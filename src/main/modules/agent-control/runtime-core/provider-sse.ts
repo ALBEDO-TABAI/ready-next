@@ -255,16 +255,35 @@ export class ChatCompletionsStreamAccumulator {
  */
 export class ResponsesStreamAccumulator {
   private completed: Record<string, unknown> | null = null
+  private responseId: string | null = null
+  private readonly messages = new Map<number, Record<string, unknown>>()
+  private unsupportedOutput = false
 
   feed(eventName: string, data: Record<string, unknown>): StreamFeedResult {
     const type = typeof data.type === 'string' && data.type ? data.type : eventName
+    if (type === 'response.created') {
+      const response = asRecord(data.response)
+      this.responseId = typeof response?.id === 'string' ? response.id : null
+      this.messages.clear(); this.unsupportedOutput = false; this.completed = null
+    }
+    if (type === 'response.output_item.done') {
+      const item = asRecord(data.item)
+      if (item?.type === 'reasoning') return {}
+      const content = Array.isArray(item?.content) ? item.content.map(asRecord) : []
+      if (item?.type === 'message' && item.role === 'assistant' && item.status === 'completed' && typeof item.id === 'string'
+        && Number.isSafeInteger(data.output_index) && Number(data.output_index) >= 0 && content.length > 0
+        && content.every((part) => part?.type === 'output_text' && typeof part.text === 'string')) {
+        this.messages.set(Number(data.output_index), item)
+      } else this.unsupportedOutput = true
+      return {}
+    }
     if (type === 'response.output_text.delta') {
       const delta = typeof data.delta === 'string' ? data.delta : ''
       return delta ? { textDelta: delta } : {}
     }
     const candidate = asRecord(data.response) || data
     if (type === 'response.completed') {
-      this.completed = candidate
+      this.completed = this.completePayload(candidate)
       return {}
     }
     return {}
@@ -273,6 +292,23 @@ export class ResponsesStreamAccumulator {
   /** Only a confirmed terminal response can be shaped as completion. */
   final(): Record<string, unknown> | null {
     return this.completed
+  }
+
+  /** A completed message is transport evidence; deltas or reasoning alone are never a final answer. */
+  completePayload(response: Record<string, unknown>): Record<string, unknown> {
+    if (response.status !== 'completed' || !this.responseId || response.id !== this.responseId
+      || !Array.isArray(response.output) || response.output.length) return response
+    const messages = [...this.messages.entries()].sort(([a], [b]) => a - b).map(([, item]) => item)
+    const last = messages.at(-1)
+    if (this.unsupportedOutput || !last || last.phase !== undefined && last.phase !== 'final_answer') {
+      if ((messages.length || this.unsupportedOutput) && response.output_text !== undefined) {
+        // An aggregate must not bypass observed commentary or silently discard a tool item.
+        const { output_text: _aggregate, ...withoutAggregate } = response
+        return withoutAggregate
+      }
+      return response
+    }
+    return { ...response, output: messages }
   }
 }
 

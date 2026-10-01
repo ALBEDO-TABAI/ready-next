@@ -1,3 +1,4 @@
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { DatabaseManager } from '../main/modules/database'
@@ -15,7 +16,8 @@ function fixture() {
   return { db, source, put, context, apply, fresh }
 }
 
-test('event and fact identity distinguish duplicate reports from progress without copying articles', () => {
+test('event and fact identity distinguish duplicate reports from progress without copying articles', (testContext) => {
+  if (skipIfSqliteUnavailable(testContext, 'RSS native storage')) return
   const f = fixture()
   try {
     f.put('original'); f.put('duplicate'); f.put('progress', 'Version 2 added video support.')
@@ -35,7 +37,8 @@ test('event and fact identity distinguish duplicate reports from progress withou
   } finally { f.db.close() }
 })
 
-test('old candidate revisions, fabricated quotations and foreign facts cannot form events', () => {
+test('old candidate revisions, fabricated quotations and foreign facts cannot form events', (testContext) => {
+  if (skipIfSqliteUnavailable(testContext, 'RSS native storage')) return
   const f = fixture()
   try {
     f.put('one'); f.put('two'); f.fresh('one')
@@ -49,7 +52,8 @@ test('old candidate revisions, fabricated quotations and foreign facts cannot fo
   } finally { f.db.close() }
 })
 
-test('manual split, move and merge persist ahead of late model decisions and preserve reader state', () => {
+test('manual split, move and merge persist ahead of late model decisions and preserve reader state', (testContext) => {
+  if (skipIfSqliteUnavailable(testContext, 'RSS native storage')) return
   const f = fixture()
   try {
     for (const id of ['one', 'two', 'three']) { f.put(id); f.fresh(id) }
@@ -75,7 +79,8 @@ test('manual split, move and merge persist ahead of late model decisions and pre
   } finally { f.db.close() }
 })
 
-test('moving one duplicate does not move its siblings or rewrite the original fact availability', () => {
+test('moving one duplicate does not move its siblings or rewrite the original fact availability', (testContext) => {
+  if (skipIfSqliteUnavailable(testContext, 'RSS native storage')) return
   const f = fixture()
   try {
     f.put('one'); f.put('two'); f.fresh('one')
@@ -92,7 +97,8 @@ test('moving one duplicate does not move its siblings or rewrite the original fa
   } finally { f.db.close() }
 })
 
-test('body completion can compare its explicitly historical fact without creating a new story', () => {
+test('body completion can compare its explicitly historical fact without creating a new story', (testContext) => {
+  if (skipIfSqliteUnavailable(testContext, 'RSS native storage')) return
   const f = fixture()
   try {
     f.put('one'); f.fresh('one')
@@ -106,7 +112,8 @@ test('body completion can compare its explicitly historical fact without creatin
   } finally { f.db.close() }
 })
 
-test('insufficient evidence remains explicit and deleting members invalidates event reads', () => {
+test('insufficient evidence remains explicit and deleting members invalidates event reads', (testContext) => {
+  if (skipIfSqliteUnavailable(testContext, 'RSS native storage')) return
   const f = fixture()
   try {
     f.put('one'); f.fresh('one'); f.put('uncertain')
@@ -119,7 +126,8 @@ test('insufficient evidence remains explicit and deleting members invalidates ev
   } finally { f.db.close() }
 })
 
-test('one explicit batch owns event judgment and saving the identical body never creates another paid input', async () => {
+test('one explicit batch owns event judgment and saving the identical body never creates another paid input', async (testContext) => {
+  if (skipIfSqliteUnavailable(testContext, 'RSS native storage')) return
   const f = fixture()
   try {
     for (let i = 0; i < 17; i++) f.db.rss.organization.save({ name: `Topic ${i}`, description: `Description ${i}` })
@@ -145,7 +153,8 @@ test('one explicit batch owns event judgment and saving the identical body never
   } finally { f.db.close() }
 })
 
-test('a new fact in the same article preserves previous version evidence for reading and future deduplication', () => {
+test('a new fact in the same article preserves previous version evidence for reading and future deduplication', (testContext) => {
+  if (skipIfSqliteUnavailable(testContext, 'RSS native storage')) return
   const f = fixture()
   try {
     f.put('one'); f.fresh('one')
@@ -170,7 +179,8 @@ test('a new fact in the same article preserves previous version evidence for rea
   } finally { f.db.close() }
 })
 
-test('group cards filter before pagination and expanded queries keep every matching article', () => {
+test('group cards filter before pagination and expanded queries keep every matching article', (testContext) => {
+  if (skipIfSqliteUnavailable(testContext, 'RSS native storage')) return
   const f = fixture()
   try {
     f.put('original'); f.fresh('original')
@@ -194,7 +204,8 @@ test('group cards filter before pagination and expanded queries keep every match
   } finally { f.db.close() }
 })
 
-test('seen facts survive duplicate reports; new progress is distinct and Agent reading does not acknowledge it', async () => {
+test('seen facts survive duplicate reports; new progress is distinct and Agent reading does not acknowledge it', async (testContext) => {
+  if (skipIfSqliteUnavailable(testContext, 'RSS native storage')) return
   const f = fixture()
   try {
     f.put('one'); f.fresh('one'); f.put('two')
@@ -215,7 +226,8 @@ test('seen facts survive duplicate reports; new progress is distinct and Agent r
   } finally { f.db.close() }
 })
 
-test('a second queued classification plan reuses an event judgment completed for the same article and method', async () => {
+test('a second queued classification plan reuses an event judgment completed for the same article and method', async (testContext) => {
+  if (skipIfSqliteUnavailable(testContext, 'RSS native storage')) return
   const f = fixture()
   try {
     f.db.rss.setRSSSourceDraftSeeded(f.source, true); f.put('one')
@@ -236,7 +248,8 @@ test('a second queued classification plan reuses an event judgment completed for
   } finally { f.db.close() }
 })
 
-test('moving the current article version preserves earlier evidence of the same fact in its original event', () => {
+test('moving the current article version preserves earlier evidence of the same fact in its original event', (testContext) => {
+  if (skipIfSqliteUnavailable(testContext, 'RSS native storage')) return
   const f = fixture()
   try {
     f.put('one'); f.fresh('one')
@@ -254,7 +267,8 @@ test('moving the current article version preserves earlier evidence of the same 
   } finally { f.db.close() }
 })
 
-test('restoring historical evidence follows a later event merge and never revives a withdrawn latest decision', () => {
+test('restoring historical evidence follows a later event merge and never revives a withdrawn latest decision', (testContext) => {
+  if (skipIfSqliteUnavailable(testContext, 'RSS native storage')) return
   const f = fixture()
   try {
     f.put('one'); f.fresh('one'); f.put('target'); f.fresh('target')

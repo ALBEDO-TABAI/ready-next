@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto'
 import OpenAI from 'openai'
 import { isProviderOutputIncomplete, ProviderOutputIncompleteError } from './provider-output-status'
+import { withCompletedResponseMessages } from './responses-completed-messages'
 import {
   OpenAIProvider,
   Usage,
@@ -219,9 +220,7 @@ export function resolveAgentSdkProvider(
       })
     }
   }
-  return {
-    model: normalized.model,
-    provider: new OpenAIProvider({
+  const nativeProvider = new OpenAIProvider({
       ...(deps.openAIClientMaxRetries === undefined ? {
         apiKey: normalized.apiKey, baseURL: baseURL || undefined,
       } : { openAIClient: new OpenAI({
@@ -230,7 +229,7 @@ export function resolveAgentSdkProvider(
       useResponses: capabilities.wireApi === 'responses',
       strictFeatureValidation: false
     })
-  }
+  return { model: normalized.model, provider: { getModel: async (name) => withCompletedResponseMessages(await nativeProvider.getModel(name)) } }
 }
 
 // ── ReadyOpenAICompatibleModelProvider (line 3254, NOT exported) ──

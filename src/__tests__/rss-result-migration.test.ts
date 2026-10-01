@@ -1,3 +1,4 @@
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createRequire } from 'node:module'
@@ -8,7 +9,8 @@ import { __getMigrationNamesForTests, __runMigrationForTests } from '../main/mod
 import { RSSStore } from '../main/modules/database/rss-store'
 import type { DatabaseConnection } from '../main/modules/database/connection'
 
-test('result migration preserves actual current values on disk without inventing results from success receipts', () => {
+test('result migration preserves actual current values on disk without inventing results from success receipts', (testContext) => {
+  if (skipIfSqliteUnavailable(testContext, 'RSS native storage')) return
   const SQLite = createRequire(import.meta.url)('better-sqlite3') as new (path: string) => DatabaseConnection
   const directory = mkdtempSync(join(tmpdir(), 'rss-results-')), path = join(directory, 'ready.db')
   let db = new SQLite(path)

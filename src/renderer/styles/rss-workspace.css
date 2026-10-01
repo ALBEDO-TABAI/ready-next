@@ -18,7 +18,7 @@
   flex-shrink: 0;
 }
 .rss-reader-actions, .rss-reader-status { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
-.rss-reader-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 9px; border-radius: 10px; font-size: 12px; color: var(--text-secondary); cursor: pointer; }
+.rss-reader-button { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; white-space: nowrap; gap: 6px; padding: 7px 9px; border-radius: 10px; font-size: 12px; color: var(--text-secondary); cursor: pointer; }
 .rss-reader-button:hover { background: var(--bg-hover); color: var(--text-body); }
 .rss-reader-button:focus-visible, .rss-reader-toc button:focus-visible { outline: 2px solid var(--color-blue); outline-offset: 2px; }
 .rss-reader-button:disabled { opacity: .5; cursor: default; }

@@ -238,6 +238,7 @@ export function extractResponsesText(payload: Record<string, unknown>): string {
     : []
   const texts: string[] = []
   for (const item of output) {
+    if (item.phase === 'commentary') continue
     const content = Array.isArray(item.content)
       ? (item.content as Array<Record<string, unknown>>)
       : []
@@ -246,6 +247,7 @@ export function extractResponsesText(payload: Record<string, unknown>): string {
     }
   }
   if (texts.length > 0) return texts.join('')
+  if (output.some((item) => item.type === 'message')) return ''
   return typeof payload.output_text === 'string' ? payload.output_text : ''
 }
 

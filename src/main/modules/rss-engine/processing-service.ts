@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { ProviderOutputIncompleteError } from '../agent-control/runtime-core/provider-output-status'
+import { ProviderOutputIncompleteError, ProviderOutputMissingTextError } from '../agent-control/runtime-core/provider-output-status'
 import type { RSSArticle } from '../../../shared/rss-workspace'
 import type { RSSProcessingStore } from '../database/rss-processing-store'
 import { ScheduleDispatchQueue } from '../scheduled-tasks/schedule-dispatch-queue'
@@ -82,7 +82,7 @@ export class RSSProcessingService {
         if (controller.signal.aborted || this.stopped) continue
         store.publish(current.id, parseRSSJudgment(text, input), now())
       } catch (error) {
-        responded ||= error instanceof ProviderOutputIncompleteError
+        responded ||= error instanceof ProviderOutputIncompleteError || error instanceof ProviderOutputMissingTextError
         store.finish(current.id, responded ? 'failed' : 'unknown', `${responded ? '结果未通过核对' : '请求结果未知，不会自动重试'}：${error instanceof Error ? error.message : String(error)}`, now())
       } finally { this.active = null; this.deps.notify() }
     }

@@ -1,4 +1,4 @@
-import { Agent, Runner, type ModelResponse } from '@openai/agents'
+import { Agent, Runner, MaxTurnsExceededError, type ModelResponse } from '@openai/agents'
 
 import { compactAgentInputItems } from '../compaction/compact-agent-input'
 import { logAgentMetric } from '../metrics'
@@ -10,7 +10,7 @@ import {
 } from './agent-sdk-provider-request-instrumentation'
 import { extractToolCallFromStreamEvent } from './agent-sdk-provider-utils'
 import type { ReadyAgentSdkRunParams, ReadyAgentSdkRunResult } from './agent-sdk-types'
-import { isProviderOutputIncomplete } from './provider-output-status'
+import { isProviderOutputIncomplete, ProviderOutputIncompleteError, ProviderOutputMissingTextError } from './provider-output-status'
 
 function log(message: string): void {
   console.log(`[agent-sdk-provider] ${message}`)
@@ -31,6 +31,7 @@ export async function runWithOpenAIAgentsSdk(
 ): Promise<ReadyAgentSdkRunResult> {
   const requestBills: ProviderRequestBills[] = []
   let outputIncomplete = false
+  let lastTerminal: { id: string; providerData: Record<string, unknown> | undefined } | null = null
   const agent = createReadyAgentForRun(params)
   const runner = new Runner({
     modelProvider: params.provider,
@@ -100,6 +101,7 @@ export async function runWithOpenAIAgentsSdk(
     try {
       for await (const event of stream) {
         if (event.type === 'raw_model_stream_event' && event.data.type === 'response_done') {
+          lastTerminal = { id: event.data.response.id, providerData: event.data.response.providerData }
           outputIncomplete = isProviderOutputIncomplete(event.data.response.providerData)
         }
         if (
@@ -122,6 +124,14 @@ export async function runWithOpenAIAgentsSdk(
       if (streamLoopPromise) await streamLoopPromise
     }
   } catch (error) {
+    // A one-shot response may contain only reasoning; the SDK then hits its turn cap before returning a result.
+    // A later started request without its own receipt must never inherit the previous response's terminal facts.
+    if (!params.signal.aborted && params.maxTurns === 1 && params.tools.length === 0 && error instanceof MaxTurnsExceededError
+      && requestBills.length === stream.rawResponses.length && lastTerminal?.id
+      && lastTerminal.id === stream.rawResponses.at(-1)?.responseId) {
+      if (outputIncomplete) error = new ProviderOutputIncompleteError()
+      else if (lastTerminal.providerData?.status === 'completed') error = new ProviderOutputMissingTextError()
+    }
     if (error && typeof error === 'object') {
       ;(error as { iterationsUsed?: number }).iterationsUsed = Math.max(
         Number((error as { iterationsUsed?: unknown }).iterationsUsed || 0),

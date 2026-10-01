@@ -1,3 +1,4 @@
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createRequire } from 'node:module'
@@ -10,7 +11,7 @@ import type { DatabaseConnection } from '../main/modules/database/connection'
 import { RSSProcessingService } from '../main/modules/rss-engine/processing-service'
 import { buildRSSJudgmentInput, type RSSJudgmentInput } from '../main/modules/rss-engine/processing-judgment'
 import { executeRSSTool } from '../main/modules/tools/rss-tools'
-import { ProviderOutputIncompleteError } from '../main/modules/agent-control/runtime-core/provider-output-status'
+import { ProviderOutputIncompleteError, ProviderOutputMissingTextError } from '../main/modules/agent-control/runtime-core/provider-output-status'
 
 function eventResult(input: RSSJudgmentInput) {
   return input.eventContext && !input.eventContext.manual && !input.eventContext.reused ? { event: { kind: 'insufficient', eventId: null, factId: null, quote: null, sourceRole: 'unknown', reason: 'This fixture exercises classification, not event semantics.' } } : {}
@@ -29,7 +30,8 @@ function fixture() {
   return { db, source, put, store, service, clock }
 }
 
-test('automatic intake skips first import, ignores unchanged refresh and preserves manual decisions', async () => {
+test('automatic intake skips first import, ignores unchanged refresh and preserves manual decisions', async (testContext) => {
+  if (skipIfSqliteUnavailable(testContext, 'RSS native storage')) return
   const f = fixture()
   try {
     f.put('old'); assert.equal(f.store.list().total, 0)
@@ -48,7 +50,8 @@ test('automatic intake skips first import, ignores unchanged refresh and preserv
   } finally { f.db.close() }
 })
 
-test('rule changes and deleted or changed articles reject late results atomically', async () => {
+test('rule changes and deleted or changed articles reject late results atomically', async (testContext) => {
+  if (skipIfSqliteUnavailable(testContext, 'RSS native storage')) return
   const f = fixture()
   try {
     f.db.rss.setRSSSourceDraftSeeded(f.source, true); f.put('one')
@@ -63,7 +66,8 @@ test('rule changes and deleted or changed articles reject late results atomicall
   } finally { f.db.close() }
 })
 
-test('no model, disabled automation and daily call limit do not drop pending work or retry unknown calls', async () => {
+test('no model, disabled automation and daily call limit do not drop pending work or retry unknown calls', async (testContext) => {
+  if (skipIfSqliteUnavailable(testContext, 'RSS native storage')) return
   const f = fixture()
   try {
     f.db.rss.setRSSSourceDraftSeeded(f.source, true); f.put('one'); f.put('two')
@@ -84,7 +88,8 @@ test('no model, disabled automation and daily call limit do not drop pending wor
   } finally { f.db.close() }
 })
 
-test('all definition batches are consumed and status paging is shared with Agent without starting work', async () => {
+test('all definition batches are consumed and status paging is shared with Agent without starting work', async (testContext) => {
+  if (skipIfSqliteUnavailable(testContext, 'RSS native storage')) return
   const f = fixture()
   try {
     for (let i = 0; i < 17; i++) f.db.rss.organization.save({ name: `Topic ${i}`, description: `Rule ${i}` })
@@ -105,7 +110,8 @@ test('all definition batches are consumed and status paging is shared with Agent
   } finally { f.db.close() }
 })
 
-test('deletion retains started attempts in the limit while rejecting late output', async () => {
+test('deletion retains started attempts in the limit while rejecting late output', async (testContext) => {
+  if (skipIfSqliteUnavailable(testContext, 'RSS native storage')) return
   const f = fixture()
   try {
     f.db.rss.setRSSSourceDraftSeeded(f.source, true); f.put('one')
@@ -119,7 +125,8 @@ test('deletion retains started attempts in the limit while rejecting late output
   } finally { f.db.close() }
 })
 
-test('intake and queue commit together and an already idle worker wakes for newly saved items', async () => {
+test('intake and queue commit together and an already idle worker wakes for newly saved items', async (testContext) => {
+  if (skipIfSqliteUnavailable(testContext, 'RSS native storage')) return
   const f = fixture()
   const runner = f.service()
   try {
@@ -138,7 +145,8 @@ test('intake and queue commit together and an already idle worker wakes for newl
   } finally { await runner.stop(); f.db.close() }
 })
 
-test('saved body continues eligible new-item processing without charging historical article reads', async () => {
+test('saved body continues eligible new-item processing without charging historical article reads', async (testContext) => {
+  if (skipIfSqliteUnavailable(testContext, 'RSS native storage')) return
   const f = fixture()
   try {
     f.put('history')
@@ -156,7 +164,8 @@ test('saved body continues eligible new-item processing without charging histori
   } finally { f.db.close() }
 })
 
-test('explicit request takes over paused automatic work; display names never enter semantic criteria', async () => {
+test('explicit request takes over paused automatic work; display names never enter semantic criteria', async (testContext) => {
+  if (skipIfSqliteUnavailable(testContext, 'RSS native storage')) return
   const f = fixture()
   try {
     f.db.rss.setRSSSourceDraftSeeded(f.source, true); f.put('one')
@@ -175,7 +184,8 @@ test('explicit request takes over paused automatic work; display names never ent
   } finally { f.db.close() }
 })
 
-test('cancel and restart never publish old receipts; explicit retry remains separate and budgeted', async () => {
+test('cancel and restart never publish old receipts; explicit retry remains separate and budgeted', async (testContext) => {
+  if (skipIfSqliteUnavailable(testContext, 'RSS native storage')) return
   const f = fixture()
   try {
     f.db.rss.setRSSSourceDraftSeeded(f.source, true); f.put('one')
@@ -197,7 +207,8 @@ test('cancel and restart never publish old receipts; explicit retry remains sepa
   } finally { f.db.close() }
 })
 
-test('invalid semantic output is a visible failure and long input is explicitly bounded', async () => {
+test('invalid semantic output is a visible failure and long input is explicitly bounded', async (testContext) => {
+  if (skipIfSqliteUnavailable(testContext, 'RSS native storage')) return
   const f = fixture()
   try {
     f.db.rss.setRSSSourceDraftSeeded(f.source, true); f.put('one', 'X'.repeat(3000))
@@ -210,7 +221,8 @@ test('invalid semantic output is a visible failure and long input is explicitly 
   } finally { f.db.close() }
 })
 
-test('preflight capacity failure is not a started call; acknowledged incomplete output is failed, not unknown', async () => {
+test('preflight capacity failure is not a started call; acknowledged incomplete output is failed, not unknown', async (testContext) => {
+  if (skipIfSqliteUnavailable(testContext, 'RSS native storage')) return
   const f = fixture()
   try {
     f.db.rss.setRSSSourceDraftSeeded(f.source, true); f.put('one')
@@ -223,10 +235,15 @@ test('preflight capacity failure is not a started call; acknowledged incomplete 
     assert.equal(f.store.get(retry)!.status, 'failed')
     assert.doesNotMatch(f.store.get(retry)!.message!, /未知/)
     assert.equal(f.store.status(f.clock(), true).callsToday, 1)
+    const [missingText] = f.store.enqueue('one', 'manual')
+    await f.service(async () => { throw new ProviderOutputMissingTextError() }).wake()
+    assert.equal(f.store.get(missingText)!.status, 'failed')
+    assert.equal(f.store.status(f.clock(), true).callsToday, 2)
   } finally { f.db.close() }
 })
 
-test('real disk reopen preserves unknown attempts and continues only unstarted work', async () => {
+test('real disk reopen preserves unknown attempts and continues only unstarted work', async (testContext) => {
+  if (skipIfSqliteUnavailable(testContext, 'RSS native storage')) return
   const f = fixture(), directory = mkdtempSync(join(tmpdir(), 'rss-processing-reopen-'))
   const path = join(directory, 'ready.db')
   let reopened: DatabaseConnection | undefined
@@ -251,7 +268,8 @@ test('real disk reopen preserves unknown attempts and continues only unstarted w
   } finally { await worker?.stop(); reopened?.close(); f.db.close(); rmSync(directory, { recursive: true, force: true }) }
 })
 
-test('failure to commit a successful task rolls back its derived memberships', async () => {
+test('failure to commit a successful task rolls back its derived memberships', async (testContext) => {
+  if (skipIfSqliteUnavailable(testContext, 'RSS native storage')) return
   const f = fixture()
   try {
     f.db.rss.setRSSSourceDraftSeeded(f.source, true); f.put('one')

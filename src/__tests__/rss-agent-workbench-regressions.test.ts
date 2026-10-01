@@ -75,10 +75,9 @@ test('rss analysis task menu uses a solid floating surface with relaxed status r
   assert.match(rssFeed, /className="rss-task-menu-panel overflow-hidden rounded-\[18px\]"/)
   assert.match(rssFeed, /position: 'absolute'/)
   assert.match(rssFeed, /top: 'calc\(100% \+ 10px\)'/)
-  assert.match(rssFeed, /right: 0/)
+  // Pane-relative placement and clipping are exercised by run-rss-layout-acceptance.cjs.
   assert.match(rssFeed, /zIndex: 30/)
   assert.match(rssFeed, /width: 384/)
-  assert.match(rssFeed, /maxWidth: 'min\(384px, calc\(100vw - 48px\)\)'/)
   assert.match(rssFeed, /data-tooltip=\{taskMenuOpen \? undefined : '任务'\}/)
   assert.match(rssFeed, /\{taskMenuPanel\}/)
   assert.doesNotMatch(rssFeed, /\{taskMenuPanel\}\s*\n\s*\{\/\* Item List \*\/\}/)

@@ -3,8 +3,12 @@ import { createServer } from 'node:http'
 import { once } from 'node:events'
 import test from 'node:test'
 import { completeRSSModel, validateRSSModelRequest } from '../main/modules/rss-engine/model-completion'
-import { ProviderOutputIncompleteError } from '../main/modules/agent-control/runtime-core/provider-output-status'
+import { ProviderOutputIncompleteError, ProviderOutputMissingTextError } from '../main/modules/agent-control/runtime-core/provider-output-status'
 import type { AIModelConfig } from '../shared/ai-providers'
+import { MemorySession } from '@openai/agents'
+import { resolveAgentSdkProvider, runWithOpenAIAgentsSdk } from '../main/modules/agent-control/runtime-core/agent-sdk-provider'
+import { ResponsesStreamAccumulator } from '../main/modules/agent-control/runtime-core/provider-sse'
+import { extractResponsesText } from '../main/modules/agent-control/runtime-core/agent-sdk-model-message-utils'
 
 test('RSS analysis uses the shared streaming provider with the entire source and no tools', async () => {
   const source = '# Original\n\n' + '完整原文。'.repeat(5000) + 'LAST-PARAGRAPH'
@@ -112,6 +116,130 @@ for (const protocol of ['chat', 'openai-chat', 'anthropic', 'responses', 'openai
         wireApi: protocol.endsWith('responses') ? 'responses' : 'chat/completions',
         baseUrl: `http://127.0.0.1:${address.port}`, apiKey: 'test-key', model: 'test-model' } as AIModelConfig
       await assert.rejects(completeRSSModel(config, { system: 'Analyze.', user: 'Source', maxTokens: 256 }), incomplete === 'length' ? ProviderOutputIncompleteError : undefined)
+      assert.equal(calls, 1)
+    } finally { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())) }
+  })
+}
+
+for (const status of ['incomplete', 'completed', 'failed'] as const) {
+  test(`one-shot native Responses keeps ${status} evidence when only reasoning was returned`, async () => {
+    let calls = 0
+    const server = createServer((_req, res) => {
+      calls++
+      const response = { id: 'reasoning-only', object: 'response', status,
+        output: [{ type: 'reasoning', id: 'thought', summary: [] }],
+        ...(status === 'incomplete' ? { incomplete_details: { reason: 'max_output_tokens' } } : {}),
+        ...(status === 'failed' ? { error: { code: 'server_error', message: 'Confirmed provider failure' } } : {}),
+        usage: { input_tokens: 10, output_tokens: 20, total_tokens: 30 } }
+      res.writeHead(200, { 'content-type': 'text/event-stream' })
+      res.end(`data: ${JSON.stringify({ type: 'response.created', response: { ...response, status: 'in_progress', output: [] } })}\n\n`
+        + `data: ${JSON.stringify({ type: `response.${status}`, response })}\n\n`)
+    }).listen(0, '127.0.0.1')
+    await once(server, 'listening')
+    try {
+      const config = { provider: 'openai', wireApi: 'responses', baseUrl: `http://127.0.0.1:${(server.address() as { port: number }).port}`, apiKey: 'synthetic', model: 'test-model' } as AIModelConfig
+      await assert.rejects(completeRSSModel(config, { system: 'Only JSON.', user: 'Synthetic source.', maxTokens: 256 }), (error: unknown) => {
+        assert.ok(status === 'completed' ? error instanceof ProviderOutputMissingTextError : error instanceof ProviderOutputIncompleteError)
+        assert.equal((error as Error & { iterationsUsed?: number }).iterationsUsed, 1)
+        return true
+      })
+      assert.equal(calls, 1)
+    } finally { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())) }
+  })
+}
+
+test('a prior terminal receipt cannot turn a later shared-runner request failure into a known output failure', async () => {
+  let calls = 0
+  const server = createServer((_req, res) => {
+    if (++calls === 1) {
+      res.writeHead(200, { 'content-type': 'text/event-stream' })
+      res.end(`data: ${JSON.stringify({ type: 'response.incomplete', response: { id: 'prior', object: 'response', status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' },
+        output: [{ type: 'reasoning', id: 'thought', summary: [] }], usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } } })}\n\n`)
+    } else { res.writeHead(503, { 'content-type': 'application/json' }); res.end('{"error":{"message":"Later request failed"}}') }
+  }).listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  try {
+    const config = { provider: 'openai', wireApi: 'responses', baseUrl: `http://127.0.0.1:${(server.address() as { port: number }).port}`, apiKey: 'synthetic', model: 'test-model' } as AIModelConfig
+    const { provider, model } = resolveAgentSdkProvider(config, { fetchWithTimeout: (url, init, signal) => fetch(url, { ...init, signal }), openAIClientMaxRetries: 0 })
+    await assert.rejects(runWithOpenAIAgentsSdk({ agentName: 'Synthetic receipt test', runId: 'terminal-two-turn', taskId: 'terminal-two-turn', instructions: 'Return text', input: 'Source',
+      provider, model, session: new MemorySession(), tools: [], signal: new AbortController().signal, maxTurns: 2, contextWindowTokens: 10000, maxOutputTokens: 128, onTextDelta: () => {} }), (error: unknown) => {
+      assert.ok(!(error instanceof ProviderOutputIncompleteError) && !(error instanceof ProviderOutputMissingTextError))
+      assert.match((error as Error).message, /Later request failed/)
+      assert.equal((error as Error & { iterationsUsed?: number }).iterationsUsed, 2)
+      return true
+    })
+    assert.equal(calls, 2)
+  } finally { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())) }
+})
+
+test('completed Responses messages supplement only an empty matching successful terminal payload', () => {
+  const message = { type: 'message', id: 'answer', role: 'assistant', status: 'completed', phase: 'final_answer', content: [{ type: 'output_text', text: '{"accepted":true}' }] }
+  const seeded = () => { const stream = new ResponsesStreamAccumulator(); stream.feed('', { type: 'response.created', response: { id: 'r' } }); return stream }
+  const done = (stream: ResponsesStreamAccumulator, item = message) => stream.feed('', { type: 'response.output_item.done', output_index: 0, item })
+  const terminal = { id: 'r', status: 'completed', output: [] }
+  const complete = seeded(); done(complete)
+  assert.deepEqual(complete.completePayload(terminal).output, [message])
+  assert.equal(complete.final(), null, 'a completed item is not a completed response')
+  for (const status of ['incomplete', 'failed']) assert.equal(complete.completePayload({ ...terminal, status }).output, terminal.output)
+  assert.equal(complete.completePayload({ ...terminal, id: 'foreign' }).output, terminal.output)
+  const canonical = { ...terminal, output: [{ ...message, id: 'canonical' }] }
+  assert.equal(complete.completePayload(canonical), canonical)
+  const partial = seeded(); partial.feed('', { type: 'response.output_text.delta', delta: '{"accepted":true}' })
+  assert.equal(partial.completePayload(terminal), terminal)
+  const commentary = seeded(); done(commentary, { ...message, phase: 'commentary' })
+  assert.equal(commentary.completePayload(terminal), terminal)
+  const withTool = seeded(); done(withTool)
+  withTool.feed('', { type: 'response.output_item.done', output_index: 1, item: { type: 'function_call', id: 'tool', name: 'not-exposed', arguments: '{}' } })
+  assert.equal(withTool.completePayload(terminal), terminal, 'never silently drop an unconverted tool result')
+})
+
+test('Responses final text excludes commentary even when an aggregate text field is present', () => {
+  const commentary = { type: 'message', phase: 'commentary', content: [{ type: 'output_text', text: 'Checking the facts.' }] }
+  assert.equal(extractResponsesText({ output: [commentary], output_text: 'Checking the facts.' }), '')
+  assert.equal(extractResponsesText({ output_text: 'Unphased aggregate answer' }), 'Unphased aggregate answer')
+  assert.equal(extractResponsesText({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'Unphased answer' }] }] }), 'Unphased answer')
+})
+
+for (const provider of ['openai', 'openai-compatible'] as const) for (const terminalOutput of ['empty', 'canonical']) for (const withCommentary of [false, true]) {
+  test(`${provider} Responses delivers final text with ${terminalOutput} output and commentary=${withCommentary} through the real SDK without another turn`, async () => {
+    let calls = 0
+    const message = { type: 'message', id: 'complete-message', role: 'assistant', status: 'completed', phase: 'final_answer', content: [{ type: 'output_text', text: '{"accepted":true}', annotations: [] }] }
+    const messages = [...(withCommentary ? [{ ...message, id: 'commentary', phase: 'commentary', content: [{ type: 'output_text', text: 'Checking the facts.', annotations: [] }] }] : []), message]
+    const server = createServer((_req, res) => {
+      calls++; res.writeHead(200, { 'content-type': 'text/event-stream' })
+      res.end([
+        { type: 'response.created', response: { id: 'complete-response', status: 'in_progress', output: [] } },
+        ...messages.map((item, output_index) => ({ type: 'response.output_item.done', output_index, item })),
+        { type: 'response.completed', response: { id: 'complete-response', status: 'completed', output: terminalOutput === 'empty' ? [] : messages, usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } } },
+      ].map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''))
+    }).listen(0, '127.0.0.1')
+    await once(server, 'listening')
+    try {
+      const config = { provider, wireApi: 'responses', baseUrl: `http://127.0.0.1:${(server.address() as { port: number }).port}`, apiKey: 'synthetic', model: 'test-model' } as AIModelConfig
+      assert.equal(await completeRSSModel(config, { system: 'Only JSON.', user: 'Source', maxTokens: 128 }), '{"accepted":true}')
+      assert.equal(calls, 1)
+    } finally { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())) }
+  })
+}
+
+for (const provider of ['openai', 'openai-compatible'] as const) for (const kind of ['commentary', 'tool']) {
+  test(`${provider} does not promote aggregate text over completed ${kind} with empty terminal output`, async () => {
+    let calls = 0
+    const item = kind === 'commentary'
+      ? { type: 'message', id: 'commentary', role: 'assistant', status: 'completed', phase: 'commentary', content: [{ type: 'output_text', text: 'Checking the facts.', annotations: [] }] }
+      : { type: 'function_call', id: 'tool', call_id: 'tool-call', name: 'not-exposed', arguments: '{}' }
+    const server = createServer((_req, res) => {
+      calls++; res.writeHead(200, { 'content-type': 'text/event-stream' })
+      res.end([
+        { type: 'response.created', response: { id: 'aggregate-response', status: 'in_progress', output: [] } },
+        { type: 'response.output_item.done', output_index: 0, item },
+        { type: 'response.completed', response: { id: 'aggregate-response', status: 'completed', output: [], output_text: 'Checking the facts.', usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } } },
+      ].map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''))
+    }).listen(0, '127.0.0.1')
+    await once(server, 'listening')
+    try {
+      const config = { provider, wireApi: 'responses', baseUrl: `http://127.0.0.1:${(server.address() as { port: number }).port}`, apiKey: 'synthetic', model: 'test-model' } as AIModelConfig
+      await assert.rejects(completeRSSModel(config, { system: 'Only JSON.', user: 'Source', maxTokens: 128 }), ProviderOutputMissingTextError)
       assert.equal(calls, 1)
     } finally { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())) }
   })

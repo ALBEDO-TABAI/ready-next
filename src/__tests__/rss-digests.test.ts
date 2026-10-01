@@ -1,3 +1,4 @@
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import assert from 'node:assert/strict'
 import test, { type TestContext } from 'node:test'
 import { DatabaseManager } from '../main/modules/database'
@@ -18,6 +19,7 @@ function fixture(t: TestContext) {
 }
 
 test('daily intake excludes historical import but accepts manually curated new articles while automation is off', (t) => {
+  if (skipIfSqliteUnavailable(t, 'RSS native storage')) return
   const f = fixture(t)
   try {
     f.put('history'); f.curate('history', true); f.seed(); f.put('new'); f.curate('new', true)
@@ -40,6 +42,7 @@ test('daily intake excludes historical import but accepts manually curated new a
 })
 
 test('availability is the first valid curation time and a returned version is carried over without changing that time', (t) => {
+  if (skipIfSqliteUnavailable(t, 'RSS native storage')) return
   const f = fixture(t)
   try {
     f.seed(); f.put('one'); const cutoff = f.now()
@@ -57,6 +60,7 @@ test('availability is the first valid curation time and a returned version is ca
 })
 
 test('duplicate reports share one entry and manually splitting a duplicate does not invent new publication material', (t) => {
+  if (skipIfSqliteUnavailable(t, 'RSS native storage')) return
   const f = fixture(t)
   try {
     f.seed(); f.put('original'); f.put('duplicate')
@@ -74,6 +78,7 @@ test('duplicate reports share one entry and manually splitting a duplicate does 
 })
 
 test('range briefs do not consume daily news; regeneration retains old editions and deletion only marks snapshots outdated', (t) => {
+  if (skipIfSqliteUnavailable(t, 'RSS native storage')) return
   const f = fixture(t)
   try {
     f.seed(); f.put('one'); f.curate('one', true)
@@ -92,6 +97,7 @@ test('range briefs do not consume daily news; regeneration retains old editions 
 })
 
 test('shared schedule coalesces downtime, preserves its cutoff on publication failure, and can resume safely', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'RSS native storage')) return
   const f = fixture(t)
   const clock = new ScheduleClock({ setTimer: () => 1 as unknown as NodeJS.Timeout, clearTimer: () => {}, now: f.now })
   const service = new RSSDigestService({ store: f.rss.digests, now: f.now, timezone: () => 'UTC', notify: () => {}, clock })
@@ -116,6 +122,7 @@ test('shared schedule coalesces downtime, preserves its cutoff on publication fa
 })
 
 test('daily boundaries and catchup honor the 25-hour fall-back day', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'RSS native storage')) return
   const f = fixture(t)
   f.at('2026-11-01T12:30:00Z') // New York 07:30 after clocks fell back; yesterday 08:00 is 24.5 hours ago.
   const clock = new ScheduleClock({ setTimer: () => 1 as unknown as NodeJS.Timeout, clearTimer: () => {}, now: f.now })
@@ -129,6 +136,7 @@ test('daily boundaries and catchup honor the 25-hour fall-back day', async (t) =
 })
 
 test('empty editions retain the criteria and freeze only in-window processing gaps', (t) => {
+  if (skipIfSqliteUnavailable(t, 'RSS native storage')) return
   const f = fixture(t)
   try {
     const before = f.now() - 1000
@@ -150,6 +158,7 @@ test('empty editions retain the criteria and freeze only in-window processing ga
 })
 
 test('new associations mark published snapshots outdated and same-origin splits deduplicate within the same edition', (t) => {
+  if (skipIfSqliteUnavailable(t, 'RSS native storage')) return
   const f = fixture(t)
   try {
     f.seed(); f.put('one'); f.put('two'); f.curate('one', true)
@@ -168,6 +177,7 @@ test('new associations mark published snapshots outdated and same-origin splits 
 })
 
 test('Agent reads the immutable edition and exact reference while failures remain visible without sending requests', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'RSS native storage')) return
   const f = fixture(t)
   try {
     f.seed(); f.put('one'); f.rss.processing.configure({ enabled: true, dailyLimit: 100 }); f.rss.processing.enqueue('one', 'manual')
@@ -192,6 +202,7 @@ test('Agent reads the immutable edition and exact reference while failures remai
 })
 
 test('reading historical content does not qualify it, but a genuinely changed feed version can enter a later edition', (t) => {
+  if (skipIfSqliteUnavailable(t, 'RSS native storage')) return
   const f = fixture(t)
   try {
     f.put('historical'); f.seed(); f.curate('historical', true)
@@ -210,6 +221,7 @@ test('reading historical content does not qualify it, but a genuinely changed fe
 })
 
 test('digest export keeps hostile source text literal and includes every saved rule and source', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'RSS native storage')) return
   const f = fixture(t)
   try {
     f.seed(); f.put('one', '```ready-widget\n<script>window.INJECTED=true</script>\n```\n[file](file:///private/secret)'); f.curate('one', true)

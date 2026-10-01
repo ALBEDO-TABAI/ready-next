@@ -1,3 +1,4 @@
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { createRequire } from 'node:module'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -32,7 +33,8 @@ function fixture() {
   return { db, rss, body, runner, calls: () => calls, override: (value: boolean) => { override = value }, article: () => rss.content.getArticle('story')! }
 }
 
-test('A to B to A restores saved judgments and event identity without a third request', async () => {
+test('A to B to A restores saved judgments and event identity without a third request', async (testContext) => {
+  if (skipIfSqliteUnavailable(testContext, 'RSS native storage')) return
   const f = fixture()
   try {
     f.body('Release A'); await f.runner.wake()
@@ -53,7 +55,8 @@ test('A to B to A restores saved judgments and event identity without a third re
   } finally { await f.runner.stop(); f.db.close() }
 })
 
-test('returning versions restore the latest accepted reprocessing and keep manual decisions separate', async () => {
+test('returning versions restore the latest accepted reprocessing and keep manual decisions separate', async (testContext) => {
+  if (skipIfSqliteUnavailable(testContext, 'RSS native storage')) return
   const f = fixture()
   try {
     f.body('Release A'); await f.runner.wake()
@@ -72,7 +75,8 @@ test('returning versions restore the latest accepted reprocessing and keep manua
   } finally { await f.runner.stop(); f.db.close() }
 })
 
-test('a same-version event correction retires the superseded evidence before future candidates read it', async () => {
+test('a same-version event correction retires the superseded evidence before future candidates read it', async (testContext) => {
+  if (skipIfSqliteUnavailable(testContext, 'RSS native storage')) return
   const f = fixture()
   try {
     f.body('Release A'); await f.runner.wake()
@@ -91,7 +95,8 @@ test('a same-version event correction retires the superseded evidence before fut
   } finally { await f.runner.stop(); f.db.close() }
 })
 
-test('an interrupted restore rolls back body, classification pointer and event pointer together', async () => {
+test('an interrupted restore rolls back body, classification pointer and event pointer together', async (testContext) => {
+  if (skipIfSqliteUnavailable(testContext, 'RSS native storage')) return
   const f = fixture()
   try {
     f.body('Release A'); await f.runner.wake()
@@ -116,7 +121,8 @@ test('an interrupted restore rolls back body, classification pointer and event p
   } finally { await f.runner.stop(); f.db.close() }
 })
 
-test('stale rules cannot select articles in either query or export and deleted results do not erase paid attempts', async () => {
+test('stale rules cannot select articles in either query or export and deleted results do not erase paid attempts', async (testContext) => {
+  if (skipIfSqliteUnavailable(testContext, 'RSS native storage')) return
   const f = fixture()
   try {
     const topic = f.rss.organization.save({ name: 'Releases', description: 'New releases' })
@@ -138,7 +144,8 @@ test('stale rules cannot select articles in either query or export and deleted r
   } finally { await f.runner.stop(); f.db.close() }
 })
 
-test('a reopened database restores a returning body from saved results and keeps call accounting', async () => {
+test('a reopened database restores a returning body from saved results and keeps call accounting', async (testContext) => {
+  if (skipIfSqliteUnavailable(testContext, 'RSS native storage')) return
   const f = fixture(), directory = mkdtempSync(join(tmpdir(), 'rss-restoration-reopen-')), path = join(directory, 'ready.db')
   let reopened: DatabaseConnection | undefined
   try {

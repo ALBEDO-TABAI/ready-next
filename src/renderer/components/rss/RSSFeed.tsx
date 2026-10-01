@@ -368,10 +368,10 @@ export default function RSSFeed({
         ...chatMenuSurfaceStyle,
         position: 'absolute',
         top: 'calc(100% + 10px)',
-        right: 0,
+        right: WORKBENCH_HEADER_EDGE_X,
         zIndex: 30,
         width: 384,
-        maxWidth: 'min(384px, calc(100vw - 48px))',
+        maxWidth: `calc(100% - ${WORKBENCH_HEADER_EDGE_X * 2}px)`,
         padding: 0,
       }}
     >
@@ -574,6 +574,7 @@ export default function RSSFeed({
         className="rss-feed-toolbar flex items-center justify-between flex-shrink-0"
         style={{
           minHeight: 56,
+          position: 'relative',
           padding: `10px ${WORKBENCH_HEADER_EDGE_X}px`,
           background: 'transparent',
           borderBottom: '1px solid var(--border-default)'
@@ -584,7 +585,7 @@ export default function RSSFeed({
           {/* Secondary dropdown: 全部源. Custom menu (not a native <select>)
               so each source row can carry an inline delete control — native
               <option> can't host a button. */}
-          <div className="relative" ref={sourceMenuRef}>
+          <div ref={sourceMenuRef}>
             <button
               type="button"
               onClick={() => setSourceMenuOpen((prev) => !prev)}
@@ -630,10 +631,10 @@ export default function RSSFeed({
                   ...chatMenuSurfaceStyle,
                   position: 'absolute',
                   top: 'calc(100% + 8px)',
-                  right: 0,
+                  left: WORKBENCH_HEADER_EDGE_X,
                   zIndex: 30,
                   width: 300,
-                  maxWidth: 'calc(100vw - 48px)',
+                  maxWidth: `calc(100% - ${WORKBENCH_HEADER_EDGE_X * 2}px)`,
                 }}
               >
                 <div
@@ -744,7 +745,7 @@ export default function RSSFeed({
           </button>
 
           {/* 任务下拉列表 */}
-          <div className="relative">
+          <div>
             <button
               type="button"
               onClick={() => setTaskMenuOpen((prev) => !prev)}
