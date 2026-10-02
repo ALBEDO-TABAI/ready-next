@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
+import { readRendererStyles } from './utils/read-renderer-styles'
 
 function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
@@ -18,8 +19,9 @@ test('document rss and calendar first-row typography matches the browser tab bas
 
   assert.match(documentTabRail, /text-\[12px\]/)
 
-  assert.match(rssFeed, /fontSize:\s*12,\s*fontWeight:\s*500/)
-  assert.match(rssFeed, /text-\[12px\]/)
+  // RSS's first row is its top bar location label, sized like Document's path label.
+  assert.match(rssFeed, /<RSSTopbarTools/)
+  assert.match(readRendererStyles(), /\.rss-topbar__lead \{[^}]*font-size: 12px;/)
 
   assert.match(calendarShell, /fontSize:\s*12,\s*fontWeight:\s*500/)
   assert.match(calendarViewSelector, /fontSize:\s*12/)

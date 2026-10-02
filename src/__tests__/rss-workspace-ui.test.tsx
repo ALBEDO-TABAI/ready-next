@@ -256,3 +256,31 @@ test('chat citation clicks enqueue the exact reference through the shared worksp
     assert.equal(useMode.getState().splitMode, 'document')
   } finally { window.removeEventListener(READY_WORKBENCH_MODE_CHANGE_EVENT, capture); useMode.setState(previous); useRSSSession.getState().reset() }
 }))
+
+test('selection references opened after the reader selected text are immediately usable', async () => withDOM(async (root, dom) => {
+  const { MarkdownContent } = await import('../renderer/components/document/MarkdownContent')
+  const { default: RSSSelectionReferences } = await import('../renderer/components/rss/RSSSelectionReferences')
+  const article = { id: 'a', title: 'Article', revision: 'r1' } as never
+  const openLink = () => {}
+  let openMenu: () => void = () => {}
+  // Mirrors the reader: a stable body, and the reference menu (with these entries) opened after selecting.
+  function Reader() {
+    const bodyRef = React.useRef<HTMLDivElement>(null)
+    const [open, setOpen] = React.useState(false)
+    openMenu = () => setOpen(true)
+    return <div>
+      <div ref={bodyRef}><MarkdownContent readingAnchors content={'First paragraph text.\n\nSecond paragraph text.'} externalBaseUrl="https://example.test" onOpenLink={openLink} /></div>
+      {open && <RSSSelectionReferences bodyRef={bodyRef} article={article} active />}
+    </div>
+  }
+  await act(async () => root.render(<Reader />))
+  const run = dom.window.document.querySelector('[data-ready-reading-run]')!
+  const range = dom.window.document.createRange()
+  range.setStart(run.firstChild!, 0); range.setEnd(run.firstChild!, 5)
+  dom.window.getSelection()!.removeAllRanges(); dom.window.getSelection()!.addRange(range)
+  // Let the selection's own change event pass before the menu opens, as it does for a real reader.
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  await act(async () => openMenu())
+  const button = [...dom.window.document.querySelectorAll('button')].find((entry) => entry.textContent === '引用所选文字')!
+  assert.equal(button.disabled, false)
+}))

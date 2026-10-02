@@ -4,7 +4,7 @@ import type { RSSProcessingStore } from '../../database/rss-processing-store'
 import type { RSSProcessingService } from '../processing-service'
 import { RSSProcessingSettingsSchema, RSSProcessingListSchema, RSSReprocessSchema } from '../../../../shared/rss-processing'
 
-const CHANNELS = ['rss:processingStatus', 'rss:processingJobs', 'rss:configureProcessing', 'rss:reprocessArticle', 'rss:cancelProcessing', 'rss:resumeProcessing'] as const
+const CHANNELS = ['rss:processingStatus', 'rss:processingJobs', 'rss:configureProcessing', 'rss:reprocessArticle', 'rss:retryUnresolvedProcessing', 'rss:cancelProcessing', 'rss:resumeProcessing'] as const
 export const processingGroup: IpcChannelGroup<{ store(): RSSProcessingStore; service(): RSSProcessingService; hasModel(): boolean; notify(): void }> = {
   namespace: 'rss:processing',
   register(ipcMain, deps) {
@@ -20,6 +20,11 @@ export const processingGroup: IpcChannelGroup<{ store(): RSSProcessingStore; ser
       const params = RSSReprocessSchema.parse(input)
       const jobIds = deps.store().enqueue(params.itemId, 'manual', params.expectedArticleRevision)
       void deps.service().wake(); deps.notify(); return { jobIds }
+    }))
+    ipcMain.handle('rss:retryUnresolvedProcessing', (_event, input: unknown) => respond(() => {
+      const { expectedCount } = z.object({ expectedCount: z.number().int().nonnegative() }).strict().parse(input)
+      const result = deps.store().retryUnresolved(expectedCount)
+      void deps.service().wake(); deps.notify(); return result
     }))
     ipcMain.handle('rss:cancelProcessing', (_event, input: unknown) => respond(() => { const id = z.string().min(1).parse(input); deps.service().cancel(id); return { id } }))
     ipcMain.handle('rss:resumeProcessing', () => respond(() => { void deps.service().wake(); return { requested: true } }))

@@ -1,13 +1,14 @@
 import RSSDigestPanel from '../../components/rss/RSSDigestPanel'
 import RSSDefinitionEditor from '../../components/rss/RSSDefinitionEditor'
-import RSSProcessingPanel from '../../components/rss/RSSProcessingPanel'
 import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { RefreshCw, AlertCircle, ExternalLink } from 'lucide-react'
 import RSSFeed from '../../components/rss/RSSFeed'
-import RSSNavigation from '../../components/rss/RSSNavigation'
-import RSSWorkspaceToolbar from '../../components/rss/RSSWorkspaceToolbar'
+import RSSNavigation, { RSSNavigationToggle } from '../../components/rss/RSSNavigation'
+import { RSSTopbarContext } from '../../components/rss/rss-topbar-context'
 import RSSArticleReader from '../../components/rss/RSSArticleReader'
+import RSSReferenceButton from '../../components/rss/RSSReferenceButton'
+import RSSExportButton from '../../components/rss/RSSExportButton'
 import AddSourceModal from '../../components/rss/AddSourceModal'
 import RSSSettingsPanel from '../../components/rss/RSSSettingsPanel'
 import Modal from '../../components/ui/Modal'
@@ -33,7 +34,7 @@ import { useBrowserTabs } from '../../stores/useBrowserTabs'
 import { useRSSSession } from '../../stores/useRSSSession'
 import { getRSSAnalysisPollState, type RSSAnalysisProgressPollResult } from '../../modules/rss/analysisPollState'
 import { getRSSAddSourceStatusMessage } from '../../modules/rss/add-source-status'
-import type { RSSItem, RSSSource } from '../../components/rss/RSSFeed'
+import type { RSSFeedNotice, RSSItem, RSSSource } from '../../components/rss/RSSFeed'
 import type { AddSourceSuccessInfo } from '../../components/rss/AddSourceModal'
 import type { RSSBrowserOpenActionData } from '../../modules/rss/types'
 
@@ -120,6 +121,10 @@ export default function RSSMode({
     browserPresetLabel: null,
   })
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
+  const [notice, setNotice] = useState<RSSFeedNotice | null>(null)
+  const [topbarLead, setTopbarLead] = useState<HTMLDivElement | null>(null)
+  const [topbarTools, setTopbarTools] = useState<HTMLDivElement | null>(null)
+  const topbarSlots = useMemo(() => ({ lead: topbarLead, tools: topbarTools }), [topbarLead, topbarTools])
   const [itemStateError, setItemStateError] = useState<{ itemId: string; action: 'read' | 'star'; message: string } | null>(null)
   const [statusAction, setStatusAction] = useState<RSSBrowserOpenActionData | null>(null)
   const [analysisBackgroundWarning, setAnalysisBackgroundWarning] = useState<string | null>(null)
@@ -279,6 +284,12 @@ export default function RSSMode({
     const timer = setTimeout(() => setStatusMessage(null), 4500)
     return () => clearTimeout(timer)
   }, [statusMessage])
+
+  useEffect(() => {
+    if (!notice) return
+    const timer = setTimeout(() => setNotice(null), notice.action ? 8000 : 4500)
+    return () => clearTimeout(timer)
+  }, [notice])
 
   useEffect(() => {
     if (!statusAction) return
@@ -545,23 +556,23 @@ export default function RSSMode({
   if (error && !loading && items.length === 0) {
     return (
       <div className="workbench-mode-root items-center justify-center">
-        <div className="text-center p-8">
-          <AlertCircle className="w-16 h-16 mx-auto mb-4 text-[var(--color-red)]" />
-          <h3 className="text-[16px] font-semibold text-[var(--text-title)] mb-2">加载失败</h3>
-          <p className="text-[13px] text-[var(--text-muted)] mb-4 max-w-[300px]">{error}</p>
-          <button
-            onClick={() => {
-              void loadRSSData()
-            }}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--color-blue)] text-white text-[13px] hover:brightness-95 transition-[filter]"
-          >
-            <RefreshCw className="w-4 h-4" />
+        <div className="flex flex-col items-center p-8 text-center">
+          <AlertCircle className="mb-4 h-8 w-8" strokeWidth={1.6} style={{ color: 'var(--text-light)' }} />
+          <h3 className="mb-2 text-[15px] font-semibold text-[var(--text-title)]">资讯暂时无法读取</h3>
+          <p className="mb-5 max-w-[320px] text-[13px] leading-relaxed text-[var(--text-muted)]">{error}</p>
+          <button type="button" onClick={() => { void loadRSSData() }} className="sx-btn sx-btn--primary">
+            <RefreshCw className="h-[14px] w-[14px]" />
             重试
           </button>
         </div>
       </div>
     )
   }
+
+  const feedVisible = !selectedItem && !digestVisible && !showOrganization
+  const surfaceActive = isActive && !isSuspended
+  const toastText = statusMessage || (itemStateError ? `《${items.find((item) => item.id === itemStateError.itemId)?.title || '文章'}》：${itemStateError.message}` : null) || notice?.message || backgroundWarning
+  const closeOverlays = () => { useRSSSession.getState().cancelReveal(); setSelectedItem(null) }
 
   return (
     <div className="workbench-mode-root rss-mode-shell" style={RSS_MODE_SHELL_STYLE}>
@@ -571,119 +582,142 @@ export default function RSSMode({
           padding: `${WORKBENCH_CANVAS_OUTER_PADDING_TOP}px ${WORKBENCH_CANVAS_OUTER_PADDING_X}px ${WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM}px`,
         }}
       >
+        {/* Same frame as Document and Browser: top bar + left rail on the canvas, content in a rounded frame. */}
         <div
-          className="workbench-canvas-shell relative flex h-full min-h-0 overflow-hidden"
+          className="workbench-canvas-shell rss-workbench-canvas relative flex h-full min-h-0 overflow-hidden"
           style={{ background: 'var(--workbench-module-surface-bg)' }}
         >
-          <RSSNavigation onDigests={() => { useRSSSession.getState().cancelReveal(); setSelectedItem(null); setShowOrganization(false); setDigestView(true) }} definitions={definitions} onManage={() => { useRSSSession.getState().cancelReveal(); setDigestView(false); setSelectedItem(null); setShowOrganization((value) => !value) }} onNavigate={(patch) => { useRSSSession.getState().cancelReveal(); setDigestView(false); setSelectedItem(null); setQuery(patch) }} />
-          {/* Keep the list mounted so returning from reading preserves scroll. */}
-          <div
-            className={`rss-feed-sheet content-surface-panel flex-1 overflow-hidden flex flex-col relative`}
-            style={{
-              background: 'var(--workbench-module-surface-bg)',
-              display: selectedItem || digestVisible ? 'none' : undefined,
-            }}
-          >
-            {showOrganization && <RSSDefinitionEditor definitions={definitions} onClose={() => setShowOrganization(false)} onSaved={(deletedId) => {
-              const current = useRSSSession.getState().query
-              if (deletedId && (current.collectionId === deletedId || current.categoryId === deletedId)) setQuery({ collectionId: undefined, categoryId: undefined, scope: 'inbox', filter: 'all' })
-            }} />}
-            <RSSWorkspaceToolbar view={view} loading={loading} definitions={definitions} />
-            <RSSProcessingPanel active={isActive && !isSuspended} />
-            <RSSFeed
-              active={isActive && !isSuspended && !selectedItem && !digestVisible}
-              query={view?.query}
-              queryRevision={view?.revision}
-              items={items}
-              sources={sources}
-              selectedSource={selectedSource}
-              selectedItemId={selectedItem?.id ?? null}
-              loading={loading}
-              refreshing={refreshing}
-              analysisProgressMap={analysisProgressMap}
-              analysisJobs={analysisJobs}
-              onSourceChange={handleSourceChange}
-              onItemClick={handleItemClick}
-              onMarkItemRead={handleMarkItemRead}
-              onToggleStar={handleToggleStar}
-              onDeleteItem={handleDeleteItem}
-              onOpenAnalysisOutput={handleOpenAnalysisOutput}
-              onRefresh={handleRefresh}
-              onAddSource={handleAddSource}
-              onDeleteSource={handleDeleteSource}
-              onClearRead={handleClearRead}
-              onOpenSettings={() => setSettingsOpen((open) => !open)}
-              onPauseAnalysisJob={handlePauseAnalysisJob}
-              onResumeAnalysisJob={handleResumeAnalysisJob}
-              onDeleteAnalysisJob={handleDeleteAnalysisJob}
-              settingsOpen={settingsOpen}
-              nextPage={Boolean(view?.nextCursor)}
-              loadingMore={loadingMore}
-              queryError={error}
-              inbox={query.scope === 'inbox'}
-              onLoadMore={() => void loadMore()}
-              onReloadQuery={() => void reload().catch(() => {})}
-            />
-            {(statusMessage || itemStateError || backgroundWarning || statusAction) && (
-              <div
-                className="glass-surface-floating absolute top-[62px] right-4 z-20 rounded-lg px-3 py-2 text-[12px]"
-                style={{
-                  background: 'color-mix(in srgb, var(--surface-floating-bg) 32%, transparent)',
-                  border: '1px solid var(--border-default)',
-                  color: 'var(--text-secondary)',
-                  boxShadow: 'var(--shadow-sm)',
-                }}
-              >
-                {statusMessage || itemStateError || backgroundWarning ? (
-                  <div>{statusMessage || (itemStateError ? `《${items.find((item) => item.id === itemStateError.itemId)?.title || '文章'}》：${itemStateError.message}` : backgroundWarning)}</div>
-                ) : null}
-                {statusAction ? (
-                  <button
-                    onClick={() => void handleStatusAction()}
-                    className="mt-2 inline-flex items-center gap-1 rounded-[8px] border px-2 py-1 text-[11px] transition-colors hover:bg-[var(--bg-hover)]"
-                    style={{
-                      borderColor: 'var(--border-default)',
-                      color: 'var(--text-title)',
-                      background: 'rgba(255,255,255,0.74)',
-                    }}
-                  >
-                    <ExternalLink className="h-3.5 w-3.5" />
-                    {statusAction.label}
-                  </button>
-                ) : null}
+          <RSSTopbarContext.Provider value={topbarSlots}>
+            <div className="rss-topbar workbench-tabs-surface no-drag">
+              <RSSNavigationToggle />
+              <div className="rss-topbar__lead" ref={setTopbarLead}>
+                {feedVisible && <span>资讯</span>}
               </div>
-            )}
-            <RSSSettingsPanel
-              open={settingsOpen}
-              sources={sources}
-              selectedSourceId={selectedSource}
-              autoRefreshIntervalMs={autoRefreshIntervalMs}
-              onAutoRefreshIntervalChange={handleAutoRefreshIntervalChange}
-              onClose={() => setSettingsOpen(false)}
-              onReloadData={() => loadRSSData({ background: true })}
-              onOpenExternalServices={handleOpenExternalServices}
-            />
-          </div>
+              <div className="rss-topbar__tools" ref={setTopbarTools} />
+            </div>
+            <div className="rss-workbench-body">
+              <RSSNavigation
+                definitions={definitions}
+                managing={showOrganization}
+                onDigests={() => { closeOverlays(); setShowOrganization(false); setDigestView(true) }}
+                onManage={() => { closeOverlays(); setDigestView(false); setShowOrganization((value) => !value) }}
+                onNavigate={(patch) => { closeOverlays(); setDigestView(false); setShowOrganization(false); setQuery(patch) }}
+              />
+              {/* The list stays mounted so returning from reading preserves scroll. */}
+              <div className={`rss-feed-sheet content-surface-panel rss-content-frame`}>
+                <div className="flex min-h-0 flex-1 flex-col" style={{ display: feedVisible ? undefined : 'none' }}>
+                  <RSSFeed
+                    active={surfaceActive && feedVisible}
+                    toolsVisible={surfaceActive && feedVisible}
+                    query={view?.query}
+                    queryRevision={view?.revision}
+                    view={view}
+                    definitions={definitions}
+                    items={items}
+                    sources={sources}
+                    selectedSource={selectedSource}
+                    selectedItemId={selectedItem?.id ?? null}
+                    loading={loading}
+                    refreshing={refreshing}
+                    analysisProgressMap={analysisProgressMap}
+                    analysisJobs={analysisJobs}
+                    onSourceChange={handleSourceChange}
+                    onItemClick={handleItemClick}
+                    onMarkItemRead={handleMarkItemRead}
+                    onToggleStar={handleToggleStar}
+                    onDeleteItem={handleDeleteItem}
+                    onOpenAnalysisOutput={handleOpenAnalysisOutput}
+                    onRefresh={handleRefresh}
+                    onAddSource={handleAddSource}
+                    onDeleteSource={handleDeleteSource}
+                    onClearRead={handleClearRead}
+                    onOpenSettings={() => setSettingsOpen((open) => !open)}
+                    onPauseAnalysisJob={handlePauseAnalysisJob}
+                    onResumeAnalysisJob={handleResumeAnalysisJob}
+                    onDeleteAnalysisJob={handleDeleteAnalysisJob}
+                    renderMoreActions={(close) => <>
+                      <RSSReferenceButton
+                        className="rss-menu-item ready-floating-menu-item"
+                        name="RSS 筛选结果"
+                        label="引用当前结果"
+                        disabled={loading}
+                        reference={view ? { kind: 'query', query: { ...view.query, expectedRevision: view.revision } } : null}
+                        onDone={close}
+                      />
+                      <RSSExportButton
+                        className="rss-menu-item ready-floating-menu-item"
+                        view={view}
+                        disabled={loading}
+                        onExported={(receipt) => {
+                          close()
+                          setNotice({ message: `已导出发起时的 ${receipt.total} 条结果`, action: { label: '显示文件', run: () => { void window.electronAPI.document.showInFolder(receipt.path) } } })
+                        }}
+                        onError={(message) => { close(); setNotice({ message }) }}
+                        onCanceled={close}
+                      />
+                    </>}
+                    settingsOpen={settingsOpen}
+                    nextPage={Boolean(view?.nextCursor)}
+                    loadingMore={loadingMore}
+                    queryError={error}
+                    inbox={query.scope === 'inbox'}
+                    onLoadMore={() => void loadMore()}
+                    onReloadQuery={() => void reload().catch(() => {})}
+                  />
+                </div>
 
-          {digestVisible && <RSSDigestPanel active={isActive && !isSuspended} view={view} onReadArticle={(item) => { setDigestView(false); handleItemClick(item) }} />}
+                {showOrganization && <RSSDefinitionEditor definitions={definitions} active={surfaceActive} onClose={() => setShowOrganization(false)} onSaved={(deletedId) => {
+                  const current = useRSSSession.getState().query
+                  if (deletedId && (current.collectionId === deletedId || current.categoryId === deletedId)) setQuery({ collectionId: undefined, categoryId: undefined, scope: 'inbox', filter: 'all' })
+                }} />}
 
-          {/* Article rendering shares the document typography, without active widgets. */}
-          {selectedItem && !digestVisible && (
-            <RSSArticleReader
-              reveal={selectedItem.reveal}
-              expectedRevision={selectedItem.pinnedRevision}
-              onSelectRelated={handleItemClick}
-              active={isActive && !isSuspended}
-              definitions={definitions}
-              key={selectedItem.id}
-              item={selectedItem.pinnedRevision ? selectedItem : items.find((item) => item.id === selectedItem.id) || selectedItem}
-              onClose={handleClosePreview}
-              onOpened={handleMarkItemRead}
-              onBodyLoaded={handleBodyLoaded}
-              onToggleStar={handleToggleStar}
-              notice={itemStateError?.itemId === selectedItem.id ? itemStateError.message : null}
-            />
-          )}
+                {digestVisible && !showOrganization && <RSSDigestPanel active={surfaceActive} view={view} onReadArticle={(item) => { setDigestView(false); handleItemClick(item) }} />}
+
+                {/* Article rendering shares the document typography, without active widgets. */}
+                {selectedItem && !digestVisible && !showOrganization && (
+                  <RSSArticleReader
+                    reveal={selectedItem.reveal}
+                    expectedRevision={selectedItem.pinnedRevision}
+                    onSelectRelated={handleItemClick}
+                    active={surfaceActive}
+                    definitions={definitions}
+                    key={selectedItem.id}
+                    item={selectedItem.pinnedRevision ? selectedItem : items.find((item) => item.id === selectedItem.id) || selectedItem}
+                    onClose={handleClosePreview}
+                    onOpened={handleMarkItemRead}
+                    onBodyLoaded={handleBodyLoaded}
+                    onToggleStar={handleToggleStar}
+                    notice={itemStateError?.itemId === selectedItem.id ? itemStateError.message : null}
+                  />
+                )}
+
+                {(toastText || statusAction || notice?.action) && (
+                  <div className="rss-toast" role="status">
+                    {toastText ? <div>{toastText}</div> : null}
+                    {notice?.action && !statusMessage ? (
+                      <button type="button" onClick={() => { notice.action!.run(); setNotice(null) }}>{notice.action.label}</button>
+                    ) : null}
+                    {statusAction ? (
+                      <button type="button" onClick={() => void handleStatusAction()}>
+                        <ExternalLink className="h-3.5 w-3.5" />
+                        {statusAction.label}
+                      </button>
+                    ) : null}
+                  </div>
+                )}
+                <RSSSettingsPanel
+                  open={settingsOpen}
+                  sources={sources}
+                  selectedSourceId={selectedSource}
+                  autoRefreshIntervalMs={autoRefreshIntervalMs}
+                  onAutoRefreshIntervalChange={handleAutoRefreshIntervalChange}
+                  onClose={() => setSettingsOpen(false)}
+                  onReloadData={() => loadRSSData({ background: true })}
+                  onOpenExternalServices={handleOpenExternalServices}
+                />
+              </div>
+            </div>
+          </RSSTopbarContext.Provider>
         </div>
       </div>
 

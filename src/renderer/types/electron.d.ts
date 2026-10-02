@@ -2143,6 +2143,7 @@ interface ElectronRSSAPI {
   processingJobs: (input?: import('../../shared/rss-processing').RSSProcessingListInput) => Promise<RSSResponse<import('../../shared/rss-processing').RSSProcessingList>>
   configureProcessing: (input: import('../../shared/rss-processing').RSSProcessingSettings) => Promise<RSSResponse<import('../../shared/rss-processing').RSSProcessingSettings>>
   reprocessArticle: (input: { itemId: string; expectedArticleRevision: string }) => Promise<RSSResponse<{ jobIds: string[] }>>
+  retryUnresolvedProcessing: (input: { expectedCount: number }) => Promise<RSSResponse<{ queued: number; jobIds: string[] }>>
   cancelProcessing: (id: string) => Promise<RSSResponse<{ id: string }>>
   resumeProcessing: () => Promise<RSSResponse<{ requested: boolean }>>
   getDefinitions: () => Promise<RSSResponse<import('../../shared/rss-organization').RSSDefinition[]>>

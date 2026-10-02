@@ -879,6 +879,7 @@ const rssAPI = {
   processingJobs: (input?: import('../shared/rss-processing').RSSProcessingListInput) => ipcRenderer.invoke('rss:processingJobs', input),
   configureProcessing: (input: import('../shared/rss-processing').RSSProcessingSettings) => ipcRenderer.invoke('rss:configureProcessing', input),
   reprocessArticle: (input: { itemId: string; expectedArticleRevision: string }) => ipcRenderer.invoke('rss:reprocessArticle', input),
+  retryUnresolvedProcessing: (input: { expectedCount: number }) => ipcRenderer.invoke('rss:retryUnresolvedProcessing', input),
   cancelProcessing: (id: string) => ipcRenderer.invoke('rss:cancelProcessing', id),
   resumeProcessing: () => ipcRenderer.invoke('rss:resumeProcessing'),
   getDefinitions: () => ipcRenderer.invoke('rss:getDefinitions'),

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { ChevronRight } from 'lucide-react'
 import type { RSSArticleSummary } from '../../../shared/rss-workspace'
 import type { RSSReadEventsResult, RSSEventMembership, RSSEventSummary } from '../../../shared/rss-events'
 import { toRSSItem } from '../../modules/rss/workspace-query'
@@ -133,33 +134,48 @@ export default function RSSEventPanel({ article, active, onSelect }: { article: 
     const key = identity.current
     void run().catch((reason) => { if (key === identity.current) report(reason) })
   }
+  const state = membership ? membership.eventId ? membership.manual ? '手工归组' : '已归组' : '证据不足，保持独立' : '尚未判断'
   return <section className="rss-event-panel">
-    <button type="button" aria-expanded={open} onClick={() => setOpen(!open)}>事件与进展 · {membership ? membership.eventId ? membership.manual ? '手工归组' : '已归组' : '证据不足，保持独立' : '尚未判断'} {open ? '收起' : '展开'}</button>
-    {open && <>
+    <button type="button" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <span>事件与进展</span>
+      <span className="flex items-center gap-2"><small>{state}</small><ChevronRight size={14} strokeWidth={2} /></span>
+    </button>
+    {open && <div className="rss-event-panel__body">
       {membership && <p>{membership.reason}{membership.stale ? ' · 原文已变化，旧依据不是当前版本。' : ''}</p>}
       {facts && <><h4>事实与进展（{facts.total}）</h4><ul>{facts.facts.map((fact) => <li key={fact.id}>
         <blockquote>{fact.quote}</blockquote><small>{fact.source} · {fact.historical ? '历史版本摘句；全文已更新' : '当前版本依据'}{fact.sourceRole === 'direct' ? ' · 发布方（模型判断）' : ''}</small>
-        {!fact.historical && onSelect && <button onClick={() => read(() => showArticle(fact.itemId, fact.articleRevision))}>读取依据文章</button>}
-      </li>)}</ul>{facts.nextOffset !== null && <button onClick={() => read(() => more('facts'))}>更多事实与进展</button>}</>}
+        {!fact.historical && onSelect && <button type="button" onClick={() => read(() => showArticle(fact.itemId, fact.articleRevision))}>读取依据文章</button>}
+      </li>)}</ul>{facts.nextOffset !== null && <button type="button" className="rss-event-panel__more" onClick={() => read(() => more('facts'))}>更多事实与进展</button>}</>}
       {members && <><h4>全部关联报道（{members.total}，包含待更新关联）</h4><ul>{members.members.map((member) => <li key={member.itemId}>
-        <button disabled={!onSelect} onClick={() => read(() => showArticle(member.itemId))}>{member.title}</button><small>{member.read ? '已读' : '未读'}{member.stale ? ' · 关联依据需更新' : ''}</small>
-      </li>)}</ul>{members.nextOffset !== null && <button onClick={() => read(() => more('members'))}>更多报道</button>}</>}
+        <button type="button" disabled={!onSelect} onClick={() => read(() => showArticle(member.itemId))}>{member.title}</button><small>{member.read ? '已读' : '未读'}{member.stale ? ' · 关联依据需更新' : ''}</small>
+      </li>)}</ul>{members.nextOffset !== null && <button type="button" className="rss-event-panel__more" onClick={() => read(() => more('members'))}>更多报道</button>}</>}
       <div className="rss-event-actions">
-        <label>归组依据摘句<textarea aria-label="归组依据摘句" maxLength={600} value={quote} onChange={(event) => { quoteDirty.current = true; setQuote(event.target.value) }} /></label>
-        <button disabled={busy || !fresh || !quote.trim()} onClick={() => void move(null)}>拆为独立事件</button>
-        <input aria-label="搜索目标事件" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="标题或事实关键词" />
-        <button disabled={busy} onClick={() => read(() => findTargets())}>搜索事件</button>
-        <select aria-label="目标事件" value={target?.id || ''} onChange={(event) => { const id = event.target.value; read(() => selectTarget(targets?.events.find((entry) => entry.id === id) || null)) }}>
-          <option value="">选择目标事件</option>{targets?.events.map((entry) => <option key={entry.id} value={entry.id}>{entry.title}（{entry.memberCount}篇 / {entry.factCount}事实）</option>)}
-        </select>
-        {targets?.nextOffset != null && <button onClick={() => read(() => findTargets(true))}>更多目标事件</button>}
-        {targetFacts && <select aria-label="并入事实方式" value={targetFactId} onChange={(event) => setTargetFactId(event.target.value)}><option value="">保留为独立事实</option>{targetFacts.facts.map((fact) => <option key={fact.id} value={fact.id}>同一事实：{fact.quote}</option>)}</select>}
-        {targetFacts?.nextOffset != null && <button onClick={() => read(moreTargetFacts)}>更多目标事实</button>}
-        <button disabled={busy || !fresh || !quote.trim() || !target || !targetFacts} onClick={() => void move(target)}>并入所选事件</button>
-        <button disabled={busy || !fresh || !target || !members || target.id === members.summary.id} onClick={() => read(merge)}>合并当前整个事件</button>
+        <span className="rss-event-actions__title">调整归组</span>
+        <label>归组依据摘句<textarea className="sx-textarea" aria-label="归组依据摘句" maxLength={600} value={quote} onChange={(event) => { quoteDirty.current = true; setQuote(event.target.value) }} /></label>
+        <div className="rss-event-actions__line">
+          <button type="button" className="sx-btn sx-btn--sm" disabled={busy || !fresh || !quote.trim()} onClick={() => void move(null)}>拆为独立事件</button>
+        </div>
+        <div className="rss-event-actions__line">
+          <input className="sx-input" aria-label="搜索目标事件" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="按标题或事实关键词查找事件" />
+          <button type="button" className="sx-btn sx-btn--sm" disabled={busy} onClick={() => read(() => findTargets())}>搜索事件</button>
+        </div>
+        {targets && <div className="rss-event-actions__line">
+          <select className="sx-select" aria-label="目标事件" value={target?.id || ''} onChange={(event) => { const id = event.target.value; read(() => selectTarget(targets.events.find((entry) => entry.id === id) || null)) }}>
+            <option value="">选择目标事件</option>{targets.events.map((entry) => <option key={entry.id} value={entry.id}>{entry.title}（{entry.memberCount}篇 / {entry.factCount}事实）</option>)}
+          </select>
+          {targets.nextOffset != null && <button type="button" className="sx-btn sx-btn--ghost sx-btn--sm" onClick={() => read(() => findTargets(true))}>更多目标事件</button>}
+        </div>}
+        {targetFacts && <div className="rss-event-actions__line">
+          <select className="sx-select" aria-label="并入事实方式" value={targetFactId} onChange={(event) => setTargetFactId(event.target.value)}><option value="">保留为独立事实</option>{targetFacts.facts.map((fact) => <option key={fact.id} value={fact.id}>同一事实：{fact.quote}</option>)}</select>
+          {targetFacts.nextOffset != null && <button type="button" className="sx-btn sx-btn--ghost sx-btn--sm" onClick={() => read(moreTargetFacts)}>更多目标事实</button>}
+        </div>}
+        <div className="rss-event-actions__line">
+          <button type="button" className="sx-btn sx-btn--primary sx-btn--sm" disabled={busy || !fresh || !quote.trim() || !target || !targetFacts} onClick={() => void move(target)}>并入所选事件</button>
+          <button type="button" className="sx-btn sx-btn--sm" disabled={busy || !fresh || !target || !members || target.id === members.summary.id} onClick={() => read(merge)}>合并当前整个事件</button>
+        </div>
       </div>
-    </>}
-    {error && <p role="alert">{error}<button onClick={() => read(refresh)}>重新读取事件</button></p>}
+    </div>}
+    {error && <p className="rss-note rss-note--danger" role="alert">{error} <button type="button" className="rss-link" onClick={() => read(refresh)}>重新读取事件</button></p>}
     <Modal {...modalProps} />
   </section>
 }

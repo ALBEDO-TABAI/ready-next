@@ -22,9 +22,16 @@ export default function RSSVirtualList({ items, selectedItemId, children }: {
 
   useLayoutEffect(() => {
     const container = containerRef.current!
+    let width = container.clientWidth
     const measure = () => {
       // Hidden workbench scenes have zero height. Retain the last viewport.
       if (container.clientHeight > 0) setHeight(container.clientHeight)
+      // Cards wrap to the frame width; after a width change keep the reader's row where it was.
+      if (container.clientWidth > 0 && container.clientWidth !== width) {
+        width = container.clientWidth
+        const anchor = anchorRef.current
+        if (anchor) requestAnimationFrame(() => listRef.current?.scrollTo({ key: anchor.key, align: 'top', offset: anchor.offset }))
+      }
     }
     measure()
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
@@ -70,7 +77,7 @@ export default function RSSVirtualList({ items, selectedItemId, children }: {
         }}
       >
         {(item, index) => (
-          <div data-rss-row-key={rowKey(item)} style={{ padding: `${index === 0 ? 12 : 4}px 8px ${index === items.length - 1 ? 12 : 4}px` }}>
+          <div data-rss-row-key={rowKey(item)} className="rss-feed-row" data-first={index === 0 || undefined} data-last={index === items.length - 1 || undefined}>
             {children(item, index)}
           </div>
         )}

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { ChevronRight } from 'lucide-react'
 import type { RSSArticleSummary, RSSQueryInput, RSSQueryResult } from '../../../shared/rss-workspace'
 import { toRSSItem } from '../../modules/rss/workspace-query'
 import type { RSSItem } from './RSSFeed'
@@ -26,15 +27,19 @@ export default function RSSGroupedReports({ group, query, revision, active, onSe
     if (open && active) void load()
     return () => { ++generation.current }
   }, [key, open, active])
+  const reports = group.matchingCount === group.memberCount ? `${group.memberCount} 篇报道` : `本范围 ${group.matchingCount} / 全部 ${group.memberCount} 篇`
+  const detail = `本范围 ${group.matchingCount} 篇 / 全事件 ${group.memberCount} 篇 · ${group.sourceCount} 个信源 · ${group.factCount} 个事实与进展 · ${group.matchingUnread} 篇未读${group.matchingStarred ? ` · ${group.matchingStarred} 篇收藏` : ''}`
   return <div className="rss-grouped-reports" onClick={(event) => event.stopPropagation()}>
-    <button type="button" aria-expanded={open} onClick={() => setOpen(!open)}>同一事件 · 本范围 {group.matchingCount} 篇 / 全事件 {group.memberCount} 篇 · {group.sourceCount} 个信源 · {group.factCount} 个事实与进展 · {group.matchingUnread} 篇未读{group.matchingStarred ? ` · ${group.matchingStarred} 篇收藏` : ''} {open ? '收起' : '展开'}</button>
-    {group.staleCount > 0 && <small>部分关联依据已变化，详情中会标明。</small>}
+    <button type="button" aria-expanded={open} title={detail} onClick={() => setOpen(!open)}>
+      <ChevronRight size={13} strokeWidth={2} />同一事件 · {reports} · {group.sourceCount} 个信源{group.factCount > 1 ? ` · ${group.factCount} 条事实与进展` : ''}
+    </button>
     {group.unseenFactCount > 0 && <strong>有 {group.unseenFactCount} 个新整理的事实或进展待查看</strong>}
+    {group.staleCount > 0 && <small>部分关联依据已变化，详情中会标明。</small>}
     {open && <ul>{result?.items.map((item) => <li key={item.id}>
       <button type="button" onClick={() => onSelect(toRSSItem(item))}>{item.title}</button>
       <small>{item.source} · {item.read ? '已读' : '未读'}{item.event?.relation === 'progress' ? ' · 后续进展' : ''}{item.event?.relation === 'duplicate' ? ' · 同事实报道' : ''}</small>
     </li>)}</ul>}
-    {open && error && <p role="alert">{error}<button type="button" onClick={() => void load()}>重试</button></p>}
+    {open && error && <p role="alert">{error} <button type="button" className="rss-link" onClick={() => void load()}>重试</button></p>}
     {open && loading && <small>正在读取…</small>}
     {open && result?.nextCursor && <button type="button" disabled={loading} onClick={() => void load(true)}>更多关联报道</button>}
   </div>

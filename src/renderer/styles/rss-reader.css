@@ -1,0 +1,417 @@
+/*
+ * RSS 阅读视图：与 rss-workspace.css 同一套 sx 纪律（填充而非描边、墨色主操作、强调色只做点缀）。
+ * 正文排版复用文档模式的 note-preview-body；这里只负责阅读栏的外围层次与“整理与关联”折叠块。
+ */
+
+/* ── 阅读 ─────────────────────────────────────────────────────────────── */
+
+.rss-article-reader {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  color: var(--text-body);
+  container-type: inline-size;
+}
+
+.rss-reader-layout {
+  display: flex;
+  flex: 1;
+  justify-content: center;
+  gap: 48px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 52px clamp(24px, 6cqw, 72px) 120px;
+}
+
+.rss-reader-content {
+  width: 100%;
+  max-width: 720px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.rss-reader-source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-bottom: 14px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.rss-reader-source strong {
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.rss-reader-title {
+  margin-bottom: 14px;
+  font-size: clamp(26px, 3.4cqw, 32px);
+  line-height: 1.32;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: var(--text-title);
+}
+
+.rss-reader-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.rss-reader-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin-bottom: 30px;
+  font-size: 12px;
+  color: var(--text-light);
+}
+
+.rss-reader-status > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rss-reader-status button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.rss-reader-status button:hover:not(:disabled) {
+  color: var(--text-title);
+}
+
+.rss-reader-status button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.rss-reader-notice {
+  margin-bottom: 16px;
+  padding: 11px 15px;
+  border-radius: 12px;
+  background: var(--sx-inset-bg);
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.rss-reader-notice[role='alert'] {
+  background: var(--sx-warning-wash);
+}
+
+.rss-article-reader .rss-cover-image {
+  margin: 4px 0 28px !important;
+}
+
+.rss-article-reader .rss-cover-image img {
+  border-radius: 14px !important;
+}
+
+.rss-reader-body {
+  padding: 0;
+}
+
+.rss-reader-body [data-ready-heading-level] {
+  scroll-margin-top: 24px;
+}
+
+.rss-reader-body ::selection {
+  background: color-mix(in srgb, var(--color-blue) 24%, transparent);
+}
+
+.rss-reader-toc {
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  flex: 0 0 168px;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding-top: 6px;
+  font-size: 12.5px;
+  scrollbar-width: none;
+}
+
+.rss-reader-toc p {
+  margin-bottom: 10px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--text-light);
+}
+
+.rss-reader-toc button {
+  display: block;
+  width: 100%;
+  padding: 5px 0;
+  text-align: left;
+  line-height: 1.55;
+  color: var(--text-muted);
+  transition: color var(--sx-dur, 160ms) var(--rss-ease);
+}
+
+.rss-reader-toc button:hover {
+  color: var(--text-title);
+}
+
+.rss-reader-toc button:focus-visible {
+  outline: none;
+  border-radius: 6px;
+  box-shadow: var(--sx-focus-ring);
+}
+
+@container (max-width: 960px) {
+  .rss-reader-toc {
+    display: none;
+  }
+}
+
+@container (max-width: 520px) {
+  .rss-reader-layout {
+    padding: 32px 20px 80px;
+  }
+}
+
+.rss-reader-extras {
+  display: grid;
+  gap: 8px;
+  margin-top: 64px;
+}
+
+.rss-reader-extras > p {
+  margin-bottom: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--text-light);
+}
+
+/* 分类与精选、事件与进展：安静的折叠块，展开后才出现控件。 */
+.rss-membership-editor,
+.rss-event-panel {
+  border-radius: 14px;
+  background: var(--sx-inset-bg);
+  font-size: 13px;
+  color: var(--text-body);
+}
+
+.rss-membership-editor > summary,
+.rss-event-panel > button:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 13px 18px;
+  list-style: none;
+  cursor: pointer;
+  text-align: left;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.rss-membership-editor > summary::-webkit-details-marker {
+  display: none;
+}
+
+.rss-membership-editor > summary small,
+.rss-event-panel > button:first-child small {
+  font-size: 12px;
+  color: var(--text-light);
+}
+
+.rss-membership-editor > summary:hover,
+.rss-event-panel > button:first-child:hover {
+  color: var(--text-title);
+}
+
+.rss-membership-editor > summary svg,
+.rss-event-panel > button:first-child svg {
+  flex-shrink: 0;
+  color: var(--text-light);
+  transition: transform 200ms var(--rss-ease);
+}
+
+.rss-membership-editor[open] > summary svg,
+.rss-event-panel > button[aria-expanded='true']:first-child svg {
+  transform: rotate(90deg);
+}
+
+.rss-membership-editor > summary:focus-visible,
+.rss-event-panel > button:first-child:focus-visible {
+  outline: none;
+  border-radius: 14px;
+  box-shadow: var(--sx-focus-ring);
+}
+
+.rss-membership-editor__body,
+.rss-event-panel__body {
+  display: grid;
+  gap: 4px;
+  padding: 0 18px 16px;
+}
+
+.rss-membership-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 16px;
+  padding: 10px 0;
+}
+
+.rss-membership-row strong {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-title);
+}
+
+.rss-membership-row small {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.rss-membership-row .sx-select {
+  width: auto;
+  min-width: 120px;
+  height: 30px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.rss-membership-editor .rss-processing-panel {
+  margin-top: 6px;
+  padding-top: 10px;
+}
+
+.rss-event-panel__body > p {
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--text-muted);
+}
+
+.rss-event-panel h4 {
+  margin: 14px 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.rss-event-panel ul {
+  display: grid;
+  gap: 2px;
+  max-height: 300px;
+  overflow: auto;
+  margin: 0 -8px;
+  padding: 0;
+  list-style: none;
+}
+
+.rss-event-panel li {
+  padding: 8px;
+  border-radius: 10px;
+  overflow-wrap: anywhere;
+}
+
+.rss-event-panel li blockquote {
+  margin: 0 0 4px;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--text-body);
+}
+
+.rss-event-panel li small {
+  display: block;
+  font-size: 11.5px;
+  color: var(--text-light);
+}
+
+.rss-event-panel li button {
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-align: left;
+}
+
+.rss-event-panel li > button:first-child {
+  margin-top: 0;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text-body);
+}
+
+.rss-event-panel li button:hover:not(:disabled) {
+  color: var(--text-title);
+}
+
+.rss-event-panel button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.rss-event-panel__more {
+  justify-self: start;
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.rss-event-panel__more:hover {
+  color: var(--text-title);
+}
+
+.rss-event-actions {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 4px;
+}
+
+.rss-event-actions__title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.rss-event-actions label {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.rss-event-actions .sx-textarea {
+  min-height: 64px;
+  resize: vertical;
+}
+
+.rss-event-actions__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.rss-event-actions__line .sx-input,
+.rss-event-actions__line .sx-select {
+  flex: 1 1 200px;
+  min-width: 0;
+  height: 32px;
+}
+
+.rss-event-panel > p[role='alert'] {
+  margin: 0 18px 14px;
+}

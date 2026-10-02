@@ -1,139 +1,975 @@
-.rss-article-reader {
+/*
+ * RSS 资讯工作区。
+ *
+ * 框架与文档 / 浏览器模块同构：画布上方一条工具栏、左侧一列导航，两者在同一层材质上连成 L 形；
+ * 右下是四角圆角的内容框（与 document-content-frame 同材质叠层），资讯流、阅读、日报、栏目管理都在框内。
+ *
+ * 视觉纪律沿用设置页的 sx 体系：
+ * - 选中、悬停用“被托起的白玻璃”填充，不画外框与分隔线；层次靠留白与字重。
+ * - 强调色只用于未读点、当前图标、焦点；主操作用墨色；危险操作平时安静、悬停才转红。
+ */
+
+.rss-mode-shell {
+  --rss-rail: 52px;
+  --rss-rail-open: 192px;
+  --rss-gutter: clamp(24px, 4.2cqw, 48px);
+  --rss-row-x: calc(var(--rss-gutter) - 16px);
+  --rss-ease: var(--sx-ease, cubic-bezier(0.22, 0.61, 0.36, 1));
+  --rss-popover-bg: var(--chat-menu-frost-bg, color-mix(in srgb, var(--bg-primary) 92%, transparent));
+  --rss-popover-shadow: var(--chat-menu-shadow, 0 18px 40px rgba(15, 23, 42, 0.16));
+}
+
+/* ── 框架：L 形工具栏 + 导航，圆角内容框 ─────────────────────────────── */
+
+.rss-workbench-canvas {
   display: flex;
   flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.rss-topbar {
+  position: relative;
+  z-index: 8;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 0 14px 0 8px;
+}
+
+.rss-topbar__toggle {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 30px;
+  border-radius: 9px;
+  color: var(--text-muted);
+  transition: background-color var(--sx-dur, 160ms) var(--rss-ease), color var(--sx-dur, 160ms) var(--rss-ease);
+}
+
+.rss-topbar__lead {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--text-light);
+  white-space: nowrap;
+}
+
+.rss-topbar__lead > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rss-topbar__back {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px 0 8px;
+  border-radius: 9px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  transition: background-color var(--sx-dur, 160ms) var(--rss-ease), color var(--sx-dur, 160ms) var(--rss-ease);
+}
+
+.rss-topbar__tools {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 2px;
+}
+
+.rss-topbar__toggle:hover,
+.rss-topbar__back:hover {
+  background: var(--sx-hover);
+  color: var(--text-title);
+}
+
+.rss-workbench-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* 与 document-workbench-body 同一层材质：顶栏与导航列连成一片，内容框再叠一层而显得更亮。 */
+html[data-skin='liquid-glass'] .rss-mode-shell .rss-workbench-body {
+  background: var(--workbench-module-surface-bg);
+  backdrop-filter: blur(24px) saturate(0%);
+  -webkit-backdrop-filter: blur(24px) saturate(0%);
+}
+
+.rss-mode-shell .rss-content-frame {
+  position: relative;
   flex: 1;
   min-width: 0;
   min-height: 0;
-  color: var(--text-body);
-  background: var(--workbench-module-surface-bg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: var(--workbench-canvas-radius);
+  background-clip: padding-box;
   container-type: inline-size;
 }
-.rss-reader-toolbar {
+
+/* ── 左侧导航 ────────────────────────────────────────────────────────── */
+
+.rss-nav {
+  flex: 0 0 var(--rss-rail-open);
+  width: var(--rss-rail-open);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 12px 14px 8px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: none;
+  transition: flex-basis 220ms var(--rss-ease), width 220ms var(--rss-ease), padding 220ms var(--rss-ease);
+}
+
+.rss-nav::-webkit-scrollbar {
+  display: none;
+}
+
+.rss-nav.is-collapsed {
+  flex-basis: var(--rss-rail);
+  width: var(--rss-rail);
+  padding: 4px 8px 14px;
+}
+
+.rss-nav__label {
+  padding: 18px 10px 6px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--text-light);
+  white-space: nowrap;
+}
+
+.rss-nav__label:first-child {
+  padding-top: 6px;
+}
+
+.rss-nav.is-collapsed .rss-nav__label {
+  height: 14px;
+  padding: 0;
+  overflow: hidden;
+  font-size: 0;
+}
+
+.rss-nav__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rss-nav__foot {
+  margin-top: auto;
+  padding-top: 14px;
+}
+
+.rss-nav__item {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 10px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-align: left;
+  transition: background-color var(--sx-dur, 160ms) var(--rss-ease), box-shadow var(--sx-dur, 160ms) var(--rss-ease), color var(--sx-dur, 160ms) var(--rss-ease);
+}
+
+.rss-nav__item svg {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  transition: color var(--sx-dur, 160ms) var(--rss-ease);
+}
+
+.rss-nav__item span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rss-nav__item:hover:not([aria-current='page']) {
+  background: var(--sx-raised-hover);
+  color: var(--text-title);
+}
+
+.rss-nav__item[aria-current='page'] {
+  background: var(--sx-raised-bg);
+  box-shadow: var(--sx-raised-shadow);
+  color: var(--text-title);
+  font-weight: 500;
+}
+
+.rss-nav__item[aria-current='page'] svg {
+  color: var(--color-blue);
+}
+
+.rss-nav.is-collapsed .rss-nav__item {
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+}
+
+.rss-nav__item:focus-visible,
+.rss-topbar__toggle:focus-visible,
+.rss-topbar__back:focus-visible {
+  outline: none;
+  box-shadow: var(--sx-focus-ring);
+}
+
+/* ── 工具栏按钮与搜索 ──────────────────────────────────────────────────── */
+
+.rss-toolbar-icon-button {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 9px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background-color var(--sx-dur, 160ms) var(--rss-ease), color var(--sx-dur, 160ms) var(--rss-ease);
+}
+
+.rss-toolbar-icon-button:hover:not(:disabled),
+.rss-toolbar-icon-button.is-active,
+.rss-toolbar-icon-button[aria-expanded='true'] {
+  background: var(--sx-hover);
+  color: var(--text-title);
+}
+
+.rss-toolbar-icon-button:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.rss-toolbar-icon-button:focus-visible {
+  outline: none;
+  box-shadow: var(--sx-focus-ring);
+}
+
+.rss-toolbar-icon-button[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  z-index: 40;
+  padding: 5px 9px;
+  border-radius: 8px;
+  background: var(--rss-popover-bg);
+  color: var(--text-secondary);
+  box-shadow: 0 6px 18px -6px rgba(15, 23, 42, 0.22);
+  font-size: 11.5px;
+  line-height: 1.2;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%) translateY(-2px);
+  transition: opacity 120ms ease, transform 120ms ease;
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+}
+
+.rss-toolbar-icon-button[data-tooltip]:hover::after,
+.rss-toolbar-icon-button[data-tooltip]:focus-visible::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.rss-toolbar-active-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--color-blue);
+}
+
+.rss-tool-gap {
+  width: 6px;
+  flex-shrink: 0;
+}
+
+.rss-search {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: clamp(168px, 22vw, 272px);
+  height: 30px;
+  margin-right: 6px;
+  padding: 0 4px 0 2px;
+  border-radius: 10px;
+  background: var(--sx-slot-bg);
+  box-shadow: var(--sx-slot-inset);
+  transition: background-color var(--sx-dur, 160ms) var(--rss-ease), box-shadow var(--sx-dur, 160ms) var(--rss-ease), width 220ms var(--rss-ease);
+}
+
+.rss-search:hover:not(:focus-within) {
+  background: var(--sx-slot-bg-hover);
+}
+
+.rss-search:focus-within {
+  width: clamp(200px, 28vw, 320px);
+  background: var(--sx-slot-bg-focus);
+  box-shadow: var(--sx-slot-focus-shadow);
+}
+
+.rss-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0 !important;
+  outline: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  padding: 0 !important;
+  font-size: 12.5px;
+  color: var(--text-body);
+}
+
+.rss-search input::placeholder {
+  color: var(--text-light);
+}
+
+.rss-search__submit,
+.rss-search__clear {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  color: var(--text-muted);
+}
+
+.rss-search__submit:hover,
+.rss-search__clear:hover {
+  color: var(--text-title);
+}
+
+.rss-search__scope {
+  flex-shrink: 0;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 7px;
+  font-size: 11px;
+  color: var(--text-light);
+  transition: background-color var(--sx-dur, 160ms) var(--rss-ease), color var(--sx-dur, 160ms) var(--rss-ease);
+}
+
+.rss-search__scope:hover {
+  color: var(--text-secondary);
+}
+
+.rss-search__scope[aria-pressed='true'] {
+  background: var(--sx-raised-bg);
+  box-shadow: var(--sx-raised-shadow);
+  color: var(--text-title);
+}
+
+/* ── 浮层菜单（与聊天菜单同一玻璃面板） ───────────────────────────────── */
+
+.rss-menu {
+  display: grid;
+  gap: 1px;
+  padding: 2px;
+}
+
+.rss-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  font-size: 12.5px;
+  color: var(--text-body);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.rss-menu-item svg {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.rss-menu-item small {
+  margin-left: auto;
+  padding-left: 16px;
+  font-size: 11.5px;
+  color: var(--text-light);
+}
+
+.rss-menu-item:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.rss-menu-gap {
+  height: 6px;
+}
+
+/* ── 资讯流页头（内容框内） ───────────────────────────────────────────── */
+
+.rss-feed-surface {
+  container-type: inline-size;
+}
+
+.rss-workspace-heading {
+  flex-shrink: 0;
+  padding: 30px var(--rss-gutter) 0;
+}
+
+.rss-heading-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.rss-heading-title {
+  min-width: 0;
+}
+
+.rss-heading-title h1 {
+  font-size: 24px;
+  line-height: 1.25;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  color: var(--text-title);
+}
+
+.rss-heading-desc {
+  display: -webkit-box;
+  max-width: 640px;
+  margin-top: 6px;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.rss-heading-meta {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 3px;
+  font-size: 12px;
+  color: var(--text-light);
+  white-space: nowrap;
+}
+
+.rss-heading-meta p {
+  font-variant-numeric: tabular-nums;
+}
+
+.rss-heading-filters {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.rss-category-filters {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 28px), transparent 100%);
+  mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 28px), transparent 100%);
+  padding: 4px 28px 4px 2px;
+  margin: -4px 0 -4px -2px;
+}
+
+.rss-category-filters::-webkit-scrollbar {
+  display: none;
+}
+
+.rss-category-filters button {
+  flex-shrink: 0;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  transition: background-color var(--sx-dur, 160ms) var(--rss-ease), box-shadow var(--sx-dur, 160ms) var(--rss-ease), color var(--sx-dur, 160ms) var(--rss-ease);
+}
+
+.rss-category-filters button:hover:not([aria-pressed='true']) {
+  background: var(--sx-raised-hover);
+  color: var(--text-title);
+}
+
+.rss-category-filters button[aria-pressed='true'] {
+  background: var(--sx-raised-bg);
+  box-shadow: var(--sx-raised-shadow);
+  color: var(--text-title);
+  font-weight: 500;
+}
+
+.rss-heading-aside {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.rss-quiet-select {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 180px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  transition: background-color var(--sx-dur, 160ms) var(--rss-ease), color var(--sx-dur, 160ms) var(--rss-ease);
+}
+
+.rss-quiet-select > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rss-quiet-select svg {
+  flex-shrink: 0;
+}
+
+.rss-quiet-select:hover,
+.rss-quiet-select[aria-expanded='true'] {
+  background: var(--sx-hover);
+  color: var(--text-title);
+}
+
+.rss-category-filters button:focus-visible,
+.rss-quiet-select:focus-visible,
+.rss-search__scope:focus-visible {
+  outline: none;
+  box-shadow: var(--sx-focus-ring);
+}
+
+@container (max-width: 640px) {
+  .rss-heading-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+}
+
+/* ── 资讯流 ───────────────────────────────────────────────────────────── */
+
+.rss-feed-list {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  margin-top: 14px;
+}
+
+.rss-feed-row {
+  padding: 1px var(--rss-row-x);
+}
+
+.rss-feed-row[data-first='true'] {
+  padding-top: 0;
+}
+
+.rss-feed-row[data-last='true'] {
+  padding-bottom: 12px;
+}
+
+.rss-date-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 26px 16px 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.01em;
+}
+
+.rss-feed-row[data-first='true'] .rss-date-heading {
+  padding-top: 6px;
+}
+
+.rss-date-heading small {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-light);
+}
+
+.rss-news-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 20px;
+  padding: 15px 16px 16px;
+  border-radius: 14px;
+  cursor: pointer;
+  transition: background-color var(--sx-dur, 160ms) var(--rss-ease), box-shadow var(--sx-dur, 160ms) var(--rss-ease);
+}
+
+.rss-news-card:hover {
+  background: var(--sx-raised-hover);
+}
+
+.rss-news-card.is-selected {
+  background: var(--sx-raised-bg);
+  box-shadow: var(--sx-raised-shadow);
+}
+
+.rss-news-card:focus-visible {
+  outline: none;
+  box-shadow: var(--sx-focus-ring);
+}
+
+.rss-card-body {
+  min-width: 0;
+}
+
+.rss-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 22px;
+  font-size: 12px;
+  color: var(--text-light);
+  white-space: nowrap;
+}
+
+.rss-card-meta > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rss-card-source {
+  flex-shrink: 1;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.rss-card-title {
+  display: -webkit-box;
+  margin-top: 4px;
+  overflow: hidden;
+  font-size: 15px;
+  line-height: 1.5;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--text-title);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.rss-news-card.is-read .rss-card-title {
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.rss-card-summary {
+  display: -webkit-box;
+  margin-top: 4px;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--text-muted);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.rss-card-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-top: 10px;
+}
+
+.rss-card-foot:empty {
+  display: none;
+}
+
+.rss-classification-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.rss-tag,
+.rss-classification-labels span {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 999px;
+  background: var(--sx-inset-bg);
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+
+.rss-card-thumb {
+  align-self: start;
+  width: 116px;
+  height: 78px;
+  margin: 26px 0 0;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--sx-inset-bg);
+}
+
+.rss-card-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+@container (max-width: 560px) {
+  .rss-card-thumb {
+    width: 84px;
+    height: 60px;
+  }
+}
+
+.rss-item-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 1px;
+  margin-left: auto;
+  padding-left: 12px;
+}
+
+.rss-item-actions > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  color: var(--text-light);
+  transition: opacity var(--sx-dur, 160ms) var(--rss-ease), background-color var(--sx-dur, 160ms) var(--rss-ease), color var(--sx-dur, 160ms) var(--rss-ease);
+}
+
+.rss-item-actions > button:not(.is-persistent) {
+  opacity: 0;
+}
+
+.rss-news-card:hover .rss-item-actions > button,
+.rss-news-card:focus-within .rss-item-actions > button,
+.rss-news-card.is-selected .rss-item-actions > button {
+  opacity: 1;
+}
+
+.rss-item-actions > button:hover {
+  background: var(--sx-hover);
+  color: var(--text-title);
+}
+
+.rss-item-actions > button.is-on {
+  color: var(--text-title);
+}
+
+.rss-item-actions > button:focus-visible {
+  opacity: 1;
+  outline: none;
+  box-shadow: var(--sx-focus-ring);
+}
+
+.rss-grouped-reports {
+  font-size: 12px;
+}
+
+.rss-grouped-reports > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 8px 0 0;
+  color: var(--text-muted);
+  transition: color var(--sx-dur, 160ms) var(--rss-ease);
+}
+
+.rss-grouped-reports > button:hover {
+  color: var(--text-title);
+}
+
+.rss-grouped-reports > button svg {
+  transition: transform 200ms var(--rss-ease);
+}
+
+.rss-grouped-reports > button[aria-expanded='true'] svg {
+  transform: rotate(90deg);
+}
+
+.rss-grouped-reports > strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 2px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--sx-accent-text);
+}
+
+.rss-grouped-reports > strong::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--color-blue);
+}
+
+.rss-grouped-reports > small {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-light);
+}
+
+.rss-grouped-reports ul {
+  display: grid;
+  gap: 2px;
+  margin: 8px 0 0;
+  padding: 6px;
+  border-radius: 12px;
+  background: var(--sx-inset-bg);
+  list-style: none;
+}
+
+.rss-grouped-reports li {
+  padding: 7px 10px;
+  border-radius: 9px;
+}
+
+.rss-grouped-reports li:hover {
+  background: var(--sx-raised-hover);
+}
+
+.rss-grouped-reports li button {
+  display: block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-align: left;
+  font-size: 13px;
+  color: var(--text-body);
+}
+
+.rss-grouped-reports li small,
+.rss-grouped-reports > p {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-light);
+  font-size: 11.5px;
+}
+
+.rss-grouped-reports > button:not([aria-expanded]) {
+  margin-top: 6px;
+}
+
+.rss-load-more {
+  align-self: center;
+  margin: 12px auto 28px;
+  padding: 7px 18px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  transition: background-color var(--sx-dur, 160ms) var(--rss-ease), color var(--sx-dur, 160ms) var(--rss-ease);
+}
+
+.rss-load-more:hover:not(:disabled) {
+  background: var(--sx-raised-hover);
+  color: var(--text-title);
+}
+
+.rss-load-more:disabled {
+  opacity: 0.5;
+}
+
+.rss-empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 64px var(--rss-gutter);
+  color: var(--text-light);
+  font-size: 13px;
+  text-align: center;
+}
+
+.rss-skeleton {
+  display: grid;
+  gap: 10px;
+  padding: 18px 16px;
+}
+
+.rss-skeleton span {
+  display: block;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--sx-inset-bg);
+}
+
+.rss-query-error {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 14px 20px;
-  border-bottom: 1px solid var(--border-default);
+  margin: 0 var(--rss-gutter) 8px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--sx-danger-wash);
+  color: var(--sx-danger-text);
+  font-size: 12.5px;
+}
+
+.rss-query-error button {
   flex-shrink: 0;
+  font-weight: 500;
+  color: inherit;
 }
-.rss-reader-actions, .rss-reader-status { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
-.rss-reader-button { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; white-space: nowrap; gap: 6px; padding: 7px 9px; border-radius: 10px; font-size: 12px; color: var(--text-secondary); cursor: pointer; }
-.rss-reader-button:hover { background: var(--bg-hover); color: var(--text-body); }
-.rss-reader-button:focus-visible, .rss-reader-toc button:focus-visible { outline: 2px solid var(--color-blue); outline-offset: 2px; }
-.rss-reader-button:disabled { opacity: .5; cursor: default; }
-.rss-reader-layout { display: flex; gap: 32px; flex: 1; min-height: 0; overflow-y: auto; padding: 36px clamp(20px, 5cqw, 72px) 64px; }
-.rss-reader-content { width: 100%; max-width: 780px; min-width: 0; margin-inline: auto; overflow-wrap: anywhere; }
-.rss-reader-source { color: var(--text-muted); font-size: 12px; line-height: 1.7; margin-bottom: 12px; }
-.rss-reader-title { font-size: clamp(24px, 3.6cqw, 36px); line-height: 1.4; font-weight: 650; letter-spacing: -.025em; color: var(--text-title); margin-bottom: 24px; }
-.rss-reader-status { color: var(--text-muted); font-size: 12px; margin-bottom: 22px; }
-.rss-reader-notice { padding: 12px 16px; margin-bottom: 18px; border: 1px solid var(--border-default); border-radius: 12px; font-size: 13px; line-height: 1.7; color: var(--text-secondary); background: var(--surface-card-bg); }
-.rss-reader-body { padding: 0; }
-.rss-reader-body [data-ready-heading-level] { scroll-margin-top: 20px; }
-.rss-reader-toc { position: sticky; top: 0; align-self: flex-start; flex: 0 0 160px; max-height: 65vh; overflow-y: auto; font-size: 12px; color: var(--text-muted); }
-.rss-reader-toc p { margin-bottom: 14px; font-weight: 600; }
-.rss-reader-toc button { display: block; text-align: left; width: 100%; padding-block: 6px; line-height: 1.6; color: var(--text-secondary); }
-.rss-reader-toc button:hover { color: var(--color-blue); }
-@container (max-width: 800px) { .rss-reader-toc { display: none; } }
-@container (max-width: 480px) {
-  .rss-reader-toolbar { align-items: flex-start; flex-wrap: wrap; padding: 10px 12px; gap: 4px; }
-  .rss-reader-layout { padding: 22px 18px 48px; }
-  .rss-reader-actions { gap: 2px; }
-}
-.rss-navigation { overflow-y: auto; min-height: 0; flex: 0 0 164px; width: 164px; display: flex; flex-direction: column; gap: 5px; padding: 15px 10px; background: var(--surface-toolbar-bg); border-right: 1px solid var(--border-default); }
-.rss-navigation.is-collapsed { flex-basis: 52px; width: 52px; padding-inline: 6px; }
-.rss-navigation-toggle, .rss-navigation-item { flex-shrink: 0; min-width: 0; display: flex; align-items: center; gap: 10px; border-radius: 12px; padding: 11px 10px; min-height: 40px; font-size: 13px; color: var(--text-secondary); text-align: left; }
-.rss-navigation-toggle { margin-bottom: 15px; font-weight: 600; }
-.rss-navigation svg { flex-shrink: 0; }
-.rss-navigation-item[aria-current=page] { background: var(--color-blue-light); color: var(--color-blue); }
-.rss-navigation-item:hover, .rss-navigation-toggle:hover { background: var(--bg-hover); }
-.rss-navigation button:focus-visible { outline: 2px solid var(--color-blue); }
-.rss-feed-sheet { min-width: 0; container-type: inline-size; }
-.rss-workspace-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 22px 24px 14px; }
-.rss-workspace-heading-title { flex: 1 0 160px; }
-.rss-workspace-heading h1 { font-size: 24px; font-weight: 650; color: var(--text-title); }
-.rss-workspace-heading p { margin-top: 6px; font-size: 12px; color: var(--text-muted); }
-.rss-search-bar { display: flex; align-items: center; gap: 5px; min-width: 0; flex: 1 1 260px; border: 1px solid var(--border-default); border-radius: 14px; padding: 6px 10px; background: var(--surface-toolbar-bg); }
-.rss-search-bar input { border: 0; box-shadow: none; min-width: 0; flex: 1; width: 120px; outline: none; background: transparent; color: var(--text-body); font-size: 12px; }
-.rss-search-bar select, .rss-sort-select { font-size: 11px; color: var(--text-secondary); background: transparent; max-width: 105px; }
-.rss-search-bar button { padding: 5px; color: var(--text-muted); }
-.rss-date-heading { padding: 16px 18px 8px; font-size: 14px; font-weight: 600; color: var(--text-title); }
-.rss-news-card { cursor: pointer; }
-.rss-news-card:hover { border-color: var(--color-blue) !important; }
-.rss-query-error { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; color: var(--text-secondary); font-size: 12px; }
-.rss-query-error button { color: var(--color-blue); }
-.rss-load-more { align-self: center; margin: 16px; padding: 9px 22px; border: 1px solid var(--border-default); border-radius: 12px; color: var(--text-secondary); font-size: 13px; }
-.rss-load-more:disabled { opacity: .5; }
-@container (max-width: 480px) { .rss-workspace-heading { padding: 16px; } .rss-sort-select { margin-left: auto; } }
-
-.rss-definition-editor { flex-shrink: 0; max-height: 48%; overflow: auto; margin: 12px; padding: 14px; border: 1px solid var(--border-default); border-radius: 14px; font-size: 12px; color: var(--text-body); }
-.rss-definition-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; padding: 12px 0; margin: 0; border: 0; }
-.rss-definition-grid label { display: flex; flex-direction: column; gap: 6px; }
-.rss-definition-grid input:not([type=checkbox]), .rss-definition-grid textarea, .rss-definition-grid select, .rss-definition-actions select { min-width: 0; width: 100%; border: 1px solid var(--border-default); border-radius: 8px; padding: 7px; background: var(--bg-secondary); color: var(--text-body); }
-.rss-definition-grid textarea { min-height: 70px; resize: vertical; }
-.rss-definition-grid .rss-definition-check { display: inline-flex; flex-direction: row; align-items: center; }
-.rss-definition-filters, .rss-definition-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
-.rss-definition-actions select { width: auto; max-width: 180px; }
-.rss-category-filters { display: flex; flex-wrap: wrap; gap: 4px; flex-basis: 100%; border-radius: 14px; padding: 4px; }
-.rss-category-filters button { padding: 6px 12px; border-radius: 10px; font-size: 12px; color: var(--text-secondary); }
-.rss-category-filters button[aria-pressed=true] { color: var(--color-ready-orange); background: var(--bg-hover); }
-.rss-classification-labels { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
-.rss-classification-labels span { padding: 2px 7px; border-radius: 8px; color: var(--text-muted); background: var(--bg-hover); font-size: 10px; }
-.rss-membership-editor { margin-bottom: 18px; border: 1px solid var(--border-default); border-radius: 12px; padding: 10px 14px; font-size: 12px; }
-.rss-membership-editor summary { cursor: pointer; }
-.rss-membership-editor label { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-top: 10px; }
-.rss-membership-editor small { flex-basis: 100%; color: var(--text-muted); }
-.rss-membership-editor select { color: var(--text-body); background: var(--bg-secondary); border-radius: 8px; padding: 5px; }
-
-.rss-navigation-item span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rss-processing-panel { flex-shrink: 0; padding: 8px 14px; border: 1px solid var(--border-default); border-radius: 12px; background: var(--surface-toolbar-bg); font-size: 12px; max-height: 320px; overflow: auto; }
-.rss-processing-panel summary { cursor: pointer; }
-.rss-processing-panel p, .rss-processing-panel small { color: var(--text-secondary); }
-.rss-processing-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
-.rss-processing-controls label { display: flex; align-items: center; gap: 6px; }
-.rss-processing-controls input[type="number"] { width: 78px; }
-.rss-processing-panel button { padding: 4px 8px; border-radius: 8px; border: 1px solid var(--border-default); }
-.rss-processing-panel ul { list-style: none; padding: 0; }
-.rss-processing-panel strong, .rss-processing-panel small { overflow-wrap: anywhere; }
-.rss-processing-panel li { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 6px 0; border-top: 1px solid var(--border-default); }
-.rss-grouped-reports { margin-bottom: 10px; padding: 8px 10px; border-radius: 10px; background: var(--surface-toolbar-bg); font-size: 12px; }
-.rss-grouped-reports > button { color: var(--color-blue); text-align: left; }
-.rss-grouped-reports ul { margin: 8px 0 0; padding: 0; list-style: none; }
-.rss-grouped-reports li { padding: 7px 0; border-top: 1px solid var(--border-default); }
-.rss-grouped-reports li button { display: block; max-width: 100%; overflow-wrap: anywhere; text-align: left; color: var(--text-body); }
-.rss-grouped-reports small { display: block; color: var(--text-secondary); }
-.rss-event-panel { margin: 12px 0; padding: 12px; border: 1px solid var(--border-default); border-radius: 14px; font-size: 12px; color: var(--text-body); background: var(--surface-toolbar-bg); }
-.rss-event-panel > button { color: var(--color-blue); }
-.rss-event-panel h4 { font-size: 13px; margin: 12px 0 6px; }
-.rss-event-panel ul { padding: 0; list-style: none; max-height: 260px; overflow: auto; }
-.rss-event-panel li { padding: 7px 0; border-top: 1px solid var(--border-default); overflow-wrap: anywhere; }
-.rss-event-panel small { display: block; color: var(--text-secondary); }
-.rss-event-panel button { text-align: left; padding: 4px 6px; border-radius: 8px; }
-.rss-event-panel button:hover { background: var(--bg-hover); }
-.rss-event-panel button:disabled { opacity: .5; cursor: default; }
-.rss-event-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-.rss-event-actions > label { width: 100%; }
-.rss-event-actions textarea { display: block; width: 100%; min-height: 54px; border: 1px solid var(--border-default); border-radius: 8px; padding: 6px; background: var(--bg-secondary); resize: vertical; }
-.rss-event-actions input, .rss-event-actions select { min-width: 0; max-width: 100%; border: 1px solid var(--border-default); border-radius: 8px; padding: 5px; background: var(--bg-secondary); }
-
-.rss-digest-panel { flex: 1; min-width: 0; overflow: auto; padding: 24px; color: var(--text-primary); }
-.rss-digest-panel header, .rss-digest-panel .rss-reader-actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-.rss-digest-panel button { border: 1px solid var(--border-default); border-radius: 10px; padding: 7px 12px; background: var(--surface-floating-bg); color: inherit; }
-.rss-digest-panel button[aria-current="page"] { color: var(--accent-primary); border-color: currentColor; }
-.rss-digest-panel button:disabled { opacity: .5; }
-.rss-digest-panel input { margin: 8px; padding: 6px; border: 1px solid var(--border-default); border-radius: 8px; background: transparent; }
-.rss-digest-panel p { margin: 10px 0; line-height: 1.65; overflow-wrap: anywhere; }
-.rss-digest-editions { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 8px; margin: 20px 0; max-height: 160px; overflow-y: auto; }
-.rss-digest-content { max-width: 900px; margin: 24px auto; }
-.rss-digest-entry { margin: 24px 0; padding: 20px; border: 1px solid var(--border-default); border-radius: 18px; background: var(--workbench-module-surface-bg); }
-.rss-digest-entry blockquote, .rss-digest-sources blockquote { white-space: pre-wrap; overflow-wrap: anywhere; border-left: 2px solid var(--border-default); padding-left: 12px; margin: 14px 0; }
-.rss-digest-sources > div { border-top: 1px solid var(--border-default); margin-top: 12px; padding-top: 12px; }
-.rss-digest-panel h1, .rss-digest-panel h2 { overflow-wrap: anywhere; }
-
-.rss-digest-panel header h2 { font-size: 20px; font-weight: 600; }
-.rss-digest-content > h1 { font-size: 28px; font-weight: 650; line-height: 1.3; margin-bottom: 12px; }
-.rss-digest-content > section > h2 { font-size: 16px; font-weight: 600; margin-top: 28px; color: var(--text-secondary); }
-.rss-digest-entry h2 { font-size: 20px; font-weight: 600; line-height: 1.45; }
-
-.rss-citation-link { color: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; background: none; border: 0; padding: 0; font: inherit; }
-.rss-reader-body ::selection { background: color-mix(in srgb, var(--accent-primary) 28%, transparent); }

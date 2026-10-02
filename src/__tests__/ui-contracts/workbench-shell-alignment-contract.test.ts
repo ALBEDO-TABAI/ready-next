@@ -55,18 +55,27 @@ test('browser rss and calendar shells align their left edge with the shared work
   assert.match(markdownEditor, /className="panel-hover-scrollbar document-editor-surface flex-1 overflow-auto"/)
   assert.match(markdownEditor, /className="panel-hover-scrollbar document-preview-surface flex-1 overflow-auto"/)
 
-  assert.match(rssFeed, /WORKBENCH_HEADER_EDGE_X/)
+  // RSS shares the Document/Browser frame: a top bar and a left rail on the canvas form one L-shaped layer,
+  // and every RSS view lives in a content frame rounded on all four corners.
+  const rssMode = readWorkspaceFile('src/renderer/pages/modes/RSSMode.tsx')
+  assert.match(rssMode, /className="workbench-canvas-shell rss-workbench-canvas relative flex h-full min-h-0 overflow-hidden"/)
+  assert.match(rssMode, /className="rss-topbar workbench-tabs-surface no-drag"/)
+  assert.match(rssMode, /<div className="rss-workbench-body">\s*<RSSNavigation/)
+  assert.match(rssMode, /className=\{`rss-feed-sheet content-surface-panel rss-content-frame`\}/)
+  assert.match(styles, /\.rss-mode-shell \.rss-content-frame \{[\s\S]*?border-radius: var\(--workbench-canvas-radius\);/)
+  assert.match(styles, /\.rss-mode-shell \{[\s\S]*?--rss-rail: 52px;/)
   assert.match(rssFeed, /className="rss-feed-surface/)
   assert.match(rssFeed, /rss-workbench-surface/)
   assert.match(rssFeed, /content-surface-panel/)
-  assert.match(rssFeed, /flex flex-col h-full/)
-  assert.match(rssFeed, /className="rss-feed-toolbar flex items-center justify-between flex-shrink-0"/)
+  assert.match(rssFeed, /WORKBENCH_HEADER_EDGE_X/)
   // 98c06c55 — the list frame is a fixed clip; scrolling (rss-feed-scroll) moved to the virtual list holder.
-  assert.match(rssFeed, /className="rss-feed-list flex-1 min-h-0 overflow-hidden"/)
+  assert.match(rssFeed, /className="rss-feed-list"/)
+  assert.match(styles, /\.rss-feed-list \{[\s\S]*?min-height: 0;/)
   assert.match(rssFeed, /<RSSVirtualList /)
   assert.match(rssVirtualList, /data-liquid-scroll-root="rss-feed-list" className=\{`\$\{props\.className \|\| ''\} rss-feed-scroll`\}/)
-  assert.match(rssFeed, /padding:\s*`0 \$\{WORKBENCH_HEADER_EDGE_X\}px 16px`/)
-  assert.match(rssFeed, /padding:\s*`12px \$\{Math\.max\(WORKBENCH_HEADER_EDGE_X - 8, 12\)\}px`/)
+  // Card text lines up with the heading: row inset + card padding = the frame gutter.
+  assert.match(styles, /--rss-row-x: calc\(var\(--rss-gutter\) - 16px\);/)
+  assert.match(styles, /\.rss-workspace-heading \{[\s\S]*?padding: 30px var\(--rss-gutter\) 0;/)
 
   assert.match(calendarMode, /import CalendarWorkbenchShell/)
   assert.match(calendarMode, /<CalendarWorkbenchShell/)
@@ -101,9 +110,9 @@ test('browser rss and calendar shells align their left edge with the shared work
   assert.match(styles, /html\[data-skin='liquid-glass'\] \.document-workbench-canvas-shell \{[\s\S]*background:\s*var\(--workbench-module-surface-bg\) !important;/)
   assert.match(styles, /html\[data-skin='liquid-glass'\] \.document-workbench-body \{[\s\S]*background:\s*var\(--workbench-module-surface-bg\) !important;/)
   assert.match(styles, /html\[data-skin='liquid-glass'\] \.document-workbench-body \.document-vertical-tab-rail \{[\s\S]*background:\s*transparent !important;/)
-  assert.match(styles, /html\[data-skin='liquid-glass'\] \.document-editor-surface,[\s\S]*\.document-preview-surface,[\s\S]*\.rss-preview-content \{[\s\S]*background:\s*transparent !important;/)
-  assert.match(styles, /html\[data-skin='liquid-glass'\] \.rss-feed-toolbar,[\s\S]*\.rss-feed-list,[\s\S]*\.rss-preview-content \{/)
-  assert.match(styles, /html\[data-skin='liquid-glass'\] \.rss-feed-toolbar,[\s\S]*backdrop-filter:\s*none !important;/)
+  assert.match(styles, /html\[data-skin='liquid-glass'\] \.document-editor-surface,[\s\S]*\.document-preview-surface,[\s\S]*\.rss-feed-list \{[\s\S]*background:\s*transparent !important;/)
+  assert.match(styles, /html\[data-skin='liquid-glass'\] \.rss-workbench-surface,[\s\S]*\.rss-feed-list \{/)
+  assert.match(styles, /html\[data-skin='liquid-glass'\] \.rss-workbench-surface,[\s\S]*backdrop-filter:\s*none !important;/)
   assert.match(styles, /\.rss-mode-shell \.rss-feed-sheet \{[\s\S]*background:\s*var\(--workbench-module-surface-bg\) !important;/)
 })
 

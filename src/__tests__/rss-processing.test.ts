@@ -280,3 +280,29 @@ test('failure to commit a successful task rolls back its derived memberships', a
     assert.equal(f.store.status(f.clock(), true).callsToday, 1)
   } finally { f.db.close() }
 })
+
+test('unresolved articles are counted, never retried on their own, and re-queued only for the confirmed scope', async (testContext) => {
+  if (skipIfSqliteUnavailable(testContext, 'RSS native storage')) return
+  const f = fixture()
+  try {
+    f.db.rss.setRSSSourceDraftSeeded(f.source, true); f.put('one'); f.put('two'); f.put('three')
+    // Two runs end without a usable answer (e.g. the gateway rejected the upstream), one succeeds.
+    for (const itemId of ['one', 'two']) {
+      const job = f.store.list({ itemId }).jobs[0]
+      assert.ok(f.store.claim(job.id, f.clock(), true, f.store.eventContext(job, f.clock())))
+    }
+    f.store.recover()
+    await f.service().wake()
+    assert.equal(f.store.list({ itemId: 'three' }).jobs[0].status, 'success')
+    assert.equal(f.store.status(f.clock(), true).unresolved, 2)
+    await f.service().wake()
+    assert.equal(f.store.status(f.clock(), true).pending, 0, 'unknown attempts are not retried automatically')
+    assert.throws(() => f.store.retryUnresolved(3), /范围已变化/)
+    const retried = f.store.retryUnresolved(2)
+    assert.equal(retried.queued, 2)
+    assert.ok(retried.jobIds.every((id) => f.store.get(id)!.trigger === 'manual' && f.store.get(id)!.status === 'queued'))
+    assert.equal(f.store.status(f.clock(), true).unresolved, 0)
+    await f.service().wake()
+    assert.ok(['one', 'two'].every((itemId) => f.db.rss.content.getArticle(itemId)!.classifications.some((entry) => entry.included)))
+  } finally { f.db.close() }
+})

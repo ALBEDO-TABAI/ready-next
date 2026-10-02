@@ -47,7 +47,7 @@ export class RSSProcessingStore {
     const settings = this.settings(), start = new Date(now); start.setHours(0, 0, 0, 0)
     const callsToday = this.db.prepare('SELECT COUNT(*) AS n FROM rss_processing_jobs WHERE started_at>=? AND started_at<=?').get<{ n: number }>(start.getTime(), now)!.n
     const counts = this.db.prepare("SELECT SUM(status='queued') AS pending,SUM(status='running') AS running FROM rss_processing_jobs").get<{ pending: number | null; running: number | null }>()!
-    return { settings, callsToday, pending: counts.pending || 0, running: counts.running || 0,
+    return { settings, callsToday, pending: counts.pending || 0, running: counts.running || 0, unresolved: this.unresolvedItemIds().length,
       blocked: !hasModel ? 'model' : callsToday >= settings.dailyLimit ? 'limit' : !settings.enabled ? 'disabled' : null }
   }
   private present(row: JobRow): RSSProcessingJob {
@@ -107,6 +107,20 @@ export class RSSProcessingStore {
     })
     if (ids.length || restored) this.changed()
     return ids
+  }
+  // Latest run per article ended failed or unknown, and the article still exists.
+  private unresolvedItemIds(): string[] {
+    return this.db.prepare(`SELECT item_id FROM (
+        SELECT item_id,status,ROW_NUMBER() OVER (PARTITION BY item_id ORDER BY created_at DESC,id DESC) AS position FROM rss_processing_jobs
+      ) latest WHERE position=1 AND status IN ('failed','unknown') AND item_id IN (SELECT id FROM rss_items) ORDER BY item_id`)
+      .all<{ item_id: string }>().map((row) => row.item_id)
+  }
+  /** User-confirmed re-run of unresolved articles at their current version; the daily limit still applies. */
+  retryUnresolved(expectedCount: number): { queued: number; jobIds: string[] } {
+    const itemIds = this.unresolvedItemIds()
+    if (itemIds.length !== expectedCount) throw new Error('待重新整理的范围已变化，请重新查看数量后再确认。')
+    const jobIds = itemIds.flatMap((itemId) => this.enqueue(itemId, 'manual'))
+    return { queued: itemIds.length, jobIds }
   }
   next(): RSSProcessingJob | null {
     const row = this.db.prepare(`SELECT * FROM rss_processing_jobs WHERE status='queued' AND (?=1 OR trigger_kind='manual') ORDER BY created_at,id LIMIT 1`).get<JobRow>(Number(this.settings().enabled))

@@ -185,7 +185,6 @@ html[data-skin='liquid-glass'] .document-content-frame {
 html[data-skin='liquid-glass'] .document-editor-surface,
 html[data-skin='liquid-glass'] .document-preview-surface,
 html[data-skin='liquid-glass'] .rss-workbench-surface,
-html[data-skin='liquid-glass'] .rss-feed-toolbar,
 html[data-skin='liquid-glass'] .rss-feed-list {
   background: transparent !important;
   backdrop-filter: none !important;

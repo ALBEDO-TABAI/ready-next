@@ -60,8 +60,11 @@ Widget 视觉不能在组件内另造色板；预览、导出和编辑必须从�
 ### RSS
 
 - 页面：`src/renderer/pages/modes/RSSMode.tsx`
-- 组件：`src/renderer/components/rss/`；列表窗口与滚动容器：`RSSVirtualList.tsx`
+- 组件：`src/renderer/components/rss/`；列表窗口与滚动容器：`RSSVirtualList.tsx`；行组件按内容等值 memo（`modules/rss/rssFeedItemEquality.ts`）
 - 状态：`src/renderer/stores/useRSSSession.ts`
+- 样式：`rss-workspace.css`（框架、导航、页头、资讯流）、`rss-controls.css`（提示、按钮、自动整理浮层）、`rss-reader.css`（阅读）、`rss-digest.css`（日报、栏目管理、订阅设置抽屉）
+
+框架与 Document/Browser 同构：画布上方 `rss-topbar`（38px）与左侧 `RSSNavigation`（收起 52px，与两者的标签列同宽）在同一层材质上连成 L 形，资讯流、阅读、日报、栏目管理都放在四角圆角的 `rss-content-frame` 里。各视图通过 `RSSTopbarTools`（`slot="lead"` / `tools`）把位置与工具放进顶栏，只有可见视图才放。视觉沿用设置页的 sx 纪律：选中与悬停是被托起的白玻璃填充，不画描边和分隔线；未读只靠字重；主操作墨色，删除类平时安静、悬停转红；菜单统一用 `LiquidFloatingPanel` + `ready-floating-menu-item`。资讯流不得引入聊天依赖（引用、导出入口由 `RSSMode` 通过 `renderMoreActions` 注入）。真实窗口验收：`npm run verify:rss-layout` 与 `node scripts/run-rss-reader-acceptance.cjs`。
 
 ### Calendar
 

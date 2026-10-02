@@ -9,33 +9,35 @@ function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-test('rss feed keeps compact toolbar controls while article rows stay on the shared glass sheet', () => {
+test('rss feed keeps compact toolbar controls in the top bar while article rows stay on the shared glass sheet', () => {
   const rssFeed = readWorkspaceFile('src/renderer/components/rss/RSSFeed.tsx')
   const rssMode = readWorkspaceFile('src/renderer/pages/modes/RSSMode.tsx')
   const styles = readRendererStyles()
 
-  assert.match(rssFeed, /const calendarPillButtonStyle = \{/)
+  // Tools live in the canvas top bar (like Document's path bar) only while the list is the visible view.
+  assert.match(rssFeed, /<RSSTopbarTools show=\{toolsVisible\}>/)
+  assert.match(rssMode, /toolsVisible=\{surfaceActive && feedVisible\}/)
   assert.match(rssFeed, /className="rss-feed-surface content-surface-panel/)
   assert.match(rssFeed, /className="rss-toolbar-actions flex items-center"/)
-  assert.match(rssFeed, /className="rss-toolbar-select appearance-none cursor-pointer transition-colors duration-150"/)
-  assert.match(rssFeed, /className="rss-toolbar-select appearance-none cursor-pointer/)
-  // 浮层升级为专属液态面板类（rss-source-menu-panel，样式在 index.css 玻璃带）
-  assert.match(rssFeed, /className="rss-source-menu-panel overflow-hidden rounded-\[12px\]"/)
-  assert.match(rssFeed, /ready-floating-menu-item/)
   assert.match(rssFeed, /className="rss-toolbar-icon-button"/)
-  assert.match(rssFeed, /<ListTodo className="h-\[14px\] w-\[14px\]"/)
   assert.match(rssFeed, /<RefreshCw/)
   assert.match(rssFeed, /rss-toolbar-active-dot/)
+  assert.match(rssFeed, /aria-label="更多操作"/)
+  // The source filter is a quiet menu, not a native select, so each row can host its delete control.
+  assert.match(rssFeed, /className="rss-quiet-select"/)
+  assert.match(rssFeed, /className="rss-source-menu-panel overflow-hidden rounded-\[12px\]"/)
+  assert.match(rssFeed, /ready-floating-menu-item/)
   assert.match(styles, /\.rss-toolbar-icon-button \{/)
-  assert.match(styles, /\.rss-toolbar-select:hover \{/)
-  assert.match(rssFeed, /border: '1px solid transparent'/)
-  assert.match(rssFeed, /color: 'var\(--text-body\)'/)
+  assert.match(styles, /\.rss-toolbar-icon-button\[data-tooltip\]::after \{/)
   assert.match(rssFeed, /background: 'transparent'/)
   assert.match(rssMode, /className=\{`rss-feed-sheet content-surface-panel/)
   assert.match(styles, /\.rss-mode-shell \.rss-feed-sheet \{/)
   assert.match(styles, /\.rss-mode-shell \.rss-feed-surface,/)
   assert.match(styles, /background:\s*transparent !important;/)
   assert.doesNotMatch(rssFeed, /bg-\[var\(--bg-primary\)\]/)
+  // The list itself never pulls in the chat composer; reference/export entries come from RSSMode.
+  assert.doesNotMatch(rssFeed, /chat-input-bridge|RSSReferenceButton/)
+  assert.match(rssMode, /renderMoreActions=/)
 })
 
 test('chat composer keeps a visible shell and a primary send button after liquid glass restyle', () => {
@@ -63,47 +65,27 @@ test('rss analysis task menu uses a solid floating surface with relaxed status r
   const rssFeed = readWorkspaceFile('src/renderer/components/rss/RSSFeed.tsx')
 
   assert.match(rssFeed, /className="rss-feed-surface content-surface-panel rss-workbench-surface relative/)
-  // 任务菜单同波升级为 rss-task-menu-panel 专属液态面板
   assert.match(rssFeed, /className="rss-task-menu-panel overflow-hidden rounded-\[18px\]"/)
   assert.match(rssFeed, /position: 'absolute'/)
-  assert.match(rssFeed, /top: 'calc\(100% \+ 10px\)'/)
+  assert.match(rssFeed, /top: 'calc\(100% \+ 6px\)'/)
   // Pane-relative placement and clipping are exercised by run-rss-layout-acceptance.cjs.
   assert.match(rssFeed, /zIndex: 30/)
   assert.match(rssFeed, /width: 384/)
   assert.match(rssFeed, /data-tooltip=\{taskMenuOpen \? undefined : '任务'\}/)
   assert.match(rssFeed, /\{taskMenuPanel\}/)
-  assert.doesNotMatch(rssFeed, /\{taskMenuPanel\}\s*\n\s*\{\/\* Item List \*\/\}/)
-  assert.match(rssFeed, /var\(--surface-floating-bg\) 96%/)
-  // 玻璃/背景滤镜职责移交共享 LiquidFloatingPanel（液态玻璃系统组件），面板不再内联 backdropFilter
   assert.match(rssFeed, /<LiquidFloatingPanel/)
   assert.match(rssFeed, /import \{ LiquidFloatingPanel \} from '\.\.\/ui\/liquid-glass\/LiquidFloatingPanel'/)
   assert.match(rssFeed, /function taskStageTone/)
   assert.match(rssFeed, /function taskDetailText/)
   assert.match(rssFeed, /if \(!message \|\| job\.status === 'success'\) return ''/)
   assert.match(rssFeed, /job\.progress >= 100 && \/完成\|已完成\/\.test\(message\)/)
-  assert.match(rssFeed, /status === 'success'[\s\S]*<Check className="h-\[13px\] w-\[13px\]/)
-  assert.match(rssFeed, /className="flex items-center justify-between border-b"/)
-  assert.match(rssFeed, /padding: '19px 20px 19px 23px'/)
-  assert.match(rssFeed, /className="rss-feed-scroll"/)
-  assert.match(rssFeed, /gap:\s*8/)
-  assert.match(rssFeed, /padding: '12px 11px 14px'/)
-  assert.match(rssFeed, /className="rss-task-menu-row group rounded-\[16px\] transition-colors hover:bg-\[var\(--bg-hover\)\]"/)
-  assert.match(rssFeed, /minHeight: 62/)
-  assert.match(rssFeed, /padding: '10px 12px'/)
-  assert.match(rssFeed, /className="flex h-6 items-center justify-center"/)
-  assert.match(rssFeed, /className="text-\[12px\] font-semibold"/)
-  assert.match(rssFeed, /className="mt-1\.5 flex min-w-0 items-center gap-1\.5 text-\[11px\]"/)
-  assert.match(rssFeed, /className="mt-1\.5 truncate text-\[11px\]"/)
-  assert.match(rssFeed, /columnGap: 14/)
-  assert.match(rssFeed, /gridTemplateColumns: '20px minmax\(0, 1fr\) 64px'/)
-  assert.match(rssFeed, /className="flex items-center justify-end gap-1\.5 opacity-70/)
-  assert.match(rssFeed, /className="flex h-6 w-6 items-center justify-center rounded-\[8px\]/)
   assert.match(rssFeed, /<AnalysisProgressRing/)
   assert.match(rssFeed, /{roundedProgress}%/)
-  assert.match(rssFeed, /className="shrink-0 rounded-full px-1\.5 py-\[1px\]"/)
   assert.match(rssFeed, /{analysisJobs\.length} 条记录 · {activeJobsCount} 个进行中/)
+  // Quiet rows: status is text weight, not colored pills; no divider under the header.
+  assert.doesNotMatch(rssFeed, /className="flex items-center justify-between border-b"/)
+  assert.doesNotMatch(rssFeed, /rounded-full px-1\.5/)
   assert.doesNotMatch(rssFeed, /className="border transition-colors"/)
-  assert.doesNotMatch(rssFeed, /rounded-full border px-1\.5/)
   assert.doesNotMatch(rssFeed, /status === 'success'[\s\S]{0,240}<circle/)
 })
 

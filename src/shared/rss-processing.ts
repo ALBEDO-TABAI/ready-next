@@ -16,6 +16,8 @@ export interface RSSProcessingJob {
 }
 export interface RSSProcessingStatus {
   settings: RSSProcessingSettings; callsToday: number; pending: number; running: number
+  // Articles whose latest run ended failed or unknown; they are never retried without the user.
+  unresolved: number
   blocked: 'model' | 'limit' | 'disabled' | null
 }
 export const RSSProcessingListSchema = z.object({

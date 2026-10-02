@@ -21,6 +21,10 @@
 
 | 评估日期 | 任务 | 文件 | 总行数 | 本次新增 | 结论 | 判断与后续动作 | 状态 |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
+| 2026-10-02 | RSS 合并修正与界面重整 | `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts` | 5613 | 净 +16 | 危险 | 只接入工作区 RSS 引用的重绑定/丢弃与旧会话工具面判断，逻辑放在 `codex-rss-resources.ts`；组合根仍混合准入、历史、恢复与收口，沿既定边界拆分。 | 后续拆分；交付提醒 |
+| 2026-10-02 | RSS 合并修正与界面重整 | `src/preload/index.ts` | 1566 | 净 +1 | 一般 | 仅增加未决整理批量重跑的透传；2026-11-01 复查按域声明。 | 已排期：2026-11-01 |
+| 2026-10-02 | RSS 合并修正与界面重整 | `src/renderer/types/electron.d.ts` | 3533 | 净 +1 | 健康 | 单一跨进程声明，类型与 IPC 合同检查通过。 | 无需处理 |
+| 2026-10-02 | RSS 合并修正与界面重整 | `src/shared/ipc-contracts/agent-runtime.ts` | 1410 | 净 +1 | 健康 | 只给 RSS 引用加可选 `origin: 'workbench'`；合同由 zod 与 typecheck 守住。 | 无需处理 |
 | 2026-10-01 | RSS 整合到 0.8 | `src/__tests__/codex-sidecar-crash-recovery.e2e.ts` | 1375 | 净 +1 | 一般 | 本轮仅接入域保存或 RSS 入口；2026-11-01 复查职责边界和分组。 | 已排期：2026-11-01 |
 | 2026-10-01 | RSS 整合到 0.8 | `src/__tests__/codex-sidecar-process-lease.e2e.ts` | 1341 | 净 +1 | 一般 | 本轮仅接入域保存或 RSS 入口；2026-11-01 复查职责边界和分组。 | 已排期：2026-11-01 |
 | 2026-10-01 | RSS 整合到 0.8 | `src/__tests__/tag-forge-batch.test.ts` | 1382 | 净 +1 | 一般 | 本轮仅接入域保存或 RSS 入口；2026-11-01 复查职责边界和分组。 | 已排期：2026-11-01 |

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { ChevronRight } from 'lucide-react'
 import RSSProcessingPanel from './RSSProcessingPanel'
 import type { RSSArticleExcerpt } from '../../../shared/rss-workspace'
 import type { RSSDefinition, RSSMembership } from '../../../shared/rss-organization'
@@ -37,18 +38,26 @@ export default function RSSMembershipEditor({ article, definitions, active }: { 
     } catch (error) { if (key === identity.current) setError(error instanceof Error ? error.message : String(error)) }
     finally { if (key === identity.current) setBusy(false) }
   }
+  const relevant = definitions.filter((definition) => ['topic', 'curated'].includes(definition.kind))
+  const includedCount = relevant.filter((definition) => memberships.find((entry) => entry.definitionId === definition.id)?.included).length
   return <details className="rss-membership-editor">
-    <summary>分类与精选</summary>
-    {definitions.filter((definition) => ['topic', 'curated'].includes(definition.kind)).map((definition) => {
-      const decision = memberships.find((entry) => entry.definitionId === definition.id)
-      return <label key={definition.id} title={definition.description}>{definition.name}
-        <select aria-label={`${definition.name}归属`} disabled={busy} value={decision?.origin === 'manual' ? decision.included ? 'yes' : 'no' : ''} onChange={(event) => void set(definition, event.target.value)}>
-          <option value="">使用自动结果</option><option value="yes">属于</option><option value="no">不属于</option>
-        </select>
-        <small>{decision ? `${decision.included === null ? '证据不足' : decision.included ? '已归入' : '未归入'} · ${decision.reason}${decision.stale ? ' · 标准或内容已变化，需要更新' : ''}` : '尚未归类'}</small>
-      </label>
-    })}
-    {error && <p role="alert">{error}</p>}
-    <RSSProcessingPanel active={active} article={article} />
+    <summary>
+      <span>分类与精选</span>
+      <span className="flex items-center gap-2"><small>{includedCount ? `已归入 ${includedCount} 项` : '尚未归入'}</small><ChevronRight size={14} strokeWidth={2} /></span>
+    </summary>
+    <div className="rss-membership-editor__body">
+      {relevant.map((definition) => {
+        const decision = memberships.find((entry) => entry.definitionId === definition.id)
+        return <div className="rss-membership-row" key={definition.id} title={definition.description}>
+          <strong>{definition.name}</strong>
+          <select className="sx-select" aria-label={`${definition.name}归属`} disabled={busy} value={decision?.origin === 'manual' ? decision.included ? 'yes' : 'no' : ''} onChange={(event) => void set(definition, event.target.value)}>
+            <option value="">使用自动结果</option><option value="yes">属于</option><option value="no">不属于</option>
+          </select>
+          <small>{decision ? `${decision.included === null ? '证据不足' : decision.included ? '已归入' : '未归入'} · ${decision.reason}${decision.stale ? ' · 标准或内容已变化，需要更新' : ''}` : '尚未归类'}</small>
+        </div>
+      })}
+      {error && <p className="rss-note rss-note--danger" role="alert">{error}</p>}
+      <RSSProcessingPanel active={active} article={article} />
+    </div>
   </details>
 }
