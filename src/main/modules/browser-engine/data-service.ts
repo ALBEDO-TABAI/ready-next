@@ -3,6 +3,7 @@ import { BrowserRepository } from '../repositories/browser-repository'
 
 export interface BrowserAdblockState {
   enabled: boolean
+  previewEnabled: boolean
   whitelistDomains: string[]
   rulesVersion: string
   networkBlockedCount: number
@@ -36,6 +37,7 @@ export class BrowserDataService {
   createDefaultAdblockState(): BrowserAdblockState {
     return {
       enabled: true,
+      previewEnabled: true,
       whitelistDomains: [],
       rulesVersion: READY_ADBLOCK_RULES_VERSION,
       networkBlockedCount: 0,
@@ -58,6 +60,7 @@ export class BrowserDataService {
       const networkBlockedCount = Number(this.repository.getSetting('browser_adblock_network_blocked_count') || 0)
       return {
         enabled: this.repository.getSetting('browser_adblock_enabled') !== 'false',
+        previewEnabled: this.repository.getSetting('browser_adblock_preview_enabled') !== 'false',
         whitelistDomains: whitelist,
         rulesVersion: String(this.repository.getSetting('browser_adblock_rules_version') || READY_ADBLOCK_RULES_VERSION),
         networkBlockedCount: Number.isFinite(networkBlockedCount) ? networkBlockedCount : 0,
@@ -71,6 +74,7 @@ export class BrowserDataService {
   persistAdblockState(state: BrowserAdblockState): void {
     try {
       this.repository.setSetting('browser_adblock_enabled', state.enabled ? 'true' : 'false')
+      this.repository.setSetting('browser_adblock_preview_enabled', state.previewEnabled ? 'true' : 'false')
       this.repository.setSetting('browser_adblock_whitelist_domains', JSON.stringify(state.whitelistDomains))
       this.repository.setSetting('browser_adblock_rules_version', state.rulesVersion)
       this.repository.setSetting('browser_adblock_network_blocked_count', String(state.networkBlockedCount))

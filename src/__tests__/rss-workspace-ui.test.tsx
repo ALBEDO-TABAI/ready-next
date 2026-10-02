@@ -166,11 +166,15 @@ test('a completed digest generation cannot reopen a panel the user has left', as
     readDigests: async () => ({ success: true, data: { view: 'editions', editions: [], total: 0, nextOffset: null, snapshot: 0 } }),
     digestSettings: async () => ({ success: true, data: { enabled: true, localTime: '08:00', timezone: 'UTC', nextRunAt: null, error: null } }),
     onDigestsChanged: () => () => {}, onOrganizationChanged: () => () => {},
+    queryCards: async (query: RSSQueryInput) => ({ success: true, data: { definitions: [], query: RSSQuerySchema.parse(query), items: [], total: 2, unreadTotal: 0, revision: 1, lastFetchAt: null, nextCursor: null } }),
     generateDigest: () => new Promise((resolve) => { finish = resolve }),
   } } })
-  await act(async () => root.render(<RSSDigestPanel active view={{ query: RSSQuerySchema.parse({}), revision: 1 } as never} onReadArticle={() => { throw new Error('unexpected navigation') }} />))
-  const button = [...dom.window.document.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === '生成当前筛选范围简报')!
-  await act(async () => button.click())
+  const all = { id: 'all', kind: 'all', name: '全部动态', visible: true } as never
+  await act(async () => root.render(<RSSDigestPanel active view={{ query: RSSQuerySchema.parse({}), revision: 1 } as never} definitions={[all]} onReadArticle={() => { throw new Error('unexpected navigation') }} />))
+  const find = (text: string) => [...dom.window.document.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === text)!
+  await act(async () => find('新建简报').click())
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)) })
+  await act(async () => find('生成简报').click())
   await act(async () => { useRSSSession.getState().setDigestView(false); root.render(<p>Another surface</p>) })
   await act(async () => finish({ success: true, data: { id: 'old-request-report' } }))
   assert.equal(useRSSSession.getState().digestVisible, false)

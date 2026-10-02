@@ -9,10 +9,13 @@ const edit = (definition: RSSDefinition): RSSDefinitionWrite => ({ id: definitio
   name: definition.name, description: definition.description, icon: definition.icon, visible: definition.visible, position: definition.position, filterIds: definition.filterIds })
 
 // 栏目管理：内容框里的独立视图。左列是全部栏目，右侧是当前栏目的表单。
-export default function RSSDefinitionEditor({ definitions, onSaved, onClose, active = true }: {
-  definitions: RSSDefinition[]; onSaved(deletedId?: string): void; onClose(): void; active?: boolean
+export default function RSSDefinitionEditor({ definitions, initialId, onSaved, onClose, active = true }: {
+  definitions: RSSDefinition[]; initialId?: string; onSaved(deletedId?: string): void; onClose(): void; active?: boolean
 }) {
-  const [draft, setDraft] = useState<RSSDefinitionWrite>(blank)
+  const [draft, setDraft] = useState<RSSDefinitionWrite>(() => {
+    const initial = definitions.find((definition) => definition.id === initialId)
+    return initial ? edit(initial) : blank()
+  })
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const selected = definitions.find((definition) => definition.id === draft.id)

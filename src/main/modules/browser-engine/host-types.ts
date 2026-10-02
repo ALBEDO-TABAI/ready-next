@@ -22,3 +22,22 @@ export function parkedBrowserHostBounds(bounds: BrowserRect): BrowserRect {
 }
 
 export type { BrowserViewBoundsUpdate }
+
+export interface PreviewTabState {
+  url: string
+  title: string
+  loading: boolean
+  canGoBack: boolean
+  canGoForward: boolean
+  error?: string
+}
+
+export function createDefaultPreviewState(): PreviewTabState {
+  return {
+    url: '',
+    title: 'Preview',
+    loading: false,
+    canGoBack: false,
+    canGoForward: false,
+  }
+}

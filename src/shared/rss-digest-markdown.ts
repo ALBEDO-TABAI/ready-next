@@ -7,7 +7,7 @@ export function renderRSSDigest(report: RSSDigestHeader, entries: Array<RSSDiges
   const text = (value: string) => ({ type: 'text' as const, value })
   const paragraph = (value: string): RootContent => ({ type: 'paragraph', children: [text(value)] })
   const children: RootContent[] = [
-    { type: 'heading', depth: 1, children: [text(`${report.kind === 'daily' ? '资讯日报' : '当前范围简报'} · 第 ${report.version} 版`)] },
+    { type: 'heading', depth: 1, children: [text(`${report.kind === 'daily' ? '资讯日报' : '范围简报'} · 第 ${report.version} 版`)] },
     paragraph(`${report.kind === 'daily' ? `覆盖时间：${new Date(report.from).toISOString()} 至 ${new Date(report.until).toISOString()}（截止时刻不包含在内）；` : ''}范围：${report.scopeLabel}；时区：${report.timezone}；生成：${new Date(report.createdAt).toISOString()}`),
     paragraph(`共 ${report.total} 项，${report.referenceCount} 条报道依据。尚未获得明确精选判断 ${report.coverage.unresolvedArticles} 篇，其中存在失败或未知任务 ${report.coverage.failedArticles} 篇；等待中的文章 ${report.coverage.pendingArticles} 篇。`),
     paragraph('内容由已保存的来源摘句与精选理由组成，没有再次生成事实综述。'),

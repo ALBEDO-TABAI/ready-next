@@ -299,6 +299,23 @@ await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.
     await revealTitle(page, '可读资讯 01')
     await page.getByText('可读资讯 01', { exact: true }).click()
     await page.getByText('AUTHENTICATED-ARTICLE-END', { exact: true }).waitFor()
+    // 打开原文 opens the live page beside the reader on the shared browser identity, then hands off to the browser module.
+    await page.getByRole('button', { name: '打开原文', exact: true }).click()
+    const originalPreview = page.getByRole('region', { name: '原文预览', exact: true })
+    await originalPreview.waitFor()
+    await waitForIPC(page, (link) => window.electronAPI.browser.previewGetState().then((state) => state.url === link && !state.loading), base + '/article/1', { timeout: 20000 })
+    await page.screenshot({ path: path.join(evidence, 'reader-original-preview.png') })
+    await originalPreview.getByRole('button', { name: '浏览器模式' }).click()
+    await page.locator('[data-workbench-mode-panel="browser"][data-mode-visual-state="current"]').waitFor()
+    await waitForIPC(page, (link) => window.electronAPI.browser.getTabs().then((tabs) => (Array.isArray(tabs) ? tabs : tabs?.tabs || []).some((tab) => tab.url === link)), base + '/article/1')
+    assert.equal((await page.evaluate(() => window.electronAPI.browser.previewGetState())).url, '', 'handing off closes the side preview')
+    // Mode tabs live in the chat panel, collapsed earlier in this run; restore that state after returning.
+    await page.getByTitle('展开聊天面板', { exact: true }).click()
+    await page.getByTitle('rss', { exact: true }).click()
+    await page.locator('.rss-article-reader').getByText('AUTHENTICATED-ARTICLE-END', { exact: true }).waitFor()
+    await page.getByTitle('收起/展开聊天面板', { exact: true }).click()
+    assert.equal(await originalPreview.count(), 0)
+    assert.equal(await page.locator('.rss-article-reader').count(), 1, 'the preview and the reader keep separate identities')
     await page.evaluate(() => document.documentElement.dataset.theme = 'dark')
     await page.screenshot({ path: path.join(evidence, 'reader-dark.png') })
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.webContents.getURL().includes('/renderer/index.html'))?.setSize(1050, 800))
@@ -560,8 +577,11 @@ await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.
     const callsBeforeDigest = modelRequests
     await page.getByRole('button', { name: '日报与简报', exact: true }).click()
     const digestPanel = page.getByRole('region', { name: '日报与简报', exact: true })
-    await digestPanel.getByRole('button', { name: '生成当前筛选范围简报', exact: true }).click()
-    await digestPanel.getByRole('heading', { name: '当前范围简报 · 第 1 版', exact: true }).waitFor()
+    await digestPanel.getByRole('button', { name: '新建简报', exact: true }).click()
+    const briefForm = digestPanel.getByRole('form', { name: '新建简报', exact: true })
+    await briefForm.getByText(/^共 \d+ 篇资讯/).waitFor()
+    await briefForm.getByRole('button', { name: '生成简报', exact: true }).click()
+    await digestPanel.getByRole('heading', { name: '范围简报 · 第 1 版', exact: true }).waitFor()
     const briefList = await page.evaluate(() => window.electronAPI.rss.readDigests())
     const brief = briefList.data.editions.find((edition) => edition.kind === 'range')
     assert.ok(brief); assert.equal(brief.referenceCount, 3)
@@ -570,7 +590,7 @@ await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.
     await digestPanel.getByRole('button', { name: '引用本刊', exact: true }).click()
     await page.locator('.chat-reference-chip').getByRole('button', { name: '范围简报 第 1 版 RSS 刊物引用', exact: true }).click()
     const digestReferencePreview = page.getByRole('dialog', { name: '附件预览', exact: true })
-    await digestReferencePreview.getByText(/当前范围简报 · 第 1 版/).waitFor()
+    await digestReferencePreview.getByText(/范围简报 · 第 1 版/).waitFor()
     assert.match(await digestReferencePreview.innerText(), /Project Delta/)
     await digestReferencePreview.getByRole('button', { name: '关闭', exact: true }).click()
     await app.evaluate(({ dialog }, folder) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] }) }, exportFolder)
@@ -582,7 +602,7 @@ await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.
     assert.match(digestMarkdown, /Project Delta released Version 2/)
     assert.match(digestMarkdown, /本刊采用的标准与订阅覆盖/)
     await digestPanel.getByRole('button', { name: '重新生成新版本', exact: true }).click()
-    await digestPanel.getByRole('heading', { name: '当前范围简报 · 第 2 版', exact: true }).waitFor()
+    await digestPanel.getByRole('heading', { name: '范围简报 · 第 2 版', exact: true }).waitFor()
     assert.equal((await page.evaluate((reportId) => window.electronAPI.rss.readDigests({ view: 'entries', reportId }), brief.id)).data.report.version, 1)
     const nextLocalMinute = await page.evaluate(() => { const now = new Date(Date.now() + 60000); return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}` })
     await page.evaluate((localTime) => window.electronAPI.rss.configureDigests({ enabled: true, localTime }), nextLocalMinute)
@@ -671,7 +691,7 @@ await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.
     }
     assert.equal(videoFetches, 0, 'reading a saved video reference must not silently download it')
 
-    report = { ok: true, exactSelectionReferenceAndReveal: true, paragraphReference: true, scheduledDailyEdition: true, digestDarkAndNarrow: true, rangeBriefExportAndRegeneration: true, digestReferences: true, savedVersionRestorationWithoutModel: true, failedRefreshPreservesBody: true, automaticEventGroupingAndProgress: true, factSeenDoesNotReadAllArticles: true, manualEventSplitMoveMerge: true, groupExpansionKeepsFilter: true, automaticRefreshProcessesOnlyNewItems: true, semanticProcessingThroughLocalProvider: true, cancelProcessingKeepsCallCount: true, historicalImportNotProcessed: true, customDefinitions: true, applicationRestartPreservesDefinitions: true, manualMemberships: true, curationSeparateFromBookmarks: true, typedRSSReferences: true, staleReferenceVisible: true, saveNoteReadback: true, noteEditIndependent: true, exportAllPages: true, cancelExport: true, navigationCollapse: true, searchAndPagination: true, historyAndFavoritesPreserved: true, preferencesSurviveReload: true, longArticle: true, sourceCodeInert: true, failedSaveVisible: true, readPersisted: true, returnPreservesScroll: true, outlineNavigation: true, browserLoginReused: true, narrowNoOverflow: true }
+    report = { ok: true, exactSelectionReferenceAndReveal: true, paragraphReference: true, scheduledDailyEdition: true, digestDarkAndNarrow: true, rangeBriefExportAndRegeneration: true, digestReferences: true, savedVersionRestorationWithoutModel: true, failedRefreshPreservesBody: true, automaticEventGroupingAndProgress: true, factSeenDoesNotReadAllArticles: true, manualEventSplitMoveMerge: true, groupExpansionKeepsFilter: true, automaticRefreshProcessesOnlyNewItems: true, semanticProcessingThroughLocalProvider: true, cancelProcessingKeepsCallCount: true, historicalImportNotProcessed: true, customDefinitions: true, applicationRestartPreservesDefinitions: true, manualMemberships: true, curationSeparateFromBookmarks: true, typedRSSReferences: true, staleReferenceVisible: true, saveNoteReadback: true, noteEditIndependent: true, exportAllPages: true, cancelExport: true, navigationCollapse: true, searchAndPagination: true, historyAndFavoritesPreserved: true, preferencesSurviveReload: true, longArticle: true, sourceCodeInert: true, failedSaveVisible: true, readPersisted: true, returnPreservesScroll: true, outlineNavigation: true, browserLoginReused: true, originalPreviewAndBrowserHandoff: true, narrowNoOverflow: true }
     report.independentAnalysisReports = true
     report.analysisPauseResumeAndReveal = true
     report.rssFloatingSourceAndCleanup = true

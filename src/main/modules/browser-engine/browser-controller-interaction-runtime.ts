@@ -6,7 +6,7 @@ import type {
   BrowserCDPErrorCode
 } from './automation-types'
 import {
-  type BrowserHostView,
+  type BrowserHostView, type PreviewTabState
 } from './host-types'
 import {
   type BrowserSitePermissionRequestReadback
@@ -82,6 +82,42 @@ export abstract class BrowserControllerInteractionRuntime extends BrowserLivePro
 
   showUtilityMenu(payload: unknown): { success: boolean } {
     return this.utilityMenuService.showMenu(payload as BrowserUtilityMenuRequest)
+  }
+
+  async previewOpen(url: string): Promise<{ success: boolean; error?: string }> {
+    return this.previewService.open(url)
+  }
+
+  async previewNavigate(url: string): Promise<{ success: boolean; error?: string }> {
+    return this.previewService.navigate(url)
+  }
+
+  previewGoBack(): { success: boolean; error?: string } {
+    return this.previewService.goBack()
+  }
+
+  previewGoForward(): { success: boolean; error?: string } {
+    return this.previewService.goForward()
+  }
+
+  previewReload(): { success: boolean; error?: string } {
+    return this.previewService.reload()
+  }
+
+  previewUpdateBounds(bounds: { x: number; y: number; width: number; height: number }): { success: boolean } {
+    return this.previewService.updateBounds(bounds)
+  }
+
+  previewClose(): { success: boolean } {
+    return this.previewService.close()
+  }
+
+  previewGetState(): PreviewTabState {
+    return this.previewService.getState()
+  }
+
+  detachPreviewView(): void {
+    this.previewService.detach()
   }
 
   // ── Programmatic API (for tool calling, not IPC) ──────────────────

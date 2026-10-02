@@ -9,6 +9,12 @@
       "evidence": "profile ? `persist:browser-profile-${profile}` : 'persist:browser'"
     },
     {
+      "id": "preview-view",
+      "file": "src/main/modules/browser-engine/preview-service.ts",
+      "partition": "persist:browser (default)",
+      "evidence": "this.deps.createHost('persist:browser')"
+    },
+    {
       "id": "rss-article-fetch",
       "file": "src/main/modules/rss-engine/content-runtime.ts",
       "partition": "persist:browser (default)",

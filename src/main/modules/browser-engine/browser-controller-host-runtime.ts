@@ -55,6 +55,9 @@ export abstract class BrowserControllerHostRuntime extends BrowserControllerComp
         return tab.domain || extractBrowserDomain(tab.url)
       }
     }
+    if (this.previewService.matchesWebContentsId(webContentsId)) {
+      return extractBrowserDomain(this.previewService.getUrl())
+    }
     return ''
   }
 
@@ -64,6 +67,9 @@ export abstract class BrowserControllerHostRuntime extends BrowserControllerComp
       if (tab.view?.webContents.id === webContentsId) {
         return tab.view.webContents.getURL() || tab.url
       }
+    }
+    if (this.previewService.matchesWebContentsId(webContentsId)) {
+      return this.previewService.getUrl()
     }
     return ''
   }
@@ -353,6 +359,10 @@ export abstract class BrowserControllerHostRuntime extends BrowserControllerComp
     bounds: BrowserRect = this.viewBounds,
   ): void {
     this.hostLayoutService.applyBounds(view, bounds)
+  }
+
+  applyPreviewBounds(view: BrowserHostView): void {
+    this.hostLayoutService.applyBounds(view, this.previewBounds)
   }
 
   protected hideActiveTabHost(): boolean {

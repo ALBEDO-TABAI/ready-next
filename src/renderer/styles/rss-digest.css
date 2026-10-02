@@ -194,25 +194,30 @@
 }
 
 .rss-paper-masthead {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  gap: 16px;
+  display: flex;
+  align-items: baseline;
+  gap: 20px;
   padding-bottom: 18px;
   font-size: 12px;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
 
+.rss-paper-masthead > span:first-child,
 .rss-paper-masthead > span:last-child {
-  text-align: right;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
+/* 中间的范围说明可长可短：占剩余宽度，过长时省略，悬停看全文。 */
 .rss-paper-masthead__scope {
-  max-width: 360px;
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
+  text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.04em;
 }
 
 .rss-paper-head {
@@ -677,6 +682,106 @@
   color: var(--text-title);
 }
 
+/* 新建简报：与资讯流同一套安静控件，标签列 + 控件列，不加卡片框。 */
+.rss-brief {
+  display: grid;
+  gap: 22px;
+  max-width: 720px;
+  margin: 0 auto;
+  padding-top: 6px;
+}
+
+.rss-brief header {
+  padding-bottom: 6px;
+}
+
+.rss-brief h1 {
+  font-size: 28px;
+  line-height: 1.2;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-title);
+}
+
+.rss-brief header p {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-muted);
+}
+
+.rss-brief__row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
+}
+
+.rss-brief__row > label,
+.rss-brief__row > span {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.rss-brief__row .sx-select,
+.rss-brief__row .sx-input {
+  width: 100%;
+  max-width: 340px;
+  height: 34px;
+}
+
+.rss-brief__row .sx-seg {
+  justify-self: start;
+  max-width: 100%;
+}
+
+.rss-brief__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: -2px;
+}
+
+.rss-brief__chips button {
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  transition: background-color var(--sx-dur, 160ms) var(--rss-ease), box-shadow var(--sx-dur, 160ms) var(--rss-ease), color var(--sx-dur, 160ms) var(--rss-ease);
+}
+
+.rss-brief__chips button:hover:not([aria-checked='true']) {
+  background: var(--sx-raised-hover);
+  color: var(--text-title);
+}
+
+.rss-brief__chips button[aria-checked='true'] {
+  background: var(--sx-raised-bg);
+  box-shadow: var(--sx-raised-shadow);
+  color: var(--text-title);
+  font-weight: 500;
+}
+
+.rss-brief footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-top: 12px;
+}
+
+.rss-brief footer p {
+  margin-right: auto;
+  font-size: 13px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.rss-digest-generate svg {
+  margin-right: 2px;
+}
+
 @container (max-width: 980px) {
   .rss-paper-grid {
     grid-template-columns: minmax(0, 1fr);
@@ -706,12 +811,18 @@
 }
 
 @container (max-width: 520px) {
+  .rss-brief__row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
   .rss-paper-masthead {
-    grid-template-columns: 1fr;
+    flex-direction: column;
     gap: 4px;
   }
 
-  .rss-paper-masthead > span:last-child {
+  .rss-paper-masthead__scope {
+    width: 100%;
     text-align: left;
   }
 

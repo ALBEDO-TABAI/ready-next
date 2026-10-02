@@ -6,6 +6,7 @@ import { JSDOM } from 'jsdom'
 import { buildSync } from 'esbuild'
 import { createRequire } from 'node:module'
 import RSSDigestPanel from '../renderer/components/rss/RSSDigestPanel'
+import RSSDefinitionEditor from '../renderer/components/rss/RSSDefinitionEditor'
 import { rankHotEvents, RSS_HOT_WINDOW_MS } from '../renderer/modules/rss/hot-events'
 import { useRSSWorkspace } from '../renderer/modules/rss/useRSSWorkspace'
 import { useRSSSession } from '../renderer/stores/useRSSSession'
@@ -159,4 +160,59 @@ test('curated rows carry a large preview and their reason while other columns us
   await act(async () => root.render(createElement(RSSFeed, props(undefined) as never)))
   assert.ok(card().querySelector('.rss-card-main .rss-card-thumb img'))
   assert.equal(card().querySelector('.rss-card-preview'), null)
+}))
+
+const scheduleOff = async () => ({ success: true, data: { enabled: true, localTime: '08:00', timezone: 'UTC', nextRunAt: null, error: null } })
+const noEditions = async () => ({ success: true, data: { view: 'editions', editions: [], total: 0, nextOffset: null, snapshot: 0 } })
+const briefDefinitions = [
+  { id: 'all', kind: 'all', name: '全部动态', visible: true },
+  { id: 'curated', kind: 'curated', name: '精选', visible: true, description: 'Primary sources with concrete progress.' },
+  { id: 'ai', kind: 'topic', name: 'AI 与模型', visible: true },
+] as RSSDefinition[]
+
+test('a new brief starts from the feed scope, can be narrowed in place, and pins the revision it was counted at', async () => withDOM(async (root, dom) => {
+  useRSSSession.getState().reset(); useRSSSession.getState().setDigestView(true)
+  const counts: RSSQueryInput[] = [], generated: unknown[] = []
+  let revision = 7
+  Object.assign(window, { electronAPI: { rss: {
+    readDigests: noEditions, digestSettings: scheduleOff, onDigestsChanged: () => () => {}, onOrganizationChanged: () => () => {},
+    queryCards: async (query: RSSQueryInput) => { counts.push(query); return { success: true, data: { definitions: [], query: RSSQuerySchema.parse(query), items: [], total: 3, unreadTotal: 0, revision: revision++, lastFetchAt: null, nextCursor: null } } },
+    generateDigest: async (input: unknown) => { generated.push(input); return { success: true, data: { id: 'brief-1' } } },
+  } } })
+  const view = { query: RSSQuerySchema.parse({ collectionId: 'all', categoryId: 'ai', sourceId: 's1', search: 'model' }), revision: 1 } as never
+  await act(async () => root.render(<RSSDigestPanel active view={view} definitions={briefDefinitions} feedSources={[{ id: 's1', name: 'Publisher' }]} onReadArticle={() => {}} />))
+  const button = (text: string) => [...dom.window.document.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === text)!
+  await act(async () => button('新建简报').click())
+  const form = dom.window.document.querySelector('form[aria-label="新建简报"]')!
+  assert.equal(form.querySelector<HTMLSelectElement>('#rss-brief-column')!.value, 'all')
+  assert.equal(form.querySelector<HTMLSelectElement>('#rss-brief-source')!.value, 's1')
+  assert.equal(form.querySelector<HTMLInputElement>('#rss-brief-search')!.value, 'model')
+  assert.equal(form.querySelector('[role="radio"][aria-checked="true"]')!.textContent, 'AI 与模型')
+  await act(async () => button('近 7 天').click())
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)) })
+  assert.match(form.querySelector('[role="status"]')!.textContent!, /共 3 篇资讯/)
+  const before = Date.now()
+  await act(async () => button('生成简报').click())
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)) })
+  const request = generated[0] as { kind: string; query: RSSQueryInput & { expectedRevision: number } }
+  assert.equal(request.kind, 'range')
+  assert.equal(request.query.categoryId, 'ai'); assert.equal(request.query.sourceId, 's1'); assert.equal(request.query.search, 'model')
+  assert.ok(Math.abs(request.query.from! - (before - 7 * 86_400_000)) < 5000, 'a rolling seven-day window')
+  assert.equal(request.query.expectedRevision, counts.length + 6, 'generation pins the revision read right before it')
+  assert.equal(useRSSSession.getState().selectedDigestId, 'brief-1')
+  assert.equal(dom.window.document.querySelector('form[aria-label="新建简报"]'), null)
+}))
+
+test('daily settings name the curated standard that scopes every issue and open it for editing', async () => withDOM(async (root, dom) => {
+  useRSSSession.getState().reset(); useRSSSession.getState().setDigestView(true)
+  Object.assign(window, { electronAPI: { rss: { readDigests: noEditions, digestSettings: scheduleOff, onDigestsChanged: () => () => {}, onOrganizationChanged: () => () => {} } } })
+  const edited: string[] = []
+  await act(async () => root.render(<RSSDigestPanel active view={null} definitions={briefDefinitions} onReadArticle={() => {}} onEditDefinition={(id) => edited.push(id)} />))
+  await act(async () => dom.window.document.querySelector<HTMLButtonElement>('[aria-label="日报设置"]')!.click())
+  assert.match(dom.window.document.body.textContent!, /收录范围每天收录“精选”栏目里新入选的资讯/)
+  assert.match(dom.window.document.body.textContent!, /标准：Primary sources with concrete progress\./)
+  await act(async () => [...dom.window.document.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === '编辑精选标准')!.click())
+  assert.deepEqual(edited, ['curated'])
+  await act(async () => root.render(<RSSDefinitionEditor definitions={briefDefinitions.map((d) => ({ ...d, icon: 'sparkles', revision: 1, position: 1, filterIds: [] })) as never} initialId="curated" onSaved={() => {}} onClose={() => {}} />))
+  assert.equal(dom.window.document.querySelector('.rss-definition-form h1')!.textContent, '精选')
 }))

@@ -82,6 +82,10 @@ const ipcHandler = assertIncludes('src/main/modules/browser-engine/ipc-handler.t
   "session.fromPartition('persist:browser')",
 ])
 
+assertIncludes('src/main/modules/browser-engine/preview-service.ts', [
+  "this.deps.createHost('persist:browser')",
+])
+
 assertIncludes('src/main/modules/rss-engine/content-runtime.ts', [
   "session.fromPartition('persist:browser')",
 ])

@@ -130,6 +130,7 @@ test('BrowserTabShellService shows primary and secondary hosts with separate bou
   const shown: Array<{ id: string; bounds: BrowserRect }> = []
   const applied: Array<{ id: string; bounds?: BrowserRect }> = []
   const detached: string[] = []
+  let previewDetached = false
 
   const service = new BrowserTabShellService({
     tabs,
@@ -150,6 +151,7 @@ test('BrowserTabShellService shows primary and secondary hosts with separate bou
       applied.push({ id: viewId(view), bounds })
     },
     hideHost: () => undefined,
+    detachPreviewView: () => { previewDetached = true },
     restoreActiveTabHost: () => undefined,
   })
 
@@ -170,6 +172,7 @@ test('BrowserTabShellService shows primary and secondary hosts with separate bou
 
   service.showActiveHost()
 
+  assert.equal(previewDetached, true)
   assert.deepEqual(detached, ['tab-c'])
   assert.deepEqual(shown.map((entry) => [entry.id, entry.bounds]), [
     ['tab-a', primaryBounds],
@@ -208,6 +211,7 @@ test('BrowserTabShellService preserves split hosts on primary tab switch', () =>
       applied.push({ id: viewId(view), bounds })
     },
     hideHost: () => undefined,
+    detachPreviewView: () => undefined,
     restoreActiveTabHost: () => undefined,
   })
 

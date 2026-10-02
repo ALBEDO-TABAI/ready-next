@@ -10,7 +10,6 @@ import { ArrowLeft, ArrowUpRight, Check, ChevronDown, Copy, Loader2, MessageSqua
 import { MarkdownContent, copyTextToClipboard } from '../document/MarkdownContent'
 import { readSavedRSSArticle } from '../../modules/rss/read-article'
 import { openWebpageInBrowser } from '../../modules/browser/openWebpageInBrowser'
-import { openRSSItemInBrowserTab } from '../../modules/rss/open-rss-item-in-browser'
 import { describeRSSMedia } from '../../../shared/rss-media'
 import type { RSSArticleExcerpt } from '../../../shared/rss-workspace'
 import type { RSSItem } from './RSSFeed'
@@ -33,6 +32,8 @@ interface RSSArticleReaderProps {
   onToggleStar(itemId: string): void
   onBodyLoaded?(article: RSSArticleExcerpt['article']): Promise<void>
   notice?: string | null
+  /** Opens the live page beside the reader (RSSMode's side preview). */
+  onOpenOriginal?(item: RSSItem): void
 }
 
 const BODY_LABELS = {
@@ -47,7 +48,7 @@ function readerTime(value: number): string {
 }
 
 // 阅读：返回与操作放在画布顶栏，内容框里只留一条安静的阅读栏；整理与关联在正文之后。
-export default function RSSArticleReader({ item, expectedRevision, reveal, onClose, onOpened, onToggleStar, onBodyLoaded, notice, active = true, definitions = [], onSelectRelated }: RSSArticleReaderProps) {
+export default function RSSArticleReader({ item, expectedRevision, reveal, onClose, onOpened, onToggleStar, onBodyLoaded, notice, active = true, definitions = [], onSelectRelated, onOpenOriginal }: RSSArticleReaderProps) {
   const [content, setContent] = useState<RSSArticleExcerpt | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -127,9 +128,6 @@ export default function RSSArticleReader({ item, expectedRevision, reveal, onClo
   useEffect(() => { if (!active) setReferenceMenuOpen(false) }, [active])
 
   const openLink = useCallback((href: string) => { void openWebpageInBrowser(href) }, [])
-  const openOriginal = useCallback(() => {
-    void openRSSItemInBrowserTab(item).then((opened) => { if (!opened) setError('未能打开原文，请稍后重试。') })
-  }, [item])
   const article = content?.article
   const title = article?.title || item.title
   const date = article?.publishedAt ?? article?.collectedAt
@@ -167,7 +165,7 @@ export default function RSSArticleReader({ item, expectedRevision, reveal, onClo
       </button>
       <RSSSaveNoteButton article={content?.article || null} disabled={busy} active={active} onError={setError} />
       <span className="rss-tool-gap" />
-      <button type="button" className="rss-btn" onClick={openOriginal}>打开原文<ArrowUpRight size={14} strokeWidth={1.9} /></button>
+      {onOpenOriginal && item.link && <button type="button" className="rss-btn" onClick={() => onOpenOriginal(item)}>打开原文<ArrowUpRight size={14} strokeWidth={1.9} /></button>}
     </RSSTopbarTools>
     <div className="rss-reader-layout">
       {headings.length > 0 && <nav className="rss-reader-toc" aria-label="本文目录">

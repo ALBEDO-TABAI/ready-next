@@ -16,6 +16,7 @@ test('document canvas and rss canvas share one module surface background token',
   const documentPanelCss = readWorkspaceFile('src/renderer/components/document/documentFloatingPanels.css')
   const rssMode = readWorkspaceFile('src/renderer/pages/modes/RSSMode.tsx')
   const rssFeed = readWorkspaceFile('src/renderer/components/rss/RSSFeed.tsx')
+  const previewBrowser = readWorkspaceFile('src/renderer/components/rss/PreviewBrowser.tsx')
 
   assert.match(styles, /--workbench-module-surface-bg:/)
   assert.match(
@@ -34,6 +35,10 @@ test('document canvas and rss canvas share one module surface background token',
   assert.match(readWorkspaceFile('src/renderer/styles/rss-workspace.css'), /background: var\(--workbench-module-surface-bg\)/)
   assert.match(rssMode, /background: 'var\(--workbench-module-surface-bg\)'/)
   assert.match(rssFeed, /background: 'transparent'/)
+  assert.match(previewBrowser, /rss-preview-surface/)
+  assert.match(previewBrowser, /rss-preview-content/)
+  assert.match(previewBrowser, /background: 'var\(--workbench-module-surface-bg\)'/)
+  assert.match(previewBrowser, /background: 'transparent'/)
   assert.match(
     styles,
     /html\[data-skin='liquid-glass'\] \.document-content-frame \{[\s\S]*background:\s*var\(--workbench-module-surface-bg\) !important;/,

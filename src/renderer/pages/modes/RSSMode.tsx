@@ -1,5 +1,6 @@
 import RSSDigestPanel from '../../components/rss/RSSDigestPanel'
 import RSSDefinitionEditor from '../../components/rss/RSSDefinitionEditor'
+import PreviewBrowser from '../../components/rss/PreviewBrowser'
 import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ExternalLink } from 'lucide-react'
@@ -110,6 +111,10 @@ export default function RSSMode({
   const activeBrowserTabId = useBrowserTabs((state) => state.activeTabId)
   const selectedSource = selectedSourceId
   const [showOrganization, setShowOrganization] = useState(false)
+  // Set when the editor opens on one column from another view (the digest's 收录范围); closing returns there.
+  const [organizationFocus, setOrganizationFocus] = useState<string | undefined>()
+  // The live page opened beside the reader; it belongs to the article being read.
+  const [originalItem, setOriginalItem] = useState<RSSItem | null>(null)
   const [selectedItem, setSelectedItem] = useState<RSSItem | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [showAddModal, setShowAddModal] = useState(false)
@@ -553,6 +558,8 @@ export default function RSSMode({
   }, [loadRSSData, setQuery, setSelection])
 
   const feedVisible = !selectedItem && !digestVisible && !showOrganization
+  const readingId = selectedItem && !digestVisible && !showOrganization ? selectedItem.id : null
+  useEffect(() => { setOriginalItem((current) => current && current.id === readingId ? current : null) }, [readingId])
   const surfaceActive = isActive && !isSuspended
   const toastText = statusMessage || (itemStateError ? `《${items.find((item) => item.id === itemStateError.itemId)?.title || '文章'}》：${itemStateError.message}` : null) || notice?.message || backgroundWarning
   const closeOverlays = () => { useRSSSession.getState().cancelReveal(); setSelectedItem(null) }
@@ -583,7 +590,7 @@ export default function RSSMode({
                 definitions={definitions}
                 managing={showOrganization}
                 onDigests={() => { closeOverlays(); setShowOrganization(false); setDigestView(true) }}
-                onManage={() => { closeOverlays(); setDigestView(false); setShowOrganization((value) => !value) }}
+                onManage={() => { closeOverlays(); setDigestView(false); setOrganizationFocus(undefined); setShowOrganization((value) => !value) }}
                 onNavigate={(patch) => { closeOverlays(); setDigestView(false); setShowOrganization(false); setQuery(patch) }}
               />
               {/* The list stays mounted so returning from reading preserves scroll. */}
@@ -649,12 +656,14 @@ export default function RSSMode({
                   />
                 </div>
 
-                {showOrganization && <RSSDefinitionEditor definitions={definitions} active={surfaceActive} onClose={() => setShowOrganization(false)} onSaved={(deletedId) => {
+                {showOrganization && <RSSDefinitionEditor key={organizationFocus || 'manage'} initialId={organizationFocus} definitions={definitions} active={surfaceActive} onClose={() => { setShowOrganization(false); setOrganizationFocus(undefined) }} onSaved={(deletedId) => {
                   const current = useRSSSession.getState().query
                   if (deletedId && (current.collectionId === deletedId || current.categoryId === deletedId)) setQuery({ collectionId: undefined, categoryId: undefined, scope: 'inbox', filter: 'all' })
                 }} />}
 
-                {digestVisible && !showOrganization && <RSSDigestPanel active={surfaceActive} view={view} onReadArticle={(item) => { setDigestView(false); handleItemClick(item) }} />}
+                {digestVisible && !showOrganization && <RSSDigestPanel active={surfaceActive} view={view} definitions={definitions} feedSources={sources}
+                  onEditDefinition={(id) => { setOrganizationFocus(id); setShowOrganization(true) }}
+                  onReadArticle={(item) => { setDigestView(false); handleItemClick(item) }} />}
 
                 {/* Article rendering shares the document typography, without active widgets. */}
                 {selectedItem && !digestVisible && !showOrganization && (
@@ -671,7 +680,11 @@ export default function RSSMode({
                     onBodyLoaded={handleBodyLoaded}
                     onToggleStar={handleToggleStar}
                     notice={itemStateError?.itemId === selectedItem.id ? itemStateError.message : null}
+                    onOpenOriginal={setOriginalItem}
                   />
+                )}
+                {originalItem && selectedItem?.id === originalItem.id && !digestVisible && !showOrganization && (
+                  <PreviewBrowser key={`original:${originalItem.id}`} item={originalItem} isActive={surfaceActive} onClose={() => setOriginalItem(null)} />
                 )}
 
                 {(toastText || statusAction || notice?.action) && (

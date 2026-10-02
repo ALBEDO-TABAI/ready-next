@@ -82,6 +82,14 @@ interface BrowserShellIPCController {
   }>
   getTabList(): unknown
   getTabContext(tabId?: string | null): Promise<unknown>
+  previewOpen(url: string): Promise<{ success: boolean; error?: string }>
+  previewNavigate(url: string): Promise<{ success: boolean; error?: string }>
+  previewGoBack(): { success: boolean; error?: string }
+  previewGoForward(): { success: boolean; error?: string }
+  previewReload(): { success: boolean; error?: string }
+  previewUpdateBounds(bounds: { x: number; y: number; width: number; height: number }): { success: boolean }
+  previewClose(): { success: boolean }
+  previewGetState(): unknown
   createP7cLiveProofManualTab(): Promise<{ success: boolean; tabId?: string; error?: string }>
   startP7cLiveProofUserViewLease(): { success: boolean; leaseId?: string; tabId?: string; error?: string }
   prepareP7cLiveProofForegroundProbe(): Promise<{ success: boolean; state?: unknown; error?: string }>
@@ -252,6 +260,40 @@ export function setupBrowserShellIPC(controller: BrowserShellIPCController): voi
       return { success: false, error: error instanceof Error ? error.message : String(error) }
     }
   })
+
+  ipcMain.handle('browser:previewOpen', async (_, payload: { url: string }) => {
+    try {
+      return await controller.previewOpen(payload.url)
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('browser:previewNavigate', async (_, payload: { url: string }) => {
+    try {
+      return await controller.previewNavigate(payload.url)
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('browser:previewGoBack', () => controller.previewGoBack())
+  ipcMain.handle('browser:previewGoForward', () => controller.previewGoForward())
+  ipcMain.handle('browser:previewReload', () => controller.previewReload())
+  // Stage Y Y1.4 — IPC contract hardening (reduction-only): the legacy
+  // ipcMain handle-style dual registration for browser:previewUpdateBounds
+  // was removed. The preload (`src/preload/index.ts:368-371`) routes
+  // `previewUpdateBounds` through `ipcRenderer.send`, so only the
+  // `ipcMain.on(...)` listener below carries the live path. See
+  // `docs/superpowers/plans/archive/2026-05-23-Y1-4-ipc-renderer-contract-hardening-implementation.md`.
+  ipcMain.on(
+    'browser:previewUpdateBounds',
+    (_, bounds: { x: number; y: number; width: number; height: number }) => {
+      controller.previewUpdateBounds(bounds)
+    },
+  )
+  ipcMain.handle('browser:previewClose', () => controller.previewClose())
+  ipcMain.handle('browser:previewGetState', () => controller.previewGetState())
 
   ipcMain.handle('browser:p7cLiveProofStartUserViewLease', () => {
     try {

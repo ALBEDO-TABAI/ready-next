@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { RSSDigestHeader, RSSDigestEntry, RSSDigestSource, RSSDigestCoverageSource, RSSDigestScheduleState, RSSDigestCriteria } from '../../../shared/rss-digests'
-import type { RSSQueryResult } from '../../../shared/rss-workspace'
+import { RSSQuerySchema, type RSSQueryInput, type RSSQueryResult } from '../../../shared/rss-workspace'
+import type { RSSDefinition } from '../../../shared/rss-organization'
 import { useRSSSession } from '../../stores/useRSSSession'
 import { toRSSItem } from '../../modules/rss/workspace-query'
 import type { RSSItem } from './RSSFeed'
 import RSSReferenceButton from './RSSReferenceButton'
 import { openWebpageInBrowser } from '../../modules/browser/openWebpageInBrowser'
-import { ChevronRight, Download, RefreshCw, Settings2 } from 'lucide-react'
+import { ChevronRight, Download, Plus, RefreshCw, Settings2 } from 'lucide-react'
+import RSSBriefComposer from './RSSBriefComposer'
 import RSSCoverImage from './RSSCoverImage'
 import RSSTopbarTools from './RSSTopbarTools'
 
@@ -46,14 +48,17 @@ function Sources({ reportId, groupKey, criteria = false, onRead }: { reportId: s
   </div>
 }
 
-export default function RSSDigestPanel({ active, view, onReadArticle }: { active: boolean; view: RSSQueryResult | null; onReadArticle(item: RSSItem): void }) {
+export default function RSSDigestPanel({ active, view, definitions = [], feedSources = [], onReadArticle, onEditDefinition }: {
+  active: boolean; view: RSSQueryResult | null; definitions?: RSSDefinition[]; feedSources?: Array<{ id: string; name: string }>
+  onReadArticle(item: RSSItem): void; onEditDefinition?(id: string): void
+}) {
   const selected = useRSSSession((s) => s.selectedDigestId), setDigestView = useRSSSession((s) => s.setDigestView)
   const [editions, setEditions] = useState<RSSDigestHeader[]>([]), [editionNext, setEditionNext] = useState<number | null>(null), [snapshot, setSnapshot] = useState<number>()
   const [listed, setListed] = useState(false)
   const [report, setReport] = useState<RSSDigestHeader | null>(null), [entries, setEntries] = useState<RSSDigestEntry[]>([]), [next, setNext] = useState<number | null>(null)
   const [settings, setSettings] = useState<RSSDigestScheduleState | null>(null), [draftTime, setDraftTime] = useState('08:00')
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState('')
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false), [composing, setComposing] = useState(false)
   const [tab, setTab] = useState<RSSDigestHeader['kind']>('daily')
   const [foldedMonths, setFoldedMonths] = useState<Set<string>>(() => new Set())
   const [leadCover, setLeadCover] = useState<{ link: string; coverImage: string | null } | null>(null)
@@ -120,14 +125,24 @@ export default function RSSDigestPanel({ active, view, onReadArticle }: { active
     try { await run() } catch (cause) { if (ticket === actionTicket.current) setError(cause instanceof Error ? cause.message : String(cause)) }
     finally { if (ticket === actionTicket.current) setBusy(false) }
   }
-  const generate = async (kind: 'range' | 'regenerate') => {
-    if (kind === 'range' && !view || kind === 'regenerate' && !report) return
+  // A brief pins the revision it was read at; regenerate keeps the edition's own saved scope.
+  const generate = async (input: { kind: 'range'; query: RSSQueryInput } | { kind: 'regenerate' }) => {
+    if (input.kind === 'regenerate' && !report) return
     const expected = useRSSSession.getState().selectedDigestId, ticket = actionTicket.current
-    const result = await window.electronAPI.rss.generateDigest(kind === 'range' ? { kind, query: { ...view!.query, expectedRevision: view!.revision } } : { kind, reportId: report!.id })
+    let request: Parameters<typeof window.electronAPI.rss.generateDigest>[0] = { kind: 'regenerate', reportId: report?.id || '' }
+    if (input.kind === 'range') {
+      const current = await window.electronAPI.rss.queryCards({ ...input.query, limit: 1 })
+      if (!current.success || !current.data) throw new Error(current.error || '无法读取这个范围')
+      const { cursor: _cursor, ...query } = RSSQuerySchema.parse(input.query)
+      request = { kind: 'range', query: { ...query, expectedRevision: current.data.revision } }
+    }
+    const result = await window.electronAPI.rss.generateDigest(request)
     if (!result.success || !result.data) throw new Error(result.error || '生成失败')
     if (ticket !== actionTicket.current || !useRSSSession.getState().digestVisible || useRSSSession.getState().selectedDigestId !== expected) return
-    await list(); if (ticket === actionTicket.current && useRSSSession.getState().selectedDigestId === expected) setDigestView(true, result.data.id)
+    await list(); if (ticket !== actionTicket.current || useRSSSession.getState().selectedDigestId !== expected) return
+    setComposing(false); setDigestView(true, result.data.id)
   }
+  const curated = definitions.find((definition) => definition.kind === 'curated')
   const readArticle = (source: RSSDigestSource) => { void action(async () => {
     const expected = useRSSSession.getState().selectedDigestId, ticket = actionTicket.current
     const result = await window.electronAPI.rss.readArticle({ itemId: source.itemId, expectedRevision: source.articleRevision, length: 1 })
@@ -182,9 +197,9 @@ export default function RSSDigestPanel({ active, view, onReadArticle }: { active
         <div className="sx-seg" role="tablist" aria-label="刊物类型">
           {(['daily', 'range'] as const).map((kind) => <button type="button" role="tab" key={kind} className="sx-seg__item" aria-selected={tab === kind} onClick={() => setTab(kind)}>{kind === 'daily' ? '日报' : '简报'}</button>)}
         </div>
-        <button type="button" className="rss-btn rss-btn--icon" aria-label="日报设置" title="日报时间与覆盖" aria-pressed={settingsOpen} onClick={() => setSettingsOpen((open) => !open)}><Settings2 size={15} strokeWidth={1.8} /></button>
+        <button type="button" className="rss-btn rss-btn--icon" aria-label="日报设置" title="日报时间与收录范围" aria-pressed={settingsOpen} onClick={() => setSettingsOpen((open) => !open)}><Settings2 size={15} strokeWidth={1.8} /></button>
       </div>
-      <button type="button" className="sx-btn sx-btn--sm rss-digest-generate" disabled={busy || !view} onClick={() => void action(() => generate('range'))}>生成当前筛选范围简报</button>
+      <button type="button" className="sx-btn sx-btn--sm rss-digest-generate" aria-pressed={composing} disabled={busy} onClick={() => { setError(''); setComposing((open) => !open) }}><Plus size={14} strokeWidth={1.9} />新建简报</button>
       <p>往期</p>
       <nav className="rss-digest-editions" aria-label="已保存刊物">
         {months.map((month) => {
@@ -196,7 +211,7 @@ export default function RSSDigestPanel({ active, view, onReadArticle }: { active
             </button>
             {!folded && month.editions.map((edition) => {
               const parts = dateParts(edition.until, edition.timezone)
-              return <button type="button" key={edition.id} className="rss-digest-issue" aria-current={selected === edition.id ? 'page' : undefined} onClick={() => setDigestView(true, edition.id)}
+              return <button type="button" key={edition.id} className="rss-digest-issue" aria-current={selected === edition.id && !composing ? 'page' : undefined} onClick={() => { setComposing(false); setDigestView(true, edition.id) }}
                 aria-label={`${kindLabel(edition.kind)} · ${editionDate(edition.until, edition.timezone, edition.kind === 'range')}`}>
                 <span className="rss-digest-issue__day"><strong>{parts.day.padStart(2, '0')}</strong><small>{edition.kind === 'range' ? parts.time : parts.weekday.replace('星期', '周')}</small></span>
                 <span className="rss-digest-issue__title">{edition.lead?.title || (edition.total ? `${edition.total} 项入选` : '本期暂无入选内容')}
@@ -205,7 +220,7 @@ export default function RSSDigestPanel({ active, view, onReadArticle }: { active
             })}
           </div>
         })}
-        {!shelf.length && <p>{tab === 'daily' ? '还没有日报。日报会在设定时间按已入选的资讯自动生成。' : '还没有简报。可以为当前筛选范围生成一份。'}</p>}
+        {!shelf.length && <p>{tab === 'daily' ? `还没有日报。每天会按“${curated?.name || '精选'}”的标准，把新入选的资讯整理成一期。` : '还没有简报。可以选一个栏目、分类、来源或时间范围生成一份。'}</p>}
         {editionNext !== null && <button type="button" className="rss-digest-older" onClick={() => void action(() => list(true))}>更早刊物</button>}
       </nav>
     </aside>
@@ -225,17 +240,23 @@ export default function RSSDigestPanel({ active, view, onReadArticle }: { active
             <button type="button" className="sx-btn sx-btn--sm" disabled={busy || !draftTime} onClick={() => void action(async () => { const result = await window.electronAPI.rss.configureDigests({ enabled: settings.enabled, localTime: draftTime }); if (!result.success || !result.data) throw new Error(result.error); setSettings(result.data); dirtyTime.current = false })}>保存日报时间</button>
           </div>
         </div>}
+        <div className="rss-processing-panel__row">
+          <div><strong>收录范围</strong><small>每天收录“{curated?.name || '精选'}”栏目里新入选的资讯，已出刊的不再重复。{curated?.description ? `标准：${curated.description}` : ''}</small></div>
+          {curated && onEditDefinition && <button type="button" className="sx-btn sx-btn--sm" onClick={() => onEditDefinition(curated.id)}>编辑{curated.name}标准</button>}
+        </div>
         {settings?.error && <p className="rss-note rss-note--danger" role="alert">上次生成未完成：{settings.error}。会在下次启动、恢复或定时触发时重试。</p>}
       </div>}
-      {report && reportDate ? <article className="rss-paper">
+      {composing ? <RSSBriefComposer definitions={definitions} sources={feedSources} initial={view?.query || null} busy={busy} error={error}
+        onCancel={() => { setComposing(false); setError('') }} onGenerate={(query) => void action(() => generate({ kind: 'range', query }))} />
+      : report && reportDate ? <article className="rss-paper">
         <div className="rss-paper-masthead">
           <span>{reportDate.year} 年 {reportDate.month} 月 {reportDate.day} 日 · {reportDate.weekday}</span>
-          <span className="rss-paper-masthead__scope" title={report.scopeLabel}>{report.kind === 'daily' ? '资讯 · 每日要闻' : report.scopeLabel}</span>
+          <span className="rss-paper-masthead__scope" title={report.scopeLabel}>{report.kind === 'daily' ? `收录 · ${curated?.name || '精选'}` : report.scopeLabel}</span>
           <span>{report.kind === 'daily' ? `每天 ${settings?.localTime || '08:00'} 出刊` : `生成于 ${reportDate.time}`}</span>
         </div>
         <header className="rss-paper-head">
           <div className="min-w-0">
-            <h1>{report.kind === 'daily' ? '资讯日报' : '当前范围简报'}<small> · 第 {report.version} 版</small></h1>
+            <h1>{report.kind === 'daily' ? '资讯日报' : '范围简报'}<small> · 第 {report.version} 版</small></h1>
             <p className="rss-paper-kicker">READY · RSS</p>
           </div>
           {report.kind === 'daily' && <div className="rss-paper-date" aria-hidden>
@@ -292,7 +313,7 @@ export default function RSSDigestPanel({ active, view, onReadArticle }: { active
               <p className="rss-digest-meta">{report.total} 项 · {report.referenceCount} 条报道依据；未得明确精选判断 {report.coverage.unresolvedArticles} 篇，其中有失败或未知任务 {report.coverage.failedArticles} 篇；等待整理 {report.coverage.pendingArticles} 篇。正文不完整或缺失 {report.coverage.missingBodies} 篇，补收 {report.coverage.carriedOverArticles} 篇。</p>
               <div className="rss-digest-actions">
                 <RSSReferenceButton name={`${report.kind === 'daily' ? '日报' : '范围简报'} 第 ${report.version} 版`} label="引用本刊" reference={{ kind: 'digest', read: { reportId: report.id, offset: 0, limit: 20 } }} />
-                <button type="button" className="rss-btn" disabled={busy} onClick={() => void action(() => generate('regenerate'))}><RefreshCw size={14} strokeWidth={1.8} />重新生成新版本</button>
+                <button type="button" className="rss-btn" disabled={busy} onClick={() => void action(() => generate({ kind: 'regenerate' }))}><RefreshCw size={14} strokeWidth={1.8} />重新生成新版本</button>
                 <button type="button" className="rss-btn" disabled={busy} onClick={() => void action(async () => { const ticket = actionTicket.current; const result = await window.electronAPI.rss.exportDigest({ reportId: report.id }); if (!result.success || !result.data) throw new Error(result.error); if (ticket === actionTicket.current) setNotice(result.data.canceled ? '已取消导出' : `已导出：${result.data.path}`) })}><Download size={14} strokeWidth={1.8} />导出本刊</button>
               </div>
               <Sources key={`${report.id}:criteria`} reportId={report.id} criteria onRead={readArticle} />
@@ -302,9 +323,9 @@ export default function RSSDigestPanel({ active, view, onReadArticle }: { active
         </div>
       </article> : <div className="rss-digest-empty">
         <h1>日报与简报</h1>
-        <p>{editions.length ? '从左侧选择一期查看。日报只汇总已入选的资讯与原文摘句，不再调用模型扩写。' : '这里会保存每天的资讯日报，以及你为某个筛选范围生成的简报。'}</p>
+        <p>{editions.length ? '从左侧选择一期查看。日报只汇总已入选的资讯与原文摘句，不再调用模型扩写。' : '这里会保存每天的资讯日报，以及你按栏目、分类、来源或时间生成的简报。'}</p>
       </div>}
-      {notice && <p className="rss-note" role="status" style={{ marginTop: 16 }}>{notice}</p>}{error && <p className="rss-note rss-note--danger" role="alert" style={{ marginTop: 16 }}>{error}</p>}
+      {notice && <p className="rss-note" role="status" style={{ marginTop: 16 }}>{notice}</p>}{error && !composing && <p className="rss-note rss-note--danger" role="alert" style={{ marginTop: 16 }}>{error}</p>}
     </div>
   </section>
 }

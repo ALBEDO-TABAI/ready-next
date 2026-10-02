@@ -85,6 +85,7 @@ interface BrowserTabShellHost {
   applyBounds(view: BrowserShellView, bounds?: BrowserRect): void
   hideHost(view: BrowserShellView): void
   isHostAttached?(view: BrowserShellView): boolean
+  detachPreviewView(): void
   restoreActiveTabHost(): void
 }
 
@@ -317,6 +318,7 @@ export class BrowserTabShellService {
         this.host.hideHost(tab.view)
       }
     }
+    this.host.detachPreviewView()
     return { success: true }
   }
 
@@ -420,6 +422,7 @@ export class BrowserTabShellService {
   }
 
   showActiveHost(): { success: boolean } {
+    this.host.detachPreviewView()
     const activeTabId = this.host.getActiveTabId()
     const splitTabId = this.host.getSplitTabId()
     const visibleTabIds = new Set<string>()

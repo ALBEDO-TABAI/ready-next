@@ -66,8 +66,8 @@ export class BrowserController extends BrowserControllerCaptureRuntime {
     return this.sessionPolicyService.getAdblockState()
   }
 
-  setAdblockEnabled(enabled: boolean): BrowserAdblockState {
-    return this.sessionPolicyService.setAdblockEnabled(enabled)
+  setAdblockEnabled(enabled: boolean, scope: 'main' | 'preview' | 'all' = 'all'): BrowserAdblockState {
+    return this.sessionPolicyService.setAdblockEnabled(enabled, scope)
   }
 
   toggleAdblockDomain(domain: string): BrowserAdblockState {
@@ -86,6 +86,7 @@ export class BrowserController extends BrowserControllerCaptureRuntime {
       activeTabId: this.activeTabId,
       diagnosticsLogPath: BROWSER_DIAGNOSTICS_LOG_PATH,
       recentLogs: this.diagnosticsService.getRecentEntries(16),
+      preview: this.previewService.getState(),
       currentTask: agentSnapshot.currentTask,
       pageState: agentSnapshot.pageState,
       continuity: agentSnapshot.continuity,

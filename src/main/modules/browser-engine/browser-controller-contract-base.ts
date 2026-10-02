@@ -34,6 +34,7 @@ import {
   type BrowserHostView,
   type BrowserRect,
   type BrowserViewBoundsUpdate,
+  type PreviewTabState
 } from './host-types'
 import type { BrowserLeaseSupervisionSnapshot } from './ipc-supervision'
 import {
@@ -165,6 +166,7 @@ export abstract class BrowserControllerContractBase {
   }): void;
   abstract getMainWindow(): BrowserWindow | null;
   abstract applyBounds(view: BrowserHostView, bounds?: BrowserRect): void;
+  abstract applyPreviewBounds(view: BrowserHostView): void;
   protected abstract hideActiveTabHost(): boolean;
   protected abstract restoreActiveTabHost(): void;
   protected abstract currentBoundsForTab(tabId: string): BrowserRect;
@@ -175,7 +177,7 @@ export abstract class BrowserControllerContractBase {
   protected abstract loadWebContentsURL(webContents: Electron.WebContents, url: string, timeoutMs: number): Promise<void>;
   abstract updateTabRuntimeState(tabId: string | null, updates: Partial<Pick<Tab, 'owner' | 'required' | 'activity' | 'lastAuditedAt'>>): Tab | null;
   abstract getAdblockState(): BrowserAdblockState;
-  abstract setAdblockEnabled(enabled: boolean): BrowserAdblockState;
+  abstract setAdblockEnabled(enabled: boolean, scope?: 'main' | 'preview' | 'all'): BrowserAdblockState;
   abstract toggleAdblockDomain(domain: string): BrowserAdblockState;
   abstract getTabList(): any;
   abstract getDiagnostics(options?: {
@@ -366,6 +368,39 @@ export abstract class BrowserControllerContractBase {
   abstract showUtilityMenu(payload: unknown): {
       success: boolean;
   };
+  abstract previewOpen(url: string): Promise<{
+      success: boolean;
+      error?: string;
+  }>;
+  abstract previewNavigate(url: string): Promise<{
+      success: boolean;
+      error?: string;
+  }>;
+  abstract previewGoBack(): {
+      success: boolean;
+      error?: string;
+  };
+  abstract previewGoForward(): {
+      success: boolean;
+      error?: string;
+  };
+  abstract previewReload(): {
+      success: boolean;
+      error?: string;
+  };
+  abstract previewUpdateBounds(bounds: {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+  }): {
+      success: boolean;
+  };
+  abstract previewClose(): {
+      success: boolean;
+  };
+  abstract previewGetState(): PreviewTabState;
+  abstract detachPreviewView(): void;
   // ── Programmatic API (for tool calling, not IPC) ──────────────────
   abstract getBrowserDialog(tabId: string | null): Promise<BrowserDialogSnapshot | null>;
   abstract handleBrowserDialog(tabId: string | null, params: {

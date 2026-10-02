@@ -1137,6 +1137,15 @@ interface BrowserTabContextData {
   capturedAt: number
 }
 
+interface BrowserPreviewState {
+  url: string
+  title: string
+  loading: boolean
+  canGoBack: boolean
+  canGoForward: boolean
+  error?: string
+}
+
 interface BrowserBookmarksChangedEvent {
   action: 'import' | 'export'
   imported?: number
@@ -1147,6 +1156,7 @@ interface BrowserBookmarksChangedEvent {
 
 interface BrowserAdblockStateData {
   enabled: boolean
+  previewEnabled: boolean
   whitelistDomains: string[]
   rulesVersion: string
   networkBlockedCount: number
@@ -1245,6 +1255,7 @@ interface ElectronBrowserAPI {
   }) => void) => () => void
   setAdblockEnabled: (
     enabled: boolean,
+    scope?: 'main' | 'preview' | 'all'
   ) => Promise<{ success: boolean; data?: BrowserAdblockStateData; error?: string }>
   toggleAdblockDomain: (
     domain: string
@@ -1252,6 +1263,19 @@ interface ElectronBrowserAPI {
   getTabContext: (
     tabId?: string
   ) => Promise<{ success: boolean; data?: BrowserTabContextData; error?: string }>
+  previewOpen: (payload: { url: string }) => Promise<{ success: boolean; error?: string }>
+  previewNavigate: (payload: { url: string }) => Promise<{ success: boolean; error?: string }>
+  previewGoBack: () => Promise<{ success: boolean; error?: string }>
+  previewGoForward: () => Promise<{ success: boolean; error?: string }>
+  previewReload: () => Promise<{ success: boolean; error?: string }>
+  previewUpdateBounds: (bounds: {
+    x: number
+    y: number
+    width: number
+    height: number
+  }) => Promise<{ success: boolean }>
+  previewClose: () => Promise<{ success: boolean }>
+  previewGetState: () => Promise<BrowserPreviewState>
   p7cLiveProofStartUserViewLease: () => Promise<{ success: boolean; leaseId?: string; tabId?: string; error?: string }>
   p7cLiveProofCreateManualTab: () => Promise<{ success: boolean; tabId?: string; error?: string }>
   p7cLiveProofPrepareForegroundProbe: () => Promise<{
@@ -1279,6 +1303,7 @@ interface ElectronBrowserAPI {
   }>
   p7cLiveProofCheckWriteDenied: () => Promise<{ success: boolean; errorKind?: string; error?: string }>
   p7cLiveProofClear: () => Promise<{ success: boolean; error?: string }>
+  onPreviewUpdate: (callback: (data: BrowserPreviewState) => void) => () => void
   onTabUpdate: (callback: (data: BrowserTabUpdateEvent) => void) => () => void
   onTabOpened: (callback: (data: BrowserTabOpenedEvent) => void) => () => void
   onAdblockUpdate: (callback: (data: BrowserAdblockStateData) => void) => () => void

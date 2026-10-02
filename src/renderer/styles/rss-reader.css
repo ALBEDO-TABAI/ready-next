@@ -415,3 +415,35 @@
 .rss-event-panel > p[role='alert'] {
   margin: 0 18px 14px;
 }
+
+/* ── 原文预览：阅读页右侧的临时浏览器（原生视图），工具栏同 RSS 安静控件 ───────── */
+
+.rss-preview-toolbar {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 2px;
+  height: 46px;
+  padding: 0 10px;
+}
+
+.rss-preview-url {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  margin: 0 8px 0 6px;
+  padding: 0 14px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--sx-inset-bg);
+  font-size: 12px;
+  line-height: 30px;
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 原生页面平时盖住内容区；挂上之前或被浮层、主题过场暂时收起时，露出的是一块干净底色，而不是下面的阅读页。 */
+.rss-mode-shell .rss-preview-floating .rss-preview-content {
+  background: var(--bg-content) !important;
+}

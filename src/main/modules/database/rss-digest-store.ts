@@ -8,6 +8,9 @@ import { RSSQuerySchema, type RSSQueryInput } from '../../../shared/rss-workspac
 
 type ReportRow = { id: string; edition_key: string; version: number; kind: 'daily' | 'range'; window_start: number; window_end: number; timezone: string; created_at: number; query_json: string | null; coverage_json: string; definitions_json: string }
 
+// Scope labels are read by people and the Agent; the exact window stays in the header's from/until.
+const localMinute = (value: number, timeZone: string) => new Intl.DateTimeFormat('zh-CN', { timeZone, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(value))
+
 export class RSSDigestStore {
   constructor(private readonly getConnection: () => DatabaseConnection | null, private readonly content: RSSContentStore, private readonly organization: RSSOrganizationStore) {}
   private get db(): DatabaseConnection { const db = this.getConnection(); assertDatabaseConnectionReady(db, 'RSS digest database'); return db }
@@ -46,7 +49,7 @@ export class RSSDigestStore {
     const scopeLabel = query ? [query.scope === 'library' ? '全部保存资料' : '收件箱',
       ...[query.collectionId, query.categoryId].filter(Boolean).map((id) => savedDefinitions.find((d) => d.id === id)?.name || id),
       query.filter === 'unread' ? '未读' : query.filter === 'starred' ? '收藏' : '', query.search ? `搜索：${query.search}` : '',
-      query.from !== undefined ? `从 ${new Date(query.from).toISOString()}` : '', query.until !== undefined ? `至 ${new Date(query.until).toISOString()}` : '',
+      query.from !== undefined || query.until !== undefined ? `${query.from !== undefined ? localMinute(query.from, row.timezone) : '最早'} 至 ${query.until !== undefined ? localMinute(query.until, row.timezone) : '生成时'}` : '',
       query.sourceId ? JSON.parse(this.db.prepare('SELECT payload_json FROM rss_digest_sources WHERE report_id=? AND source_id=?').get<{ payload_json: string }>(row.id, query.sourceId)?.payload_json || '{}').name || query.sourceId : '',
     ].filter(Boolean).join(' · ') : '新增、有效精选且尚未入刊的保存资讯'
     // The lead story is the most-reported group (ties by published order); it titles the edition in the archive.

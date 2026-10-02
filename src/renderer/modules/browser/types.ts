@@ -55,10 +55,20 @@ export interface TabUpdateEvent {
 
 export interface AdblockState {
   enabled: boolean
+  previewEnabled: boolean
   whitelistDomains: string[]
   rulesVersion: string
   networkBlockedCount: number
   lastUpdatedAt: number | null
+}
+
+export interface BrowserPreviewDiagnosticsState {
+  url: string
+  title: string
+  loading: boolean
+  canGoBack: boolean
+  canGoForward: boolean
+  error?: string
 }
 
 export interface BrowserDiagnosticsData {
@@ -67,6 +77,7 @@ export interface BrowserDiagnosticsData {
   activeTabId: string | null
   diagnosticsLogPath: string
   recentLogs: string[]
+  preview: BrowserPreviewDiagnosticsState
   currentTask: {
     sessionId?: string
     taskTitle: string

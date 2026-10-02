@@ -24,6 +24,7 @@ interface HostCalls {
   viewBounds: BrowserRect | null
   splitTabId: string | null
   splitViewBounds: BrowserRect | null
+  previewDetached: number
   restored: number
 }
 
@@ -46,6 +47,7 @@ function makeShellService(opts: {
     viewBounds: null,
     splitTabId: null,
     splitViewBounds: null,
+    previewDetached: 0,
     restored: 0,
   }
   let activeTabId = opts.activeTabId
@@ -79,6 +81,7 @@ function makeShellService(opts: {
     showHost: (v, b) => calls.shown.push({ view: v, bounds: b }),
     applyBounds: (v, bounds) => calls.applied.push({ view: v, bounds: bounds ?? null }),
     hideHost: (v) => calls.hidden.push({ view: v }),
+    detachPreviewView: () => { calls.previewDetached += 1 },
     restoreActiveTabHost: () => { calls.restored += 1 },
   })
   return { service, calls, tabsMap }
@@ -103,7 +106,7 @@ function makeTab(id: string, view: BrowserHostView): BrowserShellTabRecord {
   }
 }
 
-test('applyIntent kind=hide-all hides every attached tab view', () => {
+test('applyIntent kind=hide-all hides every attached tab view and detaches the preview', () => {
   const v1 = makeStubView('t1')
   const v2 = makeStubView('t2')
   const { service, calls } = makeShellService({
@@ -115,6 +118,7 @@ test('applyIntent kind=hide-all hides every attached tab view', () => {
   assert.equal(result.success, true)
   assert.equal(calls.hidden.length, 2)
   assert.deepEqual(new Set(calls.hidden.map((c) => c.view)), new Set([v1, v2]))
+  assert.equal(calls.previewDetached, 1)
 })
 
 test('applyIntent kind=show shows the target tab when shouldPresentHosts is true', () => {
