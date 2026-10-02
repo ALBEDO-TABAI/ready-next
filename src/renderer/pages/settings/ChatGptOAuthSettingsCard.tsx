@@ -1,12 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Loader2 } from 'lucide-react'
+import { Loader2, ShieldCheck } from 'lucide-react'
 import type { ChatGptOAuthStatus } from '../../../shared/chatgpt-oauth'
 import type { AIReasoningEffort } from '../../../shared/ai-providers'
-import {
-  SETTINGS_FLAT_BUTTON_STYLE,
-  SETTINGS_FLAT_INPUT_STYLE,
-} from '../../components/settings/settings-theme'
-import { AISettingsFieldCard } from './settings-shared'
+import { AISettingsFieldCard, SettingsNotice, settingsButtonClass } from './settings-shared'
 
 export function ChatGptOAuthSettingsCard({
   active,
@@ -119,30 +115,20 @@ export function ChatGptOAuthSettingsCard({
       description="非官方本机接入：授权页面显示的主体是 Codex，不是 Ready；凭证等同密码。OpenAI 没有把它发布为第三方通用模型 OAuth，接口可能随时失效。"
       control={(
         <div className="flex flex-col gap-3">
-          <div
-            className="rounded-xl border px-3 py-2.5 text-[12px] leading-5"
-            style={{
-              borderColor: 'color-mix(in srgb, var(--color-orange) 28%, transparent)',
-              background: 'color-mix(in srgb, var(--color-orange) 8%, transparent)',
-              color: 'var(--text-body)',
-            }}
-          >
+          <SettingsNotice tone="plain" icon={ShieldCheck}>
             仅绑定 127.0.0.1，并把凭证隔离保存在 Ready 数据目录；不会读取或覆盖 Codex CLI 的登录。官方 API Key 预设会原样保留。
-          </div>
+          </SettingsNotice>
           {active && (
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border px-3 py-2.5" style={{ borderColor: 'var(--border-subtle)' }}>
-              <div>
-                <div className="text-[12px] font-semibold" style={{ color: 'var(--text-title)' }}>推理强度</div>
-                <div className="mt-0.5 text-[11px]" style={{ color: 'var(--text-light)' }}>强度越高，通常思考更充分，但响应也会更慢。</div>
+            <div className="sx-inset flex flex-wrap items-center justify-between gap-3 px-3.5 py-3">
+              <div className="min-w-0">
+                <div className="sx-row__label">推理强度</div>
+                <div className="sx-row__desc">强度越高，通常思考更充分，但响应也会更慢。</div>
               </div>
               <select
                 value={reasoningEffort}
+                aria-label="推理强度"
                 onChange={(event) => onReasoningEffortChange(event.target.value as AIReasoningEffort)}
-                className="rounded-lg border px-3 py-2 text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 cursor-pointer"
-                style={{
-                  ...SETTINGS_FLAT_INPUT_STYLE,
-                  padding: '8px 28px 8px 12px',
-                }}
+                className="sx-select"
               >
                 <option value="none">不额外推理</option>
                 <option value="low">快速</option>
@@ -152,31 +138,33 @@ export function ChatGptOAuthSettingsCard({
               </select>
             </div>
           )}
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2">
             {!ready && !pending && status && (
               <button type="button" onClick={() => void runAction(connected ? 'resume' : 'authorize')}
-                className="rounded-full font-semibold" style={{ ...SETTINGS_FLAT_BUTTON_STYLE, padding: '10px 15px', borderRadius: 999 }}>
+                className={settingsButtonClass('primary')}>
                 {connected ? '恢复连接并使用' : '使用 ChatGPT 登录'}
               </button>
             )}
             {connected && !pending && (
-              <button type="button" onClick={() => void runAction('authorize')} className="rounded-full px-3 py-2 text-[12px] font-semibold" style={{ color: 'var(--text-muted)' }}>重新授权</button>
+              <button type="button" onClick={() => void runAction('authorize')} className={settingsButtonClass('ghost', { size: 'sm' })}>重新授权</button>
             )}
             {active && connected && !pending && (
-              <button type="button" onClick={() => void runAction('disconnect')} className="rounded-full px-3 py-2 text-[12px] font-semibold" style={{ color: 'var(--color-red)' }}>断开并删除凭证</button>
+              <button type="button" onClick={() => void runAction('disconnect')} className={settingsButtonClass('danger-ghost', { size: 'sm' })}>断开并删除凭证</button>
             )}
-            <span role="status" aria-live="polite" className="inline-flex items-center gap-2 text-[12px] font-semibold" style={{ color: ready ? 'var(--color-green)' : 'var(--text-muted)' }}>
-              {pending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}{statusText}{operation?.phase === 'waiting_browser' ? `（已等待 ${Math.floor((Date.now() - operation.startedAt) / 1000)} 秒）` : ''}
+            <span role="status" aria-live="polite" className="inline-flex items-center gap-2 px-1 text-[12px] font-medium" style={{ color: ready ? 'var(--sx-body)' : 'var(--sx-muted)' }}>
+              {pending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              {ready && <span className="sx-dot sx-dot--accent" aria-hidden />}
+              {statusText}{operation?.phase === 'waiting_browser' ? `（已等待 ${Math.floor((Date.now() - operation.startedAt) / 1000)} 秒）` : ''}
             </span>
             {operation?.canReopen && operation.phase === 'waiting_browser' && (
-              <button type="button" onClick={() => void controlLogin('reopen')} className="text-[12px] underline">重新打开授权页面</button>
+              <button type="button" onClick={() => void controlLogin('reopen')} className="sx-link">重新打开授权页面</button>
             )}
             {operation && !['saving_profile', 'cancelling'].includes(operation.phase) && (
-              <button type="button" onClick={() => void controlLogin('cancel')} className="text-[12px] underline">取消登录</button>
+              <button type="button" onClick={() => void controlLogin('cancel')} className={settingsButtonClass('ghost', { size: 'sm' })}>取消登录</button>
             )}
-            {!status && error && <button type="button" onClick={() => void refresh()} className="text-[12px] underline">重试读取状态</button>}
+            {!status && error && <button type="button" onClick={() => void refresh()} className="sx-link">重试读取状态</button>}
           </div>
-          {error && <div className="text-[12px] leading-5" style={{ color: 'var(--color-red)' }}>{error}</div>}
+          {error && <div className="sx-text-danger text-[12px] leading-5">{error}</div>}
         </div>
       )}
     />

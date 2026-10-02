@@ -1,17 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Activity, CheckCircle2, Download, HardDrive, Loader2, RefreshCw, XCircle } from 'lucide-react'
+import { Activity, AlertCircle, Check, ChevronDown, CircleDashed, Download, HardDrive, Loader2, RefreshCw, X, XCircle } from 'lucide-react'
 import type { ModelPackId, ModelPackSelfTestReport, ModelPackStatus, ModelSource } from '../../../shared/model-pack-types'
 import type { SkillSourceSelfTestReport } from '../../../shared/skill-source-types'
 import type { RuntimeStatus, RuntimeProvisionTaskSnapshot } from '../../../shared/runtime-provision-types'
 import { MODEL_SOURCES } from '../../../shared/model-pack-types'
 import {
-  SETTINGS_CARD_STYLE,
-  SETTINGS_FLAT_BUTTON_STYLE,
-  SETTINGS_FIELD_HINT_STYLE,
-  SETTINGS_SUBTLE_CARD_STYLE,
-  SETTINGS_TITLE_STYLE,
-  settingsNoticeStyle,
-} from './settings-theme'
+  SettingsCard,
+  SettingsGroup,
+  SettingsNotice,
+  SettingsRow,
+  SettingsSegmented,
+  settingsButtonClass,
+} from '../../pages/settings/settings-shared'
 
 const SOURCE_LABELS: Record<ModelSource, string> = {
   auto: '自动',
@@ -34,12 +34,28 @@ function packState(pack: ModelPackStatus): 'ready' | 'downloading' | 'error' | '
 
 function StatusRow({ label, ready, detail }: { label: string; ready: boolean; detail?: string }) {
   return (
-    <div className="flex items-center justify-between gap-3" style={{ padding: '6px 0' }}>
-      <div className="flex items-center gap-2">
-        {ready ? <CheckCircle2 size={14} style={{ color: 'var(--color-green)' }} /> : <XCircle size={14} style={{ color: 'var(--color-red)' }} />}
-        <span className="text-[13px]">{label}</span>
+    <div className="flex items-center justify-between gap-3 border-t px-3.5 py-2 first:border-t-0" style={{ borderColor: 'var(--sx-divider)' }}>
+      <div className="flex items-center gap-2.5">
+        {ready
+          ? <Check size={14} strokeWidth={2.4} style={{ color: 'var(--sx-title)' }} />
+          : <CircleDashed size={14} strokeWidth={1.9} style={{ color: 'var(--sx-subtle)' }} />}
+        <span className="text-[13px]" style={{ color: 'var(--sx-body)' }}>{label}</span>
       </div>
-      <span style={{ ...SETTINGS_FIELD_HINT_STYLE }}>{ready ? (detail || '已就绪') : (detail || '未配置')}</span>
+      <span className="text-[12px]" style={{ color: ready ? 'var(--sx-muted)' : 'var(--sx-subtle)' }}>
+        {ready ? (detail || '已就绪') : (detail || '未配置')}
+      </span>
+    </div>
+  )
+}
+
+// 自检探针一行：不可达属于真实故障，用危险色；可达只用墨色对勾。
+function ProbeLine({ ok, children }: { ok: boolean; children: React.ReactNode }) {
+  return (
+    <div className="flex items-start gap-2 text-[12px]" style={{ color: ok ? 'var(--sx-body)' : 'var(--sx-danger-text)' }}>
+      {ok
+        ? <Check size={13} strokeWidth={2.4} className="mt-[3px] shrink-0" style={{ color: 'var(--sx-title)' }} />
+        : <X size={13} strokeWidth={2.4} className="mt-[3px] shrink-0" />}
+      <span className="min-w-0" style={{ overflowWrap: 'anywhere' }}>{children}</span>
     </div>
   )
 }
@@ -181,26 +197,25 @@ export function RuntimeEnvironmentCard() {
   const doneNotice = provisionTask?.state === 'succeeded' ? '运行时已配置完成。' : null
 
   return (
-    <section className="glass-surface-card rounded-2xl border" style={{ ...SETTINGS_CARD_STYLE, padding: '18px 20px' }}>
-      <div className="flex items-center justify-between gap-3" style={{ marginBottom: 10 }}>
-        <div>
-          <div style={SETTINGS_TITLE_STYLE}>运行时环境</div>
-          <div style={{ ...SETTINGS_FIELD_HINT_STYLE, marginTop: 4 }}>
-            一键下载并配置 Python + ffmpeg + 技能核心依赖（在线视频分析所需）。本地 ASR 降级链需另装 torch/模型（见下方模型下载）。
-          </div>
-          <div style={{ ...SETTINGS_FIELD_HINT_STYLE, marginTop: 3 }}>
-            离开设置页不会中断配置，返回后会自动恢复当前进度。
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
+    <SettingsCard
+      title="运行时环境"
+      description={(
+        <>
+          一键下载并配置 Python + ffmpeg + 技能核心依赖（在线视频分析所需）。本地 ASR 降级链需另装 torch/模型（见下方模型下载）。
+          <br />
+          离开设置页不会中断配置，返回后会自动恢复当前进度。
+        </>
+      )}
+      actions={(
+        <>
           <button
             type="button"
             onClick={() => void provision(ready)}
             disabled={busy || unsupported}
-            className="inline-flex items-center gap-1.5"
-            style={{ ...SETTINGS_FLAT_BUTTON_STYLE, minWidth: 0, padding: '8px 14px', opacity: busy || unsupported ? 0.6 : 1 }}
+            aria-busy={busy || undefined}
+            className={settingsButtonClass(ready ? 'secondary' : 'primary')}
           >
-            {busy ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+            {busy ? <Loader2 className="animate-spin" /> : <Download />}
             {busy ? '配置中…' : ready ? '重新配置' : '一键下载并配置'}
           </button>
           {taskRunning && (
@@ -208,135 +223,125 @@ export function RuntimeEnvironmentCard() {
               type="button"
               onClick={() => void cancelProvision()}
               disabled={provisionTask?.state === 'cancelling'}
-              className="inline-flex items-center gap-1.5"
-              style={{
-                ...SETTINGS_FLAT_BUTTON_STYLE,
-                minWidth: 0,
-                padding: '8px 12px',
-                opacity: provisionTask?.state === 'cancelling' ? 0.6 : 1,
-              }}
+              className={settingsButtonClass('secondary')}
             >
               {provisionTask?.state === 'cancelling'
-                ? <Loader2 size={13} className="animate-spin" />
-                : <XCircle size={13} />}
+                ? <Loader2 className="animate-spin" />
+                : <XCircle />}
               {provisionTask?.state === 'cancelling' ? '正在停止…' : '停止'}
             </button>
           )}
-        </div>
-      </div>
-
-      {unsupported ? (
-        <div className="text-[12px]" style={settingsNoticeStyle('error')}>当前平台暂不支持自动配置运行时。</div>
-      ) : (
-        <div style={{ ...SETTINGS_SUBTLE_CARD_STYLE, padding: '6px 12px' }}>
-          <StatusRow label="Python" ready={Boolean(status?.python.ready)} detail={status?.python.version} />
-          <StatusRow label="ffmpeg" ready={Boolean(status?.ffmpeg.ready)} />
-          <StatusRow label="ffprobe" ready={Boolean(status?.ffprobe.ready)} />
-          <StatusRow label="核心依赖" ready={Boolean(status?.coreDeps.ready)} detail={status?.coreDeps.missing?.length ? `缺：${status.coreDeps.missing.join('、')}` : undefined} />
-        </div>
+        </>
       )}
-
-      {busy && (
-        <div style={{ marginTop: 10 }}>
-          <div className="flex items-center justify-between" style={{ ...SETTINGS_FIELD_HINT_STYLE, marginBottom: 6 }}>
-            <span>
-              正在{RUNTIME_PHASE_LABELS[phase || ''] || '配置'}{progressAsset ? ` ${progressAsset}` : ''}…
-            </span>
-            {pct !== null && <span>{pct}%</span>}
+    >
+      <div className="sx-card__body flex flex-col gap-3">
+        {unsupported ? (
+          <SettingsNotice tone="danger" title="当前平台暂不支持自动配置运行时。" />
+        ) : (
+          <div className="sx-inset">
+            <StatusRow label="Python" ready={Boolean(status?.python.ready)} detail={status?.python.version} />
+            <StatusRow label="ffmpeg" ready={Boolean(status?.ffmpeg.ready)} />
+            <StatusRow label="ffprobe" ready={Boolean(status?.ffprobe.ready)} />
+            <StatusRow label="核心依赖" ready={Boolean(status?.coreDeps.ready)} detail={status?.coreDeps.missing?.length ? `缺：${status.coreDeps.missing.join('、')}` : undefined} />
           </div>
-          <div style={{ height: 6, borderRadius: 999, overflow: 'hidden', background: 'color-mix(in srgb, var(--surface-border) 60%, transparent)' }}>
-            <div style={{ height: '100%', width: pct !== null ? `${pct}%` : '40%', borderRadius: 999, background: 'var(--color-blue)', transition: 'width 240ms ease', opacity: pct !== null ? 1 : 0.6 }} />
-          </div>
-        </div>
-      )}
+        )}
 
-      {!busy && doneNotice && (
-        <div className="text-[12px]" style={{ ...settingsNoticeStyle(ready ? 'success' : 'error'), marginTop: 10 }}>
-          {doneNotice}
-        </div>
-      )}
-
-      {!unsupported && (
-        <div style={{ marginTop: 8 }}>
-          <button
-            type="button"
-            onClick={() => setShowMirror((v) => !v)}
-            style={{ ...SETTINGS_FIELD_HINT_STYLE, background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
-          >
-            {showMirror ? '收起自定义镜像' : '自定义下载镜像（高级）'}
-          </button>
-        </div>
-      )}
-
-      {!unsupported && showMirror && (
-        <div style={{ ...SETTINGS_SUBTLE_CARD_STYLE, marginTop: 10, padding: '12px 14px' }}>
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-title)' }}>自定义下载镜像（可选）</div>
-              <div style={{ ...SETTINGS_FIELD_HINT_STYLE, marginTop: 3 }}>
-                Python 默认先走中科大镜像；ffmpeg/ffprobe 默认走上游。填写自定义镜像后会优先尝试该地址。
-              </div>
+        {busy && (
+          <div>
+            <div className="mb-1.5 flex items-center justify-between text-[12px]" style={{ color: 'var(--sx-muted)' }}>
+              <span>
+                正在{RUNTIME_PHASE_LABELS[phase || ''] || '配置'}{progressAsset ? ` ${progressAsset}` : ''}…
+              </span>
+              {pct !== null && <span className="sx-mono">{pct}%</span>}
+            </div>
+            <div className="sx-progress">
+              <span style={{ width: pct !== null ? `${pct}%` : '40%', opacity: pct !== null ? 1 : 0.6 }} />
             </div>
           </div>
-          <div className="flex gap-2" style={{ marginTop: 10 }}>
-            <input
-              value={mirror}
-              onChange={(e) => {
-                setMirror(e.target.value)
-                setMirrorNotice(null)
-                setMirrorNoticeKind('success')
-              }}
-              placeholder="https://your-cdn/ready-runtime"
-              className="flex-1 text-[12px]"
-              style={{ ...SETTINGS_FLAT_BUTTON_STYLE, padding: '8px 12px', textAlign: 'left', overflowWrap: 'anywhere' }}
-            />
+        )}
+
+        {!busy && doneNotice && (
+          <SettingsNotice tone={ready ? 'plain' : 'danger'} icon={ready ? Check : undefined} title={doneNotice} />
+        )}
+
+        {!unsupported && (
+          <div>
             <button
               type="button"
-              onClick={() => void saveMirror()}
-              disabled={busy || mirrorSaving}
-              style={{ ...SETTINGS_FLAT_BUTTON_STYLE, padding: '8px 14px', opacity: busy || mirrorSaving ? 0.6 : 1 }}
+              onClick={() => setShowMirror((v) => !v)}
+              aria-expanded={showMirror}
+              className={settingsButtonClass('ghost', { size: 'sm' })}
+              style={{ marginLeft: -8 }}
             >
-              {mirrorSaving ? '保存中…' : '保存'}
+              <ChevronDown style={{ transform: showMirror ? 'rotate(180deg)' : undefined, transition: 'transform 160ms ease' }} />
+              {showMirror ? '收起自定义镜像' : '自定义下载镜像（高级）'}
             </button>
           </div>
-          <div style={{ ...SETTINGS_FIELD_HINT_STYLE, marginTop: 6, overflowWrap: 'anywhere' }}>
-            镜像路径：&lt;base&gt;/&lt;platform&gt;/&lt;filename&gt;
-          </div>
-          {mirrorNotice && (
-            <div className="text-[12px]" style={{ ...settingsNoticeStyle(mirrorNoticeKind), marginTop: 8 }}>
-              {mirrorNotice}
+        )}
+
+        {!unsupported && showMirror && (
+          <div className="sx-inset sx-field" style={{ padding: '12px 14px' }}>
+            <div className="sx-field__label">自定义下载镜像（可选）</div>
+            <div className="sx-field__hint">
+              Python 默认先走中科大镜像；ffmpeg/ffprobe 默认走上游。填写自定义镜像后会优先尝试该地址。
             </div>
-          )}
-        </div>
-      )}
+            <div className="mt-1.5 flex gap-2">
+              <input
+                value={mirror}
+                onChange={(e) => {
+                  setMirror(e.target.value)
+                  setMirrorNotice(null)
+                  setMirrorNoticeKind('success')
+                }}
+                placeholder="https://your-cdn/ready-runtime"
+                aria-label="自定义下载镜像"
+                className="sx-input sx-input--mono flex-1"
+              />
+              <button
+                type="button"
+                onClick={() => void saveMirror()}
+                disabled={busy || mirrorSaving}
+                className={settingsButtonClass('secondary')}
+              >
+                {mirrorSaving ? '保存中…' : '保存'}
+              </button>
+            </div>
+            <div className="sx-meta" style={{ overflowWrap: 'anywhere' }}>
+              镜像路径：&lt;base&gt;/&lt;platform&gt;/&lt;filename&gt;
+            </div>
+            {mirrorNotice && (
+              <div className={`text-[12px] ${mirrorNoticeKind === 'error' ? 'sx-text-danger' : ''}`} style={mirrorNoticeKind === 'error' ? undefined : { color: 'var(--sx-muted)' }}>
+                {mirrorNoticeKind === 'success' && <Check size={12} strokeWidth={2.4} className="mr-1 inline-block align-[-1px]" style={{ color: 'var(--sx-title)' }} />}
+                {mirrorNotice}
+              </div>
+            )}
+          </div>
+        )}
 
-      {errorText && (
-        <div className="text-[12px]" style={{ ...settingsNoticeStyle('error'), marginTop: 10 }}>
-          {errorText}
-        </div>
-      )}
+        {errorText && <SettingsNotice tone="danger" title={errorText} />}
 
-      {errorKind === 'all_sources_unreachable' && (
-        <div className="flex flex-col gap-2" style={{ marginTop: 10 }}>
-          <div style={SETTINGS_FIELD_HINT_STYLE}>所有源都连不上。请在上方填写自定义镜像，或确认网络后重试。</div>
-          <button type="button" onClick={() => void saveMirrorAndRetry()} disabled={busy || mirrorSaving} style={{ ...SETTINGS_FLAT_BUTTON_STYLE, padding: '8px 14px', alignSelf: 'flex-start' }}>
-            保存并重试
-          </button>
-        </div>
-      )}
+        {errorKind === 'all_sources_unreachable' && (
+          <div className="flex items-center justify-between gap-3">
+            <div className="sx-row__desc" style={{ marginTop: 0 }}>所有源都连不上。请在上方填写自定义镜像，或确认网络后重试。</div>
+            <button type="button" onClick={() => void saveMirrorAndRetry()} disabled={busy || mirrorSaving} className={settingsButtonClass('secondary', { size: 'sm' })}>
+              保存并重试
+            </button>
+          </div>
+        )}
 
-      {errorKind === 'asset_integrity_failed' && (
-        <div className="text-[12px]" style={{ ...SETTINGS_FIELD_HINT_STYLE, marginTop: 8 }}>
-          资产校验失败（疑似钉死值过期或资产被污染）。换镜像通常无效，请反馈或稍后重试。
-        </div>
-      )}
+        {errorKind === 'asset_integrity_failed' && (
+          <div className="sx-row__desc" style={{ marginTop: 0 }}>
+            资产校验失败（疑似钉死值过期或资产被污染）。换镜像通常无效，请反馈或稍后重试。
+          </div>
+        )}
 
-      {errorKind === 'assets_not_pinned' && (
-        <div className="text-[12px]" style={{ ...SETTINGS_FIELD_HINT_STYLE, marginTop: 8 }}>
-          运行时资产尚未发布真实校验值，请等待包含校验值的版本。
-        </div>
-      )}
-    </section>
+        {errorKind === 'assets_not_pinned' && (
+          <div className="sx-row__desc" style={{ marginTop: 0 }}>
+            运行时资产尚未发布真实校验值，请等待包含校验值的版本。
+          </div>
+        )}
+      </div>
+    </SettingsCard>
   )
 }
 
@@ -451,104 +456,92 @@ export default function ModelsRuntimeSettingsPanel() {
   }, [])
 
   return (
-    <div className="flex flex-col gap-5">
-      {error && (
-        <div className="text-[12px]" style={settingsNoticeStyle('error')}>
-          {error}
-        </div>
-      )}
+    <div className="sx-stack">
+      {error && <SettingsNotice tone="danger" title={error} />}
 
-      <RuntimeEnvironmentCard />
+      <SettingsGroup label="运行时">
+        <RuntimeEnvironmentCard />
+      </SettingsGroup>
 
-      <section className="glass-surface-card rounded-2xl border" style={{ ...SETTINGS_CARD_STYLE, padding: '18px 20px' }}>
-        <div className="flex items-center justify-between gap-3" style={{ marginBottom: 14 }}>
-          <div>
-            <div style={SETTINGS_TITLE_STYLE}>下载来源</div>
-            <div style={{ ...SETTINGS_FIELD_HINT_STYLE, marginTop: 4 }}>{SOURCE_HINTS[source]}</div>
-          </div>
-          <button
-            type="button"
-            onClick={() => void refresh()}
-            disabled={loading}
-            className="inline-flex items-center gap-1.5"
-            style={{ ...SETTINGS_FLAT_BUTTON_STYLE, minWidth: 0, padding: '8px 12px', opacity: loading ? 0.6 : 1 }}
-            title="刷新状态"
-          >
-            <RefreshCw size={13} className={loading ? 'animate-spin' : undefined} />
-            刷新
-          </button>
-        </div>
-        <div className="flex gap-2">
-          {MODEL_SOURCES.map((value) => {
-            const active = value === source
-            return (
-              <button
-                key={value}
-                type="button"
-                onClick={() => setSource(value)}
-                className="flex-1"
-                style={{
-                  ...SETTINGS_FLAT_BUTTON_STYLE,
-                  minWidth: 0,
-                  border: active
-                    ? '1px solid color-mix(in srgb, var(--color-blue) 42%, transparent)'
-                    : SETTINGS_FLAT_BUTTON_STYLE.border,
-                  background: active
-                    ? 'color-mix(in srgb, var(--color-blue) 16%, var(--surface-card-bg) 84%)'
-                    : SETTINGS_FLAT_BUTTON_STYLE.background,
-                  color: active ? 'var(--color-blue)' : 'var(--text-body)',
-                }}
-              >
-                {SOURCE_LABELS[value]}
-              </button>
-            )
-          })}
-        </div>
-      </section>
-
-      <div className="flex flex-col gap-3">
-        {packs.map((pack) => {
-          const state = packState(pack)
-          const running = state === 'downloading'
-          const percent = typeof pack.download.progressPercent === 'number' ? pack.download.progressPercent : null
-          const busy = busyId === pack.id
-          return (
-            <section
-              key={pack.id}
-              className="rounded-2xl border"
-              style={{ ...SETTINGS_SUBTLE_CARD_STYLE, padding: '16px 18px' }}
+      <SettingsGroup label="语音模型">
+        <SettingsCard>
+          <SettingsRow label="下载来源" description={SOURCE_HINTS[source]}>
+            <SettingsSegmented
+              ariaLabel="下载来源"
+              value={source}
+              onChange={setSource}
+              options={MODEL_SOURCES.map((value) => ({ value, label: SOURCE_LABELS[value] }))}
+            />
+            <button
+              type="button"
+              onClick={() => void refresh()}
+              disabled={loading}
+              className={settingsButtonClass('ghost', { size: 'sm', icon: true })}
+              title="刷新状态"
+              aria-label="刷新状态"
             >
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-start gap-3 min-w-0">
-                  <span style={{ marginTop: 2 }}>
+              <RefreshCw className={loading ? 'animate-spin' : undefined} />
+            </button>
+          </SettingsRow>
+
+          {packs.map((pack) => {
+            const state = packState(pack)
+            const running = state === 'downloading'
+            const percent = typeof pack.download.progressPercent === 'number' ? pack.download.progressPercent : null
+            const busy = busyId === pack.id
+            return (
+              <div key={pack.id} className="sx-row" style={{ alignItems: 'flex-start', paddingTop: 14, paddingBottom: 14 }}>
+                <div className="flex min-w-0 flex-1 items-start gap-3">
+                  <span
+                    className="grid h-8 w-8 shrink-0 place-items-center rounded-[9px]"
+                    style={{ background: 'var(--sx-inset-bg)' }}
+                    aria-hidden
+                  >
                     {state === 'ready' ? (
-                      <CheckCircle2 size={18} color="var(--color-green)" />
+                      <Check size={15} strokeWidth={2.4} style={{ color: 'var(--sx-title)' }} />
                     ) : running ? (
-                      <Loader2 size={18} className="animate-spin" color="var(--color-blue)" />
+                      <Loader2 size={15} className="animate-spin" style={{ color: 'var(--sx-accent)' }} />
                     ) : state === 'error' ? (
-                      <XCircle size={18} color="var(--color-red)" />
+                      <AlertCircle size={15} style={{ color: 'var(--sx-danger)' }} />
                     ) : (
-                      <HardDrive size={18} color="var(--text-muted)" />
+                      <HardDrive size={15} style={{ color: 'var(--sx-muted)' }} />
                     )}
                   </span>
-                  <div className="min-w-0">
-                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-title)' }}>{pack.displayName}</div>
-                    <div style={{ ...SETTINGS_FIELD_HINT_STYLE, marginTop: 2 }}>
+                  <div className="min-w-0 flex-1">
+                    <div className="sx-row__label">{pack.displayName}</div>
+                    <div className="sx-row__desc">
                       {pack.sizeEstimate}
                       {state === 'ready' && ' · 已安装'}
                       {state === 'missing' && ' · 未下载'}
                       {running && `${percent !== null ? ` · ${percent}%` : ' · 下载中'}`}
                     </div>
+                    {running && (
+                      <div className="sx-progress mt-2.5" style={{ maxWidth: 420 }}>
+                        <span style={{ width: `${percent ?? 8}%` }} />
+                      </div>
+                    )}
+                    {pack.download.lastMessage && (
+                      <div className="sx-meta mt-1.5" style={{ overflowWrap: 'anywhere' }}>
+                        {pack.download.lastMessage}
+                      </div>
+                    )}
+                    {pack.download.error && (
+                      <div className="sx-text-danger mt-1 text-[11.5px] leading-[1.6]" style={{ overflowWrap: 'anywhere' }}>
+                        {pack.download.error}
+                      </div>
+                    )}
+                    <div className="sx-meta mt-1" style={{ overflowWrap: 'anywhere' }}>
+                      存储位置：{pack.targetDir}
+                    </div>
                   </div>
                 </div>
-                <div className="flex-shrink-0">
+                <div className="sx-row__control">
                   {running ? (
                     <button
                       type="button"
                       onClick={() => void cancelDownload(pack.id)}
                       disabled={busy}
-                      className="inline-flex items-center gap-1.5"
-                      style={{ ...SETTINGS_FLAT_BUTTON_STYLE, minWidth: 0, padding: '8px 14px', color: 'var(--color-red)' }}
+                      className={settingsButtonClass('secondary', { size: 'sm' })}
                     >
                       取消
                     </button>
@@ -557,175 +550,102 @@ export default function ModelsRuntimeSettingsPanel() {
                       type="button"
                       onClick={() => void startDownload(pack.id)}
                       disabled={busy}
-                      className="inline-flex items-center gap-1.5"
-                      style={{ ...SETTINGS_FLAT_BUTTON_STYLE, minWidth: 0, padding: '8px 14px', opacity: busy ? 0.6 : 1 }}
+                      className={settingsButtonClass(state === 'ready' ? 'ghost' : 'secondary', { size: 'sm' })}
                     >
-                      {busy ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+                      {busy ? <Loader2 className="animate-spin" /> : <Download />}
                       {state === 'ready' ? '重新下载' : '下载'}
                     </button>
                   )}
                 </div>
               </div>
-
-              {running && (
-                <div
-                  style={{
-                    marginTop: 12,
-                    height: 6,
-                    borderRadius: 999,
-                    overflow: 'hidden',
-                    background: 'color-mix(in srgb, var(--surface-border) 60%, transparent)',
-                  }}
-                >
-                  <div
-                    style={{
-                      height: '100%',
-                      width: `${percent ?? 8}%`,
-                      borderRadius: 999,
-                      background: 'var(--color-blue)',
-                      transition: 'width 240ms ease',
-                    }}
-                  />
-                </div>
-              )}
-
-              {pack.download.lastMessage && (
-                <div style={{ ...SETTINGS_FIELD_HINT_STYLE, marginTop: 10, overflowWrap: 'anywhere' }}>
-                  {pack.download.lastMessage}
-                </div>
-              )}
-              {pack.download.error && (
-                <div style={{ fontSize: 11, lineHeight: 1.6, color: 'var(--color-red)', marginTop: 6, overflowWrap: 'anywhere' }}>
-                  {pack.download.error}
-                </div>
-              )}
-              <div style={{ ...SETTINGS_FIELD_HINT_STYLE, marginTop: 10, overflowWrap: 'anywhere' }}>
-                存储位置：{pack.targetDir}
-              </div>
-            </section>
-          )
-        })}
-        {!loading && packs.length === 0 && (
-          <div style={{ ...SETTINGS_FIELD_HINT_STYLE, padding: '12px 4px' }}>暂无可下载的模型包。</div>
-        )}
-      </div>
-
-      <section className="glass-surface-card rounded-2xl border" style={{ ...SETTINGS_CARD_STYLE, padding: '18px 20px' }}>
-        <div className="flex items-center justify-between gap-3" style={{ marginBottom: selfTest ? 14 : 0 }}>
-          <div>
-            <div style={SETTINGS_TITLE_STYLE}>下载自检</div>
-            <div style={{ ...SETTINGS_FIELD_HINT_STYLE, marginTop: 4 }}>
-              校验每个模型包的国内 / 国外节点可达性与下载链路，并验证断点续传与原子安装路径，不会真正下载权重。
+            )
+          })}
+          {!loading && packs.length === 0 && (
+            <div className="sx-row">
+              <span className="sx-row__desc" style={{ marginTop: 0 }}>暂无可下载的模型包。</span>
             </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => void runSelfTest()}
-            disabled={selfTesting}
-            className="inline-flex items-center gap-1.5"
-            style={{ ...SETTINGS_FLAT_BUTTON_STYLE, minWidth: 0, padding: '8px 12px', opacity: selfTesting ? 0.6 : 1 }}
-          >
-            {selfTesting ? <Loader2 size={13} className="animate-spin" /> : <Activity size={13} />}
-            运行自检
-          </button>
-        </div>
-        {selfTest && (
-          <div className="flex flex-col gap-2">
-            {selfTest.entries.map((entry) => (
-              <div key={entry.id} className="rounded-xl border" style={{ ...SETTINGS_SUBTLE_CARD_STYLE, padding: '12px 14px' }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-title)' }}>{entry.displayName}</div>
-                <div className="flex flex-col gap-1.5" style={{ marginTop: 8 }}>
+          )}
+        </SettingsCard>
+      </SettingsGroup>
+
+      <SettingsGroup label="诊断">
+        <SettingsCard
+          title="下载自检"
+          description="校验每个模型包的国内 / 国外节点可达性与下载链路，并验证断点续传与原子安装路径，不会真正下载权重。"
+          actions={(
+            <button
+              type="button"
+              onClick={() => void runSelfTest()}
+              disabled={selfTesting}
+              className={settingsButtonClass('secondary', { size: 'sm' })}
+            >
+              {selfTesting ? <Loader2 className="animate-spin" /> : <Activity />}
+              运行自检
+            </button>
+          )}
+        >
+          {selfTest && (
+            <div className="sx-card__body flex flex-col gap-2.5">
+              {selfTest.entries.map((entry) => (
+                <div key={entry.id} className="sx-inset flex flex-col gap-1.5" style={{ padding: '10px 14px' }}>
+                  <div className="text-[12.5px] font-semibold" style={{ color: 'var(--sx-title)' }}>{entry.displayName}</div>
                   {entry.probes.map((probe) => (
-                    <div key={probe.source} className="flex items-center gap-2" style={{ fontSize: 11, color: 'var(--text-body)' }}>
-                      {probe.reachable ? (
-                        <CheckCircle2 size={13} color="var(--color-green)" />
-                      ) : (
-                        <XCircle size={13} color="var(--color-red)" />
-                      )}
-                      <span style={{ minWidth: 52 }}>{SOURCE_LABELS[probe.source]}</span>
-                      <span style={{ color: 'var(--text-muted)', overflowWrap: 'anywhere' }}>
+                    <ProbeLine key={probe.source} ok={probe.reachable}>
+                      <span className="inline-block" style={{ minWidth: 52, color: 'var(--sx-body)' }}>{SOURCE_LABELS[probe.source]}</span>
+                      <span style={{ color: probe.reachable ? 'var(--sx-muted)' : undefined }}>
                         {probe.endpoint}
                         {probe.reachable && probe.latencyMs !== null ? ` · ${probe.latencyMs}ms` : ' · 不可达'}
                         {probe.coordinatesOk ? '' : ' · 坐标解析失败'}
                       </span>
-                    </div>
+                    </ProbeLine>
                   ))}
+                  <ProbeLine ok={entry.integrityOk}>完整性：{entry.integrityDetail}</ProbeLine>
                 </div>
-                <div
-                  className="flex items-center gap-2"
-                  style={{ fontSize: 11, marginTop: 8, color: entry.integrityOk ? 'var(--color-green)' : 'var(--color-red)' }}
-                >
-                  {entry.integrityOk ? <CheckCircle2 size={13} /> : <XCircle size={13} />}
-                  完整性：{entry.integrityDetail}
-                </div>
+              ))}
+              <div className="sx-meta">
+                自检完成于 {new Date(selfTest.finishedAt).toLocaleTimeString()}
               </div>
-            ))}
-            <div style={{ ...SETTINGS_FIELD_HINT_STYLE, marginTop: 2 }}>
-              自检完成于 {new Date(selfTest.finishedAt).toLocaleTimeString()}
             </div>
-          </div>
-        )}
-      </section>
+          )}
+        </SettingsCard>
 
-      <section className="glass-surface-card rounded-2xl border" style={{ ...SETTINGS_CARD_STYLE, padding: '18px 20px' }}>
-        <div className="flex items-center justify-between gap-3" style={{ marginBottom: skillSourceTest ? 14 : 0 }}>
-          <div>
-            <div style={SETTINGS_TITLE_STYLE}>技能来源自检</div>
-            <div style={{ ...SETTINGS_FIELD_HINT_STYLE, marginTop: 4 }}>
-              校验从链接安装技能的国内 / 国外下载节点可达性、GitHub 提交溯源解析与暂存目录读写，不会真正下载技能。
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => void runSkillSourceSelfTest()}
-            disabled={skillSourceTesting}
-            className="inline-flex items-center gap-1.5"
-            style={{ ...SETTINGS_FLAT_BUTTON_STYLE, minWidth: 0, padding: '8px 12px', opacity: skillSourceTesting ? 0.6 : 1 }}
-          >
-            {skillSourceTesting ? <Loader2 size={13} className="animate-spin" /> : <Activity size={13} />}
-            运行自检
-          </button>
-        </div>
-        {skillSourceTest && (
-          <div className="flex flex-col gap-2">
-            <div className="rounded-xl border" style={{ ...SETTINGS_SUBTLE_CARD_STYLE, padding: '12px 14px' }}>
-              <div className="flex flex-col gap-1.5">
+        <SettingsCard
+          title="技能来源自检"
+          description="校验从链接安装技能的国内 / 国外下载节点可达性、GitHub 提交溯源解析与暂存目录读写，不会真正下载技能。"
+          actions={(
+            <button
+              type="button"
+              onClick={() => void runSkillSourceSelfTest()}
+              disabled={skillSourceTesting}
+              className={settingsButtonClass('secondary', { size: 'sm' })}
+            >
+              {skillSourceTesting ? <Loader2 className="animate-spin" /> : <Activity />}
+              运行自检
+            </button>
+          )}
+        >
+          {skillSourceTest && (
+            <div className="sx-card__body flex flex-col gap-2.5">
+              <div className="sx-inset flex flex-col gap-1.5" style={{ padding: '10px 14px' }}>
                 {skillSourceTest.probes.map((probe) => (
-                  <div key={probe.source} className="flex items-center gap-2" style={{ fontSize: 11, color: 'var(--text-body)' }}>
-                    {probe.reachable ? (
-                      <CheckCircle2 size={13} color="var(--color-green)" />
-                    ) : (
-                      <XCircle size={13} color="var(--color-red)" />
-                    )}
-                    <span style={{ minWidth: 52 }}>{SOURCE_LABELS[probe.source]}</span>
-                    <span style={{ color: 'var(--text-muted)', overflowWrap: 'anywhere' }}>
+                  <ProbeLine key={probe.source} ok={probe.reachable}>
+                    <span className="inline-block" style={{ minWidth: 52, color: 'var(--sx-body)' }}>{SOURCE_LABELS[probe.source]}</span>
+                    <span style={{ color: probe.reachable ? 'var(--sx-muted)' : undefined }}>
                       {probe.endpoint}
                       {probe.reachable && probe.latencyMs !== null ? ` · ${probe.latencyMs}ms` : ' · 不可达'}
                     </span>
-                  </div>
+                  </ProbeLine>
                 ))}
+                <ProbeLine ok={skillSourceTest.refResolveOk}>提交溯源：{skillSourceTest.refResolveDetail}</ProbeLine>
+                <ProbeLine ok={skillSourceTest.stagingOk}>暂存目录：{skillSourceTest.stagingDetail}</ProbeLine>
               </div>
-              <div
-                className="flex items-center gap-2"
-                style={{ fontSize: 11, marginTop: 8, color: skillSourceTest.refResolveOk ? 'var(--color-green)' : 'var(--color-red)' }}
-              >
-                {skillSourceTest.refResolveOk ? <CheckCircle2 size={13} /> : <XCircle size={13} />}
-                提交溯源：{skillSourceTest.refResolveDetail}
-              </div>
-              <div
-                className="flex items-center gap-2"
-                style={{ fontSize: 11, marginTop: 6, color: skillSourceTest.stagingOk ? 'var(--color-green)' : 'var(--color-red)' }}
-              >
-                {skillSourceTest.stagingOk ? <CheckCircle2 size={13} /> : <XCircle size={13} />}
-                暂存目录：{skillSourceTest.stagingDetail}
+              <div className="sx-meta">
+                自检完成于 {new Date(skillSourceTest.finishedAt).toLocaleTimeString()}
               </div>
             </div>
-            <div style={{ ...SETTINGS_FIELD_HINT_STYLE, marginTop: 2 }}>
-              自检完成于 {new Date(skillSourceTest.finishedAt).toLocaleTimeString()}
-            </div>
-          </div>
-        )}
-      </section>
+          )}
+        </SettingsCard>
+      </SettingsGroup>
     </div>
   )
 }

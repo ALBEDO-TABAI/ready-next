@@ -59,18 +59,20 @@ const getStoredAccent = (): ThemeAccent => {
     return 'blue'
 }
 
+// 四档强调色按 OKLCH 等明度配平（以 Ready 橘红 L≈0.67 为锚）：日间 L≈0.61–0.63、夜间 L≈0.71–0.75，
+// 让任一档在暖纸底 / 深色底上的视觉分量一致。原薄荷绿 L=0.77 在纸底只有 1.8:1，改为翡翠绿。
 const accentPalettes: Record<ThemeAccent, Record<ResolvedTheme, { color: string; light: string }>> = {
     blue: {
-        light: { color: '#5B8DEF', light: 'rgba(91, 141, 239, 0.1)' },
-        dark: { color: '#6B9BFF', light: 'rgba(107, 155, 255, 0.15)' },
+        light: { color: '#5084E7', light: 'rgba(80, 132, 231, 0.1)' },
+        dark: { color: '#72A3FD', light: 'rgba(114, 163, 253, 0.15)' },
     },
     green: {
-        light: { color: '#34D399', light: 'rgba(52, 211, 153, 0.1)' },
-        dark: { color: '#3EE8A8', light: 'rgba(62, 232, 168, 0.15)' },
+        light: { color: '#099F79', light: 'rgba(9, 159, 121, 0.1)' },
+        dark: { color: '#4AC59D', light: 'rgba(74, 197, 157, 0.15)' },
     },
     purple: {
-        light: { color: '#8B5CF6', light: 'rgba(139, 92, 246, 0.1)' },
-        dark: { color: '#9B6CFF', light: 'rgba(155, 108, 255, 0.15)' },
+        light: { color: '#8A61EC', light: 'rgba(138, 97, 236, 0.1)' },
+        dark: { color: '#A886FF', light: 'rgba(168, 134, 255, 0.15)' },
     },
     orange: {
         light: { color: '#FF4B2B', light: 'rgba(255, 75, 43, 0.12)' },
@@ -91,7 +93,7 @@ const solidSkinRoseAccents: Partial<Record<ThemeSkin, Record<ResolvedTheme, { co
     },
 }
 
-const resolveAccentPalette = (accent: ThemeAccent, resolved: ResolvedTheme, skin: ThemeSkin) => {
+export const resolveAccentPalette = (accent: ThemeAccent, resolved: ResolvedTheme, skin: ThemeSkin) => {
     const skinPalette = accent === 'purple' ? solidSkinRoseAccents[skin] : undefined
     return (skinPalette ?? accentPalettes[accent])[resolved]
 }

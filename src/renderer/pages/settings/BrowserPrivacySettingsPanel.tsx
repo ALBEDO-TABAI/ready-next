@@ -1,13 +1,12 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { CheckCircle2, ChevronRight, Loader2, RefreshCw, Trash2, XCircle } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { Check, ChevronRight, Loader2, RefreshCw, Search, Trash2 } from 'lucide-react'
 import {
-  SETTINGS_CARD_STYLE,
-  SETTINGS_DANGER_BUTTON_STYLE,
-  SETTINGS_INPUT_STYLE,
-  SETTINGS_SECONDARY_BUTTON_STYLE,
-  SETTINGS_SUBTLE_CARD_STYLE,
-} from '../../components/settings/settings-theme'
-import { SETTINGS_ROW_CONTROL_MIN_WIDTH } from './settings-shared'
+  SETTINGS_ROW_CONTROL_MIN_WIDTH,
+  SettingsCard,
+  SettingsNotice,
+  settingsButtonClass,
+} from './settings-shared'
 import type {
   BrowserCookieDomainGroup,
   BrowserCookieRecord,
@@ -298,61 +297,51 @@ export function BrowserPrivacySettingsPanel() {
   const totalCookies = summary?.cookieCount ?? 0
 
   return (
-    <div className="flex flex-col gap-7">
+    <div className="flex flex-col gap-5">
       {/* ===== 清除浏览数据 ===== */}
-      <div
-        className="glass-surface-card rounded-2xl border"
-        style={{ ...SETTINGS_CARD_STYLE, padding: '22px 24px' }}
-      >
-        <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-[13px] font-semibold" style={{ color: 'var(--text-title)' }}>
-              清除浏览数据
-            </div>
-            <div className="text-[11px]" style={{ marginTop: 4, color: 'var(--text-light)' }}>
-              清除浏览历史、下载记录、Cookie 和缓存
-            </div>
-          </div>
+      <SettingsCard
+        title="清除浏览数据"
+        description="清除浏览历史、下载记录、Cookie 和缓存"
+        actions={(
           <select
             value={timeRange}
+            aria-label="时间范围"
             onChange={(e) => setTimeRange(e.target.value as TimeRangeValue)}
-            className="flex-shrink-0 rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 cursor-pointer"
-            style={{
-              ...SETTINGS_INPUT_STYLE,
-              padding: '8px 32px 8px 14px',
-              width: 'auto',
-              minWidth: SETTINGS_ROW_CONTROL_MIN_WIDTH,
-            }}
+            className="sx-select"
+            style={{ minWidth: SETTINGS_ROW_CONTROL_MIN_WIDTH }}
           >
             {TIME_RANGE_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
           </select>
-        </div>
-
+        )}
+      >
         {summaryError && (
-          <div className="text-[11px]" style={{ marginTop: 8, color: 'var(--color-red, #d44)' }}>
+          <div className="sx-text-danger text-[12px]" style={{ padding: '0 20px 12px' }}>
             {summaryError}
           </div>
         )}
 
-        <div className="flex flex-col gap-4" style={{ marginTop: 20 }}>
+        <div>
           {CLEAR_ITEMS.map((item) => (
-            <label key={item.id} className="flex items-start gap-3 cursor-pointer select-none">
+            <label
+              key={item.id}
+              className="sx-row cursor-pointer select-none transition-colors hover:bg-[var(--sx-hover)]"
+              style={{ justifyContent: 'flex-start', gap: 14, minHeight: 58 }}
+            >
               <input
                 type="checkbox"
                 checked={checkedItems[item.id]}
                 onChange={(e) =>
                   setCheckedItems((prev) => ({ ...prev, [item.id]: e.target.checked }))
                 }
-                className="h-4 w-4 cursor-pointer accent-[var(--color-blue)]"
-                style={{ marginTop: 2 }}
+                className="sx-check"
               />
-              <span className="min-w-0">
-                <span className="block text-[12px] font-medium" style={{ color: 'var(--text-body)' }}>
+              <span className="sx-row__text">
+                <span className="sx-row__label block">
                   {item.label}
                 </span>
-                <span className="block text-[11px]" style={{ marginTop: 2, color: 'var(--text-light)' }}>
+                <span className="sx-row__desc block">
                   {summaryLoading ? '…' : itemDescriptions[item.id]}
                 </span>
               </span>
@@ -360,89 +349,65 @@ export function BrowserPrivacySettingsPanel() {
           ))}
         </div>
 
-        {showFullClearNote && (
-          <div className="text-[11px]" style={{ marginTop: 12, color: 'var(--text-muted)' }}>
-            Cookie、站点数据与缓存不支持按时间范围清除，勾选后将全部清除。
-          </div>
-        )}
-
-        <div className="flex justify-end" style={{ marginTop: 20 }}>
+        <div className="sx-card__footer">
+          {showFullClearNote && (
+            <div className="sx-meta mr-auto">
+              Cookie、站点数据与缓存不支持按时间范围清除，勾选后将全部清除。
+            </div>
+          )}
           <button
+            type="button"
             onClick={requestClear}
             disabled={clearing || selectedItems.length === 0}
-            className="flex items-center gap-1.5 rounded-lg text-[12px] font-medium transition-[filter,transform,background-color,opacity] duration-200 hover:brightness-95 active:scale-[0.98]"
-            style={{
-              ...SETTINGS_DANGER_BUTTON_STYLE,
-              minWidth: SETTINGS_ROW_CONTROL_MIN_WIDTH,
-              justifyContent: 'center',
-              opacity: clearing || selectedItems.length === 0 ? 0.6 : 1,
-              cursor: clearing || selectedItems.length === 0 ? 'not-allowed' : 'pointer',
-            }}
+            aria-busy={clearing || undefined}
+            className={settingsButtonClass('danger')}
+            style={{ minWidth: SETTINGS_ROW_CONTROL_MIN_WIDTH }}
           >
-            {clearing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+            {clearing ? <Loader2 className="animate-spin" /> : <Trash2 />}
             {clearing ? '清除中…' : '清除所选数据'}
           </button>
         </div>
+      </SettingsCard>
 
-        {clearResult && (
-          <div
-            className="rounded-xl"
-            style={{ ...SETTINGS_SUBTLE_CARD_STYLE, marginTop: 16, padding: '12px 14px' }}
-          >
-            <div className="flex items-center gap-2">
-              {clearResult.errors.length === 0
-                ? <CheckCircle2 className="w-3.5 h-3.5" style={{ color: 'var(--color-green)' }} />
-                : <XCircle className="w-3.5 h-3.5" style={{ color: 'var(--color-red, #d44)' }} />}
-              <span className="text-[12px] font-medium" style={{ color: 'var(--text-body)' }}>
-                {clearResult.errors.length === 0
-                  ? `已清除：${clearResult.clearedLabels.join('、')}`
-                  : clearResult.clearedLabels.length > 0
-                    ? `部分完成：已清除 ${clearResult.clearedLabels.join('、')}，${clearResult.errors.length} 项失败`
-                    : '清除失败'}
-              </span>
-            </div>
-            {clearResult.errors.length > 0 && (
-              <ul className="list-disc text-[11px]" style={{ marginTop: 8, paddingLeft: 20, color: 'var(--text-light)' }}>
-                {clearResult.errors.slice(0, 5).map((err, idx) => (
-                  <li key={idx}>{err}</li>
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
-      </div>
+      {clearResult && (
+        <SettingsNotice
+          tone={clearResult.errors.length === 0 ? 'plain' : 'danger'}
+          icon={clearResult.errors.length === 0 ? Check : undefined}
+          title={clearResult.errors.length === 0
+            ? `已清除：${clearResult.clearedLabels.join('、')}`
+            : clearResult.clearedLabels.length > 0
+              ? `部分完成：已清除 ${clearResult.clearedLabels.join('、')}，${clearResult.errors.length} 项失败`
+              : '清除失败'}
+        >
+          {clearResult.errors.length > 0 && (
+            <ul className="mt-1 list-disc pl-4 text-[11.5px]">
+              {clearResult.errors.slice(0, 5).map((err, idx) => (
+                <li key={idx}>{err}</li>
+              ))}
+            </ul>
+          )}
+        </SettingsNotice>
+      )}
 
       {/* ===== Cookie 管理 ===== */}
-      <div
-        className="glass-surface-card rounded-2xl border"
-        style={{ ...SETTINGS_CARD_STYLE, padding: '22px 24px' }}
-      >
-        <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-[13px] font-semibold" style={{ color: 'var(--text-title)' }}>
-              Cookie 管理
-            </div>
-            <div className="text-[11px]" style={{ marginTop: 4, color: 'var(--text-light)' }}>
-              {summary
-                ? `${summary.cookieDomainCount} 个站点 · ${summary.cookieCount} 个 Cookie`
-                : '查看并删除各站点存储在本地的 Cookie'}
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
+      <SettingsCard
+        title="Cookie 管理"
+        description={summary
+          ? `${summary.cookieDomainCount} 个站点 · ${summary.cookieCount} 个 Cookie`
+          : '查看并删除各站点存储在本地的 Cookie'}
+        actions={(
+          <>
             <button
+              type="button"
               onClick={() => { void refreshCookies(); void refreshSummary() }}
               disabled={cookiesLoading}
-              className="flex items-center gap-1.5 rounded-lg text-[12px] font-medium transition-[filter,transform,background-color,opacity] duration-200 hover:brightness-95 active:scale-[0.98]"
-              style={{
-                ...SETTINGS_SECONDARY_BUTTON_STYLE,
-                opacity: cookiesLoading ? 0.6 : 1,
-                cursor: cookiesLoading ? 'not-allowed' : 'pointer',
-              }}
+              className={settingsButtonClass('secondary')}
             >
-              <RefreshCw className={`w-3 h-3 ${cookiesLoading ? 'animate-spin' : ''}`} />
+              <RefreshCw className={cookiesLoading ? 'animate-spin' : ''} />
               刷新
             </button>
             <button
+              type="button"
               onClick={() =>
                 setConfirm({
                   title: '确认清除全部 Cookie',
@@ -452,45 +417,53 @@ export function BrowserPrivacySettingsPanel() {
                 })
               }
               disabled={clearingAllCookies || totalCookies === 0}
-              className="flex items-center gap-1.5 rounded-lg text-[12px] font-medium transition-[filter,transform,background-color,opacity] duration-200 hover:brightness-95 active:scale-[0.98]"
-              style={{
-                ...SETTINGS_DANGER_BUTTON_STYLE,
-                opacity: clearingAllCookies || totalCookies === 0 ? 0.6 : 1,
-                cursor: clearingAllCookies || totalCookies === 0 ? 'not-allowed' : 'pointer',
-              }}
+              aria-busy={clearingAllCookies || undefined}
+              className={settingsButtonClass('danger')}
             >
-              {clearingAllCookies ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+              {clearingAllCookies ? <Loader2 className="animate-spin" /> : <Trash2 />}
               全部删除
             </button>
+          </>
+        )}
+      >
+        <div style={{ padding: '0 20px 14px' }}>
+          <div className="relative" style={{ maxWidth: 340 }}>
+            <Search
+              className="pointer-events-none absolute left-3 top-1/2 h-[14px] w-[14px] -translate-y-1/2"
+              strokeWidth={1.9}
+              style={{ color: 'var(--sx-subtle)' }}
+            />
+            <input
+              value={cookieSearch}
+              onChange={(e) => setCookieSearch(e.target.value)}
+              placeholder="按域名搜索"
+              aria-label="按域名搜索"
+              className="sx-input"
+              style={{ paddingLeft: 32 }}
+            />
           </div>
+          {cookieError && (
+            <div className="sx-text-danger mt-2 text-[12px]">
+              {cookieError}
+            </div>
+          )}
         </div>
 
-        <input
-          value={cookieSearch}
-          onChange={(e) => setCookieSearch(e.target.value)}
-          placeholder="按域名搜索"
-          className="block text-[12px]"
-          style={{ ...SETTINGS_INPUT_STYLE, marginTop: 20, padding: '9px 14px', maxWidth: 340 }}
-        />
-
-        {cookieError && (
-          <div className="text-[11px]" style={{ marginTop: 8, color: 'var(--color-red, #d44)' }}>
-            {cookieError}
-          </div>
-        )}
-
-        <div
-          className="max-h-[440px] overflow-y-auto"
-          style={{ ...SETTINGS_SUBTLE_CARD_STYLE, marginTop: 16, padding: 10 }}
-        >
+        <div className="max-h-[440px] overflow-y-auto rounded-b-[15px]">
           {cookiesLoading && (
-            <div className="flex items-center gap-2 text-[12px]" style={{ padding: '32px 16px', color: 'var(--text-light)' }}>
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            <div
+              className="flex items-center justify-center gap-2 text-[12px]"
+              style={{ padding: '28px 16px', color: 'var(--sx-muted)' }}
+            >
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
               正在读取 Cookie…
             </div>
           )}
           {!cookiesLoading && filteredGroups.length === 0 && (
-            <div className="text-[12px]" style={{ padding: '32px 16px', color: 'var(--text-light)' }}>
+            <div
+              className="text-center text-[12px]"
+              style={{ padding: '28px 16px', color: 'var(--sx-muted)' }}
+            >
               {cookieSearch.trim() ? '没有匹配的站点' : '暂无 Cookie'}
             </div>
           )}
@@ -499,32 +472,41 @@ export function BrowserPrivacySettingsPanel() {
             return (
               <div key={group.domain}>
                 <div
-                  className="group flex items-center rounded-[10px] transition-colors duration-150 hover:bg-[var(--bg-hover)]"
-                  style={expanded ? { background: 'var(--bg-hover)' } : undefined}
+                  className="sx-table__row group"
+                  style={{
+                    gridTemplateColumns: 'minmax(0, 1fr) auto',
+                    minHeight: 46,
+                    borderRadius: 0,
+                    paddingRight: 12,
+                    ...(expanded ? { background: 'var(--sx-hover)' } : null),
+                  }}
                 >
                   <button
+                    type="button"
                     onClick={() => setExpandedDomain(expanded ? null : group.domain)}
-                    className="flex min-w-0 flex-1 cursor-pointer items-center gap-2.5 text-left"
-                    style={{ padding: '10px 14px' }}
+                    aria-expanded={expanded}
+                    className="flex min-w-0 cursor-pointer items-center gap-2.5 self-stretch text-left"
                   >
                     <ChevronRight
                       className={`h-3.5 w-3.5 flex-shrink-0 transition-transform duration-150 ${expanded ? 'rotate-90' : ''}`}
-                      style={{ color: 'var(--text-light)' }}
+                      strokeWidth={2}
+                      style={{ color: 'var(--sx-subtle)' }}
                     />
                     <span
-                      className={`truncate font-mono text-[12px] ${expanded ? 'font-medium' : ''}`}
-                      style={{ color: expanded ? 'var(--text-title)' : 'var(--text-body)' }}
+                      className={`sx-mono truncate text-[12.5px] ${expanded ? 'font-medium' : ''}`}
+                      style={{ color: expanded ? 'var(--sx-title)' : 'var(--sx-body)' }}
                     >
                       {group.domain}
                     </span>
                     <span
-                      className="flex-shrink-0 text-[11px] tabular-nums"
-                      style={{ marginLeft: 'auto', paddingLeft: 16, color: 'var(--text-light)' }}
+                      className="flex-shrink-0 text-[11.5px] tabular-nums"
+                      style={{ marginLeft: 'auto', paddingLeft: 16, color: 'var(--sx-subtle)' }}
                     >
                       {group.cookies.length} 个
                     </span>
                   </button>
                   <button
+                    type="button"
                     onClick={() =>
                       setConfirm({
                         title: '确认删除站点 Cookie',
@@ -535,58 +517,59 @@ export function BrowserPrivacySettingsPanel() {
                     }
                     disabled={busyDomain === group.domain}
                     title="删除该站点全部 Cookie"
-                    className={`flex-shrink-0 cursor-pointer rounded-lg transition-[opacity,background-color] duration-150 hover:bg-[var(--bg-hover)] ${
-                      expanded || busyDomain === group.domain ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                    aria-label={`删除 ${group.domain} 的全部 Cookie`}
+                    className={`${settingsButtonClass('danger-quiet', { size: 'sm', icon: true })} ml-1 transition-opacity ${
+                      expanded || busyDomain === group.domain ? 'opacity-100' : 'opacity-0 focus-visible:opacity-100 group-hover:opacity-100'
                     }`}
-                    style={{ margin: '0 8px 0 4px', padding: 8, color: 'var(--color-red)' }}
                   >
                     {busyDomain === group.domain
-                      ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      : <Trash2 className="h-3.5 w-3.5" />}
+                      ? <Loader2 className="animate-spin" />
+                      : <Trash2 />}
                   </button>
                 </div>
                 {expanded && (
-                  // 左缘 38px = 行内衬 14 + chevron 14 + 间距 10，与域名文字起点严格对齐。
-                  <div className="flex flex-col gap-2.5" style={{ margin: '10px 10px 14px 38px' }}>
-                    {group.cookies.map((cookie) => {
+                  // 左缘 44px = 行内衬 20 + chevron 14 + 间距 10，与域名文字起点严格对齐。
+                  <div className="sx-inset" style={{ margin: '4px 20px 14px 44px' }}>
+                    {group.cookies.map((cookie, cookieIndex) => {
                       const key = `${group.domain}|${cookie.name}|${cookie.path}`
                       return (
                         <div
                           key={key}
-                          className="group/cookie rounded-[10px]"
+                          className="group/cookie"
                           style={{
-                            padding: '12px 16px',
-                            border: '1px solid color-mix(in srgb, var(--surface-border) 40%, transparent)',
-                            background: 'color-mix(in srgb, var(--surface-floating-bg) 62%, transparent)',
+                            padding: '10px 10px 10px 14px',
+                            borderTop: cookieIndex === 0 ? undefined : '1px solid var(--sx-divider)',
                           }}
                         >
                           <div className="flex items-center gap-2.5">
-                            <span className="min-w-0 truncate font-mono text-[12px] font-medium" style={{ color: 'var(--text-body)' }}>
+                            <span className="sx-mono min-w-0 truncate text-[12px] font-medium" style={{ color: 'var(--sx-body)' }}>
                               {cookie.name}
                             </span>
                             <span
-                              className="flex-shrink-0 text-[11px]"
-                              style={{ marginLeft: 'auto', color: 'var(--text-light)' }}
+                              className="sx-meta flex-shrink-0"
+                              style={{ marginLeft: 'auto' }}
                             >
                               {cookieMetaLine(cookie)}
                             </span>
                             <button
+                              type="button"
                               onClick={() => { void removeSingleCookie(cookie, key) }}
                               disabled={busyCookieKey === key}
                               title="删除此 Cookie"
-                              className={`flex-shrink-0 cursor-pointer rounded-md transition-[opacity,background-color] duration-150 hover:bg-[var(--bg-hover)] ${
-                                busyCookieKey === key ? 'opacity-100' : 'opacity-0 group-hover/cookie:opacity-100'
+                              aria-label={`删除 Cookie ${cookie.name}`}
+                              className={`${settingsButtonClass('danger-quiet', { size: 'sm', icon: true })} transition-opacity ${
+                                busyCookieKey === key ? 'opacity-100' : 'opacity-0 focus-visible:opacity-100 group-hover/cookie:opacity-100'
                               }`}
-                              style={{ padding: 6, color: 'var(--color-red)' }}
+                              style={{ width: 24, height: 24 }}
                             >
                               {busyCookieKey === key
-                                ? <Loader2 className="h-3 w-3 animate-spin" />
-                                : <Trash2 className="h-3 w-3" />}
+                                ? <Loader2 className="animate-spin" />
+                                : <Trash2 />}
                             </button>
                           </div>
                           <div
-                            className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] leading-4"
-                            style={{ marginTop: 8, color: 'var(--text-muted)' }}
+                            className="sx-mono overflow-hidden text-ellipsis whitespace-nowrap text-[11px] leading-4"
+                            style={{ marginTop: 4, paddingRight: 34, color: 'var(--sx-muted)' }}
                           >
                             {cookie.value || '（空值）'}
                           </div>
@@ -599,54 +582,51 @@ export function BrowserPrivacySettingsPanel() {
             )
           })}
         </div>
-      </div>
+      </SettingsCard>
 
       {/* Confirmation modal — same pattern as StorageSettingsPanel */}
-      {confirm && (
+      {confirm && createPortal(
         <div
           data-ready-native-overlay=""
-          className="fixed inset-0 z-[100] flex items-center justify-center"
-          style={{ background: 'rgba(0,0,0,0.32)' }}
+          className="sx-scrim"
           onClick={() => setConfirm(null)}
         >
           <div
-            className="glass-surface-card rounded-2xl border"
-            style={{
-              ...SETTINGS_CARD_STYLE,
-              padding: '20px 22px',
-              width: 360,
-              maxWidth: 'calc(100vw - 48px)',
-            }}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="browser-privacy-confirm-title"
+            className="sx-dialog"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="text-[14px] font-semibold" style={{ color: 'var(--text-title)' }}>
+            <div id="browser-privacy-confirm-title" className="sx-card-title">
               {confirm.title}
             </div>
-            <div className="text-[12px] leading-5" style={{ marginTop: 8, color: 'var(--text-light)' }}>
+            <div className="mt-2 text-[12.5px] leading-[1.65]" style={{ color: 'var(--sx-muted)' }}>
               {confirm.message}
             </div>
-            <div className="flex justify-end gap-2" style={{ marginTop: 16 }}>
+            <div className="sx-dialog__actions">
               <button
+                type="button"
                 onClick={() => setConfirm(null)}
-                className="rounded-lg text-[12px] font-medium transition-[filter,transform,background-color,opacity] duration-200 hover:brightness-95 active:scale-[0.98]"
-                style={{ ...SETTINGS_SECONDARY_BUTTON_STYLE, padding: '8px 14px' }}
+                className={settingsButtonClass('secondary')}
               >
                 取消
               </button>
               <button
+                type="button"
                 onClick={() => {
                   const action = confirm.action
                   setConfirm(null)
                   void action()
                 }}
-                className="rounded-lg text-[12px] font-medium transition-[filter,transform,background-color,opacity] duration-200 hover:brightness-95 active:scale-[0.98]"
-                style={{ ...SETTINGS_DANGER_BUTTON_STYLE, padding: '8px 14px' }}
+                className={settingsButtonClass('danger')}
               >
                 {confirm.confirmLabel}
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )

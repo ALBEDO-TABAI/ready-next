@@ -66,8 +66,8 @@
   --border-horizontal: transparent;
 
   /* Semantic colors */
-  --color-blue: #5B8DEF;
-  --color-blue-light: rgba(91, 141, 239, 0.1);
+  --color-blue: #5084E7;
+  --color-blue-light: rgba(80, 132, 231, 0.1);
   --accent-primary: var(--color-blue);
   --accent-primary-light: var(--color-blue-light);
   --color-green: #34D399;
@@ -226,8 +226,8 @@ html[data-theme='dark'] {
   /* UI Optimization: Hide horizontal borders */
   --border-horizontal: transparent;
 
-  --color-blue: #6B9BFF;
-  --color-blue-light: rgba(107, 155, 255, 0.15);
+  --color-blue: #72A3FD;
+  --color-blue-light: rgba(114, 163, 253, 0.15);
   --color-green: #3EE8A8;
   --color-green-light: rgba(62, 232, 168, 0.15);
   --color-green-medium: rgba(62, 232, 168, 0.22);

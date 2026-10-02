@@ -1,12 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { WechatLoginControl } from './WechatLoginControl'
-import { AlertTriangle, Bot, CheckCircle2, ChevronDown, ChevronUp, Eye, EyeOff, Loader2, MessageSquare, RefreshCcw, Send, Trash2, XCircle } from 'lucide-react'
+import { Bot, ChevronDown, ChevronUp, Eye, EyeOff, Loader2, MessageSquareDashed, RefreshCcw, Send, Trash2 } from 'lucide-react'
 import {
-  SETTINGS_CARD_STYLE,
-  SETTINGS_INPUT_STYLE,
-  SETTINGS_PRIMARY_BUTTON_STYLE,
-  SETTINGS_SECONDARY_BUTTON_STYLE,
-} from './settings-theme'
+  SettingsCard,
+  SettingsGroup,
+  SettingsNotice,
+  SettingsRow,
+  SettingsSegmented,
+  SettingsStatus,
+  SettingsSwitch,
+  settingsButtonClass,
+  type SettingsTone,
+} from '../../pages/settings/settings-shared'
 
 type IMTab = 'imessage' | 'telegram' | 'feishu' | 'wechat'
 
@@ -62,26 +67,67 @@ interface RemoteAttachmentCacheStatsData {
   }>
 }
 
-const panelCardStyle = {
-  ...SETTINGS_CARD_STYLE,
-}
-
-const fieldStyle = {
-  ...SETTINGS_INPUT_STYLE,
-  padding: '10px 14px',
-}
-
-const secondaryButtonStyle = {
-  ...SETTINGS_SECONDARY_BUTTON_STYLE,
-}
-
-const primaryButtonStyle = {
-  ...SETTINGS_PRIMARY_BUTTON_STYLE,
-}
-
 const WECHAT_CHANNEL_ID = 'channel-wechat-openclaw-default'
 
+const IM_TABS: { value: IMTab; label: string }[] = [
+  { value: 'imessage', label: 'iMessage' },
+  { value: 'telegram', label: 'Telegram' },
+  { value: 'feishu', label: '飞书' },
+  { value: 'wechat', label: '微信' },
+]
+
+type ChannelHealth = { tone: SettingsTone; label: string }
+
+// 文案里用反引号标出的命令 / 事件名渲染成等宽小片段。
+function withInlineCode(text: string) {
+  return text.split(/`([^`]+)`/).map((part, index) => (index % 2 === 1
+    ? <code key={index} className="sx-mono rounded-[5px] px-1 py-px text-[11.5px]" style={{ background: 'var(--sx-inset-bg)', color: 'var(--sx-title)' }}>{part}</code>
+    : part))
+}
+
+// 带「显示/隐藏」按钮的密钥输入框：眼睛按钮是凹槽内的幽灵图标按钮。
+function SecretInput({
+  id,
+  value,
+  onChange,
+  placeholder,
+  visible,
+  onToggleVisible,
+}: {
+  id: string
+  value: string
+  onChange: (value: string) => void
+  placeholder: string
+  visible: boolean
+  onToggleVisible: () => void
+}) {
+  return (
+    <div className="relative">
+      <input
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        type={visible ? 'text' : 'password'}
+        autoComplete="off"
+        className="sx-input sx-input--mono"
+        style={{ paddingRight: 40 }}
+      />
+      <button
+        type="button"
+        className={settingsButtonClass('ghost', { size: 'sm', icon: true, className: 'absolute right-[3px] top-1/2 -translate-y-1/2' })}
+        onClick={onToggleVisible}
+        title="显示/隐藏"
+        aria-label="显示/隐藏"
+      >
+        {visible ? <EyeOff /> : <Eye />}
+      </button>
+    </div>
+  )
+}
+
 export default function RemoteIMSettingsPanel() {
+  const fieldId = useId()
   const [tab, setTab] = useState<IMTab>('feishu')
   const [channels, setChannels] = useState<ChannelData[]>([])
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatusData | null>(null)
@@ -351,531 +397,484 @@ export default function RemoteIMSettingsPanel() {
 
   const currentAdapters = runtimeStatus?.heartbeat?.adapters || []
 
-  return (
-    <div className="flex flex-col" style={{ gap: 28 }}>
-      <div className="text-[12px] leading-6" style={{ color: 'var(--text-muted)' }}>
-        微信和飞书绑定本人后，文字任务会交给 Ready 处理并原路回复。单独发送的附件先保存到对应会话；需要处理附件时，请同时说明任务。
-      </div>
-      <div
-        className="glass-surface-card border flex w-fit"
-        style={{
-          ...panelCardStyle,
-          borderRadius: 12,
-          padding: 5,
-          gap: 4,
-        }}
+  // 运行中 = 已启用 + 凭据就绪 + 通讯服务运行 + 适配器健康；运行中但最近一次发送报错 = 通讯异常。
+  const describeChannelHealth = (channel: ChannelData | undefined): ChannelHealth => {
+    if (!channel) return { tone: 'muted', label: '未连接' }
+    const adapter = currentAdapters.find((item) => item.id === channel.id)
+    const running = channel.enabled && channel.credentialState === 'ready' && runtimeStatus?.sidecar?.status === 'running' && adapter?.status === 'running' && adapter.healthy
+    if (running && channel.lastError) return { tone: 'danger', label: '通讯异常' }
+    if (running) return { tone: 'accent', label: '运行中' }
+    return { tone: 'muted', label: '未连接' }
+  }
+
+  const sidecarStatus: ChannelHealth = runtimeStatus?.sidecar?.status === 'running'
+    ? { tone: 'accent', label: '运行中' }
+    : runtimeStatus?.sidecar?.status === 'starting'
+      ? { tone: 'warning', label: '正在启动' }
+      : runtimeStatus?.sidecar?.status === 'error'
+        ? { tone: 'danger', label: '连接异常' }
+        : { tone: 'muted', label: '尚未启动' }
+
+  const statusIsFailure = /失败|错误|异常|不可用|请先/.test(statusText)
+
+  const renderConnectedActions = (channel: ChannelData | undefined) => channel && channel.enabled && (
+    <>
+      <button
+        type="button"
+        disabled={Boolean(busyAction)}
+        onClick={() => { void sendProbe(channel.id) }}
+        className={settingsButtonClass('secondary')}
       >
-        {[
-          { key: 'imessage' as const, label: 'iMessage' },
-          { key: 'telegram' as const, label: 'Telegram' },
-          { key: 'feishu' as const, label: '飞书' },
-          { key: 'wechat' as const, label: '微信' },
-        ].map((item) => (
-          <button
-            key={item.key}
-            onClick={() => setTab(item.key)}
-            className={`text-[13px] transition-[background-color,color] duration-150 ${tab === item.key ? '' : 'hover:bg-[var(--bg-hover)]'}`}
-            style={{
-              color: tab === item.key ? 'var(--color-blue)' : 'var(--text-muted)',
-              ...(tab === item.key ? { background: 'var(--color-blue-light)' } : {}),
-              fontWeight: tab === item.key ? 600 : 500,
-              padding: '8px 20px',
-              borderRadius: 8,
-              lineHeight: 1.35,
-            }}
-          >
-            {item.label}
-          </button>
-        ))}
+        {isBusy(`probe:${channel.id}`) ? <Loader2 className="animate-spin" /> : <Send />}
+        测试
+      </button>
+      <button
+        type="button"
+        disabled={Boolean(busyAction)}
+        onClick={() => { void disconnectChannel(channel.id) }}
+        className={settingsButtonClass('danger-ghost')}
+      >
+        {isBusy(`disconnect:${channel.id}`) && <Loader2 className="animate-spin" />}
+        断开
+      </button>
+    </>
+  )
+
+  const renderHealth = (channel: ChannelData | undefined) => {
+    const health = describeChannelHealth(channel)
+    return <SettingsStatus tone={health.tone}>{health.label}</SettingsStatus>
+  }
+
+  return (
+    <div className="sx-stack">
+      <div className="flex flex-col gap-4">
+        <p className="m-0 px-1 text-[12px] leading-6" style={{ color: 'var(--sx-muted)', maxWidth: 720 }}>
+          微信和飞书绑定本人后，文字任务会交给 Ready 处理并原路回复。单独发送的附件先保存到对应会话；需要处理附件时，请同时说明任务。
+        </p>
+        <SettingsSegmented
+          kind="tabs"
+          ariaLabel="远程 IM 平台"
+          options={IM_TABS}
+          value={tab}
+          onChange={setTab}
+          className="self-start"
+        />
       </div>
 
-      {tab === 'imessage' && (
-        <div
-          className="text-[13px]"
-          style={{
-            color: 'var(--text-muted)',
-            padding: '4px 0 10px',
-            lineHeight: 1.7,
-          }}
-        >
-          iMessage 正在开发中，当前版本先支持 Telegram、飞书与微信。
-        </div>
-      )}
+      <div className="flex flex-col gap-3">
+        {tab === 'imessage' && (
+          <SettingsCard>
+            <div className="flex flex-col items-center gap-3 px-6 py-10 text-center">
+              <div className="sx-inset grid h-11 w-11 place-items-center" style={{ borderRadius: 14, color: 'var(--sx-muted)' }}>
+                <MessageSquareDashed className="h-5 w-5" strokeWidth={1.8} />
+              </div>
+              <div className="sx-card-title">iMessage</div>
+              <p className="m-0 text-[12.5px] leading-6" style={{ color: 'var(--sx-muted)' }}>
+                iMessage 正在开发中，当前版本先支持 Telegram、飞书与微信。
+              </p>
+              <span className="sx-badge">即将推出</span>
+            </div>
+          </SettingsCard>
+        )}
 
-      {tab === 'telegram' && (
-        <div className="flex flex-col" style={{ padding: '4px 0 10px', gap: 20 }}>
-          <div className="flex flex-col" style={{ gap: 8 }}>
-            <div className="text-[15px] font-semibold" style={{ color: 'var(--text-title)' }}>Telegram 连接</div>
-            <div className="text-[12px] leading-6" style={{ color: 'var(--text-muted)' }}>
-              在 Telegram 中通过 `@BotFather` 创建机器人，并把 Bot Token 填到这里。
-            </div>
-          </div>
-          <div className="relative">
-            <input
-              value={telegramToken}
-              onChange={(e) => setTelegramToken(e.target.value)}
-              placeholder={telegramSecretState === 'ready'
-                ? '已安全保存（留空沿用）'
-                : telegramSecretState === 'recovery_required'
-                  ? '升级后需重新填写 Bot Token'
-                  : 'Bot Token'}
-              type={showTelegramToken ? 'text' : 'password'}
-              className="w-full border text-[13px] focus:outline-none"
-              style={{ ...fieldStyle, paddingRight: 56 }}
-            />
-            <button
-              className="absolute top-1/2 -translate-y-1/2 rounded-xl"
-              onClick={() => setShowTelegramToken((v) => !v)}
-              title="显示/隐藏"
-              style={{ color: 'var(--text-muted)', right: 16, padding: 8 }}
-            >
-              {showTelegramToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-            </button>
-          </div>
-          {telegramSecretState === 'recovery_required' && (
-            <div className="text-[12px]" style={{ color: 'var(--color-red)' }}>
-              升级后无法读取原密钥，请重新填写并连接。
-            </div>
-          )}
-          <div className="flex items-center flex-wrap" style={{ gap: 12 }}>
-            <button
-              disabled={Boolean(busyAction)}
-              onClick={() => { void connectTelegram() }}
-              className="text-[13px] font-medium"
-              style={primaryButtonStyle}
-            >
-              <span className="inline-flex items-center gap-2">
-                {isBusy('telegram-connect') && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                连接
-              </span>
-            </button>
-            {telegramChannel && telegramChannel.enabled && (
-              <>
-                <button
-                  disabled={Boolean(busyAction)}
-                  onClick={() => { void sendProbe(telegramChannel.id) }}
-                  className="border text-[13px]"
-                  style={secondaryButtonStyle}
-                >
-                  <span className="inline-flex items-center gap-2">
-                    {isBusy(`probe:${telegramChannel.id}`) && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                    测试
-                  </span>
-                </button>
-                <button
-                  disabled={Boolean(busyAction)}
-                  onClick={() => { void disconnectChannel(telegramChannel.id) }}
-                  className="border text-[13px]"
-                  style={secondaryButtonStyle}
-                >
-                  <span className="inline-flex items-center gap-2">
-                    {isBusy(`disconnect:${telegramChannel.id}`) && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                    断开
-                  </span>
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
-      {tab === 'feishu' && (
-        <div className="flex flex-col" style={{ padding: '4px 0 10px', gap: 24 }}>
-          <div className="flex flex-col" style={{ gap: 8 }}>
-            <div className="text-[15px] font-semibold" style={{ color: 'var(--text-title)' }}>飞书连接</div>
-            <div className="text-[12px] leading-6" style={{ color: 'var(--text-muted)' }}>
-              在飞书开放平台创建企业自建应用，启用机器人和长连接，订阅接收消息事件并发布版本。需要接收消息、以机器人身份发消息和获取消息资源权限。填入 App ID 与 App Secret 后，再绑定你本人。
-            </div>
-          </div>
-          <div className="grid grid-cols-2" style={{ gap: 16 }}>
-            <input
-              value={feishuAppId}
-              onChange={(e) => setFeishuAppId(e.target.value)}
-              placeholder="App ID"
-              className="border text-[13px] focus:outline-none"
-              style={fieldStyle}
-            />
-            <div className="relative">
-              <input
-                value={feishuAppSecret}
-                onChange={(e) => setFeishuAppSecret(e.target.value)}
-                placeholder={feishuAppSecretState === 'ready'
-                  ? '已安全保存（留空沿用）'
-                  : feishuAppSecretState === 'recovery_required'
-                    ? '升级后需重新填写 App Secret'
-                    : 'App Secret'}
-                type={showFeishuSecret ? 'text' : 'password'}
-                className="w-full border text-[13px] focus:outline-none"
-                style={{ ...fieldStyle, paddingRight: 56 }}
-              />
-              <button
-                className="absolute top-1/2 -translate-y-1/2 rounded-xl"
-                onClick={() => setShowFeishuSecret((v) => !v)}
-                title="显示/隐藏"
-                style={{ color: 'var(--text-muted)', right: 16, padding: 8 }}
-              >
-                {showFeishuSecret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
-          </div>
-          <div className="flex flex-col" style={{ gap: 12 }}>
-            <button
-              type="button"
-              onClick={() => setShowFeishuAdvanced((value) => !value)}
-              className="inline-flex w-fit items-center text-[12px] font-medium"
-              style={{ color: 'var(--text-muted)', gap: 6, padding: '4px 2px' }}
-            >
-              {showFeishuAdvanced ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-              高级选项（仅回调模式 / 加密场景）
-            </button>
-            {showFeishuAdvanced && (
-              <div className="grid grid-cols-2" style={{ gap: 16 }}>
-                <input
-                  value={feishuVerificationToken}
-                  onChange={(e) => setFeishuVerificationToken(e.target.value)}
-                  placeholder="Verification Token（可选）"
-                  className="border text-[13px] focus:outline-none"
-                  style={fieldStyle}
-                />
-                <input
-                  value={feishuEncryptKey}
-                  onChange={(e) => setFeishuEncryptKey(e.target.value)}
-                  placeholder="Encrypt Key（可选）"
-                  className="border text-[13px] focus:outline-none"
-                  style={fieldStyle}
+        {tab === 'telegram' && (
+          <SettingsCard
+            title="Telegram 连接"
+            description={withInlineCode('在 Telegram 中通过 `@BotFather` 创建机器人，并把 Bot Token 填到这里。')}
+            actions={renderHealth(telegramChannel)}
+          >
+            <div className="sx-card__body flex flex-col gap-2">
+              <div className="sx-field">
+                <label className="sx-field__label" htmlFor={`${fieldId}-telegram-token`}>Bot Token</label>
+                <SecretInput
+                  id={`${fieldId}-telegram-token`}
+                  value={telegramToken}
+                  onChange={setTelegramToken}
+                  placeholder={telegramSecretState === 'ready'
+                    ? '已安全保存（留空沿用）'
+                    : telegramSecretState === 'recovery_required'
+                      ? '升级后需重新填写 Bot Token'
+                      : 'Bot Token'}
+                  visible={showTelegramToken}
+                  onToggleVisible={() => setShowTelegramToken((v) => !v)}
                 />
               </div>
-            )}
-          </div>
-          {feishuAppSecretState === 'recovery_required' && (
-            <div className="text-[12px]" style={{ color: 'var(--color-red)', padding: '2px 4px' }}>
-              升级后无法读取原密钥，请重新填写并连接。
+              {telegramSecretState === 'recovery_required' && (
+                <div className="sx-text-danger text-[12px]">
+                  升级后无法读取原密钥，请重新填写并连接。
+                </div>
+              )}
             </div>
-          )}
-          <div className="flex items-center flex-wrap" style={{ gap: 12 }}>
-            <button
-              disabled={Boolean(busyAction)}
-              onClick={() => { void connectFeishu() }}
-              className="text-[13px] font-medium"
-              style={primaryButtonStyle}
-            >
-              <span className="inline-flex items-center gap-2">
-                {isBusy('feishu-connect') && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            <div className="sx-card__footer" style={{ justifyContent: 'flex-start' }}>
+              <button
+                type="button"
+                disabled={Boolean(busyAction)}
+                onClick={() => { void connectTelegram() }}
+                className={settingsButtonClass('primary')}
+              >
+                {isBusy('telegram-connect') && <Loader2 className="animate-spin" />}
                 连接
-              </span>
-            </button>
-            {feishuChannel && feishuChannel.enabled && (
-              <>
-                <button
-                  disabled={Boolean(busyAction)}
-                  onClick={() => { void sendProbe(feishuChannel.id) }}
-                  className="border text-[13px]"
-                  style={secondaryButtonStyle}
-                >
-                  <span className="inline-flex items-center gap-2">
-                    {isBusy(`probe:${feishuChannel.id}`) && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                    测试
-                  </span>
-                </button>
-                <button
-                  disabled={Boolean(busyAction)}
-                  onClick={() => { void disconnectChannel(feishuChannel.id) }}
-                  className="border text-[13px]"
-                  style={secondaryButtonStyle}
-                >
-                  <span className="inline-flex items-center gap-2">
-                    {isBusy(`disconnect:${feishuChannel.id}`) && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                    断开
-                  </span>
-                </button>
-              </>
-            )}
-          </div>
-          <div className="text-[12px]" style={{ color: 'var(--text-muted)', padding: '4px 0 0', lineHeight: 1.8 }}>
-            <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)', marginBottom: 10 }}>配置指引</div>
-            <div>1. 在飞书开放平台创建自建应用并启用机器人能力。</div>
-            <div>2. 建议选择事件订阅的“长连接”模式；如果使用回调 URL 模式，需要额外暴露可公网访问的 callback 地址。</div>
-            <div>3. 订阅消息事件至少包含 `im.message.receive_v1`；长连接模式通常不需要填写 Verification Token / Encrypt Key，只有回调校验或消息加密时才需要。</div>
-            <div>4. 发布应用版本后，填入 App ID / App Secret 并连接。</div>
-          </div>
-        </div>
-      )}
-
-      {tab === 'feishu' && feishuChannel?.enabled && (
-        <div className="glass-surface-card border flex flex-col" style={{ ...panelCardStyle, padding: 20, gap: 12 }}>
-          <div className="text-[13px]">{feishuChannel.config.allowedSenderId ? '已绑定本人，私聊可直接发送任务；群聊请以 @ready 开头。' : '还需要绑定本人，完成后才能远程发送任务。'}</div>
-          <button className="border text-[13px] w-fit" style={secondaryButtonStyle} disabled={Boolean(busyAction)} onClick={() => {
-            void runWithBusy('feishu-pair', async () => {
-              const result = await window.electronAPI.agent.startChannelPairing(feishuChannel.id)
-              if (!result.success || !result.data) throw new Error(result.error || '生成绑定码失败')
-              setPairingCode(result.data.code)
-            })
-          }}>{feishuChannel.config.allowedSenderId ? '重新绑定本人' : '生成本人绑定码'}</button>
-          {pairingCode && <div className="text-[13px] leading-6">在飞书中私聊你的机器人，发送 <code>/bind {pairingCode}</code>。绑定码 5 分钟内有效，完成后这里会显示已绑定。</div>}
-        </div>
-      )}
-
-      {tab === 'wechat' && (
-        <div className="flex flex-col" style={{ padding: '4px 0 10px', gap: 24 }}>
-          <div className="flex flex-col" style={{ gap: 8 }}>
-            <div className="text-[15px] font-semibold" style={{ color: 'var(--text-title)' }}>微信连接</div>
-            <div className="text-[12px] leading-6" style={{ color: 'var(--text-muted)' }}>
-              点击启用后会直接生成二维码，用手机微信扫码确认即可绑定。
+              </button>
+              {renderConnectedActions(telegramChannel)}
             </div>
-          </div>
-          <div className="text-[12px] leading-6" style={{ color: 'var(--text-muted)' }}>
-            微信通道会发送到当前绑定的微信账号本人，无需设置收件人。
-          </div>
-          <div className="flex items-center flex-wrap" style={{ gap: 12 }}>
-            <WechatLoginControl
-              channelId={wechatChannel?.id || WECHAT_CHANNEL_ID}
-              enabled={Boolean(wechatChannel?.enabled)}
-              disabled={Boolean(busyAction)}
-              beforeStart={async () => {
-                if (wechatRouteTag.trim() || wechatBotAgent.trim()) {
-                  await saveWechatChannel(undefined, { enabled: Boolean(wechatChannel?.enabled), silent: true })
-                }
-              }}
-              onChanged={loadChannelConfig}
-            />
-            {wechatChannel && wechatChannel.enabled && (
-              <>
-                <button
-                  disabled={Boolean(busyAction)}
-                  onClick={() => { void sendProbe(wechatChannel.id) }}
-                  className="border text-[13px]"
-                  style={secondaryButtonStyle}
-                >
-                  <span className="inline-flex items-center gap-2">
-                    {isBusy(`probe:${wechatChannel.id}`) && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                    测试
-                  </span>
-                </button>
-                <button
-                  disabled={Boolean(busyAction)}
-                  onClick={() => { void disconnectChannel(wechatChannel.id) }}
-                  className="border text-[13px]"
-                  style={secondaryButtonStyle}
-                >
-                  <span className="inline-flex items-center gap-2">
-                    {isBusy(`disconnect:${wechatChannel.id}`) && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                    断开
-                  </span>
-                </button>
-              </>
-            )}
-            <button
-              className="border text-[13px]"
-              style={secondaryButtonStyle}
-              onClick={() => setShowWechatAdvanced((value) => !value)}
+          </SettingsCard>
+        )}
+
+        {tab === 'feishu' && (
+          <SettingsCard
+            title="飞书连接"
+            description="在飞书开放平台创建企业自建应用，启用机器人和长连接，订阅接收消息事件并发布版本。需要接收消息、以机器人身份发消息和获取消息资源权限。填入 App ID 与 App Secret 后，再绑定你本人。"
+            actions={renderHealth(feishuChannel)}
+          >
+            <div className="sx-card__body flex flex-col gap-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="sx-field">
+                  <label className="sx-field__label" htmlFor={`${fieldId}-feishu-app-id`}>App ID</label>
+                  <input
+                    id={`${fieldId}-feishu-app-id`}
+                    value={feishuAppId}
+                    onChange={(e) => setFeishuAppId(e.target.value)}
+                    placeholder="App ID"
+                    className="sx-input sx-input--mono"
+                  />
+                </div>
+                <div className="sx-field">
+                  <label className="sx-field__label" htmlFor={`${fieldId}-feishu-app-secret`}>App Secret</label>
+                  <SecretInput
+                    id={`${fieldId}-feishu-app-secret`}
+                    value={feishuAppSecret}
+                    onChange={setFeishuAppSecret}
+                    placeholder={feishuAppSecretState === 'ready'
+                      ? '已安全保存（留空沿用）'
+                      : feishuAppSecretState === 'recovery_required'
+                        ? '升级后需重新填写 App Secret'
+                        : 'App Secret'}
+                    visible={showFeishuSecret}
+                    onToggleVisible={() => setShowFeishuSecret((v) => !v)}
+                  />
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowFeishuAdvanced((value) => !value)}
+                aria-expanded={showFeishuAdvanced}
+                className={settingsButtonClass('ghost', { size: 'sm', className: 'self-start' })}
+                style={{ marginLeft: -8 }}
+              >
+                {showFeishuAdvanced ? <ChevronUp /> : <ChevronDown />}
+                高级选项（仅回调模式 / 加密场景）
+              </button>
+              {showFeishuAdvanced && (
+                <div className="grid grid-cols-2 gap-3">
+                  <input
+                    value={feishuVerificationToken}
+                    onChange={(e) => setFeishuVerificationToken(e.target.value)}
+                    placeholder="Verification Token（可选）"
+                    aria-label="Verification Token（可选）"
+                    className="sx-input sx-input--mono"
+                  />
+                  <input
+                    value={feishuEncryptKey}
+                    onChange={(e) => setFeishuEncryptKey(e.target.value)}
+                    placeholder="Encrypt Key（可选）"
+                    aria-label="Encrypt Key（可选）"
+                    className="sx-input sx-input--mono"
+                  />
+                </div>
+              )}
+              {feishuAppSecretState === 'recovery_required' && (
+                <div className="sx-text-danger text-[12px]">
+                  升级后无法读取原密钥，请重新填写并连接。
+                </div>
+              )}
+            </div>
+            <div className="sx-card__footer" style={{ justifyContent: 'flex-start' }}>
+              <button
+                type="button"
+                disabled={Boolean(busyAction)}
+                onClick={() => { void connectFeishu() }}
+                className={settingsButtonClass('primary')}
+              >
+                {isBusy('feishu-connect') && <Loader2 className="animate-spin" />}
+                连接
+              </button>
+              {renderConnectedActions(feishuChannel)}
+            </div>
+          </SettingsCard>
+        )}
+
+        {tab === 'feishu' && feishuChannel?.enabled && (
+          <SettingsCard>
+            <SettingsRow
+              label={feishuChannel.config.allowedSenderId ? '已绑定本人' : '绑定本人'}
+              description={feishuChannel.config.allowedSenderId ? '已绑定本人，私聊可直接发送任务；群聊请以 @ready 开头。' : '还需要绑定本人，完成后才能远程发送任务。'}
             >
-              <span className="inline-flex items-center gap-2">
-                {showWechatAdvanced ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                高级
-              </span>
-            </button>
-          </div>
-          {showWechatAdvanced && (
-            <div className="grid grid-cols-1 md:grid-cols-2" style={{ gap: 12 }}>
-              <input
-                value={wechatRouteTag}
-                onChange={(e) => setWechatRouteTag(e.target.value)}
-                placeholder="OpenClaw routeTag（可选）"
-                className="border text-[13px] focus:outline-none"
-                style={fieldStyle}
-              />
-              <input
-                value={wechatBotAgent}
-                onChange={(e) => setWechatBotAgent(e.target.value)}
-                placeholder="botAgent（可选）"
-                className="border text-[13px] focus:outline-none"
-                style={fieldStyle}
+              <button
+                type="button"
+                className={settingsButtonClass('secondary')}
+                disabled={Boolean(busyAction)}
+                onClick={() => {
+                  void runWithBusy('feishu-pair', async () => {
+                    const result = await window.electronAPI.agent.startChannelPairing(feishuChannel.id)
+                    if (!result.success || !result.data) throw new Error(result.error || '生成绑定码失败')
+                    setPairingCode(result.data.code)
+                  })
+                }}
+              >
+                {isBusy('feishu-pair') && <Loader2 className="animate-spin" />}
+                {feishuChannel.config.allowedSenderId ? '重新绑定本人' : '生成本人绑定码'}
+              </button>
+            </SettingsRow>
+            {pairingCode && (
+              <div className="px-6 pb-5">
+                <div className="sx-inset px-4 py-3 text-[12.5px] leading-6" style={{ color: 'var(--sx-body)' }}>
+                  在飞书中私聊你的机器人，发送 <code className="sx-mono rounded-md px-1.5 py-0.5 text-[12px]" style={{ background: 'var(--sx-control-bg)', color: 'var(--sx-title)' }}>/bind {pairingCode}</code>。绑定码 5 分钟内有效，完成后这里会显示已绑定。
+                </div>
+              </div>
+            )}
+          </SettingsCard>
+        )}
+
+        {tab === 'wechat' && (
+          <SettingsCard
+            title="微信连接"
+            description="点击启用后会直接生成二维码，用手机微信扫码确认即可绑定。微信通道会发送到当前绑定的微信账号本人，无需设置收件人。"
+            actions={renderHealth(wechatChannel)}
+          >
+            <div className="sx-card__body flex flex-col gap-3">
+              <WechatLoginControl
+                channelId={wechatChannel?.id || WECHAT_CHANNEL_ID}
+                enabled={Boolean(wechatChannel?.enabled)}
+                disabled={Boolean(busyAction)}
+                beforeStart={async () => {
+                  if (wechatRouteTag.trim() || wechatBotAgent.trim()) {
+                    await saveWechatChannel(undefined, { enabled: Boolean(wechatChannel?.enabled), silent: true })
+                  }
+                }}
+                onChanged={loadChannelConfig}
               />
               <button
-                disabled={Boolean(busyAction)}
-                onClick={() => { void runWithBusy('wechat-save', () => saveWechatChannel()) }}
-                className="border text-[13px] md:col-span-2"
-                style={{ ...secondaryButtonStyle, justifySelf: 'start' }}
+                type="button"
+                className={settingsButtonClass('ghost', { size: 'sm', className: 'self-start' })}
+                style={{ marginLeft: -8 }}
+                aria-expanded={showWechatAdvanced}
+                onClick={() => setShowWechatAdvanced((value) => !value)}
               >
-                <span className="inline-flex items-center gap-2">
-                  {isBusy('wechat-save') && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                  保存配置
-                </span>
+                {showWechatAdvanced ? <ChevronUp /> : <ChevronDown />}
+                高级
               </button>
+              {showWechatAdvanced && (
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <input
+                    value={wechatRouteTag}
+                    onChange={(e) => setWechatRouteTag(e.target.value)}
+                    placeholder="OpenClaw routeTag（可选）"
+                    aria-label="OpenClaw routeTag（可选）"
+                    className="sx-input sx-input--mono"
+                  />
+                  <input
+                    value={wechatBotAgent}
+                    onChange={(e) => setWechatBotAgent(e.target.value)}
+                    placeholder="botAgent（可选）"
+                    aria-label="botAgent（可选）"
+                    className="sx-input sx-input--mono"
+                  />
+                  <button
+                    type="button"
+                    disabled={Boolean(busyAction)}
+                    onClick={() => { void runWithBusy('wechat-save', () => saveWechatChannel()) }}
+                    className={settingsButtonClass('secondary', { className: 'justify-self-start md:col-span-2' })}
+                  >
+                    {isBusy('wechat-save') && <Loader2 className="animate-spin" />}
+                    保存配置
+                  </button>
+                </div>
+              )}
             </div>
-          )}
+            {wechatChannel?.enabled && (
+              <div className="sx-card__footer" style={{ justifyContent: 'flex-start' }}>
+                {renderConnectedActions(wechatChannel)}
+              </div>
+            )}
+          </SettingsCard>
+        )}
 
-        </div>
+        {statusText && (
+          <SettingsNotice tone={statusIsFailure ? 'danger' : 'plain'}>
+            {statusText}
+          </SettingsNotice>
+        )}
+      </div>
+
+      {tab === 'feishu' && (
+        <SettingsGroup label="配置指引">
+          <ol className="sx-inset m-0 flex list-none flex-col gap-2.5 px-6 py-5 text-[12px] leading-[1.7]" style={{ color: 'var(--sx-muted)' }}>
+            {[
+              '在飞书开放平台创建自建应用并启用机器人能力。',
+              '建议选择事件订阅的“长连接”模式；如果使用回调 URL 模式，需要额外暴露可公网访问的 callback 地址。',
+              '订阅消息事件至少包含 `im.message.receive_v1`；长连接模式通常不需要填写 Verification Token / Encrypt Key，只有回调校验或消息加密时才需要。',
+              '发布应用版本后，填入 App ID / App Secret 并连接。',
+            ].map((step, index) => (
+              <li key={step} className="flex gap-3">
+                <span
+                  className="sx-mono mt-[2px] grid h-[18px] w-[18px] shrink-0 place-items-center rounded-full text-[10.5px]"
+                  style={{ background: 'var(--sx-control-bg)', boxShadow: 'var(--sx-control-shadow)', color: 'var(--sx-body)' }}
+                >
+                  {index + 1}
+                </span>
+                <span>{withInlineCode(step)}</span>
+              </li>
+            ))}
+          </ol>
+        </SettingsGroup>
       )}
 
-      <div className="glass-surface-card border flex flex-col" style={{ ...panelCardStyle, padding: '24px 28px', gap: 20 }}>
-        <div className="flex items-center justify-between" style={{ paddingTop: 4 }}>
-          <div className="text-[15px] font-semibold" style={{ color: 'var(--text-title)' }}>运行状态</div>
-          <button
-            className="border text-[12px] inline-flex items-center"
-            style={{ ...secondaryButtonStyle, gap: 8 }}
-            onClick={() => { void refresh() }}
+      <SettingsGroup label="运行状态">
+        <SettingsCard>
+          <SettingsRow
+            label="通讯服务"
+            description={runtimeStatus?.sidecar?.error
+              ? <span className="sx-text-danger">错误：{runtimeStatus.sidecar.error}</span>
+              : '远程 IM 的消息收发都经由本地通讯服务'}
           >
-            <RefreshCcw className="w-3.5 h-3.5" />
-            刷新
-          </button>
-        </div>
-        <div className="text-[12px] leading-7" style={{ color: 'var(--text-body)' }}>
-          <div>通讯服务：{runtimeStatus?.sidecar?.status === 'running' ? '运行中' : runtimeStatus?.sidecar?.status === 'starting' ? '正在启动' : runtimeStatus?.sidecar?.status === 'error' ? '连接异常' : '尚未启动'}</div>
-          {runtimeStatus?.sidecar?.error && (
-            <div style={{ color: 'var(--color-red)' }}>错误：{runtimeStatus.sidecar.error}</div>
-          )}
-        </div>
-
-        <div className="flex flex-col" style={{ gap: 12 }}>
+            <SettingsStatus tone={sidecarStatus.tone}>{sidecarStatus.label}</SettingsStatus>
+            <button
+              type="button"
+              className={settingsButtonClass('ghost', { size: 'sm' })}
+              onClick={() => { void refresh() }}
+            >
+              <RefreshCcw />
+              刷新
+            </button>
+          </SettingsRow>
           {channels.map((channel) => {
             const adapter = currentAdapters.find((item) => item.id === channel.id)
-            const running = channel.enabled && channel.credentialState === 'ready' && runtimeStatus?.sidecar?.status === 'running' && adapter?.status === 'running' && adapter.healthy
             const channelError = adapter?.error || channel.lastError
-            const sendError = running && Boolean(channel.lastError)
+            const health = describeChannelHealth(channel)
             return (
-              <div
-                key={channel.id}
-                className="glass-surface-card border flex items-start justify-between"
-                style={{ ...panelCardStyle, borderRadius: 12, padding: '16px 20px', gap: 16 }}
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="text-[13px] font-medium flex items-center gap-3" style={{ color: 'var(--text-title)' }}>
-                    <Bot className="w-4 h-4" />
-                    {channel.name}
-                    {sendError ? (
-                      <span className="inline-flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--color-red)' }}>
-                        <AlertTriangle className="w-3.5 h-3.5" /> 通讯异常
-                      </span>
-                    ) : running ? (
-                      <span className="inline-flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--color-green)' }}>
-                        <CheckCircle2 className="w-3.5 h-3.5" /> 运行中
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                        <XCircle className="w-3.5 h-3.5" /> 未连接
-                      </span>
+              <div key={channel.id} className="sx-row" style={{ alignItems: 'flex-start' }}>
+                <div className="flex min-w-0 flex-1 gap-3">
+                  <div className="sx-inset grid h-8 w-8 shrink-0 place-items-center" style={{ borderRadius: 10, color: 'var(--sx-muted)' }}>
+                    <Bot className="h-4 w-4" strokeWidth={1.8} />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-3">
+                      <span className="sx-row__label">{channel.name}</span>
+                      <SettingsStatus tone={health.tone}>{health.label}</SettingsStatus>
+                    </div>
+                    <div className="sx-meta mt-0.5">
+                      {channel.config.allowedSenderId ? '已绑定本人' : '尚未绑定本人'} · {adapter?.lastBeatAt ? `最近连接检查 ${new Date(adapter.lastBeatAt).toLocaleString()}` : '等待连接检查'}
+                    </div>
+                    {channelError && (
+                      <div className="sx-text-danger mt-1 text-[11.5px] leading-5">
+                        {channelError}
+                      </div>
                     )}
                   </div>
-                  <div className="text-[11px] mt-2 leading-6" style={{ color: 'var(--text-muted)' }}>
-                    {channel.config.allowedSenderId ? '已绑定本人' : '尚未绑定本人'} · {adapter?.lastBeatAt ? `最近连接检查 ${new Date(adapter.lastBeatAt).toLocaleString()}` : '等待连接检查'}
-                  </div>
-                  {channelError && (
-                    <div className="text-[11px] mt-2 leading-6" style={{ color: 'var(--color-red)' }}>
-                      {channelError}
-                    </div>
-                  )}
                 </div>
-                <div className="flex items-center" style={{ gap: 12, paddingTop: 4, paddingRight: 4 }}>
+                <div className="sx-row__control" style={{ gap: 4 }}>
                   <button
+                    type="button"
                     title="发送测试消息"
+                    aria-label="发送测试消息"
+                    disabled={Boolean(busyAction)}
                     onClick={() => { void sendProbe(channel.id) }}
-                    className="border"
-                    style={{ ...secondaryButtonStyle, padding: 8, borderRadius: 8 }}
+                    className={settingsButtonClass('ghost', { size: 'sm', icon: true })}
                   >
-                    <Send className="w-4 h-4" />
+                    <Send />
                   </button>
                   <button
-                    title={channel.enabled ? '停用' : '启用'}
-                    onClick={() => { void runWithBusy(`toggle:${channel.id}`, async () => {
-                      const result = await window.electronAPI.agent.setChannelEnabled(channel.id, !channel.enabled)
-                      if (!result.success) throw new Error(result.error || '连接设置未生效')
-                      await refresh()
-                    }) }}
-                    className="border"
-                    style={{ ...secondaryButtonStyle, padding: 8, borderRadius: 8 }}
-                  >
-                    {channel.enabled ? <MessageSquare className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
-                  </button>
-                  <button
+                    type="button"
                     title="删除"
+                    aria-label="删除"
+                    disabled={Boolean(busyAction)}
                     onClick={() => { void deleteChannel(channel.id) }}
-                    className="border"
-                    style={{ ...secondaryButtonStyle, color: 'var(--color-red)', padding: 8, borderRadius: 8 }}
+                    className={settingsButtonClass('danger-quiet', { size: 'sm', icon: true })}
                   >
-                    <Trash2 className="w-4 h-4" />
+                    <Trash2 />
                   </button>
+                  <span className="ml-2" title={channel.enabled ? '停用' : '启用'}>
+                    <SettingsSwitch
+                      checked={channel.enabled}
+                      disabled={Boolean(busyAction)}
+                      ariaLabel={channel.enabled ? `停用 ${channel.name}` : `启用 ${channel.name}`}
+                      onChange={() => {
+                        void runWithBusy(`toggle:${channel.id}`, async () => {
+                          const result = await window.electronAPI.agent.setChannelEnabled(channel.id, !channel.enabled)
+                          if (!result.success) throw new Error(result.error || '连接设置未生效')
+                          await refresh()
+                        })
+                      }}
+                    />
+                  </span>
                 </div>
               </div>
             )
           })}
           {channels.length === 0 && (
-            <div className="text-[12px]" style={{ color: 'var(--text-muted)' }}>暂无远程 IM 通道</div>
+            <div className="sx-row">
+              <span className="text-[12px]" style={{ color: 'var(--sx-muted)' }}>暂无远程 IM 通道</span>
+            </div>
           )}
-        </div>
-      </div>
+        </SettingsCard>
+      </SettingsGroup>
 
-      <div className="glass-surface-card border flex flex-col" style={{ ...panelCardStyle, padding: '24px 28px', gap: 18 }}>
-        <div className="flex items-center justify-between">
-          <div className="text-[15px] font-semibold" style={{ color: 'var(--text-title)' }}>附件缓存</div>
-          <button
-            className="border text-[12px] inline-flex items-center"
-            style={{ ...secondaryButtonStyle, gap: 8 }}
-            onClick={() => { void refresh() }}
+      <SettingsGroup label="附件缓存">
+        <SettingsCard>
+          <SettingsRow
+            label="远程附件"
+            description={cacheStats
+              ? `共 ${cacheStats.totalFiles} 个附件 · ${(cacheStats.totalBytes / 1024 / 1024).toFixed(2)} MB`
+              : '总附件数与大小需手动统计，点击刷新后查看'}
           >
-            <RefreshCcw className="w-3.5 h-3.5" />
-            刷新
-          </button>
-        </div>
-        <div className="text-[12px] leading-7" style={{ color: 'var(--text-body)' }}>
-          <div>总附件数：{cacheStats ? cacheStats.totalFiles : '点击刷新后查看'}</div>
-          <div>总大小：{cacheStats ? `${(cacheStats.totalBytes / 1024 / 1024).toFixed(2)} MB` : '尚未统计'}</div>
-        </div>
-        <div className="flex items-center flex-wrap" style={{ gap: 12 }}>
-          <button
-            className="border text-[13px]"
-            style={{ ...secondaryButtonStyle, minWidth: 120 }}
-            disabled={Boolean(busyAction)}
-            onClick={() => {
-              void runWithBusy('clear-cache:all', async () => {
-                const res = await window.electronAPI.agent.clearRemoteAttachmentCache()
-                setStatusText(res.success ? '已清空全部远程附件缓存' : `清理失败：${res.error || '未知错误'}`)
-                await refresh()
-              })
-            }}
-          >
-            清空全部
-          </button>
-        </div>
-        {cacheStats && cacheStats.channels.length > 0 && (
-          <div className="flex flex-col" style={{ gap: 10 }}>
-            {cacheStats.channels.map((item) => (
-              <div
-                key={item.channelId}
-                className="glass-surface-card border flex items-center justify-between"
-                style={{ ...panelCardStyle, borderRadius: 12, padding: '14px 16px', gap: 14 }}
+            <button
+              type="button"
+              className={settingsButtonClass('ghost', { size: 'sm' })}
+              onClick={() => { void refresh() }}
+            >
+              <RefreshCcw />
+              刷新
+            </button>
+            <button
+              type="button"
+              className={settingsButtonClass('danger')}
+              disabled={Boolean(busyAction)}
+              onClick={() => {
+                void runWithBusy('clear-cache:all', async () => {
+                  const res = await window.electronAPI.agent.clearRemoteAttachmentCache()
+                  setStatusText(res.success ? '已清空全部远程附件缓存' : `清理失败：${res.error || '未知错误'}`)
+                  await refresh()
+                })
+              }}
+            >
+              {isBusy('clear-cache:all') ? <Loader2 className="animate-spin" /> : <Trash2 />}
+              清空全部
+            </button>
+          </SettingsRow>
+          {cacheStats && cacheStats.channels.map((item) => (
+            <SettingsRow
+              key={item.channelId}
+              label={<span className="sx-mono text-[12px]">{item.channelId}</span>}
+              description={`${item.files} 个文件 · ${(item.bytes / 1024 / 1024).toFixed(2)} MB`}
+            >
+              <button
+                type="button"
+                className={settingsButtonClass('ghost', { size: 'sm' })}
+                disabled={Boolean(busyAction)}
+                onClick={() => {
+                  void runWithBusy(`clear-cache:${item.channelId}`, async () => {
+                    const res = await window.electronAPI.agent.clearRemoteAttachmentCache(item.channelId)
+                    setStatusText(res.success ? `已清理 ${item.channelId} 的附件缓存` : `清理失败：${res.error || '未知错误'}`)
+                    await refresh()
+                  })
+                }}
               >
-                <div className="min-w-0 flex-1">
-                  <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>{item.channelId}</div>
-                  <div className="text-[11px] mt-1" style={{ color: 'var(--text-muted)' }}>
-                    {item.files} 个文件 · {(item.bytes / 1024 / 1024).toFixed(2)} MB
-                  </div>
-                </div>
-                <button
-                  className="border text-[12px]"
-                  style={secondaryButtonStyle}
-                  disabled={Boolean(busyAction)}
-                  onClick={() => {
-                    void runWithBusy(`clear-cache:${item.channelId}`, async () => {
-                      const res = await window.electronAPI.agent.clearRemoteAttachmentCache(item.channelId)
-                      setStatusText(res.success ? `已清理 ${item.channelId} 的附件缓存` : `清理失败：${res.error || '未知错误'}`)
-                      await refresh()
-                    })
-                  }}
-                >
-                  清理
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {statusText && (
-        <div className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
-          {statusText}
-        </div>
-      )}
+                清理
+              </button>
+            </SettingsRow>
+          ))}
+        </SettingsCard>
+      </SettingsGroup>
     </div>
   )
 }

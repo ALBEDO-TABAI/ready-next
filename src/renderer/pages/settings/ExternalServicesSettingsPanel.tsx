@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback, type CSSProperties } from 'react'
-import { CheckCircle2, Loader2, XCircle } from 'lucide-react'
+import { useState, useEffect, useCallback } from 'react'
+import { ArrowUpRight, Check, Info, Loader2, XCircle } from 'lucide-react'
 import type { ExternalServiceOptionValue, ExternalServiceUpdateInput, PublicExternalServiceProfile } from '../../../shared/external-services'
-import { SETTINGS_FLAT_INPUT_STYLE } from '../../components/settings/settings-theme'
+import { SettingsCard, SettingsNotice, SettingsSwitch, settingsButtonClass } from './settings-shared'
 
 const EXTERNAL_SERVICE_SECRET_LABELS: Record<string, string> = {
   apiKey: 'API Key',
@@ -112,66 +112,6 @@ function buildExternalServicePayload(
   return payload
 }
 
-function externalServiceStatusStyle(enabled: boolean): CSSProperties {
-  return {
-    borderColor: enabled ? 'color-mix(in srgb, var(--color-green) 44%, transparent)' : 'color-mix(in srgb, var(--surface-border) 76%, transparent)',
-    color: enabled ? 'var(--color-green)' : 'var(--text-muted)',
-    background: 'transparent',
-  }
-}
-
-function externalServiceStatusButtonStyle(enabled: boolean): CSSProperties {
-  return {
-    ...externalServiceStatusStyle(enabled),
-    minWidth: 58,
-    height: 24,
-    padding: '0 8px',
-  }
-}
-
-function externalServiceButtonStyle(variant: 'plain' | 'secondary' | 'primary', disabled: boolean): CSSProperties {
-  if (variant === 'primary') {
-    return {
-      minWidth: 76,
-      height: 38,
-      padding: '0 15px',
-      borderRadius: 12,
-      border: '1px solid color-mix(in srgb, var(--color-blue) 72%, transparent)',
-      background: 'color-mix(in srgb, var(--color-blue) 82%, var(--surface-card-bg) 18%)',
-      color: '#fff',
-      opacity: disabled ? 0.62 : 1,
-      boxShadow: 'none',
-    }
-  }
-  return {
-    minWidth: variant === 'plain' ? 58 : 76,
-    height: 38,
-    padding: '0 13px',
-    borderRadius: 12,
-    border: variant === 'plain' ? '1px solid transparent' : '1px solid color-mix(in srgb, var(--surface-border) 70%, transparent)',
-    // 不写 background，留给 hover 类（inline 透明背景会盖掉 :hover）。
-    color: variant === 'plain' ? 'var(--text-muted)' : 'var(--text-body)',
-    opacity: disabled ? 0.62 : 1,
-    boxShadow: 'none',
-  }
-}
-
-function externalServiceFeedbackStyle(kind: ExternalServiceFeedback['kind']): CSSProperties {
-  return {
-    color: kind === 'error' ? 'var(--color-red)' : kind === 'success' ? 'var(--color-green)' : 'var(--text-muted)',
-    background: 'transparent',
-  }
-}
-
-function externalServiceInputStyle(): CSSProperties {
-  return {
-    ...SETTINGS_FLAT_INPUT_STYLE,
-    minHeight: 42,
-    padding: '9px 11px',
-    boxShadow: 'none',
-  }
-}
-
 function externalServiceDraftSummary(
   profile: PublicExternalServiceProfile,
   secretDraft: Record<string, string> | undefined,
@@ -246,7 +186,6 @@ export function ExternalServicesSettingsPanel() {
   const [busyId, setBusyId] = useState<string | null>(null)
   const [testingId, setTestingId] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<ExternalServiceFeedback | null>(null)
 
   const refresh = useCallback(async () => {
@@ -422,8 +361,8 @@ export function ExternalServicesSettingsPanel() {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-[12px]" style={{ color: 'var(--text-muted)' }}>
-        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+      <div className="flex items-center gap-2 px-1 text-[12px]" style={{ color: 'var(--sx-muted)' }}>
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
         加载外部服务配置...
       </div>
     )
@@ -462,372 +401,337 @@ export function ExternalServicesSettingsPanel() {
     { label: '外部服务', profiles: profiles.filter((profile) => profile.kind !== 'image-generation') },
     { label: 'AI 生成服务', profiles: profiles.filter((profile) => profile.kind === 'image-generation') },
   ]
+  const actionsLocked = isSelectedBusy || isSelectedTesting
+
+  if (!selectedProfile && feedback?.kind === 'error') {
+    return <SettingsNotice tone="danger" title="暂时无法读取外部服务">{feedback.text}</SettingsNotice>
+  }
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="grid gap-5 xl:grid-cols-[260px_minmax(0,760px)]">
-        <nav className="flex flex-col gap-1" aria-label="外部服务列表">
-          {navigationSections.map((section, sectionIndex) => section.profiles.length > 0 ? (
-            <div key={section.label} className={sectionIndex > 0 ? 'mt-4' : ''}>
-              <div
-                className="px-2 pb-1.5 text-[10px] font-semibold tracking-[0.12em]"
-                style={{ color: sectionIndex > 0 ? 'var(--color-ready-orange)' : 'var(--text-light)' }}
-              >
-                {section.label}
-              </div>
-              <div className="flex flex-col gap-1">
+    <div className="grid items-start gap-8 lg:grid-cols-[256px_minmax(0,1fr)]">
+      {/* 服务列表：列表直接落在画布上，选中项升起为一片玻璃卡；已启用的服务带一个强调色圆点。 */}
+      <nav className="flex flex-col" aria-label="外部服务列表">
+        {navigationSections.map((section, sectionIndex) => section.profiles.length > 0 ? (
+          <div key={section.label} className={sectionIndex > 0 ? 'mt-7' : ''}>
+            <div className="px-3.5 pb-2.5 text-[11px] font-semibold tracking-[0.04em]" style={{ color: 'var(--sx-subtle)' }}>
+              {section.label}
+            </div>
+            <div className="flex flex-col gap-1.5">
               {section.profiles.map((profile) => {
-            const active = profile.id === selectedProfile?.id
-            const hovered = profile.id === hoveredId
-            return (
-              <div
-                key={profile.id}
-                onMouseEnter={() => setHoveredId(profile.id)}
-                onMouseLeave={() => setHoveredId((current) => current === profile.id ? null : current)}
-                className="w-full transition-[background-color,color] duration-150"
-                style={{
-                  padding: '10px 11px',
-                  borderRadius: 12,
-                  border: '1px solid transparent',
-                  background: active
-                    ? 'color-mix(in srgb, var(--color-blue) 8%, transparent)'
-                    : hovered
-                      ? 'color-mix(in srgb, var(--surface-card-bg) 48%, transparent)'
-                      : 'transparent',
-                }}
-              >
-                <div className="flex items-center gap-2.5">
+                const active = profile.id === selectedProfile?.id
+                return (
                   <button
+                    key={profile.id}
                     type="button"
                     onClick={() => setSelectedId(profile.id)}
-                    className="min-w-0 flex-1 text-left"
+                    aria-current={active ? 'true' : undefined}
+                    className={`flex w-full items-center gap-3 rounded-[12px] px-3.5 py-3 text-left transition-[background-color,box-shadow] duration-150 ${active
+                      ? 'bg-[var(--sx-raised-bg)] shadow-[var(--sx-raised-shadow)]'
+                      : 'hover:bg-[var(--sx-raised-hover)]'}`}
                   >
-                    <div className="truncate text-[13px] font-semibold" style={{ color: 'var(--text-title)' }}>
-                      {profile.name}
-                    </div>
-                    <div className="mt-0.5 truncate text-[11px]" style={{ color: 'var(--text-light)' }}>
-                      {externalServiceDescription(profile)}
-                    </div>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[13px] font-medium" style={{ color: 'var(--sx-title)' }}>
+                        {profile.name}
+                      </span>
+                      <span className="mt-1 block truncate text-[11.5px]" style={{ color: 'var(--sx-muted)' }}>
+                        {externalServiceDescription(profile)}
+                      </span>
+                    </span>
+                    {profile.enabled && <span className="sx-dot sx-dot--ink" aria-hidden />}
+                    <span className="sr-only">{profile.enabled ? '已启用' : '未启用'}</span>
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => toggleProfileEnabled(profile)}
-                    className="inline-flex shrink-0 items-center justify-center rounded-[8px] border text-[11px] font-medium leading-none transition-[border-color,color,background-color] duration-150"
-                    style={externalServiceStatusButtonStyle(profile.enabled)}
-                  >
-                    {profile.enabled ? '已启用' : '未启用'}
-                  </button>
-                </div>
-              </div>
-            )
+                )
               })}
-              </div>
             </div>
-          ) : null)}
-        </nav>
+          </div>
+        ) : null)}
+      </nav>
 
-        {selectedProfile && (
-          <section
-            className="self-start rounded-2xl border"
-            style={{
-              borderColor: 'color-mix(in srgb, var(--surface-border) 58%, transparent)',
-              background: 'color-mix(in srgb, var(--surface-card-bg) 88%, var(--bg-content) 12%)',
-              boxShadow: 'none',
-              padding: '18px 20px 16px',
-            }}
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0">
-                <div className="text-[15px] font-semibold leading-tight" style={{ color: 'var(--text-title)' }}>
-                  {selectedProfile.name}
-                </div>
-                <div className="mt-1 text-[12px] leading-5" style={{ color: 'var(--text-muted)' }}>
-                  {externalServiceDescription(selectedProfile)}
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-2 flex items-center gap-2 text-[11px] leading-5" style={{ color: 'var(--text-light)' }}>
+      {selectedProfile && (
+        <SettingsCard
+          title={selectedProfile.name}
+          description={externalServiceDescription(selectedProfile)}
+          actions={(
+            <SettingsSwitch
+              checked={selectedProfile.enabled}
+              label={selectedProfile.enabled ? '已启用' : '未启用'}
+              ariaLabel={`启用 ${selectedProfile.name}`}
+              onChange={() => toggleProfileEnabled(selectedProfile)}
+            />
+          )}
+        >
+          <div className="sx-card__body flex flex-col gap-4">
+            <div className="sx-meta flex flex-wrap items-center gap-x-1.5" style={{ marginTop: -4 }}>
               <span>{selectedSummary}</span>
               {selectedProfile.updatedAt ? <span>· 更新于 {new Date(selectedProfile.updatedAt).toLocaleString()}</span> : null}
             </div>
 
             {selectedGuide && (
-              <div
-                data-external-service-guide={selectedProfile.kind}
-                className="mt-4 rounded-xl border px-3.5 py-3 text-[11px] leading-5"
-                style={{
-                  borderColor: 'color-mix(in srgb, var(--color-blue) 22%, var(--surface-border))',
-                  background: 'color-mix(in srgb, var(--color-blue) 5%, transparent)',
-                  color: 'var(--text-muted)',
-                }}
-              >
-                <p>{selectedGuide.summary}</p>
-                <p className="mt-1" style={{ color: 'var(--text-light)' }}>{selectedGuide.note}</p>
-                <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1">
-                  {selectedGuide.links.map((link) => (
-                    <a
-                      key={link.href}
-                      href={link.href}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="font-medium hover:underline"
-                      style={{ color: 'var(--color-blue)' }}
-                    >
-                      {link.label} ↗
-                    </a>
-                  ))}
+              <div data-external-service-guide={selectedProfile.kind} className="sx-notice sx-notice--plain">
+                <Info strokeWidth={1.9} />
+                <div className="min-w-0 flex-1">
+                  <p style={{ color: 'var(--sx-body)' }}>{selectedGuide.summary}</p>
+                  <p className="mt-0.5" style={{ color: 'var(--sx-muted)' }}>{selectedGuide.note}</p>
+                  <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1">
+                    {selectedGuide.links.map((link) => (
+                      <a key={link.href} href={link.href} target="_blank" rel="noreferrer" className="sx-link">
+                        {link.label}
+                        <ArrowUpRight />
+                      </a>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}
 
-            <div className="mt-4 flex max-w-[640px] flex-col gap-3.5">
-              {serviceNeedsBaseUrl(selectedProfile) && (
-                <label className="flex flex-col gap-1.5 text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
-                  服务地址
+            {serviceNeedsBaseUrl(selectedProfile) && (
+              <label className="sx-field">
+                <span className="sx-field__label">服务地址</span>
+                <input
+                  value={selectedProfile.baseUrl || ''}
+                  onChange={(event) => patchProfile(selectedProfile.id, { baseUrl: event.target.value })}
+                  className="sx-input sx-input--mono"
+                  placeholder={selectedProfile.kind === 'vision-model' || selectedProfile.kind === 'image-generation' ? 'https://api.example.com' : 'https://...'}
+                />
+              </label>
+            )}
+
+            {selectedProfile.kind === 'image-generation' && (
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="sx-field">
+                  <span className="sx-field__label">生图类型</span>
+                  <select
+                    value={String(selectedProfile.options.protocol || '')}
+                    onChange={(event) => patchOptions(selectedProfile.id, { protocol: event.target.value })}
+                    className="sx-select w-full"
+                  >
+                    <option value="openai-images">GPT Image</option>
+                    <option value="gemini-generate-content">Gemini Image</option>
+                  </select>
+                </label>
+                <label className="sx-field">
+                  <span className="sx-field__label">模型名</span>
                   <input
-                    value={selectedProfile.baseUrl || ''}
-                    onChange={(event) => patchProfile(selectedProfile.id, { baseUrl: event.target.value })}
-                    style={externalServiceInputStyle()}
-                    placeholder={selectedProfile.kind === 'vision-model' || selectedProfile.kind === 'image-generation' ? 'https://api.example.com' : 'https://...'}
+                    value={String(selectedProfile.options.model || '')}
+                    onChange={(event) => patchOptions(selectedProfile.id, { model: event.target.value })}
+                    className="sx-input sx-input--mono"
+                    placeholder={selectedProfile.options.protocol === 'gemini-generate-content' ? 'gemini-3.1-flash-image' : 'gpt-image-2'}
                   />
                 </label>
-              )}
-
-              {selectedProfile.kind === 'image-generation' && (
-                <div className="grid gap-3 md:grid-cols-2">
-                  <label className="flex flex-col gap-1.5 text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
-                    生图类型
-                    <select
-                      value={String(selectedProfile.options.protocol || '')}
-                      onChange={(event) => patchOptions(selectedProfile.id, { protocol: event.target.value })}
-                      style={externalServiceInputStyle()}
-                    >
-                      <option value="openai-images">GPT Image</option>
-                      <option value="gemini-generate-content">Gemini Image</option>
-                    </select>
-                  </label>
-                  <label className="flex flex-col gap-1.5 text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
-                    模型名
+                {selectedProfile.options.protocol === 'openai-images' ? (
+                  <label className="sx-field">
+                    <span className="sx-field__label">默认尺寸</span>
                     <input
-                      value={String(selectedProfile.options.model || '')}
-                      onChange={(event) => patchOptions(selectedProfile.id, { model: event.target.value })}
-                      style={externalServiceInputStyle()}
-                      placeholder={selectedProfile.options.protocol === 'gemini-generate-content' ? 'gemini-3.1-flash-image' : 'gpt-image-2'}
+                      value={String(selectedProfile.options.size || '')}
+                      onChange={(event) => patchOptions(selectedProfile.id, { size: event.target.value })}
+                      className="sx-input sx-input--mono"
+                      placeholder="1024x1024"
                     />
                   </label>
-                  {selectedProfile.options.protocol === 'openai-images' ? (
-                    <label className="flex flex-col gap-1.5 text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
-                      默认尺寸
-                      <input
-                        value={String(selectedProfile.options.size || '')}
-                        onChange={(event) => patchOptions(selectedProfile.id, { size: event.target.value })}
-                        style={externalServiceInputStyle()}
-                        placeholder="1024x1024"
-                      />
-                    </label>
-                  ) : (
-                    <>
-                      <label className="flex flex-col gap-1.5 text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
-                        默认比例
-                        <select
-                          value={String(selectedProfile.options.aspectRatio || '1:1')}
-                          onChange={(event) => patchOptions(selectedProfile.id, { aspectRatio: event.target.value })}
-                          style={externalServiceInputStyle()}
-                        >
-                          <option value="1:1">1:1</option>
-                          <option value="16:9">16:9</option>
-                          <option value="9:16">9:16</option>
-                          <option value="4:3">4:3</option>
-                          <option value="3:4">3:4</option>
-                        </select>
-                      </label>
-                      <label className="flex flex-col gap-1.5 text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
-                        默认清晰度
-                        <select
-                          value={String(selectedProfile.options.imageSize || '1K')}
-                          onChange={(event) => patchOptions(selectedProfile.id, { imageSize: event.target.value })}
-                          style={externalServiceInputStyle()}
-                        >
-                          <option value="1K">1K</option>
-                          <option value="2K">2K</option>
-                          <option value="4K">4K</option>
-                        </select>
-                      </label>
-                    </>
-                  )}
-                </div>
-              )}
-
-              {selectedProfile.kind === 'vision-model' && (
-                <div className="grid gap-3 md:grid-cols-2">
-                  <label className="flex flex-col gap-1.5 text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
-                    Provider
-                    <input
-                      value={String(selectedProfile.options.provider || '')}
-                      onChange={(event) => patchOptions(selectedProfile.id, { provider: event.target.value })}
-                      style={externalServiceInputStyle()}
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1.5 text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
-                    Model
-                    <input
-                      value={String(selectedProfile.options.model || '')}
-                      onChange={(event) => patchOptions(selectedProfile.id, { model: event.target.value })}
-                      style={externalServiceInputStyle()}
-                      placeholder="gpt-4o / qwen-vl..."
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1.5 text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
-                    API 格式
-                    <select
-                      value={String(selectedProfile.options.apiKind || 'openai-completions')}
-                      onChange={(event) => patchOptions(selectedProfile.id, { apiKind: event.target.value })}
-                      style={externalServiceInputStyle()}
-                    >
-                      <option value="openai-completions">OpenAI Chat</option>
-                      <option value="openai-responses">OpenAI Responses</option>
-                      <option value="anthropic-messages">Anthropic Messages</option>
-                    </select>
-                  </label>
-                  <label className="flex items-center gap-2 self-end pb-2 text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
-                    <input
-                      type="checkbox"
-                      checked={Array.isArray(selectedProfile.options.inputModes) && selectedProfile.options.inputModes.includes('image')}
-                      onChange={(event) => patchOptions(selectedProfile.id, { inputModes: event.target.checked ? ['text', 'image'] : ['text'] })}
-                    />
-                    支持图片输入
-                  </label>
-                </div>
-              )}
-
-              {selectedProfile.kind === 'bilibili' && (
-                <label className="flex flex-col gap-1.5 text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
-                  Cookie 文件路径（可选）
-                  <input
-                    value={String(normalizeServiceOptionValue(selectedProfile.options.cookieFile))}
-                    onChange={(event) => patchOptions(selectedProfile.id, { cookieFile: event.target.value })}
-                    style={externalServiceInputStyle()}
-                    placeholder="/path/to/cookies.txt"
-                  />
-                </label>
-              )}
-
-              {selectedSecretKeys.map((key) => {
-                const status = selectedProfile.secretStatus[key]
-                const markedForClear = selectedClearSecrets.includes(key)
-                return (
-                  <label key={key} className="flex flex-col gap-1.5 text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
-                    {EXTERNAL_SERVICE_SECRET_LABELS[key] || key}
-                    <div className="flex gap-2">
-                      <input
-                        type="password"
-                        value={secretDrafts[selectedProfile.id]?.[key] || ''}
-                        onChange={(event) => updateSecretDraft(selectedProfile.id, key, event.target.value)}
-                        style={{ ...externalServiceInputStyle(), flex: 1 }}
-                        placeholder={markedForClear
-                          ? '保存后清除；输入新值可替换'
-                          : status?.state === 'recovery_required'
-                            ? '升级后无法读取，请重新填写'
-                            : status?.state === 'vault_unavailable'
-                              ? '本地凭据库暂不可用'
-                              : status?.configured
-                                ? `已配置 ${status.masked || ''}，留空则保留`
-                                : '未配置'}
-                      />
-                      {status?.configured ? (
-                        <button
-                          type="button"
-                          data-external-secret-clear={`${selectedProfile.id}:${key}`}
-                          onClick={() => markedForClear ? unmarkSecretForClear(selectedProfile.id, key) : markSecretForClear(selectedProfile.id, key)}
-                          className="inline-flex items-center justify-center rounded-xl text-[12px] font-medium transition-[border-color,color,background-color,opacity] duration-150 enabled:hover:bg-[var(--bg-hover)]"
-                          style={externalServiceButtonStyle('plain', isSelectedBusy || isSelectedTesting)}
-                          disabled={isSelectedBusy || isSelectedTesting}
-                        >
-                          {markedForClear ? '保留' : '清除'}
-                        </button>
-                      ) : null}
-                    </div>
-                  </label>
-                )
-              })}
-
-              <div className="min-h-5 text-[11px] leading-5" style={selectedFeedback ? externalServiceFeedbackStyle(selectedFeedback.kind) : { color: 'var(--text-light)' }}>
-                {selectedFeedback ? (
-                  <span className="inline-flex items-center gap-1.5">
-                    {selectedFeedback.kind === 'success' ? <CheckCircle2 className="h-3.5 w-3.5" /> : selectedFeedback.kind === 'error' ? <XCircle className="h-3.5 w-3.5" /> : null}
-                    {selectedFeedback.text}
-                  </span>
                 ) : (
-                  '测试不会保存配置；保存后 Agent 才会使用。'
+                  <>
+                    <label className="sx-field">
+                      <span className="sx-field__label">默认比例</span>
+                      <select
+                        value={String(selectedProfile.options.aspectRatio || '1:1')}
+                        onChange={(event) => patchOptions(selectedProfile.id, { aspectRatio: event.target.value })}
+                        className="sx-select w-full"
+                      >
+                        <option value="1:1">1:1</option>
+                        <option value="16:9">16:9</option>
+                        <option value="9:16">9:16</option>
+                        <option value="4:3">4:3</option>
+                        <option value="3:4">3:4</option>
+                      </select>
+                    </label>
+                    <label className="sx-field">
+                      <span className="sx-field__label">默认清晰度</span>
+                      <select
+                        value={String(selectedProfile.options.imageSize || '1K')}
+                        onChange={(event) => patchOptions(selectedProfile.id, { imageSize: event.target.value })}
+                        className="sx-select w-full"
+                      >
+                        <option value="1K">1K</option>
+                        <option value="2K">2K</option>
+                        <option value="4K">4K</option>
+                      </select>
+                    </label>
+                  </>
                 )}
               </div>
+            )}
 
-              {isSelectedVisionModel && (
-                <div
-                  data-vea-test-help
-                  className="text-[11px] leading-5"
-                  style={{ color: 'var(--text-light)' }}
-                >
-                  仅校验字段，不发起真实请求 / Validates fields only; no live request issued.
-                  {visionMissingRequirements.length > 0 ? `（缺少：${visionMissingRequirements.join('、')}）` : ''}
-                </div>
-              )}
-
-              {isSelectedImageGeneration && (
-                <div data-image-generation-test-help className="text-[11px] leading-5" style={{ color: 'var(--text-light)' }}>
-                  “试生成”会真实调用当前服务并产生一次费用；测试图不会保存。
-                  同时启用两个服务时，聊天默认使用列表中第一个；也可以在需求里明确指定 GPT Image 或 Gemini Image。
-                  {imageTestBlockers.length > 0 ? `（${imageTestBlockers.join('；')}）` : ''}
-                </div>
-              )}
-
-              <div className="flex items-center justify-between gap-3 pt-0.5">
-                <button
-                  type="button"
-                  onClick={() => { void resetProfile(selectedProfile) }}
-                  disabled={isSelectedBusy || isSelectedTesting}
-                  className="inline-flex items-center justify-center gap-1.5 rounded-xl text-[12px] font-medium transition-[border-color,color,background-color,opacity,filter] duration-150 enabled:hover:bg-[var(--bg-hover)]"
-                  style={externalServiceButtonStyle('plain', isSelectedBusy || isSelectedTesting)}
-                >
-                  {isSelectedBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-                  {isSelectedBusy ? '重置中' : '重置'}
-                </button>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    data-vea-test-button={isSelectedVisionModel ? 'fields-only' : 'probe'}
-                    onClick={() => { void testProfile(selectedProfile) }}
-                    disabled={isSelectedTesting || isSelectedBusy || isVisionTestDisabled || isImageTestDisabled}
-                    title={isSelectedVisionModel
-                      ? '仅校验字段，不发起真实请求 / Validates fields only; no live request issued.'
-                      : undefined}
-                    className="inline-flex items-center justify-center gap-1.5 rounded-xl text-[12px] font-medium transition-[border-color,color,background-color,opacity,filter] duration-150 enabled:hover:bg-[var(--bg-hover)]"
-                    style={externalServiceButtonStyle('secondary', isSelectedTesting || isSelectedBusy || isVisionTestDisabled || isImageTestDisabled)}
+            {selectedProfile.kind === 'vision-model' && (
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="sx-field">
+                  <span className="sx-field__label">Provider</span>
+                  <input
+                    value={String(selectedProfile.options.provider || '')}
+                    onChange={(event) => patchOptions(selectedProfile.id, { provider: event.target.value })}
+                    className="sx-input"
+                  />
+                </label>
+                <label className="sx-field">
+                  <span className="sx-field__label">Model</span>
+                  <input
+                    value={String(selectedProfile.options.model || '')}
+                    onChange={(event) => patchOptions(selectedProfile.id, { model: event.target.value })}
+                    className="sx-input sx-input--mono"
+                    placeholder="gpt-4o / qwen-vl..."
+                  />
+                </label>
+                <label className="sx-field">
+                  <span className="sx-field__label">API 格式</span>
+                  <select
+                    value={String(selectedProfile.options.apiKind || 'openai-completions')}
+                    onChange={(event) => patchOptions(selectedProfile.id, { apiKind: event.target.value })}
+                    className="sx-select w-full"
                   >
-                    {isSelectedTesting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-                    {isSelectedVisionModel
-                      ? (isSelectedTesting ? '校验中' : '仅校验字段')
-                      : isSelectedImageGeneration
-                        ? (isSelectedTesting ? '生成中' : '试生成')
-                        : (isSelectedTesting ? '测试中' : '测试')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { void saveProfile(selectedProfile) }}
-                    disabled={isSelectedBusy || isSelectedTesting}
-                    className="inline-flex items-center justify-center gap-1.5 rounded-xl text-[12px] font-medium transition-[border-color,color,background-color,opacity,filter] duration-150 enabled:hover:brightness-95"
-                    style={externalServiceButtonStyle('primary', isSelectedBusy || isSelectedTesting)}
-                  >
-                    {isSelectedBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-                    {isSelectedBusy ? '保存中' : '保存'}
-                  </button>
-                </div>
+                    <option value="openai-completions">OpenAI Chat</option>
+                    <option value="openai-responses">OpenAI Responses</option>
+                    <option value="anthropic-messages">Anthropic Messages</option>
+                  </select>
+                </label>
+                <label className="flex h-[34px] items-center gap-2 self-end text-[12.5px]" style={{ color: 'var(--sx-body)' }}>
+                  <input
+                    type="checkbox"
+                    className="sx-check"
+                    checked={Array.isArray(selectedProfile.options.inputModes) && selectedProfile.options.inputModes.includes('image')}
+                    onChange={(event) => patchOptions(selectedProfile.id, { inputModes: event.target.checked ? ['text', 'image'] : ['text'] })}
+                  />
+                  支持图片输入
+                </label>
               </div>
+            )}
+
+            {selectedProfile.kind === 'bilibili' && (
+              <label className="sx-field">
+                <span className="sx-field__label">Cookie 文件路径（可选）</span>
+                <input
+                  value={String(normalizeServiceOptionValue(selectedProfile.options.cookieFile))}
+                  onChange={(event) => patchOptions(selectedProfile.id, { cookieFile: event.target.value })}
+                  className="sx-input sx-input--mono"
+                  placeholder="/path/to/cookies.txt"
+                />
+              </label>
+            )}
+
+            {selectedSecretKeys.map((key) => {
+              const status = selectedProfile.secretStatus[key]
+              const markedForClear = selectedClearSecrets.includes(key)
+              return (
+                <label key={key} className="sx-field">
+                  <span className="sx-field__label">{EXTERNAL_SERVICE_SECRET_LABELS[key] || key}</span>
+                  <div className="flex gap-2">
+                    <input
+                      type="password"
+                      value={secretDrafts[selectedProfile.id]?.[key] || ''}
+                      onChange={(event) => updateSecretDraft(selectedProfile.id, key, event.target.value)}
+                      className="sx-input flex-1"
+                      placeholder={markedForClear
+                        ? '保存后清除；输入新值可替换'
+                        : status?.state === 'recovery_required'
+                          ? '升级后无法读取，请重新填写'
+                          : status?.state === 'vault_unavailable'
+                            ? '本地凭据库暂不可用'
+                            : status?.configured
+                              ? `已配置 ${status.masked || ''}，留空则保留`
+                              : '未配置'}
+                    />
+                    {status?.configured ? (
+                      <button
+                        type="button"
+                        data-external-secret-clear={`${selectedProfile.id}:${key}`}
+                        onClick={() => markedForClear ? unmarkSecretForClear(selectedProfile.id, key) : markSecretForClear(selectedProfile.id, key)}
+                        className={settingsButtonClass(markedForClear ? 'secondary' : 'danger-ghost')}
+                        style={{ height: 34 }}
+                        disabled={actionsLocked}
+                      >
+                        {markedForClear ? '保留' : '清除'}
+                      </button>
+                    ) : null}
+                  </div>
+                </label>
+              )
+            })}
+
+            {isSelectedVisionModel && (
+              <div data-vea-test-help className="text-[12px] leading-5" style={{ color: 'var(--sx-muted)' }}>
+                仅校验字段，不发起真实请求 / Validates fields only; no live request issued.
+                {visionMissingRequirements.length > 0 ? `（缺少：${visionMissingRequirements.join('、')}）` : ''}
+              </div>
+            )}
+
+            {isSelectedImageGeneration && (
+              <div data-image-generation-test-help className="text-[12px] leading-5" style={{ color: 'var(--sx-muted)' }}>
+                “试生成”会真实调用当前服务并产生一次费用；测试图不会保存。
+                同时启用两个服务时，聊天默认使用列表中第一个；也可以在需求里明确指定 GPT Image 或 Gemini Image。
+                {imageTestBlockers.length > 0 ? `（${imageTestBlockers.join('；')}）` : ''}
+              </div>
+            )}
+          </div>
+
+          <div className="sx-card__footer justify-between">
+            <div className="min-w-0 text-[12px] leading-5">
+              {selectedFeedback ? (
+                <span
+                  className={`inline-flex items-start gap-1.5 ${selectedFeedback.kind === 'error' ? 'sx-text-danger' : ''}`}
+                  style={selectedFeedback.kind === 'error' ? undefined : { color: selectedFeedback.kind === 'success' ? 'var(--sx-body)' : 'var(--sx-muted)' }}
+                >
+                  {selectedFeedback.kind === 'success'
+                    ? <Check className="mt-[3px] h-3.5 w-3.5 shrink-0" strokeWidth={2.4} />
+                    : selectedFeedback.kind === 'error'
+                      ? <XCircle className="mt-[3px] h-3.5 w-3.5 shrink-0" />
+                      : null}
+                  {selectedFeedback.text}
+                </span>
+              ) : (
+                <span style={{ color: 'var(--sx-subtle)' }}>测试不会保存配置；保存后 Agent 才会使用。</span>
+              )}
             </div>
-          </section>
-        )}
-      </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={() => { void resetProfile(selectedProfile) }}
+                disabled={actionsLocked}
+                className={settingsButtonClass('ghost')}
+              >
+                {isSelectedBusy ? <Loader2 className="animate-spin" /> : null}
+                {isSelectedBusy ? '重置中' : '重置'}
+              </button>
+              <button
+                type="button"
+                data-vea-test-button={isSelectedVisionModel ? 'fields-only' : 'probe'}
+                onClick={() => { void testProfile(selectedProfile) }}
+                disabled={isSelectedTesting || isSelectedBusy || isVisionTestDisabled || isImageTestDisabled}
+                aria-busy={isSelectedTesting ? true : undefined}
+                title={isSelectedVisionModel
+                  ? '仅校验字段，不发起真实请求 / Validates fields only; no live request issued.'
+                  : undefined}
+                className={settingsButtonClass('secondary')}
+              >
+                {isSelectedTesting ? <Loader2 className="animate-spin" /> : null}
+                {isSelectedVisionModel
+                  ? (isSelectedTesting ? '校验中' : '仅校验字段')
+                  : isSelectedImageGeneration
+                    ? (isSelectedTesting ? '生成中' : '试生成')
+                    : (isSelectedTesting ? '测试中' : '测试')}
+              </button>
+              <button
+                type="button"
+                onClick={() => { void saveProfile(selectedProfile) }}
+                disabled={actionsLocked}
+                aria-busy={isSelectedBusy ? true : undefined}
+                className={settingsButtonClass('primary')}
+                style={{ minWidth: 72 }}
+              >
+                {isSelectedBusy ? <Loader2 className="animate-spin" /> : null}
+                {isSelectedBusy ? '保存中' : '保存'}
+              </button>
+            </div>
+          </div>
+        </SettingsCard>
+      )}
     </div>
   )
 }

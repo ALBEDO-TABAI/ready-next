@@ -1,5 +1,28 @@
 import type { ThemeOption, ThemeSkin } from '../stores/useTheme'
 import type { AIModelConfig, AIProviderWorkspace } from '../../shared/ai-providers'
+import { previewNamespaces as aiPreview } from './settings-preview/ai'
+import { previewNamespaces as browserPrivacyPreview } from './settings-preview/browser-privacy'
+import { previewNamespaces as externalServicesPreview } from './settings-preview/external-services'
+import { previewNamespaces as mcpPreview } from './settings-preview/mcp'
+import { previewNamespaces as memoryPreview } from './settings-preview/memory'
+import { previewNamespaces as modelsRuntimePreview } from './settings-preview/models-runtime'
+import { previewNamespaces as petPreview } from './settings-preview/pet'
+import { previewNamespaces as remoteImPreview } from './settings-preview/remote-im'
+import { previewNamespaces as rssDraftStorePreview } from './settings-preview/rss-draft-store'
+import { previewNamespaces as storagePreview } from './settings-preview/storage'
+
+const PANEL_PREVIEW_NAMESPACES = [
+  aiPreview,
+  browserPrivacyPreview,
+  externalServicesPreview,
+  mcpPreview,
+  memoryPreview,
+  modelsRuntimePreview,
+  petPreview,
+  remoteImPreview,
+  rssDraftStorePreview,
+  storagePreview,
+]
 
 type Success<T> = Promise<{ success: true; data: T }>
 type SuccessNoData = Promise<{ success: true }>
@@ -782,5 +805,32 @@ export function installSettingsPreviewMocks(): void {
   window.alert = () => undefined
   window.confirm = () => true
   window.prompt = (_message?: string, defaultValue = '') => defaultValue || 'preview-item'
-  Object.assign(window, { electronAPI: api })
+  const merged: Record<string, Record<string, unknown>> = { ...(api as unknown as Record<string, Record<string, unknown>>) }
+  for (const namespaces of PANEL_PREVIEW_NAMESPACES) {
+    for (const [name, methods] of Object.entries(namespaces)) {
+      merged[name] = { ...(merged[name] || {}), ...methods }
+    }
+  }
+  Object.assign(window, { electronAPI: withPreviewFallback(merged) })
+}
+
+// 预览只为设置页准备了真数据；主壳与其他面板新增的 IPC 走兜底：
+// on* 订阅返回退订函数，其余调用返回空成功，避免预览因缺桩白屏。
+function previewFallbackMethod(name: string) {
+  return /^on[A-Z]/.test(name)
+    ? () => () => undefined
+    : async () => ({ success: true, data: null })
+}
+
+function withPreviewFallback<T extends object>(target: T, depth = 0): T {
+  return new Proxy(target, {
+    get(source, key, receiver) {
+      if (typeof key !== 'string' || Reflect.has(source, key)) {
+        const value = Reflect.get(source, key, receiver)
+        return depth === 0 && value && typeof value === 'object' ? withPreviewFallback(value, 1) : value
+      }
+      if (key === 'then') return undefined
+      return depth === 0 ? withPreviewFallback({}, 1) : previewFallbackMethod(key)
+    },
+  })
 }

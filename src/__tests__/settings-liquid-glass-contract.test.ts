@@ -29,7 +29,10 @@ test('settings page keeps the main workbench transparent shell structure', () =>
   assert.match(settingsPage, /sendIntent\(\{[\s\S]*kind: 'hide-all'[\s\S]*reason: 'overlay-open'/)
   assert.doesNotMatch(settingsPage, /data-liquid-shell="settings-header"[\s\S]*glass-surface-panel/)
   assert.match(settingsPage, /panel-hover-scrollbar flex-shrink-0 overflow-auto/)
-  assert.match(settingsPage, /glass-surface-card/)
+  // 2026-10-02 设置页视觉重整：内容直接落在窗口玻璃底上（与工作台同源），不再额外铺整块画布；
+  // 卡片与控件统一走 settings-surfaces.css 的 sx-* 体系，不再逐个挂 glass-surface-card。
+  assert.match(settingsPage, /<div className="flex-1 min-w-0 overflow-hidden">\s*<div\s+key=\{currentSection\?\.id \|\| 'unknown'\}\s+data-liquid-shell="settings-content"/)
+  assert.doesNotMatch(settingsPage, /sx-canvas/)
   assert.match(settingsPage, /className="settings-ai-panel/)
   assert.match(settingsPage, /settings-ai-light-card/)
 
@@ -53,18 +56,19 @@ test('settings page keeps the main workbench transparent shell structure', () =>
   assert.match(rendererTypes, /refreshTransparentSurface:\s*\(\) => Promise<void>/)
 })
 
-test('settings navigation items keep the main workbench transparent glass backdrop', () => {
+test('settings navigation items keep the transparent backdrop and leave hover / current state to shared classes', () => {
   const settingsTheme = readWorkspaceFile('src/renderer/components/settings/settings-theme.ts')
+  const settingsPage = readWorkspaceFile('src/renderer/pages/Settings.tsx')
+  const surfaces = readWorkspaceFile('src/renderer/styles/settings-surfaces.css')
 
-  // 331cacf4 refactor(settings): unify settings UI with workbench design language —
-  // 导航项从 inline background: 'transparent' 改为「不写 background」让 :hover 类生效；透明底靠默认值保持。
-  assert.match(
-    settingsTheme,
-    /export function settingsListItemStyle\(active: boolean\): CSSProperties \{\s+return \{\s+padding: '14px 8px',\s+borderRadius: 16,\s+\/\/ 不写 background，让 hover 类生效（inline 样式会盖掉 :hover）。\s+border: '1px solid transparent',\s+boxShadow: 'none',/,
-  )
+  // 导航项 inline 只留透明度，不写 background / border：hover 与当前态由 sx-nav-item 类统一驱动（inline 会盖掉 :hover）。
+  const listItemStyle = settingsTheme.match(/export function settingsListItemStyle\(active: boolean\): CSSProperties \{[\s\S]*?\n\}/)?.[0] ?? ''
+  assert.ok(listItemStyle, 'settingsListItemStyle stays exported')
+  assert.doesNotMatch(listItemStyle, /\b(?:background|border|boxShadow)\s*:/)
   assert.doesNotMatch(settingsTheme, /--settings-list-item-bg/)
-  assert.match(settingsTheme, /backdropFilter:\s*'none'/)
-  assert.match(settingsTheme, /WebkitBackdropFilter:\s*'none'/)
+  assert.match(settingsPage, /aria-current=\{isActive \? 'page' : undefined\}[\s\S]*?className="sx-nav-item"/)
+  assert.match(surfaces, /\.sx-nav-item:hover:not\(\[aria-current='page'\]\)\s*\{[\s\S]*?background:\s*var\(--sx-raised-hover\)/)
+  assert.match(surfaces, /\.sx-nav-item\[aria-current='page'\]\s*\{[\s\S]*?background:\s*var\(--sx-raised-bg\);[\s\S]*?box-shadow:\s*var\(--sx-raised-shadow\)/)
 })
 
 test('file tree scroll root opts into the Chromium 148 liquid glass repaint guard', () => {
@@ -105,16 +109,32 @@ test('workbench side and chat panels stay transparent while slots use the shared
   assert.doesNotMatch(styles, /html\[data-skin='liquid-glass'\] \[data-liquid-shell='chat-panel'\],[\s\S]*?\[data-liquid-shell='side-panel'\]:not\(\[data-side-panel-variant='hidden'\]\)\s*\{[\s\S]*?backdrop-filter:/)
 })
 
-test('shared settings theme keeps glass on outer cards while dense controls stay flat', () => {
+test('shared settings theme maps every inline constant onto the sx glass tokens', () => {
   const settingsTheme = readWorkspaceFile('src/renderer/components/settings/settings-theme.ts')
+  const surfaces = readWorkspaceFile('src/renderer/styles/settings-surfaces.css')
+  const index = readWorkspaceFile('src/renderer/styles/index.css')
 
-  assert.match(settingsTheme, /var\(--lg-border-soft\)/)
-  assert.match(settingsTheme, /var\(--lg-shadow-contact\)/)
-  assert.match(settingsTheme, /backdropFilter:/)
-  assert.match(settingsTheme, /WebkitBackdropFilter:/)
-  assert.match(settingsTheme, /color-mix\(in srgb, var\(--surface-card-bg\)/)
-  assert.match(settingsTheme, /SETTINGS_FLAT_CARD_STYLE/)
-  assert.match(settingsTheme, /SETTINGS_FLAT_INPUT_STYLE:[\s\S]*backdropFilter:\s*'none'/)
+  assert.match(index, /@import '\.\/settings-surfaces\.css';/)
+  assert.match(settingsTheme, /SETTINGS_CARD_STYLE: CSSProperties = \{[\s\S]*?background: 'var\(--sx-card-bg\)'/)
+  assert.match(settingsTheme, /SETTINGS_INPUT_STYLE: CSSProperties = \{[\s\S]*?background: 'var\(--sx-slot-bg\)'/)
+  assert.match(settingsTheme, /SETTINGS_PRIMARY_BUTTON_STYLE: CSSProperties = \{[\s\S]*?background: 'var\(--sx-ink\)'/)
+  // 极简层次：分组卡只是一层半透明白玻璃 + 柔和投影，不画外框；整页不再铺额外画布。
+  const cardBlock = surfaces.match(/\n  \.sx-card \{[\s\S]*?\n  \}/)?.[0] ?? ''
+  assert.match(cardBlock, /background:\s*var\(--sx-card-bg\)/)
+  assert.doesNotMatch(cardBlock, /\bborder\s*:/)
+  assert.doesNotMatch(surfaces, /\.sx-canvas|--sx-canvas/)
+  // 选中只用「被托起的白玻璃」填充表达（与导航选中同配方），不用线框圈选。
+  const selectedOption = surfaces.match(/\.sx-option:is\(\[aria-checked='true'\], \[aria-pressed='true'\], \.is-active\) \{[\s\S]*?\}/)?.[0] ?? ''
+  assert.match(selectedOption, /background:\s*var\(--sx-raised-bg\);[\s\S]*?box-shadow:\s*var\(--sx-raised-shadow\)/)
+  assert.doesNotMatch(selectedOption, /border|0 0 0 \d/)
+  // 输入是无边框的凹陷槽，聚焦时被托起，不画强调色线框。
+  const inputFocus = surfaces.match(/\.sx-input:focus,\s*\.sx-select:focus,\s*\.sx-textarea:focus \{[\s\S]*?\}/)?.[0] ?? ''
+  assert.match(inputFocus, /background:\s*var\(--sx-slot-bg-focus\)/)
+  assert.doesNotMatch(inputFocus, /border|--sx-focus-ring/)
+  // 强调色纪律：主按钮与「开」状态走墨色，设置页设计系统里不出现成功绿。
+  assert.match(surfaces, /\.sx-btn--primary\s*\{[\s\S]*?background:\s*var\(--sx-ink\)/)
+  assert.match(surfaces, /\.sx-switch\[data-checked='true'\]\s*\{[\s\S]*?background:\s*var\(--sx-ink\)/)
+  assert.doesNotMatch(surfaces, /--color-green/)
 })
 
 test('shared liquid glass surfaces remain real backdrop blur instead of flat paint', () => {
@@ -138,14 +158,10 @@ test('compact utility settings opt into short control slots so labels do not col
   // 快捷键/版本行走 readonly 渲染分支，检查更新走 button 分支，两者都吃同一 minWidth。
   assert.doesNotMatch(settingsPage, /slotWidth/)
   assert.match(settingsShared, /export const SETTINGS_ROW_CONTROL_MIN_WIDTH = 136/)
-  assert.match(
-    settingsPage,
-    /setting\.type === 'readonly' && \([\s\S]*?\.\.\.SETTINGS_READONLY_STYLE,[\s\S]*?width: 'auto',\s+minWidth: SETTINGS_ROW_CONTROL_MIN_WIDTH,/,
-  )
-  assert.match(
-    settingsPage,
-    /setting\.type === 'button' && \([\s\S]*?minWidth: SETTINGS_ROW_CONTROL_MIN_WIDTH,\s+justifyContent: 'center',/,
-  )
+  // 2026-10-02 视觉重整：只读值走 sx-value（快捷键拆成 kbd 键帽），按钮走 settingsButtonClass；
+  // 行与行在同一张 sx-card 里用发丝线分隔，控件列靠 sx-row__control 右对齐。
+  assert.match(settingsPage, /case 'readonly':[\s\S]*?<ShortcutKeys value=[\s\S]*?className="sx-value"/)
+  assert.match(settingsPage, /case 'button':[\s\S]*?className=\{settingsButtonClass\(/)
   assert.match(settingsPage, /settings: READY_SHORTCUT_GUIDE\.map\(\(item\) => \(\{ \.\.\.item, type: 'readonly' as const \}\)\)/)
   assert.match(shortcutCatalog, /id: 'captureWindow'/)
   assert.match(shortcutCatalog, /id: 'sendMessage'/)

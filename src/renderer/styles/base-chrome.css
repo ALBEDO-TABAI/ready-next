@@ -438,9 +438,10 @@ html[data-theme='dark'] .ready-app-bg::after {
     box-shadow 160ms ease;
 }
 
-.ready-app-shell input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']):not([type='hidden']):not([type='submit']):not([type='button']):not([type='reset']):not([type='image']):not(.ready-input-slot-inner),
-.ready-app-shell textarea:not(.ready-input-slot-inner),
-.ready-app-shell select:not(.ready-input-slot-inner) {
+/* 设置页的 sx-input / sx-select / sx-textarea 自带槽位材质与强调色焦点环（settings-surfaces.css），不吃这条全局兜底。 */
+.ready-app-shell input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']):not([type='hidden']):not([type='submit']):not([type='button']):not([type='reset']):not([type='image']):not(.ready-input-slot-inner):not(.sx-input),
+.ready-app-shell textarea:not(.ready-input-slot-inner):not(.sx-textarea),
+.ready-app-shell select:not(.ready-input-slot-inner):not(.sx-select) {
   background: var(--input-slot-bg) !important;
   border-color: var(--input-slot-border) !important;
   box-shadow: var(--input-slot-shadow) !important;
@@ -456,9 +457,9 @@ html[data-theme='dark'] .ready-app-bg::after {
   outline: none !important;
 }
 
-.ready-app-shell input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']):not([type='hidden']):not([type='submit']):not([type='button']):not([type='reset']):not([type='image']):not(.ready-input-slot-inner):focus,
-.ready-app-shell textarea:not(.ready-input-slot-inner):focus,
-.ready-app-shell select:not(.ready-input-slot-inner):focus {
+.ready-app-shell input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']):not([type='hidden']):not([type='submit']):not([type='button']):not([type='reset']):not([type='image']):not(.ready-input-slot-inner):not(.sx-input):focus,
+.ready-app-shell textarea:not(.ready-input-slot-inner):not(.sx-textarea):focus,
+.ready-app-shell select:not(.ready-input-slot-inner):not(.sx-select):focus {
   border-color: var(--input-slot-focus-border) !important;
   box-shadow: var(--input-slot-shadow-focus) !important;
   outline: none !important;

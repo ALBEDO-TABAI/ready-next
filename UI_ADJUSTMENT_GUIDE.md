@@ -95,15 +95,16 @@ Widget 视觉不能在组件内另造色板；预览、导出和编辑必须从�
 
 ## 5. Settings
 
-- 页面与分区路由：`src/renderer/pages/Settings.tsx`
-- 共用组件：`src/renderer/components/settings/`
-- 共用 token：`src/renderer/components/settings/settings-theme.ts`
+- 页面与分区路由：`src/renderer/pages/Settings.tsx`（导航按 通用 / 智能 / 内容与连接 / 隐私与数据 / 应用 分组）
+- 设计系统：`src/renderer/styles/settings-surfaces.css`（`--sx-*` token 与 `sx-*` 组件类）
+- 共用组件：`src/renderer/pages/settings/settings-shared.tsx`（SettingsCard / SettingsRow / SettingsSegmented / SettingsSwitch / SettingsNotice / SettingsStatus / `settingsButtonClass`）与 `src/renderer/components/settings/`
+- inline 兼容 token：`src/renderer/components/settings/settings-theme.ts`（取值全部指向 `--sx-*`）
 - Tag Forge：`src/renderer/pages/settings/TagForgeSettingsPanel.tsx`
 - 长期记忆：`src/renderer/pages/settings/ReadyMemorySettingsPanel.tsx`（自动整理当前禁用）
 - 微信/飞书：`src/renderer/components/settings/RemoteIMSettingsPanel.tsx`
 - 状态：`src/renderer/stores/useSettings.ts`
 
-设置页左侧不堆大卡片底板；输入、按钮、只读槽优先复用共用 token。新增持久设置必须同时核对 Main、Preload、Renderer 类型和 native DB 验证。
+设置页追求极简与安静：内容直接落在窗口玻璃底上，不额外铺整块画布；需要成组的设置项才放进分组玻璃卡（`sx-card`：半透明白 + 柔和投影，无外框，行间只留内缩发丝线）。选中、聚焦、悬停一律用「填充 + 轻投影」表达（选中 = 被托起的白玻璃，与导航选中同配方），不用线框圈选；输入是无边框的凹陷槽，按钮是带白色高光边的浮起玻璃片。按钮、输入、分段、开关只用 `sx-*` 类，hover / active / focus 由类统一，不再写 inline 颜色或零散 `hover:` 工具类。色彩纪律：关键行动与「开」状态用墨色（与发送键同源），每个视图最多一个主按钮；强调色只做点缀（当前导航图标、选中点、焦点环、状态圆点、文字链接）；设置页不用成功绿；危险操作是红字 + 极淡水洗，不铺红块。四档强调色按 OKLCH 等明度配平，行为合同见 `src/__tests__/settings-design-system.test.tsx`。新增持久设置必须同时核对 Main、Preload、Renderer 类型和 native DB 验证。
 
 ## 6. 样式与验证
 

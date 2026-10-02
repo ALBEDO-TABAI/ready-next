@@ -1,13 +1,13 @@
 import { useState, useEffect, useCallback } from 'react'
-import { CheckCircle2, FileArchive, Loader2, Trash2, XCircle } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { Check, FileArchive, Loader2, Trash2 } from 'lucide-react'
 import {
-  SETTINGS_CARD_STYLE,
-  SETTINGS_DANGER_BUTTON_STYLE,
-  SETTINGS_INPUT_STYLE,
-  SETTINGS_SECONDARY_BUTTON_STYLE,
-  SETTINGS_SUBTLE_CARD_STYLE,
-} from '../../components/settings/settings-theme'
-import { SETTINGS_ROW_CONTROL_MIN_WIDTH } from './settings-shared'
+  SETTINGS_ROW_CONTROL_MIN_WIDTH,
+  SettingsCard,
+  SettingsNotice,
+  SettingsRow,
+  settingsButtonClass,
+} from './settings-shared'
 
 // Storage / cache panel — wired to app:getCacheStats + app:clearCache.
 // Replaces the legacy hardcoded "256 MB" display. Shows live breakdown of
@@ -22,6 +22,9 @@ const CACHE_QUOTA_OPTIONS: { value: CacheQuotaOption; label: string }[] = [
 ]
 
 const DEFAULT_CACHE_QUOTA: CacheQuotaOption = '1GB'
+
+// 缓存构成条与图例共用的中性墨色梯度：强调色不参与数据可视化，只按占比深浅区分。
+const BREAKDOWN_SHADES = [72, 46, 28, 14]
 
 function isValidQuota(value: string | null | undefined): value is CacheQuotaOption {
   return value === '256MB' || value === '1GB' || value === '5GB' || value === 'unlimited'
@@ -187,260 +190,231 @@ export function StorageSettingsPanel() {
       ]
     : []
 
+  const clearBusy = clearing !== 'none' || statsLoading
+
   return (
-    <div className="flex flex-col gap-7">
+    <div className="flex flex-col gap-5">
       {/* Cache breakdown summary */}
-      <div
-        className="glass-surface-card rounded-2xl border"
-        style={{
-          ...SETTINGS_CARD_STYLE,
-          padding: '18px 20px',
-        }}
-      >
-        <div className="flex items-baseline justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-[13px] font-semibold" style={{ color: 'var(--text-title)' }}>
-              缓存占用
-            </div>
-            <div className="text-[11px] mt-1" style={{ color: 'var(--text-light)' }}>
-              当前 userData 下的缓存合计大小
-            </div>
-          </div>
-          <div className="text-[18px] font-mono font-semibold" style={{ color: 'var(--text-title)' }}>
+      <SettingsCard
+        title="缓存占用"
+        description="当前 userData 下的缓存合计大小"
+        actions={(
+          <div className="sx-stat__value" style={{ fontSize: 24 }}>
             {statsLoading ? '…' : formatBytes(totalBytes)}
           </div>
-        </div>
-        {statsError && (
-          <div className="text-[11px] mt-2" style={{ color: 'var(--color-red, #d44)' }}>
-            {statsError}
-          </div>
         )}
-        <div className="mt-4 flex flex-col gap-2">
-          {breakdownRows.map((row) => (
-            <div key={row.id} className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-[12px] font-medium" style={{ color: 'var(--text-body)' }}>
-                  {row.label}
-                </div>
-                <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-light)' }}>
-                  {row.description}
-                </div>
-              </div>
-              <div className="text-[12px] font-mono" style={{ color: 'var(--text-muted)' }}>
-                {statsLoading ? '…' : formatBytes(row.bytes)}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="flex items-center justify-between transition-colors">
-        <div className="flex-1 min-w-0 mr-4">
-          <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>
-            报错信息包
-          </div>
-          <div className="text-[12px] mt-1 leading-5" style={{ color: 'var(--text-light)' }}>
-            导出最近日志、运行状态和脱敏配置，方便定位打包版问题
-          </div>
-          {diagnosticResult && (
-            <div
-              className="mt-2 text-[11px] leading-5 break-all"
-              style={{ color: diagnosticResult.error ? 'var(--color-red, #d44)' : 'var(--text-muted)' }}
-            >
-              {diagnosticResult.error
-                ? diagnosticResult.error
-                : `已导出：${diagnosticResult.path}${diagnosticResult.bytes ? `（${formatBytes(diagnosticResult.bytes)}）` : ''}`}
+      >
+        <div className="sx-card__body" style={{ paddingTop: 4 }}>
+          {statsError && (
+            <div className="sx-text-danger mb-3 text-[12px]">
+              {statsError}
             </div>
           )}
-        </div>
-        <button
-          onClick={() => { void exportDiagnosticPack() }}
-          disabled={diagnosticExporting}
-          className="flex-shrink-0 flex items-center gap-1.5 rounded-lg text-[12px] font-medium transition-[filter,transform,background-color,opacity] duration-200 hover:brightness-95 active:scale-[0.98]"
-          style={{
-            ...SETTINGS_SECONDARY_BUTTON_STYLE,
-            minWidth: SETTINGS_ROW_CONTROL_MIN_WIDTH,
-            justifyContent: 'center',
-            opacity: diagnosticExporting ? 0.6 : 1,
-            cursor: diagnosticExporting ? 'not-allowed' : 'pointer',
-          }}
-        >
-          {diagnosticExporting
-            ? <Loader2 className="w-3 h-3 animate-spin" />
-            : <FileArchive className="w-3 h-3" />}
-          {diagnosticExporting ? '导出中…' : '导出'}
-        </button>
-      </div>
-
-      {/* Quota selector — relabel-only per Stage Y0.8 plan §11.0a path-(b).
-          The configured value still persists via cache_quota_bytes so it
-          carries forward into Stage Z's real eviction landing; this UI is
-          honest that no enforcement happens today. EN equivalent for future
-          locale work: "Cache size limit (configured but NOT enforced —
-          manual cleanup required)". */}
-      <div className="flex items-center justify-between transition-colors">
-        <div className="flex-1 min-w-0 mr-4">
-          <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>
-            缓存大小上限
+          <div
+            className="flex h-[6px] w-full overflow-hidden rounded-full"
+            style={{ background: 'var(--sx-track-bg)' }}
+            aria-hidden
+          >
+            {totalBytes > 0 && breakdownRows.map((row, index) => (
+              row.bytes > 0 && (
+                <span
+                  key={row.id}
+                  className="h-full"
+                  style={{
+                    width: `${(row.bytes / totalBytes) * 100}%`,
+                    minWidth: 3,
+                    background: `color-mix(in srgb, var(--sx-ink) ${BREAKDOWN_SHADES[index]}%, transparent)`,
+                    borderRight: '1.5px solid var(--sx-card-bg)',
+                  }}
+                />
+              )
+            ))}
           </div>
-          <div className="text-[12px] mt-1 leading-5" style={{ color: 'var(--text-light)' }}>
-            仅记录配置，未强制执行 — 需要手动清理（使用下方的「清除缓存」按钮）
-          </div>
-        </div>
-        <select
-          value={quota}
-          onChange={(e) => { void handleQuotaChange(e.target.value as CacheQuotaOption) }}
-          className="flex-shrink-0 rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-[box-shadow,border-color,background-color] duration-200 cursor-pointer"
-          style={{
-            ...SETTINGS_INPUT_STYLE,
-            padding: '9px 32px 9px 14px',
-            width: 'auto',
-            minWidth: SETTINGS_ROW_CONTROL_MIN_WIDTH,
-          }}
-        >
-          {CACHE_QUOTA_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>{opt.label}</option>
-          ))}
-        </select>
-      </div>
-
-      {/* Standard clear */}
-      <div className="flex items-center justify-between transition-colors">
-        <div className="flex-1 min-w-0 mr-4">
-          <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>
-            清除缓存
-          </div>
-          <div className="text-[12px] mt-1 leading-5" style={{ color: 'var(--text-light)' }}>
-            清除 Code Cache / HTTP Cache / Shared Dictionary 与会话级 Chromium 缓存
+          <div className="mt-4 grid grid-cols-2 gap-x-8 gap-y-3.5">
+            {breakdownRows.map((row, index) => (
+              <div key={row.id} className="flex items-center justify-between gap-3">
+                <div className="flex min-w-0 items-start gap-2.5">
+                  <span
+                    className="mt-[5px] h-2 w-2 shrink-0 rounded-[3px]"
+                    style={{ background: `color-mix(in srgb, var(--sx-ink) ${BREAKDOWN_SHADES[index]}%, transparent)` }}
+                    aria-hidden
+                  />
+                  <div className="min-w-0">
+                    <div className="text-[12.5px] font-medium" style={{ color: 'var(--sx-body)' }}>
+                      {row.label}
+                    </div>
+                    <div className="sx-meta mt-0.5 truncate">
+                      {row.description}
+                    </div>
+                  </div>
+                </div>
+                <div className="sx-mono shrink-0 text-[12px]" style={{ color: 'var(--sx-muted)' }}>
+                  {statsLoading ? '…' : formatBytes(row.bytes)}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
-        <button
-          onClick={() => setConfirmKind('standard')}
-          disabled={clearing !== 'none' || statsLoading}
-          className="flex-shrink-0 flex items-center gap-1.5 rounded-lg text-[12px] font-medium transition-[filter,transform,background-color,opacity] duration-200 hover:brightness-95 active:scale-[0.98]"
-          style={{
-            ...SETTINGS_DANGER_BUTTON_STYLE,
-            minWidth: SETTINGS_ROW_CONTROL_MIN_WIDTH,
-            justifyContent: 'center',
-            opacity: clearing !== 'none' || statsLoading ? 0.6 : 1,
-            cursor: clearing !== 'none' || statsLoading ? 'not-allowed' : 'pointer',
-          }}
-        >
-          {clearing === 'standard'
-            ? <Loader2 className="w-3 h-3 animate-spin" />
-            : <Trash2 className="w-3 h-3" />}
-          {clearing === 'standard' ? '清除中…' : '清除'}
-        </button>
-      </div>
+      </SettingsCard>
 
-      {/* Puppeteer clear (gated separately) */}
-      <div className="flex items-center justify-between transition-colors">
-        <div className="flex-1 min-w-0 mr-4">
-          <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>
-            包括浏览器缓存
-          </div>
-          <div className="text-[12px] mt-1 leading-5" style={{ color: 'var(--text-light)' }}>
-            额外清除 puppeteer-cache（会重新下载 Chrome，约数百 MB）
-          </div>
-        </div>
-        <button
-          onClick={() => setConfirmKind('puppeteer')}
-          disabled={clearing !== 'none' || statsLoading}
-          className="flex-shrink-0 flex items-center gap-1.5 rounded-lg text-[12px] font-medium transition-[filter,transform,background-color,opacity] duration-200 hover:brightness-95 active:scale-[0.98]"
-          style={{
-            ...SETTINGS_SECONDARY_BUTTON_STYLE,
-            minWidth: SETTINGS_ROW_CONTROL_MIN_WIDTH,
-            justifyContent: 'center',
-            opacity: clearing !== 'none' || statsLoading ? 0.6 : 1,
-            cursor: clearing !== 'none' || statsLoading ? 'not-allowed' : 'pointer',
-          }}
+      <SettingsCard>
+        <SettingsRow
+          label="报错信息包"
+          description={(
+            <>
+              导出最近日志、运行状态和脱敏配置，方便定位打包版问题
+              {diagnosticResult && (
+                <span
+                  className={`mt-1 block break-all text-[11.5px] ${diagnosticResult.error ? 'sx-text-danger' : ''}`}
+                  style={diagnosticResult.error ? undefined : { color: 'var(--sx-body)' }}
+                >
+                  {diagnosticResult.error
+                    ? diagnosticResult.error
+                    : `已导出：${diagnosticResult.path}${diagnosticResult.bytes ? `（${formatBytes(diagnosticResult.bytes)}）` : ''}`}
+                </span>
+              )}
+            </>
+          )}
         >
-          {clearing === 'puppeteer'
-            ? <Loader2 className="w-3 h-3 animate-spin" />
-            : <Trash2 className="w-3 h-3" />}
-          {clearing === 'puppeteer' ? '清除中…' : '清除全部'}
-        </button>
-      </div>
+          <button
+            type="button"
+            onClick={() => { void exportDiagnosticPack() }}
+            disabled={diagnosticExporting}
+            aria-busy={diagnosticExporting || undefined}
+            className={settingsButtonClass('secondary')}
+            style={{ minWidth: SETTINGS_ROW_CONTROL_MIN_WIDTH }}
+          >
+            {diagnosticExporting
+              ? <Loader2 className="animate-spin" />
+              : <FileArchive />}
+            {diagnosticExporting ? '导出中…' : '导出'}
+          </button>
+        </SettingsRow>
 
-      {/* Result toast */}
+        {/* Quota selector — relabel-only per Stage Y0.8 plan §11.0a path-(b).
+            The configured value still persists via cache_quota_bytes so it
+            carries forward into Stage Z's real eviction landing; this UI is
+            honest that no enforcement happens today. EN equivalent for future
+            locale work: "Cache size limit (configured but NOT enforced —
+            manual cleanup required)". */}
+        <SettingsRow
+          label="缓存大小上限"
+          description="仅记录配置，未强制执行 — 需要手动清理（使用下方的「清除缓存」按钮）"
+        >
+          <select
+            value={quota}
+            aria-label="缓存大小上限"
+            onChange={(e) => { void handleQuotaChange(e.target.value as CacheQuotaOption) }}
+            className="sx-select"
+            style={{ minWidth: SETTINGS_ROW_CONTROL_MIN_WIDTH }}
+          >
+            {CACHE_QUOTA_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+        </SettingsRow>
+
+        {/* Standard clear */}
+        <SettingsRow
+          label="清除缓存"
+          description="清除 Code Cache / HTTP Cache / Shared Dictionary 与会话级 Chromium 缓存"
+        >
+          <button
+            type="button"
+            onClick={() => setConfirmKind('standard')}
+            disabled={clearBusy}
+            aria-busy={clearing === 'standard' || undefined}
+            className={settingsButtonClass('danger')}
+            style={{ minWidth: SETTINGS_ROW_CONTROL_MIN_WIDTH }}
+          >
+            {clearing === 'standard'
+              ? <Loader2 className="animate-spin" />
+              : <Trash2 />}
+            {clearing === 'standard' ? '清除中…' : '清除'}
+          </button>
+        </SettingsRow>
+
+        {/* Puppeteer clear (gated separately) */}
+        <SettingsRow
+          label="包括浏览器缓存"
+          description="额外清除 puppeteer-cache（会重新下载 Chrome，约数百 MB）"
+        >
+          <button
+            type="button"
+            onClick={() => setConfirmKind('puppeteer')}
+            disabled={clearBusy}
+            aria-busy={clearing === 'puppeteer' || undefined}
+            className={settingsButtonClass('danger')}
+            style={{ minWidth: SETTINGS_ROW_CONTROL_MIN_WIDTH }}
+          >
+            {clearing === 'puppeteer'
+              ? <Loader2 className="animate-spin" />
+              : <Trash2 />}
+            {clearing === 'puppeteer' ? '清除中…' : '清除全部'}
+          </button>
+        </SettingsRow>
+      </SettingsCard>
+
+      {/* Result notice — 成功用墨色对勾的中性提示，失败才用红色发丝边 */}
       {lastResult && (
-        <div
-          className="glass-surface-card rounded-2xl border"
-          style={{
-            ...SETTINGS_SUBTLE_CARD_STYLE,
-            padding: '12px 14px',
-          }}
+        <SettingsNotice
+          tone={lastResult.errors.length === 0 ? 'plain' : 'danger'}
+          icon={lastResult.errors.length === 0 ? Check : undefined}
+          title={lastResult.errors.length === 0
+            ? `已清除 ${formatBytes(lastResult.clearedBytes)}`
+            : `部分失败：清除 ${formatBytes(lastResult.clearedBytes)}，${lastResult.errors.length} 个错误`}
         >
-          <div className="flex items-center gap-2">
-            {lastResult.errors.length === 0
-              ? <CheckCircle2 className="w-3.5 h-3.5" style={{ color: 'var(--color-green)' }} />
-              : <XCircle className="w-3.5 h-3.5" style={{ color: 'var(--color-red, #d44)' }} />}
-            <span className="text-[12px] font-medium" style={{ color: 'var(--text-body)' }}>
-              {lastResult.errors.length === 0
-                ? `已清除 ${formatBytes(lastResult.clearedBytes)}`
-                : `部分失败：清除 ${formatBytes(lastResult.clearedBytes)}，${lastResult.errors.length} 个错误`}
-            </span>
-          </div>
           {lastResult.errors.length > 0 && (
-            <ul className="mt-2 ml-5 list-disc text-[11px]" style={{ color: 'var(--text-light)' }}>
+            <ul className="mt-1 list-disc pl-4 text-[11.5px]">
               {lastResult.errors.slice(0, 5).map((err, idx) => (
                 <li key={idx}>{err}</li>
               ))}
             </ul>
           )}
-        </div>
+        </SettingsNotice>
       )}
 
       {/* Confirmation modal */}
-      {confirmKind && (
+      {confirmKind && createPortal(
         <div
           data-ready-native-overlay=""
-          className="fixed inset-0 z-[100] flex items-center justify-center"
-          style={{ background: 'rgba(0,0,0,0.32)' }}
+          className="sx-scrim"
           onClick={() => setConfirmKind(null)}
         >
           <div
-            className="glass-surface-card rounded-2xl border"
-            style={{
-              ...SETTINGS_CARD_STYLE,
-              padding: '20px 22px',
-              width: 360,
-              maxWidth: 'calc(100vw - 48px)',
-            }}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="storage-clear-confirm-title"
+            className="sx-dialog"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="text-[14px] font-semibold" style={{ color: 'var(--text-title)' }}>
+            <div id="storage-clear-confirm-title" className="sx-card-title">
               确认清除缓存
             </div>
-            <div className="text-[12px] mt-2 leading-5" style={{ color: 'var(--text-light)' }}>
+            <div className="mt-2 text-[12.5px] leading-[1.65]" style={{ color: 'var(--sx-muted)' }}>
               {confirmKind === 'puppeteer'
                 ? '此操作会删除所有缓存，包括 puppeteer-cache。下次启动浏览器自动化时会重新下载 Chrome（数百 MB），耗时较长。是否继续？'
                 : '此操作会删除 Code Cache、HTTP Cache 与 Shared Dictionary。下次启动应用时会重新生成。是否继续？'}
             </div>
-            <div className="mt-4 flex justify-end gap-2">
+            <div className="sx-dialog__actions">
               <button
+                type="button"
                 onClick={() => setConfirmKind(null)}
-                className="rounded-lg text-[12px] font-medium transition-[filter,transform,background-color,opacity] duration-200 hover:brightness-95 active:scale-[0.98]"
-                style={{
-                  ...SETTINGS_SECONDARY_BUTTON_STYLE,
-                  padding: '8px 14px',
-                }}
+                className={settingsButtonClass('secondary')}
               >
                 取消
               </button>
               <button
+                type="button"
                 onClick={() => { void performClear(confirmKind === 'puppeteer') }}
-                className="rounded-lg text-[12px] font-medium transition-[filter,transform,background-color,opacity] duration-200 hover:brightness-95 active:scale-[0.98]"
-                style={{
-                  ...SETTINGS_DANGER_BUTTON_STYLE,
-                  padding: '8px 14px',
-                }}
+                className={settingsButtonClass('danger')}
               >
                 确认清除
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )

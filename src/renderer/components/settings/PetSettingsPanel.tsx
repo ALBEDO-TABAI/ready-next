@@ -1,55 +1,22 @@
 import { useEffect, useMemo, useState, type ChangeEvent, type KeyboardEvent } from 'react'
-import { Eye, EyeOff, RotateCcw } from 'lucide-react'
-import type { PetDefinition, PetSettings } from '../../../shared/pet'
+import { Cat, Check, Eye, EyeOff, RotateCcw } from 'lucide-react'
+import type { PetDefinition, PetSettings, PetSize } from '../../../shared/pet'
 import { DEFAULT_PET_SETTINGS } from '../../../shared/pet'
 import {
-  SETTINGS_CARD_STYLE,
-  SETTINGS_FLAT_BUTTON_STYLE,
-  SETTINGS_INPUT_STYLE,
-  SETTINGS_PRIMARY_BUTTON_STYLE,
-  SETTINGS_SUBTLE_CARD_STYLE,
-} from './settings-theme'
+  SettingsCard,
+  SettingsGroup,
+  SettingsNotice,
+  SettingsRow,
+  SettingsSegmented,
+  SettingsSwitch,
+  settingsButtonClass,
+} from '../../pages/settings/settings-shared'
 
-function Toggle({
-  checked,
-  onChange,
-}: {
-  checked: boolean
-  onChange: (checked: boolean) => void
-}) {
-  return (
-    <button
-      type="button"
-      onClick={() => onChange(!checked)}
-      className="flex-shrink-0 transition-colors duration-200"
-      style={{
-        width: 48,
-        height: 28,
-        borderRadius: 999,
-        position: 'relative',
-        border: `1px solid ${checked
-          ? 'color-mix(in srgb, var(--color-blue) 34%, transparent)'
-          : 'color-mix(in srgb, var(--lg-border-soft) 88%, transparent)'}`,
-        background: checked
-          ? 'color-mix(in srgb, var(--color-blue) 82%, var(--surface-floating-bg) 18%)'
-          : 'var(--surface-floating-bg)',
-        boxShadow: checked
-          ? '0 10px 22px color-mix(in srgb, var(--color-blue) 16%, transparent), inset 0 1px 0 rgba(255,255,255,0.35)'
-          : 'inset 0 1px 0 rgba(255,255,255,0.18)',
-      }}
-    >
-      <span
-        className="absolute top-[4px] h-5 w-5 rounded-full transition-transform duration-200"
-        style={{
-          left: 4,
-          transform: checked ? 'translateX(20px)' : 'translateX(0)',
-          background: '#fff',
-          boxShadow: '0 4px 10px rgba(15,23,42,0.16)',
-        }}
-      />
-    </button>
-  )
-}
+const PET_SIZE_OPTIONS: { value: PetSize; label: string }[] = [
+  { value: 'small', label: '小' },
+  { value: 'medium', label: '中' },
+  { value: 'large', label: '大' },
+]
 
 function EditableText({
   value,
@@ -79,6 +46,7 @@ function EditableText({
     const sharedProps = {
       value: draft,
       autoFocus: true,
+      onClick: (event: React.MouseEvent) => event.stopPropagation(),
       onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setDraft(event.target.value),
       onBlur: commit,
       onKeyDown: (event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -91,19 +59,21 @@ function EditableText({
           setEditing(false)
         }
       },
-      style: { ...SETTINGS_INPUT_STYLE, width: '100%', padding: multiline ? '9px 10px' : '7px 10px' },
     }
     return multiline
-      ? <textarea {...sharedProps} rows={2} />
-      : <input {...sharedProps} />
+      ? <textarea {...sharedProps} rows={2} className="sx-textarea" style={{ minHeight: 0, fontSize: 12 }} />
+      : <input {...sharedProps} className="sx-input" style={{ height: 30 }} />
   }
 
   return (
     <button
       type="button"
-      onClick={() => setEditing(true)}
-      className="block w-full rounded-lg text-left transition-colors hover:bg-[var(--bg-hover)]"
-      style={{ padding: '3px 4px', color: multiline ? 'var(--text-light)' : 'var(--text-title)' }}
+      onClick={(event) => {
+        event.stopPropagation()
+        setEditing(true)
+      }}
+      className={`block w-full rounded-[7px] text-left transition-colors hover:bg-[var(--sx-hover)] ${multiline ? 'text-[12px] leading-[1.55]' : 'text-[13px] font-semibold'}`}
+      style={{ padding: '2px 6px', margin: '0 -6px', width: 'calc(100% + 12px)', color: multiline ? 'var(--sx-muted)' : 'var(--sx-title)' }}
       title="点击编辑"
     >
       {value || placeholder}
@@ -112,18 +82,19 @@ function EditableText({
 }
 
 function PetThumb({ pet }: { pet: PetDefinition }) {
+  const frame = { background: 'var(--sx-inset-bg)' }
   if (!pet.available || !pet.spritesheetUrl) {
     return (
-      <div className="grid h-[52px] w-12 place-items-center rounded-xl border text-[13px]" style={SETTINGS_SUBTLE_CARD_STYLE}>
-        ?
+      <div className="grid h-[52px] w-12 shrink-0 place-items-center rounded-[10px]" style={frame}>
+        <Cat size={20} strokeWidth={1.6} style={{ color: pet.available ? 'var(--sx-muted)' : 'var(--sx-subtle)' }} />
       </div>
     )
   }
   return (
     <div
-      className="h-[52px] w-12 rounded-xl border"
+      className="h-[52px] w-12 shrink-0 rounded-[10px]"
       style={{
-        ...SETTINGS_SUBTLE_CARD_STYLE,
+        ...frame,
         backgroundImage: `url("${pet.spritesheetUrl}")`,
         backgroundRepeat: 'no-repeat',
         backgroundSize: '384px 468px',
@@ -191,114 +162,66 @@ export default function PetSettingsPanel() {
   }
 
   return (
-    <div className="flex flex-col gap-5">
-      {error && (
-        <div className="rounded-2xl border px-4 py-3 text-[12px]" style={{ ...SETTINGS_SUBTLE_CARD_STYLE, color: 'var(--color-red)' }}>
-          {error}
-        </div>
-      )}
+    <div className="sx-stack">
+      {error && <SettingsNotice tone="danger" title={error} />}
 
-      <section className="glass-surface-card rounded-2xl border" style={{ ...SETTINGS_CARD_STYLE, padding: '18px 20px' }}>
-        <div className="grid gap-4 md:grid-cols-3">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <div className="text-[14px] font-semibold" style={{ color: 'var(--text-title)' }}>启用桌面宠物</div>
-              <div className="text-[12px] leading-5" style={{ color: 'var(--text-light)' }}>默认关闭，打开后显示系统级悬浮猫</div>
-            </div>
-            <Toggle checked={settings.enabled} onChange={(checked) => { void updateSettings({ enabled: checked }) }} />
-          </div>
+      <SettingsGroup label="显示">
+        <SettingsCard>
+          <SettingsRow label="启用桌面宠物" description="默认关闭，打开后显示系统级悬浮猫">
+            <SettingsSwitch ariaLabel="启用桌面宠物" checked={settings.enabled} onChange={(checked) => { void updateSettings({ enabled: checked }) }} />
+          </SettingsRow>
+          <SettingsRow label="工作气泡" description="Agent 工作时显示平衡摘要">
+            <SettingsSwitch ariaLabel="工作气泡" checked={settings.bubbleEnabled} onChange={(checked) => { void updateSettings({ bubbleEnabled: checked }) }} />
+          </SettingsRow>
+          <SettingsRow label="置顶显示" description="Ready 后台时也留在最前">
+            <SettingsSwitch ariaLabel="置顶显示" checked={settings.alwaysOnTop} onChange={(checked) => { void updateSettings({ alwaysOnTop: checked }) }} />
+          </SettingsRow>
+          <SettingsRow label="显示尺寸" description="尺寸改变后会同步调整悬浮窗大小">
+            <button
+              type="button"
+              className={settingsButtonClass('ghost', { size: 'sm' })}
+              onClick={() => { void window.electronAPI.pet.resetPosition().then((result) => result.success && result.data && setSettings(result.data)) }}
+            >
+              <RotateCcw />
+              重置位置
+            </button>
+            <SettingsSegmented
+              ariaLabel="显示尺寸"
+              value={settings.size}
+              options={PET_SIZE_OPTIONS}
+              onChange={(size) => { void updateSettings({ size }) }}
+            />
+          </SettingsRow>
+        </SettingsCard>
+      </SettingsGroup>
 
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <div className="text-[14px] font-semibold" style={{ color: 'var(--text-title)' }}>工作气泡</div>
-              <div className="text-[12px] leading-5" style={{ color: 'var(--text-light)' }}>Agent 工作时显示平衡摘要</div>
-            </div>
-            <Toggle checked={settings.bubbleEnabled} onChange={(checked) => { void updateSettings({ bubbleEnabled: checked }) }} />
-          </div>
-
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <div className="text-[14px] font-semibold" style={{ color: 'var(--text-title)' }}>置顶显示</div>
-              <div className="text-[12px] leading-5" style={{ color: 'var(--text-light)' }}>Ready 后台时也留在最前</div>
-            </div>
-            <Toggle checked={settings.alwaysOnTop} onChange={(checked) => { void updateSettings({ alwaysOnTop: checked }) }} />
-          </div>
-        </div>
-      </section>
-
-      <section className="glass-surface-card rounded-2xl border" style={{ ...SETTINGS_CARD_STYLE, padding: '18px 20px' }}>
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <div>
-            <h3 className="text-[15px] font-semibold" style={{ color: 'var(--text-title)' }}>显示尺寸</h3>
-            <p className="text-[12px] leading-5" style={{ color: 'var(--text-light)' }}>尺寸改变后会同步调整悬浮窗大小</p>
-          </div>
+      <SettingsCard
+        title="选择猫猫"
+        description={`已找到 ${availablePets.length} 只可用宠物，名称和描述可点击编辑`}
+        actions={(
           <button
             type="button"
-            className="inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-[12px]"
-            style={SETTINGS_FLAT_BUTTON_STYLE}
-            onClick={() => { void window.electronAPI.pet.resetPosition().then((result) => result.success && result.data && setSettings(result.data)) }}
-          >
-            <RotateCcw className="h-3.5 w-3.5" />
-            重置位置
-          </button>
-        </div>
-        <div className="flex gap-2">
-          {(['small', 'medium', 'large'] as const).map((size) => {
-            const active = settings.size === size
-            return (
-              <button
-                key={size}
-                type="button"
-                className="rounded-xl px-4 py-2 text-[12px] font-semibold transition-colors"
-                style={active ? SETTINGS_PRIMARY_BUTTON_STYLE : SETTINGS_FLAT_BUTTON_STYLE}
-                onClick={() => { void updateSettings({ size }) }}
-              >
-                {size === 'small' ? '小' : size === 'large' ? '大' : '中'}
-              </button>
-            )
-          })}
-        </div>
-      </section>
-
-      <section className="glass-surface-card rounded-2xl border" style={{ ...SETTINGS_CARD_STYLE, padding: '18px 20px' }}>
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <div>
-            <h3 className="text-[15px] font-semibold" style={{ color: 'var(--text-title)' }}>选择猫猫</h3>
-            <p className="text-[12px] leading-5" style={{ color: 'var(--text-light)' }}>
-              已找到 {availablePets.length} 只可用宠物，名称和描述可点击编辑
-            </p>
-          </div>
-          <button
-            type="button"
-            className="inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-[12px]"
-            style={SETTINGS_FLAT_BUTTON_STYLE}
+            className={settingsButtonClass('secondary', { size: 'sm' })}
             onClick={() => { void (settings.enabled ? window.electronAPI.pet.hide() : window.electronAPI.pet.show()) }}
           >
-            {settings.enabled ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+            {settings.enabled ? <EyeOff /> : <Eye />}
             {settings.enabled ? '临时隐藏' : '显示一次'}
           </button>
-        </div>
-
-        <div className="grid gap-3 md:grid-cols-2">
-          {pets.map((pet) => {
-            const active = pet.id === settings.selectedPetId
-            return (
-              <div
-                key={pet.id}
-                className="glass-surface-card rounded-2xl border transition-[background-color,border-color,box-shadow]"
-                style={{
-                  ...SETTINGS_SUBTLE_CARD_STYLE,
-                  padding: 12,
-                  borderColor: active
-                    ? 'color-mix(in srgb, var(--color-blue) 44%, var(--lg-border-soft) 56%)'
-                    : SETTINGS_SUBTLE_CARD_STYLE.borderColor,
-                }}
-              >
-                <div className="flex gap-3">
-                  <button type="button" onClick={() => { void setPet(pet.id) }} disabled={!pet.available}>
-                    <PetThumb pet={pet} />
-                  </button>
-                  <div className="min-w-0 flex-1">
+        )}
+      >
+        {pets.length > 0 && (
+          <div className="sx-card__body grid gap-3 md:grid-cols-2">
+            {pets.map((pet) => {
+              const active = pet.id === settings.selectedPetId
+              return (
+                <div
+                  key={pet.id}
+                  className={`sx-option items-start ${active ? 'is-active' : ''}`}
+                  style={{ padding: 12, cursor: pet.available ? 'pointer' : 'default', opacity: pet.available ? 1 : 0.6 }}
+                  onClick={() => { if (pet.available && !active) void setPet(pet.id) }}
+                >
+                  <PetThumb pet={pet} />
+                  <div className="min-w-0 flex-1 pr-5">
                     <EditableText
                       value={pet.displayName}
                       placeholder="未命名宠物"
@@ -311,26 +234,36 @@ export default function PetSettingsPanel() {
                       onSave={(value) => { void updatePetMeta(pet.id, { description: value }) }}
                     />
                     <div className="mt-2 flex items-center justify-between gap-2">
-                      <span className="text-[10px]" style={{ color: 'var(--text-light)' }}>
+                      <span className="sx-meta">
                         {pet.source === 'builtin' ? '内置' : 'Codex'} · {pet.available ? '可用' : '不可用'}
                       </span>
-                      <button
-                        type="button"
-                        className="rounded-lg px-2.5 py-1.5 text-[11px]"
-                        style={active ? SETTINGS_PRIMARY_BUTTON_STYLE : SETTINGS_FLAT_BUTTON_STYLE}
-                        disabled={!pet.available}
-                        onClick={() => { void setPet(pet.id) }}
-                      >
-                        {active ? '已选择' : '选择'}
-                      </button>
+                      {active ? (
+                        <span className="sx-badge sx-badge--ink">已选择</span>
+                      ) : (
+                        <button
+                          type="button"
+                          className={settingsButtonClass('ghost', { size: 'sm' })}
+                          disabled={!pet.available}
+                          aria-pressed={false}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            void setPet(pet.id)
+                          }}
+                        >
+                          选择
+                        </button>
+                      )}
                     </div>
                   </div>
+                  <span className="sx-option__tick" aria-hidden>
+                    <Check />
+                  </span>
                 </div>
-              </div>
-            )
-          })}
-        </div>
-      </section>
+              )
+            })}
+          </div>
+        )}
+      </SettingsCard>
     </div>
   )
 }

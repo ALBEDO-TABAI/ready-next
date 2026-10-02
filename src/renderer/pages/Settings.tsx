@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   ChevronLeft, User, Bell, Shield, Database,
-  Palette, Keyboard, Globe, Info, Moon, Sun, Bot, Monitor, Droplets,
-  ChevronRight, ExternalLink, HardDrive, Trash2, MessageSquare, Cat,
-  Plug2, Boxes, Cookie, Tags, Brain
+  Palette, Keyboard, Globe, Info, Moon, Sun, Bot, Monitor,
+  ExternalLink, HardDrive, MessageSquare, Cat,
+  Plug2, Boxes, Cookie, Tags, Brain, Check, Loader2, RefreshCw,
 } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { useTheme, type ThemeAccent, type ThemeSkin } from '../stores/useTheme'
+import { resolveAccentPalette, useTheme, type ThemeAccent, type ThemeOption, type ThemeSkin } from '../stores/useTheme'
 import { READY_VERSION_LABEL } from '../../shared/app-version'
 import { nextIntentId } from '../../shared/browser-view-intent'
 import { BROWSER_POWER_MODE_SETTING_KEY } from '../../shared/browser-power'
@@ -15,16 +15,19 @@ import PetSettingsPanel from '../components/settings/PetSettingsPanel'
 import ModelsRuntimeSettingsPanel from '../components/settings/ModelsRuntimeSettingsPanel'
 import { MODELS_RUNTIME_SETTINGS_SECTION } from '../../shared/model-pack-types'
 import { FILE_EMERGENCE_SETTING_KEY } from '../../shared/file-emergence'
+import { settingsListItemStyle } from '../components/settings/settings-theme'
+import { ReadyDotRMark } from '../components/agent/WelcomePanel'
 import {
-  SETTINGS_CARD_STYLE,
-  SETTINGS_DANGER_BUTTON_STYLE,
-  SETTINGS_INPUT_STYLE,
-  SETTINGS_PRIMARY_BUTTON_STYLE,
-  SETTINGS_READONLY_STYLE,
-  SETTINGS_SECONDARY_BUTTON_STYLE,
-  settingsListItemStyle,
-} from '../components/settings/settings-theme'
-import { SETTINGS_ROW_CONTROL_MIN_WIDTH, SettingsSwitch, type SettingItem, type SettingSection } from './settings/settings-shared'
+  SETTINGS_NAV_GROUP_LABELS,
+  SettingsCard,
+  SettingsGroup,
+  SettingsRow,
+  SettingsSwitch,
+  settingsButtonClass,
+  type SettingItem,
+  type SettingSection,
+  type SettingsNavGroup,
+} from './settings/settings-shared'
 import { AISettingsPanel } from './settings/AISettingsPanel'
 import { RSSDraftStoreSettingsPanel } from './settings/RSSDraftStoreSettingsPanel'
 import { StorageSettingsPanel } from './settings/StorageSettingsPanel'
@@ -41,9 +44,11 @@ export { ExternalServicesSettingsPanel } from './settings/ExternalServicesSettin
 
 const SETTINGS_SURFACE_REFRESH_DELAY_MS = 120
 
+// 导航按分组排列（通用 → 智能 → 内容与连接 → 隐私与数据 → 应用），组内顺序即展示顺序。
 const settingsData: SettingSection[] = [
   {
     id: 'account',
+    group: 'general',
     title: '帐号',
     icon: User,
     description: '管理你的帐号信息和个人资料',
@@ -53,71 +58,15 @@ const settingsData: SettingSection[] = [
     ]
   },
   {
-    id: 'ai',
-    title: 'AI 模型',
-    icon: Bot,
-    description: '配置 AI 助手的模型和连接参数',
-    settings: [] // Rendered dynamically via AISettingsPanel
-  },
-  {
-    id: 'memory',
-    title: '长期记忆',
-    icon: Brain,
-    description: '管理 Ready 记住的内容与整理方式',
-    settings: [],
-  },
-  {
-    id: 'remote-im',
-    title: '远程 IM',
-    icon: MessageSquare,
-    description: '绑定微信、飞书，远程发送任务并接收回复',
-    settings: [] // Rendered dynamically via RemoteIMSettingsPanel
-  },
-  {
-    id: 'external-services',
-    title: '外部服务',
-    icon: ExternalLink,
-    description: '统一管理 AnySearch、Tavily、Jina、DuckDuckGo、RSSHub、Bilibili、GitHub、高德地图与读图模型',
-    settings: []
-  },
-  {
-    id: 'mcp',
-    title: 'MCP',
-    icon: Plug2,
-    description: '接入外部 MCP server（stdio），扩展 Agent 可调用的工具',
-    settings: [] // Rendered dynamically via McpSettingsPanel — Y0.7 §11.0b labeling branch
-  },
-  { id:'tag-forge',title:'文档标签',icon:Tags,description:'管理 Tag Forge 自动打标与待审核词条',settings:[] },
-  {
-    id: 'pet',
-    title: '宠物',
-    icon: Cat,
-    description: '管理桌面悬浮宠物和工作气泡',
-    settings: []
-  },
-  {
-    id: 'rss-storage',
-    title: 'RSS 底稿',
-    icon: HardDrive,
-    description: '管理 RSS 底稿仓库、增量收件箱和刷新重置',
-    settings: []
-  },
-  {
-    id: MODELS_RUNTIME_SETTINGS_SECTION,
-    title: '模型与运行时',
-    icon: Boxes,
-    description: '按需下载语音识别与标点模型，支持国内 / 国外源自动切换与断点续传',
-    settings: []
-  },
-  {
     id: 'appearance',
+    group: 'general',
     title: '外观',
     icon: Palette,
     description: '自定义应用的主题和视觉风格',
     settings: [
       { id: 'theme', label: '主题色', description: '应用的强调色', type: 'select', value: 'blue', options: [
         { value: 'blue', label: '蓝色' },
-        { value: 'green', label: '绿色' },
+        { value: 'green', label: '翡翠绿' },
         { value: 'purple', label: '紫色' },
         { value: 'orange', label: '橘红色' }
       ]}
@@ -125,6 +74,7 @@ const settingsData: SettingSection[] = [
   },
   {
     id: 'notifications',
+    group: 'general',
     title: '通知',
     icon: Bell,
     description: '控制推送通知和声音提示',
@@ -134,7 +84,102 @@ const settingsData: SettingSection[] = [
     ]
   },
   {
+    id: 'language',
+    group: 'general',
+    title: '语言',
+    icon: Globe,
+    description: '设置界面显示语言',
+    settings: [
+      { id: 'language', label: '界面语言', description: '更改后需重启应用', type: 'select', value: 'zh-CN', options: [
+        { value: 'zh-CN', label: '简体中文' },
+        { value: 'en-US', label: 'English' },
+        { value: 'ja-JP', label: '日本語' }
+      ]}
+    ]
+  },
+  {
+    id: 'shortcuts',
+    group: 'general',
+    title: '快捷键',
+    icon: Keyboard,
+    description: '查看当前可用的键盘快捷键',
+    settings: READY_SHORTCUT_GUIDE.map((item) => ({ ...item, type: 'readonly' as const })),
+  },
+  {
+    id: 'ai',
+    group: 'intelligence',
+    title: 'AI 模型',
+    icon: Bot,
+    description: '配置 AI 助手的模型和连接参数',
+    settings: [] // Rendered dynamically via AISettingsPanel
+  },
+  {
+    id: 'memory',
+    group: 'intelligence',
+    title: '长期记忆',
+    icon: Brain,
+    description: '管理 Ready 记住的内容与整理方式',
+    settings: [],
+  },
+  {
+    id: 'mcp',
+    group: 'intelligence',
+    title: 'MCP',
+    icon: Plug2,
+    description: '接入外部 MCP server（stdio），扩展 Agent 可调用的工具',
+    settings: [] // Rendered dynamically via McpSettingsPanel — Y0.7 §11.0b labeling branch
+  },
+  {
+    id: 'external-services',
+    group: 'intelligence',
+    title: '外部服务',
+    icon: ExternalLink,
+    description: '统一管理 AnySearch、Tavily、Jina、DuckDuckGo、RSSHub、Bilibili、GitHub、高德地图与读图模型',
+    settings: []
+  },
+  {
+    id: MODELS_RUNTIME_SETTINGS_SECTION,
+    group: 'intelligence',
+    title: '模型与运行时',
+    icon: Boxes,
+    description: '按需下载语音识别与标点模型，支持国内 / 国外源自动切换与断点续传',
+    settings: []
+  },
+  {
+    id: 'remote-im',
+    group: 'content',
+    title: '远程 IM',
+    icon: MessageSquare,
+    description: '绑定微信、飞书，远程发送任务并接收回复',
+    settings: [] // Rendered dynamically via RemoteIMSettingsPanel
+  },
+  {
+    id: 'rss-storage',
+    group: 'content',
+    title: 'RSS 底稿',
+    icon: HardDrive,
+    description: '管理 RSS 底稿仓库、增量收件箱和刷新重置',
+    settings: []
+  },
+  {
+    id: 'tag-forge',
+    group: 'content',
+    title: '文档标签',
+    icon: Tags,
+    description: '管理 Tag Forge 自动打标与待审核词条',
+    settings: []
+  },
+  {
+    id: 'pet',
+    group: 'content',
+    title: '宠物',
+    icon: Cat,
+    description: '管理桌面悬浮宠物和工作气泡',
+    settings: []
+  },
+  {
     id: 'privacy',
+    group: 'privacy',
     title: '隐私',
     icon: Shield,
     description: '管理数据收集和隐私偏好',
@@ -159,6 +204,7 @@ const settingsData: SettingSection[] = [
   },
   {
     id: 'browser-privacy',
+    group: 'privacy',
     title: '浏览器数据',
     icon: Cookie,
     description: '清除浏览数据，管理 Cookie 与站点数据',
@@ -166,33 +212,15 @@ const settingsData: SettingSection[] = [
   },
   {
     id: 'storage',
+    group: 'privacy',
     title: '存储',
     icon: Database,
     description: '管理本地缓存和存储空间',
     settings: [] // Rendered dynamically via StorageSettingsPanel
   },
   {
-    id: 'shortcuts',
-    title: '快捷键',
-    icon: Keyboard,
-    description: '查看当前可用的键盘快捷键',
-    settings: READY_SHORTCUT_GUIDE.map((item) => ({ ...item, type: 'readonly' as const })),
-  },
-  {
-    id: 'language',
-    title: '语言',
-    icon: Globe,
-    description: '设置界面显示语言',
-    settings: [
-      { id: 'language', label: '界面语言', description: '更改后需重启应用', type: 'select', value: 'zh-CN', options: [
-        { value: 'zh-CN', label: '简体中文' },
-        { value: 'en-US', label: 'English' },
-        { value: 'ja-JP', label: '日本語' }
-      ]}
-    ]
-  },
-  {
     id: 'about',
+    group: 'about',
     title: '关于',
     icon: Info,
     description: '应用版本信息和更新',
@@ -203,19 +231,124 @@ const settingsData: SettingSection[] = [
   }
 ]
 
+const SETTINGS_NAV_GROUP_ORDER: SettingsNavGroup[] = ['general', 'intelligence', 'content', 'privacy', 'about']
+
 // Theme mode options
-const themeOptions: { value: 'light' | 'dark' | 'system'; label: string; icon: React.ElementType; description: string }[] = [
+const themeOptions: { value: ThemeOption; label: string; icon: React.ElementType; description: string }[] = [
   { value: 'light', label: '浅色', icon: Sun, description: '始终使用浅色主题' },
   { value: 'dark', label: '深色', icon: Moon, description: '始终使用深色主题' },
   { value: 'system', label: '跟随系统', icon: Monitor, description: '自动跟随系统设置' }
 ]
 
-const skinOptions: { value: ThemeSkin; label: string; icon: React.ElementType; description: string }[] = [
-  { value: 'liquid-glass', label: '通透玻璃', icon: Droplets, description: '真半透明液态玻璃，背后透出 macOS 桌面壁纸（默认）' },
-  { value: 'ready-glass', label: '稳定玻璃', icon: Droplets, description: 'Ready 自持稳定底色，不透出桌面（更稳定但失去通透感）' },
-  { value: 'solid-green-glass', label: '实色绿玻璃', icon: Droplets, description: '自持实色绿色磨砂底，带柔和青绿渐变' },
-  { value: 'solid-blue-glass', label: '实色蓝玻璃', icon: Droplets, description: '自持实色蓝色渐变底，搭配粉色强调色' },
+const skinOptions: { value: ThemeSkin; label: string; description: string }[] = [
+  { value: 'liquid-glass', label: '通透玻璃', description: '真半透明液态玻璃，背后透出 macOS 桌面壁纸（默认）' },
+  { value: 'ready-glass', label: '稳定玻璃', description: 'Ready 自持稳定底色，不透出桌面（更稳定但失去通透感）' },
+  { value: 'solid-green-glass', label: '实色绿玻璃', description: '自持实色绿色磨砂底，带柔和青绿渐变' },
+  { value: 'solid-blue-glass', label: '实色蓝玻璃', description: '自持实色蓝色渐变底，搭配玫瑰强调色' },
 ]
+
+const ACCENT_ORDER: ThemeAccent[] = ['orange', 'blue', 'purple', 'green']
+
+// 预览缩略图只表达「底材」差异：同一个玻璃小窗放在四种底板上。
+const SKIN_PREVIEW_BACKDROP: Record<ThemeSkin, string> = {
+  'liquid-glass':
+    'radial-gradient(60% 80% at 18% 20%, rgba(123, 169, 255, 0.85), transparent 70%), radial-gradient(55% 70% at 82% 30%, rgba(178, 140, 255, 0.7), transparent 70%), radial-gradient(70% 70% at 60% 100%, rgba(255, 196, 140, 0.75), transparent 70%), #C9D4E8',
+  'ready-glass':
+    'radial-gradient(70% 90% at 12% 10%, rgba(255, 255, 255, 0.9), transparent 70%), linear-gradient(142deg, #FBFAF6 0%, #F2EEE5 100%)',
+  'solid-green-glass':
+    'radial-gradient(80% 90% at 8% 6%, rgba(225, 250, 240, 0.7), transparent 60%), linear-gradient(142deg, #D0F5E8 0%, #A0E1D3 46%, #56B2AC 100%)',
+  'solid-blue-glass':
+    'radial-gradient(80% 90% at 8% 6%, rgba(227, 247, 255, 0.72), transparent 58%), linear-gradient(142deg, #D3F0FD 0%, #ABD6F0 45%, #6BA5D4 100%)',
+}
+
+const SETTINGS_PREVIEW_SHADOW = '0 1px 2px rgba(24, 39, 77, 0.08), 0 6px 16px -8px rgba(24, 39, 77, 0.22)'
+
+function OptionTick() {
+  return (
+    <span className="sx-option__tick" aria-hidden>
+      <Check />
+    </span>
+  )
+}
+
+function ThemeModePreview({ mode }: { mode: ThemeOption }) {
+  const pane = (dark: boolean) => (
+    <div
+      className="absolute inset-0 flex gap-[6px] p-[8px]"
+      style={{ background: dark ? 'linear-gradient(150deg, #263042 0%, #161C28 100%)' : 'linear-gradient(150deg, #FBFAF6 0%, #EFEBE2 100%)' }}
+    >
+      <div className="flex w-[22%] flex-col gap-[4px] pt-[2px]">
+        {[0.9, 0.6, 0.75].map((w, index) => (
+          <span key={index} className="h-[3px] rounded-full" style={{ width: `${w * 100}%`, background: dark ? 'rgba(255,255,255,0.22)' : 'rgba(24,39,77,0.14)' }} />
+        ))}
+      </div>
+      <div
+        className="flex-1 rounded-[6px] p-[6px]"
+        style={{
+          background: dark ? 'rgba(255,255,255,0.07)' : 'rgba(255,255,255,0.78)',
+          boxShadow: dark ? 'none' : '0 4px 10px -4px rgba(24,39,77,0.18)',
+        }}
+      >
+        <span className="block h-[4px] w-[46%] rounded-full" style={{ background: dark ? 'rgba(255,255,255,0.5)' : 'rgba(24,39,77,0.42)' }} />
+        <span className="mt-[5px] block h-[3px] w-[80%] rounded-full" style={{ background: dark ? 'rgba(255,255,255,0.16)' : 'rgba(24,39,77,0.12)' }} />
+        <span className="mt-[3px] block h-[3px] w-[64%] rounded-full" style={{ background: dark ? 'rgba(255,255,255,0.16)' : 'rgba(24,39,77,0.12)' }} />
+        <span className="mt-[7px] block h-[5px] w-[5px] rounded-full" style={{ background: 'var(--sx-accent)' }} />
+      </div>
+    </div>
+  )
+  return (
+    <div className="relative h-[84px] w-full overflow-hidden rounded-[10px]" style={{ boxShadow: SETTINGS_PREVIEW_SHADOW }} aria-hidden>
+      {mode === 'dark' ? pane(true) : pane(false)}
+      {mode === 'system' && (
+        <div className="absolute inset-0" style={{ clipPath: 'polygon(58% 0, 100% 0, 100% 100%, 42% 100%)' }}>
+          {pane(true)}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SkinPreview({ skin }: { skin: ThemeSkin }) {
+  const solid = skin === 'solid-green-glass' || skin === 'solid-blue-glass'
+  return (
+    <div
+      className="relative h-[72px] w-full overflow-hidden rounded-[10px]"
+      style={{ background: SKIN_PREVIEW_BACKDROP[skin], boxShadow: SETTINGS_PREVIEW_SHADOW }}
+      aria-hidden
+    >
+      <div
+        className="absolute left-[14%] top-[20%] h-[62%] w-[72%] rounded-[8px] p-[7px]"
+        style={{
+          background: skin === 'liquid-glass' ? 'rgba(255,255,255,0.42)' : 'rgba(255,255,255,0.62)',
+          border: '0.5px solid rgba(255,255,255,0.85)',
+          boxShadow: '0 6px 16px -6px rgba(24,39,77,0.3), inset 0 1px 0 rgba(255,255,255,0.9)',
+          backdropFilter: 'blur(6px)',
+          WebkitBackdropFilter: 'blur(6px)',
+        }}
+      >
+        <span className="block h-[4px] w-[42%] rounded-full" style={{ background: solid ? 'rgba(2,45,43,0.5)' : 'rgba(24,39,77,0.4)' }} />
+        <span className="mt-[5px] block h-[3px] w-[70%] rounded-full" style={{ background: solid ? 'rgba(2,45,43,0.18)' : 'rgba(24,39,77,0.14)' }} />
+        <span className="absolute bottom-[7px] right-[7px] h-[6px] w-[6px] rounded-full" style={{ background: solid ? '#B84574' : 'var(--color-ready-orange)' }} />
+      </div>
+    </div>
+  )
+}
+
+function ShortcutKeys({ value }: { value: string }) {
+  const alternatives = value.split(' 或 ')
+  return (
+    <span className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1">
+      {alternatives.map((alternative, altIndex) => (
+        <span key={alternative} className="inline-flex items-center gap-2">
+          {altIndex > 0 && <span className="sx-meta">或</span>}
+          <span className="sx-kbd">
+            {alternative.split(' + ').map((key) => <kbd key={key}>{key}</kbd>)}
+          </span>
+        </span>
+      ))}
+    </span>
+  )
+}
 
 interface SettingsPageProps {
   initialSection?: string
@@ -231,7 +364,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
   const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'not-available' | 'error'>('idle')
   const [updateMessage, setUpdateMessage] = useState('查看是否有新版本可用')
   const [updatePercent, setUpdatePercent] = useState<number | null>(null)
-  const { theme, setTheme, skin, setSkin, accent, setAccent } = useTheme()
+  const { theme, setTheme, skin, setSkin, accent, setAccent, resolvedTheme } = useTheme()
   const didMountRef = useRef(false)
   const settingsSurfaceRefreshTimerRef = useRef<number | null>(null)
 
@@ -437,12 +570,105 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
     ? ['ai', 'memory', 'remote-im', 'external-services', 'mcp', 'tag-forge', 'pet', 'rss-storage', MODELS_RUNTIME_SETTINGS_SECTION, 'storage', 'browser-privacy'].includes(currentSection.id)
     : false
 
+  const accentLabel = (value: ThemeAccent) => {
+    const option = settingsData.find((section) => section.id === 'appearance')?.settings[0]?.options?.find((item) => item.value === value)
+    if (value === 'purple' && (skin === 'solid-green-glass' || skin === 'solid-blue-glass')) return '玫瑰'
+    return option?.label ?? value
+  }
+
+  const renderSettingControl = (sectionId: string, setting: SettingItem) => {
+    const isUpdateButton = sectionId === 'about' && setting.id === 'checkUpdate'
+    switch (setting.type) {
+      case 'toggle':
+        return (
+          <SettingsSwitch
+            checked={Boolean(setting.value)}
+            ariaLabel={setting.label}
+            onChange={() => { void handleToggleSetting(sectionId, setting) }}
+          />
+        )
+      case 'select':
+        return (
+          <select
+            value={setting.value as string}
+            aria-label={setting.label}
+            onChange={(e) => updateSetting(sectionId, setting.id, e.target.value)}
+            className="sx-select"
+          >
+            {setting.options?.map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+        )
+      case 'text':
+        return (
+          <input
+            type={setting.id === 'apiKey' ? 'password' : 'text'}
+            value={setting.value as string}
+            aria-label={setting.label}
+            onChange={(e) => updateSetting(sectionId, setting.id, e.target.value)}
+            className="sx-input"
+            style={{ width: 260 }}
+          />
+        )
+      case 'readonly':
+        return sectionId === 'shortcuts'
+          ? <ShortcutKeys value={String(setting.value ?? '')} />
+          : <span className="sx-value">{setting.value}</span>
+      case 'button':
+        return (
+          <button
+            type="button"
+            onClick={() => {
+              if (isUpdateButton) void handleUpdateButtonClick()
+            }}
+            disabled={isUpdateButton && updateBusy}
+            aria-busy={isUpdateButton && updateBusy ? true : undefined}
+            className={settingsButtonClass(setting.buttonVariant === 'primary' ? 'primary' : setting.buttonVariant === 'danger' ? 'danger' : 'secondary')}
+            style={{ minWidth: 104 }}
+          >
+            {isUpdateButton && updateBusy
+              ? <Loader2 className="animate-spin" />
+              : isUpdateButton && updateStatus !== 'downloaded' ? <RefreshCw /> : null}
+            {isUpdateButton ? updateButtonLabel : setting.buttonLabel || '执行'}
+          </button>
+        )
+      default:
+        return null
+    }
+  }
+
+  const renderSettingRows = (section: SettingSection) => (
+    <SettingsCard>
+      {section.settings.map((setting) => {
+        const isUpdateButton = section.id === 'about' && setting.id === 'checkUpdate'
+        const description = isUpdateButton ? updateDescription : setting.description
+        return (
+          <SettingsRow
+            key={setting.id}
+            label={setting.label}
+            description={(description || settingErrors[setting.id]) && (
+              <>
+                {description}
+                {settingErrors[setting.id] && (
+                  <span className="sx-text-danger block">{settingErrors[setting.id]}</span>
+                )}
+              </>
+            )}
+          >
+            {renderSettingControl(section.id, setting)}
+          </SettingsRow>
+        )
+      })}
+    </SettingsCard>
+  )
+
   return (
     <div className="settings-page-shell flex h-full flex-col overflow-hidden">
       {/* Header — macOS traffic light clearance with paddingLeft: 72 */}
       <div
         data-liquid-shell="settings-header"
-        className="mx-3 mt-3 flex h-[46px] items-center rounded-[16px] drag-region"
+        className="mx-3 mt-3 flex h-[46px] items-center gap-2 rounded-[16px] drag-region"
         style={{
           background: 'transparent',
           paddingLeft: 72,
@@ -452,116 +678,98 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
         }}
       >
         <button
+          type="button"
           onClick={() => navigate('/')}
-          className="no-drag flex items-center gap-1.5 px-2 py-1 rounded-lg hover:bg-[var(--bg-hover)] transition-colors"
-          style={{ color: 'var(--text-muted)' }}
+          className={settingsButtonClass('ghost', { size: 'sm', className: 'no-drag' })}
+          style={{ paddingLeft: 6 }}
         >
-          <ChevronLeft className="w-4 h-4" strokeWidth={2} />
-          <span className="text-[12px]">返回</span>
+          <ChevronLeft strokeWidth={2} />
+          返回
         </button>
-        <span
-          className="text-[13px] font-semibold ml-3"
-          style={{ color: 'var(--text-title)' }}
-        >
+        <span className="text-[13px] font-semibold" style={{ color: 'var(--sx-title)' }}>
           设置
         </span>
       </div>
 
       {/* Content */}
-      <div className="flex flex-1 gap-3 overflow-hidden px-3 pb-3 pt-3">
+      <div className="flex flex-1 gap-3 overflow-hidden px-3 pb-3 pt-1.5">
         {/* Sidebar Navigation */}
-        <div
+        <nav
+          aria-label="设置分区"
           data-liquid-shell="settings-sidebar"
           className="panel-hover-scrollbar flex-shrink-0 overflow-auto"
           style={{
-            width: 252,
+            width: 220,
             background: 'transparent',
-            padding: '10px 8px',
+            padding: '4px 6px 12px 4px',
             scrollbarGutter: 'stable',
           }}
           onMouseMove={handleSettingsSurfaceMotion}
           onScroll={handleSettingsSurfaceScroll}
           onMouseLeave={scheduleSettingsSurfaceRefresh}
         >
-          <div className="flex flex-col gap-1">
-            {settings.map((section) => {
-              const isActive = activeSection === section.id
-              const Icon = section.icon
-              return (
-                <button
-                  key={section.id}
-                  onClick={() => setActiveSection(section.id)}
-                  className={`flex items-center gap-3 rounded-[16px] transition-[background-color,border-color,color] duration-200 text-left group ${isActive ? '' : 'hover:bg-[var(--bg-hover)]'}`}
-                  style={settingsListItemStyle(isActive)}
-                >
-                  <div className="w-8 h-8 flex items-center justify-center flex-shrink-0 transition-colors">
+          {SETTINGS_NAV_GROUP_ORDER.map((group) => (
+            <div key={group} className="sx-nav-group flex flex-col gap-0.5">
+              <div className="sx-nav-group-label">{SETTINGS_NAV_GROUP_LABELS[group]}</div>
+              {settings.filter((section) => section.group === group).map((section) => {
+                const isActive = activeSection === section.id
+                const Icon = section.icon
+                return (
+                  <button
+                    key={section.id}
+                    type="button"
+                    onClick={() => setActiveSection(section.id)}
+                    aria-current={isActive ? 'page' : undefined}
+                    title={section.description}
+                    className="sx-nav-item"
+                    style={settingsListItemStyle(isActive)}
+                  >
                     <Icon
-                      className="w-3.5 h-3.5"
-                      strokeWidth={2}
+                      className="h-[15px] w-[15px] flex-shrink-0"
+                      strokeWidth={1.9}
                       style={{ color: isActive ? 'var(--color-blue)' : 'var(--text-muted)' }}
                     />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div
-                      className="text-[13px] font-semibold truncate"
-                      style={{ color: isActive ? 'var(--color-blue)' : 'var(--text-title)' }}
-                    >
-                      {section.title}
-                    </div>
-                    <div
-                      className="text-[11px] truncate mt-0.5"
-                      style={{ color: isActive ? 'var(--color-blue)' : 'var(--text-light)', opacity: isActive ? 0.7 : 1 }}
-                    >
-                      {section.description}
-                    </div>
-                  </div>
-                  <ChevronRight
-                    className="w-3.5 h-3.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                    style={{ color: isActive ? 'var(--color-blue)' : 'var(--text-light)' }}
-                  />
-                </button>
-              )
-            })}
-          </div>
+                    <span className="sx-nav-item__label">{section.title}</span>
+                  </button>
+                )
+              })}
+            </div>
+          ))}
 
           {/* Footer info */}
-          <div className="mt-6 pt-1">
-            <div className="flex items-center gap-2 px-1">
-              <HardDrive className="w-3 h-3" style={{ color: 'var(--text-light)' }} />
-              <span className="text-[10px]" style={{ color: 'var(--text-light)' }}>
-                {READY_VERSION_LABEL} · Electron 42
-              </span>
-            </div>
+          <div className="sx-meta mt-4 px-3">
+            {READY_VERSION_LABEL} · Electron 42
           </div>
-        </div>
+        </nav>
 
-        {/* Settings Content Panel */}
+        {/* Settings Content Panel — 内容直接落在窗口玻璃底上，不额外铺画布 */}
         <div className="flex-1 min-w-0 overflow-hidden">
           <div
             key={currentSection?.id || 'unknown'}
             data-liquid-shell="settings-content"
-            className="h-full overflow-auto"
+            className="panel-hover-scrollbar h-full overflow-auto"
           >
+          {/* 内容贴近导航左对齐、宽度随窗口舒展；左右留白按窗口宽度等比放大，超宽窗口才在右侧多留白。 */}
           <div
-            className="w-full mx-auto"
+            className="w-full"
             style={{
-              maxWidth: 1040,
-              padding: '32px 40px 64px',
+              maxWidth: 1360,
+              padding: '40px clamp(48px, 4.5vw, 88px) 80px',
             }}
           >
                 {currentSection && (
                   <>
                     {/* Section Header */}
-                    <div style={{ padding: '4px 0 0', marginBottom: 24 }}>
+                    <div style={{ padding: '0 4px', marginBottom: 24 }}>
                       <h2
                         className="text-[20px] font-semibold leading-7 tracking-[-0.01em]"
-                        style={{ color: 'var(--text-title)', margin: 0 }}
+                        style={{ color: 'var(--sx-title)', margin: 0 }}
                       >
                         {currentSection.title}
                       </h2>
                       <p
                         className="text-[13px] leading-6"
-                        style={{ color: 'var(--text-muted)', maxWidth: 720, margin: '4px 0 0 0' }}
+                        style={{ color: 'var(--sx-muted)', maxWidth: 720, margin: '4px 0 0 0' }}
                       >
                         {currentSection.description}
                       </p>
@@ -580,271 +788,131 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                 {currentSection.id === 'pet' && <PetSettingsPanel />}
                 {currentSection.id === 'tag-forge' && <TagForgeSettingsPanel />}
 
-                {/* Theme Switcher — only in Appearance section */}
+                {/* Appearance — 主题模式 / 视觉风格 / 主题色 */}
                 {currentSection.id === 'appearance' && (
-                  <>
-                    <div style={{ marginBottom: 40 }}>
-                      <h4
-                        className="text-[12px] font-semibold uppercase tracking-[0.18em] mb-4"
-                        style={{ color: 'var(--text-light)' }}
-                      >
-                        主题模式
-                      </h4>
-                      <div className="flex gap-4">
+                  <div className="sx-stack">
+                    <SettingsGroup label="主题模式">
+                      <div role="radiogroup" aria-label="主题模式" className="grid grid-cols-3 gap-3">
                         {themeOptions.map((opt) => {
                           const isActive = theme === opt.value
                           const OptIcon = opt.icon
                           return (
                             <button
                               key={opt.value}
+                              type="button"
+                              role="radio"
+                              aria-checked={isActive}
                               onClick={() => setTheme(opt.value)}
-                              className="glass-surface-card flex-1 flex flex-col items-center gap-2.5 rounded-2xl border transition-[background-color,border-color,color,transform] duration-200 hover:-translate-y-[1px] active:scale-[0.99]"
-                              style={{
-                                padding: '22px 18px',
-                                ...(isActive ? {
-                                  borderColor: 'color-mix(in srgb, var(--color-blue) 38%, var(--lg-border-soft) 62%)',
-                                  background: 'color-mix(in srgb, var(--color-blue-light) 72%, var(--surface-card-bg) 28%)',
-                                  boxShadow: 'var(--lg-shadow-contact), inset 0 0 0 1px color-mix(in srgb, var(--color-blue) 22%, transparent)',
-                                } : SETTINGS_CARD_STYLE),
-                              }}
+                              className="sx-option flex-col"
+                              style={{ padding: 10, gap: 10 }}
                             >
-                              <div
-                                className="glass-surface-floating w-10 h-10 rounded-xl flex items-center justify-center"
-                                style={{
-                                  background: isActive
-                                    ? 'color-mix(in srgb, var(--color-blue) 84%, var(--surface-floating-bg) 16%)'
-                                    : 'color-mix(in srgb, var(--surface-floating-bg) 60%, transparent)',
-                                }}
-                              >
-                                <OptIcon
-                                  className="w-5 h-5"
-                                  strokeWidth={1.8}
-                                  style={{ color: isActive ? '#FFFFFF' : 'var(--text-muted)' }}
-                                />
+                              <ThemeModePreview mode={opt.value} />
+                              <div className="flex items-center gap-2 px-1 pb-0.5" title={opt.description}>
+                                <OptIcon className="h-[14px] w-[14px]" strokeWidth={1.9} style={{ color: isActive ? 'var(--sx-accent)' : 'var(--sx-muted)' }} />
+                                <span className="text-[13px]" style={{ color: 'var(--sx-title)', fontWeight: isActive ? 600 : 500 }}>{opt.label}</span>
                               </div>
-                              <span
-                                className="text-[14px] font-semibold"
-                                style={{ color: isActive ? 'var(--color-blue)' : 'var(--text-body)' }}
-                              >
-                                {opt.label}
-                              </span>
-                              <span className="text-[11px] leading-5 text-center" style={{ color: 'var(--text-light)' }}>
-                                {opt.description}
-                              </span>
+                              <OptionTick />
                             </button>
                           )
                         })}
                       </div>
-                    </div>
+                    </SettingsGroup>
 
-                    <div style={{ marginBottom: 40 }}>
-                      <h4
-                        className="text-[12px] font-semibold uppercase tracking-[0.18em] mb-4"
-                        style={{ color: 'var(--text-light)' }}
-                      >
-                        视觉风格
-                      </h4>
-                      <div className="grid grid-cols-2 gap-3">
+                    <SettingsGroup label="视觉风格">
+                      <div role="radiogroup" aria-label="视觉风格" className="grid grid-cols-2 gap-3">
                         {skinOptions.map((opt) => {
                           const isActive = skin === opt.value
-                          const OptIcon = opt.icon
                           return (
                             <button
                               key={opt.value}
+                              type="button"
+                              role="radio"
+                              aria-checked={isActive}
                               onClick={() => setSkin(opt.value)}
-                              className="glass-surface-card flex items-center gap-3 rounded-2xl border text-left transition-[background-color,border-color,color,transform] duration-200 hover:-translate-y-[1px] active:scale-[0.99]"
-                              style={{
-                                padding: '16px 16px',
-                                ...(isActive ? {
-                                  borderColor: 'color-mix(in srgb, var(--color-blue) 38%, var(--lg-border-soft) 62%)',
-                                  background: 'color-mix(in srgb, var(--color-blue-light) 72%, var(--surface-card-bg) 28%)',
-                                  boxShadow: 'var(--lg-shadow-contact), inset 0 0 0 1px color-mix(in srgb, var(--color-blue) 22%, transparent)',
-                                } : SETTINGS_CARD_STYLE),
-                              }}
+                              className="sx-option items-center"
+                              style={{ padding: 10, gap: 14 }}
                             >
-                              <div
-                                className="glass-surface-floating h-9 w-9 rounded-xl flex items-center justify-center shrink-0"
-                                style={{
-                                  background: isActive
-                                    ? 'color-mix(in srgb, var(--color-blue) 84%, var(--surface-floating-bg) 16%)'
-                                    : 'color-mix(in srgb, var(--surface-floating-bg) 60%, transparent)',
-                                }}
-                              >
-                                <OptIcon
-                                  className="w-4.5 h-4.5"
-                                  strokeWidth={1.8}
-                                  style={{ color: isActive ? '#FFFFFF' : 'var(--text-muted)' }}
-                                />
+                              <div className="w-[132px] shrink-0">
+                                <SkinPreview skin={opt.value} />
                               </div>
-                              <div className="min-w-0">
-                                <div
-                                  className="text-[13px] font-semibold truncate"
-                                  style={{ color: isActive ? 'var(--color-blue)' : 'var(--text-body)' }}
-                                >
+                              <div className="min-w-0 pr-5">
+                                <div className="text-[13px]" style={{ color: 'var(--sx-title)', fontWeight: isActive ? 600 : 500 }}>
                                   {opt.label}
                                 </div>
-                                <div className="text-[11px] mt-0.5 leading-5" style={{ color: 'var(--text-light)' }}>
+                                <div className="mt-1 text-[11.5px] leading-[1.55]" style={{ color: 'var(--sx-muted)' }}>
                                   {opt.description}
                                 </div>
                               </div>
+                              <OptionTick />
                             </button>
                           )
                         })}
                       </div>
+                    </SettingsGroup>
+
+                    <SettingsGroup label="主题色" hint="只用于当前状态、焦点与少量点缀">
+                      <div role="radiogroup" aria-label="主题色" className="flex items-center gap-2">
+                        {ACCENT_ORDER.map((value) => {
+                          const isActive = accent === value
+                          const swatch = resolveAccentPalette(value, resolvedTheme, skin).color
+                          return (
+                            <button
+                              key={value}
+                              type="button"
+                              role="radio"
+                              aria-checked={isActive}
+                              aria-label={accentLabel(value)}
+                              onClick={() => setAccent(value)}
+                              className="sx-option items-center"
+                              style={{ padding: '8px 14px 8px 10px', gap: 8, borderRadius: 999 }}
+                            >
+                              <span
+                                className="grid h-[18px] w-[18px] place-items-center rounded-full"
+                                style={{
+                                  background: `radial-gradient(circle at 32% 28%, color-mix(in srgb, ${swatch} 70%, white) 0%, ${swatch} 62%)`,
+                                  boxShadow: '0 1px 2px rgba(15, 18, 24, 0.16)',
+                                }}
+                              >
+                                {isActive && <Check className="h-[11px] w-[11px] text-white" strokeWidth={3.2} />}
+                              </span>
+                              <span className="text-[12.5px]" style={{ color: isActive ? 'var(--sx-title)' : 'var(--sx-muted)', fontWeight: isActive ? 600 : 500 }}>
+                                {accentLabel(value)}
+                              </span>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </SettingsGroup>
+                  </div>
+                )}
+
+                {/* About — 品牌标识直接落在页面上，版本与更新进一张卡 */}
+                {currentSection.id === 'about' && (
+                  <div className="mb-6 flex items-center gap-5 px-1">
+                    <div
+                      className="grid h-[64px] w-[64px] shrink-0 place-items-center rounded-[18px]"
+                      style={{ background: 'var(--sx-raised-bg)', boxShadow: 'var(--sx-raised-shadow)' }}
+                    >
+                      <ReadyDotRMark />
                     </div>
-                  </>
+                    <div className="min-w-0">
+                      <div className="text-[18px] font-semibold tracking-[-0.01em]" style={{ color: 'var(--sx-title)' }}>Ready</div>
+                      <p className="mt-0.5 text-[12.5px] leading-6" style={{ color: 'var(--sx-muted)' }}>
+                        Ready 是由@上班摸鱼 开发的，面向知识工作者和创作者的通用桌面工作台
+                      </p>
+                      <div className="mt-1 flex items-center gap-4">
+                        <button type="button" className="sx-link">
+                          <ExternalLink />
+                          访问 Ready 官方网站
+                        </button>
+                        <span className="sx-meta">Built with Electron · React · TypeScript</span>
+                      </div>
+                    </div>
+                  </div>
                 )}
 
                 {/* Settings Items (skip for dynamic sections) */}
-                {!isDynamicSection && <div className="flex flex-col gap-6">
-                  {currentSection.settings.map((setting) => {
-                    const isUpdateButton = currentSection.id === 'about' && setting.id === 'checkUpdate'
-                    return (
-                    <div
-                      key={setting.id}
-                      className="flex items-center justify-between transition-colors"
-                      style={{
-                        padding: 0,
-                      }}
-                    >
-                      <div className="flex-1 min-w-0 mr-4">
-                        <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>
-                          {setting.label}
-                        </div>
-                        {(setting.description || isUpdateButton) && (
-                          <div className="text-[12px] mt-0.5 leading-5" style={{ color: 'var(--text-light)' }}>
-                            {isUpdateButton ? updateDescription : setting.description}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Toggle */}
-                      {setting.type === 'toggle' && (
-                        <SettingsSwitch
-                          checked={Boolean(setting.value)}
-                          onChange={() => { void handleToggleSetting(currentSection.id, setting) }}
-                        />
-                      )}
-                      {settingErrors[setting.id] && (
-                        <div className="ml-3 text-[11px]" style={{ color: 'var(--color-red, #d44)' }}>
-                          {settingErrors[setting.id]}
-                        </div>
-                      )}
-
-                      {/* Select */}
-                      {setting.type === 'select' && (
-                        <select
-                          value={currentSection.id === 'appearance' && setting.id === 'theme' ? accent : setting.value as string}
-                          onChange={(e) => {
-                            const nextValue = e.target.value
-                            if (currentSection.id === 'appearance' && setting.id === 'theme') {
-                              setAccent(nextValue as ThemeAccent)
-                              return
-                            }
-                            updateSetting(currentSection.id, setting.id, nextValue)
-                          }}
-                          className="flex-shrink-0 rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-[box-shadow,border-color,background-color] duration-200 cursor-pointer"
-                          style={{
-                            ...SETTINGS_INPUT_STYLE,
-                            padding: '9px 32px 9px 14px',
-                            width: 'auto',
-                            minWidth: SETTINGS_ROW_CONTROL_MIN_WIDTH,
-                          }}
-                        >
-                          {setting.options?.map(opt => (
-                            <option
-                              key={typeof opt === 'string' ? opt : opt.value}
-                              value={typeof opt === 'string' ? opt : opt.value}
-                            >
-                              {typeof opt === 'string'
-                                ? opt
-                                : currentSection.id === 'appearance' && setting.id === 'theme' && opt.value === 'purple' && (skin === 'solid-green-glass' || skin === 'solid-blue-glass')
-                                  ? '玫瑰'
-                                  : opt.label}
-                            </option>
-                          ))}
-                        </select>
-                      )}
-
-                      {/* Editable text */}
-                      {setting.type === 'text' && (
-                        <input
-                          type={setting.id === 'apiKey' ? 'password' : 'text'}
-                          value={setting.value as string}
-                          onChange={(e) => updateSetting(currentSection.id, setting.id, e.target.value)}
-                          className="flex-shrink-0 rounded-lg border text-[12px] text-center focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-[box-shadow,border-color,background-color] duration-200"
-                          style={{
-                            ...SETTINGS_INPUT_STYLE,
-                            padding: '9px 14px',
-                            width: 240,
-                          }}
-                        />
-                      )}
-
-                      {/* Readonly value */}
-                      {setting.type === 'readonly' && (
-                        <span
-                          className="flex-shrink-0 text-[12px] font-mono rounded-lg"
-                          style={{
-                            ...SETTINGS_READONLY_STYLE,
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            padding: '8px 12px',
-                            width: 'auto',
-                            minWidth: SETTINGS_ROW_CONTROL_MIN_WIDTH,
-                          }}
-                        >
-                          {setting.value}
-                        </span>
-                      )}
-
-                      {/* Button */}
-                      {setting.type === 'button' && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (isUpdateButton) void handleUpdateButtonClick()
-                          }}
-                          disabled={isUpdateButton && updateBusy}
-                          className="flex-shrink-0 flex items-center gap-1.5 rounded-lg text-[12px] font-medium transition-[filter,transform,background-color,opacity] duration-200 hover:brightness-95 active:scale-[0.98]"
-                          style={{
-                            ...(setting.buttonVariant === 'primary'
-                              ? SETTINGS_PRIMARY_BUTTON_STYLE
-                              : setting.buttonVariant === 'danger'
-                                ? SETTINGS_DANGER_BUTTON_STYLE
-                                : SETTINGS_SECONDARY_BUTTON_STYLE),
-                            minWidth: SETTINGS_ROW_CONTROL_MIN_WIDTH,
-                            justifyContent: 'center',
-                            opacity: isUpdateButton && updateBusy ? 0.68 : 1,
-                            cursor: isUpdateButton && updateBusy ? 'wait' : 'pointer',
-                          }}
-                        >
-                          {setting.buttonVariant === 'danger' && <Trash2 className="w-3 h-3" />}
-                          {isUpdateButton ? updateButtonLabel : setting.buttonLabel || '执行'}
-                        </button>
-                      )}
-                    </div>
-                  )})}
-                </div>}
-
-                {/* About section extra info */}
-                {currentSection.id === 'about' && (
-                  <div className="mt-6">
-                    <button
-                      className="flex items-center gap-2 text-[12px] hover:underline transition-colors"
-                      style={{ color: 'var(--color-blue)' }}
-                    >
-                      <ExternalLink className="w-3 h-3" />
-                      访问 Ready 官方网站
-                    </button>
-                    <p className="text-[11px] mt-4" style={{ color: 'var(--text-light)' }}>
-                      Ready 是由@上班摸鱼 开发的，面向知识工作者和创作者的通用桌面工作台
-                      <br />
-                      Built with Electron · React · TypeScript
-                    </p>
-                  </div>
-                )}
+                {!isDynamicSection && currentSection.id !== 'appearance' && renderSettingRows(currentSection)}
               </>
             )}
           </div>

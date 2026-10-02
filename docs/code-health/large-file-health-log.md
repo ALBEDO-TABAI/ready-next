@@ -1,6 +1,6 @@
 # 代码行数健康度台账
 
-> 更新时间：2026-09-06
+> 更新时间：2026-10-02
 
 这份台账记录“任务给代码文件增加行数后，文件总行数已超过 1000 行”的健康度评估。它不是按行数自动要求拆分，而是把真正影响维护、验证和协作的风险持续留下来。
 
@@ -21,6 +21,7 @@
 
 | 评估日期 | 任务 | 文件 | 总行数 | 本次新增 | 结论 | 判断与后续动作 | 状态 |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
+| 2026-10-02 | 设置页视觉重整 | `src/renderer/styles/settings-surfaces.css` | 1295 | 新文件 +1295 | 健康 | 设置页单一设计系统表：`--sx-*` token（明/暗/实色三套）+ `sx-*` 组件类，只承担设置页的材质、控件状态与强调色纪律；组件类在 `@layer components`，级联层 gate 与 `settings-liquid-glass-contract` / `settings-design-system` 测试在位，拆分收益不足。 | 无需处理 |
 | 2026-09-29 | 项目目录收尾与停止修复 | `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts` | 5590 | 净 +1 | 危险 | 仅对齐直接停止与实时 lifecycle 的隐藏回答历史规则；生产装配仍过密，后续独立拆分。 | 后续拆分；交付时提醒 |
 | 2026-09-29 | 项目目录收尾与停止修复 | `src/main/modules/agent-control/codex-runtime/codex-binding-repository.ts` | 10662 | 本修复有新增 | 危险 | 本轮仅纠正未声明文件输出时的收口条件；原有大仓库仍混合准入、交付与恢复职责，后续单独拆分。 | 后续拆分；交付时提醒 |
 | 2026-09-29 | 项目目录收尾与停止修复 | `src/__tests__/codex-browser-verifier-closeout-native.test.ts` | 1794 | 本修复有新增 | 一般 | 补完整目录准备条件，验证普通回答可收口。2026-10-29 复查按历史与复核职责拆分。 | 已排期：2026-10-29 |
