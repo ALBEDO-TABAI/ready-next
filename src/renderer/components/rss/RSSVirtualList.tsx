@@ -1,19 +1,25 @@
-import { forwardRef, useEffect, useLayoutEffect, useRef, useState, type HTMLAttributes, type ReactNode } from 'react'
+import { forwardRef, useEffect, useLayoutEffect, useMemo, useRef, useState, type HTMLAttributes, type ReactNode } from 'react'
 import VirtualList, { type ListRef } from 'rc-virtual-list'
 import type { RSSItem } from './RSSFeed'
 
-const rowKey = (item: RSSItem) => item.eventGroup ? `event:${item.eventGroup.id}` : item.id
+// An optional header (e.g. 当前热点) scrolls with the list as its first virtual row.
+const HEADER_KEY = 'rss-list-header'
+const HEADER_ROW = { id: HEADER_KEY } as RSSItem
+const rowKey = (item: RSSItem) => item === HEADER_ROW ? HEADER_KEY : item.eventGroup ? `event:${item.eventGroup.id}` : item.id
 
 // Keep the real scrolling element as the source for RSS floating glass panels.
 const ScrollHolder = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(function ScrollHolder(props, ref) {
   return <div {...props} ref={ref} data-liquid-scroll-root="rss-feed-list" className={`${props.className || ''} rss-feed-scroll`} />
 })
 
-export default function RSSVirtualList({ items, selectedItemId, children }: {
+export default function RSSVirtualList({ items, selectedItemId, children, header = null }: {
   items: RSSItem[]
   selectedItemId: string | null
   children: (item: RSSItem, index: number) => ReactNode
+  header?: ReactNode
 }) {
+  const rows = useMemo(() => header ? [HEADER_ROW, ...items] : items, [header, items])
+  const offset = header ? 1 : 0
   const containerRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<ListRef>(null)
   const [height, setHeight] = useState(600)
@@ -45,10 +51,10 @@ export default function RSSVirtualList({ items, selectedItemId, children }: {
 
   useLayoutEffect(() => {
     const anchor = anchorRef.current
-    if (anchor && items.some((item) => rowKey(item) === anchor.key)) {
+    if (anchor && rows.some((item) => rowKey(item) === anchor.key)) {
       listRef.current?.scrollTo({ key: anchor.key, align: 'top', offset: anchor.offset })
     }
-  }, [items])
+  }, [rows])
 
   useEffect(() => {
     const item = items.find((entry) => entry.id === selectedItemId)
@@ -59,7 +65,7 @@ export default function RSSVirtualList({ items, selectedItemId, children }: {
     <div ref={containerRef} className="flex-1 min-h-0">
       <VirtualList
         ref={listRef}
-        data={items}
+        data={rows}
         height={height}
         itemHeight={84}
         itemKey={rowKey}
@@ -76,11 +82,13 @@ export default function RSSVirtualList({ items, selectedItemId, children }: {
           })
         }}
       >
-        {(item, index) => (
-          <div data-rss-row-key={rowKey(item)} className="rss-feed-row" data-first={index === 0 || undefined} data-last={index === items.length - 1 || undefined}>
-            {children(item, index)}
-          </div>
-        )}
+        {(item, index) => item === HEADER_ROW
+          ? <div data-rss-row-key={HEADER_KEY} className="rss-feed-row rss-feed-row--header">{header}</div>
+          : (
+            <div data-rss-row-key={rowKey(item)} className="rss-feed-row" data-first={index === offset || undefined} data-last={index === rows.length - 1 || undefined}>
+              {children(item, index - offset)}
+            </div>
+          )}
       </VirtualList>
     </div>
   )

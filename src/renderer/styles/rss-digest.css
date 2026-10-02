@@ -1,14 +1,14 @@
 /*
- * RSS 日报与简报、栏目管理、订阅设置抽屉与聊天里的引用预览。
+ * RSS 日报与简报：左侧往期档案，右侧报纸式版面（刊头、统计、头条、今日看点、本期版面）。
  * 与 rss-workspace.css 同一套 sx 纪律；--rss-* 变量由 .rss-mode-shell 提供。
  */
 
-/* ── 日报与简报 ───────────────────────────────────────────────────────── */
+/* ── 日报与简报：左侧往期档案，右侧报纸式版面 ──────────────────────────── */
 
 .rss-digest-panel {
   display: grid;
   flex: 1;
-  grid-template-columns: 252px minmax(0, 1fr);
+  grid-template-columns: 264px minmax(0, 1fr);
   min-height: 0;
   container-type: inline-size;
 }
@@ -17,7 +17,7 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  padding: 30px 12px 20px 20px;
+  padding: 26px 12px 20px 20px;
   overflow-y: auto;
   scrollbar-width: none;
 }
@@ -25,18 +25,24 @@
 .rss-digest-side__actions {
   display: flex;
   align-items: center;
-  gap: 4px;
-  margin-bottom: 26px;
-  padding: 0 4px;
+  gap: 6px;
+  padding: 0 2px;
 }
 
-.rss-digest-side__actions .sx-btn {
+.rss-digest-side__actions .sx-seg {
   flex: 1;
-  min-width: 0;
+}
+
+.rss-digest-side__actions .sx-seg__item {
+  flex: 1;
+}
+
+.rss-digest-generate {
+  margin: 12px 2px 0;
 }
 
 .rss-digest-side > p {
-  padding: 0 12px 10px;
+  padding: 24px 12px 8px;
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.04em;
@@ -48,75 +54,541 @@
   gap: 2px;
 }
 
-.rss-digest-editions > button {
+.rss-digest-editions > p {
+  padding: 8px 12px;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--text-light);
+}
+
+.rss-digest-month {
   display: grid;
   gap: 2px;
+}
+
+.rss-digest-month + .rss-digest-month {
+  margin-top: 6px;
+}
+
+.rss-digest-month__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 9px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.rss-digest-month__head svg {
+  color: var(--text-light);
+  transition: transform 200ms var(--rss-ease);
+}
+
+.rss-digest-month__head[aria-expanded='true'] svg {
+  transform: rotate(90deg);
+}
+
+.rss-digest-month__head small {
+  margin-left: auto;
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--text-light);
+}
+
+.rss-digest-month__head:hover {
+  color: var(--text-title);
+}
+
+.rss-digest-issue {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
   width: 100%;
-  padding: 9px 12px;
-  border-radius: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
   text-align: left;
   transition: background-color var(--sx-dur, 160ms) var(--rss-ease), box-shadow var(--sx-dur, 160ms) var(--rss-ease);
 }
 
-.rss-digest-editions > button strong {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-body);
-}
-
-.rss-digest-editions > button small {
-  font-size: 11.5px;
-  color: var(--text-light);
-}
-
-.rss-digest-editions > button:hover:not([aria-current='page']) {
+.rss-digest-issue:hover:not([aria-current='page']) {
   background: var(--sx-raised-hover);
 }
 
-.rss-digest-editions > button[aria-current='page'] {
+.rss-digest-issue[aria-current='page'] {
   background: var(--sx-raised-bg);
   box-shadow: var(--sx-raised-shadow);
 }
 
-.rss-digest-editions > button[aria-current='page'] strong {
-  color: var(--text-title);
-}
-
-.rss-digest-editions > button:focus-visible {
+.rss-digest-issue:focus-visible {
   outline: none;
   box-shadow: var(--sx-focus-ring);
 }
 
-.rss-digest-editions > p {
-  padding: 8px 12px;
-  font-size: 12.5px;
-  line-height: 1.6;
+.rss-digest-issue__day {
+  display: grid;
+  justify-items: center;
+  line-height: 1;
+}
+
+.rss-digest-issue__day strong {
+  font-size: 19px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  color: var(--text-title);
+}
+
+.rss-digest-issue__day small {
+  margin-top: 5px;
+  font-size: 10.5px;
   color: var(--text-light);
+}
+
+.rss-digest-issue__title {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.rss-digest-issue[aria-current='page'] .rss-digest-issue__title {
+  color: var(--text-title);
+}
+
+.rss-digest-issue__title small {
+  display: block;
+  font-size: 11px;
+  color: var(--text-light);
+}
+
+.rss-digest-older {
+  justify-self: start;
+  margin: 6px 12px 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.rss-digest-older:hover {
+  color: var(--text-title);
 }
 
 .rss-digest-main {
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
-  padding: 34px var(--rss-gutter) 120px;
+  padding: 28px var(--rss-gutter) 120px;
+  container-type: inline-size;
 }
 
-.rss-digest-content {
-  max-width: 720px;
+/* 报纸式版面 */
+.rss-paper {
+  max-width: 1080px;
+  margin: 0 auto;
 }
 
-.rss-digest-content > h1 {
-  font-size: 26px;
-  line-height: 1.3;
-  font-weight: 650;
-  letter-spacing: -0.015em;
+.rss-paper-masthead {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 16px;
+  padding-bottom: 18px;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.rss-paper-masthead > span:last-child {
+  text-align: right;
+}
+
+.rss-paper-masthead__scope {
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  letter-spacing: 0.12em;
+}
+
+.rss-paper-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 28px;
+  padding: 10px 0 26px;
+}
+
+.rss-paper-head h1 {
+  font-size: clamp(36px, 5.6cqw, 56px);
+  line-height: 1.05;
+  font-weight: 700;
+  letter-spacing: -0.03em;
   color: var(--text-title);
   overflow-wrap: anywhere;
 }
 
-.rss-digest-meta {
-  margin-top: 8px;
+.rss-paper-head h1 small {
+  margin-left: 4px;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--text-light);
+}
+
+.rss-paper-kicker {
+  margin-top: 12px;
+  font-size: 11px;
+  letter-spacing: 0.32em;
+  color: var(--text-light);
+}
+
+.rss-paper-date {
+  display: flex;
+  flex-shrink: 0;
+  gap: 4px;
+  padding: 6px;
+  border-radius: 18px;
+  background: var(--sx-card-bg);
+  box-shadow: var(--sx-card-shadow);
+}
+
+.rss-paper-date__tile {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 2px;
+  min-width: 104px;
+  padding: 10px 14px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.rss-paper-date__tile strong {
+  font-size: 44px;
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-title);
+}
+
+.rss-paper-calendar {
+  min-width: 176px;
+  padding: 10px 12px;
+  border-radius: 13px;
+  background: var(--sx-inset-bg);
+}
+
+.rss-paper-calendar__head {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.rss-paper-calendar__head small {
+  font-weight: 400;
+  color: var(--text-light);
+}
+
+.rss-paper-calendar__grid {
+  display: grid;
+  grid-template-columns: repeat(7, 20px);
+  gap: 3px 2px;
+  justify-items: center;
+}
+
+.rss-paper-calendar__grid > * {
+  width: 20px;
+  height: 16px;
+}
+
+.rss-paper-calendar__grid .is-label {
+  font-size: 10px;
+  text-align: center;
+  color: var(--text-light);
+}
+
+.rss-paper-calendar__grid .is-day,
+.rss-paper-calendar__grid .is-issue,
+.rss-paper-calendar__grid .is-current {
+  position: relative;
+}
+
+.rss-paper-calendar__grid .is-day::after,
+.rss-paper-calendar__grid .is-issue::after,
+.rss-paper-calendar__grid .is-current::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--sx-track-bg);
+  transform: translate(-50%, -50%);
+}
+
+.rss-paper-calendar__grid .is-issue::after {
+  width: 6px;
+  height: 6px;
+  background: var(--text-secondary);
+}
+
+.rss-paper-calendar__grid .is-current::after {
+  width: 8px;
+  height: 8px;
+  background: var(--color-blue);
+  box-shadow: 0 0 0 3px var(--sx-accent-wash);
+}
+
+.rss-paper-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 32px;
+  padding: 18px 0;
   font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.rss-paper-stats b {
+  margin-right: 6px;
+  font-size: 26px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-title);
+}
+
+.rss-paper-stats__end {
+  margin-left: auto;
+  color: var(--text-light);
+}
+
+.rss-paper-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  grid-template-rows: auto 1fr;
+  gap: 36px 48px;
+  padding-top: 18px;
+}
+
+.rss-paper-body {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  min-width: 0;
+}
+
+/* 宽版：导读与本刊信息在右栏上下排列；窄版：导读移到正文之前。 */
+.rss-paper-guide {
+  display: grid;
+  grid-column: 2;
+  grid-row: 1;
+  align-content: start;
+  gap: 36px;
+  min-width: 0;
+}
+
+.rss-paper-info {
+  grid-column: 2;
+  grid-row: 2;
+  align-self: start;
+  min-width: 0;
+}
+
+.rss-paper-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  color: var(--sx-accent-text);
+}
+
+.rss-paper-label::before {
+  content: '';
+  width: 18px;
+  height: 1.5px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.rss-paper-lead h2 {
+  font-size: clamp(24px, 3.2cqw, 34px);
+  line-height: 1.3;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-title);
+  overflow-wrap: anywhere;
+}
+
+.rss-paper-lead__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 24px;
+  margin-top: 16px;
+}
+
+.rss-paper-lead__body blockquote {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.85;
+  color: var(--text-body);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.rss-paper-lead__body .rss-card-preview {
+  max-width: 280px;
+  margin: 4px 0 0;
+}
+
+.rss-paper-lead__body .rss-card-preview img {
+  max-height: 200px;
+}
+
+.rss-paper-section {
+  margin-top: 44px;
+}
+
+.rss-digest-entry {
+  padding: 16px 0 18px;
+}
+
+.rss-digest-entry + .rss-digest-entry {
+  padding-top: 20px;
+}
+
+.rss-digest-entry h2 {
+  font-size: 17px;
+  line-height: 1.5;
+  font-weight: 600;
+  color: var(--text-title);
+  overflow-wrap: anywhere;
+}
+
+.rss-digest-entry blockquote,
+.rss-digest-sources blockquote {
+  margin: 10px 0;
+  color: var(--text-body);
+  font-size: 13.5px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.rss-paper-entry-meta {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-light);
+}
+
+.rss-paper-reason {
+  margin-top: 6px;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--text-muted);
+}
+
+.rss-paper-highlights,
+.rss-paper-index {
+  display: grid;
+  gap: 2px;
+  margin: 0 -10px;
+  padding: 0;
+  list-style: none;
+}
+
+.rss-paper-highlights li {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  gap: 6px;
+  padding: 0 10px;
+}
+
+.rss-paper-highlights li > span {
+  padding-top: 9px;
+  font-size: 20px;
+  line-height: 1;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-title);
+}
+
+.rss-paper-highlights button,
+.rss-paper-index button {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 10px;
+  text-align: left;
+  transition: background-color var(--sx-dur, 160ms) var(--rss-ease);
+}
+
+.rss-paper-highlights button {
+  margin-left: -10px;
+}
+
+.rss-paper-highlights button:hover,
+.rss-paper-index button:hover {
+  background: var(--sx-raised-hover);
+}
+
+.rss-paper-highlights strong {
+  font-size: 13.5px;
+  line-height: 1.5;
+  font-weight: 600;
+  color: var(--text-title);
+}
+
+.rss-paper-highlights small {
+  font-size: 11.5px;
+  color: var(--text-light);
+}
+
+.rss-paper-index button {
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.rss-paper-index span {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-light);
+}
+
+.rss-paper-index strong {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-body);
+}
+
+.rss-paper-index small {
+  font-size: 11.5px;
+  color: var(--text-light);
+}
+
+.rss-paper-info .rss-digest-actions {
+  margin: 12px 0 8px -11px;
+}
+
+.rss-digest-meta {
+  margin-top: 6px;
+  font-size: 12px;
   line-height: 1.7;
   color: var(--text-muted);
 }
@@ -125,60 +597,11 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
-  margin: 16px 0 6px -11px;
-}
-
-.rss-digest-content > section > h2 {
-  margin: 40px 0 4px;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  color: var(--text-muted);
-}
-
-.rss-digest-entry {
-  padding: 18px 0 20px;
-}
-
-.rss-digest-entry > p:first-child {
-  font-size: 11.5px;
-  color: var(--text-light);
-}
-
-.rss-digest-entry h2 {
-  margin-top: 4px;
-  font-size: 18px;
-  line-height: 1.45;
-  font-weight: 600;
-  color: var(--text-title);
-  overflow-wrap: anywhere;
-}
-
-.rss-digest-entry blockquote,
-.rss-digest-sources blockquote {
-  margin: 12px 0;
-  padding: 12px 16px;
-  border-radius: 12px;
-  background: var(--sx-inset-bg);
-  color: var(--text-body);
-  font-size: 13.5px;
-  line-height: 1.75;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.rss-digest-entry > p,
-.rss-digest-sources p {
-  margin: 4px 0;
-  font-size: 12.5px;
-  line-height: 1.7;
-  color: var(--text-muted);
-  overflow-wrap: anywhere;
+  gap: 2px;
 }
 
 .rss-digest-sources {
-  margin-top: 8px;
+  margin-top: 6px;
 }
 
 .rss-digest-sources > button {
@@ -192,7 +615,7 @@
 }
 
 .rss-digest-sources > div {
-  margin-top: 12px;
+  margin-top: 10px;
   padding: 12px 16px;
   border-radius: 12px;
   background: var(--sx-inset-bg);
@@ -202,6 +625,14 @@
   font-size: 13px;
   font-weight: 500;
   color: var(--text-title);
+}
+
+.rss-digest-sources p {
+  margin: 4px 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
 }
 
 .rss-digest-sources > div button {
@@ -246,368 +677,97 @@
   color: var(--text-title);
 }
 
-.rss-digest-panel > p[role='alert'],
-.rss-digest-panel > p[role='status'] {
-  grid-column: 1 / -1;
+@container (max-width: 980px) {
+  .rss-paper-grid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+    gap: 40px;
+  }
+
+  .rss-paper-guide {
+    grid-column: 1;
+    grid-row: 1;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 28px 40px;
+  }
+
+  .rss-paper-body {
+    grid-row: 2;
+  }
+
+  .rss-paper-info {
+    grid-column: 1;
+    grid-row: 3;
+  }
+
+  .rss-paper-calendar {
+    display: none;
+  }
 }
 
-@container (max-width: 720px) {
+@container (max-width: 520px) {
+  .rss-paper-masthead {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .rss-paper-masthead > span:last-child {
+    text-align: left;
+  }
+
+  .rss-paper-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  /* 刊头已经写明日期，窄版不再重复日期块。 */
+  .rss-paper-date {
+    display: none;
+  }
+
+  .rss-paper-lead__body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@container (max-width: 760px) {
   .rss-digest-panel {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
   }
 
   .rss-digest-side {
-    padding: 18px var(--rss-gutter) 0;
+    padding: 16px var(--rss-gutter) 0;
+    overflow: visible;
+  }
+
+  .rss-digest-side > p {
+    display: none;
   }
 
   .rss-digest-editions {
     display: flex;
     gap: 4px;
+    margin-top: 14px;
     overflow-x: auto;
     scrollbar-width: none;
   }
 
-  .rss-digest-editions > button {
-    flex-shrink: 0;
-    width: auto;
-  }
-}
-
-/* ── 栏目管理 ─────────────────────────────────────────────────────────── */
-
-.rss-definition-editor {
-  display: grid;
-  flex: 1;
-  grid-template-columns: 236px minmax(0, 1fr);
-  min-height: 0;
-  container-type: inline-size;
-}
-
-.rss-definition-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-height: 0;
-  padding: 30px 12px 20px 20px;
-  overflow-y: auto;
-  scrollbar-width: none;
-}
-
-.rss-definition-list > p {
-  padding: 0 12px 10px;
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.04em;
-  color: var(--text-light);
-}
-
-.rss-definition-list > button {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  min-height: 34px;
-  padding: 0 12px;
-  border-radius: 10px;
-  font-size: 13px;
-  color: var(--text-secondary);
-  text-align: left;
-  transition: background-color var(--sx-dur, 160ms) var(--rss-ease), box-shadow var(--sx-dur, 160ms) var(--rss-ease);
-}
-
-.rss-definition-list > button svg {
-  flex-shrink: 0;
-  color: var(--text-muted);
-}
-
-.rss-definition-list > button span {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.rss-definition-list > button small {
-  font-size: 11px;
-  color: var(--text-light);
-}
-
-.rss-definition-list > button:hover:not([aria-current='true']) {
-  background: var(--sx-raised-hover);
-  color: var(--text-title);
-}
-
-.rss-definition-list > button[aria-current='true'] {
-  background: var(--sx-raised-bg);
-  box-shadow: var(--sx-raised-shadow);
-  color: var(--text-title);
-  font-weight: 500;
-}
-
-.rss-definition-list > .rss-definition-new {
-  margin-bottom: 10px;
-  color: var(--text-muted);
-}
-
-.rss-definition-main {
-  min-width: 0;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 34px var(--rss-gutter) 120px;
-}
-
-.rss-definition-form {
-  display: grid;
-  gap: 22px;
-  max-width: 640px;
-}
-
-.rss-definition-form > header h1 {
-  font-size: 22px;
-  line-height: 1.3;
-  font-weight: 650;
-  color: var(--text-title);
-}
-
-.rss-definition-form > header p {
-  margin-top: 6px;
-  font-size: 12.5px;
-  line-height: 1.65;
-  color: var(--text-muted);
-}
-
-.rss-definition-field {
-  display: grid;
-  gap: 8px;
-}
-
-.rss-definition-field > span,
-.rss-definition-field > legend {
-  padding: 0;
-  font-size: 12.5px;
-  font-weight: 500;
-  color: var(--text-body);
-}
-
-.rss-definition-field > small {
-  font-size: 12px;
-  line-height: 1.6;
-  color: var(--text-muted);
-}
-
-.rss-definition-field .sx-textarea {
-  min-height: 112px;
-  resize: vertical;
-}
-
-.rss-definition-field--inline {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.rss-definition-field--inline .sx-input {
-  width: 96px;
-}
-
-.rss-definition-icons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.rss-definition-icons button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 38px;
-  height: 38px;
-  border-radius: 11px;
-  color: var(--text-muted);
-  transition: background-color var(--sx-dur, 160ms) var(--rss-ease), box-shadow var(--sx-dur, 160ms) var(--rss-ease), color var(--sx-dur, 160ms) var(--rss-ease);
-}
-
-.rss-definition-icons button:hover:not([aria-checked='true']) {
-  background: var(--sx-raised-hover);
-  color: var(--text-title);
-}
-
-.rss-definition-icons button[aria-checked='true'] {
-  background: var(--sx-raised-bg);
-  box-shadow: var(--sx-raised-shadow);
-  color: var(--text-title);
-}
-
-.rss-definition-filters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.rss-definition-filters button {
-  height: 30px;
-  padding: 0 12px;
-  border-radius: 999px;
-  background: var(--sx-inset-bg);
-  font-size: 12.5px;
-  color: var(--text-secondary);
-  transition: background-color var(--sx-dur, 160ms) var(--rss-ease), box-shadow var(--sx-dur, 160ms) var(--rss-ease), color var(--sx-dur, 160ms) var(--rss-ease);
-}
-
-.rss-definition-filters button:hover:not([aria-pressed='true']) {
-  color: var(--text-title);
-}
-
-.rss-definition-filters button[aria-pressed='true'] {
-  background: var(--sx-raised-bg);
-  box-shadow: var(--sx-raised-shadow);
-  color: var(--text-title);
-  font-weight: 500;
-}
-
-.rss-definition-filters > p {
-  font-size: 12px;
-  color: var(--text-light);
-}
-
-.rss-definition-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding-top: 6px;
-}
-
-.rss-definition-actions > p {
-  flex-basis: 100%;
-  font-size: 12.5px;
-  color: var(--text-muted);
-}
-
-.rss-definition-icons button:focus-visible,
-.rss-definition-filters button:focus-visible,
-.rss-definition-list > button:focus-visible {
-  outline: none;
-  box-shadow: var(--sx-focus-ring);
-}
-
-@container (max-width: 720px) {
-  .rss-definition-editor {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto minmax(0, 1fr);
+  .rss-digest-month {
+    display: flex;
+    gap: 4px;
   }
 
-  .rss-definition-list {
-    flex-direction: row;
-    flex-wrap: nowrap;
-    padding: 18px var(--rss-gutter) 0;
-    overflow-x: auto;
+  .rss-digest-month + .rss-digest-month {
+    margin-top: 0;
   }
 
-  .rss-definition-list > p {
+  .rss-digest-month__head {
     display: none;
   }
 
-  .rss-definition-list > button {
+  .rss-digest-issue {
     flex-shrink: 0;
-    width: auto;
-  }
-}
-
-/* ── 订阅设置抽屉（0.8 共享侧栏玻璃，RSS 内收敛颜色） ─────────────────────── */
-
-html .rss-mode-shell .rss-settings-surface {
-  background: var(--rss-popover-bg) !important;
-  border-left-color: transparent !important;
-  box-shadow: -28px 0 56px -28px rgba(15, 23, 42, 0.24) !important;
-  backdrop-filter: blur(28px) saturate(150%) !important;
-  -webkit-backdrop-filter: blur(28px) saturate(150%) !important;
-}
-
-html .rss-mode-shell .rss-settings-choice.is-active {
-  border-color: transparent !important;
-  background: var(--sx-raised-bg) !important;
-  box-shadow: var(--sx-raised-shadow) !important;
-  color: var(--text-title) !important;
-}
-
-html .rss-mode-shell .rss-settings-status-pill.is-success,
-html .rss-mode-shell .rss-settings-status-pill.is-info {
-  background: var(--sx-inset-bg);
-  color: var(--text-muted);
-}
-
-html .rss-mode-shell .rss-settings-status-pill.is-warning {
-  background: var(--sx-warning-wash);
-  color: var(--sx-warning);
-}
-
-html .rss-mode-shell .rss-settings-status-pill.is-danger {
-  background: var(--sx-danger-wash);
-  color: var(--sx-danger-text);
-}
-
-html .rss-mode-shell .rss-settings-icon-button.is-danger {
-  color: var(--text-light);
-}
-
-html .rss-mode-shell .rss-settings-icon-button.is-danger:hover:not(:disabled) {
-  color: var(--sx-danger-text);
-}
-
-html .rss-mode-shell .rss-settings-button,
-html .rss-mode-shell .rss-settings-icon-button {
-  transform: none !important;
-}
-
-html .rss-mode-shell .rss-settings-button.is-primary {
-  border-color: transparent !important;
-  background: var(--sx-ink) !important;
-  color: var(--sx-on-ink) !important;
-}
-
-html .rss-mode-shell .rss-settings-warning.is-notice {
-  background: var(--sx-inset-bg) !important;
-  color: var(--text-secondary);
-}
-
-/* ── 聊天面板里的 RSS 引用预览 ─────────────────────────────────────────── */
-
-.rss-citation-link {
-  color: inherit;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  cursor: pointer;
-  background: none;
-  border: 0;
-  padding: 0;
-  font: inherit;
-}
-
-.rss-reference-preview__locate {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 10px;
-  border-radius: 9px;
-  font-size: 12.5px;
-  color: var(--text-secondary);
-}
-
-.rss-reference-preview__locate:hover {
-  background: var(--sx-hover);
-  color: var(--text-title);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .rss-nav,
-  .rss-search,
-  .rss-news-card,
-  .rss-item-actions > button {
-    transition: none;
+    width: 220px;
   }
 }

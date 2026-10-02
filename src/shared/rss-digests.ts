@@ -31,6 +31,7 @@ export interface RSSDigestSource {
 export interface RSSDigestHeader {
   id: string; kind: 'daily' | 'range'; editionKey: string; version: number; from: number; until: number; timezone: string; createdAt: number;
   query: unknown; scopeLabel: string; ruleCount: number; total: number; referenceCount: number; needsUpdate: boolean;
+  lead: { title: string; source: string } | null;
   coverage: { matchingArticles: number; pendingArticles: number; unresolvedArticles: number; failedArticles: number; missingBodies: number; carriedOverArticles: number; duplicateOrPublishedArticles: number };
 }
 export interface RSSDigestCriteria { id: string; name: string; description: string; ruleRevision: number; kind: string }

@@ -2,7 +2,7 @@ import RSSDigestPanel from '../../components/rss/RSSDigestPanel'
 import RSSDefinitionEditor from '../../components/rss/RSSDefinitionEditor'
 import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { RefreshCw, AlertCircle, ExternalLink } from 'lucide-react'
+import { ExternalLink } from 'lucide-react'
 import RSSFeed from '../../components/rss/RSSFeed'
 import RSSNavigation, { RSSNavigationToggle } from '../../components/rss/RSSNavigation'
 import { RSSTopbarContext } from '../../components/rss/rss-topbar-context'
@@ -551,23 +551,6 @@ export default function RSSMode({
       if (statusMessage) setStatusMessage(statusMessage)
     }).catch((cause) => setStatusMessage(String(cause)))
   }, [loadRSSData, setQuery, setSelection])
-
-  // Error state
-  if (error && !loading && items.length === 0) {
-    return (
-      <div className="workbench-mode-root items-center justify-center">
-        <div className="flex flex-col items-center p-8 text-center">
-          <AlertCircle className="mb-4 h-8 w-8" strokeWidth={1.6} style={{ color: 'var(--text-light)' }} />
-          <h3 className="mb-2 text-[15px] font-semibold text-[var(--text-title)]">资讯暂时无法读取</h3>
-          <p className="mb-5 max-w-[320px] text-[13px] leading-relaxed text-[var(--text-muted)]">{error}</p>
-          <button type="button" onClick={() => { void loadRSSData() }} className="sx-btn sx-btn--primary">
-            <RefreshCw className="h-[14px] w-[14px]" />
-            重试
-          </button>
-        </div>
-      </div>
-    )
-  }
 
   const feedVisible = !selectedItem && !digestVisible && !showOrganization
   const surfaceActive = isActive && !isSuspended

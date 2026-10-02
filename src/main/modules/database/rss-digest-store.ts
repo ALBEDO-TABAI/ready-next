@@ -49,8 +49,12 @@ export class RSSDigestStore {
       query.from !== undefined ? `从 ${new Date(query.from).toISOString()}` : '', query.until !== undefined ? `至 ${new Date(query.until).toISOString()}` : '',
       query.sourceId ? JSON.parse(this.db.prepare('SELECT payload_json FROM rss_digest_sources WHERE report_id=? AND source_id=?').get<{ payload_json: string }>(row.id, query.sourceId)?.payload_json || '{}').name || query.sourceId : '',
     ].filter(Boolean).join(' · ') : '新增、有效精选且尚未入刊的保存资讯'
+    // The lead story is the most-reported group (ties by published order); it titles the edition in the archive.
+    const lead = this.db.prepare(`WITH g AS (SELECT group_key,COUNT(*) AS n,MIN(position) AS p FROM rss_digest_entries WHERE report_id=? GROUP BY group_key ORDER BY n DESC,p LIMIT 1)
+      SELECT json_extract(e.payload_json,'$.title') AS title,json_extract(e.payload_json,'$.source') AS source FROM rss_digest_entries e JOIN g ON e.group_key=g.group_key AND e.position=g.p WHERE e.report_id=?`)
+      .get<{ title: string; source: string }>(row.id, row.id) || null
     return { id: row.id, kind: row.kind, editionKey: row.edition_key, version: row.version, from: row.window_start, until: row.window_end, timezone: row.timezone, createdAt: row.created_at,
-      query, scopeLabel, ruleCount: savedDefinitions.length, coverage: JSON.parse(row.coverage_json), needsUpdate, ...counts }
+      query, scopeLabel, ruleCount: savedDefinitions.length, coverage: JSON.parse(row.coverage_json), needsUpdate, lead, ...counts }
   }
   schedule(): RSSDigestScheduleState | null {
     const row = this.db.prepare('SELECT * FROM rss_digest_schedule WHERE id=1').get<{ enabled: number; local_time: string; timezone: string; next_run_at: string | null; last_error: string | null }>()

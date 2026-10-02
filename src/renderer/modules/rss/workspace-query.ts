@@ -1,4 +1,5 @@
 import { RSSQuerySchema, type RSSArticleSummary, type RSSQueryInput, type RSSQueryResult } from '../../../shared/rss-workspace'
+import type { RSSDefinition } from '../../../shared/rss-organization'
 import type { RSSItem } from '../../components/rss/RSSFeed'
 
 export function rssQueryKey(input: RSSQueryInput): string {
@@ -26,4 +27,11 @@ export async function readRSSWindow(api: RSSQueryAPI, input: RSSQueryInput, coun
     result = result ? { ...response.data, items: [...result.items, ...response.data.items] } : response.data
   } while (result.nextCursor && result.items.length < count)
   return result
+}
+
+/** A remembered column or category can disappear outside this view (another window, a restored database); fall back instead of querying a missing id. */
+export function staleDefinitionFallback(query: RSSQueryInput, definitions: readonly RSSDefinition[]): Partial<RSSQueryInput> | null {
+  if (query.collectionId && !definitions.some((definition) => definition.id === query.collectionId)) return { collectionId: undefined, categoryId: undefined, scope: 'inbox', filter: 'all' }
+  if (query.categoryId && !definitions.some((definition) => definition.id === query.categoryId && definition.kind === 'topic')) return { categoryId: undefined }
+  return null
 }

@@ -2,7 +2,7 @@ import type { RSSDefinition } from '../../../shared/rss-organization'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRSSSession } from '../../stores/useRSSSession'
 import type { RSSSource } from '../../components/rss/RSSFeed'
-import { readRSSWindow, rssQueryKey, toRSSItem } from './workspace-query'
+import { readRSSWindow, rssQueryKey, staleDefinitionFallback, toRSSItem } from './workspace-query'
 
 export function useRSSWorkspace(active: boolean) {
   const query = useRSSSession((state) => state.query)
@@ -28,12 +28,15 @@ export function useRSSWorkspace(active: boolean) {
     setError(null)
     const currentRequest = () => ticket === generation.current && rssQueryKey(useRSSSession.getState().query) === key
     try {
+      const definitionResult = await window.electronAPI.rss.getDefinitions()
+      if (!definitionResult.success || !definitionResult.data) throw new Error(definitionResult.error || '栏目读取失败')
+      if (!currentRequest()) return
+      setDefinitions(definitionResult.data)
+      const fallback = staleDefinitionFallback(query, definitionResult.data)
+      // Changing the query re-keys this hook, and the effect reloads the fallback scope.
+      if (fallback) { useRSSSession.getState().setQuery(fallback); return }
       const [result, sourceResult] = await Promise.all([
         readRSSWindow({ queryItems: window.electronAPI.rss.queryCards }, query, count), window.electronAPI.rss.getSources(),
-        window.electronAPI.rss.getDefinitions().then((result) => {
-          if (!result.success || !result.data) throw new Error(result.error || '栏目读取失败')
-          if (currentRequest()) setDefinitions(result.data)
-        }),
       ])
       if (!sourceResult.success) throw new Error(sourceResult.error || '订阅源读取失败')
       if (!currentRequest()) return

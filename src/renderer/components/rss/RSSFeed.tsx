@@ -5,6 +5,7 @@ import RSSGroupedReports from './RSSGroupedReports'
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   Archive,
+  Bookmark,
   Check,
   ChevronDown,
   CircleDashed,
@@ -17,7 +18,6 @@ import {
   Plus,
   RefreshCw,
   Settings,
-  Star,
   Trash2,
   TriangleAlert,
   X,
@@ -36,6 +36,7 @@ import RSSTopbarTools from './RSSTopbarTools'
 import RSSSearchField from './RSSSearchField'
 import RSSWorkspaceHeading from './RSSWorkspaceHeading'
 import RSSProcessingPanel from './RSSProcessingPanel'
+import RSSHotEvents from './RSSHotEvents'
 
 export interface RSSItem {
   event?: RSSArticleSummary['event']
@@ -267,7 +268,7 @@ function dayKey(timestamp: number | null): string {
   return timestamp == null ? 'unknown' : new Date(timestamp).toDateString()
 }
 
-// 今天 / 昨天 先说相对日期，其后是具体日期与星期；更早的日子直接给日期。
+// 日期在前，“今天 / 昨天”与星期作补充，像报纸的日期栏。
 function dayHeading(timestamp: number | null): { main: string; detail: string } {
   if (timestamp == null) return { main: '时间未提供', detail: '' }
   const date = new Date(timestamp)
@@ -275,26 +276,29 @@ function dayHeading(timestamp: number | null): { main: string; detail: string } 
   const offset = Math.round((startOfDay(new Date()) - startOfDay(date)) / 86_400_000)
   const sameYear = date.getFullYear() === new Date().getFullYear()
   const day = `${sameYear ? '' : `${date.getFullYear()}年`}${date.getMonth() + 1}月${date.getDate()}日`
-  const weekday = `周${WEEKDAYS[date.getDay()]}`
-  if (offset === 0) return { main: '今天', detail: `${day} ${weekday}` }
-  if (offset === 1) return { main: '昨天', detail: `${day} ${weekday}` }
-  return { main: day, detail: weekday }
+  const weekday = `星期${WEEKDAYS[date.getDay()]}`
+  return { main: day, detail: offset === 0 ? `今天 · ${weekday}` : offset === 1 ? `昨天 · ${weekday}` : weekday }
 }
 
 function cardTimeLabel(item: RSSItem): string {
   const format = (value: number) => new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
   if (item.publishedAtMs != null) return format(item.publishedAtMs)
   if (item.publishedAt) return item.publishedAt
-  return item.collectedAt ? `收录于 ${format(item.collectedAt)}` : ''
+  return item.collectedAt ? format(item.collectedAt) : ''
 }
 
 interface RSSFeedItemRowProps {
   item: RSSItem
+  heading: { main: string; detail: string } | null
   isSelected: boolean
   analysis?: ItemAnalysisProgress
   query?: RSSQueryInput
   queryRevision?: number
   active: boolean
+  // Comma-joined ids of curated definitions: their membership is the 精选 mark and its reason, not a tag.
+  curatedIds: string
+  // 精选 reads like an edition with a large preview; other columns scan faster with a thumbnail beside the text.
+  media: 'preview' | 'thumb'
   onItemClick: (item: RSSItem) => void
   onMarkItemRead: (itemId: string) => void
   onToggleStar: (itemId: string) => void
@@ -307,6 +311,10 @@ function areRSSFeedItemRowPropsEqual(previous: RSSFeedItemRowProps, next: RSSFee
     && previous.active === next.active
     && previous.queryRevision === next.queryRevision
     && previous.query === next.query
+    && previous.curatedIds === next.curatedIds
+    && previous.media === next.media
+    && previous.heading?.main === next.heading?.main
+    && previous.heading?.detail === next.heading?.detail
     && previous.onItemClick === next.onItemClick
     && previous.onMarkItemRead === next.onMarkItemRead
     && previous.onToggleStar === next.onToggleStar
@@ -317,11 +325,14 @@ function areRSSFeedItemRowPropsEqual(previous: RSSFeedItemRowProps, next: RSSFee
 
 const RSSFeedItemRow = memo(function RSSFeedItemRow({
   item,
+  heading,
   isSelected,
   analysis,
   query,
   queryRevision,
   active,
+  curatedIds,
+  media,
   onItemClick,
   onMarkItemRead,
   onToggleStar,
@@ -329,81 +340,92 @@ const RSSFeedItemRow = memo(function RSSFeedItemRow({
   onOpenAnalysisOutput,
 }: RSSFeedItemRowProps) {
   const time = cardTimeLabel(item)
-  const labels = (item.classifications || []).filter((entry) => entry.included)
+  const curated = new Set(curatedIds ? curatedIds.split(',') : [])
+  const included = (item.classifications || []).filter((entry) => entry.included)
+  const curation = included.find((entry) => curated.has(entry.definitionId))
+  const topics = included.filter((entry) => !curated.has(entry.definitionId))
   const grouped = item.eventGroup && (item.eventGroup.memberCount > 1 || item.eventGroup.factCount > 1 || item.eventGroup.staleCount > 0) && query && queryRevision !== undefined
   return (
-    <article
-      data-rss-item-id={item.id}
-      className={`rss-news-card rss-item-row${isSelected ? ' is-selected' : ''}${item.read ? ' is-read' : ''}`}
-      onClick={() => onItemClick(item)}
-      draggable
-      onDragStart={(event) => {
-        setRssItemDragPayload(event, {
-          id: item.id,
-          title: item.title,
-          link: item.link,
-          summary: item.summary,
-          source: item.source,
-          publishedAt: item.publishedAt,
-        })
-        event.stopPropagation()
-      }}
-      onDragEnd={() => endRssItemDragSession()}
-    >
-      <div className="rss-card-body">
-        <div className="rss-card-meta">
-          <span className="rss-card-source" title={item.source}>{item.source}</span>
-          {item.author && item.author !== item.source ? <span title={item.author}>· {item.author}</span> : null}
-          {time ? <span>· {time}</span> : null}
-          <div className="rss-item-actions" onClick={(event) => event.stopPropagation()}>
-            {analysis && (
+    <>
+      {heading && <h2 className="rss-date-heading">{heading.main}{heading.detail ? <small>{heading.detail}</small> : null}</h2>}
+      <div className={`rss-tl${item.read ? '' : ' is-unread'}`}>
+        <time className="rss-tl__time">{time}</time>
+        <i className="rss-tl__dot" aria-hidden />
+        <article
+          data-rss-item-id={item.id}
+          className={`rss-news-card rss-item-row${isSelected ? ' is-selected' : ''}${item.read ? ' is-read' : ''}`}
+          onClick={() => onItemClick(item)}
+          draggable
+          onDragStart={(event) => {
+            setRssItemDragPayload(event, {
+              id: item.id,
+              title: item.title,
+              link: item.link,
+              summary: item.summary,
+              source: item.source,
+              publishedAt: item.publishedAt,
+            })
+            event.stopPropagation()
+          }}
+          onDragEnd={() => endRssItemDragSession()}
+        >
+          <div className="rss-card-meta">
+            <span className="rss-card-monogram" aria-hidden>{(item.source || '·').trim().slice(0, 1)}</span>
+            <span className="rss-card-source" title={item.source}>{item.source}</span>
+            {item.author && item.author !== item.source ? <span title={item.author}>· {item.author}</span> : null}
+            {curation && <span className="rss-card-curated" title={curation.reason}>精选</span>}
+            <div className="rss-item-actions" onClick={(event) => event.stopPropagation()}>
+              {analysis && (
+                <button
+                  type="button"
+                  className="is-persistent"
+                  onClick={() => onOpenAnalysisOutput(item.id)}
+                  title={analysis.sourceWarning || progressLabel(analysis)}
+                  data-rss-analysis-job-id={analysis.jobId}
+                >
+                  <AnalysisProgressRing entry={analysis} />
+                </button>
+              )}
+              {!item.read && (
+                <button type="button" onClick={() => onMarkItemRead(item.id)} title="标记为已读">
+                  <Check className="h-[15px] w-[15px]" strokeWidth={2} />
+                </button>
+              )}
+              {item.inboxVisible !== false && (
+                <button
+                  type="button"
+                  onClick={() => onDeleteItem(item.id)}
+                  title={item.starred ? '移出收件箱（收藏会继续显示）' : '移出收件箱'}
+                >
+                  <Archive className="h-[15px] w-[15px]" strokeWidth={1.9} />
+                </button>
+              )}
               <button
                 type="button"
-                className="is-persistent"
-                onClick={() => onOpenAnalysisOutput(item.id)}
-                title={analysis.sourceWarning || progressLabel(analysis)}
-                data-rss-analysis-job-id={analysis.jobId}
+                className={`is-persistent${item.starred ? ' is-on' : ''}`}
+                onClick={() => onToggleStar(item.id)}
+                title={item.starred ? '取消收藏' : '收藏'}
               >
-                <AnalysisProgressRing entry={analysis} />
+                <Bookmark className="h-[15px] w-[15px]" strokeWidth={1.9} fill={item.starred ? 'currentColor' : 'none'} />
               </button>
-            )}
-            {!item.read && (
-              <button type="button" onClick={() => onMarkItemRead(item.id)} title="标记为已读">
-                <Check className="h-[15px] w-[15px]" strokeWidth={2} />
-              </button>
-            )}
-            <button
-              type="button"
-              className={item.starred ? 'is-persistent is-on' : undefined}
-              onClick={() => onToggleStar(item.id)}
-              title={item.starred ? '取消收藏' : '收藏'}
-            >
-              <Star className="h-[15px] w-[15px]" strokeWidth={1.9} fill={item.starred ? 'currentColor' : 'none'} />
-            </button>
-            {item.inboxVisible !== false && (
-              <button
-                type="button"
-                onClick={() => onDeleteItem(item.id)}
-                title={item.starred ? '移出收件箱（收藏会继续显示）' : '移出收件箱'}
-              >
-                <Archive className="h-[15px] w-[15px]" strokeWidth={1.9} />
-              </button>
-            )}
+            </div>
           </div>
-        </div>
-        <h3 className="rss-card-title"><button type="button" className="text-left">{item.title}</button></h3>
-        {item.summary ? <p className="rss-card-summary">{item.summary}</p> : null}
-        {(labels.length > 0 || grouped) && (
-          <div className="rss-card-foot">
-            {labels.length > 0 && <div className="rss-classification-labels">
-              {labels.map((entry) => <span key={entry.definitionId} title={entry.reason}>{entry.name}{entry.stale ? ' · 需更新' : ''}</span>)}
-            </div>}
-            {grouped && <RSSGroupedReports group={item.eventGroup!} query={query!} revision={queryRevision!} active={active} onSelect={onItemClick} />}
+          <div className="rss-card-main">
+            <div className="rss-card-text">
+              <h3 className="rss-card-title"><button type="button" className="text-left">{item.title}</button></h3>
+              {item.summary && item.summary.trim() !== item.title.trim() ? <p className="rss-card-summary">{item.summary}</p> : null}
+            </div>
+            {media === 'thumb' && <RSSCoverImage link={item.link} coverImage={item.coverImage} variant="thumb" />}
           </div>
-        )}
+          {media === 'preview' && <RSSCoverImage link={item.link} coverImage={item.coverImage} variant="preview" />}
+          {topics.length > 0 && <div className="rss-classification-labels">
+            {topics.map((entry) => <span key={entry.definitionId} title={entry.reason}>#{entry.name}{entry.stale ? ' · 需更新' : ''}</span>)}
+          </div>}
+          {curation?.reason && <p className="rss-card-reason">推荐理由：{curation.reason}</p>}
+          {grouped && <RSSGroupedReports group={item.eventGroup!} query={query!} revision={queryRevision!} active={active} onSelect={onItemClick} />}
+        </article>
       </div>
-      <RSSCoverImage link={item.link} coverImage={item.coverImage} variant="thumb" />
-    </article>
+    </>
   )
 }, areRSSFeedItemRowPropsEqual)
 
@@ -478,6 +500,10 @@ export default function RSSFeed({
     [analysisJobs]
   )
   const sourceLabel = selectedSourceEntry ? selectedSourceEntry.name : selectedSource ? '所选信源' : '全部源'
+  const curatedIds = useMemo(() => definitions.filter((entry) => entry.kind === 'curated').map((entry) => entry.id).join(','), [definitions])
+  // Like AIHOT's 精选 page, the curated collection opens with the multi-source events of the last two days.
+  const onCuratedCollection = definitions.find((entry) => entry.id === query?.collectionId)?.kind === 'curated'
+  const listHeader = onCuratedCollection && toolsVisible ? <RSSHotEvents active={active} onSelect={onItemClick} /> : null
   const shouldShowBootstrapSkeleton = loading && items.length === 0
   const closeMenus = () => { setMoreMenuOpen(false); setTaskMenuOpen(false) }
 
@@ -792,26 +818,26 @@ export default function RSSFeed({
             <p>{queryError ? '当前范围暂时无法读取' : '这里还没有资讯'}</p>
           </div>
         ) : (
-          <RSSVirtualList key={query ? rssQueryKey(query) : 'rss-feed'} items={items} selectedItemId={selectedItemId}>{(item, index) => {
+          <RSSVirtualList key={query ? rssQueryKey(query) : 'rss-feed'} items={items} selectedItemId={selectedItemId} header={listHeader}>{(item, index) => {
             const date = dayKey(itemTimestamp(item))
             const heading = index === 0 || dayKey(itemTimestamp(items[index - 1])) !== date ? dayHeading(itemTimestamp(item)) : null
             return (
-              <>
-                {heading && <h2 className="rss-date-heading">{heading.main}{heading.detail ? <small>{heading.detail}</small> : null}</h2>}
-                <RSSFeedItemRow
-                  item={item}
-                  isSelected={selectedItemId === item.id}
-                  analysis={analysisProgressMap[item.id]}
-                  query={query}
-                  queryRevision={queryRevision}
-                  active={active}
-                  onItemClick={onItemClick}
-                  onMarkItemRead={onMarkItemRead}
-                  onToggleStar={onToggleStar}
-                  onDeleteItem={onDeleteItem}
-                  onOpenAnalysisOutput={onOpenAnalysisOutput}
-                />
-              </>
+              <RSSFeedItemRow
+                item={item}
+                heading={heading}
+                isSelected={selectedItemId === item.id}
+                analysis={analysisProgressMap[item.id]}
+                query={query}
+                queryRevision={queryRevision}
+                active={active}
+                curatedIds={curatedIds}
+                media={onCuratedCollection ? 'preview' : 'thumb'}
+                onItemClick={onItemClick}
+                onMarkItemRead={onMarkItemRead}
+                onToggleStar={onToggleStar}
+                onDeleteItem={onDeleteItem}
+                onOpenAnalysisOutput={onOpenAnalysisOutput}
+              />
             )
           }}</RSSVirtualList>
         )}

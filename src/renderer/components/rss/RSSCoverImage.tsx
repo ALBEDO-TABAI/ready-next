@@ -1,15 +1,15 @@
 import { useEffect, useState } from 'react'
 import { describeRSSMedia } from '../../../shared/rss-media'
 
-// thumb：资讯卡右侧的固定比例缩略图；full：阅读页里完整显示的封面。
-export default function RSSCoverImage({ link, coverImage, variant = 'full' }: { link: string; coverImage?: string | null; variant?: 'full' | 'thumb' }) {
+// preview：精选条目正文下方的预览图（按原比例、限高）；thumb：动态列表标题右侧的缩略图；full：阅读页里完整显示的封面。
+export default function RSSCoverImage({ link, coverImage, variant = 'full' }: { link: string; coverImage?: string | null; variant?: 'full' | 'preview' | 'thumb' }) {
   const url = describeRSSMedia(link, coverImage).cover.url
   const [failed, setFailed] = useState(false)
   useEffect(() => setFailed(false), [url])
   if (!url) return null
-  if (variant === 'thumb') {
+  if (variant !== 'full') {
     if (failed) return null
-    return <figure className="rss-cover-image rss-card-thumb">
+    return <figure className={`rss-cover-image ${variant === 'thumb' ? 'rss-card-thumb' : 'rss-card-preview'}`}>
       <img src={url} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setFailed(true)} />
     </figure>
   }

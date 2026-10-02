@@ -26,6 +26,7 @@ test('daily intake excludes historical import but accepts manually curated new a
     assert.equal(f.rss.processing.list().total, 0)
     const first = f.generate()
     assert.equal(first.total, 1)
+    assert.deepEqual(first.lead, { title: 'new', source: 'Publisher' }, 'the archive names an issue by its leading story')
     const read = f.rss.digests.read({ view: 'entries', reportId: first.id })
     assert.equal(read.view, 'entries'); if (read.view !== 'entries') throw new Error('wrong view')
     assert.equal(read.entries[0].source.itemId, 'new')
@@ -37,7 +38,9 @@ test('daily intake excludes historical import but accepts manually curated new a
     assert.throws(() => f.rss.digests.read({ view: 'sources', reportId: first.id, groupKey: 'foreign' }), /条目不存在/)
     assert.throws(() => f.rss.digests.read({ view: 'entries', reportId: first.id, snapshot: 1 }), /目录续页/)
     f.at(f.now() + 1000); f.curate('new', true)
-    assert.equal(f.generate().total, 0, 'a repeated positive decision cannot turn an already published item into news')
+    const repeated = f.generate()
+    assert.equal(repeated.total, 0, 'a repeated positive decision cannot turn an already published item into news')
+    assert.equal(repeated.lead, null)
   } finally { f.db.close() }
 })
 
