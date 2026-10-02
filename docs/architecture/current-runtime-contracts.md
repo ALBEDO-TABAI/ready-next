@@ -95,6 +95,7 @@
 - Codex 主请求由固定 app-server 与 Ready 网关承载；Ready 自管的 openai-compatible chat/responses、anthropic 辅助请求和独立 verifier 都必须真 SSE：文本增量交付，工具调用和推理在流中累积，终局与阻塞路径同构整形。网关只接受正向注册的 Provider 事件；native 流的 4096 上限只约束结构事件，`output_text`、工具参数和 reasoning delta 不计结构数，但仍分别受真实 wire bytes 与单 item held bytes 上限约束。Ready 自管请求的 request body、headers/first byte 和相邻有效事件 idle 是独立期限；有效进展只续 idle。合法 `response.completed | response.failed | response.incomplete` 与 Chat `[DONE]` 是协议终态：工具准入和响应证据完成后必须立即转发并取消上游 reader，HTTP EOF 不能二次否决已接受终态。app-server 用户轮没有总时长或静默时长截止：`error(willRetry=false)` 只是不可重试的错误预告，turn owner 必须保留到同身份 `turn/completed`；只有 app-server 连接真实关闭时 collector 才以连接失败收口。长文或长 `skill_write_artifact` 参数不得被误判成 `gateway_native_event_limit_exceeded`，未知语义事件和真实结构风暴仍必须失败关闭。
 - Kimi Coding 的 `k3` 在供应商协议层只走 Anthropic `/v1/messages`，思考强度只允许 `low / high / max` 且默认 `high`；普通文字与工具调用都必须保留并在下一轮原样回传完整思考块和签名，请求必须声明 `keep=all` 等价的上下文保留合同。其他模型或旧版无完整身份的历史不得中途切入 K3，必须在联网前拒绝并提示新建会话。
 - `provider_request_bill` 与 `provider_wire_request_bill.toolSchemaCount` 必须直接读取 provider 边界同一个实际 `ModelRequest.tools`；禁止为统计重新执行动态 `isEnabled`，也禁止用注册全集近似。注册全集只能另记为 `configuredToolSchemaCount`，差值记 `disabledToolSchemaCount`。每次请求的 input、instructions 与 tools 必须成对记录。
+- 聊天框图片粘贴只消费用户触发的 paste 文件数据；普通文字和图片 URL 沿用浏览器文字粘贴。Main 校验图片并转为 PNG，单图不超过 20 MB，私有保存到 userData/chat-attachments/pasted；Renderer 只保存既有文件附件引用，复用预览、移除与 Codex localImage 输入。导入期间阻断发送但保留编辑，异步回执不得跨会话/上下文附加；已发送图片不随移除草稿或重启删除。验收：composer-attachment-intake.test.ts、node scripts/verify-chat-pasted-image.cjs（真实 Electron 图片解码）与实际工作台粘贴。
 - 图片上下文估算区分语义下限与文本协议物理负载：无法观测字节的 opaque image ref 按单图 1600 token 下限计；data URL 与 `computer_screenshot` 按 `max(1600, base64字符数/4)` 计。K3 等把 base64 当文本送入的端点实测可由单张 1.4MB 截图超过 100 万 token，不得为了避免保守压缩而恢复“所有图片固定 1600”的低估。
 - Ready 自管辅助请求的流式降级只有三类：`READY_SDK_TRUE_SSE=off` 总开关；服务返回非 SSE 时伪流式交付；仅错误体明确提及 stream 的 4xx 可单次阻塞重试。413/401/429 等语义性 4xx 必须原样冒泡；该开关不得改变 Codex app-server 主链。
 - 回归入口：`npm run verify:streaming`。
@@ -195,6 +196,7 @@
 - Widget 更新上下文优先于 live-info 判定；天气、新闻、股价、汇率、比分、航班、路况、空气质量和官网公告等实时问题必须进入网页查询工作流。
 - 书本阅读是 Document 内的只读展示状态，不新增 Workbench mode，也不创建全局窗口遮罩；覆盖层只存在于当前 `.document-content-frame`，原编辑面保活但不可交互。会话绑定进入时的标签，切标签、切工作台场景或外部编辑定位必须先收口并保存位置。
 - 阅读入口只接受 MarkdownEditor 真实支持的未命名、文本与 DOCX 文档；未知扩展名和 PDF、Ebook、图片、视频、表格、Board 必须关闭失败，不能靠排除列表猜测支持。
+- 普通预览与书本切换前即时采集正文块源码行和块内进度，按实际分页定位；整篇比例只用于无正文锚点的位置。未翻页时保留进入前锚点，翻页后以左页首段更新同一位置表，退出恢复普通预览；书本期间暂停隐藏预览的采集与恢复，字号重排复用同一正文锚点。
 - 每次进入先显示合起封面；打开后才恢复已保存对开。正文仍来自现有结构化预览真值，书页只写阅读位置与排版偏好，翻页、跳页和排版不得修改正文或触发正文保存。
 - 图片在分页前完成加载并冻结尺寸，测量、静态页与翻动页共用这一份尺寸；失败或 10 秒内无响应时显示占位，退出或正文变化取消旧测量。独立图片按页宽缩放后达到半页高时自动独页，等比完整显示，后文从下一页接续；小图随正文排列，图与段落间距计入页高。重复 Markdown 图片服从相同规则，本地与相对路径沿用预览的文档目录解析。实际排版回归与合同见 `docs/superpowers/plans/2026-09-15-document-reading-images-implementation.md`。
 - 静态书页保留文本选择和链接点击；左右外缘 36–48px 才是翻页手势带。按下不换层，移动超过 6px 才让活动叶片接管；取消、失焦、捕获丢失和动画帧暂停都必须回到确定页且清除半页。

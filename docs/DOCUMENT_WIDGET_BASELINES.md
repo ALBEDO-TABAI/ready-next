@@ -70,6 +70,7 @@ Use these style words to reduce drift between user intent and generated widgets.
 ## Recommended Defaults
 
 - 优先使用受控组件与结构骨架；颜色、字号、边界与图表走共享令牌。
+- 柱图、折线与横向点条统一渲染为细点阵场：整块等距淡点（`dcRest`）打底，数据在同一网格上点亮（`dcOn`），点径小而密；每行/每列 = unit 的图例与真值直标保留。
 - 风格词只调信息密度和层级；不开放彩虹色、饼图或独立装饰系统。
 - 关系图用节点、分组和边；流程图用结构步骤，不手排 SVG 坐标。
 - 本地交互和请求 Agent 更新分开：现有 receiver 接收事件，写回仍走宿主授权与精确 Widget 目标。

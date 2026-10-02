@@ -5,6 +5,9 @@ export type DocumentScrollAnchorSnapshot = {
   anchorTitle: string | null
   anchorOrdinal: number | null
   anchorProgress: number | null
+  /** 正文块的源码行与块内阅读进度，跨排版共享。 */
+  sourceLine?: number
+  sourceProgress?: number
 }
 
 type DocumentReadingPositionStorage = {
@@ -112,6 +115,10 @@ function normalizeSnapshot(value: Partial<DocumentScrollAnchorSnapshot>): Docume
   const maxScroll = Number(value.maxScroll)
   if (!Number.isFinite(top) || !Number.isFinite(ratio) || !Number.isFinite(maxScroll)) return null
   return {
+    ...(Number.isFinite(value.sourceLine) && Number(value.sourceLine) >= 1 ? {
+      sourceLine: Math.floor(Number(value.sourceLine)),
+      sourceProgress: Number.isFinite(value.sourceProgress) ? Math.max(0, Math.min(1, Number(value.sourceProgress))) : 0,
+    } : {}),
     top: Math.max(0, top),
     ratio: Math.max(0, Math.min(1, ratio)),
     maxScroll: Math.max(0, maxScroll),

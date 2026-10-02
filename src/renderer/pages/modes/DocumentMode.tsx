@@ -38,6 +38,7 @@ import { shouldHandleSelectedDocument } from '../../modules/document/documentSel
 import {
   readDocumentReadingPositionMap,
   saveDocumentReadingPosition,
+  type DocumentScrollAnchorSnapshot,
 } from '../../modules/document/documentScrollAnchor'
 import {
   captureElementScroll,
@@ -561,11 +562,12 @@ export default function DocumentMode({
   }, [scrollSnapshots, tabIdByScrollKey])
 
   const captureVisibleDocumentScrollPositions = useCallback((options?: { includeAnchor?: boolean }) => {
+    if (bookReadingVisible) return
     pendingScrollFlushesRef.current.forEach((flushPosition) => flushPosition())
     documentRootRef.current?.querySelectorAll<HTMLElement>('[data-ready-document-scroll-key]').forEach((scope) => {
       captureDocumentScrollScope(scope, options)
     })
-  }, [captureDocumentScrollScope])
+  }, [bookReadingVisible, captureDocumentScrollScope])
 
   useEffect(() => {
     const flush = () => pendingScrollFlushesRef.current.forEach((flushPosition) => flushPosition())
@@ -584,7 +586,7 @@ export default function DocumentMode({
   }, [])
 
   useEffect(() => {
-    if (!isActive) return
+    if (!isActive || bookReadingVisible) return
     const cleanups: Array<() => void> = []
     documentRootRef.current?.querySelectorAll<HTMLElement>('[data-ready-document-scroll-key]').forEach((scope) => {
       const key = scope.dataset.readyDocumentScrollKey!
@@ -605,7 +607,7 @@ export default function DocumentMode({
       })
     })
     return () => cleanups.forEach((cleanup) => cleanup())
-  }, [activeTabId, editorMode, isActive, scrollSnapshots, splitTabId, tabIdByScrollKey])
+  }, [activeTabId, bookReadingVisible, editorMode, isActive, scrollSnapshots, splitTabId, tabIdByScrollKey])
 
   const restoreVisibleDocumentScrollPositions = useCallback(() => {
     const cleanups: Array<() => void> = []
@@ -626,9 +628,13 @@ export default function DocumentMode({
   }, [scrollSnapshots, tabIdByScrollKey])
 
   useLayoutEffect(() => {
-    if (!isSceneVisible) return
+    if (!isSceneVisible || bookReadingVisible) return
     return restoreVisibleDocumentScrollPositions()
-  }, [activeTabId, editorMode, isSceneVisible, restoreVisibleDocumentScrollPositions, splitTabId])
+  }, [activeTabId, bookReadingVisible, editorMode, isSceneVisible, restoreVisibleDocumentScrollPositions, splitTabId])
+
+  const handleBookPositionChange = useCallback((key: string, snapshot: DocumentScrollAnchorSnapshot) => {
+    scrollSnapshots.set(key, snapshot)
+  }, [scrollSnapshots])
 
   const handleEditorModeChange = useCallback((nextMode: 'edit' | 'preview') => {
     if (nextMode === editorMode) return
@@ -923,6 +929,7 @@ export default function DocumentMode({
                   if (bookReadingVisible) {
                     setBookReadingActive(false)
                   } else if (panelTargetTab && bookReadingEligible) {
+                    captureVisibleDocumentScrollPositions()
                     setBookReadingTabId(panelTargetTab.id)
                     setBookReadingActive(true)
                   }
@@ -1057,6 +1064,8 @@ export default function DocumentMode({
 
             {bookReadingVisible && panelTargetTab && (
               <DocumentBookReadingView
+                initialPosition={scrollSnapshots.get(panelTargetTab.path || panelTargetTab.id) ?? null}
+                onPositionChange={handleBookPositionChange}
                 key={panelTargetTab.id}
                 tab={panelTargetTab}
                 isSceneVisible={isSceneVisible}

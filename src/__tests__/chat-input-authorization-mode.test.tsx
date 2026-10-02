@@ -265,6 +265,31 @@ test('chat input exposes and switches the three conversation authorization modes
     assert.equal(emptySend?.disabled, true)
     assert.equal(emptySend?.getAttribute('data-ready-agent-send-blocked'), null)
     assert.equal(emptySend?.style.opacity, '1', 'empty composer must stay solid; only unready/unavailable fades')
+
+    await act(async () => root.render(createElement(Harness)))
+    let finishImport!: (result: { success: boolean; error: string }) => void
+    dom.window.electronAPI.chat = {
+      savePastedImage: () => new Promise((resolve) => { finishImport = resolve }),
+    } as typeof dom.window.electronAPI.chat
+    const paste = new dom.window.Event('paste', { bubbles: true, cancelable: true })
+    Object.defineProperty(paste, 'clipboardData', {
+      value: { files: [new File(['png'], 'image.png', { type: 'image/png' })] },
+    })
+    await act(async () => {
+      dom.window.document.querySelector('textarea')!.dispatchEvent(paste)
+    })
+    assert.equal(paste.defaultPrevented, true)
+    assert.equal(idleSend?.disabled, true, 'send waits for image persistence')
+    assert.equal(idleSend?.getAttribute('data-ready-agent-send-blocked'), '正在添加图片')
+    act(() => {
+      dom.window.document.querySelector('textarea')!.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+      idleSend?.click()
+    })
+    assert.equal(sends, 3, 'neither Enter nor click may send an incomplete attachment list')
+    await act(async () => finishImport({ success: false, error: '无法读取这张图片' }))
+    assert.equal(idleSend?.disabled, false)
+    assert.match(dom.window.document.querySelector('[role="alert"]')?.textContent || '', /无法读取这张图片/)
+    assert.equal(dom.window.document.querySelector('textarea')?.value, '发送测试')
   } finally {
     await act(async () => root.unmount())
     Object.defineProperty(globalThis, 'window', { value: previousWindow, configurable: true })

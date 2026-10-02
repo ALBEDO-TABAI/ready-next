@@ -7,8 +7,6 @@ import test from 'node:test'
 
 import {
   pageIndexForRatio,
-  readBookReadingRatio,
-  resolveBookEntryPage,
   saveBookReadingPosition,
   sourceLineForCharOffset,
 } from '../renderer/modules/document/book/bookReadingPosition'
@@ -31,11 +29,6 @@ test('pageIndexForRatio：端点、取整与单页文档', () => {
   assert.equal(pageIndexForRatio(2, 10), 9, '越界夹取')
 })
 
-test('进入阅读模式总是先显示封面，保存进度只决定开书后的目标页', () => {
-  assert.equal(resolveBookEntryPage(null, 10), 0)
-  assert.equal(resolveBookEntryPage(0.6, 6), 3)
-})
-
 test('位置保存/读取往返：ratio 与章节锚点透传', () => {
   const store = new Map<string, string>()
   const storage = {
@@ -55,7 +48,7 @@ test('位置保存/读取往返：ratio 与章节锚点透传', () => {
       pageCount: 6,
       anchorLine: 3,
     })
-    const ratio = readBookReadingRatio('/tmp/book.md')
+    const ratio = readDocumentReadingPositionMap().get('/tmp/book.md')?.ratio ?? null
     assert.ok(ratio !== null && Math.abs(ratio - 0.6) < 1e-9, `ratio 应≈0.6，实际 ${ratio}`)
     const snapshot = readDocumentReadingPositionMap().get('/tmp/book.md')
     assert.equal(snapshot?.anchorTitle, '第二章')
@@ -70,5 +63,22 @@ test('空键与无记录安全返回', () => {
   assert.doesNotThrow(() => {
     saveBookReadingPosition({ key: '', content: '', pageIndex: 0, pageCount: 1, anchorLine: null })
   })
-  assert.equal(readBookReadingRatio(''), null)
+})
+
+test('正文位置优先于整篇比例，无标题且跨页的段落也能定位', async () => {
+  const { resolveBookPageForPosition } = await import('../renderer/modules/document/book/bookReadingPosition')
+  const { buildBookPageModel } = await import('../renderer/modules/document/book/bookPagination')
+  const content = '短段落\n\n很长的正文段落\n\n最后一段'
+  const blocks = [0, 5, 14].map((start, i) => ({
+    id: String(i), type: 'markdown' as const, markdown: '', source: { start, end: [3, 12, 18][i] },
+  }))
+  const model = buildBookPageModel([
+    { blockIdx: 0, startCol: 0, endCol: 0, offsetY: 0, height: 100 },
+    { blockIdx: 1, startCol: 1, endCol: 8, offsetY: 0, height: 600 },
+    { blockIdx: 2, startCol: 9, endCol: 9, offsetY: 0, height: 100 },
+  ], 400, 600)
+  const position = { top: 50, maxScroll: 100, ratio: 0.01, anchorTitle: null, anchorOrdinal: null, anchorProgress: null, sourceLine: 3, sourceProgress: 0.7 }
+  assert.equal(resolveBookPageForPosition(position, content, blocks, model), 6)
+  assert.equal(resolveBookPageForPosition({ ...position, sourceProgress: 0 }, content, blocks, model), 1)
+  assert.equal(resolveBookPageForPosition(null, content, blocks, model), 0)
 })

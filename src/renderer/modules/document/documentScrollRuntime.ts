@@ -70,6 +70,19 @@ function capturePreviewAnchor(element: HTMLElement): Pick<DocumentScrollAnchorSn
   }
 }
 
+function capturePreviewSource(element: HTMLElement): Pick<DocumentScrollAnchorSnapshot, 'sourceLine' | 'sourceProgress'> {
+  const top = element.getBoundingClientRect().top + 8
+  for (const block of element.querySelectorAll<HTMLElement>('[data-ready-block-source-line]')) {
+    const rect = block.getBoundingClientRect()
+    if (rect.height <= 0 || rect.bottom <= top) continue
+    return {
+      sourceLine: Number(block.dataset.readyBlockSourceLine),
+      sourceProgress: Math.max(0, Math.min(1, (top - rect.top) / rect.height)),
+    }
+  }
+  return {}
+}
+
 export function captureElementScroll(
   element: HTMLElement,
   content: string,
@@ -81,6 +94,7 @@ export function captureElementScroll(
     ? null
     : captureTextareaAnchor(element, content) || capturePreviewAnchor(element)
   return {
+    ...(options?.includeAnchor === false ? {} : capturePreviewSource(element)),
     top,
     ratio: maxScroll > 0 ? top / maxScroll : 0,
     maxScroll,
@@ -91,6 +105,14 @@ export function captureElementScroll(
 }
 
 function restoreAnchorScroll(element: HTMLElement, snapshot: DocumentScrollAnchorSnapshot, content: string): boolean {
+  if (snapshot.sourceLine && !(element instanceof HTMLTextAreaElement)) {
+    const block = element.querySelector<HTMLElement>(`[data-ready-block-source-line="${snapshot.sourceLine}"]`)
+    if (block) {
+      element.scrollTop = Math.max(0, getElementContentOffset(element, block)
+        + block.getBoundingClientRect().height * (snapshot.sourceProgress ?? 0) - 8)
+      return true
+    }
+  }
   if (!snapshot.anchorTitle) return false
   if (element instanceof HTMLTextAreaElement) {
     const line = resolveMarkdownLineFromAnchor(content, snapshot)

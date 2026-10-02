@@ -3251,6 +3251,7 @@ interface ElectronChatAPI {
     title: string
   }) => Promise<{ success: boolean; error?: string }>
   pickFiles: () => Promise<{ success: boolean; data?: ChatPickedFile[]; error?: string }>
+  savePastedImage: (bytes: Uint8Array) => Promise<{ success: boolean; data?: import('../../shared/chat-pasted-image').PastedImageFile; error?: string }>
   readFileForAI: (
     filePath: string
   ) => Promise<{ success: boolean; data?: ChatFileForAI; error?: string }>

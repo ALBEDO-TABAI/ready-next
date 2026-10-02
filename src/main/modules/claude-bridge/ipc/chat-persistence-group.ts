@@ -29,6 +29,7 @@
 // The remaining metadata/read and file handlers share one renderer lifecycle.
 import type { IpcMain } from 'electron'
 import type { IpcChannelGroup, IpcDisposeHandle } from './types'
+import type { PastedImageFile } from '../../../../shared/chat-pasted-image'
 
 /**
  * Local mirror of the host's `IPCResponse` shape. Inlined to avoid a back
@@ -100,6 +101,7 @@ export interface ChatPersistenceGroupDeps {
    * builds `PickedFile` entries.
    */
   pickFiles(): Promise<PickedFile[]>
+  savePastedImage(bytes: Uint8Array): Promise<PastedImageFile>
   /**
    * Bound file reader / classifier — async, returns the shape the renderer
    * expects per file type (image base64, video base64 or downgrade text,
@@ -115,6 +117,7 @@ const CHANNELS = [
   'chat:getMessages',
   'chat:updateConversationTitle',
   'chat:pickFiles',
+  'chat:savePastedImage',
   'chat:readFileForAI',
 ] as const
 
@@ -160,6 +163,14 @@ export const chatPersistenceGroup: IpcChannelGroup<ChatPersistenceGroupDeps> = {
       try {
         const files = await deps.pickFiles()
         return { success: true, data: files }
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : String(error) }
+      }
+    })
+
+    ipcMain.handle('chat:savePastedImage', async (_, bytes: Uint8Array): Promise<IPCResponse> => {
+      try {
+        return { success: true, data: await deps.savePastedImage(bytes) }
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }
       }

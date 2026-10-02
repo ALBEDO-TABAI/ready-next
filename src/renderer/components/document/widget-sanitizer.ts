@@ -325,6 +325,8 @@ window.addEventListener('message',function(event){
       document.documentElement.style.setProperty(key, String(vars[key]));
     });
     document.documentElement.className=event.data.isDark ? 'dark' : '';
+    // 与宿主 color-scheme 保持一致：不一致时 Chromium 会给 iframe 铺不透明底色，圆角处露出白/黑边
+    document.documentElement.style.colorScheme=event.data.isDark ? 'dark' : 'light dark';
     notifyResize();
     return;
   }
@@ -348,7 +350,7 @@ setTimeout(function(){
 })();`
 
   return `<!doctype html>
-<html class="${isDark ? 'dark' : ''}">
+<html class="${isDark ? 'dark' : ''}" style="color-scheme:${isDark ? 'dark' : 'light dark'}">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />

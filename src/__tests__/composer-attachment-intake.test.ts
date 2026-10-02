@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createElement } from 'react'
-import type { DragEvent as ReactDragEvent } from 'react'
+import type { ClipboardEvent, DragEvent as ReactDragEvent } from 'react'
+import { usePastedImages } from '../renderer/components/agent/chat-panel/use-pasted-images'
 import { flushSync } from 'react-dom'
 import { createRoot } from 'react-dom/client'
 import { JSDOM } from 'jsdom'
@@ -86,19 +87,19 @@ function makeDropEvent(input: {
 
 async function withMountedIntake(
   electronAPI: Record<string, unknown>,
-  run: (handle: AttachmentIntakeHandle, focusCount: () => number) => Promise<void>,
+  run: (handle: AttachmentIntakeHandle & ReturnType<typeof usePastedImages>, focusCount: () => number) => Promise<void>,
 ) {
   Object.defineProperty(testDom.window, 'electronAPI', { value: electronAPI, configurable: true })
 
-  let handle: AttachmentIntakeHandle | null = null
+  let handle: (AttachmentIntakeHandle & ReturnType<typeof usePastedImages>) | null = null
   let focuses = 0
   function Harness() {
-    handle = useAttachmentIntake({
+    handle = { ...useAttachmentIntake({
       addAttachments: useAgent.getState().addAttachments,
       setInputValue: useAgent.getState().setInputValue,
       setIsDragOver: () => undefined,
       focusInputWithResize: () => { focuses += 1 },
-    })
+    }), ...usePastedImages() }
     return null
   }
 
@@ -206,5 +207,58 @@ test('late file stat cannot attach an operating-system drop to a different sessi
     assert.deepEqual(useAgent.getState().attachments, [])
     assert.deepEqual(useAgent.getState().filePool, [])
     assert.equal(focusCount(), 0)
+  })
+})
+
+function pasteEvent(files: File[]) {
+  let prevented = false
+  const event = {
+    clipboardData: { files },
+    preventDefault: () => { prevented = true },
+  } as unknown as ClipboardEvent<HTMLTextAreaElement>
+  return { event, prevented: () => prevented }
+}
+
+test('paste imports all images as removable file attachments and leaves ordinary text to the browser', async () => {
+  setComposerSession('a')
+  useAgent.getState().setInputValue('保留草稿')
+  const received: Uint8Array[] = []
+  await withMountedIntake({
+    chat: { savePastedImage: async (bytes: Uint8Array) => {
+      received.push(bytes)
+      return { success: true, data: { name: '粘贴图片.png', path: `/tmp/paste-${received.length}.png`, size: bytes.length, ext: '.png', type: 'image' } }
+    } },
+  }, async (handle) => {
+    const plain = pasteEvent([])
+    await handle.onPaste(plain.event)
+    assert.equal(plain.prevented(), false)
+    const images = pasteEvent([new File(['one'], 'image.png', { type: 'image/png' }), new File(['two'], 'image.jpg', { type: 'image/jpeg' })])
+    await handle.onPaste(images.event)
+    assert.equal(images.prevented(), true)
+    assert.deepEqual(received.map((bytes) => Buffer.from(bytes).toString()), ['one', 'two'])
+    assert.equal(useAgent.getState().inputValue, '保留草稿')
+    assert.deepEqual(useAgent.getState().attachments.map((a) => [a.type, a.source, a.path]), [
+      ['image', 'file', '/tmp/paste-1.png'], ['image', 'file', '/tmp/paste-2.png'],
+    ])
+    for (const a of useAgent.getState().attachments) useAgent.getState().removeAttachment(a.id)
+    assert.equal(useAgent.getState().attachments.length, 0)
+  })
+})
+
+test('failed or late image imports never add a broken attachment or cross conversations', async () => {
+  setComposerSession('a')
+  const result = deferred<{ success: boolean; data?: { name: string; path: string; size: number; ext: string } }>()
+  let called = false
+  await withMountedIntake({ chat: { savePastedImage: () => { called = true; return result.promise } } }, async (handle) => {
+    const pending = handle.onPaste(pasteEvent([new File(['png'], 'image.png', { type: 'image/png' })]).event)
+    while (!called) await new Promise((resolve) => setTimeout(resolve, 0))
+    setComposerSession('b')
+    result.resolve({ success: true, data: { name: 'image.png', path: '/tmp/late.png', size: 3, ext: '.png' } })
+    await pending
+    assert.deepEqual(useAgent.getState().attachments, [])
+  })
+  await withMountedIntake({ chat: { savePastedImage: async () => ({ success: false, error: '无法读取图片' }) } }, async (handle) => {
+    await handle.onPaste(pasteEvent([new File(['broken'], 'image.png', { type: 'image/png' })]).event)
+    assert.deepEqual(useAgent.getState().attachments, [])
   })
 })

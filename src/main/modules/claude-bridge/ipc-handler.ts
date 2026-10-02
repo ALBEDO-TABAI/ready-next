@@ -64,6 +64,7 @@ import { runControlGroup } from './ipc/run-control-group'
 import { telemetryGroup } from './ipc/telemetry-group'
 import { channelManagementGroup } from './ipc/channel-management-group'
 import { chatPersistenceGroup } from './ipc/chat-persistence-group'
+import { savePastedImage } from './chat-pasted-image'
 import type { IpcDisposeHandle } from './ipc/types'
 import { logAgentMetric } from '../agent-control/metrics'
 import { isRendererAgentMetricName } from '../../../shared/renderer-agent-metrics'
@@ -975,6 +976,7 @@ export async function setupAgentIPC(
     chatPersistenceGroupDispose = null
   }
   chatPersistenceGroupDispose = chatPersistenceGroup.register(ipcMain, {
+    savePastedImage: (bytes) => savePastedImage(app.getPath('userData'), bytes),
     getConversations: (agent) => chatRepository.getConversations(agent),
     getMessages: (conversationId) => chatRepository.getMessages(conversationId),
     updateConversationTitle: (payload) => chatRepository.updateConversationTitle(payload),

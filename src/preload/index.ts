@@ -1403,6 +1403,7 @@ const chatAPI = {
   updateConversationTitle: (data: { id: string; title: string }) =>
     ipcRenderer.invoke('chat:updateConversationTitle', data),
   pickFiles: () => ipcRenderer.invoke('chat:pickFiles'),
+  savePastedImage: (bytes: Uint8Array) => ipcRenderer.invoke('chat:savePastedImage', bytes),
   readFileForAI: (filePath: string) => ipcRenderer.invoke('chat:readFileForAI', filePath),
 }
 

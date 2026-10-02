@@ -74,11 +74,12 @@ function createMockDeps(): ChatPersistenceGroupDeps {
     getMessages: fail('getMessages') as ChatPersistenceGroupDeps['getMessages'],
     updateConversationTitle: fail('updateConversationTitle') as ChatPersistenceGroupDeps['updateConversationTitle'],
     pickFiles: fail('pickFiles') as ChatPersistenceGroupDeps['pickFiles'],
+    savePastedImage: fail('savePastedImage') as ChatPersistenceGroupDeps['savePastedImage'],
     readFileForAI: fail('readFileForAI') as ChatPersistenceGroupDeps['readFileForAI'],
   }
 }
 
-test('chatPersistenceGroup.register wires the 5 read/metadata/file channels exactly once each', () => {
+test('chatPersistenceGroup.register wires the 6 read/metadata/file channels exactly once each', () => {
   const { ipc, handleCalls } = createMockIpc()
   chatPersistenceGroup.register(ipc, createMockDeps())
 
@@ -87,9 +88,9 @@ test('chatPersistenceGroup.register wires the 5 read/metadata/file channels exac
   assert.deepEqual(
     registered,
     expected,
-    'register must subscribe to exactly the 5 chat metadata/read + file channels',
+    'register must subscribe to exactly the 6 chat metadata/read + file channels',
   )
-  assert.equal(handleCalls.length, 5, 'each channel must be registered exactly once')
+  assert.equal(handleCalls.length, 6, 'each channel must be registered exactly once')
 
   // Spot-check the exact channel literals per the plan (V2.1m, §3 V2.1) so
   // accidental renames trip this test even if the channel count happens to
@@ -100,6 +101,7 @@ test('chatPersistenceGroup.register wires the 5 read/metadata/file channels exac
     'chat:getMessages',
     'chat:updateConversationTitle',
     'chat:pickFiles',
+    'chat:savePastedImage',
     'chat:readFileForAI',
   ]) {
     assert.ok(

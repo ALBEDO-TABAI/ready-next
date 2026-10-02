@@ -281,6 +281,17 @@ describe('document widget renderer contract', () => {
     assert.doesNotMatch(source, /isScriptWidget/)
   })
 
+  it('declares a color-scheme matching the host theme so the transparent frame never paints an opaque canvas', () => {
+    // 宿主 html[data-theme=dark] 声明 color-scheme: dark；iframe 文档若不声明一致的
+    // color-scheme，Chromium 会给整个 frame 铺不透明底色，12px 圆角处露出白色弧边。
+    const dark = buildWidgetReceiverSrcdoc(':root{}', true, '<div>demo</div>', 'tok')
+    const light = buildWidgetReceiverSrcdoc(':root{}', false, '<div>demo</div>', 'tok')
+
+    assert.match(dark, /<html class="dark" style="color-scheme:dark">/)
+    assert.match(light, /<html class="" style="color-scheme:light dark">/)
+    assert.match(dark, /document\.documentElement\.style\.colorScheme=event\.data\.isDark \? 'dark' : 'light dark'/)
+  })
+
   it('stamps the CSP nonce on the widget receiver script so inherited CSP does not block widget startup', () => {
     // W10c（2026-07-11 dogfood）：CSP 的 script-src 同时声明 'unsafe-inline' 与 nonce——
     // 按规范 nonce 在场时 'unsafe-inline' 被忽略，裸内联接收器曾被静默拦截（widget:ready

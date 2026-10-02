@@ -32,7 +32,6 @@ import {
 import {
   BOOK_TITLE_PAGE,
   buildBookPageModel,
-  locatePageForAnchor,
   measureBookBlocks,
   resolveFlipSheet,
   spreadAt,
@@ -48,8 +47,7 @@ import {
   type BookReadingPreferences,
 } from '../../../modules/document/book/bookReadingPreferences'
 import {
-  readBookReadingRatio,
-  resolveBookEntryPage,
+  resolveBookPageForPosition,
   saveBookReadingPosition,
   sourceLineForCharOffset,
 } from '../../../modules/document/book/bookReadingPosition'
@@ -61,6 +59,7 @@ import DocumentBookStage, { type BookStageHandle, type StagePointerHandlers } fr
 import DocumentBookControls from './DocumentBookControls'
 import DocumentBookBlock from './DocumentBookBlock'
 import type { BookLeafHandle } from './DocumentBookLeaf'
+import { loadDocumentReadingPosition, type DocumentScrollAnchorSnapshot } from '../../../modules/document/documentScrollAnchor'
 
 const CONTROLS_IDLE_HIDE_MS = 2600
 
@@ -73,6 +72,8 @@ export interface DocumentBookReadingViewProps {
   tab: DocTab
   isSceneVisible: boolean
   onExit: () => void
+  initialPosition?: DocumentScrollAnchorSnapshot | null
+  onPositionChange?: (key: string, position: DocumentScrollAnchorSnapshot) => void
 }
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
@@ -97,6 +98,8 @@ export default function DocumentBookReadingView({
   tab,
   isSceneVisible,
   onExit,
+  initialPosition,
+  onPositionChange,
 }: DocumentBookReadingViewProps) {
   const reducedMotion = useBookReducedMotion()
   const [prefs, setPrefs] = useState<BookReadingPreferences>(() => loadBookReadingPreferences())
@@ -127,7 +130,9 @@ export default function DocumentBookReadingView({
   const hideCoverRef = useRef(false)
   const coverLiftingRef = useRef(false)
   const restoredRef = useRef(false)
-  const anchorBeforeReflowRef = useRef<{ anchorBlock: number } | null>(null)
+  const [entryPosition] = useState(() => initialPosition === undefined ? loadDocumentReadingPosition(tab.path || tab.id) : initialPosition)
+  const positionRef = useRef(entryPosition)
+  const positionSpreadRef = useRef<number | null>(null)
   const controlsIdleRef = useRef(0)
   const controlsPinnedRef = useRef(false)
   const idleArmCancelRef = useRef<(() => void) | null>(null)
@@ -185,31 +190,30 @@ export default function DocumentBookReadingView({
     key: positionKey, reducedMotion, blocks, isSceneVisible,
   }
 
-  const anchorLineForPage = useCallback((pageIndex: number): number | null => {
-    const rt = runtimeRef.current
-    const page = rt.model?.pages[pageIndex]
-    if (!page) return null
-    const start = rt.blocks[page.anchorBlock]?.source?.start
-    return typeof start === 'number' ? sourceLineForCharOffset(rt.content, start) : null
-  }, [])
-
   const savePosition = useCallback(() => {
     const rt = runtimeRef.current
-    if (!rt.model || !restoredRef.current) return
+    if (!rt.model || !restoredRef.current || rt.coverClosed) return
+    // 进入后未翻页时保留原段落，避免反复切换向页首漂移。
+    if (positionSpreadRef.current === rt.spreadIndex) return
     const current = spreadAt(rt.spreadIndex, rt.model.pageCount)
-    const currentPage = current.right !== null && current.right >= 0
-      ? current.right
-      : current.left !== null && current.left >= 0
-        ? current.left
-        : 0
-    saveBookReadingPosition({
+    const currentPage = current.left !== null && current.left >= 0 ? current.left : current.right ?? 0
+    const entry = rt.model.pages[currentPage]?.entries[0]
+    const start = entry ? rt.blocks[entry.blockIdx]?.source?.start : undefined
+    const blockPages = entry ? rt.model.pages.filter(page => page.entries.some(item => item.blockIdx === entry.blockIdx)) : []
+    const snapshot = saveBookReadingPosition({
       key: rt.key,
       content: rt.content,
-      pageIndex: Math.max(0, currentPage),
+      pageIndex: currentPage,
       pageCount: rt.model.pageCount,
-      anchorLine: anchorLineForPage(Math.max(0, currentPage)),
+      anchorLine: typeof start === 'number' ? sourceLineForCharOffset(rt.content, start) : null,
+      sourceProgress: entry && blockPages.length ? entry.columnIndex / blockPages.length : 0,
     })
-  }, [anchorLineForPage])
+    if (snapshot) {
+      positionRef.current = snapshot
+      positionSpreadRef.current = rt.spreadIndex
+      onPositionChange?.(rt.key, snapshot)
+    }
+  }, [onPositionChange])
 
   const armFor = useCallback((direction: BookFlipDirection): boolean => {
     const rt = runtimeRef.current
@@ -453,17 +457,6 @@ export default function DocumentBookReadingView({
       })
       return () => controller.abort()
     }
-    // 重排前捕获当前锚点（首测除外）
-    const rt = runtimeRef.current
-    if (restoredRef.current && rt.model) {
-      const current = spreadAt(rt.spreadIndex, rt.model.pageCount)
-      const anchorPage = current.right !== null && current.right >= 0
-        ? rt.model.pages[current.right]
-        : current.left !== null && current.left >= 0
-          ? rt.model.pages[current.left]
-          : null
-      if (anchorPage) anchorBeforeReflowRef.current = { anchorBlock: anchorPage.anchorBlock }
-    }
     // 同步测量：测量器已完成布局，getClientRects 只读一次；
     // 超大文档让到下一帧，避免阻塞输入。
     const runMeasure = () => {
@@ -473,16 +466,13 @@ export default function DocumentBookReadingView({
       const nextModel = buildBookPageModel(measures, geometry.contentWidth, geometry.contentHeight)
       setModel(nextModel)
       setMeasurerActive(false)
+      const nextSpread = spreadForPage(resolveBookPageForPosition(positionRef.current, content, blocks, nextModel))
       if (!restoredRef.current) {
         restoredRef.current = true
-        const ratio = readBookReadingRatio(positionKey)
         setCoverClosed(true)
-        setSpreadIndex(spreadForPage(resolveBookEntryPage(ratio, nextModel.pageCount)))
-      } else if (anchorBeforeReflowRef.current) {
-        const page = locatePageForAnchor(nextModel, anchorBeforeReflowRef.current.anchorBlock)
-        anchorBeforeReflowRef.current = null
-        setSpreadIndex(spreadForPage(page))
       }
+      positionSpreadRef.current = nextSpread
+      setSpreadIndex(nextSpread)
       scheduleIdleArm()
     }
     if (blocks.length > 1500) {
@@ -500,7 +490,7 @@ export default function DocumentBookReadingView({
     prefs.lineHeight,
     isSceneVisible,
     measurerActive,
-    positionKey,
+    content,
     scheduleIdleArm,
     stageSize.width,
   ])
@@ -554,10 +544,10 @@ export default function DocumentBookReadingView({
   }, [isSceneVisible])
 
   // --- 位置保存 ---
-  useEffect(() => {
+  useLayoutEffect(() => {
     savePosition()
   }, [coverClosed, savePosition, safeSpreadIndex])
-  useEffect(() => () => {
+  useLayoutEffect(() => () => {
     idleArmCancelRef.current?.()
     savePosition()
     controllerRef.current?.dispose()

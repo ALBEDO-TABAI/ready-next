@@ -10,6 +10,7 @@ import type { ContextUsageSnapshot } from '../../../shared/context-usage-types'
 import { chatMenuItemStyle, chatMenuSurfaceStyle } from './chatMenuStyles'
 import { getChatMenuHorizontalFrame, subscribeChatMenuLayout } from './chatMenuLayout'
 import { ContextUsageMeter } from './chat-panel/ContextUsageMeter'
+import { usePastedImages } from './chat-panel/use-pasted-images'
 import type { ActionAuthorizationMode } from '../../../shared/action-authorization-mode'
 import {
   buildSlashSkillInsertion,
@@ -113,17 +114,18 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   const atMenuRef = useRef<HTMLDivElement>(null)
   const slashMenuRef = useRef<HTMLDivElement>(null)
   const composingRef = useRef(false)
+  const { onPaste, isPasting, pasteError } = usePastedImages()
   const hasSendableContent = Boolean(inputValue.trim() || attachmentsCount > 0)
   const composerState = deriveComposerState({
     hasSendableContent,
-    sendAvailability: admissionReady && !lifecycleInputBlocked ? 'ready' : 'blocked',
-    blocker: !admissionReady ? 'head_unavailable' : sendBlocker,
+    sendAvailability: admissionReady && !lifecycleInputBlocked && !isPasting ? 'ready' : 'blocked',
+    blocker: isPasting ? 'attachment_importing' : !admissionReady ? 'head_unavailable' : sendBlocker,
     authorizationModeUpdating,
     destructiveOperationPending,
     exactStopIntentAvailable: stopAvailable,
   })
   const composerLocked = !composerState.editable
-  const sendBlockedReason = !admissionReady
+  const sendBlockedReason = isPasting ? '正在添加图片' : !admissionReady
     ? '还没有可用的对话，请稍候或新建对话'
     : authorizationModeUpdating
       ? '正在更新授权方式'
@@ -737,6 +739,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
             value={inputValue}
             onChange={(e) => handleInputChange(e.target.value, e.target.selectionStart)}
             onKeyDown={handleKeyDown}
+            onPaste={onPaste}
             onCompositionStart={() => {
               composingRef.current = true
             }}
@@ -759,6 +762,11 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
             rows={2}
           />
 
+          {(isPasting || pasteError) && (
+            <div role={pasteError ? 'alert' : 'status'} style={{ fontSize: 11, color: pasteError ? 'var(--color-red)' : 'var(--text-muted)' }}>
+              {isPasting ? '正在添加图片…' : pasteError}
+            </div>
+          )}
           {stopError && (
             <div
               role="alert"

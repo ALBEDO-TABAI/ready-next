@@ -287,6 +287,19 @@ describe('document widget ready design language', () => {
     assert.match(single, /62/)
   })
 
+  it('bar and line render one fine dot field (rest dots + lit dots on a shared grid)', () => {
+    for (const type of ['bar', 'line'] as const) {
+      const html = renderReadyChart({ type, data: CHART_DATA })
+      assert.match(html, /<svg/, `${type} 应是 svg 点阵场`)
+      const rest = html.match(/fill="var\(--widget-dc-rest[^"]*\)"/g) ?? []
+      const lit = html.match(/fill="var\(--widget-dc-on[^"]*\)"/g) ?? []
+      assert.ok(rest.length > 100, `${type} 需要铺满淡点背景，实际 ${rest.length}`)
+      assert.ok(lit.length > 0 && lit.length < rest.length, `${type} 点亮的点应少于背景点`)
+      const radii = new Set([...html.matchAll(/<circle [^>]*r="([\d.]+)"/g)].map((m) => Number(m[1])))
+      assert.ok(Math.max(...radii) <= 4, `${type} 点应细小（r≤4），实际 ${[...radii]}`)
+    }
+  })
+
   it('bar and line charts always ship unit legend and direct value labels', () => {
     const bar = renderReadyChart({ type: 'bar', data: CHART_DATA, unitLabel: 'h' })
     assert.match(bar, /= /)
