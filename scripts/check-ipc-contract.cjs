@@ -20,32 +20,9 @@
  *   - `*.sendToRenderer(` (e.g. controller.sendToRenderer /
  *     this.host.sendToRenderer)
  *
- * Non-literal first-arg push (e.g. forwarders like
- * `this.mainWindow.webContents.send(channel, data)` in
- * browser-engine/ipc-handler.ts:418-420, or spy wrappers like
- * content-study-runner.ts:181-182) is NOT silently skipped: it emits
- * NON_LITERAL_PUSH, which requires explicit registration in
- * `scripts/ipc-contract-allowlist.json` under `non_literal_push` with
- * `{ callsite, variable, channels[], reason, owner, expiry }`. Missing
- * or expired entry = gate fail (§6 v7 format).
- *
- * Top-level allowlist sections (all entries require owner + reason +
- * expiry YYYY-MM-DD; expired = gate fail):
- *   - invoke_only          : INVOKE_HANDLED w/o INVOKE_USED (handler
- *                            registered but no renderer caller — usually
- *                            transitional)
- *   - invoke_unhandled     : INVOKE_USED w/o INVOKE_HANDLED (renderer
- *                            calls a channel main does not handle — must
- *                            justify or fix)
- *   - send_unreceived      : SEND_USED w/o SEND_RECEIVED
- *   - push_unlistened      : PUSH_EMITTED w/o PUSH_LISTENED
- *   - non_literal_push     : runtime-variable channel emit sites
- *   - methods_exposed_only : keys exposed but not in Window types
- *   - methods_typed_only   : keys typed but not exposed
- *
- * Implementation uses the typescript compiler API directly (no
- * ts-morph dep), per §6 — same approach as
- * scripts/check-silent-catch.cjs.
+ * Forwarded channels must have a closed string-literal type (including unions).
+ * Every member participates in ordinary producer/consumer checks. Open strings
+ * are errors; there is no line-number exemption for dynamic event forwarding.
  */
 
 'use strict'
@@ -93,7 +70,7 @@ function main() {
         + `send=${counts.sendUsed}/${counts.sendReceived} `
         + `push=${counts.pushEmitted}/${counts.pushListened} `
         + `methods=${counts.methodsExposed}/${counts.methodsTyped} `
-        + `allowlist=${counts.allowlistEntries} non_literal_push=${counts.nonLiteralAllowlist}`,
+        + `allowlist=${counts.allowlistEntries}`,
     )
   } catch (error) {
     console.error(error instanceof Error ? error.stack || error.message : String(error))
@@ -107,7 +84,7 @@ function checkIPCContract({ root }) {
   const fatal = []
   validateAllowlist(allowlist, fatal)
   if (fatal.length > 0) {
-    return { fatal, sections: [], nonLiteral: { violations: [], used: new Set() }, counts: emptyCounts() }
+    return { fatal, sections: [], nonLiteral: { violations: [] }, counts: emptyCounts() }
   }
 
   const mainScan = scanMainProcess(repoRoot)
@@ -186,8 +163,6 @@ function checkIPCContract({ root }) {
   // Non-literal push gate
   const nonLiteral = checkNonLiteralPush({
     sites: mainScan.nonLiteralPushSites,
-    allowlist: allowlist.non_literal_push,
-    today,
   })
 
   const counts = {
@@ -206,7 +181,6 @@ function checkIPCContract({ root }) {
       + allowlist.push_unlistened.length
       + allowlist.methods_exposed_only.length
       + allowlist.methods_typed_only.length,
-    nonLiteralAllowlist: allowlist.non_literal_push.length,
   }
 
   // Unused allowlist entries surface as violations so the list stays
@@ -245,18 +219,6 @@ function checkIPCContract({ root }) {
       violations: unusedViolations,
     })
   }
-  // Non-literal push unused entries
-  const unusedNonLiteral = []
-  for (const entry of allowlist.non_literal_push) {
-    const key = `${entry.callsite}::${entry.variable}`
-    if (!nonLiteral.used.has(key)) {
-      unusedNonLiteral.push(`non_literal_push ${key} — no matching call site found`)
-    }
-  }
-  if (unusedNonLiteral.length > 0) {
-    nonLiteral.violations.push(...unusedNonLiteral)
-  }
-
   return { fatal: [], sections, nonLiteral, counts }
 }
 
@@ -271,7 +233,6 @@ function emptyCounts() {
     methodsExposed: 0,
     methodsTyped: 0,
     allowlistEntries: 0,
-    nonLiteralAllowlist: 0,
   }
 }
 
@@ -339,26 +300,12 @@ function diffSetSection({
   return { label, ok: violations.length === 0, summary, details, violations }
 }
 
-function checkNonLiteralPush({ sites, allowlist, today }) {
-  const violations = []
-  const used = new Set()
-  for (const site of sites) {
-    const callsite = site.callsite
-    const variable = site.variable || '<expr>'
-    const entry = allowlist.find(e => e.callsite === callsite && e.variable === variable)
-    if (!entry) {
-      violations.push(
-        `NON_LITERAL_PUSH ${callsite} variable='${variable}' (${site.calleeForm}) — no allowlist entry`,
-      )
-    } else if (isExpired(entry.expiry, today)) {
-      violations.push(
-        `NON_LITERAL_PUSH ${callsite} variable='${variable}' — allowlist expired ${entry.expiry}`,
-      )
-    } else {
-      used.add(`${entry.callsite}::${entry.variable}`)
-    }
+function checkNonLiteralPush({ sites }) {
+  return {
+    violations: sites.map((site) =>
+      `NON_LITERAL_PUSH ${site.callsite} variable='${site.variable || '<expr>'}' (${site.calleeForm}) — channel type must be a closed string-literal union`,
+    ),
   }
-  return { violations, used }
 }
 
 function findAllowlistEntry(entries, channel) {
@@ -397,6 +344,7 @@ function loadAllowlist(repoRoot) {
   } catch (error) {
     throw new Error(`${ALLOWLIST_PATH}: invalid JSON — ${error.message}`)
   }
+  if (Object.hasOwn(parsed, 'non_literal_push')) throw new Error('non_literal_push exemptions are retired; declare finite channel types instead')
   const empty = emptyAllowlist()
   for (const key of Object.keys(empty)) {
     if (parsed[key] !== undefined && !Array.isArray(parsed[key])) {
@@ -415,7 +363,6 @@ function emptyAllowlist() {
     push_unlistened: [],
     methods_exposed_only: [],
     methods_typed_only: [],
-    non_literal_push: [],
   }
 }
 
@@ -439,22 +386,6 @@ function validateAllowlist(allowlist, fatal) {
       checkMetaFields(entry, `${section}[${idx}]`, fatal)
     }
   }
-  for (const [idx, entry] of allowlist.non_literal_push.entries()) {
-    if (!entry || typeof entry !== 'object') {
-      fatal.push(`${ALLOWLIST_PATH} non_literal_push[${idx}]: must be object`)
-      continue
-    }
-    if (typeof entry.callsite !== 'string' || !/^[^:]+:\d+$/.test(entry.callsite)) {
-      fatal.push(`${ALLOWLIST_PATH} non_literal_push[${idx}]: 'callsite' must be 'file:line'`)
-    }
-    if (typeof entry.variable !== 'string' || entry.variable.length === 0) {
-      fatal.push(`${ALLOWLIST_PATH} non_literal_push[${idx}]: missing 'variable' string`)
-    }
-    if (!Array.isArray(entry.channels) || entry.channels.length === 0) {
-      fatal.push(`${ALLOWLIST_PATH} non_literal_push[${idx}]: 'channels' must be non-empty array`)
-    }
-    checkMetaFields(entry, `non_literal_push[${idx}]`, fatal)
-  }
 }
 
 function checkMetaFields(entry, label, fatal) {
@@ -471,16 +402,23 @@ function checkMetaFields(entry, label, fatal) {
 
 function scanMainProcess(repoRoot) {
   const files = listTSFilesUnder(path.join(repoRoot, MAIN_SCAN_ROOT))
+  const configPath = path.join(repoRoot, 'tsconfig.node.json')
+  const options = fs.existsSync(configPath)
+    ? ts.parseJsonConfigFileContent(ts.readConfigFile(configPath, ts.sys.readFile).config, ts.sys, repoRoot).options
+    : { target: ts.ScriptTarget.ESNext, strict: true }
+  const program = ts.createProgram(files, { ...options, noEmit: true })
+  const checker = program.getTypeChecker()
   const invokeHandled = new Set()
   const sendReceived = new Set()
   const pushEmitted = new Set()
   const nonLiteralPushSites = []
   for (const filePath of files) {
     const rel = relPath(repoRoot, filePath)
-    const sf = readSourceFile(filePath)
+    const sf = program.getSourceFile(filePath)
     visitMainFile({
       relativeFile: rel,
       sourceFile: sf,
+      checker,
       invokeHandled,
       sendReceived,
       pushEmitted,
@@ -493,6 +431,7 @@ function scanMainProcess(repoRoot) {
 function visitMainFile({
   relativeFile,
   sourceFile,
+  checker,
   invokeHandled,
   sendReceived,
   pushEmitted,
@@ -522,6 +461,7 @@ function visitMainFile({
       ) {
         recordPush({
           node,
+          checker,
           sourceFile,
           relativeFile,
           calleeForm: 'sendToRenderer',
@@ -537,6 +477,7 @@ function visitMainFile({
       ) {
         recordPush({
           node,
+          checker,
           sourceFile,
           relativeFile,
           calleeForm: `${prevSegment}.send`,
@@ -568,6 +509,7 @@ function collectTopLevelStringConstants(sourceFile) {
 
 function recordPush({
   node,
+  checker,
   sourceFile,
   relativeFile,
   calleeForm,
@@ -578,6 +520,14 @@ function recordPush({
   if (arg && ts.isStringLiteral(arg)) {
     pushEmitted.add(arg.text)
     return
+  }
+  if (arg) {
+    const type = checker.getTypeAtLocation(arg)
+    const members = type.isUnion() ? type.types : [type]
+    if (members.length && members.every((member) => member.isStringLiteral())) {
+      for (const member of members) pushEmitted.add(member.value)
+      return
+    }
   }
   const { line } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile))
   let variable = '<expr>'
@@ -803,7 +753,7 @@ function printSection(section) {
 
 function printNonLiteralReport(nonLiteral) {
   if (nonLiteral.violations.length === 0) {
-    console.log(`[OK] NON_LITERAL_PUSH — ${nonLiteral.used.size} allowlisted site(s)`)
+    console.log('[OK] NON_LITERAL_PUSH — all forwarded channels are finite and checked')
     return
   }
   console.log('[FAIL] NON_LITERAL_PUSH')

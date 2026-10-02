@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import type { DatabaseConnection } from '../../database'
+import type { DatabaseConnection } from '../../database/connection'
 import {
   READY_MEMORY_READ_RECEIPT_CONTRACT,
   READY_MEMORY_SNAPSHOT_CONTRACT,

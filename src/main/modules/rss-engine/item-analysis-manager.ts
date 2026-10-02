@@ -1,20 +1,24 @@
+export const RSS_ANALYSIS_TERMINAL_WAIT_MS = 90_000
+import type { RSSAnalysisAction, RSSAnalysisJob, RSSAnalysisJobStatus } from '../database/records'
 import { randomUUID } from 'crypto'
 import { mkdirSync } from 'fs'
 import { readFile, readdir, stat, writeFile } from 'fs/promises'
-import { basename, dirname, join } from 'path'
-import {
-  type RSSAnalysisAction,
-  type RSSAnalysisJob,
-  type RSSAnalysisJobStatus,
-} from '../database'
+import { basename, join } from 'path'
+
 import { RSSRepository } from '../repositories/rss-repository'
+import { atomicWriteText } from '../agent-control/atomic-write'
+import { analysisReportName, captureAnalysisReport, readAnalysisReportPage, savedAnalysisReport } from './analysis-report'
+import type { RSSReadAnalysisReportInput, RSSAnalysisReportPage } from '../../../shared/rss-analysis-report'
+import type { RSSReadAnalysisAssetsInput } from '../../../shared/rss-analysis-assets'
+import { captureAnalysisAssets, readAnalysisAssets, type AnalysisAssetPaths } from './analysis-assets'
 import {
   getSkillsRuntimeManager,
   startSkillChildRunAndWait,
   type StartSkillChildRunAndWaitResult,
 } from '../skills-runtime/runtime-manager'
 import { getChildRunRetryPolicy } from '../agent-control/child-run/child-run-retry-policy'
-import { extractWebContentToFile } from './content-extractor'
+import { getRSSContentService } from './content-runtime'
+import { runArticleAnalysis, assertArticleAnalysisCurrent, articleAnalysisWarning, type ArticleAnalysisSource, type ArticleAnalysisDeps } from './article-analysis'
 import { rssSubagentRunner } from './subagent-runner'
 import {
   BROWSER_VIDEO_FILE_EXTENSIONS,
@@ -32,9 +36,13 @@ export interface StartRSSItemAnalysisPayload {
   summary?: string
   publishedAt?: string
   force?: boolean
+  sourceRevision?: string
 }
 
+interface AnalysisFlowResult { source?: ArticleAnalysisSource; assets: AnalysisAssetPaths }
+
 export interface RSSItemAnalysisProgress {
+  sourceWarning?: string | null
   itemId: string
   jobId: string
   action: RSSAnalysisAction
@@ -46,8 +54,6 @@ export interface RSSItemAnalysisProgress {
   reportPath: string | null
   updatedAt: string
 }
-
-export const RSS_ANALYSIS_TERMINAL_WAIT_MS = 90_000
 
 function sanitizeName(input: string): string {
   const cleaned = input
@@ -374,6 +380,9 @@ const VEA_AWAIT_RETRY_LIMIT = QUEUED_GLOBAL_CONCURRENCY_RETRY_POLICY.maxAttempts
 const VEA_AWAIT_RETRY_DELAY_MS = QUEUED_GLOBAL_CONCURRENCY_RETRY_POLICY.backoffMs[0] ?? 0
 
 export interface RSSItemAnalysisManagerDeps {
+  repository?: RSSRepository
+  articleAnalysis?: ArticleAnalysisDeps
+  runCopySkill?: ReturnType<typeof getSkillsRuntimeManager>['runSkill']
   /**
    * Test seam — defaults to the production helper. Tests inject a stub so
    * the manager can be exercised without booting the child-run runtime.
@@ -388,7 +397,9 @@ export interface RSSItemAnalysisManagerDeps {
 }
 
 export class RSSItemAnalysisManager {
-  private readonly repository = new RSSRepository()
+  private readonly repository: RSSRepository
+  private readonly articleAnalysis: ArticleAnalysisDeps
+  private readonly runCopySkill: ReturnType<typeof getSkillsRuntimeManager>['runSkill']
   private readonly queues: Record<RSSAnalysisAction, Array<{ jobId: string; run: () => Promise<void> }>> = {
     copy: [],
     visual: [],
@@ -402,6 +413,13 @@ export class RSSItemAnalysisManager {
   private readonly veaAwaitRetryDelayMs: number
 
   constructor(deps: RSSItemAnalysisManagerDeps = {}) {
+    this.repository = deps.repository || new RSSRepository()
+    this.runCopySkill = deps.runCopySkill || ((request) => getSkillsRuntimeManager().runSkill(request))
+    this.articleAnalysis = deps.articleAnalysis || {
+      read: (id) => this.repository.getContentStore().getArticle(id),
+      load: (id) => getRSSContentService().load(id),
+      summarize: (input) => rssSubagentRunner.summarizeArticle(input),
+    }
     this.veaChildAwait = deps.startSkillChildRunAndWait || startSkillChildRunAndWait
     this.veaAwaitRetryDelayMs =
       typeof deps.veaAwaitRetryDelayMs === 'number' && Number.isFinite(deps.veaAwaitRetryDelayMs) && deps.veaAwaitRetryDelayMs >= 0
@@ -434,32 +452,41 @@ export class RSSItemAnalysisManager {
     return this.translateVeaCloseToError(result, fallbackMessage)
   }
 
-  private ensureInitialized(): void {
+  initialize(): void {
     if (this.initialized) return
-    this.initialized = true
     const interrupted = this.repository.markInterruptedRSSAnalysisJobs()
+    this.initialized = true
     if (interrupted > 0) {
       console.log(`[rss:analysis] marked interrupted jobs=${interrupted}`)
     }
-    this.repository.cleanupRSSAnalysisJobs(30, 500)
+  }
+
+  private assertInitialized(): void {
+    if (!this.initialized) throw new Error('RSS 分析尚未完成启动恢复。')
   }
 
   async startItemAnalysis(payload: StartRSSItemAnalysisPayload): Promise<RSSAnalysisJob> {
-    this.ensureInitialized()
+    this.assertInitialized()
+    const article = this.repository.getContentStore().getArticle(payload.itemId)
+    if (!article) throw new Error('文章已不存在，请刷新列表。')
+    payload = { ...payload, link: article.link, title: article.title, source: article.source,
+      summary: article.summary, publishedAt: article.publishedAt === null ? undefined : new Date(article.publishedAt).toISOString(),
+      sourceRevision: article.sourceRevision }
+    const isWebCopy = payload.action === 'copy' && !isLikelyVideoLink(payload.link)
+    if (!payload.force) {
+      const active = this.repository.findActiveRSSAnalysisJob(payload.itemId, payload.action)
+      if (active && (!isWebCopy || parseMetaJson(active.meta_json).sourceRevision === payload.sourceRevision)) return active
+    }
+    const jobId = randomUUID()
     const safeTitle = sanitizeName(payload.title)
     const folderSuffix = payload.itemId.slice(0, 8)
     const rootDir = join(payload.targetDir, `${safeTitle}-${folderSuffix}`)
-    const outputDir = join(rootDir, payload.action === 'copy' ? 'copy-analysis' : 'visual-analysis')
+    const outputDir = join(rootDir, payload.action === 'copy' ? 'copy-analysis' : 'visual-analysis', jobId)
     mkdirSync(outputDir, { recursive: true })
-
-    if (!payload.force) {
-      const active = this.repository.findActiveRSSAnalysisJob(payload.itemId, payload.action)
-      if (active) return active
-    }
 
     const now = new Date().toISOString()
     const job = this.repository.createRSSAnalysisJob({
-      id: randomUUID(),
+      id: jobId,
       itemId: payload.itemId,
       action: payload.action,
       sourceUrl: payload.link,
@@ -474,6 +501,8 @@ export class RSSItemAnalysisManager {
         summary: payload.summary || '',
         publishedAt: payload.publishedAt || '',
         queuedAt: now,
+        sourceRevision: payload.sourceRevision,
+        rootDir,
       }),
     })
 
@@ -484,7 +513,6 @@ export class RSSItemAnalysisManager {
   }
 
   getItemProgress(itemIds?: string[]): Record<string, RSSItemAnalysisProgress> {
-    this.ensureInitialized()
     let latest: Record<string, RSSAnalysisJob> = {}
     if (Array.isArray(itemIds) && itemIds.length > 0) {
       latest = this.repository.getLatestRSSAnalysisByItemIds(itemIds)
@@ -497,18 +525,12 @@ export class RSSItemAnalysisManager {
 
     const result: Record<string, RSSItemAnalysisProgress> = {}
     for (const [itemId, job] of Object.entries(latest)) {
-      result[itemId] = toProgress(job)
+      result[itemId] = { ...toProgress(job), sourceWarning: this.getSourceWarning(job) }
     }
     return result
   }
 
-  listJobs(itemId?: string, limit = 50): RSSAnalysisJob[] {
-    this.ensureInitialized()
-    return this.repository.listRSSAnalysisJobs(itemId, limit)
-  }
-
   getJob(jobId: string): RSSAnalysisJob | null {
-    this.ensureInitialized()
     return this.repository.getRSSAnalysisJob(jobId)
   }
 
@@ -532,8 +554,26 @@ export class RSSItemAnalysisManager {
     }
   }
 
+  listJobs(itemId?: string, limit = 50): RSSAnalysisJob[] {
+    return this.repository.listRSSAnalysisJobs(itemId, limit)
+  }
+
+  getSourceWarning(job: RSSAnalysisJob): string | null {
+    if (job.status === 'success' && !savedAnalysisReport(job)) return '历史报告没有可核验的保存记录，现有文件可能已被覆盖。'
+    if (job.action !== 'copy' || job.status !== 'success' || isLikelyVideoLink(job.source_url)) return null
+    return articleAnalysisWarning(parseMetaJson(job.meta_json), this.repository.getContentStore().getArticle(job.item_id))
+  }
+
+  readReport(input: RSSReadAnalysisReportInput): RSSAnalysisReportPage {
+    return readAnalysisReportPage(input, (id) => this.repository.getRSSAnalysisJob(id), (job) => this.getSourceWarning(job))
+  }
+
+  readAssets(input: RSSReadAnalysisAssetsInput) {
+    return readAnalysisAssets(input, (id) => this.repository.getRSSAnalysisJob(id))
+  }
+
   pauseJob(jobId: string): RSSAnalysisJob {
-    this.ensureInitialized()
+    this.assertInitialized()
     const job = this.repository.getRSSAnalysisJob(jobId)
     if (!job) {
       throw new Error('任务不存在')
@@ -554,7 +594,7 @@ export class RSSItemAnalysisManager {
   }
 
   resumeJob(jobId: string): RSSAnalysisJob {
-    this.ensureInitialized()
+    this.assertInitialized()
     const job = this.repository.getRSSAnalysisJob(jobId)
     if (!job) {
       throw new Error('任务不存在')
@@ -564,6 +604,10 @@ export class RSSItemAnalysisManager {
     }
 
     const meta = parseMetaJson(job.meta_json)
+    const rootDir = typeof meta.rootDir === 'string' ? meta.rootDir
+      : join(job.target_dir, `${sanitizeName(job.title)}-${job.item_id.slice(0, 8)}`)
+    const outputDir = join(rootDir, job.action === 'copy' ? 'copy-analysis' : 'visual-analysis', job.id)
+    mkdirSync(outputDir, { recursive: true })
     const payload: StartRSSItemAnalysisPayload = {
       itemId: job.item_id,
       action: job.action,
@@ -574,6 +618,7 @@ export class RSSItemAnalysisManager {
       summary: typeof meta.summary === 'string' ? meta.summary : undefined,
       publishedAt: typeof meta.publishedAt === 'string' ? meta.publishedAt : undefined,
       force: true,
+      sourceRevision: typeof meta.sourceRevision === 'string' ? meta.sourceRevision : undefined,
     }
     const updated = this.repository.updateRSSAnalysisJob(jobId, {
       status: 'queued',
@@ -583,17 +628,18 @@ export class RSSItemAnalysisManager {
       finishedAt: null,
       startedAt: null,
       reportPath: null,
+      outputDir,
+      metaJson: safeJson({ ...meta, rootDir }),
     })
     if (!updated) throw new Error('继续任务失败')
-    const rootDir = dirname(job.output_dir)
     this.enqueue(job.action, job.id, async () => {
-      await this.executeJob(job.id, payload, rootDir, job.output_dir)
+      await this.executeJob(job.id, payload, rootDir, outputDir)
     })
     return updated
   }
 
   deleteJob(jobId: string): { deleted: boolean; reason?: string } {
-    this.ensureInitialized()
+    this.assertInitialized()
     const job = this.repository.getRSSAnalysisJob(jobId)
     if (!job) {
       return { deleted: false, reason: '任务不存在' }
@@ -641,19 +687,25 @@ export class RSSItemAnalysisManager {
         startedAt: new Date().toISOString(),
       })
 
-      if (payload.action === 'copy') {
-        await this.runCopyFlow(jobId, payload, rootDir, outputDir)
-      } else {
-        await this.runVisualFlow(jobId, payload, rootDir, outputDir)
-      }
+      const result = payload.action === 'copy' ? await this.runCopyFlow(jobId, payload, rootDir, outputDir)
+        : await this.runVisualFlow(jobId, payload, rootDir, outputDir)
 
-      this.updateJob(jobId, {
+      if (result.source) assertArticleAnalysisCurrent(result.source, (id) => this.repository.getContentStore().getArticle(id))
+      const job = this.repository.getRSSAnalysisJob(jobId)
+      if (!job) throw new Error('分析任务已删除，报告未发布。')
+      const reportArtifact = captureAnalysisReport(job)
+      const analysisAssets = captureAnalysisAssets(job, result.assets)
+      const published = this.updateJob(jobId, {
         status: 'success',
         progress: 100,
-        message: '分析完成',
+        message: result.source?.completeness === 'partial' ? '已基于部分正文完成分析' : '分析完成',
         error: null,
         finishedAt: new Date().toISOString(),
+        reportPath: join(outputDir, reportArtifact.fileName),
+        metaJson: safeJson({ ...parseMetaJson(job.meta_json), reportArtifact, analysisAssets,
+          ...(result.source ? { articleSource: result.source } : {}) }),
       })
+      if (!published) throw new Error('分析报告未能保存发布状态。')
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       const veaCause = error && typeof error === 'object' && 'veaCause' in error
@@ -681,8 +733,6 @@ export class RSSItemAnalysisManager {
       }
       this.updateJob(jobId, failurePatch)
       console.error('[rss:analysis] job failed', jobId, message)
-    } finally {
-      this.repository.cleanupRSSAnalysisJobs(30, 500)
     }
   }
 
@@ -691,9 +741,14 @@ export class RSSItemAnalysisManager {
     payload: StartRSSItemAnalysisPayload,
     rootDir: string,
     outputDir: string,
-  ): Promise<void> {
-    const runtime = getSkillsRuntimeManager()
+  ): Promise<AnalysisFlowResult> {
     const isVideo = isLikelyVideoLink(payload.link)
+    if (!isVideo) {
+      if (!payload.sourceRevision) throw new Error('旧网页任务未记录原文版本，请重新创建分析。')
+      this.updateJob(jobId, { status: 'running_subagent', progress: 45, message: '正在读取共享原文并生成分析' })
+      const article = await runArticleAnalysis({ itemId: payload.itemId, sourceRevision: payload.sourceRevision, outputDir }, this.articleAnalysis)
+      return { source: article.source, assets: { source_article: article.sourcePath } }
+    }
     let extractedText = ''
     let transcriptPath: string | null = null
     let sourceVideoPath: string | null = null
@@ -705,7 +760,7 @@ export class RSSItemAnalysisManager {
         progress: 24,
         message: sourceVideoPath ? '复用已下载视频，正在提取文案' : '正在下载并提取视频文案',
       })
-      const skillResult = await runtime.runSkill({
+      const skillResult = await this.runCopySkill({
         skillId: 'video-copy-analyzer',
         action: 'video_copy_analyze',
         params: {
@@ -736,18 +791,6 @@ export class RSSItemAnalysisManager {
       if (!extractedText) {
         extractedText = `${skillResult.stdout}\n${skillResult.stderr}`.trim()
       }
-    } else {
-      this.updateJob(jobId, {
-        status: 'running_script',
-        progress: 45,
-        message: '正在提取网页正文',
-      })
-      const extracted = await extractWebContentToFile(payload.link, outputDir)
-      extractedText = extracted.text
-      this.updateJob(jobId, {
-        progress: 72,
-        message: '正文提取完成，正在生成总结',
-      })
     }
 
     this.updateJob(jobId, {
@@ -767,13 +810,13 @@ export class RSSItemAnalysisManager {
 
     const existingTranscriptPath = transcriptPath || await findFileBySuffix(outputDir, '_文字稿.md')
     const baseVideoId = existingTranscriptPath ? stripKnownTranscriptSuffix(existingTranscriptPath) : sanitizeName(payload.title)
-    const correctedTranscriptPath = existingTranscriptPath || join(outputDir, `${baseVideoId}_文字稿.md`)
+    const correctedTranscriptPath = join(outputDir, `${baseVideoId}_文字稿.md`)
     const structuredTranscriptPath = join(outputDir, `${baseVideoId}_结构化文字稿.md`)
     await writeFile(correctedTranscriptPath, deliverables.correctedTranscript.trim() + '\n', 'utf-8')
     await writeFile(structuredTranscriptPath, deliverables.structuredTranscript.trim() + '\n', 'utf-8')
 
-    const reportPath = join(outputDir, '文案分析报告.md')
-    await writeFile(
+    const reportPath = join(outputDir, analysisReportName('copy'))
+    atomicWriteText(
       reportPath,
       [
         '# 文案分析报告',
@@ -785,7 +828,6 @@ export class RSSItemAnalysisManager {
         deliverables.report.trim(),
         '',
       ].join('\n'),
-      'utf-8',
     )
 
     const manifestPath = join(outputDir, 'manifest.json')
@@ -814,8 +856,8 @@ export class RSSItemAnalysisManager {
     this.updateJob(jobId, {
       progress: 98,
       message: '文案报告已生成',
-      reportPath,
     })
+    return { assets: { corrected_transcript: correctedTranscriptPath, structured_transcript: structuredTranscriptPath, source_video: sourceVideoPath } }
   }
 
   /**
@@ -943,7 +985,7 @@ export class RSSItemAnalysisManager {
     payload: StartRSSItemAnalysisPayload,
     rootDir: string,
     outputDir: string,
-  ): Promise<void> {
+  ): Promise<AnalysisFlowResult> {
     if (!canAttemptVisualAnalysis(payload.link)) {
       throw new Error('视觉分析仅支持视频链接')
     }
@@ -1027,8 +1069,8 @@ export class RSSItemAnalysisManager {
       pipelineSummary: outputSummary,
     })
 
-    const reportPath = join(outputDir, '视觉分析总结.md')
-    await writeFile(
+    const reportPath = join(outputDir, analysisReportName('visual'))
+    atomicWriteText(
       reportPath,
       [
         '# 视觉分析总结',
@@ -1040,7 +1082,6 @@ export class RSSItemAnalysisManager {
         summary.trim(),
         '',
       ].join('\n'),
-      'utf-8',
     )
 
     const manifestPath = join(outputDir, 'manifest.json')
@@ -1069,8 +1110,8 @@ export class RSSItemAnalysisManager {
     this.updateJob(jobId, {
       progress: 98,
       message: '视觉报告已生成',
-      reportPath,
     })
+    return { assets: { scene_scores: sceneScoresPath, source_video: sourceVideoPath } }
   }
 
   private updateJob(
@@ -1081,6 +1122,7 @@ export class RSSItemAnalysisManager {
       message: string | null
       error: string | null
       reportPath: string | null
+      metaJson: string | null
       finishedAt: string | null
       startedAt: string | null
     }>,

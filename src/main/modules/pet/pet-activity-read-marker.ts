@@ -1,5 +1,5 @@
 import type { PetActivityOpenIdentity, PetActivitySnapshot } from '../../../shared/pet'
-import type { DatabaseConnection } from '../database'
+import type { DatabaseConnection } from '../database/connection'
 
 export const PET_ACTIVITY_CUTOVER_AT_KEY = 'desktop_pet_activity_cutover_at'
 

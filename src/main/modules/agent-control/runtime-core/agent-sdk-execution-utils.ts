@@ -134,9 +134,9 @@ function collectLocalDocumentReferences(
     ...parseAttachmentReferences(message),
   ]
   return references.filter((reference) =>
-    reference.kind === 'folder_reference'
+    reference.kind !== 'rss_reference' && (reference.kind === 'folder_reference'
     || reference.source === 'folder_reference'
-    || /\.(?:md|markdown|txt|docx?)$/i.test(reference.path || reference.name)
+    || /\.(?:md|markdown|txt|docx?)$/i.test(reference.path || reference.name))
   )
 }
 

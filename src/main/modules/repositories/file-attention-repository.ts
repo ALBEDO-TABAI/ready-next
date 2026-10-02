@@ -1,5 +1,6 @@
+import type { DatabaseConnection } from '../database/connection'
 import { createHash, randomUUID } from 'crypto'
-import type { DatabaseConnection } from '../database'
+
 
 const DAY_MS = 86_400_000
 

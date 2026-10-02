@@ -1,5 +1,13 @@
+import { RSSReadExcerptSchema } from '../../../../shared/rss-excerpt'
+import { RSSReadCatalogSchema } from '../../../../shared/rss-catalog'
+import { RSSReadAnalysisReportSchema } from '../../../../shared/rss-analysis-report'
+import { RSSReadAnalysisAssetsSchema } from '../../../../shared/rss-analysis-assets'
+import { RSSDigestReadSchema } from '../../../../shared/rss-digests'
+import { RSSReadReferenceSchema } from '../../../../shared/rss-reference'
+import { RSSProcessingListSchema } from '../../../../shared/rss-processing'
+import { RSSReadEventsSchema } from '../../../../shared/rss-events'
 /**
- * Zod schemas for the RSS domain tools.
+ * RSS domain schemas; saved-content reads share their schema with the IPC API.
  *
  * SSOT for dispatch-time validation + LLM-facing SkillParamDefinition[] via
  * zod-param-derivation. Descriptions mirror the legacy hand-rolled params in
@@ -13,6 +21,7 @@
  */
 
 import { z } from 'zod'
+import { RSSQuerySchema, RSSReadArticleSchema } from '../../../../shared/rss-workspace'
 
 export const RssAddSourceSchema = z.object({
   name: z.string().describe('订阅源名称'),
@@ -32,27 +41,43 @@ export const RssAnalyzeItemSchema = z.object({
   analysisType: z.string().describe('copy 或 visual'),
 })
 
-export const RssGetAnalysisResultSchema = z.object({
-  jobId: z.string().optional().describe('可选，分析任务 ID'),
-  itemId: z.string().optional().describe('可选，RSS 条目 ID'),
-  analysisType: z.string().optional().describe('可选，copy 或 visual'),
-})
+export const RssGetAnalysisResultSchema = z.object({ jobId: z.string().optional().describe('可选，分析任务 ID'), itemId: z.string().optional().describe('可选，RSS 条目 ID'), analysisType: z.string().optional().describe('可选，copy 或 visual') })
 
 export const RssCaptureSessionSchema = z.object({})
 
 export type RssToolName =
+  | 'rss_read_analysis_assets'
+  | 'rss_read_catalog'
+  | 'rss_read_analysis_report'
   | 'rss_add_source'
   | 'rss_fetch_updates'
   | 'rss_select_item'
-  | 'rss_analyze_item'
   | 'rss_get_analysis_result'
+  | 'rss_analyze_item'
   | 'rss_capture_session'
+  | 'rss_query_items'
+  | 'rss_read_article'
+  | 'rss_read_reference'
+  | 'rss_read_processing'
+  | 'rss_read_excerpt'
+  | 'rss_read_digests'
+  | 'rss_read_events'
 
 export const RSS_SCHEMAS: Record<RssToolName, z.ZodObject<z.ZodRawShape>> = {
+  rss_read_analysis_assets: RSSReadAnalysisAssetsSchema,
+  rss_read_catalog: RSSReadCatalogSchema,
+  rss_read_analysis_report: RSSReadAnalysisReportSchema,
   rss_add_source: RssAddSourceSchema,
   rss_fetch_updates: RssFetchUpdatesSchema,
   rss_select_item: RssSelectItemSchema,
   rss_analyze_item: RssAnalyzeItemSchema,
   rss_get_analysis_result: RssGetAnalysisResultSchema,
   rss_capture_session: RssCaptureSessionSchema,
+  rss_query_items: RSSQuerySchema,
+  rss_read_article: RSSReadArticleSchema,
+  rss_read_reference: RSSReadReferenceSchema,
+  rss_read_processing: RSSProcessingListSchema,
+  rss_read_excerpt: RSSReadExcerptSchema,
+  rss_read_digests: RSSDigestReadSchema,
+  rss_read_events: RSSReadEventsSchema,
 }

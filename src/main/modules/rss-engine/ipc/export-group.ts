@@ -34,7 +34,7 @@ import type { IpcMain } from 'electron'
 import type { IpcChannelGroup, IpcDisposeHandle } from './types'
 
 /** Category slug accepted by `rss:exportFeed` — mirrors the host literal. */
-export type ExportFeedType = 'master' | 'tech' | 'humanities' | 'design' | 'entertainment' | 'others'
+export type ExportFeedType = string
 
 /**
  * Shape of the artifact bundle the host's `ensureArtifactFiles` returns.
@@ -133,7 +133,8 @@ export const exportGroup: IpcChannelGroup<ExportGroupDeps> = {
           const path =
             type === 'master'
               ? artifacts.files.masterFeed
-              : artifacts.files.categoryFeeds[type] || artifacts.files.masterFeed
+              : Object.hasOwn(artifacts.files.categoryFeeds, type) ? artifacts.files.categoryFeeds[type] : undefined
+          if (typeof path !== 'string' || !path) throw new Error('分类已删除或无效，未导出其他范围。')
           return ok({ path }, false)
         } catch (error) {
           return fail(error instanceof Error ? error.message : String(error))

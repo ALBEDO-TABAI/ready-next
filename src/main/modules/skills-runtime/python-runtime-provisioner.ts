@@ -170,7 +170,7 @@ export class PythonRuntimeProvisioner {
   async findPythonExecutable(): Promise<string> {
     let configured: string | undefined
     try {
-      configured = getDatabase().getSetting('skills_python_path')
+      configured = getDatabase().settings.getSetting('skills_python_path')
     } catch {
       configured = undefined
     }

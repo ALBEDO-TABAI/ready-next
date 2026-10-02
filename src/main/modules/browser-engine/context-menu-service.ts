@@ -24,7 +24,7 @@ interface BrowserContextMenuHost {
   createTab(url: string, options?: { background?: boolean; openerTabId?: string | null }): Promise<{ success: boolean; tabId?: string; error?: string }>
   addImageToActiveBoard(url: string): Promise<unknown>
   getTabIdForWebContents(webContents: WebContents): string | null
-  sendToRenderer(channel: string, data: unknown): void
+  sendToRenderer(channel: 'board:activeBoardExternalImageAdded' | 'browser:fastCardContextAction', data: unknown): void
   logBrowserDiag(message: string): void
 }
 

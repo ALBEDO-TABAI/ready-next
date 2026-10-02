@@ -1,4 +1,4 @@
-import type { DatabaseConnection } from '../../database'
+import type { DatabaseConnection } from '../../database/connection'
 
 export type CodexClosedConversationScopeRead = {
   scopeId: string

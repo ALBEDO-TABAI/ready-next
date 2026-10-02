@@ -13,7 +13,8 @@ import {
   type FileEmergenceSnapshot,
 } from '../../../shared/file-emergence'
 import { validateWorkspaceRoot } from '../../../shared/workspace-validation'
-import { getDatabase, type DatabaseConnection } from '../database'
+import type { DatabaseConnection } from '../database/connection'
+import { getDatabase } from '../database'
 import { AppSettingsRepository } from '../repositories/app-settings-repository'
 import { BrowserRepository } from '../repositories/browser-repository'
 import { CalendarRepository } from '../repositories/calendar-repository'

@@ -6,6 +6,7 @@ import {
   RemoteChannelService,
   type RemoteChannelServiceDeps,
 } from '../main/modules/agent-control/runtime-core/remote-channel-service'
+import { flatDomainStores } from './helpers/flat-domain-stores'
 
 function publicScope(epoch: number): ConversationScope {
   return {
@@ -56,7 +57,7 @@ function createHarness(options: {
     },
   }
   const service = new RemoteChannelService({
-    db,
+    db: flatDomainStores(db),
     sidecar: {},
     settingsRepository: { getAIConfig: () => null },
     getRuntimeStatus: options.getRuntimeStatus || (async () => ({ state: 'ready' }) as never),

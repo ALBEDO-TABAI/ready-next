@@ -522,6 +522,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
           <span style={{ fontSize: 10, color: 'var(--text-light)', marginLeft: 'auto', flexShrink: 0 }}>
             {file.isDirectory
               ? '文件夹'
+              : file.source === 'rss-reference' ? 'RSS 引用'
               : file.source === 'browser-tab'
                 ? '网页'
                 : file.source === 'skill-folder'

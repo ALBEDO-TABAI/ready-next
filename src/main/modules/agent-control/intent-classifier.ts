@@ -115,9 +115,10 @@ function detectDomainSignals(
   envelope: RequestEnvelope,
   options?: { registeredSkillTokens?: string[] },
 ): DomainSignal[] {
+  const rssNames = new Set(envelope.resources.filter((resource) => resource.kind === 'rss_reference').map((resource) => resource.name))
   const text = [
     envelope.primaryInstruction,
-    ...envelope.referencedResources.map((ref) => ref.value),
+    ...envelope.referencedResources.filter((ref) => ref.kind !== 'mention' || !rssNames.has(ref.value)).map((ref) => ref.value),
   ].filter(Boolean).join('\n')
   const signals: DomainSignal[] = []
   // Live-info detection only consumes the user's own primary instruction — widget

@@ -1,4 +1,5 @@
-import type { ConversationSourceKind } from '../database'
+import type { ConversationSourceKind } from '../database/records'
+
 import type { ToolContext } from './tool-executor'
 import { buildToolParamSchema, normalizeAnthropicToolSchema, normalizeOpenAIToolSchema, type ToolParamSchemaSpec } from './tool-schema'
 import { SESSION_SCHEMAS } from './schemas/session-schemas'

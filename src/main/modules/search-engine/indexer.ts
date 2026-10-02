@@ -1,4 +1,5 @@
-import type { DatabaseConnection } from '../database'
+import type { DatabaseConnection } from '../database/connection'
+
 import { createRotatingLogger } from '../../utils/rotating-logger'
 import { normalizeSearchText } from '../../../shared/document-graph-parse'
 import { validateWorkspaceRoot } from '../../../shared/workspace-validation'

@@ -7,8 +7,9 @@ import {
 } from '../main/modules/agent-control/codex-runtime/codex-product-action-handlers'
 import { CodexProductActionError } from '../main/modules/agent-control/codex-runtime/codex-product-action-requester'
 import type { DatabaseManager } from '../main/modules/database'
+import { flatDomainStores } from './helpers/flat-domain-stores'
 
-function fakeDb(overrides?: Partial<DatabaseManager>): DatabaseManager {
+function fakeDb(overrides?: Record<string, unknown>): DatabaseManager {
   const events = new Map<string, Record<string, unknown>>()
   const base = {
     getRSSStats: () => ({ totalItems: 3, unreadItems: 1 }),
@@ -32,7 +33,7 @@ function fakeDb(overrides?: Partial<DatabaseManager>): DatabaseManager {
     deleteCalendarEvent: (id: string) => { events.delete(id) },
     ...overrides,
   }
-  return base as unknown as DatabaseManager
+  return flatDomainStores(base) as unknown as DatabaseManager
 }
 
 function handlers(overrides?: {
@@ -186,7 +187,7 @@ test('calendar list rejects oversized model windows', async () => {
 
 test('calendar update injects the typed event id and rejects conflicts', async () => {
   const db = fakeDb()
-  db.createCalendarEvent({
+  db.calendar.createCalendarEvent({
     calendar_id: 'cal-1',
     title: '原',
     start_time: 1,
@@ -208,7 +209,7 @@ test('calendar update injects the typed event id and rejects conflicts', async (
 
 test('calendar update without a typed target only accepts a unique list receipt', async () => {
   const db = fakeDb()
-  db.createCalendarEvent({
+  db.calendar.createCalendarEvent({
     calendar_id: 'cal-1',
     title: '唯一',
     start_time: 1,
@@ -227,7 +228,7 @@ test('calendar update without a typed target only accepts a unique list receipt'
 test('calendar list exposes persistable parent ids and accepts synthetic instance ids on write', async () => {
   assert.equal(persistableCalendarEventId('parent#1710000000'), 'parent')
   const db = fakeDb()
-  db.createCalendarEvent({
+  db.calendar.createCalendarEvent({
     calendar_id: 'cal-1',
     title: '周会',
     start_time: 1,

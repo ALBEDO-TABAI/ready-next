@@ -9,7 +9,7 @@ export function ensureRemoteChannelAlias(input: {
   runtimeManifestDigest: string
   protocolSchemaDigest: string
 }): void {
-  const scope = input.database.getConversationScope(input.scopeId)
+  const scope = input.database.chat.getConversationScope(input.scopeId)
   if (!scope || scope.source_kind !== 'channel') throw new Error('remote_scope_missing')
   if (input.repository.readLatestAliasGeneration(scope.id) !== null) return
   const db = input.database.getRawDb()

@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import { disabledReadyMemorySnapshot } from './utils/ready-memory-fixture'
 
-import type { DatabaseConnection } from '../main/modules/database'
+import type { DatabaseConnection } from '../main/modules/database/connection'
 import { __runMigrationForTests, type MigrationDatabase } from '../main/modules/migrations'
 import {
   buildCodexIngressAdmittedDigest,

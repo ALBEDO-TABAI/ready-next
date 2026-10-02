@@ -1,11 +1,31 @@
-import { RSS_SCHEMAS } from './schemas/rss-schemas'
+import { z } from 'zod'
+import { describeRSSMedia } from '../../../shared/rss-media'
+import { RSSReadCatalogSchema } from '../../../shared/rss-catalog'
+import type { RSSCatalogStore } from '../database/rss-catalog-store'
+import type { RouteAttemptSnapshotEntry } from '../rss-engine/source-diagnostics'
+import { RSSReadAnalysisReportSchema, type RSSReadAnalysisReportInput, type RSSAnalysisReportPage } from '../../../shared/rss-analysis-report'
+import { RSSReadAnalysisAssetsSchema } from '../../../shared/rss-analysis-assets'
+import type { RSSItemAnalysisManager } from '../rss-engine/item-analysis-manager'
+import { RSSReadExcerptSchema } from '../../../shared/rss-excerpt'
+import { RSSDigestReadSchema } from '../../../shared/rss-digests'
+import type { RSSDigestStore } from '../database/rss-digest-store'
+import { RSSReadReferenceSchema, rssCitationUrl, type RSSReferenceResource } from '../../../shared/rss-reference'
+import { RSS_SCHEMAS, type RssToolName } from './schemas/rss-schemas'
 import { zodObjectToParamList } from './zod-param-derivation'
+import { RSSQuerySchema, RSSReadArticleSchema } from '../../../shared/rss-workspace'
+import type { RSSContentStore } from '../database/rss-content-store'
+import type { RSSProcessingStore } from '../database/rss-processing-store'
+import { RSSProcessingListSchema } from '../../../shared/rss-processing'
+import { RSSReadEventsSchema } from '../../../shared/rss-events'
+import type { RSSEventStore } from '../database/rss-event-store'
+import type { RSSItemAnalysisProgress } from '../rss-engine/item-analysis-manager'
 
 interface ToolParam {
   name: string
   type: string
   description: string
   required: boolean
+  enum?: string[]
 }
 
 interface RSSToolDef {
@@ -18,11 +38,39 @@ interface RSSToolDef {
 }
 
 interface RSSToolContext {
-  emitToolAction?: (tool: string, args: Record<string, unknown>) => void
+  readAnalysisAssets?: RSSItemAnalysisManager['readAssets']
+  getCatalog?: () => Pick<RSSCatalogStore, 'read'>
+  getRouteAttempt?: (sourceId: string) => RouteAttemptSnapshotEntry | null
+  readAnalysisReport?: (input: RSSReadAnalysisReportInput) => RSSAnalysisReportPage
+  getDigests?: () => Pick<RSSDigestStore, 'read' | 'schedule'>
+  getEvents?: () => Pick<RSSEventStore, 'browse'>
+  getProcessing?: () => Pick<RSSProcessingStore, 'list' | 'status'>
+  hasProcessingModel?: () => boolean
+  getContent?: () => Pick<RSSContentStore, 'query' | 'readArticle' | 'readExcerpt'>
+  getAnalysisProgress?: (itemIds: string[]) => Record<string, RSSItemAnalysisProgress>
+  references?: RSSReferenceResource[]
+  readAccessDenied?: boolean
   requestModuleToolAction?: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
 }
 
 const RSS_TOOLS: RSSToolDef[] = [
+  { name: 'rss_read_analysis_assets', description: '检查分析任务已发布的补充产物，分段读取校正文稿、结构化转录、网页输入快照或场景评分。视频只返回本地引用及文件身份检查，不读取或理解画面；旧任务缺少身份时明确不可核验。报告正文使用 rss_read_analysis_report。',
+    action: 'rss.readAnalysisAssets', intent: 'read_rss_analysis_assets', executionKind: 'deterministic', params: zodObjectToParamList(RSS_SCHEMAS.rss_read_analysis_assets) as ToolParam[] },
+  { name: 'rss_read_catalog', description: '完整分页读取已保存的来源、栏目、分析任务、历史判断和全部事件依据；来源含停用，依据含撤回与信息不足。success 不证明报告文件仍可用，须另调用 rss_read_analysis_report 核验。采集诊断是独立时点记录，不属于目录分页快照。',
+    action: 'rss.readCatalog', intent: 'read_rss_catalog', executionKind: 'deterministic', params: zodObjectToParamList(RSS_SCHEMAS.rss_read_catalog) as ToolParam[] },
+  { name: 'rss_read_analysis_report', description: '按任务 ID 分段读取已保存且可核验的分析报告；续读必须沿用 revision。不启动模型，不重新分析；旧报告归属不可核验时明确失败。',
+    action: 'rss.readAnalysisReport', intent: 'read_rss_analysis_report', executionKind: 'deterministic', params: zodObjectToParamList(RSS_SCHEMAS.rss_read_analysis_report) as ToolParam[] },
+  { name: 'rss_read_excerpt', description: '读取绑定文章版本的段落或选区；范围原样沿用引用，续读不会越过选区。可用返回的 citationUrl 定位。',
+    action: 'rss.readExcerpt', intent: 'read_rss_excerpt', executionKind: 'deterministic', params: zodObjectToParamList(RSS_SCHEMAS.rss_read_excerpt) as ToolParam[] },
+  { name: 'rss_read_digests', description: '分页读取已保存日报或范围简报、原文依据与采集覆盖；仅查询，不生成、不重算、不标已读。',
+    action: 'rss.readDigests', intent: 'read_rss_digests', executionKind: 'deterministic', params: zodObjectToParamList(RSS_SCHEMAS.rss_read_digests) as ToolParam[] },
+  { name: 'rss_read_events', description: '分页读取已保存事件、当前报道或事实进展及历史版本依据。历史摘句不代表当前原文仍有效；只读，不重新归组。',
+    action: 'rss.readEvents', intent: 'read_rss_events', executionKind: 'deterministic', params: zodObjectToParamList(RSS_SCHEMAS.rss_read_events) as ToolParam[] },
+  {
+    name: 'rss_read_processing', description: '读取 RSS 自动分类与精选的设置、当日调用次数及分页任务记录。仅查询，不启动、重试或取消任务。',
+    action: 'rss.readProcessing', intent: 'read_rss_processing', executionKind: 'deterministic',
+    params: zodObjectToParamList(RSS_SCHEMAS.rss_read_processing) as ToolParam[],
+  },
   {
     name: 'rss_add_source',
     description: '添加一个 RSS 订阅源。',
@@ -55,14 +103,7 @@ const RSS_TOOLS: RSSToolDef[] = [
     executionKind: 'pipeline',
     params: zodObjectToParamList(RSS_SCHEMAS.rss_analyze_item) as ToolParam[],
   },
-  {
-    name: 'rss_get_analysis_result',
-    description: '等待 RSS 分析任务结束并返回报告路径与校验值。',
-    action: 'rss.getAnalysisResult',
-    intent: 'get_rss_analysis_result',
-    executionKind: 'pipeline',
-    params: zodObjectToParamList(RSS_SCHEMAS.rss_get_analysis_result) as ToolParam[],
-  },
+  { name: 'rss_get_analysis_result', description: '等待 RSS 分析任务结束并返回报告路径与校验值。', action: 'rss.getAnalysisResult', intent: 'get_rss_analysis_result', executionKind: 'pipeline', params: zodObjectToParamList(RSS_SCHEMAS.rss_get_analysis_result) as ToolParam[] },
   {
     name: 'rss_capture_session',
     description: '读取当前 RSS 会话快照、选中条目和最近分析状态。',
@@ -71,23 +112,46 @@ const RSS_TOOLS: RSSToolDef[] = [
     executionKind: 'deterministic',
     params: zodObjectToParamList(RSS_SCHEMAS.rss_capture_session) as ToolParam[],
   },
+  {
+    name: 'rss_read_reference',
+    description: '读取本轮 RSS 引用：条件和版本由应用绑定，不能改写。查询按 nextCursor 续页，正文按 nextOffset 续读。旧引用已变化或删除时明确失败，不自动抓取或分析。',
+    action: 'rss.readReference', intent: 'read_rss_reference', executionKind: 'deterministic',
+    params: zodObjectToParamList(RSS_SCHEMAS.rss_read_reference) as ToolParam[],
+  },
+  {
+    name: 'rss_query_items',
+    description: '查询已保存的 RSS 资讯；支持收件箱/历史底稿、筛选和连续分页，不打开界面、不抓取、不改已读。',
+    action: 'rss.queryItems', intent: 'query_rss_items', executionKind: 'deterministic',
+    params: zodObjectToParamList(RSS_SCHEMAS.rss_query_items) as ToolParam[],
+  },
+  {
+    name: 'rss_read_article',
+    description: '按文章 ID 分段读取已保存正文和来源，以及最近分析任务、报告路径与原文变化警告；不重新启动分析。沿 nextOffset 与 revision 续读；缺失正文明确返回来源摘要。',
+    action: 'rss.readArticle', intent: 'read_rss_article', executionKind: 'deterministic',
+    params: zodObjectToParamList(RSS_SCHEMAS.rss_read_article) as ToolParam[],
+  },
 ]
 
-function toSchemaParam(param: ToolParam): Record<string, unknown> {
+function toSchemaParam(param: ToolParam, toolName: string): Record<string, unknown> {
+  if (param.type === 'object') {
+    const { $schema: _dialect, ...shape } = z.toJSONSchema(RSS_SCHEMAS[toolName as RssToolName].shape[param.name], { io: 'input' })
+    return shape
+  }
   return {
     type: param.type,
     description: param.description,
+    ...(param.enum ? { enum: param.enum } : {}),
   }
 }
 
 function toStructuredResult(tool: RSSToolDef, message: string, extra?: Record<string, unknown>): string {
   return JSON.stringify({
+    ...(extra || {}),
     module: 'rss',
     intent: tool.intent,
     executionKind: tool.executionKind,
     action: tool.action,
     message,
-    ...(extra || {}),
   })
 }
 
@@ -97,7 +161,7 @@ export function getRSSAnthropicTools(): Array<Record<string, unknown>> {
     description: tool.description,
     input_schema: {
       type: 'object',
-      properties: Object.fromEntries(tool.params.map((param) => [param.name, toSchemaParam(param)])),
+      properties: Object.fromEntries(tool.params.map((param) => [param.name, toSchemaParam(param, tool.name)])),
       required: tool.params.filter((param) => param.required).map((param) => param.name),
     },
   }))
@@ -111,7 +175,7 @@ export function getRSSOpenAITools(): Array<Record<string, unknown>> {
       description: tool.description,
       parameters: {
         type: 'object',
-        properties: Object.fromEntries(tool.params.map((param) => [param.name, toSchemaParam(param)])),
+        properties: Object.fromEntries(tool.params.map((param) => [param.name, toSchemaParam(param, tool.name)])),
         required: tool.params.filter((param) => param.required).map((param) => param.name),
       },
     },
@@ -125,6 +189,95 @@ export async function executeRSSTool(
 ): Promise<string> {
   const tool = RSS_TOOLS.find((item) => item.name === toolName)
   if (!tool) return `Unknown RSS tool: ${toolName}`
+
+  if (toolName === 'rss_read_analysis_assets') {
+    if (context?.readAccessDenied || !context?.readAnalysisAssets) return toStructuredResult(tool, '当前会话未获准读取本机 RSS 资料。', { ok: false, error: 'rss_read_not_authorized' })
+    try { return toStructuredResult(tool, '只读取已发布产物或检查本地引用；状态以 data 为准，没有下载、转录或视觉理解。', { ok: true, data: context.readAnalysisAssets(RSSReadAnalysisAssetsSchema.parse(args)) }) }
+    catch (error) { /* silent-catch: the read failure is returned to the Agent as a structured error. */ return toStructuredResult(tool, '补充产物读取失败。', { ok: false, error: error instanceof Error ? error.message : String(error) }) }
+  }
+
+  if (toolName === 'rss_read_catalog') {
+    if (context?.readAccessDenied || !context?.getCatalog) return toStructuredResult(tool, '当前会话未获准读取本机 RSS 资料。', { ok: false, error: 'rss_read_not_authorized' })
+    try {
+      const data = context.getCatalog().read(RSSReadCatalogSchema.parse(args))
+      const diagnostics = data.view === 'sources' ? { observedAt: new Date().toISOString(), entries: data.entries.map((source) => {
+        const attempt = context.getRouteAttempt?.(String(source.id)) ?? null
+        return { sourceId: source.id, attempt, matchesCurrentUrl: !!attempt && 'url' in source && attempt.url === source.url }
+      }) } : undefined
+      return toStructuredResult(tool, '已读取保存记录。decision 为 0 排除、1 包含、2 信息不足；manual_decision 为当前人工覆盖，null 表示未覆盖。版本匹配与当前采用分别列出；资料变化时重新开始分页，不把新页拼入旧结果。', { ok: true, data, ...(diagnostics ? { diagnostics } : {}) })
+    } catch (error) { /* silent-catch: the read failure is returned to the Agent as a structured error. */ return toStructuredResult(tool, '目录读取失败。', { ok: false, error: error instanceof Error ? error.message : String(error) }) }
+  }
+
+  if (toolName === 'rss_read_analysis_report') {
+    if (context?.readAccessDenied || !context?.readAnalysisReport) return toStructuredResult(tool, '当前会话未获准读取本机 RSS 资料。', { ok: false, error: 'rss_read_not_authorized' })
+    try { return toStructuredResult(tool, '已读取发布时保存的分析报告；原文变化提示与报告版本独立，未重新分析。', { ok: true, data: context.readAnalysisReport(RSSReadAnalysisReportSchema.parse(args)) }) }
+    catch (error) { /* silent-catch: the read failure is returned to the Agent as a structured error. */ return toStructuredResult(tool, '分析报告读取失败。', { ok: false, error: error instanceof Error ? error.message : String(error) }) }
+  }
+
+  if (toolName === 'rss_read_digests') {
+    if (context?.readAccessDenied || !context?.getDigests) return toStructuredResult(tool, '当前会话未获准读取本机 RSS 资料。', { ok: false, error: 'rss_read_not_authorized' })
+    try { return toStructuredResult(tool, '已读取保存的刊物；原文摘句和精选判断分开标识，needsUpdate 表示发布后依据变化，未修改原刊。', { ok: true, data: context.getDigests().read(RSSDigestReadSchema.parse(args)), schedule: context.getDigests().schedule() }) }
+    catch (error) { /* silent-catch: the read failure is returned to the Agent as a structured error. */ return toStructuredResult(tool, '刊物读取失败。', { ok: false, error: error instanceof Error ? error.message : String(error) }) }
+  }
+
+  if (toolName === 'rss_read_events') {
+    if (context?.readAccessDenied || !context?.getEvents) return toStructuredResult(tool, '当前会话未获准读取本机 RSS 资料。', { ok: false, error: 'rss_read_not_authorized' })
+    try { return toStructuredResult(tool, '事件数据以 data 为准，历史依据保留对应文章版本；待更新的关联不当作已重新验证。', { ok: true, data: context.getEvents().browse(RSSReadEventsSchema.parse(args)) }) }
+    catch (error) { /* silent-catch: the read failure is returned to the Agent as a structured error. */ return toStructuredResult(tool, '事件读取失败。', { ok: false, error: error instanceof Error ? error.message : String(error) }) }
+  }
+
+  if (toolName === 'rss_read_processing') {
+    if (context?.readAccessDenied || !context?.getProcessing || !context.hasProcessingModel) return toStructuredResult(tool, '当前会话未获准读取本机 RSS 资料。', { ok: false, error: 'rss_read_not_authorized' })
+    try {
+      const store = context.getProcessing()
+      return toStructuredResult(tool, '整理状态以 data 为准；等待和请求结果未知不表示已完成。', { ok: true, data: { ...store.list(RSSProcessingListSchema.parse(args)), status: store.status(Date.now(), context.hasProcessingModel()) } })
+    } catch (error) { /* silent-catch: the read failure is returned to the Agent as a structured error. */ return toStructuredResult(tool, '整理状态读取失败。', { ok: false, error: error instanceof Error ? error.message : String(error) }) }
+  }
+
+  if (toolName === 'rss_read_excerpt' || toolName === 'rss_query_items' || toolName === 'rss_read_article' || toolName === 'rss_read_reference') {
+    if (context?.readAccessDenied || !context?.getContent) {
+      return toStructuredResult(tool, '当前会话未获准读取本机 RSS 资料。', { ok: false, error: 'rss_read_not_authorized' })
+    }
+    try {
+      let readKind = toolName
+      let referenceId: string | undefined
+      if (toolName === 'rss_read_reference') {
+        const input = RSSReadReferenceSchema.parse(args)
+        const matches = context.references?.filter((resource) => resource.id === input.referenceId) || []
+        if (matches.length !== 1) throw new Error('rss_reference_unavailable')
+        const reference = matches[0].reference
+        referenceId = input.referenceId
+        if (reference.kind === 'digest') {
+          if (input.cursor !== undefined || !context.getDigests) throw new Error('rss_reference_wrong_cursor')
+          return toStructuredResult(tool, '已读取引用绑定的刊物版本；使用 nextOffset 续读，引用来源通过 rss_read_digests 的 sources 视图读取。', {
+            ok: true, referenceId, data: context.getDigests().read({ ...reference.read, view: 'entries', offset: input.offset ?? reference.read.offset }),
+          })
+        }
+        if (reference.kind === 'query') {
+          if (input.offset !== undefined) throw new Error('rss_reference_wrong_cursor')
+          args = { ...reference.query, cursor: input.cursor }
+          readKind = 'rss_query_items'
+        } else {
+          if (input.cursor !== undefined) throw new Error('rss_reference_wrong_cursor')
+          args = { ...reference.read, offset: input.offset ?? reference.read.offset }
+          readKind = reference.kind === 'excerpt' ? 'rss_read_excerpt' : 'rss_read_article'
+        }
+      }
+      const content = context.getContent()
+      const data = readKind === 'rss_query_items'
+        ? content.query(RSSQuerySchema.parse(args))
+        : readKind === 'rss_read_excerpt' ? content.readExcerpt(RSSReadExcerptSchema.parse(args)) : content.readArticle(RSSReadArticleSchema.parse(args))
+      const citationUrl = readKind === 'rss_read_excerpt' ? rssCitationUrl({ kind: 'excerpt', read: RSSReadExcerptSchema.parse(args) }) : undefined
+      const analysis = readKind === 'rss_read_article'
+        ? context.getAnalysisProgress?.([String(args.itemId)])[String(args.itemId)] ?? null : undefined
+      const media = readKind === 'rss_query_items' && 'items' in data ? data.items.map((item) => ({ itemId: item.id, ...describeRSSMedia(item.link, item.coverImage) }))
+        : readKind === 'rss_read_article' && 'body' in data && 'coverImage' in data.article ? describeRSSMedia(data.article.link, data.article.coverImage) : undefined
+      return toStructuredResult(tool, '已读取保存的 RSS 资料；范围、正文状态及续读位置以 data 为准，analysis 为最近分析的当前状态。media 仅为类型提示和未核验的远端引用，不表示已理解画面。', { ok: true, data, ...(citationUrl ? { citationUrl } : {}), ...(referenceId ? { referenceId } : {}), ...(analysis !== undefined ? { analysis } : {}), ...(media ? { media } : {}) })
+    } catch (error) {
+      // silent-catch: the structured failed result is returned to the Agent, never treated as read success.
+      return toStructuredResult(tool, 'RSS 读取未完成。', { ok: false, error: error instanceof Error ? error.message : String(error) })
+    }
+  }
 
   if (toolName === 'rss_add_source') {
     const name = String(args.name || '').trim()
@@ -140,15 +293,12 @@ export async function executeRSSTool(
   if (context?.requestModuleToolAction) {
     try {
       const payload = await context.requestModuleToolAction(tool.action, args)
-      if (payload.ok === false) {
-        return toStructuredResult(tool, typeof payload.summary === 'string' ? payload.summary : `${tool.action} 失败`, {
-          ...payload,
-          ok: false,
-        })
+      if (payload.ok === false || payload.success === false) {
+        return toStructuredResult(tool, typeof payload.summary === 'string' && payload.summary.trim() ? payload.summary.trim() : 'RSS 操作未完成。', { ...payload, ok: false })
       }
       const summary = typeof payload.summary === 'string' && payload.summary.trim()
         ? payload.summary.trim()
-        : `${tool.action} 已完成。`
+        : `${tool.action} 已返回，请以状态和数据为准。`
       return toStructuredResult(tool, summary, payload)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -159,7 +309,7 @@ export async function executeRSSTool(
     }
   }
 
-  return toStructuredResult(tool, `${tool.action} 缺少产品动作桥。`, {
+  return toStructuredResult(tool, `${tool.action} 缺少产品动作桥，操作尚未执行。`, {
     ok: false,
     errorKind: 'product_action_bridge_missing',
     ownerResourceId: typeof args.itemId === 'string' ? args.itemId : null,

@@ -1,3 +1,4 @@
+import { rssQueryKey } from '../modules/rss/workspace-query'
 import { persistableCalendarEventId } from '../../shared/calendar-event-identity'
 import type { SendScopedResourceSelection } from '../../shared/ipc-contracts/agent-runtime'
 import { useCalendarSession } from './useCalendarSession'
@@ -9,22 +10,15 @@ export function collectWorkbenchSurfaceResources(): SendScopedResourceSelection[
   const resources: SendScopedResourceSelection[] = []
   if (mode.workbenchMode === 'rss' || mode.splitMode === 'rss') {
     const rss = useRSSSession.getState()
-    if (rss.selectedItemId) {
-      resources.push({
-        kind: 'rss_item',
-        id: `rss-item-${rss.selectedItemId}`,
-        name: rss.selectedItemTitle || 'RSS 条目',
-        itemId: rss.selectedItemId,
-      })
-    }
-    if (rss.selectedSourceId) {
-      resources.push({
-        kind: 'rss_source',
-        id: `rss-source-${rss.selectedSourceId}`,
-        name: 'RSS 订阅源',
-        sourceId: rss.selectedSourceId,
-      })
-    }
+    let reference: import('../../shared/rss-reference').RSSReference | null = null
+    if (rss.digestVisible) {
+      if (rss.selectedDigestId) reference = { kind: 'digest', read: { reportId: rss.selectedDigestId, offset: 0, limit: 20 } }
+    } else if (rss.selectedItemId && rss.selectedItemExpectedRevision) {
+      reference = rss.selectedExcerpt
+        ? { kind: 'excerpt', read: { format: 'reading-v1', itemId: rss.selectedItemId, expectedRevision: rss.selectedItemExpectedRevision, range: rss.selectedExcerpt, offset: 0, length: 12000 } }
+        : { kind: 'article', read: { itemId: rss.selectedItemId, expectedRevision: rss.selectedItemExpectedRevision, offset: 0, length: 12000 } }
+    } else if (rss.view && rssQueryKey(rss.view.query) === rssQueryKey(rss.query)) reference = { kind: 'query', query: { ...rss.view.query, expectedRevision: rss.view.revision, cursor: undefined } }
+    if (reference) resources.push({ kind: 'rss_reference', id: crypto.randomUUID(), name: rss.selectedItemTitle || '当前 RSS 资料', reference, origin: 'workbench' })
   }
   if (mode.workbenchMode === 'calendar' || mode.splitMode === 'calendar') {
     const calendar = useCalendarSession.getState()

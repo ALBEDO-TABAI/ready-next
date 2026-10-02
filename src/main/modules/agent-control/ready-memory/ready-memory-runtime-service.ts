@@ -12,7 +12,7 @@ import type {
   ReadyMemoryView,
   ReadyMemoryStateChange,
 } from '../../../../shared/ready-memory'
-import type { DatabaseConnection } from '../../database'
+import type { DatabaseConnection } from '../../database/connection'
 import type { ReadyMemoryGenerationCoordinator } from './ready-memory-generation'
 import type {
   ReadyMemoryEvidenceLoader,

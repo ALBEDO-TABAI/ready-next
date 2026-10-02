@@ -86,9 +86,9 @@ test('reset rejects old message/context writers while the new epoch remains writ
       role: 'assistant',
       content: 'epoch zero',
     }, 0)
-    assert.equal(database.getChatMessages(scopeId).length, 1)
+    assert.equal(database.chat.getChatMessages(scopeId).length, 1)
     assert.equal(
-      (JSON.parse(database.getConversationScope(scopeId)!.meta_json || '{}') as {
+      (JSON.parse(database.chat.getConversationScope(scopeId)!.meta_json || '{}') as {
         lastReferenceSkill?: { id?: string }
       }).lastReferenceSkill?.id,
       'old-skill',
@@ -162,9 +162,9 @@ test('reset rejects old message/context writers while the new epoch remains writ
       role: 'assistant',
       content: 'late old writer',
     }, 0), /visibility epoch mismatch/)
-    assert.deepEqual(database.getChatMessages(scopeId), [])
+    assert.deepEqual(database.chat.getChatMessages(scopeId), [])
     assert.equal(
-      'lastReferenceSkill' in JSON.parse(database.getConversationScope(scopeId)!.meta_json || '{}'),
+      'lastReferenceSkill' in JSON.parse(database.chat.getConversationScope(scopeId)!.meta_json || '{}'),
       false,
     )
     assert.equal(runMeta.update('old-provider-run', {
@@ -271,11 +271,11 @@ test('reset rejects old message/context writers while the new epoch remains writ
     )
 
     assert.deepEqual(
-      database.getChatMessages(scopeId).map((message) => message.content),
+      database.chat.getChatMessages(scopeId).map((message) => message.content),
       ['epoch one', 'same epoch after stop'],
     )
     assert.equal(
-      (JSON.parse(database.getConversationScope(scopeId)!.meta_json || '{}') as {
+      (JSON.parse(database.chat.getConversationScope(scopeId)!.meta_json || '{}') as {
         lastReferenceSkill?: { id?: string }
       }).lastReferenceSkill?.id,
       'new-skill',

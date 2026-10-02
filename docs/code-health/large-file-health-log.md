@@ -21,6 +21,20 @@
 
 | 评估日期 | 任务 | 文件 | 总行数 | 本次新增 | 结论 | 判断与后续动作 | 状态 |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
+| 2026-10-01 | RSS 整合到 0.8 | `src/__tests__/codex-sidecar-crash-recovery.e2e.ts` | 1375 | 净 +1 | 一般 | 本轮仅接入域保存或 RSS 入口；2026-11-01 复查职责边界和分组。 | 已排期：2026-11-01 |
+| 2026-10-01 | RSS 整合到 0.8 | `src/__tests__/codex-sidecar-process-lease.e2e.ts` | 1341 | 净 +1 | 一般 | 本轮仅接入域保存或 RSS 入口；2026-11-01 复查职责边界和分组。 | 已排期：2026-11-01 |
+| 2026-10-01 | RSS 整合到 0.8 | `src/__tests__/tag-forge-batch.test.ts` | 1382 | 净 +1 | 一般 | 本轮仅接入域保存或 RSS 入口；2026-11-01 复查职责边界和分组。 | 已排期：2026-11-01 |
+| 2026-10-01 | RSS 整合到 0.8 | `src/main/index.ts` | 1244 | 净 +13 | 一般 | 本轮仅接入域保存或 RSS 入口；2026-11-01 复查职责边界和分组。 | 已排期：2026-11-01 |
+| 2026-10-01 | RSS 整合到 0.8 | `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts` | 5597 | 净 +7 | 危险 | 现有生产装配混合准入、历史与恢复；本轮仅接通 RSS，后续独立按职责拆分。 | 后续拆分；交付提醒 |
+| 2026-10-01 | RSS 整合到 0.8 | `src/main/modules/agent-control/tools-runtime/tool-registry.ts` | 1582 | 净 +10 | 健康 | 声明/顺序聚合，类型与专项合同门已通过。 | 无需处理 |
+| 2026-10-01 | RSS 整合到 0.8 | `src/main/modules/calendar-engine/ipc-handler.ts` | 1106 | 净 +1 | 一般 | 本轮仅接入域保存或 RSS 入口；2026-11-01 复查职责边界和分组。 | 已排期：2026-11-01 |
+| 2026-10-01 | RSS 整合到 0.8 | `src/main/modules/migrations.ts` | 4502 | 净 +16 | 健康 | 声明/顺序聚合，类型与专项合同门已通过。 | 无需处理 |
+| 2026-10-01 | RSS 整合到 0.8 | `src/main/modules/rss-engine/ipc-handler.ts` | 1253 | 净 +12 | 一般 | 本轮仅接入域保存或 RSS 入口；2026-11-01 复查职责边界和分组。 | 已排期：2026-11-01 |
+| 2026-10-01 | RSS 整合到 0.8 | `src/main/modules/rss-engine/item-analysis-manager.ts` | 1141 | 净 +42 | 一般 | 本轮仅接入域保存或 RSS 入口；2026-11-01 复查职责边界和分组。 | 已排期：2026-11-01 |
+| 2026-10-01 | RSS 整合到 0.8 | `src/main/modules/tools/tool-executor.ts` | 1490 | 净 +16 | 一般 | 本轮仅接入域保存或 RSS 入口；2026-11-01 复查职责边界和分组。 | 已排期：2026-11-01 |
+| 2026-10-01 | RSS 整合到 0.8 | `src/preload/index.ts` | 1564 | 净 +25 | 健康 | 声明/顺序聚合，类型与专项合同门已通过。 | 无需处理 |
+| 2026-10-01 | RSS 整合到 0.8 | `src/renderer/modules/agent/messageComposer.ts` | 1067 | 净 +11 | 一般 | 本轮仅接入域保存或 RSS 入口；2026-11-01 复查职责边界和分组。 | 已排期：2026-11-01 |
+| 2026-10-01 | RSS 整合到 0.8 | `src/shared/ipc-contracts/agent-runtime.ts` | 1409 | 净 +3 | 健康 | 声明/顺序聚合，类型与专项合同门已通过。 | 无需处理 |
 | 2026-10-02 | 设置页视觉重整 | `src/renderer/styles/settings-surfaces.css` | 1295 | 新文件 +1295 | 健康 | 设置页单一设计系统表：`--sx-*` token（明/暗/实色三套）+ `sx-*` 组件类，只承担设置页的材质、控件状态与强调色纪律；组件类在 `@layer components`，级联层 gate 与 `settings-liquid-glass-contract` / `settings-design-system` 测试在位，拆分收益不足。 | 无需处理 |
 | 2026-09-29 | 项目目录收尾与停止修复 | `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts` | 5590 | 净 +1 | 危险 | 仅对齐直接停止与实时 lifecycle 的隐藏回答历史规则；生产装配仍过密，后续独立拆分。 | 后续拆分；交付时提醒 |
 | 2026-09-29 | 项目目录收尾与停止修复 | `src/main/modules/agent-control/codex-runtime/codex-binding-repository.ts` | 10662 | 本修复有新增 | 危险 | 本轮仅纠正未声明文件输出时的收口条件；原有大仓库仍混合准入、交付与恢复职责，后续单独拆分。 | 后续拆分；交付时提醒 |

@@ -1,4 +1,4 @@
-import type { DatabaseConnection } from '../../database'
+import type { DatabaseConnection } from '../../database/connection'
 
 export interface AgentChannelEventRecord {
   payload_json: string | null

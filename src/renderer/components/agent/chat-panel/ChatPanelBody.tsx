@@ -1,3 +1,4 @@
+import { revealRSSReference } from '../../../modules/rss/reveal-reference'
 import { useLayoutEffect, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode, RefObject } from 'react'
 import { X, Puzzle, Copy, StickyNote } from 'lucide-react'
@@ -297,7 +298,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
             renderAttachmentIcon={(attachment, size = 16) => (
               <AttachmentIcon attachment={attachment} size={size} />
             )}
-            renderMarkdown={(content, streaming) => <MarkdownContent content={content} streaming={streaming} />}
+            renderMarkdown={(content, streaming) => <MarkdownContent content={content} streaming={streaming} onRSSReference={revealRSSReference} />}
           />
 
           {agentSelectionMenu && (

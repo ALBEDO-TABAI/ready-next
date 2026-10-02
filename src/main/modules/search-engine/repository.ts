@@ -1,4 +1,5 @@
-import type { DatabaseConnection, DatabaseStatement } from '../database'
+import type { DatabaseConnection, DatabaseStatement } from '../database/connection'
+
 import type { WikilinkRef, MdlinkRef, AttachmentRef } from '../../../shared/document-graph-parse'
 import { buildFtsSearchText } from './query'
 

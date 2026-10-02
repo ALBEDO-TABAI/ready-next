@@ -1,3 +1,5 @@
+import { fromMarkdown } from 'mdast-util-from-markdown'
+
 export interface WidgetPersistedControlState {
   index: number
   tag: 'input' | 'textarea' | 'select'
@@ -73,22 +75,17 @@ export interface DocumentWidgetSummary {
   canReplace: boolean
 }
 
-const SHOW_WIDGET_FENCE_REGEX = /```show-widget\s*\n?([\s\S]*?)\n?\s*```/g
 
 interface MarkdownFenceRange {
   start: number
   end: number
 }
 
-interface BareWidgetTextPart {
-  content: string
-  hasTrailingSeparator: boolean
-}
-
 function getMarkdownFenceOpening(line: string): { marker: '`' | '~'; length: number } | null {
-  const match = line.match(/^[ \t]{0,3}(`{3,}|~{3,})/)
+  const match = line.match(/^ {0,3}(`{3,}|~{3,})/)
   if (!match) return null
   const fence = match[1]
+  if (fence[0] === '`' && line.slice(match[0].length).includes('`')) return null
   return {
     marker: fence[0] as '`' | '~',
     length: fence.length,
@@ -100,41 +97,10 @@ function isMarkdownFenceClosing(
   fence: { marker: '`' | '~'; length: number },
 ): boolean {
   const regex = fence.marker === '`'
-    ? /^[ \t]{0,3}(`{3,})[ \t]*$/
-    : /^[ \t]{0,3}(~{3,})[ \t]*$/
-  const match = line.match(regex)
+    ? /^ {0,3}(`{3,})[ \t]*$/
+    : /^ {0,3}(~{3,})[ \t]*$/
+  const match = line.replace(/\r$/, '').match(regex)
   return Boolean(match && match[1].length >= fence.length)
-}
-
-function collectMarkdownFenceRanges(text: string): MarkdownFenceRange[] {
-  const ranges: MarkdownFenceRange[] = []
-  let activeFence: ({ marker: '`' | '~'; length: number; start: number }) | null = null
-  let offset = 0
-
-  for (const line of text.split('\n')) {
-    const lineStart = offset
-    const lineEnd = lineStart + line.length
-
-    if (activeFence) {
-      if (isMarkdownFenceClosing(line, activeFence)) {
-        ranges.push({ start: activeFence.start, end: lineEnd })
-        activeFence = null
-      }
-    } else {
-      const opening = getMarkdownFenceOpening(line)
-      if (opening) {
-        activeFence = { ...opening, start: lineStart }
-      }
-    }
-
-    offset = lineEnd + 1
-  }
-
-  if (activeFence) {
-    ranges.push({ start: activeFence.start, end: text.length })
-  }
-
-  return ranges
 }
 
 function isDetailsOpeningLine(line: string): boolean {
@@ -187,35 +153,6 @@ function collectMarkdownDetailsRanges(text: string): MarkdownFenceRange[] {
   return ranges
 }
 
-function splitBareWidgetTextParts(text: string): BareWidgetTextPart[] {
-  const protectedRanges = [
-    ...collectMarkdownFenceRanges(text),
-    ...collectMarkdownDetailsRanges(text),
-  ]
-  const parts: BareWidgetTextPart[] = []
-  let lastIndex = 0
-
-  for (const match of text.matchAll(/\n{2,}/g)) {
-    const separatorStart = match.index ?? 0
-    const isProtectedSeparator = protectedRanges.some((range) => (
-      separatorStart >= range.start && separatorStart < range.end
-    ))
-    if (isProtectedSeparator) continue
-
-    parts.push({
-      content: text.slice(lastIndex, separatorStart),
-      hasTrailingSeparator: true,
-    })
-    lastIndex = separatorStart + match[0].length
-  }
-
-  parts.push({
-    content: text.slice(lastIndex),
-    hasTrailingSeparator: false,
-  })
-
-  return parts
-}
 
 function hashWidgetIdentity(value: string): string {
   let hash = 2166136261
@@ -321,16 +258,33 @@ export function tryParseWidgetPayload(rawBody: string, rawFence: string): Docume
   }
 }
 
+function* showWidgetFences(source: string): Generator<{ start: number; end: number; raw: string; body: string }> {
+  for (const node of fromMarkdown(source).children) {
+    if (node.type !== 'code' || node.lang !== 'show-widget') continue
+    const begin = node.position?.start.offset, finish = node.position?.end.offset
+    if (begin === undefined || finish === undefined) continue
+    const block = source.slice(begin, finish)
+    const opening = block.match(/^( {0,3})(`{3,})show-widget[ \t]*\r?\n/)
+    if (!opening) continue
+    const closeStart = block.lastIndexOf('\n') + 1
+    const closing = block.slice(closeStart).match(/^ {0,3}(`{3,})[ \t]*\r?$/)
+    if (!closing || closing[1].length < opening[2].length || closeStart < opening[0].length) continue
+    const start = begin + opening[1].length
+    const end = begin + closeStart + closing[0].trimEnd().length
+    yield { start, end, raw: source.slice(start, end), body: block.slice(opening[0].length, closeStart).trim() }
+  }
+}
+
 export function parseShowWidgetFences(text: string): DocumentWidgetSegment[] {
   if (!text) return []
 
   const segments: DocumentWidgetSegment[] = []
   let lastIndex = 0
 
-  for (const match of text.matchAll(SHOW_WIDGET_FENCE_REGEX)) {
-    const fullMatch = match[0]
-    const fenceBody = match[1] || ''
-    const start = match.index ?? 0
+  for (const match of showWidgetFences(text)) {
+    const fullMatch = match.raw
+    const fenceBody = match.body
+    const start = match.start
 
     if (start > lastIndex) {
       segments.push({
@@ -376,38 +330,32 @@ export function parseShowWidgetFences(text: string): DocumentWidgetSegment[] {
 
 export function parseBareWidgetPayloadSegments(text: string): DocumentWidgetSegment[] {
   if (!text.trim()) return []
-
-  const parts = splitBareWidgetTextParts(text)
+  const nodes = fromMarkdown(text).children
+  const protectedRanges = [
+    ...collectMarkdownDetailsRanges(text),
+    ...nodes.filter((node) => node.type === 'code' || node.type === 'html').map((node) => ({
+      start: node.position!.start.offset!, end: node.position!.end.offset!,
+    })),
+  ]
+  const boundaries = [...text.matchAll(/\n{2,}/g)].filter((match) => !protectedRanges.some((range) => match.index! >= range.start && match.index! < range.end))
   const segments: DocumentWidgetSegment[] = []
-
-  parts.forEach((part, index) => {
-    const trimmed = part.content.trim()
-    const widget = trimmed.startsWith('{') && trimmed.endsWith('}')
-      ? tryParseWidgetPayload(trimmed, trimmed)
-      : null
-
+  let start = 0
+  for (const [index, boundary] of [...boundaries, null].entries()) {
+    const end = boundary?.index ?? text.length
+    const raw = text.slice(start, end)
+    const trimmed = raw.trim()
+    const paragraph = nodes.find((node) => node.type === 'paragraph' && node.position!.start.offset! >= start && node.position!.end.offset! <= end)
+    const widget = paragraph && text.slice(paragraph.position!.start.offset!, paragraph.position!.end.offset!).trim() === trimmed && trimmed.startsWith('{') && trimmed.endsWith('}')
+      ? tryParseWidgetPayload(trimmed, trimmed) : null
     if (widget) {
-      segments.push({
-        type: 'widget',
-        data: {
-          ...widget,
-          id: ensureDocumentWidgetId({
-            id: widget.id,
-            title: widget.title,
-            widgetCode: widget.widgetCode,
-            seed: index,
-          }),
-        },
-      })
+      segments.push({ type: 'widget', data: { ...widget, id: ensureDocumentWidgetId({ id: widget.id, title: widget.title, widgetCode: widget.widgetCode, seed: index }) } })
     } else {
-      const content = part.hasTrailingSeparator ? `${part.content}\n\n` : part.content
-      if (content) {
-        segments.push({ type: 'text', content })
-      }
+      const content = boundary ? `${raw}\n\n` : raw
+      if (content) segments.push({ type: 'text', content })
     }
-  })
-
-  return segments.length > 0 ? segments : [{ type: 'text', content: text }]
+    start = end + (boundary?.[0].length ?? 0)
+  }
+  return segments
 }
 
 export function getWidgetRenderMode(widgetCode: string): WidgetRenderMode {
@@ -418,16 +366,15 @@ export function getWidgetRenderMode(widgetCode: string): WidgetRenderMode {
 
 export function collectDocumentWidgets(source: string): DocumentWidgetRecord[] {
   const normalizedSource = source.replace(/\r\n/g, '\n')
-  const regex = /```show-widget\s*\n?([\s\S]*?)\n?\s*```/g
   const widgets: DocumentWidgetRecord[] = []
 
-  for (const match of normalizedSource.matchAll(regex)) {
-    const fullMatch = match[0]
-    const body = match[1] || ''
+  for (const match of showWidgetFences(normalizedSource)) {
+    const fullMatch = match.raw
+    const body = match.body
     const parsed = tryParseWidgetPayload(body, fullMatch)
     if (!parsed) continue
 
-    const start = match.index ?? 0
+    const start = match.start
     widgets.push({
       id: ensureDocumentWidgetId({
         id: parsed.id,

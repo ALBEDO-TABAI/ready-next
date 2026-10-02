@@ -1,4 +1,4 @@
-import type { DatabaseConnection } from '../database'
+import type { DatabaseConnection } from '../database/connection'
 import type { TaskProjectionRepository } from '../repositories/task-projection-repository'
 import type { PetActivitySnapshot } from '../../../shared/pet'
 import type { PetWindowManager } from './pet-window-manager'

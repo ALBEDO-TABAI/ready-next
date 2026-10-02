@@ -1,8 +1,9 @@
+import type { ChatConversationRecord, ConversationSourceKind } from '../main/modules/database/records'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { SessionRecallService, type SessionRecallDatabaseAdapter } from '../main/modules/agent-control/session/session-recall-service'
-import type { ChatConversationRecord, ConversationSourceKind } from '../main/modules/database'
+
 
 interface MetadataRow {
   conversation_id: string
@@ -28,6 +29,7 @@ interface MessageMatchRow {
 }
 
 class FakeSessionRecallDb implements SessionRecallDatabaseAdapter {
+  readonly chat = this
   vectorRows = new Map<string, { content_hash: string; vector_json: string; vector_version: string; updated_at: string }>()
 
   constructor(

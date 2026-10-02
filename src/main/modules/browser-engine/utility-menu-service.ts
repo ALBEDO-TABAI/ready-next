@@ -1,5 +1,6 @@
+import type { BrowserBookmark, BrowserDownload, BrowserHistoryEntry } from '../database/records'
 import { Menu, shell, type BrowserWindow, type MenuItemConstructorOptions } from 'electron'
-import type { BrowserBookmark, BrowserDownload, BrowserHistoryEntry } from '../database'
+
 import type {
   BrowserUtilityMenuCurrentTab,
   BrowserUtilityMenuRequest,
@@ -25,7 +26,7 @@ interface BrowserUtilityMenuServiceHost {
   toggleAdblockDomain: (domain: string) => void
   printCurrentTab: () => void
   openExternal: (url: string) => void
-  sendToRenderer: (channel: string, data: unknown) => void
+  sendToRenderer: (channel: 'browser:bookmarksChanged' | 'browser:clipCurrentTabRequested', data: unknown) => void
 }
 
 export class BrowserUtilityMenuService {

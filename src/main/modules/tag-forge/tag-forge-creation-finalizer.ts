@@ -1,7 +1,8 @@
+import type { DatabaseConnection } from '../database/connection'
 import { createHash } from 'crypto'
 import { lstat, readFile, realpath } from 'fs/promises'
 import { isAbsolute, relative, resolve } from 'path'
-import type { DatabaseConnection } from '../database'
+
 import { FileProjectIdentityRepository } from '../repositories/file-project-identity-repository'
 import { TagForgeRepository } from '../repositories/tag-forge-repository'
 import { buildSearchIndexContentHash } from '../search-engine/adapters'

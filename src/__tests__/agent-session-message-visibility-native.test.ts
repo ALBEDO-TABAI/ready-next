@@ -3,7 +3,7 @@ import test from 'node:test'
 
 import type { AgentInputItem } from '@openai/agents'
 import { RunMetaRepository } from '../main/modules/agent-control/task-projection/run-meta-repository'
-import type { DatabaseConnection } from '../main/modules/database'
+import type { DatabaseConnection } from '../main/modules/database/connection'
 import type { MigrationDatabase } from '../main/modules/migrations'
 import { AgentSessionCheckpointRepository, workflowDigest } from '../main/modules/repositories/agent-session-checkpoint-repository'
 import { TaskProjectionRepository } from '../main/modules/repositories/task-projection-repository'

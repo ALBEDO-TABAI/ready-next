@@ -1,8 +1,9 @@
+import type { DatabaseConnection } from '../database/connection'
 import { createHash, randomUUID } from 'crypto'
 import { lstat, readFile, realpath } from 'fs/promises'
 import { basename, dirname, extname, join, relative, resolve } from 'path'
 
-import type { DatabaseConnection } from '../database'
+
 import type { SearchEngine } from '../search-engine/indexer'
 import { buildSearchIndexContentHash } from '../search-engine/adapters'
 import { TagForgeRepository } from '../repositories/tag-forge-repository'

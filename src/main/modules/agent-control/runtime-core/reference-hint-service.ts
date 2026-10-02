@@ -25,7 +25,8 @@ import { findSkillToolByName } from '../../tools/skills-tools'
 import { getSkillsRuntimeManager } from '../../skills-runtime/runtime-manager'
 import { logAgentMetric } from '../metrics'
 import { TOOL_ERROR_METRICS } from '../tools-runtime/tool-error-metrics'
-import type { ChatConversationRecord, DatabaseManager } from '../../database'
+import type { ChatConversationRecord } from '../../database/records'
+import type { DatabaseManager } from '../../database'
 import type { ConversationScope } from '../contracts/types'
 
 export interface ReferenceHintServiceDeps {
@@ -51,7 +52,7 @@ export class ReferenceHintService {
     if (!live) return null
     const latestUserText = (() => {
       try {
-        const messages = this.deps.db.getChatMessages(normalizedScopeId)
+        const messages = this.deps.db.chat.getChatMessages(normalizedScopeId)
         for (let index = messages.length - 1; index >= 0; index -= 1) {
           const message = messages[index]
           if (message.role === 'user') return message.content || ''
@@ -141,7 +142,7 @@ export class ReferenceHintService {
   ): void {
     try {
       const hint = snapshotLastReferenceSkill(scopeId)
-      const scopeRow = this.deps.db.getConversationScope(scopeId)
+      const scopeRow = this.deps.db.chat.getConversationScope(scopeId)
       if (!scopeRow) return
       if ((scopeRow.message_visibility_epoch ?? 0) !== expectedMessageVisibilityEpoch) return
       const scope = this.deps.mapConversationRow(scopeRow)
@@ -149,7 +150,7 @@ export class ReferenceHintService {
       if (!hint) {
         if ('lastReferenceSkill' in meta) {
           delete meta['lastReferenceSkill']
-          this.deps.db.updateConversationScopeMeta(
+          this.deps.db.chat.updateConversationScopeMeta(
             scopeId,
             meta,
             expectedMessageVisibilityEpoch,
@@ -169,7 +170,7 @@ export class ReferenceHintService {
         return
       }
       meta['lastReferenceSkill'] = hint
-      this.deps.db.updateConversationScopeMeta(
+      this.deps.db.chat.updateConversationScopeMeta(
         scopeId,
         meta,
         expectedMessageVisibilityEpoch,

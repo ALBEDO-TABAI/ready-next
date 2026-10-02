@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module'
 
-import type { DatabaseConnection } from '../main/modules/database'
+import type { DatabaseConnection } from '../main/modules/database/connection'
 import { runMigrations, type MigrationDatabase } from '../main/modules/migrations'
 import { buildPreparedSkillTurnTruth } from '../main/modules/agent-control/skills/prepared-skill-turn'
 import { buildExplicitNoSkillAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'

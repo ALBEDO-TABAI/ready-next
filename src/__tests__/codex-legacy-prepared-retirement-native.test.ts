@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { classifyLifecycleOperation } from '../shared/ipc-contracts/agent-lifecycle-snapshot'
-import type { DatabaseConnection } from '../main/modules/database'
+import type { DatabaseConnection } from '../main/modules/database/connection'
 import {
   __getMigrationNamesForTests,
   __runMigrationForTests,

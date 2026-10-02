@@ -68,7 +68,15 @@ const READ_ONLY_DOCUMENT_TOOL_NAMES = new Set([
 ])
 
 const READ_ONLY_RSS_TOOL_NAMES = new Set([
+  'rss_read_analysis_assets',
+  'rss_read_catalog',
+  'rss_read_analysis_report',
   'rss_capture_session',
+  'rss_query_items',
+  'rss_read_article',
+  'rss_read_reference',
+  'rss_read_processing',
+  'rss_read_excerpt', 'rss_read_digests', 'rss_read_events',
 ])
 
 const READ_ONLY_CALENDAR_TOOL_NAMES = new Set([

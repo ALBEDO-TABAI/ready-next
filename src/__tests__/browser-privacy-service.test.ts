@@ -289,21 +289,21 @@ describe('browser-privacy-service', () => {
     }
 
     try {
-      const oldId = db.addHistoryEntry('https://old.example/x', 'Old')
-      db.addHistoryEntry('https://new.example/y', 'New')
-      assert.equal(db.getHistoryCount(), 2)
+      const oldId = db.browser.addHistoryEntry('https://old.example/x', 'Old')
+      db.browser.addHistoryEntry('https://new.example/y', 'New')
+      assert.equal(db.browser.getHistoryCount(), 2)
 
       const cutoff = Math.floor(Date.now() / 1000) - 3600
       db.getRawDb()!
         .prepare('UPDATE browser_history SET visited_at = ? WHERE id = ?')
         .run(cutoff - 7200, oldId)
 
-      db.clearHistory(cutoff)
-      assert.equal(db.getHistoryCount(), 1)
-      assert.equal(db.getHistory()[0].url, 'https://old.example/x')
+      db.browser.clearHistory(cutoff)
+      assert.equal(db.browser.getHistoryCount(), 1)
+      assert.equal(db.browser.getHistory()[0].url, 'https://old.example/x')
 
-      db.clearHistory()
-      assert.equal(db.getHistoryCount(), 0)
+      db.browser.clearHistory()
+      assert.equal(db.browser.getHistoryCount(), 0)
     } finally {
       db.close()
     }
@@ -324,21 +324,21 @@ describe('browser-privacy-service', () => {
     }
 
     try {
-      db.addDownload({ id: 'dl-old', url: 'https://a/1', filename: 'a.bin', total_bytes: 10 })
-      db.addDownload({ id: 'dl-new', url: 'https://a/2', filename: 'b.bin', total_bytes: 10 })
-      assert.equal(db.getDownloadCount(), 2)
+      db.browser.addDownload({ id: 'dl-old', url: 'https://a/1', filename: 'a.bin', total_bytes: 10 })
+      db.browser.addDownload({ id: 'dl-new', url: 'https://a/2', filename: 'b.bin', total_bytes: 10 })
+      assert.equal(db.browser.getDownloadCount(), 2)
 
       const cutoff = Math.floor(Date.now() / 1000) - 3600
       db.getRawDb()!
         .prepare('UPDATE browser_downloads SET created_at = ? WHERE id = ?')
         .run(cutoff - 7200, 'dl-old')
 
-      db.clearDownloads(cutoff)
-      assert.equal(db.getDownloadCount(), 1)
-      assert.equal(db.getDownloads()[0].id, 'dl-old')
+      db.browser.clearDownloads(cutoff)
+      assert.equal(db.browser.getDownloadCount(), 1)
+      assert.equal(db.browser.getDownloads()[0].id, 'dl-old')
 
-      db.clearDownloads()
-      assert.equal(db.getDownloadCount(), 0)
+      db.browser.clearDownloads()
+      assert.equal(db.browser.getDownloadCount(), 0)
     } finally {
       db.close()
     }

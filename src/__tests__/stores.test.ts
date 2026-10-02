@@ -197,38 +197,31 @@ describe('useRSSSession Store', () => {
 
     it('should allow clearing selected fields back to null', () => {
         useRSSSession.getState().setSelection({
-            selectedSourceId: 'source-1',
             selectedItemId: 'item-1',
             selectedItemTitle: 'Title 1',
         })
-        assert.strictEqual(useRSSSession.getState().selectedSourceId, 'source-1')
+        useRSSSession.getState().setQuery({ sourceId: 'source-1' })
+        assert.strictEqual(useRSSSession.getState().query.sourceId, 'source-1')
         assert.strictEqual(useRSSSession.getState().selectedItemId, 'item-1')
         assert.strictEqual(useRSSSession.getState().selectedItemTitle, 'Title 1')
 
         useRSSSession.getState().setSelection({
-            selectedSourceId: null,
             selectedItemId: null,
             selectedItemTitle: null,
         })
-        assert.strictEqual(useRSSSession.getState().selectedSourceId, null)
+        useRSSSession.getState().setQuery({ sourceId: undefined })
+        assert.strictEqual(useRSSSession.getState().query.sourceId, undefined)
         assert.strictEqual(useRSSSession.getState().selectedItemId, null)
         assert.strictEqual(useRSSSession.getState().selectedItemTitle, null)
     })
 
-    it('should allow explicitly clearing lastFetchAt', () => {
-        useRSSSession.getState().setFeedSnapshot({
-            totalItems: 12,
-            unreadItems: 4,
-            lastFetchAt: 123456,
-        })
-        assert.strictEqual(useRSSSession.getState().lastFetchAt, 123456)
-
-        useRSSSession.getState().setFeedSnapshot({
-            lastFetchAt: null,
-        })
-        assert.strictEqual(useRSSSession.getState().lastFetchAt, null)
-        assert.strictEqual(useRSSSession.getState().totalItems, 12)
-        assert.strictEqual(useRSSSession.getState().unreadItems, 4)
+    it('keeps the native view count and timestamp rather than recomputing them from the loaded page', () => {
+        const store = useRSSSession.getState()
+        store.setView({ query: store.query, revision: 1, total: 120, unreadTotal: 40, items: [], nextCursor: 'next', lastFetchAt: 123456 })
+        assert.strictEqual(useRSSSession.getState().view?.lastFetchAt, 123456)
+        store.setView({ ...useRSSSession.getState().view!, lastFetchAt: null })
+        assert.strictEqual(useRSSSession.getState().view?.lastFetchAt, null)
+        assert.strictEqual(useRSSSession.getState().view?.total, 120)
     })
 })
 

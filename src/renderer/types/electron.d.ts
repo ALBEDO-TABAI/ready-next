@@ -1137,15 +1137,6 @@ interface BrowserTabContextData {
   capturedAt: number
 }
 
-interface BrowserPreviewState {
-  url: string
-  title: string
-  loading: boolean
-  canGoBack: boolean
-  canGoForward: boolean
-  error?: string
-}
-
 interface BrowserBookmarksChangedEvent {
   action: 'import' | 'export'
   imported?: number
@@ -1156,7 +1147,6 @@ interface BrowserBookmarksChangedEvent {
 
 interface BrowserAdblockStateData {
   enabled: boolean
-  previewEnabled: boolean
   whitelistDomains: string[]
   rulesVersion: string
   networkBlockedCount: number
@@ -1255,7 +1245,6 @@ interface ElectronBrowserAPI {
   }) => void) => () => void
   setAdblockEnabled: (
     enabled: boolean,
-    scope?: 'main' | 'preview' | 'all'
   ) => Promise<{ success: boolean; data?: BrowserAdblockStateData; error?: string }>
   toggleAdblockDomain: (
     domain: string
@@ -1263,19 +1252,6 @@ interface ElectronBrowserAPI {
   getTabContext: (
     tabId?: string
   ) => Promise<{ success: boolean; data?: BrowserTabContextData; error?: string }>
-  previewOpen: (payload: { url: string }) => Promise<{ success: boolean; error?: string }>
-  previewNavigate: (payload: { url: string }) => Promise<{ success: boolean; error?: string }>
-  previewGoBack: () => Promise<{ success: boolean; error?: string }>
-  previewGoForward: () => Promise<{ success: boolean; error?: string }>
-  previewReload: () => Promise<{ success: boolean; error?: string }>
-  previewUpdateBounds: (bounds: {
-    x: number
-    y: number
-    width: number
-    height: number
-  }) => Promise<{ success: boolean }>
-  previewClose: () => Promise<{ success: boolean }>
-  previewGetState: () => Promise<BrowserPreviewState>
   p7cLiveProofStartUserViewLease: () => Promise<{ success: boolean; leaseId?: string; tabId?: string; error?: string }>
   p7cLiveProofCreateManualTab: () => Promise<{ success: boolean; tabId?: string; error?: string }>
   p7cLiveProofPrepareForegroundProbe: () => Promise<{
@@ -1303,7 +1279,6 @@ interface ElectronBrowserAPI {
   }>
   p7cLiveProofCheckWriteDenied: () => Promise<{ success: boolean; errorKind?: string; error?: string }>
   p7cLiveProofClear: () => Promise<{ success: boolean; error?: string }>
-  onPreviewUpdate: (callback: (data: BrowserPreviewState) => void) => () => void
   onTabUpdate: (callback: (data: BrowserTabUpdateEvent) => void) => () => void
   onTabOpened: (callback: (data: BrowserTabOpenedEvent) => void) => () => void
   onAdblockUpdate: (callback: (data: BrowserAdblockStateData) => void) => () => void
@@ -2090,23 +2065,6 @@ interface RSSDraftStoreSourceData {
 }
 
 /** RSS item record */
-interface RSSItemData {
-  id: string
-  sourceId: string
-  title: string
-  link: string
-  summary: string
-  author?: string
-  source?: string
-  publishedAt: string
-  inboxVisible?: boolean
-  read: boolean
-  starred: boolean
-  coverImage?: string | null
-  aiScore?: number | null
-  aiTags?: string | null
-}
-
 /** Input for adding an RSS source */
 interface RSSAddSourceInput {
   name?: string
@@ -2133,6 +2091,7 @@ type RSSAnalysisJobStatus =
   | 'skipped'
 
 interface RSSAnalysisJobData {
+  sourceWarning?: string | null
   id: string
   itemId: string
   action: RSSAnalysisAction
@@ -2153,6 +2112,7 @@ interface RSSAnalysisJobData {
 }
 
 interface RSSItemAnalysisProgress {
+  sourceWarning?: string | null
   itemId: string
   jobId: string
   action: RSSAnalysisAction
@@ -2166,6 +2126,36 @@ interface RSSItemAnalysisProgress {
 }
 
 interface ElectronRSSAPI {
+  readExcerpt: (input: import('../../shared/rss-excerpt').RSSReadExcerptInput) => Promise<RSSResponse<import('../../shared/rss-excerpt').RSSSelectionExcerpt>>
+  readDigests: (input?: import('../../shared/rss-digests').RSSDigestReadInput) => Promise<RSSResponse<import('../../shared/rss-digests').RSSDigestReadResult>>
+  digestSettings: () => Promise<RSSResponse<import('../../shared/rss-digests').RSSDigestScheduleState | null>>
+  configureDigests: (input: import('../../shared/rss-digests').RSSDigestSettings) => Promise<RSSResponse<import('../../shared/rss-digests').RSSDigestScheduleState>>
+  generateDigest: (input: import('../../shared/rss-digests').RSSDigestGenerateInput) => Promise<RSSResponse<import('../../shared/rss-digests').RSSDigestHeader>>
+  exportDigest: (input: { reportId: string }) => Promise<RSSResponse<{ canceled: boolean; path?: string; reportId?: string }>>
+  onDigestsChanged: (callback: () => void) => () => void
+  markEventFactsSeen: (input: { factIds: string[] }) => Promise<RSSResponse<{ changed: number; seenIds: string[] }>>
+  onEventSeenChanged: (callback: () => void) => () => void
+  queryCards: (query?: import('../../shared/rss-workspace').RSSQueryInput) => Promise<RSSResponse<import('../../shared/rss-workspace').RSSQueryResult>>
+  readEvents: (input?: import('../../shared/rss-events').RSSReadEventsInput) => Promise<RSSResponse<import('../../shared/rss-events').RSSReadEventsResult>>
+  moveEventMember: (input: import('../../shared/rss-events').RSSEventMoveInput) => Promise<RSSResponse<import('../../shared/rss-events').RSSEventMembership>>
+  mergeEvents: (input: import('../../shared/rss-events').RSSEventMergeInput) => Promise<RSSResponse<import('../../shared/rss-events').RSSEventSummary>>
+  processingStatus: () => Promise<RSSResponse<import('../../shared/rss-processing').RSSProcessingStatus>>
+  processingJobs: (input?: import('../../shared/rss-processing').RSSProcessingListInput) => Promise<RSSResponse<import('../../shared/rss-processing').RSSProcessingList>>
+  configureProcessing: (input: import('../../shared/rss-processing').RSSProcessingSettings) => Promise<RSSResponse<import('../../shared/rss-processing').RSSProcessingSettings>>
+  reprocessArticle: (input: { itemId: string; expectedArticleRevision: string }) => Promise<RSSResponse<{ jobIds: string[] }>>
+  cancelProcessing: (id: string) => Promise<RSSResponse<{ id: string }>>
+  resumeProcessing: () => Promise<RSSResponse<{ requested: boolean }>>
+  getDefinitions: () => Promise<RSSResponse<import('../../shared/rss-organization').RSSDefinition[]>>
+  saveDefinition: (input: import('../../shared/rss-organization').RSSDefinitionWrite) => Promise<RSSResponse<import('../../shared/rss-organization').RSSDefinition>>
+  removeDefinition: (input: { id: string; expectedRevision: number }) => Promise<RSSResponse<{ id: string }>>
+  setMembership: (input: import('../../shared/rss-organization').RSSMembershipWrite) => Promise<RSSResponse<import('../../shared/rss-organization').RSSMembership[]>>
+  onOrganizationChanged: (callback: () => void) => () => void
+  saveArticleNote: (input: import('../../shared/rss-workspace').RSSSaveNoteInput) => Promise<RSSResponse<import('../../shared/rss-workspace').RSSNoteSaveResult>>
+  exportQuery: (input: import('../../shared/rss-workspace').RSSQueryInput) => Promise<RSSResponse<import('../../shared/rss-workspace').RSSQueryExportResult>>
+  queryItems: (query?: import('../../shared/rss-workspace').RSSQueryInput) => Promise<RSSResponse<import('../../shared/rss-workspace').RSSQueryResult>>
+  dismissQuery: (input: import('../../shared/rss-workspace').RSSQueryInput) => Promise<RSSResponse<{ dismissed: number }>>
+  readArticle: (input: import('../../shared/rss-workspace').RSSReadArticleInput) => Promise<RSSResponse<import('../../shared/rss-workspace').RSSArticleExcerpt>>
+  loadArticle: (input: { itemId: string; force?: boolean }) => Promise<RSSResponse<Omit<import('../../shared/rss-workspace').RSSArticle, 'body'> & { body: Omit<import('../../shared/rss-workspace').RSSArticle['body'], 'markdown'> }>>
   getSources: () => Promise<RSSResponse<RSSSourceData[]>>
   addSource: (source: RSSAddSourceInput) => Promise<
     RSSResponse<{
@@ -2177,7 +2167,6 @@ interface ElectronRSSAPI {
     }>
   >
   removeSource: (id: string) => Promise<RSSResponse<{ removed: boolean }>>
-  getItems: (sourceId?: string) => Promise<RSSResponse<RSSItemData[]>>
   getDraftStoreSources: () => Promise<RSSResponse<RSSDraftStoreSourceData[]>>
   markRead: (itemId: string) => Promise<RSSResponse<{ marked: boolean }>>
   markReadBatch: (itemIds: string[]) => Promise<RSSResponse<{ marked: number }>>
@@ -2193,7 +2182,6 @@ interface ElectronRSSAPI {
   ) => Promise<RSSResponse<import('../modules/rss/types').RSSRefreshSourceResultData>>
   fetchAll: (options?: {
     digest?: boolean
-    classification?: 'simple' | 'none'
     group?: string
     sourceIds?: string[]
   }) => Promise<
@@ -2215,7 +2203,7 @@ interface ElectronRSSAPI {
       totalItems: number
       unreadItems: number
       platformDistribution: Record<string, number>
-      categoryDistribution: Record<string, number>
+      categories: Array<{ id: string; name: string; count: number }>
     }>
   >
   diagnostics: () => Promise<RSSResponse<RSSDiagnosticsData>>
@@ -2228,7 +2216,7 @@ interface ElectronRSSAPI {
   >
   exportOpml: () => Promise<RSSResponse<{ path: string }>>
   exportFeed: (
-    type?: 'master' | 'tech' | 'humanities' | 'design' | 'entertainment' | 'others'
+    type?: string
   ) => Promise<RSSResponse<{ path: string }>>
   startItemAnalysis: (payload: {
     itemId: string

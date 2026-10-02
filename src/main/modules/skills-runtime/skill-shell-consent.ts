@@ -33,7 +33,7 @@ export function parseShellConsentMap(raw: string | null | undefined): Record<str
 export function getSkillShellConsent(skillId: string): boolean {
   if (!skillId) return false
   try {
-    return parseShellConsentMap(getDatabase().getSetting(SHELL_CONSENT_SETTING_KEY))[skillId] === true
+    return parseShellConsentMap(getDatabase().settings.getSetting(SHELL_CONSENT_SETTING_KEY))[skillId] === true
   } catch {
     return false
   }
@@ -41,10 +41,10 @@ export function getSkillShellConsent(skillId: string): boolean {
 
 export function setSkillShellConsent(skillId: string, granted: boolean): void {
   if (!skillId) return
-  const map = parseShellConsentMap(getDatabase().getSetting(SHELL_CONSENT_SETTING_KEY))
+  const map = parseShellConsentMap(getDatabase().settings.getSetting(SHELL_CONSENT_SETTING_KEY))
   if (granted) map[skillId] = true
   else delete map[skillId]
-  getDatabase().setSetting(SHELL_CONSENT_SETTING_KEY, JSON.stringify(map))
+  getDatabase().settings.setSetting(SHELL_CONSENT_SETTING_KEY, JSON.stringify(map))
 }
 
 /** Embedded skills are shipped + CI-reviewed → shell allowed by default. */

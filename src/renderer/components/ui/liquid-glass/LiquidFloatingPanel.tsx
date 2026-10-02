@@ -6,6 +6,7 @@ interface LiquidFloatingPanelProps extends HTMLAttributes<HTMLDivElement> {
   contentClassName?: string
   contentStyle?: CSSProperties
   radius?: number
+  sourceSelector?: string
 }
 
 interface LiquidSurfaceLayerProps {
@@ -69,6 +70,7 @@ export const LiquidFloatingPanel = forwardRef<HTMLDivElement, LiquidFloatingPane
     contentClassName,
     contentStyle,
     radius = 16,
+    sourceSelector,
     style,
     ...props
   }, ref) {
@@ -91,7 +93,7 @@ export const LiquidFloatingPanel = forwardRef<HTMLDivElement, LiquidFloatingPane
           WebkitBackdropFilter: 'none',
         }}
       >
-        <LiquidSurfaceLayer radius={radius} />
+        <LiquidSurfaceLayer radius={radius} sourceSelector={sourceSelector} />
         <div className={contentClassName || 'ready-liquid-popover__content'} style={contentStyle}>
           {children}
         </div>

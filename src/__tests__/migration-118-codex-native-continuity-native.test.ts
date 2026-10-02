@@ -10,7 +10,7 @@ import {
 import { loadSqliteAfterGuardForTest, skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { CodexBindingRepository } from '../main/modules/agent-control/codex-runtime/codex-binding-repository'
 import { projectCodexHeadActionProjection } from '../main/modules/agent-control/codex-runtime/codex-action-surface'
-import type { DatabaseConnection } from '../main/modules/database'
+import type { DatabaseConnection } from '../main/modules/database/connection'
 import { applyCodexGatewayCompletionEvidenceMigration } from '../main/modules/agent-control/codex-runtime/codex-binding-schema'
 
 const historicalSchema = readFileSync(new URL('./fixtures/ready-pre118-schema.sql', import.meta.url), 'utf8')

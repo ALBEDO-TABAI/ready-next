@@ -1,5 +1,5 @@
 /** Durable model routes and request/response receipts. This module never opens a provider connection. */
-import type { DatabaseConnection } from '../../database'
+import type { DatabaseConnection } from '../../database/connection'
 import type { CodexModelGatewayBindingRead, CodexModelGatewayBindingReadInput } from './codex-binding-repository'
 import { CodexModelGatewayAuthorityError } from './codex-model-gateway-common'
 import {

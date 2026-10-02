@@ -106,7 +106,7 @@ export async function pruneUnreferencedCredentials(
 
 export async function pruneUnreferencedCredentialsAtStartup(): Promise<number> {
   const repository = new AppSettingsRepository()
-  const channels = getDatabase().listAgentChannels()
+  const channels = getDatabase().channels.listAgentChannels()
   return pruneUnreferencedCredentials(
     getCredentialVault(),
     repository.getSetting(EXTERNAL_SERVICE_SETTINGS_KEY),

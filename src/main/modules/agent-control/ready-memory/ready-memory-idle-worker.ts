@@ -1,5 +1,5 @@
 import type { ReadyMemoryGenerationCoordinator } from './ready-memory-generation'
-import type { DatabaseConnection } from '../../database'
+import type { DatabaseConnection } from '../../database/connection'
 
 export function isReadyMemoryProductionIdle(db: DatabaseConnection): boolean {
   return !db.prepare(`

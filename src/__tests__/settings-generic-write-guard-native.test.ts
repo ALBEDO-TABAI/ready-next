@@ -65,7 +65,7 @@ async function withSettingsDatabase(
     getRawDb: () => db,
   }
   const repository = new AppSettingsRepository(
-    () => database,
+    () => ({ settings: database, getRawDb: database.getRawDb }),
     (current, next) => guard.assertWorkspaceMutationAllowed(current, next),
   )
   try {

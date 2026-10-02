@@ -10,7 +10,7 @@ import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 function createScopeStore(database: DatabaseManager): ConversationScopeStore {
   return new ConversationScopeStore({
-      ensureChannelAlias: () => {},
+    ensureChannelAlias: () => {},
     db: database,
     emitConversationEvent() {},
     mapChannelRow(row) {
@@ -64,7 +64,7 @@ test('closed scope is absent from cold hydration, history, recall, and late writ
   try {
     const store = createScopeStore(database)
     const scope = store.createLocalScope('butler', 'scope-closed-local')
-    database.addChatMessage(
+    database.chat.addChatMessage(
       'message-closed-local',
       scope.id,
       'user',
@@ -86,21 +86,21 @@ test('closed scope is absent from cold hydration, history, recall, and late writ
       () => coldStore.getConversationScopeMessages(scope.id),
       /conversation_scope_closed_or_missing/,
     )
-    assert.deepEqual(database.getChatMessages(scope.id), [])
-    assert.deepEqual(database.getConversations('butler'), [])
+    assert.deepEqual(database.chat.getChatMessages(scope.id), [])
+    assert.deepEqual(database.chat.getConversations('butler'), [])
     assert.deepEqual(recall.searchSessionRecall({ query: '雅典关键词' }), [])
     assert.deepEqual(recall.listRecentSessions({ agent: 'butler' }), [])
     assert.equal(recall.getSessionRecallCapsule({ conversationId: scope.id }), null)
-    assert.equal(database.getChatMessageById('message-closed-local'), null)
-    assert.equal(database.updateChatMessageMeta('message-closed-local', { late: true }), false)
+    assert.equal(database.chat.getChatMessageById('message-closed-local'), null)
+    assert.equal(database.chat.updateChatMessageMeta('message-closed-local', { late: true }), false)
     assert.throws(
-      () => database.addChatMessage(
+      () => database.chat.addChatMessage(
         'message-late-local', scope.id, 'assistant', '晚到写入', '2026-08-12T01:02:00.000Z',
       ),
       /Conversation scope closed/,
     )
     assert.throws(
-      () => database.upsertConversationScope({
+      () => database.chat.upsertConversationScope({
         id: scope.id,
         agent: 'butler',
         title: '不应复活',
@@ -145,7 +145,7 @@ test('closed remote thread creates a new scope without exposing the old messages
   const database = new DatabaseManager(true)
   try {
     const store = createScopeStore(database)
-    database.upsertAgentChannel({
+    database.channels.upsertAgentChannel({
       id: 'channel-1',
       type: 'local-debug',
       name: 'Closed scope test channel',
@@ -153,13 +153,13 @@ test('closed remote thread creates a new scope without exposing the old messages
       configJson: '{}',
     })
     const first = store.ensureChannelScope('channel-1', 'remote-thread-1', 'butler', 'Alice')
-    database.upsertAgentChannelThread({
+    database.channels.upsertAgentChannelThread({
       channelId: 'channel-1',
       remoteThread: 'remote-thread-1',
       sessionId: first.id,
       conversationId: first.id,
     })
-    database.addChatMessage(
+    database.chat.addChatMessage(
       'message-remote-old',
       first.id,
       'user',
@@ -169,7 +169,7 @@ test('closed remote thread creates a new scope without exposing the old messages
     closeScope(database, first.id, '2026-08-12T02:01:00.000Z')
 
     const second = store.ensureChannelScope('channel-1', 'remote-thread-1', 'butler', 'Alice')
-    database.upsertAgentChannelThread({
+    database.channels.upsertAgentChannelThread({
       channelId: 'channel-1',
       remoteThread: 'remote-thread-1',
       sessionId: second.id,
@@ -184,7 +184,7 @@ test('closed remote thread creates a new scope without exposing the old messages
     )
     assert.deepEqual(store.getConversationScopeMessages(second.id), [])
 
-    database.addChatMessage(
+    database.chat.addChatMessage(
       'message-remote-new',
       second.id,
       'user',
@@ -199,8 +199,8 @@ test('closed remote thread creates a new scope without exposing the old messages
       store.listConversationScopes('butler').map((scope) => scope.id),
       [second.id],
     )
-    assert.equal(database.getAgentChannelThreadBySession(first.id), null)
-    assert.equal(database.getAgentChannelThreadBySession(second.id)?.conversation_id, second.id)
+    assert.equal(database.channels.getAgentChannelThreadBySession(first.id), null)
+    assert.equal(database.channels.getAgentChannelThreadBySession(second.id)?.conversation_id, second.id)
 
     const db = database.getRawDb()
     assert.ok(db)

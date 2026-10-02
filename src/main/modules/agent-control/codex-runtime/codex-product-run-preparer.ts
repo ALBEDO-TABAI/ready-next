@@ -1,3 +1,5 @@
+import { RSSReferenceResourceSchema, type RSSReferenceResource } from '../../../../shared/rss-reference'
+import { rssResourceBindingsMatch } from './codex-rss-resources'
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
 
@@ -128,6 +130,7 @@ export type PreparedCodexProductRun = {
   readyTurnToolAuthorization: ReadyTurnToolAuthorizationRef
   readyToolHostIdentity: ReadyToolHostIdentity
   externalReadSlice?: PreparedCodexExternalReadSlice
+  rssReferences?: RSSReferenceResource[]
   resourceAuthorities?: PreparedCodexResourceAuthority[]
   outputContract?: CodexOutputContract
   browserPageRef?: NonNullable<TrustedRequestEnvironment['browserPageRef']>
@@ -176,6 +179,7 @@ export type CodexProductRunPreparationInput = {
   authorizationOwnerId: string
   resourceOwnerId: string
   externalReadSlice?: PreparedCodexExternalReadSlice | null
+  rssReferences?: RSSReferenceResource[]
   resourceAuthorities?: PreparedCodexResourceAuthority[]
   browserPageRef?: NonNullable<TrustedRequestEnvironment['browserPageRef']>
   productSurfaceTargets?: PreparedCodexProductRun['productSurfaceTargets']
@@ -414,6 +418,7 @@ const preparationInputSchema = z.object({
   authorizationOwnerId: nonEmptyString,
   resourceOwnerId: nonEmptyString,
   externalReadSlice: preparedExternalReadSliceSchema.nullable().optional(),
+  rssReferences: z.array(RSSReferenceResourceSchema).optional(),
   resourceAuthorities: z.array(preparedCodexResourceAuthoritySchema).optional(),
   browserPageRef: browserPageRefSchema.optional(),
   productSurfaceTargets: z.object({
@@ -482,6 +487,7 @@ const preparedRunSchema = z.object({
     resourceOwnerId: nonEmptyString,
   }).strict(),
   externalReadSlice: preparedExternalReadSliceSchema.optional(),
+  rssReferences: z.array(RSSReferenceResourceSchema).optional(),
   resourceAuthorities: z.array(preparedCodexResourceAuthoritySchema).optional(),
   outputContract: outputContractSchema.optional(),
   browserPageRef: browserPageRefSchema.optional(),
@@ -511,6 +517,30 @@ const preparedRunSchema = z.object({
 
 function digest(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex')
+}
+
+// One builder for prepare and validation: JSON key order is part of the digest.
+// Optional members are omitted when empty so pre-RSS prepared runs keep their digest.
+function resourceAnchorDigest(input: {
+  explicitResourceEnvelope: unknown
+  resourceAdditionalContext: unknown
+  currentDocumentAnchor?: unknown
+  externalReadSlice?: Parameters<typeof externalReadResourceAuthority>[0] | null
+  resourceAuthorities?: readonly unknown[]
+  rssReferences?: readonly unknown[]
+  browserPageRef?: unknown
+}): string {
+  return digest({
+    explicitResourceEnvelope: input.explicitResourceEnvelope,
+    resourceAdditionalContext: input.resourceAdditionalContext,
+    ...(input.currentDocumentAnchor ? { currentDocumentAnchor: input.currentDocumentAnchor } : {}),
+    ...(input.externalReadSlice
+      ? { externalReadResourceAuthority: externalReadResourceAuthority(input.externalReadSlice) }
+      : {}),
+    ...(input.resourceAuthorities?.length ? { resourceAuthorities: input.resourceAuthorities } : {}),
+    ...(input.rssReferences?.length ? { rssReferences: input.rssReferences } : {}),
+    ...(input.browserPageRef ? { browserPageRef: input.browserPageRef } : {}),
+  })
 }
 
 function validUncommittedTailContract(ingress: UserIngress): boolean {
@@ -603,6 +633,7 @@ export function isPreparedCodexProductRun(value: unknown): value is PreparedCode
   const parsed = preparedRunSchema.safeParse(value)
   if (!parsed.success) return false
   const prepared = parsed.data
+  if (!rssResourceBindingsMatch(prepared.rssReferences || [], prepared.ingress.resourceAdditionalContext, prepared.readyTurnToolAuthorization.allowedToolNames)) return false
   const directoryAuthorities = (prepared.resourceAuthorities ?? [])
     .filter((authority) => authority.kind === 'local_directory')
   const expectedOutputContract = createOutputContract(prepared.resourceAuthorities ?? [])
@@ -667,20 +698,15 @@ export function isPreparedCodexProductRun(value: unknown): value is PreparedCode
       prepared.ingress.explicitResourceEnvelope.resourceRefs,
       prepared.ingress.resourceAdditionalContext,
     )
-    && prepared.resourceAnchorDigest === digest({
-          explicitResourceEnvelope: prepared.ingress.explicitResourceEnvelope,
-          resourceAdditionalContext: prepared.ingress.resourceAdditionalContext,
-          ...(prepared.ingress.currentDocumentAnchor
-            ? { currentDocumentAnchor: prepared.ingress.currentDocumentAnchor }
-            : {}),
-          ...(prepared.externalReadSlice
-            ? { externalReadResourceAuthority: externalReadResourceAuthority(prepared.externalReadSlice) }
-            : {}),
-          ...(prepared.resourceAuthorities?.length
-            ? { resourceAuthorities: prepared.resourceAuthorities }
-            : {}),
-          ...(prepared.browserPageRef ? { browserPageRef: prepared.browserPageRef } : {}),
-        })
+    && prepared.resourceAnchorDigest === resourceAnchorDigest({
+      explicitResourceEnvelope: prepared.ingress.explicitResourceEnvelope,
+      resourceAdditionalContext: prepared.ingress.resourceAdditionalContext,
+      currentDocumentAnchor: prepared.ingress.currentDocumentAnchor,
+      externalReadSlice: prepared.externalReadSlice,
+      resourceAuthorities: prepared.resourceAuthorities,
+      rssReferences: prepared.rssReferences,
+      browserPageRef: prepared.browserPageRef,
+    })
     && directoryAuthorities.every((authority) => authority.directoryIdentity != null)
     && (prepared.actionObligations === undefined
       || (
@@ -812,6 +838,8 @@ export class CodexProductRunPreparer {
     const currentDocumentAnchor = input.currentDocumentAnchor ?? null
     const externalReadSlice = input.externalReadSlice ?? null
     const resourceAuthorities = input.resourceAuthorities ?? []
+    const rssReferences = input.rssReferences ?? []
+    if (!rssResourceBindingsMatch(rssReferences, input.resourceAdditionalContext, input.readyTurnToolAuthorization.allowedToolNames)) return { ok: false, code: 'invalid_product_ingress' }
     const actionObligations = input.actionObligations ?? emptyReadyActionObligationSet()
     const outputContract = createOutputContract(resourceAuthorities)
     if (resourceAuthorities.some((authority) => (
@@ -909,16 +937,15 @@ export class CodexProductRunPreparer {
           reservationEvidenceDigest: input.reservationEvidenceDigest,
         },
         ingress,
-        resourceAnchorDigest: digest({
-              explicitResourceEnvelope: input.explicitResourceEnvelope,
-              resourceAdditionalContext: input.resourceAdditionalContext,
-              ...(currentDocumentAnchor ? { currentDocumentAnchor } : {}),
-              ...(externalReadSlice
-                ? { externalReadResourceAuthority: externalReadResourceAuthority(externalReadSlice) }
-                : {}),
-              ...(resourceAuthorities.length > 0 ? { resourceAuthorities } : {}),
-              ...(input.browserPageRef ? { browserPageRef: input.browserPageRef } : {}),
-            }),
+        resourceAnchorDigest: resourceAnchorDigest({
+          explicitResourceEnvelope: input.explicitResourceEnvelope,
+          resourceAdditionalContext: input.resourceAdditionalContext,
+          currentDocumentAnchor,
+          externalReadSlice,
+          resourceAuthorities,
+          rssReferences,
+          browserPageRef: input.browserPageRef,
+        }),
         sourceTrustedEnvironmentRef: input.explicitRetry?.sourceTrustedEnvironmentRef || {
           workbenchMode: input.trustedWorkbenchMode,
           environmentDigest: digest({
@@ -944,6 +971,7 @@ export class CodexProductRunPreparer {
         },
         ...(externalReadSlice ? { externalReadSlice } : {}),
         ...(resourceAuthorities.length > 0 ? { resourceAuthorities } : {}),
+        ...(rssReferences.length > 0 ? { rssReferences } : {}),
         ...(outputContract ? { outputContract } : {}),
         ...(input.browserPageRef ? { browserPageRef: input.browserPageRef } : {}),
         ...(input.productSurfaceTargets ? { productSurfaceTargets: input.productSurfaceTargets } : {}),

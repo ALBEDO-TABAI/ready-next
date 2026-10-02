@@ -45,12 +45,6 @@
       "owner": "codex-native-continuity"
     },
     {
-      "path": "src/__tests__/browser-input-readiness.test.ts",
-      "reason": "The capability-selection import graph now reaches database.ts statically, but this test passed under host Node while better-sqlite3 remained on the incompatible Electron ABI; it uses injected BrowserController fakes and never opens SQLite.",
-      "since": "2026-08-16",
-      "owner": "codex-capability-selection"
-    },
-    {
       "path": "src/__tests__/browser-surface-hardening.test.ts",
       "reason": "The capability-selection import graph now reaches database.ts statically, but this test passed under host Node while better-sqlite3 remained on the incompatible Electron ABI; its browser effects and receipts are all in-memory fakes.",
       "since": "2026-08-16",
@@ -105,50 +99,14 @@
       "owner": "browser-target-claims"
     },
     {
-      "path": "src/__tests__/browser-agent-work-tab.test.ts",
-      "reason": "Agent work-tab routing coverage invokes browser tools with a fully injected controller and in-memory call log; no path opens getDatabase or better-sqlite3.",
-      "since": "2026-07-22",
-      "owner": "browser-target-claims"
-    },
-    {
       "path": "src/__tests__/browser-sequential-closure-s0.test.ts",
       "reason": "Sequential-closure regression coverage uses MemoryBrowserTargetClaimRepository plus injected finalizer and handoff stores; it never opens the production database, while transitive runtime imports trigger C4.",
       "since": "2026-07-22",
       "owner": "browser-sequential-closure"
     },
     {
-      "path": "src/__tests__/browser-cdp-page-map.test.ts",
-      "reason": "CDP page-map coverage uses a fully injected BrowserController and the in-memory snapshot service. It never opens getDatabase or a repository; only the browser probe import graph reaches database.ts, so host-Node coverage must remain active.",
-      "since": "2026-07-19",
-      "owner": "browser-grounded-orchestration"
-    },
-    {
-      "path": "src/__tests__/browser-trusted-input.test.ts",
-      "reason": "Trusted-input coverage invokes pure input helpers against a fully injected BrowserController and records mouse, key, and script calls in arrays. It never opens getDatabase or a repository; only browser helper imports trigger C4.",
-      "since": "2026-07-19",
-      "owner": "browser-grounded-orchestration"
-    },
-    {
-      "path": "src/__tests__/browser-capability-service-structure.test.ts",
-      "reason": "Browser capability structure coverage runs extraction against JSDOM pages with a directly constructed capability service. It never opens getDatabase or a repository; only the widened browser service import graph reaches database.ts, so host-Node coverage must remain active.",
-      "since": "2026-07-17",
-      "owner": "browser-performance-dynamic-load"
-    },
-    {
-      "path": "src/__tests__/browser-capability-service.test.ts",
-      "reason": "Browser capability coverage uses JSDOM and synthetic browser contents to exercise page-map and observation behavior. No path opens getDatabase or better-sqlite3; only transitive browser service imports trigger C4, so host-Node coverage must remain active.",
-      "since": "2026-07-17",
-      "owner": "browser-performance-dynamic-load"
-    },
-    {
       "path": "src/__tests__/browser-download-hardening.test.ts",
       "reason": "Browser download hardening coverage uses temporary files, stubbed fetch responses, synthetic DownloadItems, and injected controller callbacks. It never opens getDatabase or better-sqlite3; only transitive browser controller types and helpers trigger C4.",
-      "since": "2026-07-17",
-      "owner": "browser-performance-dynamic-load"
-    },
-    {
-      "path": "src/__tests__/browser-semantic-tool-behavior.test.ts",
-      "reason": "Semantic browser behavior coverage uses fake controllers and direct pure helpers for forms, observation, screenshots, tabs, pointer geometry, and origin budgets. It never opens the production database; only the browser-tools import graph triggers C4, so host-Node coverage must remain active.",
       "since": "2026-07-17",
       "owner": "browser-performance-dynamic-load"
     },

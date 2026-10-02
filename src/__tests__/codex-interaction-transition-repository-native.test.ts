@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import type { DatabaseConnection } from '../main/modules/database'
+import type { DatabaseConnection } from '../main/modules/database/connection'
 import { CodexInteractionTransitionRepository } from '../main/modules/agent-control/codex-runtime/codex-interaction-transition-repository'
 import { buildFrozenCallPendingSourceDigest } from '../main/modules/agent-control/safety/frozen-call-store'
 import { loadSqliteAfterGuardForTest, skipIfSqliteUnavailable } from './utils/sqlite-skip'

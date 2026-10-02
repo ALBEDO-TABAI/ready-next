@@ -34,7 +34,6 @@ import {
   publishBrowserAgentActionLifecycle,
   publishBrowserAgentPointer
 } from './ipc-browser-lock-overlay'
-import { BrowserPreviewService } from './preview-service'
 import { BrowserPageBackgroundService } from './page-background-service'
 import { BrowserSessionPolicyService } from './session-policy-service'
 import {
@@ -55,7 +54,7 @@ import {
   toOAuthCompatibleUserAgent,
 } from './popup-policy'
 import { mapBrowserAgentPointerToOverlay } from '../../../shared/browser-agent-pointer'
-import type { BrowserPowerPreflightAuditRecord } from '../database'
+import type { BrowserPowerPreflightAuditRecord } from '../database/records'
 import { BrowserPerformanceRuntime } from './browser-performance-runtime'
 import { BrowserVisibilityRuntime } from './browser-visibility-runtime'
 import type {
@@ -75,7 +74,6 @@ export abstract class BrowserControllerComposition extends BrowserControllerCont
   tabCounter = 0
   viewBounds: BrowserRect = { x: 0, y: 0, width: 800, height: 600 }
   splitViewBounds: BrowserRect = { x: 0, y: 0, width: 800, height: 600 }
-  previewBounds: BrowserRect = { x: 0, y: 0, width: 800, height: 600 }
   protected readonly browserVisibilityRuntime: BrowserVisibilityRuntime
   protected readonly localMediaDropRuns = new Map<string, number>()
   protected readonly browserHostKind = BROWSER_HOST_KIND
@@ -86,7 +84,6 @@ export abstract class BrowserControllerComposition extends BrowserControllerCont
   protected readonly dataService: BrowserDataService
   protected readonly downloadService: BrowserDownloadService
   protected readonly diagnosticsService: BrowserDiagnosticsService
-  protected readonly previewService: BrowserPreviewService
   protected readonly contextMenuService: BrowserContextMenuService
   protected readonly bookmarkTransferService: BrowserBookmarkTransferService
   protected readonly hostLayoutService: BrowserHostLayoutService
@@ -221,32 +218,6 @@ export abstract class BrowserControllerComposition extends BrowserControllerCont
       log: (message) => this.logBrowserDiag(message),
     })
     this.networkObserverService = new BrowserNetworkObserverService(this.cdpSessionService)
-    this.previewService = new BrowserPreviewService({
-      useMock: this.useMock,
-      browserUserAgent: this.browserUserAgent,
-      createHost: (partition) => {
-        this.sessionPolicyService.applyForPartition(partition)
-        return this.createHost(partition)
-      },
-      resetPageBackground: (view) => this.pageBackgroundService.reset(view),
-      syncPageBackground: (view) => this.pageBackgroundService.sync(view),
-      showHost: (view, bounds) => this.showHost(view, bounds),
-      hideHost: (view) => this.hideHost(view),
-      detachHost: (view) => this.detachHost(view),
-      applyPreviewBounds: (view) => this.applyPreviewBounds(view),
-      getPreviewBounds: () => this.previewBounds,
-      setPreviewBounds: (bounds) => {
-        this.previewBounds = bounds
-      },
-      sendToRenderer: (channel, data) => this.sendToRenderer(channel, data),
-      logBrowserDiag: (message) => this.logBrowserDiag(message),
-      bindPopup: (webContents) => this.popupManager.bindWindow(webContents),
-      installContextMenu: (webContents) => this.contextMenuService.install(webContents),
-      ensureDownloadSession: (targetSession) => this.downloadService.ensureRegistered(targetSession),
-      handleWindowOpen: (details, source, sourceContentsId) => this.handleWindowOpen(details, source, sourceContentsId),
-      hideActiveTab: () => this.hideActiveTabHost(),
-      restoreActiveTab: () => this.restoreActiveTabHost(),
-    })
     this.automationService = new BrowserAutomationService({
       resolveTabView: (tabId) => this.resolveTabView(tabId),
       createBrowserError: (code, message) => this.createBrowserError(code, message),
@@ -379,14 +350,12 @@ export abstract class BrowserControllerComposition extends BrowserControllerCont
       applyBounds: (view, bounds) => this.applyBounds(view, bounds),
       hideHost: (view) => this.hideHost(view),
       isHostAttached: (view) => this.hostLayoutService.isHostAttached(view),
-      detachPreviewView: () => this.detachPreviewView(),
       restoreActiveTabHost: () => this.restoreActiveTabHost(),
     })
     this.sessionPolicyService = new BrowserSessionPolicyService({
       dataService: this.dataService,
       sendToRenderer: (channel, data) => this.sendToRenderer(channel, data),
       resolveOriginDomain: (webContentsId) => this.resolveOriginDomainForWebContentsId(webContentsId),
-      isPreviewWebContentsId: (webContentsId) => this.previewService.matchesWebContentsId(webContentsId),
       getMainWindow: () => (this.mainWindow && !this.mainWindow.isDestroyed() ? this.mainWindow : null),
       resolveAgentPermissionBinding: (webContentsId, partition) => (
         this.resolveAgentPermissionBinding(webContentsId, partition)
@@ -417,7 +386,7 @@ export abstract class BrowserControllerComposition extends BrowserControllerCont
         await this.createTab(url)
       },
       setAdblockEnabled: (enabled) => {
-        this.sessionPolicyService.setAdblockEnabled(enabled, 'all')
+        this.sessionPolicyService.setAdblockEnabled(enabled)
       },
       toggleAdblockDomain: (domain) => {
         this.sessionPolicyService.toggleAdblockDomain(domain)

@@ -81,7 +81,7 @@ interface BrowserTabLifecycleHost {
   applyBounds(view: BrowserHostView): void
   detachHost(view: BrowserHostView): void
   showHost(view: BrowserHostView, bounds: BrowserRect): void
-  sendToRenderer(channel: string, data: unknown): void
+  sendToRenderer(channel: 'browser:tabOpened', data: unknown): void
   queueTabUpdate(data: { type: string; tabId: string } & Record<string, unknown>): void
   buildTabPayload(tab: BrowserLifecycleTabRecord): BrowserTabMetaPayload
   emitTabMeta(tabId: string): void

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { RSSItemAnalysisManager } from '../main/modules/rss-engine/item-analysis-manager'
-import type { RSSAnalysisJob } from '../main/modules/database'
+import type { RSSAnalysisJob } from '../main/modules/database/records'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 function job(status: RSSAnalysisJob['status']): RSSAnalysisJob {

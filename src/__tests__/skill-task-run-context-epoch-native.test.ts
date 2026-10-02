@@ -6,7 +6,7 @@ import test from 'node:test'
 
 import { RunMetaRepository } from '../main/modules/agent-control/task-projection/run-meta-repository'
 import { loadSkillRunContract } from '../main/modules/agent-control/contracts/skill-run-contract-loader'
-import type { DatabaseConnection } from '../main/modules/database'
+import type { DatabaseConnection } from '../main/modules/database/connection'
 import type { MigrationDatabase } from '../main/modules/migrations'
 import {
   SkillTaskRunRepository,

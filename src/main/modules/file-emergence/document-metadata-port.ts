@@ -1,5 +1,6 @@
+import type { DatabaseConnection } from '../database/connection'
 import { isAbsolute,relative } from 'path'
-import type { DatabaseConnection } from '../database'
+
 import type { DocumentMetadataPort } from './types'
 
 export function createDocumentMetadataPort(rawDb: DatabaseConnection): DocumentMetadataPort {

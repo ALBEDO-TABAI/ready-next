@@ -84,7 +84,7 @@ function makeStore(database: DatabaseManager) {
     mapConversationRow: (row) => store.mapConversationRow(row),
   })
   store = new ConversationScopeStore({
-      ensureChannelAlias: () => {},
+    ensureChannelAlias: () => {},
     db: database,
     emitConversationEvent() {},
     mapChannelRow() { throw new Error('unexpected_channel_mapping') },
@@ -145,7 +145,7 @@ test('runtime replay reaches current-intent skill selection, while same-epoch bo
     })
     store.createConversationMessage(scopeId, { role: 'assistant', content: '已分析' }, 0)
     assert.equal(
-      (JSON.parse(database.getConversationScope(scopeId)!.meta_json || '{}') as {
+      (JSON.parse(database.chat.getConversationScope(scopeId)!.meta_json || '{}') as {
         lastReferenceSkill?: { id?: string }
       }).lastReferenceSkill?.id,
       VIDEO_COPY_SKILL.id,
@@ -198,8 +198,8 @@ test('runtime replay reaches current-intent skill selection, while same-epoch bo
       runtimeManifestDigest: 'runtime-current', protocolSchemaDigest: 'protocol-current',
       committedAt: new Date().toISOString(),
     })
-    assert.equal(database.getConversationScope(scopeId)?.message_visibility_epoch, 0)
-    assert.equal(database.getChatMessages(scopeId).length, 1)
+    assert.equal(database.chat.getConversationScope(scopeId)?.message_visibility_epoch, 0)
+    assert.equal(database.chat.getChatMessages(scopeId).length, 1)
     _resetLastReferenceSkillHintsForTests()
     await replayViaSendScoped(database, store, referenceHints, scopeId)
     assert.equal(peekLastReferenceSkill(scopeId), null)

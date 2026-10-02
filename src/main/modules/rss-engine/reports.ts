@@ -1,3 +1,4 @@
+import type { RSSMembership, RSSDefinition } from '../../../shared/rss-organization'
 import { mkdir, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { app } from 'electron'
@@ -22,7 +23,7 @@ interface RSSItemForReport {
   author: string | null
   published_at: number | null
   read: number
-  ai_tags: string | null
+  classifications: RSSMembership[]
 }
 
 export interface RSSArtifactsResult {
@@ -49,6 +50,19 @@ function formatDate(unixSeconds: number | null): string {
   return new Date(unixSeconds * 1000).toLocaleString('zh-CN')
 }
 
+function literalMarkdown(value: string): string {
+  return value.replace(/\s+/g, ' ').replace(/([\\`*_{}\[\]<>])/g, '\\$1')
+}
+
+function sourceLink(title: string, link: string): string {
+  try {
+    const url = new URL(link)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return literalMarkdown(title)
+    const href = url.href.replace(/[()<>\\]/g, (value) => encodeURIComponent(value))
+    return `[${literalMarkdown(title)}](${href})`
+  } catch { return literalMarkdown(title) }
+}
+
 function renderLatestUpdateMarkdown(
   insertedItems: RSSItemForReport[],
   sourceById: Map<string, RSSSourceForReport>,
@@ -67,10 +81,10 @@ function renderLatestUpdateMarkdown(
 
   for (const item of insertedItems) {
     const source = sourceById.get(item.source_id)
-    lines.push(`- [${item.title}](${item.link})`)
-    lines.push(`  - 来源：${source?.name || item.source_id}`)
+    lines.push(`- ${sourceLink(item.title, item.link)}`)
+    lines.push(`  - 来源：${literalMarkdown(source?.name || item.source_id)}`)
     lines.push(`  - 时间：${formatDate(item.published_at)}`)
-    lines.push(`  - 分类：${item.ai_tags || '其他'}`)
+    lines.push(`  - 分类：${item.classifications.filter((entry) => entry.included === true).map((entry) => literalMarkdown(entry.name) + (entry.stale ? '（待更新）' : '')).join('、') || '未分类'}`)
   }
 
   return lines.join('\n')
@@ -81,16 +95,18 @@ function renderSummaryMarkdown(
   items: RSSItemForReport[],
 ): string {
   const unread = items.filter((item) => item.read === 0).length
-  const categoryCounts = new Map<string, number>()
+  const categoryCounts = new Map<string, { name: string; count: number }>()
   for (const item of items) {
-    const key = item.ai_tags || '其他'
-    categoryCounts.set(key, (categoryCounts.get(key) ?? 0) + 1)
+    for (const entry of item.classifications.filter((entry) => entry.included === true && !entry.stale)) {
+      const previous = categoryCounts.get(entry.definitionId)
+      categoryCounts.set(entry.definitionId, { name: entry.name, count: (previous?.count || 0) + 1 })
+    }
   }
 
-  const sourceLines = sources.map((source) => `- ${source.name} (${source.platform || 'rss'})`)
+  const sourceLines = sources.map((source) => `- ${literalMarkdown(source.name)} (${literalMarkdown(source.platform || 'rss')})`)
   const categoryLines = Array.from(categoryCounts.entries())
-    .sort((a, b) => b[1] - a[1])
-    .map(([category, count]) => `- ${category}: ${count}`)
+    .sort((a, b) => b[1].count - a[1].count)
+    .map(([, entry]) => `- ${literalMarkdown(entry.name)}: ${entry.count}`)
 
   return [
     '# RSS 汇总报告',
@@ -106,15 +122,27 @@ function renderSummaryMarkdown(
     ...sourceLines,
     '',
     '## 分类分布',
+    '一篇资讯可属于多个分类，分类计数之和可能大于资讯总数。',
     ...(categoryLines.length > 0 ? categoryLines : ['- 暂无数据']),
   ].join('\n')
 }
 
-export async function generateRSSArtifacts(params: {
+interface RSSArtifactInput {
   sources: RSSSourceForReport[]
+  definitions: RSSDefinition[]
   allItems: RSSItemForReport[]
   insertedItems: RSSItemForReport[]
-}): Promise<RSSArtifactsResult> {
+}
+
+let artifactPublication: Promise<unknown> = Promise.resolve()
+
+export function generateRSSArtifacts(params: RSSArtifactInput): Promise<RSSArtifactsResult> {
+  const operation = artifactPublication.then(() => writeRSSArtifacts(params))
+  artifactPublication = operation.catch(() => {})
+  return operation
+}
+
+async function writeRSSArtifacts(params: RSSArtifactInput): Promise<RSSArtifactsResult> {
   const rootDir = join(app.getPath('userData'), 'rss-artifacts')
   await mkdir(rootDir, { recursive: true })
 
@@ -123,7 +151,7 @@ export async function generateRSSArtifacts(params: {
   const summaryContent = renderSummaryMarkdown(params.sources, params.allItems)
 
   const masterFeedContent = generateMasterFeed(params.allItems, params.sources)
-  const categoryFeedsContent = generateCategoryFeeds(params.allItems, params.sources)
+  const categoryFeedsContent = generateCategoryFeeds(params.allItems, params.sources, params.definitions)
   const opmlContent = generateSubscriptionsOpml(params.sources)
 
   const latestUpdatePath = join(rootDir, 'latest_update.md')

@@ -66,6 +66,7 @@ export function createProductionProductActionHandlers(input: {
   pet: CodexProductPetPort
   requestRendererToolAction: RendererToolActionRequester
   documentRequester?: (action: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
+  rssReferences?: import('../../../../shared/rss-reference').RSSReferenceResource[]
   targets?: CodexProductSurfaceTargets
   agent?: string
   sessionId: string
@@ -121,7 +122,7 @@ export function createProductionProductActionHandlers(input: {
             errors: result.data.errors || [],
           }
         }
-        const stats = input.database.getRSSStats()
+        const stats = input.database.rss.getRSSStats()
         const errors = result.data?.errors || []
         return {
           ok: true,
@@ -160,7 +161,7 @@ export function createProductionProductActionHandlers(input: {
         }
         const sourceId = added.data?.id
         const readback = sourceId
-          ? input.database.getRSSSources().find((source) => source.id === sourceId) || null
+          ? input.database.rss.getRSSSources().find((source) => source.id === sourceId) || null
           : null
         return {
           ok: true,
@@ -173,7 +174,13 @@ export function createProductionProductActionHandlers(input: {
       }
 
       if (action === 'rss.captureSession') {
-        const stats = input.database.getRSSStats()
+        const references = input.rssReferences || []
+        const query = references.find((entry) => entry.reference.kind === 'query')
+        if (query?.reference.kind === 'query') {
+          const view = input.database.rss.content.query(query.reference.query)
+          return { ok: true, summary: '已读取本轮冻结的 RSS 筛选范围。', references, query: view.query, revision: view.revision, totalItems: view.total, unreadItems: view.unreadTotal, lastFetchAt: view.lastFetchAt }
+        }
+        const stats = input.database.rss.getRSSStats()
         return {
           ok: true,
           summary: targets.rssItemId
@@ -181,6 +188,7 @@ export function createProductionProductActionHandlers(input: {
             : targets.rssSourceId
               ? `RSS 会话已捕获：当前订阅源 ${targets.rssSourceId}。`
               : 'RSS 会话已捕获：当前未选中订阅源或条目。',
+          references, statsScope: 'all_saved_items',
           selectedItemId: targets.rssItemId || null,
           selectedSourceId: targets.rssSourceId || null,
           totalItems: stats.totalItems,
@@ -195,7 +203,7 @@ export function createProductionProductActionHandlers(input: {
         }
         const itemId = requested || targets.rssItemId
         if (!itemId) throw new CodexProductActionError('product_action_rss_item_missing')
-        const items = input.database.getRSSItemsByIds([itemId])
+        const items = input.database.rss.getRSSItemsByIds([itemId])
         if (items.length !== 1) throw new CodexProductActionError('product_action_rss_item_unavailable')
         const item = items[0]
         if (action === 'rss.analyzeItem') {
@@ -203,7 +211,7 @@ export function createProductionProductActionHandlers(input: {
           if (analysisType !== 'copy' && analysisType !== 'visual') {
             return { ok: false, errorKind: 'rss_analyze_invalid', summary: 'analysisType 必须为 copy 或 visual' }
           }
-          const source = input.database.getRSSSources().find((candidate) => candidate.id === item.source_id)
+          const source = input.database.rss.getRSSSources().find((candidate) => candidate.id === item.source_id)
           const started = await input.rss.analyzeItem({
             itemId,
             analysisType,
@@ -265,7 +273,7 @@ export function createProductionProductActionHandlers(input: {
 
       if (action === 'calendar.createEvent') {
         const created = createCalendarEventFromArgs(input.database, args)
-        const readback = input.database.getCalendarEventById(created.id)
+        const readback = input.database.calendar.getCalendarEventById(created.id)
         if (!readback) {
           return { ok: false, errorKind: 'calendar_create_readback_failed', summary: '事件已写但读回失败' }
         }
@@ -287,8 +295,8 @@ export function createProductionProductActionHandlers(input: {
           listedEventIds: input.listedCalendarEventIds?.() || [],
         })
         if (action === 'calendar.deleteEvent') {
-          input.database.deleteCalendarEvent(eventId)
-          const gone = input.database.getCalendarEventById(eventId)
+          input.database.calendar.deleteCalendarEvent(eventId)
+          const gone = input.database.calendar.getCalendarEventById(eventId)
           if (gone) {
             return { ok: false, errorKind: 'calendar_delete_readback_failed', summary: '删除后仍能读到事件' }
           }
@@ -296,7 +304,7 @@ export function createProductionProductActionHandlers(input: {
           return { ok: true, summary: `事件已删除：${eventId}`, eventId }
         }
         updateCalendarEventFromArgs(input.database, eventId, args)
-        const readback = input.database.getCalendarEventById(eventId)
+        const readback = input.database.calendar.getCalendarEventById(eventId)
         if (!readback) {
           return { ok: false, errorKind: 'calendar_update_readback_failed', summary: '更新后读回失败' }
         }
@@ -362,8 +370,8 @@ function listCalendarWindowEvents(
 }> {
   const start = Math.floor(Date.parse(window.start) / 1000)
   const end = Math.floor(Date.parse(window.end) / 1000)
-  const nonRecurring = database.getNonRecurringEventsInWindow(start, end)
-  const { events: recurringParents, overridesByParent } = database.getRecurringEventsAndOverrides(start, end)
+  const nonRecurring = database.calendar.getNonRecurringEventsInWindow(start, end)
+  const { events: recurringParents, overridesByParent } = database.calendar.getRecurringEventsAndOverrides(start, end)
   const expanded = expandEventList(recurringParents, start, end, overridesByParent)
   return [...nonRecurring.map((event) => ({
     id: event.id,
@@ -424,13 +432,13 @@ function createCalendarEventFromArgs(database: DatabaseManager, args: Record<str
   if (!title || !Number.isFinite(startTime) || !Number.isFinite(endTime)) {
     throw new CodexProductActionError('product_action_calendar_create_invalid')
   }
-  const sources = database.getCalendarSources()
+  const sources = database.calendar.getCalendarSources()
   const calendarId = typeof args.calendarId === 'string' && args.calendarId.trim()
     ? args.calendarId.trim()
     : sources[0]?.id
   if (!calendarId) throw new CodexProductActionError('product_action_calendar_missing')
   const reminders = parseReminders(args.reminders)
-  const id = database.createCalendarEvent({
+  const id = database.calendar.createCalendarEvent({
     calendar_id: calendarId,
     title,
     description: typeof args.description === 'string' ? args.description : null,
@@ -482,7 +490,7 @@ function updateCalendarEventFromArgs(
   if (reminders !== undefined) updates.reminders = reminders
   if (typeof args.startTz === 'string') updates.start_tz = args.startTz
   if (typeof args.endTz === 'string') updates.end_tz = args.endTz
-  database.updateCalendarEvent(eventId, updates)
+  database.calendar.updateCalendarEvent(eventId, updates)
 }
 
 function afterCalendarMutation(

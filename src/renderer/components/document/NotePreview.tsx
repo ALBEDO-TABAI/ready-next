@@ -1,6 +1,5 @@
+import { createMarkdownComponents, copyTextToClipboard } from './MarkdownContent'
 import {
-  Children,
-  isValidElement,
   memo,
   useCallback,
   useEffect,
@@ -18,9 +17,8 @@ import {
 } from 'lucide-react'
 import { openWebpageInBrowser } from '../../modules/browser/openWebpageInBrowser'
 import { appendToAgentInput } from '../../modules/agent/chat-input-bridge'
-import { EBOOK_INLINE_IMAGE_TITLE, EBOOK_MARKDOWN_MARKER } from '../../../shared/ebook'
+import { EBOOK_MARKDOWN_MARKER } from '../../../shared/ebook'
 import {
-  resolvePreviewReference,
   type PreviewBlock,
   type PreviewEmbed,
   type PreviewProperty,
@@ -45,7 +43,6 @@ import {
 } from '../../modules/document/previewEditOperations'
 import { resolveNotePreviewModel } from '../../modules/document/notePreviewModel'
 import { recordDocumentPerformanceCounter } from '../../../shared/document-performance-diagnostics'
-import MermaidPreviewBlock from './MermaidPreviewBlock'
 
 export const PREVIEW_BLOCK_DRAG_MIME = 'application/x-ready-preview-block'
 
@@ -346,45 +343,6 @@ const MediaEmbed = memo(function MediaEmbed({
   )
 }, arePreviewEmbedPropsEqual)
 
-function mergeMarkdownClassName(className: string | undefined, previewClassName: string): string {
-  return className ? `${className} ${previewClassName}` : previewClassName
-}
-
-function extractMarkdownText(children: ReactNode): string {
-  if (children === null || children === undefined || typeof children === 'boolean') return ''
-  if (typeof children === 'string' || typeof children === 'number') return String(children)
-  if (Array.isArray(children)) return children.map(extractMarkdownText).join('')
-  if (isValidElement<{ children?: ReactNode }>(children)) return extractMarkdownText(children.props.children)
-  return ''
-}
-
-async function copyTextToClipboard(value: string): Promise<boolean> {
-  try {
-    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(value)
-      return true
-    }
-
-    if (typeof document === 'undefined') return false
-    const textarea = document.createElement('textarea')
-    textarea.value = value
-    textarea.style.position = 'fixed'
-    textarea.style.opacity = '0'
-    document.body.appendChild(textarea)
-    textarea.focus()
-    textarea.select()
-    const copied = document.execCommand('copy')
-    document.body.removeChild(textarea)
-    return copied
-  } catch {
-    return false
-  }
-}
-
-function isMermaidLanguage(className: string | undefined): boolean {
-  return /\blanguage-mermaid\b/.test(className || '')
-}
-
 function BrokenWidgetFallback({ reason }: { reason: string }) {
   return (
     <div className="note-preview-widget-error" data-ready-widget-error="true">
@@ -402,122 +360,6 @@ function BrokenWidgetFallback({ reason }: { reason: string }) {
         </button>
         <span>也可以切到编辑模式手动修复。</span>
       </div>
-    </div>
-  )
-}
-
-function isMermaidPreChildren(children: ReactNode): boolean {
-  const onlyChild = Children.toArray(children)[0]
-  return isValidElement<{ className?: string }>(onlyChild) && isMermaidLanguage(onlyChild.props.className)
-}
-
-function isMarkdownSourceLanguage(className?: string): boolean {
-  return /\blanguage-(md|markdown)\b/i.test(className || '')
-}
-
-function getPreCodeChild(children: ReactNode): { className?: string; code: string } | null {
-  const onlyChild = Children.toArray(children)[0]
-  if (!isValidElement<{ className?: string; children?: ReactNode }>(onlyChild)) return null
-  return {
-    className: onlyChild.props.className,
-    code: extractMarkdownText(onlyChild.props.children),
-  }
-}
-
-function shouldRenderMarkdownCodeAsDocument(code: string): boolean {
-  return code.split('\n').some((line) => (
-    /^[ \t]{0,3}#{1,6}\s+\S/.test(line)
-    || /^[ \t]{0,3}[-*_]{3,}[ \t]*$/.test(line)
-    || /^[ \t]{0,3}(`{3,}|~{3,})/.test(line)
-    || /^<details(\s+open)?\s*>$/i.test(line.trim())
-  ))
-}
-
-function CodeBlockWithCopy({
-  children,
-  code,
-}: {
-  children?: ReactNode
-  code: string
-}) {
-  const [copied, setCopied] = useState(false)
-
-  useEffect(() => {
-    if (!copied) return
-    const timer = window.setTimeout(() => setCopied(false), 1200)
-    return () => window.clearTimeout(timer)
-  }, [copied])
-
-  const handleCopy = useCallback(async () => {
-    const didCopy = await copyTextToClipboard(code)
-    if (didCopy) setCopied(true)
-  }, [code])
-
-  return (
-    <div className="note-preview-code-block">
-      <button
-        type="button"
-        className="note-preview-code-copy-button"
-        aria-label={copied ? '已复制代码块' : '复制代码块'}
-        title={copied ? '已复制' : '复制代码'}
-        data-ready-code-copy-button="true"
-        data-ready-code-copied={copied ? 'true' : undefined}
-        onClick={() => { void handleCopy() }}
-      >
-        {copied ? (
-          <Check style={{ width: 14, height: 14 }} strokeWidth={2} />
-        ) : (
-          <Copy style={{ width: 14, height: 14 }} strokeWidth={2} />
-        )}
-      </button>
-      <pre className="note-preview-markdown-pre">{children}</pre>
-    </div>
-  )
-}
-
-function MarkdownSourceBlock({ code }: { code: string }) {
-  return (
-    <div className="note-preview-markdown-source-rendered" data-ready-markdown-source-rendered="true">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          h1: ({ children }) => <h1 className="note-preview-markdown-h1" data-ready-heading-level="1" data-ready-heading-title={extractMarkdownText(children)}>{children}</h1>,
-          h2: ({ children }) => <h2 className="note-preview-markdown-h2" data-ready-heading-level="2" data-ready-heading-title={extractMarkdownText(children)}>{children}</h2>,
-          h3: ({ children }) => <h3 className="note-preview-markdown-h3" data-ready-heading-level="3" data-ready-heading-title={extractMarkdownText(children)}>{children}</h3>,
-          h4: ({ children }) => <h4 className="note-preview-markdown-h4" data-ready-heading-level="4" data-ready-heading-title={extractMarkdownText(children)}>{children}</h4>,
-          p: ({ children }) => <p className="note-preview-markdown-p">{children}</p>,
-          hr: () => <hr className="note-preview-markdown-hr" />,
-          blockquote: ({ children }) => <blockquote className="note-preview-markdown-quote">{children}</blockquote>,
-          ul: ({ children, node: _node, className, ...props }) => (
-            <ul className={mergeMarkdownClassName(className, 'note-preview-markdown-ul')} {...props}>{children}</ul>
-          ),
-          ol: ({ children, node: _node, className, ...props }) => (
-            <ol className={mergeMarkdownClassName(className, 'note-preview-markdown-ol')} {...props}>{children}</ol>
-          ),
-          li: ({ children, node: _node, className, ...props }) => (
-            <li className={mergeMarkdownClassName(className, 'note-preview-markdown-li')} {...props}>{children}</li>
-          ),
-          pre: ({ children }) => {
-            if (isMermaidPreChildren(children)) return <>{children}</>
-            const codeChild = getPreCodeChild(children)
-            if (
-              codeChild
-              && isMarkdownSourceLanguage(codeChild.className)
-              && shouldRenderMarkdownCodeAsDocument(codeChild.code)
-            ) {
-              return <MarkdownSourceBlock code={codeChild.code} />
-            }
-            return <CodeBlockWithCopy code={codeChild?.code ?? extractMarkdownText(children)}>{children}</CodeBlockWithCopy>
-          },
-          code: ({ children, className, ...props }) => (
-            <code className={className ? `${className} note-preview-markdown-code` : 'note-preview-markdown-code'} {...props}>
-              {children}
-            </code>
-          ),
-        }}
-      >
-        {code}
-      </ReactMarkdown>
     </div>
   )
 }
@@ -727,98 +569,7 @@ function NotePreview({
     applyContentEdit(appendPreviewParagraph(displayContent, text))
   }, [applyContentEdit, displayContent])
 
-  const markdownComponents = useMemo(() => ({
-    h1: ({ children }: { children?: ReactNode }) => <h1 className="note-preview-markdown-h1" data-ready-heading-level="1" data-ready-heading-title={extractMarkdownText(children)}>{children}</h1>,
-    h2: ({ children }: { children?: ReactNode }) => <h2 className="note-preview-markdown-h2" data-ready-heading-level="2" data-ready-heading-title={extractMarkdownText(children)}>{children}</h2>,
-    h3: ({ children }: { children?: ReactNode }) => <h3 className="note-preview-markdown-h3" data-ready-heading-level="3" data-ready-heading-title={extractMarkdownText(children)}>{children}</h3>,
-    h4: ({ children }: { children?: ReactNode }) => <h4 className="note-preview-markdown-h4" data-ready-heading-level="4" data-ready-heading-title={extractMarkdownText(children)}>{children}</h4>,
-    p: ({ children }: { children?: ReactNode }) => <p className="note-preview-markdown-p">{children}</p>,
-    em: ({ children, node: _node, ...props }: { children?: ReactNode; node?: unknown }) => <em className="note-preview-markdown-em" {...props}>{children}</em>,
-    hr: () => <hr className="note-preview-markdown-hr" />,
-    blockquote: ({ children }: { children?: ReactNode }) => <blockquote className="note-preview-markdown-quote">{children}</blockquote>,
-    ul: ({ children, node: _node, className, ...props }: { children?: ReactNode; node?: unknown; className?: string }) => (
-      <ul className={mergeMarkdownClassName(className, 'note-preview-markdown-ul')} {...props}>{children}</ul>
-    ),
-    ol: ({ children, node: _node, className, ...props }: { children?: ReactNode; node?: unknown; className?: string }) => (
-      <ol className={mergeMarkdownClassName(className, 'note-preview-markdown-ol')} {...props}>{children}</ol>
-    ),
-    li: ({ children, node: _node, className, ...props }: { children?: ReactNode; node?: unknown; className?: string }) => (
-      <li className={mergeMarkdownClassName(className, 'note-preview-markdown-li')} {...props}>{children}</li>
-    ),
-    table: ({ children, node: _node, ...props }: { children?: ReactNode; node?: unknown }) => (
-      <div className="note-preview-table-scroll" data-note-preview-table="true">
-        <table className="note-preview-markdown-table" {...props}>{children}</table>
-      </div>
-    ),
-    thead: ({ children, node: _node, ...props }: { children?: ReactNode; node?: unknown }) => <thead className="note-preview-markdown-thead" {...props}>{children}</thead>,
-    tbody: ({ children, node: _node, ...props }: { children?: ReactNode; node?: unknown }) => <tbody className="note-preview-markdown-tbody" {...props}>{children}</tbody>,
-    tr: ({ children, node: _node, ...props }: { children?: ReactNode; node?: unknown }) => <tr className="note-preview-markdown-tr" {...props}>{children}</tr>,
-    th: ({ children, node: _node, className, ...props }: { children?: ReactNode; node?: unknown; className?: string }) => (
-      <th className={className ? `${className} note-preview-markdown-th` : 'note-preview-markdown-th'} {...props}>
-        {children}
-      </th>
-    ),
-    td: ({ children, node: _node, className, ...props }: { children?: ReactNode; node?: unknown; className?: string }) => (
-      <td className={className ? `${className} note-preview-markdown-td` : 'note-preview-markdown-td'} {...props}>
-        {children}
-      </td>
-    ),
-    pre: ({ children }: { children?: ReactNode }) => (
-      (() => {
-        if (isMermaidPreChildren(children)) return <>{children}</>
-        const codeChild = getPreCodeChild(children)
-        if (
-          codeChild
-          && isMarkdownSourceLanguage(codeChild.className)
-          && shouldRenderMarkdownCodeAsDocument(codeChild.code)
-        ) {
-          return <MarkdownSourceBlock code={codeChild.code} />
-        }
-        return <CodeBlockWithCopy code={codeChild?.code ?? extractMarkdownText(children)}>{children}</CodeBlockWithCopy>
-      })()
-    ),
-    code: ({ children, className, ...props }: { children?: ReactNode; className?: string }) => {
-      if (isMermaidLanguage(className)) {
-        return <MermaidPreviewBlock code={extractMarkdownText(children).trim()} />
-      }
-      return (
-        <code className={className ? `${className} note-preview-markdown-code` : 'note-preview-markdown-code'} {...props}>
-          {children}
-        </code>
-      )
-    },
-    a: ({ href, children }: { href?: string; children?: ReactNode }) => {
-      const reference = href || ''
-      const resolved = resolvePreviewReference(reference, notePath)
-      return (
-        <a
-          href={resolved.resolvedUrl}
-          className="note-preview-markdown-link"
-          onClick={(event) => {
-            event.preventDefault()
-            void openHref(resolved.resolvedUrl, resolved.localPath)
-          }}
-        >
-          <span>{children}</span>
-          <ExternalLink style={{ width: 11, height: 11 }} strokeWidth={2} />
-        </a>
-      )
-    },
-    img: ({ src, alt, title }: { src?: string; alt?: string; title?: string }) => {
-      const reference = src || ''
-      const resolved = resolvePreviewReference(reference, notePath)
-      const isInlineEbookImage = title === EBOOK_INLINE_IMAGE_TITLE
-      return (
-        <img
-          src={resolved.resolvedUrl}
-          alt={alt || (isInlineEbookImage ? '' : 'embedded media')}
-          className={isInlineEbookImage ? 'note-preview-image note-preview-image--inline' : 'note-preview-image'}
-          loading="lazy"
-          decoding="async"
-        />
-      )
-    },
-  }), [notePath, openHref])
+  const markdownComponents = useMemo(() => createMarkdownComponents({ mode: 'document', notePath, openHref }), [notePath, openHref])
 
   return (
     <div

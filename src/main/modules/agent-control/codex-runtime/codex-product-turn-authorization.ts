@@ -1,3 +1,4 @@
+import { rssResourceVersion } from './codex-rss-resources'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -56,11 +57,9 @@ export function buildCodexProductRequestEnvelope(
     sessionId: request.scopeId,
     scopeId: request.scopeId,
     trustedEnvironment,
+    trustedResources,
     actionAuthorizationMode,
   })
-  for (const resource of trustedResources) {
-    envelope.resources.push({ ...resource, order: envelope.resources.length })
-  }
   if (trustedResources.some((resource) => resource.kind === 'attachment')) {
     envelope.environmentHints.hasAttachments = true
   }
@@ -232,6 +231,7 @@ export function readCodexPreparedActionAuthorizationEnvelope(
   outputContract?: PreparedCodexProductRun['outputContract']
 } {
   const authorities = product.prepared.resourceAuthorities ?? []
+  const rss = product.prepared.rssReferences || []
   const browserPageRef = product.prepared.browserPageRef
   return {
     actionAuthorizationMode: parseActionAuthorizationMode(
@@ -240,10 +240,10 @@ export function readCodexPreparedActionAuthorizationEnvelope(
     ...(product.prepared.outputContract
       ? { outputContract: product.prepared.outputContract }
       : {}),
-    ...(authorities.length > 0 || browserPageRef
+    ...(authorities.length > 0 || rss.length > 0 || browserPageRef
       ? {
-          ...(authorities.length > 0 ? {
-            resources: authorities.map((authority, order) => ({
+          ...(authorities.length > 0 || rss.length > 0 ? {
+            resources: [...rss.map((resource, order) => ({ id: resource.id, kind: 'rss_reference' as const, source: 'rss_context' as const, name: resource.name, path: null, text: '', summary: null, order, canRead: true, canWrite: false, rssReference: resource.reference, ...rssResourceVersion(resource) })), ...authorities.map((authority, order) => ({
               id: authority.logicalResourceId,
               kind: authority.kind === 'local_directory' ? 'folder_reference' as const : 'attachment' as const,
               source: authority.kind === 'local_directory' ? 'folder_reference' as const : 'user_attachment' as const,
@@ -257,7 +257,7 @@ export function readCodexPreparedActionAuthorizationEnvelope(
               currentVersion: authority.currentVersion,
               currentDigest: authority.currentDigest,
               policyEpoch: authority.policyEpoch,
-            })),
+            }))],
           } : {}),
           environmentHints: {
             workspaceRoots: authorities

@@ -51,6 +51,7 @@ function logSettings(msg: string) {
 
 export function setupSettingsIPC(options?: {
   onSettingChanged?: (key: string, value: string) => void
+  onModelChanged?: () => void
   chatGptOAuthService?: ChatGptOAuthService
 }): ChatGptOAuthService {
   const database = getDatabase()
@@ -97,6 +98,7 @@ export function setupSettingsIPC(options?: {
     if (!wasRunning) {
       logSettings(`[oauth] resume ready source=${source} durationMs=${Date.now() - startedAt} models=${chatGptOAuth.getStatus().models.length}`)
     }
+    options?.onModelChanged?.()
   }
 
   const initialAIConfig = repository.getAIConfig()
@@ -153,6 +155,7 @@ export function setupSettingsIPC(options?: {
       }
       await ensureChatGptOAuthReady(normalized)
       repository.setAIConfig(normalized)
+      options?.onModelChanged?.()
       return { success: true }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
@@ -192,6 +195,7 @@ export function setupSettingsIPC(options?: {
           }
         },
       })
+      options?.onModelChanged?.()
       return { success: true }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
@@ -227,6 +231,7 @@ export function setupSettingsIPC(options?: {
           )),
         },
       )
+      options?.onModelChanged?.()
       logSettings(`[oauth] authorize ready durationMs=${Date.now() - startedAt} models=${status.models.length}`)
       return { success: true, data: status }
     } catch (error) {
@@ -289,6 +294,7 @@ export function setupSettingsIPC(options?: {
         profileMutationGuard,
         chatGptOAuth,
       })
+      options?.onModelChanged?.()
       logSettings('[oauth] disconnected credentialRemoved=true')
       return { success: true, data: chatGptOAuth.getStatus() }
     } catch (error) {

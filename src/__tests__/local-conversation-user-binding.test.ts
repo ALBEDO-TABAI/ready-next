@@ -1,13 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import {
-  DatabaseManager,
-  type ChatConversationRecord,
-  type ConversationSourceKind,
-  type DatabaseConnection,
-  type DatabaseStatement,
-} from '../main/modules/database'
+import type { ChatConversationRecord, ConversationSourceKind } from '../main/modules/database/records'
+import type { DatabaseConnection, DatabaseStatement } from '../main/modules/database/connection'
+import { ChatStore } from '../main/modules/database/chat-store'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 test('local conversation user binding declares transitive sqlite ABI guard', (t) => {
@@ -83,10 +79,9 @@ class FakeConversationConnection implements DatabaseConnection {
   }
 }
 
-function createManager(): { manager: DatabaseManager; connection: FakeConversationConnection } {
+function createManager(): { manager: ChatStore; connection: FakeConversationConnection } {
   const connection = new FakeConversationConnection()
-  const manager = Object.create(DatabaseManager.prototype) as DatabaseManager
-  ;(manager as unknown as { db: DatabaseConnection }).db = connection
+  const manager = new ChatStore(() => connection)
   ;(manager as unknown as { syncConversationRecallMetadata: () => void }).syncConversationRecallMetadata = () => {}
   return { manager, connection }
 }

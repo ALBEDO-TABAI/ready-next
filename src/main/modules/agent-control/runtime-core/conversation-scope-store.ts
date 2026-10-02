@@ -22,13 +22,8 @@ import {
   parseActionAuthorizationMode,
   type ActionAuthorizationMode,
 } from '../../../../shared/action-authorization-mode'
-import type {
-  AgentChannelRecord,
-  ChatConversationRecord,
-  ChatMessageRecord,
-  DatabaseManager,
-  UpsertConversationScopeMode,
-} from '../../database'
+import type { AgentChannelRecord, ChatConversationRecord, ChatMessageRecord, UpsertConversationScopeMode } from '../../database/records'
+import type { DatabaseManager } from '../../database'
 import type { MultimodalBlock } from '../contracts/run-contracts'
 import type {
   AgentChannelConfig,
@@ -68,27 +63,27 @@ export class ConversationScopeStore {
   constructor(private readonly deps: ConversationScopeStoreDeps) {}
 
   listConversationScopes(agent?: string): ConversationScope[] {
-    return this.deps.db.listConversationScopes(agent).map((row) => this.mapConversationRow(row))
+    return this.deps.db.chat.listConversationScopes(agent).map((row) => this.mapConversationRow(row))
   }
 
   getConversationScope(scopeId: string): ConversationScope | null {
-    const row = this.deps.db.getConversationScope(scopeId)
+    const row = this.deps.db.chat.getConversationScope(scopeId)
     return row ? this.mapConversationRow(row) : null
   }
 
   getConversationScopeMessages(scopeId: string): ConversationScopeMessage[] {
-    if (!this.deps.db.getConversationScope(scopeId)) {
+    if (!this.deps.db.chat.getConversationScope(scopeId)) {
       throw new Error(`conversation_scope_closed_or_missing:${scopeId}`)
     }
-    return this.deps.db.getChatMessages(scopeId).map((row) => this.mapMessageRow(row))
+    return this.deps.db.chat.getChatMessages(scopeId).map((row) => this.mapMessageRow(row))
   }
 
   setProjectDirectory(scopeId: string, path: unknown, expectedMessageVisibilityEpoch: number): ConversationScope {
-    const existing = this.deps.db.getConversationScope(scopeId)
+    const existing = this.deps.db.chat.getConversationScope(scopeId)
     if (!existing || existing.source_kind !== 'local') throw new Error('只能为本地聊天选择项目')
     const projectDirectory = canonicalProjectDirectory(path)
     const meta = tryParseJson<Record<string, unknown>>(existing.meta_json || '{}', {})
-    const updated = this.deps.db.updateConversationScopeMeta(
+    const updated = this.deps.db.chat.updateConversationScopeMeta(
       scopeId, { ...meta, projectDirectory }, expectedMessageVisibilityEpoch,
     )
     if (!updated) throw new Error('聊天已发生变化，请重新选择项目')
@@ -102,7 +97,7 @@ export class ConversationScopeStore {
     mode: ActionAuthorizationMode,
     expectedMessageVisibilityEpoch: number,
   ): ConversationScope {
-    const existing = this.deps.db.getConversationScope(scopeId)
+    const existing = this.deps.db.chat.getConversationScope(scopeId)
     if (!existing) throw new Error(`Conversation scope not found: ${scopeId}`)
     if (existing.source_kind !== 'local') {
       throw new Error('action_authorization_mode_local_scope_required')
@@ -110,7 +105,7 @@ export class ConversationScopeStore {
     const normalizedMode = parseActionAuthorizationMode(mode)
     if (normalizedMode !== mode) throw new Error('action_authorization_mode_invalid')
     const meta = tryParseJson<Record<string, unknown>>(existing.meta_json || '{}', {})
-    const updated = this.deps.db.updateConversationScopeMeta(
+    const updated = this.deps.db.chat.updateConversationScopeMeta(
       scopeId,
       {
         ...meta,
@@ -142,7 +137,7 @@ export class ConversationScopeStore {
     id?: string,
   ): { scope: ConversationScope; mode: UpsertConversationScopeMode } {
     const scopeId = typeof id === 'string' && id.trim() ? id.trim() : `conv-${randomUUID()}`
-    const { row, mode } = this.deps.db.upsertConversationScope({
+    const { row, mode } = this.deps.db.chat.upsertConversationScope({
       id: scopeId,
       agent,
       activeAgentId: this.deps.resolveConversationAgentId(agent),
@@ -203,17 +198,17 @@ export class ConversationScopeStore {
     agent: string,
     sender: string
   ): ConversationScope {
-    const channel = this.deps.db.getAgentChannel(channelId)
+    const channel = this.deps.db.channels.getAgentChannel(channelId)
     const channelMeta = channel ? this.deps.mapChannelRow(channel) : null
     const scopedThreadKey = this.deps.getScopedRemoteThreadKey(channelId, remoteThread, agent)
-    const existing = this.deps.db.findConversationScope('channel', channelId, scopedThreadKey, agent)
+    const existing = this.deps.db.chat.findConversationScope('channel', channelId, scopedThreadKey, agent)
     const database = this.deps.db.getRawDb()
     if (!database) throw new Error('remote_database_unavailable')
     const ownsTransaction = !database.inTransaction
     if (ownsTransaction) database.exec('BEGIN IMMEDIATE')
-    let row: ReturnType<DatabaseManager['upsertConversationScope']>['row']
+    let row: ReturnType<DatabaseManager['chat']['upsertConversationScope']>['row']
     try {
-      row = this.deps.db.upsertConversationScope({
+      row = this.deps.db.chat.upsertConversationScope({
       id: existing?.id || `conv-${randomUUID()}`,
       agent,
       activeAgentId: this.deps.resolveConversationAgentId(agent),
@@ -230,7 +225,7 @@ export class ConversationScopeStore {
         channelBindingId: channelMeta?.config.bindingId,
         sender,
         remoteThread,
-        channelSessionToken: this.deps.db.getSetting(
+        channelSessionToken: this.deps.db.settings.getSetting(
           this.deps.getRemoteChannelSessionSettingKey(channelId, remoteThread, agent)
         ) || null
       }
@@ -257,7 +252,7 @@ export class ConversationScopeStore {
   }
 
   refreshScope(scopeId: string): ConversationScope {
-    const row = this.deps.db.getConversationScope(scopeId)
+    const row = this.deps.db.chat.getConversationScope(scopeId)
     if (!row) throw new Error(`Conversation scope not found: ${scopeId}`)
     return this.mapConversationRow(row)
   }
@@ -273,7 +268,7 @@ export class ConversationScopeStore {
   ): ConversationScopeMessage {
     const messageId = `msg-${randomUUID()}`
     const timestamp = new Date().toISOString()
-    this.deps.db.addChatMessage(
+    this.deps.db.chat.addChatMessage(
       messageId,
       scopeId,
       payload.role,
@@ -288,7 +283,7 @@ export class ConversationScopeStore {
     if (payload.role === 'assistant') {
       this.deps.persistReferenceHintToScope(scopeId, expectedMessageVisibilityEpoch)
     }
-    return this.mapMessageRow(this.deps.db.getChatMessages(scopeId).find((row) => row.id === messageId)!)
+    return this.mapMessageRow(this.deps.db.chat.getChatMessages(scopeId).find((row) => row.id === messageId)!)
   }
 
   extractTextFromMessage(message: string | MultimodalBlock[]): string {

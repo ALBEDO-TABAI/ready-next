@@ -14,8 +14,7 @@ import {
 import { getDatabase } from '../database'
 
 interface SettingsDatabaseLike {
-  getSetting(key: string): string | undefined
-  setSetting(key: string, value: string): void
+  settings: { getSetting(key: string): string | undefined; setSetting(key: string, value: string): void }
   getRawDb(): { exec(sql: string): void } | null
 }
 
@@ -52,15 +51,15 @@ export class AppSettingsRepository {
   ) {}
 
   getSetting(key: string): string | undefined {
-    return this.getSettingsDatabase().getSetting(key)
+    return this.getSettingsDatabase().settings.getSetting(key)
   }
 
   setSetting(key: string, value: string): void {
-    this.getSettingsDatabase().setSetting(key, value)
+    this.getSettingsDatabase().settings.setSetting(key, value)
   }
 
   getAllSettings(): Record<string, string> {
-    return getDatabase().getAllSettings()
+    return getDatabase().settings.getAllSettings()
   }
 
   private parseJSONSetting<T>(key: string): T | null {
@@ -193,12 +192,12 @@ export class AppSettingsRepository {
     try {
       const mutationGuard = this.assertAIWorkspaceMutationAllowed ?? registeredAIWorkspaceMutationGuard
       mutationGuard?.(currentWorkspace, normalizedWorkspace)
-      database.setSetting('ai_provider_workspace', JSON.stringify(normalizedWorkspace))
+      database.settings.setSetting('ai_provider_workspace', JSON.stringify(normalizedWorkspace))
       if (activeConfig) {
-        database.setSetting('ai_model_config', JSON.stringify(activeConfig))
+        database.settings.setSetting('ai_model_config', JSON.stringify(activeConfig))
       }
       if (legacyPayload.aiSavedConfigs) {
-        database.setSetting('ai_saved_configs', JSON.stringify(legacyPayload.aiSavedConfigs))
+        database.settings.setSetting('ai_saved_configs', JSON.stringify(legacyPayload.aiSavedConfigs))
       }
       rawDb.exec('COMMIT')
     } catch (error) {

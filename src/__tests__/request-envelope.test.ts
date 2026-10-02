@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { buildRequestEnvelope } from '../main/modules/agent-control/contracts/request-envelope'
+import { buildRequestEnvelope, envelopeHasLocalDocumentResource } from '../main/modules/agent-control/contracts/request-envelope'
+import { classifyIntent } from '../main/modules/agent-control/intent-classifier'
 
 test('request envelope keeps only the pure user instruction for first-pass intent and records provenance', () => {
   const envelope = buildRequestEnvelope({
@@ -184,4 +185,32 @@ test('request envelope does not turn a stale @[skill] mention in assembled conte
     ].join('\n'),
   })
   assert.equal(envelope.resources.filter((r) => r.kind === 'skill_reference').length, 0)
+})
+
+test('trusted Codex widget targets keep the 0.8 live-info routing for a widget refresh request', () => {
+  const userText = '把这张卡更新成今天上海的实时天气'
+  const widgetTarget = {
+    id: 'widget-1', kind: 'widget_target' as const, source: 'explicit_reference' as const, name: '天气卡', path: null,
+    text: '', summary: '天气卡', order: 0, canRead: true, canWrite: true,
+  }
+  const plain = buildRequestEnvelope({ userText })
+  const withTarget = buildRequestEnvelope({ userText, trustedResources: [widgetTarget] })
+  // Hints come from assembled context markers only; a structured target must not flip the request to document-only work.
+  assert.deepEqual(withTarget.environmentHints, plain.environmentHints)
+  assert.deepEqual(classifyIntent(withTarget).excludedDomains, classifyIntent(plain).excludedDomains)
+  assert.equal(classifyIntent(withTarget).primaryDomain, classifyIntent(plain).primaryDomain)
+})
+
+test('an RSS reference label is data: a title that looks like a file never becomes a document or skill resource', () => {
+  const envelope = buildRequestEnvelope({
+    userText: '总结 @[article.md] 的要点',
+    trustedResources: [{
+      id: '6f1c2c0e-3d3a-4a51-9a51-2a8b9b3f4e10', kind: 'rss_reference', source: 'rss_context', name: 'article.md', path: 'rss-reference://fixture',
+      text: '', summary: null, order: 0, canRead: true, canWrite: false,
+      rssReference: { kind: 'article', read: { itemId: 'a', expectedRevision: 'r', offset: 0, length: 12000 } },
+    }],
+  })
+  assert.equal(envelope.primaryInstruction.includes('article.md'), false)
+  assert.deepEqual(envelope.resources.map((resource) => resource.kind), ['rss_reference'])
+  assert.equal(envelopeHasLocalDocumentResource(envelope), false)
 })

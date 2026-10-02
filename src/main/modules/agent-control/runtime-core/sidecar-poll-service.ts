@@ -43,8 +43,8 @@ export class SidecarPollService {
     for (const channel of channels) {
       try { await this.deps.syncChannel(channel.id) }
       catch (error) {
-        if (this.deps.db.getAgentChannel(channel.id)?.last_error !== 'channel_delete_pending') {
-          this.deps.db.setAgentChannelError(channel.id, error instanceof Error ? error.message : String(error))
+        if (this.deps.db.channels.getAgentChannel(channel.id)?.last_error !== 'channel_delete_pending') {
+          this.deps.db.channels.setAgentChannelError(channel.id, error instanceof Error ? error.message : String(error))
         }
       }
     }

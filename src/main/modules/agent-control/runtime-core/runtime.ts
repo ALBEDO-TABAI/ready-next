@@ -26,12 +26,8 @@ import type { AskUserQuestionsCardEvent } from '../../tools/builtins/ask-user-qu
 import { registerChannelOutboundSender } from '../channel-outbound-bridge'
 import type { AgentManager } from '../../claude-bridge/agent-manager'
 import type { MultimodalBlock } from '../contracts/run-contracts'
-import {
-  getDatabase,
-  type AgentChannelType,
-  type ChatConversationRecord,
-  type ConversationSourceKind,
-} from '../../database'
+import type { AgentChannelType, ChatConversationRecord, ConversationSourceKind } from '../../database/records'
+import { getDatabase } from '../../database'
 import { CodexHostOrchestrator } from './codex-host-orchestrator'
 import {
   type RunMetaRepositoryLike,
@@ -448,7 +444,7 @@ export class AgentControlRuntime extends EventEmitter {
       getScope: (scopeId) => this.getConversationScope(scopeId),
       getPrevious: (scopeId) => this.scopeRunSummaries.get(scopeId),
       setSummary: (scopeId, summary) => {
-        if (!this.db.updateConversationRecallTaskState(
+        if (!this.db.chat.updateConversationRecallTaskState(
           scopeId,
           summary.taskTitle,
           summary.taskSummary,
@@ -728,7 +724,7 @@ export class AgentControlRuntime extends EventEmitter {
     const committed = await this.agentSessionCheckpoints.commitCanonicalCoreCloseout({
       ...input,
       repairDerivedState: async ({ canonicalMessage, canonicalMessageDigest }) => {
-        this.db.repairChatMessageDerivedIndexes(canonicalMessage, canonicalMessageDigest)
+        this.db.chat.repairChatMessageDerivedIndexes(canonicalMessage, canonicalMessageDigest)
       },
     })
     if (committed.derivedRepairError) {
@@ -751,7 +747,7 @@ export class AgentControlRuntime extends EventEmitter {
     const committed = await this.agentSessionCheckpoints.commitCanonicalCoreCloseout({
       ...input,
       repairDerivedState: async ({ canonicalMessage, canonicalMessageDigest }) => {
-        this.db.repairChatMessageDerivedIndexes(canonicalMessage, canonicalMessageDigest)
+        this.db.chat.repairChatMessageDerivedIndexes(canonicalMessage, canonicalMessageDigest)
       },
     })
     if (committed.derivedRepairError) {
@@ -874,8 +870,8 @@ export class AgentControlRuntime extends EventEmitter {
 
     const sidecarEnabled = this.getSettingBool('remote_channels_enabled', true)
     const autostart = this.getSettingBool('sidecar_autostart', true)
-    const bindHost = this.db.getSetting('sidecar_bind_host') || '127.0.0.1'
-    const bindPort = this.parsePortSetting(this.db.getSetting('sidecar_bind_port'))
+    const bindHost = this.db.settings.getSetting('sidecar_bind_host') || '127.0.0.1'
+    const bindPort = this.parsePortSetting(this.db.settings.getSetting('sidecar_bind_port'))
     this.sidecar.setBindConfig(bindHost, bindPort)
     if (!sidecarEnabled || !autostart) return
     await this.startSidecar()
@@ -1041,7 +1037,7 @@ export class AgentControlRuntime extends EventEmitter {
     const key = String(scopeId || '').trim()
     if (!key) return false
     try {
-      return Boolean(this.db.getAgentChannelThreadBySession(key))
+      return Boolean(this.db.channels.getAgentChannelThreadBySession(key))
     } catch {
       // silent-catch: 判据读取失败按未绑定处理（工具隐藏，不炸 turn 准备）
       return false
@@ -1462,7 +1458,7 @@ export class AgentControlRuntime extends EventEmitter {
       },
       sweepPendingAskUserCards: (scopeId) => {
         const reason = lifecycleAction === 'reset' ? 'session_reset' : 'session_close'
-        const swept = this.db.sweepPendingAskUserQuestionsCardsBySession(scopeId, reason)
+        const swept = this.db.chat.sweepPendingAskUserQuestionsCardsBySession(scopeId, reason)
         if (swept > 0) logAgentMetric('ask_user_questions_scope_context_swept_db', {
           scopeId,
           lifecycleAction,
@@ -1532,13 +1528,13 @@ export class AgentControlRuntime extends EventEmitter {
   async sendScoped(payload: SendScopedRequest): Promise<SendScopedResponse> {
     const explicitRetryRejection = preflightExplicitRetryControl({
       request: payload,
-      scope: payload.explicitRetry ? this.db.getConversationScope(payload.scopeId) : null,
+      scope: payload.explicitRetry ? this.db.chat.getConversationScope(payload.scopeId) : null,
     })
     if (explicitRetryRejection) return explicitRetryRejection
     // Restore only at turn execution; the host still checks current intent
     // before selecting a skill. A new-context boundary preserves visible
     // history/epoch but clears both persisted and live hints at commit.
-    const scopeRowForHintReplay = this.db.getConversationScope(payload.scopeId)
+    const scopeRowForHintReplay = this.db.chat.getConversationScope(payload.scopeId)
     if (scopeRowForHintReplay) {
       this.referenceHints.restoreReferenceHintFromScope(
         this.mapConversationRow(scopeRowForHintReplay),
@@ -1561,7 +1557,7 @@ export class AgentControlRuntime extends EventEmitter {
       scopeId: payload.scopeId,
       requestId: payload.requestId,
       userMessage: canonicalUserMessage,
-      getScope: (scopeId) => this.db.getConversationScope(scopeId),
+      getScope: (scopeId) => this.db.chat.getConversationScope(scopeId),
       resolveStartIdentityMethods: (scopeRow) => {
         const requestedMode = payload.userMessage.meta.workbenchMode
         const workbenchMode = requestedMode === 'document'
@@ -1894,7 +1890,7 @@ export class AgentControlRuntime extends EventEmitter {
   }
 
   private getSettingBool(key: string, fallback: boolean): boolean {
-    const raw = this.db.getSetting(key)
+    const raw = this.db.settings.getSetting(key)
     if (!raw) return fallback
     const normalized = raw.trim().toLowerCase()
     if (normalized === 'true' || normalized === '1' || normalized === 'yes') return true
@@ -1923,7 +1919,7 @@ export class AgentControlRuntime extends EventEmitter {
     ]
     for (const key of keys) {
       try {
-        this.db.deleteSetting(key)
+        this.db.settings.deleteSetting(key)
       } catch {
         // ignore cleanup failures
       }

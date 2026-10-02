@@ -34,6 +34,30 @@ const COMPLETE_COPY_REPORT = [
   '- 增量验证点：完整。',
 ].join('\n')
 
+test('article analysis sends the complete written source without transcript correction or clipping', async () => {
+  const runner = new RSSSubagentRunner()
+  const calls = patchComplete(runner, async () => COMPLETE_COPY_REPORT)
+  const body = '# Original\n\n' + '完整网页原文。'.repeat(4000) + 'END-OF-ARTICLE'
+  assert.equal(await runner.summarizeArticle({ title: 'Article', link: 'https://example.test', extractedText: body, sourceScope: '完整的已保存原文' }), COMPLETE_COPY_REPORT)
+  assert.equal(calls.length, 1)
+  assert.ok(calls[0].user.includes(body))
+  assert.ok(calls[0].user.includes('完整的已保存原文'))
+})
+
+test('article analysis rejects empty section headings instead of publishing a fake complete report', async () => {
+  const runner = new RSSSubagentRunner()
+  const calls = patchComplete(runner, async () => '## 一、TextContent Analysis 视角\n\n## 二、Viral-Abstract-Script 视角\n\n## 三、Brainstorming 视角')
+  await assert.rejects(runner.summarizeArticle({ title: 'Article', link: 'https://example.test', extractedText: '真实正文' }), /未获得有效/)
+  assert.equal(calls.length, 2)
+})
+
+test('article model failures propagate without an automatic analysis retry', async () => {
+  const runner = new RSSSubagentRunner()
+  const calls = patchComplete(runner, async () => { throw new Error('provider request outcome unknown') })
+  await assert.rejects(runner.summarizeArticle({ title: 'Article', link: 'https://example.test', extractedText: 'Source' }), /outcome unknown/)
+  assert.equal(calls.length, 1)
+})
+
 function patchComplete(
   runner: RSSSubagentRunner,
   handler: (request: CompletionRequest) => Promise<string>,

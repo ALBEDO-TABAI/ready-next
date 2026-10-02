@@ -13,6 +13,22 @@ export {
 
 export type RSSRefreshRiskLevel = 'none' | 'notice' | 'warning' | 'danger'
 
+export interface RSSRefreshOutcome {
+  ok: boolean
+  status: 'running' | 'completed' | 'partial' | 'failed'
+  summary: string
+  errors: string[]
+  viewUpdated?: boolean
+}
+
+export function getRSSRefreshOutcome(result: { success: boolean; error?: string; data?: { running?: boolean; errors?: string[]; message?: string } }, label = 'RSS'): RSSRefreshOutcome {
+  const errors = result.data?.errors || []
+  if (!result.success) return { ok: false, status: 'failed', summary: `${label} 刷新失败：${result.error || errors[0] || result.data?.message || '请稍后重试'}`, errors }
+  if (result.data?.running) return { ok: true, status: 'running', summary: `${label} 正在刷新中`, errors }
+  if (errors.length) return { ok: true, status: 'partial', summary: `${label} 刷新结束，但部分来源失败：${errors[0]}`, errors }
+  return { ok: true, status: 'completed', summary: result.data?.message || `${label} 刷新完成`, errors }
+}
+
 export interface RSSRefreshIntervalOption {
   value: number
   label: string
@@ -62,14 +78,15 @@ export function getRSSAutoRefreshWarning(snapshot: RSSAutoRefreshSnapshot): stri
 export function getRSSFetchAllResultWarning(result: {
   success: boolean
   error?: string
-  data?: { message?: string; errors?: string[] }
+  data?: { message?: string; errors?: string[]; running?: boolean }
 }): string | null {
-  if (!result.success) {
+  const outcome = getRSSRefreshOutcome(result)
+  if (outcome.status === 'failed') {
     const detail = result.error || result.data?.errors?.[0] || result.data?.message
     return detail ? `RSS 刷新失败：${detail}` : 'RSS 刷新失败，稍后可再次尝试。'
   }
-  if (result.data?.errors?.length) {
-    return `RSS 刷新完成，但存在错误：${result.data.errors[0]}`
+  if (outcome.status === 'partial') {
+    return `RSS 刷新完成，但存在错误：${outcome.errors[0]}`
   }
   return null
 }

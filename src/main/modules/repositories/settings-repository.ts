@@ -5,10 +5,10 @@ export class SettingsRepository {
   }
 
   async getSetting(key: string): Promise<string | undefined> {
-    return (await this.getDatabase()).getSetting(key)
+    return (await this.getDatabase()).settings.getSetting(key)
   }
 
   async setSetting(key: string, value: string): Promise<void> {
-    ;(await this.getDatabase()).setSetting(key, value)
+    ;(await this.getDatabase()).settings.setSetting(key, value)
   }
 }

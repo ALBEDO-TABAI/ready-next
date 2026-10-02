@@ -1,3 +1,5 @@
+import { RSSReferenceResourceSchema, type RSSReferenceResource } from '../../../../shared/rss-reference'
+import { rssResourceVersion } from './codex-rss-resources'
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { realpath, stat } from 'node:fs/promises'
@@ -77,6 +79,7 @@ export type ResolvedCodexExplicitResources = {
   resourceRefs: ResourceVersionReference[]
   requestResources: RequestEnvelopeResource[]
   authorities: PreparedCodexResourceAuthority[]
+  rssReferences: RSSReferenceResource[]
 }
 
 
@@ -172,6 +175,7 @@ export async function resolveCodexExplicitResources(input: {
   resolveCalendar?: (
     selection: Extract<SendScopedResourceSelection, { kind: 'calendar_event' }>,
   ) => CodexResolvedInlineResource | null
+  resolveRssReference?: (resource: RSSReferenceResource) => RSSReferenceResource | null
   resolveRssItem?: (
     selection: Extract<SendScopedResourceSelection, { kind: 'rss_item' }>,
   ) => CodexResolvedInlineResource | null
@@ -187,6 +191,7 @@ export async function resolveCodexExplicitResources(input: {
   const resourceRefs: ResourceVersionReference[] = []
   const requestResources: RequestEnvelopeResource[] = []
   const authorities: PreparedCodexResourceAuthority[] = []
+  const rssReferences: RSSReferenceResource[] = []
   const seen = new Set<string>()
 
   const addSkill = async (
@@ -261,6 +266,20 @@ export async function resolveCodexExplicitResources(input: {
         order: requestResources.length,
         canRead: true,
       }))
+      continue
+    }
+
+    if (selection.kind === 'rss_reference') {
+      const selected = RSSReferenceResourceSchema.parse({ id: selection.id, name: selection.name, reference: selection.reference })
+      const resource = input.resolveRssReference?.(selected)
+      if (!resource) throw new Error('codex_explicit_rss_reference_unavailable')
+      const key = `rss_reference:${resource.id}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      rssReferences.push(resource)
+      resourceRefs.push(rssResourceVersion(resource))
+      requestResources.push({ ...bodyFreeRequestResource({ logicalResourceId: resource.id, kind: 'rss_reference', source: 'rss_context', name: resource.name, path: null, order: requestResources.length, canRead: true }), rssReference: resource.reference })
+      nativeInput.push({ type: 'text', text: JSON.stringify({ rssReferenceId: resource.id, name: resource.name, readWith: 'rss_read_reference', readonly: true }), text_elements: [] })
       continue
     }
 
@@ -497,5 +516,5 @@ export async function resolveCodexExplicitResources(input: {
 
   if (input.selectedSkill) await addSkill(input.selectedSkill, 'codex_selected_skill_unavailable')
 
-  return { input: nativeInput, resourceRefs, requestResources, authorities }
+  return { input: nativeInput, resourceRefs, requestResources, authorities, rssReferences }
 }

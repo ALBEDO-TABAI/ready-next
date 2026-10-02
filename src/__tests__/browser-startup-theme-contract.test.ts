@@ -103,7 +103,7 @@ test('browser startup gates chrome until host restoration completes and main pro
   assert.match(mainIndex, /const baseUrl = devRendererUrl\.endsWith\('\/'\)[\s\S]*?await window\.loadURL\([\s\S]*?renderer load failed; retrying once/)
   assert.match(mainIndex, /void loadMainWindowRenderer\(mainWindow\)\.catch/)
   assert.doesNotMatch(mainIndex, /void mainWindow\.loadURL\(process\.env\['ELECTRON_RENDERER_URL'\]\)/)
-  assert.match(mainIndex, /getDatabase\(\)\.setSetting\(THEME_SETTING_KEY, nextTheme\)/)
+  assert.match(mainIndex, /getDatabase\(\)\.settings\.setSetting\(THEME_SETTING_KEY, nextTheme\)/)
   // Theme transitions are now orchestrated by the shared ritual overlay; see theme-ritual-orchestration-contract.test.ts.
   // Legacy data-theme-transitioning attribute is fully removed (store no longer defines or touches it).
   assert.doesNotMatch(themeStore, /THEME_TRANSITION_ATTRIBUTE/)

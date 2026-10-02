@@ -1,8 +1,5 @@
-import type {
-  ChatConversationRecord,
-  ChatMessageRecord,
-  ConversationAttachmentRecord,
-} from '../database'
+import type { ChatConversationRecord, ChatMessageRecord, ConversationAttachmentRecord } from '../database/records'
+
 
 export class AgentRepository {
   private async getDatabase() {
@@ -11,14 +8,14 @@ export class AgentRepository {
   }
 
   async getConversationScope(id: string): Promise<ChatConversationRecord | null> {
-    return (await this.getDatabase()).getConversationScope(id)
+    return (await this.getDatabase()).chat.getConversationScope(id)
   }
 
   async getChatMessages(conversationId: string): Promise<ChatMessageRecord[]> {
-    return (await this.getDatabase()).getChatMessages(conversationId)
+    return (await this.getDatabase()).chat.getChatMessages(conversationId)
   }
 
   async listConversationAttachments(conversationId: string): Promise<ConversationAttachmentRecord[]> {
-    return (await this.getDatabase()).listConversationAttachments(conversationId)
+    return (await this.getDatabase()).chat.listConversationAttachments(conversationId)
   }
 }

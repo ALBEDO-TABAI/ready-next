@@ -1,3 +1,4 @@
+import type { RSSAnalysisAction, RSSAnalysisJob } from '../../database/records'
 // Stage V V2.2c — rss-engine AnalysisGroup channel cluster.
 //
 // Bundles the 6 channels that drive the renderer's "analyze this RSS item"
@@ -9,7 +10,7 @@
 //   rss:listItemAnalysisJobs     (recent jobs, optionally filtered by item)
 //   rss:pauseAnalysisJob         (pause a running / queued job by id)
 //   rss:resumeAnalysisJob        (resume a previously paused job)
-//   rss:deleteAnalysisJob        (delete one job + its output dir)
+//   rss:deleteAnalysisJob        (delete one task record; preserve its files)
 //
 // Handler bodies are lifted verbatim from `ipc-handler.ts` (V2.2c is a
 // move + thin-wrapper, same shape as V2.2a SourceGroup and V2.2b
@@ -31,7 +32,7 @@
 // overlap entirely — against the per-group-deps-as-contract intent
 // documented in `engine-deps.ts`.
 import type { IpcMain } from 'electron'
-import type { RSSAnalysisAction, RSSAnalysisJob } from '../../database'
+
 import type { RSSItemAnalysisManager } from '../item-analysis-manager'
 import type { EngineDeps } from './engine-deps'
 import type { IpcChannelGroup, IpcDisposeHandle } from './types'
@@ -44,6 +45,7 @@ import type { IpcChannelGroup, IpcDisposeHandle } from './types'
  * `ipc-handler.ts`.
  */
 export interface MappedRSSAnalysisJob {
+  sourceWarning?: string | null
   id: string
   itemId: string
   action: RSSAnalysisAction

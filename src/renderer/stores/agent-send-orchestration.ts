@@ -166,11 +166,18 @@ export async function sendAgentMessage(input: {
   } catch {
     return rejectedMessageResult('attachment_unavailable')
   }
+  // RSS references read local saved data, so only local scopes carry them; calendar context stays as in 0.8.
   const workbenchResources = collectWorkbenchSurfaceResources()
+    .filter((resource) => resource.kind !== 'rss_reference' || activeScope.sourceKind === 'local')
+  // The visible RSS list rides along as an implicit query reference. Like 0.8's unselected list it is
+  // not new context: it never blocks a retry, and a retry does not carry it.
+  const retryContextResources = workbenchResources.filter((resource) => !(
+    resource.kind === 'rss_reference' && resource.origin === 'workbench' && resource.reference.kind === 'query'
+  ))
   let explicitRetry = options?.explicitRetry
   const retryHasCurrentContext = attachments.length > 0
     || referencedPoolAttachments.length > 0
-    || workbenchResources.length > 0
+    || retryContextResources.length > 0
     || Boolean(options?.codexExternalReadSlice)
   if (explicitRetry && retryHasCurrentContext) {
     return rejectedMessageResult('explicit_retry_control_invalid')
@@ -179,7 +186,7 @@ export async function sendAgentMessage(input: {
     const retryRoute = await resolveNaturalExplicitRetry({
       content,
       attachmentCount: attachments.length + referencedPoolAttachments.length,
-      workbenchResourceCount: workbenchResources.length,
+      workbenchResourceCount: retryContextResources.length,
       externalReadSlicePresent: Boolean(options?.codexExternalReadSlice),
       messages: originSlice.messages,
       scopeId: activeScopeId,
@@ -224,10 +231,14 @@ export async function sendAgentMessage(input: {
   }
   const composedResources = [
     ...(composedInput.resources || []),
-    ...workbenchResources.filter((resource) => !(composedInput.resources || []).some((existing) => (
-      existing.kind === resource.kind
-      && JSON.stringify(existing) === JSON.stringify(resource)
-    ))),
+    ...(explicitRetry ? [] : workbenchResources).filter((resource) => (
+      // A reference the user attached on purpose replaces the implicit view of the RSS workbench.
+      !(resource.kind === 'rss_reference' && (composedInput.resources || []).some((entry) => ['rss_reference', 'rss_item', 'rss_source'].includes(entry.kind)))
+      && !(composedInput.resources || []).some((existing) => (
+        existing.kind === resource.kind
+        && JSON.stringify(existing) === JSON.stringify(resource)
+      ))
+    )),
   ]
   const beforeDispatch = get()
   if (

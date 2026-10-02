@@ -1,3 +1,11 @@
+import { migrateRSSDigests, RSS_DIGEST_MIGRATION } from './rss-engine/digest-schema'
+import { migrateRSSCatalog, RSS_CATALOG_MIGRATION } from './rss-engine/catalog-schema'
+import { migrateRSSMethodValidity, RSS_METHOD_VALIDITY_MIGRATION } from './rss-engine/method-validity-schema'
+import { migrateRSSResults, RSS_RESULT_MIGRATION } from './rss-engine/result-schema'
+import { migrateRSSOrganization, RSS_ORGANIZATION_MIGRATION } from './rss-engine/organization-schema'
+import { migrateRSSProcessing, RSS_PROCESSING_MIGRATION } from './rss-engine/processing-schema'
+import { migrateRSSEvents, RSS_EVENT_MIGRATION } from './rss-engine/event-schema'
+import { migrateRSSContent, RSS_CONTENT_MIGRATION } from './rss-engine/content-schema'
 /**
  * Database migration system for Ready V5.
  *
@@ -4401,6 +4409,14 @@ const migrations: Migration[] = [
       db.exec('ALTER TABLE agent_channel_events ADD COLUMN payload_json TEXT')
     },
   },
+  { name: RSS_CONTENT_MIGRATION, up: migrateRSSContent },
+  { name: RSS_ORGANIZATION_MIGRATION, up: migrateRSSOrganization },
+  { name: RSS_PROCESSING_MIGRATION, up: migrateRSSProcessing },
+  { name: RSS_EVENT_MIGRATION, up: migrateRSSEvents },
+  { name: RSS_RESULT_MIGRATION, up: migrateRSSResults },
+  { name: RSS_DIGEST_MIGRATION, up: migrateRSSDigests },
+  { name: RSS_CATALOG_MIGRATION, up: migrateRSSCatalog },
+  { name: RSS_METHOD_VALIDITY_MIGRATION, up: migrateRSSMethodValidity }
 ]
 
 /**

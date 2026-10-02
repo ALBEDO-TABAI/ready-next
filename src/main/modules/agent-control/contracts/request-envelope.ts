@@ -1,3 +1,4 @@
+import type { RSSReference } from '../../../../shared/rss-reference'
 import { extractPrimaryUserInstruction as extractPrimaryUserInstructionFromText } from '../../claude-bridge/tool-policy-heuristics'
 import { validateWorkspaceRoot } from '../../../../shared/workspace-validation'
 import type { ActionAuthorizationMode } from '../../../../shared/action-authorization-mode'
@@ -37,6 +38,7 @@ export type RequestEnvelopeResourceKind =
   | 'widget_target'
   // P1-1 — 显式 @[技能] 引用：未被解析成任何既有资源的 @[token]。envelope 不校验技能存在性（授权层校验）。
   | 'skill_reference'
+  | 'rss_reference'
 
 export type RequestEnvelopeResourceSource =
   | 'user_attachment'
@@ -69,6 +71,7 @@ export interface RequestEnvelopeResource {
   // Optional fingerprint of the widget's componentSpec / widgetCode. When `text` is synthesized
   //   empty (e.g., lease-driven fallback target), cache-key builders fall back to this so different
   //   widget states don't collide on the same hash key.
+  rssReference?: RSSReference
   widgetFingerprint?: string | null
   // Optional non-empty text slice from the widget body. Used symmetrically with widgetFingerprint
   //   to differentiate cache keys when the synthesized resource has no snapshot content.
@@ -137,7 +140,7 @@ const LEADING_BOOTSTRAP_TITLES = new Set([
   'L2 按需规则',
 ])
 
-const CONTEXT_MARKERS = [
+export const REQUEST_CONTEXT_MARKERS = [
   '## 环境信息',
   '## 当前 Scope',
   '## 最近会话摘要',
@@ -150,6 +153,7 @@ const CONTEXT_MARKERS = [
   '### 日程事件引用',
   '### 文件夹引用',
   '### 技能目录引用',
+  '--- 测试模式附件路径 ---',
   '--- 引用设计项目:',
   '--- 引用技能目录:',
   '--- 文档摘要开始 ---',
@@ -240,20 +244,16 @@ export function extractPureUserInput(userText: string): string {
   const strippedBootstrap = stripLeadingBootstrapSections(userText)
   if (!strippedBootstrap) return ''
 
-  const userPrefixMatch = strippedBootstrap.match(/用户:\s*(.+?)(?:\n|$)/s)
-  if (userPrefixMatch) {
-    return userPrefixMatch[1].trim()
-  }
-
   let pureInput = strippedBootstrap
-  for (const marker of CONTEXT_MARKERS) {
-    const index = pureInput.indexOf(marker)
+  for (const marker of REQUEST_CONTEXT_MARKERS) {
+    const index = collectMarkerStarts(pureInput, marker)[0] ?? -1
     if (index >= 0) {
       pureInput = pureInput.slice(0, index).trim()
     }
   }
 
-  return pureInput.trim()
+  const userPrefixMatch = pureInput.match(/(?:^|\n)用户:\s*(.+?)(?:\n|$)/s)
+  return (userPrefixMatch?.[1] || pureInput).trim()
 }
 
 function stripStructuredResourceBoilerplate(text: string): string {
@@ -502,7 +502,7 @@ function normalizeWorkspaceRoots(rawRoots: unknown): string[] {
  */
 export function envelopeHasLocalDocumentResource(envelope: RequestEnvelope): boolean {
   return envelope.resources.some((resource) =>
-    resource.kind !== 'skill_reference'
+    resource.kind !== 'skill_reference' && resource.kind !== 'rss_reference'
     && (
       resource.kind === 'folder_reference'
       || resource.source === 'folder_reference'
@@ -532,12 +532,13 @@ export function buildRequestEnvelope(params: {
   workspaceRoots?: string[]
   contextRefIds?: string[]
   trustedFolderReferences?: TrustedFolderReference[]
+  trustedResources?: readonly RequestEnvelopeResource[]
   trustedEnvironment?: TrustedRequestEnvironment
   actionAuthorizationMode?: ActionAuthorizationMode
 }): RequestEnvelope {
   const rawUserText = String(params.userText || '')
   const pureUserText = extractPureUserInput(rawUserText)
-  const primaryInstruction = extractPrimaryUserInstructionFromText(pureUserText || rawUserText).trim()
+  let primaryInstruction = extractPrimaryUserInstructionFromText(pureUserText || rawUserText).trim()
   const structuredBlocks = collectStructuredBlocks(rawUserText)
   const workspaceRoots = normalizeWorkspaceRoots(params.workspaceRoots)
   const trustedFolderReferences = normalizeTrustedFolderReferences(params.trustedFolderReferences)
@@ -562,6 +563,13 @@ export function buildRequestEnvelope(params: {
   const resources = structuredBlocks
     .map((block, index) => buildResourceFromBlock(block, index, trustedFolderReferences))
     .filter(Boolean) as RequestEnvelopeResource[]
+  for (const resource of params.trustedResources || []) {
+    resources.push({ ...resource, order: resources.length })
+  }
+
+  // Resource labels are data. A news title such as article.md must not authorize document work.
+  const rssNames = new Set(resources.filter((resource) => resource.kind === 'rss_reference').map((resource) => resource.name))
+  primaryInstruction = primaryInstruction.replace(/@\[([^\]]+)\]/g, (token, name: string) => rssNames.has(name) ? '资料引用' : token)
 
   // P1-1 — 当前轮用户文本（pureUserText，已剥离装配上下文/bootstrap）里每个 @[token]，若没有被
   //   解析成任何既有资源（附件/文档/文件夹/widget/浏览器…），追加一条 skill_reference 资源。

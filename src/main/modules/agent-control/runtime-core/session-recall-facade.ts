@@ -1,3 +1,4 @@
+import type { ChatConversationRecord, ConversationSourceKind } from '../../database/records'
 // B8-D R2 — SessionRecallFacade: session-recall search/list/capsule reads,
 // attach/detach of recall contexts (with scope_updated conversation events),
 // resume-candidate probing, and the retry-turn auto-attach hook, extracted
@@ -15,7 +16,7 @@ import { isRetryOnlyTurn } from '../skills/skill-detection-inputs'
 import { getLastReferenceSkill } from '../skills/skill-reference-hints'
 import type { SessionRecallService } from '../session/session-recall-service'
 import type { MultimodalBlock } from '../contracts/run-contracts'
-import type { ChatConversationRecord, ConversationSourceKind } from '../../database'
+
 import type { ConversationEventPayload, ConversationScope } from '../contracts/types'
 import type { SessionRecallCapsule, SessionRecallHit } from '../../../../shared/session-recall'
 

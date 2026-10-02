@@ -29,6 +29,7 @@ import type { RemoteChannelServiceDeps } from '../main/modules/agent-control/run
 import { hasRemoteFileDeliveryIntent } from '../shared/remote-im-file-intent'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+import { flatDomainStores } from './helpers/flat-domain-stores'
 
 test('channel-send-file declares transitive sqlite ABI guard', (t) => {
   skipIfSqliteUnavailable(t, 'channel-send-file transitive sqlite load')
@@ -124,12 +125,12 @@ test('sendFileToScopeThread resolves the bound thread and ships the attachment t
   const filePath = join(dir, 'report.pdf')
   writeFileSync(filePath, 'x'.repeat(2048))
   const makeService = (channelType: string): RemoteChannelService => new RemoteChannelService({
-    db: {
+    db: flatDomainStores({
       getAgentChannelThreadBySession: () => ({ channel_id: 'chan-1', remote_thread: 'wxid_demo' }),
       getAgentChannel: () => ({ type: channelType, enabled: 1, config_json: JSON.stringify({ bindingId: 'binding-1' }) }),
       getConversationScope: () => ({ meta_json: JSON.stringify({ channelBindingId: 'binding-1' }) }),
       getSetting: () => null,
-    },
+    }),
     sidecar: {
       sendChannel: async (payload: { id: string; thread: string; text: string; attachments?: Array<{ name: string }> }) => {
         sent.push(payload)

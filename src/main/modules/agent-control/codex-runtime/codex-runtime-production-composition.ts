@@ -1,3 +1,4 @@
+import { RSS_READ_TOOL_NAMES, settleWorkbenchRSSSelections, validateRSSResource } from './codex-rss-resources'
 import { canonicalProjectDirectory, readProjectDirectory, withProjectDirectorySelection, projectDirectoryContext } from './chat-project-directory'
 import { ensureRemoteChannelAlias } from './remote-channel-alias'
 import { CodexBindingRepositoryError } from './codex-binding-error'
@@ -774,7 +775,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
     createAliasAtomic(value) {
       rawDb.exec('BEGIN IMMEDIATE')
       try {
-        const scope = input.database.upsertConversationScope({
+        const scope = input.database.chat.upsertConversationScope({
           id: value.aliasId,
           agent: value.agentId,
           activeAgentId: value.agentId,
@@ -3681,7 +3682,23 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
         }
         const projectDirectory = readProjectDirectory(scope)
         if (projectDirectory) canonicalProjectDirectory(projectDirectory)
-        const currentResourceSelections = withProjectDirectorySelection(request.resources ?? [], projectDirectory)
+        const settledRSS = scope.sourceKind === 'local'
+          ? settleWorkbenchRSSSelections({
+            store: input.database.rss,
+            selections: request.resources ?? [],
+            threadCanReadRSS: !binding.toolSurface
+              || RSS_READ_TOOL_NAMES.every((name) => binding.toolSurface!.toolNames.includes(name)),
+          })
+          : { selections: request.resources ?? [], explicitBlocked: false }
+        if (settledRSS.explicitBlocked) {
+          throw new PrePersistenceAdmissionError(
+            'native_tool_surface_extension_required',
+            false,
+            digestCanonicalJson({ scopeId: scope.id, requestId: request.requestId, missing: 'rss_read_tools' }),
+            'rss_read_tool_surface_missing',
+          )
+        }
+        const currentResourceSelections = withProjectDirectorySelection(settledRSS.selections, projectDirectory)
         const explicitResources = await resolveCodexExplicitResources({
           selections: currentResourceSelections,
           resolveSkill: (selection) => {
@@ -3696,15 +3713,16 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           ),
           resolveCalendar: (selection) => {
             const eventId = persistableCalendarEventId(selection.eventId) || selection.eventId
-            const event = input.database.getCalendarEventById(eventId)
+            const event = input.database.calendar.getCalendarEventById(eventId)
             return event ? trustedCalendarReferenceInput(event) : null
           },
+          resolveRssReference: (resource) => scope.sourceKind === 'local' ? validateRSSResource(input.database.rss, resource) : null,
           resolveRssItem: (selection) => {
-            const item = input.database.getRSSItemsByIds([selection.itemId])[0]
+            const item = input.database.rss.getRSSItemsByIds([selection.itemId])[0]
             return item ? trustedRssItemInput(item) : null
           },
           resolveRssSource: (selection) => {
-            const source = input.database.getRSSSources().find((candidate) => candidate.id === selection.sourceId)
+            const source = input.database.rss.getRSSSources().find((candidate) => candidate.id === selection.sourceId)
             return source ? trustedRssSourceInput(source) : null
           },
           resolveMcpResource: async (selection) => {
@@ -3881,6 +3899,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
             },
             externalReadAllowedToolNames: externalReadSlice?.allowedToolNames,
             explicitResourceAllowedToolNames: explicitAllowedToolNames,
+            hasRSSResource: turnResources.rssReferences.length > 0,
             workbenchMode: trustedEnvironment.workbenchMode,
             exclusiveAllowSet,
             browserAdmission,
@@ -4208,6 +4227,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           supersededUncommittedItems,
           externalReadSlice,
           resourceAuthorities: turnResources.authorities,
+          rssReferences: turnResources.rssReferences,
           ...(executionPageRef
             ? { browserPageRef: executionPageRef }
             : {}),
@@ -4556,7 +4576,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
         const ingressAdmittedDigest = buildCodexIngressAdmittedDigest(admissionWithoutDigest)
         const existing = rawDb.prepare('SELECT 1 AS present FROM chat_messages WHERE id = ? LIMIT 1').get(request.userMessage.id)
         if (existing) throw new Error('codex_origin_message_already_exists')
-        input.database.addChatMessage(
+        input.database.chat.addChatMessage(
           request.userMessage.id,
           scope.id,
           'user',
@@ -4938,7 +4958,8 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
                       status: job.status,
                     }
                   }
-                  const reportDigest = createHash('sha256').update(readFileSync(job.report_path)).digest('hex')
+                  const report = manager.readReport({ jobId: job.id, offset: 0, length: 2 })
+                  const reportDigest = report.revision
                   return {
                     ok: true,
                     summary: 'RSS 条目分析报告已生成。',
@@ -4947,6 +4968,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
                     status: job.status,
                     reportPath: job.report_path,
                     reportDigest,
+                    sourceWarning: report.sourceWarning,
                     outputDir: job.output_dir,
                   }
                 },
@@ -5026,6 +5048,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
                   })
                 : undefined,
               targets: product.prepared.productSurfaceTargets,
+              rssReferences: product.prepared.rssReferences,
               waitForRssAnalysisResult: product.prepared.actionObligations?.requirements.some((requirement) => (
                 requirement.domain === 'rss' && requirement.outcome === 'job_terminal_artifact'
               )),

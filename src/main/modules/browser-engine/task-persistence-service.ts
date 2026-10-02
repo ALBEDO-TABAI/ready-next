@@ -84,7 +84,7 @@ function sha256(value: unknown): string {
   return createHash('sha256').update(stableJson(value)).digest('hex')
 }
 
-function parsePersistedTaskPayload(record: import('../database').BrowserTaskRecord): Record<string, unknown> {
+function parsePersistedTaskPayload(record: import('../database/records').BrowserTaskRecord): Record<string, unknown> {
   try {
     const payload = asRecord(JSON.parse(record.payload_json))
     if (payload) return payload
@@ -207,7 +207,7 @@ function readString(record: Record<string, unknown> | null, keys: readonly strin
   return null
 }
 
-function recordToHandle(record: import('../database').BrowserTaskRecord): BrowserCapabilityTaskHandle {
+function recordToHandle(record: import('../database/records').BrowserTaskRecord): BrowserCapabilityTaskHandle {
   return {
     taskId: record.id,
     kind: record.kind as BrowserCapabilityTaskKind,
@@ -235,7 +235,7 @@ function recordToHandle(record: import('../database').BrowserTaskRecord): Browse
 }
 
 function preserveBrowserWorkflowJournal(
-  record: import('../database').BrowserTaskRecord,
+  record: import('../database/records').BrowserTaskRecord,
   requested: Record<string, unknown>,
 ): Record<string, unknown> {
   if (record.kind !== 'browser_workflow') return requested

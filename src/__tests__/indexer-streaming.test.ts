@@ -4,7 +4,7 @@
  * Verifies the FileSystemAdapter (post-B6) streams 200 files through 4 batches
  * of 50, yields the event loop per file, honours an AbortSignal mid-stream
  * (preserving rows already committed by earlier batches), and that the
- * `document:cancelReindex` IPC propagates through the worker bridge.
+ * worker shutdown settles pending reindex operations.
  *
  * Uses an in-memory stub repository so we avoid touching better-sqlite3 here
  * (other tests cover the repository contract). The fixture files are written
@@ -392,7 +392,7 @@ test('FileSystemAdapter exits immediately when signal is already aborted', async
   })
 })
 
-// ----- Cancellation IPC propagates to worker --------------------------------
+// ----- Shutdown propagates to worker --------------------------------
 
 interface FakeWorker extends WorkerLike {
   sent: Array<{ id: number; cmd: string; args?: unknown }>
@@ -429,92 +429,16 @@ function factoryFromWorker(worker: FakeWorker): WorkerFactory {
   return () => worker
 }
 
-test('WorkerDbBridge.cancelReindex posts cancelReindex cmd and resolves with count', async () => {
+test('worker shutdown settles pending reindex requests and closes the worker', async () => {
   const fake = makeFakeWorker()
   const bridge = new WorkerDbBridgeImpl('/tmp/test.db', factoryFromWorker(fake))
-
-  const promise = bridge.cancelReindex()
-  assert.equal(fake.sent.length, 1, 'bridge should post exactly one message')
-  assert.equal(fake.sent[0].cmd, 'cancelReindex', 'cmd must be cancelReindex')
-
-  // Worker replies with the count of aborted reindexes.
-  fake.emit('message', { id: fake.sent[0].id, ok: true, data: 2 })
-  const cancelled = await promise
-  assert.equal(cancelled, 2, 'bridge resolves with aborted-count from worker')
-
-  // Drain shutdown so the test process doesn't keep handles alive.
-  const before = fake.sent.length
-  const shutdownPromise = bridge.shutdown()
-  if (fake.sent.length > before && fake.sent[fake.sent.length - 1].cmd === 'shutdown') {
-    fake.emit('message', { id: fake.sent[fake.sent.length - 1].id, ok: true })
-  }
-  await shutdownPromise
-})
-
-test('WorkerDbBridge.cancelReindex resolves with 0 when worker reports no in-flight jobs', async () => {
-  const fake = makeFakeWorker()
-  const bridge = new WorkerDbBridgeImpl('/tmp/test.db', factoryFromWorker(fake))
-
-  const promise = bridge.cancelReindex()
-  assert.equal(fake.sent[0].cmd, 'cancelReindex')
-
-  fake.emit('message', { id: fake.sent[0].id, ok: true, data: 0 })
-  const cancelled = await promise
-  assert.equal(cancelled, 0, 'no-op cancel still resolves cleanly')
-
-  // Drain.
-  const before = fake.sent.length
-  const shutdownPromise = bridge.shutdown()
-  if (fake.sent.length > before && fake.sent[fake.sent.length - 1].cmd === 'shutdown') {
-    fake.emit('message', { id: fake.sent[fake.sent.length - 1].id, ok: true })
-  }
-  await shutdownPromise
-})
-
-test('WorkerDbBridge.cancelReindex multiplexes alongside other commands', async () => {
-  const fake = makeFakeWorker()
-  const bridge = new WorkerDbBridgeImpl('/tmp/test.db', factoryFromWorker(fake))
-
-  // Send a reindex + a cancel back-to-back. The bridge correlates by id.
-  const reindexP = bridge.reindexWorkspace({ root: '/r' })
-  const cancelP = bridge.cancelReindex()
-
-  assert.equal(fake.sent.length, 2)
-  assert.equal(fake.sent[0].cmd, 'reindexWorkspace')
-  assert.equal(fake.sent[1].cmd, 'cancelReindex')
-
-  // Reply to cancel first (worker would emit cancel-reply synchronously
-  // before the reindex finishes its own teardown).
-  fake.emit('message', { id: fake.sent[1].id, ok: true, data: 1 })
-  // Then reindex resolves with a partial-result payload (aborted=true).
-  fake.emit('message', {
-    id: fake.sent[0].id,
-    ok: true,
-    data: {
-      ok: false,
-      root: '/r',
-      workspaceId: 1,
-      indexed: 50,
-      skipped: 0,
-      removed: 0,
-      scanned: 200,
-      elapsedMs: 5,
-      degraded: false,
-      error: 'reindex aborted',
-      aborted: true,
-    },
-  })
-
-  const [cancelled, reindex] = await Promise.all([cancelP, reindexP])
-  assert.equal(cancelled, 1, 'cancelReindex resolves to 1 aborted job')
-  assert.equal(reindex.indexed, 50, 'reindex returns the partial count it had committed')
-  assert.equal(reindex.error, 'reindex aborted')
-
-  // Drain.
-  const before = fake.sent.length
-  const shutdownPromise = bridge.shutdown()
-  if (fake.sent.length > before && fake.sent[fake.sent.length - 1].cmd === 'shutdown') {
-    fake.emit('message', { id: fake.sent[fake.sent.length - 1].id, ok: true })
-  }
-  await shutdownPromise
+  const reindex = bridge.reindexWorkspace({ root: '/r' })
+  const rejected = assert.rejects(reindex, /db-worker shutdown/)
+  const shutdown = bridge.shutdown()
+  assert.equal(fake.sent[1].cmd, 'shutdown')
+  fake.emit('message', { id: fake.sent[1].id, ok: true })
+  await shutdown
+  await rejected
+  assert.equal(fake.terminated, true)
+  assert.equal(bridge.__isAvailable(), false)
 })

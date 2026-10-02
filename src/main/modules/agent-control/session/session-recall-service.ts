@@ -1,5 +1,5 @@
+import type { ChatConversationRecord, ConversationSourceKind } from '../../database/records'
 import { createHash } from 'crypto'
-import type { ChatConversationRecord, ConversationSourceKind, DatabaseManager } from '../../database'
 import type { SessionRecallCapsule, SessionRecallContextRef, SessionRecallHit, SessionRecallMatchKind, SessionRecallSessionStatus } from '../../../../shared/session-recall'
 
 interface SessionRecallMetadataRow {
@@ -37,12 +37,14 @@ interface SessionRecallRawDb {
 
 export interface SessionRecallDatabaseAdapter {
   getRawDb(): SessionRecallRawDb | null
+  chat: {
   getConversationScope(id: string): ChatConversationRecord | null
   updateConversationScopeMeta(
     id: string,
     meta: Record<string, unknown>,
     expectedMessageVisibilityEpoch?: number,
   ): ChatConversationRecord | null
+  }
 }
 
 interface SessionRecallVectorRow {
@@ -62,7 +64,7 @@ const SESSION_RECALL_VECTORS_LRU_CAP = 200
 const SESSION_RECALL_VECTOR_DIMENSIONS = 256
 
 export class SessionRecallService {
-  constructor(private readonly db: SessionRecallDatabaseAdapter | DatabaseManager) {}
+  constructor(private readonly db: SessionRecallDatabaseAdapter) {}
 
   searchSessionRecall(params: {
     query?: string
@@ -184,7 +186,7 @@ export class SessionRecallService {
   }
 
   listAttachedSessionRecallContexts(scopeId: string): SessionRecallCapsule[] {
-    const scope = this.db.getConversationScope(scopeId)
+    const scope = this.db.chat.getConversationScope(scopeId)
     if (!scope) return []
     const refs = this.readSessionRecallContextRefs(scope)
     return refs
@@ -204,7 +206,7 @@ export class SessionRecallService {
     scope: ChatConversationRecord
     capsule: SessionRecallCapsule
   } {
-    const scope = this.db.getConversationScope(params.currentScopeId)
+    const scope = this.db.chat.getConversationScope(params.currentScopeId)
     if (!scope) throw new Error(`Conversation scope not found: ${params.currentScopeId}`)
     if ((scope.message_visibility_epoch ?? 0) !== params.expectedMessageVisibilityEpoch) {
       throw new Error('conversation_context_epoch_stale')
@@ -226,7 +228,7 @@ export class SessionRecallService {
       ...this.parseConversationMeta(scope),
       sessionRecallContext: refs,
     }
-    const updatedScope = this.db.updateConversationScopeMeta(
+    const updatedScope = this.db.chat.updateConversationScopeMeta(
       params.currentScopeId,
       nextMeta,
       params.expectedMessageVisibilityEpoch,
@@ -245,7 +247,7 @@ export class SessionRecallService {
   }): {
     scope: ChatConversationRecord
   } {
-    const scope = this.db.getConversationScope(params.currentScopeId)
+    const scope = this.db.chat.getConversationScope(params.currentScopeId)
     if (!scope) throw new Error(`Conversation scope not found: ${params.currentScopeId}`)
     if ((scope.message_visibility_epoch ?? 0) !== params.expectedMessageVisibilityEpoch) {
       throw new Error('conversation_context_epoch_stale')
@@ -256,7 +258,7 @@ export class SessionRecallService {
       ...this.parseConversationMeta(scope),
       sessionRecallContext: refs,
     }
-    const updatedScope = this.db.updateConversationScopeMeta(
+    const updatedScope = this.db.chat.updateConversationScopeMeta(
       params.currentScopeId,
       nextMeta,
       params.expectedMessageVisibilityEpoch,
@@ -284,7 +286,7 @@ export class SessionRecallService {
     limit?: number
   }): { attached: SessionRecallCapsule[] } {
     const limit = Math.max(1, Math.min(5, Number(params.limit ?? 3)))
-    const scope = this.db.getConversationScope(params.currentScopeId)
+    const scope = this.db.chat.getConversationScope(params.currentScopeId)
     if (!scope) return { attached: [] }
     if ((scope.message_visibility_epoch ?? 0) !== params.expectedMessageVisibilityEpoch) {
       return { attached: [] }
@@ -395,7 +397,7 @@ export class SessionRecallService {
       const merged = new Map<string, SessionRecallMetadataRow>()
       for (const row of [...directMatches, ...conversationMatches]) merged.set(row.conversation_id, row)
       return Array.from(merged.values()).filter(
-        (row) => Boolean(this.db.getConversationScope(row.conversation_id)),
+        (row) => Boolean(this.db.chat.getConversationScope(row.conversation_id)),
       )
     }
     const placeholders = attachmentConversationIds.map(() => '?').join(', ')
@@ -407,7 +409,7 @@ export class SessionRecallService {
     const merged = new Map<string, SessionRecallMetadataRow>()
     for (const row of [...directMatches, ...attachmentMatches, ...conversationMatches]) merged.set(row.conversation_id, row)
     return Array.from(merged.values()).filter(
-      (row) => Boolean(this.db.getConversationScope(row.conversation_id)),
+      (row) => Boolean(this.db.chat.getConversationScope(row.conversation_id)),
     )
   }
 
@@ -430,7 +432,7 @@ export class SessionRecallService {
       if (!merged.has(row.conversation_id)) merged.set(row.conversation_id, row)
     }
     return Array.from(merged.values())
-      .filter((row) => Boolean(this.db.getConversationScope(row.conversation_id)))
+      .filter((row) => Boolean(this.db.chat.getConversationScope(row.conversation_id)))
       .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
       .slice(0, 80)
   }
@@ -449,12 +451,12 @@ export class SessionRecallService {
       ORDER BY updated_at DESC
       LIMIT 240
     `).all<SessionRecallMetadataRow>().filter(
-      (row) => Boolean(this.db.getConversationScope(row.conversation_id)),
+      (row) => Boolean(this.db.chat.getConversationScope(row.conversation_id)),
     )
   }
 
   private getMetadataRow(conversationId: string): SessionRecallMetadataRow | null {
-    if (!this.db.getConversationScope(conversationId)) return null
+    if (!this.db.chat.getConversationScope(conversationId)) return null
     const db = this.db.getRawDb()
     if (!db) return null
     const row = db.prepare(`
@@ -480,7 +482,7 @@ export class SessionRecallService {
   }
 
   private getConversationFallbackMetadata(conversationId: string): SessionRecallMetadataRow | null {
-    const row = this.db.getConversationScope(conversationId)
+    const row = this.db.chat.getConversationScope(conversationId)
     return row ? this.metadataFromConversation(row) : null
   }
 
@@ -508,7 +510,7 @@ export class SessionRecallService {
 
   private resolveExcludedLineageRootId(currentScopeId?: string): string | null {
     if (!currentScopeId) return null
-    const scope = this.db.getConversationScope(currentScopeId)
+    const scope = this.db.chat.getConversationScope(currentScopeId)
     if (!scope) return null
     return scope.lineage_root_id || scope.id
   }

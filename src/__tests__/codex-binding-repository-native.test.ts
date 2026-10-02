@@ -9,7 +9,7 @@ import { ReadyMemoryRepository } from '../main/modules/agent-control/ready-memor
 import { FrozenCallStore } from '../main/modules/agent-control/safety/frozen-call-store'
 import { resolveExplicitRetryTailPlan } from '../main/modules/agent-control/codex-runtime/codex-history-continuity-policy'
 
-import type { DatabaseConnection } from '../main/modules/database'
+import type { DatabaseConnection } from '../main/modules/database/connection'
 import { __runMigrationForTests, type MigrationDatabase } from '../main/modules/migrations'
 import {
   buildCodexIngressAdmittedDigest,
@@ -8810,12 +8810,12 @@ test('production ingress admits a real fresh-root tail, closes it out and contin
     const writes = { count: 0 }
     const database = {
       getRawDb: () => db,
-      addChatMessage(id: string, scopeId: string, role: string, content: string,
+      chat: { addChatMessage(id: string, scopeId: string, role: string, content: string,
         timestamp: string, meta: object, epoch: number) {
         writes.count += 1
         db.prepare(`INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch)
           VALUES (?, ?, ?, ?, ?, ?, ?)`).run(id, scopeId, role, content, timestamp, JSON.stringify(meta), epoch)
-      },
+      } },
     }
     const scope = {
       id: 'scope-1', aliasGeneration: head!.aliasGeneration, messageVisibilityEpoch: 0,

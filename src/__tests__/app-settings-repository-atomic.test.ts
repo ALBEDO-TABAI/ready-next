@@ -33,7 +33,7 @@ test('AI workspace persistence rolls back every settings key when one write fail
       },
     }),
   }
-  const repository = new AppSettingsRepository(() => database)
+  const repository = new AppSettingsRepository(() => ({ settings: database, getRawDb: database.getRawDb }))
 
   assert.throws(
     () => repository.setAIWorkspace(createDefaultAIWorkspace()),
@@ -81,7 +81,7 @@ test('AI workspace mutation guard runs inside the write transaction and rolls ba
     }),
   }
   const repository = new AppSettingsRepository(
-    () => database,
+    () => ({ settings: database, getRawDb: database.getRawDb }),
     () => {
       assert.equal(inTransaction, true)
       throw new Error('ai_profile_in_use_by_active_turn')

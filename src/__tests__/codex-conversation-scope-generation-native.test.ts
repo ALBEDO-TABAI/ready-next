@@ -1,16 +1,15 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import {
-  DatabaseManager,
-  type ChatConversationRecord,
-  type DatabaseConnection,
-} from '../main/modules/database'
+import type { ChatConversationRecord } from '../main/modules/database/records'
+import type { DatabaseConnection } from '../main/modules/database/connection'
+import { DatabaseManager } from '../main/modules/database'
 import { CodexBindingRepository } from '../main/modules/agent-control/codex-runtime/codex-binding-repository'
 import { ConversationScopeStore } from '../main/modules/agent-control/runtime-core/conversation-scope-store'
 import { SessionRecallService } from '../main/modules/agent-control/session/session-recall-service'
 import { TaskProjectionRepository } from '../main/modules/repositories/task-projection-repository'
 import { loadSqliteAfterGuardForTest, skipIfSqliteUnavailable } from './utils/sqlite-skip'
+import { flatDomainStores } from './helpers/flat-domain-stores'
 
 type NativeDb = import('better-sqlite3').Database
 
@@ -34,13 +33,13 @@ const scopeRow: ChatConversationRecord = {
 }
 
 function createStore(repository: CodexBindingRepository): ConversationScopeStore {
-  const db = {
+  const db = flatDomainStores({
     listConversationScopes: () => [scopeRow],
     getConversationScope: (scopeId: string) => scopeId === scopeRow.id ? scopeRow : null,
     getChatMessages: () => [],
-  } as unknown as DatabaseManager
+  }) as unknown as DatabaseManager
   return new ConversationScopeStore({
-      ensureChannelAlias: () => {},
+    ensureChannelAlias: () => {},
     db,
     emitConversationEvent() {},
     mapChannelRow() { throw new Error('unexpected_channel_mapping') },
@@ -61,7 +60,7 @@ function createRealStore(
   repository: CodexBindingRepository,
 ): ConversationScopeStore {
   return new ConversationScopeStore({
-      ensureChannelAlias: () => {},
+    ensureChannelAlias: () => {},
     db: database,
     emitConversationEvent() {},
     mapChannelRow() { throw new Error('unexpected_channel_mapping') },
@@ -144,13 +143,13 @@ test('reset then reload exposes only the new durable generation', async (t) => {
 })
 
 test('list keeps latestAliasGeneration when the active binding is gone', async () => {
-  const db = {
+  const db = flatDomainStores({
     listConversationScopes: () => [scopeRow],
     getConversationScope: (scopeId: string) => scopeId === scopeRow.id ? scopeRow : null,
     getChatMessages: () => [],
-  } as unknown as DatabaseManager
+  }) as unknown as DatabaseManager
   const store = new ConversationScopeStore({
-      ensureChannelAlias: () => {},
+    ensureChannelAlias: () => {},
     db,
     emitConversationEvent() {},
     mapChannelRow() { throw new Error('unexpected_channel_mapping') },
@@ -185,12 +184,12 @@ test('reset advances the durable message epoch while preserving old rows only fo
       protocolSchemaDigest: 'protocol-schema-digest',
       createdAt,
     })
-    database.updateConversationScopeMeta(scope.id, {
+    database.chat.updateConversationScopeMeta(scope.id, {
       lastReferenceSkill: { skillId: 'old-reference-skill', recordedAt: createdAt },
       sessionRecallContext: { attached: ['old-recall-capsule'] },
       actionAuthorizationMode: 'oa_mode',
     })
-    database.addChatMessage(
+    database.chat.addChatMessage(
       'old-visibility-message',
       scope.id,
       'assistant',
@@ -208,7 +207,7 @@ test('reset advances the durable message epoch while preserving old rows only fo
       },
       0,
     )
-    database.updateConversationRecallTaskState(
+    database.chat.updateConversationRecallTaskState(
       scope.id,
       '旧任务奥林匹斯关键词',
       '旧任务摘要',
@@ -264,9 +263,9 @@ test('reset advances the durable message epoch while preserving old rows only fo
 
     const coldStore = createRealStore(database, new CodexBindingRepository(rawDb))
     assert.deepEqual(coldStore.getConversationScopeMessages(scope.id), [])
-    assert.deepEqual(database.listConversationAttachments(scope.id), [])
-    assert.equal(database.getChatMessageById('old-visibility-message'), null)
-    assert.equal(database.updateChatMessageMeta('old-visibility-message', { revived: true }), false)
+    assert.deepEqual(database.chat.listConversationAttachments(scope.id), [])
+    assert.equal(database.chat.getChatMessageById('old-visibility-message'), null)
+    assert.equal(database.chat.updateChatMessageMeta('old-visibility-message', { revived: true }), false)
     assert.deepEqual(recall.searchSessionRecall({ query: '雅典关键词' }), [])
     assert.deepEqual(recall.searchSessionRecall({ query: '火星关键词' }), [])
     assert.deepEqual(recall.searchSessionRecall({ query: '奥林匹斯关键词' }), [])
@@ -278,16 +277,16 @@ test('reset advances the durable message epoch while preserving old rows only fo
       taskSummary: '不得晚到复活',
       updatedAt: '2026-08-08T00:01:05.000Z',
     }), /task_projection_visibility_epoch_stale/)
-    assert.throws(() => database.addChatMessage(
+    assert.throws(() => database.chat.addChatMessage(
       'old-visibility-message', scope.id, 'assistant', '不得复活',
       '2026-08-08T00:01:10.000Z', {}, 1,
     ), /visibility epoch mismatch/)
-    assert.throws(() => database.addChatMessage(
+    assert.throws(() => database.chat.addChatMessage(
       'stale-fresh-message', scope.id, 'assistant', '旧代新 ID 不得写入',
       '2026-08-08T00:01:11.000Z', {}, 0,
     ), /visibility epoch mismatch/)
 
-    database.addChatMessage(
+    database.chat.addChatMessage(
       'new-visibility-message',
       scope.id,
       'assistant',

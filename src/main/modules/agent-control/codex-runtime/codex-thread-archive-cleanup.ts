@@ -1,4 +1,4 @@
-import type { DatabaseConnection } from '../../database'
+import type { DatabaseConnection } from '../../database/connection'
 
 import { digestCanonicalJson } from './codex-model-gateway-contract'
 

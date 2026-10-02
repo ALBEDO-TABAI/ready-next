@@ -1,8 +1,9 @@
+import type { DatabaseConnection } from '../main/modules/database/connection'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import test from 'node:test'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
-import type { DatabaseConnection } from '../main/modules/database'
+
 import { runMigrations, type MigrationDatabase } from '../main/modules/migrations'
 import { FileActivityRepository } from '../main/modules/repositories/file-activity-repository'
 import { FileAttentionRepository } from '../main/modules/repositories/file-attention-repository'

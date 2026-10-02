@@ -1,6 +1,10 @@
+import { isChatGptOAuthConfig } from '../shared/chatgpt-oauth'
+import { startRSSDigests, stopRSSDigests, resumeRSSDigests } from './modules/rss-engine/digest-runtime'
+import { stopRSSContentService } from './modules/rss-engine/content-runtime'
+import { startRSSProcessing, stopRSSProcessing, wakeRSSProcessing } from './modules/rss-engine/processing-runtime'
 // 本文件是重模块：由 boot-entry.ts（构建入口）在 splash 可见后动态加载。
 // dotenv、userData 路径、协议注册、命令行开关等 pre-ready 配置都在 boot-entry 完成。
-import { app, shell, BrowserWindow, ipcMain, protocol, nativeImage, nativeTheme, Menu, dialog, clipboard, type MenuItemConstructorOptions, type NativeImage } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, protocol, nativeImage, nativeTheme, Menu, dialog, clipboard, powerMonitor, type MenuItemConstructorOptions, type NativeImage } from 'electron'
 import { join, isAbsolute, basename, resolve } from 'path'
 import { statSync, existsSync, appendFileSync } from 'fs'
 import { writeFile } from 'fs/promises'
@@ -148,7 +152,7 @@ type ThemeSnapshot = {
 
 function resolveStoredThemeSource(): 'light' | 'dark' | 'system' {
   try {
-    const raw = String(getDatabase().getSetting(THEME_SETTING_KEY) || '').trim().toLowerCase()
+    const raw = String(getDatabase().settings.getSetting(THEME_SETTING_KEY) || '').trim().toLowerCase()
     if (raw === 'light' || raw === 'dark' || raw === 'system') return raw
   } catch {
     // ignore persisted theme read failures
@@ -158,7 +162,7 @@ function resolveStoredThemeSource(): 'light' | 'dark' | 'system' {
 
 function resolveStoredThemeSkin(): ThemeSkin {
   try {
-    const raw = String(getDatabase().getSetting(THEME_SKIN_SETTING_KEY) || '').trim().toLowerCase()
+    const raw = String(getDatabase().settings.getSetting(THEME_SKIN_SETTING_KEY) || '').trim().toLowerCase()
     if (raw === 'liquid-glass' || raw === 'ready-glass' || raw === 'solid-green-glass' || raw === 'solid-blue-glass') return raw
   } catch {
     // ignore persisted skin read failures
@@ -332,6 +336,8 @@ function setupApplicationMenu(): void {
   Menu.setApplicationMenu(menu)
 }
 
+const handleRSSResume = (): void => { void resumeRSSDigests().catch((error) => console.error('[rss-digests] resume failed', error)) }
+
 function stopRSSAutoRefresh(): Promise<void> {
   setRSSFetchAllCompletedListener(null)
   try {
@@ -343,7 +349,9 @@ function stopRSSAutoRefresh(): Promise<void> {
 }
 
 function runFatalProcessCleanup(): Promise<void> {
-  const rssAutoRefreshStopped = stopRSSAutoRefresh()
+  stopRSSDigests()
+  powerMonitor.removeListener('resume', handleRSSResume)
+  const rssAutoRefreshStopped = Promise.all([stopRSSAutoRefresh(), stopRSSContentService(), stopRSSProcessing()])
   return runBeforeQuitCleanup({
     cleanupAgentRuntime,
     cleanupAgentManager: () => agentManager.cleanup(),
@@ -659,6 +667,7 @@ function setupGlobalIPC(): void {
   setupTagForgeIPC()
   setupImageGenerationIPC()
   setupRSSIPC(RSS_USE_MOCK)
+  if (!RSS_USE_MOCK) { void startRSSDigests().catch((error) => console.error('[rss-digests] startup failed', error)); powerMonitor.on('resume', handleRSSResume) }
   rssAutoRefreshScheduler = new RSSAutoRefreshScheduler({
     now: () => Date.now(),
     readIntervalMs: readRSSAutoRefreshInterval,
@@ -688,7 +697,7 @@ function setupGlobalIPC(): void {
   })
   reminderNotifierFire = (payload) => reminderNotifier.fire(payload)
   reminderScheduler = startReminderScheduler({
-    getDb: () => getDatabase(),
+    getDb: () => getDatabase().calendar,
     now: () => Math.floor(Date.now() / 1000),
     scheduleAt: defaultScheduleAt,
     fire: (payload) => reminderNotifier.fire(payload),
@@ -707,7 +716,7 @@ function setupGlobalIPC(): void {
           // be re-polled. We narrow the row shape so the scheduler's
           // TS contract is preserved (it only needs id / sync_url /
           // sync_interval).
-          return getDatabase().getCalendarSources().map((s) => ({
+          return getDatabase().calendar.getCalendarSources().map((s) => ({
             id: s.id,
             sync_url: s.sync_url,
             sync_interval: s.sync_interval,
@@ -733,7 +742,7 @@ function setupGlobalIPC(): void {
       },
       importedEventsFor: (sourceId: string) => {
         try {
-          return getDatabase().listImportedEventsForSource(sourceId)
+          return getDatabase().calendar.listImportedEventsForSource(sourceId)
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error)
           console.warn(`[sync-scheduler] listImportedEventsForSource(${sourceId}) failed:`, message)
@@ -741,9 +750,9 @@ function setupGlobalIPC(): void {
         }
       },
       upsertImportedEvent: (sourceId, ev) =>
-        getDatabase().upsertImportedEvent(sourceId, ev),
+        getDatabase().calendar.upsertImportedEvent(sourceId, ev),
       deleteImportedEvent: (sourceId, uid) =>
-        getDatabase().deleteImportedEvent(sourceId, uid),
+        getDatabase().calendar.deleteImportedEvent(sourceId, uid),
       onSourceSynced: (result) => {
         // Telemetry hook — log line; tests rely on this not throwing.
         if (result.ok) {
@@ -767,12 +776,14 @@ function setupGlobalIPC(): void {
     syncScheduler: calendarSyncScheduler ?? undefined,
   })
   chatGptOAuthService = setupSettingsIPC({
+    onModelChanged: wakeRSSProcessing,
     onSettingChanged: (key) => {
       if (key === RSS_AUTO_REFRESH_INTERVAL_KEY) {
         rssAutoRefreshScheduler?.onSettingChanged()
       }
     },
   })
+  if (!RSS_USE_MOCK) void startRSSProcessing({ isProviderReady: (config) => !chatGptOAuthService?.isLifecycleBusy() && (!isChatGptOAuthConfig(config) || chatGptOAuthService?.getStatus().state === 'ready') })
   petWindowManager = setupPetIPC({
     preloadPath: join(__dirname, '../preload/index.mjs'),
       rendererFile: join(__dirname, '../renderer/index.html'),
@@ -874,7 +885,7 @@ function setupGlobalIPC(): void {
     const nextTheme = theme === 'dark' || theme === 'light' || theme === 'system' ? theme : 'light'
     nativeTheme.themeSource = nextTheme
     try {
-      getDatabase().setSetting(THEME_SETTING_KEY, nextTheme)
+      getDatabase().settings.setSetting(THEME_SETTING_KEY, nextTheme)
     } catch {
       // ignore persistence failures
     }
@@ -889,7 +900,7 @@ function setupGlobalIPC(): void {
   ipcMain.handle('theme:setSkin', (_event, skin: string) => {
     const nextSkin: ThemeSkin = skin === 'ready-glass' || skin === 'solid-green-glass' || skin === 'solid-blue-glass' ? skin : 'liquid-glass'
     try {
-      getDatabase().setSetting(THEME_SKIN_SETTING_KEY, nextSkin)
+      getDatabase().settings.setSetting(THEME_SKIN_SETTING_KEY, nextSkin)
     } catch {
       // ignore persistence failures
     }
@@ -1098,7 +1109,7 @@ app.whenReady().then(async () => {
     const scheduler = reminderScheduler
     const fire = reminderNotifierFire
     void recoverMissedReminders({
-      getDb: () => getDatabase(),
+      getDb: () => getDatabase().calendar,
       now: () => Math.floor(Date.now() / 1000),
       fire,
     }).then((summary) => {
@@ -1165,7 +1176,9 @@ async function cleanupBeforeAppQuit(startedAt: number): Promise<void> {
   } catch (err) {
     console.warn('[before-quit] calendarSyncScheduler.stop threw:', err)
   }
-  const rssAutoRefreshStopped = stopRSSAutoRefresh()
+  stopRSSDigests()
+  powerMonitor.removeListener('resume', handleRSSResume)
+  const rssAutoRefreshStopped = Promise.all([stopRSSAutoRefresh(), stopRSSContentService(), stopRSSProcessing()])
   const remainingTimeoutMs = Math.max(0, 5_000 - (Date.now() - startedAt))
   await runBeforeQuitCleanup({
     cleanupAgentRuntime,

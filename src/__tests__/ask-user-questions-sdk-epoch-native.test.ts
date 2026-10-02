@@ -5,7 +5,8 @@ import { RunMetaRepository } from '../main/modules/agent-control/task-projection
 import {
   persistAskUserQuestionsCardPending,
 } from '../main/modules/claude-bridge/ask-user-questions-card-persistence'
-import { DatabaseManager, type DatabaseConnection } from '../main/modules/database'
+import type { DatabaseConnection } from '../main/modules/database/connection'
+import { DatabaseManager } from '../main/modules/database'
 import type { MigrationDatabase } from '../main/modules/migrations'
 import {
   executeAskUserQuestions,

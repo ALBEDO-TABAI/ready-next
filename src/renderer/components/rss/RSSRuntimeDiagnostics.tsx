@@ -217,7 +217,6 @@ export default function RSSRuntimeDiagnostics({
           </div>
           <div style={{ color: 'var(--text-light)' }}>
             {formatWhen(lastFetchInvocation.recordedAt)}
-            {lastFetchInvocation.classification ? ` · 分类 ${lastFetchInvocation.classification}` : ''}
             {typeof lastFetchInvocation.digest === 'boolean' ? ` · digest ${lastFetchInvocation.digest ? 'on' : 'off'}` : ''}
           </div>
         </div>

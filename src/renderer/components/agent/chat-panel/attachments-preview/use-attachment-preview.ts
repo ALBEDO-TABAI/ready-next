@@ -28,6 +28,10 @@ export function useAttachmentPreview({
   return useCallback(async (attachment: ChatAttachment) => {
     if (!attachment.path) return
     const composerAuthority = captureComposerAuthority(useAgent.getState())
+    if (attachment.source === 'rss-reference') {
+      setActiveAttachmentPreview({ attachment, mode: 'text' })
+      return
+    }
     if (attachment.source === 'document-quote') {
       setActiveAttachmentPreview({
         attachment,

@@ -1,7 +1,8 @@
 // Owns persisted remote-channel configuration and binding state. All adapter
 // changes share one per-channel queue and read the latest committed settings.
 import { createHash, randomInt, randomUUID } from 'crypto'
-import type { AgentChannelRecord, AgentChannelType, DatabaseManager } from '../../database'
+import type { AgentChannelRecord, AgentChannelType } from '../../database/records'
+import type { DatabaseManager } from '../../database'
 import type { SidecarManager } from '../sidecar-manager'
 import type { AgentChannelConfig, ChannelAdapterType, HeartbeatSnapshot } from '../contracts/types'
 import {
@@ -72,12 +73,12 @@ export class ChannelConfigService {
   constructor(private readonly deps: ChannelConfigServiceDeps) {}
 
   listChannels(): AgentChannelConfig[] {
-    const rows = this.deps.db.listAgentChannels()
+    const rows = this.deps.db.channels.listAgentChannels()
     return rows.map((row) => this.mapChannelRow(row))
   }
 
   listRuntimeChannels(): AgentChannelConfig[] {
-    return this.deps.db.listAgentChannels().map((row) => this.mapRuntimeChannelRow(row))
+    return this.deps.db.channels.listAgentChannels().map((row) => this.mapRuntimeChannelRow(row))
   }
 
   async migrateStoredCredentialsOnce(): Promise<{
@@ -85,17 +86,17 @@ export class ChannelConfigService {
     unresolved: number
     alreadyDone: boolean
   }> {
-    if (this.deps.db.getSetting(CHANNEL_CREDENTIAL_MIGRATION_SETTING)) {
+    if (this.deps.db.settings.getSetting(CHANNEL_CREDENTIAL_MIGRATION_SETTING)) {
       return { migrated: 0, unresolved: 0, alreadyDone: true }
     }
     let unresolved = 0
-    for (const row of this.deps.db.listAgentChannels()) {
+    for (const row of this.deps.db.channels.listAgentChannels()) {
       const owner = channelCredentialOwner(row.id)
       const storedConfig = tryParseJson<Record<string, unknown>>(row.config_json, {})
       const status = toPublicChannelConfig(storedConfig, owner).secretStatus
       unresolved += Object.values(status).filter((item) => item.state === 'recovery_required').length
     }
-    this.deps.db.setSetting(CHANNEL_CREDENTIAL_MIGRATION_SETTING, JSON.stringify({
+    this.deps.db.settings.setSetting(CHANNEL_CREDENTIAL_MIGRATION_SETTING, JSON.stringify({
       attemptedAt: new Date().toISOString(),
       migrated: 0,
       unresolved,
@@ -122,7 +123,7 @@ export class ChannelConfigService {
   async upsertChannel(payload: UpsertChannelPayload): Promise<AgentChannelConfig> {
     const id = payload.id || `channel-${randomUUID()}`
     const generation = this.nextMutationGeneration(id)
-    const existing = this.deps.db.getAgentChannel(id)
+    const existing = this.deps.db.channels.getAgentChannel(id)
     if (existing?.last_error === CHANNEL_DELETE_PENDING_ERROR) throw new Error('连接正在删除，请稍后再试')
     if (existing && existing.type !== payload.type) throw new Error('既有连接不能改为另一种通讯类型')
     const previousConfig = existing
@@ -143,11 +144,11 @@ export class ChannelConfigService {
     )
     let row: AgentChannelRecord
     try {
-      const current = this.deps.db.getAgentChannel(id)
+      const current = this.deps.db.channels.getAgentChannel(id)
       if (this.mutationGenerations.get(id) !== generation || current?.config_json !== existing?.config_json || current?.enabled !== existing?.enabled) {
         throw new Error('连接设置已发生变化，请重新操作')
       }
-      row = this.deps.db.upsertAgentChannel({
+      row = this.deps.db.channels.upsertAgentChannel({
         id,
         type: payload.type as AgentChannelType,
         name: payload.name.trim() || id,
@@ -167,17 +168,17 @@ export class ChannelConfigService {
 
   async deleteChannel(id: string): Promise<boolean> {
     this.nextMutationGeneration(id)
-    const existing = this.deps.db.getAgentChannel(id)
+    const existing = this.deps.db.channels.getAgentChannel(id)
     if (!existing) return false
-    this.deps.db.setSetting(`wechat_login:${id}`, '')
-    this.deps.db.setSetting(`channel_pairing:${id}`, '')
-    this.deps.db.setAgentChannelEnabled(id, false)
-    this.deps.db.setAgentChannelError(id, CHANNEL_DELETE_PENDING_ERROR)
+    this.deps.db.settings.setSetting(`wechat_login:${id}`, '')
+    this.deps.db.settings.setSetting(`channel_pairing:${id}`, '')
+    this.deps.db.channels.setAgentChannelEnabled(id, false)
+    this.deps.db.channels.setAgentChannelError(id, CHANNEL_DELETE_PENDING_ERROR)
     return this.finishPendingDelete(id)
   }
 
   async reconcilePendingDeletes(): Promise<void> {
-    const pending = this.deps.db.listAgentChannels().filter(
+    const pending = this.deps.db.channels.listAgentChannels().filter(
       (row) => row.last_error === CHANNEL_DELETE_PENDING_ERROR,
     )
     for (const row of pending) {
@@ -187,15 +188,15 @@ export class ChannelConfigService {
 
   async setChannelEnabled(id: string, enabled: boolean): Promise<AgentChannelConfig | null> {
     this.nextMutationGeneration(id)
-    const existing = this.deps.db.getAgentChannel(id)
+    const existing = this.deps.db.channels.getAgentChannel(id)
     if (existing?.last_error === CHANNEL_DELETE_PENDING_ERROR) throw new Error('连接正在删除，请稍后再试')
     if (!enabled) {
-      this.deps.db.setSetting(`wechat_login:${id}`, '')
+      this.deps.db.settings.setSetting(`wechat_login:${id}`, '')
     }
     if (enabled && existing && this.mapChannelRow(existing).credentialState !== 'ready') {
       throw new Error('channel_credential_recovery_required')
     }
-    const row = this.deps.db.setAgentChannelEnabled(id, enabled)
+    const row = this.deps.db.channels.setAgentChannelEnabled(id, enabled)
     if (!row) return null
     if (enabled && !this.deps.sidecar.isRunning()) await this.deps.startSidecar()
     if (this.deps.sidecar.isRunning()) await this.syncChannel(id)
@@ -206,7 +207,7 @@ export class ChannelConfigService {
     if (!this.deps.sidecar.isRunning()) {
       await this.deps.startSidecar()
     }
-    const channel = this.deps.db.getAgentChannel(id)
+    const channel = this.deps.db.channels.getAgentChannel(id)
     if (!channel) return { success: false, error: `Channel not found: ${id}` }
     if (!channel.enabled || this.mapChannelRow(channel).credentialState !== 'ready') return { success: false, error: '请先启用并完成绑定' }
     try {
@@ -229,14 +230,14 @@ export class ChannelConfigService {
     channelId: string,
     result: { success: boolean; error?: string }
   ): void {
-    const row = this.deps.db.getAgentChannel(channelId)
+    const row = this.deps.db.channels.getAgentChannel(channelId)
     if (!row || row.last_error === CHANNEL_DELETE_PENDING_ERROR) return
     if (result.success) {
-      this.deps.db.setAgentChannelError(channelId, null)
-      this.deps.db.markAgentChannelSeen(channelId)
+      this.deps.db.channels.setAgentChannelError(channelId, null)
+      this.deps.db.channels.markAgentChannelSeen(channelId)
       return
     }
-    this.deps.db.setAgentChannelError(channelId, result.error || '远程 IM 发送失败')
+    this.deps.db.channels.setAgentChannelError(channelId, result.error || '远程 IM 发送失败')
   }
 
   async testChannel(payload: UpsertChannelPayload): Promise<{ success: boolean; error?: string }> {
@@ -273,17 +274,17 @@ export class ChannelConfigService {
     const sessionKey = randomUUID()
     try {
       const generation = this.nextMutationGeneration(id)
-      const existing = this.deps.db.getAgentChannel(id)
+      const existing = this.deps.db.channels.getAgentChannel(id)
       if (existing?.last_error === CHANNEL_DELETE_PENDING_ERROR) throw new Error('连接正在删除，请稍后再试')
       if (existing && existing.type !== 'wechat-openclaw') throw new Error('请选择微信连接')
-      this.deps.db.upsertAgentChannel({ id, type: 'wechat-openclaw', name: existing?.name || '微信', enabled: false,
+      this.deps.db.channels.upsertAgentChannel({ id, type: 'wechat-openclaw', name: existing?.name || '微信', enabled: false,
         configJson: existing?.config_json || '{}' })
-      this.deps.db.setSetting(`wechat_login:${id}`, JSON.stringify({ sessionKey, status: 'pending' }))
-      this.deps.db.setAgentChannelError(id, null)
+      this.deps.db.settings.setSetting(`wechat_login:${id}`, JSON.stringify({ sessionKey, status: 'pending' }))
+      this.deps.db.channels.setAgentChannelError(id, null)
       if (!this.deps.sidecar.isRunning()) await this.deps.startSidecar()
       return await this.serializeChannelMirror(id, async () => {
         if (this.mutationGenerations.get(id) !== generation) return { success: false, error: '绑定已取消或设置已变更' }
-        const row = this.deps.db.getAgentChannel(id)
+        const row = this.deps.db.channels.getAgentChannel(id)
         if (!row) return { success: false, error: '连接已删除' }
         const config = this.mapRuntimeChannelRow(row).config
         delete config.defaultTarget
@@ -297,8 +298,8 @@ export class ChannelConfigService {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       if (this.readWechatLoginState(id)?.sessionKey === sessionKey) {
-        this.deps.db.setSetting(`wechat_login:${id}`, JSON.stringify({ sessionKey, status: 'error', error: message }))
-        this.deps.db.setAgentChannelError(id, message)
+        this.deps.db.settings.setSetting(`wechat_login:${id}`, JSON.stringify({ sessionKey, status: 'error', error: message }))
+        this.deps.db.channels.setAgentChannelError(id, message)
       }
       throw error
     }
@@ -321,7 +322,7 @@ export class ChannelConfigService {
       return { success: true, sessionKey, status: 'activating', message: '已确认扫码，正在启动连接…' }
     }
     if (state.status === 'connected') {
-      const row = this.deps.db.getAgentChannel(channelId)
+      const row = this.deps.db.channels.getAgentChannel(channelId)
       const config = tryParseJson<Record<string, unknown>>(row?.config_json || '{}', {})
       return row?.enabled && config.bindingId === state.bindingId
         ? { success: true, ...state }
@@ -343,7 +344,7 @@ export class ChannelConfigService {
     if (result.status === 'connected' || result.status === 'already_connected') {
       await this.completeWechatBinding({ ...result, channelId, sessionKey })
       const completed = this.readWechatLoginState(channelId)
-      const row = this.deps.db.getAgentChannel(channelId)
+      const row = this.deps.db.channels.getAgentChannel(channelId)
       const config = tryParseJson<Record<string, unknown>>(row?.config_json || '{}', {})
       if (completed?.sessionKey === sessionKey && completed.status === 'activating') return { success: true, sessionKey, status: 'activating', message: '已确认扫码，正在启动连接…' }
       if (completed?.sessionKey === sessionKey && completed.status === 'error') return { success: false, ...completed }
@@ -354,8 +355,8 @@ export class ChannelConfigService {
     if (result.success === false || result.status === 'error' || result.status === 'expired') {
       const error = String(result.error || result.message || '绑定已结束，请重新生成二维码。')
       if (this.readWechatLoginState(channelId)?.sessionKey === sessionKey) {
-        this.deps.db.setSetting(`wechat_login:${channelId}`, JSON.stringify({ sessionKey, status: 'error', error }))
-        this.deps.db.setAgentChannelError(channelId, error)
+        this.deps.db.settings.setSetting(`wechat_login:${channelId}`, JSON.stringify({ sessionKey, status: 'error', error }))
+        this.deps.db.channels.setAgentChannelError(channelId, error)
       }
     }
     return result
@@ -376,7 +377,7 @@ export class ChannelConfigService {
 
   private async persistWechatBinding(payload: Record<string, unknown>): Promise<void> {
     const id = String(payload.channelId || '')
-    const row = this.deps.db.getAgentChannel(id)
+    const row = this.deps.db.channels.getAgentChannel(id)
     if (!row || row.type !== 'wechat-openclaw') return
     const config = tryParseJson<Record<string, unknown>>(row.config_json, {})
     const pendingSession = this.readWechatLoginState(id)
@@ -387,8 +388,8 @@ export class ChannelConfigService {
     const owner = String(payload.userId || '')
     if (!accountId || !owner) {
       const error = '微信没有返回完整的账号身份，请重新绑定'
-      this.deps.db.setAgentChannelError(id, error)
-      this.deps.db.setSetting(`wechat_login:${id}`, JSON.stringify({ sessionKey: pendingSession?.sessionKey || null, status: 'error', error }))
+      this.deps.db.channels.setAgentChannelError(id, error)
+      this.deps.db.settings.setSetting(`wechat_login:${id}`, JSON.stringify({ sessionKey: pendingSession?.sessionKey || null, status: 'error', error }))
       return
     }
     const restoredBindingId = `restored-${createHash('sha256').update(`${id}:${accountId}:${owner}`).digest('hex').slice(0, 32)}`
@@ -398,9 +399,9 @@ export class ChannelConfigService {
     if (!raw) throw new Error('Database not available')
     raw.exec('BEGIN IMMEDIATE')
     try {
-      this.deps.db.upsertAgentChannel({ id, type: 'wechat-openclaw', name: row.name, enabled: true,
+      this.deps.db.channels.upsertAgentChannel({ id, type: 'wechat-openclaw', name: row.name, enabled: true,
         configJson: JSON.stringify({ ...config, accountId, allowedSenderId: owner, bindingId, remoteAssistantEnabled: true }) })
-      this.deps.db.setSetting(`wechat_login:${id}`, JSON.stringify({ sessionKey: restoring ? null : payload.sessionKey,
+      this.deps.db.settings.setSetting(`wechat_login:${id}`, JSON.stringify({ sessionKey: restoring ? null : payload.sessionKey,
         status: 'activating', accountId, userId: owner, bindingId }))
       raw.exec('COMMIT')
     } catch (error) {
@@ -427,25 +428,25 @@ export class ChannelConfigService {
       if (this.deps.sidecar.isRunning()) await this.syncChannel(id)
       const current = this.readWechatLoginState(id)
       if (current?.bindingId === bindingId && current.status === 'activating') {
-        this.deps.db.setSetting(`wechat_login:${id}`, JSON.stringify({ ...current, status: 'connected' }))
+        this.deps.db.settings.setSetting(`wechat_login:${id}`, JSON.stringify({ ...current, status: 'connected' }))
       }
     } catch (error) {
       const current = this.readWechatLoginState(id)
       if (current?.bindingId === bindingId && current.status === 'activating') {
         const message = error instanceof Error ? error.message : String(error)
-        this.deps.db.setSetting(`wechat_login:${id}`, JSON.stringify({ ...current, status: 'error', error: message }))
-        this.deps.db.setAgentChannelError(id, message)
+        this.deps.db.settings.setSetting(`wechat_login:${id}`, JSON.stringify({ ...current, status: 'error', error: message }))
+        this.deps.db.channels.setAgentChannelError(id, message)
       }
       throw error
     }
   }
 
   startChannelPairing(id: string): { code: string; expiresAt: string } {
-    const channel = this.deps.db.getAgentChannel(id)
+    const channel = this.deps.db.channels.getAgentChannel(id)
     if (!channel || channel.type !== 'feishu-app' || !channel.enabled) throw new Error('请先连接飞书应用')
     const code = String(randomInt(100000, 1000000))
     const expiresAt = new Date(Date.now() + 5 * 60_000).toISOString()
-    this.deps.db.setSetting(`channel_pairing:${id}`, JSON.stringify({
+    this.deps.db.settings.setSetting(`channel_pairing:${id}`, JSON.stringify({
       digest: createHash('sha256').update(`${id}:${code}`).digest('hex'), expiresAt, attempts: 0,
       appId: tryParseJson<Record<string, unknown>>(channel.config_json, {}).appId,
     }))
@@ -456,22 +457,22 @@ export class ChannelConfigService {
     const text = String(payload.text || '').trim()
     if (!/^\/bind(?:\s|$)/i.test(text)) return false
     const id = String(payload.channelId || '')
-    const row = this.deps.db.getAgentChannel(id)
+    const row = this.deps.db.channels.getAgentChannel(id)
     if (!row || row.type !== 'feishu-app' || !row.enabled) return true
     const meta = payload.meta as Record<string, unknown> | undefined
     if (meta?.chatType !== 'p2p') return true
-    const state = tryParseJson<Record<string, unknown>>(this.deps.db.getSetting(`channel_pairing:${id}`) || '{}', {})
+    const state = tryParseJson<Record<string, unknown>>(this.deps.db.settings.getSetting(`channel_pairing:${id}`) || '{}', {})
     const code = text.match(/^\/bind\s+(\d{6})$/i)?.[1]
     const attempts = Number(state.attempts || 0)
     if (state.appId !== tryParseJson<Record<string, unknown>>(row.config_json, {}).appId) return true
     if (!state.digest || Date.parse(String(state.expiresAt)) < Date.now() || attempts >= 5) return true
-    this.deps.db.setSetting(`channel_pairing:${id}`, JSON.stringify({ ...state, attempts: attempts + 1 }))
+    this.deps.db.settings.setSetting(`channel_pairing:${id}`, JSON.stringify({ ...state, attempts: attempts + 1 }))
     if (!code || createHash('sha256').update(`${id}:${code}`).digest('hex') !== state.digest) return true
     const sender = String(payload.sender || '')
     const thread = String(payload.thread || '')
     if (!sender || !thread) return true
     // Consume before any asynchronous channel reconfiguration: one owner wins.
-    this.deps.db.setSetting(`channel_pairing:${id}`, '')
+    this.deps.db.settings.setSetting(`channel_pairing:${id}`, '')
     await this.upsertChannel({ id, type: row.type, name: row.name, enabled: true,
       config: { allowedSenderId: sender, defaultChatId: thread, bindingId: randomUUID(), remoteAssistantEnabled: true } })
     return true
@@ -484,7 +485,7 @@ export class ChannelConfigService {
   }
 
   private readWechatLoginState(id: string): WechatLoginState | null {
-    return tryParseJson<WechatLoginState | null>(this.deps.db.getSetting(`wechat_login:${id}`) || 'null', null)
+    return tryParseJson<WechatLoginState | null>(this.deps.db.settings.getSetting(`wechat_login:${id}`) || 'null', null)
   }
 
   private async serializeChannelMirror<T>(id: string, operation: () => Promise<T>): Promise<T> {
@@ -495,7 +496,7 @@ export class ChannelConfigService {
 
   async syncChannel(id: string): Promise<void> {
     return this.serializeChannelMirror(id, async () => {
-      const row = this.deps.db.getAgentChannel(id)
+      const row = this.deps.db.channels.getAgentChannel(id)
       if (!row || row.last_error === CHANNEL_DELETE_PENDING_ERROR || this.mapChannelRow(row).credentialState !== 'ready') {
         const result = await this.deps.sidecar.deleteChannel(id)
         if (result.success !== true) throw new Error(String(result.error || '通道停止失败'))
@@ -505,7 +506,7 @@ export class ChannelConfigService {
       const result = await this.deps.sidecar.upsertChannel({ id, type: row.type, name: row.name,
         enabled: Boolean(row.enabled), config: channel.config })
       if (result.success !== true) throw new Error(String(result.error || '连接设置未生效'))
-      const current = this.deps.db.getAgentChannel(id)
+      const current = this.deps.db.channels.getAgentChannel(id)
       if (!current || current.last_error === CHANNEL_DELETE_PENDING_ERROR || current.config_json !== row.config_json || current.enabled !== row.enabled) return
       await this.applyChannelState(id, Boolean(row.enabled))
     })
@@ -514,8 +515,8 @@ export class ChannelConfigService {
   private async applyChannelState(id: string, enabled: boolean): Promise<void> {
     const response = enabled ? await this.deps.sidecar.startChannel(id) : await this.deps.sidecar.stopChannel(id)
     const result = normalizeChannelDeliveryResult(response, enabled ? '通道启动失败' : '通道停止失败')
-    if (this.deps.db.getAgentChannel(id)?.last_error !== CHANNEL_DELETE_PENDING_ERROR) {
-      this.deps.db.setAgentChannelError(id, result.success ? null : result.error || '连接失败')
+    if (this.deps.db.channels.getAgentChannel(id)?.last_error !== CHANNEL_DELETE_PENDING_ERROR) {
+      this.deps.db.channels.setAgentChannelError(id, result.success ? null : result.error || '连接失败')
     }
     if (!result.success) throw new Error(result.error)
   }
@@ -563,7 +564,7 @@ export class ChannelConfigService {
       }
     }
     if (!payload.id) return config
-    const existing = this.deps.db.getAgentChannel(payload.id)
+    const existing = this.deps.db.channels.getAgentChannel(payload.id)
     if (!existing) return config
     const owner = channelCredentialOwner(existing.id)
     const storedConfig = tryParseJson<Record<string, unknown>>(existing.config_json, {})
@@ -587,7 +588,7 @@ export class ChannelConfigService {
   }
 
   private async finishPendingDeleteAtMirror(id: string): Promise<boolean> {
-    const existing = this.deps.db.getAgentChannel(id)
+    const existing = this.deps.db.channels.getAgentChannel(id)
     if (!existing) return true
     await clearChannelCredentials(
       tryParseJson<Record<string, unknown>>(existing.config_json, {}),
@@ -600,6 +601,6 @@ export class ChannelConfigService {
         throw new Error(String(deleted.error || CHANNEL_DELETE_PENDING_ERROR))
       }
     }
-    return this.deps.db.deleteAgentChannel(id)
+    return this.deps.db.channels.deleteAgentChannel(id)
   }
 }

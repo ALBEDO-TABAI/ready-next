@@ -35,13 +35,12 @@ import type {
 /**
  * Narrow facade for the worker-db bridge surface SourceIndexGroup consumes.
  * Mirrors the three methods the inline handlers call (`reindexWorkspace`,
- * `reindexAllSources`, `cancelReindex`) so the group does not import
+ * `reindexAllSources`) so the group does not import
  * `getWorkerDbBridge()` or the full `WorkerDbBridge` interface directly.
  */
 export interface SearchWorkerBridgeFacade {
   reindexWorkspace(opts: { root: string }): Promise<ReindexWorkspaceResult>
   reindexAllSources(opts: { root: string }): Promise<ReindexAllSourcesResult>
-  cancelReindex(): Promise<number>
   /**
    * V2.4b — FTS search offloaded to the worker. SearchQueryGroup calls this
    * before falling back to the in-process engine on bridge failure.
@@ -99,8 +98,7 @@ export interface EngineDeps {
   /**
    * Resolve the lazy `getWorkerDbBridge()` facade. The host owns the
    * actual bridge construction + worker lifecycle; the group only sees
-   * the three methods it needs (`reindexWorkspace`, `reindexAllSources`,
-   * `cancelReindex`).
+   * the two methods it needs (`reindexWorkspace`, `reindexAllSources`).
    */
   getWorkerBridge(): SearchWorkerBridgeFacade
   /**

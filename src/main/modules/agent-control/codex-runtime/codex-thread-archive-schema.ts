@@ -1,4 +1,4 @@
-import type { DatabaseConnection } from '../../database'
+import type { DatabaseConnection } from '../../database/connection'
 
 export const CODEX_THREAD_ARCHIVE_CLEANUP_SCHEMA_SQL = `
   CREATE TABLE IF NOT EXISTS codex_thread_archive_intents (

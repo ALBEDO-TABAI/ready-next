@@ -1,69 +1,38 @@
 import { useEffect, useRef } from 'react'
 import type { RSSItem } from '../../components/rss/RSSFeed'
 import { registerModuleAgentHandler } from '../../utils/moduleAgentBridge'
+import { toRSSItem, rssQueryKey } from './workspace-query'
+import { useRSSSession } from '../../stores/useRSSSession'
 
-interface UseRSSSelectionCommandBridgeParams {
-  items: RSSItem[]
-  selectedSource: string | null
+export function useRSSSelectionCommandBridge(params: {
+  active: boolean
   selectedItem: RSSItem | null
-  handleItemClick: (item: RSSItem) => void
-  setFeedSnapshot: (payload: { totalItems?: number; unreadItems?: number; lastFetchAt?: number | null }) => void
-  setSelection: (payload: {
-    selectedSourceId?: string | null
-    selectedItemId?: string | null
-    selectedItemTitle?: string | null
-  }) => void
-}
-
-export function useRSSSelectionCommandBridge(params: UseRSSSelectionCommandBridgeParams): void {
-  const {
-    items,
-    selectedSource,
-    selectedItem,
-    handleItemClick,
-    setFeedSnapshot,
-    setSelection,
-  } = params
-  const surfaceGeneration = useRef(0)
-
+  handleItemClick(item: RSSItem): void
+}): void {
+  const { active, selectedItem, handleItemClick } = params
+  const generation = useRef(0)
   useEffect(() => {
-    setSelection({
-      selectedSourceId: selectedSource,
-      selectedItemId: selectedItem?.id ?? null,
-      selectedItemTitle: selectedItem?.title ?? null,
-    })
-    setFeedSnapshot({
-      totalItems: items.length,
-      unreadItems: items.filter((item) => !item.read).length,
-    })
-  }, [items, selectedItem, selectedSource, setFeedSnapshot, setSelection])
-
+    useRSSSession.getState().setSelection({ selectedItemId: selectedItem?.id || null, selectedItemTitle: selectedItem?.title || null,
+      selectedExcerpt: selectedItem?.reveal?.range || null, selectedItemExpectedRevision: selectedItem?.pinnedRevision || selectedItem?.revision || null })
+  }, [selectedItem])
+  // Showing or hiding the surface invalidates a selection that is still reading.
+  useEffect(() => { generation.current++ }, [active])
+  // Registered while RSS is mounted, as in 0.8: an Agent selection made from another mode
+  // lands here without switching the visible workbench.
   useEffect(() => {
-    surfaceGeneration.current += 1
-  }, [items])
-
-  useEffect(() => {
-    return registerModuleAgentHandler('rss', async ({ action, args }) => {
+    const unregister = registerModuleAgentHandler('rss', async ({ action, args }) => {
       if (action !== 'rss.selectItem') throw new Error('rss_renderer_action_not_supported')
-      const itemId = String(args.itemId || '').trim()
-      const item = items.find((candidate) => candidate.id === itemId)
-      if (!item) throw new Error('rss_item_not_on_current_surface')
-      const expectedSurfaceGeneration = surfaceGeneration.current
-      handleItemClick(item)
-      await new Promise<void>((resolveApplied) => {
-        requestAnimationFrame(() => requestAnimationFrame(() => resolveApplied()))
-      })
-      if (surfaceGeneration.current !== expectedSurfaceGeneration) {
-        throw new Error('rss_surface_generation_changed')
-      }
-      return {
-        ok: true,
-        applied: true,
-        itemId: item.id,
-        selectedItemId: item.id,
-        surfaceGeneration: expectedSurfaceGeneration,
-        summary: `已选中 RSS 条目：《${item.title}》。`,
-      }
+      const incarnation = generation.current
+      const itemId = String(args.itemId || '').trim(), query = rssQueryKey(useRSSSession.getState().query)
+      const interaction = useRSSSession.getState().interactionRevision
+      const response = await window.electronAPI.rss.readArticle({ itemId, offset: 0, length: 1 })
+      if (generation.current !== incarnation || useRSSSession.getState().interactionRevision !== interaction || rssQueryKey(useRSSSession.getState().query) !== query) throw new Error('rss_surface_generation_changed')
+      if (!response.success || !response.data) throw new Error(response.error || 'rss_item_unavailable')
+      handleItemClick(toRSSItem(response.data.article))
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+      if (generation.current !== incarnation || useRSSSession.getState().selectedItemId !== itemId) throw new Error('rss_selection_not_applied')
+      return { ok: true, applied: true, itemId, selectedItemId: itemId, surfaceGeneration: incarnation, summary: `已选中 RSS 条目：《${response.data.article.title}》。` }
     })
-  }, [handleItemClick, items])
+    return () => { generation.current++; unregister() }
+  }, [handleItemClick])
 }

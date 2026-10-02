@@ -9,7 +9,7 @@ test('isolated calendar write through the production handler readbacks by id', a
   if (skipIfSqliteUnavailable(t, 'codex-workbench-surface-native')) return
   const database = new DatabaseManager(true)
   try {
-    const calendarId = database.addCalendarSource({ name: '测试日历', color: '#000000' })
+    const calendarId = database.calendar.addCalendarSource({ name: '测试日历', color: '#000000' })
     const { dispatch } = createProductionProductActionHandlers({
       database,
       rss: {
@@ -46,11 +46,11 @@ test('isolated calendar write through the production handler readbacks by id', a
     })
     assert.equal(created.ok, true)
     const eventId = String(created.eventId)
-    const readback = database.getCalendarEventById(eventId)
+    const readback = database.calendar.getCalendarEventById(eventId)
     assert.equal(readback?.title, '明天下午的会')
     assert.deepEqual(readback?.reminders, [{ offsetMinutes: -15, method: 'notification' }])
-    database.deleteCalendarEvent(eventId)
-    assert.equal(database.getCalendarEventById(eventId), null)
+    database.calendar.deleteCalendarEvent(eventId)
+    assert.equal(database.calendar.getCalendarEventById(eventId), null)
   } finally {
     database.close()
   }

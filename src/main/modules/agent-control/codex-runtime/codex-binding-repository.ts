@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { closeSync, lstatSync, openSync, readSync, realpathSync, statSync } from 'node:fs'
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 
-import type { DatabaseConnection } from '../../database'
+import type { DatabaseConnection } from '../../database/connection'
 import { parseObjectStrict, workflowDigest } from '../../repositories/browser-workflow-codec'
 import {
   readWorkflowVerifierBundleFromDb

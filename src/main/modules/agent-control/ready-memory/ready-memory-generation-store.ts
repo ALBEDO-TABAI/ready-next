@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import type { DatabaseConnection } from '../../database'
+import type { DatabaseConnection } from '../../database/connection'
 import { canonicalReadyMemoryJson } from './ready-memory-contract'
 import { ReadyMemoryRepositoryError } from './ready-memory-repository'
 import type { ReadyMemoryJob } from './ready-memory-types'

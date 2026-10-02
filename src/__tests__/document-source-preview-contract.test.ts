@@ -94,9 +94,12 @@ test('document edit and preview modes share reading scroll position when remount
   assert.match(scrollRuntime, /captureMarkdownLineAnchor\(content, lineNumber\)/)
   assert.match(scrollRuntime, /resolveMarkdownLineFromAnchor\(content, snapshot\)/)
 
+  // Document preview and RSS reading share one Markdown renderer; heading anchors live there.
   const notePreview = readWorkspaceFile('src/renderer/components/document/NotePreview.tsx')
+  const markdownContent = readWorkspaceFile('src/renderer/components/document/MarkdownContent.tsx')
   const mermaidPreview = readWorkspaceFile('src/renderer/components/document/MermaidPreviewBlock.tsx')
-  assert.match(notePreview, /data-ready-heading-title=\{extractMarkdownText\(children\)\}/)
+  assert.match(notePreview, /from '\.\/MarkdownContent'/)
+  assert.match(markdownContent, /data-ready-heading-title=\{extractMarkdownText\(children\)\}/)
   assert.match(mermaidPreview, /data-ready-mermaid="true"/)
 })
 

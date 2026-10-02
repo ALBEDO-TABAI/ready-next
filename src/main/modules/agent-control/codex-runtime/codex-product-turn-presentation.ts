@@ -1,4 +1,4 @@
-import type { DatabaseConnection } from '../../database'
+import type { DatabaseConnection } from '../../database/connection'
 import { workflowDigest } from '../../repositories/browser-workflow-codec'
 import type {
   ProductTurnArtifactReceipt,

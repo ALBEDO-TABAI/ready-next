@@ -6,7 +6,8 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
-import type { DatabaseConnection, DatabaseManager } from '../main/modules/database'
+import type { DatabaseConnection } from '../main/modules/database/connection'
+import type { DatabaseManager } from '../main/modules/database'
 import { AppSettingsRepository } from '../main/modules/repositories/app-settings-repository'
 import { AgentSessionCheckpointRepository } from '../main/modules/repositories/agent-session-checkpoint-repository'
 import { RunMetaRepository } from '../main/modules/agent-control/task-projection/run-meta-repository'
@@ -650,8 +651,7 @@ async function productionCloseout(
     database: value.accessor as unknown as DatabaseManager,
     settings: new AppSettingsRepository(() => ({
       ...value.accessor,
-      getSetting: () => undefined,
-      setSetting() { throw new Error('unexpected_settings_write') },
+      settings: { getSetting: () => undefined, setSetting() { throw new Error('unexpected_settings_write') } },
     })),
     async requestRendererToolAction() { throw new Error('unexpected_renderer_action') },
     providerReadiness: { async ensureReady() { throw new Error('unexpected_provider_call') } },

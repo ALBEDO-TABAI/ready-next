@@ -1,3 +1,4 @@
+import type { EventOverride, ImportedEvent } from '../database/records'
 import { ipcMain } from 'electron'
 import { CalendarRepository } from '../repositories/calendar-repository'
 import { parseRemindersInput } from './reminder-codec'
@@ -8,7 +9,7 @@ import {
   type DetectedTimeExpression,
 } from './time-expression-detector'
 import type { SyncResult, SyncScheduler } from './sync-scheduler'
-import type { EventOverride, ImportedEvent } from '../database'
+
 import type { Reminder } from '../../../shared/calendar-types'
 import { serializeEventToWire, serializeSourceToWire } from '../../../shared/calendar-wire'
 import { detectRemoteChannelEventSuggestions } from './remote-channel-event-detector'

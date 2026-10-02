@@ -13,16 +13,11 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import RitualOverlay from './components/overlay/RitualOverlay'
 import SkillInlinedToast from './components/skill/SkillInlinedToast'
 import AgentRuntimeListenerRoot from './modules/agent/AgentRuntimeListenerRoot'
-import { fetchRSSWarmSnapshot } from './modules/rss/rssWarmLoader'
-import { primeRSSWarmCache } from './modules/rss/rssWarmCache'
 import { handleWorkspaceWatcherFailure } from './stores/useWorkspace'
 import { useAgent } from './stores/useAgent'
 
 const LiquidTest = lazy(() => import('./LiquidTest'))
 const StartupPreview = lazy(() => import('./pages/StartupPreview'))
-
-// fire-and-forget: module-load warm cache prime; failure just means the first RSS read runs cold.
-void primeRSSWarmCache(fetchRSSWarmSnapshot).catch(() => undefined)
 
 function MainAppShell() {
   const { captureFeedback } = useKeyboardShortcuts()
@@ -102,11 +97,6 @@ function MainAppShell() {
     return subscribe((event) => {
       handleWorkspaceWatcherFailure(event)
     })
-  }, [])
-
-  useEffect(() => {
-    // fire-and-forget: re-prime warm cache on mount; same rationale as the module-load prime above.
-    void primeRSSWarmCache(fetchRSSWarmSnapshot).catch(() => undefined)
   }, [])
 
   return (

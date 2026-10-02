@@ -9,7 +9,7 @@ function readWorkspaceFile(path: string): string {
 }
 
 test('rss item upsert overwrites stale item fields instead of silently ignoring them', () => {
-  const database = readWorkspaceFile('src/main/modules/database.ts')
+  const database = readWorkspaceFile('src/main/modules/database/rss-store.ts')
 
   assert.match(database, /INSERT INTO rss_items[\s\S]*ON CONFLICT\(id\) DO UPDATE SET/)
   assert.match(database, /summary = excluded\.summary/)

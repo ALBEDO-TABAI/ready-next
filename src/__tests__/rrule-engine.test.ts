@@ -1,3 +1,4 @@
+import type { CalendarEvent } from '../main/modules/database/records'
 /**
  * Behavior tests for `rrule-engine.ts`.
  *
@@ -15,7 +16,7 @@ import {
   expandEventList,
   type EventOverride,
 } from '../main/modules/calendar-engine/rrule-engine'
-import type { CalendarEvent } from '../main/modules/database'
+
 
 const ONE_DAY_SEC = 24 * 3600
 const ONE_HOUR_SEC = 3600

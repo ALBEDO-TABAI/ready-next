@@ -1,4 +1,4 @@
-import type { DatabaseConnection } from '../../database'
+import type { DatabaseConnection } from '../../database/connection'
 import { CodexBindingRepositoryError } from './codex-binding-error'
 import { canonicalJson, digestCanonicalJson } from './codex-model-gateway-contract'
 import { buildCodexToolActionIdentity } from './codex-tool-action-identity'

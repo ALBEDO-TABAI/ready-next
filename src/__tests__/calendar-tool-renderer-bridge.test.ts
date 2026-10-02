@@ -39,3 +39,16 @@ test('rss tools also use renderer bridge payloads when available', async () => {
   assert.equal(payload.message, 'RSS 会话已捕获：当前共 3 条内容。')
   assert.equal(payload.totalItems, 3)
 })
+
+test('RSS missing or failed bridge results never claim a completed operation', async () => {
+  const missing = JSON.parse(await executeRSSTool('rss_fetch_updates', {}))
+  assert.equal(missing.ok, false)
+  assert.equal(missing.errorKind, 'product_action_bridge_missing')
+  assert.equal(String(missing.message).includes('完成'), false)
+  const failed = JSON.parse(await executeRSSTool('rss_fetch_updates', {}, {
+    requestModuleToolAction: async () => ({ ok: false, error: 'offline', message: '已完成' }),
+  }))
+  assert.equal(failed.ok, false)
+  assert.equal(failed.error, 'offline')
+  assert.equal(failed.message, 'RSS 操作未完成。')
+})

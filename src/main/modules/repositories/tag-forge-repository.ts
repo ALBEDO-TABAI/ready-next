@@ -1,5 +1,6 @@
+import type { DatabaseConnection } from '../database/connection'
 import { createHash, randomUUID } from 'crypto'
-import type { DatabaseConnection } from '../database'
+
 import type { TagFacet, TagLexiconEntry, TagProposal, ValidatedTag } from '../tag-forge/tag-forge-policy'
 
 export interface TagPendingIdentity {

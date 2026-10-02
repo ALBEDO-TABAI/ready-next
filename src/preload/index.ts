@@ -543,21 +543,10 @@ const browserAPI = {
     ipcRenderer.on('browser:leaseChanged', handler)
     return () => ipcRenderer.removeListener('browser:leaseChanged', handler)
   },
-  setAdblockEnabled: (enabled: boolean, scope?: 'main' | 'preview' | 'all') =>
-    ipcRenderer.invoke('browser:setAdblockEnabled', { enabled, scope }),
+  setAdblockEnabled: (enabled: boolean) =>
+    ipcRenderer.invoke('browser:setAdblockEnabled', { enabled }),
   toggleAdblockDomain: (domain: string) => ipcRenderer.invoke('browser:toggleAdblockDomain', { domain }),
   getTabContext: (tabId?: string) => ipcRenderer.invoke('browser:getTabContext', tabId),
-  previewOpen: (payload: { url: string }) => ipcRenderer.invoke('browser:previewOpen', payload),
-  previewNavigate: (payload: { url: string }) => ipcRenderer.invoke('browser:previewNavigate', payload),
-  previewGoBack: () => ipcRenderer.invoke('browser:previewGoBack'),
-  previewGoForward: () => ipcRenderer.invoke('browser:previewGoForward'),
-  previewReload: () => ipcRenderer.invoke('browser:previewReload'),
-  previewUpdateBounds: (bounds: { x: number; y: number; width: number; height: number }) => {
-    ipcRenderer.send('browser:previewUpdateBounds', bounds)
-    return Promise.resolve({ success: true })
-  },
-  previewClose: () => ipcRenderer.invoke('browser:previewClose'),
-  previewGetState: () => ipcRenderer.invoke('browser:previewGetState'),
   p7cLiveProofStartUserViewLease: () => ipcRenderer.invoke('browser:p7cLiveProofStartUserViewLease'),
   p7cLiveProofCreateManualTab: () => ipcRenderer.invoke('browser:p7cLiveProofCreateManualTab'),
   p7cLiveProofPrepareForegroundProbe: () => ipcRenderer.invoke('browser:p7cLiveProofPrepareForegroundProbe'),
@@ -569,11 +558,6 @@ const browserAPI = {
     ipcRenderer.invoke('browser:p7cLiveProofFinishAgentAction', phase),
   p7cLiveProofCheckWriteDenied: () => ipcRenderer.invoke('browser:p7cLiveProofCheckWriteDenied'),
   p7cLiveProofClear: () => ipcRenderer.invoke('browser:p7cLiveProofClear'),
-  onPreviewUpdate: (callback: (data: unknown) => void) => {
-    const handler = (_: unknown, data: unknown): void => callback(data)
-    ipcRenderer.on('browser:previewUpdate', handler)
-    return () => ipcRenderer.removeListener('browser:previewUpdate', handler)
-  },
   onTabUpdate: (callback: (data: unknown) => void) => {
     const handler = (_: unknown, data: unknown): void => callback(data)
     ipcRenderer.on('browser:tabUpdate', handler)
@@ -870,10 +854,51 @@ const boardAPI = {
 
 // RSS API
 const rssAPI = {
+  readExcerpt: (input: import('../shared/rss-excerpt').RSSReadExcerptInput) => ipcRenderer.invoke('rss:readExcerpt', input),
+  readDigests: (input?: import('../shared/rss-digests').RSSDigestReadInput) => ipcRenderer.invoke('rss:readDigests', input),
+  digestSettings: () => ipcRenderer.invoke('rss:digestSettings'),
+  configureDigests: (input: import('../shared/rss-digests').RSSDigestSettings) => ipcRenderer.invoke('rss:configureDigests', input),
+  generateDigest: (input: import('../shared/rss-digests').RSSDigestGenerateInput) => ipcRenderer.invoke('rss:generateDigest', input),
+  exportDigest: (input: { reportId: string }) => ipcRenderer.invoke('rss:exportDigest', input),
+  onDigestsChanged: (callback: () => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('rss:digestsChanged', handler)
+    return () => ipcRenderer.removeListener('rss:digestsChanged', handler)
+  },
+  markEventFactsSeen: (input: { factIds: string[] }) => ipcRenderer.invoke('rss:markEventFactsSeen', input),
+  onEventSeenChanged: (callback: () => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('rss:eventSeenChanged', handler)
+    return () => ipcRenderer.removeListener('rss:eventSeenChanged', handler)
+  },
+  queryCards: (query?: import('../shared/rss-workspace').RSSQueryInput) => ipcRenderer.invoke('rss:queryCards', query),
+  readEvents: (input?: import('../shared/rss-events').RSSReadEventsInput) => ipcRenderer.invoke('rss:readEvents', input),
+  moveEventMember: (input: import('../shared/rss-events').RSSEventMoveInput) => ipcRenderer.invoke('rss:moveEventMember', input),
+  mergeEvents: (input: import('../shared/rss-events').RSSEventMergeInput) => ipcRenderer.invoke('rss:mergeEvents', input),
+  processingStatus: () => ipcRenderer.invoke('rss:processingStatus'),
+  processingJobs: (input?: import('../shared/rss-processing').RSSProcessingListInput) => ipcRenderer.invoke('rss:processingJobs', input),
+  configureProcessing: (input: import('../shared/rss-processing').RSSProcessingSettings) => ipcRenderer.invoke('rss:configureProcessing', input),
+  reprocessArticle: (input: { itemId: string; expectedArticleRevision: string }) => ipcRenderer.invoke('rss:reprocessArticle', input),
+  cancelProcessing: (id: string) => ipcRenderer.invoke('rss:cancelProcessing', id),
+  resumeProcessing: () => ipcRenderer.invoke('rss:resumeProcessing'),
+  getDefinitions: () => ipcRenderer.invoke('rss:getDefinitions'),
+  saveDefinition: (input: import('../shared/rss-organization').RSSDefinitionWrite) => ipcRenderer.invoke('rss:saveDefinition', input),
+  removeDefinition: (input: { id: string; expectedRevision: number }) => ipcRenderer.invoke('rss:removeDefinition', input),
+  setMembership: (input: import('../shared/rss-organization').RSSMembershipWrite) => ipcRenderer.invoke('rss:setMembership', input),
+  onOrganizationChanged: (callback: () => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('rss:organizationChanged', handler)
+    return () => ipcRenderer.removeListener('rss:organizationChanged', handler)
+  },
+  saveArticleNote: (input: import('../shared/rss-workspace').RSSSaveNoteInput) => ipcRenderer.invoke('rss:saveArticleNote', input),
+  exportQuery: (input: import('../shared/rss-workspace').RSSQueryInput) => ipcRenderer.invoke('rss:exportQuery', input),
+  queryItems: (query?: unknown) => ipcRenderer.invoke('rss:queryItems', query),
+  dismissQuery: (input: import('../shared/rss-workspace').RSSQueryInput) => ipcRenderer.invoke('rss:dismissQuery', input),
+  readArticle: (input: unknown) => ipcRenderer.invoke('rss:readArticle', input),
+  loadArticle: (input: unknown) => ipcRenderer.invoke('rss:loadArticle', input),
   getSources: () => ipcRenderer.invoke('rss:getSources'),
   addSource: (source: unknown) => ipcRenderer.invoke('rss:addSource', source),
   removeSource: (id: string) => ipcRenderer.invoke('rss:removeSource', id),
-  getItems: (sourceId?: string) => ipcRenderer.invoke('rss:getItems', sourceId),
   getDraftStoreSources: () => ipcRenderer.invoke('rss:getDraftStoreSources'),
   markRead: (itemId: string) => ipcRenderer.invoke('rss:markRead', itemId),
   markReadBatch: (itemIds: string[]) => ipcRenderer.invoke('rss:markReadBatch', itemIds),
@@ -882,7 +907,7 @@ const rssAPI = {
   toggleStarred: (itemId: string) => ipcRenderer.invoke('rss:toggleStarred', itemId),
   clearDraftStore: (payload?: { sourceId?: string }) => ipcRenderer.invoke('rss:clearDraftStore', payload),
   refreshSource: (sourceId: string) => ipcRenderer.invoke('rss:refreshSource', { sourceId }),
-  fetchAll: (options?: { digest?: boolean; classification?: 'simple' | 'none'; group?: string; sourceIds?: string[] }) =>
+  fetchAll: (options?: { digest?: boolean; group?: string; sourceIds?: string[] }) =>
     ipcRenderer.invoke('rss:fetchAll', options),
   autoRefreshStatus: () => ipcRenderer.invoke('rss:autoRefreshStatus'),
   onAutoRefreshCompleted: (callback: (snapshot: RSSAutoRefreshSnapshot) => void) => {
@@ -897,7 +922,7 @@ const rssAPI = {
     ipcRenderer.invoke('rss:benchmarkSources', options),
   repairRuntime: () => ipcRenderer.invoke('rss:repairRuntime'),
   exportOpml: () => ipcRenderer.invoke('rss:exportOpml'),
-  exportFeed: (type?: 'master' | 'tech' | 'humanities' | 'design' | 'entertainment' | 'others') =>
+  exportFeed: (type?: string) =>
     ipcRenderer.invoke('rss:exportFeed', type),
   startItemAnalysis: (payload: {
     itemId: string

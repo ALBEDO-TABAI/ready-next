@@ -1,3 +1,4 @@
+import { RSS_READ_TOOL_NAMES } from './codex-rss-resources'
 import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
 import {
   CURRENT_DOCUMENT_CONTEXT_FLOOR_TOOL_NAMES,
@@ -54,6 +55,7 @@ export function composeCodexTurnToolSnapshot(input: {
   folderExport?: { present: boolean; allowWrite: boolean }
   externalReadAllowedToolNames?: readonly string[]
   explicitResourceAllowedToolNames?: readonly string[]
+  hasRSSResource?: boolean
   workbenchMode?: 'browser' | 'document' | 'rss' | 'calendar' | null
   exclusiveAllowSet?: readonly string[] | null
   browserAdmission?: BrowserAdmissionAuthoritySnapshot | null
@@ -182,6 +184,11 @@ export function composeCodexTurnToolSnapshot(input: {
 
   if (input.exclusiveAllowSet && input.exclusiveAllowSet.length > 0) {
     allowed = [...input.exclusiveAllowSet]
+  }
+
+  if (input.hasRSSResource) for (const name of RSS_READ_TOOL_NAMES) {
+    if (!surfaceNames.has(name)) throw new Error('rss_read_tool_surface_missing')
+    if (!allowed.includes(name)) allowed.push(name)
   }
 
   return {

@@ -26,7 +26,7 @@ export interface PersistAskUserQuestionsCardArgs {
 /** Persists first and returns the exact run identity reused by the later push. */
 export function persistAskUserQuestionsCardPending(
   args: PersistAskUserQuestionsCardArgs,
-  database: Pick<ReturnType<typeof getDatabase>, 'getRawDb' | 'addChatMessage'> = getDatabase(),
+  database: Pick<ReturnType<typeof getDatabase>, 'getRawDb' | 'chat'> = getDatabase(),
 ): AskUserQuestionsCardPersistenceReceipt {
   const conversationId = args.conversationId || args.sessionId || ''
   if (!conversationId) {
@@ -127,7 +127,7 @@ export function persistAskUserQuestionsCardPending(
     `).get<{ id: string }>(scopeId)
     if (pendingConfirmation) throw new Error('overlapping_card')
   }
-  database.addChatMessage(
+  database.chat.addChatMessage(
     args.cardId,
     conversationId,
     'agent_card',

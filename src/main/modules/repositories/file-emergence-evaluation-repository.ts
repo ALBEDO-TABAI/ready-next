@@ -1,4 +1,5 @@
-import type { DatabaseConnection } from '../database'
+import type { DatabaseConnection } from '../database/connection'
+
 import { evaluateEmergence, type EmergenceEvaluationReport, type EmergenceGeneration, type EmergencePrediction, type EmergenceReplayEvent } from '../file-emergence/evaluation'
 import { FileEmergenceFeedbackRepository } from './file-emergence-feedback-repository'
 import { rootScopeHash } from './file-attention-repository'

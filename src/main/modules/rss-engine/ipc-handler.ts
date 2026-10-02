@@ -1,8 +1,17 @@
-import { ipcMain, app } from 'electron'
+import { digestGroup } from './ipc/digest-group'
+import { getRSSDigestService, generateRSSDigest } from './digest-runtime'
+import { organizationGroup } from './ipc/organization-group'
+import { processingGroup } from './ipc/processing-group'
+import { eventGroup } from './ipc/event-group'
+import { getDatabase } from '../database'
+import { getRSSProcessingService, hasRSSProcessingModel, notifyRSSProcessing } from './processing-runtime'
+import type { RSSMembership } from '../../../shared/rss-organization'
+import type { RSSAnalysisAction, RSSAnalysisJob } from '../database/records'
+import { ipcMain, app, BrowserWindow, dialog } from 'electron'
 import { join } from 'path'
 import { readFile } from 'fs/promises'
 import type { BrowserController } from '../browser-engine/ipc-handler'
-import type { RSSAnalysisAction, RSSAnalysisJob } from '../database'
+
 import { AppSettingsRepository } from '../repositories/app-settings-repository'
 import { RSSRepository } from '../repositories/rss-repository'
 import {
@@ -13,7 +22,6 @@ import {
   type PlatformType,
 } from './scrapers/index'
 import { isLikelyStaleBilibiliResult, resolveBilibiliStaleRouteResult } from './scrapers/rsshub'
-import { classifyItem } from './classifier'
 import { rsshubManager } from './rsshub-process'
 import type { ScrapedItem, ScrapeResult } from './scrapers/base'
 import { normalizeScrapedItemIdentities } from './item-identity'
@@ -55,6 +63,9 @@ import {
 } from './ipc/fetch-group'
 import { diagnosticsGroup } from './ipc/diagnostics-group'
 import { exportGroup } from './ipc/export-group'
+import { contentGroup } from './ipc/content-group'
+import { workspaceFilesGroup } from './ipc/workspace-files-group'
+import { getRSSContentService } from './content-runtime'
 import type { AddSourceCoreInput, AddSourceCoreResult } from './ipc/engine-deps'
 import type { IpcDisposeHandle } from './ipc/types'
 import {
@@ -70,11 +81,9 @@ interface RSSResponse<T> {
   error?: string
 }
 
-type ClassificationMode = 'simple' | 'none'
 
 interface FetchAllOptions {
   digest?: boolean
-  classification?: ClassificationMode
   group?: string
   sourceIds?: string[]
 }
@@ -99,7 +108,7 @@ interface DBRSSItem {
   read: number
   starred: number
   ai_score: number | null
-  ai_tags: string | null
+  classifications: RSSMembership[]
   source_name?: string
 }
 
@@ -115,23 +124,6 @@ interface DBRSSSource {
   created_at: number
   platform: string
   draft_seeded?: number
-}
-
-interface MappedRSSItem {
-  id: string
-  sourceId: string
-  title: string
-  link: string
-  summary: string
-  author: string
-  source: string
-  publishedAt: string
-  inboxVisible: boolean
-  read: boolean
-  starred: boolean
-  coverImage: string | null
-  aiScore: number | null
-  aiTags: string | null
 }
 
 interface MappedRSSSource {
@@ -156,6 +148,7 @@ interface MappedRSSDraftStoreSource {
 }
 
 interface MappedRSSAnalysisJob {
+  sourceWarning?: string | null
   id: string
   itemId: string
   action: RSSAnalysisAction
@@ -176,6 +169,7 @@ interface MappedRSSAnalysisJob {
 }
 
 interface RSSAnalysisProgressPayload {
+  sourceWarning?: string | null
   itemId: string
   jobId: string
   action: RSSAnalysisAction
@@ -251,6 +245,12 @@ let diagnosticsGroupDispose: IpcDisposeHandle | null = null
  * (source / item / analysis / fetch / diagnostics / export) is now complete.
  */
 let exportGroupDispose: IpcDisposeHandle | null = null
+let contentGroupDispose: IpcDisposeHandle | null = null
+let organizationGroupDispose: IpcDisposeHandle | null = null
+let processingGroupDispose: IpcDisposeHandle | null = null
+let digestGroupDispose: IpcDisposeHandle | null = null
+let eventGroupDispose: IpcDisposeHandle | null = null
+let workspaceFilesGroupDispose: IpcDisposeHandle | null = null
 
 export function setRSSBrowserController(controller: BrowserController | null): void {
   rssBrowserController = controller
@@ -307,28 +307,8 @@ const mockItems = [
     starred: false,
     coverImage: null,
     aiScore: null,
-    aiTags: '科技',
   },
 ]
-
-function mapDBItemToAPI(item: DBRSSItem): MappedRSSItem {
-  return {
-    id: item.id,
-    sourceId: item.source_id,
-    title: item.title,
-    link: item.link,
-    summary: item.summary ?? '',
-    author: item.author ?? '',
-    source: item.source_name ?? '',
-    publishedAt: item.published_at ? new Date(item.published_at * 1000).toISOString() : '',
-    inboxVisible: item.inbox_visible !== 0,
-    read: item.read === 1,
-    starred: item.starred === 1,
-    coverImage: item.cover_image ?? null,
-    aiScore: item.ai_score ?? null,
-    aiTags: item.ai_tags ?? null,
-  }
-}
 
 function mapDBSourceToAPI(source: DBRSSSource): MappedRSSSource {
   return {
@@ -342,7 +322,7 @@ function mapDBSourceToAPI(source: DBRSSSource): MappedRSSSource {
 }
 
 function mapDraftStoreSourceToAPI(
-  source: import('../database').RSSDraftStoreSourceSummary,
+  source: import('../database/records').RSSDraftStoreSourceSummary,
 ): MappedRSSDraftStoreSource {
   return {
     sourceId: source.source_id,
@@ -368,6 +348,7 @@ function parseMetaJson(raw: string | null): Record<string, unknown> | null {
 
 function mapAnalysisJob(job: RSSAnalysisJob): MappedRSSAnalysisJob {
   return {
+    sourceWarning: getRSSItemAnalysisManager().getSourceWarning(job),
     id: job.id,
     itemId: job.item_id,
     action: job.action,
@@ -515,19 +496,16 @@ function saveDigestSnapshot(snapshot: Record<string, string>): void {
 
 function normalizeFetchOptions(options?: FetchAllOptions): {
   digest: boolean
-  classification: ClassificationMode
   group?: string
   sourceIds?: string[]
 } {
   const digest = options?.digest === true
-  const classification: ClassificationMode = options?.classification === 'none' ? 'none' : 'simple'
   const group = options?.group?.trim()
   const sourceIds = Array.isArray(options?.sourceIds)
     ? options?.sourceIds.filter((id) => typeof id === 'string' && id.trim().length > 0)
     : undefined
   return {
     digest,
-    classification,
     group: group || undefined,
     sourceIds: sourceIds && sourceIds.length > 0 ? sourceIds : undefined,
   }
@@ -567,7 +545,6 @@ function loadFetchInvocationSnapshot(): {
   sourceIds: string[]
   group: string | null
   digest: boolean | null
-  classification: 'simple' | 'none' | null
 } | null {
   const raw = appSettingsRepository.getSetting(FETCH_INVOCATION_SNAPSHOT_KEY)
   if (!raw) return null
@@ -582,10 +559,6 @@ function loadFetchInvocationSnapshot(): {
         : [],
       group: typeof parsed.group === 'string' ? parsed.group : null,
       digest: typeof parsed.digest === 'boolean' ? parsed.digest : null,
-      classification:
-        parsed.classification === 'simple' || parsed.classification === 'none'
-          ? parsed.classification
-          : null,
     }
   } catch {
     return null
@@ -666,6 +639,7 @@ async function ensureArtifactFiles() {
   const sources = rssRepository.getRSSSources() as DBRSSSource[]
   const allItems = rssRepository.getAllRSSItems() as DBRSSItem[]
   return generateRSSArtifacts({
+    definitions: rssRepository.getOrganizationStore().list(),
     sources,
     allItems,
     insertedItems: [],
@@ -989,7 +963,6 @@ async function runAddSourceCore(input: AddSourceCoreInput): Promise<AddSourceCor
       cover_image: item.coverImage || null,
       author: item.author || null,
       published_at: item.pubDate ? Math.floor(new Date(item.pubDate).getTime() / 1000) : null,
-      ai_tags: classifyItem(item.title, item.description),
     }))
     itemCount = rssRepository.upsertRSSItems(dbItems)
     rssRepository.updateRSSSourceLastFetched(id)
@@ -1046,8 +1019,50 @@ async function runAddSourceCore(input: AddSourceCoreInput): Promise<AddSourceCor
 }
 
 export function setupRSSIPC(useMock = false): void {
+  digestGroupDispose?.dispose()
+  digestGroupDispose = digestGroup.register(ipcMain, { store: () => getDatabase().rss.digests, service: getRSSDigestService, generate: generateRSSDigest,
+    chooseDirectory: async (sender) => {
+      const parent = BrowserWindow.fromWebContents(sender)
+      if (!parent) throw new Error('当前窗口不可用。')
+      const result = await dialog.showOpenDialog(parent, { title: '选择刊物导出文件夹', properties: ['openDirectory', 'createDirectory'] })
+      return result.canceled ? null : result.filePaths[0] || null
+    },
+  })
+  eventGroupDispose?.dispose()
+  eventGroupDispose = eventGroup.register(ipcMain, { store: () => getDatabase().rss.events, notify: notifyRSSProcessing,
+    notifySeen: () => { for (const window of BrowserWindow.getAllWindows()) if (!window.webContents.isDestroyed()) window.webContents.send('rss:eventSeenChanged') },
+  })
+  processingGroupDispose?.dispose()
+  processingGroupDispose = processingGroup.register(ipcMain, {
+    store: () => getDatabase().rss.processing, service: getRSSProcessingService, hasModel: hasRSSProcessingModel, notify: notifyRSSProcessing,
+  })
+  organizationGroupDispose?.dispose()
+  organizationGroupDispose = organizationGroup.register(ipcMain, {
+    getStore: () => rssRepository.getOrganizationStore(),
+    notify: () => { for (const window of BrowserWindow.getAllWindows()) {
+      try { if (!window.webContents.isDestroyed()) window.webContents.send('rss:organizationChanged') } catch { /* Window may close after saving. */ }
+    } },
+  })
+  workspaceFilesGroupDispose?.dispose()
+  workspaceFilesGroupDispose = workspaceFilesGroup.register(ipcMain, {
+    getContent: () => rssRepository.getContentStore(),
+    chooseDirectory: async (sender, title, defaultDirectory) => {
+      const parent = BrowserWindow.fromWebContents(sender)
+      if (!parent) throw new Error('当前窗口不可用。')
+      const result = await dialog.showOpenDialog(parent, { title, defaultPath: defaultDirectory || app.getPath('documents'), properties: ['openDirectory', 'createDirectory'] })
+      return result.canceled ? null : result.filePaths[0] || null
+    },
+  })
+  contentGroupDispose?.dispose()
+  contentGroupDispose = contentGroup.register(ipcMain, {
+    useMock,
+    getContent: () => rssRepository.getContentStore(),
+    getLoader: getRSSContentService,
+  })
   const analysisManager = getRSSItemAnalysisManager()
   if (!useMock) {
+    analysisManager.initialize()
+    getRSSContentService()
     loadRouteDiagnosticsSnapshot()
   }
 
@@ -1067,12 +1082,12 @@ export function setupRSSIPC(useMock = false): void {
     getRSSRepository: () => rssRepository,
     mapSourceToAPI: (source) => mapDBSourceToAPI(source as DBRSSSource),
     mapDraftStoreSourceToAPI: (source) =>
-      mapDraftStoreSourceToAPI(source as import('../database').RSSDraftStoreSourceSummary),
+      mapDraftStoreSourceToAPI(source as import('../database/records').RSSDraftStoreSourceSummary),
     addSourceCore: (input) => runAddSourceCore(input),
     mockSources,
   })
 
-  // Stage V V2.2b — 6 item channels (`rss:getItems`, `rss:markRead`,
+  // Item mutation channels (`rss:markRead`,
   // `rss:markReadBatch`, `rss:deleteItems`, `rss:toggleStarred`,
   // `rss:clearDraftStore`) moved into `itemGroup`. Dev-reload re-entry
   // disposes the prior handle first so listener slots stay clean — same
@@ -1084,8 +1099,6 @@ export function setupRSSIPC(useMock = false): void {
   itemGroupDispose = itemGroup.register(ipcMain, {
     useMock,
     getRSSRepository: () => rssRepository,
-    mapItemToAPI: (item) => mapDBItemToAPI(item as DBRSSItem),
-    mockItems,
   })
 
   // Stage V V2.2c — the 6 analysis channels (`rss:startItemAnalysis`,
@@ -1153,9 +1166,8 @@ export function setupRSSIPC(useMock = false): void {
     buildBrowserActionFromSource,
     buildBenchmarkSummary,
     getRouteCapabilityMatrix,
-    generateRSSArtifacts: (payload) => generateRSSArtifacts(payload),
+    generateRSSArtifacts: (payload) => generateRSSArtifacts({ ...payload, definitions: rssRepository.getOrganizationStore().list() }),
     generateRSSBenchmarkArtifacts: (payload) => generateRSSBenchmarkArtifacts(payload),
-    classifyItem,
     detectPlatform,
     normalizeSourcePlatform,
     classifyBackend,

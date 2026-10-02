@@ -1,9 +1,12 @@
+import { rssReferencesFromEnvelope } from '../../../shared/rss-reference'
 /**
  * Unified tool dispatcher.
  * Routes tool calls by prefix to the appropriate executor.
  */
 
 import { BrowserController } from '../browser-engine/ipc-handler'
+import { getRSSItemAnalysisManager } from '../rss-engine/item-analysis-manager'
+import { getRouteAttempt } from '../rss-engine/source-diagnostics'
 import type { SidecarManager } from '../agent-control/sidecar-manager'
 import type { AgentControlRuntime } from '../agent-control/runtime-core/runtime'
 import {
@@ -73,6 +76,8 @@ import {
 import { completeTagForgeHostReview } from '../tag-forge/tag-forge-host-review'
 import { executeMcpTool } from './mcp-tools'
 import { executeRSSTool } from './rss-tools'
+import { isRSSModelConfigured } from '../rss-engine/model-completion'
+import { AppSettingsRepository } from '../repositories/app-settings-repository'
 import { executeSkillTool, findSkillToolByNameForExecution } from './skills-tools'
 import { executeSystemTool } from './system-tools'
 import { executeFeishuTool } from './feishu-tools'
@@ -933,7 +938,18 @@ async function executeToolCallInner(
 
         case 'rss':
           return executeRSSTool(toolName, args, {
-            emitToolAction: context.emitToolAction,
+            readAnalysisAssets: (input) => getRSSItemAnalysisManager().readAssets(input),
+            getCatalog: () => getDatabase().rss.catalog,
+            getRouteAttempt,
+            readAnalysisReport: (input) => getRSSItemAnalysisManager().readReport(input),
+            getDigests: () => getDatabase().rss.digests,
+            getEvents: () => getDatabase().rss.events,
+            getProcessing: () => getDatabase().rss.processing,
+            hasProcessingModel: () => isRSSModelConfigured(new AppSettingsRepository().getAIConfig()),
+            getContent: () => getDatabase().rss.content,
+            getAnalysisProgress: (ids) => getRSSItemAnalysisManager().getItemProgress(ids),
+            readAccessDenied: context.scope?.sourceKind !== 'local',
+            references: rssReferencesFromEnvelope(context.requestEnvelope),
             requestModuleToolAction: context.requestModuleToolAction,
           })
 
@@ -1227,8 +1243,8 @@ async function executeToolCallInner(
           // Phase M —— agent 代装 MCP server：confirmAck 只选择写入阶段；
           // exact pendingConfig 已由上方 FrozenCall 闸门逐次确认。
           return executeInstallMcpServer(args as Record<string, unknown>, {
-            getSetting: (key) => getDatabase().getSetting(key),
-            setSetting: (key, value) => getDatabase().setSetting(key, value),
+            getSetting: (key) => getDatabase().settings.getSetting(key),
+            setSetting: (key, value) => getDatabase().settings.setSetting(key, value),
           })
 
         case 'command_exec':

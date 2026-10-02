@@ -33,7 +33,7 @@ The default identity is still shared:
 
 - normal tabs and agent tabs use `persist:browser` unless a named profile is explicitly selected;
 - agent tabs are created through the same tab lifecycle path;
-- preview views use `createHost('persist:browser')`;
+- RSS article body fetching uses `session.fromPartition('persist:browser')` (the in-RSS preview view was retired with the 2026-10 RSS workspace);
 - auth popups follow the source tab's profile;
 - background probes use `partition: 'persist:browser'`;
 - downloads follow the source tab's browser session;

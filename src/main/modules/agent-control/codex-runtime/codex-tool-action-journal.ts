@@ -1,4 +1,4 @@
-import type { DatabaseConnection } from '../../database'
+import type { DatabaseConnection } from '../../database/connection'
 import type { ToolExecutionOutput } from '../tools-runtime/tool-result-types'
 import { canonicalJson, digestCanonicalJson } from './codex-model-gateway-contract'
 

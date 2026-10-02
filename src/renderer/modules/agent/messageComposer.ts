@@ -1,3 +1,4 @@
+import { RSSReferenceSchema } from '../../../shared/rss-reference'
 import type { ChatAttachment } from './types'
 import { buildActiveDocumentContext } from './documentActions'
 import { useMode } from '../../stores/useMode'
@@ -144,6 +145,9 @@ function normalizeAttachmentSource(value: unknown): ChatAttachment['source'] {
   if (normalized === 'document-quote') return 'document-quote'
   if (normalized === 'document-widget-target') return 'document-widget-target'
   if (normalized === 'calendar-event') return 'calendar-event'
+  if (normalized === 'rss-reference') return 'rss-reference'
+  if (normalized === 'rss-item') return 'rss-item'
+  if (normalized === 'rss-source') return 'rss-source'
   if (normalized === 'generated-image') return 'generated-image'
   if (normalized === 'mcp-resource') return 'mcp-resource'
   if (normalized === 'file') return 'file'
@@ -201,6 +205,7 @@ export function extractAttachmentsFromMeta(meta?: Record<string, unknown>): Chat
         mcpResourceUri: typeof record.mcpResourceUri === 'string' ? record.mcpResourceUri : undefined,
         mcpCatalogGeneration: typeof record.mcpCatalogGeneration === 'number' ? record.mcpCatalogGeneration : undefined,
         mcpCatalogDigest: typeof record.mcpCatalogDigest === 'string' ? record.mcpCatalogDigest : undefined,
+        rssReference: RSSReferenceSchema.safeParse(record.rssReference).success ? RSSReferenceSchema.parse(record.rssReference) : undefined,
         mcpContentDigest: typeof record.mcpContentDigest === 'string' ? record.mcpContentDigest : undefined,
         dirty: typeof record.dirty === 'boolean' ? record.dirty : undefined,
         saveStatus: typeof record.saveStatus === 'string' ? record.saveStatus : undefined,
@@ -437,6 +442,7 @@ export function serializePersistedAttachments(attachments: ChatAttachment[]): Ar
       mcpCatalogGeneration: attachment.mcpCatalogGeneration,
       mcpCatalogDigest: attachment.mcpCatalogDigest,
       mcpContentDigest: attachment.mcpContentDigest,
+      rssReference: attachment.rssReference,
     }))
 }
 
@@ -496,6 +502,11 @@ export async function buildCodexIngressInputWithDiagnostics(params: {
         name: attachment.name,
         eventId,
       })
+      diagnostics.inputIncludedCount += 1
+      continue
+    }
+    if (attachment.source === 'rss-reference') {
+      resources.push({ kind: 'rss_reference', id: attachment.id, name: attachment.name, reference: RSSReferenceSchema.parse(attachment.rssReference) })
       diagnostics.inputIncludedCount += 1
       continue
     }

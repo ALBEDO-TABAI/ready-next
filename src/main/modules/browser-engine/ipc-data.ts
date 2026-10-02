@@ -5,7 +5,7 @@ import type { BrowserDownloadUrlToDirectoryPayload } from './download-service'
 interface BrowserDataIPCController {
   getAdblockState: () => unknown
   getDiagnostics: (options?: { includePerformance?: boolean }) => unknown
-  setAdblockEnabled: (enabled: boolean, scope?: 'main' | 'preview' | 'all') => unknown
+  setAdblockEnabled: (enabled: boolean) => unknown
   toggleAdblockDomain: (domain: string) => unknown
   importBookmarksFromDialog: () => Promise<unknown>
   exportBookmarksToDialog: () => Promise<unknown>
@@ -26,9 +26,9 @@ export function setupBrowserDataIPC(
     return { success: true, data: controller.getDiagnostics(options) }
   })
 
-  ipcMain.handle('browser:setAdblockEnabled', (_, payload: { enabled: boolean; scope?: 'main' | 'preview' | 'all' }) => {
+  ipcMain.handle('browser:setAdblockEnabled', (_, payload: { enabled: boolean }) => {
     try {
-      return { success: true, data: controller.setAdblockEnabled(Boolean(payload.enabled), payload.scope || 'all') }
+      return { success: true, data: controller.setAdblockEnabled(Boolean(payload.enabled)) }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
     }

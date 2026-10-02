@@ -1,4 +1,5 @@
-import type { DatabaseConnection } from '../database'
+import type { DatabaseConnection } from '../database/connection'
+
 import { FileProjectIdentityRepository } from '../repositories/file-project-identity-repository'
 import { TagForgeRepository } from '../repositories/tag-forge-repository'
 import { loadTagForgePolicy } from './tag-forge-policy'

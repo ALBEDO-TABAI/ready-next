@@ -33,8 +33,8 @@ test('conversation authorization mode persists in scope metadata without replaci
     throw error
   }
   try {
-    db.createConversation('scope-action-mode', 'butler', 'Action mode')
-    db.updateConversationScopeMeta('scope-action-mode', { sourceLabel: '应用内', adjacent: 'keep' })
+    db.chat.createConversation('scope-action-mode', 'butler', 'Action mode')
+    db.chat.updateConversationScopeMeta('scope-action-mode', { sourceLabel: '应用内', adjacent: 'keep' })
     const events: string[] = []
     const store = new ConversationScopeStore({
       ensureChannelAlias: () => {},
@@ -55,7 +55,7 @@ test('conversation authorization mode persists in scope metadata without replaci
     assert.throws(() => store.setProjectDirectory('scope-action-mode', 'relative-path', 0))
     assert.throws(() => store.setProjectDirectory('scope-action-mode', null, 1))
     assert.equal(store.getConversationScope('scope-action-mode')?.meta.projectDirectory, process.cwd())
-    db.createConversation('other-project-scope', 'butler', 'Other')
+    db.chat.createConversation('other-project-scope', 'butler', 'Other')
     assert.equal(store.getConversationScope('other-project-scope')?.meta.projectDirectory, undefined)
     store.setProjectDirectory('scope-action-mode', null, 0)
     assert.equal(store.getConversationScope('scope-action-mode')?.meta.projectDirectory, null)
@@ -101,7 +101,7 @@ test('conversation authorization mode persists in scope metadata without replaci
       () => store.setActionAuthorizationMode('scope-action-mode', 'invalid' as never, 1),
       /action_authorization_mode_invalid/,
     )
-    db.upsertConversationScope({
+    db.chat.upsertConversationScope({
       id: 'scope-channel-action-mode',
       agent: 'butler',
       activeAgentId: 'butler',

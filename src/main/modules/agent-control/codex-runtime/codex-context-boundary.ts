@@ -1,4 +1,4 @@
-import type { DatabaseConnection } from '../../database'
+import type { DatabaseConnection } from '../../database/connection'
 import type { CodexBeginNewContextActionRef, CodexConversationContextBoundary } from '../../../../shared/ipc-contracts/agent-runtime'
 import { CodexBindingRepositoryError } from './codex-binding-error'
 import { digestCanonicalJson } from './codex-model-gateway-contract'

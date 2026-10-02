@@ -30,6 +30,26 @@ const FIXTURE = [
 ].join('\n')
 
 describe('shared document-widget-parse', () => {
+  it('does not activate show-widget examples inside other code fences or inline text', () => {
+    const example = '```show-widget\n{"widget_code":"<script>example()</script>"}\n```'
+    const source = `~~~~text\n${example}\n~~~~\n\nThis is an example: ${example}`
+    assert.equal(collectDocumentWidgets(source).length, 0)
+    assert.equal(parseShowWidgetFences(source).some((part) => part.type === 'widget'), false)
+  })
+  it('keeps tab/space-indented code and HTML comment examples inactive', () => {
+    const json = '{"widget_code":"<script>example()</script>"}'
+    for (const source of [
+      '\t```show-widget\n\t' + json + '\n\t```',
+      '    ' + json,
+      '\t' + json,
+      '<!--\n\n' + json + '\n\n```show-widget\n' + json + '\n```\n-->',
+    ]) {
+      assert.equal(collectDocumentWidgets(source).length, 0)
+      assert.equal(parseShowWidgetFences(source).some((part) => part.type === 'widget'), false)
+      assert.equal(parseBareWidgetPayloadSegments(source).some((part) => part.type === 'widget'), false)
+    }
+  })
+
   it('tryParseWidgetPayload accepts both widget_code and widgetCode keys', () => {
     const snake = tryParseWidgetPayload('{"title":"a","widget_code":"<b/>"}', 'fence')
     const camel = tryParseWidgetPayload('{"title":"a","widgetCode":"<b/>"}', 'fence')

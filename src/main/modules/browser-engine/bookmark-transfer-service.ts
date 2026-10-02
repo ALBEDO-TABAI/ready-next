@@ -13,7 +13,7 @@ interface BrowserBookmarkTransferHost {
   addBookmark(url: string, title: string): string
   isBookmarked(url: string): boolean
   getBookmarks(): Array<{ url: string; title: string }>
-  sendToRenderer(channel: string, data: unknown): void
+  sendToRenderer(channel: 'browser:bookmarksChanged', data: unknown): void
 }
 
 function decodeHtmlEntities(value: string): string {

@@ -820,7 +820,7 @@ export class SkillsRuntimeManager {
       },
       getMirrorBase: () => {
         try {
-          return getDatabase().getSetting('runtime_asset_mirror_base')?.trim() || null
+          return getDatabase().settings.getSetting('runtime_asset_mirror_base')?.trim() || null
         } catch {
           // silent-catch: settings DB unavailable just means no custom mirror this run.
           return null
@@ -828,7 +828,7 @@ export class SkillsRuntimeManager {
       },
       setSkillsPythonPath: (path) => {
         try {
-          getDatabase().setSetting('skills_python_path', path)
+          getDatabase().settings.setSetting('skills_python_path', path)
         } catch {
           // silent-catch: if the DB write fails the provisioner re-probes and surfaces not-ready.
         }

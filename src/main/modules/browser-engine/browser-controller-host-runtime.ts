@@ -1,3 +1,4 @@
+import type { BrowserMainPushChannel } from '../../../shared/browser-ipc-channels'
 import { BrowserWindow, shell } from 'electron'
 import { getBrowserTargetClaimService } from './browser-target-claim-singleton'
 import { findReusableCaptureTabId } from './capture-url-utils'
@@ -54,9 +55,6 @@ export abstract class BrowserControllerHostRuntime extends BrowserControllerComp
         return tab.domain || extractBrowserDomain(tab.url)
       }
     }
-    if (this.previewService.matchesWebContentsId(webContentsId)) {
-      return extractBrowserDomain(this.previewService.getUrl())
-    }
     return ''
   }
 
@@ -66,9 +64,6 @@ export abstract class BrowserControllerHostRuntime extends BrowserControllerComp
       if (tab.view?.webContents.id === webContentsId) {
         return tab.view.webContents.getURL() || tab.url
       }
-    }
-    if (this.previewService.matchesWebContentsId(webContentsId)) {
-      return this.previewService.getUrl()
     }
     return ''
   }
@@ -198,11 +193,11 @@ export abstract class BrowserControllerHostRuntime extends BrowserControllerComp
     this.hostLayoutService.hideHost(view)
   }
 
-  sendToRenderer(channel: string, data: unknown): void {
+  sendToRenderer(channel: BrowserMainPushChannel, data: unknown): void {
     this.sendToRendererImmediate(channel, data)
   }
 
-  protected sendToRendererImmediate(channel: string, data: unknown): void {
+  protected sendToRendererImmediate(channel: BrowserMainPushChannel, data: unknown): void {
     if (!this.mainWindow.isDestroyed()) {
       this.mainWindow.webContents.send(channel, data)
     }
@@ -358,10 +353,6 @@ export abstract class BrowserControllerHostRuntime extends BrowserControllerComp
     bounds: BrowserRect = this.viewBounds,
   ): void {
     this.hostLayoutService.applyBounds(view, bounds)
-  }
-
-  applyPreviewBounds(view: BrowserHostView): void {
-    this.hostLayoutService.applyBounds(view, this.previewBounds)
   }
 
   protected hideActiveTabHost(): boolean {

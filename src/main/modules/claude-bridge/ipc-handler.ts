@@ -310,7 +310,7 @@ function cleanupSkillSessionState(sessionId?: string, reason = 'Skill session st
     // otherwise the next renderer hydrate would resurrect a pending row whose
     // in-memory Promise is already gone.
     try {
-      const swept = getDatabase().sweepPendingAskUserQuestionsCardsBySession(sessionId, 'session_reset')
+      const swept = getDatabase().chat.sweepPendingAskUserQuestionsCardsBySession(sessionId, 'session_reset')
       if (swept > 0) {
         logAgentMetric('ask_user_questions_session_reset_swept_db', { sessionId, swept })
       }
@@ -541,7 +541,7 @@ export async function setupAgentIPC(
       const liveCardIds = new Set(
         getAskUserQuestionsStore().list().map((entry) => entry.cardId),
       )
-      const { mutated, skippedLive } = getDatabase().sweepPendingAskUserQuestionsCardsOnBoot({ liveCardIds })
+      const { mutated, skippedLive } = getDatabase().chat.sweepPendingAskUserQuestionsCardsOnBoot({ liveCardIds })
       if (mutated > 0) {
         log(`ask_user_questions boot sweep cancelled ${mutated} stale pending card(s)`)
       }
@@ -576,14 +576,14 @@ export async function setupAgentIPC(
     mcpGroupDispose = null
   }
   mcpGroupDispose = mcpGroup.register(ipcMain, {
-    getDatabase: () => getDatabase(),
+    getDatabase: () => getDatabase().settings,
     log: (line) => log(line),
     dataRoot: join(app.getPath('userData'), 'mcp-servers'),
   })
   if (!mcpBootstrapRanForBoot) {
     mcpBootstrapRanForBoot = true
     void runMcpBoot({
-      getDatabase: () => getDatabase(),
+      getDatabase: () => getDatabase().settings,
       log: (line) => log(line),
       dataRoot: join(app.getPath('userData'), 'mcp-servers'),
     }).catch((bootstrapErr) => {

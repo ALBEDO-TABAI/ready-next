@@ -1,4 +1,5 @@
-import type { DatabaseConnection } from '../database'
+import type { DatabaseConnection } from './connection'
+
 
 export const DOCUMENT_GRAPH_MAX_DOCUMENTS = 5000
 

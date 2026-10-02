@@ -11,6 +11,7 @@ import {
 import { textUserInput } from '../main/modules/agent-control/codex-runtime/codex-turn-input-builder'
 import { digestCodexUserInput } from '../main/modules/agent-control/codex-runtime/codex-user-input'
 import { createCodexToolFixture } from './utils/codex-tool-fixture'
+import { RSS_READ_TOOL_NAMES, rssResourceVersion } from '../main/modules/agent-control/codex-runtime/codex-rss-resources'
 import { digestCanonicalJson } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
 import {
   externalReadResourceReference,
@@ -376,6 +377,49 @@ test('product run preparer persists exact resource authority with matching refs 
     ...resourceInput,
     resourceAuthorities: [{ ...authority, currentDigest: 'e'.repeat(64) }],
   }), { ok: false, code: 'invalid_product_ingress' })
+})
+
+test('product run preparer validates a turn that carries both a file authority and an RSS reference', () => {
+  const resourceDigest = 'd'.repeat(64)
+  const fileReference = {
+    logicalResourceId: 'local-file:notes',
+    currentVersion: `sha256:${resourceDigest}`,
+    currentDigest: resourceDigest,
+    supersedesVersion: null,
+    policyEpoch: 1,
+  }
+  const authority = {
+    kind: 'local_file',
+    logicalResourceId: fileReference.logicalResourceId,
+    name: 'notes.txt',
+    path: '/canonical/notes.txt',
+    currentVersion: fileReference.currentVersion,
+    currentDigest: fileReference.currentDigest,
+    policyEpoch: fileReference.policyEpoch,
+    allowedToolNames: ['file_extract_text', 'file_read_excerpt'],
+  }
+  const rssReference = {
+    id: '6f1c2c0e-3d3a-4a51-9a51-2a8b9b3f4e10',
+    name: '当前筛选',
+    reference: { kind: 'article' as const, read: { itemId: 'item-1', expectedRevision: 'revision-1', offset: 0, length: 12000 } },
+  }
+  const rssVersion = rssResourceVersion(rssReference)
+  const result = preparer.prepare({
+    ...base,
+    explicitResourceEnvelope: {
+      input: [{ type: 'mention', name: 'notes.txt', path: '/canonical/notes.txt' }],
+      resourceRefs: [fileReference, rssVersion],
+    },
+    resourceAdditionalContext: [fileReference, rssVersion],
+    resourceAuthorities: [authority],
+    rssReferences: [rssReference],
+    trustedWorkbenchMode: 'rss',
+    ...createCodexToolFixture(['file_read_excerpt', ...RSS_READ_TOOL_NAMES]),
+  })
+  assert.equal(result.ok, true)
+  if (!result.ok) return
+  // Prepare and validation must build the anchor digest identically; a restored row must stay valid.
+  assert.equal(isPreparedCodexProductRun(JSON.parse(JSON.stringify(result.prepared))), true)
 })
 
 test('product run preparer accepts the controlled Tag Forge consumer for a selected folder', () => {

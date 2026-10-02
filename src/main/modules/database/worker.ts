@@ -1,3 +1,4 @@
+import type { DatabaseConnection } from './connection'
 /**
  * Worker-thread side of the DB worker. Owns its own better-sqlite3 connection
  * to the same ready.db file as the main process. The main thread continues to
@@ -20,7 +21,7 @@ import { createRequire } from 'module'
 import { parentPort, workerData } from 'worker_threads'
 
 import { runMigrations } from '../migrations'
-import { applyPerformancePragmas, type DatabaseConnection } from '../database'
+import { applyPerformancePragmas } from '../database'
 import { SearchEngine, probeFts5Availability } from '../search-engine/indexer'
 import type { SearchHit } from '../search-engine/query'
 import { queryDocumentGraph, type DocumentGraphQuery } from './document-graph-query'
@@ -125,7 +126,7 @@ interface ReindexAllSourcesArgs { root: string }
 
 // perf-rescue B6: per-request abort controllers for in-flight reindex jobs.
 // Keyed by message id so concurrent reindexes (e.g. one workspace + one
-// shared) can be cancelled independently. `cancelReindex` aborts all entries.
+// shared) can be cancelled independently. Shutdown aborts all remaining entries.
 // We don't track other commands (search/graph) since those return in <100ms
 // and aren't worth the bookkeeping.
 const activeReindexes = new Map<number, AbortController>()
@@ -144,14 +145,6 @@ port.on('message', (raw: unknown) => {
     try { db.close() } catch { /* ignore */ }
     reply({ id: msg.id, ok: true })
     setTimeout(() => process.exit(0), 0)
-    return
-  }
-
-  if (msg.cmd === 'cancelReindex') {
-    const cancelled = activeReindexes.size
-    for (const ctrl of activeReindexes.values()) ctrl.abort()
-    activeReindexes.clear()
-    reply({ id: msg.id, ok: true, data: cancelled })
     return
   }
 

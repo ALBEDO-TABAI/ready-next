@@ -51,7 +51,8 @@ test('gateway responsibilities remain bounded and protocol code cannot own persi
     if (name === 'codex-model-gateway-native-stream.ts') {
       assert.ok(!imports.some((path) => path.includes('gateway-chat')), 'native Responses must not load the Chat stream implementation')
     }
-    if (!['codex-model-gateway.ts', 'codex-model-gateway-authority.ts', 'codex-model-gateway-repository.ts', 'codex-provider-connection-test.ts'].includes(name)) {
+    // codex-provider-text owns the one-shot, tool-free gateway request shared by the connection test and RSS background judgments.
+    if (!['codex-model-gateway.ts', 'codex-model-gateway-authority.ts', 'codex-model-gateway-repository.ts', 'codex-provider-connection-test.ts', 'codex-provider-text.ts'].includes(name)) {
       assert.ok(!imports.includes('./codex-model-gateway'), `${name} must not depend on the HTTP service`)
       assert.ok(!imports.some((path) => /repository|authority|settings-engine|node:(?:fs|http)|electron/.test(path)), `${name} must not own application state or the listener`)
     }

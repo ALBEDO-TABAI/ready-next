@@ -22,7 +22,7 @@ test('RSS keeps a bounded row window, reaches the last item, and retains its pos
   }
   Object.defineProperties(dom.window.HTMLElement.prototype, {
     clientHeight: { get: () => 768 },
-    offsetHeight: { get() { return (this as HTMLElement).dataset.rssItemId ? 84 : 768 } },
+    offsetHeight: { get() { return ((this as HTMLElement).dataset.rssRowKey || (this as HTMLElement).dataset.rssItemId) ? 84 : 768 } },
     offsetParent: { get() { return dom.window.document.body } },
   })
   const root = createRoot(document.getElementById('root')!)
@@ -70,7 +70,7 @@ test('RSS keeps a bounded row window, reaches the last item, and retains its pos
     await render()
     assert.equal(holder.scrollTop, offset)
     assert.ok(document.querySelector('[data-rss-item-id="item-9999"]'))
-    props.items = items.map((item) => item.id === 'item-123' ? { ...item, starred: true } : item)
+    props.items = items.filter((item) => item.id === 'item-123').map((item) => ({ ...item, starred: true }))
     props.filter = 'starred'
     props.selectedItemId = null
     await render()

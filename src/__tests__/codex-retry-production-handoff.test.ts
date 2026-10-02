@@ -134,11 +134,11 @@ async function fixture(scenario: Scenario) {
     explicitRetry: { predecessorRunId: 'B', predecessorPresentationDigest: receipt.presentationDigest },
     ...(scenario.anchor ? { currentDocumentAnchor: scenario.anchor } : {}),
   }
-  const database = { getRawDb: () => db, addChatMessage(id: string, scopeId: string, role: string, content: string, timestamp: string, meta: object, epoch: number) {
+  const database = { getRawDb: () => db, chat: { addChatMessage(id: string, scopeId: string, role: string, content: string, timestamp: string, meta: object, epoch: number) {
     calls.writes += 1
     db.prepare(`INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch) VALUES (?, ?, ?, ?, ?, ?, ?)`)
       .run(id, scopeId, role, content, timestamp, JSON.stringify(meta), epoch)
-  } }
+  } } }
   const host = { getScope: () => scope, runtime: { async resolveTrustedRequestEnvironment() {
     return { workbenchMode: scenario.mode, ...(scenario.page ? { browserPageRef: scenario.page } : {}) }
   } }, resolveSkillAuthorizationForTurn(value: { mode: string; message: string }) {

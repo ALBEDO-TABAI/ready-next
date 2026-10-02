@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import { disabledReadyMemorySnapshot } from './utils/ready-memory-fixture'
 
-import { DatabaseManager, type DatabaseConnection } from '../main/modules/database'
+import type { DatabaseConnection } from '../main/modules/database/connection'
+import { DatabaseManager } from '../main/modules/database'
 import {
   CodexAppServerClient,
   type CodexJsonLineTransport,

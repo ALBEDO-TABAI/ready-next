@@ -1,4 +1,4 @@
-import type { DatabaseConnection } from '../../database'
+import type { DatabaseConnection } from '../../database/connection'
 import { buildFrozenCallPendingSourceDigest } from '../safety/frozen-call-store'
 
 function changes(result: unknown): number {

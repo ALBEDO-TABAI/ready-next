@@ -1,3 +1,4 @@
+import type { DatabaseConnection } from '../database/connection'
 import { randomUUID } from 'crypto'
 import { existsSync } from 'fs'
 import { basename, dirname, sep } from 'path'
@@ -7,7 +8,7 @@ import type {
   DocumentMarkRecord,
   DocumentMarkStatus,
 } from '../../../shared/document-side-panels'
-import type { DatabaseConnection } from '../database'
+
 
 interface DocumentMarkRow {
   id: string

@@ -1,9 +1,5 @@
-import type {
-  CalendarEvent,
-  CalendarSource,
-  EventOverride,
-  ImportedEvent,
-} from '../database'
+import type { CalendarEvent, CalendarSource, EventOverride, ImportedEvent } from '../database/records'
+
 import { getDatabase } from '../database'
 import type { Reminder } from '../../../shared/calendar-types'
 
@@ -58,35 +54,35 @@ export type CalendarEventUpdateInput = Partial<{
 
 export class CalendarRepository {
   getSources(): CalendarSource[] {
-    return getDatabase().getCalendarSources()
+    return getDatabase().calendar.getCalendarSources()
   }
 
   getEvents(startTime: number, endTime: number): CalendarEvent[] {
-    return getDatabase().getCalendarEvents(startTime, endTime)
+    return getDatabase().calendar.getCalendarEvents(startTime, endTime)
   }
 
   /** L3-B — single-row read used by splitRecurringSeries transaction. */
   getEventById(id: string): CalendarEvent | null {
-    return getDatabase().getCalendarEventById(id)
+    return getDatabase().calendar.getCalendarEventById(id)
   }
 
   getRecurringEventsAndOverrides(
     startTime: number,
     endTime: number,
   ): { events: CalendarEvent[]; overridesByParent: Map<string, EventOverride[]> } {
-    return getDatabase().getRecurringEventsAndOverrides(startTime, endTime)
+    return getDatabase().calendar.getRecurringEventsAndOverrides(startTime, endTime)
   }
 
   createEvent(event: CalendarEventCreateInput): string {
-    return getDatabase().createCalendarEvent(event)
+    return getDatabase().calendar.createCalendarEvent(event)
   }
 
   updateEvent(id: string, updates: CalendarEventUpdateInput): void {
-    getDatabase().updateCalendarEvent(id, updates)
+    getDatabase().calendar.updateCalendarEvent(id, updates)
   }
 
   deleteEvent(id: string): void {
-    getDatabase().deleteCalendarEvent(id)
+    getDatabase().calendar.deleteCalendarEvent(id)
   }
 
   /**
@@ -100,11 +96,11 @@ export class CalendarRepository {
     kind: 'single' | 'cancelled'
     patch: EventOverride['patch']
   }): { id: string } {
-    return getDatabase().upsertEventOverride(override)
+    return getDatabase().calendar.upsertEventOverride(override)
   }
 
   deleteEventOverride(parentEventId: string, occurrenceStart: number): { deleted: boolean } {
-    return getDatabase().deleteEventOverride(parentEventId, occurrenceStart)
+    return getDatabase().calendar.deleteEventOverride(parentEventId, occurrenceStart)
   }
 
   /**
@@ -142,12 +138,12 @@ export class CalendarRepository {
     sourceId: string,
     ev: ImportedEvent,
   ): { id: string; action: 'created' | 'updated' } {
-    return getDatabase().upsertImportedEvent(sourceId, ev)
+    return getDatabase().calendar.upsertImportedEvent(sourceId, ev)
   }
 
   /** L4-B — delete an externally-synced row by `(sourceId, uid)`. */
   deleteImportedEvent(sourceId: string, uid: string): void {
-    getDatabase().deleteImportedEvent(sourceId, uid)
+    getDatabase().calendar.deleteImportedEvent(sourceId, uid)
   }
 
   /**
@@ -156,7 +152,7 @@ export class CalendarRepository {
    * fetch.
    */
   listImportedEventsForSource(sourceId: string): Array<{ uid: string; id: string }> {
-    return getDatabase().listImportedEventsForSource(sourceId)
+    return getDatabase().calendar.listImportedEventsForSource(sourceId)
   }
 
   /**
@@ -172,12 +168,12 @@ export class CalendarRepository {
     syncInterval?: number
     enabled?: boolean
   }): { id: string; action: 'created' | 'updated' } {
-    return getDatabase().upsertCalendarSource(source)
+    return getDatabase().calendar.upsertCalendarSource(source)
   }
 
   /** L4-B — read one source row. Returns null when missing. */
   getCalendarSourceById(id: string): CalendarSource | null {
-    return getDatabase().getCalendarSourceById(id)
+    return getDatabase().calendar.getCalendarSourceById(id)
   }
 
   /**
@@ -187,6 +183,6 @@ export class CalendarRepository {
    * `source_id`).
    */
   deleteCalendarSource(id: string): { deleted: boolean } {
-    return getDatabase().deleteCalendarSource(id)
+    return getDatabase().calendar.deleteCalendarSource(id)
   }
 }

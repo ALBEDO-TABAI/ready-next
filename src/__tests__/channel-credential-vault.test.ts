@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import type { AgentChannelRecord } from '../main/modules/database'
+import type { AgentChannelRecord } from '../main/modules/database/records'
 import { ChannelConfigService } from '../main/modules/agent-control/runtime-core/channel-config-service'
 import {
   decryptChannelConfig,
@@ -17,8 +17,13 @@ import {
 
 class ChannelDatabaseFixture {
   readonly rows = new Map<string, AgentChannelRecord>()
-  readonly settings = new Map<string, string>()
+  readonly settingValues = new Map<string, string>()
   failNextUpsert = false
+
+  // DatabaseManager exposes domain stores; this flat fixture serves every store the channel service reads.
+  get channels() { return this }
+  get chat() { return this }
+  get settings() { return this }
 
   getRawDb() { return { exec() {}, inTransaction: false } }
   listAgentChannels(): AgentChannelRecord[] { return Array.from(this.rows.values()) }
@@ -66,8 +71,8 @@ class ChannelDatabaseFixture {
     return row
   }
   markAgentChannelSeen(id: string): AgentChannelRecord | null { return this.rows.get(id) ?? null }
-  getSetting(key: string): string | null { return this.settings.get(key) ?? null }
-  setSetting(key: string, value: string): void { this.settings.set(key, value) }
+  getSetting(key: string): string | null { return this.settingValues.get(key) ?? null }
+  setSetting(key: string, value: string): void { this.settingValues.set(key, value) }
 }
 
 function createSidecarFixture() {

@@ -2,6 +2,8 @@ import { forwardRef, useEffect, useLayoutEffect, useRef, useState, type HTMLAttr
 import VirtualList, { type ListRef } from 'rc-virtual-list'
 import type { RSSItem } from './RSSFeed'
 
+const rowKey = (item: RSSItem) => item.eventGroup ? `event:${item.eventGroup.id}` : item.id
+
 // Keep the real scrolling element as the source for RSS floating glass panels.
 const ScrollHolder = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(function ScrollHolder(props, ref) {
   return <div {...props} ref={ref} data-liquid-scroll-root="rss-feed-list" className={`${props.className || ''} rss-feed-scroll`} />
@@ -10,7 +12,7 @@ const ScrollHolder = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(
 export default function RSSVirtualList({ items, selectedItemId, children }: {
   items: RSSItem[]
   selectedItemId: string | null
-  children: (item: RSSItem) => ReactNode
+  children: (item: RSSItem, index: number) => ReactNode
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<ListRef>(null)
@@ -36,23 +38,24 @@ export default function RSSVirtualList({ items, selectedItemId, children }: {
 
   useLayoutEffect(() => {
     const anchor = anchorRef.current
-    if (anchor && items.some((item) => item.id === anchor.key)) {
+    if (anchor && items.some((item) => rowKey(item) === anchor.key)) {
       listRef.current?.scrollTo({ key: anchor.key, align: 'top', offset: anchor.offset })
     }
   }, [items])
 
   useEffect(() => {
-    if (selectedItemId) listRef.current?.scrollTo({ key: selectedItemId, align: 'auto' })
+    const item = items.find((entry) => entry.id === selectedItemId)
+    if (item) listRef.current?.scrollTo({ key: rowKey(item), align: 'auto' })
   }, [selectedItemId])
 
   return (
-    <div ref={containerRef} className="h-full min-h-0">
+    <div ref={containerRef} className="flex-1 min-h-0">
       <VirtualList
         ref={listRef}
         data={items}
         height={height}
         itemHeight={84}
-        itemKey="id"
+        itemKey={rowKey}
         component={ScrollHolder}
         onScroll={(event) => {
           const holder = event.currentTarget
@@ -60,15 +63,15 @@ export default function RSSVirtualList({ items, selectedItemId, children }: {
           scrollFrameRef.current = requestAnimationFrame(() => {
             scrollFrameRef.current = null
             const top = holder.getBoundingClientRect().top
-            const row = Array.from(holder.querySelectorAll<HTMLElement>('[data-rss-item-id]'))
+            const row = Array.from(holder.querySelectorAll<HTMLElement>('[data-rss-row-key]'))
               .find((element) => element.getBoundingClientRect().bottom > top)
-            if (row) anchorRef.current = { key: row.dataset.rssItemId!, offset: row.getBoundingClientRect().top - top }
+            if (row) anchorRef.current = { key: row.dataset.rssRowKey!, offset: row.getBoundingClientRect().top - top }
           })
         }}
       >
         {(item, index) => (
-          <div data-rss-item-id={item.id} style={{ padding: `${index === 0 ? 12 : 4}px 8px ${index === items.length - 1 ? 12 : 4}px` }}>
-            {children(item)}
+          <div data-rss-row-key={rowKey(item)} style={{ padding: `${index === 0 ? 12 : 4}px 8px ${index === items.length - 1 ? 12 : 4}px` }}>
+            {children(item, index)}
           </div>
         )}
       </VirtualList>

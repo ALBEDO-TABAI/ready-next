@@ -87,7 +87,7 @@ test('sourceIndexGroup.register wires the 4 documented channels exactly once eac
 
   // Spot-check the exact channel names per the plan (V2.4a, §3 V2.4) so
   // accidental renames trip this test even if the channel count happens
-  // to still be 5. The V5 IPC contract gate catches the renderer side;
+  // to still be 4. The V5 IPC contract gate catches the renderer side;
   // this pins the main-side literals.
   for (const required of [
     'document:listSources',

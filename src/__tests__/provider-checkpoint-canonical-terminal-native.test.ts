@@ -4,7 +4,7 @@ import test from 'node:test'
 
 import type { AgentInputItem } from '@openai/agents'
 
-import type { DatabaseConnection } from '../main/modules/database'
+import type { DatabaseConnection } from '../main/modules/database/connection'
 import { runMigrations, type MigrationDatabase } from '../main/modules/migrations'
 import { RunMetaRepository } from '../main/modules/agent-control/task-projection/run-meta-repository'
 import { buildPreparedSkillTurnTruth } from '../main/modules/agent-control/skills/prepared-skill-turn'

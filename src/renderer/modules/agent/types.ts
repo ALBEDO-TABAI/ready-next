@@ -75,6 +75,7 @@ export interface ChatAttachment {
     | 'document-quote'
     | 'document-widget-target'
     | 'calendar-event'
+    | 'rss-reference'
     | 'rss-item'
     | 'rss-source'
     | 'mcp-resource'
@@ -97,6 +98,7 @@ export interface ChatAttachment {
   excerpt?: string
   capturedAt?: number
   eventId?: string
+  rssReference?: import('../../../shared/rss-reference').RSSReference
   rssItemId?: string
   rssSourceId?: string
   mcpServerId?: string

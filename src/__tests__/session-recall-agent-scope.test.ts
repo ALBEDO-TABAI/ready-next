@@ -1,3 +1,5 @@
+import type { ChatConversationRecord, ConversationSourceKind } from '../main/modules/database/records'
+import type { DatabaseConnection, DatabaseStatement } from '../main/modules/database/connection'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -6,13 +8,7 @@ import test from 'node:test'
 import { SessionRecallService, type SessionRecallDatabaseAdapter } from '../main/modules/agent-control/session/session-recall-service'
 import { executeSessionRecallTool } from '../main/modules/tools/session-recall-tools'
 import type { ToolContext } from '../main/modules/tools/tool-executor'
-import {
-  DatabaseManager,
-  type ChatConversationRecord,
-  type ConversationSourceKind,
-  type DatabaseConnection,
-  type DatabaseStatement,
-} from '../main/modules/database'
+import { ChatStore } from '../main/modules/database/chat-store'
 
 interface MetadataRow {
   conversation_id: string
@@ -38,6 +34,7 @@ interface MessageMatchRow {
 }
 
 class FakeSessionRecallDb implements SessionRecallDatabaseAdapter {
+  readonly chat = this
   vectorRows = new Map<string, { content_hash: string; vector_json: string; vector_version: string; updated_at: string }>()
 
   constructor(
@@ -425,12 +422,11 @@ test('runtime keeps session recall user-invoked and does not inject it automatic
   assert.doesNotMatch(runtime, /getAutoSessionRecallCapsules|getAutomaticRecallCapsules/)
 })
 
-test('DatabaseManager recall metadata write persists conversation.agent', () => {
+test('ChatStore recall metadata write persists conversation.agent', () => {
   const connection = new FakeDatabaseManagerConnection()
-  const manager = Object.create(DatabaseManager.prototype) as DatabaseManager
-  ;(manager as unknown as { db: DatabaseConnection }).db = connection
+  const manager = { chat: new ChatStore(() => connection) }
 
-  manager.upsertConversationScope({
+  manager.chat.upsertConversationScope({
     id: 'conv-alpha',
     agent: 'alpha',
     userId: 'user-1',
@@ -441,7 +437,7 @@ test('DatabaseManager recall metadata write persists conversation.agent', () => 
     meta: {},
   })
 
-  manager.addChatMessage(
+  manager.chat.addChatMessage(
     'msg-alpha',
     'conv-alpha',
     'assistant',
@@ -462,15 +458,14 @@ test('DatabaseManager recall metadata write persists conversation.agent', () => 
 
 test('reusing a conversation never resets its persisted active agent or handoff generation', () => {
   const connection = new FakeDatabaseManagerConnection()
-  const manager = Object.create(DatabaseManager.prototype) as DatabaseManager
-  ;(manager as unknown as { db: DatabaseConnection }).db = connection
+  const manager = { chat: new ChatStore(() => connection) }
   const payload = {
     id: 'conv-handoff', agent: 'butler', title: '会话', sourceKind: 'local' as const,
     sourceId: 'app', threadKey: 'conv-handoff', meta: {},
   }
-  manager.upsertConversationScope(payload)
-  manager.updateConversationAgentState('conv-handoff', 'copywriter', 4)
-  const reused = manager.upsertConversationScope({ ...payload, activeAgentId: 'butler', title: '更新标题' })
+  manager.chat.upsertConversationScope(payload)
+  manager.chat.updateConversationAgentState('conv-handoff', 'copywriter', 4)
+  const reused = manager.chat.upsertConversationScope({ ...payload, activeAgentId: 'butler', title: '更新标题' })
   assert.equal(reused.mode, 'reused')
   assert.equal(reused.row.active_agent_id, 'copywriter')
   assert.equal(reused.row.handoff_generation, 4)

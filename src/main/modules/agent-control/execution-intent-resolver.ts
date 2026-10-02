@@ -184,7 +184,6 @@ export function resolveExecutionIntentContext(params: {
 
   const hasDocumentEnvironment =
     hasWritableDocumentContext(params.requestEnvelope)
-    || (params.requestEnvelope.rawUserText.includes('## 环境信息') && params.requestEnvelope.rawUserText.includes('当前模式: 文档模式'))
 
   return {
     requestEnvelope: effectiveEnvelope,

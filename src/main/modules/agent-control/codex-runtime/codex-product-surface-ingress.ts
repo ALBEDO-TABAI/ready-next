@@ -52,7 +52,7 @@ export function trustedBrowserReferenceInput(
   }
 }
 
-export function trustedCalendarReferenceInput(event: NonNullable<ReturnType<DatabaseManager['getCalendarEventById']>>): CodexResolvedInlineResource {
+export function trustedCalendarReferenceInput(event: NonNullable<ReturnType<DatabaseManager['calendar']['getCalendarEventById']>>): CodexResolvedInlineResource {
   const canonical = {
     id: event.id,
     calendarId: event.calendar_id,
@@ -83,7 +83,7 @@ export function trustedCalendarReferenceInput(event: NonNullable<ReturnType<Data
   }
 }
 
-export function trustedRssItemInput(item: NonNullable<ReturnType<DatabaseManager['getRSSItemsByIds']>[number]>): CodexResolvedInlineResource {
+export function trustedRssItemInput(item: NonNullable<ReturnType<DatabaseManager['rss']['getRSSItemsByIds']>[number]>): CodexResolvedInlineResource {
   const summary = String(item.summary || '').slice(0, 1200)
   return {
     name: item.title || 'RSS 条目',
@@ -105,7 +105,7 @@ export function trustedRssItemInput(item: NonNullable<ReturnType<DatabaseManager
   }
 }
 
-export function trustedRssSourceInput(source: NonNullable<ReturnType<DatabaseManager['getRSSSources']>[number]>): CodexResolvedInlineResource {
+export function trustedRssSourceInput(source: NonNullable<ReturnType<DatabaseManager['rss']['getRSSSources']>[number]>): CodexResolvedInlineResource {
   return {
     name: source.name || 'RSS 源',
     path: source.url,
@@ -123,11 +123,13 @@ export function extractProductSurfaceTargets(
 ): PreparedCodexProductRun['productSurfaceTargets'] {
   const rssItem = resources.find((resource) => resource.kind === 'rss_item')
   const rssSource = resources.find((resource) => resource.kind === 'rss_source')
+  const articleRefs = resources.flatMap((resource) => resource.kind === 'rss_reference' && ['article', 'excerpt'].includes(resource.reference.kind) ? [resource.reference] : [])
+  const referencedItemIds = [...new Set(articleRefs.map((reference) => reference.kind === 'article' || reference.kind === 'excerpt' ? reference.read.itemId : null))]
   const calendarEvent = resources.find((resource) => resource.kind === 'calendar_event')
   const calendarWindow = resources.find((resource) => resource.kind === 'calendar_window')
   const widget = resources.find((resource) => resource.kind === 'widget_target')
   const targets = {
-    rssItemId: rssItem && rssItem.kind === 'rss_item' ? rssItem.itemId : null,
+    rssItemId: rssItem && rssItem.kind === 'rss_item' ? rssItem.itemId : referencedItemIds.length === 1 ? referencedItemIds[0] : null,
     rssSourceId: rssSource && rssSource.kind === 'rss_source' ? rssSource.sourceId : null,
     calendarEventId: calendarEvent && calendarEvent.kind === 'calendar_event'
       ? persistableCalendarEventId(calendarEvent.eventId) || calendarEvent.eventId

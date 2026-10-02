@@ -1,12 +1,8 @@
+import type { DatabaseConnection } from '../main/modules/database/connection'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import {
-  assertDatabaseConnectionReady,
-  assertPrimaryDatabaseReady,
-  DatabaseUnavailableError,
-  type DatabaseConnection,
-} from '../main/modules/database'
+import { assertDatabaseConnectionReady, assertPrimaryDatabaseReady, DatabaseUnavailableError } from '../main/modules/database'
 
 function createFakeSettingsDb(calls: string[]): DatabaseConnection {
   return {

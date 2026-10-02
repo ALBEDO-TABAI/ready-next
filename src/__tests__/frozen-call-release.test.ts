@@ -831,9 +831,11 @@ test('dedicated agent:frozenCall:respond IPC confirms a pending frozen call end 
   } as unknown as IpcMain
   const deps: AskUserGroupDeps = {
     getDatabase: (() => ({
-      getChatMessageById: () => null,
-      updateChatMessageMeta: (_id: string, meta: Record<string, unknown>) => persistResolvedCardToFakeDb(db, meta),
-      listPendingAskUserQuestionsCards: () => [],
+      chat: {
+        getChatMessageById: () => null,
+        updateChatMessageMeta: (_id: string, meta: Record<string, unknown>) => persistResolvedCardToFakeDb(db, meta),
+        listPendingAskUserQuestionsCards: () => [],
+      },
     })) as unknown as AskUserGroupDeps['getDatabase'],
     getEphemeralExecutionStore: (() => {
       throw new Error('not used')
@@ -885,9 +887,11 @@ test('dedicated IPC deny path rejects without execution', async (t) => {
   } as unknown as IpcMain
   const deps: AskUserGroupDeps = {
     getDatabase: (() => ({
-      getChatMessageById: () => null,
-      updateChatMessageMeta: (_id: string, meta: Record<string, unknown>) => persistResolvedCardToFakeDb(db, meta),
-      listPendingAskUserQuestionsCards: () => [],
+      chat: {
+        getChatMessageById: () => null,
+        updateChatMessageMeta: (_id: string, meta: Record<string, unknown>) => persistResolvedCardToFakeDb(db, meta),
+        listPendingAskUserQuestionsCards: () => [],
+      },
     })) as unknown as AskUserGroupDeps['getDatabase'],
     getEphemeralExecutionStore: (() => {
       throw new Error('not used')

@@ -21,6 +21,7 @@ import {
 import type { PendingInboundChannel } from '../main/modules/agent-control/runtime-core/runtime-helpers'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+import { flatDomainStores } from './helpers/flat-domain-stores'
 
 test('remote-ask-card-channel declares transitive sqlite ABI guard', (t) => {
   skipIfSqliteUnavailable(t, 'remote-ask-card-channel transitive sqlite load')
@@ -51,7 +52,7 @@ function makeService(options: {
     },
   }
   const deps = {
-    db: fakeDb,
+    db: flatDomainStores(fakeDb),
     sidecar: fakeSidecar,
     settingsRepository: {},
     getRuntimeStatus: () => ({}),

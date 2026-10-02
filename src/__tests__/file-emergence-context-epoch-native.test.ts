@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import type { DatabaseConnection } from '../main/modules/database'
+import type { DatabaseConnection } from '../main/modules/database/connection'
 import {
   listCurrentVisibleTaskProjections,
 } from '../main/modules/file-emergence/current-visible-task-projections'

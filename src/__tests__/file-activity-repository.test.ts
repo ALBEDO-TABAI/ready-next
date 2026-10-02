@@ -1,10 +1,11 @@
+import type { DatabaseConnection } from '../main/modules/database/connection'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import test from 'node:test'
 
 import { FileActivityRepository } from '../main/modules/repositories/file-activity-repository'
 import { runMigrations, type MigrationDatabase } from '../main/modules/migrations'
-import type { DatabaseConnection } from '../main/modules/database'
+
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 type SqliteCtor = new (path: string) => DatabaseConnection & MigrationDatabase

@@ -1,4 +1,4 @@
-import type { DatabaseConnection } from '../../database'
+import type { DatabaseConnection } from '../../database/connection'
 import type { CodexBindingRepository, CodexTerminalCloseoutEvidence } from './codex-binding-repository'
 import { CodexModelGatewayRepository } from './codex-model-gateway-authority'
 import { CodexToolActionJournal } from './codex-tool-action-journal'

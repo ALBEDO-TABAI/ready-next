@@ -3,7 +3,6 @@ import assert from 'node:assert'
 import { describe, it } from 'node:test'
 
 import { BrowserAutomationService } from '../main/modules/browser-engine/automation-service'
-import { BrowserPreviewService } from '../main/modules/browser-engine/preview-service'
 import { BrowserTabLifecycleService, type BrowserLifecycleTabRecord } from '../main/modules/browser-engine/tab-lifecycle-service'
 import { BrowserTabMetaService } from '../main/modules/browser-engine/tab-meta-service'
 import { BrowserTabShellService, type BrowserShellTabRecord } from '../main/modules/browser-engine/tab-shell-service'
@@ -160,7 +159,6 @@ describe('BrowserTabShellService', () => {
       showHost: () => undefined,
       applyBounds: () => undefined,
       hideHost: () => undefined,
-      detachPreviewView: () => undefined,
       restoreActiveTabHost: () => undefined,
     })
 
@@ -207,7 +205,6 @@ describe('BrowserTabShellService', () => {
       showHost: () => undefined,
       applyBounds: () => undefined,
       hideHost: () => undefined,
-      detachPreviewView: () => undefined,
       restoreActiveTabHost: () => undefined,
     })
 
@@ -252,7 +249,6 @@ describe('BrowserTabShellService', () => {
         events.push('apply')
       },
       hideHost: () => undefined,
-      detachPreviewView: () => undefined,
       restoreActiveTabHost: () => undefined,
     })
 
@@ -298,7 +294,6 @@ describe('BrowserTabShellService', () => {
       showHost: (view) => { if (view === replacement.view) events.push('show:replacement') },
       applyBounds: (view) => { if (view === replacement.view) events.push('bounds:replacement') },
       hideHost: () => undefined,
-      detachPreviewView: () => undefined,
       restoreActiveTabHost: () => undefined,
     })
 
@@ -338,7 +333,6 @@ describe('BrowserTabShellService', () => {
       showHost: (view) => { if (view === restored.view) events.push('show:restored') },
       applyBounds: (view) => { if (view === restored.view) events.push('bounds:restored') },
       hideHost: () => undefined,
-      detachPreviewView: () => undefined,
       restoreActiveTabHost: () => undefined,
     })
 
@@ -383,7 +377,6 @@ describe('BrowserTabShellService', () => {
       },
       applyBounds: () => undefined,
       hideHost: () => undefined,
-      detachPreviewView: () => undefined,
       restoreActiveTabHost: () => undefined,
     })
 
@@ -403,7 +396,6 @@ describe('BrowserTabShellService', () => {
       ['tab-2', { id: 'tab-2', url: 'https://b.com', title: 'B', domain: 'b.com', favicon: null, owner: 'manual', required: false, activity: 'idle', lastAuditedAt: null, view: second.view }],
     ])
     const hidden: string[] = []
-    let previewDetached = 0
 
     const service = new BrowserTabShellService({
       tabs: tabs as any,
@@ -426,9 +418,6 @@ describe('BrowserTabShellService', () => {
         if (view === second.view) hidden.push('tab-2')
       },
       isHostAttached: (view) => view === first.view,
-      detachPreviewView: () => {
-        previewDetached += 1
-      },
       restoreActiveTabHost: () => undefined,
     })
 
@@ -436,7 +425,6 @@ describe('BrowserTabShellService', () => {
 
     assert.deepStrictEqual(result, { success: true })
     assert.deepStrictEqual(hidden, ['tab-1'])
-    assert.strictEqual(previewDetached, 1)
   })
 })
 
@@ -989,172 +977,6 @@ describe('BrowserTabLifecycleService', () => {
     assert.equal(activeTabId, metadata.id)
     assert.equal(splitTabId, null)
     assert.deepEqual(partitions, ['persist:browser-profile-work'])
-  })
-})
-
-describe('BrowserPreviewService', () => {
-  it('uses the browser tab session so RSS previews share login state with browser mode', async () => {
-    const mock = createMockView()
-    const requestedPartitions: string[] = []
-    const service = new BrowserPreviewService({
-      useMock: false,
-      browserUserAgent: 'ready-test',
-      createHost: (partition) => {
-        requestedPartitions.push(partition)
-        return mock.view as any
-      },
-      ...noopPageBackgroundDeps,
-      showHost: () => undefined,
-      hideHost: () => undefined,
-      detachHost: () => undefined,
-      applyPreviewBounds: () => undefined,
-      getPreviewBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }),
-      setPreviewBounds: () => undefined,
-      sendToRenderer: () => undefined,
-      logBrowserDiag: () => undefined,
-      bindPopup: () => undefined,
-      installContextMenu: () => undefined,
-      handleWindowOpen: () => ({ action: 'deny' }),
-      hideActiveTab: () => false,
-      restoreActiveTab: () => undefined,
-    })
-
-    await service.open('https://example.com')
-
-    assert.deepStrictEqual(requestedPartitions, ['persist:browser'])
-  })
-
-  it('registers the preview session for downloads before opening preview pages', async () => {
-    const mock = createMockView()
-    const downloadSessions: unknown[] = []
-    const service = new BrowserPreviewService({
-      useMock: false,
-      browserUserAgent: 'ready-test',
-      createHost: () => mock.view as any,
-      ...noopPageBackgroundDeps,
-      showHost: () => undefined,
-      hideHost: () => undefined,
-      detachHost: () => undefined,
-      applyPreviewBounds: () => undefined,
-      getPreviewBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }),
-      setPreviewBounds: () => undefined,
-      sendToRenderer: () => undefined,
-      logBrowserDiag: () => undefined,
-      bindPopup: () => undefined,
-      installContextMenu: () => undefined,
-      handleWindowOpen: () => ({ action: 'deny' }),
-      hideActiveTab: () => false,
-      restoreActiveTab: () => undefined,
-      ensureDownloadSession: (targetSession: unknown) => {
-        downloadSessions.push(targetSession)
-      },
-    } as any)
-
-    await service.open('https://example.com')
-
-    assert.deepStrictEqual(downloadSessions, [mock.view.webContents.session])
-  })
-
-  it('does not restore the active tab when preview did not hide a visible browser host', async () => {
-    const mock = createMockView()
-    const events: string[] = []
-    const service = new BrowserPreviewService({
-      useMock: false,
-      browserUserAgent: 'ready-test',
-      createHost: () => mock.view as any,
-      ...noopPageBackgroundDeps,
-      showHost: () => {
-        events.push('show')
-      },
-      hideHost: () => undefined,
-      detachHost: () => {
-        events.push('detach')
-      },
-      applyPreviewBounds: () => undefined,
-      getPreviewBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }),
-      setPreviewBounds: () => undefined,
-      sendToRenderer: () => undefined,
-      logBrowserDiag: () => undefined,
-      bindPopup: () => undefined,
-      installContextMenu: () => undefined,
-      handleWindowOpen: () => ({ action: 'deny' }),
-      hideActiveTab: () => false,
-      restoreActiveTab: () => {
-        events.push('restore')
-      },
-    })
-
-    await service.open('https://example.com')
-    service.close()
-
-    assert.deepStrictEqual(events, ['show', 'detach'])
-  })
-
-  it('restores the active tab after closing preview only when preview hid it', async () => {
-    const mock = createMockView()
-    const events: string[] = []
-    const service = new BrowserPreviewService({
-      useMock: false,
-      browserUserAgent: 'ready-test',
-      createHost: () => mock.view as any,
-      ...noopPageBackgroundDeps,
-      showHost: () => undefined,
-      hideHost: () => undefined,
-      detachHost: () => undefined,
-      applyPreviewBounds: () => undefined,
-      getPreviewBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }),
-      setPreviewBounds: () => undefined,
-      sendToRenderer: () => undefined,
-      logBrowserDiag: () => undefined,
-      bindPopup: () => undefined,
-      installContextMenu: () => undefined,
-      handleWindowOpen: () => ({ action: 'deny' }),
-      hideActiveTab: () => true,
-      restoreActiveTab: () => {
-        events.push('restore')
-      },
-    })
-
-    await service.open('https://example.com')
-    service.close()
-
-    assert.deepStrictEqual(events, ['restore'])
-  })
-
-  it('ignores subresource did-fail-load events when updating preview error state', async () => {
-    const mock = createMockView()
-    const updates: unknown[] = []
-    const diagMessages: string[] = []
-    const service = new BrowserPreviewService({
-      useMock: false,
-      browserUserAgent: 'ready-test',
-      createHost: () => mock.view as any,
-      ...noopPageBackgroundDeps,
-      showHost: () => undefined,
-      hideHost: () => undefined,
-      detachHost: () => undefined,
-      applyPreviewBounds: () => undefined,
-      getPreviewBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }),
-      setPreviewBounds: () => undefined,
-      sendToRenderer: (_channel, data) => {
-        updates.push(data)
-      },
-      logBrowserDiag: (message) => {
-        diagMessages.push(message)
-      },
-      bindPopup: () => undefined,
-      installContextMenu: () => undefined,
-      handleWindowOpen: () => ({ action: 'deny' }),
-      hideActiveTab: () => false,
-      restoreActiveTab: () => undefined,
-    })
-
-    await service.open('https://example.com')
-    const updateCountBeforeFailure = updates.length
-    mock.state.emit('did-fail-load', {}, -105, 'ERR_NAME_NOT_RESOLVED', 'https://cdn.example/script.js', false)
-
-    assert.strictEqual(updates.length, updateCountBeforeFailure)
-    assert.deepStrictEqual(diagMessages, [])
   })
 })
 

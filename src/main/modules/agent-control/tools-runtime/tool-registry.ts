@@ -228,12 +228,22 @@ const DOCUMENT_TOOL_NAMES = [
 ]
 
 const RSS_TOOL_NAMES = [
+  'rss_read_analysis_assets',
+  'rss_read_catalog',
+  'rss_read_analysis_report',
   'rss_add_source',
   'rss_fetch_updates',
   'rss_select_item',
   'rss_analyze_item',
   'rss_get_analysis_result',
   'rss_capture_session',
+  'rss_query_items',
+  'rss_read_article',
+  'rss_read_reference',
+  'rss_read_processing',
+  'rss_read_excerpt',
+  'rss_read_digests',
+  'rss_read_events',
 ]
 
 const CALENDAR_TOOL_NAMES = [

@@ -13,19 +13,19 @@ import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 test('WeChat identity and completion receipt commit together or roll back together', async t => {
   if (skipIfSqliteUnavailable(t, 'atomic remote binding')) return
   const db = new DatabaseManager(true); t.after(() => db.close())
-  db.upsertAgentChannel({ id: 'w', type: 'wechat-openclaw', name: 'WeChat', enabled: false, configJson: '{}' })
-  db.setSetting('wechat_login:w', JSON.stringify({ status: 'pending', sessionKey: 'session' }))
+  db.channels.upsertAgentChannel({ id: 'w', type: 'wechat-openclaw', name: 'WeChat', enabled: false, configJson: '{}' })
+  db.settings.setSetting('wechat_login:w', JSON.stringify({ status: 'pending', sessionKey: 'session' }))
   const service = new ChannelConfigService({ db, sidecar: { isRunning: () => false } as never,
     startSidecar: async () => {}, heartbeat: {} as never })
-  const setSetting = db.setSetting.bind(db)
-  db.setSetting = () => { throw new Error('receipt_write_failed') }
+  const setSetting = db.settings.setSetting.bind(db)
+  db.settings.setSetting = () => { throw new Error('receipt_write_failed') }
   const completion = { channelId: 'w', sessionKey: 'session', accountId: 'account', userId: 'owner' }
   await assert.rejects(service.completeWechatBinding(completion), /receipt_write_failed/)
-  assert.equal(db.getAgentChannel('w')?.enabled, 0)
-  assert.equal(db.getAgentChannel('w')?.config_json, '{}')
-  db.setSetting = setSetting
+  assert.equal(db.channels.getAgentChannel('w')?.enabled, 0)
+  assert.equal(db.channels.getAgentChannel('w')?.config_json, '{}')
+  db.settings.setSetting = setSetting
   await service.completeWechatBinding(completion)
-  assert.equal(db.getAgentChannel('w')?.enabled, 1)
+  assert.equal(db.channels.getAgentChannel('w')?.enabled, 1)
   assert.equal((await service.getWechatLoginStatus('w', 'session')).status, 'connected')
 })
 
@@ -42,7 +42,7 @@ function harness(send?: (request: SendScopedRequest) => Promise<SendScopedRespon
   const db = new DatabaseManager(true)
   const manifest = { runtimeManifestDigest: 'test-runtime', protocolSchemaDigest: 'test-protocol' }
   const repository = new CodexBindingRepository(db.getRawDb()!, manifest)
-  db.upsertAgentChannel({ id: 'c', type: 'feishu-app', name: 'Fixture', enabled: true,
+  db.channels.upsertAgentChannel({ id: 'c', type: 'feishu-app', name: 'Fixture', enabled: true,
     configJson: JSON.stringify({ allowedSenderId: 'owner', bindingId: 'binding-1', remoteAssistantEnabled: true }) })
   const inputs: SendScopedRequest[] = []
   const sent: Array<{ text: string; thread?: string; deliveryId?: string }> = []
@@ -83,8 +83,8 @@ test('duplicate remote events produce one Codex input, and separate messages kee
   const h = harness(); t.after(h.close)
   await h.receive('one', 'hello')
   await h.receive('one', 'hello')
-  assert.equal(h.db.getAgentChannelEvent('one')?.status, 'queued')
-  assert.ok(h.db.getAgentChannelEvent('one')?.payload_json)
+  assert.equal(h.db.channels.getAgentChannelEvent('one')?.status, 'queued')
+  assert.ok(h.db.channels.getAgentChannelEvent('one')?.payload_json)
   await h.flush('one')
   await h.receive('one', 'hello')
   await h.flush('one')
@@ -107,22 +107,22 @@ test('unbound senders and attachment-only receipts cannot start Codex', async t 
   await h.flush('file')
   assert.equal(h.inputs.length, 0)
   assert.equal(h.sent.length, 0)
-  assert.equal(h.db.getAgentChannelEvent('stranger'), null)
-  assert.equal(h.db.getAgentChannelEvent('file')?.status, 'done')
-  const binding = h.db.getAgentChannelThread('c', 'chat')!
-  assert.equal(h.db.getChatMessages(binding.session_id).length, 1)
+  assert.equal(h.db.channels.getAgentChannelEvent('stranger'), null)
+  assert.equal(h.db.channels.getAgentChannelEvent('file')?.status, 'done')
+  const binding = h.db.channels.getAgentChannelThread('c', 'chat')!
+  assert.equal(h.db.chat.getChatMessages(binding.session_id).length, 1)
 })
 
 test('queued input recovers after restart without changing its visible context', async t => {
   if (skipIfSqliteUnavailable(t, 'remote queue restart')) return
   const h = harness(); t.after(h.close)
   await h.receive('queued', 'after restart')
-  const before = h.db.getAgentChannelEvent('queued')?.payload_json
+  const before = h.db.channels.getAgentChannelEvent('queued')?.payload_json
   await h.restart()
   await h.flush('queued')
   assert.equal(h.inputs.length, 1)
   assert.equal(h.inputs[0].scopeId, JSON.parse(before!).frozenScopeId)
-  assert.equal(h.db.getAgentChannelEvent('queued')?.status, 'done')
+  assert.equal(h.db.channels.getAgentChannelEvent('queued')?.status, 'done')
 })
 
 test('two remote tasks run in order and a revoked binding cannot receive an old reply', async t => {
@@ -138,19 +138,19 @@ test('two remote tasks run in order and a revoked binding cannot receive an old 
   await h.receive('first', 'first'); const first = h.flush('first'); await began
   await h.receive('second', 'second'); const second = h.flush('second')
   assert.equal(h.inputs.length, 1)
-  h.db.setAgentChannelEnabled('c', false)
+  h.db.channels.setAgentChannelEnabled('c', false)
   release()
   await Promise.all([first, second])
   assert.equal(h.inputs.length, 1)
   assert.equal(h.sent.length, 0)
-  assert.equal(h.db.getAgentChannelEvent('first')?.status, 'failed')
+  assert.equal(h.db.channels.getAgentChannelEvent('first')?.status, 'failed')
 })
 
 test('restart never automatically executes a previously running request', async t => {
   if (skipIfSqliteUnavailable(t, 'remote interrupted execution')) return
   const h = harness(); t.after(h.close)
   await h.receive('interrupted', 'change something')
-  h.db.upsertAgentChannelEvent({ eventId: 'interrupted', channelId: 'c', status: 'running' })
+  h.db.channels.upsertAgentChannelEvent({ eventId: 'interrupted', channelId: 'c', status: 'running' })
   await h.restart()
   assert.equal(h.inputs.length, 0)
   assert.equal(h.sent.length, 1)
@@ -164,17 +164,17 @@ test('an event from the previous binding cannot enter the replacement binding ev
   const h = harness(); t.after(h.close)
   await h.receive('old-binding', 'old request', { meta: { bindingId: 'previous-binding' } })
   await h.flush('old-binding')
-  assert.equal(h.db.getAgentChannelEvent('old-binding'), null)
+  assert.equal(h.db.channels.getAgentChannelEvent('old-binding'), null)
   assert.equal(h.inputs.length, 0)
 })
 
 test('a queued sidecar event for a deleted channel is discarded without recreating that channel or blocking polling', async t => {
   if (skipIfSqliteUnavailable(t, 'deleted remote channel')) return
   const h = harness(); t.after(h.close)
-  h.db.deleteAgentChannel('c')
+  h.db.channels.deleteAgentChannel('c')
   await assert.doesNotReject(h.receive('deleted', 'late message'))
-  assert.equal(h.db.getAgentChannelEvent('deleted'), null)
-  assert.equal(h.db.listConversationScopes().length, 0)
+  assert.equal(h.db.channels.getAgentChannelEvent('deleted'), null)
+  assert.equal(h.db.chat.listConversationScopes().length, 0)
 })
 
 test('new remote session preserves history and prevents a queued old input from running in it', async t => {
@@ -185,11 +185,11 @@ test('new remote session preserves history and prevents a queued old input from 
   await h.receive('queued', 'old queued request')
   await h.receive('new', '/new'); await h.flush('new')
   await h.flush('queued')
-  const nextScope = h.db.getAgentChannelThread('c', 'chat')!.session_id
+  const nextScope = h.db.channels.getAgentChannelThread('c', 'chat')!.session_id
   assert.notEqual(nextScope, oldScope)
-  assert.ok(h.db.getConversationScope(oldScope))
+  assert.ok(h.db.chat.getConversationScope(oldScope))
   assert.equal(h.inputs.length, 1)
-  assert.equal(h.db.getAgentChannelEvent('queued')?.status, 'failed')
+  assert.equal(h.db.channels.getAgentChannelEvent('queued')?.status, 'failed')
   await h.receive('fresh', 'fresh request'); await h.flush('fresh')
   assert.equal(h.inputs[1].scopeId, nextScope)
 })
@@ -199,7 +199,7 @@ test('an unexpected current-turn failure reports failure to its owner without re
   const h = harness(async () => { throw new Error('fixture_dispatch_failed') }); t.after(h.close)
   await h.receive('failed', 'run task'); await h.flush('failed')
   assert.equal(h.inputs.length, 1)
-  assert.equal(h.db.getAgentChannelEvent('failed')?.status, 'failed')
+  assert.equal(h.db.channels.getAgentChannelEvent('failed')?.status, 'failed')
   assert.equal(h.sent.length, 1)
   assert.match(h.sent[0].text, /没有处理完成/)
   await h.restart()
@@ -214,9 +214,9 @@ test('failed WeChat QR initialization persists an actionable terminal error', as
     startWechatLogin: async () => { throw new Error('QR network unavailable') },
   } as never, startSidecar: async () => {}, heartbeat: {} as never })
   await assert.rejects(service.startWechatLogin({ id: 'w' }), /QR network unavailable/)
-  const state = JSON.parse(db.getSetting('wechat_login:w')!)
+  const state = JSON.parse(db.settings.getSetting('wechat_login:w')!)
   assert.equal(state.status, 'error')
-  assert.match(db.getAgentChannel('w')!.last_error!, /QR network unavailable/)
+  assert.match(db.channels.getAgentChannel('w')!.last_error!, /QR network unavailable/)
   assert.equal((await service.getWechatLoginStatus('w', '')).status, 'error')
 })
 
@@ -258,14 +258,14 @@ test('cancelled WeChat QR requests cannot revive the connection when the respons
   assert.equal((await starting).success, false)
   await cancelling
   assert.equal((await service.getWechatLoginStatus('w', '')).status, 'idle')
-  assert.equal(db.getAgentChannel('w')!.enabled, 0)
+  assert.equal(db.channels.getAgentChannel('w')!.enabled, 0)
 })
 
 test('WeChat reports activation progress and startup failure after mobile confirmation', async t => {
   if (skipIfSqliteUnavailable(t, 'wechat activation status')) return
   const db = new DatabaseManager(true); t.after(() => db.close())
-  db.upsertAgentChannel({ id: 'w', type: 'wechat-openclaw', name: 'WeChat', enabled: false, configJson: '{}' })
-  db.setSetting('wechat_login:w', JSON.stringify({ status: 'pending', sessionKey: 'session' }))
+  db.channels.upsertAgentChannel({ id: 'w', type: 'wechat-openclaw', name: 'WeChat', enabled: false, configJson: '{}' })
+  db.settings.setSetting('wechat_login:w', JSON.stringify({ status: 'pending', sessionKey: 'session' }))
   let finish!: () => void
   const gate = new Promise<void>(resolve => { finish = resolve })
   const service = new ChannelConfigService({ db, sidecar: {
@@ -285,9 +285,9 @@ test('WeChat reports activation progress and startup failure after mobile confir
 test('WeChat activation interrupted by restart resumes from the stored binding', async t => {
   if (skipIfSqliteUnavailable(t, 'wechat activation restart')) return
   const db = new DatabaseManager(true); t.after(() => db.close())
-  db.upsertAgentChannel({ id: 'w', type: 'wechat-openclaw', name: 'WeChat', enabled: true,
+  db.channels.upsertAgentChannel({ id: 'w', type: 'wechat-openclaw', name: 'WeChat', enabled: true,
     configJson: JSON.stringify({ accountId: 'account', allowedSenderId: 'owner', bindingId: 'b' }) })
-  db.setSetting('wechat_login:w', JSON.stringify({ status: 'activating', sessionKey: 'session', bindingId: 'b' }))
+  db.settings.setSetting('wechat_login:w', JSON.stringify({ status: 'activating', sessionKey: 'session', bindingId: 'b' }))
   let started = 0
   const service = new ChannelConfigService({ db, sidecar: { isRunning: () => true,
     upsertChannel: async () => ({ success: true }), startChannel: async () => { started++; return { success: true } },
@@ -299,8 +299,8 @@ test('WeChat activation interrupted by restart resumes from the stored binding',
 test('late QR polling cannot replace a committed WeChat connection with a missing-session error', async t => {
   if (skipIfSqliteUnavailable(t, 'wechat stale polling response')) return
   const db = new DatabaseManager(true); t.after(() => db.close())
-  db.upsertAgentChannel({ id: 'w', type: 'wechat-openclaw', name: 'WeChat', enabled: false, configJson: '{}' })
-  db.setSetting('wechat_login:w', JSON.stringify({ status: 'pending', sessionKey: 'session' }))
+  db.channels.upsertAgentChannel({ id: 'w', type: 'wechat-openclaw', name: 'WeChat', enabled: false, configJson: '{}' })
+  db.settings.setSetting('wechat_login:w', JSON.stringify({ status: 'pending', sessionKey: 'session' }))
   let finish!: () => void
   const gate = new Promise<void>(resolve => { finish = resolve })
   const service = new ChannelConfigService({ db, sidecar: { isRunning: () => true,
@@ -311,6 +311,6 @@ test('late QR polling cannot replace a committed WeChat connection with a missin
   await service.completeWechatBinding({ channelId: 'w', sessionKey: 'session', accountId: 'account', userId: 'owner' })
   finish()
   assert.equal((await polling).status, 'connected')
-  assert.equal(JSON.parse(db.getSetting('wechat_login:w')!).status, 'connected')
-  assert.equal(db.getAgentChannel('w')!.last_error, null)
+  assert.equal(JSON.parse(db.settings.getSetting('wechat_login:w')!).status, 'connected')
+  assert.equal(db.channels.getAgentChannel('w')!.last_error, null)
 })

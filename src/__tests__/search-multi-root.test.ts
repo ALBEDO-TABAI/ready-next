@@ -1,3 +1,4 @@
+import type { DatabaseConnection } from '../main/modules/database/connection'
 /**
  * Multi-root search & reindex integration test.
  *
@@ -24,18 +25,20 @@
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { createRequire } from 'node:module'
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
 import { runMigrations, type MigrationDatabase } from '../main/modules/migrations'
-import type { DatabaseConnection } from '../main/modules/database'
+
 import { SearchEngine, probeFts5Availability } from '../main/modules/search-engine/indexer'
 import { SearchRepository } from '../main/modules/search-engine/repository'
 import { validateWorkspaceRoot } from '../shared/workspace-validation'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 type SqliteCtor = new (path: string) => DatabaseConnection & MigrationDatabase
+const require = createRequire(import.meta.url)
 
 function loadSqliteCtor(): SqliteCtor | null {
   try {

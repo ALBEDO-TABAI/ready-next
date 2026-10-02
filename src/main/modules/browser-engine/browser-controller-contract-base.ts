@@ -1,3 +1,4 @@
+import type { BrowserMainPushChannel } from '../../../shared/browser-ipc-channels'
 import { BrowserWindow } from 'electron'
 import { type BrowserExecutionDeadlineOptions } from './automation-service'
 import { type BrowserDialogSnapshot } from './browser-dialog-service'
@@ -33,7 +34,6 @@ import {
   type BrowserHostView,
   type BrowserRect,
   type BrowserViewBoundsUpdate,
-  type PreviewTabState
 } from './host-types'
 import type { BrowserLeaseSupervisionSnapshot } from './ipc-supervision'
 import {
@@ -55,7 +55,7 @@ import {
   type SettledBrowserWorkflowAction
 } from './task-persistence-service'
 import type { BrowserActionOutcome } from '../../../shared/browser-action-outcome'
-import type { BrowserPowerPreflightAuditRecord } from '../database'
+import type { BrowserPowerPreflightAuditRecord } from '../database/records'
 import type { RegisterDormantBrowserTabsRequest, RegisterDormantBrowserTabsResult } from '../../../shared/browser-tab-session'
 import type {
   BrowserHumanTakeoverPhysicalTarget,
@@ -153,8 +153,8 @@ export abstract class BrowserControllerContractBase {
       height: number;
   }): void;
   abstract hideHost(view: BrowserHostView): void;
-  abstract sendToRenderer(channel: string, data: unknown): void;
-  protected abstract sendToRendererImmediate(channel: string, data: unknown): void;
+  abstract sendToRenderer(channel: BrowserMainPushChannel, data: unknown): void;
+  protected abstract sendToRendererImmediate(channel: BrowserMainPushChannel, data: unknown): void;
   abstract notifyTabClosed(tabId: string): void;
   protected abstract isDuplicateLocalMediaDrop(signature: string): boolean;
   protected abstract handleLocalMediaDropNavigation(tabId: string, url: string): boolean;
@@ -165,7 +165,6 @@ export abstract class BrowserControllerContractBase {
   }): void;
   abstract getMainWindow(): BrowserWindow | null;
   abstract applyBounds(view: BrowserHostView, bounds?: BrowserRect): void;
-  abstract applyPreviewBounds(view: BrowserHostView): void;
   protected abstract hideActiveTabHost(): boolean;
   protected abstract restoreActiveTabHost(): void;
   protected abstract currentBoundsForTab(tabId: string): BrowserRect;
@@ -176,7 +175,7 @@ export abstract class BrowserControllerContractBase {
   protected abstract loadWebContentsURL(webContents: Electron.WebContents, url: string, timeoutMs: number): Promise<void>;
   abstract updateTabRuntimeState(tabId: string | null, updates: Partial<Pick<Tab, 'owner' | 'required' | 'activity' | 'lastAuditedAt'>>): Tab | null;
   abstract getAdblockState(): BrowserAdblockState;
-  abstract setAdblockEnabled(enabled: boolean, scope?: 'main' | 'preview' | 'all'): BrowserAdblockState;
+  abstract setAdblockEnabled(enabled: boolean): BrowserAdblockState;
   abstract toggleAdblockDomain(domain: string): BrowserAdblockState;
   abstract getTabList(): any;
   abstract getDiagnostics(options?: {
@@ -367,39 +366,6 @@ export abstract class BrowserControllerContractBase {
   abstract showUtilityMenu(payload: unknown): {
       success: boolean;
   };
-  abstract previewOpen(url: string): Promise<{
-      success: boolean;
-      error?: string;
-  }>;
-  abstract previewNavigate(url: string): Promise<{
-      success: boolean;
-      error?: string;
-  }>;
-  abstract previewGoBack(): {
-      success: boolean;
-      error?: string;
-  };
-  abstract previewGoForward(): {
-      success: boolean;
-      error?: string;
-  };
-  abstract previewReload(): {
-      success: boolean;
-      error?: string;
-  };
-  abstract previewUpdateBounds(bounds: {
-      x: number;
-      y: number;
-      width: number;
-      height: number;
-  }): {
-      success: boolean;
-  };
-  abstract previewClose(): {
-      success: boolean;
-  };
-  abstract previewGetState(): PreviewTabState;
-  abstract detachPreviewView(): void;
   // ── Programmatic API (for tool calling, not IPC) ──────────────────
   abstract getBrowserDialog(tabId: string | null): Promise<BrowserDialogSnapshot | null>;
   abstract handleBrowserDialog(tabId: string | null, params: {

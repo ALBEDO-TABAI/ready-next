@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import type { DatabaseConnection } from '../main/modules/database'
+import type { DatabaseConnection } from '../main/modules/database/connection'
 import type { CodexThread } from '../main/modules/agent-control/codex-runtime/codex-native-runtime'
 import {
   CodexDurableThreadArchiveDispatchPort,

@@ -8,7 +8,7 @@ import { BrowserDataService } from './data-service'
 
 interface BrowserDownloadServiceDeps {
   dataService: BrowserDataService
-  sendToRenderer: (channel: string, data: unknown) => void
+  sendToRenderer: (channel: 'browser:downloadUpdate', data: unknown) => void
   resolveTabIdForWebContents?: (webContentsId: number) => string | null
   onTabDownloadStateChange?: (tabId: string) => void
 }

@@ -32,10 +32,10 @@ function seed(root, overrides = {}) {
         evidence: "profile ? `persist:browser-profile-${profile}` : 'persist:browser'",
       },
       {
-        id: 'preview-view',
-        file: 'src/main/modules/browser-engine/preview-service.ts',
+        id: 'rss-article-fetch',
+        file: 'src/main/modules/rss-engine/content-runtime.ts',
         partition: 'persist:browser (default)',
-        evidence: "this.deps.createHost('persist:browser')",
+        evidence: "session.fromPartition('persist:browser')",
       },
       {
         id: 'auth-popup',
@@ -78,7 +78,7 @@ function seed(root, overrides = {}) {
       'this.sessionPolicyService.applyForPartition(partition)',
     ].join('\n'),
     'src/main/modules/browser-engine/ipc-handler.ts': "session.fromPartition('persist:browser')\n",
-    'src/main/modules/browser-engine/preview-service.ts': "this.deps.createHost('persist:browser')\n",
+    'src/main/modules/rss-engine/content-runtime.ts': "session.fromPartition('persist:browser')\n",
     'src/main/modules/browser-engine/auth-popup-manager.ts': "profile ? `persist:browser-profile-${profile}` : 'persist:browser'\n",
     'src/main/modules/browser-engine/session-policy-service.ts': "this.applyForPartition('persist:browser')\n",
     'src/main/modules/browser-engine/browser-surface-binding.ts': [

@@ -1,4 +1,4 @@
-import type { DatabaseConnection } from '../../database'
+import type { DatabaseConnection } from '../../database/connection'
 
 export const CODEX_FOLDER_DELIVERY_TOOL_NAMES = Object.freeze([
   'skill_write_artifact',
