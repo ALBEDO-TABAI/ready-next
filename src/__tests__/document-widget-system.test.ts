@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { parseShowWidgetFences } from '../renderer/components/document/widget-fence-parser'
 import { buildStructuredNotePreview } from '../renderer/components/document/note-preview-parser'
@@ -201,40 +201,8 @@ describe('document widget renderer contract', () => {
     assert.equal(widgetNeedsManualPreview(simpleWidget), false)
   })
 
-  it('keeps widget runtime on the sandboxed iframe path instead of branching by needsSandbox', () => {
-    const source = readFileSync(
-      resolve(process.cwd(), 'src/renderer/components/document/WidgetRenderer.tsx'),
-      'utf8',
-    )
-
-    assert.match(source, /useLayoutEffect/)
-    assert.match(source, /sandbox="allow-scripts"/)
-    assert.doesNotMatch(source, /if\s*\(\s*!needsSandbox\s*\)/)
-    assert.match(source, /srcDoc=\{srcDoc\}/)
-    assert.doesNotMatch(source, /src=\{iframeBlobUrl/)
-    assert.doesNotMatch(source, /onLoad=\{\(\) => setReceiverReady\(true\)\}/)
-    assert.match(source, /stripWidgetScripts/)
-    assert.doesNotMatch(source, /WidgetDomRuntime/)
-    assert.match(source, /widgetNeedsManualPreview/)
-    assert.match(source, /preferManualPreview/)
-    assert.match(source, /启用预览/)
-  })
-
-  it('falls back to stripped static markup instead of executing widget scripts in the renderer document', () => {
-    const rendererSource = readFileSync(
-      resolve(process.cwd(), 'src/renderer/components/document/WidgetRenderer.tsx'),
-      'utf8',
-    )
-
-    assert.match(rendererSource, /staticFallbackHtml/)
-    assert.match(rendererSource, /dangerouslySetInnerHTML/)
-    assert.match(rendererSource, /showSandboxFallback \|\| renderError/)
-    assert.doesNotMatch(rendererSource, /WidgetDomRuntime/)
-    assert.equal(
-      existsSync(resolve(process.cwd(), 'src/renderer/components/document/WidgetDomRuntime.tsx')),
-      false,
-    )
-  })
+  // 渲染舞台（iframe 运行时 / 静态投影 / 休眠与启用）的行为合同已迁到真实挂载测试
+  // document-widget-stage.test.tsx：沙箱 srcdoc、脚本与内联事件不进宿主、休眠态不挂 iframe。
 
   it('does not describe non-script widgets as static html only', () => {
     const source = readFileSync(

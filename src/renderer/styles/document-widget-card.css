@@ -1,0 +1,224 @@
+/* ═══ document-widget-card.css — 文档信息卡外壳的图注与渲染舞台。
+ *
+ * 外壳基础（透明卡壳、题注行、操作按钮的表面令牌）仍在 tiptap.css，由
+ * document-dark-surface-contract 测试钉住；这里只放随静态投影与图注引入的部分：
+ * FIG 编号、窄画幅题注对齐、“启用交互预览”入口，以及静态投影 → iframe 的舞台切换。
+ * ═══ */
+
+.ready-doc-widget-card-index {
+  flex: none;
+  color: var(--text-light);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 常驻状态入口：静态呈现的交互卡在图注里给一个可点的“启用交互预览” */
+.ready-doc-widget-card-activate {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+  cursor: pointer;
+  transition: color 160ms ease;
+}
+
+.ready-doc-widget-card-activate::before {
+  content: '';
+  width: 1px;
+  height: 10px;
+  margin-right: 4px;
+  background: color-mix(in srgb, var(--text-title) 16%, transparent);
+}
+
+.ready-doc-widget-card-activate-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-ready-orange);
+  box-shadow: 0 0 0 3px var(--color-ready-orange-light);
+}
+
+.ready-doc-widget-card-activate:hover {
+  color: var(--text-title);
+}
+
+.ready-doc-widget-card-activate:focus-visible {
+  outline: 1.5px solid var(--color-ready-orange);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+/* ─── 玻璃卡面：与聊天输入框 / 模式开关同一套液态玻璃材质 ───
+ * 白纱底 + 顶缘镜面高光 + 斜向边缘光（遮罩成 1px 环）+ 极柔的落影；卡片内容（iframe
+ * 或静态投影）透明叠在上面。卡片不叠在可滚动内容之上，折射无可见对象，所以只做材质，
+ * 不为每张卡挂折射镜片，滚动时零额外合成负担。 */
+.ready-doc-widget-card > .ready-doc-widget-card-preview {
+  position: relative;
+  isolation: isolate;
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.72) 0%, rgba(255, 255, 255, 0.5) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.35),
+    0 0 0 0.5px rgba(30, 40, 60, 0.06),
+    0 1px 1px rgba(30, 40, 60, 0.018),
+    0 8px 32px -8px rgba(30, 40, 60, 0.07);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  backdrop-filter: blur(20px) saturate(1.4);
+}
+
+.ready-doc-widget-card > .ready-doc-widget-card-preview::before,
+.ready-doc-widget-card > .ready-doc-widget-card-preview::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+/* 顶部左侧的柔光：玻璃受光面 */
+.ready-doc-widget-card > .ready-doc-widget-card-preview::before {
+  z-index: -1;
+  background: radial-gradient(120% 70% at 12% 0%, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0) 55%);
+  opacity: 0.8;
+}
+
+/* 斜向边缘光：遮罩成 1px 的环，读作玻璃厚度 */
+.ready-doc-widget-card > .ready-doc-widget-card-preview::after {
+  z-index: 2;
+  padding: 1px;
+  background:
+    linear-gradient(132deg, rgba(255, 255, 255, 0.9) 0%, rgba(255, 255, 255, 0.2) 34%, rgba(255, 255, 255, 0.05) 58%, rgba(255, 255, 255, 0.55) 86%, rgba(255, 255, 255, 0.9) 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+}
+
+html[data-theme='dark'] .ready-doc-widget-card > .ready-doc-widget-card-preview {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.075) 0%, rgba(255, 255, 255, 0.04) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.18),
+    0 0 0 0.5px rgba(0, 0, 0, 0.28),
+    0 1px 1px rgba(0, 0, 0, 0.1),
+    0 10px 36px -10px rgba(0, 0, 0, 0.3);
+}
+
+html[data-theme='dark'] .ready-doc-widget-card > .ready-doc-widget-card-preview::before {
+  background: radial-gradient(120% 70% at 12% 0%, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0) 55%);
+}
+
+html[data-theme='dark'] .ready-doc-widget-card > .ready-doc-widget-card-preview::after {
+  background:
+    linear-gradient(132deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.04) 34%, rgba(255, 255, 255, 0.01) 58%, rgba(255, 255, 255, 0.1) 86%, rgba(255, 255, 255, 0.2) 100%);
+}
+
+/* ─── 渲染舞台：静态投影 → iframe 就绪后接管，两者同令牌同构图，切换无跳变 ─── */
+.ready-doc-widget-card-preview .document-widget-shell {
+  position: relative;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.ready-doc-widget-card-preview .document-widget-title {
+  display: none;
+}
+
+.document-widget-static-projection {
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
+.ready-doc-widget-card-preview .document-widget-frame {
+  width: 100%;
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+.document-widget-shell[data-widget-stage='loading'] > .document-widget-frame,
+.document-widget-shell[data-widget-stage='error'] > .document-widget-frame {
+  position: absolute;
+  inset: 0 auto auto 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.document-widget-shell[data-widget-stage='live'] > .document-widget-frame {
+  animation: ready-doc-widget-frame-in 220ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+@keyframes ready-doc-widget-frame-in {
+  from { opacity: 0.4; }
+  to { opacity: 1; }
+}
+
+.ready-doc-widget-card-preview .document-widget-error {
+  padding: 0 2px;
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.ready-doc-widget-card-preview .document-widget-error svg {
+  color: var(--color-ready-orange);
+}
+
+/* 非受控休眠态（编辑面卡片）的启用行 */
+.document-widget-activate {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding: 0 2px;
+}
+
+.document-widget-activate-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.document-widget-activate-button:hover {
+  color: var(--text-title);
+}
+
+.document-widget-activate-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-ready-orange);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ready-doc-widget-card-actions,
+  .document-widget-shell[data-widget-stage='live'] > .document-widget-frame {
+    transition: none;
+    animation: none;
+  }
+}

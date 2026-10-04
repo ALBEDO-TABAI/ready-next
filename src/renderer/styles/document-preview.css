@@ -1,0 +1,844 @@
+/* ═══ document-preview.css — 文档模式预览的 Ready 排印（Ready Editorial）。
+ *
+ * 作用域：只限 `.note-preview-shell`（文档预览面与 PDF 导出捕获共用的 NotePreview 根），
+ * RSS 阅读栏（.note-preview-body.rss-reader-body）与书本阅读（.document-book-reading）
+ * 继续使用 markdown.css 的共享基线，互不影响分页测量。
+ *
+ * 视觉来源：assets/embedded-skills/ready-human-touch-card/references/style-ready.md ——
+ * 暖纸白上的精密仪器：秩序靠留白与 hairline，标签与数字走 mono，橘红只为强调词与链接
+ * 语义点亮；没有功能蓝、没有斑马纹、没有外投影。墨色与线色按 ink 透明度混合，
+ * 落在液态玻璃或纯色面上都随底色自然取暖，明暗主题共用同一套比例。
+ * Widget 卡片仍是唯一的“实体物件”（白卡 + hairline，与 iframe 内令牌同值）。
+ * ═══ */
+
+.note-preview-shell {
+  --rd-ink: var(--text-title);
+  --rd-body: var(--text-body);
+  --rd-2: var(--text-muted);
+  --rd-3: var(--text-light);
+  --rd-accent: var(--color-ready-orange);
+  --rd-hair: color-mix(in srgb, var(--text-title) 9%, transparent);
+  --rd-hair-strong: color-mix(in srgb, var(--text-title) 20%, transparent);
+  --rd-wash: color-mix(in srgb, var(--text-title) 2.5%, transparent);
+  --rd-well: color-mix(in srgb, var(--text-title) 3%, transparent);
+  --rd-object: #FFFFFF;
+  --rd-object-line: #E8E5DE;
+  --rd-mono: var(--font-mono);
+  --rd-ease: cubic-bezier(0.2, 0, 0, 1);
+
+  gap: 22px;
+  color: var(--rd-body);
+  font-feature-settings: 'kern', 'palt' 0;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+html[data-theme='dark'] .note-preview-shell {
+  --rd-hair: color-mix(in srgb, var(--text-title) 11%, transparent);
+  --rd-hair-strong: color-mix(in srgb, var(--text-title) 24%, transparent);
+  --rd-wash: color-mix(in srgb, var(--text-title) 3.5%, transparent);
+  --rd-well: color-mix(in srgb, var(--text-title) 4.5%, transparent);
+  --rd-object: #202124;
+  --rd-object-line: #333538;
+}
+
+.note-preview-shell ::selection {
+  background: color-mix(in srgb, var(--rd-accent) 20%, transparent);
+}
+
+/* ─── 竖向节奏：块间 16，块内元素自己管理上下空间 ─── */
+.note-preview-shell .note-preview-body {
+  gap: 16px;
+}
+
+.note-preview-shell .note-preview-render-block > :first-child {
+  margin-top: 0;
+}
+
+.note-preview-shell .note-preview-render-block > :last-child {
+  margin-bottom: 0;
+}
+
+/* ─── 标题：500-600 的从容字重，负字距只给大字 ─── */
+.note-preview-shell .note-preview-markdown-h1,
+.note-preview-shell .note-preview-markdown-h2,
+.note-preview-shell .note-preview-markdown-h3,
+.note-preview-shell .note-preview-markdown-h4 {
+  color: var(--rd-ink);
+  font-weight: 600;
+  text-wrap: balance;
+  scroll-margin-top: 24px;
+}
+
+.note-preview-shell .note-preview-markdown-h1 {
+  margin: 0 0 24px;
+  font-size: 34px;
+  line-height: 44px;
+  letter-spacing: -0.025em;
+}
+
+.note-preview-shell .note-preview-markdown-h2 {
+  margin: 56px 0 16px;
+  font-size: 22px;
+  line-height: 32px;
+  letter-spacing: -0.014em;
+}
+
+.note-preview-shell .note-preview-markdown-h3 {
+  margin: 40px 0 12px;
+  font-size: 17px;
+  line-height: 26px;
+  letter-spacing: -0.006em;
+}
+
+.note-preview-shell .note-preview-markdown-h4 {
+  margin: 32px 0 8px;
+  font-size: 15px;
+  line-height: 24px;
+}
+
+.note-preview-shell .note-preview-render-block > .note-preview-markdown-h2:first-child {
+  margin-top: 40px;
+}
+
+.note-preview-shell .note-preview-render-block > .note-preview-markdown-h3:first-child,
+.note-preview-shell .note-preview-render-block > .note-preview-markdown-h4:first-child {
+  margin-top: 24px;
+}
+
+/* ─── 文首：标题 → 引言（standfirst）→ 一条 hairline → 正文 ───
+ * 预览按顶层节点切块，标题与引言在相邻的两个渲染块里，用 :has() 跨块识别。 */
+.note-preview-shell .note-preview-body > .note-preview-render-block:first-child > .note-preview-markdown-h1:only-child {
+  margin: 0;
+  padding-bottom: 32px;
+  border-bottom: 1px solid var(--rd-hair);
+}
+
+.note-preview-shell .note-preview-body > .note-preview-render-block:first-child:has(> .note-preview-markdown-h1:only-child) {
+  margin-bottom: 24px;
+}
+
+.note-preview-shell .note-preview-body > .note-preview-render-block:first-child:has(> .note-preview-markdown-h1:only-child):has(+ .note-preview-render-block > .note-preview-markdown-quote:only-child) {
+  margin-bottom: 0;
+}
+
+.note-preview-shell .note-preview-body > .note-preview-render-block:first-child:has(+ .note-preview-render-block > .note-preview-markdown-quote:only-child) > .note-preview-markdown-h1:only-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.note-preview-shell .note-preview-body > .note-preview-render-block:first-child:has(> .note-preview-markdown-h1:only-child) + .note-preview-render-block {
+  margin-bottom: 24px;
+}
+
+.note-preview-shell .note-preview-body > .note-preview-render-block:first-child:has(> .note-preview-markdown-h1:only-child) + .note-preview-render-block > .note-preview-markdown-quote:only-child {
+  margin: 0;
+  padding: 0 0 32px;
+  border-bottom: 1px solid var(--rd-hair);
+  color: var(--rd-2);
+}
+
+.note-preview-shell .note-preview-body > .note-preview-render-block:first-child:has(> .note-preview-markdown-h1:only-child) + .note-preview-render-block > .note-preview-markdown-quote:only-child::before {
+  display: none;
+}
+
+.note-preview-shell .note-preview-body > .note-preview-render-block:first-child:has(> .note-preview-markdown-h1:only-child) + .note-preview-render-block > .note-preview-markdown-quote:only-child > .note-preview-markdown-p {
+  margin: 0;
+  font-size: 18px;
+  line-height: 30px;
+}
+
+/* ─── 正文 ─── */
+.note-preview-shell .note-preview-markdown-p {
+  margin: 0 0 16px;
+  font-size: 15px;
+  line-height: 28px;
+  text-wrap: pretty;
+}
+
+.note-preview-shell strong {
+  color: var(--rd-ink);
+  font-weight: 600;
+}
+
+.note-preview-shell .note-preview-markdown-em {
+  font-style: italic;
+}
+
+/* 中文强调用着重号：Ready 的点母题落在正文里，文字仍穿墨色，只有点是橘红。 */
+.note-preview-shell .note-preview-markdown-em[data-cjk-emphasis='true'] {
+  font-style: normal;
+  -webkit-text-emphasis: filled dot var(--rd-accent);
+  text-emphasis: filled dot var(--rd-accent);
+  -webkit-text-emphasis-position: under right;
+  text-emphasis-position: under right;
+}
+
+.note-preview-shell .note-preview-markdown-p:has(> .note-preview-markdown-em:only-child) {
+  margin-top: -4px;
+  color: var(--rd-2);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.note-preview-shell .note-preview-markdown-p:has(> .note-preview-markdown-em:only-child) .note-preview-markdown-em {
+  font-style: normal;
+  -webkit-text-emphasis: none;
+  text-emphasis: none;
+}
+
+/* ─── 链接：墨色文字 + 橘红细下划线，与 Agent 回复里的链接同一套 ↗ 记号 ─── */
+.note-preview-shell .note-preview-markdown-link {
+  display: inline;
+  color: var(--rd-ink);
+  text-decoration-line: underline;
+  text-decoration-color: color-mix(in srgb, var(--rd-accent) 46%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.26em;
+  transition: color 160ms var(--rd-ease), text-decoration-color 160ms var(--rd-ease);
+}
+
+.note-preview-shell .note-preview-markdown-link > svg {
+  display: none;
+}
+
+.note-preview-shell .note-preview-markdown-link::after {
+  content: '↗';
+  display: inline-block;
+  margin-left: 2px;
+  color: var(--rd-3);
+  font-size: 0.78em;
+  transform: translateY(-0.1em);
+  transition: color 160ms var(--rd-ease), transform 160ms var(--rd-ease);
+}
+
+.note-preview-shell .note-preview-markdown-link:hover {
+  color: var(--rd-accent);
+  text-decoration-color: var(--rd-accent);
+  text-decoration-line: underline;
+}
+
+.note-preview-shell .note-preview-markdown-link:hover::after {
+  color: var(--rd-accent);
+  transform: translate(1px, -0.18em);
+}
+
+.note-preview-shell .note-preview-markdown-link:focus-visible {
+  outline: 1.5px solid var(--rd-accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* ─── 行内代码与代码块 ─── */
+.note-preview-shell :not(pre) > .note-preview-markdown-code {
+  padding: 0.14em 0.42em;
+  border-radius: 5px;
+  background: var(--rd-well);
+  color: var(--rd-ink);
+  font-family: var(--rd-mono);
+  font-size: 0.84em;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+.note-preview-shell .note-preview-code-block {
+  margin: 4px 0 18px;
+}
+
+.note-preview-shell .note-preview-markdown-pre {
+  margin: 4px 0 18px;
+  padding: 16px 18px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--rd-well);
+  scrollbar-width: thin;
+}
+
+.note-preview-shell .note-preview-code-block .note-preview-markdown-pre {
+  margin: 0;
+  padding-right: 52px;
+}
+
+.note-preview-shell .note-preview-markdown-pre .note-preview-markdown-code {
+  color: var(--rd-body);
+  font-family: var(--rd-mono);
+  font-size: 12.5px;
+  line-height: 1.72;
+}
+
+.note-preview-shell .note-preview-code-copy-button {
+  top: 10px;
+  right: 10px;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--rd-3);
+  opacity: 0;
+  transition: opacity 160ms var(--rd-ease), background-color 160ms var(--rd-ease), color 160ms var(--rd-ease);
+}
+
+.note-preview-shell .note-preview-code-block:hover .note-preview-code-copy-button,
+.note-preview-shell .note-preview-code-copy-button:focus-visible,
+.note-preview-shell .note-preview-code-copy-button[data-ready-code-copied='true'] {
+  opacity: 1;
+}
+
+.note-preview-shell .note-preview-code-copy-button:hover {
+  border: 0;
+  background: var(--rd-wash);
+  color: var(--rd-ink);
+  transform: none;
+}
+
+.note-preview-shell .note-preview-code-copy-button:focus-visible {
+  outline: 1.5px solid var(--rd-accent);
+  outline-offset: 1px;
+}
+
+.note-preview-shell .note-preview-code-copy-button[data-ready-code-copied='true'] {
+  border: 0;
+  background: transparent;
+  color: var(--rd-ink);
+}
+
+/* ─── 引用：点阵竖线（完整正圆）+ 稍大的正文，像页边的批注 ─── */
+/* ─── 引用：点阵竖线落在正文左缘上，引文在其后缩进一档 ─── */
+.note-preview-shell .note-preview-markdown-quote {
+  position: relative;
+  margin: 8px 0 24px;
+  padding: 0 0 0 24px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--rd-2);
+}
+
+.note-preview-shell .note-preview-markdown-quote::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 4px;
+  background: radial-gradient(circle, var(--rd-hair-strong) 1.15px, transparent 1.55px) 0 0 / 4px 7px repeat-y;
+}
+
+.note-preview-shell .note-preview-markdown-quote > .note-preview-markdown-p {
+  margin-bottom: 8px;
+  font-size: 16px;
+  line-height: 28px;
+}
+
+.note-preview-shell .note-preview-markdown-quote > :last-child {
+  margin-bottom: 0;
+}
+
+/* ─── 分隔：一行细点阵，代替实线 ─── */
+.note-preview-shell .note-preview-markdown-hr {
+  height: 4px;
+  margin: 40px 0;
+  border: 0;
+  background:
+    radial-gradient(circle, var(--rd-hair-strong) 1px, transparent 1.4px) center / 8px 4px repeat-x;
+}
+
+/* ─── 列表：圆点与序号都退到弱墨，序号走 mono ─── */
+/* ─── 列表：标记落在正文左缘的固定 24px 槽里，条目文字统一从槽后起排 ───
+ * 圆点与 mono 序号都在同一个槽内（序号右对齐），无序、有序与任务列表的文字左缘一致。 */
+.note-preview-shell .note-preview-markdown-ul,
+.note-preview-shell .note-preview-markdown-ol {
+  margin: 0 0 16px;
+  padding-left: 0;
+  list-style: none;
+  font-size: 15px;
+  line-height: 28px;
+}
+
+.note-preview-shell .note-preview-markdown-li {
+  position: relative;
+  margin-bottom: 4px;
+  padding-left: 24px;
+}
+
+.note-preview-shell .note-preview-markdown-ul > .note-preview-markdown-li::before {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 12px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--rd-3);
+}
+
+.note-preview-shell .note-preview-markdown-ul .note-preview-markdown-ul > .note-preview-markdown-li::before {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--rd-3);
+}
+
+.note-preview-shell .note-preview-markdown-ol > .note-preview-markdown-li::before {
+  content: counter(list-item) '.';
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 16px;
+  color: var(--rd-2);
+  font-family: var(--rd-mono);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.note-preview-shell .note-preview-markdown-li > .note-preview-markdown-ul,
+.note-preview-shell .note-preview-markdown-li > .note-preview-markdown-ol {
+  margin: 4px 0 0;
+  padding-left: 0;
+}
+
+.note-preview-shell .note-preview-markdown-ul.contains-task-list {
+  padding-left: 0;
+}
+
+.note-preview-shell .note-preview-markdown-li.task-list-item {
+  gap: 9px;
+  padding-left: 0;
+}
+
+.note-preview-shell .note-preview-markdown-li.task-list-item::before {
+  display: none;
+}
+
+.note-preview-shell .note-preview-markdown-li.task-list-item > input[type='checkbox'] {
+  position: relative;
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  margin: 6.5px 0 0;
+  border: 1.5px solid var(--rd-hair-strong);
+  border-radius: 4.5px;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+  opacity: 1;
+}
+
+.note-preview-shell .note-preview-markdown-li.task-list-item > input[type='checkbox']:checked {
+  border-color: var(--rd-ink);
+  background-color: var(--rd-ink);
+}
+
+.note-preview-shell .note-preview-markdown-li.task-list-item > input[type='checkbox']:checked::after {
+  content: '';
+  position: absolute;
+  left: 3.6px;
+  top: 0.8px;
+  width: 4px;
+  height: 7.5px;
+  border: solid var(--bg-primary);
+  border-width: 0 1.6px 1.6px 0;
+  transform: rotate(42deg);
+}
+
+.note-preview-shell .note-preview-markdown-li.task-list-item:has(> input[type='checkbox']:checked) {
+  color: var(--rd-3);
+}
+
+/* ─── 表格：三线表——顶线、表头线、底线，行间只留极淡的发丝 ─── */
+.note-preview-shell .note-preview-table-scroll {
+  margin: 6px 0 20px;
+  border: 0;
+  border-top: 1px solid var(--rd-hair-strong);
+  border-bottom: 1px solid var(--rd-hair-strong);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  scrollbar-gutter: auto;
+}
+
+.note-preview-shell .note-preview-markdown-table {
+  min-width: 520px;
+  font-size: 13.5px;
+  line-height: 1.65;
+}
+
+.note-preview-shell .note-preview-markdown-thead {
+  background: transparent;
+}
+
+.note-preview-shell .note-preview-markdown-th {
+  padding: 11px 14px 10px;
+  border-bottom: 1px solid var(--rd-hair-strong);
+  color: var(--rd-2);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.note-preview-shell .note-preview-markdown-td {
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--rd-hair);
+  color: var(--rd-body);
+}
+
+.note-preview-shell .note-preview-markdown-td:first-child {
+  color: var(--rd-ink);
+  font-weight: 500;
+}
+
+.note-preview-shell .note-preview-markdown-th:first-child,
+.note-preview-shell .note-preview-markdown-td:first-child {
+  padding-left: 2px;
+}
+
+.note-preview-shell .note-preview-markdown-th:last-child,
+.note-preview-shell .note-preview-markdown-td:last-child {
+  padding-right: 2px;
+}
+
+.note-preview-shell .note-preview-markdown-th[style*='text-align:right'],
+.note-preview-shell .note-preview-markdown-td[style*='text-align:right'],
+.note-preview-shell .note-preview-markdown-th[style*='text-align: right'],
+.note-preview-shell .note-preview-markdown-td[style*='text-align: right'] {
+  font-family: var(--rd-mono);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.note-preview-shell .note-preview-markdown-th[style*='text-align:right'],
+.note-preview-shell .note-preview-markdown-th[style*='text-align: right'] {
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.note-preview-shell .note-preview-markdown-tbody .note-preview-markdown-tr:nth-child(even) {
+  background: transparent;
+}
+
+.note-preview-shell .note-preview-markdown-tbody .note-preview-markdown-tr {
+  transition: background-color 140ms var(--rd-ease);
+}
+
+.note-preview-shell .note-preview-markdown-tbody .note-preview-markdown-tr:hover {
+  background: var(--rd-wash);
+}
+
+/* ─── 折叠块：上下 hairline 的手风琴，箭头自绘 ─── */
+.note-preview-shell .note-preview-details {
+  margin: 4px 0 18px;
+  border: 0;
+  border-top: 1px solid var(--rd-hair);
+  border-bottom: 1px solid var(--rd-hair);
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
+}
+
+.note-preview-shell .note-preview-details-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 2px;
+  color: var(--rd-ink);
+  font-size: 14.5px;
+  font-weight: 600;
+  list-style: none;
+}
+
+.note-preview-shell .note-preview-details-summary::-webkit-details-marker {
+  display: none;
+}
+
+.note-preview-shell .note-preview-details-summary::before {
+  content: '';
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin: 0 3px 2px 1px;
+  border: solid var(--rd-2);
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(-45deg);
+  transition: transform 200ms var(--rd-ease);
+}
+
+.note-preview-shell .note-preview-details[open] > .note-preview-details-summary::before {
+  margin-bottom: 4px;
+  transform: rotate(45deg);
+}
+
+.note-preview-shell .note-preview-details-summary:hover {
+  color: var(--rd-ink);
+}
+
+.note-preview-shell .note-preview-details-summary:focus-visible {
+  outline: 1.5px solid var(--rd-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.note-preview-shell .note-preview-details-body {
+  gap: 12px;
+  padding: 0 2px 16px 22px;
+}
+
+.note-preview-shell .note-preview-details-body .note-preview-markdown-pre {
+  border: 0;
+  background: var(--rd-well);
+}
+
+.note-preview-shell .note-preview-markdown-source-rendered {
+  margin: 4px 0 18px;
+  padding: 18px 20px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--rd-well);
+}
+
+/* ─── Mermaid：与卡片同底同线 ─── */
+.note-preview-shell .note-preview-mermaid {
+  margin: 6px 0 20px;
+  padding: 20px;
+  border: 1px solid var(--rd-object-line);
+  border-radius: 16px;
+  background: var(--rd-object);
+}
+
+.note-preview-shell .note-preview-mermaid__svg :is(.node rect, .cluster rect, rect.actor) {
+  rx: 8px;
+  ry: 8px;
+}
+
+.note-preview-shell .note-preview-mermaid__loading {
+  color: var(--rd-3);
+  font-family: var(--rd-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+
+/* ─── 图片与媒体 ─── */
+.note-preview-shell .note-preview-image:not(.note-preview-image--inline) {
+  border-radius: 14px;
+  outline: 1px solid var(--rd-hair);
+  outline-offset: -1px;
+}
+
+.note-preview-shell .note-preview-markdown-p > .note-preview-image:not(.note-preview-image--inline) {
+  margin: 6px 0;
+}
+
+.note-preview-shell .note-preview-media-block {
+  gap: 10px;
+}
+
+.note-preview-shell .note-preview-image-caption {
+  color: var(--rd-3);
+  font-family: var(--rd-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  line-height: 1.6;
+}
+
+.note-preview-shell .note-preview-youtube-thumb-shell {
+  border-radius: 16px;
+  background: var(--rd-well);
+}
+
+.note-preview-shell .note-preview-youtube-title {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.note-preview-shell .note-preview-youtube-subline {
+  color: var(--rd-3);
+  font-family: var(--rd-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.note-preview-shell .note-preview-embed-caption {
+  color: var(--rd-2);
+  font-size: 12.5px;
+}
+
+/* ─── 属性区（frontmatter）：规格表式的 mono 键 + hairline 行 ─── */
+.note-preview-shell .note-preview-properties {
+  gap: 0;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--rd-hair);
+}
+
+.note-preview-shell .note-preview-property-row {
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 16px;
+  padding: 7px 0;
+}
+
+.note-preview-shell .note-preview-property-row + .note-preview-property-row {
+  border-top: 1px solid var(--rd-hair);
+}
+
+.note-preview-shell .note-preview-property-key {
+  padding-top: 3px;
+  color: var(--rd-3);
+  font-family: var(--rd-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  line-height: 1.6;
+  text-transform: uppercase;
+}
+
+.note-preview-shell .note-preview-property-value {
+  color: var(--rd-body);
+  font-size: 13.5px;
+  line-height: 1.7;
+}
+
+.note-preview-shell .note-preview-link-button {
+  color: var(--rd-ink);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--rd-accent) 46%, transparent);
+  text-underline-offset: 0.26em;
+}
+
+.note-preview-shell .note-preview-link-button > svg {
+  color: var(--rd-3);
+}
+
+/* 标签芯片：hairline 胶囊 + mono；复制成功只换图标与墨色，不借用功能蓝/绿 */
+.note-preview-shell .note-preview-chip {
+  gap: 5px;
+  padding: 5px 10px 5px 11px;
+  border: 1px solid var(--rd-hair-strong);
+  background: transparent;
+  color: var(--rd-2);
+  font-family: var(--rd-mono);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  transition: border-color 160ms var(--rd-ease), color 160ms var(--rd-ease), background-color 160ms var(--rd-ease);
+}
+
+.note-preview-shell .note-preview-chip > svg {
+  color: var(--rd-3);
+}
+
+.note-preview-shell .note-preview-chip:hover {
+  border-color: color-mix(in srgb, var(--rd-ink) 34%, transparent);
+  background: var(--rd-wash);
+  color: var(--rd-ink);
+  filter: none;
+  transform: none;
+}
+
+.note-preview-shell .note-preview-chip[data-copied='true'] {
+  border-color: var(--rd-ink);
+  color: var(--rd-ink);
+}
+
+.note-preview-shell .note-preview-chip[data-copied='true'] > svg {
+  color: var(--rd-accent);
+}
+
+/* ─── 预览提示与损坏卡 ─── */
+.note-preview-shell .note-preview-warning {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--rd-accent) 7%, transparent);
+  color: var(--rd-body);
+  font-size: 12.5px;
+}
+
+.note-preview-shell .note-preview-warning::before {
+  content: '';
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--rd-accent);
+  transform: translateY(-1px);
+}
+
+.note-preview-shell .note-preview-widget-error {
+  margin: 6px 0 20px;
+  padding: 20px 22px;
+  border: 1px solid var(--rd-object-line);
+  border-radius: 16px;
+  background: var(--rd-object);
+  color: var(--rd-body);
+}
+
+.note-preview-shell .note-preview-widget-error__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: var(--rd-ink);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.note-preview-shell .note-preview-widget-error__title::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--rd-accent);
+}
+
+.note-preview-shell .note-preview-widget-error__body {
+  color: var(--rd-2);
+  font-family: var(--rd-mono);
+  font-size: 11.5px;
+  line-height: 1.7;
+  word-break: break-word;
+}
+
+.note-preview-shell .note-preview-widget-error__actions {
+  margin-top: 14px;
+  color: var(--rd-3);
+}
+
+.note-preview-shell .note-preview-repair-button {
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--rd-hair-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--rd-ink);
+  font-size: 12px;
+  font-weight: 500;
+  transition: background-color 160ms var(--rd-ease), border-color 160ms var(--rd-ease);
+}
+
+.note-preview-shell .note-preview-repair-button:hover {
+  border-color: color-mix(in srgb, var(--rd-ink) 40%, transparent);
+  background: var(--rd-wash);
+}
+
+/* ─── 电子书模式：更宽松的书页节奏，居中标题 ─── */
+.note-preview-shell--ebook .note-preview-markdown-h1 {
+  margin: 10px 0 30px;
+  font-size: 30px;
+  text-align: center;
+}
+
+.note-preview-shell--ebook .note-preview-markdown-p {
+  font-size: 16px;
+  line-height: 2;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .note-preview-shell .note-preview-markdown-link,
+  .note-preview-shell .note-preview-markdown-link::after,
+  .note-preview-shell .note-preview-details-summary::before,
+  .note-preview-shell .note-preview-code-copy-button,
+  .note-preview-shell .note-preview-chip {
+    transition: none;
+  }
+}

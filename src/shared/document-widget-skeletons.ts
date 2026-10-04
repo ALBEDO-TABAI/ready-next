@@ -10,11 +10,16 @@ import {
 } from './document-widget-relation-graph'
 import {
   resolveWidgetTone,
-  resolveWidgetToneStyle,
-  widgetStatusDotColor,
   widgetVar,
 } from './document-widget-theme'
 import { compileReadyInfoCard } from './document-widget-info-card'
+import {
+  renderWidgetChrome,
+  renderWidgetDotList,
+  renderWidgetFoot,
+  renderWidgetHeading,
+  renderWidgetLabelRow,
+} from './document-widget-chassis'
 
 export type WidgetSize =
   | 'square_card'
@@ -116,7 +121,6 @@ const INK = widgetVar('ink')
 const INK2 = widgetVar('ink2')
 const INK_BODY = widgetVar('inkBody')
 const HAIR = widgetVar('hair')
-const CARD = widgetVar('card')
 const ACCENT = widgetVar('accent')
 const MONO = "var(--widget-font-mono, ui-monospace, 'SF Mono', monospace)"
 
@@ -158,33 +162,30 @@ const dualCompareProps = z.object({
   }),
 })
 
-function renderCompareColumn(side: { heading: string; items: string[]; ramp: WidgetRampId }): string {
-  const tone = resolveWidgetToneStyle(side.ramp)
-  const items = side.items.map((item) => `<li style="margin:6px 0;color:${INK_BODY};">${escapeHtml(item)}</li>`).join('')
-  return `<div class="stack" style="gap:10px;padding:16px;border-radius:12px;background:${tone.surface};border:1px solid ${tone.border};">
-    <div style="display:flex;align-items:center;gap:8px;">
-      <span style="width:8px;height:8px;border-radius:50%;background:${tone.marker};flex:none;"></span>
-      <div style="font-weight:600;color:${tone.title};">${escapeHtml(side.heading)}</div>
+function renderCompareColumn(side: { heading: string; items: string[]; ramp: WidgetRampId }, position: 'left' | 'right', rule: string): string {
+  const tone = resolveWidgetTone(side.ramp)
+  const marker = tone === 'ok' ? widgetVar('ok') : tone === 'accent' ? ACCENT : INK
+  return `<section data-compare-side="${position}" class="span-6 stack" style="position:relative;gap:12px;min-width:0;">
+    ${rule}
+    <div style="display:flex;align-items:center;gap:10px;">
+      <span class="dot" style="width:6px;height:6px;background:${marker};"></span>
+      <div style="font-size:15px;font-weight:600;line-height:22px;color:${INK};">${escapeHtml(side.heading)}</div>
     </div>
-    <ul style="margin:0;padding-left:18px;">${items}</ul>
-  </div>`
+    ${renderWidgetDotList(side.items, { size: 13.5, gap: 8 })}
+  </section>`
 }
 
 function compileDualCompare(props: z.infer<typeof dualCompareProps>): string {
-  const divider = props.divider_style === 'vs_badge'
-    ? `<div class="badge" style="align-self:center;background:${INK};color:${CARD};border-color:transparent;">VS</div>`
-    : props.divider_style === 'line'
-      ? `<div style="align-self:stretch;width:1px;background:${widgetVar('hairV')};"></div>`
-      : ''
-  return `<div class="card stack" style="gap:18px;">
-    <div class="stack" style="gap:6px;">
-      <div class="title">${escapeHtml(props.title)}</div>
-      ${props.subtitle ? `<div class="subtitle">${escapeHtml(props.subtitle)}</div>` : ''}
-    </div>
-    <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:14px;align-items:stretch;">
-      ${renderCompareColumn(props.left)}
-      ${divider}
-      ${renderCompareColumn(props.right)}
+  // 两栏对齐 12 栏网格的第 1、7 栏；分隔只用栏距中线上的一条竖 hairline（标题已写明对比，不再画 VS 徽章）。
+  const rule = props.divider_style === 'none'
+    ? ''
+    : `<span aria-hidden="true" style="position:absolute;left:-12px;top:0;bottom:0;width:1px;background:${HAIR};"></span>`
+  return `<div class="card stack" style="gap:20px;">
+    ${renderWidgetChrome({ kicker: 'COMPARE', meta: `${props.left.items.length} / ${props.right.items.length}` })}
+    ${renderWidgetHeading(props.title, props.subtitle)}
+    <div data-fill="grid" class="grid">
+      ${renderCompareColumn(props.left, 'left', '')}
+      ${renderCompareColumn(props.right, 'right', rule)}
     </div>
   </div>`
 }
@@ -205,28 +206,32 @@ const metricGridProps = z.object({
   columns: z.union([z.literal(2), z.literal(3), z.literal(4)]).optional(),
 })
 
+/** 指标在 12 栏里的跨度：≤4 项一行排开，5–6 项三列。 */
+function metricSpan(count: number, columns?: number): number {
+  const cols = columns ?? (count <= 4 ? count : 3)
+  return 12 / Math.max(1, Math.min(4, cols))
+}
+
 function compileMetricGrid(props: z.infer<typeof metricGridProps>): string {
-  const cols = props.columns ?? (props.metrics.length <= 2 ? 2 : props.metrics.length <= 4 ? 2 : 3)
+  const span = metricSpan(props.metrics.length, props.columns)
+  // 指标面板：网格对齐 + 留白分组，不画格线与外框；数字按 Ready kpi-num 用 mono 500，
+  // 只有被标记的指标点亮橘红；涨跌不猜好坏，统一墨色箭头。
   const cells = props.metrics.map((metric) => {
-    const tone = resolveWidgetToneStyle(metric.ramp)
     const isHot = resolveWidgetTone(metric.ramp) === 'accent'
     const arrow = metric.delta_direction === 'up' ? '↑' : metric.delta_direction === 'down' ? '↓' : metric.delta_direction === 'flat' ? '→' : ''
-    const deltaColor = metric.delta_direction === 'up' ? widgetVar('ok') : INK2
     const deltaLine = metric.delta
-      ? `<div class="num" style="font-size:12px;color:${deltaColor};">${arrow ? `${arrow} ` : ''}${escapeHtml(metric.delta)}</div>`
+      ? `<div class="num" style="margin-top:8px;font-size:11.5px;line-height:16px;letter-spacing:0.02em;color:${INK2};">${arrow ? `<span style="color:${isHot ? ACCENT : INK};margin-right:4px;">${arrow}</span>` : ''}${escapeHtml(metric.delta)}</div>`
       : ''
-    return `<div class="stack" style="gap:6px;padding:14px;border-radius:12px;background:${tone.surface};border:1px solid ${tone.border};">
+    return `<div data-metric class="span-${span}" style="min-width:0;">
       <div class="label" style="font-size:10px;">${escapeHtml(metric.label)}</div>
-      <div class="num" style="font-size:32px;font-weight:600;color:${isHot ? ACCENT : INK};line-height:1;">${escapeHtml(metric.value)}${metric.unit ? `<span style="font-size:14px;font-weight:500;margin-left:4px;color:${INK2};">${escapeHtml(metric.unit)}</span>` : ''}</div>
+      <div class="num" style="margin-top:10px;font-size:34px;font-weight:500;letter-spacing:-0.02em;line-height:36px;color:${isHot ? ACCENT : INK};white-space:nowrap;">${escapeHtml(metric.value)}${metric.unit ? `<span style="font-size:13px;letter-spacing:0;margin-left:4px;color:${INK2};">${escapeHtml(metric.unit)}</span>` : ''}</div>
       ${deltaLine}
     </div>`
   }).join('')
-  return `<div class="card stack" style="gap:16px;">
-    <div class="stack" style="gap:4px;">
-      <div class="title">${escapeHtml(props.title)}</div>
-      ${props.period ? `<div class="subtitle">${escapeHtml(props.period)}</div>` : ''}
-    </div>
-    <div style="display:grid;grid-template-columns:repeat(${cols}, minmax(0,1fr));gap:12px;">${cells}</div>
+  return `<div class="card stack" style="gap:20px;">
+    ${renderWidgetChrome({ kicker: 'METRICS', meta: props.period || `${props.metrics.length} 项` })}
+    ${renderWidgetHeading(props.title)}
+    <div data-fill="grid" class="grid keep-pairs" style="row-gap:28px;padding-top:4px;">${cells}</div>
   </div>`
 }
 
@@ -245,28 +250,43 @@ const verticalTimelineProps = z.object({
   show_connector: z.boolean().default(true),
 })
 
+const TIMELINE_STATUS_LABEL: Record<string, string> = {
+  active: '进行中',
+  blocked: '受阻',
+}
+
+function timelineMarkerClass(status: string): string {
+  if (status === 'active') return 'dot dot--active'
+  if (status === 'done') return 'dot dot--done'
+  if (status === 'blocked') return 'dot dot--blocked'
+  return 'dot dot--pending'
+}
+
 function compileVerticalTimeline(props: z.infer<typeof verticalTimelineProps>): string {
-  const items = props.events.map((event, index) => {
-    const dotColor = widgetStatusDotColor(event.status ?? 'pending')
+  const doneCount = props.events.filter((event) => event.status === 'done').length
+  // 时间落在标签栏（2 栏），节点与事件落在内容栏；导轨是内容栏左缘的一条 hairline。
+  const rows = props.events.map((event, index) => {
+    const status = event.status ?? 'pending'
     const isLast = index === props.events.length - 1
-    const connector = props.show_connector && !isLast
-      ? `<div style="position:absolute;left:6px;top:18px;bottom:-12px;width:1px;background:${HAIR};"></div>`
+    const rail = props.show_connector && !isLast
+      ? `<span aria-hidden="true" style="position:absolute;left:3.5px;top:16px;bottom:-26px;width:1px;background:${HAIR};"></span>`
       : ''
-    const body = event.body ? `<div class="subtitle" style="margin-top:4px;">${escapeRichText(event.body)}</div>` : ''
-    return `<div style="position:relative;padding-left:28px;padding-bottom:${isLast ? '0' : '12px'};">
-      ${connector}
-      <div style="position:absolute;left:0;top:4px;width:13px;height:13px;border-radius:50%;background:${dotColor};border:2px solid ${CARD};"></div>
-      <div class="num" style="font-size:12px;color:${INK2};">${escapeHtml(event.time)}</div>
-      <div style="font-weight:600;color:${INK};">${escapeHtml(event.heading)}</div>
-      ${body}
-    </div>`
+    const statusLabel = TIMELINE_STATUS_LABEL[status]
+      ? `<span class="label" style="font-size:9.5px;margin-left:10px;color:${status === 'active' ? ACCENT : INK};">${TIMELINE_STATUS_LABEL[status]}</span>`
+      : ''
+    const body = event.body ? `<div style="margin-top:2px;font-size:13px;line-height:20px;color:${INK2};text-wrap:pretty;">${escapeRichText(event.body)}</div>` : ''
+    return `<div data-timeline-event="${status}" class="num span-2" style="padding-top:3px;font-size:11.5px;line-height:16px;color:${status === 'pending' ? widgetVar('ink3') : INK2};white-space:nowrap;">${escapeHtml(event.time)}</div>
+      <div class="span-10" style="position:relative;min-width:0;padding-left:24px;">
+        <span class="${timelineMarkerClass(status)}" style="position:absolute;left:0;top:7px;width:8px;height:8px;"></span>
+        ${rail}
+        <div style="display:flex;align-items:baseline;flex-wrap:wrap;font-size:14.5px;font-weight:600;line-height:22px;color:${status === 'pending' ? INK_BODY : INK};">${escapeHtml(event.heading)}${statusLabel}</div>
+        ${body}
+      </div>`
   }).join('')
-  return `<div class="card stack" style="gap:14px;">
-    <div class="stack" style="gap:4px;">
-      <div class="title">${escapeHtml(props.title)}</div>
-      ${props.axis_label ? `<div class="subtitle">${escapeHtml(props.axis_label)}</div>` : ''}
-    </div>
-    <div>${items}</div>
+  return `<div class="card stack" style="gap:20px;">
+    ${renderWidgetChrome({ kicker: 'TIMELINE', meta: doneCount > 0 ? `${doneCount} / ${props.events.length} 完成` : `${props.events.length} 节点` })}
+    ${renderWidgetHeading(props.title, props.axis_label)}
+    <div data-fill="grid" class="grid" style="row-gap:24px;padding-top:4px;">${rows}</div>
   </div>`
 }
 
@@ -295,15 +315,15 @@ function compileHero(hero: z.infer<typeof photoNoteProps>['hero']): string {
   const aspect = hero.aspect || '4/3'
   const wellBg = widgetVar('canvas')
   if (hero.type === 'image' && hero.src) {
-    return `<div style="aspect-ratio:${escapeAttr(aspect)};border-radius:18px;overflow:hidden;background:${wellBg};"><img src="${escapeAttr(hero.src)}" alt="" style="display:block;width:100%;height:100%;object-fit:cover;"/></div>`
+    return `<div style="aspect-ratio:${escapeAttr(aspect)};border-radius:12px;overflow:hidden;background:${wellBg};"><img src="${escapeAttr(hero.src)}" alt="" style="display:block;width:100%;height:100%;object-fit:cover;"/></div>`
   }
   if (hero.type === 'svg_illustration' && hero.svg) {
-    return `<div style="aspect-ratio:${escapeAttr(aspect)};border-radius:18px;overflow:hidden;background:${wellBg};display:flex;align-items:center;justify-content:center;">${hero.svg}</div>`
+    return `<div style="aspect-ratio:${escapeAttr(aspect)};border-radius:12px;overflow:hidden;background:${wellBg};display:flex;align-items:center;justify-content:center;">${hero.svg}</div>`
   }
   if (hero.type === 'emoji_block') {
-    return `<div data-ready-media-placeholder style="aspect-ratio:${escapeAttr(aspect)};border-radius:18px;background:${wellBg};display:flex;align-items:center;justify-content:center;gap:9px;"><span class="dot dot--active"></span><span class="label">视觉占位</span></div>`
+    return `<div data-ready-media-placeholder style="aspect-ratio:${escapeAttr(aspect)};border-radius:12px;background:radial-gradient(circle, ${widgetVar('dcRest')} 1.4px, transparent 1.9px) 0 0 / 12px 12px, ${wellBg};display:flex;align-items:center;justify-content:center;gap:9px;"><span class="dot dot--active"></span><span class="label">视觉占位</span></div>`
   }
-  return `<div style="aspect-ratio:${escapeAttr(aspect)};border-radius:18px;background:${wellBg};border:1px dashed ${HAIR};"></div>`
+  return `<div style="aspect-ratio:${escapeAttr(aspect)};border-radius:12px;background:${wellBg};border:1px dashed ${HAIR};"></div>`
 }
 
 function compilePhotoNote(props: z.infer<typeof photoNoteProps>): string {
@@ -311,12 +331,13 @@ function compilePhotoNote(props: z.infer<typeof photoNoteProps>): string {
   const tags = props.tags?.length
     ? `<div style="display:flex;gap:6px;flex-wrap:wrap;">${props.tags.map((tag) => `<span class="badge">#${escapeHtml(tag)}</span>`).join('')}</div>`
     : ''
-  return `<div class="card stack" style="gap:14px;">
-    ${hero}
-    <div class="title">${escapeHtml(props.title)}</div>
-    ${props.body ? `<div style="font-size:15px;line-height:1.7;color:${INK_BODY};">${escapeRichText(props.body)}</div>` : ''}
+  return `<div class="card stack" style="gap:20px;">
+    ${renderWidgetChrome({ kicker: 'NOTE', meta: props.tags?.length ? `${props.tags.length} 标签` : null })}
+    <div data-fill="center">${hero}</div>
+    ${renderWidgetHeading(props.title)}
+    ${props.body ? `<div style="font-size:15px;line-height:26px;color:${INK_BODY};text-wrap:pretty;">${escapeRichText(props.body)}</div>` : ''}
     ${tags}
-    ${props.footer ? `<div class="muted" style="font-size:12px;">${escapeHtml(props.footer)}</div>` : ''}
+    ${renderWidgetFoot(props.footer)}
   </div>`
 }
 
@@ -353,15 +374,18 @@ function compileChartFocus(props: z.infer<typeof chartFocusProps>): string {
     unitLabel: props.chart.unit,
     hot: props.chart.hot,
   })
-  return `<div class="card stack" style="gap:16px;">
-    <div class="stack" style="gap:4px;">
-      <div class="title">${escapeHtml(props.title)}</div>
-      ${props.subtitle ? `<div class="subtitle">${escapeHtml(props.subtitle)}</div>` : ''}
-    </div>
-    <div class="stack" style="gap:8px;">${chartHtml}</div>
-    ${props.insight ? `<div style="display:flex;gap:8px;align-items:baseline;"><span class="label" style="color:${ACCENT};">INSIGHT</span><span style="font-size:13px;color:${INK_BODY};">${escapeHtml(props.insight)}</span></div>` : ''}
-    ${props.source_note ? `<div class="label" style="font-size:10px;">来源 · ${escapeHtml(props.source_note)}</div>` : ''}
+  return `<div class="card stack" style="gap:20px;">
+    ${renderWidgetChrome({ kicker: 'DATA', meta: props.chart.unit ? `单位 · ${props.chart.unit}` : `${props.chart.data.length} 项` })}
+    ${renderWidgetHeading(props.title, props.subtitle)}
+    <div data-fill="center" class="stack" style="gap:8px;">${chartHtml}</div>
+    ${props.insight ? renderChartInsight(props.insight) : ''}
+    ${renderWidgetFoot(props.source_note ? `来源 · ${props.source_note}` : null)}
   </div>`
+}
+
+/** 结论行：标签栏放 mono INSIGHT（卡里唯一的橘红文字），内容栏放结论正文。 */
+export function renderChartInsight(text: string): string {
+  return `<div data-chart-insight>${renderWidgetLabelRow('INSIGHT', `<div style="font-size:14px;line-height:22px;color:${INK};text-wrap:pretty;">${escapeHtml(text)}</div>`, { labelColor: ACCENT })}</div>`
 }
 
 const gridItemSchema = z.object({
@@ -381,28 +405,57 @@ const gridCollectionProps = z.object({
   items: z.array(gridItemSchema).min(2).max(20),
 })
 
-function renderGridItem(item: z.infer<typeof gridItemSchema>, shape: 'square' | 'portrait' | 'free'): string {
-  const tone = resolveWidgetToneStyle(item.ramp)
-  const aspect = shape === 'square' ? '1/1' : shape === 'portrait' ? '3/4' : 'auto'
-  const visual = item.image
-    ? `<img src="${escapeAttr(item.image)}" alt="" style="display:block;width:100%;height:100%;object-fit:cover;"/>`
-    : `<div style="width:14px;height:14px;border-radius:50%;background:${widgetStatusDotColor(item.status ?? 'pending')};"></div>`
-  const statusBorder = item.status === 'done'
-    ? widgetVar('ok')
-    : item.status === 'active' || item.status === 'highlight'
-      ? ACCENT
-      : tone.border
-  return `<div class="stack" style="gap:6px;align-items:center;justify-content:center;text-align:center;padding:12px;border-radius:12px;background:${tone.surface};border:1px solid ${statusBorder};${aspect !== 'auto' ? `aspect-ratio:${aspect};` : ''}">
-    <div style="display:flex;align-items:center;justify-content:center;flex:1;${item.image ? 'width:100%;height:100%;border-radius:8px;overflow:hidden;' : ''}">${visual}</div>
-    ${item.label ? `<div style="font-size:12px;color:${INK};font-weight:600;">${escapeHtml(item.label)}</div>` : ''}
+const GRID_STATUS_LABEL: Record<string, string> = {
+  done: '完成',
+  active: '进行中',
+  highlight: '重点',
+  pending: '未开始',
+}
+
+function gridStatusDotClass(status: string): string {
+  if (status === 'done') return 'dot dot--done'
+  if (status === 'active' || status === 'highlight') return 'dot dot--active'
+  return 'dot dot--pending'
+}
+
+function renderGridItem(
+  item: z.infer<typeof gridItemSchema>,
+  shape: 'square' | 'portrait' | 'free',
+  index: number,
+  showStatus: boolean,
+  span: number,
+): string {
+  const status = item.status ?? 'pending'
+  const emphasized = showStatus && (status === 'active' || status === 'highlight')
+  const lead = showStatus
+    ? `<span class="${gridStatusDotClass(status)}" style="width:6px;height:6px;"></span>`
+    : `<span class="num" style="font-size:10.5px;line-height:16px;color:${widgetVar('ink3')};">${String(index + 1).padStart(2, '0')}</span>`
+  const statusText = showStatus && GRID_STATUS_LABEL[status]
+    ? `<span class="label" style="margin-left:auto;font-size:9.5px;white-space:nowrap;color:${emphasized ? ACCENT : widgetVar('ink3')};">${GRID_STATUS_LABEL[status]}</span>`
+    : ''
+  const image = item.image
+    ? `<div style="margin-bottom:12px;${shape === 'square' ? 'aspect-ratio:1/1;' : shape === 'portrait' ? 'aspect-ratio:3/4;' : 'aspect-ratio:4/3;'}border-radius:10px;overflow:hidden;background:${widgetVar('canvas')};"><img src="${escapeAttr(item.image)}" alt="" style="display:block;width:100%;height:100%;object-fit:cover;"/></div>`
+    : ''
+  // 清单条目：顶边一条 hairline 起头，点/序号 + 名称 + 状态在同一行，不做底板瓷砖。
+  return `<div data-grid-item="${status}" class="span-${span}" style="min-width:0;padding-top:12px;border-top:1px solid ${HAIR};">
+    ${image}
+    <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+      ${lead}
+      <span style="min-width:0;font-size:14px;font-weight:600;line-height:22px;color:${status === 'pending' && showStatus ? INK_BODY : INK};overflow-wrap:anywhere;">${escapeHtml(item.label || '')}</span>
+      ${statusText}
+    </div>
   </div>`
 }
 
 function compileGridCollection(props: z.infer<typeof gridCollectionProps>): string {
-  const cells = props.items.map((item) => renderGridItem(item, props.item_shape)).join('')
-  return `<div class="card stack" style="gap:14px;">
-    <div class="title">${escapeHtml(props.title)}</div>
-    <div style="display:grid;grid-template-columns:repeat(${props.cols}, minmax(0,1fr));gap:10px;">${cells}</div>
+  const showStatus = props.items.some((item) => Boolean(item.status))
+  const span = 12 / props.cols
+  const cells = props.items.map((item, index) => renderGridItem(item, props.item_shape, index, showStatus, span)).join('')
+  const doneCount = props.items.filter((item) => item.status === 'done').length
+  return `<div class="card stack" style="gap:20px;">
+    ${renderWidgetChrome({ kicker: 'COLLECTION', meta: doneCount > 0 ? `${doneCount} / ${props.items.length} 完成` : `${props.items.length} 项` })}
+    ${renderWidgetHeading(props.title)}
+    <div data-fill="grid" class="grid keep-pairs" style="row-gap:20px;">${cells}</div>
   </div>`
 }
 
@@ -502,7 +555,7 @@ export const WIDGET_SKELETONS: Record<WidgetSkeletonId, WidgetSkeletonDefinition
     id: 'dual_compare',
     displayName: '双栏对比',
     description: '左右两栏对照，A vs B / 前后 / 优缺点',
-    defaultSize: 'landscape_card',
+    defaultSize: 'doc_block',
     allowedSizes: ['landscape_card', 'landscape_4_3', 'square_card', 'a4_portrait', 'doc_block'],
     defaultBackgroundMode: 'opaque',
     supportsAnimation: false,
@@ -513,7 +566,7 @@ export const WIDGET_SKELETONS: Record<WidgetSkeletonId, WidgetSkeletonDefinition
     id: 'metric_grid',
     displayName: '多栏数据板',
     description: '2–6 个 KPI 网格 + 标签 + 趋势',
-    defaultSize: 'landscape_card',
+    defaultSize: 'doc_block',
     allowedSizes: ['landscape_card', 'landscape_4_3', 'square_card', 'portrait_card', 'a4_portrait', 'doc_block'],
     defaultBackgroundMode: 'opaque',
     supportsAnimation: false,
@@ -524,7 +577,7 @@ export const WIDGET_SKELETONS: Record<WidgetSkeletonId, WidgetSkeletonDefinition
     id: 'vertical_timeline',
     displayName: '垂直时间线',
     description: '日报 / 行程 / 里程碑',
-    defaultSize: 'portrait_card',
+    defaultSize: 'doc_block',
     allowedSizes: ['portrait_card', 'square_card', 'story_card', 'a4_portrait', 'doc_block'],
     defaultBackgroundMode: 'opaque',
     supportsAnimation: false,
@@ -535,7 +588,7 @@ export const WIDGET_SKELETONS: Record<WidgetSkeletonId, WidgetSkeletonDefinition
     id: 'photo_note',
     displayName: '图文笔记',
     description: '主视觉 + 标题 + 正文 + 标签',
-    defaultSize: 'portrait_card',
+    defaultSize: 'doc_block',
     allowedSizes: ['portrait_card', 'story_card', 'square_card', 'doc_block'],
     defaultBackgroundMode: 'opaque',
     supportsAnimation: false,
@@ -546,7 +599,7 @@ export const WIDGET_SKELETONS: Record<WidgetSkeletonId, WidgetSkeletonDefinition
     id: 'chart_focus',
     displayName: '单图表聚焦',
     description: '一张图说明一个趋势 / 分布 / 占比 / 相关性（点阵图表：bar/hbar/line/scatter/stacked_bar/waffle；pie 输入自动转合规占比形态）',
-    defaultSize: 'landscape_card',
+    defaultSize: 'doc_block',
     allowedSizes: ['landscape_card', 'landscape_4_3', 'square_card', 'a4_portrait', 'doc_block'],
     defaultBackgroundMode: 'opaque',
     supportsAnimation: false,
@@ -557,7 +610,7 @@ export const WIDGET_SKELETONS: Record<WidgetSkeletonId, WidgetSkeletonDefinition
     id: 'grid_collection',
     displayName: '网格拼贴',
     description: '清单 / 习惯 / 推荐墙 / 九宫格',
-    defaultSize: 'square_card',
+    defaultSize: 'doc_block',
     allowedSizes: ['square_card', 'portrait_card', 'a4_portrait', 'doc_block'],
     defaultBackgroundMode: 'opaque',
     supportsAnimation: false,
@@ -568,7 +621,7 @@ export const WIDGET_SKELETONS: Record<WidgetSkeletonId, WidgetSkeletonDefinition
     id: 'relation_map',
     displayName: '关系图谱',
     description: '人物 / 组织 / 概念关系网络：分组卡片 + 自动连线 + 图例，只给 groups/nodes/edges 不给坐标',
-    defaultSize: 'landscape_4_3',
+    defaultSize: 'doc_block',
     allowedSizes: ['landscape_4_3', 'landscape_card', 'square_card', 'a4_portrait', 'doc_block'],
     defaultBackgroundMode: 'opaque',
     supportsAnimation: false,
@@ -579,7 +632,7 @@ export const WIDGET_SKELETONS: Record<WidgetSkeletonId, WidgetSkeletonDefinition
     id: 'process_flow',
     displayName: '流程说明图',
     description: '步骤 / 科普流程 / 因果链：编号步骤 + 可选分支 chips + 可选结果卡',
-    defaultSize: 'portrait_card',
+    defaultSize: 'doc_block',
     allowedSizes: ['portrait_card', 'story_card', 'square_card', 'a4_portrait', 'landscape_4_3', 'doc_block'],
     defaultBackgroundMode: 'opaque',
     supportsAnimation: false,

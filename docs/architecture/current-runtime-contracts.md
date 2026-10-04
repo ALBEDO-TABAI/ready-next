@@ -1,6 +1,6 @@
 # Ready 当前运行时硬合同
 
-> 核对日期：2026-09-06
+> 核对日期：2026-09-06（§7 文档预览与 Widget 呈现 2026-10-04 更新）
 > 本文承接原先重复写在 `AGENTS.md` 与 `CLAUDE.md` 里的详细约束。两份根指引保留入口与红线；修改本页覆盖的模块前必须读取对应章节。
 
 代码、类型、行为测试和 CI gate 比本文更权威。若实现与本文冲突，先判断是实现回归还是文档漂移；不得为旧文档复活已退役路径。
@@ -199,7 +199,9 @@
 - keep-alive 的 DocumentMode 只在可见时响应文件选择。文件树、搜索和图谱已经打开的目标不得被 DocumentMode 再次 stat/open/activity；文件涌现活动只把快照标脏，刷新经空闲合并调度且同一工作区只允许一轮生成。FileTree 的涌现上下文只订阅 group/path 等结构事实，正文、dirty 与激活时间变化不得重建调度或发查询。
 - 文档预览计算最多缓存最近 4 个路径，每份正文不超过 100 万字符，命中须同时匹配完整正文与路径；正文变化、路径变化或容量淘汰后重新计算。段落只复用 Markdown 语法树，每次仍经当前组件和 react-markdown 的 URL/HTML 安全处理。缓存不保留编辑器、媒体或 iframe 实例，隐藏场景的原有释放规则不变。阅读位置只在 DocumentMode 初始化时载入，后续渲染复用内存中的位置表；场景重新可见后，必须对重新挂载的编辑面恢复位置。
 - H1/H2 freeform 只在命中特定触发词时使用；其他 Widget 使用结构化骨架 A-G、`relation_map` 或 `process_flow`。
-- Widget 视觉唯一来源是 `src/shared/document-widget-theme.ts` 与 `document-widget-dot-charts.ts`：Ready 单橘红、mono 标签、禁饼图/彩虹/Emoji 图标；`pie` 输入渲染为合规占比形态。
+- Widget 视觉唯一来源是 `src/shared/document-widget-theme.ts`、`document-widget-chassis.ts` 与 `document-widget-dot-charts.ts`：Ready 单橘红、mono 标签、禁饼图/彩虹/Emoji 图标；`pie` 输入渲染为合规占比形态。两套编译器的卡片都按同一构图输出：身份行（橘点 + mono 类别 · 右侧元信息）→ 标题块 → 主体 → 可选页脚。卡片内部按 12 栏网格排布（标签栏 2 栏、内容栏 10 栏，栏距 24px，竖向节奏取 8 的倍数），不用线框与层叠底板，浅底只用极淡墨色。文档里的卡片是液态玻璃面（`surface: 'document'`）：玻璃材质（白纱、顶缘镜面高光、斜向边缘光环、柔影、backdrop 模糊）由宿主 `.ready-doc-widget-card-preview` 绘制，iframe/静态投影内的卡片透明叠在其上；卡内嵌板 `--widget-doc-inset` 是极淡的内凹墨色，`--widget-doc-card` 只是玻璃面的近似实色，供连线光晕与标签底擦线使用。卡片不叠在滚动内容之上，因此不挂逐卡折射镜片；高度随内容，画幅比例不在文档里生效；单卡导出用纸面（`sheet`），固定画幅按比例成型、主体成组居中。结构化骨架默认画幅为 `doc_block`。关系图由编译期确定性布局输出纯 SVG（宽版分列、窄版弧线，容器查询切换），不依赖运行时测量脚本。
+- 文档预览中的卡片先以静态投影呈现：与书本阅读共用 `sanitizeBookWidgetStaticHtml` 去脚本与事件，放进 clonable + serializable 的 ShadowRoot，令牌与基线类层和 iframe 同源；iframe 运行时在其下就绪后接管。组件较多或单卡过重时保持静态投影（预算规则不变），只有含脚本、内联事件、表单、标签切换或消息按钮的卡在图注给“启用交互预览”；静态投影的链接改走浏览器打开。PDF 导出用 `getHTML({ serializableShadowRoots })` 把静态卡序列化为声明式 shadow DOM。卡片外壳是 figure：卡片在上，“FIG 编号 · 名称”图注在下，编辑/引用/导出悬停或聚焦时浮现。回归 `document-widget-stage.test.tsx`（`verify:widget-ready`）。
+- 文档预览排印（`src/renderer/styles/document-preview.css`）只作用于 `.note-preview-shell`（预览面与 PDF 导出捕获）：文首标题 → 引言 → hairline 分层、列表圆点/序号/勾选与引用点阵线落在正文左缘的 24px 标记槽内、8px 竖向节奏、三线表、点阵引用与分隔、中文着重号、无功能蓝；RSS 阅读栏与书本阅读继续使用 `markdown.css` 共享基线，书页分页测量不受影响。Mermaid 按明暗主题使用 Ready 主题变量，缓存键包含配色。
 - OpenUI componentSpec、骨架编译器与 iframe 基线 CSS 都走令牌。预览/导出优先从 `skeleton_spec` 或 `component_spec` 重编译；`widget_code` 只作无法重建时的兼容回退。
 - iframe、接收器、导出注入与宿主 bootstrap 脚本必须使用与 `index.html` CSP 完全一致的 `WIDGET_SCRIPT_NONCE`。
 - `onclick/oninput/onchange` 先由 sanitizer 改写为 `data-ready-on*`，再由 receiver 调用具名函数；静态回退与导出必须剥除事件属性。

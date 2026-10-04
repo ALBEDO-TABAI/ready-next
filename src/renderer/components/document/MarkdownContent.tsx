@@ -82,6 +82,15 @@ function shouldRenderMarkdownCodeAsDocument(code: string): boolean {
   ))
 }
 
+const CJK_CHARACTER = /[㐀-鿿豈-﫿]/
+const LATIN_LETTER = /[A-Za-z]/
+
+/** 纯中文强调用着重号呈现；含拉丁字母时保留斜体，避免在英文字母下打点。 */
+function isCjkEmphasis(children: ReactNode): boolean {
+  const text = extractMarkdownText(children)
+  return CJK_CHARACTER.test(text) && !LATIN_LETTER.test(text)
+}
+
 function CodeBlockWithCopy({
   children,
   code,
@@ -186,7 +195,15 @@ export function createMarkdownComponents({ mode, notePath, openHref, externalBas
     h3: ({ children }: { children?: ReactNode }) => <h3 className="note-preview-markdown-h3" data-ready-heading-level="3" data-ready-heading-title={extractMarkdownText(children)}>{children}</h3>,
     h4: ({ children }: { children?: ReactNode }) => <h4 className="note-preview-markdown-h4" data-ready-heading-level="4" data-ready-heading-title={extractMarkdownText(children)}>{children}</h4>,
     p: ({ children }: { children?: ReactNode }) => <p className="note-preview-markdown-p">{children}</p>,
-    em: ({ children, node: _node, ...props }: { children?: ReactNode; node?: unknown }) => <em className="note-preview-markdown-em" {...props}>{children}</em>,
+    em: ({ children, node: _node, ...props }: { children?: ReactNode; node?: unknown }) => (
+      <em
+        className="note-preview-markdown-em"
+        data-cjk-emphasis={!external && isCjkEmphasis(children) ? 'true' : undefined}
+        {...props}
+      >
+        {children}
+      </em>
+    ),
     hr: () => <hr className="note-preview-markdown-hr" />,
     blockquote: ({ children }: { children?: ReactNode }) => <blockquote className="note-preview-markdown-quote">{children}</blockquote>,
     ul: ({ children, node: _node, className, ...props }: { children?: ReactNode; node?: unknown; className?: string }) => (

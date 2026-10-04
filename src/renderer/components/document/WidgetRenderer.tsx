@@ -6,10 +6,11 @@ import {
   resolveWidgetThemePayload,
   type WidgetBackgroundMode,
 } from './widget-css-bridge'
-import { buildWidgetReceiverSrcdoc, sanitizeWidgetHtml, stripWidgetScripts } from './widget-sanitizer'
+import { buildWidgetReceiverSrcdoc, sanitizeWidgetHtml } from './widget-sanitizer'
+import WidgetStaticProjection from './WidgetStaticProjection'
 import { appendWidgetMessageToAgentInput } from '../../modules/agent/chat-input-bridge'
 import type { DocumentWidgetPersistedState } from './widget-state-runtime'
-import { widgetNeedsManualPreview } from './widget-card-helpers'
+import { widgetHasInteractiveRuntime, widgetNeedsManualPreview } from './widget-card-helpers'
 import { subscribeWidgetThemeChanges } from './widget-theme-observer'
 import { BoundedLruCache } from '../../../shared/bounded-lru'
 
@@ -19,6 +20,11 @@ interface WidgetRendererProps {
   widgetState?: DocumentWidgetPersistedState | null
   onWidgetStateChange?: (state: DocumentWidgetPersistedState) => void
   preferManualPreview?: boolean
+  /**
+   * 受控的交互预览开关：由外层（文档卡片题注）决定何时挂载 iframe；
+   * 省略时组件自管休眠态，并在卡下给出启用入口。
+   */
+  previewEnabled?: boolean
   backgroundMode?: WidgetBackgroundMode
 }
 
@@ -52,6 +58,7 @@ export default function WidgetRenderer({
   widgetState,
   onWidgetStateChange,
   preferManualPreview = false,
+  previewEnabled,
   backgroundMode,
 }: WidgetRendererProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null)
@@ -59,15 +66,16 @@ export default function WidgetRenderer({
   const [receiverReady, setReceiverReady] = useState(false)
   const [height, setHeight] = useState(() => widgetHeightCache.get(getCacheKey(widgetCode)) || 180)
   const [renderError, setRenderError] = useState<string | null>(null)
-  const [showSandboxFallback, setShowSandboxFallback] = useState(false)
   const manualPreviewRequired = useMemo(
     () => preferManualPreview || widgetNeedsManualPreview(widgetCode),
     [preferManualPreview, widgetCode],
   )
-  const [manualPreviewEnabled, setManualPreviewEnabled] = useState(() => !manualPreviewRequired)
+  const [internalPreviewEnabled, setManualPreviewEnabled] = useState(() => !manualPreviewRequired)
+  const isControlled = typeof previewEnabled === 'boolean'
+  const manualPreviewEnabled = isControlled ? previewEnabled : internalPreviewEnabled
 
   const sanitizedWidgetCode = useMemo(() => sanitizeWidgetHtml(widgetCode), [widgetCode])
-  const staticFallbackHtml = useMemo(() => stripWidgetScripts(sanitizedWidgetCode), [sanitizedWidgetCode])
+  const hasInteractiveRuntime = useMemo(() => widgetHasInteractiveRuntime(sanitizedWidgetCode), [sanitizedWidgetCode])
   const resolvedBackgroundMode = useMemo<WidgetBackgroundMode>(
     () => inferBackgroundMode(backgroundMode, sanitizedWidgetCode),
     [backgroundMode, sanitizedWidgetCode],
@@ -79,6 +87,7 @@ export default function WidgetRenderer({
   const srcDoc = useMemo(() => {
     const styleBlock = getWidgetIframeStyleBlock(themePayload.vars, {
       backgroundMode: resolvedBackgroundMode,
+      surface: 'document',
     })
     return buildWidgetReceiverSrcdoc(styleBlock, themePayload.isDark, sanitizedWidgetCode, widgetTokenRef.current)
   }, [sanitizedWidgetCode, themePayload, resolvedBackgroundMode])
@@ -102,7 +111,6 @@ export default function WidgetRenderer({
 
       if (event.data.type === 'widget:ready') {
         setReceiverReady(true)
-        setShowSandboxFallback(false)
         setRenderError(null)
         postTheme()
         return
@@ -112,9 +120,6 @@ export default function WidgetRenderer({
         const nextHeight = Math.max(120, Math.min(MAX_IFRAME_HEIGHT, Math.ceil(event.data.height)))
         widgetHeightCache.set(getCacheKey(widgetCode), nextHeight)
         setHeight(nextHeight)
-        if (nextHeight > 140) {
-          setShowSandboxFallback(false)
-        }
         return
       }
 
@@ -145,7 +150,6 @@ export default function WidgetRenderer({
   useEffect(() => {
     setReceiverReady(false)
     setRenderError(null)
-    setShowSandboxFallback(false)
   }, [srcDoc, widgetCode])
 
   useEffect(() => {
@@ -167,40 +171,38 @@ export default function WidgetRenderer({
     )
   }, [receiverReady, widgetState])
 
-  useEffect(() => {
-    if (receiverReady) return
-
-    const timer = window.setTimeout(() => {
-      setShowSandboxFallback(true)
-    }, 180)
-    return () => window.clearTimeout(timer)
-  }, [receiverReady, widgetCode])
+  // 舞台：static = 休眠（只显示静态投影）；loading = iframe 在投影下方就绪；
+  // live = 交互运行时接管；error = 运行时报错，保留静态投影并说明原因。
+  const liveVisible = manualPreviewEnabled && receiverReady && !renderError
+  const stage = !manualPreviewEnabled ? 'static' : renderError ? 'error' : liveVisible ? 'live' : 'loading'
 
   return (
-    <div className="document-widget-shell">
+    <div className="document-widget-shell" data-widget-stage={stage}>
       {title ? <div className="document-widget-title">{title}</div> : null}
-      {!manualPreviewEnabled ? (
-        <div className="document-widget-fallback-shell">
-          <div className="document-widget-fallback-note">
-            {preferManualPreview
-              ? '当前文档里的组件较多，默认不自动渲染，避免拖垮当前文档页面。'
-              : '这个组件内容较重，默认不自动渲染，避免拖垮当前文档页面。'}
-          </div>
+      {!liveVisible ? (
+        <WidgetStaticProjection widgetCode={sanitizedWidgetCode} backgroundMode={resolvedBackgroundMode} />
+      ) : null}
+      {!isControlled && !manualPreviewEnabled && hasInteractiveRuntime ? (
+        <div className="document-widget-fallback-shell document-widget-activate">
           <button
             type="button"
-            className="ready-doc-widget-card-action"
+            className="document-widget-activate-button"
             onClick={() => {
               setManualPreviewEnabled(true)
             }}
           >
-            启用预览
+            <span className="document-widget-activate-dot" aria-hidden="true" />
+            启用交互预览
           </button>
+          <span className="document-widget-fallback-note">
+            {preferManualPreview ? '组件较多，先以静态方式呈现' : '内容较重，先以静态方式呈现'}
+          </span>
         </div>
       ) : null}
       {renderError ? (
         <div className="document-widget-error">
-          <AlertTriangle style={{ width: 16, height: 16 }} strokeWidth={2} />
-          <span>{renderError}</span>
+          <AlertTriangle style={{ width: 14, height: 14 }} strokeWidth={2} />
+          <span>交互预览出错，已保留静态内容：{renderError}</span>
         </div>
       ) : null}
       {manualPreviewEnabled ? (
@@ -210,30 +212,11 @@ export default function WidgetRenderer({
           sandbox="allow-scripts"
           srcDoc={srcDoc}
           className="document-widget-frame"
-          style={{
-            height: showSandboxFallback ? 0 : height,
-            display: showSandboxFallback ? 'none' : 'block',
-          }}
+          data-widget-frame-ready={liveVisible ? 'true' : undefined}
+          aria-hidden={liveVisible ? undefined : true}
+          tabIndex={liveVisible ? undefined : -1}
+          style={{ height }}
         />
-      ) : null}
-      {(manualPreviewEnabled && (showSandboxFallback || renderError)) ? (
-        <div className="document-widget-fallback-shell">
-          <div className="document-widget-fallback-note">
-            {renderError
-              ? '脚本交互预览出现错误，已显示静态回退内容。'
-              : '交互预览加载较慢，先显示静态回退内容。'}
-          </div>
-          {staticFallbackHtml.trim().length > 0 ? (
-            <div
-              className="document-widget-static"
-              dangerouslySetInnerHTML={{ __html: staticFallbackHtml }}
-            />
-          ) : (
-            <div className="document-widget-fallback-note">
-              当前组件暂时无法展示静态回退内容。
-            </div>
-          )}
-        </div>
       ) : null}
     </div>
   )

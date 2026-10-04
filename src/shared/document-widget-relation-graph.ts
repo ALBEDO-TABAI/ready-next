@@ -1,8 +1,15 @@
 /**
  * 关系图共享渲染器：openui `relationship_graph` 组件与骨架 `relation_map` 的同一实现。
  *
- * 布局哲学：模型只给 groups/nodes/edges，卡片排版与连线端点由 HTML 布局 + 运行时
- * 测量（ResizeObserver + rail 路由）决定，不接受手写坐标。
+ * 布局哲学：模型只给 groups/nodes/edges，不接受手写坐标；坐标由这里确定性计算，
+ * 分组只是一列的标签（不画底板），节点是卡片色块上的纸白嵌块，层级只有两层。
+ * 输出纯 SVG（无运行时测量脚本）。同一份结构因此在 iframe、静态投影、书本阅读与
+ * PDF 导出里一模一样——连线不再依赖脚本跑完才出现。
+ *
+ * 两套构图由容器查询切换：
+ * - 宽版（>520px）：分组成列（左/中/右，未指定位置的组自动分列），相邻列之间用
+ *   三次贝塞尔连线，同列关系走外侧弧线，顶/底组横向铺开。
+ * - 窄版：分组纵向堆叠，所有关系画成右侧嵌套弧线（arc diagram），跨度越大弧越外。
  *
  * Ready 化纪律：连线的"身份"由标签 chip + 线型 + 图例承担，颜色只作强调
  * （emotion/主角=品牌橘红、alliance=完成绿、其余墨灰阶），无第二 accent、无彩虹；
@@ -10,6 +17,7 @@
  */
 
 import { z } from 'zod'
+import { renderWidgetChrome, renderWidgetHeading } from './document-widget-chassis'
 import { widgetVar } from './document-widget-theme'
 
 export const relationshipGroupSchema = z.object({
@@ -49,6 +57,7 @@ export type RelationshipGraphProps = z.infer<typeof relationshipGraphPropsSchema
 type RelationshipGroup = z.infer<typeof relationshipGroupSchema>
 type RelationshipNode = z.infer<typeof relationshipNodeSchema>
 type RelationshipEdgeKind = NonNullable<z.infer<typeof relationshipEdgeSchema>['kind']>
+type GroupPlacement = 'left' | 'center' | 'right' | 'top' | 'bottom'
 
 function escapeHtml(value: string): string {
   return value
@@ -62,14 +71,14 @@ function escapeAttr(value: string): string {
   return escapeHtml(value)
 }
 
-function escapeJsonForScript(value: unknown): string {
-  return JSON.stringify(value)
-    .replace(/</g, '\\u003c')
-    .replace(/>/g, '\\u003e')
-    .replace(/&/g, '\\u0026')
-    .replace(/\u2028/g, '\\u2028')
-    .replace(/\u2029/g, '\\u2029')
-}
+const INK = widgetVar('ink')
+const INK2 = widgetVar('ink2')
+const HAIR = widgetVar('hair')
+const CARD = widgetVar('card')
+const CANVAS = widgetVar('canvas')
+const DC_OFF = widgetVar('dcOff')
+const SANS = "var(--widget-font-sans, -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif)"
+const MONO = 'var(--widget-font-mono, ui-monospace, monospace)'
 
 /** 组色板：首组品牌橘红，其余墨阶（代码执掌，忽略模型供色）。 */
 function relationshipGroupColor(index: number): string {
@@ -98,7 +107,7 @@ function relationshipEdgeColor(kind: RelationshipEdgeKind | undefined): string {
     case 'influence':
       return widgetVar('ink3')
     default:
-      return widgetVar('dcOff')
+      return DC_OFF
   }
 }
 
@@ -119,14 +128,385 @@ const EDGE_KIND_LABELS: Record<RelationshipEdgeKind, string> = {
   other: '其他',
 }
 
-function renderHeader(heading?: string): string {
-  return heading ? `<div class="title">${escapeHtml(heading)}</div>` : ''
+// ─── 文字度量：按字形类别估宽，用于截断与标签底板，保证布局确定性 ───
+
+function estimateTextWidth(text: string, fontSize: number, mono = false): number {
+  let width = 0
+  for (const char of text) {
+    const code = char.codePointAt(0) ?? 0
+    if (code >= 0x2e80) width += fontSize
+    else if (char === ' ') width += fontSize * (mono ? 0.6 : 0.3)
+    else if (mono) width += fontSize * 0.6
+    else if (/[A-Z0-9]/.test(char)) width += fontSize * 0.64
+    else width += fontSize * 0.54
+  }
+  return width
+}
+
+function fitText(text: string, fontSize: number, maxWidth: number, mono = false): string {
+  if (estimateTextWidth(text, fontSize, mono) <= maxWidth) return text
+  let output = ''
+  for (const char of text) {
+    if (estimateTextWidth(`${output}${char}…`, fontSize, mono) > maxWidth) break
+    output += char
+  }
+  return `${output}…`
+}
+
+// ─── 几何 ───
+
+const SIDE_GUTTER = 30
+const COLUMN_GAP = 76
+const GROUP_PAD = 0
+const GROUP_LABEL_H = 28
+const NODE_GAP = 6
+const STACK_GAP = 16
+const ROW_GAP = 30
+const WIDE_W = 680
+const NARROW_W = 420
+const NARROW_NODE_RATIO = 0.58
+
+interface Box {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+interface ResolvedGroup {
+  id: string
+  label: string
+  color: string
+  placement: GroupPlacement
+  nodes: RelationshipNode[]
+}
+
+interface PlacedNode extends Box {
+  node: RelationshipNode
+  groupId: string
+  color: string
+  column: number
+  row: 'top' | 'middle' | 'bottom'
+}
+
+interface PlacedGroup extends Box {
+  group: ResolvedGroup
+}
+
+interface ResolvedEdge {
+  from: string
+  to: string
+  label?: string
+  kind: RelationshipEdgeKind
+  style: string
+  weight: 'light' | 'normal' | 'heavy'
+  color: string
+}
+
+interface LayoutResult {
+  width: number
+  height: number
+  groups: PlacedGroup[]
+  nodes: Map<string, PlacedNode>
+  edgeMarkup: string
+  labelMarkup: string
+}
+
+interface Point {
+  x: number
+  y: number
+}
+
+function nodeHeight(node: RelationshipNode): number {
+  let height = 38
+  if (node.subtitle) height += 18
+  if (node.tag) height += 24
+  return height
+}
+
+function groupHeight(nodes: RelationshipNode[]): number {
+  return GROUP_LABEL_H + nodes.reduce((sum, node) => sum + nodeHeight(node), 0) + NODE_GAP * Math.max(nodes.length - 1, 0) + GROUP_PAD
+}
+
+type UnplacedGroup = Omit<ResolvedGroup, 'placement'> & { position?: GroupPlacement }
+
+/** 未指定位置的组自动分列；显式位置保持不变。 */
+function assignPlacements(groups: UnplacedGroup[]): ResolvedGroup[] {
+  const middle: GroupPlacement[] = ['left', 'center', 'right']
+  const autos = groups.filter((group) => !group.position)
+  const explicitMiddle = groups.filter((group) => group.position && middle.includes(group.position))
+  const load = new Map<GroupPlacement, number>(middle.map((placement) => [placement, 0]))
+  for (const group of explicitMiddle) {
+    load.set(group.position!, (load.get(group.position!) ?? 0) + group.nodes.length)
+  }
+  const autoSlots: GroupPlacement[] | null = explicitMiddle.length > 0
+    ? null
+    : autos.length === 1 ? ['center'] : autos.length === 2 ? ['left', 'right'] : ['left', 'center', 'right']
+  let autoIndex = 0
+  return groups.map((group) => {
+    if (group.position) return { ...group, placement: group.position }
+    const placement = autoSlots
+      ? autoSlots[autoIndex % autoSlots.length]
+      : [...middle].sort((a, b) => (load.get(a) ?? 0) - (load.get(b) ?? 0))[0]
+    autoIndex += 1
+    load.set(placement, (load.get(placement) ?? 0) + group.nodes.length)
+    return { ...group, placement }
+  })
+}
+
+function renderGroupPanel(placed: PlacedGroup): string {
+  const { x, y, w, h, group } = placed
+  const label = fitText(group.label.toUpperCase(), 10, w - GROUP_PAD * 2 - 16, true)
+  return `<g data-rg-group-panel="${escapeAttr(group.id)}">
+    <rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="none"/>
+    <circle cx="${(x + GROUP_PAD + 3).toFixed(1)}" cy="${(y + 15).toFixed(1)}" r="3" fill="${group.color}"/>
+    <text x="${(x + GROUP_PAD + 12).toFixed(1)}" y="${(y + 18.5).toFixed(1)}" font-family="${MONO}" font-size="10" font-weight="500" letter-spacing="1" fill="${INK2}">${escapeHtml(label)}</text>
+  </g>`
+}
+
+function renderNode(placed: PlacedNode): string {
+  const { x, y, w, h, node } = placed
+  const emphasis = node.emphasis || 'secondary'
+  const isPrimary = emphasis === 'primary'
+  const titleX = x + 11 + (isPrimary ? 11 : 0)
+  const titleY = y + 23.5
+  const subtitle = node.subtitle
+    ? `<text x="${(x + 11).toFixed(1)}" y="${(titleY + 18).toFixed(1)}" font-family="${SANS}" font-size="11.5" fill="${INK2}">${escapeHtml(fitText(node.subtitle, 11.5, w - 22))}</text>`
+    : ''
+  const tagText = node.tag ? fitText(node.tag, 10, w - 40, true) : ''
+  const tagY = y + h - 28
+  const tag = node.tag
+    ? `<rect x="${(x + 11).toFixed(1)}" y="${tagY.toFixed(1)}" width="${Math.min(estimateTextWidth(tagText, 10, true) + 16, w - 22).toFixed(1)}" height="18" rx="9" fill="${CARD}"/>
+      <text x="${(x + 19).toFixed(1)}" y="${(tagY + 12.5).toFixed(1)}" font-family="${MONO}" font-size="10" fill="${INK2}">${escapeHtml(tagText)}</text>`
+    : ''
+  return `<g data-rg-node="${escapeAttr(node.id)}" data-rg-group="${escapeAttr(placed.groupId)}"${emphasis === 'muted' ? ' opacity="0.62"' : ''}>
+    <rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" rx="10" fill="${CANVAS}"/>
+    ${isPrimary ? `<circle cx="${(x + 14).toFixed(1)}" cy="${(titleY - 4.5).toFixed(1)}" r="3" fill="${placed.color}"/>` : ''}
+    <text x="${titleX.toFixed(1)}" y="${titleY.toFixed(1)}" font-family="${SANS}" font-size="13" font-weight="600" fill="${INK}">${escapeHtml(fitText(node.label, 13, w - 22 - (isPrimary ? 11 : 0)))}</text>
+    ${subtitle}
+    ${tag}
+  </g>`
+}
+
+// ─── 连线与标签 ───
+
+interface LabelBox {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+function overlaps(a: LabelBox, b: LabelBox): boolean {
+  return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+}
+
+function edgePath(edge: ResolvedEdge, d: string, start: Point, end: Point): string {
+  const width = edge.weight === 'heavy' ? 2.4 : edge.weight === 'light' ? 1.1 : 1.6
+  const dash = edge.style === 'dashed' ? ' stroke-dasharray="6 5"' : edge.style === 'dotted' ? ' stroke-dasharray="0.1 5"' : ''
+  const dotRadius = edge.weight === 'heavy' ? 3.4 : 2.7
+  return `<g data-rg-edge="${escapeAttr(edge.from)}:${escapeAttr(edge.to)}">
+    <path class="rg-edge-halo" d="${d}" fill="none" stroke="${CARD}" stroke-width="${width + 4}" stroke-linecap="round" opacity="0.8"/>
+    <path class="rg-edge-line" d="${d}" fill="none" stroke="${edge.color}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round" opacity="${edge.weight === 'light' ? 0.7 : 0.95}"${dash}/>
+    <circle class="rg-edge-dot" cx="${start.x.toFixed(1)}" cy="${start.y.toFixed(1)}" r="${dotRadius}" fill="${edge.color}" stroke="${CARD}" stroke-width="1.5"/>
+    <circle class="rg-edge-dot" cx="${end.x.toFixed(1)}" cy="${end.y.toFixed(1)}" r="${dotRadius}" fill="${edge.color}" stroke="${CARD}" stroke-width="1.5"/>
+  </g>`
+}
+
+function edgeLabel(edge: ResolvedEdge, center: Point, placed: LabelBox[], bounds: { width: number; height: number }): string {
+  const raw = (edge.label || '').trim()
+  if (!raw) return ''
+  const text = fitText(raw, 10, 112, true)
+  const w = estimateTextWidth(text, 10, true) + 14
+  const h = 18
+  const baseX = Math.max(2, Math.min(bounds.width - w - 2, center.x - w / 2))
+  let box: LabelBox = { x: baseX, y: center.y - h / 2, w, h }
+  for (let attempt = 1; attempt <= 8 && placed.some((other) => overlaps(box, other)); attempt += 1) {
+    const shift = Math.ceil(attempt / 2) * (h + 3) * (attempt % 2 === 1 ? 1 : -1)
+    box = { ...box, y: Math.max(0, Math.min(bounds.height - h, center.y - h / 2 + shift)) }
+  }
+  placed.push(box)
+  const textColor = edge.color === DC_OFF ? INK2 : edge.color
+  return `<g class="rg-edge-label-group">
+    <rect class="rg-edge-label-bg" x="${box.x.toFixed(1)}" y="${box.y.toFixed(1)}" width="${w.toFixed(1)}" height="${h}" rx="${h / 2}" fill="${CARD}"/>
+    <text class="rg-edge-label" x="${(box.x + w / 2).toFixed(1)}" y="${(box.y + 12.6).toFixed(1)}" text-anchor="middle" font-family="${MONO}" font-size="10" font-weight="500" fill="${textColor}">${escapeHtml(text)}</text>
+  </g>`
+}
+
+function cubic(start: Point, c1: Point, c2: Point, end: Point): string {
+  const f = (point: Point) => `${point.x.toFixed(1)} ${point.y.toFixed(1)}`
+  return `M ${f(start)} C ${f(c1)}, ${f(c2)}, ${f(end)}`
+}
+
+function bezierPoint(start: Point, c1: Point, c2: Point, end: Point, t: number): Point {
+  const u = 1 - t
+  const at = (a: number, b: number, c: number, d: number) => u * u * u * a + 3 * u * u * t * b + 3 * u * t * t * c + t * t * t * d
+  return { x: at(start.x, c1.x, c2.x, end.x), y: at(start.y, c1.y, c2.y, end.y) }
+}
+
+// ─── 宽版：分列构图 ───
+
+function layoutWide(groups: ResolvedGroup[], edges: ResolvedEdge[]): LayoutResult | null {
+  const middleOrder: GroupPlacement[] = ['left', 'center', 'right']
+  const columns = middleOrder.filter((placement) => groups.some((group) => group.placement === placement))
+  if (columns.length <= 1) return null
+  // 左缘与卡片正文对齐；同列关系一律向右画弧，只在右侧留出弧线余量。
+  const innerW = WIDE_W - SIDE_GUTTER
+  const colW = (innerW - COLUMN_GAP * (columns.length - 1)) / columns.length
+  const nodes = new Map<string, PlacedNode>()
+  const placedGroups: PlacedGroup[] = []
+  let cursorY = 0
+
+  const layoutRow = (row: 'top' | 'bottom') => {
+    for (const group of groups.filter((candidate) => candidate.placement === row)) {
+      const innerGroupW = innerW - GROUP_PAD * 2
+      const perRow = Math.max(1, Math.min(group.nodes.length, Math.floor((innerGroupW + NODE_GAP) / (128 + NODE_GAP))))
+      const nodeW = (innerGroupW - NODE_GAP * (perRow - 1)) / perRow
+      let y = cursorY + GROUP_LABEL_H
+      for (let start = 0; start < group.nodes.length; start += perRow) {
+        const slice = group.nodes.slice(start, start + perRow)
+        const rowH = Math.max(...slice.map(nodeHeight))
+        slice.forEach((node, index) => {
+          nodes.set(node.id, { node, groupId: group.id, color: group.color, column: -1, row, x: GROUP_PAD + index * (nodeW + NODE_GAP), y, w: nodeW, h: rowH })
+        })
+        y += rowH + NODE_GAP
+      }
+      const h = y - NODE_GAP + GROUP_PAD - cursorY
+      placedGroups.push({ group, x: 0, y: cursorY, w: innerW, h })
+      cursorY += h + ROW_GAP
+    }
+  }
+
+  layoutRow('top')
+  const middleTop = cursorY
+  let middleBottom = middleTop
+  columns.forEach((placement, column) => {
+    const x = column * (colW + COLUMN_GAP)
+    let y = middleTop
+    for (const group of groups.filter((candidate) => candidate.placement === placement)) {
+      const h = groupHeight(group.nodes)
+      let nodeY = y + GROUP_LABEL_H
+      for (const node of group.nodes) {
+        const nh = nodeHeight(node)
+        nodes.set(node.id, { node, groupId: group.id, color: group.color, column, row: 'middle', x: x + GROUP_PAD, y: nodeY, w: colW - GROUP_PAD * 2, h: nh })
+        nodeY += nh + NODE_GAP
+      }
+      placedGroups.push({ group, x, y, w: colW, h })
+      y += h + STACK_GAP
+    }
+    middleBottom = Math.max(middleBottom, y - STACK_GAP)
+  })
+  cursorY = middleBottom + ROW_GAP
+  layoutRow('bottom')
+  const height = Math.max(cursorY - ROW_GAP, middleBottom) + 4
+
+  const labels: LabelBox[] = []
+  const sameColumnDepth = new Map<number, number>()
+  let edgeMarkup = ''
+  let labelMarkup = ''
+  for (const edge of edges) {
+    const a = nodes.get(edge.from)
+    const b = nodes.get(edge.to)
+    if (!a || !b || a === b) continue
+    let start: Point
+    let end: Point
+    let c1: Point
+    let c2: Point
+    let labelAt: Point
+    if (a.row === 'middle' && b.row === 'middle' && a.column !== b.column) {
+      // 不同列：从相对的两侧出发，水平切线进出列间距。
+      const forward = a.column < b.column
+      start = { x: forward ? a.x + a.w : a.x, y: a.y + a.h / 2 }
+      end = { x: forward ? b.x : b.x + b.w, y: b.y + b.h / 2 }
+      const direction = forward ? 1 : -1
+      const bend = Math.max(28, Math.min(COLUMN_GAP * 0.9, Math.abs(end.x - start.x) * 0.45))
+      c1 = { x: start.x + bend * direction, y: start.y }
+      c2 = { x: end.x - bend * direction, y: end.y }
+      // 跨两列的线从中间列背后穿过，标签放在第一段列间距里。
+      labelAt = bezierPoint(start, c1, c2, end, Math.abs(a.column - b.column) > 1 ? 0.15 : 0.5)
+    } else if (a.row === 'middle' && b.row === 'middle') {
+      // 同列：一律向右画弧（进入列间距或右侧余量），弧的外扩随跨度与次序递增。
+      const column = a.column
+      const goRight = true
+      const depth = sameColumnDepth.get(column) ?? 0
+      sameColumnDepth.set(column, depth + 1)
+      const span = Math.abs((b.y + b.h / 2) - (a.y + a.h / 2))
+      const room = column === columns.length - 1 ? SIDE_GUTTER - 6 : COLUMN_GAP * 0.42
+      const reach = Math.min(room, 14 + depth * 5 + span * 0.05) * (goRight ? 1 : -1)
+      start = { x: goRight ? a.x + a.w : a.x, y: a.y + a.h / 2 }
+      end = { x: goRight ? b.x + b.w : b.x, y: b.y + b.h / 2 }
+      c1 = { x: start.x + reach * 1.33, y: start.y }
+      c2 = { x: end.x + reach * 1.33, y: end.y }
+      labelAt = { x: start.x + reach, y: (start.y + end.y) / 2 }
+    } else {
+      // 顶/底行：竖向切线进出。
+      const aIsUpper = a.y < b.y
+      const upper = aIsUpper ? a : b
+      const lower = aIsUpper ? b : a
+      const top = { x: upper.x + upper.w / 2, y: upper.y + upper.h }
+      const bottom = { x: lower.x + lower.w / 2, y: lower.y }
+      const bend = Math.max(18, (bottom.y - top.y) * 0.45)
+      start = aIsUpper ? top : bottom
+      end = aIsUpper ? bottom : top
+      c1 = { x: start.x, y: start.y + bend * (aIsUpper ? 1 : -1) }
+      c2 = { x: end.x, y: end.y - bend * (aIsUpper ? 1 : -1) }
+      labelAt = bezierPoint(start, c1, c2, end, 0.5)
+    }
+    edgeMarkup += edgePath(edge, cubic(start, c1, c2, end), start, end)
+    labelMarkup += edgeLabel(edge, labelAt, labels, { width: WIDE_W, height })
+  }
+  return { width: WIDE_W, height, groups: placedGroups, nodes, edgeMarkup, labelMarkup }
+}
+
+// ─── 窄版 / 单列：纵向堆叠 + 右侧嵌套弧线 ───
+
+function layoutArc(groups: ResolvedGroup[], edges: ResolvedEdge[], width: number): LayoutResult {
+  const order: GroupPlacement[] = ['top', 'left', 'center', 'right', 'bottom']
+  const sorted = [...groups].sort((a, b) => order.indexOf(a.placement) - order.indexOf(b.placement))
+  const columnW = Math.round(width * (width > NARROW_W ? 0.46 : NARROW_NODE_RATIO))
+  const nodes = new Map<string, PlacedNode>()
+  const placedGroups: PlacedGroup[] = []
+  let y = 0
+  for (const group of sorted) {
+    const h = groupHeight(group.nodes)
+    let nodeY = y + GROUP_LABEL_H
+    for (const node of group.nodes) {
+      const nh = nodeHeight(node)
+      nodes.set(node.id, { node, groupId: group.id, color: group.color, column: 0, row: 'middle', x: GROUP_PAD, y: nodeY, w: columnW - GROUP_PAD * 2, h: nh })
+      nodeY += nh + NODE_GAP
+    }
+    placedGroups.push({ group, x: 0, y, w: columnW, h })
+    y += h + STACK_GAP
+  }
+  const height = y - STACK_GAP + 4
+  const gutter = width - columnW
+  const labels: LabelBox[] = []
+  // 跨度小的弧在内、跨度大的弧在外，嵌套而不交叉。
+  const routable = edges
+    .map((edge) => ({ edge, a: nodes.get(edge.from), b: nodes.get(edge.to) }))
+    .filter((entry): entry is { edge: ResolvedEdge; a: PlacedNode; b: PlacedNode } => Boolean(entry.a && entry.b && entry.a !== entry.b))
+    .sort((p, q) => Math.abs(p.a.y - p.b.y) - Math.abs(q.a.y - q.b.y))
+  let edgeMarkup = ''
+  let labelMarkup = ''
+  routable.forEach(({ edge, a, b }, rank) => {
+    const start = { x: a.x + a.w, y: a.y + a.h / 2 }
+    const end = { x: b.x + b.w, y: b.y + b.h / 2 }
+    const reach = Math.min(gutter - 30, 20 + rank * ((gutter - 50) / Math.max(routable.length - 1, 1)))
+    const c1 = { x: start.x + reach * 1.33, y: start.y }
+    const c2 = { x: end.x + reach * 1.33, y: end.y }
+    edgeMarkup += edgePath(edge, cubic(start, c1, c2, end), start, end)
+    labelMarkup += edgeLabel(edge, { x: start.x + reach, y: (start.y + end.y) / 2 }, labels, { width, height })
+  })
+  return { width, height, groups: placedGroups, nodes, edgeMarkup, labelMarkup }
+}
+
+function renderLayout(layout: LayoutResult, variant: 'wide' | 'narrow', ariaLabel: string): string {
+  const groupMarkup = layout.groups.map(renderGroupPanel).join('')
+  const nodeMarkup = [...layout.nodes.values()].map(renderNode).join('')
+  return `<svg class="rg-layout rg-layout--${variant}" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${layout.width} ${Math.ceil(layout.height)}" role="img" aria-label="${escapeAttr(ariaLabel)}">${groupMarkup}${layout.edgeMarkup}${nodeMarkup}${layout.labelMarkup}</svg>`
 }
 
 export function compileRelationshipGraph(props: RelationshipGraphProps): string {
-  type RelationshipGroupWithColor = RelationshipGroup & { color: string }
-  type ResolvedRelationshipGroup = RelationshipGroupWithColor & { nodes: RelationshipNode[] }
-
   const suppliedGroups = props.groups || []
   const nodeGroups = Array.from(new Set(props.nodes.map((node) => node.group).filter((value): value is string => Boolean(value))))
   const groups: RelationshipGroup[] = [
@@ -135,284 +515,67 @@ export function compileRelationshipGraph(props: RelationshipGraphProps): string 
       .filter((groupId) => !suppliedGroups.some((group) => group.id === groupId))
       .map((groupId) => ({ id: groupId, label: groupId })),
   ]
-  const groupsWithFallback: RelationshipGroup[] = groups.length > 0 ? groups : [{ id: 'main', label: '关系网络', position: 'center' }]
-  const groupById = new Map<string, RelationshipGroupWithColor>(
-    groupsWithFallback.map((group, index) => [group.id, { ...group, color: relationshipGroupColor(index) }] as const),
-  )
+  const groupsWithFallback: RelationshipGroup[] = groups.length > 0 ? groups : [{ id: 'main', label: '关系网络' }]
   const ungroupedId = groupsWithFallback[0]?.id || 'main'
-  const groupedNodes: ResolvedRelationshipGroup[] = groupsWithFallback.map((group) => ({
-    ...groupById.get(group.id)!,
-    nodes: props.nodes.filter((node) => (node.group || ungroupedId) === group.id),
-  })).filter((group) => group.nodes.length > 0)
+  const resolvedGroups = assignPlacements(
+    groupsWithFallback
+      .map((group, index) => ({
+        id: group.id,
+        label: group.label,
+        color: relationshipGroupColor(index),
+        position: group.position,
+        nodes: props.nodes.filter((node) => (node.group || ungroupedId) === group.id),
+      }))
+      .filter((group) => group.nodes.length > 0),
+  )
   const knownNodeIds = new Set(props.nodes.map((node) => node.id))
   const invalidEdgeCount = props.edges.filter((edge) => !knownNodeIds.has(edge.from) || !knownNodeIds.has(edge.to)).length
-  const edges = props.edges
+  const edges: ResolvedEdge[] = props.edges
     .filter((edge) => knownNodeIds.has(edge.from) && knownNodeIds.has(edge.to))
-    .map((edge, routeIndex) => ({
-      ...edge,
+    .map((edge) => ({
+      from: edge.from,
+      to: edge.to,
+      label: edge.label,
       kind: edge.kind || 'other',
       style: relationshipEdgeStyle(edge.kind, edge.style),
       weight: edge.weight || 'normal',
       color: relationshipEdgeColor(edge.kind),
-      routeIndex,
     }))
-  const edgeData = escapeJsonForScript(edges)
+
+  const heading = props.heading || '关系图'
+  const wide = layoutWide(resolvedGroups, edges) ?? layoutArc(resolvedGroups, edges, WIDE_W)
+  const narrow = layoutArc(resolvedGroups, edges, NARROW_W)
+
   const legendKinds = Array.from(new Set(edges.map((edge) => edge.kind)))
   const legend = legendKinds.length
-    ? `<div class="rg-legend">${legendKinds.map((kind) => `<span><i style="background:${escapeAttr(relationshipEdgeColor(kind))};"></i>${escapeHtml(EDGE_KIND_LABELS[kind])}</span>`).join('')}</div>`
+    ? `<div class="rg-legend">${legendKinds.map((kind) => `<span><i data-style="${relationshipEdgeStyle(kind)}" style="background:${escapeAttr(relationshipEdgeColor(kind))};color:${escapeAttr(relationshipEdgeColor(kind))};"></i>${escapeHtml(EDGE_KIND_LABELS[kind])}</span>`).join('')}</div>`
     : ''
   const warning = invalidEdgeCount > 0
     ? `<div class="rg-warning">有 ${invalidEdgeCount} 条关系引用了不存在的人物，已跳过。</div>`
     : ''
   const note = props.note ? `<div class="rg-note">${escapeHtml(props.note)}</div>` : ''
-  const groupsHtml = groupedNodes.map((group) => {
-    const position = group.position || 'center'
-    return `<section class="rg-group rg-pos-${escapeAttr(position)}" data-rg-group-panel="${escapeAttr(group.id)}" style="--rg-group-color:${escapeAttr(group.color)};">
-      <div class="rg-group-label"><span></span>${escapeHtml(group.label)}</div>
-      <div class="rg-node-list">
-        ${group.nodes.map((node) => `<article class="rg-node rg-node-${escapeAttr(node.emphasis || 'secondary')}" data-rg-node="${escapeAttr(node.id)}" data-rg-group="${escapeAttr(group.id)}" style="--rg-node-color:${escapeAttr(group.color)};">
-          <div class="rg-node-title">${escapeHtml(node.label)}</div>
-          ${node.subtitle ? `<div class="rg-node-subtitle">${escapeHtml(node.subtitle)}</div>` : ''}
-          ${node.tag ? `<div class="rg-node-tag">${escapeHtml(node.tag)}</div>` : ''}
-        </article>`).join('')}
-      </div>
-    </section>`
-  }).join('')
 
-  return `<div class="card relationship-graph-widget" data-rg-root>
+  return `<div class="card stack relationship-graph-widget" data-rg-root style="gap:20px;">
     <style>
-      .relationship-graph-widget{position:relative;overflow:hidden;padding:22px;background:${widgetVar('card')};border:1px solid ${widgetVar('hair')};}
-      .relationship-graph-widget .rg-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:14px;}
-      .relationship-graph-widget .rg-stage{position:relative;min-height:360px;padding:12px 4px 6px;}
-      .relationship-graph-widget .rg-lines{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none;z-index:2;}
-      .relationship-graph-widget .rg-groups{position:relative;display:grid;grid-template-columns:minmax(150px,1fr) minmax(190px,1.18fr) minmax(150px,1fr);gap:24px 28px;align-items:start;}
-      .relationship-graph-widget .rg-group{min-width:0;padding:10px;border-radius:18px;background:color-mix(in srgb, ${widgetVar('canvas')} 62%, transparent);border:1px solid ${widgetVar('hair')};}
-      .relationship-graph-widget .rg-pos-top,.relationship-graph-widget .rg-pos-bottom{grid-column:1 / -1;}
-      .relationship-graph-widget .rg-pos-left{grid-column:1;}
-      .relationship-graph-widget .rg-pos-center{grid-column:2;}
-      .relationship-graph-widget .rg-pos-right{grid-column:3;}
-      .relationship-graph-widget .rg-group-label{position:relative;z-index:4;display:flex;align-items:center;gap:7px;margin:0 0 9px;font-family:var(--widget-font-mono, ui-monospace, monospace);font-size:10px;font-weight:500;letter-spacing:0.08em;text-transform:uppercase;color:${widgetVar('ink2')};}
-      .relationship-graph-widget .rg-group-label span{width:8px;height:8px;border-radius:50%;background:var(--rg-group-color);}
-      .relationship-graph-widget .rg-node-list{display:grid;gap:8px;}
-      .relationship-graph-widget .rg-pos-top .rg-node-list,.relationship-graph-widget .rg-pos-bottom .rg-node-list{grid-template-columns:repeat(auto-fit,minmax(132px,1fr));}
-      .relationship-graph-widget .rg-node{position:relative;z-index:4;border-radius:12px;background:${widgetVar('card')};border:1px solid ${widgetVar('hair')};padding:10px 11px;}
-      .relationship-graph-widget .rg-node:before{content:"";position:absolute;left:0;top:10px;bottom:10px;width:3px;border-radius:4px;background:var(--rg-node-color);}
-      .relationship-graph-widget .rg-node-primary{border-color:color-mix(in srgb, var(--rg-node-color) 45%, ${widgetVar('card')});box-shadow:0 1px 3px rgba(0,0,0,.06);}
-      .relationship-graph-widget .rg-node-muted{opacity:.78;}
-      .relationship-graph-widget .rg-node-title{font-size:13px;font-weight:600;color:${widgetVar('ink')};line-height:1.35;padding-left:5px;}
-      .relationship-graph-widget .rg-node-subtitle{font-size:11px;color:${widgetVar('ink2')};line-height:1.35;margin-top:3px;padding-left:5px;}
-      .relationship-graph-widget .rg-node-tag{display:inline-flex;margin:7px 0 0 5px;border-radius:999px;padding:3px 7px;border:1px solid ${widgetVar('hair')};color:${widgetVar('ink2')};font-family:var(--widget-font-mono, ui-monospace, monospace);font-size:10px;font-weight:500;letter-spacing:0.04em;}
-      .relationship-graph-widget .rg-legend{display:flex;gap:10px;flex-wrap:wrap;align-items:center;font-family:var(--widget-font-mono, ui-monospace, monospace);font-size:10px;letter-spacing:0.04em;color:${widgetVar('ink2')};}
-      .relationship-graph-widget .rg-legend span{display:inline-flex;align-items:center;gap:5px;}
-      .relationship-graph-widget .rg-legend i{display:block;width:16px;height:3px;border-radius:999px;}
-      .relationship-graph-widget .rg-edge-halo{fill:none;stroke-linecap:round;stroke-linejoin:round;opacity:.82;}
-      .relationship-graph-widget .rg-edge-line{fill:none;stroke-linecap:round;stroke-linejoin:round;}
-      .relationship-graph-widget .rg-edge-dot{stroke-width:3;}
-      .relationship-graph-widget .rg-edge-label-bg{stroke-width:1;}
-      .relationship-graph-widget .rg-edge-label{font-size:10px;font-weight:600;font-family:var(--widget-font-mono, ui-monospace, monospace);paint-order:stroke;stroke-width:3;stroke-linejoin:round;}
-      .relationship-graph-widget .rg-note,.relationship-graph-widget .rg-warning{font-size:12px;color:${widgetVar('ink2')};margin-top:10px;}
-      .relationship-graph-widget .rg-warning{color:${widgetVar('ink')};}
-      @media (max-width:720px){.relationship-graph-widget .rg-groups{grid-template-columns:1fr;}.relationship-graph-widget .rg-group{grid-column:1 / -1 !important;}.relationship-graph-widget .rg-lines{display:none;}}
+      .relationship-graph-widget .rg-stage{container-type:inline-size;}
+      .relationship-graph-widget .rg-layout{display:block;width:100%;height:auto;overflow:visible;}
+      .relationship-graph-widget .rg-layout--narrow{display:none;max-width:460px;margin:0 auto;}
+      @container (max-width: 520px){.relationship-graph-widget .rg-layout--wide{display:none;}.relationship-graph-widget .rg-layout--narrow{display:block;}}
+      .relationship-graph-widget .rg-legend{display:flex;gap:6px 14px;flex-wrap:wrap;align-items:center;font-family:${MONO};font-size:10.5px;letter-spacing:0.04em;color:${INK2};}
+      .relationship-graph-widget .rg-legend span{display:inline-flex;align-items:center;gap:6px;}
+      .relationship-graph-widget .rg-legend i{display:block;width:16px;height:2px;border-radius:999px;}
+      .relationship-graph-widget .rg-legend i[data-style="dashed"]{background:repeating-linear-gradient(90deg,currentColor 0 5px,transparent 5px 8px) !important;}
+      .relationship-graph-widget .rg-legend i[data-style="dotted"]{height:3px;background:radial-gradient(circle,currentColor 1.2px,transparent 1.5px) 0 50% / 5px 3px repeat-x !important;}
+      .relationship-graph-widget .rg-foot{display:flex;align-items:baseline;justify-content:space-between;gap:10px 24px;flex-wrap:wrap;padding-top:12px;border-top:1px solid ${HAIR};}
+      .relationship-graph-widget .rg-note,.relationship-graph-widget .rg-warning{font-size:12px;line-height:1.6;color:${INK2};}
+      .relationship-graph-widget .rg-warning{color:${INK};}
     </style>
-    <div class="rg-head">
-      <div>${renderHeader(props.heading || '关系图')}</div>
-      ${legend}
+    ${renderWidgetChrome({ kicker: 'RELATIONS', meta: `${props.nodes.length} 节点 · ${edges.length} 关系` })}
+    ${renderWidgetHeading(heading)}
+    <div class="rg-stage" data-fill="center">
+      ${renderLayout(wide, 'wide', heading)}
+      ${renderLayout(narrow, 'narrow', heading)}
     </div>
-    <div class="rg-stage">
-      <svg class="rg-lines" aria-hidden="true"></svg>
-      <div class="rg-groups">${groupsHtml}</div>
-    </div>
-    ${warning}
-    ${note}
-    <script>(function(){
-      const root=document.currentScript && document.currentScript.closest('[data-rg-root]');
-      if(!root) return;
-      const stage=root.querySelector('.rg-stage');
-      const svg=root.querySelector('.rg-lines');
-      const edges=${edgeData};
-      const ns='http://www.w3.org/2000/svg';
-      const styles=getComputedStyle(root);
-      const haloColor=(styles.getPropertyValue('--widget-bg-primary')||'').trim()||'#FFFFFF';
-      const labelBgColor=haloColor;
-      const nodeMap=new Map();
-      Array.from(root.querySelectorAll('[data-rg-node]')).forEach(function(node){
-        nodeMap.set(node.getAttribute('data-rg-node'), node);
-      });
-      const groupMap=new Map();
-      Array.from(root.querySelectorAll('[data-rg-group-panel]')).forEach(function(group){
-        groupMap.set(group.getAttribute('data-rg-group-panel'), group);
-      });
-      function clear(node){ while(node.firstChild) node.removeChild(node.firstChild); }
-      function box(element, origin){
-        const rect=element.getBoundingClientRect();
-        return {left:rect.left-origin.left,top:rect.top-origin.top,right:rect.right-origin.left,bottom:rect.bottom-origin.top,width:rect.width,height:rect.height,cx:rect.left-origin.left+rect.width/2,cy:rect.top-origin.top+rect.height/2};
-      }
-      function sidePoint(rect, side){
-        if(side==='right') return {x:rect.right,y:rect.cy,side:'right'};
-        if(side==='left') return {x:rect.left,y:rect.cy,side:'left'};
-        if(side==='bottom') return {x:rect.cx,y:rect.bottom,side:'bottom'};
-        return {x:rect.cx,y:rect.top,side:'top'};
-      }
-      function anchor(from,to){
-        const dx=to.cx-from.cx;
-        const dy=to.cy-from.cy;
-        if(Math.abs(dx)>=Math.abs(dy)){
-          return sidePoint(from, dx>=0 ? 'right' : 'left');
-        }
-        return sidePoint(from, dy>=0 ? 'bottom' : 'top');
-      }
-      function clamp(value, min, max){
-        return Math.max(min, Math.min(max, value));
-      }
-      function directPathD(start, end){
-        const bend=Math.max(30, Math.min(110, Math.abs(end.x-start.x)/2.4));
-        const c1x=start.side==='right'?start.x+bend:start.side==='left'?start.x-bend:start.x;
-        const c1y=start.side==='bottom'?start.y+bend:start.side==='top'?start.y-bend:start.y;
-        const c2x=end.side==='right'?end.x+bend:end.side==='left'?end.x-bend:end.x;
-        const c2y=end.side==='bottom'?end.y+bend:end.side==='top'?end.y-bend:end.y;
-        return 'M '+start.x+' '+start.y+' C '+c1x+' '+c1y+', '+c2x+' '+c2y+', '+end.x+' '+end.y;
-      }
-      function groupForNode(node){
-        const groupId=node.getAttribute('data-rg-group');
-        return groupId ? groupMap.get(groupId) : null;
-      }
-      function railRoute(edge, fromNode, toNode, from, to, origin, width){
-        const fromGroup=groupForNode(fromNode);
-        const toGroup=groupForNode(toNode);
-        if(!fromGroup || fromGroup!==toGroup) return null;
-        const group=box(fromGroup,origin);
-        const canRight=group.right+96<width;
-        const canLeft=group.left-96>0;
-        const index=Number(edge.routeIndex || 0);
-        const side=canRight && (!canLeft || index%2===0) ? 'right' : canLeft ? 'left' : canRight ? 'right' : group.cx<width/2 ? 'right' : 'left';
-        const gap=44+(index%3)*18;
-        const railX=side==='right' ? clamp(group.right+gap, 10, width-10) : clamp(group.left-gap, 10, width-10);
-        const start=sidePoint(from,side);
-        const end=sidePoint(to,side);
-        const d='M '+start.x+' '+start.y+' C '+railX+' '+start.y+', '+railX+' '+end.y+', '+end.x+' '+end.y;
-        return {
-          start:start,
-          end:end,
-          d:d,
-          labelX:railX+(side==='right'?12:-12),
-          labelY:(start.y+end.y)/2,
-          labelAnchor:side==='right'?'start':'end',
-        };
-      }
-      function routeFor(edge, fromNode, toNode, from, to, origin, width){
-        const rail=railRoute(edge,fromNode,toNode,from,to,origin,width);
-        if(rail) return rail;
-        const start=anchor(from,to);
-        const end=anchor(to,from);
-        const dx=end.x-start.x;
-        const dy=end.y-start.y;
-        const tight=Math.abs(dx)<170 && Math.abs(dy)<86;
-        if(tight){
-          const lift=dy>=0 ? -24 : 24;
-          const midX=(start.x+end.x)/2;
-          const midY=(start.y+end.y)/2+lift;
-          return {
-            start:start,
-            end:end,
-            d:'M '+start.x+' '+start.y+' Q '+midX+' '+midY+', '+end.x+' '+end.y,
-            labelX:midX,
-            labelY:midY-3,
-            labelAnchor:'middle',
-          };
-        }
-        const labelOffset=((Number(edge.routeIndex || 0)%3)-1)*14;
-        return {
-          start:start,
-          end:end,
-          d:directPathD(start,end),
-          labelX:(start.x+end.x)/2+labelOffset,
-          labelY:(start.y+end.y)/2-8,
-          labelAnchor:'middle',
-        };
-      }
-      function makePath(edge, route, halo){
-        const path=document.createElementNS(ns,'path');
-        path.setAttribute('d',route.d);
-        path.setAttribute('class',halo?'rg-edge-halo':'rg-edge-line');
-        path.setAttribute('stroke',halo?haloColor:edge.color || '#666666');
-        path.setAttribute('stroke-width',halo?(edge.weight==='heavy'?'8':edge.weight==='light'?'5':'6'):(edge.weight==='heavy'?'3.8':edge.weight==='light'?'1.8':'2.6'));
-        path.setAttribute('opacity',halo?'.72':edge.weight==='light'?'.7':'.94');
-        if(!halo && edge.style==='dashed') path.setAttribute('stroke-dasharray','8 7');
-        if(!halo && edge.style==='dotted') path.setAttribute('stroke-dasharray','2 7');
-        return path;
-      }
-      function makeDot(edge, point, radius){
-        const circle=document.createElementNS(ns,'circle');
-        circle.setAttribute('class','rg-edge-dot');
-        circle.setAttribute('cx',String(point.x));
-        circle.setAttribute('cy',String(point.y));
-        circle.setAttribute('r',String(radius));
-        circle.setAttribute('fill',edge.color || '#666666');
-        circle.setAttribute('stroke',haloColor);
-        return circle;
-      }
-      function appendLabel(edge, x, y, anchorMode){
-        const label=String(edge.label || '').slice(0,18);
-        if(!label) return;
-        const group=document.createElementNS(ns,'g');
-        const text=document.createElementNS(ns,'text');
-        text.textContent=label;
-        text.setAttribute('class','rg-edge-label');
-        text.setAttribute('x',String(x));
-        text.setAttribute('y',String(y));
-        text.setAttribute('text-anchor',anchorMode || 'middle');
-        text.setAttribute('fill',edge.color || '#666666');
-        text.setAttribute('stroke',labelBgColor);
-        group.appendChild(text);
-        svg.appendChild(group);
-        try{
-          const bbox=text.getBBox();
-          const rect=document.createElementNS(ns,'rect');
-          rect.setAttribute('class','rg-edge-label-bg');
-          rect.setAttribute('x',String(bbox.x-5));
-          rect.setAttribute('y',String(bbox.y-3));
-          rect.setAttribute('width',String(bbox.width+10));
-          rect.setAttribute('height',String(bbox.height+6));
-          rect.setAttribute('rx','8');
-          rect.setAttribute('fill',labelBgColor);
-          rect.setAttribute('fill-opacity','0.9');
-          rect.setAttribute('stroke',(styles.getPropertyValue('--widget-border')||'').trim()||'#E8E5DE');
-          group.insertBefore(rect,text);
-        }catch(error){}
-      }
-      function render(){
-        if(!stage || !svg) return;
-        const origin=stage.getBoundingClientRect();
-        const width=Math.max(stage.clientWidth,1);
-        const height=Math.max(stage.clientHeight,1);
-        svg.setAttribute('viewBox','0 0 '+width+' '+height);
-        svg.setAttribute('width',String(width));
-        svg.setAttribute('height',String(height));
-        clear(svg);
-        edges.forEach(function(edge){
-          const fromNode=nodeMap.get(edge.from);
-          const toNode=nodeMap.get(edge.to);
-          if(!fromNode || !toNode) return;
-          const from=box(fromNode,origin);
-          const to=box(toNode,origin);
-          const route=routeFor(edge,fromNode,toNode,from,to,origin,width);
-          svg.appendChild(makePath(edge,route,true));
-          svg.appendChild(makePath(edge,route,false));
-          svg.appendChild(makeDot(edge,route.start,edge.weight==='heavy'?4.8:3.8));
-          svg.appendChild(makeDot(edge,route.end,edge.weight==='heavy'?4.8:3.8));
-          appendLabel(edge,route.labelX,route.labelY,route.labelAnchor);
-        });
-      }
-      let raf=0;
-      function schedule(){ if(raf) cancelAnimationFrame(raf); raf=requestAnimationFrame(render); }
-      if(typeof ResizeObserver==='function'){
-        const observer=new ResizeObserver(schedule);
-        observer.observe(stage);
-        nodeMap.forEach(function(node){ observer.observe(node); });
-      }
-      window.addEventListener('resize',schedule);
-      schedule();
-      setTimeout(schedule,80);
-    })();</script>
+    ${legend || note || warning ? `<div class="rg-foot">${legend}<div>${warning}${note}</div></div>` : ''}
   </div>`
 }

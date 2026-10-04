@@ -61,6 +61,13 @@ export function getWidgetModeLabel(widgetCode: string): string {
   return 'HTML widget'
 }
 
+const INTERACTIVE_WIDGET_PATTERN = /<script\b|data-ready-on|data-ready-agent-message|<input\b|<select\b|<textarea\b|data-tab-target|data-focus-target/i
+
+/** 卡片是否带交互运行时（脚本、内联事件、表单控件、标签切换、消息按钮）；静态投影无法替代这些。 */
+export function widgetHasInteractiveRuntime(widgetCode: string): boolean {
+  return INTERACTIVE_WIDGET_PATTERN.test(widgetCode)
+}
+
 export function widgetNeedsManualPreview(widgetCode: string): boolean {
   const normalized = String(widgetCode || '')
   if (!normalized.trim()) return false

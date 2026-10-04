@@ -50,7 +50,7 @@ export function transformPreviewDomForExport(root: HTMLElement): void {
 
   root
     .querySelectorAll(
-      '.note-preview-code-copy-button, .note-preview-repair-button, .ready-doc-widget-card-actions, .document-widget-fallback-shell button',
+      '.note-preview-code-copy-button, .note-preview-repair-button, .ready-doc-widget-card-actions, .ready-doc-widget-card-activate, .document-widget-fallback-shell button',
     )
     .forEach((node) => node.remove())
 

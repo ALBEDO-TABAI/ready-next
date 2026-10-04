@@ -82,6 +82,8 @@ export function resolveWidgetThemePayload(options?: ResolveWidgetThemeOptions): 
 
 export interface WidgetIframeStyleOptions {
   backgroundMode?: WidgetBackgroundMode
+  /** document：文档正文里的开放式图版；省略时为导出用的纸面卡片。 */
+  surface?: 'document' | 'sheet'
 }
 
 export function getWidgetIframeStyleBlock(
@@ -96,5 +98,5 @@ export function getWidgetIframeStyleBlock(
 :root {
 ${cssVars}
 }
-${buildWidgetBaseStyleCss({ backgroundMode: options?.backgroundMode })}`
+${buildWidgetBaseStyleCss({ backgroundMode: options?.backgroundMode, surface: options?.surface })}`
 }

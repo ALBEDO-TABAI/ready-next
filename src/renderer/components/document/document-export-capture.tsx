@@ -61,6 +61,24 @@ async function waitForCaptureSettled(host: HTMLElement): Promise<void> {
   }
 }
 
+type ShadowSerializingElement = HTMLElement & {
+  getHTML?: (options: { serializableShadowRoots: boolean }) => string
+}
+
+/**
+ * Serialize the cloned preview including the static widget projections, which
+ * live in clonable + serializable shadow roots. `getHTML` emits them as
+ * declarative `<template shadowrootmode>` blocks that the print window's HTML
+ * parser re-attaches; plain `outerHTML` would silently drop every static card.
+ */
+function serializePreviewForExport(clone: HTMLElement): string {
+  const wrapper = clone.ownerDocument.createElement('div') as ShadowSerializingElement
+  wrapper.appendChild(clone)
+  return typeof wrapper.getHTML === 'function'
+    ? wrapper.getHTML({ serializableShadowRoots: true })
+    : wrapper.innerHTML
+}
+
 /**
  * Render the document's preview offscreen and capture it as a standalone
  * HTML document ready for `document:exportPdf`.
@@ -93,7 +111,7 @@ export async function captureDocumentPreviewHtml(options: DocumentExportCaptureO
 
     return buildExportHtmlDocument({
       title: options.title,
-      bodyHtml: clone.outerHTML,
+      bodyHtml: serializePreviewForExport(clone),
       baseCss: `${themeTokensCssRaw}\n${markdownCssRaw}`,
       collectedCss: collectLiveStyleSheetText(document),
       darkTheme: document.documentElement.dataset.theme === 'dark',

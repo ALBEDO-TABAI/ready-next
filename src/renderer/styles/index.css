@@ -1,5 +1,6 @@
 @import 'tailwindcss';
 @import './tiptap.css';
+@import './document-widget-card.css';
 
 /* index.css 已按领域序保拆分（2026-07-06）。以下 @import 顺序即原文件段落顺序，
    级联语义与拆分前逐字节一致——新增规则请落到对应领域文件，不要回填本文件。 */
@@ -21,4 +22,5 @@
 @import './rss-manage.css';
 @import './glass-overrides.css';
 @import './document-book.css';
+@import './document-preview.css';
 @import './settings-surfaces.css';

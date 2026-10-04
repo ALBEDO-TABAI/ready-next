@@ -87,10 +87,7 @@ function Chip({
       }}
       className="note-preview-chip"
       title={isOpenable ? `打开 ${chip.label}` : `点击复制 ${chip.label}`}
-      style={{
-        background: copied ? 'rgba(52, 211, 153, 0.14)' : 'var(--color-blue-light)',
-        color: copied ? 'var(--color-green)' : 'var(--color-blue)',
-      }}
+      data-copied={copied ? 'true' : undefined}
     >
       <span>{chip.label}</span>
       {copied ? (
@@ -452,6 +449,13 @@ function NotePreview({
     }])),
     [preview.widgets],
   )
+  const widgetFigureIndexByBlockId = useMemo(() => {
+    const indexes = new Map<string, number>()
+    for (const block of preview.blocks) {
+      if (block.type === 'widget') indexes.set(block.id, indexes.size + 1)
+    }
+    return indexes
+  }, [preview.blocks])
   const widgetRenderBudget = useMemo(
     () => getDocumentWidgetRenderBudgetFromCodes([...widgetsById.values()].map((entry) => entry.renderCode)),
     [widgetsById],
@@ -651,6 +655,7 @@ function NotePreview({
               return (
                 <DocumentWidgetPreviewBlock
                   renderIdentity={blockRenderKeys.get(block.id) || block.id}
+                  figureIndex={widgetFigureIndexByBlockId.get(block.id) ?? null}
                   widget={widget}
                   renderCode={renderCode}
                   widgetState={widgetState}

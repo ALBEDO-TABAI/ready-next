@@ -2,18 +2,27 @@ import { useEffect, useId, useState } from 'react'
 import { Wrench } from 'lucide-react'
 
 import { appendToAgentInput } from '../../modules/agent/chat-input-bridge'
-import { renderCachedMermaidSvg } from '../../modules/document/mermaidRenderCache'
+import { renderCachedMermaidSvg, type MermaidColorScheme } from '../../modules/document/mermaidRenderCache'
+import { subscribeWidgetThemeChanges } from './widget-theme-observer'
+
+function readColorScheme(): MermaidColorScheme {
+  if (typeof document === 'undefined') return 'light'
+  return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'
+}
 
 export default function MermaidPreviewBlock({ code }: { code: string }) {
   const renderId = `ready-mermaid-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
   const [svg, setSvg] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [scheme, setScheme] = useState<MermaidColorScheme>(readColorScheme)
+
+  useEffect(() => subscribeWidgetThemeChanges(() => setScheme(readColorScheme())), [])
 
   useEffect(() => {
     let cancelled = false
     setSvg(null)
     setError(null)
-    void renderCachedMermaidSvg(code, renderId)
+    void renderCachedMermaidSvg(code, renderId, scheme)
       .then((nextSvg) => {
         if (!cancelled) setSvg(nextSvg)
       })
@@ -21,7 +30,7 @@ export default function MermaidPreviewBlock({ code }: { code: string }) {
         if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause))
       })
     return () => { cancelled = true }
-  }, [code, renderId])
+  }, [code, renderId, scheme])
 
   if (error) {
     return (

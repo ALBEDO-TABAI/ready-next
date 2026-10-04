@@ -1055,7 +1055,7 @@ export default function MarkdownEditor({
               onPointerDownCapture={handleSurfacePointerDown}
               onScroll={handlePreviewSurfaceScroll}
             >
-              <div className="document-preview-layout" style={{ padding: '12px 40px 24px', maxWidth: 800, margin: '0 auto' }}>
+              <div className="document-preview-layout" style={{ padding: '56px 48px 120px', maxWidth: 816, margin: '0 auto' }}>
                 {blockingLoadError ? (
                   renderLoadState()
                 ) : (

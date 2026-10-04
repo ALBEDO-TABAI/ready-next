@@ -376,24 +376,8 @@
     {
       "file": "src/__tests__/document-widget-system.test.ts",
       "rule": "ready/no-source-grep-test",
-      "snippetHash": "690df9eb6c8e13d8",
-      "line": 205,
-      "snippet": "const source = readFileSync(",
-      "area": "ui-history"
-    },
-    {
-      "file": "src/__tests__/document-widget-system.test.ts",
-      "rule": "ready/no-source-grep-test",
-      "snippetHash": "1009d2a62db22f3e",
-      "line": 224,
-      "snippet": "const rendererSource = readFileSync(",
-      "area": "ui-history"
-    },
-    {
-      "file": "src/__tests__/document-widget-system.test.ts",
-      "rule": "ready/no-source-grep-test",
-      "snippetHash": "842325f0345a4cf6",
-      "line": 240,
+      "snippetHash": "a7d4aeeb7b4877ad",
+      "line": 208,
       "snippet": "const source = readFileSync(",
       "area": "ui-history"
     },
@@ -401,7 +385,7 @@
       "file": "src/__tests__/document-widget-system.test.ts",
       "rule": "ready/no-source-grep-test",
       "snippetHash": "30e6137bbf072737",
-      "line": 256,
+      "line": 224,
       "snippet": "const documentToolsSource = readFileSync(",
       "area": "ui-history"
     },
@@ -409,7 +393,7 @@
       "file": "src/__tests__/document-widget-system.test.ts",
       "rule": "ready/no-source-grep-test",
       "snippetHash": "698d27aff44dfa46",
-      "line": 260,
+      "line": 228,
       "snippet": "const documentSchemasSource = readFileSync(",
       "area": "ui-history"
     },
@@ -417,7 +401,7 @@
       "file": "src/__tests__/document-widget-system.test.ts",
       "rule": "ready/no-source-grep-test",
       "snippetHash": "30e8fc188efefc07",
-      "line": 275,
+      "line": 243,
       "snippet": "const source = readFileSync(",
       "area": "ui-history"
     },
@@ -425,7 +409,7 @@
       "file": "src/__tests__/document-widget-system.test.ts",
       "rule": "ready/no-source-grep-test",
       "snippetHash": "ec4bc4389a80763e",
-      "line": 290,
+      "line": 269,
       "snippet": "const rendererHtml = readFileSync(",
       "area": "ui-history"
     },
@@ -433,7 +417,7 @@
       "file": "src/__tests__/document-widget-system.test.ts",
       "rule": "ready/no-source-grep-test",
       "snippetHash": "7a81332e4718279c",
-      "line": 310,
+      "line": 289,
       "snippet": "const source = readFileSync(",
       "area": "ui-history"
     },
@@ -441,7 +425,7 @@
       "file": "src/__tests__/document-widget-system.test.ts",
       "rule": "ready/no-source-grep-test",
       "snippetHash": "b28f176092b64db5",
-      "line": 319,
+      "line": 298,
       "snippet": "const rendererSource = readFileSync(",
       "area": "ui-history"
     },
@@ -449,7 +433,7 @@
       "file": "src/__tests__/document-widget-system.test.ts",
       "rule": "ready/no-source-grep-test",
       "snippetHash": "977bf5d3b38c6b41",
-      "line": 323,
+      "line": 302,
       "snippet": "const receiverSource = readFileSync(",
       "area": "ui-history"
     },
@@ -457,7 +441,7 @@
       "file": "src/__tests__/document-widget-system.test.ts",
       "rule": "ready/no-source-grep-test",
       "snippetHash": "c01e3cf7618cc717",
-      "line": 336,
+      "line": 315,
       "snippet": "const blockCardSource = readFileSync(",
       "area": "ui-history"
     },
@@ -465,7 +449,7 @@
       "file": "src/__tests__/document-widget-system.test.ts",
       "rule": "ready/no-source-grep-test",
       "snippetHash": "c4f08f175a031681",
-      "line": 340,
+      "line": 319,
       "snippet": "const shellSource = readFileSync(",
       "area": "ui-history"
     },
@@ -473,7 +457,7 @@
       "file": "src/__tests__/document-widget-system.test.ts",
       "rule": "ready/no-source-grep-test",
       "snippetHash": "ad93cb9208e3d14a",
-      "line": 344,
+      "line": 323,
       "snippet": "const notePreviewSource = readFileSync(",
       "area": "ui-history"
     },
@@ -481,7 +465,7 @@
       "file": "src/__tests__/document-widget-system.test.ts",
       "rule": "ready/no-source-grep-test",
       "snippetHash": "c483698a4f7ca752",
-      "line": 348,
+      "line": 327,
       "snippet": "const previewBlockSource = readFileSync(",
       "area": "ui-history"
     },
@@ -489,7 +473,7 @@
       "file": "src/__tests__/document-widget-system.test.ts",
       "rule": "ready/no-source-grep-test",
       "snippetHash": "45b4610238dce203",
-      "line": 352,
+      "line": 331,
       "snippet": "const markdownEditorSource = readFileSync(",
       "area": "ui-history"
     },

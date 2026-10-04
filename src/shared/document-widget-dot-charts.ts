@@ -83,8 +83,13 @@ function markColor(index: number, hot?: number): string {
   return index === hot ? DC_ON : DC_OFF
 }
 
+/** 百分号与千分号紧贴数字，其余单位与数字之间留一个空格。 */
+function unitSeparator(unitLabel: string): string {
+  return /^[%‰]/.test(unitLabel) ? '' : ' '
+}
+
 function valueText(value: number, unitLabel?: string): string {
-  return `${formatNumber(value)}${unitLabel ? ` ${escapeHtml(unitLabel)}` : ''}`
+  return `${formatNumber(value)}${unitLabel ? `${unitSeparator(unitLabel)}${escapeHtml(unitLabel)}` : ''}`
 }
 
 /*
@@ -115,37 +120,49 @@ function dot(cx: number, cy: number, on: boolean, color: string): string {
 }
 
 function fieldLegend(unit: number, unitLabel: string | undefined, axis: 'row' | 'col'): string {
-  const unitText = `${formatNumber(unit)}${unitLabel ? ` ${escapeHtml(unitLabel)}` : ''}`
+  const unitText = `${formatNumber(unit)}${unitLabel ? `${unitSeparator(unitLabel)}${escapeHtml(unitLabel)}` : ''}`
   return `<div class="label" style="display:flex;align-items:center;gap:6px;">
     <span style="width:6px;height:6px;border-radius:50%;background:${DC_ON};flex:none;"></span>
     <span style="text-transform:none;">每${axis === 'row' ? '行' : '列'} = ${unitText}</span>
   </div>`
 }
 
-function fieldRow(filled: number, color: string, cols = 34): string {
-  const n = Math.max(0, Math.min(cols, filled))
-  let dots = ''
-  for (let c = 0; c < cols; c++) dots += dot(PITCH / 2 + c * PITCH, PITCH / 2, c < n, color)
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${cols * PITCH} ${PITCH}" style="width:100%;height:auto;display:block;" role="img">${dots}</svg>`
+/** 横向点条的列数：与点阵场同一节距（在文档栏宽里约 10px），条宽吃满 12 栏中的 8 栏。 */
+const ROW_COLS = 46
+
+/** 让最大值落在约 36 个点上的“好看”单位，横条因此铺开到七八成宽。 */
+function resolveRowUnit(maxValue: number): number {
+  const max = Math.max(Math.abs(maxValue), Number.EPSILON)
+  const raw = max / 36
+  const exp = Math.floor(Math.log10(raw))
+  const base = raw / 10 ** exp
+  const step = base <= 1 ? 1 : base <= 2 ? 2 : base <= 2.5 ? 2.5 : base <= 5 ? 5 : 10
+  return step * 10 ** exp
 }
 
+/** 共享的横向点条：rows 行 × ROW_COLS 列，前 filled 列点亮。进度卡也用它，保证点径一致。 */
+export function renderDotRowSvg(filled: number, color: string, rows = 2): string {
+  const n = Math.max(0, Math.min(ROW_COLS, Math.round(filled)))
+  let dots = ''
+  for (let r = 0; r < rows; r++) for (let c = 0; c < ROW_COLS; c++) dots += dot(PITCH / 2 + c * PITCH, PITCH / 2 + r * PITCH, c < n, color)
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${ROW_COLS * PITCH} ${rows * PITCH}" style="width:100%;height:auto;display:block;" role="img">${dots}</svg>`
+}
+
+export const READY_DOT_ROW_COLS = ROW_COLS
+
 function renderDotHBar(data: ReadyChartDatum[], options: ReadyChartOptions, opts?: { percentOfTotal?: boolean }): string {
-  const unit = resolveFieldUnit(Math.max(...data.map((d) => d.value), 1))
+  const unit = resolveRowUnit(Math.max(...data.map((d) => d.value), 1))
   const total = data.reduce((acc, d) => acc + Math.max(d.value, 0), 0) || 1
-  const cols = 34
+  const unitIsPercent = /%/.test(options.unitLabel || '')
+  // 名称落在标签栏（2 栏），点条 8 栏，数值 2 栏右对齐——与卡片里其他行同一网格。
   const rows = data.map((d, i) => {
-    const filled = Math.max(0, Math.min(cols, Math.round(Math.max(d.value, 0) / unit)))
-    const color = markColor(i, options.hot)
-    let dots = ''
-    for (let r = 0; r < 2; r++) for (let c = 0; c < cols; c++) dots += dot(PITCH / 2 + c * PITCH, PITCH / 2 + r * PITCH, c < filled, color)
-    const percent = opts?.percentOfTotal ? ` <span class="muted">· ${Math.round((Math.max(d.value, 0) / total) * 100)}%</span>` : ''
-    return `<div style="display:grid;grid-template-columns:minmax(56px,auto) 1fr auto;gap:12px;align-items:center;">
-      <div style="font-size:12px;color:${INK2};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(d.label)}</div>
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${cols * PITCH} ${2 * PITCH}" style="width:100%;height:auto;display:block;" role="img">${dots}</svg>
-      <div class="num" style="font-size:12px;color:${INK};">${valueText(d.value, options.unitLabel)}${percent}</div>
-    </div>`
+    const filled = Math.max(d.value, 0) / unit
+    const percent = opts?.percentOfTotal && !unitIsPercent ? ` <span class="muted">· ${Math.round((Math.max(d.value, 0) / total) * 100)}%</span>` : ''
+    return `<div class="span-2" style="font-size:13px;line-height:20px;color:${INK};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(d.label)}</div>
+      <div class="span-8" style="padding-top:1px;">${renderDotRowSvg(filled, markColor(i, options.hot))}</div>
+      <div class="num span-2" style="font-size:12px;line-height:20px;color:${INK};text-align:right;white-space:nowrap;">${valueText(d.value, options.unitLabel)}${percent}</div>`
   }).join('')
-  return `<div class="stack" style="gap:10px;">${rows}${fieldLegend(unit, options.unitLabel, 'col')}</div>`
+  return `<div class="stack" style="gap:16px;"><div class="grid keep-row" style="row-gap:14px;align-items:center;">${rows}</div>${fieldLegend(unit, options.unitLabel, 'col')}</div>`
 }
 
 function renderDotBar(data: ReadyChartDatum[], options: ReadyChartOptions): string {
@@ -189,51 +206,66 @@ function renderDotLine(data: ReadyChartDatum[], options: ReadyChartOptions): str
   const min = Math.min(...data.map((d) => d.value), 0)
   const range = max - min || 1
   const rows = 18
-  const top = 24
+  const top = 26
   const fieldH = rows * PITCH
-  const h = top + fieldH + 26
-  const padX = 26
+  const h = top + fieldH + 28
+  const padX = 30
   const cols = Math.floor((FIELD_W - padX * 2) / PITCH)
   const x0 = (FIELD_W - cols * PITCH) / 2 + PITCH / 2
-  const colOf = (i: number) => Math.round((i / (data.length - 1)) * (cols - 1))
-  const levelOf = (v: number) => Math.round(((v - min) / range) * (rows - 1))
-  // 在每一列上插值出折线所在的行，折线本身由点亮的点组成
-  const lineRow: number[] = []
-  for (let c = 0; c < cols; c++) {
-    const pos = (c / (cols - 1)) * (data.length - 1)
-    const i = Math.min(Math.floor(pos), data.length - 2)
-    const t = pos - i
-    lineRow[c] = Math.round(levelOf(data[i].value) * (1 - t) + levelOf(data[i + 1].value) * t)
+  const xEnd = x0 + (cols - 1) * PITCH
+  const yBottom = top + PITCH / 2 + (rows - 1) * PITCH
+  const yTop = top + PITCH / 2
+  const xOf = (i: number) => x0 + (i / (data.length - 1)) * (xEnd - x0)
+  const yOf = (v: number) => yBottom - ((v - min) / range) * (yBottom - yTop)
+  const points = data.map((d, i) => ({ x: xOf(i), y: yOf(d.value) }))
+  const lineYAt = (x: number) => {
+    const span = (xEnd - x0) / (data.length - 1)
+    const i = Math.min(Math.max(Math.floor((x - x0) / span), 0), data.length - 2)
+    const t = (x - points[i].x) / (points[i + 1].x - points[i].x)
+    return points[i].y + (points[i + 1].y - points[i].y) * t
   }
-  const pointCols = new Map(data.map((d, i) => [colOf(i), i]))
-  let dots = ''
+  // 1) 点阵场：线下方的格点用退避灰“点亮”成面积，其余是淡底点。
+  let field = ''
   for (let c = 0; c < cols; c++) {
+    const cx = x0 + c * PITCH
+    const lineY = lineYAt(cx)
     for (let r = 0; r < rows; r++) {
-      const level = rows - 1 - r
-      const cx = x0 + c * PITCH
-      const cy = top + PITCH / 2 + r * PITCH
-      const prev = c > 0 ? lineRow[c - 1] : lineRow[c]
-      const lo = Math.min(prev, lineRow[c]), hi = Math.max(prev, lineRow[c])
-      const onLine = level === lineRow[c] || (level > lo && level < hi)
-      if (onLine && level !== lineRow[c]) {
-        dots += dot(cx, cy, true, DC_ON)
-      } else if (level === lineRow[c]) {
-        const pi = pointCols.get(c)
-        const color = pi == null ? DC_ON : markColor(pi, options.hot)
-        dots += pi == null ? dot(cx, cy, true, color) : `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${DOT_R + 1.4}" fill="${color}"/>`
-      } else {
-        dots += dot(cx, cy, false, DC_REST)
-      }
+      const cy = yTop + r * PITCH
+      field += cy > lineY + PITCH * 0.6
+        ? `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${REST_R}" fill="${DC_OFF}" fill-opacity="0.78"/>`
+        : dot(cx, cy, false, DC_REST)
     }
   }
-  const labels = data.map((d, i) => {
-    const cx = x0 + colOf(i) * PITCH
-    const cy = top + PITCH / 2 + (rows - 1 - levelOf(d.value)) * PITCH
-    return `<text x="${cx.toFixed(1)}" y="${(cy - 9).toFixed(1)}" text-anchor="middle" font-size="11" font-family="${MONO}" fill="${INK}">${escapeHtml(valueText(d.value, options.unitLabel))}</text>
-      <text x="${cx.toFixed(1)}" y="${(top + fieldH + 18).toFixed(1)}" text-anchor="middle" font-size="11" font-family="${MONO}" fill="${INK2}">${escapeHtml(d.label)}</text>`
+  // 2) 折线：沿真实线段等弧长落点，读起来是一条连续的点线而不是阶梯。
+  let line = ''
+  const step = 5.4
+  for (let i = 0; i < points.length - 1; i++) {
+    const p = points[i]
+    const q = points[i + 1]
+    const length = Math.hypot(q.x - p.x, q.y - p.y)
+    const n = Math.max(1, Math.round(length / step))
+    for (let k = 0; k < n; k++) {
+      const t = k / n
+      line += `<circle cx="${(p.x + (q.x - p.x) * t).toFixed(1)}" cy="${(p.y + (q.y - p.y) * t).toFixed(1)}" r="1.7" fill="${DC_ON}"/>`
+    }
+  }
+  // 3) 数据点 + 真值直标：首尾标签向内对齐，避免被画布裁掉。
+  const showAllLabels = data.length <= 8
+  const maxIndex = data.reduce((best, d, i) => (d.value > data[best].value ? i : best), 0)
+  const minIndex = data.reduce((best, d, i) => (d.value < data[best].value ? i : best), 0)
+  const marks = data.map((d, i) => {
+    const { x, y } = points[i]
+    const color = markColor(i, options.hot)
+    const anchor = i === 0 ? 'start' : i === data.length - 1 ? 'end' : 'middle'
+    const labelX = i === 0 ? x - 4 : i === data.length - 1 ? x + 4 : x
+    const labelled = showAllLabels || i === 0 || i === data.length - 1 || i === maxIndex || i === minIndex || i === options.hot
+    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.9" fill="${widgetVar('card')}"/>
+      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.9" fill="${color}"/>
+      ${labelled ? `<text x="${labelX.toFixed(1)}" y="${(y - 10).toFixed(1)}" text-anchor="${anchor}" font-size="11" font-weight="500" font-family="${MONO}" fill="${INK}">${escapeHtml(valueText(d.value, options.unitLabel))}</text>` : ''}
+      <text x="${labelX.toFixed(1)}" y="${(yBottom + 22).toFixed(1)}" text-anchor="${anchor}" font-size="11" font-family="${MONO}" fill="${INK2}">${escapeHtml(d.label)}</text>`
   }).join('')
   return `<div class="stack" style="gap:8px;">
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${FIELD_W} ${h}" style="width:100%;height:auto;display:block;" role="img">${dots}${labels}</svg>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${FIELD_W} ${h}" style="width:100%;height:auto;display:block;overflow:visible;" role="img">${field}${line}${marks}</svg>
   </div>`
 }
 
@@ -289,16 +321,16 @@ function renderScatter(data: ReadyChartDatum[], options: ReadyChartOptions): str
 
 function renderStackedGroups(data: ReadyChartDatum[], options: ReadyChartOptions): string {
   const flatValues = data.flatMap((d) => (d.parts?.length ? d.parts.map((p) => p.value) : [d.value]))
-  const unit = resolveFieldUnit(Math.max(...flatValues, 1))
+  const unit = resolveRowUnit(Math.max(...flatValues, 1))
   const groups = data.map((d, i) => {
     const parts = d.parts?.length ? d.parts : [{ label: d.label, value: d.value }]
     const total = parts.reduce((acc, p) => acc + Math.max(p.value, 0), 0)
     const rows = parts.map((p) => `<div style="display:grid;grid-template-columns:minmax(48px,auto) 1fr auto;gap:10px;align-items:center;">
       <div class="label" style="font-size:10px;">${escapeHtml(p.label)}</div>
-      ${fieldRow(Math.round(Math.max(p.value, 0) / unit), markColor(i, options.hot))}
+      ${renderDotRowSvg(Math.max(p.value, 0) / unit, markColor(i, options.hot), 1)}
       <div class="num" style="font-size:12px;color:${INK};">${valueText(p.value, options.unitLabel)}</div>
     </div>`).join('')
-    return `<div class="stack" style="gap:8px;padding:12px;border-radius:12px;background:${widgetVar('canvas')};border:1px solid ${HAIR};">
+    return `<div class="stack" style="gap:8px;padding-top:12px;border-top:1px solid ${HAIR};">
       <div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline;">
         <div style="font-size:13px;font-weight:600;color:${INK};">${escapeHtml(d.label)}</div>
         <div class="num" style="font-size:12px;color:${INK2};">Σ ${valueText(total, options.unitLabel)}</div>

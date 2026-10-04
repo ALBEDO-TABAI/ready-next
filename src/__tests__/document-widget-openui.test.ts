@@ -184,9 +184,12 @@ describe('document widget OpenUI compiler', () => {
     assert.match(compiled.widgetCode, /data-rg-node="duke"/)
     assert.match(compiled.widgetCode, /data-rg-group-panel="core"/)
     assert.match(compiled.widgetCode, /data-rg-group="core"/)
-    assert.match(compiled.widgetCode, /ResizeObserver/)
-    assert.match(compiled.widgetCode, /getBoundingClientRect/)
-    assert.match(compiled.widgetCode, /railRoute/)
+    // 连线由编译期确定性布局给出，不依赖运行时测量脚本：静态投影/书本/导出同样可见。
+    assert.doesNotMatch(compiled.widgetCode, /<script/i)
+    const wideLayout = compiled.widgetCode.match(/<svg class="rg-layout rg-layout--wide"[\s\S]*?<\/svg>/)?.[0] || ''
+    assert.equal((wideLayout.match(/class="rg-edge-line"/g) || []).length, 3)
+    assert.match(compiled.widgetCode, /rg-layout--narrow/)
+    assert.match(compiled.widgetCode, /@container/)
     assert.match(compiled.widgetCode, /rg-edge-dot/)
     assert.match(compiled.widgetCode, /rg-edge-label-bg/)
     assert.match(compiled.widgetCode, /梅诗金公爵/)

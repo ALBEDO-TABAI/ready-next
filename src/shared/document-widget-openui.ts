@@ -1,7 +1,14 @@
 import { z } from 'zod'
 import { createLibrary, defineComponent } from './openui-lite'
-import { renderReadyChart } from './document-widget-dot-charts'
+import { READY_DOT_ROW_COLS, renderDotRowSvg, renderReadyChart } from './document-widget-dot-charts'
 import { widgetVar } from './document-widget-theme'
+import {
+  renderWidgetChrome,
+  renderWidgetDotList,
+  renderWidgetHeading,
+  renderWidgetLabelRow,
+  type WidgetKickerTone,
+} from './document-widget-chassis'
 import {
   compileReadyInfoCard,
   resolveInfoCardKicker,
@@ -588,62 +595,98 @@ function escapeAttr(value: string): string {
 }
 
 function renderHeader(heading?: string): string {
-  return heading ? `<div class="title">${escapeHtml(heading)}</div>` : ''
+  return renderWidgetHeading(heading)
 }
+
+const INK = widgetVar('ink')
+const INK2 = widgetVar('ink2')
+const INK3 = widgetVar('ink3')
+const INK_BODY = widgetVar('inkBody')
+const HAIR = widgetVar('hair')
+const CANVAS = widgetVar('canvas')
+const ACCENT = widgetVar('accent')
+const ACCENT_WASH = widgetVar('accentWash')
 
 function buildButtonRow(items: Array<{ label: string; message: string }>): string {
   if (items.length === 0) return ''
-  return `<div class="widget-actions" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;">${items.map((item) => (
-    `<button data-ready-agent-message="${escapeAttr(item.message)}" style="border:1px solid ${widgetVar('hair')};border-radius:999px;padding:7px 12px;background:${widgetVar('accentSoft')};color:${widgetVar('accent')};font-size:12px;font-weight:500;cursor:pointer;">${escapeHtml(item.label)}</button>`
+  return `<div class="widget-actions" style="display:flex;gap:8px;flex-wrap:wrap;">${items.map((item) => (
+    `<button data-ready-agent-message="${escapeAttr(item.message)}" style="display:inline-flex;align-items:center;gap:7px;border:0;border-radius:999px;padding:6px 13px 6px 11px;background:var(--widget-bg-secondary, rgba(26,26,26,.035));color:${INK};font-size:12px;font-weight:500;line-height:16px;cursor:pointer;"><span style="width:5px;height:5px;border-radius:50%;background:${ACCENT};"></span>${escapeHtml(item.label)}</button>`
   )).join('')}</div>`
 }
 
+function renderSegmented(attr: 'data-tab-target' | 'data-focus-target', className: string, items: Array<{ target: string; label: string }>): string {
+  return `<div class="segmented" role="tablist">${items.map((item, index) => (
+    `<button ${attr}="${escapeAttr(item.target)}" class="${className}${index === 0 ? ' is-active' : ''}" role="tab">${escapeHtml(item.label)}</button>`
+  )).join('')}</div>`
+}
+
+/** 分段切换脚本：只切 is-active 与面板显隐，视觉全部交给 .segmented 类层。 */
+function segmentedScript(buttonSelector: string, attr: string, panelAttr: string): string {
+  return `<script>(function(){const root=document.currentScript && document.currentScript.parentElement;if(!root)return;const buttons=Array.from(root.querySelectorAll('${buttonSelector}'));const panels=Array.from(root.querySelectorAll('[${panelAttr}]'));buttons.forEach((button)=>{button.addEventListener('click',()=>{const target=button.getAttribute('${attr}');buttons.forEach((btn)=>btn.classList.toggle('is-active',btn===button));panels.forEach((panel)=>{panel.style.display=panel.getAttribute('${panelAttr}')===target?'block':'none';});});});})();</script>`
+}
+
 function compileStatsCard(props: z.infer<typeof componentSchemas.stats_card>): string {
-  const cols = Math.min(props.metrics.length, 4)
-  const cells = props.metrics.map((metric) => `<div class="stack" style="gap:6px;padding:14px;border-radius:12px;background:${widgetVar('canvas')};border:1px solid ${widgetVar('hair')};">
+  const cols = props.metrics.length <= 4 ? props.metrics.length : 3
+  const span = 12 / Math.max(1, cols)
+  const cells = props.metrics.map((metric) => `<div data-metric class="span-${span}" style="min-width:0;">
     <div class="label" style="font-size:10px;">${escapeHtml(metric.label)}</div>
-    <div class="num" style="font-size:28px;font-weight:600;color:${widgetVar('ink')};line-height:1;">${escapeHtml(metric.value)}</div>
-    ${metric.trend ? `<div class="num" style="font-size:12px;color:${widgetVar('ink2')};">${escapeHtml(metric.trend)}</div>` : ''}
+    <div class="num" style="margin-top:10px;font-size:32px;font-weight:500;letter-spacing:-0.02em;line-height:36px;color:${INK};white-space:nowrap;">${escapeHtml(metric.value)}</div>
+    ${metric.trend ? `<div class="num" style="margin-top:8px;font-size:11.5px;line-height:16px;letter-spacing:0.02em;color:${INK2};">${escapeHtml(metric.trend)}</div>` : ''}
   </div>`).join('')
-  return `<div class="card stack" style="gap:16px;">
+  return `<div class="card stack" style="gap:20px;">
+    ${renderWidgetChrome({ kicker: 'METRICS', meta: `${props.metrics.length} 项` })}
     ${renderHeader(props.heading)}
-    <div style="display:grid;grid-template-columns:repeat(${cols},minmax(0,1fr));gap:10px;">${cells}</div>
+    <div class="grid keep-pairs" style="row-gap:28px;padding-top:4px;">${cells}</div>
   </div>`
 }
 
+function renderOpenuiInsight(text: string): string {
+  return `<div data-chart-insight>${renderWidgetLabelRow('INSIGHT', `<div style="font-size:14px;line-height:22px;color:${INK};">${escapeHtml(text)}</div>`, { labelColor: ACCENT })}</div>`
+}
+
 function compileSimpleBarChart(props: z.infer<typeof componentSchemas.bar_chart>): string {
-  return `<div class="card stack" style="gap:14px;">
+  return `<div class="card stack" style="gap:20px;">
+    ${renderWidgetChrome({ kicker: 'DATA', meta: props.yLabel ? `单位 · ${props.yLabel}` : `${props.series.length} 项` })}
     ${renderHeader(props.heading)}
-    ${renderReadyChart({
+    <div>${renderReadyChart({
       type: 'bar',
       data: props.series.map((item) => ({ label: item.label, value: item.value })),
       unitLabel: props.yLabel,
-    })}
+    })}</div>
   </div>`
 }
 
 function compileSimpleLineChart(props: z.infer<typeof componentSchemas.line_chart>): string {
-  return `<div class="card stack" style="gap:14px;">
+  return `<div class="card stack" style="gap:20px;">
+    ${renderWidgetChrome({ kicker: 'TREND', meta: props.yLabel ? `单位 · ${props.yLabel}` : `${props.series.length} 点` })}
     ${renderHeader(props.heading)}
-    ${renderReadyChart({
+    <div>${renderReadyChart({
       type: 'line',
       data: props.series.map((item) => ({ label: item.label, value: item.value })),
       unitLabel: props.yLabel,
-    })}
-    ${props.annotation ? `<div style="display:flex;gap:8px;align-items:baseline;"><span class="label" style="color:${widgetVar('accent')};">INSIGHT</span><span style="font-size:13px;color:${widgetVar('inkBody')};">${escapeHtml(props.annotation)}</span></div>` : ''}
+    })}</div>
+    ${props.annotation ? renderOpenuiInsight(props.annotation) : ''}
   </div>`
 }
 
+const NUMERIC_CELL = /^[\s+\-−±~≈]*[¥$€£]?\s*\d[\d,.\s]*(?:%|‰|[a-zA-Z]{1,3}|[万亿千百倍元次个人天小时分秒])?\s*$/
+
 function compileDataTable(props: z.infer<typeof componentSchemas.data_table>): string {
-  return `<div class="card stack" style="gap:14px;">
+  // 三线表：顶线与表头线用 hairline，行间极淡；整列都是数值时右对齐并用 tabular mono。
+  const numericColumns = props.columns.map((_, columnIndex) => {
+    const cells = props.rows.map((row) => (row[columnIndex] ?? '').trim()).filter(Boolean)
+    return cells.length > 0 && cells.every((cell) => NUMERIC_CELL.test(cell))
+  })
+  return `<div class="card stack" style="gap:20px;">
+    ${renderWidgetChrome({ kicker: 'TABLE', meta: `${props.rows.length} 行 · ${props.columns.length} 列` })}
     ${renderHeader(props.heading)}
-    <div style="overflow:auto;">
-      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+    <div style="overflow:auto;border-top:1px solid ${HAIR};border-bottom:1px solid ${HAIR};">
+      <table style="width:100%;border-collapse:collapse;font-size:13px;line-height:1.55;font-variant-numeric:tabular-nums;">
         <thead>
-          <tr>${props.columns.map((column) => `<th class="label" style="text-align:left;padding:10px 12px;border-bottom:1px solid ${widgetVar('hair')};">${escapeHtml(column)}</th>`).join('')}</tr>
+          <tr>${props.columns.map((column, columnIndex) => `<th class="label" style="text-align:${numericColumns[columnIndex] ? 'right' : 'left'};font-size:10px;padding:11px ${columnIndex === props.columns.length - 1 ? 0 : 12}px 10px ${columnIndex === 0 ? 0 : 12}px;border-bottom:1px solid var(--widget-border, #E8E5DE);">${escapeHtml(column)}</th>`).join('')}</tr>
         </thead>
         <tbody>
-          ${props.rows.map((row) => `<tr>${row.map((cell) => `<td style="padding:10px 12px;border-bottom:1px solid ${widgetVar('hairV')};color:${widgetVar('inkBody')};">${escapeHtml(cell)}</td>`).join('')}</tr>`).join('')}
+          ${props.rows.map((row, rowIndex) => `<tr>${row.map((cell, cellIndex) => `<td${numericColumns[cellIndex] ? ' class="num"' : ''} style="padding:10px ${cellIndex === row.length - 1 ? 0 : 12}px 10px ${cellIndex === 0 ? 0 : 12}px;${rowIndex < props.rows.length - 1 ? `border-bottom:1px solid ${widgetVar('hairV')};` : ''}color:${cellIndex === 0 ? INK : INK_BODY};${cellIndex === 0 ? 'font-weight:500;' : ''}${numericColumns[cellIndex] ? 'text-align:right;font-size:12.5px;white-space:nowrap;' : ''}">${escapeHtml(cell)}</td>`).join('')}</tr>`).join('')}
         </tbody>
       </table>
     </div>
@@ -652,78 +695,83 @@ function compileDataTable(props: z.infer<typeof componentSchemas.data_table>): s
 
 function compileCalloutBlock(props: z.infer<typeof componentSchemas.callout_block>): string {
   const resolvedTone = props.tone || 'info'
-  const tones: Record<z.infer<typeof calloutToneSchema>, { bg: string; border: string; edge: string; label: string; labelColor: string }> = {
-    info: { bg: widgetVar('canvas'), border: widgetVar('hair'), edge: 'transparent', label: '提示', labelColor: widgetVar('ink2') },
-    success: { bg: widgetVar('canvas'), border: widgetVar('hair'), edge: widgetVar('ok'), label: '完成', labelColor: widgetVar('ink2') },
-    warning: { bg: widgetVar('accentSoft'), border: widgetVar('hair'), edge: widgetVar('accent'), label: '提醒', labelColor: widgetVar('accent') },
-    danger: { bg: widgetVar('accentSoft'), border: widgetVar('accent'), edge: widgetVar('accent'), label: '风险', labelColor: widgetVar('accent') },
-    neutral: { bg: widgetVar('canvas'), border: widgetVar('hair'), edge: 'transparent', label: '说明', labelColor: widgetVar('ink2') },
+  // 语气只落在身份行圆点与结论底色上（极浅），正文永不穿彩。
+  const tones: Record<z.infer<typeof calloutToneSchema>, { surface: string; label: string; kicker: WidgetKickerTone }> = {
+    info: { surface: CANVAS, label: '提示', kicker: 'ink' },
+    success: { surface: CANVAS, label: '完成', kicker: 'ok' },
+    warning: { surface: ACCENT_WASH, label: '提醒', kicker: 'accent' },
+    danger: { surface: ACCENT_WASH, label: '风险', kicker: 'accent' },
+    neutral: { surface: CANVAS, label: '说明', kicker: 'quiet' },
   }
   const tone = tones[resolvedTone]
-  return `<div class="card stack" style="gap:10px;padding:18px 20px;background:${tone.bg};border:1px solid ${tone.border};border-left:3px solid ${tone.edge === 'transparent' ? tone.border : tone.edge};">
-    <div class="label" style="color:${tone.labelColor};">${tone.label}</div>
+  return `<div class="card stack" style="gap:20px;">
+    ${renderWidgetChrome({ kicker: tone.label, tone: tone.kicker })}
     ${props.heading ? `<div class="title">${escapeHtml(props.heading)}</div>` : ''}
-    <div style="font-size:14px;line-height:1.7;color:${widgetVar('inkBody')};">${escapeHtml(props.body)}</div>
-    ${props.points?.length ? `<ul style="margin:0;padding-left:18px;">${props.points.map((point) => `<li style="margin:6px 0;">${escapeHtml(point)}</li>`).join('')}</ul>` : ''}
+    <div style="padding:16px 20px;border-radius:10px;background:${tone.surface};font-size:15px;line-height:26px;color:${INK};text-wrap:pretty;">${escapeHtml(props.body)}</div>
+    ${props.points?.length ? renderWidgetDotList(props.points, { size: 13.5, gap: 6 }) : ''}
   </div>`
 }
 
 function compileTabInfoBlock(props: z.infer<typeof componentSchemas.tab_info_block>): string {
-  const tabs = props.tabs.map((tab, index) => `
-    <button data-tab-target="tab-${index}" class="tab-button${index === 0 ? ' is-active' : ''}" style="border:0;border-radius:999px;padding:8px 12px;background:${index === 0 ? widgetVar('accentSoft') : widgetVar('canvas')};cursor:pointer;">${escapeHtml(tab.label)}</button>
-  `).join('')
+  const tabs = renderSegmented('data-tab-target', 'tab-button', props.tabs.map((tab, index) => ({ target: `tab-${index}`, label: tab.label })))
   const panels = props.tabs.map((tab, index) => `
     <section data-tab-panel="tab-${index}" style="display:${index === 0 ? 'block' : 'none'};">
-      <div class="subtitle">${escapeHtml(tab.body)}</div>
-      ${(tab.points || []).length ? `<ul style="margin-top:10px;padding-left:18px;">${(tab.points || []).map((point) => `<li style="margin:6px 0;">${escapeHtml(point)}</li>`).join('')}</ul>` : ''}
+      <div style="font-size:14.5px;line-height:24px;color:${INK};text-wrap:pretty;">${escapeHtml(tab.body)}</div>
+      ${(tab.points || []).length ? `<div style="margin-top:12px;">${renderWidgetDotList(tab.points || [], { size: 13.5, gap: 7 })}</div>` : ''}
     </section>
   `).join('')
-  return `<div class="card stack" style="gap:14px;">
+  return `<div class="card stack" style="gap:20px;">
+    ${renderWidgetChrome({ kicker: 'BRIEF', meta: `${props.tabs.length} 组` })}
     ${renderHeader(props.heading)}
-    <div style="display:flex;gap:8px;flex-wrap:wrap;">${tabs}</div>
+    ${tabs}
     <div>${panels}</div>
-    <script>(function(){const root=document.currentScript && document.currentScript.parentElement; if(!root) return; const buttons=Array.from(root.querySelectorAll('.tab-button')); const panels=Array.from(root.querySelectorAll('[data-tab-panel]')); buttons.forEach((button)=>{button.addEventListener('click',()=>{const target=button.getAttribute('data-tab-target'); buttons.forEach((btn)=>{btn.classList.remove('is-active'); btn.style.background='var(--widget-bg-secondary, #F0EFED)';}); panels.forEach((panel)=>{panel.style.display=panel.getAttribute('data-tab-panel')===target?'block':'none';}); button.classList.add('is-active'); button.style.background='var(--widget-accent-soft, rgba(255,75,43,.12))';});});})();</script>
+    ${segmentedScript('.tab-button', 'data-tab-target', 'data-tab-panel')}
   </div>`
 }
 
 function compileComparisonGrid(props: z.infer<typeof componentSchemas.comparison_grid>): string {
-  return `<div class="card stack" style="gap:14px;">
+  const span = 12 / props.columns.length
+  return `<div class="card stack" style="gap:20px;">
+    ${renderWidgetChrome({ kicker: 'COMPARE', meta: `${props.columns.length} 方案` })}
     ${renderHeader(props.heading)}
-    <div style="display:grid;grid-template-columns:repeat(${props.columns.length}, minmax(0,1fr));gap:12px;">
-      ${props.columns.map((column) => `<section style="padding:14px;border-radius:12px;background:${widgetVar('canvas')};border:1px solid ${widgetVar('hair')};">
-        <div style="font-weight:600;color:${widgetVar('ink')};margin-bottom:8px;">${escapeHtml(column.title)}</div>
-        <ul style="margin:0;padding-left:18px;">${column.points.map((point) => `<li style="margin:6px 0;">${escapeHtml(point)}</li>`).join('')}</ul>
+    <div class="grid">
+      ${props.columns.map((column, index) => `<section class="span-${span} stack" style="gap:12px;min-width:0;">
+        <div style="display:flex;align-items:baseline;gap:10px;"><span class="num" style="font-size:10.5px;color:${INK3};">${String.fromCharCode(65 + index)}</span><span style="font-size:15px;font-weight:600;line-height:22px;color:${INK};">${escapeHtml(column.title)}</span></div>
+        ${renderWidgetDotList(column.points, { size: 13.5, gap: 8 })}
       </section>`).join('')}
     </div>
   </div>`
 }
 
 function compileProgressSnapshot(props: z.infer<typeof componentSchemas.progress_snapshot>): string {
-  return `<div class="card stack" style="gap:12px;">
+  // 进度：名称落在标签栏（2 栏），点阵 8 栏（与横向点条同一节距），数值 2 栏右对齐。
+  const rows = props.items.map((item) => {
+    const max = item.max || 100
+    const ratio = item.value / max
+    return `<span class="span-2" style="font-size:13.5px;line-height:20px;color:${INK};min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(item.label)}</span>
+      <div class="span-8">${renderDotRowSvg(Math.max(0, Math.min(1, ratio)) * READY_DOT_ROW_COLS, widgetVar('dcOn'), 1)}</div>
+      <span class="num span-2" style="font-size:12px;line-height:20px;color:${INK};text-align:right;white-space:nowrap;">${escapeHtml(item.displayValue || `${item.value}/${max}`)}</span>`
+  }).join('')
+  const average = props.items.reduce((sum, item) => sum + Math.max(0, Math.min(1, item.value / (item.max || 100))), 0) / Math.max(props.items.length, 1)
+  return `<div class="card stack" style="gap:20px;">
+    ${renderWidgetChrome({ kicker: 'PROGRESS', meta: `平均 ${Math.round(average * 100)}%` })}
     ${renderHeader(props.heading)}
-    ${props.items.map((item) => {
-      const max = item.max || 100
-      const ratio = Math.max(0, Math.min(100, (item.value / max) * 100))
-      return `<div class="stack" style="gap:6px;">
-        <div style="display:flex;justify-content:space-between;gap:12px;font-size:13px;"><span>${escapeHtml(item.label)}</span><span>${escapeHtml(item.displayValue || `${item.value}/${max}`)}</span></div>
-        <div style="height:8px;border-radius:999px;background:${widgetVar('dcRest')};overflow:hidden;"><div style="height:100%;width:${ratio}%;background:${widgetVar('accent')};border-radius:999px;"></div></div>
-      </div>`
-    }).join('')}
+    <div class="grid keep-row" style="row-gap:14px;align-items:center;padding-top:4px;">${rows}</div>
   </div>`
 }
 
 function compileDayScheduleCard(props: z.infer<typeof componentSchemas.day_schedule_card>): string {
-  return `<div class="card stack" style="gap:14px;">
+  const rows = props.events.length > 0
+    ? props.events.map((event) => `<div class="num span-2" style="padding-top:3px;font-size:11.5px;line-height:16px;color:${INK2};white-space:nowrap;">${escapeHtml(event.timeLabel)}</div>
+        <div class="span-10" style="min-width:0;">
+          <div style="font-size:14.5px;font-weight:600;line-height:22px;color:${INK};">${escapeHtml(event.title)}</div>
+          ${event.meta ? `<div style="font-size:13px;line-height:20px;color:${INK2};margin-top:2px;">${escapeHtml(event.meta)}</div>` : ''}
+        </div>`).join('')
+    : `<div class="subtitle span-12">今天没有已记录安排。</div>`
+  return `<div class="card stack" style="gap:20px;">
+    ${renderWidgetChrome({ kicker: 'SCHEDULE', meta: `${props.dateLabel} · ${props.events.length} 项` })}
     ${renderHeader(props.heading || props.dateLabel)}
-    <div style="display:grid;gap:10px;">
-      ${props.events.length > 0 ? props.events.map((event) => `<div style="padding:12px 14px;border-radius:12px;background:${widgetVar('canvas')};border:1px solid ${widgetVar('hair')};display:flex;justify-content:space-between;gap:12px;">
-        <div>
-          <div style="font-weight:600;color:${widgetVar('ink')};">${escapeHtml(event.title)}</div>
-          ${event.meta ? `<div style="font-size:12px;color:${widgetVar('ink2')};">${escapeHtml(event.meta)}</div>` : ''}
-        </div>
-        <div class="num" style="white-space:nowrap;color:${widgetVar('accent')};font-size:13px;font-weight:500;">${escapeHtml(event.timeLabel)}</div>
-      </div>`).join('') : '<div class="subtitle">今天没有已记录安排。</div>'}
-    </div>
+    <div class="grid" style="row-gap:20px;padding-top:4px;">${rows}</div>
     ${buildButtonRow([
       { label: '打开日历', message: `请切换到日历模式并查看${props.dateLabel}的安排。` },
       { label: '新增事件', message: `请在日历里新增一个${props.dateLabel}的事件。` },
@@ -731,27 +779,33 @@ function compileDayScheduleCard(props: z.infer<typeof componentSchemas.day_sched
   </div>`
 }
 
+function renderFocusItems(items: Array<{ label: string; detail?: string }>): string {
+  return `<div class="grid" style="row-gap:16px;">${items.map((item, index) => `<span class="num span-2" style="padding-top:3px;font-size:11.5px;line-height:16px;color:${INK3};">${String(index + 1).padStart(2, '0')}</span>
+    <div class="span-10" style="min-width:0;"><div style="font-size:14.5px;font-weight:600;line-height:22px;color:${INK};">${escapeHtml(item.label)}</div>${item.detail ? `<div style="font-size:13px;line-height:20px;color:${INK2};margin-top:2px;">${escapeHtml(item.detail)}</div>` : ''}</div>`).join('')}</div>`
+}
+
 function compileWeeklyFocusChart(props: z.infer<typeof componentSchemas.weekly_focus_chart>): string {
-  const currentItems = props.currentItems.map((item) => `<li style="margin:6px 0;"><strong>${escapeHtml(item.label)}</strong>${item.detail ? `：${escapeHtml(item.detail)}` : ''}</li>`).join('')
-  const nextItems = props.nextItems.map((item) => `<li style="margin:6px 0;"><strong>${escapeHtml(item.label)}</strong>${item.detail ? `：${escapeHtml(item.detail)}` : ''}</li>`).join('')
-  return `<div class="card stack" style="gap:14px;">
+  return `<div class="card stack" style="gap:20px;">
+    ${renderWidgetChrome({ kicker: 'FOCUS', meta: `${props.currentItems.length} · ${props.nextItems.length}` })}
     ${renderHeader(props.heading)}
-    <div style="display:flex;gap:8px;flex-wrap:wrap;">
-      <button data-focus-target="current" class="focus-toggle is-active" style="border:0;border-radius:999px;padding:8px 12px;background:${widgetVar('accentSoft')};cursor:pointer;">${escapeHtml(props.currentLabel)}</button>
-      <button data-focus-target="next" class="focus-toggle" style="border:0;border-radius:999px;padding:8px 12px;background:${widgetVar('canvas')};cursor:pointer;">${escapeHtml(props.nextLabel)}</button>
-    </div>
-    <section data-focus-panel="current"><ul style="margin:0;padding-left:18px;">${currentItems}</ul></section>
-    <section data-focus-panel="next" style="display:none;"><ul style="margin:0;padding-left:18px;">${nextItems}</ul></section>
-    <script>(function(){const root=document.currentScript && document.currentScript.parentElement;if(!root)return;const buttons=Array.from(root.querySelectorAll('[data-focus-target]'));const panels=Array.from(root.querySelectorAll('[data-focus-panel]'));buttons.forEach((button)=>{button.addEventListener('click',()=>{const target=button.getAttribute('data-focus-target');buttons.forEach((btn)=>{btn.classList.remove('is-active');btn.style.background='var(--widget-bg-secondary, #F0EFED)';});panels.forEach((panel)=>{panel.style.display=panel.getAttribute('data-focus-panel')===target?'block':'none';});button.classList.add('is-active');button.style.background='var(--widget-accent-soft, rgba(255,75,43,.12))';});});})();</script>
+    ${renderSegmented('data-focus-target', 'focus-toggle', [
+      { target: 'current', label: props.currentLabel },
+      { target: 'next', label: props.nextLabel },
+    ])}
+    <section data-focus-panel="current">${renderFocusItems(props.currentItems)}</section>
+    <section data-focus-panel="next" style="display:none;">${renderFocusItems(props.nextItems)}</section>
+    ${segmentedScript('[data-focus-target]', 'data-focus-target', 'data-focus-panel')}
   </div>`
 }
 
 function compileMiniCalculator(props: z.infer<typeof componentSchemas.mini_calculator>): string {
-  const inputs = props.fields.map((field) => `<label class="stack" style="gap:6px;"><span>${escapeHtml(field.label)}</span><input type="number" id="${escapeAttr(field.id)}" ${field.min != null ? `min="${field.min}"` : ''} ${field.max != null ? `max="${field.max}"` : ''} ${field.value != null ? `value="${field.value}"` : ''} /></label>`).join('')
-  return `<div class="card stack" style="gap:14px;">
+  const span = props.fields.length >= 3 ? 4 : 6
+  const inputs = props.fields.map((field) => `<label class="span-${span} stack" style="gap:6px;min-width:0;"><span class="label" style="font-size:10px;">${escapeHtml(field.label)}</span><input type="number" id="${escapeAttr(field.id)}" ${field.min != null ? `min="${field.min}"` : ''} ${field.max != null ? `max="${field.max}"` : ''} ${field.value != null ? `value="${field.value}"` : ''} class="num" style="font-size:16px;" /></label>`).join('')
+  return `<div class="card stack" style="gap:20px;">
+    ${renderWidgetChrome({ kicker: 'CALCULATOR', meta: `${props.fields.length} 项输入` })}
     ${renderHeader(props.heading)}
-    ${inputs}
-    <div class="card" style="text-align:center;"><div class="subtitle">${escapeHtml(props.outputLabel)}</div><div id="calculator-output" class="title">-</div></div>
+    <div class="grid keep-pairs" style="row-gap:20px;">${inputs}</div>
+    ${renderWidgetLabelRow(props.outputLabel, `<span id="calculator-output" class="figure" style="font-size:32px;line-height:36px;">-</span>`)}
     <script>(function(){const root=document.currentScript && document.currentScript.parentElement;if(!root)return;const inputs=Array.from(root.querySelectorAll('input[type="number"]'));const output=root.querySelector('#calculator-output');const render=()=>{if(!output)return;const values=inputs.map((input)=>Number(input.value||0));if(values.every((value)=>value===0)&&inputs.every((input)=>input.value==='')){output.textContent='-';return;}const total=values.reduce((sum,value)=>sum+value,0)/Math.max(values.length,1);output.textContent=String(total.toFixed(1));};inputs.forEach((input)=>input.addEventListener('input',render));render();})();</script>
   </div>`
 }
@@ -761,13 +815,15 @@ function compileFlowDiagram(props: z.infer<typeof componentSchemas.flow_diagram>
 }
 
 function compileWeekScheduleCard(props: z.infer<typeof componentSchemas.week_schedule_card>): string {
-  return `<div class="card stack" style="gap:14px;">
+  const total = props.days.reduce((sum, day) => sum + day.count, 0)
+  const span = 12 / Math.min(props.days.length, 4)
+  return `<div class="card stack" style="gap:20px;">
+    ${renderWidgetChrome({ kicker: 'WEEK', meta: `${props.weekLabel} · ${total} 项` })}
     ${renderHeader(props.heading || props.weekLabel)}
-    <div style="display:grid;grid-template-columns:repeat(${Math.min(props.days.length, 4)}, minmax(0,1fr));gap:10px;">
-      ${props.days.map((day) => `<section style="padding:12px;border-radius:12px;background:${widgetVar('canvas')};border:1px solid ${widgetVar('hair')};">
-        <div style="font-weight:600;color:${widgetVar('ink')};">${escapeHtml(day.label)}</div>
-        <div class="num" style="font-size:12px;color:${widgetVar('ink2')};margin-top:4px;">${day.count} 个安排</div>
-        ${(day.highlights || []).length ? `<ul style="margin:10px 0 0;padding-left:18px;">${(day.highlights || []).map((item) => `<li style="margin:4px 0;">${escapeHtml(item)}</li>`).join('')}</ul>` : `<div style="margin-top:10px;font-size:12px;color:${widgetVar('ink3')};">暂无重点</div>`}
+    <div class="grid keep-pairs" style="row-gap:24px;">
+      ${props.days.map((day) => `<section class="span-${span}" style="min-width:0;padding-top:10px;border-top:1px solid ${HAIR};">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;"><span style="font-size:14px;font-weight:600;line-height:22px;color:${INK};">${escapeHtml(day.label)}</span><span class="num" style="font-size:11px;color:${day.count > 0 ? INK2 : INK3};">${day.count}</span></div>
+        ${(day.highlights || []).length ? `<div style="margin-top:8px;">${renderWidgetDotList(day.highlights || [], { size: 12.5, gap: 4 })}</div>` : `<div style="margin-top:8px;font-size:12.5px;line-height:20px;color:${INK3};">暂无重点</div>`}
       </section>`).join('')}
     </div>
     ${buildButtonRow([{ label: '查看本周日历', message: `请切换到日历模式并查看${props.weekLabel}。` }])}
@@ -775,7 +831,9 @@ function compileWeekScheduleCard(props: z.infer<typeof componentSchemas.week_sch
 }
 
 function compileTimeAllocationChart(props: z.infer<typeof componentSchemas.time_allocation_chart>): string {
-  return `<div class="card stack" style="gap:14px;">
+  const total = props.segments.reduce((sum, segment) => sum + Math.max(segment.value, 0), 0)
+  return `<div class="card stack" style="gap:20px;">
+    ${renderWidgetChrome({ kicker: 'TIME', meta: `${props.periodLabel} · ${Math.round(total * 10) / 10} h` })}
     ${renderHeader(props.heading || props.periodLabel)}
     ${renderReadyChart({
       type: 'pie',
@@ -787,47 +845,56 @@ function compileTimeAllocationChart(props: z.infer<typeof componentSchemas.time_
 }
 
 function compileTodoListManual(props: z.infer<typeof componentSchemas.todo_list_manual>): string {
-  return `<div class="card stack" style="gap:14px;">
+  const doneCount = props.items.filter((item) => item.done).length
+  return `<div class="card stack" style="gap:20px;">
+    ${renderWidgetChrome({ kicker: 'TODO', meta: `${doneCount} / ${props.items.length} 完成` })}
     ${renderHeader(props.heading)}
-    <div style="display:grid;gap:10px;">
-      ${props.items.map((item, index) => `<label style="display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:12px;background:${widgetVar('canvas')};border:1px solid ${widgetVar('hair')};">
+    <div style="display:grid;border-top:1px solid ${HAIR};">
+      ${props.items.map((item, index) => `<label style="display:flex;gap:12px;align-items:flex-start;padding:11px 2px;border-bottom:1px solid ${HAIR};cursor:pointer;">
         <input type="checkbox" ${item.done ? 'checked' : ''} data-todo-index="${index}" />
-        <span style="flex:1;${item.done ? `text-decoration:line-through;color:${widgetVar('ink3')};` : ''}">${escapeHtml(item.text)}${item.note ? `<small style="display:block;margin-top:4px;color:${widgetVar('ink2')};">${escapeHtml(item.note)}</small>` : ''}</span>
+        <span style="flex:1;min-width:0;font-size:14px;line-height:1.5;${item.done ? `text-decoration:line-through;text-decoration-color:${INK3};color:${INK3};` : `color:${INK};`}">${escapeHtml(item.text)}${item.note ? `<small style="display:block;margin-top:2px;font-size:12px;color:${INK2};text-decoration:none;">${escapeHtml(item.note)}</small>` : ''}</span>
       </label>`).join('')}
     </div>
-    <script>(function(){const root=document.currentScript && document.currentScript.parentElement; if(!root) return; root.querySelectorAll('input[type="checkbox"]').forEach((box)=>{box.addEventListener('change',()=>{const text=box.parentElement && box.parentElement.querySelector('span'); if(text){text.style.textDecoration = box.checked ? 'line-through' : 'none'; text.style.color = box.checked ? 'var(--widget-text-faint, #999999)' : '';}});});})();</script>
+    <script>(function(){const root=document.currentScript && document.currentScript.parentElement; if(!root) return; root.querySelectorAll('input[type="checkbox"]').forEach((box)=>{box.addEventListener('change',()=>{const text=box.parentElement && box.parentElement.querySelector('span'); if(text){text.style.textDecoration = box.checked ? 'line-through' : 'none'; text.style.color = box.checked ? 'var(--widget-text-faint, #999999)' : 'var(--widget-text-primary, #1A1A1A)';}});});})();</script>
   </div>`
 }
 
 function compileWeeklyPlanBoard(props: z.infer<typeof componentSchemas.weekly_plan_board_manual>): string {
-  return `<div class="card stack" style="gap:14px;">
+  const span = 12 / props.lanes.length
+  // 看板：每列顶边一条 hairline + mono 列名，条目是对齐的纯文字行，不叠底板与卡片。
+  return `<div class="card stack" style="gap:20px;">
+    ${renderWidgetChrome({ kicker: 'PLAN', meta: `${props.lanes.length} 列` })}
     ${renderHeader(props.heading)}
-    <div style="display:grid;grid-template-columns:repeat(${props.lanes.length}, minmax(0,1fr));gap:12px;">
-      ${props.lanes.map((lane) => `<section style="padding:12px;border-radius:12px;background:${widgetVar('canvas')};border:1px solid ${widgetVar('hair')};">
-        <div style="font-weight:600;color:${widgetVar('ink')};margin-bottom:8px;">${escapeHtml(lane.title)}</div>
-        <ul style="margin:0;padding-left:18px;">${lane.items.map((item) => `<li style="margin:6px 0;">${escapeHtml(item)}</li>`).join('')}</ul>
+    <div class="grid keep-pairs">
+      ${props.lanes.map((lane) => `<section class="span-${span}" style="min-width:0;padding-top:10px;border-top:1px solid ${HAIR};">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:10px;"><span class="label" style="font-size:10px;color:${INK};">${escapeHtml(lane.title)}</span><span class="num" style="font-size:10.5px;color:${INK3};">${lane.items.length}</span></div>
+        ${renderWidgetDotList(lane.items, { size: 13.5, gap: 6 })}
       </section>`).join('')}
     </div>
   </div>`
 }
 
 function compileHabitStreak(props: z.infer<typeof componentSchemas.habit_streak_manual>): string {
-  return `<div class="card stack" style="gap:14px;">
+  const weekdays = ['一', '二', '三', '四', '五', '六', '日']
+  return `<div class="card stack" style="gap:20px;">
+    ${renderWidgetChrome({ kicker: 'HABITS', meta: `${props.habits.length} 项` })}
     ${renderHeader(props.heading)}
-    ${props.habits.map((habit) => `<section style="padding:12px;border-radius:12px;background:${widgetVar('canvas')};border:1px solid ${widgetVar('hair')};display:grid;gap:6px;">
-      <div style="display:flex;justify-content:space-between;gap:12px;"><strong style="color:${widgetVar('ink')};font-weight:600;">${escapeHtml(habit.name)}</strong><span class="num" style="color:${widgetVar('ink2')};">${habit.streak} 天</span></div>
-      <div style="display:flex;gap:6px;">${habit.weekMarks.map((mark) => `<span style="width:12px;height:12px;border-radius:50%;background:${mark ? widgetVar('ok') : widgetVar('dcRest')};"></span>`).join('')}</div>
-    </section>`).join('')}
+    <div style="display:grid;grid-template-columns:minmax(0,1fr) repeat(7,18px) minmax(48px,auto);gap:8px 6px;align-items:center;">
+      <span></span>${weekdays.map((day) => `<span class="num" style="font-size:9.5px;color:${INK3};text-align:center;">${day}</span>`).join('')}<span></span>
+      ${props.habits.map((habit) => `<span style="font-size:13.5px;font-weight:500;color:${INK};min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(habit.name)}</span>${habit.weekMarks.map((mark) => `<span style="justify-self:center;width:9px;height:9px;border-radius:50%;background:${mark ? widgetVar('dcOn') : widgetVar('dcRest')};"></span>`).join('')}<span class="num" style="font-size:12px;color:${INK};text-align:right;">${habit.streak}<span style="color:${INK2};margin-left:2px;">天</span></span>`).join('')}
+    </div>
   </div>`
 }
 
 function compileTodayFocusSnapshot(props: z.infer<typeof componentSchemas.today_focus_snapshot>): string {
-  return `<div class="card stack" style="gap:14px;">
+  const span = 12 / Math.max(1, props.metrics.length)
+  return `<div class="card stack" style="gap:20px;">
+    ${renderWidgetChrome({ kicker: 'TODAY', meta: props.dayLabel })}
     ${renderHeader(props.heading || props.dayLabel)}
-    <div style="display:grid;grid-template-columns:repeat(${props.metrics.length}, minmax(0,1fr));gap:10px;">
-      ${props.metrics.map((metric) => `<section style="padding:12px;border-radius:12px;background:${widgetVar('canvas')};border:1px solid ${widgetVar('hair')};"><div class="label" style="font-size:10px;">${escapeHtml(metric.label)}</div><div class="num" style="font-size:22px;font-weight:600;color:${widgetVar('ink')};margin-top:4px;">${escapeHtml(metric.value)}</div></section>`).join('')}
+    <div class="grid keep-pairs" style="row-gap:24px;">
+      ${props.metrics.map((metric) => `<section class="span-${span}" style="min-width:0;"><div class="label" style="font-size:10px;">${escapeHtml(metric.label)}</div><div class="figure" style="font-size:26px;line-height:32px;margin-top:8px;">${escapeHtml(metric.value)}</div></section>`).join('')}
     </div>
-    <ul style="margin:0;padding-left:18px;">${props.highlights.map((item) => `<li style="margin:6px 0;">${escapeHtml(item)}</li>`).join('')}</ul>
+    ${renderWidgetDotList(props.highlights, { size: 13.5, gap: 6 })}
     ${buildButtonRow([{ label: '查看今天安排', message: `请切换到日历模式并查看${props.dayLabel}的重点安排。` }])}
   </div>`
 }

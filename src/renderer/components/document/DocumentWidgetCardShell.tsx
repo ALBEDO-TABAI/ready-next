@@ -30,6 +30,8 @@ function DocumentWidgetCardAction({
 
 interface DocumentWidgetCardShellProps {
   title: string
+  /** 文档内第几张卡（从 1 开始）；有值时题注显示 FIG 编号。 */
+  figureIndex?: number | null
   modeLabel?: string | null
   hint?: string | null
   onRenameTitle?: (nextTitle: string) => void | Promise<void>
@@ -37,14 +39,23 @@ interface DocumentWidgetCardShellProps {
   onExport?: () => void
   onEdit?: () => void
   extraActions?: ReactNode
+  /** 题注里常驻的状态入口（如“启用交互预览”），不随悬停隐藏。 */
+  captionStatus?: ReactNode
   children: ReactNode
   contentEditable?: boolean
   dataReadyWidgetTitle?: string
   previewClassName?: string
+  /** 卡片画幅（widget-canvas 的 data-widget-size）；窄画幅时题注与卡片同宽居中。 */
+  canvasSize?: string | null
+}
+
+function formatFigureIndex(index: number): string {
+  return `FIG ${String(index).padStart(2, '0')}`
 }
 
 export default function DocumentWidgetCardShell({
   title,
+  figureIndex,
   modeLabel,
   hint,
   onRenameTitle,
@@ -52,10 +63,12 @@ export default function DocumentWidgetCardShell({
   onExport,
   onEdit,
   extraActions,
+  captionStatus,
   children,
   contentEditable = false,
   dataReadyWidgetTitle,
   previewClassName,
+  canvasSize,
 }: DocumentWidgetCardShellProps) {
   const [editingTitle, setEditingTitle] = useState(false)
   const [draftTitle, setDraftTitle] = useState(title)
@@ -79,14 +92,24 @@ export default function DocumentWidgetCardShell({
     }
   }
 
+  // 卡片先于题注：读者先看到内容，题注（编号 + 名称）与操作作为图注落在卡下，
+  // 操作只在悬停或键盘聚焦时浮现，阅读态保持安静。
   return (
-    <div
+    <figure
       className="ready-doc-widget-card"
       contentEditable={contentEditable}
       data-ready-widget-title={dataReadyWidgetTitle || title}
+      data-widget-size={canvasSize || undefined}
     >
-      <div className="ready-doc-widget-card-header">
+      <div className={previewClassName || 'ready-doc-widget-card-preview'}>
+        {children}
+      </div>
+
+      <figcaption className="ready-doc-widget-card-header">
         <div className="ready-doc-widget-card-meta">
+          {typeof figureIndex === 'number' && figureIndex > 0 ? (
+            <span className="ready-doc-widget-card-index">{formatFigureIndex(figureIndex)}</span>
+          ) : null}
           {editingTitle ? (
             <input
               autoFocus
@@ -106,6 +129,7 @@ export default function DocumentWidgetCardShell({
                 }
               }}
               className="ready-doc-widget-card-title-input"
+              aria-label="卡片名称"
             />
           ) : (
             <button
@@ -123,6 +147,8 @@ export default function DocumentWidgetCardShell({
             </button>
           )}
 
+          {captionStatus}
+
           {(modeLabel || hint) ? (
             <div className="ready-doc-widget-card-subline">
               {modeLabel ? <span className="ready-doc-widget-card-badge">{modeLabel}</span> : null}
@@ -135,27 +161,23 @@ export default function DocumentWidgetCardShell({
           {onEdit ? (
             <DocumentWidgetCardAction
               label="编辑"
-              icon={<Pencil size={13} strokeWidth={2} />}
+              icon={<Pencil size={12} strokeWidth={1.8} />}
               onClick={onEdit}
             />
           ) : null}
           <DocumentWidgetCardAction
             label="引用"
-            icon={<MessageSquareQuote size={13} strokeWidth={2} />}
+            icon={<MessageSquareQuote size={12} strokeWidth={1.8} />}
             onClick={onQuote}
           />
           <DocumentWidgetCardAction
             label="导出"
-            icon={<Download size={13} strokeWidth={2} />}
+            icon={<Download size={12} strokeWidth={1.8} />}
             onClick={onExport}
           />
           {extraActions}
         </div>
-      </div>
-
-      <div className={previewClassName || 'ready-doc-widget-card-preview'}>
-        {children}
-      </div>
-    </div>
+      </figcaption>
+    </figure>
   )
 }
