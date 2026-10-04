@@ -20,7 +20,8 @@ export function getRSSContentService(): RSSContentService {
           return browserSession.fetch(input, { ...init, headers, credentials: 'include' })
         })
       },
-      extractor: new ReadabilityJsdomAdapter(),
+      // The reader never renders page HTML, so tables must arrive as Markdown grids or text.
+      extractor: new ReadabilityJsdomAdapter({ tables: 'markdown' }),
     })
   }
   return service

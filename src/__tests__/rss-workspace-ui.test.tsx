@@ -98,6 +98,30 @@ test('a newly fetched body acknowledged by the list does not refetch or leave th
   assert.equal(dom.window.document.querySelector<HTMLButtonElement>('.rss-reader-status button')?.disabled, false)
 }))
 
+test('a body saved by the old extraction re-reads once, without first showing its source text', async () => withDOM(async (root, dom) => {
+  let refreshed = false
+  const loads: Array<{ force?: boolean }> = []
+  const leaked = 'window.__SSR__=truewindow.__INITIAL_STATE__={"global":{"appSettings":{}}}'
+  const seen: string[] = []
+  Object.assign(window, { electronAPI: { rss: {
+    readArticle: async () => {
+      seen.push(dom.window.document.body.textContent || '')
+      return { success: true, data: { article: { id: 'xhs', title: 'Note', revision: refreshed ? 'v2' : 'v1', read: true }, body: { status: refreshed ? 'ready' : 'partial', sourceUrl: 'https://www.xiaohongshu.com/explore/1' },
+        text: refreshed ? '藏在老城区的小巷里。' : leaked, textKind: 'body', offset: 0, totalLength: 10, nextOffset: null } }
+    },
+    onOrganizationChanged: () => () => {}, onEventSeenChanged: () => () => {},
+    loadArticle: async (input: { force?: boolean }) => { loads.push(input); refreshed = true; return { success: true } },
+  } } })
+  const item = { id: 'xhs', title: 'Note', link: 'https://www.xiaohongshu.com/explore/1' } as RSSItem
+  await act(async () => root.render(<RSSArticleReader key="first" item={item} onClose={() => {}} onOpened={async () => {}} onToggleStar={() => {}} />))
+  assert.deepEqual(loads, [{ itemId: 'xhs', force: true }])
+  assert.match(dom.window.document.body.textContent!, /藏在老城区的小巷里/)
+  assert.ok(seen.every((text) => !text.includes('__INITIAL_STATE__')), 'the leaked state is never rendered')
+  refreshed = false
+  await act(async () => root.render(<RSSArticleReader key="again" item={item} onClose={() => {}} onOpened={async () => {}} onToggleStar={() => {}} />))
+  assert.equal(loads.length, 1, 'a page that still extracts badly is not fetched again in the same session')
+}))
+
 test('an inactive RSS workspace does not query until it is shown', async () => withDOM(async (root) => {
   useRSSSession.getState().reset()
   let reads = 0

@@ -20,3 +20,11 @@ export async function readSavedRSSArticle(api: ArticleReaderAPI, itemId: string,
   }
   return { ...first!, text: chunks.join(''), offset: 0, nextOffset: null }
 }
+
+/**
+ * Bodies saved before platform extraction and reader table handling: a script-rendered page's state literal,
+ * or a page table kept as HTML block. Both read as source text in the reader, which never renders page HTML.
+ */
+export function isOutdatedRSSExtraction(markdown: string): boolean {
+  return /^window\.__(?:SSR__|INITIAL_STATE__)\b/m.test(markdown) || /^<table\b[^>]*>/m.test(markdown)
+}

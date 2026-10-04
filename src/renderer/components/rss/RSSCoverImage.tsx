@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
+import { Play } from 'lucide-react'
 import { describeRSSMedia } from '../../../shared/rss-media'
 
 // preview：精选条目正文下方的预览图（按原比例、限高）；thumb：动态列表标题右侧的缩略图；full：阅读页里完整显示的封面。
 export default function RSSCoverImage({ link, coverImage, variant = 'full' }: { link: string; coverImage?: string | null; variant?: 'full' | 'preview' | 'thumb' }) {
-  const url = describeRSSMedia(link, coverImage).cover.url
+  const media = describeRSSMedia(link, coverImage)
+  const url = media.cover.url
   const [failed, setFailed] = useState(false)
   useEffect(() => setFailed(false), [url])
   if (!url) return null
@@ -11,6 +13,7 @@ export default function RSSCoverImage({ link, coverImage, variant = 'full' }: { 
     if (failed) return null
     return <figure className={`rss-cover-image ${variant === 'thumb' ? 'rss-card-thumb' : 'rss-card-preview'}`}>
       <img src={url} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setFailed(true)} />
+      {media.kind === 'video' && <span className="rss-card-play" aria-label="视频"><Play size={variant === 'thumb' ? 12 : 15} strokeWidth={0} fill="currentColor" /></span>}
     </figure>
   }
   return <figure className="rss-cover-image" style={{ margin: '8px 0', maxWidth: '100%', width: '100%' }}>

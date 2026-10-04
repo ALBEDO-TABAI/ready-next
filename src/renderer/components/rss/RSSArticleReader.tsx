@@ -8,9 +8,9 @@ import RSSReferenceButton from './RSSReferenceButton'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowLeft, ArrowUpRight, Check, ChevronDown, Copy, Loader2, MessageSquareQuote, RefreshCw, Star } from 'lucide-react'
 import { MarkdownContent, copyTextToClipboard } from '../document/MarkdownContent'
-import { readSavedRSSArticle } from '../../modules/rss/read-article'
+import { readSavedRSSArticle, isOutdatedRSSExtraction } from '../../modules/rss/read-article'
 import { openWebpageInBrowser } from '../../modules/browser/openWebpageInBrowser'
-import { describeRSSMedia } from '../../../shared/rss-media'
+import { describeRSSMedia, rssVideoEmbed } from '../../../shared/rss-media'
 import type { RSSArticleExcerpt } from '../../../shared/rss-workspace'
 import type { RSSItem } from './RSSFeed'
 import RssTimeHintBanner from './RssTimeHintBanner'
@@ -19,6 +19,9 @@ import RSSCoverImage from './RSSCoverImage'
 import RSSTopbarTools from './RSSTopbarTools'
 import { LiquidFloatingPanel } from '../ui/liquid-glass/LiquidFloatingPanel'
 import { chatMenuSurfaceStyle } from '../agent/chatMenuStyles'
+
+// Items re-extracted in this session; a page that still extracts badly is not fetched again on every open.
+const reextracted = new Set<string>()
 
 interface RSSArticleReaderProps {
   reveal?: { id: string; range: RSSReadingRange }
@@ -61,6 +64,7 @@ export default function RSSArticleReader({ item, expectedRevision, reveal, onClo
   const referenceMenuRef = useRef<HTMLDivElement>(null)
   const mediaKind = describeRSSMedia(item.link, item.coverImage).kind
   const video = mediaKind === 'video', image = mediaKind === 'image'
+  const embed = rssVideoEmbed(item.link, item.summary)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -75,9 +79,12 @@ export default function RSSArticleReader({ item, expectedRevision, reveal, onClo
     void (async () => {
       try {
         let saved = await readSavedRSSArticle(api, item.id, controller.signal, expectedRevision)
-        setContent(saved)
-        if (!expectedRevision && !video && !image && (force || saved.body.fetching || ['missing', 'stale', 'loading'].includes(saved.body.status))) {
-          const fetched = await api.loadArticle({ itemId: item.id, force })
+        // A body extracted the old way re-reads once per session, as if the user had asked to fetch it again.
+        const outdated = !expectedRevision && !force && ['ready', 'partial'].includes(saved.body.status) && !reextracted.has(item.id) && isOutdatedRSSExtraction(saved.text)
+        if (outdated) reextracted.add(item.id)
+        else setContent(saved)
+        if (!expectedRevision && !video && !image && (force || outdated || saved.body.fetching || ['missing', 'stale', 'loading'].includes(saved.body.status))) {
+          const fetched = await api.loadArticle({ itemId: item.id, force: force || outdated })
           controller.signal.throwIfAborted()
           saved = await readSavedRSSArticle(api, item.id, controller.signal, expectedRevision)
           setContent(saved)
@@ -188,10 +195,13 @@ export default function RSSArticleReader({ item, expectedRevision, reveal, onClo
           {!video && !image && <button type="button" disabled={busy || !!expectedRevision} title={expectedRevision ? '刊物引用保留对应版本；可返回资讯列表获取新正文。' : undefined}
             onClick={() => { forceReload.current = true; setReload((value) => value + 1) }}><RefreshCw size={12} strokeWidth={2} />重新获取正文</button>}
         </div>
-        {(!expectedRevision || content) && <RSSCoverImage link={article?.link || item.link} coverImage={article ? article.coverImage : item.coverImage} />}
+        {embed ? <figure className="rss-reader-video">
+          <iframe src={embed.embedUrl} title={`${title}（视频）`} loading="lazy" referrerPolicy="strict-origin-when-cross-origin"
+            allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" allowFullScreen />
+        </figure> : (!expectedRevision || content) && <RSSCoverImage link={article?.link || item.link} coverImage={article ? article.coverImage : item.coverImage} />}
         <RssTimeHintBanner itemId={item.id} title={title} summary={article?.summary || item.summary} author={author} />
         {expectedRevision && content && <p className="rss-reader-notice" role="status">此处按引用版本阅读；获取最新内容请返回列表。</p>}
-        {video && <p className="rss-reader-notice">视频资讯：下方为来源提供的文字。观看、转录和视觉分析需使用对应操作。</p>}
+        {video && <p className="rss-reader-notice">{embed ? '视频可直接在上方播放；下方是来源提供的文字，转录和画面分析需使用对应操作。' : '视频资讯：下方为来源提供的文字。观看、转录和视觉分析需使用对应操作。'}</p>}
         {image && <p className="rss-reader-notice">图片资讯：下方为已有文字与图片引用，查看图片不会自动进行画面分析。</p>}
         {content?.body.fetching && <p className="rss-reader-notice" role="status">正在获取正文，已有内容仍可阅读。</p>}
         {content?.body.error && ['ready', 'partial'].includes(content.body.status) && <p className="rss-reader-notice" role="alert">重新获取未完成，已保留上次保存的正文。{content.body.error}</p>}

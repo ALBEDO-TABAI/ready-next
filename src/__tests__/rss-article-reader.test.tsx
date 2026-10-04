@@ -3,10 +3,12 @@ import test from 'node:test'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MarkdownContent } from '../renderer/components/document/MarkdownContent'
-import { readSavedRSSArticle } from '../renderer/modules/rss/read-article'
+import { isOutdatedRSSExtraction, readSavedRSSArticle } from '../renderer/modules/rss/read-article'
 import type { RSSArticleExcerpt } from '../shared/rss-workspace'
 import RSSCoverImage from '../renderer/components/rss/RSSCoverImage'
-import { describeRSSMedia } from '../shared/rss-media'
+import { describeRSSMedia, rssVideoEmbed } from '../shared/rss-media'
+import RSSArticleReader from '../renderer/components/rss/RSSArticleReader'
+import type { RSSItem } from '../renderer/components/rss/RSSFeed'
 
 test('saved covers render passively and media descriptions keep reference and understanding separate', () => {
   const video = describeRSSMedia('https://media.test/video.mp4', 'https://media.test/cover.png')
@@ -76,4 +78,38 @@ test('article reader cannot combine old and new versions or publish after naviga
     controller.abort()
     return { success: true, data: { article: { revision: 'old' }, text: 'old', nextOffset: null } as RSSArticleExcerpt }
   } }, 'a', controller.signal), /abort/i)
+})
+
+test('Bilibili and YouTube items resolve to the framed players; a dynamic plays only the single video it shares', () => {
+  assert.deepEqual(rssVideoEmbed('https://www.bilibili.com/video/BV15far6dEjT/?p=2&spm=x'), {
+    provider: 'bilibili', embedUrl: 'https://player.bilibili.com/player.html?isOutside=true&bvid=BV15far6dEjT&p=2&autoplay=0', pageUrl: 'https://www.bilibili.com/video/BV15far6dEjT/',
+  })
+  assert.equal(rssVideoEmbed('https://m.bilibili.com/video/av170001')?.embedUrl, 'https://player.bilibili.com/player.html?isOutside=true&aid=170001&p=1&autoplay=0')
+  const shared = '这是我们一次全新的测试//转发自: @飓多多StormCrew: 视频地址：https://www.bilibili.com/video/BV15far6dEjT'
+  assert.equal(rssVideoEmbed('https://t.bilibili.com/1060000000000000000', shared)?.pageUrl, 'https://www.bilibili.com/video/BV15far6dEjT/')
+  assert.equal(rssVideoEmbed('https://t.bilibili.com/1060000000000000000', `${shared} 以及 https://www.bilibili.com/video/BV1xx411c7mD`), null, 'two shared videos name no single player')
+  assert.equal(rssVideoEmbed('https://space.bilibili.com/946974'), null)
+  for (const link of ['https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=3', 'https://youtu.be/dQw4w9WgXcQ', 'https://www.youtube.com/shorts/dQw4w9WgXcQ']) {
+    assert.equal(rssVideoEmbed(link)?.embedUrl, 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?rel=0', link)
+  }
+  assert.equal(rssVideoEmbed('https://vimeo.com/123456'), null, 'only players the renderer CSP frames')
+  assert.equal(rssVideoEmbed('javascript:alert(1)'), null)
+  assert.match(renderToStaticMarkup(<RSSCoverImage variant="thumb" link="https://www.bilibili.com/video/BV15far6dEjT" coverImage="https://i0.hdslb.com/cover.jpg" />), /class="rss-card-play"/)
+  assert.doesNotMatch(renderToStaticMarkup(<RSSCoverImage variant="thumb" link="https://example.test/story" coverImage="https://example.test/cover.jpg" />), /rss-card-play/)
+})
+
+test('a video item plays in the reader instead of showing only its cover', () => {
+  const item = { id: 'v', title: '这是我们一次全新的测试', link: 'https://www.bilibili.com/video/BV15far6dEjT', source: '影视飓风', summary: '视频地址：https://www.bilibili.com/video/BV15far6dEjT', coverImage: 'https://i0.hdslb.com/cover.jpg' } as RSSItem
+  const html = renderToStaticMarkup(<RSSArticleReader item={item} onClose={() => {}} onOpened={async () => {}} onToggleStar={() => {}} />)
+  assert.match(html, /<figure class="rss-reader-video"><iframe src="https:\/\/player\.bilibili\.com\/player\.html\?isOutside=true&amp;bvid=BV15far6dEjT&amp;p=1&amp;autoplay=0"/)
+  assert.match(html, /allowfullscreen/i)
+  assert.doesNotMatch(html, /i0\.hdslb\.com\/cover\.jpg/, 'the player shows its own poster')
+  assert.match(html, /视频可直接在上方播放/)
+})
+
+test('only bodies the old extraction left as page source count as outdated', () => {
+  assert.equal(isOutdatedRSSExtraction('window.__SSR__=truewindow.__INITIAL_STATE__={"global":{}}'), true)
+  assert.equal(isOutdatedRSSExtraction('Intro\n\n<table id="hnmain"><tbody><tr><td></td></tr></tbody></table>'), true)
+  assert.equal(isOutdatedRSSExtraction('Use the `<table>` element for data, not layout.'), false, 'prose about tables is an article')
+  assert.equal(isOutdatedRSSExtraction('| A | B |\n| --- | --- |\n| 1 | 2 |'), false)
 })

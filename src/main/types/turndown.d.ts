@@ -6,6 +6,7 @@ declare module 'turndown' {
       replacement: (content: string, node: unknown) => string
     }): this
     keep(filter: string | string[] | ((node: unknown) => boolean)): this
+    remove(filter: string | string[] | ((node: unknown) => boolean)): this
     use(plugin: unknown | unknown[]): this
     turndown(input: string): string
   }

@@ -14,6 +14,7 @@
 import { Readability } from '@mozilla/readability'
 import { JSDOM } from 'jsdom'
 import TurndownService from 'turndown'
+import { extractPlatformArticle } from './platform-article-extractors'
 import { gfm } from 'turndown-plugin-gfm'
 import { ClipFetchError } from './clip-fetch'
 
@@ -30,7 +31,17 @@ const READ_CONFIDENCE_PARTIAL = 0.55
 const READ_CONFIDENCE_NONE = 0.25
 const MIN_CONTENT_CHARS = 200
 
+export interface ReadabilityJsdomAdapterOptions {
+  /**
+   * `html` keeps data tables as HTML (notes that render HTML); `markdown` turns every data table into a
+   * GFM grid for readers that never render page HTML, and flattens tables that cannot be a grid.
+   */
+  tables?: 'html' | 'markdown'
+}
+
 export class ReadabilityJsdomAdapter implements ExtractionAdapter {
+  constructor(private readonly options: ReadabilityJsdomAdapterOptions = {}) {}
+
   async extract(input: ExtractionInput): Promise<ExtractionResult> {
     const dom = new JSDOM(input.html, {
       url: input.url,
@@ -58,6 +69,23 @@ export class ReadabilityJsdomAdapter implements ExtractionAdapter {
 
     const weChatArticle = extractWeChatArticle(document, dom.window.document, input.url, structuredData, metaLookup)
     if (weChatArticle) return weChatArticle
+
+    // Script-rendered or table-laid-out pages whose article data the page itself already carries.
+    const platformArticle = extractPlatformArticle(document, input.url)
+    if (platformArticle?.contentMarkdown.trim()) {
+      return {
+        title: platformArticle.title,
+        contentMarkdown: platformArticle.contentMarkdown,
+        metadata: platformArticle.metadata,
+        structuredData,
+        metaLookup,
+        diagnostics: {
+          extractionSource: 'readability',
+          confidence: platformArticle.complete ? READ_CONFIDENCE_FULL : READ_CONFIDENCE_PARTIAL,
+          warnings: [],
+        },
+      }
+    }
 
     // Prefer the article itself over the surrounding page: a comment sign-in
     // form in the same <main> does not gate an independently readable article.
@@ -94,7 +122,9 @@ export class ReadabilityJsdomAdapter implements ExtractionAdapter {
       contentHtml = appendMissingImagesAsFigures(contentHtml, missing)
     }
 
-    const turndown = createTurndownService(input.url)
+    const markdownTables = this.options.tables === 'markdown'
+    if (markdownTables) contentHtml = gridReadyTables(contentHtml, document)
+    const turndown = createTurndownService(input.url, { keepTables: !markdownTables })
     const contentMarkdown = turndown.turndown(contentHtml).trim()
 
     const title = readabilityArticle?.title?.trim() || document.title?.trim() || ''
@@ -348,7 +378,7 @@ function resolveConfidence(
   return READ_CONFIDENCE_PARTIAL
 }
 
-function createTurndownService(baseUrl: string): TurndownService {
+function createTurndownService(baseUrl: string, options: { keepTables?: boolean } = {}): TurndownService {
   const service = new TurndownService({
     codeBlockStyle: 'fenced',
     headingStyle: 'atx',
@@ -356,7 +386,22 @@ function createTurndownService(baseUrl: string): TurndownService {
     bulletListMarker: '-',
   })
   service.use(gfm)
-  service.keep(['table', 'thead', 'tbody', 'tr', 'th', 'td'])
+  if (options.keepTables !== false) service.keep(['table', 'thead', 'tbody', 'tr', 'th', 'td'])
+  // Page code and inert templates are never article text (script-rendered pages otherwise leak their state JSON).
+  service.remove(['script', 'style', 'noscript', 'template'])
+  // Tables used for page layout (nested tables, forms, paragraphs in cells) read as text, not as kept HTML.
+  service.addRule('layoutTable', {
+    filter(node: unknown) {
+      const element = node as { nodeName?: string }
+      if (!element.nodeName || !LAYOUT_TABLE_PARTS.has(element.nodeName)) return false
+      const table = element.nodeName === 'TABLE' ? element : closestTable(element)
+      return !!table && isLayoutTable(table as LayoutTableNode)
+    },
+    replacement(content: string, node: unknown) {
+      const name = (node as { nodeName?: string }).nodeName
+      return name === 'TD' || name === 'TH' ? ` ${content.trim()} ` : `\n\n${content.trim()}\n\n`
+    },
+  })
   service.addRule('absoluteImage', {
     filter: 'img',
     replacement(_content: string, node: unknown) {
@@ -385,6 +430,53 @@ function createTurndownService(baseUrl: string): TurndownService {
     },
   })
   return service
+}
+
+const LAYOUT_TABLE_PARTS = new Set(['TABLE', 'THEAD', 'TBODY', 'TFOOT', 'TR', 'TD', 'TH'])
+interface LayoutTableNode {
+  nodeName?: string
+  parentNode?: LayoutTableNode | null
+  getAttribute?: (name: string) => string | null
+  querySelector?: (selector: string) => unknown
+}
+
+function closestTable(node: LayoutTableNode): LayoutTableNode | null {
+  let current = node.parentNode
+  while (current && current.nodeName !== 'TABLE') current = current.parentNode
+  return current || null
+}
+
+/**
+ * GFM grids need a heading row and no spanning cells. A heading-less data table gets an empty heading row
+ * (its first row stays data); a table with spanning cells is marked presentational and read as text.
+ */
+function gridReadyTables(html: string, document: Document): string {
+  const host = document.createElement('div')
+  host.innerHTML = html
+  for (const table of Array.from(host.querySelectorAll('table'))) {
+    if (isLayoutTable(table as unknown as LayoutTableNode)) continue
+    const rows = Array.from(table.rows)
+    if (!rows.length) continue
+    if (rows.some((row) => Array.from(row.cells).some((cell) => cell.colSpan > 1 || cell.rowSpan > 1))) {
+      table.setAttribute('role', 'presentation')
+      continue
+    }
+    if (table.tHead || Array.from(rows[0].cells).every((cell) => cell.tagName === 'TH')) continue
+    const heading = document.createElement('thead')
+    const row = heading.appendChild(document.createElement('tr'))
+    for (let index = 0; index < Math.max(...rows.map((entry) => entry.cells.length)); index += 1) row.appendChild(document.createElement('th'))
+    table.insertBefore(heading, table.firstChild)
+  }
+  return host.innerHTML
+}
+
+/** Data tables keep their structure; layout tables are recognised by what a data table never contains. */
+function isLayoutTable(table: LayoutTableNode): boolean {
+  const role = table.getAttribute?.('role')
+  if (role === 'presentation' || role === 'none') return true
+  if (table.querySelector?.('table, form, input, textarea, select')) return true
+  if (table.querySelector?.('th, thead, caption')) return false
+  return !!table.querySelector?.('td > p, td > div, td > ul, td > ol, td > blockquote, td > pre, td > h1, td > h2, td > h3, td > center')
 }
 
 const LAZY_SRC_ATTRS = [
