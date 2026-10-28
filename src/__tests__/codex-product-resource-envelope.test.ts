@@ -10,7 +10,7 @@ import {
   createCurrentDocumentReadRequester,
   hasExplicitCurrentDocumentAccessExclusion,
   hasExplicitCurrentDocumentAccessIntent,
-  hasExplicitCurrentDocumentWriteIntent,
+  hasExplicitCurrentDocumentWriteProhibition,
   validateCurrentDocumentReadPayload,
 } from '../main/modules/agent-control/codex-runtime/codex-runtime-production-composition'
 import { digestCanonicalJson } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
@@ -24,6 +24,8 @@ import {
   buildSelectedSkillToolAuthorization,
 } from '../main/modules/agent-control/skills/skill-tool-authorization'
 import { prepareFeishuExternalReadSlice } from '../main/modules/agent-control/codex-runtime/codex-external-read-slice'
+import { resolveCurrentDocumentActivation } from '../main/modules/agent-control/codex-runtime/codex-product-turn-authorization'
+import { DOCUMENT_WRITE_FLOOR_TOOL_NAMES } from '../main/modules/agent-control/codex-runtime/codex-product-action-map'
 import {
   currentDocumentReadReceiptMatches,
 } from '../main/modules/agent-control/codex-runtime/codex-binding-repository'
@@ -247,12 +249,21 @@ test('current-document turn keeps the full legal surface but authorizes only exa
   assert.equal(narrowed.readyTurnToolAuthorization.allowedToolNames.includes('document_save_tab'), false)
 })
 
-test('current-document write intent is explicit and keeps advice or read-only requests read-only', () => {
-  assert.equal(hasExplicitCurrentDocumentWriteIntent('把当前文档第二段改成更简洁的表述并保存'), true)
-  assert.equal(hasExplicitCurrentDocumentWriteIntent('在当前文档插入一张信息卡'), true)
-  assert.equal(hasExplicitCurrentDocumentWriteIntent('只阅读当前文档并总结'), false)
-  assert.equal(hasExplicitCurrentDocumentWriteIntent('建议我如何修改当前文档'), false)
-  assert.equal(hasExplicitCurrentDocumentWriteIntent('不要修改，只检查是否有错字'), false)
+// 2026-10-06: guessing write intent from wording kept missing requests ("换成", "做一些信息卡"); a pointed-at
+// document is now writable and only an explicit read-only request keeps it read-only.
+test('only an explicit read-only request keeps the current document read-only', () => {
+  for (const text of [
+    '只阅读当前文档并总结',
+    '不要修改，只检查是否有错字',
+    '别改动原文，帮我看看结构',
+    '仅查看这篇文档的结论',
+  ]) assert.equal(hasExplicitCurrentDocumentWriteProhibition(text), true, text)
+  for (const text of [
+    '把文档中这些引用块卡片换成 Ready 信息卡',
+    '试着在文档中做一些信息卡来让内容更加可读',
+    '这篇文档还能怎么改进？',
+    '只需把第二段改短',
+  ]) assert.equal(hasExplicitCurrentDocumentWriteProhibition(text), false, text)
 })
 
 test('only explicit current-document intent activates an ambient current document', () => {
@@ -268,6 +279,9 @@ test('only explicit current-document intent activates an ambient current documen
   assert.equal(hasExplicitCurrentDocumentAccessIntent('review this document'), true)
   assert.equal(hasExplicitCurrentDocumentAccessIntent('只盘点所附文件夹，不要写文件'), false)
   assert.equal(hasExplicitCurrentDocumentAccessIntent('在线查资料，整理为一份文档输出'), false)
+  assert.equal(hasExplicitCurrentDocumentAccessIntent('试着在文档中做一些信息卡来让内容更加可读'), true)
+  assert.equal(hasExplicitCurrentDocumentAccessIntent('往笔记里补一段总结'), true)
+  assert.equal(hasExplicitCurrentDocumentAccessIntent('把文档中这些引用块卡片换成 Ready 信息卡'), true)
   assert.equal(hasExplicitCurrentDocumentAccessIntent('不要读取当前文档，只查公开网页'), false)
 
   const envelope = buildCodexProductRequestEnvelope(
@@ -341,11 +355,14 @@ test('current-document write turn requires exact read, pins every mutation to th
   assert.equal(calls[0]?.args.tabId, anchor.tabId)
   assert.deepEqual(calls[1], {
     tool: 'document.replaceExact',
-    args: { tabId: anchor.tabId, target: 'old', replacement: 'new' },
+    args: {
+      tabId: anchor.tabId, target: 'old', replacement: 'new',
+      __readyResourceWrite: { scopeId: 'scope-1', anchor },
+    },
   })
   assert.deepEqual(calls[2], {
     tool: 'document.saveTab',
-    args: { tabId: anchor.tabId },
+    args: { tabId: anchor.tabId, __readyResourceWrite: { scopeId: 'scope-1', anchor } },
   })
 })
 
@@ -555,6 +572,99 @@ test('main-to-renderer current-document read returns one exact receipt and rejec
   )
 })
 
+// 2026-10-06: the user had the reading review open, attached its tab and asked "试着在文档中做一些信息卡…"; Main
+// dropped the anchor, the file arrived as a read-only copy, and the cards were faked with Markdown quotes.
+test('the open document attached to the message is the current document, and asking for cards opens the card tools', async () => {
+  resetCodexCurrentDocumentAnchorStateForTest()
+  const path = '/Users/reader/卡拉马佐夫兄弟/阅读回顾·第一卷至第四卷第二章.md'
+  useMode.setState({ workbenchMode: 'document', splitMode: null })
+  useDocTabs.setState({
+    tabs: [{ id: 'doc-review', path, title: '阅读回顾·第一卷至第四卷第二章.md', content: '# 阅读回顾\n', isDirty: false }],
+    activeTabId: 'doc-review',
+    splitTabId: null,
+    focusedPaneTabId: 'doc-review',
+  })
+  const anchor = await buildCodexCurrentDocumentAnchor('scope-cards')
+  assert.ok(anchor)
+  const chip = {
+    kind: 'local_file' as const, id: 'chip-review', name: '阅读回顾·第一卷至第四卷第二章.md', path,
+    size: 12, ext: 'md', rendererType: 'text' as const,
+  }
+  const otherFile = { ...chip, id: 'chip-other', name: '其他.md', path: '/Users/reader/其他.md' }
+
+  const activate = (resources: Array<typeof chip>, intentText: string, overrides: { ambient?: boolean; anchor?: null } = {}) => (
+    resolveCurrentDocumentActivation({
+      resources, anchor: overrides.anchor === null ? null : anchor, intentText, ambient: overrides.ambient ?? true,
+    })
+  )
+  const cards = activate([chip, otherFile], '试着在文档中做一些信息卡来让内容更加可读')
+  assert.deepEqual([cards.anchor, cards.canWrite, cards.readRequired], [anchor, true, true])
+  assert.deepEqual([...cards.documentFileIds], ['chip-review'], 'only the open document stands in for its file')
+  const attachedOnly = activate([chip], '让内容更好读一点')
+  assert.deepEqual([attachedOnly.anchor, attachedOnly.readRequired], [anchor, true], 'attaching it points at it')
+  const readOnly = activate([chip], '只阅读这篇文档并总结')
+  assert.deepEqual([readOnly.anchor, readOnly.canWrite], [anchor, false], 'an explicit read-only request stays read-only')
+
+  // 2026-10-06: a follow-up in the same conversation ("把第二节也换成信息卡", "继续") names no document; the agent knows
+  // what it refers to, so the focused document stays available without a forced read (unrelated replies are not blocked).
+  for (const text of ['把第二节也换成信息卡', '继续', '今天天气怎么样']) {
+    const followUp = activate([], text)
+    assert.deepEqual([followUp.anchor, followUp.canWrite, followUp.readRequired], [anchor, true, false], text)
+  }
+  assert.equal(activate([], '把第二节也换成信息卡', { ambient: false }).anchor, null, 'an explicit Retry takes no document it was not given')
+  for (const inactive of [
+    activate([chip], '不要读取当前文档，只查公开网页'),
+    activate([], '继续', { anchor: null }),
+  ]) {
+    assert.deepEqual([inactive.anchor, inactive.canWrite, inactive.documentFileIds.size], [null, false, 0])
+  }
+
+  const authorization = buildExplicitNoSkillAuthorization('no_skill_signal')
+  const definition = (name: string, kind: 'read' | 'write') => ({
+    name, groupId: 'agent_interaction' as const, domain: 'document' as const, kind,
+    concurrency: kind === 'read' ? 'parallel_read_safe' as const : 'exclusive' as const,
+    interruptBehavior: 'abort_signal' as const, timeoutProfile: 'default' as const, supportsTextBridge: true,
+    projectionHint: null, description: name, schema: { type: 'object' as const }, executionVisibility: 'model' as const,
+    resultShape: 'json' as const,
+  })
+  const readyToolSurface = buildReadyToolSurface({
+    surfaceId: 'surface-cards',
+    toolDefinitions: [
+      definition('document_read_section', 'read'),
+      ...DOCUMENT_WRITE_FLOOR_TOOL_NAMES.map((name) => definition(name, 'write')),
+    ],
+  })
+  const snapshot = buildCurrentDocumentReadToolSnapshot({
+    resolved: {
+      readyToolSurface,
+      readyTurnToolAuthorization: buildReadyTurnToolAuthorization({
+        authorizationId: 'resolved-cards', authorization, toolSurface: readyToolSurface,
+      }),
+    },
+    authorizationId: 'current-doc-cards',
+    authorization,
+    allowWrite: cards.canWrite,
+  })
+  for (const name of ['document_read_section', 'document_insert_widget', 'document_save_tab']) {
+    assert.ok(snapshot.readyTurnToolAuthorization.allowedToolNames.includes(name), name)
+  }
+
+  // A thread frozen before the edit tools existed keeps working, read-only, instead of being rejected.
+  const readOnlySurface = buildReadyToolSurface({ surfaceId: 'surface-read-only', toolDefinitions: [definition('document_read_section', 'read')] })
+  const olderThread = buildCurrentDocumentReadToolSnapshot({
+    resolved: {
+      readyToolSurface: readOnlySurface,
+      readyTurnToolAuthorization: buildReadyTurnToolAuthorization({
+        authorizationId: 'resolved-read-only', authorization, toolSurface: readOnlySurface,
+      }),
+    },
+    authorizationId: 'current-doc-read-only',
+    authorization,
+    allowWrite: true,
+  })
+  assert.deepEqual(olderThread.readyTurnToolAuthorization.allowedToolNames, ['document_read_section'])
+})
+
 test('current-document write authorization reaches the anchored renderer tab and saves only its existing path', async () => {
   resetCodexCurrentDocumentAnchorStateForTest()
   useMode.setState({ workbenchMode: 'document', splitMode: null })
@@ -628,6 +738,11 @@ test('current-document write authorization reaches the anchored renderer tab and
       target: '旧句',
       replacement: '新句',
     })
+    // 2026-10-06: after the turn's own first edit every later read came back superseded, so the rest of a long
+    // document could no longer be read in that turn.
+    const afterOwnEdit = await requester('document.readSection', { range: 'full' })
+    assert.equal(afterOwnEdit.ok, true, 'a version produced by the turn itself stays readable')
+    assert.match(String(afterOwnEdit.summary), /新句/)
     await requester('document.saveTab', {
       tabId: 'other-tab',
       path: '/tmp/escaped.md',
@@ -641,6 +756,9 @@ test('current-document write authorization reaches the anchored renderer tab and
     assert.equal(saved?.path, '/tmp/codex-current-write.md')
     assert.equal(saved?.content, '# 标题\n\n新句\n')
     assert.equal(saved?.isDirty, false)
+    useDocTabs.getState().setTabContent('doc-write-integrated', '# 标题\n\n用户自己改的\n')
+    const afterUserEdit = await requester('document.readSection', { range: 'full' })
+    assert.equal(afterUserEdit.errorKind, 'resource_version_superseded', 'an edit the turn did not make is not authorized')
   } finally {
     if (priorWindow === undefined) delete (globalThis as { window?: unknown }).window
     else Object.defineProperty(globalThis, 'window', { configurable: true, value: priorWindow })

@@ -26,6 +26,7 @@ export function resolveLarkCliCandidatePrimitives(): LarkCliCandidatePrimitives 
       primitives: LARK_CLI_CANDIDATE_PRIMITIVES,
     }
   } catch {
+    // silent-catch: if skills cannot be listed, the lark-cli candidate primitives are not offered (fails closed)
     return null
   }
 }

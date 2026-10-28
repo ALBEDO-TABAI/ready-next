@@ -50,6 +50,7 @@ export function isCodexSafeHostSkillPrimitive(toolName: string, skillId: string)
     if (!skill) return false
     return isCodexSafeHostSkillPrimitiveDefinition(toolName, skill)
   } catch {
+    // silent-catch: if the skill list or its directory cannot be read the primitive is not proven safe, so authority is denied
     return false
   }
 }

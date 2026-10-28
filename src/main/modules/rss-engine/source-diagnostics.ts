@@ -324,6 +324,7 @@ function classifyRouteFailure(message: string): RSSRouteErrorInfo {
     lower.includes('empty post data') ||
     lower.includes('waf') ||
     lower.includes('risk control') ||
+    lower.includes('安全限制') ||
     lower.includes('-352') ||
     lower.includes('-799')
   ) {

@@ -320,6 +320,8 @@ export class CodexTurnCollector {
     const items: Array<{ item: CodexThreadItem; order: number }> = []
     const itemStarts = new Map<string, CodexThreadItem>()
     const deltas = new Map<string, string[]>()
+    // Streamed narration is not a shown answer, whether it finished or was cut off.
+    const commentaryStreamIds = new Set<string>()
     const reasoningSummaryParts = new Map<string, Map<number, string>>()
     const usageAccumulator = new CodexTurnUsageAccumulator()
     let expectedTurnId: string | null = null
@@ -393,7 +395,7 @@ export class CodexTurnCollector {
         try {
           context.onActivity?.(event)
         } catch {
-          // A projection observer never owns the native turn or its result.
+          // silent-catch: a projection observer never owns the native turn or its result
         }
       }
 
@@ -462,6 +464,7 @@ export class CodexTurnCollector {
         deltas.set(notification.params.itemId, itemDeltas)
         const started = itemStarts.get(notification.params.itemId)
         if (started?.type === 'agentMessage' && started.phase === 'commentary') {
+          commentaryStreamIds.add(notification.params.itemId)
           publishActivity({
             kind: 'narration',
             source: 'commentary',
@@ -605,7 +608,7 @@ export class CodexTurnCollector {
         return this.buildCandidate(context, started.turn, items, deltas, {
           kind: 'protocol_failure',
           code: 'turn_identity_mismatch',
-        }, null, contextUsage)
+        }, null, contextUsage, commentaryStreamIds)
       }
       const settledModelReroute = modelReroute as Extract<
         CodexNativeNotification,
@@ -631,6 +634,7 @@ export class CodexTurnCollector {
           { kind: 'protocol_failure', code: 'model_rerouted' },
           null,
           contextUsage,
+          commentaryStreamIds,
         )
         rejected.runtimeDiagnostics.nativeTurnError = 'codex_model_rerouted'
         return rejected
@@ -647,6 +651,7 @@ export class CodexTurnCollector {
         selection.result,
         selection.message,
         contextUsage,
+        commentaryStreamIds,
       )
     } finally {
       if (timeoutHandle) clearTimeout(timeoutHandle)
@@ -675,7 +680,11 @@ export class CodexTurnCollector {
     selection: CoreTurnCandidate['candidateSelection'],
     selectedMessage: CodexAgentMessageItem | null,
     contextUsage: ContextUsageSnapshot | null = null,
+    commentaryStreamIds: ReadonlySet<string> = new Set(),
   ): CoreTurnCandidate {
+    const commentaryItemIds = items.flatMap(({ item }) => (
+      item.type === 'agentMessage' && item.phase === 'commentary' ? [item.id] : []
+    ))
     return {
       kind: 'native_terminal',
       readyTaskId: context.readyTaskId,
@@ -716,10 +725,11 @@ export class CodexTurnCollector {
       otherProofRefs: [...context.otherProofRefs],
       projectionPatchRefs: [...context.projectionPatchRefs],
       runtimeDiagnostics: {
-        finalDeltaItemIds: [...deltas.keys()],
-        commentaryItemIds: items.flatMap(({ item }) => (
-          item.type === 'agentMessage' && item.phase === 'commentary' ? [item.id] : []
+        // Only streamed answer text counts as shown to the user; narration finished or cut off as commentary does not.
+        finalDeltaItemIds: [...deltas.keys()].filter((id) => (
+          !commentaryStreamIds.has(id) && !commentaryItemIds.includes(id)
         )),
+        commentaryItemIds,
         nativeTurnError: turn.error?.message ?? null,
       },
     }

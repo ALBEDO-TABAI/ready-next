@@ -214,6 +214,25 @@ export function mapBackendErrorToFriendly(input: {
     }
   }
 
+  // Lark reads fail before any model call; the generic API-key and service messages would point at the wrong thing.
+  if (/codex_external_read_lark_auth_required/.test(error)) {
+    return {
+      friendlyMessage: '飞书（lark-cli）未授权或授权已过期，请重新授权后再试',
+      technicalDetails: error || undefined,
+      recoverable: true,
+      retryStrategy: 'user_action',
+    }
+  }
+
+  if (/codex_external_read_lark_cli_unavailable/.test(error)) {
+    return {
+      friendlyMessage: '无法运行本机的飞书命令行工具（lark-cli），请确认已安装且能正常启动',
+      technicalDetails: error || undefined,
+      recoverable: true,
+      retryStrategy: 'user_action',
+    }
+  }
+
   if (
     errorKind === 'auth_required' ||
     errorKind === 'auth' ||

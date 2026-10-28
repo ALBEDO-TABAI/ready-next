@@ -229,8 +229,15 @@ export function readCodexPreparedActionAuthorizationEnvelope(
     browserPageRef?: NonNullable<import('../contracts/request-envelope').TrustedRequestEnvironment['browserPageRef']>
   }
   outputContract?: PreparedCodexProductRun['outputContract']
+  /** The writable current document's path digest: a folder output naming that file is the document itself. */
+  currentDocumentPathDigest?: string
 } {
   const authorities = product.prepared.resourceAuthorities ?? []
+  const anchor = product.prepared.ingress.kind === 'user_ingress' ? product.prepared.ingress.currentDocumentAnchor : null
+  const writableDocumentPathDigest = anchor?.pathDigest
+    && product.prepared.readyTurnToolAuthorization.allowedToolNames.includes('document_save_tab')
+    ? anchor.pathDigest
+    : null
   const rss = product.prepared.rssReferences || []
   const browserPageRef = product.prepared.browserPageRef
   return {
@@ -240,6 +247,7 @@ export function readCodexPreparedActionAuthorizationEnvelope(
     ...(product.prepared.outputContract
       ? { outputContract: product.prepared.outputContract }
       : {}),
+    ...(writableDocumentPathDigest ? { currentDocumentPathDigest: writableDocumentPathDigest } : {}),
     ...(authorities.length > 0 || rss.length > 0 || browserPageRef
       ? {
           ...(authorities.length > 0 || rss.length > 0 ? {
@@ -301,16 +309,11 @@ export function buildCurrentDocumentReadToolSnapshot(input: {
   })
 }
 
-export function hasExplicitCurrentDocumentWriteIntent(text: string): boolean {
+/** The user asked only to read, or said not to change the document: the turn stays read-only. */
+export function hasExplicitCurrentDocumentWriteProhibition(text: string): boolean {
   const normalized = String(text || '').trim()
   if (!normalized) return false
-  if (/(?:只|仅)(?:需|要)?(?:阅读|读取|查看|总结|概括|分析|检查|审阅)|(?:不要|无需|不必|禁止).{0,8}(?:修改|编辑|改写|替换|删除|插入|追加|写入|保存)/.test(normalized)) {
-    return false
-  }
-  if (/(?:如何|怎么|建议|方案|讨论).{0,8}(?:修改|编辑|改写|替换|删除|插入|追加|写入|保存)/.test(normalized)) {
-    return false
-  }
-  return /(?:修改|编辑|改写|重写|润色|替换|删除|删掉|移除|插入|追加|补充|更新|调整|排版|格式化|保存|写入|写到|做成|制作|生成|修复|修正)/.test(normalized)
+  return /(?:只|仅)(?:需|要)?(?:阅读|读取|查看|总结|概括|分析|检查|审阅)|(?:不要|不用|无需|不必|禁止|别)(?:再)?.{0,8}(?:修改|编辑|改写|改动|替换|删除|插入|追加|写入|保存)/.test(normalized)
 }
 
 export function hasExplicitCurrentDocumentAccessExclusion(text: string): boolean {
@@ -324,10 +327,48 @@ export function hasExplicitCurrentDocumentAccessExclusion(text: string): boolean
 export function hasExplicitCurrentDocumentAccessIntent(text: string): boolean {
   const normalized = String(text || '').trim()
   if (!normalized || hasExplicitCurrentDocumentAccessExclusion(normalized)) return false
-  const chineseReference = /(?:当前|现在打开的?|正在(?:查看|阅读|编辑)的?|眼前的?|这(?:个|份|篇)?)(?:文档|文件|资料|笔记)/
+  const chineseReference = /(?:当前|现在打开的?|正在(?:查看|阅读|编辑)的?|眼前的?|这(?:个|份|篇)?)(?:文档|文件|资料|笔记)|(?:在|往|把)(?:文档|笔记)(?:里|中|内)/
   const chineseAction = /(?:总结|概括|分析|检查|审阅|阅读|读取|查看|修改|编辑|改写|重写|润色|替换|删除|插入|追加|补充|更新|调整|排版|格式化|保存).{0,12}(?:文档|文件|资料|笔记)/
   const english = /\b(?:(?:current|open|opened|this)\s+(?:document|file|note)|(?:summari[sz]e|analy[sz]e|review|read|inspect|edit|rewrite|revise|format|save)\s+(?:the\s+|this\s+)?(?:document|file|note))\b/i
   return chineseReference.test(normalized) || chineseAction.test(normalized) || english.test(normalized)
+}
+
+/**
+ * Whether this turn works on the focused document. A document open and focused in the document workbench is available
+ * to every ordinary turn, so the model follows the conversation ("把第二节也换成信息卡") without the user naming it
+ * again; only an explicit Retry (which replays its task root) and an explicit "don't use local documents" leave it out.
+ * When the user points at it — a widget target, the open document attached as a file (which then stands as the current
+ * document instead of a read-only copy), or wording that names it — the turn must also read it before answering.
+ * Writing is open unless the user said to only read it; saving to disk follows the conversation's confirmation mode.
+ */
+export function resolveCurrentDocumentActivation(input: {
+  resources: NonNullable<SendScopedRequest['resources']>
+  anchor: CodexCurrentDocumentAnchor | null
+  intentText: string
+  /** False for an explicit Retry: it replays its task root and takes no current document it was not given. */
+  ambient: boolean
+}): {
+  anchor: CodexCurrentDocumentAnchor | null
+  canWrite: boolean
+  readRequired: boolean
+  documentFileIds: ReadonlySet<string>
+} {
+  const inactive = { anchor: null, canWrite: false, readRequired: false, documentFileIds: new Set<string>() }
+  if (!input.anchor || hasExplicitCurrentDocumentAccessExclusion(input.intentText)) return inactive
+  const pathDigest = input.anchor.pathDigest
+  const documentFileIds = new Set(input.resources
+    .filter((resource) => resource.kind === 'local_file' && pathDigest !== null && sha256(resource.path) === pathDigest)
+    .map((resource) => resource.id))
+  const pointed = documentFileIds.size > 0
+    || input.resources.some((resource) => resource.kind === 'widget_target')
+    || hasExplicitCurrentDocumentAccessIntent(input.intentText)
+  if (!pointed && !input.ambient) return inactive
+  return {
+    anchor: input.anchor,
+    canWrite: !hasExplicitCurrentDocumentWriteProhibition(input.intentText),
+    readRequired: pointed,
+    documentFileIds,
+  }
 }
 
 export function buildExternalReadToolSnapshot(input: {
@@ -449,6 +490,8 @@ export function createCurrentDocumentReadRequester(input: {
     if (!readTool) {
       const nextArgs: Record<string, unknown> = { ...args, tabId: input.anchor.tabId }
       if (tool === 'document.saveTab') delete nextArgs.path
+      // The renderer extends the read authority to the versions this turn's own edits produce.
+      if (writeTools.has(tool)) nextArgs.__readyResourceWrite = { scopeId: input.scopeId, anchor: input.anchor }
       return input.requestRendererToolAction({
         agent: input.agent,
         sessionId: input.sessionId,

@@ -8,7 +8,10 @@ export function canonicalProjectDirectory(value: unknown): string | null {
   try {
     const path = realpathSync(value)
     if (statSync(path).isDirectory()) return path
-  } catch { /* Report a user-facing error without changing the old selection. */ }
+  } catch {
+    // silent-catch: a missing or inaccessible folder falls through to the user-facing error thrown below
+    /* Report a user-facing error without changing the old selection. */
+  }
   throw new Error('项目文件夹不存在或无法访问，请重新选择')
 }
 

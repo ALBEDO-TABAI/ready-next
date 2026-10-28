@@ -106,6 +106,7 @@ function parseRecord(value: string | null): Record<string, unknown> | null {
     const parsed = JSON.parse(value)
     return isRecord(parsed) ? parsed : null
   } catch {
+    // silent-catch: malformed stored JSON reads as an absent record
     return null
   }
 }
@@ -354,6 +355,7 @@ export function scanCodexPendingInteractionsForRestart(input: {
     try {
       product = input.repository.readProductTurnRuntime(readyRunId)
     } catch {
+      // silent-catch: an unreadable product turn runtime cannot back a closeout plan, so its interactions are only cancelled
       cancelOnly.push(...interactions)
       continue
     }

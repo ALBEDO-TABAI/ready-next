@@ -3,7 +3,10 @@ import test from 'node:test'
 
 import { CodexManualCompactionController } from '../main/modules/agent-control/codex-runtime/codex-manual-compaction-controller'
 import { digestCanonicalJson } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
-import type { CodexBindingRepository } from '../main/modules/agent-control/codex-runtime/codex-binding-repository'
+import type {
+  CodexBindingRepository,
+  CodexManualCompactionRecovery,
+} from '../main/modules/agent-control/codex-runtime/codex-binding-repository'
 import type { CodexModelGatewayRepository } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-authority'
 import type { CodexSidecarSession } from '../main/modules/agent-control/codex-runtime/codex-sidecar-session'
 
@@ -107,6 +110,7 @@ test('production manual compaction binds before RPC evidence and consumes inside
     repository,
     gatewayRepository,
     getSession: () => session,
+    ensureThreadLoaded: async () => undefined,
     ownerMainBootId: 'main-boot-1',
     timeoutMs: 20_000,
     now: () => '2026-08-07T00:00:00.000Z',
@@ -176,6 +180,7 @@ test('manual compaction connection loss stays unknown and never consumes', async
       readSnapshot: () => ({ profileId: 'profile-1', credentialReferenceId: 'credential-1' }),
     } as unknown as CodexModelGatewayRepository,
     getSession: () => session,
+    ensureThreadLoaded: async () => undefined,
     ownerMainBootId: 'main-boot-1',
     timeoutMs: 20_000,
     now: () => '2026-08-07T00:00:00.000Z',
@@ -253,6 +258,10 @@ test('boot recovery retries only a dispatch proven not written and consumes exac
       }),
     } as unknown as CodexModelGatewayRepository,
     getSession: () => session,
+    ensureThreadLoaded: async (identity) => {
+      assert.deepEqual(identity, { aliasId: 'alias-1', aliasGeneration: 1 })
+      calls.push('ensure-loaded')
+    },
     ownerMainBootId: 'new-main',
     timeoutMs: 20_000,
     now: () => '2026-08-07T00:00:00.000Z',
@@ -269,8 +278,9 @@ test('boot recovery retries only a dispatch proven not written and consumes exac
     },
   }), 'observing')
   await waitFor(() => calls.includes('consume'))
+  // 2026-10-07: after a restart the thread is not loaded and Codex answers “thread not found” to the redispatch.
   assert.deepEqual(calls, [
-    'prove-absent', 'renew', 'register', 'dispatch', 'readback', 'consume',
+    'prove-absent', 'renew', 'register', 'ensure-loaded', 'dispatch', 'readback', 'consume',
   ])
   assert.equal(consumeInput?.notificationContextCompactionItemId, 'compact-notification-item-new')
   assert.equal(consumeInput?.contextCompactionItemId, 'compact-readback-item-new')
@@ -289,6 +299,7 @@ test('boot recovery marks a possibly written unclaimed compaction unknown withou
     repository,
     gatewayRepository: {} as CodexModelGatewayRepository,
     getSession: () => session,
+    ensureThreadLoaded: async () => undefined,
     ownerMainBootId: 'new-main', timeoutMs: 20_000,
     now: () => '2026-08-07T00:00:00.000Z', nowMs: () => 1_000,
   })
@@ -332,6 +343,7 @@ test('boot recovery makes an ambiguous claimed turn durably unknown instead of e
     repository,
     gatewayRepository: {} as CodexModelGatewayRepository,
     getSession: () => session,
+    ensureThreadLoaded: async () => undefined,
     ownerMainBootId: 'new-main', timeoutMs: 20_000,
     now: () => '2026-08-07T00:00:00.000Z', nowMs: () => 1_000,
   })
@@ -394,6 +406,7 @@ test('boot recovery validates a claimed turn once, then observes its terminal st
         },
       }),
     }) as unknown as CodexSidecarSession,
+    ensureThreadLoaded: async () => undefined,
     ownerMainBootId: 'main-1', timeoutMs: 300_000,
     now: () => '2026-08-11T00:00:00.000Z', nowMs: () => 0,
     wait: () => poll,
@@ -453,6 +466,7 @@ test('sidecar generation change cancels a manual observer without retiring it as
         },
       }),
     }) as unknown as CodexSidecarSession,
+    ensureThreadLoaded: async () => undefined,
     ownerMainBootId: 'main-1', timeoutMs: 300_000,
     now: () => '2026-08-11T00:00:00.000Z', nowMs: () => 0,
     wait: () => new Promise<void>(() => undefined),
@@ -523,6 +537,7 @@ test('a proven-absent redispatch retries in the same generation before any child
         },
       }),
     }) as unknown as CodexSidecarSession,
+    ensureThreadLoaded: async () => undefined,
     ownerMainBootId: 'main-1', timeoutMs: 300_000,
     now: () => '2026-08-11T00:00:00.000Z', nowMs: () => 0,
     wait: async () => undefined,
@@ -565,6 +580,7 @@ test('a deterministic redispatch identity failure becomes explicit unknown witho
         },
       }),
     }) as unknown as CodexSidecarSession,
+    ensureThreadLoaded: async () => undefined,
     ownerMainBootId: 'main-1', timeoutMs: 300_000,
     now: () => '2026-08-11T00:00:00.000Z', nowMs: () => 0,
     wait: async () => undefined,
@@ -582,4 +598,126 @@ test('a deterministic redispatch identity failure becomes explicit unknown witho
   await waitFor(() => unknownReason !== null)
   assert.equal(dispatches, 1)
   assert.equal(unknownReason, 'redispatch_failed:manual_dispatch_binding_not_unique')
+})
+
+// 2026-10-07: compaction on a thread not loaded after restart was answered “thread not found”; the record stayed
+// pending with its fence, and boot recovery later called it unknown, so the conversation could only be reset.
+test('a rejected compaction is settled from unchanged readback, live and at boot, never redispatched', async () => {
+  const recovery = (overrides: Partial<CodexManualCompactionRecovery> = {}): CodexManualCompactionRecovery => ({
+    manualCompactionId: 'manual-1', threadBindingId: 'binding-1', codexThreadId: 'thread-1',
+    codexCompactionTurnId: null, preDispatchThreadReadDigest: 'pre-read', preDispatchTurnIds: ['turn-a', 'turn-b'],
+    aliasId: 'alias-1', aliasGeneration: 1, upstreamProfileSnapshotDigest: 'snapshot-digest',
+    unknownAt: null, unknownReason: null, state: 'pending', fenceQuarantined: false,
+    latestAttempt: {
+      connectionEpoch: 'old-epoch', rpcId: 5, childWriteAttemptedAt: '2026-10-06T17:29:15.619Z',
+      childWriteConfirmedAt: '2026-10-06T17:29:15.619Z', unresolvedReason: null, responseKind: 'rejected',
+    },
+    ...overrides,
+  })
+  const harness = (turnIds: string[]) => {
+    const calls: string[] = []
+    const repository = {
+      settleRejectedManualCompaction(input: { manualCompactionId: string }) {
+        calls.push(`settle:${input.manualCompactionId}`)
+      },
+      recordManualCompactionUnknown(input: { reason: string }) { calls.push(`unknown:${input.reason}`) },
+      readManualCompactionRoute: () => ({
+        threadBindingId: 'binding-1', codexThreadId: 'thread-1', codexModel: 'ready-e0-model',
+        upstreamProfileSnapshotRef: 'snapshot-ref', upstreamProfileSnapshotDigest: 'snapshot-digest',
+      }),
+      beginManualCompaction: (input: { manualCompactionId: string }) => ({
+        manualCompactionId: input.manualCompactionId, codexThreadId: 'thread-1',
+      }),
+    } as unknown as CodexBindingRepository
+    const session = {
+      getActiveConnectionEpoch: () => 'epoch-1',
+      isConnectionLive: () => true,
+      getInboundBuffer: () => ({
+        registerProvisionalManualCompaction() { calls.push('register') },
+        discardRejectedManualCompaction(input: { manualCompactionId: string }) {
+          calls.push(`discard:${input.manualCompactionId}`)
+        },
+      }),
+      getClient: () => ({
+        async threadCompactStart() { calls.push('dispatch') },
+        async threadRead() {
+          calls.push('readback')
+          return { thread: { id: 'thread-1', turns: turnIds.map((id) => ({ id, status: 'completed', items: [] })) } }
+        },
+      }),
+    } as unknown as CodexSidecarSession
+    const controller = new CodexManualCompactionController({
+      repository,
+      gatewayRepository: {
+        readSnapshot: () => ({ credentialReferenceId: 'credential-1' }),
+      } as unknown as CodexModelGatewayRepository,
+      getSession: () => session,
+      ensureThreadLoaded: async () => { calls.push('ensure-loaded') },
+      ownerMainBootId: 'main-1', timeoutMs: 20_000,
+      now: () => '2026-10-07T00:00:00.000Z', nowMs: () => 1_000,
+      wait: async () => undefined,
+    })
+    return { controller, calls }
+  }
+
+  {
+    const { controller, calls } = harness(['turn-a', 'turn-b'])
+    assert.equal(await controller.reconcileRecovery(recovery()), 'settled')
+    assert.deepEqual(calls, ['readback', 'readback', 'settle:manual-1'])
+  }
+  {
+    const { controller, calls } = harness(['turn-a', 'turn-b'])
+    assert.equal(await controller.reconcileRecovery(recovery({
+      unknownAt: '2026-10-06T17:34:17.491Z', unknownReason: 'dispatch_may_have_reached_child',
+    })), 'settled')
+    assert.deepEqual(calls, ['readback', 'readback', 'settle:manual-1'], 'the record already called unknown is repaired')
+  }
+  {
+    const { controller, calls } = harness(['turn-a', 'turn-b', 'turn-new'])
+    assert.equal(await controller.reconcileRecovery(recovery()), 'settled')
+    assert.deepEqual(calls, ['readback', 'unknown:rejected_dispatch_unproven'], 'a new turn means it may have run')
+  }
+  {
+    const { controller, calls } = harness(['turn-a', 'turn-b'])
+    const live = await controller.begin({ aliasId: 'alias-1', aliasGeneration: 1 })
+    assert.equal(await controller.settleRejected({ identity: { aliasId: 'alias-1', aliasGeneration: 1 },
+      manualCompactionId: live.manualCompactionId }), true)
+    assert.deepEqual(calls, ['readback', 'register', 'readback', 'readback',
+      `discard:${live.manualCompactionId}`, `settle:${live.manualCompactionId}`])
+  }
+})
+
+// A second compaction right after one would summarize an empty history without the thread's instructions.
+test('manual compaction is refused when nothing happened since the last compaction', async () => {
+  let begun = 0
+  const controller = new CodexManualCompactionController({
+    repository: {
+      readManualCompactionRoute: () => ({
+        threadBindingId: 'binding-1', codexThreadId: 'thread-1', codexModel: 'ready-e0-model',
+        upstreamProfileSnapshotRef: 'snapshot-ref', upstreamProfileSnapshotDigest: 'snapshot-digest',
+      }),
+      beginManualCompaction() { begun += 1 },
+    } as unknown as CodexBindingRepository,
+    gatewayRepository: {
+      readSnapshot: () => ({ credentialReferenceId: 'credential-1' }),
+    } as unknown as CodexModelGatewayRepository,
+    getSession: () => ({
+      getActiveConnectionEpoch: () => 'epoch-1',
+      getInboundBuffer: () => ({}),
+      getClient: () => ({
+        async threadRead() {
+          return { thread: { id: 'thread-1', turns: [
+            { id: 'turn-a', status: 'completed', items: [{ type: 'userMessage', id: 'u' }] },
+            { id: 'turn-compact', status: 'completed', items: [{ type: 'contextCompaction', id: 'c' }] },
+          ] } }
+        },
+      }),
+    }) as unknown as CodexSidecarSession,
+    ensureThreadLoaded: async () => undefined,
+    ownerMainBootId: 'main-1', timeoutMs: 20_000,
+    now: () => '2026-10-07T00:00:00.000Z', nowMs: () => 1_000,
+  })
+  await assert.rejects(controller.begin({ aliasId: 'alias-1', aliasGeneration: 1 }),
+    (error: { code?: string }) => error.code === 'no_active_operation')
+  assert.equal(begun, 0)
 })

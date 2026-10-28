@@ -111,6 +111,7 @@ export function listLiveCodexThreadToolDefinitions(): ToolDefinition[] {
   try {
     skills = getSkillsRuntimeManager().listSkills()
   } catch {
+    // silent-catch: if skills cannot be listed, no skill-specific primitive is marked Codex-safe (fails closed)
     skills = []
   }
   return defaultToolRegistry.listToolDefinitions().map((definition) => (
@@ -127,6 +128,7 @@ function resolveFloorToolDefinitionFromLiveRoot(name: string): ToolDefinition | 
   try {
     skills = getSkillsRuntimeManager().listSkills()
   } catch {
+    // silent-catch: if skills cannot be listed, no skill-specific primitive is marked Codex-safe (fails closed)
     skills = []
   }
   return stampLiveCodexSkillDefinition(recovered, skills)

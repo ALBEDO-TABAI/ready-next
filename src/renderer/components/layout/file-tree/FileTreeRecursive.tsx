@@ -6,7 +6,8 @@ import type { FileFilterMap } from './file-kinds'
 import { hasMatchingDescendant, isFileAllowed, passesFilter } from './file-kinds'
 import { InlineCreateRow } from './inline-inputs'
 import { FileTreeItem } from './FileTreeItem'
-import { PendingClipRow, type PendingClipPlaceholder } from './pending-placeholders'
+import type { PendingClipPlaceholder } from './pending-placeholder-model'
+import { PendingClipRow } from './pending-placeholders'
 
 export function FileTreeRecursive({
   items,

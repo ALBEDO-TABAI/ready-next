@@ -89,13 +89,13 @@ try {
         results.push({width,height,font,margin,...result});
         if (results.length===1) {
           await win.webContents.executeJavaScript("window.dispatchEvent(new KeyboardEvent('keydown',{key:'Home'}));");
-          await win.webContents.executeJavaScript("document.querySelector('[aria-label=\\\"下一页\\\"]').click(); new Promise(r=>setTimeout(r,400));");
+          await win.webContents.executeJavaScript("document.querySelector('[aria-label=\\"下一页\\"]').click(); new Promise(r=>setTimeout(r,400));");
           fs.writeFileSync(${JSON.stringify(join(evidence, 'verified.png'))},(await win.webContents.capturePage()).toPNG());
         }
       }
       win.setSize(920,760);
       await win.webContents.executeJavaScript(
-        "new Promise(r=>setTimeout(r,100)).then(()=>{const input=document.querySelector('[aria-label=\\\"字号\\\"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'20');input.dispatchEvent(new Event('input',{bubbles:true}));})"
+        "new Promise(r=>setTimeout(r,100)).then(()=>{const input=document.querySelector('[aria-label=\\"字号\\"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'20');input.dispatchEvent(new Event('input',{bubbles:true}));})"
       );
       const reflow=await win.webContents.executeJavaScript('('+${JSON.stringify(inspectBook.toString())}+')()');
       if(reflow.fontSize!=='20px') reflow.failures.push('font control did not reflow');

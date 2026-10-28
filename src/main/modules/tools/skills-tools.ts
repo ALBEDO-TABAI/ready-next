@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { dirname, isAbsolute, relative, resolve } from 'node:path'
+import { broadcastDirectoryChanged } from '../document-engine/ipc/directory-change-broadcast'
 import type { ZodObject, ZodRawShape } from 'zod'
 import { getSkillsRuntimeManager, type SkillState } from '../skills-runtime/runtime-manager'
 import { rememberSkillRun } from '../agent-control/session/session-continuity'
@@ -2240,7 +2241,10 @@ export async function executeSkillTool(
           expectedSha256,
           destination: codexDelivery.destination,
           targetRelativePath,
+          // overwrite=true only reaches here after the user's per-call confirmation (M2, never pre-approved).
+          replaceExisting: args.overwrite === true,
         })
+        broadcastDirectoryChanged([dirname(resolve(codexDelivery.destination.path, targetRelativePath))])
         const output = createToolExecutionOutput(
           `已交付并回读验证 ${outputReceipt.bytes} 字节。`,
           { shape: 'json', data: outputReceipt },
@@ -2498,6 +2502,13 @@ export async function executeSkillTool(
         })
         throw error
       }
+    }
+    if (tool.name === 'skill_compact_context') {
+      // Codex compacts as its own step between turns; a tool call inside this turn cannot run it.
+      return createToolExecutionOutput(
+        '本轮内无法压缩上下文：Ready 的上下文压缩是独立操作。请告诉用户单独发送 @[context-compact]（不带其他内容），或在聊天菜单中选择“压缩上下文”；长任务中上下文满了时，Codex 也会自动压缩。',
+        { shape: 'json', data: { ok: false, errorKind: 'compaction_runs_between_turns', toolName } },
+      )
     }
     return `Unknown skill primitive: ${toolName}`
   }

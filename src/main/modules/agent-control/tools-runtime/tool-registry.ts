@@ -1299,7 +1299,9 @@ export class ToolRegistry implements ToolRegistryReader {
     const seen = new Set(definitions.map((definition) => definition.name))
     for (const name of authorizedPrimitiveNames) {
       if (seen.has(name)) continue
-      const definition = this.getToolDefinitionForExecution(name)
+      // The same definition the Codex thread surface froze (the full registry list); the execution lookup alone
+      // lacks the input schema, so a candidate primitive would never match its frozen entry.
+      const definition = this.getToolDefinition(name) || this.getToolDefinitionForExecution(name)
       if (!definition || definition.groupId !== 'skills') continue
       definitions = [...definitions, definition]
       seen.add(name)
@@ -1308,6 +1310,7 @@ export class ToolRegistry implements ToolRegistryReader {
     try {
       liveSkills = getSkillsRuntimeManager().listSkills()
     } catch {
+      // silent-catch: if skills cannot be listed, no skill-specific primitive is marked Codex-safe (fails closed)
       liveSkills = []
     }
     return definitions.map((definition) => ({

@@ -1,6 +1,6 @@
 {
   "contractVersion": 1,
-  "pinnedCodexVersion": "0.149.0",
+  "pinnedCodexVersion": "0.160.1",
   "startIdentityRegistryCapacity": 64,
   "agentMessageFinalSelectionContract": {
     "phaseEnum": [
@@ -405,6 +405,10 @@
       "features.plugins",
       "features.skill_search",
       "features.memories",
+      "features.background_paginated_rollout_migration",
+      "features.code_mode_host",
+      "features.enable_request_compression",
+      "features.skill_mcp_dependency_install",
       "memories.generate_memories",
       "memories.use_memories"
     ],
@@ -563,6 +567,7 @@
       },
       "metadataField": "client_metadata.x-codex-turn-metadata",
       "metadataOuterExactKeys": [
+        "root_turn_id",
         "session_id",
         "thread_id",
         "turn_id",
@@ -572,21 +577,28 @@
       ],
       "metadataBaseInnerExactKeys": [
         "agent_name",
+        "analytics_enabled",
         "auto_review_enabled",
+        "context_window_id",
         "installation_id",
         "node_repl_auto_review_required",
         "node_repl_disabled",
         "request_kind",
+        "root_turn_id",
         "sandbox",
         "sandbox_mode",
         "session_id",
         "thread_id",
         "turn_id",
         "turn_started_at_unix_ms",
-        "window_id"
+        "window_id",
+        "window_number"
       ],
       "metadataOptionalNativeLineageKeys": [
         "forked_from_thread_id"
+      ],
+      "productNativeMetadataKeys": [
+        "model"
       ],
       "productMetadataKeys": [
         "readyRunId",
@@ -594,8 +606,8 @@
         "turnContractDigest",
         "upstreamProfileSnapshotDigest"
       ],
-      "metadataShapePolicy": "product_is_base_plus_ready_fields_with_optional_root_turn_id_in_both_outer_and_inner_automatic_compaction_is_base_plus_compaction_plus_ready_fields_with_required_root_turn_id_in_both_manual_compaction_is_base_plus_compaction_without_root_turn_id_or_ready_fields_all_three_allow_only_optional_nonempty_forked_from_thread_id_in_inner",
-      "metadataIdentityPolicy": "outer_inner_ids_exact_session_equals_thread_window_equals_thread_colon_nonnegative_index_prompt_cache_key_equals_thread_root_turn_id_when_present_equals_turn_id_forked_from_thread_id_or_absence_exact_matches_bound_thread_codex_forked_from_id_before_claim_and_receipt",
+      "metadataShapePolicy": "product_is_base_plus_model_plus_ready_fields_automatic_compaction_is_base_plus_compaction_plus_ready_fields_manual_compaction_is_base_plus_compaction_without_model_or_ready_fields_root_turn_id_required_in_both_outer_and_inner_for_all_three_all_three_allow_only_optional_nonempty_forked_from_thread_id_in_inner",
+      "metadataIdentityPolicy": "outer_inner_ids_exact_session_equals_thread_window_id_equals_thread_colon_window_number_nonnegative_integer_context_window_id_nonempty_analytics_disabled_prompt_cache_key_equals_thread_root_turn_id_equals_turn_id_product_model_equals_bound_codex_model_forked_from_thread_id_or_absence_exact_matches_bound_thread_codex_forked_from_id_before_claim_and_receipt",
       "toolDigestAlgorithm": "sha256_canonical_json",
       "instructionDigestAlgorithm": "sha256_canonical_native_base_and_ordered_semantic_developer_messages",
       "instructionSystemMessagePolicy": "reject",

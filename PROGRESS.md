@@ -4,7 +4,7 @@
 
 ## 1. 当前基线
 
-- 应用 0.8.0，Electron 42.3.0，固定 Codex runtime 0.149.0；版本以 `package.json` 与 `assets/codex-runtime/runtime-manifest.json` 为准。
+- 应用 0.8.0，Electron 42.3.0，固定 Codex runtime 0.160.1（2026-10-07 升级，旧对话按续接证据继续）；版本以 `package.json` 与 `assets/codex-runtime/runtime-manifest.json` 为准。
 - 四个工作面：Browser、Document、RSS、Calendar；跨工作面的单一 Ready 助手、文件、技能、MCP、手动长期记忆和远程助手。
 - Agent 生产入口为 `CodexHostOrchestrator`，经原生回合与统一结果保存呈现。旧 SDK 模型循环、Dynamic Delivery/Boost、专项人格、旧记忆和 Agent 定时任务均已退役。
 - 当前发布配置是 macOS arm64。精简包不内置技能运行时；完整包需要单独置备并核对运行时清单。
@@ -16,6 +16,8 @@
 | 历史续聊和草稿恢复 | 阻断时仍可编辑草稿；可恢复失败保留记录开始新上下文。固定运行时已证明的零输出额度拒绝保留原 thread 和普通发送资格，不自动重发；终态按实际发送内容的回读形态核对 | `a68c9a43`、`e5e4cff0`；`docs/superpowers/plans/2026-09-03-ready-history-continuation-and-composer-repair-implementation.md` |
 | 聊天项目目录 | 每个本地聊天保存自己的默认交付目录；显式文件夹引用优先，远程会话不设置项目，选目录不放宽权限或自动扫描文件 | `74ebfa98`、`c387072f`；`docs/superpowers/plans/2026-09-29-chat-project-selector-implementation.md` |
 | 第三方模型接入 | 同一 Codex 网关承接 Responses、Chat Completions、Messages；连接测试复用正式接入路径。Z.ai 与 Opus 的已验证配置见专门记录 | `c16d5e13`；`docs/superpowers/audits/2026-09-26-provider-adapters-validation.md` |
+| 门禁清理 | `npm run verify` 原先停在空 catch 检查（184 处无说明），`lint:check`、lint 预算、a1-gate 也已变红。现在空 catch 都写明 `silent-catch:` 理由，hook 依赖逐条说明或做了等价修正，旧版物化种类改用具名判断，5 个源码断言改为行为测试或归入检查脚本，打包产物不再参与 lint；`verify`、`verify:a0/a05/a1/c`、`verify:lint-budget` 全部通过 | `docs/superpowers/operations/lint-warning-debt-ledger.md`；`scripts/check-silent-catch.cjs` |
+| Codex 运行时大文件拆分 | 绑定仓库与运行时组合按职责拆成分层模块和显式依赖工厂，公开接口、SQL、事务与行为不变；层级、状态与行数上限由边界测试强制 | `docs/superpowers/plans/2026-10-07-codex-runtime-large-module-split-implementation.md`；`src/__tests__/codex-runtime-module-boundaries.test.ts` |
 | 接入模块拆分 | HTTP、协议转换、流校验、凭据过滤与数据库访问按职责分开，保留公开入口及同一授权边界 | `6a8199ad`；`docs/superpowers/plans/2026-09-26-model-gateway-modularization.md` |
 | 工作台性能与菜单 | RSS 按可见窗口渲染；历史动作面和技能目录减少重复读取；聊天菜单随面板边界布局 | `1e9585c3`、`15aed89d`、`98c06c55`；`docs/superpowers/plans/2026-09-22-workbench-switch-performance-implementation.md` |
 | 测试维护 | 退役与空转测试清理，保留有效覆盖并补真实失败路径；界面合同进入默认套件，E6 使用独立环境 | `docs/superpowers/audits/2026-09-29-test-suite-cleanup-checklist.md` |

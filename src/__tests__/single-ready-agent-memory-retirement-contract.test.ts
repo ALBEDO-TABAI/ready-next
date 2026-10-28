@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import test from 'node:test'
+import { readCodexBindingRepositoryModules } from './helpers/codex-runtime-split-sources'
 
 function read(relativePath: string): string {
   // allow-source-grep: retired public surfaces must remain absent from the shipped architecture
@@ -40,6 +41,7 @@ test('specialist and retired memory capabilities are absent while Ready memory i
   const runtime = read('main/modules/agent-control/runtime-core/runtime.ts')
   const bootReconciler = read('main/modules/agent-control/codex-runtime/codex-runtime-boot-reconciler.ts')
   const bindingRepository = read('main/modules/agent-control/codex-runtime/codex-binding-repository.ts')
+    + readCodexBindingRepositoryModules()
   const migrations = read('main/modules/migrations.ts')
 
   assert.doesNotMatch(preload, /listRegistry|systemStudio|specialistBlueprint|agentPersonality|userProfile/)

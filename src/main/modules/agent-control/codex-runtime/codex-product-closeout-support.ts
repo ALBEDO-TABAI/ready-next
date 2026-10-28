@@ -337,6 +337,7 @@ export function runCodexEngineTerminalFinalization(input: {
   try {
     input.deliver()
   } catch (error) {
+    // silent-catch: the delivery error is held so cleanup always runs, then it is rethrown or handed to onDeliveryFailure
     deliveryError = error
   }
   input.cleanup()

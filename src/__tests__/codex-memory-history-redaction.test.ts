@@ -334,7 +334,8 @@ test('gateway validates original sidecar input but receipts and forwards redacte
         root_turn_id: 'turn-memory', agent_name: '/root',
         sandbox: 'seatbelt', sandbox_mode: 'read-only', auto_review_enabled: false,
         node_repl_auto_review_required: false, node_repl_disabled: false,
-        turn_started_at_unix_ms: 1, readyRunId: 'run-memory',
+        turn_started_at_unix_ms: 1, window_number: 0, context_window_id: 'context-window-1',
+        analytics_enabled: false, model: 'ready-e0-model', readyRunId: 'run-memory',
         toolSurfaceDigest: digestCanonicalJson(tools), turnContractDigest: 'turn-contract-memory',
         upstreamProfileSnapshotDigest: created.snapshotDigest,
       }),
@@ -342,7 +343,7 @@ test('gateway validates original sidecar input but receipts and forwards redacte
   }
   const binding: CodexModelGatewayBinding = {
     kind: 'product', codexModel: 'ready-e0-model', snapshot: created.snapshot,
-    snapshotDigest: created.snapshotDigest, toolSurfaceDigest: digestCanonicalJson(tools),
+    snapshotDigest: created.snapshotDigest, toolSurfaceDigest: digestCanonicalJson(tools), requestToolsDigest: digestCanonicalJson(tools),
     turnContractDigest: 'turn-contract-memory',
     instructionContractDigest: instructionTranscriptDigest(body.instructions, body.input),
     deliveredUserTail: [tail],
@@ -376,6 +377,7 @@ test('gateway validates original sidecar input but receipts and forwards redacte
                 ? 'manual_compaction' : 'automatic_compaction') as 'automatic_compaction' | 'manual_compaction',
               deliveredUserTail: [],
               toolSurfaceDigest: digestCanonicalJson([]),
+              requestToolsDigest: digestCanonicalJson([]),
               instructionContractDigest: instructionTranscriptDigest(
                 compactionFixtureBody?.instructions,
                 compactionFixtureBody?.input,
@@ -432,6 +434,8 @@ test('gateway validates original sidecar input but receipts and forwards redacte
       const compactionMetadata = JSON.parse(
         (compactionBody.client_metadata as Record<string, string>)['x-codex-turn-metadata'],
       ) as Record<string, unknown>
+      // Pinned 0.160.1 sends the model only on product requests and the root turn on every request.
+      delete compactionMetadata.model
       compactionMetadata.request_kind = 'compaction'
       compactionMetadata.compaction = {
         trigger, reason: trigger === 'manual' ? 'user_requested' : 'context_limit', implementation: 'responses',
@@ -439,8 +443,7 @@ test('gateway validates original sidecar input but receipts and forwards redacte
       }
       compactionMetadata.toolSurfaceDigest = digestCanonicalJson([])
       if (trigger === 'manual') {
-        delete (compactionBody.client_metadata as Record<string, unknown>).root_turn_id
-        for (const key of ['root_turn_id', 'readyRunId', 'toolSurfaceDigest', 'turnContractDigest', 'upstreamProfileSnapshotDigest']) {
+        for (const key of ['readyRunId', 'toolSurfaceDigest', 'turnContractDigest', 'upstreamProfileSnapshotDigest']) {
           delete compactionMetadata[key]
         }
       }

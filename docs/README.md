@@ -1,6 +1,6 @@
 # Ready 文档导航
 
-> 核对日期：2026-09-29。当前应用 0.8.0，固定 Codex runtime 0.149.0，发布配置为 macOS arm64；精确值以源码清单为准。
+> 核对日期：2026-09-29。当前应用 0.8.0，固定 Codex runtime 0.160.1，发布配置为 macOS arm64；精确值以源码清单为准。
 
 从本页选择当前入口。[全量文档清单](documentation-inventory.md) 记录项目叙述文档的用途、原位置和归档去向；[9/6 归档核对记录](maintenance/2026-09-06-documentation-refresh.md) 保留当时整理范围；9/29 的应用变化与验证边界见 [PROGRESS](../PROGRESS.md)，测试清扫见 [复核记录](superpowers/audits/2026-09-29-test-suite-cleanup-checklist.md)。
 

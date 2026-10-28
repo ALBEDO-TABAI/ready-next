@@ -13,6 +13,7 @@ import type {
 import type { PreparedCodexProductRun } from '../main/modules/agent-control/codex-runtime/codex-product-run-preparer'
 import { CodexTurnInputBuilder, textUserInput } from '../main/modules/agent-control/codex-runtime/codex-turn-input-builder'
 import { createCodexToolFixture } from './utils/codex-tool-fixture'
+import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
 import { disabledReadyMemorySnapshot } from './utils/ready-memory-fixture'
 import {
   CodexThreadResumeAuthority,
@@ -176,9 +177,11 @@ class FakeNativeRuntime implements CodexNativeRuntime {
     if (this.interruptError) throw this.interruptError
     return {}
   }
+  compactRejection: unknown = null
   async threadCompactStart(): Promise<Record<string, never>> {
     this.calls.push('threadCompactStart')
     this.failIfRequested('threadCompactStart')
+    if (this.compactRejection) throw this.compactRejection
     this.manualCompactionStarted = true
     return {}
   }
@@ -243,6 +246,16 @@ class FakeLifecycleStore implements ReadyCodexLifecycleStore {
     this.failIfRequested('readAliasIdentity')
     return { aliasId, aliasGeneration: 1 }
   }
+  async resolveStartedThread() {
+    if (this.threadState !== 'resume_required') return { state: 'loaded' as const, threadId: 'thread-1' }
+    return {
+      state: 'resume_required' as const,
+      threadId: 'thread-1',
+      expectedCwd: rootThread.cwd,
+      expectedForkedFromId: this.expectedForkedFromId,
+      developerInstructions: 'Ready thread instructions',
+    }
+  }
   async resolveThreadBinding() {
     if (this.threadState === 'loaded') return { state: 'loaded' as const, threadId: 'thread-1' }
     if (this.threadState === 'resume_required') {
@@ -251,6 +264,7 @@ class FakeLifecycleStore implements ReadyCodexLifecycleStore {
         threadId: 'thread-1',
         expectedCwd: rootThread.cwd,
         expectedForkedFromId: this.expectedForkedFromId,
+        developerInstructions: 'Ready thread instructions',
       }
     }
     return {
@@ -502,6 +516,11 @@ class FakeLifecycleStore implements ReadyCodexLifecycleStore {
   async markManualCompactionUnknown() {
     this.calls.push('markManualCompactionUnknown')
   }
+  rejectedCompactionProvenAbsent = true
+  async settleRejectedManualCompaction() {
+    this.calls.push('settleRejectedManualCompaction')
+    return this.rejectedCompactionProvenAbsent
+  }
   digestThreadRead() { return 'thread-read-digest' }
 }
 
@@ -588,7 +607,9 @@ function createHarness(options: {
   const adapter = new ReadyCodexLifecycleAdapter({
     nativeRuntime,
     threadResumePort: options.threadResumePort || {
-      async readThenResume({ threadId, validateRead }) {
+      async readThenResume({ threadId, developerInstructions, validateRead }) {
+        // 2026-10-07: Codex drops the instructions of a compacted thread unless the resume carries them.
+        assert.equal(developerInstructions, 'Ready thread instructions')
         const read = await nativeRuntime.threadRead({ threadId, includeTurns: true })
         validateRead(read.thread)
         const resumed = await nativeRuntime.threadResume({ threadId })
@@ -1991,7 +2012,65 @@ test('manual compact requires idle native thread, item terminal evidence, and re
   ])
 })
 
-test('pinned native capture keeps manual compaction notification and readback item identities separate', () => {
+// 2026-10-07: after Ready restarted, compaction targeted a thread the new runtime process had not loaded; Codex
+// answered “thread not found” and the conversation stayed blocked by the unsettled compaction.
+test('manual compact resumes an unloaded thread first and settles a rejected dispatch', async () => {
+  const idleNative = {
+    ...idleNever, readyRunCreated: true, codexThreadId: 'thread-1', allNativeThreadAttemptsSettled: true,
+  }
+  {
+    const { adapter, nativeRuntime, lifecycleStore } = createHarness()
+    lifecycleStore.facts = idleNative
+    lifecycleStore.threadState = 'resume_required'
+    const result = await adapter.compactSession(aliasIdentity)
+    assert.equal(result.ok, true)
+    assert.deepEqual(nativeRuntime.calls, ['threadRead', 'threadResume', 'threadCompactStart', 'threadRead'])
+    assert.deepEqual(lifecycleStore.calls, [
+      'markThreadResumed', 'beginManualCompaction', 'awaitManualCompaction', 'consumeManualCompaction',
+    ])
+  }
+  {
+    const { adapter, nativeRuntime, lifecycleStore } = createHarness()
+    lifecycleStore.facts = idleNative
+    lifecycleStore.threadState = 'resume_required'
+    nativeRuntime.threadResume = async () => { throw new Error('threadResume_failed') }
+    const result = await adapter.compactSession(aliasIdentity)
+    assert.equal(result.ok, false)
+    if (!result.ok) assert.equal(result.code, 'native_protocol_error')
+    assert.equal(lifecycleStore.calls.includes('beginManualCompaction'), false, 'no record when the thread cannot load')
+  }
+  for (const provenAbsent of [true, false]) {
+    const { adapter, nativeRuntime, lifecycleStore } = createHarness()
+    lifecycleStore.facts = idleNative
+    lifecycleStore.rejectedCompactionProvenAbsent = provenAbsent
+    nativeRuntime.compactRejection = new CodexAppServerClientError('rpc_rejected', {
+      code: -32600, message: 'thread not found: thread-1',
+    })
+    const result = await adapter.compactSession(aliasIdentity)
+    assert.equal(result.ok, false)
+    if (!result.ok) {
+      assert.equal(result.code, provenAbsent ? 'native_protocol_error' : 'compaction_state_unknown')
+      assert.equal(result.preserveUi, true)
+    }
+    assert.deepEqual(lifecycleStore.calls, provenAbsent
+      ? ['beginManualCompaction', 'settleRejectedManualCompaction']
+      : ['beginManualCompaction', 'settleRejectedManualCompaction', 'markManualCompactionUnknown'])
+  }
+  {
+    // Nothing happened since the last compaction: the store refuses before any record or dispatch.
+    const { adapter, nativeRuntime, lifecycleStore } = createHarness()
+    lifecycleStore.facts = idleNative
+    lifecycleStore.failAt.set('beginManualCompaction', 'no_active_operation')
+    const result = await adapter.compactSession(aliasIdentity)
+    assert.equal(result.ok, false)
+    if (!result.ok) assert.equal(result.code, 'no_active_operation')
+    assert.equal(nativeRuntime.calls.includes('threadCompactStart'), false)
+  }
+})
+
+// 0.149 gave the live notification and the durable readback different item ids; pinned 0.160.1 reports one id.
+// Ready records both columns either way, so rows written under either runtime stay valid.
+test('pinned native capture reports one manual compaction item identity in notification and readback', () => {
   const capture = JSON.parse(readFileSync(
     new URL('../../assets/codex-runtime/fixtures/native-protocol-capture.json', import.meta.url),
     'utf8',
@@ -2007,7 +2086,7 @@ test('pinned native capture keeps manual compaction notification and readback it
   )
   const readbackItems = readbackTurn?.items.filter((item) => item.type === 'contextCompaction') || []
   assert.equal(readbackItems.length, 1)
-  assert.notEqual(notification.item.id, readbackItems[0].id)
+  assert.equal(notification.item.id, readbackItems[0].id)
 })
 
 test('reset persistence failure preserves the current generation and performs no native operation', async () => {
@@ -2278,5 +2357,31 @@ test('manual compaction uncertainty and consume persistence failure never report
       assert.equal(result.preserveUi, true)
     }
     assert.equal(lifecycleStore.calls.includes('markManualCompactionUnknown'), true)
+  }
+  {
+    const { adapter, lifecycleStore } = createHarness()
+    lifecycleStore.facts = {
+      ...idleNever,
+      readyRunCreated: true,
+      codexThreadId: 'thread-1',
+      allNativeThreadAttemptsSettled: true,
+    }
+    lifecycleStore.digestThreadRead = () => { throw new Error('digest_failed') }
+    lifecycleStore.markManualCompactionUnknown = async () => { throw new Error('manual_compaction_transition_invalid') }
+    const metrics: AgentMetricEvent[] = []
+    __setMetricSinkForTests((event) => metrics.push(event))
+    let result: Awaited<ReturnType<typeof adapter.compactSession>>
+    try {
+      result = await adapter.compactSession(aliasIdentity)
+    } finally {
+      __setMetricSinkForTests(null)
+    }
+    assert.equal(result.ok, false)
+    if (!result.ok) assert.equal(result.code, 'compaction_state_unknown')
+    assert.deepEqual(metrics.map(({ metric, aliasId, reason }) => ({ metric, aliasId, reason })), [{
+      metric: 'codex_manual_compaction_unknown_marker_failed',
+      aliasId: 'alias-1',
+      reason: 'manual_compaction_transition_invalid',
+    }], 'a marker that cannot be written is reported instead of lost')
   }
 })

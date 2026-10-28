@@ -61,6 +61,7 @@ export default function ImageGallery({ tab, fileUrl, currentExt }: ImageGalleryP
 
   // Load sibling images once per directory and refresh only when that directory changes.
   useEffect(() => {
+    const directoryRequestGate = directoryRequestGateRef.current
     if (!directory || typeof window === 'undefined' || !window.electronAPI) return undefined
     let cancelled = false
     const load = () => {
@@ -77,7 +78,7 @@ export default function ImageGallery({ tab, fileUrl, currentExt }: ImageGalleryP
     load()
     return () => {
       cancelled = true
-      directoryRequestGateRef.current.invalidate()
+      directoryRequestGate.invalidate()
       unsubscribe()
     }
   }, [directory])

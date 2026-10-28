@@ -54,6 +54,14 @@ export type CodexThreadForkParams = {
   modelProvider: 'ready_gateway'
   approvalPolicy: 'never'
   sandbox: 'read-only'
+  /** Ready's thread instructions; Codex drops them when it rebuilds a compacted history without them. */
+  developerInstructions: string
+}
+
+/** Resuming rebuilds the thread's context; Ready re-declares its instructions so a compacted history keeps them. */
+export type CodexThreadResumeParams = {
+  threadId: string
+  developerInstructions?: string
 }
 
 export type CodexThreadEffectiveSettings = {
@@ -132,6 +140,8 @@ export type CodexThreadSource = string
 export type CodexThread = {
   id: string
   sessionId: string
+  /** Fixed when the thread was created: 0.160.1 starts `paginated` threads; older and forked-from-older stay `legacy`. */
+  historyMode: 'legacy' | 'paginated'
   parentThreadId: string | null
   forkedFromId: string | null
   cwd: string
@@ -200,18 +210,29 @@ export type CodexThreadItem =
 
 type CodexHttpErrorDetails = { httpStatusCode?: number | null }
 
+/** Every string `CodexErrorInfo` of the pinned runtime; a turn error with any other value is a protocol violation. */
+export const CODEX_ERROR_INFO_STRING_VARIANTS = [
+  'contextWindowExceeded',
+  'sessionBudgetExceeded',
+  'usageLimitExceeded',
+  'rateLimitExceeded',
+  'flexUnavailable',
+  'serverOverloaded',
+  'cyberPolicy',
+  'misalignmentPolicyViolation',
+  'tooManyDenials',
+  'internalServerError',
+  'unauthorized',
+  'badRequest',
+  'threadRollbackFailed',
+  'sandboxError',
+  'other',
+] as const
+
+const CODEX_ERROR_INFO_STRINGS = new Set<string>(CODEX_ERROR_INFO_STRING_VARIANTS)
+
 export type CodexErrorInfo =
-  | 'contextWindowExceeded'
-  | 'sessionBudgetExceeded'
-  | 'usageLimitExceeded'
-  | 'serverOverloaded'
-  | 'cyberPolicy'
-  | 'internalServerError'
-  | 'unauthorized'
-  | 'badRequest'
-  | 'threadRollbackFailed'
-  | 'sandboxError'
-  | 'other'
+  | typeof CODEX_ERROR_INFO_STRING_VARIANTS[number]
   | { httpConnectionFailed: CodexHttpErrorDetails }
   | { responseStreamConnectionFailed: CodexHttpErrorDetails }
   | { responseStreamDisconnected: CodexHttpErrorDetails }
@@ -357,6 +378,14 @@ export const CODEX_OPT_OUT_NOTIFICATION_METHODS = [
   'thread/project/updated',
   'thread/queue/changed',
   'thread/reverted',
+  'account/gatewayOAuth/changed',
+  'mcpServer/event/stream/notification',
+  'modelProvider/authRecoveryStarted',
+  'modelProvider/authRecoveryCompleted',
+  'thread/attachment/updated',
+  'thread/realtime/item/started',
+  'thread/realtime/item/completed',
+  'thread/realtime/item/transcript/delta',
 ] as const
 
 export interface CodexNativeRuntime {
@@ -372,7 +401,7 @@ export interface CodexNativeRuntime {
     data: CodexThread[]
     nextCursor: string | null
   }>
-  threadResume(params: { threadId: string }): Promise<CodexThreadEffectiveSettings>
+  threadResume(params: CodexThreadResumeParams): Promise<CodexThreadEffectiveSettings>
   threadArchive(params: { threadId: string }): Promise<Record<string, never>>
   turnStart(params: CodexTurnStartParams): Promise<{ turn: CodexTurn }>
   turnInterrupt(params: { threadId: string; turnId: string }): Promise<Record<string, never>>
@@ -595,19 +624,9 @@ function normalizeItem(value: unknown): CodexThreadItem | null {
 
 function normalizeCodexErrorInfo(value: unknown): { ok: true; value: CodexErrorInfo | null } | { ok: false } {
   if (value === undefined || value === null) return { ok: true, value: null }
-  if (
-    value === 'contextWindowExceeded'
-    || value === 'sessionBudgetExceeded'
-    || value === 'usageLimitExceeded'
-    || value === 'serverOverloaded'
-    || value === 'cyberPolicy'
-    || value === 'internalServerError'
-    || value === 'unauthorized'
-    || value === 'badRequest'
-    || value === 'threadRollbackFailed'
-    || value === 'sandboxError'
-    || value === 'other'
-  ) return { ok: true, value }
+  if (typeof value === 'string' && CODEX_ERROR_INFO_STRINGS.has(value)) {
+    return { ok: true, value: value as CodexErrorInfo }
+  }
   if (!isRecord(value)) return { ok: false }
 
   const keys = Object.keys(value)
@@ -696,6 +715,8 @@ export function normalizeCodexTurn(value: unknown): CodexTurn | null {
   }
 }
 
+const CODEX_THREAD_HISTORY_MODES: ReadonlySet<CodexThread['historyMode']> = new Set(['legacy', 'paginated'])
+
 export function normalizeCodexThread(value: unknown): CodexThread | null {
   if (!isRecord(value)) return null
   const id = stringField(value, 'id')
@@ -706,6 +727,9 @@ export function normalizeCodexThread(value: unknown): CodexThread | null {
   const cliVersion = stringField(value, 'cliVersion')
   const preview = stringField(value, 'preview')
   const status = normalizeThreadStatus(value.status)
+  // The pinned schema defaults an absent historyMode to legacy.
+  const historyMode = value.historyMode === undefined ? 'legacy' : value.historyMode
+  if (!CODEX_THREAD_HISTORY_MODES.has(historyMode as CodexThread['historyMode'])) return null
   if (
     !isNullableString(value.parentThreadId)
     || !isNullableString(value.forkedFromId)
@@ -737,6 +761,7 @@ export function normalizeCodexThread(value: unknown): CodexThread | null {
   return {
     id,
     sessionId,
+    historyMode: historyMode as CodexThread['historyMode'],
     parentThreadId: typeof value.parentThreadId === 'string' ? value.parentThreadId : null,
     forkedFromId: typeof value.forkedFromId === 'string' ? value.forkedFromId : null,
     cwd,

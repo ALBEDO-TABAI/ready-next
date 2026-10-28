@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import { detectPlatform } from '../main/modules/rss-engine/scrapers/index'
+import { NativeRSSScraper } from '../main/modules/rss-engine/scrapers/native-rss'
 import {
   BilibiliScraper,
   DouyinScraper,
@@ -251,6 +252,18 @@ describe('WeiboScraper', () => {
   })
 })
 
+describe('NativeRSSScraper cover images', () => {
+  it('reads the first picture of a CDATA description, as RSSHub writes it', () => {
+    const cover = 'http://sns-webpic-qc.xhscdn.com/202610051405/aaf39b1a/notes_pre_post/1040g3k8!nc_n_webp_mw_1'
+    const result = new NativeRSSScraper().parseXML(`<?xml version="1.0"?><rss version="2.0"><channel><title>广州潮会吃 - 小红书</title>
+      <item><title>广州新的！！白云也有了</title><link>https://www.xiaohongshu.com/user/profile/5e31b693000000000100bb06</link>
+      <description><![CDATA[<img src="${cover}" width="1186" height="1581" referrerpolicy="no-referrer"><br>广州新的！！白云也有了]]></description></item>
+      </channel></rss>`, 'xiaohongshu')
+    assert.equal(result.items[0]?.coverImage, cover)
+    assert.equal(result.items[0]?.description, '广州新的！！白云也有了')
+  })
+})
+
 describe('XiaohongshuScraper', () => {
   it('keeps RSSHub JSON items separate when the route reuses the profile link', () => {
     class TestXiaohongshuScraper extends XiaohongshuScraper {
@@ -397,5 +410,47 @@ describe('XiaohongshuScraper', () => {
     await scraper.fetchItems('https://www.xiaohongshu.com/user/profile/5fc91b41000000000101fe32')
 
     assert.equal(attempts, 2)
+  })
+
+  it('says a profile Xiaohongshu never opened was blocked, without asking again', async () => {
+    // RSSHub's own replies when the page went to the security-restriction page or a captcha (embedded, format=json).
+    const blocked = [
+      `HTTP 503: Service Unavailable | {"error":{"message":"page.waitForSelector: Target page, context or browser has been closed\\nCall log:\\n\\u001b[2m  - waiting for locator('div.reds-tab-item:nth-child(2), #red-captcha') to be visible\\u001b[22m\\n"}}`,
+      `HTTP 503: Service Unavailable | {"error":{"message":"page.waitForSelector: Target page, context or browser has been closed\\nCall log:\\n\\u001b[2m    - navigated to \\"https://www.xiaohongshu.com/website-login/error?redirectPath=https://www.xiaohongshu.com/login`,
+      'HTTP 503: Service Unavailable | {"error":{"message":"小红书风控校验，请稍后再试"}}',
+    ]
+    for (const error of blocked) {
+      const scraper = new XiaohongshuScraper('http://127.0.0.1:1240') as XiaohongshuScraper & {
+        fetchRoute: (routePath: string, platform: string) => Promise<{ items: never[]; feedTitle: string; platform: string; error?: string }>
+      }
+      let attempts = 0
+      scraper.fetchRoute = async (_routePath, platform) => {
+        attempts += 1
+        return { items: [], feedTitle: '', platform, error }
+      }
+
+      const result = await scraper.fetchItems('https://www.xiaohongshu.com/user/profile/5e31b693000000000100bb06')
+
+      assert.equal(attempts, 1, error)
+      assert.match(result.error || '', /登录或安全限制页/)
+      assert.doesNotMatch(result.error || '', /waitForSelector|HTTP 503/)
+    }
+  })
+
+  it('waits past RSSHub\'s page browser and does not repeat a route that timed out', async () => {
+    const scraper = new XiaohongshuScraper('http://127.0.0.1:1240') as XiaohongshuScraper & {
+      httpGet: (url: string, options?: { timeout?: number }) => Promise<never>
+    }
+    const timeouts: number[] = []
+    scraper.httpGet = async (_url, options) => {
+      timeouts.push(options?.timeout ?? 0)
+      throw new Error(`Request timed out after ${options?.timeout}ms`)
+    }
+
+    const result = await scraper.fetchItems('https://www.xiaohongshu.com/user/profile/5e31b693000000000100bb06')
+
+    assert.equal(timeouts.length, 1)
+    assert.ok(timeouts[0]! > 30_000 + 5_000, 'RSSHub closes the page browser 30s after launch')
+    assert.match(result.error || '', /RSSHub 路由请求超时/)
   })
 })

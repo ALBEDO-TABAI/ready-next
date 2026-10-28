@@ -15,6 +15,8 @@ import { Readability } from '@mozilla/readability'
 import { JSDOM } from 'jsdom'
 import TurndownService from 'turndown'
 import { extractPlatformArticle } from './platform-article-extractors'
+import { pushLinksIntoBlocks } from './block-links'
+import { restoreMissingImages } from './image-recovery'
 import { gfm } from 'turndown-plugin-gfm'
 import { ClipFetchError } from './clip-fetch'
 
@@ -107,20 +109,13 @@ export class ReadabilityJsdomAdapter implements ExtractionAdapter {
 
     let contentHtml = readabilityArticle?.content || document.body?.innerHTML || ''
 
-    // Carousel/slideshow reconciliation. Some CMSes (RebelMouse, Glide,
-    // Flickity) wrap gallery images in slideshow containers with prev/next
-    // navigation UI. Readability tends to strip those entire containers
-    // because the nav links/buttons make them look like UI chrome rather
-    // than article content. We compare the image URLs surviving in the
-    // readability article against the full set we found (and promoted) in
-    // the original DOM; if a material number went missing, append them as
-    // a `<figure>` sequence so turndown emits them in the final markdown.
-    const articleImageUrls = collectImageUrls(contentHtml)
-    const allDomImageUrls = collectImageUrlsFromDocument(document, input.url)
-    const missing = filterContentImagesNotIn(allDomImageUrls, articleImageUrls)
-    if (missing.length >= 3) {
-      contentHtml = appendMissingImagesAsFigures(contentHtml, missing)
-    }
+    // Pictures Readability dropped (slideshow chrome, lead figures, layout wrappers) return in place.
+    contentHtml = restoreMissingImages(contentHtml, document, input.url)
+
+    const linkHost = document.createElement('div')
+    linkHost.innerHTML = contentHtml
+    pushLinksIntoBlocks(linkHost)
+    contentHtml = linkHost.innerHTML
 
     const markdownTables = this.options.tables === 'markdown'
     if (markdownTables) contentHtml = gridReadyTables(contentHtml, document)
@@ -190,6 +185,7 @@ function extractWeChatArticle(
   promoteSvgImages(contentClone, ownerDocument, sourceUrl)
   normalizeWeChatImageUrls(contentClone)
   removeWeChatChrome(contentClone)
+  pushLinksIntoBlocks(contentClone)
 
   const turndown = createTurndownService(sourceUrl)
   const contentMarkdown = normalizeAdjacentWeChatImages(turndown.turndown(contentClone.innerHTML).trim())
@@ -664,99 +660,6 @@ function promoteLazyImages(document: Document, baseUrl: string): void {
     const absolute = toAbsoluteUrl(resolved, baseUrl)
     if (absolute) img.setAttribute('src', absolute)
   }
-}
-
-const IMG_TAG_SRC_RE = /<img\b[^>]*?\bsrc\s*=\s*"([^"]+)"/gi
-
-function collectImageUrls(html: string): Set<string> {
-  const out = new Set<string>()
-  for (const match of html.matchAll(IMG_TAG_SRC_RE)) {
-    const src = match[1]
-    if (src && /^https?:\/\//i.test(src)) out.add(normalizeImageUrl(src))
-  }
-  return out
-}
-
-function collectImageUrlsFromDocument(document: Document, baseUrl: string): { url: string; alt: string }[] {
-  const seen = new Set<string>()
-  const out: { url: string; alt: string }[] = []
-  for (const img of Array.from(document.querySelectorAll('img'))) {
-    // Skip 1×1 tracking / scorecard pixels.
-    const w = parseInt(img.getAttribute('width') || '', 10)
-    const h = parseInt(img.getAttribute('height') || '', 10)
-    if (Number.isFinite(w) && Number.isFinite(h) && (w <= 16 || h <= 16)) continue
-    // Skip site nav / logo / footer images.
-    const classes = (img.getAttribute('class') || '').toLowerCase()
-    if (/\b(site-footer|site-header|nav-|navigation|logo|menu|avatar|tracker|tracking)\b/.test(classes)) continue
-    const src = img.getAttribute('src')?.trim() || ''
-    if (!src || looksLikePlaceholder(src)) continue
-    const absolute = toAbsoluteUrl(src, baseUrl)
-    if (!absolute) continue
-    const key = normalizeImageUrl(absolute)
-    if (seen.has(key)) continue
-    seen.add(key)
-    out.push({ url: absolute, alt: img.getAttribute('alt')?.trim() || '' })
-  }
-  return out
-}
-
-function normalizeImageUrl(url: string): string {
-  // Drop fragment + sort query params so the same image with different
-  // width/quality params still dedupes.
-  try {
-    const parsed = new URL(url)
-    parsed.hash = ''
-    const params = Array.from(parsed.searchParams.entries()).sort()
-    parsed.search = ''
-    for (const [k, v] of params) parsed.searchParams.append(k, v)
-    return parsed.toString()
-  } catch {
-    return url
-  }
-}
-
-function filterContentImagesNotIn(
-  all: { url: string; alt: string }[],
-  present: Set<string>,
-): { url: string; alt: string }[] {
-  // Use a path-only key for the present-set comparison so that the same
-  // CDN image at different widths (e.g. `?width=980` vs `?width=1200`) is
-  // recognized as already-present.
-  const presentPaths = new Set<string>()
-  for (const url of present) {
-    try {
-      const parsed = new URL(url)
-      presentPaths.add(`${parsed.host}${parsed.pathname}`)
-    } catch {
-      presentPaths.add(url)
-    }
-  }
-  const out: { url: string; alt: string }[] = []
-  for (const item of all) {
-    let key = item.url
-    try {
-      const parsed = new URL(item.url)
-      key = `${parsed.host}${parsed.pathname}`
-    } catch {
-      // ignore
-    }
-    if (presentPaths.has(key)) continue
-    out.push(item)
-    presentPaths.add(key)
-  }
-  return out
-}
-
-function appendMissingImagesAsFigures(
-  html: string,
-  missing: { url: string; alt: string }[],
-): string {
-  const figures = missing.map(({ url, alt }) => {
-    const safeAlt = alt.replace(/"/g, '&quot;')
-    const safeUrl = url.replace(/"/g, '&quot;')
-    return `<figure><img src="${safeUrl}" alt="${safeAlt}" /></figure>`
-  })
-  return `${html}\n<div data-clip-gallery-reconciled="true">\n${figures.join('\n')}\n</div>`
 }
 
 function looksLikePlaceholder(src: string): boolean {

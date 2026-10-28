@@ -67,6 +67,7 @@ function parseMissingScopes(output: ToolExecutionOutput): string[] {
     try {
       parsed = JSON.parse(channel)
     } catch {
+      // silent-catch: a non-JSON output channel carries no structured missing-scope evidence, so it is skipped
       continue
     }
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue
@@ -193,6 +194,7 @@ function findVerificationUrl(value: unknown): string | null {
         const parsed = new URL(candidate)
         if (parsed.protocol === 'https:' && parsed.hostname && !parsed.username && !parsed.password) return candidate
       } catch {
+        // silent-catch: an unparseable verification URL is treated as absent, so no auth flow is remembered
         return null
       }
     }
@@ -222,6 +224,7 @@ export function rememberLarkCliAuthInitiation(input: {
   try {
     parsed = JSON.parse(data.stdout)
   } catch {
+    // silent-catch: non-JSON stdout is not an auth initiation payload, so no auth flow is remembered
     return null
   }
   const deviceCode = findDeviceCode(parsed)

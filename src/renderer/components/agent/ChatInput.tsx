@@ -665,7 +665,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
               await onActionAuthorizationModeChange(option.mode)
               setShowAuthorizationModeSelect(false)
             } catch {
-              // The parent updates the displayed mode only after Main
+              // silent-catch: the parent updates the displayed mode only after Main
               // persisted it. Keep the old value and menu on failure.
             } finally {
               setAuthorizationModeUpdating(false)

@@ -5,6 +5,7 @@ import { performDocActionWithMetadata } from './documentActions'
 import {
   digestCodexDocumentValue,
   getFocusedCodexDocumentSnapshot,
+  isAuthorizedCodexDocumentDigest,
   isLatestAuthorizedCodexDocumentAnchor,
   type FocusedCodexDocumentSnapshot,
 } from './codexCurrentDocumentAnchor'
@@ -44,8 +45,8 @@ async function snapshotMatchesAnchor(
       snapshot.path,
     ])),
   ])
-  return currentDigest === anchor.currentDigest
-    && anchor.currentVersion === `sha256:${currentDigest}`
+  return isAuthorizedCodexDocumentDigest(scopeId, anchor, currentDigest)
+    && anchor.currentVersion === `sha256:${anchor.currentDigest}`
     && pathDigest === anchor.pathDigest
     && incarnationKey === anchor.incarnationKey
 }

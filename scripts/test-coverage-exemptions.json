@@ -781,6 +781,30 @@
       "reason": "Lists the same tool executor surface used before Codex admission with an injected skill catalog; no executor dispatch, runtime session, or real database is invoked.",
       "since": "2026-09-29",
       "owner": "test-suite-cleanup"
+    },
+    {
+      "path": "src/__tests__/history-continuation-contract.test.ts",
+      "reason": "Reads the thread instruction contract through resolveCodexThreadInstructionContract over the pinned runtime assets; no repository, database or native binding is opened.",
+      "since": "2026-10-08",
+      "owner": "codex-runtime-0.160.1"
+    },
+    {
+      "path": "src/__tests__/skill-compact-context-codex.test.ts",
+      "reason": "Executes the skill tool against an injected SkillsRuntimeManager fake (__setSkillsRuntimeManagerForTests); no skill state database or native binding is opened.",
+      "since": "2026-10-08",
+      "owner": "codex-manual-compaction"
+    },
+    {
+      "path": "src/__tests__/codex-production-tool-wire.e2e.ts",
+      "reason": "Only lists the live Codex thread tool definitions and checks the pinned binary accepts them; tool execution, sessions and databases are never invoked.",
+      "since": "2026-10-08",
+      "owner": "codex-runtime-0.160.1"
+    },
+    {
+      "path": "src/__tests__/runtimeDriver-tool-event-log.test.ts",
+      "reason": "Lists the default tool surface through AgentSdkToolExecutor with an injected empty skill catalog and reads the isolated test log; no executor dispatch, session or database is opened.",
+      "since": "2026-10-09",
+      "owner": "lint-gate-cleanup"
     }
   ]
 }

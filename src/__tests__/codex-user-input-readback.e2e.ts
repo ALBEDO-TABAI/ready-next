@@ -13,7 +13,10 @@ import { CodexTurnInputBuilder, buildCodexDeliveredUserTail } from '../main/modu
 import { currentTurnReadyAdditionalContext, digestReadyAdditionalContext } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
 import { disabledReadyMemorySnapshot } from './utils/ready-memory-fixture'
 
-test('pinned runtime retains resource inputs and quota failures across restart on the same thread', { timeout: 30_000 }, async () => {
+// 2026-10-07: 0.160.1 starts new threads `paginated` (exact readback) while threads created earlier, and forks of
+// them, stay `legacy` (joined text, no skill or mention). Both shapes are exercised on the pinned binary.
+for (const historyMode of ['paginated', 'legacy'] as const) {
+test(`pinned runtime retains resource inputs and quota failures across restart on the same thread (${historyMode})`, { timeout: 30_000 }, async () => {
   const manifest = JSON.parse(readFileSync('assets/codex-runtime/runtime-manifest.json', 'utf8'))
   const binary = join(process.cwd(), 'build/codex', manifest.targetTriple, 'codex')
   assert.equal(createHash('sha256').update(readFileSync(binary)).digest('hex'), manifest.binarySha256)
@@ -115,7 +118,7 @@ supports_websockets = false
   try {
     await client.initialize()
     const started = await client.request('thread/start', { model: 'ready-e0-model', modelProvider: 'fixture',
-      cwd: root, approvalPolicy: 'never', sandbox: 'read-only', dynamicTools: [] })
+      cwd: root, approvalPolicy: 'never', sandbox: 'read-only', dynamicTools: [], historyMode })
     const threadId = started.thread.id
     const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jLzQAAAAASUVORK5CYII='
     writeFileSync(join(root, 'pixel.png'), Buffer.from(png, 'base64'))
@@ -168,10 +171,11 @@ supports_websockets = false
         buildCodexDeliveredUserTail(ingress, readyRunId), readyRunId)
       assert.equal(digestReadyAdditionalContext(currentContext),
         digestReadyAdditionalContext({ resourceReferences: refs, explicitRetry: null }), `turn ${sequence}`)
-      expected.push({ marker, content: projectCodexUserInputReadback(input) })
+      expected.push({ marker, content: projectCodexUserInputReadback(input, historyMode) })
       const checkReadback = async () => {
         const read = await client.request('thread/read', { threadId, includeTurns: true })
         assert.equal(read.thread.id, threadId)
+        assert.equal(read.thread.historyMode, historyMode)
         assert.equal(read.thread.turns.length, expected.length)
         for (const [index, turn] of read.thread.turns.entries()) {
           const user = normalizeCodexTurn(turn)?.items.filter((item) => item.type === 'userMessage')
@@ -196,3 +200,4 @@ supports_websockets = false
     rmSync(root, { recursive: true, force: true })
   }
 })
+}

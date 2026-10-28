@@ -93,6 +93,7 @@ export function AskUserQuestionsCard({ card, onSubmit, onCancel }: AskUserQuesti
     if (card.status !== 'pending') {
       setExpandSummary(false)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-seeds only when the card identity or status changes; depending on the whole card object would wipe in-progress answers whenever the parent passes a new object for the same pending card
   }, [card.cardId, card.status])
 
   const isPending = card.status === 'pending'

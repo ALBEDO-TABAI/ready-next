@@ -577,8 +577,15 @@ export async function buildCodexIngressInputWithDiagnostics(params: {
       diagnostics.inputIncludedCount += 1
       continue
     }
+    // The focused document's own tab is the current document: Main reads its live content (unsaved edits included)
+    // through the anchor, so it goes as its file reference rather than as a pasted copy.
+    const isCurrentDocumentTab = attachment.source === 'document-tab'
+      && Boolean(params.currentDocumentAnchor)
+      && attachment.tabId === params.currentDocumentAnchor?.tabId
+      && isAbsoluteLocalPath(attachment.path)
     if (
-      (attachment.source === 'document-quote'
+      !isCurrentDocumentTab
+      && (attachment.source === 'document-quote'
         || (attachment.source === 'document-tab' && (!isAbsoluteLocalPath(attachment.path) || attachment.dirty)))
       && attachment.selection?.trim()
     ) {
@@ -595,7 +602,8 @@ export async function buildCodexIngressInputWithDiagnostics(params: {
       diagnostics.inputIncludedCount += 1
       continue
     }
-    if (attachment.source === 'document-tab' && isAbsoluteLocalPath(attachment.path) && !attachment.dirty) {
+    if (attachment.source === 'document-tab' && isAbsoluteLocalPath(attachment.path)
+      && (!attachment.dirty || isCurrentDocumentTab)) {
       resources.push({
         kind: 'local_file',
         id: attachment.id,

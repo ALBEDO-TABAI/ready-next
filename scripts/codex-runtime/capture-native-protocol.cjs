@@ -246,6 +246,10 @@ function buildConfig(baseUrl) {
     'apps = false',
     'plugins = false',
     'skill_search = false',
+    'background_paginated_rollout_migration = false',
+    'code_mode_host = false',
+    'enable_request_compression = false',
+    'skill_mcp_dependency_install = false',
     ''
   ].join('\n')
 }

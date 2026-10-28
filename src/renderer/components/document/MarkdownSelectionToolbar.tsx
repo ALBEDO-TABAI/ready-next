@@ -384,6 +384,7 @@ export default function MarkdownSelectionToolbar({
     const left = Math.min(Math.max(8, rawLeft), maxLeft)
     const top = coords.top + coords.lineHeight + TOOLBAR_VERTICAL_GAP
     setPosition({ left, top })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the anchor coordinates (which also flip to undefined when anchor becomes null); a new anchor object with the same x/y must not recompute the position
   }, [
     anchor?.x,
     anchor?.y,

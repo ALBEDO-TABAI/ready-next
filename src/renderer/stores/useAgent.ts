@@ -1851,6 +1851,7 @@ export const useAgent = create<AgentState>((set, get) => ({
       await hydratePendingAskUserQuestionsCards()
       return true
     } catch {
+      // silent-catch: loadScopes reports failure as false and the panel keeps its current scopes
       return false
     }
   },

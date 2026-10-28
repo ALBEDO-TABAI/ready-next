@@ -55,6 +55,7 @@ export function WechatLoginControl({ channelId, enabled, disabled, beforeStart, 
     }
     void poll()
     const timer = window.setInterval(() => { void poll() }, 1500)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- generation is a request counter, not a DOM node; cleanup bumps its latest value so in-flight status reads and login actions are dropped
     return () => { mounted.current = false; ++generation.current; window.clearInterval(timer) }
   }, [refresh])
 
@@ -103,7 +104,10 @@ export function WechatLoginControl({ channelId, enabled, disabled, beforeStart, 
       if (!result.success) throw new Error(result.error || '取消失败，请重试。')
       if (mounted.current) setLogin({ status: 'idle', message: '已取消绑定，可以重新开始。' })
       await callbacks.current.onChanged()
-    } catch (error) { failure = error instanceof Error ? error.message : '取消失败' }
+    } catch (error) {
+      // silent-catch: the message is shown after the refresh in finally
+      failure = error instanceof Error ? error.message : '取消失败'
+    }
     finally { action.current = null; if (mounted.current) { setBusy(null); await refresh(); if (failure) setError(failure) } }
   }
 

@@ -195,12 +195,12 @@ test('the production Codex analysis-result port consumes the shared published re
     repo.getContentStore = () => db.rss.content
     const manager = new RSSItemAnalysisManager({ repository: repo })
     // Execute the actual production method body; replace only its singleton import.
-    const filename = join(process.cwd(), 'src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts')
+    const filename = join(process.cwd(), 'src/main/modules/agent-control/codex-runtime/composition/runtime-start.ts')
     const sourceFile = ts.createSourceFile(filename, readFileSync(filename, 'utf8'), ts.ScriptTarget.Latest, true)
     let method: ts.MethodDeclaration | undefined
     const visit = (node: ts.Node) => { if (ts.isMethodDeclaration(node) && node.name.getText(sourceFile) === 'getAnalysisResult') method = node; ts.forEachChild(node, visit) }
     visit(sourceFile); assert.ok(method?.body)
-    const body = method!.body!.getText(sourceFile).replace("const { getRSSItemAnalysisManager } = await import('../../rss-engine/item-analysis-manager')", '')
+    const body = method!.body!.getText(sourceFile).replace("const { getRSSItemAnalysisManager } = await import('../../../rss-engine/item-analysis-manager')", '')
     const compiled = ts.transpile(`async function port(payload) ${body}`, { target: ts.ScriptTarget.ES2022 })
     const port = new Function('getRSSItemAnalysisManager', 'abortSignal', compiled + '; return port')(() => manager, new AbortController().signal)
     const result = await port({ jobId: job.id })

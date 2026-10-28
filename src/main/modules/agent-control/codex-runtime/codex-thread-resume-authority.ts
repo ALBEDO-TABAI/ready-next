@@ -13,6 +13,7 @@ export class CodexThreadResumeAuthority implements ReadyCodexThreadResumePort {
 
   async readThenResume(input: {
     threadId: string
+    developerInstructions: string
     validateRead(thread: Awaited<ReturnType<CodexNativeRuntime['threadRead']>>['thread']): void
   }) {
     const session = this.getSession()
@@ -37,7 +38,10 @@ export class CodexThreadResumeAuthority implements ReadyCodexThreadResumePort {
     assertPinnedConnection()
     input.validateRead(read.thread)
     assertPinnedConnection()
-    const resumed = await client.threadResume({ threadId: input.threadId })
+    const resumed = await client.threadResume({
+      threadId: input.threadId,
+      developerInstructions: input.developerInstructions,
+    })
     assertPinnedConnection()
     return { connectionEpoch, read, resumed }
   }

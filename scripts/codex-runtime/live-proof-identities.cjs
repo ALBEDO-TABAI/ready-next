@@ -14,9 +14,10 @@ const TRUSTED_NPM_CLI = Object.freeze({
   path: '/opt/homebrew/lib/node_modules/npm/bin/npm-cli.js',
   sha256: '8e5f6f3429f8cdbe693cdc29904e9d5a7b127a494bd15c804bd54c7403bfcbe7',
 })
+// macOS 27.2 system sqlite3 3.54.0 (com.apple.sqlite3, macOS Software Signing), re-pinned 2026-10-07.
 const TRUSTED_SQLITE3 = Object.freeze({
   path: '/usr/bin/sqlite3',
-  sha256: 'a88c4bbabc67571b2fb9ceb58dc7bcc3220295802d5a2f278f87a21fbbae8446',
+  sha256: '5b4d771825e408a60db3549ada33e5abeb7a31464b5d65a87d8514208f8b61cf',
 })
 const TRUSTED_BUILD_SHELL = Object.freeze({
   path: '/bin/sh',

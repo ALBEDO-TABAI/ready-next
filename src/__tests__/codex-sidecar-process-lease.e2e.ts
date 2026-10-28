@@ -16,7 +16,12 @@ import {
   CodexBindingRepository,
   type CodexAdmittedBindingInput,
 } from '../main/modules/agent-control/codex-runtime/codex-binding-repository'
-import { createCodexUpstreamProfileSnapshot, digestCanonicalJson, instructionTranscriptDigest } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
+import {
+  createCodexUpstreamProfileSnapshot,
+  digestCanonicalJson,
+  instructionTranscriptDigest,
+  resolveCodexNativeModelSettings,
+} from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
 import { CodexModelGatewayRepository } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-authority'
 import type { CodexModelGatewayMetadata } from '../main/modules/agent-control/codex-runtime/codex-model-gateway'
 import { verifyCodexAutomaticCompactionEvidence } from '../main/modules/agent-control/codex-runtime/codex-automatic-compaction-evidence'
@@ -58,6 +63,8 @@ import type { StartIdentityReservationSet } from '../main/modules/agent-control/
 import { RunMetaRepository } from '../main/modules/agent-control/task-projection/run-meta-repository'
 import { workflowDigest } from '../main/modules/repositories/browser-workflow-codec'
 import { TaskProjectionRepository } from '../main/modules/repositories/task-projection-repository'
+import { loadRuntimeContinuityAssets } from '../main/modules/agent-control/codex-runtime/codex-runtime-continuity-assets'
+import { codexRequestToolsDigest } from '../main/modules/agent-control/codex-runtime/codex-tool-surface'
 import { providerCheckpointExecutionBinding } from './provider-checkpoint-test-fixtures'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
@@ -335,6 +342,17 @@ function admission(
     codexModel: 'ready-e0-model',
     upstreamProfileSnapshotRef: 'profile-e2e',
     upstreamProfileSnapshotDigest: providerSnapshotDigest,
+    // A started thread is admitted only with the same-thread continuation candidate production resolves.
+    continuationCandidate: reservation.existingThread
+      ? {
+          model: 'ready-e0-model',
+          threadConfig: resolveCodexNativeModelSettings(upstream.snapshot).threadConfig,
+          isolatedThreadCwd: threadCwd,
+          cwdAvailable: true,
+          instructionContractDigest: 'instruction-e2e',
+          currentToolSurface: run.readyToolSurface,
+        }
+      : null,
     additionalContextDigest: `additional-context-${run.runId}`,
     turnContractDigest: `turn-contract-${run.runId}`,
     messageVisibilityEpoch: 0,
@@ -401,7 +419,21 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
   const database = new DatabaseManager(true)
   const db = database.getRawDb()
   assert.ok(db)
-  const repository = new CodexBindingRepository(db)
+  const paths = resolveCodexRuntimePaths({
+    appPath: repoRoot,
+    resourcesPath: join(repoRoot, 'assets'),
+    isPackaged: false,
+  })
+  const runtime = loadVerifiedCodexRuntime(paths)
+  // Production binds the repository to the verified manifest and its checked-in continuity catalog.
+  const repository = new CodexBindingRepository(db, {
+    runtimeManifestDigest: runtime.manifestDigest,
+    protocolSchemaDigest: 'protocol-schema-e2e',
+    runtimeContinuityCatalog: loadRuntimeContinuityAssets({
+      assetRoot: join(repoRoot, 'assets/runtime-continuity'),
+      targetManifestDigest: runtime.manifestDigest,
+    }).catalog,
+  })
   const gateway = new CodexModelGatewayRepository(db, repository)
   const tempRoot = mkdtempSync(join(tmpdir(), 'ready-codex-e2-'))
   const gatewayTokens: string[] = []
@@ -505,12 +537,6 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
       store: new CodexThreadArchiveIntentStore(db as unknown as DatabaseConnection),
       now: () => new Date().toISOString(),
     })
-    const paths = resolveCodexRuntimePaths({
-      appPath: repoRoot,
-      resourcesPath: join(repoRoot, 'assets'),
-      isPackaged: false,
-    })
-    const runtime = loadVerifiedCodexRuntime(paths)
     const state = prepareCodexRuntimeState({
       userDataPath: tempRoot,
       gatewayUrl,
@@ -705,7 +731,7 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
       const nativeThread = (await client.threadRead({ threadId: start.codexThreadId, includeTurns: true })).thread
       const automatic = verifyCodexAutomaticCompactionEvidence({ gatewayRepository: gateway, readyRunId: run.runId,
         codexThreadId: start.codexThreadId, codexTurnId: turn.id, upstreamProfileSnapshotDigest: providerSnapshotDigest,
-        productToolSurfaceDigest: run.readyToolSurface.toolSurfaceDigest, thread: nativeThread })
+        productRequestToolsDigest: codexRequestToolsDigest(run.readyToolSurface), thread: nativeThread })
       repository.recordEngineTerminalCandidate({
         readyRunId: run.runId,
         codexThreadId: start.codexThreadId,
@@ -733,7 +759,7 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
           terminalReasonCandidate: projectionStatus === 'completed' ? 'done' : 'cancelled',
           abortInitiator: projectionStatus === 'completed' ? null : 'user',
           budgetState: {},
-          contextState: { automaticCompactionExchanges: automatic ? [automatic] : [] },
+          contextState: { automaticCompactionExchanges: automatic },
           providerDiagnostics: {},
           contextUsage: null,
           recoveryCheckpointRef: null,
@@ -771,7 +797,10 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
       const history = resolveCodexHistoryObservation({ candidate: engine.candidate, prepared: run,
         expectedClientUserMessageId: `client-message-${run.runId}`, thread: nativeThread, publicationDiverged: false,
         gatewayEvidence: gateway.readTurnGatewayEvidence(identity) })
-      assert.equal(history.kind, projectionStatus === 'completed' ? 'continuation_safe' : 'diverged', JSON.stringify(history))
+      // A user interrupt with a tool in flight is the pinned interrupted_after_completed_items_v1 seam: the
+      // completed items stay exactly once and the open call is closed as aborted, so the thread continues.
+      assert.equal(history.kind, 'continuation_safe', JSON.stringify(history))
+      if (projectionStatus === 'killed') assert.equal(history.seamId, 'interrupted_after_completed_items_v1')
       const terminalFacts = resolveCodexTerminalFacts({
         product: { terminal: projectionStatus === 'completed' ? 'done' : 'interrupted',
           terminalReason: projectionStatus === 'completed' ? 'done' : 'cancelled_runtime',
@@ -946,8 +975,8 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
       return read.thread.status.type === 'idle' ? read : null
     })
     await closeRun(interruptRun, interrupted.params.turn, 'killed')
-    assert.equal(repository.readTerminalCloseoutEvidence(interruptRun.runId)!.terminalFacts.history.kind, 'diverged')
-    assert.notEqual(repository.readActiveAliasBinding(interruptAliasId)?.threadBindingId, interruptBindingId)
+    assert.equal(repository.readTerminalCloseoutEvidence(interruptRun.runId)!.terminalFacts.history.kind, 'continuation_safe')
+    assert.equal(repository.readActiveAliasBinding(interruptAliasId)?.threadBindingId, interruptBindingId)
 
     const postInterruptRun = reserveAndAdmit('run-post-interrupt', 'POST_INTERRUPT_TOKEN', true)
     const postInterruptTurn = await runProductTurn(postInterruptRun, 'POST_INTERRUPT_TOKEN')

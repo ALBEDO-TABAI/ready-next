@@ -51,7 +51,7 @@ function formatDate(unixSeconds: number | null): string {
 }
 
 function literalMarkdown(value: string): string {
-  return value.replace(/\s+/g, ' ').replace(/([\\`*_{}\[\]<>])/g, '\\$1')
+  return value.replace(/\s+/g, ' ').replace(/([\\`*_{}[\]<>])/g, '\\$1')
 }
 
 function sourceLink(title: string, link: string): string {

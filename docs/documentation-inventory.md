@@ -28,6 +28,12 @@
 | 2026-09-26 | [模型接入实施](superpowers/plans/2026-09-26-provider-adapters-implementation.md)、[网关分层](superpowers/plans/2026-09-26-model-gateway-modularization.md) — 当前接入与职责边界；[接入验收](superpowers/audits/2026-09-26-provider-adapters-validation.md) 及其同名 JSON 是固定证据，不能推广到未验证配置 |
 | 2026-09-29 | [聊天项目目录](superpowers/plans/2026-09-29-chat-project-selector-implementation.md) — 本地聊天默认交付目录、隔离与安装记录 |
 | 2026-09-29 | [测试清扫复核](superpowers/audits/2026-09-29-test-suite-cleanup-checklist.md)、[E6 隔离合同](superpowers/plans/2026-09-29-e6-isolated-test-identities-implementation.md) — 删除/保留决定、测试入口及正式验收边界 |
+| 2026-10-05 | [Codex 失败续接与收尾](superpowers/plans/2026-10-05-codex-transient-failure-continuity-implementation.md) — 瞬时/流中断/停止续接 seam、未交付收尾、确认覆盖与候选原语执行复核；[RSS 一键翻译](superpowers/plans/2026-10-05-rss-article-translation-implementation.md) — 按篇翻译的切分、校验与展示合同 |
+| 2026-10-08 | [Codex runtime 两个大文件拆分](superpowers/plans/2026-10-07-codex-runtime-large-module-split-implementation.md) — 绑定仓库门面 + `binding-repository/` 分层模块、组合入口 + `composition/` 显式依赖工厂；边界由 `codex-runtime-module-boundaries.test.ts` 强制 |
+| 2026-10-07 | [手动压缩与线程加载](superpowers/plans/2026-10-07-codex-manual-compaction-loaded-thread-implementation.md) — 压缩前恢复线程、被拒派发结算与启动恢复、恢复/分叉重申指令、0.160.1 对照 |
+| 2026-10-07 | [Codex 0.160.1 采用与旧对话续接](superpowers/plans/2026-10-07-codex-runtime-0.160.1-adoption-implementation.md) — 固定身份、网关元数据、有效指令合同与续接证据（`scripts/probe-codex-runtime-continuity.mjs` → `scripts/codex-runtime/write-runtime-continuity-evidence.cjs` → `assets/runtime-continuity/`）、失败续接回执 v6 |
+| 2026-10-06 | [回合内压缩与手动压缩入口](superpowers/plans/2026-10-06-codex-mid-turn-compaction-implementation.md) — 网关接收回合内自动压缩、压缩后上下文放行、多次压缩收尾证据与 context-compact 入口 |
+| 2026-10-06 | [当前文档写面](superpowers/plans/2026-10-06-current-document-write-surface-implementation.md) — 指向即可修改、明确只读例外与保存确认 |
 
 ## 现行入口与维护文档
 

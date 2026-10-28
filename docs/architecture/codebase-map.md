@@ -76,7 +76,7 @@ claude-bridge IPC
 
 - `src/main/modules/agent-control/runtime-core/runtime.ts`
 - `src/main/modules/agent-control/runtime-core/codex-host-orchestrator.ts`
-- `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts`
+- `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts`：只创建共享状态并按依赖顺序接线；各部分在 `codex-runtime/composition/`，每个工厂经参数拿依赖，原可变状态集中在 `live-state.ts` 的 `CodexCompositionLive`
 - `src/main/modules/agent-control/codex-runtime/ready-codex-lifecycle-adapter.ts`
 - `src/main/modules/tools/tool-executor.ts`
 
@@ -120,7 +120,7 @@ claude-bridge IPC
 | 原生历史操作兼容性 | `src/main/modules/agent-control/codex-runtime/codex-runtime-compatibility.ts`、`assets/runtime-continuity/` |
 | 本地聊天项目目录 | `src/main/modules/agent-control/codex-runtime/chat-project-directory.ts`、`src/renderer/components/agent/ProjectSelector.tsx` |
 | 当前发送/恢复资格 | `src/main/modules/agent-control/codex-runtime/codex-action-surface.ts`、`codex-lifecycle-action-surface.ts` |
-| 上下文边界与绑定 | `src/main/modules/agent-control/codex-runtime/codex-context-boundary.ts`、`codex-binding-repository.ts` |
+| 上下文边界与绑定 | `src/main/modules/agent-control/codex-runtime/codex-context-boundary.ts`、`codex-binding-repository.ts`（门面，只做委托；SQL 与事务在 `binding-repository/` 分层模块） |
 | 远程收信、去重与执行 | `src/main/modules/agent-control/runtime-core/remote-channel-service.ts`、`remote-channel-event-repository.ts`、`remote-codex-turn.ts` |
 | 微信/飞书连接与持久队列 | `src/python/ready_sidecar/channels/`、`src/python/ready_sidecar/event_store.py` |
 | 稳定凭据 | `src/main/modules/settings-engine/credential-vault.ts`、`credential-vault-reconciliation.ts` |

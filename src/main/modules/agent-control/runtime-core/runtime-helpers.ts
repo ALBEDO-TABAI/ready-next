@@ -94,6 +94,7 @@ export function listCurrentProjectionBackedChildRunSummaries(
       LIMIT 100
     `).all<TaskProjectionChildSummaryRow>()
   } catch (error) {
+    // silent-catch: the DB failure is returned to the caller as a projection_db_error result
     return {
       rows: [],
       failure: {

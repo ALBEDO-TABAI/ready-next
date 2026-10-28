@@ -270,6 +270,7 @@ export class CodexRuntimeBootReconciler {
         try {
           await this.deps.actions.reconcileManualCompaction(manual)
         } catch {
+          // silent-catch: the compaction is reported as unresolved through unresolvedStartBindings in the boot result
           unresolvedStartBindings.push(`manual:${manual.manualCompactionId}`)
         }
       }
@@ -282,6 +283,7 @@ export class CodexRuntimeBootReconciler {
       try {
         await this.deps.threadArchiveCleanup?.reconcileForBoot()
       } catch {
+        // silent-catch: archive cleanup intents stay durable and pending; a cleanup failure must not block product boot
         // Durable intents remain pending; archive cleanup never blocks product boot.
       }
       this.deps.sidecarSession.sealBootReconciliation()

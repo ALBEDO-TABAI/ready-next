@@ -9,6 +9,36 @@ const latestAuthorizationByResource = new Map<string, {
   anchor: CodexCurrentDocumentAnchor
 }>()
 let lastPolicyEpoch = 0
+// Versions reached from an authorized version only through the turn's own edits, keyed by the anchor.
+const runEditedDigestsByAnchor = new Map<string, Set<string>>()
+
+function anchorEditKey(scopeId: string, anchor: CodexCurrentDocumentAnchor): string {
+  return `${scopeId}\0${anchor.logicalResourceId}\0${anchor.policyEpoch}`
+}
+
+/** Whether `digest` is the anchored version or one the same turn's edits produced from it. */
+export function isAuthorizedCodexDocumentDigest(
+  scopeId: string,
+  anchor: CodexCurrentDocumentAnchor,
+  digest: string,
+): boolean {
+  return digest === anchor.currentDigest
+    || runEditedDigestsByAnchor.get(anchorEditKey(scopeId, anchor))?.has(digest) === true
+}
+
+/** An edit by the turn that started from an authorized version keeps the result readable; anything else does not. */
+export function recordCodexDocumentEdit(
+  scopeId: string,
+  anchor: CodexCurrentDocumentAnchor,
+  beforeDigest: string,
+  afterDigest: string,
+): void {
+  if (!isAuthorizedCodexDocumentDigest(scopeId, anchor, beforeDigest)) return
+  const key = anchorEditKey(scopeId, anchor)
+  const digests = runEditedDigestsByAnchor.get(key) || new Set<string>()
+  digests.add(afterDigest)
+  runEditedDigestsByAnchor.set(key, digests)
+}
 
 function nextPolicyEpoch(): number {
   lastPolicyEpoch = Math.max(Date.now(), lastPolicyEpoch + 1)
@@ -124,5 +154,6 @@ export function isLatestAuthorizedCodexDocumentAnchor(
 export function resetCodexCurrentDocumentAnchorStateForTest(): void {
   previousVersionByResource.clear()
   latestAuthorizationByResource.clear()
+  runEditedDigestsByAnchor.clear()
   lastPolicyEpoch = 0
 }

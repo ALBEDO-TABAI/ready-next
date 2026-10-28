@@ -6,6 +6,7 @@ import test from 'node:test'
 import { buildChildRunPayload } from '../main/modules/repositories/skill-task-run-repository'
 import { createSkillChildSubAgentFromPersisted } from '../main/modules/agent-control/skills/skill-child-sub-agent-factory'
 import type { SkillChildLaunchParams } from '../main/modules/agent-control/skills/skill-child-run-types'
+import { readCodexRuntimeCompositionModules } from './helpers/codex-runtime-split-sources'
 
 const repoRoot = resolve(import.meta.dirname, '../..')
 const VERBATIM = '  帮我盯三个平台行情📈，明早九点前出对比！！\n（小红书优先）  '
@@ -18,7 +19,7 @@ test('retired handoff relay cannot return to the live Codex graph', () => {
   const liveComposition = readFileSync(resolve(
     repoRoot,
     'src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts',
-  ), 'utf8')
+  ), 'utf8') + readCodexRuntimeCompositionModules()
   assert.doesNotMatch(liveComposition, /runHandoffProposal|HANDOFF_NEW_SESSION_OPTION/)
 })
 

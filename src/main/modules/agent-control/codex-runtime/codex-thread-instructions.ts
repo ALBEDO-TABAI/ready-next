@@ -92,6 +92,7 @@ export function resolveCodexNativeSkillInput(input: {
     try {
       return realpathSync(skillPath) === canonicalRequestedPath
     } catch {
+      // silent-catch: an installed skill whose path no longer resolves cannot match the requested skill path
       return false
     }
   })

@@ -458,6 +458,7 @@ export default function BoardEditor({ tab, onActivate, isFocused = false }: Boar
       textEditorRef.current?.select()
     })
     return () => window.cancelAnimationFrame(frame)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- focuses and selects the editor only when a different node enters text edit; keystrokes replace textEdit.value and must not re-select the text
   }, [textEdit?.id])
 
   useEffect(() => {
@@ -757,6 +758,7 @@ export default function BoardEditor({ tab, onActivate, isFocused = false }: Boar
     return () => {
       disposed = true
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- setTextEditState is a []-memoized useCallback (it only touches textEditRef and the setTextEdit setter); the board must reopen only when openAttempt or the tab id/path changes
   }, [openAttempt, tab.id, tab.path])
 
   const retryBlockedPathSave = useCallback(async () => {

@@ -45,6 +45,8 @@ const DOCUMENT_WRITE_TOOLS = new Set<string>([
   'document_save_tab',
 ])
 
+const ANCHORED_DOCUMENT_TOOLS = new Set<string>([...DOCUMENT_WRITE_TOOLS, 'document_read_section', 'document_list_widgets'])
+
 const FILE_WRITE_OR_ORGANIZE = new Set<string>(FILE_WRITE_OR_ORGANIZE_TOOL_NAMES)
 
 export function composeCodexTurnToolSnapshot(input: {
@@ -72,12 +74,18 @@ export function composeCodexTurnToolSnapshot(input: {
     allowed = allowed.filter((name) => !DOCUMENT_WRITE_TOOLS.has(name))
     if (!allowed.includes('document_read_section')) allowed.push('document_read_section')
     if (input.currentDocument.allowWrite) {
+      // Writing is the default for a pointed-at document, so a thread frozen without these tools stays read-only.
+      const frozenNames = new Set(input.resolved.readyToolSurface.toolNames)
       for (const name of DOCUMENT_WRITE_FLOOR_TOOL_NAMES) {
-        if (!allowed.includes(name)) allowed.push(name)
+        if (frozenNames.has(name) && !allowed.includes(name)) allowed.push(name)
       }
     } else {
       allowed = allowed.filter((name) => name !== 'document_list_widgets')
     }
+  } else {
+    // Every document action runs against the document anchored when the message was sent; without one, a
+    // document tool can only fail, so the model is not offered any (files and folders keep their own tools).
+    allowed = allowed.filter((name) => !ANCHORED_DOCUMENT_TOOLS.has(name))
   }
 
   if (input.externalReadAllowedToolNames && input.externalReadAllowedToolNames.length > 0) {

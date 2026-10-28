@@ -5,6 +5,12 @@ import {
 } from './codex-product-boot-recovery'
 import type { CodexTurnCollector, CoreTurnCandidate } from './codex-turn-collector'
 
+/**
+ * The runtime that owns this readback stopped. The interrupt stays unknown in storage and the next boot's recovery
+ * resolves it from a fresh `thread/read`, so the wait ends instead of polling a detached runtime forever.
+ */
+export const CODEX_TERMINAL_READBACK_RUNTIME_STOPPED = 'codex_terminal_readback_runtime_stopped'
+
 export async function recoverCodexTerminalAfterInterrupt(input: {
   runtime: Pick<CodexNativeRuntime, 'turnInterrupt' | 'threadRead' | 'subscribe'>
   collector: CodexTurnCollector
@@ -12,6 +18,8 @@ export async function recoverCodexTerminalAfterInterrupt(input: {
   timedOutCandidate: CoreTurnCandidate
   acknowledgeInterrupt: () => void
   markInterruptUnknown: () => void
+  /** False once the runtime is stopping or stopped; a crashed sidecar that is still recovering stays active. */
+  isRuntimeActive: () => boolean
   wait?: () => Promise<void>
 }): Promise<CoreTurnCandidate> {
   const threadId = input.product.codexThreadId
@@ -42,9 +50,14 @@ export async function recoverCodexTerminalAfterInterrupt(input: {
       await input.runtime.turnInterrupt({ threadId, turnId })
       input.acknowledgeInterrupt()
     } catch {
+      // silent-catch: a failed interrupt request is recorded via markUnknownOnce; terminal readback still proceeds
       markUnknownOnce()
     }
     while (!terminal) {
+      if (!input.isRuntimeActive()) {
+        markUnknownOnce()
+        throw new Error(CODEX_TERMINAL_READBACK_RUNTIME_STOPPED)
+      }
       try {
         const read = await input.runtime.threadRead({ threadId, includeTurns: true })
         if (read.thread.id !== threadId) throw new Error('codex_terminal_readback_thread_mismatch')
@@ -52,6 +65,7 @@ export async function recoverCodexTerminalAfterInterrupt(input: {
         if (matches.length !== 1) throw new Error('codex_terminal_readback_turn_ambiguous')
         if (matches[0].status !== 'inProgress') terminal = matches[0]
       } catch {
+        // silent-catch: a failed or ambiguous thread readback is recorded via markUnknownOnce and retried after the wait
         markUnknownOnce()
       }
       if (terminal) break

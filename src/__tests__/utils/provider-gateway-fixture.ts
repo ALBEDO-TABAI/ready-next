@@ -37,7 +37,8 @@ export async function providerGatewayFixture(config: Partial<AIModelConfig> = {}
           installation_id: 'test', session_id: 'thread-test', thread_id: 'thread-test', turn_id: 'turn-test',
           root_turn_id: 'turn-test', window_id: 'thread-test:0', agent_name: '/root', request_kind: 'turn',
           sandbox: 'seatbelt', sandbox_mode: 'read-only', auto_review_enabled: false,
-          node_repl_auto_review_required: false, node_repl_disabled: false, turn_started_at_unix_ms: 1,
+          node_repl_auto_review_required: false, node_repl_disabled: false, turn_started_at_unix_ms: 1, window_number: 0, context_window_id: 'context-window-1',
+        analytics_enabled: false, model: 'ready-e0-model',
           readyRunId: 'run-test', toolSurfaceDigest: digestCanonicalJson(tools),
           turnContractDigest: 'contract-test', upstreamProfileSnapshotDigest: created.snapshotDigest,
         }),
@@ -47,7 +48,7 @@ export async function providerGatewayFixture(config: Partial<AIModelConfig> = {}
       async resolve(input) {
         const binding: CodexModelGatewayBinding = {
           kind: 'product', codexModel: 'ready-e0-model', snapshot: created.snapshot,
-          snapshotDigest: created.snapshotDigest, toolSurfaceDigest: digestCanonicalJson(tools),
+          snapshotDigest: created.snapshotDigest, toolSurfaceDigest: digestCanonicalJson(tools), requestToolsDigest: digestCanonicalJson(tools),
           turnContractDigest: 'contract-test', instructionContractDigest: instructionTranscriptDigest(request.instructions, request.input),
           additionalContextDigest: digestCanonicalJson([]), deliveredUserTail: [],
           forceToolFreeFinalization: false, allowedToolNames: ['read_token'],

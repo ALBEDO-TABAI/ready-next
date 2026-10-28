@@ -257,10 +257,27 @@ export function createMarkdownComponents({ mode, notePath, openHref, externalBas
         </code>
       )
     },
-    a: ({ href, children }: { href?: string; children?: ReactNode }) => {
+    a: ({ href, children, node }: { href?: string; children?: ReactNode; node?: { children?: Array<{ type: string; tagName?: string; value?: string }> } }) => {
       const reference = href || ''
       const resolved = resolveReference(reference)
       if (!resolved.resolvedUrl) return <span>{children}</span>
+      // A linked picture (`[![photo](src)](href)`) stays a full-width picture that opens its link.
+      const picture = Boolean(node?.children?.some((child) => child.tagName === 'img'))
+        && Boolean(node?.children?.every((child) => child.tagName === 'img' || (child.type === 'text' && !child.value?.trim())))
+      if (picture) {
+        return (
+          <a
+            href={resolved.resolvedUrl}
+            className="note-preview-picture-link"
+            onClick={(event) => {
+              event.preventDefault()
+              void openHref(resolved.resolvedUrl, resolved.localPath)
+            }}
+          >
+            {children}
+          </a>
+        )
+      }
       return (
         <a
           href={resolved.resolvedUrl}

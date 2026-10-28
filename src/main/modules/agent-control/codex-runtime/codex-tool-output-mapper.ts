@@ -78,7 +78,12 @@ function outputSuccess(output: ToolExecutionOutput): boolean {
 }
 
 function safeOutputSuccess(output: ToolExecutionOutput): boolean {
-  try { return outputSuccess(output) } catch { return false }
+  try {
+    return outputSuccess(output)
+  } catch {
+    // silent-catch: an output whose success fields cannot be read is reported as unsuccessful
+    return false
+  }
 }
 
 function mapReadyToolOutputUnsafe(
@@ -127,6 +132,7 @@ export function mapReadyToolOutput(
   try {
     return mapReadyToolOutputUnsafe(output, sensitiveValues)
   } catch {
+    // silent-catch: an unmappable tool payload is replaced by a payload-omitted notice for the model; success is still derived from the output
     return {
       contentItems: [{
         type: 'inputText',

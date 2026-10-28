@@ -3,6 +3,7 @@ import type {
   CodexHeadActionProjection,
 } from '../../../../shared/ipc-contracts/agent-runtime'
 import { digestCanonicalJson } from './codex-model-gateway-contract'
+import { codexThreadPredatesMaterializationRecords } from './codex-thread-materialization'
 
 export const CODEX_HEAD_ACTION_BLOCKER_PRECEDENCE = [
   'closed',
@@ -90,7 +91,7 @@ export function projectCodexHeadActionProjection(
 
   const historyState: CodexHeadActionProjection['historyState'] = facts.continuationBlocked
     ? 'terminal_unknown'
-    : facts.materializationKind === 'legacy'
+    : codexThreadPredatesMaterializationRecords(facts.materializationKind)
       ? 'legacy_context_boundary'
       : facts.materializationState === 'unknown'
           || facts.materializationState === 'proven_absent'

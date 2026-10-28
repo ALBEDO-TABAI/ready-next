@@ -685,6 +685,19 @@ test('feishu_message_send: sensitive content → M2; ordinary content → M3 (bo
 //    (toolName, args): no intent/TurnFrame input exists to pre-approve with.
 // ---------------------------------------------------------------------------
 
+// 2026-10-06: a document the user points at opens its edit tools; only writing it back to disk asks first.
+test('saving the current document confirms in ask mode and follows auto or full delegation', () => {
+  const ask = resolveConfirmationGate('document_save_tab', { tabId: 'current' })
+  assert.deepEqual([ask.mode, ask.action, ask.ruleId], ['M3', 'confirm', 'm3-save-current-document'])
+  for (const actionAuthorizationMode of ['auto', 'full'] as const) {
+    const delegated = resolveConfirmationGate('document_save_tab', { tabId: 'current' }, { actionAuthorizationMode })
+    assert.equal(delegated.action, 'allow', actionAuthorizationMode)
+  }
+  for (const toolName of ['document_insert_widget', 'document_update_widget', 'document_replace_exact']) {
+    assert.equal(resolveConfirmationGate(toolName, { tabId: 'current' }).action, 'allow', `${toolName} edits the open tab only`)
+  }
+})
+
 test('M3 and M2 produce the same gate action in default ask mode', () => {
   const m2 = resolveConfirmationGate('calendar_delete_event', { id: 'evt-1' })
   const m3 = resolveConfirmationGate('feishu_message_send', {

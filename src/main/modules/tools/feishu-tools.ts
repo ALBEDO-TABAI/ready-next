@@ -363,21 +363,24 @@ function authorityMatches(
     && args.doc_type === authority.docType
 }
 
-async function currentFeishuChannelIdentityMatches(
+/** Whether the authorized channel is still the same one, or the channel list could not be read to tell. */
+async function readFeishuChannelIdentity(
   authority: FeishuReadAuthority,
   sidecarManager: NonNullable<FeishuToolContext['sidecarManager']>,
-): Promise<boolean> {
+): Promise<'match' | 'mismatch' | 'unavailable'> {
+  let listed: Awaited<ReturnType<typeof sidecarManager.listChannels>>
   try {
-    const listed = await sidecarManager.listChannels()
-    const channels = Array.isArray(listed.channels) ? listed.channels : []
-    const current = channels.find((candidate) => candidate
-      && typeof candidate === 'object'
-      && !Array.isArray(candidate)
-      && (candidate as Record<string, unknown>).id === authority.channelId)
-    return Boolean(current) && digestFeishuChannelSnapshot(current) === authority.channelIdentityDigest
+    listed = await sidecarManager.listChannels()
   } catch {
-    return false
+    // silent-catch: an unreadable channel list leaves the identity unproven; the caller fails closed as unavailable
+    return 'unavailable'
   }
+  const channels = Array.isArray(listed.channels) ? listed.channels : []
+  const current = channels.find((candidate) => candidate
+    && typeof candidate === 'object'
+    && !Array.isArray(candidate)
+    && (candidate as Record<string, unknown>).id === authority.channelId)
+  return current && digestFeishuChannelSnapshot(current) === authority.channelIdentityDigest ? 'match' : 'mismatch'
 }
 
 export function getFeishuAnthropicTools(): Array<Record<string, unknown>> {
@@ -453,8 +456,17 @@ export async function executeFeishuTool(
     )
   }
 
-  if (context.feishuReadAuthority
-    && !await currentFeishuChannelIdentityMatches(context.feishuReadAuthority, context.sidecarManager)) {
+  const channelIdentity = context.feishuReadAuthority
+    ? await readFeishuChannelIdentity(context.feishuReadAuthority, context.sidecarManager)
+    : 'match'
+  if (channelIdentity === 'unavailable') {
+    return failureOutput(
+      tool,
+      FEISHU_TOOL_ERROR_KINDS.sidecarUnavailable.code,
+      'Feishu channels could not be read to verify this read authorization',
+    )
+  }
+  if (channelIdentity === 'mismatch') {
     return failureOutput(
       tool,
       FEISHU_TOOL_ERROR_KINDS.authorityMismatch.code,
@@ -630,6 +642,7 @@ export async function executeFeishuTool(
 
     return successOutput(tool, result)
   } catch (error) {
+    // silent-catch: sidecar call errors are classified and returned to the caller as a Feishu tool failure output
     const errorRecord: Record<string, unknown> = error && typeof error === 'object'
       ? {
           ...(error as unknown as Record<string, unknown>),

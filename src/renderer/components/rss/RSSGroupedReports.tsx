@@ -25,7 +25,9 @@ export default function RSSGroupedReports({ group, query, revision, active, onSe
   useEffect(() => {
     setResult(null); setError('')
     if (open && active) void load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- generation is a counter bumped on cleanup to drop the in-flight load; incrementing its live value is intended
     return () => { ++generation.current }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- load is recreated every render; the first-page load reads only group.id, query and revision, which key encodes
   }, [key, open, active])
   const reports = group.matchingCount === group.memberCount ? `${group.memberCount} 篇报道` : `本范围 ${group.matchingCount} / 全部 ${group.memberCount} 篇`
   const detail = `本范围 ${group.matchingCount} 篇 / 全事件 ${group.memberCount} 篇 · ${group.sourceCount} 个信源 · ${group.factCount} 个事实与进展 · ${group.matchingUnread} 篇未读${group.matchingStarred ? ` · ${group.matchingStarred} 篇收藏` : ''}`

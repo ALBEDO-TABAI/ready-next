@@ -3,6 +3,7 @@ import { createCodexChatPreSemanticState, inspectCodexChatPrefix } from './codex
 import {
   assertToolArgumentsObject,
   CodexModelGatewayChatError,
+  createCodexDownstream,
   isRecord,
   type JsonObject,
 } from './codex-model-gateway-common'
@@ -94,6 +95,7 @@ export async function streamChatAsResponses(input: {
   maxEvents?: number
   maxItemBytes?: number
   eventIdleMs?: number
+  keepaliveMs?: number
   admitToolResponse?: (calls: readonly Readonly<{
     codexCallId: string
     toolName: string
@@ -114,6 +116,7 @@ export async function streamChatAsResponses(input: {
   const startedAtMs = Date.now()
   const decoder = new TextDecoder('utf-8', { fatal: true })
   const reader = input.body.getReader()
+  const downstream = createCodexDownstream(input.write, input.keepaliveMs)
   let buffer = ''
   const responseId = `resp_ready_${randomUUID().replaceAll('-', '')}`
   const messageId = `msg_ready_${randomUUID().replaceAll('-', '')}`
@@ -143,7 +146,7 @@ export async function streamChatAsResponses(input: {
   const seenToolIds = new Set<string>()
   const messageFilter = new ProviderCredentialFilter(input.credential)
   const reasoningFilter = new ProviderCredentialFilter(input.credential)
-  input.write(event('response.created', {
+  downstream.write(event('response.created', {
     response: { id: responseId, model: input.snapshot.model, status: 'in_progress', output: [] },
   }))
 
@@ -164,7 +167,7 @@ export async function streamChatAsResponses(input: {
         wireByteCount: bytes,
       })
     }
-    input.write(responseFailed(responseId, input.snapshot.model, input.credential, code, details))
+    downstream.write(responseFailed(responseId, input.snapshot.model, input.credential, code, details))
     input.abort()
     return false
   }
@@ -195,7 +198,7 @@ export async function streamChatAsResponses(input: {
       messageStarted = true
       messageOutputIndex = nextOutputIndex
       nextOutputIndex += 1
-      input.write(event('response.output_item.added', {
+      downstream.write(event('response.output_item.added', {
         output_index: messageOutputIndex,
         item: { type: 'message', id: messageId, role: 'assistant', phase: 'final_answer', content: [] },
       }))
@@ -204,7 +207,7 @@ export async function streamChatAsResponses(input: {
     if (Buffer.byteLength(text, 'utf8') > maxItemBytes) {
       throw new CodexModelGatewayChatError('gateway_chat_item_too_large')
     }
-    input.write(event('response.output_text.delta', {
+    downstream.write(event('response.output_text.delta', {
       output_index: messageOutputIndex, content_index: 0, item_id: messageId, delta,
     }))
   }
@@ -215,7 +218,7 @@ export async function streamChatAsResponses(input: {
       reasoningStarted = true
       reasoningOutputIndex = nextOutputIndex
       nextOutputIndex += 1
-      input.write(event('response.output_item.added', {
+      downstream.write(event('response.output_item.added', {
         output_index: reasoningOutputIndex,
         item: { type: 'reasoning', id: reasoningId, summary: [] },
       }))
@@ -224,7 +227,7 @@ export async function streamChatAsResponses(input: {
     if (Buffer.byteLength(reasoning, 'utf8') > maxItemBytes) {
       throw new CodexModelGatewayChatError('gateway_chat_item_too_large')
     }
-    input.write(event('response.reasoning_summary_text.delta', {
+    downstream.write(event('response.reasoning_summary_text.delta', {
       output_index: reasoningOutputIndex,
       item_id: reasoningId,
       delta,
@@ -261,6 +264,7 @@ export async function streamChatAsResponses(input: {
         try {
           parsedPayload = JSON.parse(raw)
         } catch {
+          // silent-catch: a malformed SSE data payload is recorded and sent downstream as response.failed via fail()
           return void fail('gateway_chat_sse_json_invalid')
         }
         if (!isRecord(parsedPayload)) return void fail('gateway_chat_sse_payload_invalid')
@@ -464,8 +468,10 @@ export async function streamChatAsResponses(input: {
         await reader.cancel().catch(() => undefined)
         break
       }
+      downstream.upstreamProgressed()
     }
   } catch (error) {
+    // silent-catch: upstream read errors cancel the reader and are recorded and sent downstream as response.failed via fail()
     const code = error instanceof CodexModelGatewayChatError
       ? error.code
       : 'gateway_chat_stream_failed'
@@ -479,6 +485,7 @@ export async function streamChatAsResponses(input: {
   try {
     buffer += decoder.decode()
   } catch {
+    // silent-catch: a truncated UTF-8 sequence at stream end is recorded and sent downstream as response.failed via fail()
     return void fail('gateway_chat_sse_utf8_invalid')
   }
   if (buffer.trim()) return void fail('gateway_chat_sse_truncated')
@@ -518,6 +525,7 @@ export async function streamChatAsResponses(input: {
         return void fail('gateway_tool_arguments_schema_invalid')
       }
     } catch (error) {
+      // silent-catch: unparseable tool arguments are recorded and sent downstream as response.failed via fail()
       return void fail(
         error instanceof CodexModelGatewayChatError
           ? error.code
@@ -609,6 +617,7 @@ export async function streamChatAsResponses(input: {
       }
     }
   } catch (error) {
+    // silent-catch: invalid upstream usage is recorded and sent downstream as response.failed via fail()
     return void fail(error instanceof CodexModelGatewayChatError ? error.code : 'gateway_chat_usage_invalid')
   }
   if (finishReason === 'length' || finishReason === 'content_filter') {
@@ -629,6 +638,7 @@ export async function streamChatAsResponses(input: {
         argsDigest: digestCanonicalJson(JSON.parse(state.arguments)),
       })))
     } catch (error) {
+      // silent-catch: a tool response admission rejection is recorded and sent downstream as response.failed via fail()
       const code = error instanceof Error && /^gateway_[a-z0-9_]+$/.test(error.message)
         ? error.message
         : 'gateway_tool_response_admission_failed'
@@ -645,7 +655,7 @@ export async function streamChatAsResponses(input: {
   ].sort((left, right) => left.outputIndex - right.outputIndex)
   for (const item of bufferedItems) {
     if (item.kind === 'message') {
-      input.write(event('response.output_item.done', {
+      downstream.write(event('response.output_item.done', {
         output_index: item.outputIndex,
         item: {
           type: 'message', id: messageId, role: 'assistant', phase: 'final_answer',
@@ -653,7 +663,7 @@ export async function streamChatAsResponses(input: {
         },
       }))
     } else {
-      input.write(event('response.output_item.done', {
+      downstream.write(event('response.output_item.done', {
         output_index: item.outputIndex,
         item: {
           type: 'reasoning', id: reasoningId,
@@ -665,16 +675,16 @@ export async function streamChatAsResponses(input: {
   for (const state of tools.values()) {
     const outputIndex = nextOutputIndex
     nextOutputIndex += 1
-    input.write(event('response.output_item.added', {
+    downstream.write(event('response.output_item.added', {
       output_index: outputIndex,
       item: { type: 'function_call', id: state.id, call_id: state.id, name: state.name, arguments: '' },
     }))
     if (state.arguments) {
-      input.write(event('response.function_call_arguments.delta', {
+      downstream.write(event('response.function_call_arguments.delta', {
         output_index: outputIndex, item_id: state.id, delta: state.arguments,
       }))
     }
-    input.write(event('response.output_item.done', {
+    downstream.write(event('response.output_item.done', {
       output_index: outputIndex,
       item: {
         type: 'function_call', id: state.id, call_id: state.id,
@@ -717,6 +727,7 @@ export async function streamChatAsResponses(input: {
         usageDigest: digestCanonicalJson(completedPayload.response.usage),
       })
     } catch (error) {
+      // silent-catch: a completion evidence write failure is recorded and sent downstream as response.failed via fail()
       return void fail(
         error instanceof Error && /^gateway_[a-z0-9_]+$/.test(error.message)
           ? error.message
@@ -724,5 +735,5 @@ export async function streamChatAsResponses(input: {
       )
     }
   }
-  input.write(event('response.completed', { response: completedPayload.response }))
+  downstream.write(event('response.completed', { response: completedPayload.response }))
 }

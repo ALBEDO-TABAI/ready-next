@@ -28,8 +28,8 @@ function extractCoverImage(item: Record<string, unknown>): string | null {
   const mediaThumbnail = item['media:thumbnail'] as Record<string, string> | undefined
   if (mediaThumbnail?.['@_url']) return mediaThumbnail['@_url']
 
-  // 3. First <img> in description/content
-  const content = String(
+  // 3. First <img> in description/content (usually CDATA, which the parser keeps as an object)
+  const content = textOf(
     item['content:encoded'] ?? item['description'] ?? item['content'] ?? item['summary'] ?? ''
   )
   const imgMatch = content.match(/<img[^>]*src\s*=\s*["']([^"']+)["'][^>]*>/i)

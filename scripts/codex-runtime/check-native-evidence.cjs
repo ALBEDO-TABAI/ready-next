@@ -27,10 +27,11 @@ function assertCommon(capture) {
     JSON.stringify(threadStartIdentity.threadListSourceKinds) === JSON.stringify([pinnedSource]),
     'thread_list_source_contract_mismatch'
   )
-  assert(capture.runtime.releaseTag === 'rust-v0.149.0', 'unexpected_release_tag')
-  assert(capture.threads.first.historyMode === 'legacy', 'first_thread_history_mode_changed')
-  assert(capture.threads.second.historyMode === 'legacy', 'second_thread_history_mode_changed')
-  assert(capture.threads.resume.thread.historyMode === 'legacy', 'resumed_thread_history_mode_changed')
+  assert(capture.runtime.releaseTag === 'rust-v0.160.1', 'unexpected_release_tag')
+  // 0.160.1 creates every new thread with paginated history storage; Ready reads complete turns through thread/read.
+  assert(capture.threads.first.historyMode === 'paginated', 'first_thread_history_mode_changed')
+  assert(capture.threads.second.historyMode === 'paginated', 'second_thread_history_mode_changed')
+  assert(capture.threads.resume.thread.historyMode === 'paginated', 'resumed_thread_history_mode_changed')
   assert(capture.invariants.providerAuthorizationPresent, 'provider_authorization_missing')
   assert(capture.invariants.providerAuthorizationValueNotStored, 'provider_token_stored')
   assert(capture.invariants.appServerStderrDoesNotContainGatewayToken, 'provider_token_in_stderr')

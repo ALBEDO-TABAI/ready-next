@@ -5,6 +5,7 @@ import { RSSProcessingStore } from './rss-processing-store'
 import { RSSEventStore } from './rss-event-store'
 import type { DatabaseConnection } from './connection'
 import { RSSContentStore } from './rss-content-store'
+import { RSSTranslationStore } from './rss-translation-store'
 import type { RSSSource, RSSItem, RSSDraftStoreSourceSummary, RSSStats, RSSAnalysisAction, RSSAnalysisJobStatus, RSSAnalysisJob } from './records'
 
 export class RSSStore {
@@ -14,6 +15,7 @@ export class RSSStore {
   readonly digests: RSSDigestStore
   readonly events: RSSEventStore
   readonly catalog: RSSCatalogStore
+  readonly translations: RSSTranslationStore
 
   constructor(private readonly getConnection: () => DatabaseConnection | null) {
     this.organization = new RSSOrganizationStore(getConnection, (id) => this.content.getArticle(id)?.revision || null)
@@ -22,6 +24,7 @@ export class RSSStore {
     this.content = new RSSContentStore(getConnection, this.organization, (id) => { this.processing.enqueueBodyChange(id); this.organization.recordDigestIntake(id) }, this.events)
     this.digests = new RSSDigestStore(getConnection, this.content, this.organization)
     this.processing = new RSSProcessingStore(getConnection, this.content, this.organization, this.events)
+    this.translations = new RSSTranslationStore(getConnection)
   }
 
   private get db(): DatabaseConnection | null {

@@ -280,6 +280,79 @@ test('the Codex export primitive directly delivers a frozen predecessor version'
   }
 })
 
+// 2026-10-06: the user confirmed overwriting the document they asked to edit, and the export still refused it.
+test('the Codex export primitive replaces an existing file only on a confirmed overwrite', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ready-materializer-'))
+  try {
+    const targetRoot = join(root, 'target')
+    mkdirSync(targetRoot)
+    const original = join(targetRoot, '阅读回顾.md')
+    writeFileSync(original, '# 原文\n', { mode: 0o644 })
+    const materializer = new ArtifactMaterializer(join(root, 'staging'))
+    const staged = await materializer.write({
+      readyRunId: 'run-edit', itemId: '阅读回顾.md', actionId: 'write-edit',
+      expectedVersion: null, mode: 'replace', content: '# 原文\n\n> 信息卡\n',
+    })
+    const target = destination(targetRoot)
+    const exportOnce = (actionId: string, overwrite?: boolean) => executeSkillTool(
+      'skill_export_artifact',
+      {
+        relativePath: '阅读回顾.md',
+        targetRelativePath: '阅读回顾.md',
+        destinationResourceId: target.logicalResourceId,
+        expectedVersion: staged.version,
+        expectedSha256: staged.logicalSha256,
+        ...(overwrite === undefined ? {} : { overwrite }),
+      },
+      'scope-edit', undefined, undefined, null,
+      {
+        scopeId: 'scope-edit',
+        runId: 'run-edit',
+        authorization: {
+          mode: 'selected', skillId: 'artifact-test', allowedTypedActions: [], allowedPrimitives: ['skill_export_artifact'],
+        },
+        codexHostPrimitiveOnly: true,
+        artifactMaterializer: materializer,
+        readArtifactWriteHead: () => ({ version: staged.version, logicalSha256: staged.logicalSha256 }),
+        codexExecutionIdentity: { readyActionId: actionId, actionIdentityDigest: `${actionId}-digest` },
+        requestEnvelope: {
+          outputContract: {
+            destination: {
+              logicalResourceId: target.logicalResourceId,
+              path: target.path,
+              directoryIdentity: { device: target.device, inode: target.inode, mode: target.mode },
+              policyEpoch: target.policyEpoch,
+            },
+          },
+          folderOutputActivation: {
+            kind: 'positive', destinationResourceId: target.logicalResourceId, expectedOutputs: ['阅读回顾.md'],
+          },
+        },
+      } as never,
+    )
+    for (const [actionId, overwrite] of [['export-plain', undefined], ['export-declined', false]] as const) {
+      await assert.rejects(exportOnce(actionId, overwrite), (error: unknown) => (
+        error instanceof ArtifactMaterializerError && error.code === 'artifact_target_conflict'
+      ), actionId)
+      assert.equal(readFileSync(original, 'utf8'), '# 原文\n', `${actionId} keeps the file`)
+    }
+    const replaced = await exportOnce('export-confirmed', true)
+    assert.equal((replaced.data as { result?: string }).result, 'replaced')
+    assert.equal(readFileSync(original, 'utf8'), '# 原文\n\n> 信息卡\n')
+    assert.equal(statSync(original).mode & 0o777, 0o644, 'the replaced file keeps its permissions')
+    assert.deepEqual((await exportOnce('export-confirmed', true)).data, replaced.data, 'the confirmed action replays once')
+    symlinkSync(original, join(targetRoot, 'link.md'))
+    await assert.rejects(materializer.exportVersion({
+      actionReadyRunId: 'run-edit', sourceReadyRunId: 'run-edit', itemId: '阅读回顾.md', actionId: 'export-link',
+      version: staged.version, expectedSha256: staged.logicalSha256, destination: target,
+      targetRelativePath: 'link.md', replaceExisting: true,
+    }), (error: unknown) => error instanceof ArtifactMaterializerError && error.code === 'artifact_target_conflict')
+    assert.equal(lstatSync(join(targetRoot, 'link.md')).isSymbolicLink(), true, 'a confirmed overwrite never replaces a link')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('same-hash target is accepted without rewrite and destination drift or symlinks are refused', async () => {
   const root = await mkdtemp(join(tmpdir(), 'ready-materializer-'))
   try {

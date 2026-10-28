@@ -59,6 +59,7 @@ export default function RSSVirtualList({ items, selectedItemId, children, header
   useEffect(() => {
     const item = items.find((entry) => entry.id === selectedItemId)
     if (item) listRef.current?.scrollTo({ key: rowKey(item), align: 'auto' })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- scrolls only when the selection changes; list reloads and load-more replace items and must not snap the viewport back to the selected row
   }, [selectedItemId])
 
   return (

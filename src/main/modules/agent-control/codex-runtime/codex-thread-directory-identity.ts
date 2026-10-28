@@ -11,6 +11,7 @@ export function sameCodexThreadDirectory(left: string, right: string): boolean {
       && leftStat.dev === rightStat.dev
       && leftStat.ino === rightStat.ino
   } catch {
+    // silent-catch: a directory that cannot be stat-ed is not proven to be the same thread directory
     return false
   }
 }

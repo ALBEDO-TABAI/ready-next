@@ -21,6 +21,7 @@ import {
 import { isPreparedCodexProductRun, type PreparedCodexProductRun } from '../main/modules/agent-control/codex-runtime/codex-product-run-preparer'
 import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
 import type { StartIdentityReservationSet } from '../main/modules/agent-control/send-scoped-confirmation'
+import { codexRequestToolsDigest } from '../main/modules/agent-control/codex-runtime/codex-tool-surface'
 import { createCodexToolFixtureFromDefinitions } from './utils/codex-tool-fixture'
 import { loadSqliteAfterGuardForTest, skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { workflowDigest } from '../main/modules/repositories/browser-workflow-codec'
@@ -391,6 +392,10 @@ test('durable gateway authority resolves only the active product binding before 
       },
     })
     assert.equal(resolved.kind, 'product')
+    // The turn carries the frozen surface identity; the wire is derived from the thread's frozen dynamic tools.
+    assert.equal(resolved.toolSurfaceDigest, digestCanonicalJson(tools))
+    assert.equal(resolved.requestToolsDigest,
+      codexRequestToolsDigest(createCodexToolFixtureFromDefinitions([gatewayToolDefinition]).readyToolSurface))
     assert.deepEqual(resolved.deliveredUserTail, [])
     assert.equal(resolved.snapshot.model, 'upstream-model')
     assert.deepEqual(resolved.allowedToolNames, ['ready_read_probe'])

@@ -652,12 +652,16 @@ export class CodexModelGatewayRepository {
       snapshot,
       snapshotDigest: row.upstreamProfileSnapshotDigest,
       toolSurfaceDigest: kind === 'product' ? row.toolSurfaceDigest : digestCanonicalJson([]),
+      requestToolsDigest: kind === 'product' ? row.requestToolsDigest : digestCanonicalJson([]),
       turnContractDigest: row.turnContractDigest,
       instructionContractDigest: row.instructionContractDigest,
       additionalContextDigest: row.additionalContextDigest,
       deliveredUserTail: row.deliveredUserTail,
       forceToolFreeFinalization: budgetLane === 'final',
       allowedToolNames: kind === 'product' ? row.allowedToolNames : null,
+      ...(kind === 'product' && this.turnCompactedAutomatically(row.ownerId, input.metadata.threadId, input.metadata.turnId)
+        ? { compactedEarlierInTurn: true }
+        : {}),
     }
     input.validate(binding)
     this.writeReceipt({
@@ -674,6 +678,18 @@ export class CodexModelGatewayRepository {
       budgetLane,
     })
     return binding
+  }
+
+  private turnCompactedAutomatically(readyRunId: string, codexThreadId: string, codexTurnId: string): boolean {
+    return Boolean(this.db.prepare(`
+      SELECT 1 FROM ready_model_gateway_request_receipts receipt
+        JOIN ready_model_gateway_exchange_events response
+          ON response.gateway_request_receipt_id = receipt.receipt_id
+         AND response.event_kind = 'response_completed'
+       WHERE receipt.ready_run_id = ? AND receipt.codex_thread_id = ? AND receipt.codex_turn_id = ?
+         AND receipt.request_kind = 'automatic_compaction'
+       LIMIT 1
+    `).get(readyRunId, codexThreadId, codexTurnId))
   }
 
   private resolveManual(input: {
@@ -716,6 +732,7 @@ export class CodexModelGatewayRepository {
       snapshot,
       snapshotDigest: binding.upstreamProfileSnapshotDigest,
       toolSurfaceDigest: binding.toolSurfaceDigest,
+      requestToolsDigest: digestCanonicalJson([]),
       turnContractDigest: null,
       instructionContractDigest: binding.instructionContractDigest,
       additionalContextDigest: null,

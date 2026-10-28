@@ -205,6 +205,7 @@ function inlineSheetCellDimensions(value: string): { columns: number; rows: numb
     const rows = parsed.length
     return { columns: columns || 0, rows, cells: rows * (columns || 0) }
   } catch {
+    // silent-catch: unparseable --cells JSON is not a small literal grid, so the write is not treated as delegable
     return null
   }
 }
@@ -249,6 +250,7 @@ function collectJsonStringValues(value: string): string[] {
     visit(JSON.parse(value))
     return strings
   } catch {
+    // silent-catch: a non-JSON --cells/--reference-map value contributes no nested strings; the caller already includes the raw value
     return []
   }
 }

@@ -913,6 +913,14 @@ const rssAPI = {
   dismissQuery: (input: import('../shared/rss-workspace').RSSQueryInput) => ipcRenderer.invoke('rss:dismissQuery', input),
   readArticle: (input: unknown) => ipcRenderer.invoke('rss:readArticle', input),
   loadArticle: (input: unknown) => ipcRenderer.invoke('rss:loadArticle', input),
+  translateArticle: (input: import('../shared/rss-translation').RSSTranslateArticleInput) => ipcRenderer.invoke('rss:translateArticle', input),
+  readTranslation: (input: import('../shared/rss-translation').RSSTranslationRef) => ipcRenderer.invoke('rss:readTranslation', input),
+  cancelTranslation: (input: import('../shared/rss-translation').RSSTranslationRef) => ipcRenderer.invoke('rss:cancelTranslation', input),
+  onTranslationChanged: (callback: (ref: import('../shared/rss-translation').RSSTranslationRef) => void) => {
+    const handler = (_event: unknown, ref: import('../shared/rss-translation').RSSTranslationRef) => callback(ref)
+    ipcRenderer.on('rss:translationChanged', handler)
+    return () => ipcRenderer.removeListener('rss:translationChanged', handler)
+  },
   getSources: () => ipcRenderer.invoke('rss:getSources'),
   addSource: (source: unknown) => ipcRenderer.invoke('rss:addSource', source),
   removeSource: (id: string) => ipcRenderer.invoke('rss:removeSource', id),

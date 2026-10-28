@@ -393,7 +393,7 @@ export function extractInlineCitationSources(content: string): InlineCitationSou
     try {
       source = new URL(href).hostname.replace(/^www\./, '')
     } catch {
-      // The renderer only links http(s) values. If URL parsing still fails,
+      // silent-catch: the renderer only links http(s) values. If URL parsing still fails,
       // the literal href is the truthful fallback label.
     }
     sources.set(key, { index, href, source })
@@ -468,7 +468,7 @@ export function renderInline(
         try {
           path = decodeURI(path)
         } catch {
-          // Keep the raw file URL path if it is not valid URI encoding.
+          // silent-catch: keep the raw file URL path if it is not valid URI encoding.
         }
         parts.push(<LocalFileChip key={`a-${key++}`} path={path} />)
       } else {

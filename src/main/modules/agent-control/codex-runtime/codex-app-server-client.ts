@@ -16,6 +16,7 @@ import {
   type CodexThreadEffectiveSettings,
   type CodexThreadForkParams,
   type CodexThreadListParams,
+  type CodexThreadResumeParams,
   type CodexThreadStartParams,
   type CodexTurn,
   type CodexTurnStartParams
@@ -214,6 +215,15 @@ export function isCodexNoActiveTurnInterruptError(error: unknown): boolean {
     && error.details.message === 'no active turn to interrupt'
 }
 
+/** A typed JSON-RPC error: Codex received the request and refused it, as opposed to a timeout or a lost connection. */
+export function isCodexTypedRpcRejection(error: unknown): boolean {
+  if (!(error instanceof CodexAppServerClientError) || error.code !== 'rpc_rejected') return false
+  return isRecord(error.details)
+    && Number.isSafeInteger(error.details.code)
+    && typeof error.details.message === 'string'
+    && error.details.message.trim().length > 0
+}
+
 type PendingRequest = {
   id: number
   method: ClientMethod
@@ -394,8 +404,10 @@ function validateThreadForkParams(value: unknown): asserts value is CodexThreadF
     'modelProvider',
     'approvalPolicy',
     'sandbox',
+    'developerInstructions',
   ])
   if (!nonEmptyString(params.threadId)
+    || !nonEmptyString(params.developerInstructions)
     || !nonEmptyString(params.lastTurnId)
     || !nonEmptyString(params.cwd)
     || !nonEmptyString(params.model)
@@ -707,9 +719,12 @@ export class CodexAppServerClient implements CodexNativeRuntime {
     ) as Promise<CodexThreadEffectiveSettings>
   }
 
-  async threadResume(params: { threadId: string }): Promise<CodexThreadEffectiveSettings> {
-    const exact = requireExactIdentityParams(params, ['threadId'])
-    if (!nonEmptyString(exact.threadId)) invalidParams()
+  async threadResume(params: CodexThreadResumeParams): Promise<CodexThreadEffectiveSettings> {
+    const exact = requireExactIdentityParams(params, params.developerInstructions === undefined
+      ? ['threadId']
+      : ['threadId', 'developerInstructions'])
+    if (!nonEmptyString(exact.threadId)
+      || (exact.developerInstructions !== undefined && !nonEmptyString(exact.developerInstructions))) invalidParams()
     return this.request(
       'thread/resume',
       params,
@@ -959,6 +974,7 @@ export class CodexAppServerClient implements CodexNativeRuntime {
         if (error) this.rejectOrdinaryRequest(id, new CodexAppServerClientError('child_write_failed'))
       })
     } catch (error) {
+      // silent-catch: a failed child write marks the dispatch binding unresolved and rejects the pending request; start and archive writes also close the connection
       if (startMethod && bindingId) {
         void this.options.startDispatchPort.markUnresolved({
           connectionEpoch: this.options.connectionEpoch,
@@ -1149,6 +1165,7 @@ export class CodexAppServerClient implements CodexNativeRuntime {
     try {
       request.resolve(request.responseNormalizer(frame.result))
     } catch (error) {
+      // silent-catch: a result the normalizer rejects is surfaced to the caller by rejecting the pending request
       request.reject(error instanceof Error ? error : new CodexAppServerClientError('rpc_result_invalid'))
     }
   }
@@ -1214,6 +1231,7 @@ export class CodexAppServerClient implements CodexNativeRuntime {
       try {
         nativeId = startNativeId(method, frame.result)
       } catch {
+        // silent-catch: a result without this start method's native id is not its late response; try the next method
         continue
       }
       const consumed = await this.options.startDispatchPort.consumeLateResponse({
@@ -1236,6 +1254,7 @@ export class CodexAppServerClient implements CodexNativeRuntime {
       try {
         normalizeEmptyResult(frame.result)
       } catch {
+        // silent-catch: a late compaction response with a malformed result is left unconsumed by the manual compaction port
         return false
       }
     }
@@ -1255,6 +1274,7 @@ export class CodexAppServerClient implements CodexNativeRuntime {
       try {
         normalizeEmptyResult(frame.result)
       } catch {
+        // silent-catch: a late archive response with a malformed result is left unconsumed by the thread archive port
         return false
       }
     }
@@ -1420,6 +1440,7 @@ export class CodexAppServerClient implements CodexNativeRuntime {
       try {
         confirmation = this.options.inboundFramePort.confirmServerResponseTransportWrite(deliveryAttempt)
       } catch (confirmError) {
+        // silent-catch: a failed write confirmation is surfaced by closing the connection as a protocol failure
         this.closeForProtocolFailure(confirmError)
         return
       }
@@ -1513,7 +1534,9 @@ export class CodexAppServerClient implements CodexNativeRuntime {
     for (const listener of [...this.listeners]) {
       try {
         void Promise.resolve(listener(notification)).catch(() => undefined)
-      } catch { /* observer failures do not own the protocol */ }
+      } catch {
+        // silent-catch: observer failures do not own the protocol; a throwing notification listener must not disturb frame handling
+      }
     }
   }
 
@@ -1538,6 +1561,8 @@ export class CodexAppServerClient implements CodexNativeRuntime {
         reason,
         error instanceof CodexAppServerClientError ? error.details : undefined,
       )
-    } catch { /* local close ownership is authoritative */ }
+    } catch {
+      // silent-catch: local close ownership is authoritative; the connection close is already queued above even if the transport close throws
+    }
   }
 }

@@ -58,6 +58,14 @@
       "evidenceFiles": [
         "evidence/provider-adapters-22816589.json"
       ]
+    },
+    {
+      "manifestDigest": "e2ae5b1c9807e039b9516dc58dda8e9675f3c08e71dc1da362cd354216410558",
+      "classification": "observed_active_source",
+      "manifestFile": "manifests/0.160.1-e2ae5b1c.json",
+      "evidenceFiles": [
+        "evidence/0.160.1-e2ae5b1c-target.json"
+      ]
     }
   ]
 }

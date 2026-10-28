@@ -62,6 +62,7 @@ const EXTERNAL_SERVICE_CODES = new Set([
   'codex_chatgpt_oauth_lifecycle_busy',
   'codex_chatgpt_oauth_runtime_unavailable',
   'codex_external_read_feishu_unavailable',
+  'codex_external_read_lark_cli_unavailable',
   'codex_external_read_lark_resources_unavailable',
 ])
 

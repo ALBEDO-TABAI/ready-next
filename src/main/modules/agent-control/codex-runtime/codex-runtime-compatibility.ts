@@ -20,6 +20,12 @@ export type RuntimeContinuityTransition = Readonly<{
   result: 'compatible' | 'unsupported'
   proofDigest: string
   reason?: RuntimeUnsupportedReason
+  /**
+   * A runtime upgrade can change Codex's native base instructions, which every request on a resumed thread then
+   * carries. The proof measured that a thread whose instruction contract was `sourceDigest` under the source runtime
+   * sends exactly `targetDigest` under the target, with Ready's own developer instructions unchanged.
+   */
+  instructionContract?: Readonly<{ sourceDigest: string; targetDigest: string }>
 }>
 
 export type RuntimeContinuityCatalog = Readonly<{
@@ -71,6 +77,7 @@ function assertCatalog(catalog: RuntimeContinuityCatalog): void {
     throw new Error('runtime_continuity_catalog_invalid')
   }
   const identities = new Set<string>()
+  const instructionMappings = new Map<string, string>()
   for (const transition of catalog.transitions) {
     if (!validDigest(transition.sourceManifestDigest)
       || !validDigest(transition.targetManifestDigest)
@@ -79,6 +86,18 @@ function assertCatalog(catalog: RuntimeContinuityCatalog): void {
       || (transition.result === 'unsupported' && !transition.reason)
       || (transition.result === 'compatible' && transition.reason !== undefined)) {
       throw new Error('runtime_continuity_transition_invalid')
+    }
+    if (transition.instructionContract) {
+      const { sourceDigest, targetDigest } = transition.instructionContract
+      if (transition.result !== 'compatible' || !validDigest(sourceDigest) || !validDigest(targetDigest)) {
+        throw new Error('runtime_continuity_instruction_contract_invalid')
+      }
+      const pair = [transition.sourceManifestDigest, transition.targetManifestDigest, sourceDigest].join('\0')
+      const declared = instructionMappings.get(pair)
+      if (declared !== undefined && declared !== targetDigest) {
+        throw new Error('runtime_continuity_instruction_contract_conflict')
+      }
+      instructionMappings.set(pair, targetDigest)
     }
     const identity = [
       transition.sourceManifestDigest,
@@ -187,4 +206,27 @@ export function resolveRuntimeCompatibilitySet(input: {
     sources,
   }
   return { ...unsigned, evidenceDigest: digestCanonicalJson(unsigned) }
+}
+
+/**
+ * The instruction contract a thread created under `sourceManifestDigest` with `lineageInstructionContractDigest`
+ * carries under the target runtime, as measured by the verified ordinary-continuation proof; null when undeclared.
+ */
+export function resolveInstructionContractTransition(input: {
+  catalog: RuntimeContinuityCatalog
+  sourceManifestDigest: string
+  targetManifestDigest: string
+  lineageInstructionContractDigest: string
+}): string | null {
+  assertCatalog(input.catalog)
+  if (input.targetManifestDigest !== input.catalog.targetManifestDigest) return null
+  const transition = input.catalog.transitions.find((candidate) => (
+    candidate.sourceManifestDigest === input.sourceManifestDigest
+    && candidate.targetManifestDigest === input.targetManifestDigest
+    && candidate.operation === 'ordinary_continuation'
+    && candidate.result === 'compatible'
+  ))
+  return transition?.instructionContract?.sourceDigest === input.lineageInstructionContractDigest
+    ? transition.instructionContract.targetDigest
+    : null
 }

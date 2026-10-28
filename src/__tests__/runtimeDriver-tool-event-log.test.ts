@@ -3,9 +3,15 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, it } from 'node:test'
 
+import type { CapabilityResolution } from '../main/modules/agent-control/domain-adapters/capability-resolver'
+import { AgentSdkToolExecutor } from '../main/modules/agent-control/runtime-core/agent-sdk-tool-executor'
+import { buildExplicitNoSkillAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
+import { __setSkillsRuntimeManagerForTests } from '../main/modules/skills-runtime/runtime-manager'
+import { getLogPath } from '../main/utils/platform'
+import { flushBufferedRotatingLoggers } from '../main/utils/rotating-logger'
+
 const DRIVER_PATH = resolve(process.cwd(), 'src/renderer/modules/agent/runtimeDriver.ts')
 const PRELOAD_PATH = resolve(process.cwd(), 'src/preload/index.ts')
-const AGENT_SDK_RUNTIME_PATH = resolve(process.cwd(), 'src/main/modules/agent-control/runtime-core/agent-sdk-runtime.ts')
 const CAPABILITY_CONTROLLER_PATH = resolve(
   process.cwd(),
   'src/main/modules/agent-control/domain-adapters/run-capability-controller.ts',
@@ -77,12 +83,31 @@ describe('G-Z12 runtimeDriver 事件接入 ready-tools.log', () => {
     // 出口由下方 agent-sdk-tool-executor 的 stage=sdk_runtime_default_tools 断言钉住。
     // listDefaultToolDefinitionsForTurn (which emits the default-tools capability
     // log line) was extracted to agent-sdk-tool-executor.ts (V3 Phase 5-A).
-    const toolExecutorSource = readFileSync(
-      resolve(process.cwd(), 'src/main/modules/agent-control/runtime-core/agent-sdk-tool-executor.ts'),
-      'utf8',
-    )
-    assert.match(toolExecutorSource, /stage=sdk_runtime_default_tools/)
-    assert.match(toolExecutorSource, /visibleCapabilityGroups=\$\{capabilityResolution\.visibleCapabilityGroupIds/)
+    // The live listing (also used before Codex admission) writes the groups it resolved; read them back from the
+    // isolated test log instead of the executor's source.
+    __setSkillsRuntimeManagerForTests({ listSkills: () => [] } as never)
+    try {
+      const resolutions: CapabilityResolution[] = []
+      new AgentSdkToolExecutor({} as never).listDefaultToolDefinitionsForTurn({
+        message: '整理一下这段文字',
+        sessionId: 'scope-capability-log',
+        scopeId: 'scope-capability-log',
+        config: { provider: 'openai', baseUrl: 'https://api.openai.com/v1', apiKey: 'test-key', model: 'gpt-test' },
+        browserHostAvailable: false,
+        feishuConnected: false,
+        authorization: buildExplicitNoSkillAuthorization('capability_log_readback'),
+        onCapabilityResolution: (resolution) => resolutions.push(resolution),
+      })
+      flushBufferedRotatingLoggers()
+      const written = readFileSync(getLogPath('ready-tools.log'), 'utf8').split('\n')
+        .filter((line) => line.includes('stage=sdk_runtime_default_tools'))
+        .at(-1)
+      assert.equal(resolutions.length, 1)
+      const visible = resolutions[0].visibleCapabilityGroupIds.join('|') || 'none'
+      assert.ok(written?.includes(` visibleCapabilityGroups=${visible} `), 'the log line carries the resolved groups')
+    } finally {
+      __setSkillsRuntimeManagerForTests(null)
+    }
     assert.match(capabilityControllerSource, /visibleCapabilityGroups=/)
   })
 })

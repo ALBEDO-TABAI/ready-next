@@ -148,6 +148,31 @@ test('a clean Windows document tab remains a file reference instead of being mis
   }])
 })
 
+// 2026-10-06: after a turn left card edits unsaved, re-attaching the open document sent a 30k-character pasted copy
+// next to the live document instead of pointing at it.
+test('the focused document tab with unsaved edits is still the current document, not a pasted copy', async () => {
+  const chip = (id: string, tabId: string) => ({
+    id, name: '阅读回顾.md', path: '/Users/reader/阅读回顾.md', type: 'text' as const, size: 40, ext: '.md',
+    source: 'document-tab' as const, tabId, dirty: true, selection: '# 阅读回顾\n\n未保存的信息卡',
+  })
+  const currentDocumentAnchor = {
+    kind: 'current_document' as const, logicalResourceId: 'ready-current-document:scope-1:doc-264', tabId: 'doc-264',
+    title: '阅读回顾.md', pane: 'primary' as const, pathDigest: 'a'.repeat(64), incarnationKey: 'b'.repeat(64),
+    currentVersion: `sha256:${'c'.repeat(64)}`, currentDigest: 'c'.repeat(64), supersedesVersion: null, policyEpoch: 1,
+    readScope: { operation: 'read_section' as const, maxChars: 30_000 },
+  }
+  const result = await buildCodexIngressInputWithDiagnostics({
+    content: '把文档中这些引用块卡片换成 Ready 信息卡',
+    attachments: [chip('focused-chip', 'doc-264'), chip('other-chip', 'doc-other')],
+    currentDocumentAnchor,
+  })
+  assert.deepEqual(result.resources, [
+    { kind: 'local_file', id: 'focused-chip', name: '阅读回顾.md', path: '/Users/reader/阅读回顾.md',
+      size: 40, ext: '.md', rendererType: 'text' },
+    { kind: 'quoted_text', id: 'other-chip', name: '阅读回顾.md', text: '# 阅读回顾\n\n未保存的信息卡' },
+  ])
+})
+
 test('@ references reuse the same structured resource identities without duplicating a repeated mention', async () => {
   const filePool = [
     {

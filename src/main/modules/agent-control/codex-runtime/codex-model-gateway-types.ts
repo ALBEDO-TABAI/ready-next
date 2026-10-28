@@ -13,13 +13,18 @@ export type CodexModelGatewayBinding = {
   codexModel: string
   snapshot: CodexUpstreamProfileSnapshot
   snapshotDigest: string
+  /** The thread's frozen tool surface identity, carried in the turn metadata. */
   toolSurfaceDigest: string
+  /** The request `tools` the pinned runtime sends for that surface (codexRequestToolsDigest). */
+  requestToolsDigest: string
   turnContractDigest: string | null
   instructionContractDigest: string
   additionalContextDigest: string | null
   deliveredUserTail: readonly CodexDeliveredUserTail[]
   forceToolFreeFinalization: boolean
   allowedToolNames: readonly string[] | null
+  /** The turn already finished an automatic compaction; Codex drops the turn's Ready context from later requests. */
+  compactedEarlierInTurn?: boolean
 }
 
 export type CodexModelGatewayMetadata = {
@@ -32,6 +37,21 @@ export type CodexModelGatewayMetadata = {
   upstreamProfileSnapshotDigest: string | null
   raw: JsonObject
 }
+
+/** Sanitized, content-free record of one failed upstream exchange, for logs only. */
+export type CodexModelGatewayUpstreamFailureDiagnostic = Readonly<{
+  readyRunId: string | null
+  codexThreadId: string
+  codexTurnId: string
+  profileId: string
+  model: string
+  causeCode: string
+  failureStage: CodexModelGatewayFailureEvidence['failureStage']
+  elapsedMs: number
+  retriesUsed: number
+  upstreamRequestId: string | null
+  providerError: Readonly<{ code: string; type: string; message: string }> | null
+}>
 
 export type CodexModelGatewayToolResponseCall = Readonly<{
   codexCallId: string

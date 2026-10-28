@@ -107,6 +107,7 @@ export type CodexHistoryObservation =
   | {
       kind: 'continuation_safe'
       seamId: 'completed_product_accepted_v1' | 'failed_user_only_no_suffix_v1'
+        | 'failed_after_completed_rounds_v1' | 'failed_mid_stream_v1' | 'interrupted_after_completed_items_v1'
       retainedFormalInputMappingDigest: string
     }
   | {
@@ -160,14 +161,30 @@ function hasExactAutomaticCompactionEvidence(input: {
   candidate: NativeCandidate
   thread: CodexThread
 }): boolean {
+  // One pair per automatic compaction in the turn (before it or mid-turn), in request order.
   const exchanges = input.candidate.contextState.automaticCompactionExchanges
-  if (!Array.isArray(exchanges) || exchanges.length !== 1) return false
-  const value = exchanges[0]
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
-  const evidence = value as Record<string, unknown>
-  return evidence.threadId === input.candidate.codexThreadId
-    && evidence.turnId === input.candidate.codexTurnId
-    && evidence.threadReadDigest === digestCanonicalJson(input.thread)
+  if (!Array.isArray(exchanges) || exchanges.length === 0) return false
+  const compactionItems = input.thread.turns.find((turn) => turn.id === input.candidate.codexTurnId)
+    ?.items.filter((item) => item.type === 'contextCompaction').length
+  if (compactionItems !== exchanges.length) return false
+  const threadReadDigest = digestCanonicalJson(input.thread)
+  return exchanges.every((value, index) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+    const previous = index > 0 ? exchanges[index - 1] as Record<string, unknown> : null
+    const evidence = value as Record<string, unknown>
+    return isExactAutomaticCompactionPair(evidence, input.candidate, threadReadDigest)
+      && (!previous || Number(previous.automaticResponseSequence) < Number(evidence.automaticRequestSequence))
+  })
+}
+
+function isExactAutomaticCompactionPair(
+  evidence: Record<string, unknown>,
+  candidate: NativeCandidate,
+  threadReadDigest: string,
+): boolean {
+  return evidence.threadId === candidate.codexThreadId
+    && evidence.turnId === candidate.codexTurnId
+    && evidence.threadReadDigest === threadReadDigest
     && typeof evidence.automaticRequestReceiptId === 'string'
     && typeof evidence.automaticRequestEvidenceDigest === 'string'
     && typeof evidence.automaticResponseEvidenceDigest === 'string'
@@ -199,31 +216,92 @@ export function resolveCodexProductFailureKind(input: {
   return 'provider'
 }
 
-// Pinned probe receipt for the local 0.149.0 user-only failed-turn seam. This
-// literal is package-scoped evidence identity, not a claim about future runtimes.
+// Pinned probe receipt for the local 0.160.1 failed-turn seams. This literal is
+// package-scoped evidence identity, not a claim about future runtimes.
 const continuationSafeFailureWire = {
   failureClass: 'provider', failureStage: 'headers', causeCode: 'gateway_upstream_http_400',
   responseIdentitySeen: false, partialAssistantItemSeen: false, toolCallItemSeen: false,
   eventCount: 0, wireByteCount: 0,
 } as const
 const usageLimitFailureWire = { ...continuationSafeFailureWire, causeCode: 'gateway_upstream_http_429' } as const
+// Transient failures the probe drove through the pinned runtime before any
+// output. Gateway transport failures reach the runtime as 502 or 504.
+const transientFailureWire = {
+  failureStages: ['connect', 'headers'],
+  httpStatuses: [408, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524],
+  gatewayCauseCodes: [
+    'gateway_upstream_headers_deadline',
+    'gateway_upstream_retry_exhausted',
+    'gateway_upstream_transport_failed',
+  ],
+  responseIdentitySeen: false, partialAssistantItemSeen: false, toolCallItemSeen: false,
+  eventCount: 0, wireByteCount: 0,
+} as const
+// After the response began, every gateway failure reaches the runtime as one
+// gateway `response.failed`, and a held tool call is never delivered; the
+// runtime's own stream idle timeout ends the stream the same way. Completed
+// items stay exactly once and partial ones are dropped.
+const midStreamFailureWire = {
+  failureStages: ['stream-before-item', 'stream-after-item', 'terminal-validation'],
+  downstreamWires: ['gateway_response_failed', 'runtime_stream_idle_timeout'],
+  heldToolCallsDelivered: false,
+} as const
 
 export const CODEX_CONTINUATION_SAFE_PROBE_RECEIPT_DIGEST = digestCanonicalJson({
-  contract: 'codex_0_149_failed_user_only_continuity_probe_v2',
-  runtimeVersion: '0.149.0',
-  binarySha256: 'f4a74117b8142cda581c95ff753abf4508b5636d89682c1ed77e4a9249af8963',
-  runtimeManifestDigest: '22816589f287db132fdc4e3a57b674878795fb75891d765d598b3c94e381bc79',
-  stableV2SchemaDigest: '38483e82eb7170aaa49861a9690734f1201249ae8207d84e3300c7a1c06412e1',
-  seam: 'one_user_item_no_assistant_tool_or_compaction_suffix',
-  failedUserRetention: 'prior_user_exact_once',
-  retainedPriorUserCount: 1,
-  unsafeSuffixObserved: false,
+  contract: 'codex_0_160_failed_turn_continuity_probe_v6',
+  runtimeVersion: '0.160.1',
+  binarySha256: '09fa44fdc37a5fc70dc1ace31235f90468a2e193d0e85f7552eab068ea2582be',
+  runtimeManifestDigest: 'e2ae5b1c9807e039b9516dc58dda8e9675f3c08e71dc1da362cd354216410558',
+  stableV2SchemaDigest: 'f4f1cdde028f2bba3bab32ca69af1c0d584cb642f2f9a043ac612e41b0c79989',
+  seams: {
+    failed_user_only_no_suffix_v1: {
+      seam: 'one_user_item_no_assistant_tool_or_compaction_suffix',
+      failedUserRetention: 'prior_user_exact_once',
+      wires: ['semantic_400', 'usage_limit_429', 'transient'],
+    },
+    failed_after_completed_rounds_v1: {
+      seam: 'user_item_then_completed_commentary_and_tool_rounds_then_transient_failure',
+      failedTurnRetention: 'user_commentary_and_tool_rounds_exact_once',
+      nativeReadbackOmitsDynamicToolCalls: false,
+      wires: ['transient'],
+    },
+    failed_mid_stream_v1: {
+      seam: 'completed_rounds_and_items_then_failure_after_response_began',
+      failedTurnRetention: 'completed_items_exact_once_partial_items_dropped',
+      wires: ['mid_stream'],
+    },
+    interrupted_after_completed_items_v1: {
+      seam: 'completed_rounds_and_items_then_user_interrupt',
+      failedTurnRetention: 'completed_items_exact_once_partial_items_dropped_open_call_closed_as_aborted',
+      runtimeAddsTurnAbortedNotice: true,
+      wires: ['between_requests', 'mid_stream', 'tool_in_flight'],
+    },
+  },
   probeTransport: 'isolated_local_responses_fixture',
+  probeTest: 'src/__tests__/codex-failed-turn-continuity.e2e.ts',
   wire: continuationSafeFailureWire,
   usageLimitWire: usageLimitFailureWire,
   usageLimitErrorInfo: 'usageLimitExceeded',
+  transientWire: transientFailureWire,
+  midStreamWire: midStreamFailureWire,
   continuationAfterRestart: true,
 })
+
+function isTransientFailureBeforeOutput(failure: CodexModelGatewayFailureEvidence | null): boolean {
+  if (!failure
+    || !(transientFailureWire.failureStages as readonly string[]).includes(failure.failureStage)
+    || failure.responseIdentitySeen || failure.partialAssistantItemSeen || failure.toolCallItemSeen
+    || failure.eventCount !== 0 || failure.wireByteCount !== 0) return false
+  const http = /^gateway_upstream_http_(\d{3})$/.exec(failure.causeCode)
+  return http
+    ? (transientFailureWire.httpStatuses as readonly number[]).includes(Number(http[1]))
+    : (transientFailureWire.gatewayCauseCodes as readonly string[]).includes(failure.causeCode)
+}
+
+function isFailureAfterResponseBegan(failure: CodexModelGatewayFailureEvidence | null): boolean {
+  return Boolean(failure)
+    && (midStreamFailureWire.failureStages as readonly string[]).includes(failure!.failureStage)
+}
 
 export function buildTerminalNativeReadbackReceipt(input: {
   candidate: NativeCandidate
@@ -287,7 +365,8 @@ export function resolveCodexHistoryObservation(input: {
   const userItems = turn.items.filter((item) => item.type === 'userMessage')
   const exactUser = userItems.filter((item) => (
     item.clientId === input.expectedClientUserMessageId
-    && digestCanonicalJson(item.content) === digestCanonicalJson(projectCodexUserInputReadback(sentInput))
+    && digestCanonicalJson(item.content)
+      === digestCanonicalJson(projectCodexUserInputReadback(sentInput, input.thread.historyMode))
   ))
   if (userItems.length === 0 && input.candidate.engineOutcome !== 'completed') {
     return { kind: 'diverged', reason: 'missing_user_half_turn' }
@@ -340,6 +419,62 @@ export function resolveCodexHistoryObservation(input: {
     || turn.items.some((item) => item.type === 'contextCompaction')) {
     return { kind: 'unknown_reset_required', reason: 'formal_input_mapping_unknown' }
   }
+  const failedUserMappingDigest = digestCanonicalJson({
+    originUserMessageId: current.messageId,
+    clientUserMessageId: input.expectedClientUserMessageId,
+    inputDigest: digestCanonicalJson(sentInput),
+  })
+  // Earlier sampling rounds finished and their tool results were published; only
+  // the last request failed, either transiently before any output or after its
+  // response began. The runtime keeps the completed rounds and items, so the
+  // next ordinary input continues them on this thread.
+  const failedExchange = input.gatewayEvidence.at(-1)
+  const completedBeforeFailure = input.candidate.engineOutcome === 'failed'
+    && failedExchange !== undefined && failedExchange.responseSequence !== null
+    && input.gatewayEvidence.slice(0, -1).every((exchange) => (
+      exchange.failure === null && exchange.responseSequence !== null
+    ))
+    && input.candidate.runtimeDiagnostics.finalDeltaItemIds.length === 0
+    && turn.items.every((item) => item.type === 'userMessage'
+      || (item.type === 'agentMessage' && item.phase === 'commentary')
+      || (item.type === 'dynamicToolCall' && item.status !== 'inProgress')
+      || (item.type === 'other' && item.nativeType === 'reasoning'))
+  if (completedBeforeFailure && input.gatewayEvidence.length >= 2
+    && isTransientFailureBeforeOutput(failedExchange.failure)) {
+    return {
+      kind: 'continuation_safe',
+      seamId: 'failed_after_completed_rounds_v1',
+      retainedFormalInputMappingDigest: failedUserMappingDigest,
+    }
+  }
+  if (completedBeforeFailure && isFailureAfterResponseBegan(failedExchange.failure)) {
+    return {
+      kind: 'continuation_safe',
+      seamId: 'failed_mid_stream_v1',
+      retainedFormalInputMappingDigest: failedUserMappingDigest,
+    }
+  }
+  // A stop keeps what had finished: the runtime closes an open tool call as aborted, drops partial items and
+  // tells the model the user interrupted, so the next ordinary input continues on this thread.
+  const lastExchange = input.gatewayEvidence.at(-1)
+  if (input.candidate.engineOutcome === 'interrupted'
+    && input.gatewayEvidence.slice(0, -1).every((exchange) => (
+      exchange.failure === null && exchange.responseSequence !== null
+    ))
+    && (lastExchange === undefined
+      || (lastExchange.failure === null && lastExchange.responseSequence !== null)
+      || isFailureAfterResponseBegan(lastExchange.failure))
+    && input.candidate.runtimeDiagnostics.finalDeltaItemIds.length === 0
+    && turn.items.every((item) => item.type === 'userMessage'
+      || (item.type === 'agentMessage' && item.phase === 'commentary')
+      || (item.type === 'dynamicToolCall' && item.status !== 'inProgress')
+      || (item.type === 'other' && item.nativeType === 'reasoning'))) {
+    return {
+      kind: 'continuation_safe',
+      seamId: 'interrupted_after_completed_items_v1',
+      retainedFormalInputMappingDigest: failedUserMappingDigest,
+    }
+  }
   const partialAssistant = turn.items.some((item) => item.type === 'agentMessage')
     || input.candidate.runtimeDiagnostics.finalDeltaItemIds.length > 0
     || input.candidate.runtimeDiagnostics.commentaryItemIds.length > 0
@@ -360,19 +495,15 @@ export function resolveCodexHistoryObservation(input: {
     || input.gatewayEvidence.length !== 1
     || exchange.requestKind !== 'product' || exchange.responseSequence === null
     || !exchange.failure
-    || Object.entries(failureWire).some(([key, value]) => (
+    || (Object.entries(failureWire).some(([key, value]) => (
       exchange.failure?.[key as keyof CodexModelGatewayFailureEvidence] !== value
-    ))) {
+    )) && !isTransientFailureBeforeOutput(exchange.failure))) {
     return { kind: 'diverged', reason: 'unprobed_failure_seam' }
   }
   return {
     kind: 'continuation_safe',
     seamId: 'failed_user_only_no_suffix_v1',
-    retainedFormalInputMappingDigest: digestCanonicalJson({
-      originUserMessageId: current.messageId,
-      clientUserMessageId: input.expectedClientUserMessageId,
-      inputDigest: digestCanonicalJson(sentInput),
-    }),
+    retainedFormalInputMappingDigest: failedUserMappingDigest,
   }
 }
 

@@ -44,6 +44,7 @@ function digestJson(value: unknown): string | null {
       ? createHash('sha256').update(serialized).digest('hex')
       : null
   } catch {
+    // silent-catch: a value JSON cannot serialize has no digest, so the canonical message digest check fails
     return null
   }
 }

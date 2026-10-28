@@ -207,6 +207,7 @@ export class CodexDurableStartDispatchPort implements CodexStartDispatchPort {
         close()
         return Promise.resolve()
       } catch (error) {
+        // silent-catch: the sync failure becomes a rejection so allSettled runs every close step and rethrows it in an AggregateError below
         return Promise.reject(error)
       }
     }

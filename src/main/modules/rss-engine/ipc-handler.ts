@@ -65,7 +65,7 @@ import { diagnosticsGroup } from './ipc/diagnostics-group'
 import { exportGroup } from './ipc/export-group'
 import { contentGroup } from './ipc/content-group'
 import { workspaceFilesGroup } from './ipc/workspace-files-group'
-import { getRSSContentService } from './content-runtime'
+import { getRSSContentService, getRSSTranslationService } from './content-runtime'
 import type { AddSourceCoreInput, AddSourceCoreResult } from './ipc/engine-deps'
 import type { IpcDisposeHandle } from './ipc/types'
 import {
@@ -1058,11 +1058,13 @@ export function setupRSSIPC(useMock = false): void {
     useMock,
     getContent: () => rssRepository.getContentStore(),
     getLoader: getRSSContentService,
+    getTranslator: getRSSTranslationService,
   })
   const analysisManager = getRSSItemAnalysisManager()
   if (!useMock) {
     analysisManager.initialize()
     getRSSContentService()
+    getRSSTranslationService()
     loadRouteDiagnosticsSnapshot()
   }
 

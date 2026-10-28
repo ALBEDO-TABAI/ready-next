@@ -12,6 +12,7 @@ import {
   READY_MEMORY_READ_RECEIPT_CONTRACT,
   type ReadyMemoryReadReceipt,
 } from '../ready-memory'
+import { logAgentMetric } from '../metrics'
 import { digestCanonicalJson } from './codex-model-gateway-contract'
 import { normalizeContextUsageSnapshot } from '../../../../shared/context-usage-types'
 import { assertCodexTerminalFacts, type CodexTerminalFacts } from './codex-terminal-facts'
@@ -37,12 +38,50 @@ export type ProductTurnActionContext = {
 }
 type ProductTurnActionContextReader = (readyRunId: string) => ProductTurnActionContext | null
 
+// Runtime error kinds that mean the model service failed temporarily.
+function isTransientServiceError(error: CodexTurnError | null | undefined): boolean {
+  const info = error?.codexErrorInfo
+  if (info === 'internalServerError' || info === 'serverOverloaded'
+    || info === 'rateLimitExceeded' || info === 'flexUnavailable') return true
+  return typeof info === 'object' && info !== null && (
+    'httpConnectionFailed' in info || 'responseStreamConnectionFailed' in info
+    || 'responseStreamDisconnected' in info || 'responseTooManyFailedAttempts' in info
+  )
+}
+
+const UNDELIVERED_MESSAGES: Readonly<Record<string, string>> = {
+  artifact_staged_receipt_missing: '本轮没有完成：计划保存的文件没有保存成功。',
+  artifact_export_receipt_missing: '本轮没有完成：计划保存的文件没有保存成功。',
+  folder_output_intent_receipt_missing: '本轮没有完成：计划保存的文件没有保存成功。',
+  action_obligation_missing: '本轮没有完成：需要执行的操作没有执行。',
+  current_document_read_required: '本轮没有完成：回答前没有读取当前文档。',
+  current_document_read_receipt_missing: '本轮没有完成：回答前没有读取当前文档。',
+}
+
+/**
+ * `historySeam` is the continuation-safe seam that kept this thread, or null when the turn was set aside;
+ * `undelivered` is the publication code of a completed turn that did not deliver what it declared, and
+ * `answer` its final answer, shown after the verified note so the user can reply to it on the same thread.
+ */
 export function codexTerminalPublicMessage(
   status: 'error' | 'cancelled' | 'interrupted',
   nativeError?: CodexTurnError | null,
+  options: { historySeam?: string | null; undelivered?: string | null; answer?: string | null } = {},
 ): string {
+  const kept = '已完成的步骤都保留在对话里，发送“继续”就能接着做。'
+  const undelivered = options.undelivered?.replace(/^codex_tool_publication_incomplete:/, '')
+  if (status === 'error' && undelivered && UNDELIVERED_MESSAGES[undelivered]) {
+    const answer = options.answer?.trim()
+    return answer ? `${UNDELIVERED_MESSAGES[undelivered]}\n\n${answer}` : UNDELIVERED_MESSAGES[undelivered]
+  }
   if (status === 'error' && nativeError?.codexErrorInfo === 'usageLimitExceeded') {
     return '模型服务的使用额度已达到上限，本轮没有完成。请稍后再试，或切换可用的模型服务。'
+  }
+  if (status === 'error' && options.historySeam === 'failed_mid_stream_v1') {
+    return `模型的回复中途断开，本轮没有完成。${kept}`
+  }
+  if (status === 'error' && isTransientServiceError(nativeError)) {
+    return options.historySeam ? `模型服务暂时出错，本轮没有完成。${kept}` : '模型服务暂时出错，本轮没有完成。'
   }
   return status === 'error'
     ? '本轮未能完成。'
@@ -100,6 +139,7 @@ function safeJson(value: string | null): Record<string, unknown> | null {
   try {
     return record(JSON.parse(value))
   } catch {
+    // silent-catch: malformed stored result JSON reads as no structured result
     return null
   }
 }
@@ -359,6 +399,7 @@ function preparedRun(row: TurnRow): PreparedCodexProductRun | null {
     const ingress = JSON.parse(row.ingress_json) as { prepared?: unknown }
     return isPreparedCodexProductRun(ingress.prepared) ? ingress.prepared : null
   } catch {
+    // silent-catch: malformed ingress JSON reads as no prepared run
     return null
   }
 }
@@ -666,11 +707,19 @@ export function readProductTurnPresentation(
     return receipt
   } catch (error) {
     if (ownsSnapshot) {
-      try { db.exec('ROLLBACK') } catch { /* preserve the read error */ }
+      try {
+        db.exec('ROLLBACK')
+      } catch {
+        // silent-catch: a failed rollback must not mask the original read error, which is rethrown below
+        /* preserve the read error */
+      }
     }
     throw error
   }
 }
+
+// A run with no binding yet, or one still running, has no receipt to show.
+const PRESENTATION_ABSENT = new Set(['product_turn_binding_missing', 'product_turn_not_terminal'])
 
 export function readProductTurnPresentations(
   db: DatabaseConnection,
@@ -683,14 +732,27 @@ export function readProductTurnPresentations(
   if (ownsSnapshot) db.exec('BEGIN')
   try {
     const receipts = runIds.flatMap((readyRunId) => {
-      try { return [readInSnapshot(db, readyRunId, currentEnvironment, readActionContext)] }
-      catch { return [] }
+      try {
+        return [readInSnapshot(db, readyRunId, currentEnvironment, readActionContext)]
+      } catch (error) {
+        // One unreadable run must not hide the whole history; only expected absence stays quiet.
+        const reason = error instanceof Error ? error.message : 'product_turn_presentation_unreadable'
+        if (!PRESENTATION_ABSENT.has(reason)) {
+          logAgentMetric('codex_product_turn_presentation_unreadable', { readyRunId, reason })
+        }
+        return []
+      }
     })
     if (ownsSnapshot) db.exec('COMMIT')
     return receipts
   } catch (error) {
     if (ownsSnapshot) {
-      try { db.exec('ROLLBACK') } catch { /* preserve the read error */ }
+      try {
+        db.exec('ROLLBACK')
+      } catch {
+        // silent-catch: a failed rollback must not mask the original read error, which is rethrown below
+        /* preserve the read error */
+      }
     }
     throw error
   }

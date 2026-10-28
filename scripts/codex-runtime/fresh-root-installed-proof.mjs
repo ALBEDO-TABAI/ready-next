@@ -2,8 +2,10 @@ import { createHash } from 'node:crypto'
 import { evaluateCdp, sqlQuote, sqliteJson } from './live-proof-runtime.mjs'
 import { READY_BROWSER_BLANK_URL } from '../../src/shared/browser-defaults.ts'
 
+// F01 is a text-only turn. Document mode always carries the focused document (at least the blank “新文档” tab), which
+// makes any tail a resource restatement, so F01 runs in Browser mode with every tab closed.
 export const freshRootCases = [
-  { label: 'F01', workbenchMode: 'document', policy: 'untrusted_text_history', delivered: true },
+  { label: 'F01', workbenchMode: 'browser', policy: 'untrusted_text_history', delivered: true },
   { label: 'F02', workbenchMode: 'browser', policy: 'resource_restatement_required', delivered: false },
 ]
 const sha256 = (value) => createHash('sha256').update(String(value)).digest('hex')
@@ -125,6 +127,9 @@ export async function runFreshRootTurn(cdp, { label, proofId, round, aliasId = n
     if (delivered === false) {
       const tab = await window.electronAPI.browser.createTab(${JSON.stringify(READY_BROWSER_BLANK_URL)});
       if (!tab.success || !tab.tabId) return { ok: false, stage: 'resource_tab_missing', error: tab.error || null };
+    } else {
+      for (const tab of await window.electronAPI.browser.getTabs()) await window.electronAPI.browser.closeTab(tab.id);
+      if ((await window.electronAPI.browser.getTabs()).length !== 0) return { ok: false, stage: 'text_only_tabs_remain' };
     }
     let surface = null;
     for (let attempt = 0; attempt < 240; attempt += 1) {

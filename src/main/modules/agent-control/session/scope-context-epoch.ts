@@ -39,6 +39,7 @@ export function readScopeContextEpoch(scopeId: string | null | undefined): Scope
     }
     return { kind: 'open', messageVisibilityEpoch: row.message_visibility_epoch }
   } catch {
+    // silent-catch: a database that cannot be opened or queried is reported to the caller as epoch state unavailable
     return { kind: 'unavailable' }
   }
 }

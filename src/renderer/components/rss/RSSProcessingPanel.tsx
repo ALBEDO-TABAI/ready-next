@@ -30,7 +30,9 @@ export default function RSSProcessingPanel({ active, article }: { active: boolea
     if (!active) return
     const read = () => { void refresh().catch((reason) => { if (live) setError(String(reason)) }) }
     read(); const off = window.electronAPI.rss.onOrganizationChanged(read)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- generation is a counter bumped on cleanup to drop in-flight status reads; incrementing its live value is intended
     return () => { live = false; ++generation.current; off() }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refresh is recreated every render; the first-page refresh reads only article?.id, which this effect is keyed on, plus refs, so it must not resubscribe on each render
   }, [active, article?.id, article?.revision])
   // The workspace popover closes on an outside click, like the other RSS menus.
   useEffect(() => {

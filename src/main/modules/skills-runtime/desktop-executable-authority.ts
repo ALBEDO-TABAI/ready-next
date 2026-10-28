@@ -126,6 +126,7 @@ function assertOwnedRegularFile(path: string, mode: number): boolean {
       && (stats.mode & 0o777) === mode
       && (typeof process.getuid !== 'function' || stats.uid === process.getuid())
   } catch {
+    // silent-catch: a missing or unreadable file fails the ownership/mode check
     return false
   }
 }
@@ -168,6 +169,7 @@ function cleanupDeadExecutableSnapshots(authorityRoot: string): void {
   try {
     entries = readdirSync(authorityRoot, { encoding: 'utf8', withFileTypes: true })
   } catch {
+    // silent-catch: an unreadable snapshot authority root leaves nothing to sweep; dead-snapshot cleanup is best-effort
     return
   }
   for (const entry of entries) {
@@ -180,6 +182,7 @@ function cleanupDeadExecutableSnapshots(authorityRoot: string): void {
       process.kill(ownerPid, 0)
       continue
     } catch (error) {
+      // silent-catch: only ESRCH proves the owner pid is dead; any other probe error keeps its snapshot as possibly live
       if ((error as NodeJS.ErrnoException).code !== 'ESRCH') continue
     }
     const candidate = join(authorityRoot, entry.name)
@@ -212,6 +215,7 @@ function cleanupDeadExecutableSnapshots(authorityRoot: string): void {
       chmodSync(candidate, 0o700)
       rmSync(candidate, { recursive: true, force: true })
     } catch {
+      // silent-catch: best-effort removal of a dead process snapshot; a failure leaves it for the next sweep
       // Cleanup is maintenance only and must not change a later tool result.
     }
   }
@@ -231,11 +235,13 @@ function materializeLauncherChainSnapshot(
     try {
       chmodSync(snapshotRoot, 0o700)
     } catch {
+      // silent-catch: best-effort permission reset before removing the snapshot directory
       // The directory may already be gone after a failed setup.
     }
     try {
       rmSync(snapshotRoot, { recursive: true, force: true })
     } catch {
+      // silent-catch: best-effort snapshot removal; a leftover is swept by cleanupDeadExecutableSnapshots once this pid is dead
       // Cleanup failure cannot erase an already observed executable result.
     }
   }
@@ -338,6 +344,7 @@ function resolveExecutablePath(input: {
       accessSync(candidate, constants.X_OK)
       if (statSync(realpathSync.native(candidate)).isFile()) return candidate
     } catch {
+      // silent-catch: a candidate that vanishes, is not executable or cannot be resolved is skipped for the next search path
       continue
     }
   }
@@ -483,6 +490,16 @@ export function assertFrozenDesktopExecutableAuthority(
   }
 }
 
+export type DesktopExecutableOutcome = 'exited' | 'killed' | 'launch_failed'
+
+/** How an `execFile` rejection ended: a numeric code is the program's exit, `killed` a timeout or output limit. */
+export function classifyDesktopExecutableFailure(error: unknown): DesktopExecutableOutcome {
+  const failure = error as { code?: unknown; killed?: unknown } | null
+  if (typeof failure?.code === 'number') return 'exited'
+  if (failure?.killed === true) return 'killed'
+  return 'launch_failed'
+}
+
 export async function executeFrozenDesktopExecutable(input: {
   authority: FrozenDesktopExecutableAuthority
   args: readonly string[]
@@ -490,6 +507,8 @@ export async function executeFrozenDesktopExecutable(input: {
   timeoutMs?: number
 }): Promise<Readonly<{
   exitCode: number
+  /** Whether the program ran to an exit code, was killed (timeout or output limit), or never started. */
+  outcome: DesktopExecutableOutcome
   stdout: string
   stderr: string
   executableReadbackDigest: string
@@ -508,15 +527,18 @@ export async function executeFrozenDesktopExecutable(input: {
     })
     return Object.freeze({
       exitCode: 0,
+      outcome: 'exited' as const,
       stdout: result.stdout,
       stderr: result.stderr,
       executableReadbackDigest: input.authority.authorityDigest,
     })
   } catch (error) {
+    // silent-catch: a non-zero exit, timeout or launch failure is returned with its outcome and captured output
     const failure = error as { code?: unknown; stdout?: unknown; stderr?: unknown }
     const exitCode = typeof failure.code === 'number' ? failure.code : -1
     return Object.freeze({
       exitCode,
+      outcome: classifyDesktopExecutableFailure(error),
       stdout: typeof failure.stdout === 'string' ? failure.stdout : '',
       stderr: typeof failure.stderr === 'string' ? failure.stderr : '',
       executableReadbackDigest: input.authority.authorityDigest,

@@ -191,6 +191,8 @@ const CODEX_SCHEMA_KEYS = new Set([
   'allOf',
   '$defs',
   'definitions',
+  // Kept by the pinned 0.160.1 on any node; 0.149 dropped it.
+  'minItems',
 ])
 const CODEX_SCHEMA_TYPES = new Set([
   'string', 'number', 'boolean', 'integer', 'object', 'array', 'null',
@@ -264,6 +266,12 @@ function normalizeCodexSchemaNode(value: unknown): unknown {
       output[key] = typeof child === 'boolean' ? child : normalizeCodexSchemaNode(child)
     } else if (key === 'anyOf' || key === 'oneOf' || key === 'allOf') {
       if (Array.isArray(child)) output[key] = child.map(normalizeCodexSchemaNode)
+    } else if (key === 'minItems') {
+      // The runtime refuses the whole tool at thread start for any other value.
+      if (!Number.isSafeInteger(child) || (child as number) < 0) {
+        throw new CodexToolSurfaceError('tool_surface_schema_invalid')
+      }
+      output[key] = child
     } else {
       output[key] = child
     }
@@ -328,6 +336,26 @@ function serializeAuthorization(authorization: SkillToolAuthorization): Serializ
   }
 }
 
+/** The request `tools` the pinned runtime sends for a thread's dynamic tools. */
+function codexRequestTools(dynamicTools: readonly CodexDynamicToolSpec[]): ReadyResponsesFunctionTool[] {
+  return dynamicTools.map((tool) => ({
+    type: 'function',
+    name: tool.name,
+    description: tool.description,
+    strict: false,
+    parameters: normalizeCodexDynamicToolSchema(tool.inputSchema),
+  }))
+}
+
+/**
+ * What the pinned runtime sends for a frozen surface. A surface frozen under an earlier runtime keeps its
+ * `responsesTools` and `toolSurfaceDigest` as lineage; a later runtime may serialize the same dynamic tools
+ * differently (0.160.1 keeps `minItems`, 0.149 dropped it), so the wire is always derived from `dynamicTools`.
+ */
+export function codexRequestToolsDigest(surface: Pick<ReadyToolSurface, 'dynamicTools'>): string {
+  return digestCanonicalJson(codexRequestTools(surface.dynamicTools))
+}
+
 export function buildReadyToolSurface(input: {
   surfaceId: string
   toolDefinitions: readonly ToolDefinition[]
@@ -379,13 +407,7 @@ export function buildReadyToolSurface(input: {
     description: entry.description,
     inputSchema: entry.inputSchema,
   }))
-  const responsesTools = entries.map<ReadyResponsesFunctionTool>((entry) => ({
-    type: 'function',
-    name: entry.name,
-    description: entry.description,
-    strict: false,
-    parameters: normalizeCodexDynamicToolSchema(entry.inputSchema),
-  }))
+  const responsesTools = codexRequestTools(dynamicTools)
   const snapshot = { entries, dynamicTools, responsesTools }
   return deepFreeze({
     surfaceId,
@@ -458,12 +480,29 @@ export function assertReadyToolSurface(value: ReadyToolSurface): void {
       resultShape: entry.effectProfile.resultShape,
     })),
   })
+  // The runtime-independent surface must rebuild exactly. `responsesTools` is the creating runtime's serialization
+  // of these dynamic tools and the two digests are its lineage identity: they must pair with the tools and match
+  // what was stored, but a later runtime's serialization (codexRequestToolsDigest) may differ.
   if (
-    rebuilt.toolSurfaceDigest !== value.toolSurfaceDigest
-    || rebuilt.surfaceSnapshotDigest !== value.surfaceSnapshotDigest
+    canonicalJson(rebuilt.entries) !== canonicalJson(value.entries)
     || canonicalJson(rebuilt.dynamicTools) !== canonicalJson(value.dynamicTools)
-    || canonicalJson(rebuilt.responsesTools) !== canonicalJson(value.responsesTools)
     || canonicalJson(rebuilt.toolNames) !== canonicalJson(value.toolNames)
+    || value.responsesTools.length !== value.dynamicTools.length
+    || value.responsesTools.some((tool, index) => (
+      !isRecord(tool)
+      || !hasExactKeys(tool, ['type', 'name', 'description', 'strict', 'parameters'])
+      || tool.type !== 'function'
+      || tool.strict !== false
+      || tool.name !== value.dynamicTools[index].name
+      || tool.description !== value.dynamicTools[index].description
+      || !isRecord(tool.parameters)
+    ))
+    || digestCanonicalJson(value.responsesTools) !== value.toolSurfaceDigest
+    || digestCanonicalJson({
+      entries: value.entries,
+      dynamicTools: value.dynamicTools,
+      responsesTools: value.responsesTools,
+    }) !== value.surfaceSnapshotDigest
   ) throw new CodexToolSurfaceError('tool_surface_digest_mismatch')
 }
 

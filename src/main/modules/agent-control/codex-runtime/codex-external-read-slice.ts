@@ -477,6 +477,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 export async function readLarkCliAuthReadback(input: {
   executableAuthority: FrozenDesktopExecutableAuthority
   env?: NodeJS.ProcessEnv
+  timeoutMs?: number
 }): Promise<LarkCliAuthReadback> {
   const result = await executeFrozenDesktopExecutable({
     authority: input.executableAuthority,
@@ -486,12 +487,15 @@ export async function readLarkCliAuthReadback(input: {
       LARKSUITE_CLI_NO_UPDATE_NOTIFIER: '1',
       LARKSUITE_CLI_NO_SKILLS_NOTIFIER: '1',
     },
-    timeoutMs: 15_000,
+    timeoutMs: input.timeoutMs ?? 15_000,
   })
+  // A CLI that never started or was killed says nothing about the login; do not send the user to re-authorize.
+  if (result.outcome !== 'exited') throw new Error('codex_external_read_lark_cli_unavailable')
   let payload: Record<string, unknown> | null = null
   try {
     payload = asRecord(JSON.parse(result.stdout || result.stderr))
   } catch {
+    // silent-catch: non-JSON auth status output leaves payload null, which fails the check below as codex_external_read_lark_auth_required
     payload = null
   }
   const identities = asRecord(payload?.identities)

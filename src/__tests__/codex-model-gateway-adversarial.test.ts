@@ -20,6 +20,7 @@ import {
   ReadySettingsModelGatewayCredentialStore,
 } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-authority'
 import { responsesRequestToChat } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-chat'
+import { parseMetadata, validateBinding } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-request'
 import { streamChatAsResponses } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-chat-stream'
 import {
   CodexModelGateway,
@@ -85,7 +86,8 @@ function requestBody(toolNames: string[] = []): JsonObject {
         root_turn_id: 'turn-1', agent_name: '/root', request_kind: 'turn',
         sandbox: 'seatbelt', sandbox_mode: 'read-only', auto_review_enabled: false,
         node_repl_auto_review_required: false, node_repl_disabled: false,
-        turn_started_at_unix_ms: 1,
+        turn_started_at_unix_ms: 1, window_number: 0, context_window_id: 'context-window-1',
+        analytics_enabled: false, model: 'ready-e0-model',
         readyRunId: 'run-1',
         toolSurfaceDigest: digestCanonicalJson(tools), turnContractDigest: 'turn-contract-1',
         upstreamProfileSnapshotDigest: 'pending',
@@ -104,6 +106,7 @@ function bindRequest(request: JsonObject, snapshot: CodexUpstreamProfileSnapshot
     kind: 'product', codexModel: 'ready-e0-model', snapshot,
     snapshotDigest: digestCanonicalJson(snapshot),
     toolSurfaceDigest: metadata.toolSurfaceDigest as string,
+    requestToolsDigest: metadata.toolSurfaceDigest as string,
     turnContractDigest: 'turn-contract-1',
     instructionContractDigest: instructionTranscriptDigest(request.instructions, request.input),
     additionalContextDigest: digestCanonicalJson([]),
@@ -118,6 +121,33 @@ function bindRequest(request: JsonObject, snapshot: CodexUpstreamProfileSnapshot
       : [],
   }
 }
+
+// 2026-10-07: under 0.160.1 a thread frozen by 0.149 sends its dynamic tools with minItems, so the wire no longer
+// hashes to the frozen surface identity. The wire is checked against the derived request tools, the turn metadata
+// against the identity.
+test('request tools are checked against the derived wire while metadata keeps the frozen surface identity', () => {
+  const request = requestBody()
+  const binding = bindRequest(request, createCodexUpstreamProfileSnapshot({
+    profileId: 'profile-lineage', maxRetries: 0,
+    config: {
+      provider: 'openai-compatible', baseUrl: 'https://provider.example/v1', apiKey: 'secret',
+      model: 'qwen-model', agentProtocol: 'openai', wireApi: 'chat/completions', toolUseMode: 'on',
+    },
+  }).snapshot)
+  const lineage = digestCanonicalJson({ fixture: 'surface-frozen-under-0.149' })
+  const outer = request.client_metadata as Record<string, string>
+  const raw = JSON.parse(outer['x-codex-turn-metadata']) as JsonObject
+  raw.toolSurfaceDigest = lineage
+  outer['x-codex-turn-metadata'] = JSON.stringify(raw)
+  const metadata = parseMetadata(request)
+  const lineageBinding = { ...binding, toolSurfaceDigest: lineage, requestToolsDigest: digestCanonicalJson(request.tools) }
+  assert.doesNotThrow(() => validateBinding({ body: request, metadata, binding: lineageBinding }))
+  assert.throws(() => validateBinding({ body: request, metadata, binding: { ...lineageBinding, requestToolsDigest: lineage } }),
+    /gateway_tool_surface_mismatch/, 'the wire never matches the frozen identity once the serialization changed')
+  assert.throws(() => validateBinding({
+    body: request, metadata, binding: { ...lineageBinding, toolSurfaceDigest: digestCanonicalJson(request.tools) },
+  }), /gateway_product_metadata_mismatch/, 'the turn metadata still carries the frozen identity')
+})
 
 test('fork metadata preserves the exact direct parent for product and both compaction shapes', async (t) => {
   const contract = JSON.parse(readFileSync('assets/codex-runtime/contracts/runtime-contracts.json', 'utf8'))
@@ -140,10 +170,12 @@ test('fork metadata preserves the exact direct parent for product and both compa
         const outer = body.client_metadata as JsonObject
         const raw = JSON.parse(String(outer['x-codex-turn-metadata'])) as JsonObject
         assert.deepEqual(Object.keys(raw).filter((key) => (
-          !contract.productMetadataKeys.includes(key) && key !== 'root_turn_id'
+          !contract.productMetadataKeys.includes(key) && !contract.productNativeMetadataKeys.includes(key)
         )).sort(), [...contract.metadataBaseInnerExactKeys].sort())
         raw.forked_from_thread_id = 'direct-parent-not-root'
         if (kind !== 'product') {
+          // Pinned 0.160.1 sends the model only on product requests.
+          delete raw.model
           raw.request_kind = 'compaction'
           raw.compaction = {
             trigger: kind === 'manual_compaction' ? 'manual' : 'auto',
@@ -154,8 +186,7 @@ test('fork metadata preserves the exact direct parent for product and both compa
           }
         }
         if (kind === 'manual_compaction') {
-          delete outer.root_turn_id
-          for (const key of ['root_turn_id', 'readyRunId', 'toolSurfaceDigest', 'turnContractDigest', 'upstreamProfileSnapshotDigest']) {
+          for (const key of ['readyRunId', 'toolSurfaceDigest', 'turnContractDigest', 'upstreamProfileSnapshotDigest']) {
             delete raw[key]
           }
         }
@@ -176,10 +207,8 @@ test('fork metadata preserves the exact direct parent for product and both compa
           assert.equal(rejected.status, 400)
         }
         assert.equal((await send({ ...raw, unknown_lineage: 'forged' })).status, 400)
-        if (kind === 'automatic_compaction') {
-          delete outer.root_turn_id
-          assert.equal((await send(raw)).status, 400, 'automatic compaction requires the captured outer root turn identity')
-        }
+        delete outer.root_turn_id
+        assert.equal((await send(raw)).status, 400, 'every request kind requires the captured outer root turn identity')
         assert.equal(seen.length, 1, 'invalid or unknown fields must not reach authority')
       } finally {
         await gateway.stop()
@@ -276,15 +305,18 @@ async function convertChat(
   return output
 }
 
-test('compaction classification accepts only the two captured exact signatures', () => {
+test('compaction classification accepts only the captured exact signatures', () => {
   assert.equal(classifyCodexModelGatewayRequest({ request_kind: 'turn' }), 'product')
-  assert.equal(classifyCodexModelGatewayRequest({
-    request_kind: 'compaction',
-    compaction: {
-      trigger: 'auto', reason: 'context_limit', implementation: 'responses',
-      phase: 'pre_turn', strategy: 'memento',
-    },
-  }), 'automatic_compaction')
+  // 2026-10-06: a long tool loop filled the context and Codex 0.149 compacted mid-turn; the gateway rejected it.
+  for (const phase of ['pre_turn', 'mid_turn']) {
+    assert.equal(classifyCodexModelGatewayRequest({
+      request_kind: 'compaction',
+      compaction: {
+        trigger: 'auto', reason: 'context_limit', implementation: 'responses',
+        phase, strategy: 'memento',
+      },
+    }), 'automatic_compaction', phase)
+  }
   assert.equal(classifyCodexModelGatewayRequest({
     request_kind: 'compaction',
     compaction: {
@@ -301,6 +333,14 @@ test('compaction classification accepts only the two captured exact signatures',
     {
       trigger: 'manual', reason: 'user_requested', implementation: 'responses',
       phase: 'pre_turn', strategy: 'memento',
+    },
+    {
+      trigger: 'auto', reason: 'context_limit', implementation: 'responses',
+      phase: 'post_turn', strategy: 'memento',
+    },
+    {
+      trigger: 'auto', reason: 'model_downshift', implementation: 'responses',
+      phase: 'mid_turn', strategy: 'memento',
     },
   ]) {
     assert.throws(
@@ -524,6 +564,87 @@ test('run-owned resource snapshots pass the gateway while changed or stale snaps
   }
 })
 
+// 2026-10-06: after a mid-turn compaction Codex rebuilds the request from its summary and drops the turn's Ready
+// context; the gateway rejected every later request of the 37-tool turn.
+test('only a turn that already compacted may send a request whose Ready context was dropped entirely', async () => {
+  let upstreamCalls = 0
+  const upstream = createServer((_request, response) => {
+    upstreamCalls += 1
+    response.writeHead(500).end()
+  })
+  const port = await listen(upstream)
+  const created = createCodexUpstreamProfileSnapshot({
+    profileId: 'profile-dropped-context',
+    config: {
+      provider: 'openai-compatible', baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: 'secret',
+      model: 'native-model', agentProtocol: 'openai', wireApi: 'responses', toolUseMode: 'on',
+    },
+    maxRetries: 0,
+  })
+  const document = {
+    logicalResourceId: 'ready-current-document:scope:doc-1',
+    currentVersion: `sha256:${'c'.repeat(64)}`,
+    currentDigest: 'c'.repeat(64),
+    supersedesVersion: null,
+    policyEpoch: 1,
+  }
+  const other = { ...document, logicalResourceId: 'local-file:other', currentDigest: 'd'.repeat(64),
+    currentVersion: `sha256:${'d'.repeat(64)}` }
+  const snapshot = (references: typeof document[]) => ({
+    type: 'message', role: 'developer', content: [{ type: 'input_text',
+      text: `<ready-resource-context>${JSON.stringify({ contract: 'ready_resource_context_v1', readyRunId: 'run-1', references })}</ready-resource-context>` }],
+  })
+  const task = { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'turn the quotes into cards' }] }
+  const summary = { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Another language model started to solve this problem and produced a summary.' }] }
+  const request = requestBody()
+  request.input = [task, summary]
+  const binding = bindRequest(request, created.snapshot)
+  binding.additionalContextDigest = digestReadyResourceReferences([document, other])
+  const gateway = new CodexModelGateway({
+    bearerToken: 'local-token',
+    authority: { async resolve(input) { input.validate(binding); return binding } },
+    credentials: { resolve() { return 'secret' } },
+  })
+  const address = await gateway.start()
+  const send = () => fetch(`${address.url}/v1/responses`, {
+    method: 'POST',
+    headers: { authorization: 'Bearer local-token', 'content-type': 'application/json' },
+    body: JSON.stringify(request),
+  })
+  try {
+    const beforeCompaction = await send()
+    assert.equal(beforeCompaction.status, 409)
+    assert.match(await beforeCompaction.text(), /gateway_additional_context_mismatch/)
+    assert.equal(upstreamCalls, 0)
+
+    binding.compactedEarlierInTurn = true
+    const afterCompaction = await send()
+    assert.notEqual(afterCompaction.status, 409)
+    assert.equal(upstreamCalls, 1)
+
+    const legacyTag = { type: 'message', role: 'developer', content: [{ type: 'input_text',
+      text: `<ready-resource:${other.logicalResourceId}>${JSON.stringify(other)}</ready-resource:${other.logicalResourceId}>` }] }
+    request.input = [legacyTag, task, summary]
+    const legacyHistory = await send()
+    assert.notEqual(legacyHistory.status, 409, 'legacy resource tags are history, not this run’s context')
+    assert.equal(upstreamCalls, 2)
+
+    request.input = [snapshot([document]), task, summary]
+    const partial = await send()
+    assert.equal(partial.status, 409, 'a partial or altered context is never accepted')
+    assert.match(await partial.text(), /gateway_additional_context_mismatch/)
+    assert.equal(upstreamCalls, 2)
+
+    request.input = [summary, snapshot([document, other]), task]
+    const intact = await send()
+    assert.notEqual(intact.status, 409, 'a context re-injected after a compaction still passes exact checks')
+    assert.equal(upstreamCalls, 3)
+  } finally {
+    await gateway.stop()
+    await close(upstream)
+  }
+})
+
 test('follow-up turn additionalContext digest ignores leftover historical resource tags', () => {
   const folder = {
     logicalResourceId: 'local-directory:0990e072e69d96c50d49a94eafbc8105',
@@ -588,6 +709,7 @@ test('explicit retry metadata is bound application context rather than developer
     resourceReferences: [],
     explicitRetry: retry,
     readyMemory: null,
+    documentWidgetGuidance: null,
     currentUserIndex: 2,
     readyMemoryIndex: null,
   })
@@ -3454,7 +3576,7 @@ test('current Retry context crosses only its exact frozen delivered user tail', 
   const parsed = currentTurnReadyAdditionalContext([
     nativeRetryMessage, ...deliveredTailFixture.map((_, index) => nativeTailMessage(index)), nativeCurrentUser,
   ], deliveredTailFixture, 'run-1')
-  assert.deepEqual(parsed, { resourceReferences: [], explicitRetry: { predecessorRunId: 'current-predecessor' }, readyMemory: null, currentUserIndex: 3, readyMemoryIndex: null })
+  assert.deepEqual(parsed, { resourceReferences: [], explicitRetry: { predecessorRunId: 'current-predecessor' }, readyMemory: null, documentWidgetGuidance: null, currentUserIndex: 3, readyMemoryIndex: null })
 })
 
 test('current tail rejects changed content, digest, identity, role, key, order, count and mixed messages', () => {
@@ -3489,7 +3611,7 @@ test('historical tails do not satisfy current expected delivery or resurrect a h
   const history = [nativeRetryMessage, nativeTailMessage(0), nativeCurrentUser,
     { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'old answer' }] }]
   assert.deepEqual(currentTurnReadyAdditionalContext([...history, nativeCurrentUser], [], 'run-1'),
-    { resourceReferences: [], explicitRetry: null, readyMemory: null, currentUserIndex: 4, readyMemoryIndex: null })
+    { resourceReferences: [], explicitRetry: null, readyMemory: null, documentWidgetGuidance: null, currentUserIndex: 4, readyMemoryIndex: null })
   assert.throws(() => currentTurnReadyAdditionalContext([...history, nativeCurrentUser], [deliveredTailFixture[0]], 'run-1'),
     /gateway_uncommitted_user_tail_mismatch/)
 })

@@ -19,7 +19,11 @@ import {
   CodexBindingRepository,
   type CodexAdmittedBindingInput,
 } from '../main/modules/agent-control/codex-runtime/codex-binding-repository'
-import { createCodexUpstreamProfileSnapshot, digestCanonicalJson } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
+import {
+  createCodexUpstreamProfileSnapshot,
+  digestCanonicalJson,
+  resolveCodexNativeModelSettings,
+} from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
 import { CodexModelGatewayRepository } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-authority'
 import { buildTerminalNativeReadbackReceipt, resolveCodexHistoryObservation, resolveCodexTerminalFacts, terminalEvidenceRef, terminalNativeReadbackEvidenceRef } from '../main/modules/agent-control/codex-runtime/codex-terminal-facts'
 import { projectCodexHeadActionProjection } from '../main/modules/agent-control/codex-runtime/codex-action-surface'
@@ -59,6 +63,7 @@ import type { StartIdentityReservationSet } from '../main/modules/agent-control/
 import { RunMetaRepository } from '../main/modules/agent-control/task-projection/run-meta-repository'
 import { workflowDigest } from '../main/modules/repositories/browser-workflow-codec'
 import { TaskProjectionRepository } from '../main/modules/repositories/task-projection-repository'
+import { loadRuntimeContinuityAssets } from '../main/modules/agent-control/codex-runtime/codex-runtime-continuity-assets'
 import { providerCheckpointExecutionBinding } from './provider-checkpoint-test-fixtures'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
@@ -244,6 +249,17 @@ function admission(
     codexModel: 'ready-e0-model',
     upstreamProfileSnapshotRef: 'profile-recovery',
     upstreamProfileSnapshotDigest: upstream.snapshotDigest,
+    // A started thread is admitted only with the same-thread continuation candidate production resolves.
+    continuationCandidate: reservation.existingThread
+      ? {
+          model: 'ready-e0-model',
+          threadConfig: resolveCodexNativeModelSettings(upstream.snapshot).threadConfig,
+          isolatedThreadCwd: threadCwd,
+          cwdAvailable: true,
+          instructionContractDigest: 'instruction-recovery',
+          currentToolSurface: run.readyToolSurface,
+        }
+      : null,
     additionalContextDigest: `additional-context-${run.runId}`,
     turnContractDigest: `turn-contract-${run.runId}`,
     messageVisibilityEpoch: 0,
@@ -459,7 +475,6 @@ test('real app-server crash recovery covers all six start seams and three-way re
   let activeFault: FaultingTransport | null = null
 
   try {
-    const repository = new CodexBindingRepository(db as unknown as DatabaseConnection)
     new CodexModelGatewayRepository(db).storeSnapshot({
       ...upstream, snapshotRef: 'profile-recovery', createdAt: new Date().toISOString(),
     })
@@ -471,6 +486,15 @@ test('real app-server crash recovery covers all six start seams and three-way re
       appPath: repoRoot, resourcesPath: join(repoRoot, 'assets'), isPackaged: false,
     })
     const runtime = loadVerifiedCodexRuntime(paths)
+    // Production binds the repository to the verified manifest and its checked-in continuity catalog.
+    const repository = new CodexBindingRepository(db as unknown as DatabaseConnection, {
+      runtimeManifestDigest: runtime.manifestDigest,
+      protocolSchemaDigest: 'protocol-schema-recovery',
+      runtimeContinuityCatalog: loadRuntimeContinuityAssets({
+        assetRoot: join(repoRoot, 'assets/runtime-continuity'),
+        targetManifestDigest: runtime.manifestDigest,
+      }).catalog,
+    })
     const state = prepareCodexRuntimeState({
       userDataPath: tempRoot, gatewayUrl, contracts: runtime.contracts,
     })

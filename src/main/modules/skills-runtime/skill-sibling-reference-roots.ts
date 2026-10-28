@@ -22,6 +22,7 @@ function canonicalDirectory(path: string | undefined): string | null {
     const canonical = realpathSync.native(path)
     return statSync(canonical).isDirectory() ? canonical : null
   } catch {
+    // silent-catch: a path that cannot be resolved or stat'ed is not a usable skill directory
     return null
   }
 }
@@ -46,6 +47,7 @@ export function resolveDeclaredSiblingSkillReadRoots(input: {
       .map((skill) => canonicalDirectory(skill.managedPath || skill.sourcePath))
       .filter((path): path is string => Boolean(path))
   } catch {
+    // silent-catch: an unreadable SKILL.md or skill entry grants no sibling read roots (fails closed)
     return []
   }
 }

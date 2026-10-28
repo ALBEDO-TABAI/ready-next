@@ -169,3 +169,26 @@ test('Tag Forge exclusive set replaces the composed allow-set', () => {
   })
   assert.deepEqual(composed.readyTurnToolAuthorization.allowedToolNames, [...TAG_FORGE_EXCLUSIVE_TOOL_NAMES].sort())
 })
+
+test('without a current document no document tool is offered, while file and folder tools stay', () => {
+  const documentTools = [
+    'document_new_tab', 'document_open_tab', 'document_switch_tab', 'document_rename_tab', 'document_set_content',
+    'document_append_content', 'document_insert_widget', 'document_update_widget', 'document_remove_widget',
+    'document_replace_text', 'document_replace_exact', 'document_format_section', 'document_rewrite_section',
+    'document_save_tab', 'document_read_section', 'document_list_widgets',
+  ]
+  // A message that only mentions "文档" with an attached file: every document action would fail for lack of an anchor.
+  const composed = composeCodexTurnToolSnapshot({
+    resolved: workbenchTestSnapshot([...documentTools, 'file_read_excerpt', 'file_inventory', 'skill_write_artifact',
+      'skill_export_artifact', 'declare_completion_criteria']),
+    authorizationId: 'auth-no-document',
+    authorization: buildExplicitNoSkillAuthorization('no_skill_signal'),
+    explicitResourceAllowedToolNames: ['file_read_excerpt', 'file_inventory'],
+    folderExport: { present: true, allowWrite: true },
+  })
+  const allowed = composed.readyTurnToolAuthorization.allowedToolNames
+  assert.deepEqual(allowed.filter((name) => name.startsWith('document_')), [])
+  for (const name of ['file_read_excerpt', 'file_inventory', 'skill_write_artifact', 'skill_export_artifact']) {
+    assert.ok(allowed.includes(name), name)
+  }
+})

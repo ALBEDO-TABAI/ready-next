@@ -148,6 +148,7 @@ export async function persistRunMetaSnapshot(
   try {
     repository = host.getRunMetaRepositoryForFinalize()
   } catch {
+    // silent-catch: an unavailable run_meta repository makes this persist attempt return false to the caller
     repository = null
   }
   if (!repository) return false

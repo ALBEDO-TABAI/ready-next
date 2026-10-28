@@ -434,6 +434,7 @@ async function nativeTerminalFixture(
   const nativeThread: CodexThread = {
     id: codexThreadId,
     sessionId: codexThreadId,
+    historyMode: 'paginated',
     parentThreadId: null,
     forkedFromId: null,
     cwd: admissionInput.isolatedThreadCwd,
@@ -903,9 +904,14 @@ test('production resource closeout publishes the answer and keeps the conversati
   if (!value) return
   try {
     const nativeThread = completedNativeThread(value)
+    // Pinned 0.160.1 reads the current input and every resource item back exactly, in order.
     nativeThread.turns[0].items[0] = {
       type: 'userMessage', id: 'item-1', clientId: value.admissionInput.turnRequestId,
-      content: [{ type: 'text', text: '查询天气project directory fixture', text_elements: [] }],
+      content: [
+        { type: 'text', text: '查询天气', text_elements: [] },
+        { type: 'text', text: 'project directory fixture', text_elements: [] },
+        { type: 'mention', name: 'project', path: '/tmp/project-fixture' },
+      ],
     }
     // Recreate a restart after the model was durably finished but publication failed.
     value.candidate.contextState = { ...value.candidate.contextState, automaticCompactionExchanges: [] }
@@ -1048,9 +1054,11 @@ test('production accepted automatic compaction commits one compaction coverage h
         upstreamProfileSnapshotDigest: product.upstreamProfileSnapshotDigest,
         requestDigest: sha256(`request-${sequence}`), instructionDigest: sha256('instructions'),
         inputDigest: sha256(`input-${sequence}`),
-        inputItems: [{ digest: sha256(`item-${sequence}`), totalStringCharacters: chars, maxStringCharacters: chars }],
-        inputTotalStringCharacters: chars, inputMaxStringCharacters: chars,
-        toolsDigest: automatic ? digestCanonicalJson([]) : product.toolSurfaceDigest,
+        // Codex ends every compaction request with its compaction prompt.
+        inputItems: [{ digest: sha256(`item-${sequence}`), totalStringCharacters: chars, maxStringCharacters: chars },
+          ...(automatic ? [{ digest: sha256('compaction-prompt'), totalStringCharacters: 40, maxStringCharacters: 40 }] : [])],
+        inputTotalStringCharacters: automatic ? chars + 40 : chars, inputMaxStringCharacters: chars,
+        toolsDigest: automatic ? digestCanonicalJson([]) : product.requestToolsDigest,
         toolCount: 0, bodyBytes: chars + 100,
         requestEvidenceDigest: sha256(`request-evidence-${sequence}`),
         responseId: `response-${sequence + 1}`,
@@ -1073,9 +1081,9 @@ test('production accepted automatic compaction commits one compaction coverage h
       gatewayRepository: { readTurnGatewayEvidence: () => rows },
       readyRunId: value.runId, codexThreadId: value.codexThreadId, codexTurnId: value.codexTurnId,
       upstreamProfileSnapshotDigest: product.upstreamProfileSnapshotDigest,
-      productToolSurfaceDigest: product.toolSurfaceDigest, thread: completedNativeThread(value, true),
+      productRequestToolsDigest: product.requestToolsDigest, thread: completedNativeThread(value, true),
     })
-    assert.ok(verified)
+    assert.equal(verified.length, 1)
     const closed = await productionCloseout(value, true)
     assert.equal(closed.canonicalCommits, 1)
     assert.equal(closed.result.execution.success, true)

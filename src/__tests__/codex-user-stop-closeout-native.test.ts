@@ -534,6 +534,7 @@ test('production live closeout retires an observation-required Browser workflow 
     const nativeThread: CodexThread = {
       id: codexThreadId,
       sessionId: codexThreadId,
+      historyMode: 'paginated',
       parentThreadId: null,
       forkedFromId: null,
       cwd: admissionInput.isolatedThreadCwd,

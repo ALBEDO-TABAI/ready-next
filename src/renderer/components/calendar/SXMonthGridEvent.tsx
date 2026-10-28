@@ -44,6 +44,7 @@ export default function SXMonthGridEvent({ calendarEvent }: SXMonthGridEventProp
   const contentType = (calendarEvent.contentType as string) || undefined
   const location = ((calendarEvent.location as string) || '').trim()
   const platformStr = (calendarEvent.platform as string) || ''
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- platforms is re-parsed from calendarEvent.platform each render (like `parsed`), so handleClick/handleDragStart are rebuilt per render; they always read the current event and correctness does not rely on memoization
   let platforms: string[] = []
   try {
     platforms = platformStr ? JSON.parse(platformStr) : []

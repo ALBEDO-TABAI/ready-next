@@ -61,7 +61,10 @@ export function responsesRequestToMessages(request: ObjectValue, snapshot: Codex
       if (messages.at(-1)?.role === 'user' && pending.size) reject('tool_result_order_invalid')
       if (!item.call_id || calls.has(item.call_id) || !item.name) reject('tool_identity_invalid')
       let args: unknown
-      try { args = JSON.parse(text(item.arguments)) } catch { reject('tool_arguments_invalid') }
+      try { args = JSON.parse(text(item.arguments)) } catch {
+        // silent-catch: reject() rethrows the unparseable arguments as gateway_messages_tool_arguments_invalid
+        reject('tool_arguments_invalid')
+      }
       if (!record(args)) reject('tool_arguments_invalid')
       calls.add(item.call_id); pending.add(item.call_id)
       append('assistant', [{ type: 'tool_use', id: item.call_id, name: item.name, input: args }])
@@ -70,7 +73,10 @@ export function responsesRequestToMessages(request: ObjectValue, snapshot: Codex
       if (item.type === 'reasoning') {
         if (typeof item.encrypted_content !== 'string' || !item.encrypted_content.startsWith(HISTORY_PREFIX)) reject('reasoning_history_invalid')
         let saved: ObjectValue
-        try { saved = JSON.parse(Buffer.from(item.encrypted_content.slice(HISTORY_PREFIX.length), 'base64').toString('utf8')) } catch { reject('reasoning_history_invalid') }
+        try { saved = JSON.parse(Buffer.from(item.encrypted_content.slice(HISTORY_PREFIX.length), 'base64').toString('utf8')) } catch {
+          // silent-catch: reject() rethrows the undecodable reasoning history as gateway_messages_reasoning_history_invalid
+          reject('reasoning_history_invalid')
+        }
         if (saved.model !== snapshot.model || !Array.isArray(saved.blocks)) reject('reasoning_history_invalid')
         append('assistant', saved.blocks.map(thinkingBlock))
       } else if (item.type === 'message') {

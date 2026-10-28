@@ -114,6 +114,26 @@ describe('RSS source diagnostics', () => {
     assert.equal(parserEntry.lastRouteError?.kind, 'route')
     assert.equal(parserEntry.lastRouteError?.detail, 'route_parser_failed')
   })
+
+  it('classifies a Xiaohongshu profile behind its security restriction as upstream risk control', () => {
+    recordSourceRouteAttempt({
+      sourceId: 'xhs-blocked',
+      sourceName: 'XHS Blocked',
+      url: 'https://www.xiaohongshu.com/user/profile/5e31b693000000000100bb06',
+      platform: 'xiaohongshu',
+      durationMs: 33000,
+      itemCount: 0,
+      success: false,
+      error: '[XHS Blocked] 小红书没有打开这个主页：访问被转到了登录或安全限制页，多为当前网络被小红书风控。换个网络后再刷新。',
+    })
+
+    const [entry] = buildSourceDiagnostics([
+      { id: 'xhs-blocked', name: 'XHS Blocked', url: 'https://www.xiaohongshu.com/user/profile/5e31b693000000000100bb06', platform: 'xiaohongshu' },
+    ])
+
+    assert.equal(entry.lastRouteError?.kind, 'waf')
+    assert.equal(entry.lastRouteError?.detail, 'upstream_waf_or_risk_control')
+  })
 })
 
 describe('RSS benchmark summary', () => {

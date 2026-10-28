@@ -33,8 +33,9 @@ import {
   CodexTurnInputBuilder,
   type CodexTurnBuildContext,
 } from './codex-turn-input-builder'
-import { isCodexNoActiveTurnInterruptError } from './codex-app-server-client'
+import { isCodexNoActiveTurnInterruptError, isCodexTypedRpcRejection } from './codex-app-server-client'
 import { sameCodexThreadDirectory } from './codex-thread-directory-identity'
+import { logAgentMetric } from '../metrics'
 
 export type ReadyAliasIdentity = {
   aliasId: string
@@ -48,10 +49,20 @@ export type ReadyProductLifecycleIdentity = ReadyAliasIdentity & Pick<
 >
 export type ReadyLifecycleAction = 'stop' | 'close' | 'reset'
 
+export type StartedThreadResolution =
+  | { state: 'loaded'; threadId: string }
+  | {
+      state: 'resume_required'
+      threadId: string
+      expectedCwd: string
+      expectedForkedFromId: string | null
+      /** The thread's frozen instructions; resuming without them loses them once the history was compacted. */
+      developerInstructions: string
+    }
+
 export type ReadyThreadBindingResolution =
   | { state: 'unstarted'; params: CodexThreadStartParams }
-  | { state: 'loaded'; threadId: string }
-  | { state: 'resume_required'; threadId: string; expectedCwd: string; expectedForkedFromId: string | null }
+  | StartedThreadResolution
 
 export type ProductTurnCloseoutEvidence = {
   aliasId: string
@@ -92,6 +103,8 @@ export interface ReadyCodexLifecycleStore {
     identity: ReadyAliasIdentity,
     prepared: PreparedCodexProductRun,
   ): Promise<ReadyThreadBindingResolution>
+  /** The alias's existing native thread, and whether this runtime process has it loaded. */
+  resolveStartedThread(identity: ReadyAliasIdentity): Promise<StartedThreadResolution>
   bindStartedThread(input: {
     identity: ReadyAliasIdentity
     threadId: string
@@ -200,12 +213,18 @@ export interface ReadyCodexLifecycleStore {
     manualCompactionId: string
     reason: string
   }): Promise<void>
+  /** Settles a rejected dispatch when readback proves nothing started; false when it cannot be proven. */
+  settleRejectedManualCompaction(input: {
+    identity: ReadyAliasIdentity
+    manualCompactionId: string
+  }): Promise<boolean>
   digestThreadRead(thread: unknown): string
 }
 
 export interface ReadyCodexThreadResumePort {
   readThenResume(input: {
     threadId: string
+    developerInstructions: string
     validateRead(thread: CodexThread): void
   }): Promise<{
     connectionEpoch: string
@@ -283,7 +302,8 @@ export class ReadyCodexLifecyclePortError extends Error {
       | 'native_protocol_error'
       | 'binding_conflict'
       | 'thread_busy'
-      | 'persistence_failed',
+      | 'persistence_failed'
+      | 'no_active_operation',
   ) {
     super(code)
     this.name = 'ReadyCodexLifecyclePortError'
@@ -353,6 +373,7 @@ export class ReadyCodexLifecycleAdapter<TExecutionResult> {
     try {
       return await this.deps.lifecycleStore.createAlias(request)
     } catch {
+      // silent-catch: alias persistence failure is returned as a typed persistence_failed result that preserves the UI
       return {
         ok: false,
         action: 'create',
@@ -406,6 +427,7 @@ export class ReadyCodexLifecycleAdapter<TExecutionResult> {
         startTurn: () => this.deps.nativeRuntime.turnStart(turnInput.params),
       })
     } catch (error) {
+      // silent-catch: a host-side start failure becomes a host-failure candidate (stage, code, error) that goes through canonical closeout below
       candidate = createHostFailureCandidate({
         ...(context?.collection || {
           actionReceiptRefs: [],
@@ -448,6 +470,7 @@ export class ReadyCodexLifecycleAdapter<TExecutionResult> {
         result,
       }
     } catch (closeoutError) {
+      // silent-catch: a rejected closeout is handed to recoverRejectedCandidate together with its error
       try {
         const result = this.deps.closeout.recoverRejectedCandidate({
           candidate,
@@ -460,6 +483,7 @@ export class ReadyCodexLifecycleAdapter<TExecutionResult> {
           result,
         }
       } catch (recoveryError) {
+        // silent-catch: both closeout errors are returned in a ready_closeout_pending outcome for later recovery
         const pending = this.pendingCloseout(candidate, [closeoutError, recoveryError])
         this.deps.collector.releaseRun(input.prepared.runId)
         return pending
@@ -903,6 +927,12 @@ export class ReadyCodexLifecycleAdapter<TExecutionResult> {
       return this.failureForSnapshot(identity, 'manual_compact', snapshot)
     }
 
+    // Codex compacts only a thread loaded in this runtime process; after a restart it answers “thread not found”.
+    try {
+      await this.ensureNativeThreadLoaded(identity)
+    } catch (error) {
+      return this.failureFromError(identity, 'manual_compact', error, 'native_protocol_error', snapshot)
+    }
     let binding: Awaited<ReturnType<ReadyCodexLifecycleStore['beginManualCompaction']>>
     try {
       binding = await this.deps.lifecycleStore.beginManualCompaction(identity)
@@ -912,6 +942,20 @@ export class ReadyCodexLifecycleAdapter<TExecutionResult> {
     try {
       await this.deps.nativeRuntime.threadCompactStart({ threadId: binding.threadId })
     } catch (error) {
+      if (isCodexTypedRpcRejection(error)) {
+        let settled = false
+        try {
+          settled = await this.deps.lifecycleStore.settleRejectedManualCompaction({
+            identity,
+            manualCompactionId: binding.manualCompactionId,
+          })
+        } catch {
+          // silent-catch: a failed settle write counts as unsettled, so the compaction is marked unknown below
+          settled = false
+        }
+        if (settled) return this.failure(identity, 'manual_compact', 'native_protocol_error', snapshot)
+        await this.markManualCompactionUnknown(identity, binding.manualCompactionId, error)
+      }
       return this.failureFromError(
         identity,
         'manual_compact',
@@ -1016,9 +1060,48 @@ export class ReadyCodexLifecycleAdapter<TExecutionResult> {
         manualCompactionId,
         reason: error instanceof Error ? error.message : String(error),
       })
-    } catch {
-      // The lifecycle result must remain unknown even if its durable marker cannot be written.
+    } catch (markerError) {
+      // The caller still answers compaction_state_unknown. Without the marker the head keeps its dispatched state, so
+      // the reset escape hatch waits for the next boot's reconciliation; make that visible.
+      logAgentMetric('codex_manual_compaction_unknown_marker_failed', {
+        aliasId: identity.aliasId,
+        manualCompactionId,
+        reason: markerError instanceof Error ? markerError.message : String(markerError),
+      })
     }
+  }
+
+  /** Loads the alias's existing native thread into this runtime process, resuming it with identity checks if needed. */
+  async ensureNativeThreadLoaded(identity: ReadyAliasIdentity): Promise<string> {
+    const resolution = await this.deps.lifecycleStore.resolveStartedThread(identity)
+    if (resolution.state === 'resume_required') await this.resumeVerifiedThread(identity, resolution)
+    return resolution.threadId
+  }
+
+  private async resumeVerifiedThread(
+    identity: ReadyAliasIdentity,
+    resolution: Extract<StartedThreadResolution, { state: 'resume_required' }>,
+  ): Promise<void> {
+    const validateThread = (thread: CodexThread, instructionSources: string[]) => {
+      this.assertThreadIdentity(thread, resolution.threadId, instructionSources, resolution.expectedForkedFromId)
+      if (!sameCodexThreadDirectory(thread.cwd, resolution.expectedCwd)) {
+        throw new CodexIngressRejectedError('native_thread_cwd_mismatch')
+      }
+    }
+    const { connectionEpoch, read, resumed } = await this.deps.threadResumePort.readThenResume({
+      threadId: resolution.threadId,
+      developerInstructions: resolution.developerInstructions,
+      validateRead: (thread) => validateThread(thread, []),
+    })
+    const preResumeThreadReadDigest = this.deps.lifecycleStore.digestThreadRead(read.thread)
+    validateThread(resumed.thread, resumed.instructionSources)
+    await this.deps.lifecycleStore.markThreadResumed({
+      identity,
+      threadId: resolution.threadId,
+      connectionEpoch,
+      preResumeThreadReadDigest,
+      resumedThreadDigest: this.deps.lifecycleStore.digestThreadRead(resumed.thread),
+    })
   }
 
   private async ensureThread(
@@ -1028,25 +1111,7 @@ export class ReadyCodexLifecycleAdapter<TExecutionResult> {
     const resolution = await this.deps.lifecycleStore.resolveThreadBinding(identity, prepared)
     if (resolution.state === 'loaded') return resolution.threadId
     if (resolution.state === 'resume_required') {
-      const validateThread = (thread: CodexThread, instructionSources: string[]) => {
-        this.assertThreadIdentity(thread, resolution.threadId, instructionSources, resolution.expectedForkedFromId)
-        if (!sameCodexThreadDirectory(thread.cwd, resolution.expectedCwd)) {
-          throw new CodexIngressRejectedError('native_thread_cwd_mismatch')
-        }
-      }
-      const { connectionEpoch, read, resumed } = await this.deps.threadResumePort.readThenResume({
-        threadId: resolution.threadId,
-        validateRead: (thread) => validateThread(thread, []),
-      })
-      const preResumeThreadReadDigest = this.deps.lifecycleStore.digestThreadRead(read.thread)
-      validateThread(resumed.thread, resumed.instructionSources)
-      await this.deps.lifecycleStore.markThreadResumed({
-        identity,
-        threadId: resolution.threadId,
-        connectionEpoch,
-        preResumeThreadReadDigest,
-        resumedThreadDigest: this.deps.lifecycleStore.digestThreadRead(resumed.thread),
-      })
+      await this.resumeVerifiedThread(identity, resolution)
       return resolution.threadId
     }
     const started = await this.deps.nativeRuntime.threadStart(resolution.params)
@@ -1085,6 +1150,7 @@ export class ReadyCodexLifecycleAdapter<TExecutionResult> {
     try {
       read = await this.deps.lifecycleStore.readLifecycleOperation(request)
     } catch (error) {
+      // silent-catch: lifecycle read failures map to typed no_active_operation or persistence_failed results
       const code = error instanceof Error ? error.message : ''
       if (action === 'stop' && code === 'active_alias_generation_mismatch') {
         return {
@@ -1601,7 +1667,7 @@ export class ReadyCodexLifecycleAdapter<TExecutionResult> {
         snapshot,
       })
     } catch {
-      // A diagnostic helper cannot turn an exact lifecycle failure into a rejected Promise.
+      // silent-catch: a diagnostic helper cannot turn an exact lifecycle failure into a rejected Promise; a local digest is derived below
     }
     if (!evidenceDigest.trim()) {
       evidenceDigest = createHash('sha256')

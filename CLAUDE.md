@@ -1,6 +1,6 @@
 # Ready 项目协作指引（Claude）
 
-> 协作规则核对日期：2026-09-13；运行时基线核对日期：2026-09-06。
+> 协作规则核对日期：2026-09-13；运行时基线核对日期：2026-10-07。
 > 根指引保留工作方式、不可破红线和按需入口。子系统细节集中在 `docs/architecture/current-runtime-contracts.md`，阶段实现集中在 `docs/superpowers/plans/`；这些入口不是每次任务的通读清单。
 
 ## 0. 开工前
@@ -30,7 +30,7 @@
 ## 1. 项目基线
 
 - Ready 是 Electron 创作工作台，承载 Browser、Document、RSS、Calendar、AI Agent、技能、文件涌现与远程协作。
-- 版本与依赖以 `package.json` 为准；当前应用 0.8.0，固定 Codex runtime 0.149.0；技术基线是 Electron 42.3、React 19、TypeScript 5.7、Vite 6、Tailwind CSS 4、Zustand、SQLite/better-sqlite3。
+- 版本与依赖以 `package.json` 为准；当前应用 0.8.0，固定 Codex runtime 0.160.1；技术基线是 Electron 42.3、React 19、TypeScript 5.7、Vite 6、Tailwind CSS 4、Zustand、SQLite/better-sqlite3。
 - 分层：`src/main/`、`src/preload/`、`src/renderer/`、`src/shared/`；稳定入口见 `docs/architecture/codebase-map.md`。
 - Workbench mode 只有 `browser | document | rss | calendar`。
 - Agent 生产主链是 `CodexHostOrchestrator -> Codex ingress/product composition -> ReadyCodexLifecycleAdapter -> canonical closeout/projection`；`AgentSdkRuntime`、`ReadyAgentOrchestrator`、`direct-chat.ts` 与 `turn-engine.ts` 都不是现行入口，不得复活或写成 live 权威。

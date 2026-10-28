@@ -50,6 +50,7 @@ export function parseSkillRequiredBins(text: string): string[] {
           && !isDestructiveShellCommand(value)),
     ))
   } catch {
+    // silent-catch: malformed frontmatter YAML declares no required bins
     return []
   }
 }

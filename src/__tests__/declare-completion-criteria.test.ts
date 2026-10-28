@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
+import { join } from 'node:path'
 import test from 'node:test'
 
 import {
@@ -87,6 +89,48 @@ test('expected_outputs 空数组与省略字段等价', async () => {
   const result = await executeDeclareCompletionCriteria({ criteria: ['合法'], expected_outputs: [] }, deps)
   assert.deepEqual(result.data?.expectedOutputs, [])
   assert.deepEqual(writes, [{ taskId: 'task-d4', modelCriteria: ['合法'], expectedOutputs: [] }])
+})
+
+// 2026-10-06: the model declared the open document's own file as a folder save; it was edited and saved through its
+// tab, and the folder check still reported the file unsaved.
+test('the open document named as a folder output is routed to its own save, not to folder delivery', async () => {
+  const destinationPath = join('/Users', 'reader', '卡拉马佐夫兄弟')
+  const documentPath = join(destinationPath, '阅读回顾.md')
+  const outputContract = {
+    destinationResourceId: 'local-directory:fixture',
+    maxExpectedOutputs: 8,
+    currentDocumentFile: { destinationPath, pathDigest: createHash('sha256').update(documentPath).digest('hex') },
+  }
+  const patches: Array<{ expectedOutputs: string[] }> = []
+  const declare = (expected: string[], intent = 'save') => executeDeclareCompletionCriteria({
+    criteria: ['把引用块换成信息卡并保存'], folder_output_intent: intent, expected_outputs: expected,
+  }, {
+    taskId: 'task-1',
+    outputContract,
+    updateTaskCompletionDeclaration: (_taskId, patch) => { patches.push(patch) },
+  })
+  const onlyDocument = await declare(['阅读回顾.md'])
+  assert.deepEqual(
+    [(onlyDocument.data as Record<string, unknown>).folderOutputIntent, (onlyDocument.data as Record<string, unknown>).expectedOutputs],
+    ['no_write', []],
+  )
+  assert.match(onlyDocument.text, /document_save_tab/)
+  const withExport = await declare(['阅读回顾.md', '人物表.md'])
+  assert.deepEqual(
+    [(withExport.data as Record<string, unknown>).folderOutputIntent, (withExport.data as Record<string, unknown>).expectedOutputs],
+    ['save', ['人物表.md']],
+    'other files still go through folder delivery',
+  )
+  assert.deepEqual(patches.map((patch) => patch.expectedOutputs), [[], ['人物表.md']])
+  const readOnlyDocument = await executeDeclareCompletionCriteria({
+    criteria: ['另存一份'], folder_output_intent: 'save', expected_outputs: ['阅读回顾.md'],
+  }, {
+    taskId: 'task-1',
+    outputContract: { destinationResourceId: 'local-directory:fixture', maxExpectedOutputs: 8 },
+    updateTaskCompletionDeclaration: () => {},
+  })
+  assert.equal((readOnlyDocument.data as Record<string, unknown>).folderOutputIntent, 'save',
+    'without a writable current document the file is an ordinary folder output')
 })
 
 test('重复声明是整组替换（幂等语义由写侧承载）', async () => {

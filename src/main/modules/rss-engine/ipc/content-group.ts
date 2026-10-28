@@ -2,15 +2,19 @@ import { RSSReadExcerptSchema } from '../../../../shared/rss-excerpt'
 import type { IpcChannelGroup } from './types'
 import type { RSSContentStore } from '../../database/rss-content-store'
 import type { RSSContentService } from '../content-service'
+import type { RSSTranslationService } from '../translation-service'
+import { RSSTranslateArticleSchema, RSSTranslationRefSchema } from '../../../../shared/rss-translation'
 import { RSSLoadArticleSchema, RSSQuerySchema, RSSReadArticleSchema } from '../../../../shared/rss-workspace'
 
 interface ContentGroupDeps {
   useMock: boolean
   getContent(): RSSContentStore
   getLoader(): RSSContentService
+  getTranslator(): RSSTranslationService
 }
 
-const CHANNELS = ['rss:readExcerpt', 'rss:queryItems', 'rss:queryCards', 'rss:readArticle', 'rss:loadArticle', 'rss:dismissQuery'] as const
+const CHANNELS = ['rss:readExcerpt', 'rss:queryItems', 'rss:queryCards', 'rss:readArticle', 'rss:loadArticle', 'rss:dismissQuery',
+  'rss:translateArticle', 'rss:readTranslation', 'rss:cancelTranslation'] as const
 
 export const contentGroup: IpcChannelGroup<ContentGroupDeps> = {
   namespace: 'rss:content',
@@ -32,6 +36,16 @@ export const contentGroup: IpcChannelGroup<ContentGroupDeps> = {
       if (article.body.error || article.body.status !== 'ready' && article.body.status !== 'partial') throw new Error(article.body.error || article.body.status)
       const { body: { markdown: _markdown, ...body }, ...metadata } = article
       return { ...metadata, body }
+    }))
+    ipcMain.handle('rss:translateArticle', (_event, input: unknown) => respond(() => deps.getTranslator().translate(RSSTranslateArticleSchema.parse(input))))
+    ipcMain.handle('rss:readTranslation', (_event, input: unknown) => respond(() => {
+      const { itemId, targetLang } = RSSTranslationRefSchema.parse(input)
+      return deps.getTranslator().read(itemId, targetLang)
+    }))
+    ipcMain.handle('rss:cancelTranslation', (_event, input: unknown) => respond(() => {
+      const { itemId, targetLang } = RSSTranslationRefSchema.parse(input)
+      deps.getTranslator().cancel(itemId, targetLang)
+      return null
     }))
     return { dispose: () => { for (const channel of CHANNELS) ipcMain.removeHandler(channel) } }
   },

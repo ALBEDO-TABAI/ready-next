@@ -48,6 +48,7 @@ export async function reportInfrastructureTimeoutToMain(
     }
     return { kind: 'authoritative', state, activeRunId }
   } catch {
+    // silent-catch: any IPC failure means Main could not be asked, which the caller handles as unreachable
     return { kind: 'unreachable' }
   } finally {
     if (timeout) clearTimeout(timeout)

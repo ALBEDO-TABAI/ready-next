@@ -106,6 +106,7 @@ export function resolveFrozenResourceRef(
     try {
       canonicalRaw = realpathSync(raw)
     } catch {
+      // silent-catch: a path that vanishes or cannot be canonicalized after existsSync falls back to raw-path matching
       canonicalRaw = null
     }
   }

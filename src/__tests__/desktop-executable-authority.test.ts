@@ -18,6 +18,7 @@ import { join } from 'node:path'
 
 import {
   assertFrozenDesktopExecutableAuthority,
+  classifyDesktopExecutableFailure,
   executeFrozenDesktopExecutable,
   materializeFrozenDesktopExecutableSnapshot,
   resolveFrozenDesktopExecutableAuthority,
@@ -158,4 +159,25 @@ test('dead snapshot cleanup requires the private root marker and exact Ready-own
     }
     fixture.cleanup()
   }
+})
+
+test('a frozen executable reports whether it exited, was killed or never started', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'ready-executable-outcome-'))
+  const path = join(root, 'fixture-cli')
+  try {
+    writeFileSync(path, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "fixture 1.0"; exit 0; fi\nif [ "$1" = "hang" ]; then sleep 5; fi\nexit 3\n', 'utf8')
+    chmodSync(path, 0o755)
+    const authority = await resolveFrozenDesktopExecutableAuthority({ program: path })
+    const exited = await executeFrozenDesktopExecutable({ authority, args: ['fail'] })
+    assert.equal(exited.outcome, 'exited')
+    assert.equal(exited.exitCode, 3)
+    const killed = await executeFrozenDesktopExecutable({ authority, args: ['hang'], timeoutMs: 200 })
+    assert.equal(killed.outcome, 'killed')
+    assert.equal(killed.exitCode, -1)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+  // execFile rejects a program that cannot start with a string errno code and no exit status.
+  assert.equal(classifyDesktopExecutableFailure(Object.assign(new Error('spawn ENOENT'), { code: 'ENOENT' })), 'launch_failed')
+  assert.equal(classifyDesktopExecutableFailure(Object.assign(new Error('spawn EACCES'), { code: 'EACCES' })), 'launch_failed')
 })

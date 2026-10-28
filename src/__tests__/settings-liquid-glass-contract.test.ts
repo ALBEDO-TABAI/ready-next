@@ -119,7 +119,7 @@ test('shared settings theme maps every inline constant onto the sx glass tokens'
   assert.match(settingsTheme, /SETTINGS_INPUT_STYLE: CSSProperties = \{[\s\S]*?background: 'var\(--sx-slot-bg\)'/)
   assert.match(settingsTheme, /SETTINGS_PRIMARY_BUTTON_STYLE: CSSProperties = \{[\s\S]*?background: 'var\(--sx-ink\)'/)
   // 极简层次：分组卡只是一层半透明白玻璃 + 柔和投影，不画外框；整页不再铺额外画布。
-  const cardBlock = surfaces.match(/\n  \.sx-card \{[\s\S]*?\n  \}/)?.[0] ?? ''
+  const cardBlock = surfaces.match(/\n {2}\.sx-card \{[\s\S]*?\n {2}\}/)?.[0] ?? ''
   assert.match(cardBlock, /background:\s*var\(--sx-card-bg\)/)
   assert.doesNotMatch(cardBlock, /\bborder\s*:/)
   assert.doesNotMatch(surfaces, /\.sx-canvas|--sx-canvas/)

@@ -8,6 +8,7 @@ import {
   type CodexModelGatewayRequestKind,
   type CodexToolArgumentValidator,
   currentTurnReadyAdditionalContext,
+  hasCurrentTurnReadyContext,
   digestCanonicalJson,
   digestReadyAdditionalContext,
   instructionTranscriptDigest,
@@ -38,20 +39,19 @@ const EXACT_REQUEST_KEYS = [
 
 export function parseMetadata(body: JsonObject): CodexModelGatewayMetadata {
   if (!isRecord(body.client_metadata)) throw new CodexModelGatewayError('gateway_client_metadata_invalid')
+  // The exact shape the pinned 0.160.1 runtime sends on every request: product turns and both compaction kinds.
   const outerKeys = [
     'x-codex-installation-id',
     'session_id',
     'x-codex-window-id',
     'turn_id',
     'thread_id',
+    'root_turn_id',
     'x-codex-turn-metadata',
   ]
-  const actualOuterKeys = Object.keys(body.client_metadata).sort()
-  const hasRootTurnId = actualOuterKeys.includes('root_turn_id')
-  if (
-    JSON.stringify(actualOuterKeys)
-    !== JSON.stringify([...outerKeys, ...(hasRootTurnId ? ['root_turn_id'] : [])].sort())
-  ) throw new CodexModelGatewayError('gateway_client_metadata_shape_invalid')
+  if (JSON.stringify(Object.keys(body.client_metadata).sort()) !== JSON.stringify([...outerKeys].sort())) {
+    throw new CodexModelGatewayError('gateway_client_metadata_shape_invalid')
+  }
   const rawMetadata = body.client_metadata['x-codex-turn-metadata']
   if (typeof rawMetadata !== 'string') throw new CodexModelGatewayError('gateway_turn_metadata_missing')
   let parsed: unknown
@@ -70,9 +70,13 @@ export function parseMetadata(body: JsonObject): CodexModelGatewayMetadata {
     'session_id',
     'thread_id',
     'turn_id',
+    'root_turn_id',
     'window_id',
+    'window_number',
+    'context_window_id',
     'request_kind',
     'agent_name',
+    'analytics_enabled',
     'auto_review_enabled',
     'node_repl_auto_review_required',
     'node_repl_disabled',
@@ -87,9 +91,6 @@ export function parseMetadata(body: JsonObject): CodexModelGatewayMetadata {
   } catch {
     throw new CodexModelGatewayError('gateway_turn_metadata_shape_invalid')
   }
-  if (metadataKind === 'automatic_compaction' && !hasRootTurnId) {
-    throw new CodexModelGatewayError('gateway_turn_metadata_shape_invalid')
-  }
   const readyKeys = [
     'readyRunId',
     'toolSurfaceDigest',
@@ -97,13 +98,9 @@ export function parseMetadata(body: JsonObject): CodexModelGatewayMetadata {
     'upstreamProfileSnapshotDigest',
   ]
   const expectedInnerKeys = metadataKind === 'product'
-    ? [
-        ...baseInnerKeys,
-        ...(hasRootTurnId ? ['root_turn_id'] : []),
-        ...readyKeys,
-      ]
+    ? [...baseInnerKeys, 'model', ...readyKeys]
     : metadataKind === 'automatic_compaction'
-      ? [...baseInnerKeys, 'root_turn_id', 'compaction', ...readyKeys]
+      ? [...baseInnerKeys, 'compaction', ...readyKeys]
       : [...baseInnerKeys, 'compaction']
   if (
     JSON.stringify(Object.keys(parsed).sort()) !== JSON.stringify(expectedInnerKeys.sort())
@@ -121,20 +118,20 @@ export function parseMetadata(body: JsonObject): CodexModelGatewayMetadata {
     || nonEmptyString(outer['x-codex-window-id'], 'gateway_window_id_missing')
       !== nonEmptyString(parsed.window_id, 'gateway_window_id_missing')
   ) throw new CodexModelGatewayError('gateway_metadata_identity_mismatch')
-  if (hasRootTurnId && (
+  if (
     nonEmptyString(outer.root_turn_id, 'gateway_root_turn_id_missing')
       !== nonEmptyString(parsed.root_turn_id, 'gateway_root_turn_id_missing')
     || parsed.root_turn_id !== parsed.turn_id
-  )) throw new CodexModelGatewayError('gateway_root_turn_identity_mismatch')
+  ) throw new CodexModelGatewayError('gateway_root_turn_identity_mismatch')
   if (parsed.session_id !== parsed.thread_id) {
     throw new CodexModelGatewayError('gateway_root_session_thread_mismatch')
   }
-  const windowPrefix = `${String(parsed.thread_id)}:`
-  const windowId = String(parsed.window_id)
-  const windowIndex = windowId.startsWith(windowPrefix) ? windowId.slice(windowPrefix.length) : ''
-  if (!/^(?:0|[1-9]\d*)$/.test(windowIndex)) {
-    throw new CodexModelGatewayError('gateway_root_window_thread_mismatch')
-  }
+  if (
+    !Number.isSafeInteger(parsed.window_number)
+    || Number(parsed.window_number) < 0
+    || parsed.window_id !== `${String(parsed.thread_id)}:${String(parsed.window_number)}`
+  ) throw new CodexModelGatewayError('gateway_root_window_thread_mismatch')
+  nonEmptyString(parsed.context_window_id, 'gateway_context_window_id_missing')
   if (body.prompt_cache_key !== parsed.thread_id) {
     throw new CodexModelGatewayError('gateway_root_prompt_cache_thread_mismatch')
   }
@@ -142,11 +139,13 @@ export function parseMetadata(body: JsonObject): CodexModelGatewayMetadata {
     parsed.sandbox !== 'seatbelt'
     || parsed.sandbox_mode !== 'read-only'
     || parsed.agent_name !== '/root'
+    || parsed.analytics_enabled !== false
     || parsed.auto_review_enabled !== false
     || parsed.node_repl_auto_review_required !== false
     || parsed.node_repl_disabled !== false
     || !Number.isSafeInteger(parsed.turn_started_at_unix_ms)
     || Number(parsed.turn_started_at_unix_ms) < 0
+    || (metadataKind === 'product' && (typeof parsed.model !== 'string' || !parsed.model))
   ) throw new CodexModelGatewayError('gateway_turn_metadata_value_invalid')
   return {
     requestKind: nonEmptyString(parsed.request_kind, 'gateway_request_kind_missing'),
@@ -161,6 +160,33 @@ export function parseMetadata(body: JsonObject): CodexModelGatewayMetadata {
       typeof parsed.upstreamProfileSnapshotDigest === 'string' && parsed.upstreamProfileSnapshotDigest
         ? parsed.upstreamProfileSnapshotDigest : null,
     raw: parsed,
+  }
+}
+
+/**
+ * The session identity Codex sends on every Responses call. Upstream prompt-cache
+ * routing keys on it, so a hop that drops these headers turns every request into
+ * a full prefill. Values come from client_metadata already checked by parseMetadata.
+ */
+/**
+ * The ChatGPT Codex backend gives a turn's first response an opaque routing token, and Codex sends it back on
+ * that turn's later requests; carried both ways, they reach the backend that holds the turn's prompt cache.
+ */
+export function codexTurnStateHeader(value: unknown): string | null {
+  return typeof value === 'string' && /^[A-Za-z0-9_=.+/-]{1,8192}$/.test(value) ? value : null
+}
+
+export function codexSessionAffinityHeaders(body: JsonObject): Record<string, string> {
+  const outer = body.client_metadata as JsonObject
+  const threadId = String(outer.thread_id)
+  const windowId = String(outer['x-codex-window-id'])
+  const headerSafe = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/
+  if (!headerSafe.test(threadId) || !headerSafe.test(windowId)) return {}
+  return {
+    'session-id': threadId,
+    'thread-id': threadId,
+    'x-client-request-id': threadId,
+    'x-codex-window-id': windowId,
   }
 }
 
@@ -273,6 +299,18 @@ export function expectedKind(metadata: CodexModelGatewayMetadata): CodexModelGat
   }
 }
 
+function droppedTurnContext(
+  input: unknown,
+  readyRunId: string,
+): ReturnType<typeof currentTurnReadyAdditionalContext> | null {
+  if (!Array.isArray(input) || hasCurrentTurnReadyContext(input, readyRunId)) return null
+  const lastUser = input.findLastIndex((item) => isRecord(item) && item.role === 'user')
+  return {
+    resourceReferences: [], explicitRetry: null, readyMemory: null, documentWidgetGuidance: null,
+    currentUserIndex: lastUser < 0 ? null : lastUser, readyMemoryIndex: null,
+  }
+}
+
 export function validateBinding(input: {
   body: JsonObject
   metadata: CodexModelGatewayMetadata
@@ -285,7 +323,8 @@ export function validateBinding(input: {
   if (expectedKind(metadata) !== binding.kind) {
     throw new CodexModelGatewayError('gateway_binding_kind_mismatch', 409)
   }
-  if (body.model !== binding.codexModel) {
+  if (body.model !== binding.codexModel
+    || (binding.kind === 'product' && metadata.raw.model !== binding.codexModel)) {
     throw new CodexModelGatewayError('gateway_codex_model_mismatch', 409)
   }
   if (digestCanonicalJson(binding.snapshot) !== binding.snapshotDigest) {
@@ -302,7 +341,7 @@ export function validateBinding(input: {
   }
   const tools = body.tools as unknown[]
   const toolNames = responsesToolNames(tools)
-  if (digestCanonicalJson(tools) !== binding.toolSurfaceDigest) {
+  if (digestCanonicalJson(tools) !== binding.requestToolsDigest) {
     throw new CodexModelGatewayError('gateway_tool_surface_mismatch', 409)
   }
   let currentTurnContext: ReturnType<typeof currentTurnReadyAdditionalContext> | null = null
@@ -313,18 +352,29 @@ export function validateBinding(input: {
       || metadata.upstreamProfileSnapshotDigest !== binding.snapshotDigest
       || !metadata.readyRunId
     ) throw new CodexModelGatewayError('gateway_product_metadata_mismatch', 409)
+    let exactContext: ReturnType<typeof currentTurnReadyAdditionalContext> | null = null
     try {
-      currentTurnContext = currentTurnReadyAdditionalContext(body.input, binding.deliveredUserTail, metadata.readyRunId)
+      exactContext = currentTurnReadyAdditionalContext(body.input, binding.deliveredUserTail, metadata.readyRunId)
     } catch {
-      throw new CodexModelGatewayError('gateway_additional_context_mismatch', 409)
+      // silent-catch: an unreadable turn context counts as absent and must then pass the compaction check below or fail as a mismatch
+      exactContext = null
     }
-    if (
-      binding.additionalContextDigest === null
-      || digestReadyAdditionalContext(currentTurnContext) !== binding.additionalContextDigest
-    ) throw new CodexModelGatewayError('gateway_additional_context_mismatch', 409)
+    if (exactContext && binding.additionalContextDigest !== null
+      && digestReadyAdditionalContext(exactContext) === binding.additionalContextDigest) {
+      currentTurnContext = exactContext
+    } else {
+      // After an automatic compaction Codex rebuilds the history from its summary and drops the turn's Ready
+      // context; that is the only mismatch allowed, and only when nothing of the context is left.
+      const droppedByCompaction = binding.compactedEarlierInTurn === true
+        ? droppedTurnContext(body.input, metadata.readyRunId)
+        : null
+      if (!droppedByCompaction) throw new CodexModelGatewayError('gateway_additional_context_mismatch', 409)
+      currentTurnContext = droppedByCompaction
+    }
   } else if (
     tools.length !== 0
     || binding.toolSurfaceDigest !== digestCanonicalJson([])
+    || binding.requestToolsDigest !== digestCanonicalJson([])
     || binding.allowedToolNames !== null
   ) {
     throw new CodexModelGatewayError('gateway_compaction_tool_surface_not_empty', 409)

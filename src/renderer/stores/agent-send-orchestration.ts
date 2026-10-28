@@ -164,6 +164,7 @@ export async function sendAgentMessage(input: {
   try {
     currentDocumentAnchor = await buildCodexCurrentDocumentAnchor(activeScopeId)
   } catch {
+    // silent-catch: an unreadable current document rejects the send as attachment_unavailable
     return rejectedMessageResult('attachment_unavailable')
   }
   // RSS references read local saved data, so only local scopes carry them; calendar context stays as in 0.8.

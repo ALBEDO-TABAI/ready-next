@@ -426,6 +426,7 @@ export class ReadyMemoryGenerationCoordinator {
         createdAt: segment.createdAt,
       }))
     } catch {
+      // silent-catch: ids, timestamps or evidence that fail validation are rejected and reported to the caller as reason 'unsafe'
       return { enqueued: false, reason: 'unsafe' }
     }
     if (!this.dependencies.repository.getConversationPolicy(conversationId).contributeToMemories) {
@@ -597,10 +598,12 @@ export class ReadyMemoryGenerationCoordinator {
     try {
       request = await this.buildRequest(job, now)
     } catch (error) {
+      // silent-catch: a request that cannot be built locally is persisted as the job's failed terminal receipt with the error text
       request = this.localRejectionRequest(job)
       try {
         this.persistSubmitted(job, leaseToken, request, now, false)
       } catch {
+        // silent-catch: submission is refused when generation is disabled, revocation advanced, or the lease lapsed; the lease returns to pending
         this.dependencies.store.releaseUnsubmittedLease({
           jobId: job.jobId, leaseToken, releasedAt: now,
         })
@@ -619,6 +622,7 @@ export class ReadyMemoryGenerationCoordinator {
     try {
       this.persistSubmitted(job, leaseToken, request, now)
     } catch {
+      // silent-catch: submission is refused when generation is disabled, revocation advanced, or the lease lapsed; the lease returns to pending
       this.dependencies.store.releaseUnsubmittedLease({
         jobId: job.jobId, leaseToken, releasedAt: now,
       })
@@ -628,11 +632,13 @@ export class ReadyMemoryGenerationCoordinator {
     try {
       response = await this.dependencies.provider.submit(request)
     } catch {
+      // silent-catch: the job is already persisted as submitted with mayHaveCommitted, so recovery queries the provider later
       return { kind: 'submitted', jobId: job.jobId, providerState: 'unknown' }
     }
     try {
       this.recordProviderResponse(job, request, response, now)
     } catch (error) {
+      // silent-catch: an invalid provider response is persisted as the job's failed terminal receipt with the error text
       this.recordInvalidProviderResult(job, request, error, now, response)
     }
     return { kind: 'submitted', jobId: job.jobId, providerState: response.state }
@@ -751,6 +757,7 @@ export class ReadyMemoryGenerationCoordinator {
     try {
       response = await this.dependencies.provider.recover(submission.request, remoteId)
     } catch {
+      // silent-catch: a failed recovery query keeps the job unknown and defers the next recovery check
       this.dependencies.store.deferRecovery({
         jobId: job.jobId,
         providerRequestId: submission.request.requestId,
@@ -787,6 +794,7 @@ export class ReadyMemoryGenerationCoordinator {
         })
       }
     } catch (error) {
+      // silent-catch: an invalid recovery result is persisted as the job's failed terminal receipt with the error text
       this.recordInvalidProviderResult(job, submission.request, error, now, response)
     }
     return { kind: 'recovered', jobId: job.jobId, providerState: response.state }
@@ -808,7 +816,9 @@ export class ReadyMemoryGenerationCoordinator {
         assertUsage(response.usage, request.maxOutputTokens)
         responseUsage = response.usage
       }
-    } catch { /* invalid usage remains explicitly unknown */ }
+    } catch {
+      // silent-catch: invalid provider usage stays undefined so the failed receipt records usage as unknown
+    }
     const responseOutput = response && 'outputText' in response
       && typeof response.outputText === 'string' ? response.outputText : undefined
     this.dependencies.repository.recordJobTerminal({

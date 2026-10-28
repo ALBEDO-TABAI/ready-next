@@ -858,6 +858,7 @@ function preparePublicationRecoveryFixture(
     admittedCalls?: Array<{ codexCallId: string; toolName: string; argsDigest: string }>
     pendingOutputContract?: boolean
     currentDocumentReadAuthorized?: boolean
+    currentDocumentAmbient?: true
     actionObligations?: ReadyActionObligationSetV1
     currentDocumentAnchor?: NonNullable<Extract<
       PreparedCodexProductRun['ingress'],
@@ -901,6 +902,7 @@ function preparePublicationRecoveryFixture(
     run.ingress.explicitResourceEnvelope.resourceRefs = [reference]
     run.ingress.resourceAdditionalContext = [reference]
     run.ingress.currentDocumentAnchor = anchor
+    if (input.currentDocumentAmbient) run.currentDocumentAmbient = true
     run.resourceAnchorDigest = createHash('sha256').update(JSON.stringify({
       explicitResourceEnvelope: run.ingress.explicitResourceEnvelope,
       resourceAdditionalContext: run.ingress.resourceAdditionalContext,
@@ -1846,6 +1848,7 @@ test('product admission can join the Ready ingress transaction and rolls back ev
       continuationBlockedAt: null,
       continuationBlockedReason: null,
       retiredAt: null,
+      instructionContractDigest: null,
     })
   })
 })
@@ -5842,6 +5845,30 @@ test('publication recovery only abandons calls that never reached the Ready host
     }).kind, 'accepted')
   })
 
+  // 2026-10-06: a focused document is available to every ordinary turn; only a turn that pointed at it owes a read,
+  // so a reply about something else is not held back.
+  await withRepository(t, (db, repository) => {
+    const { run } = preparePublicationRecoveryFixture(db, repository, {
+      runId: 'run-completed-available-document',
+      currentDocumentAnchor,
+      currentDocumentAmbient: true,
+    })
+    repository.recordEngineTerminalCandidate({
+      readyRunId: run.runId,
+      codexThreadId: 'thread-native-1',
+      codexTurnId: 'turn-native-1',
+      engineOutcome: 'completed',
+      candidate: nativeFailureCandidate(run, 'completed'),
+      recordedAt: admittedAt,
+    })
+    assert.equal(repository.readToolPublicationBarrier({
+      readyRunId: run.runId,
+      codexThreadId: 'thread-native-1',
+      codexTurnId: 'turn-native-1',
+      candidateCalls: [],
+    }).kind, 'accepted')
+  })
+
   await withRepository(t, (db, repository) => {
     const { run } = preparePublicationRecoveryFixture(db, repository, {
       runId: 'run-completed-tag-forge-with-ambient-document',
@@ -8009,6 +8036,180 @@ test('manual compaction uses the latest closed authoritative turn snapshot inste
         provider_snapshot_json: JSON.stringify(latestProfile.snapshot),
       },
     })
+  })
+})
+
+// 2026-10-07: Codex answered a compaction of an unloaded thread with “thread not found”; the request stayed pending
+// with its fence and later became unknown, so the conversation could only be reset.
+test('a rejected manual compaction settles idle and releases its fence in one transaction', async (t) => {
+  await withRepository(t, (db, repository) => {
+    const run = prepared()
+    const providerSnapshot = defaultThreadProfile.snapshot
+    const providerSnapshotDigest = digestCanonicalJson(providerSnapshot)
+    prepareReadyParents(db, repository, run)
+    repository.admitProductBindings(admission(run, lazyReservation(), {
+      upstreamProfileSnapshotDigest: providerSnapshotDigest,
+    }))
+    repository.activateStartDispatch({
+      connectionEpoch: 'epoch-1', rpcId: 1, method: 'thread/start',
+      bindingLookupKey: '/tmp/ready-codex/thread-binding-1',
+      requestDigest: 'thread-request-digest', dispatchedAt: admittedAt,
+    })
+    repository.reconcileStartAccepted({
+      connectionEpoch: 'epoch-1', rpcId: 1, method: 'thread/start', bindingId: 'thread-binding-1',
+      nativeId: 'thread-native-1', nativeResult: { thread: rootThread(), instructionSources: [] },
+      responseDigest: 'thread-response', responsePending: false, reconciledAt: admittedAt,
+    })
+    repository.activateStartDispatch({
+      connectionEpoch: 'epoch-1', rpcId: 2, method: 'turn/start', bindingLookupKey: 'run-1',
+      requestDigest: 'turn-request-digest', dispatchedAt: admittedAt,
+    })
+    repository.reconcileStartAccepted({
+      connectionEpoch: 'epoch-1', rpcId: 2, method: 'turn/start', bindingId: 'run-1',
+      nativeId: 'turn-native-1', nativeResult: { turn: activeTurn() },
+      responseDigest: 'turn-response', responsePending: false, reconciledAt: admittedAt,
+    })
+    const productTerminalDigest = recordCompletedTerminal(db, repository)
+    db.prepare(`UPDATE task_projections SET status = 'completed' WHERE task_id = 'task-run-1'`).run()
+    repository.completeProductTurnCloseout({
+      readyRunId: 'run-1', productTerminalDigest, closeoutAt: admittedAt,
+    })
+
+    const manualInput = {
+      manualCompactionId: 'manual-1',
+      threadBindingId: 'thread-binding-1',
+      ownerMainBootId: 'main-boot-1',
+      codexModel: 'ready-e0-model',
+      upstreamProfileSnapshotRef: 'profile-ref-1',
+      upstreamProfileSnapshotDigest: providerSnapshotDigest,
+      providerSnapshot,
+      credentialReferenceId: providerSnapshot.credentialReferenceId,
+      expectedToolsDigest: digestCanonicalJson([]),
+      preDispatchThreadReadDigest: 'pre-dispatch-thread-read',
+      preDispatchTurnIds: ['turn-native-1'],
+      expiresAt: '2026-08-07T03:00:00.000Z',
+      createdAt: admittedAt,
+    }
+    repository.beginManualCompaction(manualInput)
+    repository.activateManualCompactionDispatch({
+      connectionEpoch: 'manual-epoch-1', rpcId: 7, codexThreadId: 'thread-native-1',
+      requestDigest: 'manual-request-digest', dispatchIntentAt: admittedAt,
+    })
+    repository.markManualCompactionWriteAttempted({
+      connectionEpoch: 'manual-epoch-1', rpcId: 7, manualCompactionId: 'manual-1', attemptedAt: admittedAt,
+    })
+    assert.throws(
+      () => repository.settleRejectedManualCompaction({ manualCompactionId: 'manual-1', settledAt: admittedAt }),
+      (error: unknown) => error instanceof CodexBindingRepositoryError
+        && error.code === 'manual_compaction_rejection_missing',
+      'without a recorded rejection the request may have started',
+    )
+    repository.recordManualCompactionDispatchResponse({
+      connectionEpoch: 'manual-epoch-1', rpcId: 7, manualCompactionId: 'manual-1',
+      responseKind: 'rejected', responseDigest: 'manual-rejection-digest', responseAt: admittedAt,
+    })
+    assert.equal(repository.readLifecycleOperation({ aliasId: 'scope-1', aliasGeneration: 1 })
+      .facts.manualCompactionState, 'pending')
+    repository.settleRejectedManualCompaction({ manualCompactionId: 'manual-1', settledAt: admittedAt })
+    assert.deepEqual(db.prepare(`
+      SELECT abandoned_reason, abandoned_at IS NOT NULL AS abandoned, abandoned_reconciled_at IS NOT NULL AS reconciled,
+             unknown_at, consumed_at
+        FROM codex_manual_compaction_bindings WHERE manual_compaction_id = 'manual-1'
+    `).get(), { abandoned_reason: 'dispatch_rejected', abandoned: 1, reconciled: 1, unknown_at: null, consumed_at: null })
+    assert.equal(db.prepare(`SELECT COUNT(*) AS count FROM codex_thread_dispatch_fences`).get<{ count: number }>()?.count, 0)
+    assert.equal(classifyLifecycleOperation(repository.readLifecycleOperation({ aliasId: 'scope-1', aliasGeneration: 1 })
+      .facts), 'idle_native_thread')
+    assert.deepEqual(repository.readRecoverySnapshot(() => false).manualCompactions, [])
+    assert.throws(
+      () => repository.settleRejectedManualCompaction({ manualCompactionId: 'manual-1', settledAt: admittedAt }),
+      (error: unknown) => error instanceof CodexBindingRepositoryError
+        && error.code === 'manual_compaction_not_settleable',
+    )
+    assert.deepEqual(repository.beginManualCompaction({ ...manualInput, manualCompactionId: 'manual-2' }), {
+      manualCompactionId: 'manual-2', codexThreadId: 'thread-native-1',
+    }, 'the conversation can compact again')
+  })
+})
+
+
+// 2026-10-07: Codex 0.160.1 sends a new native base on every resumed thread. A thread created under an earlier
+// runtime keeps its lineage contract; the verified transition declares the contract it carries now.
+test('a verified runtime transition maps an earlier lineage instruction contract to the current one', async (t) => {
+  await withRepository(t, (db, repository) => {
+    const run = prepared()
+    const providerSnapshot = defaultThreadProfile.snapshot
+    const providerSnapshotDigest = digestCanonicalJson(providerSnapshot)
+    prepareReadyParents(db, repository, run)
+    const lineage = digestCanonicalJson({ fixture: 'lineage-instruction-contract' })
+    repository.admitProductBindings(admission(run, lazyReservation(), {
+      upstreamProfileSnapshotDigest: providerSnapshotDigest,
+      instructionContractDigest: lineage,
+    }))
+    repository.activateStartDispatch({
+      connectionEpoch: 'epoch-1', rpcId: 1, method: 'thread/start',
+      bindingLookupKey: '/tmp/ready-codex/thread-binding-1',
+      requestDigest: 'thread-request-digest', dispatchedAt: admittedAt,
+    })
+    repository.reconcileStartAccepted({
+      connectionEpoch: 'epoch-1', rpcId: 1, method: 'thread/start', bindingId: 'thread-binding-1',
+      nativeId: 'thread-native-1', nativeResult: { thread: rootThread(), instructionSources: [] },
+      responseDigest: 'thread-response', responsePending: false, reconciledAt: admittedAt,
+    })
+    repository.activateStartDispatch({
+      connectionEpoch: 'epoch-1', rpcId: 2, method: 'turn/start', bindingLookupKey: 'run-1',
+      requestDigest: 'turn-request-digest', dispatchedAt: admittedAt,
+    })
+    repository.reconcileStartAccepted({
+      connectionEpoch: 'epoch-1', rpcId: 2, method: 'turn/start', bindingId: 'run-1',
+      nativeId: 'turn-native-1', nativeResult: { turn: activeTurn() },
+      responseDigest: 'turn-response', responsePending: false, reconciledAt: admittedAt,
+    })
+    const productTerminalDigest = recordCompletedTerminal(db, repository)
+    db.prepare(`UPDATE task_projections SET status = 'completed' WHERE task_id = 'task-run-1'`).run()
+    repository.completeProductTurnCloseout({
+      readyRunId: 'run-1', productTerminalDigest, closeoutAt: admittedAt,
+    })
+
+    assert.equal(repository.readActiveAliasBinding('scope-1')?.instructionContractDigest, lineage)
+    const targetManifestDigest = digestCanonicalJson({ fixture: 'codex-binding-runtime-v2' })
+    const currentInstructionContractDigest = digestCanonicalJson({ fixture: 'current-instruction-contract' })
+    const upgraded = (instructionContract?: { sourceDigest: string; targetDigest: string }) => new CodexBindingRepository(
+      db as unknown as DatabaseConnection,
+      {
+        runtimeManifestDigest: targetManifestDigest,
+        protocolSchemaDigest: 'protocol-schema-digest',
+        instructionContractDigest: currentInstructionContractDigest,
+        runtimeContinuityCatalog: {
+          contract: 'ready_runtime_continuity_catalog_v1',
+          targetManifestDigest,
+          transitions: [{
+            sourceManifestDigest: testRuntimeManifestDigest,
+            targetManifestDigest,
+            operation: 'ordinary_continuation',
+            result: 'compatible',
+            proofDigest: digestCanonicalJson({ fixture: 'transition-proof' }),
+            ...(instructionContract ? { instructionContract } : {}),
+          }],
+        },
+      },
+    )
+    const mapped = upgraded({ sourceDigest: lineage, targetDigest: currentInstructionContractDigest })
+    assert.equal(mapped.readActiveAliasBinding('scope-1')?.instructionContractDigest, currentInstructionContractDigest)
+    assert.equal(mapped.readStoredContinuationContract({ aliasId: 'scope-1', aliasGeneration: 1 })
+      .stored.instructionContractDigest, currentInstructionContractDigest)
+    assert.equal(mapped.readProductTurnRuntime('run-1').instructionContractDigest, currentInstructionContractDigest)
+
+    const unmapped = upgraded()
+    assert.equal(unmapped.readActiveAliasBinding('scope-1')?.instructionContractDigest, lineage,
+      'without a declared mapping the lineage stays and continuation reports the contract change')
+    const otherLineage = upgraded({ sourceDigest: digestCanonicalJson({ fixture: 'other-lineage' }),
+      targetDigest: currentInstructionContractDigest })
+    assert.equal(otherLineage.readActiveAliasBinding('scope-1')?.instructionContractDigest, lineage)
+    assert.throws(() => upgraded({ sourceDigest: lineage, targetDigest: digestCanonicalJson({ fixture: 'stale' }) }),
+      /runtime_continuity_instruction_contract_stale/, 'a mapping to anything but the current contract is stale evidence')
+    assert.equal(db.prepare(`SELECT instruction_contract_digest FROM codex_thread_bindings`).get<{
+      instruction_contract_digest: string
+    }>()?.instruction_contract_digest, lineage, 'the stored lineage is never rewritten')
   })
 })
 

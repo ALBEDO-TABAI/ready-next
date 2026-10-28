@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
+import { readCodexRuntimeCompositionModules } from './helpers/codex-runtime-split-sources'
 
 function source(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
@@ -221,7 +222,7 @@ test('Codex composition is explicit and has no SDK fallback constructor', () => 
   const composition = source('src/main/modules/agent-control/codex-runtime/codex-runtime-composition.ts')
   const production = source(
     'src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts',
-  )
+  ) + readCodexRuntimeCompositionModules()
   const ipc = source('src/main/modules/claude-bridge/ipc-handler.ts')
   assert.match(runtime, /codexRuntime: CodexRuntimeComposition/)
   const constructorSignature = between(runtime, 'constructor(', 'super()')

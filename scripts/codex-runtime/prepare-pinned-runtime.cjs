@@ -59,9 +59,17 @@ function main() {
     )
     fs.mkdirSync(destinationDir, { recursive: true })
     const destination = path.join(destinationDir, 'codex')
-    fs.copyFileSync(extractedPath, destination)
-    fs.chmodSync(destination, 0o755)
-    assert(digestFile(destination) === sourceLock.releaseAsset.binarySha256, 'Copied binary digest mismatch')
+    // Replace atomically: a running sidecar keeps its own inode, and a half-copied binary is never visible.
+    const staged = path.join(destinationDir, `.codex-${process.pid}-${Date.now()}`)
+    try {
+      fs.copyFileSync(extractedPath, staged)
+      fs.chmodSync(staged, 0o755)
+      assert(digestFile(staged) === sourceLock.releaseAsset.binarySha256, 'Copied binary digest mismatch')
+      fs.renameSync(staged, destination)
+    } finally {
+      fs.rmSync(staged, { force: true })
+    }
+    assert(digestFile(destination) === sourceLock.releaseAsset.binarySha256, 'Installed binary digest mismatch')
     console.log(destination)
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true })

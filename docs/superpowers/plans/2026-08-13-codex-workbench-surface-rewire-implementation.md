@@ -151,6 +151,7 @@ note: >
 - 组合顺序固定为：共享解析结果 → capability floors → current document 域内收窄 → external/explicit resource 约束与只读地板 → 产品工作面只读地板 → 最终排他策略。
 - 同步修改 capability floor 定义：`current_document_context` 的无条件地板只有 `document_read_section`；明确写意图产生独立的条件地板。不得先恢复全部文档写工具、再靠后续过滤移除地板来制造合同自相矛盾。
 - 当前文档存在时，从已有 allow-set 仅移除未授权的 document 写工具；始终并入 `document_read_section`。明确写意图才并入固定 Widget/replace/save 工具。
+  - 2026-10-06 起写工具不再看措辞：激活即开放（用户明确只读除外），保存走 M3 确认，见 [当前文档写面](2026-10-06-current-document-write-surface-implementation.md)。
 - explicit resource 只移除没有 typed authority 的 file 写/整理工具，并入该资源对应的只读工具；不得删除其他域和选中技能地板。
 - current document、external read slice 和 explicit resources 同时存在时全部组合，不再使用互斥三元分支让后者失效。
 - 无 typed file/folder authority 时，`file_rename/file_move/file_copy/file_organize_*` 与 `tag_forge_*` 不出现；已解析的 `file_search/file_locate/file_read_excerpt` 只按原意图保留，不因普通闲聊常开。

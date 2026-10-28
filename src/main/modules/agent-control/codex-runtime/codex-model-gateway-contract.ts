@@ -145,13 +145,14 @@ export function digestText(value: string): string {
   return createHash('sha256').update(value).digest('hex')
 }
 
-const AUTOMATIC_COMPACTION_SIGNATURE = {
+// Codex compacts automatically before a turn starts and, when the context fills inside a long tool loop, mid-turn.
+const AUTOMATIC_COMPACTION_SIGNATURES = (['pre_turn', 'mid_turn'] as const).map((phase) => canonicalJson({
   trigger: 'auto',
   reason: 'context_limit',
   implementation: 'responses',
-  phase: 'pre_turn',
+  phase,
   strategy: 'memento',
-}
+}))
 
 const MANUAL_COMPACTION_SIGNATURE = {
   trigger: 'manual',
@@ -167,7 +168,7 @@ export function classifyCodexModelGatewayRequest(metadata: JsonObject): CodexMod
     throw new CodexModelGatewayContractError('gateway_request_unclassified')
   }
   const signature = canonicalJson(metadata.compaction)
-  if (signature === canonicalJson(AUTOMATIC_COMPACTION_SIGNATURE)) return 'automatic_compaction'
+  if (AUTOMATIC_COMPACTION_SIGNATURES.includes(signature)) return 'automatic_compaction'
   if (signature === canonicalJson(MANUAL_COMPACTION_SIGNATURE)) return 'manual_compaction'
   throw new CodexModelGatewayContractError('gateway_request_unclassified')
 }
@@ -267,6 +268,29 @@ function readyExplicitRetryContextFromText(text: string): {
   return { recognized: true, context: parsed }
 }
 
+function readyDocumentWidgetGuidanceFromText(text: string): {
+  recognized: boolean
+  readyRunId: string | null
+  guidance: string | null
+} {
+  const match = text.match(/^<ready-document-widget-guidance>([\s\S]*)<\/ready-document-widget-guidance>$/)
+  if (!match) return { recognized: false, readyRunId: null, guidance: null }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(match[1])
+  } catch {
+    throw new CodexModelGatewayContractError('gateway_document_widget_guidance_invalid')
+  }
+  if (!isRecord(parsed)
+    || Object.keys(parsed).sort().join(',') !== 'contract,guidance,readyRunId'
+    || parsed.contract !== 'ready_document_widget_guidance_v1'
+    || typeof parsed.readyRunId !== 'string' || !parsed.readyRunId
+    || typeof parsed.guidance !== 'string' || !parsed.guidance) {
+    throw new CodexModelGatewayContractError('gateway_document_widget_guidance_invalid')
+  }
+  return { recognized: true, readyRunId: parsed.readyRunId, guidance: parsed.guidance }
+}
+
 function readyMemoryContextFromText(text: string): {
   recognized: boolean
   context: ReadyMemoryPromptPayload | null
@@ -309,6 +333,7 @@ export function instructionTranscriptDigest(instructions: unknown, input: unknow
       || readyResourceReferencesFromText(developerText).recognized
       || readyExplicitRetryContextFromText(developerText).recognized
       || readyMemoryContextFromText(developerText).recognized
+      || readyDocumentWidgetGuidanceFromText(developerText).recognized
     ) return
     developerMessages.push({ type: 'message', role: 'developer', content: item.content })
   })
@@ -536,6 +561,7 @@ export function currentTurnReadyAdditionalContext(
   resourceReferences: unknown[]
   explicitRetry: JsonObject | null
   readyMemory: ReadyMemoryPromptPayload | null
+  documentWidgetGuidance: string | null
   currentUserIndex: number | null
   readyMemoryIndex: number | null
 } {
@@ -549,7 +575,10 @@ export function currentTurnReadyAdditionalContext(
   }
   if (lastUser < 0) {
     if (expectedDeliveredUserTail.length > 0) throw new CodexModelGatewayContractError('gateway_uncommitted_user_tail_mismatch')
-    return { resourceReferences: [], explicitRetry: null, readyMemory: null, currentUserIndex: null, readyMemoryIndex: null }
+    return {
+      resourceReferences: [], explicitRetry: null, readyMemory: null, documentWidgetGuidance: null,
+      currentUserIndex: null, readyMemoryIndex: null,
+    }
   }
   if (textFromContent(input[lastUser].content).some((text) => text.startsWith('<external_ready-uncommitted-user-tail:'))) {
     throw new CodexModelGatewayContractError('gateway_uncommitted_user_tail_mismatch')
@@ -559,6 +588,7 @@ export function currentTurnReadyAdditionalContext(
   let explicitRetry: JsonObject | null = null
   let readyMemory: ReadyMemoryPromptPayload | null = null
   let readyMemoryIndex: number | null = null
+  let documentWidgetGuidance: string | null = null
   let nextTailIndex = expectedDeliveredUserTail.length - 1
   for (let index = lastUser - 1; index >= 0; index -= 1) {
     const item = input[index]
@@ -628,6 +658,20 @@ export function currentTurnReadyAdditionalContext(
         readyMemoryIndex = index
         continue
       }
+      const widgetGuidance = readyDocumentWidgetGuidanceFromText(text)
+      if (widgetGuidance.recognized) {
+        if (widgetGuidance.readyRunId !== readyRunId || documentWidgetGuidance !== null
+          || item.type !== 'message' || item.role !== 'developer'
+          || Object.keys(item).some((key) => !['type', 'id', 'role', 'content'].includes(key))
+          || (item.id !== undefined && typeof item.id !== 'string')
+          || !Array.isArray(item.content) || item.content.length !== 1
+          || !isRecord(item.content[0]) || item.content[0].type !== 'input_text'
+          || Object.keys(item.content[0]).some((key) => key !== 'type' && key !== 'text')) {
+          throw new CodexModelGatewayContractError('gateway_document_widget_guidance_invalid')
+        }
+        documentWidgetGuidance = widgetGuidance.guidance
+        continue
+      }
       recognized = false
       break
     }
@@ -638,9 +682,34 @@ export function currentTurnReadyAdditionalContext(
     resourceReferences: sortReadyResourceReferences([...latest.values()]),
     explicitRetry,
     readyMemory,
+    documentWidgetGuidance,
     currentUserIndex: lastUser,
     readyMemoryIndex,
   }
+}
+
+/**
+ * After an automatic compaction Codex rebuilds the request from its summary and drops the turn's Ready context.
+ * True when anything of that context is still present anywhere in the request: an entry bound to this run, or a retry
+ * or memory entry. Older runs' and legacy resource tags are only history. Unreadable Ready entries count as present.
+ */
+export function hasCurrentTurnReadyContext(input: unknown, readyRunId: string): boolean {
+  if (!Array.isArray(input)) return true
+  return input.some((item) => isRecord(item) && textFromContent(item.content).some((text) => {
+    try {
+      const resources = readyResourceReferencesFromText(text)
+      // Legacy resource tags carry no run and are history only, like other runs' snapshots.
+      if (resources.recognized) return resources.readyRunId === readyRunId
+      if (readyExplicitRetryContextFromText(text).recognized) return true
+      if (readyMemoryContextFromText(text).recognized) return true
+      const guidance = readyDocumentWidgetGuidanceFromText(text)
+      if (guidance.recognized) return guidance.readyRunId === readyRunId
+      return text.startsWith('<external_ready-uncommitted-user-tail:') && text.includes(JSON.stringify(readyRunId))
+    } catch {
+      // silent-catch: per the contract above, an unreadable Ready context entry counts as still present
+      return true
+    }
+  }))
 }
 
 function canonicalReadyResourceReferences(references: readonly unknown[]): JsonObject[] {
@@ -665,6 +734,7 @@ export function digestReadyAdditionalContext(input: {
   resourceReferences: readonly unknown[]
   explicitRetry: unknown | null
   readyMemory?: unknown | null
+  documentWidgetGuidance?: string | null
 }): string {
   if (input.explicitRetry !== null && !isRecord(input.explicitRetry)) {
     throw new CodexModelGatewayContractError('gateway_explicit_retry_context_invalid')
@@ -685,6 +755,7 @@ export function digestReadyAdditionalContext(input: {
     ...references,
     ...(input.explicitRetry === null ? [] : [{ kind: 'explicit_retry', value: input.explicitRetry }]),
     ...(memory === null ? [] : [{ kind: 'ready_memory', value: memory }]),
+    ...(input.documentWidgetGuidance ? [{ kind: 'document_widget_guidance', value: input.documentWidgetGuidance }] : []),
   ])
 }
 

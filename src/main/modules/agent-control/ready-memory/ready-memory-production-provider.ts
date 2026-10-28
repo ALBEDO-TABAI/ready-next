@@ -68,6 +68,10 @@ function providerError(response: Response, body: unknown): string {
   return `ready_memory_provider_${response.status}:${message.slice(0, 500)}`
 }
 
+function snapshotServesRequest(snapshot: CodexUpstreamProfileSnapshot, request: ReadyMemoryProviderRequest): boolean {
+  return snapshot.model === request.model && snapshot.agentProtocol === 'openai'
+}
+
 export class ReadyMemoryProductionProvider implements ReadyMemoryGenerationProvider {
   readonly automaticGenerationAvailable = false
 
@@ -87,7 +91,14 @@ export class ReadyMemoryProductionProvider implements ReadyMemoryGenerationProvi
     request: ReadyMemoryProviderRequest,
     remoteId: string | null,
   ): Promise<ReadyMemoryProviderRecovery> {
-    const snapshot = this.resolveSnapshot(request)
+    const snapshot = this.dependencies.profiles.readSnapshot(
+      request.upstreamProfileSnapshotRef,
+      request.upstreamProfileSnapshotDigest,
+    )
+    // The snapshot is frozen, so a mismatch never heals: retrying would keep the job unknown forever.
+    if (!snapshotServesRequest(snapshot, request)) {
+      return { state: 'failed', remoteId: remoteId || undefined, error: 'ready_memory_provider_profile_mismatch' }
+    }
     if (snapshot.wireApi !== 'responses' || !remoteId) {
       return { state: 'unknown', remoteId: remoteId || undefined }
     }
@@ -97,11 +108,15 @@ export class ReadyMemoryProductionProvider implements ReadyMemoryGenerationProvi
       response = await this.request(`${upstreamEndpoint(snapshot)}/${encodeURIComponent(remoteId)}`,
         snapshot, credential, { method: 'GET' })
     } catch {
+      // silent-catch: a network or timeout failure leaves the remote state unknown so recovery is retried later
       return { state: 'unknown', remoteId }
     }
     if (response.status === 404) return { state: 'not_found', remoteId }
     let body: unknown
-    try { body = await response.json() as unknown } catch { return { state: 'unknown', remoteId } }
+    try { body = await response.json() as unknown } catch {
+      // silent-catch: an unreadable response body leaves the remote state unknown so recovery is retried later
+      return { state: 'unknown', remoteId }
+    }
     if (!response.ok) {
       if (response.status >= 500 || response.status === 408 || response.status === 429) {
         return { state: 'unknown', remoteId }
@@ -114,7 +129,9 @@ export class ReadyMemoryProductionProvider implements ReadyMemoryGenerationProvi
     if (['queued', 'in_progress'].includes(status)) return { state: 'pending', remoteId }
     if (['failed', 'cancelled', 'incomplete'].includes(status)) {
       let partialOutput: string | undefined
-      try { partialOutput = outputText(payload, snapshot.wireApi) } catch { /* digest unavailable */ }
+      try { partialOutput = outputText(payload, snapshot.wireApi) } catch {
+        // silent-catch: partial output of a failed remote response is optional; when unreadable the failed result carries no output digest
+      }
       return {
         state: 'failed', remoteId, error: `ready_memory_provider_${status}`,
         outputText: partialOutput, usage: usage(payload.usage, snapshot.wireApi),
@@ -136,6 +153,7 @@ export class ReadyMemoryProductionProvider implements ReadyMemoryGenerationProvi
         usage: completedUsage,
       }
     } catch {
+      // silent-catch: unparseable completed output or usage is reported to the worker as a failed recovery with ready_memory_provider_output_invalid
       return { state: 'failed', remoteId, error: 'ready_memory_provider_output_invalid' }
     }
   }
@@ -145,9 +163,7 @@ export class ReadyMemoryProductionProvider implements ReadyMemoryGenerationProvi
       request.upstreamProfileSnapshotRef,
       request.upstreamProfileSnapshotDigest,
     )
-    if (snapshot.model !== request.model || snapshot.agentProtocol !== 'openai') {
-      throw new Error('ready_memory_provider_profile_mismatch')
-    }
+    if (!snapshotServesRequest(snapshot, request)) throw new Error('ready_memory_provider_profile_mismatch')
     return snapshot
   }
 

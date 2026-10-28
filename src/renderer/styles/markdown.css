@@ -186,6 +186,10 @@
   text-underline-offset: 2px;
 }
 
+.note-preview-picture-link {
+  display: block;
+}
+
 .note-preview-hero,
 .note-preview-media-block {
   display: flex;

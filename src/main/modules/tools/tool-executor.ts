@@ -255,6 +255,7 @@ function readSettledBrowserWorkflowOutcomes(
       .settledOutcomes
       .map((item) => item.outcome)
   } catch {
+    // silent-catch: an unparseable workflow action journal yields no settled outcomes, so the admission-pinned page ref is kept
     return []
   }
 }
@@ -658,6 +659,7 @@ async function executeToolCallInner(
             env: getSkillsRuntimeManager().getRuntimeEnv({ allowPackaged: true }),
           })
         } catch {
+          // silent-catch: an unresolvable lark-cli executable leaves no authority, so online writes are not auto-delegated and need per-action confirmation
           context.larkCliExecutableAuthority = null
         }
       }
@@ -1170,9 +1172,17 @@ async function executeToolCallInner(
                 const destination = (contract as { destination?: unknown }).destination
                 if (!destination || typeof destination !== 'object' || Array.isArray(destination)) return null
                 const destinationResourceId = (destination as { logicalResourceId?: unknown }).logicalResourceId
+                const destinationPath = (destination as { path?: unknown }).path
                 const maxExpectedOutputs = (contract as { maxExpectedOutputs?: unknown }).maxExpectedOutputs
+                const documentDigest = (envelope as { currentDocumentPathDigest?: unknown }).currentDocumentPathDigest
                 return typeof destinationResourceId === 'string' && Number.isSafeInteger(maxExpectedOutputs)
-                  ? { destinationResourceId, maxExpectedOutputs: Number(maxExpectedOutputs) }
+                  ? {
+                      destinationResourceId,
+                      maxExpectedOutputs: Number(maxExpectedOutputs),
+                      ...(typeof destinationPath === 'string' && typeof documentDigest === 'string'
+                        ? { currentDocumentFile: { destinationPath, pathDigest: documentDigest } }
+                        : {}),
+                    }
                   : null
               })(),
               updateTaskCompletionDeclaration: async (taskId, patch) => {

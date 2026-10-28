@@ -33,6 +33,8 @@ import {
 } from './codex-model-gateway-provider-errors'
 import {
   buildValidatedRequestCapture,
+  codexSessionAffinityHeaders,
+  codexTurnStateHeader,
   durableRequestEvidence,
   expectedKind,
   parseMetadata,
@@ -55,6 +57,7 @@ import type {
   CodexModelGatewayPreparedRequestReceipt,
   CodexModelGatewaySpawnCapability,
   CodexModelGatewayToolResponseCall,
+  CodexModelGatewayUpstreamFailureDiagnostic,
   CodexModelGatewayValidatedRequestCapture,
 } from './codex-model-gateway-types'
 import { randomBytes } from 'node:crypto'
@@ -96,7 +99,9 @@ export class CodexModelGateway {
     headersDeadlineMs?: number
     firstByteDeadlineMs?: number
     eventIdleMs?: number
+    downstreamKeepaliveMs?: number
     onUpstreamAttempt?: (attempt: number) => void
+    onUpstreamFailure?: (diagnostic: CodexModelGatewayUpstreamFailureDiagnostic) => void
     proofSentinel?: string
     proofSentinels?: readonly string[]
     onValidatedRequest?: (capture: CodexModelGatewayValidatedRequestCapture) => void | Promise<void>
@@ -128,6 +133,8 @@ export class CodexModelGateway {
       || this.firstByteDeadlineMs <= 0
       || (this.eventIdleMsOverride !== undefined
         && (!Number.isSafeInteger(this.eventIdleMsOverride) || this.eventIdleMsOverride <= 0))
+      || (deps.downstreamKeepaliveMs !== undefined
+        && (!Number.isSafeInteger(deps.downstreamKeepaliveMs) || deps.downstreamKeepaliveMs <= 0))
     ) {
       throw new CodexModelGatewayError('gateway_configuration_invalid')
     }
@@ -274,6 +281,27 @@ export class CodexModelGateway {
     } | null = null
     let admittedFailureRecorded = false
     let admittedFailureStage: CodexModelGatewayFailureEvidence['failureStage'] = 'connect'
+    let failureTarget: { profileId: string; model: string } | null = null
+    let retriesUsed = 0
+    const reportUpstreamFailure = (
+      metadata: CodexModelGatewayMetadata,
+      failure: Omit<CodexModelGatewayUpstreamFailureDiagnostic,
+        'readyRunId' | 'codexThreadId' | 'codexTurnId' | 'profileId' | 'model' | 'retriesUsed'>,
+    ): void => {
+      if (!failureTarget || !this.deps.onUpstreamFailure) return
+      try {
+        this.deps.onUpstreamFailure({
+          readyRunId: metadata.readyRunId,
+          codexThreadId: metadata.threadId,
+          codexTurnId: metadata.turnId,
+          ...failureTarget,
+          retriesUsed,
+          ...failure,
+        })
+      } catch {
+        // silent-catch: diagnostics never change the request outcome; a throwing onUpstreamFailure observer is ignored
+      }
+    }
     const abortForRequest = () => abortController.abort()
     const abortForResponse = () => { if (!completed) abortController.abort() }
     request.once('aborted', abortForRequest)
@@ -365,6 +393,7 @@ export class CodexModelGateway {
       if (!sealedRequest) throw new CodexModelGatewayError('gateway_request_not_prepared', 409)
       const requestDigest = preparedReceipt.requestDigest
       admittedFailureContext = { metadata, requestDigest }
+      failureTarget = { profileId: binding.snapshot.profileId, model: binding.snapshot.model }
       const allowedTools = binding.forceToolFreeFinalization
         ? new Set<string>()
         : validation.allowedTools
@@ -431,6 +460,13 @@ export class CodexModelGateway {
           failedAt: new Date().toISOString(),
         })
         admittedFailureRecorded = true
+        reportUpstreamFailure(metadata, {
+          causeCode: failureEvidence.causeCode,
+          failureStage: failureEvidence.failureStage,
+          elapsedMs: failureEvidence.elapsedMs,
+          upstreamRequestId: upstreamRequestId,
+          providerError: null,
+        })
       }
       if (
         this.lifecycle !== 'running'
@@ -463,7 +499,12 @@ export class CodexModelGateway {
           }
       let upstreamResponse: Response
       let upstreamResponseBody: ReadableStream<Uint8Array> | null = null
-      let retriesUsed = 0
+      let upstreamRequestId: string | null = null
+      const codexRouting = binding.snapshot.agentProtocol !== 'anthropic' && binding.snapshot.wireApi === 'responses'
+      const turnState = codexRouting ? codexTurnStateHeader(request.headers['x-codex-turn-state']) : null
+      const sessionAffinityHeaders = codexRouting
+        ? { ...codexSessionAffinityHeaders(body), ...(turnState ? { 'x-codex-turn-state': turnState } : {}) }
+        : {}
       while (true) {
         let fetched: Awaited<ReturnType<typeof fetchCodexUpstreamWithRetry>>
         try {
@@ -472,6 +513,7 @@ export class CodexModelGateway {
             headers: {
               'content-type': 'application/json',
               accept: 'text/event-stream',
+              ...sessionAffinityHeaders,
               ...(binding.snapshot.agentProtocol === 'anthropic' ? messagesHeaders(binding.snapshot) : binding.snapshot.extraHeaders),
               [binding.snapshot.authHeader]: `${binding.snapshot.authPrefix}${credential}`,
             },
@@ -535,7 +577,8 @@ export class CodexModelGateway {
       }
       if (!upstreamResponse.ok) {
         const requestId = safeProviderHeader(
-          upstreamResponse.headers.get('x-request-id') || upstreamResponse.headers.get('request-id'),
+          upstreamResponse.headers.get('x-request-id') || upstreamResponse.headers.get('request-id')
+            || upstreamResponse.headers.get('x-oai-request-id'),
           credential,
           'request_id',
         )
@@ -567,16 +610,19 @@ export class CodexModelGateway {
         throw new CodexModelGatewayError('gateway_upstream_not_sse', 502)
       }
       if (!upstreamResponseBody) throw new CodexModelGatewayError('gateway_upstream_body_missing', 502)
-      const upstreamRequestId = safeProviderHeader(
-        upstreamResponse.headers.get('x-request-id') || upstreamResponse.headers.get('request-id'),
+      upstreamRequestId = safeProviderHeader(
+        upstreamResponse.headers.get('x-request-id') || upstreamResponse.headers.get('request-id')
+          || upstreamResponse.headers.get('x-oai-request-id'),
         credential,
         'request_id',
       )
+      const upstreamTurnState = codexRouting ? codexTurnStateHeader(upstreamResponse.headers.get('x-codex-turn-state')) : null
       response.writeHead(200, {
         'content-type': 'text/event-stream',
         'cache-control': 'no-cache',
         connection: 'keep-alive',
         ...(upstreamRequestId ? { 'x-ready-upstream-request-id': upstreamRequestId } : {}),
+        ...(upstreamTurnState ? { 'x-codex-turn-state': upstreamTurnState } : {}),
       })
       const eventIdleMs = resolveCodexGatewayEventIdleMs({
         snapshot: binding.snapshot,
@@ -596,6 +642,7 @@ export class CodexModelGateway {
           maxEvents: this.nativeMaxEvents,
           maxItemBytes: this.nativeMaxItemBytes,
           eventIdleMs,
+          keepaliveMs: this.deps.downstreamKeepaliveMs,
           admitToolResponse,
           recordCompleted,
           recordFailed: (observation) => recordFailed({
@@ -628,6 +675,7 @@ export class CodexModelGateway {
           maxEvents: this.nativeMaxEvents,
           maxItemBytes: this.nativeMaxItemBytes,
           eventIdleMs,
+          keepaliveMs: this.deps.downstreamKeepaliveMs,
           admitToolResponse,
           recordCompleted,
           recordFailed,
@@ -640,19 +688,30 @@ export class CodexModelGateway {
         const code = error instanceof CodexModelGatewayError
           ? error.code
           : 'gateway_request_forward_failed'
+        const failureEvidence = gatewayFailureEvidence({
+          code,
+          stage: admittedFailureStage,
+          responseIdentitySeen: false,
+          partialAssistantItemSeen: false,
+          toolCallItemSeen: false,
+          startedAtMs: forwardStartedAtMs,
+          eventCount: 0,
+          wireByteCount: 0,
+        })
         this.deps.authority.recordResponseFailureEvidence?.({
           ...admittedFailureContext,
-          failureEvidence: gatewayFailureEvidence({
-            code,
-            stage: admittedFailureStage,
-            responseIdentitySeen: false,
-            partialAssistantItemSeen: false,
-            toolCallItemSeen: false,
-            startedAtMs: forwardStartedAtMs,
-            eventCount: 0,
-            wireByteCount: 0,
-          }),
+          failureEvidence,
           failedAt: new Date().toISOString(),
+        })
+        const providerError = error instanceof CodexModelGatewayError
+          && error.responseError.type !== 'gateway_error' ? error.responseError : null
+        reportUpstreamFailure(admittedFailureContext.metadata, {
+          causeCode: failureEvidence.causeCode,
+          failureStage: failureEvidence.failureStage,
+          elapsedMs: failureEvidence.elapsedMs,
+          upstreamRequestId: error instanceof CodexModelGatewayError
+            ? error.responseHeaders['x-ready-upstream-request-id'] ?? null : null,
+          providerError,
         })
       }
       throw error

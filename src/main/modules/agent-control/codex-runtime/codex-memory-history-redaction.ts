@@ -66,6 +66,7 @@ function readyMemoryCall(item: unknown): ReadyMemoryCall {
     try {
       argumentsValid = isRecord(JSON.parse(item.arguments))
     } catch {
+      // silent-catch: unparseable memory search arguments mark the call invalid, so it is redacted rather than preserved
       argumentsValid = false
     }
   }

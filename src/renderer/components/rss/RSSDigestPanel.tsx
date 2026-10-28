@@ -105,13 +105,17 @@ export default function RSSDigestPanel({ active, view, definitions = [], feedSou
       }).catch((error) => { if (live) setError(String(error)) })
     }
     const off = window.electronAPI.rss.onDigestsChanged(refresh), offOrganization = window.electronAPI.rss.onOrganizationChanged(refresh)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the list/read/action tickets are generation counters bumped on deactivate to drop in-flight responses; incrementing their live values is intended
     return () => { live = false; ++listTicket.current; ++readTicket.current; ++actionTicket.current; off(); offOrganization() }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- list is recreated every render; the subscription only ever calls list() for the first page, which reads refs and state setters, so it must not resubscribe on each render
   }, [active])
   useEffect(() => {
     ++actionTicket.current; setBusy(false); setReport(null); setEntries([]); setNext(null); setError(''); setNotice(''); setLeadCover(null)
     if (!active || !selected) return
     void read(selected).catch((e) => setError(String(e)))
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- readTicket is a generation counter bumped on cleanup to drop the in-flight edition read; incrementing its live value is intended
     return () => { ++readTicket.current }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- read is recreated every render; read(selected) for the first page uses only the id, refs and state setters, so the edition reloads only when the selection or activation changes
   }, [selected, active])
   // Like a newspaper rack: opening the view shows the latest issue of the current shelf.
   useEffect(() => {
@@ -119,6 +123,7 @@ export default function RSSDigestPanel({ active, view, definitions = [], feedSou
     const latest = editions.find((edition) => edition.kind === tab) || editions[0]
     if (latest) setDigestView(true, latest.id)
   }, [active, listed, selected, editions, tab, setDigestView])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- follows the edition's kind only when a different edition opens; a refresh of the same report must not override a shelf tab the user picked
   useEffect(() => { if (report) setTab(report.kind) }, [report?.id])
   const action = async (run: () => Promise<void>) => {
     const ticket = ++actionTicket.current; setBusy(true); setError(''); setNotice('')
@@ -174,6 +179,7 @@ export default function RSSDigestPanel({ active, view, definitions = [], feedSou
       if (live && result.success && result.data) setLeadCover({ link: result.data.article.link, coverImage: result.data.article.coverImage })
     }).catch(() => { /* silent-catch: the headline simply shows no image when its article is gone. */ })
     return () => { live = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the headline story's identity; lead is re-derived from entries on every load and its pinned articleRevision belongs to that story, so only a different headline should refetch the cover
   }, [lead?.groupKey, lead?.source.itemId, active])
   const shelf = editions.filter((edition) => edition.kind === tab)
   const months = useMemo(() => {

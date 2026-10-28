@@ -1,4 +1,4 @@
-// node scripts/verify-chat-pasted-image.cjs uses the real Electron image decoder.
+// npm run verify:chat-pasted-image runs this in Electron's main process with the real image decoder.
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { app, nativeImage } from 'electron'

@@ -1,6 +1,6 @@
 # Ready pinned Codex runtime
 
-Verified against the checkout on 2026-09-06: Codex 0.149.0, macOS arm64.
+Verified against the checkout on 2026-10-07: Codex 0.160.1, macOS arm64.
 The manifest and source lock are authoritative; a protocol study of a newer
 version does not upgrade this runtime.
 

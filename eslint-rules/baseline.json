@@ -40,22 +40,6 @@
       "area": "ui-history"
     },
     {
-      "file": "src/__tests__/browser-host-driver-init-contract.test.ts",
-      "rule": "ready/no-source-grep-test",
-      "snippetHash": "c826ba9d7ffeab6c",
-      "line": 8,
-      "snippet": "const controller = readFileSync(new URL('../main/modules/browser-engine/ipc-handler.ts', import.meta.url), 'utf8')",
-      "area": "a1-gate"
-    },
-    {
-      "file": "src/__tests__/browser-host-driver-init-contract.test.ts",
-      "rule": "ready/no-source-grep-test",
-      "snippetHash": "df4b956fca33234e",
-      "line": 9,
-      "snippet": "const layout = readFileSync(new URL('../main/modules/browser-engine/host-layout-service.ts', import.meta.url), 'utf8')",
-      "area": "a1-gate"
-    },
-    {
       "file": "src/__tests__/browser-startup-theme-contract.test.ts",
       "rule": "ready/no-source-grep-test",
       "snippetHash": "d152c0472c4209cb",
@@ -198,14 +182,6 @@
       "line": 7,
       "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
       "area": "ui-history"
-    },
-    {
-      "file": "src/__tests__/chat-input-toolbar-contract.test.ts",
-      "rule": "ready/no-source-grep-test",
-      "snippetHash": "003d59ad2fafed26",
-      "line": 7,
-      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
-      "area": "a1-gate"
     },
     {
       "file": "src/__tests__/chat-panel-collapsed-rail-contract.test.ts",
@@ -550,14 +526,6 @@
       "area": "ui-history"
     },
     {
-      "file": "src/__tests__/orchestrator-persona-resolver.test.ts",
-      "rule": "ready/no-source-grep-test",
-      "snippetHash": "81663883258d529a",
-      "line": 23,
-      "snippet": "const liveSources = readFileSync(resolve(",
-      "area": "a1-gate"
-    },
-    {
       "file": "src/__tests__/panel-fusion-contract.test.ts",
       "rule": "ready/no-source-grep-test",
       "snippetHash": "32d6009759165e91",
@@ -580,14 +548,6 @@
       "line": 7,
       "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
       "area": "ui-history"
-    },
-    {
-      "file": "src/__tests__/runtimeDriver-tool-event-log.test.ts",
-      "rule": "ready/no-source-grep-test",
-      "snippetHash": "7e71a496420376ed",
-      "line": 80,
-      "snippet": "const toolExecutorSource = readFileSync(",
-      "area": "a1-gate"
     },
     {
       "file": "src/__tests__/settings-shell-visual-contract.test.ts",
@@ -656,8 +616,8 @@
     {
       "file": "src/__tests__/ui-contracts/rss-list-row-style-contract.test.ts",
       "rule": "ready/no-source-grep-test",
-      "snippetHash": "ebfde5ac80cefce9",
-      "line": 7,
+      "snippetHash": "f268ac2d67727a1e",
+      "line": 8,
       "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
       "area": "ui-history"
     },
@@ -752,8 +712,8 @@
     {
       "file": "src/__tests__/verbatim-relay.test.ts",
       "rule": "ready/no-source-grep-test",
-      "snippetHash": "6f996ad8447a1d77",
-      "line": 18,
+      "snippetHash": "a288770e33c6273b",
+      "line": 19,
       "snippet": "const liveComposition = readFileSync(resolve(",
       "area": "ui-history"
     },
@@ -768,8 +728,8 @@
     {
       "file": "src/__tests__/workbench-first-row-font-contract.test.ts",
       "rule": "ready/no-source-grep-test",
-      "snippetHash": "2653afda7b79fad2",
-      "line": 7,
+      "snippetHash": "fcafbfc8a7c7705e",
+      "line": 8,
       "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
       "area": "ui-history"
     },

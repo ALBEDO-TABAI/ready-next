@@ -77,4 +77,12 @@ for (const file of walk(path.join(ROOT, 'src/main'))) {
   }
 }
 
+// One host driver: rounded WebContentsView, with no BrowserView path or driver selector left to fall back to.
+const hostController = read('src/main/modules/browser-engine/ipc-handler.ts')
+if (/READY_BROWSER_HOST_DRIVER|browser_host_driver/.test(hostController)) fail('browser host driver selector is back')
+const hostLayout = read('src/main/modules/browser-engine/host-layout-service.ts')
+if (/\bBrowserView\b|addBrowserView|removeBrowserView/.test(hostLayout)) fail('host layout still drives BrowserView')
+if (!hostLayout.includes('new WebContentsView(options)')) fail('host layout does not create WebContentsView hosts')
+if (!hostLayout.includes('view.setBorderRadius(HOST_BORDER_RADIUS)')) fail('host views lost their rounded corners')
+
 console.log('[check-browser-surface-binding] OK')

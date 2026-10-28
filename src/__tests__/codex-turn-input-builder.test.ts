@@ -6,7 +6,12 @@ import {
   textUserInput,
 } from '../main/modules/agent-control/codex-runtime/codex-turn-input-builder'
 import { digestCodexUserInput } from '../main/modules/agent-control/codex-runtime/codex-user-input'
-import { currentTurnReadyAdditionalContext, digestCanonicalJson } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
+import {
+  currentTurnReadyAdditionalContext,
+  digestCanonicalJson,
+  digestReadyAdditionalContext,
+  instructionTranscriptDigest,
+} from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
 import { disabledReadyMemorySnapshot } from './utils/ready-memory-fixture'
 
 const builder = new CodexTurnInputBuilder()
@@ -150,6 +155,44 @@ test('resource snapshots require the exact current run and cannot borrow histori
     [{ ...snapshot(), content: [...snapshot().content, { type: 'input_image', image_url: 'hidden' }] }, user],
     [{ ...snapshot(), content: [{ type: 'input_text', text: `<ready-resource:${resource.logicalResourceId}>${JSON.stringify(resource)}</ready-resource:${resource.logicalResourceId}>` }] }, user],
   ]) assert.throws(() => currentTurnReadyAdditionalContext(items, [], 'run-1'), /gateway_resource_context_invalid/)
+})
+
+test('the widget catalog is current-run context only and never part of the instruction contract', () => {
+  const ingress = {
+    kind: 'user_ingress', attemptKind: 'user_ingress', originUserMessageId: 'message-1',
+    canonicalCurrentInputRef: { messageId: 'message-1', input: [{ type: 'text', text: '换成信息卡', text_elements: [] }] },
+    explicitResourceEnvelope: { input: [], resourceRefs: [] }, resourceAdditionalContext: [], ...ordinaryTailContract,
+  }
+  const withCatalog = builder.build(ingress, { ...context, documentWidgetGuidance: '## Ready 文档组件' })
+  const withoutCatalog = builder.build(ingress, context)
+  assert.ok(withCatalog.ok && withoutCatalog.ok)
+  assert.deepEqual(JSON.parse(String(withCatalog.params.additionalContext['ready-document-widget-guidance']?.value)), {
+    contract: 'ready_document_widget_guidance_v1', readyRunId: 'run-1', guidance: '## Ready 文档组件',
+  })
+  assert.equal('ready-document-widget-guidance' in withoutCatalog.params.additionalContext, false)
+
+  const catalog = (readyRunId = 'run-1', extra: Record<string, unknown> = {}) => ({
+    type: 'message', role: 'developer', content: [{ type: 'input_text',
+      text: `<ready-document-widget-guidance>${JSON.stringify({
+        contract: 'ready_document_widget_guidance_v1', readyRunId, guidance: '## Ready 文档组件', ...extra,
+      })}</ready-document-widget-guidance>` }],
+  })
+  const user = { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'question' }] }
+  const answer = { type: 'message', role: 'assistant', content: [] }
+  assert.equal(currentTurnReadyAdditionalContext([catalog(), user], [], 'run-1').documentWidgetGuidance, '## Ready 文档组件')
+  assert.equal(currentTurnReadyAdditionalContext([catalog('older-run'), user, answer, user], [], 'run-1').documentWidgetGuidance, null,
+    'an earlier turn\'s catalog is history, not this turn\'s context')
+  assert.equal(
+    digestReadyAdditionalContext({ resourceReferences: [], explicitRetry: null, documentWidgetGuidance: '## Ready 文档组件' }) === digestReadyAdditionalContext({ resourceReferences: [], explicitRetry: null }),
+    false,
+  )
+  assert.equal(instructionTranscriptDigest('base', [catalog('older-run'), user, answer, catalog(), user]), instructionTranscriptDigest('base', [user, answer, user]))
+  for (const items of [
+    [catalog('older-run'), user],
+    [catalog(), catalog(), user],
+    [catalog('run-1', { injected: true }), user],
+    [{ ...catalog(), role: 'user' }, user],
+  ]) assert.throws(() => currentTurnReadyAdditionalContext(items, [], 'run-1'), /gateway_document_widget_guidance_invalid/)
 })
 
 test('user ingress rejects every successor cross-field and resource body extension', () => {

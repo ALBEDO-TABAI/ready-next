@@ -6,6 +6,7 @@ import {
   CodexProductRunPreparer,
   preparedCodexProductRunMatchesIngress,
 } from '../main/modules/agent-control/codex-runtime/codex-product-run-preparer'
+import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
 import { textUserInput } from '../main/modules/agent-control/codex-runtime/codex-turn-input-builder'
 import { createCodexToolFixture } from './utils/codex-tool-fixture'
 import { disabledReadyMemorySnapshot } from './utils/ready-memory-fixture'
@@ -163,6 +164,7 @@ function createHarness(overrides: Partial<{
   rawPrepareResult: unknown
   validateDispatchContext: (value: unknown) => boolean
   prepareFactory: () => unknown
+  releaseError: Error
 }> = {}) {
   const calls: string[] = []
   const emittedEvents: IngressAdmittedEvent[] = []
@@ -279,6 +281,7 @@ function createHarness(overrides: Partial<{
       },
       releaseReservationAfterIngressFailure: async () => {
         calls.push('release-reservation')
+        if (overrides.releaseError) throw overrides.releaseError
       },
       releaseReservationAfterPrePersistenceRejection: async () => {
         calls.push('release-pre-persistence-reservation')
@@ -674,6 +677,33 @@ test('malformed reservation port results fail closed and enter reconciliation', 
       'reconcile-reservation-contract-failure',
     ])
   }
+})
+
+test('a reservation release that throws keeps the ingress failure and is reported, not lost', async () => {
+  const harness = createHarness({
+    persistError: new IngressPersistenceError(
+      'ingress_message_persist_failed',
+      'ingress-failure-digest',
+      'message transaction failed',
+    ),
+    releaseError: new Error('reservation_set_not_found'),
+  })
+  const metrics: AgentMetricEvent[] = []
+  __setMetricSinkForTests((event) => metrics.push(event))
+  let result: Awaited<ReturnType<typeof harness.send>>
+  try {
+    result = await harness.send()
+  } finally {
+    __setMetricSinkForTests(null)
+  }
+  assert.equal(result.success, false)
+  assert.equal(result.disposition, 'ingress_persistence_failed')
+  assert.deepEqual(metrics.map(({ metric, scopeId, stage, reason }) => ({ metric, scopeId, stage, reason })), [{
+    metric: 'codex_start_reservation_release_failed',
+    scopeId: 'scope-1',
+    stage: 'ingress_persistence_failed',
+    reason: 'reservation_set_not_found',
+  }])
 })
 
 test('atomic ingress failure releases the full reservation and preserves the composer', async () => {

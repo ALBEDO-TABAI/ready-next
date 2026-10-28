@@ -195,7 +195,7 @@ const DocumentBookStage = forwardRef<BookStageHandle, DocumentBookStageProps>(fu
     try {
       event.currentTarget.setPointerCapture(event.pointerId)
     } catch {
-      // 合成指针（探针/自动化）无活跃捕获目标；真实指针不会走到这里
+      // silent-catch: 合成指针（探针/自动化）无活跃捕获目标；真实指针不会走到这里
     }
     dragRef.current = {
       pointerId: event.pointerId,

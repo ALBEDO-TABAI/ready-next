@@ -222,6 +222,31 @@ test('an HTTP 200 login form is not stored or returned as article body', async (
   } finally { await service.stop(); db.close() }
 })
 
+test('a Xiaohongshu note that links to its author profile keeps its own title instead of the profile page', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'RSS Xiaohongshu profile link')) return
+  const { db, rss, content, sourceId } = fixture()
+  const link = (id: string, path: string) => rss.upsertRSSItems([{
+    id, source_id: sourceId, guid: id, title: id, link: `https://www.xiaohongshu.com${path}`, summary: `${id} source summary`,
+  }])
+  link('profile-note', '/user/profile/5e31b693000000000100bb06')
+  link('real-note', '/explore/65a123456789012345678901')
+  let fetches = 0
+  const service = new RSSContentService({
+    content,
+    fetchHtml: async (url) => { fetches++; return { finalUrl: url, html: '<article><p>note body</p></article>' } },
+    extractor: { extract: async () => ({ title: 'Note', contentMarkdown: '笔记正文'.repeat(80), metadata: {}, structuredData: [], metaLookup: {}, diagnostics: { confidence: 0.85, extractionSource: 'readability', warnings: [] } }) },
+  })
+  try {
+    const profile = await service.load('profile-note')
+    assert.equal(fetches, 0, 'the profile page is never saved as the note body')
+    assert.equal(profile.body.status, 'failed')
+    assert.match(profile.body.error ?? '', /只提供笔记的标题和封面/)
+    assert.equal(content.readArticle({ itemId: 'profile-note' }).text, 'profile-note source summary')
+    assert.equal((await service.load('real-note')).body.status, 'ready')
+    assert.equal(fetches, 1)
+  } finally { await service.stop(); db.close() }
+})
+
 test('authentication follows the main content boundary, not document length or a sidebar form', async (t) => {
   if (skipIfSqliteUnavailable(t, 'RSS primary authentication boundary')) return
   const { db, content, put } = fixture()

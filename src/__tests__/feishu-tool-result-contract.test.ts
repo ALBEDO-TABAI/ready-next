@@ -82,6 +82,19 @@ test('exact Feishu authority rejects channel replacement and content-version dri
   assert.equal(drifted.data?.errorKind, FEISHU_TOOL_ERROR_KINDS.authorityMismatch.code)
 })
 
+test('an unreadable channel list fails closed as sidecar unavailable, not as a channel change', async () => {
+  let dispatchCount = 0
+  const context = readContext(async () => {
+    dispatchCount += 1
+    return READ_RESULT
+  }, READ_AUTHORITY)
+  context.sidecarManager!.listChannels = async () => { throw new Error('sidecar not running') }
+  const output = await executeFeishuTool('feishu_doc_read', READ_ARGS, context)
+  assert.equal(output.data?.ok, false)
+  assert.equal(output.data?.errorKind, FEISHU_TOOL_ERROR_KINDS.sidecarUnavailable.code)
+  assert.equal(dispatchCount, 0)
+})
+
 test('feishu_doc_read classifies sidecar and thrown failures without turning them into success', async (t) => {
   const fixtures: Array<{
     name: string

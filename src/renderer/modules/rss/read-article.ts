@@ -22,9 +22,11 @@ export async function readSavedRSSArticle(api: ArticleReaderAPI, itemId: string,
 }
 
 /**
- * Bodies saved before platform extraction and reader table handling: a script-rendered page's state literal,
- * or a page table kept as HTML block. Both read as source text in the reader, which never renders page HTML.
+ * Bodies saved before platform extraction, reader table handling and block-link handling: a script-rendered
+ * page's state literal, a page table kept as HTML block, or a link around a whole card split across blocks
+ * (`[![photo](src)` on one line, `## Title](href)` on the next). All read as source text in the reader.
  */
 export function isOutdatedRSSExtraction(markdown: string): boolean {
   return /^window\.__(?:SSR__|INITIAL_STATE__)\b/m.test(markdown) || /^<table\b[^>]*>/m.test(markdown)
+    || /^#{1,6} [^[\n]*\]\(/m.test(markdown) || /^\s*\[!\[[^\]\n]*\]\([^)\s]*\)\s*$/m.test(markdown)
 }

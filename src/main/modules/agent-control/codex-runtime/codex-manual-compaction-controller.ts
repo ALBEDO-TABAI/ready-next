@@ -8,7 +8,7 @@ import type { CodexModelGatewayRepository } from './codex-model-gateway-authorit
 import { digestCanonicalJson } from './codex-model-gateway-contract'
 import type { CodexProvisionalInboundBuffer } from './codex-provisional-inbound-buffer'
 import type { CodexSidecarSession } from './codex-sidecar-session'
-import type { ReadyAliasIdentity } from './ready-codex-lifecycle-adapter'
+import { ReadyCodexLifecyclePortError, type ReadyAliasIdentity } from './ready-codex-lifecycle-adapter'
 import type { CodexThread, CodexTurn } from './codex-native-runtime'
 
 type ManualOperation = {
@@ -19,6 +19,7 @@ type ManualOperation = {
   session: CodexSidecarSession
   inboundBuffer: CodexProvisionalInboundBuffer
   upstreamProfileSnapshotDigest: string
+  preDispatchTurnIds: string[]
 }
 
 function isManualRecoveryCancellation(error: unknown): boolean {
@@ -54,6 +55,8 @@ export class CodexManualCompactionController {
     repository: CodexBindingRepository
     gatewayRepository: CodexModelGatewayRepository
     getSession: () => CodexSidecarSession | null
+    /** Compaction needs the thread loaded in this runtime process; resume it the way product turns do. */
+    ensureThreadLoaded: (identity: ReadyAliasIdentity) => Promise<void>
     ownerMainBootId: string
     timeoutMs: number
     now: () => string
@@ -96,6 +99,13 @@ export class CodexManualCompactionController {
     if (preDispatchRead.thread.id !== route.codexThreadId) {
       throw new Error('manual_compaction_pre_dispatch_thread_mismatch')
     }
+    // Nothing happened since the last compaction. Codex re-adds the thread's instructions only at the start of a
+    // regular turn, so a second compaction now would summarize an empty history without them.
+    const latestTurn = preDispatchRead.thread.turns.at(-1)
+    if (latestTurn?.status === 'completed' && latestTurn.items.length > 0
+      && latestTurn.items.every((item) => item.type === 'contextCompaction')) {
+      throw new ReadyCodexLifecyclePortError('no_active_operation')
+    }
     const preDispatchTurnIds = preDispatchRead.thread.turns.map((turn) => turn.id)
     const connectionEpoch = session.getActiveConnectionEpoch()
     const inboundBuffer = session.getInboundBuffer()
@@ -131,8 +141,58 @@ export class CodexManualCompactionController {
       session,
       inboundBuffer,
       upstreamProfileSnapshotDigest: route.upstreamProfileSnapshotDigest,
+      preDispatchTurnIds,
     })
     return { manualCompactionId, threadId: binding.codexThreadId }
+  }
+
+  /**
+   * Codex rejected the dispatch. When two readbacks show the thread exactly as before dispatch, nothing started:
+   * settle the request, drop its inbound owner and release the fence. Returns false when that cannot be proven.
+   */
+  async settleRejected(input: {
+    identity: ReadyAliasIdentity
+    manualCompactionId: string
+  }): Promise<boolean> {
+    const operation = this.requireOperation(input)
+    const provenAbsent = await this.proveRejectedDispatchAbsent(
+      operation.session,
+      operation.threadId,
+      operation.preDispatchTurnIds,
+      (value) => value,
+    )
+    if (!provenAbsent) return false
+    operation.inboundBuffer.discardRejectedManualCompaction({
+      manualCompactionId: input.manualCompactionId,
+      connectionEpoch: operation.connectionEpoch,
+    })
+    this.deps.repository.settleRejectedManualCompaction({
+      manualCompactionId: input.manualCompactionId,
+      settledAt: this.deps.now(),
+    })
+    this.operations.delete(input.manualCompactionId)
+    return true
+  }
+
+  private async proveRejectedDispatchAbsent(
+    session: CodexSidecarSession,
+    threadId: string,
+    preDispatchTurnIds: readonly string[],
+    guard: <T>(value: Promise<T>) => Promise<T>,
+  ): Promise<boolean> {
+    const wait = this.deps.wait ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)))
+    for (let index = 0; index < 2; index += 1) {
+      if (index > 0) await guard(wait(25))
+      const read = await guard(session.getClient().threadRead({ threadId, includeTurns: true }))
+      if (
+        read.thread.id !== threadId
+        || read.thread.turns.length !== preDispatchTurnIds.length
+        || read.thread.turns.some((turn, order) => (
+          turn.id !== preDispatchTurnIds[order] || turn.status === 'inProgress'
+        ))
+      ) return false
+    }
+    return true
   }
 
   async awaitCompletion(input: {
@@ -254,6 +314,25 @@ export class CodexManualCompactionController {
       }
       return 'settled'
     }
+    if (recovery.latestAttempt?.responseKind === 'rejected' && !recovery.codexCompactionTurnId) {
+      // Codex answered with an error, so the request reached it and was refused; prove nothing started instead of
+      // treating the written request as possibly running.
+      const provenAbsent = await this.proveRejectedDispatchAbsent(
+        session,
+        recovery.codexThreadId,
+        recovery.preDispatchTurnIds,
+        (value) => this.awaitRecoveryActive(value),
+      )
+      if (provenAbsent) {
+        this.deps.repository.settleRejectedManualCompaction({
+          manualCompactionId: recovery.manualCompactionId,
+          settledAt: this.deps.now(),
+        })
+      } else if (!recovery.unknownAt) {
+        this.markRecoveryUnknown(recovery, 'rejected_dispatch_unproven')
+      }
+      return 'settled'
+    }
     if (recovery.unknownAt) return 'settled'
     if (recovery.codexCompactionTurnId) {
       try {
@@ -267,6 +346,7 @@ export class CodexManualCompactionController {
             try {
               await this.observeClaimedTurn(recovery, session)
             } catch (error) {
+              // silent-catch: cancellation ends observation; any other readback failure is recorded via markRecoveryUnknown
               if (isManualRecoveryCancellation(error)) return
               this.markRecoveryUnknown(
                 recovery,
@@ -336,8 +416,10 @@ export class CodexManualCompactionController {
       session,
       inboundBuffer,
       upstreamProfileSnapshotDigest: recovery.upstreamProfileSnapshotDigest,
+      preDispatchTurnIds: recovery.preDispatchTurnIds,
     })
     try {
+      await this.awaitRecoveryActive(this.deps.ensureThreadLoaded(identity))
       await this.awaitRecoveryActive(
         session.getClient().threadCompactStart({ threadId: recovery.codexThreadId }),
       )

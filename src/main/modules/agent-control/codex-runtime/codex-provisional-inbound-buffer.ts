@@ -606,6 +606,7 @@ export class CodexProvisionalInboundBuffer implements CodexInboundFramePort {
       try {
         this.commitPendingQuarantine(quarantine)
       } catch (error) {
+        // silent-catch: collect the failure so every quarantine still commits; all failures are rethrown as an AggregateError below
         failures.push(error)
       }
     }
@@ -614,6 +615,7 @@ export class CodexProvisionalInboundBuffer implements CodexInboundFramePort {
       try {
         this.markUnknown(owner, 'connection_closed_before_binding', { quarantineDurable: false })
       } catch (error) {
+        // silent-catch: collect the failure so every unbound owner is still marked unknown; all failures are rethrown as an AggregateError below
         failures.push(error)
       }
     }
@@ -648,6 +650,26 @@ export class CodexProvisionalInboundBuffer implements CodexInboundFramePort {
       )
     }
     return expired
+  }
+
+  /**
+   * Codex rejected the compaction request and readback proved no turn started, so nothing will ever arrive for it.
+   * Drop the owner now; letting it reach its deadline would fail the whole connection.
+   */
+  discardRejectedManualCompaction(input: { manualCompactionId: string; connectionEpoch: string }): void {
+    const owner = this.turns.get(input.manualCompactionId)
+    if (!owner) return
+    if (
+      owner.identityMode !== 'manual_compaction'
+      || owner.connectionEpoch !== input.connectionEpoch
+      || owner.state !== 'provisional'
+      || owner.frames.length !== 0
+      || owner.observedNativeTurnId !== null
+      || owner.candidateNativeTurnIds.size !== 0
+      || owner.pendingReconciliation !== null
+    ) throw new CodexProvisionalInboundBufferError('manual_compaction_owner_not_discardable')
+    this.clearDeadline(owner)
+    this.turns.delete(owner.bindingId)
   }
 
   readManualCompactionEvidence(manualCompactionId: string): {
@@ -964,6 +986,7 @@ export class CodexProvisionalInboundBuffer implements CodexInboundFramePort {
           )
         }
       } catch (error) {
+        // silent-catch: a deadline-check failure is forwarded to the release port as a protocol failure
         this.releasePort?.failProtocol(
           error instanceof Error ? error : new CodexProvisionalInboundBufferError('deadline_failure'),
         )

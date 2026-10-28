@@ -644,6 +644,35 @@ test('manual compaction evidence is retired after exact terminal consumption', a
   assert.equal(executions(), 0)
 })
 
+// 2026-10-07: Codex rejected a compaction; its owner waited out the deadline and failed the whole connection.
+test('a rejected manual compaction owner is discarded and its deadline never fails the connection', async () => {
+  const { buffer, events, setNow } = harness()
+  buffer.registerProvisionalManualCompaction({
+    manualCompactionId: 'manual-rejected', connectionEpoch: 'epoch-1',
+    threadId: 'thread-native-1', deadlineAtMs: 1_000,
+  })
+  assert.throws(() => buffer.discardRejectedManualCompaction({
+    manualCompactionId: 'manual-rejected', connectionEpoch: 'epoch-other',
+  }), /manual_compaction_owner_not_discardable/)
+  buffer.discardRejectedManualCompaction({ manualCompactionId: 'manual-rejected', connectionEpoch: 'epoch-1' })
+  setNow(5_000)
+  assert.equal(buffer.expireDue(), 0)
+  assert.deepEqual(events, [])
+
+  buffer.registerProvisionalManualCompaction({
+    manualCompactionId: 'manual-started', connectionEpoch: 'epoch-1',
+    threadId: 'thread-native-1', deadlineAtMs: 9_000,
+  })
+  const started: CodexNativeNotification = {
+    method: 'turn/started',
+    params: { threadId: 'thread-native-1', turn: turn('compact-turn-1') },
+  }
+  await buffer.routeNotification({ connectionEpoch: 'epoch-1', frame: started, notification: started })
+  assert.throws(() => buffer.discardRejectedManualCompaction({
+    manualCompactionId: 'manual-started', connectionEpoch: 'epoch-1',
+  }), /manual_compaction_owner_not_discardable/, 'a compaction that produced frames did start')
+})
+
 test('active owner capacity fails closed without evicting retained identities', () => {
   const { buffer } = harness({ maxOwners: 2 })
   buffer.registerProvisionalThread({

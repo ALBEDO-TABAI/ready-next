@@ -3,6 +3,7 @@ import type {
   CodexNativeRuntime,
   CodexThreadForkParams,
   CodexThreadListParams,
+  CodexThreadResumeParams,
   CodexThreadStartParams,
   CodexTurnStartParams,
 } from './codex-native-runtime'
@@ -21,7 +22,10 @@ export class StableNativeRuntime implements CodexNativeRuntime {
       for (const listener of [...this.listeners]) {
         try {
           void Promise.resolve(listener(notification)).catch(() => undefined)
-        } catch { /* observers do not own the native connection */ }
+        } catch {
+          // silent-catch: a throwing observer must not break fan-out to the other listeners on the native connection
+          /* observers do not own the native connection */
+        }
       }
     })
   }
@@ -44,7 +48,7 @@ export class StableNativeRuntime implements CodexNativeRuntime {
     return this.current().threadFork(params, bindingId)
   }
   threadList(params: CodexThreadListParams) { return this.current().threadList(params) }
-  threadResume(params: { threadId: string }) { return this.current().threadResume(params) }
+  threadResume(params: CodexThreadResumeParams) { return this.current().threadResume(params) }
   threadArchive(params: { threadId: string }) { return this.current().threadArchive(params) }
   turnStart(params: CodexTurnStartParams) { return this.current().turnStart(params) }
   turnInterrupt(params: { threadId: string; turnId: string }) { return this.current().turnInterrupt(params) }

@@ -302,7 +302,7 @@ test('Codex product task facts distinguish real Tag Forge execution from advisor
 
 test('production task facts are derived from the frozen final tool authorization', () => {
   // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: this pins the cross-boundary wiring between final tool admission and task closeout facts
-  const source = readFileSync(new URL('../main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts', import.meta.url), 'utf8')
+  const source = readFileSync(new URL('../main/modules/agent-control/codex-runtime/composition/ingress-prepare.ts', import.meta.url), 'utf8')
   assert.match(source, /const selectedSkill = toolSnapshot\.readyTurnToolAuthorization\.skillAuthorization[\s\S]*?const productTaskInput = \{[\s\S]*?completionProfile: selectedNativeSkill!\.completionProfile,[\s\S]*?hasBrowserToolSurface:[\s\S]*?const productTaskFacts = resolveCodexProductTaskFacts\(productTaskInput\)/)
   assert.doesNotMatch(source, /const productTaskFacts = resolveCodexProductTaskFacts\(\{\s*skillAuthorization: authorization,/)
 })

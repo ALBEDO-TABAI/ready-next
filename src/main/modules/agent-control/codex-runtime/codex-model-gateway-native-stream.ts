@@ -1,5 +1,5 @@
 /** Deliver validated Responses events incrementally; admit tool results only after a valid terminal. */
-import { CodexModelGatewayError, isRecord, type JsonObject } from './codex-model-gateway-common'
+import { CodexModelGatewayError, createCodexDownstream, isRecord, type JsonObject } from './codex-model-gateway-common'
 import {
   type CodexModelGatewayFailureEvidence,
   type CodexModelGatewayResponseEvidence,
@@ -69,6 +69,7 @@ export async function streamNativeResponses(input: {
   maxEvents: number
   maxItemBytes: number
   eventIdleMs: number
+  keepaliveMs?: number
   admitToolResponse: (calls: readonly CodexModelGatewayToolResponseCall[]) => Promise<void>
   recordCompleted: (evidence: CodexModelGatewayResponseEvidence) => Promise<void>
   recordFailed: (evidence: CodexModelGatewayFailureEvidence) => void
@@ -77,6 +78,7 @@ export async function streamNativeResponses(input: {
   const startedAtMs = Date.now()
   const decoder = new TextDecoder('utf-8', { fatal: true })
   const reader = input.body.getReader()
+  const downstream = createCodexDownstream((chunk) => input.response.write(chunk), input.keepaliveMs)
   const deltaFilters = new Map<string, {
     filter: ProviderCredentialFilter
     eventType: string
@@ -123,7 +125,7 @@ export async function streamNativeResponses(input: {
   }
   const writeSafePayload = (payload: JsonObject): void => {
     if (holdFromFunctionCall) appendHeldFunctionPayload(payload)
-    else input.response.write(encodeSafePayload(payload))
+    else downstream.write(encodeSafePayload(payload))
   }
   const deltaFamily = (eventType: string): string | null => {
     if (eventType === 'response.function_call_arguments.delta') return 'arguments'
@@ -297,6 +299,7 @@ export async function streamNativeResponses(input: {
         await reader.cancel().catch(() => undefined)
         break
       }
+      downstream.upstreamProgressed()
     }
     if (!state.terminal) {
       try {
@@ -328,7 +331,7 @@ export async function streamNativeResponses(input: {
         eventCount: snapshot.structuralEvents,
         wireByteCount: snapshot.wireBytes,
       }))
-      input.response.write(terminalEvent)
+      downstream.write(terminalEvent)
       return
     }
     flushDeltaFilters(() => true)
@@ -363,10 +366,10 @@ export async function streamNativeResponses(input: {
       }))),
       usageDigest: digestCanonicalJson(terminalPayload.response.usage),
     })
-    for (const safePayload of heldFunctionTail) input.response.write(encodeSafePayload(safePayload))
+    for (const safePayload of heldFunctionTail) downstream.write(encodeSafePayload(safePayload))
     heldFunctionTail.length = 0
     holdFromFunctionCall = false
-    input.response.write(terminalEvent)
+    downstream.write(terminalEvent)
   } catch (error) {
     input.abort()
     await reader.cancel().catch(() => undefined)
@@ -388,7 +391,7 @@ export async function streamNativeResponses(input: {
       wireByteCount: snapshot.wireBytes,
     }))
     const responseId = state.responseId || `resp_ready_${randomBytes(16).toString('hex')}`
-    input.response.write(`event: response.failed\ndata: ${JSON.stringify({
+    downstream.write(`event: response.failed\ndata: ${JSON.stringify({
       type: 'response.failed',
       sequence_number: 0,
       response: {

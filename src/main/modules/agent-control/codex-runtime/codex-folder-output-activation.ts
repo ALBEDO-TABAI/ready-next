@@ -55,6 +55,7 @@ function outputContractState(ingressJson: string | null): {
       directoryCount,
     }
   } catch {
+    // silent-catch: unparseable ingress JSON reads as no output contract and no directory authorities
     return { destinationResourceId: null, directoryCount: 0 }
   }
 }
@@ -95,16 +96,24 @@ export function readCodexFolderOutputActivation(
     result_json: string
     attempt_id: string
   }>(readyRunId)
-  if (rows.length === 0) return { kind: 'pending' }
-  const first = rows[0]
-  let result: unknown
-  try {
-    result = JSON.parse(first.result_json)
-  } catch {
-    return { kind: 'pending' }
+  // The first accepted declaration freezes the turn's folder promise; a rejected one promised nothing.
+  let first: (typeof rows)[number] | null = null
+  let result: Record<string, unknown> & { data: Record<string, unknown> } | null = null
+  for (const row of rows) {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(row.result_json)
+    } catch {
+      // silent-catch: an unparseable declaration result is not an accepted declaration, so the scan moves to the next one
+      continue
+    }
+    if (!record(parsed) || !record(parsed.data) || parsed.data.ok !== true
+      || parsed.data.destinationResourceId !== destinationResourceId) continue
+    first = row
+    result = parsed as Record<string, unknown> & { data: Record<string, unknown> }
+    break
   }
-  if (!record(result) || !record(result.data)
-    || result.data.destinationResourceId !== destinationResourceId) return { kind: 'pending' }
+  if (!first || !result) return { kind: 'pending' }
   const intent = result.data.folderOutputIntent
   const base = {
     destinationResourceId,

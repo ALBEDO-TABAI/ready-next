@@ -1,3 +1,4 @@
+import { codexDocumentWidgetGuidance } from './codex-document-widget-guidance'
 import type {
   CodexBindingRecoveryMember,
   CodexBindingRepository,
@@ -14,6 +15,7 @@ import { digestCanonicalJson } from './codex-model-gateway-contract'
 import type { CodexNativeModelSettings } from './codex-model-gateway-contract'
 import type { CodexAutomaticCompactionEvidence } from './codex-automatic-compaction-evidence'
 import { sameCodexThreadDirectory } from './codex-thread-directory-identity'
+import { logAgentMetric } from '../metrics'
 
 const DEFAULT_POLL_INTERVAL_MS = 250
 
@@ -57,6 +59,26 @@ export class CodexRunLocalRecoveryError extends Error {
   }
 }
 
+/**
+ * Publication found that a completed turn did not do what it declared or was asked to: a declared file was not
+ * saved and exported, a required product action never ran, or a current-document answer has no read of the
+ * document. The engine has ended and its effects are settled, so nothing more can arrive; the turn closes as
+ * not delivered instead of waiting for receipts that will never come.
+ */
+const UNDELIVERED_TURN_CODES = new Set([
+  'codex_tool_publication_incomplete:artifact_staged_receipt_missing',
+  'codex_tool_publication_incomplete:artifact_export_receipt_missing',
+  'codex_tool_publication_incomplete:folder_output_intent_receipt_missing',
+  'codex_tool_publication_incomplete:action_obligation_missing',
+  'codex_tool_publication_incomplete:current_document_read_required',
+  'codex_tool_publication_incomplete:current_document_read_receipt_missing',
+])
+
+export function undeliveredCodexTurnCode(error: unknown): string | null {
+  const code = error instanceof Error ? error.message : String(error)
+  return UNDELIVERED_TURN_CODES.has(code) ? code : null
+}
+
 export type CodexProductRecoveryFailureClassification =
   | { kind: 'run_local'; code: string }
   | { kind: 'transient'; code: string }
@@ -76,10 +98,12 @@ export function classifyCodexProductRecoveryFailure(
     || code === 'codex_browser_workflow_research_incomplete'
     || code === 'codex_browser_workflow_projection_missing'
     || isRunLocalAutomaticCompactionError(code)
+    || UNDELIVERED_TURN_CODES.has(code)
   ) return { kind: 'run_local', code }
   if (
     code === 'codex_product_closeout_in_flight'
     || code === 'codex_product_closeout_already_committed'
+    || code === 'codex_terminal_readback_runtime_stopped'
     || code === 'codex_browser_workflow_action_in_flight'
     || code.startsWith('codex_tool_publication_incomplete:')
     || code.startsWith('codex_tool_publication_indeterminate:')
@@ -102,6 +126,7 @@ export async function routeCodexBootRecoveryFailure(input: {
     await input.settleRunLocal(classification.code)
     return 'run_local_settled'
   } catch (error) {
+    // silent-catch: a run-local settlement failure escalates to the global recovery failure path
     input.failGlobal(stableRecoveryCode(error, 'product_recovery_settlement_failed'))
     return 'global_failed'
   }
@@ -146,7 +171,7 @@ export function buildCodexProductReadbackCandidate(input: {
   turn: CodexTurn
   recovery: string
   sourceCandidate?: CoreTurnCandidate
-  automaticCompactionEvidence?: CodexAutomaticCompactionEvidence | null
+  automaticCompactionEvidence?: readonly CodexAutomaticCompactionEvidence[]
 }): CoreTurnCandidate {
   const source = input.sourceCandidate
   return input.collector.buildReadbackCandidate({
@@ -166,9 +191,7 @@ export function buildCodexProductReadbackCandidate(input: {
       ...(source?.contextState || {
         resourceAnchorDigest: input.product.prepared.resourceAnchorDigest,
       }),
-      automaticCompactionExchanges: input.automaticCompactionEvidence
-        ? [input.automaticCompactionEvidence]
-        : [],
+      automaticCompactionExchanges: [...(input.automaticCompactionEvidence || [])],
     },
     providerDiagnostics: {
       ...(source?.providerDiagnostics || {
@@ -212,6 +235,8 @@ export class CodexProductBootRecovery {
     finishActiveProductRun: (product: CodexProductTurnRuntimeRead) => void
     ownerMainBootId: string
     resolveDeveloperInstructions: (product: CodexProductTurnRuntimeRead) => string
+    /** A thread's frozen instructions from its digest; forks re-declare them so a compacted prefix keeps them. */
+    resolveThreadDeveloperInstructions: (instructionContractDigest: string) => string
     resolveNativeModelSettings: (
       product: CodexProductTurnRuntimeRead,
     ) => CodexNativeModelSettings
@@ -219,7 +244,7 @@ export class CodexProductBootRecovery {
       product: CodexProductTurnRuntimeRead
       thread: CodexThread
       turn: CodexTurn
-    }) => CodexAutomaticCompactionEvidence | null
+    }) => CodexAutomaticCompactionEvidence[]
     nowMs?: () => number
     wait?: (ms: number) => Promise<void>
     pollIntervalMs?: number
@@ -325,6 +350,7 @@ export class CodexProductBootRecovery {
             turnContractDigest: product.turnContractDigest,
             upstreamProfileSnapshotDigest: product.upstreamProfileSnapshotDigest,
             readyMemorySnapshot: product.prepared.readyMemorySnapshot,
+            documentWidgetGuidance: codexDocumentWidgetGuidance(product.prepared),
           })
           if (!turnInput.ok) {
             throw runLocalRecoveryError(`codex_recovered_turn_input_${turnInput.code}`)
@@ -366,6 +392,7 @@ export class CodexProductBootRecovery {
         modelProvider: 'ready_gateway',
         approvalPolicy: 'never',
         sandbox: 'read-only',
+        developerInstructions: this.deps.resolveThreadDeveloperInstructions(fork.instructionContractDigest),
       }, fork.targetThreadBindingId))
       const confirmed = this.deps.repository.readNativeForkMaterialization(input.member.bindingId)
       if (confirmed?.materializationState !== 'confirmed') return 'pending'
@@ -467,6 +494,7 @@ export class CodexProductBootRecovery {
           settleFirstAttempt('completed')
           return
         } catch (error) {
+          // silent-catch: cancellation ends the job, non-transient failures go to onRecoveryFailure, transient ones retry after a poll
           if (isRecoveryLifecycleCancellation(error)) {
             settleFirstAttempt('completed')
             return
@@ -488,6 +516,7 @@ export class CodexProductBootRecovery {
           try {
             await this.awaitActive(wait(this.deps.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS))
           } catch (waitError) {
+            // silent-catch: cancellation during the poll wait ends the job quietly; any other wait failure goes to onRecoveryFailure
             if (!isRecoveryLifecycleCancellation(waitError)) {
               await this.deps.onRecoveryFailure(readyRunId, waitError)
             }
@@ -531,11 +560,8 @@ export class CodexProductBootRecovery {
         threadId: lifecycleAction.codexThreadId,
         turnId: lifecycleAction.codexTurnId,
       }))
-      this.deps.repository.acknowledgeProductInterrupt({
-        readyRunId: product.readyRunId,
-        acknowledgedAt: new Date((this.deps.nowMs || Date.now)()).toISOString(),
-      })
     } catch {
+      // silent-catch: an interrupt failure is resolved by re-reading the native turn; a still-running turn is durably marked interrupt-unknown
       turn = await this.readExactTurn(product)
       if (turn.status === 'inProgress') {
         this.deps.repository.markProductInterruptUnknown({
@@ -543,6 +569,20 @@ export class CodexProductBootRecovery {
           unknownAt: new Date((this.deps.nowMs || Date.now)()).toISOString(),
         })
       }
+      return turn
+    }
+    try {
+      this.deps.repository.acknowledgeProductInterrupt({
+        readyRunId: product.readyRunId,
+        acknowledgedAt: new Date((this.deps.nowMs || Date.now)()).toISOString(),
+      })
+    } catch (error) {
+      // The interrupt was delivered and the run still closes from its native terminal; only the acknowledgement is
+      // missing, which must not be mistaken for an undelivered interrupt.
+      logAgentMetric('codex_boot_interrupt_ack_failed', {
+        readyRunId: product.readyRunId,
+        reason: error instanceof Error ? error.message : String(error),
+      })
     }
     return turn
   }
@@ -580,14 +620,14 @@ export class CodexProductBootRecovery {
     }
     const readback = await this.readExactTurnReadback(product)
     if (readback.turn.status === 'inProgress') return
-    let automaticCompactionEvidence: CodexAutomaticCompactionEvidence | null = null
+    let automaticCompactionEvidence: CodexAutomaticCompactionEvidence[] = []
     if (!this.deps.repository.readProductLifecycleAction(product.readyRunId)) {
       try {
         automaticCompactionEvidence = this.deps.verifyAutomaticCompaction?.({
           product,
           thread: readback.thread,
           turn: readback.turn,
-        }) || null
+        }) || []
       } catch (error) {
         const code = stableRecoveryCode(error, 'codex_product_recovery_verifier_rejected')
         if (!isRunLocalAutomaticCompactionError(code)) throw error

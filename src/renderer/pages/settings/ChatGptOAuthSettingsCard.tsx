@@ -55,6 +55,7 @@ export function ChatGptOAuthSettingsCard({
     }
     void poll()
     const timer = window.setInterval(() => { void poll() }, 1000)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- readVersion is a request counter, not a DOM node; cleanup bumps its latest value so in-flight status reads are dropped after unmount
     return () => { mounted.current = false; ++readVersion.current; window.clearInterval(timer) }
   }, [refresh])
 

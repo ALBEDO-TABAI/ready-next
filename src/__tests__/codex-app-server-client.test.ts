@@ -442,8 +442,19 @@ test('exact method validators reject unknown parameters before any child byte', 
       modelProvider: 'ready_gateway',
       approvalPolicy: 'never',
       sandbox: 'read-only',
-      developerInstructions: 'forbidden',
+      developerInstructions: 'Ready instructions',
+      baseInstructions: 'forbidden',
     } as never),
+    () => client.threadFork({
+      threadId: 'thread-1',
+      lastTurnId: 'turn-accepted',
+      cwd: '/tmp/ready-thread-child',
+      model: 'ready-e0-model',
+      modelProvider: 'ready_gateway',
+      approvalPolicy: 'never',
+      sandbox: 'read-only',
+    } as never),
+    () => client.threadResume({ threadId: 'thread-1', developerInstructions: '' } as never),
     () => client.threadArchive({ threadId: 'thread-1', force: true } as never),
     () => client.threadCompactStart({ threadId: 'thread-1', baseInstructions: 'override' } as never),
     () => client.turnInterrupt({ threadId: 'thread-1', turnId: 'turn-1', reason: 'override' } as never),
@@ -504,6 +515,8 @@ test('thread fork exposes only the inherited-safe allowlist and validates effect
     modelProvider: 'ready_gateway' as const,
     approvalPolicy: 'never' as const,
     sandbox: 'read-only' as const,
+    // 2026-10-07: a fork of a compacted thread loses the instructions unless the request carries them.
+    developerInstructions: 'Ready thread instructions',
   }
   const forking = input.client.threadFork(params, 'fork-binding-1')
   await waitFor(() => input.transport.writes.length === 1)
@@ -605,7 +618,7 @@ test('server diagnostics distinguishes available, unsupported, and malformed res
   ))
 })
 
-test('pinned 0.149.0 notifications close exactly as 10 projected, 9 passive, 1 reroute, and 55 opted out', () => {
+test('pinned 0.160.1 notifications close exactly as 10 projected, 9 passive, 1 reroute, and 63 opted out', () => {
   const schema = JSON.parse(readFileSync(resolve(
     'assets/codex-runtime/schemas/stable/codex_app_server_protocol.v2.schemas.json',
   ), 'utf8')) as {
@@ -627,10 +640,10 @@ test('pinned 0.149.0 notifications close exactly as 10 projected, 9 passive, 1 r
 
   assert.equal(CODEX_PROJECTED_NOTIFICATION_METHODS.length, 10)
   assert.equal(CODEX_PASSIVE_NOTIFICATION_METHODS.length, 9)
-  assert.equal(CODEX_OPT_OUT_NOTIFICATION_METHODS.length, 55)
-  assert.equal(pinnedMethods.length, 75)
-  assert.equal(new Set(pinnedMethods).size, 75)
-  assert.equal(new Set(classifiedMethods).size, 75)
+  assert.equal(CODEX_OPT_OUT_NOTIFICATION_METHODS.length, 63)
+  assert.equal(pinnedMethods.length, 83)
+  assert.equal(new Set(pinnedMethods).size, 83)
+  assert.equal(new Set(classifiedMethods).size, 83)
   assert.deepEqual([...classifiedMethods].sort(), [...pinnedMethods].sort())
 })
 

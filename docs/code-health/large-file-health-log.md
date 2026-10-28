@@ -1,6 +1,6 @@
 # 代码行数健康度台账
 
-> 更新时间：2026-10-04
+> 更新时间：2026-10-09
 
 这份台账记录“任务给代码文件增加行数后，文件总行数已超过 1000 行”的健康度评估。它不是按行数自动要求拆分，而是把真正影响维护、验证和协作的风险持续留下来。
 
@@ -21,6 +21,56 @@
 
 | 评估日期 | 任务 | 文件 | 总行数 | 本次新增 | 结论 | 判断与后续动作 | 状态 |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
+| 2026-10-09 | 复核并修复门禁清理中发现的可疑问题 | `src/main/modules/agent-control/codex-runtime/ready-codex-lifecycle-adapter.ts` 1693、`composition/candidate-closeout.ts` 1042；`src/__tests__/codex-product-boot-recovery.test.ts` 1941、`src/__tests__/ready-codex-lifecycle-adapter.test.ts` 2387 | 见文件列 | +7 / +5 / +约 60 / +约 27 | 一般 | 生产文件只加失败指标与“运行时已停止则不再写中断请求”的守卫，候选收尾仍在边界测试上限（1050）内；两个测试文件各补一例回归。职责未变，沿用原复查目标。 | 已排期：2026-11-09 |
+| 2026-10-09 | 门禁清理（silent-catch 理由、hook 依赖说明） | `src/renderer/components/document/BoardEditor.tsx` / `src/renderer/stores/useAgent.ts` / `src/renderer/components/layout/FileTree.tsx` | 1685 / 2479 / 1955 | +2 / +1 / +1 | 危险 | 只加注释（hook 依赖省略的原因、空 catch 的理由）；FileTree 另把从不重赋值的定时器 Map 在 effect 开头取出，行为不变。三者原有的多职责问题未变，仍需各自的拆分合同。 | 待独立拆分合同；交付时提醒 |
+| 2026-10-09 | 门禁清理（silent-catch 理由、hook 依赖说明） | `codex-app-server-client.ts` 1568、`ready-codex-lifecycle-adapter.ts` 1686、`codex-provisional-inbound-buffer.ts` 1097、`composition/candidate-closeout.ts` 1037、`composition/ingress-prepare.ts` 1009、`ready-memory/ready-memory-generation.ts` 1017、`runtime-core/agent-sdk-tool-executor.ts` 1246、`runtime-core/runtime.ts` 1936、`tools-runtime/tool-registry.ts` 1585（以上在 `src/main/modules/agent-control/`）；`src/main/modules/tools/browser-input-actions.ts` 1538、`src/main/modules/tools/tool-executor.ts` 1500；`src/renderer/components/agent/ChatPanel.tsx` 1401、`src/renderer/pages/modes/DocumentMode.tsx` 1099 | 见文件列 | 每个 +1～+10，均为注释 | 一般 | 只补空 catch 的 `silent-catch:` 理由或 hook 依赖说明，没有新增职责，原结论不变；两个组合文件仍在边界测试上限内（1050 / 1025）。`ready-memory-generation`、`agent-sdk-tool-executor`、`browser-input-actions`、`DocumentMode` 的原复查日期已过且本轮未做复查，统一顺延。 | 已排期：2026-11-09 |
+| 2026-10-08 | Codex runtime 两个大文件拆分 | `src/main/modules/agent-control/codex-runtime/codex-binding-repository.ts` 与 `binding-repository/*.ts` | 634（门面）/ 模块最大 913 | 门面净 −10185 | 健康 | 门面只做一行委托，SQL 与事务按职责落在 22 个分层模块（准入、交付、恢复、压缩、收尾、进程租约等），每个都少于 1000 行；`codex-runtime-module-boundaries.test.ts`（接入 `verify:codex-runtime-e1`）强制层级无环、无 this/class、行数上限与拆分前公开方法快照。 | 危险已解除 |
+| 2026-10-08 | Codex runtime 两个大文件拆分 | `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts` 与 `composition/*.ts` | 190（入口）/ 模块最大 833（不含下两行） | 入口净 −5466 | 健康 | 入口只创建共享状态 `CodexCompositionLive` 并按依赖顺序接线；收尾、生命周期、续接判定、动作面、入场端口与启动各为显式依赖的工厂。边界测试禁止工厂之间运行时互相导入、在 live 之外保留可变状态，并限制行数。 | 危险已解除 |
+| 2026-10-08 | Codex runtime 两个大文件拆分 | `src/main/modules/agent-control/codex-runtime/composition/candidate-closeout.ts` | 1036 | 新文件（整体迁入） | 一般 | 只含收尾函数 `closeCandidateOwned`（995 行）与依赖声明，主职责单一但函数过长；边界测试把上限钉在 1050 行。复查目标：按读回、发布屏障、终态写入拆函数内部（属行为改动，需另立合同）。 | 已排期：2026-11-07 |
+| 2026-10-08 | Codex runtime 两个大文件拆分 | `src/main/modules/agent-control/codex-runtime/composition/ingress-prepare.ts` | 1008 | 新文件（整体迁入） | 一般 | 只含入场准备函数 `prepareIngress`（951 行）与依赖声明；边界测试把上限钉在 1025 行。复查目标：按资源与工具面冻结、续接判定、请求组装拆函数内部（需另立合同）。 | 已排期：2026-11-07 |
+| 2026-10-07 | Codex 0.160.1 采用与旧对话续接 | `src/__tests__/codex-model-gateway-sidecar.e2e.ts` | 1536 | 本轮净 +1 | 一般 | 只把自动压缩证据参数改为请求工具摘要（`codexRequestToolsDigest`）。按场景拆文件的复查保持 2026-11-06。 | 已排期：2026-11-06 |
+| 2026-10-07 | Codex 0.160.1 采用与旧对话续接 | `src/main/modules/agent-control/codex-runtime/codex-binding-repository.ts` | 10819 | 本轮净 +84 | 危险 | 新增有效指令合同推导、过期映射的构造期拒绝，以及网关读取按线程冻结工具面推导请求工具摘要（`requestToolsDigest`）。大仓库仍混合准入、交付、恢复与压缩职责；续接合同读取、有效合同/请求工具推导可与压缩记录、栅栏一起作为第一批拆出。 | 后续拆分；交付时提醒 |
+| 2026-10-07 | Codex 0.160.1 采用与旧对话续接 | `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts` | 5656 | 本轮净 +5 | 危险 | 只把当前指令合同摘要交给仓库；组合根仍混合准入、历史、恢复与收口。 | 后续拆分；交付时提醒 |
+| 2026-10-07 | Codex 0.160.1 采用与旧对话续接 | `src/__tests__/codex-binding-repository-native.test.ts` | 9316 | 本轮净 +81 | 一般 | 复用压缩夹具补旧谱系映射、无映射、其他谱系与过期映射一例。按 continuity / recovery / action-surface 拆套件的复查保持 2026-11-06。 | 已排期：2026-11-06 |
+| 2026-10-07 | Codex 0.160.1 采用与旧对话续接 | `src/__tests__/codex-model-gateway-adversarial.test.ts` | 3669 | 本轮净 +36 | 一般 | 把请求元数据夹具同步为 0.160.1 精确形状，按 0.160.1 事实改写分叉元数据用例，并补“请求工具对推导值、元数据对谱系身份”一例。按请求校验与流处理分套件的复查保持 2026-11-06。 | 已排期：2026-11-06 |
+| 2026-10-07 | Codex 0.160.1 采用与旧对话续接 | `src/__tests__/codex-model-gateway-contract.test.ts` | 1306 | 本轮净 +4 | 一般 | 只把请求元数据夹具同步为 0.160.1 精确形状，过期令牌用例的压缩请求去掉 model。2026-11-05 复查按网关协议拆分保持。 | 已排期：2026-11-05 |
+| 2026-10-07 | Codex 0.160.1 采用与旧对话续接 | `src/__tests__/codex-model-gateway-retry.test.ts` | 1279 | 本轮净 +2 | 一般 | 只把请求元数据夹具同步为 0.160.1 精确形状；原 2026-10-02 复查逾期，2026-11-07 复查请求合同与传输重试测试边界。 | 已排期：2026-11-07 |
+| 2026-10-07 | Codex 0.160.1 采用与旧对话续接 | `src/__tests__/ready-codex-lifecycle-adapter.test.ts` | 2360 | 本轮净 +2 | 一般 | 只把手动压缩条目身份断言改为 0.160.1 的同一 id。2026-11-07 复查按动作分组。 | 已排期：2026-11-07 |
+| 2026-10-07 | Codex 0.160.1 采用与旧对话续接 | `src/__tests__/codex-browser-verifier-closeout-native.test.ts` | 1801 | 本轮净 +5 | 一般 | 只把资源回读夹具改为 0.160.1 的逐项回读。按历史与复核职责拆分的复查保持 2026-10-29。 | 已排期：2026-10-29 |
+| 2026-10-07 | Codex 0.160.1 采用与旧对话续接 | `scripts/run-history-continuation-installed-proof.mjs` | 1731 | 本轮净 +87 | 一般 | 来源表与普查按清单逐项；副本只读打开（无 `-wal` 时 immutable）并大小写无关地改写路径；只放行已被拒绝且记为 unknown 的停住压缩并要求首启结算；仅因旧版 Ready 工具定义而需新上下文的对话走恢复验证。原 2026-10-05 复查逾期，2026-11-07 复查资料准备与普查逻辑能否下沉到 `scripts/codex-runtime/`。 | 已排期：2026-11-07 |
+| 2026-10-07 | Codex 0.160.1 采用与旧对话续接 | `src/__tests__/codex-sidecar-crash-recovery.e2e.ts` | 1399 | 本轮净 +24 | 一般 | 准入补续接候选、仓库绑定已校验清单与续接目录（此前自 10-06 起在准入处失败，掩盖了后续恢复验证）。2026-11-01 复查保持。 | 已排期：2026-11-01 |
+| 2026-10-07 | Codex 0.160.1 采用与旧对话续接 | `src/__tests__/codex-sidecar-process-lease.e2e.ts` | 1370 | 本轮净 +29 | 一般 | 同上补准入候选与仓库合同，并把中断与自动压缩的断言同步到现行 seam 与证据列表。2026-11-01 复查保持。 | 已排期：2026-11-01 |
+| 2026-10-07 | 手动压缩与线程加载 | `src/main/modules/agent-control/codex-runtime/codex-binding-repository.ts` | 10735 | 本轮净 +68 | 危险 | 新增被拒压缩的结算事务，读取接口暴露线程指令摘要；大仓库仍混合准入、交付、恢复与压缩职责，压缩记录与栅栏可作为第一块拆出。 | 后续拆分；交付时提醒 |
+| 2026-10-07 | 手动压缩与线程加载 | `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts` | 5651 | 本轮净 +21 | 危险 | 只接线程指令复原函数、压缩控制器的恢复依赖与分叉/启动恢复的指令参数；逻辑在适配器、控制器与仓库。组合根仍混合准入、历史、恢复与收口。 | 后续拆分；交付时提醒 |
+| 2026-10-07 | 手动压缩与线程加载 | `src/main/modules/agent-control/codex-runtime/ready-codex-lifecycle-adapter.ts` | 1680 | 本轮净 +53 | 一般 | 把产品回合的带核验恢复抽成共享方法供压缩复用，并接被拒结算；原 2026-10-02 复查逾期，改为 2026-11-07 复查 stop/close/reset/compact 是否按动作拆分。 | 已排期：2026-11-07 |
+| 2026-10-07 | 手动压缩与线程加载 | `src/main/modules/agent-control/codex-runtime/codex-app-server-client.ts` | 1558 | 本轮净 +15 | 一般 | 只放宽 resume/fork 的指令参数并新增类型化拒绝判定；原复查逾期，2026-11-07 复查请求校验与通知解析拆分。 | 已排期：2026-11-07 |
+| 2026-10-07 | 手动压缩与线程加载 | `src/main/modules/agent-control/codex-runtime/codex-provisional-inbound-buffer.ts` | 1094 | 本轮净 +20 | 一般 | 只新增被拒压缩所有者的撤销入口；仍是单一的身份缓冲职责。原复查逾期，2026-11-07 复查。 | 已排期：2026-11-07 |
+| 2026-10-07 | 手动压缩与线程加载 | `src/__tests__/codex-model-gateway-sidecar.e2e.ts` | 1535 | 本轮净 +114 | 一般 | 在同一真实二进制会话里补重启、被拒、恢复与重派场景，复用 sidecar 与网关启动开销。2026-11-06 复查按场景拆文件。 | 已排期：2026-11-06 |
+| 2026-10-07 | 手动压缩与线程加载 | `src/__tests__/codex-binding-repository-native.test.ts` | 9235 | 本轮净 +94 | 一般 | 复用压缩夹具补被拒结算一例。按 continuity / recovery / action-surface 拆套件的复查保持 2026-11-06。 | 已排期：2026-11-06 |
+| 2026-10-07 | 手动压缩与线程加载 | `src/__tests__/ready-codex-lifecycle-adapter.test.ts` | 2358 | 本轮净 +76 | 一般 | 补压缩前恢复、被拒结算与无新内容用例。原复查逾期，2026-11-07 复查按动作分组。 | 已排期：2026-11-07 |
+| 2026-10-07 | 手动压缩与线程加载 | `src/__tests__/codex-app-server-client.test.ts` | 1671 | 本轮净 +13 | 一般 | 只同步 resume/fork 指令参数的允许与拒绝。原复查逾期，2026-11-07 复查请求/通知/fork 分套件。 | 已排期：2026-11-07 |
+| 2026-10-06 | 回合内压缩与手动压缩入口 | `src/main/modules/tools/skills-tools.ts` | 3051 | 净 +7 | 危险 | 只给回合内的 `skill_compact_context` 返回“压缩在回合之间执行”的说明；技能工具注册与多种 primitive 执行仍混合，后续按 artifact / shell / detached 分离。 | 后续拆分；交付时提醒 |
+| 2026-10-06 | 回合内压缩与手动压缩入口 | `src/renderer/components/agent/ChatPanel.tsx` | 1395 | 净 +30 | 一般 | 只在发送入口前接“单独发送 context-compact 即执行压缩”，判定放在 `modules/agent/standaloneCompaction.ts`。面板仍集中发送、重试、生命周期与会话召回处理；2026-11-06 复查是否把发送/重试/压缩处理收进 `chat-panel/` 下的独立 hook。 | 已排期：2026-11-06 |
+| 2026-10-06 | 回合内压缩与手动压缩入口 | `src/__tests__/codex-model-gateway-adversarial.test.ts` | 3633 | 净 +85 | 一般 | 新增回合内压缩分类与压缩后上下文放行两组用例，沿用既有网关夹具。按请求校验与流处理分套件的复查保持 2026-11-06。 | 已排期：2026-11-06 |
+| 2026-10-06 | 回合内压缩与手动压缩入口 | `src/__tests__/codex-model-gateway-sidecar.e2e.ts` | 1421 | 净 +109 | 一般 | 在同一真实二进制会话里补回合内两次压缩场景，复用 sidecar 与网关启动开销。2026-11-06 复查是否把各场景的假上游分支抽到场景表。 | 已排期：2026-11-06 |
+| 2026-10-06 | 回合内压缩与手动压缩入口 | `src/__tests__/codex-browser-verifier-closeout-native.test.ts` | 1796 | 净 +2 | 一般 | 只把压缩请求夹具补成真实形状（末尾压缩提示）并改为证据列表断言。按历史与复核职责拆分的复查保持 2026-10-29。 | 已排期：2026-10-29 |
+| 2026-10-06 | 当前文档连续上下文 | `src/main/modules/agent-control/codex-runtime/codex-binding-repository.ts` | 10667 | 净 +4 | 危险 | 只让收尾读取义务跳过仅因聚焦可用的轮次；大仓库仍混合准入、交付与恢复职责，后续单独拆分。 | 后续拆分；交付时提醒 |
+| 2026-10-06 | 当前文档连续上下文 | `src/__tests__/codex-binding-repository-native.test.ts` | 9141 | 净 +25 | 一般 | 只在既有收尾用例旁补“仅可用不欠读取”一例与夹具选项。按 continuity / recovery / action-surface 拆套件的复查顺延到 2026-11-06。 | 已排期：2026-11-06 |
+| 2026-10-06 | 当前文档全链路复查 | `src/main/modules/tools/tool-executor.ts` | 1498 | 净 +8 | 一般 | 只把目标目录路径与可写当前文档摘要传给声明工具；多域分发仍在此，沿 2026-11-01 复查。 | 已排期：2026-11-01 |
+| 2026-10-06 | 当前文档全链路复查 | `src/renderer/modules/agent/messageComposer.ts` | 1075 | 净 +7 | 一般 | 只让聚焦文档自己的标签按文件引用发送；沿 2026-11-01 复查职责边界。 | 已排期：2026-11-01 |
+| 2026-10-06 | Codex 组件目录送达 | `src/shared/document-widget-openui.ts` | 1201 | 净 +6 | 一般 | 只让拒绝信息带出已批准组件名与该组件 props 结构；schema、目录与编译仍三合一，沿 2026-11-04 复查拆分。 | 已排期：2026-11-04 |
+| 2026-10-06 | Codex 组件目录送达 | `src/__tests__/codex-model-gateway-adversarial.test.ts` | 3548 | 净 +3 | 一般 | 只同步当前轮上下文结果的新增字段。按请求校验与流处理分套件的复查顺延到 2026-11-06。 | 已排期：2026-11-06 |
+| 2026-10-06 | 候选技能原语执行复核同源 | `src/main/modules/agent-control/tools-runtime/tool-registry.ts` | 1584 | 净 +2 | 一般 | 只把候选原语的定义来源改为与线程冻结面同源；注册、分组与回退仍集中在此文件。2026-11-06 复查注册密度。 | 已排期：2026-11-06 |
+| 2026-10-06 | 候选技能原语执行复核同源 | `src/__tests__/codex-tool-bridge.test.ts` | 1841 | 净 +33 | 一般 | 只补真实注册表下候选原语执行复核回归。2026-11-06 复查按 tool result / interaction fence / 执行复核拆套件。 | 已排期：2026-11-06 |
+| 2026-10-06 | 确认覆盖与未交付续接 | `src/main/modules/tools/skills-tools.ts` | 3044 | 净 +4 | 危险 | 只把已确认的 `overwrite` 传给 Materializer 并广播目录变化；技能工具注册与多种 primitive 执行仍混合，后续按 artifact / shell / detached 分离。 | 后续拆分；交付时提醒 |
+| 2026-10-05 | 停止与收尾更顺 | `src/__tests__/codex-product-boot-recovery.test.ts` | 1800 | 净 +20 | 一般 | 只在既有分类用例里补未交付缺口的分类与路由断言。2026-11-05 复查是否按分类/启动恢复/实时收尾拆分。 | 已排期：2026-11-05 |
+| 2026-10-05 | RSS 一键翻译与正文图片位置 | `src/main/modules/rss-engine/ipc-handler.ts` | 1255 | 净 +2 | 一般 | 只把翻译服务接入正文 IPC 分组并在启动时创建；翻译逻辑在 `translation-service.ts`、IPC 在 `ipc/content-group.ts`。2026-11-01 复查职责边界和分组（沿用既有排期）。 | 已排期：2026-11-01 |
+| 2026-10-05 | RSS 一键翻译与正文图片位置 | `src/main/modules/migrations.ts` | 4504 | 净 +2 | 健康 | 只按顺序登记 132 迁移；迁移体在 `translation-schema.ts`，迁移链与备份测试覆盖。 | 无需处理 |
+| 2026-10-05 | RSS 一键翻译与正文图片位置 | `src/preload/index.ts` | 1590 | 净 +9 | 一般 | 只加翻译三条调用与进度事件的透传；2026-11-01 复查按域声明（沿用既有排期）。 | 已排期：2026-11-01 |
+| 2026-10-05 | RSS 一键翻译与正文图片位置 | `src/renderer/types/electron.d.ts` | 3562 | 净 +4 | 健康 | 单一跨进程声明，类型检查覆盖。 | 无需处理 |
+| 2026-10-05 | RSS 小红书刷新与图集链接 | `src/renderer/styles/markdown.css` | 1414 | 净 +4 | 健康 | 只加图片链接的块级显示一条规则；仍是单一 Markdown 呈现样式表，级联层 gate、阅读页渲染测试与隔离 Electron 截图覆盖。 | 无需处理 |
+| 2026-10-05 | Codex 瞬时失败续接、流中断续接与缓存路由 | `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts` | 5632 | 净 +19 | 危险 | 第一轮接失败诊断回调与历史保留；第二轮只把命中的续接 seam 传给失败文案；第三轮把未交付缺口接到既有的引擎终态失败收尾（判定在 `codex-product-boot-recovery.ts`，文案在 `codex-product-turn-presentation.ts`）；第四轮只让未交付收尾不再强制分叉并把模型回答交给文案；第五轮把当前文档激活判定移到 `resolveCurrentDocumentActivation`（净 -4 行）；之后只在准入摘要与开轮上下文各接一行组件目录（目录在 `codex-document-widget-guidance.ts`）；连续上下文一轮把冻结标记传给准备器（可用性判定在 `resolveCurrentDocumentActivation`）。判定在 `codex-terminal-facts.ts`、保活在 `codex-model-gateway-common.ts`。组合根仍混合准入、历史、恢复与收口，沿既定边界拆分。 | 后续拆分；交付提醒 |
+| 2026-10-05 | Codex 瞬时失败续接与上游会话亲和 | `src/__tests__/codex-model-gateway-contract.test.ts` | 1302 | 净 +31 | 一般 | 只在既有原生 Responses、Chat 与重试用例里补会话亲和头、turn-state 双向与失败诊断断言；保活场景另放 `codex-model-gateway-keepalive.test.ts`。2026-11-05 复查按网关协议（Responses / Chat / 重试）拆分。 | 已排期：2026-11-05 |
 | 2026-10-04 | 文档预览与信息卡视觉统一 | `src/shared/document-widget-openui.ts` | 1195 | 净 +67 | 一般 | 20 个 OpenUI 组件改用共享构图（chassis）后各编译函数更短，但新增分段切换、点阵进度与数值列对齐的局部工具；文件仍是 schema、目录与编译三合一。2026-11-04 复查是否把 componentSchemas 与 catalog 元数据拆出、编译函数留守。 | 已排期：2026-11-04 |
 | 2026-10-02 | RSS 合并修正与界面重整 | `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts` | 5613 | 净 +16 | 危险 | 只接入工作区 RSS 引用的重绑定/丢弃与旧会话工具面判断，逻辑放在 `codex-rss-resources.ts`；组合根仍混合准入、历史、恢复与收口，沿既定边界拆分。 | 后续拆分；交付提醒 |
 | 2026-10-02 | RSS 合并修正与界面重整 | `src/preload/index.ts` | 1566 | 净 +1 | 一般 | 仅增加未决整理批量重跑的透传；2026-11-01 复查按域声明。 | 已排期：2026-11-01 |

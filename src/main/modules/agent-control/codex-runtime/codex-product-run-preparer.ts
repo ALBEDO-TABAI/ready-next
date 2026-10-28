@@ -133,6 +133,8 @@ export type PreparedCodexProductRun = {
   rssReferences?: RSSReferenceResource[]
   resourceAuthorities?: PreparedCodexResourceAuthority[]
   outputContract?: CodexOutputContract
+  /** The current document was available without the user pointing at it: no read is owed before answering. */
+  currentDocumentAmbient?: true
   browserPageRef?: NonNullable<TrustedRequestEnvironment['browserPageRef']>
   productSurfaceTargets?: {
     rssItemId?: string | null
@@ -168,6 +170,7 @@ export type CodexProductRunPreparationInput = {
   resourceAdditionalContext: ResourceVersionReference[]
   trustedWorkbenchMode: 'browser' | 'document' | 'rss' | 'calendar'
   currentDocumentAnchor?: CodexCurrentDocumentAnchor | null
+  currentDocumentAmbient?: true
   uncommittedUserTail?: UserIngress['uncommittedUserTail']
   actionAdmissionRef?: UserIngress['actionAdmissionRef']
   uncommittedTailAssignments: NonNullable<UserIngress['uncommittedTailAssignments']>
@@ -268,6 +271,7 @@ const readyToolSurfaceSchema = z.custom<ReadyToolSurface>((value) => {
     assertReadyToolSurface(value as ReadyToolSurface)
     return true
   } catch {
+    // silent-catch: an assertion failure means the value is not a ReadyToolSurface; zod reports it as a schema issue
     return false
   }
 })
@@ -276,6 +280,7 @@ const readyTurnToolAuthorizationSchema = z.custom<ReadyTurnToolAuthorization>((v
     assertReadyTurnToolAuthorization(value as ReadyTurnToolAuthorization)
     return true
   } catch {
+    // silent-catch: an assertion failure means the value is not a ReadyTurnToolAuthorization; zod reports it as a schema issue
     return false
   }
 })
@@ -284,6 +289,7 @@ const readyMemorySnapshotSchema = z.custom<ReadyMemorySnapshot>((value) => {
     assertReadyMemorySnapshot(value)
     return true
   } catch {
+    // silent-catch: an assertion failure means the value is not a ReadyMemorySnapshot; zod reports it as a schema issue
     return false
   }
 })
@@ -292,6 +298,7 @@ const preparedExternalReadSliceSchema = z.custom<PreparedCodexExternalReadSlice>
     assertPreparedCodexExternalReadSlice(value)
     return true
   } catch {
+    // silent-catch: an assertion failure means the value is not a PreparedCodexExternalReadSlice; zod reports it as a schema issue
     return false
   }
 })
@@ -407,6 +414,7 @@ const preparationInputSchema = z.object({
   resourceAdditionalContext: z.array(resourceRefSchema),
   trustedWorkbenchMode: z.enum(['browser', 'document', 'rss', 'calendar']),
   currentDocumentAnchor: codexCurrentDocumentAnchorSchema.nullable().optional(),
+  currentDocumentAmbient: z.literal(true).optional(),
   uncommittedUserTail: userIngressPreparationSchema.shape.uncommittedUserTail,
   actionAdmissionRef: userIngressPreparationSchema.shape.actionAdmissionRef,
   uncommittedTailAssignments: userIngressPreparationSchema.shape.uncommittedTailAssignments,
@@ -490,6 +498,7 @@ const preparedRunSchema = z.object({
   rssReferences: z.array(RSSReferenceResourceSchema).optional(),
   resourceAuthorities: z.array(preparedCodexResourceAuthoritySchema).optional(),
   outputContract: outputContractSchema.optional(),
+  currentDocumentAmbient: z.literal(true).optional(),
   browserPageRef: browserPageRefSchema.optional(),
   productSurfaceTargets: z.object({
     rssItemId: z.string().nullable().optional(),
@@ -973,6 +982,7 @@ export class CodexProductRunPreparer {
         ...(resourceAuthorities.length > 0 ? { resourceAuthorities } : {}),
         ...(rssReferences.length > 0 ? { rssReferences } : {}),
         ...(outputContract ? { outputContract } : {}),
+        ...(currentDocumentAnchor && input.currentDocumentAmbient ? { currentDocumentAmbient: true as const } : {}),
         ...(input.browserPageRef ? { browserPageRef: input.browserPageRef } : {}),
         ...(input.productSurfaceTargets ? { productSurfaceTargets: input.productSurfaceTargets } : {}),
         actionObligations,

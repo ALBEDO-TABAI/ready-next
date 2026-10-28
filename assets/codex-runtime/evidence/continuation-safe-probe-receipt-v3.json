@@ -1,0 +1,81 @@
+{
+  "contract": "codex_0_149_failed_turn_continuity_probe_v3",
+  "runtimeVersion": "0.149.0",
+  "binarySha256": "f4a74117b8142cda581c95ff753abf4508b5636d89682c1ed77e4a9249af8963",
+  "runtimeManifestDigest": "22816589f287db132fdc4e3a57b674878795fb75891d765d598b3c94e381bc79",
+  "stableV2SchemaDigest": "38483e82eb7170aaa49861a9690734f1201249ae8207d84e3300c7a1c06412e1",
+  "seams": {
+    "failed_user_only_no_suffix_v1": {
+      "seam": "one_user_item_no_assistant_tool_or_compaction_suffix",
+      "failedUserRetention": "prior_user_exact_once",
+      "wires": [
+        "semantic_400",
+        "usage_limit_429",
+        "transient"
+      ]
+    },
+    "failed_after_completed_rounds_v1": {
+      "seam": "user_item_then_completed_commentary_and_tool_rounds_then_transient_failure",
+      "failedTurnRetention": "user_commentary_and_tool_rounds_exact_once",
+      "nativeReadbackOmitsDynamicToolCalls": true,
+      "wires": [
+        "transient"
+      ]
+    }
+  },
+  "probeTransport": "isolated_local_responses_fixture",
+  "probeTest": "src/__tests__/codex-failed-turn-continuity.e2e.ts",
+  "wire": {
+    "failureClass": "provider",
+    "failureStage": "headers",
+    "causeCode": "gateway_upstream_http_400",
+    "responseIdentitySeen": false,
+    "partialAssistantItemSeen": false,
+    "toolCallItemSeen": false,
+    "eventCount": 0,
+    "wireByteCount": 0
+  },
+  "usageLimitWire": {
+    "failureClass": "provider",
+    "failureStage": "headers",
+    "causeCode": "gateway_upstream_http_429",
+    "responseIdentitySeen": false,
+    "partialAssistantItemSeen": false,
+    "toolCallItemSeen": false,
+    "eventCount": 0,
+    "wireByteCount": 0
+  },
+  "usageLimitErrorInfo": "usageLimitExceeded",
+  "transientWire": {
+    "failureStages": [
+      "connect",
+      "headers"
+    ],
+    "httpStatuses": [
+      408,
+      425,
+      429,
+      500,
+      502,
+      503,
+      504,
+      520,
+      521,
+      522,
+      523,
+      524
+    ],
+    "gatewayCauseCodes": [
+      "gateway_upstream_headers_deadline",
+      "gateway_upstream_retry_exhausted",
+      "gateway_upstream_transport_failed"
+    ],
+    "responseIdentitySeen": false,
+    "partialAssistantItemSeen": false,
+    "toolCallItemSeen": false,
+    "eventCount": 0,
+    "wireByteCount": 0
+  },
+  "continuationAfterRestart": true,
+  "receiptDigest": "bb79abbd6610ed5ebc14d9e003664273352072b69212ca05ac6f4ad6a8a3d21e"
+}

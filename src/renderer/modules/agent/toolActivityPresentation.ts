@@ -63,6 +63,7 @@ function toolDescriptor(input: ToolActivityInput): string {
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return ''
     detail = parsed as Record<string, unknown>
   } catch {
+    // silent-catch: call details that are not JSON have no summary to show
     return ''
   }
   for (const key of ['query', 'url', 'prompt', 'title', 'name', 'relativePath', 'path', 'command']) {

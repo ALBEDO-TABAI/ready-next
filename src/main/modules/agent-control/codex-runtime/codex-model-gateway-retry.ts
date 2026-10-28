@@ -289,6 +289,7 @@ export async function prepareCodexUpstreamStreamForControlledRetry(input: {
     try {
       await reader.cancel()
     } catch {
+      // silent-catch: cancel is transport cleanup only; the retry error is thrown right after
       // The retry decision is already final; transport cleanup cannot replace it.
     } finally {
       reader.releaseLock()
@@ -322,6 +323,7 @@ export async function prepareCodexUpstreamStreamForControlledRetry(input: {
         }),
       ])
     } catch (error) {
+      // silent-catch: read failures and the probe deadline become a retry error that cancelAndThrow throws
       const retryError = error instanceof CodexModelGatewayRetryError
         ? error
         : new CodexModelGatewayRetryError(
@@ -337,6 +339,7 @@ export async function prepareCodexUpstreamStreamForControlledRetry(input: {
       try {
         decoder.decode()
       } catch {
+        // silent-catch: an invalid UTF-8 tail ends probing; the buffered bytes are replayed downstream unchanged
         return replayBufferedBody(chunks, reader)
       }
       return cancelAndThrow(new CodexModelGatewayRetryError(
@@ -351,6 +354,7 @@ export async function prepareCodexUpstreamStreamForControlledRetry(input: {
     try {
       buffer += decoder.decode(next.value, { stream: true })
     } catch {
+      // silent-catch: bytes that are not valid UTF-8 cannot be probed, so the buffered bytes are replayed unchanged
       return replayBufferedBody(chunks, reader)
     }
     const parsed = parseSseBlocks(buffer)
@@ -366,6 +370,7 @@ export async function prepareCodexUpstreamStreamForControlledRetry(input: {
       try {
         payload = JSON.parse(raw)
       } catch {
+        // silent-catch: a non-JSON SSE data payload ends probing; the buffered bytes are replayed unchanged
         return replayBufferedBody(chunks, reader)
       }
       if (!isRecord(payload)) return replayBufferedBody(chunks, reader)

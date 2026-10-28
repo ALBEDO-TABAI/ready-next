@@ -20,6 +20,7 @@ import {
   CodexProductBootRecovery,
   proveCodexStableStartAbsence,
   routeCodexBootRecoveryFailure,
+  undeliveredCodexTurnCode,
 } from '../main/modules/agent-control/codex-runtime/codex-product-boot-recovery'
 import type {
   CodexNativeRuntime,
@@ -43,6 +44,7 @@ import {
   getSkillsRuntimeManager,
   type SkillsRuntimeManager,
 } from '../main/modules/skills-runtime/runtime-manager'
+import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
 import { loadSqliteAfterGuardForTest, skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 test('direct Codex answers do not require a browser workflow seal', () => {
@@ -72,9 +74,33 @@ test('boot recovery policy keeps ingress open for one rejected run and fails clo
     { kind: 'transient', code: 'codex_browser_workflow_action_in_flight' },
   )
   assert.deepEqual(
+    classifyCodexProductRecoveryFailure(new Error('codex_terminal_readback_runtime_stopped')),
+    { kind: 'transient', code: 'codex_terminal_readback_runtime_stopped' },
+    'a readback abandoned because the runtime stopped waits for the next boot instead of failing the run or runtime',
+  )
+  assert.deepEqual(
     classifyCodexProductRecoveryFailure(new Error('codex_tool_publication_indeterminate:pending')),
     { kind: 'transient', code: 'codex_tool_publication_indeterminate:pending' },
   )
+  // A completed turn that did not deliver what it declared never completes later; it closes instead of waiting.
+  for (const code of ['artifact_staged_receipt_missing', 'artifact_export_receipt_missing', 'folder_output_intent_receipt_missing',
+    'action_obligation_missing', 'current_document_read_required', 'current_document_read_receipt_missing']) {
+    const error = new Error(`codex_tool_publication_incomplete:${code}`)
+    assert.deepEqual(classifyCodexProductRecoveryFailure(error), { kind: 'run_local', code: error.message })
+    assert.equal(undeliveredCodexTurnCode(error), error.message)
+  }
+  for (const code of ['candidate_tool_result_not_delivered', 'tool_result_success_unknown']) {
+    const error = new Error(`codex_tool_publication_incomplete:${code}`)
+    assert.equal(classifyCodexProductRecoveryFailure(error).kind, 'transient', 'receipts still in flight may arrive')
+    assert.equal(undeliveredCodexTurnCode(error), null)
+  }
+  const settled: string[] = []
+  assert.equal(await routeCodexBootRecoveryFailure({
+    error: new Error('codex_tool_publication_incomplete:artifact_staged_receipt_missing'),
+    async settleRunLocal(code) { settled.push(code) },
+    failGlobal() { throw new Error('unexpected_global_failure') },
+  }), 'run_local_settled')
+  assert.deepEqual(settled, ['codex_tool_publication_incomplete:artifact_staged_receipt_missing'])
   assert.deepEqual(
     classifyCodexProductRecoveryFailure(new Error('codex_candidate_durable_identity_mismatch')),
     { kind: 'global', code: 'codex_candidate_durable_identity_mismatch' },
@@ -338,6 +364,106 @@ test('boot resumes a durable lifecycle action by interrupting the exact turn wit
   assert.equal(closeCount, 1)
 })
 
+test('a delivered boot interrupt whose acknowledgement cannot be written is not marked unknown', async () => {
+  const current = {
+    ...product(),
+    codexThreadId: 'thread-native-1',
+    codexTurnId: 'turn-native-1',
+  }
+  let readCount = 0
+  let unknownCount = 0
+  let nativeStatus: CodexTurn['status'] = 'inProgress'
+  let interruptCount = 0
+  let interruptAckCount = 0
+  let hostAbortCount = 0
+  let verifierCalls = 0
+  let closeCount = 0
+  let published = 0
+  const runtime = {
+    subscribe() { return () => undefined },
+    async turnInterrupt(input: { threadId: string; turnId: string }) {
+      assert.deepEqual(input, { threadId: 'thread-native-1', turnId: 'turn-native-1' })
+      interruptCount += 1
+      return {}
+    },
+    async threadRead() {
+      readCount += 1
+      // The native turn settles a moment after the interrupt is delivered.
+      return { thread: rootThread([terminalTurn(interruptCount > 0 && readCount > 2 ? 'interrupted' : nativeStatus)]) }
+    },
+  } as unknown as CodexNativeRuntime
+  const collector = new CodexTurnCollector(runtime)
+  const repository = {
+    readProductCloseout: () => null,
+    readProductTurnRuntime: () => current,
+    claimProductFenceForBoot: () => ({ transferred: false }),
+    readEngineTerminalCandidate: () => null,
+    readProductStartState: () => ({
+      codexThreadId: 'thread-native-1', codexTurnId: 'turn-native-1',
+      hostFailureKind: null, productCloseoutCommitted: false,
+    }),
+    readProductLifecycleAction: () => ({
+      readyRunId: 'run-1', readyTaskId: 'task-1', readyScopeId: 'scope-1',
+      readyAliasId: 'scope-1', aliasGeneration: 1, threadBindingId: 'binding-1',
+      codexThreadId: 'thread-native-1', codexTurnId: 'turn-native-1',
+      lifecycleAction: 'close', lifecycleActionRequestedAt: '2026-08-07T00:00:01.000Z',
+      lifecycleActionEvidenceDigest: 'action-digest',
+    }),
+    acknowledgeProductInterrupt() {
+      interruptAckCount += 1
+      throw new Error('interrupt_ack_transition_invalid')
+    },
+    markProductInterruptUnknown() { unknownCount += 1 },
+  }
+  const recovery = new CodexProductBootRecovery({
+    repository: repository as never,
+    runtime: () => runtime,
+    collector,
+    async closeCandidate(candidate) {
+      closeCount += 1
+      assert.equal(candidate.engineOutcome, 'interrupted')
+      return { closed: true }
+    },
+    publishRecoveredCloseout() { published += 1 },
+    onRecoveryFailure(_readyRunId, error) { throw error },
+    async settleHostFailure() { throw new Error('unexpected_host_failure') },
+    restoreActiveProductRun() {},
+    abortActiveProductRun() {
+      hostAbortCount += 1
+      return true
+    },
+    finishActiveProductRun() {},
+    ownerMainBootId: 'main-1',
+    resolveNativeModelSettings: () => nativeModelSettings,
+    resolveDeveloperInstructions: () => 'Ready overlay',
+    verifyAutomaticCompaction() {
+      verifierCalls += 1
+      throw new Error('automatic_compaction_should_not_run')
+    },
+    async wait() {},
+  })
+
+  const metrics: AgentMetricEvent[] = []
+  __setMetricSinkForTests((event) => metrics.push(event))
+  try {
+  await recovery.reconcileProductFence({
+    threadBindingId: 'binding-1', readyRunId: 'run-1', ownerMainBootId: 'old-main',
+    quarantinedAt: null, quarantineReason: null,
+  })
+  await waitUntil(() => published === 1)
+  } finally {
+    __setMetricSinkForTests(null)
+  }
+  assert.equal(interruptCount, 1)
+  assert.equal(interruptAckCount, 1)
+  assert.equal(unknownCount, 0, 'a delivered interrupt is never recorded as unknown')
+  assert.equal(hostAbortCount, 1)
+  assert.equal(verifierCalls, 0)
+  assert.equal(closeCount, 1)
+  assert.deepEqual(metrics.filter((event) => event.metric === 'codex_boot_interrupt_ack_failed')
+    .map(({ readyRunId, reason }) => ({ readyRunId, reason })), [{ readyRunId: 'run-1', reason: 'interrupt_ack_transition_invalid' }])
+})
+
 test('held start recovery gives a durable lifecycle action ownership before any new dispatch', async () => {
   const current = {
     ...product(),
@@ -521,7 +647,7 @@ function product(): CodexProductTurnRuntimeRead {
       toolSurfaceDigest: 'surface-digest',
     },
     readyTurnToolAuthorization: {
-      contractVersion: 1 as const, authorizationId: 'authorization-1',
+      contractVersion: 1 as const, authorizationId: 'authorization-1', allowedToolNames: [] as string[],
       authorization: {
         contractVersion: 1 as const, skillIdentity: {
           kind: 'explicit_no_skill' as const, reason: 'no_skill_signal' as const,
@@ -734,7 +860,7 @@ async function recoverWithGatewayEvidence(input: {
         codexThreadId: runtimeProduct.codexThreadId || '',
         codexTurnId: runtimeProduct.codexTurnId || '',
         upstreamProfileSnapshotDigest: runtimeProduct.upstreamProfileSnapshotDigest,
-        productToolSurfaceDigest: runtimeProduct.toolSurfaceDigest,
+        productRequestToolsDigest: runtimeProduct.requestToolsDigest,
         thread,
       })
     },
@@ -1249,7 +1375,7 @@ test('boot recovery reconstructs automatic compaction evidence from exact native
     verifyAutomaticCompaction({ thread, turn }) {
       assert.equal(thread.id, 'thread-native-1')
       assert.equal(turn.id, 'turn-native-1')
-      return {
+      return [{
         threadId: thread.id,
         turnId: turn.id,
         threadReadDigest: 'thread-read-digest',
@@ -1268,7 +1394,7 @@ test('boot recovery reconstructs automatic compaction evidence from exact native
         successorProductInputDigest: 'successor-input-1',
         automaticInputTotalStringCharacters: 1000,
         successorProductInputTotalStringCharacters: 100,
-      }
+      }]
     },
     ownerMainBootId: 'main-1',
     resolveNativeModelSettings: () => nativeModelSettings,
@@ -1667,6 +1793,7 @@ test('terminal timeout interrupt readback recovers the exact late native termina
     timedOutCandidate: timedOut,
     acknowledgeInterrupt() { acknowledged += 1 },
     markInterruptUnknown() { unknown += 1 },
+    isRuntimeActive: () => true,
   })
   assert.deepEqual(calls, ['interrupt:thread-native-1:turn-native-1', 'read'])
   assert.equal(acknowledged, 1)
@@ -1707,6 +1834,7 @@ test('terminal timeout keeps one recovery observer until an exact late terminal 
     runtime, collector, product: current, timedOutCandidate: timedOut,
     acknowledgeInterrupt() { acknowledged += 1 },
     markInterruptUnknown() { unknown += 1 },
+    isRuntimeActive: () => true,
     async wait() {},
   })
   assert.equal(recovered.kind, 'native_terminal')
@@ -1756,6 +1884,7 @@ test('interrupt delivery uncertainty keeps observing until the exact late termin
     runtime, collector, product: current, timedOutCandidate: timedOut,
     acknowledgeInterrupt() { acknowledged += 1 },
     markInterruptUnknown() { unknown += 1 },
+    isRuntimeActive: () => true,
     async wait() {
       waits += 1
       listener?.({
@@ -1777,4 +1906,36 @@ test('interrupt delivery uncertainty keeps observing until the exact late termin
   assert.equal(acknowledged, 0)
   assert.equal(unknown, 1)
   assert.equal(unsubscribeCount, 1)
+})
+
+test('terminal readback stops polling once its runtime stops, leaving the interrupt unknown for the next boot', async () => {
+  const current = { ...product(), codexThreadId: 'thread-native-1', codexTurnId: 'turn-native-1' }
+  let readCount = 0
+  let active = true
+  const runtime = {
+    subscribe() { return () => undefined },
+    async turnInterrupt() { throw new Error('codex_runtime_detached') },
+    async threadRead() {
+      readCount += 1
+      active = false
+      return { thread: rootThread([terminalTurn('inProgress')]) }
+    },
+  } as unknown as CodexNativeRuntime
+  const timedOut = {
+    kind: 'host_failure', readyTaskId: 'task-1', readyRunId: 'run-1', scopeId: 'scope-1',
+    codexThreadId: 'thread-native-1', codexTurnId: 'turn-native-1',
+  } as unknown as Parameters<typeof recoverCodexTerminalAfterInterrupt>[0]['timedOutCandidate']
+  let unknown = 0
+  await assert.rejects(recoverCodexTerminalAfterInterrupt({
+    runtime,
+    collector: new CodexTurnCollector(runtime),
+    product: current,
+    timedOutCandidate: timedOut,
+    acknowledgeInterrupt() { throw new Error('unexpected_acknowledgement') },
+    markInterruptUnknown() { unknown += 1 },
+    isRuntimeActive: () => active,
+    async wait() {},
+  }), /codex_terminal_readback_runtime_stopped/)
+  assert.equal(readCount, 1, 'no further thread reads after the runtime stopped')
+  assert.equal(unknown, 1)
 })

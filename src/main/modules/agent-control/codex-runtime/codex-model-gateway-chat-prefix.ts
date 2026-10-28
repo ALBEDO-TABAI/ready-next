@@ -63,6 +63,7 @@ export function inspectCodexChatPrefix(input: {
   try {
     payload = patchChatPayload({ payload: input.parsedPayload, snapshot: input.snapshot })
   } catch {
+    // silent-catch: a provider response patch that throws classifies the chunk as invalid (gateway_chat_stream_failed)
     return { kind: 'invalid', code: 'gateway_chat_stream_failed' }
   }
   if (!payload) return { kind: 'invalid', code: 'gateway_chat_sse_payload_invalid' }

@@ -33,6 +33,7 @@ function registeredSkillOrFallback(skillId: string, fallback: unknown): unknown 
     return getSkillsRuntimeManager().listSkills()
       .find((candidate) => candidate.id === skillId) ?? fallback
   } catch {
+    // silent-catch: if the skills registry cannot be listed, the caller-supplied skill record is used instead
     return fallback
   }
 }

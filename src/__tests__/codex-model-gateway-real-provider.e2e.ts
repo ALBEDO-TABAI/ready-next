@@ -75,8 +75,11 @@ function readCandidateIdentity(options: { requireFrozenBoundary: boolean }): {
   const gatewayDependencyPaths = filesUnder(resolve(repositoryRoot, 'src/main/modules/agent-control/codex-runtime'))
     .filter((path) => /^codex-(?:model-gateway|provider-|zai-responses)/.test(basename(path)))
     .map((path) => relative(repositoryRoot, path))
+  // The binding repository's façade is a candidate path; the modules it delegates to are part of it.
+  const bindingRepositoryPaths = filesUnder(resolve(repositoryRoot, 'src/main/modules/agent-control/codex-runtime/binding-repository'))
+    .map((path) => relative(repositoryRoot, path))
   const candidatePaths = [...new Set([
-    ...E3_CANDIDATE_PATHS, ...providerDependencyPaths, ...gatewayDependencyPaths,
+    ...E3_CANDIDATE_PATHS, ...providerDependencyPaths, ...gatewayDependencyPaths, ...bindingRepositoryPaths,
   ])].sort()
   const candidatePathSet = new Set(candidatePaths)
   const dirtyPaths = [...new Set([
@@ -210,7 +213,8 @@ test('real configured Provider returns one successful response through the gatew
         root_turn_id: 'turn-real-e3', agent_name: '/root', request_kind: 'turn',
         sandbox: 'seatbelt', sandbox_mode: 'read-only', auto_review_enabled: false,
         node_repl_auto_review_required: false, node_repl_disabled: false,
-        turn_started_at_unix_ms: 1,
+        turn_started_at_unix_ms: 1, window_number: 0, context_window_id: 'context-window-1',
+        analytics_enabled: false, model: 'ready-e0-model',
         readyRunId: 'run-real-e3', toolSurfaceDigest: digestCanonicalJson([]),
         turnContractDigest: 'turn-contract-real-e3',
         upstreamProfileSnapshotDigest: created.snapshotDigest,
@@ -229,7 +233,7 @@ test('real configured Provider returns one successful response through the gatew
       async resolve(input) {
         const binding: CodexModelGatewayBinding = {
           kind: 'product', codexModel: 'ready-e0-model', snapshot: created.snapshot,
-          snapshotDigest: created.snapshotDigest, toolSurfaceDigest: digestCanonicalJson([]),
+          snapshotDigest: created.snapshotDigest, toolSurfaceDigest: digestCanonicalJson([]), requestToolsDigest: digestCanonicalJson([]),
           turnContractDigest: 'turn-contract-real-e3',
           instructionContractDigest: instructionTranscriptDigest(request.instructions, request.input),
           additionalContextDigest: digestCanonicalJson([]),

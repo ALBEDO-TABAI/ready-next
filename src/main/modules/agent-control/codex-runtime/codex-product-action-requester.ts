@@ -132,7 +132,7 @@ export function createCodexProductActionRequester(input: {
               at: (input.now || (() => new Date().toISOString()))(),
             })
           } catch {
-            /* already resolved */
+            // silent-catch: the receipt may already be resolved (CAS miss); the product action error is rethrown below and closeout settles any pending receipt
           }
           throw error
         }
@@ -147,6 +147,7 @@ export function createCodexProductActionRequester(input: {
       try {
         input.assertEffectAuthority()
       } catch (error) {
+        // silent-catch: authority lost after dispatch makes the outcome unknown; it is journaled indeterminate and returned as product_action_unknown
         markUnknown(input, effectActionId, effectIdentityDigest, error)
         return {
           ok: false,
@@ -179,7 +180,7 @@ export function createCodexProductActionRequester(input: {
             at: (input.now || (() => new Date().toISOString()))(),
           })
         } catch {
-          /* already resolved */
+          // silent-catch: the receipt may already be resolved (CAS miss); the bridge error is rethrown below and closeout settles any pending receipt
         }
         throw error
       }
@@ -215,7 +216,7 @@ function markUnknown(
       at: (input.now || (() => new Date().toISOString()))(),
     })
   } catch {
-    /* already resolved */
+    // silent-catch: the receipt may already be resolved (CAS miss); callers still return product_action_unknown and closeout settles any pending receipt
   }
 }
 

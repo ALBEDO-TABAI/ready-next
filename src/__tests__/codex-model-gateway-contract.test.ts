@@ -15,6 +15,7 @@ import {
   normalizeChatGptOAuthResponseEvent,
   type CodexModelGatewayBinding,
 } from '../main/modules/agent-control/codex-runtime/codex-model-gateway'
+import type { CodexModelGatewayUpstreamFailureDiagnostic } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-types'
 import { buildCodexThreadDeveloperInstructions } from '../main/modules/agent-control/codex-runtime/codex-runtime-production-composition'
 
 function nativeUsage(): Record<string, unknown> {
@@ -115,7 +116,8 @@ function baseRequest(toolName: string | null = 'ready_read_probe'): Record<strin
         node_repl_disabled: false,
         sandbox: 'seatbelt',
         sandbox_mode: 'read-only',
-        turn_started_at_unix_ms: 1,
+        turn_started_at_unix_ms: 1, window_number: 0, context_window_id: 'context-window-1',
+        analytics_enabled: false, model: 'ready-e0-model',
         readyRunId: 'run-1',
         toolSurfaceDigest: digestCanonicalJson(tools),
         turnContractDigest: 'turn-contract-1',
@@ -451,7 +453,7 @@ test('each sidecar spawn gets one capability and every prior token is rejected b
   ;(body.client_metadata as Record<string, string>)['x-codex-turn-metadata'] = JSON.stringify(metadata)
   const binding: CodexModelGatewayBinding = {
     kind: 'product', codexModel: 'ready-e0-model', snapshot: created.snapshot,
-    snapshotDigest: created.snapshotDigest, toolSurfaceDigest: digestCanonicalJson([]),
+    snapshotDigest: created.snapshotDigest, toolSurfaceDigest: digestCanonicalJson([]), requestToolsDigest: digestCanonicalJson([]),
     turnContractDigest: 'turn-contract-1',
     instructionContractDigest: instructionTranscriptDigest(body.instructions, body.input),
     additionalContextDigest: digestCanonicalJson([]),
@@ -507,6 +509,7 @@ test('each sidecar spawn gets one capability and every prior token is rejected b
       const raw = JSON.parse(
         (requestBody.client_metadata as Record<string, string>)['x-codex-turn-metadata'],
       ) as Record<string, unknown>
+      if (kind !== 'turn') delete raw.model
       if (kind === 'automatic_compaction') {
         raw.request_kind = 'compaction'
         raw.compaction = {
@@ -570,7 +573,7 @@ test('rotating the sidecar capability aborts an admitted old request before cred
   ;(body.client_metadata as Record<string, string>)['x-codex-turn-metadata'] = JSON.stringify(metadata)
   const binding: CodexModelGatewayBinding = {
     kind: 'product', codexModel: 'ready-e0-model', snapshot: created.snapshot,
-    snapshotDigest: created.snapshotDigest, toolSurfaceDigest: digestCanonicalJson([]),
+    snapshotDigest: created.snapshotDigest, toolSurfaceDigest: digestCanonicalJson([]), requestToolsDigest: digestCanonicalJson([]),
     turnContractDigest: 'turn-contract-1',
     instructionContractDigest: instructionTranscriptDigest(body.instructions, body.input),
     additionalContextDigest: digestCanonicalJson([]),
@@ -676,10 +679,12 @@ test('chat conversion streams text and authorized tools while blocking malicious
   let toolMode: 'allowed' | 'malicious' | 'mutated' | 'parallel' | 'none' = 'allowed'
   let admittedResponseGroups = 0
   let finishReason: 'tool_calls' | 'stop' | 'length' | 'content_filter' = 'tool_calls'
+  const chatUpstreamHeaders: Array<Record<string, unknown>> = []
   const upstream = createServer(async (request, response) => {
     const chunks: Buffer[] = []
     for await (const chunk of request) chunks.push(Buffer.from(chunk))
     upstreamBodies.push(JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>)
+    chatUpstreamHeaders.push(request.headers)
     response.writeHead(200, { 'content-type': 'text/event-stream' })
     response.write(`data: ${JSON.stringify({
       id: 'chat-1', model: 'upstream-model', choices: [{ index: 0, delta: { reasoning_summary: 'checked' } }],
@@ -786,6 +791,7 @@ test('chat conversion streams text and authorized tools while blocking malicious
     snapshot: created.snapshot,
     snapshotDigest: created.snapshotDigest,
     toolSurfaceDigest: metadata.toolSurfaceDigest as string,
+    requestToolsDigest: metadata.toolSurfaceDigest as string,
     turnContractDigest: 'turn-contract-1',
     instructionContractDigest: instructionTranscriptDigest(request.instructions, request.input),
     additionalContextDigest: digestCanonicalJson([v2]),
@@ -825,6 +831,7 @@ test('chat conversion streams text and authorized tools while blocking malicious
     assert.match(text, /response\.completed/)
     assert.match(text, /"cached_tokens":2/)
     assert.match(text, /"reasoning_tokens":3/)
+    assert.equal(chatUpstreamHeaders[0]?.['session-id'], undefined, 'Codex session headers are a Responses contract')
     const addedEvents = text.split('\n')
       .filter((line) => line.startsWith('data: '))
       .map((line) => JSON.parse(line.slice(6)) as Record<string, unknown>)
@@ -937,11 +944,13 @@ test('native Responses lane forwards only verified events and rejects action ite
   let maliciousCompleted = false
   let admittedResponseGroups = 0
   const upstreamBodies: Record<string, unknown>[] = []
+  const upstreamHeaders: Array<Record<string, unknown>> = []
   const upstream = createServer(async (request, response) => {
     const chunks: Buffer[] = []
     for await (const chunk of request) chunks.push(Buffer.from(chunk))
     upstreamBodies.push(JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>)
-    response.writeHead(200, { 'content-type': 'text/event-stream' })
+    upstreamHeaders.push(request.headers)
+    response.writeHead(200, { 'content-type': 'text/event-stream', 'x-codex-turn-state': 'turn-state-1', 'x-oai-request-id': 'oai-request-1' })
     response.write(`event: response.created\ndata: ${JSON.stringify({
       type: 'response.created',
       response: { id: 'response-native-1', model: 'native-model', status: 'in_progress', output: [] },
@@ -1010,6 +1019,7 @@ test('native Responses lane forwards only verified events and rejects action ite
           kind: 'product', codexModel: 'ready-e0-model', snapshot: created.snapshot,
           snapshotDigest: created.snapshotDigest,
           toolSurfaceDigest: metadata.toolSurfaceDigest as string,
+          requestToolsDigest: metadata.toolSurfaceDigest as string,
           turnContractDigest: 'turn-contract-1',
           instructionContractDigest: instructionTranscriptDigest(request.instructions, request.input),
           additionalContextDigest: digestCanonicalJson([]),
@@ -1025,11 +1035,12 @@ test('native Responses lane forwards only verified events and rejects action ite
     credentials: { resolve() { return 'upstream-secret' } },
   })
   const address = await gateway.start()
-  const call = () => fetch(`${address.url}/v1/responses`, {
+  const call = (headers: Record<string, string> = {}) => fetch(`${address.url}/v1/responses`, {
     method: 'POST',
     headers: {
       authorization: 'Bearer local-capability-token',
       'content-type': 'application/json',
+      ...headers,
     },
     body: JSON.stringify(request),
   })
@@ -1037,9 +1048,20 @@ test('native Responses lane forwards only verified events and rejects action ite
     const allowed = await call()
     assert.equal(allowed.status, 200)
     assert.match(await allowed.text(), /native-ok/)
+    // The backend's per-turn routing token goes back to Codex and returns on the turn's next request.
+    assert.equal(allowed.headers.get('x-codex-turn-state'), 'turn-state-1')
+    assert.equal(allowed.headers.get('x-ready-upstream-request-id'), 'oai-request-1')
+    assert.equal(upstreamHeaders[0]?.['x-codex-turn-state'], undefined)
+    assert.equal((await call({ 'x-codex-turn-state': 'turn-state-1' })).status, 200)
+    assert.equal(upstreamHeaders[1]?.['x-codex-turn-state'], 'turn-state-1')
     assert.deepEqual(upstreamBodies[0]?.tools, [])
     assert.equal(upstreamBodies[0]?.tool_choice, 'none')
     assert.equal(upstreamBodies[0]?.parallel_tool_calls, false)
+    // Prompt-cache routing keys on the session identity Codex sends; the hop keeps it.
+    assert.equal(upstreamHeaders[0]?.['session-id'], 'thread-native-1')
+    assert.equal(upstreamHeaders[0]?.['thread-id'], 'thread-native-1')
+    assert.equal(upstreamHeaders[0]?.['x-client-request-id'], 'thread-native-1')
+    assert.equal(upstreamHeaders[0]?.['x-codex-window-id'], 'thread-native-1:0')
     malicious = true
     const blocked = await call()
     assert.equal(blocked.status, 200)
@@ -1064,6 +1086,7 @@ test('native Responses lane forwards only verified events and rejects action ite
 test('gateway owns retries exactly and never retries semantic 4xx responses', async () => {
   let mode: 'retryable' | 'semantic' = 'retryable'
   let calls = 0
+  const diagnostics: CodexModelGatewayUpstreamFailureDiagnostic[] = []
   const upstream = createServer((_request, response) => {
     calls += 1
     if (mode === 'retryable' && calls === 1) {
@@ -1071,7 +1094,9 @@ test('gateway owns retries exactly and never retries semantic 4xx responses', as
       return
     }
     if (mode === 'semantic') {
-      response.writeHead(401, { 'content-type': 'application/json' }).end('{}')
+      response.writeHead(401, { 'content-type': 'application/json', 'x-request-id': 'upstream-401' })
+        .end(JSON.stringify({ error: { code: 'invalid_api_key', type: 'auth_error',
+          message: 'key upstream-secret rejected' } }))
       return
     }
     response.writeHead(200, { 'content-type': 'text/event-stream' })
@@ -1108,7 +1133,7 @@ test('gateway owns retries exactly and never retries semantic 4xx responses', as
       async resolve(input) {
         const binding: CodexModelGatewayBinding = {
           kind: 'product', codexModel: 'ready-e0-model', snapshot: created.snapshot,
-          snapshotDigest: created.snapshotDigest, toolSurfaceDigest: digestCanonicalJson([]),
+          snapshotDigest: created.snapshotDigest, toolSurfaceDigest: digestCanonicalJson([]), requestToolsDigest: digestCanonicalJson([]),
           turnContractDigest: 'turn-contract-1',
           instructionContractDigest: instructionTranscriptDigest(request.instructions, request.input),
           additionalContextDigest: digestCanonicalJson([]),
@@ -1121,6 +1146,7 @@ test('gateway owns retries exactly and never retries semantic 4xx responses', as
       },
     },
     credentials: { resolve() { return 'upstream-secret' } },
+    onUpstreamFailure(diagnostic) { diagnostics.push(diagnostic) },
   })
   const address = await gateway.start()
   const call = () => fetch(`${address.url}/v1/responses`, {
@@ -1136,11 +1162,20 @@ test('gateway owns retries exactly and never retries semantic 4xx responses', as
     assert.equal(recovered.status, 200)
     await recovered.text()
     assert.equal(calls, 2)
+    assert.deepEqual(diagnostics, [], 'a recovered retry is not a failure')
     mode = 'semantic'
     calls = 0
     const rejected = await call()
     assert.equal(rejected.status, 401)
     assert.equal(calls, 1)
+    assert.equal(diagnostics.length, 1)
+    assert.equal(diagnostics[0].causeCode, 'gateway_upstream_http_401')
+    assert.equal(diagnostics[0].failureStage, 'headers')
+    assert.equal(diagnostics[0].profileId, 'profile-retry')
+    assert.equal(diagnostics[0].upstreamRequestId, 'upstream-401')
+    assert.deepEqual(diagnostics[0].providerError, {
+      code: 'invalid_api_key', type: 'auth_error', message: 'key [REDACTED] rejected',
+    })
   } finally {
     await gateway.stop()
     await close(upstream)
@@ -1187,7 +1222,7 @@ test('gateway rejects excess concurrency before authority work and aborts an in-
   ;(request.client_metadata as Record<string, string>)['x-codex-turn-metadata'] = JSON.stringify(metadata)
   const binding: CodexModelGatewayBinding = {
     kind: 'product', codexModel: 'ready-e0-model', snapshot: created.snapshot,
-    snapshotDigest: created.snapshotDigest, toolSurfaceDigest: digestCanonicalJson([]),
+    snapshotDigest: created.snapshotDigest, toolSurfaceDigest: digestCanonicalJson([]), requestToolsDigest: digestCanonicalJson([]),
     turnContractDigest: 'turn-contract-1',
     instructionContractDigest: instructionTranscriptDigest(request.instructions, request.input),
     additionalContextDigest: digestCanonicalJson([]),

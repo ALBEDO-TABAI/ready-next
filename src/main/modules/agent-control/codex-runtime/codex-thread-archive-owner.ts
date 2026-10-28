@@ -117,6 +117,7 @@ export class CodexThreadArchiveCleanupOwner {
         else if (result === 'retry') retryable += 1
         else unknown += 1
       } catch {
+        // silent-catch: a failed reconciliation is counted as unknown; the intent stays result_unknown for a later pass
         unknown += 1
       }
     }
@@ -140,6 +141,7 @@ export class CodexThreadArchiveCleanupOwner {
               failedAt: this.deps.now(),
             })
           } catch {
+            // silent-catch: failure bookkeeping is best-effort; the archive intent already reads as result_unknown
             // The durable result_unknown row remains the recovery authority.
           }
         }
@@ -167,6 +169,7 @@ export class CodexThreadArchiveCleanupOwner {
         includeTurns: true,
       })
     } catch {
+      // silent-catch: a failed thread readback leaves the intent pending so the next drain retries it
       return
     }
     if (!exactArchivedThread(current, readback.thread, lineage) || !archivableThread(readback.thread)) {

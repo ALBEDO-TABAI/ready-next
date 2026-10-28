@@ -397,6 +397,7 @@ export async function executeDocumentTool(
           : summary
       }
     } catch (error) {
+      // silent-catch: the failure is returned to the model as a 'Document action failed' tool result
       const message = error instanceof Error ? error.message : String(error)
       if (toolName === 'document_read_section') {
         return createToolExecutionOutput(`Document action failed: ${tool.action} - ${message}`, {

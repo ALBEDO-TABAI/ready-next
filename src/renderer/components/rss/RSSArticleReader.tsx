@@ -17,6 +17,8 @@ import RssTimeHintBanner from './RssTimeHintBanner'
 import RSSSaveNoteButton from './RSSSaveNoteButton'
 import RSSCoverImage from './RSSCoverImage'
 import RSSTopbarTools from './RSSTopbarTools'
+import { RSSTranslatedBody, RSSTranslationControl } from './RSSTranslationControl'
+import { rssReaderHeadings, useRSSArticleTranslation } from '../../modules/rss/article-translation'
 import { LiquidFloatingPanel } from '../ui/liquid-glass/LiquidFloatingPanel'
 import { chatMenuSurfaceStyle } from '../agent/chatMenuStyles'
 
@@ -65,6 +67,8 @@ export default function RSSArticleReader({ item, expectedRevision, reveal, onClo
   const mediaKind = describeRSSMedia(item.link, item.coverImage).kind
   const video = mediaKind === 'video', image = mediaKind === 'image'
   const embed = rssVideoEmbed(item.link, item.summary)
+  // Quotes, copies and the assistant always take the source; a reference version is read as quoted.
+  const translation = useRSSArticleTranslation(content, !expectedRevision && !video && !image)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -102,6 +106,7 @@ export default function RSSArticleReader({ item, expectedRevision, reveal, onClo
       }
     })()
     return () => controller.abort()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- content is read only to skip reloading a body this reader already holds for the item's revision, and onBodyLoaded is a completion notification (RSSMode passes a stable callback); re-running on either would refetch after every setContent
   }, [item.id, item.revision, item.title, item.link, item.summary, reload, video, image, expectedRevision])
 
   useEffect(() => {
@@ -109,14 +114,14 @@ export default function RSSArticleReader({ item, expectedRevision, reveal, onClo
   }, [content?.article.id, content?.article.read, item.id, onOpened])
 
   useEffect(() => {
-    const nodes = bodyRef.current?.querySelectorAll<HTMLElement>('[data-ready-heading-level]')
-    setHeadings(Array.from(nodes || []).map((node) => ({ title: node.dataset.readyHeadingTitle || '', level: Number(node.dataset.readyHeadingLevel) })))
-  }, [content])
+    setHeadings(rssReaderHeadings(bodyRef.current).map((node) => ({ title: node.dataset.readyHeadingTitle || '', level: Number(node.dataset.readyHeadingLevel) })))
+  }, [content, translation.view, translation.translation])
 
   useEffect(() => {
     if (!active || !reveal || !content || content.article.id !== item.id || content.article.revision !== expectedRevision || !bodyRef.current) return
     try { revealReadingRange(bodyRef.current, reveal.range) }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on reveal.id and the loaded revision: each reveal request carries a fresh id with its own range, and content is only checked for a match, so new object identities on re-render must not scroll the reader again
   }, [active, reveal?.id, content?.article.revision, item.id, expectedRevision])
 
   useEffect(() => {
@@ -159,10 +164,11 @@ export default function RSSArticleReader({ item, expectedRevision, reveal, onClo
           <div className="rss-menu">
             <RSSReferenceButton className="rss-menu-item ready-floating-menu-item" name={title} label="引用文章" disabled={busy} onDone={closeReferenceMenu}
               reference={article ? { kind: 'article', read: { itemId: article.id, expectedRevision: article.revision, offset: 0, length: 12000 } } : null} />
-            {article && <RSSSelectionReferences bodyRef={bodyRef} article={article} active={active && !busy} className="rss-menu-item ready-floating-menu-item" onDone={closeReferenceMenu} />}
+            {article && <RSSSelectionReferences bodyRef={bodyRef} article={article} active={active && !busy && translation.view === 'source'} className="rss-menu-item ready-floating-menu-item" onDone={closeReferenceMenu} />}
           </div>
         </LiquidFloatingPanel>}
       </div>
+      <RSSTranslationControl state={translation} disabled={busy} />
       <button type="button" className="rss-btn rss-btn--icon" title={item.starred ? '取消收藏' : '收藏文章'} aria-label={item.starred ? '取消收藏' : '收藏文章'} aria-pressed={item.starred} onClick={() => onToggleStar(item.id)}>
         <Star size={16} strokeWidth={1.8} fill={item.starred ? 'currentColor' : 'none'} />
       </button>
@@ -177,7 +183,7 @@ export default function RSSArticleReader({ item, expectedRevision, reveal, onClo
     <div className="rss-reader-layout">
       {headings.length > 0 && <nav className="rss-reader-toc" aria-label="本文目录">
         <p>本文目录</p>
-        {headings.map((heading, index) => <button type="button" key={index} style={{ paddingLeft: `${Math.min(heading.level - 1, 3) * 12}px` }} onClick={() => bodyRef.current?.querySelectorAll('[data-ready-heading-level]')[index]?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>{heading.title}</button>)}
+        {headings.map((heading, index) => <button type="button" key={index} style={{ paddingLeft: `${Math.min(heading.level - 1, 3) * 12}px` }} onClick={() => rssReaderHeadings(bodyRef.current)[index]?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>{heading.title}</button>)}
       </nav>}
       <article className="rss-reader-content">
         <p className="rss-reader-source">
@@ -207,7 +213,10 @@ export default function RSSArticleReader({ item, expectedRevision, reveal, onClo
         {content?.body.error && ['ready', 'partial'].includes(content.body.status) && <p className="rss-reader-notice" role="alert">重新获取未完成，已保留上次保存的正文。{content.body.error}</p>}
         {(error || notice || content?.body.status === 'partial' || content?.body.status === 'login_required') && <p className="rss-reader-notice" role="alert">{error || notice || (content?.body.status === 'partial' ? '目前仅获取到部分正文，请打开原文查看完整内容。' : '请先打开原文登录，再重新获取正文。')}</p>}
         <div className="note-preview-body rss-reader-body" ref={bodyRef}>
-          {content && <MarkdownContent readingAnchors content={content.text} externalBaseUrl={content.body.sourceUrl || article?.link || item.link} onOpenLink={openLink} />}
+          {content && (translation.translation && translation.view !== 'source'
+            ? <RSSTranslatedBody body={content.text} translation={translation.translation} bilingual={translation.view === 'bilingual'}
+              externalBaseUrl={content.body.sourceUrl || article?.link || item.link} onOpenLink={openLink} />
+            : <MarkdownContent readingAnchors content={content.text} externalBaseUrl={content.body.sourceUrl || article?.link || item.link} onOpenLink={openLink} />)}
         </div>
         {content && <div className="rss-reader-extras">
           <p>整理与关联</p>

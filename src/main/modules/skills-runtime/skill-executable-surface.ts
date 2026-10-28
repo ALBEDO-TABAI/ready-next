@@ -7,6 +7,7 @@ export function skillDirHasScripts(managedPath: string | undefined | null): bool
   try {
     return existsSync(join(managedPath, 'scripts'))
   } catch {
+    // silent-catch: a malformed managedPath makes join throw (existsSync itself never throws); treat it as having no scripts
     return false
   }
 }

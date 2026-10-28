@@ -172,6 +172,7 @@ export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
 
   // Track visible page via IntersectionObserver
   useEffect(() => {
+    const visiblePageEntries = visiblePageEntriesRef.current
     if (numPages === 0) return
 
     observerRef.current = new IntersectionObserver(
@@ -199,7 +200,7 @@ export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
 
     return () => {
       observerRef.current?.disconnect()
-      visiblePageEntriesRef.current.clear()
+      visiblePageEntries.clear()
     }
   }, [numPages, zoom])
 

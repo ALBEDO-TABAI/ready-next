@@ -18,7 +18,9 @@ export async function requestCodexProviderText(config: AIModelConfig, options: {
     installation_id: id, session_id: id, thread_id: id, turn_id: id, root_turn_id: id,
     window_id: `${id}:0`, agent_name: '/root', request_kind: 'turn', sandbox: 'seatbelt', sandbox_mode: 'read-only',
     auto_review_enabled: false, node_repl_auto_review_required: false, node_repl_disabled: false,
-    turn_started_at_unix_ms: started, readyRunId: id, toolSurfaceDigest: digestCanonicalJson([]),
+    // The exact product shape of the pinned runtime; the gateway accepts no other.
+    turn_started_at_unix_ms: started, window_number: 0, context_window_id: id, analytics_enabled: false,
+    model: 'ready-e0-model', readyRunId: id, toolSurfaceDigest: digestCanonicalJson([]),
     turnContractDigest: id, upstreamProfileSnapshotDigest: created.snapshotDigest,
   }
   const request = {
@@ -38,7 +40,8 @@ export async function requestCodexProviderText(config: AIModelConfig, options: {
         if (incoming.threadId !== id || incoming.turnId !== id || incoming.readyRunId !== id) throw new Error('connection_identity_invalid')
         const binding: CodexModelGatewayBinding = {
           kind: 'product', codexModel: request.model, snapshot: created.snapshot, snapshotDigest: created.snapshotDigest,
-          toolSurfaceDigest: metadata.toolSurfaceDigest, turnContractDigest: id,
+          toolSurfaceDigest: metadata.toolSurfaceDigest, requestToolsDigest: digestCanonicalJson([]),
+          turnContractDigest: id,
           instructionContractDigest: instructionTranscriptDigest(instructions, input),
           additionalContextDigest: digestCanonicalJson([]), deliveredUserTail: [],
           forceToolFreeFinalization: true, allowedToolNames: [],

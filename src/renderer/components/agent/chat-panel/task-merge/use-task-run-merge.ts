@@ -282,6 +282,7 @@ export function useTaskRunMerge(params: UseTaskRunMergeParams): TaskCardRun[] {
 
   return useMemo<TaskCardRun[]>(
     () => mergeTaskRuns(params),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- params is a fresh object every render; the array lists all six UseTaskRunMergeParams fields, which are the only inputs mergeTaskRuns reads
     [activeChildRuns, currentScopeId, filteredScopes, inMemoryTaskRuns, persistedScopeRuns, persistedTaskProjections],
   )
 }

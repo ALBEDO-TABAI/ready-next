@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import {
+  CODEX_ERROR_INFO_STRING_VARIANTS,
   normalizeCodexNativeNotification,
   type CodexNativeRuntime,
 } from '../main/modules/agent-control/codex-runtime/codex-native-runtime'
@@ -253,6 +256,22 @@ test('native notification normalization accepts only the pinned error frame shap
       code: 'invalid_params',
     })
   }
+})
+
+// 2026-10-07: 0.160.1 added rateLimitExceeded, flexUnavailable and tooManyDenials; misalignmentPolicyViolation was
+// already pinned but rejected, so a turn ending with any of them would have been treated as a protocol violation.
+test('turn error info accepts exactly the string variants of the pinned schema', () => {
+  const schema = JSON.parse(readFileSync(resolve(
+    'assets/codex-runtime/schemas/stable/codex_app_server_protocol.v2.schemas.json',
+  ), 'utf8')) as { definitions: { CodexErrorInfo: { oneOf: Array<{ enum?: string[] }> } } }
+  const pinned = schema.definitions.CodexErrorInfo.oneOf.flatMap((variant) => variant.enum || [])
+  assert.deepEqual([...CODEX_ERROR_INFO_STRING_VARIANTS].sort(), [...pinned].sort())
+  const frame = (codexErrorInfo: unknown) => normalizeCodexNativeNotification({
+    method: 'error',
+    params: { error: { message: 'failed', codexErrorInfo }, threadId: 'thread-1', turnId: 'turn-1', willRetry: false },
+  }).kind
+  for (const value of pinned) assert.equal(frame(value), 'accepted', value)
+  assert.equal(frame('futureStringError'), 'invalid')
 })
 
 test('native notification normalization projects exact context usage, ignores passive telemetry, and rejects unknown active methods', () => {

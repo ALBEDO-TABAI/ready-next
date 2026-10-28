@@ -109,6 +109,7 @@ export function SkillAskUserPrompt(): ReactElement | null {
         scrollRoot.scrollTop = scrollRoot.scrollHeight
       }
     })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- scrolls once per new question; the 500 ms reconcile poll replaces queue items with fresh objects, so depending on `current` would re-scroll the chat on every poll
   }, [current?.executionId])
 
   const submit = useCallback(async (answer: string) => {

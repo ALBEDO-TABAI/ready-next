@@ -56,7 +56,7 @@ function makeRuntimeFixture(): {
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, unknown>
   const binaryPath = join(root, 'build/codex/aarch64-apple-darwin/codex')
   mkdirSync(dirname(binaryPath), { recursive: true })
-  writeFileSync(binaryPath, '#!/bin/sh\nprintf "codex-cli 0.149.0\\n"\n', { mode: 0o755 })
+  writeFileSync(binaryPath, '#!/bin/sh\nprintf "codex-cli 0.160.1\\n"\n', { mode: 0o755 })
   manifest.binarySha256 = sha256File(binaryPath)
   manifest.binarySizeBytes = statSync(binaryPath).size
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
@@ -118,6 +118,9 @@ test('Codex-owned table mutations stay inside the declared storage owners', () =
     mainRoot,
     'modules/agent-control/codex-runtime/codex-tool-binding-repository.ts',
   )
+  // The binding repository is its façade plus the modules it delegates to.
+  const repositoryModules = join(mainRoot, 'modules/agent-control/codex-runtime/binding-repository')
+  const ownedByRepository = (sourcePath: string) => sourcePath === facade || dirname(sourcePath) === repositoryModules
   const allowed = new Set([
     facade,
     internalToolStore,
@@ -145,14 +148,15 @@ test('Codex-owned table mutations stay inside the declared storage owners', () =
     'i',
   )
   const unexpected = listSourceFiles(mainRoot).filter((sourcePath) => (
-    !allowed.has(sourcePath) && tableMutation.test(readFileSync(sourcePath, 'utf8'))
+    !allowed.has(sourcePath) && !ownedByRepository(sourcePath) && tableMutation.test(readFileSync(sourcePath, 'utf8'))
   ))
   assert.deepEqual(unexpected, [])
   const internalConsumers = listSourceFiles(mainRoot).filter((sourcePath) => (
     sourcePath !== internalToolStore
-    && readFileSync(sourcePath, 'utf8').includes("'./codex-tool-binding-repository'")
+    && /from '\.\.?\/codex-tool-binding-repository'/.test(readFileSync(sourcePath, 'utf8'))
   ))
-  assert.deepEqual(internalConsumers, [facade])
+  assert.ok(internalConsumers.length > 0)
+  assert.deepEqual(internalConsumers.filter((sourcePath) => !ownedByRepository(sourcePath)), [])
 })
 
 test('runtime verification joins the manifest, machine contracts, binary digest, mode, and version', () => {
@@ -162,8 +166,8 @@ test('runtime verification joins the manifest, machine contracts, binary digest,
       assetRoot: fixture.assetRoot,
       binaryPath: fixture.binaryPath,
     })
-    assert.equal(verified.manifest.releaseTag, 'rust-v0.149.0')
-    assert.equal(verified.binaryVersion, 'codex-cli 0.149.0')
+    assert.equal(verified.manifest.releaseTag, 'rust-v0.160.1')
+    assert.equal(verified.binaryVersion, 'codex-cli 0.160.1')
     assert.equal(verified.binarySha256, sha256File(fixture.binaryPath))
     assert.equal(verified.contracts.startIdentityRegistryCapacity, 64)
     assert.equal(

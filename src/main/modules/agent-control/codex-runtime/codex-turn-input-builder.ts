@@ -24,6 +24,10 @@ import {
   type ReadyMemorySnapshot,
 } from '../ready-memory'
 import { digestCanonicalJson } from './codex-model-gateway-contract'
+import {
+  CODEX_DOCUMENT_WIDGET_GUIDANCE_CONTRACT,
+  CODEX_DOCUMENT_WIDGET_GUIDANCE_KEY,
+} from './codex-document-widget-guidance'
 
 export type ResourceVersionReference = {
   logicalResourceId: string
@@ -138,6 +142,8 @@ export type CodexTurnBuildContext = {
   turnContractDigest: string
   upstreamProfileSnapshotDigest: string
   readyMemorySnapshot: ReadyMemorySnapshot
+  /** Ready's widget catalog, for a turn authorized to insert widgets (`codexDocumentWidgetGuidance`). */
+  documentWidgetGuidance?: string | null
 }
 
 export type CodexTurnInputBuildResult =
@@ -487,6 +493,19 @@ export class CodexTurnInputBuilder {
                 'ready-explicit-retry': {
                   kind: 'application' as const,
                   value: JSON.stringify(buildCodexExplicitRetryContext(ingress)),
+                },
+              }
+            : {}),
+          ...(context.documentWidgetGuidance
+            ? {
+                // The run id makes the value differ every turn; Codex drops context whose key and value repeat.
+                [CODEX_DOCUMENT_WIDGET_GUIDANCE_KEY]: {
+                  kind: 'application' as const,
+                  value: JSON.stringify({
+                    contract: CODEX_DOCUMENT_WIDGET_GUIDANCE_CONTRACT,
+                    readyRunId: context.readyRunId,
+                    guidance: context.documentWidgetGuidance,
+                  }),
                 },
               }
             : {}),

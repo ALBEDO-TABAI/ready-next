@@ -22,6 +22,7 @@ import {
   type CloseRetirementEvidence,
   type ProductTurnCloseoutEvidence,
   type ReadyCodexLifecycleStore,
+  type StartedThreadResolution,
 } from './ready-codex-lifecycle-adapter'
 
 function isoNow(): string {
@@ -44,6 +45,25 @@ function readExpectedForkedFromId(
     throw new ReadyCodexLifecyclePortError('native_protocol_error')
   }
   return fork.sourceCodexThreadId
+}
+
+function startedThreadResolution(
+  repository: CodexBindingRepository,
+  loadedThreads: ReadonlySet<string>,
+  binding: CodexActiveAliasBindingRead & { codexThreadId: string; isolatedThreadCwd: string },
+  threadDeveloperInstructions: (instructionContractDigest: string) => string,
+): StartedThreadResolution {
+  if (loadedThreads.has(binding.codexThreadId)) {
+    return { state: 'loaded', threadId: binding.codexThreadId }
+  }
+  if (!binding.instructionContractDigest) throw new ReadyCodexLifecyclePortError('native_protocol_error')
+  return {
+    state: 'resume_required',
+    threadId: binding.codexThreadId,
+    expectedCwd: binding.isolatedThreadCwd,
+    expectedForkedFromId: readExpectedForkedFromId(repository, binding),
+    developerInstructions: threadDeveloperInstructions(binding.instructionContractDigest),
+  }
 }
 
 export async function retireCodexAliasForClose(input: {
@@ -197,6 +217,8 @@ export function createLifecycleStore(input: {
   }) => Promise<ProductTurnCloseoutEvidence | null>
   manualCompactionController: CodexManualCompactionController
   getDeveloperInstructions: (prepared: PreparedCodexProductRun) => string
+  /** The instructions a thread was created with, rebuilt from its frozen digest; throws on drift. */
+  getThreadDeveloperInstructions: (instructionContractDigest: string) => string
   getNativeModelSettings: (
     prepared: PreparedCodexProductRun,
   ) => ReturnType<typeof resolveCodexNativeModelSettings>
@@ -242,15 +264,25 @@ export function createLifecycleStore(input: {
           },
         }
       }
-      if (input.loadedThreads.has(binding.codexThreadId)) {
-        return { state: 'loaded' as const, threadId: binding.codexThreadId }
-      }
-      return {
-        state: 'resume_required' as const,
-        threadId: binding.codexThreadId,
-        expectedCwd: binding.isolatedThreadCwd,
-        expectedForkedFromId: readExpectedForkedFromId(input.repository, binding),
-      }
+      return startedThreadResolution(input.repository, input.loadedThreads, {
+        ...binding,
+        codexThreadId: binding.codexThreadId,
+        isolatedThreadCwd: binding.isolatedThreadCwd,
+      }, input.getThreadDeveloperInstructions)
+    },
+    async resolveStartedThread(identity) {
+      const binding = input.repository.readActiveAliasBinding(identity.aliasId)
+      if (
+        !binding
+        || binding.aliasGeneration !== identity.aliasGeneration
+        || !binding.isolatedThreadCwd
+        || !binding.codexThreadId
+      ) throw new Error('active_alias_binding_mismatch')
+      return startedThreadResolution(input.repository, input.loadedThreads, {
+        ...binding,
+        codexThreadId: binding.codexThreadId,
+        isolatedThreadCwd: binding.isolatedThreadCwd,
+      }, input.getThreadDeveloperInstructions)
     },
     async bindStartedThread(binding) {
       if (
@@ -486,6 +518,7 @@ export function createLifecycleStore(input: {
             fenceReleaseRevision: read.fenceReleaseRevision,
           }
         } catch {
+          // silent-catch: closeout not readable yet; poll again until the deadline, then interrupt_state_unknown is thrown
           await new Promise((resolve) => setTimeout(resolve, 25))
         }
       }
@@ -523,6 +556,9 @@ export function createLifecycleStore(input: {
     },
     consumeManualCompaction(value) {
       return input.manualCompactionController.consume(value)
+    },
+    settleRejectedManualCompaction(value) {
+      return input.manualCompactionController.settleRejected(value)
     },
     async markManualCompactionUnknown(value) {
       input.manualCompactionController.markUnknown(value)

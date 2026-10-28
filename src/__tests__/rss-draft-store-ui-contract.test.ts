@@ -5,7 +5,7 @@ import test from 'node:test'
 import { getRSSAddSourceStatusMessage } from '../renderer/modules/rss/add-source-status'
 
 function readWorkspaceFile(path: string): string {
-  // eslint-disable-next-line ready/no-source-grep-test -- Existing RSS UI contract pins rendered copy/layout wiring; behavior coverage for add-source status lives below.
+  // allow-source-grep: Existing RSS UI contract pins rendered copy/layout wiring; behavior coverage for add-source status lives below.
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 

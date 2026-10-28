@@ -2181,6 +2181,10 @@ interface ElectronRSSAPI {
   queryItems: (query?: import('../../shared/rss-workspace').RSSQueryInput) => Promise<RSSResponse<import('../../shared/rss-workspace').RSSQueryResult>>
   dismissQuery: (input: import('../../shared/rss-workspace').RSSQueryInput) => Promise<RSSResponse<{ dismissed: number }>>
   readArticle: (input: import('../../shared/rss-workspace').RSSReadArticleInput) => Promise<RSSResponse<import('../../shared/rss-workspace').RSSArticleExcerpt>>
+  translateArticle: (input: import('../../shared/rss-translation').RSSTranslateArticleInput) => Promise<RSSResponse<import('../../shared/rss-translation').RSSArticleTranslation>>
+  readTranslation: (input: import('../../shared/rss-translation').RSSTranslationRef) => Promise<RSSResponse<import('../../shared/rss-translation').RSSArticleTranslation | null>>
+  cancelTranslation: (input: import('../../shared/rss-translation').RSSTranslationRef) => Promise<RSSResponse<null>>
+  onTranslationChanged: (callback: (ref: import('../../shared/rss-translation').RSSTranslationRef) => void) => () => void
   loadArticle: (input: { itemId: string; force?: boolean }) => Promise<RSSResponse<Omit<import('../../shared/rss-workspace').RSSArticle, 'body'> & { body: Omit<import('../../shared/rss-workspace').RSSArticle['body'], 'markdown'> }>>
   getSources: () => Promise<RSSResponse<RSSSourceData[]>>
   addSource: (source: RSSAddSourceInput) => Promise<

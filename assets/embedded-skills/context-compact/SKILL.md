@@ -6,6 +6,6 @@ when-to-use: 用户明确要求压缩、整理、瘦身、compact 当前 Agent �
 
 # Context Compact
 
-Use `skill_compact_context` once when the user explicitly asks to compact the current Agent context.
+In Ready, sending this skill on its own (`@[context-compact]` with nothing else) runs the compaction directly, the same as “压缩上下文” in the chat menu; no Agent turn is started. Long tasks are also compacted automatically when the context fills.
 
-Do not summarize the conversation manually. Do not run shell commands. After the tool result returns, tell the user plainly whether compaction ran or was queued.
+If this skill arrives together with other requests, call `skill_compact_context` once: it reports that compaction runs between turns. Tell the user plainly to send the skill on its own or use the chat menu, then continue with the rest of the request. Do not summarize the conversation manually. Do not run shell commands.

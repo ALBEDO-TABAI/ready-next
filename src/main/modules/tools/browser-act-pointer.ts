@@ -376,6 +376,7 @@ export async function executeBrowserActPointer(
             if (press) return press
             pressed = true
           } catch {
+            // silent-catch: a failed press dispatch may still have reached the page, so it returns a may-have-committed phase failure
             return pointerPhaseFailure(true)
           }
           for (let step = 1; step <= 8; step += 1) {
@@ -398,6 +399,7 @@ export async function executeBrowserActPointer(
           }, pointerExpected)
           if (released) return pointerPhaseOutput(released, true)
         } catch (error) {
+          // silent-catch: a drag dispatch failure is returned as structured pointer output: committed-unknown if pressed, else not delivered
           if (pressed) return pointerPhaseFailure(true)
           if (error instanceof TrustedPointerBlockedError) return error.output
           return pointerPhaseFailure(false)

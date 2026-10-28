@@ -1012,6 +1012,7 @@ export class AgentControlRuntime extends EventEmitter {
     try {
       return shouldReserveAmapRouteTool(this.externalServices.getAmapConfig())
     } catch {
+      // silent-catch: an unreadable Amap service config reports the map route service as unavailable
       return false
     }
   }
@@ -1545,6 +1546,7 @@ export class AgentControlRuntime extends EventEmitter {
     try {
       await this.codexRuntime.ensureReadyForUserIngress()
     } catch (error) {
+      // silent-catch: a runtime that cannot become ready is returned as a retryable host_unavailable rejection before persistence
       return createRejectedBeforePersistence({
         scope: 'pre-existing',
         code: 'host_unavailable',

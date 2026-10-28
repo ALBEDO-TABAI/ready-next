@@ -257,3 +257,18 @@ test('unknown errors fall back to generic copy with technical details separated'
   assert.equal(result.retryStrategy, 'none')
   assert.equal(result.technicalDetails, 'opaque backend detail')
 })
+
+test('Lark read failures name the Lark CLI instead of the model API key', () => {
+  const login = mapBackendErrorToFriendly({
+    errorKind: 'configuration_unavailable',
+    error: 'codex_external_read_lark_auth_required',
+  })
+  assert.match(login.friendlyMessage, /飞书/)
+  assert.doesNotMatch(login.friendlyMessage, /API Key/)
+  const unavailable = mapBackendErrorToFriendly({
+    errorKind: 'external_service_unavailable',
+    error: 'codex_external_read_lark_cli_unavailable',
+  })
+  assert.match(unavailable.friendlyMessage, /lark-cli/)
+  assert.doesNotMatch(unavailable.friendlyMessage, /模型服务/)
+})

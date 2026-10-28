@@ -16,6 +16,7 @@ import {
   type ReadyMemoryReadReceipt,
   type ReadyMemorySnapshot,
 } from '../main/modules/agent-control/ready-memory'
+import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
 import { loadSqliteAfterGuardForTest, skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 test('public terminal messages keep internal failure codes in diagnostics only', () => {
@@ -30,6 +31,31 @@ test('native usage failures explain the account limit without exposing provider 
   assert.doesNotMatch(codexTerminalPublicMessage('error', error), /private provider/)
   assert.equal(codexTerminalPublicMessage('interrupted', error), codexTerminalPublicMessage('interrupted'))
   assert.equal(codexTerminalPublicMessage('error', { message: 'untrusted provider text' }), '本轮未能完成。')
+})
+
+test('transient service failures say so, and invite continuing only when the work was kept', () => {
+  const overloaded = { message: 'We are experiencing high demand', codexErrorInfo: 'internalServerError' as const }
+  const disconnected = { message: 'stream closed', codexErrorInfo: { responseStreamDisconnected: { httpStatusCode: 502 } } }
+  const kept = { historySeam: 'failed_after_completed_rounds_v1' }
+  assert.match(codexTerminalPublicMessage('error', overloaded, kept), /暂时出错.*保留.*继续/)
+  assert.match(codexTerminalPublicMessage('error', disconnected, kept), /继续/)
+  assert.doesNotMatch(codexTerminalPublicMessage('error', overloaded), /继续/)
+  assert.doesNotMatch(codexTerminalPublicMessage('error', overloaded, kept), /high demand/)
+  assert.equal(codexTerminalPublicMessage('error', { message: 'bad', codexErrorInfo: 'badRequest' as const },
+    { historySeam: 'failed_user_only_no_suffix_v1' }), '本轮未能完成。')
+  const idle = { message: 'stream disconnected before completion: idle timeout waiting for SSE', codexErrorInfo: 'other' as const }
+  assert.match(codexTerminalPublicMessage('error', idle, { historySeam: 'failed_mid_stream_v1' }), /中途断开.*保留.*继续/)
+  assert.equal(codexTerminalPublicMessage('error', idle, { historySeam: null }), '本轮未能完成。')
+  assert.match(codexTerminalPublicMessage('error', null, { undelivered: 'codex_tool_publication_incomplete:artifact_staged_receipt_missing' }),
+    /计划保存的文件没有保存成功/)
+  assert.match(codexTerminalPublicMessage('error', null, { undelivered: 'codex_tool_publication_incomplete:action_obligation_missing' }),
+    /需要执行的操作没有执行/)
+  assert.equal(codexTerminalPublicMessage('error', null, { undelivered: 'codex_browser_workflow_observation_required' }), '本轮未能完成。')
+  assert.equal(codexTerminalPublicMessage('error', null, {
+    undelivered: 'codex_tool_publication_incomplete:artifact_export_receipt_missing',
+    answer: '  保存时被拒绝，原文档尚未改动。要另存为新文件吗？\n',
+  }), '本轮没有完成：计划保存的文件没有保存成功。\n\n保存时被拒绝，原文档尚未改动。要另存为新文件吗？',
+  'the verified note leads and the answer stays, so the user can reply to it')
 })
 
 test('product presentation reads one terminal snapshot and degrades an oversized tool result', (t) => {
@@ -326,6 +352,18 @@ test('product presentation reads one terminal snapshot and degrades an oversized
     () => readProductTurnPresentation(db as unknown as DatabaseConnection, 'run-1'),
     /product_turn_memory_receipt_incomplete/,
   )
+  const metrics: AgentMetricEvent[] = []
+  __setMetricSinkForTests((event) => metrics.push(event))
+  try {
+    assert.deepEqual(readProductTurnPresentations(db as unknown as DatabaseConnection, ['missing', 'run-1']), [])
+  } finally {
+    __setMetricSinkForTests(null)
+  }
+  assert.deepEqual(metrics.map(({ metric, readyRunId, reason }) => ({ metric, readyRunId, reason })), [{
+    metric: 'codex_product_turn_presentation_unreadable',
+    readyRunId: 'run-1',
+    reason: 'product_turn_memory_receipt_incomplete',
+  }], 'a damaged run is reported; a run without a binding stays quiet')
   writeMemoryReceipt.run(
     JSON.stringify(snapshot),
     snapshot.snapshotDigest,

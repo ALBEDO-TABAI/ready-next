@@ -248,6 +248,7 @@ export function supplementAuthorizedSkillPrimitiveDefinitions(
   try {
     liveSkills = getSkillsRuntimeManager().listSkills()
   } catch {
+    // silent-catch: if skills cannot be listed, no skill-specific primitive is marked Codex-safe (fails closed)
     liveSkills = []
   }
   const liveDefinitions = defaultToolRegistry.listToolDefinitions()

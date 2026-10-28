@@ -133,6 +133,7 @@ export default function GraphView({
     const next = stored?.viewport ?? { x: width / 2, y: height / 2, zoom: 1 }
     viewportRef.current = next
     setViewport(next)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- restores the stored viewport only when the session or view changes; width/height only seed the fallback center, and resize re-fitting is owned by the fit effect below
   }, [session, viewId])
 
   useEffect(() => {

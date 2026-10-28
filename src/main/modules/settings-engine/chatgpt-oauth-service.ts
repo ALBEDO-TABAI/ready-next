@@ -8,6 +8,7 @@ import {
   createOpenAIOAuthFetchHandler,
   runOpenAIOAuthLogin,
 } from 'openai-oauth'
+import { createCodexRoutingRelay } from './chatgpt-oauth-routing'
 import {
   CHATGPT_OAUTH_BASE_URL,
   type ChatGptOAuthStatus,
@@ -397,8 +398,10 @@ export function createChatGptOAuthService(authFilePath: string): ChatGptOAuthSer
     },
     startServer: async (models, proxyApiKey, signal) => {
       await secureAuthStorage(authFilePath)
+      const routing = createCodexRoutingRelay()
       const oauthHandler = createOpenAIOAuthFetchHandler({
         authFilePath,
+        fetch: routing.fetch,
       })
       const expectedAuthorization = `Bearer ${proxyApiKey}`
       const server = await startAuthenticatedServer(async (request) => {
@@ -410,7 +413,7 @@ export function createChatGptOAuthService(authFilePath: string): ChatGptOAuthSer
             },
           }, { status: 401 })
         }
-        return oauthHandler(request)
+        return routing.run(request.headers, () => oauthHandler(request))
       })
       try {
         const resolvedModels = await resolveOAuthServerModels(

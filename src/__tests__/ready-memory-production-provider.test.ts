@@ -137,3 +137,21 @@ test('production submission fails closed with zero provider calls without a prov
   })
   assert.equal(fetchCalls, 0)
 })
+
+test('production provider ends recovery when the frozen profile can never serve the request', async () => {
+  let fetches = 0
+  const provider = new ReadyMemoryProductionProvider({
+    profiles: { readSnapshot: () => ({ ...snapshot('responses'), model: 'another-model' }) },
+    credentials: { resolve: () => 'secret-not-logged' },
+    fetch: async () => {
+      fetches += 1
+      throw new Error('unexpected_fetch')
+    },
+  })
+  assert.deepEqual(await provider.recover(request(), 'response-1'), {
+    state: 'failed',
+    remoteId: 'response-1',
+    error: 'ready_memory_provider_profile_mismatch',
+  })
+  assert.equal(fetches, 0)
+})

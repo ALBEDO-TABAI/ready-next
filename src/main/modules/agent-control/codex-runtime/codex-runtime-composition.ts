@@ -30,6 +30,7 @@ import type {
   CodexServerDiagnostics,
   CodexThreadForkParams,
   CodexThreadListParams,
+  CodexThreadResumeParams,
   CodexThreadStartParams,
   CodexTurnStartParams,
 } from './codex-native-runtime'
@@ -339,7 +340,7 @@ class UnavailableCodexNativeRuntime implements CodexNativeRuntime {
   async threadRead(_params: { threadId: string; includeTurns: true }): Promise<never> { return this.unavailable() }
   async threadFork(_params: CodexThreadForkParams): Promise<never> { return this.unavailable() }
   async threadList(_params: CodexThreadListParams): Promise<never> { return this.unavailable() }
-  async threadResume(_params: { threadId: string }): Promise<never> { return this.unavailable() }
+  async threadResume(_params: CodexThreadResumeParams): Promise<never> { return this.unavailable() }
   async threadArchive(_params: { threadId: string }): Promise<never> { return this.unavailable() }
   async turnStart(_params: CodexTurnStartParams): Promise<never> { return this.unavailable() }
   async turnInterrupt(_params: { threadId: string; turnId: string }): Promise<never> { return this.unavailable() }
@@ -359,6 +360,7 @@ class UnavailableCodexLifecycleStore implements ReadyCodexLifecycleStore {
   async createAlias(): Promise<never> { return this.unavailable() }
   async readAliasIdentity(): Promise<never> { return this.unavailable() }
   async resolveThreadBinding(): Promise<never> { return this.unavailable() }
+  async resolveStartedThread(): Promise<never> { return this.unavailable() }
   async bindStartedThread(): Promise<never> { return this.unavailable() }
   async markThreadResumed(): Promise<never> { return this.unavailable() }
   async readLifecycleOperation(): Promise<never> { return this.unavailable() }
@@ -380,6 +382,7 @@ class UnavailableCodexLifecycleStore implements ReadyCodexLifecycleStore {
   async awaitManualCompaction(): Promise<never> { return this.unavailable() }
   async consumeManualCompaction(): Promise<never> { return this.unavailable() }
   async markManualCompactionUnknown(): Promise<never> { return this.unavailable() }
+  async settleRejectedManualCompaction(): Promise<never> { return this.unavailable() }
   digestThreadRead(): string { return digest('e1-native-unavailable:thread-read') }
 }
 

@@ -10,6 +10,7 @@ export function sanitizedProviderError(text: string, credential: string): {
   try {
     parsed = JSON.parse(text)
   } catch {
+    // silent-catch: a non-JSON provider error body has no structured error to sanitize
     return null
   }
   if (!isRecord(parsed)) return null

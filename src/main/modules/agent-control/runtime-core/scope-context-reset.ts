@@ -158,6 +158,7 @@ function runScopeContextCleanup(input: {
         failure = null
         break
       } catch (error) {
+        // silent-catch: the step is retried once and a persistent failure goes to reportCleanupFailure below
         failure = error
       }
     }
@@ -165,7 +166,7 @@ function runScopeContextCleanup(input: {
       try {
         input.deps.reportCleanupFailure(cleanup.name, failure)
       } catch {
-        // The durable reset is already committed; reporting cannot change its result.
+        // silent-catch: the durable reset is already committed; a failing failure reporter cannot change its result
       }
     }
   }

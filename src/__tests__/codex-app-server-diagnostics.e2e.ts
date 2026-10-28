@@ -11,7 +11,7 @@ test('pinned app-server returns content-free process diagnostics', { timeout: 20
     join(process.cwd(), 'assets/codex-runtime/source-lock.json'),
     'utf8',
   )) as { targetTriple: string; codexVersion: string }
-  assert.equal(sourceLock.codexVersion, '0.149.0')
+  assert.equal(sourceLock.codexVersion, '0.160.1')
   const binary = join(process.cwd(), 'build/codex', sourceLock.targetTriple, 'codex')
   assert.equal(existsSync(binary), true)
 

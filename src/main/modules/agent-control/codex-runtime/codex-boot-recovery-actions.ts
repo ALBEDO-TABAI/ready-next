@@ -115,6 +115,8 @@ export class CodexDefaultBootRecoveryActions implements CodexBootRecoveryActions
     hostFailureTerminal: CodexHostFailureTerminalPort
     manualCompaction: CodexManualCompactionBootPort
     productFence: CodexProductFenceBootPort
+    /** The fork target's frozen instructions, re-declared when its thread is resumed. */
+    forkDeveloperInstructions: (threadBindingId: string) => string
   }) {
     if (!Number.isSafeInteger(deps.threadListLimit) || deps.threadListLimit <= 0) {
       throw new Error('codex_boot_thread_list_limit_invalid')
@@ -142,6 +144,7 @@ export class CodexDefaultBootRecoveryActions implements CodexBootRecoveryActions
       try {
         readback = await this.readStart(input.member, input.recoveryConnectionEpoch)
       } catch (error) {
+        // silent-catch: a failed start readback resolves as unknown, with the read error captured in the evidence digest
         return {
           resolution: 'unknown',
           evidenceDigest: evidence({
@@ -208,13 +211,16 @@ export class CodexDefaultBootRecoveryActions implements CodexBootRecoveryActions
     recoveryConnectionEpoch: string,
   ): Promise<ReadbackResult> {
     const identity = this.deps.repository.readStartInboundIdentity(member.method, member.bindingId)
-    if (identity.method !== 'turn/start') return this.readThread(identity, recoveryConnectionEpoch)
+    if (identity.method !== 'turn/start') {
+      return this.readThread(identity, recoveryConnectionEpoch, member.bindingId)
+    }
     return this.readTurn(identity.threadId, identity.clientUserMessageId)
   }
 
   private async readThread(
     identity: ThreadStartIdentity,
     recoveryConnectionEpoch: string,
+    threadBindingId: string,
   ): Promise<ReadbackResult> {
     const listed = await this.deps.runtime.threadList({
       limit: this.deps.threadListLimit,
@@ -242,7 +248,10 @@ export class CodexDefaultBootRecoveryActions implements CodexBootRecoveryActions
     }
     const preResumeThreadReadDigest = evidence(read)
     const nativeResult = identity.method === 'thread/fork'
-      ? await this.deps.runtime.threadResume({ threadId: read.thread.id })
+      ? await this.deps.runtime.threadResume({
+          threadId: read.thread.id,
+          developerInstructions: this.deps.forkDeveloperInstructions(threadBindingId),
+        })
       : { thread: read.thread, instructionSources: [] }
     if (!exactThread(nativeResult.thread, identity, this.deps.pinnedThreadSource)) {
       return { kind: 'ambiguous', evidenceDigest: evidence({ identity, read, nativeResult }) }

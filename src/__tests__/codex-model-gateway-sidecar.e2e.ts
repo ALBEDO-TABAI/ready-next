@@ -57,12 +57,19 @@ import {
   resolveCodexRuntimePaths,
 } from '../main/modules/agent-control/codex-runtime/codex-runtime-host'
 import { CodexSidecarSession } from '../main/modules/agent-control/codex-runtime/codex-sidecar-session'
+import { CodexManualCompactionController } from '../main/modules/agent-control/codex-runtime/codex-manual-compaction-controller'
+import { classifyLifecycleOperation } from '../shared/ipc-contracts/agent-lifecycle-snapshot'
+import { createLifecycleStore } from '../main/modules/agent-control/codex-runtime/codex-product-lifecycle-store'
+import { StableNativeRuntime } from '../main/modules/agent-control/codex-runtime/codex-stable-native-runtime'
+import { CodexThreadResumeAuthority } from '../main/modules/agent-control/codex-runtime/codex-thread-resume-authority'
+import { ReadyCodexLifecycleAdapter } from '../main/modules/agent-control/codex-runtime/ready-codex-lifecycle-adapter'
 import {
   CodexSidecarSupervisor,
   MacCodexProcessInspector,
   NodeCodexSidecarSpawnPort,
 } from '../main/modules/agent-control/codex-runtime/codex-sidecar-supervisor'
 import { createCodexStartIdentityRegistryForRuntime } from '../main/modules/agent-control/codex-runtime/codex-start-identity-registry'
+import { codexRequestToolsDigest } from '../main/modules/agent-control/codex-runtime/codex-tool-surface'
 import type { StartIdentityReservationSet } from '../main/modules/agent-control/send-scoped-confirmation'
 import { loadSqliteAfterGuardForTest, skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { workflowDigest } from '../main/modules/repositories/browser-workflow-codec'
@@ -122,7 +129,7 @@ function prepared(
   readyToolSurface: PreparedCodexProductRun['readyToolSurface'] = createCodexToolFixture([]).readyToolSurface,
 ): PreparedCodexProductRun {
   const maxToolCalls = readyToolSurface.toolNames.length > 0 ? 4 : 0
-  const resourceRefs = ['run-first', 'run-second'].includes(runId)
+  const resourceRefs = ['run-first', 'run-second', 'run-native-tool-midturn'].includes(runId)
     ? [{ logicalResourceId: 'document-e3', currentVersion: 'v1', currentDigest: 'f'.repeat(64), supersedesVersion: null, policyEpoch: 1 }]
     : []
   const result = new CodexProductRunPreparer().prepare({
@@ -203,6 +210,7 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
   let upstreamSequence = 0
   let toolExecutions = 0
   let toolResponseDeliveries = 0
+  let midTurnProductRequests = 0
   const upstream = createServer(async (request, response) => {
     upstreamSequence += 1
     upstreamPaths.push(request.url || '')
@@ -218,6 +226,43 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
       if (typeof metadata.readyRunId === 'string') readyRunId = metadata.readyRunId
     }
     response.writeHead(200, { 'content-type': 'text/event-stream' })
+    if (request.url === '/v1/responses' && readyRunId === 'run-native-tool-midturn') {
+      // Two tool rounds report a nearly full context, so Codex compacts mid-turn before each next sampling.
+      const metadata = JSON.parse(String(rawMetadata)) as Record<string, unknown>
+      const compaction = metadata.request_kind === 'compaction'
+      if (!compaction) midTurnProductRequests += 1
+      const responseId = `midturn-response-${upstreamSequence}`
+      const item = compaction
+        ? { type: 'message', id: `midturn-summary-${upstreamSequence}`, role: 'assistant',
+            content: [{ type: 'output_text', text: 'MIDTURN_SUMMARY' }] }
+        : midTurnProductRequests <= 2
+          ? { type: 'function_call', id: `midturn-call-item-${midTurnProductRequests}`,
+              call_id: `midturn-call-${midTurnProductRequests}`, name: 'ready_read_probe', arguments: '{"query":"q"}' }
+          : { type: 'message', id: `midturn-final-${upstreamSequence}`, role: 'assistant', phase: 'final_answer',
+              content: [{ type: 'output_text', text: 'midturn done' }] }
+      const totalTokens = !compaction && midTurnProductRequests <= 2 ? 60_000 : 500
+      const text = item.type === 'message' ? (item.content as Array<{ text: string }>)[0].text : null
+      const itemEvents = text === null
+        ? [
+            { type: 'response.output_item.added', output_index: 0, item: { ...item, arguments: '', status: 'in_progress' } },
+            { type: 'response.function_call_arguments.delta', output_index: 0, item_id: item.id, delta: '{"query":"q"}' },
+            { type: 'response.function_call_arguments.done', output_index: 0, item_id: item.id, arguments: '{"query":"q"}' },
+          ]
+        : [
+            { type: 'response.output_item.added', output_index: 0, item: { ...item, content: [] } },
+            { type: 'response.output_text.delta', output_index: 0, content_index: 0, item_id: item.id, delta: text },
+            { type: 'response.output_text.done', output_index: 0, content_index: 0, item_id: item.id, text },
+          ]
+      response.end([
+        { type: 'response.created', response: { id: responseId, model: 'upstream-native-model', status: 'in_progress', output: [] } },
+        ...itemEvents,
+        { type: 'response.output_item.done', output_index: 0, item },
+        { type: 'response.completed', response: { id: responseId, model: 'upstream-native-model', status: 'completed', output: [item],
+          usage: { input_tokens: totalTokens - 10, output_tokens: 10, total_tokens: totalTokens,
+            input_tokens_details: { cached_tokens: 0 }, output_tokens_details: { reasoning_tokens: 0 } } } },
+      ].map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(''))
+      return
+    }
     if (request.url === '/v1/responses') {
       if (readyRunId === 'run-native-tool-long') {
         if (upstreamText.includes('UNEXPECTED_TOOL_RESULT')) {
@@ -891,8 +936,8 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
       const automatic = verifyCodexAutomaticCompactionEvidence({ gatewayRepository, readyRunId: run.runId,
         codexThreadId: candidate.codexThreadId, codexTurnId: candidate.codexTurnId,
         upstreamProfileSnapshotDigest: snapshotByRun.get(run.runId)!.snapshotDigest,
-        productToolSurfaceDigest: run.readyToolSurface.toolSurfaceDigest, thread: nativeThread })
-      candidate.contextState = { ...candidate.contextState, automaticCompactionExchanges: automatic ? [automatic] : [] }
+        productRequestToolsDigest: codexRequestToolsDigest(run.readyToolSurface), thread: nativeThread })
+      candidate.contextState = { ...candidate.contextState, automaticCompactionExchanges: automatic }
       repository.recordEngineTerminalCandidate({
         readyRunId: run.runId,
         codexThreadId: candidate.codexThreadId,
@@ -1054,16 +1099,17 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
         && automaticRows[1].inputMaxStringCharacters < automaticRows[0].inputMaxStringCharacters,
       JSON.stringify(automaticRows),
     )
-    const automaticEvidence = verifyCodexAutomaticCompactionEvidence({
+    const [automaticEvidence, ...extraAutomaticEvidence] = verifyCodexAutomaticCompactionEvidence({
       gatewayRepository,
       readyRunId: secondRun.runId,
       codexThreadId: startedThread.thread.id,
       codexTurnId: secondTurn.turnId,
       upstreamProfileSnapshotDigest: snapshot.snapshotDigest,
-      productToolSurfaceDigest: secondRun.readyToolSurface.toolSurfaceDigest,
+      productRequestToolsDigest: codexRequestToolsDigest(secondRun.readyToolSurface),
       thread: automaticReadback.thread,
     })
     assert.ok(automaticEvidence)
+    assert.equal(extraAutomaticEvidence.length, 0)
     assert.ok(automaticEvidence.automaticRequestSequence < automaticEvidence.automaticResponseSequence)
     assert.ok(automaticEvidence.automaticResponseSequence < automaticEvidence.successorProductRequestSequence)
     assert.ok(automaticEvidence.successorProductRequestSequence < automaticEvidence.successorProductResponseSequence)
@@ -1298,6 +1344,184 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
     assert.equal(toolResponseDeliveries, deliveriesBeforeLongTool + 1)
     assert.ok(upstreamPaths.includes('/v1/responses'))
     assert.ok(upstreamBodies.some((body) => body.model === 'upstream-native-model'))
+
+    // 2026-10-06: a 37-tool document turn filled the context; Codex compacted mid-turn and the gateway rejected it,
+    // then dropped the turn's Ready context after compaction, and closeout accepted only one compaction per turn.
+    const midTurnScopeId = 'scope-e3-native-tool-midturn'
+    const midTurnThreadBindingId = 'thread-binding-e3-native-tool-midturn'
+    const midTurnThreadCwd = join(state.threadCwdRoot, midTurnThreadBindingId)
+    mkdirSync(midTurnThreadCwd, { recursive: true })
+    repository.createEmptyAliasGeneration({
+      threadBindingId: midTurnThreadBindingId, aliasId: midTurnScopeId, aliasGeneration: 1,
+      readyScopeId: midTurnScopeId, runtimeManifestDigest: runtime.manifestDigest,
+      protocolSchemaDigest: 'protocol-schema-e3', createdAt: new Date().toISOString(),
+    })
+    const midTurnRun = reserveAndAdmit('run-native-tool-midturn', 'TRIGGER_MID_TURN_COMPACTION', false,
+      nativeFailureSnapshot, midTurnScopeId, midTurnThreadBindingId, midTurnThreadCwd, toolSurface)
+    const midTurnThread = await client.threadStart({
+      model: 'ready-e0-model', modelProvider: 'ready_gateway',
+      allowProviderModelFallback: false, cwd: midTurnThreadCwd,
+      approvalPolicy: 'never', sandbox: 'read-only',
+      runtimeWorkspaceRoots: [], environments: [],
+      // Production sets only the window; Codex derives the compaction threshold from it, which the 60k usage exceeds.
+      config: { model_context_window: 50_000 },
+      dynamicTools: [{ type: 'function', name: responseTool.name, description: responseTool.description, inputSchema: toolParameters }],
+      developerInstructions,
+    })
+    const midTurnInput = new CodexTurnInputBuilder().build(midTurnRun.ingress, {
+      threadId: midTurnThread.thread.id, turnRequestId: 'client-message-run-native-tool-midturn',
+      readyRunId: midTurnRun.runId, reasoningEffort: nativeFailureSnapshot.snapshot.reasoningEffort,
+      toolSurfaceDigest: midTurnRun.readyToolSurface.toolSurfaceDigest,
+      turnContractDigest: `turn-contract-${midTurnRun.runId}`,
+      upstreamProfileSnapshotDigest: nativeFailureSnapshot.snapshotDigest,
+      readyMemorySnapshot: midTurnRun.readyMemorySnapshot,
+    })
+    if (!midTurnInput.ok) throw new Error(midTurnInput.code)
+    const midTurnCandidate = await new CodexTurnCollector(client).collect({
+      readyTaskId: midTurnRun.taskId, readyRunId: midTurnRun.runId, scopeId: midTurnScopeId,
+      codexThreadId: midTurnThread.thread.id,
+      startTurn: () => client.turnStart(midTurnInput.params),
+      terminalTimeoutMs: 20_000,
+      actionReceiptRefs: [], interactionState: null, waitingFor: null,
+      terminalReasonCandidate: 'done', abortInitiator: null,
+      budgetState: {}, contextState: {}, providerDiagnostics: {},
+      recoveryCheckpointRef: null, browserContinuationRef: null,
+      browserProofRefs: [], otherProofRefs: [], projectionPatchRefs: [],
+      allowNullPhaseFallback: true, allowDirectProvisionalStream: false, onProvisionalDelta: () => undefined,
+    })
+    assert.equal(midTurnCandidate.engineOutcome, 'completed', JSON.stringify({
+      candidate: midTurnCandidate, stderr: stderr.join('').slice(-4_000), upstreamBody: upstreamBodies.at(-1),
+    }))
+    assert.equal(midTurnCandidate.usedToolCalls.length, 2)
+    assert.equal(midTurnCandidate.kind === 'native_terminal' && midTurnCandidate.candidateText, 'midturn done')
+    const midTurnRows = gatewayRepository.readTurnGatewayEvidence({
+      readyRunId: midTurnRun.runId, codexThreadId: midTurnThread.thread.id, codexTurnId: midTurnCandidate.codexTurnId,
+    })
+    assert.deepEqual(midTurnRows.map((row) => row.requestKind),
+      ['product', 'automatic_compaction', 'product', 'automatic_compaction', 'product'],
+      'both mid-turn compactions crossed the Ready gateway and the turn continued after each')
+    const midTurnReadback = (await client.threadRead({ threadId: midTurnThread.thread.id, includeTurns: true })).thread
+    const midTurnEvidence = verifyCodexAutomaticCompactionEvidence({
+      gatewayRepository, readyRunId: midTurnRun.runId, codexThreadId: midTurnThread.thread.id,
+      codexTurnId: midTurnCandidate.codexTurnId, upstreamProfileSnapshotDigest: nativeFailureSnapshot.snapshotDigest,
+      productRequestToolsDigest: codexRequestToolsDigest(midTurnRun.readyToolSurface), thread: midTurnReadback,
+    })
+    assert.equal(midTurnEvidence.length, 2, 'each compaction is paired with the request after it')
+    midTurnCandidate.contextState = { ...midTurnCandidate.contextState, automaticCompactionExchanges: midTurnEvidence }
+    const midTurnHistory = resolveCodexHistoryObservation({
+      candidate: midTurnCandidate, prepared: midTurnRun,
+      expectedClientUserMessageId: 'client-message-run-native-tool-midturn', thread: midTurnReadback,
+      publicationDiverged: false, gatewayEvidence: midTurnRows,
+    })
+    assert.equal(midTurnHistory.kind, 'continuation_safe', JSON.stringify(midTurnHistory))
+
+    // 2026-10-07: after Ready restarted, manual compaction targeted a thread the new runtime process had not loaded.
+    // Codex answered “thread not found”, the request stayed pending with its fence, and boot recovery then called it
+    // unknown so the conversation could only be reset. Drive the production lifecycle pieces over the real binary.
+    const loadedThreads = new Set<string>()
+    const unexpected = (): never => { throw new Error('unexpected_lifecycle_call') }
+    const stableRuntime = new StableNativeRuntime(() => session!.getClient())
+    let lifecycleAdapter: ReadyCodexLifecycleAdapter<unknown> | null = null
+    const createManualController = () => new CodexManualCompactionController({
+      repository, gatewayRepository, getSession: () => session,
+      ensureThreadLoaded: async (identity) => { await lifecycleAdapter!.ensureNativeThreadLoaded(identity) },
+      ownerMainBootId: 'main-boot-e3', timeoutMs: 20_000,
+      now: () => new Date().toISOString(), nowMs: Date.now,
+    })
+    let manualController = createManualController()
+    const lifecycleStore = createLifecycleStore({
+      repository, nativeRuntime: stableRuntime, getHost: () => null, getRegistry: () => registry,
+      createAliasAtomic: unexpected, loadedThreads,
+      getActiveConnectionEpoch: () => session!.getActiveConnectionEpoch(),
+      currentRuntimeManifestDigest: runtime.manifestDigest, currentProtocolSchemaDigest: 'protocol-schema-e3',
+      settleHostFailureCloseout: unexpected, scheduleThreadArchiveCleanup: () => undefined,
+      sealClosedConversationInOpenTransaction: unexpected, settleEngineTerminalUserStop: unexpected,
+      settleReadbackTerminalUserStop: unexpected, retryEngineTerminalUserStopFinalization: unexpected,
+      get manualCompactionController() { return manualController },
+      getDeveloperInstructions: () => developerInstructions, getNativeModelSettings: unexpected,
+      getThreadDeveloperInstructions: (digest) => {
+        assert.equal(digest, instructionDigest)
+        return developerInstructions
+      },
+    })
+    lifecycleAdapter = new ReadyCodexLifecycleAdapter<unknown>({
+      nativeRuntime: stableRuntime,
+      threadResumePort: new CodexThreadResumeAuthority(() => session),
+      collector: new CodexTurnCollector(stableRuntime),
+      inputBuilder: new CodexTurnInputBuilder(),
+      lifecycleStore,
+      closeout: {} as never,
+    })
+    // Each restart stands for a new Ready launch, which starts with a fresh supervisor and crash budget.
+    const restartRuntime = async () => {
+      await session!.stop()
+      supervisor.resetCrashBudgetForExplicitRetry()
+      loadedThreads.clear()
+      await session!.startAndInitialize({ registry, snapshot: repository.readRecoverySnapshot(() => false) })
+      client = session!.getClient()
+    }
+    const mainIdentity = { aliasId: scopeId, aliasGeneration: 1 }
+    const snapshotOf = async () => classifyLifecycleOperation(
+      (await lifecycleStore.readLifecycleOperation(mainIdentity)).facts,
+    )
+    const fenceCount = () => db.prepare(`
+      SELECT COUNT(*) AS count FROM codex_thread_dispatch_fences WHERE thread_binding_id = ?
+    `).get<{ count: number }>(threadBindingId)?.count
+
+    // The main thread was compacted before the earlier restart. Codex rebuilds a compacted thread's context on resume
+    // without its developer instructions unless the resume carries them; the gateway would refuse the next turn.
+    await restartRuntime()
+    await lifecycleAdapter.ensureNativeThreadLoaded(mainIdentity)
+    await runTurn(reserveAndAdmit('run-after-restart', 'AFTER_RESTART_TURN', true), 'AFTER_RESTART_TURN')
+
+    await restartRuntime()
+    const rejectedPending = await manualController.begin(mainIdentity)
+    await assert.rejects(
+      client.threadCompactStart({ threadId: startedThread.thread.id }),
+      (error: { code?: string; details?: { message?: string } }) => (
+        error.code === 'rpc_rejected' && /thread not found/.test(error.details?.message || '')
+      ),
+      'an unloaded thread cannot be compacted',
+    )
+    assert.equal(fenceCount(), 1, 'the rejected request is left pending with its fence, as in the user data')
+    assert.equal(await snapshotOf(), 'manual_compaction_pending')
+
+    await restartRuntime()
+    manualController = createManualController()
+    const rejectedRecovery = repository.readRecoverySnapshot(() => false).manualCompactions
+      .find((entry) => entry.manualCompactionId === rejectedPending.manualCompactionId)
+    assert.equal(rejectedRecovery?.latestAttempt?.responseKind, 'rejected')
+    assert.equal(await manualController.reconcileRecovery(rejectedRecovery!), 'settled')
+    assert.deepEqual(db.prepare(`
+      SELECT abandoned_reason, unknown_at FROM codex_manual_compaction_bindings WHERE manual_compaction_id = ?
+    `).get(rejectedPending.manualCompactionId), { abandoned_reason: 'dispatch_rejected', unknown_at: null })
+    assert.equal(fenceCount(), 0, 'boot recovery released the fence instead of calling it unknown')
+    assert.equal(await snapshotOf(), 'idle_native_thread')
+
+    const upstreamBeforeManual = upstreamBodies.length
+    const compacted = await lifecycleAdapter.compactSession(mainIdentity)
+    assert.equal(compacted.ok, true, JSON.stringify(compacted))
+    if (!compacted.ok || compacted.action !== 'manual_compact') throw new Error('manual_compaction_failed')
+    assert.equal(fenceCount(), 0)
+    assert.equal(upstreamBodies.length, upstreamBeforeManual + 1, 'the compaction request crossed the Ready gateway')
+    const compactedRead = await client.threadRead({ threadId: startedThread.thread.id, includeTurns: true })
+    assert.deepEqual(compactedRead.thread.turns.find((turn) => turn.id === compacted.codexTurnId)?.items
+      .map((item) => item.type), ['contextCompaction'])
+    const repeated = await lifecycleAdapter.compactSession(mainIdentity)
+    assert.equal(!repeated.ok && repeated.code, 'no_active_operation', 'nothing new since the last compaction')
+    await runTurn(reserveAndAdmit('run-after-manual', 'AFTER_MANUAL_COMPACTION', true), 'AFTER_MANUAL_COMPACTION')
+
+    const interrupted = await manualController.begin(mainIdentity)
+    await restartRuntime()
+    manualController = createManualController()
+    const interruptedRecovery = repository.readRecoverySnapshot(() => false).manualCompactions
+      .find((entry) => entry.manualCompactionId === interrupted.manualCompactionId)
+    assert.equal(interruptedRecovery?.latestAttempt, null, 'the request never left Ready before the restart')
+    assert.equal(await manualController.reconcileRecovery(interruptedRecovery!), 'observing')
+    await waitUntil(() => db.prepare(`
+      SELECT consumed_at FROM codex_manual_compaction_bindings WHERE manual_compaction_id = ?
+    `).get<{ consumed_at: string | null }>(interrupted.manualCompactionId)?.consumed_at || null)
+    assert.equal(fenceCount(), 0, 'the redispatch resumed the thread first and completed')
 
     assert.equal(db.pragma('quick_check', { simple: true }), 'ok')
   } finally {

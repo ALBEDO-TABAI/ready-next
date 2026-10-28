@@ -9,6 +9,22 @@ export interface RSSContentServiceDeps {
   extractor: ExtractionAdapter
 }
 
+/**
+ * A link that names no article of its own. RSSHub's anonymous Xiaohongshu route has no note ids, so every note
+ * links to the author's profile, whose page would otherwise be saved as each note's body.
+ */
+export function rssLinkWithoutArticleBody(link: string): string | null {
+  try {
+    const url = new URL(link)
+    if (url.hostname.replace(/^www\./, '') === 'xiaohongshu.com' && /^\/user\/profile\/[^/]+\/?$/.test(url.pathname)) {
+      return '小红书订阅只提供笔记的标题和封面，这条链接指向作者主页而不是笔记；完整笔记请打开原文查看。'
+    }
+  } catch {
+    return null
+  }
+  return null
+}
+
 /** Loading is an explicit action. Queries and reads never invoke this service. */
 export class RSSContentService {
   private readonly inFlight = new Map<string, { itemId: string; revision: string; controller: AbortController; promise: Promise<RSSArticle> }>()
@@ -40,6 +56,8 @@ export class RSSContentService {
     try {
       const parsed = new URL(url)
       if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Unsupported article URL')
+      const withoutBody = rssLinkWithoutArticleBody(url)
+      if (withoutBody) throw new Error(withoutBody)
       const response = await this.deps.fetchHtml(url, signal)
       const extracted = await this.deps.extractor.extract({ html: response.html, url: response.finalUrl })
       const markdown = extracted.contentMarkdown

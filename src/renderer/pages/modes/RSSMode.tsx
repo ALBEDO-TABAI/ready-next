@@ -383,6 +383,7 @@ export default function RSSMode({
       } finally { if (current()) useRSSSession.getState().finishReveal(request.id) }
     })()
     return () => { live = false; useRSSSession.getState().finishReveal(request.id) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on pendingReveal.id: every requestReveal creates a new object with a fresh UUID, so the id identifies the request whose reference is captured here
   }, [pendingReveal?.id, isActive, isSuspended, handleItemClick, setDigestView, setQuery])
 
   const applySavedItemState = useCallback(async (itemId: string) => {

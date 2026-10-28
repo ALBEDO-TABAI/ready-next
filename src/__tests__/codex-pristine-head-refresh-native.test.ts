@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import ts from 'typescript'
 
 import type { DatabaseConnection } from '../main/modules/database/connection'
 import { runMigrations, type MigrationDatabase } from '../main/modules/migrations'
@@ -11,6 +10,7 @@ import { digestCanonicalJson } from '../main/modules/agent-control/codex-runtime
 import { CODEX_PRISTINE_CONTRACT_REFRESH_GUARDS_SQL } from '../main/modules/agent-control/codex-runtime/codex-binding-schema'
 import { loadSqliteAfterGuardForTest, skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { createCodexProductionPorts } from './helpers/codex-production-composition-harness'
+import { refreshDriftedPristineFreshStartHeads } from '../main/modules/agent-control/codex-runtime/composition/runtime-start'
 
 // The extracted production closure executes against the real repository and projectors.
 // It does not initialize the sidecar or claim installed-app/IPC delivery coverage.
@@ -24,27 +24,14 @@ const currentContract = { runtimeManifestDigest: 'runtime-v2', protocolSchemaDig
 const historicalSchema = readFileSync(new URL('./fixtures/ready-pre118-schema.sql', import.meta.url), 'utf8')
 
 function productionBootRefresh(repository: CodexBindingRepository, publish: (aliasId: string, candidate: unknown) => void) {
-  // allow-source-grep: Execute the exact boot refresh loop with real database owners; no source-string assertions or sidecar replacement behavior is counted as boot coverage.
-  const source = readFileSync(new URL('../main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts', import.meta.url), 'utf8')
-  const parsed = ts.createSourceFile('production.ts', source, ts.ScriptTarget.Latest, true)
-  let loop: ts.ForOfStatement | undefined
-  const visit = (node: ts.Node): void => {
-    if (ts.isForOfStatement(node) && ts.isCallExpression(node.expression)
-      && ts.isPropertyAccessExpression(node.expression.expression)
-      && node.expression.expression.name.text === 'readDriftedFreshStartAliases') loop = node
-    ts.forEachChild(node, visit)
-  }
-  visit(parsed)
-  if (!loop) throw new Error('production_boot_refresh_loop_missing')
-  const compiled = ts.transpileModule(loop.getText(parsed), {
-    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
-  }).outputText
-  return () => Function('repository', 'verified', 'restartSweepAt', 'publishCodexActionSurfaceInvalidation', compiled)(
+  // The production boot refresh runs with real database owners; no sidecar replacement behavior is counted as boot coverage.
+  return () => refreshDriftedPristineFreshStartHeads({
     repository,
-    { manifestDigest: currentContract.runtimeManifestDigest,
+    verified: { manifestDigest: currentContract.runtimeManifestDigest,
       manifest: { stableV2SchemaSha256: currentContract.protocolSchemaDigest } },
-    at, publish,
-  )
+    createdAt: at,
+    publishCodexActionSurfaceInvalidation: publish,
+  })
 }
 
 function fixture(t: Parameters<typeof skipIfSqliteUnavailable>[0], kind: 'fresh_start' | 'legacy' = 'fresh_start') {

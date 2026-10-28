@@ -1047,12 +1047,17 @@ export function describeApprovedWidgetProps(names: Iterable<DocumentWidgetCompon
   return blocks.join('\n')
 }
 
+// A rejected spec says what would have been accepted, so the caller can correct it instead of guessing.
+function unknownComponentMessage(component: unknown): string {
+  return `Unknown approved document widget component: ${String(component)}. Approved components: ${WIDGET_COMPONENT_IDS.join(', ')}`
+}
+
 export function validateDocumentWidgetComponentSpec(spec: DocumentWidgetComponentSpec): DocumentWidgetValidateResult {
   const entry = getComponentEntry(spec.component)
   if (!entry) {
     return {
       ok: false,
-      errors: [`Unknown approved document widget component: ${String(spec.component)}`],
+      errors: [unknownComponentMessage(spec.component)],
     }
   }
 
@@ -1072,6 +1077,7 @@ export function validateDocumentWidgetComponentSpec(spec: DocumentWidgetComponen
       errors.push(...result.error.issues.map((issue) => issue.path.length > 0
         ? `${entry.name}.${issue.path.join('.')}: ${issue.message}`
         : `${entry.name}: ${issue.message}`))
+      errors.push(`${entry.name} props (!required ?optional):\n${describeApprovedWidgetProps([entry.name])}`)
     } else if (entry.name === 'relationship_graph') {
       const props = result.data as z.infer<typeof componentSchemas.relationship_graph>
       const nodeIds = new Set<string>()
@@ -1154,7 +1160,7 @@ export function compileDocumentWidgetSpec(
 ): CompiledDocumentWidget {
   const entry = getComponentEntry(spec.component)
   if (!entry) {
-    throw new Error(`Unknown approved document widget component: ${String(spec.component)}`)
+    throw new Error(unknownComponentMessage(spec.component))
   }
 
   const validation = validateDocumentWidgetComponentSpec(spec)

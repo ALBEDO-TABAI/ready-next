@@ -941,3 +941,30 @@ test('pending-interaction restart candidate wakes a live collector before termin
   }
   collector.releaseRun('run-1')
 })
+
+// 2026-10-06: a turn that streamed narration before its tools failed transiently; the narration was counted as a
+// shown answer, so the thread that should have continued was set aside and the user had to restate.
+test('streamed narration never counts as a shown answer, finished or cut off', async () => {
+  const runtime = new FakeNativeRuntime()
+  const collector = new CodexTurnCollector(runtime)
+  const collection = collector.collect(context(runtime, async () => ({ turn: turn('inProgress') })))
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  const stream = (id: string, phase: 'commentary' | 'final_answer', text: string, complete: boolean) => {
+    runtime.emit({ method: 'item/started', params: { threadId: 'thread-1', turnId: 'turn-1', startedAtMs: 1,
+      item: { type: 'agentMessage', id, text: '', phase } } })
+    runtime.emit({ method: 'item/agentMessage/delta', params: { threadId: 'thread-1', turnId: 'turn-1', itemId: id, delta: text } })
+    if (complete) {
+      runtime.emit({ method: 'item/completed', params: { threadId: 'thread-1', turnId: 'turn-1', completedAtMs: 2,
+        item: { type: 'agentMessage', id, text, phase } } })
+    }
+  }
+  stream('narration-done', 'commentary', '先读一遍文档', true)
+  stream('narration-cut', 'commentary', '接着处理第二', false)
+  stream('answer-cut', 'final_answer', '已经换好了一半', false)
+  runtime.emit({ method: 'turn/completed', params: { threadId: 'thread-1', turn: turn('failed') } })
+  const candidate = await collection
+  assert.equal(candidate.kind, 'native_terminal')
+  if (candidate.kind !== 'native_terminal') throw new Error('unexpected_candidate')
+  assert.deepEqual(candidate.runtimeDiagnostics.commentaryItemIds, ['narration-done'])
+  assert.deepEqual(candidate.runtimeDiagnostics.finalDeltaItemIds, ['answer-cut'])
+})

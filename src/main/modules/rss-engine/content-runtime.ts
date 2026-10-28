@@ -2,8 +2,12 @@ import { getDatabase } from '../database'
 import { fetchClipHtml } from '../clipping/clip-fetch'
 import { ReadabilityJsdomAdapter } from '../clipping/readability-jsdom-adapter'
 import { RSSContentService } from './content-service'
+import { RSSTranslationService } from './translation-service'
+import { completeRSSModel } from './model-completion'
+import { hasRSSProcessingModel, rssModelConfig } from './model-readiness'
 
 let service: RSSContentService | null = null
+let translations: RSSTranslationService | null = null
 
 export function getRSSContentService(): RSSContentService {
   if (!service) {
@@ -27,6 +31,29 @@ export function getRSSContentService(): RSSContentService {
   return service
 }
 
+/** Article translations derive from saved bodies and use the same model, readiness and limits as RSS judgments. */
+export function getRSSTranslationService(): RSSTranslationService {
+  if (!translations) {
+    const rss = getDatabase().rss
+    translations = new RSSTranslationService({
+      store: rss.translations,
+      getArticle: (id) => rss.content.getArticle(id),
+      assertModelReady: () => {
+        if (!hasRSSProcessingModel()) throw new Error('请先在 Ready 中配置可用的模型，再翻译文章。')
+      },
+      complete: (request) => completeRSSModel(rssModelConfig(), request),
+      notify: (itemId, targetLang) => {
+        void import('electron').then(({ BrowserWindow }) => {
+          for (const window of BrowserWindow.getAllWindows()) {
+            if (!window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send('rss:translationChanged', { itemId, targetLang })
+          }
+        })
+      },
+    })
+  }
+  return translations
+}
+
 export async function stopRSSContentService(): Promise<void> {
-  await service?.stop()
+  await Promise.all([service?.stop(), translations?.stop()])
 }

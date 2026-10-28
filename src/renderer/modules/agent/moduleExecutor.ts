@@ -11,6 +11,8 @@ import {
 import type { AgentArtifact, AgentModuleKind, ScopeRunState, ScopeRunTaskStepStatus, ToolTraceEvent } from './types'
 import { useDocTabs } from '../../stores/useDocTabs'
 import { executeCodexCurrentDocumentRead } from './codexCurrentDocumentRead'
+import { codexCurrentDocumentAnchorSchema } from '../../../shared/ipc-contracts/agent-runtime'
+import { digestCodexDocumentValue, recordCodexDocumentEdit } from './codexCurrentDocumentAnchor'
 
 function toExecutionKind(tool: string): ScopeRunState['executionKind'] {
   if (tool === 'rss.analyzeItem') return 'pipeline'
@@ -333,6 +335,15 @@ export async function executeModuleToolAction(
     }
   }
 
+  // A Codex edit of the current document carries the turn's authority; its result stays readable this turn.
+  const writeAuthority = args.__readyResourceWrite as { scopeId?: unknown; anchor?: unknown } | undefined
+  const editAnchor = writeAuthority && typeof writeAuthority.scopeId === 'string'
+    ? codexCurrentDocumentAnchorSchema.safeParse(writeAuthority.anchor)
+    : null
+  const editedTabContent = () => useDocTabs.getState().tabs.find((tab) => (
+    editAnchor?.success && tab.id === editAnchor.data.tabId
+  ))?.content
+  const contentBeforeEdit = editAnchor?.success ? editedTabContent() : undefined
   const docAction = mapToolActionToDocAction(tool, args)
   if (docAction) {
     pushTrace('call', `执行 ${tool}`, 'tool_running', { module: 'document', executionKind: 'deterministic' })
@@ -343,6 +354,15 @@ export async function executeModuleToolAction(
     const preSaveTab=preSaveSnapshot?useDocTabs.getState().tabs.find((tab)=>tab.id===preSaveSnapshot.tabId):null
     const creationPending=preSaveTab?.tagForgeCreationPending===true
     const result = await performDocActionWithMetadata(docAction)
+    const contentAfterEdit = editAnchor?.success ? editedTabContent() : undefined
+    if (editAnchor?.success && typeof contentBeforeEdit === 'string' && typeof contentAfterEdit === 'string'
+      && contentAfterEdit !== contentBeforeEdit) {
+      const [beforeDigest, afterDigest] = await Promise.all([
+        digestCodexDocumentValue(contentBeforeEdit),
+        digestCodexDocumentValue(contentAfterEdit),
+      ])
+      recordCodexDocumentEdit(String(writeAuthority?.scopeId), editAnchor.data, beforeDigest, afterDigest)
+    }
     let summary = result.summary
     const failureReason = classifyDocActionFailureReason(docAction, summary)
     const payload: Record<string, unknown> = {

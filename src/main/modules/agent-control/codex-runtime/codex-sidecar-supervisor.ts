@@ -184,6 +184,7 @@ export class MacCodexProcessInspector implements CodexProcessInspector {
         try {
           executableSha256 = sha256(readFileSync(parsed.executablePath))
         } catch {
+          // silent-catch: an unreadable executable gets no digest, so the process cannot match a lease binary digest
           executableSha256 = null
         }
       }

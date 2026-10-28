@@ -21,6 +21,7 @@ import {
   buildReadyBoundTurnToolAuthorization,
   buildReadyToolSurface,
   buildReadyTurnToolAuthorization,
+  codexRequestToolsDigest,
   CodexToolSurfaceError,
   digestCodexRootToolSurface,
   normalizeCodexDynamicToolSchema,
@@ -144,11 +145,12 @@ test('wire tool schema mirrors pinned Codex normalization without weakening Read
     additionalProperties: false,
   }
   const normalized = normalizeCodexDynamicToolSchema(original)
+  // Measured on pinned 0.160.1 (2026-10-07): minItems is kept, every other constraint keyword is dropped.
   assert.deepEqual(normalized, {
     type: 'object',
     properties: {
       title: { type: 'string' },
-      items: { type: 'array', items: { type: 'integer' } },
+      items: { type: 'array', minItems: 1, items: { type: 'integer' } },
       metadata: { type: 'object', properties: {} },
     },
     required: ['title'],
@@ -162,6 +164,62 @@ test('wire tool schema mirrors pinned Codex normalization without weakening Read
   assert.notEqual(surface.entries[0].schemaDigest, digestCanonicalJson(normalized))
   assert.deepEqual(surface.responsesTools[0].parameters, normalized)
   assert.equal(surface.toolSurfaceDigest, digestCanonicalJson(surface.responsesTools))
+})
+
+test('wire tool schema keeps minItems only as the non-negative integer the runtime accepts', () => {
+  const schema = (minItems: unknown) => ({
+    type: 'object',
+    properties: { values: { type: 'array', items: { type: 'string' }, minItems } },
+  })
+  assert.deepEqual(normalizeCodexDynamicToolSchema(schema(0)).properties, {
+    values: { type: 'array', items: { type: 'string' }, minItems: 0 },
+  })
+  // The runtime refuses the whole tool at thread start for these; Ready refuses them when building the surface.
+  for (const invalid of [1.5, -1, '1', null]) {
+    assert.throws(() => normalizeCodexDynamicToolSchema(schema(invalid)), /tool_surface_schema_invalid/)
+  }
+})
+
+// 2026-10-07: every surface frozen under 0.149 lacks minItems in responsesTools, while 0.160.1 sends it. The
+// stored serialization and its digests stay the thread's identity; the wire is derived from its dynamic tools.
+test('a surface frozen under an earlier serialization stays valid and derives the current request tools', () => {
+  const tool = definition('upload_files')
+  tool.schema = {
+    type: 'object',
+    properties: { ids: { type: 'array', items: { type: 'string' }, minItems: 1 } },
+    required: ['ids'],
+    additionalProperties: false,
+  }
+  const current = buildReadyToolSurface({ surfaceId: 'lineage', toolDefinitions: [tool] })
+  const earlierResponsesTools = current.responsesTools.map((entry) => ({
+    ...entry,
+    parameters: {
+      ...entry.parameters,
+      properties: { ids: { type: 'array', items: { type: 'string' } } },
+    },
+  }))
+  const frozen = {
+    ...current,
+    responsesTools: earlierResponsesTools,
+    toolSurfaceDigest: digestCanonicalJson(earlierResponsesTools),
+    surfaceSnapshotDigest: digestCanonicalJson({
+      entries: current.entries, dynamicTools: current.dynamicTools, responsesTools: earlierResponsesTools,
+    }),
+  }
+  assert.doesNotThrow(() => assertReadyToolSurface(frozen))
+  assert.notEqual(frozen.toolSurfaceDigest, current.toolSurfaceDigest)
+  assert.equal(codexRequestToolsDigest(frozen), current.toolSurfaceDigest)
+  assert.equal(codexRequestToolsDigest(current), current.toolSurfaceDigest)
+
+  const tampered = [
+    { ...frozen, toolSurfaceDigest: current.toolSurfaceDigest },
+    { ...frozen, surfaceSnapshotDigest: current.surfaceSnapshotDigest },
+    { ...frozen, responsesTools: [{ ...earlierResponsesTools[0], name: 'other_tool' }] },
+    { ...frozen, dynamicTools: [{ ...frozen.dynamicTools[0], description: 'changed' }] },
+  ]
+  for (const value of tampered) {
+    assert.throws(() => assertReadyToolSurface(value as typeof frozen), /tool_surface_digest_mismatch/)
+  }
 })
 
 test('wire tool schema performs the pinned first compaction pass for large schemas', () => {

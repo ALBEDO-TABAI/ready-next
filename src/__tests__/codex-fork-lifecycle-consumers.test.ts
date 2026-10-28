@@ -18,6 +18,7 @@ const binding = {
   threadBindingId: 'binding-child', aliasId: 'alias', aliasGeneration: 2,
   readyScopeId: 'scope', codexThreadId: child.id, codexSessionId: child.id,
   isolatedThreadCwd: child.cwd, materializationKind: 'native_fork',
+  instructionContractDigest: 'instruction-contract',
 }
 
 test('resume resolution consumes the confirmed fork source from durable materialization', async () => {
@@ -32,6 +33,8 @@ test('resume resolution consumes the confirmed fork source from durable material
       },
     },
     loadedThreads: new Set(),
+    // Resume re-declares the instructions the thread was created with.
+    getThreadDeveloperInstructions: (digest: string) => `instructions:${digest}`,
   } as unknown as Parameters<typeof createLifecycleStore>[0])
   const prepared = { readyToolHostIdentity: { scopeId: 'scope' } } as Parameters<
     typeof store.resolveThreadBinding
@@ -39,6 +42,7 @@ test('resume resolution consumes the confirmed fork source from durable material
   assert.deepEqual(await store.resolveThreadBinding({ aliasId: 'alias', aliasGeneration: 2 }, prepared), {
     state: 'resume_required', threadId: child.id,
     expectedCwd: child.cwd, expectedForkedFromId: 'native-source',
+    developerInstructions: 'instructions:instruction-contract',
   })
   assert.deepEqual(reads, ['binding-child'])
   materializationState = 'unknown'

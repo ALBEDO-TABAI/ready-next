@@ -167,7 +167,7 @@ export function resolveFormalNativeInputCoverage(input: {
 }
 
 export function resolveAcceptedNativePrefixHead(input: {
-  legacy: boolean
+  predatesMaterializationRecords: boolean
   acceptedHead: CodexAcceptedNativePrefixHead | null
   currentRunId: string
   currentNativeTurnId: string | null
@@ -178,7 +178,7 @@ export function resolveAcceptedNativePrefixHead(input: {
   uncommittedOriginCount: number
 }): AcceptedNativePrefixResolution {
   if (input.uncommittedOriginCount > 8) return { kind: 'unknown', reason: 'uncommitted_tail_budget_exceeded' }
-  if (input.legacy || !input.currentNativeTurnId || !input.orderedNativeTurnIds
+  if (input.predatesMaterializationRecords || !input.currentNativeTurnId || !input.orderedNativeTurnIds
     || new Set(input.orderedNativeTurnIds).size !== input.orderedNativeTurnIds.length
     || input.orderedNativeTurnIds.at(-1) !== input.currentNativeTurnId) return { kind: 'unknown' }
   if (input.acceptedHead) {

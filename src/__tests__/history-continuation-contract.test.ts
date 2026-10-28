@@ -6,6 +6,7 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 import {
+  resolveInstructionContractTransition,
   resolveRuntimeCompatibilitySet,
   resolveRuntimeOperationCompatibility,
   type RuntimeContinuityCatalog,
@@ -17,6 +18,7 @@ import {
 } from '../main/modules/agent-control/codex-runtime/codex-same-thread-continuation'
 import { digestCanonicalJson } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
 import { loadRuntimeContinuityAssets } from '../main/modules/agent-control/codex-runtime/codex-runtime-continuity-assets'
+import { resolveCodexThreadInstructionContract } from '../main/modules/agent-control/codex-runtime/codex-product-turn-authorization'
 import {
   buildReadyToolSurface,
   compareReadyToolSurfaceCompatibility,
@@ -83,6 +85,77 @@ test('release continuity assets reject a missing published operation edge', () =
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
+})
+
+// 2026-10-07: Codex 0.160.1 changed its native base instructions; every resumed thread now sends the new base with
+// Ready's unchanged developer instructions. The verified transition declares that mapping per lineage contract.
+test('checked-in continuity assets map every supported lineage to the current instruction contract', () => {
+  const loaded = loadRuntimeContinuityAssets({
+    assetRoot: fileURLToPath(new URL('../../assets/runtime-continuity', import.meta.url)),
+    targetManifestDigest: currentRuntimeManifestDigest,
+  })
+  const ordinary = loaded.catalog.transitions.filter((transition) => transition.operation === 'ordinary_continuation')
+  assert.ok(ordinary.length > 0)
+  const current = resolveCodexThreadInstructionContract({
+    assetRoot: fileURLToPath(new URL('../../assets/codex-runtime', import.meta.url)),
+    host: null,
+    skillAuthorization: { mode: 'none' },
+  }).instructionContractDigest
+  assert.deepEqual([...new Set(loaded.catalog.transitions.map((transition) => transition.instructionContract?.targetDigest))],
+    [current], 'every edge maps to the contract the pinned runtime and current Ready instructions produce')
+  for (const transition of ordinary) {
+    assert.equal(resolveInstructionContractTransition({
+      catalog: loaded.catalog,
+      sourceManifestDigest: transition.sourceManifestDigest,
+      targetManifestDigest: currentRuntimeManifestDigest,
+      lineageInstructionContractDigest: transition.instructionContract!.sourceDigest,
+    }), transition.instructionContract!.targetDigest)
+    assert.equal(resolveInstructionContractTransition({
+      catalog: loaded.catalog,
+      sourceManifestDigest: transition.sourceManifestDigest,
+      targetManifestDigest: currentRuntimeManifestDigest,
+      lineageInstructionContractDigest: sha('f'),
+    }), null, 'an undeclared lineage is never mapped')
+  }
+})
+
+test('continuity assets reject an instruction-contract mapping that its proof does not carry', () => {
+  const source = fileURLToPath(new URL('../../assets/runtime-continuity', import.meta.url))
+  const root = mkdtempSync(join(tmpdir(), 'ready-runtime-assets-'))
+  try {
+    cpSync(source, root, { recursive: true })
+    const path = join(root, 'runtime-continuity-transitions.json')
+    const value = JSON.parse(readFileSync(path, 'utf8')) as {
+      transitions: Array<{ instructionContract?: { sourceDigest: string; targetDigest: string } }>
+    }
+    value.transitions[0].instructionContract = { ...value.transitions[0].instructionContract!, targetDigest: sha('e') }
+    writeFileSync(path, JSON.stringify(value, null, 2))
+    assert.throws(() => loadRuntimeContinuityAssets({
+      assetRoot: root,
+      targetManifestDigest: currentRuntimeManifestDigest,
+    }), /runtime_continuity_transition_evidence_mismatch/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('instruction-contract mappings must be consistent and only ride compatible edges', () => {
+  const base = {
+    sourceManifestDigest: sha('a'), targetManifestDigest: sha('c'), result: 'compatible' as const, proofDigest: sha('d'),
+  }
+  const mapped = (operation: 'ordinary_continuation' | 'fork_from_accepted_prefix', targetDigest: string) => ({
+    ...base, operation, instructionContract: { sourceDigest: sha('1'), targetDigest },
+  })
+  const check = (transitions: RuntimeContinuityCatalog['transitions']) => resolveInstructionContractTransition({
+    catalog: { contract: 'ready_runtime_continuity_catalog_v1', targetManifestDigest: sha('c'), transitions },
+    sourceManifestDigest: sha('a'), targetManifestDigest: sha('c'), lineageInstructionContractDigest: sha('1'),
+  })
+  assert.equal(check([mapped('ordinary_continuation', sha('2')), mapped('fork_from_accepted_prefix', sha('2'))]), sha('2'))
+  assert.throws(() => check([mapped('ordinary_continuation', sha('2')), mapped('fork_from_accepted_prefix', sha('3'))]),
+    /runtime_continuity_instruction_contract_conflict/)
+  assert.throws(() => check([{ ...mapped('ordinary_continuation', sha('2')), result: 'unsupported',
+    reason: 'native_resume_rejected' }]), /runtime_continuity_instruction_contract_invalid/)
+  assert.equal(check([mapped('fork_from_accepted_prefix', sha('2'))]), null, 'only the ordinary edge maps the lineage')
 })
 
 const catalog: RuntimeContinuityCatalog = {

@@ -93,6 +93,20 @@ function isRouteTimeoutError(message: string): boolean {
   )
 }
 
+/**
+ * The profile page never rendered: Xiaohongshu sent the visitor to its login or security-restriction page
+ * (`website-login/error`, e.g. 300012 "IP 存在风险") or a captcha, and RSSHub waited for the profile tabs until
+ * its page browser closed. Asking again from the same network gets the same page.
+ */
+function isXiaohongshuProfileBlocked(message: string): boolean {
+  const lower = message.toLowerCase()
+  return (
+    lower.includes('website-login/error') ||
+    (lower.includes('waitforselector') && lower.includes('reds-tab-item')) ||
+    message.includes('风控校验')
+  )
+}
+
 function isXiaohongshuRouteParserError(message: string): boolean {
   const lower = message.toLowerCase()
   return (
@@ -778,8 +792,9 @@ export class XiaohongshuScraper extends RSSHubScraper {
     return 'xiaohongshu'
   }
 
+  // RSSHub closes the route's page browser 30s after launch; waiting past that hears what the page showed.
   protected getRouteTimeoutMs(): number {
-    return 35_000
+    return 45_000
   }
 
   extractUserId(url: string): string | null {
@@ -792,12 +807,17 @@ export class XiaohongshuScraper extends RSSHubScraper {
   protected shouldRetryRouteError(message: string): boolean {
     return (
       isTransientBrowserRouteError(message) &&
+      !isXiaohongshuProfileBlocked(message) &&
+      !isRouteTimeoutError(message) &&
       !isChromiumDependencyError(message) &&
       !isLoginOrCookieError(message)
     )
   }
 
   protected normalizeRouteError(message: string, url: string): string {
+    if (isXiaohongshuProfileBlocked(message)) {
+      return '小红书没有打开这个主页：访问被转到了登录或安全限制页，多为当前网络被小红书风控。换个网络后再刷新。'
+    }
     if (isChromiumDependencyError(message)) {
       return `小红书 RSSHub 抓取依赖 Chromium，可先修复 RSS 运行时后重试：${message}`
     }

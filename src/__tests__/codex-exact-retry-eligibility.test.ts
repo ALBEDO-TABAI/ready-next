@@ -76,12 +76,12 @@ test('a consumed Retry source is not applicable, while an exact source may still
 
 test('accepted prefix distinguishes bilateral first-turn proof from unknown earlier native or product history', () => {
   const first = {
-    legacy: false, acceptedHead: null, currentRunId: 'run-b', currentNativeTurnId: 'native-b',
+    predatesMaterializationRecords: false, acceptedHead: null, currentRunId: 'run-b', currentNativeTurnId: 'native-b',
     productRunIds: ['run-b'], manualCompactionCount: 0, orderedNativeTurnIds: ['native-b'], nativeCompactionItemCount: 0, uncommittedOriginCount: 1,
   }
   assert.deepEqual(resolveAcceptedNativePrefixHead(first), { kind: 'proven_native_first_turn_no_prefix' })
   for (const patch of [
-    { legacy: true }, { productRunIds: ['run-a', 'run-b'] },
+    { predatesMaterializationRecords: true }, { productRunIds: ['run-a', 'run-b'] },
     { orderedNativeTurnIds: ['unmapped-native-a', 'native-b'] }, { orderedNativeTurnIds: null },
     { manualCompactionCount: 1 }, { nativeCompactionItemCount: 1 },
   ]) assert.deepEqual(resolveAcceptedNativePrefixHead({ ...first, ...patch }), { kind: 'unknown' })

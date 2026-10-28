@@ -114,6 +114,7 @@ export class CodexSidecarRecoveryOwner {
         await input.prerequisite
         this.settlementPending = false
       } catch (error) {
+        // silent-catch: failUnprovenSettlement publishes the exhausted state and throws with this error
         return this.failUnprovenSettlement(input.trigger, error)
       }
     } else if (this.settlementPending) {
@@ -121,6 +122,7 @@ export class CodexSidecarRecoveryOwner {
         await this.deps.settleFailedAttempt()
         this.settlementPending = false
       } catch (settlementError) {
+        // silent-catch: failUnprovenSettlement publishes the exhausted state and throws with this error
         return this.failUnprovenSettlement(input.trigger, settlementError)
       }
     }
@@ -143,6 +145,7 @@ export class CodexSidecarRecoveryOwner {
           await this.deps.settleFailedAttempt()
           this.settlementPending = false
         } catch (settlementError) {
+          // silent-catch: the settlement failure is folded into lastFailure and thrown as exhaustion after the loop
           lastFailure = new AggregateError(
             [error, settlementError],
             'sidecar_failed_attempt_settlement_unproven',

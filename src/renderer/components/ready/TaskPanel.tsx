@@ -389,6 +389,7 @@ export default function TaskPanel() {
         row.messageVisibilityEpoch,
       )
     )))
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- scopeAuthorityRevision is a deliberate cache-busting dependency: a new callback identity re-runs the refresh effect when scope read authority changes
   }, [currentScopeId, scopeAuthorityRevision])
 
   const handleCancelProjection = useCallback(async () => {

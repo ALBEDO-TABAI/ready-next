@@ -44,6 +44,7 @@ test('gateway responsibilities remain bounded and protocol code cannot own persi
   ))
   const graph = new Map<string, string[]>()
   for (const name of files) {
+    // allow-source-grep: module size and the runtime import graph are static architecture boundaries with no runtime observer
     const source = readFileSync(resolve(root, name), 'utf8')
     assert.ok(source.trimEnd().split('\n').length < 1000, `${name} must remain one bounded responsibility`)
     const imports = runtimeDependencies(source)

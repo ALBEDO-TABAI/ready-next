@@ -297,6 +297,7 @@ function receiptedToolOutput(output: ToolExecutionOutput): {
   try {
     return { output, resultDigest: digestCanonicalJson(output) }
   } catch {
+    // silent-catch: output that cannot be canonically digested is replaced by a tool_result_not_serializable error result
     const safeOutput = createToolExecutionOutput(
       'The tool finished, but returned an invalid result.',
       {
@@ -446,7 +447,7 @@ export class CodexReadyToolBridge implements CodexBoundServerRequestExecutor {
       try {
         await active
       } catch {
-        // The replacement connection decides from the durable receipt below.
+        // silent-catch: the old connection's execution failure is not reused; the replacement connection decides from the durable receipt below
       }
       if (this.inFlight.get(readyActionId) === active) this.inFlight.delete(readyActionId)
       return this.executeBound({

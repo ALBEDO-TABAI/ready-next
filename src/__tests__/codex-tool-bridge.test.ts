@@ -53,6 +53,7 @@ import {
   type ReadyTurnToolAuthorization,
 } from '../main/modules/agent-control/codex-runtime/codex-tool-surface'
 import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
+import { listLiveCodexThreadToolDefinitions } from '../main/modules/agent-control/runtime-core/agent-sdk-tool-executor'
 
 before(() => {
   __setScopeContextEpochDatabaseForTests({
@@ -703,6 +704,38 @@ test('frozen host artifact delivery primitives remain executable without selecti
       },
       defaultToolRegistry,
     ))
+  }
+})
+
+// 2026-10-06: a document turn called the candidate skill_run_shell; the execution check re-resolved it without its
+// input schema, called that surface drift, and restarted the runtime mid-turn.
+test('candidate skill primitives execute against the same definition the thread surface froze', () => {
+  const candidateAuthorization = buildExplicitNoSkillAuthorization('no_skill_signal', {
+    candidateSkillPrimitives: {
+      skillId: 'lark-cli',
+      primitives: ['skill_ask_user', 'skill_read_artifact', 'skill_run_shell'],
+    },
+  })
+  // Whether lark-cli is installed decides codexExecutionSafe; stamp it so only the definition sources are compared.
+  const safe = (definition: ToolDefinition): ToolDefinition => ({ ...definition, codexExecutionSafe: true })
+  const registry = {
+    getToolDefinition: (name: string) => defaultToolRegistry.getToolDefinition(name),
+    getToolDefinitionForExecution: (name: string) => defaultToolRegistry.getToolDefinitionForExecution(name),
+    getToolDefinitionsForGroup: (...args: Parameters<typeof defaultToolRegistry.getToolDefinitionsForGroup>) => (
+      defaultToolRegistry.getToolDefinitionsForGroup(...args).map(safe)
+    ),
+  }
+  for (const toolName of ['skill_run_shell', 'skill_ask_user']) {
+    const frozenDefinition = listLiveCodexThreadToolDefinitions().find((definition) => definition.name === toolName)
+    assert.ok(frozenDefinition, toolName)
+    const executionBinding = binding([toolName], undefined, safe(frozenDefinition), candidateAuthorization)
+    const frozenEntry = executionBinding.toolSurface.entries[0]
+    assert.ok(frozenEntry)
+    assert.doesNotThrow(() => validateCodexFrozenToolExecution(
+      { binding: executionBinding, toolName, args: {}, frozenEntry },
+      registry,
+      () => null,
+    ), toolName)
   }
 })
 

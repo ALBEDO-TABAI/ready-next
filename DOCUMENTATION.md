@@ -80,7 +80,7 @@ IPC request
 
 模型接入统一通过本机网关，上游 Responses、Chat Completions、Messages 共享准入、工具校验和结果保存；连接测试复用同一路径。拆分后的接入文件见代码地图“模型接入”，实际配置验收见 `docs/superpowers/audits/2026-09-26-provider-adapters-validation.md`。
 
-当前固定 runtime 是 0.149.0。历史操作按运行时发布证据和当前冻结合同裁决，不能仅凭版本不同要求清空会话。当前动作可用性由 Main 返回，Renderer 不从旧任务文案猜测；草稿与编辑权独立于发送是否可用。详细合同见 `docs/architecture/current-runtime-contracts.md` §2/§5。
+当前固定 runtime 是 0.160.1。历史操作按运行时发布证据和当前冻结合同裁决，不能仅凭版本不同要求清空会话；升级后的续接证据由 `scripts/probe-codex-runtime-continuity.mjs` 在真实历史的隔离副本上测得，经 `scripts/codex-runtime/write-runtime-continuity-evidence.cjs` 写入 `assets/runtime-continuity/`。当前动作可用性由 Main 返回，Renderer 不从旧任务文案猜测；草稿与编辑权独立于发送是否可用。详细合同见 `docs/architecture/current-runtime-contracts.md` §2/§5。
 
 技能在进入回合前确定，`use_skill`、`use_browser` 不在当前 Codex 工具面。新手动记忆的读取与撤销也进入本轮冻结事实；旧人格、预路由和旧记忆系统不得接回。
 

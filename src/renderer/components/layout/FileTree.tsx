@@ -89,7 +89,7 @@ import { InlineInput } from './file-tree/inline-inputs'
 import { FileTreeItem } from './file-tree/FileTreeItem'
 import { GridItemCard } from './file-tree/GridItemCard'
 import { FileTreeRecursive } from './file-tree/FileTreeRecursive'
-import { mapAnalysisJobToPlaceholderPatch, isActiveAnalysisStatus, isTrackedAnalysisPlaceholder, analysisPlaceholderTerminalDelay, buildAnalysisJobKey, type PendingClipPlaceholder } from './file-tree/pending-placeholders'
+import { mapAnalysisJobToPlaceholderPatch, isActiveAnalysisStatus, isTrackedAnalysisPlaceholder, analysisPlaceholderTerminalDelay, buildAnalysisJobKey, type PendingClipPlaceholder } from './file-tree/pending-placeholder-model'
 import { FileColorPalette, FileTreeExternalDropMenu, ContextMenuBridge, type FileAppearanceColorMenuState, type FileTreeExternalDropMenuState } from './file-tree/floating-menus'
 import { isActiveReadyBoardTab } from './file-tree/ready-board-tab'
 import {
@@ -447,6 +447,7 @@ export default function FileTree({
   }, [])
 
   useEffect(() => {
+    const pendingClipRemoveTimers = pendingClipRemoveTimersRef.current
     const cleanupStudy = window.electronAPI?.browser?.onContentStudyUpdate?.((data) => {
       if (!data || typeof data !== 'object') return
       const update = data as {
@@ -573,10 +574,10 @@ export default function FileTree({
         window.clearTimeout(flashClearTimerRef.current)
         flashClearTimerRef.current = null
       }
-      for (const timer of pendingClipRemoveTimersRef.current.values()) {
+      for (const timer of pendingClipRemoveTimers.values()) {
         window.clearTimeout(timer)
       }
-      pendingClipRemoveTimersRef.current.clear()
+      pendingClipRemoveTimers.clear()
     }
   }, [flashCompletedPath, schedulePlaceholderRemoval])
 

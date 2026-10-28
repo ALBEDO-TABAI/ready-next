@@ -40,6 +40,7 @@ export function MessageCodeBlock({
       if (resetTimerRef.current != null) window.clearTimeout(resetTimerRef.current)
       resetTimerRef.current = window.setTimeout(() => setCopied(false), 1400)
     } catch {
+      // silent-catch: clipboard access was refused, so the button just does not show the copied state
       setCopied(false)
     }
   }

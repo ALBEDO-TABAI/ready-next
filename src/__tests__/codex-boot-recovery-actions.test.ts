@@ -126,6 +126,10 @@ function actions(input: {
         },
       },
       pinnedThreadSource: 'vscode',
+      forkDeveloperInstructions(threadBindingId) {
+        assert.equal(threadBindingId, forkMember.bindingId)
+        return 'Ready thread instructions'
+      },
       threadListLimit: 100,
       stableZeroReadCount: 3,
       async waitBetweenZeroReads() {},
@@ -191,8 +195,10 @@ test('boot recovery resumes and binds the one exact native-fork child', async ()
   const fixture = actions({
     async threadList() { return { data: [{ ...child, turns: [] }], nextCursor: null } },
     async threadRead() { return { thread: child } },
-    async threadResume() {
+    async threadResume(params) {
       resumeCalls += 1
+      // 2026-10-07: a fork of a compacted thread loses the instructions unless the resume carries them.
+      assert.deepEqual(params, { threadId: child.id, developerInstructions: 'Ready thread instructions' })
       return {
         thread: child,
         cwd: child.cwd,

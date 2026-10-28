@@ -3,6 +3,7 @@ import {
   closeSync,
   constants,
   existsSync,
+  fchmodSync,
   fstatSync,
   fsyncSync,
   lstatSync,
@@ -13,6 +14,7 @@ import {
   readFileSync,
   readSync,
   realpathSync,
+  renameSync,
   rmSync,
   unlinkSync,
   writeSync,
@@ -67,7 +69,7 @@ export type ArtifactExportReceipt = Readonly<{
   sha256: string
   targetDevice: string
   targetInode: string
-  result: 'created' | 'same_hash_idempotent'
+  result: 'created' | 'replaced' | 'same_hash_idempotent'
   readbackVerified: true
 }>
 
@@ -341,6 +343,8 @@ export class ArtifactMaterializer {
     expectedSha256: string
     destination: ArtifactDirectoryIdentity
     targetRelativePath: string
+    /** The user confirmed replacing a different file already at the target. */
+    replaceExisting?: boolean
   }>): Promise<ArtifactExportReceipt> {
     return this.serial(`${input.actionReadyRunId}\0${input.itemId}`, () => this.exportNow(input))
   }
@@ -489,6 +493,7 @@ export class ArtifactMaterializer {
     expectedSha256: string
     destination: ArtifactDirectoryIdentity
     targetRelativePath: string
+    replaceExisting?: boolean
   }>): ArtifactExportReceipt {
     if (!/^[a-f0-9]{64}$/.test(input.expectedSha256)) {
       throw new ArtifactMaterializerError('artifact_expected_hash_invalid')
@@ -505,6 +510,7 @@ export class ArtifactMaterializer {
       destinationResourceId: input.destination.logicalResourceId,
       destinationPolicyEpoch: input.destination.policyEpoch,
       targetRelativePath,
+      ...(input.replaceExisting ? { replaceExisting: true } : {}),
     }))
     const operationPath = this.operationPath(input.actionReadyRunId, input.itemId, input.actionId)
     if (existsSync(operationPath)) {
@@ -526,8 +532,8 @@ export class ArtifactMaterializer {
     this.ensureStorageCapacity(input.actionReadyRunId, EXPORT_OPERATION_RECEIPT_RESERVE_BYTES)
     const root = this.verifyDestination(input.destination)
     const targetPath = this.createTargetParent(root, targetRelativePath)
-    const existing = this.readExistingTarget(targetPath, input.expectedSha256)
-    if (existing) {
+    const existing = this.readExistingTarget(targetPath, input.expectedSha256, input.replaceExisting === true)
+    if (existing?.sha256 === input.expectedSha256) {
       const receipt = this.exportReceipt(
         input,
         sourceManifest.logicalArtifactRef,
@@ -557,24 +563,34 @@ export class ArtifactMaterializer {
       if (streamed.sha256 !== input.expectedSha256) {
         throw new ArtifactMaterializerError('artifact_staged_hash_mismatch')
       }
+      if (existing) fchmodSync(fd, lstatSync(targetPath).mode & 0o777)
       fsyncSync(fd)
       closeSync(fd)
       fd = null
-      try {
-        linkSync(tempPath, targetPath)
-      } catch (error) {
-        if (!error || typeof error !== 'object' || !('code' in error) || error.code !== 'EEXIST') throw error
-        const raced = this.readExistingTarget(targetPath, input.expectedSha256)
-        if (!raced) throw new ArtifactMaterializerError('artifact_target_conflict')
-        const receipt = this.exportReceipt(
-          input,
-          sourceManifest.logicalArtifactRef,
-          targetRelativePath,
-          raced,
-          'same_hash_idempotent',
-        )
-        writeImmutable(operationPath, Buffer.from(canonical({ actionDigest, receipt }), 'utf8'))
-        return receipt
+      if (existing) {
+        // Replace only the file the confirmation was about: anything that changed it since is a conflict.
+        const current = hashStableRegularFile(targetPath)
+        if (current.sha256 !== existing.sha256 || current.inode !== existing.inode) {
+          throw new ArtifactMaterializerError('artifact_target_conflict')
+        }
+        renameSync(tempPath, targetPath)
+      } else {
+        try {
+          linkSync(tempPath, targetPath)
+        } catch (error) {
+          if (!error || typeof error !== 'object' || !('code' in error) || error.code !== 'EEXIST') throw error
+          const raced = this.readExistingTarget(targetPath, input.expectedSha256)
+          if (!raced) throw new ArtifactMaterializerError('artifact_target_conflict')
+          const receipt = this.exportReceipt(
+            input,
+            sourceManifest.logicalArtifactRef,
+            targetRelativePath,
+            raced,
+            'same_hash_idempotent',
+          )
+          writeImmutable(operationPath, Buffer.from(canonical({ actionDigest, receipt }), 'utf8'))
+          return receipt
+        }
       }
       committed = true
       const directoryFd = openSync(dirname(targetPath), 'r')
@@ -586,7 +602,7 @@ export class ArtifactMaterializer {
         sourceManifest.logicalArtifactRef,
         targetRelativePath,
         readback,
-        'created',
+        existing ? 'replaced' : 'created',
       )
       this.writeReservedOperationReceipt(
         operationPath,
@@ -685,10 +701,11 @@ export class ArtifactMaterializer {
   private readExistingTarget(
     path: string,
     expectedSha256: string,
+    replaceable = false,
   ): { sha256: string; bytes: number; device: string; inode: string } | null {
     if (!existsSync(path)) return null
     const digest = hashStableRegularFile(path)
-    if (digest.sha256 !== expectedSha256) throw new ArtifactMaterializerError('artifact_target_conflict')
+    if (digest.sha256 !== expectedSha256 && !replaceable) throw new ArtifactMaterializerError('artifact_target_conflict')
     return digest
   }
 

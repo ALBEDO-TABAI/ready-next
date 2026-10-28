@@ -47,10 +47,33 @@ if (!existsSync(dmgPath) || !statSync(dmgPath).isFile()
   throw new Error('usage: node scripts/run-history-continuation-installed-proof.mjs Ready.dmg --source-db=/absolute/ready.db --source-codex-home=/absolute/codex-home')
 }
 
+// Every source the pinned runtime declares continuity edges for, labelled by its creation runtime and digest.
 const supportedSources = new Map([
-  ['8b2e1f3f4f80fd9ef28657b49e90290e06c63f004eb35fc198c91d59992f3e0b', '0.149'],
-  ['d47a3b863ed1975f7d18fb337a508127efe7559bfd47ce8e5f9bcb0ed7ee854f', '0.146'],
+  ['8b2e1f3f4f80fd9ef28657b49e90290e06c63f004eb35fc198c91d59992f3e0b', '0.149/8b2e1f3f'],
+  ['d47a3b863ed1975f7d18fb337a508127efe7559bfd47ce8e5f9bcb0ed7ee854f', '0.146/d47a3b86'],
+  ['cda6bd5ff08247c0fd502accba2c0c0d342d5d59945d06dfb53a666bb64b636d', '0.149/cda6bd5f'],
+  ['22816589f287db132fdc4e3a57b674878795fb75891d765d598b3c94e381bc79', '0.149/22816589'],
 ])
+// Reviewed 2026-10-07 census of active heads per source (started/all) in the library this proof was run on.
+const reviewedCensus = new Map([
+  ['0.149/8b2e1f3f', { active: 6, started: 6 }],
+  ['0.146/d47a3b86', { active: 5, started: 4 }],
+  ['0.149/cda6bd5f', { active: 1, started: 1 }],
+  ['0.149/22816589', { active: 8, started: 4 }],
+])
+const primarySource = '0.149/8b2e1f3f'
+const READY_TOOL_SURFACE_BLOCKERS = new Set([
+  'native_tool_surface_extension_required', 'native_tool_definition_changed', 'ready_tool_execution_contract_changed',
+])
+// A manual compaction Codex refused and the old build then called unknown is parked, not moving: nothing retries
+// it and its fence only waits for boot recovery. The installed build must settle it; any other fence is live work.
+const PARKED_REJECTED_COMPACTION = `
+  manual.unknown_at IS NOT NULL AND manual.consumed_at IS NULL AND manual.abandoned_at IS NULL
+  AND manual.codex_compaction_turn_id IS NULL
+  AND (SELECT attempt.response_kind FROM codex_manual_compaction_dispatch_attempts attempt
+        WHERE attempt.manual_compaction_id = manual.manual_compaction_id
+        ORDER BY attempt.created_at DESC, attempt.rpc_id DESC LIMIT 1) = 'rejected'
+`
 // A run takes many minutes across several app launches. Without a phase trace a
 // failure only says which line threw, not which stage of the run it was in.
 function logPhase(message) {
@@ -87,22 +110,26 @@ let sourceTargets = []
 let startedTargets = []
 let recoveryTarget = null
 let isolatedExternalLeaseCount = 0
+let parkedRejectedCompactions = []
 try {
-  copyReadyDatabase()
+  parkedRejectedCompactions = copyReadyDatabase()
   isolatedExternalLeaseCount = freezeExternalProcessLeasesInCopy()
   copyCodexHistory()
   sourceTargets = attachNativeHistoryWitnesses(selectSourceTargets())
-  const alternateModeTarget = sourceTargets.find((target) => target.started && target.source === '0.149')
+  const alternateModeTarget = sourceTargets.find((target) => target.started && target.source === primarySource)
   sourceTargets = sourceTargets.map((target) => ({
     ...target,
     workbenchMode: target === alternateModeTarget ? 'document' : 'browser',
   }))
   startedTargets = sourceTargets.filter((target) => target.started)
   recoveryTarget = attachNativeHistoryWitnesses([selectHistoryOnlyTarget()])[0]
-  if (sourceTargets.length !== 14 || startedTargets.length !== 11
-    || countBySource(startedTargets, '0.149') !== 7
-    || countBySource(startedTargets, '0.146') !== 4) {
-    throw new Error('installed proof source population does not match the reviewed 14/11/7/4 census')
+  const census = [...reviewedCensus].map(([source, expected]) => ({
+    source, expected,
+    active: countBySource(sourceTargets, source),
+    started: countBySource(startedTargets, source),
+  }))
+  if (census.some((entry) => entry.active !== entry.expected.active || entry.started !== entry.expected.started)) {
+    throw new Error(`installed proof source population does not match the reviewed census: ${JSON.stringify(census)}`)
   }
   const markers = new Map()
   for (const target of startedTargets) {
@@ -133,13 +160,16 @@ try {
   logPhase('launch #1 + classify heads')
   runtime = await launchInstalledApp(executablePath)
   await showAgentPanel(runtime.cdp)
+  await awaitParkedCompactionsSettled(parkedRejectedCompactions)
   const classification = await classifyAllHeads(runtime.cdp, sourceTargets)
   assertClassification(classification, sourceTargets)
   const pristineTargets = sourceTargets.filter((target) => !target.started
     && classification.find((row) => row.label === target.label)?.availability === 'ready')
-  if (pristineTargets.length !== 2 || classification.some((row) => !row.started
+  // Every never-started head is either a pristine root that continues after refresh or a settled failed start
+  // that offers recovery; which is which is only known once the installed app classifies them.
+  if (pristineTargets.length === 0 || classification.some((row) => !row.started
     && row.availability !== 'ready' && !row.recoveryAvailable)) {
-    throw new Error('the two pristine legacy roots or the settled failed-start recovery were omitted')
+    throw new Error('no pristine root was exercised or a never-started head was neither ready nor recoverable')
   }
   for (const target of pristineTargets) for (const round of [1, 2]) {
     markers.set(`READY_HISTORY_${target.label}_R${round}_${proofId}`, {
@@ -426,6 +456,7 @@ try {
       isolatedExternalLeaseCount,
       isolatedExternalLeaseDisposition: isolatedExternalLeaseCount > 0
         ? 'settled_to_synthesized_tree_zero' : 'none_open',
+      parkedRejectedCompactionsSettledAtBoot: parkedRejectedCompactions.length,
     },
     population: {
       legacyActiveHeads: sourceTargets.length,
@@ -574,23 +605,60 @@ function countBySource(targets, source) {
   return targets.filter((target) => target.source === source).length
 }
 
+// A WAL database no process has open has no -wal/-shm, and SQLite cannot open it read-only without creating them;
+// reading it as immutable is then exact. While a -wal exists, a plain read-only connection reads it.
+function readOnlySqliteSource(path) {
+  return existsSync(`${path}-wal`) ? path : `file:${encodeURI(path)}?mode=ro&immutable=1`
+}
+
 function copyReadyDatabase() {
   const openWorkQuery = `
     SELECT
       (SELECT COUNT(*) FROM run_meta WHERE status IN ('running', 'waiting_input', 'paused_budget')) AS open_runs,
-      (SELECT COUNT(*) FROM codex_thread_dispatch_fences) AS dispatch_fences;
+      (SELECT COUNT(*) FROM codex_thread_dispatch_fences fence
+        WHERE fence.quarantined_at IS NOT NULL OR NOT EXISTS (
+          SELECT 1 FROM codex_manual_compaction_bindings manual
+           WHERE manual.manual_compaction_id = fence.owner_manual_compaction_id
+             AND manual.thread_binding_id = fence.thread_binding_id
+             AND ${PARKED_REJECTED_COMPACTION})) AS dispatch_fences;
   `
   const openWork = sqliteJson(sourceDbPath, openWorkQuery)[0]
   if (Number(openWork?.open_runs) !== 0 || Number(openWork?.dispatch_fences) !== 0) {
     throw new Error('source Ready profile has open work; installed proof refused to copy a moving execution')
   }
-  execFileSync('/usr/bin/sqlite3', [sourceDbPath, `VACUUM INTO ${sqlQuote(databasePath)};`], {
+  execFileSync('/usr/bin/sqlite3', ['-readonly', readOnlySqliteSource(sourceDbPath), `VACUUM INTO ${sqlQuote(databasePath)};`], {
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   const copiedWork = sqliteJson(databasePath, openWorkQuery)[0]
   if (Number(copiedWork?.open_runs) !== 0 || Number(copiedWork?.dispatch_fences) !== 0) {
     throw new Error('Ready work started during profile copy; isolated snapshot is not quiescent')
   }
+  return sqliteJson(databasePath, `
+    SELECT manual.manual_compaction_id FROM codex_thread_dispatch_fences fence
+      JOIN codex_manual_compaction_bindings manual
+        ON manual.manual_compaction_id = fence.owner_manual_compaction_id
+     WHERE ${PARKED_REJECTED_COMPACTION};
+  `).map((row) => row.manual_compaction_id)
+}
+
+// Boot recovery proves from two unchanged readbacks that the refused compaction never started, records it as
+// dispatch_rejected and releases the fence, so the conversation is usable again without a new context.
+async function awaitParkedCompactionsSettled(manualCompactionIds) {
+  if (manualCompactionIds.length === 0) return
+  const quoted = manualCompactionIds.map(sqlQuote).join(',')
+  const deadline = Date.now() + 120_000
+  while (Date.now() < deadline) {
+    const rows = sqliteJson(databasePath, `
+      SELECT manual.manual_compaction_id, manual.abandoned_reason, manual.abandoned_reconciled_at,
+             (SELECT COUNT(*) FROM codex_thread_dispatch_fences fence
+               WHERE fence.owner_manual_compaction_id = manual.manual_compaction_id) AS fences
+        FROM codex_manual_compaction_bindings manual WHERE manual.manual_compaction_id IN (${quoted});
+    `)
+    if (rows.length === manualCompactionIds.length && rows.every((row) => row.abandoned_reason === 'dispatch_rejected'
+      && row.abandoned_reconciled_at && Number(row.fences) === 0)) return
+    await new Promise((resolveWait) => setTimeout(resolveWait, 1000))
+  }
+  throw new Error(`parked rejected compaction was not settled at boot: ${manualCompactionIds.join(',')}`)
 }
 
 function freezeExternalProcessLeasesInCopy() {
@@ -765,15 +833,23 @@ function copyCodexHistory() {
     if (existsSync(source)) cpSync(source, join(copiedCodexHome, file))
   }
   const copiedStatePath = join(copiedCodexHome, 'state_5.sqlite')
-  execFileSync('/usr/bin/sqlite3', [join(sourceCodexHome, 'state_5.sqlite'),
+  execFileSync('/usr/bin/sqlite3', ['-readonly', readOnlySqliteSource(join(sourceCodexHome, 'state_5.sqlite')),
     `VACUUM INTO ${sqlQuote(copiedStatePath)};`], { stdio: ['ignore', 'pipe', 'pipe'] })
   const state = new DatabaseSync(copiedStatePath)
   try {
-    state.prepare('UPDATE threads SET rollout_path = replace(rollout_path, ?, ?)')
-      .run(sourceCodexHome, copiedCodexHome)
-    const leaked = state.prepare('SELECT COUNT(*) AS count FROM threads WHERE instr(rollout_path, ?) = 1')
-      .get(sourceCodexHome)
-    if (Number(leaked?.count) !== 0) throw new Error('copied Codex state still points to real history')
+    // Stored paths may be spelled in a different case than the given home on a case-insensitive volume; rewrite
+    // by prefix, then require every path to live inside the copy.
+    const sourcePrefix = `${sourceCodexHome.toLowerCase()}/`
+    const rewrite = state.prepare('UPDATE threads SET rollout_path = ? WHERE id = ?')
+    for (const row of state.prepare('SELECT id, rollout_path FROM threads').all()) {
+      const path = String(row.rollout_path)
+      if (path.toLowerCase().startsWith(sourcePrefix)) {
+        rewrite.run(`${copiedCodexHome}/${path.slice(sourcePrefix.length)}`, row.id)
+      }
+    }
+    const leaked = state.prepare('SELECT rollout_path FROM threads').all()
+      .filter((row) => !String(row.rollout_path).startsWith(`${copiedCodexHome}/`))
+    if (leaked.length !== 0) throw new Error('copied Codex state still points outside the isolated copy')
   } finally {
     state.close()
   }
@@ -1116,11 +1192,16 @@ function assertClassification(results, targets) {
   if (!Array.isArray(results) || results.length !== targets.length) {
     throw new Error(`production preflight did not classify all heads: ${JSON.stringify(results)}`)
   }
-  const primaryLabels = new Set(targets.filter((target) => target.started && target.source === '0.149')
-    .map((target) => target.label))
+  // The pinned runtime declares continuity for every supported source, so no started head may be blocked by the
+  // runtime, model, thread config, cwd or instruction contract. Continuation checks those first; a head that only
+  // carries an older Ready tool definition is a product-side change that offers a new context instead.
+  const primaryLabels = new Set(targets.filter((target) => target.started).map((target) => target.label))
+  const readyToolChangeOnly = (result) => result.recoveryAvailable && Array.isArray(result.blockers)
+    && result.blockers.length > 0 && result.blockers.every((blocker) => READY_TOOL_SURFACE_BLOCKERS.has(blocker))
   const failedPrimary = results.filter((result) => primaryLabels.has(result.label)
-    && (result.state !== 'active_head' || result.availability !== 'ready'))
-  if (primaryLabels.size !== 7 || failedPrimary.length > 0) {
+    && (result.state !== 'active_head' || (result.availability !== 'ready' && !readyToolChangeOnly(result))))
+  const expectedStarted = [...reviewedCensus.values()].reduce((sum, entry) => sum + entry.started, 0)
+  if (primaryLabels.size !== expectedStarted || failedPrimary.length > 0) {
     throw new Error(`primary production preflight not ready: ${JSON.stringify(failedPrimary)}`)
   }
   if (results.some((result) => result.state === 'read_failed')) {
@@ -1260,11 +1341,13 @@ async function beginBoundaryAndSend(cdp, target) {
     const mode = await harness.setWorkbenchMode(target.workbenchMode);
     if (!mode.ok) return { ok: false, stage: 'workbench_mode' };
     let beforeSurface = null;
+    let lastSurfaceRead = null;
     for (let attempt = 0; attempt < 160; attempt += 1) {
       const read = await window.electronAPI.agent.readCodexActionSurface({
         aliasId: target.aliasId, aliasGeneration: target.originalGeneration,
         workbenchMode: target.workbenchMode,
       });
+      lastSurfaceRead = { success: read.success, state: read.data?.state || null, error: read.error || null };
       if (read.success && read.data?.state === target.expectedState) { beforeSurface = read.data; break; }
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
@@ -1286,7 +1369,11 @@ async function beginBoundaryAndSend(cdp, target) {
     const visibleMessagesBefore = (await harness.snapshot()).messages.length;
     let button = document.querySelector('[data-ready-begin-new-context="true"] button');
     if (!beforeSurface?.beginNewContext || !button) {
-      return { ok: false, stage: 'history_only_recovery_missing' };
+      return {
+        ok: false, stage: 'history_only_recovery_missing', label: target.label,
+        expectedState: target.expectedState, lastSurfaceRead,
+        beginNewContext: Boolean(beforeSurface?.beginNewContext), button: Boolean(button),
+      };
     }
     const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
     setter.call(input, marker);
@@ -1592,9 +1679,13 @@ async function startFixtureProvider(markerMap, contaminationMarkers = []) {
     // that shape, and it is an ordinary production failure rather than a
     // synthesized one. Only the first turn of that conversation fails; the
     // recovery turn that carries its tail is answered normally.
+    // The status must be one the gateway retries but Ready has not probed as
+    // history-preserving: since 2026-10-05 a zero-output 408/425/429/500/502–504/
+    // 520–524 keeps the same thread (codex-failed-turn-continuity.e2e.ts), while
+    // other retried 5xx such as 599 still diverge into a fresh root with a tail.
     if (identity.kind === 'fresh_root_failure') {
       captures[captures.length - 1].stage = 'provider_failure_injected'
-      response.writeHead(500, { 'content-type': 'application/json' })
+      response.writeHead(599, { 'content-type': 'application/json' })
       response.end(JSON.stringify({ error: { message: 'fresh-root divergence: injected provider failure' } }))
       return
     }

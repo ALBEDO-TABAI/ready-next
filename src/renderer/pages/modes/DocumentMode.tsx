@@ -406,6 +406,7 @@ export default function DocumentMode({
     const next = new Map<string, string>()
     useDocTabs.getState().tabs.forEach((tab) => next.set(tab.path || tab.id, tab.id))
     return next
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- tabScrollStructureSignature is a deliberate cache-busting key: the memo reads the store via getState() and rebuilds only when tab ids or paths change
   }, [tabScrollStructureSignature])
 
   const markReadingSessionInteraction = useCallback(() => {
@@ -526,6 +527,7 @@ export default function DocumentMode({
     void refreshCleanTextTabsFromDisk(visibleTabs).then((resolvedIds) => {
       for (const id of resolvedIds) pendingExternalRefreshTabIdsRef.current.delete(id)
     })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs when the visible tab ids or activation change; tab objects are replaced on every edit and must not re-issue the disk refresh check per keystroke (directory change events refresh visible tabs themselves)
   }, [activeTab?.id, isActive, refreshCleanTextTabsFromDisk, splitTab?.id])
 
   useEffect(() => {
@@ -848,6 +850,7 @@ export default function DocumentMode({
       dirty: tab.isDirty,
       groupId: tab.groupId ?? null,
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- railProjectionSignature is a deliberate cache-busting key: the memo reads the stores via getState() and rebuilds only when a rail-visible tab field or file appearance changes
   }), [railProjectionSignature])
   const handleRailTabClose = useCallback((id: string) => closeTab(id), [closeTab])
   const handleRailNewTab = useCallback(() => {

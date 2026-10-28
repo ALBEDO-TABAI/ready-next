@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+import { join } from 'node:path'
 import { createToolExecutionOutput, type ToolExecutionOutput } from '../../agent-control/tools-runtime/tool-result-types'
 import { logAgentMetric } from '../../agent-control/metrics'
 
@@ -27,7 +29,16 @@ export interface DeclareCompletionCriteriaDeps {
   outputContract?: {
     destinationResourceId: string
     maxExpectedOutputs: number
+    /** The writable current document, when it lives in this folder: it is saved with document_save_tab. */
+    currentDocumentFile?: { destinationPath: string; pathDigest: string }
   } | null
+}
+
+function isCurrentDocumentFile(file: { destinationPath: string; pathDigest: string }, target: string): boolean {
+  // Native join matches the renderer's tab path form on each platform.
+  const path = join(file.destinationPath, target)
+  return [path, path.normalize('NFC'), path.normalize('NFD')]
+    .some((candidate) => createHash('sha256').update(candidate).digest('hex') === file.pathDigest)
 }
 
 function normalizeExpectedOutputs(value: unknown): { ok: true; value: string[] } | { ok: false; message: string } {
@@ -142,9 +153,20 @@ export async function executeDeclareCompletionCriteria(
     })
   }
 
+  // The open document is edited in place and saved through its tab; folder delivery would prove a second copy.
+  const documentFile = deps.outputContract?.currentDocumentFile
+  const documentOutputs = documentFile
+    ? expectedOutputsResult.value.filter((target) => isCurrentDocumentFile(documentFile, target))
+    : []
+  const expectedOutputs = expectedOutputsResult.value.filter((target) => !documentOutputs.includes(target))
+  if (documentOutputs.length > 0 && expectedOutputs.length === 0) folderOutputIntent = 'no_write'
+  const documentNote = documentOutputs.length > 0
+    ? `「${documentOutputs.join('、')}」就是当前打开的文档：用 document_* 工具直接修改，改完用 document_save_tab 保存回原文件，不作为文件夹交付登记。`
+    : ''
+
   await deps.updateTaskCompletionDeclaration(deps.taskId, {
     modelCriteria: criteria,
-    expectedOutputs: expectedOutputsResult.value,
+    expectedOutputs,
   })
   logAgentMetric('model_criteria_declared', {
     taskId: deps.taskId,
@@ -154,17 +176,17 @@ export async function executeDeclareCompletionCriteria(
   logAgentMetric('expected_outputs_declared', {
     taskId: deps.taskId,
     sessionId: deps.sessionId || null,
-    count: expectedOutputsResult.value.length,
+    count: expectedOutputs.length,
   })
   return createToolExecutionOutput(
-    `已登记 ${criteria.length} 条补充验收标准（整组替换）。具体文件目标会由系统逐一核对；登记动作本身不会冒充完成证明。`,
+    `${documentNote}已登记 ${criteria.length} 条补充验收标准（整组替换）。具体文件目标会由系统逐一核对；登记动作本身不会冒充完成证明。`,
     {
       shape: 'json',
       data: {
         ok: true,
         count: criteria.length,
         criteria,
-        expectedOutputs: expectedOutputsResult.value,
+        expectedOutputs,
         ...(folderOutputIntent ? { folderOutputIntent, destinationResourceId } : {}),
       },
     },

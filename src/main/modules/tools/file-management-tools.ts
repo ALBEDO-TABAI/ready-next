@@ -81,6 +81,7 @@ export function resolveFileToolDirectoryAliases(envelope: unknown): FrozenDirect
       const canonical = realpathSync(path)
       if (!canonical || !statSync(canonical).isDirectory() || !validateWorkspaceRoot(canonical).ok) continue
     } catch {
+      // silent-catch: a folder reference whose path cannot be resolved or stat-ed is dropped from the frozen directory aliases
       continue
     }
     if (aliases.some((alias) => alias.logicalResourceId === logicalResourceId)) continue
@@ -157,6 +158,7 @@ export function resolveFileToolExplicitReadableResources(
         resourcesByPath.set(canonical, { logicalResourceId, name, path: canonical, currentDigest })
       }
     } catch {
+      // silent-catch: an attachment whose path cannot be resolved or stat-ed is dropped from the readable resources
       // Missing or changed paths do not retain authority.
     }
   }
@@ -467,6 +469,7 @@ async function resolveReadableDocumentPath(
           return { ok: true, path: canonical, readPath: canonical, root: dirname(canonical) }
         }
       } catch {
+        // silent-catch: a candidate path that cannot be resolved, stat-ed or hashed is skipped in favor of the next candidate
         // Continue to the indexed/workspace path, which remains independently guarded.
       }
     }

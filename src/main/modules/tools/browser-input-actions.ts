@@ -35,6 +35,7 @@ export async function requireTrustedPointerDelivery(
     await requireBrowserInputReadiness(controller, tabId, 'trusted_pointer')
     return null
   } catch (error) {
+    // silent-catch: a readiness failure is returned as a structured rejected, not-delivered browser output
     const readiness = error && typeof error === 'object' && 'readiness' in error
       ? (error as { readiness?: { reason?: string } }).readiness
       : null

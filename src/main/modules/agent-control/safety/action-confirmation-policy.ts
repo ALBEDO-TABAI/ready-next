@@ -335,6 +335,15 @@ const FIRST_BATCH_RULES: readonly ConfirmationRule[] = [
   },
   // --- M3 — 默认确认；只有规则显式声明的对话模式或对象授权可免确认 ---------
   {
+    id: 'm3-save-current-document',
+    designRef: '2026-10-06 当前文档写面 — 指向即可修改，写回磁盘按对话授权方式确认',
+    mode: 'M3',
+    // Edits stay in the open tab, visible and undoable; saving rewrites the file on disk.
+    tools: new Set(['document_save_tab']),
+    reason: '保存会把修改写回磁盘上的原文件',
+    delegatedBy: 'auto',
+  },
+  {
     id: 'm3-send-external',
     designRef: '05 §3.1 M3 — 对外发送普通内容',
     mode: 'M3',

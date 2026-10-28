@@ -118,6 +118,7 @@ export default function ModelSelector() {
       next.add(activeProfile.id)
       return next
     })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- auto-expands once per open/active-profile id; activeProfile is re-derived by getActiveProfile() every render, so depending on the object would re-run this on every render
   }, [open, activeProfile?.id])
 
   const resolveHost = (value: string): string => {

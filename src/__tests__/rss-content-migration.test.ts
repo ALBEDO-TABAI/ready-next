@@ -1,6 +1,7 @@
 import { migrateRSSDigests, RSS_DIGEST_MIGRATION } from '../main/modules/rss-engine/digest-schema'
 import { migrateRSSCatalog, RSS_CATALOG_MIGRATION } from '../main/modules/rss-engine/catalog-schema'
 import { migrateRSSMethodValidity, RSS_METHOD_VALIDITY_MIGRATION } from '../main/modules/rss-engine/method-validity-schema'
+import { migrateRSSTranslations, RSS_TRANSLATION_MIGRATION } from '../main/modules/rss-engine/translation-schema'
 import { RSSStore } from '../main/modules/database/rss-store'
 import { migrateRSSResults, RSS_RESULT_MIGRATION } from '../main/modules/rss-engine/result-schema'
 import { migrateRSSOrganization, RSS_ORGANIZATION_MIGRATION } from '../main/modules/rss-engine/organization-schema'
@@ -102,6 +103,13 @@ test('RSS migration backs up existing WAL data and rolls back without losing rea
     assert.deepEqual(afterMethods.items, beforeMethods.items)
     assert.deepEqual(new RSSStore(() => db).getRSSAnalysisJob(oldJob.id), oldJob)
     assert.throws(() => new RSSStore(() => db).content.query({ expectedRevision: beforeMethods.revision }), /stale/)
+    assert.ok(backupBeforeRSSMigration(db, path)?.includes('before-rss-132-'))
+    db.exec('BEGIN')
+    migrateRSSTranslations(db)
+    db.prepare('INSERT INTO migrations VALUES(?)').run(RSS_TRANSLATION_MIGRATION)
+    db.exec('COMMIT')
+    assert.equal(new RSSStore(() => db).translations.get(afterMethods.items[0]!.id, 'zh-CN'), null)
+    assert.deepEqual(new RSSStore(() => db).content.query({}).items, afterMethods.items, 'translations add no reader state')
     assert.equal(backupBeforeRSSMigration(db, path), null, 'all RSS migrations have completed')
     assert.equal(snapshot.prepare('SELECT title FROM rss_items').get<{ title: string }>()?.title, 'Saved title')
   } finally {

@@ -1,0 +1,23 @@
+{
+  "contract": "ready_runtime_transition_proof_v1",
+  "sourceManifestDigest": "d47a3b863ed1975f7d18fb337a508127efe7559bfd47ce8e5f9bcb0ed7ee854f",
+  "targetManifestDigest": "e2ae5b1c9807e039b9516dc58dda8e9675f3c08e71dc1da362cd354216410558",
+  "operation": "ordinary_continuation",
+  "result": "compatible",
+  "instructionContract": {
+    "sourceDigest": "eb75d36abc160394f83bae5772bc5267f149f3b42a87f6ff5bf9037ca4b67046",
+    "targetDigest": "fd4614754f7b45e7d505436eacb9305747a1d7191d904b341e14209801a56c35"
+  },
+  "probe": {
+    "targetBinarySha256": "09fa44fdc37a5fc70dc1ace31235f90468a2e193d0e85f7552eab068ea2582be",
+    "targetRuntimeVersion": "codex-cli 0.160.1",
+    "isolatedCopy": true,
+    "providerKind": "local_fixture",
+    "priorNativeContextObservedByProvider": true,
+    "requestToolsDerivedFromFrozenSurface": true,
+    "userInputReadbackHistoryMode": "legacy",
+    "inputCardinality": 1,
+    "turnCountBefore": 1,
+    "turnCountAfter": 2
+  }
+}

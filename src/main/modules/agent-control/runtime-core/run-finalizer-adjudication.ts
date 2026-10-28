@@ -36,6 +36,7 @@ export function defaultVerifyRunStateTerminal(runStatePath: string): boolean {
       .filter((dir) => dir.length > 0)
     return candidateDirs.some((dir) => existsSync(join(dir, DELIVERY_REPORT_FILE)))
   } catch {
+    // silent-catch: an unreadable or malformed run state degrades to not verified, as documented above
     return false
   }
 }

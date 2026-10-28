@@ -41,8 +41,11 @@ export default function RSSEventPanel({ article, active, onSelect }: { article: 
     const read = () => { void refresh().catch((reason) => { if (live) setError(reason instanceof Error ? reason.message : String(reason)) }) }
     if (open) read()
     const off = window.electronAPI.rss.onOrganizationChanged(read)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- generation, targetGeneration and navigationGeneration are counters bumped on cleanup to drop in-flight reads; incrementing their live values is intended
     return () => { live = false; ++generation.current; ++targetGeneration.current; ++navigationGeneration.current; off() }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refresh is recreated every render; the first-page refresh reads article.id/revision/title and open, which this effect is keyed on, plus refs, so it must not resubscribe on each render
   }, [article.id, article.revision, active, open])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- resets local edit state only when a different article or revision opens; membership updates arrive through refresh() readback, and re-running on article.event/title identity changes would wipe the in-progress target, search and quote
   useEffect(() => { setMembership(article.event); setTarget(null); setTargetFacts(null); setTargets(null); setTargetFactId(''); setSearch(''); quoteDirty.current = false; setQuote(article.event?.quote && !article.event.stale ? article.event.quote : article.title.slice(0, 600)) }, [article.id, article.revision])
   useEffect(() => {
     if (!active) return

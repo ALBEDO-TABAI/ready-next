@@ -103,6 +103,15 @@ function parseInventory(value: unknown): RuntimeSourceInventory {
   return { contract: 'ready_runtime_source_inventory_v1', sources }
 }
 
+function parseInstructionContract(value: unknown): { sourceDigest: string; targetDigest: string } {
+  if (!record(value) || Object.keys(value).sort().join(',') !== 'sourceDigest,targetDigest'
+    || typeof value.sourceDigest !== 'string' || !/^[a-f0-9]{64}$/.test(value.sourceDigest)
+    || typeof value.targetDigest !== 'string' || !/^[a-f0-9]{64}$/.test(value.targetDigest)) {
+    throw new Error('runtime_continuity_instruction_contract_invalid')
+  }
+  return { sourceDigest: value.sourceDigest, targetDigest: value.targetDigest }
+}
+
 function parseTransitions(value: unknown): RuntimeTransitionFile {
   if (!record(value) || value.contract !== 'ready_runtime_continuity_transitions_v1'
     || typeof value.targetManifestDigest !== 'string'
@@ -129,6 +138,9 @@ function parseTransitions(value: unknown): RuntimeTransitionFile {
       proofDigest: transition.proofDigest,
       ...(typeof transition.reason === 'string'
         ? { reason: transition.reason as RuntimeUnsupportedReason }
+        : {}),
+      ...(transition.instructionContract !== undefined
+        ? { instructionContract: parseInstructionContract(transition.instructionContract) }
         : {}),
       evidenceFile: safeRelativePath(transition.evidenceFile),
     }
@@ -189,7 +201,9 @@ export function loadRuntimeContinuityAssets(input: {
       || evidence.sourceManifestDigest !== transition.sourceManifestDigest
       || evidence.targetManifestDigest !== transition.targetManifestDigest
       || evidence.operation !== transition.operation
-      || evidence.result !== transition.result) {
+      || evidence.result !== transition.result
+      // The measured instruction-contract mapping is part of the proof, never added beside it.
+      || digest(evidence.instructionContract ?? null) !== digest(transition.instructionContract ?? null)) {
       throw new Error('runtime_continuity_transition_evidence_mismatch')
     }
     const { evidenceFile: _, ...catalogTransition } = transition

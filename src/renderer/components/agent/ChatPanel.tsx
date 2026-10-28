@@ -91,6 +91,7 @@ import {
   type ConversationChannelOption,
 } from './chat-panel/recall-state/use-channel-session-recall'
 import { useReferenceSkillHint } from './chat-panel/reference-skill/use-reference-skill-hint'
+import { compactionFailureMessage, isStandaloneCompactionRequest } from '../../modules/agent/standaloneCompaction'
 import {
   captureScopeReadAuthority,
   isScopeReadAuthorityCurrent,
@@ -202,6 +203,7 @@ export default function ChatPanel({
     // W3
     attachments,
     removeAttachment,
+    clearAttachments,
     pickFiles,
     addAttachments,
     // W4
@@ -335,6 +337,7 @@ export default function ChatPanel({
         ))
       : []
     setPersistedScopeRuns(rows)
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- scopeAuthorityRevision is a deliberate cache-busting dependency: a new callback identity re-runs the refresh effects when scope read authority changes
   }, [filteredScopes, scopeAuthorityRevision, selectedChannelKey])
 
   const refreshPersistedTaskProjections = useCallback(async () => {
@@ -370,6 +373,7 @@ export default function ChatPanel({
     if (persistedTaskProjectionsRequestRevisionRef.current !== requestRevision
       || !isScopeReadAuthorityCurrent(useAgent.getState(), authority)) return
     setPersistedTaskProjections(Object.fromEntries(entries))
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- scopeAuthorityRevision is a deliberate cache-busting dependency: a new callback identity re-runs the refresh effects when scope read authority changes
   }, [filteredScopes, scopeAuthorityRevision])
 
   const refreshActiveChildRuns = useCallback(async () => {
@@ -393,6 +397,7 @@ export default function ChatPanel({
         ))
       : []
     setActiveChildRuns(rows)
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- scopeAuthorityRevision is a deliberate cache-busting dependency: a new callback identity re-runs the refresh effects when scope read authority changes
   }, [filteredScopes, scopeAuthorityRevision])
 
   // Stage V V1.9a — runSessionRecallSearch / handleAttachSessionRecall /
@@ -699,6 +704,7 @@ export default function ChatPanel({
           errorKind: 'host_unavailable',
         })
       })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- setComposerNotice is a stable useCallback (its only dependency is the []-memoized setComposerNoticeFor) declared further down, so listing it here would read it in the temporal dead zone during render
   }, [loadScopes])
 
   useEffect(() => {
@@ -808,9 +814,40 @@ export default function ChatPanel({
   }, [setComposerNoticeFor])
   const composerNotice = activeSessionId ? composerNotices[activeSessionId] ?? null : null
 
+  // The chat menu's “压缩上下文” and sending the context-compact skill on its own share one result: a failure is
+  // explained above the composer and keeps the draft.
+  const runCompaction = useCallback(async (sessionId: string): Promise<boolean> => {
+    setComposerNoticeFor(sessionId, null)
+    let code: string
+    try {
+      const result = await compactCurrentSession()
+      if (result.ok) return true
+      code = result.code
+    } catch (error) {
+      // silent-catch: the failure code becomes the composer notice below
+      code = error instanceof Error ? error.message : 'compaction_failed'
+    }
+    setComposerNoticeFor(sessionId, { message: compactionFailureMessage(code), errorKind: code })
+    return false
+  }, [compactCurrentSession, setComposerNoticeFor])
+
   const handleSend = useCallback(async () => {
     const sendSessionId = activeSessionId
     if (!sendSessionId) return
+    // Sending the context-compact skill on its own is the compaction itself, not an Agent turn that could not compact.
+    if (isStandaloneCompactionRequest(inputValue, attachments)) {
+      if (sendingSessionsRef.current.has(sendSessionId)) return
+      sendingSessionsRef.current.add(sendSessionId)
+      try {
+        if (await runCompaction(sendSessionId)) {
+          setInputValue('')
+          clearAttachments()
+        }
+      } finally {
+        sendingSessionsRef.current.delete(sendSessionId)
+      }
+      return
+    }
     const sendGate = headProjection?.actions.send_new_message
     if (!sendGate || sendGate.availability !== 'ready') {
       const blocker = !sendGate ? 'head_unavailable' : sendGate.blockers[0] || 'conversation_reset_required'
@@ -845,8 +882,8 @@ export default function ChatPanel({
     } finally {
       sendingSessionsRef.current.delete(sendSessionId)
     }
-  }, [activeLifecycleSlice?.beginNewContextActionRef, activeSessionId, attachments.length,
-    inputValue, sendMessage, headProjection, setComposerNoticeFor])
+  }, [activeLifecycleSlice?.beginNewContextActionRef, activeSessionId, attachments,
+    inputValue, sendMessage, headProjection, setComposerNoticeFor, runCompaction, setInputValue, clearAttachments])
 
   const handleRetryProductTurn = useCallback(async (predecessorRunId: string) => {
     const sendSessionId = activeSessionId
@@ -976,6 +1013,7 @@ export default function ChatPanel({
     try {
       return await createNewSession()
     } catch {
+      // silent-catch: a failed create yields no session, so the caller keeps the panel as it is
       return null
     }
   }, [createNewSession])
@@ -984,17 +1022,13 @@ export default function ChatPanel({
     try {
       await resetCurrentConversation()
     } catch {
-      // The retained session remains the visible recovery boundary.
+      // silent-catch: the retained session remains the visible recovery boundary.
     }
   }, [resetCurrentConversation])
 
   const handleCompactCurrentSession = useCallback(async () => {
-    try {
-      await compactCurrentSession()
-    } catch {
-      // The retained session remains the visible recovery boundary.
-    }
-  }, [compactCurrentSession])
+    if (activeSessionId) await runCompaction(activeSessionId)
+  }, [activeSessionId, runCompaction])
 
   const handleLoadConversation = useCallback(
     (convId: string) => {
@@ -1029,6 +1063,7 @@ export default function ChatPanel({
         await createNewSession()
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- setSelectedChannelKey is the raw useState setter passed through by useChannelSessionRecall, so it never changes identity
     [getScopeChannelKey, loadConversation, createNewSession, scopes]
   )
 
@@ -1039,9 +1074,10 @@ export default function ChatPanel({
         setSessionRecallResults((prev) => prev.filter((hit) => hit.conversationId !== convId))
         void runSessionRecallSearch(sessionRecallQuery)
       } catch {
-        // Lifecycle failure remains visible in the retained session state.
+        // silent-catch: lifecycle failure remains visible in the retained session state.
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- setSessionRecallResults is the raw useState setter passed through by useChannelSessionRecall, so it never changes identity
     [deleteConversation, runSessionRecallSearch, sessionRecallQuery]
   )
 

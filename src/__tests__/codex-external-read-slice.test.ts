@@ -66,6 +66,24 @@ test('Lark document preparation stops after an invalid auth readback', async () 
   }
 })
 
+test('a Lark CLI that never answers is reported as unavailable, not as a missing login', async () => {
+  const fixtureRoot = mkdtempSync(join(tmpdir(), 'ready-lark-auth-hang-'))
+  const fixturePath = join(fixtureRoot, 'fixture-cli')
+  try {
+    writeFileSync(fixturePath, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo fixture-1; else /bin/sleep 5; fi\n')
+    chmodSync(fixturePath, 0o755)
+    const executableAuthority = await resolveFrozenDesktopExecutableAuthority({
+      program: fixturePath,
+    })
+    await assert.rejects(
+      readLarkCliAuthReadback({ executableAuthority, env: { PATH: '' }, timeoutMs: 200 }),
+      /codex_external_read_lark_cli_unavailable/,
+    )
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true })
+  }
+})
+
 test('prepares exact Feishu read authority only when the channel and sidecar are available', () => {
   const channelIdentityDigest = digestFeishuChannelSnapshot({
     id: 'channel-1',

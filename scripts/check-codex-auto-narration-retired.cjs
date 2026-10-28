@@ -76,6 +76,11 @@ const retiredFiles = [
   'src/main/modules/settings-engine/agent-auto-narration-setting.ts',
 ]
 
+function compositionModules() {
+  const dir = 'src/main/modules/agent-control/codex-runtime/composition'
+  return fs.readdirSync(path.join(ROOT, dir)).filter((name) => name.endsWith('.ts')).sort().map((name) => `${dir}/${name}`)
+}
+
 const forbiddenByFile = {
   'src/main/modules/agent-control/codex-runtime/codex-binding-schema.ts': ["'system_background'"],
   'src/main/modules/agent-control/codex-runtime/codex-runtime-composition.ts': [
@@ -86,6 +91,11 @@ const forbiddenByFile = {
     'prepareSystemBackgroundIngress',
     'persistSystemBackgroundIngressAtomic',
   ],
+  // The composition entry assembles the factories under composition/; they are the same live graph.
+  ...Object.fromEntries(compositionModules().map((rel) => [rel, [
+    'prepareSystemBackgroundIngress',
+    'persistSystemBackgroundIngressAtomic',
+  ]])),
   'src/main/modules/agent-control/runtime-core/runtime.ts': [
     'NarrationContinuationService',
     'startCodexSystemBackground',

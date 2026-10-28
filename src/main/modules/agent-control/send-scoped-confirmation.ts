@@ -9,6 +9,7 @@ import {
   type SendScopedResponse,
   type SendScopedUserMessage,
 } from '../../../shared/ipc-contracts/agent-runtime'
+import { logAgentMetric } from './metrics'
 
 export interface SendScopedAttachmentConfirmation {
   attachments: PersistedIngress['attachments']
@@ -176,6 +177,19 @@ function isStartIdentityReservationFailure(
     && isNonEmptyString(value.admissionEvidenceDigest)
 }
 
+/**
+ * The rejection is returned either way. Releasing a held start reservation only throws when its set was already
+ * released or has since been dispatched (then the dispatch path owns it), so nothing is left held; the metric makes
+ * any other cause visible instead of silently losing it.
+ */
+function logReservationReleaseFailure(scopeId: string, stage: string, error: unknown): void {
+  logAgentMetric('codex_start_reservation_release_failed', {
+    scopeId,
+    stage,
+    reason: error instanceof Error ? error.message : String(error),
+  })
+}
+
 function isPrePersistenceDispatchFailure(
   value: unknown,
 ): value is Extract<PrePersistenceDispatchResult<unknown>, { ok: false }> {
@@ -340,6 +354,7 @@ export async function runConfirmedSendScoped<ScopeRow, DispatchContext>(params: 
   try {
     scope = params.getScope(params.scopeId)
   } catch (error) {
+    // silent-catch: a failed scope read is returned to the caller as a host_unavailable rejection before any persistence
     if (error instanceof PrePersistenceAdmissionError) {
       return createRejectedBeforePersistence({
         scope: 'pre-existing',
@@ -374,6 +389,7 @@ export async function runConfirmedSendScoped<ScopeRow, DispatchContext>(params: 
     }
     methods = resolvedMethods
   } catch (error) {
+    // silent-catch: a start-identity resolution failure is returned to the caller as a pre-persistence rejection
     if (error instanceof PrePersistenceAdmissionError) {
       return createRejectedBeforePersistence({
         scope: 'pre-existing',
@@ -398,6 +414,7 @@ export async function runConfirmedSendScoped<ScopeRow, DispatchContext>(params: 
       methods,
     })
   } catch (error) {
+    // silent-catch: a reservation failure is returned to the caller as a host_unavailable rejection; nothing was persisted
     return hostUnavailableBeforePersistence({
       scope: 'pre-existing',
       stage: 'start_identity_reservation',
@@ -428,8 +445,8 @@ export async function runConfirmedSendScoped<ScopeRow, DispatchContext>(params: 
         reservationResult,
         evidenceDigest,
       })
-    } catch {
-      // Reconciliation owns any capacity whose runtime result is malformed.
+    } catch (error) {
+      logReservationReleaseFailure(params.scopeId, 'reservation_contract_invalid', error)
     }
     return createRejectedBeforePersistence({
       scope: 'pre-existing',
@@ -448,8 +465,8 @@ export async function runConfirmedSendScoped<ScopeRow, DispatchContext>(params: 
         reservationResult,
         evidenceDigest,
       })
-    } catch {
-      // Reconciliation owns any foreign or contradictory reservation identity.
+    } catch (error) {
+      logReservationReleaseFailure(params.scopeId, 'reservation_contract_mismatch', error)
     }
     return createRejectedBeforePersistence({
       scope: 'pre-existing',
@@ -469,6 +486,7 @@ export async function runConfirmedSendScoped<ScopeRow, DispatchContext>(params: 
       reservation: reservationResult.reservation,
     })
   } catch (error) {
+    // silent-catch: a thrown dispatch preparation becomes a host_unavailable rejection that is returned to the caller
     preparedDispatch = {
       ok: false,
       code: 'host_unavailable',
@@ -483,9 +501,8 @@ export async function runConfirmedSendScoped<ScopeRow, DispatchContext>(params: 
         reservation: reservationResult.reservation,
         rejection: preparedDispatch,
       })
-    } catch {
-      // No ingress was persisted. Reconciliation retains ownership of any
-      // reservation whose release could not be proven.
+    } catch (error) {
+      logReservationReleaseFailure(params.scopeId, 'dispatch_preparation_rejected', error)
     }
     return createRejectedBeforePersistence({
       scope: 'pre-existing',
@@ -516,6 +533,7 @@ export async function runConfirmedSendScoped<ScopeRow, DispatchContext>(params: 
         },
       )
     } catch {
+      // silent-catch: a throwing dispatch-context validator counts as invalid and is rejected just below
       dispatchContextValid = false
     }
   }
@@ -538,8 +556,8 @@ export async function runConfirmedSendScoped<ScopeRow, DispatchContext>(params: 
         reservation: reservationResult.reservation,
         rejection,
       })
-    } catch {
-      // Reconciliation retains ownership of a reservation that could not be released.
+    } catch (error) {
+      logReservationReleaseFailure(params.scopeId, 'dispatch_preparation_contract_invalid', error)
     }
     return createRejectedBeforePersistence({
       scope: 'pre-existing',
@@ -573,8 +591,8 @@ export async function runConfirmedSendScoped<ScopeRow, DispatchContext>(params: 
         await params.releaseReservationAfterPrePersistenceRejection({
           reservation: reservationResult.reservation, rejection,
         })
-      } catch {
-        // silent-catch: a failed release remains owned by the existing reservation reconciler.
+      } catch (releaseError) {
+        logReservationReleaseFailure(params.scopeId, 'pre_persistence_admission_rejected', releaseError)
       }
       return createRejectedBeforePersistence({ scope: 'pre-existing', ...rejection })
     }
@@ -590,8 +608,8 @@ export async function runConfirmedSendScoped<ScopeRow, DispatchContext>(params: 
         reservation: reservationResult.reservation,
         failure,
       })
-    } catch {
-      // Persistence remains failed; the reservation stays held for reconciliation.
+    } catch (releaseError) {
+      logReservationReleaseFailure(params.scopeId, 'ingress_persistence_failed', releaseError)
     }
     return {
       success: false,
@@ -607,6 +625,7 @@ export async function runConfirmedSendScoped<ScopeRow, DispatchContext>(params: 
   try {
     params.emitIngressAdmitted(admission.event)
   } catch {
+    // silent-catch: admission is already durable; a failed renderer notification must not block the confirmed run
     // Durable admission already succeeded. A renderer delivery race must not
     // prevent the one native dispatch that owns this persisted request.
   }

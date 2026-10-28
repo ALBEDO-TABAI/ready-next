@@ -79,7 +79,12 @@ function record(value: unknown): Record<string, unknown> | null {
 
 function hasUntrustedIngress(raw: string): boolean {
   let ingress: Record<string, unknown> | null
-  try { ingress = record(JSON.parse(raw)) } catch { return true }
+  try {
+    ingress = record(JSON.parse(raw))
+  } catch {
+    // silent-catch: unparseable ingress JSON counts as untrusted context, which keeps the conversation out of memory
+    return true
+  }
   const prepared = record(ingress?.prepared)
   const turnIngress = record(prepared?.ingress)
   const resources = record(turnIngress?.explicitResourceEnvelope)
@@ -94,7 +99,12 @@ function hasUntrustedIngress(raw: string): boolean {
 
 function eligibleConversationScope(conversation: ScopeRow | undefined): conversation is ScopeRow {
   let meta: Record<string, unknown> | null = null
-  try { meta = record(JSON.parse(conversation?.meta_json || '')) } catch { return false }
+  try {
+    meta = record(JSON.parse(conversation?.meta_json || ''))
+  } catch {
+    // silent-catch: missing or unparseable conversation meta_json makes the scope ineligible for memory
+    return false
+  }
   return Boolean(conversation && conversation.closed_at === null
     && conversation.source_kind === 'local' && conversation.source_id === 'app'
     && conversation.thread_key === conversation.id
@@ -271,7 +281,11 @@ export class ReadyMemoryRuntimeService {
       FROM chat_conversations WHERE id = ? LIMIT 1
     `).get<ScopeRow>(input.conversationId)
     let meta: Record<string, unknown> | null = null
-    try { meta = record(JSON.parse(scope?.meta_json || '')) } catch { /* ineligible */ }
+    try {
+      meta = record(JSON.parse(scope?.meta_json || ''))
+    } catch {
+      // silent-catch: missing or unparseable meta_json leaves meta null, which fails the eligibility check below
+    }
     if (!scope || scope.closed_at !== input.closedAt || scope.source_kind !== 'local'
       || scope.source_id !== 'app' || scope.thread_key !== scope.id
       || scope.parent_conversation_id !== null || scope.lineage_root_id !== scope.id

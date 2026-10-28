@@ -33,6 +33,7 @@ export function useRSSSelectionCommandBridge(params: {
       if (generation.current !== incarnation || useRSSSession.getState().selectedItemId !== itemId) throw new Error('rss_selection_not_applied')
       return { ok: true, applied: true, itemId, selectedItemId: itemId, surfaceGeneration: incarnation, summary: `已选中 RSS 条目：《${response.data.article.title}》。` }
     })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- generation is a counter bumped on unregister to invalidate in-flight selections; incrementing its live value is intended
     return () => { generation.current++; unregister() }
   }, [handleItemClick])
 }
