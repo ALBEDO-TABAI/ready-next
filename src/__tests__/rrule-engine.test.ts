@@ -159,34 +159,8 @@ test('single override applies patch fields to the matched occurrence only', () =
   assert.equal(day3.overrideKind, null)
 })
 
-test('malformed RRULE falls back to a single instance and warns', () => {
-  const originalWarn = console.warn
-  const warnings: string[] = []
-  console.warn = (msg: unknown) => {
-    warnings.push(String(msg))
-  }
-  try {
-    const ev = makeEvent({ recurrence_rule: 'THIS_IS_NOT_A_VALID_RRULE_STRING_AT_ALL' })
-    const out = expandRecurringEvent(
-      ev,
-      T_2026_05_17,
-      T_2026_05_17 + 10 * ONE_DAY_SEC,
-      [],
-    )
-    // Some malformed strings still parse to a degenerate rule (yielding 0
-    // occurrences); others throw and fall back to a single instance.
-    // Both behaviors are acceptable — what we forbid is throwing out of
-    // expandRecurringEvent. So just assert length is in [0, 1].
-    assert.ok(
-      out.length === 0 || out.length === 1,
-      `malformed RRULE should yield 0 or 1 instances (got ${out.length})`,
-    )
-    if (out.length === 1) {
-      assert.equal(out[0].occurrenceStart, ev.start_time)
-    }
-  } finally {
-    console.warn = originalWarn
-  }
+test('malformed recurrence is rejected instead of silently becoming a one-off event', () => {
+  assert.throws(() => expandRecurringEvent(makeEvent({ recurrence_rule: 'INVALID' }), T_2026_05_17, T_2026_05_17 + ONE_DAY_SEC, []), /无效/ )
 })
 
 test('expandEventList sorts mixed recurring + non-recurring deterministically', () => {

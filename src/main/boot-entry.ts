@@ -1,3 +1,4 @@
+import { captureCalendarOpen } from './calendar-open-intents'
 import { config } from 'dotenv'
 import { resolve } from 'path'
 
@@ -20,6 +21,8 @@ import { logBootStage, startBootStallProbe } from './boot-timing'
  */
 
 app.setName('Ready')
+app.on('open-file', (event, path) => { if(captureCalendarOpen({kind:'file',value:path}))event.preventDefault() })
+app.on('open-url', (event, url) => { if(captureCalendarOpen({kind:'url',value:url}))event.preventDefault() })
 
 const READY_USER_DATA_DIR = process.env.READY_USER_DATA_DIR?.trim()
 const READY_START_HIDDEN = process.env.READY_START_HIDDEN === '1'

@@ -1,20 +1,13 @@
 import { CALENDAR_SCHEMAS } from './schemas/calendar-schemas'
-import { zodObjectToParamList } from './zod-param-derivation'
-
-interface ToolParam {
-  name: string
-  type: string
-  description: string
-  required: boolean
-}
+import { z } from 'zod'
+import type { CalendarToolName } from './schemas/calendar-schemas'
 
 interface CalendarToolDef {
-  name: string
+  name: CalendarToolName
   description: string
   action: string
   intent: string
   executionKind: 'deterministic'
-  params: ToolParam[]
 }
 
 interface CalendarToolContext {
@@ -29,7 +22,6 @@ const CALENDAR_TOOLS: CalendarToolDef[] = [
     action: 'calendar.listWindow',
     intent: 'list_calendar_window',
     executionKind: 'deterministic',
-    params: zodObjectToParamList(CALENDAR_SCHEMAS.calendar_list_window) as ToolParam[],
   },
   {
     name: 'calendar_create_event',
@@ -37,7 +29,6 @@ const CALENDAR_TOOLS: CalendarToolDef[] = [
     action: 'calendar.createEvent',
     intent: 'create_calendar_event',
     executionKind: 'deterministic',
-    params: zodObjectToParamList(CALENDAR_SCHEMAS.calendar_create_event) as ToolParam[],
   },
   {
     name: 'calendar_update_event',
@@ -45,7 +36,6 @@ const CALENDAR_TOOLS: CalendarToolDef[] = [
     action: 'calendar.updateEvent',
     intent: 'update_calendar_event',
     executionKind: 'deterministic',
-    params: zodObjectToParamList(CALENDAR_SCHEMAS.calendar_update_event) as ToolParam[],
   },
   {
     name: 'calendar_delete_event',
@@ -53,7 +43,6 @@ const CALENDAR_TOOLS: CalendarToolDef[] = [
     action: 'calendar.deleteEvent',
     intent: 'delete_calendar_event',
     executionKind: 'deterministic',
-    params: zodObjectToParamList(CALENDAR_SCHEMAS.calendar_delete_event) as ToolParam[],
   },
   {
     name: 'calendar_capture_session',
@@ -61,15 +50,12 @@ const CALENDAR_TOOLS: CalendarToolDef[] = [
     action: 'calendar.captureSession',
     intent: 'capture_calendar_session',
     executionKind: 'deterministic',
-    params: zodObjectToParamList(CALENDAR_SCHEMAS.calendar_capture_session) as ToolParam[],
   },
 ]
 
-function toSchemaParam(param: ToolParam): Record<string, unknown> {
-  return {
-    type: param.type,
-    description: param.description,
-  }
+function calendarToolSchema(name:CalendarToolName):Record<string,unknown>{
+  const { $schema: _dialect, ...schema } = z.toJSONSchema(CALENDAR_SCHEMAS[name], { target: 'draft-7', unrepresentable: 'any' })
+  return schema
 }
 
 function toStructuredResult(tool: CalendarToolDef, message: string, extra?: Record<string, unknown>): string {
@@ -87,11 +73,7 @@ export function getCalendarAnthropicTools(): Array<Record<string, unknown>> {
   return CALENDAR_TOOLS.map((tool) => ({
     name: tool.name,
     description: tool.description,
-    input_schema: {
-      type: 'object',
-      properties: Object.fromEntries(tool.params.map((param) => [param.name, toSchemaParam(param)])),
-      required: tool.params.filter((param) => param.required).map((param) => param.name),
-    },
+    input_schema: calendarToolSchema(tool.name),
   }))
 }
 
@@ -101,11 +83,7 @@ export function getCalendarOpenAITools(): Array<Record<string, unknown>> {
     function: {
       name: tool.name,
       description: tool.description,
-      parameters: {
-        type: 'object',
-        properties: Object.fromEntries(tool.params.map((param) => [param.name, toSchemaParam(param)])),
-        required: tool.params.filter((param) => param.required).map((param) => param.name),
-      },
+      parameters: calendarToolSchema(tool.name),
     },
   }))
 }
@@ -118,12 +96,9 @@ export async function executeCalendarTool(
   const tool = CALENDAR_TOOLS.find((item) => item.name === toolName)
   if (!tool) return `Unknown calendar tool: ${toolName}`
 
-  if (toolName === 'calendar_create_event') {
-    const title = String(args.title || '').trim()
-    const startTime = String(args.startTime || '').trim()
-    const endTime = String(args.endTime || '').trim()
-    if (!title || !startTime || !endTime) return 'Error: title, startTime and endTime are required'
-  }
+  const parsed=CALENDAR_SCHEMAS[tool.name].safeParse(args)
+  if(!parsed.success)return `Error: ${parsed.error.issues.map(issue=>issue.message).join('；')}`
+  args=parsed.data
 
   if (context?.requestModuleToolAction) {
     try {

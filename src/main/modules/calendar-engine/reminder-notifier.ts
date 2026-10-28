@@ -1,3 +1,4 @@
+import { requestCalendarNavigation } from './calendar-navigation'
 /**
  * Reminder notifier — main-process only.
  *
@@ -142,9 +143,10 @@ export function createReminderNotifier(deps: ReminderNotifierDeps): ReminderNoti
           // Stage V V3.2 — reminder click is a global (no session) emit, but
           // the push payload must carry sessionId per the V3.2 contract so
           // listeners can distinguish global events. null = not session-scoped.
+          requestCalendarNavigation({kind:'event',eventId:payload.eventId})
           win.webContents.send('agent:toolAction', {
             tool: 'app.switchMode',
-            args: { mode: 'calendar', eventId: payload.eventId },
+            args: { mode: 'calendar' },
             sessionId: null,
           })
         } catch (error) {

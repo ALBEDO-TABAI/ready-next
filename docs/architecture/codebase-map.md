@@ -29,7 +29,7 @@ Renderer (React / Zustand)
 | Browser | `src/renderer/pages/modes/BrowserMode.tsx` | `src/main/modules/browser-engine/` | `npm run verify:browser-reliability` |
 | Document | `src/renderer/pages/modes/DocumentMode.tsx` | `src/main/modules/document-engine/` | `npm run verify:widget-ready` |
 | RSS | `src/renderer/pages/modes/RSSMode.tsx` | `src/main/modules/rss-engine/` | 按改动选择 RSS 焦点测试与阶段 gate |
-| Calendar | `src/renderer/pages/modes/CalendarMode.tsx` | `src/main/modules/calendar-engine/` | `npm run verify:calendar` |
+| Calendar | `src/renderer/pages/modes/CalendarMode.tsx` | `src/main/modules/calendar-engine/` | `npm run verify:calendar-integration` |
 
 Agent、文件面板、技能中心和设置页是跨工作面的能力，不是额外的 Workbench mode。
 
@@ -136,7 +136,7 @@ claude-bridge IPC
 - Browser：`src/renderer/components/browser/`、`src/renderer/stores/useBrowserTabs.ts`
 - Document：`src/renderer/components/document/`、`src/renderer/stores/useDocTabs.ts`
 - RSS：`src/renderer/components/rss/`、`src/renderer/stores/useRSSSession.ts`
-- Calendar：`src/renderer/components/calendar/`、`src/renderer/stores/useCalendarSession.ts`
+- Calendar：`src/renderer/modules/calendar/workbench/`、`src/shared/calendar/`、`src/main/modules/database/calendar-store.ts`、`src/renderer/stores/useCalendarSession.ts`
 - Settings：`src/renderer/pages/Settings.tsx`、`src/renderer/components/settings/`
 - UI 调整导览：`UI_ADJUSTMENT_GUIDE.md`
 

@@ -1,3 +1,4 @@
+import { calendarRecordToEvent } from '../../calendar-engine/calendar-row-codec'
 import { createHash } from 'node:crypto'
 
 import { persistableCalendarEventId } from '../../../../shared/calendar-event-identity'
@@ -53,6 +54,7 @@ export function trustedBrowserReferenceInput(
 }
 
 export function trustedCalendarReferenceInput(event: NonNullable<ReturnType<DatabaseManager['calendar']['getCalendarEventById']>>): CodexResolvedInlineResource {
+  const details = calendarRecordToEvent(event)
   const canonical = {
     id: event.id,
     calendarId: event.calendar_id,
@@ -66,6 +68,16 @@ export function trustedCalendarReferenceInput(event: NonNullable<ReturnType<Data
     startTimezone: event.start_tz,
     endTimezone: event.end_tz,
     updatedAt: event.updated_at,
+    revision: details.revision,
+    conferenceUrl: details.conferenceUrl,
+    url: details.url,
+    attendees: details.attendees,
+    reminders: details.reminders,
+    status: details.status,
+    transparency: details.transparency,
+    visibility: details.visibility,
+    startDate: details.allDay ? details.start : null,
+    endDate: details.allDay ? details.end : null,
   }
   return {
     name: event.title || '日程',
@@ -132,7 +144,7 @@ export function extractProductSurfaceTargets(
     rssItemId: rssItem && rssItem.kind === 'rss_item' ? rssItem.itemId : referencedItemIds.length === 1 ? referencedItemIds[0] : null,
     rssSourceId: rssSource && rssSource.kind === 'rss_source' ? rssSource.sourceId : null,
     calendarEventId: calendarEvent && calendarEvent.kind === 'calendar_event'
-      ? persistableCalendarEventId(calendarEvent.eventId) || calendarEvent.eventId
+      ? calendarEvent.eventId
       : null,
     calendarWindow: calendarWindow && calendarWindow.kind === 'calendar_window'
       ? {

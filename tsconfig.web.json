@@ -5,6 +5,7 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/renderer/*"],
+      "@shared/*": ["src/shared/*"],
       "@main/*": ["src/main/*"],
       "@preload/*": ["src/preload/*"]
     },

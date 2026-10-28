@@ -1,3 +1,4 @@
+import { backupBeforeCalendarMigration } from './calendar-engine/calendar-schema'
 import type { DatabaseConnection } from './database/connection'
 import { DatabaseUnavailableError, assertDatabaseConnectionReady } from './database/connection'
 export { DatabaseUnavailableError, assertDatabaseConnectionReady } from './database/connection'
@@ -216,6 +217,8 @@ export class DatabaseManager {
     const backup = backupBeforeRSSMigration(this.db, this.dbPath)
     if (backup) logDatabase(`RSS migration backup created: ${backup}`)
     // Run the migration system to create/update all tables and indexes
+    const calendarBackup = backupBeforeCalendarMigration(this.db, this.dbPath)
+    if (calendarBackup) logDatabase(`Calendar migration backup created: ${calendarBackup}`)
     runMigrations(this.db)
 
     // Seed default calendar sources
@@ -229,7 +232,7 @@ export class DatabaseManager {
     const insertSource = this.db.prepare(
       'INSERT OR IGNORE INTO calendar_sources (id, name, color) VALUES (?, ?, ?)'
     )
-    for (const source of defaultSources) {
+    if (!this.db.prepare('SELECT 1 FROM calendar_sources LIMIT 1').get()) for (const source of defaultSources) {
       insertSource.run(source.id, source.name, source.color)
     }
   }

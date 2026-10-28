@@ -1,797 +1,215 @@
+import { createHash } from 'node:crypto'
 import type { DatabaseConnection } from './connection'
-import type { CalendarSource, CalendarEvent, EventInstance, EventOverride, ImportedEvent } from './records'
-import { createHash } from 'crypto'
-import { encodeReminders, decodeReminders } from '../calendar-engine/reminder-codec'
-import { expandEventList, expandRecurringEvent } from '../calendar-engine/rrule-engine'
-import type { Reminder } from '../../../shared/calendar-types'
+import { SettingsStore } from './settings-store'
+import type { CalendarSource, CalendarEvent, EventInstance, EventOverride } from './records'
+import { occurrences, newId, isRecurring, type CalEvent, type Calendar } from '../../../shared/calendar/model'
+import { planCalendarMutation, findCalendarOccurrence, type CalendarCommand, type CalendarDelta, type CalendarSnapshot, type CalendarMutationReceipt } from '../../../shared/calendar/commands'
+import { validateCalendarEvent } from '../../../shared/calendar/validation'
+import { importIcs, exportIcs } from '../../../shared/calendar/ics'
+import { dayOf, startOfDayMs, systemTimeZone } from '../../../shared/calendar/tz'
+import { isoDate } from '../../../shared/calendar/dates'
+import { decodeCalendarRow, encodeCalendarEvent, calendarEventToRecord, originalFromSeconds, originalToSeconds, type CalendarRow } from '../calendar-engine/calendar-row-codec'
+import { publishCalendarChanged } from '../calendar-engine/calendar-change'
 
+const PREFS_KEY = 'calendar_preferences_v1'
+const versionsOf = (events: CalEvent[]) => Object.fromEntries(events.map(e => [e.id, e.revision || 1]))
+const importedId = (source: string, uid: string) => `ics-${source}-${createHash('md5').update(uid).digest('hex').slice(0,12)}`
 
-/**
- * Row interface as returned from `SELECT * FROM calendar_events` — `reminders`
- * is the raw TEXT column (a JSON string or null). Internal-only.
- */
-interface CalendarEventRow {
-  id: string
-  calendar_id: string
-  title: string
-  description: string | null
-  location: string | null
-  start_time: number
-  end_time: number
-  all_day: number
-  recurrence_rule: string | null
-  reminders: string | null
-  /** L4-A — IANA tz; null = local timezone. */
-  start_tz: string | null
-  /** L4-A — IANA tz; null = local timezone. */
-  end_tz: string | null
-  /** L4-B — VEVENT UID for externally-synced rows. Null for local rows. */
-  ics_uid: string | null
-  /** L4-B — `calendar_sources.id` that produced this row. Null for local rows. */
-  source_id: string | null
-  created_at: number
-  updated_at: number
-}
-
-
-/**
- * Raw row from `calendar_event_overrides` — patch_json is the encoded
- * JSON string. Internal only; `decodeEventOverride` returns the parsed
- * `EventOverride` shape.
- */
-interface CalendarEventOverrideRow {
-  id: string
-  parent_event_id: string
-  occurrence_start: number
-  kind: 'single' | 'cancelled'
-  patch_json: string | null
-  created_at: number
-  updated_at: number
-}
-
-
-function decodeEventOverride(row: CalendarEventOverrideRow): EventOverride {
-  let patch: EventOverride['patch'] = null
-  if (row.kind === 'single' && row.patch_json != null) {
-    try {
-      const parsed = JSON.parse(row.patch_json) as Record<string, unknown>
-      // Only copy known fields; ignore stray keys so we don't accidentally
-      // surface unknown junk.
-      const p: NonNullable<EventOverride['patch']> = {}
-      if (typeof parsed.title === 'string') p.title = parsed.title
-      if (parsed.description === null || typeof parsed.description === 'string') {
-        p.description = parsed.description as string | null
-      }
-      if (parsed.location === null || typeof parsed.location === 'string') {
-        p.location = parsed.location as string | null
-      }
-      if (typeof parsed.start_time === 'number') p.start_time = parsed.start_time
-      if (typeof parsed.end_time === 'number') p.end_time = parsed.end_time
-      if (typeof parsed.all_day === 'number') p.all_day = parsed.all_day
-      if (parsed.reminders === null || Array.isArray(parsed.reminders)) {
-        p.reminders = parsed.reminders as Reminder[] | null
-      }
-      // L4-A — accept null (= clear) or non-empty string. Empty strings
-      // are normalized to null so the decode side never surfaces ''.
-      if (parsed.start_tz === null) p.start_tz = null
-      else if (typeof parsed.start_tz === 'string' && parsed.start_tz.length > 0) {
-        p.start_tz = parsed.start_tz
-      }
-      if (parsed.end_tz === null) p.end_tz = null
-      else if (typeof parsed.end_tz === 'string' && parsed.end_tz.length > 0) {
-        p.end_tz = parsed.end_tz
-      }
-      patch = p
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      console.warn(`[database] failed to decode override patch_json for ${row.id}: ${message}; treating as empty patch`)
-      patch = {}
-    }
-  }
-  return {
-    parentEventId: row.parent_event_id,
-    occurrenceStart: row.occurrence_start,
-    kind: row.kind,
-    patch,
-  }
-}
-
-
-/**
- * L4-B — deterministic row id for an externally-synced VEVENT.
- *
- * Same (sourceId, uid) → same id, so repeating the same fetch lands on
- * the same row. We MD5 the UID and slice 12 hex chars (48 bits); that's
- * a few orders of magnitude above the collision threshold for the
- * thousands-of-events typical for a single subscription, and gives us
- * a fixed-length token regardless of UID format (UIDs can be very long
- * — e.g. Google's `…@google.com` UIDs are 60+ chars).
- *
- * Exported as a top-level helper so the unit tests don't need to reach
- * into the DatabaseManager to verify the formula.
- */
-function computeImportedEventId(sourceId: string, uid: string): string {
-  const digest = createHash('md5').update(uid).digest('hex').slice(0, 12)
-  return `ics-${sourceId}-${digest}`
-}
+/** The single database owner for UI, product actions, subscriptions and reminders. */
 export class CalendarStore {
-  constructor(private readonly getConnection: () => DatabaseConnection | null) {}
+  private readonly settings: SettingsStore
+  constructor(private readonly getConnection: () => DatabaseConnection | null) { this.settings = new SettingsStore(getConnection) }
+  private get db(): DatabaseConnection { const db = this.getConnection(); if (!db) throw new Error('日历数据库不可用'); return db }
 
-  private get db(): DatabaseConnection | null {
-    return this.getConnection()
-  }
-
-
-  // ===================== Calendar CRUD Methods =====================
-
-  getCalendarSources(): CalendarSource[] {
-    if (!this.db) return []
-    return this.db.prepare('SELECT * FROM calendar_sources WHERE enabled = 1 ORDER BY created_at').all<CalendarSource>()
-  }
-
-  addCalendarSource(source: { name: string; color: string }): string {
-    if (!this.db) throw new Error('Database not available')
-    const id = `cal-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-    this.db.prepare(
-      'INSERT INTO calendar_sources (id, name, color) VALUES (?, ?, ?)'
-    ).run(id, source.name, source.color)
-    return id
-  }
-
-  getCalendarEvents(startTime: number, endTime: number): CalendarEvent[] {
-    if (!this.db) return []
-    // Events that overlap with the query range:
-    // event.start_time < endTime AND event.end_time > startTime
-    //
-    // Note: this method is intentionally LEFT AS-IS for recurring events —
-    // it returns the parent row (recurrence_rule IS NOT NULL) only if the
-    // parent's own start_time/end_time happens to fall inside [startTime,
-    // endTime]. For window-based recurring expansion the IPC handler calls
-    // `getRecurringEventsAndOverrides` + the rrule engine. Tools / sync
-    // jobs that read raw parent rows still use this method.
-    const rows = this.db.prepare(
-      `SELECT * FROM calendar_events
-       WHERE start_time < ? AND end_time > ?
-       ORDER BY start_time`
-    ).all<CalendarEventRow>(endTime, startTime)
-    return rows.map((row) => ({
-      ...row,
-      reminders: decodeReminders(row.reminders, { eventId: row.id }),
-    }))
-  }
-
-  /**
-   * Return non-recurring events that overlap [startTime, endTime] only.
-   * Used by the IPC layer to split the read into (non-recurring overlap
-   * SQL) + (recurring expansion via rrule). Recurring parents are excluded
-   * here so the IPC layer doesn't accidentally double-yield them — they
-   * come from `getRecurringEventsAndOverrides` instead.
-   */
-  getNonRecurringEventsInWindow(startTime: number, endTime: number): CalendarEvent[] {
-    if (!this.db) return []
-    const rows = this.db.prepare(
-      `SELECT * FROM calendar_events
-       WHERE recurrence_rule IS NULL
-         AND start_time < ? AND end_time > ?
-       ORDER BY start_time`,
-    ).all<CalendarEventRow>(endTime, startTime)
-    return rows.map((row) => ({
-      ...row,
-      reminders: decodeReminders(row.reminders, { eventId: row.id }),
-    }))
-  }
-
-  /**
-   * Fetch all recurring events (recurrence_rule IS NOT NULL) plus the
-   * full override list for them. Recurring parents are NOT window-filtered
-   * — a weekly event whose `start_time` is in 2024 must still expand into
-   * a 2026 window. The rrule engine handles the window filter via
-   * RRULE.between(). Overrides are grouped by parent event id.
-   *
-   * `windowStartUnix` / `windowEndUnix` are accepted for symmetry with the
-   * engine signature but the SQL query intentionally does NOT use them on
-   * the parent rows. Override rows ARE window-filtered (only overrides
-   * whose `occurrence_start` falls in the window matter for this query).
-   */
-  getRecurringEventsAndOverrides(
-    windowStartUnix: number,
-    windowEndUnix: number,
-  ): { events: CalendarEvent[]; overridesByParent: Map<string, EventOverride[]> } {
-    if (!this.db) return { events: [], overridesByParent: new Map() }
-
-    const eventRows = this.db.prepare(
-      `SELECT * FROM calendar_events
-       WHERE recurrence_rule IS NOT NULL
-       ORDER BY start_time`,
-    ).all<CalendarEventRow>()
-    const events: CalendarEvent[] = eventRows.map((row) => ({
-      ...row,
-      reminders: decodeReminders(row.reminders, { eventId: row.id }),
-    }))
-
-    if (events.length === 0) {
-      return { events: [], overridesByParent: new Map() }
+  snapshot(): CalendarSnapshot {
+    const sources = this.db.prepare('SELECT * FROM calendar_sources ORDER BY position,created_at,id').all<CalendarRow>()
+    const setting = this.db.prepare('SELECT value FROM settings WHERE key=?').get<{value:string}>(PREFS_KEY)
+    const prefs = setting ? JSON.parse(setting.value) as Record<string, unknown> : {}
+    const primary = String(prefs.defaultCalendarId || sources.find(s => !s.sync_url && s.enabled)?.id || sources.find(s=>!s.sync_url)?.id || '')
+    const calendars: Calendar[] = sources.map(s => ({id:String(s.id),accountId:s.sync_url?'subscriptions':'local',name:String(s.name),color:String(s.color),visible:!!s.visible,primary:s.id===primary,readOnly:!!s.sync_url,order:Number(s.position),timeZone:s.time_zone?String(s.time_zone):undefined,syncUrl:s.sync_url?String(s.sync_url):null,syncInterval:Number(s.sync_interval),syncEnabled:!!s.enabled,revision:Number(s.revision),syncError:s.sync_error?String(s.sync_error):null,lastSyncedAt:s.last_synced_at?Number(s.last_synced_at):null}))
+    const rows = this.db.prepare('SELECT * FROM calendar_events ORDER BY created_at,id').all<CalendarRow>()
+    const events = rows.map(decodeCalendarRow), parents = new Map(events.map(e=>[e.id,e])), raw = new Map(rows.map(r=>[String(r.id),r]))
+    for (const override of this.db.prepare('SELECT * FROM calendar_event_overrides ORDER BY occurrence_start').all<CalendarRow>()) {
+      const parent = parents.get(String(override.parent_event_id)); if (!parent) throw new Error('日历例外缺少母事件')
+      if (!isRecurring(parent)) continue
+      const originalStart = originalFromSeconds(Number(override.occurrence_start),parent.allDay)
+      if (override.kind !== 'single') continue
+      const patch = override.patch_json ? JSON.parse(String(override.patch_json)) as CalendarRow : {}
+      const base = raw.get(parent.id)!
+      const start = parent.allDay ? isoDate(Number(override.occurrence_start)/86400) : Number(override.occurrence_start)
+      const duration = parent.allDay ? (Date.parse(String(parent.end))-Date.parse(String(parent.start)))/86400000 : (Number(parent.end)-Number(parent.start))/1000
+      const occurrenceRow = {...base, ...(parent.allDay ? {start_date:start,end_date:isoDate(Number(override.occurrence_start)/86400+duration)} : {start_time:start,end_time:Number(start)+duration}), ...patch, id:override.id,recurrence_rule:null,created_at:override.created_at,updated_at:override.updated_at,revision:parent.revision}
+      events.push({...decodeCalendarRow(occurrenceRow),uid:parent.uid,rrule:undefined,exdates:undefined,rdates:undefined,recurringEventId:parent.id,originalStart})
     }
-
-    // Pull all overrides for those parents within the window. We widen the
-    // window slightly: an override may move an occurrence's start_time
-    // OUTSIDE the original window. Since we match overrides against the
-    // ORIGINAL occurrence_start (not the patched start_time) we just use
-    // the window directly; the engine then yields the patched fields.
-    const placeholders = events.map(() => '?').join(',')
-    const overrideRows = this.db.prepare(
-      `SELECT * FROM calendar_event_overrides
-       WHERE parent_event_id IN (${placeholders})
-         AND occurrence_start BETWEEN ? AND ?`,
-    ).all<CalendarEventOverrideRow>(
-      ...events.map((e) => e.id),
-      windowStartUnix,
-      windowEndUnix,
-    )
-
-    const overridesByParent = new Map<string, EventOverride[]>()
-    for (const row of overrideRows) {
-      const decoded = decodeEventOverride(row)
-      const list = overridesByParent.get(decoded.parentEventId) ?? []
-      list.push(decoded)
-      overridesByParent.set(decoded.parentEventId, list)
-    }
-    return { events, overridesByParent }
+    return {calendars,events,prefs}
   }
 
-  /**
-   * Reminder scheduler entry point — returns expanded `EventInstance[]`
-   * for events that have at least one reminder, INCLUDING recurring
-   * instances. Each EventInstance carries its own `reminders` (the parent
-   * row's reminders, possibly patched by an override), and its `id` is
-   * the syntheticId so the scheduler dedupes timers per-instance.
-   *
-   * `windowStartSeconds` and `windowEndSeconds` are Unix seconds. Pass
-   * the **start_time** bounds you want to consider — callers should
-   * widen this against the largest plausible offset.
-   *
-   * Why expanded instances instead of parents: a daily-recurring event
-   * with reminders fires reminders on every occurrence, not just the
-   * first. The scheduler is intentionally instance-aware so the timer
-   * map can cancel one instance independently. Using syntheticId as
-   * `id` means scheduler.onEventChanged(parentId) won't accidentally
-   * dedupe two different instances of the same parent.
-   */
-  getCalendarEventsWithReminders(
-    windowStartSeconds: number,
-    windowEndSeconds: number,
-  ): EventInstance[] {
-    if (!this.db) return []
+  private pendingChange = false
+  private pendingIds = new Set<string>()
+  private changed(ids:readonly string[]):void {
+    if(this.db.inTransaction){this.pendingChange=true;ids.forEach(id=>this.pendingIds.add(id));return}
+    publishCalendarChanged(ids)
+  }
+  private transaction<T>(body:()=>T):T {
+    const own = !this.db.inTransaction
+    if (own) this.db.exec('BEGIN IMMEDIATE')
+    try {const result=body();if(own){this.db.exec('COMMIT');if(this.pendingChange){const ids=[...this.pendingIds];this.pendingChange=false;this.pendingIds.clear();publishCalendarChanged(ids)}}return result}
+    catch(error){if(own){this.db.exec('ROLLBACK');this.pendingChange=false;this.pendingIds.clear()}throw error}
+  }
+  private writable(id:string, calendars:Calendar[]) {
+    const cal=calendars.find(c=>c.id===id)
+    if(!cal)throw new Error('日历不存在')
+    if(cal.readOnly)throw new Error('订阅日历为只读，请复制到本地日历后修改')
+  }
+  mutate(command:CalendarCommand, expected:Record<string,number>):CalendarMutationReceipt {
+    return this.commit(planCalendarMutation(this.snapshot(),command),expected)
+  }
+  restore(delta:CalendarDelta,expected:Record<string,number>):CalendarMutationReceipt { return this.commit(delta,expected) }
 
-    // Non-recurring path: events with reminders AND start_time in window.
-    const nonRecurringRows = this.db.prepare(
-      `SELECT * FROM calendar_events
-       WHERE reminders IS NOT NULL
-         AND recurrence_rule IS NULL
-         AND start_time BETWEEN ? AND ?
-       ORDER BY start_time`,
-    ).all<CalendarEventRow>(windowStartSeconds, windowEndSeconds)
-    const nonRecurring: CalendarEvent[] = nonRecurringRows.map((row) => ({
-      ...row,
-      reminders: decodeReminders(row.reminders, { eventId: row.id }),
-    }))
+  private commit(delta:CalendarDelta,expected:Record<string,number>, importedSource?:string):CalendarMutationReceipt {return this.transaction(()=>this.commitInside(delta,expected,importedSource))}
+  private commitInside(delta:CalendarDelta,expected:Record<string,number>, importedSource?:string):CalendarMutationReceipt {
+    const before=this.snapshot(), old=new Map(before.events.map(e=>[e.id,e]))
+    const put=delta.put.map(validateCalendarEvent), remove=[...new Set(delta.remove)]
+    for(const event of put.filter(e=>e.recurringEventId)){const conflict=before.events.find(e=>e.recurringEventId===event.recurringEventId&&String(e.originalStart)===String(event.originalStart)&&e.id!==event.id);if(conflict&&!put.some(e=>e.id===conflict.id)&&!remove.includes(conflict.id))remove.push(conflict.id)}
+    const targets=new Set([...put.map(e=>e.id),...remove])
+    for(const e of put)if(e.recurringEventId)targets.add(e.recurringEventId)
+    for(const id of remove){const e=old.get(id);if(e?.recurringEventId)targets.add(e.recurringEventId)}
+    for(const id of targets){
+      const current=old.get(id)
+      if(current && expected[id]!==current.revision)throw new Error('日程版本已变化，请刷新后重试')
+      if(!current && (expected[id] || 0)!==0)throw new Error('日程已被删除，请刷新后重试')
+      if(current && !importedSource)this.writable(current.calendarId,before.calendars)
+    }
+    const future=new Map(old)
+    remove.forEach(id=>future.delete(id));put.forEach(e=>future.set(e.id,e))
+    for(const e of put){
+      if(importedSource){if(e.calendarId!==importedSource)throw new Error('导入日历不匹配')}
+      else this.writable(e.calendarId,before.calendars)
+      if(e.recurringEventId && !future.has(e.recurringEventId))throw new Error('重复日程缺少母事件')
+      if(e.recurringEventId&&typeof e.originalStart!==(future.get(e.recurringEventId)!.allDay?'string':'number'))throw new Error('重复实例的原日期类型与母事件不一致')
+    }
+    const undo:CalendarDelta={put:[...targets].map(id=>old.get(id)).filter((e):e is CalEvent=>!!e),remove:put.filter(e=>!old.has(e.id)).map(e=>e.id)}
+    this.transaction(()=>{
+      for(const id of remove){this.db.prepare('DELETE FROM calendar_event_overrides WHERE id=?').run(id);this.db.prepare('DELETE FROM calendar_event_overrides WHERE parent_event_id=?').run(id);this.db.prepare('DELETE FROM calendar_events WHERE id=?').run(id)}
+      for(const event of put.filter(e=>e.recurringEventId))this.db.prepare('DELETE FROM calendar_event_overrides WHERE id=?').run(event.id)
+      for(const e of put.filter(e=>!e.recurringEventId)){
+        const record=encodeCalendarEvent(e), keys=Object.keys(record)
+        const revision=(old.get(e.id)?.revision ?? e.revision ?? 0)+1
+        this.db.prepare(`INSERT INTO calendar_events(${keys.join(',')},revision,source_id) VALUES (${keys.map(()=>'?').join(',')},?,?) ON CONFLICT(id) DO UPDATE SET ${keys.filter(k=>k!=='id'&&k!=='created_at').map(k=>`${k}=excluded.${k}`).join(',')},revision=excluded.revision`).run(...keys.map(k=>record[k]),revision,importedSource || null)
 
-    // Recurring path: events with reminders AND recurrence_rule, expand.
-    const recurringRows = this.db.prepare(
-      `SELECT * FROM calendar_events
-       WHERE reminders IS NOT NULL
-         AND recurrence_rule IS NOT NULL
-       ORDER BY start_time`,
-    ).all<CalendarEventRow>()
-    const recurringEvents: CalendarEvent[] = recurringRows.map((row) => ({
-      ...row,
-      reminders: decodeReminders(row.reminders, { eventId: row.id }),
-    }))
-
-    // Pull overrides for the recurring parents that lie inside the window.
-    let overridesByParent = new Map<string, EventOverride[]>()
-    if (recurringEvents.length > 0) {
-      const placeholders = recurringEvents.map(() => '?').join(',')
-      const overrideRows = this.db.prepare(
-        `SELECT * FROM calendar_event_overrides
-         WHERE parent_event_id IN (${placeholders})
-           AND occurrence_start BETWEEN ? AND ?`,
-      ).all<CalendarEventOverrideRow>(
-        ...recurringEvents.map((e) => e.id),
-        windowStartSeconds,
-        windowEndSeconds,
-      )
-      for (const row of overrideRows) {
-        const decoded = decodeEventOverride(row)
-        const list = overridesByParent.get(decoded.parentEventId) ?? []
-        list.push(decoded)
-        overridesByParent.set(decoded.parentEventId, list)
       }
-    }
-
-    // Build EventInstances for both pools and concat. Non-recurring rows
-    // produce a single instance whose syntheticId == row.id; recurring
-    // rows expand.
-    const instances: EventInstance[] = []
-    for (const ev of nonRecurring) {
-      const inst = expandRecurringEvent(ev, windowStartSeconds, windowEndSeconds, [])
-      for (const i of inst) instances.push(i)
-    }
-    const recurringInstances = expandEventList(
-      recurringEvents,
-      windowStartSeconds,
-      windowEndSeconds,
-      overridesByParent,
-    )
-    for (const i of recurringInstances) instances.push(i)
-
-    instances.sort((a, b) => a.start_time - b.start_time)
-    return instances
+      for(const e of put.filter(e=>e.recurringEventId)){
+        const parent=future.get(e.recurringEventId!)!, record=encodeCalendarEvent(e), parentRecord=encodeCalendarEvent(parent)
+        const patch:CalendarRow={}
+        for(const [k,v]of Object.entries(record))if(!['id','ics_uid','recurrence_rule','rdates','created_at','updated_at'].includes(k) && (['start_time','end_time','start_date','end_date'].includes(k)||JSON.stringify(v)!==JSON.stringify(parentRecord[k])))patch[k]=v
+        this.db.prepare("INSERT INTO calendar_event_overrides(id,parent_event_id,occurrence_start,kind,patch_json) VALUES (?,?,?,'single',?) ON CONFLICT(parent_event_id,occurrence_start) DO UPDATE SET id=excluded.id,kind='single',patch_json=excluded.patch_json,updated_at=unixepoch()").run(e.id,e.recurringEventId,originalToSeconds(e.originalStart!),JSON.stringify(patch))
+      }
+      for(const id of targets)if(old.has(id)&&!put.some(e=>e.id===id)&&!remove.includes(id))this.db.prepare('UPDATE calendar_events SET revision=revision+1,updated_at=unixepoch() WHERE id=?').run(id)
+    })
+    const snapshot=this.snapshot(), now=versionsOf(snapshot.events)
+    for(const id of targets)if(!(id in now))now[id]=0
+    this.changed([...targets])
+    return {snapshot,undo,versions:now,changedIds:[...targets]}
   }
 
-  createCalendarEvent(event: {
-    calendar_id: string
-    title: string
-    description?: string | null
-    location?: string | null
-    start_time: number
-    end_time: number
-    all_day?: number
-    color?: string | null
-    recurrence_rule?: string | null
-    reminders?: Reminder[] | null
-    /** L4-A — IANA tz id or null (= local). Empty string is normalized to null. */
-    start_tz?: string | null
-    /** L4-A — IANA tz id or null (= local). Empty string is normalized to null. */
-    end_tz?: string | null
-  }): string {
-    if (!this.db) throw new Error('Database not available')
-    const id = `event-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-    // Empty string → null so the gate (recurrence_rule IS NOT NULL) is
-    // honest. UI / IPC may send '' instead of null when clearing.
-    const normalizedRule =
-      event.recurrence_rule != null && event.recurrence_rule.trim().length > 0
-        ? event.recurrence_rule
-        : null
-    // L4-A — same normalization for tz columns: empty string is treated
-    // as "no explicit zone" (= local) so we don't accidentally persist a
-    // sentinel that the validator would later reject.
-    const normalizedStartTz =
-      event.start_tz != null && event.start_tz.trim().length > 0
-        ? event.start_tz
-        : null
-    const normalizedEndTz =
-      event.end_tz != null && event.end_tz.trim().length > 0
-        ? event.end_tz
-        : null
-    this.db.prepare(
-      `INSERT INTO calendar_events
-       (id, calendar_id, title, description, location, start_time, end_time, all_day, recurrence_rule, reminders, start_tz, end_tz)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      id,
-      event.calendar_id,
-      event.title,
-      event.description || null,
-      event.location || null,
-      event.start_time,
-      event.end_time,
-      event.all_day || 0,
-      normalizedRule,
-      encodeReminders(event.reminders ?? null),
-      normalizedStartTz,
-      normalizedEndTz,
-    )
-    return id
+  savePreferences(prefs:Record<string,unknown>):void {
+    this.settings.setSetting(PREFS_KEY,JSON.stringify({...this.snapshot().prefs,...prefs}));this.changed([])
+  }
+  putCalendars(calendars:Calendar[]):void {this.transaction(()=>calendars.forEach(calendar=>this.putCalendar(calendar)))}
+  putCalendar(calendar:Calendar):void {
+    if(!calendar.id || !calendar.name.trim() || !/^#[0-9a-f]{6}$/i.test(calendar.color))throw new Error('日历名称或颜色无效')
+    const current=this.getCalendarSourceById(calendar.id) as (CalendarSource&{revision?:number})|null
+    if(current && calendar.revision!==undefined && calendar.revision!==current.revision)throw new Error('日历版本已变化')
+    this.transaction(()=>{
+      this.db.prepare(`INSERT INTO calendar_sources(id,name,color,visible,position,time_zone) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,color=excluded.color,visible=excluded.visible,position=excluded.position,time_zone=excluded.time_zone,revision=calendar_sources.revision+1`).run(calendar.id,calendar.name.trim(),calendar.color,calendar.visible?1:0,calendar.order||0,calendar.timeZone||null)
+      if(calendar.primary){const prefs=this.snapshot().prefs || {};this.settings.setSetting(PREFS_KEY,JSON.stringify({...prefs,defaultCalendarId:calendar.id}))}
+    });this.changed([calendar.id])
+  }
+  getSources():CalendarSource[]{return this.getCalendarSources()}
+  getCalendarSources():CalendarSource[]{return this.db.prepare('SELECT * FROM calendar_sources ORDER BY position,created_at').all<CalendarSource>()}
+  getCalendarSourceById(id:string):CalendarSource|null{return this.db.prepare('SELECT * FROM calendar_sources WHERE id=?').get<CalendarSource>(id)||null}
+  addCalendarSource(source:{name:string;color:string}):string{const id=newId('cal');this.putCalendar({id,accountId:'local',...source,visible:true});return id}
+  upsertCalendarSource(source:{id:string;name:string;color?:string;type?:string;syncUrl?:string|null;syncInterval?:number;enabled?:boolean}):{id:string;action:'created'|'updated'}{
+    const old=this.getCalendarSourceById(source.id)
+    this.db.prepare(`INSERT INTO calendar_sources(id,name,color,type,sync_url,sync_interval,enabled) VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,color=excluded.color,type=excluded.type,sync_url=excluded.sync_url,sync_interval=excluded.sync_interval,enabled=excluded.enabled,revision=calendar_sources.revision+1`).run(source.id,source.name,source.color||old?.color||'#4CA8DF',source.type||old?.type||'local',source.syncUrl===undefined?old?.sync_url||null:source.syncUrl,source.syncInterval||old?.sync_interval||60,source.enabled===undefined?(old?.enabled??1):source.enabled?1:0)
+    this.changed([source.id]);return {id:source.id,action:old?'updated':'created'}
+  }
+  deleteCalendarSource(id:string):{deleted:boolean}{
+    const exists=this.getCalendarSourceById(id);if(!exists)return {deleted:false}
+    const snapshot=this.snapshot();if(!exists.sync_url&&snapshot.calendars.filter(c=>!c.readOnly).length<=1)throw new Error('请至少保留一个本地日历')
+    this.transaction(()=>{this.db.prepare('DELETE FROM calendar_event_overrides WHERE parent_event_id IN (SELECT id FROM calendar_events WHERE calendar_id=?)').run(id);this.db.prepare('DELETE FROM calendar_events WHERE calendar_id=?').run(id);this.db.prepare('DELETE FROM calendar_sources WHERE id=?').run(id)})
+    this.changed([id]);return {deleted:true}
   }
 
-  updateCalendarEvent(id: string, updates: Partial<{
-    title: string
-    description: string | null
-    location: string | null
-    start_time: number
-    end_time: number
-    all_day: number
-    calendar_id: string
-    recurrence_rule: string | null
-    reminders: Reminder[] | null
-    /** L4-A — IANA tz id or null (= local). Empty string → null. */
-    start_tz: string | null
-    /** L4-A — IANA tz id or null (= local). Empty string → null. */
-    end_tz: string | null
-  }>): void {
-    if (!this.db) throw new Error('Database not available')
-
-    const setClauses: string[] = []
-    const values: unknown[] = []
-
-    if (updates.title !== undefined) { setClauses.push('title = ?'); values.push(updates.title) }
-    if (updates.description !== undefined) { setClauses.push('description = ?'); values.push(updates.description) }
-    if (updates.location !== undefined) { setClauses.push('location = ?'); values.push(updates.location) }
-    if (updates.start_time !== undefined) { setClauses.push('start_time = ?'); values.push(updates.start_time) }
-    if (updates.end_time !== undefined) { setClauses.push('end_time = ?'); values.push(updates.end_time) }
-    if (updates.all_day !== undefined) { setClauses.push('all_day = ?'); values.push(updates.all_day) }
-    if (updates.calendar_id !== undefined) { setClauses.push('calendar_id = ?'); values.push(updates.calendar_id) }
-    if (updates.recurrence_rule !== undefined) {
-      setClauses.push('recurrence_rule = ?')
-      // Empty string → null (clear); string with content → store raw.
-      const v = updates.recurrence_rule
-      values.push(v != null && v.trim().length > 0 ? v : null)
+  getCalendarEventReference(id:string):CalendarEvent|null {
+    const [parentId,origin]=id.split('#')
+    if(origin===undefined)return this.getCalendarEventById(id)
+    if(!Number.isFinite(Number(origin)))return null
+    const snapshot=this.snapshot(),parent=snapshot.events.find(e=>e.id===parentId)
+    if(!parent)return null
+    const found=findCalendarOccurrence(snapshot.events,`${parentId}|${originalFromSeconds(Number(origin),parent.allDay)}`)
+    return found?{...calendarEventToRecord(found.event),id,start_time:found.start/1000,end_time:found.end/1000}:null
+  }
+  getCalendarEventById(id:string):CalendarEvent|null {const e=this.snapshot().events.find(e=>e.id===id);return e?calendarEventToRecord(e):null}
+  getCalendarEvents(start:number,end:number):CalendarEvent[]{return this.snapshot().events.filter(e=>!e.recurringEventId).map(e=>calendarEventToRecord(e)).filter(e=>e.start_time<end&&e.end_time>start)}
+  getNonRecurringEventsInWindow(start:number,end:number):CalendarEvent[]{return this.getCalendarEvents(start,end).filter(e=>!e.recurrence_rule&&!(e as unknown as {rdates?:unknown[]}).rdates?.length)}
+  getRecurringEventsAndOverrides(_start:number,_end:number):{events:CalendarEvent[];overridesByParent:Map<string,EventOverride[]>}{
+    const snapshot=this.snapshot(), parents=snapshot.events.filter(e=>isRecurring(e)&&!e.recurringEventId)
+    const overridesByParent=new Map<string,EventOverride[]>()
+    for(const parent of parents){const list:EventOverride[]=[]
+      for(const d of parent.exdates||[])list.push({parentEventId:parent.id,occurrenceStart:originalToSeconds(d),kind:'cancelled',patch:null})
+      for(const e of snapshot.events.filter(e=>e.recurringEventId===parent.id))list.push({parentEventId:parent.id,occurrenceStart:originalToSeconds(e.originalStart!),kind:'single',patch:calendarEventToRecord(e)})
+      overridesByParent.set(parent.id,list)
     }
-    if (updates.reminders !== undefined) {
-      setClauses.push('reminders = ?')
-      values.push(encodeReminders(updates.reminders))
-    }
-    if (updates.start_tz !== undefined) {
-      setClauses.push('start_tz = ?')
-      // Empty string → null so the back-compat "null = local timezone"
-      // semantic stays the canonical clear value.
-      const v = updates.start_tz
-      values.push(v != null && v.trim().length > 0 ? v : null)
-    }
-    if (updates.end_tz !== undefined) {
-      setClauses.push('end_tz = ?')
-      const v = updates.end_tz
-      values.push(v != null && v.trim().length > 0 ? v : null)
-    }
-
-    if (setClauses.length === 0) return
-
-    setClauses.push('updated_at = unixepoch()')
-    values.push(id)
-
-    this.db.prepare(
-      `UPDATE calendar_events SET ${setClauses.join(', ')} WHERE id = ?`
-    ).run(...values)
+    return {events:parents.map(e=>calendarEventToRecord(e)),overridesByParent}
+  }
+  listOccurrences(start:number,end:number,zone=systemTimeZone()) {
+    const snapshot=this.snapshot()
+    return occurrences(snapshot.events,dayOf(start*1000,zone)-1,dayOf(end*1000,zone)+2,zone).filter(o=>o.end>start*1000&&o.start<end*1000)
+  }
+  getCalendarEventsWithReminders(start:number,end:number):EventInstance[]{
+    const snapshot=this.snapshot();if(snapshot.prefs?.notifications===false)return [];const offsets=snapshot.events.flatMap(e=>(e.reminders||[]).filter(r=>r.method!=='email').map(r=>r.minutes*60))
+    const zone=systemTimeZone(), lo=start+Math.min(0,...offsets),hi=end+Math.max(0,...offsets)
+    return occurrences(snapshot.events,dayOf(lo*1000,zone)-1,dayOf(hi*1000,zone)+2,zone).filter(o=>o.event.reminders?.some(r=>r.method!=='email')).map(o=>({...calendarEventToRecord(o.event),id:o.seriesId?`${o.seriesId}#${originalToSeconds(o.event.originalStart??(o.allDay?isoDate(o.startDay):o.start))}`:o.event.id,instanceOf:o.seriesId||o.event.id,occurrenceStart:originalToSeconds(o.event.originalStart??(o.allDay?isoDate(o.startDay):o.start)),overrideKind:o.event.recurringEventId?'single':null,start_time:o.allDay?startOfDayMs(o.startDay,o.event.timeZone||zone)/1000:o.start/1000,end_time:o.allDay?startOfDayMs(o.endDay+1,o.event.timeZone||zone)/1000:o.end/1000})) as EventInstance[]
+  }
+  claimReminder(eventId:string,start:number,offset:number,method:string,now:number):boolean{
+    const result=this.db.prepare('INSERT OR IGNORE INTO calendar_reminder_deliveries(event_id,occurrence_start,offset_minutes,method,delivered_at) VALUES (?,?,?,?,?)').run(eventId,start,offset,method,now) as {changes:number}
+    return result.changes===1
   }
 
-  deleteCalendarEvent(id: string): void {
-    if (!this.db) throw new Error('Database not available')
-    this.db.prepare('DELETE FROM calendar_events WHERE id = ?').run(id)
+  importStandaloneSnapshot(input:CalendarSnapshot):{created:number;skipped:number}{
+    return this.transaction(()=>{
+      const before=this.snapshot(),existing=new Set(before.events.map(e=>e.id))
+      const key=(kind:string,id:string)=>`standalone-${kind}-${createHash('sha256').update(id).digest('hex').slice(0,20)}`
+      const ids=new Map(input.events.map(e=>[e.id,key('event',e.id)]))
+      const put=input.events.filter(e=>!existing.has(ids.get(e.id)!)&&(!e.recurringEventId||!existing.has(ids.get(e.recurringEventId)!))).map(e=>({...e,id:ids.get(e.id)!,calendarId:key('calendar',e.calendarId),recurringEventId:e.recurringEventId?ids.get(e.recurringEventId):undefined,revision:0}))
+      const needed=new Set(put.map(e=>e.calendarId))
+      for(const source of input.calendars){const id=key('calendar',source.id);if(needed.has(id)&&!this.getCalendarSourceById(id))this.putCalendar({...source,id,primary:false,readOnly:false,accountId:'local',order:before.calendars.length+(source.order||0)})}
+      if(put.length)this.commit({put,remove:[]},versionsOf(before.events))
+      return {created:put.length,skipped:input.events.length-put.length}
+    })
   }
 
-  /**
-   * L3-B — fetch a single event row by id. Used by the
-   * `splitRecurringSeries` IPC handler to read the parent's existing
-   * recurrence_rule / fields before truncating it; also useful for
-   * idempotency checks. Returns null when the event is missing — the
-   * caller decides whether that's an error.
-   */
-  getCalendarEventById(id: string): CalendarEvent | null {
-    if (!this.db) return null
-    const row = this.db.prepare(
-      `SELECT * FROM calendar_events WHERE id = ?`,
-    ).get<CalendarEventRow>(id)
-    if (!row) return null
-    return {
-      ...row,
-      reminders: decodeReminders(row.reminders, { eventId: row.id }),
-    }
+  importCalendar(raw:string,sourceId?:string,name='导入的日历'):{sourceId:string;created:number;updated:number;skipped:number}{
+    const id=sourceId||`ics-content-${createHash('sha256').update(raw.replace(/\r\n/g,'\n').trim()).digest('hex').slice(0,24)}`,parsed=importIcs(raw,id,systemTimeZone())
+    if(parsed.warnings.length)throw new Error(`导入内容不完整，原数据未修改：${parsed.warnings.join('；')}`)
+    if(!parsed.events.length)throw new Error('文件中没有可导入的日程')
+    return this.transaction(()=>{
+      if(this.getCalendarSourceById(id)?.sync_url)throw new Error('订阅日历为只读，请导入本地日历')
+      if(!this.getCalendarSourceById(id))this.upsertCalendarSource({id,name:parsed.calendarName||name,color:parsed.calendarColor?.slice(0,7),type:'ics'})
+      const result=this.replaceImportedCalendar(id,parsed.events,false)
+      return {sourceId:id,created:result.created,updated:result.updated,skipped:0}
+    })
   }
-
-  /**
-   * L3-B — upsert a per-occurrence override row.
-   *
-   * The `(parent_event_id, occurrence_start)` UNIQUE index is the conflict
-   * key — re-upserting the same occurrence flips the row's kind / patch
-   * fields and bumps `updated_at`, keeping the original `id` and
-   * `created_at` stable so consumers tracking override ids can resolve
-   * a stable handle across edits.
-   *
-   * `patch` is JSON-encoded; pass `null` when `kind === 'cancelled'`
-   * (the IPC layer enforces this contract — patch is silently nulled
-   * server-side when the kind is `cancelled` to match the migration
-   * 038 schema discipline). `patch` for `kind === 'single'` may use
-   * either snake_case (DB-shape) or be partial — only the documented
-   * fields survive `decodeEventOverride` on the read side.
-   *
-   * Returns the row id so the IPC handler can echo it back to the
-   * renderer; the renderer doesn't use the id today but knowing the
-   * row was written is useful for log lines / future "undo" surfaces.
-   */
-  upsertEventOverride(override: {
-    parentEventId: string
-    occurrenceStart: number
-    kind: 'single' | 'cancelled'
-    patch: EventOverride['patch']
-  }): { id: string } {
-    if (!this.db) throw new Error('Database not available')
-    const id = `ovr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-    // Cancelled rows always have null patch_json — this matches the
-    // CHECK-constraint-free but documented schema discipline in the
-    // 038 migration. If a caller hands us patch on a cancelled kind we
-    // drop it on the floor here rather than smuggle it into JSON.
-    const encodedPatch =
-      override.kind === 'cancelled' || override.patch == null
-        ? null
-        : JSON.stringify(override.patch)
-    this.db.prepare(
-      `INSERT INTO calendar_event_overrides
-         (id, parent_event_id, occurrence_start, kind, patch_json)
-       VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT (parent_event_id, occurrence_start) DO UPDATE SET
-         kind = excluded.kind,
-         patch_json = excluded.patch_json,
-         updated_at = unixepoch()`,
-    ).run(
-      id,
-      override.parentEventId,
-      override.occurrenceStart,
-      override.kind,
-      encodedPatch,
-    )
-    // The runtime id might be either the freshly inserted id or the
-    // existing row's id (when ON CONFLICT updated). Look it up to be
-    // honest about which one this call landed on.
-    const row = this.db.prepare(
-      `SELECT id FROM calendar_event_overrides
-       WHERE parent_event_id = ? AND occurrence_start = ?`,
-    ).get<{ id: string }>(override.parentEventId, override.occurrenceStart)
-    return { id: row?.id ?? id }
+  replaceImportedCalendar(sourceId:string,events:CalEvent[],replace=true):{created:number;updated:number;removed:number}{
+    if(!this.getCalendarSourceById(sourceId))throw new Error('日历不存在')
+    const snapshot=this.snapshot(),mapping=new Map(events.filter(e=>!e.recurringEventId).map(e=>[e.id,importedId(sourceId,e.uid)]))
+    const normalized=events.map(e=>({...e,calendarId:sourceId,id:e.recurringEventId?`${importedId(sourceId,e.uid)}-${originalToSeconds(e.originalStart!)}`:mapping.get(e.id)!,recurringEventId:e.recurringEventId?mapping.get(e.recurringEventId):undefined}))
+    const incoming=new Set(normalized.map(e=>e.id)),existing=snapshot.events.filter(e=>e.calendarId===sourceId)
+    const remove=replace?existing.filter(e=>!incoming.has(e.id)).map(e=>e.id):[]
+    this.commit({put:normalized,remove},versionsOf(snapshot.events),sourceId)
+    return {created:normalized.filter(e=>!existing.some(x=>x.id===e.id)).length,updated:normalized.filter(e=>existing.some(x=>x.id===e.id)).length,removed:remove.length}
   }
-
-  /**
-   * L3-B — delete a per-occurrence override row. Returns
-   * `{ deleted: false }` when the row didn't exist (idempotent semantic
-   * so the IPC layer doesn't error on "remove override that never
-   * existed" — equivalent to "the event already follows the parent's
-   * default behavior").
-   */
-  deleteEventOverride(parentEventId: string, occurrenceStart: number): { deleted: boolean } {
-    if (!this.db) throw new Error('Database not available')
-    const result = this.db.prepare(
-      `DELETE FROM calendar_event_overrides
-       WHERE parent_event_id = ? AND occurrence_start = ?`,
-    ).run(parentEventId, occurrenceStart)
-    // better-sqlite3 RunResult.changes is a number; treat any non-zero as deleted.
-    const changes =
-      typeof (result as { changes?: number })?.changes === 'number'
-        ? (result as { changes?: number }).changes ?? 0
-        : 0
-    return { deleted: changes > 0 }
-  }
-
-  // ===================== Calendar External Sync (L4-B) =====================
-
-  /**
-   * L4-B — upsert one externally-synced event row for a given source.
-   *
-   * Identity model: the row id is derived deterministically from
-   * `(sourceId, uid)` so re-running the same fetch always lands on the
-   * same row. We MD5 the UID and slice the first 12 hex chars; that's
-   * 48 bits which is well above the collision threshold for the at-
-   * most-thousands of events a single ICS subscription carries.
-   *
-   * Sentinel id form: `ics-<sourceId>-<md5(uid).slice(0,12)>`. The
-   * `ics-` prefix flags the row as externally-synced for any future
-   * dashboard that wants to count "subscriptions vs local events".
-   *
-   * Behavior contract:
-   *   - INSERT when no row with that id exists → `action: 'created'`.
-   *   - ON CONFLICT(id) DO UPDATE when row exists → `action: 'updated'`
-   *     (every mutable field — title, time, location, rrule, reminders,
-   *     tz — is overwritten with the latest fetch).
-   *   - `calendar_id` is set to `sourceId` so the event appears in the
-   *     subscription's own bucket. The user can rebucket via UI later;
-   *     a re-sync will NOT clobber a moved row's `calendar_id` because
-   *     we only update `calendar_id` on INSERT path — but the conflict
-   *     branch keeps the existing `calendar_id` intact. (Note: today's
-   *     impl OVERWRITES `calendar_id` on update. Future enhancement
-   *     can split create-time / update-time field sets if user demand
-   *     for "move externally-synced event to local calendar" appears.)
-   *   - `reminders` is always written as null on import — the upstream
-   *     feed doesn't carry a runtime "remind me 15m before" semantic
-   *     in a portable way (X-properties vary), and silently inheriting
-   *     stale reminders would be confusing.
-   */
-  upsertImportedEvent(
-    sourceId: string,
-    ev: ImportedEvent,
-  ): { id: string; action: 'created' | 'updated' } {
-    if (!this.db) throw new Error('Database not available')
-    if (typeof sourceId !== 'string' || sourceId.length === 0) {
-      throw new Error('upsertImportedEvent: sourceId is required')
-    }
-    if (typeof ev.uid !== 'string' || ev.uid.length === 0) {
-      throw new Error('upsertImportedEvent: ImportedEvent.uid is required')
-    }
-
-    const id = computeImportedEventId(sourceId, ev.uid)
-
-    const existing = this.db.prepare(
-      `SELECT id FROM calendar_events WHERE id = ?`,
-    ).get<{ id: string }>(id)
-
-    // L4-B — normalize tz / rrule the same way createCalendarEvent does
-    // so the "empty string never lands in DB" rule is preserved.
-    const normalizedRule =
-      ev.recurrenceRule != null && ev.recurrenceRule.trim().length > 0
-        ? ev.recurrenceRule
-        : null
-    const normalizedStartTz =
-      ev.startTz != null && ev.startTz.trim().length > 0 ? ev.startTz : null
-    const normalizedEndTz =
-      ev.endTz != null && ev.endTz.trim().length > 0 ? ev.endTz : null
-
-    if (!existing) {
-      this.db.prepare(
-        `INSERT INTO calendar_events
-         (id, calendar_id, title, description, location, start_time, end_time,
-          all_day, recurrence_rule, reminders, start_tz, end_tz, ics_uid, source_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(
-        id,
-        sourceId,
-        ev.title,
-        ev.description ?? null,
-        ev.location ?? null,
-        ev.startTime,
-        ev.endTime,
-        ev.allDay ? 1 : 0,
-        normalizedRule,
-        null,
-        normalizedStartTz,
-        normalizedEndTz,
-        ev.uid,
-        sourceId,
-      )
-      return { id, action: 'created' }
-    }
-
-    this.db.prepare(
-      `UPDATE calendar_events SET
-         title = ?,
-         description = ?,
-         location = ?,
-         start_time = ?,
-         end_time = ?,
-         all_day = ?,
-         recurrence_rule = ?,
-         start_tz = ?,
-         end_tz = ?,
-         ics_uid = ?,
-         source_id = ?,
-         updated_at = unixepoch()
-       WHERE id = ?`,
-    ).run(
-      ev.title,
-      ev.description ?? null,
-      ev.location ?? null,
-      ev.startTime,
-      ev.endTime,
-      ev.allDay ? 1 : 0,
-      normalizedRule,
-      normalizedStartTz,
-      normalizedEndTz,
-      ev.uid,
-      sourceId,
-      id,
-    )
-    return { id, action: 'updated' }
-  }
-
-  /**
-   * L4-B — delete one externally-synced row by `(sourceId, uid)`. Used
-   * by the sync diff to drop events the upstream feed has removed.
-   * Idempotent: missing rows resolve as "no-op".
-   */
-  deleteImportedEvent(sourceId: string, uid: string): void {
-    if (!this.db) throw new Error('Database not available')
-    if (typeof sourceId !== 'string' || sourceId.length === 0) return
-    if (typeof uid !== 'string' || uid.length === 0) return
-    this.db.prepare(
-      `DELETE FROM calendar_events WHERE source_id = ? AND ics_uid = ?`,
-    ).run(sourceId, uid)
-  }
-
-  /**
-   * L4-B — list every externally-synced row owned by a given source.
-   * Returns `(uid, id)` tuples so the scheduler can diff against the
-   * latest fetch without paying for the full row decode.
-   */
-  listImportedEventsForSource(sourceId: string): Array<{ uid: string; id: string }> {
-    if (!this.db) return []
-    const rows = this.db.prepare(
-      `SELECT id, ics_uid FROM calendar_events
-       WHERE source_id = ? AND ics_uid IS NOT NULL`,
-    ).all<{ id: string; ics_uid: string }>(sourceId)
-    return rows.map((r) => ({ uid: r.ics_uid, id: r.id }))
-  }
-
-  /**
-   * L4-B — create or update a `calendar_sources` row. Returns whether
-   * the row was inserted fresh or had its name / color / sync_url /
-   * sync_interval updated. Used by the ICS-subscribe IPC handler so a
-   * single call can register a feed.
-   *
-   * Caller picks the id. If you want one auto-generated, pass `id:
-   * \`sub-<Date.now()>-<random>\`` from the IPC layer — the DB does NOT
-   * mint ids here so the IPC layer is free to use stable IDs (e.g. for
-   * "import a second time, same source name" scenarios where the user
-   * actually wants two rows).
-   *
-   * Empty / undefined `syncUrl` is normalized to null (= local-only
-   * source). `syncInterval` defaults to 60 minutes for new rows and is
-   * left unchanged for existing rows when omitted.
-   */
-  upsertCalendarSource(source: {
-    id: string
-    name: string
-    color?: string
-    type?: string
-    syncUrl?: string | null
-    syncInterval?: number
-    enabled?: boolean
-  }): { id: string; action: 'created' | 'updated' } {
-    if (!this.db) throw new Error('Database not available')
-    if (typeof source.id !== 'string' || source.id.length === 0) {
-      throw new Error('upsertCalendarSource: id is required')
-    }
-    if (typeof source.name !== 'string' || source.name.length === 0) {
-      throw new Error('upsertCalendarSource: name is required')
-    }
-
-    const existing = this.db.prepare(
-      `SELECT id FROM calendar_sources WHERE id = ?`,
-    ).get<{ id: string }>(source.id)
-
-    const color = source.color ?? '#5B8DEF'
-    const type = source.type ?? (source.syncUrl ? 'external' : 'local')
-    const syncUrl =
-      source.syncUrl != null && source.syncUrl.trim().length > 0 ? source.syncUrl : null
-    const syncInterval =
-      typeof source.syncInterval === 'number' && Number.isFinite(source.syncInterval)
-        ? Math.max(1, Math.floor(source.syncInterval))
-        : 60
-    const enabled = source.enabled === false ? 0 : 1
-
-    if (!existing) {
-      this.db.prepare(
-        `INSERT INTO calendar_sources
-         (id, name, color, type, sync_url, sync_interval, enabled)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      ).run(source.id, source.name, color, type, syncUrl, syncInterval, enabled)
-      return { id: source.id, action: 'created' }
-    }
-
-    this.db.prepare(
-      `UPDATE calendar_sources SET
-         name = ?, color = ?, type = ?,
-         sync_url = ?, sync_interval = ?, enabled = ?
-       WHERE id = ?`,
-    ).run(source.name, color, type, syncUrl, syncInterval, enabled, source.id)
-    return { id: source.id, action: 'updated' }
-  }
-
-  /**
-   * L4-B — read one calendar_sources row by id; returns null when
-   * missing. Used by the unsubscribe IPC handler to confirm the row
-   * exists before issuing the cascade DELETE.
-   */
-  getCalendarSourceById(id: string): CalendarSource | null {
-    if (!this.db) return null
-    return this.db.prepare(
-      'SELECT * FROM calendar_sources WHERE id = ?',
-    ).get<CalendarSource>(id) ?? null
-  }
-
-  /**
-   * L4-B — delete one calendar_sources row. The FK on `calendar_events.
-   * calendar_id` is declared `ON DELETE CASCADE` (migration 002), so
-   * all rows whose `calendar_id` equals this id are dropped atomically.
-   * Note: ICS-synced rows store the source id in `source_id` AND
-   * `calendar_id` (see `upsertImportedEvent`), so the CASCADE handles
-   * them without a separate sweep.
-   */
-  deleteCalendarSource(id: string): { deleted: boolean } {
-    if (!this.db) throw new Error('Database not available')
-    const result = this.db.prepare(
-      'DELETE FROM calendar_sources WHERE id = ?',
-    ).run(id)
-    const changes =
-      typeof (result as { changes?: number })?.changes === 'number'
-        ? (result as { changes?: number }).changes ?? 0
-        : 0
-    return { deleted: changes > 0 }
-  }
+  recordSyncResult(id:string,error:string|null):void {this.db.prepare('UPDATE calendar_sources SET sync_error=?,last_synced_at=CASE WHEN ? IS NULL THEN unixepoch() ELSE last_synced_at END WHERE id=?').run(error,error,id);this.changed([id])}
+  exportCalendar(id?:string):string {const snapshot=this.snapshot();return exportIcs(snapshot.events.filter(e=>!id||e.calendarId===id),{calendarName:snapshot.calendars.find(c=>c.id===id)?.name||'Ready'})}
 }

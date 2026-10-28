@@ -10,13 +10,13 @@ function readWorkspaceFile(path: string): string {
 
 test('workbench panel scroll areas hide scrollbar thumbs until the user hovers the panel', () => {
   const styles = readRendererStyles()
-  const scheduleStyles = readWorkspaceFile('src/renderer/styles/schedule-x.css')
+  const scheduleStyles = readWorkspaceFile('src/renderer/modules/calendar/workbench/styles/app.css')
   const fileTree = readWorkspaceFile('src/renderer/components/layout/FileTree.tsx')
   const chatMessages = readWorkspaceFile('src/renderer/components/agent/ChatMessages.tsx')
   const globalSearch = readWorkspaceFile('src/renderer/components/layout/GlobalSearchPanel.tsx')
   const skillsPanel = readWorkspaceFile('src/renderer/components/layout/SkillsCenterPanel.tsx')
   const browserSidePanel = readWorkspaceFile('src/renderer/components/browser/BrowserSidePanel.tsx')
-  const calendarShell = readWorkspaceFile('src/renderer/components/calendar/CalendarWorkbenchShell.tsx')
+  const calendarShell = readWorkspaceFile('src/renderer/modules/calendar/workbench/components/Sidebar.tsx')
   const markdownEditor = readWorkspaceFile('src/renderer/components/document/MarkdownEditor.tsx')
   const pdfViewer = readWorkspaceFile('src/renderer/components/document/PdfViewer.tsx')
   const imageGallery = readWorkspaceFile('src/renderer/components/document/ImageGallery.tsx')
@@ -38,6 +38,6 @@ test('workbench panel scroll areas hide scrollbar thumbs until the user hovers t
   assert.match(pdfViewer, /panel-hover-scrollbar flex-1 overflow-auto/)
   assert.match(imageGallery, /panel-hover-scrollbar flex-1 flex items-center justify-center overflow-auto/)
 
-  assert.match(scheduleStyles, /\.sx__calendar-wrapper ::-webkit-scrollbar-thumb\s*\{/)
-  assert.match(scheduleStyles, /\.sx__calendar-wrapper:hover ::-webkit-scrollbar-thumb\s*\{/)
+  assert.match(scheduleStyles, /\.ready-calendar ::-webkit-scrollbar-thumb\s*\{/)
+  assert.match(scheduleStyles, /\.ready-calendar:hover ::-webkit-scrollbar-thumb\s*\{/)
 })

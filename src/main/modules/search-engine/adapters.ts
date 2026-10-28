@@ -1,3 +1,5 @@
+import { calendarEventToRecord, originalToSeconds } from '../calendar-engine/calendar-row-codec'
+import { CalendarStore } from '../database/calendar-store'
 import { readFile, readdir, stat, open } from 'fs/promises'
 import { createHash } from 'crypto'
 import { basename, extname, join } from 'path'
@@ -650,23 +652,10 @@ export class CalendarAdapter implements IndexSourceAdapter {
 
   async reindex(ctx: AdapterContext): Promise<AdapterReindexResult> {
     const db = ctx.repository.getConnection()
-    const events = db
-      .prepare(
-        `SELECT id, calendar_id, title, description, location, start_time, end_time, all_day
-         FROM calendar_events
-         ORDER BY start_time DESC
-         LIMIT 5000`,
-      )
-      .all<{
-        id: string
-        calendar_id: string
-        title: string
-        description: string | null
-        location: string | null
-        start_time: number
-        end_time: number
-        all_day: number | null
-      }>()
+    const events = new CalendarStore(()=>db).snapshot().events.map(event=>({
+      ...calendarEventToRecord(event),
+      id:event.recurringEventId?`${event.recurringEventId}#${originalToSeconds(event.originalStart!)}`:event.id,
+    })).sort((a,b)=>b.start_time-a.start_time).slice(0,5000)
     const rows = events.map((event) => ({
       path: `calendar://${event.id}`,
       sourceId: event.id,

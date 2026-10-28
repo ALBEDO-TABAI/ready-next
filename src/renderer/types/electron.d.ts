@@ -2369,86 +2369,6 @@ interface CalendarEventData {
   sourceId?: string | null
 }
 
-/** Input for creating a calendar event */
-interface CalendarCreateEventInput {
-  calendarId: string
-  title: string
-  description?: string
-  location?: string
-  startTime: Date | string | number
-  endTime: Date | string | number
-  allDay?: boolean
-  reminders?: CalendarReminderInput[] | null
-  /** L3-B — RFC 5545 RRULE body or null for non-recurring. */
-  recurrenceRule?: string | null
-  /** L4-A — IANA tz id; null / undefined = local timezone. */
-  startTz?: string | null
-  /** L4-A — IANA tz id; null / undefined = local timezone. */
-  endTz?: string | null
-  [key: string]: unknown
-}
-
-/** Input for updating a calendar event (partial) */
-interface CalendarUpdateEventInput {
-  title?: string
-  description?: string
-  location?: string
-  calendarId?: string
-  startTime?: Date | string | number
-  endTime?: Date | string | number
-  allDay?: boolean
-  reminders?: CalendarReminderInput[] | null
-  /** L3-B — set / clear the parent's RRULE. */
-  recurrenceRule?: string | null
-  /** L4-A — set / clear the IANA start tz; null = local. */
-  startTz?: string | null
-  /** L4-A — set / clear the IANA end tz; null = local. */
-  endTz?: string | null
-  [key: string]: unknown
-}
-
-/** L3-B — payload for "modify this single occurrence" / "skip this occurrence". */
-interface CalendarUpsertEventOverrideInput {
-  parentEventId: string
-  /** Unix seconds, ISO string, or Date. */
-  occurrenceStart: number | string | Date
-  kind: 'single' | 'cancelled'
-  patch?: {
-    title?: string
-    description?: string | null
-    location?: string | null
-    startTime?: number | string | Date
-    endTime?: number | string | Date
-    allDay?: boolean
-    reminders?: CalendarReminderInput[] | null
-    /** L4-A — per-occurrence start tz; null clears. */
-    startTz?: string | null
-    /** L4-A — per-occurrence end tz; null clears. */
-    endTz?: string | null
-  }
-}
-
-/** L3-B — payload for "modify this and all future occurrences". */
-interface CalendarSplitRecurringSeriesInput {
-  parentEventId: string
-  occurrenceStart: number | string | Date
-  patch: {
-    title?: string
-    description?: string | null
-    location?: string | null
-    startTime?: number | string | Date
-    endTime?: number | string | Date
-    allDay?: boolean
-    reminders?: CalendarReminderInput[] | null
-    recurrenceRule?: string | null
-    calendarId?: string
-    /** L4-A — start tz for the new series; null = local. */
-    startTz?: string | null
-    /** L4-A — end tz for the new series; null = local. */
-    endTz?: string | null
-  }
-}
-
 /** Unified calendar response shape (all calendar handlers use { success, mock, data?, error? }) */
 interface CalendarResponse<T> {
   success: boolean
@@ -2473,18 +2393,6 @@ interface CalendarReminderFirePayload {
   method: 'notification' | 'sound'
   /** Unix seconds. */
   firedAt: number
-}
-
-/**
- * L4-B — payload shape for `calendar:importIcsString`. The renderer
- * reads the .ics file (FileReader / drop-zone) and ships the string;
- * we don't accept file paths because the renderer doesn't have
- * filesystem access.
- */
-interface CalendarImportIcsInput {
-  rawIcs: string
-  calendarSourceId?: string
-  sourceName?: string
 }
 
 /**
@@ -2514,45 +2422,29 @@ interface CalendarSyncResult {
 }
 
 interface ElectronCalendarAPI {
+  prepareStandaloneImport(): Promise<CalendarResponse<{ ticket:string; fileName:string; calendars:number; events:number; possibleExamples:number } | null>>
+  applyStandaloneImport(ticket:string,skipExamples:boolean): Promise<CalendarResponse<{ created:number; skipped:number }>>
+  revealEvent(id: string): Promise<CalendarResponse<boolean>>
+  peekNavigation(): Promise<CalendarResponse<import('../../shared/calendar/desktop').CalendarNavigationRequest | null>>
+  ackNavigation(id: string): Promise<CalendarResponse<void>>
+  onNavigation(handler: () => void): () => void
+  snapshot(): Promise<CalendarResponse<import('../../shared/calendar/commands').CalendarSnapshot>>
+  mutate(command: import('../../shared/calendar/commands').CalendarCommand, versions: Record<string, number>): Promise<CalendarResponse<import('../../shared/calendar/commands').CalendarMutationReceipt>>
+  restore(delta: import('../../shared/calendar/commands').CalendarDelta, versions: Record<string, number>): Promise<CalendarResponse<import('../../shared/calendar/commands').CalendarMutationReceipt>>
+  putCalendars(calendars: import('../../shared/calendar/model').Calendar[]): Promise<CalendarResponse<import('../../shared/calendar/commands').CalendarSnapshot>>
+  putCalendar(calendar: import('../../shared/calendar/model').Calendar): Promise<CalendarResponse<import('../../shared/calendar/commands').CalendarSnapshot>>
+  deleteCalendar(id: string): Promise<CalendarResponse<import('../../shared/calendar/commands').CalendarSnapshot>>
+  putPreferences(prefs: Record<string, unknown>): Promise<CalendarResponse<import('../../shared/calendar/commands').CalendarSnapshot>>
+  exportIcs(id?: string): Promise<CalendarResponse<string>>
+  importCalendar(raw: string, name: string, sourceId?: string): Promise<CalendarResponse<{ sourceId: string; created: number; updated: number; skipped: number }>>
+  openIcs(): Promise<CalendarResponse<{ name: string; text: string; sourceId: string } | null>>
+  saveIcs(name: string, text: string): Promise<CalendarResponse<boolean>>
+  openLink(url: string): Promise<CalendarResponse<boolean>>
+  getLoginItem(): Promise<CalendarResponse<boolean>>
+  setLoginItem(enabled: boolean): Promise<CalendarResponse<boolean>>
+  onChanged(handler: () => void): () => void
   getSources: () => Promise<CalendarResponse<CalendarSourceData[]>>
-  getEvents: (start: Date, end: Date) => Promise<CalendarResponse<CalendarEventData[]>>
-  createEvent: (event: CalendarCreateEventInput) => Promise<CalendarResponse<{ id: string }>>
-  updateEvent: (
-    id: string,
-    event: CalendarUpdateEventInput
-  ) => Promise<CalendarResponse<{ updated: boolean }>>
-  deleteEvent: (id: string) => Promise<CalendarResponse<{ deleted: boolean }>>
-  /**
-   * L3-B — per-occurrence override CRUD. See `CalendarUpsertEventOverrideInput`
-   * and `CalendarSplitRecurringSeriesInput` for the payload shape.
-   */
-  upsertEventOverride: (
-    payload: CalendarUpsertEventOverrideInput
-  ) => Promise<CalendarResponse<{ id: string }>>
-  deleteEventOverride: (
-    payload: { parentEventId: string; occurrenceStart: number | string | Date }
-  ) => Promise<CalendarResponse<{ deleted: boolean }>>
-  splitRecurringSeries: (
-    payload: CalendarSplitRecurringSeriesInput
-  ) => Promise<CalendarResponse<{ newEventId: string }>>
-  /**
-   * L4-B — import a raw .ics body string into a calendar source.
-   * When `calendarSourceId` is omitted the handler auto-creates a
-   * new source named `sourceName` (or `'导入的日历'` if also absent).
-   */
-  importIcsString: (
-    payload: CalendarImportIcsInput
-  ) => Promise<CalendarResponse<{
-    sourceId: string
-    created: number
-    updated: number
-    skipped: number
-  }>>
-  /**
-   * L4-B — subscribe to an ICS URL. Creates a `calendar_sources` row,
-   * runs an immediate first sync, then registers a periodic timer.
-   * `initialEvents` is the created + updated count from the first sync.
-   */
+  getEvents: (start: Date, end: Date, timeZone?: string) => Promise<CalendarResponse<CalendarEventData[]>>
   subscribeUrl: (
     payload: CalendarSubscribeUrlInput
   ) => Promise<CalendarResponse<{ sourceId: string; initialEvents: number }>>

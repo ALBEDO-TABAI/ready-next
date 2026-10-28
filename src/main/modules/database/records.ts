@@ -1,7 +1,6 @@
 import type { RSSMembership } from '../../../shared/rss-organization'
 import type { Reminder } from '../../../shared/calendar-types'
 export type { EventInstance, EventOverride } from '../calendar-engine/rrule-engine'
-export type { ImportedEvent } from '../calendar-engine/ics-importer'
 
 
 // --- Exported Type Interfaces ---

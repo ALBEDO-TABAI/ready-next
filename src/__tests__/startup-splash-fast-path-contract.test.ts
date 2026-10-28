@@ -70,6 +70,7 @@ test('boot entry static import graph stays tiny so the splash is not delayed', (
     './modules/browser-engine/popup-policy',
     './startup-splash-window',
     './boot-timing',
+    './calendar-open-intents',
   ])
   const staticImports = [...bootEntry.matchAll(/^import[^'"]+from ['"]([^'"]+)['"]/gm)].map((m) => m[1])
 

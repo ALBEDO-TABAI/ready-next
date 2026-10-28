@@ -13,6 +13,7 @@ import test from 'node:test'
 
 import {
   createCalendarWidgetFetcher,
+  getDefaultCalendarWidgetFetcher,
   type CalendarWidgetApi,
   type CalendarWidgetEventLike,
 } from '../renderer/modules/calendar/widget-data-provider'
@@ -149,4 +150,35 @@ test('reminders field passes through wire as Reminder[] (parsed) when source row
   // an array. Check via the wire layer directly.
   assert.ok(Array.isArray(wireWithReminders.reminders), 'reminders parsed to array')
   assert.equal(wireWithReminders.reminders?.length, 1)
+})
+
+test('day and week widgets retain events across midnight and exclude the end boundary', async () => {
+  const start=Date.parse('2026-10-27T00:00:00Z')/1000
+  const wire=serializeEventToWire({id:'multi',title:'Two days',start_time:start,end_time:start+2*86400,all_day:1})
+  const fetcher=createCalendarWidgetFetcher({calendar:buildApi([wire])})
+  const now=new Date('2026-10-28T12:00:00Z')
+  assert.deepEqual((await fetcher.fetchDaySchedule({now,tz:'UTC'})).events.map(e=>e.title),['Two days'])
+  assert.equal((await fetcher.fetchDaySchedule({now:new Date('2026-10-29T12:00:00Z'),tz:'UTC'})).events.length,0)
+  const week=await fetcher.fetchWeekSchedule({now,tz:'UTC'})
+  assert.deepEqual(week.days.map(day=>day.count),[0,1,1,0,0,0,0])
+})
+
+test('live widget adapter preserves busy semantics and colors from the Main wire result', async () => {
+  const start=Date.parse('2026-10-26T00:00:00Z')/1000
+  const row={calendar_id:'work',start_time:start,end_time:start+3600,all_day:0}
+  const events=[
+    serializeEventToWire({...row,id:'busy',title:'Busy',color:'#123456'}),
+    serializeEventToWire({...row,id:'free',transparency:'transparent'}),
+    serializeEventToWire({...row,id:'cancelled',status:'cancelled'}),
+    serializeEventToWire({...row,id:'declined',attendees:[{email:'me@example.test',self:true,rsvp:'declined'}]}),
+    serializeEventToWire({...row,id:'all-day',start_time:start-86400,end_time:start+86400,all_day:1}),
+  ]
+  const globals=globalThis as typeof globalThis & {electronAPI?:unknown},before=globals.electronAPI
+  globals.electronAPI={calendar:buildApi(events)}
+  try {
+    const fetcher=getDefaultCalendarWidgetFetcher(),options={now:new Date('2026-10-26T12:00:00Z'),tz:'UTC'}
+    const allocation=await fetcher.fetchTimeAllocation(options)
+    assert.equal(allocation.segments.reduce((total,s)=>total+s.value,0),25)
+    assert.equal((await fetcher.fetchDaySchedule(options)).events.find(e=>e.title==='Busy')?.accent,'#123456')
+  } finally {if(before===undefined)delete globals.electronAPI;else globals.electronAPI=before}
 })

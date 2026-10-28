@@ -136,3 +136,14 @@ asar: true
 asarUnpack:
   - "node_modules/rsshub/**"
   - "node_modules/better-sqlite3/**"
+
+protocols:
+  - name: Ready Calendar
+    schemes:
+      - ready
+fileAssociations:
+  - ext:
+      - ics
+      - vcs
+    name: iCalendar
+    role: Viewer

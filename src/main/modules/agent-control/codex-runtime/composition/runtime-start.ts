@@ -54,7 +54,7 @@ export function refreshDriftedPristineFreshStartHeads(input: {
   }
 }
 
-export type RuntimeStartDeps = Pick<CodexCompositionBase, 'actionJournal' | 'artifactMaterializer' | 'browserTurnLeases' | 'calendarListedEventIdsByRun' | 'calendarNotifyReady' | 'collector' | 'createGateway' | 'currentDocumentExactReadRuns' | 'gate' | 'gatewayRepository' | 'input' | 'loadedThreads' | 'nativeRuntime' | 'ownerMainBootId' | 'publishCodexActionSurfaceInvalidation' | 'rawDb' | 'repository' | 'threadArchiveCleanup' | 'threadArchiveDispatchPort' | 'threadDeveloperInstructions' | 'verified'>
+export type RuntimeStartDeps = Pick<CodexCompositionBase, 'actionJournal' | 'artifactMaterializer' | 'browserTurnLeases' | 'calendarListedEventIdsByRun' | 'collector' | 'createGateway' | 'currentDocumentExactReadRuns' | 'gate' | 'gatewayRepository' | 'input' | 'loadedThreads' | 'nativeRuntime' | 'ownerMainBootId' | 'publishCodexActionSurfaceInvalidation' | 'rawDb' | 'repository' | 'threadArchiveCleanup' | 'threadArchiveDispatchPort' | 'threadDeveloperInstructions' | 'verified'>
   & Pick<CloseoutDispatch, 'closeCandidate' | 'closeRunLocalRecoveryFailure'>
   & Pick<CloseoutSupport, 'closePersistedHostFailure' | 'releaseHostFailureReservationIfPresent'>
   & Pick<LifecycleWiring, 'deliverRecoveredCloseout' | 'failRuntimeForProductRecovery' | 'manualCompactionController'>
@@ -63,7 +63,7 @@ export type RuntimeStartDeps = Pick<CodexCompositionBase, 'actionJournal' | 'art
 
 /** Starting the runtime and owning sidecar recovery. */
 export function createRuntimeStart(deps: RuntimeStartDeps) {
-  const { live, actionJournal, artifactMaterializer, browserTurnLeases, calendarListedEventIdsByRun, calendarNotifyReady, closeCandidate, closePersistedHostFailure, closeRunLocalRecoveryFailure, collector, createGateway, currentDocumentExactReadRuns, deliverRecoveredCloseout, failRuntimeForProductRecovery, gate, gatewayRepository, input, loadedThreads, manualCompactionController, nativeRuntime, ownerMainBootId, publishCodexActionSurfaceInvalidation, rawDb, releaseHostFailureReservationIfPresent, repository, settleEngineTerminalFailure, threadArchiveCleanup, threadArchiveDispatchPort, threadDeveloperInstructions, verified } = deps
+  const { live, actionJournal, artifactMaterializer, browserTurnLeases, calendarListedEventIdsByRun, closeCandidate, closePersistedHostFailure, closeRunLocalRecoveryFailure, collector, createGateway, currentDocumentExactReadRuns, deliverRecoveredCloseout, failRuntimeForProductRecovery, gate, gatewayRepository, input, loadedThreads, manualCompactionController, nativeRuntime, ownerMainBootId, publishCodexActionSurfaceInvalidation, rawDb, releaseHostFailureReservationIfPresent, repository, settleEngineTerminalFailure, threadArchiveCleanup, threadArchiveDispatchPort, threadDeveloperInstructions, verified } = deps
   const startRuntime = async (): Promise<boolean> => {
     if (!live.host) throw new Error('codex_runtime_host_unbound')
     if (live.gatewayNeedsReplacement) {
@@ -367,12 +367,11 @@ export function createRuntimeStart(deps: RuntimeStartDeps) {
                 requirement.domain === 'rss' && requirement.outcome === 'job_terminal_artifact'
               )),
               recordListedCalendarEventIds: (eventIds) => {
-                calendarListedEventIdsByRun.set(binding.readyRunId, [...eventIds])
+                calendarListedEventIdsByRun.set(binding.readyRunId, { ids: [...eventIds], versions: {} })
               },
-              listedCalendarEventIds: () => calendarListedEventIdsByRun.get(binding.readyRunId) || [],
-              onCalendarMutated: (eventId) => {
-                void calendarNotifyReady.then((notify) => { notify?.(eventId) })
-              },
+              listedCalendarEventIds: () => calendarListedEventIdsByRun.get(binding.readyRunId)?.ids || [],
+              recordListedCalendarRevisions: (versions) => { const receipt=calendarListedEventIdsByRun.get(binding.readyRunId); if(receipt)receipt.versions=versions },
+              listedCalendarRevisions: () => calendarListedEventIdsByRun.get(binding.readyRunId)?.versions || {},
               agent: scope?.activeAgentId || scope?.agent || undefined,
               sessionId: binding.readyAliasId,
               runId: binding.readyRunId,

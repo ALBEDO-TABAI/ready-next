@@ -8,12 +8,10 @@ function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-test('document rss and calendar first-row typography matches the browser tab baseline', () => {
+test('document and rss first-row typography matches the browser tab baseline', () => {
   const browserTabRail = readWorkspaceFile('src/renderer/components/browser/TabRail.tsx')
   const documentTabRail = readWorkspaceFile('src/renderer/components/document/DocumentTabRail.tsx')
   const rssFeed = readWorkspaceFile('src/renderer/components/rss/RSSFeed.tsx')
-  const calendarShell = readWorkspaceFile('src/renderer/components/calendar/CalendarWorkbenchShell.tsx')
-  const calendarViewSelector = readWorkspaceFile('src/renderer/components/calendar/CalendarViewSelector.tsx')
 
   assert.match(browserTabRail, /text-\[12px\]/)
 
@@ -23,6 +21,4 @@ test('document rss and calendar first-row typography matches the browser tab bas
   assert.match(rssFeed, /<RSSTopbarTools/)
   assert.match(readRendererStyles(), /\.rss-topbar__lead \{[^}]*font-size: 12px;/)
 
-  assert.match(calendarShell, /fontSize:\s*12,\s*fontWeight:\s*500/)
-  assert.match(calendarViewSelector, /fontSize:\s*12/)
 })

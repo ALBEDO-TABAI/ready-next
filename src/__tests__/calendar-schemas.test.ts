@@ -22,7 +22,7 @@ test('CalendarListWindowSchema uses the frozen turn window when bounds are omitt
   assert.equal(CalendarListWindowSchema.safeParse({}).success, true)
 })
 
-test('CalendarCreateEventSchema requires title + startTime + endTime, others optional', () => {
+test('CalendarCreateEventSchema requires a title and a complete timed or all-day range', () => {
   assert.equal(
     CalendarCreateEventSchema.safeParse({
       title: '会议',
@@ -42,6 +42,7 @@ test('CalendarCreateEventSchema requires title + startTime + endTime, others opt
     true,
   )
   assert.equal(CalendarCreateEventSchema.safeParse({ title: 't' }).success, false)
+  assert.equal(CalendarCreateEventSchema.safeParse({title:'Day',allDay:true,startDate:'2026-10-28',endDate:'2026-10-29'}).success,true)
 })
 
 test('CalendarUpdateEventSchema can use the frozen event target when id is omitted', () => {

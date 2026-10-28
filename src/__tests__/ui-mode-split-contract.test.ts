@@ -9,15 +9,12 @@ function readWorkspaceFile(path: string): string {
 
 test('calendar and browser modes delegate presentation to focused shell components', () => {
   const calendarMode = readWorkspaceFile('src/renderer/pages/modes/CalendarMode.tsx')
-  const calendarShell = readWorkspaceFile('src/renderer/components/calendar/CalendarWorkbenchShell.tsx')
+  const calendarApp = readWorkspaceFile('src/renderer/modules/calendar/workbench/App.tsx')
   const browserMode = readWorkspaceFile('src/renderer/pages/modes/BrowserMode.tsx')
 
-  assert.match(calendarMode, /import CalendarWorkbenchShell/)
-  assert.match(calendarMode, /import \{ useCalendarQuickCreate \} from/)
-  assert.doesNotMatch(calendarMode, /function ViewSelector/)
-  assert.match(calendarMode, /<CalendarWorkbenchShell/)
-  assert.match(calendarShell, /import CalendarViewSelector from/)
-  assert.match(calendarMode, /useCalendarQuickCreate\(/)
+  assert.match(calendarMode, /<App active=/)
+  assert.match(calendarApp, /<TimeGrid/)
+  assert.match(calendarApp, /<MonthGrid/)
 
   assert.match(browserMode, /import BrowserModeEmptyState from/)
   assert.match(browserMode, /<BrowserModeEmptyState/)

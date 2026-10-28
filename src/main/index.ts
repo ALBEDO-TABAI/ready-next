@@ -1,3 +1,6 @@
+import { captureCalendarOpen } from './calendar-open-intents'
+import { startCalendarDesktop } from './modules/calendar-engine/calendar-desktop'
+import { onCalendarChanged } from './modules/calendar-engine/calendar-change'
 import { isChatGptOAuthConfig } from '../shared/chatgpt-oauth'
 import { startRSSDigests, stopRSSDigests, resumeRSSDigests } from './modules/rss-engine/digest-runtime'
 import { stopRSSContentService } from './modules/rss-engine/content-runtime'
@@ -24,7 +27,7 @@ import { registerAgentRuntimeReadinessIPC } from './modules/claude-bridge/agent-
 import { setupBrowserIPC, type BrowserController } from './modules/browser-engine/ipc-handler'
 import { setupBrowserLiveProofHandshake } from './modules/browser-engine/live-proof-handshake'
 import { setupDocumentIPC } from './modules/document-engine/ipc-handler'
-import { setupSearchIPC, shutdownFileWatchers } from './modules/search-engine/ipc-handler'
+import { setupSearchIPC, shutdownFileWatchers, getSearchEngine } from './modules/search-engine/ipc-handler'
 import { setupFileEmergenceIPC } from './modules/file-emergence/ipc-handler'
 import { setupTagForgeIPC } from './modules/tag-forge/ipc-handler'
 import {
@@ -131,6 +134,7 @@ let petWindowManager: PetWindowManager | null = null
 let reminderScheduler: ReminderScheduler | null = null
 let reminderNotifierFire: ((payload: import('./modules/calendar-engine/reminder-scheduler').ReminderFirePayload) => void) | null = null
 let calendarSyncScheduler: SyncScheduler | null = null
+let stopCalendarDesktop: (() => void) | null = null
 let rssAutoRefreshScheduler: RSSAutoRefreshScheduler | null = null
 let chatGptOAuthService: ChatGptOAuthService | null = null
 // Guard to prevent re-registering window-dependent IPC handlers on macOS dock re-open
@@ -337,6 +341,10 @@ function setupApplicationMenu(): void {
 }
 
 const handleRSSResume = (): void => { void resumeRSSDigests().catch((error) => console.error('[rss-digests] resume failed', error)) }
+const handleCalendarResume = (): void => {
+  if (!reminderScheduler || !reminderNotifierFire) return
+  void reminderScheduler.rescheduleAll().then(() => recoverMissedReminders({getDb: () => getDatabase().calendar, now: () => Math.floor(Date.now()/1000), fire: reminderNotifierFire!})).catch(error => console.error('[calendar-resume]', error))
+}
 
 function stopRSSAutoRefresh(): Promise<void> {
   setRSSFetchAllCompletedListener(null)
@@ -351,6 +359,7 @@ function stopRSSAutoRefresh(): Promise<void> {
 function runFatalProcessCleanup(): Promise<void> {
   stopRSSDigests()
   powerMonitor.removeListener('resume', handleRSSResume)
+  powerMonitor.removeListener('resume', handleCalendarResume)
   const rssAutoRefreshStopped = Promise.all([stopRSSAutoRefresh(), stopRSSContentService(), stopRSSProcessing()])
   return runBeforeQuitCleanup({
     cleanupAgentRuntime,
@@ -695,13 +704,21 @@ function setupGlobalIPC(): void {
   const reminderNotifier = createReminderNotifier({
     getMainWindow: () => mainWindow,
   })
-  reminderNotifierFire = (payload) => reminderNotifier.fire(payload)
+  reminderNotifierFire = (payload) => {
+    const store = getDatabase().calendar
+    const prefs = store.snapshot().prefs || {}
+    if (prefs.notifications === false || !store.claimReminder(payload.eventId, payload.eventStartTime, payload.offsetMinutes, payload.method, payload.firedAt)) return
+    reminderNotifier.fire({ ...payload, method: prefs.notifySound === false ? 'notification' : 'sound' })
+  }
   reminderScheduler = startReminderScheduler({
     getDb: () => getDatabase().calendar,
     now: () => Math.floor(Date.now() / 1000),
     scheduleAt: defaultScheduleAt,
-    fire: (payload) => reminderNotifier.fire(payload),
+    fire: (payload) => reminderNotifierFire?.(payload),
   })
+  const refreshCalendarSearch = () => { void getSearchEngine()?.reindexCalendar().catch(error=>console.error('[calendar search]',error)) }
+  onCalendarChanged(ids => { void reminderScheduler?.rescheduleAll(); if(ids.length)refreshCalendarSearch() })
+  refreshCalendarSearch()
   // L4-B-External-Sync — periodic ICS subscription poller. Lives next
   // to the reminder scheduler because both share the "in-memory
   // setTimeout map + DI clock + scheduleAt" shape; one stop call kills
@@ -716,7 +733,7 @@ function setupGlobalIPC(): void {
           // be re-polled. We narrow the row shape so the scheduler's
           // TS contract is preserved (it only needs id / sync_url /
           // sync_interval).
-          return getDatabase().calendar.getCalendarSources().map((s) => ({
+          return getDatabase().calendar.getCalendarSources().filter(s => s.enabled).map((s) => ({
             id: s.id,
             sync_url: s.sync_url,
             sync_interval: s.sync_interval,
@@ -727,33 +744,23 @@ function setupGlobalIPC(): void {
           return []
         }
       },
-      fetchIcs: async (url: string) => {
+      fetchIcs: async (url: string, signal: AbortSignal) => {
         // Node 18+ has a global `fetch`; Electron 34 inherits it. We
         // set a UA so upstream servers can tell us apart from generic
         // crawlers and apply less aggressive rate-limits where they
         // distinguish (Google's iCal endpoints do this).
         const res = await fetch(url, {
           headers: { 'User-Agent': 'Ready-Calendar/1.0' },
+          signal: AbortSignal.any([signal, AbortSignal.timeout(30000)]),
         })
         if (!res.ok) {
           throw new Error(`HTTP ${res.status} ${res.statusText}`)
         }
         return res.text()
       },
-      importedEventsFor: (sourceId: string) => {
-        try {
-          return getDatabase().calendar.listImportedEventsForSource(sourceId)
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error)
-          console.warn(`[sync-scheduler] listImportedEventsForSource(${sourceId}) failed:`, message)
-          return []
-        }
-      },
-      upsertImportedEvent: (sourceId, ev) =>
-        getDatabase().calendar.upsertImportedEvent(sourceId, ev),
-      deleteImportedEvent: (sourceId, uid) =>
-        getDatabase().calendar.deleteImportedEvent(sourceId, uid),
+      replaceEvents: (sourceId, events) => getDatabase().calendar.replaceImportedCalendar(sourceId, events),
       onSourceSynced: (result) => {
+        getDatabase().calendar.recordSyncResult(result.sourceId, result.error);
         // Telemetry hook — log line; tests rely on this not throwing.
         if (result.ok) {
           console.log(
@@ -769,10 +776,8 @@ function setupGlobalIPC(): void {
       scheduleAt: defaultScheduleAt,
     })
   }
+  powerMonitor.on('resume', handleCalendarResume)
   setupCalendarIPC(CALENDAR_USE_MOCK, {
-    onEventChanged: (eventId) => {
-      reminderScheduler?.onEventChanged(eventId)
-    },
     syncScheduler: calendarSyncScheduler ?? undefined,
   })
   chatGptOAuthService = setupSettingsIPC({
@@ -1136,6 +1141,7 @@ app.whenReady().then(async () => {
   }
 
   await yieldToPresentation()
+  stopCalendarDesktop = startCalendarDesktop(async () => { await showMainWindow(); return mainWindow })
   void createWindow().then(() => {
     rssAutoRefreshScheduler?.start()
     return petWindowManager?.restoreIfEnabled()
@@ -1152,7 +1158,8 @@ app.whenReady().then(async () => {
 // boot-entry and exits; this focuses the already-running window instead of
 // silently doing nothing. Guards the invariant that only one process ever runs
 // the startup reconciler against a given SQLite (see boot-entry lock rationale).
-app.on('second-instance', () => {
+app.on('second-instance', (_event, argv) => {
+  for(const value of argv)captureCalendarOpen({kind:value.startsWith('ready:')?'url':'file',value})
   if (!mainWindow) return
   if (mainWindow.isMinimized()) mainWindow.restore()
   mainWindow.show()
@@ -1166,6 +1173,7 @@ app.on('window-all-closed', () => {
 })
 
 async function cleanupBeforeAppQuit(startedAt: number): Promise<void> {
+  stopCalendarDesktop?.(); stopCalendarDesktop=null
   try {
     reminderScheduler?.stop()
   } catch (err) {
@@ -1178,6 +1186,7 @@ async function cleanupBeforeAppQuit(startedAt: number): Promise<void> {
   }
   stopRSSDigests()
   powerMonitor.removeListener('resume', handleRSSResume)
+  powerMonitor.removeListener('resume', handleCalendarResume)
   const rssAutoRefreshStopped = Promise.all([stopRSSAutoRefresh(), stopRSSContentService(), stopRSSProcessing()])
   const remainingTimeoutMs = Math.max(0, 5_000 - (Date.now() - startedAt))
   await runBeforeQuitCleanup({

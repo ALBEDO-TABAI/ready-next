@@ -48,9 +48,7 @@ interface CalendarSessionState {
    * each row and identify the zone the event was authored in). The
    * display timezone is a renderer-only preference; events keep their
    * authored zone in the DB regardless of how they're rendered. The
-   * `useScheduleXCalendar` hook passes this into schedule-x's
-   * `timezone` config so month/week/day views render under the chosen
-   * zone.
+   * The shared calendar projection renders each window in this zone.
    */
   displayTimezone: string
   setVisibleRange: (start: string, end: string) => void

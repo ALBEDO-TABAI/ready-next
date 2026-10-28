@@ -636,7 +636,7 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
         return
       }
       case 'calendar':
-        revealWorkbenchModeForSearchOpen('calendar')
+        void window.electronAPI?.calendar.revealEvent(item.path.replace(/^calendar:\/\//, '')).then(result=>{if(result.success)revealWorkbenchModeForSearchOpen('calendar');else setMessage(result.error||'日程无法打开')}).catch(error=>setMessage(String(error)))
         return
       case 'agent':
         revealWorkbenchModeForSearchOpen('document')

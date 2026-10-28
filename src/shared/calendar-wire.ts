@@ -27,6 +27,7 @@
  */
 
 import type { Reminder } from './calendar-types'
+import type { CalEvent } from './calendar/model'
 
 /**
  * Wire shape for a single calendar event crossing the IPC boundary.
@@ -38,6 +39,10 @@ import type { Reminder } from './calendar-types'
  * uniformly treat every payload as an "instance".
  */
 export interface CalendarEventWire {
+  color?: string | null
+  status?: CalEvent['status']
+  transparency?: CalEvent['transparency']
+  attendees?: CalEvent['attendees']
   id: string
   calendarId: string
   title: string
@@ -80,6 +85,10 @@ export interface CalendarEventWire {
  * the wire shape never escapes the boundary helper.
  */
 export interface CalendarEventParsed {
+  color?: string | null
+  status?: CalEvent['status']
+  transparency?: CalEvent['transparency']
+  attendees?: CalEvent['attendees']
   id: string
   calendarId: string
   title: string
@@ -130,6 +139,10 @@ export interface CalendarSourceWire {
  * a discriminated structural shape that accepts either casing.
  */
 export interface SerializableEventInput {
+  color?: string | null
+  status?: CalEvent['status']
+  transparency?: CalEvent['transparency']
+  attendees?: CalEvent['attendees']
   id?: string
   // Snake-case DB shape
   calendar_id?: string
@@ -211,6 +224,10 @@ export function serializeEventToWire(input: SerializableEventInput): CalendarEve
   const overrideKind = input.overrideKind ?? null
   return {
     id,
+    color: input.color || null,
+    status: input.status || 'confirmed',
+    transparency: input.transparency || 'opaque',
+    attendees: input.attendees || [],
     calendarId,
     title: String(input.title ?? ''),
     description: strOrNull(input.description),
@@ -245,6 +262,10 @@ export function serializeEventToWire(input: SerializableEventInput): CalendarEve
 export function parseEventFromWire(wire: CalendarEventWire): CalendarEventParsed {
   return {
     id: wire.id,
+    color: wire.color,
+    status: wire.status,
+    transparency: wire.transparency,
+    attendees: wire.attendees,
     calendarId: wire.calendarId,
     title: wire.title,
     description: wire.description,

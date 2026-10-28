@@ -1,101 +1,30 @@
-/**
- * Golden snapshot for calendar domain LLM-facing tool schemas (Phase 2.5 PR 4).
- * Commit BEFORE swapping calendar-tools.ts params from hand-rolled to Zod-derived.
- */
-
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { getCalendarAnthropicTools,getCalendarOpenAITools } from '../main/modules/tools/calendar-tools'
 
-import {
-  getCalendarAnthropicTools,
-  getCalendarOpenAITools,
-} from '../main/modules/tools/calendar-tools'
-
-const EXPECTED_ANTHROPIC = [
-  {
-    name: 'calendar_list_window',
-    description: '读取 Ready 应用内本地日历某个时间窗口的日程。这不是飞书日历。',
-    input_schema: {
-      type: 'object',
-      properties: {
-        start: { type: 'string', description: '开始时间 ISO 字符串；省略时使用本轮日历窗口' },
-        end: { type: 'string', description: '结束时间 ISO 字符串；省略时使用本轮日历窗口' },
-      },
-      required: [],
-    },
-  },
-  {
-    name: 'calendar_create_event',
-    description: '在 Ready 应用内的本地日历创建一个新日程。这不是飞书日历。',
-    input_schema: {
-      type: 'object',
-      properties: {
-        title: { type: 'string', description: '事件标题' },
-        startTime: { type: 'string', description: '开始时间 ISO 字符串' },
-        endTime: { type: 'string', description: '结束时间 ISO 字符串' },
-        calendarId: { type: 'string', description: '目标日历 ID' },
-        description: { type: 'string', description: '事件描述' },
-        location: { type: 'string', description: '事件地点' },
-        allDay: { type: 'boolean', description: '是否全天事件' },
-        reminders: { type: 'array', description: '提醒列表' },
-        recurrenceRule: { type: 'string', description: 'RFC 5545 RRULE 字符串，描述循环规则' },
-      },
-      required: ['title', 'startTime', 'endTime'],
-    },
-  },
-  {
-    name: 'calendar_update_event',
-    description: '更新 Ready 应用内本地日历中的现有日程。这不是飞书日历。',
-    input_schema: {
-      type: 'object',
-      properties: {
-        id: { type: 'string', description: '事件 ID；省略时使用本轮唯一日程目标或列表回执' },
-        title: { type: 'string', description: '可选，更新后的标题' },
-        startTime: { type: 'string', description: '可选，新的开始时间 ISO 字符串' },
-        endTime: { type: 'string', description: '可选，新的结束时间 ISO 字符串' },
-        description: { type: 'string', description: '可选，新的事件描述' },
-        location: { type: 'string', description: '可选，新的事件地点' },
-        allDay: { type: 'boolean', description: '可选，是否全天事件' },
-        reminders: { type: 'array', description: '可选，新的提醒列表（整组替换）' },
-        recurrenceRule: { type: 'string', description: '可选，新的 RFC 5545 RRULE 字符串' },
-      },
-      required: [],
-    },
-  },
-  {
-    name: 'calendar_delete_event',
-    description: '删除 Ready 应用内本地日历中的日程。这不是飞书日历。',
-    input_schema: {
-      type: 'object',
-      properties: {
-        id: { type: 'string', description: '事件 ID；省略时使用本轮唯一日程目标或列表回执' },
-      },
-      required: [],
-    },
-  },
-  {
-    name: 'calendar_capture_session',
-    description: '读取 Ready 应用内本地日历工作面的会话快照、时间窗口和选中事件。这不是飞书日历。',
-    input_schema: {
-      type: 'object',
-      properties: {},
-      required: [],
-    },
-  },
-]
-
-test('getCalendarAnthropicTools matches the locked LLM-facing payload byte-for-byte', () => {
-  assert.deepEqual(getCalendarAnthropicTools(), EXPECTED_ANTHROPIC)
+const names=['calendar_list_window','calendar_create_event','calendar_update_event','calendar_delete_event','calendar_capture_session']
+const details=['startTz','endTz','startDate','endDate','url','conferenceUrl','color','status','transparency','visibility','attendees']
+const targets=['scope','occurrenceStart','expectedRevision']
+const fields:Record<string,string[]>={
+  calendar_list_window:['calendarId','start','end'],
+  calendar_create_event:[...details,'title','startTime','endTime','calendarId','description','location','allDay','reminders','recurrenceRule'],
+  calendar_update_event:[...details,...targets,'id','title','startTime','endTime','description','location','allDay','reminders','recurrenceRule'],
+  calendar_delete_event:[...targets,'id'],calendar_capture_session:[],
+}
+test('calendar provider schemas expose exactly the complete local-calendar field surface',()=>{
+  const tools=getCalendarAnthropicTools() as any[]
+  assert.deepEqual(tools.map(t=>t.name),names)
+  for(const tool of tools){assert.match(tool.description,/不是飞书日历/);assert.deepEqual(Object.keys(tool.input_schema.properties).sort(),fields[tool.name].sort());assert.equal(tool.input_schema.additionalProperties,false)}
+  const create=tools[1].input_schema
+  assert.deepEqual(create.required,['title'])
+  assert.deepEqual(create.properties.reminders.items.required,['offsetMinutes','method'])
+  assert.deepEqual(create.properties.reminders.items.properties.method.enum,['notification','sound'])
+  assert.deepEqual(create.properties.attendees.items.properties.rsvp.enum,['accepted','declined','tentative','needsAction'])
+  assert.ok(create.properties.conferenceUrl.anyOf.some((s:any)=>s.type==='null'))
+  assert.deepEqual(tools[2].input_schema.properties.scope.enum,['this','following','all'])
 })
-
-test('getCalendarOpenAITools matches the locked LLM-facing payload byte-for-byte', () => {
-  const expected = EXPECTED_ANTHROPIC.map((tool) => ({
-    type: 'function',
-    function: {
-      name: tool.name,
-      description: tool.description,
-      parameters: tool.input_schema,
-    },
-  }))
-  assert.deepEqual(getCalendarOpenAITools(), expected)
+test('OpenAI and Anthropic receive the same complete structured schema',()=>{
+  const anthropic=getCalendarAnthropicTools() as any[],openai=getCalendarOpenAITools() as any[]
+  assert.equal(openai.length,5)
+  openai.forEach((tool,i)=>{assert.equal(tool.type,'function');assert.equal(tool.function.name,anthropic[i].name);assert.deepEqual(tool.function.parameters,anthropic[i].input_schema)})
 })

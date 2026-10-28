@@ -1,3 +1,8 @@
+import { planCalendarMutation } from '../shared/calendar/commands'
+import { occurrences, type CalEvent } from '../shared/calendar/model'
+import { validateCalendarEvent } from '../shared/calendar/validation'
+import { calendarRecordToEvent, calendarEventToRecord } from '../main/modules/calendar-engine/calendar-row-codec'
+import { dayOf } from '../shared/calendar/tz'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
@@ -10,27 +15,24 @@ import type { DatabaseManager } from '../main/modules/database'
 import { flatDomainStores } from './helpers/flat-domain-stores'
 
 function fakeDb(overrides?: Record<string, unknown>): DatabaseManager {
-  const events = new Map<string, Record<string, unknown>>()
+  const events = new Map<string, CalEvent>()
   const base = {
     getRSSStats: () => ({ totalItems: 3, unreadItems: 1 }),
     getRSSSources: () => [{ id: 'src-1', name: '科技' }],
     getRSSItemsByIds: (ids: string[]) => ids.includes('item-1')
       ? [{ id: 'item-1', source_id: 'src-1', title: '标题', link: 'https://example.com', summary: '摘要' }]
       : [],
-    getNonRecurringEventsInWindow: () => [],
-    getRecurringEventsAndOverrides: () => ({ events: [], overridesByParent: new Map() }),
-    getCalendarSources: () => [{ id: 'cal-1' }],
-    createCalendarEvent: (input: Record<string, unknown>) => {
-      const id = 'event-created'
-      events.set(id, { id, ...input })
-      return id
+    snapshot:()=>({events:[...events.values()],calendars:[{id:'cal-1',accountId:'local',name:'Local',color:'#4488CC',visible:true,primary:true}]}),
+    listOccurrences:(start:number,end:number)=>occurrences([...events.values()],dayOf(start*1000,'UTC'),dayOf(end*1000,'UTC')+1,'UTC').filter(o=>o.end>start*1000&&o.start<end*1000),
+    mutate:(command:Parameters<typeof planCalendarMutation>[1],versions:Record<string,number>)=>{
+      const delta=planCalendarMutation(base.snapshot(),command)
+      for(const e of delta.put){if(events.has(e.id))assert.equal(versions[e.id],events.get(e.id)!.revision);events.set(e.id,validateCalendarEvent({...e,revision:(events.get(e.id)?.revision||0)+1}))}
+      delta.remove.forEach(id=>events.delete(id))
+      return {snapshot:base.snapshot(),undo:{put:[],remove:delta.put.map(e=>e.id)},versions:{},changedIds:delta.put.map(e=>e.id)}
     },
-    getCalendarEventById: (id: string) => events.get(id) || null,
-    updateCalendarEvent: (id: string, updates: Record<string, unknown>) => {
-      const current = events.get(id)
-      if (current) events.set(id, { ...current, ...updates })
-    },
-    deleteCalendarEvent: (id: string) => { events.delete(id) },
+    getCalendarSources:()=>[{id:'cal-1'}],
+    createCalendarEvent:(input:Record<string,unknown>)=>{const id='event-created';events.set(id,calendarRecordToEvent({created_at:1,updated_at:1,start_tz:'UTC',...input,id} as never));return id},
+    getCalendarEventById:(id:string)=>{const event=events.get(id);return event?calendarEventToRecord(event):null},
     ...overrides,
   }
   return flatDomainStores(base) as unknown as DatabaseManager
@@ -45,6 +47,7 @@ function handlers(overrides?: {
 }) {
   const rendererCalls: string[] = []
   const listed: string[] = [...(overrides?.listed || [])]
+  let revisions:Record<string,number>=Object.fromEntries(listed.map(id=>[id,1]))
   const dispatch = createProductionProductActionHandlers({
     database: overrides?.db || fakeDb(),
     rss: {
@@ -77,6 +80,8 @@ function handlers(overrides?: {
       listed.splice(0, listed.length, ...ids)
     },
     listedCalendarEventIds: () => listed,
+    recordListedCalendarRevisions: value=>{revisions=value},
+    listedCalendarRevisions:()=>revisions,
   }).dispatch
   return { dispatch, rendererCalls, listed }
 }
@@ -110,8 +115,8 @@ test('calendar create notifies the scheduler hook after durable write', async ()
     endTime: '2026-08-15T14:00:00Z',
   })
   assert.equal(created.ok, true)
-  assert.deepEqual(mutated, ['event-created'])
-  assert.deepEqual(renderer, ['calendar.reloadWindow'])
+  assert.deepEqual(mutated, [created.eventId])
+  assert.deepEqual(renderer, [])
 })
 
 test('in-flight RSS fetch is not a completed refresh', async () => {
@@ -146,34 +151,13 @@ test('rss.analyzeItem stays on Main and does not call the renderer bridge', asyn
   assert.deepEqual(rendererCalls, [])
 })
 
-test('calendar list uses the recurrence-expanding window APIs', async () => {
-  let usedLegacy = false
-  let usedWindow = false
-  const db = fakeDb({
-    getCalendarEvents: () => {
-      usedLegacy = true
-      return []
-    },
-    getNonRecurringEventsInWindow: () => {
-      usedWindow = true
-      return [{
-        id: 'evt-1',
-        title: '单次',
-        start_time: 1,
-        end_time: 2,
-        calendar_id: 'cal-1',
-      }] as never
-    },
-  } as Partial<DatabaseManager>)
-  const { dispatch, listed } = handlers({ db })
-  const result = await dispatch('calendar.listWindow', {
-    start: '2026-08-10T00:00:00Z',
-    end: '2026-08-16T00:00:00Z',
-  })
-  assert.equal(result.ok, true)
-  assert.equal(usedLegacy, false)
-  assert.equal(usedWindow, true)
-  assert.deepEqual(listed, ['evt-1'])
+test('calendar list uses the shared occurrence reader and records its exact identities', async () => {
+  let queried=false
+  const event:CalEvent={id:'evt-1',uid:'evt-1@test',calendarId:'cal-1',title:'One',start:Date.parse('2026-08-12T09:00Z'),end:Date.parse('2026-08-12T10:00Z'),allDay:false,timeZone:'UTC',status:'confirmed',transparency:'opaque',createdAt:1,updatedAt:1,revision:1}
+  const db=fakeDb({snapshot:()=>({events:[event],calendars:[]}),listOccurrences:()=>{queried=true;return occurrences([event],dayOf(Number(event.start),'UTC'),dayOf(Number(event.start),'UTC')+1,'UTC')}})
+  const {dispatch,listed}=handlers({db})
+  assert.equal((await dispatch('calendar.listWindow',{start:'2026-08-10',end:'2026-08-16'})).ok,true)
+  assert.equal(queried,true);assert.deepEqual(listed,['evt-1'])
 })
 
 test('calendar list rejects oversized model windows', async () => {
@@ -197,7 +181,7 @@ test('calendar update injects the typed event id and rejects conflicts', async (
     db,
     targets: { calendarEventId: 'event-created' },
   })
-  const updated = await dispatch('calendar.updateEvent', { title: '新标题' })
+  const updated = await dispatch('calendar.updateEvent', { title: '新标题', expectedRevision: 1 })
   assert.equal(updated.ok, true)
   assert.equal(updated.eventId, 'event-created')
   await assert.rejects(
@@ -225,22 +209,10 @@ test('calendar update without a typed target only accepts a unique list receipt'
   )
 })
 
-test('calendar list exposes persistable parent ids and accepts synthetic instance ids on write', async () => {
-  assert.equal(persistableCalendarEventId('parent#1710000000'), 'parent')
-  const db = fakeDb()
-  db.calendar.createCalendarEvent({
-    calendar_id: 'cal-1',
-    title: '周会',
-    start_time: 1,
-    end_time: 2,
-  })
-  const { dispatch } = handlers({ db, listed: ['event-created'] })
-  const updated = await dispatch('calendar.updateEvent', {
-    id: 'event-created#1710000000',
-    title: '周会改名',
-  })
-  assert.equal(updated.ok, true)
-  assert.equal(updated.eventId, 'event-created')
+test('unread synthetic instances cannot borrow a parent write receipt', async () => {
+  assert.equal(persistableCalendarEventId('parent#1710000000'),'parent')
+  const {dispatch}=handlers({listed:['event-created']})
+  await assert.rejects(()=>dispatch('calendar.updateEvent',{id:'event-created#1710000000',title:'No',scope:'this'}),(error:unknown)=>error instanceof CodexProductActionError&&error.code==='product_action_calendar_event_not_in_receipt')
 })
 
 test('malformed reminders fail closed instead of wiping the event', async () => {

@@ -293,8 +293,7 @@ export function createIngressPrepare(deps: IngressPrepareDeps) {
           browserSelections[0]?.id === selection.id ? resolvedBrowserInput : null
         ),
         resolveCalendar: (selection) => {
-          const eventId = persistableCalendarEventId(selection.eventId) || selection.eventId
-          const event = input.database.calendar.getCalendarEventById(eventId)
+          const event = input.database.calendar.getCalendarEventReference(selection.eventId)
           return event ? trustedCalendarReferenceInput(event) : null
         },
         resolveRssReference: (resource) => scope.sourceKind === 'local' ? validateRSSResource(input.database.rss, resource) : null,

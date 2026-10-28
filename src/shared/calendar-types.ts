@@ -5,11 +5,9 @@
  * import the same types without crossing the process boundary. Pure TS —
  * no electron / better-sqlite3 / zod / React imports allowed.
  *
- * Boundary note: `src/renderer/components/calendar/schedule-x-utils.ts`
- * intentionally maintains its OWN `CalendarEvent` shape (Date-based)
- * because the schedule-x runtime protocol requires Date objects. That
- * file is a renderer-only adapter; downstream teams writing IPC bridges
- * or main-process consumers MUST import from THIS file instead.
+ * This module defines the seconds-based product wire and reminder payloads.
+ * The editable calendar domain model is shared by Main and Renderer in
+ * `src/shared/calendar/model.ts`; conversions live at the wire/storage boundary.
  */
 
 export interface CalendarSource {

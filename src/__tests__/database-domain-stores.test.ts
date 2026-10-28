@@ -61,7 +61,8 @@ test('all six stores read the same persisted records after a connection is reope
     rss.toggleRSSStarred('item')
     rss.dismissRSSItemsFromInbox(['item'])
     const calendarId = calendar.addCalendarSource({ name: 'Test calendar', color: '#123456' })
-    const eventId = calendar.createCalendarEvent({ calendar_id: calendarId, title: 'Test event', start_time: 1000, end_time: 2000 })
+    const eventId = 'domain-store-event'
+    calendar.mutate({type:'create',event:{id:eventId,uid:eventId,calendarId,title:'Test event',start:1000000,end:2000000,allDay:false,timeZone:'UTC',status:'confirmed',transparency:'opaque',createdAt:Date.now(),updatedAt:Date.now()}},{})
     browser.addBookmark('https://example.test', 'Test bookmark')
     chat.createConversation('conversation', 'assistant', 'Test conversation')
     chat.addChatMessage('message', 'conversation', 'user', 'Test message', '2026-09-30T00:00:00Z')

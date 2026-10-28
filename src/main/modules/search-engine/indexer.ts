@@ -355,6 +355,11 @@ export class SearchEngine {
     return null
   }
 
+  async reindexCalendar():Promise<AdapterReindexResult> {
+    const workspaceId=this.repository.ensureWorkspace(SHARED_WORKSPACE_ROOT)
+    return this.adaptersByType.get('calendar')!.reindex({workspaceId,workspaceRoot:SHARED_WORKSPACE_ROOT,repository:this.repository})
+  }
+
   getRepository(): SearchRepository {
     return this.repository
   }

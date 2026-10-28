@@ -12,7 +12,7 @@ test('liquid workbench surfaces remove prominent borders and heavy highlights', 
   const styles = readRendererStyles()
   const topBar = readWorkspaceFile('src/renderer/components/layout/TopBar.tsx')
   const statusBar = readWorkspaceFile('src/renderer/components/layout/StatusBar.tsx')
-  const calendarShell = readWorkspaceFile('src/renderer/components/calendar/CalendarWorkbenchShell.tsx')
+  const calendarShell = readWorkspaceFile('src/renderer/pages/modes/CalendarMode.tsx')
 
   assert.match(styles, /--lg-border-soft: rgba\(244, 249, 255, 0\.18\);/)
   assert.match(styles, /--lg-border-strong: rgba\(252, 254, 255, 0\.28\);/)
@@ -25,5 +25,5 @@ test('liquid workbench surfaces remove prominent borders and heavy highlights', 
 
   assert.match(topBar, /borderBottom: '1px solid transparent'/)
   assert.match(statusBar, /borderTop: '1px solid transparent'/)
-  assert.match(calendarShell, /background: 'var\(--calendar-canvas-bg\)'/)
+  assert.match(calendarShell, /background:'transparent',boxShadow:'none'/)
 })

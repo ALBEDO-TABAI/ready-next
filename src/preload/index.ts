@@ -979,84 +979,29 @@ const rssAPI = {
 import type { ReminderFirePayload as CalendarReminderFirePayload } from '../shared/calendar-types'
 
 const calendarAPI = {
+  prepareStandaloneImport: () => ipcRenderer.invoke('calendar:prepareStandaloneImport'),
+  applyStandaloneImport: (ticket:string,skipExamples:boolean) => ipcRenderer.invoke('calendar:applyStandaloneImport',ticket,skipExamples),
+  revealEvent: (id: string) => ipcRenderer.invoke('calendar:revealEvent', id),
+  peekNavigation: () => ipcRenderer.invoke('calendar:peekNavigation'),
+  ackNavigation: (id: string) => ipcRenderer.invoke('calendar:ackNavigation', id),
+  onNavigation: (handler: () => void) => { const listener = () => handler(); ipcRenderer.on('calendar:navigationPending', listener); return () => ipcRenderer.removeListener('calendar:navigationPending', listener) },
+  snapshot: () => ipcRenderer.invoke('calendar:snapshot'),
+  mutate: (command: import('../shared/calendar/commands').CalendarCommand, versions: Record<string, number>) => ipcRenderer.invoke('calendar:mutate', command, versions),
+  restore: (delta: import('../shared/calendar/commands').CalendarDelta, versions: Record<string, number>) => ipcRenderer.invoke('calendar:restore', delta, versions),
+  putCalendars: (calendars: import('../shared/calendar/model').Calendar[]) => ipcRenderer.invoke('calendar:putCalendars', calendars),
+  putCalendar: (calendar: import('../shared/calendar/model').Calendar) => ipcRenderer.invoke('calendar:putCalendar', calendar),
+  deleteCalendar: (id: string) => ipcRenderer.invoke('calendar:deleteCalendar', id),
+  putPreferences: (prefs: Record<string, unknown>) => ipcRenderer.invoke('calendar:putPreferences', prefs),
+  exportIcs: (id?: string) => ipcRenderer.invoke('calendar:exportIcs', id),
+  importCalendar: (raw: string, name: string, sourceId?: string) => ipcRenderer.invoke('calendar:importCalendar', raw, name, sourceId),
+  openIcs: () => ipcRenderer.invoke('calendar:openIcs'),
+  saveIcs: (name: string, text: string) => ipcRenderer.invoke('calendar:saveIcs', name, text),
+  openLink: (url: string) => ipcRenderer.invoke('calendar:openLink', url),
+  getLoginItem: () => ipcRenderer.invoke('calendar:getLoginItem'),
+  setLoginItem: (enabled: boolean) => ipcRenderer.invoke('calendar:setLoginItem', enabled),
+  onChanged: (handler: () => void) => { const listener = () => handler(); ipcRenderer.on('calendar:changed', listener); return () => ipcRenderer.removeListener('calendar:changed', listener) },
   getSources: () => ipcRenderer.invoke('calendar:getSources'),
-  getEvents: (start: Date, end: Date) => ipcRenderer.invoke('calendar:getEvents', { start, end }),
-  createEvent: (event: unknown) => ipcRenderer.invoke('calendar:createEvent', event),
-  updateEvent: (id: string, event: unknown) => ipcRenderer.invoke('calendar:updateEvent', { id, event }),
-  deleteEvent: (id: string) => ipcRenderer.invoke('calendar:deleteEvent', id),
-  // L3-B — per-occurrence override CRUD. `upsertEventOverride` covers
-  // both "modify single occurrence" (kind='single' + patch fields) and
-  // "skip single occurrence" (kind='cancelled'); `deleteEventOverride`
-  // removes the row so the parent's default rule re-applies.
-  //
-  // `splitRecurringSeries` is the "modify this and future" gesture:
-  // it truncates the parent series at `occurrenceStart - 1s` and
-  // creates a new event starting at `patch.startTime ?? occurrenceStart`
-  // carrying the rest of the patched fields. The new event's RRULE
-  // defaults to the parent's original rule unless `patch.recurrenceRule`
-  // is explicitly provided.
-  upsertEventOverride: (payload: {
-    parentEventId: string
-    occurrenceStart: number | string | Date
-    kind: 'single' | 'cancelled'
-    patch?: {
-      title?: string
-      description?: string | null
-      location?: string | null
-      startTime?: number | string | Date
-      endTime?: number | string | Date
-      allDay?: boolean
-      reminders?: unknown
-      /** L4-A — per-occurrence start tz; null = local. */
-      startTz?: string | null
-      /** L4-A — per-occurrence end tz; null = local. */
-      endTz?: string | null
-    }
-  }) => ipcRenderer.invoke('calendar:upsertEventOverride', payload),
-  deleteEventOverride: (payload: {
-    parentEventId: string
-    occurrenceStart: number | string | Date
-  }) => ipcRenderer.invoke('calendar:deleteEventOverride', payload),
-  splitRecurringSeries: (payload: {
-    parentEventId: string
-    occurrenceStart: number | string | Date
-    patch: {
-      title?: string
-      description?: string | null
-      location?: string | null
-      startTime?: number | string | Date
-      endTime?: number | string | Date
-      allDay?: boolean
-      reminders?: unknown
-      recurrenceRule?: string | null
-      calendarId?: string
-      /** L4-A — start tz for the NEW series; null = local. */
-      startTz?: string | null
-      /** L4-A — end tz for the NEW series; null = local. */
-      endTz?: string | null
-    }
-  }) => ipcRenderer.invoke('calendar:splitRecurringSeries', payload),
-  // L4-B-External-Sync — ICS import + URL subscription.
-  //
-  // `importIcsString` takes raw ICS body text (renderer reads the file
-  // and ships the string); the main process parses, dedupes by VEVENT
-  // UID, and writes to the named source (creating one when needed).
-  //
-  // `subscribeUrl` registers a periodic poller against an ICS URL and
-  // returns the count of events imported in the first sync (which is
-  // run immediately so the calendar isn't empty while waiting for the
-  // first scheduled tick).
-  //
-  // `unsubscribeSource` cascades — FK ON DELETE CASCADE drops every
-  // event whose calendar_id matched the source.
-  //
-  // `syncSourceNow` is the "立即同步" action: forces one sync cycle
-  // and returns the full SyncResult so the renderer can show counts.
-  importIcsString: (payload: {
-    rawIcs: string
-    calendarSourceId?: string
-    sourceName?: string
-  }) => ipcRenderer.invoke('calendar:importIcsString', payload),
+  getEvents: (start: Date, end: Date, timeZone?: string) => ipcRenderer.invoke('calendar:getEvents', { start, end, timeZone }),
   subscribeUrl: (payload: {
     url: string
     name: string

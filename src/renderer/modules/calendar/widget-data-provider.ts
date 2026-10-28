@@ -28,6 +28,7 @@
 import { format } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 import { Temporal } from '@js-temporal/polyfill'
+import { isBusyEvent, type CalEvent } from '../../../shared/calendar/model'
 
 import type {
   DayScheduleSnapshot,
@@ -46,7 +47,7 @@ import type {
  * stubbing every event-CRUD endpoint.
  */
 export interface CalendarWidgetApi {
-  getEvents(start: Date, end: Date): Promise<CalendarWidgetIpcResponse<CalendarWidgetEventLike[]>>
+  getEvents(start: Date, end: Date, timeZone?: string): Promise<CalendarWidgetIpcResponse<CalendarWidgetEventLike[]>>
   getSources(): Promise<CalendarWidgetIpcResponse<CalendarWidgetSourceLike[]>>
 }
 
@@ -69,7 +70,10 @@ export interface CalendarWidgetEventLike {
   startTz?: string | null
   endTz?: string | null
   /** Some IPC paths surface a per-event color directly. */
-  color?: string
+  color?: string | null
+  status?: CalEvent['status']
+  transparency?: CalEvent['transparency']
+  attendees?: CalEvent['attendees']
 }
 
 /** Subset of `CalendarSourceData` we actually consume. */
@@ -118,14 +122,12 @@ function dateToZdt(date: Date, tz: string): Temporal.ZonedDateTime {
 }
 
 /**
- * Returns the [startOfDay, endOfDay] pair (as Date) in the chosen tz.
- * The Dates we return are absolute instants that, when displayed in
- * `tz`, fall at 00:00:00 and 23:59:59.999 respectively.
+ * Returns the half-open day window in the chosen timezone.
  */
 function dayWindow(now: Date, tz: string): { start: Date; end: Date } {
   const zdt = dateToZdt(now, tz)
   const startZdt = zdt.with({ hour: 0, minute: 0, second: 0, millisecond: 0, microsecond: 0, nanosecond: 0 })
-  const endZdt = zdt.with({ hour: 23, minute: 59, second: 59, millisecond: 999, microsecond: 0, nanosecond: 0 })
+  const endZdt = startZdt.add({ days: 1 })
   return {
     start: new Date(startZdt.epochMilliseconds),
     end: new Date(endZdt.epochMilliseconds),
@@ -133,7 +135,7 @@ function dayWindow(now: Date, tz: string): { start: Date; end: Date } {
 }
 
 /**
- * Returns the Monday-anchored week window [startOfMonday, endOfSunday]
+ * Returns the Monday-anchored half-open week window.
  * in the chosen tz. We use Monday as the week start to match the
  * existing renderer locale (zhCN / date-fns).
  */
@@ -144,12 +146,10 @@ function weekWindow(now: Date, tz: string): { start: Date; end: Date; mondayInst
   const monday = zdt
     .with({ hour: 0, minute: 0, second: 0, millisecond: 0, microsecond: 0, nanosecond: 0 })
     .subtract({ days: offsetToMonday })
-  const sunday = monday
-    .add({ days: 6 })
-    .with({ hour: 23, minute: 59, second: 59, millisecond: 999, microsecond: 0, nanosecond: 0 })
+  const nextMonday = monday.add({ days: 7 })
   return {
     start: new Date(monday.epochMilliseconds),
-    end: new Date(sunday.epochMilliseconds),
+    end: new Date(nextMonday.epochMilliseconds),
     mondayInstant: new Date(monday.epochMilliseconds),
   }
 }
@@ -172,8 +172,9 @@ function eventDateInTz(value: string | number | Date | undefined, tz: string): T
   return Temporal.Instant.fromEpochMilliseconds(ms).toZonedDateTimeISO(tz)
 }
 
-function sameWallDay(a: Temporal.ZonedDateTime, b: Temporal.ZonedDateTime): boolean {
-  return a.year === b.year && a.month === b.month && a.day === b.day
+function overlapsWindow(event: CalendarWidgetEventLike, start: number, end: number): boolean {
+  const eventStart = eventEpochMs(event.startTime), eventEnd = eventEpochMs(event.endTime)
+  return eventStart !== null && eventEnd !== null && eventStart < end && eventEnd > start
 }
 
 function buildTimeLabel(event: CalendarWidgetEventLike, tz: string): string {
@@ -201,11 +202,11 @@ function eventEpochMs(value: string | number | Date | undefined): number | null 
   return Number.isNaN(parsed) ? null : parsed
 }
 
-function durationHours(event: CalendarWidgetEventLike): number {
+function durationHours(event: CalendarWidgetEventLike, from: number, to: number): number {
   const startMs = eventEpochMs(event.startTime)
   const endMs = eventEpochMs(event.endTime)
   if (startMs === null || endMs === null || endMs <= startMs) return 0
-  return (endMs - startMs) / (60 * 60 * 1000)
+  return Math.max(0, Math.min(endMs, to) - Math.max(startMs, from)) / (60 * 60 * 1000)
 }
 
 function mapSourceNames(sources: ReadonlyArray<CalendarWidgetSourceLike>): Map<string, string> {
@@ -231,9 +232,9 @@ export interface CreateFetcherDeps {
   calendar: CalendarWidgetApi
 }
 
-async function safeGetEvents(api: CalendarWidgetApi, start: Date, end: Date): Promise<CalendarWidgetEventLike[]> {
+async function safeGetEvents(api: CalendarWidgetApi, start: Date, end: Date, timeZone: string): Promise<CalendarWidgetEventLike[]> {
   try {
-    const res = await api.getEvents(start, end)
+    const res = await api.getEvents(start, end, timeZone)
     if (!res?.success || !Array.isArray(res.data)) return []
     return res.data
   } catch {
@@ -260,17 +261,14 @@ export function createCalendarWidgetFetcher(deps: CreateFetcherDeps): CalendarWi
     const locale = options.locale ?? zhCN
     const { start, end } = dayWindow(now, tz)
     const [events, sources] = await Promise.all([
-      safeGetEvents(calendar, start, end),
+      safeGetEvents(calendar, start, end, tz),
       safeGetSources(calendar),
     ])
     const sourceNames = mapSourceNames(sources)
     const sourceColors = mapSourceColors(sources)
     const nowZdt = dateToZdt(now, tz)
 
-    const filtered = events.filter((event) => {
-      const startZdt = eventDateInTz(event.startTime, tz)
-      return startZdt ? sameWallDay(startZdt, nowZdt) : false
-    })
+    const filtered = events.filter(event => overlapsWindow(event, start.getTime(), end.getTime()))
 
     return {
       dateLabel: format(toLabelDate(nowZdt), 'M月d日 EEEE', { locale }),
@@ -288,16 +286,13 @@ export function createCalendarWidgetFetcher(deps: CreateFetcherDeps): CalendarWi
     const now = options.now ?? new Date()
     const locale = options.locale ?? zhCN
     const { start: weekStart, end: weekEnd, mondayInstant } = weekWindow(now, tz)
-    const events = await safeGetEvents(calendar, weekStart, weekEnd)
+    const events = await safeGetEvents(calendar, weekStart, weekEnd, tz)
 
     const days: WeekScheduleSnapshot['days'] = []
     let mondayZdt = dateToZdt(mondayInstant, tz)
     for (let index = 0; index < 7; index += 1) {
       const dayZdt = mondayZdt.add({ days: index })
-      const dayEvents = events.filter((event) => {
-        const startZdt = eventDateInTz(event.startTime, tz)
-        return startZdt ? sameWallDay(startZdt, dayZdt) : false
-      })
+      const dayEvents = events.filter(event => overlapsWindow(event, dayZdt.epochMilliseconds, dayZdt.add({ days: 1 }).epochMilliseconds))
       days.push({
         label: format(toLabelDate(dayZdt), 'EEE', { locale }),
         count: dayEvents.length,
@@ -323,7 +318,7 @@ export function createCalendarWidgetFetcher(deps: CreateFetcherDeps): CalendarWi
     const now = options.now ?? new Date()
     const { start: weekStart, end: weekEnd } = weekWindow(now, tz)
     const [events, sources] = await Promise.all([
-      safeGetEvents(calendar, weekStart, weekEnd),
+      safeGetEvents(calendar, weekStart, weekEnd, tz),
       safeGetSources(calendar),
     ])
     const sourceNames = mapSourceNames(sources)
@@ -331,7 +326,8 @@ export function createCalendarWidgetFetcher(deps: CreateFetcherDeps): CalendarWi
     const buckets = new Map<string, { label: string; value: number; accent?: string }>()
 
     for (const event of events) {
-      const hours = durationHours(event)
+      if (!isBusyEvent(event)) continue
+      const hours = durationHours(event, weekStart.getTime(), weekEnd.getTime())
       if (hours <= 0) continue
       const calendarId = String(event.calendarId || 'unknown')
       const bucket = buckets.get(calendarId) ?? {
@@ -373,6 +369,7 @@ export function createCalendarWidgetFetcher(deps: CreateFetcherDeps): CalendarWi
       calendar,
       dayWindow(now, tz).start,
       dayWindow(now, tz).end,
+      tz,
     )
     const upcoming = sourceEvents
       .map((event) => ({ event, ms: eventEpochMs(event.startTime) ?? 0 }))
@@ -427,13 +424,8 @@ function toLabelDate(zdt: Temporal.ZonedDateTime): Date {
  * an inert no-op when the global is missing (e.g. node tests that
  * never inject a fake) so the renderer cannot crash on cold paths.
  *
- * IMPORTANT: the calendar IPC channel returns `CalendarEventWire[]`
- * (Unix seconds + camelCase, see `src/shared/calendar-wire.ts`). The
- * `eventEpochMs` helper in this file does handle Unix seconds, but
- * relying on that implicit detection was the same shape mismatch that
- * caused the original "1970 on refresh" bug. Wrap the live API in a
- * normalizer so the fetcher always sees the canonical wire shape —
- * tests can still inject any compatible shape via `CalendarWidgetApi`.
+ * Main already serializes `CalendarEventWire[]` (Unix seconds + camelCase).
+ * Consume that result directly; serializing it again can discard fields.
  */
 export function getDefaultCalendarWidgetFetcher(): CalendarWidgetFetcher {
   const electronAPI = (globalThis as { electronAPI?: unknown }).electronAPI
@@ -448,36 +440,5 @@ export function getDefaultCalendarWidgetFetcher(): CalendarWidgetFetcher {
       },
     })
   }
-  return createCalendarWidgetFetcher({
-    calendar: wrapCalendarApiWithWireNormalization(calendarApi),
-  })
-}
-
-/**
- * Normalize the live calendar IPC response into wire shape before the
- * widget fetcher consumes it. The serializer accepts both snake_case
- * DB rows and camelCase EventInstance and emits a stable
- * `CalendarEventWire[]` — so any future drift on the main side surfaces
- * as a wire-shape mismatch, not as silently bad widget data.
- */
-function wrapCalendarApiWithWireNormalization(api: CalendarWidgetApi): CalendarWidgetApi {
-  return {
-    async getEvents(start, end) {
-      const res = await api.getEvents(start, end)
-      if (!res.success || !res.data) return res
-      // Lazy-load the wire helper to avoid bundling it in tests that
-      // inject fake APIs directly.
-      const { serializeEventToWire } = await import('../../../shared/calendar-wire')
-      const normalized = (res.data as Array<Record<string, unknown>>).map((event) => {
-        const wire = serializeEventToWire(event as Parameters<typeof serializeEventToWire>[0])
-        // CalendarWidgetEventLike consumes a subset; the wire shape is a
-        // superset. Cast through `unknown` to acknowledge the widening.
-        return wire as unknown as CalendarWidgetEventLike
-      })
-      return { ...res, data: normalized }
-    },
-    async getSources() {
-      return api.getSources()
-    },
-  }
+  return createCalendarWidgetFetcher({ calendar: calendarApi })
 }

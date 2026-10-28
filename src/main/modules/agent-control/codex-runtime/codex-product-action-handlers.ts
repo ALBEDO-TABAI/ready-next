@@ -1,7 +1,11 @@
+import { isRecurring } from '../../../../shared/calendar/model'
 import type { DatabaseManager } from '../../database'
 import type { Reminder } from '../../../../shared/calendar-types'
 import { persistableCalendarEventId } from '../../../../shared/calendar-event-identity'
-import { expandEventList } from '../../calendar-engine/rrule-engine'
+import { calendarEventFromInput, calendarPatchFromInput, calendarSeconds } from '../../calendar-engine/calendar-input'
+import { originalFromSeconds, originalToSeconds } from '../../calendar-engine/calendar-row-codec'
+import { isoDate } from '../../../../shared/calendar/dates'
+import type { RecurrenceScope } from '../../../../shared/calendar/commands'
 import { parseRemindersInput } from '../../calendar-engine/reminder-codec'
 import { validateCodexCalendarWindow } from './codex-explicit-resources'
 import { CodexProductActionError } from './codex-product-action-requester'
@@ -80,6 +84,8 @@ export function createProductionProductActionHandlers(input: {
   waitForRssAnalysisResult?: boolean
   recordListedCalendarEventIds?: (eventIds: readonly string[]) => void
   listedCalendarEventIds?: () => readonly string[]
+  recordListedCalendarRevisions?: (versions: Record<string, number>) => void
+  listedCalendarRevisions?: () => Record<string, number>
   onCalendarMutated?: (eventId: string) => void
 }): { dispatch(action: string, args: Record<string, unknown>): Promise<Record<string, unknown>> } {
   const targets = input.targets || {}
@@ -262,6 +268,7 @@ export function createProductionProductActionHandlers(input: {
         const window = resolveCalendarWindow(args, targets.calendarWindow)
         const events = listCalendarWindowEvents(input.database, window)
         input.recordListedCalendarEventIds?.(uniqueParentEventIds(events))
+        input.recordListedCalendarRevisions?.(Object.fromEntries(events.flatMap(e=>[[e.id,e.revision],[e.instanceId,e.revision]])))
         return {
           ok: true,
           summary: `已读取日程窗口，共 ${events.length} 个事件。`,
@@ -294,22 +301,38 @@ export function createProductionProductActionHandlers(input: {
           typedEventId: targets.calendarEventId,
           listedEventIds: input.listedCalendarEventIds?.() || [],
         })
-        if (action === 'calendar.deleteEvent') {
-          input.database.calendar.deleteCalendarEvent(eventId)
-          const gone = input.database.calendar.getCalendarEventById(eventId)
-          if (gone) {
-            return { ok: false, errorKind: 'calendar_delete_readback_failed', summary: '删除后仍能读到事件' }
-          }
-          afterCalendarMutation(input, eventId)
-          return { ok: true, summary: `事件已删除：${eventId}`, eventId }
+        const parentId = persistableCalendarEventId(eventId)!
+        const snapshot = input.database.calendar.snapshot()
+        const event = snapshot.events.find(e=>e.id===parentId)
+        if(!event)throw new CodexProductActionError('product_action_calendar_event_missing')
+        const scope = typeof args.scope==='string' && ['this','following','all'].includes(args.scope) ? args.scope as RecurrenceScope : undefined
+        if(isRecurring(event) && !scope)throw new CodexProductActionError('product_action_calendar_scope_required')
+        let origin=eventId.includes('#')?Number(eventId.slice(eventId.indexOf('#')+1)):undefined
+        if(args.occurrenceStart!==undefined)origin=calendarSeconds(args.occurrenceStart)
+        if(isRecurring(event) && scope!=='all' && origin===undefined)throw new CodexProductActionError('product_action_calendar_occurrence_required')
+        if(origin!==undefined){
+          const exact=`${parentId}#${origin}`
+          if(targets.calendarEventId!==exact && !(input.listedCalendarEventIds?.()||[]).includes(exact))throw new CodexProductActionError('product_action_calendar_event_not_in_receipt')
         }
-        updateCalendarEventFromArgs(input.database, eventId, args)
-        const readback = input.database.calendar.getCalendarEventById(eventId)
+        const key=origin===undefined?parentId:`${parentId}|${originalFromSeconds(origin,event.allDay)}`
+        const versions=Object.fromEntries(snapshot.events.map(e=>[e.id,e.revision||1]))
+        const expected=args.expectedRevision ?? input.listedCalendarRevisions?.()[eventId] ?? input.listedCalendarRevisions?.()[parentId]
+        if(typeof expected!=='number')throw new CodexProductActionError('product_action_calendar_revision_required')
+        versions[parentId]=expected
+        if(action==='calendar.deleteEvent'){
+          input.database.calendar.mutate({type:'delete',keys:[key],scope},versions)
+          afterCalendarMutation(input,parentId)
+          return {ok:true,summary:'日程已按指定范围删除',eventId:parentId,scope:scope||'single'}
+        }
+        const receipt=input.database.calendar.mutate({type:'update',key,scope,patch:calendarPatchFromInput(args,event)},versions)
+        const instanceId=scope==='this'&&isRecurring(event)?`${parentId}#${origin}`:null
+        const savedId=instanceId?receipt.snapshot.events.find(e=>e.recurringEventId===parentId&&e.originalStart===originalFromSeconds(origin!,event.allDay))?.id:scope==='following'&&isRecurring(event)?receipt.undo.remove.find(id=>receipt.snapshot.events.some(e=>e.id===id&&!e.recurringEventId)):parentId
+        const readback = savedId ? input.database.calendar.getCalendarEventById(savedId) : null
         if (!readback) {
           return { ok: false, errorKind: 'calendar_update_readback_failed', summary: '更新后读回失败' }
         }
-        afterCalendarMutation(input, eventId)
-        return { ok: true, summary: `事件已更新：${readback.title}`, eventId }
+        afterCalendarMutation(input, parentId)
+        return { ok: true, summary: `事件已更新：${readback.title}`, eventId: instanceId || readback.id, scope: scope || 'single' }
       }
 
       if (
@@ -357,140 +380,45 @@ function resolveCalendarWindow(
   }
 }
 
-function listCalendarWindowEvents(
-  database: DatabaseManager,
-  window: { start: string; end: string; calendarId?: string },
-): Array<{
-  id: string
-  title: string
-  startTime: number
-  endTime: number
-  calendarId: string
-  instanceOf: string
-}> {
-  const start = Math.floor(Date.parse(window.start) / 1000)
-  const end = Math.floor(Date.parse(window.end) / 1000)
-  const nonRecurring = database.calendar.getNonRecurringEventsInWindow(start, end)
-  const { events: recurringParents, overridesByParent } = database.calendar.getRecurringEventsAndOverrides(start, end)
-  const expanded = expandEventList(recurringParents, start, end, overridesByParent)
-  return [...nonRecurring.map((event) => ({
-    id: event.id,
-    instanceId: event.id,
-    title: event.title,
-    startTime: event.start_time,
-    endTime: event.end_time,
-    calendarId: event.calendar_id,
-    instanceOf: event.id,
-  })), ...expanded.map((event) => ({
-    id: persistableCalendarEventId(event.instanceOf || event.id) || event.id,
-    instanceId: event.id,
-    title: event.title,
-    startTime: event.start_time,
-    endTime: event.end_time,
-    calendarId: event.calendar_id,
-    instanceOf: persistableCalendarEventId(event.instanceOf || event.id) || event.id,
-  }))].filter((event) => !window.calendarId || event.calendarId === window.calendarId)
+function listCalendarWindowEvents(database:DatabaseManager,window:{start:string;end:string;calendarId?:string}) {
+  const parents=new Map(database.calendar.snapshot().events.map(e=>[e.id,e]))
+  return database.calendar.listOccurrences(Date.parse(window.start)/1000,Date.parse(window.end)/1000)
+    .filter(o=>!window.calendarId||o.event.calendarId===window.calendarId).map(o=>{
+      const event=o.event,parent=o.seriesId||event.id,original=originalToSeconds(event.originalStart??(o.allDay?isoDate(o.startDay):o.start))
+      return {id:parent,instanceId:o.seriesId?`${parent}#${original}`:parent,instanceOf:parent,occurrenceStart:original,
+        title:event.title,description:event.description||null,location:event.location||null,calendarId:event.calendarId,
+        startTime:o.start/1000,endTime:o.end/1000,allDay:event.allDay,startDate:o.allDay?isoDate(o.startDay):null,endDate:o.allDay?isoDate(o.endDay+1):null,
+        startTz:event.timeZone,endTz:event.endTimeZone||null,recurrenceRule:parents.get(parent)?.rrule||null,
+        reminders:event.reminders?.map(r=>({offsetMinutes:-r.minutes,method:r.method}))||[],
+        attendees:event.attendees||[],url:event.url||null,conferenceUrl:event.conferenceUrl||null,status:event.status,transparency:event.transparency,visibility:event.visibility||'default',color:event.color||null,revision:parents.get(parent)?.revision||1}
+    })
 }
 
 export { persistableCalendarEventId }
 
-function uniqueParentEventIds(
-  events: ReadonlyArray<{ id: string; instanceOf: string }>,
-): string[] {
-  return [...new Set(events.map((event) => persistableCalendarEventId(event.instanceOf || event.id)).filter((id): id is string => Boolean(id)))]
-}
-
-function resolveWritableCalendarEventId(input: {
-  requestedId: string
-  typedEventId?: string | null
-  listedEventIds: readonly string[]
-}): string {
-  const requested = persistableCalendarEventId(input.requestedId)
-  const typed = persistableCalendarEventId(input.typedEventId)
-  if (typed) {
-    if (requested && requested !== typed) {
-      throw new CodexProductActionError('product_action_calendar_event_conflict')
-    }
-    return typed
+function uniqueParentEventIds(events:ReadonlyArray<{id:string;instanceId?:string;instanceOf:string}>):string[]{return [...new Set(events.map(e=>e.instanceId||e.id))]}
+function resolveWritableCalendarEventId(input:{requestedId:string;typedEventId?:string|null;listedEventIds:readonly string[]}):string {
+  const requested=input.requestedId.trim(),typed=input.typedEventId?.trim()
+  if(typed){
+    if(requested&&(persistableCalendarEventId(requested)!==persistableCalendarEventId(typed)||(requested.includes('#')&&typed.includes('#')&&requested!==typed)))throw new CodexProductActionError('product_action_calendar_event_conflict')
+    return requested||typed
   }
-  if (requested) {
-    if (!input.listedEventIds.includes(requested)) {
-      throw new CodexProductActionError('product_action_calendar_event_not_in_receipt')
-    }
+  if(requested){
+    if(!input.listedEventIds.includes(requested)&&!( !requested.includes('#') && input.listedEventIds.some(id=>persistableCalendarEventId(id)===requested)))throw new CodexProductActionError('product_action_calendar_event_not_in_receipt')
     return requested
   }
-  if (input.listedEventIds.length !== 1) {
-    throw new CodexProductActionError('product_action_calendar_event_missing')
-  }
+  if(input.listedEventIds.length!==1)throw new CodexProductActionError('product_action_calendar_event_missing')
   return input.listedEventIds[0]
 }
 
-function createCalendarEventFromArgs(database: DatabaseManager, args: Record<string, unknown>): { id: string } {
-  const title = String(args.title || '').trim()
-  const startTime = Date.parse(String(args.startTime || ''))
-  const endTime = Date.parse(String(args.endTime || ''))
-  if (!title || !Number.isFinite(startTime) || !Number.isFinite(endTime)) {
-    throw new CodexProductActionError('product_action_calendar_create_invalid')
-  }
-  const sources = database.calendar.getCalendarSources()
-  const calendarId = typeof args.calendarId === 'string' && args.calendarId.trim()
-    ? args.calendarId.trim()
-    : sources[0]?.id
-  if (!calendarId) throw new CodexProductActionError('product_action_calendar_missing')
-  const reminders = parseReminders(args.reminders)
-  const id = database.calendar.createCalendarEvent({
-    calendar_id: calendarId,
-    title,
-    description: typeof args.description === 'string' ? args.description : null,
-    location: typeof args.location === 'string' ? args.location : null,
-    start_time: Math.floor(startTime / 1000),
-    end_time: Math.floor(endTime / 1000),
-    all_day: args.allDay === true ? 1 : 0,
-    recurrence_rule: typeof args.recurrenceRule === 'string' ? args.recurrenceRule : null,
-    ...(reminders !== undefined ? { reminders } : {}),
-    start_tz: typeof args.startTz === 'string' ? args.startTz : null,
-    end_tz: typeof args.endTz === 'string' ? args.endTz : null,
-  })
-  return { id }
-}
-
-function updateCalendarEventFromArgs(
-  database: DatabaseManager,
-  eventId: string,
-  args: Record<string, unknown>,
-): void {
-  const updates: {
-    title?: string
-    description?: string | null
-    location?: string | null
-    start_time?: number
-    end_time?: number
-    all_day?: number
-    recurrence_rule?: string | null
-    reminders?: Reminder[] | null
-    start_tz?: string | null
-    end_tz?: string | null
-  } = {}
-  if (typeof args.title === 'string' && args.title.trim()) updates.title = args.title.trim()
-  if (typeof args.description === 'string') updates.description = args.description
-  if (typeof args.location === 'string') updates.location = args.location
-  if (args.startTime) {
-    const startTime = Date.parse(String(args.startTime))
-    if (!Number.isFinite(startTime)) throw new CodexProductActionError('product_action_calendar_update_invalid')
-    updates.start_time = Math.floor(startTime / 1000)
-  }
-  if (args.endTime) {
-    const endTime = Date.parse(String(args.endTime))
-    if (!Number.isFinite(endTime)) throw new CodexProductActionError('product_action_calendar_update_invalid')
-    updates.end_time = Math.floor(endTime / 1000)
-  }
-  if (typeof args.allDay === 'boolean') updates.all_day = args.allDay ? 1 : 0
-  if (typeof args.recurrenceRule === 'string') updates.recurrence_rule = args.recurrenceRule
-  const reminders = parseReminders(args.reminders)
-  if (reminders !== undefined) updates.reminders = reminders
-  if (typeof args.startTz === 'string') updates.start_tz = args.startTz
-  if (typeof args.endTz === 'string') updates.end_tz = args.endTz
-  database.calendar.updateCalendarEvent(eventId, updates)
+function createCalendarEventFromArgs(database:DatabaseManager,args:Record<string,unknown>):{id:string}{
+  const snapshot=database.calendar.snapshot()
+  const calendarId=typeof args.calendarId==='string'&&args.calendarId.trim()?args.calendarId:snapshot.calendars.find(c=>c.primary&&!c.readOnly)?.id||snapshot.calendars.find(c=>!c.readOnly)?.id
+  if(!calendarId)throw new CodexProductActionError('product_action_calendar_missing')
+  if(args.reminders!==undefined)parseReminders(args.reminders)
+  const event=calendarEventFromInput(args,calendarId)
+  database.calendar.mutate({type:'create',event},{})
+  return {id:event.id}
 }
 
 function afterCalendarMutation(
@@ -510,19 +438,7 @@ function afterCalendarMutation(
   eventId: string,
 ): void {
   input.onCalendarMutated?.(eventId)
-  void input.requestRendererToolAction({
-    agent: input.agent,
-    sessionId: input.sessionId,
-    runId: input.runId,
-    codexThreadId: input.codexThreadId,
-    codexTurnId: input.codexTurnId,
-    codexCallId: input.codexCallId,
-    readyActionId: input.readyActionId,
-    actionIdentityDigest: input.actionIdentityDigest,
-    tool: 'calendar.reloadWindow',
-    args: { eventId },
-    abortSignal: input.abortSignal,
-  }).catch(() => { /* view refresh must not stall the write result */ })
+
 }
 
 function parseReminders(value: unknown): Reminder[] | undefined {

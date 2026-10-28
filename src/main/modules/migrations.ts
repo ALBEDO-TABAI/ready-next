@@ -1,3 +1,4 @@
+import { migrateCalendarUnion, CALENDAR_UNION_MIGRATION } from './calendar-engine/calendar-schema'
 import { migrateRSSDigests, RSS_DIGEST_MIGRATION } from './rss-engine/digest-schema'
 import { migrateRSSCatalog, RSS_CATALOG_MIGRATION } from './rss-engine/catalog-schema'
 import { migrateRSSMethodValidity, RSS_METHOD_VALIDITY_MIGRATION } from './rss-engine/method-validity-schema'
@@ -4418,7 +4419,8 @@ const migrations: Migration[] = [
   { name: RSS_DIGEST_MIGRATION, up: migrateRSSDigests },
   { name: RSS_CATALOG_MIGRATION, up: migrateRSSCatalog },
   { name: RSS_METHOD_VALIDITY_MIGRATION, up: migrateRSSMethodValidity },
-  { name: RSS_TRANSLATION_MIGRATION, up: migrateRSSTranslations }
+  { name: RSS_TRANSLATION_MIGRATION, up: migrateRSSTranslations },
+  { name: CALENDAR_UNION_MIGRATION, up: migrateCalendarUnion }
 ]
 
 /**

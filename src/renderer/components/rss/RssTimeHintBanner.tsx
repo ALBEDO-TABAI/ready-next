@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CalendarPlus, X } from 'lucide-react'
 import { stripHtml } from '../../utils/strip-html'
+import { dayOf, isoDate, newId, systemTimeZone, type Calendar } from '../../../shared/calendar'
 
 /**
  * L5-B — banner chip + modal that surfaces the time expressions
@@ -31,13 +32,6 @@ interface DetectedExpression {
   hasTime: boolean
   confidence: 'high' | 'medium' | 'low'
   locale: 'en' | 'zh'
-}
-
-interface CalendarSource {
-  id: string
-  name: string
-  color: string
-  enabled: boolean
 }
 
 interface RssTimeHintBannerProps {
@@ -105,7 +99,7 @@ export default function RssTimeHintBanner({
   const [open, setOpen] = useState(false)
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [eventTitle, setEventTitle] = useState(title)
-  const [sources, setSources] = useState<CalendarSource[]>([])
+  const [sources, setSources] = useState<Calendar[]>([])
   const [selectedSourceId, setSelectedSourceId] = useState<string>('')
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
@@ -156,18 +150,18 @@ export default function RssTimeHintBanner({
     if (!open) return
     if (sources.length > 0) return
     const api = window.electronAPI?.calendar
-    if (!api || typeof api.getSources !== 'function') return
-    void api.getSources().then(
+    if (!api) return
+    void api.snapshot().then(
       (res) => {
-        if (!res || !res.success || !Array.isArray(res.data)) return
-        const enabled = (res.data as CalendarSource[]).filter((s) => s.enabled !== false)
-        setSources(enabled)
-        if (enabled.length > 0 && selectedSourceId === '') {
-          setSelectedSourceId(enabled[0].id)
+        if (!res.success || !res.data) return
+        const writable = res.data.calendars.filter(source => !source.readOnly)
+        setSources(writable)
+        if (writable.length > 0 && selectedSourceId === '') {
+          setSelectedSourceId((writable.find(source => source.primary) || writable[0]).id)
         }
       },
       (err) => {
-        console.warn('[RssTimeHintBanner] getSources failed:', err)
+        console.warn('[RssTimeHintBanner] snapshot failed:', err)
       },
     )
   }, [open, sources.length, selectedSourceId])
@@ -204,7 +198,7 @@ export default function RssTimeHintBanner({
 
   const handleSubmit = useCallback(async () => {
     const api = window.electronAPI?.calendar
-    if (!api || typeof api.createEvent !== 'function') return
+    if (!api) return
     if (!selected) return
     if (selectedSourceId === '') {
       setSubmitError('请选择日历')
@@ -220,14 +214,16 @@ export default function RssTimeHintBanner({
     setSubmitting(true)
     setSubmitError(null)
     try {
-      const res = await api.createEvent({
+      const id = newId('event'), now = Date.now(), timeZone = systemTimeZone(), allDay = !selected.hasTime
+      const res = await api.mutate({type: 'create', event: {
+        id, uid: `${id}@ready.local`, createdAt: now, updatedAt: now, timeZone,
         calendarId: selectedSourceId,
         title: eventTitle.trim(),
-        startTime: new Date(startSeconds * 1000).toISOString(),
-        endTime: new Date(endSeconds * 1000).toISOString(),
-        allDay: !selected.hasTime,
+        start: allDay ? isoDate(dayOf(startSeconds * 1000, timeZone)) : startSeconds * 1000,
+        end: allDay ? isoDate(dayOf((endSeconds - 1) * 1000, timeZone) + 1) : endSeconds * 1000,
+        allDay, status: 'confirmed', transparency: allDay ? 'transparent' : 'opaque',
         description: `From RSS · 来自文章：${title}`,
-      })
+      }}, {})
       if (!res || !res.success) {
         setSubmitError(res?.error ?? '创建失败')
         return

@@ -154,11 +154,7 @@ export function createCodexCompositionBase(input: FactoryInput, live: CodexCompo
     readStorageRetention: () => repository.readArtifactStorageRetention(),
   })
 
-  const calendarListedEventIdsByRun = new Map<string, string[]>()
-
-  const calendarNotifyReady = import('../../../calendar-engine/ipc-handler')
-    .then((module) => module.notifyCalendarEventChanged)
-    .catch(() => null)
+  const calendarListedEventIdsByRun = new Map<string, { ids: string[]; versions: Record<string, number> }>()
 
   const loadedThreads = new Set<string>()
 
@@ -366,7 +362,6 @@ export function createCodexCompositionBase(input: FactoryInput, live: CodexCompo
     currentDocumentExactReadRuns,
     artifactMaterializer,
     calendarListedEventIdsByRun,
-    calendarNotifyReady,
     loadedThreads,
     pendingEngineTerminalFinalizations,
     expectedCodexCloseouts,

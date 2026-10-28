@@ -49,7 +49,7 @@ test('isolated calendar write through the production handler readbacks by id', a
     const readback = database.calendar.getCalendarEventById(eventId)
     assert.equal(readback?.title, '明天下午的会')
     assert.deepEqual(readback?.reminders, [{ offsetMinutes: -15, method: 'notification' }])
-    database.calendar.deleteCalendarEvent(eventId)
+    database.calendar.mutate({type:'delete',keys:[eventId]}, {[eventId]:database.calendar.snapshot().events.find(e=>e.id===eventId)!.revision!})
     assert.equal(database.calendar.getCalendarEventById(eventId), null)
   } finally {
     database.close()
