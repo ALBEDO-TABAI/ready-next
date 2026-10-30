@@ -20,6 +20,7 @@ export interface ObjectLink {
   kind: ObjectLinkKind
   rawTarget: string
   fragment: string | null
+  sourceNodeId?: string | null
   sourceLine: number | null
   sourceOffset: number | null
   resolved: boolean
@@ -31,6 +32,7 @@ export interface ExtractedObjectLink {
   rawTarget: string
   targetText: string
   fragment: string | null
+  sourceNodeId?: string | null
   sourceLine: number | null
   sourceOffset: number | null
 }

@@ -10,9 +10,16 @@ export function readPageTree(input: PageRoot,
 ): PageNode {
   const root = vaultRoot(PageRootSchema.parse(input).path)
   if (root.split(/[\\/]/).includes('.ready')) throw new Error('Internal metadata is not a page root')
+  // Display metadata only: a foreign or damaged canvas is still listed under its file name, and opening it reports the problem.
+  const canvasFields = (path: string): Record<string, unknown> => {
+    try {
+      const ready = (JSON.parse(readFileSync(path, 'utf8')) as { ready?: unknown } | null)?.ready
+      return ready && typeof ready === 'object' && !Array.isArray(ready) ? ready as Record<string, unknown> : {}
+    } catch { return {} }
+  }
   const node = (path: string, kind: PageNode['kind'], position: number): PageNode => {
-    const name = basename(path), fields = kind === 'page' ? readDocumentSource(readFileSync(path, 'utf8')).frontmatter : {}
-    return { ...identify(path), path, name, kind, title: typeof fields.title === 'string' ? fields.title : kind === 'page' ? name.slice(0, -3) : name,
+    const name = basename(path), fields: Record<string, unknown> = kind === 'page' ? readDocumentSource(readFileSync(path, 'utf8')).frontmatter : kind === 'canvas' ? canvasFields(path) : {}
+    return { ...identify(path), path, name, kind, title: typeof fields.title === 'string' ? fields.title : kind === 'page' || kind === 'canvas' ? name.slice(0, -extname(name).length) : name,
       icon: typeof fields.icon === 'string' ? fields.icon : undefined, cover: typeof fields.cover === 'string' ? fields.cover : undefined,
       children: [], hasChildren: false, position }
   }
@@ -20,13 +27,13 @@ export function readPageTree(input: PageRoot,
     const entries = readdirSync(directory, { withFileTypes: true }).filter(e => e.name !== '.ready' && !e.isSymbolicLink())
       .sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)
     const stems = new Map<string, string[]>()
-    for (const e of entries) if (e.isFile() && extname(e.name).toLowerCase() === '.md') {
-      const stem = e.name.slice(0, -3).toLowerCase(); stems.set(stem, [...(stems.get(stem) ?? []), e.name])
+    for (const e of entries) if (e.isFile() && ['.md', '.canvas'].includes(extname(e.name).toLowerCase())) {
+      const stem = e.name.slice(0, -extname(e.name).length).toLowerCase(); stems.set(stem, [...(stems.get(stem) ?? []), e.name])
     }
     const merges = new Map<string, { directory?: string; assets?: string }>(), ambiguous = new Set<string>(), consumed = new Set<string>()
     for (const [stem, pages] of stems) {
       const dirs = entries.filter(e => e.isDirectory() && [stem, stem + '.assets'].includes(e.name.toLowerCase()))
-      const exact = pages[0].slice(0, -3)
+      const exact = pages[0].slice(0, -extname(pages[0]).length)
       if (pages.length !== 1 || dirs.some(d => d.name !== exact && d.name !== exact + '.assets') || dirs.length > 2) {
         for (const name of [...pages, ...dirs.map(d => d.name)]) ambiguous.add(name)
       } else {

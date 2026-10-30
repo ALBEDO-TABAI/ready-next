@@ -23,6 +23,10 @@
 
 ## 2. 会话、资源与工具面
 
+- ReadyRef 第 4、5 批（R45 / C1）：浏览器展示 `web` 引用，发送仍只选 tabId，由 Main 现场重读。文档展示 page/file 对象身份，发送前从对象定位取得文件路径，当前文档锚与选中文字仍决定授权；没有持久身份的草稿、摘录保留原文本和空地址。浏览器历史只保留网页导航，不恢复过期标签授权。
+- RSS 精确引用在 `ready://rss/item/<id>` 上携带 article 或 excerpt 查询字段（经共享读取 schema 校验的版本、范围、offset、length）；两者互斥。刊物使用 `ready://rss/digest/<id>?offset=…&limit=…`，筛选使用 `ready://rss/query?query=…` 保存完整筛选和版本。导航必须调用原有版本校验读取，过期或越界明确失败；导航 URI 不参与本轮读取授权，`RSSReadExcerptSchema` 不变。行为合同：`ready-ref-r45.test.ts`、`rss-excerpts.test.tsx`。
+- R45 聊天迁移只更新开启会话的用户附件结构；不可变消息正文及已关闭附件另存绑定原值摘要的展示映射，读取时验证摘要。代码块和普通文字不替换，原始工具回执和原生历史不变。缺失定位信息保存原因；事务失败回滚，重复运行不重复写；重建受影响的附件索引和全文索引。合同：`ready-ref-r45-native.test.ts`。无 URL 书签沿用第 2 批决定：保留书签正本，删除不能导航的派生索引，不编造网页地址。
+
 - ReadyRef 日历附件（M1 第 3 批 / C1）：展示地址只由 `toReadyUri` 生成；普通事件引用事件 ID，重复实例保留系列 ID 与原始开始值，定时事件为毫秒、全天事件为日期。与日历既有 `id#秒数` 资源身份之间只经 calendar-row-codec 转换，不从当前开始时间猜测原始实例。缺少身份或实例类型时附件显示“无法定位”，不生成 URI、不进入资源授权。Main 通过现有实例读取入口重读标题、时间、地点，版本摘要包含完整实例身份与实例内容；URI 仅定位，不能授权，本轮权限仍冻结，历史回执摘要不改写。系统深链先解析 ReadyRef，再转换为日历实例身份；系统注册仍只接收 `ready-next:`。聊天附件、Markdown 日程链接走 `openReadyRef`，工作台资源保留完整实例 ID。行为合同：`calendar-ready-ref.test.ts`、`calendar-ready-ref-entrypoints.test.ts`、`calendar-ready-ref-native.test.ts`；原生用例加入 `verify:native`。
 - 迁移 141 只转换未关闭会话中可变的用户消息附件字段；正文、工具回执、助手终态与原生历史原值保留。旧附件必须通过真实事件/实例回读，无法定位时保存原地址与原因，重建附件索引和消息全文索引；迁移失败整体回滚，再次启动重做，已完成项不重复写。已关闭会话受不可变保护，不解除保护来改历史。 迁移 142 单独保存已关闭会话的展示引用，绑定消息 ID、附件序号、原附件 SHA-256 摘要和 ReadyRef（或无法定位原因）；原消息和回执不变，失败回滚、重跑不重复写，读取时重新核对原值摘要。`calendar:getAttachmentDisplayRefs` 按消息返回校验后的映射；聊天附件按消息与附件序号消费，仅替换展示，点击经 `openReadyRef` 定位原始实例。映射读取失败或无法定位时禁用点击并显示原因；切换消息后不得消费旧请求结果。已关闭 scope 的历史列表与消息读取禁令仍有效，当前没有可浏览它们的产品入口。
 
@@ -196,6 +200,11 @@
 - Agent 定时任务已从 Codex 生产版退役：Renderer 入口、IPC、启动调度与执行器均不可调用。升级时只会一次性停用 `scheduled_tasks` 中的旧计划、将未完成 occurrence 定态并保留历史审计；不得恢复一条绕过 Codex 用户入场合同的后台执行链。Skills Runtime 自有的定时机制是独立能力，不受此退役影响。
 
 ## 7. 文档与 Widget
+
+- Ready Next M3：资料库内的 Markdown 页面在页面视角、正文预览模式中显示 `PageHeader`；文件视角、源码模式、书本阅读及资料库外文件不显示。页面头部修改前通过现有保存入口保存未保存正文；失败不继续改属性。页面属性变化订阅页面服务通知，标签位置仍由对象服务的完成通知更新。
+- `PageDocumentEditor` 只组合页面头部和现有 `MarkdownEditor`。后者保留加载与保存职责，页面预览交给 `ReadyBlockEditor`，源码使用原 textarea；两边复用 T4 的 `TabBuffer` 与统一历史，不创建第二份正文或撤销栈。新建、页面侧栏、文件打开和 `openReadyRef` 均由现有标签对象绑定去重。
+- 草稿与未保存正文由 Main 草稿服务确认；关闭标签不丢弃。草稿“保存到…”、未命名标签拖入目录、页面移动/恢复均使用 `SaveToPicker`。拖拽只预选位置，确认并完成文件回读后才通知调用方保存成功；取消保留草稿。T3b 的简化文件夹对话框及拖拽自行挑文件名的路径已删除。画板文档卡选项在消费者完成前不由文档接线开放。
+- 文档书本模式与书房保持独立：前者只读当前文本/DOCX 编辑缓冲，按文档块、源码行和块内进度定位，Widget 为静态投影；后者读取导入书籍，以章节、书内位置、目录和标注组织阅读。文档书本模式不另存书籍正文，书房不接管普通文档缓冲；不新增重复入口或通用分页框架。M3 综合检查为 `npm run verify:ready-next-m3 -- --cli`，真实窗口流程为构建后 `npm run verify:ready-next-m3`。
 
 - ready-next C3 / D4：外部文档修改统一经 Main `applyDocumentOperation({ path, expectedVersion?, operation, origin })`，同一真实路径串行；版本为全文 SHA-256。共享 `document-operations` 负责 frontmatter 字段修改、标题下追加和精确区间替换，未修改字节保持原样。未打开与 clean 文档须原子发布、回读、索引确认；dirty 文档只在原缓冲上应用操作并保持 dirty，不写盘、不发布落盘证据。回执区分 `not_open / synced_clean / merged_dirty`，后者的版本是缓冲版本。
 - 写入同步采用有请求身份、截止时间与内容快照的 prepare / commit / rollback / release 确认；保存队列与外部同步共用路径锁，迟到请求、关闭或变更的标签页不得覆盖新内容。失败码为 `version_conflict / dirty_conflict / operation_failed / write_failed / readback_mismatch`；发布失败恢复磁盘、索引和参与方，回滚冲突明确失败并保留外部新内容。行为合同由 `document-operations.test.ts`、`document-write-service-native.test.ts` 验证。

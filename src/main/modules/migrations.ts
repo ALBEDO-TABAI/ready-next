@@ -1,3 +1,6 @@
+import { migrateChatReadyRefs } from './database/ready-ref-migration'
+import { migrateCanvasComposition } from './canvas-composition/schema'
+import { DOCUMENT_DATABASE_MIGRATION, migrateDocumentDatabase } from './document-database/schema'
 import { DOCUMENT_PAGES_MIGRATION, migrateDocumentPages } from './document-pages/schema'
 import { migrateCalendarAttachmentReadyRefs, migrateCalendarAttachmentDisplayRefs } from './calendar-engine/ready-ref-migration'
 import { migrateObjectLinks } from './search-engine/object-link-schema'
@@ -4477,7 +4480,43 @@ const migrations: Migration[] = [
   } },
   { name: '143_calendar_attachment_ready_refs', up: migrateCalendarAttachmentReadyRefs },
   { name: '144_calendar_attachment_display_refs', up: migrateCalendarAttachmentDisplayRefs },
-  { name: '145_fastcard_transfers', up: (db) => {
+  { name: '145_chat_ready_refs', up: migrateChatReadyRefs },
+  { name: '146_canvas_operations', up: (db) => {
+    db.exec(`ALTER TABLE object_links ADD COLUMN source_node_id TEXT;
+      CREATE INDEX object_links_source_node ON object_links(source_id,source_node_id);
+      CREATE TABLE canvas_operations (
+        id TEXT PRIMARY KEY, object_id TEXT NOT NULL, input_hash TEXT NOT NULL,
+        state TEXT NOT NULL CHECK(state IN ('prepared','awaiting-buffer','published','indexed','completed','conflict','recovery-required')),
+        plan_json TEXT NOT NULL, result_json TEXT, error TEXT
+      );
+      CREATE TABLE canvas_buffers (object_id TEXT PRIMARY KEY, snapshot_json TEXT NOT NULL);
+      CREATE TABLE canvas_imports (id TEXT PRIMARY KEY, input_hash TEXT NOT NULL, plan_json TEXT NOT NULL, result_json TEXT);`)
+  } },
+  { name: DOCUMENT_DATABASE_MIGRATION, up: migrateDocumentDatabase },
+  { name: '148_calendar_event_links', up: (db) => {
+    db.exec(`CREATE TABLE calendar_event_links (
+      id TEXT PRIMARY KEY, event_id TEXT NOT NULL REFERENCES calendar_events(id) ON DELETE CASCADE,
+      occurrence_start INTEGER, target_ref TEXT NOT NULL,
+      purpose TEXT NOT NULL CHECK(purpose IN ('related','meeting-note'))
+    );
+    CREATE UNIQUE INDEX calendar_link_target ON calendar_event_links(event_id,COALESCE(occurrence_start,''),target_ref,purpose);
+    CREATE UNIQUE INDEX calendar_meeting_note ON calendar_event_links(event_id,COALESCE(occurrence_start,'')) WHERE purpose='meeting-note';
+    CREATE TABLE calendar_meeting_note_intents (
+      event_key TEXT PRIMARY KEY, vault_root TEXT NOT NULL, draft_id TEXT NOT NULL REFERENCES document_drafts(draft_id),
+      destination_json TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('prepared','linked')),
+      receipt_json TEXT, CHECK((state='linked')=(receipt_json IS NOT NULL))
+    );`)
+  } },
+  { name: '149_library_reading_sessions', up: (db) => {
+    db.exec(`CREATE TABLE library_reading_sessions (
+      id TEXT PRIMARY KEY, object_id TEXT NOT NULL REFERENCES objects(id), book_id TEXT NOT NULL,
+      loc TEXT NOT NULL, workspace_root TEXT NOT NULL, started_at INTEGER NOT NULL,
+      ended_at INTEGER CHECK(ended_at IS NULL OR ended_at >= started_at)
+    );
+    CREATE INDEX library_reading_sessions_range ON library_reading_sessions(workspace_root,started_at,ended_at);`)
+  } },
+  { name: '150_canvas_compositions', up: migrateCanvasComposition },
+  { name: '151_fastcard_transfers', up: (db) => {
     db.exec(`CREATE TABLE fastcard_sequence (singleton INTEGER PRIMARY KEY CHECK(singleton=1), position INTEGER NOT NULL);
     INSERT INTO fastcard_sequence SELECT 1,COALESCE(MAX(position),0) FROM fastcard_items;
     CREATE TRIGGER fastcard_position_advance AFTER INSERT ON fastcard_items BEGIN

@@ -1,4 +1,7 @@
 // Week / day / N-day time grid. Geometry follows the measured reference.
+import { LayerDay } from '../layers/LayerDays';
+import { useLayerEntries } from '../layers/use-layer-entries';
+import { openReadyRef } from '../../../workbench/open-ready-ref';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronUp, Plus, X } from 'lucide-react';
 import { addSlot, removeSlot } from '../availability';
@@ -27,6 +30,7 @@ export function TimeGrid({active=true}:{active?:boolean}) {
   const tz = s.prefs.primaryTimeZone; const h24 = s.prefs.format24HourTime;
   const days = useMemo(() => periodDays(getState()), [s.prefs, s.anchor]); // eslint-disable-line
   const n = days.length;
+  const layers = useLayerEntries(days[0] ?? s.anchor, (days[n - 1] ?? s.anchor) + 1, tz, active);
   // one overscan day each side (clipped), so bars and lines continue past the visible edge like the reference
   const cols = useMemo(() => (n ? [days[0] - 1, ...days, days[n - 1] + 1] : []), [days, n]);
   const xOf = (d: DayNum) => gutter + (cols.indexOf(d) - 1) * cw;
@@ -36,7 +40,7 @@ export function TimeGrid({active=true}:{active?:boolean}) {
   const hourH = hourHeight(s.prefs.densityZoomLevel, available);
   useEffect(() => { if (size.h) { const m = minDensityLevel(available); if (m !== getState().minDensity) setState({ minDensity: m }); if (s.prefs.densityZoomLevel < m) setPrefs({ densityZoomLevel: m }); } }, [available, size.h]); // eslint-disable-line
 
-  const occs = useMemo(() => (n ? occurrencesIn(days[0] - 1, days[n - 1] + 2) : []), [days, s.events, s.calendars, s.prefs.showDeclined]); // eslint-disable-line
+  const occs = useMemo(() => (n ? occurrencesIn(days[0] - 1, days[n - 1] + 2) : []), [days, s.events, s.calendars, s.prefs.showDeclined, s.prefs.layers.events, s.prefs.primaryTimeZone]); // eslint-disable-line
   const spans = useMemo(() => occs.filter((o) => o.allDay || o.isMultiDay), [occs]);
   const timed = useMemo(() => occs.filter((o) => !o.allDay && !o.isMultiDay), [occs]);
   const dayIdx = (d: DayNum) => days.indexOf(d);
@@ -237,10 +241,14 @@ export function TimeGrid({active=true}:{active?:boolean}) {
         </div>
         {days.map((d) => {
           const isToday = d === s.today; const { d: dd } = ymd(d);
-          return <div key={d} className={`colhead${isToday ? ' today' : ''}`} style={{ width: cw }} onClick={() => { if (n > 1) { setState({ anchor: d }); setPrefs({ daysPerPeriod: 1 }); } }}>
+          return <div key={d} className={`colhead${isToday ? ' today' : ''}`} style={{ width: cw }} onClick={() => { if (n > 1) { void openReadyRef({ kind: 'day', date: isoDate(d) }, 'calendar').then(() => setPrefs({ daysPerPeriod: 1 })).catch(error => setState({ error: String(error) })); } }}>
             {cw >= 50 ? <>{wdShort(weekday(d))} <span className="num tnum">{dd}</span></> : <span className="num tnum">{dd}</span>}
           </div>;
         })}
+      </div>
+      {layers.error && <div role="alert">{layers.error}</div>}
+      <div style={{ display: 'flex', paddingLeft: gutter, minHeight: 48 }}>
+        {days.map(day => <div key={day} style={{ width: cw, minWidth: 0 }}><LayerDay date={isoDate(day)} entries={layers.entries} enabled={s.prefs.layers} move={layers.move} /></div>)}
       </div>
       <div className="allday" style={{ height: adH }} onPointerDown={onAdDown} onContextMenu={(e) => { e.preventDefault(); openMenu({ kind: 'grid', x: e.clientX, y: e.clientY, data: { day: adPoint(e), allDay: true } }); }}>
         <div className="allday-gutter" style={{ width: gutter }} onPointerDown={(e) => e.stopPropagation()}>

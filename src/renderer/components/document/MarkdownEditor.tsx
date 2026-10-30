@@ -1,3 +1,6 @@
+import { textAreaContent, textAreaOffset } from '../../modules/document/block-editor/text-edit'
+import { useSourceHistory } from '../../modules/document/block-editor/use-source-history'
+import { parseDocumentBlocks } from '../../../shared/document-blocks'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useDocTabs, type DocTab } from '../../stores/useDocTabs'
 import EditorContextMenu from './EditorContextMenu'
@@ -99,7 +102,7 @@ const getFileExt = (path: string | null): string => {
 interface MarkdownEditorProps {
   tab: DocTab
   viewMode?: 'edit' | 'preview'
-  /** Preview-edit mode (滑块下沉态): the preview allows in-place content edits. */
+  /** Page view edits the shared tab buffer; read-only export keeps this off. */
   previewEditable?: boolean
   previewFocusWidgetTitle?: string | null
   onVisibleLineChange?: (line: number | null) => void
@@ -245,6 +248,7 @@ export default function MarkdownEditor({
   const [isLoading, setIsLoading] = useState(!!tab.path)
   const [saveState, setSaveState] = useState<SaveState>('idle')
   const [saveError, setSaveError] = useState<string | null>(null)
+  const sourceHistory = useSourceHistory(tab.id, message => { setSaveError(message); setSaveState('error') })
   const [contentReady, setContentReady] = useState(!tab.path || !!tab.content)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [widgetStates, setWidgetStates] = useState<Record<string, DocumentWidgetPersistedState>>(() => (
@@ -279,7 +283,8 @@ export default function MarkdownEditor({
   const [selectionAnchor, setSelectionAnchor] = useState<{ x: number; y: number } | null>(null)
 
   const currentExt = useMemo(() => getFileExt(tab.path), [tab.path])
-  const documentScrollKey = useMemo(() => tab.path || tab.id, [tab.id, tab.path])
+  // The object id comes back with the tab at startup, before path-to-object lookups are known.
+  const documentScrollKey = useMemo(() => tab.objectId || tab.path || tab.id, [tab.id, tab.objectId, tab.path])
   const activeRevealTarget = useMemo(() => {
     if (!tab.path || !pendingReveal || pendingReveal.path !== tab.path) return null
     return pendingReveal
@@ -417,6 +422,7 @@ export default function MarkdownEditor({
   const saveCurrentTab = useCallback(async () => {
     if (saveInFlightRef.current) return
     const api = window.electronAPI?.document
+    try { sourceHistory.buffer.flush() } catch (error) { setSaveState('error'); setSaveError(String(error)); return }
     const currentState = useDocTabs.getState()
     const currentTab = currentState.tabs.find((item) => item.id === tab.id)
     if (!api || !currentTab) return
@@ -446,7 +452,7 @@ export default function MarkdownEditor({
     } finally {
       saveInFlightRef.current = false
     }
-  }, [tab.id])
+  }, [tab.id, sourceHistory.buffer])
 
   useEffect(
     () => registerDocumentSaveHandler(
@@ -466,14 +472,14 @@ export default function MarkdownEditor({
 
   const handleRawEditorBeforeInput = useCallback((e: React.FormEvent<HTMLTextAreaElement>) => {
     rawEditRangeRef.current = {
-      start: e.currentTarget.selectionStart,
-      end: e.currentTarget.selectionEnd,
+      start: textAreaOffset(tabContentRef.current, e.currentTarget.selectionStart),
+      end: textAreaOffset(tabContentRef.current, e.currentTarget.selectionEnd),
     }
   }, [])
 
   const handleRawEditorChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const previousContent = tabContentRef.current
-    const nextContent = e.target.value
+    const nextContent = textAreaContent(previousContent, e.target.value)
     const editRange = rawEditRangeRef.current
     rawEditRangeRef.current = null
     if (editRange) {
@@ -494,9 +500,9 @@ export default function MarkdownEditor({
       }
     }
     tabContentRef.current = nextContent
-    updateTabContent(tab.id, nextContent)
+    sourceHistory.change(nextContent, textAreaOffset(nextContent, e.target.selectionStart))
     setSaveState('idle')
-  }, [tab.id, updateTabContent])
+  }, [sourceHistory])
 
   const emitVisibleLine = useCallback((line: number | null) => {
     if (!onVisibleLineChange) return
@@ -575,7 +581,7 @@ export default function MarkdownEditor({
 
   const handleToolbarChange = useCallback(
     (nextContent: string, nextSelection: SelectionRange) => {
-      replaceEditorContent(nextContent)
+      replaceEditorContent(textAreaContent(tabContentRef.current, nextContent))
       setSaveState('idle')
       // After applying a toolbar edit, the mouse anchor is no longer
       // meaningful — fall back to caret-derived placement so the bar
@@ -788,26 +794,25 @@ export default function MarkdownEditor({
   }, [tab.path])
 
   const handleWidgetStateChange = useCallback((widgetTitle: string, widgetCode: string, widgetState: DocumentWidgetPersistedState) => {
-    const nextWidgetStates = {
-      ...widgetStatesRef.current,
-      [getWidgetPersistenceKey(widgetTitle, widgetCode)]: widgetState,
+    const key = getWidgetPersistenceKey(widgetTitle, widgetCode)
+    const baseContent = sourceHistory.buffer.snapshot.content
+    let nextContent = baseContent
+    for (const block of parseDocumentBlocks(baseContent).blocks.filter(block => block.type === 'widget').reverse()) {
+      const widget = collectDocumentWidgets(block.raw)[0]
+      if (!widget || getWidgetPersistenceKey(widget.title, widget.widgetCode) !== key) continue
+      const previous = widget.widgetState ?? { controls: [], activeTargets: [] }
+      if (JSON.stringify(previous) === JSON.stringify(widgetState)) continue
+      const { start, end, raw } = block
+      const updated = textAreaContent(raw, mergeWidgetStateMapIntoContent(raw, { [key]: widgetState }))
+      nextContent = nextContent.slice(0, start) + updated + nextContent.slice(end)
     }
+    if (nextContent === baseContent) return
+    const nextWidgetStates = { ...widgetStatesRef.current, [key]: widgetState }
     widgetStatesRef.current = nextWidgetStates
     setWidgetStates(nextWidgetStates)
-    const baseContent = tabContentRef.current
-    const nextContent = mergeWidgetStateMapIntoContent(baseContent, nextWidgetStates)
-    if (nextContent !== baseContent) {
-      replaceEditorContent(nextContent)
-    }
-    setSaveState('idle')
-  }, [replaceEditorContent])
-
-  // Preview-edit writes land on the same tab-content channel as the source
-  // textarea: dirty state + Cmd+S save semantics stay identical.
-  const handlePreviewContentEdit = useCallback((nextContent: string) => {
     replaceEditorContent(nextContent)
     setSaveState('idle')
-  }, [replaceEditorContent])
+  }, [replaceEditorContent, sourceHistory.buffer])
 
   const handleWidgetEditRequest = useCallback((widget: { id?: string; title?: string; widgetCode: string }) => {
     const current = collectDocumentWidgets(tabContentRef.current).find((record) => (
@@ -1015,6 +1020,9 @@ export default function MarkdownEditor({
                       ref={rawEditorRef}
                       value={tab.content}
                       onBeforeInput={handleRawEditorBeforeInput}
+                      onKeyDown={sourceHistory.onKeyDown}
+                      onCompositionStart={sourceHistory.onCompositionStart}
+                      onCompositionEnd={sourceHistory.onCompositionEnd}
                       onChange={handleRawEditorChange}
                       onMouseUp={handleEditorMouseUp}
                       onKeyUp={handleEditorKeyUp}
@@ -1064,8 +1072,7 @@ export default function MarkdownEditor({
                     content={tab.content}
                     notePath={tab.path}
                     focusWidgetTitle={previewFocusWidgetTitle}
-                    editable={previewEditable && !blockingLoadError}
-                    onApplyContentEdit={handlePreviewContentEdit}
+                    editorTabId={previewEditable && !blockingLoadError ? tab.id : undefined}
                     onWidgetRename={handleWidgetRename}
                     onWidgetQuote={handleWidgetQuoteToAgent}
                     onWidgetExport={handleWidgetExport}
@@ -1097,7 +1104,7 @@ export default function MarkdownEditor({
       {viewMode === 'edit' && selectionRange && (
         <MarkdownSelectionToolbar
           textareaRef={rawEditorRef}
-          content={tab.content}
+          content={tab.content.replace(/\r\n?/g, '\n')}
           selectionRange={selectionRange}
           anchor={selectionAnchor}
           onChange={handleToolbarChange}

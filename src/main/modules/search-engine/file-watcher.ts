@@ -18,7 +18,7 @@
  *     indexer's `loadFile` already short-circuits on those, so re-checking
  *     would just be duplicated work. We let chokidar fire raw add/change and
  *     let the indexer reject. Worst case: a tiny burst of "skipped" events.
- *   - Each file path is debounced 1s — VS Code / IntelliJ tend to write the
+ *   - Each file path is debounced 100ms — VS Code / IntelliJ tend to write the
  *     same file 3-5 times in 200ms (atomic save dance). We collapse those.
  *
  * The module is structured for testability: `createFileWatcher` accepts an
@@ -67,7 +67,7 @@ export interface FileWatcherOptions {
   onChange: FileWatcherCallback
   /** Optional abort signal — closes the watcher cleanly when aborted. */
   signal?: AbortSignal
-  /** Debounce window per file in ms. Default 1000. Tests pass smaller. */
+  /** Debounce window per file in ms. Default 100. Tests pass smaller. */
   debounceMs?: number
   /** Override chokidar.watch — for unit tests. */
   chokidarFactory?: ChokidarFactory
@@ -273,7 +273,7 @@ export async function createFileWatcher(
     ?? (process.platform === 'darwin'
       ? ((p) => createDarwinRecursiveWatcher(Array.isArray(p) ? p[0] : p))
       : ((p, opts) => chokidar.watch(p, opts) as unknown as ChokidarLike))
-  const debounceMs = options.debounceMs ?? 1000
+  const debounceMs = options.debounceMs ?? 100
 
   let watcher: ChokidarLike
   try {

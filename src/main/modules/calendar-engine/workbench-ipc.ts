@@ -1,3 +1,4 @@
+import { createCalendarMeetingNotesRuntime } from './meeting-notes-runtime'
 import { prepareStandaloneImport, applyStandaloneImport } from './standalone-import'
 import { readCalendarAttachmentDisplayRefs } from './ready-ref-migration'
 import { calendarErrorMessage } from './calendar-error'
@@ -11,11 +12,13 @@ import type { Calendar } from '../../../shared/calendar/model'
 
 export function setupCalendarWorkbenchIPC(): void {
   const store = () => getDatabase().calendar
+  const createMeetingNote = createCalendarMeetingNotesRuntime()
   const receipt = <Args extends unknown[], T>(fn:(...args:Args)=>T) => async (_event:unknown,...args:Args)=>{
     try {return {success:true,mock:false,data:await fn(...args)}}
     catch(error){return {success:false,mock:false,error:calendarErrorMessage(error)}}
   }
   ipcMain.handle('calendar:revealEvent',receipt((id:string)=>{if(!store().getCalendarEventReference(id))throw new Error('日程已不存在');requestCalendarNavigation({kind:'event',eventId:id});return true}))
+  ipcMain.handle('calendar:revealDay',receipt((date:unknown)=>{if(typeof date!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(date)||Number.isNaN(Date.parse(`${date}T00:00:00Z`)))throw new Error('日期无效');requestCalendarNavigation({kind:'day',date});return true}))
   ipcMain.handle('calendar:getAttachmentDisplayRefs',receipt((messageIds:unknown)=>{
     if(!Array.isArray(messageIds)||messageIds.some(id=>typeof id!=='string'||!id.trim()||id!==id.trim()))throw new Error('消息 ID 列表无效')
     const db=getDatabase().getRawDb()
@@ -24,6 +27,8 @@ export function setupCalendarWorkbenchIPC(): void {
   }))
   ipcMain.handle('calendar:prepareStandaloneImport',receipt(prepareStandaloneImport))
   ipcMain.handle('calendar:applyStandaloneImport',receipt(applyStandaloneImport))
+  ipcMain.handle('calendar:createMeetingNote',receipt(createMeetingNote.create))
+  ipcMain.handle('calendar:pendingMeetingNote',receipt(createMeetingNote.pending))
   ipcMain.handle('calendar:snapshot',receipt(()=>store().snapshot()))
   ipcMain.handle('calendar:mutate',receipt((command:CalendarCommand,versions:Record<string,number>)=>store().mutate(command,versions)))
   ipcMain.handle('calendar:restore',receipt((delta:CalendarDelta,versions:Record<string,number>)=>store().restore(delta,versions)))

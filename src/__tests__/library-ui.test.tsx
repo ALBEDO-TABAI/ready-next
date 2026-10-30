@@ -57,6 +57,13 @@ test('shelf renders, sorts, scopes keys, opens a real text reader and switches t
     getPosition: async () => ({ success: true, data: null }), setPosition: async p => { saved++; return { success: true, data: p } },
     listBookmarks: async () => ({ success: true, data: [] }), setBookmarks: async p => ({ success: true, data: p.bookmarks }),
   }
+  // The reader records reading footprints for the calendar (M6-B) while a book is open.
+  const sessions: unknown[] = []
+  const calendarLayers = {
+    beginReading: async (input: unknown) => { sessions.push(input); return { ok: true, value: undefined } },
+    endReading: async () => ({ ok: true, value: undefined }),
+  }
+  Object.assign(dom.window, { electronAPI: { calendarLayers } })
   const { createRoot } = await import('react-dom/client')
   const root = createRoot(dom.window.document.getElementById('root')!)
   try {
@@ -82,6 +89,7 @@ test('shelf renders, sorts, scopes keys, opens a real text reader and switches t
     await click('翻看封面'); await click('开始阅读')
     await act(async () => { await new Promise(r => setTimeout(r, 30)) })
     assert.match(d.body.textContent || '', /真正的书籍内容|走过山海/)
+    assert.ok(sessions.length > 0, 'opening a book starts a reading session')
     assert.equal(d.querySelector('[aria-label="阅读器"]')?.getAttribute('data-layout'), 'spread')
     width = 500
     await act(async () => { observers.forEach(cb => cb()); await new Promise(r => setTimeout(r, 150)) })
@@ -102,7 +110,7 @@ test('shelf renders, sorts, scopes keys, opens a real text reader and switches t
     assert.equal(d.querySelector('[aria-label="阅读器"]')?.getAttribute('data-layout'), 'spread')
     // Exercise Ready's real global Save dispatch with the actual system surface mounted.
     let fileWrites = 0
-    Object.assign(dom.window, { electronAPI: { library: api, document: {
+    Object.assign(dom.window, { electronAPI: { library: api, calendarLayers, document: {
       writeFile: async () => { fileWrites++; throw new Error('system tab attempted save') },
       saveFileAs: async () => { fileWrites++; throw new Error('system tab attempted save as') },
     } } })

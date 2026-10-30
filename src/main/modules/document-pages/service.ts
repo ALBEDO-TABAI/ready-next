@@ -1,21 +1,24 @@
+import { CanvasService } from '../board-engine/canvas-service'
+import { canvasPageMoveIds, repairCanvasPageMoves } from '../board-engine/page-moves'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, extname, join } from 'node:path'
 import { z } from 'zod'
 import { PageOperationSchema, PagePropertiesSchema, type PageOperation, type PageReceipt, type PageChange, type PageRoot, type PageUserState, type PageProperties, type PageOperationRecord, type PageTrashEntry } from '../../../shared/document-pages'
 import { readDocumentSource, setFrontmatterFields } from '../../../shared/document-operations'
 import { DocumentDraftService } from '../document-drafts/service'
 import { checkedPath, collision, ensureDirectory, existsIgnoringCase, filename, vaultRoot } from '../document-drafts/files'
-import { commitDocumentOperation, documentVersion, getDocumentWriteDependencies, publishDocumentContent, saveUserDocument } from '../document-engine/document-write-service'
+import { commitDocumentOperation, documentVersion, documentWriteError, getDocumentWriteDependencies, publishDocumentContent, saveUserDocument } from '../document-engine/document-write-service'
 import { ObjectRegistry, isInside, objectTransaction } from '../object-service/registry'
 import { ObjectMutations, type ObjectMoveGroup } from '../object-service/mutations'
 import { publishObjectMoves } from '../object-service/events'
 import { repairObjectLinks } from '../object-service/link-repair'
 import { readPageTree } from './tree'
 
-interface Dependencies { index(path: string): Promise<void>; afterMove?(index: number): void | Promise<void> }
-type Intent = { kind: 'create'; draftId: string; revision: number } | { kind: 'group'; title: string; group: ObjectMoveGroup; parentObjectId: string | null; originalPath: string; trashId?: string }
+interface Dependencies { canvases?: CanvasService; index(path: string): Promise<void>; afterMove?(index: number): void | Promise<void> }
+type Intent = { kind: 'create'; draftId: string; revision: number } | { kind: 'group'; title: string; group: ObjectMoveGroup; parentObjectId: string | null; originalPath: string; trashId?: string; canvasPathMoves?: ObjectMoveGroup['moves'] }
   | { kind: 'delete'; trashId: string; directory: string; objectIds: string[] }
+type VersionedPageOperation = z.output<typeof PageOperationSchema> & { expectedVersion?: string }
 interface RecordRow { id: string; request_json: string; intent_json: string; state: PageOperationRecord['state']; receipt_json: string | null; error: string | null }
 
 export class DocumentPageService {
@@ -41,6 +44,7 @@ export class DocumentPageService {
     }, parent => this.registry.db.prepare('SELECT object_id FROM document_page_order WHERE parent_id=? ORDER BY position').all<{object_id:string}>(parent).map(row => row.object_id))
   }
   async save(input: { path: string; content: string; expectedVersion: string }) {
+    if (extname(input.path).toLowerCase() === '.canvas') throw new Error('Canvas writes require a canvas handle')
     const receipt = await saveUserDocument(input)
     const row = this.registry.register(receipt.path)
     this.notify({ operationId: 'save', objectId: row.id, revision: row.revision })
@@ -67,6 +71,7 @@ export class DocumentPageService {
     // Title changes own a persistent rename operation; the property endpoint cannot bypass it.
     if ('title' in fields || remove.includes('title')) throw new Error('Use the rename operation to change the title')
     const row = this.object(id), dependencies = getDocumentWriteDependencies()
+    if (row.kind !== 'markdown') throw new Error('Properties require a Markdown page')
     if (!row.current_path || !dependencies) throw new Error('Document writer unavailable')
     if (fields.ready_page) {
       const original = readDocumentSource(readFileSync(row.current_path,'utf8')).frontmatter.ready_page
@@ -85,7 +90,7 @@ export class DocumentPageService {
     if (new Set(ids).size !== ids.length) throw new Error('Duplicate ordering entry')
     const parent = this.object(parentId)
     if (!parent.current_path) throw new Error('Parent is unavailable')
-    const directory = parent.kind === 'markdown' ? parent.current_path.slice(0, -3) : parent.current_path
+    const directory = ['markdown', 'canvas'].includes(parent.kind) ? parent.current_path.slice(0, -extname(parent.current_path).length) : parent.current_path
     for (const id of ids) { const row = this.object(id); if (!row.current_path || dirname(row.current_path) !== directory) throw new Error('Ordering entry is not a child') }
     objectTransaction(this.registry.db, () => {
       this.registry.db.prepare('DELETE FROM document_page_order WHERE parent_id=?').run(parentId)
@@ -124,12 +129,12 @@ export class DocumentPageService {
   private parent(root: string, input: { parentObjectId?: string; parentPath?: string }): { path: string; id: string } {
     if (!!input.parentObjectId === !!input.parentPath) throw new Error('Specify exactly one parent')
     const parent = input.parentObjectId ? this.object(input.parentObjectId) : this.registry.register(checkedPath(root,input.parentPath!))
-    if (!parent.current_path || !['markdown','directory'].includes(parent.kind)) throw new Error('Parent is unavailable')
+    if (!parent.current_path || !['markdown','canvas','directory'].includes(parent.kind)) throw new Error('Parent is unavailable')
     checkedPath(root,parent.current_path)
     if (parent.current_path.split(/[\\/]/).includes('.ready')) throw new Error('Cannot create pages inside internal metadata')
-    return { path: parent.kind === 'markdown' ? parent.current_path.slice(0,-3) : parent.current_path, id: parent.id }
+    return { path: ['markdown', 'canvas'].includes(parent.kind) ? parent.current_path.slice(0,-extname(parent.current_path).length) : parent.current_path, id: parent.id }
   }
-  private prepare(request: z.output<typeof PageOperationSchema>): Intent {
+  private prepare(request: VersionedPageOperation): Intent {
     const root = vaultRoot(request.root)
     if (root !== request.root) throw new Error('Use the canonical root')
     this.registry.db.prepare('INSERT INTO workspaces(root) VALUES (?) ON CONFLICT(root) DO NOTHING').run(root)
@@ -157,10 +162,10 @@ export class DocumentPageService {
         if (current.status !== 'trashed') throw new Error('Trash member changed')
         return { ...current, current_path: current.last_known_path }
       })
-      return { kind: 'group', title: previous.title, group: { id: request.operationId, root, moves, objects, status: 'present' }, originalPath: moves[0].target, parentObjectId: destination.id, trashId: trash.operationId }
+      return { kind: 'group', title: previous.title, group: { id: request.operationId, root, moves, objects, status: 'present' }, originalPath: moves[0].target, parentObjectId: destination.id, trashId: trash.operationId, canvasPathMoves: previous.group.moves.map((move, index) => ({ source: move.source, target: moves[index].target })) }
     }
-    if (object.kind !== 'markdown' || !object.current_path) throw new Error('Page is not present')
-    const path = checkedPath(root,object.current_path), base = path.slice(0,-3), name = basename(base)
+    if (!['markdown', 'canvas'].includes(object.kind) || !object.current_path) throw new Error('Page is not present')
+    const path = checkedPath(root,object.current_path), base = path.slice(0,-extname(path).length), name = basename(base)
     // Reuse the read model's ambiguity decision, so operations never guess a partner.
     const tree = this.tree({ path: dirname(path), kind: 'external' })
     if (tree.children.find(node => node.path === path)?.ambiguity) throw new Error('ambiguous page: use file view')
@@ -182,18 +187,23 @@ export class DocumentPageService {
       if (drafts.some(d => d.content_hash !== row.content_hash)) throw new Error('dirty_conflict: save draft before recycling page')
     }
     const original = readFileSync(path,'utf8')
-    const title = readDocumentSource(original).frontmatter.title
+    if (request.expectedVersion !== undefined && documentVersion(original) !== request.expectedVersion) throw documentWriteError('version_conflict', 'version_conflict: page changed before rename or move')
+    const title = object.kind === 'canvas' ? JSON.parse(original).ready?.title : readDocumentSource(original).frontmatter.title
     return { kind: 'group', title: request.type === 'rename' ? request.title : typeof title === 'string' ? title : name, group: { id: request.operationId, root, moves, objects, status: request.type === 'trash' ? 'trashed' : 'present',
-      ...(request.type === 'rename' ? { patch: { path: targetBase+'.md', original, content: setFrontmatterFields(original,{set:{title:request.title}}) } } : {}) },
+      ...(request.type === 'rename' && object.kind === 'markdown' ? { patch: { path: targetBase+'.md', original, content: setFrontmatterFields(original,{set:{title:request.title}}) } } : {}) },
       parentObjectId: destination.id, originalPath: path }
   }
-  operate(input: PageOperation): Promise<PageReceipt> {
-    const request = PageOperationSchema.parse(input)
+  operate(input: PageOperation, expectedVersion?: string): Promise<PageReceipt> {
+    const request: VersionedPageOperation = PageOperationSchema.parse(input)
+    if (expectedVersion !== undefined) {
+      if (request.type !== 'rename' && request.type !== 'move') throw new Error('Expected version requires rename or move')
+      request.expectedVersion = z.string().min(1).parse(expectedVersion)
+    }
     const result = this.tail.then(() => this.execute(request))
     this.tail = result.catch(() => undefined)
     return result
   }
-  private async execute(request: z.output<typeof PageOperationSchema>): Promise<PageReceipt> {
+  private async execute(request: VersionedPageOperation): Promise<PageReceipt> {
     const db = this.registry.db, prior = this.record(request.operationId)
     if (prior && prior.request_json !== JSON.stringify(request)) throw new Error('operation_conflict: operation id reused')
     if (prior?.receipt_json) return JSON.parse(prior.receipt_json)
@@ -220,13 +230,18 @@ export class DocumentPageService {
         objectId = request.objectId
       } else {
         if (request.type === 'create') throw new Error('Invalid move intent')
-        await this.mutations.moveGroup(intent.group,this.dependencies.afterMove,async () => {
+        const canvases = this.dependencies.canvases ?? new CanvasService(this.registry, request.root)
+        const pathGroup = { ...intent.group, moves: intent.canvasPathMoves ?? intent.group.moves }
+        const canvasIds = canvasPageMoveIds(canvases, pathGroup)
+        await canvases.withPageMove(canvasIds, request.operationId, () => this.mutations.moveGroup(intent.group,this.dependencies.afterMove,async () => {
           if (request.type === 'trash') {
             const directory = join(request.root,'.ready','trash',request.operationId)
             ensureDirectory(request.root,directory)
             await publishDocumentContent(join(directory,'manifest.json'),JSON.stringify({ operationId: request.operationId, objectId: request.objectId, parentObjectId: intent.parentObjectId, originalPath: intent.originalPath, ...intent.group },null,2))
           } else for (const move of intent.group.moves) ensureDirectory(request.root,dirname(move.target))
-        })
+        }))
+        await repairCanvasPageMoves(canvases, pathGroup, request.type === 'rename' ? { objectId: request.objectId, value: request.title } : undefined)
+        for (const id of canvasIds) canvases.refreshRelations(id)
         objectId = request.objectId
         if (intent.group.status === 'present') {
           for (const row of intent.group.objects) { const current = this.registry.get(row.id); if (current?.kind === 'markdown' && current.current_path) await this.dependencies.index(current.current_path) }
@@ -250,7 +265,10 @@ export class DocumentPageService {
     for (const row of this.registry.db.prepare("SELECT * FROM document_page_operations WHERE state IN ('prepared','recovery_required')").all<RecordRow>()) {
       const group = this.registry.db.prepare('SELECT state FROM object_move_groups WHERE id=?').get<{state:string}>(row.id)
       if (group?.state === 'rolled_back') this.registry.db.prepare("UPDATE document_page_operations SET state='rolled_back' WHERE id=?").run(row.id)
-      else await this.operate(JSON.parse(row.request_json))
+      else {
+        const { expectedVersion, ...request } = JSON.parse(row.request_json)
+        await this.operate(request, expectedVersion)
+      }
     }
   }
 }

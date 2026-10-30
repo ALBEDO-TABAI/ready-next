@@ -1,3 +1,10 @@
+import { registerCalendarLayersIPC } from './modules/calendar-layers/ipc'
+import { createCalendarLayersResolver } from './modules/calendar-layers/runtime'
+import { createDocumentDatabaseResolver } from './modules/document-database/runtime'
+import { registerDocumentDatabaseIPC } from './modules/document-database/ipc'
+import { VaultService } from './modules/settings-engine/vault-service'
+import { AppSettingsRepository } from './modules/repositories/app-settings-repository'
+import { getDocumentWriteDependencies } from './modules/document-engine/document-write-service'
 import { setupDocumentPagesIPC } from './modules/document-pages/runtime'
 import { setupDocumentDraftIPC } from './modules/document-drafts/runtime'
 import { captureCalendarOpen } from './calendar-open-intents'
@@ -677,7 +684,7 @@ function setupGlobalIPC(): void {
   setupSearchIPC()
   setupLibraryIPC()
   setupDocumentDraftIPC()
-  setupDocumentPagesIPC()
+  const documentPages = setupDocumentPagesIPC()
   setupFileEmergenceIPC()
   setupRendererStateFlushIPC()
   setupTagForgeIPC()
@@ -787,6 +794,12 @@ function setupGlobalIPC(): void {
   setupCalendarIPC(CALENDAR_USE_MOCK, {
     syncScheduler: calendarSyncScheduler ?? undefined,
   })
+  const documentDatabase = createDocumentDatabaseResolver({
+    vault: new VaultService(new AppSettingsRepository(), { home: app.getPath('home'), userData: app.getPath('userData'), isPackaged: app.isPackaged }),
+    pages: documentPages.service, ready: documentPages.ready, writer: getDocumentWriteDependencies,
+  })
+  registerDocumentDatabaseIPC(ipcMain, documentDatabase)
+  registerCalendarLayersIPC(ipcMain, createCalendarLayersResolver({ pages: documentPages.service, writer: getDocumentWriteDependencies, database: documentDatabase }))
   chatGptOAuthService = setupSettingsIPC({
     onModelChanged: wakeRSSProcessing,
     onSettingChanged: (key) => {

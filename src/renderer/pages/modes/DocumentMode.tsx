@@ -1,5 +1,5 @@
 import { DraftBootNotice, DraftControls } from '../../modules/document/drafts/DraftControls'
-import { initializeDrafts, reportDraftError, useDraftUI } from '../../modules/document/drafts/runtime'
+import { initializeDrafts, reportDraftError, useDraftUI, watchDraftVault } from '../../modules/document/drafts/runtime'
 import { readingPositionKey } from '../../stores/objectPresentationState'
 import { registerReturnPosition } from '../../modules/workbench/reference-return'
 import { LibraryTab, OpenEpubInLibrary } from '../../modules/library/navigation'
@@ -9,6 +9,7 @@ import '../../modules/library/shelf.css'
 import '../../modules/library/reader.css'
 import '../../modules/library/reader/page.css'
 import '../../modules/library/library.css'
+import '../../modules/document/database/database.css'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, lazy, memo, Suspense } from 'react'
 import { FileText, Loader2 } from 'lucide-react'
 import { computeDesiredRoots, useWorkspace } from '../../stores/useWorkspace'
@@ -18,7 +19,7 @@ import {
   type DocTab,
   type DocumentPaneTarget,
 } from '../../stores/useDocTabs'
-import MarkdownEditor from '../../components/document/MarkdownEditor'
+import { PageDocumentEditor } from '../../modules/document/page-ui/PageDocumentEditor'
 import DocumentVerticalTabRail from '../../components/document/DocumentVerticalTabRail'
 import FilePreview from '../../components/document/FilePreview'
 import DraggableModeSwitch from '../../components/document/DraggableModeSwitch'
@@ -156,7 +157,7 @@ function SplitResizeHandle({
 }
 
 // --- Tab content router ---
-type DocumentEditorProps = RetainedDocumentEditorProps<DocTab>
+type DocumentEditorProps = RetainedDocumentEditorProps<DocTab> & { bookReading: boolean }
 
 const DocumentEditor = memo(function DocumentEditor({
   tab,
@@ -166,6 +167,8 @@ const DocumentEditor = memo(function DocumentEditor({
   onVisibleLineChange,
   onActivate,
   isFocused,
+  isSceneVisible,
+  bookReading,
 }: DocumentEditorProps) {
   const ext = useMemo(() => (tab.path ? getFileExtension(tab.path) : ''), [tab.path])
   const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico'].includes(ext)
@@ -200,7 +203,9 @@ const DocumentEditor = memo(function DocumentEditor({
 
   // Markdown / text / docx / default
   return (
-    <MarkdownEditor
+    <PageDocumentEditor
+      bookReading={bookReading}
+      isSceneVisible={isSceneVisible}
       tab={tab}
       viewMode={viewMode}
       previewEditable={previewEditable}
@@ -209,7 +214,7 @@ const DocumentEditor = memo(function DocumentEditor({
       onActivate={onActivate}
     />
   )
-}, areRetainedDocumentEditorPropsEqual)
+}, (previous, next) => previous.bookReading === next.bookReading && areRetainedDocumentEditorPropsEqual(previous, next))
 
 // --- DocumentMode main component ---
 interface DocumentModeProps {
@@ -243,9 +248,15 @@ export default function DocumentMode({
   } = useDocTabs.getState()
 
   const draftBoot = useDraftUI(state => state.boot)
-  useEffect(() => { void initializeDrafts().catch(reportDraftError) }, [])
+  useEffect(() => { void initializeDrafts().catch(reportDraftError); return watchDraftVault() }, [])
 
   const documentRootRef = useRef<HTMLDivElement>(null)
+  // Scroll restoration depends on the root being mounted; after a restart it can mount after the first restore ran.
+  const [documentRootElement, setDocumentRootElement] = useState<HTMLDivElement | null>(null)
+  const attachDocumentRoot = useCallback((element: HTMLDivElement | null) => {
+    documentRootRef.current = element
+    setDocumentRootElement(element)
+  }, [])
   const pendingScrollFlushesRef = useRef(new Set<() => void>())
   const splitContainerRef = useRef<HTMLDivElement>(null)
   const primarySplitPaneRef = useRef<HTMLDivElement>(null)
@@ -254,8 +265,6 @@ export default function DocumentMode({
   const liveDocumentSplitRatioRef = useRef(documentSplitRatio)
   const restoreDocumentLayoutFreezeRef = useRef<(() => void) | null>(null)
   const [editorMode, setEditorMode] = useState<'edit' | 'preview'>('preview')
-  // 预览下沉态（预览内编辑）：仅在 preview 模式下有效，切模式/切标签即复位。
-  const [previewEditActive, setPreviewEditActive] = useState(false)
   const [previewFocusWidgetTitle, setPreviewFocusWidgetTitle] = useState<string | null>(null)
   // 阅读模式是当前文档上的只读展示态；原编辑面继续保活。
   const [bookReadingActive, setBookReadingActive] = useState(false)
@@ -401,6 +410,8 @@ export default function DocumentMode({
   }, [activeTab, focusedPaneTabId, splitTab])
   const panelTargetLine = panelTargetTab ? visibleLineByTabId[panelTargetTab.id] ?? null : null
   const bookReadingEligible = panelTargetTab && panelTargetTab.kind !== 'library' ? isBookReadablePath(panelTargetTab.path) : false
+  // Document book mode reads the current buffer; the library owns imported books,
+  // chapter pagination and annotations. Neither opens an editor for the other.
   const bookReadingVisible = isBookReadingSessionVisible(
     bookReadingActive,
     bookReadingTabId,
@@ -630,13 +641,13 @@ export default function DocumentMode({
     return () => cleanups.forEach((cleanup) => cleanup())
   }, [activeTabId, bookReadingVisible, editorMode, isActive, scrollSnapshots, splitTabId, tabIdByScrollKey])
 
-  const restoreVisibleDocumentScrollPositions = useCallback(() => {
+  const restoreDocumentScrollScopes = useCallback((scopes: Iterable<HTMLElement>) => {
     const cleanups: Array<() => void> = []
-    documentRootRef.current?.querySelectorAll<HTMLElement>('[data-ready-document-scroll-key]').forEach((scope) => {
+    for (const scope of scopes) {
       const key = readingPositionKey(scope.dataset.readyDocumentScrollKey || '')
-      if (!key) return
+      if (!key) continue
       const snapshot = scrollSnapshots.get(key) ?? readDocumentReadingPositionMap().get(key)
-      if (!snapshot) return
+      if (!snapshot) continue
       const tabId = tabIdByScrollKey.get(key)
       const content = tabId
         ? useDocTabs.getState().tabs.find((tab) => tab.id === tabId)?.content || ''
@@ -644,14 +655,62 @@ export default function DocumentMode({
       findScrollCandidates(scope).forEach((element) => {
         cleanups.push(restoreElementScroll(element, snapshot, content))
       })
-    })
+    }
     return () => cleanups.forEach((cleanup) => cleanup())
   }, [scrollSnapshots, tabIdByScrollKey])
 
+  const restoreVisibleDocumentScrollPositions = useCallback(() => restoreDocumentScrollScopes(
+    documentRootRef.current?.querySelectorAll<HTMLElement>('[data-ready-document-scroll-key]') ?? [],
+  ), [restoreDocumentScrollScopes])
+
+  useEffect(() => {
+    const root = documentRootElement
+    if (!root || !isSceneVisible || bookReadingVisible || typeof MutationObserver !== 'function') return
+    // After a restart a tab binds its object first, and the preview can swap its scroller once content arrives, so the
+    // first restore may land on an element that is replaced. Until the reader acts (or a few seconds pass), any change
+    // inside a scope re-applies its saved position to the current elements.
+    const settling = new Map<HTMLElement, { until: number; cleanup: (() => void) | null; touched: boolean; stop: () => void }>()
+    const watch = (scope: HTMLElement) => {
+      if (settling.has(scope)) return settling.get(scope)!
+      const entry = { until: Date.now() + 5000, cleanup: null as (() => void) | null, touched: false, stop: () => {} }
+      const touch = () => { entry.touched = true }
+      for (const type of ['wheel', 'pointerdown', 'keydown', 'touchstart'] as const) scope.addEventListener(type, touch, { passive: true, capture: true })
+      entry.stop = () => { for (const type of ['wheel', 'pointerdown', 'keydown', 'touchstart'] as const) scope.removeEventListener(type, touch, { capture: true }) }
+      settling.set(scope, entry)
+      return entry
+    }
+    const reapply = (scope: HTMLElement) => {
+      const entry = watch(scope)
+      if (entry.touched || Date.now() > entry.until) return
+      entry.cleanup?.()
+      entry.cleanup = restoreDocumentScrollScopes([scope])
+    }
+    root.querySelectorAll<HTMLElement>('[data-ready-document-scroll-key]').forEach((scope) => { watch(scope) })
+    const observer = new MutationObserver((records) => {
+      const scopes = new Set<HTMLElement>()
+      for (const record of records) {
+        const target = record.target instanceof Element ? record.target : record.target.parentElement
+        const scope = target?.closest<HTMLElement>('[data-ready-document-scroll-key]')
+        if (scope) scopes.add(scope)
+        for (const node of Array.from(record.addedNodes)) {
+          if (!(node instanceof Element)) continue
+          if (node.matches('[data-ready-document-scroll-key]')) scopes.add(node as HTMLElement)
+          node.querySelectorAll<HTMLElement>('[data-ready-document-scroll-key]').forEach((inner) => scopes.add(inner))
+        }
+      }
+      scopes.forEach(reapply)
+    })
+    observer.observe(root, { childList: true, subtree: true })
+    return () => {
+      observer.disconnect()
+      settling.forEach((entry) => { entry.cleanup?.(); entry.stop() })
+    }
+  }, [bookReadingVisible, documentRootElement, isSceneVisible, restoreDocumentScrollScopes])
+
   useLayoutEffect(() => {
-    if (!isSceneVisible || bookReadingVisible) return
+    if (!isSceneVisible || bookReadingVisible || !documentRootElement) return
     return restoreVisibleDocumentScrollPositions()
-  }, [activeTabId, bookReadingVisible, editorMode, isSceneVisible, restoreVisibleDocumentScrollPositions, splitTabId])
+  }, [activeTabId, bookReadingVisible, documentRootElement, editorMode, isSceneVisible, restoreVisibleDocumentScrollPositions, splitTabId])
 
   useEffect(() => registerReturnPosition('document', () => {
     captureVisibleDocumentScrollPositions()
@@ -667,7 +726,6 @@ export default function DocumentMode({
   const handleEditorModeChange = useCallback((nextMode: 'edit' | 'preview') => {
     if (nextMode === editorMode) return
     captureVisibleDocumentScrollPositions()
-    setPreviewEditActive(false)
     setEditorMode(nextMode)
   }, [captureVisibleDocumentScrollPositions, editorMode])
 
@@ -675,19 +733,8 @@ export default function DocumentMode({
     if (!bookReadingVisible) return false
     setBookReadingActive(false)
     setBookReadingTabId(null)
-    setPreviewEditActive(false)
     return true
   }, [bookReadingVisible])
-
-  const handleTogglePreviewEdit = useCallback(() => {
-    setPreviewEditActive((value) => !value)
-  }, [])
-
-  // Preview-edit is a per-document deliberate action: leaving the document
-  // (or the preview mode) lifts the thumb back to plain preview.
-  useEffect(() => {
-    setPreviewEditActive(false)
-  }, [activeTabId])
 
   const handlePanelReveal = useCallback((lineStart: number, lineEnd?: number | null) => {
     if (!panelTargetTab?.path) return
@@ -919,7 +966,7 @@ export default function DocumentMode({
   if (draftBoot !== 'ready') return <DraftBootNotice />
 
   return (
-    <div className="workbench-mode-root" ref={documentRootRef}>
+    <div className="workbench-mode-root" ref={attachDocumentRoot}>
       <DraftControls />
       <div
         className="flex-1 min-h-0"
@@ -971,8 +1018,6 @@ export default function DocumentMode({
                 mode={editorMode}
                 onChange={handleEditorModeChange}
                 onModeIntent={handleEditorModeIntent}
-                previewEditActive={previewEditActive}
-                onTogglePreviewEdit={handleTogglePreviewEdit}
               />
             </div>}
           </div>
@@ -1028,9 +1073,10 @@ export default function DocumentMode({
                   {renderActiveEditor && (
                     <DocumentEditor
                       key={renderedActiveTab.id}
+                      bookReading={bookReadingVisible}
                       tab={renderedActiveTab}
                       viewMode={editorMode}
-                      previewEditable={editorMode === 'preview' && previewEditActive}
+                      previewEditable={editorMode === 'preview'}
                       previewFocusWidgetTitle={previewFocusWidgetTitle}
                       onVisibleLineChange={handlePrimaryVisibleLineChange}
                       onActivate={handlePrimaryActivate}
@@ -1054,9 +1100,10 @@ export default function DocumentMode({
                   {renderSplitEditor && (
                     <DocumentEditor
                       key={renderedSplitTab.id}
+                      bookReading={bookReadingVisible}
                       tab={renderedSplitTab}
                       viewMode={editorMode}
-                      previewEditable={editorMode === 'preview' && previewEditActive}
+                      previewEditable={editorMode === 'preview'}
                       previewFocusWidgetTitle={previewFocusWidgetTitle}
                       onVisibleLineChange={handleSplitVisibleLineChange}
                       onActivate={handleSplitActivate}
@@ -1074,9 +1121,10 @@ export default function DocumentMode({
               >
                 <DocumentEditor
                   key={renderedActiveTab.id}
+                  bookReading={bookReadingVisible}
                   tab={renderedActiveTab}
                   viewMode={editorMode}
-                  previewEditable={editorMode === 'preview' && previewEditActive}
+                  previewEditable={editorMode === 'preview'}
                   previewFocusWidgetTitle={previewFocusWidgetTitle}
                   onVisibleLineChange={handlePrimaryVisibleLineChange}
                   onActivate={handlePrimaryActivate}

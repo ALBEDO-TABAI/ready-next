@@ -3,7 +3,7 @@ import { recordDocumentPerformanceCounter } from '../../../shared/document-perfo
 import remarkGfm from 'remark-gfm'
 import type { Root } from 'mdast'
 import type { PluggableList, Plugin } from 'unified'
-import { buildStructuredNotePreview } from '../../components/document/note-preview-parser'
+import { buildStructuredNotePreview, normalizePreviewNoteText } from '../../components/document/note-preview-parser'
 import { buildPreviewBlockRenderKeys, buildPreviewBlockSourceLines } from './notePreviewBlockIdentity'
 
 function createRemarkPlugins(): PluggableList {
@@ -26,11 +26,12 @@ function createRemarkPlugins(): PluggableList {
 
 function buildModel(content: string, notePath?: string | null) {
   const preview = buildStructuredNotePreview(content, notePath)
+  const displaySource = normalizePreviewNoteText(content)
   return {
     content,
     preview,
-    blockRenderKeys: buildPreviewBlockRenderKeys(content, preview.blocks),
-    blockSourceLines: buildPreviewBlockSourceLines(content, preview.blocks),
+    blockRenderKeys: buildPreviewBlockRenderKeys(displaySource, preview.blocks),
+    blockSourceLines: buildPreviewBlockSourceLines(displaySource, preview.blocks),
     remarkPlugins: createRemarkPlugins(),
   }
 }

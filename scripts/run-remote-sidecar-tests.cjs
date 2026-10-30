@@ -1,10 +1,9 @@
 const { spawnSync } = require('node:child_process')
 const { join } = require('node:path')
-const { homedir } = require('node:os')
 
 const candidates = [
   process.env.READY_REMOTE_TEST_PYTHON,
-  join(homedir(), 'Library/Application Support/Ready/agent-sidecar-runtime/python/bin/python'),
+  // Never the daily Ready app folder: Ready Next development stays out of ~/Library/Application Support/Ready (C15).
   join(process.cwd(), 'build/release-skill-runtime/python/bin/python3'),
   'python3.12', 'python3.11', 'python3',
 ].filter(Boolean)

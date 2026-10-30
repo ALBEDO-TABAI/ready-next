@@ -44,7 +44,7 @@ export interface PreviewEmbed {
 /**
  * Char range of a block inside the *normalized* (CRLF→LF) full note text.
  * `null` means the block could not be mapped back to a unique source span —
- * preview-edit must treat such blocks as read-only.
+ * This is display bookkeeping only; editable ranges come from document-blocks.
  */
 export interface PreviewBlockSourceRange {
   start: number
@@ -1157,7 +1157,7 @@ function parseBodyBlocks(
   // slices of `body`, so a plain arithmetic cursor recovers their offsets.
   // Bare-widget subsegments inside a text segment are located with a forward
   // indexOf and verified; any mismatch marks mapping as broken from that point
-  // on (ranges become null → blocks degrade to read-only, never mis-edited).
+  // on (ranges become null → display anchors are omitted).
   const rangeState = { broken: baseOffset === null }
   let segmentCursor = 0
 
@@ -1400,8 +1400,7 @@ function parseBodyBlocks(
 
 /**
  * Preview block source ranges refer to offsets inside THIS normalization of
- * the note text. Preview-edit operations must run on the same normalization
- * before splicing ranges.
+ * the note text. These offsets are only for display anchors, never edits.
  */
 export function normalizePreviewNoteText(content: string): string {
   return normalizeLineEndings(content)

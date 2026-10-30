@@ -60,7 +60,7 @@ const RSS_TOOLS: RSSToolDef[] = [
     action: 'rss.readCatalog', intent: 'read_rss_catalog', executionKind: 'deterministic', params: zodObjectToParamList(RSS_SCHEMAS.rss_read_catalog) as ToolParam[] },
   { name: 'rss_read_analysis_report', description: '按任务 ID 分段读取已保存且可核验的分析报告；续读必须沿用 revision。不启动模型，不重新分析；旧报告归属不可核验时明确失败。',
     action: 'rss.readAnalysisReport', intent: 'read_rss_analysis_report', executionKind: 'deterministic', params: zodObjectToParamList(RSS_SCHEMAS.rss_read_analysis_report) as ToolParam[] },
-  { name: 'rss_read_excerpt', description: '读取绑定文章版本的段落或选区；范围原样沿用引用，续读不会越过选区。可用返回的 citationUrl 定位。',
+  { name: 'rss_read_excerpt', description: '读取绑定文章版本的段落或选区；范围原样沿用引用，续读不会越过选区。可用返回的 ReadyRef citationUrl 定位原文选区；导航地址不授予读取权限。',
     action: 'rss.readExcerpt', intent: 'read_rss_excerpt', executionKind: 'deterministic', params: zodObjectToParamList(RSS_SCHEMAS.rss_read_excerpt) as ToolParam[] },
   { name: 'rss_read_digests', description: '分页读取已保存日报或范围简报、原文依据与采集覆盖；仅查询，不生成、不重算、不标已读。',
     action: 'rss.readDigests', intent: 'read_rss_digests', executionKind: 'deterministic', params: zodObjectToParamList(RSS_SCHEMAS.rss_read_digests) as ToolParam[] },
@@ -250,7 +250,7 @@ export async function executeRSSTool(
         if (reference.kind === 'digest') {
           if (input.cursor !== undefined || !context.getDigests) throw new Error('rss_reference_wrong_cursor')
           return toStructuredResult(tool, '已读取引用绑定的刊物版本；使用 nextOffset 续读，引用来源通过 rss_read_digests 的 sources 视图读取。', {
-            ok: true, referenceId, data: context.getDigests().read({ ...reference.read, view: 'entries', offset: input.offset ?? reference.read.offset }),
+            ok: true, referenceId, citationUrl: rssCitationUrl({ kind: 'digest', read: { ...reference.read, offset: input.offset ?? reference.read.offset } }), data: context.getDigests().read({ ...reference.read, view: 'entries', offset: input.offset ?? reference.read.offset }),
           })
         }
         if (reference.kind === 'query') {

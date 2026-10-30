@@ -5,6 +5,7 @@ import type { LibraryHighlightContext, LibraryHighlightCreate, LibraryHighlightU
 import type { LibraryBook, LibraryBookPatch, LibraryBookmark, LibraryImportResult, LibraryReadingPosition, LibraryResult, LibraryState } from '../shared/library'
 import type { DocumentSyncRequest, DocumentSyncReply } from '../shared/document-operations'
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
+import { createBeforeQuitFlushChannel } from './before-quit-flush'
 import {
   BROWSER_VIEW_INTENT_CHANNEL,
   type BrowserViewIntent,
@@ -112,6 +113,13 @@ import {
   type ReadyMemoryStateChange,
 } from '../shared/ready-memory'
 
+const subscribeBeforeQuitFlush = createBeforeQuitFlushChannel({
+  listen: (listener) => {
+    ipcRenderer.on('app:flushBeforeQuit', listener)
+    return () => ipcRenderer.removeListener('app:flushBeforeQuit', listener)
+  },
+  answer: (requestId, outcome) => ipcRenderer.send('app:beforeQuitFlushed', requestId, outcome),
+})
 const readAgentRuntimeReady = async (): Promise<AgentRuntimeReadinessSnapshot> => (
   parseAgentRuntimeReadinessSnapshot(await ipcRenderer.invoke('agent:readRuntimeReady'))
 )
@@ -1003,9 +1011,12 @@ const calendarAPI = {
   prepareStandaloneImport: () => ipcRenderer.invoke('calendar:prepareStandaloneImport'),
   applyStandaloneImport: (ticket:string,skipExamples:boolean) => ipcRenderer.invoke('calendar:applyStandaloneImport',ticket,skipExamples),
   revealEvent: (id: string) => ipcRenderer.invoke('calendar:revealEvent', id),
+  revealDay: (date: string) => ipcRenderer.invoke('calendar:revealDay', date),
   peekNavigation: () => ipcRenderer.invoke('calendar:peekNavigation'),
   ackNavigation: (id: string) => ipcRenderer.invoke('calendar:ackNavigation', id),
   onNavigation: (handler: () => void) => { const listener = () => handler(); ipcRenderer.on('calendar:navigationPending', listener); return () => ipcRenderer.removeListener('calendar:navigationPending', listener) },
+  createMeetingNote: (input: import('../shared/calendar/event-links').MeetingNoteInput) => ipcRenderer.invoke('calendar:createMeetingNote', input),
+  pendingMeetingNote: (key: string) => ipcRenderer.invoke('calendar:pendingMeetingNote', key),
   snapshot: () => ipcRenderer.invoke('calendar:snapshot'),
   mutate: (command: import('../shared/calendar/commands').CalendarCommand, versions: Record<string, number>) => ipcRenderer.invoke('calendar:mutate', command, versions),
   restore: (delta: import('../shared/calendar/commands').CalendarDelta, versions: Record<string, number>) => ipcRenderer.invoke('calendar:restore', delta, versions),
@@ -1253,11 +1264,7 @@ const appAPI = {
     ipcRenderer.on('app:shortcut', handler)
     return () => ipcRenderer.removeListener('app:shortcut', handler)
   },
-  onBeforeQuitFlush: (callback: (requestId: string) => void) => {
-    const handler = (_: IpcRendererEvent, requestId: string): void => callback(requestId)
-    ipcRenderer.on('app:flushBeforeQuit', handler)
-    return () => ipcRenderer.removeListener('app:flushBeforeQuit', handler)
-  },
+  onBeforeQuitFlush: (callback: (requestId: string) => void) => subscribeBeforeQuitFlush(callback),
   onBeforeQuitFlushCancelled: (callback: (requestId: string) => void) => {
     const handler = (_: IpcRendererEvent, requestId: string): void => callback(requestId)
     ipcRenderer.on('app:cancelBeforeQuitFlush', handler)
@@ -1612,6 +1619,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   document: documentAPI,
   board: boardAPI,
   rss: rssAPI,
+  calendarLayers: {
+    query: (range: import('../shared/calendar-layers').LayerRange) => ipcRenderer.invoke('calendarLayers:query', range),
+    move: (input: import('../shared/calendar-layers').LayerMove) => ipcRenderer.invoke('calendarLayers:move', input),
+    beginReading: (input: import('../shared/calendar-layers').ReadingBegin) => ipcRenderer.invoke('calendarLayers:beginReading', input),
+    endReading: (input: import('../shared/calendar-layers').ReadingEnd) => ipcRenderer.invoke('calendarLayers:endReading', input),
+    onChanged: (callback: () => void) => {
+      const listener = () => callback()
+      ipcRenderer.on('calendarLayers:changed', listener)
+      ipcRenderer.on('document:indexChanged', listener)
+      return () => { ipcRenderer.removeListener('calendarLayers:changed', listener); ipcRenderer.removeListener('document:indexChanged', listener) }
+    },
+  },
   calendar: calendarAPI,
   skills: skillsAPI,
   app: appAPI,
@@ -1621,6 +1640,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   vault: vaultAPI,
   documentDrafts: documentDraftsAPI,
   documentPages: documentPagesAPI,
+  documentDatabase: (request: import('../shared/document-database').DatabaseRequest): Promise<import('../shared/document-database').DatabaseReply> => ipcRenderer.invoke('documentDatabase:request', request),
   library: libraryAPI,
   libraryArchive: libraryArchiveAPI,
   bookSources: bookSourcesAPI,

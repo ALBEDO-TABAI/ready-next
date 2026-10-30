@@ -206,3 +206,78 @@ test('page IPC validates input, returns collision choices and publishes once for
     assert.equal(existsSync(join(f.root,'picture.png')),false)
   } finally { f.close() }
 })
+
+test('M4 canvas triplet rename, move, trash and restore preserve child identity and readable media', async t => {
+  if (skipIfSqliteUnavailable(t, 'Canvas pages')) return
+  const f = fixture()
+  try {
+    const { CanvasService } = await import('../main/modules/board-engine/canvas-service')
+    const canvases = new CanvasService(f.registry, f.root)
+    const h = await canvases.create({ path: 'A.canvas', operationId: 'canvas-create' })
+    await assert.rejects(f.service.save({ path: join(f.root, h.path), content: 'not canvas', expectedVersion: h.version }), /canvas handle/)
+    await assert.rejects(f.service.patchProperties(h.objectId, h.version, { icon: 'x' }), /Markdown page/)
+    const node = { id: 'child', type: 'file' as const, x: 0, y: 0, width: 100, height: 100, file: 'A/child.canvas', ready: { kind: 'subcanvas' as const, ref: { kind: 'canvas' as const, id: 'child-object' } } }
+    const child = { nodes: [], edges: [], ready: { schemaVersion: 1 as const, id: 'child-object' } }
+    assert.equal((await canvases.write({ ...h, operationId: 'add-child', expectedVersion: h.version, commands: [{ type: 'createSubcanvas', node, path: node.file, canvas: child }, { type: 'addNode', node: { id: 'text', type: 'text', text: '[child](A/child.canvas)', x: 0, y: 0, width: 100, height: 100, ready: { kind: 'text' } } }] })).state, 'completed')
+    mkdirSync(join(f.root, 'A.assets')); writeFileSync(join(f.root, 'A.assets', 'media.txt'), 'media')
+    const page = f.service.tree({ path: f.root, kind: 'vault' }).children.find(n => n.objectId === h.objectId)!
+    assert.equal(page.children[0].objectId, 'child-object'); assert.ok(page.assetsPath)
+    await f.service.operate({ type: 'rename', root: f.root, operationId: 'rename-canvas', objectId: h.objectId, title: 'B' })
+    assert.equal(JSON.parse(readFileSync(join(f.root, 'B.canvas'), 'utf8')).nodes[0].file, 'B/child.canvas')
+    mkdirSync(join(f.root, 'destination'))
+    await f.service.operate({ type: 'move', root: f.root, operationId: 'move-canvas', objectId: h.objectId, parentPath: join(f.root, 'destination') })
+    await f.service.operate({ type: 'trash', root: f.root, operationId: 'trash-canvas', objectId: h.objectId })
+    assert.equal(new ObjectLinkRepository(f.db).outgoing({ objectId: h.objectId }).length, 0)
+    mkdirSync(join(f.root, 'restored'))
+    await f.service.operate({ type: 'restore', root: f.root, operationId: 'restore-canvas', objectId: h.objectId, parentPath: join(f.root, 'restored') })
+    assert.equal(f.registry.get('child-object')?.id, 'child-object')
+    const restored = await canvases.open(h.objectId)
+    assert.equal(restored.canvas.nodes[0].file, 'restored/B/child.canvas')
+    assert.equal(restored.canvas.nodes[1].text, '[child](restored/B/child.canvas)')
+    assert.equal(readFileSync(join(f.root, 'restored/B.assets/media.txt'), 'utf8'), 'media')
+    await assert.rejects(f.service.operate({ type: 'move', objectId: 'child-object', root: f.root, operationId: 'child-outside-owner', parentPath: f.root }), /Subcanvas outside parent/)
+    assert.ok(existsSync(join(f.root, 'restored/B/child.canvas')))
+  } finally { f.close() }
+})
+
+test('M4 rename refuses an unsaved referring canvas before moving the source files', async t => {
+  if (skipIfSqliteUnavailable(t, 'Canvas related buffers')) return
+  const f = fixture()
+  try {
+    const { CanvasService } = await import('../main/modules/board-engine/canvas-service')
+    const canvases = new CanvasService(f.registry, f.root)
+    const target = await canvases.create({ path: 'Target.canvas', operationId: 'create-target' })
+    const node = { id: 'ref', type: 'file' as const, file: target.path, x: 0, y: 0, width: 100, height: 100, ready: { kind: 'document' as const, ref: { kind: 'canvas' as const, id: target.objectId } } }
+    const reference = await canvases.create({ path: 'Reference.canvas', operationId: 'create-reference', canvas: { nodes: [node], edges: [], ready: { schemaVersion: 1, id: 'reference-board' } } })
+    const dirty = structuredClone(reference.canvas); dirty.nodes[0].x = 99
+    canvases.updateBuffer({ objectId: reference.objectId, tabId: 'ref-tab', openGeneration: 1, bufferVersion: 1, baseVersion: reference.version, canvas: dirty })
+    await assert.rejects(f.service.operate({ type: 'rename', objectId: target.objectId, root: f.root, operationId: 'refused-rename', title: 'NewTarget' }), /dirty_conflict/)
+    assert.ok(existsSync(join(f.root, 'Target.canvas'))); assert.equal(existsSync(join(f.root, 'NewTarget.canvas')), false)
+    assert.equal(canvases.buffer(reference.objectId)?.canvas.nodes[0].x, 99)
+  } finally { f.close() }
+})
+
+// M6-B-finish contract: compare the caller's version inside the page operation queue.
+test('page rename and move reject stale expected versions without changing files', async t => {
+  if (skipIfSqliteUnavailable(t, 'version checked pages')) return
+  const f = fixture(); t.after(() => f.close())
+  const path = join(f.root, 'diary.md'), original = '# original\n'
+  writeFileSync(path, original)
+  const object = f.registry.register(path), expectedVersion = documentVersion(original)
+  const newer = '# externally edited\n'; writeFileSync(path, newer)
+  mkdirSync(join(f.root, 'destination'))
+  for (const request of [
+    { type: 'rename' as const, title: 'renamed', operationId: 'stale-rename' },
+    { type: 'move' as const, parentPath: join(f.root, 'destination'), operationId: 'stale-move' },
+  ]) {
+    await assert.rejects(f.service.operate({ ...request, root: f.root, objectId: object.id }, expectedVersion), /version_conflict/)
+    assert.equal(readFileSync(path, 'utf8'), newer)
+    assert.equal(f.registry.get(object.id)?.current_path, path)
+  }
+  assert.equal(existsSync(join(f.root, 'renamed.md')), false)
+  assert.equal(existsSync(join(f.root, 'destination', 'diary.md')), false)
+  const request = { type: 'rename' as const, root: f.root, objectId: object.id, title: 'renamed', operationId: 'current-rename' }
+  const receipt = await f.service.operate(request, documentVersion(newer))
+  assert.equal(receipt.path, join(f.root, 'renamed.md'))
+  assert.deepEqual(await f.service.operate(request, documentVersion(newer)), receipt)
+})

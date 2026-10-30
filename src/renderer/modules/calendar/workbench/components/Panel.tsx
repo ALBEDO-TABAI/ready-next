@@ -1,3 +1,4 @@
+import { EventLinks } from './EventLinks';
 import { findCalendarOccurrence } from '@shared/calendar/commands';
 import { searchCalendar } from '@shared/calendar/search';
 import { api, unwrap } from '../platform';
@@ -153,6 +154,7 @@ function EventPanel({ occKey }: { occKey: string }) {
         <div className="ev-r"><div className="ev-f"><MapPin size={18} /><input data-field="l" placeholder={t('location')} value={loc} disabled={ro} onChange={(e) => setLoc(e.target.value)} onBlur={() => { if (loc !== (ev.location ?? '')) patch({ location: loc || undefined }); }} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLElement).blur(); e.stopPropagation(); }} /></div></div>
       </div>
       <div className="ev-sec"><div className="ev-r"><div className="ev-f"><Link2 size={18} /><input data-field="u" placeholder={t('addLink')} value={link} onChange={e=>setLink(e.target.value)} disabled={ro} onBlur={(e) => { if (e.target.value !== (ev.url ?? '')) patch({ url: e.target.value || undefined }); }} onKeyDown={(e) => e.stopPropagation()} /></div></div></div>
+      <EventLinks occKey={occKey} title={ev.title} readOnly={ro} />
       <div className="ev-sec"><div className="ev-r auto"><div className="ev-f noicon"><textarea data-field="n" rows={Math.min(12, Math.max(1, desc.split('\n').length))} placeholder={t('description')} value={desc} disabled={ro} onChange={(e) => setDesc(e.target.value)} onBlur={() => { if (desc !== (ev.description ?? '')) patch({ description: desc || undefined }); }} onKeyDown={(e) => e.stopPropagation()} /></div></div></div>
       <div className="ev-sec">
         <div className="ev-r"><button className="ev-f" data-field="c" disabled={ro} onClick={menuAt('calendarPick')}><span className="ev-sw" style={{ ['--sw' as any]: fam.backgroundPrimary }} /><span>{cal?.name}</span></button></div>

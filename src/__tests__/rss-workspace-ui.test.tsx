@@ -1,5 +1,4 @@
 import { MarkdownContent as ChatMarkdown } from '../renderer/components/agent/chat-panel/markdown'
-import { revealRSSReference } from '../renderer/modules/rss/reveal-reference'
 import { rssCitationUrl } from '../shared/rss-reference'
 import { READY_WORKBENCH_MODE_CHANGE_EVENT } from '../renderer/modules/workbench/mode-transition'
 import { collectWorkbenchSurfaceResources } from '../renderer/stores/agent-workbench-resources'
@@ -270,12 +269,16 @@ test('chat citation clicks enqueue the exact reference through the shared worksp
   const previous = useMode.getState()
   useMode.setState({ workbenchMode: 'browser', splitMode: 'document' })
   const reference = { kind: 'article' as const, read: { itemId: 'source', expectedRevision: 'v1', offset: 0, length: 12000 } }
+  Object.assign(window, { electronAPI: { rss: { readArticle: async (read: unknown) => {
+    assert.deepEqual(read, reference.read)
+    return { success: true, data: { article: { revision: 'v1' } } }
+  } } } })
   const requests: unknown[] = []
   const capture = (event: Event) => requests.push((event as CustomEvent).detail)
   window.addEventListener(READY_WORKBENCH_MODE_CHANGE_EVENT, capture)
   try {
-    await act(async () => root.render(<ChatMarkdown content={rssCitationUrl(reference)} onRSSReference={revealRSSReference} />))
-    const button = dom.window.document.querySelector<HTMLButtonElement>('.rss-citation-link')!
+    await act(async () => root.render(<ChatMarkdown content={rssCitationUrl(reference)} />))
+    const button = dom.window.document.querySelector<HTMLAnchorElement>('.rss-citation-link')!
     assert.equal(button.textContent, '查看 RSS 引用')
     await act(async () => button.click())
     assert.deepEqual(useRSSSession.getState().pendingReveal?.reference, reference)

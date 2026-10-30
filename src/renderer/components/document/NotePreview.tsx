@@ -1,3 +1,4 @@
+import { InlineDatabase, parseDatabaseLink, remarkDatabaseViews } from '../../modules/document/database'
 import { LibraryQuoteCard } from './LibraryQuoteCard'
 import { openReadyRef } from '../../modules/workbench/open-ready-ref'
 import { createMarkdownComponents, copyTextToClipboard } from './MarkdownContent'
@@ -9,6 +10,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
+import type { Element as HastElement, ElementContent } from 'hast'
 import ReactMarkdown, { defaultUrlTransform, type Components, type Options as MarkdownOptions } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
@@ -21,7 +23,6 @@ import { openWebpageInBrowser } from '../../modules/browser/openWebpageInBrowser
 import { appendToAgentInput } from '../../modules/agent/chat-input-bridge'
 import { EBOOK_MARKDOWN_MARKER } from '../../../shared/ebook'
 import {
-  type PreviewBlock,
   type PreviewEmbed,
   type PreviewProperty,
   type PreviewTag,
@@ -31,31 +32,17 @@ import { resolveDocumentWidgetRenderCode } from '../../../shared/document-widget
 import type { DocumentWidgetData } from '../../../shared/document-widget-parse'
 import { getDocumentWidgetRenderBudgetFromCodes, getWidgetPersistenceKey } from './widget-card-helpers'
 import DocumentWidgetPreviewBlock from './DocumentWidgetPreviewBlock'
-import {
-  EditableBlockShell,
-  PreviewAppendComposer,
-  PreviewBlockEditor,
-  type PreviewDropIndicator,
-} from './NotePreviewEditable'
-import {
-  appendPreviewParagraph,
-  getPreviewBlockSourceText,
-  movePreviewBlockSource,
-  replacePreviewBlockSource,
-} from '../../modules/document/previewEditOperations'
+import { ReadyBlockEditor } from '../../modules/document/block-editor/ReadyBlockEditor'
 import { resolveNotePreviewModel } from '../../modules/document/notePreviewModel'
 import { recordDocumentPerformanceCounter } from '../../../shared/document-performance-diagnostics'
-
-export const PREVIEW_BLOCK_DRAG_MIME = 'application/x-ready-preview-block'
 
 interface NotePreviewProps {
   content: string
   notePath?: string | null
   focusWidgetTitle?: string | null
-  /** Preview-edit mode: blocks become editable/movable in place. */
-  editable?: boolean
-  /** Receives the full next document text after a preview-edit operation. */
-  onApplyContentEdit?: (nextContent: string) => void
+  editorTabId?: string
+  widgetEditable?: boolean
+  forceManualPreview?: boolean
   onWidgetRename?: (currentTitle: string, widgetCode: string, nextTitle: string) => void
   onWidgetQuote?: (title: string, widgetCode: string) => void
   onWidgetExport?: (title: string, widgetCode: string, widgetState?: DocumentWidgetPersistedState | null) => void
@@ -374,8 +361,23 @@ const MarkdownPreviewBlock = memo(function MarkdownPreviewBlock({
   remarkPlugins: MarkdownOptions['remarkPlugins']
 }) {
   recordDocumentPerformanceCounter('previewBlockRenders')
+  const databaseComponents = useMemo<Components>(() => {
+    const Link = components.a
+    const Paragraph = components.p
+    const hasDatabase = (node: HastElement | ElementContent): boolean => node.type === 'element'
+      && (node.tagName === 'a' && String(node.properties.href).startsWith('ready-db:') || node.children.some(hasDatabase))
+    return {
+      ...components,
+      a: ({ node, href, ...props }) => {
+        const reference = parseDatabaseLink(href ?? '')
+        return reference ? <InlineDatabase {...reference} /> : Link && typeof Link !== 'string' ? <Link node={node} href={href} {...props} /> : <a href={href} {...props} />
+      },
+      p: ({ node, ...props }) => node && hasDatabase(node) ? <div {...props} /> : Paragraph && typeof Paragraph !== 'string' ? <Paragraph node={node} {...props} /> : <p {...props} />,
+    }
+  }, [components])
+  const databasePlugins = useMemo(() => [...remarkPlugins ?? [], remarkDatabaseViews], [remarkPlugins])
   return (
-    <ReactMarkdown urlTransform={href => href.startsWith('ready://') ? href : defaultUrlTransform(href)} remarkPlugins={remarkPlugins} components={components}>
+    <ReactMarkdown urlTransform={href => href.startsWith('ready://') || href.startsWith('ready-db:') ? href : defaultUrlTransform(href)} remarkPlugins={databasePlugins} components={databaseComponents}>
       {markdown}
     </ReactMarkdown>
   )
@@ -411,8 +413,9 @@ function NotePreview({
   content,
   notePath,
   focusWidgetTitle,
-  editable,
-  onApplyContentEdit,
+  editorTabId,
+  widgetEditable = false,
+  forceManualPreview = false,
   onWidgetRename,
   onWidgetQuote,
   onWidgetExport,
@@ -432,12 +435,7 @@ function NotePreview({
     () => resolveNotePreviewModel(displayContent, notePath),
     [displayContent, notePath],
   )
-  // Ebook markdown strips a marker before parsing, so ranges would not line up
-  // with the tab content — preview-edit stays off there.
-  const canEdit = Boolean(editable && onApplyContentEdit) && !isEbookMarkdown
-  const [editingBlockId, setEditingBlockId] = useState<string | null>(null)
-  const [draggingBlockId, setDraggingBlockId] = useState<string | null>(null)
-  const [dropIndicator, setDropIndicator] = useState<PreviewDropIndicator | null>(null)
+  const canEdit = Boolean(editorTabId || widgetEditable) && !isEbookMarkdown
   const embedsById = useMemo(
     () => new Map(preview.embeds.map((embed) => [embed.id, embed])),
     [preview.embeds],
@@ -503,85 +501,6 @@ function NotePreview({
     }
   }, [])
 
-  // ─── Preview-edit (预览内编辑) ─────────────────────────────
-  const blocksById = useMemo(
-    () => new Map(preview.blocks.map((block) => [block.id, block])),
-    [preview.blocks],
-  )
-
-  useEffect(() => {
-    if (canEdit) return
-    setEditingBlockId(null)
-    setDraggingBlockId(null)
-    setDropIndicator(null)
-  }, [canEdit])
-
-  // Drag state must clear even when the drop lands outside the preview
-  // (dragend fires on the source; drop may land anywhere).
-  useEffect(() => {
-    if (!canEdit) return undefined
-    const reset = () => {
-      setDraggingBlockId(null)
-      setDropIndicator(null)
-    }
-    window.addEventListener('dragend', reset)
-    window.addEventListener('drop', reset)
-    return () => {
-      window.removeEventListener('dragend', reset)
-      window.removeEventListener('drop', reset)
-    }
-  }, [canEdit])
-
-  const applyContentEdit = useCallback((next: string | null) => {
-    if (next === null || next === displayContent) return
-    onApplyContentEdit?.(next)
-  }, [displayContent, onApplyContentEdit])
-
-  const handleBlockEditCommit = useCallback((block: PreviewBlock, nextText: string) => {
-    setEditingBlockId(null)
-    applyContentEdit(replacePreviewBlockSource(displayContent, block, nextText))
-  }, [applyContentEdit, displayContent])
-
-  const handleBlockDragStart = useCallback((event: React.DragEvent<HTMLDivElement>, blockId: string) => {
-    event.dataTransfer.effectAllowed = 'move'
-    event.dataTransfer.setData(PREVIEW_BLOCK_DRAG_MIME, blockId)
-    setDraggingBlockId(blockId)
-  }, [])
-
-  const handleBlockDragEnd = useCallback(() => {
-    setDraggingBlockId(null)
-    setDropIndicator(null)
-  }, [])
-
-  const handleBlockDragOver = useCallback((event: React.DragEvent<HTMLDivElement>, blockId: string) => {
-    if (!draggingBlockId || draggingBlockId === blockId) return
-    event.preventDefault()
-    event.stopPropagation()
-    event.dataTransfer.dropEffect = 'move'
-    const rect = event.currentTarget.getBoundingClientRect()
-    const position: PreviewDropIndicator['position'] = event.clientY - rect.top < rect.height / 2 ? 'before' : 'after'
-    setDropIndicator((prev) => (
-      prev && prev.blockId === blockId && prev.position === position ? prev : { blockId, position }
-    ))
-  }, [draggingBlockId])
-
-  const handleBlockDrop = useCallback((event: React.DragEvent<HTMLDivElement>, blockId: string) => {
-    if (!draggingBlockId) return
-    event.preventDefault()
-    event.stopPropagation()
-    const moved = blocksById.get(draggingBlockId)
-    const target = blocksById.get(blockId)
-    const indicator = dropIndicator
-    setDraggingBlockId(null)
-    setDropIndicator(null)
-    if (!moved || !target || !indicator || indicator.blockId !== blockId) return
-    applyContentEdit(movePreviewBlockSource(displayContent, moved, target, indicator.position))
-  }, [applyContentEdit, blocksById, displayContent, draggingBlockId, dropIndicator])
-
-  const handleAppendParagraph = useCallback((text: string) => {
-    applyContentEdit(appendPreviewParagraph(displayContent, text))
-  }, [applyContentEdit, displayContent])
-
   const markdownComponents = useMemo(() => createMarkdownComponents({ mode: 'document', notePath, openHref }), [notePath, openHref])
 
   return (
@@ -616,7 +535,14 @@ function NotePreview({
         </div>
       ) : null}
 
-      <div className="note-preview-body" data-preview-editable={canEdit ? 'true' : undefined}>
+      {editorTabId && !isEbookMarkdown ? (
+        <ReadyBlockEditor tabId={editorTabId} content={content} renderSource={block => block.type === 'frontmatter' ? null : (
+          <NotePreview content={block.raw} notePath={notePath} widgetEditable
+            forceManualPreview={widgetRenderBudget.forceManualPreviewAll}
+            onWidgetRename={onWidgetRename} onWidgetQuote={onWidgetQuote} onWidgetExport={onWidgetExport}
+            onWidgetEdit={onWidgetEdit} onWidgetStateChange={onWidgetStateChange} widgetStates={widgetStates} />
+        )} />
+      ) : <div className="note-preview-body">
         {preview.blocks.map((block) => {
           const renderBlockBody = (): ReactNode => {
             if (block.type === 'markdown') {
@@ -670,7 +596,7 @@ function NotePreview({
                   renderCode={renderCode}
                   widgetState={widgetState}
                   widgetStateSignature={JSON.stringify(widgetState)}
-                  preferManualPreview={widgetRenderBudget.forceManualPreviewAll}
+                  preferManualPreview={forceManualPreview || widgetRenderBudget.forceManualPreviewAll}
                   canEdit={canEdit}
                   onWidgetRename={onWidgetRename}
                   onWidgetQuote={onWidgetQuote}
@@ -688,66 +614,17 @@ function NotePreview({
             return null
           }
 
-          if (!canEdit) {
-            const body = renderBlockBody()
-            if (body === null) return null
-            return (
-              <div
-                key={blockRenderKeys.get(block.id) || block.id}
-                className="note-preview-render-block"
-                data-ready-block-source-line={blockSourceLines.get(block.id)}
-              >
-                {body}
-              </div>
-            )
-          }
-
-          const hasSource = block.source !== null
-          const textEditable = hasSource && (block.type === 'markdown' || block.type === 'details')
-
-          if (textEditable && editingBlockId === block.id) {
-            const seed = getPreviewBlockSourceText(displayContent, block)
-            if (seed !== null) {
-              return (
-                <PreviewBlockEditor
-                  key={block.id}
-                  initialText={seed}
-                  ariaLabel="编辑此段内容"
-                  onCommit={(nextText) => handleBlockEditCommit(block, nextText)}
-                  onCancel={() => setEditingBlockId(null)}
-                />
-              )
-            }
-          }
-
           const body = renderBlockBody()
           if (body === null) return null
-          const embed = block.type === 'embed' ? embedsById.get(block.embedId) : undefined
-          const blockDraggable = hasSource && block.type === 'embed' && (embed?.kind === 'image' || embed?.kind === 'video')
-
           return (
-            <EditableBlockShell
-              key={blockRenderKeys.get(block.id) || block.id}
-              blockId={block.id}
-              sourceLine={blockSourceLines.get(block.id)}
-              textEditable={textEditable}
-              draggable={blockDraggable}
-              dropTargetable={hasSource && Boolean(draggingBlockId) && draggingBlockId !== block.id}
-              isDraggingSelf={draggingBlockId === block.id}
-              dropIndicator={dropIndicator}
-              onStartEdit={textEditable ? () => setEditingBlockId(block.id) : undefined}
-              onDragStartBlock={(event) => handleBlockDragStart(event, block.id)}
-              onDragEndBlock={handleBlockDragEnd}
-              onDragOverBlock={(event) => handleBlockDragOver(event, block.id)}
-              onDropBlock={(event) => handleBlockDrop(event, block.id)}
-            >
+            <div key={blockRenderKeys.get(block.id) || block.id} className="note-preview-render-block"
+              data-ready-block-source-line={blockSourceLines.get(block.id)}>
               {body}
-            </EditableBlockShell>
+            </div>
           )
         })}
 
-        {canEdit && <PreviewAppendComposer onAppend={handleAppendParagraph} />}
-      </div>
+      </div>}
     </div>
   )
 }

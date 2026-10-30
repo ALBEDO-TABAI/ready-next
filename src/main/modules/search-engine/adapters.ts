@@ -1,3 +1,4 @@
+import { rebuildCalendarLinks } from './calendar-link-adapter'
 import { canonicalObjectPath } from '../object-service/registry'
 import { ReadyRefSchema, toReadyUri } from '../../../shared/ready-ref'
 import { calendarEventToRecord, originalToSeconds } from '../calendar-engine/calendar-row-codec'
@@ -661,6 +662,7 @@ export class CalendarAdapter implements IndexSourceAdapter {
 
   async reindex(ctx: AdapterContext): Promise<AdapterReindexResult> {
     const db = ctx.repository.getConnection()
+    rebuildCalendarLinks(db)
     const events = new CalendarStore(()=>db).snapshot().events.map(event=>({
       ...calendarEventToRecord(event),
       id: event.recurringEventId && event.originalStart !== undefined ? `${event.recurringEventId}#${originalToSeconds(event.originalStart)}` : event.recurringEventId || event.id,

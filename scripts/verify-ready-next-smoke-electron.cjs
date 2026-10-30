@@ -60,6 +60,70 @@ async function requestMode(page, mode) {
   }
 }
 
+// C8: use the actual layer controls, external write and HTML drag, then read the authoritative file.
+async function checkCalendarLayers(page, root) {
+  const source = path.join(root, 'c8-layer.md')
+  fs.writeFileSync(source, '---\ndate: 2026-10-30\n---\nC8 layer smoke\n')
+  const indexed = await page.evaluate(root => window.electronAPI.document.reindexWorkspace(root), root)
+  if (!indexed.success) throw new Error(JSON.stringify(indexed))
+  await requestMode(page, 'calendar')
+  await page.evaluate(async () => {
+    const prefs = await window.electronAPI.calendar.putPreferences({ gridView: 'default', daysPerPeriod: 4, showWeekends: true, sidebar: true,
+      layers: { events: true, documents: true, tasks: true, footprints: true } })
+    if (!prefs.success) throw new Error(prefs.error)
+    const day = await window.electronAPI.calendar.revealDay('2026-10-30')
+    if (!day.success) throw new Error(day.error)
+  })
+  await page.getByRole('checkbox', { name: '文档日期', exact: true }).check()
+  const id = await page.evaluate(source => window.electronAPI.objects.resolvePath(source), source)
+  const chip = page.locator(`[data-layer-entry="page:${id.objectId}"]`).first()
+  await chip.waitFor({ state: 'visible', timeout: 10000 })
+  fs.writeFileSync(source, '---\ndate: 2026-10-31\n---\nC8 layer smoke\n')
+  const began = performance.now()
+  await page.locator('[data-layer-day="2026-10-31"] [data-layer="documents"]').filter({ hasText: 'c8-layer' }).waitFor({ state: 'visible', timeout: 1000 })
+  const elapsed = performance.now() - began
+  ok('C8 external file date renders within one second', elapsed < 1000, `${elapsed.toFixed(1)}ms`)
+  console.log(`C8 window latency ${elapsed.toFixed(1)}ms`)
+  // The event panel left open by the M6 link checks covers part of the grid (the drop day included); close it
+  // first, as a person would, so the drag lands on the visible day.
+  for (let i = 0; i < 5 && await page.locator('.ev-sec').first().isVisible().catch(() => false); i++) {
+    await page.getByTestId('ready-calendar').focus()
+    await page.keyboard.press('Escape'); await page.waitForTimeout(200)
+  }
+  ok('C8 the event panel is closed before dragging', !await page.locator('.ev-sec').first().isVisible().catch(() => false))
+  await page.evaluate(() => {
+    window.__layerDrag = []
+    for (const type of ['dragstart', 'drop', 'dragend']) document.addEventListener(type, event => {
+      const target = event.target instanceof Element ? event.target : null
+      window.__layerDrag.push(`${type}@${target?.closest('[data-layer-day]')?.getAttribute('data-layer-day') ?? target?.tagName}:${event.dataTransfer?.dropEffect ?? ''}`)
+    }, true)
+  })
+  await chip.dragTo(page.locator('[data-layer-day="2026-11-01"]').first())
+  // waitForFunction does not await an async predicate, so poll the service and the disk from here.
+  const moveDeadline = Date.now() + 10000
+  let dragged = fs.readFileSync(source, 'utf8')
+  while (Date.now() < moveDeadline) {
+    const shown = await page.evaluate(async () => {
+      const result = await window.electronAPI.calendarLayers.query({ from: '2026-11-01', to: '2026-11-02', timeZone: 'Asia/Tokyo' })
+      return result.ok && result.value.some(entry => entry.title === 'c8-layer' && entry.date === '2026-11-01')
+    })
+    dragged = fs.readFileSync(source, 'utf8')
+    if (shown && dragged.includes('2026-11-01')) break
+    await page.waitForTimeout(100)
+  }
+  const layerAlerts = await page.locator('[data-layer-day] [role="alert"]').allTextContents()
+  // Diagnostics only when the drag did not land: the entry as the service sees it, and a direct service move.
+  const diagnosis = dragged.includes('2026-11-01') ? null : await page.evaluate(async () => {
+    const range = { from: '2026-10-28', to: '2026-11-04', timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }
+    const query = await window.electronAPI.calendarLayers.query(range)
+    const entry = query.ok ? query.value.find(item => item.title === 'c8-layer') : null
+    const chips = [...document.querySelectorAll('[data-layer-entry]')].map(chip => [chip.getAttribute('data-layer-entry'), chip.closest('[data-layer-day]')?.getAttribute('data-layer-day'), chip.getAttribute('draggable')])
+    const move = entry ? await window.electronAPI.calendarLayers.move({ range, id: entry.id, expectedVersion: entry.version, date: '2026-11-01' }) : null
+    return { range, query: query.ok ? null : query, entry, chips, events: window.__layerDrag, move }
+  })
+  ok('C8 drag changes only the source date', dragged === '---\ndate: 2026-11-01\n---\nC8 layer smoke\n', JSON.stringify({ dragged, layerAlerts, diagnosis }))
+}
+
 // I2: exercise a real file-tree open, the Ready move command, the live watcher and restart.
 async function checkObjectPresentationBeforeRestart(app, page, root) {
   const from = path.join(root, 'i2-a.md'), internal = path.join(root, 'i2-b.md'), external = path.join(root, 'i2-c.md')
@@ -113,10 +177,14 @@ async function checkObjectPresentationAfterRestart(page, identity) {
     position: JSON.parse(localStorage.getItem('ready-object-reading-positions-v1') || '[]').find(row => row.key === objectId),
   }), identity)
   ok('C2 reopening retains one tab, appearance and reading position', restored.tabs.length === 1 && restored.appearance?.icon === '🐙' && restored.position?.top > 0, JSON.stringify(restored))
+  // The M6 meeting note opens its own tab before the restart; bring this tab to the front through the tab rail.
+  const activeTab = await page.evaluate(() => JSON.parse(localStorage.getItem('ready-doc-tabs-v2') || '{}').state?.activeTabId)
+  if (activeTab !== restored.tabs[0].id) await page.locator(`[title^="${path.basename(identity.path)}"]`).first().click({ timeout: 20000 })
   await page.locator('.document-path-bar').getByText(identity.path, { exact: true }).waitFor({ timeout: 20000 })
   ok('C2 the visible document header shows the final path', true)
-  await page.waitForFunction(path => Array.from(document.querySelectorAll('[data-ready-document-scroll-key]')).some(scope =>
-    scope.getAttribute('data-ready-document-scroll-key') === path && [scope, ...scope.querySelectorAll('*')].some(element => element.scrollTop > 0)), identity.path, { timeout: 20000 })
+  // Scroll scopes are keyed by object id (path only for files without one).
+  await page.waitForFunction(({ path, objectId }) => Array.from(document.querySelectorAll('[data-ready-document-scroll-key]')).some(scope =>
+    [objectId, path].includes(scope.getAttribute('data-ready-document-scroll-key')) && [scope, ...scope.querySelectorAll('*')].some(element => element.scrollTop > 0)), identity, { timeout: 20000 })
   ok('C2 the reopened document visibly restores its reading position', true)
   // The document tab rail renders each tab with its title attribute; the custom icon is its visible glyph.
   const iconShown = await page.waitForFunction(name => [...document.querySelectorAll('[title]')]
@@ -178,6 +246,60 @@ async function checkCalendarReference(page) {
 
 // No local IPC writes arbitrary chat messages. Remote receive requires a bound
 // account, so seed through the real stores only after closing this throwaway app.
+// M6-A: real event panel + SaveToPicker. The preceding C1 step has created a recurring event.
+async function checkCalendarLinksBeforeRestart(page, reference, root) {
+  const created = await page.evaluate(async root => {
+    const result = await window.electronAPI.documentPages.operate({type:'create',root,parentPath:root,
+      title:'M6 linked page',content:'# M6 linked page\n',operationId:'m6-smoke-page'})
+    if (!result.ok) throw new Error(result.message)
+    return result.value
+  }, root)
+  await requestMode(page, 'calendar')
+  await page.evaluate(id => window.electronAPI.calendar.revealEvent(id), reference.eventId)
+  const panel = page.getByRole('region', {name:'日程关联'})
+  await panel.waitFor()
+  const uri = `ready://doc/page/${encodeURIComponent(created.objectId)}`
+  await panel.getByLabel('关联地址', {exact:true}).fill(uri)
+  await panel.getByRole('button', {name:'添加关联',exact:true}).click()
+  await panel.getByRole('button', {name:'解除关联 M6 linked page',exact:true}).waitFor()
+  await panel.getByRole('button', {name:'会议笔记',exact:true}).click()
+  const picker = panel.getByRole('dialog', {name:'保存到…'})
+  await picker.getByLabel('标题', {exact:true}).fill('M6 meeting notes')
+  await picker.getByRole('button', {name:'确认',exact:true}).click()
+  await panel.getByRole('button', {name:'打开会议笔记',exact:true}).waitFor()
+  const links = await page.evaluate(async ({seriesId,second}) => {
+    const result=await window.electronAPI.calendar.snapshot()
+    if(!result.success)throw new Error(result.error)
+    return result.data.links.filter(link=>link.eventId===seriesId&&link.originalStart===second)
+  },reference)
+  ok('M6 second occurrence owns both page and meeting note', links.length===2 && links.some(link=>link.purpose==='meeting-note'))
+  return {pageId:created.objectId,note:links.find(link=>link.purpose==='meeting-note').target,reference}
+}
+
+async function checkCalendarLinksAfterRestart(page, saved) {
+  const state = await page.evaluate(async () => {
+    const result=await window.electronAPI.calendar.snapshot()
+    if(!result.success)throw new Error(result.error)
+    return result.data
+  })
+  const links=state.links.filter(link=>link.eventId===saved.reference.seriesId&&link.originalStart===saved.reference.second)
+  const note=links.find(link=>link.purpose==='meeting-note')
+  ok('M6 page and note links survive restart with original instance identity', links.length===2 && note?.target.id===saved.note.id)
+  const location=await page.evaluate(id=>window.electronAPI.objects.locate(id),saved.note.id)
+  ok('M6 meeting note file survives restart', !!location?.path && fs.existsSync(location.path))
+  await requestMode(page,'calendar')
+  await page.evaluate(id=>window.electronAPI.calendar.revealEvent(id),saved.reference.eventId)
+  const panel=page.getByRole('region',{name:'日程关联'})
+  await panel.getByRole('button',{name:'解除关联 M6 linked page',exact:true}).click()
+  const detached=await page.evaluate(async()=>window.electronAPI.calendar.snapshot())
+  ok('M6 removing the page association leaves the meeting note intact', detached.success
+    && !detached.data.links.some(link=>link.target.id===saved.pageId)
+    && detached.data.links.some(link=>link.target.id===saved.note.id))
+  await panel.getByRole('button',{name:'撤销上次关联修改',exact:true}).click()
+  await panel.getByRole('button',{name:'解除关联 M6 linked page',exact:true}).waitFor()
+  ok('M6 panel undo restores the page association after restart', true)
+}
+
 // Closed scopes remain invisible by product contract; keep a separate closed
 // fixture for migration/readback, never reopen its tombstone to fake a UI pass.
 async function seedCalendarHistory(profile, reference) {
@@ -209,6 +331,7 @@ async function seedCalendarHistory(profile, reference) {
       // Simulate the pre-142 profile; the next real boot must build the mapping.
       db.prepare('DELETE FROM migrations WHERE name=?').run('144_calendar_attachment_display_refs')
     })()
+    if (reference.r45Url) history.r45 = await seedR45History(db, reference.r45Url)
     return history
   } finally { db.close() }
 }
@@ -251,10 +374,73 @@ async function checkCalendarHistoryAfterRestart(page, reference, history) {
   step('Closed-history UI click remains blocked by the product visibility contract; this is not a closed-history UI pass')
 }
 
+// R45 uses saved fixtures and real UI actions; it never needs a model or a remote website.
+async function seedR45History(db, url) {
+  const { pathToFileURL } = require('node:url')
+  const load = file => import(pathToFileURL(path.resolve(file)).href)
+  const { RSSStore } = await load('src/main/modules/database/rss-store.ts')
+  const { ChatStore } = await load('src/main/modules/database/chat-store.ts')
+  const { rssReferencePath } = await load('src/shared/rss-reference.ts')
+  const { toReadyUri } = await load('src/shared/ready-ref.ts')
+  const rss = new RSSStore(() => db), chat = new ChatStore(() => db)
+  const source = rss.addRSSSource({ name: 'R45 fixture', url: `${url}/feed` })
+  rss.upsertRSSItems([{ id: 'r45-item', source_id: source, guid: 'r45-item', title: 'R45 saved article', link: url, summary: 'R45 exact selection and remaining text.' }])
+  const article = rss.content.getArticle('r45-item')
+  const reference = { kind: 'excerpt', read: { format: 'reading-v1', itemId: article.id, expectedRevision: article.revision,
+    range: { start: { run: 0, offset: 4 }, end: { run: 0, offset: 9 } }, offset: 0, length: 12000 } }
+  const history = { scopeId: 'r45-history', title: 'R45 browser and RSS history', messageId: 'r45-message', url, reference }
+  chat.createConversation(history.scopeId, 'butler', history.title)
+  chat.addChatMessage(history.messageId, history.scopeId, 'user', 'R45 persisted references', new Date().toISOString(), { attachments: [
+    { id: 'r45-web', name: 'R45 webpage', source: 'browser-tab', path: toReadyUri({ kind: 'web', url }), url, type: 'text', size: 0, ext: '.url' },
+    { id: 'r45-rss', name: 'R45 saved excerpt', source: 'rss-reference', path: rssReferencePath(reference), rssReference: reference, type: 'text', size: 0, ext: '.rss' },
+  ] }, 0)
+  return history
+}
+
+async function checkR45References(app, page, history, createDrafts) {
+  const saved = await readChatMessages(page, history.scopeId)
+  ok('R45 history contains a webpage and an exact RSS reference', saved.success && JSON.parse(saved.data.find(row => row.id === history.messageId)?.meta_json || '{}').attachments?.length === 2, JSON.stringify(saved))
+  await page.getByRole('button', { name: /当前会话：.*点击查看历史对话/ }).click()
+  const row = page.locator('.chat-header-floating-menu').getByText(history.title, { exact: true }).first()
+  if (!await row.isVisible()) await page.getByRole('button', { name: '展开历史会话', exact: true }).first().click()
+  await row.click()
+  if (createDrafts) {
+    const tab = await page.evaluate(url => window.electronAPI.browser.createTab(url), history.url)
+    if (!tab.success || !tab.tabId) throw Error('R45 browser fixture failed')
+    await page.locator('[data-chat-composer-shell="true"]').evaluate((element, payload) => {
+      const transfer = new DataTransfer(); transfer.setData('application/x-ready-drag', JSON.stringify(payload))
+      element.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }))
+    }, { type: 'browser-tab', name: 'R45 draft webpage', tabId: tab.tabId, url: history.url })
+    await page.locator('.chat-reference-chip button').filter({ hasText: 'R45 draft webpage' }).click()
+  } else await page.locator('[data-chat-message-attachment="true"]:not([disabled])').filter({ hasText: 'R45 webpage' }).first().click()
+  await page.locator('[data-workbench-mode-panel="browser"][data-mode-visual-state="current"]').waitFor()
+  const deadline = Date.now() + 15000
+  while (!await app.evaluate(({ webContents }, url) => webContents.getAllWebContents().some(w => w.getURL() === url && !w.isLoading()), history.url)) {
+    if (Date.now() > deadline) throw Error('R45 browser reference did not load its original URL')
+    await page.waitForTimeout(100)
+  }
+  ok(`R45 ${createDrafts ? 'new' : 'restarted history'} browser reference opens its webpage`, true)
+  await page.locator('[data-chat-message-attachment="true"]:not([disabled])').filter({ hasText: 'R45 saved excerpt' }).first().click()
+  await page.getByRole('button', { name: '在 RSS 中定位', exact: true }).click()
+  await page.locator('.rss-reader-title').filter({ hasText: 'R45 saved article' }).waitFor()
+  await page.waitForFunction(() => window.getSelection()?.toString() === 'exact')
+  if (createDrafts) {
+    await page.getByRole('button', { name: '引用', exact: true }).click()
+    await page.getByRole('button', { name: '引用所选文字', exact: true }).click()
+    await page.locator('.chat-reference-chip button').filter({ hasText: 'R45 saved article · 选区' }).click()
+    await page.getByRole('button', { name: '在 RSS 中定位', exact: true }).click()
+    await page.waitForFunction(() => window.getSelection()?.toString() === 'exact')
+  }
+  ok(`R45 ${createDrafts ? 'new' : 'restarted history'} RSS reference selects the original exact text`, true)
+}
+
 async function checkIdentityAndFastCard() {
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'ready-next-smoke-'))
   let app
   let page
+  const server = require('node:http').createServer((_request, response) => { response.setHeader('Content-Type', 'text/html'); response.end('<title>R45 webpage</title><p>R45 local webpage fixture</p>') })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  const r45Url = `http://127.0.0.1:${server.address().port}/`
   try {
     ;({ app, page } = await launch(profile))
     const identity = await withTimeout(app.evaluate(({ app }) => ({ name: app.getName(), userData: app.getPath('userData') })), 20000, 'read app identity')
@@ -275,7 +461,9 @@ async function checkIdentityAndFastCard() {
     const added = await withTimeout(page.evaluate(entry => window.electronAPI.browser.addFastCardItem(entry), item), 20000, 'add FastCard item')
     ok('C7 FastCard add returns a persisted receipt', added?.success === true && added.data?.id === item.id, JSON.stringify(added))
     const objectIdentity = await checkObjectPresentationBeforeRestart(app, page, created.root)
-    const calendarReference = await checkCalendarReference(page)
+    const calendarReference = { ...await checkCalendarReference(page), r45Url }
+    const calendarLinks = await checkCalendarLinksBeforeRestart(page, calendarReference, created.root)
+    await checkCalendarLayers(page, created.root)
     step('close app')
     await withTimeout(app.close(), 150000, 'close app')
     app = undefined
@@ -288,6 +476,12 @@ async function checkIdentityAndFastCard() {
     ;({ app, page } = await launch(profile))
     await checkObjectPresentationAfterRestart(page, objectIdentity)
     await checkCalendarHistoryAfterRestart(page, calendarReference, history)
+    await checkCalendarLinksAfterRestart(page, calendarLinks)
+    await checkR45References(app, page, history.r45, true)
+    await withTimeout(app.close(), 150000, 'R45 close before restart')
+    app = undefined
+    ;({ app, page } = await launch(profile))
+    await checkR45References(app, page, history.r45, false)
     const reopenedVault = await withTimeout(page.evaluate(() => window.electronAPI.vault.get()), 20000, 'read vault after restart')
     ok('D17 the vault setting survives a restart', reopenedVault.status === 'ready' && reopenedVault.root === created.root, JSON.stringify(reopenedVault))
     const listed = await withTimeout(page.evaluate(() => window.electronAPI.browser.listFastCardItems()), 20000, 'list FastCard items')
@@ -299,6 +493,7 @@ async function checkIdentityAndFastCard() {
   } finally {
     // A failed check must not leave Electron running, or the script never exits.
     if (app) await withTimeout(app.close(), 30000, 'close app after failure').catch(() => app.process().kill('SIGKILL'))
+    await new Promise(resolve => server.close(resolve))
     fs.rmSync(profile, { recursive: true, force: true })
   }
 }
@@ -325,7 +520,7 @@ function checkDailyDataRefusal() {
   }
 }
 
-module.exports = { seedCalendarHistory }
+module.exports = { seedCalendarHistory, seedR45History }
 
 if (require.main === module && process.argv[2] === '--seed-calendar-history') {
   seedCalendarHistory(process.argv[3], JSON.parse(process.argv[4])).then(result => console.log(JSON.stringify(result)), error => { console.error(error); process.exitCode = 1 })

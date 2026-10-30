@@ -18,7 +18,7 @@ test('conflict UI shows both versions, uses checked overwrite, preserves disk an
     readFile: async () => ({ success: true, content: disk }),
     writeFile: async () => { diskWrites++; return { success: true } },
     openFolder: async () => ({ success: true, path: '/vault' }),
-  }, documentPages: { save: async (input: { path: string; content: string; expectedVersion: string }) => {
+  }, vault: { get: async () => ({ status: 'unconfigured', defaultSuggestion: '/vault' }), onChanged: () => () => {} }, documentPages: { onChanged: () => () => {}, save: async (input: { path: string; content: string; expectedVersion: string }) => {
     checkedWrites++
     assert.equal(input.expectedVersion, await contentHash(disk))
     if (checkedWrites === 1) { disk = 'changed again'; return { ok: false, code: 'version_conflict', message: 'changed again' } }
@@ -31,7 +31,7 @@ test('conflict UI shows both versions, uses checked overwrite, preserves disk an
   const { createRoot } = await import('react-dom/client')
   configureDrafts({ ...f.port, read: async path => path === '/vault/Test.md' && checkedWrites > 0 ? disk : f.port.read(path), tabs: () => useDocTabs.getState().tabs,
     patch: (id, patch) => useDocTabs.setState(state => ({ tabs: state.tabs.map(tab => tab.id === id && tab.kind !== 'library' ? { ...tab, ...patch } : tab) })),
-  }, () => {})
+  })
   const { drafts } = await import('../renderer/modules/document/drafts/runtime')
   const hash = await contentHash('draft version')
   f.drafts.set('conflict', { draftId: 'conflict', tabId: 'tab', revision: 2, content: 'draft version', contentHash: hash, origin: 'document', objectId: 'object', baseVersion: hash,
@@ -64,8 +64,8 @@ test('conflict UI shows both versions, uses checked overwrite, preserves disk an
   assert.ok(newTab)
   assert.equal(newTab.path, null)
   assert.equal(newTab.content, 'draft version')
-  await click('选择文件夹')
-  await click('确认保存')
+  await click('其他位置…')
+  await click('确认')
   assert.equal(useDocTabs.getState().tabs.find(tab => tab.id === newTab.id)?.objectId, 'object')
   assert.equal(useDraftUI.getState().saveTabId, null)
   assert.equal(f.drafts.get('conflict')?.state, 'conflict', 'copy does not discard the original')

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { readFileSync, statSync } from 'node:fs'
 import { readFile, rm } from 'node:fs/promises'
-import { basename, dirname, extname, join } from 'node:path'
+import { basename, dirname, extname, join, relative } from 'node:path'
 import { z } from 'zod'
 import {
   DocumentDraftSchema, DraftCreateSchema, DraftFinalizeInputSchema, DraftIdSchema, DraftRevisionSchema,
@@ -10,14 +10,17 @@ import {
   type DraftFinalizeReceipt, type DraftReceipt, type LegacyDraftItem, type LegacyDraftReceipt,
 } from '../../../shared/document-drafts'
 import { readDocumentSource, setFrontmatterFields } from '../../../shared/document-operations'
+import { rewriteMarkdownMediaRefs } from '../../../shared/markdown-asset-refs'
+import { CanvasPathSchema } from '../../../shared/ready-canvas/schema'
 import type { DatabaseConnection } from '../database/connection'
 import { ObjectRegistry, objectTransaction } from '../object-service/registry'
 import { checkedPath, collision, draftError, ensureDirectory, existsIgnoringCase, filename, hashBytes, publishNewFile, realParent, stageFile, vaultRoot } from './files'
 
-interface Dependencies {
+export interface DraftDependencies {
   registry: ObjectRegistry
   index(vaultRoot: string, path: string): Promise<void>
   beforePublish?(): void | Promise<void>
+  completeCanvas?(draft: DocumentDraft, receipt: DraftFinalizeReceipt, keep: boolean): Promise<void>
 }
 const select = `SELECT draft_id AS draftId, tab_id AS tabId, vault_root AS vaultRoot, revision, content, content_hash AS contentHash,
   origin, object_id AS objectId, base_version AS baseVersion, suggested_parent AS suggestedParent,
@@ -33,7 +36,7 @@ function receipt(draft: DocumentDraft): DraftReceipt {
 
 export class DocumentDraftService {
   private readonly pending = new Map<string, { input: string; promise: Promise<DraftFinalizeReceipt> }>()
-  constructor(private readonly db: DatabaseConnection, private readonly dependencies: Dependencies) {
+  constructor(private readonly db: DatabaseConnection, private readonly dependencies: DraftDependencies) {
     // One service is created at Main startup. Interrupted intents remain attached and retryable.
     db.prepare("UPDATE document_drafts SET state='editing' WHERE state='finalizing'").run()
   }
@@ -158,6 +161,9 @@ export class DocumentDraftService {
     const directory = info.isDirectory() ? parentPath : join(dirname(parentPath), basename(parentPath, extname(parentPath)))
     checkedPath(draft.vaultRoot, directory)
     const path = join(directory, `${name}.md`)
+    if (draft.origin === 'canvas' && request.keepDocumentCard !== false && !CanvasPathSchema.safeParse(relative(draft.vaultRoot, path)).success) {
+      throw draftError('invalid_canvas_path', '画板无法引用此路径，请使用不含 #、% 等特殊字符的名称或位置')
+    }
     if (existsIgnoringCase(path)) throw collision(path)
     const claimed = this.db.prepare("SELECT draft_id FROM document_drafts WHERE json_extract(finalize_json,'$.path')=? AND state<>'discarded'").get(path)
     if (claimed) throw collision(path)
@@ -168,6 +174,11 @@ export class DocumentDraftService {
     if (name !== request.title || 'ready_id' in fields) content = setFrontmatterFields(content, {
       set: name !== request.title ? { title: request.title } : {}, remove: ['ready_id'],
     })
+    if (draft.origin === 'canvas' && request.keepDocumentCard !== false) {
+      content = setFrontmatterFields(content, { set: { ready_id: registry.reserve(path).id } })
+    }
+    const media = new Map(draft.attachments.filter(item => item.markdownPath).map(item => [item.markdownPath!, `${name}.assets/${item.name}`]))
+    content = rewriteMarkdownMediaRefs(content, ref => ref.localCandidate && media.has(ref.localCandidate) ? encodeURI(media.get(ref.localCandidate)!) : null)
     const stagingDirectory = join(draft.vaultRoot, '.ready', 'draft-finalize', draft.draftId)
     const files: DraftFinalizeIntent['files'] = draft.attachments.map((attachment, i) => ({
       path: join(directory, `${name}.assets`, attachment.name), stagePath: join(stagingDirectory, String(i)),
@@ -183,9 +194,11 @@ export class DocumentDraftService {
     if (this.baseChanged(draft)) this.conflict(draft)
     if (draft.finalize?.receipt) return draft.finalize.receipt
     if (draft.state !== 'editing') throw draftError('invalid_state', 'draft cannot be finalized in its current state')
+    if (draft.origin === 'canvas' && !this.dependencies.completeCanvas) throw draftError('canvas_unavailable', '画板保存服务尚未接通')
     const intent = draft.finalize ?? this.prepare(draft, request)
     try {
       draft = this.write({ ...draft, state: 'finalizing', finalize: intent }, draft.revision)
+      if (intent.publishedReceipt) return await this.completeFinalization(draft, intent.publishedReceipt)
       ensureDirectory(draft.vaultRoot, intent.directory)
       ensureDirectory(draft.vaultRoot, intent.stagingDirectory)
       for (const file of intent.files) {
@@ -209,20 +222,33 @@ export class DocumentDraftService {
       if (object.identity_state === 'conflict' || object.content_hash !== intent.contentHash) throw draftError('identity_conflict', 'published object identity readback mismatch')
       await this.dependencies.index(draft.vaultRoot, intent.path)
       if (this.baseChanged(draft)) this.conflict(draft)
-      // Recheck after the asynchronous index before acknowledging durable completion.
-      for (const file of intent.files) {
-        if (hashBytes(await readFile(checkedPath(draft.vaultRoot, file.path))) !== file.contentHash) throw draftError('readback_mismatch', 'final file readback mismatch')
-      }
       const result: DraftFinalizeReceipt = { operationId: request.operationId, draftId, revision: draft.revision,
         objectId: object.id, path: intent.path, contentHash: intent.contentHash, parentObjectId: intent.parentObjectId }
-      draft = this.write({ ...draft, state: 'finalized', finalize: { ...intent, receipt: result } }, draft.revision)
-      await rm(checkedPath(draft.vaultRoot, intent.stagingDirectory), { recursive: true })
-      return draft.finalize!.receipt!
+      return await this.completeFinalization(draft, result)
     } catch (error) {
       const current = this.require(draftId)
       if (current.state === 'finalizing') this.write({ ...current, state: 'editing' }, current.revision)
       throw error
     }
+  }
+
+  private async verifyFinalFiles(draft: DocumentDraft): Promise<void> {
+    for (const file of draft.finalize!.files) {
+      if (hashBytes(await readFile(checkedPath(draft.vaultRoot, file.path))) !== file.contentHash) throw draftError('readback_mismatch', '已保存文件发生变化，未覆盖文件')
+    }
+  }
+  private async completeFinalization(draft: DocumentDraft, result: DraftFinalizeReceipt): Promise<DraftFinalizeReceipt> {
+    await this.verifyFinalFiles(draft)
+    if (!draft.finalize!.publishedReceipt) draft = this.write({ ...draft, finalize: { ...draft.finalize!, publishedReceipt: result } }, draft.revision)
+    const intent = draft.finalize!
+    if (draft.origin === 'canvas') {
+      try { await this.dependencies.completeCanvas!(draft, result, intent.request.keepDocumentCard !== false) }
+      catch (error) { throw draftError('canvas_pending', `文档已保存，画板待完成：${error instanceof Error ? error.message : String(error)}`) }
+      await this.verifyFinalFiles(draft)
+    }
+    const saved = this.write({ ...draft, state: 'finalized', finalize: { ...intent, receipt: result } }, draft.revision)
+    await rm(checkedPath(draft.vaultRoot, intent.stagingDirectory), { recursive: true, force: true })
+    return saved.finalize!.receipt!
   }
 
   importLegacy(rootPath: string, items: LegacyDraftItem[]): LegacyDraftReceipt[] {
