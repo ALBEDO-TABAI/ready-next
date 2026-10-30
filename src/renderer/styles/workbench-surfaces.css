@@ -86,10 +86,9 @@ html[data-skin='liquid-glass'] .glass-surface-card {
 }
 
 /* Frosted "glass slider" action button — the same thumb recipe as
- * .icon-rail-slider__thumb / .draggable-mode-tabs__thumb, generalized into a
- * standalone CTA. Used for empty-state actions (build index, open folder) so a
- * single visual standard covers the rail thumb and these buttons. Blue content
- * sits on the frosted surface, mirroring the active rail icon. */
+ * .draggable-mode-tabs__thumb, generalized into a standalone CTA. Used for
+ * empty-state actions (build index, open folder) so a single visual standard
+ * covers the slider thumb and these buttons. */
 .ready-glass-button {
   position: relative;
   display: inline-flex;

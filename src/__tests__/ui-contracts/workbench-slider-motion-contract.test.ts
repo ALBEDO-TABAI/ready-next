@@ -7,7 +7,7 @@ function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-test('icon rail slider reuses the same motion profile as the workbench mode slider', () => {
+test('icon rail buttons reuse the same motion profile as the workbench mode slider', () => {
   const modeTabs = readWorkspaceFile('src/renderer/components/layout/DraggableModeTabs.tsx')
   const iconRailGroup = readWorkspaceFile('src/renderer/components/motion/MorphIconRailGroup.tsx')
   const motionProfile = readWorkspaceFile('src/renderer/modules/workbench/slider-motion.ts')
@@ -22,18 +22,12 @@ test('icon rail slider reuses the same motion profile as the workbench mode slid
   assert.match(modeTabs, /handleMouseUp[\s\S]*startSpringAnimation\(\)/)
 
   assert.match(iconRailGroup, /from '\.\.\/\.\.\/modules\/workbench\/slider-motion'/)
-  // The rail thumb switches with the same direct ease-out click profile as the
-  // mode slider, not the heavy drag spring — so it tracks the click immediately
-  // instead of stalling (the old "disappear then reappear then slide" feel).
+  // The rail buttons' hover/tap feedback uses the same direct ease-out click
+  // profile as the mode slider, not the heavy drag spring. The sliding thumb
+  // itself retired with the flush-rail redesign (2026-10-30).
   assert.match(iconRailGroup, /WORKBENCH_SLIDER_CLICK_TRANSITION/)
   assert.match(iconRailGroup, /REDUCED_MOTION_TRANSITION/)
-  assert.match(iconRailGroup, /const ICON_RAIL_ITEM_PITCH = 40/)
-  assert.match(iconRailGroup, /const thumbIndex = Math\.max\(items\.findIndex\(\(\{ id \}\) => id === activeId\), 0\)/)
-  assert.match(iconRailGroup, /const thumbOffset = thumbIndex \* ICON_RAIL_ITEM_PITCH/)
-  // initial={false} keeps the thumb painted at its current slot on (re)mount so
-  // it never plays an enter animation before sliding.
-  assert.match(iconRailGroup, /initial=\{false\}/)
-  assert.match(iconRailGroup, /animate=\{\{ y: thumbOffset \}\}/)
+  assert.doesNotMatch(iconRailGroup, /thumbOffset/)
   assert.doesNotMatch(iconRailGroup, /layoutId=\{`\$\{layoutId\}-thumb`\}/)
   assert.doesNotMatch(iconRailGroup, /<motion\.button[\s\S]*layout/)
   assert.doesNotMatch(iconRailGroup, /THUMB_LIFT_BEFORE_SLIDE_MS = 1500/)

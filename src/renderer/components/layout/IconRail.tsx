@@ -1,10 +1,13 @@
 import {
   IconFolder,
+  IconFolderFilled,
   IconLink,
   IconPuzzle,
+  IconPuzzleFilled,
   IconSearch,
   IconSettings,
   IconSitemap,
+  IconSitemapFilled,
 } from '@tabler/icons-react'
 import { type CSSProperties, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
@@ -27,12 +30,13 @@ interface IconRailProps {
 
 type SettingsMenuItem = 'user' | 'theme' | 'settings'
 
+// 闭合图形激活时换实心字形；搜索、链接是开放线条，不给 activeIcon，激活时加粗描边并发光。
 const topIcons = [
-  { id: 'folder', icon: IconFolder, label: '文件' },
+  { id: 'folder', icon: IconFolder, activeIcon: IconFolderFilled, label: '文件' },
   { id: 'search', icon: IconSearch, label: '搜索' },
-  { id: 'skills', icon: IconPuzzle, label: '技能中心' },
+  { id: 'skills', icon: IconPuzzle, activeIcon: IconPuzzleFilled, label: '技能中心' },
   { id: 'backlinks', icon: IconLink, label: '反向链接' },
-  { id: 'graph', icon: IconSitemap, label: '关系图谱' },
+  { id: 'graph', icon: IconSitemap, activeIcon: IconSitemapFilled, label: '关系图谱' },
 ]
 
 export default function IconRail({ activeIcon = 'folder', onIconClick, hidden = false, expanded = true }: IconRailProps) {

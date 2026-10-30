@@ -187,10 +187,8 @@ test('liquid glass sliders preserve the groove and use lens-backed convex thumbs
   const modeTabs = readWorkspaceFile('src/renderer/components/layout/DraggableModeTabs.tsx')
   const modeSwitch = readWorkspaceFile('src/renderer/components/document/DraggableModeSwitch.tsx')
 
-  const iconRailGroove = findCssBlock(sliderStyles, "html[data-skin='liquid-glass'] .icon-rail-slider")
   const modeTabsGroove = findCssBlock(sliderStyles, "html[data-skin='liquid-glass'] .draggable-mode-tabs")
   const documentSwitchGroove = findCssBlock(appStyles, "html[data-skin='liquid-glass'] .draggable-mode-switch")
-  const iconRailThumb = findCssBlock(sliderStyles, "html[data-skin='liquid-glass'] .icon-rail-slider__thumb")
   const modeTabsThumb = findCssBlock(sliderStyles, "html[data-skin='liquid-glass'] .draggable-mode-tabs__thumb")
   const documentSwitchThumb = findCssBlock(appStyles, "html[data-skin='liquid-glass'] .draggable-mode-switch__thumb")
   const darkDocumentSwitchGroove = findCssBlock(appStyles, "html[data-theme='dark'][data-skin='liquid-glass'] .draggable-mode-switch")
@@ -214,16 +212,9 @@ test('liquid glass sliders preserve the groove and use lens-backed convex thumbs
   const darkAppModeTabsGroove = findCssBlock(appModeTabsSection, "html[data-theme='dark'][data-skin='liquid-glass'] .draggable-mode-tabs")
   const darkAppModeTabsThumb = findCssBlock(appModeTabsSection, "html[data-theme='dark'][data-skin='liquid-glass'] .draggable-mode-tabs__thumb")
 
-  // 8ab48cd7 style(ui): checkpoint liquid glass polish — icon rail 槽改为中性实底凹槽：
-  // thumb 不再放大（1），边线亮描边，实体底色，双 inset 塑形，去掉 backdrop 模糊。
-  assert.match(iconRailGroove, /--ready-workbench-slider-thumb-scale:\s*1;/)
-  assert.match(iconRailGroove, /border-color:\s*rgba\(255, 255, 255, 0\.42\);/)
-  assert.match(iconRailGroove, /background:\s*rgba\(214, 214, 211, 0\.84\);/)
-  assert.match(
-    iconRailGroove,
-    /inset 0 1px 0 rgba\(255, 255, 255, 0\.46\),\s*inset 0 -1px 0 rgba\(42, 45, 48, 0\.045\)/,
-  )
-  assert.match(iconRailGroove, /backdrop-filter:\s*none;/)
+  // 2026-10-30 icon rail 退出凹槽 + 透镜 thumb 体系，改为贴边图标列：liquid 皮肤不再给它槽底或 thumb。
+  assert.doesNotMatch(sliderStyles, /html\[data-skin='liquid-glass'\] \.icon-rail-slider(?:__thumb)?\s*\{/)
+  assert.doesNotMatch(iconRail, /LiquidLens/)
   // 8ab48cd7 — 工作台四模式槽改为 Ready 橙渐变轨道（thumb 1.04，实体投影，无 backdrop 模糊）。
   assert.match(modeTabsGroove, /--ready-workbench-slider-thumb-scale:\s*1\.04;/)
   assert.match(
@@ -272,7 +263,7 @@ test('liquid glass sliders preserve the groove and use lens-backed convex thumbs
   assert.match(darkChatModeDockSurface, /inset 0 1px 0 rgba\(232,\s*232,\s*232,\s*0\.14\)/)
   assert.match(darkChatModeDockProjection, /filter:\s*blur\(3\.5px\) saturate\(0\) contrast\(0\.78\) brightness\(0\.78\);/)
 
-  for (const thumbBlock of [iconRailThumb, appModeTabsThumb]) {
+  for (const thumbBlock of [appModeTabsThumb]) {
     assert.match(thumbBlock, /radial-gradient\(ellipse 110% 62% at 50% -12%/)
     assert.match(thumbBlock, /inset 0 -2px 4px/)
     assert.match(thumbBlock, /inset 2px 0 4px/)
@@ -306,13 +297,11 @@ test('liquid glass sliders preserve the groove and use lens-backed convex thumbs
   assert.match(darkDocumentSwitchThumb, /inset 0 0 0 1px rgba\(255, 255, 255, 0\.13\)/)
   assert.doesNotMatch(darkDocumentSwitchThumb, /rgba\(232, 240, 255/)
 
-  assert.match(iconRail, /<LiquidLens[\s\S]*className="ready-slider-thumb-lens"[\s\S]*bevel=\{4\}[\s\S]*depth=\{8\}[\s\S]*ior=\{1\.22\}[\s\S]*dome=\{0\.7\}[\s\S]*strength=\{1\.05\}[\s\S]*blur=\{0\}/)
   assert.match(modeTabs, /from '..\/ui\/liquid-glass\/LiquidBackdropProjection'/)
   assert.match(modeTabs, /<LiquidLens[\s\S]*className="draggable-mode-tabs__surface"[\s\S]*bevel=\{6\}[\s\S]*depth=\{18\.5\}[\s\S]*ior=\{1\.34\}[\s\S]*dome=\{0\.65\}[\s\S]*profile="squircle"[\s\S]*strength=\{2\}[\s\S]*blur=\{3\.5\}[\s\S]*blurBeforeRefraction[\s\S]*backdropContent=\{\(/)
   assert.match(modeTabs, /<LiquidBackdropProjection[\s\S]*className="draggable-mode-tabs__projection"[\s\S]*sourceMaskRadius=\{19\}/)
   assert.match(modeTabs, /<LiquidLens[\s\S]*className="ready-slider-thumb-lens"[\s\S]*bevel=\{6\}[\s\S]*depth=\{14\}[\s\S]*ior=\{1\.3\}[\s\S]*dome=\{1\.15\}[\s\S]*strength=\{1\.42\}[\s\S]*blur=\{0\}/)
   assert.match(modeSwitch, /<LiquidLens[\s\S]*className="ready-slider-thumb-lens"[\s\S]*ior=\{1\.22\}[\s\S]*dome=\{0\.7\}[\s\S]*blur=\{0\}/)
-  assert.match(sliderStyles, /\.icon-rail-slider__thumb\s*\{[\s\S]*transform:\s*scale\(var\(--ready-workbench-slider-thumb-scale, 1\)\);/)
   assert.match(sliderStyles, /\.draggable-mode-tabs__thumb\s*\{[\s\S]*transform:\s*translateX\(calc\(var\(--dmt-thumb-pos[\s\S]*scale\(var\(--ready-workbench-slider-thumb-scale, 1\)\);/)
   // 皮肤缩放变量与预览下沉缩放（sinkScale）在同一 transform 相乘：变量仍生效。
   assert.match(modeSwitch, /scale\(calc\(var\(--ready-document-switch-thumb-scale, 1\) \* \$\{sinkScale\}\)\)/)

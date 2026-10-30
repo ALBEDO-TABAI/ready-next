@@ -40,15 +40,11 @@ test('files side panel shell styling comes from shared shell tokens instead of d
 test('icon rail and mode rail carry their own base materials after the liquid glass polish', () => {
   const styles = readWorkspaceFile('src/renderer/styles/workbench-sliders.css')
 
-  // 8ab48cd7 style(ui): checkpoint liquid glass polish — 基础槽位不再消费共享 rail-slot token：
-  // icon rail 改中性实底凹槽，四模式槽改 Ready 橙渐变轨道；track/::before 覆层同步去 token 化。
-  assert.match(styles, /\.icon-rail-slider\s*\{[\s\S]*?border:\s*0\.5px solid rgba\(255, 255, 255, 0\.34\)/)
-  assert.match(styles, /\.icon-rail-slider\s*\{[\s\S]*?background:\s*rgba\(214, 214, 211, 0\.86\)/)
-  assert.match(
-    styles,
-    /\.icon-rail-slider\s*\{[\s\S]*?box-shadow:\s*inset 0 1px 0 rgba\(255, 255, 255, 0\.46\),\s*inset 0 -1px 0 rgba\(42, 45, 48, 0\.045\)/,
-  )
-  assert.match(styles, /\.icon-rail-slider__track\s*\{[\s\S]*?background:\s*transparent/)
+  // 8ab48cd7 style(ui): checkpoint liquid glass polish — 基础槽位不再消费共享 rail-slot token；四模式槽改 Ready 橙渐变轨道。
+  // 2026-10-30 icon rail 改为贴边图标列：无槽底、无 track，配色只走自身 --icon-rail-* 令牌。
+  assert.match(styles, /\.icon-rail-slider\s*\{[\s\S]*?background:\s*transparent/)
+  assert.match(styles, /\.icon-rail-slider\s*\{[\s\S]*?--icon-rail-ink:\s*var\(--text-muted\)/)
+  assert.doesNotMatch(styles, /\.icon-rail-slider__track/)
 
   assert.match(
     styles,

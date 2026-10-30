@@ -20,12 +20,10 @@ test('MorphIconRailGroup no longer drives thumb state through setTimeout chains'
   assert.match(source, /data-expanded=\{expanded \? 'true' : 'false'\}/)
 })
 
-test('workbench-sliders.css only sinks the icon rail thumb when the side panel is collapsed', () => {
+test('workbench-sliders.css keeps no icon rail thumb after the flush-rail redesign', () => {
   const css = readWorkspaceFile('src/renderer/styles/workbench-sliders.css')
 
-  assert.match(css, /\.icon-rail-slider\[data-expanded='false'\] \.icon-rail-slider__thumb/)
-  assert.doesNotMatch(css, /\.icon-rail-slider:has\(\.icon-rail-slider__button:active\) \.icon-rail-slider__thumb/)
-  assert.doesNotMatch(css, /\.icon-rail-slider__thumb\.is-pressing/)
-  assert.doesNotMatch(css, /\.icon-rail-slider__thumb\.is-resting/)
-  assert.doesNotMatch(css, /\.icon-rail-slider__thumb\.is-elevated/)
+  // 2026-10-30 图标列贴边化：thumb 及其按压/休眠态全部退役；收起侧栏时由按钮 is-remembered 保留激活字形。
+  assert.doesNotMatch(css, /\.icon-rail-slider__thumb/)
+  assert.match(css, /\.icon-rail-slider__button:is\(\.is-active, \.is-remembered\)/)
 })

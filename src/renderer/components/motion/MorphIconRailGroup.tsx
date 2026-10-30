@@ -1,6 +1,5 @@
 import type { CSSProperties, ElementType } from 'react'
 import { MotionConfig, motion, useReducedMotion } from 'framer-motion'
-import { LiquidLens } from '../ui/liquid-glass/LiquidLens'
 import {
   REDUCED_MOTION_TRANSITION,
   WORKBENCH_SLIDER_CLICK_TRANSITION,
@@ -10,6 +9,8 @@ interface RailItem {
   id: string
   label: string
   icon: ElementType
+  /** 闭合图形的激活态实心（负向填充）字形；缺省时激活态改为加粗描边 + 发光。 */
+  activeIcon?: ElementType
 }
 
 interface MorphIconRailGroupProps {
@@ -22,8 +23,6 @@ interface MorphIconRailGroupProps {
   style?: CSSProperties
 }
 
-const ICON_RAIL_ITEM_PITCH = 40
-
 export default function MorphIconRailGroup({
   items,
   activeId,
@@ -35,8 +34,6 @@ export default function MorphIconRailGroup({
 }: MorphIconRailGroupProps) {
   const reduceMotion = useReducedMotion()
   const transition = reduceMotion ? REDUCED_MOTION_TRANSITION : WORKBENCH_SLIDER_CLICK_TRANSITION
-  const thumbIndex = Math.max(items.findIndex(({ id }) => id === activeId), 0)
-  const thumbOffset = thumbIndex * ICON_RAIL_ITEM_PITCH
 
   return (
     <MotionConfig transition={transition}>
@@ -45,35 +42,7 @@ export default function MorphIconRailGroup({
         className={['icon-rail-slider', className].filter(Boolean).join(' ')}
         style={style}
       >
-        <div className="icon-rail-slider__track" />
-        <motion.span
-          aria-hidden="true"
-          className="icon-rail-slider__thumb-shell"
-          initial={false}
-          animate={{ y: thumbOffset }}
-          transition={transition}
-        >
-          <span className="icon-rail-slider__thumb">
-            <LiquidLens
-              className="ready-slider-thumb-lens"
-              style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
-              radius={16}
-              bevel={4}
-              depth={8}
-              ior={1.22}
-              dome={0.7}
-              strength={1.05}
-              blur={0}
-              frost={0}
-              saturation={1}
-              brightness={1}
-              contrast={1}
-              aberration={0}
-              engine="backdrop"
-            />
-          </span>
-        </motion.span>
-        {items.map(({ id, label, icon: Icon }) => {
+        {items.map(({ id, label, icon: Icon, activeIcon: ActiveIcon }) => {
           const isActive = activeId === id && expanded
           const isRemembered = activeId === id && !expanded
           return (
@@ -83,12 +52,15 @@ export default function MorphIconRailGroup({
               onClick={() => onSelect?.(id)}
               title={label}
               aria-label={label}
+              aria-pressed={isActive}
+              data-active-glyph={ActiveIcon ? 'fill' : 'stroke'}
               whileHover={!reduceMotion ? { y: -0.4 } : undefined}
               whileTap={!reduceMotion ? { scale: 0.992, y: 0.4 } : undefined}
               className={`icon-rail-slider__button ${isRemembered ? 'is-remembered' : ''}${isActive ? ' is-active' : ''}`}
             >
               <span className="icon-rail-slider__button-icon">
-                <Icon className="h-[15px] w-[15px]" strokeWidth={1.8} />
+                <Icon className="icon-rail-slider__glyph is-outline" strokeWidth={1.8} />
+                {ActiveIcon ? <ActiveIcon className="icon-rail-slider__glyph is-filled" aria-hidden="true" /> : null}
               </span>
             </motion.button>
           )

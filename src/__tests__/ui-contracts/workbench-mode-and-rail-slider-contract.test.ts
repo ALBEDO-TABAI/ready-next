@@ -7,7 +7,7 @@ function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-test('workbench mode switch and icon rail keep the current Ready accent and slider geometry', () => {
+test('workbench mode switch keeps the Ready accent slider geometry and the icon rail sits flush on the frame', () => {
   const modeTabs = readWorkspaceFile('src/renderer/components/layout/DraggableModeTabs.tsx')
   const iconRail = readWorkspaceFile('src/renderer/components/layout/IconRail.tsx')
   const iconRailGroup = readWorkspaceFile('src/renderer/components/motion/MorphIconRailGroup.tsx')
@@ -17,20 +17,17 @@ test('workbench mode switch and icon rail keep the current Ready accent and slid
 
   assert.match(iconRail, /className="icon-rail-slider-shell"/)
   assert.match(iconRailGroup, /icon-rail-slider/)
-  assert.match(iconRailGroup, /className="icon-rail-slider__track"/)
-  assert.match(iconRailGroup, /className="icon-rail-slider__thumb-shell"/)
-  assert.match(iconRailGroup, /animate=\{\{ y: thumbOffset \}\}/)
-  assert.match(iconRailGroup, /icon-rail-slider__thumb/)
   assert.match(iconRailGroup, /className=\{`icon-rail-slider__button/)
-  assert.doesNotMatch(iconRailGroup, /layoutId=\{`\$\{layoutId\}-thumb`\}/)
   assert.doesNotMatch(iconRailGroup, /<motion\.button[\s\S]*layout/)
+  // 2026-10-30 图标列改为 Codex 式贴边：无槽底、无滑块 thumb（激活字形行为见 icon-rail-active-glyph.test.tsx）。
+  assert.doesNotMatch(iconRailGroup, /icon-rail-slider__(?:track|thumb)/)
+  assert.doesNotMatch(styles, /icon-rail-slider__(?:track|thumb)/)
 
   assert.match(styles, /\.icon-rail-slider\s*\{[\s\S]*?flex-direction:\s*column/)
-  assert.match(styles, /\.icon-rail-slider\s*\{[\s\S]*?border-radius:\s*19px/)
+  assert.match(styles, /\.icon-rail-slider\s*\{[\s\S]*?background:\s*transparent/)
+  assert.doesNotMatch(styles, /\.icon-rail-slider\s*\{[^}]*border-radius/)
   assert.match(styles, /\.icon-rail-slider-shell\s*\{[\s\S]*?width:\s*100%/)
   assert.match(styles, /\.icon-rail-slider-shell\s*\{[\s\S]*?justify-content:\s*flex-start/)
-  assert.match(styles, /\.icon-rail-slider__thumb-shell\s*\{[\s\S]*?display:\s*none/)
-  assert.match(styles, /\.icon-rail-slider__button\s*\{[\s\S]*?z-index:\s*3/)
 
   assert.match(modeTabs, /<Icon style=\{\{ width: 15, height: 15 \}\} strokeWidth=\{2\} \/>/)
   assert.match(styles, /\.draggable-mode-tabs\s*\{[\s\S]*?width:\s*140px/)

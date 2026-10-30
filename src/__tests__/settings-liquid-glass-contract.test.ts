@@ -100,8 +100,7 @@ test('workbench side and chat panels stay transparent while slots use the shared
   // c17b8883 Polish liquid glass workbench controls — 槽位内阴影收敛 0.11 → 0.10
   assert.match(styles, /html\[data-skin='liquid-glass'\],\s*html\[data-fastcard-overlay-window='true'\]\s*\{[\s\S]*?--workbench-rail-slot-shadow:\s*[\s\S]*?inset 0 1\.5px 3px rgba\(24,\s*39,\s*77,\s*0\.10\)/)
   // 8ab48cd7 style(ui): checkpoint liquid glass polish — 槽位不再引用共享 rail-slot token：
-  // icon rail 改中性实底凹槽，四模式槽改 Ready 橙渐变轨道（真值详钉在 workbench-liquid-shell-contract）。
-  assert.match(sliderStyles, /html\[data-skin='liquid-glass'\] \.icon-rail-slider\s*\{[\s\S]*?background:\s*rgba\(214, 214, 211, 0\.84\)/)
+  // 四模式槽改 Ready 橙渐变轨道（真值详钉在 workbench-liquid-shell-contract）；icon rail 2026-10-30 起贴边无槽。
   assert.match(sliderStyles, /html\[data-skin='liquid-glass'\] \.draggable-mode-tabs\s*\{[\s\S]*?background:\s*linear-gradient\(180deg, color-mix\(in srgb, var\(--color-ready-orange, #ff4b2b\) 82%, white\) 0%/)
   assert.match(sidePanel, /background:\s*'transparent'/)
   assert.match(chatPanel, /background:\s*'transparent'/)

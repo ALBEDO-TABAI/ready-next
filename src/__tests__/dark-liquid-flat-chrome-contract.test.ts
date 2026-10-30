@@ -68,31 +68,20 @@ test('the four-mode switch track kills the old top sheen through shared dark liq
     themeStyles,
     /html\[data-theme='dark'\]\[data-skin='liquid-glass'\]\s*\{[\s\S]*?--workbench-rail-slot-shadow:\s*[\s\S]*?inset 0 1\.5px 3px rgba\(0,\s*0,\s*0,\s*0\.36\)/,
   )
-  // 8ab48cd7 — track 覆层退役为 transparent（sheen 由 ::before/thumb 自绘承担）
-  assert.match(
-    styles,
-    /\.icon-rail-slider__track\s*\{[\s\S]*?background:\s*transparent;/,
-  )
-  // 8ab48cd7 — icon rail 槽改中性实底凹槽（无 backdrop 模糊）
-  assert.match(
-    styles,
-    /html\[data-skin='liquid-glass'\] \.icon-rail-slider\s*\{[\s\S]*?background:\s*rgba\(214, 214, 211, 0\.84\);[\s\S]*?backdrop-filter:\s*none;/,
-  )
+  // 2026-10-30 — icon rail 改为贴边图标列：无 track、无槽底（明暗两套均无专属槽块）
+  assert.doesNotMatch(styles, /\.icon-rail-slider__track/)
+  assert.doesNotMatch(styles, /html\[data-skin='liquid-glass'\] \.icon-rail-slider\s*\{/)
   // 8ab48cd7 — 四模式槽改 Ready 橙渐变轨道（无 backdrop 模糊）
   assert.match(
     styles,
     /html\[data-skin='liquid-glass'\] \.draggable-mode-tabs\s*\{[\s\S]*?background:\s*linear-gradient\(180deg, color-mix\(in srgb, var\(--color-ready-orange, #ff4b2b\) 82%, white\) 0%[\s\S]*?backdrop-filter:\s*none;/,
   )
-  // 8ab48cd7 — 暗色两槽拆分为独立块并自带材质：icon rail 深灰实底、四模式深橙渐变，均无 backdrop
-  assert.match(
-    styles,
-    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.icon-rail-slider\s*\{[\s\S]*?border-color:\s*rgba\(235, 235, 230, 0\.08\);[\s\S]*?background:\s*rgba\(58, 59, 57, 0\.74\);[\s\S]*?backdrop-filter:\s*none;/,
-  )
+  // 8ab48cd7 — 暗色四模式槽自带深橙渐变材质，无 backdrop；icon rail 2026-10-30 起无暗色槽块
+  assert.doesNotMatch(styles, /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.icon-rail-slider\s*\{/)
   assert.match(
     styles,
     /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.draggable-mode-tabs\s*\{[\s\S]*?linear-gradient\(180deg, color-mix\(in srgb, var\(--color-ready-orange, #ff6345\) 72%, #2a0b04\) 0%[\s\S]*?backdrop-filter:\s*none;/,
   )
-  // 8ab48cd7 — 暗色 thumb 改暖灰实体渐变 + 亮描边
-  assert.match(styles, /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.icon-rail-slider__thumb,[\s\S]*?linear-gradient\(180deg, rgba\(225, 225, 218, 0\.90\) 0%, rgba\(176, 178, 171, 0\.86\) 100%\)[\s\S]*?border-color:\s*rgba\(235, 235, 230, 0\.22\);/)
-  assert.doesNotMatch(styles, /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.icon-rail-slider__thumb,[\s\S]*?rgba\(232, 240, 255/)
+  // 8ab48cd7 — 暗色四模式 thumb 改暖灰实体渐变 + 亮描边
+  assert.match(styles, /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.draggable-mode-tabs__thumb\s*\{\s*background:\s*linear-gradient\(180deg, rgba\(225, 225, 218, 0\.90\) 0%, rgba\(176, 178, 171, 0\.86\) 100%\)[\s\S]*?border-color:\s*rgba\(235, 235, 230, 0\.22\);/)
 })
