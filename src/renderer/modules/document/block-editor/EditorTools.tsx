@@ -1,3 +1,4 @@
+import { useAnnotationMenus } from '../annotations/menus'
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { createBlockCommand, parseDocumentBlocks, parseInlineBlock, type DocumentBlock, type DocumentBuffer, type InlineMarks, type InlineModel, type InlineSpan } from '../../../../shared/document-blocks'
@@ -18,6 +19,7 @@ type Picker = Selection & { kind: 'slash' | 'wiki' | 'mention' }
 const widgetInput = { title: '新信息卡', widgetCode: '', skeletonSpec: { skeleton: 'single_focus', size: 'doc_block', props: { title: '新信息卡', body: '填写内容' } } }
 
 export function EditorTools({ buffer, children, report }: { buffer: EditorBuffer; children: ReactNode; report(error: unknown): void }) {
+  const extensions = useAnnotationMenus()
   const tabId = buffer.owner.kind === 'document' ? buffer.owner.tabId : undefined
   const root = useRef<HTMLDivElement>(null)
   const [selection, setSelection] = useState<Selection | null>(null)
@@ -102,6 +104,7 @@ export function EditorTools({ buffer, children, report }: { buffer: EditorBuffer
       buffer.apply(createBlockCommand(current.snapshot, { type: 'replace', block: current.block, markdown: convertBlock(block, kind, eol) }))
       setPicker(null); setRestore({ at: current.block.start, start: 0, end: 0 })
     }) }))
+    items.push(...extensions.slashItems(markdown => slashMarkdown(current, markdown)).map(item => ({ ...item, run: () => { setPicker(null); item.run() } })))
     items.push({ id: 'widget', label: '插入 Widget', run: () => { setPicker(null); setWidget(current) } },
       { id: 'mermaid', label: '插入 Mermaid', run: () => attempt(() => slashMarkdown(current, `\`\`\`mermaid${eol}graph TD${eol}  A --> B${eol}\`\`\``)) },
       { id: 'columns', label: '插入分栏', run: () => attempt(() => slashMarkdown(current, `<!-- ready:columns widths=1,1 -->${eol}${eol}<!-- ready:column -->${eol}${eol}<!-- ready:columns-end -->`)) },

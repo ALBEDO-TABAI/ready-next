@@ -3375,6 +3375,7 @@ interface ElectronAPI {
   vault: import('../../shared/vault').VaultAPI
   documentDrafts: import('../../shared/document-drafts').DocumentDraftAPI
   documentPages: import('../../shared/document-pages').DocumentPagesAPI
+  documentAnnotations: import('../../shared/document-comments').DocumentAnnotationsAPI
   documentDatabase: (request: import('../../shared/document-database').DatabaseRequest) => Promise<import('../../shared/document-database').DatabaseReply>
   bookSources: import('../../shared/library-sources').BookSourcesAPI
   libraryArchive: import('../../shared/library').LibraryArchiveAPI

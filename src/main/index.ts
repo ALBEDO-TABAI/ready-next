@@ -1,3 +1,4 @@
+import { registerDocumentAnnotationsIPC } from './modules/document-annotations/ipc'
 import { registerCalendarLayersIPC } from './modules/calendar-layers/ipc'
 import { createCalendarLayersResolver } from './modules/calendar-layers/runtime'
 import { createDocumentDatabaseResolver } from './modules/document-database/runtime'
@@ -799,6 +800,9 @@ function setupGlobalIPC(): void {
     pages: documentPages.service, ready: documentPages.ready, writer: getDocumentWriteDependencies,
   })
   registerDocumentDatabaseIPC(ipcMain, documentDatabase)
+  registerDocumentAnnotationsIPC(ipcMain, { pages: documentPages.service, ready: documentPages.ready,
+    vault: new VaultService(new AppSettingsRepository(), { home: app.getPath('home'), userData: app.getPath('userData'), isPackaged: app.isPackaged }),
+  })
   registerCalendarLayersIPC(ipcMain, createCalendarLayersResolver({ pages: documentPages.service, writer: getDocumentWriteDependencies, database: documentDatabase }))
   chatGptOAuthService = setupSettingsIPC({
     onModelChanged: wakeRSSProcessing,
