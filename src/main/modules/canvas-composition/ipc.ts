@@ -4,7 +4,7 @@ import { CanvasComposeInputSchema, CanvasPreviewInputSchema } from '../../../sha
 import type { CanvasCompositionService } from './service'
 
 /** F resolves the active vault and authorizes the sender before returning its service. */
-export function registerCanvasCompositionIPC(ipc: Pick<IpcMain, 'handle'>,
+export function registerCanvasCompositionIPC(ipcMain: Pick<IpcMain, 'handle'>,
   authorizedService: (event: IpcMainInvokeEvent) => Promise<CanvasCompositionService>): void {
   const reply = async <T>(event: IpcMainInvokeEvent, work: (service: CanvasCompositionService) => T | Promise<T>): Promise<DraftResult<T>> => {
     try { return { ok: true, value: await work(await authorizedService(event)) } }
@@ -12,7 +12,7 @@ export function registerCanvasCompositionIPC(ipc: Pick<IpcMain, 'handle'>,
       code: error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : 'composition_failed',
       message: error instanceof Error ? error.message : String(error) } }
   }
-  ipc.handle('canvasComposition:compose', (event, input: unknown) => reply(event, service => service.compose(CanvasComposeInputSchema.parse(input))))
-  ipc.handle('canvasComposition:recover', event => reply(event, service => service.recover()))
-  ipc.handle('canvasComposition:preview', (event, input: unknown) => reply(event, service => service.preview(CanvasPreviewInputSchema.parse(input))))
+  ipcMain.handle('canvasComposition:compose', (event, input: unknown) => reply(event, service => service.compose(CanvasComposeInputSchema.parse(input))))
+  ipcMain.handle('canvasComposition:recover', event => reply(event, service => service.recover()))
+  ipcMain.handle('canvasComposition:preview', (event, input: unknown) => reply(event, service => service.preview(CanvasPreviewInputSchema.parse(input))))
 }

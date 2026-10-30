@@ -7,10 +7,6 @@ import {
   isComposerAuthorityCurrent,
 } from '../../../../modules/agent/composer-authority'
 import { createLocalPathAttachment, getPathBasename } from '../attachments-helpers'
-import {
-  parseReadyBoardResourceDragPayload,
-  READY_BOARD_RESOURCE_MIME,
-} from '../../../../utils/boardTransfer'
 
 export interface UseAttachmentIntakeParams {
   addAttachments: (attachments: ChatAttachment[]) => void
@@ -34,29 +30,6 @@ export function useAttachmentIntake(params: UseAttachmentIntakeParams): Attachme
       e.stopPropagation()
       setIsDragOver(false)
       const composerAuthority = captureComposerAuthority(useAgent.getState())
-
-      const boardRaw = e.dataTransfer.getData(READY_BOARD_RESOURCE_MIME)
-      const boardPayload = parseReadyBoardResourceDragPayload(boardRaw)
-      if (boardPayload) {
-        const fileAttachments = boardPayload.resources
-          .filter((resource) => resource.kind === 'file')
-          .map((resource) => createLocalPathAttachment({
-            name: resource.title || resource.name,
-            path: resource.path,
-            ext: resource.ext,
-            size: resource.size,
-            isDirectory: false,
-          }))
-        if (fileAttachments.length > 0) addAttachments(fileAttachments)
-        const textResources = boardPayload.resources.filter((resource) => resource.kind === 'text')
-        if (textResources.length > 0) {
-          const currentInput = useAgent.getState().inputValue
-          const snippet = ['### 画布引用', ...textResources.map((resource) => resource.text)].join('\n\n')
-          setInputValue(currentInput ? `${currentInput}\n\n${snippet}` : snippet)
-        }
-        focusInputWithResize()
-        return
-      }
 
       const readyRaw = e.dataTransfer.getData('application/x-ready-drag')
       if (readyRaw) {

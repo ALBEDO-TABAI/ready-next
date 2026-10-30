@@ -38,7 +38,7 @@ test('selection-only document links remain actionable in the visible mode', () =
 
 test('a board remains active when file tree already prepared the selected document in background', () => {
   const boardTabs: DocTab[] = [
-    { id: 'board', path: '/workspace/canvas.readyboard', title: 'canvas', content: '', isDirty: false },
+    { id: 'board', path: '/workspace/canvas.canvas', title: 'canvas', content: '', isDirty: false },
     tabs[1],
   ]
   assert.equal(shouldHandleSelectedDocument({

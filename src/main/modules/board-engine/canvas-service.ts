@@ -20,6 +20,7 @@ export interface CanvasSyncRequest {
   confirmation?: CanvasBufferConfirmation; canvas?: ReadyCanvas; dirty?: boolean
 }
 export interface CanvasDependencies {
+  changed?(objectId: string): void
   stage?: typeof stageFile
   publish?: typeof publishFileAtomically
   readback?(path: string): Promise<Buffer>
@@ -51,6 +52,7 @@ export class CanvasService {
   private row(id: string): Row | undefined { return this.registry.db.prepare('SELECT * FROM canvas_operations WHERE id=?').get<Row>(id) }
   private saveResult(id: string, state: string, result: CanvasWriteResult): CanvasWriteResult {
     this.registry.db.prepare('UPDATE canvas_operations SET state=?,result_json=?,error=NULL WHERE id=?').run(state, JSON.stringify(result), id)
+    if (result.state === 'completed') this.dependencies.changed?.(result.objectId)
     return result
   }
   private objectPath(id: string): string {

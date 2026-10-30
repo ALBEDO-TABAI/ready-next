@@ -6,11 +6,7 @@ import { pathToFileURL } from 'node:url'
 import JSZip from 'jszip'
 import * as XLSX from 'xlsx'
 
-import {
-  buildReadyBoardHtml,
-  createEmptyReadyBoardState,
-  type ReadyBoardNode,
-} from '../src/shared/ready-board'
+import { serializeCanvas, type CanvasNode, type ReadyCanvas } from '../src/shared/ready-canvas'
 
 const DEFAULT_OUTPUT = join(tmpdir(), 'ready-document-perf-fixtures')
 
@@ -68,17 +64,16 @@ function buildLongMarkdown(): string {
   return `${lines.slice(0, 5_000).join('\n')}\n`
 }
 
-function buildBoardNodes(): ReadyBoardNode[] {
+function buildBoardNodes(): CanvasNode[] {
   return Array.from({ length: 150 }, (_, index) => ({
     id: `perf-node-${index + 1}`,
-    type: 'note' as const,
+    type: 'text' as const,
     x: (index % 15) * 220,
     y: Math.floor(index / 15) * 150,
     width: 190,
     height: 120,
     text: `性能节点 ${index + 1}`,
-    color: '#1f2937',
-    background: index % 2 === 0 ? '#fef3c7' : '#dbeafe',
+    ready: { kind: 'note' as const, appearance: { color: '#1f2937', background: index % 2 === 0 ? '#fef3c7' : '#dbeafe' } },
   }))
 }
 
@@ -147,22 +142,14 @@ export async function generateDocumentPerfFixtures(outputDir = DEFAULT_OUTPUT): 
     await writeFile(join(imageDir, `image-${label}.svg`), svg)
   }
 
-  const board = createEmptyReadyBoardState('150 节点性能画布')
-  board.nodes = buildBoardNodes()
-  board.updatedAt = new Date(0).toISOString()
-  const secondaryBoard = createEmptyReadyBoardState('第二画布')
-  secondaryBoard.nodes = buildBoardNodes().slice(0, 30).map((node, index) => ({
-    ...node,
-    id: `secondary-node-${index + 1}`,
-    text: `第二画布节点 ${index + 1}`,
-  }))
-  secondaryBoard.updatedAt = new Date(0).toISOString()
+  const board: ReadyCanvas = { nodes: buildBoardNodes(), edges: [], ready: { id: 'perf-main', schemaVersion: 1, title: '150 节点性能画布' } }
+  const secondaryBoard: ReadyCanvas = { nodes: buildBoardNodes().slice(0, 30), edges: [], ready: { id: 'perf-secondary', schemaVersion: 1, title: '第二画布' } }
 
   const files = {
     markdown: 'long-rich-document.md',
     secondaryMarkdown: 'secondary-document.md',
-    board: 'large-board.readyboard',
-    secondaryBoard: 'secondary-board.readyboard',
+    board: 'large-board.canvas',
+    secondaryBoard: 'secondary-board.canvas',
     pdf: '500-pages.pdf',
     docx: 'worker-proof.docx',
     xlsx: 'worker-proof.xlsx',
@@ -172,8 +159,8 @@ export async function generateDocumentPerfFixtures(outputDir = DEFAULT_OUTPUT): 
   await Promise.all([
     writeFile(join(outputDir, files.markdown), buildLongMarkdown()),
     writeFile(join(outputDir, files.secondaryMarkdown), '# 第二文档\n\n用于双栏保存、焦点与外部变更保护验收。\n'),
-    writeFile(join(outputDir, files.board), buildReadyBoardHtml(board)),
-    writeFile(join(outputDir, files.secondaryBoard), buildReadyBoardHtml(secondaryBoard)),
+    writeFile(join(outputDir, files.board), serializeCanvas(board)),
+    writeFile(join(outputDir, files.secondaryBoard), serializeCanvas(secondaryBoard)),
     writeFile(join(outputDir, files.pdf), buildBlankPdf(500)),
     writeFile(join(outputDir, files.docx), docx),
     writeFile(join(outputDir, files.xlsx), buildXlsx()),

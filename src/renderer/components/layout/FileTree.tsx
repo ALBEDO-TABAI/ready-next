@@ -18,7 +18,6 @@ import {
   getActiveRssItemDragPayload,
   getActiveUntitledDocTabDragPayload,
   parseBrowserTabDragPayload,
-  parseReadyBoardFileTreeDropPayload,
   parseRssItemDragPayload,
   parseUntitledDocTabDragPayload,
   parseWebDownloadDragPayload,
@@ -84,7 +83,7 @@ import {
   type FileFilterMap,
   type FileViewMode,
 } from './file-tree/file-kinds'
-import { readWorkspaceDragPayloads, hasNativeFileDrop, splitNameForCopy, joinPath, buildSelectedDragItemsByPath, fileTreeDropTargetsEqual } from './file-tree/drag-utils'
+import { readWorkspaceDragPayloads, hasNativeFileDrop, joinPath, buildSelectedDragItemsByPath, fileTreeDropTargetsEqual } from './file-tree/drag-utils'
 import { InlineInput } from './file-tree/inline-inputs'
 import { FileTreeItem } from './file-tree/FileTreeItem'
 import { GridItemCard } from './file-tree/GridItemCard'
@@ -653,7 +652,7 @@ export default function FileTree({
 
     const ext = item.name.split('.').pop()?.toLowerCase() || ''
     selectFile(item.path)
-    if (isReadyBoardFile(item.path)) {
+    if (isReadyBoardFile(item.path) || ext === 'canvas') {
       openTab(item.path)
       recordFileActivity({
         path: item.path,
@@ -709,16 +708,18 @@ export default function FileTree({
 
   const handleCreateBoard = useCallback(async (targetDir: string | null) => {
     const parentDir = targetDir || currentPath
-    const result: { success: boolean; data?: { path: string }; error?: string } | undefined = await window.electronAPI?.board?.create?.({ parentDir }).catch((error) => ({
-      success: false,
-      error: error instanceof Error ? error.message : String(error),
-    }))
-    if (!result?.success || !result.data?.path) {
-      console.error('Failed to create board:', result?.error || 'unknown error')
-      return
-    }
-    openTab(result.data.path)
-    selectFile(result.data.path)
+    const vault = await window.electronAPI.vault.get()
+    if (vault.status !== 'ready') { window.alert('请先配置资料库'); return }
+    const root = vault.root
+    if (parentDir !== root && !parentDir.startsWith(root + '/')) { window.alert('请在当前资料库中新建画板'); return }
+    const name = `新画板-${Date.now()}`
+    const path = `${parentDir.slice(root.length).replace(/^\//, '')}${parentDir === root ? '' : '/'}${name}.canvas`
+    const result = await window.electronAPI.canvas.create({ path, operationId: crypto.randomUUID() })
+    if (!result.ok) { window.alert(result.error); return }
+    await window.electronAPI.canvas.release(result.value.handleId)
+    const absolutePath = `${root}/${result.value.path}`
+    openTab(absolutePath)
+    selectFile(absolutePath)
     await refreshFiles()
     await loadDirChildren(parentDir)
     requestWorkbenchModeOpen('document')
@@ -786,8 +787,6 @@ export default function FileTree({
     (dataTransfer: DataTransfer): FileTreeExternalDropPayload | null => {
       const generatedImage = getGeneratedImageDragPayload(dataTransfer)
       if (generatedImage) return generatedImage
-      const readyBoard = parseReadyBoardFileTreeDropPayload(dataTransfer)
-      if (readyBoard) return readyBoard
       const untitledDocTab = parseUntitledDocTabDragPayload(dataTransfer.getData(UNTITLED_DOC_TAB_DRAG_MIME))
         ?? getActiveUntitledDocTabDragPayload()
       if (untitledDocTab) return untitledDocTab
@@ -872,76 +871,7 @@ export default function FileTree({
     })()
   }, [flashCompletedPath, loadDirChildren, refreshFiles, schedulePlaceholderRemoval])
 
-  const resolveBoardCopyDestination = useCallback(async (targetDir: string, name: string): Promise<string> => {
-    const safeName = name.trim() || 'board-asset'
-    const { base, ext } = splitNameForCopy(safeName)
-    for (let index = 0; index < 1000; index += 1) {
-      const candidateName = index === 0 ? safeName : `${base} ${index + 1}${ext}`
-      const candidatePath = joinPath(targetDir, candidateName)
-      const statResult = await window.electronAPI?.document?.stat?.(candidatePath).catch(() => null)
-      if (!statResult?.success) return candidatePath
-    }
-    return joinPath(targetDir, `${base}-${Date.now()}${ext}`)
-  }, [])
 
-  const handleReadyBoardResourceDrop = useCallback((payload: FileTreeExternalDropPayload, target: FileTreeDropTarget) => {
-    if (payload.type !== 'ready-board-selection') return
-    const targetDir = getTargetDirFromDropTarget(target)
-    const fileResources = payload.resources.filter((resource) => resource.kind === 'file')
-    if (fileResources.length === 0) return
-    const taskId = `board-export-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
-    const title = fileResources.length === 1
-      ? fileResources[0].title || fileResources[0].name
-      : `${fileResources.length} 个画布素材`
-    setPendingClips((prev) => [
-      ...prev,
-      {
-        taskId,
-        targetDir,
-        urlHost: 'Readyboard',
-        title,
-        status: 'running',
-        createdAt: Date.now(),
-        kind: 'board-export',
-      },
-    ])
-
-    void (async () => {
-      try {
-        const copiedPaths: string[] = []
-        for (const resource of fileResources) {
-          const dest = await resolveBoardCopyDestination(targetDir, resource.name)
-          const result = await window.electronAPI?.document?.copyItem?.(resource.path, dest)
-          if (!result?.success) throw new Error(result?.error || '复制失败')
-          copiedPaths.push(dest)
-        }
-        const flashPath = copiedPaths[0] || null
-        setPendingClips((prev) =>
-          prev.map((item) =>
-            item.taskId === taskId
-              ? { ...item, status: 'completed', copiedPath: flashPath || undefined }
-              : item,
-          ),
-        )
-        await refreshFiles()
-        await loadDirChildren(targetDir)
-        flashCompletedPath(flashPath)
-        schedulePlaceholderRemoval(taskId, 1800)
-      } catch (error) {
-        // silent-catch: failure surfaces on the clip row as failed status with the message
-        setPendingClips((prev) =>
-          prev.map((item) =>
-            item.taskId === taskId
-              ? { ...item, status: 'failed', errorMessage: error instanceof Error ? error.message : String(error) }
-              : item,
-          ),
-        )
-        schedulePlaceholderRemoval(taskId, 4000)
-      }
-    })()
-  }, [flashCompletedPath, loadDirChildren, refreshFiles, resolveBoardCopyDestination, schedulePlaceholderRemoval])
-
-  // 未保存的新建文档标签拖到目录：直接落盘确认保存位置（无动作菜单）。
   const handleUntitledDocTabDrop = useCallback(async (
     payload: UntitledDocTabDragPayload,
     target: FileTreeDropTarget,
@@ -997,10 +927,6 @@ export default function FileTree({
       void handleGeneratedImageDrop(payload, target)
       return
     }
-    if (payload.type === 'ready-board-selection') {
-      handleReadyBoardResourceDrop(payload, target)
-      return
-    }
     if (payload.type === 'untitled-doc-tab') {
       void handleUntitledDocTabDrop(payload, target)
       return
@@ -1010,7 +936,7 @@ export default function FileTree({
       return
     }
     setExternalDropMenu({ x, y, payload, target })
-  }, [handleGeneratedImageDrop, handleReadyBoardResourceDrop, handleUntitledDocTabDrop, handleWebDownloadDrop])
+  }, [handleGeneratedImageDrop, handleUntitledDocTabDrop, handleWebDownloadDrop])
 
   const handleItemDragOver = useCallback((e: React.DragEvent, item: FileItem, containerPath: string) => {
     const workspacePayloads = readWorkspaceDragPayloads(e.dataTransfer)

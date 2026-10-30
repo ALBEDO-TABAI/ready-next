@@ -238,3 +238,14 @@ test('rotated-card dragging still submits integer coordinates at a zoomed scale'
     assert.equal(ui.canvas.nodes[0].ready.appearance?.rotation, 30)
   } finally { await ui.close() }
 })
+
+test('a canvas node navigation request selects and centers the requested node', async () => {
+  const ui = await mount(3, { revealNode: { nodeId: 'n1', requestId: 'navigation-1' } })
+  try {
+    assert.equal(ui.card('n1').dataset.selected, 'true')
+    const node = ui.canvas.nodes.find(node => node.id === 'n1')!
+    const world = ui.surface.querySelector<HTMLElement>('.canvas-world')!
+    assert.equal(world.style.transform, `translate(${1000 / 2 - node.x - node.width / 2}px, ${700 / 2 - node.y - node.height / 2}px) scale(1)`)
+    assert.equal(ui.commits, 0, 'navigation does not change the file')
+  } finally { await ui.close() }
+})

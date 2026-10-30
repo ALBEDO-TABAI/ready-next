@@ -1,4 +1,4 @@
-export type FastCardItemKind = 'text' | 'image' | 'video' | 'translation' | 'image-description'
+export type FastCardItemKind = 'text' | 'image' | 'video' | 'translation' | 'image-description' | 'audio'
 
 export interface FastCardSource {
   pageUrl?: string
@@ -38,6 +38,8 @@ export interface FastCardItem {
   source?: FastCardSource
   video?: FastCardVideoMeta
   tags?: string[]
+  media?: FastCardMedia
+  transcription?: FastCardTranscription
 }
 
 export interface BrowserFastCardBaseTarget extends FastCardSource {
@@ -70,6 +72,7 @@ export type BrowserFastCardTarget =
   | BrowserFastCardVideoTarget
 
 export type BrowserFastCardContextAction =
+  | 'save-to-canvas'
   | 'add-to-fastcard'
   | 'describe-image'
   | 'translate-selection'
@@ -157,7 +160,7 @@ export type FastCardOverlayCommand =
   | { type: 'close-result' }
   | { type: 'add-result' }
   | { type: 'clear' }
-  | { type: 'save-markdown' }
+  | { type: 'save-canvas'; itemIds: string[] }
   | { type: 'insert-chat' }
   | { type: 'remove-item'; id: string }
   | { type: 'target-language-change'; targetLanguage: string }
@@ -166,6 +169,7 @@ export interface FastCardIPCResult<T> {
   success: boolean
   data?: T
   error?: string
+  errorCode?: string
 }
 
 export function createFastCardId(prefix = 'fastcard'): string {
@@ -231,6 +235,7 @@ function sourceLine(source: FastCardSource | undefined): string {
 
 function renderItem(item: FastCardItem, index: number): string {
   const title = item.title || ({
+    audio: '录音',
     text: '文字',
     image: '图片',
     video: '视频',
@@ -292,4 +297,58 @@ export function renderFastCardMarkdown(items: FastCardItem[], now = new Date()):
 export function createFastCardMarkdownFilename(now = new Date()): string {
   const stamp = now.toISOString().replace(/[:.]/g, '-').slice(0, 19)
   return `FastCard-${stamp}.md`
+}
+
+// C7: only Main can issue a cached receipt; a remote URL never proves offline availability.
+export type FastCardMedia =
+  | { status: 'cached'; key: string; sha256: string; mime: string; bytes: number }
+  | { status: 'missing'; error: string }
+export type FastCardTranscription =
+  | { status: 'unavailable' | 'pending' }
+  | { status: 'running'; attemptId: string }
+  | { status: 'ready'; text: string }
+  | { status: 'failed'; error: string }
+export type FastCardCanvasTarget =
+  | { kind: 'existing'; objectId: string }
+  | { kind: 'new'; title: string; parentObjectId?: string; parentPath?: string }
+export interface FastCardTransferRequest {
+  operationId: string
+  itemIds: string[]
+  target?: FastCardCanvasTarget
+  position?: { x: number; y: number }
+}
+export interface FastCardTransferReceipt {
+  state: 'completed'; operationId: string; objectId: string; title: string; nodeIds: string[]
+}
+export interface FastCardTransferAPI {
+  transfer(input: FastCardTransferRequest): Promise<FastCardIPCResult<FastCardTransferReceipt>>
+  undo(operationId: string): Promise<FastCardIPCResult<{ state: 'undone' }>>
+  targets(): Promise<FastCardIPCResult<Array<{ objectId: string; title: string }>>>
+  pending(): Promise<FastCardIPCResult<FastCardTransferRequest[]>>
+}
+export function isFastCardTransferAPI(value: unknown): value is FastCardTransferAPI {
+  return typeof value === 'object' && value !== null
+    && 'transfer' in value && typeof value.transfer === 'function'
+    && 'undo' in value && typeof value.undo === 'function'
+    && 'targets' in value && typeof value.targets === 'function'
+    && 'pending' in value && typeof value.pending === 'function'
+}
+export interface FastCardQuickNoteAPI {
+  quickClose(): Promise<FastCardIPCResult<void>>
+  quickStatus(): Promise<FastCardIPCResult<{ registered: boolean; error?: string }>>
+  quickText(input: { text: string; itemId: string }): Promise<FastCardIPCResult<FastCardItem>>
+  quickClipboard(itemId: string): Promise<FastCardIPCResult<FastCardItem>>
+  quickRecording(input: { bytes: Uint8Array; mime: string; itemId: string }): Promise<FastCardIPCResult<FastCardItem>>
+  transcribe(itemId: string): Promise<FastCardIPCResult<FastCardItem>>
+  playback(itemId: string): Promise<FastCardIPCResult<string>>
+}
+export function isFastCardQuickNoteAPI(value: unknown): value is FastCardQuickNoteAPI {
+  return typeof value === 'object' && value !== null
+    && 'quickClose' in value && typeof value.quickClose === 'function'
+    && 'quickStatus' in value && typeof value.quickStatus === 'function'
+    && 'quickText' in value && typeof value.quickText === 'function'
+    && 'quickClipboard' in value && typeof value.quickClipboard === 'function'
+    && 'quickRecording' in value && typeof value.quickRecording === 'function'
+    && 'transcribe' in value && typeof value.transcribe === 'function'
+    && 'playback' in value && typeof value.playback === 'function'
 }

@@ -1,4 +1,5 @@
 import { useMentionNavigation } from '../calendar/workbench/layers/mention-navigation'
+import { requestCanvasNode } from '../canvas/navigation'
 import { rssReferenceFromReadyRef } from '../../../shared/rss-reference'
 import type { WorkbenchMode } from '../../stores/useMode'
 import { parseReadyUri, ReadyRefSchema, type ReadyRef } from '../../../shared/ready-ref'
@@ -33,6 +34,7 @@ export async function openReadyRef(input: string | ReadyRef, fromMode?: Workbenc
       requestWorkbenchModeOpen('document')
       return
     }
+    case 'canvas':
     case 'page':
     case 'file': {
       const location = await window.electronAPI.objects.locate(ref.id)
@@ -47,8 +49,9 @@ export async function openReadyRef(input: string | ReadyRef, fromMode?: Workbenc
         return
       }
       // A missing heading or block still opens the page; only the scroll target is dropped.
-      const reveal = ref.anchor ? await anchorLines(location.path, ref.anchor) : null
+      const reveal = ref.kind !== 'canvas' && ref.anchor ? await anchorLines(location.path, ref.anchor) : null
       rememberReferenceOrigin(origin, 'document')
+      if (ref.kind === 'canvas') requestCanvasNode(ref.id, ref.node)
       useWorkspace.getState().selectFile(location.path)
       useDocTabs.getState().openTab(location.path)
       if (reveal) useDocTabs.getState().setPendingReveal({ path: location.path, ...reveal, requestedAt: Date.now() })

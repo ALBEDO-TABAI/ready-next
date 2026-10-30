@@ -23,6 +23,12 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
   }, [])
   const [editing, setEditing] = useState<string | null>(null), [camera, setCamera] = useState<Camera>(props.initialCamera ?? { x: 40, y: 80, zoom: 1 })
   const [size, setSize] = useState({ width: 1000, height: 700 })
+  useEffect(() => {
+    const node = canvas.nodes.find(node => node.id === props.revealNode?.nodeId && !node.ready.trash)
+    if (!node) return
+    setSelected([node.id]); setCamera({ x: size.width / 2 - node.x - node.width / 2, y: size.height / 2 - node.y - node.height / 2, zoom: 1 })
+  }, [props.revealNode?.requestId, size.width, size.height]) // eslint-disable-line react-hooks/exhaustive-deps -- a navigation request runs once; editing must not recenter
+
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   const [composing, setComposing] = useState(false), [compositionError, setCompositionError] = useState('')
   const root = useRef<HTMLDivElement>(null), world = useRef<HTMLDivElement>(null), overlay = useRef<SVGSVGElement>(null)

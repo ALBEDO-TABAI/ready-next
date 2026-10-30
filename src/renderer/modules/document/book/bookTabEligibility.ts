@@ -24,7 +24,7 @@ const BOOK_READABLE_EXTENSIONS = new Set([
 
 export function isBookReadablePath(path: string | null | undefined): boolean {
   if (!path) return true
-  if (isReadyBoardFile(path)) return false
+  if ((isReadyBoardFile(path) || /\.canvas$/i.test(path))) return false
   const ext = getFileExtension(path)
   if (!ext) return true
   return BOOK_READABLE_EXTENSIONS.has(ext)

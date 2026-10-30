@@ -20,6 +20,7 @@ export interface CanvasSurfaceProps {
   onNavigateSubcanvas?: (node: CanvasNode) => void
   breadcrumbs?: Array<{ id: string; title: string }>
   onNavigateAncestor?: (id: string) => void
+  revealNode?: { nodeId?: string; requestId: string }
   initialCamera?: Camera
   onFrameWork?: (work: FrameWork) => void
 }

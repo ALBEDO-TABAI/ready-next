@@ -2,7 +2,7 @@ import type { FileItem } from '../../../stores/useWorkspace'
 import { EBOOK_EXTENSIONS } from '../../../../shared/ebook'
 
 const ALLOWED_EXTENSIONS = new Set([
-  'md', 'txt', 'pdf', 'docx', 'doc', 'rtf', 'odt', 'readyboard',
+  'md', 'txt', 'pdf', 'docx', 'doc', 'rtf', 'odt', 'readyboard', 'canvas',
   'ts', 'tsx', 'js', 'jsx', 'json', 'html', 'css', 'scss', 'less',
   'py', 'go', 'rs', 'java', 'kt', 'swift', 'c', 'cpp', 'h',
   'yaml', 'yml', 'toml', 'xml', 'sql', 'sh', 'bash', 'zsh',
@@ -74,7 +74,7 @@ export function getParentDir(path: string): string {
 export function getFileKind(item: FileItem): FileKind {
   if (item.isDirectory) return 'folder'
   const ext = getFileExt(item)
-  if (ext === 'readyboard' || ext === 'tldr') return 'design'
+  if (ext === 'canvas' || ext === 'readyboard' || ext === 'tldr') return 'design'
   if (DOCUMENT_EXTS.has(ext)) return 'document'
   if (CODE_EXTS.has(ext)) return 'code'
   if (IMAGE_EXTS.has(ext)) return 'image'

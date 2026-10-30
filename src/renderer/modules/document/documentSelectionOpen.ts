@@ -1,4 +1,3 @@
-import { isReadyBoardFile } from '../../../shared/ready-board'
 import { normalizeDocTabPathKey, type DocTab } from '../../stores/useDocTabs'
 
 export function shouldHandleSelectedDocument(input: {
@@ -12,7 +11,7 @@ export function shouldHandleSelectedDocument(input: {
   const activeTab = input.tabs.find((tab) => tab.id === input.activeTabId)
   if (normalizeDocTabPathKey(activeTab?.path) === selectedPathKey) return false
 
-  const keepBoardActive = isReadyBoardFile(activeTab?.path) && !isReadyBoardFile(input.selectedFile)
+  const keepBoardActive = /\.canvas$/i.test(activeTab?.path ?? '') && !/\.canvas$/i.test(input.selectedFile)
   if (!keepBoardActive) return true
   return !input.tabs.some((tab) => normalizeDocTabPathKey(tab.path) === selectedPathKey)
 }

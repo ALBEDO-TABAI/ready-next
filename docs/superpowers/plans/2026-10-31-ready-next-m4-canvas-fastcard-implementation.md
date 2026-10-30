@@ -107,3 +107,20 @@ M3 编辑器、SaveToPicker 归原负责人；M4 只消费公开接口。其他�
 ## 8. 交付状态
 
 2026-10-31：合同冻结；A 格式、转换、纯操作与命令行入口已完成：34 项行为测试、2 个合法夹具、13 个非法夹具；类型和 eslint 检查通过。B–F、完整 C10/C13、原生持久化和窗口验收尚未完成。
+
+### F 接线验收合同（实施前冻结）
+
+- `ready-canvas-ipc.test.ts` 调用真实注册函数与资料库解析器：未配置拒绝、恢复完成前不执行、每次请求读取当前库、恢复失败不放行；恢复期间切库不得返回旧实例。
+- 生产画板只有 CanvasService 写入；打开 `.readyboard` 只提供一次性导入，旧文件字节保留。CLI 回归使用现有导入、写入、成文与 FastCard 原生行为测试。
+- preload 和声明覆盖画板、成文、FastCard、link-preview，IPC 合同检查不得缺项。新增持久化测试全部纳入 verify:native。
+- 文档画板操作等待 Main 成功回执；外部转存完成通知刷新已打开画板。节点引用进入文档画板并选中居中。
+- `verify:ready-next-canvas` 仅操作独立 userData 与规范化临时资料库，磁盘回读及截图逐步取证；窗口验收由 Claude 执行，CLI 不代替窗口结论。
+
+### F 交付记录（2026-10-31，窗口验收待 Claude）
+
+- 已接 Main/preload/声明、当前库解析及恢复屏障、FastCard 目标适配、成文回写、link-preview、快记启动与退出；文档画板、旧格式转换、节点定位、`.canvas` 路径预览接通。旧编辑器/保存/素材接收/HTML 构建入口及旧拖拽消费者删除；共享 Widget/文档路径只移除旧画板分支。
+- 先增加真实注册函数/解析器测试，首次因缺少解析器失败，再实施。新增生产 FastCard→CanvasService 原生测试，覆盖未打开画板、默认/新建/已有、磁盘回读、撤销、重试不重复及刷新通知；窗口脚本使用的旧格式夹具由真实导入服务验证源字节不变。
+- `typecheck` 通过；IPC invoke 462/462、send 9/9、push 66/70（4 项已有白名单）、methods 38/38，全部检查项通过；SQLite skip/CSS reset/迁移连续性检查通过（1–151，无新增迁移）。格式测试 34 项与合法/非法夹具通过；Widget 163/163；文档性能 152/152；相关子集 64/64；最后界面改动复测 33/33；画板原生复测 13/13；上述行为测试均 skipped 0。
+- 原生完整批使用已安装 Electron 的 `--import tsx --test --test-concurrency=1` 执行同一清单（不安装或重编依赖）：432 项中 428 通过、4 失败。范围内一项为注册函数签名更新后的旧测试，已修正并包含于 13/13 复测；剩余 3 项范围外分别为 calendar-layers-native、library-engine、ready-object-identity-native 的文件监听 EMFILE/超时，不改其实现或断言。日志 `/tmp/m4f-native.log`、`/tmp/m4f-native-recheck.log`。新增原生测试已全部登记 verify:native。
+- `verify:ready-next-canvas` 已提供六步窗口脚本、逐步磁盘/暂存回读与截图、SIGKILL 重启及旧文件字节比较；这里只校验脚本语法和夹具，未启动窗口。浏览器收集步骤目前调用生产 browser FastCard 接口注入文本，原生右键与网页层遮挡/恢复仍须 Claude 实际验收。
+- 未完成边界：`[[` 选择与子页面创建需修改 M3 的 `block-editor/EditorTools.tsx`、`references.ts` 及公开路径传递接口；这些不在 F 可改范围，未改。卡片插槽已提供 canvasPath，未伪装文档标签。旧静态模板的打包条目位于 `electron-builder.yml` 和 `scripts/verify-release-structural-package.cjs`，不在明确许可清单；保留资产以免破坏打包，待负责人将两处条目与 assets/board/board-template.html 一并删除。C10/C13 及 M4 整体尚不能标为最终验收通过。

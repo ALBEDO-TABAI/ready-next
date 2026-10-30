@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { FastCardSaveDialog } from '../../components/browser/FastCardPanel'
+import { createModeSwitchAckWaiter } from '../../modules/browser/modeSwitchAckWaiter'
+import { openReadyRef } from '../../modules/workbench/open-ready-ref'
 import BrowserModeEmptyState from '../../components/browser/BrowserModeEmptyState'
 import BrowserDiagnosticsDock from '../../components/browser/BrowserDiagnosticsDock'
 import { AgentBrowserSupervisionPanel } from '../../components/browser/AgentBrowserSupervisionPanel'
@@ -39,7 +42,6 @@ import type { BrowserLockOverlaySnapshot } from '../../../shared/browser-lock-ov
 import {
   buildFastCardItemTags,
   createFastCardId,
-  createFastCardMarkdownFilename,
   detectFastCardTargetLanguage,
   renderFastCardMarkdown,
   type BrowserFastCardContextActionEvent,
@@ -250,6 +252,11 @@ export default function BrowserMode({
   const shouldHideAllBrowserHosts = (hasError || isReadyBlankTab) && !splitTabHasNativeSurface
   const fastCardItems = useFastCard(s => s.items)
   const fastCardSyncState = useFastCard(s => s.syncState)
+  const fastCardTransferReceipt = useFastCard(s => s.transferReceipt)
+  const [fastCardSaveItems, setFastCardSaveItems] = useState<string[] | null>(null)
+  const [fastCardOpeningPicker, setFastCardOpeningPicker] = useState(false)
+  const fastCardTransferVisible = fastCardSaveItems !== null || fastCardTransferReceipt !== null
+
   const loadFastCard = useFastCard(s => s.load)
   useEffect(() => { if (isElectron) void loadFastCard() }, [isElectron, loadFastCard])
   const fastCardPanelOpen = useFastCard(s => s.panelOpen && !s.collapsed)
@@ -261,7 +268,7 @@ export default function BrowserMode({
   const [fastCardResultPanel, setFastCardResultPanel] = useState<FastCardResultPanelData | null>(null)
   const [localMediaUploadStatus, setLocalMediaUploadStatus] = useState<{ kind: 'uploading' | 'success' | 'error'; message: string } | null>(null)
   const [generatedImageDragActive, setGeneratedImageDragActive] = useState(false)
-  const suppressNativeBrowserSurface = generatedImageDragActive || localMediaUploadStatus !== null
+  const suppressNativeBrowserSurface = generatedImageDragActive || localMediaUploadStatus !== null || fastCardTransferVisible || fastCardOpeningPicker
   const fastCardResultTargetRef = useRef<BrowserFastCardTarget | null>(null)
   const fastCardResultRequestIdRef = useRef(0)
   const setAddressEditing = useCallback((next: boolean) => {
@@ -560,6 +567,28 @@ export default function BrowserMode({
     void handleNavigate(targetUrl)
   }, [browserDiagnostics, handleNavigate])
 
+  const handleFastCardSaveCanvas = useCallback(async (itemIds: string[]) => {
+    if (!itemIds.length || fastCardOpeningPicker) return
+    setFastCardOpeningPicker(true)
+    try {
+      const browser = window.electronAPI.browser
+      const hidden = await browser.hideFastCardOverlay()
+      if (!hidden.success) throw new Error(hidden.error || '无法收起暂存面板')
+      const intentId = nextIntentId()
+      const waiter = createModeSwitchAckWaiter(browser.onIntentAck, intentId)
+      browser.sendIntent({ kind: 'hide-all', intentId, reason: 'overlay-open', expectsAck: true })
+      if ((await waiter.wait).outcome !== 'ack') throw new Error('网页尚未让出选择器位置，请重试')
+      setFastCardSaveItems(itemIds)
+    } catch (error) {
+      useFastCard.setState({ syncState: { kind: 'error', message: String(error) }, panelOpen: true, collapsed: false })
+    } finally { setFastCardOpeningPicker(false) }
+  }, [fastCardOpeningPicker])
+
+  useEffect(() => {
+    if (!isActive || fastCardTransferVisible || fastCardOpeningPicker) return
+    void syncBrowserVisibility('visible', { forceExact: true, forceBoundsSync: true })
+  }, [isActive, fastCardTransferVisible, fastCardOpeningPicker, syncBrowserVisibility])
+
   const addVideoTargetToFastCard = useCallback(async (target: BrowserFastCardVideoTarget) => {
     openFastCard()
     const response = await window.electronAPI?.browser?.resolveFastCardVideo?.({ target })
@@ -654,6 +683,12 @@ export default function BrowserMode({
   }, [])
 
   const handleFastCardContextAction = useCallback((event: BrowserFastCardContextActionEvent) => {
+    if (event.action === 'save-to-canvas' && event.target.kind !== 'video') {
+      const item = event.target.kind === 'image' ? createImageFastCardItem(event.target) : createTextFastCardItem(event.target)
+      // A confirmed collection record precedes target selection and any board effect.
+      void addFastCardItem(item).then(async saved => { if (saved) await handleFastCardSaveCanvas([item.id]) })
+      return
+    }
     if (event.action === 'add-to-fastcard') {
       handleAddTargetToFastCard(event.target)
       return
@@ -665,7 +700,7 @@ export default function BrowserMode({
     if (event.action === 'describe-image' && event.target.kind === 'image') {
       void runFastCardImageDescription(event.target)
     }
-  }, [handleAddTargetToFastCard, runFastCardImageDescription, runFastCardTranslation])
+  }, [addFastCardItem, handleFastCardSaveCanvas, handleAddTargetToFastCard, runFastCardImageDescription, runFastCardTranslation])
 
   const handleFastCardResultLanguageChange = useCallback((targetLanguage: string) => {
     const target = fastCardResultTargetRef.current
@@ -720,15 +755,6 @@ export default function BrowserMode({
     openFastCard()
   }, [collapseFastCard, fastCardPanelOpen, fastCardResultPanel, openFastCard])
 
-  const handleFastCardSaveMarkdown = useCallback(() => {
-    if (fastCardItems.length === 0) return
-    const markdown = renderFastCardMarkdown(fastCardItems)
-    void window.electronAPI?.document?.saveFileAs?.({
-      content: markdown,
-      suggestedName: createFastCardMarkdownFilename(),
-    })
-  }, [fastCardItems])
-
   const handleFastCardInsertToChat = useCallback(() => {
     if (fastCardItems.length === 0) return
     appendToAgentInput(renderFastCardMarkdown(fastCardItems))
@@ -759,8 +785,8 @@ export default function BrowserMode({
         clearFastCard()
         return
       }
-      if (command.type === 'save-markdown') {
-        handleFastCardSaveMarkdown()
+      if (command.type === 'save-canvas') {
+        void handleFastCardSaveCanvas(command.itemIds)
         return
       }
       if (command.type === 'insert-chat') {
@@ -781,7 +807,7 @@ export default function BrowserMode({
     handleAddFastCardResult,
     handleFastCardInsertToChat,
     handleFastCardResultLanguageChange,
-    handleFastCardSaveMarkdown,
+    handleFastCardSaveCanvas,
     isElectron,
     removeFastCardItem,
   ])
@@ -802,7 +828,7 @@ export default function BrowserMode({
 
   useEffect(() => {
     if (!isElectron) return
-    const shouldShowOverlay = isActive && (fastCardResultPanel !== null || fastCardPanelOpen)
+    const shouldShowOverlay = isActive && !fastCardTransferVisible && !fastCardOpeningPicker && (fastCardResultPanel !== null || fastCardPanelOpen)
     if (!shouldShowOverlay) {
       void window.electronAPI?.browser?.hideFastCardOverlay?.()
       return
@@ -850,7 +876,7 @@ export default function BrowserMode({
       observer.disconnect()
       window.removeEventListener('resize', scheduleSnapshot)
     }
-  }, [fastCardItems, fastCardSyncState, fastCardPanelOpen, fastCardResultPanel, isActive, isElectron])
+  }, [fastCardItems, fastCardSyncState, fastCardPanelOpen, fastCardResultPanel, fastCardTransferVisible, fastCardOpeningPicker, isActive, isElectron])
 
   useEffect(() => {
     if (!isElectron) return
@@ -1412,6 +1438,20 @@ export default function BrowserMode({
               </div>
             </div>
           )}
+
+          {fastCardTransferVisible && <div style={{ position: 'absolute', inset: '70px 20px auto auto', width: 440, zIndex: 80 }}>
+            {fastCardSaveItems && <FastCardSaveDialog
+              onSave={target => useFastCard.getState().saveToCanvas(fastCardSaveItems, target)}
+              onRetry={request => useFastCard.getState().retryTransfer(request)}
+              onCancel={() => setFastCardSaveItems(null)} />}
+            {fastCardTransferReceipt && <div role="status" className="p-3 rounded" style={{ background: 'var(--bg-primary)', color: 'var(--text-primary)' }}>
+              已存到《{fastCardTransferReceipt.title}》 · <button onClick={() => {
+                void openReadyRef({ kind: 'canvas', id: fastCardTransferReceipt.objectId }, 'browser').then(() => useFastCard.getState().dismissReceipt()).catch(error => useFastCard.setState({ syncState: { kind: 'error', message: String(error) } }))
+              }}>打开</button> · <button disabled={fastCardSyncState.kind === 'saving'} onClick={() => { void useFastCard.getState().undoTransfer() }}>撤销</button>
+              <button onClick={() => useFastCard.getState().dismissReceipt()}>关闭</button>
+            </div>}
+            {fastCardSyncState.kind === 'error' && <p role="alert">{fastCardSyncState.message}</p>}
+          </div>}
 
           {shouldShowStartupPlaceholder && (
             <div

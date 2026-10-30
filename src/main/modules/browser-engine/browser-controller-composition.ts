@@ -49,7 +49,6 @@ import {
 } from './task-persistence-service'
 import { BrowserUtilityMenuService } from './utility-menu-service'
 import { BrowserWindowOpenService } from './window-open-service'
-import { getReadyBoardService } from '../board-engine/ipc-handler'
 import {
   isAllowedBrowserURL,
   toOAuthCompatibleUserAgent,
@@ -188,7 +187,6 @@ export abstract class BrowserControllerComposition extends BrowserControllerCont
       mainWindow,
       isAllowedUrl: (url) => isAllowedBrowserURL(url),
       createTab: (url, options) => this.createTab(url, options),
-      addImageToActiveBoard: (url) => getReadyBoardService().importRemoteImageToActiveBoard(url),
       getTabIdForWebContents: (webContents) => this.getTabIdForWebContents(webContents.id),
       sendToRenderer: (channel, data) => this.sendToRenderer(channel, data),
       logBrowserDiag: (message) => this.logBrowserDiag(message),

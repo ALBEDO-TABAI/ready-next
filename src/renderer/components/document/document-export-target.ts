@@ -22,7 +22,7 @@ const NON_MARKDOWN_EXTENSIONS = new Set([
 export function isMarkdownExportableTab(tab: { path: string | null | undefined } | null | undefined): boolean {
   if (!tab) return false
   if (!tab.path) return true // untitled draft — markdown by construction
-  if (isReadyBoardFile(tab.path)) return false
+  if ((isReadyBoardFile(tab.path) || /\.canvas$/i.test(tab.path))) return false
   const ext = getFileExtension(tab.path)
   if (!ext) return true
   if (NON_MARKDOWN_EXTENSIONS.has(ext)) return false

@@ -1,3 +1,4 @@
+import { flushCanvasWrites } from './modules/canvas/pending-writes'
 // Temporal polyfill — must be injected BEFORE any Schedule-X code is loaded
 // (even lazily), because SX v4 references Temporal at module init time.
 import { Temporal } from '@js-temporal/polyfill'
@@ -16,10 +17,8 @@ import {
   installBeforeQuitFlushBridge,
   registerBeforeQuitFlushHandler,
 } from './modules/app/beforeQuitFlushRegistry'
-import { installBoardExternalAssetBridge } from './modules/document/boardExternalAssetInbox'
 import { installDocumentDirectoryChangeBridge } from './modules/document/directoryChangeBridge'
 import { flushCurrentDocumentTabsForExit } from './modules/document/documentExitFlush'
-import { waitForAllBoardPathSaves } from './modules/document/boardHandleRegistry'
 
 type StartupThemeSnapshot = {
   option: string
@@ -99,11 +98,10 @@ async function bootstrap() {
   const root = document.getElementById('root')
   if (!root) throw new Error('Root element #root not found')
   rendererRoot = ReactDOM.createRoot(root)
+  registerBeforeQuitFlushHandler('canvas:writes', flushCanvasWrites)
   installBeforeQuitFlushBridge(window.electronAPI?.app)
   installDocumentDirectoryChangeBridge(window.electronAPI?.document)
   registerBeforeQuitFlushHandler('document:dirty-tabs', flushCurrentDocumentTabsForExit)
-  registerBeforeQuitFlushHandler('board:unmounted-saves', waitForAllBoardPathSaves)
-  installBoardExternalAssetBridge(window.electronAPI?.board)
 
   if (window.location.hash.startsWith('#/startup-preview')) {
     const { default: StartupPreview } = await import('./pages/StartupPreview')

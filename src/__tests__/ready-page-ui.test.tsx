@@ -89,6 +89,9 @@ test('SaveToPicker search, breadcrumbs, preview, Main collision candidates, save
     assert.match(ui.body.textContent!, /来源画板：画板/); assert.match(ui.body.querySelector('[aria-label="最终路径"]')!.textContent!, /\/vault\/画板\/A.md/)
     await ui.click('确认'); assert.equal(submitted.at(-1)?.parentPath, '/vault/画板'); assert.equal(submitted.at(-1)?.keepDocumentCard, true)
     assert.equal(cancelled, 3)
+    await ui.render(<SaveToPicker key="canvas-target" {...props} extension=".canvas" initialParentPath="/vault" />)
+    assert.match(ui.body.querySelector('[aria-label="最终路径"]')!.textContent!, /\/vault\/A.canvas/)
+    assert.doesNotMatch(ui.body.querySelector('[aria-label="最终路径"]')!.textContent!, /A.md/)
   } finally { await ui.close() }
 })
 

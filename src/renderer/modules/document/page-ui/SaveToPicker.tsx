@@ -8,6 +8,7 @@ export interface SaveToSelection extends DraftFinalizeInput { keepDocumentCard?:
 export interface SaveToPickerProps {
   trees: PageNode[]
   initialTitle: string
+  extension?: '.md' | '.canvas'
   initialParentPath?: string
   mode?: 'save' | 'move' | 'restore'
   excludeObjectId?: string
@@ -17,7 +18,7 @@ export interface SaveToPickerProps {
 }
 const LAST_LOCATION = 'ready-page-last-location'
 
-export function SaveToPicker({ trees, initialTitle, initialParentPath, mode = 'save', excludeObjectId, sourceCanvas, onConfirm, onCancel }: SaveToPickerProps) {
+export function SaveToPicker({ trees, initialTitle, initialParentPath, extension = '.md', mode = 'save', excludeObjectId, sourceCanvas, onConfirm, onCancel }: SaveToPickerProps) {
   const nodes = useMemo(() => {
     const walk = (items: PageNode[]): PageNode[] => items.flatMap(node => node.objectId === excludeObjectId ? [] : [node, ...walk(node.children)])
     return walk(trees).filter(node => ['page', 'folder', 'vault'].includes(node.kind) && !node.ambiguity)
@@ -36,7 +37,7 @@ export function SaveToPicker({ trees, initialTitle, initialParentPath, mode = 's
   const submitting = useRef(false)
   const intent = useRef<{ key: string; operationId: string } | null>(null)
   const selected = nodes.find(node => parentDirectory(node) === parent)
-  const filename = `${title || '未命名'}.md`
+  const filename = `${title || '未命名'}${extension}`
   const preview = parent ? joinPagePath(parent, filename) : ''
   const duplicate = flattenPages(trees).some(node => node.objectId !== excludeObjectId && node.path.toLocaleLowerCase() === preview.toLocaleLowerCase())
   const crumbs = nodes.filter(node => parent === parentDirectory(node) || parent.startsWith(`${parentDirectory(node)}/`) || parent.startsWith(`${parentDirectory(node)}\\`))
