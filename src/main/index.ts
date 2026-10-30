@@ -1,5 +1,6 @@
 import { ObjectRelationsService, registerObjectRelationsIPC } from './modules/object-relations/service'
 import { registerDocumentAnnotationsIPC } from './modules/document-annotations/ipc'
+import { setupDateMentions } from './modules/calendar-engine/date-mentions/runtime'
 import { registerCalendarLayersIPC } from './modules/calendar-layers/ipc'
 import { createCalendarLayersResolver } from './modules/calendar-layers/runtime'
 import { createDocumentDatabaseResolver } from './modules/document-database/runtime'
@@ -143,6 +144,7 @@ const agentManager = new AgentManager(ENABLE_MOCK_SERVICES)
 let mainWindow: BrowserWindow | null = null
 let browserController: BrowserController | null = null
 let petWindowManager: PetWindowManager | null = null
+let dateMentions: ReturnType<typeof setupDateMentions> | undefined
 let reminderScheduler: ReminderScheduler | null = null
 let reminderNotifierFire: ((payload: import('./modules/calendar-engine/reminder-scheduler').ReminderFirePayload) => void) | null = null
 let calendarSyncScheduler: SyncScheduler | null = null
@@ -355,7 +357,7 @@ function setupApplicationMenu(): void {
 const handleRSSResume = (): void => { void resumeRSSDigests().catch((error) => console.error('[rss-digests] resume failed', error)) }
 const handleCalendarResume = (): void => {
   if (!reminderScheduler || !reminderNotifierFire) return
-  void reminderScheduler.rescheduleAll().then(() => recoverMissedReminders({getDb: () => getDatabase().calendar, now: () => Math.floor(Date.now()/1000), fire: reminderNotifierFire!})).catch(error => console.error('[calendar-resume]', error))
+  void reminderScheduler.rescheduleAll().then(() => recoverMissedReminders({mentions: dateMentions, getDb: () => getDatabase().calendar, now: () => Math.floor(Date.now()/1000), fire: reminderNotifierFire!})).catch(error => console.error('[calendar-resume]', error))
 }
 
 function stopRSSAutoRefresh(): Promise<void> {
@@ -725,7 +727,10 @@ function setupGlobalIPC(): void {
   const reminderNotifier = createReminderNotifier({
     getMainWindow: () => mainWindow,
   })
+  dateMentions = setupDateMentions({ registry: documentPages.service.registry, ready: documentPages.ready, getWindow: () => mainWindow,
+    reschedule: async () => { await reminderScheduler?.rescheduleAll() } })
   reminderNotifierFire = (payload) => {
+    if (payload.mention) { dateMentions?.fire(payload); return }
     const store = getDatabase().calendar
     const prefs = store.snapshot().prefs || {}
     if (prefs.notifications === false || !store.claimReminder(payload.eventId, payload.eventStartTime, payload.offsetMinutes, payload.method, payload.firedAt)) return
@@ -733,6 +738,7 @@ function setupGlobalIPC(): void {
   }
   reminderScheduler = startReminderScheduler({
     getDb: () => getDatabase().calendar,
+    mentions: dateMentions,
     now: () => Math.floor(Date.now() / 1000),
     scheduleAt: defaultScheduleAt,
     fire: (payload) => reminderNotifierFire?.(payload),
@@ -1145,6 +1151,7 @@ app.whenReady().then(async () => {
     const fire = reminderNotifierFire
     void recoverMissedReminders({
       getDb: () => getDatabase().calendar,
+      mentions: dateMentions,
       now: () => Math.floor(Date.now() / 1000),
       fire,
     }).then((summary) => {

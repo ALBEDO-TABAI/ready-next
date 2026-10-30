@@ -33,10 +33,20 @@ function electronEnv(extra) {
 
 async function launch(profile) {
   step('launch Electron')
+  // Instrument the real notification call before Main boot, including cold-start recovery.
+  const traceHook = path.join(profile, 'm6c-notification-hook.cjs')
+  fs.writeFileSync(traceHook, `if (process.type === 'browser') {
+    const { Notification } = require('electron'), fs = require('node:fs')
+    const show = Notification.prototype.show
+    Notification.prototype.show = function () {
+      fs.appendFileSync(${JSON.stringify(path.join(profile, 'm6c-notifications.jsonl'))}, JSON.stringify({ title: this.title, at: Date.now() }) + '\\n')
+      return show.apply(this, arguments)
+    }
+  }`)
   const app = await _electron.launch({
     executablePath: require('electron'),
     args: [process.cwd()],
-    env: electronEnv({ READY_USER_DATA_DIR: profile }),
+    env: electronEnv({ READY_USER_DATA_DIR: profile, NODE_OPTIONS: `${process.env.NODE_OPTIONS || ''} --require=${JSON.stringify(traceHook)}` }),
     timeout: 45000,
   })
   const deadline = Date.now() + 90000
@@ -135,6 +145,73 @@ async function checkCalendarLayers(page, root) {
     return { range, query: query.ok ? null : query, entry, chips, events: window.__layerDrag, move }
   })
   ok('C8 drag changes only the source date', dragged === '---\ndate: 2026-10-30\n---\nC8 layer smoke\n', JSON.stringify({ dragged, layerAlerts, diagnosis, geometry }))
+}
+
+// M6-C: poll IPC from Node; Playwright does not await async waitForFunction predicates.
+async function pollMention(page, predicate, timeout = 15000) {
+  const deadline = Date.now() + timeout
+  while (Date.now() < deadline) {
+    const rows = await page.evaluate(() => window.electronAPI.dateMentions.list())
+    const result = predicate(rows)
+    if (result) return result
+    await new Promise(resolve => setTimeout(resolve, 250))
+  }
+  throw new Error('M6-C reminder condition timed out')
+}
+function mentionPopups(profile, title) {
+  const file = path.join(profile, 'm6c-notifications.jsonl')
+  return fs.existsSync(file) ? fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)).filter(row => row.title === title).length : 0
+}
+async function checkDateMentionBeforeRestart(page, root, profile) {
+  const title = 'M6-C one-minute reminder'
+  // The date format has minute precision: use the first complete minute at least 60 seconds away.
+  const at = new Date(Math.ceil((Date.now() + 60000) / 60000) * 60000)
+  const date = `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, '0')}-${String(at.getDate()).padStart(2, '0')}`
+  const time = `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`
+  const content = `# M6-C\n\n[${title}](ready://calendar/day/${date}?at=${time}&remind=0)\n`
+  const created = await page.evaluate(async root => {
+    const result = await window.electronAPI.documentPages.operate({ type: 'create', root, parentPath: root,
+      title: 'M6-C reminder', content: '# M6-C\n', operationId: 'm6c-reminder-smoke' })
+    if (!result.ok) throw new Error(result.message)
+    return result.value
+  }, root)
+  const location = await page.evaluate(id => window.electronAPI.objects.locate(id), created.objectId)
+  const source = fs.readFileSync(location.path, 'utf8')
+  const version = require('node:crypto').createHash('sha256').update(source).digest('hex')
+  const saved = await page.evaluate(input => window.electronAPI.documentPages.save(input), { path: location.path, content: source + content, expectedVersion: version })
+  if (!saved.ok) throw new Error(saved.message)
+  const row = await pollMention(page, rows => rows.find(row => row.objectId === created.objectId))
+  ok('M6-C saved mention schedules a future reminder', row.deliveredAt === null && row.startTime * 1000 >= Date.now())
+  await requestMode(page, 'calendar')
+  await page.evaluate(async date => {
+    await window.electronAPI.calendar.putPreferences({ notifications: true, gridView: 'default', daysPerPeriod: 1, primaryTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone })
+    await window.electronAPI.calendar.revealDay(date)
+  }, date)
+  await page.getByRole('checkbox', { name: '文档日期', exact: true }).check()
+  const delivered = await pollMention(page, rows => rows.find(item => item.id === row.id && item.deliveredAt !== null), 140000)
+  const chip = page.locator(`[data-layer-entry="${row.id}"]`).first()
+  await chip.filter({ hasText: '已提醒' }).waitFor({ state: 'visible' })
+  ok('M6-C due reminder remains visible in calendar', true)
+  const popups = mentionPopups(profile, title)
+  ok('M6-C notification is attempted once', popups === 1, `attempts=${popups}; OS notification support required`)
+  await chip.click()
+  await page.locator('[data-workbench-mode-panel="document"][data-mode-visual-state="current"]').waitFor()
+  await page.locator('[data-ready-block-editor] a[data-ready-date-mention]').filter({ hasText: title }).waitFor({ state: 'visible' })
+  ok('M6-C reminder opens its original document', true)
+  return { id: row.id, date, title, path: location.path, deliveredAt: delivered.deliveredAt, popups }
+}
+async function checkDateMentionAfterRestart(page, saved, profile) {
+  const row = await pollMention(page, rows => rows.find(row => row.id === saved.id))
+  await requestMode(page, 'calendar')
+  await page.evaluate(date => window.electronAPI.calendar.revealDay(date), saved.date)
+  await page.locator(`[data-layer-entry="${saved.id}"]`).filter({ hasText: '已提醒' }).first().waitFor({ state: 'visible' })
+  ok('M6-C restart retains the delivered reminder without another notification', row.deliveredAt === saved.deliveredAt
+    && mentionPopups(profile, saved.title) === saved.popups)
+  // External deletion must revoke the same reminder through the real watcher.
+  fs.writeFileSync(saved.path, '# M6-C mention removed\n')
+  await pollMention(page, rows => !rows.some(row => row.id === saved.id))
+  await page.locator(`[data-layer-entry="${saved.id}"]`).waitFor({ state: 'detached' })
+  ok('M6-C deleting the mention revokes its reminder', true)
 }
 
 // I2: exercise a real file-tree open, the Ready move command, the live watcher and restart.
@@ -477,6 +554,7 @@ async function checkIdentityAndFastCard() {
     const calendarReference = { ...await checkCalendarReference(page), r45Url }
     const calendarLinks = await checkCalendarLinksBeforeRestart(page, calendarReference, created.root)
     await checkCalendarLayers(page, created.root)
+    const dateMention = await checkDateMentionBeforeRestart(page, created.root, profile)
     step('close app')
     await withTimeout(app.close(), 150000, 'close app')
     app = undefined
@@ -490,6 +568,7 @@ async function checkIdentityAndFastCard() {
     await checkObjectPresentationAfterRestart(page, objectIdentity)
     await checkCalendarHistoryAfterRestart(page, calendarReference, history)
     await checkCalendarLinksAfterRestart(page, calendarLinks)
+    await checkDateMentionAfterRestart(page, dateMention, profile)
     await checkR45References(app, page, history.r45, true)
     await withTimeout(app.close(), 150000, 'R45 close before restart')
     app = undefined

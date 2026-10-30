@@ -48,6 +48,7 @@ export interface ColdStartDb {
 
 export interface RecoverMissedRemindersDeps {
   getDb(): ColdStartDb
+  mentions?: { pending(until: number, now: number): ReminderFirePayload[] }
   /** Unix seconds — injectable for tests. */
   now(): number
   /**
@@ -113,6 +114,11 @@ export function recoverMissedRemindersSync(deps: RecoverMissedRemindersDeps): Mi
   }
 
   let recovered = 0
+  // Document reminders remain visible and recoverable without the event grace cutoff.
+  for (const payload of deps.mentions?.pending(now, now) ?? []) {
+    deps.fire(payload)
+    recovered += 1
+  }
   let suppressed = 0
   let skipped = 0
 

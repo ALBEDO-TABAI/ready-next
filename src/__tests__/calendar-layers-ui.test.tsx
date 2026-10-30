@@ -38,7 +38,7 @@ test('C8 switches render the same entries, footprints cannot drag, moves wait fo
   }
   let prefs = store.defaultPrefs()
   const snapshot = () => ({ success: true, data: { prefs, calendars: [], events: [], revision: 1 } })
-  Object.assign(dom.window, { electronAPI: { calendarLayers: api, vault: { onChanged: (callback: () => void) => { vaultListener = callback; return () => { vaultListener = undefined } } }, calendar: {
+  Object.assign(dom.window, { electronAPI: { dateMentions: { takeOpen: async () => null, onOpen: () => () => {}, list: async () => [], onChanged: () => () => {} }, calendarLayers: api, vault: { onChanged: (callback: () => void) => { vaultListener = callback; return () => { vaultListener = undefined } } }, calendar: {
     snapshot: async () => snapshot(), putPreferences: async (patch: Partial<typeof prefs>) => { prefs = { ...prefs, ...patch }; return snapshot() },
   } } })
   const root = createRoot(dom.window.document.getElementById('root')!)

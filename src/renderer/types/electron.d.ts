@@ -3366,6 +3366,7 @@ interface ElectronAPI {
   document: ElectronDocumentAPI
   board: ElectronBoardAPI
   rss: ElectronRSSAPI
+  dateMentions: import('../../shared/calendar/date-mentions').DateMentionsAPI
   calendarLayers: import('../../shared/calendar-layers').CalendarLayersAPI
   calendar: ElectronCalendarAPI
   skills: ElectronSkillsAPI

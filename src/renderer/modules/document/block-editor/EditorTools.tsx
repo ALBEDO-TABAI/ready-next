@@ -1,4 +1,9 @@
 import { useAnnotationMenus } from '../annotations/menus'
+import { useMentionNavigation } from '../../calendar/workbench/layers/mention-navigation'
+import { matchDateMentionRanges, parseDateMentions } from '../../../../shared/calendar/date-mentions'
+import { DateMentionPicker } from './DateMentionPicker'
+import { parseReadyUri } from '../../../../shared/ready-ref'
+import type { DateMentionRef } from '../../../../shared/calendar/date-mentions'
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { createBlockCommand, parseDocumentBlocks, parseInlineBlock, type DocumentBlock, type DocumentBuffer, type InlineMarks, type InlineModel, type InlineSpan } from '../../../../shared/document-blocks'
@@ -27,6 +32,7 @@ export function EditorTools({ buffer, children, report }: { buffer: EditorBuffer
   const [selection, setSelection] = useState<Selection | null>(null)
   const [picker, setPicker] = useState<Picker | null>(null), [query, setQuery] = useState('')
   const [results, setResults] = useState<ReferenceChoice[]>([]), [loading, setLoading] = useState(false)
+  const [dateMention, setDateMention] = useState<{ selection: Selection; ref: DateMentionRef } | null>(null)
   const [widget, setWidget] = useState<Picker | null>(null)
   const [page, setPage] = useState<{ picker: Picker; title: string; operationId: string; state: 'editing' | 'pending' | 'failed' } | null>(null)
   const pagePending = useRef(false)
@@ -37,6 +43,25 @@ export function EditorTools({ buffer, children, report }: { buffer: EditorBuffer
     if (el) { el.focus(); setCaret(el, restore.start, restore.end) }
     setRestore(null)
   }, [restore])
+  const mentionTarget = useMentionNavigation(s => s.target)
+  useLayoutEffect(() => {
+    if (!mentionTarget || !tabId || !buffer.snapshot.content) return
+    const tab = useDocTabs.getState().tabs.find(tab => tab.id === tabId)
+    if (tab?.path !== mentionTarget.path || useDocTabs.getState().activeTabId !== tabId) return
+    try {
+      const before = parseDateMentions('', mentionTarget.content), after = parseDateMentions('', buffer.snapshot.content)
+      const index = before.findIndex(row => row.start === mentionTarget.start && row.end === mentionTarget.end)
+      const matches = matchDateMentionRanges(mentionTarget.content, buffer.snapshot.content, before, after)
+      const next = after.find((_row, j) => matches.get(j) === index)
+      if (index < 0 || !next) throw new Error('当前正文中的日期提及已变更，无法定位')
+      const block = parseDocumentBlocks(buffer.snapshot.content).blocks.find(block => block.start <= next.start && block.end >= next.end)
+      const element = block && root.current?.querySelector<HTMLElement>(`[data-block-start="${block.start}"]`)
+      if (!element) throw new Error('日期提及所在段落尚不可用')
+      element.scrollIntoView({ block: 'center' })
+      element.animate([{ backgroundColor: 'rgba(220,145,45,.35)' }, { backgroundColor: 'transparent' }], { duration: 1800 })
+    } catch (error) { report(error) }
+    useMentionNavigation.setState({ target: null })
+  }, [mentionTarget, tabId, buffer.snapshot.content, report])
   function readSelection(el: HTMLElement): Selection | null {
     const snapshot = buffer.snapshot, at = Number(el.dataset.richStart)
     const block = parseDocumentBlocks(snapshot.content).blocks.find(item => item.start === at && ['paragraph', 'heading', 'wikiLink'].includes(item.type)) ?? (el.textContent === '' ? emptyBlock(at) : null)
@@ -166,12 +191,32 @@ export function EditorTools({ buffer, children, report }: { buffer: EditorBuffer
       const anchor = event.target.closest('a'), el = anchor?.closest<HTMLElement>('[data-rich-start]')
       if (!anchor || !el) return
       event.preventDefault(); event.stopPropagation()
+      const parsed = parseReadyUri(anchor.getAttribute('href') ?? '')
+      if (parsed.ok && parsed.ref.kind === 'day' && !(event.metaKey || event.ctrlKey)) {
+        const ref = parsed.ref
+        attempt(() => {
+          buffer.flush()
+          const state = readSelection(el)
+          if (!state) return
+          const range = document.createRange(); range.selectNodeContents(el); range.setEndBefore(anchor)
+          const start = range.toString().length
+          setSelection(null); setPicker(null)
+          setDateMention({ selection: { ...state, start, end: start + (anchor.textContent?.length ?? 0), anchor: anchor.getBoundingClientRect() }, ref })
+        })
+        return
+      }
       if (!(event.metaKey || event.ctrlKey)) return
       const reference = anchor.dataset.readyWiki ? { kind: 'wiki' as const, target: anchor.dataset.readyWiki }
         : { kind: 'link' as const, href: anchor.getAttribute('href') ?? anchor.dataset.readyHref ?? '' }
       void openInlineReference(reference, tabId).catch(report)
     }}>
     <BlockEditorStyles />{children}
+    {sceneVisible && dateMention && <DateMentionPicker value={dateMention.ref} anchor={dateMention.selection.anchor} report={report}
+      close={() => setDateMention(null)} open={() => openInlineReference({ kind: 'ready', ref: dateMention.ref }, tabId)}
+      save={ref => {
+        replaceSelection(dateMention.selection, [{ text: `${ref.date}${ref.at ? ` ${ref.at}` : ''}`, marks: { reference: { kind: 'ready', ref } } }])
+        setDateMention(null)
+      }} />}
     {sceneVisible && selection && !picker && <InlineToolbar anchor={selection.anchor}
       marks={sliceSpans(selection.model.spans, selection.start, selection.end)[0]?.marks ?? {}}
       apply={patch => applyMarks(selection, patch)} close={close} report={report} open={ref => openInlineReference(ref, tabId)} />}

@@ -1626,6 +1626,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
   document: documentAPI,
   board: boardAPI,
   rss: rssAPI,
+  dateMentions: {
+    list: () => ipcRenderer.invoke('dateMentions:list'),
+    locate: (ref: import('../shared/ready-ref').ReadyRef) => ipcRenderer.invoke('dateMentions:locate', ref),
+    takeOpen: () => ipcRenderer.invoke('dateMentions:takeOpen'),
+    onChanged: (handler: () => void) => {
+      const listener = () => handler()
+      ipcRenderer.on('dateMentions:changed', listener)
+      return () => ipcRenderer.removeListener('dateMentions:changed', listener)
+    },
+    onOpen: (handler: () => void) => {
+      const listener = () => handler()
+      ipcRenderer.on('dateMentions:open', listener)
+      return () => ipcRenderer.removeListener('dateMentions:open', listener)
+    },
+  } satisfies import('../shared/calendar/date-mentions').DateMentionsAPI,
   calendarLayers: {
     query: (range: import('../shared/calendar-layers').LayerRange) => ipcRenderer.invoke('calendarLayers:query', range),
     move: (input: import('../shared/calendar-layers').LayerMove) => ipcRenderer.invoke('calendarLayers:move', input),

@@ -71,6 +71,11 @@ export function drawInline(root: HTMLElement, spans: readonly InlineSpan[]) {
         else wrapper.dataset.readyHref = href
         if (marks.reference.kind === 'link' && marks.reference.title) wrapper.title = marks.reference.title
       }
+      if (marks.reference.kind === 'ready' && marks.reference.ref.kind === 'day') {
+        wrapper.dataset.readyDateMention = ''
+        wrapper.style.cssText = 'border-radius:999px;padding:2px 7px;background:var(--bg-secondary);border:1px solid var(--border-color);cursor:pointer;text-decoration:none'
+        wrapper.title = marks.reference.ref.remind === undefined ? '设置日期与提醒' : `提前 ${marks.reference.ref.remind} 分钟提醒`
+      }
       wrapper.append(node); node = wrapper
     }
     fragment.append(node)
