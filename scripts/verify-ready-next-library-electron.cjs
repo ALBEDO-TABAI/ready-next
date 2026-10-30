@@ -147,6 +147,44 @@ async function checkHighlights(page, book, vaultRoot) {
   await restoredOnVisiblePage()
   ok('font and single-page changes retain the highlighted words on the visible page', true)
   await page.screenshot({ path: path.join(shots, '6-highlight-reopened.png') })
+  await checkQuoteReturn(page, book, id, selected)
+}
+
+// L4: use the reader's copied reference, the real document editor and return capsule.
+async function checkQuoteReturn(page, book, id, selected) {
+  const point = await page.evaluate(id => {
+    const folio = Number(document.querySelector('.rn-library .rd-dock span').textContent.split('/')[0].trim())
+    const mark = document.querySelector(`.rn-library .rd-book .leaf .sheet[data-pi="${folio - 1}"] mark[data-hl="${id}"]`)
+    if (!mark) throw new Error('visible quote mark missing')
+    const box = mark.getBoundingClientRect()
+    return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+  }, id)
+  await page.mouse.click(point.x, point.y)
+  await page.getByRole('button', { name: '复制引用', exact: true }).click()
+  const reference = await page.evaluate(() => navigator.clipboard.readText())
+  ok('reader copies a source-block embed', reference === `![[${path.basename(book.notePath, '.md')}#^${id}]]`, reference)
+  await page.getByTitle('新建', { exact: true }).click()
+  await page.getByRole('button', { name: '编辑', exact: true }).click()
+  const sourceEditor = page.getByRole('textbox', { name: 'Markdown source editor' })
+  await sourceEditor.fill(`# 引用验收\n\n${reference}`)
+  await page.getByRole('button', { name: '预览', exact: true }).click()
+  const card = page.locator('[data-library-quote="true"]')
+  await card.getByRole('button', { name: '回到原文', exact: true }).waitFor()
+  await page.screenshot({ path: path.join(shots, '6b-quote-card.png') })
+  ok('document preview renders book, author and quote', (await card.textContent()).includes(book.title) && (await card.textContent()).includes(book.author) && (await card.textContent()).includes(selected))
+  const before = await page.locator('[data-ready-document-scroll-key]').getAttribute('data-ready-document-scroll-key')
+  await card.getByRole('button', { name: '回到原文', exact: true }).click()
+  await page.waitForFunction(selected => {
+    const folios = document.querySelector('.rn-library .rd-dock span')?.textContent.split('/')[0].match(/\d+/g)?.map(Number) ?? []
+    return folios.some(folio => [...document.querySelectorAll(`.rn-library .rd-book .leaf .sheet[data-pi="${folio - 1}"] [data-book-location]`)].map(m => m.textContent).join('').replace(/\s+/g, ' ').trim() === selected)
+  }, selected)
+  ok('quote opens the original range and briefly highlights it', true)
+  await page.getByRole('button', { name: /^返回 / }).click()
+  await card.getByRole('button', { name: '回到原文', exact: true }).waitFor()
+  ok('return restores the originating document tab', await page.locator('[data-ready-document-scroll-key]').getAttribute('data-ready-document-scroll-key') === before)
+  await page.getByRole('button', { name: '编辑', exact: true }).click()
+  ok('source view preserves the embed text', await sourceEditor.inputValue() === `# 引用验收\n\n${reference}`)
+  await page.screenshot({ path: path.join(shots, '7-quote-return.png') })
 }
 
 function electronEnv(extra) {

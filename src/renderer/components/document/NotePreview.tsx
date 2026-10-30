@@ -1,3 +1,5 @@
+import { LibraryQuoteCard } from './LibraryQuoteCard'
+import { openReadyRef } from '../../modules/workbench/open-ready-ref'
 import { createMarkdownComponents, copyTextToClipboard } from './MarkdownContent'
 import {
   memo,
@@ -7,7 +9,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import ReactMarkdown, { type Components, type Options as MarkdownOptions } from 'react-markdown'
+import ReactMarkdown, { defaultUrlTransform, type Components, type Options as MarkdownOptions } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
   Check,
@@ -293,6 +295,7 @@ const MediaEmbed = memo(function MediaEmbed({
   embed,
   onOpen,
 }: MediaEmbedProps) {
+  if (embed.kind === 'library-quote') return <LibraryQuoteCard raw={embed.url} />
   if (embed.kind === 'youtube') {
     return <YouTubeCard embed={embed} onOpen={onOpen} />
   }
@@ -372,7 +375,7 @@ const MarkdownPreviewBlock = memo(function MarkdownPreviewBlock({
 }) {
   recordDocumentPerformanceCounter('previewBlockRenders')
   return (
-    <ReactMarkdown remarkPlugins={remarkPlugins} components={components}>
+    <ReactMarkdown urlTransform={href => href.startsWith('ready://') ? href : defaultUrlTransform(href)} remarkPlugins={remarkPlugins} components={components}>
       {markdown}
     </ReactMarkdown>
   )
@@ -417,6 +420,7 @@ function NotePreview({
   onWidgetStateChange,
   widgetStates,
 }: NotePreviewProps) {
+  const [navigationError, setNavigationError] = useState('')
   const [copiedChipId, setCopiedChipId] = useState<string | null>(null)
   const isEbookMarkdown = content.includes(EBOOK_MARKDOWN_MARKER)
   const displayContent = useMemo(() => (
@@ -477,6 +481,11 @@ function NotePreview({
   }, [focusWidgetTitle, preview.widgets.length])
 
   const openHref = useCallback(async (href: string, localPath?: string | null) => {
+    if (href.startsWith('ready://')) {
+      try { setNavigationError(''); await openReadyRef(href, 'document') }
+      catch (error) { setNavigationError(error instanceof Error ? error.message : String(error)) }
+      return
+    }
     if (localPath && window.electronAPI?.document?.openPath) {
       await window.electronAPI.document.openPath(localPath)
       return
@@ -600,6 +609,7 @@ function NotePreview({
         </section>
       ) : null}
 
+      {navigationError && <p role="alert">{navigationError}</p>}
       {preview.heroEmbed ? (
         <div className="note-preview-hero">
           <MediaEmbed embed={preview.heroEmbed} onOpen={openHref} />

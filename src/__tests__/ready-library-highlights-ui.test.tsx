@@ -36,10 +36,11 @@ test('reader drag creates a durable mark; popover edits/copies/removes; N groups
   }
   const previous = Object.fromEntries(Object.keys(replacements).map(k => [k, Object.getOwnPropertyDescriptor(globalThis, k)]))
   for (const [k, value] of Object.entries(replacements)) Object.defineProperty(globalThis, k, { value, configurable: true, writable: true })
+  const savedPositions: Array<{ chapter: number; offset: number }> = []
   const api: LibraryAPI = {
     get: async () => ({ success: true, data: await engine.get() }), onChanged: () => () => {},
     importFiles: async () => ({ success: true, data: { imported: [], failed: [] } }), pickAndImport: async () => ({ success: true, data: { imported: [], failed: [] } }),
-    updateBook: async () => ({ success: true, data: record }), getPosition: async () => ({ success: true, data: null }), setPosition: async p => ({ success: true, data: p }),
+    updateBook: async () => ({ success: true, data: record }), getPosition: async () => ({ success: true, data: null }), setPosition: async p => { savedPositions.push(p); return { success: true, data: p } },
     listBookmarks: async () => ({ success: true, data: [] }), setBookmarks: async p => ({ success: true, data: p.bookmarks }),
     listHighlights: async input => ({ success: true, data: await service.list(input) }), createHighlight: async input => ({ success: true, data: await service.create(input) }),
     updateHighlight: async input => ({ success: true, data: await service.update(input) }), removeHighlight: async input => ({ success: true, data: await service.remove(input) }),
@@ -131,7 +132,35 @@ test('reader drag creates a durable mark; popover edits/copies/removes; N groups
     const plain = d.querySelector('.pg-flow p')!, before = d.querySelector('.rd-dock')!.textContent
     await act(async () => { pointer(plain, 'pointerdown', 400); pointer(plain, 'pointerup', 400) }); await flush()
     assert.notEqual(d.querySelector('.rd-dock')!.textContent, before)
+    // L4: open a URI range in the second chapter using the real paginator/flipbook.
+    await act(async () => root.render(<p>重新按引用打开</p>))
+    const target = { book: record.id, location: { chapter: 1, from: 5, to: 9 } }
+    await act(async () => root.render(<Reader record={record} api={api} target={target} onBack={() => {}} onError={e => errors.push(e)} />)); await flush()
+    const flashed = () => [...d.querySelectorAll('[data-book-location]')].map(el => el.textContent).join('')
+    assert.ok(flashed().includes('走过山海'), flashed())
+    assert.equal(savedPositions.at(-1)?.chapter, 1)
+    assert.equal(savedPositions.at(-1)?.offset, 5)
+    const { captureReferenceOrigin } = await import('../renderer/modules/workbench/reference-return')
+    const { useLibraryRequest } = await import('../renderer/modules/library/reader/navigation-state')
+    const origin = captureReferenceOrigin('document')
+    origin.restore()
+    assert.deepEqual(useLibraryRequest.getState().target, { book: record.id, location: { chapter: 1, from: 5, to: 6 } })
+    await click('排版'); await click('单页')
+    const targetSize = d.querySelector<HTMLInputElement>('input[aria-label="字号"]')!
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value')!.set!.call(targetSize, '28')
+      targetSize.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    }); await flush()
+    assert.ok(flashed().includes('走过山海'), 'font and single-page changes preserve the target range')
+    const visibleFolio = Number(d.querySelector('.rd-dock span')!.textContent!.split('/')[0].trim())
+    assert.match(d.querySelector(`.rd-book .leaf .sheet[data-pi="${visibleFolio - 1}"] .pg-flow`)?.textContent ?? '', /走过山海/)
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 3600)) })
+    assert.equal(d.querySelector('[data-book-location]'), null, 'navigation highlight expires')
     assert.deepEqual(errors, [])
+    await act(async () => root.render(<p>错误引用</p>))
+    await act(async () => root.render(<Reader record={record} api={api} target={{ book: record.id, location: { chapter: 99, from: 0, to: 1 } }} onBack={() => {}} onError={e => errors.push(e)} />)); await flush()
+    assert.match(errors.at(-1) ?? '', /位置不存在/)
+
   } finally {
     await act(async () => root.unmount()); useDocTabs.setState(tabsBefore, true)
     for (const [k, descriptor] of Object.entries(previous)) { if (descriptor) Object.defineProperty(globalThis, k, descriptor); else Reflect.deleteProperty(globalThis, k) }
