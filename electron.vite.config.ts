@@ -4,8 +4,11 @@ import react from '@vitejs/plugin-react'
 // @ts-expect-error - @tailwindcss/vite types require bundler moduleResolution
 import tailwindcss from '@tailwindcss/vite'
 
+const bookSourceDefines = { __READY_FEATURE_CTFILE__: JSON.stringify((process.env.READY_BUILD_FEATURES || '').split(',').includes('ctfile')) }
+
 export default defineConfig({
   main: {
+    define: bookSourceDefines,
     plugins: [externalizeDepsPlugin({
       exclude: ['@openuidev/react-lang', '@openuidev/lang-core'],
     })],
@@ -44,6 +47,7 @@ export default defineConfig({
     }
   },
   renderer: {
+    define: bookSourceDefines,
     resolve: {
       alias: {
         '@': resolve(__dirname, 'src/renderer'),

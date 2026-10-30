@@ -124,7 +124,22 @@ export class LibraryEngine {
     })
   }
 
-  private async importOne(root: string, folder: string, path: string): Promise<LibraryBook> {
+  importDownload(path: string, id: string, source: LibraryBook['source'], expectedRoot: string): Promise<LibraryBook> {
+    return this.serial(async () => {
+      const root = this.requireRoot()
+      if (root !== expectedRoot) throw new Error('下载期间资料库已切换')
+      const state = await this.scan()
+      const existing = state.status === 'ready' ? state.books.find(book => book.id === id) : undefined
+      if (existing) return existing
+      const folder = join(root, LIBRARY_FOLDER)
+      await mkdir(folder, { recursive: true })
+      await insideVault(root, folder)
+      if ((await lstat(folder)).isSymbolicLink()) throw new Error('阅读目录不能是符号链接')
+      return this.importOne(root, folder, path, { id: bookIdSchema.parse(id), source })
+    })
+  }
+
+  private async importOne(root: string, folder: string, path: string, download?: { id: string; source: LibraryBook['source'] }): Promise<LibraryBook> {
     if (!isAbsolute(path)) throw new Error('导入文件必须是绝对路径')
     const format = z.enum(formats).parse(extname(path).slice(1).toLowerCase())
     const bytes = await readFile(path)
@@ -149,12 +164,12 @@ export class LibraryEngine {
       if (metadata.cover && coverName) await publish(join(assetsPath, coverName), metadata.cover.bytes)
       const words = format === 'txt' || format === 'md' ? [...decodeBookText(bytes).replace(/\s/g, '')].length : undefined
       const fields = {
-        [F.id]: randomUUID(), [F.kind]: LIBRARY_KIND_BOOK,
+        [F.id]: download?.id ?? randomUUID(), [F.kind]: LIBRARY_KIND_BOOK,
         ...(name !== title ? { title } : {}),
         [F.author]: metadata.author || named.author, [F.year]: metadata.year, [F.publisher]: metadata.publisher,
         [F.language]: metadata.language, [F.topic]: topicFor({ cats: metadata.subjects, title }), [F.tags]: metadata.subjects,
         [F.status]: '想读', [F.file]: `${assetsName}/${basename(path)}`, [F.cover]: coverName ? `${assetsName}/${coverName}` : undefined,
-        [F.words]: words, [F.addedAt]: localDateTime(Date.now()), [F.source]: { kind: 'local' },
+        [F.words]: words, [F.addedAt]: localDateTime(Date.now()), [F.source]: download?.source ?? { kind: 'local' },
       }
       if (this.requireRoot() !== root) throw new Error('导入期间资料库已切换，请重新导入')
       if (!await exists(page)) { ownsDatabasePage = true; await publish(page, databasePage) }

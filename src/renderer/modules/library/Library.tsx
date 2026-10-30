@@ -1,3 +1,5 @@
+import { FindSheet } from './find/FindSheet'
+import { JobView } from './find/JobView'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { LibraryBook, LibraryState } from '../../../shared/library'
 import { getLibraryAPI, confirmed, type LibraryAPI } from './access'
@@ -12,6 +14,8 @@ type Route = { kind: 'shelf' } | { kind: 'info'; id: string; origin: HTMLElement
 type Snapshot = { status: 'loading' } | LibraryState
 
 export function Library({ api: providedAPI, requestedPath, onOpenOther }: { api?: LibraryAPI; requestedPath?: string; onOpenOther?: (path: string) => void }) {
+  const [finding, setFinding] = useState(false)
+  const sourceAPI = window.electronAPI?.bookSources
   const [snapshot, setSnapshot] = useState<Snapshot>({ status: 'loading' })
   const [error, setError] = useState('')
   const [route, setRoute] = useState<Route>({ kind: 'shelf' })
@@ -93,6 +97,8 @@ export function Library({ api: providedAPI, requestedPath, onOpenOther }: { api?
   }
   return <div ref={root} className="rn-library rn-design" tabIndex={0} aria-label="书房" onPointerDown={e => { if (e.target === e.currentTarget) e.currentTarget.focus() }} onKeyDown={e => {
     if (route.kind !== 'shelf' || e.metaKey || e.ctrlKey || e.altKey || (e.target instanceof Element && e.target.closest('input,textarea,select,[contenteditable]'))) return
+    if (finding) return
+    if (e.key.toLowerCase() === 'f' && sourceAPI) { e.preventDefault(); e.stopPropagation(); setFinding(true) }
     if (e.key === '/') { e.preventDefault(); e.stopPropagation(); search.current?.focus() }
     if (e.key.toLowerCase() === 'r') { e.preventDefault(); e.stopPropagation(); draw() }
   }}>
@@ -112,8 +118,10 @@ export function Library({ api: providedAPI, requestedPath, onOpenOther }: { api?
           </>}
         </>}
       </div>
-      <footer className="library-footer"><Glass>{SORTS.map(s => <button type="button" key={s.key} aria-pressed={sort === s.key} onClick={() => setSort(s.key)}>{s.label}</button>)}<button type="button" disabled={!shown.size} onClick={draw}>抽一本</button></Glass></footer>
+      <footer className="library-footer"><Glass>{sourceAPI && <button type="button" onClick={() => setFinding(true)}>找书 F</button>}{SORTS.map(s => <button type="button" key={s.key} aria-pressed={sort === s.key} onClick={() => setSort(s.key)}>{s.label}</button>)}<button type="button" disabled={!shown.size} onClick={draw}>抽一本</button></Glass></footer>
       {route.kind === 'info' && current && <BookOpen key={current.id} book={shelfBook(current)} record={current} origin={route.origin} onClose={() => setRoute({ kind: 'shelf' })} onRead={() => read(current)} />}
     </>}
+    {finding && sourceAPI && <FindSheet api={sourceAPI} onClose={() => { setFinding(false); root.current?.focus() }} />}
+    {sourceAPI && <JobView api={sourceAPI} />}
   </div>
 }

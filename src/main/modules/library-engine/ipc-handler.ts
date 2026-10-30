@@ -1,3 +1,4 @@
+import { LibraryHighlightService } from './highlight-service'
 import type { IpcMain } from 'electron'
 import type { LibraryResult, LibraryState } from '../../../shared/library'
 import type { LibraryEngine } from './library-engine'
@@ -6,11 +7,13 @@ import { bookmarkInputSchema, bookIdSchema, positionSchema } from './validation'
 
 export function registerLibraryIPC(ipcMain: Pick<IpcMain, 'handle'>, dependencies: {
   engine: LibraryEngine
+  highlights?: LibraryHighlightService
   reading: LibraryReadingRepository
   pickFiles(): Promise<string[]>
   changed(state: LibraryState): void
 }): void {
   const { engine, reading } = dependencies
+  const highlights = dependencies.highlights ?? new LibraryHighlightService(engine)
   const result = async <T>(work: () => Promise<T> | T): Promise<LibraryResult<T>> => {
     try { return { success: true, data: await work() } } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error),
@@ -23,6 +26,10 @@ export function registerLibraryIPC(ipcMain: Pick<IpcMain, 'handle'>, dependencie
     await changed()
     return imported
   }
+  ipcMain.handle('library:listHighlights', (_event, input: unknown) => result(() => highlights.list(input)))
+  ipcMain.handle('library:createHighlight', (_event, input: unknown) => result(() => highlights.create(input)))
+  ipcMain.handle('library:updateHighlight', (_event, input: unknown) => result(() => highlights.update(input)))
+  ipcMain.handle('library:removeHighlight', (_event, input: unknown) => result(() => highlights.remove(input)))
   ipcMain.handle('library:get', () => result(() => engine.get()))
   ipcMain.handle('library:importFiles', (_event, paths: unknown) => result(() => importFiles(paths)))
   ipcMain.handle('library:pickAndImport', () => result(async () => {

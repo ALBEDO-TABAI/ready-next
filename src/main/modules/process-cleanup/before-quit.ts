@@ -51,6 +51,8 @@ export interface BeforeQuitCleanupDeps {
    * parallel with the other runtime cleanups.
    */
   cleanupFileWatchers?: () => Promise<void> | void
+  /** Stops book-source download jobs so their records settle before the database closes. */
+  cleanupLibrarySources?: () => Promise<void> | void
   /** Closes the SQLite handle. Runs last. */
   closeDatabase: () => void
   /** Optional logger override (defaults to console). */
@@ -133,6 +135,9 @@ export async function runBeforeQuitCleanup(
   }
   if (deps.cleanupFileWatchers) {
     tasks.push(safeInvoke(deps.cleanupFileWatchers, 'cleanupFileWatchers', logger))
+  }
+  if (deps.cleanupLibrarySources) {
+    tasks.push(safeInvoke(deps.cleanupLibrarySources, 'cleanupLibrarySources', logger))
   }
   const cleanupPromise = Promise.allSettled(tasks)
 

@@ -117,3 +117,24 @@
 
 
 }
+
+@layer ready-next.library {
+.rn-library .rd-highlight-popover { position: absolute; z-index: 60; max-width: min(460px, calc(100% - 16px)); }
+.rn-library .highlight-tools { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px; }
+.rn-library .highlight-tools [role="group"] { display: flex; gap: 6px; width: 100%; }
+.rn-library .highlight-tools [role="group"] button { border-bottom: 4px solid var(--marker); padding: 5px 8px; }
+.rn-library .highlight-write { width: 100%; }
+.rn-library .highlight-write textarea { width: 100%; padding: 8px; resize: vertical; }
+.rn-library .highlight-tools p, .rn-library .rd-note-item p { width: 100%; white-space: pre-wrap; }
+.rn-library .rd-notes-list h3 { margin: 18px 0 8px; font-size: 14px; }
+.rn-library .rd-note-item { padding: 10px 0; border-bottom: 1px solid var(--rn-hair); }
+.rn-library .rd-note-item > button:first-child { display: block; border-left: 3px solid; padding-left: 10px; text-align: left; white-space: pre-wrap; }
+.rn-library .rd-note-item small { display: block; }
+.rn-library .rd-highlight-warning { position: absolute; bottom: 70px; left: 24px; right: 24px; z-index: 40; padding: 8px; background: var(--paper-face); }
+.rn-library .rd-margin-notes { position: absolute; inset: 0; pointer-events: none; z-index: 20; }
+.rn-library .rd-margin-notes button { position: absolute; pointer-events: auto; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-note); padding: 8px 12px; border-left: 2px solid; }
+.rn-library .rd-margin-notes button[hidden] { display: none; }
+/* the stage is user-select: none; only the text column selects, as in the original reader */
+.rn-library .rd-book .leaf .pg-flow { user-select: text; -webkit-user-select: text; }
+.rn-library .rd-book .pg-flow ::selection { background: color-mix(in srgb, var(--rn-accent) 22%, transparent); color: inherit; }
+}

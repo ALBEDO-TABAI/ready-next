@@ -55,7 +55,7 @@ import {
   type SyncScheduler,
 } from './modules/calendar-engine/sync-scheduler'
 import { setupSettingsIPC } from './modules/settings-engine/ipc-handler'
-import { setupLibraryIPC } from './modules/library-engine/runtime'
+import { setupLibraryIPC, shutdownLibrarySources } from './modules/library-engine/runtime'
 import { initializeCredentialVault } from './modules/settings-engine/credential-vault'
 import { pruneUnreferencedCredentialsAtStartup } from './modules/settings-engine/credential-vault-reconciliation'
 import { migrateExternalServiceCredentialsAfterWindowReady } from './modules/settings-engine/external-service-store'
@@ -381,6 +381,7 @@ function runFatalProcessCleanup(): Promise<void> {
     cleanupDocumentWorker: () => shutdownDocumentWorker(),
     cleanupDocumentDirectoryBroadcasts: () => shutdownDirectoryChangeBroadcasts(),
     cleanupFileWatchers: () => shutdownFileWatchers().then(() => undefined),
+    cleanupLibrarySources: () => shutdownLibrarySources(),
     closeDatabase: () => getDatabase().close(),
   }, { timeoutMs: 5_000 })
 }
@@ -1209,6 +1210,7 @@ async function cleanupBeforeAppQuit(startedAt: number): Promise<void> {
     cleanupDocumentWorker: () => shutdownDocumentWorker(),
     cleanupDocumentDirectoryBroadcasts: () => shutdownDirectoryChangeBroadcasts(),
     cleanupFileWatchers: () => shutdownFileWatchers().then(() => undefined),
+    cleanupLibrarySources: () => shutdownLibrarySources(),
     closeDatabase: () => getDatabase().close(),
   }, { timeoutMs: remainingTimeoutMs })
 }

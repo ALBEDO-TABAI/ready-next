@@ -8,19 +8,24 @@
 // a DMG that passes acceptance cannot be tied back to the exact source tree it
 // was built from.
 const path = require('node:path')
+const fs = require('node:fs')
 
 const {
   writeReleasePackageReceipt,
 } = require('./release-package-identity.cjs')
 
-exports.default = function writeReleaseReceipts(buildResult, root = path.resolve(__dirname, '..')) {
+exports.default = async function writeReleaseReceipts(buildResult, root = path.resolve(__dirname, '..')) {
   const artifacts = Array.isArray(buildResult?.artifactPaths) ? buildResult.artifactPaths : []
   const written = []
+  const { inspectBookSourceBuild } = await import('./verify-ready-next-book-sources.mjs')
   for (const artifactPath of artifacts) {
     if (!artifactPath.toLowerCase().endsWith('.dmg')) continue
-    written.push(writeReleasePackageReceipt(artifactPath, {
-      root,
-    }))
+    const features = inspectBookSourceBuild(path.join(root, 'out'))
+    const receiptPath = writeReleasePackageReceipt(artifactPath, { root })
+    const receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8'))
+    receipt.buildFeatures = { ctfile: features.ctfile }
+    fs.writeFileSync(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, { mode: 0o600 })
+    written.push(receiptPath)
   }
   for (const receiptPath of written) {
     console.log(`📄 发布回执已输出：${path.relative(root, receiptPath)}`)

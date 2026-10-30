@@ -1,3 +1,4 @@
+import type { LibraryHighlightContext, LibraryHighlightCreate, LibraryHighlightUpdate, LibraryHighlightRemove, LibraryHighlightState } from '../shared/library'
 import type { LibraryBook, LibraryBookPatch, LibraryBookmark, LibraryImportResult, LibraryReadingPosition, LibraryResult, LibraryState } from '../shared/library'
 import type { DocumentSyncRequest, DocumentSyncReply } from '../shared/document-operations'
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
@@ -1327,6 +1328,10 @@ const vaultAPI: import('../shared/vault').VaultAPI = {
 }
 
 const libraryAPI = {
+  listHighlights: (input: LibraryHighlightContext): Promise<LibraryResult<LibraryHighlightState>> => ipcRenderer.invoke('library:listHighlights', input),
+  createHighlight: (input: LibraryHighlightCreate): Promise<LibraryResult<LibraryHighlightState>> => ipcRenderer.invoke('library:createHighlight', input),
+  updateHighlight: (input: LibraryHighlightUpdate): Promise<LibraryResult<LibraryHighlightState>> => ipcRenderer.invoke('library:updateHighlight', input),
+  removeHighlight: (input: LibraryHighlightRemove): Promise<LibraryResult<LibraryHighlightState>> => ipcRenderer.invoke('library:removeHighlight', input),
   get: (): Promise<LibraryResult<LibraryState>> => ipcRenderer.invoke('library:get'),
   importFiles: (paths: string[]): Promise<LibraryResult<LibraryImportResult>> => ipcRenderer.invoke('library:importFiles', paths),
   pickAndImport: (): Promise<LibraryResult<LibraryImportResult>> => ipcRenderer.invoke('library:pickAndImport'),
@@ -1339,6 +1344,25 @@ const libraryAPI = {
     const handler = (_event: IpcRendererEvent, state: LibraryState) => listener(state)
     ipcRenderer.on('library:changed', handler)
     return () => ipcRenderer.removeListener('library:changed', handler)
+  },
+}
+
+const bookSourcesAPI: import('../shared/library-sources').BookSourcesAPI = {
+  settings: () => ipcRenderer.invoke('librarySources:settings'),
+  configure: input => ipcRenderer.invoke('librarySources:configure', input),
+  status: () => ipcRenderer.invoke('librarySources:status'),
+  search: input => ipcRenderer.invoke('librarySources:search', input),
+  categories: () => ipcRenderer.invoke('librarySources:categories'),
+  jobs: () => ipcRenderer.invoke('librarySources:jobs'),
+  download: input => ipcRenderer.invoke('librarySources:download', input),
+  cancel: id => ipcRenderer.invoke('librarySources:cancel', id),
+  retry: id => ipcRenderer.invoke('librarySources:retry', id),
+  answer: input => ipcRenderer.invoke('librarySources:answer', input),
+  openManual: id => ipcRenderer.invoke('librarySources:openManual', id),
+  onChanged: listener => {
+    const handler = (_event: IpcRendererEvent, jobs: import('../shared/library-sources').SourceJob[]) => listener(jobs)
+    ipcRenderer.on('librarySources:changed', handler)
+    return () => ipcRenderer.removeListener('librarySources:changed', handler)
   },
 }
 
@@ -1530,6 +1554,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   settings: settingsAPI,
   vault: vaultAPI,
   library: libraryAPI,
+  bookSources: bookSourcesAPI,
   imageGeneration: imageGenerationAPI,
   fileEmergence: fileEmergenceAPI,
   tagForge: tagForgeAPI,
@@ -1563,6 +1588,7 @@ declare global {
       theme: typeof themeAPI
       settings: typeof settingsAPI
       vault: typeof vaultAPI
+      bookSources: typeof bookSourcesAPI
       library: typeof libraryAPI
       imageGeneration: typeof imageGenerationAPI
       fileEmergence: typeof fileEmergenceAPI

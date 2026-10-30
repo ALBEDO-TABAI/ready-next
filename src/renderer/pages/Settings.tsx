@@ -1,3 +1,4 @@
+import { BookSourceSettingsPanel } from './settings/BookSourceSettingsPanel'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   ChevronLeft, User, Bell, Shield, Database,
@@ -153,6 +154,7 @@ const settingsData: SettingSection[] = [
     description: '绑定微信、飞书，远程发送任务并接收回复',
     settings: [] // Rendered dynamically via RemoteIMSettingsPanel
   },
+  { id: 'reading', group: 'content', title: '阅读', icon: HardDrive, description: '书源与下载设置', settings: [] },
   {
     id: 'rss-storage',
     group: 'content',
@@ -778,6 +780,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                 {/* AI Settings Panel — dynamic, wired to backend */}
                 {currentSection.id === 'ai' && <AISettingsPanel />}
                 {currentSection.id === 'memory' && <ReadyMemorySettingsPanel />}
+                {currentSection.id === 'reading' && <BookSourceSettingsPanel />}
                 {currentSection.id === 'rss-storage' && <RSSDraftStoreSettingsPanel />}
                 {currentSection.id === MODELS_RUNTIME_SETTINGS_SECTION && <ModelsRuntimeSettingsPanel />}
                 {currentSection.id === 'storage' && <StorageSettingsPanel />}

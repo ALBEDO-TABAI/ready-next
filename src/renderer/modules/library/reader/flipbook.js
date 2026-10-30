@@ -262,8 +262,10 @@ export function createFlipbook(o) {
     if (S.busy || e.button > 0) return;
     if (e.target.closest && e.target.closest('.rd-ui')) return;
     const r = book.getBoundingClientRect();
-    // the text column selects (a click there still turns the page); everywhere else, and a lifted corner, grabs the paper
-    if (o.selectable && e.pointerType === 'mouse' && !GLT.hovering && e.target.closest && e.target.closest('.pg-flow') && !e.target.closest('[data-goto]')) {
+    // the text column selects (a click there still turns the page); everywhere else, and a lifted corner, grabs the paper.
+    // The peel zone is wider than the page margin, so text wins: a corner still easing down is dropped at once.
+    if (o.selectable && e.pointerType === 'mouse' && e.target.closest && e.target.closest('.pg-flow') && !e.target.closest('[data-goto]')) {
+      if (GLT.hovering) GLT.endHover(true);
       sel = { x0: e.clientX, y0: e.clientY, t0: performance.now(), target: e.target, moved: false, vg: clamp((e.clientY - r.top) / r.height, 0, 1) };
       return;
     }
@@ -284,7 +286,7 @@ export function createFlipbook(o) {
       if (e.pointerType === 'mouse' && !S.busy && GLT.ok && !reduced) hoverPeel(e, r);
       const t = e.target.closest ? e.target : null;
       stage.style.cursor = t && t.closest('[data-goto]') ? 'pointer'
-        : o.selectable && t && !GLT.hovering && t.closest('.pg-flow') ? (t.closest('mark.hl') ? 'pointer' : 'text')
+        : o.selectable && t && t.closest('.pg-flow') ? (t.closest('mark.hl') ? 'pointer' : 'text')
         : inside ? (S.spread ? (e.clientX >= spineX ? 'e-resize' : 'w-resize') : (e.clientX - r.left < S.pw * 0.33 ? 'w-resize' : 'e-resize')) : 'default';
       return;
     }
@@ -304,6 +306,8 @@ export function createFlipbook(o) {
     poseTurner(drag.T, drag.theta, drag.T.dir);
   }
   function hoverPeel(e, r) {
+    // over selectable text the corner stays down; it lifts only in the margin and beyond the page
+    if (o.selectable && e.target.closest && e.target.closest('.pg-flow')) { if (GLT.hovering) GLT.endHover(false); return; }
     const zone = S.pw * 0.16, y = clamp((e.clientY - r.top) / r.height, 0, 1);
     let dir = 0, d = 1e9;
     const inY = e.clientY > r.top - 10 && e.clientY < r.bottom + 10;

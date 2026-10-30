@@ -447,6 +447,7 @@ test('isPathIgnored matches blocked dir names anywhere in the path', () => {
     '/proj/build/out.o',
     '/proj/coverage/index.html',
     '/proj/__pycache__/x.pyc',
+    '/vault/.ready/anchors/book.json',
   ]) {
     assert.equal(isPathIgnored(p), true, `expected ${p} to be ignored`)
   }

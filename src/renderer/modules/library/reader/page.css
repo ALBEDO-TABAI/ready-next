@@ -88,3 +88,17 @@
 
 
 }
+
+@layer ready-next.library {
+/* your highlights: a marker wash (four colours) or a red pen underline; a noted one carries a dot at its end */
+.rn-library .pg-flow mark.hl { color: inherit; padding: 0; border-radius: 2px; --mk: #f2c94c; --mka: 46%; background: color-mix(in srgb, var(--mk) var(--mka, 46%), transparent);
+  -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.rn-library .pg-flow mark.hl[data-c='green'] { --mk: #8fd17c; }
+.rn-library .pg-flow mark.hl[data-c='blue'] { --mk: #86b8f2; }
+.rn-library .pg-flow mark.hl[data-c='pink'] { --mk: #f39cbc; }
+.rn-library .pg-flow mark.hl[data-c='pen'] { --mk: #ff5a1f; background: none; text-decoration: underline; text-decoration-color: #ff5a1f; text-decoration-thickness: 1.5px; text-underline-offset: .26em; text-decoration-skip-ink: none; }
+.rn-library .pg-flow mark.hl[data-note][data-end] { position: relative; }
+.rn-library .pg-flow mark.hl[data-note][data-end]::after { content: ''; position: absolute; right: -4px; top: -3px; width: 6px; height: 6px; border-radius: 50%; background: #ff5a1f; box-shadow: 0 0 0 1.5px var(--pp, #f7f4ee); }
+.rn-library .pg-flow mark.hl.is-hot { background: color-mix(in srgb, var(--mk) calc(var(--mka, 46%) + 22%), transparent); }
+
+}

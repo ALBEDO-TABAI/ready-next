@@ -4447,6 +4447,20 @@ const migrations: Migration[] = [
       `)
     },
   },
+  {
+    name: '137_library_source_jobs',
+    up: (db) => {
+      db.exec(`CREATE TABLE library_source_jobs (
+        id TEXT PRIMARY KEY NOT NULL,
+        source TEXT NOT NULL CHECK(source IN ('zlib','treasure','ctfile')),
+        ref TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('queued','downloading','captcha','extracting','done','failed','cancelled')),
+        progress REAL NOT NULL DEFAULT 0 CHECK(progress BETWEEN 0 AND 100),
+        error TEXT, book_id TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+      )`)
+    },
+  },
+
 ]
 
 /**

@@ -82,6 +82,26 @@ test('runBeforeQuitCleanup awaits renderer state flush before closing DB', async
   assert.equal(order[order.length - 1], 'db')
 })
 
+test('runBeforeQuitCleanup settles book-source jobs before closing DB', async () => {
+  const order: string[] = []
+  const { logger } = makeLogger()
+
+  await runBeforeQuitCleanup({
+    cleanupAgentRuntime: () => { order.push('runtime') },
+    cleanupAgentManager: () => { order.push('agent') },
+    cleanupRsshubManager: () => { order.push('rss') },
+    cleanupLibrarySources: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      order.push('library-sources')
+    },
+    closeDatabase: () => { order.push('db') },
+    logger,
+  }, { timeoutMs: 1_000 })
+
+  assert.ok(order.includes('library-sources'))
+  assert.equal(order[order.length - 1], 'db')
+})
+
 test('runBeforeQuitCleanup honours the timeout when one cleanup hangs', async () => {
   const order: string[] = []
   const { logger, rec } = makeLogger()

@@ -81,6 +81,74 @@ async function checkVisibleLines(page, label) {
   return checks
 }
 
+// L2 / C6: real mouse drag, source-file readback and a freshly mounted reader.
+async function checkHighlights(page, book, vaultRoot) {
+  await page.getByRole('button', { name: '关闭面板', exact: true }).click()
+  const drag = await page.evaluate(() => {
+    const folios = document.querySelector('.rn-library .rd-dock span').textContent.split('/')[0].match(/\d+/g).map(Number)
+    for (const folio of folios) {
+      const paragraph = document.querySelector(`.rn-library .rd-book .leaf .sheet[data-pi="${folio - 1}"] .pg-flow p`)
+      const node = paragraph?.firstChild
+      if (!node || node.nodeType !== Node.TEXT_NODE || node.textContent.length < 10) continue
+      const first = document.createRange(), last = document.createRange()
+      first.setStart(node, 0); first.setEnd(node, 1)
+      last.setStart(node, 7); last.setEnd(node, 8)
+      const a = first.getBoundingClientRect(), b = last.getBoundingClientRect()
+      if (a.width && b.width) return { x1: a.left + 1, y1: a.top + a.height / 2, x2: b.right - 1, y2: b.top + b.height / 2 }
+    }
+    throw new Error('no visible text range for highlight drag')
+  })
+  const folioBefore = await page.locator('.rn-library .rd-dock').textContent()
+  await page.mouse.move(drag.x1, drag.y1)
+  await page.mouse.down()
+  await page.mouse.move(drag.x2, drag.y2, { steps: 12 })
+  await page.mouse.up()
+  await page.getByRole('dialog', { name: '划线', exact: true }).waitFor()
+  const selected = await page.evaluate(() => getSelection().toString().replace(/\s+/g, ' ').trim())
+  ok('drag selects text without turning pages', selected.length >= 3 && await page.locator('.rn-library .rd-dock').textContent() === folioBefore, selected)
+  await page.getByRole('button', { name: '黄', exact: true }).click()
+  await page.getByRole('dialog', { name: '划线', exact: true }).waitFor({ state: 'hidden' })
+  const source = fs.readFileSync(book.notePath, 'utf8')
+  const id = source.match(/^\^(hl-[\w-]+)$/m)?.[1]
+  ok('drag writes the quote block into the source note', id && source.includes('> [!quote|yellow]') && source.includes(`> ${selected}`), source)
+  if (!id) throw new Error('highlight id missing from source note')
+  const anchors = JSON.parse(fs.readFileSync(path.join(vaultRoot, '.ready', 'anchors', `${book.id}.json`), 'utf8'))
+  ok('sidecar is published after the source block', anchors.version === 1 && anchors.highlights[id]?.quote.exact === selected)
+  const restoredOnVisiblePage = async () => page.waitForFunction(({ id, selected }) => {
+    const folios = document.querySelector('.rn-library .rd-dock span')?.textContent.split('/')[0].match(/\d+/g)?.map(Number) ?? []
+    const text = [...new Set(folios)].flatMap(folio => [...document.querySelectorAll(`.rn-library .rd-book .leaf .sheet[data-pi="${folio - 1}"] mark[data-hl="${id}"]`)].map(mark => mark.textContent)).join('').replace(/\s+/g, ' ').trim()
+    return text === selected
+  }, { id, selected })
+  await restoredOnVisiblePage()
+  await page.screenshot({ path: path.join(shots, '5-highlight.png') })
+
+  await page.getByRole('button', { name: '回到书架', exact: true }).click()
+  const spine = page.locator('.rn-library .spine', { hasText: book.title }).first()
+  const box = await spine.boundingBox()
+  if (!box) throw new Error('reopened book spine is missing')
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+  await page.waitForTimeout(1500)
+  const cover = await page.getByRole('button', { name: '翻看封面' }).boundingBox()
+  if (!cover) throw new Error('reopened cover is missing')
+  await page.mouse.click(cover.x + cover.width / 2, cover.y + cover.height / 2)
+  await page.getByRole('button', { name: '开始阅读', exact: true }).click()
+  await page.locator('.rn-library [aria-label="阅读器"]').waitFor()
+  await restoredOnVisiblePage()
+  ok('reopening the reader restores the same highlight on the visible page', true)
+  await page.getByRole('button', { name: '排版', exact: true }).click()
+  await page.getByRole('slider', { name: '字号', exact: true }).fill('24')
+  await page.locator('.rn-library .reading-status').waitFor({ state: 'hidden' })
+  await page.getByRole('button', { name: '单页', exact: true }).click()
+  await page.getByRole('button', { name: '关闭面板', exact: true }).click()
+  await page.locator('.rn-library [aria-label="阅读器"]').focus()
+  await page.keyboard.press('n')
+  await page.locator('.rd-notes-list .rd-note-item > button').filter({ hasText: selected }).first().click()
+  await page.getByRole('button', { name: '关闭面板', exact: true }).click()
+  await restoredOnVisiblePage()
+  ok('font and single-page changes retain the highlighted words on the visible page', true)
+  await page.screenshot({ path: path.join(shots, '6-highlight-reopened.png') })
+}
+
 function electronEnv(extra) {
   const env = { ...process.env, ...extra }
   delete env.ELECTRON_RUN_AS_NODE
@@ -180,6 +248,7 @@ function electronEnv(extra) {
     await page.waitForTimeout(2000)
     const spaced = await checkVisibleLines(page, 'line spacing 2.2')
     ok('line spacing changes body layout', spaced.length > 0 && spaced.every(c => Math.abs(c.lead - 18 * 2.2) < 0.5), JSON.stringify(spaced))
+    await checkHighlights(page, epubBook, vault.root)
     ok('no uncaught renderer errors', errors.length === 0, errors.join(' | '))
   } catch (error) {
     ok('library acceptance completed', false, error instanceof Error ? error.stack : String(error))

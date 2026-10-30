@@ -108,6 +108,8 @@ async function mapBounded<T, R>(
 export const IGNORED_DIR_NAMES: ReadonlySet<string> = new Set<string>([
   // VCS / metadata
   '.DS_Store', '.git', '.hg', '.svn',
+  // Vault machine data (anchors, comments) owned by Ready services
+  '.ready',
   // Package managers / vendored deps
   'node_modules', 'vendor',
   // Python tooling

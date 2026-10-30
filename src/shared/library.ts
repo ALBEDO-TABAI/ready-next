@@ -111,3 +111,46 @@ export type LibraryResult<T> = { success: true; data: T } | { success: false; er
  *   'library:setBookmarks'  ({ bookId: string, bookmarks: LibraryBookmark[] }) -> LibraryBookmark[]
  * Push 'library:changed' (LibraryState) after imports, updates and vault changes.
  */
+
+/** M2.2 / D9: md owns text/notes; the sidecar is a rebuildable locator. Offsets count non-whitespace UTF-16 units, as pagination does. */
+export type LibraryHighlightColor = 'yellow' | 'green' | 'blue' | 'pink' | 'pen'
+export interface LibraryHighlightContext { bookId: string; chapters: { title: string; text: string }[] }
+export type LibraryHighlightLocation =
+  | { status: 'located'; chapter: number; from: number; to: number }
+  | { status: 'unlocated' | 'malformed'; reason: string }
+export interface LibraryHighlight {
+  id: string
+  chapter: number
+  from: number
+  to: number
+  chapterTitle: string
+  text: string
+  note: string
+  color: LibraryHighlightColor
+  location: LibraryHighlightLocation
+  sourceLine: number
+}
+export interface LibraryHighlightState {
+  version: string
+  sourcePath: string
+  highlights: LibraryHighlight[]
+  persistence: 'saved' | 'pending_save'
+  anchors: 'synced' | 'repair_needed'
+  warning?: string
+}
+export interface LibraryHighlightCreate extends LibraryHighlightContext {
+  expectedVersion: string
+  chapter: number
+  from: number
+  to: number
+  color: LibraryHighlightColor
+  note?: string
+}
+export interface LibraryHighlightRemove extends LibraryHighlightContext { expectedVersion: string; id: string }
+export interface LibraryHighlightUpdate extends LibraryHighlightRemove { patch: { color?: LibraryHighlightColor; note?: string } }
+export interface LibraryHighlightAPI {
+  listHighlights(input: LibraryHighlightContext): Promise<LibraryResult<LibraryHighlightState>>
+  createHighlight(input: LibraryHighlightCreate): Promise<LibraryResult<LibraryHighlightState>>
+  updateHighlight(input: LibraryHighlightUpdate): Promise<LibraryResult<LibraryHighlightState>>
+  removeHighlight(input: LibraryHighlightRemove): Promise<LibraryResult<LibraryHighlightState>>
+}
