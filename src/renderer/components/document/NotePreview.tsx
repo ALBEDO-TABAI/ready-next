@@ -1,3 +1,6 @@
+import { remarkSyncedBlocks } from '../../modules/document/annotations/inline-links'
+import { createContext, useContext } from 'react'
+import { SyncedBlock } from '../../modules/document/annotations/SyncedBlock'
 import { InlineDatabase, parseDatabaseLink, remarkDatabaseViews } from '../../modules/document/database'
 import { LibraryQuoteCard } from './LibraryQuoteCard'
 import { openReadyRef } from '../../modules/workbench/open-ready-ref'
@@ -351,6 +354,8 @@ function BrokenWidgetFallback({ reason }: { reason: string }) {
   )
 }
 
+const SyncedPathContext = createContext<string | null>(null)
+
 const MarkdownPreviewBlock = memo(function MarkdownPreviewBlock({
   markdown,
   components,
@@ -360,24 +365,27 @@ const MarkdownPreviewBlock = memo(function MarkdownPreviewBlock({
   components: Components
   remarkPlugins: MarkdownOptions['remarkPlugins']
 }) {
+  const syncedPath = useContext(SyncedPathContext)
   recordDocumentPerformanceCounter('previewBlockRenders')
   const databaseComponents = useMemo<Components>(() => {
     const Link = components.a
     const Paragraph = components.p
     const hasDatabase = (node: HastElement | ElementContent): boolean => node.type === 'element'
-      && (node.tagName === 'a' && String(node.properties.href).startsWith('ready-db:') || node.children.some(hasDatabase))
+      && (node.tagName === 'a' && /^ready-(?:db|sync):/.test(String(node.properties.href)) || node.children.some(hasDatabase))
     return {
       ...components,
       a: ({ node, href, ...props }) => {
+        const synced = /^ready-sync:([^#]*)#([\w-]+)$/.exec(href ?? '')
+        if (synced) return <SyncedBlock path={syncedPath} page={decodeURIComponent(synced[1])} blockId={synced[2]} />
         const reference = parseDatabaseLink(href ?? '')
         return reference ? <InlineDatabase {...reference} /> : Link && typeof Link !== 'string' ? <Link node={node} href={href} {...props} /> : <a href={href} {...props} />
       },
       p: ({ node, ...props }) => node && hasDatabase(node) ? <div {...props} /> : Paragraph && typeof Paragraph !== 'string' ? <Paragraph node={node} {...props} /> : <p {...props} />,
     }
-  }, [components])
-  const databasePlugins = useMemo(() => [...remarkPlugins ?? [], remarkDatabaseViews], [remarkPlugins])
+  }, [components, syncedPath])
+  const databasePlugins = useMemo(() => [...remarkPlugins ?? [], remarkSyncedBlocks, remarkDatabaseViews], [remarkPlugins])
   return (
-    <ReactMarkdown urlTransform={href => href.startsWith('ready://') || href.startsWith('ready-db:') ? href : defaultUrlTransform(href)} remarkPlugins={databasePlugins} components={databaseComponents}>
+    <ReactMarkdown urlTransform={href => href.startsWith('ready://') || href.startsWith('ready-db:') || href.startsWith('ready-sync:') ? href : defaultUrlTransform(href)} remarkPlugins={databasePlugins} components={databaseComponents}>
       {markdown}
     </ReactMarkdown>
   )
@@ -535,7 +543,7 @@ function NotePreview({
         </div>
       ) : null}
 
-      {editorTabId && !isEbookMarkdown ? (
+      <SyncedPathContext.Provider value={notePath ?? null}>{editorTabId && !isEbookMarkdown ? (
         <ReadyBlockEditor tabId={editorTabId} content={content} renderSource={block => block.type === 'frontmatter' ? null : (
           <NotePreview content={block.raw} notePath={notePath} widgetEditable
             forceManualPreview={widgetRenderBudget.forceManualPreviewAll}
@@ -625,6 +633,7 @@ function NotePreview({
         })}
 
       </div>}
+      </SyncedPathContext.Provider>
     </div>
   )
 }

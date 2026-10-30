@@ -98,7 +98,14 @@ async function checkCalendarLayers(page, root) {
       window.__layerDrag.push(`${type}@${target?.closest('[data-layer-day]')?.getAttribute('data-layer-day') ?? target?.tagName}:${event.dataTransfer?.dropEffect ?? ''}`)
     }, true)
   })
-  await chip.dragTo(page.locator('[data-layer-day="2026-11-01"]').first())
+  const dropDay = page.locator('[data-layer-day="2026-11-01"]').first()
+  const geometry = await page.evaluate(({ source, target }) => {
+    const at = (box) => { const el = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2); return `${el?.tagName}.${String(el?.className || '').slice(0, 30)}@${el?.closest('[data-layer-day]')?.getAttribute('data-layer-day')}:${el?.getAttribute('data-layer-entry') ?? ''}` }
+    const chip = document.querySelector(source), day = document.querySelector(target)
+    const a = chip?.getBoundingClientRect(), b = day?.getBoundingClientRect()
+    return { chip: a && [Math.round(a.x), Math.round(a.y), Math.round(a.width), Math.round(a.height), at(a)], day: b && [Math.round(b.x), Math.round(b.y), Math.round(b.width), Math.round(b.height), at(b)], viewport: [innerWidth, innerHeight] }
+  }, { source: `[data-layer-entry="page:${id.objectId}"]`, target: '[data-layer-day="2026-11-01"]' })
+  await chip.dragTo(dropDay)
   // waitForFunction does not await an async predicate, so poll the service and the disk from here.
   const moveDeadline = Date.now() + 10000
   let dragged = fs.readFileSync(source, 'utf8')
@@ -121,7 +128,7 @@ async function checkCalendarLayers(page, root) {
     const move = entry ? await window.electronAPI.calendarLayers.move({ range, id: entry.id, expectedVersion: entry.version, date: '2026-11-01' }) : null
     return { range, query: query.ok ? null : query, entry, chips, events: window.__layerDrag, move }
   })
-  ok('C8 drag changes only the source date', dragged === '---\ndate: 2026-11-01\n---\nC8 layer smoke\n', JSON.stringify({ dragged, layerAlerts, diagnosis }))
+  ok('C8 drag changes only the source date', dragged === '---\ndate: 2026-11-01\n---\nC8 layer smoke\n', JSON.stringify({ dragged, layerAlerts, diagnosis, geometry }))
 }
 
 // I2: exercise a real file-tree open, the Ready move command, the live watcher and restart.

@@ -1,3 +1,5 @@
+import { blockWithMarker } from '../../../../shared/document-anchors'
+import { AnnotationWorkspace } from '../annotations/AnnotationWorkspace'
 import { useCallback, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, useId, type ReactNode } from 'react'
 import { useDocTabs } from '../../../stores/useDocTabs'
 import {
@@ -24,7 +26,7 @@ function SourceBlock({ block, buffer, children, report }: { block: DocumentBlock
     // must retain the original CRLF bytes.
     if (draft.text !== draft.block.raw.replace(/\r\n?/g, '\n')) {
       buffer.apply(createBlockCommand({ ...buffer.snapshot, version: draft.version }, {
-        type: 'replace', mode: 'source', block: draft.block, markdown: textAreaContent(draft.block.raw, draft.text),
+        type: 'replace', mode: 'source', block: draft.text ? draft.block : blockWithMarker(buffer.snapshot.content, draft.block), markdown: textAreaContent(draft.block.raw, draft.text),
       }))
     }
     setDraft(null)
@@ -165,7 +167,7 @@ export function BufferedBlockEditor({ buffer, content: displayedContent, renderS
   const extra = emptyAt === null || parsed.blocks.some(block => block.start === emptyAt && block.type === 'paragraph')
     ? null : emptyBlock(emptyAt, containing?.id ?? null)
   if (extra && !extra.parentId) { segments.push(extra); segments.sort((a, b) => a.start - b.start) }
-  return <div ref={root} className="note-preview-body" data-ready-block-editor={editorId}
+  return <AnnotationWorkspace buffer={buffer}><div ref={root} className="note-preview-body" data-ready-block-editor={editorId}
     onKeyDownCapture={event => {
       if (event.nativeEvent.isComposing || !(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'z') return
       event.preventDefault(); event.stopPropagation()
@@ -184,5 +186,5 @@ export function BufferedBlockEditor({ buffer, content: displayedContent, renderS
       } catch (cause) { report(cause) }
     }}>添加文字</button>
     </EditorTools></BlockControls>
-  </div>
+  </div></AnnotationWorkspace>
 }

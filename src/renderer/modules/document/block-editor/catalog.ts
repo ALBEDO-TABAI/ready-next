@@ -46,7 +46,8 @@ export function convertBlock(block: DocumentBlock, kind: BlockKind, eol: string)
  * ready:columns markers, they get no handle and are not move stops, and their bytes stay where they are.
  */
 export function isNonContentBlock(block: DocumentBlock): boolean {
-  return (block.type === 'html' && /^\s*(?:<!--[\s\S]*?-->\s*)+$/.test(block.raw))
+  return /^\^[\w-]+\s*$/.test(block.raw)
+    || (block.type === 'html' && /^\s*(?:<!--[\s\S]*?-->\s*)+$/.test(block.raw))
     || (block.type === 'unknown' && /^ {0,3}\[[^\]\r\n]+\]:/.test(block.raw))
 }
 export function actionableBlocks(content: string): DocumentBlock[] {
