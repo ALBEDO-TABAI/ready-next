@@ -10,7 +10,7 @@ import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 const Database = createRequire(import.meta.url)('better-sqlite3') as new (path: string) => DatabaseConnection
 
-// Migration 137 rebuilds file identity and its dependants, so a pre-137 database is copied first.
+// Migration 138 rebuilds file identity and its dependants, so a pre-138 database is copied first.
 test('a database that still has file_identities is copied before the object migration', (t) => {
   if (skipIfSqliteUnavailable(t, 'Object migration backup')) return
   const dir = mkdtempSync(join(tmpdir(), 'ready-object-backup-'))
