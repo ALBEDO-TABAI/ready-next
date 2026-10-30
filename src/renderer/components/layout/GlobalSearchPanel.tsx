@@ -5,25 +5,13 @@ import { FileText, Loader2, Database, RotateCw } from 'lucide-react'
 import { useWorkspace, computeDesiredRoots } from '../../stores/useWorkspace'
 import { reduceReindexResponse } from './reindex-response-reducer'
 import type { WorkbenchMode } from '../../stores/useMode'
-import { useDocTabs, type DocTab } from '../../stores/useDocTabs'
-import { parseDocumentGraph, normalizeSearchText } from '../../../shared/document-graph-parse'
+import { useDocTabs } from '../../stores/useDocTabs'
+import { draftSearchResults, mergeDraftResults, queryObjectIndex, type SearchResultItem } from '../../modules/workbench/object-ui/query'
 import { readJsonStorage, writeJsonStorage, removeStorage } from '../../utils/storage'
 import { GLOBAL_SEARCH_DIMENSIONS, PANEL_TOKENS } from './panelTokens'
 import Modal from '../ui/Modal'
 import { isLocalHtmlFilePath, openLocalHtmlFileInBrowser } from '../../modules/browser/localHtmlFileOpen'
 import { requestWorkbenchModeOpen } from '../../modules/workbench/mode-transition'
-
-interface SearchResultItem {
-  path: string
-  name: string
-  nameMatch: boolean
-  snippet: string
-  tagsHit: string[]
-  linksHit: string[]
-  sourceType: string
-  sourceMeta?: Record<string, unknown> | null
-  draft?: { tabId: string }
-}
 
 const SOURCE_BADGE_LABEL: Record<string, string> = {
   document: 'doc',
@@ -52,112 +40,6 @@ export interface SidePanelSlots {
 const MARK_START = ''
 const MARK_END = ''
 const PREFIX_TOKEN_REGEX = /(^|\s)([#[])/
-
-interface ParsedLocalQuery {
-  tags: string[]
-  wikilinks: string[]
-  terms: string[]
-}
-
-function parseLocalQuery(raw: string): ParsedLocalQuery {
-  const tags: string[] = []
-  const wikilinks: string[] = []
-  const terms: string[] = []
-  const trimmed = raw.trim()
-  if (!trimmed) return { tags, wikilinks, terms }
-  const pieces: string[] = []
-  let buffer = ''
-  let inQuote = false
-  for (let i = 0; i < trimmed.length; i += 1) {
-    const ch = trimmed[i]
-    if (ch === '"') {
-      inQuote = !inQuote
-      buffer += ch
-      continue
-    }
-    if (!inQuote && /\s/.test(ch)) {
-      if (buffer.length > 0) { pieces.push(buffer); buffer = '' }
-      continue
-    }
-    buffer += ch
-  }
-  if (buffer.length > 0) pieces.push(buffer)
-
-  for (const piece of pieces) {
-    const normalized = normalizeSearchText(piece)
-    if (!normalized) continue
-    if (!/[\p{L}\p{N}]/u.test(normalized)) continue
-    if (normalized.startsWith('"') && normalized.endsWith('"') && normalized.length >= 2) {
-      const inner = normalized.slice(1, -1).trim()
-      if (inner) terms.push(inner.toLowerCase())
-      continue
-    }
-    if (normalized.startsWith('#') && normalized.length > 1) {
-      tags.push(normalized.slice(1).toLowerCase())
-      continue
-    }
-    if (normalized.startsWith('[[') && normalized.endsWith(']]') && normalized.length > 4) {
-      wikilinks.push(normalized.slice(2, -2).trim().toLowerCase())
-      continue
-    }
-    terms.push(normalized.toLowerCase())
-  }
-  return { tags, wikilinks, terms }
-}
-
-function buildDraftSnippet(body: string, terms: string[]): string {
-  if (!body) return ''
-  if (terms.length === 0) return body.slice(0, 120).replace(/\s+/g, ' ')
-  const normalizedBody = body.toLowerCase()
-  const first = terms[0]
-  const idx = normalizedBody.indexOf(first)
-  if (idx < 0) return body.slice(0, 120).replace(/\s+/g, ' ')
-  const start = Math.max(0, idx - 40)
-  const end = Math.min(body.length, idx + first.length + 80)
-  const prefix = body.slice(start, idx).replace(/\s+/g, ' ')
-  const match = body.slice(idx, idx + first.length)
-  const suffix = body.slice(idx + first.length, end).replace(/\s+/g, ' ')
-  return `${start > 0 ? '…' : ''}${prefix}${MARK_START}${match}${MARK_END}${suffix}${end < body.length ? '…' : ''}`
-}
-
-function matchDraftTab(tab: DocTab, parsed: ParsedLocalQuery): SearchResultItem | null {
-  const content = tab.content ?? ''
-  const graph = parseDocumentGraph(content)
-  const normalizedBody = graph.body.toLowerCase()
-  const normalizedName = normalizeSearchText(tab.title).toLowerCase()
-
-  for (const tag of parsed.tags) {
-    if (!graph.tags.some((t) => t.toLowerCase() === tag)) return null
-  }
-  for (const link of parsed.wikilinks) {
-    if (!graph.wikilinks.some((w) => w.target.toLowerCase() === link)) return null
-  }
-  let nameHits = 0
-  for (const term of parsed.terms) {
-    if (normalizedBody.includes(term)) continue
-    if (normalizedName.includes(term)) { nameHits += 1; continue }
-    return null
-  }
-  if (parsed.tags.length === 0 && parsed.wikilinks.length === 0 && parsed.terms.length === 0) {
-    return null
-  }
-
-  const nameMatch = parsed.terms.length > 0 && parsed.terms.every((t) => normalizedName.includes(t)) ? true : nameHits > 0
-  const snippet = buildDraftSnippet(graph.body, parsed.terms)
-  const tagsHit = parsed.tags.filter((tag) => graph.tags.some((t) => t.toLowerCase() === tag))
-  const linksHit = parsed.wikilinks.filter((link) => graph.wikilinks.some((w) => w.target.toLowerCase() === link))
-
-  return {
-    path: tab.path ?? `draft://${tab.id}`,
-    name: tab.title || '新文档',
-    nameMatch,
-    snippet,
-    tagsHit,
-    linksHit,
-    sourceType: 'document',
-    draft: { tabId: tab.id },
-  }
-}
 
 const PANEL_COLORS = {
   panelBg: PANEL_TOKENS.panelBg,
@@ -520,32 +402,10 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
     setMessage('')
 
     try {
-      // Multi-root payload: a single SQL pass on the main side ranks across
-      // all roots fairly. Falling back to the legacy `workspaceRoot` field
-      // would re-introduce the bug where pinned folders couldn't be searched.
-      const response = await window.electronAPI.document.searchIndex({
-        query: trimmed,
-        workspaceRoots: roots as string[],
-      })
+      const response = await queryObjectIndex(trimmed, roots)
       if (searchVersionRef.current !== currentVersion) return
-      if (!response?.success || !response.data) {
-        setResults([])
-        setStats({ returned: 0, elapsedMs: 0 })
-        setMessage(response?.error ? `搜索失败：${response.error}` : '搜索失败')
-        setDegraded(false)
-        return
-      }
-      const { items, stats: nextStats, degraded: nextDegraded } = response.data
-      setResults(items.map((hit) => ({
-        path: hit.path,
-        name: hit.name,
-        nameMatch: hit.nameMatch,
-        snippet: hit.snippet,
-        tagsHit: hit.tagsHit,
-        linksHit: hit.linksHit,
-        sourceType: hit.sourceType,
-        sourceMeta: hit.sourceMeta ?? null,
-      })))
+      const { items, stats: nextStats, degraded: nextDegraded } = response
+      setResults(items)
       setStats(nextStats)
       setDegraded(nextDegraded)
       setMessage(nextDegraded ? 'FTS5 不可用，结果可能不完整' : '')
@@ -560,6 +420,7 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
   }, [roots])
 
   useEffect(() => {
+    searchVersionRef.current += 1
     const timer = setTimeout(() => {
       void runSearch(query)
     }, 280)
@@ -634,27 +495,8 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
     revealWorkbenchModeForSearchOpen(modeForPath(item.path))
   }, [openTab, selectFile, setActiveTab])
 
-  // Overlay unsaved (path-less or dirty) drafts from useDocTabs. Indexed search
-  // only sees persisted files; this keeps brand-new or in-flight edits visible.
-  const draftResults = useMemo<SearchResultItem[]>(() => {
-    const trimmed = query.trim()
-    if (!trimmed) return []
-    const parsed = parseLocalQuery(trimmed)
-    const out: SearchResultItem[] = []
-    for (const tab of tabs) {
-      if (tab.path && !tab.isDirty) continue
-      const hit = matchDraftTab(tab, parsed)
-      if (hit) out.push(hit)
-    }
-    return out
-  }, [query, tabs])
-
-  const mergedResults = useMemo(() => {
-    if (draftResults.length === 0) return results
-    const draftPaths = new Set(draftResults.map((d) => d.path))
-    const filteredIpc = results.filter((r) => !draftPaths.has(r.path))
-    return [...draftResults, ...filteredIpc]
-  }, [draftResults, results])
+  const draftResults = useMemo(() => draftSearchResults(query, tabs), [query, tabs])
+  const mergedResults = useMemo(() => mergeDraftResults(results, draftResults, tabs), [results, draftResults, tabs])
 
   const showEmptyState = !isSearching && query.trim().length > 0 && mergedResults.length === 0
   const statsText = useMemo(

@@ -79,7 +79,7 @@ export function handleKey(e: KeyboardEvent): boolean {
     return false;
   }
   if (mod && k === 'Enter' && !s.overlay) { const a = document.activeElement as HTMLElement | null; if (editable(a)) { a!.blur(); setState({ draftId: null }); return true; } return false; }
-  if (mod && k.toLowerCase() === 'k' && !e.shiftKey) { openOverlay(s.overlay === 'cmdk' ? null : 'cmdk'); return true; }
+  // ⌘K belongs to the global object switcher (M5-C); the calendar palette stays on the g k sequence.
   if (mod && k === ',' && !e.shiftKey) { openOverlay('settings'); return true; }
   if (mod && e.shiftKey && (k === '>' || k === '.')) { zoom(1); return true; }
   if (mod && e.shiftKey && (k === '<' || k === ',')) { zoom(-1); return true; }

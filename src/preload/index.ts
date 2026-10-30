@@ -1616,6 +1616,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   emergence: emergenceAPI,
   browser: browserAPI,
   objects: objectsAPI,
+  objectRelations: { query: (id: string) => ipcRenderer.invoke('objectRelations:query', id) },
   document: documentAPI,
   board: boardAPI,
   rss: rssAPI,

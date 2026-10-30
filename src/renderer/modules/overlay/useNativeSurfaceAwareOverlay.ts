@@ -23,6 +23,7 @@ export function useNativeSurfaceAwareOverlay(): void {
     let hidePending = false
     let maskDesired = false
     let disposed = false
+    let failed = false
     const hidden = new Map<HTMLElement, string>()
 
     const reveal = () => {
@@ -49,10 +50,11 @@ export function useNativeSurfaceAwareOverlay(): void {
             element.style.visibility = 'hidden'
           }
         }
-        if (!masked && !hidePending) {
+        if (!masked && !hidePending && !failed) {
           hidePending = true
-          void beginBrowserMask({ persistent: true }).finally(() => {
+          void beginBrowserMask({ persistent: true, requireAck: true }).then((confirmed) => {
             hidePending = false
+            if (!confirmed) { failed = true; return }
             if (disposed || !maskDesired) {
               masked = false
               reveal()
@@ -67,6 +69,7 @@ export function useNativeSurfaceAwareOverlay(): void {
         return
       }
 
+      failed = false
       if (!hidePending) reveal()
       if (masked) {
         masked = false

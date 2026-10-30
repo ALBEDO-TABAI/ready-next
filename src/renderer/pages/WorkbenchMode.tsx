@@ -1,5 +1,6 @@
 import { useEffect, useCallback, useRef, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { ObjectUIHost } from '../modules/workbench/object-ui/ObjectUIHost'
 import { useWorkspace, type SidePanelWidthKey, reconcileWorkspaceWatchersFromStore, getNextSidePanelVariant, formatWorkspaceWatcherFailure } from '../stores/useWorkspace'
 import { useMode, type WorkbenchMode as WorkbenchModeType } from '../stores/useMode'
 import { useDocTabs } from '../stores/useDocTabs'
@@ -826,6 +827,8 @@ export default function WorkbenchMode() {
 
   return (
     <LiquidSceneProvider mouseContainer={sceneRef}>
+      {/* M5-C: the one global ⌘K switcher and quick look, mounted once for every mode. */}
+      <ObjectUIHost onSettings={() => navigate('/settings')} />
       <div
         ref={sceneRef}
         className="workbench-mode-root relative flex h-full flex-col overflow-hidden"

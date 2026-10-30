@@ -3361,6 +3361,7 @@ interface ElectronAPI {
   runFeedback: ElectronRunFeedbackAPI
   emergence: ElectronEmergenceAPI
   browser: ElectronBrowserAPI
+  objectRelations: import('../../main/modules/object-relations/contract').ObjectRelationsAPI
   objects: ObjectPresentationAPI
   document: ElectronDocumentAPI
   board: ElectronBoardAPI
