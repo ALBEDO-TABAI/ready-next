@@ -249,6 +249,9 @@ export default function BrowserMode({
   const splitTabHasNativeSurface = visibleSplitTab ? !visibleSplitTab.error && !isReadyBrowserBlankUrl(visibleSplitTab.url) : false
   const shouldHideAllBrowserHosts = (hasError || isReadyBlankTab) && !splitTabHasNativeSurface
   const fastCardItems = useFastCard(s => s.items)
+  const fastCardSyncState = useFastCard(s => s.syncState)
+  const loadFastCard = useFastCard(s => s.load)
+  useEffect(() => { if (isElectron) void loadFastCard() }, [isElectron, loadFastCard])
   const fastCardPanelOpen = useFastCard(s => s.panelOpen && !s.collapsed)
   const addFastCardItem = useFastCard(s => s.addItem)
   const removeFastCardItem = useFastCard(s => s.removeItem)
@@ -571,22 +574,20 @@ export default function BrowserMode({
         parseStatus: 'failed',
         error: response?.error || '视频解析未返回结果',
       }
-    addFastCardItem(createVideoFastCardItem(target, video))
+    await addFastCardItem(createVideoFastCardItem(target, video))
   }, [addFastCardItem, openFastCard])
 
   const handleAddTargetToFastCard = useCallback((target: BrowserFastCardTarget) => {
     if (target.kind === 'text') {
-      addFastCardItem(createTextFastCardItem(target))
-      openFastCard()
+      void addFastCardItem(createTextFastCardItem(target))
       return
     }
     if (target.kind === 'image') {
-      addFastCardItem(createImageFastCardItem(target))
-      openFastCard()
+      void addFastCardItem(createImageFastCardItem(target))
       return
     }
     void addVideoTargetToFastCard(target)
-  }, [addFastCardItem, addVideoTargetToFastCard, openFastCard])
+  }, [addFastCardItem, addVideoTargetToFastCard])
 
   const runFastCardTranslation = useCallback(async (target: BrowserFastCardTextTarget, targetLanguage: string) => {
     const requestId = ++fastCardResultRequestIdRef.current
@@ -672,12 +673,12 @@ export default function BrowserMode({
     void runFastCardTranslation(target, targetLanguage)
   }, [runFastCardTranslation])
 
-  const handleAddFastCardResult = useCallback(() => {
+  const handleAddFastCardResult = useCallback(async () => {
     const state = fastCardResultPanel
     const target = fastCardResultTargetRef.current
     if (!state || state.status !== 'ready' || !target) return
     if (state.kind === 'translation' && target.kind === 'text') {
-      addFastCardItem(finalizeFastCardItem({
+      const saved = await addFastCardItem(finalizeFastCardItem({
         id: createFastCardId('translation'),
         kind: 'translation',
         createdAt: Date.now(),
@@ -687,12 +688,12 @@ export default function BrowserMode({
         targetLanguage: state.targetLanguage,
         source: fastCardSourceFromTarget(target),
       }))
-      openFastCard()
-      setFastCardResultPanel(null)
+      if (!saved) return
+      setFastCardResultPanel(current => current === state ? null : current)
       return
     }
     if (state.kind === 'image-description' && target.kind === 'image') {
-      addFastCardItem(finalizeFastCardItem({
+      const saved = await addFastCardItem(finalizeFastCardItem({
         id: createFastCardId('image-description'),
         kind: 'image-description',
         createdAt: Date.now(),
@@ -701,10 +702,10 @@ export default function BrowserMode({
         description: state.description,
         source: fastCardSourceFromTarget(target),
       }))
-      openFastCard()
-      setFastCardResultPanel(null)
+      if (!saved) return
+      setFastCardResultPanel(current => current === state ? null : current)
     }
-  }, [addFastCardItem, fastCardResultPanel, openFastCard])
+  }, [addFastCardItem, fastCardResultPanel])
 
   const handleToggleFastCard = useCallback(() => {
     if (fastCardResultPanel) {
@@ -823,6 +824,7 @@ export default function BrowserMode({
       const snapshot: FastCardOverlaySnapshot = {
         mode: fastCardResultPanel ? 'result' : 'fastcard',
         items: fastCardItems,
+        syncState: fastCardSyncState,
         resultPanel: fastCardResultPanel,
         bounds: {
           left: rect.left,
@@ -848,7 +850,7 @@ export default function BrowserMode({
       observer.disconnect()
       window.removeEventListener('resize', scheduleSnapshot)
     }
-  }, [fastCardItems, fastCardPanelOpen, fastCardResultPanel, isActive, isElectron])
+  }, [fastCardItems, fastCardSyncState, fastCardPanelOpen, fastCardResultPanel, isActive, isElectron])
 
   useEffect(() => {
     if (!isElectron) return

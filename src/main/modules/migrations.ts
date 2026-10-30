@@ -4420,7 +4420,19 @@ const migrations: Migration[] = [
   { name: RSS_CATALOG_MIGRATION, up: migrateRSSCatalog },
   { name: RSS_METHOD_VALIDITY_MIGRATION, up: migrateRSSMethodValidity },
   { name: RSS_TRANSLATION_MIGRATION, up: migrateRSSTranslations },
-  { name: CALENDAR_UNION_MIGRATION, up: migrateCalendarUnion }
+  { name: CALENDAR_UNION_MIGRATION, up: migrateCalendarUnion },
+  {
+    name: '134_fastcard_items',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS fastcard_items (
+          id TEXT PRIMARY KEY NOT NULL,
+          payload_json TEXT NOT NULL,
+          position INTEGER NOT NULL UNIQUE
+        );
+      `)
+    },
+  }
 ]
 
 /**

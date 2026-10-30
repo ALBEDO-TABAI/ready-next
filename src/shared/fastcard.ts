@@ -133,8 +133,20 @@ export type FastCardResultPanelData =
     error?: string
   }
 
+export type FastCardSyncState =
+  | { kind: 'idle' | 'loading' | 'saving' | 'ready' }
+  | { kind: 'error'; message: string }
+
+export interface FastCardStorageAPI {
+  listFastCardItems: () => Promise<FastCardIPCResult<FastCardItem[]>>
+  addFastCardItem: (item: FastCardItem) => Promise<FastCardIPCResult<FastCardItem>>
+  removeFastCardItem: (id: string) => Promise<FastCardIPCResult<void>>
+  clearFastCardItems: () => Promise<FastCardIPCResult<void>>
+}
+
 export interface FastCardOverlaySnapshot {
   mode: 'fastcard' | 'result'
+  syncState?: FastCardSyncState
   items: FastCardItem[]
   resultPanel?: FastCardResultPanelData | null
   bounds: FastCardOverlayBounds

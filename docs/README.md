@@ -30,6 +30,7 @@
 
 | 专题 | 合同与验证起点 |
 | --- | --- |
+| Ready Next 四项目整合 | [整合实施计划](superpowers/plans/2026-10-30-ready-next-integration-implementation.md)；ready-next 分支的 D1–D18、待实现 C1–C15 与 M0–M8，不代表当前生产能力 |
 | 聊天项目目录 | [项目目录合同](superpowers/plans/2026-09-29-chat-project-selector-implementation.md)；目录隔离、显式覆盖与当前安装记录 |
 | 第三方模型与网关分层 | [模型验收](superpowers/audits/2026-09-26-provider-adapters-validation.md) / [模块拆分](superpowers/plans/2026-09-26-model-gateway-modularization.md)；`verify:codex-runtime-e3` |
 | 工作台性能与长 RSS 列表 | [性能实现与验收](superpowers/plans/2026-09-22-workbench-switch-performance-implementation.md)；`verify:workbench-performance` |

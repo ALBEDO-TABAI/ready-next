@@ -1159,7 +1159,7 @@ app.whenReady().then(async () => {
 // silently doing nothing. Guards the invariant that only one process ever runs
 // the startup reconciler against a given SQLite (see boot-entry lock rationale).
 app.on('second-instance', (_event, argv) => {
-  for(const value of argv)captureCalendarOpen({kind:value.startsWith('ready:')?'url':'file',value})
+  for(const value of argv)captureCalendarOpen({kind:value.startsWith('ready-next:')?'url':'file',value})
   if (!mainWindow) return
   if (mainWindow.isMinimized()) mainWindow.restore()
   mainWindow.show()

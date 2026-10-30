@@ -1,6 +1,6 @@
 # 代码行数健康度台账
 
-> 更新时间：2026-10-09
+> 更新时间：2026-10-30
 
 这份台账记录“任务给代码文件增加行数后，文件总行数已超过 1000 行”的健康度评估。它不是按行数自动要求拆分，而是把真正影响维护、验证和协作的风险持续留下来。
 
@@ -21,6 +21,10 @@
 
 | 评估日期 | 任务 | 文件 | 总行数 | 本次新增 | 结论 | 判断与后续动作 | 状态 |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
+| 2026-10-30 | ready-next M0/M1 起步（FastCard 落盘） | `src/main/modules/migrations.ts` | 4518 | 净 +12 | 健康 | 只按顺序登记 134 迁移 `fastcard_items`；迁移链在原生测试中完整执行。 | 无需处理 |
+| 2026-10-30 | ready-next M0/M1 起步（FastCard 落盘） | `src/preload/index.ts` | 1540 | 净 +5 | 一般 | 只加 FastCard 列表、添加、移除、清空四条透传；沿用按域声明的既有复查。 | 已排期：2026-11-01 |
+| 2026-10-30 | ready-next M0/M1 起步（FastCard 落盘） | `src/renderer/types/electron.d.ts` | 3459 | 净 +5 | 健康 | 单一跨进程声明，类型检查覆盖。 | 无需处理 |
+| 2026-10-30 | ready-next M0/M1 起步（FastCard 落盘） | `src/renderer/pages/modes/BrowserMode.tsx` | 1452 | 净 +2 | 一般 | 只改 FastCard 接线（启动读取、回执后关闭结果）；复查目标：浏览器页面接线按功能拆分，M4 接入画板保存前复查。 | 已排期：2026-11-30 |
 | 2026-10-09 | 复核并修复门禁清理中发现的可疑问题 | `src/main/modules/agent-control/codex-runtime/ready-codex-lifecycle-adapter.ts` 1693、`composition/candidate-closeout.ts` 1042；`src/__tests__/codex-product-boot-recovery.test.ts` 1941、`src/__tests__/ready-codex-lifecycle-adapter.test.ts` 2387 | 见文件列 | +7 / +5 / +约 60 / +约 27 | 一般 | 生产文件只加失败指标与“运行时已停止则不再写中断请求”的守卫，候选收尾仍在边界测试上限（1050）内；两个测试文件各补一例回归。职责未变，沿用原复查目标。 | 已排期：2026-11-09 |
 | 2026-10-09 | 门禁清理（silent-catch 理由、hook 依赖说明） | `src/renderer/components/document/BoardEditor.tsx` / `src/renderer/stores/useAgent.ts` / `src/renderer/components/layout/FileTree.tsx` | 1685 / 2479 / 1955 | +2 / +1 / +1 | 危险 | 只加注释（hook 依赖省略的原因、空 catch 的理由）；FileTree 另把从不重赋值的定时器 Map 在 effect 开头取出，行为不变。三者原有的多职责问题未变，仍需各自的拆分合同。 | 待独立拆分合同；交付时提醒 |
 | 2026-10-09 | 门禁清理（silent-catch 理由、hook 依赖说明） | `codex-app-server-client.ts` 1568、`ready-codex-lifecycle-adapter.ts` 1686、`codex-provisional-inbound-buffer.ts` 1097、`composition/candidate-closeout.ts` 1037、`composition/ingress-prepare.ts` 1009、`ready-memory/ready-memory-generation.ts` 1017、`runtime-core/agent-sdk-tool-executor.ts` 1246、`runtime-core/runtime.ts` 1936、`tools-runtime/tool-registry.ts` 1585（以上在 `src/main/modules/agent-control/`）；`src/main/modules/tools/browser-input-actions.ts` 1538、`src/main/modules/tools/tool-executor.ts` 1500；`src/renderer/components/agent/ChatPanel.tsx` 1401、`src/renderer/pages/modes/DocumentMode.tsx` 1099 | 见文件列 | 每个 +1～+10，均为注释 | 一般 | 只补空 catch 的 `silent-catch:` 理由或 hook 依赖说明，没有新增职责，原结论不变；两个组合文件仍在边界测试上限内（1050 / 1025）。`ready-memory-generation`、`agent-sdk-tool-executor`、`browser-input-actions`、`DocumentMode` 的原复查日期已过且本轮未做复查，统一顺延。 | 已排期：2026-11-09 |

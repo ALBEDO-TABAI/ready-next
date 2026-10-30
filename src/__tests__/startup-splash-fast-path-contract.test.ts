@@ -71,6 +71,9 @@ test('boot entry static import graph stays tiny so the splash is not delayed', (
     './startup-splash-window',
     './boot-timing',
     './calendar-open-intents',
+    // C15: the data-isolation guard must run before userData is touched; both depend only on fs/path.
+    './ready-next-data-isolation',
+    './modules/database-path',
   ])
   const staticImports = [...bootEntry.matchAll(/^import[^'"]+from ['"]([^'"]+)['"]/gm)].map((m) => m[1])
 

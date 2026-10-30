@@ -1,78 +1,71 @@
 import { create } from 'zustand'
-import type { FastCardItem } from '../../shared/fastcard'
+import type { FastCardItem, FastCardIPCResult, FastCardStorageAPI, FastCardSyncState } from '../../shared/fastcard'
 
-interface FastCardSnapshot {
+interface FastCardState {
   items: FastCardItem[]
   panelOpen: boolean
   collapsed: boolean
-}
-
-interface FastCardState extends FastCardSnapshot {
-  addItem: (item: FastCardItem) => void
-  removeItem: (id: string) => void
-  clear: () => void
-  open: () => void
+  syncState: FastCardSyncState
+  load: () => Promise<boolean>
+  addItem: (item: FastCardItem) => Promise<boolean>
+  removeItem: (id: string) => Promise<boolean>
+  clear: () => Promise<boolean>
+  open: () => Promise<boolean>
   collapse: () => void
 }
 
-const FASTCARD_SESSION_KEY = 'ready-fastcard-session-v1'
+function receipt<T>(result: FastCardIPCResult<T>): T | undefined {
+  if (!result.success) throw new Error(result.error || 'FastCard 操作失败')
+  return result.data
+}
 
-function readSnapshot(): FastCardSnapshot {
-  const fallback: FastCardSnapshot = { items: [], panelOpen: false, collapsed: true }
-  if (typeof sessionStorage === 'undefined') return fallback
-  try {
-    const raw = sessionStorage.getItem(FASTCARD_SESSION_KEY)
-    if (!raw) return fallback
-    const parsed = JSON.parse(raw) as Partial<FastCardSnapshot>
-    return {
-      items: Array.isArray(parsed.items) ? parsed.items.filter((item) => item?.id && item.kind) as FastCardItem[] : [],
-      panelOpen: Boolean(parsed.panelOpen),
-      collapsed: parsed.collapsed !== false,
+export function createFastCardStore(getAPI: () => FastCardStorageAPI) {
+  // One writer in the workbench; the overlay receives confirmed snapshots only.
+  let queue = Promise.resolve(true)
+  return create<FastCardState>((set, get) => {
+    const run = (kind: 'loading' | 'saving', operation: () => Promise<void>): Promise<boolean> => {
+      queue = queue.then(async () => {
+        set({ syncState: { kind } })
+        try {
+          await operation()
+          set({ syncState: { kind: 'ready' } })
+          return true
+        } catch (error) {
+          set({ syncState: { kind: 'error', message: error instanceof Error ? error.message : String(error) },
+            panelOpen: true, collapsed: false })
+          return false
+        }
+      })
+      return queue
     }
-  } catch {
-    return fallback
-  }
+    return {
+      items: [], panelOpen: false, collapsed: true, syncState: { kind: 'idle' },
+      load: () => run('loading', async () => {
+        const items = receipt(await getAPI().listFastCardItems())
+        if (!items) throw new Error('FastCard 未收到列表回执')
+        set({ items })
+      }),
+      addItem: (item) => run('saving', async () => {
+        const saved = receipt(await getAPI().addFastCardItem(item))
+        if (!saved) throw new Error('FastCard 未收到保存回执')
+        set(state => ({ items: [saved, ...state.items.filter(value => value.id !== saved.id)],
+          panelOpen: true, collapsed: false }))
+      }),
+      removeItem: (id) => run('saving', async () => {
+        receipt(await getAPI().removeFastCardItem(id))
+        set(state => ({ items: state.items.filter(item => item.id !== id) }))
+      }),
+      clear: () => run('saving', async () => {
+        receipt(await getAPI().clearFastCardItems())
+        set({ items: [] })
+      }),
+      open: () => {
+        set({ panelOpen: true, collapsed: false })
+        return get().load()
+      },
+      collapse: () => set({ panelOpen: false, collapsed: true }),
+    }
+  })
 }
 
-function writeSnapshot(snapshot: FastCardSnapshot): void {
-  if (typeof sessionStorage === 'undefined') return
-  try {
-    sessionStorage.setItem(FASTCARD_SESSION_KEY, JSON.stringify(snapshot))
-  } catch {
-    // silent-catch: session-only cache; storage failures should not break browser use.
-  }
-}
-
-function persist(next: FastCardSnapshot): FastCardSnapshot {
-  writeSnapshot(next)
-  return next
-}
-
-const initialSnapshot = readSnapshot()
-
-export const useFastCard = create<FastCardState>((set) => ({
-  ...initialSnapshot,
-  addItem: (item) => set((state) => persist({
-    items: [item, ...state.items],
-    panelOpen: true,
-    collapsed: false,
-  })),
-  removeItem: (id) => set((state) => persist({
-    ...state,
-    items: state.items.filter((item) => item.id !== id),
-  })),
-  clear: () => set((state) => persist({
-    ...state,
-    items: [],
-  })),
-  open: () => set((state) => persist({
-    ...state,
-    panelOpen: true,
-    collapsed: false,
-  })),
-  collapse: () => set((state) => persist({
-    ...state,
-    panelOpen: false,
-    collapsed: true,
-  })),
-}))
+export const useFastCard = createFastCardStore(() => window.electronAPI.browser)

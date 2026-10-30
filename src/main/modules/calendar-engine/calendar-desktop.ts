@@ -68,6 +68,6 @@ export function startCalendarDesktop(getWindow:()=>Promise<BrowserWindow|null>):
       else {const target=parseCalendarDeepLink(intent.value);if(target)await show(target)}
     }).catch(report)
   })
-  if(app.isPackaged)app.setAsDefaultProtocolClient('ready')
+  if(app.isPackaged)app.setAsDefaultProtocolClient('ready-next')
   return()=>{if(stopped)return;stopped=true;off();unlisten();clearInterval(timer);registered.forEach(key=>globalShortcut.unregister(key));tray.destroy()}
 }

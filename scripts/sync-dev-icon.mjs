@@ -22,9 +22,9 @@ copyFileSync(sourceIcon, targetIcon)
 
 if (existsSync(targetPlist)) {
   const bundleValues = {
-    CFBundleDisplayName: 'Ready',
-    CFBundleName: 'Ready',
-    CFBundleIdentifier: 'com.ready.app.dev',
+    CFBundleDisplayName: 'Ready Next',
+    CFBundleName: 'Ready Next',
+    CFBundleIdentifier: 'com.ready.app.next.dev',
   }
 
   for (const [key, value] of Object.entries(bundleValues)) {

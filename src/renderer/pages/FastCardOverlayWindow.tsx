@@ -19,13 +19,15 @@ export default function FastCardOverlayWindow() {
 
   useEffect(() => {
     let cancelled = false
+    let receivedPush = false
     const browser = window.electronAPI?.browser
     const cleanup = browser?.onFastCardOverlaySnapshot?.((next) => {
+      receivedPush = true
       setSnapshot(next)
     }) ?? (() => undefined)
 
     void browser?.getFastCardOverlaySnapshot?.().then((result) => {
-      if (cancelled) return
+      if (cancelled || receivedPush) return
       if (result?.success && result.data) {
         setSnapshot(result.data)
         return
@@ -46,6 +48,7 @@ export default function FastCardOverlayWindow() {
       {snapshot.mode === 'result' && snapshot.resultPanel ? (
         <FastCardResultPanel
           state={snapshot.resultPanel}
+          syncState={snapshot.syncState}
           onClose={() => send({ type: 'close-result' })}
           onAddToFastCard={() => send({ type: 'add-result' })}
           onTargetLanguageChange={(targetLanguage) => send({ type: 'target-language-change', targetLanguage })}
@@ -53,6 +56,7 @@ export default function FastCardOverlayWindow() {
       ) : (
         <FastCardPanel
           items={snapshot.items}
+          syncState={snapshot.syncState}
           onCollapse={() => send({ type: 'collapse' })}
           onClear={() => send({ type: 'clear' })}
           onSaveMarkdown={() => send({ type: 'save-markdown' })}

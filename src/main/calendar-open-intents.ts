@@ -3,7 +3,8 @@ export interface CalendarOpenIntent {kind:'file'|'url';value:string}
 const pending:CalendarOpenIntent[]=[]
 let consumer:((intent:CalendarOpenIntent)=>void)|null=null
 export function captureCalendarOpen(intent:CalendarOpenIntent):boolean {
-  if(intent.kind==='file'?!/\.(ics|vcs)$/i.test(intent.value):!intent.value.startsWith('ready://calendar/'))return false
+  if(intent.kind==='file'?!/\.(ics|vcs)$/i.test(intent.value):!intent.value.startsWith('ready-next://calendar/'))return false
+  if(intent.kind==='url')intent={...intent,value:intent.value.replace(/^ready-next:/,'ready:')}
   if(consumer)consumer(intent);else pending.push(intent)
   return true
 }

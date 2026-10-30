@@ -1,9 +1,10 @@
 import { FileText, Image as ImageIcon, Languages, PanelRightClose, Save, Send, Sparkles, Trash2, Video, X } from 'lucide-react'
-import type { FastCardItem } from '../../../shared/fastcard'
+import type { FastCardItem, FastCardSyncState } from '../../../shared/fastcard'
 import { LiquidSurfaceLayer } from '../ui/liquid-glass/LiquidFloatingPanel'
 
 interface FastCardPanelProps {
   items: FastCardItem[]
+  syncState?: FastCardSyncState
   onCollapse: () => void
   onClear: () => void
   onSaveMarkdown: () => void
@@ -38,6 +39,7 @@ function itemPreview(item: FastCardItem): string {
 
 export default function FastCardPanel({
   items,
+  syncState,
   onCollapse,
   onClear,
   onSaveMarkdown,
@@ -66,6 +68,10 @@ export default function FastCardPanel({
         </button>
       </header>
 
+      {syncState?.kind === 'error' && <p role="alert">{syncState.message}</p>}
+      {(syncState?.kind === 'loading' || syncState?.kind === 'saving') && (
+        <p role="status">{syncState.kind === 'loading' ? '正在读取暂存…' : '正在保存…'}</p>
+      )}
       <div className="browser-fastcard-list">
         {items.length === 0 ? (
           <div className="browser-fastcard-empty">暂无内容</div>

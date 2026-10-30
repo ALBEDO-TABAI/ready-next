@@ -95,7 +95,7 @@ const results=[];
     await root.locator('.side-row',{hasText:'匯入'}).click();await idle();ok('file chooser reimport keeps event count',(await events()).length===importedCount);
     await app.evaluate(({Menu})=>Menu.getApplicationMenu().getMenuItemById('ready-calendar-menu').submenu.items.find(i=>i.label==='导出全部日历…').click());
     await page.waitForTimeout(200);ok('native export writes an ICS file',fs.readFileSync(output,'utf8').includes('BEGIN:VCALENDAR'));
-    await app.evaluate(({app})=>app.emit('open-url',{preventDefault(){}},'ready://calendar/day/2026-12-25'));
+    await app.evaluate(({app})=>app.emit('open-url',{preventDefault(){}},'ready-next://calendar/day/2026-12-25'));
     await page.waitForFunction(()=>document.querySelector('[data-testid=title]')?.textContent.includes('十二月'));ok('native day deep link reaches calendar',true);
     const primary=(await snap()).calendars.find(c=>c.primary&&!c.readOnly).id;
     await api('putPreferences',{notifications:true,notifySound:false});

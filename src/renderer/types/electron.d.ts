@@ -99,6 +99,7 @@ import type {
   VerticalRailOverlaySnapshot,
 } from '../../shared/browser-vertical-rail-overlay'
 import type {
+  FastCardStorageAPI,
   BrowserFastCardContextActionEvent,
   FastCardOverlayCommand,
   FastCardOverlaySnapshot,
@@ -1308,6 +1309,10 @@ interface ElectronBrowserAPI {
   onTabOpened: (callback: (data: BrowserTabOpenedEvent) => void) => () => void
   onAdblockUpdate: (callback: (data: BrowserAdblockStateData) => void) => () => void
   onFastCardContextAction: (callback: (data: BrowserFastCardContextActionEvent) => void) => () => void
+  listFastCardItems: FastCardStorageAPI['listFastCardItems']
+  addFastCardItem: FastCardStorageAPI['addFastCardItem']
+  removeFastCardItem: FastCardStorageAPI['removeFastCardItem']
+  clearFastCardItems: FastCardStorageAPI['clearFastCardItems']
   translateFastCardSelection: (payload: FastCardTranslateRequest) => Promise<FastCardIPCResult<FastCardTranslateResult>>
   describeFastCardImage: (payload: FastCardDescribeImageRequest) => Promise<FastCardIPCResult<FastCardDescribeImageResult>>
   resolveFastCardVideo: (payload: FastCardResolveVideoRequest) => Promise<FastCardIPCResult<FastCardResolveVideoResult>>

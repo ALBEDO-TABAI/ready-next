@@ -1,5 +1,5 @@
-appId: com.ready.app
-productName: Ready
+appId: com.ready.app.next
+productName: Ready Next
 directories:
   buildResources: build
   output: exports
@@ -138,9 +138,9 @@ asarUnpack:
   - "node_modules/better-sqlite3/**"
 
 protocols:
-  - name: Ready Calendar
+  - name: Ready Next Calendar
     schemes:
-      - ready
+      - ready-next
 fileAssociations:
   - ext:
       - ics

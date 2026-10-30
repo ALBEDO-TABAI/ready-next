@@ -22,6 +22,7 @@
 
 | 日期 | 文档与用途 |
 | --- | --- |
+| 2026-10-30 | [Ready Next 四项目整合](superpowers/plans/2026-10-30-ready-next-integration-implementation.md) — 已确认方案 v2 的仓库计划；D1–D18、待实现 C1–C15、调整后的 M0–M8；独立数据环境与 Claude 审阅合入，不宣称产品已实现 |
 | 2026-09-13 | [技能与提示词指引应用记录](maintenance/2026-09-13-skills-and-prompts-refresh.md) — 本项目协作规则、技能描述与执行边界的调整和验证 |
 | 2026-09-15 | [书本图片分页](superpowers/plans/2026-09-15-document-reading-images-implementation.md) — 图片尺寸、独页与后文接续合同 |
 | 2026-09-22 | [工作台性能](superpowers/plans/2026-09-22-workbench-switch-performance-implementation.md) — RSS 渲染、历史读取、技能扫描及绑定包体的验收 |

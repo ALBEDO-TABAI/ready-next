@@ -75,6 +75,7 @@ import type {
   VerticalRailOverlaySnapshot,
 } from '../shared/browser-vertical-rail-overlay'
 import type {
+  FastCardItem,
   BrowserFastCardContextActionEvent,
   FastCardOverlayCommand,
   FastCardOverlaySnapshot,
@@ -594,6 +595,10 @@ const browserAPI = {
     ipcRenderer.on('browser:fastCardContextAction', handler)
     return () => ipcRenderer.removeListener('browser:fastCardContextAction', handler)
   },
+  listFastCardItems: () => ipcRenderer.invoke('browser:fastCardList'),
+  addFastCardItem: (item: FastCardItem) => ipcRenderer.invoke('browser:fastCardAdd', item),
+  removeFastCardItem: (id: string) => ipcRenderer.invoke('browser:fastCardRemove', id),
+  clearFastCardItems: () => ipcRenderer.invoke('browser:fastCardClear'),
   translateFastCardSelection: (payload: FastCardTranslateRequest) =>
     ipcRenderer.invoke('browser:fastCardTranslateSelection', payload),
   describeFastCardImage: (payload: FastCardDescribeImageRequest) =>

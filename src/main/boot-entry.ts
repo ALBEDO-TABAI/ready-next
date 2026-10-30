@@ -1,6 +1,6 @@
 import { captureCalendarOpen } from './calendar-open-intents'
 import { config } from 'dotenv'
-import { resolve } from 'path'
+import { delimiter, resolve } from 'path'
 
 // Load .env from project root (before anything else)
 config({ path: resolve(__dirname, '../../.env') })
@@ -10,6 +10,8 @@ import { appendFileSync, mkdirSync } from 'fs'
 import { toOAuthCompatibleUserAgent } from './modules/browser-engine/popup-policy'
 import { createStartupSplashWindow, yieldToPresentation } from './startup-splash-window'
 import { logBootStage, startBootStallProbe } from './boot-timing'
+import { assertReadyNextDataIsolation } from './ready-next-data-isolation'
+import { resolveReadyDatabasePath } from './modules/database-path'
 
 /**
  * 主进程微入口（build 入口指向本文件，产物仍为 out/main/index.js）。
@@ -20,12 +22,29 @@ import { logBootStage, startBootStallProbe } from './boot-timing'
  * 回归围栏：startup-splash-fast-path-contract.test.ts（入口 import 白名单）。
  */
 
-app.setName('Ready')
+app.setName('Ready Next')
 app.on('open-file', (event, path) => { if(captureCalendarOpen({kind:'file',value:path}))event.preventDefault() })
 app.on('open-url', (event, url) => { if(captureCalendarOpen({kind:'url',value:url}))event.preventDefault() })
+for(const value of process.argv)captureCalendarOpen({kind:value.startsWith('ready-next:')?'url':'file',value})
 
 const READY_USER_DATA_DIR = process.env.READY_USER_DATA_DIR?.trim()
 const READY_START_HIDDEN = process.env.READY_START_HIDDEN === '1'
+try {
+  const userData = READY_USER_DATA_DIR || app.getPath('userData')
+  const extraProtected = (process.env.READY_NEXT_EXTRA_PROTECTED_DIRS ?? '').split(delimiter).filter(Boolean)
+  assertReadyNextDataIsolation(userData, resolveReadyDatabasePath(userData, process.env.READY_DB_PATH), app.getPath('home'), extraProtected)
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error)
+  console.error('[boot-entry] data isolation check failed:', message)
+  try {
+    // Hidden starts are automation: a modal box would block exit until someone dismisses it.
+    if (!READY_START_HIDDEN) dialog.showErrorBox('Ready Next 启动失败', message)
+  } finally {
+    // process.exit halts synchronously; app.exit would let the rest of this
+    // module (mkdir, lock, startup) keep running against the forbidden path.
+    process.exit(1)
+  }
+}
 if (READY_USER_DATA_DIR) {
   mkdirSync(READY_USER_DATA_DIR, { recursive: true })
   app.setPath('userData', READY_USER_DATA_DIR)

@@ -1,11 +1,12 @@
 import { Languages, Plus, Sparkles, X } from 'lucide-react'
-import type { FastCardResultPanelData } from '../../../shared/fastcard'
+import type { FastCardResultPanelData, FastCardSyncState } from '../../../shared/fastcard'
 import { LiquidSurfaceLayer } from '../ui/liquid-glass/LiquidFloatingPanel'
 
 export type FastCardResultPanelState = FastCardResultPanelData
 
 interface FastCardResultPanelProps {
   state: FastCardResultPanelState
+  syncState?: FastCardSyncState
   onClose: () => void
   onAddToFastCard: () => void
   onTargetLanguageChange: (language: string) => void
@@ -23,6 +24,7 @@ const TARGET_LANGUAGE_OPTIONS = [
 
 export default function FastCardResultPanel({
   state,
+  syncState,
   onClose,
   onAddToFastCard,
   onTargetLanguageChange,
@@ -57,6 +59,8 @@ export default function FastCardResultPanel({
       </header>
 
       <div className="browser-fastcard-result-body">
+        {syncState?.kind === 'error' && <p role="alert">{syncState.message}</p>}
+        {syncState?.kind === 'saving' && <p role="status">正在保存…</p>}
         {state.kind === 'translation' && (
           <>
             <label className="browser-fastcard-field">
@@ -81,7 +85,7 @@ export default function FastCardResultPanel({
       </div>
 
       <footer className="browser-fastcard-footer">
-        <button className="browser-fastcard-action" type="button" onClick={onAddToFastCard} disabled={state.status !== 'ready'}>
+        <button className="browser-fastcard-action" type="button" onClick={onAddToFastCard} disabled={state.status !== 'ready' || syncState?.kind === 'saving'}>
           <Plus size={14} />
           <span>添加到 FastCard</span>
         </button>
