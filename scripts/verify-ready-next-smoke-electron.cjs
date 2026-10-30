@@ -79,7 +79,9 @@ async function checkObjectPresentationBeforeRestart(app, page, root) {
   }, { root, from })
   await page.reload()
   await requestMode(page, 'document')
-  // The vault is a pinned folder that starts collapsed; expand it the way a person would.
+  // This step is about the file tree: show the 文件 view, then expand the collapsed vault folder as a person would.
+  const filesView = page.getByRole('group', { name: '侧栏视角' }).getByRole('button', { name: '文件', exact: true })
+  if (await filesView.isVisible().catch(() => false) && await filesView.getAttribute('aria-pressed') !== 'true') await filesView.click()
   const fileRow = page.getByText('i2-a.md', { exact: true }).first()
   if (!await fileRow.isVisible().catch(() => false)) await page.getByText(path.basename(root), { exact: true }).first().click({ timeout: 20000 })
   await fileRow.click({ timeout: 20000 })

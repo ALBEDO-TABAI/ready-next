@@ -357,6 +357,7 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
       <PageRootNotice hasRoots={pagePanel.roots.length > 0} />
       <button type="button" className="shrink-0 text-left text-[13px] rounded hover:bg-[var(--files-panel-state-hover-bg)]"
         style={{ margin: '4px 12px', padding: '8px 10px', color: PANEL_TOKENS.text }}
+        title="打开书房" data-library-entry="true"
         onClick={() => { useDocTabs.getState().openLibraryTab(); requestWorkbenchModeOpen('document') }}>
         阅读
       </button>
