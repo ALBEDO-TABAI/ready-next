@@ -123,6 +123,26 @@ for(const backend of ['native','chokidar'] as const)test(`C2 real ${backend} wat
  }finally{if(handle && !('kind' in handle))await handle.close();f.close()}
 })
 
+test('C2/C8 the event window settles known-file changes fast and keeps a split move together', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'Object identity')) return
+  const f=fixture()
+  try {
+    const path=join(f.root,'dated.md');writeFileSync(path,'---\ndate: 2026-11-01\n---\nA');f.registry.reconcile([path])
+    const id=f.registry.find(path)!.id
+    const settled:string[][]=[]
+    const eventWindow=new ObjectEventWindow(f.registry,async paths=>{settled.push(paths)})
+    writeFileSync(path,'---\ndate: 2026-11-02\n---\nA')
+    const started=Date.now();await eventWindow.add(path)
+    assert.ok(Date.now()-started<500,`a known file change settles fast (${Date.now()-started}ms)`)
+    // The two halves of an external move arrive 400 ms apart: longer than the fast window, still one batch.
+    const moved=join(f.root,'moved.md');renameSync(path,moved)
+    const first=eventWindow.add(path);await new Promise(resolve=>setTimeout(resolve,400));const second=eventWindow.add(moved)
+    await Promise.all([first,second])
+    assert.deepEqual(settled.at(-1),[path,moved])
+    assert.equal(f.registry.find(moved)!.id,id)
+  } finally { f.close() }
+})
+
 test('C2 path swaps, window boundaries and interrupted moves do not invent or steal identity', async (t) => {
   if (skipIfSqliteUnavailable(t, 'Object identity')) return
  const f=fixture();try{

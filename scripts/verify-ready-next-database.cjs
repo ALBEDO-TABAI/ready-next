@@ -23,7 +23,8 @@ if (process.argv.includes('--checks')) {
 
 async function main() {
   const { _electron } = require('playwright')
-  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'ready-next-database-'))
+  // Page operations take the canonical vault root (macOS temp paths sit behind the /var -> /private/var link).
+  const temporary = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ready-next-database-')))
   const profile = path.join(temporary, 'profile'), vault = path.join(temporary, '测试资料库'), evidence = path.join(temporary, 'evidence')
   fs.mkdirSync(vault); fs.mkdirSync(evidence)
   const entry = path.resolve(process.cwd(), require('../package.json').main)
@@ -59,7 +60,7 @@ async function main() {
       { id: 'calendar', name: '日历', type: 'calendar', dateField: 'date', cardFields: ['text'] },
     ] }
     const databaseId = await page.evaluate(async ({ root, content }) => {
-      const result = await window.electronAPI.documentPages.operate({ type: 'create', root, operationId: 'm5b-create-db', title: '验收库', content })
+      const result = await window.electronAPI.documentPages.operate({ type: 'create', root, parentPath: root, operationId: 'm5b-create-db', title: '验收库', content })
       if (!result.ok) throw new Error(result.message)
       return result.value.objectId
     }, { root: vault, content: `---\n${stringify({ ready_database: definition })}---\n数据库验收正文\n` })
@@ -69,7 +70,7 @@ async function main() {
       return result.value.objectId
     }, databaseId)
     await page.evaluate(async root => {
-      const result = await window.electronAPI.documentPages.operate({ type: 'create', root, operationId: 'm5b-create-preview', title: '视图验收', content: '# 视图验收\n\n![[验收库#表格]]\n\n![[验收库#看板]]\n\n![[验收库#日历]]\n' })
+      const result = await window.electronAPI.documentPages.operate({ type: 'create', root, parentPath: root, operationId: 'm5b-create-preview', title: '视图验收', content: '# 视图验收\n\n![[验收库#表格]]\n\n![[验收库#看板]]\n\n![[验收库#日历]]\n' })
       if (!result.ok) throw new Error(result.message)
     }, vault)
     assert.deepEqual(fields(fs.readFileSync(path.join(vault, '验收库.md'), 'utf8')).ready_database, definition)

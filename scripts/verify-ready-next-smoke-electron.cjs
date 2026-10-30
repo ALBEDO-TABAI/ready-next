@@ -85,11 +85,19 @@ async function checkCalendarLayers(page, root) {
   ok('C8 external file date renders within one second', elapsed < 1000, `${elapsed.toFixed(1)}ms`)
   console.log(`C8 window latency ${elapsed.toFixed(1)}ms`)
   await chip.dragTo(page.locator('[data-layer-day="2026-11-01"]').first())
-  await page.waitForFunction(async () => {
-    const result = await window.electronAPI.calendarLayers.query({ from: '2026-11-01', to: '2026-11-02', timeZone: 'Asia/Tokyo' })
-    return result.ok && result.value.some(entry => entry.title === 'c8-layer' && entry.date === '2026-11-01')
-  })
-  ok('C8 drag changes only the source date', fs.readFileSync(source, 'utf8') === '---\ndate: 2026-11-01\n---\nC8 layer smoke\n')
+  // waitForFunction does not await an async predicate, so poll the service and the disk from here.
+  const moveDeadline = Date.now() + 10000
+  let dragged = fs.readFileSync(source, 'utf8')
+  while (Date.now() < moveDeadline) {
+    const shown = await page.evaluate(async () => {
+      const result = await window.electronAPI.calendarLayers.query({ from: '2026-11-01', to: '2026-11-02', timeZone: 'Asia/Tokyo' })
+      return result.ok && result.value.some(entry => entry.title === 'c8-layer' && entry.date === '2026-11-01')
+    })
+    dragged = fs.readFileSync(source, 'utf8')
+    if (shown && dragged.includes('2026-11-01')) break
+    await page.waitForTimeout(100)
+  }
+  ok('C8 drag changes only the source date', dragged === '---\ndate: 2026-11-01\n---\nC8 layer smoke\n', JSON.stringify(dragged))
 }
 
 // I2: exercise a real file-tree open, the Ready move command, the live watcher and restart.

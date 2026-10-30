@@ -201,8 +201,9 @@ test('C8 registered layer handlers follow vault switches and reject old-vault mo
   let activeRoot = f.root
   let release!: () => void
   const ready = new Promise<void>(resolve => { release = resolve })
-  const resolve = createCalendarLayersResolver({ pages: f.pages, ready,
-    vault: { get: () => ({ status: 'ready', root: activeRoot, defaultSuggestion: other }) }, writer: () => f.dependencies })
+  const { createDocumentDatabaseResolver } = await import('../main/modules/document-database/runtime')
+  const resolve = createCalendarLayersResolver({ pages: f.pages, writer: () => f.dependencies, database: createDocumentDatabaseResolver({ pages: f.pages, ready,
+    vault: { get: () => ({ status: 'ready', root: activeRoot, defaultSuggestion: other }) }, writer: () => f.dependencies }) })
   const handlers = new Map<string, (event: import('electron').IpcMainInvokeEvent, input: unknown) => unknown>()
   const dispose = registerCalendarLayersIPC({ handle: (name, handler) => { handlers.set(name, handler) }, removeHandler: name => { handlers.delete(name) } }, resolve)
   t.after(dispose)
@@ -220,8 +221,8 @@ test('C8 registered layer handlers follow vault switches and reject old-vault mo
   // A request waiting on startup must resolve the vault after the barrier.
   activeRoot = f.root
   let resume!: () => void
-  const pending = createCalendarLayersResolver({ pages: f.pages, ready: new Promise<void>(r => { resume = r }),
-    vault: { get: () => ({ status: 'ready', root: activeRoot, defaultSuggestion: other }) }, writer: () => f.dependencies })()
+  const pending = createCalendarLayersResolver({ pages: f.pages, writer: () => f.dependencies, database: createDocumentDatabaseResolver({ pages: f.pages, ready: new Promise<void>(r => { resume = r }),
+    vault: { get: () => ({ status: 'ready', root: activeRoot, defaultSuggestion: other }) }, writer: () => f.dependencies }) })()
   activeRoot = other; resume()
   assert.deepEqual((await pending).layers.query(range).map(e => e.objectId), [newer.id])
 })

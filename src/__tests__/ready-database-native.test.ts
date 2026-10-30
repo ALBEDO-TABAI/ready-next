@@ -154,7 +154,7 @@ test('DB3 IPC rejects unauthorized roots and invalid requests; personal state pe
   try {
     const handlers = new Map<string, Parameters<IpcMain['handle']>[1]>()
     let allowed = true
-    registerDocumentDatabaseIPC({ handle: (channel, handler) => { handlers.set(channel, handler) } }, f.service, Promise.resolve(), path => { assert.equal(path, f.root); if (!allowed) throw new Error('unauthorized') })
+    registerDocumentDatabaseIPC({ handle: (channel, handler) => { handlers.set(channel, handler) } }, async () => { if (!allowed) throw new Error('unauthorized'); return f.service })
     const invoke = (input: unknown) => handlers.get('documentDatabase:request')!({} as IpcMainInvokeEvent, input)
     assert.equal((await invoke({ type: 'query', databaseId: f.databaseId, viewId: 'all' })).ok, true)
     assert.equal((await invoke({ type: 'query', databaseId: f.databaseId, viewId: 'all', limit: -1 })).ok, false)
@@ -165,6 +165,28 @@ test('DB3 IPC rejects unauthorized roots and invalid requests; personal state pe
     assert.equal(readFileSync(join(f.root, '库.md'), 'utf8'), before)
     allowed = false; assert.equal((await invoke({ type: 'read', databaseId: f.databaseId })).ok, false)
     assert.equal(existsSync(join(f.root, 'outside')), false)
+  } finally { f.close() }
+})
+
+test('DB3 the active-vault resolver waits for recovery, keeps one service per vault and refuses an unconfigured vault', async t => {
+  if (skipIfSqliteUnavailable(t, 'Document database')) return
+  const f = fixture()
+  try {
+    const { createDocumentDatabaseResolver } = await import('../main/modules/document-database/runtime')
+    const other = realpathSync(mkdtempSync(join(tmpdir(), 'ready-m5-other-')))
+    t.after(() => rmSync(other, { recursive: true, force: true }))
+    let state: { status: 'ready'; root: string; defaultSuggestion: string } | { status: 'unconfigured'; defaultSuggestion: string } = { status: 'ready', root: f.root, defaultSuggestion: other }
+    let release!: () => void
+    const resolve = createDocumentDatabaseResolver({ pages: f.pages, writer: () => f.dependencies, ready: new Promise<void>(r => { release = r }), vault: { get: () => state } })
+    const waiting = resolve(); state = { status: 'ready', root: other, defaultSuggestion: other }; release()
+    assert.equal((await waiting).root, other, 'the vault is read after the recovery barrier')
+    const first = await resolve()
+    assert.equal(await resolve(), first, 'one service (and read cache) per vault')
+    state = { status: 'ready', root: f.root, defaultSuggestion: other }
+    const switched = await resolve()
+    assert.notEqual(switched, first); assert.equal(switched.root, f.root)
+    state = { status: 'unconfigured', defaultSuggestion: other }
+    await assert.rejects(resolve(), /资料库/)
   } finally { f.close() }
 })
 
