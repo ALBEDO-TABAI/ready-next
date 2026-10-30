@@ -236,6 +236,7 @@
     "test:calendar:native": "node scripts/run-calendar-native-tests.cjs",
     "verify:calendar-integration": "npm run verify:calendar && npm run test:calendar:native && node scripts/check-css-cascade-layer-reset.cjs",
     "verify:calendar:electron": "npm run build && node scripts/verify-calendar-electron.cjs",
+    "verify:canvas-format": "node --import tsx --test src/__tests__/ready-canvas-schema.test.ts src/__tests__/ready-canvas-conversion.test.ts src/__tests__/ready-canvas-operations.test.ts && node scripts/check-ready-canvas-schema.cjs src/__tests__/fixtures/ready-canvas/valid && node scripts/check-ready-canvas-schema.cjs --expect-invalid src/__tests__/fixtures/ready-canvas/invalid",
     "verify:object-presentation": "node --import tsx --test src/__tests__/ready-object-presentation-renderer.test.ts src/__tests__/note-preview-parser.test.ts"
   },
   "dependencies": {

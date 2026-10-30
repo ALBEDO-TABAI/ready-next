@@ -313,6 +313,8 @@ M5 的数据库往返/导入保真另由计划 `src/__tests__/ready-database-rou
 
 ### M4 画板与 FastCard
 
+实施合同：[M4 画板与 FastCard](2026-10-31-ready-next-m4-canvas-fastcard-implementation.md)。
+
 **依赖：**M3（及 M1 地基）；使用 M2 共享视觉基础。**对应合同：**C10、C13，回归 C3/C7/C12/C14/C15。
 
 **交付物：**按需搬入 Stillroom 画板交互和视觉，合并 Ready 白板工具；JSON Canvas 与旧格式迁移、FastCard 保存/拖入、无需先开画板的右键入口、卡片块编辑器、文档卡、添加到文档/草稿卡、快记、Stillroom 导入、共用链接预览。

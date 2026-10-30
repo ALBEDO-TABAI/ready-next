@@ -1,0 +1,293 @@
+{
+  "nodes": [
+    {
+      "id": "text",
+      "type": "text",
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 120,
+      "ready": {
+        "kind": "text"
+      },
+      "text": "第一段\r\n第二段 😀",
+      "vendor": {
+        "nested": [
+          1,
+          {
+            "keep": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "note",
+      "type": "text",
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 120,
+      "ready": {
+        "kind": "note",
+        "groupId": "group",
+        "dock": {
+          "left": "text"
+        },
+        "appearance": {
+          "background": "#fff4b8",
+          "fontScale": 1.5
+        }
+      },
+      "text": "便签"
+    },
+    {
+      "id": "image",
+      "type": "file",
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 120,
+      "ready": {
+        "kind": "image",
+        "media": {
+          "mime": "image/test",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "file": "Board.assets/image.bin"
+    },
+    {
+      "id": "video",
+      "type": "file",
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 120,
+      "ready": {
+        "kind": "video",
+        "media": {
+          "mime": "video/test",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "file": "Board.assets/video.bin"
+    },
+    {
+      "id": "audio",
+      "type": "file",
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 120,
+      "ready": {
+        "kind": "audio",
+        "media": {
+          "mime": "audio/test",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "file": "Board.assets/audio.bin"
+    },
+    {
+      "id": "document",
+      "type": "file",
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 120,
+      "ready": {
+        "kind": "document",
+        "ref": {
+          "kind": "page",
+          "id": "page_1",
+          "anchor": "section"
+        }
+      },
+      "file": "Page.md",
+      "subpath": "#section"
+    },
+    {
+      "id": "link",
+      "type": "link",
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 120,
+      "ready": {
+        "kind": "link",
+        "preview": {
+          "image": "Board.assets/preview.png"
+        },
+        "sources": [
+          {
+            "uri": "https://example.test",
+            "method": "clip"
+          }
+        ],
+        "fastCard": {
+          "id": "fc_1",
+          "kind": "text",
+          "createdAt": "2026-10-31T00:00:00Z",
+          "originalText": "原文"
+        }
+      },
+      "url": "https://example.test"
+    },
+    {
+      "id": "group",
+      "type": "group",
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 120,
+      "ready": {
+        "kind": "group"
+      },
+      "label": "分组"
+    },
+    {
+      "id": "child",
+      "type": "file",
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 120,
+      "ready": {
+        "kind": "subcanvas",
+        "ref": {
+          "kind": "canvas",
+          "id": "cv_child"
+        }
+      },
+      "file": "Board/child.canvas"
+    },
+    {
+      "id": "draft",
+      "type": "text",
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 120,
+      "ready": {
+        "kind": "draft",
+        "draftId": "draft_1",
+        "draftLibraryId": "lib_1"
+      },
+      "text": "草稿名称"
+    },
+    {
+      "id": "rect",
+      "type": "file",
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 120,
+      "ready": {
+        "kind": "graphic",
+        "graphic": {
+          "type": "rect",
+          "fill": "#ffffff",
+          "stroke": "#000000",
+          "strokeWidth": 1
+        }
+      },
+      "file": "Board.assets/rect.svg"
+    },
+    {
+      "id": "arrow",
+      "type": "file",
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 120,
+      "ready": {
+        "kind": "graphic",
+        "graphic": {
+          "type": "arrow",
+          "x2": -40,
+          "y2": 20,
+          "stroke": "#ff0000",
+          "strokeWidth": 2
+        }
+      },
+      "file": "Board.assets/arrow.svg"
+    },
+    {
+      "id": "path",
+      "type": "file",
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 120,
+      "ready": {
+        "kind": "graphic",
+        "graphic": {
+          "type": "path",
+          "points": [
+            {
+              "x": 0,
+              "y": 0
+            },
+            {
+              "x": 10,
+              "y": 30
+            }
+          ],
+          "stroke": "#000000",
+          "strokeWidth": 3
+        }
+      },
+      "file": "Board.assets/path.svg"
+    },
+    {
+      "id": "trashed",
+      "type": "text",
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 120,
+      "ready": {
+        "kind": "text",
+        "trash": {
+          "operationId": "del_1",
+          "deletedAt": "2026-10-31T00:00:00Z"
+        }
+      },
+      "text": "保留我"
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge",
+      "fromNode": "text",
+      "toNode": "note",
+      "toEnd": "arrow",
+      "vendor": {
+        "weight": 2
+      }
+    },
+    {
+      "id": "edge-trash",
+      "fromNode": "trashed",
+      "toNode": "text",
+      "ready": {
+        "trash": {
+          "operationId": "del_1",
+          "deletedAt": "2026-10-31T00:00:00Z"
+        }
+      }
+    }
+  ],
+  "ready": {
+    "schemaVersion": 1,
+    "id": "cv_board",
+    "title": "全部格式"
+  },
+  "vendor": {
+    "keep": [
+      "exact",
+      false,
+      null
+    ]
+  }
+}

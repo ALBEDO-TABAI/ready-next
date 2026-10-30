@@ -1,0 +1,133 @@
+{
+  "app": "stillroom",
+  "version": 1,
+  "exportedAt": "2026-10-31T00:00:00Z",
+  "cam": {
+    "x": 0,
+    "y": 0,
+    "z": 1
+  },
+  "prefs": {
+    "dark": true
+  },
+  "notes": [
+    {
+      "id": "folder",
+      "type": "folder",
+      "title": "folder",
+      "text": "",
+      "createdAt": 1793404800000,
+      "updatedAt": 1793404801000,
+      "canvasX": 20.3,
+      "canvasY": 40,
+      "parentId": null,
+      "deletedAt": null,
+      "metadata": {}
+    },
+    {
+      "id": "text",
+      "type": "text",
+      "title": "text",
+      "text": "<p>Hello <strong>世界</strong></p><ul><li>一</li></ul>",
+      "createdAt": 1793404800000,
+      "updatedAt": 1793404801000,
+      "canvasX": 20.3,
+      "canvasY": 40,
+      "parentId": "folder",
+      "deletedAt": null,
+      "metadata": {
+        "titleAlign": "center",
+        "titleWeight": "medium",
+        "titleFontScale": 1.2
+      }
+    },
+    {
+      "id": "image",
+      "type": "image",
+      "title": "image",
+      "text": "",
+      "createdAt": 1793404800000,
+      "updatedAt": 1793404801000,
+      "canvasX": 20.3,
+      "canvasY": 40,
+      "parentId": "folder",
+      "deletedAt": null,
+      "metadata": {
+        "rotation": 1,
+        "crop": {
+          "x": 25,
+          "y": 75,
+          "w": 1,
+          "h": 1
+        },
+        "dock": {
+          "l": "text"
+        }
+      },
+      "mediaUrl": "idb:pic"
+    },
+    {
+      "id": "audio",
+      "type": "audio",
+      "title": "audio",
+      "text": "",
+      "createdAt": 1793404800000,
+      "updatedAt": 1793404801000,
+      "canvasX": 20.3,
+      "canvasY": 40,
+      "parentId": null,
+      "deletedAt": null,
+      "metadata": {
+        "transcript": "你好"
+      },
+      "audioUrl": "idb:sound",
+      "duration": "1:05"
+    },
+    {
+      "id": "video",
+      "type": "video",
+      "title": "video",
+      "text": "",
+      "createdAt": 1793404800000,
+      "updatedAt": 1793404801000,
+      "canvasX": 20.3,
+      "canvasY": 40,
+      "parentId": null,
+      "deletedAt": null,
+      "metadata": {
+        "poster": "idb:poster"
+      },
+      "mediaUrl": "idb:movie"
+    },
+    {
+      "id": "link",
+      "type": "link",
+      "title": "link",
+      "text": "<p>链接备注</p>",
+      "createdAt": 1793404800000,
+      "updatedAt": 1793404801000,
+      "canvasX": 20.3,
+      "canvasY": 40,
+      "parentId": null,
+      "deletedAt": null,
+      "metadata": {
+        "url": "https://example.test/a",
+        "linkImage": "idb:poster",
+        "linkTitle": "网站"
+      }
+    },
+    {
+      "id": "trash",
+      "type": "text",
+      "title": "trash",
+      "text": "",
+      "createdAt": 1793404800000,
+      "updatedAt": 1793404801000,
+      "canvasX": 20.3,
+      "canvasY": 40,
+      "parentId": null,
+      "deletedAt": 1793404800000,
+      "metadata": {}
+    }
+  ]
+}
