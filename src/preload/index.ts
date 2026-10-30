@@ -1319,6 +1319,11 @@ const vaultAPI: import('../shared/vault').VaultAPI = {
   get: () => ipcRenderer.invoke('vault:get'),
   set: (path) => ipcRenderer.invoke('vault:set', path),
   createDefault: () => ipcRenderer.invoke('vault:createDefault'),
+  onChanged: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, state: import('../shared/vault').VaultState) => listener(state)
+    ipcRenderer.on('vault:changed', handler)
+    return () => ipcRenderer.removeListener('vault:changed', handler)
+  },
 }
 
 const libraryAPI = {

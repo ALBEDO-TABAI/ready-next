@@ -19,12 +19,16 @@ test('vault banner loads Main state, shows failures, retries, picks folders and 
   let createCalls = 0
   let getCalls = 0
   let setCalls = 0
+  let changed!: (state: VaultState) => void
+  let subscriptions = 0
+  let beforeCreate: (() => void) | undefined
   let failCreate = true
   Object.assign(dom.window, { electronAPI: {
     vault: {
+      onChanged: (listener: (state: VaultState) => void) => { subscriptions++; changed = listener; return () => {} },
       get: () => { getCalls++; return new Promise<VaultState>((resolve, reject) => { finishLoad = resolve; failLoad = reject }) },
       set: async (path: string) => { setCalls++; return { status: 'ready', root: path, defaultSuggestion: suggestion } },
-      createDefault: async () => { createCalls++; if (failCreate) throw new Error('无法创建资料库'); return { status: 'ready', root: suggestion, defaultSuggestion: suggestion } },
+      createDefault: async () => { createCalls++; beforeCreate?.(); if (failCreate) throw new Error('无法创建资料库'); return { status: 'ready', root: suggestion, defaultSuggestion: suggestion } },
     },
     document: {
       openFolder: async () => pick,
@@ -80,6 +84,26 @@ test('vault banner loads Main state, shows failures, retries, picks folders and 
     await click('选择已有文件夹…')
     assert.equal(setCalls, 1)
     assert.deepEqual(useWorkspace.getState().pinnedFolders, [suggestion, selected])
+    assert.equal(subscriptions, 1, 'repeated loads do not multiply subscriptions')
+    await act(async () => changed({ status: 'unconfigured', defaultSuggestion: suggestion }))
+    assert.match(text(), /设置资料库/)
+    const external = '/Users/test/Documents/External'
+    await act(async () => { loading = useVault.getState().load() })
+    await act(async () => changed({ status: 'ready', root: external, defaultSuggestion: suggestion }))
+    assert.equal(dom.window.document.querySelector('[aria-label="资料库设置"]'), null)
+    assert.ok(useWorkspace.getState().pinnedFolders.includes(external))
+    await act(async () => { finishLoad({ status: 'unconfigured', defaultSuggestion: suggestion }); await loading })
+    assert.equal(useVault.getState().view.data?.root, external, 'old load must not overwrite a pushed state')
+    await act(async () => { loading = useVault.getState().load() })
+    await act(async () => changed({ status: 'missing', root: external, defaultSuggestion: suggestion }))
+    await act(async () => { failLoad(new Error('old failure')); await loading })
+    assert.match(text(), /找不到资料库/)
+    assert.doesNotMatch(text(), /old failure/)
+    failCreate = true
+    beforeCreate = () => changed({ status: 'ready', root: external, defaultSuggestion: suggestion })
+    await act(async () => useVault.getState().createDefault())
+    assert.match(text(), /无法创建资料库/, 'a concurrent push must not hide an actual save failure')
+    assert.equal(useVault.getState().view.data?.root, external)
   } finally {
     await act(async () => root.unmount())
     for (const [key, descriptor] of Object.entries(previous)) {

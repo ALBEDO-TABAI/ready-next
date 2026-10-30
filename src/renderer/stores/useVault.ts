@@ -17,23 +17,36 @@ interface VaultStore {
 
 export const useVault = create<VaultStore>((set, get) => {
   let pending: Promise<void> | null = null
+  let subscribed = false
+  let revision = 0
+  const accept = (data: VaultState) => {
+    if (data.status === 'ready') {
+      const workspace = useWorkspace.getState()
+      if (!workspace.pinnedFolders.includes(data.root)) workspace.addPinnedFolder(data.root)
+    }
+    set({ view: { phase: 'loaded', data } })
+  }
+  // One subscription for the lifetime of this renderer store, including while UI is unmounted.
   const run = (phase: 'loading' | 'saving', action: () => Promise<VaultState | null>): Promise<void> => {
+    if (!subscribed) {
+      window.electronAPI.vault.onChanged(data => { revision++; accept(data) })
+      subscribed = true
+    }
     if (pending) return pending
+    const startedAt = revision
     const previousView = get().view
     const previous = previousView.data
     set({ view: phase === 'loading' ? { phase, data: null } : { phase, data: previous } })
     pending = Promise.resolve().then(action).then(data => {
+      if (revision !== startedAt) return
       if (!data) {
         set({ view: previousView })
         return
       }
-      if (data.status === 'ready') {
-        const workspace = useWorkspace.getState()
-        if (!workspace.pinnedFolders.includes(data.root)) workspace.addPinnedFolder(data.root)
-      }
-      set({ view: { phase: 'loaded', data } })
+      accept(data)
     }).catch((error: unknown) => {
-      set({ view: { phase: 'error', data: previous, message: error instanceof Error ? error.message : String(error) } })
+      if (phase === 'loading' && revision !== startedAt) return
+      set({ view: { phase: 'error', data: revision === startedAt ? previous : get().view.data, message: error instanceof Error ? error.message : String(error) } })
     }).finally(() => { pending = null })
     return pending
   }

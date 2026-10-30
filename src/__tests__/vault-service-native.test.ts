@@ -7,7 +7,7 @@ import Database from 'better-sqlite3'
 import { SettingsStore } from '../main/modules/database/settings-store'
 import { AppSettingsRepository } from '../main/modules/repositories/app-settings-repository'
 import { VaultService } from '../main/modules/settings-engine/vault-service'
-import { VAULT_ROOT_SETTING_KEY } from '../shared/vault'
+import { VAULT_ROOT_SETTING_KEY, type VaultState } from '../shared/vault'
 import { registerVaultIPC } from '../main/modules/settings-engine/vault-ipc'
 import { createGenericSettingIPCHandler } from '../main/modules/settings-engine/generic-setting-ipc-handler'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
@@ -83,20 +83,32 @@ test('vault IPC returns readback and propagates persistence failure without publ
     getSetting: () => { reads++; return undefined },
     setSetting: () => { throw new Error('disk full') },
   }, { home: join(temp, 'home'), userData: join(temp, 'Ready Next'), isPackaged: false })
-  registerVaultIPC({ handle: (channel, handler) => { handlers.set(channel, handler) } }, service)
+  const received: VaultState[][] = [[], [], []]
+  const windows = () => received.map((messages, index) => ({
+    isDestroyed: () => index === 2,
+    webContents: { send: (channel: string, state: VaultState) => { assert.equal(channel, 'vault:changed'); messages.push(state) } },
+  }))
+  const ipc = { handle: (channel: string, handler: (event: unknown, path?: unknown) => unknown) => { handlers.set(channel, handler) } }
+  registerVaultIPC(ipc, service, windows)
   try {
     assert.deepEqual([...handlers.keys()], ['vault:get', 'vault:set', 'vault:createDefault'])
     assert.equal((await handlers.get('vault:get')!({}) as { status: string }).status, 'unconfigured')
     assert.throws(() => handlers.get('vault:set')!({}, temp), /disk full/)
     assert.throws(() => handlers.get('vault:createDefault')!({}), /disk full/)
     assert.equal(service.get().status, 'unconfigured')
+    assert.deepEqual(received, [[], [], []], 'failed writes and reads must not publish')
     let value: string | undefined
     const readbackService = new VaultService({
       getSetting: () => { reads++; return value },
       setSetting: (_key, path) => { value = path },
     }, { home: join(temp, 'home'), userData: join(temp, 'Ready Next'), isPackaged: false })
     const before = reads
-    readbackService.set(temp)
+    registerVaultIPC(ipc, readbackService, windows)
+    const setResult = await handlers.get('vault:set')!({}, temp)
+    assert.deepEqual(setResult, readbackService.get())
+    const created = await handlers.get('vault:createDefault')!({})
+    assert.deepEqual(created, readbackService.get())
+    assert.deepEqual(received, [[setResult, created], [setResult, created], []], 'all live windows get exactly the persisted readback')
     assert.ok(reads > before, 'successful set must read the saved setting')
   } finally {
     rmSync(temp, { recursive: true, force: true })

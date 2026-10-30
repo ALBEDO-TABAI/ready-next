@@ -15,7 +15,7 @@
 .rn-library .pg-foot .dotx { width: 5px; height: 5px; border-radius: 50%; background: #ff5a1f; }
 .rn-library .verso .pg-foot { flex-direction: row-reverse; }
 .rn-library .pg-body { position: absolute; left: 56px; right: 56px; top: 80px; height: 682px; overflow: hidden; }
-.rn-library .pg-flow { display: flow-root; font-size: var(--fs, 18px); line-height: var(--rn-lh, 1.8); text-align: justify; hanging-punctuation: allow-end; overflow-wrap: break-word; word-break: normal; line-break: strict; }
+.rn-library .pg-flow { display: flow-root; font-size: var(--fs, 18px); line-height: var(--lh, 1.8); text-align: justify; hanging-punctuation: allow-end; overflow-wrap: break-word; word-break: normal; line-break: strict; }
 .rn-library .pg-flow > :first-child { margin-top: 0 !important; }
 .rn-library .pg-flow p, .rn-library .pg-flow li, .rn-library .pg-flow dd, .rn-library .pg-flow blockquote { margin: 0; }
 .rn-library .pg-flow p { text-indent: 2em; }

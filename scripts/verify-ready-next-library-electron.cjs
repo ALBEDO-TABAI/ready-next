@@ -30,6 +30,57 @@ async function writeEpub(file) {
   fs.writeFileSync(file, await zip.generateAsync({ type: 'nodebuffer', mimeType: 'application/epub+zip' }))
 }
 
+// Resting pages may be covered by WebGL. Inspect both the DOM and the actual SVG
+// captured at Image.src (the exact foreignObject used to upload each page texture).
+async function checkVisibleLines(page, label) {
+  const checks = await page.evaluate(async () => {
+    const folios = document.querySelector('.rn-library .rd-dock span').textContent.split('/')[0].match(/\d+/g).map(Number)
+    const inspect = (sheet, win) => {
+      const body = sheet.querySelector('.pg-body'), flow = sheet.querySelector('.pg-flow')
+      const box = body.getBoundingClientRect(), scale = box.height / 682
+      const range = sheet.ownerDocument.createRange()
+      const walker = sheet.ownerDocument.createTreeWalker(flow, NodeFilter.SHOW_TEXT)
+      let bottom = box.top
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (!node.textContent.trim()) continue
+        range.selectNodeContents(node)
+        for (const rect of range.getClientRects()) if (rect.width && rect.height) bottom = Math.max(bottom, rect.bottom)
+      }
+      return { overflow: (bottom - box.bottom) / scale, lead: parseFloat(win.getComputedStyle(flow).lineHeight),
+        firstParagraph: (flow.querySelector('p').getBoundingClientRect().top - box.top) / scale }
+    }
+    const out = []
+    for (const folio of folios) {
+      const index = String(folio - 1)
+      const sheet = document.querySelector(`.rn-library .rd-book .sheet[data-pi="${index}"]`)
+      if (!sheet?.querySelector('.pg-flow p')) continue // front matter is not body text
+      const dom = inspect(sheet, window)
+      out.push({ page: folio, source: 'DOM', ...dom })
+      const svg = window.__libraryRasters.get(index)
+      if (!svg) {
+        if (document.querySelector('.rn-library .rd-book.gl3d')) throw new Error(`visible texture ${folio} was not captured`)
+        continue
+      }
+      const frame = document.createElement('iframe')
+      frame.style.cssText = 'position:fixed;left:-20000px;width:2400px;height:3400px;visibility:hidden'
+      const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }))
+      try {
+        const loaded = new Promise(resolve => { frame.onload = resolve })
+        frame.src = url
+        document.body.appendChild(frame)
+        await loaded
+        await frame.contentDocument.fonts.ready
+        const raster = inspect(frame.contentDocument.querySelector('.sheet'), frame.contentWindow)
+        out.push({ page: folio, source: 'texture', ...raster, leadDifference: raster.lead - dom.lead,
+          paragraphDifference: raster.firstParagraph - dom.firstParagraph })
+      } finally { frame.remove(); URL.revokeObjectURL(url) }
+    }
+    return out
+  })
+  ok(`${label}: visible body lines fit DOM and texture pages`, checks.length > 0 && checks.every(c => c.overflow <= 0.5 && Math.abs(c.leadDifference || 0) <= 0.5 && Math.abs(c.paragraphDifference || 0) <= 1), JSON.stringify(checks))
+  return checks
+}
+
 function electronEnv(extra) {
   const env = { ...process.env, ...extra }
   delete env.ELECTRON_RUN_AS_NODE
@@ -68,6 +119,18 @@ function electronEnv(extra) {
     app.process().stdout?.on('data', data => { const text = String(data); if (/process-gone|CRASH|Fatal|Check failed/i.test(text)) console.log(`main: ${text.trim().slice(0, 400)}`) })
     app.process().stderr?.on('data', data => { const text = String(data); if (/process-gone|CRASH|Fatal|Check failed|GPU|WebGL/i.test(text)) console.log(`main-err: ${text.trim().slice(0, 400)}`) })
 
+    await page.evaluate(() => {
+      window.__libraryRasters = new Map()
+      const descriptor = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src')
+      Object.defineProperty(HTMLImageElement.prototype, 'src', { ...descriptor, set(value) {
+        if (value.startsWith('data:image/svg+xml;charset=utf-8,')) {
+          const svg = decodeURIComponent(value.slice(value.indexOf(',') + 1))
+          const index = new DOMParser().parseFromString(svg, 'image/svg+xml').querySelector('.sheet')?.getAttribute('data-pi')
+          if (index !== null && index !== undefined) window.__libraryRasters.set(index, svg)
+        }
+        descriptor.set.call(this, value)
+      } })
+    })
     const vault = await page.evaluate(() => window.electronAPI.vault.createDefault())
     ok('vault is ready inside the throwaway profile', vault.status === 'ready' && fs.realpathSync(vault.root).startsWith(fs.realpathSync(profile)), JSON.stringify(vault))
     const imported = await page.evaluate(paths => window.electronAPI.library.importFiles(paths), [epub, txt])
@@ -100,16 +163,23 @@ function electronEnv(extra) {
     await page.getByRole('button', { name: '开始阅读' }).click()
     await page.waitForTimeout(3000)
     await page.screenshot({ path: path.join(shots, '3-reader.png') })
+    await checkVisibleLines(page, 'chapter opening')
     await page.keyboard.press('ArrowRight')
     await page.waitForTimeout(1500)
     await page.keyboard.press('ArrowRight')
     await page.waitForTimeout(1500)
     await page.screenshot({ path: path.join(shots, '4-reader-turned.png') })
+    await checkVisibleLines(page, 'continuation')
     await page.waitForTimeout(1500)
     const books = await page.evaluate(() => window.electronAPI.library.get())
     const opened = books.success && books.data.status === 'ready' && books.data.books.find(b => b.format === 'epub')
     const position = opened ? await page.evaluate(id => window.electronAPI.library.getPosition(id), opened.id) : null
     ok('turning pages saves a reading position', position?.success && position.data && (position.data.offset > 0 || position.data.chapter > 0), JSON.stringify(position))
+    await page.getByRole('button', { name: '排版', exact: true }).click()
+    await page.getByRole('slider', { name: '行距', exact: true }).fill('2.2')
+    await page.waitForTimeout(2000)
+    const spaced = await checkVisibleLines(page, 'line spacing 2.2')
+    ok('line spacing changes body layout', spaced.length > 0 && spaced.every(c => Math.abs(c.lead - 18 * 2.2) < 0.5), JSON.stringify(spaced))
     ok('no uncaught renderer errors', errors.length === 0, errors.join(' | '))
   } catch (error) {
     ok('library acceptance completed', false, error instanceof Error ? error.stack : String(error))

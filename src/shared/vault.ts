@@ -6,6 +6,7 @@ export type VaultState = { defaultSuggestion: string } & (
 )
 
 export interface VaultAPI {
+  onChanged(listener: (state: VaultState) => void): () => void
   get(): Promise<VaultState>
   set(path: string): Promise<VaultState>
   createDefault(): Promise<VaultState>

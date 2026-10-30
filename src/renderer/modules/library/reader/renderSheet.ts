@@ -14,7 +14,7 @@ export function renderSheet(i: number, L: Layout, book: LoadedBook, rec: Library
   const recto = i % 2 === 0;
   d.className = `sheet ${recto ? 'recto' : 'verso'} ${latin ? 'latin' : ''}`;
   d.dataset.pi = String(i);
-  d.style.cssText = `--fs:${typo.size}px;--lh:${typo.lead};--pf:${fontStack(typo.font, latin)};--pp:${paper.pp};--pp2:${paper.pp2};--pi:${paper.pi};--cc:${cloth};--cf:${clothFg};--mka:${typo.paper === 'night' ? '34%' : '46%'}`;
+  d.style.cssText = `--fs:${typo.size}px;--lh:${typo.lead};--pf:${fontStack(typo.font, latin)};--pp:${paper.pp};--pp2:${paper.pp2};--pi:${paper.pi};--cc:${cloth};--cf:${clothFg}`;
   const no = String((hash(rec.id) % 900) + 100);
   const cover = rec.coverPath ? toLocalFileUrl(rec.coverPath) : undefined;
   const folio = (n: number) => `<div class="pg-foot"><span>${String(n).padStart(3, '0')}</span><span class="dotx"></span></div>`;
