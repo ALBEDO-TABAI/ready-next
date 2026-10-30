@@ -1,3 +1,4 @@
+import { createCalendarMeetingNotesRuntime } from './meeting-notes-runtime'
 import { prepareStandaloneImport, applyStandaloneImport } from './standalone-import'
 import { readCalendarAttachmentDisplayRefs } from './ready-ref-migration'
 import { calendarErrorMessage } from './calendar-error'
@@ -11,6 +12,7 @@ import type { Calendar } from '../../../shared/calendar/model'
 
 export function setupCalendarWorkbenchIPC(): void {
   const store = () => getDatabase().calendar
+  const createMeetingNote = createCalendarMeetingNotesRuntime()
   const receipt = <Args extends unknown[], T>(fn:(...args:Args)=>T) => async (_event:unknown,...args:Args)=>{
     try {return {success:true,mock:false,data:await fn(...args)}}
     catch(error){return {success:false,mock:false,error:calendarErrorMessage(error)}}
@@ -24,6 +26,8 @@ export function setupCalendarWorkbenchIPC(): void {
   }))
   ipcMain.handle('calendar:prepareStandaloneImport',receipt(prepareStandaloneImport))
   ipcMain.handle('calendar:applyStandaloneImport',receipt(applyStandaloneImport))
+  ipcMain.handle('calendar:createMeetingNote',receipt(createMeetingNote.create))
+  ipcMain.handle('calendar:pendingMeetingNote',receipt(createMeetingNote.pending))
   ipcMain.handle('calendar:snapshot',receipt(()=>store().snapshot()))
   ipcMain.handle('calendar:mutate',receipt((command:CalendarCommand,versions:Record<string,number>)=>store().mutate(command,versions)))
   ipcMain.handle('calendar:restore',receipt((delta:CalendarDelta,versions:Record<string,number>)=>store().restore(delta,versions)))

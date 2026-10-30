@@ -179,6 +179,60 @@ async function checkCalendarReference(page) {
 
 // No local IPC writes arbitrary chat messages. Remote receive requires a bound
 // account, so seed through the real stores only after closing this throwaway app.
+// M6-A: real event panel + SaveToPicker. The preceding C1 step has created a recurring event.
+async function checkCalendarLinksBeforeRestart(page, reference, root) {
+  const created = await page.evaluate(async root => {
+    const result = await window.electronAPI.documentPages.operate({type:'create',root,parentPath:root,
+      title:'M6 linked page',content:'# M6 linked page\n',operationId:'m6-smoke-page'})
+    if (!result.ok) throw new Error(result.message)
+    return result.value
+  }, root)
+  await requestMode(page, 'calendar')
+  await page.evaluate(id => window.electronAPI.calendar.revealEvent(id), reference.eventId)
+  const panel = page.getByRole('region', {name:'日程关联'})
+  await panel.waitFor()
+  const uri = `ready://doc/page/${encodeURIComponent(created.objectId)}`
+  await panel.getByLabel('关联地址', {exact:true}).fill(uri)
+  await panel.getByRole('button', {name:'添加关联',exact:true}).click()
+  await panel.getByRole('button', {name:'解除关联 M6 linked page',exact:true}).waitFor()
+  await panel.getByRole('button', {name:'会议笔记',exact:true}).click()
+  const picker = panel.getByRole('dialog', {name:'保存到…'})
+  await picker.getByLabel('标题', {exact:true}).fill('M6 meeting notes')
+  await picker.getByRole('button', {name:'确认',exact:true}).click()
+  await panel.getByRole('button', {name:'打开会议笔记',exact:true}).waitFor()
+  const links = await page.evaluate(async ({seriesId,second}) => {
+    const result=await window.electronAPI.calendar.snapshot()
+    if(!result.success)throw new Error(result.error)
+    return result.data.links.filter(link=>link.eventId===seriesId&&link.originalStart===second)
+  },reference)
+  ok('M6 second occurrence owns both page and meeting note', links.length===2 && links.some(link=>link.purpose==='meeting-note'))
+  return {pageId:created.objectId,note:links.find(link=>link.purpose==='meeting-note').target,reference}
+}
+
+async function checkCalendarLinksAfterRestart(page, saved) {
+  const state = await page.evaluate(async () => {
+    const result=await window.electronAPI.calendar.snapshot()
+    if(!result.success)throw new Error(result.error)
+    return result.data
+  })
+  const links=state.links.filter(link=>link.eventId===saved.reference.seriesId&&link.originalStart===saved.reference.second)
+  const note=links.find(link=>link.purpose==='meeting-note')
+  ok('M6 page and note links survive restart with original instance identity', links.length===2 && note?.target.id===saved.note.id)
+  const location=await page.evaluate(id=>window.electronAPI.objects.locate(id),saved.note.id)
+  ok('M6 meeting note file survives restart', !!location?.path && fs.existsSync(location.path))
+  await requestMode(page,'calendar')
+  await page.evaluate(id=>window.electronAPI.calendar.revealEvent(id),saved.reference.eventId)
+  const panel=page.getByRole('region',{name:'日程关联'})
+  await panel.getByRole('button',{name:'解除关联 M6 linked page',exact:true}).click()
+  const detached=await page.evaluate(async()=>window.electronAPI.calendar.snapshot())
+  ok('M6 removing the page association leaves the meeting note intact', detached.success
+    && !detached.data.links.some(link=>link.target.id===saved.pageId)
+    && detached.data.links.some(link=>link.target.id===saved.note.id))
+  await panel.getByRole('button',{name:'撤销上次关联修改',exact:true}).click()
+  await panel.getByRole('button',{name:'解除关联 M6 linked page',exact:true}).waitFor()
+  ok('M6 panel undo restores the page association after restart', true)
+}
+
 // Closed scopes remain invisible by product contract; keep a separate closed
 // fixture for migration/readback, never reopen its tombstone to fake a UI pass.
 async function seedCalendarHistory(profile, reference) {
@@ -341,6 +395,7 @@ async function checkIdentityAndFastCard() {
     ok('C7 FastCard add returns a persisted receipt', added?.success === true && added.data?.id === item.id, JSON.stringify(added))
     const objectIdentity = await checkObjectPresentationBeforeRestart(app, page, created.root)
     const calendarReference = { ...await checkCalendarReference(page), r45Url }
+    const calendarLinks = await checkCalendarLinksBeforeRestart(page, calendarReference, created.root)
     step('close app')
     await withTimeout(app.close(), 150000, 'close app')
     app = undefined
@@ -353,6 +408,7 @@ async function checkIdentityAndFastCard() {
     ;({ app, page } = await launch(profile))
     await checkObjectPresentationAfterRestart(page, objectIdentity)
     await checkCalendarHistoryAfterRestart(page, calendarReference, history)
+    await checkCalendarLinksAfterRestart(page, calendarLinks)
     await checkR45References(app, page, history.r45, true)
     await withTimeout(app.close(), 150000, 'R45 close before restart')
     app = undefined

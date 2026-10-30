@@ -1006,6 +1006,8 @@ const calendarAPI = {
   peekNavigation: () => ipcRenderer.invoke('calendar:peekNavigation'),
   ackNavigation: (id: string) => ipcRenderer.invoke('calendar:ackNavigation', id),
   onNavigation: (handler: () => void) => { const listener = () => handler(); ipcRenderer.on('calendar:navigationPending', listener); return () => ipcRenderer.removeListener('calendar:navigationPending', listener) },
+  createMeetingNote: (input: import('../shared/calendar/event-links').MeetingNoteInput) => ipcRenderer.invoke('calendar:createMeetingNote', input),
+  pendingMeetingNote: (key: string) => ipcRenderer.invoke('calendar:pendingMeetingNote', key),
   snapshot: () => ipcRenderer.invoke('calendar:snapshot'),
   mutate: (command: import('../shared/calendar/commands').CalendarCommand, versions: Record<string, number>) => ipcRenderer.invoke('calendar:mutate', command, versions),
   restore: (delta: import('../shared/calendar/commands').CalendarDelta, versions: Record<string, number>) => ipcRenderer.invoke('calendar:restore', delta, versions),

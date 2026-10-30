@@ -4492,6 +4492,20 @@ const migrations: Migration[] = [
       CREATE TABLE canvas_imports (id TEXT PRIMARY KEY, input_hash TEXT NOT NULL, plan_json TEXT NOT NULL, result_json TEXT);`)
   } },
   { name: DOCUMENT_DATABASE_MIGRATION, up: migrateDocumentDatabase },
+  { name: '148_calendar_event_links', up: (db) => {
+    db.exec(`CREATE TABLE calendar_event_links (
+      id TEXT PRIMARY KEY, event_id TEXT NOT NULL REFERENCES calendar_events(id) ON DELETE CASCADE,
+      occurrence_start INTEGER, target_ref TEXT NOT NULL,
+      purpose TEXT NOT NULL CHECK(purpose IN ('related','meeting-note'))
+    );
+    CREATE UNIQUE INDEX calendar_link_target ON calendar_event_links(event_id,COALESCE(occurrence_start,''),target_ref,purpose);
+    CREATE UNIQUE INDEX calendar_meeting_note ON calendar_event_links(event_id,COALESCE(occurrence_start,'')) WHERE purpose='meeting-note';
+    CREATE TABLE calendar_meeting_note_intents (
+      event_key TEXT PRIMARY KEY, vault_root TEXT NOT NULL, draft_id TEXT NOT NULL REFERENCES document_drafts(draft_id),
+      destination_json TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('prepared','linked')),
+      receipt_json TEXT, CHECK((state='linked')=(receipt_json IS NOT NULL))
+    );`)
+  } },
 ]
 
 /**

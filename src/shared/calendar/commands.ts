@@ -1,3 +1,5 @@
+import { CalendarLinkTargetSchema, sameCalendarLink, type CalendarEventLink, type CalendarLinkReplacement } from './event-links'
+import { toReadyUri, type ReadyRef } from '../ready-ref'
 import { occurrences, newId, isRecurring, type CalEvent, type Calendar, type Occurrence } from './model'
 import { isoDate, parseIsoDate } from './dates'
 import { dayOf, fromWall, toWall } from './tz'
@@ -5,12 +7,14 @@ import { expand, parseRRule, stringifyRRule } from './rrule'
 
 export type RecurrenceScope = 'this' | 'following' | 'all'
 export type CalendarCommand =
+  | { type: 'link'; key: string; target: ReadyRef; purpose?: 'related' | 'meeting-note' }
+  | { type: 'unlink'; key: string; linkId: string }
   | { type: 'create'; event: CalEvent }
   | { type: 'update'; key: string; patch: Partial<CalEvent>; scope?: RecurrenceScope }
   | { type: 'delete'; keys: string[]; scope?: RecurrenceScope }
   | { type: 'duplicate'; keys: string[]; calendarId?: string }
-export interface CalendarSnapshot { events: CalEvent[]; calendars: Calendar[]; prefs?: Record<string, unknown> | null }
-export interface CalendarDelta { put: CalEvent[]; remove: string[] }
+export interface CalendarSnapshot { links?: CalendarEventLink[]; events: CalEvent[]; calendars: Calendar[]; prefs?: Record<string, unknown> | null }
+export interface CalendarDelta { links?: CalendarLinkReplacement[]; put: CalEvent[]; remove: string[] }
 const value = (v: number | string) => typeof v === 'string' ? parseIsoDate(v) : v
 const wallStamp=(ms:number,zone:string)=>{const w=toWall(ms,zone);return Date.UTC(w.y,w.m-1,w.d,w.h,w.mi,w.s)}
 const fromStamp=(ms:number,zone:string)=>{const d=new Date(ms);return fromWall({y:d.getUTCFullYear(),m:d.getUTCMonth()+1,d:d.getUTCDate(),h:d.getUTCHours(),mi:d.getUTCMinutes(),s:d.getUTCSeconds()},zone)}
@@ -43,7 +47,7 @@ function retimeSeries(parent:CalEvent,origin:number|string,patch:Partial<CalEven
     else if(e.allDay===parent.allDay){childStart=map(e.start);childEnd=map(e.end)}
     return {...e,...fields,allDay:timing?allDay:e.allDay,originalStart,start:childStart,end:childEnd,rrule:undefined,exdates:undefined,rdates:undefined}
   }
-  return {event,child}
+  return {event,child,map}
 }
 export function splitOccurrenceKey(key: string): [string, string | undefined] {
   const i = key.indexOf('|'); return i < 0 ? [key, undefined] : [key.slice(0, i), key.slice(i + 1)]
@@ -63,6 +67,7 @@ export function findCalendarOccurrence(events: CalEvent[], key: string, zone = '
 /** Pure command planning, called by Main against its current persisted snapshot. */
 export function planCalendarMutation(snapshot: CalendarSnapshot, command: CalendarCommand): CalendarDelta {
   const events = new Map(snapshot.events.map(e => [e.id, e]))
+  let links = [...(snapshot.links || [])]
   const puts = new Map<string, CalEvent>(), removed = new Set<string>()
   const writable = (id: string) => {
     const calendar = snapshot.calendars.find(c => c.id === id)
@@ -81,7 +86,25 @@ export function planCalendarMutation(snapshot: CalendarSnapshot, command: Calend
     const id = newId('event')
     return { ...rest, id, uid: `${id}@ready.local`, revision: 0, calendarId, start: o.allDay ? isoDate(o.startDay) : o.start, end: o.allDay ? isoDate(o.endDay + 1) : o.end }
   }
-  if (command.type === 'create') {
+  if (command.type === 'link' || command.type === 'unlink') {
+    const o = occurrence(command.key), parent = events.get(o.seriesId || o.event.id)!
+    writable(parent.calendarId)
+    const original = splitOccurrenceKey(command.key)[1]
+    const originalStart = original === undefined ? undefined : parent.allDay ? original : Number(original)
+    if (command.type === 'link') {
+      const target = CalendarLinkTargetSchema.parse(command.target)
+      const link: CalendarEventLink = { id: newId('link'), eventId: parent.id, originalStart, target, purpose: command.purpose || 'related' }
+      if (!links.some(existing => sameCalendarLink(existing, link))) {
+        if (link.purpose === 'meeting-note' && links.some(existing => existing.eventId === parent.id && existing.originalStart === originalStart && existing.purpose === 'meeting-note')) throw new Error('该日程已有会议笔记')
+        links.push(link)
+      }
+    } else {
+      const existing = links.find(link => link.id === command.linkId)
+      if (!existing || existing.eventId !== parent.id || existing.originalStart !== originalStart) throw new Error('关联已变化或不属于当前实例')
+      links = links.filter(link => link.id !== command.linkId)
+    }
+    put(parent)
+  } else if (command.type === 'create') {
     if (events.has(command.event.id)) throw new Error('事件标识已存在')
     put(command.event)
   } else if (command.type === 'duplicate') {
@@ -102,6 +125,7 @@ export function planCalendarMutation(snapshot: CalendarSnapshot, command: Calend
       const origin: number | string = parent.allDay ? original : Number(original)
       const related = [...events.values()].filter(e => e.recurringEventId === parent.id)
       if (scope === 'this') {
+        if (!patch) links = links.filter(link => link.eventId !== parent.id || link.originalStart !== origin)
         if(patch&&('rrule'in patch||'rdates'in patch||'exdates'in patch))throw new Error('重复规则需要选择整个系列或后续范围')
         if (!patch) {
           put({ ...parent, exdates: [...new Set([...(parent.exdates || []), origin])] })
@@ -115,6 +139,7 @@ export function planCalendarMutation(snapshot: CalendarSnapshot, command: Calend
       if (scope === 'all') {
         if (!patch) { related.forEach(e => remove(e.id)); remove(parent.id); continue }
         const change=retimeSeries(parent,origin,patch)
+        links = links.map(link => link.eventId === parent.id && link.originalStart !== undefined ? {...link, originalStart: isRecurring(change.event) ? change.map(link.originalStart) : undefined} : link)
         if(!isRecurring(change.event)){related.forEach(e=>remove(e.id));change.event.exdates=undefined}
         else related.forEach(e=>put(change.child(e)))
         put({...change.event,id:parent.id,uid:parent.uid})
@@ -126,6 +151,8 @@ export function planCalendarMutation(snapshot: CalendarSnapshot, command: Calend
       else put({ ...parent, rrule: parent.rrule ? truncated : undefined, exdates: parent.exdates?.filter(x => value(x) < cutoff), rdates: parent.rdates?.filter(x => value(x) < cutoff) })
       const following = related.filter(e => value(e.originalStart!) >= cutoff)
       following.forEach(e => remove(e.id))
+      const movedLinks = links.filter(link => link.eventId === parent.id && link.originalStart !== undefined && value(link.originalStart) >= cutoff)
+      links = links.filter(link => !movedLinks.includes(link))
       if (patch) {
         const used = rule.count === undefined ? 0 : expand({ rule: parent.rrule || 'FREQ=DAILY;COUNT=1', dtstart: value(parent.start), allDay: parent.allDay, timeZone: parent.timeZone }, value(parent.start), cutoff, Math.max(20000, rule.count)).length
         const id = newId('event'),duration=value(parent.end)-value(parent.start)
@@ -133,13 +160,21 @@ export function planCalendarMutation(snapshot: CalendarSnapshot, command: Calend
           rrule:parent.rrule?stringifyRRule({...rule,count:rule.count===undefined?undefined:Math.max(1,rule.count-used)}):undefined,
           exdates:parent.exdates?.filter(x=>value(x)>=cutoff),rdates:parent.rdates?.filter(x=>value(x)>=cutoff),createdAt:Date.now()}
         const change=retimeSeries(base,origin,patch)
+        links.push(...movedLinks.map(link => ({...link, eventId: id, originalStart: isRecurring(change.event) ? change.map(link.originalStart!) : undefined})))
         put(change.event)
         if(isRecurring(change.event))for(const child of following)put({...change.child(child),recurringEventId:id,uid:change.event.uid})
 
       }
     }
   }
-  return { put: [...puts.values()], remove: [...removed] }
+  links = links.filter(link => events.has(link.eventId) && (link.originalStart === undefined ||
+    findCalendarOccurrence([...events.values()], `${link.eventId}|${link.originalStart}`)))
+  const linkEvents = new Set([...(snapshot.links || []), ...links].map(link => link.eventId))
+  const replacements = [...linkEvents].flatMap(eventId => {
+    const before = (snapshot.links || []).filter(link => link.eventId === eventId), after = links.filter(link => link.eventId === eventId)
+    return JSON.stringify(before) === JSON.stringify(after) ? [] : [{ eventId, links: after }]
+  })
+  return { put: [...puts.values()], remove: [...removed], ...(replacements.length ? {links: replacements} : {}) }
 }
 
 export interface CalendarMutationReceipt { snapshot: CalendarSnapshot; undo: CalendarDelta; versions: Record<string, number>; changedIds: string[] }
@@ -148,6 +183,6 @@ export function rebaseCalendarHistory(stack:CalendarMutationReceipt[],result:Cal
   const content=(e:CalEvent|undefined)=>{if(!e)return '';const {revision,updatedAt,...value}=e;return JSON.stringify(value)};
   for(const entry of stack)for(const id of Object.keys(entry.versions)){
     const current=result.snapshot.events.find(e=>e.id===id),expected=entry.snapshot.events.find(e=>e.id===id);
-    if(content(current)===content(expected))entry.versions[id]=current?.revision||0;
+    if(content(current)===content(expected)&&JSON.stringify((result.snapshot.links||[]).filter(l=>l.eventId===id).map(l=>[l.id,l.originalStart,toReadyUri(l.target),l.purpose]))===JSON.stringify((entry.snapshot.links||[]).filter(l=>l.eventId===id).map(l=>[l.id,l.originalStart,toReadyUri(l.target),l.purpose])))entry.versions[id]=current?.revision||0;
   }
 }
