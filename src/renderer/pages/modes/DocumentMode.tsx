@@ -1,3 +1,4 @@
+import { RelationsPanel } from '../../modules/workbench/object-ui/RelationsPanel'
 import { DraftBootNotice, DraftControls } from '../../modules/document/drafts/DraftControls'
 import { initializeDrafts, reportDraftError, useDraftUI, watchDraftVault } from '../../modules/document/drafts/runtime'
 import { readingPositionKey } from '../../stores/objectPresentationState'
@@ -1046,14 +1047,14 @@ export default function DocumentMode({
           {/* Content Area — rounded on all four corners so the editor reads as an inset card
               like the browser content viewport. */}
           <div
-            className="document-content-frame relative flex-1 min-h-0 overflow-hidden"
+            className="document-content-frame relative flex flex-col flex-1 min-h-0 overflow-hidden"
             style={{
               borderRadius: 'var(--workbench-canvas-radius)',
               background: 'var(--workbench-module-surface-bg)',
             }}
           >
             <div
-              className={bookReadingVisible ? 'h-full min-h-0' : 'contents'}
+              className="flex-1 min-h-0"
               style={bookReadingVisible ? { visibility: 'hidden' } : undefined}
               inert={bookReadingVisible || undefined}
               aria-hidden={bookReadingVisible || undefined}
@@ -1141,6 +1142,10 @@ export default function DocumentMode({
               </div>
             )}
             </div>
+
+            {isSceneVisible && panelTargetTab?.objectId && (
+              <RelationsPanel key={panelTargetTab.objectId} objectId={panelTargetTab.objectId} />
+            )}
 
             {bookReadingVisible && panelTargetTab && (
               <DocumentBookReadingView

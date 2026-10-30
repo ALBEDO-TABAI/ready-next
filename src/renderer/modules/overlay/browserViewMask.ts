@@ -10,10 +10,14 @@ export function didBrowserHideAck(outcome: AckWaiterOutcome): boolean {
   return outcome.outcome === 'ack'
 }
 
-export async function beginBrowserMask(options: { persistent?: boolean } = {}): Promise<void> {
-  if (typeof window === 'undefined') return
+export async function beginBrowserMask(options: { persistent?: boolean; requireAck?: boolean } = {}): Promise<boolean> {
+  if (typeof window === 'undefined') return false
   const browser = window.electronAPI?.browser
   let alreadyHidden = false
+  // Lock before sending hide so resize/focus cannot show a native view during the wait.
+  if (options.requireAck) window.dispatchEvent(new CustomEvent(BROWSER_OVERLAY_LOCK_EVENT, {
+    detail: { locked: true, alreadyHidden: true, persistent: options.persistent },
+  }))
   if (browser?.sendIntent && browser.onIntentAck) {
     try {
       const intentId = nextIntentId()
@@ -30,10 +34,18 @@ export async function beginBrowserMask(options: { persistent?: boolean } = {}): 
       alreadyHidden = false
     }
   }
+  if (options.requireAck) {
+    if (!alreadyHidden) {
+      if (options.persistent) await endPersistentBrowserMask()
+      else await endBrowserMask()
+    }
+    return alreadyHidden
+  }
   const detail = options.persistent
     ? { locked: true, alreadyHidden, persistent: true }
     : { locked: true, alreadyHidden }
   window.dispatchEvent(new CustomEvent(BROWSER_OVERLAY_LOCK_EVENT, { detail }))
+  return alreadyHidden
 }
 
 export function beginPersistentBrowserMask(): void {

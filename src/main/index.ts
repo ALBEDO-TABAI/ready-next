@@ -1,3 +1,4 @@
+import { ObjectRelationsService, registerObjectRelationsIPC } from './modules/object-relations/service'
 import { registerCalendarLayersIPC } from './modules/calendar-layers/ipc'
 import { createCalendarLayersResolver } from './modules/calendar-layers/runtime'
 import { createDocumentDatabaseResolver } from './modules/document-database/runtime'
@@ -682,6 +683,11 @@ function setupGlobalIPC(): void {
   setupDocumentIPC(DOCUMENT_USE_MOCK)  // Always real fs
   setupBoardIPC({ getMainWindow: () => mainWindow })
   setupSearchIPC()
+  registerObjectRelationsIPC(ipcMain, () => {
+    const db = getDatabase().getRawDb()
+    if (!db) throw new Error('关系索引尚未就绪')
+    return new ObjectRelationsService(db)
+  })
   setupLibraryIPC()
   setupDocumentDraftIPC()
   const documentPages = setupDocumentPagesIPC()
