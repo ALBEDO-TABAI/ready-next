@@ -113,6 +113,9 @@ async function checkObjectPresentationAfterRestart(page, identity) {
     position: JSON.parse(localStorage.getItem('ready-object-reading-positions-v1') || '[]').find(row => row.key === objectId),
   }), identity)
   ok('C2 reopening retains one tab, appearance and reading position', restored.tabs.length === 1 && restored.appearance?.icon === '🐙' && restored.position?.top > 0, JSON.stringify(restored))
+  // The M6 meeting note opens its own tab before the restart; bring this tab to the front through the tab rail.
+  const activeTab = await page.evaluate(() => JSON.parse(localStorage.getItem('ready-doc-tabs-v2') || '{}').state?.activeTabId)
+  if (activeTab !== restored.tabs[0].id) await page.locator(`[title^="${path.basename(identity.path)}"]`).first().click({ timeout: 20000 })
   await page.locator('.document-path-bar').getByText(identity.path, { exact: true }).waitFor({ timeout: 20000 })
   ok('C2 the visible document header shows the final path', true)
   // Scroll scopes are keyed by object id (path only for files without one).
