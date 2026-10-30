@@ -8,7 +8,7 @@ export class ObjectEventWindow {
   private maximum:ReturnType<typeof setTimeout>|undefined
   private pending:Array<{resolve:()=>void;reject:(error:unknown)=>void}>=[]
   private tail:Promise<void>=Promise.resolve()
-  constructor(private registry:ObjectRegistry,private indexed:(paths:string[])=>Promise<void>) {}
+  constructor(private registry:ObjectRegistry,private indexed:(paths:string[],removedPaths:string[])=>Promise<void>) {}
   add(path:string):Promise<void> {
     this.paths.add(path)
     clearTimeout(this.quiet)
@@ -21,7 +21,14 @@ export class ObjectEventWindow {
     clearTimeout(this.quiet);clearTimeout(this.maximum);this.maximum=undefined
     const paths=[...this.paths];const waiters=this.pending;this.paths.clear();this.pending=[]
     if(!paths.length)return
-    const run=this.tail.then(async()=>{this.registry.reconcile(paths);await this.indexed(paths);await repairObjectLinks(this.registry)})
+    const run=this.tail.then(async()=>{
+      const indexedPaths=()=>this.registry.db.prepare("SELECT path FROM documents WHERE source_type='document'").all<{path:string}>().map(row=>row.path)
+      const before=indexedPaths()
+      this.registry.reconcile(paths)
+      const after=new Set(indexedPaths())
+      await this.indexed(paths,before.filter(path=>!after.has(path)))
+      await repairObjectLinks(this.registry)
+    })
     this.tail=run.then(()=>{for(const waiter of waiters)waiter.resolve()},error=>{for(const waiter of waiters)waiter.reject(error)})
   }
 }

@@ -1,3 +1,7 @@
+import { writeFileSync, unlinkSync } from 'node:fs'
+import { join } from 'node:path'
+import { fixture } from './utils/ready-object-fixture'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { IpcMain, IpcMainInvokeEvent } from 'electron'
@@ -85,45 +89,42 @@ test('successful rebuild and single-document indexing publish index readback eve
   assert.ok(capture.sent.every((item) => Number.isFinite(item.completedAt) && item.completedAt > 0))
 })
 
-test('watcher publishes only after add/change/unlink has reached the index', async () => {
-  let onChange: ((change: FileWatcherChange) => void | Promise<void>) | null = null
-  const deleted: string[] = []
-  const indexed: string[] = []
-  const engine = {
-    indexDocument: async (_root: string, path: string) => {
-      indexed.push(path)
-      return { ok: true, documentId: 9, skipped: false }
-    },
-    getRepository: () => ({
-      ensureWorkspace: () => 1,
-      deletePath: (_workspaceId: number, path: string) => {
-        deleted.push(path)
-        return 1
-      },
-    }),
-  }
+test('watcher publishes only after add/change/unlink has reached the index', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'Watcher object settlement')) return
+  const f = fixture()
+  t.after(() => f.close())
+  let onChange: FileWatcherOptions['onChange'] | undefined
   const deps = {
-    getSearchEngine: () => engine,
+    getSearchEngine: () => f.engine,
     createFileWatcher: async (options: FileWatcherOptions) => {
       onChange = options.onChange
-      return { id: 'watch-1', workspaceRoot: options.workspaceRoot, close: async () => undefined }
+      return { id: 'watch-1', workspaceRoot: options.workspaceRoot, isClosed: () => false, onFatalError: () => () => {}, close: async () => undefined }
     },
-    getFileWatcherRegistry: () => ({ add: () => true, stop: async () => true }),
-  } as unknown as WatcherGroupDeps
+    getFileWatcherRegistry: () => new FileWatcherRegistry(),
+  } satisfies WatcherGroupDeps
   const handlers = registerHandlers((ipc) => { watcherGroup.register(ipc, deps) })
   const capture = eventCapture()
-
-  await handlers.get('document:startWatcher')!(capture.event, { workspaceRoot: '/workspace' } as never)
+  const path = join(f.root, 'new.md')
+  const readBody = () => f.db.prepare('SELECT f.body FROM documents d JOIN documents_fts f ON f.rowid=d.id WHERE d.path=?').get<{ body: string }>(path)?.body
+  const publishedBodies: Array<string | undefined> = []
+  const send = capture.event.sender.send.bind(capture.event.sender)
+  capture.event.sender.send = (channel, payload) => {
+    publishedBodies.push(readBody())
+    send(channel, payload)
+  }
+  await handlers.get('document:startWatcher')!(capture.event, { workspaceRoot: f.root } as never)
   assert.ok(onChange)
-  await onChange!({ filePath: '/workspace/new.md', kind: 'add', workspaceRoot: '/workspace' })
-  await onChange!({ filePath: '/workspace/gone.md', kind: 'unlink', workspaceRoot: '/workspace' })
+  writeFileSync(path, '# Added')
+  const added = onChange({ filePath: path, kind: 'add', workspaceRoot: f.root })
+  assert.deepEqual(capture.sent, [], 'no publication while the event window is pending')
+  await added
+  writeFileSync(path, '# Changed')
+  await onChange({ filePath: path, kind: 'change', workspaceRoot: f.root })
+  unlinkSync(path)
+  await onChange({ filePath: path, kind: 'unlink', workspaceRoot: f.root })
 
-  assert.deepEqual(indexed, ['/workspace/new.md'])
-  assert.deepEqual(deleted, ['/workspace/gone.md'])
-  assert.deepEqual(capture.sent.map((item) => item.changedPaths), [
-    ['/workspace/new.md'],
-    ['/workspace/gone.md'],
-  ])
+  assert.deepEqual(publishedBodies, ['# Added', '# Changed', undefined])
+  assert.deepEqual(capture.sent.map((item) => item.changedPaths), [[path], [path], [path]])
   assert.ok(capture.sent.every((item) => item.reason === 'incremental'))
 })
 
@@ -165,12 +166,16 @@ test('failed rebuild and document indexing do not publish completion events', as
   assert.deepEqual(capture.sent, [])
 })
 
-test('watcher does not publish when incremental indexing reports failure', async () => {
+test('watcher does not publish when incremental indexing reports failure', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'Watcher object settlement')) return
+  const f = fixture()
+  t.after(() => f.close())
+  const path = join(f.root, 'broken.md')
+  writeFileSync(path, '# Broken')
+  t.mock.method(f.engine, 'indexDocument', async () => ({ ok: false, error: 'not indexed' }))
   let onChange: ((change: FileWatcherChange) => void | Promise<void>) | null = null
   const deps = {
-    getSearchEngine: () => ({
-      indexDocument: async () => ({ ok: false, error: 'not indexed' }),
-    }),
+    getSearchEngine: () => f.engine,
     createFileWatcher: async (options: FileWatcherOptions) => {
       onChange = options.onChange
       return { id: 'watch-2', workspaceRoot: options.workspaceRoot, close: async () => undefined }
@@ -180,19 +185,22 @@ test('watcher does not publish when incremental indexing reports failure', async
   const handlers = registerHandlers((ipc) => { watcherGroup.register(ipc, deps) })
   const capture = eventCapture()
 
-  await handlers.get('document:startWatcher')!(capture.event, { workspaceRoot: '/workspace' } as never)
+  await handlers.get('document:startWatcher')!(capture.event, { workspaceRoot: f.root } as never)
   assert.ok(onChange)
-  await onChange!({ filePath: '/workspace/broken.md', kind: 'change', workspaceRoot: '/workspace' })
+  await assert.rejects(async () => onChange!({ filePath: path, kind: 'change', workspaceRoot: f.root }), /not indexed/)
 
   assert.deepEqual(capture.sent, [])
 })
 
-test('watcher runtime failure removes the registry entry and notifies the renderer', async () => {
+test('watcher runtime failure removes the registry entry and notifies the renderer', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'Watcher object settlement')) return
+  const f = fixture()
+  t.after(() => f.close())
   let fatalCallback: ((event: DocumentWatcherFailedEvent) => void) | null = null
   let closed = false
   const registry = new FileWatcherRegistry()
   const deps = {
-    getSearchEngine: () => ({ indexDocument: async () => ({ ok: true, skipped: false }) }),
+    getSearchEngine: () => f.engine,
     createFileWatcher: async (options: FileWatcherOptions) => ({
       id: 'watch-runtime-failure',
       workspaceRoot: options.workspaceRoot,
@@ -235,7 +243,13 @@ test('watcher runtime failure removes the registry entry and notifies the render
   }])
 })
 
-test('no-change rebuild, skipped indexing, and missing unlink do not invalidate the graph', async () => {
+test('no-change rebuild, skipped indexing, and missing unlink do not invalidate the graph', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'Watcher object settlement')) return
+  const f = fixture()
+  t.after(() => f.close())
+  const path = join(f.root, 'same.md')
+  writeFileSync(path, '# Same')
+  assert.equal((await f.engine.indexDocument(f.root, path)).ok, true)
   const sourceEngine = {
     indexDocument: async () => ({ ok: true, documentId: 7, skipped: true }),
   }
@@ -271,13 +285,7 @@ test('no-change rebuild, skipped indexing, and missing unlink do not invalidate 
 
   let onChange: ((change: FileWatcherChange) => void | Promise<void>) | null = null
   const watcherDeps = {
-    getSearchEngine: () => ({
-      indexDocument: async () => ({ ok: true, documentId: 7, skipped: true }),
-      getRepository: () => ({
-        ensureWorkspace: () => 1,
-        deletePath: () => 0,
-      }),
-    }),
+    getSearchEngine: () => f.engine,
     createFileWatcher: async (options: FileWatcherOptions) => {
       onChange = options.onChange
       return { id: 'watch-no-change', workspaceRoot: options.workspaceRoot, close: async () => undefined }
@@ -286,8 +294,8 @@ test('no-change rebuild, skipped indexing, and missing unlink do not invalidate 
   } as unknown as WatcherGroupDeps
   const watcherHandlers = registerHandlers((ipc) => { watcherGroup.register(ipc, watcherDeps) })
   const watcherCapture = eventCapture()
-  await watcherHandlers.get('document:startWatcher')!(watcherCapture.event, { workspaceRoot: '/workspace' } as never)
-  await onChange!({ filePath: '/workspace/same.md', kind: 'change', workspaceRoot: '/workspace' })
-  await onChange!({ filePath: '/workspace/missing.md', kind: 'unlink', workspaceRoot: '/workspace' })
+  await watcherHandlers.get('document:startWatcher')!(watcherCapture.event, { workspaceRoot: f.root } as never)
+  await onChange!({ filePath: path, kind: 'change', workspaceRoot: f.root })
+  await onChange!({ filePath: join(f.root, 'missing.md'), kind: 'unlink', workspaceRoot: f.root })
   assert.deepEqual(watcherCapture.sent, [])
 })

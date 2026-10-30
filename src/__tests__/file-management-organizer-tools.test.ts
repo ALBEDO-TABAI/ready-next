@@ -96,7 +96,8 @@ async function makeXlsx(path: string, text: string): Promise<void> {
   await writeFile(path, xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' }))
 }
 
-test('file organizer tools preview, apply, and undo a confirmed folder cleanup', async () => {
+test('file organizer tools preview, apply, and undo a confirmed folder cleanup', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'File management objects')) return
   const root = await mkdtemp(join(tmpdir(), 'ready-file-organizer-root-'))
   const store = await mkdtemp(join(tmpdir(), 'ready-file-organizer-store-'))
   try {
@@ -159,7 +160,8 @@ test('file organizer tools preview, apply, and undo a confirmed folder cleanup',
   }
 })
 
-test('file tools honor current file-manager roots over stale indexed roots', async () => {
+test('file tools honor current file-manager roots over stale indexed roots', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'File management objects')) return
   const allowedRoot = await mkdtemp(join(tmpdir(), 'ready-file-scope-allowed-'))
   const staleRoot = await mkdtemp(join(tmpdir(), 'ready-file-scope-stale-'))
   try {
@@ -189,7 +191,8 @@ test('file tools honor current file-manager roots over stale indexed roots', asy
   }
 })
 
-test('file organizer preview reports conflicts before touching disk', async () => {
+test('file organizer preview reports conflicts before touching disk', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'File management objects')) return
   const root = await mkdtemp(join(tmpdir(), 'ready-file-organizer-conflict-'))
   const store = await mkdtemp(join(tmpdir(), 'ready-file-organizer-store-'))
   try {
@@ -213,7 +216,8 @@ test('file organizer preview reports conflicts before touching disk', async () =
   }
 })
 
-test('file extraction supports docx and xlsx text paths', async () => {
+test('file extraction supports docx and xlsx text paths', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'File management objects')) return
   const root = await mkdtemp(join(tmpdir(), 'ready-file-organizer-extract-'))
   try {
     const context = { searchEngine: fakeSearchEngine(root) as never }
@@ -245,6 +249,7 @@ test('file extraction supports docx and xlsx text paths', async () => {
 })
 
 test('file extraction supports pdf text when a system PDF generator is available', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'File management objects')) return
   const root = await mkdtemp(join(tmpdir(), 'ready-file-organizer-pdf-'))
   try {
     const sourceText = join(root, 'source.txt')
@@ -269,7 +274,8 @@ test('file extraction supports pdf text when a system PDF generator is available
   }
 })
 
-test('file organizer rejects symlink escapes from an authorized root', async () => {
+test('file organizer rejects symlink escapes from an authorized root', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'File management objects')) return
   const root = await mkdtemp(join(tmpdir(), 'ready-file-organizer-symlink-'))
   const outside = await mkdtemp(join(tmpdir(), 'ready-file-organizer-outside-'))
   const store = await mkdtemp(join(tmpdir(), 'ready-file-organizer-store-'))
@@ -294,7 +300,8 @@ test('file organizer rejects symlink escapes from an authorized root', async () 
 })
 
 
-test('file_copy copies within one workspace root and refuses unsafe overwrite targets', async () => {
+test('file_copy copies within one workspace root and refuses unsafe overwrite targets', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'File management objects')) return
   const root = await mkdtemp(join(tmpdir(), 'ready-file-copy-root-'))
   try {
     const source = join(root, 'source.md')
@@ -345,7 +352,8 @@ test('file_copy copies within one workspace root and refuses unsafe overwrite ta
   }
 })
 
-test('file_copy refuses to overwrite a symlink target', async () => {
+test('file_copy refuses to overwrite a symlink target', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'File management objects')) return
   const root = await mkdtemp(join(tmpdir(), 'ready-file-copy-symlink-'))
   try {
     const source = join(root, 'source.md')

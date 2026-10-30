@@ -1,28 +1,29 @@
 import { repairObjectLinks } from './link-repair'
 import { randomUUID } from 'node:crypto'
-import { cpSync, existsSync, mkdirSync, renameSync, readFileSync, rmSync, lstatSync, readdirSync, readlinkSync, openSync, fsyncSync, closeSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
+import { cp, mkdir, rename, rm, lstat, readdir, readlink, open } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { ObjectRegistry, canonicalObjectPath, fullHash, isInside, objectTransaction, type ObjectRecord } from './registry'
 import { getDocumentTabTransport, requestDocumentTab, withDocumentPathLock } from '../document-engine/document-write-service'
 
-function moveFile(source:string,target:string):void {
-  mkdirSync(dirname(target),{recursive:true})
-  try { renameSync(source,target) } catch(error) {
+async function moveFile(source:string,target:string):Promise<void> {
+  await mkdir(dirname(target),{recursive:true})
+  try { await rename(source,target) } catch(error) {
     if(!(error && typeof error==='object' && 'code' in error && error.code==='EXDEV'))throw error
     const temporary=`${target}.ready-move-${randomUUID()}`
     try {
-      cpSync(source,temporary,{recursive:true,errorOnExist:true,force:false,verbatimSymlinks:true})
-      const verify=(from:string,to:string):void=>{
-        const info=lstatSync(from)
-        if(info.isSymbolicLink()){if(readlinkSync(from)!==readlinkSync(to))throw new Error('Cross-device symlink readback mismatch');return}
-        if(info.isDirectory()){for(const entry of readdirSync(from))verify(join(from,entry),join(to,entry));return}
+      await cp(source,temporary,{recursive:true,errorOnExist:true,force:false,verbatimSymlinks:true})
+      const verify=async(from:string,to:string):Promise<void>=>{
+        const info=await lstat(from)
+        if(info.isSymbolicLink()){if(await readlink(from)!==await readlink(to))throw new Error('Cross-device symlink readback mismatch');return}
+        if(info.isDirectory()){for(const entry of await readdir(from))await verify(join(from,entry),join(to,entry));return}
         if(fullHash(from)!==fullHash(to))throw new Error('Cross-device copy readback mismatch')
-        const fd=openSync(to,'r');try{fsyncSync(fd)}finally{closeSync(fd)}
+        const file=await open(to,'r');try{await file.sync()}finally{await file.close()}
       }
-      verify(source,temporary)
-      renameSync(temporary,target)
-      try { rmSync(source,{recursive:true}) } catch(failure) {rmSync(target,{recursive:true});throw failure}
-    } finally { if(existsSync(temporary))rmSync(temporary,{recursive:true}) }
+      await verify(source,temporary)
+      await rename(temporary,target)
+      try { await rm(source,{recursive:true}) } catch(failure) {await rm(target,{recursive:true});throw failure}
+    } finally { if(existsSync(temporary))await rm(temporary,{recursive:true}) }
   }
 }
 
@@ -70,12 +71,12 @@ export class ObjectMutations {
           if(canonicalObjectPath(source)!==canonical || canonicalObjectPath(target)!==destination)throw new Error('Move location changed during preparation')
           if(existsSync(destination))throw new Error('Target already exists')
           if(objects.some(row=>row.kind!=='directory' && fullHash(row.current_path!)!==row.content_hash))throw new Error('version_conflict: source changed during move preparation')
-          moveFile(canonical,destination);published=true
+          await moveFile(canonical,destination);published=true
           db.prepare("UPDATE object_move_operations SET state='file_published' WHERE id=?").run(id)
           this.commitMove(id,canonical,destination,objects)
         } catch(error) {
           try {
-            if(published)moveFile(destination,canonical)
+            if(published)await moveFile(destination,canonical)
             this.registry.reconcile(objects.map(row=>row.current_path!))
             db.prepare("UPDATE object_move_operations SET state='rolled_back',error=? WHERE id=?").run(String(error),id)
           } catch(rollback) {

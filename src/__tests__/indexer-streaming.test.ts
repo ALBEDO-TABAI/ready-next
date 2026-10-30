@@ -1,3 +1,4 @@
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { fixture as objectFixture } from './utils/ready-object-fixture'
 /**
  * perf-rescue B6 — streaming reindex tests.
@@ -251,13 +252,15 @@ test('FileSystemAdapter does not rewrite derived rows when hash upsert is skippe
   })
 })
 
-test('SearchEngine.indexDocument stops after a hash-equal upsert', async () => {
+test('SearchEngine.indexDocument stops after a hash-equal upsert', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'Search index objects')) return
   const f=objectFixture()
   try {
     const path=join(f.root,'A.md')
-    writeFileSync(path,'# A')
+    writeFileSync(path,'---\ntags: [kept]\n---\n# A')
     const first=await f.engine.indexDocument(f.root,path)
     assert.equal(first.ok,true)
+    assert.deepEqual(f.db.prepare('SELECT tag FROM tags WHERE doc_id=?').all(first.documentId), [{tag:'kept'}])
     f.db.exec("CREATE TRIGGER reject_derived_rewrite BEFORE DELETE ON tags BEGIN SELECT RAISE(ABORT,'unchanged tags rewritten'); END")
     const second=await f.engine.indexDocument(f.root,path)
     assert.deepEqual(second,{ok:true,documentId:first.documentId,skipped:true})

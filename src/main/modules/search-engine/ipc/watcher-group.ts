@@ -93,16 +93,19 @@ export const watcherGroup: IpcChannelGroup<WatcherGroupDeps> = {
         }
 
         const registry = new ObjectRegistry(searchEngine.getRepository().getConnection())
-        const window = new ObjectEventWindow(registry, async paths => {
+        const window = new ObjectEventWindow(registry, async (paths, removedPaths) => {
           const engine = deps.getSearchEngine()
           if (!engine) throw new Error('Search engine unavailable during identity settlement')
+          const changedPaths = new Set(removedPaths)
           for (const path of paths) {
             const object = registry.find(path)
             if (object?.status === 'present' && object.kind !== 'directory' && object.identity_state !== 'conflict') {
-              await engine.indexDocument(payload.workspaceRoot, path)
+              const result = await engine.indexDocument(payload.workspaceRoot, path)
+              if (!result.ok) throw new Error(result.error || 'Incremental indexing failed')
+              if (!result.skipped) changedPaths.add(path)
             }
           }
-          publishDocumentIndexChanged(event.sender, { workspaceRoot:payload.workspaceRoot,reason:'incremental',changedPaths:paths })
+          if (changedPaths.size) publishDocumentIndexChanged(event.sender, { workspaceRoot:payload.workspaceRoot,reason:'incremental',changedPaths:[...changedPaths] })
         })
         const result = await deps.createFileWatcher({
           workspaceRoot: payload.workspaceRoot,

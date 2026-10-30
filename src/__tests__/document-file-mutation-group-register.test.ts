@@ -1,3 +1,4 @@
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { fixture as objectFixture } from './utils/ready-object-fixture'
 import { ObjectMutations } from '../main/modules/object-service/mutations'
 import { afterEach } from 'node:test'
@@ -151,6 +152,7 @@ test('dispose is idempotent — calling twice does not throw and removes nothing
 })
 
 test('document deletePermanent removes a file directly', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'Document object mutations')) return
   const root = mkdtempSync(join(tmpdir(), 'ready-file-delete-permanent-'))
   t.after(async () => {
     await rm(root, { recursive: true, force: true })
@@ -200,6 +202,7 @@ test('document move refuses an existing destination before copy/remove fallback 
 })
 
 test('document move rolls the filesystem back when identity bookkeeping fails', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'Document object mutations')) return
   const root = mkdtempSync(join(tmpdir(), 'ready-file-move-identity-'))
   t.after(async () => { await rm(root, { recursive: true, force: true }) })
   const source = join(root, 'source.md')

@@ -139,14 +139,16 @@ test('C2 path swaps, window boundaries and interrupted moves do not invent or st
 
 test('C2 EXDEV uses a real verified copy and removes the source only after publication', async (t) => {
   if (skipIfSqliteUnavailable(t, 'Object identity')) return
- const {createRequire,syncBuiltinESMExports}=await import('node:module');const fs=createRequire(import.meta.url)('node:fs') as typeof import('node:fs')
- const f=fixture();const original=fs.renameSync
+ // Moves use the async fs/promises rename, so the cross-device error is injected there.
+ const {createRequire,syncBuiltinESMExports}=await import('node:module');const require=createRequire(import.meta.url)
+ const fs=require('node:fs') as typeof import('node:fs');const fsp=require('node:fs/promises') as typeof import('node:fs/promises')
+ const f=fixture();const original=fsp.rename
  try {
   const source=join(f.root,'source.md'),target=join(f.root,'target.md');writeFileSync(source,'cross-volume');const record=f.registry.register(source)
   let injected=false
-  fs.renameSync=(from,to)=>{if(!injected && String(from)===record.current_path){injected=true;throw Object.assign(new Error('cross device'),{code:'EXDEV'})}return original(from,to)}
+  fsp.rename=async(from,to)=>{if(!injected && String(from)===record.current_path){injected=true;throw Object.assign(new Error('cross device'),{code:'EXDEV'})}return original(from,to)}
   syncBuiltinESMExports()
   await new ObjectMutations(f.registry).move(source,target)
   assert.equal(injected,true);assert.equal(readFileSync(target,'utf8'),'cross-volume');assert.equal(fs.existsSync(source),false);assert.equal(f.registry.find(target)!.id,record.id)
- }finally{fs.renameSync=original;syncBuiltinESMExports();f.close()}
+ }finally{fsp.rename=original;syncBuiltinESMExports();f.close()}
 })
