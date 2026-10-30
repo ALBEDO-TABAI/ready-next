@@ -75,14 +75,15 @@ test('db-worker integration: end-to-end query/response', async (t) => {
         indexed_at INTEGER,
         source_type TEXT,
         source_id TEXT,
-        source_meta_json TEXT
+        source_meta_json TEXT,
+        object_id TEXT
       );
-      CREATE TABLE IF NOT EXISTS doc_links (
+      CREATE TABLE IF NOT EXISTS object_links (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        src_doc_id INTEGER NOT NULL,
+        source_id TEXT, source_ref TEXT, target_ref TEXT,
         kind TEXT NOT NULL,
         target_text TEXT,
-        target_doc_id INTEGER,
+        target_id TEXT,
         resolved INTEGER DEFAULT 0
       );
       CREATE TABLE IF NOT EXISTS tags (
@@ -93,7 +94,8 @@ test('db-worker integration: end-to-end query/response', async (t) => {
       INSERT INTO workspaces (root) VALUES ('/work');
       INSERT INTO documents (workspace_id, path, name, source_type) VALUES (1, '/work/a.md', 'a.md', 'document');
       INSERT INTO documents (workspace_id, path, name, source_type) VALUES (1, '/work/b.md', 'b.md', 'document');
-      INSERT INTO doc_links (src_doc_id, kind, target_text, target_doc_id) VALUES (1, 'wikilink', 'b', 2);
+      UPDATE documents SET object_id=CAST(id AS TEXT);
+      INSERT INTO object_links (source_id, kind, target_text, target_id,resolved) VALUES ('1', 'wikilink', 'b', '2',1);
       INSERT INTO tags (doc_id, tag) VALUES (1, 'note');
     `)
     seed.close()

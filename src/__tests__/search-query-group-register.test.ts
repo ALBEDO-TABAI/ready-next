@@ -4,10 +4,10 @@
 // Mirrors `search-source-index-group-register.test.ts` (V2.4a). Pins the
 // group-mechanism contract the V5 IPC contract gate cannot prove on its own:
 //
-//   1. `register` registers EXACTLY the 3 channel names the group owns
+//   1. `register` registers EXACTLY the 5 channel names the group owns
 //      (`document:searchIndex` / `document:getBacklinks` / `document:getGraph`).
 //   2. The returned dispose handle calls `removeHandler` for each of those
-//      same 3 channels — so dev-reload re-registration does not leak
+//      same 5 channels — so dev-reload re-registration does not leak
 //      listeners.
 //   3. `namespace` stays at the documented `document:query` label so the
 //      host can rely on it for future dispose-ordering / logging.
@@ -69,7 +69,7 @@ function createMockDeps(): SearchQueryGroupDeps {
   }
 }
 
-test('searchQueryGroup.register wires the 3 documented channels exactly once each', () => {
+test('searchQueryGroup.register wires the 5 documented channels exactly once each', () => {
   const { ipc, handleCalls } = createMockIpc()
   searchQueryGroup.register(ipc, createMockDeps())
 
@@ -78,9 +78,9 @@ test('searchQueryGroup.register wires the 3 documented channels exactly once eac
   assert.deepEqual(
     registered,
     expected,
-    'register must subscribe to exactly the 3 search-query channels',
+    'register must subscribe to exactly the 5 search-query channels',
   )
-  assert.equal(handleCalls.length, 3, 'each channel must be registered exactly once')
+  assert.equal(handleCalls.length, 5, 'each channel must be registered exactly once')
 
   // Spot-check the exact channel names per the plan (V2.4b, §3 V2.4) so
   // accidental renames trip this test even if the channel count happens
@@ -105,7 +105,7 @@ test('searchQueryGroup namespace is the documented label so dispose ordering can
   assert.equal(searchQueryGroup.namespace, 'document:query')
 })
 
-test('IpcDisposeHandle.dispose removes the same 3 channels that register added', () => {
+test('IpcDisposeHandle.dispose removes the same 5 channels that register added', () => {
   const { ipc, removeHandlerCalls } = createMockIpc()
   const handle = searchQueryGroup.register(ipc, createMockDeps())
 
@@ -135,7 +135,7 @@ test('dispose is idempotent — calling twice does not throw and removes nothing
   // group's dispose loop wraps each call in try/catch, so a second
   // invocation must NOT throw.
   assert.doesNotThrow(() => handle.dispose())
-  // Second dispose runs the same 3 removeHandler calls; total count grows
+  // Second dispose runs the same 5 removeHandler calls; total count grows
   // by exactly the channel count, never more.
   assert.equal(
     removeHandlerCalls.length - afterFirst,

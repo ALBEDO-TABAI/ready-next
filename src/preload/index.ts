@@ -1,4 +1,5 @@
 import type { ObjectPresentationAPI, ObjectMovedEvent } from '../shared/object-identity'
+import type { ObjectLinkQuery } from '../shared/object-links'
 import type { LibraryHighlightContext, LibraryHighlightCreate, LibraryHighlightUpdate, LibraryHighlightRemove, LibraryHighlightState } from '../shared/library'
 import type { LibraryBook, LibraryBookPatch, LibraryBookmark, LibraryImportResult, LibraryReadingPosition, LibraryResult, LibraryState } from '../shared/library'
 import type { DocumentSyncRequest, DocumentSyncReply } from '../shared/document-operations'
@@ -845,6 +846,8 @@ const documentAPI = {
   listSources: () => ipcRenderer.invoke('document:listSources'),
   getBacklinks: (payload: { path: string; limit?: number }) =>
     ipcRenderer.invoke('document:getBacklinks', payload),
+  getObjectOutgoingLinks: (payload: ObjectLinkQuery) => ipcRenderer.invoke('document:getObjectOutgoingLinks', payload),
+  getObjectIncomingLinks: (payload: ObjectLinkQuery) => ipcRenderer.invoke('document:getObjectIncomingLinks', payload),
   getGraph: (payload?: { centerPath?: string; depth?: number; workspaceRoot?: string }) =>
     ipcRenderer.invoke('document:getGraph', payload),
   listMarks: (payload: { documentPath: string }) =>

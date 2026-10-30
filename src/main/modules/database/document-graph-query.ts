@@ -109,20 +109,22 @@ function collectRelatedDocumentIds(
       const marks = placeholders(batch.length)
       const outgoing = db
         .prepare(
-          `SELECT dl.src_doc_id AS a, dl.target_doc_id AS b
-           FROM doc_links dl
-           JOIN documents target ON target.id = dl.target_doc_id
-           WHERE dl.target_doc_id IS NOT NULL
+          `SELECT source.id AS a, target.id AS b
+           FROM object_links dl
+           JOIN documents source ON source.object_id=dl.source_id OR source.path=dl.source_ref
+           JOIN documents target ON (target.object_id=dl.target_id OR target.path=dl.target_ref) AND dl.resolved=1
+           WHERE target.id IS NOT NULL
              AND target.workspace_id = ?
-             AND dl.src_doc_id IN (${marks})`,
+             AND source.id IN (${marks})`,
         )
         .all<{ a: number; b: number }>(center.workspaceId, ...batch)
       const incoming = db
         .prepare(
-          `SELECT dl.src_doc_id AS a, dl.target_doc_id AS b
-           FROM doc_links dl
-           JOIN documents source ON source.id = dl.src_doc_id
-           WHERE dl.target_doc_id IN (${marks})
+          `SELECT source.id AS a, target.id AS b
+           FROM object_links dl
+           JOIN documents source ON source.object_id=dl.source_id OR source.path=dl.source_ref
+           JOIN documents target ON (target.object_id=dl.target_id OR target.path=dl.target_ref) AND dl.resolved=1
+           WHERE target.id IN (${marks})
              AND source.workspace_id = ?`,
         )
         .all<{ a: number; b: number }>(...batch, center.workspaceId)
@@ -173,9 +175,11 @@ function loadGraphRows(
     const marks = placeholders(batch.length)
     links.push(...db
       .prepare(
-        `SELECT src_doc_id AS src, target_doc_id AS tgt, kind, target_text AS label
-         FROM doc_links
-         WHERE src_doc_id IN (${marks})`,
+        `SELECT source.id AS src, target.id AS tgt, dl.kind, dl.target_text AS label
+         FROM object_links dl
+         JOIN documents source ON source.object_id=dl.source_id OR source.path=dl.source_ref
+         LEFT JOIN documents target ON (target.object_id=dl.target_id OR target.path=dl.target_ref) AND dl.resolved=1
+         WHERE source.id IN (${marks})`,
       )
       .all<LinkRow>(...batch))
     tags.push(...db

@@ -1,3 +1,4 @@
+import { refreshCardLinks } from './object-index-rebuild'
 import { ObjectRegistry, canonicalObjectPath, isInside } from '../object-service/registry'
 import { ObjectMutations } from '../object-service/mutations'
 import { IGNORED_DIR_NAMES } from './adapters'
@@ -204,6 +205,7 @@ export class SearchEngine {
         logSearch(`adapter ${adapter.sourceType} failed error=${message}`)
       }
     }
+    refreshCardLinks(this)
     this.repository.touchWorkspace(sharedWorkspaceId, Math.floor(Date.now() / 1000))
     // `ok` reflects the primary deliverable: the FS index for `root`. When
     // the FS pass failed (e.g. ENOENT after the workspace dir was deleted)
@@ -244,7 +246,7 @@ export class SearchEngine {
         skipped = upsert.skipped
         if (!skipped) {
           this.repository.replaceTags(documentId, parsed.tags)
-          this.repository.replaceLinks(documentId, parsed.wikilinks, parsed.mdlinks)
+          this.repository.replaceLinks(documentId, parsed.raw)
           this.repository.replaceAttachments(documentId, parsed.attachments)
           // perf-rescue B8: per-document wikilink resolve.
           //
@@ -490,7 +492,7 @@ export class SearchEngine {
     }
     if (parsed.wikilinks.length > 0) {
       const placeholders = parsed.wikilinks.map(() => '?').join(',')
-      sql += ` AND d.id IN (SELECT src_doc_id FROM doc_links WHERE kind = 'wikilink' AND target_text IN (${placeholders}))`
+      sql += ` AND d.id IN (SELECT d2.id FROM object_links l JOIN documents d2 ON d2.object_id=l.source_id OR d2.path=l.source_ref WHERE kind IN ('wikilink','block-ref','embed') AND target_text IN (${placeholders}))`
       bindings.push(...parsed.wikilinks)
     }
     sql += usingFts ? ' ORDER BY rank ASC' : ' ORDER BY d.indexed_at DESC'
@@ -532,7 +534,7 @@ export class SearchEngine {
       .all<{ id: number; tag: string }>(...ids)
     const linkHits = this.db
       .prepare(
-        `SELECT src_doc_id AS id, target_text AS target FROM doc_links WHERE kind = 'wikilink' AND src_doc_id IN (${placeholder})`,
+        `SELECT DISTINCT d2.id AS id, target_text AS target FROM object_links l JOIN documents d2 ON d2.object_id=l.source_id OR d2.path=l.source_ref WHERE kind IN ('wikilink','block-ref','embed') AND d2.id IN (${placeholder})`,
       )
       .all<{ id: number; target: string }>(...ids)
 

@@ -109,7 +109,7 @@ export class ObjectMutations {
       this.registry.captureLinks()
       for(const row of objects) {
         const next=target+row.current_path!.slice(source.length)
-        db.prepare("UPDATE object_link_targets SET state='pending' WHERE source_id=? OR target_id=?").run(row.id,row.id)
+        db.prepare("UPDATE object_link_repairs SET state='pending' WHERE source_id=? OR target_id=?").run(row.id,row.id)
         db.prepare("UPDATE objects SET current_path=?,path_key=?,last_known_path=?,workspace_id=?,revision=revision+1 WHERE id=?").run(next,next,next,this.registry.workspace(next),row.id)
         db.prepare(`INSERT INTO file_move_receipts(receipt_id,object_id,workspace_root,old_path,new_path,move_kind,moved_at,operation_id) VALUES (?,?,?,?,?,?,?,?)
           ON CONFLICT(object_id,old_path,new_path) DO UPDATE SET moved_at=excluded.moved_at,operation_id=excluded.operation_id`).run(randomUUID(),row.id,this.workspaceRoot(row.workspace_id),row.current_path,next,row.kind==='directory'?'directory':'file',Date.now(),id)

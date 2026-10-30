@@ -103,8 +103,8 @@ function seedDoc(repo: SearchRepository, input: DocSeedInput): number {
  */
 function seedWikilink(db: DatabaseConnection, srcDocId: number, targetText: string): void {
   db.prepare(
-    'INSERT OR IGNORE INTO doc_links (src_doc_id, kind, target_text, target_doc_id, resolved) VALUES (?, ?, ?, NULL, 0)',
-  ).run(srcDocId, 'wikilink', targetText)
+    `INSERT INTO object_links(id,source_id,kind,raw_target,target_text,resolved,unresolved_reason) VALUES (lower(hex(randomblob(16))),(SELECT object_id FROM documents WHERE id=?),?,?,?,0,'尚未解析')`,
+  ).run(srcDocId, 'wikilink', targetText, targetText)
 }
 
 interface LinkRow {
@@ -118,12 +118,12 @@ function listLinks(db: DatabaseConnection, srcDocId?: number): LinkRow[] {
   if (srcDocId !== undefined) {
     return db
       .prepare(
-        'SELECT src_doc_id, target_text, target_doc_id, resolved FROM doc_links WHERE src_doc_id = ? ORDER BY target_text',
+        'SELECT s.id AS src_doc_id,l.target_text,t.id AS target_doc_id,l.resolved FROM object_links l JOIN documents s ON s.object_id=l.source_id LEFT JOIN documents t ON t.object_id=l.target_id AND l.resolved=1 WHERE s.id=? ORDER BY target_text',
       )
       .all<LinkRow>(srcDocId)
   }
   return db
-    .prepare('SELECT src_doc_id, target_text, target_doc_id, resolved FROM doc_links ORDER BY src_doc_id, target_text')
+    .prepare('SELECT s.id AS src_doc_id,l.target_text,t.id AS target_doc_id,l.resolved FROM object_links l JOIN documents s ON s.object_id=l.source_id LEFT JOIN documents t ON t.object_id=l.target_id AND l.resolved=1 ORDER BY s.id,target_text')
     .all<LinkRow>()
 }
 
@@ -571,7 +571,7 @@ test('single-document indexing reads content even when size and mtime were resto
     const afterRow = db.prepare('SELECT content_hash AS contentHash FROM documents WHERE path = ?')
       .get<{ contentHash: string }>(path)
     assert.notEqual(afterRow?.contentHash, beforeRow.contentHash)
-    const links = db.prepare('SELECT target_text AS targetText FROM doc_links WHERE src_doc_id = ?')
+    const links = db.prepare('SELECT target_text AS targetText FROM object_links WHERE source_id=(SELECT object_id FROM documents WHERE id=?)')
       .all<{ targetText: string }>(beforeRow.id)
     assert.deepEqual(links.map((link) => link.targetText), ['Two'])
   } finally {

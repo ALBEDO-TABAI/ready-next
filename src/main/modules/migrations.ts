@@ -1,3 +1,4 @@
+import { migrateObjectLinks } from './search-engine/object-link-schema'
 import { migrateObjects, OBJECT_MIGRATION } from './object-service/schema'
 import { migrateSearchReadyRefs } from './search-engine/ready-ref-migration'
 import { migrateCalendarUnion, CALENDAR_UNION_MIGRATION } from './calendar-engine/calendar-schema'
@@ -4462,6 +4463,9 @@ const migrations: Migration[] = [
     },
   },
   { name: OBJECT_MIGRATION, up: migrateObjects },
+  { name: '139_object_links', up: (db) => {
+    migrateObjectLinks(db)
+  } },
 ]
 
 /**

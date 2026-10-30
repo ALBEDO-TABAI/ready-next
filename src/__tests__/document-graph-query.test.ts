@@ -53,7 +53,7 @@ test('full graph returns truncation metadata, uses the 5000-document cap, and de
         { id: 2, workspaceId: 7, path: '/work/b.md', name: 'b.md', sourceType: 'document' },
       ]
     }
-    if (query.sql.includes('FROM doc_links') && query.sql.includes('src_doc_id AS src')) {
+    if (query.sql.includes('FROM object_links') && query.sql.includes('source.id AS src')) {
       return [
         { src: 1, tgt: 2, kind: 'wikilink', label: 'b' },
         { src: 1, tgt: 2, kind: 'wikilink', label: 'b' },
@@ -90,10 +90,10 @@ test('focus graph expands from the center with SQL BFS and loads only the matche
     if (query.method === 'get' && query.sql.includes('WHERE w.root = ? AND d.path = ?')) {
       return { id: 1, workspaceId: 7, path: '/work/a.md', name: 'a.md', sourceType: 'document' }
     }
-    if (query.sql.includes('JOIN documents target')) {
+    if (query.sql.includes('AND source.id IN')) {
       return [{ a: 1, b: 2 }]
     }
-    if (query.sql.includes('JOIN documents source')) {
+    if (query.sql.includes('WHERE target.id IN')) {
       return [{ a: 3, b: 1 }]
     }
     if (query.sql.includes('WHERE workspace_id = ? AND id IN')) {
@@ -104,7 +104,7 @@ test('focus graph expands from the center with SQL BFS and loads only the matche
         { id: 3, workspaceId: 7, path: '/work/c.md', name: 'c.md', sourceType: 'document' },
       ].filter((row) => ids.has(row.id))
     }
-    if (query.sql.includes('FROM doc_links') && query.sql.includes('src_doc_id AS src')) {
+    if (query.sql.includes('FROM object_links') && query.sql.includes('source.id AS src')) {
       return [
         { src: 1, tgt: 2, kind: 'wikilink', label: 'b' },
         { src: 3, tgt: 1, kind: 'wikilink', label: 'a' },

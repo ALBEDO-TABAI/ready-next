@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { closeSync, openSync, readFileSync, readSync, realpathSync, statSync, readdirSync, lstatSync } from 'node:fs'
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative } from 'node:path'
 import type { DatabaseConnection } from '../database/connection'
 import { ReadyRefSchema } from '../../../shared/ready-ref'
 import { readDocumentSource } from '../../../shared/document-operations'
@@ -171,7 +171,7 @@ export class ObjectRegistry {
       }
       for(const {item,id,conflict} of assigned.values()) {
         const existing=this.get(id)
-        if(existing && existing.current_path!==item.path)this.db.prepare("UPDATE object_link_targets SET state='pending' WHERE source_id=? OR target_id=?").run(id,id)
+        if(existing && existing.current_path!==item.path)this.db.prepare("UPDATE object_link_repairs SET state='pending' WHERE source_id=? OR target_id=?").run(id,id)
         // An existing local UUID conflicting with an embedded claim must never be silently renumbered.
         const displaced=old.find(row=>(row.current_path??row.last_known_path)===item.path && row.id!==id && row.status==='unverified')
         const actualId=displaced ? displaced.id : id
@@ -190,31 +190,13 @@ export class ObjectRegistry {
     })
   }
   captureLinks():void {
-    for(const link of this.db.prepare(`SELECT l.src_doc_id,l.target_text,s.path FROM doc_links l JOIN documents s ON s.id=l.src_doc_id WHERE l.kind='mdlink' AND l.target_doc_id IS NULL AND s.object_id IS NOT NULL`).all<{src_doc_id:number;target_text:string;path:string}>()) {
-      if(/^[a-z][a-z0-9+.-]*:/i.test(link.target_text) || link.target_text.startsWith('#'))continue
-      let path:string
-      try {path=resolve(dirname(link.path),decodeURIComponent(link.target_text.split('#')[0]))} catch {continue}
-      const target=this.find(path)
-      if(!target || target.identity_state==='conflict')continue
-      const document=this.db.prepare('SELECT id FROM documents WHERE object_id=?').get<{id:number}>(target.id)
-      if(document)this.db.prepare("UPDATE doc_links SET target_doc_id=?,resolved=1 WHERE src_doc_id=? AND kind='mdlink' AND target_text=?").run(document.id,link.src_doc_id,link.target_text)
-    }
-    this.db.exec(`INSERT INTO object_link_targets(source_id,kind,raw_target,target_id,source_hash,state)
-      SELECT s.object_id,l.kind,l.target_text,t.object_id,o.content_hash,'pending' FROM doc_links l
-      JOIN documents s ON s.id=l.src_doc_id JOIN documents t ON t.id=l.target_doc_id JOIN objects o ON o.id=s.object_id
-      WHERE s.object_id IS NOT NULL AND t.object_id IS NOT NULL AND l.resolved=1
-      ON CONFLICT(source_id,kind,raw_target) DO UPDATE SET source_hash=excluded.source_hash WHERE object_link_targets.state='confirmed'`)
+    this.db.exec(`UPDATE object_link_repairs SET source_hash=(SELECT content_hash FROM objects WHERE id=source_id) WHERE state='confirmed'`)
   }
   syncProjection():void {
     // Free projection paths before swaps, while preserving row IDs and incoming links.
     this.db.exec(`UPDATE documents SET path='object-location:'||object_id WHERE object_id IN (SELECT id FROM objects WHERE status='present') AND path<>(SELECT current_path FROM objects WHERE id=object_id);
       DELETE FROM documents WHERE object_id IN (SELECT id FROM objects WHERE status<>'present' OR identity_state='conflict');
       UPDATE documents SET path=(SELECT current_path FROM objects WHERE id=object_id),workspace_id=COALESCE((SELECT workspace_id FROM objects WHERE id=object_id),workspace_id) WHERE object_id IN (SELECT id FROM objects WHERE status='present');`)
-    this.restoreLinks()
-  }
-  restoreLinks():void {
-    this.db.exec(`UPDATE doc_links SET target_doc_id=(SELECT t.id FROM object_link_targets b JOIN documents s ON s.object_id=b.source_id JOIN documents t ON t.object_id=b.target_id WHERE s.id=doc_links.src_doc_id AND b.kind=doc_links.kind AND b.raw_target=doc_links.target_text),
-      resolved=CASE WHEN EXISTS(SELECT 1 FROM object_link_targets b JOIN documents s ON s.object_id=b.source_id JOIN documents t ON t.object_id=b.target_id WHERE s.id=doc_links.src_doc_id AND b.kind=doc_links.kind AND b.raw_target=doc_links.target_text) THEN 1 ELSE 0 END WHERE EXISTS(SELECT 1 FROM object_link_targets b JOIN documents s ON s.object_id=b.source_id WHERE s.id=doc_links.src_doc_id AND b.kind=doc_links.kind AND b.raw_target=doc_links.target_text);`)
   }
   markDeleted(path:string):void {
     objectTransaction(this.db,()=>{this.captureLinks();for(const row of this.list()) if(row.current_path && isInside(path,row.current_path)) this.db.prepare("UPDATE objects SET status='deleted',current_path=NULL,path_key=NULL,revision=revision+1,last_verified_at=? WHERE id=?").run(Date.now(),row.id);this.syncProjection()})
