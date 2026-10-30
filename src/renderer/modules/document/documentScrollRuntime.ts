@@ -157,22 +157,37 @@ export function restoreElementScroll(
   restore()
   const frame = requestAnimationFrame(restore)
   let resizeFrame: number | null = null
-  const observer = typeof ResizeObserver === 'function'
-    ? new ResizeObserver(() => {
-        if (resizeFrame !== null) cancelAnimationFrame(resizeFrame)
-        resizeFrame = requestAnimationFrame(() => {
-          resizeFrame = null
-          restore()
-        })
+  const schedule = () => {
+    if (resizeFrame !== null) cancelAnimationFrame(resizeFrame)
+    resizeFrame = requestAnimationFrame(() => {
+      resizeFrame = null
+      restore()
+    })
+  }
+  // Content can lay out after the first frames (slow machines, late images, async previews). The container's own
+  // size does not change when its content grows, so watch the content and new nodes until the reader takes over.
+  const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(schedule) : null
+  observer?.observe(element)
+  for (const child of Array.from(element.children)) observer?.observe(child)
+  const mutations = typeof MutationObserver === 'function'
+    ? new MutationObserver((records) => {
+        for (const record of records) for (const node of Array.from(record.addedNodes)) if (node instanceof Element) observer?.observe(node)
+        schedule()
       })
     : null
-  observer?.observe(element)
-  const settleTimer = window.setTimeout(() => observer?.disconnect(), 800)
+  mutations?.observe(element, { childList: true, subtree: true })
+  const stop = () => {
+    window.clearTimeout(settleTimer)
+    observer?.disconnect()
+    mutations?.disconnect()
+    for (const type of ['wheel', 'pointerdown', 'keydown', 'touchstart'] as const) element.removeEventListener(type, stop)
+  }
+  for (const type of ['wheel', 'pointerdown', 'keydown', 'touchstart'] as const) element.addEventListener(type, stop, { passive: true })
+  const settleTimer = window.setTimeout(stop, 5000)
   return () => {
     cancelAnimationFrame(frame)
     if (resizeFrame !== null) cancelAnimationFrame(resizeFrame)
-    window.clearTimeout(settleTimer)
-    observer?.disconnect()
+    stop()
   }
 }
 

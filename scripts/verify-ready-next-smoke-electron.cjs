@@ -210,6 +210,7 @@ async function seedCalendarHistory(profile, reference) {
       // Simulate the pre-142 profile; the next real boot must build the mapping.
       db.prepare('DELETE FROM migrations WHERE name=?').run('144_calendar_attachment_display_refs')
     })()
+    if (reference.r45Url) history.r45 = await seedR45History(db, reference.r45Url)
     return history
   } finally { db.close() }
 }
@@ -252,10 +253,73 @@ async function checkCalendarHistoryAfterRestart(page, reference, history) {
   step('Closed-history UI click remains blocked by the product visibility contract; this is not a closed-history UI pass')
 }
 
+// R45 uses saved fixtures and real UI actions; it never needs a model or a remote website.
+async function seedR45History(db, url) {
+  const { pathToFileURL } = require('node:url')
+  const load = file => import(pathToFileURL(path.resolve(file)).href)
+  const { RSSStore } = await load('src/main/modules/database/rss-store.ts')
+  const { ChatStore } = await load('src/main/modules/database/chat-store.ts')
+  const { rssReferencePath } = await load('src/shared/rss-reference.ts')
+  const { toReadyUri } = await load('src/shared/ready-ref.ts')
+  const rss = new RSSStore(() => db), chat = new ChatStore(() => db)
+  const source = rss.addRSSSource({ name: 'R45 fixture', url: `${url}/feed` })
+  rss.upsertRSSItems([{ id: 'r45-item', source_id: source, guid: 'r45-item', title: 'R45 saved article', link: url, summary: 'R45 exact selection and remaining text.' }])
+  const article = rss.content.getArticle('r45-item')
+  const reference = { kind: 'excerpt', read: { format: 'reading-v1', itemId: article.id, expectedRevision: article.revision,
+    range: { start: { run: 0, offset: 4 }, end: { run: 0, offset: 9 } }, offset: 0, length: 12000 } }
+  const history = { scopeId: 'r45-history', title: 'R45 browser and RSS history', messageId: 'r45-message', url, reference }
+  chat.createConversation(history.scopeId, 'butler', history.title)
+  chat.addChatMessage(history.messageId, history.scopeId, 'user', 'R45 persisted references', new Date().toISOString(), { attachments: [
+    { id: 'r45-web', name: 'R45 webpage', source: 'browser-tab', path: toReadyUri({ kind: 'web', url }), url, type: 'text', size: 0, ext: '.url' },
+    { id: 'r45-rss', name: 'R45 saved excerpt', source: 'rss-reference', path: rssReferencePath(reference), rssReference: reference, type: 'text', size: 0, ext: '.rss' },
+  ] }, 0)
+  return history
+}
+
+async function checkR45References(app, page, history, createDrafts) {
+  const saved = await readChatMessages(page, history.scopeId)
+  ok('R45 history contains a webpage and an exact RSS reference', saved.success && JSON.parse(saved.data.find(row => row.id === history.messageId)?.meta_json || '{}').attachments?.length === 2, JSON.stringify(saved))
+  await page.getByRole('button', { name: /当前会话：.*点击查看历史对话/ }).click()
+  const row = page.locator('.chat-header-floating-menu').getByText(history.title, { exact: true }).first()
+  if (!await row.isVisible()) await page.getByRole('button', { name: '展开历史会话', exact: true }).first().click()
+  await row.click()
+  if (createDrafts) {
+    const tab = await page.evaluate(url => window.electronAPI.browser.createTab(url), history.url)
+    if (!tab.success || !tab.tabId) throw Error('R45 browser fixture failed')
+    await page.locator('[data-chat-composer-shell="true"]').evaluate((element, payload) => {
+      const transfer = new DataTransfer(); transfer.setData('application/x-ready-drag', JSON.stringify(payload))
+      element.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }))
+    }, { type: 'browser-tab', name: 'R45 draft webpage', tabId: tab.tabId, url: history.url })
+    await page.locator('.chat-reference-chip button').filter({ hasText: 'R45 draft webpage' }).click()
+  } else await page.locator('[data-chat-message-attachment="true"]:not([disabled])').filter({ hasText: 'R45 webpage' }).first().click()
+  await page.locator('[data-workbench-mode-panel="browser"][data-mode-visual-state="current"]').waitFor()
+  const deadline = Date.now() + 15000
+  while (!await app.evaluate(({ webContents }, url) => webContents.getAllWebContents().some(w => w.getURL() === url && !w.isLoading()), history.url)) {
+    if (Date.now() > deadline) throw Error('R45 browser reference did not load its original URL')
+    await page.waitForTimeout(100)
+  }
+  ok(`R45 ${createDrafts ? 'new' : 'restarted history'} browser reference opens its webpage`, true)
+  await page.locator('[data-chat-message-attachment="true"]:not([disabled])').filter({ hasText: 'R45 saved excerpt' }).first().click()
+  await page.getByRole('button', { name: '在 RSS 中定位', exact: true }).click()
+  await page.locator('.rss-reader-title').filter({ hasText: 'R45 saved article' }).waitFor()
+  await page.waitForFunction(() => window.getSelection()?.toString() === 'exact')
+  if (createDrafts) {
+    await page.getByRole('button', { name: '引用', exact: true }).click()
+    await page.getByRole('button', { name: '引用所选文字', exact: true }).click()
+    await page.locator('.chat-reference-chip button').filter({ hasText: 'R45 saved article · 选区' }).click()
+    await page.getByRole('button', { name: '在 RSS 中定位', exact: true }).click()
+    await page.waitForFunction(() => window.getSelection()?.toString() === 'exact')
+  }
+  ok(`R45 ${createDrafts ? 'new' : 'restarted history'} RSS reference selects the original exact text`, true)
+}
+
 async function checkIdentityAndFastCard() {
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'ready-next-smoke-'))
   let app
   let page
+  const server = require('node:http').createServer((_request, response) => { response.setHeader('Content-Type', 'text/html'); response.end('<title>R45 webpage</title><p>R45 local webpage fixture</p>') })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  const r45Url = `http://127.0.0.1:${server.address().port}/`
   try {
     ;({ app, page } = await launch(profile))
     const identity = await withTimeout(app.evaluate(({ app }) => ({ name: app.getName(), userData: app.getPath('userData') })), 20000, 'read app identity')
@@ -276,7 +340,7 @@ async function checkIdentityAndFastCard() {
     const added = await withTimeout(page.evaluate(entry => window.electronAPI.browser.addFastCardItem(entry), item), 20000, 'add FastCard item')
     ok('C7 FastCard add returns a persisted receipt', added?.success === true && added.data?.id === item.id, JSON.stringify(added))
     const objectIdentity = await checkObjectPresentationBeforeRestart(app, page, created.root)
-    const calendarReference = await checkCalendarReference(page)
+    const calendarReference = { ...await checkCalendarReference(page), r45Url }
     step('close app')
     await withTimeout(app.close(), 150000, 'close app')
     app = undefined
@@ -289,6 +353,11 @@ async function checkIdentityAndFastCard() {
     ;({ app, page } = await launch(profile))
     await checkObjectPresentationAfterRestart(page, objectIdentity)
     await checkCalendarHistoryAfterRestart(page, calendarReference, history)
+    await checkR45References(app, page, history.r45, true)
+    await withTimeout(app.close(), 150000, 'R45 close before restart')
+    app = undefined
+    ;({ app, page } = await launch(profile))
+    await checkR45References(app, page, history.r45, false)
     const reopenedVault = await withTimeout(page.evaluate(() => window.electronAPI.vault.get()), 20000, 'read vault after restart')
     ok('D17 the vault setting survives a restart', reopenedVault.status === 'ready' && reopenedVault.root === created.root, JSON.stringify(reopenedVault))
     const listed = await withTimeout(page.evaluate(() => window.electronAPI.browser.listFastCardItems()), 20000, 'list FastCard items')
@@ -300,6 +369,7 @@ async function checkIdentityAndFastCard() {
   } finally {
     // A failed check must not leave Electron running, or the script never exits.
     if (app) await withTimeout(app.close(), 30000, 'close app after failure').catch(() => app.process().kill('SIGKILL'))
+    await new Promise(resolve => server.close(resolve))
     fs.rmSync(profile, { recursive: true, force: true })
   }
 }
@@ -326,7 +396,7 @@ function checkDailyDataRefusal() {
   }
 }
 
-module.exports = { seedCalendarHistory }
+module.exports = { seedCalendarHistory, seedR45History }
 
 if (require.main === module && process.argv[2] === '--seed-calendar-history') {
   seedCalendarHistory(process.argv[3], JSON.parse(process.argv[4])).then(result => console.log(JSON.stringify(result)), error => { console.error(error); process.exitCode = 1 })

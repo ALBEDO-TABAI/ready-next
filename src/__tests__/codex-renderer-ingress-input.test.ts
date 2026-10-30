@@ -107,7 +107,7 @@ test('browser, calendar and selected document text use narrow structured referen
     content: '看看这个',
     attachments: [
       {
-        id: 'browser-1', name: '网页', path: 'browser-tab://tab-1', type: 'other',
+        id: 'browser-1', name: '网页', path: 'ready://web?url=https%3A%2F%2Fexample.test', type: 'other',
         size: 0, ext: '', source: 'browser-tab', browserTabId: 'tab-1',
       },
       {
@@ -134,11 +134,14 @@ test('browser, calendar and selected document text use narrow structured referen
   assert.equal(result.diagnostics.inputFailedCount, 0)
 })
 
-test('a clean Windows document tab remains a file reference instead of being mistaken for an unsaved quote', async () => {
+test('a clean Windows document tab remains a file reference instead of being mistaken for an unsaved quote', async t => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'window')
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { electronAPI: { objects: { locate: async () => ({ objectId: 'doc-object', path: "C:\\workspace\\方案.md", revision: 1 }) } } } })
+  t.after(() => { if (previous) Object.defineProperty(globalThis, 'window', previous); else Reflect.deleteProperty(globalThis, 'window') })
   const result = await buildCodexIngressInputWithDiagnostics({
     content: '阅读这个文档',
     attachments: [{
-      id: 'windows-doc', name: '方案.md', path: 'C:\\workspace\\方案.md', type: 'text',
+      id: 'windows-doc', name: '方案.md', path: 'ready://doc/page/doc-object', type: 'text',
       size: 12, ext: '.md', source: 'document-tab', dirty: false, selection: 'visible selection',
     }],
   })
@@ -150,9 +153,12 @@ test('a clean Windows document tab remains a file reference instead of being mis
 
 // 2026-10-06: after a turn left card edits unsaved, re-attaching the open document sent a 30k-character pasted copy
 // next to the live document instead of pointing at it.
-test('the focused document tab with unsaved edits is still the current document, not a pasted copy', async () => {
+test('the focused document tab with unsaved edits is still the current document, not a pasted copy', async t => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'window')
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { electronAPI: { objects: { locate: async () => ({ objectId: 'doc-object', path: "/Users/reader/阅读回顾.md", revision: 1 }) } } } })
+  t.after(() => { if (previous) Object.defineProperty(globalThis, 'window', previous); else Reflect.deleteProperty(globalThis, 'window') })
   const chip = (id: string, tabId: string) => ({
-    id, name: '阅读回顾.md', path: '/Users/reader/阅读回顾.md', type: 'text' as const, size: 40, ext: '.md',
+    id, name: '阅读回顾.md', path: 'ready://doc/page/doc-object', type: 'text' as const, size: 40, ext: '.md',
     source: 'document-tab' as const, tabId, dirty: true, selection: '# 阅读回顾\n\n未保存的信息卡',
   })
   const currentDocumentAnchor = {
@@ -176,11 +182,11 @@ test('the focused document tab with unsaved edits is still the current document,
 test('@ references reuse the same structured resource identities without duplicating a repeated mention', async () => {
   const filePool = [
     {
-      id: 'browser-pool', name: '网页资料', path: 'browser-tab://tab-pool', type: 'text' as const,
+      id: 'browser-pool', name: '网页资料', path: 'ready://web?url=https%3A%2F%2Fexample.test', type: 'text' as const,
       size: 0, ext: '.url', source: 'browser-tab' as const, browserTabId: 'tab-pool',
     },
     {
-      id: 'quote-pool', name: '摘录', path: 'document-quote://quote-pool', type: 'text' as const,
+      id: 'quote-pool', name: '摘录', path: '', type: 'text' as const,
       size: 4, ext: '.quote', source: 'document-quote' as const, selection: '原文事实',
     },
   ]

@@ -1,5 +1,5 @@
 import { calendarEventReadyRef } from '../../../shared/calendar-event-identity'
-import { toReadyUri } from '../../../shared/ready-ref'
+import { ReadyRefSchema, toReadyUri } from '../../../shared/ready-ref'
 import { RSSReferenceSchema, rssReferencePath, type RSSReference } from '../../../shared/rss-reference'
 import { useAgent } from '../../stores/useAgent'
 import { useWorkspace } from '../../stores/useWorkspace'
@@ -188,6 +188,11 @@ export function createSkillReferenceAttachment(skill: ReadySkillReference): Chat
   }
 }
 
+async function documentReferencePath(path: string): Promise<string> {
+  const location = await window.electronAPI.objects.resolvePath(path)
+  return toReadyUri({ kind: /\.(md|markdown)$/i.test(location.path) ? 'page' : 'file', id: location.objectId })
+}
+
 export async function createReadyContextAttachment(reference: ReadyContextReference): Promise<ChatAttachment> {
   if (reference.type === 'skill-folder') {
     return createSkillReferenceAttachment(reference)
@@ -205,7 +210,8 @@ export async function createReadyContextAttachment(reference: ReadyContextRefere
 
   if (reference.type === 'browser-tab') {
     const fallbackTitle = reference.title || reference.name || '网页标签'
-    const path = reference.tabId ? `browser-tab://${reference.tabId}` : `browser-tab://${Date.now()}`
+    const ref = ReadyRefSchema.safeParse({ kind: 'web', url: reference.url })
+    const path = ref.success ? toReadyUri(ref.data) : ''
     return {
       id: createAttachmentId('attach-browser'),
       name: fallbackTitle,
@@ -215,6 +221,7 @@ export async function createReadyContextAttachment(reference: ReadyContextRefere
       ext: '.url',
       source: 'browser-tab',
       browserTabId: reference.tabId,
+      url: ref.success && ref.data.kind === 'web' ? ref.data.url : undefined,
       title: fallbackTitle,
     }
   }
@@ -222,7 +229,7 @@ export async function createReadyContextAttachment(reference: ReadyContextRefere
   if (reference.type === 'doc-tab') {
     const title = reference.title || reference.name || '文档标签页'
     const content = reference.content || ''
-    const path = reference.path || `doc-tab://${encodeURIComponent(reference.tabId || title)}`
+    const path = reference.path ? await documentReferencePath(reference.path) : ''
     return {
       id: createAttachmentId('attach-doc-tab'),
       name: title,
@@ -292,13 +299,21 @@ export function addDocumentWidgetTargetReference(context: DocumentWidgetTargetCo
   window.dispatchEvent(new CustomEvent(READY_FOCUS_CHAT_INPUT_EVENT))
 }
 
-export function addDocumentQuoteReference(context: DocumentQuoteContext): void {
+export async function addDocumentQuoteReference(context: DocumentQuoteContext): Promise<void> {
   const selection = context.selection.trim()
   if (!selection) return
+  const authority = captureComposerAuthority(useAgent.getState())
+  let path = '', description: string | undefined
+  if (context.path) {
+    try { path = await documentReferencePath(context.path) }
+    catch (error) { description = `无法定位来源：${error instanceof Error ? error.message : String(error)}` }
+  }
+  if (!isComposerAuthorityCurrent(useAgent.getState(), authority)) return
   const attachment: ChatAttachment = {
     id: createAttachmentId('attach-document-quote'),
     name: context.title || '文档摘录',
-    path: context.path || `document-quote://${Date.now()}`,
+    path,
+    description,
     type: 'text',
     size: selection.length,
     ext: '.quote',

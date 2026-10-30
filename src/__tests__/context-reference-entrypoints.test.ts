@@ -239,7 +239,7 @@ test('file and folder references become local-path agent attachments and open th
   }
 })
 
-test('document quote enters both the active composer and @ reference pool as user-selected text', () => {
+test('document quote enters both the active composer and @ reference pool as user-selected text', async () => {
   const { restore } = installDom()
   try {
     useAgent.setState({ sessions: {}, attachments: [], filePool: [], inputValue: '' })
@@ -249,7 +249,7 @@ test('document quote enters both the active composer and @ reference pool as use
       focusEvents += 1
     })
 
-    addDocumentQuoteReference({
+    await addDocumentQuoteReference({
       title: '方案.md',
       path: '/workspace/方案.md',
       selection: '这一段需要 agent 能直接看到。',

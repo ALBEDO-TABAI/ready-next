@@ -107,7 +107,7 @@ export function AttachmentPreviewModal({
           contrast={0.86}
         />
         <div className="attachment-preview-toolbar" aria-label="预览操作">
-            {preview.attachment.source !== 'rss-reference' && <><button
+            {/^(?:\/|[a-z]:[\\/])/i.test(preview.attachment.path) && <><button
               type="button"
               className="attachment-preview-action"
               onClick={() => {

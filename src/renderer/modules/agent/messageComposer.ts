@@ -1,4 +1,4 @@
-import { toReadyUri } from '../../../shared/ready-ref'
+import { parseReadyUri, toReadyUri } from '../../../shared/ready-ref'
 import { RSSReferenceSchema } from '../../../shared/rss-reference'
 import type { ChatAttachment } from './types'
 import { buildActiveDocumentContext } from './documentActions'
@@ -156,7 +156,8 @@ function normalizeAttachmentSource(value: unknown): ChatAttachment['source'] {
 }
 
 export function extractAttachmentsFromMeta(meta?: Record<string, unknown>): ChatAttachment[] | undefined {
-  const raw = meta?.attachments
+  const display = meta?.readyRefDisplay
+  const raw = display && typeof display === 'object' && 'attachments' in display ? display.attachments : meta?.attachments
   if (!Array.isArray(raw) || raw.length === 0) return undefined
 
   const attachments = raw
@@ -165,7 +166,7 @@ export function extractAttachmentsFromMeta(meta?: Record<string, unknown>): Chat
       const record = item as Record<string, unknown>
       const name = String(record.name || '').trim()
       const path = String(record.path || '').trim()
-      if (!name || (!path && record.source !== 'calendar-event')) return null
+      if (!name || (!path && !['calendar-event', 'document-tab', 'document-quote', 'browser-tab', 'rss-reference'].includes(String(record.source)))) return null
       return {
         id: String(record.id || `remote-attachment-${index}`),
         name,
@@ -401,8 +402,8 @@ export function buildEnvironmentContext(): string | null {
 export function serializePersistedAttachments(attachments: ChatAttachment[]): Array<Record<string, unknown>> {
   return attachments
     .filter((attachment) => {
-      if (!attachment?.path || !attachment.name) return false
-      if (attachment.source === 'browser-tab') return false
+      if (!attachment.name) return false
+      if (!attachment.path && !['document-tab', 'document-quote', 'browser-tab', 'rss-reference'].includes(attachment.source || '')) return false
       if (attachment.source === 'skill-folder') return false
       return true
     })
@@ -419,6 +420,8 @@ export function serializePersistedAttachments(attachments: ChatAttachment[]): Ar
       title: attachment.title,
       documentTitle: attachment.documentTitle,
       tabId: attachment.tabId,
+      dirty: attachment.dirty,
+      saveStatus: attachment.saveStatus,
       widgetTitle: attachment.widgetTitle,
       widgetId: attachment.widgetId,
       widgetCode: attachment.widgetCode,
@@ -584,16 +587,26 @@ export async function buildCodexIngressInputWithDiagnostics(params: {
       diagnostics.inputIncludedCount += 1
       continue
     }
+    let documentPath = ''
+    if (attachment.source === 'document-tab' && attachment.path) {
+      const parsed = parseReadyUri(attachment.path)
+      if (parsed.ok && (parsed.ref.kind === 'page' || parsed.ref.kind === 'file')
+        && (!attachment.dirty || attachment.tabId === params.currentDocumentAnchor?.tabId)) {
+        const location = await window.electronAPI.objects.locate(parsed.ref.id)
+        if (!location) throw new Error('引用文档已不存在')
+        documentPath = location.path
+      }
+    }
     // The focused document's own tab is the current document: Main reads its live content (unsaved edits included)
     // through the anchor, so it goes as its file reference rather than as a pasted copy.
     const isCurrentDocumentTab = attachment.source === 'document-tab'
       && Boolean(params.currentDocumentAnchor)
       && attachment.tabId === params.currentDocumentAnchor?.tabId
-      && isAbsoluteLocalPath(attachment.path)
+      && isAbsoluteLocalPath(documentPath)
     if (
       !isCurrentDocumentTab
       && (attachment.source === 'document-quote'
-        || (attachment.source === 'document-tab' && (!isAbsoluteLocalPath(attachment.path) || attachment.dirty)))
+        || (attachment.source === 'document-tab' && (!isAbsoluteLocalPath(documentPath) || attachment.dirty)))
       && attachment.selection?.trim()
     ) {
       resources.push({
@@ -609,13 +622,13 @@ export async function buildCodexIngressInputWithDiagnostics(params: {
       diagnostics.inputIncludedCount += 1
       continue
     }
-    if (attachment.source === 'document-tab' && isAbsoluteLocalPath(attachment.path)
+    if (attachment.source === 'document-tab' && isAbsoluteLocalPath(documentPath)
       && (!attachment.dirty || isCurrentDocumentTab)) {
       resources.push({
         kind: 'local_file',
         id: attachment.id,
         name: attachment.name,
-        path: attachment.path,
+        path: documentPath,
         size: attachment.size,
         ext: attachment.ext,
         rendererType: attachment.type === 'video' ? 'other' : attachment.type,

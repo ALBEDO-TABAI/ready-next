@@ -1,3 +1,4 @@
+import { rssReferenceFromReadyRef } from '../../../shared/rss-reference'
 import type { WorkbenchMode } from '../../stores/useMode'
 import { parseReadyUri, ReadyRefSchema, type ReadyRef } from '../../../shared/ready-ref'
 import { calendarEventReferenceId } from '../../../shared/calendar-event-identity'
@@ -31,7 +32,30 @@ export async function openReadyRef(input: string | ReadyRef, fromMode?: Workbenc
       requestWorkbenchModeOpen('document')
       return
     }
+    case 'page':
+    case 'file': {
+      const location = await window.electronAPI.objects.locate(ref.id)
+      if (!location) throw new Error('引用文档已不存在')
+      if (ref.anchor) throw new Error('此文档锚点暂不支持定位')
+      rememberReferenceOrigin(origin, 'document')
+      useWorkspace.getState().selectFile(location.path)
+      useDocTabs.getState().openTab(location.path)
+      requestWorkbenchModeOpen('document')
+      return
+    }
+    case 'rss-digest':
     case 'rss-item': {
+      const reference = rssReferenceFromReadyRef(ref)
+      if (reference && reference.kind !== 'query') {
+        const api = window.electronAPI.rss
+        const result = reference.kind === 'excerpt' ? await api.readExcerpt(reference.read)
+          : reference.kind === 'article' ? await api.readArticle(reference.read)
+          : await api.readDigests({ view: 'entries', ...reference.read })
+        if (!result.success || !result.data) throw new Error(result.error || 'RSS 引用无法打开')
+        rememberReferenceOrigin(origin, 'rss')
+        revealRSSReference(reference)
+        return
+      }
       const result = await window.electronAPI.rss.readArticle({ itemId: ref.id, length: 1 })
       if (!result.success || !result.data) throw new Error(result.error || '文章无法打开')
       rememberReferenceOrigin(origin, 'rss')

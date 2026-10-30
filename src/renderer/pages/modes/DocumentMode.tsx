@@ -246,6 +246,12 @@ export default function DocumentMode({
   useEffect(() => { void initializeDrafts().catch(reportDraftError) }, [])
 
   const documentRootRef = useRef<HTMLDivElement>(null)
+  // Scroll restoration depends on the root being mounted; after a restart it can mount after the first restore ran.
+  const [documentRootElement, setDocumentRootElement] = useState<HTMLDivElement | null>(null)
+  const attachDocumentRoot = useCallback((element: HTMLDivElement | null) => {
+    documentRootRef.current = element
+    setDocumentRootElement(element)
+  }, [])
   const pendingScrollFlushesRef = useRef(new Set<() => void>())
   const splitContainerRef = useRef<HTMLDivElement>(null)
   const primarySplitPaneRef = useRef<HTMLDivElement>(null)
@@ -630,13 +636,13 @@ export default function DocumentMode({
     return () => cleanups.forEach((cleanup) => cleanup())
   }, [activeTabId, bookReadingVisible, editorMode, isActive, scrollSnapshots, splitTabId, tabIdByScrollKey])
 
-  const restoreVisibleDocumentScrollPositions = useCallback(() => {
+  const restoreDocumentScrollScopes = useCallback((scopes: Iterable<HTMLElement>) => {
     const cleanups: Array<() => void> = []
-    documentRootRef.current?.querySelectorAll<HTMLElement>('[data-ready-document-scroll-key]').forEach((scope) => {
+    for (const scope of scopes) {
       const key = readingPositionKey(scope.dataset.readyDocumentScrollKey || '')
-      if (!key) return
+      if (!key) continue
       const snapshot = scrollSnapshots.get(key) ?? readDocumentReadingPositionMap().get(key)
-      if (!snapshot) return
+      if (!snapshot) continue
       const tabId = tabIdByScrollKey.get(key)
       const content = tabId
         ? useDocTabs.getState().tabs.find((tab) => tab.id === tabId)?.content || ''
@@ -644,14 +650,62 @@ export default function DocumentMode({
       findScrollCandidates(scope).forEach((element) => {
         cleanups.push(restoreElementScroll(element, snapshot, content))
       })
-    })
+    }
     return () => cleanups.forEach((cleanup) => cleanup())
   }, [scrollSnapshots, tabIdByScrollKey])
 
+  const restoreVisibleDocumentScrollPositions = useCallback(() => restoreDocumentScrollScopes(
+    documentRootRef.current?.querySelectorAll<HTMLElement>('[data-ready-document-scroll-key]') ?? [],
+  ), [restoreDocumentScrollScopes])
+
+  useEffect(() => {
+    const root = documentRootElement
+    if (!root || !isSceneVisible || bookReadingVisible || typeof MutationObserver !== 'function') return
+    // After a restart a tab binds its object first, and the preview can swap its scroller once content arrives, so the
+    // first restore may land on an element that is replaced. Until the reader acts (or a few seconds pass), any change
+    // inside a scope re-applies its saved position to the current elements.
+    const settling = new Map<HTMLElement, { until: number; cleanup: (() => void) | null; touched: boolean; stop: () => void }>()
+    const watch = (scope: HTMLElement) => {
+      if (settling.has(scope)) return settling.get(scope)!
+      const entry = { until: Date.now() + 5000, cleanup: null as (() => void) | null, touched: false, stop: () => {} }
+      const touch = () => { entry.touched = true }
+      for (const type of ['wheel', 'pointerdown', 'keydown', 'touchstart'] as const) scope.addEventListener(type, touch, { passive: true, capture: true })
+      entry.stop = () => { for (const type of ['wheel', 'pointerdown', 'keydown', 'touchstart'] as const) scope.removeEventListener(type, touch, { capture: true }) }
+      settling.set(scope, entry)
+      return entry
+    }
+    const reapply = (scope: HTMLElement) => {
+      const entry = watch(scope)
+      if (entry.touched || Date.now() > entry.until) return
+      entry.cleanup?.()
+      entry.cleanup = restoreDocumentScrollScopes([scope])
+    }
+    root.querySelectorAll<HTMLElement>('[data-ready-document-scroll-key]').forEach((scope) => { watch(scope) })
+    const observer = new MutationObserver((records) => {
+      const scopes = new Set<HTMLElement>()
+      for (const record of records) {
+        const target = record.target instanceof Element ? record.target : record.target.parentElement
+        const scope = target?.closest<HTMLElement>('[data-ready-document-scroll-key]')
+        if (scope) scopes.add(scope)
+        for (const node of Array.from(record.addedNodes)) {
+          if (!(node instanceof Element)) continue
+          if (node.matches('[data-ready-document-scroll-key]')) scopes.add(node as HTMLElement)
+          node.querySelectorAll<HTMLElement>('[data-ready-document-scroll-key]').forEach((inner) => scopes.add(inner))
+        }
+      }
+      scopes.forEach(reapply)
+    })
+    observer.observe(root, { childList: true, subtree: true })
+    return () => {
+      observer.disconnect()
+      settling.forEach((entry) => { entry.cleanup?.(); entry.stop() })
+    }
+  }, [bookReadingVisible, documentRootElement, isSceneVisible, restoreDocumentScrollScopes])
+
   useLayoutEffect(() => {
-    if (!isSceneVisible || bookReadingVisible) return
+    if (!isSceneVisible || bookReadingVisible || !documentRootElement) return
     return restoreVisibleDocumentScrollPositions()
-  }, [activeTabId, bookReadingVisible, editorMode, isSceneVisible, restoreVisibleDocumentScrollPositions, splitTabId])
+  }, [activeTabId, bookReadingVisible, documentRootElement, editorMode, isSceneVisible, restoreVisibleDocumentScrollPositions, splitTabId])
 
   useEffect(() => registerReturnPosition('document', () => {
     captureVisibleDocumentScrollPositions()
@@ -919,7 +973,7 @@ export default function DocumentMode({
   if (draftBoot !== 'ready') return <DraftBootNotice />
 
   return (
-    <div className="workbench-mode-root" ref={documentRootRef}>
+    <div className="workbench-mode-root" ref={attachDocumentRoot}>
       <DraftControls />
       <div
         className="flex-1 min-h-0"

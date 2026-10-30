@@ -31,7 +31,8 @@ export function formatDocumentQuoteAttachmentSummary(attachment: ChatAttachment)
   return [
     '### 文档引用',
     `- 文档: ${attachment.title || attachment.name}`,
-    `- 路径: ${attachment.path}`,
+    attachment.path ? `- 来源: ${attachment.path}` : null,
+    attachment.description || null,
     attachment.sectionTitle ? `- 章节: ${attachment.sectionTitle}` : null,
     lineLabel ? `- 位置: ${lineLabel}` : null,
     attachment.selection ? '' : null,

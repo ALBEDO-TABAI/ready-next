@@ -1,4 +1,4 @@
-import { parseRSSCitationUrl, type RSSNavigableReference } from '../../../../../shared/rss-reference'
+import { parseReadyUri } from '../../../../../shared/ready-ref'
 import { useMemo, useState } from 'react'
 import { openReadyRef } from '../../../../modules/workbench/open-ready-ref'
 import { MessageCodeBlock } from './MessageCodeBlock'
@@ -351,20 +351,18 @@ function splitBareUrl(raw: string): { href: string; trailing: string } {
   return { href: raw.slice(0, end), trailing: raw.slice(end) }
 }
 
-function CalendarReferenceLink({ href, label }: { href: string; label: string }) {
+function ReadyReferenceLink({ href, label }: { href: string; label: string }) {
   const [error, setError] = useState<string | null>(null)
-  return <><a href={href} className="ready-agent-link" onClick={event => {
+  return <><a href={href} className={href.startsWith('ready://rss/') ? 'rss-citation-link' : 'ready-agent-link'} onClick={event => {
     event.preventDefault()
     setError(null)
     void openReadyRef(href).catch(error => setError(error instanceof Error ? error.message : String(error)))
   }}>{label}</a>{error && <span role="alert">{error}</span>}</>
 }
 
-function externalLink(href: string, label: string, key: string, onRSSReference?: (reference: RSSNavigableReference) => void): React.ReactNode {
-  if (href.startsWith('ready://calendar/')) return <CalendarReferenceLink key={key} href={href} label={label} />
-  if (href.startsWith('ready-rss:')) {
-    const reference = parseRSSCitationUrl(href)
-    return reference && onRSSReference ? <button key={key} className="rss-citation-link" onClick={() => onRSSReference(reference)}>{label === href ? '查看 RSS 引用' : label}</button> : <span key={key}>{label}</span>
+function externalLink(href: string, label: string, key: string): React.ReactNode {
+  if (href.startsWith('ready://')) {
+    return parseReadyUri(href).ok ? <ReadyReferenceLink key={key} href={href} label={label === href && href.startsWith('ready://rss/') ? '查看 RSS 引用' : label} /> : <span key={key}>{label}</span>
   }
   const citation = /^\d+$/.test(label.trim())
   return (
@@ -438,12 +436,11 @@ function renderLocalReferenceParts(
 export function renderInline(
   text: string,
   mentions?: Readonly<Record<string, MentionResolution>> | null,
-  onRSSReference?: (reference: RSSNavigableReference) => void,
 ): React.ReactNode[] {
   const parts: React.ReactNode[] = []
   // Ordering is significant: code consumes URLs before the bare-URL branch;
   // labelled links consume their URL before that same branch.
-  const regex = /(`([^`]+)`)|(\[([^\]]+)\]\(((?:https?:\/\/|file:\/\/|ready-rss:\/\/|ready:\/\/calendar\/)[^\s)]+)\))|(\*\*(.+?)\*\*)|(\*(.+?)\*)|((?:https?:\/\/|ready-rss:\/\/|ready:\/\/calendar\/)[^\s<>"'`]+)/g
+  const regex = /(`([^`]+)`)|(\[([^\]]+)\]\(((?:https?:\/\/|file:\/\/|ready:\/\/)[^\s)]+)\))|(\*\*(.+?)\*\*)|(\*(.+?)\*)|((?:https?:\/\/|ready:\/\/)[^\s<>"'`]+)/g
   let lastIndex = 0
   let match: RegExpExecArray | null
   let key = 0
@@ -479,7 +476,7 @@ export function renderInline(
         }
         parts.push(<LocalFileChip key={`a-${key++}`} path={path} />)
       } else {
-        parts.push(externalLink(href, match[4], `a-${key++}`, onRSSReference))
+        parts.push(externalLink(href, match[4], `a-${key++}`))
       }
     } else if (match[6]) {
       // bold
@@ -489,7 +486,7 @@ export function renderInline(
       parts.push(<em key={`i-${key++}`}>{match[9]}</em>)
     } else if (match[10]) {
       const { href, trailing } = splitBareUrl(match[10])
-      parts.push(externalLink(href, href, `a-${key++}`, onRSSReference))
+      parts.push(externalLink(href, href, `a-${key++}`))
       if (trailing) parts.push(trailing)
     }
     lastIndex = match.index + match[0].length
@@ -510,12 +507,10 @@ function StreamCaret({ visible }: { visible: boolean }) {
 function OrderedList({
   list,
   mentions,
-  onRSSReference,
   streaming,
 }: {
   list: MarkdownOrderedList
   mentions?: Readonly<Record<string, MentionResolution>> | null
-  onRSSReference?: (reference: RSSNavigableReference) => void
   streaming: boolean
 }): React.ReactElement {
   return (
@@ -534,12 +529,12 @@ function OrderedList({
         return (
           <li key={itemIndex}>
             <span>
-              {renderInline(item.content, mentions, onRSSReference)}
+              {renderInline(item.content, mentions)}
               <StreamCaret visible={caretOnContent} />
             </span>
             {item.continuations.map((continuation, continuationIndex) => (
               <div key={`continuation-${continuationIndex}`} data-ready-list-continuation="true">
-                {renderInline(continuation, mentions, onRSSReference)}
+                {renderInline(continuation, mentions)}
                 <StreamCaret
                   visible={streaming
                     && lastItem
@@ -552,7 +547,7 @@ function OrderedList({
               <OrderedList
                 key={`nested-${nestedIndex}`}
                 list={nested}
-                mentions={mentions} onRSSReference={onRSSReference}
+                mentions={mentions}
                 streaming={streaming && lastItem && nestedIndex === item.nestedLists.length - 1}
               />
             ))}
@@ -567,12 +562,10 @@ export function MarkdownContent({
   content,
   streaming = false,
   mentions,
-  onRSSReference,
 }: {
   content: string
   streaming?: boolean
   mentions?: Readonly<Record<string, MentionResolution>> | null
-  onRSSReference?: (reference: RSSNavigableReference) => void
 }) {
   const nodes = useMemo(() => parseMarkdown(content), [content])
   const citationSources = useMemo(() => extractInlineCitationSources(content), [content])
@@ -596,7 +589,7 @@ export function MarkdownContent({
             const fontSize = node.level === 1 ? 16 : node.level === 2 ? 14.5 : 13.5
             return (
               <div key={idx} style={{ fontSize, fontWeight: 700, marginTop: 6, marginBottom: 2 }}>
-                {renderInline(node.content, mentions, onRSSReference)}
+                {renderInline(node.content, mentions)}
                 <StreamCaret visible={showCaret} />
               </div>
             )
@@ -623,7 +616,7 @@ export function MarkdownContent({
               >
                 <span style={{ flexShrink: 0, color: 'var(--text-gray)' }}>&bull;</span>
                 <span>
-                  {renderInline(node.content, mentions, onRSSReference)}
+                  {renderInline(node.content, mentions)}
                   <StreamCaret visible={showCaret} />
                 </span>
               </div>
@@ -633,7 +626,7 @@ export function MarkdownContent({
               <OrderedList
                 key={idx}
                 list={node.orderedList}
-                mentions={mentions} onRSSReference={onRSSReference}
+                mentions={mentions}
                 streaming={showCaret}
               />
             ) : null
@@ -651,7 +644,7 @@ export function MarkdownContent({
                           key={`h-${columnIndex}`}
                           style={{ textAlign: aligns[columnIndex] || undefined }}
                         >
-                          {renderInline(header, mentions, onRSSReference)}
+                          {renderInline(header, mentions)}
                         </th>
                       ))}
                     </tr>
@@ -664,7 +657,7 @@ export function MarkdownContent({
                             key={`c-${rowIndex}-${columnIndex}`}
                             style={{ textAlign: aligns[columnIndex] || undefined }}
                           >
-                            {renderInline(row[columnIndex] || '', mentions, onRSSReference)}
+                            {renderInline(row[columnIndex] || '', mentions)}
                           </td>
                         ))}
                       </tr>
@@ -683,7 +676,7 @@ export function MarkdownContent({
                 data-ready-markdown-indent={node.indent || undefined}
                 style={{ paddingLeft: node.indent ? `${node.indent}ch` : undefined }}
               >
-                {renderInline(node.content, mentions, onRSSReference)}
+                {renderInline(node.content, mentions)}
                 <StreamCaret visible={showCaret} />
               </div>
             )

@@ -1,3 +1,4 @@
+import { useDocTabs } from '../../../../stores/useDocTabs'
 import { useCallback } from 'react'
 import { openReadyRef } from '../../../../modules/workbench/open-ready-ref'
 
@@ -27,10 +28,16 @@ export function useAttachmentPreview({
   setAttachmentPreviewLoading,
 }: UseAttachmentPreviewParams): (attachment: ChatAttachment) => Promise<void> {
   return useCallback(async (attachment: ChatAttachment) => {
-    if (!attachment.path) return
     const composerAuthority = captureComposerAuthority(useAgent.getState())
-    if (attachment.source === 'calendar-event') {
-      try { await openReadyRef(attachment.path) }
+    if (attachment.source === 'calendar-event' || attachment.source === 'browser-tab' || ((attachment.source === 'document-tab' || attachment.source === 'document-quote') && attachment.path && !attachment.dirty)) {
+      try {
+        await openReadyRef(attachment.path)
+        if (attachment.source === 'document-quote') {
+          const state = useDocTabs.getState(), tab = state.tabs.find(tab => tab.id === state.activeTabId)
+          if (tab?.path) state.setPendingReveal({ path: tab.path, selection: attachment.selection,
+            lineStart: attachment.lineStart, lineEnd: attachment.lineEnd, sectionTitle: attachment.sectionTitle, requestedAt: Date.now() })
+        }
+      }
       catch (error) {
         if (isComposerAuthorityCurrent(useAgent.getState(), composerAuthority)) {
           setActiveAttachmentPreview({ attachment, mode: 'file', error: error instanceof Error ? error.message : String(error) })
@@ -42,7 +49,7 @@ export function useAttachmentPreview({
       setActiveAttachmentPreview({ attachment, mode: 'text' })
       return
     }
-    if (attachment.source === 'document-quote') {
+    if (attachment.source === 'document-quote' || attachment.source === 'document-tab') {
       setActiveAttachmentPreview({
         attachment,
         mode: 'text',
@@ -66,6 +73,7 @@ export function useAttachmentPreview({
       })
       return
     }
+    if (!attachment.path) return
     if (attachment.isDirectory) {
       setActiveAttachmentPreview({
         attachment,
