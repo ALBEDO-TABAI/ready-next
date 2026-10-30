@@ -16,6 +16,7 @@ import AgentRuntimeListenerRoot from './modules/agent/AgentRuntimeListenerRoot'
 import { handleWorkspaceWatcherFailure } from './stores/useWorkspace'
 import { useAgent } from './stores/useAgent'
 
+const CanvasLab = lazy(() => import('./components/canvas/surface/CanvasLab'))
 const LiquidTest = lazy(() => import('./LiquidTest'))
 const StartupPreview = lazy(() => import('./pages/StartupPreview'))
 
@@ -164,6 +165,9 @@ function MainAppShell() {
 
 function App() {
   const location = useLocation()
+  if (location.pathname === '/canvas-lab') {
+    return <ErrorBoundary><Suspense fallback={<div />}><CanvasLab /></Suspense></ErrorBoundary>
+  }
   if (location.pathname === '/pet-window') {
     return (
       <ErrorBoundary>
