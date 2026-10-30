@@ -27,6 +27,7 @@ function Preview({ node: n, resolveAsset }: Pick<Props, 'node' | 'resolveAsset'>
 export const CanvasCard = memo(function CanvasCard({ node, visible, selected, editor, content, element, resolveAsset, open }: Props) {
   const a = node.ready.appearance, frame = cardFrame(node)
   const style: CSSProperties = { left: frame.x, top: frame.y, width: frame.width, height: frame.height,
+    borderStyle: node.ready.kind === 'draft' ? 'dashed' : undefined,
     transform: a?.rotation ? `rotate(${a.rotation}deg)` : undefined, borderRadius: a?.radius,
     background: a?.background, color: a?.color, fontSize: a?.fontScale ? `${a.fontScale * 24}px` : undefined,
     textAlign: a?.align, fontWeight: a?.weight ? ({ light: 300, regular: 400, medium: 500, bold: 700 })[a.weight] : undefined }

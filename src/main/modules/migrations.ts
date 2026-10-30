@@ -1,4 +1,5 @@
 import { migrateChatReadyRefs } from './database/ready-ref-migration'
+import { migrateCanvasComposition } from './canvas-composition/schema'
 import { DOCUMENT_DATABASE_MIGRATION, migrateDocumentDatabase } from './document-database/schema'
 import { DOCUMENT_PAGES_MIGRATION, migrateDocumentPages } from './document-pages/schema'
 import { migrateCalendarAttachmentReadyRefs, migrateCalendarAttachmentDisplayRefs } from './calendar-engine/ready-ref-migration'
@@ -4506,6 +4507,7 @@ const migrations: Migration[] = [
       receipt_json TEXT, CHECK((state='linked')=(receipt_json IS NOT NULL))
     );`)
   } },
+  { name: '149_canvas_compositions', up: migrateCanvasComposition },
 ]
 
 /**

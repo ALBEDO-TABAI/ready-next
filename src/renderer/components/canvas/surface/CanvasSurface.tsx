@@ -16,6 +16,8 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
   const [selected, setSelected] = useState<string[]>([]), [tool, setTool] = useState<Tool>('select'), [trash, setTrash] = useState(false)
   const [editing, setEditing] = useState<string | null>(null), [camera, setCamera] = useState<Camera>(props.initialCamera ?? { x: 40, y: 80, zoom: 1 })
   const [size, setSize] = useState({ width: 1000, height: 700 })
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
+  const [composing, setComposing] = useState(false), [compositionError, setCompositionError] = useState('')
   const root = useRef<HTMLDivElement>(null), world = useRef<HTMLDivElement>(null), overlay = useRef<SVGSVGElement>(null)
   const elements = useRef(new Map<string, HTMLElement>()), edgeElements = useRef<GestureScene['edgeElements']>(new Map())
   const latest = useRef({ buffer, props }), scene = useRef<GestureScene | null>(null)
@@ -81,7 +83,20 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
   }
   const tools: Array<[Tool, string]> = [['select', '选择'], ['pan', '平移'], ['rect', '矩形'], ['arrow', '箭头'], ['edge', '连线'], ['path', '手绘']]
   const recycled = canvas.nodes.filter(n => n.ready.trash)
+  async function addToDocument() {
+    if (composing || !props.onAddToDocument) return
+    setComposing(true); setCompositionError('')
+    try { await props.onAddToDocument(chosen.map(n => n.id)); setMenu(null) }
+    catch (error) { setCompositionError(error instanceof Error ? error.message : String(error)) }
+    finally { setComposing(false) }
+  }
   return <div className="rn-canvas" data-canvas-surface tabIndex={0} ref={root} aria-label={canvas.ready.title || '画板'}
+    onContextMenu={event => {
+      if (!props.onAddToDocument || busy || trash || editing || !chosen.length || (event.target instanceof Element && event.target.closest('[data-canvas-ui]'))) return
+      event.preventDefault(); gestures.cancel()
+      const rect = event.currentTarget.getBoundingClientRect()
+      setMenu({ x: event.clientX - rect.left, y: event.clientY - rect.top })
+    }}
     onKeyDown={shortcut} onKeyUp={e => { if (e.key === ' ') gestures.space = false }}
     onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) gestures.cancel() }}
     onPointerDown={e => gestures.down(e.nativeEvent)} onPointerMove={e => gestures.move(e.nativeEvent)} onPointerUp={e => gestures.up(e.nativeEvent)}
@@ -105,6 +120,11 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
       </div>}
     </div>
     {buffer.error && <div className="canvas-message" role="alert" data-canvas-ui>{buffer.error}</div>}
+    {menu && <div role="menu" aria-label="选区菜单" data-canvas-ui style={{ position: 'absolute', left: menu.x, top: menu.y, zIndex: 5, background: 'var(--bg-primary)', padding: 8 }}>
+      <button role="menuitem" disabled={composing || busy} onClick={() => void addToDocument()}>{composing ? '正在添加…' : '添加到文档'}</button>
+      <button disabled={composing} onClick={() => setMenu(null)}>关闭</button>
+      {compositionError && <p role="alert">{compositionError}</p>}
+    </div>}
     {busy && <div className="canvas-message" role="status">正在处理…</div>}
     {trash ? <section className="canvas-trash" data-canvas-ui aria-label="回收的卡片">
       <h2>回收站 · {recycled.length}</h2><button disabled={busy || !recycled.length} onClick={() => void commit([{ type: 'restore', ids: recycled.map(n => n.id) }])}>全部恢复</button>

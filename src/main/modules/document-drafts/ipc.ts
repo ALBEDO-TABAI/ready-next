@@ -31,6 +31,7 @@ export function registerDocumentDraftIPC(ipcMain: Pick<IpcMain, 'handle'>, servi
   }
   ipcMain.handle('documentDrafts:create', (_event, input: unknown) => reply(() => {
     const parsed = DraftCreateSchema.parse(input)
+    if (parsed.origin === 'canvas') throw draftError('composition_required', '请通过画板选区创建草稿')
     DraftIdSchema.parse(parsed.tabId)
     if (vaultRoot(parsed.vaultRoot) !== root()) throw draftError('wrong_vault', '草稿不属于当前资料库')
     return service.create(parsed)

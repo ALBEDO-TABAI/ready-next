@@ -5,15 +5,16 @@ import { AppSettingsRepository } from '../repositories/app-settings-repository'
 import { getSearchEngine } from '../search-engine/ipc-handler'
 import { VaultService } from '../settings-engine/vault-service'
 import { registerDocumentDraftIPC } from './ipc'
-import { DocumentDraftService } from './service'
+import { DocumentDraftService, type DraftDependencies } from './service'
 
-export function setupDocumentDraftIPC(): void {
+export function setupDocumentDraftIPC(completeCanvas?: DraftDependencies['completeCanvas']): DocumentDraftService {
   const db = getDatabase().getRawDb()
   if (!db) throw new Error('Draft database unavailable')
   const vault = new VaultService(new AppSettingsRepository(), {
     home: app.getPath('home'), userData: app.getPath('userData'), isPackaged: app.isPackaged,
   })
   const service = new DocumentDraftService(db, {
+    completeCanvas,
     registry: new ObjectRegistry(db),
     index: async (root, path) => {
       const search = getSearchEngine()
@@ -24,4 +25,5 @@ export function setupDocumentDraftIPC(): void {
     },
   })
   registerDocumentDraftIPC(ipcMain, service, () => vault.get())
+  return service
 }

@@ -40,6 +40,23 @@ async function mount(count = 12, extra: Partial<CanvasSurfaceProps> = {}) {
     async close() { await act(async () => root.unmount()); dom.window.close(); for (const [key, descriptor] of Object.entries(saved)) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key) } } }
 }
 
+test('selection context menu adds the actual selected nodes and keeps failed work retryable', async () => {
+  const attempts: string[][] = []
+  const ui = await mount(3, { onAddToDocument: async ids => {
+    attempts.push(ids); if (attempts.length === 1) throw new Error('请重试')
+  } })
+  try {
+    ui.surface.focus(); await ui.key('a', { ctrlKey: true })
+    await act(async () => ui.card().dispatchEvent(new ui.dom.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 20 })))
+    await ui.click('添加到文档')
+    assert.match(ui.surface.textContent!, /请重试/)
+    await ui.click('添加到文档')
+    assert.deepEqual(attempts, [['n0', 'n1', 'n2'], ['n0', 'n1', 'n2']])
+    assert.equal(ui.surface.querySelector('[role="menu"]'), null)
+    assert.equal(ui.commits, 0)
+  } finally { await ui.close() }
+})
+
 test('real surface coalesces drag frames, commits once, restores cancel and supports undo/redo', async () => {
   const ui = await mount()
   try {

@@ -1,10 +1,12 @@
 import { z } from 'zod'
+import { ReadyRefSchema, type ReadyRef } from './ready-ref'
+import { CanvasIdSchema } from './ready-canvas/schema'
 
 const id = z.string().min(1)
 export const DraftRevisionSchema = z.number().int().positive()
 export const DraftIdSchema = id
 export const DraftHashSchema = z.string().regex(/^[0-9a-f]{64}$/)
-export const DraftAttachmentSchema = z.object({ sourcePath: id, name: id, contentHash: DraftHashSchema }).strict()
+export const DraftAttachmentSchema = z.object({ sourcePath: id, name: id, contentHash: DraftHashSchema, markdownPath: id.optional() }).strict()
 // Main page creation has no tab; Renderer IPC requires a non-null tabId.
 const common = {
   tabId: id.nullable().default(null), vaultRoot: id, content: z.string(), title: z.string().default(''), suggestedParent: id.nullable().default(null),
@@ -19,7 +21,7 @@ export type DraftCreate = z.input<typeof DraftCreateSchema>
 export const DraftReceiptSchema = z.object({ draftId: id, revision: DraftRevisionSchema, contentHash: DraftHashSchema })
 export type DraftReceipt = z.infer<typeof DraftReceiptSchema>
 export const DraftFinalizeInputSchema = z.object({
-  parentObjectId: id.optional(), parentPath: id.optional(), title: z.string(), operationId: id,
+  parentObjectId: id.optional(), parentPath: id.optional(), title: z.string(), operationId: id, keepDocumentCard: z.boolean().optional(),
 }).strict().refine(value => Number(value.parentObjectId !== undefined) + Number(value.parentPath !== undefined) === 1, 'Exactly one parent is required')
 export type DraftFinalizeInput = z.infer<typeof DraftFinalizeInputSchema>
 export const DraftFinalizeReceiptSchema = DraftReceiptSchema.extend({ operationId: id, objectId: id, path: id, parentObjectId: id.nullable() })
@@ -29,6 +31,8 @@ export const DraftFinalizeIntentSchema = z.object({
   stagingDirectory: id, content: z.string(), contentHash: DraftHashSchema,
   files: z.array(z.object({ path: id, stagePath: id, contentHash: DraftHashSchema, sourcePath: id.nullable() })),
   receipt: DraftFinalizeReceiptSchema.nullable(),
+  // A published document is durable even while its canvas step still needs retry.
+  publishedReceipt: DraftFinalizeReceiptSchema.optional(),
 })
 export type DraftFinalizeIntent = z.infer<typeof DraftFinalizeIntentSchema>
 export const DocumentDraftSchema = z.object({
@@ -62,3 +66,22 @@ export interface DocumentDraftAPI {
   finalize(draftId: string, expectedRevision: number, input: DraftFinalizeInput): Promise<DraftResult<DraftFinalizeReceipt>>
   importLegacy(items: LegacyDraftItem[]): Promise<DraftResult<LegacyDraftReceipt[]>>
 }
+
+export const CanvasComposeInputSchema = z.object({
+  objectId: CanvasIdSchema, expectedVersion: DraftHashSchema, operationId: CanvasIdSchema,
+  nodeIds: z.array(CanvasIdSchema).min(1).refine(ids => new Set(ids).size === ids.length, 'Duplicate nodes'),
+  tabId: id, title: z.string(),
+}).strict()
+export type CanvasComposeInput = z.infer<typeof CanvasComposeInputSchema>
+export const CanvasComposeReceiptSchema = DraftReceiptSchema.extend({
+  operationId: id, objectId: id, cardId: id, canvasVersion: DraftHashSchema,
+})
+export type CanvasComposeReceipt = z.infer<typeof CanvasComposeReceiptSchema>
+export interface CanvasCompositionAPI {
+  compose(input: CanvasComposeInput): Promise<DraftResult<CanvasComposeReceipt>>
+  recover(): Promise<DraftResult<CanvasComposeReceipt[]>>
+  preview(input: CanvasPreviewInput): Promise<DraftResult<CanvasDocumentPreview>>
+}
+export const CanvasPreviewInputSchema = z.union([ReadyRefSchema, z.object({ objectId: CanvasIdSchema, nodeId: CanvasIdSchema }).strict()])
+export type CanvasPreviewInput = z.infer<typeof CanvasPreviewInputSchema>
+export interface CanvasDocumentPreview { ref: ReadyRef; title: string; markdown: string; version: string; truncated: boolean }
