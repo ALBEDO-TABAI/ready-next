@@ -14,6 +14,7 @@ test('M3-P1 merges exact filenames, keeps ambiguous pairs, excludes metadata and
     writeFileSync(join(root, 'A', 'child.md'), 'child')
     writeFileSync(join(root, 'B.md'), 'B')
     writeFileSync(join(root, 'board.canvas'), '{}')
+    writeFileSync(join(root, 'damaged.canvas'), '{"nodes": [')
     writeFileSync(join(root, 'other.txt'), 'other')
     const before = readdirSync(root)
     const tree = readPageTree({ path: root, kind: 'vault' }, path => ({ objectId: path, revision: 1 }), () => [])
@@ -26,6 +27,8 @@ test('M3-P1 merges exact filenames, keeps ambiguous pairs, excludes metadata and
     assert.ok(tree.children.find(node => node.name === 'B.md')?.ambiguity)
     assert.ok(tree.children.find(node => node.name === 'b')?.ambiguity)
     assert.equal(tree.children.find(node => node.name === 'board.canvas')?.kind, 'canvas')
+    // A foreign or damaged canvas never hides the rest of the tree; it is listed under its file name.
+    assert.equal(tree.children.find(node => node.name === 'damaged.canvas')?.title, 'damaged')
     assert.equal(readPageTree({ path: root, kind: 'external' }, path => ({ objectId: path, revision: 1 }), () => []).kind, 'folder')
     assert.equal(readFileSync(join(root, 'A.md'), 'utf8'), source)
     assert.deepEqual(readdirSync(root), before)
