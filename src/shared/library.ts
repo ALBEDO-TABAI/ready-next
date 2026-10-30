@@ -32,7 +32,7 @@ export type LibraryBookStatus = '想读' | '在读' | '读完'
 export type LibraryBookFormat = 'epub' | 'txt' | 'md' | 'pdf' | 'mobi' | 'azw3' | 'fb2' | 'cbz' | 'djvu'
 
 export interface LibraryBookSource {
-  kind: 'local' | 'zlib' | 'treasure'
+  kind: 'local' | 'zlib' | 'treasure' | 'import'
   ref?: string
   url?: string
 }
@@ -153,4 +153,18 @@ export interface LibraryHighlightAPI {
   createHighlight(input: LibraryHighlightCreate): Promise<LibraryResult<LibraryHighlightState>>
   updateHighlight(input: LibraryHighlightUpdate): Promise<LibraryResult<LibraryHighlightState>>
   removeHighlight(input: LibraryHighlightRemove): Promise<LibraryResult<LibraryHighlightState>>
+}
+
+/** L5: Main owns selection/confirmation and serializes the complete migration. */
+export interface LibraryArchiveReport {
+  success: { id: string; title: string; bookId: string }[]
+  skipped: { id: string; title: string; reason: string }[]
+  failed: { id: string; title: string; reason: string }[]
+  unlocated: number
+}
+export interface LibraryArchiveProgress { completed: number; total: number; title: string }
+export interface LibraryArchiveAPI {
+  archiveSuggestion(): Promise<LibraryResult<string>>
+  pickAndImportArchive(): Promise<LibraryResult<LibraryArchiveReport | null>>
+  onArchiveProgress(listener: (progress: LibraryArchiveProgress) => void): () => void
 }

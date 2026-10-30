@@ -1,3 +1,4 @@
+import type { LibraryArchiveAPI, LibraryArchiveProgress } from '../shared/library'
 import type { ObjectPresentationAPI, ObjectMovedEvent } from '../shared/object-identity'
 import type { ObjectLinkQuery } from '../shared/object-links'
 import type { LibraryHighlightContext, LibraryHighlightCreate, LibraryHighlightUpdate, LibraryHighlightRemove, LibraryHighlightState } from '../shared/library'
@@ -1341,6 +1342,16 @@ const vaultAPI: import('../shared/vault').VaultAPI = {
   },
 }
 
+const libraryArchiveAPI: LibraryArchiveAPI = {
+  archiveSuggestion: () => ipcRenderer.invoke('library:archiveSuggestion'),
+  pickAndImportArchive: () => ipcRenderer.invoke('library:pickAndImportArchive'),
+  onArchiveProgress: listener => {
+    const handler = (_event: IpcRendererEvent, progress: LibraryArchiveProgress) => listener(progress)
+    ipcRenderer.on('library:archiveProgress', handler)
+    return () => ipcRenderer.removeListener('library:archiveProgress', handler)
+  },
+}
+
 const libraryAPI = {
   listHighlights: (input: LibraryHighlightContext): Promise<LibraryResult<LibraryHighlightState>> => ipcRenderer.invoke('library:listHighlights', input),
   createHighlight: (input: LibraryHighlightCreate): Promise<LibraryResult<LibraryHighlightState>> => ipcRenderer.invoke('library:createHighlight', input),
@@ -1582,6 +1593,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   vault: vaultAPI,
   documentDrafts: documentDraftsAPI,
   library: libraryAPI,
+  libraryArchive: libraryArchiveAPI,
   bookSources: bookSourcesAPI,
   imageGeneration: imageGenerationAPI,
   fileEmergence: fileEmergenceAPI,
@@ -1619,6 +1631,7 @@ declare global {
       vault: typeof vaultAPI
       documentDrafts: typeof documentDraftsAPI
       bookSources: typeof bookSourcesAPI
+      libraryArchive: LibraryArchiveAPI
       library: typeof libraryAPI
       imageGeneration: typeof imageGenerationAPI
       fileEmergence: typeof fileEmergenceAPI

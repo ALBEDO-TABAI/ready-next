@@ -6,6 +6,12 @@
   .rn-library button:focus-visible, .rn-library input:focus-visible { outline: 2px solid var(--rn-accent); outline-offset: 3px; }
   .rn-library .library-toolbar { position: relative; z-index: 30; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 14px 18px; }
   .rn-library .library-toolbar .rn-glass, .rn-library .library-footer .rn-glass { display: flex; align-items: center; gap: 12px; padding: 9px 14px; border-radius: var(--rn-r-pill); }
+  .rn-library .archive-backdrop { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; background: color-mix(in srgb, var(--rn-stage) 85%, transparent); }
+  .rn-library .archive-dialog { width: min(540px, 90%); max-height: 85%; overflow: auto; padding: 24px; border-radius: var(--rn-r-md); background: var(--rn-paper); box-shadow: var(--rn-shadow-2); }
+  .rn-library .archive-dialog p, .rn-library .archive-dialog details { margin-block: 16px; }
+  .rn-library .archive-dialog code { display: block; overflow-wrap: anywhere; }
+  .rn-library .archive-dialog button { margin-right: 16px; color: var(--rn-accent); }
+  .rn-library .archive-dialog progress { width: 100%; }
   .rn-library .library-toolbar input { width: min(190px, 32cqw); background: transparent; color: inherit; border: none; }
   .rn-library .library-scroll { position: absolute; inset: 76px 0 76px; padding: 0 24px; overflow: auto; background-image: radial-gradient(var(--rn-hair-2) .7px, transparent .9px); background-size: 16px 16px; }
   .rn-library .library-hero { display: flex; justify-content: space-between; align-items: end; gap: 24px; flex-wrap: wrap; padding: 24px 0; }

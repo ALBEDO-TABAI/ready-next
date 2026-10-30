@@ -1,3 +1,5 @@
+import { LibraryArchiveImporter } from './archive-import'
+import { registerLibraryArchiveIPC } from './archive-ipc'
 import { join } from 'node:path'
 import { BookSourceService } from './source-service'
 import { registerBookSourceIPC } from './source-ipc'
@@ -45,20 +47,33 @@ export function setupLibraryIPC(): void {
       if (!window.isDestroyed()) window.webContents.send('library:changed', state)
     }
   }
+  const reading = new LibraryReadingRepository(db)
+  const highlights = new LibraryHighlightService(engine, { write: async input => {
+    const root = engine.vaultRoot()
+    if (!root) throw new Error('请先配置可用的资料库')
+    const search = getSearchEngine()
+    if (!search) throw new Error('文档索引尚未就绪')
+    search.getRepository().ensureWorkspace(root)
+    return applyDocumentOperation(input)
+  } })
   registerLibraryIPC(ipcMain, {
-    engine, reading: new LibraryReadingRepository(db), changed,
-    highlights: new LibraryHighlightService(engine, { write: async input => {
-      const root = engine.vaultRoot()
-      if (!root) throw new Error('请先配置可用的资料库')
-      const search = getSearchEngine()
-      if (!search) throw new Error('文档索引尚未就绪')
-      search.getRepository().ensureWorkspace(root)
-      return applyDocumentOperation(input)
-    } }),
+    engine, reading, changed,
+    highlights,
     pickFiles: async () => {
       const result = await dialog.showOpenDialog({ title: '导入书籍', properties: ['openFile', 'multiSelections'], filters: [{ name: '电子书', extensions: [...formats] }] })
       return result.canceled ? [] : result.filePaths
     },
+  })
+  const suggestion = join(app.getPath('appData'), 'Ready Library', 'library')
+  registerLibraryArchiveIPC(ipcMain, {
+    engine, importer: new LibraryArchiveImporter(engine, reading, highlights), changed, suggestion,
+    pickDirectory: async () => {
+      const result = await dialog.showOpenDialog({ title: '选择藏书阁数据目录（包含 library.json）', properties: ['openDirectory'] })
+      return result.canceled ? null : result.filePaths[0] ?? null
+    },
+    confirm: async directory => (await dialog.showMessageBox({ type: 'question', title: '从藏书阁导入',
+      message: '将书籍和阅读记录复制到当前资料库？', detail: `${directory}\n原目录保持不变。已导入的书籍会跳过。`,
+      buttons: ['取消', '导入'], defaultId: 0, cancelId: 0 })).response === 1,
   })
   const sources = new BookSourceService({
     db, cache: join(app.getPath('userData'), 'Cache', 'book-sources'), engine,

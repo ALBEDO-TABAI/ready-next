@@ -32,7 +32,7 @@ const fieldsSchema = z.object({
   [F.file]: z.string().min(1), [F.cover]: z.string().min(1).optional(),
   [F.year]: z.number().int().optional(), [F.publisher]: z.string().optional(), [F.language]: z.string().optional(),
   [F.words]: z.number().int().nonnegative().optional(), [F.addedAt]: timestamp, [F.finishedAt]: timestamp.optional(),
-  [F.source]: z.object({ kind: z.enum(['local', 'zlib', 'treasure']), ref: z.string().optional(), url: z.string().optional() }),
+  [F.source]: z.object({ kind: z.enum(['local', 'zlib', 'treasure', 'import']), ref: z.string().optional(), url: z.string().optional() }),
 })
 
 export async function readBook(root: string, notePath: string): Promise<LibraryBook | null> {
