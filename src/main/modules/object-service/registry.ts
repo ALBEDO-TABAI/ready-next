@@ -13,7 +13,7 @@ export interface ObjectRecord {
   current_path: string | null
   path_key: string | null
   last_known_path: string
-  status: 'unverified' | 'present' | 'missing' | 'deleted'
+  status: 'unverified' | 'present' | 'missing' | 'trashed' | 'deleted'
   identity_state: 'local' | 'portable' | 'conflict'
   embedded_ready_id: string | null
   device: string | null
@@ -109,7 +109,7 @@ export class ObjectRegistry {
   scan(root:string, ignored:ReadonlySet<string> = new Set()):void {
     const paths:string[]=[]
     const walk=(dir:string)=>{ for(const entry of readdirSync(dir,{withFileTypes:true})) {
-      if(ignored.has(entry.name) || entry.isSymbolicLink()) continue
+      if(entry.name === '.ready' || ignored.has(entry.name) || entry.isSymbolicLink()) continue
       const path=join(dir,entry.name); paths.push(path); if(entry.isDirectory()) walk(path)
     }}
     walk(root)
@@ -117,13 +117,19 @@ export class ObjectRegistry {
   }
   /** One complete event window; releases locations before assignment to support path swaps. */
   reconcile(paths:readonly string[],expandDirectories=true):void {
-    paths=paths.map(canonicalObjectPath)
-    const before=this.list()
+    paths=paths.map(canonicalObjectPath).filter(path => !path.split(/[\\/]/).includes('.ready'))
+    const before=this.list().filter(row => row.status !== 'trashed' && row.status !== 'deleted')
     const expanded=new Set(paths)
     for(const path of paths) {
       for(const row of before) if(isInside(path,row.current_path??row.last_known_path)) expanded.add(row.current_path??row.last_known_path)
-      const walk=(dir:string)=>{for(const entry of readdirSync(dir,{withFileTypes:true})) {if(entry.isSymbolicLink())continue;const child=join(dir,entry.name);expanded.add(child);if(entry.isDirectory())walk(child)}}
+      const walk=(dir:string)=>{for(const entry of readdirSync(dir,{withFileTypes:true})) {if(entry.name === '.ready' || entry.isSymbolicLink())continue;const child=join(dir,entry.name);expanded.add(child);if(entry.isDirectory())walk(child)}}
       try { if(expandDirectories && lstatSync(path).isDirectory()) walk(path) } catch(error) { if(!(error && typeof error==='object' && 'code' in error && error.code==='ENOENT')) throw error }
+    }
+    // A durable group owns these locations until all its members commit or roll back.
+    if (this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='object_move_groups'").get()) {
+      const pending = this.db.prepare("SELECT intent_json FROM object_move_groups WHERE state IN ('prepared','recovery_required')").all<{intent_json:string}>()
+      const moves = pending.flatMap(row => { const intent: { moves: Array<{source:string;target:string}>; objects: ObjectRecord[] } = JSON.parse(row.intent_json); return [...intent.moves, ...intent.objects.map(object => ({source: object.current_path!,target: object.current_path!}))] })
+      for (const path of expanded) if (moves.some(move => isInside(move.source,path) || isInside(move.target,path))) expanded.delete(path)
     }
     const observed=new Map<string,Observation>()
     const missing=new Set<string>()
@@ -159,7 +165,7 @@ export class ObjectRegistry {
     }
     for(const item of observed.values()) {
       if(assigned.has(item.path))continue
-      const duplicate=!!item.embedded && ((duplicates.get(item.embedded)?.length??0)>1 || !!ownerStillPresent(item.embedded) || used.has(item.embedded))
+      const duplicate=!!item.embedded && ((duplicates.get(item.embedded)?.length??0)>1 || !!ownerStillPresent(item.embedded) || used.has(item.embedded) || ['trashed','deleted'].includes(this.get(item.embedded)?.status ?? ''))
       const replacement=!!item.embedded && old.some(row=>row.status==='present' && row.current_path===item.path && row.id!==item.embedded) && !before.some(row=>row.id===item.embedded)
       const id=item.embedded && !duplicate && !replacement ? item.embedded : randomUUID()
       assigned.set(item.path,{item,id,conflict:duplicate||replacement});used.add(id)

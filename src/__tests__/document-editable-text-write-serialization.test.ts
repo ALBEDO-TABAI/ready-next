@@ -1,3 +1,4 @@
+import { configureDocumentWriteService } from '../main/modules/document-engine/document-write-service'
 import assert from 'node:assert/strict'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -10,6 +11,7 @@ import {
 } from '../main/modules/document-engine/document-editable-text'
 
 test('Agent and Renderer writes to the same canonical path stay ordered', async () => {
+  configureDocumentWriteService({ index: async () => {} })
   resetDocumentEditableTextWriteQueueForTests()
   const directory = await mkdtemp(join(tmpdir(), 'ready-document-main-write-'))
   try {
@@ -40,13 +42,13 @@ test('Agent and Renderer writes to the same canonical path stay ordered', async 
     assert.deepEqual(started, ['exit-old-snapshot'])
 
     releaseFirst()
-    assert.deepEqual(await Promise.all([exitWrite, agentWrite]), [
-      { success: true },
-      { success: true },
-    ])
+    const results = await Promise.all([exitWrite, agentWrite])
+    assert.deepEqual(results.map(result => result.success), [true, true])
+    assert.ok(results.every(result => result.receipt?.afterVersion))
     assert.deepEqual(started, ['exit-old-snapshot', 'agent-new-snapshot'])
     assert.equal(await readFile(path, 'utf8'), 'agent-new-snapshot')
   } finally {
+    configureDocumentWriteService(null)
     resetDocumentEditableTextWriteQueueForTests()
     await rm(directory, { recursive: true, force: true })
   }

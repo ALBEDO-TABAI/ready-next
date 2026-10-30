@@ -1320,6 +1320,33 @@ const themeAPI = {
   },
 }
 
+const documentPagesAPI: import('../shared/document-pages').DocumentPagesAPI = {
+  tree: root => ipcRenderer.invoke('documentPages:tree', root),
+  properties: id => ipcRenderer.invoke('documentPages:properties', id),
+  patchProperties: (id, version, set, remove) => ipcRenderer.invoke('documentPages:patchProperties', id, version, set, remove),
+  operate: input => ipcRenderer.invoke('documentPages:operate', input),
+  operation: id => ipcRenderer.invoke('documentPages:operation', id),
+  trash: root => ipcRenderer.invoke('documentPages:trash', root),
+  order: (parent, ids) => ipcRenderer.invoke('documentPages:order', parent, ids),
+  favorite: (id, value) => ipcRenderer.invoke('documentPages:favorite', id, value),
+  visit: id => ipcRenderer.invoke('documentPages:visit', id),
+  states: () => ipcRenderer.invoke('documentPages:states'),
+  save: input => ipcRenderer.invoke('documentPages:save', input),
+  onChanged: listener => {
+    const handler = (_event: IpcRendererEvent, change: import('../shared/document-pages').PageChange) => listener(change)
+    const indexed = (_event: IpcRendererEvent, change: DocumentIndexChangedEvent) => listener({ type: 'tree_invalidated', paths: [change.workspaceRoot] })
+    const directories = (_event: IpcRendererEvent, change: { paths: string[] }) => listener({ type: 'tree_invalidated', paths: change.paths })
+    ipcRenderer.on('documentPages:changed', handler)
+    ipcRenderer.on('document:indexChanged', indexed)
+    ipcRenderer.on('document:directoryChanged', directories)
+    return () => {
+      ipcRenderer.removeListener('documentPages:changed', handler)
+      ipcRenderer.removeListener('document:indexChanged', indexed)
+      ipcRenderer.removeListener('document:directoryChanged', directories)
+    }
+  },
+}
+
 const documentDraftsAPI: import('../shared/document-drafts').DocumentDraftAPI = {
   create: (input) => ipcRenderer.invoke('documentDrafts:create', input),
   save: (id, revision, content) => ipcRenderer.invoke('documentDrafts:save', id, revision, content),
@@ -1581,6 +1608,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   settings: settingsAPI,
   vault: vaultAPI,
   documentDrafts: documentDraftsAPI,
+  documentPages: documentPagesAPI,
   library: libraryAPI,
   bookSources: bookSourcesAPI,
   imageGeneration: imageGenerationAPI,
@@ -1618,6 +1646,7 @@ declare global {
       settings: typeof settingsAPI
       vault: typeof vaultAPI
       documentDrafts: typeof documentDraftsAPI
+      documentPages: typeof documentPagesAPI
       bookSources: typeof bookSourcesAPI
       library: typeof libraryAPI
       imageGeneration: typeof imageGenerationAPI
