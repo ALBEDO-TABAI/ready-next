@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useDocTabs } from '../../../stores/useDocTabs'
 import {
   createBlockCommand, createRangeEdit, parseDocumentBlocks, parseInlineBlock, replaceRanges,
@@ -9,6 +9,9 @@ import { emptyBlock, inlineMarkdown, newline, plainModel } from './editing'
 import { getCaret, plainText, setCaret } from './dom-inline'
 import { BlockIdentity } from './block-identity'
 import { RichBlock } from './RichBlock'
+import { BlockControls, BlockShell } from './BlockControls'
+import { EditorTools } from './EditorTools'
+import { isNonContentBlock } from './catalog'
 import { textAreaContent } from './text-edit'
 
 function SourceBlock({ block, buffer, children, report }: { block: DocumentBlock; buffer: TabBuffer; children: ReactNode; report(error: unknown): void }) {
@@ -31,7 +34,7 @@ function SourceBlock({ block, buffer, children, report }: { block: DocumentBlock
     buffer.flushers.add(flush); return () => { buffer.flushers.delete(flush) }
   }, [buffer])
   useLayoutEffect(() => { if (draft) textarea.current?.focus() }, [draft !== null]) // eslint-disable-line react-hooks/exhaustive-deps
-  return <div data-block-type={block.type}>
+  return <div className="ready-block-source" data-block-type={block.type}>
     {children}
     {draft ? <div className="note-preview-edit-editor">
       <textarea ref={textarea} aria-label="块源码" value={draft.text} spellCheck={false}
@@ -42,7 +45,7 @@ function SourceBlock({ block, buffer, children, report }: { block: DocumentBlock
         }} />
       <button type="button" onClick={() => { try { commit() } catch (error) { report(error) } }}>完成</button>
       <button type="button" onClick={() => setDraft(null)}>取消</button>
-    </div> : <button type="button" onClick={() => setDraft({ block, version: buffer.snapshot.version, text: block.raw.replace(/\r\n?/g, '\n') })}>
+    </div> : <button type="button" className="ready-block-source-edit" onClick={() => setDraft({ block, version: buffer.snapshot.version, text: block.raw.replace(/\r\n?/g, '\n') })}>
       {block.capability === 'readonly' ? '编辑这段源码' : '编辑源码'}
     </button>}
   </div>
@@ -60,8 +63,23 @@ export function ReadyBlockEditor({ tabId, content: displayedContent, renderSourc
   const [appendPrefix, setAppendPrefix] = useState('')
   const [focusRequest, setFocusRequest] = useState<{ at: number; textOffset?: number } | null>(null)
   const root = useRef<HTMLDivElement>(null)
-  const report = (cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause))
+  const report = useCallback((cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause)), [])
   const focus = (at: number, empty = false, textOffset?: number) => { setAppendPrefix(''); setEmptyAt(empty ? at : null); setFocusRequest({ at, textOffset }) }
+  function travel(direction: 'undo' | 'redo') {
+    try { const selection = buffer.travel(direction); if (selection) focus(selection.focus); setError('') } catch (cause) { report(cause) }
+  }
+  useLayoutEffect(() => {
+    // Native Edit-menu commands arrive as beforeinput, without a keydown.
+    // React's before-input plugin does not forward these history input types.
+    const editor = root.current!
+    const beforeInput = (event: InputEvent) => {
+      if (event.inputType !== 'historyUndo' && event.inputType !== 'historyRedo') return
+      event.preventDefault(); event.stopPropagation()
+      travel(event.inputType === 'historyUndo' ? 'undo' : 'redo')
+    }
+    editor.addEventListener('beforeinput', beforeInput)
+    return () => editor.removeEventListener('beforeinput', beforeInput)
+  })
   useLayoutEffect(() => {
     if (!focusRequest) return
     const elements = [...root.current!.querySelectorAll<HTMLElement>('[data-rich-start]')]
@@ -99,11 +117,14 @@ export function ReadyBlockEditor({ tabId, content: displayedContent, renderSourc
     next.focus(); setCaret(next, Math.min(offset, next.textContent?.length ?? 0))
   }
   function renderBlock(block: DocumentBlock, fallbackKey: string, continuation = ''): ReactNode {
+    if (isNonContentBlock(block)) return null
     const key = keys.get(block.id) ?? fallbackKey
     const children = block.children.filter((part): part is DocumentBlock => part.kind === 'block')
     if (extra?.parentId === block.id) { children.push(extra); children.sort((a, b) => a.start - b.start) }
     const line = content.slice(0, block.start).split(/\r\n|\n|\r/).length
-    const shell = (body: ReactNode) => <div key={key} className="note-preview-render-block" data-ready-block-source-line={line} data-block-type={block.type}>{body}</div>
+    const parent = parsed.blocks.find(item => item.id === block.parentId)
+    const actionable = block.type !== 'frontmatter' && block.type !== 'column' && !isNonContentBlock(block) && (!block.parentId || parent?.type === 'column')
+    const shell = (body: ReactNode) => <BlockShell key={key} block={block} line={line} actionable={actionable}>{body}</BlockShell>
     if (['columns', 'column', 'list', 'listItem', 'taskItem', 'blockquote', 'callout'].includes(block.type)) {
       const isList = block.type === 'listItem' || block.type === 'taskItem'
       const prefix = isList ? /^(?:\s*)(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s*)?/.exec(block.raw)?.[0] ?? ''
@@ -124,9 +145,7 @@ export function ReadyBlockEditor({ tabId, content: displayedContent, renderSourc
     }
     // Source/readonly blocks never enter contentEditable. Rendering remains in
     // NotePreview, including Widget's sandbox and the library quote resolver.
-    return <div key={key} className="note-preview-render-block" data-ready-block-source-line={line}>
-      <SourceBlock block={block} buffer={buffer} report={report}>{renderSource(block)}</SourceBlock>
-    </div>
+    return shell(<SourceBlock block={block} buffer={buffer} report={report}>{renderSource(block)}</SourceBlock>)
   }
   const segments = parsed.segments.filter((part): part is DocumentBlock => part.kind === 'block')
   const containing = emptyAt === null ? undefined : parsed.blocks.filter(block =>
@@ -138,8 +157,9 @@ export function ReadyBlockEditor({ tabId, content: displayedContent, renderSourc
     onKeyDownCapture={event => {
       if (event.nativeEvent.isComposing || !(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'z') return
       event.preventDefault(); event.stopPropagation()
-      try { const selection = buffer.travel(event.shiftKey ? 'redo' : 'undo'); if (selection) focus(selection.focus); setError('') } catch (cause) { report(cause) }
+      travel(event.shiftKey ? 'redo' : 'undo')
     }}>
+    <BlockControls buffer={buffer} report={report}><EditorTools buffer={buffer} report={report}>
     {error && <p role="alert">{error}</p>}
     {parsed.blocks.some(block => block.issue) && <p role="status">分栏格式需修复，其他段落仍可编辑。</p>}
     {segments.map((block, index) => renderBlock(block, String(index)))}
@@ -151,5 +171,6 @@ export function ReadyBlockEditor({ tabId, content: displayedContent, renderSourc
         setAppendPrefix(end ? newline(buffer.snapshot.content).repeat(2) : ''); setEmptyAt(end); setFocusRequest({ at: end })
       } catch (cause) { report(cause) }
     }}>添加文字</button>
+    </EditorTools></BlockControls>
   </div>
 }

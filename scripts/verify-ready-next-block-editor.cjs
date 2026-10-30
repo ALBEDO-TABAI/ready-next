@@ -16,6 +16,8 @@ async function main() {
   const suffix = '\r\n\r\n```js\r\nconst untouched = "é😀";\r\n```\n\n不改结尾'
   const original = prefix + '编辑甲乙' + middle + widget + suffix
   await fs.writeFile(file, original)
+  const linkedFile = path.join(vault, '链接目标.md')
+  await fs.writeFile(linkedFile, '# 链接目标\n\n## 章节一\n\n引用正文')
   const env = { ...process.env, READY_USER_DATA_DIR: profile }
   delete env.ELECTRON_RUN_AS_NODE
   delete env.READY_START_HIDDEN
@@ -103,6 +105,85 @@ async function main() {
     assert.deepEqual(saved.subarray(0, Buffer.byteLength(prefix)), Buffer.from(prefix))
     assert.deepEqual(saved.subarray(saved.length - Buffer.byteLength(suffix)), Buffer.from(suffix))
     assert.deepEqual(Buffer.from(text.slice(text.indexOf(middle), text.indexOf(middle) + middle.length)), Buffer.from(middle))
+    // T4b: exercise the actual rendered controls, keyboard focus and persisted bytes.
+    const readback = async wanted => {
+      await page.keyboard.press(`${mod}+s`)
+      const deadline = Date.now() + 15000
+      let actual = await fs.readFile(file)
+      while (!actual.equals(Buffer.from(wanted)) && Date.now() < deadline) {
+        await page.waitForTimeout(100); actual = await fs.readFile(file)
+      }
+      assert.deepEqual(actual, Buffer.from(wanted), `T4b byte readback; alerts: ${await page.getByRole('alert').allTextContents()}`)
+    }
+    const richText = text => editor.locator('[contenteditable="true"]').filter({ hasText: new RegExp(`^${text}$`) })
+    const firstText = '编辑甲乙中文'
+    const firstHandle = () => richText(firstText).locator('xpath=..').getByRole('button', { name: '块菜单', exact: true })
+    await firstHandle().focus()
+    await page.keyboard.press('Space'); await page.keyboard.press('ArrowDown'); await page.keyboard.press('Escape')
+    await readback(expected)
+    await firstHandle().focus()
+    await page.keyboard.press('Space'); await page.keyboard.press('ArrowDown'); await page.keyboard.press('Enter')
+    const editedWidget = widget.replace('Widget 原文', 'Widget 新文')
+    await richText(firstText).focus()
+    await readback(expected.replace(firstText, '').replace(editedWidget, editedWidget + '\r\n\r\n' + firstText))
+    await page.keyboard.press(`${mod}+z`); await readback(expected)
+    console.log('PASS keyboard drag preview → Escape; drag → drop → one undo; exact disk bytes')
+
+    // Pointer drag uses the real HTML drag/drop events, not an injected operation.
+    const tailBlock = richText('不改结尾').locator('xpath=..')
+    await firstHandle().dragTo(tailBlock, { targetPosition: { x: 15, y: (await tailBlock.boundingBox()).height - 2 } })
+    await richText(firstText).focus()
+    await readback(expected.replace(firstText, '') + '\r\n\r\n' + firstText)
+    await page.keyboard.press(`${mod}+z`); await readback(expected)
+    console.log('PASS pointer handle drag → drop → one undo')
+
+    await firstHandle().focus(); await page.keyboard.press('Enter')
+    await page.getByRole('combobox', { name: '搜索操作' }).fill('标题 2')
+    await page.keyboard.press('Enter'); await readback(expected.replace(firstText, '## ' + firstText))
+    await page.keyboard.press(`${mod}+z`); await readback(expected)
+    console.log('PASS keyboard block menu conversion and focus restoration')
+
+    await richText(firstText).focus()
+    await richText(firstText).evaluate(element => {
+      const selection = window.getSelection(), range = document.createRange()
+      range.selectNodeContents(element); selection.removeAllRanges(); selection.addRange(range)
+    })
+    await page.keyboard.press('Alt+F10')
+    const toolbar = page.getByRole('toolbar', { name: '文字格式' })
+    await toolbar.getByRole('button', { name: '粗体', exact: true }).focus(); await page.keyboard.press('Enter')
+    await readback(expected.replace(firstText, '**' + firstText + '**'))
+    await page.keyboard.press(`${mod}+z`); await readback(expected)
+    console.log('PASS selected text → keyboard inline toolbar → bold → exact Markdown → undo')
+
+    await richText(firstText).focus()
+    await richText(firstText).evaluate(element => {
+      const selection = window.getSelection(), range = document.createRange()
+      range.selectNodeContents(element); selection.removeAllRanges(); selection.addRange(range)
+    })
+    await page.keyboard.insertText('/')
+    await page.getByRole('combobox', { name: '搜索操作' }).fill('Widget'); await page.keyboard.press('Enter')
+    await page.getByRole('dialog', { name: '编辑 widget', exact: true }).waitFor()
+    await page.keyboard.press('Escape')
+    await editor.locator('[contenteditable="true"]').filter({ hasText: /^\/$/ }).focus()
+    await page.keyboard.press(`${mod}+z`); await readback(expected)
+    console.log('PASS slash → existing Widget drawer → cancel without inserting a placeholder')
+
+    const indexed = await page.evaluate(async ({ target, root }) => window.electronAPI.document.indexDocument({ path: target, root }), { target: linkedFile, root: vault })
+    assert.ok(indexed.success, JSON.stringify(indexed))
+    await richText(firstText).focus()
+    await richText(firstText).evaluate(element => {
+      const selection = window.getSelection(), range = document.createRange()
+      range.selectNodeContents(element); range.collapse(false); selection.removeAllRanges(); selection.addRange(range)
+    })
+    await page.keyboard.insertText('[[')
+    await page.getByRole('combobox', { name: '搜索操作' }).fill('链接目标#章节一')
+    await page.getByRole('option', { name: /章节一/ }).waitFor()
+    await page.keyboard.press('Enter')
+    // Canonical target: relative to the edited page's folder, as the object link repair keeps it.
+    const wiki = `[[${path.relative(path.dirname(file), linkedFile).replace(/\.md$/, '')}#章节一]]`
+    await readback(expected.replace(firstText, firstText + wiki))
+    await page.keyboard.press(`${mod}+z`); await page.keyboard.press(`${mod}+z`); await readback(expected)
+    console.log('PASS [[ → real global index → heading choice → exact wiki source → undo')
     await page.screenshot({ path: path.join(profile, 'block-editor.png') })
     console.log('PASS Widget source → save → file readback; every unedited interval is byte-identical')
     console.log(`Evidence: ${profile}\nFixture: ${file}`)
