@@ -1,3 +1,5 @@
+import { createDraftFixture } from './helpers/ready-drafts-fixture'
+import { configureDrafts, drafts } from '../renderer/modules/document/drafts/runtime'
 import assert from 'node:assert/strict'
 import { afterEach, test } from 'node:test'
 
@@ -160,8 +162,14 @@ test('image activation swaps a visible split preview into primary', () => {
   assert.equal(state.tabs.find((tab) => tab.id === 'right')?.path, '/tmp/next.png')
 })
 
-test('closing primary promotes the visible split document and clears split mode', () => {
+test('closing primary promotes the visible split document and clears split mode', async () => {
+  const fixture = createDraftFixture()
+  configureDrafts({ ...fixture.port, tabs: () => useDocTabs.getState().tabs,
+    patch: (id, patch) => useDocTabs.setState(state => ({ tabs: state.tabs.map(tab => tab.id === id && tab.kind !== 'library' ? { ...tab, ...patch } : tab) })),
+  }, () => {})
   resetDocTabs()
+  drafts.changed(useDocTabs.getState().tabs[0], 'disk left')
+  await drafts.flush('left')
 
   useDocTabs.getState().closeTab('left')
   const state = useDocTabs.getState()

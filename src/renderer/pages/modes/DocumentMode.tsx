@@ -1,3 +1,5 @@
+import { DraftBootNotice, DraftControls } from '../../modules/document/drafts/DraftControls'
+import { initializeDrafts, reportDraftError, useDraftUI } from '../../modules/document/drafts/runtime'
 import { readingPositionKey } from '../../stores/objectPresentationState'
 import { registerReturnPosition } from '../../modules/workbench/reference-return'
 import { LibraryTab, OpenEpubInLibrary } from '../../modules/library/navigation'
@@ -239,6 +241,9 @@ export default function DocumentMode({
     renameTabGroup, recolorTabGroup, setTabGroupCollapsed, disbandTabGroup,
     setFocusedPaneTab,
   } = useDocTabs.getState()
+
+  const draftBoot = useDraftUI(state => state.boot)
+  useEffect(() => { void initializeDrafts().catch(reportDraftError) }, [])
 
   const documentRootRef = useRef<HTMLDivElement>(null)
   const pendingScrollFlushesRef = useRef(new Set<() => void>())
@@ -911,8 +916,11 @@ export default function DocumentMode({
     requestAnimationFrame(restoreVisibleDocumentScrollPositions)
   }, [captureVisibleDocumentScrollPositions, restoreVisibleDocumentScrollPositions, setDocumentSplitRatio])
 
+  if (draftBoot !== 'ready') return <DraftBootNotice />
+
   return (
     <div className="workbench-mode-root" ref={documentRootRef}>
+      <DraftControls />
       <div
         className="flex-1 min-h-0"
         style={{

@@ -3,7 +3,7 @@ import { getDocumentSaveSerializationKey, runSerializedDocumentSave } from './do
 
 interface TabPort {
   tabs(): DocumentTabSnapshot[]
-  replace(tab: DocumentTabSnapshot): void
+  replace(tab: DocumentTabSnapshot): void | Promise<void>
 }
 interface Lease {
   path: string
@@ -31,10 +31,10 @@ export function createDocumentOperationSync(port: TabPort): (request: DocumentSy
     const current = port.tabs().filter((tab) => tab.path === expected[0]?.path)
     return current.length === expected.length && expected.every((tab) => current.some((item) => item.id === tab.id && item.path === tab.path && item.content === tab.content && item.isDirty === tab.isDirty))
   }
-  const rollback = (lease: Lease, content?: string) => {
+  const rollback = async (lease: Lease, content?: string) => {
     if (lease.state === 'prepared') return
     if (!matches(lease.after)) throw new Error('Tab changed after synchronization; rollback would overwrite newer edits')
-    for (const tab of lease.before) port.replace({ ...tab, content: tab.isDirty ? tab.content : content ?? tab.content })
+    for (const tab of lease.before) await port.replace({ ...tab, content: tab.isDirty ? tab.content : content ?? tab.content })
   }
   return async (request) => {
     try {
@@ -54,8 +54,10 @@ export function createDocumentOperationSync(port: TabPort): (request: DocumentSy
               let unlock!: () => void
               const held = new Promise<void>((done) => { unlock = done })
               const lease: Lease = { path: request.path, before, after, state: 'prepared', release: unlock, timer: setTimeout(() => {
-                try { if (lease.state !== 'released') rollback(lease) } catch (error) { console.error('[document-operation-sync] lease rollback failed', error) }
-                close(request.id, lease)
+                void (async () => {
+                  try { if (lease.state !== 'released') await rollback(lease) } catch (error) { console.error('[document-operation-sync] lease rollback failed', error) }
+                  finally { close(request.id, lease) }
+                })()
               }, Math.max(1, request.deadline - Date.now())) }
               if (typeof lease.timer === 'object' && 'unref' in lease.timer) lease.timer.unref()
               leases.set(request.id, lease)
@@ -71,7 +73,7 @@ export function createDocumentOperationSync(port: TabPort): (request: DocumentSy
       if (request.phase === 'rollback') {
         closed.add(request.id)
         if (lease) {
-          try { rollback(lease, request.content) } finally { close(request.id, lease) }
+          try { await rollback(lease, request.content) } finally { close(request.id, lease) }
         }
         return { ok: true, tabs: [] }
       }
@@ -80,8 +82,8 @@ export function createDocumentOperationSync(port: TabPort): (request: DocumentSy
         if (lease.state === 'prepared') {
           const current = port.tabs().filter((tab) => tab.path === request.path)
           if (lease.before.length === 0 ? current.length !== 0 : !matches(lease.before)) throw new Error('Tab was closed or edited during synchronization')
-          for (const tab of lease.after) port.replace(tab)
           lease.state = 'applied'
+          for (const tab of lease.after) await port.replace(tab)
         }
         return { ok: true, tabs: lease.after, content: lease.after[0]?.content }
       }

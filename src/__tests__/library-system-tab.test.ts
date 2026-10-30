@@ -1,3 +1,5 @@
+import { getDocTabDraftStorageKey } from '../renderer/modules/document/drafts/migration'
+import { useDraftUI } from '../renderer/modules/document/drafts/runtime'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
@@ -10,7 +12,8 @@ test('library stays a singleton across restore, refuses content and paths, and n
     setItem: (key: string, value: string) => { writes.push(key); data.set(key, value) },
     removeItem: (key: string) => { data.delete(key) },
   } })
-  const { useDocTabs, flushPendingDocTabDrafts, flushPendingDocTabMetadata, getDocTabDraftStorageKey } = await import('../renderer/stores/useDocTabs')
+  const { useDocTabs, flushPendingDocTabDrafts, flushPendingDocTabMetadata } = await import('../renderer/stores/useDocTabs')
+  useDraftUI.setState({ boot: 'ready' })
   try {
     const a = useDocTabs.getState().openLibraryTab()
     useDocTabs.getState().openTab('/test/note.md')

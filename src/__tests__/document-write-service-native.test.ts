@@ -1,3 +1,5 @@
+import { createDraftFixture } from './helpers/ready-drafts-fixture'
+import { configureDrafts } from '../renderer/modules/document/drafts/runtime'
 import assert from 'node:assert/strict'
 import test, { type TestContext } from 'node:test'
 import { chmod, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
@@ -29,6 +31,11 @@ async function fixture(t: TestContext, dirty?: boolean) {
   runMigrations(db)
   const engine = new SearchEngine(db, { fts5Available: false })
   assert.equal((await engine.indexDocument(root, path, original)).ok, true)
+  // This suite exercises the disk publisher; the separate C12 integration test uses real draft IPC/SQLite.
+  const draftFixture = createDraftFixture()
+  configureDrafts({ ...draftFixture.port, tabs: () => useDocTabs.getState().tabs,
+    patch: (id, patch) => useDocTabs.setState(state => ({ tabs: state.tabs.map(tab => tab.id === id && tab.kind !== 'library' ? { ...tab, ...patch } : tab) })),
+  }, () => {})
   useDocTabs.setState({ tabs: [], activeTabId: '' })
   let tabId = ''
   if (dirty !== undefined) {
@@ -116,6 +123,8 @@ test('dirty replaceRange conflict and read-only publication leave both versions 
   assert.equal(conflict.code, 'dirty_conflict')
   assert.equal(f.tab().content, dirty)
   assert.equal(await readFile(f.path, 'utf8'), f.original)
+  // Start the publication case from a clean buffer; hydration cannot discard edits.
+  useDocTabs.getState().markTabSaved(f.tabId)
   useDocTabs.getState().hydrateTabContentFromDisk(f.tabId, f.original)
   await chmod(f.path, 0o444)
   const failed = await f.apply(append('blocked'))
@@ -196,6 +205,8 @@ test('closed or newly edited tabs are rejected and the disk rolls back', async (
   assert.equal(await readFile(f.path, 'utf8'), f.original)
   assert.equal(f.tab().content, f.original + 'new typing')
   f.dependencies.publish = async (path, content) => { await publishFileAtomically(path, content); useDocTabs.getState().closeTab(f.tabId) }
+  // Reset this fixture explicitly before testing closure of a clean tab.
+  useDocTabs.getState().markTabSaved(f.tabId)
   useDocTabs.getState().hydrateTabContentFromDisk(f.tabId, f.original)
   assert.ok('code' in await f.apply(append('closed')))
   assert.equal(await readFile(f.path, 'utf8'), f.original)
