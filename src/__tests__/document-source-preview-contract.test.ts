@@ -36,20 +36,7 @@ test('document save failures surface a visible alert and keep the tab dirty', ()
   assert.doesNotMatch(markdownEditor, /catch \{\s*setSaveState\('error'\)\s*\}/)
 })
 
-test('document widget-only state changes enter shared tab content so clean markdown can be saved', () => {
-  const markdownEditor = readWorkspaceFile('src/renderer/components/document/MarkdownEditor.tsx')
-
-  assert.match(markdownEditor, /const saveInFlightRef = useRef\(false\)/)
-  assert.match(markdownEditor, /saveDocumentTabSnapshot\(\{/)
-  assert.match(markdownEditor, /registerDocumentSaveHandler\(\s*tab\.id,\s*saveCurrentTab,/)
-  assert.match(markdownEditor, /const widgetStatesRef = useRef\(widgetStates\)/)
-  assert.match(markdownEditor, /const tabContentRef = useRef\(tab\.content\)/)
-  assert.match(markdownEditor, /const nextWidgetStates = \{[\s\S]*\.\.\.widgetStatesRef\.current,[\s\S]*\[getWidgetPersistenceKey\(widgetTitle, widgetCode\)\]: widgetState,[\s\S]*\}/)
-  assert.match(markdownEditor, /widgetStatesRef\.current = nextWidgetStates/)
-  assert.match(markdownEditor, /const baseContent = tabContentRef\.current[\s\S]*const nextContent = mergeWidgetStateMapIntoContent\(baseContent, nextWidgetStates\)/)
-  assert.match(markdownEditor, /if \(nextContent !== baseContent\) \{[\s\S]*replaceEditorContent\(nextContent\)[\s\S]*\}/)
-  assert.doesNotMatch(markdownEditor, /widgetStateDirty/)
-})
+// Widget state/save behavior is exercised with the real editor in ready-block-editor-save.test.tsx.
 
 test('document source editor soft-wraps long markdown lines inside narrow split panes', () => {
   const markdownEditor = readWorkspaceFile('src/renderer/components/document/MarkdownEditor.tsx')
