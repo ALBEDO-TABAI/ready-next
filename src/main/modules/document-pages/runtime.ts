@@ -9,7 +9,7 @@ import { readFile } from 'node:fs/promises'
 import { DocumentPageService } from './service'
 import { registerDocumentPagesIPC } from './ipc'
 
-export function setupDocumentPagesIPC(): void {
+export function setupDocumentPagesIPC() {
   const db = getDatabase().getRawDb()
   if (!db) throw new Error('Page database unavailable')
   const vault = new VaultService(new AppSettingsRepository(), { home: app.getPath('home'), userData: app.getPath('userData'), isPackaged: app.isPackaged })
@@ -34,4 +34,5 @@ export function setupDocumentPagesIPC(): void {
     if (state.status === 'ready') roots.push(state.root)
     if (!roots.some(root => isInside(canonicalObjectPath(root),canonicalObjectPath(path)))) throw new Error('Path is outside open workspaces')
   })
+  return { service, ready: recovery }
 }

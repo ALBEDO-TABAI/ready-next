@@ -256,3 +256,28 @@ test('M4 rename refuses an unsaved referring canvas before moving the source fil
     assert.equal(canvases.buffer(reference.objectId)?.canvas.nodes[0].x, 99)
   } finally { f.close() }
 })
+
+// M6-B-finish contract: compare the caller's version inside the page operation queue.
+test('page rename and move reject stale expected versions without changing files', async t => {
+  if (skipIfSqliteUnavailable(t, 'version checked pages')) return
+  const f = fixture(); t.after(() => f.close())
+  const path = join(f.root, 'diary.md'), original = '# original\n'
+  writeFileSync(path, original)
+  const object = f.registry.register(path), expectedVersion = documentVersion(original)
+  const newer = '# externally edited\n'; writeFileSync(path, newer)
+  mkdirSync(join(f.root, 'destination'))
+  for (const request of [
+    { type: 'rename' as const, title: 'renamed', operationId: 'stale-rename' },
+    { type: 'move' as const, parentPath: join(f.root, 'destination'), operationId: 'stale-move' },
+  ]) {
+    await assert.rejects(f.service.operate({ ...request, root: f.root, objectId: object.id }, expectedVersion), /version_conflict/)
+    assert.equal(readFileSync(path, 'utf8'), newer)
+    assert.equal(f.registry.get(object.id)?.current_path, path)
+  }
+  assert.equal(existsSync(join(f.root, 'renamed.md')), false)
+  assert.equal(existsSync(join(f.root, 'destination', 'diary.md')), false)
+  const request = { type: 'rename' as const, root: f.root, objectId: object.id, title: 'renamed', operationId: 'current-rename' }
+  const receipt = await f.service.operate(request, documentVersion(newer))
+  assert.equal(receipt.path, join(f.root, 'renamed.md'))
+  assert.deepEqual(await f.service.operate(request, documentVersion(newer)), receipt)
+})

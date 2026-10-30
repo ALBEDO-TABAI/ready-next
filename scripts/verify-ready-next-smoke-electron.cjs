@@ -60,6 +60,38 @@ async function requestMode(page, mode) {
   }
 }
 
+// C8: use the actual layer controls, external write and HTML drag, then read the authoritative file.
+async function checkCalendarLayers(page, root) {
+  const source = path.join(root, 'c8-layer.md')
+  fs.writeFileSync(source, '---\ndate: 2026-10-30\n---\nC8 layer smoke\n')
+  const indexed = await page.evaluate(root => window.electronAPI.document.reindexWorkspace(root), root)
+  if (!indexed.success) throw new Error(JSON.stringify(indexed))
+  await requestMode(page, 'calendar')
+  await page.evaluate(async () => {
+    const prefs = await window.electronAPI.calendar.putPreferences({ gridView: 'default', daysPerPeriod: 4, showWeekends: true, sidebar: true,
+      layers: { events: true, documents: true, tasks: true, footprints: true } })
+    if (!prefs.success) throw new Error(prefs.error)
+    const day = await window.electronAPI.calendar.revealDay('2026-10-30')
+    if (!day.success) throw new Error(day.error)
+  })
+  await page.getByRole('checkbox', { name: '文档日期', exact: true }).check()
+  const id = await page.evaluate(source => window.electronAPI.objects.resolvePath(source), source)
+  const chip = page.locator(`[data-layer-entry="page:${id.objectId}"]`).first()
+  await chip.waitFor({ state: 'visible', timeout: 10000 })
+  fs.writeFileSync(source, '---\ndate: 2026-10-31\n---\nC8 layer smoke\n')
+  const began = performance.now()
+  await page.locator('[data-layer-day="2026-10-31"] [data-layer="documents"]').filter({ hasText: 'c8-layer' }).waitFor({ state: 'visible', timeout: 1000 })
+  const elapsed = performance.now() - began
+  ok('C8 external file date renders within one second', elapsed < 1000, `${elapsed.toFixed(1)}ms`)
+  console.log(`C8 window latency ${elapsed.toFixed(1)}ms`)
+  await chip.dragTo(page.locator('[data-layer-day="2026-11-01"]').first())
+  await page.waitForFunction(async () => {
+    const result = await window.electronAPI.calendarLayers.query({ from: '2026-11-01', to: '2026-11-02', timeZone: 'Asia/Tokyo' })
+    return result.ok && result.value.some(entry => entry.title === 'c8-layer' && entry.date === '2026-11-01')
+  })
+  ok('C8 drag changes only the source date', fs.readFileSync(source, 'utf8') === '---\ndate: 2026-11-01\n---\nC8 layer smoke\n')
+}
+
 // I2: exercise a real file-tree open, the Ready move command, the live watcher and restart.
 async function checkObjectPresentationBeforeRestart(app, page, root) {
   const from = path.join(root, 'i2-a.md'), internal = path.join(root, 'i2-b.md'), external = path.join(root, 'i2-c.md')
@@ -396,6 +428,7 @@ async function checkIdentityAndFastCard() {
     const objectIdentity = await checkObjectPresentationBeforeRestart(app, page, created.root)
     const calendarReference = { ...await checkCalendarReference(page), r45Url }
     const calendarLinks = await checkCalendarLinksBeforeRestart(page, calendarReference, created.root)
+    await checkCalendarLayers(page, created.root)
     step('close app')
     await withTimeout(app.close(), 150000, 'close app')
     app = undefined

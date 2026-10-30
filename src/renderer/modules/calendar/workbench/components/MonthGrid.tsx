@@ -1,4 +1,7 @@
 // Month view: 6 week rows, chips 19px at 21px pitch below the date number.
+import { LayerDay } from '../layers/LayerDays';
+import { useLayerEntries } from '../layers/use-layer-entries';
+import { openReadyRef } from '../../../workbench/open-ready-ref';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { packSpans, fromWall, toWall, dayOf, weekday, ymd, isoDate, Occurrence, DayNum, isoWeek } from '@shared/calendar';
 import { useStore, getState, setState, monthRange, occurrencesIn, select, clearSelection, createEvent, updateOccurrence, openMenu, setPrefs, calendarOf } from '../store';
@@ -14,12 +17,13 @@ export function MonthGrid({active=true}:{active?:boolean}) {
   const wrap = useRef<HTMLDivElement>(null); const size = useSize(wrap);
   const s = useStore((x) => ({ prefs: x.prefs, anchor: x.anchor, events: x.events, calendars: x.calendars, today: x.today, selected: x.selected, now: x.now, systemDark: x.systemDark }));
   const { first, month } = monthRange(getState()); const weeks = 6;
+  const layers = useLayerEntries(first, first + 42, s.prefs.primaryTimeZone, active);
   const gutter = s.prefs.showWeekNumbers ? 24 : 0;
   const cols = s.prefs.showWeekends ? 7 : 5;
   const colDays = (w: number) => Array.from({ length: 7 }, (_, i) => first + w * 7 + i).filter((d) => s.prefs.showWeekends || (weekday(d) !== 0 && weekday(d) !== 6));
   const cw = (size.w - gutter) / cols; const rh = size.h / weeks;
-  const occs = useMemo(() => occurrencesIn(first, first + weeks * 7), [first, s.events, s.calendars, s.prefs.showDeclined]); // eslint-disable-line
-  const perRow = Math.max(0, Math.floor((rh - 1 - G.monthPadTop - 2 - 16) / (G.allDayChip + G.allDaySpacing)));
+  const occs = useMemo(() => occurrencesIn(first, first + weeks * 7), [first, s.events, s.calendars, s.prefs.showDeclined, s.prefs.layers.events, s.prefs.primaryTimeZone]); // eslint-disable-line
+  const perRow = Math.max(0, Math.floor((rh - 1 - G.monthPadTop - 2 - 16 - 48) / (G.allDayChip + G.allDaySpacing)));
   const [drag, setDrag] = useState<{ key?: string; a: DayNum; b: DayNum; delta?: number } | null>(null);
   const dragRef = useRef(drag); dragRef.current = drag;
   const sel = new Set(s.selected);
@@ -75,8 +79,9 @@ export function MonthGrid({active=true}:{active?:boolean}) {
       const wk = weekday(d) === 0 || weekday(d) === 6; const { m, d: dd } = ymd(d); const isToday = d === s.today; const out = m !== month;
       rowsOut.push(<div key={`c${d}`} className={`mcell${wk ? ' wknd' : ''}${out ? ' out' : ''}`} style={{ left: gutter + c * cw, top, width: cw, height: rh }}>
         <div className={`mnum tnum${isToday ? ' today' : ''}`} style={dd === 1 && !isToday ? { fontWeight: 600 } : undefined}
-          onPointerDown={(e) => e.stopPropagation()} onClick={() => { setState({ anchor: d }); setPrefs({ gridView: 'default', daysPerPeriod: 1 }); }}>
+          onPointerDown={(e) => e.stopPropagation()} onClick={() => { void openReadyRef({ kind: 'day', date: isoDate(d) }, 'calendar').then(() => setPrefs({ gridView: 'default', daysPerPeriod: 1 })).catch(error => setState({ error: String(error) })); }}>
           {dd === 1 ? <><strong>{monthName(m)}</strong>{dd}</> : dd}</div>
+        <div style={{ position: 'absolute', left: 2, right: 2, bottom: 0, height: 46 }}><LayerDay date={isoDate(d)} entries={layers.entries} enabled={s.prefs.layers} move={layers.move} /></div>
       </div>);
     });
     for (const p of placed) {
@@ -107,6 +112,7 @@ export function MonthGrid({active=true}:{active?:boolean}) {
   }
   return (
     <div className="month" data-testid="month" data-colw={cw} data-rowh={rh}>
+      {layers.error && <div role="alert">{layers.error}</div>}
       <div className="month-heads" style={{ paddingLeft: gutter }}>
         {colDays(0).map((d) => <div key={d} className={`colhead${weekday(d) === weekday(s.today) && s.today >= first && s.today < first + 42 ? ' today' : ''}`} style={{ width: cw, height: 29 }}>{wdShort(weekday(d))}</div>)}
       </div>

@@ -1615,6 +1615,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   document: documentAPI,
   board: boardAPI,
   rss: rssAPI,
+  calendarLayers: {
+    query: (range: import('../shared/calendar-layers').LayerRange) => ipcRenderer.invoke('calendarLayers:query', range),
+    move: (input: import('../shared/calendar-layers').LayerMove) => ipcRenderer.invoke('calendarLayers:move', input),
+    beginReading: (input: import('../shared/calendar-layers').ReadingBegin) => ipcRenderer.invoke('calendarLayers:beginReading', input),
+    endReading: (input: import('../shared/calendar-layers').ReadingEnd) => ipcRenderer.invoke('calendarLayers:endReading', input),
+    onChanged: (callback: () => void) => {
+      const listener = () => callback()
+      ipcRenderer.on('calendarLayers:changed', listener)
+      ipcRenderer.on('document:indexChanged', listener)
+      return () => { ipcRenderer.removeListener('calendarLayers:changed', listener); ipcRenderer.removeListener('document:indexChanged', listener) }
+    },
+  },
   calendar: calendarAPI,
   skills: skillsAPI,
   app: appAPI,

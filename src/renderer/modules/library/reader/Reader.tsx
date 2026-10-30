@@ -71,6 +71,33 @@ function ReadyReader({ record, api, loaded, target, onBack, onError }: { record:
   const paper = PAPERS[typo.paper]
   const fail = useRef(onError); fail.current = onError
 
+  const readingReady = view !== null
+  useEffect(() => {
+    if (!readingReady) return
+    const layers = window.electronAPI.calendarLayers
+    let session: { id: string; began: Promise<void> } | null = null
+    const finish = () => {
+      const current = session; session = null
+      if (!current) return
+      const endedAt = Date.now()
+      void current.began.then(async () => {
+        const result = await layers.endReading({ id: current.id, endedAt })
+        if (!result.ok) throw new Error(result.message)
+      }).catch(error => fail.current(errorText(error)))
+    }
+    const begin = () => {
+      if (session || document.hidden) return
+      const id = crypto.randomUUID(), at = position.current
+      const began = layers.beginReading({ id, objectId: record.id, bookId: record.id,
+        loc: `c${at?.chapter ?? 0}:${at?.offset ?? 0}+1`, startedAt: Date.now() }).then(result => { if (!result.ok) throw new Error(result.message) })
+      session = { id, began }
+      void began.catch(error => fail.current(errorText(error)))
+    }
+    const visibility = () => { if (document.hidden) finish(); else begin() }
+    begin(); document.addEventListener('visibilitychange', visibility); window.addEventListener('pagehide', finish)
+    return () => { document.removeEventListener('visibilitychange', visibility); window.removeEventListener('pagehide', finish); finish() }
+  }, [record.id, readingReady])
+
   useEffect(() => registerReturnPosition('library-reader', () => {
     const at = position.current
     return () => { if (at) requestBookLocation({ book: record.id, location: { chapter: at.chapter, from: at.offset, to: at.offset + 1 } }) }

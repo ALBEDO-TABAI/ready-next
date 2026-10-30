@@ -4506,6 +4506,14 @@ const migrations: Migration[] = [
       receipt_json TEXT, CHECK((state='linked')=(receipt_json IS NOT NULL))
     );`)
   } },
+  { name: '149_library_reading_sessions', up: (db) => {
+    db.exec(`CREATE TABLE library_reading_sessions (
+      id TEXT PRIMARY KEY, object_id TEXT NOT NULL REFERENCES objects(id), book_id TEXT NOT NULL,
+      loc TEXT NOT NULL, workspace_root TEXT NOT NULL, started_at INTEGER NOT NULL,
+      ended_at INTEGER CHECK(ended_at IS NULL OR ended_at >= started_at)
+    );
+    CREATE INDEX library_reading_sessions_range ON library_reading_sessions(workspace_root,started_at,ended_at);`)
+  } },
 ]
 
 /**

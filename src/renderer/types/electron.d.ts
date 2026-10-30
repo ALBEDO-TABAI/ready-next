@@ -3365,6 +3365,7 @@ interface ElectronAPI {
   document: ElectronDocumentAPI
   board: ElectronBoardAPI
   rss: ElectronRSSAPI
+  calendarLayers: import('../../shared/calendar-layers').CalendarLayersAPI
   calendar: ElectronCalendarAPI
   skills: ElectronSkillsAPI
   app: ElectronAppAPI

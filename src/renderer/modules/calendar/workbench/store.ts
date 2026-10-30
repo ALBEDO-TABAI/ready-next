@@ -9,8 +9,11 @@ import { findCalendarOccurrence, splitOccurrenceKey, rebaseCalendarHistory, type
 import { useTheme } from '../../../stores/useTheme';
 import { Locale, setLocale, detectLocale, t } from './i18n';
 
+import type { CalendarLayer } from '../../../../shared/calendar-layers';
+
 export type GridView = 'default' | 'month';
 export interface Prefs {
+  layers: Record<CalendarLayer, boolean>;
   gridView: GridView; daysPerPeriod: number; densityZoomLevel: number; weekStartsOn: number;
   showWeekends: boolean; showDeclined: boolean; showWeekNumbers: boolean; format24HourTime: boolean;
   interfaceTheme: 'system' | 'light' | 'dark'; sidebar: boolean; contextPanel: boolean;
@@ -21,6 +24,7 @@ export interface Prefs {
   displayName: string; email: string; videoProvider: 'none' | 'meet' | 'zoom' | 'teams' | 'custom'; videoUrl: string; autoAddVideo: boolean;
 }
 export const defaultPrefs = (): Prefs => ({
+  layers: { events: true, documents: true, tasks: true, footprints: true },
   gridView: 'default', daysPerPeriod: 7, densityZoomLevel: 0, weekStartsOn: 0, showWeekends: true, showDeclined: true, showWeekNumbers: false,
   format24HourTime: false, interfaceTheme: 'system', sidebar: true, contextPanel: true, primaryTimeZone: systemTimeZone(), additionalTimeZones: [],
   locale: detectLocale(), defaultEventDuration: 30, collapseAllDaySection: false, todayKey: 'today',
@@ -91,6 +95,7 @@ export function monthRange(s = state): { first: DayNum; weeks: number; month: nu
 export function visibleCalendars(s = state) { return new Set(s.calendars.filter((c) => c.visible).map((c) => c.id)); }
 export function calendarOf(id: string) { return state.calendars.find((c) => c.id === id); }
 export function occurrencesIn(from: DayNum, to: DayNum, s = state): Occurrence[] {
+  if (!s.prefs.layers.events) return [];
   const vis = visibleCalendars(s);
   const evs = Object.values(s.events).filter((e) => vis.has(e.calendarId));
   return occurrences(evs, from, to, s.prefs.primaryTimeZone).filter((o) => s.prefs.showDeclined || !o.event.attendees?.some((a) => a.self && a.rsvp === 'declined'));
