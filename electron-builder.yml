@@ -81,10 +81,6 @@ extraResources:
     to: pets
     filter:
       - "**/*"
-  - from: assets/board
-    to: board
-    filter:
-      - "**/*"
   - from: assets/prompts
     to: prompts
     filter:

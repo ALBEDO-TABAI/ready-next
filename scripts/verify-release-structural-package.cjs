@@ -1141,7 +1141,6 @@ function inspectMountedPackage(root, contract, dmgPath, {
       ['assets/codex-runtime', 'codex-runtime', (name) => !/^evidence(?:\/|$)/i.test(name), 'Codex runtime assets', new Set(['aarch64-apple-darwin/codex'])],
       ['assets/embedded-skills', 'embedded-skills', (name) => !/__pycache__|\.py[co]$|(?:^|\/)\.env(?:\.|$)/i.test(name), 'embedded skills'],
       ['assets/pets', 'pets', () => true, 'pets'],
-      ['assets/board', 'board', () => true, 'board'],
       ['assets/prompts', 'prompts', () => true, 'prompts'],
       ['assets/site-cards', 'site-cards', () => true, 'site cards'],
       ['src/python', 'sidecar', (name) => !/__pycache__|\.py[co]$/i.test(name), 'Python sidecar'],
