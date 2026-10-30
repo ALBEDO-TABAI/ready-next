@@ -90,6 +90,8 @@ export interface RecurrenceRule {
  * original scheduled time.
  */
 export interface ReminderFirePayload {
+  /** Present only for a persisted document mention; revision rejects stale timers. */
+  mention?: { objectId: string; revision: number }
   eventId: string
   eventTitle: string
   /** Unix seconds. */

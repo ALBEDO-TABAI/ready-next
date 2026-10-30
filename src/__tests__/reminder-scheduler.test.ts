@@ -481,3 +481,15 @@ test('DB read failure during rescheduleAll is swallowed and logged', async () =>
     console.warn = originalWarn
   }
 })
+
+test('default timer does not deliver a 24-hour reminder at its 23-hour timeout cap', async t => {
+  const { defaultScheduleAt } = await import('../main/modules/calendar-engine/reminder-scheduler')
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 0 })
+  let count = 0
+  const handle = defaultScheduleAt(86400, () => { count++ })
+  t.mock.timers.tick(23 * 3600000)
+  assert.equal(count, 0)
+  t.mock.timers.tick(3600000)
+  assert.equal(count, 1)
+  handle.cancel()
+})

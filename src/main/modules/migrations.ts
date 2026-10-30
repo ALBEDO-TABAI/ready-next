@@ -1,3 +1,4 @@
+import { migrateDateMentions } from './calendar-engine/date-mentions/schema'
 import { migrateChatReadyRefs } from './database/ready-ref-migration'
 import { migrateCanvasComposition } from './canvas-composition/schema'
 import { DOCUMENT_DATABASE_MIGRATION, migrateDocumentDatabase } from './document-database/schema'
@@ -4516,6 +4517,7 @@ const migrations: Migration[] = [
     CREATE INDEX library_reading_sessions_range ON library_reading_sessions(workspace_root,started_at,ended_at);`)
   } },
   { name: '150_canvas_compositions', up: migrateCanvasComposition },
+  { name: '151_calendar_date_mentions', up: migrateDateMentions },
 ]
 
 /**

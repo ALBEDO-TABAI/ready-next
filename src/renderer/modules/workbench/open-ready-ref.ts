@@ -1,3 +1,4 @@
+import { useMentionNavigation } from '../calendar/workbench/layers/mention-navigation'
 import { rssReferenceFromReadyRef } from '../../../shared/rss-reference'
 import type { WorkbenchMode } from '../../stores/useMode'
 import { parseReadyUri, ReadyRefSchema, type ReadyRef } from '../../../shared/ready-ref'
@@ -36,6 +37,15 @@ export async function openReadyRef(input: string | ReadyRef, fromMode?: Workbenc
     case 'file': {
       const location = await window.electronAPI.objects.locate(ref.id)
       if (!location) throw new Error('引用文档已不存在')
+      if (ref.kind === 'file' && ref.anchor?.startsWith('date-mention:')) {
+        const target = await window.electronAPI.dateMentions.locate(ref)
+        rememberReferenceOrigin(origin, 'document')
+        useWorkspace.getState().selectFile(target.path)
+        useDocTabs.getState().openTab(target.path)
+        useMentionNavigation.setState({ target })
+        requestWorkbenchModeOpen('document')
+        return
+      }
       if (ref.anchor) throw new Error('此文档锚点暂不支持定位')
       rememberReferenceOrigin(origin, 'document')
       useWorkspace.getState().selectFile(location.path)

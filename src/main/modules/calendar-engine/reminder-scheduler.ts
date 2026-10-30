@@ -84,6 +84,7 @@ export interface SchedulerDb {
 
 export interface ReminderSchedulerDeps {
   getDb(): SchedulerDb
+  mentions?: { pending(until: number, now: number): ReminderFirePayload[] }
   /** Unix seconds — injectable so tests can pin wall clock. */
   now(): number
   /**
@@ -134,20 +135,20 @@ const DEFAULT_MAX_OFFSET_MAGNITUDE_MINUTES = 24 * 60
 /**
  * Default `scheduleAt` implementation using `setTimeout`. setTimeout's
  * delay argument is a 32-bit signed int (max ~24.8 days). We cap delays
- * at 23 hours so any too-distant reminder gets re-picked at the next
- * resweep — much smaller than the 24.8d wrap point so safe by a wide
- * margin.
+ * at 23 hours and re-arm until the target instant, without firing early.
  */
 const SETTIMEOUT_MAX_DELAY_MS = 23 * 60 * 60 * 1000
 
 export function defaultScheduleAt(epochSec: number, fn: () => void): SchedulerHandle {
   const targetMs = epochSec * 1000
-  const delayMs = Math.max(0, Math.min(targetMs - Date.now(), SETTIMEOUT_MAX_DELAY_MS))
   let fired = false
-  const handle = setTimeout(() => {
+  const tick = () => {
+    const remaining = targetMs - Date.now()
+    if (remaining > 0) { handle = setTimeout(tick, Math.min(remaining, SETTIMEOUT_MAX_DELAY_MS)); return }
     fired = true
     fn()
-  }, delayMs)
+  }
+  let handle = setTimeout(tick, Math.max(0, Math.min(targetMs - Date.now(), SETTIMEOUT_MAX_DELAY_MS)))
   return {
     cancel() {
       if (!fired) clearTimeout(handle)
@@ -338,6 +339,15 @@ export function startReminderScheduler(deps: ReminderSchedulerDeps): ReminderSch
       for (const expanded of expandReminders(row, now, windowEnd)) {
         scheduleOne(expanded)
       }
+    }
+    for (const payload of deps.mentions?.pending(windowEnd, now) ?? []) {
+      const handle = deps.scheduleAt(payload.eventStartTime + payload.offsetMinutes * 60, () => {
+        if (stopped) return
+        if (handles.get(payload.eventId)?.includes(handle)) handles.delete(payload.eventId)
+        try { deps.fire({ ...payload, firedAt: deps.now() }) }
+        catch (error) { console.warn('[reminder-scheduler] mention delivery failed:', error) }
+      })
+      handles.set(payload.eventId, [handle])
     }
   }
 
