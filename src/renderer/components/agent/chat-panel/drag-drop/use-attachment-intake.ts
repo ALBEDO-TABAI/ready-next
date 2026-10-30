@@ -151,17 +151,9 @@ export function useAttachmentIntake(params: UseAttachmentIntakeParams): Attachme
             setInputValue(`${next} `)
             focusInputWithResize()
           } else if (data.type === 'browser-tab' && data.tabId) {
-            addAttachments([{
-              id: `attach-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-              name: data.title || data.name || '网页标签',
-              path: `browser-tab://${data.tabId}`,
-              type: 'text',
-              size: 0,
-              ext: '.url',
-              source: 'browser-tab',
-              browserTabId: data.tabId,
-              title: data.title || data.name || '网页标签'
-            }])
+            const attachment = await createReadyContextAttachment({ ...data, type: 'browser-tab' })
+            if (!isComposerAuthorityCurrent(useAgent.getState(), composerAuthority)) return
+            addAttachments([attachment])
             focusInputWithResize()
           } else if (data.type === 'design-project') {
             const designData = data as typeof data & {
@@ -234,23 +226,13 @@ export function useAttachmentIntake(params: UseAttachmentIntakeParams): Attachme
             if (!isComposerAuthorityCurrent(useAgent.getState(), composerAuthority)) return
             if (attachment) addAttachments([attachment])
             focusInputWithResize()
-          } else if (data.type === 'doc-tab' && data.selection?.trim() && (data.dirty || !data.path)) {
-            addAttachments([{
-              id: `attach-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-              name: data.title || data.name || '文档标签页',
-              path: data.path || `doc-tab://${encodeURIComponent(data.tabId || data.name)}`,
-              type: 'text',
-              size: data.selection.length,
-              ext: data.ext || '.md',
-              source: 'document-tab',
-              documentTitle: data.title || data.name || '文档标签页',
-              tabId: data.tabId,
-              selection: data.selection.slice(0, 30_000),
-              dirty: true,
-            }])
+          } else if (data.type === 'doc-tab') {
+            const attachment = await createReadyContextAttachment({ ...data, type: 'doc-tab', content: data.selection })
+            if (!isComposerAuthorityCurrent(useAgent.getState(), composerAuthority)) return
+            addAttachments([attachment])
             focusInputWithResize()
           } else if (
-            (data.type === 'file' || data.type === 'doc-tab' || data.type === 'folder') &&
+            (data.type === 'file' || data.type === 'folder') &&
             data.path
           ) {
             addAttachments([

@@ -1,4 +1,3 @@
-import { revealRSSReference } from '../../../modules/rss/reveal-reference'
 import { useLayoutEffect, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode, RefObject } from 'react'
 import { X, Puzzle, Copy, StickyNote } from 'lucide-react'
@@ -10,7 +9,6 @@ import type {
   ToolTraceEvent,
 } from '../../../stores/useAgent'
 import type { ReadySkillReference } from '../../../modules/agent/chat-input-bridge'
-import { revealDocumentQuoteAttachment } from '../../../modules/agent/document-quote-navigation'
 import { WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM } from '../../../modules/workbench/chrome'
 import type { ReferenceSkillHintData } from '../../../types/electron'
 import type { ActionAuthorizationMode } from '../../../../shared/action-authorization-mode'
@@ -267,7 +265,11 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
           }}
         >
           <ChatMessages
-            messages={messages}
+            messages={messages.map(message => {
+              const display = message.meta?.readyRefDisplay
+              return display && typeof display === 'object' && 'content' in display && typeof display.content === 'string'
+                ? { ...message, content: display.content } : message
+            })}
             contextBoundaries={contextBoundaries}
             messageTaskSnapshots={messageTaskSnapshots}
             messageGeneratedImageArtifacts={messageGeneratedImageArtifacts}
@@ -291,14 +293,14 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
             onAgentSelectionContextMenu={onAgentSelectionContextMenu}
             onAttachmentPreview={handleAttachmentPreview}
             onReferenceSelect={onReferenceSelect}
-            onRevealDocumentQuote={revealDocumentQuoteAttachment}
+            onRevealDocumentQuote={attachment => { void handleAttachmentPreview(attachment) }}
             getDocumentQuoteTooltip={getDocumentQuoteTooltip}
             getAttachmentMetaSummary={getAttachmentMetaSummary}
             getAttachmentPreviewSrc={getAttachmentPreviewSrc}
             renderAttachmentIcon={(attachment, size = 16) => (
               <AttachmentIcon attachment={attachment} size={size} />
             )}
-            renderMarkdown={(content, streaming) => <MarkdownContent content={content} streaming={streaming} onRSSReference={revealRSSReference} />}
+            renderMarkdown={(content, streaming) => <MarkdownContent content={content} streaming={streaming} />}
           />
 
           {agentSelectionMenu && (
@@ -575,7 +577,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
               attachments={attachments}
               onRemove={removeAttachment}
               onPreview={handleAttachmentPreview}
-              onRevealDocumentQuote={revealDocumentQuoteAttachment}
+              onRevealDocumentQuote={attachment => { void handleAttachmentPreview(attachment) }}
               getDocumentQuoteTooltip={getDocumentQuoteTooltip}
               getAttachmentMetaSummary={getAttachmentMetaSummary}
               renderAttachmentIcon={(attachment, size = 16) => (

@@ -1,3 +1,4 @@
+import { parseReadyUri, toReadyUri, type ReadyRef } from './ready-ref'
 import { RSSReadExcerptSchema } from './rss-excerpt'
 import { z } from 'zod'
 import { RSSQuerySchema, RSSReadArticleSchema } from './rss-workspace'
@@ -14,7 +15,15 @@ export type RSSNavigableReference = Exclude<RSSReference, { kind: 'query' }>
 export const RSSReferenceResourceSchema = z.object({ id: z.string().uuid(), name: z.string().min(1), reference: RSSReferenceSchema }).strict()
 
 export function rssReferencePath(reference: RSSReference): string {
-  return `rss-reference://${encodeURIComponent(JSON.stringify(reference))}`
+  const value = RSSReferenceSchema.parse(reference)
+  if (value.kind === 'query') return toReadyUri({ kind: 'rss-query', query: value.query })
+  if (value.kind === 'digest') return toReadyUri({ kind: 'rss-digest', id: value.read.reportId, offset: value.read.offset, limit: value.read.limit })
+  if (value.kind === 'excerpt') {
+    const { itemId, ...read } = value.read
+    return toReadyUri({ kind: 'rss-item', id: itemId, excerpt: read })
+  }
+  const { itemId, ...read } = value.read
+  return toReadyUri({ kind: 'rss-item', id: itemId, article: read })
 }
 
 export type RSSReferenceResource = z.infer<typeof RSSReferenceResourceSchema>
@@ -37,14 +46,22 @@ export function rssReferencesFromEnvelope(envelope: unknown): RSSReferenceResour
 
 
 export function rssCitationUrl(reference: RSSNavigableReference): string {
-  return `ready-rss://reference?data=${encodeURIComponent(JSON.stringify(RSSReferenceSchema.parse(reference))).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16)}`)}`
+  return rssReferencePath(reference)
 }
+
+/** Navigation only: callers must never add these references to the frozen read authority. */
+export function rssReferenceFromReadyRef(ref: ReadyRef): RSSReference | null {
+  if (ref.kind === 'rss-query') return RSSReferenceSchema.parse({ kind: 'query', query: ref.query })
+  if (ref.kind === 'rss-digest') return RSSReferenceSchema.parse({ kind: 'digest', read: { reportId: ref.id, offset: ref.offset, limit: ref.limit } })
+  if (ref.kind !== 'rss-item') return null
+  if (ref.excerpt) return RSSReferenceSchema.parse({ kind: 'excerpt', read: { itemId: ref.id, ...ref.excerpt } })
+  if (ref.article) return RSSReferenceSchema.parse({ kind: 'article', read: { itemId: ref.id, ...ref.article } })
+  return null
+}
+
 export function parseRSSCitationUrl(href: string): RSSNavigableReference | null {
-  try {
-    const url = new URL(href)
-    if (url.protocol !== 'ready-rss:' || url.hostname !== 'reference' || url.username || url.password || url.port || url.pathname && url.pathname !== '/') return null
-    if (url.hash || [...url.searchParams.keys()].length !== 1 || !url.searchParams.has('data')) return null
-    const reference = RSSReferenceSchema.parse(JSON.parse(url.searchParams.get('data') || ''))
-    return reference.kind === 'query' ? null : reference
-  } catch { return null }
+  const parsed = parseReadyUri(href)
+  if (!parsed.ok) return null
+  const reference = rssReferenceFromReadyRef(parsed.ref)
+  return reference && reference.kind !== 'query' ? reference : null
 }

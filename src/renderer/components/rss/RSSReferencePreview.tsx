@@ -1,4 +1,5 @@
-import { revealRSSReference } from '../../modules/rss/reveal-reference'
+import { openReadyRef } from '../../modules/workbench/open-ready-ref'
+import { rssReferencePath } from '../../../shared/rss-reference'
 import type { RSSReference } from '../../../shared/rss-reference'
 import { useEffect, useState } from 'react'
 import { RSSReferenceSchema } from '../../../shared/rss-reference'
@@ -37,5 +38,5 @@ export default function RSSReferencePreview({ reference, onReveal }: { reference
     })()
     return () => { live = false }
   }, [reference])
-  return <><div style={{ padding: '12px 14px 0' }}>{valid && valid.kind !== 'query' && <button type="button" className="rss-reference-preview__locate" onClick={() => { revealRSSReference(valid); onReveal?.() }}>在 RSS 中定位</button>}</div><pre style={{ padding: '48px 14px 14px', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', fontSize: 13, lineHeight: 1.7 }} role="status">{text}</pre></>
+  return <><div style={{ padding: '12px 14px 0' }}>{valid && valid.kind !== 'query' && <button type="button" className="rss-reference-preview__locate" onClick={() => { void openReadyRef(rssReferencePath(valid)).then(() => onReveal?.()).catch(error => setText(error instanceof Error ? error.message : String(error))) }}>在 RSS 中定位</button>}</div><pre style={{ padding: '48px 14px 14px', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', fontSize: 13, lineHeight: 1.7 }} role="status">{text}</pre></>
 }

@@ -1,3 +1,4 @@
+import { migrateChatReadyRefs } from './database/ready-ref-migration'
 import { DOCUMENT_PAGES_MIGRATION, migrateDocumentPages } from './document-pages/schema'
 import { migrateCalendarAttachmentReadyRefs, migrateCalendarAttachmentDisplayRefs } from './calendar-engine/ready-ref-migration'
 import { migrateObjectLinks } from './search-engine/object-link-schema'
@@ -4477,6 +4478,7 @@ const migrations: Migration[] = [
   } },
   { name: '143_calendar_attachment_ready_refs', up: migrateCalendarAttachmentReadyRefs },
   { name: '144_calendar_attachment_display_refs', up: migrateCalendarAttachmentDisplayRefs },
+  { name: '145_chat_ready_refs', up: migrateChatReadyRefs },
 ]
 
 /**

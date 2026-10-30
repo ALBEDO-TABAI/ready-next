@@ -1,3 +1,4 @@
+import { readChatReadyRefDisplay } from './ready-ref-migration'
 import { createHash } from 'crypto'
 import { CodexInteractionTransitionRepository } from '../agent-control/codex-runtime/codex-interaction-transition-repository'
 import type { DatabaseConnection } from './connection'
@@ -314,7 +315,13 @@ export class ChatStore {
        WHERE message.conversation_id = ? AND scope.closed_at IS NULL
          AND message.message_visibility_epoch = scope.message_visibility_epoch
        ORDER BY message.timestamp ASC`
-    ).all<ChatMessageRecord>(conversationId)
+    ).all<ChatMessageRecord>(conversationId).map(row => {
+      const display = readChatReadyRefDisplay(this.db!, row.id)
+      const meta = JSON.parse(row.meta_json || '{}')
+      if (!display && !Object.hasOwn(meta, 'readyRefDisplay')) return row
+      delete meta.readyRefDisplay
+      return { ...row, meta_json: JSON.stringify({ ...meta, ...(display ? { readyRefDisplay: display } : {}) }) }
+    })
   }
 
   /**
@@ -494,7 +501,7 @@ export class ChatStore {
         const record = item as Record<string, unknown>
         const name = String(record.name || '').trim()
         const path = String(record.path || '').trim()
-        if (!name || !path) continue
+        if (!name || (!path && !['document-tab', 'document-quote'].includes(String(record.source)))) continue
         const attachmentId = String(record.id || `${row.id}-${index}`).trim()
         const key = `${attachmentId}::${path}`
         if (seen.has(key)) continue
