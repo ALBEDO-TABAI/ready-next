@@ -8,7 +8,7 @@ import { PageOperationSchema, PagePropertiesSchema, type PageOperation, type Pag
 import { readDocumentSource, setFrontmatterFields } from '../../../shared/document-operations'
 import { DocumentDraftService } from '../document-drafts/service'
 import { checkedPath, collision, ensureDirectory, existsIgnoringCase, filename, vaultRoot } from '../document-drafts/files'
-import { commitDocumentOperation, documentVersion, getDocumentWriteDependencies, publishDocumentContent, saveUserDocument } from '../document-engine/document-write-service'
+import { commitDocumentOperation, documentVersion, documentWriteError, getDocumentWriteDependencies, publishDocumentContent, saveUserDocument } from '../document-engine/document-write-service'
 import { ObjectRegistry, isInside, objectTransaction } from '../object-service/registry'
 import { ObjectMutations, type ObjectMoveGroup } from '../object-service/mutations'
 import { publishObjectMoves } from '../object-service/events'
@@ -18,6 +18,7 @@ import { readPageTree } from './tree'
 interface Dependencies { canvases?: CanvasService; index(path: string): Promise<void>; afterMove?(index: number): void | Promise<void> }
 type Intent = { kind: 'create'; draftId: string; revision: number } | { kind: 'group'; title: string; group: ObjectMoveGroup; parentObjectId: string | null; originalPath: string; trashId?: string; canvasPathMoves?: ObjectMoveGroup['moves'] }
   | { kind: 'delete'; trashId: string; directory: string; objectIds: string[] }
+type VersionedPageOperation = z.output<typeof PageOperationSchema> & { expectedVersion?: string }
 interface RecordRow { id: string; request_json: string; intent_json: string; state: PageOperationRecord['state']; receipt_json: string | null; error: string | null }
 
 export class DocumentPageService {
@@ -133,7 +134,7 @@ export class DocumentPageService {
     if (parent.current_path.split(/[\\/]/).includes('.ready')) throw new Error('Cannot create pages inside internal metadata')
     return { path: ['markdown', 'canvas'].includes(parent.kind) ? parent.current_path.slice(0,-extname(parent.current_path).length) : parent.current_path, id: parent.id }
   }
-  private prepare(request: z.output<typeof PageOperationSchema>): Intent {
+  private prepare(request: VersionedPageOperation): Intent {
     const root = vaultRoot(request.root)
     if (root !== request.root) throw new Error('Use the canonical root')
     this.registry.db.prepare('INSERT INTO workspaces(root) VALUES (?) ON CONFLICT(root) DO NOTHING').run(root)
@@ -186,18 +187,23 @@ export class DocumentPageService {
       if (drafts.some(d => d.content_hash !== row.content_hash)) throw new Error('dirty_conflict: save draft before recycling page')
     }
     const original = readFileSync(path,'utf8')
+    if (request.expectedVersion !== undefined && documentVersion(original) !== request.expectedVersion) throw documentWriteError('version_conflict', 'version_conflict: page changed before rename or move')
     const title = object.kind === 'canvas' ? JSON.parse(original).ready?.title : readDocumentSource(original).frontmatter.title
     return { kind: 'group', title: request.type === 'rename' ? request.title : typeof title === 'string' ? title : name, group: { id: request.operationId, root, moves, objects, status: request.type === 'trash' ? 'trashed' : 'present',
       ...(request.type === 'rename' && object.kind === 'markdown' ? { patch: { path: targetBase+'.md', original, content: setFrontmatterFields(original,{set:{title:request.title}}) } } : {}) },
       parentObjectId: destination.id, originalPath: path }
   }
-  operate(input: PageOperation): Promise<PageReceipt> {
-    const request = PageOperationSchema.parse(input)
+  operate(input: PageOperation, expectedVersion?: string): Promise<PageReceipt> {
+    const request: VersionedPageOperation = PageOperationSchema.parse(input)
+    if (expectedVersion !== undefined) {
+      if (request.type !== 'rename' && request.type !== 'move') throw new Error('Expected version requires rename or move')
+      request.expectedVersion = z.string().min(1).parse(expectedVersion)
+    }
     const result = this.tail.then(() => this.execute(request))
     this.tail = result.catch(() => undefined)
     return result
   }
-  private async execute(request: z.output<typeof PageOperationSchema>): Promise<PageReceipt> {
+  private async execute(request: VersionedPageOperation): Promise<PageReceipt> {
     const db = this.registry.db, prior = this.record(request.operationId)
     if (prior && prior.request_json !== JSON.stringify(request)) throw new Error('operation_conflict: operation id reused')
     if (prior?.receipt_json) return JSON.parse(prior.receipt_json)
@@ -259,7 +265,10 @@ export class DocumentPageService {
     for (const row of this.registry.db.prepare("SELECT * FROM document_page_operations WHERE state IN ('prepared','recovery_required')").all<RecordRow>()) {
       const group = this.registry.db.prepare('SELECT state FROM object_move_groups WHERE id=?').get<{state:string}>(row.id)
       if (group?.state === 'rolled_back') this.registry.db.prepare("UPDATE document_page_operations SET state='rolled_back' WHERE id=?").run(row.id)
-      else await this.operate(JSON.parse(row.request_json))
+      else {
+        const { expectedVersion, ...request } = JSON.parse(row.request_json)
+        await this.operate(request, expectedVersion)
+      }
     }
   }
 }

@@ -13,8 +13,8 @@ export class ObjectEventWindow {
   add(path:string):Promise<void> {
     this.paths.add(path)
     clearTimeout(this.quiet)
-    this.quiet=setTimeout(()=>this.flush(),1000)
-    this.maximum??=setTimeout(()=>this.flush(),5000)
+    this.quiet=setTimeout(()=>this.flush(),100)
+    this.maximum??=setTimeout(()=>this.flush(),300)
     return new Promise((resolve,reject)=>this.pending.push({resolve,reject}))
   }
   async drain():Promise<void> {this.flush();await this.tail}

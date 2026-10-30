@@ -1,8 +1,14 @@
+import Database from 'better-sqlite3'
+import { runMigrations } from '../main/modules/migrations'
+import { ObjectRegistry } from '../main/modules/object-service/registry'
+import { LibrarySessions } from '../main/modules/calendar-layers/reading'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+import type { ReadingBegin, ReadingEnd } from '../shared/calendar-layers'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import React, { act } from 'react'
 import { JSDOM } from 'jsdom'
-import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, rm, realpath } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { LibraryEngine } from '../main/modules/library-engine/library-engine'
@@ -12,6 +18,8 @@ import type { LibraryAPI } from '../renderer/modules/library/access'
 
 // Only geometry/GPU are supplied: real React, selection Range, flipbook, IPC-shaped API and disk writer run.
 test('reader drag creates a durable mark; popover edits/copies/removes; N groups notes and source opens at its block', async t => {
+  if (skipIfSqliteUnavailable(t, 'reader sessions and highlights')) return
+  const db = new Database(':memory:'); runMigrations(db); t.after(() => db.close())
   const directory = await mkdtemp(join(tmpdir(), 'ready-highlight-ui-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
   const vault = join(directory, 'vault'); await mkdir(vault)
@@ -20,7 +28,13 @@ test('reader drag creates a durable mark; popover edits/copies/removes; N groups
   const engine = new LibraryEngine({ vault: () => ({ status: 'ready', root: vault, defaultSuggestion: vault }) })
   const record = (await engine.importFiles([file])).imported[0]
   const service = new LibraryHighlightService(engine, { write: input => applyDocumentOperation(input, { index: async () => {} }) })
+  const registry = new ObjectRegistry(db); registry.register(record.notePath)
+  const reading = new LibrarySessions(await realpath(vault), registry)
   const dom = new JSDOM('<div class="rn-library"><div id="root"></div></div>', { url: 'http://localhost', pretendToBeVisual: true })
+  Object.assign(dom.window, { electronAPI: { calendarLayers: {
+    beginReading: async (input: ReadingBegin) => { reading.begin(input); return { ok: true, value: undefined } },
+    endReading: async (input: ReadingEnd) => { reading.end(input); return { ok: true, value: undefined } },
+  } } })
   let width = 1100, copied = ''
   const observers = new Set<() => void>()
   class Observer { constructor(private cb: () => void) { observers.add(cb) } observe() {} disconnect() { observers.delete(this.cb) } }
@@ -158,11 +172,14 @@ test('reader drag creates a durable mark; popover edits/copies/removes; N groups
     assert.equal(d.querySelector('[data-book-location]'), null, 'navigation highlight expires')
     assert.deepEqual(errors, [])
     await act(async () => root.render(<p>错误引用</p>))
+    const sessionsBeforeInvalid = db.prepare('SELECT COUNT(*) AS count FROM library_reading_sessions').get<{ count: number }>()!.count
     await act(async () => root.render(<Reader record={record} api={api} target={{ book: record.id, location: { chapter: 99, from: 0, to: 1 } }} onBack={() => {}} onError={e => errors.push(e)} />)); await flush()
     assert.match(errors.at(-1) ?? '', /位置不存在/)
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM library_reading_sessions').get<{ count: number }>()!.count, sessionsBeforeInvalid, 'failed navigation is not a reading session')
 
   } finally {
-    await act(async () => root.unmount()); useDocTabs.setState(tabsBefore, true)
+    await act(async () => root.unmount())
+    assert.ok(db.prepare('SELECT COUNT(*) AS count FROM library_reading_sessions WHERE ended_at IS NOT NULL').get<{ count: number }>()!.count > 0, 'reader lifecycle must close durable sessions'); useDocTabs.setState(tabsBefore, true)
     for (const [k, descriptor] of Object.entries(previous)) { if (descriptor) Object.defineProperty(globalThis, k, descriptor); else Reflect.deleteProperty(globalThis, k) }
     dom.window.close()
   }
