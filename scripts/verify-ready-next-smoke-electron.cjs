@@ -49,6 +49,68 @@ async function launch(profile) {
   throw new Error('Ready Next renderer did not start')
 }
 
+// I2: exercise a real file-tree open, the Ready move command, the live watcher and restart.
+async function checkObjectPresentationBeforeRestart(app, page, root) {
+  const from = path.join(root, 'i2-a.md'), internal = path.join(root, 'i2-b.md'), external = path.join(root, 'i2-c.md')
+  const source = '# I2 reading fixture\n\n' + Array.from({ length: 160 }, (_, i) => `Paragraph ${i + 1}: reading position follows this object.\n`).join('\n')
+  fs.writeFileSync(from, source)
+  const mtime = fs.statSync(from).mtimeMs
+  await app.evaluate(({ BrowserWindow }) => {
+    for (const window of BrowserWindow.getAllWindows()) if (window.webContents.getURL().includes('/renderer/index.html')) window.setSize(1500, 1000)
+  })
+  // Seed the previous format in this throwaway profile to exercise the real migration handshake.
+  await page.evaluate(({ root, from }) => {
+    localStorage.setItem('ready-workspace-root', root)
+    localStorage.setItem('ready-pinned-folders', JSON.stringify([root]))
+    localStorage.removeItem('ready-object-presentation-migration-v1')
+    localStorage.setItem('ready-file-appearances-v1', JSON.stringify({ [from]: { color: 'red', icon: '🐙' } }))
+    localStorage.setItem('ready-document-reading-positions-v1', JSON.stringify([{ key: from, updatedAt: Date.now(), top: 400, ratio: 0.1, maxScroll: 4000, anchorTitle: null, anchorOrdinal: null, anchorProgress: null }]))
+  }, { root, from })
+  await page.reload()
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('ready:workbench-mode-change-request', { detail: { mode: 'document', placement: 'open', presentation: 'immediate' } })))
+  // The vault is a pinned folder that starts collapsed; expand it the way a person would.
+  const fileRow = page.getByText('i2-a.md', { exact: true }).first()
+  if (!await fileRow.isVisible().catch(() => false)) await page.getByText(path.basename(root), { exact: true }).first().click({ timeout: 20000 })
+  await fileRow.click({ timeout: 20000 })
+  await page.waitForFunction(from => JSON.parse(localStorage.getItem('ready-doc-tabs-v2') || '{}').state?.tabs.some(tab => tab.path === from && tab.objectId), from)
+  const identity = await page.evaluate(from => window.electronAPI.objects.resolvePath(from), from)
+  ok('C2 opening a real file leaves its bytes and mtime unchanged', fs.readFileSync(from, 'utf8') === source && fs.statSync(from).mtimeMs === mtime)
+  await page.waitForFunction(() => !localStorage.getItem('ready-file-appearances-v1') && !localStorage.getItem('ready-document-reading-positions-v1'))
+  const before = await page.evaluate(id => ({
+    appearance: JSON.parse(localStorage.getItem('ready-object-appearances-v1') || '{}')[id],
+    position: JSON.parse(localStorage.getItem('ready-object-reading-positions-v1') || '[]').find(row => row.key === id),
+  }), identity.objectId)
+  ok('C2 migration retains appearance and reading position under the object ID', before.appearance?.icon === '🐙' && before.position?.top > 0, JSON.stringify(before))
+  const renamed = await page.evaluate(({ from, internal }) => window.electronAPI.document.rename(from, internal), { from, internal })
+  ok('C2 Ready rename succeeds', renamed.success, JSON.stringify(renamed))
+  await page.waitForFunction(({ id, to }) => JSON.parse(localStorage.getItem('ready-doc-tabs-v2') || '{}').state?.tabs.some(tab => tab.objectId === id && tab.path === to), { id: identity.objectId, to: internal })
+  fs.renameSync(internal, external)
+  await page.waitForFunction(({ id, to }) => JSON.parse(localStorage.getItem('ready-doc-tabs-v2') || '{}').state?.tabs.some(tab => tab.objectId === id && tab.path === to), { id: identity.objectId, to: external }, { timeout: 20000 })
+  ok('C2 external mv updates the open tab through the real watcher', true)
+  ok('C2 open and both moves never insert ready_id', fs.readFileSync(external, 'utf8') === source)
+  return { objectId: identity.objectId, path: external }
+}
+
+async function checkObjectPresentationAfterRestart(page, identity) {
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('ready:workbench-mode-change-request', { detail: { mode: 'document', placement: 'open', presentation: 'immediate' } })))
+  await page.waitForFunction(({ objectId, path }) => JSON.parse(localStorage.getItem('ready-doc-tabs-v2') || '{}').state?.tabs.some(tab => tab.objectId === objectId && tab.path === path && tab.objectBinding?.status === 'resolved'), identity)
+  const restored = await page.evaluate(({ objectId }) => ({
+    tabs: JSON.parse(localStorage.getItem('ready-doc-tabs-v2')).state.tabs.filter(tab => tab.objectId === objectId),
+    appearance: JSON.parse(localStorage.getItem('ready-object-appearances-v1') || '{}')[objectId],
+    position: JSON.parse(localStorage.getItem('ready-object-reading-positions-v1') || '[]').find(row => row.key === objectId),
+  }), identity)
+  ok('C2 reopening retains one tab, appearance and reading position', restored.tabs.length === 1 && restored.appearance?.icon === '🐙' && restored.position?.top > 0, JSON.stringify(restored))
+  await page.locator('.document-path-bar').getByText(identity.path, { exact: true }).waitFor({ timeout: 20000 })
+  ok('C2 the visible document header shows the final path', true)
+  await page.waitForFunction(path => Array.from(document.querySelectorAll('[data-ready-document-scroll-key]')).some(scope =>
+    scope.getAttribute('data-ready-document-scroll-key') === path && [scope, ...scope.querySelectorAll('*')].some(element => element.scrollTop > 0)), identity.path, { timeout: 20000 })
+  ok('C2 the reopened document visibly restores its reading position', true)
+  // The document tab rail renders each tab with its title attribute; the custom icon is its visible glyph.
+  const iconShown = await page.waitForFunction(name => [...document.querySelectorAll('[title]')]
+    .some(el => el.getAttribute('title').startsWith(name) && el.textContent.includes('🐙')), path.basename(identity.path), { timeout: 15000 }).then(() => true, () => false)
+  ok('C2 the reopened tab visibly retains its custom icon', iconShown)
+}
+
 async function checkIdentityAndFastCard() {
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'ready-next-smoke-'))
   let app
@@ -72,10 +134,12 @@ async function checkIdentityAndFastCard() {
     }
     const added = await withTimeout(page.evaluate(entry => window.electronAPI.browser.addFastCardItem(entry), item), 20000, 'add FastCard item')
     ok('C7 FastCard add returns a persisted receipt', added?.success === true && added.data?.id === item.id, JSON.stringify(added))
+    const objectIdentity = await checkObjectPresentationBeforeRestart(app, page, created.root)
     step('close app')
     await withTimeout(app.close(), 150000, 'close app')
 
     ;({ app, page } = await launch(profile))
+    await checkObjectPresentationAfterRestart(page, objectIdentity)
     const reopenedVault = await withTimeout(page.evaluate(() => window.electronAPI.vault.get()), 20000, 'read vault after restart')
     ok('D17 the vault setting survives a restart', reopenedVault.status === 'ready' && reopenedVault.root === created.root, JSON.stringify(reopenedVault))
     const listed = await withTimeout(page.evaluate(() => window.electronAPI.browser.listFastCardItems()), 20000, 'list FastCard items')

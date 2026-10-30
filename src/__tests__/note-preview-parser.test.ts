@@ -39,6 +39,7 @@ tags:
   - 参考资料
   - Web开发
 ready_state: 待整理
+ready_id: identity-secret
 ---
 
 # Browser API
@@ -46,6 +47,7 @@ ready_state: 待整理
 
     assert.deepEqual(preview.tags.map((tag) => tag.label), ['参考资料', 'Web开发'])
     assert.equal(preview.properties.some((property) => property.key === 'ready_state'), false)
+    assert.doesNotMatch(JSON.stringify(preview), /identity-secret/)
     assert.doesNotMatch(preview.bodyMarkdown, /待整理/)
   })
 

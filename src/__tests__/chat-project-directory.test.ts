@@ -1,3 +1,4 @@
+import { resolveTestObject } from './utils/object-resolver'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { mkdtempSync, writeFileSync, rmSync, realpathSync, readFileSync } from 'node:fs'
@@ -17,7 +18,7 @@ test('project directory validates real folders and supplies the existing resourc
     assert.throws(() => canonicalProjectDirectory(join(root, 'missing')))
     assert.throws(() => canonicalProjectDirectory('relative'))
     const selections = withProjectDirectorySelection([], root)
-    const resolved = await resolveCodexExplicitResources({ selections, resolveSkill: () => null })
+    const resolved = await resolveCodexExplicitResources({ resolveLocalObject: resolveTestObject, selections, resolveSkill: () => null })
     assert.equal(resolved.authorities[0].path, root)
     assert.equal(resolved.requestResources[0].kind, 'folder_reference')
     const authority = resolved.authorities[0]

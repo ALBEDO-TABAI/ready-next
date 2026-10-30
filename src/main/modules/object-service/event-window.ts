@@ -1,3 +1,4 @@
+import { publishObjectMoves } from './events'
 import { repairObjectLinks } from './link-repair'
 import { ObjectRegistry } from './registry'
 
@@ -24,7 +25,9 @@ export class ObjectEventWindow {
     const run=this.tail.then(async()=>{
       const indexedPaths=()=>this.registry.db.prepare("SELECT path FROM documents WHERE source_type='document'").all<{path:string}>().map(row=>row.path)
       const before=indexedPaths()
+      const objectsBefore = this.registry.list()
       this.registry.reconcile(paths)
+      publishObjectMoves(this.registry, objectsBefore)
       const after=new Set(indexedPaths())
       await this.indexed(paths,before.filter(path=>!after.has(path)))
       await repairObjectLinks(this.registry)

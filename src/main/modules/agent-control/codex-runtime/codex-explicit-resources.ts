@@ -1,3 +1,4 @@
+import type { ObjectLocation } from '../../../../shared/object-identity'
 import { RSSReferenceResourceSchema, type RSSReferenceResource } from '../../../../shared/rss-reference'
 import { rssResourceVersion } from './codex-rss-resources'
 import { createHash } from 'node:crypto'
@@ -86,11 +87,6 @@ export type ResolvedCodexExplicitResources = {
 function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex')
 }
-
-function localLogicalResourceId(kind: 'local_file' | 'local_directory', canonicalPath: string): string {
-  return `${kind === 'local_directory' ? 'local-directory' : 'local-file'}:${sha256(canonicalPath).slice(0, 32)}`
-}
-
 
 async function sha256File(path: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -185,6 +181,7 @@ export async function resolveCodexExplicitResources(input: {
   resolveMcpResource?: (
     selection: Extract<SendScopedResourceSelection, { kind: 'mcp_resource' }>,
   ) => Promise<CodexResolvedInlineResource | null>
+  resolveLocalObject?: (path: string) => ObjectLocation
   selectedSkill?: CodexResolvedSkillInput | null
 }): Promise<ResolvedCodexExplicitResources> {
   const nativeInput: CodexUserInput[] = []
@@ -434,7 +431,11 @@ export async function resolveCodexExplicitResources(input: {
     if (expectedDirectory !== metadata.isDirectory() || (!expectedDirectory && !metadata.isFile())) {
       throw new Error('codex_explicit_resource_kind_mismatch')
     }
-    const key = `${selection.kind}\u0000${canonicalPath}`
+    if (!input.resolveLocalObject) throw new Error('codex_object_resolver_unavailable')
+    const object = input.resolveLocalObject(canonicalPath)
+    // Files and directories are registered locally; identity grants no additional tools or write access.
+    const logicalResourceId = `${expectedDirectory ? 'local-directory' : 'local-file'}:${object.objectId}`
+    const key = `${selection.kind}\u0000${logicalResourceId}`
     if (seen.has(key)) continue
     seen.add(key)
 
@@ -444,7 +445,6 @@ export async function resolveCodexExplicitResources(input: {
       : await sha256File(canonicalPath).catch(() => {
           throw new Error('codex_explicit_resource_unavailable')
         })
-    const logicalResourceId = localLogicalResourceId(selection.kind, canonicalPath)
     const reference = versionReference(logicalResourceId, digest)
     resourceRefs.push(reference)
 

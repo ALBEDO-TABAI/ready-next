@@ -1,5 +1,3 @@
-export const FILE_APPEARANCE_STORAGE_KEY = 'ready-file-appearances-v1'
-
 export const FILE_APPEARANCE_COLORS = [
   { key: 'red', label: '红色', value: '#ff453a' },
   { key: 'orange', label: '橙色', value: '#ff9f0a' },
@@ -107,30 +105,6 @@ export function clearFileAppearanceForPath(map: FileAppearanceMap, path: string)
 
 function isSameOrDescendantPath(path: string, ancestor: string): boolean {
   return path === ancestor || path.startsWith(`${ancestor}/`) || path.startsWith(`${ancestor}\\`)
-}
-
-function remapPath(path: string, sourcePath: string, targetPath: string): string {
-  if (path === sourcePath) return targetPath
-  if (path.startsWith(`${sourcePath}/`) || path.startsWith(`${sourcePath}\\`)) {
-    return `${targetPath}${path.slice(sourcePath.length)}`
-  }
-  return path
-}
-
-export function remapFileAppearancePath(
-  map: FileAppearanceMap,
-  sourcePath: string,
-  targetPath: string,
-): FileAppearanceMap {
-  if (!sourcePath || !targetPath || sourcePath === targetPath) return map
-  let changed = false
-  const next: FileAppearanceMap = {}
-  for (const [path, appearance] of Object.entries(map)) {
-    const mappedPath = remapPath(path, sourcePath, targetPath)
-    if (mappedPath !== path) changed = true
-    next[mappedPath] = appearance
-  }
-  return changed ? next : map
 }
 
 export function removeFileAppearancePath(map: FileAppearanceMap, path: string): FileAppearanceMap {

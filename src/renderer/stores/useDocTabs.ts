@@ -1,3 +1,4 @@
+import { initializeObjectPresentation, objectLocationForPath, objectPresentationAPI, onObjectMoved, rememberObjectLocation, resolvePresentationObject } from './objectPresentationState'
 import { registerDocumentSaveHandler } from '../modules/document/documentSaveRegistry'
 import { createDocumentOperationSync } from '../modules/document/documentOperationSync'
 import { create } from 'zustand'
@@ -21,6 +22,9 @@ import {
 interface DocTabBase {
     id: string
     title: string
+    objectId?: string
+    objectRevision?: number
+    objectBinding?: { status: 'resolving' } | { status: 'resolved' } | { status: 'failed'; message: string }
     lastActivatedAt?: number | null
     tagForgeCreationPending?: boolean
     // Renderer-only grouping (mirrors the browser rail). null/absent = ungrouped.
@@ -73,7 +77,6 @@ interface DocTabsState {
     setSplitTab: (id: string | null) => void
     setDocumentSplitRatio: (ratio: number) => void
     setPendingReveal: (reveal: PendingDocReveal | null) => void
-    remapTabPaths: (fromPath: string, toPath: string) => void
 
     // Group ops — delegate to the pure tab-group-model (single source) and land
     // through the normalize choke. delete-group / new-tab-in-group are orchestrated
@@ -404,24 +407,11 @@ function syncTabCounterFromTabs(tabs: DocTab[]) {
     tabCounter = Math.max(tabCounter, maxId)
 }
 
-function remapDocTabPath(path: string | null, fromPath: string, toPath: string): string | null {
-    if (!path) return path
-    const pathKey = normalizeDocTabPathKey(path)
-    const fromKey = normalizeDocTabPathKey(fromPath)
-    if (!pathKey || !fromKey) return path
-    if (pathKey === fromKey) return toPath
-    if (pathKey.startsWith(`${fromKey}/`)) {
-        const separator = toPath.includes('\\') && !toPath.includes('/') ? '\\' : '/'
-        const base = toPath.replace(/[\\/]+$/, '')
-        const suffix = pathKey.slice(fromKey.length).replace(/\//g, separator)
-        return `${base}${suffix}`
-    }
-    return path
-}
-
 function ensureDocumentTabForPath(tabs: DocTab[], path: string): { tabs: DocTab[]; id: string } {
     const pathKey = normalizeDocTabPathKey(path)
-    const existing = pathKey ? tabs.find(t => normalizeDocTabPathKey(t.path) === pathKey) : undefined
+    const location = objectLocationForPath(path)
+    const existing = location ? tabs.find(tab => tab.objectId === location.objectId)
+        : pathKey ? tabs.find(t => !t.objectId && t.objectBinding?.status !== 'failed' && normalizeDocTabPathKey(t.path) === pathKey) : undefined
     if (existing) {
         return { tabs, id: existing.id }
     }
@@ -456,7 +446,7 @@ function ensureImagePreviewTabForPath(tabs: DocTab[], path: string): { tabs: Doc
         return {
             tabs: tabs.map(t =>
                 t.id === existing.id && t.kind !== 'library'
-                    ? { ...t, path, title: getFilename(path), content: '', isDirty: false }
+                    ? { ...t, path, objectId: undefined, objectRevision: undefined, objectBinding: undefined, title: getFilename(path), content: '', isDirty: false }
                     : t
             ),
             id: existing.id,
@@ -722,9 +712,10 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
     },
 
     setTabPath: (id: string, path: string | null) => {
+        if (get().tabs.find(tab => tab.id === id)?.path === path) return
         set({
             tabs: get().tabs.map(t =>
-                t.id === id && t.kind !== 'library' ? { ...t, path, title: path ? getFilename(path) : t.title } : t
+                t.id === id && t.kind !== 'library' ? { ...t, path, objectId: undefined, objectRevision: undefined, objectBinding: undefined, title: path ? getFilename(path) : t.title } : t
             )
         })
     },
@@ -808,21 +799,6 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
         set({ pendingReveal: reveal })
     },
 
-    remapTabPaths: (fromPath: string, toPath: string) => {
-        set({
-            tabs: get().tabs.map((tab) => {
-                if (tab.kind === 'library') return tab
-                const nextPath = remapDocTabPath(tab.path, fromPath, toPath)
-                if (nextPath === tab.path) return tab
-                return {
-                    ...tab,
-                    path: nextPath,
-                    title: nextPath ? getFilename(nextPath) : tab.title,
-                }
-            }),
-        })
-    },
-
     createTabGroupFromDrop: (draggedId, targetId) => {
         const state = get()
         const color = pickNextGroupColor(state.tabGroups.map((group) => group.color))
@@ -892,7 +868,7 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
         ...currentState,
         ...state,
         ...next,
-        tabs: restorePersistedDrafts(next.tabs),
+        tabs: restorePersistedDrafts(next.tabs).map(tab => ({ ...tab, objectBinding: undefined })),
         focusedPaneTabId: next.activeTabId,
       }
     },
@@ -954,3 +930,51 @@ if (typeof window !== 'undefined' && typeof window.electronAPI?.document?.onOper
     })
     void api.registerOperationSync().catch((error) => console.error('[document-operation-sync] registration failed', error))
 }
+
+// Resolve before a disk-backed editor can read or persist presentation state. Drafts stay local.
+const objectBindings = new Map<string, Promise<void>>()
+function scheduleObjectBindings(): void {
+    if (typeof window === 'undefined' || !window.electronAPI?.objects) return
+    for (const tab of useDocTabs.getState().tabs) {
+        if (!tab.path || tab.objectBinding || objectBindings.has(tab.id)) continue
+        const path = tab.path
+        const work = Promise.resolve().then(async () => {
+            if (useDocTabs.getState().tabs.find(current => current.id === tab.id)?.path !== path) return
+            useDocTabs.setState(state => ({ tabs: state.tabs.map(current => current.id === tab.id ? { ...current, objectBinding: { status: 'resolving' as const } } : current) }))
+            await initializeObjectPresentation()
+            const located = tab.objectId ? await objectPresentationAPI().locate(tab.objectId) : await resolvePresentationObject(path)
+            if (!located) throw new Error('文件当前位置不可用')
+            const location = rememberObjectLocation(located)
+            useDocTabs.setState(state => {
+                const current = state.tabs.find(item => item.id === tab.id)
+                if (!current || current.path !== path) return state
+                const existing = state.tabs.find(item => item.id !== tab.id && item.objectId === location.objectId)
+                if (existing) {
+                    // Keep an independently edited duplicate as an explicit draft, never discard its text.
+                    if (current.isDirty && current.content !== existing.content) {
+                        return { tabs: state.tabs.map(item => item.id === tab.id ? { ...item, path: null, objectId: undefined, objectRevision: undefined, objectBinding: undefined } : item) }
+                    }
+                    const tabs = state.tabs.filter(item => item.id !== tab.id)
+                    const activeTabId = state.activeTabId === tab.id ? existing.id : state.activeTabId
+                    const split = state.splitTabId === tab.id ? existing.id : state.splitTabId
+                    return { ...normalizeDocGroups(tabs, state.tabGroups), activeTabId, splitTabId: split === activeTabId ? null : split, focusedPaneTabId: state.focusedPaneTabId === tab.id ? existing.id : state.focusedPaneTabId }
+                }
+                return { tabs: state.tabs.map(item => item.id === tab.id && item.kind !== 'library' ? { ...item, path: location.path, title: getFilename(location.path), objectId: location.objectId, objectRevision: location.revision, objectBinding: { status: 'resolved' as const } } : item) }
+            })
+        }).catch(error => {
+            useDocTabs.setState(state => ({ tabs: state.tabs.map(current => current.id === tab.id && current.path === path ? { ...current, objectBinding: { status: 'failed' as const, message: String(error) } } : current) }))
+            console.error('[objects] tab identity resolution failed', error)
+        }).finally(() => { objectBindings.delete(tab.id); scheduleObjectBindings() })
+        objectBindings.set(tab.id, work)
+    }
+}
+export async function settleDocTabObjects(): Promise<void> {
+    scheduleObjectBindings()
+    while (objectBindings.size) await Promise.all(objectBindings.values())
+}
+onObjectMoved(event => {
+    useDocTabs.setState(state => ({ tabs: state.tabs.map(tab => tab.kind !== 'library' && tab.objectId === event.objectId && event.revision > (tab.objectRevision ?? -1)
+        ? { ...tab, path: event.to, title: getFilename(event.to), objectRevision: event.revision, objectBinding: { status: 'resolved' as const } } : tab) }))
+})
+useDocTabs.subscribe((state, previous) => { if (state.tabs !== previous.tabs) scheduleObjectBindings() })
+scheduleObjectBindings()

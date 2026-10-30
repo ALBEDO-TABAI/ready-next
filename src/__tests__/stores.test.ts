@@ -1,3 +1,4 @@
+import { acceptObjectMove } from '../renderer/stores/objectPresentationState'
 import { describe, it, beforeEach } from 'node:test'
 import assert from 'node:assert'
 
@@ -409,10 +410,10 @@ describe('useDocTabs Store', () => {
         assert.strictEqual(useDocTabs.getState().splitTabId, null)
     })
 
-    it('should remap document tab paths using normalized path identity', () => {
+    it('should update document tab paths from a confirmed object move', () => {
         useDocTabs.setState({
             tabs: [
-                { id: 'doc-1', path: 'C:\\Workspace\\Cafe\u0301\\draft.md', title: 'draft.md', content: '', isDirty: false },
+                { id: 'doc-1', objectId: 'store-move-object', objectRevision: 1, path: 'C:\\Workspace\\Cafe\u0301\\draft.md', title: 'draft.md', content: '', isDirty: false },
             ],
             activeTabId: 'doc-1',
             splitTabId: null,
@@ -420,7 +421,7 @@ describe('useDocTabs Store', () => {
             pendingReveal: null,
         })
 
-        useDocTabs.getState().remapTabPaths('c:\\Workspace\\Café', 'c:\\Workspace\\Archive\\Café')
+        acceptObjectMove({ objectId: 'store-move-object', from: 'C:\\Workspace\\Café', to: 'c:\\Workspace\\Archive\\Café\\draft.md', revision: 2 })
 
         const tab = useDocTabs.getState().tabs[0]
         assert.strictEqual(tab.path, 'c:\\Workspace\\Archive\\Café\\draft.md')
@@ -1209,10 +1210,10 @@ describe('useWorkspace Store', () => {
         assert.strictEqual(state.creatingType, null)
     })
 
-    it('should rename an item in mock mode', async () => {
+    it('rename receipt waits for the object completion event before updating an open tab', async () => {
         useDocTabs.setState({
             tabs: [
-                { id: 'doc-1', path: '/workspace/old.md', title: 'old.md', content: 'open', isDirty: false },
+                { id: 'doc-1', objectId: 'workspace-move', objectRevision: 1, path: '/workspace/old.md', title: 'old.md', content: 'open', isDirty: false },
             ],
             activeTabId: 'doc-1',
             splitTabId: null,
@@ -1232,15 +1233,17 @@ describe('useWorkspace Store', () => {
         assert.ok(state.files.some(f => f.name === 'new.md'))
         assert.ok(!state.files.some(f => f.name === 'old.md'))
         assert.strictEqual(state.renamingPath, null)
+        assert.strictEqual(useDocTabs.getState().tabs[0].path, '/workspace/old.md')
+        acceptObjectMove({ objectId: 'workspace-move', from: '/workspace/old.md', to: '/workspace/new.md', revision: 2 })
         const tab = useDocTabs.getState().tabs[0]
         assert.strictEqual(tab.path, '/workspace/new.md')
         assert.strictEqual(tab.title, 'new.md')
     })
 
-    it('should remap open document tab paths when moving a file', async () => {
+    it('move receipt waits for the object completion event before updating an open tab', async () => {
         useDocTabs.setState({
             tabs: [
-                { id: 'doc-1', path: '/workspace/old.md', title: 'old.md', content: 'open', isDirty: false },
+                { id: 'doc-1', objectId: 'workspace-move-second', objectRevision: 1, path: '/workspace/old.md', title: 'old.md', content: 'open', isDirty: false },
             ],
             activeTabId: 'doc-1',
             splitTabId: null,
@@ -1258,6 +1261,8 @@ describe('useWorkspace Store', () => {
         const result = await useWorkspace.getState().moveItem('/workspace/old.md', '/workspace/archive/old.md')
 
         assert.strictEqual(result, true)
+        assert.strictEqual(useDocTabs.getState().tabs[0].path, '/workspace/old.md')
+        acceptObjectMove({ objectId: 'workspace-move-second', from: '/workspace/old.md', to: '/workspace/archive/old.md', revision: 2 })
         const tab = useDocTabs.getState().tabs[0]
         assert.strictEqual(tab.path, '/workspace/archive/old.md')
         assert.strictEqual(tab.title, 'old.md')

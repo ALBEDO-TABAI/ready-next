@@ -6,7 +6,7 @@ import {
   DOCUMENT_READING_POSITIONS_KEY,
   loadDocumentReadingPosition,
   readDocumentReadingPositionMap,
-  readDocumentReadingPositions,
+  readObjectReadingPositions,
   resolveMarkdownLineFromAnchor,
   saveDocumentReadingPosition,
 } from '../renderer/modules/document/documentScrollAnchor'
@@ -67,7 +67,7 @@ test('markdown scroll anchor distinguishes duplicate chapter titles', () => {
 test('document reading positions round-trip through persistent storage', () => {
   const storage = createStorage()
 
-  saveDocumentReadingPosition('/tmp/a.md', {
+  saveDocumentReadingPosition('object-a', {
     top: 240,
     ratio: 0.4,
     maxScroll: 600,
@@ -76,7 +76,7 @@ test('document reading positions round-trip through persistent storage', () => {
     anchorProgress: 0.25,
   }, storage)
 
-  assert.deepEqual(loadDocumentReadingPosition('/tmp/a.md', storage), {
+  assert.deepEqual(loadDocumentReadingPosition('object-a', storage), {
     top: 240,
     ratio: 0.4,
     maxScroll: 600,
@@ -89,18 +89,18 @@ test('document reading positions round-trip through persistent storage', () => {
 test('document reading position cache ignores corrupt rows and exposes a restore map', () => {
   const storage = createStorage()
   storage.setItem(DOCUMENT_READING_POSITIONS_KEY, JSON.stringify([
-    { key: '/tmp/a.md', top: 10, ratio: 2, maxScroll: 50, updatedAt: 2 },
+    { key: 'object-a', top: 10, ratio: 2, maxScroll: 50, updatedAt: 2 },
     { key: '', top: 5, ratio: 0.1, maxScroll: 20, updatedAt: 3 },
     { key: '/tmp/b.md', top: 'bad', ratio: 0.1, maxScroll: 20, updatedAt: 4 },
   ]))
 
-  const records = readDocumentReadingPositions(storage)
+  const records = readObjectReadingPositions(storage)
   assert.equal(records.length, 1)
-  assert.equal(records[0].key, '/tmp/a.md')
+  assert.equal(records[0].key, 'object-a')
   assert.equal(records[0].ratio, 1)
 
   const map = readDocumentReadingPositionMap(storage)
-  assert.deepEqual(map.get('/tmp/a.md'), {
+  assert.deepEqual(map.get('object-a'), {
     top: 10,
     ratio: 1,
     maxScroll: 50,
@@ -149,8 +149,8 @@ test('resize-time scroll capture skips expensive anchor discovery but keeps the 
 test('正文段落位置持久保存，不依赖章节标题', () => {
   const storage = createStorage()
   const snapshot = { top: 500, ratio: 0.5, maxScroll: 1000, anchorTitle: null, anchorOrdinal: null, anchorProgress: null, sourceLine: 321, sourceProgress: 0.6 }
-  saveDocumentReadingPosition('/tmp/paragraph.md', snapshot, storage)
-  assert.deepEqual(loadDocumentReadingPosition('/tmp/paragraph.md', storage), snapshot)
+  saveDocumentReadingPosition('object-paragraph', snapshot, storage)
+  assert.deepEqual(loadDocumentReadingPosition('object-paragraph', storage), snapshot)
 })
 
 test('预览按可见正文段落捕获，重排后恢复同一段落内部', async () => {

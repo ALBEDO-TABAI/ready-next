@@ -1,3 +1,4 @@
+import { publishObjectMoves } from './events'
 import { repairObjectLinks } from './link-repair'
 import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
@@ -120,6 +121,7 @@ export class ObjectMutations {
       this.registry.syncProjection()
       db.prepare("UPDATE object_move_operations SET state='committed' WHERE id=?").run(id)
     })
+    publishObjectMoves(this.registry, objects)
   }
   private workspaceRoot(id:number|null):string {return id===null?'':this.registry.db.prepare('SELECT root FROM workspaces WHERE id=?').get<{root:string}>(id)?.root??''}
   recover():void {

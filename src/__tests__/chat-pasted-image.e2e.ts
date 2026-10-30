@@ -1,3 +1,4 @@
+import { resolveTestObject } from './utils/object-resolver'
 // npm run verify:chat-pasted-image runs this in Electron's main process with the real image decoder.
 import assert from 'node:assert/strict'
 import test from 'node:test'
@@ -22,7 +23,7 @@ test('clipboard image bytes persist privately and reach native image input throu
       assert.deepEqual(nativeImage.createFromBuffer(saved).getSize(), { width: 16, height: 16 })
       assert.equal((await stat(file.path)).mode & 0o777, 0o600)
       const composed = await buildCodexIngressInputWithDiagnostics({ content: '', attachments: [createLocalPathAttachment(file)] })
-      const resolved = await resolveCodexExplicitResources({ selections: composed.resources!, resolveSkill: () => null })
+      const resolved = await resolveCodexExplicitResources({ resolveLocalObject: resolveTestObject, selections: composed.resources!, resolveSkill: () => null })
       assert.deepEqual(resolved.input, [{ type: 'localImage', path: await realpath(file.path), detail: null }])
       assert.equal(JSON.stringify(composed).includes('base64'), false)
       assert.deepEqual(await readFile(file.path), saved)

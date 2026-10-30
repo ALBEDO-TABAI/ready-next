@@ -1,3 +1,5 @@
+import { ObjectPresentationService, registerObjectIPC } from '../object-service/presentation'
+import { subscribeObjectMoves } from '../object-service/events'
 import { ObjectRegistry } from '../object-service/registry'
 import { ObjectMutations } from '../object-service/mutations'
 import { app, ipcMain, dialog, shell, BrowserWindow } from 'electron'
@@ -302,7 +304,21 @@ let widgetGroupDispose: IpcDisposeHandle | null = null
  */
 let exportGroupDispose: IpcDisposeHandle | null = null
 
+let releaseObjectMoves: (() => void) | undefined
+
 export function setupDocumentIPC(useMock = false): void {
+  const objectService = () => {
+    const db = getDatabase().getRawDb()
+    if (!db) throw new Error('Database unavailable')
+    return new ObjectPresentationService(new ObjectRegistry(db))
+  }
+  registerObjectIPC(ipcMain, objectService)
+  releaseObjectMoves?.()
+  releaseObjectMoves = subscribeObjectMoves(objectService().registry.db, (event) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) window.webContents.send('object:moved', event)
+    }
+  })
   setupDocumentWriteIPC()
   // Stage V V2.3g — `document:widgetCommitted` (renderer → main push)
   // moved into `widgetGroup`. The group owns the listener registration

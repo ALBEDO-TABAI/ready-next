@@ -1,3 +1,5 @@
+import { ObjectPresentationService } from '../../../object-service/presentation'
+import { ObjectRegistry } from '../../../object-service/registry'
 import { createHash } from 'node:crypto'
 import { mkdirSync, realpathSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -281,6 +283,7 @@ export function createIngressPrepare(deps: IngressPrepareDeps) {
       }
       const currentResourceSelections = withProjectDirectorySelection(settledRSS.selections, projectDirectory)
       const explicitResources = await resolveCodexExplicitResources({
+        resolveLocalObject: path => new ObjectPresentationService(new ObjectRegistry(rawDb)).resolve(path),
         selections: currentResourceSelections,
         resolveSkill: (selection) => {
           const resolved = boundHost.resolveNativeSkillInput?.({

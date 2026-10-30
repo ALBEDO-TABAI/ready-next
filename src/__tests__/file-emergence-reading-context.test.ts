@@ -1,3 +1,4 @@
+import { rememberObjectLocation } from '../renderer/stores/objectPresentationState'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { JSDOM } from 'jsdom'
@@ -22,7 +23,7 @@ test('reading context collects existing document and ebook progress inside works
   const now = Date.now()
   const fakeStorage = storage({
     [DOCUMENT_READING_POSITIONS_KEY]: [{
-      key: '/workspace/docs/置身钉内.md',
+      key: 'reading-context-0',
       top: 10,
       ratio: 0.4,
       maxScroll: 100,
@@ -31,7 +32,7 @@ test('reading context collects existing document and ebook progress inside works
       anchorProgress: 0.2,
       updatedAt: now,
     }, {
-      key: '/outside/docs/旧文.md',
+      key: 'reading-context-1',
       top: 10,
       ratio: 0.8,
       maxScroll: 100,
@@ -67,8 +68,8 @@ test('reading context preserves the receiver required by native Web Storage', ()
   const now = Date.now()
   const dom = new JSDOM('<!doctype html>', { url: 'http://localhost' })
   dom.window.localStorage.setItem(DOCUMENT_READING_POSITIONS_KEY, JSON.stringify([
-    { key: '/workspace/docs/继续写.md', top: 20, ratio: 0.45, maxScroll: 100, updatedAt: now },
-    { key: '/workspace/papers/继续读.pdf', top: 40, ratio: 0.7, maxScroll: 100, updatedAt: now - 1 },
+    { key: 'reading-context-2', top: 20, ratio: 0.45, maxScroll: 100, updatedAt: now },
+    { key: 'reading-context-3', top: 40, ratio: 0.7, maxScroll: 100, updatedAt: now - 1 },
   ]))
   dom.window.localStorage.setItem(EBOOK_READING_STATE_KEY, JSON.stringify([
     { path: '/workspace/books/继续读.epub', fraction: 0.6, updatedAt: now - 2 },
@@ -81,3 +82,8 @@ test('reading context preserves the receiver required by native Web Storage', ()
 
   assert.deepEqual(records.map((record) => record.kind), ['document', 'pdf', 'ebook'])
 })
+
+rememberObjectLocation({ objectId: 'reading-context-0', path: '/workspace/docs/置身钉内.md', revision: 1 })
+rememberObjectLocation({ objectId: 'reading-context-1', path: '/outside/docs/旧文.md', revision: 1 })
+rememberObjectLocation({ objectId: 'reading-context-2', path: '/workspace/docs/继续写.md', revision: 1 })
+rememberObjectLocation({ objectId: 'reading-context-3', path: '/workspace/papers/继续读.pdf', revision: 1 })

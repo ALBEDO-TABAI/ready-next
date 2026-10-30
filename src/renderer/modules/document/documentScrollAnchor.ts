@@ -1,3 +1,4 @@
+import { OBJECT_READING_POSITIONS_KEY, readingPositionKey, objectLocationForId } from '../../stores/objectPresentationState'
 export type DocumentScrollAnchorSnapshot = {
   top: number
   ratio: number
@@ -20,7 +21,7 @@ export type DocumentReadingPositionRecord = DocumentScrollAnchorSnapshot & {
   updatedAt: number
 }
 
-export const DOCUMENT_READING_POSITIONS_KEY = 'ready-document-reading-positions-v1'
+export const DOCUMENT_READING_POSITIONS_KEY = OBJECT_READING_POSITIONS_KEY
 const MAX_DOCUMENT_READING_POSITIONS = 800
 
 type HeadingEntry = {
@@ -140,7 +141,7 @@ function normalizeRecord(value: unknown): DocumentReadingPositionRecord | null {
   return { key, updatedAt, ...snapshot }
 }
 
-export function readDocumentReadingPositions(
+export function readObjectReadingPositions(
   storage?: DocumentReadingPositionStorage | null,
 ): DocumentReadingPositionRecord[] {
   const target = resolveReadingPositionStorage(storage)
@@ -159,11 +160,19 @@ export function readDocumentReadingPositions(
   }
 }
 
+/** Path projection for file-emergence queries; persisted keys remain object IDs. */
+export function readDocumentReadingPositions(storage?: DocumentReadingPositionStorage | null): DocumentReadingPositionRecord[] {
+  return readObjectReadingPositions(storage).flatMap(record => {
+    const location = objectLocationForId(record.key)
+    return location ? [{ ...record, key: location.path }] : []
+  })
+}
+
 export function readDocumentReadingPositionMap(
   storage?: DocumentReadingPositionStorage | null,
 ): Map<string, DocumentScrollAnchorSnapshot> {
   const map = new Map<string, DocumentScrollAnchorSnapshot>()
-  readDocumentReadingPositions(storage).forEach(({ key, updatedAt: _updatedAt, ...snapshot }) => {
+  readObjectReadingPositions(storage).forEach(({ key, updatedAt: _updatedAt, ...snapshot }) => {
     map.set(key, snapshot)
   })
   return map
@@ -173,9 +182,9 @@ export function loadDocumentReadingPosition(
   key: string,
   storage?: DocumentReadingPositionStorage | null,
 ): DocumentScrollAnchorSnapshot | null {
-  const normalizedKey = key.trim()
+  const normalizedKey = readingPositionKey(key.trim())
   if (!normalizedKey) return null
-  const record = readDocumentReadingPositions(storage).find((item) => item.key === normalizedKey)
+  const record = readObjectReadingPositions(storage).find((item) => item.key === normalizedKey)
   if (!record) return null
   const { key: _key, updatedAt: _updatedAt, ...snapshot } = record
   return snapshot
@@ -186,12 +195,12 @@ export function saveDocumentReadingPosition(
   snapshot: DocumentScrollAnchorSnapshot,
   storage?: DocumentReadingPositionStorage | null,
 ): void {
-  const normalizedKey = key.trim()
+  const normalizedKey = readingPositionKey(key.trim())
   const target = resolveReadingPositionStorage(storage)
   const normalizedSnapshot = normalizeSnapshot(snapshot)
   if (!normalizedKey || !target || !normalizedSnapshot) return
   try {
-    const rest = readDocumentReadingPositions(target).filter((item) => item.key !== normalizedKey)
+    const rest = readObjectReadingPositions(target).filter((item) => item.key !== normalizedKey)
     const next = [
       { key: normalizedKey, updatedAt: Date.now(), ...normalizedSnapshot },
       ...rest,

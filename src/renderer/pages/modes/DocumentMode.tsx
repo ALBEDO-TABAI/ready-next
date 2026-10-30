@@ -1,3 +1,4 @@
+import { readingPositionKey } from '../../stores/objectPresentationState'
 import { LibraryTab, OpenEpubInLibrary } from '../../modules/library/navigation'
 import '../../design/next/tokens.css'
 import '../../design/next/glass.css'
@@ -171,6 +172,7 @@ const DocumentEditor = memo(function DocumentEditor({
   const isXlsx = ['xlsx', 'csv', 'xls'].includes(ext)
 
   if (tab.kind === 'library') return <LibraryTab />
+  if (tab.path && tab.objectBinding?.status !== 'resolved') return <div role="status">{tab.objectBinding?.status === 'failed' ? `无法打开文件：${tab.objectBinding.message}` : '正在确认文件位置…'}</div>
   if (ext === 'epub' && tab.path) return <OpenEpubInLibrary path={tab.path} sourceTabId={tab.id} />
 
   if (isReadyBoardFile(tab.path)) {
@@ -411,10 +413,10 @@ export default function DocumentMode({
       setBookReadingTabId(null)
     }
   }, [bookReadingActive, bookReadingTabId, isSceneVisible, panelTargetTab?.id])
-  const tabScrollStructureSignature = tabs.map((tab) => `${tab.id}\u0000${tab.path || ''}`).join('\u0001')
+  const tabScrollStructureSignature = tabs.map((tab) => `${tab.id}\u0000${tab.objectId || ''}\u0000${tab.path || ''}`).join('\u0001')
   const tabIdByScrollKey = useMemo(() => {
     const next = new Map<string, string>()
-    useDocTabs.getState().tabs.forEach((tab) => next.set(tab.path || tab.id, tab.id))
+    useDocTabs.getState().tabs.forEach((tab) => next.set(tab.objectId || `draft:${tab.id}`, tab.id))
     return next
     // eslint-disable-next-line react-hooks/exhaustive-deps -- tabScrollStructureSignature is a deliberate cache-busting key: the memo reads the store via getState() and rebuilds only when tab ids or paths change
   }, [tabScrollStructureSignature])
@@ -560,7 +562,7 @@ export default function DocumentMode({
   }, [isActive, refreshCleanTextTabsFromDisk])
 
   const captureDocumentScrollScope = useCallback((scope: HTMLElement, options?: { includeAnchor?: boolean }) => {
-    const key = scope.dataset.readyDocumentScrollKey
+    const key = readingPositionKey(scope.dataset.readyDocumentScrollKey || '')
     if (!key) return
     const element = findCurrentScrollElement(scope)
     if (!element) return
@@ -601,7 +603,8 @@ export default function DocumentMode({
     if (!isActive || bookReadingVisible) return
     const cleanups: Array<() => void> = []
     documentRootRef.current?.querySelectorAll<HTMLElement>('[data-ready-document-scroll-key]').forEach((scope) => {
-      const key = scope.dataset.readyDocumentScrollKey!
+      const key = readingPositionKey(scope.dataset.readyDocumentScrollKey || '')
+      if (!key) return
       const tabId = tabIdByScrollKey.get(key)
       findScrollCandidates(scope).forEach((element) => {
         const tracker = trackDocumentScrollPosition(element,
@@ -624,9 +627,9 @@ export default function DocumentMode({
   const restoreVisibleDocumentScrollPositions = useCallback(() => {
     const cleanups: Array<() => void> = []
     documentRootRef.current?.querySelectorAll<HTMLElement>('[data-ready-document-scroll-key]').forEach((scope) => {
-      const key = scope.dataset.readyDocumentScrollKey
+      const key = readingPositionKey(scope.dataset.readyDocumentScrollKey || '')
       if (!key) return
-      const snapshot = scrollSnapshots.get(key)
+      const snapshot = scrollSnapshots.get(key) ?? readDocumentReadingPositionMap().get(key)
       if (!snapshot) return
       const tabId = tabIdByScrollKey.get(key)
       const content = tabId
@@ -645,7 +648,8 @@ export default function DocumentMode({
   }, [activeTabId, bookReadingVisible, editorMode, isSceneVisible, restoreVisibleDocumentScrollPositions, splitTabId])
 
   const handleBookPositionChange = useCallback((key: string, snapshot: DocumentScrollAnchorSnapshot) => {
-    scrollSnapshots.set(key, snapshot)
+    const objectKey = readingPositionKey(key)
+    if (objectKey) scrollSnapshots.set(objectKey, snapshot)
   }, [scrollSnapshots])
 
   const handleEditorModeChange = useCallback((nextMode: 'edit' | 'preview') => {
@@ -1077,7 +1081,7 @@ export default function DocumentMode({
 
             {bookReadingVisible && panelTargetTab && (
               <DocumentBookReadingView
-                initialPosition={scrollSnapshots.get(panelTargetTab.path || panelTargetTab.id) ?? null}
+                initialPosition={scrollSnapshots.get(panelTargetTab.objectId || `draft:${panelTargetTab.id}`) ?? readDocumentReadingPositionMap().get(panelTargetTab.objectId || `draft:${panelTargetTab.id}`) ?? null}
                 onPositionChange={handleBookPositionChange}
                 key={panelTargetTab.id}
                 tab={panelTargetTab}

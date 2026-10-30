@@ -1,3 +1,4 @@
+import type { ObjectPresentationAPI, ObjectMovedEvent } from '../shared/object-identity'
 import type { LibraryHighlightContext, LibraryHighlightCreate, LibraryHighlightUpdate, LibraryHighlightRemove, LibraryHighlightState } from '../shared/library'
 import type { LibraryBook, LibraryBookPatch, LibraryBookmark, LibraryImportResult, LibraryReadingPosition, LibraryResult, LibraryState } from '../shared/library'
 import type { DocumentSyncRequest, DocumentSyncReply } from '../shared/document-operations'
@@ -1537,12 +1538,25 @@ const mcpAPI = {
   ),
 }
 
+const objectsAPI: ObjectPresentationAPI = {
+  resolvePath: (path) => ipcRenderer.invoke('object:resolve-path', path),
+  locate: (id) => ipcRenderer.invoke('object:locate', id),
+  prepareMigration: (request) => ipcRenderer.invoke('object:migration-prepare', request),
+  completeMigration: (id) => ipcRenderer.invoke('object:migration-complete', id),
+  onMoved: (callback) => {
+    const handler = (_event: Electron.IpcRendererEvent, event: ObjectMovedEvent) => callback(event)
+    ipcRenderer.on('object:moved', handler)
+    return () => ipcRenderer.removeListener('object:moved', handler)
+  },
+}
+
 contextBridge.exposeInMainWorld('electronAPI', {
   agent: agentAPI,
   runQuality: runQualityAPI,
   runFeedback: runFeedbackAPI,
   emergence: emergenceAPI,
   browser: browserAPI,
+  objects: objectsAPI,
   document: documentAPI,
   board: boardAPI,
   rss: rssAPI,
@@ -1578,6 +1592,7 @@ declare global {
       mcp: typeof mcpAPI
       runQuality: typeof runQualityAPI
       browser: typeof browserAPI
+      objects: typeof objectsAPI
       document: typeof documentAPI
       board: typeof boardAPI
       rss: typeof rssAPI

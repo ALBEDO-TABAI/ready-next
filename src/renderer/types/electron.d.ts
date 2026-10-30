@@ -1,3 +1,4 @@
+import type { ObjectPresentationAPI } from '../../shared/object-identity'
 import type { LibraryBook, LibraryBookPatch, LibraryBookmark, LibraryImportResult, LibraryReadingPosition, LibraryResult, LibraryState } from '../../shared/library'
 import type { DocumentSyncRequest, DocumentSyncReply } from '../../shared/document-operations'
 import type { ChatGptOAuthStatus } from '../../shared/chatgpt-oauth'
@@ -3353,6 +3354,7 @@ interface ElectronAPI {
   runFeedback: ElectronRunFeedbackAPI
   emergence: ElectronEmergenceAPI
   browser: ElectronBrowserAPI
+  objects: ObjectPresentationAPI
   document: ElectronDocumentAPI
   board: ElectronBoardAPI
   rss: ElectronRSSAPI

@@ -254,7 +254,10 @@
 
 - C2 Main 身份合同：`objects.id` 是唯一身份，沿用旧 `file_key`；`fileKey` 只是消费端名称。搜索、涌现和标签不得生成身份。对象服务以磁盘核验维护位置、完整 SHA-256、inode/device、版本及 present/missing/deleted；无法核验保持 unverified，不以历史路径声明 present。
 - 内部移动由同一对象服务完成文件操作、对象位置和搜索关系更新；失败补偿，跨工作区先核对两端范围。外部变化按同一批次先识别同路径原子保存，再依次按唯一 inode、完整内容哈希、文件内 ID 配对；冲突 ID 有否决权，重复副本隔离，不擅自写文件。窗口外仅文件内 ID 可恢复墓碑。
-- 书签、阅读会话、活动和标签按对象关联；路径快照只解释历史，不参与运行时认领。用户新建书签/笔记经写入服务补齐 Markdown `ready_id`；自动打开/阅读不写。失败保留本地关系并返回原失败码及不可跨机器恢复状态。已有书签的补写仅针对对应 Markdown。Renderer 状态迁移和真实窗口验收不属于本轮 Main 合同。
+- 书签、阅读会话、活动和标签按对象关联；路径快照只解释历史，不参与运行时认领。用户新建书签/笔记经写入服务补齐 Markdown `ready_id`；自动打开/阅读不写。失败保留本地关系并返回原失败码及不可跨机器恢复状态。已有书签的补写仅针对对应 Markdown。真实窗口验收使用隔离 Ready Next 环境。
+- C2 Renderer / Agent 合同（I2）：对象查询只登记 ready.db，打开、自动阅读和附件解析不得写入文件身份。标签编号属于界面，磁盘绑定由 Main 返回的 objectId/path/revision 确认；未完成解析不得保存路径阅读状态。内部移动与外部事件窗口提交后发布对象完成事件，旧 revision 不覆盖新位置。外观的路径映射仅是文件树显示投影，持久状态只按对象保存。
+- Renderer 旧状态迁移：固定 migrationId 和输入，Main 持久准备映射及未解析路径；Renderer 写入新键并记录已应用，再请求 Main 持久完成，确认后删除旧键。重试不覆盖新状态，未解析条目连同原值保留在迁移报告中，不猜身份。
+- Agent 本地文件与目录使用对象 id 派生 logicalResourceId；只影响新回合准备，授权仍冻结路径、内容版本及原工具范围，历史回执不改写。页面只隐藏 ready_id 元数据，源码及保存正文保留。行为合同入口：`ready-object-presentation-native.test.ts`、`ready-object-presentation-renderer.test.ts` 与 `note-preview-parser.test.ts`；真实窗口流程在 `verify-ready-next-smoke-electron.cjs`。
 - C2 命令行验收：`ready-object-migration-native.test.ts`、`ready-object-identity-native.test.ts`、`ready-object-write-native.test.ts`，以真实临时文件与 Electron SQLite 断言迁移保真、身份稳定、反链、无孤儿行及失败可见；界面验收由独立 Ready Next 环境承担。
 
 - Tag Forge 的文件发布与补偿只经文档写入服务；标签规则、审核和 durable creation receipt 仍归 Tag Forge。文件、打开标签页、索引与 `file_tag_assignments` 属于同一可回滚单元，读回失败不得发布成功；未保存缓冲合并不充当 durable receipt。

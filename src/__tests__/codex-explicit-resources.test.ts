@@ -1,3 +1,4 @@
+import { resolveTestObject } from './utils/object-resolver'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises'
@@ -26,7 +27,7 @@ test('Main revalidates selected files and emits body-free native/resource contra
     const canonicalImagePath = await realpath(imagePath)
     const canonicalTextPath = await realpath(textPath)
     const canonicalDirectoryPath = await realpath(directoryPath)
-    const result = await resolveCodexExplicitResources({
+    const result = await resolveCodexExplicitResources({ resolveLocalObject: resolveTestObject,
       selections: [
         {
           kind: 'local_file', id: 'image', name: 'image.png', path: imagePath,
@@ -70,7 +71,7 @@ test('explicit and selected skill inputs are Main-validated and deduplicated by 
     await writeFile(join(skillPath, 'SKILL.md'), '# Summary\n')
     const canonicalSkillPath = await realpath(skillPath)
     const resolvedSkill = { name: 'summary', path: skillPath }
-    const result = await resolveCodexExplicitResources({
+    const result = await resolveCodexExplicitResources({ resolveLocalObject: resolveTestObject,
       selections: [{
         kind: 'skill', id: 'skill-1', name: 'forged renderer name',
         path: '/forged/path', skillId: 'summary',
@@ -82,7 +83,7 @@ test('explicit and selected skill inputs are Main-validated and deduplicated by 
     assert.equal(result.resourceRefs.length, 1)
     assert.equal(result.requestResources.length, 1)
     await writeFile(join(skillPath, 'SKILL.md'), '# Changed summary\n')
-    const changed = await resolveCodexExplicitResources({
+    const changed = await resolveCodexExplicitResources({ resolveLocalObject: resolveTestObject,
       selections: [],
       resolveSkill: () => null,
       selectedSkill: resolvedSkill,
@@ -94,7 +95,7 @@ test('explicit and selected skill inputs are Main-validated and deduplicated by 
 })
 
 test('browser, calendar and document-quote references use Main-resolved or explicit-user text without widening file authority', async () => {
-  const result = await resolveCodexExplicitResources({
+  const result = await resolveCodexExplicitResources({ resolveLocalObject: resolveTestObject,
     selections: [
       { kind: 'browser_tab', id: 'browser-1', name: 'forged title', tabId: 'tab-1' },
       { kind: 'calendar_event', id: 'calendar-1', name: 'forged event', eventId: 'event-1' },
@@ -154,7 +155,7 @@ test('legacy DOC/RTF/ODT selections remain explicitly unsupported', async () => 
     for (const extension of ['.doc', '.rtf', '.odt']) {
       const path = join(root, `legacy${extension}`)
       await writeFile(path, 'unsupported')
-      await assert.rejects(resolveCodexExplicitResources({
+      await assert.rejects(resolveCodexExplicitResources({ resolveLocalObject: resolveTestObject,
         selections: [{
           kind: 'local_file', id: extension, name: `legacy${extension}`, path,
           size: 11, ext: extension, rendererType: 'text',
@@ -179,7 +180,7 @@ test('MCP resources freeze exact server, URI, catalog generation and content dig
     catalogDigest: 'b'.repeat(64),
     contentDigest: digest,
   }
-  const result = await resolveCodexExplicitResources({
+  const result = await resolveCodexExplicitResources({ resolveLocalObject: resolveTestObject,
     selections: [selection],
     resolveSkill: () => null,
     resolveMcpResource: async () => ({
@@ -194,7 +195,7 @@ test('MCP resources freeze exact server, URI, catalog generation and content dig
   assert.equal(result.requestResources[0]?.kind, 'mcp_resource')
   assert.equal(result.requestResources[0]?.source, 'mcp_context')
   assert.equal(result.resourceRefs[0]?.currentDigest, digest)
-  await assert.rejects(resolveCodexExplicitResources({
+  await assert.rejects(resolveCodexExplicitResources({ resolveLocalObject: resolveTestObject,
     selections: [{ ...selection, contentDigest: 'c'.repeat(64) }],
     resolveSkill: () => null,
     resolveMcpResource: async () => ({
