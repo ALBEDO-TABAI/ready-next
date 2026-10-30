@@ -117,13 +117,15 @@ export class ObjectLinkRepository {
                 .filter(o => basename(o.current_path!).replace(/\.md$/i, '').toLowerCase() === stem)
             }
           }
+          if (!candidates.length) candidates = this.db.prepare(`SELECT DISTINCT o.* FROM objects o JOIN file_move_receipts r ON r.object_id=o.id
+            WHERE o.status='trashed' AND o.identity_state<>'conflict' AND r.old_path IN (?,?)`).all<Target>(...paths)
           if (candidates.length === 1) target = candidates[0]
           else if (candidates.length > 1) reason = '多个候选'
         }
       }
       const resolved = !!targetRef || !!target && target.status === 'present' && target.identity_state !== 'conflict'
       this.db.prepare('UPDATE object_links SET target_id=?,target_ref=?,resolved=?,unresolved_reason=? WHERE id=?')
-        .run(target?.id ?? null, targetRef, resolved ? 1 : 0, resolved ? null : reason ?? (target ? '目标不可用' : '目标不存在'), row.id)
+        .run(target?.id ?? null, targetRef, resolved ? 1 : 0, resolved ? null : reason ?? (target?.status === 'trashed' ? '已回收' : target ? '目标不可用' : '目标不存在'), row.id)
       if (row.source_id && target && !ready.ok) {
         this.db.prepare(`INSERT INTO object_link_repairs(source_id,kind,raw_target,target_id,source_hash,state) VALUES(?,?,?,?,?,'confirmed')
           ON CONFLICT(source_id,kind,raw_target) DO UPDATE SET source_hash=excluded.source_hash WHERE object_link_repairs.state='confirmed'`)

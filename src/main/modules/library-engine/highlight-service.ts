@@ -102,7 +102,7 @@ export class LibraryHighlightService {
     return this.serial(input.bookId, async () => { const current = await this.read(input); return this.snapshot(input, current, current.md) })
   }
 
-  private async change(input: Context & { expectedVersion: string }, edit: (list: LibraryHighlight[]) => { next: LibraryHighlight[]; removed: Set<string> }): Promise<LibraryHighlightState> {
+  private async change(input: Context & { expectedVersion: string }, edit: (list: LibraryHighlight[]) => { next: LibraryHighlight[]; removed: Set<string> }, importedAt?: Map<string, number>): Promise<LibraryHighlightState> {
     const current = await this.read(input)
     if (documentVersion(current.md) !== input.expectedVersion) throw new Error('Document version has changed，请刷新标注后重试')
     const { next, removed } = edit(this.project(current.md, input, current.cache).highlights)
@@ -110,11 +110,11 @@ export class LibraryHighlightService {
     const before = parseHighlights(current.md, input.bookId)
     for (const h of normalized) {
       const old = before.find(b => b.highlight.id === h.id)?.highlight
-      if (h.location.status === 'located' && (!old || old.color !== h.color || old.note !== h.note)) {
+      if ((h.location.status === 'located' && (!old || old.color !== h.color || old.note !== h.note)) || importedAt?.has(h.id)) {
         const now = Date.now()
         current.cache.highlights[h.id] = { chapter: h.chapter, from: h.from, to: h.to,
-          quote: quoteAt(input.chapters[h.chapter].text, h.from, h.to), color: h.color,
-          createdAt: current.cache.highlights[h.id]?.createdAt ?? now, updatedAt: now }
+          quote: h.location.status === 'located' ? { ...quoteAt(input.chapters[h.chapter].text, h.from, h.to), exact: h.text } : { exact: h.text, prefix: '', suffix: '' }, color: h.color,
+          createdAt: current.cache.highlights[h.id]?.createdAt ?? importedAt?.get(h.id) ?? now, updatedAt: importedAt?.get(h.id) ?? now }
       }
     }
     const md = rewriteHighlights(current.md, input.bookId, normalized, removed)
@@ -132,6 +132,17 @@ export class LibraryHighlightService {
     const saved = await readFile(current.book.notePath, 'utf8')
     if (documentVersion(saved) !== receipt.afterVersion) throw new Error('来源页在保存后又被修改，请刷新标注')
     return this.snapshot(input, current, saved)
+  }
+
+  /** Archive ids are deterministic; retry adds only blocks still absent from the source. */
+  importMissing(input: Context & { expectedVersion: string }, imported: (LibraryHighlight & { createdAt: number })[]): Promise<LibraryHighlightState> {
+    return this.serial(input.bookId, async () => {
+      const current = await this.read(input)
+      const ids = new Set(parseHighlights(current.md, input.bookId).map(b => b.highlight.id))
+      const missing = imported.filter(h => !ids.has(h.id))
+      if (!missing.length) return this.snapshot(input, current, current.md)
+      return this.change(input, list => ({ next: [...list, ...missing], removed: new Set() }), new Map(missing.map(h => [h.id, h.createdAt])))
+    })
   }
 
   create(raw: unknown): Promise<LibraryHighlightState> {

@@ -1,6 +1,8 @@
+import { BINARY_EXTENSIONS } from './binary-extensions'
 import { createHash, randomUUID } from 'node:crypto'
-import { readFile, realpath } from 'node:fs/promises'
+import { readFile, realpath, link, unlink } from 'node:fs/promises'
 import { applyDocumentOperation as applyOperation, type DocumentOperation, type DocumentSyncRequest, type DocumentSyncReply } from '../../../shared/document-operations'
+import { basename, dirname, join, resolve, extname } from 'node:path'
 import { publishFileAtomically } from './atomic-file-publish'
 
 export type DocumentWriteErrorCode = 'version_conflict' | 'dirty_conflict' | 'operation_failed' | 'write_failed' | 'readback_mismatch'
@@ -42,7 +44,13 @@ export function getDocumentTabTransport(): DocumentTabTransport | undefined { re
 let canonicalizing: Promise<unknown> = Promise.resolve()
 
 export async function withDocumentPathLock<T>(path: string, work: (path: string) => Promise<T>): Promise<T> {
-  const resolving = canonicalizing.then(() => realpath(path))
+  const canonicalPath = async (location: string): Promise<string> => {
+    try { return await realpath(location) } catch (error) {
+      if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error
+      return join(await canonicalPath(dirname(location)),basename(location))
+    }
+  }
+  const resolving = canonicalizing.then(() => canonicalPath(resolve(path)))
   canonicalizing = resolving.catch(() => undefined)
   const canonical = await resolving
   const previous = tails.get(canonical) ?? Promise.resolve()
@@ -173,4 +181,33 @@ export async function applyDocumentOperation(input: DocumentWriteInput, dependen
     const allowed: readonly unknown[] = ['version_conflict', 'dirty_conflict', 'operation_failed', 'write_failed', 'readback_mismatch']
     return { code: allowed.includes(code) ? code as DocumentWriteErrorCode : 'operation_failed', message: error instanceof Error ? error.message : String(error) }
   }
+}
+
+/** User buffers supply the complete text. A receipt means disk and index both acknowledged it. */
+export async function saveUserDocument(
+  input: { path: string; content: string; expectedVersion?: string },
+  dependencies = runtime,
+): Promise<DocumentWriteReceipt> {
+  if (typeof input.path !== 'string' || typeof input.content !== 'string' || input.expectedVersion !== undefined && typeof input.expectedVersion !== 'string') throw documentWriteError('operation_failed','Invalid user save input')
+  if (BINARY_EXTENSIONS.has(extname(input.path).toLowerCase())) throw documentWriteError('operation_failed','Binary files cannot be saved as text')
+  if (!dependencies) throw documentWriteError('write_failed', 'Document write service is not initialized')
+  let original: string
+  try { original = await readFile(input.path, 'utf8') } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error
+    if (input.expectedVersion !== undefined && input.expectedVersion !== 'missing') throw documentWriteError('version_conflict','Document was removed')
+    const directory = await realpath(dirname(input.path)), path = join(directory,basename(input.path))
+    const stage = join(directory, `.ready-save-${randomUUID()}`)
+    try {
+      await (dependencies.publish ?? publishFileAtomically)(stage,input.content)
+      if (await readFile(stage,'utf8') !== input.content) throw documentWriteError('readback_mismatch','New document readback mismatch')
+      await link(stage,path)
+      await dependencies.index(path,input.content)
+      if (await readFile(path,'utf8') !== input.content) throw documentWriteError('readback_mismatch','New document changed during indexing')
+      return { path, beforeVersion:'missing', afterVersion:documentVersion(input.content), committedAt:Date.now(), tab:'not_open' }
+    } finally { await unlink(stage).catch(error => { if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error }) }
+  }
+  return commitDocumentOperation({ path: input.path, expectedVersion: input.expectedVersion ?? documentVersion(original),
+    operation: { type: 'replaceRange', start: 0, end: original.length, expectedText: original, replacement: input.content }, origin: 'user_save' },
+  // The invoking editor owns this buffer; applying the full replacement to its dirty buffer is not a merge.
+  { ...dependencies, tabs: undefined })
 }

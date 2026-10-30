@@ -30,6 +30,64 @@ async function writeEpub(file) {
   fs.writeFileSync(file, await zip.generateAsync({ type: 'nodebuffer', mimeType: 'application/epub+zip' }))
 }
 
+// L5: exercise the visible chooser against fixture-only native dialog replies.
+// Originals are restored immediately; no test endpoint or production bypass exists.
+async function checkArchiveImport(app, page, fixtures, vaultRoot) {
+  const source = path.join(fixtures, '藏书阁夹具')
+  fs.mkdirSync(path.join(source, 'files'), { recursive: true })
+  fs.mkdirSync(path.join(source, 'covers'))
+  const text = '第一章\n甲乙丙丁戊己庚辛'
+  fs.writeFileSync(path.join(source, 'files', 'archive.txt'), text)
+  const record = { id: 'archive', title: '藏书阁迁移夹具', author: '测试作者', tags: ['迁移'], source: 'local', status: 'ready', addedAt: 1700000000000,
+    file: { name: '原书.txt', ext: 'txt', size: Buffer.byteLength(text) },
+    progress: { chapter: 0, offset: 5, pct: 0.5, at: 1700000000000 },
+    bookmarks: [{ chapter: 0, offset: 5, label: '旧书签', at: 1700000000000 }],
+    highlights: [
+      { id: 'one', chapter: 0, from: 3, to: 5, text: '甲乙', color: 'pink', note: '原批注', at: 1700000000000 },
+      { id: 'two', chapter: 0, from: 99, to: 101, text: '丙丁', color: 'pen', at: 1700000000000 },
+      { id: 'three', chapter: 0, from: 30, to: 33, text: '找不到', color: 'blue', at: 1700000000000 },
+    ] }
+  const json = JSON.stringify({ version: 1, books: [record, { ...record, id: 'missing', title: '缺失文件夹具' }] })
+  fs.writeFileSync(path.join(source, 'library.json'), json)
+  await app.evaluate(({ dialog }, directory) => {
+    globalThis.__archiveDialogs = { open: dialog.showOpenDialog, confirm: dialog.showMessageBox }
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [directory] })
+    dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false })
+  }, source)
+  try {
+    await page.getByRole('button', { name: '从藏书阁导入…', exact: true }).click()
+    const modal = page.getByRole('dialog', { name: '从藏书阁导入', exact: true })
+    await modal.getByText('桌面版建议位置', { exact: false }).waitFor()
+    await modal.getByRole('button', { name: '选择目录并导入' }).click()
+    await modal.getByText('导入结束：成功 1 本，跳过 0 本，失败 1 本；未定位划线 1 条。', { exact: true }).waitFor()
+    await modal.getByText('查看失败项', { exact: true }).click()
+    ok('archive failure reason is visible', await modal.getByText('缺失文件夹具：', { exact: false }).isVisible())
+    await page.screenshot({ path: path.join(shots, 'archive-report.png') })
+    const state = await page.evaluate(() => window.electronAPI.library.get())
+    const book = state.success && state.data.books.find(b => b.source.ref === '藏书阁:archive')
+    ok('archive book reaches shelf', !!book)
+    if (!book) throw new Error('archive fixture book missing')
+    const md = fs.readFileSync(book.notePath, 'utf8')
+    ok('archive source preserves annotations and unlocated text', md.includes('原批注') && md.includes('未定位') && md.includes('找不到'))
+    ok('archive anchors exist', fs.existsSync(path.join(vaultRoot, '.ready', 'anchors', `${book.id}.json`)))
+    const reading = await page.evaluate(async id => ({ position: await window.electronAPI.library.getPosition(id), bookmarks: await window.electronAPI.library.listBookmarks(id) }), book.id)
+    ok('archive reading records persist', reading.position.success && reading.position.data.offset === 5 && reading.bookmarks.success && reading.bookmarks.data.length === 1)
+    await modal.getByRole('button', { name: '关闭', exact: true }).click()
+    await page.getByRole('button', { name: '从藏书阁导入…', exact: true }).click()
+    await modal.getByRole('button', { name: '选择目录并导入' }).click()
+    await modal.getByText('导入结束：成功 0 本，跳过 1 本，失败 1 本；未定位划线 0 条。', { exact: true }).waitFor()
+    ok('archive retry does not duplicate source blocks', fs.readFileSync(book.notePath, 'utf8') === md)
+    ok('archive source bytes unchanged', fs.readFileSync(path.join(source, 'library.json'), 'utf8') === json && fs.readFileSync(path.join(source, 'files', 'archive.txt'), 'utf8') === text)
+    await modal.getByRole('button', { name: '关闭', exact: true }).click()
+  } finally {
+    await app.evaluate(({ dialog }) => {
+      dialog.showOpenDialog = globalThis.__archiveDialogs.open
+      dialog.showMessageBox = globalThis.__archiveDialogs.confirm
+      delete globalThis.__archiveDialogs
+    })
+  }
+}
+
 // Resting pages may be covered by WebGL. Inspect both the DOM and the actual SVG
 // captured at Image.src (the exact foreignObject used to upload each page texture).
 async function checkVisibleLines(page, label) {
@@ -251,6 +309,7 @@ function electronEnv(extra) {
     await page.waitForTimeout(1200)
     await page.screenshot({ path: path.join(shots, '1-shelf.png') })
     ok('the shelf shows both books', await page.locator('.rn-library .spine').count() >= 2)
+    await checkArchiveImport(app, page, fixtures, vault.root)
 
     // Spines sway and tilt, so Playwright's stability check never settles; click the spine's centre.
     const spine = page.locator('.rn-library .spine', { hasText: '验收用书' }).first()

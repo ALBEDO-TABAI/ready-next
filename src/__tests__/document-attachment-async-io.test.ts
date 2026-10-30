@@ -1,3 +1,5 @@
+import { writeDocumentEditableText } from '../main/modules/document-engine/document-editable-text'
+import { configureDocumentWriteService } from '../main/modules/document-engine/document-write-service'
 import assert from 'node:assert/strict'
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import fsPromises from 'node:fs/promises'
@@ -23,11 +25,6 @@ describe('document engine attachment async IO', () => {
   const sourcePath = resolve(process.cwd(), 'src/main/modules/document-engine/ipc-handler.ts')
   // eslint-disable-next-line ready/no-source-grep-test -- W1.1 exempt: document-engine/ipc-handler.ts registers handlers against the Electron `ipcMain` singleton on import, so saveAs remains structurally pinned here. Tracked in lint-exemption-ledger 2026-05-22.
   const source = readFileSync(sourcePath, 'utf8')
-  // eslint-disable-next-line ready/no-source-grep-test -- W1.1 exempt: pins the async-vs-sync write contract for the pure editable-text helper; behavior tests cover result shape, this check guards the main-thread blocking regression.
-  const editableTextSource = readFileSync(
-    resolve(process.cwd(), 'src/main/modules/document-engine/document-editable-text.ts'),
-    'utf8',
-  )
   // eslint-disable-next-line ready/no-source-grep-test -- W1.1 exempt: file-io-group.ts imports `electron`'s IpcMain and registers IPC handlers at module load; the async-fs-promises migration is asserted structurally because the handlers cannot be loaded from node:test. Tracked in lint-exemption-ledger 2026-05-22.
   const fileIoSource = readFileSync(
     resolve(process.cwd(), 'src/main/modules/document-engine/ipc/file-io-group.ts'),
@@ -160,15 +157,24 @@ describe('document engine attachment async IO', () => {
     assert.match(fileIoSource, /ipcMain\.handle\('document:createFile'[\s\S]*await writeFile\(path, '', 'utf-8'\)/)
   })
 
-  it('writeDocumentEditableText uses atomic async publish (not writeFileSync)', () => {
-    // The exported helper feeds document:write — must not block the main thread
-    // when the renderer commits a multi-MB markdown export.
-    const helperBlockMatch = editableTextSource.match(
-      /export async function writeDocumentEditableText[\s\S]*?\n\}\n/,
-    )
-    assert.ok(helperBlockMatch, 'writeDocumentEditableText not found')
-    const helperBlock = helperBlockMatch![0]
-    assert.match(helperBlock, /await \(options\.publish \?\? publishFileAtomically\)\(filePath, content\)/)
-    assert.doesNotMatch(helperBlock, /writeFileSync\(filePath, content, 'utf-8'\)/)
+  it('user text save awaits disk and search confirmation before returning success', async t => {
+    if (skipIfSqliteUnavailable(t, 'Document write')) return
+    const f = fixture()
+    try {
+      const path = join(f.root,'saved.md'); writeFileSync(path,'before')
+      let release!: () => void
+      let started!: () => void
+      const indexing = new Promise<void>(resolve => { started = resolve })
+      const gate = new Promise<void>(resolve => { release = resolve })
+      configureDocumentWriteService({ index: async path => { started(); await gate; const result = await f.engine.indexDocument(f.root,path); assert.ok(result.ok,result.error) } })
+      let complete = false
+      const pending = writeDocumentEditableText(path,'after').then(result => { complete = true; return result })
+      await indexing
+      assert.equal(complete,false); assert.equal(readFileSync(path,'utf8'),'after')
+      release()
+      const result = await pending
+      assert.equal(result.success,true,result.error); assert.ok(result.receipt)
+      assert.ok(f.db.prepare('SELECT id FROM documents WHERE object_id=?').get(f.registry.find(path)!.id))
+    } finally { configureDocumentWriteService(null); f.close() }
   })
 })

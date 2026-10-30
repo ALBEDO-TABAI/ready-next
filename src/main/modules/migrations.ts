@@ -1,3 +1,4 @@
+import { DOCUMENT_PAGES_MIGRATION, migrateDocumentPages } from './document-pages/schema'
 import { migrateObjectLinks } from './search-engine/object-link-schema'
 import { migrateDocumentDrafts, DOCUMENT_DRAFT_MIGRATION } from './document-drafts/schema'
 import { migrateObjects, OBJECT_MIGRATION } from './object-service/schema'
@@ -4468,6 +4469,7 @@ const migrations: Migration[] = [
     migrateObjectLinks(db)
   } },
   { name: DOCUMENT_DRAFT_MIGRATION, up: migrateDocumentDrafts },
+  { name: DOCUMENT_PAGES_MIGRATION, up: migrateDocumentPages },
 ]
 
 /**
@@ -4515,7 +4517,7 @@ export function runMigrations(db: MigrationDatabase): void {
     }
 
     const foreignKeysBefore = ['109_browser_target_claim_user_takeover',
-      '118_codex_native_continuity_terminal_head_v3', OBJECT_MIGRATION].includes(migration.name)
+      '118_codex_native_continuity_terminal_head_v3', OBJECT_MIGRATION, DOCUMENT_PAGES_MIGRATION].includes(migration.name)
       ? Number(db.prepare('PRAGMA foreign_keys').get<{ foreign_keys: number }>()?.foreign_keys || 0)
       : 0
     if (foreignKeysBefore) db.exec('PRAGMA foreign_keys = OFF')

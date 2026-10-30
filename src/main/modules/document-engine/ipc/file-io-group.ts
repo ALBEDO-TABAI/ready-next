@@ -231,12 +231,12 @@ export const fileIoGroup: IpcChannelGroup<FileIoGroupDeps> = {
     })
 
     // Write file
-    ipcMain.handle('document:write', async (_, { path, content }: { path: string; content: string }) => {
+    ipcMain.handle('document:write', async (_, { path, content, expectedVersion }: { path: string; content: string; expectedVersion?: string }) => {
       try {
         if (deps.useMock) {
           return { success: true, mock: true }
         }
-        const result = await deps.writeDocumentEditableText(path, content)
+        const result = await deps.writeDocumentEditableText(path, content, { expectedVersion })
         if (!result.success) {
           const ext = extname(path).toLowerCase()
           return {

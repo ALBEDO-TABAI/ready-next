@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { lstat, mkdir, readdir, readFile, rm } from 'node:fs/promises'
 import { basename, extname, isAbsolute, join } from 'node:path'
 import { stringify } from 'yaml'
@@ -6,7 +6,8 @@ import { z } from 'zod'
 import { LIBRARY_DATABASE_PAGE, LIBRARY_FOLDER, LIBRARY_FIELDS as F, LIBRARY_KIND_BOOK, type LibraryBook, type LibraryState, type LibraryImportResult } from '../../../shared/library'
 import type { VaultState } from '../../../shared/vault'
 import { topicFor } from '../../../shared/library-topics'
-import { applyDocumentOperation } from '../document-engine/document-write-service'
+import { readDocumentSource } from '../../../shared/document-operations'
+import { applyDocumentOperation, documentVersion } from '../document-engine/document-write-service'
 import { publishFileAtomically } from '../document-engine/atomic-file-publish'
 import { decodeBookText, epubMetadata, nameMetadata, type BookMetadata } from './book-metadata'
 import { exists, insideVault, isMissing, readBook } from './source-note'
@@ -139,13 +140,59 @@ export class LibraryEngine {
     })
   }
 
-  private async importOne(root: string, folder: string, path: string, download?: { id: string; source: LibraryBook['source'] }): Promise<LibraryBook> {
+  /** L5 runs under the existing import queue, including hash-based duplicate detection. */
+  importArchive(input: { path: string; title: string; ref: string; bytes: Uint8Array; root: string; fields: Record<string, unknown>; cover?: BookMetadata['cover'] }): Promise<{ book: LibraryBook; skipped: boolean }> {
+    return this.serial(async () => {
+      if (this.requireRoot() !== input.root) throw new Error('导入期间资料库已切换')
+      const fileHash = createHash('sha256').update(input.bytes).digest('hex')
+      const state = await this.scan()
+      if (state.status !== 'ready') throw new Error('资料库不可用')
+      let book = state.books.find(b => b.source.kind === 'import' && b.source.ref === input.ref)
+      if (book) {
+        const { frontmatter } = readDocumentSource(await readFile(book.notePath, 'utf8'))
+        if (frontmatter['藏书阁导入完成'] === true) return { book, skipped: true }
+        if (createHash('sha256').update(await readFile(book.filePath)).digest('hex') !== fileHash) throw new Error('未完成导入的原书内容已改变，请先核对文件')
+      } else {
+        for (const existing of state.books) {
+          const hash = createHash('sha256').update(await readFile(existing.filePath)).digest('hex')
+          if (hash === fileHash) return { book: existing, skipped: true }
+        }
+        const folder = join(input.root, LIBRARY_FOLDER)
+        await mkdir(folder, { recursive: true }); await insideVault(input.root, folder)
+        if ((await lstat(folder)).isSymbolicLink()) throw new Error('阅读目录不能是符号链接')
+        book = await this.importOne(input.root, folder, input.path, {
+          id: `archive-${createHash('sha256').update(input.ref).digest('hex')}`,
+          source: { kind: 'import', ref: input.ref }, title: input.title, cover: input.cover, bytes: input.bytes,
+        })
+      }
+      await this.writeArchiveFields(book, input.root, { ...input.fields, '藏书阁文件哈希': fileHash, '藏书阁导入完成': false })
+      return { book: await this.locate(book.id), skipped: false }
+    })
+  }
+
+  completeArchive(id: string, root: string): Promise<void> {
+    return this.serial(async () => this.writeArchiveFields(await this.locate(id), root, { '藏书阁导入完成': true }))
+  }
+
+  private async writeArchiveFields(book: LibraryBook, root: string, set: Record<string, unknown>): Promise<void> {
+    if (this.requireRoot() !== root) throw new Error('导入期间资料库已切换')
+    const content = await readFile(book.notePath, 'utf8')
+    if (this.requireRoot() !== root) throw new Error('导入期间资料库已切换')
+    const receipt = await (this.dependencies.write ?? applyDocumentOperation)({ path: book.notePath,
+      expectedVersion: documentVersion(content), operation: { type: 'setFrontmatterFields', set }, origin: 'library-archive' })
+    if ('code' in receipt) throw Object.assign(new Error(receipt.message), { code: receipt.code })
+    if (receipt.tab === 'merged_dirty') throw new Error('来源页有未保存修改，请保存后重新导入')
+    if (documentVersion(await readFile(book.notePath, 'utf8')) !== receipt.afterVersion) throw new Error('来源页在写入后发生变化，请重新导入')
+  }
+
+  private async importOne(root: string, folder: string, path: string, download?: { id: string; source: LibraryBook['source']; title?: string; cover?: BookMetadata['cover']; bytes?: Uint8Array }): Promise<LibraryBook> {
     if (!isAbsolute(path)) throw new Error('导入文件必须是绝对路径')
     const format = z.enum(formats).parse(extname(path).slice(1).toLowerCase())
-    const bytes = await readFile(path)
+    const bytes = download?.bytes ?? await readFile(path)
     const named = nameMetadata(basename(path))
     const metadata: BookMetadata = format === 'epub' ? await epubMetadata(bytes) : { ...named, subjects: [] }
-    const title = metadata.title || named.title || '未命名'
+    if (download?.cover) metadata.cover = download.cover
+    const title = download?.title || metadata.title || named.title || '未命名'
     const stem = title.replace(/[<>:"/\\|?*]|\p{Cc}/gu, '_').replace(/[. ]+$/g, '').slice(0, 80) || '未命名'
     let name = stem
     for (let n = 2; await exists(join(folder, `${name}.md`)) || await exists(join(folder, `${name}.assets`)); n++) name = `${stem} (${n})`

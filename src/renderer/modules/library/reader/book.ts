@@ -37,22 +37,34 @@ const PURIFY = {
   ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel|blob|data):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i,
 };
 
-export async function loadBook(buf: ArrayBuffer, ext: string, title: string): Promise<LoadedBook> {
-  if (ext === 'epub') return loadEpub(new Uint8Array(buf));
+// Supplied by Main's isolated DOM when importing an archive; the chapter parser is shared.
+export interface BookDOM {
+  parseXml(text: string): Document;
+  parseDoc(text: string): Document;
+  serialize(node: Node): string;
+  sanitize(html: string, config: typeof PURIFY): string;
+}
+const browserDOM: BookDOM = {
+  parseXml, parseDoc,
+  serialize: node => new XMLSerializer().serializeToString(node),
+  sanitize: (html, config) => DOMPurify.sanitize(html, config),
+};
+export async function loadBook(buf: ArrayBuffer, ext: string, title: string, dom: BookDOM = browserDOM): Promise<LoadedBook> {
+  if (ext === 'epub') return loadEpub(new Uint8Array(buf), dom);
   return loadText(buf, ext, title);
 }
 
 /* ---------------- EPUB ---------------- */
 
-async function loadEpub(u8: Uint8Array): Promise<LoadedBook> {
+async function loadEpub(u8: Uint8Array, dom: BookDOM): Promise<LoadedBook> {
   const zip = await JSZip.loadAsync(u8);
   const files = Object.fromEntries(await Promise.all(Object.values(zip.files).filter(f => !f.dir).map(async f => [f.name, await f.async('uint8array')])));
   const get = (p: string) => files[p] ?? files[decodeURIComponent(p)] ?? null;
   const container = get('META-INF/container.xml');
   if (!container) throw new Error('这不是一个有效的 EPUB（缺少 container.xml）');
-  const opfPath = parseXml(strFromU8(container)).querySelector('rootfile')?.getAttribute('full-path');
+  const opfPath = dom.parseXml(strFromU8(container)).querySelector('rootfile')?.getAttribute('full-path');
   if (!opfPath || !get(opfPath)) throw new Error('EPUB 缺少目录文件（OPF）');
-  const opf = parseXml(strFromU8(get(opfPath)!));
+  const opf = dom.parseXml(strFromU8(get(opfPath)!));
   const lang = byLocal(opf, 'language')[0]?.textContent?.trim() || '';
 
   const manifest = new Map<string, { href: string; type: string; props: string }>();
@@ -82,7 +94,7 @@ async function loadEpub(u8: Uint8Array): Promise<LoadedBook> {
   };
   const nav = [...manifest.values()].find((m) => /\bnav\b/.test(m.props));
   if (nav && get(nav.href)) {
-    const doc = parseDoc(strFromU8(get(nav.href)!));
+    const doc = dom.parseDoc(strFromU8(get(nav.href)!));
     const navs = byLocal(doc, 'nav');
     const tocNav = navs.find((n) => /toc/.test(n.getAttribute('epub:type') || n.getAttributeNS('http://www.idpf.org/2007/ops', 'type') || '')) || navs[0];
     const walk = (ol: Element, depth: number) => {
@@ -99,7 +111,7 @@ async function loadEpub(u8: Uint8Array): Promise<LoadedBook> {
   if (!toc.length) {
     const ncxItem = manifest.get(spineEl?.getAttribute('toc') || '') || [...manifest.values()].find((m) => /ncx/.test(m.type));
     if (ncxItem && get(ncxItem.href)) {
-      const ncx = parseXml(strFromU8(get(ncxItem.href)!));
+      const ncx = dom.parseXml(strFromU8(get(ncxItem.href)!));
       const walk = (parent: Element, depth: number) => {
         for (const np of [...parent.children].filter((c) => c.localName === 'navPoint')) {
           const label = byLocal(np, 'text')[0]?.textContent || '';
@@ -122,7 +134,7 @@ async function loadEpub(u8: Uint8Array): Promise<LoadedBook> {
   const chapters: Chapter[] = spine.map((m, i) => {
     const raw = get(m.href);
     if (!raw) return { title: '', html: '', file: m.href };
-    const doc = parseDoc(strFromU8(raw));
+    const doc = dom.parseDoc(strFromU8(raw));
     const body = doc.querySelector('body') || byLocal(doc, 'body')[0];
     if (!body) return { title: '', html: '', file: m.href };
     // an SVG-wrapped picture (common for covers) becomes a plain image
@@ -163,9 +175,8 @@ async function loadEpub(u8: Uint8Array): Promise<LoadedBook> {
       a.removeAttribute('href');
       if (ci != null) a.setAttribute('data-href', `${ci}#${anchor || ''}`);
     }
-    const ser = new XMLSerializer();
-    const inner = [...body.childNodes].map((n) => ser.serializeToString(n)).join('');
-    const html = DOMPurify.sanitize(inner, PURIFY) as string;
+    const inner = [...body.childNodes].map((n) => dom.serialize(n)).join('');
+    const html = dom.sanitize(inner, PURIFY);
     chars += (body.textContent || '').replace(/\s+/g, '').length;
     const heading = body.querySelector('h1, h2, h3')?.textContent?.trim();
     const t = toc.find((x) => x.chapter === i && !x.anchor)?.label || toc.find((x) => x.chapter === i)?.label || heading || '';

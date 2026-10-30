@@ -3369,7 +3369,9 @@ interface ElectronAPI {
   settings: ElectronSettingsAPI
   vault: import('../../shared/vault').VaultAPI
   documentDrafts: import('../../shared/document-drafts').DocumentDraftAPI
+  documentPages: import('../../shared/document-pages').DocumentPagesAPI
   bookSources: import('../../shared/library-sources').BookSourcesAPI
+  libraryArchive: import('../../shared/library').LibraryArchiveAPI
   library: import('../../shared/library').LibraryHighlightAPI & {
     get(): Promise<LibraryResult<LibraryState>>
     importFiles(paths: string[]): Promise<LibraryResult<LibraryImportResult>>
