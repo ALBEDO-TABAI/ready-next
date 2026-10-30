@@ -10,7 +10,8 @@ test('NotePreview page mode directly edits text and keeps embeds on the source p
   const el = f.rich('第一段。'); await f.caret(el, 4); await f.input(el, '第一段改好了。'); await f.blur(el)
   f.bytes('第一段改好了。\n\n![图](a.png)')
   assert.ok(document.querySelector('[data-block-type="image"] button'), 'embed has a source entrance')
-  assert.equal(document.querySelectorAll('[draggable="true"]').length, 0, 'handles are T4b')
+  // T4b: each actionable block carries a draggable handle; the image embed keeps its own source entrance.
+  assert.ok(document.querySelectorAll('[aria-label="块菜单"][draggable="true"]').length > 0, 'block handles are present')
 })
 
 test('NotePreview without a tab stays read-only', async t => {
