@@ -3,7 +3,6 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const os = require('node:os')
-const { pathToFileURL } = require('node:url')
 
 if (process.argv.includes('--checks')) {
   const { spawnSync } = require('node:child_process')
@@ -19,8 +18,13 @@ async function main() {
   const temporary = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ready-next-object-ui-')))
   const vault = path.join(temporary, '测试资料库'), profile = path.join(temporary, 'profile')
   fs.mkdirSync(vault)
-  const html = path.join(vault, '网页.html')
-  fs.writeFileSync(html, '<html><body style="background:#4db6ac">M5-C native browser fixture</body></html>')
+  // A real web page over loopback: a vault HTML file is a document, not something the browser keeps as a tab.
+  const server = require('node:http').createServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+    response.end('<html><body style="background:#4db6ac">M5-C native browser fixture</body></html>')
+  })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  const webPage = `http://127.0.0.1:${server.address().port}/`
   const env = { ...process.env, READY_USER_DATA_DIR: profile }
   delete env.ELECTRON_RUN_AS_NODE; delete env.READY_START_HIDDEN
   // The first window can be a transient one; wait for the workbench renderer, and relaunch instead of reloading.
@@ -65,6 +69,51 @@ async function main() {
       await input.fill(keyword)
       return input
     }
+    // The browser step runs first, on a fresh tab: it checks that ⌘K hides the native web layer and restores it.
+    // As a person would: go to the browser first, then open the page there. (Product code opens web pages from other
+    // modes through openWebpageInBrowser, which switches modes itself; a bare createTab from document mode does not.)
+    const browserScene = page.locator('[data-workbench-mode-panel="browser"][data-mode-visual-state="current"]')
+    const sceneDeadline = Date.now() + 30000
+    while (!await browserScene.count()) {
+      assert.ok(Date.now() < sceneDeadline, 'Browser mode did not become current')
+      await page.evaluate(() => window.dispatchEvent(new CustomEvent('ready:workbench-mode-change-request', { detail: { mode: 'browser', placement: 'primary', presentation: 'immediate' } })))
+      await page.waitForTimeout(300)
+    }
+    await page.evaluate(async url => {
+      const result = await window.electronAPI.browser.createTab(url)
+      if (!result.success) throw new Error(result.error)
+    }, webPage)
+    const visibleNative = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some(win => win.contentView.children.some(view => {
+      const b = view.getBounds()
+      return view.webContents && b.x >= 0 && b.y >= 0 && b.width > 1 && b.height > 1
+    })))
+    const waitNative = async expected => {
+      const end = Date.now() + 15000
+      while ((await visibleNative()) !== expected) {
+        if (Date.now() >= end) {
+          const views = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map(win => (win.contentView.children || []).map(view => ({ url: view.webContents?.getURL?.().slice(0, 60), bounds: view.getBounds(), visible: view.getVisible?.() }))))
+          const overlays = await page.evaluate(() => {
+            const rect = el => { const r = el.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)] }
+            return {
+              native: [...document.querySelectorAll('[data-ready-native-overlay]')].map(el => `${el.tagName}.${String(el.className).slice(0, 40)}[${el.getAttribute('role') || ''}:${el.getAttribute('aria-label') || ''}]${JSON.stringify(rect(el))} vis=${getComputedStyle(el).visibility}`),
+              surfaces: [...document.querySelectorAll('[data-ready-native-surface]')].map(el => `${el.getAttribute('data-ready-native-surface')}${JSON.stringify(rect(el))}`),
+              dialogs: [...document.querySelectorAll('[role="dialog"],[role="combobox"],[role="toolbar"]')].map(el => `${el.getAttribute('role')}:${el.getAttribute('aria-label') || ''}`),
+            }
+          })
+          overlays.tabs = await page.evaluate(async () => { const r = await window.electronAPI.browser.getTabs(); return JSON.stringify(r).slice(0, 600) })
+          await page.screenshot({ path: path.join(temporary, 'native-failure.png') }).catch(() => {})
+          assert.fail(`Native visibility did not become ${expected}: ${JSON.stringify({ views, overlays })} (screenshot in ${temporary})`)
+        }
+        await page.waitForTimeout(50)
+      }
+    }
+    await waitNative(true)
+    await search('M5验收来源')
+    await waitNative(false)
+    await page.keyboard.press('Escape')
+    await waitNative(true)
+    console.log('PASS 2: 浏览器 ⌘K 隐藏网页，关闭后恢复')
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('ready:workbench-mode-change-request', { detail: { mode: 'document', placement: 'open', presentation: 'immediate' } })))
     await search('M5验收目标')
     const option = page.getByRole('option').filter({ hasText: 'M5验收目标' }).locator('button').first()
     if (!await option.waitFor({ timeout: 10000 }).then(() => true, () => false)) {
@@ -94,28 +143,9 @@ async function main() {
     await page.getByRole('dialog').getByText('引用已失效', { exact: true }).waitFor()
     await page.keyboard.press('Escape')
     console.log('PASS 4: 速览引用，回收后立即显示失效')
-    await page.evaluate(async url => {
-      const result = await window.electronAPI.browser.createTab(url)
-      if (!result.success) throw new Error(result.error)
-      window.dispatchEvent(new CustomEvent('ready:workbench-mode-change-request', { detail: { mode: 'browser', placement: 'primary', presentation: 'immediate' } }))
-    }, pathToFileURL(html).href)
-    const visibleNative = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some(win => win.contentView.children.some(view => {
-      const b = view.getBounds()
-      return view.webContents && b.x >= 0 && b.y >= 0 && b.width > 1 && b.height > 1
-    })))
-    const waitNative = async expected => {
-      const end = Date.now() + 10000
-      while ((await visibleNative()) !== expected) { assert.ok(Date.now() < end, `Native visibility did not become ${expected}`); await page.waitForTimeout(50) }
-    }
-    await waitNative(true)
-    await search('M5验收来源')
-    await waitNative(false)
-    await page.keyboard.press('Escape')
-    await waitNative(true)
-    console.log('PASS 2: 浏览器 ⌘K 隐藏网页，关闭后恢复')
     const shot = await app.evaluate(async ({ BrowserWindow }) => (await BrowserWindow.getAllWindows().find(win => win.isVisible()).capturePage()).toPNG().toString('base64'))
     fs.writeFileSync(path.join(temporary, 'window.png'), Buffer.from(shot, 'base64'))
     console.log(`PASS M5-C real-window acceptance: ${temporary}`)
-  } finally { if (app) await app.close() }
+  } finally { if (app) await app.close(); server.close() }
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })

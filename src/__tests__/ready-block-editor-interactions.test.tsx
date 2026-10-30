@@ -165,6 +165,19 @@ async function toolbar(f: Fixture) {
   await f.key(el, 'F10', { altKey: true })
   assert.ok(document.querySelector('[aria-label="文字格式"]'))
 }
+test('editor popups leave with their scene: switching mode removes the toolbar and keeps the text intact', async t => {
+  const f = await editorFixture(t, '正文')
+  const root = document.getElementById('root')!, panel = document.createElement('div')
+  panel.setAttribute('data-workbench-mode-panel', 'document'); root.replaceWith(panel); panel.append(root)
+  const { useMode } = await import('../renderer/stores/useMode')
+  await act(() => useMode.setState({ workbenchMode: 'document' }))
+  await toolbar(f)
+  await act(() => useMode.setState({ workbenchMode: 'browser' }))
+  assert.equal(document.querySelector('[aria-label="文字格式"]'), null, 'no document popup floats over the browser')
+  await act(() => useMode.setState({ workbenchMode: 'document' }))
+  f.bytes('正文')
+})
+
 async function buttonKey(f: Fixture, label: string) {
   const el = [...document.querySelectorAll('button')].find(el => el.textContent === label)!
   assert.ok(el, label); await f.key(el, 'Enter')

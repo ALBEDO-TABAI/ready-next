@@ -6,6 +6,7 @@ import WidgetEditDrawer from '../../../components/document/WidgetEditDrawer'
 import { useDocTabs } from '../../../stores/useDocTabs'
 import { CommandMenu, BlockEditorStyles, type MenuAnchor, type MenuItem } from './CommandMenu'
 import { InlineToolbar } from './InlineToolbar'
+import { useSceneVisible } from './scene'
 import { BLOCK_KINDS, convertBlock } from './catalog'
 import { getCaret, plainText, setCaret, sliceSpans } from './dom-inline'
 import { emptyBlock, inlineMarkdown, newline, plainModel } from './editing'
@@ -22,6 +23,7 @@ export function EditorTools({ buffer, children, report }: { buffer: EditorBuffer
   const extensions = useAnnotationMenus()
   const tabId = buffer.owner.kind === 'document' ? buffer.owner.tabId : undefined
   const root = useRef<HTMLDivElement>(null)
+  const sceneVisible = useSceneVisible(() => root.current)
   const [selection, setSelection] = useState<Selection | null>(null)
   const [picker, setPicker] = useState<Picker | null>(null), [query, setQuery] = useState('')
   const [results, setResults] = useState<ReferenceChoice[]>([]), [loading, setLoading] = useState(false)
@@ -170,10 +172,10 @@ export function EditorTools({ buffer, children, report }: { buffer: EditorBuffer
       void openInlineReference(reference, tabId).catch(report)
     }}>
     <BlockEditorStyles />{children}
-    {selection && !picker && <InlineToolbar anchor={selection.anchor}
+    {sceneVisible && selection && !picker && <InlineToolbar anchor={selection.anchor}
       marks={sliceSpans(selection.model.spans, selection.start, selection.end)[0]?.marks ?? {}}
       apply={patch => applyMarks(selection, patch)} close={close} report={report} open={ref => openInlineReference(ref, tabId)} />}
-    {picker && <CommandMenu label={picker.kind === 'slash' ? '插入块' : picker.kind === 'wiki' ? '页面和标题' : '提及'} anchor={picker.anchor} items={items} close={close} initialQuery={query}
+    {sceneVisible && picker && <CommandMenu label={picker.kind === 'slash' ? '插入块' : picker.kind === 'wiki' ? '页面和标题' : '提及'} anchor={picker.anchor} items={items} close={close} initialQuery={query}
       {...(picker.kind !== 'slash' ? { query, onQuery: setQuery, pending: loading } : {})} />}
     <WidgetEditDrawer open={Boolean(widget)} input={widgetInput} onClose={() => setWidget(null)} onSave={result => {
       if (!widget) return
@@ -183,7 +185,7 @@ export function EditorTools({ buffer, children, report }: { buffer: EditorBuffer
       const fence = '`'.repeat(Math.max(3, ...[...json.matchAll(/`+/g)].map(match => match[0].length + 1)))
       slashMarkdown(widget, `${fence}show-widget${eol}${json}${eol}${fence}`); setWidget(null)
     }} />
-    {page && createPortal(<form className="ready-block-popover" data-block-popup data-ready-native-overlay="" role="dialog" aria-label="新建子页面" style={{ left: page.picker.anchor.left, top: page.picker.anchor.bottom }}
+    {sceneVisible && page && createPortal(<form className="ready-block-popover" data-block-popup data-ready-native-overlay="" role="dialog" aria-label="新建子页面" style={{ left: page.picker.anchor.left, top: page.picker.anchor.bottom }}
       onSubmit={event => { event.preventDefault(); void createPage() }} onKeyDown={event => { event.stopPropagation(); if (event.key === 'Escape' && page.state !== 'pending') setPage(null) }}>
       <input autoFocus aria-label="子页面标题" required value={page.title} disabled={page.state !== 'editing'} onChange={event => setPage({ ...page, title: event.target.value })} />
       <button disabled={page.state === 'pending'} type="submit">{page.state === 'failed' ? '重试' : '创建并插入'}</button>

@@ -3,6 +3,7 @@ import { useAnnotationMenus } from '../annotations/menus'
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createBlockCommand, createRangeEdit, parseDocumentBlocks, parseInlineBlock, DOCUMENT_PALETTE, isDocumentColor, type DocumentBlock, type DocumentBuffer } from '../../../../shared/document-blocks'
 import { useDocTabs } from '../../../stores/useDocTabs'
+import { useSceneVisible } from './scene'
 import { actionableBlocks, BLOCK_KINDS, convertBlock } from './catalog'
 import { CommandMenu, type MenuAnchor, type MenuItem } from './CommandMenu'
 import { inlineMarkdown, newline } from './editing'
@@ -44,6 +45,7 @@ function moveEdit(snapshot: DocumentBuffer, block: DocumentBlock, target: Docume
 export function BlockControls({ buffer, editorId, report, children }: { editorId: string; buffer: EditorBuffer; report(error: unknown): void; children: ReactNode }) {
   const extensions = useAnnotationMenus()
   const [menu, setMenu] = useState<{ block: DocumentBlock; snapshot: DocumentBuffer; anchor: MenuAnchor } | null>(null)
+  const sceneVisible = useSceneVisible(() => [...document.querySelectorAll('[data-ready-block-editor]')].find(element => element instanceof HTMLElement && element.dataset.readyBlockEditor === editorId))
   const [drag, setDrag] = useState<Drag | null>(null), dragRef = useRef<Drag | null>(null)
   const [busy, setBusy] = useState(false), busyRef = useRef(false)
   const [restoreAt, setRestoreAt] = useState<number | null>(null)
@@ -133,7 +135,7 @@ export function BlockControls({ buffer, editorId, report, children }: { editorId
     },
   }}>{children}
     {drag && <p role="status">正在移动块；方向键选择位置，Enter 放下，Esc 取消。</p>}
-    {menu && <CommandMenu label="块菜单" anchor={menu.anchor} items={items} close={closeMenu} pending={busy} />}
+    {sceneVisible && menu && <CommandMenu label="块菜单" anchor={menu.anchor} items={items} close={closeMenu} pending={busy} />}
   </Context.Provider>
 }
 
