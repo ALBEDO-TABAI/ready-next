@@ -227,6 +227,7 @@ const resolveCreationBaseDir = (state: Pick<
   WorkspaceState,
   'currentPath' | 'workspaceRoot' | 'pinnedFolders' | 'selectedFile' | 'files' | 'dirChildren'
 >): string => {
+  if (!state.workspaceRoot && state.pinnedFolders.length === 0) return ''
   if (isKnownDirectoryPath(state.selectedFile, state.files, state.dirChildren, state.pinnedFolders)) {
     return state.selectedFile as string
   }
@@ -247,7 +248,7 @@ const resolveCreationBaseDir = (state: Pick<
     return state.pinnedFolders[0]
   }
 
-  return state.currentPath || '/'
+  return state.currentPath
 }
 
 // perf-rescue B7 → multi-root (2026-05): keep one chokidar watcher per safe
@@ -594,7 +595,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
 
   return {
   workspaceRoot: null,
-  currentPath: '/',
+  currentPath: '',
   files: [],
   selectedFile: null,
   objectAppearances: normalizeFileAppearanceMap(readJsonStorage(OBJECT_APPEARANCES_KEY, {} as FileAppearanceMap)),
@@ -672,6 +673,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
   toggleChatPanel: () => set((state) => ({ chatPanelVisible: !state.chatPanelVisible })),
 
   loadDirChildren: async (dirPath) => {
+    if (!dirPath || (!get().workspaceRoot && get().pinnedFolders.length === 0)) return []
     try {
       if (typeof window !== 'undefined' && window.electronAPI) {
         const result = await window.electronAPI.document.listFiles(dirPath)
@@ -794,7 +796,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
   clearWorkspace: () => {
     set({
       workspaceRoot: null,
-      currentPath: '/',
+      currentPath: '',
       files: [],
       selectedFile: null,
       expandedDirs: new Set(),
@@ -886,7 +888,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       dirChildren: new Map(),
       selectedFile: null,
       workspaceRoot: safePrimary,
-      currentPath: safePrimary || '/',
+      currentPath: safePrimary || '',
     })
     writeJsonStorage('ready-pinned-folders', folders)
     if (safePrimary) {
@@ -970,7 +972,11 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
 
   refreshFiles: async () => {
     try {
-      const { currentPath } = get()
+      const { currentPath, workspaceRoot, pinnedFolders } = get()
+      if (!currentPath || (!workspaceRoot && pinnedFolders.length === 0)) {
+        set({ files: [] })
+        return
+      }
 
       if (typeof window !== 'undefined' && window.electronAPI) {
         const result = await window.electronAPI.document.listFiles(currentPath)
@@ -1013,6 +1019,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
   createFile: async (name) => {
     const state = get()
     const targetDir = resolveCreationBaseDir(state)
+    if (!targetDir) return false
     const filePath = joinChildPath(targetDir, name)
     try {
       if (window.electronAPI) {
@@ -1046,6 +1053,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
   createFolder: async (name) => {
     const state = get()
     const targetDir = resolveCreationBaseDir(state)
+    if (!targetDir) return false
     const folderPath = joinChildPath(targetDir, name)
     try {
       if (window.electronAPI) {
@@ -1215,6 +1223,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
   startCreating: (type) => {
     const state = get()
     const targetDir = resolveCreationBaseDir(state)
+    if (!targetDir) return
     const expandedDirs = expandDirsForTarget(targetDir, state.expandedDirs, state.pinnedFolders)
     if (targetDir !== state.currentPath) {
       set({
