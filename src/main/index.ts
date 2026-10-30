@@ -55,6 +55,7 @@ import {
   type SyncScheduler,
 } from './modules/calendar-engine/sync-scheduler'
 import { setupSettingsIPC } from './modules/settings-engine/ipc-handler'
+import { setupLibraryIPC } from './modules/library-engine/runtime'
 import { initializeCredentialVault } from './modules/settings-engine/credential-vault'
 import { pruneUnreferencedCredentialsAtStartup } from './modules/settings-engine/credential-vault-reconciliation'
 import { migrateExternalServiceCredentialsAfterWindowReady } from './modules/settings-engine/external-service-store'
@@ -671,6 +672,7 @@ function setupGlobalIPC(): void {
   setupDocumentIPC(DOCUMENT_USE_MOCK)  // Always real fs
   setupBoardIPC({ getMainWindow: () => mainWindow })
   setupSearchIPC()
+  setupLibraryIPC()
   setupFileEmergenceIPC()
   setupRendererStateFlushIPC()
   setupTagForgeIPC()

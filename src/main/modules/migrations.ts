@@ -4435,6 +4435,18 @@ const migrations: Migration[] = [
     },
   },
   { name: '135_search_ready_refs', up: migrateSearchReadyRefs },
+  {
+    name: '136_library_reading',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE library_reading (
+          book_id TEXT PRIMARY KEY NOT NULL,
+          position_json TEXT,
+          bookmarks_json TEXT NOT NULL DEFAULT '[]'
+        );
+      `)
+    },
+  },
 ]
 
 /**

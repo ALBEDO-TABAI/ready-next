@@ -1,3 +1,4 @@
+import type { LibraryBook, LibraryBookPatch, LibraryBookmark, LibraryImportResult, LibraryReadingPosition, LibraryResult, LibraryState } from '../shared/library'
 import type { DocumentSyncRequest, DocumentSyncReply } from '../shared/document-operations'
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 import {
@@ -1320,6 +1321,22 @@ const vaultAPI: import('../shared/vault').VaultAPI = {
   createDefault: () => ipcRenderer.invoke('vault:createDefault'),
 }
 
+const libraryAPI = {
+  get: (): Promise<LibraryResult<LibraryState>> => ipcRenderer.invoke('library:get'),
+  importFiles: (paths: string[]): Promise<LibraryResult<LibraryImportResult>> => ipcRenderer.invoke('library:importFiles', paths),
+  pickAndImport: (): Promise<LibraryResult<LibraryImportResult>> => ipcRenderer.invoke('library:pickAndImport'),
+  updateBook: (input: { id: string; patch: LibraryBookPatch }): Promise<LibraryResult<LibraryBook>> => ipcRenderer.invoke('library:updateBook', input),
+  getPosition: (bookId: string): Promise<LibraryResult<LibraryReadingPosition | null>> => ipcRenderer.invoke('library:getPosition', bookId),
+  setPosition: (position: LibraryReadingPosition): Promise<LibraryResult<LibraryReadingPosition>> => ipcRenderer.invoke('library:setPosition', position),
+  listBookmarks: (bookId: string): Promise<LibraryResult<LibraryBookmark[]>> => ipcRenderer.invoke('library:listBookmarks', bookId),
+  setBookmarks: (input: { bookId: string; bookmarks: LibraryBookmark[] }): Promise<LibraryResult<LibraryBookmark[]>> => ipcRenderer.invoke('library:setBookmarks', input),
+  onChanged: (listener: (state: LibraryState) => void) => {
+    const handler = (_event: IpcRendererEvent, state: LibraryState) => listener(state)
+    ipcRenderer.on('library:changed', handler)
+    return () => ipcRenderer.removeListener('library:changed', handler)
+  },
+}
+
 // Settings API
 const settingsAPI = {
   get: (key: string) => ipcRenderer.invoke('settings:get', key),
@@ -1507,6 +1524,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   theme: themeAPI,
   settings: settingsAPI,
   vault: vaultAPI,
+  library: libraryAPI,
   imageGeneration: imageGenerationAPI,
   fileEmergence: fileEmergenceAPI,
   tagForge: tagForgeAPI,
@@ -1540,6 +1558,7 @@ declare global {
       theme: typeof themeAPI
       settings: typeof settingsAPI
       vault: typeof vaultAPI
+      library: typeof libraryAPI
       imageGeneration: typeof imageGenerationAPI
       fileEmergence: typeof fileEmergenceAPI
       tagForge: typeof tagForgeAPI

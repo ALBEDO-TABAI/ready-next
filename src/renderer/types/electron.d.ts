@@ -1,3 +1,4 @@
+import type { LibraryBook, LibraryBookPatch, LibraryBookmark, LibraryImportResult, LibraryReadingPosition, LibraryResult, LibraryState } from '../../shared/library'
 import type { DocumentSyncRequest, DocumentSyncReply } from '../../shared/document-operations'
 import type { ChatGptOAuthStatus } from '../../shared/chatgpt-oauth'
 import type { BrowserDiagnosticsData } from '../modules/browser/types'
@@ -3362,6 +3363,17 @@ interface ElectronAPI {
   theme: ElectronThemeAPI
   settings: ElectronSettingsAPI
   vault: import('../../shared/vault').VaultAPI
+  library: {
+    get(): Promise<LibraryResult<LibraryState>>
+    importFiles(paths: string[]): Promise<LibraryResult<LibraryImportResult>>
+    pickAndImport(): Promise<LibraryResult<LibraryImportResult>>
+    updateBook(input: { id: string; patch: LibraryBookPatch }): Promise<LibraryResult<LibraryBook>>
+    getPosition(bookId: string): Promise<LibraryResult<LibraryReadingPosition | null>>
+    setPosition(position: LibraryReadingPosition): Promise<LibraryResult<LibraryReadingPosition>>
+    listBookmarks(bookId: string): Promise<LibraryResult<LibraryBookmark[]>>
+    setBookmarks(input: { bookId: string; bookmarks: LibraryBookmark[] }): Promise<LibraryResult<LibraryBookmark[]>>
+    onChanged(listener: (state: LibraryState) => void): () => void
+  }
   imageGeneration: ElectronImageGenerationAPI
   fileEmergence: ElectronFileEmergenceAPI
   tagForge: ElectronTagForgeAPI

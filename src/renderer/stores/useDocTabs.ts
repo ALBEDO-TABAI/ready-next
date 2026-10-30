@@ -1,3 +1,4 @@
+import { registerDocumentSaveHandler } from '../modules/document/documentSaveRegistry'
 import { createDocumentOperationSync } from '../modules/document/documentOperationSync'
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
@@ -17,17 +18,19 @@ import {
     setGroupCollapsed,
 } from '../../shared/tab-group-model'
 
-export interface DocTab {
+interface DocTabBase {
     id: string
-    path: string | null  // null = untitled temp doc
     title: string
-    content: string
-    isDirty: boolean
     lastActivatedAt?: number | null
     tagForgeCreationPending?: boolean
     // Renderer-only grouping (mirrors the browser rail). null/absent = ungrouped.
     groupId?: string | null
 }
+
+export type DocTab = DocTabBase & (
+    | { kind?: 'document'; path: string | null; content: string; isDirty: boolean }
+    | { kind: 'library'; path: null; content: ''; isDirty: false }
+)
 
 export interface PendingDocReveal {
     path: string
@@ -49,6 +52,7 @@ interface DocTabsState {
     documentSplitRatio: number
     pendingReveal: PendingDocReveal | null
 
+    openLibraryTab: () => string
     openTab: (path: string) => void
     openImageTab: (path: string, options?: { activate?: boolean }) => string | null
     openTabInPane: (path: string, pane: DocumentPaneTarget) => string | null
@@ -264,7 +268,7 @@ function readDraft(id: string): string | null {
 }
 
 function needsPersistedDraft(tab: DocTab): boolean {
-    return tab.isDirty || tab.path === null
+    return tab.kind !== 'library' && (tab.isDirty || tab.path === null)
 }
 
 function persistLegacyDrafts(tabs: DocTab[]): void {
@@ -282,7 +286,8 @@ function persistLegacyDrafts(tabs: DocTab[]): void {
 }
 
 function restorePersistedDrafts(tabs: DocTab[]): DocTab[] {
-    return tabs.map((tab) => {
+    return tabs.map((tab): DocTab => {
+        if (tab.kind === 'library') return { ...tab, path: null, content: '' as const, isDirty: false }
         if (!needsPersistedDraft(tab)) return { ...tab, content: '' }
         const draft = readDraft(tab.id)
         return draft === null ? tab : { ...tab, content: draft }
@@ -450,7 +455,7 @@ function ensureImagePreviewTabForPath(tabs: DocTab[], path: string): { tabs: Doc
         }
         return {
             tabs: tabs.map(t =>
-                t.id === existing.id
+                t.id === existing.id && t.kind !== 'library'
                     ? { ...t, path, title: getFilename(path), content: '', isDirty: false }
                     : t
             ),
@@ -466,17 +471,17 @@ function markTabActivated(tabs: DocTab[], id: string, now = Date.now()): DocTab[
 
 function replaceDirtyTabContent(tabs: DocTab[], id: string, content: string): DocTab[] {
     const current = tabs.find((tab) => tab.id === id)
-    if (!current) return tabs
+    if (!current || current.kind === 'library') return tabs
     if (current.content === content && current.isDirty) return tabs
     if (current.content !== content || !current.isDirty) queueDraftWrite(id, content)
-    return tabs.map((tab) => tab.id === id ? { ...tab, content, isDirty: true } : tab)
+    return tabs.map((tab) => tab.id === id && tab.kind !== 'library' ? { ...tab, content, isDirty: true } : tab)
 }
 
 function ensureTabsState(
     state: Pick<DocTabsState, 'tabs' | 'activeTabId' | 'splitTabId' | 'documentSplitRatio'> & { tabGroups?: TabGroup[] },
 ) {
-    const rawTabs = state.tabs.length > 0
-        ? state.tabs
+    const rawTabs: DocTab[] = state.tabs.length > 0
+        ? state.tabs.filter((tab, index, tabs) => tab.kind !== 'library' || tabs.findIndex(t => t.kind === 'library') === index)
         : [{ id: 'doc-1', path: null, title: '新文档', content: '', isDirty: false }]
     syncTabCounterFromTabs(rawTabs)
     const { tabs, tabGroups } = normalizeDocGroups(rawTabs, Array.isArray(state.tabGroups) ? state.tabGroups : [])
@@ -518,6 +523,19 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
     focusedPaneTabId: 'doc-1',
     documentSplitRatio: 50,
     pendingReveal: null,
+
+    openLibraryTab: () => {
+        const state = get()
+        const existing = state.tabs.find(tab => tab.kind === 'library')
+        const id = existing?.id ?? makeId()
+        const tabs: DocTab[] = existing ? state.tabs : [...state.tabs, {
+            id, kind: 'library', path: null, title: '书房', content: '', isDirty: false,
+        }]
+        set({ tabs: markTabActivated(tabs, id), activeTabId: id,
+            splitTabId: state.splitTabId === id ? state.activeTabId : state.splitTabId,
+            focusedPaneTabId: id })
+        return id
+    },
 
     openTab: (path: string) => {
         const { tabs, activeTabId, splitTabId } = get()
@@ -706,7 +724,7 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
     setTabPath: (id: string, path: string | null) => {
         set({
             tabs: get().tabs.map(t =>
-                t.id === id ? { ...t, path, title: path ? getFilename(path) : t.title } : t
+                t.id === id && t.kind !== 'library' ? { ...t, path, title: path ? getFilename(path) : t.title } : t
             )
         })
     },
@@ -735,7 +753,7 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
     hydrateTabContentFromDisk: (id: string, content: string) => {
         set({
             tabs: get().tabs.map((tab) =>
-                tab.id === id ? { ...tab, content, isDirty: false } : tab
+                tab.id === id && tab.kind !== 'library' ? { ...tab, content, isDirty: false } : tab
             ),
         })
         discardDraft(id)
@@ -745,7 +763,7 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
         let committed = false
         set({
             tabs: get().tabs.map((tab) => {
-                if (tab.id !== id || tab.content !== expectedContent) return tab
+                if (tab.kind === 'library' || tab.id !== id || tab.content !== expectedContent) return tab
                 committed = true
                 return { ...tab, content: writtenContent, isDirty: false }
             }),
@@ -793,6 +811,7 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
     remapTabPaths: (fromPath: string, toPath: string) => {
         set({
             tabs: get().tabs.map((tab) => {
+                if (tab.kind === 'library') return tab
                 const nextPath = remapDocTabPath(tab.path, fromPath, toPath)
                 if (nextPath === tab.path) return tab
                 return {
@@ -850,7 +869,7 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
     version: 4,
     storage: createJSONStorage(() => (typeof localStorage !== 'undefined' ? coalescedMetadataStorage : fallbackStorage)),
     partialize: (state) => {
-        const tabs = state.tabs.map((tab) => ({ ...tab, content: '' }))
+        const tabs = state.tabs.map((tab) => tab.kind === 'library' ? tab : ({ ...tab, content: '' }))
         return {
             tabs,
             tabGroups: state.tabGroups,
@@ -902,6 +921,22 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
       }
     },
 }))
+
+// System tabs own their save capability for their whole lifetime, including while
+// their pane is hidden. Consume Save so the global pathless-document fallback
+// cannot offer to save the library as an empty file.
+const librarySaveOwners = new Map<string, () => void>()
+function syncLibrarySaveOwners(tabs: DocTab[]): void {
+    const ids = new Set(tabs.filter(tab => tab.kind === 'library').map(tab => tab.id))
+    for (const [id, release] of librarySaveOwners) {
+        if (!ids.has(id)) { release(); librarySaveOwners.delete(id) }
+    }
+    for (const id of ids) {
+        if (!librarySaveOwners.has(id)) librarySaveOwners.set(id, registerDocumentSaveHandler(id, () => {}))
+    }
+}
+syncLibrarySaveOwners(useDocTabs.getState().tabs)
+useDocTabs.subscribe((state, previous) => { if (state.tabs !== previous.tabs) syncLibrarySaveOwners(state.tabs) })
 
 // Install once with the store, including while the Document work surface is hidden.
 if (typeof window !== 'undefined' && typeof window.electronAPI?.document?.onOperationSync === 'function') {

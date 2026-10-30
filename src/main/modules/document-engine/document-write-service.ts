@@ -36,8 +36,14 @@ let runtime: DocumentWriteDependencies | null = null
 export function configureDocumentWriteService(dependencies: DocumentWriteDependencies): void { runtime = dependencies }
 export function getDocumentTabTransport(): DocumentTabTransport | undefined { return runtime?.tabs }
 
+// Paths are canonicalised one at a time in call order, so a caller whose realpath
+// resolves sooner cannot take a queue slot ahead of an earlier caller.
+let canonicalizing: Promise<unknown> = Promise.resolve()
+
 export async function withDocumentPathLock<T>(path: string, work: (path: string) => Promise<T>): Promise<T> {
-  const canonical = await realpath(path)
+  const resolving = canonicalizing.then(() => realpath(path))
+  canonicalizing = resolving.catch(() => undefined)
+  const canonical = await resolving
   const previous = tails.get(canonical) ?? Promise.resolve()
   const result = previous.then(() => work(canonical))
   const tail = result.then(() => undefined, () => undefined)

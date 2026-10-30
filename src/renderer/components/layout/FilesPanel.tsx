@@ -1,3 +1,5 @@
+import { useDocTabs } from '../../stores/useDocTabs'
+import { requestWorkbenchModeOpen } from '../../modules/workbench/mode-transition'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import {
@@ -355,6 +357,11 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
   const body = (
     <>
       <VaultSetupBanner />
+      <button type="button" className="shrink-0 text-left text-[13px] rounded hover:bg-[var(--files-panel-state-hover-bg)]"
+        style={{ margin: '4px 12px', padding: '8px 10px', color: PANEL_TOKENS.text }}
+        onClick={() => { useDocTabs.getState().openLibraryTab(); requestWorkbenchModeOpen('document') }}>
+        阅读
+      </button>
       <div
         ref={toolbarRef}
         className="shrink-0 flex items-center justify-between"

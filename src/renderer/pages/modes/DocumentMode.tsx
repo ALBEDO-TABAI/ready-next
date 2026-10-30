@@ -1,3 +1,10 @@
+import { LibraryTab, OpenEpubInLibrary } from '../../modules/library/navigation'
+import '../../design/next/tokens.css'
+import '../../design/next/glass.css'
+import '../../modules/library/shelf.css'
+import '../../modules/library/reader.css'
+import '../../modules/library/reader/page.css'
+import '../../modules/library/library.css'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, lazy, memo, Suspense } from 'react'
 import { FileText, Loader2 } from 'lucide-react'
 import { computeDesiredRoots, useWorkspace } from '../../stores/useWorkspace'
@@ -162,6 +169,9 @@ const DocumentEditor = memo(function DocumentEditor({
   const isPdf = ext === 'pdf'
   const isEbook = isEbookExtension(ext)
   const isXlsx = ['xlsx', 'csv', 'xls'].includes(ext)
+
+  if (tab.kind === 'library') return <LibraryTab />
+  if (ext === 'epub' && tab.path) return <OpenEpubInLibrary path={tab.path} sourceTabId={tab.id} />
 
   if (isReadyBoardFile(tab.path)) {
     return (
@@ -382,7 +392,7 @@ export default function DocumentMode({
     return visibleTabs.find((tab) => tab.id === focusedPaneTabId) || activeTab || splitTab || null
   }, [activeTab, focusedPaneTabId, splitTab])
   const panelTargetLine = panelTargetTab ? visibleLineByTabId[panelTargetTab.id] ?? null : null
-  const bookReadingEligible = panelTargetTab ? isBookReadablePath(panelTargetTab.path) : false
+  const bookReadingEligible = panelTargetTab && panelTargetTab.kind !== 'library' ? isBookReadablePath(panelTargetTab.path) : false
   const bookReadingVisible = isBookReadingSessionVisible(
     bookReadingActive,
     bookReadingTabId,
@@ -765,7 +775,7 @@ export default function DocumentMode({
       e.dataTransfer.setData('text/plain', tab.path)
       e.dataTransfer.setData('text/uri-list', `file://${encodeURI(tab.path)}`)
       startBrowserLocalMediaNativeFileDrag(e)
-    } else if (tab) {
+    } else if (tab && tab.kind !== 'library') {
       // Untitled draft (未保存的新建文档): dropping it onto a file-tree
       // directory confirms the save location.
       setUntitledDocTabDragPayload(e, { tabId: tab.id, title: tab.title })
@@ -801,7 +811,7 @@ export default function DocumentMode({
 
   const handleTabContextMenu = useCallback((event: React.MouseEvent, id: string) => {
     const tab = useDocTabs.getState().tabs.find((candidate) => candidate.id === id)
-    if (!tab) return
+    if (!tab || tab.kind === 'library') return
     event.preventDefault()
     event.stopPropagation()
     void showReferenceToInputMenu({ x: event.clientX, y: event.clientY }).then((selected) => {
@@ -916,7 +926,7 @@ export default function DocumentMode({
             >
               {activeTabPathLabel}
             </div>
-            <div className="flex flex-shrink-0 items-center" style={{ gap: 8 }}>
+            {panelTargetTab?.kind !== 'library' && <div className="flex flex-shrink-0 items-center" style={{ gap: 8 }}>
               <DocumentPanelToggleButtons
                 outlineOpen={outlinePanelOpen}
                 marksOpen={marksPanelOpen}
@@ -945,7 +955,7 @@ export default function DocumentMode({
                 previewEditActive={previewEditActive}
                 onTogglePreviewEdit={handleTogglePreviewEdit}
               />
-            </div>
+            </div>}
           </div>
 
           <div className="document-workbench-body flex min-h-0 flex-1">
@@ -1076,7 +1086,7 @@ export default function DocumentMode({
               />
             )}
 
-            {isSceneVisible && panelTargetTab && (
+            {isSceneVisible && panelTargetTab && panelTargetTab.kind !== 'library' && (
               <DocumentFloatingPanels
                 documentPath={panelTargetTab.path}
                 documentTitle={panelTargetTab.title}

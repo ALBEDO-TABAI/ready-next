@@ -1,0 +1,145 @@
+/* Shared foundation: Library paper/glass; Inkwell paper/type; Stillroom materials;
+   Calendar 13/14/17/22px scale. Module-specific cloth and shelf tokens stay namespaced.
+   Use --rn-* in new modules; no global --sr/--ink/--tp overrides of existing surfaces. */
+@font-face { font-family: 'RN Inter'; src: url('./fonts/Inter.woff2') format('woff2'); font-weight: 100 900; font-display: swap; }
+@font-face { font-family: 'RN Serif'; src: url('./fonts/InstrumentSerif.woff2') format('woff2'); font-display: swap; }
+@font-face { font-family: 'RN Serif'; src: url('./fonts/InstrumentSerifItalic.woff2') format('woff2'); font-style: italic; font-display: swap; }
+@font-face { font-family: 'RN Mono'; src: url('./fonts/GeistMono.woff2') format('woff2'); font-weight: 100 900; font-display: swap; }
+@layer ready-next.tokens {
+/* ============================================================
+   Ready Library — design tokens
+   Ready Poster Printer's system (light default, [data-theme="dark"] overrides),
+   plus what a library needs: cloth, paper and glass shelves.
+   ============================================================ */
+
+:root, [data-theme="light"] {
+  /* ---- type ---- */
+  --rn-font-ui: 'RN Inter', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  --rn-font-display: 'RN Inter', 'PingFang SC', system-ui, sans-serif;
+  --rn-font-mono: 'RN Mono', ui-monospace, 'PingFang SC', monospace;
+  --rn-font-serif: 'RN Serif', 'Songti SC', Georgia, serif;
+  /* titles on cloth: a book face for CJK, Instrument Serif for Latin */
+  --rn-font-cloth: 'RN Serif', 'Songti SC', 'STSong', serif;
+  --rn-fs-2xs: 10px; --rn-fs-xs: 11px; --rn-fs-sm: 12px; --rn-fs-md: 13px; --rn-fs-lg: 15px; --rn-fs-xl: 17px; --rn-fs-2xl: 22px; --rn-fs-3xl: 28px; --rn-fs-4xl: 40px;
+  --rn-lh-tight: 1.15; --rn-lh: 1.45;
+
+  /* ---- space (4pt) ---- */
+  --rn-s1: 4px; --rn-s2: 8px; --rn-s3: 12px; --rn-s4: 16px; --rn-s5: 20px; --rn-s6: 24px; --rn-s8: 32px; --rn-s10: 40px; --rn-s14: 56px;
+
+  /* ---- radii ---- */
+  --rn-r-xs: 6px; --rn-r-sm: 9px; --rn-r-md: 12px; --rn-r-lg: 16px; --rn-r-xl: 22px; --rn-r-2xl: 28px; --rn-r-pill: 999px;
+
+  /* ---- motion ---- */
+  --rn-ease-out: cubic-bezier(.22, 1, .36, 1);
+  --rn-ease-in-out: cubic-bezier(.65, 0, .35, 1);
+  --rn-ease-spring: cubic-bezier(.34, 1.56, .64, 1);
+  --rn-ease-liquid: cubic-bezier(.3, .7, .2, 1);
+  --rn-ease-shelf: cubic-bezier(.77, 0, .175, 1);
+  --rn-d-1: 120ms; --rn-d-2: 200ms; --rn-d-3: 320ms; --rn-d-4: 480ms; --rn-d-5: 640ms;
+
+  /* ---- palette: light ---- */
+  --rn-stage: #ebebee;
+  --rn-stage-2: #e3e3e8;
+  --rn-ink: #0b0b0e;
+  --rn-ink-2: rgba(11, 11, 14, .64);
+  --rn-ink-3: rgba(11, 11, 14, .42);
+  --rn-ink-4: rgba(11, 11, 14, .22);
+  --rn-hair: rgba(11, 11, 14, .08);
+  --rn-hair-2: rgba(11, 11, 14, .14);
+  --rn-fill: rgba(11, 11, 14, .045);
+  --rn-fill-2: rgba(11, 11, 14, .08);
+  --rn-fill-3: rgba(11, 11, 14, .13);
+  --rn-accent: #ff5a1f;           /* "Print signal" — the one accent */
+  --rn-accent-ink: #ffffff;
+  --rn-accent-soft: rgba(255, 90, 31, .14);
+  --rn-ok: #1fae6b; --rn-warn: #e2a400; --rn-bad: #e5484d;
+  --rn-inverse: #0b0b0e; --rn-on-inverse: #fafafa;
+  --rn-logo-ink: #ebebee;
+
+  /* ---- paper: the page, a bookplate, a ribbon ---- */
+  --rn-paper: #f7f4ee;
+  --rn-paper-2: #efeae0;
+  --rn-paper-ink: #1d1b18;
+  --rn-paper-ink-2: #5a544a;
+  --rn-paper-ink-3: #8f877a;
+  --rn-ribbon: #ff5a1f;
+  --rn-hl: rgb(255 206 64 / .5);
+
+  /* ---- glass material ---- */
+  --rn-glass-tint: 252 252 253;
+  --rn-glass-alpha: .52;
+  --rn-glass-alpha-strong: .62;
+  --rn-glass-alpha-clear: .3;
+  --rn-glass-blur: 22px;
+  --rn-glass-sat: 185%;
+  --rn-glass-rim-hi: rgba(255, 255, 255, .95);
+  --rn-glass-rim-lo: rgba(255, 255, 255, .18);
+  --rn-glass-edge: rgba(11, 11, 14, .07);
+  --rn-glass-inner-hi: rgba(255, 255, 255, .75);
+  --rn-glass-inner-lo: rgba(11, 11, 14, .04);
+  --rn-glass-caustic: rgba(255, 255, 255, .55);
+  --rn-shadow-1: 0 1px 2px rgba(10, 10, 20, .06), 0 2px 8px -2px rgba(10, 10, 20, .06);
+  --rn-shadow-2: 0 2px 6px rgba(10, 10, 20, .05), 0 12px 32px -12px rgba(10, 10, 30, .18);
+  --rn-shadow-3: 0 4px 12px rgba(10, 10, 20, .06), 0 24px 64px -20px rgba(10, 10, 30, .28);
+  --rn-shadow-4: 0 8px 24px rgba(10, 10, 20, .08), 0 48px 120px -32px rgba(10, 10, 30, .38);
+  --rn-book-shadow: 0 1px 1px rgba(0,0,0,.08), 0 20px 32px -18px rgba(20,20,40,.5), 0 4px 10px -4px rgba(20,20,40,.18);
+
+  /* ---- the shelf: a pane of glass on brackets ---- */
+  --rn-shelf-top: rgb(255 255 255 / .78);
+  --rn-shelf-face: rgb(255 255 255 / .42);
+  --rn-shelf-edge: rgb(11 11 14 / .10);
+  --rn-shelf-cast: rgb(20 20 40 / .16);
+  --rn-bracket: #c9c9cf;
+
+  /* adaptive: written by JS from the cover in view */
+  --rn-amb: 200 190 180;
+  --rn-amb-alpha: .10;
+  --rn-la: 135deg;
+  color-scheme: light;
+}
+
+[data-theme='dark'] {
+  --rn-stage: #0b0b0d;
+  --rn-stage-2: #111114;
+  --rn-ink: #f4f4f6;
+  --rn-ink-2: rgba(244, 244, 246, .66);
+  --rn-ink-3: rgba(244, 244, 246, .42);
+  --rn-ink-4: rgba(244, 244, 246, .2);
+  --rn-hair: rgba(255, 255, 255, .08);
+  --rn-hair-2: rgba(255, 255, 255, .14);
+  --rn-fill: rgba(255, 255, 255, .05);
+  --rn-fill-2: rgba(255, 255, 255, .085);
+  --rn-fill-3: rgba(255, 255, 255, .13);
+  --rn-accent: #ff5a1f;
+  --rn-accent-soft: rgba(255, 106, 44, .18);
+  --rn-inverse: #f4f4f6; --rn-on-inverse: #0b0b0e;
+  --rn-logo-ink: #0b0b0e;
+  --rn-paper: #202022;
+  --rn-paper-2: #2a2a2d;
+  --rn-hl: rgb(255 200 60 / .42);
+  --rn-glass-tint: 28 28 32;
+  --rn-glass-alpha: .5;
+  --rn-glass-alpha-strong: .64;
+  --rn-glass-alpha-clear: .3;
+  --rn-glass-sat: 170%;
+  --rn-glass-rim-hi: rgba(255, 255, 255, .42);
+  --rn-glass-rim-lo: rgba(255, 255, 255, .04);
+  --rn-glass-edge: rgba(0, 0, 0, .5);
+  --rn-glass-inner-hi: rgba(255, 255, 255, .14);
+  --rn-glass-inner-lo: rgba(0, 0, 0, .25);
+  --rn-glass-caustic: rgba(255, 255, 255, .12);
+  --rn-shadow-1: 0 1px 2px rgba(0,0,0,.4), 0 2px 8px -2px rgba(0,0,0,.4);
+  --rn-shadow-2: 0 2px 6px rgba(0,0,0,.35), 0 12px 32px -12px rgba(0,0,0,.6);
+  --rn-shadow-3: 0 4px 12px rgba(0,0,0,.4), 0 24px 64px -20px rgba(0,0,0,.7);
+  --rn-shadow-4: 0 8px 24px rgba(0,0,0,.45), 0 48px 120px -32px rgba(0,0,0,.8);
+  --rn-book-shadow: 0 0 0 1px rgba(255,255,255,.03), 0 20px 34px -16px rgba(0,0,0,.8), 0 4px 10px -4px rgba(0,0,0,.5);
+  --rn-shelf-top: rgb(255 255 255 / .16);
+  --rn-shelf-face: rgb(255 255 255 / .07);
+  --rn-shelf-edge: rgb(255 255 255 / .1);
+  --rn-shelf-cast: rgb(0 0 0 / .5);
+  --rn-bracket: #3a3a40;
+  --rn-amb-alpha: .14;
+  color-scheme: dark;
+}
+
+}
