@@ -32,7 +32,9 @@ export function extractObjectLinks(raw: string): ExtractedObjectLink[] {
   if (bodyStart) {
     const opening = /^(?:\uFEFF)?---[^\n]*\n/.exec(raw)
     if (opening) {
-      const end = raw.lastIndexOf('\n---', bodyStart)
+      const close = raw.lastIndexOf('\n---', bodyStart)
+      // A CRLF file leaves the closing line's \r before "\n---"; it belongs to the line break, not the last value.
+      const end = raw[close - 1] === '\r' ? close - 1 : close
       const yaml = parseDocument(raw.slice(opening[0].length, end))
       // Existing relation convention: explicit [[...]] / ready:// values, including arrays.
       // Plain metadata (title, tags, ready_project, etc.) never becomes a guessed link.

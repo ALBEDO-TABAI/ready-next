@@ -61,12 +61,17 @@ test('EPUB metadata, classification, cover and source/database pages round trip'
   assert.match(String(note.frontmatter.加入), /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/)
   assert.deepEqual(note.frontmatter.来源, { kind: 'local' })
   assert.equal(note.body, '\n## 标注\n\n## 我的笔记\n')
-  const dbPage = readDocumentSource(await readFile(join(root, '阅读.md'), 'utf8')).frontmatter.ready_database
-  assert.deepEqual(dbPage, {
-    source: '阅读',
-    fields: { 类型: { type: 'select', options: ['书'] }, 作者: { type: 'text' }, 分类: { type: 'select' }, 状态: { type: 'select', options: ['想读', '在读', '读完'] }, 读完: { type: 'date' }, 加入: { type: 'date' }, 字数: { type: 'number' }, 来源: { type: 'text' } },
-    views: [{ name: '书架', type: 'bookshelf' }, { name: '表格', type: 'table' }, { name: '日历', type: 'calendar', dateField: '读完' }],
-  })
+  const dbPage = readDocumentSource(await readFile(join(root, '阅读.md'), 'utf8')).frontmatter.ready_database as {
+    version: number; source: string; fields: Record<string, { id: string; name: string; type: string; options?: string[] }>; views: { id: string; name: string; type: string; dateField?: string }[]
+  }
+  // M5 database format: versioned, typed fields with stable ids, the library's shelf/table/calendar views kept.
+  assert.equal(dbPage.version, 1)
+  assert.equal(dbPage.source, '阅读')
+  assert.deepEqual(dbPage.fields.状态.options, ['想读', '在读', '读完'])
+  assert.equal(dbPage.fields.读完.type, 'date')
+  assert.equal(dbPage.fields.来源说明.type, 'text')
+  assert.deepEqual(dbPage.views.map((view) => [view.name, view.type, view.dateField ?? null]), [['书架', 'bookshelf', null], ['表格', 'table', null], ['日历', 'calendar', '读完']])
+  assert.ok(dbPage.views.every((view) => view.id))
   assert.deepEqual(await engine.get(), { status: 'ready', vaultRoot: root, books: [book], issues: [] })
 })
 

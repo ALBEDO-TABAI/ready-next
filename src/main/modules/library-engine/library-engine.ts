@@ -13,15 +13,8 @@ import { decodeBookText, epubMetadata, nameMetadata, type BookMetadata } from '.
 import { exists, insideVault, isMissing, readBook } from './source-note'
 import { bookIdSchema, formats, importSchema, updateSchema } from './validation'
 
-const databasePage = `---\n${stringify({ ready_database: {
-  source: LIBRARY_FOLDER,
-  fields: {
-    类型: { type: 'select', options: ['书'] }, 作者: { type: 'text' }, 分类: { type: 'select' },
-    状态: { type: 'select', options: ['想读', '在读', '读完'] }, 读完: { type: 'date' },
-    加入: { type: 'date' }, 字数: { type: 'number' }, 来源: { type: 'text' },
-  },
-  views: [{ name: '书架', type: 'bookshelf' }, { name: '表格', type: 'table' }, { name: '日历', type: 'calendar', dateField: '读完' }],
-} })}---\n`
+import { readingDatabasePage as databasePage, readingSourceText, upgradeReadingDatabase } from './database-upgrade'
+
 const reason = (error: unknown) => error instanceof Error ? error.message : String(error)
 
 // Frontmatter dates stay human-readable: local wall-clock time with its UTC offset.
@@ -65,6 +58,7 @@ export class LibraryEngine {
   private async scan(): Promise<LibraryState> {
     const root = this.vaultRoot()
     if (!root) return { status: 'no_vault' }
+    await upgradeReadingDatabase(root, { write: this.dependencies.write })
     const state: Extract<LibraryState, { status: 'ready' }> = { status: 'ready', vaultRoot: root, books: [], issues: [] }
     const scanDirectory = async (path: string): Promise<void> => {
       try {
@@ -217,9 +211,11 @@ export class LibraryEngine {
         [F.language]: metadata.language, [F.topic]: topicFor({ cats: metadata.subjects, title }), [F.tags]: metadata.subjects,
         [F.status]: '想读', [F.file]: `${assetsName}/${basename(path)}`, [F.cover]: coverName ? `${assetsName}/${coverName}` : undefined,
         [F.words]: words, [F.addedAt]: localDateTime(Date.now()), [F.source]: download?.source ?? { kind: 'local' },
+        来源说明: readingSourceText(download?.source ?? { kind: 'local' }),
       }
       if (this.requireRoot() !== root) throw new Error('导入期间资料库已切换，请重新导入')
       if (!await exists(page)) { ownsDatabasePage = true; await publish(page, databasePage) }
+      else await upgradeReadingDatabase(root, { write: this.dependencies.write })
       if (await exists(notePath)) throw new Error('来源页已被其他程序创建')
       ownsNote = true
       await publish(notePath, `---\n${stringify(fields)}---\n\n## 标注\n\n## 我的笔记\n`)

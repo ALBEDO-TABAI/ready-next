@@ -323,6 +323,8 @@ M5 的数据库往返/导入保真另由计划 `src/__tests__/ready-database-rou
 
 ### M5 Notion 层
 
+实施合同：[M5 Notion 层](2026-10-31-ready-next-m5-notion-layer-implementation.md)。
+
 **依赖：**M2、M3；整体推进在 M4 可用之后。**对应合同：**C2/C3/C4/C5/C12/C14，加 §4 数据库往返与导入保真。
 
 **交付物：**数据库字段/视图与文件行，六种视图加书架视图、筛选排序分组和列计算、内联视图；速览、⌘K、关联面板；模板、同步块、评论；Notion 导出包与 Inkwell 一次导入；RSS/网页/PDF 标注来源页，书房文章/标注栏目。

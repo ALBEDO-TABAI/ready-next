@@ -1621,6 +1621,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   vault: vaultAPI,
   documentDrafts: documentDraftsAPI,
   documentPages: documentPagesAPI,
+  documentDatabase: (request: import('../shared/document-database').DatabaseRequest): Promise<import('../shared/document-database').DatabaseReply> => ipcRenderer.invoke('documentDatabase:request', request),
   library: libraryAPI,
   libraryArchive: libraryArchiveAPI,
   bookSources: bookSourcesAPI,
