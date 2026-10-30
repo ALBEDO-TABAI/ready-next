@@ -84,6 +84,20 @@ async function checkCalendarLayers(page, root) {
   const elapsed = performance.now() - began
   ok('C8 external file date renders within one second', elapsed < 1000, `${elapsed.toFixed(1)}ms`)
   console.log(`C8 window latency ${elapsed.toFixed(1)}ms`)
+  // The event panel left open by the M6 link checks covers part of the grid (the drop day included); close it
+  // first, as a person would, so the drag lands on the visible day.
+  for (let i = 0; i < 5 && await page.locator('.ev-sec').first().isVisible().catch(() => false); i++) {
+    await page.getByTestId('ready-calendar').focus()
+    await page.keyboard.press('Escape'); await page.waitForTimeout(200)
+  }
+  ok('C8 the event panel is closed before dragging', !await page.locator('.ev-sec').first().isVisible().catch(() => false))
+  await page.evaluate(() => {
+    window.__layerDrag = []
+    for (const type of ['dragstart', 'drop', 'dragend']) document.addEventListener(type, event => {
+      const target = event.target instanceof Element ? event.target : null
+      window.__layerDrag.push(`${type}@${target?.closest('[data-layer-day]')?.getAttribute('data-layer-day') ?? target?.tagName}:${event.dataTransfer?.dropEffect ?? ''}`)
+    }, true)
+  })
   await chip.dragTo(page.locator('[data-layer-day="2026-11-01"]').first())
   // waitForFunction does not await an async predicate, so poll the service and the disk from here.
   const moveDeadline = Date.now() + 10000
@@ -97,7 +111,17 @@ async function checkCalendarLayers(page, root) {
     if (shown && dragged.includes('2026-11-01')) break
     await page.waitForTimeout(100)
   }
-  ok('C8 drag changes only the source date', dragged === '---\ndate: 2026-11-01\n---\nC8 layer smoke\n', JSON.stringify(dragged))
+  const layerAlerts = await page.locator('[data-layer-day] [role="alert"]').allTextContents()
+  // Diagnostics only when the drag did not land: the entry as the service sees it, and a direct service move.
+  const diagnosis = dragged.includes('2026-11-01') ? null : await page.evaluate(async () => {
+    const range = { from: '2026-10-28', to: '2026-11-04', timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }
+    const query = await window.electronAPI.calendarLayers.query(range)
+    const entry = query.ok ? query.value.find(item => item.title === 'c8-layer') : null
+    const chips = [...document.querySelectorAll('[data-layer-entry]')].map(chip => [chip.getAttribute('data-layer-entry'), chip.closest('[data-layer-day]')?.getAttribute('data-layer-day'), chip.getAttribute('draggable')])
+    const move = entry ? await window.electronAPI.calendarLayers.move({ range, id: entry.id, expectedVersion: entry.version, date: '2026-11-01' }) : null
+    return { range, query: query.ok ? null : query, entry, chips, events: window.__layerDrag, move }
+  })
+  ok('C8 drag changes only the source date', dragged === '---\ndate: 2026-11-01\n---\nC8 layer smoke\n', JSON.stringify({ dragged, layerAlerts, diagnosis }))
 }
 
 // I2: exercise a real file-tree open, the Ready move command, the live watcher and restart.
