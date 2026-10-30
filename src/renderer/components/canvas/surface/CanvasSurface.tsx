@@ -10,10 +10,17 @@ import { silhouettePath } from '../../../modules/canvas/interaction/outline'
 import { CanvasCard } from './CanvasCard'
 import { useCanvasBuffer } from './useCanvasBuffer'
 import type { CanvasSurfaceProps, Tool } from './types'
+import { CanvasEditorLifecycle } from './editor-lifecycle'
 
 export function CanvasSurface(props: CanvasSurfaceProps) {
   const buffer = useCanvasBuffer(props), { canvas, busy, commit } = buffer
   const [selected, setSelected] = useState<string[]>([]), [tool, setTool] = useState<Tool>('select'), [trash, setTrash] = useState(false)
+  const finishEditor = useRef<(() => Promise<void>) | null>(null), exiting = useRef(false)
+  const [editorError, setEditorError] = useState(''), [closing, setClosing] = useState(false)
+  const registerFinish = useCallback((finish: () => Promise<void>) => {
+    finishEditor.current = finish
+    return () => { if (finishEditor.current === finish) finishEditor.current = null }
+  }, [])
   const [editing, setEditing] = useState<string | null>(null), [camera, setCamera] = useState<Camera>(props.initialCamera ?? { x: 40, y: 80, zoom: 1 })
   const [size, setSize] = useState({ width: 1000, height: 700 })
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
@@ -40,6 +47,8 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
   const marker = `canvas-arrow-${useId().replace(/:/g, '')}`
   const bindElement = useCallback((id: string, el: HTMLDivElement | null) => { if (el) elements.current.set(id, el); else elements.current.delete(id) }, [])
   const open = useCallback((node: CanvasNode) => {
+    if (scene.current?.busy) return
+    setEditorError('')
     if (node.ready.kind === 'subcanvas') latest.current.props.onNavigateSubcanvas?.(node)
     else if (node.type === 'text' && node.ready.kind !== 'draft' && latest.current.props.renderTextEditor) setEditing(node.id)
     else latest.current.props.onOpenNode?.(node)
@@ -62,6 +71,17 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     observer?.observe(el)
     return () => { el.removeEventListener('wheel', wheel); view.removeEventListener('blur', cancel); observer?.disconnect(); gestures.dispose(); scene.current = null }
   }, [gestures])
+  async function closeEditor() {
+    if (exiting.current) return
+    const boardId = props.canvas.ready.id
+    exiting.current = true; setClosing(true); setEditorError('')
+    try {
+      await finishEditor.current?.()
+      if (latest.current.props.canvas.ready.id === boardId) setEditing(current => current === editing ? null : current)
+    } catch (error) {
+      if (latest.current.props.canvas.ready.id === boardId) setEditorError(error instanceof Error ? error.message : String(error))
+    } finally { exiting.current = false; setClosing(false) }
+  }
   function recycle() {
     if (!chosen.length) return
     void commit([{ type: 'trash', ids: chosen.map(n => n.id), trash: { operationId: crypto.randomUUID(), deletedAt: new Date().toISOString() } }])
@@ -106,7 +126,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
       <div role="toolbar" aria-label="画板工具">
         {tools.map(([value, label]) => <button key={value} disabled={busy || trash || !!editing || (['rect', 'arrow', 'path'].includes(value) && !props.prepareGraphic)} aria-pressed={tool === value} onClick={() => { gestures.cancel(); setTool(value); root.current?.focus() }}>{label}</button>)}
         <button disabled={busy || !buffer.canUndo} onClick={() => void buffer.undo()}>撤销</button><button disabled={busy || !buffer.canRedo} onClick={() => void buffer.redo()}>重做</button>
-        <button disabled={busy} aria-pressed={trash} onClick={() => { gestures.cancel(); setEditing(null); setTrash(!trash) }}>回收站</button>
+        <button disabled={busy || !!editing} aria-pressed={trash} onClick={() => { gestures.cancel(); setEditing(null); setTrash(!trash) }}>回收站</button>
       </div>
       {!trash && <div role="toolbar" aria-label="选区操作">
         <button disabled={busy || chosen.length < 2} onClick={() => void commit(groupOperations(chosen, crypto.randomUUID()))}>分组</button>
@@ -139,7 +159,11 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
       </svg>
       {active.nodes.map(node => <CanvasCard key={node.id} node={node} selected={selected.includes(node.id)} visible={visibleIds.has(node.id)} element={bindElement} open={open} resolveAsset={props.resolveAsset}
         content={visibleIds.has(node.id) ? props.renderCard?.(node) : undefined}
-        editor={editing === node.id ? <div data-canvas-ui className="canvas-editor">{props.renderTextEditor?.({ node, commit, close: () => setEditing(null) })}<button onClick={() => setEditing(null)}>完成编辑</button></div> : undefined} />)}
+        editor={editing === node.id ? <CanvasEditorLifecycle.Provider value={registerFinish}><div data-canvas-ui className="canvas-editor">
+          <div inert={closing}>{props.renderTextEditor?.({ node, commit, close: () => { void closeEditor() } })}</div>
+          {editorError && <p role="alert">{editorError}</p>}
+          <button disabled={closing} onClick={() => void closeEditor()}>{closing ? '正在完成…' : '完成编辑'}</button>
+        </div></CanvasEditorLifecycle.Provider> : undefined} />)}
       <svg className="canvas-overlay" ref={overlay} data-arrow-marker={marker} aria-hidden="true" />
     </div>}
     <div className="canvas-hint" aria-live="polite">{selected.length} 已选 · 空格拖动画布 · Shift 多选 · P / L / R 排版</div>

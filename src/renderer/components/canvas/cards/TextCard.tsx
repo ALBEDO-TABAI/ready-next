@@ -1,38 +1,23 @@
-import { useRef, useState, type ReactNode } from 'react'
+import { useContext, useLayoutEffect, useMemo, useRef, type ReactNode } from 'react'
 import type { CanvasNode, CanvasOperation } from '../../../../shared/ready-canvas'
-import type { BlockEdit, DocumentBuffer, DocumentSelection } from '../../../../shared/document-blocks'
-import { cardTextEdit } from './text-adapter'
+import type { EditorBuffer } from '../../../modules/document/block-editor/editor-buffer'
+import { BufferedBlockEditor } from '../../../modules/document/block-editor/ReadyBlockEditor'
+import { CanvasEditorLifecycle } from '../surface/editor-lifecycle'
+import { NodeBuffer } from './node-buffer'
 
-/** Required public M3 host contract. ReadyBlockEditor currently only accepts a document tab;
- * F/T4 must expose this boundary before supplying the renderer. No synthetic document tabs. */
-export interface CardEditorHost {
-  buffer: DocumentBuffer; selection: DocumentSelection
-  apply(edit: BlockEdit): Promise<boolean>
-}
+export interface CardEditorHost { buffer: EditorBuffer }
 export function TextCard({ node, commit, renderEditor }: {
   node: Extract<CanvasNode, { type: 'text' }>
   commit(operations: CanvasOperation[]): Promise<boolean>
   renderEditor?: (host: CardEditorHost) => ReactNode
 }) {
-  const version = useRef({ text: node.text, value: 0 })
-  if (version.current.text !== node.text) version.current = { text: node.text, value: version.current.value + 1 }
-  const [selection, setSelection] = useState<DocumentSelection>({ anchor: 0, focus: 0 })
-  const [error, setError] = useState(''), pending = useRef(false)
-  const bodyVersion = version.current.value
-  const apply = async (edit: BlockEdit) => {
-    if (pending.current) return false
-    pending.current = true
-    try {
-      const change = cardTextEdit(node, bodyVersion, edit)
-      const accepted = await commit([change.operation])
-      if (accepted) { setSelection(change.selection); setError('') }
-      return accepted
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); return false }
-    finally { pending.current = false }
-  }
-  return <div data-canvas-ui aria-label="文字卡编辑">
-    {renderEditor ? renderEditor({ buffer: { content: node.text, version: bodyVersion }, selection, apply })
-      : <><p>{node.text}</p><p role="status">文字卡编辑尚未接通</p></>}
-    {error && <p role="alert">{error}</p>}
+  const registerFinish = useContext(CanvasEditorLifecycle)
+  const latest = useRef(commit); latest.current = commit
+  const buffer = useMemo(() => new NodeBuffer(node, operations => latest.current(operations)), [node.id]) // eslint-disable-line react-hooks/exhaustive-deps -- body updates enter observe, never replace history
+  useLayoutEffect(() => registerFinish?.(() => buffer.finish()), [buffer, registerFinish])
+  useLayoutEffect(() => buffer.observe(node.text), [buffer, node.text])
+  return <div data-canvas-ui className="note-preview-shell" aria-label="文字卡编辑">
+    {renderEditor ? renderEditor({ buffer }) : <BufferedBlockEditor buffer={buffer} renderSource={block => <pre>{block.raw}</pre>} />}
+    <small>未提供画板文件路径，页面链接选择器和子页面暂不可用；文字卡不提供保存到和复制块引用。</small>
   </div>
 }

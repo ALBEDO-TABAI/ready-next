@@ -1,10 +1,11 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, useId, type ReactNode } from 'react'
 import { useDocTabs } from '../../../stores/useDocTabs'
 import {
   createBlockCommand, createRangeEdit, parseDocumentBlocks, parseInlineBlock, replaceRanges,
   type DocumentBlock,
 } from '../../../../shared/document-blocks'
-import { getTabBuffer, type TabBuffer } from './tab-buffer'
+import { getTabBuffer } from './tab-buffer'
+import type { EditorBuffer } from './editor-buffer'
 import { emptyBlock, inlineMarkdown, newline, plainModel } from './editing'
 import { getCaret, plainText, setCaret } from './dom-inline'
 import { BlockIdentity } from './block-identity'
@@ -14,7 +15,7 @@ import { EditorTools } from './EditorTools'
 import { isNonContentBlock } from './catalog'
 import { textAreaContent } from './text-edit'
 
-function SourceBlock({ block, buffer, children, report }: { block: DocumentBlock; buffer: TabBuffer; children: ReactNode; report(error: unknown): void }) {
+function SourceBlock({ block, buffer, children, report }: { block: DocumentBlock; buffer: EditorBuffer; children: ReactNode; report(error: unknown): void }) {
   const [draft, setDraft] = useState<{ block: DocumentBlock; version: number; text: string } | null>(null)
   const textarea = useRef<HTMLTextAreaElement>(null)
   const commit = () => {
@@ -55,6 +56,17 @@ export function ReadyBlockEditor({ tabId, content: displayedContent, renderSourc
   // A retained hidden DocumentMode supplies its frozen snapshot. Do not bypass it.
   const content = useDocTabs(state => displayedContent ?? state.tabs.find(tab => tab.id === tabId)?.content ?? '')
   const buffer = useMemo(() => getTabBuffer(tabId), [tabId])
+  return <BufferedBlockEditor buffer={buffer} content={content} renderSource={renderSource} />
+}
+
+/** Both document tabs and canvas cards render this exact editor. */
+export function BufferedBlockEditor({ buffer, content: displayedContent, renderSource }: {
+  buffer: EditorBuffer; content?: string; renderSource(block: DocumentBlock): ReactNode
+}) {
+  const content = useSyncExternalStore(buffer.subscribe, () => displayedContent ?? buffer.snapshot.content)
+  const writeError = useSyncExternalStore(buffer.subscribe, () => buffer.error)
+  const instanceId = useId()
+  const editorId = buffer.owner.kind === 'document' ? buffer.owner.tabId : instanceId
   const parsed = useMemo(() => parseDocumentBlocks(content), [content])
   const identities = useRef(new BlockIdentity())
   const keys = useMemo(() => identities.current.resolve(parsed), [parsed])
@@ -153,14 +165,14 @@ export function ReadyBlockEditor({ tabId, content: displayedContent, renderSourc
   const extra = emptyAt === null || parsed.blocks.some(block => block.start === emptyAt && block.type === 'paragraph')
     ? null : emptyBlock(emptyAt, containing?.id ?? null)
   if (extra && !extra.parentId) { segments.push(extra); segments.sort((a, b) => a.start - b.start) }
-  return <div ref={root} className="note-preview-body" data-ready-block-editor={tabId}
+  return <div ref={root} className="note-preview-body" data-ready-block-editor={editorId}
     onKeyDownCapture={event => {
       if (event.nativeEvent.isComposing || !(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'z') return
       event.preventDefault(); event.stopPropagation()
       travel(event.shiftKey ? 'redo' : 'undo')
     }}>
-    <BlockControls buffer={buffer} report={report}><EditorTools buffer={buffer} report={report}>
-    {error && <p role="alert">{error}</p>}
+    <BlockControls editorId={editorId} buffer={buffer} report={report}><EditorTools buffer={buffer} report={report}>
+    {(writeError || error) && <p role="alert">{writeError || error}</p>}
     {parsed.blocks.some(block => block.issue) && <p role="status">分栏格式需修复，其他段落仍可编辑。</p>}
     {segments.map((block, index) => renderBlock(block, String(index)))}
     <button type="button" onClick={() => {

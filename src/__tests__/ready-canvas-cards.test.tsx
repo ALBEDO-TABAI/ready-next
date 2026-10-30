@@ -15,7 +15,7 @@ import { DocumentDraftSchema, type DraftFinalizeInput } from '../shared/document
 async function mount() {
   const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost' })
   const globals = { window: dom.window, document: dom.window.document, HTMLElement: dom.window.HTMLElement,
-    Element: dom.window.Element, IS_REACT_ACT_ENVIRONMENT: true }
+    Element: dom.window.Element, Node: dom.window.Node, IS_REACT_ACT_ENVIRONMENT: true }
   const saved = Object.fromEntries(Object.keys(globals).map(k => [k, Object.getOwnPropertyDescriptor(globalThis, k)]))
   for (const [key, value] of Object.entries(globals)) Object.defineProperty(globalThis, key, { value, configurable: true, writable: true })
   dom.window.requestAnimationFrame = () => 1; dom.window.cancelAnimationFrame = () => {}
@@ -36,8 +36,8 @@ test('card adapter submits M3 range commands to the surface; one card changes an
   try {
     await ui.render(<CanvasSurface canvas={canvas} onOperations={operations => { canvas = applyCanvasOperations(canvas, operations).canvas }}
       renderTextEditor={({ node, commit }) => node.type === 'text' && <TextCard node={node} commit={commit}
-        renderEditor={host => <button onClick={() => void host.apply(createRangeEdit(host.buffer,
-          [{ start: 0, end: 2, expectedText: '原文', replacement: '修改' }], host.selection, { anchor: 2, focus: 2 }))}>提交区间</button>} />} />)
+        renderEditor={host => <button onClick={() => void host.buffer.apply(createRangeEdit(host.buffer.snapshot,
+          [{ start: 0, end: 2, expectedText: '原文', replacement: '修改' }], { anchor: 0, focus: 0 }, { anchor: 2, focus: 2 }))}>提交区间</button>} />} />)
     await act(async () => document.querySelector('[data-node-id="one"]')!.dispatchEvent(new ui.dom.window.MouseEvent('dblclick', { bubbles: true })))
     await ui.click('提交区间')
     assert.equal(canvas.nodes[0].type === 'text' && canvas.nodes[0].text, '修改😀')
@@ -73,14 +73,14 @@ test('document card refreshes on object change, ignores an old read and renders 
   } finally { await ui.close() }
 })
 
-test('link failure retains its original address and missing M3 host is visibly unavailable', async () => {
+test('link failure retains its original address and text cards use the shared editor', async () => {
   const ui = await mount()
   try {
     await ui.render(<><LinkCard node={{ id: 'link', type: 'link', url: 'https://example.com/original', x: 0, y: 0, width: 200, height: 100, ready: { kind: 'link' } }}
       source={{ read: async () => { throw new Error('离线') } }} /><TextCard node={text('one')} commit={async () => true} /></>)
     assert.match(document.body.textContent!, /https:\/\/example.com\/original/)
     assert.match(document.body.textContent!, /预览失败：离线/)
-    assert.match(document.body.textContent!, /文字卡编辑尚未接通/)
+    assert.ok(document.querySelector('[data-ready-block-editor] [contenteditable="true"]'))
   } finally { await ui.close() }
 })
 
