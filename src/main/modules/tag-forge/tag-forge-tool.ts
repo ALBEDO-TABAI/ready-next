@@ -1,3 +1,4 @@
+import { ObjectRegistry } from '../object-service/registry'
 import { commitDocumentOperation, getDocumentTabTransport } from '../document-engine/document-write-service'
 import { readFile } from 'fs/promises'
 import { realpathSync } from 'fs'
@@ -53,7 +54,8 @@ export async function executeTagForgeApply(
   if (!root) return json({ ok: false, errorKind: 'workspace_boundary_rejected', error: 'path is outside any known workspace' })
   const db = engine.getRepository().getConnection()
   const identities = new FileProjectIdentityRepository(db)
-  const file = identities.ensureFile({ workspaceRoot: root, path })
+  new ObjectRegistry(db).register(path)
+  const file = identities.requireFile({ workspaceRoot: root, path })
   const repo = new TagForgeRepository(db)
   if (context?.requestModuleToolAction) {
     try {
@@ -250,7 +252,7 @@ export async function executeTagForgeApply(
         if (revisionOf(diskReadback) !== written.revision) {
           throw Object.assign(new Error('post_index_revision_conflict'), { code: 'post_index_revision_conflict' })
         }
-        const indexed = db.prepare(`SELECT d.frontmatter_json AS frontmatter,d.content_hash AS contentHash FROM documents d JOIN workspaces w ON w.id=d.workspace_id WHERE w.root=? AND d.path=?`).get<{ frontmatter: string | null; contentHash: string | null }>(root, path)
+        const indexed = db.prepare(`SELECT d.frontmatter_json AS frontmatter,d.content_hash AS contentHash FROM documents d WHERE d.object_id=?`).get<{ frontmatter: string | null; contentHash: string | null }>(file.fileKey)
         const indexedFrontmatter = parseFrontmatter(indexed?.frontmatter)
         const indexedTags = Array.isArray(indexedFrontmatter.tags) ? indexedFrontmatter.tags.map(String) : []
         const indexedWorkflowState = typeof indexedFrontmatter.ready_state === 'string' ? indexedFrontmatter.ready_state : null

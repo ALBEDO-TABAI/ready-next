@@ -1,3 +1,4 @@
+import { ObjectRegistry } from '../object-service/registry'
 import type { DatabaseConnection } from '../database/connection'
 import { randomUUID } from 'crypto'
 
@@ -48,23 +49,25 @@ export class FileActivityRepository {
       throw new Error(`eventType '${input.eventType}' is not recorded in file emergence v1`)
     }
 
+    const objectId = new ObjectRegistry(this.db).register(path).id
+
     const recent = input.eventType === 'open'
       ? this.db
           .prepare(`
-            SELECT * FROM file_activity_events
-            WHERE path = ? AND event_type = ? AND created_at >= ?
+            SELECT *, (SELECT COALESCE(current_path,last_known_path) FROM objects WHERE objects.id=file_activity_events.object_id) AS path FROM file_activity_events
+            WHERE object_id = ? AND event_type = ? AND created_at >= ?
             ORDER BY created_at DESC
             LIMIT 1
           `)
-          .get<FileActivityRow>(path, input.eventType, now - DEDUPE_WINDOW_MS)
+          .get<FileActivityRow>(objectId, input.eventType, now - DEDUPE_WINDOW_MS)
       : this.db
           .prepare(`
-            SELECT * FROM file_activity_events
-            WHERE path = ? AND event_type = ? AND source = ? AND created_at >= ?
+            SELECT *, (SELECT COALESCE(current_path,last_known_path) FROM objects WHERE objects.id=file_activity_events.object_id) AS path FROM file_activity_events
+            WHERE object_id = ? AND event_type = ? AND source = ? AND created_at >= ?
             ORDER BY created_at DESC
             LIMIT 1
           `)
-          .get<FileActivityRow>(path, input.eventType, input.source, now - DEDUPE_WINDOW_MS)
+          .get<FileActivityRow>(objectId, input.eventType, input.source, now - DEDUPE_WINDOW_MS)
 
     if (recent) {
       this.db
@@ -87,11 +90,12 @@ export class FileActivityRepository {
     this.db
       .prepare(`
         INSERT INTO file_activity_events (
-          id, path, workspace_root, event_type, source, weight, meta_json, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          id, object_id, path_at_event, workspace_root, event_type, source, weight, meta_json, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       .run(
         id,
+        objectId,
         path,
           input.workspaceRoot ?? null,
           input.eventType,
@@ -105,7 +109,7 @@ export class FileActivityRepository {
 
   getById(id: string): FileActivityEvent | null {
     const row = this.db
-      .prepare('SELECT * FROM file_activity_events WHERE id = ?')
+      .prepare('SELECT *, (SELECT COALESCE(current_path,last_known_path) FROM objects WHERE objects.id=file_activity_events.object_id) AS path FROM file_activity_events WHERE id = ?')
       .get<FileActivityRow>(id)
     return row ? rowToEvent(row) : null
   }
@@ -118,7 +122,7 @@ export class FileActivityRepository {
     const placeholders = roots.map(() => '?').join(', ')
     return this.db
       .prepare(`
-        SELECT * FROM file_activity_events
+        SELECT *, (SELECT COALESCE(current_path,last_known_path) FROM objects WHERE objects.id=file_activity_events.object_id) AS path FROM file_activity_events
         WHERE workspace_root IN (${placeholders}) AND created_at >= ?
         ORDER BY created_at DESC
         LIMIT ?

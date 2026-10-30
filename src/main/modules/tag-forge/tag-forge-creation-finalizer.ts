@@ -1,3 +1,4 @@
+import { ObjectRegistry } from '../object-service/registry'
 import type { DatabaseConnection } from '../database/connection'
 import { createHash } from 'crypto'
 import { lstat, readFile, realpath } from 'fs/promises'
@@ -190,8 +191,8 @@ async function restoreIndexToDiskTruth(
   }
 }
 
-function readIndexedDocument(db: DatabaseConnection, root: string, path: string): { contentHash: string | null; frontmatter: Record<string, unknown> } {
-  const row = db.prepare(`SELECT d.frontmatter_json AS frontmatter,d.content_hash AS contentHash FROM documents d JOIN workspaces w ON w.id=d.workspace_id WHERE w.root=? AND d.path=?`).get<{ frontmatter: string | null; contentHash: string | null }>(root, path)
+function readIndexedDocument(db: DatabaseConnection, _root: string, path: string): { contentHash: string | null; frontmatter: Record<string, unknown> } {
+  const row = db.prepare(`SELECT d.frontmatter_json AS frontmatter,d.content_hash AS contentHash FROM documents d WHERE d.object_id=?`).get<{ frontmatter: string | null; contentHash: string | null }>(new ObjectRegistry(db).find(path)?.id ?? null)
   let frontmatter: Record<string, unknown> = {}
   try {
     const parsed = JSON.parse(row?.frontmatter || '{}')

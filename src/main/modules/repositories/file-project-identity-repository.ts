@@ -1,6 +1,7 @@
 import type { DatabaseConnection } from '../database/connection'
 import { randomUUID } from 'crypto'
 import { isAbsolute, relative } from 'path'
+import { ObjectRegistry, canonicalObjectPath, type ObjectRecord } from '../object-service/registry'
 
 
 
@@ -39,16 +40,6 @@ export interface ProjectIdentityRecord {
   updatedAt: number
 }
 
-interface FileIdentityRow {
-  file_key: string
-  workspace_root: string
-  current_path: string
-  status: FileIdentityStatus
-  content_hash: string | null
-  observed_since: number
-  last_verified_at: number
-}
-
 interface ProjectIdentityRow {
   project_key: string
   workspace_root: string
@@ -76,149 +67,26 @@ const SOURCE_PRIORITY: Record<ProjectIdentitySource, number> = {
 export class FileProjectIdentityRepository {
   constructor(private readonly db: DatabaseConnection) {}
 
-  ensureFile(input: {
-    workspaceRoot: string
-    path: string
-    contentHash?: string | null
-    observedAt?: number
-  }): FileIdentityRecord {
-    assertPathInWorkspace(input.path, input.workspaceRoot)
-    const now = input.observedAt ?? Date.now()
-    const existing = this.findFileByCurrentPath(input.workspaceRoot, input.path)
-    if (existing) {
-      this.db.prepare(`
-        UPDATE file_identities
-        SET status = 'present', content_hash = COALESCE(?, content_hash), last_verified_at = ?
-        WHERE file_key = ?
-      `).run(input.contentHash ?? null, now, existing.fileKey)
-      return this.getFile(existing.fileKey)!
-    }
-    const fileKey = randomUUID()
-    this.db.prepare(`
-      INSERT INTO file_identities (
-        file_key, workspace_root, current_path, status, content_hash, observed_since, last_verified_at
-      ) VALUES (?, ?, ?, 'present', ?, ?, ?)
-    `).run(fileKey, input.workspaceRoot, input.path, input.contentHash ?? null, now, now)
-    return this.getFile(fileKey)!
+  requireFile(input: {workspaceRoot:string;path:string;observedAt?:number}):FileIdentityRecord {
+    const file=this.findFileByCurrentPath(input.workspaceRoot,input.path)
+    if(!file)throw new Error('Object has not been verified: '+input.path)
+    return file
   }
 
-  getFile(fileKey: string): FileIdentityRecord | null {
-    const row = this.db.prepare('SELECT * FROM file_identities WHERE file_key = ?')
-      .get<FileIdentityRow>(fileKey)
-    return row ? fileRow(row) : null
+  getFile(fileKey:string):FileIdentityRecord|null {
+    const row=new ObjectRegistry(this.db).get(fileKey)
+    return row?.status==='present' && row.identity_state!=='conflict' ? this.fileRecord(row) : null
   }
 
-  findFileByCurrentPath(workspaceRoot: string, path: string): FileIdentityRecord | null {
-    const row = this.db.prepare(`
-      SELECT * FROM file_identities WHERE workspace_root = ? AND current_path = ? LIMIT 1
-    `).get<FileIdentityRow>(workspaceRoot, path)
-    return row ? fileRow(row) : null
+  findFileByCurrentPath(workspaceRoot:string,path:string):FileIdentityRecord|null {
+    assertPathInWorkspace(path,workspaceRoot)
+    const row=new ObjectRegistry(this.db).find(path)
+    return row && row.identity_state!=='conflict' ? this.fileRecord(row) : null
   }
 
-  resolveFileByObservedPath(workspaceRoot: string, path: string): FileIdentityRecord | null {
-    const current = this.findFileByCurrentPath(workspaceRoot, path)
-    if (current) return current
-    const receipt = this.db.prepare(`
-      SELECT file_key FROM file_move_receipts
-      WHERE workspace_root = ? AND old_path = ?
-      ORDER BY moved_at DESC LIMIT 1
-    `).get<{ file_key: string }>(workspaceRoot, path)
-    return receipt ? this.getFile(receipt.file_key) : null
-  }
-
-  findWorkspaceRootForMove(oldPath: string): string | null {
-    const row = this.db.prepare(`
-      SELECT workspace_root FROM file_identities
-      WHERE current_path = ? OR current_path LIKE ? ESCAPE '\\'
-      ORDER BY length(current_path) ASC LIMIT 1
-    `).get<{ workspace_root: string }>(oldPath, `${escapeLike(oldPath)}/%`)
-    if (row?.workspace_root) return row.workspace_root
-    const project = this.db.prepare(`
-      SELECT workspace_root FROM project_identities
-      WHERE anchor_path = ? OR anchor_path LIKE ? ESCAPE '\\'
-      ORDER BY length(anchor_path) ASC LIMIT 1
-    `).get<{ workspace_root: string }>(oldPath, `${escapeLike(oldPath)}/%`)
-    return project?.workspace_root || null
-  }
-
-  recordInternalMove(input: {
-    workspaceRoot: string
-    oldPath: string
-    newPath: string
-    kind: 'file' | 'directory'
-    movedAt?: number
-  }): FileIdentityRecord[] {
-    assertPathInWorkspace(input.oldPath, input.workspaceRoot)
-    assertPathInWorkspace(input.newPath, input.workspaceRoot)
-    const movedAt = input.movedAt ?? Date.now()
-    let identities = this.listFilesUnder(input.workspaceRoot, input.oldPath, input.kind === 'directory')
-    if (identities.length === 0) {
-      const receipts = input.kind === 'directory'
-        ? this.db.prepare(`
-            SELECT file_key FROM file_move_receipts
-            WHERE workspace_root = ? AND old_path LIKE ? ESCAPE '\\' AND new_path LIKE ? ESCAPE '\\'
-            ORDER BY moved_at DESC
-          `).all<{ file_key: string }>(input.workspaceRoot, `${escapeLike(input.oldPath)}/%`, `${escapeLike(input.newPath)}/%`)
-        : this.db.prepare(`
-            SELECT file_key FROM file_move_receipts
-            WHERE workspace_root = ? AND old_path = ? AND new_path = ?
-            ORDER BY moved_at DESC
-          `).all<{ file_key: string }>(input.workspaceRoot, input.oldPath, input.newPath)
-      if (receipts.length > 0) {
-        return uniqueStrings(receipts.map((receipt) => receipt.file_key))
-          .map((fileKey) => this.getFile(fileKey))
-          .filter((file): file is FileIdentityRecord => Boolean(file))
-      }
-    }
-    if (identities.length === 0 && input.kind === 'file') {
-      identities = [this.ensureFile({ workspaceRoot: input.workspaceRoot, path: input.oldPath, observedAt: movedAt })]
-    }
-
-    this.db.exec('BEGIN')
-    try {
-      for (const identity of identities) {
-        const nextPath = replacePathPrefix(identity.currentPath, input.oldPath, input.newPath)
-        const conflict = this.findFileByCurrentPath(input.workspaceRoot, nextPath)
-        if (conflict && conflict.fileKey !== identity.fileKey) {
-          throw new Error(`file identity target already exists: ${nextPath}`)
-        }
-        this.db.prepare(`
-          UPDATE file_identities
-          SET current_path = ?, status = 'present', last_verified_at = ?
-          WHERE file_key = ?
-        `).run(nextPath, movedAt, identity.fileKey)
-        this.db.prepare(`
-          INSERT OR IGNORE INTO file_move_receipts (
-            receipt_id, file_key, workspace_root, old_path, new_path, move_kind, moved_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?)
-        `).run(randomUUID(), identity.fileKey, input.workspaceRoot, identity.currentPath, nextPath, input.kind, movedAt)
-      }
-      this.db.prepare(`
-        UPDATE project_identities
-        SET anchor_path = CASE
-          WHEN anchor_path = ? THEN ?
-          WHEN anchor_path LIKE ? THEN ? || substr(anchor_path, length(?) + 1)
-          ELSE anchor_path
-        END,
-        updated_at = ?
-        WHERE workspace_root = ? AND (anchor_path = ? OR anchor_path LIKE ? ESCAPE '\\')
-      `).run(
-        input.oldPath,
-        input.newPath,
-        `${escapeLike(input.oldPath)}/%`,
-        input.newPath,
-        input.oldPath,
-        movedAt,
-        input.workspaceRoot,
-        input.oldPath,
-        `${escapeLike(input.oldPath)}/%`,
-      )
-      this.db.exec('COMMIT')
-    } catch (error) {
-      this.db.exec('ROLLBACK')
-      throw error
-    }
-    return identities.map((identity) => this.getFile(identity.fileKey)!).filter(Boolean)
+  private fileRecord(row:ObjectRecord):FileIdentityRecord {
+    const root=row.workspace_id===null ? '' : this.db.prepare('SELECT root FROM workspaces WHERE id=?').get<{root:string}>(row.workspace_id)?.root??''
+    return {fileKey:row.id,workspaceRoot:root,currentPath:row.current_path!,status:'present',contentHash:row.content_hash,observedSince:row.observed_since,lastVerifiedAt:row.last_verified_at!}
   }
 
   resolveOrCreateProject(input: {
@@ -232,7 +100,7 @@ export class FileProjectIdentityRepository {
     observedAt?: number
   }): ProjectIdentityRecord {
     const now = input.observedAt ?? Date.now()
-    const files = input.filePaths.map((path) => this.ensureFile({
+    const files = input.filePaths.map((path) => this.requireFile({
       workspaceRoot: input.workspaceRoot,
       path,
       observedAt: now,
@@ -293,11 +161,11 @@ export class FileProjectIdentityRepository {
 
   listProjectFiles(projectKey: string): FileIdentityRecord[] {
     return this.db.prepare(`
-      SELECT f.* FROM file_identities f
-      JOIN project_identity_members m ON m.file_key = f.file_key
-      WHERE m.project_key = ?
+      SELECT f.* FROM objects f
+      JOIN project_identity_members m ON m.object_id = f.id
+      WHERE m.project_key = ? AND f.status='present' AND f.identity_state<>'conflict'
       ORDER BY f.current_path
-    `).all<FileIdentityRow>(projectKey).map(fileRow)
+    `).all<ObjectRecord>(projectKey).map(row=>this.fileRecord(row))
   }
 
   renameProject(projectKey: string, displayName: string, updatedAt = Date.now()): ProjectIdentityRecord {
@@ -322,7 +190,7 @@ export class FileProjectIdentityRepository {
     const project = this.getProject(input.projectKey)
     if (!project) throw new Error('project identity not found')
     if (project.workspaceRoot !== input.workspaceRoot) throw new Error('project and file workspace differ')
-    const file = this.ensureFile({ workspaceRoot: input.workspaceRoot, path: input.path, observedAt: input.updatedAt })
+    const file = this.requireFile({ workspaceRoot: input.workspaceRoot, path: input.path, observedAt: input.updatedAt })
     this.assignFile({ projectKey: project.projectKey, fileKey: file.fileKey, source: 'user', confidence: 1, updatedAt: input.updatedAt })
     return this.getProject(project.projectKey)!
   }
@@ -334,7 +202,7 @@ export class FileProjectIdentityRepository {
     updatedAt?: number
   }): ProjectIdentityRecord {
     const now = input.updatedAt ?? Date.now()
-    const file = this.ensureFile({ workspaceRoot: input.workspaceRoot, path: input.path, observedAt: now })
+    const file = this.requireFile({ workspaceRoot: input.workspaceRoot, path: input.path, observedAt: now })
     const project = this.createProject({
       workspaceRoot: input.workspaceRoot,
       displayName: input.displayName,
@@ -387,13 +255,13 @@ export class FileProjectIdentityRepository {
     updatedAt?: number
   }): void {
     const now = input.updatedAt ?? Date.now()
-    this.db.prepare('DELETE FROM project_identity_members WHERE file_key = ? AND project_key <> ?')
+    this.db.prepare('DELETE FROM project_identity_members WHERE object_id = ? AND project_key <> ?')
       .run(input.fileKey, input.projectKey)
     this.db.prepare(`
       INSERT INTO project_identity_members (
-        project_key, file_key, source, confidence, created_at, updated_at
+        project_key, object_id, source, confidence, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(project_key, file_key) DO UPDATE SET
+      ON CONFLICT(project_key, object_id) DO UPDATE SET
         source = CASE WHEN project_identity_members.source = 'user' THEN 'user' ELSE excluded.source END,
         confidence = CASE WHEN project_identity_members.source = 'user' THEN 1 ELSE excluded.confidence END,
         updated_at = excluded.updated_at
@@ -408,7 +276,7 @@ export class FileProjectIdentityRepository {
       SELECT p.*, COUNT(*) AS support
       FROM project_identities p
       JOIN project_identity_members m ON m.project_key = p.project_key
-      WHERE m.file_key IN (${placeholders}) AND p.status <> 'merged'
+      WHERE m.object_id IN (${placeholders}) AND p.status <> 'merged'
       GROUP BY p.project_key
       ORDER BY support DESC, p.updated_at DESC
       LIMIT 1
@@ -426,30 +294,6 @@ export class FileProjectIdentityRepository {
     return row ? projectRow(row) : null
   }
 
-  private listFilesUnder(workspaceRoot: string, path: string, includeDescendants: boolean): FileIdentityRecord[] {
-    if (!includeDescendants) {
-      const exact = this.findFileByCurrentPath(workspaceRoot, path)
-      return exact ? [exact] : []
-    }
-    const rows = this.db.prepare(`
-      SELECT * FROM file_identities
-      WHERE workspace_root = ? AND (current_path = ? OR current_path LIKE ? ESCAPE '\\')
-      ORDER BY current_path
-    `).all<FileIdentityRow>(workspaceRoot, path, `${escapeLike(path)}/%`)
-    return rows.map(fileRow)
-  }
-}
-
-function fileRow(row: FileIdentityRow): FileIdentityRecord {
-  return {
-    fileKey: row.file_key,
-    workspaceRoot: row.workspace_root,
-    currentPath: row.current_path,
-    status: row.status,
-    contentHash: row.content_hash,
-    observedSince: row.observed_since,
-    lastVerifiedAt: row.last_verified_at,
-  }
 }
 
 function projectRow(row: ProjectIdentityRow): ProjectIdentityRecord {
@@ -477,18 +321,8 @@ function validateDisplayName(raw: string): string {
 
 function assertPathInWorkspace(path: string, workspaceRoot: string): void {
   if (!isAbsolute(path) || !isAbsolute(workspaceRoot)) throw new Error('identity path must be absolute')
-  const rel = relative(workspaceRoot, path)
+  const rel = relative(canonicalObjectPath(workspaceRoot), canonicalObjectPath(path))
   if (rel.startsWith('..') || isAbsolute(rel)) throw new Error('identity path is outside workspace')
-}
-
-function replacePathPrefix(path: string, oldPath: string, newPath: string): string {
-  if (path === oldPath) return newPath
-  if (!path.startsWith(`${oldPath}/`)) throw new Error('path is outside moved prefix')
-  return `${newPath}${path.slice(oldPath.length)}`
-}
-
-function escapeLike(value: string): string {
-  return value.replace(/[\\%_]/g, (match) => `\\${match}`)
 }
 
 function uniqueStrings(values: readonly string[]): string[] {

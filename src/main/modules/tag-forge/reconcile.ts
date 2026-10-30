@@ -10,7 +10,7 @@ export function addTagAssignmentChangeListener(listener:ChangeListener):()=>void
 
 export function reconcileIndexedFrontmatter(db:DatabaseConnection,workspaceRoot:string,path:string,tags:readonly string[],workflowState:string|null=null):void{
   if(!path.toLowerCase().endsWith('.md'))return
-  const identity=new FileProjectIdentityRepository(db).ensureFile({workspaceRoot,path})
+  const identity=new FileProjectIdentityRepository(db).requireFile({workspaceRoot,path})
   const repository=new TagForgeRepository(db);const policy=loadTagForgePolicy();const before=JSON.stringify(repository.listAssignments(identity.fileKey))
   repository.reconcileAssignments({fileKey:identity.fileKey,frontmatterTags:tags,workflowState,knownEntries:[...policy.entries,...repository.listOverlay()]})
   repository.markReadback(identity.fileKey)
@@ -23,6 +23,6 @@ export function reconcileIndexedWorkspace(db:DatabaseConnection,workspaceRoot:st
 }
 
 export function reconcilePendingIndexedReadbacks(db:DatabaseConnection,workspaceRoot:string,workspaceId:number):void{
-  const rows=db.prepare(`SELECT DISTINCT d.path,d.frontmatter_json AS frontmatter FROM documents d JOIN file_identities f ON f.workspace_root=? AND f.current_path=d.path AND f.status='present' JOIN file_tag_assignments a ON a.file_key=f.file_key WHERE d.workspace_id=? AND d.source_type='document' AND LOWER(d.path) LIKE '%.md' AND a.suppressed=0 AND a.readback_at IS NULL`).all<{path:string;frontmatter:string|null}>(workspaceRoot,workspaceId)
+  const rows=db.prepare(`SELECT DISTINCT d.path,d.frontmatter_json AS frontmatter FROM documents d JOIN objects f ON (SELECT root FROM workspaces WHERE id=f.workspace_id)=? AND f.current_path=d.path AND f.status='present' JOIN file_tag_assignments a ON a.object_id=f.id WHERE d.workspace_id=? AND d.source_type='document' AND LOWER(d.path) LIKE '%.md' AND a.suppressed=0 AND a.readback_at IS NULL`).all<{path:string;frontmatter:string|null}>(workspaceRoot,workspaceId)
   for(const row of rows){let tags:string[]=[];let workflowState:string|null=null;try{const parsed=JSON.parse(row.frontmatter||'{}');tags=Array.isArray(parsed.tags)?parsed.tags.map(String):[];workflowState=typeof parsed.ready_state==='string'?parsed.ready_state:null}catch{/* malformed is no controlled tags */}reconcileIndexedFrontmatter(db,workspaceRoot,row.path,tags,workflowState)}
 }

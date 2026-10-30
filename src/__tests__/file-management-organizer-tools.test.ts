@@ -1,3 +1,7 @@
+import Database from 'better-sqlite3'
+import { runMigrations } from '../main/modules/migrations'
+import { SearchEngine } from '../main/modules/search-engine/indexer'
+const databases:Database.Database[]=[]
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { existsSync, realpathSync } from 'node:fs'
@@ -37,6 +41,7 @@ before(() => {
 })
 
 after(async () => {
+  for(const db of databases)db.close()
   await shutdownDocumentWorker()
 })
 
@@ -44,29 +49,10 @@ test('file-management-organizer-tools declares transitive sqlite ABI guard', (t)
   skipIfSqliteUnavailable(t, 'file-management-organizer-tools transitive sqlite load')
 })
 
-function fakeSearchEngine(root: string) {
-  const canonicalRoot = realpathSync(root)
-  const contains = (path: string, candidate: string) =>
-    path === candidate || path.startsWith(`${candidate}/`)
-  const db = {
-    prepare() {
-      return {
-        get: () => undefined,
-        all: () => [],
-        run: () => undefined,
-      }
-    },
-  }
-  return {
-    findWorkspaceRootForPath: (path: string) =>
-      contains(path, root) || contains(path, canonicalRoot) ? root : null,
-    indexDocument: async () => ({ ok: true }),
-    getRepository: () => ({
-      getConnection: () => db,
-      ensureWorkspace: () => 1,
-      deletePath: () => undefined,
-    }),
-  }
+function fakeSearchEngine(root:string) {
+  const db=new Database(':memory:');runMigrations(db);databases.push(db)
+  const engine=new SearchEngine(db,{fts5Available:false});engine.getRepository().ensureWorkspace(root)
+  return engine
 }
 
 function fakeSearchEngineForRoots(roots: string[], indexedPaths: string[]) {

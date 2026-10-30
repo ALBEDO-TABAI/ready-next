@@ -1,3 +1,4 @@
+import { migrateObjects, OBJECT_MIGRATION } from './object-service/schema'
 import { migrateSearchReadyRefs } from './search-engine/ready-ref-migration'
 import { migrateCalendarUnion, CALENDAR_UNION_MIGRATION } from './calendar-engine/calendar-schema'
 import { migrateRSSDigests, RSS_DIGEST_MIGRATION } from './rss-engine/digest-schema'
@@ -4460,7 +4461,7 @@ const migrations: Migration[] = [
       )`)
     },
   },
-
+  { name: OBJECT_MIGRATION, up: migrateObjects },
 ]
 
 /**
@@ -4508,7 +4509,7 @@ export function runMigrations(db: MigrationDatabase): void {
     }
 
     const foreignKeysBefore = ['109_browser_target_claim_user_takeover',
-      '118_codex_native_continuity_terminal_head_v3'].includes(migration.name)
+      '118_codex_native_continuity_terminal_head_v3', OBJECT_MIGRATION].includes(migration.name)
       ? Number(db.prepare('PRAGMA foreign_keys').get<{ foreign_keys: number }>()?.foreign_keys || 0)
       : 0
     if (foreignKeysBefore) db.exec('PRAGMA foreign_keys = OFF')

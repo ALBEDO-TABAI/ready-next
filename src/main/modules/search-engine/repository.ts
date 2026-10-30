@@ -1,3 +1,4 @@
+import { ObjectRegistry, canonicalObjectPath } from '../object-service/registry'
 import type { DatabaseConnection, DatabaseStatement } from '../database/connection'
 
 import type { WikilinkRef, MdlinkRef, AttachmentRef } from '../../../shared/document-graph-parse'
@@ -85,8 +86,8 @@ export class SearchRepository {
     this.insertDocumentStmt = db.prepare(`
       INSERT INTO documents
         (workspace_id, path, name, ext, size, mtime, content_hash, frontmatter_json, indexed_at,
-         source_type, source_id, source_meta_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         source_type, source_id, source_meta_json, object_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
     this.updateDocumentStmt = db.prepare(`
       UPDATE documents
@@ -229,10 +230,13 @@ export class SearchRepository {
   }
 
   upsertDocument(input: UpsertDocumentInput): UpsertDocumentResult {
-    const existing = this.selectDocumentByPathStmt.get<IndexedPathMetadata>(
-      input.workspaceId,
-      input.path,
-    )
+    const registry = new ObjectRegistry(this.db)
+    const object = (input.sourceType ?? 'document') === 'document' ? registry.find(input.path) : null
+    if ((input.sourceType ?? 'document') === 'document' && (!object || object.identity_state === 'conflict')) throw new Error('Search requires a verified object')
+    if (object) input = {...input,path:object.current_path!,workspaceId:object.workspace_id??input.workspaceId}
+    const existing = object
+      ? this.db.prepare('SELECT id,path,size,mtime,content_hash AS contentHash FROM documents WHERE object_id=?').get<IndexedPathMetadata>(object.id)
+      : this.selectDocumentByPathStmt.get<IndexedPathMetadata>(input.workspaceId,input.path)
 
     const indexedAt = Math.floor(Date.now() / 1000)
     const sourceType = input.sourceType ?? 'document'
@@ -269,6 +273,7 @@ export class SearchRepository {
         sourceType,
         sourceId,
         sourceMetaJson,
+        object?.id ?? null,
       ) as { lastInsertRowid: number | bigint }
       const documentId = Number(insertResult.lastInsertRowid)
       this.writeFtsRow(documentId, input.name, input.body)
@@ -302,6 +307,7 @@ export class SearchRepository {
   }
 
   replaceLinks(documentId: number, wikilinks: WikilinkRef[], mdlinks: MdlinkRef[]): void {
+    new ObjectRegistry(this.db).captureLinks()
     this.deleteLinksStmt.run(documentId)
     for (const link of wikilinks) {
       const target = link.target.trim()
@@ -313,6 +319,7 @@ export class SearchRepository {
       if (!target) continue
       this.insertLinkStmt.run(documentId, 'mdlink', target)
     }
+    this.db.prepare(`DELETE FROM object_link_targets WHERE source_id=(SELECT object_id FROM documents WHERE id=?) AND NOT EXISTS (SELECT 1 FROM doc_links WHERE src_doc_id=? AND kind=object_link_targets.kind AND target_text=object_link_targets.raw_target)`).run(documentId,documentId)
   }
 
   replaceAttachments(documentId: number, attachments: AttachmentRef[]): void {
@@ -327,6 +334,8 @@ export class SearchRepository {
   resolveWikilinkTargets(workspaceId: number): void {
     this.resolveLinkTargetsStmt.run(workspaceId, workspaceId)
     this.markResolvedFlagStmt.run(workspaceId)
+    new ObjectRegistry(this.db).captureLinks()
+    new ObjectRegistry(this.db).restoreLinks()
   }
 
   /**
@@ -373,15 +382,17 @@ export class SearchRepository {
       )
       this.markIncomingResolvedByNameStmt.run(documentId)
     }
+    new ObjectRegistry(this.db).captureLinks()
+    new ObjectRegistry(this.db).restoreLinks()
   }
 
   deletePath(workspaceId: number, path: string): number {
-    const result = this.deletePathStmt.run(workspaceId, path) as { changes?: number }
+    const result = this.deletePathStmt.run(workspaceId, path.startsWith('/') ? canonicalObjectPath(path) : path) as { changes?: number }
     return Number(result.changes ?? 0)
   }
 
   getPathMetadata(workspaceId: number, path: string): IndexedPathMetadata | undefined {
-    return this.selectDocumentByPathStmt.get<IndexedPathMetadata>(workspaceId, path)
+    return this.selectDocumentByPathStmt.get<IndexedPathMetadata>(workspaceId, path.startsWith('/') ? canonicalObjectPath(path) : path)
   }
 
   listPathsForWorkspace(workspaceId: number, sourceType?: string): IndexedPathMetadata[] {

@@ -1,3 +1,4 @@
+import { seedSearchObject } from './utils/object-repository-fixtures'
 import type { DatabaseConnection } from '../main/modules/database/connection'
 /**
  * perf-rescue B8 — per-file wikilink resolve regression.
@@ -26,7 +27,7 @@ import type { DatabaseConnection } from '../main/modules/database/connection'
  */
 
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -80,6 +81,7 @@ interface DocSeedInput {
  * workspace_id / path / name / mtime / hash fields.
  */
 function seedDoc(repo: SearchRepository, input: DocSeedInput): number {
+  seedSearchObject(repo.getConnection(),input.workspaceId,input.path)
   const result = repo.upsertDocument({
     workspaceId: input.workspaceId,
     path: input.path,
@@ -478,7 +480,7 @@ test('reindex and indexDocument preserve derived rows when content is unchanged'
   if (skipIfSqliteUnavailable(t, 'single-file-link-resolve: unchanged content fast path')) return
   const Sqlite = loadSqliteCtor()!
   const db = openSchemaDb(Sqlite)
-  const root = mkdtempSync(join(tmpdir(), 'ready-index-fast-path-'))
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'ready-index-fast-path-')))
   try {
     const engine = new SearchEngine(db, {
       fts5Available: false,
@@ -507,10 +509,10 @@ test('reindex and indexDocument preserve derived rows when content is unchanged'
     repo.resolveWikilinkTargetsForDocument = () => { narrowResolves += 1 }
     repo.resolveWikilinkTargets = () => { workspaceResolves += 1 }
     const identity = db.prepare(
-      'SELECT file_key AS fileKey FROM file_identities WHERE workspace_root = ? AND current_path = ?',
+      'SELECT id AS fileKey FROM objects WHERE workspace_id = (SELECT id FROM workspaces WHERE root=?) AND current_path = ?',
     ).get<{ fileKey: string }>(root, path)
     assert.ok(identity)
-    db.prepare('UPDATE file_tag_assignments SET readback_at = NULL WHERE file_key = ?').run(identity.fileKey)
+    db.prepare('UPDATE file_tag_assignments SET readback_at = NULL WHERE object_id = ?').run(identity.fileKey)
 
     const repeated = await engine.reindexWorkspace({ root })
 
@@ -520,7 +522,7 @@ test('reindex and indexDocument preserve derived rows when content is unchanged'
     assert.equal(derivedWrites, 0)
     assert.equal(workspaceResolves, 0)
     const readback = db.prepare(
-      'SELECT readback_at AS readbackAt FROM file_tag_assignments WHERE file_key = ? AND suppressed = 0',
+      'SELECT readback_at AS readbackAt FROM file_tag_assignments WHERE object_id = ? AND suppressed = 0',
     ).get<{ readbackAt: number | null }>(identity.fileKey)
     assert.ok(readback?.readbackAt, 'a no-change rebuild must still complete pending Tag Forge readback')
 
@@ -545,7 +547,7 @@ test('single-document indexing reads content even when size and mtime were resto
   if (skipIfSqliteUnavailable(t, 'single-file-link-resolve: strong single-file change signal')) return
   const Sqlite = loadSqliteCtor()!
   const db = openSchemaDb(Sqlite)
-  const root = mkdtempSync(join(tmpdir(), 'ready-index-restored-mtime-'))
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'ready-index-restored-mtime-')))
   try {
     const engine = new SearchEngine(db, { fts5Available: false })
     const path = join(root, 'A.md')

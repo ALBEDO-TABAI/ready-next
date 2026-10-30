@@ -1,3 +1,4 @@
+import { ObjectRegistry } from '../object-service/registry'
 import type { DatabaseConnection } from '../database/connection'
 import { createHash, randomUUID } from 'crypto'
 import { lstat, readFile, realpath } from 'fs/promises'
@@ -597,7 +598,7 @@ async function hasCompleteTagForgeReadback(
 
 async function readTagForgeRevisionReadback(
   path: string,
-  workspaceRoot: string,
+  _workspaceRoot: string,
   expectedRevision: string | undefined,
   engine: SearchEngine,
 ): Promise<string | null> {
@@ -606,9 +607,8 @@ async function readTagForgeRevisionReadback(
   const indexed = engine.getRepository().getConnection().prepare(`
     SELECT d.content_hash AS contentHash
     FROM documents d
-    JOIN workspaces w ON w.id = d.workspace_id
-    WHERE w.root = ? AND d.path = ?
-  `).get<{ contentHash: string | null }>(workspaceRoot, path)
+    WHERE d.object_id = ?
+  `).get<{ contentHash: string | null }>(new ObjectRegistry(engine.getRepository().getConnection()).find(path)?.id ?? null)
   return indexed?.contentHash === buildSearchIndexContentHash(content) ? content : null
 }
 

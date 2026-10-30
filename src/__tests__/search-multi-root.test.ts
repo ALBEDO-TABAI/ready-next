@@ -1,3 +1,4 @@
+import { seedSearchObject } from './utils/object-repository-fixtures'
 import type { DatabaseConnection } from '../main/modules/database/connection'
 /**
  * Multi-root search & reindex integration test.
@@ -26,7 +27,7 @@ import type { DatabaseConnection } from '../main/modules/database/connection'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createRequire } from 'node:module'
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
+import { mkdtempSync, realpathSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -59,7 +60,7 @@ function openSchemaDb(Sqlite: SqliteCtor): DatabaseConnection {
 }
 
 function withTempRoot<T>(fn: (root: string) => Promise<T>): Promise<T> {
-  const root = mkdtempSync(join(tmpdir(), 'ready-search-multiroot-'))
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'ready-search-multiroot-')))
   return Promise.resolve()
     .then(() => fn(root))
     .finally(() => {
@@ -174,6 +175,7 @@ function seedUnsafeLegacyWorkspace(db: DatabaseConnection, root: string, body: s
   const repo = new SearchRepository(db, false)
   db.prepare('INSERT OR IGNORE INTO workspaces (root) VALUES (?)').run(root)
   const row = db.prepare('SELECT id FROM workspaces WHERE root = ?').get<{ id: number }>(root)!
+  seedSearchObject(db,row.id,`${root}/legacy.md`)
   repo.upsertDocument({
     workspaceId: row.id,
     path: `${root}/legacy.md`,

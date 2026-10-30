@@ -1,3 +1,4 @@
+import { ObjectRegistry } from '../object-service/registry'
 import type { DatabaseConnection } from '../database/connection'
 import { randomUUID } from 'crypto'
 
@@ -59,16 +60,18 @@ export class FileReadingSessionRepository {
     }
     if (!Number.isFinite(activeMs) || activeMs < MIN_ACTIVE_MS) return null
 
+    const objectId = new ObjectRegistry(this.db).register(path).id
     const id = randomUUID()
     this.db
       .prepare(`
         INSERT INTO document_reading_sessions (
-          id, path, workspace_root, source, started_at, ended_at, active_ms,
+          id, object_id, path_at_event, workspace_root, source, started_at, ended_at, active_ms,
           progress_start, progress_end, progress_kind, meta_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       .run(
         id,
+        objectId,
         path,
         input.workspaceRoot ?? null,
         input.source,
@@ -85,7 +88,7 @@ export class FileReadingSessionRepository {
 
   getById(id: string): FileReadingSession | null {
     const row = this.db
-      .prepare('SELECT * FROM document_reading_sessions WHERE id = ?')
+      .prepare('SELECT *, (SELECT COALESCE(current_path,last_known_path) FROM objects WHERE objects.id=document_reading_sessions.object_id) AS path FROM document_reading_sessions WHERE id = ?')
       .get<FileReadingSessionRow>(id)
     return row ? rowToSession(row) : null
   }
@@ -98,7 +101,7 @@ export class FileReadingSessionRepository {
     const placeholders = roots.map(() => '?').join(', ')
     return this.db
       .prepare(`
-        SELECT * FROM document_reading_sessions
+        SELECT *, (SELECT COALESCE(current_path,last_known_path) FROM objects WHERE objects.id=document_reading_sessions.object_id) AS path FROM document_reading_sessions
         WHERE workspace_root IN (${placeholders}) AND ended_at >= ?
         ORDER BY ended_at DESC
         LIMIT ?

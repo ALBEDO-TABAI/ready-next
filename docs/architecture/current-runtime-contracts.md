@@ -249,6 +249,11 @@
 
 ## 9. 文件涌现与 Tag Forge
 
+- C2 Main 身份合同：`objects.id` 是唯一身份，沿用旧 `file_key`；`fileKey` 只是消费端名称。搜索、涌现和标签不得生成身份。对象服务以磁盘核验维护位置、完整 SHA-256、inode/device、版本及 present/missing/deleted；无法核验保持 unverified，不以历史路径声明 present。
+- 内部移动由同一对象服务完成文件操作、对象位置和搜索关系更新；失败补偿，跨工作区先核对两端范围。外部变化按同一批次先识别同路径原子保存，再依次按唯一 inode、完整内容哈希、文件内 ID 配对；冲突 ID 有否决权，重复副本隔离，不擅自写文件。窗口外仅文件内 ID 可恢复墓碑。
+- 书签、阅读会话、活动和标签按对象关联；路径快照只解释历史，不参与运行时认领。用户新建书签/笔记经写入服务补齐 Markdown `ready_id`；自动打开/阅读不写。失败保留本地关系并返回原失败码及不可跨机器恢复状态。已有书签的补写仅针对对应 Markdown。Renderer 状态迁移和真实窗口验收不属于本轮 Main 合同。
+- C2 命令行验收：`ready-object-migration-native.test.ts`、`ready-object-identity-native.test.ts`、`ready-object-write-native.test.ts`，以真实临时文件与 Electron SQLite 断言迁移保真、身份稳定、反链、无孤儿行及失败可见；界面验收由独立 Ready Next 环境承担。
+
 - Tag Forge 的文件发布与补偿只经文档写入服务；标签规则、审核和 durable creation receipt 仍归 Tag Forge。文件、打开标签页、索引与 `file_tag_assignments` 属于同一可回滚单元，读回失败不得发布成功；未保存缓冲合并不充当 durable receipt。
 
 - 文件管理公开入口只负责无状态查询与工具分发；路径授权、真实路径边界和持久 JSON 原语集中在共享运行层，文件整理状态归文件整理模块，Tag Forge 批次与审核状态归 Tag Forge 域。禁止把这些状态重新塞回公开入口或复制边界实现。

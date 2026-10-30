@@ -1,3 +1,4 @@
+import { ObjectRegistry } from '../object-service/registry'
 import { ipcMain, type WebContents } from 'electron'
 import { createDocumentTabTransport } from './document-write-transport'
 import { parseDocumentSyncReply, type DocumentSyncReply } from '../../../shared/document-operations'
@@ -21,7 +22,7 @@ const transport = createDocumentTabTransport(() => [...owners.values()].map((own
 
 export function setupDocumentWriteIPC(): void {
   ipcMain.removeHandler('document:registerOperationSync')
-  ipcMain.handle('document:registerOperationSync', (event) => {
+  ipcMain.handle('document:registerOperationSync', async (event) => {
     if (!owners.has(event.sender.id)) {
       const id = event.sender.id
       owners.set(id, event.sender)
@@ -30,6 +31,10 @@ export function setupDocumentWriteIPC(): void {
         for (const item of pending.values()) if (item.owner === id) item.resolve({ ok: false, message: 'Document window closed' })
       })
     }
+    const { getDatabase } = await import('../database')
+    const { DocumentMarksRepository } = await import('./document-marks-repository')
+    const db = getDatabase().getRawDb()
+    if (db) await new DocumentMarksRepository(db).backfillPortableIdentities()
   })
   ipcMain.removeAllListeners('document:operationSyncReply')
   ipcMain.on('document:operationSyncReply', (event, payload: unknown) => {
@@ -48,7 +53,7 @@ export function setupDocumentWriteIPC(): void {
       if (!engine || !root) throw new Error('Document search workspace unavailable')
       const result = await engine.indexDocument(root, path, content)
       if (!result.ok) throw documentWriteError('write_failed', result.error || 'Document index update failed')
-      const row = engine.getRepository().getConnection().prepare('SELECT d.content_hash AS hash FROM documents d JOIN workspaces w ON w.id=d.workspace_id WHERE w.root=? AND d.path=?').get<{ hash: string }>(root, path)
+      const row = engine.getRepository().getConnection().prepare('SELECT d.content_hash AS hash FROM documents d WHERE d.object_id=?').get<{ hash: string }>(new ObjectRegistry(engine.getRepository().getConnection()).find(path)?.id ?? null)
       if (row?.hash !== buildSearchIndexContentHash(content)) throw documentWriteError('readback_mismatch', 'Document index readback mismatch')
     },
   })

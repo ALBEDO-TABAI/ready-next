@@ -33,7 +33,8 @@ export function documentWriteError(code: DocumentWriteErrorCode, message: string
 }
 const tails = new Map<string, Promise<void>>()
 let runtime: DocumentWriteDependencies | null = null
-export function configureDocumentWriteService(dependencies: DocumentWriteDependencies): void { runtime = dependencies }
+export function configureDocumentWriteService(dependencies: DocumentWriteDependencies | null): void { runtime = dependencies }
+export function getDocumentWriteDependencies(): DocumentWriteDependencies | null { return runtime }
 export function getDocumentTabTransport(): DocumentTabTransport | undefined { return runtime?.tabs }
 
 // Paths are canonicalised one at a time in call order, so a caller whose realpath

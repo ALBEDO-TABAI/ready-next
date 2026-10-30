@@ -75,7 +75,11 @@ export const markGroup: IpcChannelGroup<MarkGroupDeps> = {
     ipcMain.handle('document:createMark', async (_, payload: DocumentMarkDraft) => {
       try {
         if (deps.useMock) return { success: false, error: 'mock_document_marks_unavailable' }
-        return { success: true, data: deps.getDocumentMarksRepository().create(payload) }
+        const repository = deps.getDocumentMarksRepository()
+        const created = repository.create(payload)
+        const portability = await repository.ensureMarkPortable(created.id)
+        const data = repository.get(created.id)
+        return portability.ok ? { success: true, data, portability } : { success: false, localSaved: true, data, portability, errorCode: portability.code, error: '已保留本地记录，尚不可跨机器恢复：' + portability.message }
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }
       }

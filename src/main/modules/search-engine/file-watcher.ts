@@ -345,7 +345,9 @@ export async function createFileWatcher(
   const flush = (key: string, change: FileWatcherChange): void => {
     pending.delete(key)
     try {
-      options.onChange(change)
+      Promise.resolve(options.onChange(change)).catch(error => {
+        logWatcher(`onChange failed path=${change.filePath} error=${String(error)}`)
+      })
     } catch (error) {
       // Caller errors should not blow up the watcher — log + continue.
       const message = error instanceof Error ? error.message : String(error)

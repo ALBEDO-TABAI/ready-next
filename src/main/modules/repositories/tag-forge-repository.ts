@@ -85,8 +85,8 @@ export class TagForgeRepository {
 
   mintCreationReceipt(input:{sourceRunId:string;fileKey:string;createdAt?:number}):string {
     const now=input.createdAt??Date.now();const receiptId=randomUUID()
-    this.db.prepare(`INSERT INTO artifact_creation_receipts(receipt_id,source_run_id,file_key,created_in_this_run,created_at,enrichment_status,updated_at) VALUES(?,?,?,1,?,'awaiting_final_save',?) ON CONFLICT(source_run_id,file_key) DO NOTHING`).run(receiptId,input.sourceRunId,input.fileKey,now,now)
-    return this.db.prepare(`SELECT receipt_id AS id FROM artifact_creation_receipts WHERE source_run_id=? AND file_key=?`).get<{id:string}>(input.sourceRunId,input.fileKey)!.id
+    this.db.prepare(`INSERT INTO artifact_creation_receipts(receipt_id,source_run_id,object_id,created_in_this_run,created_at,enrichment_status,updated_at) VALUES(?,?,?,1,?,'awaiting_final_save',?) ON CONFLICT(source_run_id,object_id) DO NOTHING`).run(receiptId,input.sourceRunId,input.fileKey,now,now)
+    return this.db.prepare(`SELECT receipt_id AS id FROM artifact_creation_receipts WHERE source_run_id=? AND object_id=?`).get<{id:string}>(input.sourceRunId,input.fileKey)!.id
   }
 
   storeCreationValidation(receiptId:string,hash:string,validationJson:string,now=Date.now()):void {
@@ -95,15 +95,15 @@ export class TagForgeRepository {
   }
 
   getCreationReceipt(receiptId:string,sourceRunId:string):TagCreationReceiptRecord|null {
-    return this.db.prepare(`SELECT receipt_id AS receiptId,source_run_id AS sourceRunId,file_key AS fileKey,enrichment_status AS status,final_save_hash AS finalSaveHash,validation_json AS validationJson FROM artifact_creation_receipts WHERE receipt_id=? AND source_run_id=? AND created_in_this_run=1`).get<TagCreationReceiptRecord>(receiptId,sourceRunId)??null
+    return this.db.prepare(`SELECT receipt_id AS receiptId,source_run_id AS sourceRunId,object_id AS fileKey,enrichment_status AS status,final_save_hash AS finalSaveHash,validation_json AS validationJson FROM artifact_creation_receipts WHERE receipt_id=? AND source_run_id=? AND created_in_this_run=1`).get<TagCreationReceiptRecord>(receiptId,sourceRunId)??null
   }
 
   findOpenCreationReceipt(sourceRunId:string,fileKey:string):TagCreationReceiptRecord|null {
-    return this.db.prepare(`SELECT receipt_id AS receiptId,source_run_id AS sourceRunId,file_key AS fileKey,enrichment_status AS status,final_save_hash AS finalSaveHash,validation_json AS validationJson FROM artifact_creation_receipts WHERE source_run_id=? AND file_key=? AND created_in_this_run=1 AND enrichment_status IN ('awaiting_final_save','pending','failed_retryable')`).get<TagCreationReceiptRecord>(sourceRunId,fileKey)??null
+    return this.db.prepare(`SELECT receipt_id AS receiptId,source_run_id AS sourceRunId,object_id AS fileKey,enrichment_status AS status,final_save_hash AS finalSaveHash,validation_json AS validationJson FROM artifact_creation_receipts WHERE source_run_id=? AND object_id=? AND created_in_this_run=1 AND enrichment_status IN ('awaiting_final_save','pending','failed_retryable')`).get<TagCreationReceiptRecord>(sourceRunId,fileKey)??null
   }
 
   findRecoverableCreationReceipt(fileKey:string):TagCreationReceiptRecord|null {
-    return this.db.prepare(`SELECT receipt_id AS receiptId,source_run_id AS sourceRunId,file_key AS fileKey,enrichment_status AS status,final_save_hash AS finalSaveHash,validation_json AS validationJson FROM artifact_creation_receipts WHERE file_key=? AND created_in_this_run=1 AND enrichment_status IN ('awaiting_final_save','pending','failed_retryable') ORDER BY updated_at DESC LIMIT 1`).get<TagCreationReceiptRecord>(fileKey)??null
+    return this.db.prepare(`SELECT receipt_id AS receiptId,source_run_id AS sourceRunId,object_id AS fileKey,enrichment_status AS status,final_save_hash AS finalSaveHash,validation_json AS validationJson FROM artifact_creation_receipts WHERE object_id=? AND created_in_this_run=1 AND enrichment_status IN ('awaiting_final_save','pending','failed_retryable') ORDER BY updated_at DESC LIMIT 1`).get<TagCreationReceiptRecord>(fileKey)??null
   }
 
   supersedeCreationReceipt(receiptId:string,now=Date.now()):void {
@@ -115,36 +115,36 @@ export class TagForgeRepository {
   }
 
   listAssignments(fileKey:string):Array<ValidatedTag & {ownership:'manual'|'automatic';suppressed:boolean;source:string}> {
-    return this.db.prepare(`SELECT tag_id AS tagId,facet,label,COALESCE(confidence,1) AS confidence,COALESCE(evidence_code,'manual') AS evidenceCode,'exact' AS resolution,ownership,suppressed,source FROM file_tag_assignments WHERE file_key=?`).all<any>(fileKey).map((row)=>({...row,suppressed:Boolean(row.suppressed)}))
+    return this.db.prepare(`SELECT tag_id AS tagId,facet,label,COALESCE(confidence,1) AS confidence,COALESCE(evidence_code,'manual') AS evidenceCode,'exact' AS resolution,ownership,suppressed,source FROM file_tag_assignments WHERE object_id=?`).all<any>(fileKey).map((row)=>({...row,suppressed:Boolean(row.suppressed)}))
   }
 
   snapshotAssignments(fileKey:string):TagAssignmentSnapshot[] {
-    return this.db.prepare(`SELECT file_key AS fileKey,tag_id AS tagId,facet,label,source,ownership,suppressed,lexicon_version AS lexiconVersion,evidence_code AS evidenceCode,confidence,validated_at AS validatedAt,written_at AS writtenAt,readback_at AS readbackAt,updated_at AS updatedAt FROM file_tag_assignments WHERE file_key=?`).all<TagAssignmentSnapshot>(fileKey)
+    return this.db.prepare(`SELECT object_id AS fileKey,tag_id AS tagId,facet,label,source,ownership,suppressed,lexicon_version AS lexiconVersion,evidence_code AS evidenceCode,confidence,validated_at AS validatedAt,written_at AS writtenAt,readback_at AS readbackAt,updated_at AS updatedAt FROM file_tag_assignments WHERE object_id=?`).all<TagAssignmentSnapshot>(fileKey)
   }
 
   restoreAssignments(fileKey:string,snapshot:readonly TagAssignmentSnapshot[]):void {
-    this.db.prepare(`DELETE FROM file_tag_assignments WHERE file_key=?`).run(fileKey)
-    const insert=this.db.prepare(`INSERT INTO file_tag_assignments(file_key,tag_id,facet,label,source,ownership,suppressed,lexicon_version,evidence_code,confidence,validated_at,written_at,readback_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    this.db.prepare(`DELETE FROM file_tag_assignments WHERE object_id=?`).run(fileKey)
+    const insert=this.db.prepare(`INSERT INTO file_tag_assignments(object_id,tag_id,facet,label,source,ownership,suppressed,lexicon_version,evidence_code,confidence,validated_at,written_at,readback_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     for(const row of snapshot)insert.run(row.fileKey,row.tagId,row.facet,row.label,row.source,row.ownership,row.suppressed,row.lexiconVersion,row.evidenceCode,row.confidence,row.validatedAt,row.writtenAt,row.readbackAt,row.updatedAt)
   }
 
   reconcileAssignments(input:{fileKey:string;frontmatterTags:readonly string[];workflowState?:string|null;knownEntries:readonly TagLexiconEntry[];now?:number}):void {
     const labels=[...input.frontmatterTags,...(input.workflowState?[input.workflowState]:[])];const now=input.now??Date.now();const present=new Set(labels.map(key));const existing=this.listAssignments(input.fileKey)
     for(const assignment of existing){
-      if(assignment.ownership==='automatic'&&!present.has(key(assignment.label))) this.db.prepare(`UPDATE file_tag_assignments SET suppressed=1,readback_at=?,updated_at=? WHERE file_key=? AND tag_id=?`).run(now,now,input.fileKey,assignment.tagId)
-      if(assignment.ownership==='manual'&&!present.has(key(assignment.label))) this.db.prepare(`DELETE FROM file_tag_assignments WHERE file_key=? AND tag_id=?`).run(input.fileKey,assignment.tagId)
+      if(assignment.ownership==='automatic'&&!present.has(key(assignment.label))) this.db.prepare(`UPDATE file_tag_assignments SET suppressed=1,readback_at=?,updated_at=? WHERE object_id=? AND tag_id=?`).run(now,now,input.fileKey,assignment.tagId)
+      if(assignment.ownership==='manual'&&!present.has(key(assignment.label))) this.db.prepare(`DELETE FROM file_tag_assignments WHERE object_id=? AND tag_id=?`).run(input.fileKey,assignment.tagId)
     }
     for(const label of labels){const entry=input.knownEntries.find((item)=>item.status==='active'&&(key(item.label)===key(label)||item.aliases.some((alias)=>key(alias)===key(label))));if(!entry)continue;const owned=existing.find((item)=>item.tagId===entry.id);if(owned){if(owned.suppressed)this.upsertAssignment(input.fileKey,{tagId:entry.id,facet:entry.facet,label:entry.label,confidence:1,evidenceCode:'frontmatter_reconcile',resolution:'exact'},'user','manual',null,now);continue}this.upsertAssignment(input.fileKey,{tagId:entry.id,facet:entry.facet,label:entry.label,confidence:1,evidenceCode:'frontmatter_reconcile',resolution:'exact'},'user','manual',null,now)}
   }
 
   replaceAutomaticAssignments(fileKey:string,tags:readonly ValidatedTag[],source:'tag_forge_auto'|'tag_forge_explicit',lexiconVersion:string,now=Date.now(),preservedManualTagIds?:ReadonlySet<string>):void {
-    const retained=new Set(tags.map((tag)=>tag.tagId));const manual=preservedManualTagIds??new Set(this.listAssignments(fileKey).filter((item)=>item.ownership==='manual').map((item)=>item.tagId));this.db.prepare(`DELETE FROM file_tag_assignments WHERE file_key=? AND ownership='automatic' AND suppressed=0 AND tag_id NOT IN (${tags.length?tags.map(()=>'?').join(','):"''"})`).run(fileKey,...retained)
+    const retained=new Set(tags.map((tag)=>tag.tagId));const manual=preservedManualTagIds??new Set(this.listAssignments(fileKey).filter((item)=>item.ownership==='manual').map((item)=>item.tagId));this.db.prepare(`DELETE FROM file_tag_assignments WHERE object_id=? AND ownership='automatic' AND suppressed=0 AND tag_id NOT IN (${tags.length?tags.map(()=>'?').join(','):"''"})`).run(fileKey,...retained)
     for(const tag of tags){if(!manual.has(tag.tagId))this.upsertAssignment(fileKey,tag,source,'automatic',lexiconVersion,now)}
   }
 
-  markReadback(fileKey:string,at=Date.now()):void {this.db.prepare(`UPDATE file_tag_assignments SET readback_at=?,updated_at=? WHERE file_key=? AND suppressed=0`).run(at,at,fileKey)}
+  markReadback(fileKey:string,at=Date.now()):void {this.db.prepare(`UPDATE file_tag_assignments SET readback_at=?,updated_at=? WHERE object_id=? AND suppressed=0`).run(at,at,fileKey)}
 
-  private upsertAssignment(fileKey:string,tag:ValidatedTag,source:string,ownership:string,version:string|null,now:number):void {this.db.prepare(`INSERT INTO file_tag_assignments(file_key,tag_id,facet,label,source,ownership,suppressed,lexicon_version,evidence_code,confidence,validated_at,written_at,updated_at) VALUES(?,?,?,?,?,?,0,?,?,?,?,?,?) ON CONFLICT(file_key,tag_id) DO UPDATE SET facet=excluded.facet,label=excluded.label,source=excluded.source,ownership=excluded.ownership,suppressed=0,lexicon_version=excluded.lexicon_version,evidence_code=excluded.evidence_code,confidence=excluded.confidence,validated_at=excluded.validated_at,written_at=excluded.written_at,updated_at=excluded.updated_at`).run(fileKey,tag.tagId,tag.facet,tag.label,source,ownership,version,tag.evidenceCode,tag.confidence,now,now,now)}
+  private upsertAssignment(fileKey:string,tag:ValidatedTag,source:string,ownership:string,version:string|null,now:number):void {this.db.prepare(`INSERT INTO file_tag_assignments(object_id,tag_id,facet,label,source,ownership,suppressed,lexicon_version,evidence_code,confidence,validated_at,written_at,updated_at) VALUES(?,?,?,?,?,?,0,?,?,?,?,?,?) ON CONFLICT(object_id,tag_id) DO UPDATE SET facet=excluded.facet,label=excluded.label,source=excluded.source,ownership=excluded.ownership,suppressed=0,lexicon_version=excluded.lexicon_version,evidence_code=excluded.evidence_code,confidence=excluded.confidence,validated_at=excluded.validated_at,written_at=excluded.written_at,updated_at=excluded.updated_at`).run(fileKey,tag.tagId,tag.facet,tag.label,source,ownership,version,tag.evidenceCode,tag.confidence,now,now,now)}
 }
 export function tagOverlayId(facet:TagFacet,label:string):string{return `user-${createHash('sha256').update(`${facet}\0${label.normalize('NFKC').trim().toLowerCase()}`).digest('hex')}`}
 function parseList(raw:string):string[]{try{const v=JSON.parse(raw);return Array.isArray(v)?v.map(String):[]}catch{return[]}}

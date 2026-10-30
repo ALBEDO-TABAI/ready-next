@@ -1,7 +1,8 @@
 import type { DatabaseConnection } from '../database/connection'
 import { randomUUID } from 'crypto'
-import { existsSync } from 'fs'
-import { basename, dirname, sep } from 'path'
+import { ObjectRegistry } from '../object-service/registry'
+import { ensurePortableIdentity } from '../object-service/portable'
+import type { PortableIdentityResult } from '../../../shared/object-identity'
 import type {
   DocumentMarkDraft,
   DocumentMarkPatch,
@@ -14,6 +15,8 @@ interface DocumentMarkRow {
   id: string
   kind: 'bookmark' | 'note'
   document_path: string
+  object_id: string
+  portability_json: string | null
   title: string
   group_name: string
   note_text: string | null
@@ -31,10 +34,6 @@ interface DocumentMarkRow {
 
 interface RunResult {
   changes?: number
-}
-
-interface DocumentMarkPathRow {
-  document_path: string
 }
 
 function normalizeText(value: string | null | undefined, fallback = ''): string {
@@ -62,16 +61,11 @@ function normalizeProgress(value: number | null | undefined): number | null {
   return Math.max(0, Math.min(1, Number(value)))
 }
 
-function getMoveSuffix(documentPath: string): string | null {
-  const fileName = basename(documentPath)
-  const parentName = basename(dirname(documentPath))
-  if (!fileName || !parentName || parentName === sep) return null
-  return `${sep}${parentName}${sep}${fileName}`
-}
-
-function rowToRecord(row: DocumentMarkRow): DocumentMarkRecord {
+function rowToRecord(row: DocumentMarkRow): DocumentMarkRecord & {objectId:string;portability:PortableIdentityResult|null} {
   return {
     id: row.id,
+    objectId:row.object_id,
+    portability:row.portability_json ? JSON.parse(row.portability_json) : null,
     kind: row.kind,
     documentPath: row.document_path,
     title: row.title,
@@ -93,47 +87,35 @@ function rowToRecord(row: DocumentMarkRow): DocumentMarkRecord {
 export class DocumentMarksRepository {
   constructor(private readonly db: DatabaseConnection) {}
 
-  private findMovedDocumentPaths(documentPath: string): string[] {
-    if (!existsSync(documentPath)) return []
-    const suffix = getMoveSuffix(documentPath)
-    if (!suffix) return []
-    const rows = this.db
-      .prepare(`
-        SELECT DISTINCT document_path
-        FROM document_marks
-        WHERE document_path != ?
-          AND document_path LIKE ?
-      `)
-      .all<DocumentMarkPathRow>(documentPath, `%${suffix}`)
-    return rows
-      .map((row) => normalizeText(row.document_path))
-      .filter((candidate) => (
-        candidate &&
-        candidate !== documentPath &&
-        candidate.endsWith(suffix) &&
-        !existsSync(candidate)
-      ))
+  list(documentPath:string):DocumentMarkRecord[] {
+    if(!documentPath.trim())return []
+    const registry=new ObjectRegistry(this.db)
+    const object=registry.find(documentPath)
+    if(!object || object.identity_state==='conflict')return []
+    return this.db.prepare(`SELECT m.*,o.current_path AS document_path FROM document_marks m JOIN objects o ON o.id=m.object_id WHERE m.object_id=? ORDER BY kind,group_name,sort_order,updated_at DESC`).all<DocumentMarkRow>(object.id).map(rowToRecord)
   }
 
-  list(documentPath: string): DocumentMarkRecord[] {
-    const normalizedPath = normalizeText(documentPath)
-    if (!normalizedPath) return []
-    const paths = [normalizedPath, ...this.findMovedDocumentPaths(normalizedPath)]
-    const placeholders = paths.map(() => '?').join(', ')
-    return this.db
-      .prepare(`
-        SELECT *
-        FROM document_marks
-        WHERE document_path IN (${placeholders})
-        ORDER BY kind ASC, group_name ASC, sort_order ASC, updated_at DESC
-      `)
-      .all<DocumentMarkRow>(...paths)
-      .map(rowToRecord)
+  async ensureMarkPortable(id:string):Promise<PortableIdentityResult> {
+    const row=this.db.prepare('SELECT object_id FROM document_marks WHERE id=?').get<{object_id:string}>(id)
+    if(!row)throw new Error('document_mark_not_found')
+    const registry=new ObjectRegistry(this.db)
+    const object=registry.get(row.object_id)
+    if(object?.status==='unverified')registry.reconcile([object.last_known_path])
+    const result=await ensurePortableIdentity(registry,row.object_id)
+    this.db.prepare('UPDATE document_marks SET portability_json=? WHERE id=?').run(JSON.stringify(result),id)
+    return result
+  }
+
+  async backfillPortableIdentities():Promise<void> {
+    for(const row of this.db.prepare(`SELECT m.id FROM document_marks m JOIN objects o ON o.id=m.object_id WHERE o.kind='markdown' AND m.portability_json IS NULL`).all<{id:string}>()) {
+      await this.ensureMarkPortable(row.id)
+    }
   }
 
   create(draft: DocumentMarkDraft): DocumentMarkRecord {
     const documentPath = normalizeText(draft.documentPath)
     if (!documentPath) throw new Error('document_path_required')
+    const objectId = new ObjectRegistry(this.db).register(documentPath).id
     const kind = draft.kind === 'note' ? 'note' : 'bookmark'
     const now = new Date().toISOString()
     const sortOrder = Date.now()
@@ -142,7 +124,7 @@ export class DocumentMarksRepository {
 
     this.db.prepare(`
       INSERT INTO document_marks (
-        id, kind, document_path, title, group_name, note_text, excerpt,
+        id, kind, object_id, title, group_name, note_text, excerpt,
         line_start, line_end, anchor_title, anchor_ordinal, anchor_progress,
         anchor_status, sort_order, created_at, updated_at
       )
@@ -150,7 +132,7 @@ export class DocumentMarksRepository {
     `).run(
       id,
       kind,
-      documentPath,
+      objectId,
       normalizeText(draft.title, fallbackTitle),
       normalizeText(draft.groupName, '默认'),
       normalizeNullableText(draft.noteText),
@@ -172,7 +154,7 @@ export class DocumentMarksRepository {
 
   get(id: string): DocumentMarkRecord | null {
     const row = this.db
-      .prepare('SELECT * FROM document_marks WHERE id = ?')
+      .prepare('SELECT m.*,COALESCE(o.current_path,o.last_known_path) AS document_path FROM document_marks m JOIN objects o ON o.id=m.object_id WHERE m.id = ?')
       .get<DocumentMarkRow>(id)
     return row ? rowToRecord(row) : null
   }

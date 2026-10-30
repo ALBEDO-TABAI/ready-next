@@ -1,3 +1,5 @@
+import { newRepositoryFixture, prepareObjectFixtures } from './utils/object-repository-fixtures'
+let fixtureRoot = ''
 import type { DatabaseConnection } from '../main/modules/database/connection'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
@@ -25,6 +27,7 @@ function openDb(): DatabaseConnection & MigrationDatabase {
   const Sqlite = loadSqlite()!
   const db = new Sqlite(':memory:')
   runMigrations(db)
+  fixtureRoot=newRepositoryFixture();prepareObjectFixtures(db,[`${fixtureRoot}/workspace`],[`${fixtureRoot}/workspace/books/4.epub`,`${fixtureRoot}/workspace/books/白痴.epub`,`${fixtureRoot}/workspace/books/3.epub`]);
   return db
 }
 
@@ -59,8 +62,8 @@ test('file reading session repository drops short sessions and stores effective 
   try {
     const repo = new FileReadingSessionRepository(db)
     const short = repo.recordSession({
-      path: '/workspace/books/白痴.epub',
-      workspaceRoot: '/workspace',
+      path: `${fixtureRoot}/workspace/books/白痴.epub`,
+      workspaceRoot: `${fixtureRoot}/workspace`,
       source: 'document_mode',
       startedAt: 1000,
       endedAt: 20_000,
@@ -69,8 +72,8 @@ test('file reading session repository drops short sessions and stores effective 
     assert.equal(short, null)
 
     const stored = repo.recordSession({
-      path: '/workspace/books/白痴.epub',
-      workspaceRoot: '/workspace',
+      path: `${fixtureRoot}/workspace/books/白痴.epub`,
+      workspaceRoot: `${fixtureRoot}/workspace`,
       source: 'document_mode',
       startedAt: 1000,
       endedAt: 80_000,
@@ -83,7 +86,7 @@ test('file reading session repository drops short sessions and stores effective 
     assert.equal(stored?.activeMs, 65_000)
     assert.equal(stored?.progressEnd, 0.45)
 
-    const rows = repo.listRecent({ workspaceRoots: ['/workspace'], since: 0, limit: 10 })
+    const rows = repo.listRecent({ workspaceRoots: [`${fixtureRoot}/workspace`], since: 0, limit: 10 })
     assert.equal(rows.length, 1)
     assert.deepEqual(rows[0].meta, { tabId: 'doc-1' })
   } finally {
@@ -99,9 +102,10 @@ test('file reading session repository prunes by age and max rows', (t) => {
   try {
     const repo = new FileReadingSessionRepository(db)
     for (let index = 0; index < 5; index += 1) {
+      prepareObjectFixtures(db,[],[`${fixtureRoot}/workspace/books/${index}.epub`])
       repo.recordSession({
-        path: `/workspace/books/${index}.epub`,
-        workspaceRoot: '/workspace',
+        path: `${fixtureRoot}/workspace/books/${index}.epub`,
+        workspaceRoot: `${fixtureRoot}/workspace`,
         source: 'document_mode',
         startedAt: index * 1000,
         endedAt: index * 1000 + 60_000,
@@ -110,8 +114,8 @@ test('file reading session repository prunes by age and max rows', (t) => {
     }
 
     repo.prune(1000, 2)
-    const rows = repo.listRecent({ workspaceRoots: ['/workspace'], since: 0, limit: 10 })
-    assert.deepEqual(rows.map((row) => row.path), ['/workspace/books/4.epub', '/workspace/books/3.epub'])
+    const rows = repo.listRecent({ workspaceRoots: [`${fixtureRoot}/workspace`], since: 0, limit: 10 })
+    assert.deepEqual(rows.map((row) => row.path), [`${fixtureRoot}/workspace/books/4.epub`, `${fixtureRoot}/workspace/books/3.epub`])
   } finally {
     db.close()
   }

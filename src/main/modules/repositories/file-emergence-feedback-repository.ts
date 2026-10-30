@@ -44,8 +44,8 @@ export class FileEmergenceFeedbackRepository{
     return this.db.prepare(`
       SELECT f.current_path AS path
       FROM project_identity_members m
-      JOIN file_identities f ON f.file_key=m.file_key
-      WHERE m.project_key=?
+      JOIN objects f ON f.id=m.object_id
+      WHERE m.project_key=? AND f.status='present' AND f.identity_state<>'conflict'
       ORDER BY f.current_path
     `).all<{path:string}>(projectKey).map((row)=>row.path)
   }
@@ -56,7 +56,7 @@ export class FileEmergenceFeedbackRepository{
     const projects=this.db.prepare(`SELECT DISTINCT p.project_key AS projectKey FROM project_identities p JOIN file_emergence_feedback f ON f.project_key=p.project_key WHERE p.workspace_root IN (${slots}) AND f.action<>'rename'`).all<{projectKey:string}>(...workspaceRoots)
     const paths=new Set<string>()
     for(const project of projects){
-      const latest=this.db.prepare(`SELECT MAX(MAX(COALESCE(r.last_open_at,0),COALESCE(r.last_save_at,0)),COALESCE(r.last_read_at,0)) AS at FROM project_identity_members m LEFT JOIN file_attention_rollups r ON r.file_key=m.file_key WHERE m.project_key=?`).get<{at:number|null}>(project.projectKey)?.at??0
+      const latest=this.db.prepare(`SELECT MAX(MAX(COALESCE(r.last_open_at,0),COALESCE(r.last_save_at,0)),COALESCE(r.last_read_at,0)) AS at FROM project_identity_members m LEFT JOIN file_attention_rollups r ON r.object_id=m.object_id WHERE m.project_key=?`).get<{at:number|null}>(project.projectKey)?.at??0
       if(!this.resolve(project.projectKey,latest,now).visible)for(const path of this.listProjectFilePaths(project.projectKey))paths.add(path)
     }
     return [...paths]

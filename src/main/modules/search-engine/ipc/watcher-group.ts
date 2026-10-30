@@ -1,3 +1,5 @@
+import { ObjectEventWindow } from '../../object-service/event-window'
+import { ObjectRegistry } from '../../object-service/registry'
 // Stage V V2.4c — search-engine WatcherGroup channel cluster (M4 IPC split
 // final group).
 //
@@ -90,51 +92,21 @@ export const watcherGroup: IpcChannelGroup<WatcherGroupDeps> = {
           return { success: false, error: 'workspaceRoot required', errorKind: 'invalid_root' }
         }
 
+        const registry = new ObjectRegistry(searchEngine.getRepository().getConnection())
+        const window = new ObjectEventWindow(registry, async paths => {
+          const engine = deps.getSearchEngine()
+          if (!engine) throw new Error('Search engine unavailable during identity settlement')
+          for (const path of paths) {
+            const object = registry.find(path)
+            if (object?.status === 'present' && object.kind !== 'directory' && object.identity_state !== 'conflict') {
+              await engine.indexDocument(payload.workspaceRoot, path)
+            }
+          }
+          publishDocumentIndexChanged(event.sender, { workspaceRoot:payload.workspaceRoot,reason:'incremental',changedPaths:paths })
+        })
         const result = await deps.createFileWatcher({
           workspaceRoot: payload.workspaceRoot,
-          onChange: async ({ filePath, kind, workspaceRoot }) => {
-            // Re-resolve the engine inside the callback because the
-            // watcher outlives any single IPC call; if `setupSearchIPC`
-            // re-runs and swaps the engine instance, we still route
-            // events into the current one (or no-op if it's been torn
-            // down).
-            const engine = deps.getSearchEngine()
-            if (!engine) return
-            try {
-              if (kind === 'unlink') {
-                // Delete the row from documents (+ FTS via cascade trigger).
-                // ensureWorkspace is idempotent — INSERT OR IGNORE + SELECT —
-                // and we already validated the root before starting the watcher
-                // so the workspace is guaranteed to exist by this point.
-                const repo = engine.getRepository()
-                const wsId = repo.ensureWorkspace(workspaceRoot)
-                const deleted = repo.deletePath(wsId, filePath)
-                if (deleted > 0) {
-                  publishDocumentIndexChanged(event.sender, {
-                    workspaceRoot,
-                    reason: 'incremental',
-                    changedPaths: [filePath],
-                  })
-                }
-                return
-              }
-              // add / change → re-index this single file. The indexer's own
-              // `decideFileForIndex` filter will reject binary / oversized
-              // files, so we don't pre-filter here.
-              const indexResult = await engine.indexDocument(workspaceRoot, filePath)
-              if (indexResult.ok && !indexResult.skipped) {
-                publishDocumentIndexChanged(event.sender, {
-                  workspaceRoot,
-                  reason: 'incremental',
-                  changedPaths: [filePath],
-                })
-              }
-            } catch (error) {
-              // Per-event errors must not crash the watcher. Logged inside the
-              // indexer via `logSearch`; we just swallow here.
-              void error
-            }
-          },
+          onChange: ({filePath}) => window.add(filePath),
         })
 
         // Discriminate handle vs error by the presence of `id` (handle) /
@@ -152,7 +124,7 @@ export const watcherGroup: IpcChannelGroup<WatcherGroupDeps> = {
           }
         }
 
-        const registered = deps.getFileWatcherRegistry().add(result, (failure) => {
+        const registered = deps.getFileWatcherRegistry().add({...result, close:async()=>{await result.close();await window.drain()}}, (failure) => {
           publishDocumentWatcherFailed(event.sender, failure)
         })
         if (!registered) {

@@ -110,7 +110,7 @@ export function setupFileEmergenceIPC(): void {
           source: parsed.source,
           meta: parsed.meta,
         })
-        const identity = new FileProjectIdentityRepository(rawDb).ensureFile({ workspaceRoot: resolved.workspaceRoot, path: resolved.path, observedAt: event.createdAt })
+        const identity = new FileProjectIdentityRepository(rawDb).requireFile({ workspaceRoot: resolved.workspaceRoot, path: resolved.path, observedAt: event.createdAt })
         new FileAttentionRepository(rawDb).recordActivity(identity.fileKey, parsed.eventType, event.createdAt)
         getService().markStale(parsed.workspaceRoots)
         return { success: true }
@@ -144,7 +144,7 @@ export function setupFileEmergenceIPC(): void {
           meta: parsed.meta,
         })
         if (session) {
-          const identity = new FileProjectIdentityRepository(rawDb).ensureFile({ workspaceRoot: resolved.workspaceRoot, path: resolved.path, observedAt: session.endedAt })
+          const identity = new FileProjectIdentityRepository(rawDb).requireFile({ workspaceRoot: resolved.workspaceRoot, path: resolved.path, observedAt: session.endedAt })
           new FileAttentionRepository(rawDb).recordReading(identity.fileKey, session.endedAt, session.activeMs, session.progressEnd, session.progressKind)
         }
         getService().markStale(parsed.workspaceRoots)
@@ -257,7 +257,7 @@ export function setupFileEmergenceIPC(): void {
         eventType: 'save',
         source: 'document_write',
       })
-      const identity = new FileProjectIdentityRepository(rawDb).ensureFile({ workspaceRoot: root, path, observedAt: event.createdAt })
+      const identity = new FileProjectIdentityRepository(rawDb).requireFile({ workspaceRoot: root, path, observedAt: event.createdAt })
       new FileAttentionRepository(rawDb).recordActivity(identity.fileKey, 'save', event.createdAt)
       fileEmergenceService?.markStale([root])
     } catch (error) {
@@ -265,21 +265,11 @@ export function setupFileEmergenceIPC(): void {
     }
   })
 
-  documentMoveDispose = addDocumentMoveIdentityListener(({ oldPath, newPath, isDirectory }) => {
+  documentMoveDispose = addDocumentMoveIdentityListener(() => {
     const rawDb = getDatabase().getRawDb()
     if (!rawDb) throw new Error('Database not available for file identity move')
-    const repository = new FileProjectIdentityRepository(rawDb)
-    const root = repository.findWorkspaceRootForMove(oldPath) || getSearchEngine()?.findWorkspaceRootForPath(newPath)
-    if (!root || validateWorkspaceRoot(root).ok === false) {
-      throw new Error('Cannot resolve a safe workspace for file identity move')
-    }
-    repository.recordInternalMove({
-      workspaceRoot: root,
-      oldPath,
-      newPath,
-      kind: isDirectory ? 'directory' : 'file',
-    })
-    fileEmergenceService?.markStale([root])
+    const roots = rootsForKnownFiles(rawDb)
+    fileEmergenceService?.markStale(roots)
   })
 }
 
@@ -352,19 +342,13 @@ function createAttentionPort(rawDb: DatabaseConnection): import('./types').Atten
   const repository = new FileAttentionRepository(rawDb)
   return {
     backfill: (roots, now) => {
-      if (roots.length) {
-        const placeholders=roots.map(()=>'?').join(',')
-        const paths=rawDb.prepare(`SELECT workspace_root AS workspaceRoot,path,created_at AS at FROM file_activity_events WHERE workspace_root IN (${placeholders}) UNION SELECT workspace_root,path,ended_at FROM document_reading_sessions WHERE workspace_root IN (${placeholders})`).all<{workspaceRoot:string;path:string;at:number}>(...roots,...roots)
-        const identities=new FileProjectIdentityRepository(rawDb)
-        for(const row of paths) identities.ensureFile({workspaceRoot:row.workspaceRoot,path:row.path,observedAt:row.at})
-      }
       repository.backfill(roots, now)
     },
     listFacts: (roots) => {
       const rollups = new Map(repository.list(roots).map((row) => [row.fileKey, row]))
       if (!roots.length) return []
       const placeholders = roots.map(() => '?').join(',')
-      return rawDb.prepare(`SELECT file_key AS fileKey,current_path AS path,workspace_root AS workspaceRoot FROM file_identities WHERE workspace_root IN (${placeholders})`).all<{fileKey:string;path:string;workspaceRoot:string}>(...roots).flatMap((file) => {
+      return rawDb.prepare(`SELECT id AS fileKey,current_path AS path,(SELECT root FROM workspaces WHERE id=workspace_id) AS workspaceRoot FROM objects WHERE status='present' AND identity_state<>'conflict' AND (SELECT root FROM workspaces WHERE id=workspace_id) IN (${placeholders})`).all<{fileKey:string;path:string;workspaceRoot:string}>(...roots).flatMap((file) => {
         const row = rollups.get(file.fileKey)
         if (!row) return []
         return [{ fileKey:file.fileKey,path:file.path,workspaceRoot:file.workspaceRoot,lastActivityAt:Math.max(row.lastOpenAt??0,row.lastSaveAt??0,row.lastReadAt??0),openCount:row.openCount,saveCount:row.saveCount,activeDays:row.activeDays.length,readingMs:row.readingMs,progress:row.latestProgress,markCount:row.markCount,lastSurfacedAt:row.lastSurfacedAt }]
@@ -375,7 +359,7 @@ function createAttentionPort(rawDb: DatabaseConnection): import('./types').Atten
       const tasks=listCurrentVisibleTaskProjections(rawDb,200)
       for(const task of tasks){
         const paths=uniqueWorkspacePaths([...pathsFromJson(task.expectedOutputs),...pathsFromJson(task.recentArtifacts)], rootsForKnownFiles(rawDb))
-        const files=paths.flatMap((path)=>rawDb.prepare(`SELECT f.file_key AS fileKey,m.project_key AS projectKey FROM file_identities f JOIN project_identity_members m ON m.file_key=f.file_key WHERE f.current_path=?`).all<{fileKey:string;projectKey:string}>(path))
+        const files=paths.flatMap((path)=>rawDb.prepare(`SELECT f.id AS fileKey,m.project_key AS projectKey FROM objects f JOIN project_identity_members m ON m.object_id=f.id WHERE f.current_path=?`).all<{fileKey:string;projectKey:string}>(path))
         for(const projectKey of new Set(files.map((file)=>file.projectKey))){
           const intentId=`task:${task.taskId}:${projectKey}`;const fileKeys=files.filter((file)=>file.projectKey===projectKey).map((file)=>file.fileKey)
           if(terminal.has(task.status)) rawDb.prepare(`UPDATE project_intent_facts SET status='completed',updated_at=? WHERE intent_id=? AND status='active'`).run(now,intentId)
@@ -391,7 +375,7 @@ function createAttentionPort(rawDb: DatabaseConnection): import('./types').Atten
 }
 
 function rootsForKnownFiles(rawDb: DatabaseConnection): string[] {
-  return rawDb.prepare(`SELECT DISTINCT workspace_root AS root FROM file_identities`).all<{root:string}>().map((row)=>row.root)
+  return rawDb.prepare(`SELECT DISTINCT w.root FROM objects o JOIN workspaces w ON w.id=o.workspace_id WHERE o.status='present'`).all<{root:string}>().map((row)=>row.root)
 }
 
 function createStructuralHintPort(rawDb: DatabaseConnection): StructuralProjectHintPort {
@@ -440,7 +424,7 @@ function createIdentityPort(rawDb: DatabaseConnection): FileProjectIdentityPort 
   const repository = new FileProjectIdentityRepository(rawDb)
   return {
     resolveCurrentFile(workspaceRoot, observedPath) {
-      const file = repository.resolveFileByObservedPath(workspaceRoot, observedPath)
+      const file = repository.findFileByCurrentPath(workspaceRoot, observedPath)
       return file ? { fileKey: file.fileKey, currentPath: file.currentPath } : null
     },
     resolveProject(input) {

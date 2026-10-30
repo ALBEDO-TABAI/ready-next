@@ -1,3 +1,5 @@
+import { newRepositoryFixture, prepareObjectFixtures } from './utils/object-repository-fixtures'
+let fixtureRoot = ''
 import type { DatabaseConnection } from '../main/modules/database/connection'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
@@ -25,6 +27,7 @@ function openDb(): DatabaseConnection & MigrationDatabase {
   const Sqlite = loadSqlite()!
   const db = new Sqlite(':memory:')
   runMigrations(db)
+  fixtureRoot=newRepositoryFixture();prepareObjectFixtures(db,[`${fixtureRoot}/workspace/b`,`${fixtureRoot}/workspace/a`],[`${fixtureRoot}/workspace/a/3.md`,`${fixtureRoot}/workspace/a/4.md`,`${fixtureRoot}/workspace/b/other.md`,`${fixtureRoot}/workspace/a/note.md`]);
   return db
 }
 
@@ -59,29 +62,29 @@ test('file activity repository writes open and save events by workspace time', (
   try {
     const repo = new FileActivityRepository(db)
     repo.recordEvent({
-      path: '/workspace/a/note.md',
-      workspaceRoot: '/workspace/a',
+      path: `${fixtureRoot}/workspace/a/note.md`,
+      workspaceRoot: `${fixtureRoot}/workspace/a`,
       eventType: 'open',
       source: 'file_tree',
       createdAt: 1000,
     })
     repo.recordEvent({
-      path: '/workspace/a/note.md',
-      workspaceRoot: '/workspace/a',
+      path: `${fixtureRoot}/workspace/a/note.md`,
+      workspaceRoot: `${fixtureRoot}/workspace/a`,
       eventType: 'save',
       source: 'document_write',
       meta: { tabId: 'tab-1' },
       createdAt: 2000,
     })
     repo.recordEvent({
-      path: '/workspace/b/other.md',
-      workspaceRoot: '/workspace/b',
+      path: `${fixtureRoot}/workspace/b/other.md`,
+      workspaceRoot: `${fixtureRoot}/workspace/b`,
       eventType: 'open',
       source: 'file_tree',
       createdAt: 3000,
     })
 
-    const rows = repo.listRecent({ workspaceRoots: ['/workspace/a'], since: 0, limit: 10 })
+    const rows = repo.listRecent({ workspaceRoots: [`${fixtureRoot}/workspace/a`], since: 0, limit: 10 })
     assert.deepEqual(rows.map((row) => row.eventType), ['save', 'open'])
     assert.equal(rows[0].weight, 1.2)
     assert.deepEqual(rows[0].meta, { tabId: 'tab-1' })
@@ -99,8 +102,8 @@ test('file activity repository rejects v1-noisy enum values', (t) => {
     const repo = new FileActivityRepository(db)
     assert.throws(
       () => repo.recordEvent({
-        path: '/workspace/a/note.md',
-        workspaceRoot: '/workspace/a',
+        path: `${fixtureRoot}/workspace/a/note.md`,
+        workspaceRoot: `${fixtureRoot}/workspace/a`,
         eventType: 'select',
         source: 'file_tree',
       }),
@@ -119,20 +122,20 @@ test('file activity repository merges short repeated opens for the same path', (
   try {
     const repo = new FileActivityRepository(db)
     const first = repo.recordEvent({
-      path: '/workspace/a/note.md',
-      workspaceRoot: '/workspace/a',
+      path: `${fixtureRoot}/workspace/a/note.md`,
+      workspaceRoot: `${fixtureRoot}/workspace/a`,
       eventType: 'open',
       source: 'file_tree',
       createdAt: 10_000,
     })
     const second = repo.recordEvent({
-      path: '/workspace/a/note.md',
-      workspaceRoot: '/workspace/a',
+      path: `${fixtureRoot}/workspace/a/note.md`,
+      workspaceRoot: `${fixtureRoot}/workspace/a`,
       eventType: 'open',
       source: 'document_mode',
       createdAt: 15_000,
     })
-    const rows = repo.listRecent({ workspaceRoots: ['/workspace/a'], since: 0, limit: 10 })
+    const rows = repo.listRecent({ workspaceRoots: [`${fixtureRoot}/workspace/a`], since: 0, limit: 10 })
 
     assert.equal(first.id, second.id)
     assert.equal(rows.length, 1)
@@ -148,9 +151,9 @@ test('file activity repository keeps short saves from distinct sources separate'
   const db = openDb()
   try {
     const repo = new FileActivityRepository(db)
-    repo.recordEvent({ path: '/workspace/a/note.md', workspaceRoot: '/workspace/a', eventType: 'save', source: 'document_mode', createdAt: 10_000 })
-    repo.recordEvent({ path: '/workspace/a/note.md', workspaceRoot: '/workspace/a', eventType: 'save', source: 'document_write', createdAt: 11_000 })
-    assert.equal(repo.listRecent({ workspaceRoots: ['/workspace/a'], since: 0, limit: 10 }).length, 2)
+    repo.recordEvent({ path: `${fixtureRoot}/workspace/a/note.md`, workspaceRoot: `${fixtureRoot}/workspace/a`, eventType: 'save', source: 'document_mode', createdAt: 10_000 })
+    repo.recordEvent({ path: `${fixtureRoot}/workspace/a/note.md`, workspaceRoot: `${fixtureRoot}/workspace/a`, eventType: 'save', source: 'document_write', createdAt: 11_000 })
+    assert.equal(repo.listRecent({ workspaceRoots: [`${fixtureRoot}/workspace/a`], since: 0, limit: 10 }).length, 2)
   } finally {
     db.close()
   }
@@ -164,9 +167,10 @@ test('file activity repository prunes by age and max rows', (t) => {
   try {
     const repo = new FileActivityRepository(db)
     for (let index = 0; index < 5; index += 1) {
+      prepareObjectFixtures(db,[],[`${fixtureRoot}/workspace/a/${index}.md`])
       repo.recordEvent({
-        path: `/workspace/a/${index}.md`,
-        workspaceRoot: '/workspace/a',
+        path: `${fixtureRoot}/workspace/a/${index}.md`,
+        workspaceRoot: `${fixtureRoot}/workspace/a`,
         eventType: 'open',
         source: 'file_tree',
         createdAt: index * 1000,
@@ -174,8 +178,8 @@ test('file activity repository prunes by age and max rows', (t) => {
     }
 
     repo.prune(1000, 2)
-    const rows = repo.listRecent({ workspaceRoots: ['/workspace/a'], since: 0, limit: 10 })
-    assert.deepEqual(rows.map((row) => row.path), ['/workspace/a/4.md', '/workspace/a/3.md'])
+    const rows = repo.listRecent({ workspaceRoots: [`${fixtureRoot}/workspace/a`], since: 0, limit: 10 })
+    assert.deepEqual(rows.map((row) => row.path), [`${fixtureRoot}/workspace/a/4.md`, `${fixtureRoot}/workspace/a/3.md`])
   } finally {
     db.close()
   }

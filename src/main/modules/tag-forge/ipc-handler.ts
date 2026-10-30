@@ -2,7 +2,7 @@ import { createHash } from 'crypto'
 import { ipcMain } from 'electron'
 import { getDatabase } from '../database'
 import { AppSettingsRepository } from '../repositories/app-settings-repository'
-import { FileProjectIdentityRepository } from '../repositories/file-project-identity-repository'
+import { ObjectRegistry } from '../object-service/registry'
 import { TagForgeRepository } from '../repositories/tag-forge-repository'
 import { getSearchEngine } from '../search-engine/ipc-handler'
 import {
@@ -41,12 +41,12 @@ export function setupTagForgeIPC(): void {
       const db = getDatabase().getRawDb()
       if (!db) return { success: false, errorKind: 'database_unavailable' }
 
-      const identity = new FileProjectIdentityRepository(db).ensureFile({ workspaceRoot: checked.root, path: checked.path })
+      const identity = new ObjectRegistry(db).reserve(checked.path)
       const repo = new TagForgeRepository(db)
-      const current = repo.findOpenCreationReceipt(runId, identity.fileKey)
-      const recoverable = current ?? repo.findRecoverableCreationReceipt(identity.fileKey)
+      const current = repo.findOpenCreationReceipt(runId, identity.id)
+      const recoverable = current ?? repo.findRecoverableCreationReceipt(identity.id)
       if (!current && !payload.creationPending && !recoverable) return { success: true, data: null }
-      receiptId = current?.receiptId ?? repo.mintCreationReceipt({ sourceRunId: runId, fileKey: identity.fileKey })
+      receiptId = current?.receiptId ?? repo.mintCreationReceipt({ sourceRunId: runId, fileKey: identity.id })
 
       const content = String(payload?.content || '')
       const proposals = Array.isArray(payload?.proposals) ? payload.proposals : []

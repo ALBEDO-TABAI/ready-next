@@ -1,3 +1,5 @@
+import { ObjectRegistry } from '../object-service/registry'
+import { ObjectMutations } from '../object-service/mutations'
 import { app, ipcMain, dialog, shell, BrowserWindow } from 'electron'
 import {
   statSync, existsSync,
@@ -391,6 +393,13 @@ export function setupDocumentIPC(useMock = false): void {
   fileMutationGroupDispose = fileMutationGroup.register(ipcMain, {
     useMock,
     onPathMoved: notifyDocumentPathMoved,
+    getObjectMutations: () => {
+      const db = getDatabase().getRawDb()
+      if (!db) throw new Error('Database unavailable')
+      const mutations = new ObjectMutations(new ObjectRegistry(db))
+      mutations.recover()
+      return mutations
+    },
   })
 
   // Stage V V2.3d — 3 workspace-portability channels

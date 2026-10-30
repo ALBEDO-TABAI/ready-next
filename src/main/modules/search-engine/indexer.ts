@@ -1,3 +1,6 @@
+import { ObjectRegistry, canonicalObjectPath, isInside } from '../object-service/registry'
+import { ObjectMutations } from '../object-service/mutations'
+import { IGNORED_DIR_NAMES } from './adapters'
 import type { DatabaseConnection } from '../database/connection'
 
 import { createRotatingLogger } from '../../utils/rotating-logger'
@@ -120,6 +123,9 @@ export class SearchEngine {
     try {
       const workspaceId = this.repository.ensureWorkspace(root)
       result.workspaceId = workspaceId
+      const objects = new ObjectRegistry(this.repository.getConnection())
+      new ObjectMutations(objects).recover()
+      objects.scan(root, IGNORED_DIR_NAMES)
       const adapterResult = await this.fsAdapter.reindex({
         workspaceId,
         workspaceRoot: root,
@@ -215,6 +221,8 @@ export class SearchEngine {
   ): Promise<{ ok: boolean; documentId?: number; skipped?: boolean; error?: string }> {
     try {
       const workspaceId = this.repository.ensureWorkspace(root)
+      const object = new ObjectRegistry(this.repository.getConnection()).register(path)
+      if (object.identity_state === 'conflict') return { ok: false, error: 'identity_conflict' }
       const parsed = await this.fsAdapter.loadOne(path, content)
       if (!parsed) return { ok: false, error: 'file skipped (binary or oversized)' }
       let documentId = -1
@@ -349,8 +357,7 @@ export class SearchEngine {
     const roots = this.repository.listWorkspaceRoots()
     for (const { root } of roots) {
       if (!root || root === SHARED_WORKSPACE_ROOT) continue
-      const prefix = root.endsWith('/') ? root : `${root}/`
-      if (filePath === root || filePath.startsWith(prefix)) return root
+      if (isInside(canonicalObjectPath(root),canonicalObjectPath(filePath))) return root
     }
     return null
   }

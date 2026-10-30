@@ -27,13 +27,15 @@
 // the read companion back into the host. The grouping is mixed-surface
 // by design, mirroring the file-io group's read+write+shell pairing.
 import { existsSync } from 'fs'
-import { copyFile, cp, mkdir, rename, rm, stat, unlink } from 'fs/promises'
-import { dirname, extname } from 'path'
+import { copyFile, cp, mkdir, rm, stat } from 'fs/promises'
+import { extname } from 'path'
+import type { ObjectMutations } from '../../object-service/mutations'
 import type { IpcMain } from 'electron'
 import type { EngineDeps } from './engine-deps'
 import type { IpcChannelGroup, IpcDisposeHandle } from './types'
 
 export type FileMutationGroupDeps = Pick<EngineDeps, 'useMock'> & {
+  getObjectMutations: () => ObjectMutations
   onPathMoved?: (input: { oldPath: string; newPath: string; isDirectory: boolean }) => void
 }
 
@@ -45,23 +47,6 @@ const CHANNELS = [
   'document:move',
   'document:stat',
 ] as const
-
-async function movePath(src: string, dest: string, isDirectory: boolean): Promise<void> {
-  await mkdir(dirname(dest), { recursive: true })
-  try {
-    await rename(src, dest)
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code
-    if (code !== 'EXDEV') throw error
-    if (isDirectory) {
-      await cp(src, dest, { recursive: true })
-      await rm(src, { recursive: true, force: true })
-    } else {
-      await copyFile(src, dest)
-      await unlink(src)
-    }
-  }
-}
 
 export const fileMutationGroup: IpcChannelGroup<FileMutationGroupDeps> = {
   namespace: 'document:fileMutation',
@@ -94,13 +79,8 @@ export const fileMutationGroup: IpcChannelGroup<FileMutationGroupDeps> = {
         if (!existsSync(oldPath)) return { success: false, error: 'Source not found' }
         if (existsSync(newPath)) return { success: false, error: 'Target already exists' }
         const stats = await stat(oldPath)
-        await rename(oldPath, newPath)
-        try {
-          deps.onPathMoved?.({ oldPath, newPath, isDirectory: stats.isDirectory() })
-        } catch (error) {
-          await rename(newPath, oldPath)
-          throw error
-        }
+        await deps.getObjectMutations().move(oldPath,newPath)
+        deps.onPathMoved?.({ oldPath,newPath,isDirectory:stats.isDirectory() })
         return { success: true }
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }
@@ -111,7 +91,10 @@ export const fileMutationGroup: IpcChannelGroup<FileMutationGroupDeps> = {
       try {
         if (deps.useMock) return { success: true, mock: true }
         if (!existsSync(path)) return { success: false, error: 'Not found' }
+        const objects = deps.getObjectMutations().registry
+        objects.register(path)
         await rm(path, { recursive: true })
+        objects.markDeleted(path)
         return { success: true }
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }
@@ -142,13 +125,8 @@ export const fileMutationGroup: IpcChannelGroup<FileMutationGroupDeps> = {
         if (!existsSync(src)) return { success: false, error: 'Source not found' }
         if (existsSync(dest)) return { success: false, error: 'Target already exists' }
         const stats = await stat(src)
-        await movePath(src, dest, stats.isDirectory())
-        try {
-          deps.onPathMoved?.({ oldPath: src, newPath: dest, isDirectory: stats.isDirectory() })
-        } catch (error) {
-          await movePath(dest, src, stats.isDirectory())
-          throw error
-        }
+        await deps.getObjectMutations().move(src,dest)
+        deps.onPathMoved?.({ oldPath:src,newPath:dest,isDirectory:stats.isDirectory() })
         return { success: true }
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }

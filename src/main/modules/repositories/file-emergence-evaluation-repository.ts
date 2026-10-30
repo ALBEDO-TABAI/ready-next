@@ -13,17 +13,11 @@ export class FileEmergenceEvaluationRepository {
     if (!workspaceRoots.length) return evaluateEmergence({ events: [], predictions: [], cutoffs: [], now })
     const slots = workspaceRoots.map(() => '?').join(',')
     const events = this.db.prepare(`
-      SELECT COALESCE(
-        (SELECT f.file_key FROM file_identities f WHERE f.workspace_root=e.workspace_root AND f.current_path=e.path LIMIT 1),
-        (SELECT r.file_key FROM file_move_receipts r WHERE r.workspace_root=e.workspace_root AND r.old_path=e.path ORDER BY r.moved_at DESC LIMIT 1)
-      ) AS projectKey,e.created_at AS at,e.event_type AS kind,NULL AS activeMs
+      SELECT e.object_id AS projectKey,e.created_at AS at,e.event_type AS kind,NULL AS activeMs
       FROM file_activity_events e
       WHERE e.workspace_root IN (${slots})
       UNION ALL
-      SELECT COALESCE(
-        (SELECT f.file_key FROM file_identities f WHERE f.workspace_root=s.workspace_root AND f.current_path=s.path LIMIT 1),
-        (SELECT r.file_key FROM file_move_receipts r WHERE r.workspace_root=s.workspace_root AND r.old_path=s.path ORDER BY r.moved_at DESC LIMIT 1)
-      ),s.ended_at,'read',s.active_ms
+      SELECT s.object_id,s.ended_at,'read',s.active_ms
       FROM document_reading_sessions s
       WHERE s.workspace_root IN (${slots})
       ORDER BY at

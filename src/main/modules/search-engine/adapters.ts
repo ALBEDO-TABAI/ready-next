@@ -1,3 +1,4 @@
+import { canonicalObjectPath } from '../object-service/registry'
 import { ReadyRefSchema, toReadyUri } from '../../../shared/ready-ref'
 import { calendarEventToRecord, originalToSeconds } from '../calendar-engine/calendar-row-codec'
 import { CalendarStore } from '../database/calendar-store'
@@ -256,7 +257,7 @@ export class FileSystemAdapter implements IndexSourceAdapter {
       existingPaths.set(row.path, row)
     }
 
-    const filePaths = await this.collectCandidatePaths(ctx.workspaceRoot)
+    const filePaths = (await this.collectCandidatePaths(ctx.workspaceRoot)).map(canonicalObjectPath)
     result.scanned = filePaths.length
 
     for (let offset = 0; offset < filePaths.length; offset += BATCH_SIZE) {

@@ -1,3 +1,8 @@
+import { fixture as objectFixture } from './utils/ready-object-fixture'
+import { ObjectMutations } from '../main/modules/object-service/mutations'
+import { afterEach } from 'node:test'
+const fixtures:ReturnType<typeof objectFixture>[]=[]
+afterEach(()=>{for(const f of fixtures.splice(0))f.close()})
 // Stage V V2.3c — behavior test for `fileMutationGroup.register` /
 // `IpcDisposeHandle.dispose()`.
 //
@@ -62,6 +67,7 @@ function createMockDeps(): FileMutationGroupDeps {
   // them.
   return {
     useMock: false,
+    getObjectMutations: () => { const f=objectFixture();fixtures.push(f);return new ObjectMutations(f.registry) },
   }
 }
 
@@ -202,7 +208,11 @@ test('document move rolls the filesystem back when identity bookkeeping fails', 
   const { ipc, handleCalls } = createMockIpc()
   fileMutationGroup.register(ipc, {
     useMock: false,
-    onPathMoved: () => { throw new Error('identity unavailable') },
+    getObjectMutations: () => {
+      const f=objectFixture();fixtures.push(f)
+      f.db.exec("CREATE TRIGGER fail_move BEFORE UPDATE OF current_path ON objects WHEN NEW.current_path LIKE '%destination.md' BEGIN SELECT RAISE(ABORT,'identity unavailable'); END")
+      return new ObjectMutations(f.registry)
+    },
   })
   const handlers = new Map(handleCalls.map((entry) => [entry.channel, entry.handler]))
 

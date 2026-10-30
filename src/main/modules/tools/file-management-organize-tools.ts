@@ -1,5 +1,7 @@
+import { ObjectRegistry } from '../object-service/registry'
+import { ObjectMutations } from '../object-service/mutations'
 import { constants, existsSync } from 'fs'
-import { copyFile, lstat, mkdir, realpath, rename, stat } from 'fs/promises'
+import { copyFile, lstat, mkdir, realpath, stat } from 'fs/promises'
 import { randomUUID } from 'crypto'
 import { basename, dirname, join } from 'path'
 
@@ -67,6 +69,8 @@ type OrganizeJournal = {
   workspaceRoot: string
   executedAt: string
   undoneAt: string | null
+  completedAt: string | null
+  restoredPaths: string[]
   operations: Array<JournalMove | JournalFolder>
 }
 
@@ -264,16 +268,6 @@ async function runFileOrganizePreview(
   })
 }
 
-function deleteIndexedPath(engine: SearchEngine, workspaceRoot: string, path: string): void {
-  try {
-    const repo = engine.getRepository()
-    const workspaceId = repo.ensureWorkspace(workspaceRoot)
-    repo.deletePath(workspaceId, path)
-  } catch {
-    // silent-catch: best-effort index cleanup; the filesystem operation already succeeded.
-  }
-}
-
 async function indexPathIfPossible(engine: SearchEngine, workspaceRoot: string, path: string): Promise<void> {
   try {
     await engine.indexDocument(workspaceRoot, path)
@@ -297,41 +291,48 @@ async function runFileOrganizeApply(
   const storeDir = await getFileManagementStoreDir(context)
   const plan = await readJsonFile<OrganizePlan & { appliedJournalId?: string }>(planPath(storeDir, planId))
   if (!plan) return toJsonString({ ok: false, planId, error: 'plan not found' })
-  if (plan.appliedJournalId) return toJsonString({ ok: false, planId, error: 'plan already applied', journalId: plan.appliedJournalId })
+  const previousJournal = plan.appliedJournalId ? await readJsonFile<OrganizeJournal>(journalPath(storeDir,plan.appliedJournalId)) : null
+  if (plan.appliedJournalId && !previousJournal) return toJsonString({ok:false,planId,error:'organize journal missing'})
   if (new Date(plan.expiresAt).getTime() < Date.now()) return toJsonString({ ok: false, planId, error: 'plan expired' })
   if (plan.conflicts.length > 0) return toJsonString({ ok: false, planId, error: 'plan has conflicts', conflicts: plan.conflicts })
   const auth = await authorizeRoot(plan.rootPath, engine, context?.workspaceRoots)
   if (!auth.ok) return toJsonString(auth.output)
 
-  const journal: OrganizeJournal = {
+  if (previousJournal?.completedAt) return toJsonString({ok:true,planId,journalId:previousJournal.journalId,executed:previousJournal.operations.length})
+  const journal: OrganizeJournal = previousJournal ?? {
     journalId: `file-journal-${randomUUID()}`,
     planId,
     rootPath: plan.rootPath,
     workspaceRoot: plan.workspaceRoot,
     executedAt: new Date().toISOString(),
     undoneAt: null,
+    completedAt: null,
+    restoredPaths: [],
     operations: [],
   }
   try {
+    await writeJsonFile(journalPath(storeDir,journal.journalId),journal)
+    plan.appliedJournalId=journal.journalId
+    await writeJsonFile(planPath(storeDir,planId),plan)
     for (const relativeFolder of plan.createFolders) {
       const folder = resolveRelativeFolderInsideRoot(relativeFolder, auth)
       if (!folder.ok) throw new Error(folder.error)
       const existed = existsSync(folder.path)
       await mkdir(folder.path, { recursive: true })
-      if (!existed) journal.operations.push({ type: 'mkdir', path: folder.path })
+      if (!existed) {journal.operations.push({ type: 'mkdir', path: folder.path });await writeJsonFile(journalPath(storeDir,journal.journalId),journal)}
     }
-    for (const op of plan.operations) {
-      const source = await resolveExistingPathInsideRoot(op.path, auth)
+    for (const [operationIndex,op] of plan.operations.entries()) {
+      const source = resolvePlannedPathInsideRoot(op.path, auth)
       if (!source.ok) throw new Error(`source invalid: ${source.error}`)
       const target = resolvePlannedPathInsideRoot(op.targetPath, auth)
       if (!target.ok) throw new Error(`target invalid: ${target.error}`)
-      if (existsSync(target.path)) throw new Error(`target already exists: ${target.path}`)
       await mkdir(dirname(target.path), { recursive: true })
-      await rename(source.path, target.path)
-      journal.operations.push({ type: 'move', sourcePath: source.path, targetPath: target.path })
-      deleteIndexedPath(engine, plan.workspaceRoot, source.path)
+      await new ObjectMutations(new ObjectRegistry(engine.getRepository().getConnection())).move(source.path,target.path,{authorizedRoots:[plan.workspaceRoot],operationId:`${journal.journalId}:${operationIndex}`})
+      if(!journal.operations.some(item=>item.type==='move' && item.sourcePath===source.path && item.targetPath===target.path))journal.operations.push({ type: 'move', sourcePath: source.path, targetPath: target.path })
+      await writeJsonFile(journalPath(storeDir,journal.journalId),journal)
       await indexPathIfPossible(engine, plan.workspaceRoot, target.path)
     }
+    journal.completedAt=new Date().toISOString()
     plan.confirmed = true
     plan.appliedJournalId = journal.journalId
     await writeJsonFile(planPath(storeDir, planId), plan)
@@ -360,25 +361,25 @@ async function runFileOrganizeUndo(
   const storeDir = await getFileManagementStoreDir(context)
   const journal = await readJsonFile<OrganizeJournal>(journalPath(storeDir, journalId))
   if (!journal) return toJsonString({ ok: false, journalId, error: 'journal not found' })
-  if (journal.undoneAt) return toJsonString({ ok: false, journalId, error: 'journal already undone', undoneAt: journal.undoneAt })
+  if (journal.undoneAt) return toJsonString({ ok: true, journalId, restored: journal.restoredPaths.length, restoredPaths:journal.restoredPaths })
   const auth = await authorizeRoot(journal.rootPath, engine, context?.workspaceRoots)
   if (!auth.ok) return toJsonString(auth.output)
-  const undone: string[] = []
+  const undone = journal.restoredPaths
   try {
     const reverseMoves = journal.operations
       .filter((op): op is JournalMove => op.type === 'move')
       .reverse()
-    for (const op of reverseMoves) {
+    for (const [operationIndex,op] of reverseMoves.entries()) {
+      if(undone.includes(op.sourcePath))continue
       const source = resolvePlannedPathInsideRoot(op.sourcePath, auth)
-      const target = await resolveExistingPathInsideRoot(op.targetPath, auth)
+      const target = resolvePlannedPathInsideRoot(op.targetPath, auth)
       if (!source.ok) throw new Error(`source restore path invalid: ${source.error}`)
       if (!target.ok) throw new Error(`moved file missing: ${op.targetPath}`)
-      if (existsSync(source.path)) throw new Error(`restore target already exists: ${source.path}`)
       await mkdir(dirname(source.path), { recursive: true })
-      await rename(target.path, source.path)
-      deleteIndexedPath(engine, journal.workspaceRoot, target.path)
+      await new ObjectMutations(new ObjectRegistry(engine.getRepository().getConnection())).move(target.path,source.path,{authorizedRoots:[journal.workspaceRoot],operationId:`${journal.journalId}:undo:${operationIndex}`})
       await indexPathIfPossible(engine, journal.workspaceRoot, source.path)
       undone.push(source.path)
+      await writeJsonFile(journalPath(storeDir,journalId),journal)
     }
     journal.undoneAt = new Date().toISOString()
     await writeJsonFile(journalPath(storeDir, journalId), journal)
@@ -408,7 +409,6 @@ async function runFileRename(
 ): Promise<string> {
   const path = typeof args.path === 'string' ? args.path : ''
   const newName = typeof args.newName === 'string' ? args.newName.trim() : ''
-  const overwrite = args.overwrite === true
   if (!path || !newName) return 'Error: path and newName required'
   if (newName.includes('/') || newName.includes('\\')) return 'Error: newName must not contain path separators'
 
@@ -420,11 +420,8 @@ async function runFileRename(
 
   try {
     const exists = await stat(newPath).then(() => true).catch(() => false)
-    if (exists && !overwrite) return toJsonString({ ok: false, error: 'target exists; pass overwrite=true to replace' })
-    await rename(path, newPath)
-    const db = engine.getRepository().getConnection()
-    const existing = db.prepare('SELECT workspace_id FROM documents WHERE path = ?').get<{ workspace_id: number }>(path)
-    if (existing) db.prepare('DELETE FROM documents WHERE path = ?').run(path)
+    if (exists) return toJsonString({ ok: false, error: 'target exists; choose a new destination to preserve both object identities' })
+    await new ObjectMutations(new ObjectRegistry(engine.getRepository().getConnection())).move(path,newPath,{authorizedRoots:[guard.root,newGuard.root]})
     await engine.indexDocument(guard.root, newPath)
     return toJsonString({ ok: true, newPath })
   } catch (error) {
@@ -477,14 +474,12 @@ async function runFileMove(
   const path = typeof args.path === 'string' ? args.path : ''
   const destDir = typeof args.destDir === 'string' ? args.destDir : ''
   const newName = typeof args.newName === 'string' ? args.newName.trim() : ''
-  const overwrite = args.overwrite === true
   if (!path || !destDir) return 'Error: path and destDir required'
 
   const srcGuard = assertInsideWorkspace(path, engine, context?.workspaceRoots)
   if (!srcGuard.ok) return `Error: ${srcGuard.error}`
   const destGuard = assertInsideWorkspace(destDir, engine, context?.workspaceRoots)
   if (!destGuard.ok) return `Error: ${destGuard.error}`
-  if (srcGuard.root !== destGuard.root) return 'Error: cross-workspace move not supported'
 
   const fileName = newName || path.split(/[\\/]/).pop() || 'file'
   const newPath = join(destDir, fileName)
@@ -495,11 +490,9 @@ async function runFileMove(
     const destStat = await stat(destDir).catch(() => null)
     if (!destStat || !destStat.isDirectory()) return 'Error: destDir is not a directory'
     const exists = await stat(newPath).then(() => true).catch(() => false)
-    if (exists && !overwrite) return toJsonString({ ok: false, error: 'target exists; pass overwrite=true to replace' })
-    await rename(path, newPath)
-    const db = engine.getRepository().getConnection()
-    db.prepare('DELETE FROM documents WHERE path = ?').run(path)
-    await engine.indexDocument(srcGuard.root, newPath)
+    if (exists) return toJsonString({ ok: false, error: 'target exists; choose a new destination to preserve both object identities' })
+    await new ObjectMutations(new ObjectRegistry(engine.getRepository().getConnection())).move(path,newPath,{authorizedRoots:[srcGuard.root,destGuard.root]})
+    await engine.indexDocument(destGuard.root, newPath)
     return toJsonString({ ok: true, newPath })
   } catch (error) {
     return toJsonString({ ok: false, error: error instanceof Error ? error.message : String(error) })

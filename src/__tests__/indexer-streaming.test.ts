@@ -1,3 +1,4 @@
+import { fixture as objectFixture } from './utils/ready-object-fixture'
 /**
  * perf-rescue B6 — streaming reindex tests.
  *
@@ -13,7 +14,7 @@
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -21,9 +22,7 @@ import {
   AbortError,
   buildSearchIndexContentHash,
   FileSystemAdapter,
-  type LoadedFile,
 } from '../main/modules/search-engine/adapters'
-import { SearchEngine } from '../main/modules/search-engine/indexer'
 import { SEARCH_INDEX_CONTENT_VERSION } from '../main/modules/search-engine/query'
 import {
   WorkerDbBridgeImpl,
@@ -34,7 +33,7 @@ import {
 // ----- Helpers ---------------------------------------------------------------
 
 function withTempRoot<T>(fn: (root: string) => Promise<T> | T): Promise<T> {
-  const root = mkdtempSync(join(tmpdir(), 'ready-indexer-streaming-'))
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'ready-indexer-streaming-')))
   return Promise.resolve()
     .then(() => fn(root))
     .finally(() => {
@@ -253,47 +252,16 @@ test('FileSystemAdapter does not rewrite derived rows when hash upsert is skippe
 })
 
 test('SearchEngine.indexDocument stops after a hash-equal upsert', async () => {
-  const parsed: LoadedFile = {
-    path: '/tmp/work/A.md',
-    name: 'A.md',
-    ext: '.md',
-    size: 8,
-    mtime: 123,
-    contentHash: buildSearchIndexContentHash('# A'),
-    frontmatterJson: null,
-    body: '# A',
-    tags: [],
-    wikilinks: [],
-    mdlinks: [],
-    attachments: [],
-  }
-  let derivedWrites = 0
-  let narrowResolves = 0
-  let scheduledResolves = 0
-  const repository = {
-    ensureWorkspace() { return 1 },
-    transaction(fn: () => void) { fn() },
-    upsertDocument() { return { documentId: 77, skipped: true } },
-    replaceTags() { derivedWrites += 1 },
-    replaceLinks() { derivedWrites += 1 },
-    replaceAttachments() { derivedWrites += 1 },
-    resolveWikilinkTargetsForDocument() { narrowResolves += 1 },
-    getConnection(): never { throw new Error('unchanged content must not reconcile frontmatter') },
-  } as unknown as import('../main/modules/search-engine/repository').SearchRepository
-  const engine = Object.create(SearchEngine.prototype) as SearchEngine
-  Reflect.set(engine, 'repository', repository)
-  Reflect.set(engine, 'fsAdapter', { loadOne: async () => parsed })
-  Reflect.set(engine, 'scheduleWorkspaceLinkResolve', () => {
-    scheduledResolves += 1
-    return new AbortController().signal
-  })
-
-  const result = await engine.indexDocument('/tmp/work', parsed.path, parsed.body)
-
-  assert.deepEqual(result, { ok: true, documentId: 77, skipped: true })
-  assert.equal(derivedWrites, 0)
-  assert.equal(narrowResolves, 0)
-  assert.equal(scheduledResolves, 0)
+  const f=objectFixture()
+  try {
+    const path=join(f.root,'A.md')
+    writeFileSync(path,'# A')
+    const first=await f.engine.indexDocument(f.root,path)
+    assert.equal(first.ok,true)
+    f.db.exec("CREATE TRIGGER reject_derived_rewrite BEFORE DELETE ON tags BEGIN SELECT RAISE(ABORT,'unchanged tags rewritten'); END")
+    const second=await f.engine.indexDocument(f.root,path)
+    assert.deepEqual(second,{ok:true,documentId:first.documentId,skipped:true})
+  }finally{f.close()}
 })
 
 // ----- Mid-stream abort: partial index remains -------------------------------

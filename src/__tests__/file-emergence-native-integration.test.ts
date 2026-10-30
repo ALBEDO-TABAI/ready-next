@@ -1,3 +1,5 @@
+import { newRepositoryFixture, prepareObjectFixtures, registeredFixtureFile, moveFixture } from './utils/object-repository-fixtures'
+let fixtureRoot = ''
 import type { DatabaseConnection } from '../main/modules/database/connection'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
@@ -22,6 +24,7 @@ function openDb(): DatabaseConnection & MigrationDatabase {
   const Sqlite = mod.default || mod
   const db = new Sqlite(':memory:')
   runMigrations(db)
+  fixtureRoot=newRepositoryFixture();prepareObjectFixtures(db,[`${fixtureRoot}/workspace`],[`${fixtureRoot}/workspace/theme.md`,`${fixtureRoot}/workspace/books/白痴.epub`]);
   return db
 }
 
@@ -33,22 +36,22 @@ test('native repositories carry one open fact and real reading progress into a s
     const readingSessions = new FileReadingSessionRepository(db)
     const identities = new FileProjectIdentityRepository(db)
     const firstOpen = activity.recordEvent({
-      path: '/workspace/books/白痴.epub',
-      workspaceRoot: '/workspace',
+      path: `${fixtureRoot}/workspace/books/白痴.epub`,
+      workspaceRoot: `${fixtureRoot}/workspace`,
       eventType: 'open',
       source: 'file_tree',
       createdAt: now - 60_000,
     })
     const secondOpen = activity.recordEvent({
-      path: '/workspace/books/白痴.epub',
-      workspaceRoot: '/workspace',
+      path: `${fixtureRoot}/workspace/books/白痴.epub`,
+      workspaceRoot: `${fixtureRoot}/workspace`,
       eventType: 'open',
       source: 'document_mode',
       createdAt: now - 59_000,
     })
     readingSessions.recordSession({
-      path: '/workspace/books/白痴.epub',
-      workspaceRoot: '/workspace',
+      path: `${fixtureRoot}/workspace/books/白痴.epub`,
+      workspaceRoot: `${fixtureRoot}/workspace`,
       source: 'document_mode',
       startedAt: now - 45 * 60_000,
       endedAt: now - 1_000,
@@ -59,7 +62,7 @@ test('native repositories carry one open fact and real reading progress into a s
     })
 
     assert.equal(firstOpen.id, secondOpen.id)
-    const storedSessions = readingSessions.listRecent({ workspaceRoots: ['/workspace'], since: 0, limit: 10 })
+    const storedSessions = readingSessions.listRecent({ workspaceRoots: [`${fixtureRoot}/workspace`], since: 0, limit: 10 })
     assert.equal(storedSessions[0]?.progressKind, 'ebook')
     assert.equal(storedSessions[0]?.progressEnd, 0.48)
 
@@ -76,7 +79,7 @@ test('native repositories carry one open fact and real reading progress into a s
       search: null,
       identity: {
         resolveCurrentFile: (workspaceRoot, observedPath) => {
-          const file = identities.resolveFileByObservedPath(workspaceRoot, observedPath)
+          const file = identities.findFileByCurrentPath(workspaceRoot, observedPath)
           return file ? { fileKey: file.fileKey, currentPath: file.currentPath } : null
         },
         resolveProject: (input) => {
@@ -92,7 +95,7 @@ test('native repositories carry one open fact and real reading progress into a s
       },
       now: () => now,
     })
-    const snapshot = await service.getSnapshot({ workspaceRoots: ['/workspace'] })
+    const snapshot = await service.getSnapshot({ workspaceRoots: [`${fixtureRoot}/workspace`] })
 
     assert.equal(snapshot.buckets.today[0]?.title, '白痴')
     assert.equal(snapshot.diagnostics?.sourceCounts.reading_session, 1)
@@ -102,42 +105,45 @@ test('native repositories carry one open fact and real reading progress into a s
     assert.ok(snapshot.buckets.today[0]?.files[0]?.fileKey)
 
     identities.renameProject(projectKey, '用户书单')
-    const renamed = await service.getSnapshot({ workspaceRoots: ['/workspace'], forceRefresh: true })
+    const renamed = await service.getSnapshot({ workspaceRoots: [`${fixtureRoot}/workspace`], forceRefresh: true })
     assert.equal(renamed.buckets.today[0]?.projectKey, projectKey)
     assert.equal(renamed.buckets.today[0]?.title, '用户书单')
 
-    identities.recordInternalMove({
-      workspaceRoot: '/workspace',
-      oldPath: '/workspace/books/白痴.epub',
-      newPath: '/workspace/archive/白痴.epub',
+    await moveFixture(db,{
+      workspaceRoot: `${fixtureRoot}/workspace`,
+      oldPath: `${fixtureRoot}/workspace/books/白痴.epub`,
+      newPath: `${fixtureRoot}/workspace/archive/白痴.epub`,
       kind: 'file',
       movedAt: now + 1,
     })
-    const moved = await service.getSnapshot({ workspaceRoots: ['/workspace'], forceRefresh: true })
+    const moved = await service.getSnapshot({ workspaceRoots: [`${fixtureRoot}/workspace`], forceRefresh: true })
     assert.equal(moved.buckets.today[0]?.projectKey, projectKey)
-    assert.equal(moved.buckets.today[0]?.files[0]?.path, '/workspace/archive/白痴.epub')
+    assert.equal(moved.buckets.today[0]?.files[0]?.path, `${fixtureRoot}/workspace/archive/白痴.epub`)
   } finally {
     db.close()
   }
 })
 
-test('native metadata port reads controlled assignments and never promotes raw CSS body tags',(t)=>{
+test('native metadata port reads controlled assignments and never promotes raw CSS body tags', async (t) =>{
   if(skipIfSqliteUnavailable(t,'file-emergence-native-integration'))return
   const db=openDb()
   try{
-    db.prepare(`INSERT INTO workspaces(root) VALUES(?)`).run('/workspace')
-    const workspaceId=db.prepare(`SELECT id FROM workspaces WHERE root=?`).get<{id:number}>('/workspace')!.id
-    db.prepare(`INSERT INTO documents(workspace_id,path,name,frontmatter_json,indexed_at) VALUES(?,?,?,?,?)`).run(workspaceId,'/workspace/theme.md','theme.md',JSON.stringify({title:'主题'}),now)
-    const documentId=db.prepare(`SELECT id FROM documents WHERE path=?`).get<{id:number}>('/workspace/theme.md')!.id
+    db.prepare(`INSERT OR IGNORE INTO workspaces(root) VALUES(?)`).run(`${fixtureRoot}/workspace`)
+    const workspaceId=db.prepare(`SELECT id FROM workspaces WHERE root=?`).get<{id:number}>(`${fixtureRoot}/workspace`)!.id
+    db.prepare(`INSERT INTO documents(workspace_id,path,name,frontmatter_json,indexed_at) VALUES(?,?,?,?,?)`).run(workspaceId,`${fixtureRoot}/workspace/theme.md`,'theme.md',JSON.stringify({title:'主题'}),now)
+    const documentId=db.prepare(`SELECT id FROM documents WHERE path=?`).get<{id:number}>(`${fixtureRoot}/workspace/theme.md`)!.id
     db.prepare(`INSERT INTO tags(doc_id,tag) VALUES(?,?)`).run(documentId,'fff')
-    const file=new FileProjectIdentityRepository(db).ensureFile({workspaceRoot:'/workspace',path:'/workspace/theme.md'})
+    const file=registeredFixtureFile(db,{workspaceRoot:`${fixtureRoot}/workspace`,path:`${fixtureRoot}/workspace/theme.md`})
     const tags=new TagForgeRepository(db)
     tags.replaceAutomaticAssignments(file.fileKey,[{tagId:'domain-design',facet:'domain',label:'设计系统',confidence:.9,evidenceCode:'topic',resolution:'exact'}],'tag_forge_auto','v1')
-    const beforeReadback=createDocumentMetadataPort(db).getTitleMetadata(['/workspace/theme.md'],['/workspace']).get('/workspace/theme.md')
+    const beforeReadback=createDocumentMetadataPort(db).getTitleMetadata([`${fixtureRoot}/workspace/theme.md`],[`${fixtureRoot}/workspace`]).get(`${fixtureRoot}/workspace/theme.md`)
     assert.deepEqual(beforeReadback?.controlledTags,[],'unverified assignments must not influence emergence')
     tags.markReadback(file.fileKey)
-    const metadata=createDocumentMetadataPort(db).getTitleMetadata(['/workspace/theme.md'],['/workspace']).get('/workspace/theme.md')
+    const metadata=createDocumentMetadataPort(db).getTitleMetadata([`${fixtureRoot}/workspace/theme.md`],[`${fixtureRoot}/workspace`]).get(`${fixtureRoot}/workspace/theme.md`)
     assert.deepEqual(metadata?.controlledTags?.map((tag)=>tag.label),['设计系统'])
     assert.equal(metadata?.controlledTags?.some((tag)=>tag.label==='fff'),false)
+    const related=createDocumentMetadataPort(db).findRelatedFiles([{tagId:'domain-design',facet:'domain',label:'设计系统'}],[`${fixtureRoot}/workspace`],[],5)
+    assert.equal(related.length,1)
+    assert.equal(related[0].fileKey,file.fileKey)
   }finally{db.close()}
 })
