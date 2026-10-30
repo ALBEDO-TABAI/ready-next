@@ -2438,6 +2438,7 @@ interface CalendarSyncResult {
 interface ElectronCalendarAPI {
   prepareStandaloneImport(): Promise<CalendarResponse<{ ticket:string; fileName:string; calendars:number; events:number; possibleExamples:number } | null>>
   applyStandaloneImport(ticket:string,skipExamples:boolean): Promise<CalendarResponse<{ created:number; skipped:number }>>
+  getAttachmentDisplayRefs(messageIds: string[]): Promise<CalendarResponse<import('../../shared/calendar-event-identity').CalendarAttachmentDisplayRef[]>>
   revealEvent(id: string): Promise<CalendarResponse<boolean>>
   peekNavigation(): Promise<CalendarResponse<import('../../shared/calendar/desktop').CalendarNavigationRequest | null>>
   ackNavigation(id: string): Promise<CalendarResponse<void>>

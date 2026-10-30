@@ -999,6 +999,7 @@ const rssAPI = {
 import type { ReminderFirePayload as CalendarReminderFirePayload } from '../shared/calendar-types'
 
 const calendarAPI = {
+  getAttachmentDisplayRefs: (messageIds: string[]) => ipcRenderer.invoke('calendar:getAttachmentDisplayRefs', messageIds),
   prepareStandaloneImport: () => ipcRenderer.invoke('calendar:prepareStandaloneImport'),
   applyStandaloneImport: (ticket:string,skipExamples:boolean) => ipcRenderer.invoke('calendar:applyStandaloneImport',ticket,skipExamples),
   revealEvent: (id: string) => ipcRenderer.invoke('calendar:revealEvent', id),

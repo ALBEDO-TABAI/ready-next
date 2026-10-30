@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readCalendarAttachmentDisplayRefs } from '../main/modules/calendar-engine/ready-ref-migration'
 import test from 'node:test'
 import Database from 'better-sqlite3'
 import { runMigrations, __runMigrationForTests } from '../main/modules/migrations'
@@ -83,4 +84,106 @@ test('C1 Main reads the selected exception and all-day occurrence, binds version
   assert.notEqual(resolve(id)!.digest, resolve('timed')!.digest)
   assert.notEqual(resolve('day#1793318400')!.digest, resolve('day#1793404800')!.digest)
   await assert.rejects(() => resolveCodexExplicitResources({ selections: [{ kind: 'calendar_event', id: 'x', name: 'missing', eventId: 'timed#1' }], resolveSkill: () => null, resolveCalendar: selection => resolve(selection.eventId) }), /unavailable/)
+})
+
+test('R3b closed history gets digest-bound display refs without changing protected messages, with atomic retry', t => {
+  if (skipIfSqliteUnavailable(t, 'closed calendar display references')) return
+  const { db, add } = fixture(); t.after(() => db.close())
+  add('a', 'user', [{ id: 'second', name: 'Second', path: 'calendar-event://timed%231793350800', source: 'calendar-event' }])
+  add('b', 'user', [{ id: 'missing', name: 'Gone', path: 'calendar-event://gone' }])
+  add('tool', 'tool', [{ path: 'calendar-event://timed' }])
+  db.prepare("UPDATE chat_conversations SET closed_at='closed' WHERE id='chat'").run()
+  const before = db.prepare('SELECT * FROM chat_messages ORDER BY id').all()
+  // Even a migration may not mutate these original records.
+  db.exec("CREATE TRIGGER test_closed_immutable BEFORE UPDATE ON chat_messages BEGIN SELECT RAISE(ABORT,'immutable'); END")
+  db.exec("CREATE TRIGGER interrupt_display_refs BEFORE INSERT ON calendar_attachment_display_refs WHEN NEW.message_id='b' BEGIN SELECT RAISE(ABORT,'interrupted'); END")
+  assert.throws(() => __runMigrationForTests('142_calendar_attachment_display_refs', db), /interrupted/)
+  assert.equal(db.prepare('SELECT count(*) n FROM calendar_attachment_display_refs').get<{n:number}>()!.n, 0)
+  db.exec('DROP TRIGGER interrupt_display_refs')
+  __runMigrationForTests('142_calendar_attachment_display_refs', db)
+  assert.deepEqual(db.prepare('SELECT * FROM chat_messages ORDER BY id').all(), before)
+  const refs = readCalendarAttachmentDisplayRefs(db, ['a', 'b', 'tool'])
+  assert.deepEqual(refs.map(row => [row.messageId, row.attachmentIndex, row.target]), [
+    ['a', 0, { status: 'resolved', ref: { kind: 'event', id: 'timed', occurrence: '1793350800000' } }],
+    ['b', 0, { status: 'unlocatable', reason: '真实事件或原始实例不存在' }],
+  ])
+  const changes = db.prepare('SELECT total_changes() n').get()
+  __runMigrationForTests('142_calendar_attachment_display_refs', db)
+  assert.deepEqual(db.prepare('SELECT total_changes() n').get(), changes)
+  // A stale or corrupted mapping must not attach to a different original value.
+  db.prepare("UPDATE calendar_attachment_display_refs SET original_digest='wrong' WHERE message_id='a'").run()
+  assert.throws(() => readCalendarAttachmentDisplayRefs(db, ['a']), /摘要/)
+})
+
+test('R3c registered display IPC returns verified mappings and reports invalid input or stale originals', async t => {
+  if (skipIfSqliteUnavailable(t, 'calendar display IPC')) return
+  const { registerHooks } = await import('node:module')
+  const { db, add } = fixture(); t.after(() => db.close())
+  add('ipc-message', 'user', [{ path: 'calendar-event://timed%231793350800' }])
+  db.prepare("UPDATE chat_conversations SET closed_at='closed' WHERE id='chat'").run()
+  __runMigrationForTests('142_calendar_attachment_display_refs', db)
+  const electronStub = 'data:text/javascript,' + encodeURIComponent(`
+    export const handlers = new Map();
+    export const ipcMain = { handle: (name, fn) => handlers.set(name, fn) };
+    export const BrowserWindow = { getAllWindows: () => [] };
+    export const app = {}, dialog = {}, shell = {};
+  `)
+  const databaseStub = 'data:text/javascript,' + encodeURIComponent(`
+    let db; export const setDb = value => { db = value };
+    export const getDatabase = () => ({ getRawDb: () => db });
+  `)
+  const hook = registerHooks({ resolve(specifier, context, next) {
+    const url = specifier === 'electron' ? electronStub
+      : specifier === '../database' && context.parentURL?.includes('/calendar-engine/') ? databaseStub : null
+    return url ? { url, shortCircuit: true } : next(specifier, context)
+  } })
+  t.after(() => hook.deregister())
+  const stub = await import(databaseStub); stub.setDb(db)
+  const { setupCalendarWorkbenchIPC } = await import('../main/modules/calendar-engine/workbench-ipc')
+  setupCalendarWorkbenchIPC()
+  const { handlers } = await import(electronStub)
+  const invoke = handlers.get('calendar:getAttachmentDisplayRefs')
+  assert.equal(typeof invoke, 'function')
+  assert.deepEqual(await invoke({}, ['ipc-message', 'ipc-message', 'missing']), {
+    success: true, mock: false, data: [{ messageId: 'ipc-message', attachmentIndex: 0,
+      target: { status: 'resolved', ref: { kind: 'event', id: 'timed', occurrence: '1793350800000' } } }],
+  })
+  for (const input of [null, 'ipc-message', [42], [''], [' a ']]) {
+    const result = await invoke({}, input)
+    assert.equal(result.success, false); assert.match(result.error, /消息/)
+  }
+  db.prepare("UPDATE calendar_attachment_display_refs SET original_digest='wrong'").run()
+  const stale = await invoke({}, ['ipc-message'])
+  assert.equal(stale.success, false); assert.match(stale.error, /摘要/)
+})
+
+export const __breaksInvariants = ['isolated-ipc-registration-replaces-electron-and-database-singletons'] as const
+
+test('R3c smoke fixture persists real history and creates closed mappings on the next database boot', async t => {
+  if (skipIfSqliteUnavailable(t, 'calendar saved history restart')) return
+  const { mkdtempSync, rmSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const { ChatStore } = await import('../main/modules/database/chat-store')
+  const script = new URL('../../scripts/verify-ready-next-smoke-electron.cjs', import.meta.url).href
+  const { seedCalendarHistory } = await import(script)
+  const root = mkdtempSync(join(tmpdir(), 'ready-next-smoke-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const { db } = fixture()
+  db.exec(`VACUUM INTO '${join(root, 'ready.db').replaceAll("'", "''")}'`)
+  db.close()
+  const history = await seedCalendarHistory(root, { title: 'Second', seriesId: 'timed', second: 1793350800000, eventId: 'timed#1793350800' })
+  const reopened = new Database(join(root, 'ready.db')); t.after(() => reopened.close())
+  const original = reopened.prepare('SELECT * FROM chat_messages WHERE id=?').get(history.closedMessageId)
+  runMigrations(reopened)
+  const chat = new ChatStore(() => reopened)
+  const message = chat.getChatMessages(history.scopeId).find(row => row.id === history.messageId)!
+  assert.equal(JSON.parse(message.meta_json!).attachments[0].path, 'ready://calendar/event/timed#occurrence=1793350800000')
+  assert.deepEqual(chat.getChatMessages(history.closedId), [], 'a closed scope is deliberately unavailable to the history UI')
+  assert.deepEqual(reopened.prepare('SELECT * FROM chat_messages WHERE id=?').get(history.closedMessageId), original)
+  const refs = readCalendarAttachmentDisplayRefs(reopened, [history.closedMessageId])
+  assert.deepEqual(refs.map(row => row.target), [
+    { status: 'resolved', ref: { kind: 'event', id: 'timed', occurrence: '1793350800000' } },
+    { status: 'unlocatable', reason: '真实事件或原始实例不存在' },
+  ])
 })

@@ -31,3 +31,11 @@ export function calendarEventReferenceId(ref: Extract<ReadyRef, { kind: 'event' 
   else if (!Number.isSafeInteger(original) || original % 1000 !== 0) throw new Error('日程实例无效')
   return `${ref.id}#${originalToSeconds(original)}`
 }
+
+/** Display-only history projection; never an authorization or a message rewrite. */
+export interface CalendarAttachmentDisplayRef {
+  messageId: string
+  attachmentIndex: number
+  target: { status: 'resolved'; ref: Extract<ReadyRef, { kind: 'event' }> }
+    | { status: 'unlocatable'; reason: string }
+}

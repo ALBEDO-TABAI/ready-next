@@ -1,4 +1,4 @@
-import { migrateCalendarAttachmentReadyRefs } from './calendar-engine/ready-ref-migration'
+import { migrateCalendarAttachmentReadyRefs, migrateCalendarAttachmentDisplayRefs } from './calendar-engine/ready-ref-migration'
 import { migrateObjectLinks } from './search-engine/object-link-schema'
 import { migrateDocumentDrafts, DOCUMENT_DRAFT_MIGRATION } from './document-drafts/schema'
 import { migrateObjects, OBJECT_MIGRATION } from './object-service/schema'
@@ -4470,6 +4470,7 @@ const migrations: Migration[] = [
   } },
   { name: DOCUMENT_DRAFT_MIGRATION, up: migrateDocumentDrafts },
   { name: '141_calendar_attachment_ready_refs', up: migrateCalendarAttachmentReadyRefs },
+  { name: '142_calendar_attachment_display_refs', up: migrateCalendarAttachmentDisplayRefs },
 ]
 
 /**

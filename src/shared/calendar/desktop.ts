@@ -1,14 +1,15 @@
-import { parseIsoDate } from './dates'
+import { parseReadyUri } from '../ready-ref'
+import { calendarEventReferenceId } from '../calendar-event-identity'
 export type CalendarNavigation =
   | { kind:'event'; eventId:string }
   | { kind:'day'; date:string }
   | { kind:'command'; command:'create'|'settings'|'search'|'day'|'week'|'month' }
 export interface CalendarNavigationRequest { id:string; target:CalendarNavigation }
 export function parseCalendarDeepLink(raw:string):CalendarNavigation|null {
-  const url=new URL(raw)
-  if(url.protocol!=='ready:'||url.hostname!=='calendar')return null
-  const [kind,...parts]=url.pathname.slice(1).split('/'),value=decodeURIComponent(parts.join('/'))
-  if(kind==='day'){parseIsoDate(value);return {kind:'day',date:value}}
-  if(kind==='event'&&value)return {kind:'event',eventId:value}
-  return null
+  const parsed = parseReadyUri(raw)
+  if (!parsed.ok) return null
+  if (parsed.ref.kind === 'day') return { kind: 'day', date: parsed.ref.date }
+  if (parsed.ref.kind !== 'event') return null
+  try { return { kind: 'event', eventId: calendarEventReferenceId(parsed.ref) } }
+  catch { return null }
 }
