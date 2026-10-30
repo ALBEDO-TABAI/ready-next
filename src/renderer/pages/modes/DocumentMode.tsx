@@ -254,8 +254,6 @@ export default function DocumentMode({
   const liveDocumentSplitRatioRef = useRef(documentSplitRatio)
   const restoreDocumentLayoutFreezeRef = useRef<(() => void) | null>(null)
   const [editorMode, setEditorMode] = useState<'edit' | 'preview'>('preview')
-  // 预览下沉态（预览内编辑）：仅在 preview 模式下有效，切模式/切标签即复位。
-  const [previewEditActive, setPreviewEditActive] = useState(false)
   const [previewFocusWidgetTitle, setPreviewFocusWidgetTitle] = useState<string | null>(null)
   // 阅读模式是当前文档上的只读展示态；原编辑面继续保活。
   const [bookReadingActive, setBookReadingActive] = useState(false)
@@ -667,7 +665,6 @@ export default function DocumentMode({
   const handleEditorModeChange = useCallback((nextMode: 'edit' | 'preview') => {
     if (nextMode === editorMode) return
     captureVisibleDocumentScrollPositions()
-    setPreviewEditActive(false)
     setEditorMode(nextMode)
   }, [captureVisibleDocumentScrollPositions, editorMode])
 
@@ -675,19 +672,8 @@ export default function DocumentMode({
     if (!bookReadingVisible) return false
     setBookReadingActive(false)
     setBookReadingTabId(null)
-    setPreviewEditActive(false)
     return true
   }, [bookReadingVisible])
-
-  const handleTogglePreviewEdit = useCallback(() => {
-    setPreviewEditActive((value) => !value)
-  }, [])
-
-  // Preview-edit is a per-document deliberate action: leaving the document
-  // (or the preview mode) lifts the thumb back to plain preview.
-  useEffect(() => {
-    setPreviewEditActive(false)
-  }, [activeTabId])
 
   const handlePanelReveal = useCallback((lineStart: number, lineEnd?: number | null) => {
     if (!panelTargetTab?.path) return
@@ -971,8 +957,6 @@ export default function DocumentMode({
                 mode={editorMode}
                 onChange={handleEditorModeChange}
                 onModeIntent={handleEditorModeIntent}
-                previewEditActive={previewEditActive}
-                onTogglePreviewEdit={handleTogglePreviewEdit}
               />
             </div>}
           </div>
@@ -1030,7 +1014,7 @@ export default function DocumentMode({
                       key={renderedActiveTab.id}
                       tab={renderedActiveTab}
                       viewMode={editorMode}
-                      previewEditable={editorMode === 'preview' && previewEditActive}
+                      previewEditable={editorMode === 'preview'}
                       previewFocusWidgetTitle={previewFocusWidgetTitle}
                       onVisibleLineChange={handlePrimaryVisibleLineChange}
                       onActivate={handlePrimaryActivate}
@@ -1056,7 +1040,7 @@ export default function DocumentMode({
                       key={renderedSplitTab.id}
                       tab={renderedSplitTab}
                       viewMode={editorMode}
-                      previewEditable={editorMode === 'preview' && previewEditActive}
+                      previewEditable={editorMode === 'preview'}
                       previewFocusWidgetTitle={previewFocusWidgetTitle}
                       onVisibleLineChange={handleSplitVisibleLineChange}
                       onActivate={handleSplitActivate}
@@ -1076,7 +1060,7 @@ export default function DocumentMode({
                   key={renderedActiveTab.id}
                   tab={renderedActiveTab}
                   viewMode={editorMode}
-                  previewEditable={editorMode === 'preview' && previewEditActive}
+                  previewEditable={editorMode === 'preview'}
                   previewFocusWidgetTitle={previewFocusWidgetTitle}
                   onVisibleLineChange={handlePrimaryVisibleLineChange}
                   onActivate={handlePrimaryActivate}

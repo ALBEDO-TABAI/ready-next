@@ -10,7 +10,7 @@ import {
 /**
  * 合同：每个 PreviewBlock 的 source 区间指向归一化全文中它对应的源码片段；
  * 区间严格递增且互不重叠；无法可靠映射时必须为 null（宁缺毋错）。
- * 预览内编辑（preview-edit）的替换/移动都建立在这份合同上。
+ * 此合同只用于展示定位；写入使用共享 document-blocks 的原文区间。
  */
 
 function sliceOf(content: string, range: PreviewBlockSourceRange | null): string {
