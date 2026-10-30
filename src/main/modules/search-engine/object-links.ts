@@ -8,7 +8,7 @@ import type { DatabaseConnection } from '../database/connection'
 interface LinkRow {
   id: string; source_id: string | null; source_ref: string | null; target_id: string | null; target_ref: string | null
   kind: ObjectLinkKind; raw_target: string; target_text: string; fragment: string | null; source_line: number | null; source_offset: number | null
-  resolved: number; unresolved_reason: string | null
+  source_node_id: string | null; resolved: number; unresolved_reason: string | null
 }
 interface Target { id: string; current_path: string | null; status: string; identity_state: string }
 function endpoint(id: string | null, uri: string | null): ObjectLinkEndpoint | null {
@@ -35,9 +35,12 @@ export class ObjectLinkRepository {
   private query(input: ObjectLinkEndpoint, side: 'source' | 'target', limit: number): ObjectLink[] {
     const { id, uri } = key(input)
     if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw new Error('Invalid relation limit')
-    return this.db.prepare(`SELECT * FROM object_links WHERE ${side}_${id ? 'id' : 'ref'}=? ORDER BY id LIMIT ?`)
-      .all<LinkRow>(id ?? uri, limit).map(row => ({ id: row.id, source: endpoint(row.source_id, row.source_ref)!, target: endpoint(row.target_id, row.target_ref),
-        kind: row.kind, rawTarget: row.raw_target, fragment: row.fragment, sourceLine: row.source_line, sourceOffset: row.source_offset,
+    const node = 'ref' in input && input.ref.kind === 'canvas' ? input.ref.node : undefined
+    const predicate = node ? side === 'source' ? ' AND source_node_id=?' : ' AND raw_target=?' : ''
+    const parameters = node ? [id ?? uri, side === 'source' ? node : 'ref' in input ? toReadyUri(input.ref) : '', limit] : [id ?? uri, limit]
+    return this.db.prepare(`SELECT * FROM object_links WHERE ${side}_${id ? 'id' : 'ref'}=?${predicate} ORDER BY id LIMIT ?`)
+      .all<LinkRow>(...parameters).map(row => ({ id: row.id, source: endpoint(row.source_id, row.source_ref)!, target: endpoint(row.target_id, row.target_ref),
+        sourceNodeId: row.source_node_id, kind: row.kind, rawTarget: row.raw_target, fragment: row.fragment, sourceLine: row.source_line, sourceOffset: row.source_offset,
         resolved: row.resolved === 1, unresolvedReason: row.unresolved_reason }))
   }
 
@@ -45,9 +48,9 @@ export class ObjectLinkRepository {
     const { id, uri } = key(source)
     this.db.prepare(`DELETE FROM object_links WHERE source_${id ? 'id' : 'ref'}=?`).run(id ?? uri)
     for (const [index, link] of links.entries()) {
-      const edgeId = createHash('sha256').update(JSON.stringify([id ?? uri, link.kind, link.rawTarget, link.sourceOffset ?? index])).digest('hex')
-      this.db.prepare(`INSERT INTO object_links(id,source_id,source_ref,kind,raw_target,target_text,fragment,source_line,source_offset,resolved,unresolved_reason)
-        VALUES(?,?,?,?,?,?,?,?,?,0,'尚未解析')`).run(edgeId, id, uri, link.kind, link.rawTarget, link.targetText, link.fragment, link.sourceLine, link.sourceOffset)
+      const edgeId = createHash('sha256').update(JSON.stringify([id ?? uri, link.kind, link.rawTarget, link.sourceNodeId ?? null, link.sourceOffset ?? (link.sourceNodeId ? 0 : index)])).digest('hex')
+      this.db.prepare(`INSERT OR IGNORE INTO object_links(id,source_id,source_ref,kind,raw_target,target_text,fragment,source_line,source_offset,source_node_id,resolved,unresolved_reason)
+        VALUES(?,?,?,?,?,?,?,?,?,?,0,'尚未解析')`).run(edgeId, id, uri, link.kind, link.rawTarget, link.targetText, link.fragment, link.sourceLine, link.sourceOffset, link.sourceNodeId ?? null)
     }
     if (id) {
       const bindings = new Set(links.map(link => JSON.stringify(repairBinding(link.kind, link.rawTarget))))
@@ -100,7 +103,8 @@ export class ObjectLinkRepository {
         let text: string
         try { text = decodeURIComponent(row.target_text) } catch { reason = '无效链接编码'; text = '' }
         if (!reason) {
-          const absolute = text ? resolve(dirname(source.current_path), text) : source.current_path
+          const root = row.source_node_id ? this.db.prepare('SELECT root FROM workspaces WHERE id=?').get<{ root: string }>(source.workspace_id)?.root : undefined
+          const absolute = text ? resolve(root ?? dirname(source.current_path), text) : source.current_path
           const paths = [absolute, absolute + '.md']
           let candidates = this.db.prepare(`SELECT * FROM objects WHERE status='present' AND identity_state<>'conflict' AND current_path IN (?,?)`).all<Target>(...paths)
           if (!candidates.length && !text.startsWith('.') && !text.startsWith('/')) {

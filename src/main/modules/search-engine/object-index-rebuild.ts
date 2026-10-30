@@ -24,7 +24,7 @@ export function refreshCardLinks(engine: SearchEngine): void {
   const repository = engine.getRepository(), db = repository.getConnection()
   const links = new ObjectLinkRepository(db)
   repository.transaction(() => {
-    db.exec("DELETE FROM object_links WHERE kind='card-source'")
+    db.exec("DELETE FROM object_links WHERE kind='card-source' AND source_ref LIKE 'ready://fastcard/%'")
     for (const card of new FastCardRepository(db).list()) {
       const url = card.source?.pageUrl
       links.replace({ ref: { kind: 'fastcard', id: card.id } }, url ? [linkTarget(url, 'card-source', null, null)] : [], null)
