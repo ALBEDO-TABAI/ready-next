@@ -78,12 +78,14 @@ try {
   await page.getByTestId(`draft-recovery-${original.draftId}`).getByRole('button', { name: original.title || '未命名草稿', exact: true }).click()
   assert.equal(await (await sourceEditor(page)).inputValue(), text)
   await page.getByRole('button', { name: '保存到…', exact: true }).click()
-  await page.getByLabel('草稿标题').fill('重启后的定稿')
-  // Supply only the native picker response; the production dialog and finalize IPC run normally.
+  // The shared location picker (M3 T6) serves drafts, page moves and tab drops alike.
+  const picker = page.getByRole('dialog', { name: '保存到…', exact: true })
+  await picker.getByRole('textbox', { name: '标题', exact: true }).fill('重启后的定稿')
+  // Supply only the native folder response; the production picker and finalize IPC run normally.
   await app.evaluate(({ dialog }, selected) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [selected] }) }, parent)
-  await page.getByRole('button', { name: '选择文件夹', exact: true }).click()
-  await page.getByRole('button', { name: '确认保存', exact: true }).click()
-  await page.getByRole('dialog', { name: '保存到', exact: true }).waitFor({ state: 'hidden' })
+  await picker.getByRole('button', { name: '其他位置…', exact: true }).click()
+  await picker.getByRole('button', { name: '确认', exact: true }).click()
+  await picker.waitFor({ state: 'hidden' })
   assert.equal(await readFile(join(parent, '重启后的定稿.md'), 'utf8'), text)
   const finalized = await page.evaluate(async id => window.electronAPI.documentDrafts.read(id), original.draftId)
   assert.ok(finalized.ok && finalized.value?.state === 'finalized')

@@ -206,6 +206,7 @@ enforce: true
 | M3-P1 页面树 | 用临时资料库导出的页面树与实际文件一致，覆盖合并规则、歧义、排除 `.ready/`；没有根目录时，不发出任何目录读取。 | `src/__tests__/ready-page-tree.test.ts`，包含 Renderer 在没有根目录时的行为 |
 | M3-P2 页面操作 | • 新建子页面时父文件不动；<br>• 改名、移动后三件套一致，对象身份不变；<br>• 回收后不进入普通索引；<br>• 恢复回到原位，重名不覆盖；<br>• 中断后重试不会重复。 | `src/__tests__/ready-document-pages-native.test.ts`；接入 `npm run verify:native` |
 | M3-E 编辑器 | 用真实组件完成输入、拆分合并、拖拽、粘贴多块、撤销，之后检查 Markdown 字节。Widget 和 Mermaid 块只整体替换各自的源码区间。 | `src/__tests__/ready-block-editor.test.tsx` |
+| M3-T6 公共接线 | 真实页面头部、编辑器、草稿控件与标签 store 完成新建、改标题/图标、块输入、源码往返及撤销、保存和草稿存为子页；源码/书本/资料库外不展示页面头部；页面、文件和 ReadyRef 复用对象标签。拖拽只预选保存位置，确认前不发布文件，取消保留草稿。 | `src/__tests__/ready-next-m3.test.tsx`、`src/__tests__/untitled-doc-tab-save.test.ts`；真实窗口 `scripts/verify-ready-next-m3.cjs` |
 
 ### 5.1 黄金语料
 
@@ -249,3 +250,36 @@ enforce: true
 ## 8. 交付状态
 
 - 2026-10-31：本合同冻结。T1（区间内核与编辑命令，C4 黄金语料）与 T3a（Main 草稿服务，迁移 140）完成并合入 ready-next；T2、T3b 开工。
+
+### T6 公共接线与总验收（2026-10-31）
+
+T1–T5、T3c、T4a/T4b 已合入。本次完成公共接线，**M3 总验收仍待真实窗口证据与下列范围外检查问题解除**。
+
+- 页面头部接在资料库 Markdown 页面预览正文上方，源码、文件视角、书本及资料库外不显示。头部修改前保存脏正文，失败不继续写属性；页面变化由既有对象/页面通知刷新。
+- 文档加载、保存及源码编辑仍由 `MarkdownEditor` 承担，预览编辑使用已合入的 `ReadyBlockEditor`；共用现有缓冲与历史。本任务没有修改块编辑器内部或 `verify-ready-next-block-editor.cjs` 的断言。
+- 草稿、未命名标签拖拽和页面移动使用同一 `SaveToPicker`，旧草稿对话框及拖拽自动挑名逻辑删除。拖拽预选位置，等待确认回执；旧选择器完成不能关闭新请求。位置树刷新不重置正在输入的标题。
+- 新增 `verify:ready-next-m3`：`--cli` 运行真实组件/store、真实页面/草稿服务、临时 SQLite 与文件的综合流程；不带参数在相同检查之后运行隔离窗口八步流程，每步保存文件/草稿回读与截图。窗口脚本本次只通过语法检查，不能算窗口验收通过。
+- 文档书本模式与书房按 §6 保持独立，已在 `DocumentMode` 注释及运行时合同 §7 同步；没有新增互相接管缓冲或分页的入口。
+
+命令行证据（日志位于本机 `/tmp/ready-m3-*.log`，临时证据不作为持久报告）：
+
+| 检查 | 结果 |
+| --- | --- |
+| `npm run typecheck` | web/node 均通过 |
+| `npm run verify:ready-next-m3 -- --cli` | 14 pass / 0 fail / 0 skipped；覆盖新建、头部标题/图标、块输入、源码往返/撤销、脏正文先保存、子页定稿、移动及三个打开入口去重 |
+| `npm run test:ready-next-pages` | 12 pass / 0 fail / 0 skipped |
+| 草稿/页面原生与块编辑专项，Electron `--import tsx --test --test-concurrency=1` | 102 pass / 0 fail / 0 skipped（draft-hierarchy、document-pages、draft-tab、drafts-controller、block-editor-save、block-editor、block-editor-interactions） |
+| `verify:widget-ready` 同批测试替代执行 | 163 pass / 0 fail / 0 skipped |
+| `verify:document-reading` 同批行为测试替代执行 | 66 pass / 0 fail / 0 skipped；typecheck 通过。其窗口图片排版脚本未执行，交 Claude |
+| `verify:document-perf` 夹具生成与同批测试替代执行 | 173 pass / 1 fail / 0 skipped；范围外的 `document-preview-performance-contract.test.ts` 导入 database.css 无加载器。仅补临时 CSS 测试加载器重跑该文件：13 pass / 0 fail / 0 skipped，未改仓库中的该测试 |
+| `native:check` + `verify:native` 的完整测试清单替代执行 | ABI 146 / Electron 42.3.0 通过；391 tests / 388 pass / 3 fail / 0 skipped。范围外的 calendar-layers-native、library-engine、ready-object-identity-native 文件监听测试均为 `EMFILE: too many open files, watch`，未修改这些模块 |
+| IPC / CSS 层级 / 测试归属 / SQLite skip 规约 | 均通过；IPC violations=0，CSS 扫描 43 文件 |
+| 改动文件 ESLint / `git diff --check` / 新脚本 `node --check` | 无错误；DocumentMode 保留两个原有未使用变量警告 |
+
+原 npm 专项被沙箱拒绝创建 tsx 管道（`listen EPERM`），改用 `node --import tsx --test`；需要 SQLite 的同批清单改用 `ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx --test`。沿用已安装的原生依赖，不重新安装或重编。
+
+允许范围之外的两处消费者仍需后续同步，本次未改：
+- `scripts/verify-ready-next-draft-restart.mjs` 仍找旧对话框的“草稿标题 / 选择文件夹 / 确认保存”；应改为新选择器定位。新的 M3 窗口脚本已使用新界面并包含强制退出恢复。
+- `src/renderer/components/layout/FileTree.tsx` 将所有非 not-untitled 返回显示为失败通知；现在用户取消拖拽保存会显示“保存失败：已取消保存，草稿已保留”。应将 cancelled 作为正常取消且更新旧的“直接落盘”注释，不能为绕过该消费者伪报保存成功。
+
+`DocumentMode.tsx` 1175 行、本次净 +9，仅做接线；健康度“一般”，已登记 2026-11-30 复查。未执行提交、推送、切分支或安装依赖，未访问日常 Ready 数据。

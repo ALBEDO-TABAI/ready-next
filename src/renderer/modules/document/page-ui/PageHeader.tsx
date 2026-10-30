@@ -8,9 +8,10 @@ export interface PageHeaderProps {
   root: string
   title: string
   api?: DocumentPagesAPI
+  beforeSave?(): Promise<void>
 }
 
-export function PageHeader({ objectId, root, title, api = window.electronAPI.documentPages }: PageHeaderProps) {
+export function PageHeader({ objectId, root, title, beforeSave, api = window.electronAPI.documentPages }: PageHeaderProps) {
   const iconList = useId()
   const [reload, setReload] = useState(0)
   const renameIntent = useRef<{ title: string; objectId: string; id: string } | null>(null)
@@ -32,11 +33,22 @@ export function PageHeader({ objectId, root, title, api = window.electronAPI.doc
     return () => { active = false }
   }, [api, objectId, title, reload])
 
+  useEffect(() => api.onChanged(event => {
+    if ('objectId' in event && event.objectId === objectId) setReload(value => value + 1)
+  }), [api, objectId])
+
   const save = async () => {
     if (!loaded || lock.current) return
     lock.current = true; setBusy(true); setError(null)
     try {
+      await beforeSave?.()
       let version = loaded.version
+      if (beforeSave) {
+        const current = await api.properties(objectId)
+        if (!current.ok) throw new Error(current.message)
+        if (JSON.stringify(current.value.properties) !== JSON.stringify(loaded.properties)) throw new Error('页面属性已有变化，请重新读取后再修改。')
+        version = current.value.version
+      }
       if (draft.title !== (loaded.properties.title ?? title)) {
         const nextTitle = draft.title ?? ''
         if (renameIntent.current?.title !== nextTitle || renameIntent.current.objectId !== objectId) renameIntent.current = { title: nextTitle, objectId, id: crypto.randomUUID() }
