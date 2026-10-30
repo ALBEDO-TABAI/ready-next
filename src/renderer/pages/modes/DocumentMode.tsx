@@ -1,3 +1,4 @@
+import { registerReturnPosition } from '../../modules/workbench/reference-return'
 import { LibraryTab, OpenEpubInLibrary } from '../../modules/library/navigation'
 import '../../design/next/tokens.css'
 import '../../design/next/glass.css'
@@ -643,6 +644,12 @@ export default function DocumentMode({
     if (!isSceneVisible || bookReadingVisible) return
     return restoreVisibleDocumentScrollPositions()
   }, [activeTabId, bookReadingVisible, editorMode, isSceneVisible, restoreVisibleDocumentScrollPositions, splitTabId])
+
+  useEffect(() => registerReturnPosition('document', () => {
+    captureVisibleDocumentScrollPositions()
+    const captured = new Map(scrollSnapshots)
+    return () => { captured.forEach((snapshot, key) => scrollSnapshots.set(key, snapshot)) }
+  }), [captureVisibleDocumentScrollPositions, scrollSnapshots])
 
   const handleBookPositionChange = useCallback((key: string, snapshot: DocumentScrollAnchorSnapshot) => {
     scrollSnapshots.set(key, snapshot)

@@ -1,3 +1,4 @@
+import { parseQuoteEmbed } from './library-quote'
 import { format, isValid, parseISO } from 'date-fns'
 import { parse as parseYaml } from 'yaml'
 import { EBOOK_INLINE_IMAGE_TITLE } from '../../../shared/ebook'
@@ -24,7 +25,7 @@ export interface PreviewProperty {
 
 export interface PreviewEmbed {
   id: string
-  kind: 'youtube' | 'bilibili' | 'image' | 'video'
+  kind: 'youtube' | 'bilibili' | 'image' | 'video' | 'library-quote'
   source: 'metadata' | 'body'
   url: string
   displayUrl: string
@@ -594,7 +595,7 @@ function resolveReference(reference: string, notePath: string | null | undefined
 } {
   const rawReference = stripMarkdownDestinationBrackets(stripWrappingQuotes(reference))
 
-  if (/^(https?:|data:|local-file:|file:)/i.test(rawReference)) {
+  if (/^(https?:|ready:|data:|local-file:|file:)/i.test(rawReference)) {
     return {
       displayUrl: rawReference,
       resolvedUrl: rawReference,
@@ -971,6 +972,8 @@ function parseStandaloneEmbedLine(
 ): PreviewEmbed | null {
   const trimmed = line.trim()
   if (!trimmed) return null
+
+  if (parseQuoteEmbed(trimmed)) return { id: makeId('quote', trimmed, 0), kind: 'library-quote', source: 'body', url: trimmed, displayUrl: trimmed }
 
   const bilibili = extractBilibiliEmbed(trimmed)
   if (bilibili) {
@@ -1354,7 +1357,7 @@ function parseBodyBlocks(
 
         const embed = parseStandaloneEmbedLine(trimmed, notePath)
         if (embed) {
-          const duplicate = [...existingEmbeds, ...embeds].some((item) => item.kind === embed.kind && item.displayUrl === embed.displayUrl)
+          const duplicate = embed.kind !== 'library-quote' && [...existingEmbeds, ...embeds].some((item) => item.kind === embed.kind && item.displayUrl === embed.displayUrl)
           if (!duplicate) {
             flushMarkdownBlock(markdownBuffer, blocks, blockIndex, rangeForLines)
             const nextEmbed = { ...embed, id: makeId('embed', embed.displayUrl, embeds.length) }

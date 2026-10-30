@@ -1,3 +1,4 @@
+import type { BookTarget } from './reader/navigation-state'
 import { FindSheet } from './find/FindSheet'
 import { JobView } from './find/JobView'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -10,15 +11,15 @@ import { Reader } from './reader/Reader'
 import { SORTS, sortBooks, TOPICS, type Sort } from './topics'
 import { shelfBook } from './presentation'
 
-type Route = { kind: 'shelf' } | { kind: 'info'; id: string; origin: HTMLElement } | { kind: 'read'; id: string }
+type Route = { kind: 'shelf' } | { kind: 'info'; id: string; origin: HTMLElement } | { kind: 'read'; id: string; target?: BookTarget }
 type Snapshot = { status: 'loading' } | LibraryState
 
-export function Library({ api: providedAPI, requestedPath, onOpenOther }: { api?: LibraryAPI; requestedPath?: string; onOpenOther?: (path: string) => void }) {
+export function Library({ api: providedAPI, requestedPath, requestedTarget, onOpenOther }: { api?: LibraryAPI; requestedPath?: string; requestedTarget?: BookTarget; onOpenOther?: (path: string) => void }) {
   const [finding, setFinding] = useState(false)
   const sourceAPI = window.electronAPI?.bookSources
   const [snapshot, setSnapshot] = useState<Snapshot>({ status: 'loading' })
   const [error, setError] = useState('')
-  const [route, setRoute] = useState<Route>({ kind: 'shelf' })
+  const [route, setRoute] = useState<Route>(requestedTarget ? { kind: 'read', id: requestedTarget.book, target: requestedTarget } : { kind: 'shelf' })
   const [opened, setOpened] = useState<Record<string, number>>({})
   const [sort, setSort] = useState<Sort>('topic')
   const [query, setQuery] = useState('')
@@ -102,8 +103,9 @@ export function Library({ api: providedAPI, requestedPath, onOpenOther }: { api?
     if (e.key === '/') { e.preventDefault(); e.stopPropagation(); search.current?.focus() }
     if (e.key.toLowerCase() === 'r') { e.preventDefault(); e.stopPropagation(); draw() }
   }}>
+    {route.kind === 'read' && snapshot.status === 'ready' && !current && <p role="alert">书籍不存在或已从书房移除</p>}
     {error && <div className="library-error" role="alert">{error}<button type="button" onClick={() => { setError(''); setRevision(n => n + 1) }}>重试</button><button type="button" onClick={() => setError('')}>关闭提示</button></div>}
-    {route.kind === 'read' && current && api ? <Reader key={current.id} record={current} api={api} onBack={() => setRoute({ kind: 'shelf' })} onError={reportError} /> : <>
+    {route.kind === 'read' && current && api ? <Reader key={current.id} record={current} api={api} target={route.target} onBack={() => setRoute({ kind: 'shelf' })} onError={reportError} /> : <>
       <header className="library-toolbar"><Glass><b>书房</b><input ref={search} aria-label="搜索书架" placeholder="在书架上找… /" value={query} onChange={e => setQuery(e.target.value)} /></Glass><Glass><button type="button" disabled={busy || snapshot.status !== 'ready'} onClick={() => void importBooks()}>导入本地书</button></Glass></header>
       <div className="library-scroll"><header className="library-hero"><h1>我的<em>藏书</em></h1><div className="library-statistics"><span>{books.length} 本藏书</span><span>{new Set(books.map(b => b.topic)).size} 个分类</span><span>{books.filter(b => b.status === '在读').length} 本在读</span><span>{books.filter(b => b.status === '读完').length} 本读完</span></div></header>
         {snapshot.status === 'loading' && !error && <p role="status">正在整理书架…</p>}

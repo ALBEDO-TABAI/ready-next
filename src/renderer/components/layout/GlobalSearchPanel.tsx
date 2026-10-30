@@ -1,7 +1,5 @@
-import { parseReadyUri, ReadyRefSchema } from '../../../shared/ready-ref'
-import { originalToSeconds } from '../../../main/modules/calendar-engine/calendar-row-codec'
-import { revealRSSReference } from '../../modules/rss/reveal-reference'
-import { openWebpageInBrowser } from '../../modules/browser/openWebpageInBrowser'
+import { ReadyRefSchema } from '../../../shared/ready-ref'
+import { openIndexedSearchResult } from '../../modules/workbench/open-ready-ref'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { FileText, Loader2, Database, RotateCw } from 'lucide-react'
 import { useWorkspace, computeDesiredRoots } from '../../stores/useWorkspace'
@@ -25,35 +23,6 @@ interface SearchResultItem {
   sourceType: string
   sourceMeta?: Record<string, unknown> | null
   draft?: { tabId: string }
-}
-
-/** Non-file search hits are navigation references, never document paths. */
-async function openIndexedSearchResult(item: Pick<SearchResultItem, 'path' | 'sourceType'>): Promise<void> {
-  const parsed = parseReadyUri(item.path)
-  if (!parsed.ok) throw new Error('搜索结果地址无效')
-  const ref = parsed.ref
-  if (item.sourceType === 'rss' && ref.kind === 'rss-item') {
-    const result = await window.electronAPI.rss.readArticle({ itemId: ref.id, length: 1 })
-    if (!result.success || !result.data) throw new Error(result.error || '文章无法打开')
-    revealRSSReference({ kind: 'article', read: { itemId: ref.id, expectedRevision: result.data.article.revision, offset: 0, length: 1 } })
-  } else if (item.sourceType === 'calendar' && ref.kind === 'event') {
-    let id = ref.id
-    if (ref.occurrence !== undefined) {
-      const original = /^-?\d+$/.test(ref.occurrence) ? Number(ref.occurrence) : ref.occurrence
-      if (typeof original === 'string') ReadyRefSchema.parse({ kind: 'day', date: original })
-      else if (!Number.isSafeInteger(original)) throw new Error('日程实例无效')
-      id = `${id}#${originalToSeconds(original)}`
-    }
-    const result = await window.electronAPI.calendar.revealEvent(id)
-    if (!result.success) throw new Error(result.error || '日程无法打开')
-    revealWorkbenchModeForSearchOpen('calendar')
-  } else if (item.sourceType === 'agent' && ref.kind === 'conversation') {
-    const { revealSearchConversation } = await import('../../stores/useAgent')
-    await revealSearchConversation(ref.id)
-    if (!useWorkspace.getState().chatPanelVisible) useWorkspace.getState().toggleChatPanel()
-  } else if (item.sourceType === 'bookmark' && ref.kind === 'web') {
-    if (!await openWebpageInBrowser(ref.url)) throw new Error('网页未能在 Ready 浏览器中打开')
-  } else throw new Error('搜索结果类型与地址不符')
 }
 
 const SOURCE_BADGE_LABEL: Record<string, string> = {

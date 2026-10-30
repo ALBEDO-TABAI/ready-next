@@ -1,3 +1,6 @@
+import { pageOf, resolveBookLocation } from './location'
+import { requestBookLocation, type BookTarget } from './navigation-state'
+import { registerReturnPosition } from '../../workbench/reference-return'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { LibraryBook, LibraryBookmark, LibraryReadingPosition } from '../../../../shared/library'
 import { toLocalFileUrl } from '../../../utils/dragDrop'
@@ -16,7 +19,7 @@ type Loaded = { css: string; book: LoadedBook; position: LibraryReadingPosition 
 type Load = { status: 'loading' } | { status: 'ready'; data: Loaded } | { status: 'error'; error: string }
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error)
 
-export function Reader({ record, api, onBack, onError }: { record: LibraryBook; api: LibraryAPI; onBack: () => void; onError: (error: string) => void }) {
+export function Reader({ record, api, target, onBack, onError }: { record: LibraryBook; api: LibraryAPI; target?: BookTarget; onBack: () => void; onError: (error: string) => void }) {
   const [load, setLoad] = useState<Load>({ status: 'loading' })
   useEffect(() => {
     const abort = new AbortController()
@@ -38,11 +41,11 @@ export function Reader({ record, api, onBack, onError }: { record: LibraryBook; 
     })()
     return () => { abort.abort(); owned?.urls.forEach(url => URL.revokeObjectURL(url)) }
   }, [api, record.id, record.filePath, record.title, record.format])
-  if (load.status === 'ready') return <ReadyReader key={record.id} record={record} api={api} loaded={load.data} onBack={onBack} onError={onError} />
+  if (load.status === 'ready') return <ReadyReader key={record.id} record={record} api={api} loaded={load.data} target={target} onBack={onBack} onError={onError} />
   return <div className="reader-loading"><button type="button" onClick={onBack}>回到书架</button><p role={load.status === 'error' ? 'alert' : 'status'}>{load.status === 'error' ? load.error : '正在打开书…'}</p></div>
 }
 
-function ReadyReader({ record, api, loaded, onBack, onError }: { record: LibraryBook; api: LibraryAPI; loaded: Loaded; onBack: () => void; onError: (error: string) => void }) {
+function ReadyReader({ record, api, loaded, target, onBack, onError }: { record: LibraryBook; api: LibraryAPI; loaded: Loaded; target?: BookTarget; onBack: () => void; onError: (error: string) => void }) {
   const [typo, setTypo] = useState<Typo>({ size: 18, lead: 1.8, font: 'song', paper: document.documentElement.dataset.theme === 'dark' ? 'night' : 'cream' })
   const [single, setSingle] = useState(false)
   const [layout, setLayout] = useState<Layout | null>(null)
@@ -56,7 +59,10 @@ function ReadyReader({ record, api, loaded, onBack, onError }: { record: Library
   const [engine, setEngine] = useState('CSS 翻页')
   const root = useRef<HTMLDivElement>(null), stage = useRef<HTMLDivElement>(null), bookEl = useRef<HTMLDivElement>(null)
   const flip = useRef<ReturnType<typeof createFlipbook> | null>(null)
-  const position = useRef(loaded.position)
+  const position = useRef(target ? { bookId: record.id, chapter: target.location.chapter, offset: target.location.from, pct: 0, updatedAt: Date.now() } : loaded.position)
+  const flashUntil = useRef<number | null>(null)
+  const targetValidated = useRef(false)
+  const targetPositionPublished = useRef(false)
   const { book } = loaded
   const annotations = useHighlights({ record, api, book, layout, flip, onError })
   const { listRef, onSelect, onMark, close: closeHighlight } = annotations
@@ -64,6 +70,11 @@ function ReadyReader({ record, api, loaded, onBack, onError }: { record: Library
   const toc = useMemo(() => book.toc.length ? book.toc : book.chapters.map((c, chapter) => ({ label: c.title, chapter, depth: 0 })), [book])
   const paper = PAPERS[typo.paper]
   const fail = useRef(onError); fail.current = onError
+
+  useEffect(() => registerReturnPosition('library-reader', () => {
+    const at = position.current
+    return () => { if (at) requestBookLocation({ book: record.id, location: { chapter: at.chapter, from: at.offset, to: at.offset + 1 } }) }
+  }), [record.id])
 
   useEffect(() => {
     const observer = new MutationObserver(() => setTypo(t => ({ ...t, paper: document.documentElement.dataset.theme === 'dark' ? 'night' : 'cream' })))
@@ -84,6 +95,11 @@ function ReadyReader({ record, api, loaded, onBack, onError }: { record: Library
 
   useEffect(() => {
     if (!layout || !stage.current || !bookEl.current) return
+    if (target && !targetValidated.current) {
+      try { resolveBookLocation(layout, target.location); targetValidated.current = true }
+      catch (error) { fail.current(errorText(error)); return }
+      flashUntil.current = Date.now() + 3500
+    }
     let live = true
     const textPages = layout.pages.filter(p => p.kind === 'text').length
     const current = createFlipbook({
@@ -91,7 +107,14 @@ function ReadyReader({ record, api, loaded, onBack, onError }: { record: Library
       page: i => {
         const sheet = renderSheet(i, layout, book, record, typo, latin, toc)
         const page = layout.pages[i], flow = sheet.querySelector<HTMLElement>('.pg-flow')
-        if (page.kind === 'text' && flow) paintMarks(flow, page.start, listRef.current.filter(h => h.location.status === 'located' && h.location.chapter === page.chapter))
+        if (page.kind === 'text' && flow) {
+          paintMarks(flow, page.start, listRef.current.filter(h => h.location.status === 'located' && h.location.chapter === page.chapter))
+          if (target && target.location.chapter === page.chapter && (flashUntil.current ?? 0) > Date.now()) {
+            const { chapter, from, to } = target.location
+            paintMarks(flow, page.start, [{ id: 'reference-location', chapter, from, to, chapterTitle: '', text: '', note: '', color: 'yellow', sourceLine: 0, location: { status: 'located', chapter, from, to } }], 'reference-location')
+            flow.querySelectorAll<HTMLElement>('[data-hl="reference-location"]').forEach(mark => { delete mark.dataset.hl; mark.dataset.bookLocation = 'true' })
+          }
+        }
         return sheet
       },
       blank: () => { const d = document.createElement('div'); d.className = 'sheet'; return d },
@@ -103,20 +126,30 @@ function ReadyReader({ record, api, loaded, onBack, onError }: { record: Library
       onChange: next => {
         if (!live) return
         setView(next)
+        const anchoredPage = position.current ? pageOf(layout, position.current) : 0
+        // A reference target keeps its exact passage while it stays in view; ordinary reading anchors to the spread start.
+        const keepsAnchor = !!target && anchoredPage >= next.a && anchoredPage <= next.b
+        if (keepsAnchor && targetPositionPublished.current) return
         const page = [layout.pages[next.a - 1], layout.pages[next.b - 1]].find(p => p?.kind === 'text')
         if (!page) return
-        if (position.current?.chapter === page.chapter && position.current.offset === page.start) return
+        if (!keepsAnchor && position.current?.chapter === page.chapter && position.current.offset === page.start) return
         const pct = layout.pages.slice(0, next.b).filter(p => p.kind === 'text').length / Math.max(1, textPages)
-        const p: LibraryReadingPosition = { bookId: record.id, chapter: page.chapter, offset: page.start, pct, updatedAt: Date.now() }
+        const at = keepsAnchor && position.current ? position.current : { chapter: page.chapter, offset: page.start }
+        const p: LibraryReadingPosition = { bookId: record.id, chapter: at.chapter, offset: at.offset, pct, updatedAt: Date.now() }
         position.current = p
+        targetPositionPublished.current = true
         void savePosition(api, p).catch(error => fail.current(`阅读位置保存失败：${errorText(error)}`))
       },
     })
     flip.current = current
     setEngine(current.gl ? 'WebGL 纸张翻页' : 'CSS 翻页')
     root.current?.focus({ preventScroll: true })
-    return () => { live = false; current.dispose(); flip.current = null }
-  }, [api, book, layout, latin, loaded.css, paper.pp, record, toc, typo, listRef, onSelect, onMark, closeHighlight])
+    const flashTimer = target && (flashUntil.current ?? 0) > Date.now() ? window.setTimeout(() => {
+      flashUntil.current = 0
+      current.repaint(layout.pages.flatMap((p, i) => p.kind === 'text' && p.chapter === target.location.chapter ? [i] : []))
+    }, flashUntil.current! - Date.now()) : undefined
+    return () => { live = false; window.clearTimeout(flashTimer); current.dispose(); flip.current = null }
+  }, [api, book, layout, latin, loaded.css, paper.pp, record, toc, typo, listRef, onSelect, onMark, closeHighlight, target])
 
   useEffect(() => { flip.current?.setSingle(single) }, [single, layout, typo])
 
@@ -159,13 +192,4 @@ function ReadyReader({ record, api, loaded, onBack, onError }: { record: Library
     <MarginNotes root={root} book={bookEl} view={view} list={annotations.state?.highlights ?? []} hidden={turning || !!panel || !!annotations.lens} onOpen={(h, el) => onMark(h.id, el)} />
     {annotations.lens && <HighlightPopover key={annotations.lens.id ?? 'selection'} lens={annotations.lens} highlight={annotations.selected} busy={annotations.busy} onSave={annotations.save} onRemove={annotations.remove} onCopy={annotations.copy} onSource={annotations.openSource} onClose={closeHighlight} />}
   </div>
-}
-
-function pageOf(layout: Layout, at: { chapter: number; offset: number }): number {
-  let index = layout.chapterPage[at.chapter] ?? layout.firstText
-  for (let i = index; i < layout.pages.length; i++) {
-    const p = layout.pages[i]
-    if (p.kind === 'text' && p.chapter === at.chapter && p.start <= at.offset) index = i
-  }
-  return index + 1
 }
