@@ -51,3 +51,24 @@ test('Tag Forge preserves raw punctuation, BOM, widgets and CRLF outside its fie
   assert.equal(result.content.startsWith('\uFEFF---\r\n# comment\r\ntitle: untouched\r\n'), true)
   assert.equal(await readFile(path, 'utf8'), result.content)
 })
+
+test('replaceRanges is version-bound and atomic, with explicit range failures', () => {
+  const content = '甲😀乙\r\n尾'
+  const operation = { type: 'replaceRanges' as const, expectedVersion: 3, ranges: [
+    { start: 0, end: 1, expectedText: '甲', replacement: '新' },
+    { start: 6, end: 7, expectedText: '尾', replacement: '末' },
+  ] }
+  assert.equal(applyDocumentOperation(content, operation, 3), '新😀乙\r\n末')
+  assert.throws(() => applyDocumentOperation(content, operation, 4), { code: 'version_conflict' })
+  assert.throws(() => applyDocumentOperation(content, operation), { code: 'version_conflict' })
+  for (const [ranges, code] of [
+    [[operation.ranges[0], { ...operation.ranges[1], expectedText: '错' }], 'stale_range'],
+    [[{ start: -1, end: 1, expectedText: '', replacement: '' }], 'invalid_range'],
+    [[{ start: 1, end: 2, expectedText: '\ud83d', replacement: '' }], 'split_surrogate'],
+    [[{ start: 0, end: 3, expectedText: '甲😀', replacement: '' }, { start: 1, end: 3, expectedText: '😀', replacement: '' }], 'overlapping_ranges'],
+    [[{ start: 0, end: 0, expectedText: '', replacement: 'a' }, { start: 0, end: 0, expectedText: '', replacement: 'b' }], 'overlapping_ranges'],
+  ] as const) {
+    assert.throws(() => applyDocumentOperation(content, { ...operation, ranges: [...ranges] }, 3), { code })
+    assert.equal(content, '甲😀乙\r\n尾')
+  }
+})

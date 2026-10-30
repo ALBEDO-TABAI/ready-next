@@ -1,6 +1,10 @@
 import { isMap, isScalar, parseDocument, stringify } from 'yaml'
+import { replaceRanges, type ReplaceRangesOperation } from './document-blocks/ranges'
+
+export { replaceRanges, type ReplaceRangesOperation, type ReplacementRange } from './document-blocks/ranges'
 
 export type DocumentOperation =
+  | ReplaceRangesOperation
   | { type: 'setFrontmatterFields'; set: Record<string, unknown>; remove?: string[] }
   | { type: 'appendBlock'; underHeading?: string; markdown: string }
   | { type: 'replaceRange'; start: number; end: number; expectedText: string; replacement: string }
@@ -140,8 +144,9 @@ export function appendBlock(content: string, input: Omit<Extract<DocumentOperati
   return before + separator + block + suffix + (after ? newline : '') + after
 }
 
-export function applyDocumentOperation(content: string, operation: DocumentOperation): string {
+export function applyDocumentOperation(content: string, operation: DocumentOperation, currentVersion?: number): string {
   switch (operation.type) {
+    case 'replaceRanges': return replaceRanges(content, operation, currentVersion)
     case 'setFrontmatterFields': return setFrontmatterFields(content, operation)
     case 'appendBlock': return appendBlock(content, operation)
     case 'replaceRange': return replaceRange(content, operation)
