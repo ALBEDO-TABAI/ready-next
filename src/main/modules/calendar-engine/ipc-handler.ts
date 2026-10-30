@@ -17,9 +17,9 @@ export interface CalendarIPCOptions {syncScheduler?:SyncScheduler}
 export function setupCalendarIPC(_useMock=false,options:CalendarIPCOptions={}):void{
   setupCalendarWorkbenchIPC()
   const store=()=>getDatabase().calendar
-  const handle=(name:string,fn:(...args:any[])=>unknown)=>ipcMain.handle(`calendar:${name}`,async(_event,...args)=>{try{return{success:true,mock:false,data:await fn(...args)}}catch(error){return{success:false,mock:false,error:calendarErrorMessage(error)}}})
-  handle('getSources',()=>store().getCalendarSources().map(source=>serializeSourceToWire({...source,enabled:!!(source as unknown as {visible:number}).visible})))
-  handle('getEvents',({start,end,timeZone}:{start:unknown;end:unknown;timeZone?:string})=>{
+  const receipt=<Args extends unknown[], T>(fn:(...args:Args)=>T)=>async(_event:unknown,...args:Args)=>{try{return{success:true,mock:false,data:await fn(...args)}}catch(error){return{success:false,mock:false,error:calendarErrorMessage(error)}}}
+  ipcMain.handle('calendar:getSources',receipt(()=>store().getCalendarSources().map(source=>serializeSourceToWire({...source,enabled:!!(source as unknown as {visible:number}).visible}))))
+  ipcMain.handle('calendar:getEvents',receipt(({start,end,timeZone}:{start:unknown;end:unknown;timeZone?:string})=>{
     const a=calendarSeconds(start),b=calendarSeconds(end);if(a>=b)throw new Error('日历窗口无效')
     const parents=new Map(store().snapshot().events.map(e=>[e.id,e]))
     return store().listOccurrences(a,b,timeZone).map(o=>{
@@ -27,8 +27,8 @@ export function setupCalendarIPC(_useMock=false,options:CalendarIPCOptions={}):v
       const parent=o.seriesId||o.event.id,id=o.seriesId?`${parent}#${original}`:parent
       return serializeEventToWire({...calendarEventToRecord(o.event),recurrence_rule:parents.get(parent)?.rrule||null,id,start_time:o.start/1000,end_time:o.end/1000,instanceOf:parent,occurrenceStart:original,syntheticId:id,overrideKind:o.event.recurringEventId?'single':null})
     })
-  })
-  handle('subscribeUrl',async(p:{url:string;name:string;color?:string;syncIntervalMinutes?:number})=>{
+  }))
+  ipcMain.handle('calendar:subscribeUrl',receipt(async(p:{url:string;name:string;color?:string;syncIntervalMinutes?:number})=>{
     const url=new URL(p.url);if(!['http:','https:'].includes(url.protocol)||!p.name.trim())throw new Error('请填写日历名称和有效的订阅网址')
     if(!options.syncScheduler)throw new Error('订阅服务尚未启动')
     const existing=store().getCalendarSources().find(s=>s.sync_url===url.href)
@@ -37,17 +37,17 @@ export function setupCalendarIPC(_useMock=false,options:CalendarIPCOptions={}):v
     const result=await options.syncScheduler.syncOne(sourceId)
     if(!result.ok){if(!existing)store().deleteCalendarSource(sourceId);throw new Error(result.error||'订阅失败，未改变原日历')}
     options.syncScheduler.startPeriodic();return{sourceId,initialEvents:result.eventsCreated+result.eventsUpdated}
-  })
-  handle('unsubscribeSource',(id:string)=>{const result=store().deleteCalendarSource(id);options.syncScheduler?.startPeriodic();return{removed:result.deleted}})
-  handle('syncSourceNow',async(id:string)=>{if(!options.syncScheduler)throw new Error('订阅服务尚未启动');const result=await options.syncScheduler.syncOne(id);if(!result.ok)throw new Error(result.error||'同步失败');return result})
-  handle('detectTimeExpressions',(p:{text?:unknown;referenceDate?:unknown})=>{
+  }))
+  ipcMain.handle('calendar:unsubscribeSource',receipt((id:string)=>{const result=store().deleteCalendarSource(id);options.syncScheduler?.startPeriodic();return{removed:result.deleted}}))
+  ipcMain.handle('calendar:syncSourceNow',receipt(async(id:string)=>{if(!options.syncScheduler)throw new Error('订阅服务尚未启动');const result=await options.syncScheduler.syncOne(id);if(!result.ok)throw new Error(result.error||'同步失败');return result}))
+  ipcMain.handle('calendar:detectTimeExpressions',receipt((p:{text?:unknown;referenceDate?:unknown})=>{
     if(typeof p?.text!=='string'||!p.text)return[]
     const date=p.referenceDate===undefined?new Date():new Date(p.referenceDate as string|number)
     return detectTimeExpressions(p.text.slice(0,8192),Number.isNaN(date.getTime())?new Date():date)
-  })
-  handle('detectRemoteChannelEvent',(p:{message:RemoteChannelMessage;autoDetectOverride?:boolean|null;minConfidence?:'high'|'medium'|'low'})=>{
+  }))
+  ipcMain.handle('calendar:detectRemoteChannelEvent',receipt((p:{message:RemoteChannelMessage;autoDetectOverride?:boolean|null;minConfidence?:'high'|'medium'|'low'})=>{
     if(!p?.message||typeof p.message.text!=='string'||typeof p.message.channelKind!=='string')throw new Error('消息缺少必要内容')
     return detectRemoteChannelEventSuggestions(p.message,{autoDetectOverride:p.autoDetectOverride??null,minConfidence:p.minConfidence})
-  })
-  handle('listRemoteChannelEntries',()=>listRemoteChannelEntries().map(({kind,displayName,iconKey,autoDetectByDefault})=>({kind,displayName,iconKey,autoDetectByDefault})))
+  }))
+  ipcMain.handle('calendar:listRemoteChannelEntries',receipt(()=>listRemoteChannelEntries().map(({kind,displayName,iconKey,autoDetectByDefault})=>({kind,displayName,iconKey,autoDetectByDefault}))))
 }
