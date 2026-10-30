@@ -895,7 +895,7 @@ describe('useWorkspace Store', () => {
         ;(globalThis as any).window.electronAPI = undefined
         useWorkspace.setState({
             workspaceRoot: null,
-            currentPath: '/',
+            currentPath: '',
             files: [],
             selectedFile: null,
             expandedDirs: new Set<string>(),
@@ -909,13 +909,14 @@ describe('useWorkspace Store', () => {
             chatPanelWidth: 380,
             renamingPath: null,
             creatingType: null,
+            creatingPath: null,
         })
     })
 
     it('should have correct default state', () => {
         const state = useWorkspace.getState()
         assert.strictEqual(state.workspaceRoot, null)
-        assert.strictEqual(state.currentPath, '/')
+        assert.strictEqual(state.currentPath, '')
         assert.deepStrictEqual(state.files, [])
         assert.strictEqual(state.selectedFile, null)
         assert.strictEqual(state.pinnedFolders.length, 0)
@@ -1091,7 +1092,7 @@ describe('useWorkspace Store', () => {
         useWorkspace.getState().clearWorkspace()
         const state = useWorkspace.getState()
         assert.strictEqual(state.workspaceRoot, null)
-        assert.strictEqual(state.currentPath, '/')
+        assert.strictEqual(state.currentPath, '')
         assert.deepStrictEqual(state.files, [])
         assert.strictEqual(state.selectedFile, null)
         assert.deepStrictEqual(state.pinnedFolders, [])
@@ -1157,7 +1158,7 @@ describe('useWorkspace Store', () => {
         assert.deepStrictEqual(state.pinnedFolders, ['/Users/alice', '/another'])
         // But workspaceRoot is null (and storage cleared)
         assert.strictEqual(state.workspaceRoot, null)
-        assert.strictEqual(state.currentPath, '/')
+        assert.strictEqual(state.currentPath, '')
         assert.strictEqual(storage.get('ready-workspace-root'), undefined)
     })
 
@@ -1179,7 +1180,13 @@ describe('useWorkspace Store', () => {
         assert.strictEqual(useWorkspace.getState().renamingPath, null)
     })
 
-    it('should start and cancel creating', () => {
+    it('should start and cancel creating', async () => {
+        // M3-P1: creation requires an opened folder, even in mock mode.
+        useWorkspace.getState().startCreating('file')
+        assert.strictEqual(useWorkspace.getState().creatingType, null)
+        assert.strictEqual(await useWorkspace.getState().createFile('orphan.md'), false)
+        assert.strictEqual(await useWorkspace.getState().createFolder('orphan'), false)
+        useWorkspace.setState({ pinnedFolders: ['/workspace'], currentPath: '/workspace' })
         useWorkspace.getState().startCreating('file')
         assert.strictEqual(useWorkspace.getState().creatingType, 'file')
         useWorkspace.getState().cancelCreating()
@@ -1190,7 +1197,7 @@ describe('useWorkspace Store', () => {
     })
 
     it('should create a file in mock mode', async () => {
-        useWorkspace.setState({ currentPath: '/workspace' })
+        useWorkspace.setState({ pinnedFolders: ['/workspace'], currentPath: '/workspace' })
         const result = await useWorkspace.getState().createFile('new-file.md')
         assert.strictEqual(result, true)
         const state = useWorkspace.getState()
@@ -1200,7 +1207,7 @@ describe('useWorkspace Store', () => {
     })
 
     it('should create a folder in mock mode', async () => {
-        useWorkspace.setState({ currentPath: '/workspace' })
+        useWorkspace.setState({ pinnedFolders: ['/workspace'], currentPath: '/workspace' })
         const result = await useWorkspace.getState().createFolder('new-folder')
         assert.strictEqual(result, true)
         const state = useWorkspace.getState()
@@ -1312,6 +1319,7 @@ describe('useWorkspace Store', () => {
         }
 
         useWorkspace.setState({
+            pinnedFolders: ['/workspace'],
             currentPath: '/workspace/ghost',
             files: [
                 { name: 'ghost', path: '/workspace/ghost', isDirectory: true, size: 0, modified: new Date() },
@@ -1346,6 +1354,7 @@ describe('useWorkspace Store', () => {
         }
 
         useWorkspace.setState({
+            pinnedFolders: ['/workspace'],
             dirChildren: new Map([
                 ['/workspace/ghost', [
                     { name: 'stale.md', path: '/workspace/ghost/stale.md', isDirectory: false, size: 100, modified: new Date() },
@@ -1360,6 +1369,7 @@ describe('useWorkspace Store', () => {
     })
 
     it('should set currentPath and trigger mock file loading', () => {
+        useWorkspace.setState({ pinnedFolders: ['/test'] })
         useWorkspace.getState().setCurrentPath('/test/dir')
         const state = useWorkspace.getState()
         assert.strictEqual(state.currentPath, '/test/dir')
