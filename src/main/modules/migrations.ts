@@ -1,3 +1,4 @@
+import { migrateSearchReadyRefs } from './search-engine/ready-ref-migration'
 import { migrateCalendarUnion, CALENDAR_UNION_MIGRATION } from './calendar-engine/calendar-schema'
 import { migrateRSSDigests, RSS_DIGEST_MIGRATION } from './rss-engine/digest-schema'
 import { migrateRSSCatalog, RSS_CATALOG_MIGRATION } from './rss-engine/catalog-schema'
@@ -4432,7 +4433,8 @@ const migrations: Migration[] = [
         );
       `)
     },
-  }
+  },
+  { name: '135_search_ready_refs', up: migrateSearchReadyRefs },
 ]
 
 /**

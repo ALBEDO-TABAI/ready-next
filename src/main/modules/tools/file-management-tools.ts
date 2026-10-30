@@ -234,10 +234,12 @@ export function buildFileLocatePathCandidates(input: string): string[] {
   const raw = String(input || '').trim()
   addCandidate(candidates, raw)
   const stripped = stripBalancedWrapper(raw)
+  if (/^ready:\/\//i.test(stripped)) return [stripped]
   addCandidate(candidates, stripped)
 
   const markdownLink = stripped.match(/^!?\[([^\]]+)\]\(([^)]+)\)$/)
   if (markdownLink) {
+    if (/^ready:\/\//i.test(markdownLink[2])) return [markdownLink[2]]
     addCandidate(candidates, markdownLink[2])
     addCandidate(candidates, markdownLink[1])
   }
@@ -382,14 +384,17 @@ async function runFileLocate(
   }
   const row = resolved.row
   let sourceType = row?.source_type || 'document'
+  if (!row && /^ready:\/\//i.test(path)) {
+    return toJsonString({ ok: false, path, error: 'non-filesystem reference; open via host UI' })
+  }
   if (!row) {
     const guard = assertInsideWorkspace(path, engine, context?.workspaceRoots)
     if (!guard.ok) return toJsonString({ ok: false, error: 'path not in index', detail: guard.error })
     await engine.indexDocument(guard.root, path)
   }
 
-  if (sourceType !== 'document') {
-    return toJsonString({ ok: true, path, sourceType, note: 'non-filesystem source; open via host UI' })
+  if (sourceType !== 'document' || /^ready:\/\//i.test(path)) {
+    return toJsonString({ ok: false, path, sourceType, error: 'non-filesystem source; open via host UI' })
   }
 
   try {
@@ -443,6 +448,9 @@ async function resolveReadableDocumentPath(
 > {
   let path = rawPath.trim()
   if (!path) return { ok: false, output: { ok: false, error: 'path is required' } }
+  if (buildFileLocatePathCandidates(path).some(candidate => /^ready:\/\//i.test(candidate))) {
+    return { ok: false, output: { ok: false, path, error: 'non-filesystem reference; open via host UI' } }
+  }
   const explicitReadableResources = context?.explicitReadableResources ?? []
   const explicitReadablePaths = context?.explicitReadablePaths ?? []
   if (explicitReadableResources.length || explicitReadablePaths.length) {
@@ -492,7 +500,7 @@ async function resolveReadableDocumentPath(
     await engine.indexDocument(guard.root, path)
   }
 
-  if (sourceType !== 'document') {
+  if (sourceType !== 'document' || /^ready:\/\//i.test(path)) {
     return { ok: false, output: { ok: false, path, sourceType, error: 'non-filesystem source; open via host UI' } }
   }
 

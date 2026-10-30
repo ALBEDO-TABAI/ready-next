@@ -1,3 +1,4 @@
+import type { DocumentSyncRequest, DocumentSyncReply } from '../shared/document-operations'
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 import {
   BROWSER_VIEW_INTENT_CHANNEL,
@@ -772,6 +773,13 @@ const browserAPI = {
 
 // Document API
 const documentAPI = {
+  registerOperationSync: () => ipcRenderer.invoke('document:registerOperationSync'),
+  onOperationSync: (callback: (payload: { requestId: string; request: DocumentSyncRequest }) => void) => {
+    const listener = (_event: IpcRendererEvent, payload: { requestId: string; request: DocumentSyncRequest }) => callback(payload)
+    ipcRenderer.on('document:operationSync', listener)
+    return () => ipcRenderer.removeListener('document:operationSync', listener)
+  },
+  replyOperationSync: (requestId: string, reply: DocumentSyncReply) => ipcRenderer.send('document:operationSyncReply', { requestId, reply }),
   readFile: (path: string) => ipcRenderer.invoke('document:read', path),
   writeFile: (path: string, content: string) => ipcRenderer.invoke('document:write', { path, content }),
   saveFileAs: (payload: { content?: string; contentBase64?: string; suggestedName?: string; defaultPath?: string | null }) =>
@@ -1306,6 +1314,12 @@ const themeAPI = {
   },
 }
 
+const vaultAPI: import('../shared/vault').VaultAPI = {
+  get: () => ipcRenderer.invoke('vault:get'),
+  set: (path) => ipcRenderer.invoke('vault:set', path),
+  createDefault: () => ipcRenderer.invoke('vault:createDefault'),
+}
+
 // Settings API
 const settingsAPI = {
   get: (key: string) => ipcRenderer.invoke('settings:get', key),
@@ -1492,6 +1506,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   window: windowAPI,
   theme: themeAPI,
   settings: settingsAPI,
+  vault: vaultAPI,
   imageGeneration: imageGenerationAPI,
   fileEmergence: fileEmergenceAPI,
   tagForge: tagForgeAPI,
@@ -1524,6 +1539,7 @@ declare global {
       window: typeof windowAPI
       theme: typeof themeAPI
       settings: typeof settingsAPI
+      vault: typeof vaultAPI
       imageGeneration: typeof imageGenerationAPI
       fileEmergence: typeof fileEmergenceAPI
       tagForge: typeof tagForgeAPI

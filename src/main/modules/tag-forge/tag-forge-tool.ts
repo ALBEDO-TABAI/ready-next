@@ -1,3 +1,4 @@
+import { commitDocumentOperation, getDocumentTabTransport } from '../document-engine/document-write-service'
 import { readFile } from 'fs/promises'
 import { realpathSync } from 'fs'
 import { isAbsolute, relative, resolve } from 'path'
@@ -14,7 +15,7 @@ import {
   type TagLexiconEntry,
   type TagProposal,
 } from './tag-forge-policy'
-import { revisionOf, rollbackControlledWrite, writeControlledTags, type TagForgeWriteResult } from './tag-forge-writer'
+import { revisionOf, prepareControlledTags } from './tag-forge-writer'
 import { evidenceOccursInContent, selectEvidenceBackedAdmissions } from './tag-forge-admission'
 import { parseDocumentGraph } from '../../../shared/document-graph-parse'
 import { extractDocumentTagLabels } from './tag-forge-content-tags'
@@ -55,9 +56,11 @@ export async function executeTagForgeApply(
   const file = identities.ensureFile({ workspaceRoot: root, path })
   const repo = new TagForgeRepository(db)
   if (context?.requestModuleToolAction) {
-    const lease = await context.requestModuleToolAction('tagForge.checkRevision', { path, expectedRevision })
-    if (lease.ok === false) {
-      return json({ ok: false, status: 'failed_terminal', errorKind: 'open_tab_revision_conflict' })
+    try {
+      const lease = await requestTagForgeAction(context, 'tagForge.checkRevision', { path, expectedRevision })
+      if (lease.ok === false) return json({ ok: false, status: 'failed_terminal', errorKind: 'open_tab_revision_conflict' })
+    } catch (error) {
+      return json({ ok: false, status: 'failed_terminal', errorKind: 'open_tab_revision_conflict', error: String(error) })
     }
   }
 
@@ -188,11 +191,10 @@ export async function executeTagForgeApply(
   const workflowStates = [...policy.entries, ...overlay]
     .filter((entry) => entry.status === 'active' && entry.facet === 'state')
     .map((entry) => ({ label: entry.label, aliases: entry.aliases }))
-  let written: TagForgeWriteResult | null = null
   let openTabSynced = false
   let assignmentsStaged = false
   try {
-    written = await writeControlledTags({
+    const written = await prepareControlledTags({
       path,
       workspaceRoot: root,
       expectedRevision,
@@ -202,57 +204,80 @@ export async function executeTagForgeApply(
       workflowStates,
       defaultWorkflowState: policy.automaticState,
     })
-    if (context?.requestModuleToolAction) {
-      const sync = await context.requestModuleToolAction('tagForge.applyContent', { path, content: written.content, revision: written.revision })
-      if (sync.ok === false) {
-        throw Object.assign(new Error('open_tab_revision_conflict'), { code: 'open_tab_revision_conflict' })
-      }
-      openTabSynced = true
-    }
-    const writtenWorkflowState = written.workflowState
-    const workflowStateEntry = writtenWorkflowState
-      ? [...policy.entries, ...overlay, ...admittedEntries].find((entry) => entry.facet === 'state' && same(entry.label, writtenWorkflowState))
-      : null
-    const assignmentTags = [...validated.active]
-    if (workflowStateEntry && !assignmentTags.some((tag) => tag.facet === 'state')) {
-      assignmentTags.push({
-        tagId: workflowStateEntry.id,
-        facet: 'state',
-        label: workflowStateEntry.label,
-        confidence: 1,
-        evidenceCode: 'code_owned_workflow_state',
-        resolution: 'exact',
-      })
-    }
-    engine.getRepository().transaction(() => {
-      repo.replaceAutomaticAssignments(file.fileKey, assignmentTags, 'tag_forge_explicit', policy.version, Date.now(), preservedManualTagIds)
-    })
-    assignmentsStaged = true
-    const indexResult = await engine.indexDocument(root, path, written.content)
-    if (!indexResult.ok) throw Object.assign(new Error(indexResult.error || 'index_write_failed'), { code: 'index_write_failed' })
-    const diskReadback = await readFile(written.path, 'utf8').catch(() => null)
-    if (diskReadback === null) throw Object.assign(new Error('post_index_read_failed'), { code: 'post_index_read_failed' })
-    if (revisionOf(diskReadback) !== written.revision) {
-      throw Object.assign(new Error('post_index_revision_conflict'), { code: 'post_index_revision_conflict' })
-    }
-    const indexed = db.prepare(`SELECT d.frontmatter_json AS frontmatter,d.content_hash AS contentHash FROM documents d JOIN workspaces w ON w.id=d.workspace_id WHERE w.root=? AND d.path=?`).get<{ frontmatter: string | null; contentHash: string | null }>(root, path)
-    const indexedFrontmatter = parseFrontmatter(indexed?.frontmatter)
-    const indexedTags = Array.isArray(indexedFrontmatter.tags) ? indexedFrontmatter.tags.map(String) : []
-    const indexedWorkflowState = typeof indexedFrontmatter.ready_state === 'string' ? indexedFrontmatter.ready_state : null
-    if (indexed?.contentHash !== buildSearchIndexContentHash(diskReadback) || JSON.stringify(indexedTags) !== JSON.stringify(written.tags) || indexedWorkflowState !== written.workflowState) {
-      throw Object.assign(new Error('index_readback_mismatch'), { code: 'index_readback_mismatch' })
-    }
-    const selectedContentLabels = validated.active.filter((tag) => tag.facet !== 'state').map((tag) => tag.label)
-    const finalCoverage = evaluateControlledContentLabels(policy, selectedContentLabels, [...overlay, ...admittedEntries])
-    const finalReviewProposals = reviewProposals.filter((proposal) => !(proposal.facet === 'form' && finalCoverage.formCount === 1))
-    if (!finalCoverage.complete && !canSatisfyFinalCoverage(finalCoverage, finalReviewProposals, locallySatisfiedTags)) {
-      throw Object.assign(new Error('post_write_content_incomplete'), { code: 'post_write_content_incomplete' })
-    }
     let pendingRows: ReturnType<TagForgeRepository['listPending']> = []
-    engine.getRepository().transaction(() => {
-      for (const entry of admittedEntries) repo.upsertOverlay(entry)
-      pendingRows = repo.addPending(finalReviewProposals, pendingIdentity)
-      repo.markReadback(file.fileKey)
+    let finalReviewProposals: TagProposal[] = []
+    await commitDocumentOperation({
+      path, expectedVersion: expectedRevision, origin: 'tag-forge',
+      operation: { type: 'replaceRange', start: 0, end: written.originalContent.length, expectedText: written.originalContent, replacement: written.content },
+    }, {
+      tabs: getDocumentTabTransport(),
+      index: async (_path, next) => {
+        const result = await engine.indexDocument(root, path, next)
+        if (!result.ok) throw Object.assign(new Error(result.error || 'index_write_failed'), { code: 'index_write_failed' })
+      },
+    }, {
+      published: async () => {
+        if (context?.requestModuleToolAction) {
+          const sync = await requestTagForgeAction(context, 'tagForge.applyContent', { path, content: written.content, revision: written.revision })
+          if (sync.ok === false) {
+            throw Object.assign(new Error('open_tab_revision_conflict'), { code: 'open_tab_revision_conflict' })
+          }
+          openTabSynced = true
+        }
+        const writtenWorkflowState = written.workflowState
+        const workflowStateEntry = writtenWorkflowState
+          ? [...policy.entries, ...overlay, ...admittedEntries].find((entry) => entry.facet === 'state' && same(entry.label, writtenWorkflowState))
+          : null
+        const assignmentTags = [...validated.active]
+        if (workflowStateEntry && !assignmentTags.some((tag) => tag.facet === 'state')) {
+          assignmentTags.push({
+            tagId: workflowStateEntry.id,
+            facet: 'state',
+            label: workflowStateEntry.label,
+            confidence: 1,
+            evidenceCode: 'code_owned_workflow_state',
+            resolution: 'exact',
+          })
+        }
+        engine.getRepository().transaction(() => {
+          repo.replaceAutomaticAssignments(file.fileKey, assignmentTags, 'tag_forge_explicit', policy.version, Date.now(), preservedManualTagIds)
+        })
+        assignmentsStaged = true
+      },
+      indexed: async () => {
+        const diskReadback = await readFile(written.path, 'utf8').catch(() => null)
+        if (diskReadback === null) throw Object.assign(new Error('post_index_read_failed'), { code: 'post_index_read_failed' })
+        if (revisionOf(diskReadback) !== written.revision) {
+          throw Object.assign(new Error('post_index_revision_conflict'), { code: 'post_index_revision_conflict' })
+        }
+        const indexed = db.prepare(`SELECT d.frontmatter_json AS frontmatter,d.content_hash AS contentHash FROM documents d JOIN workspaces w ON w.id=d.workspace_id WHERE w.root=? AND d.path=?`).get<{ frontmatter: string | null; contentHash: string | null }>(root, path)
+        const indexedFrontmatter = parseFrontmatter(indexed?.frontmatter)
+        const indexedTags = Array.isArray(indexedFrontmatter.tags) ? indexedFrontmatter.tags.map(String) : []
+        const indexedWorkflowState = typeof indexedFrontmatter.ready_state === 'string' ? indexedFrontmatter.ready_state : null
+        if (indexed?.contentHash !== buildSearchIndexContentHash(diskReadback) || JSON.stringify(indexedTags) !== JSON.stringify(written.tags) || indexedWorkflowState !== written.workflowState) {
+          throw Object.assign(new Error('index_readback_mismatch'), { code: 'index_readback_mismatch' })
+        }
+        const selectedContentLabels = validated.active.filter((tag) => tag.facet !== 'state').map((tag) => tag.label)
+        const finalCoverage = evaluateControlledContentLabels(policy, selectedContentLabels, [...overlay, ...admittedEntries])
+        finalReviewProposals = reviewProposals.filter((proposal) => !(proposal.facet === 'form' && finalCoverage.formCount === 1))
+        if (!finalCoverage.complete && !canSatisfyFinalCoverage(finalCoverage, finalReviewProposals, locallySatisfiedTags)) {
+          throw Object.assign(new Error('post_write_content_incomplete'), { code: 'post_write_content_incomplete' })
+        }
+      },
+      complete: () => {
+        engine.getRepository().transaction(() => {
+          for (const entry of admittedEntries) repo.upsertOverlay(entry)
+          pendingRows = repo.addPending(finalReviewProposals, pendingIdentity)
+          repo.markReadback(file.fileKey)
+        })
+      },
+      rollback: async (restored) => {
+        if (assignmentsStaged) engine.getRepository().transaction(() => repo.restoreAssignments(file.fileKey, assignmentSnapshot))
+        if (openTabSynced && context?.requestModuleToolAction) {
+          const sync = await requestTagForgeAction(context, 'tagForge.applyContent', { path, content: restored, revision: revisionOf(restored) })
+          if (sync.ok === false) throw new Error('rollback open tab sync failed')
+        }
+      },
     })
     const waitingReview = pendingRows.length > 0
     return json({
@@ -270,49 +295,8 @@ export async function executeTagForgeApply(
     })
   } catch (error) {
     let code = typeof (error as { code?: unknown })?.code === 'string' ? (error as { code: string }).code : 'tag_write_failed'
-    if (written) {
-      let rollbackFailed = false
-      if (assignmentsStaged) {
-        try {
-          engine.getRepository().transaction(() => repo.restoreAssignments(file.fileKey, assignmentSnapshot))
-        } catch {
-          rollbackFailed = true
-        }
-      }
-      let rollbackContent: string | null = null
-      try {
-        const current = await readFile(written.path, 'utf8')
-        if (revisionOf(current) === written.revision) {
-          await rollbackControlledWrite(written.path, written.revision, written.originalContent)
-          rollbackContent = written.originalContent
-        } else {
-          rollbackContent = current
-        }
-      } catch {
-        rollbackFailed = true
-      }
-      if (rollbackContent !== null) {
-        try {
-          const rollbackIndex = await engine.indexDocument(root, path, rollbackContent)
-          if (!rollbackIndex.ok) throw new Error(rollbackIndex.error || 'rollback index failed')
-        } catch {
-          rollbackFailed = true
-        }
-      }
-      if (rollbackContent !== null && openTabSynced && context?.requestModuleToolAction) {
-        try {
-          const rollbackSync = await context.requestModuleToolAction('tagForge.applyContent', {
-            path,
-            content: rollbackContent,
-            revision: revisionOf(rollbackContent),
-          })
-          if (rollbackSync.ok === false) throw new Error('rollback open tab sync failed')
-        } catch {
-          rollbackFailed = true
-        }
-      }
-      if (rollbackFailed) code = 'tag_write_rollback_failed'
-    }
+    if (error instanceof Error && error.message === 'post_index_revision_conflict') code = 'post_index_revision_conflict'
+    if (error instanceof Error && error.message.startsWith('Rollback failed:')) code = 'tag_write_rollback_failed'
     return json({ ok: false, status: 'failed_terminal', errorKind: code, path })
   }
 }
@@ -417,4 +401,15 @@ function canSatisfyFinalCoverage(
 
 function json(value: unknown): string {
   return JSON.stringify(value, null, 2)
+}
+
+async function requestTagForgeAction(context: TagForgeToolContext, tool: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
+  if (!context.requestModuleToolAction) throw new Error('Tag Forge action transport unavailable')
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      context.requestModuleToolAction(tool, args),
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Tag Forge tab acknowledgement timed out')), 10_000) }),
+    ])
+  } finally { clearTimeout(timer) }
 }

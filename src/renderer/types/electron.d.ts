@@ -1,3 +1,4 @@
+import type { DocumentSyncRequest, DocumentSyncReply } from '../../shared/document-operations'
 import type { ChatGptOAuthStatus } from '../../shared/chatgpt-oauth'
 import type { BrowserDiagnosticsData } from '../modules/browser/types'
 import type { BrowserUtilityMenuRequest } from '../../shared/browser-utility-menu'
@@ -1806,6 +1807,9 @@ interface DocumentDeleteMarkResponse {
 }
 
 interface ElectronDocumentAPI {
+  registerOperationSync: () => Promise<void>
+  onOperationSync: (callback: (payload: { requestId: string; request: DocumentSyncRequest }) => void) => () => void
+  replyOperationSync: (requestId: string, reply: DocumentSyncReply) => void
   readFile: (path: string) => Promise<DocumentReadResponse>
   writeFile: (path: string, content: string) => Promise<DocumentWriteResponse>
   saveFileAs: (payload: {
@@ -3357,6 +3361,7 @@ interface ElectronAPI {
   window: ElectronWindowAPI
   theme: ElectronThemeAPI
   settings: ElectronSettingsAPI
+  vault: import('../../shared/vault').VaultAPI
   imageGeneration: ElectronImageGenerationAPI
   fileEmergence: ElectronFileEmergenceAPI
   tagForge: ElectronTagForgeAPI

@@ -6,6 +6,7 @@ import {
 import { join, basename, dirname, extname } from 'path'
 import { homedir } from 'os'
 import { buildDocumentHtmlSnapshotExport } from '../../../shared/document-widget-html-export'
+import { setupDocumentWriteIPC } from './document-write-ipc'
 import { documentCommitRegistry } from './document-commit-registry'
 import { validateWorkspaceRoot } from '../../../shared/workspace-validation'
 import { EBOOK_BINARY_EXTENSIONS } from '../../../shared/ebook'
@@ -300,6 +301,7 @@ let widgetGroupDispose: IpcDisposeHandle | null = null
 let exportGroupDispose: IpcDisposeHandle | null = null
 
 export function setupDocumentIPC(useMock = false): void {
+  setupDocumentWriteIPC()
   // Stage V V2.3g — `document:widgetCommitted` (renderer → main push)
   // moved into `widgetGroup`. The group owns the listener registration
   // + dev-reload pre-clear; the handler body (payload validation +

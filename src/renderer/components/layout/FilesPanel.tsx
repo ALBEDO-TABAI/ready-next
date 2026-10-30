@@ -16,6 +16,7 @@ import {
 
 import { useWorkspace } from '../../stores/useWorkspace'
 import FileTree, { DEFAULT_FILE_FILTERS, type FileFilterMap, type FileViewMode } from './FileTree'
+import VaultSetupBanner from './VaultSetupBanner'
 import Modal from '../ui/Modal'
 import { LiquidFloatingPanel } from '../ui/liquid-glass/LiquidFloatingPanel'
 import { computeNextGridHistory, type GridNavigationEntry } from './gridNavigation'
@@ -353,6 +354,7 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
 
   const body = (
     <>
+      <VaultSetupBanner />
       <div
         ref={toolbarRef}
         className="shrink-0 flex items-center justify-between"

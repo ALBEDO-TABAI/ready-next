@@ -399,4 +399,9 @@ M5 的数据库往返/导入保真另由计划 `src/__tests__/ready-database-rou
 - **基线既有问题**（9a1b0f6a 上就存在，不属于本批改动）：
   - `ui-fail-fast-contract.test.ts` 对 `CalendarMode.tsx` 的 `loadError` 断言失败。
   - `check-sqlite-test-skip-pattern.cjs` 报告 `calendar-union-native.test.ts` 等文件的既有违规。
-- **尚未实现**：C2–C6、C8–C14，M1 其余部分，以及 M2–M8。
+- **M1 第二批**（2026-10-30）：
+  - D4 / C3 文档写入服务：`applyDocumentOperation`，覆盖未打开、打开且干净、打开且有未保存修改三种情况，与标签页之间按 prepare → commit → release 同步，失败时回滚。Tag Forge 已改为经它写入。
+  - D17 资料库设置：`vault:get/set/createDefault`，设置键 `vault.root`。打包版建议 `~/Documents/Ready`，开发运行用 `<userData>/test-vault`。
+  - ReadyRef 迁移第 2 批：搜索索引中 RSS、日历、会话、书签四类来源改为 `ready://`（迁移 135，重复索引行保留规范形式），搜索点击改为在 Ready 内打开。
+  - 检查：typecheck 通过；`verify:native` 224/224；`verify:tag-forge` 91/91；`npm test` 只剩基线的 1 项失败；`verify:ready-next-smoke` 10/10，新增资料库三项检查。IPC 合同检查只剩日历 27 项基线违例。
+- **尚未实现**：C2、C4–C6、C8–C14，M1 其余部分（身份统一、关系索引、ReadyRef 第 3–7 批、跨模式返回），以及 M2–M8。

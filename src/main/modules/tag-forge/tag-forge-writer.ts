@@ -1,8 +1,7 @@
-import { createHash, randomUUID } from 'crypto'
-import { lstat, readFile, realpath, rename, unlink, writeFile } from 'fs/promises'
-import { dirname, isAbsolute, join, relative } from 'path'
-import { parseDocumentGraph } from '../../../shared/document-graph-parse'
-import { writeFrontmatter } from '../../../shared/document-graph-parse-frontmatter-writer'
+import { lstat, readFile, realpath } from 'fs/promises'
+import { isAbsolute, relative } from 'path'
+import { applyDocumentOperation, readDocumentSource } from '../../../shared/document-operations'
+import { documentVersion, publishDocumentContent, restoreDocumentContent, withDocumentPathLock } from '../document-engine/document-write-service'
 import type { ValidatedTag } from './tag-forge-policy'
 import { extractLeadingHashtagLabels, stripLeadingHashtagLines } from './tag-forge-content-tags'
 
@@ -15,7 +14,7 @@ export interface TagForgeWriteResult {
   originalContent: string
 }
 
-export async function writeControlledTags(input:{
+export async function prepareControlledTags(input:{
   path:string
   workspaceRoot:string
   expectedRevision:string
@@ -35,7 +34,7 @@ export async function writeControlledTags(input:{
   if(!input.path.toLowerCase().endsWith('.md'))throw codeError('markdown_only')
   const content=await readFile(pathReal,'utf8')
   if(revisionOf(content)!==input.expectedRevision)throw codeError('revision_conflict')
-  const graph=parseDocumentGraph(content)
+  const graph=readDocumentSource(content)
   const frontmatter={...(graph.frontmatter??{})}
   const frontmatterTags=Array.isArray(frontmatter.tags)?frontmatter.tags.filter((tag):tag is string=>typeof tag==='string').map(clean):[]
   const inlineTags=extractLeadingHashtagLabels(graph.body)
@@ -61,37 +60,32 @@ export async function writeControlledTags(input:{
   if(workflowState)frontmatter.ready_state=workflowState;else delete frontmatter.ready_state
   if(input.readyProject?.trim())frontmatter.ready_project=input.readyProject.trim()
   const body=stripLeadingHashtagLines(graph.body)
-  const next=writeFrontmatter(body,frontmatter)
-  const tmp=join(dirname(pathReal),`.${randomUUID()}.tag-forge.tmp`)
-  let committed=false
-  try{
-    await writeFile(tmp,next,{encoding:'utf8',flag:'wx'});await rename(tmp,pathReal);committed=true
-    const readback=await readFile(pathReal,'utf8')
-    if(readback!==next)throw codeError('disk_readback_mismatch')
-    const parsed=parseDocumentGraph(readback);const parsedTags=Array.isArray(parsed.frontmatter?.tags)?parsed.frontmatter!.tags as unknown[]:[]
-    if(JSON.stringify(parsedTags.map(String))!==JSON.stringify(tags))throw codeError('frontmatter_readback_mismatch')
-    return{path:pathReal,content:readback,revision:revisionOf(readback),tags,workflowState:workflowState??null,originalContent:content}
-  }catch(error){
-    await unlink(tmp).catch(()=>undefined)
-    if(committed){
-      try{
-        const current=await readFile(pathReal,'utf8')
-        if(revisionOf(current)!==revisionOf(next))throw codeError('rollback_revision_conflict')
-        const rollbackTmp=join(dirname(pathReal),`.${randomUUID()}.tag-forge.rollback.tmp`)
-        try{await writeFile(rollbackTmp,content,{encoding:'utf8',flag:'wx'});await rename(rollbackTmp,pathReal)}catch(rollbackError){await unlink(rollbackTmp).catch(()=>undefined);throw rollbackError}
-      }catch{throw codeError('tag_write_rollback_failed')}
-    }
-    throw error
+  const bodyStart=graph.bodyStart
+  const source=applyDocumentOperation(content,{type:'replaceRange',start:bodyStart,end:content.length,expectedText:graph.body,replacement:body})
+  const fields:Record<string,unknown>={}
+  const remove:string[]=[]
+  for(const name of ['tags','ready_state','ready_project']){
+    if(Object.prototype.hasOwnProperty.call(frontmatter,name))fields[name]=frontmatter[name]
+    else if(name!=='ready_project')remove.push(name)
   }
+  const next=applyDocumentOperation(source,{type:'setFrontmatterFields',set:fields,remove})
+  return{path:pathReal,content:next,revision:revisionOf(next),tags,workflowState:workflowState??null,originalContent:content}
 }
 
-export async function rollbackControlledWrite(path:string,writtenRevision:string,originalContent:string):Promise<void>{
-  const stat=await lstat(path);if(!stat.isFile()||stat.isSymbolicLink())throw codeError('rollback_target_invalid')
-  const current=await readFile(path,'utf8');if(revisionOf(current)!==writtenRevision)throw codeError('rollback_revision_conflict')
-  const tmp=join(dirname(path),`.${randomUUID()}.tag-forge.rollback.tmp`);try{await writeFile(tmp,originalContent,{encoding:'utf8',flag:'wx'});await rename(tmp,path)}catch(error){await unlink(tmp).catch(()=>undefined);throw error}
+// Scoped writer API retained for callers that only need a file publication. The
+// full Tag Forge product transaction uses prepareControlledTags + the service.
+export async function writeControlledTags(input:Parameters<typeof prepareControlledTags>[0]):Promise<TagForgeWriteResult>{
+  return withDocumentPathLock(input.path,async()=>{
+    const result=await prepareControlledTags(input)
+    try{await publishDocumentContent(result.path,result.content)}catch(error){
+      await restoreDocumentContent(result.path,result.revision,result.originalContent)
+      throw error
+    }
+    return result
+  })
 }
 
-export function revisionOf(content:string):string{return createHash('sha256').update(content).digest('hex')}
+export const revisionOf = documentVersion
 function clean(v:string):string{return v.trim().replace(/^#/,'')}
 function key(v:string):string{return clean(v).toLocaleLowerCase()}
 function unique(values:string[]):string[]{const seen=new Set<string>();return values.filter((value)=>{const k=key(value);if(!k||seen.has(k))return false;seen.add(k);return true})}

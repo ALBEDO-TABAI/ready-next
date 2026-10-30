@@ -17,7 +17,7 @@ const EXPECTED_ANTHROPIC = [
   {
     name: 'file_search',
     description:
-      '跨源全局搜索（文档、书签、RSS、日程、Agent 会话）。支持 #tag / [[wikilink]] / "短语" / src:xxx 前缀语法；返回命中清单（path / name / snippet / sourceType / tagsHit / linksHit）。',
+      '跨源全局搜索（文档、书签、RSS、日程、Agent 会话）。支持 #tag / [[wikilink]] / "短语" / src:xxx 前缀语法；返回命中清单（path / name / snippet / sourceType / tagsHit / linksHit）；非文件来源的 path 是 ready:// 导航地址，不授予文件读取权限。',
     input_schema: {
       type: 'object',
       properties: {
@@ -40,7 +40,7 @@ const EXPECTED_ANTHROPIC = [
   {
     name: 'file_locate',
     description:
-      '定位文件中的特定锚点。传 path（绝对路径、索引 path、唯一文件名或相对后缀）+ 可选 anchor（章节标题 / 首个命中关键词），返回 { path, line, sectionTitle } 供导航。',
+      '定位文件中的特定锚点。传 path（绝对路径、已索引的文件路径、唯一文件名或相对后缀）+ 可选 anchor（章节标题 / 首个命中关键词），返回 { path, line, sectionTitle } 供导航；拒绝非文件来源的 ready:// 地址。',
     input_schema: {
       type: 'object',
       properties: {

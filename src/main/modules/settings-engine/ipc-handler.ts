@@ -33,6 +33,8 @@ import { getDatabase } from '../database'
 import { CodexBindingRepository } from '../agent-control/codex-runtime/codex-binding-repository'
 import { ActiveAIProfileMutationGuard } from './active-ai-profile-mutation-guard'
 import { createGenericSettingIPCHandler } from './generic-setting-ipc-handler'
+import { VaultService } from './vault-service'
+import { registerVaultIPC } from './vault-ipc'
 import {
   disconnectChatGptOAuthWithWorkspaceLifecycle,
   persistAIWorkspaceWithChatGptOAuthLifecycle,
@@ -65,6 +67,11 @@ export function setupSettingsIPC(options?: {
     (current, next) => profileMutationGuard.assertWorkspaceMutationAllowed(current, next),
   )
   const repository = new AppSettingsRepository(() => database)
+  registerVaultIPC(ipcMain, new VaultService(repository, {
+    home: app.getPath('home'),
+    userData: app.getPath('userData'),
+    isPackaged: app.isPackaged,
+  }))
   const externalServices = new ExternalServiceStore(repository)
   const chatGptOAuth = options?.chatGptOAuthService || createChatGptOAuthService(
     join(app.getPath('userData'), 'openai-oauth', 'auth.json')

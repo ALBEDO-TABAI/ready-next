@@ -194,6 +194,9 @@
 
 ## 7. 文档与 Widget
 
+- ready-next C3 / D4：外部文档修改统一经 Main `applyDocumentOperation({ path, expectedVersion?, operation, origin })`，同一真实路径串行；版本为全文 SHA-256。共享 `document-operations` 负责 frontmatter 字段修改、标题下追加和精确区间替换，未修改字节保持原样。未打开与 clean 文档须原子发布、回读、索引确认；dirty 文档只在原缓冲上应用操作并保持 dirty，不写盘、不发布落盘证据。回执区分 `not_open / synced_clean / merged_dirty`，后者的版本是缓冲版本。
+- 写入同步采用有请求身份、截止时间与内容快照的 prepare / commit / rollback / release 确认；保存队列与外部同步共用路径锁，迟到请求、关闭或变更的标签页不得覆盖新内容。失败码为 `version_conflict / dirty_conflict / operation_failed / write_failed / readback_mismatch`；发布失败恢复磁盘、索引和参与方，回滚冲突明确失败并保留外部新内容。行为合同由 `document-operations.test.ts`、`document-write-service-native.test.ts` 验证。
+
 - 聊天正文里的 `@[名]` 与本地绝对路径渲染为可点芯片，发送协议仍是 `@[名]` 加结构化资源；`/` 只插入命令，`@` 与斜杠选技插入实体引用。附件、`@[文件]`、当前文档与引用片段先进入结构化资源层；多来源、多目标、多步骤任务先计划再执行。Codex 结构化 ingress 接受 `rss_item` / `rss_source` / `calendar_window` / `widget_target` / `mcp_resource`：内容型资源只传稳定 ID，由 Main 读真值；MCP 资源另外冻结 server、URI、catalog generation/digest 和 content digest；日历窗口只传可见范围结构事实并由 Main 校验格式、顺序和最大跨度。`widget_target` 必须与发送时冻结的当前文档 tab/version/incarnation 完全一致，且不得把 widget HTML 当权威正文。Widget 目标只决定写回哪张卡；用户明确要求最新天气、股价等外部事实时，网页查询工具与同一 Widget 更新工具可以并存。远程 IM 只有本人绑定后的文字任务进入当前 Codex 准入并回复原会话；纯附件只持久化资源并把事件收口为 `done`，不启动 Agent run。入站不额外发送 typing 或自动进度消息；slash command、pending ask-card 回答和 Ready 内明确出站保留独立通路。冷启动时无主的旧 `running` 事件必须标记为失败且保留原因，不得伪装成已完成或永久运行中。
 - 关系图谱中可打开的文档节点必须由 Main 返回真实路径；Renderer 只对本地文档节点提供悬浮正文预览与点击打开，并沿统一工作面切换入口进入 Document，不能用文件名猜路径。
 - 关系图谱的全景与聚焦入口共用整体向心布局：连通群按面积初始化，孤点填充同一圆形区域，不以分量私有锚点维持隔离，也不把大量邻居塞进半径随数量线性增长的单环。位置刷新按节点 ID 延续；首次布局完成后补一次自动取景，逐帧布局不反复缩放，用户移动、缩放或拖点后不抢视口。颜色与大小消费布局同一份去重有效邻接：灰色独立点、橘色单连接端点、较大的墨色连接中心；明暗主题与文档/标签类型保持相同角色规则。回归入口 `npm run verify:knowledge-graph`，当前合同见 `docs/superpowers/plans/2026-09-06-knowledge-graph-cohesion-implementation.md`。
@@ -245,6 +248,8 @@
 - 回归入口：`npm run verify:single-ready-memory`、`npm run verify:evolution-p1`、`npm run verify:evolution-p3`、`npm run verify:evolution-p4`。单一 Ready 专项必须覆盖退役面、升级清理、冻结快照、历史脱敏、只读检索、设置与 IPC、自动整理恢复、归档 owner 和真实数据库授权链，不能只验证入口消失。
 
 ## 9. 文件涌现与 Tag Forge
+
+- Tag Forge 的文件发布与补偿只经文档写入服务；标签规则、审核和 durable creation receipt 仍归 Tag Forge。文件、打开标签页、索引与 `file_tag_assignments` 属于同一可回滚单元，读回失败不得发布成功；未保存缓冲合并不充当 durable receipt。
 
 - 文件管理公开入口只负责无状态查询与工具分发；路径授权、真实路径边界和持久 JSON 原语集中在共享运行层，文件整理状态归文件整理模块，Tag Forge 批次与审核状态归 Tag Forge 域。禁止把这些状态重新塞回公开入口或复制边界实现。
 - hidden、snoozed、not_related 等持久反馈必须在 Main 与 Renderer 两端同时生效；当前 tab、dirty tab 或阅读进度不能把被压制项目重新注入。

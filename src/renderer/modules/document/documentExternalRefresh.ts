@@ -1,3 +1,4 @@
+import { isDocumentOperationPending } from './documentOperationSync'
 import { getFileExtension } from '../../utils/path'
 
 interface RefreshableDocumentTab {
@@ -66,7 +67,7 @@ export async function refreshCleanDocumentTabsFromDisk(
   },
 ): Promise<Set<string>> {
   const results = await Promise.all(candidateTabs.map(async (candidate) => {
-    if (!candidate.path || candidate.isDirty || !isReloadableTextDocumentPath(candidate.path)) {
+    if (!candidate.path || isDocumentOperationPending(candidate.path) || candidate.isDirty || !isReloadableTextDocumentPath(candidate.path)) {
       return { id: candidate.id, resolved: true }
     }
     const key = `${candidate.id}\u0000${candidate.path}`
@@ -91,7 +92,7 @@ export async function refreshCleanDocumentTabsFromDisk(
             if (result?.success) {
               resolved = true
               const current = dependencies.getCurrentTab(candidate.id)
-              if (current && current.path === candidate.path && !current.isDirty) {
+              if (current && current.path === candidate.path && !current.isDirty && !isDocumentOperationPending(candidate.path!)) {
                 const nextContent = result.content || ''
                 if (current.content !== nextContent) dependencies.hydrateTab(current.id, nextContent)
               }

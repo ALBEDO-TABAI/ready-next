@@ -16,9 +16,9 @@ export function extractLeadingHashtagLabels(body: string): string[] {
 }
 
 export function stripLeadingHashtagLines(body: string): string {
-  const { lines, start, end } = leadingTagBlock(body)
+  const { start, end } = leadingTagBlock(body)
   if (start === end) return body
-  return lines.slice(end).join('\n').replace(/^\n+/, '')
+  return body.replace(/^\uFEFF/, '').split(/(?<=\n)/).slice(end).join('').replace(/^(?:\r?\n)+/, '')
 }
 
 function leadingTagBlock(body: string): { lines: string[]; start: number; end: number } {

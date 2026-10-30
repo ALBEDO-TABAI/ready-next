@@ -53,6 +53,7 @@ export function resolveIndexedDocumentCandidate(
     .prepare('SELECT id, path, source_type FROM documents WHERE path = ? LIMIT 1')
     .get?.<IndexedDocumentRow>(path)
   if (exact) return { kind: 'found', row: exact }
+  if (/^ready:\/\//i.test(path)) return { kind: 'missing' }
 
   const name = basenameFromPathLike(path)
   const suffix = normalizeRelativeSuffix(path)

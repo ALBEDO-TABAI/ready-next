@@ -1658,7 +1658,7 @@ export const useAgent = create<AgentState>((set, get) => ({
     if (scope && !state.retiredScopeIds[scopeId]) await hydrateCodexLifecycleScope(scope)
   },
 
-  loadScopes: async () => {
+  loadScopes: async (targetScopeId) => {
     if (typeof window === 'undefined' || !window.electronAPI?.agent) return false
     try {
       const requestRevision = get().scopeListRequestRevision + 1
@@ -1682,6 +1682,7 @@ export const useAgent = create<AgentState>((set, get) => ({
         || currentAuthority.scopeAuthorityRevision !== authorityRevision) return false
       const scopes = (result.data as unknown as ConversationScope[])
         .filter((scope) => !currentAuthority.retiredScopeIds[scope.id])
+      if (targetScopeId && !scopes.some(scope => scope.id === targetScopeId)) return false
       if (scopes.length === 0) {
         const emptySlice = makeEmptySessionSlice()
         set((state) => {
@@ -1716,7 +1717,7 @@ export const useAgent = create<AgentState>((set, get) => ({
         return true
       }
       const previousScopeId = get().currentScopeId
-      const requestedCurrentScope = scopes.find((scope) => scope.id === previousScopeId) || scopes[0] || null
+      const requestedCurrentScope = scopes.find((scope) => scope.id === (targetScopeId || previousScopeId)) || scopes[0] || null
       set((state) => {
         const loadedScopeIds = new Set(scopes.map((scope) => scope.id))
         const nextSessions: typeof state.sessions = {}
@@ -1834,7 +1835,7 @@ export const useAgent = create<AgentState>((set, get) => ({
       if (currentAfterReconcile?.id) previouslyLoadedScopeIds.add(currentAfterReconcile.id)
       const hasOnlyWelcomeMessages = get().messages.every((message) => /^welcome(?:-|$)/.test(message.id))
       const shouldLoadCurrent = Boolean(
-        currentAfterReconcile?.id
+        !targetScopeId && currentAfterReconcile?.id
         && currentAfterReconcile.lastMessageAt
         && (previousScopeId !== currentAfterReconcile.id || hasOnlyWelcomeMessages)
         && typeof window.electronAPI.agent.getConversationScopeMessages === 'function',
@@ -1857,17 +1858,17 @@ export const useAgent = create<AgentState>((set, get) => ({
   },
 
   loadScope: async (scopeId: string) => {
-    if (typeof window === 'undefined' || !window.electronAPI?.agent) return
+    if (typeof window === 'undefined' || !window.electronAPI?.agent) return false
     try {
       const authorityRevision = get().scopeAuthorityRevision
       if (get().retiredScopeIds[scopeId]
-        || !get().scopes.some((scope) => scope.id === scopeId)) return
+        || !get().scopes.some((scope) => scope.id === scopeId)) return false
       const result = await window.electronAPI.agent.getConversationScopeMessages(scopeId)
-      if (!result.success || !result.data) return
+      if (!result.success || !result.data) return false
       const authoritative = get()
       if (authoritative.scopeAuthorityRevision !== authorityRevision
         || authoritative.retiredScopeIds[scopeId]
-        || !authoritative.scopes.some((scope) => scope.id === scopeId)) return
+        || !authoritative.scopes.some((scope) => scope.id === scopeId)) return false
       const scopes = get().scopes
       const scope = scopes.find((item) => item.id === scopeId) || null
       const activeRunState = getScopeRunStateForScope(get(), scopeId)
@@ -1911,7 +1912,7 @@ export const useAgent = create<AgentState>((set, get) => ({
         })
       }
       if (get().scopeAuthorityRevision !== authorityRevision
-        || get().retiredScopeIds[scopeId]) return
+        || get().retiredScopeIds[scopeId]) return false
       set((state) => {
         const sessionKey = sessionKeyForScopeId(state, scopeId)
         const slice = normalizeSessionSlice(state.sessions[sessionKey])
@@ -1972,8 +1973,10 @@ export const useAgent = create<AgentState>((set, get) => ({
       const currentScope = get().scopes.find((candidate) => candidate.id === scopeId)
       if (currentScope) await hydrateCodexLifecycleScope(currentScope)
       window.electronAPI.pet?.scopeViewed?.(scopeId)
+      return true
     } catch {
-      // silent-catch: history reload failure preserves the transcript/draft; only the atomic reader replaces actions.
+      // silent-catch: history reload failure preserves the transcript/draft and reports failure.
+      return false
     }
   },
 
@@ -2476,4 +2479,10 @@ export async function cancelAskUserQuestionsCard(
     foldCardLocallyToCancelled(cardId, 'cancel_persist_failed')
   }
   return result
+}
+
+/** Search navigation must not fall back to another visible conversation. */
+export async function revealSearchConversation(id: string): Promise<void> {
+  if (!await useAgent.getState().loadScopes(id)) throw new Error('会话已关闭、已删除或不可见，无法打开')
+  if (!await useAgent.getState().loadScope(id)) throw new Error('会话无法打开，请重新搜索')
 }

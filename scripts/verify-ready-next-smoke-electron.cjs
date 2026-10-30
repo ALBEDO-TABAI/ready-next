@@ -59,6 +59,13 @@ async function checkIdentityAndFastCard() {
     ok('C15 app identifies as Ready Next', identity.name === 'Ready Next', JSON.stringify(identity))
     ok('C15 userData is the isolated profile', fs.realpathSync(identity.userData) === fs.realpathSync(profile), JSON.stringify(identity))
 
+    const vault = await withTimeout(page.evaluate(() => window.electronAPI.vault.get()), 20000, 'read vault state')
+    ok('D17 a fresh dev profile has no vault and suggests a test vault inside the profile',
+      vault.status === 'unconfigured' && fs.realpathSync(path.dirname(vault.defaultSuggestion)) === fs.realpathSync(profile), JSON.stringify(vault))
+    const created = await withTimeout(page.evaluate(() => window.electronAPI.vault.createDefault()), 20000, 'create default vault')
+    ok('D17 creating the default vault makes it ready inside the profile',
+      created.status === 'ready' && fs.realpathSync(created.root).startsWith(fs.realpathSync(profile)), JSON.stringify(created))
+
     const item = {
       id: `smoke-${Date.now()}`, kind: 'text', createdAt: Date.now(), text: 'ready-next smoke',
       source: { pageUrl: 'https://example.test/', pageTitle: 'Example', domain: 'example.test', capturedAt: Date.now() },
@@ -69,6 +76,8 @@ async function checkIdentityAndFastCard() {
     await withTimeout(app.close(), 150000, 'close app')
 
     ;({ app, page } = await launch(profile))
+    const reopenedVault = await withTimeout(page.evaluate(() => window.electronAPI.vault.get()), 20000, 'read vault after restart')
+    ok('D17 the vault setting survives a restart', reopenedVault.status === 'ready' && reopenedVault.root === created.root, JSON.stringify(reopenedVault))
     const listed = await withTimeout(page.evaluate(() => window.electronAPI.browser.listFastCardItems()), 20000, 'list FastCard items')
     const restored = listed?.success === true && listed.data.find(entry => entry.id === item.id)
     ok('C7 FastCard item survives a restart', restored && restored.text === item.text && restored.source?.pageUrl === item.source.pageUrl, JSON.stringify(listed))

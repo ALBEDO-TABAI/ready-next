@@ -21,6 +21,11 @@
 
 | 评估日期 | 任务 | 文件 | 总行数 | 本次新增 | 结论 | 判断与后续动作 | 状态 |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
+| 2026-10-30 | ready-next M1：写入服务、资料库、搜索引用迁移 | `src/renderer/stores/useAgent.ts` | 2488 | 净 +9 | 危险 | 只加按会话 id 打开准确会话的入口（全局搜索点击用）；原有多职责问题未变，仍需独立拆分合同。 | 待独立拆分合同；交付时提醒 |
+| 2026-10-30 | ready-next M1：写入服务、资料库、搜索引用迁移 | `src/renderer/components/layout/GlobalSearchPanel.tsx` | 1026 | 净 +16 | 一般 | 结果点击改为解析 ReadyRef 并在 Ready 内打开；复查目标：把结果打开逻辑拆成独立模块。 | 已排期：2026-11-30 |
+| 2026-10-30 | ready-next M1：写入服务、资料库、搜索引用迁移 | `src/preload/index.ts` | 1556 | 净 +16 | 一般 | 只加资料库三条接口与文档同步通道；沿用按域声明的既有复查。 | 已排期：2026-11-01 |
+| 2026-10-30 | ready-next M1：写入服务、资料库、搜索引用迁移 | `src/main/modules/migrations.ts` | 4520 | 净 +2 | 健康 | 只按顺序登记 135 迁移 `search_ready_refs`。 | 无需处理 |
+| 2026-10-30 | ready-next M1：写入服务、资料库、搜索引用迁移 | `src/renderer/types/electron.d.ts` | 3464 | 净 +5 | 健康 | 单一跨进程声明，类型检查覆盖。 | 无需处理 |
 | 2026-10-30 | ready-next M0/M1 起步（FastCard 落盘） | `src/main/modules/migrations.ts` | 4518 | 净 +12 | 健康 | 只按顺序登记 134 迁移 `fastcard_items`；迁移链在原生测试中完整执行。 | 无需处理 |
 | 2026-10-30 | ready-next M0/M1 起步（FastCard 落盘） | `src/preload/index.ts` | 1540 | 净 +5 | 一般 | 只加 FastCard 列表、添加、移除、清空四条透传；沿用按域声明的既有复查。 | 已排期：2026-11-01 |
 | 2026-10-30 | ready-next M0/M1 起步（FastCard 落盘） | `src/renderer/types/electron.d.ts` | 3459 | 净 +5 | 健康 | 单一跨进程声明，类型检查覆盖。 | 无需处理 |

@@ -1,3 +1,5 @@
+import { VAULT_ROOT_SETTING_KEY } from '../../../shared/vault'
+
 type GenericSettingRepository = {
   setSetting(key: string, value: string): void
 }
@@ -24,6 +26,7 @@ export function createGenericSettingIPCHandler(options: {
 }): (_event: unknown, payload: { key: string; value: string }) => GenericSettingIPCResponse {
   return (_event, { key, value }) => {
     try {
+      if (key === VAULT_ROOT_SETTING_KEY) throw new Error('vault_setting_requires_dedicated_ipc')
       if (RESERVED_AI_WORKSPACE_SETTING_KEYS.has(key)) {
         throw new Error('ai_workspace_setting_requires_dedicated_ipc')
       }

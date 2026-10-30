@@ -1,3 +1,4 @@
+import { ReadyRefSchema, toReadyUri } from '../../../shared/ready-ref'
 import { calendarEventToRecord, originalToSeconds } from '../calendar-engine/calendar-row-codec'
 import { CalendarStore } from '../database/calendar-store'
 import { readFile, readdir, stat, open } from 'fs/promises'
@@ -594,15 +595,18 @@ export class BookmarkAdapter implements IndexSourceAdapter {
     const bookmarks = db
       .prepare('SELECT id, url, title, favicon, created_at FROM browser_bookmarks')
       .all<{ id: string; url: string; title: string; favicon: string | null; created_at: number | null }>()
-    const rows = bookmarks.map((b) => ({
-      path: b.url || `bookmark://${b.id}`,
+    const rows = bookmarks.filter(b => ReadyRefSchema.safeParse({ kind: 'web', url: b.url }).success).map((b) => ({
+      path: toReadyUri({ kind: 'web', url: b.url }),
       sourceId: b.id,
       name: b.title || b.url,
       body: [b.title || '', b.url].filter(Boolean).join(' '),
       meta: { url: b.url, favicon: b.favicon, createdAt: b.created_at },
       mtime: b.created_at ?? 0,
     }))
-    return syncShared(this, ctx, rows)
+    const result = syncShared(this, ctx, rows)
+    result.scanned = bookmarks.length
+    result.skipped += bookmarks.length - rows.length
+    return result
   }
 }
 
@@ -630,7 +634,7 @@ export class RssAdapter implements IndexSourceAdapter {
         starred: number | null
       }>()
     const rows = items.map((item) => ({
-      path: `rss://${item.id}`,
+      path: toReadyUri({ kind: 'rss-item', id: item.id }),
       sourceId: item.id,
       name: item.title || item.link,
       body: [item.title || '', stripHtml(item.summary), item.author || '', item.link].filter(Boolean).join(' '),
@@ -654,10 +658,13 @@ export class CalendarAdapter implements IndexSourceAdapter {
     const db = ctx.repository.getConnection()
     const events = new CalendarStore(()=>db).snapshot().events.map(event=>({
       ...calendarEventToRecord(event),
-      id:event.recurringEventId?`${event.recurringEventId}#${originalToSeconds(event.originalStart!)}`:event.id,
+      id: event.recurringEventId && event.originalStart !== undefined ? `${event.recurringEventId}#${originalToSeconds(event.originalStart)}` : event.recurringEventId || event.id,
+      path: toReadyUri({ kind: 'event', id: event.recurringEventId || event.id,
+        ...(event.recurringEventId && event.originalStart !== undefined ? { occurrence: String(event.originalStart) } : {}),
+      }),
     })).sort((a,b)=>b.start_time-a.start_time).slice(0,5000)
     const rows = events.map((event) => ({
-      path: `calendar://${event.id}`,
+      path: event.path,
       sourceId: event.id,
       name: event.title,
       body: [event.title, event.description || '', event.location || ''].filter(Boolean).join(' '),
@@ -714,7 +721,7 @@ export class AgentMessageAdapter implements IndexSourceAdapter {
         .join('\n')
       const lastTs = Date.parse(messages[0].timestamp)
       rows.push({
-        path: `agent://${conv.id}`,
+        path: toReadyUri({ kind: 'conversation', id: conv.id }),
         sourceId: conv.id,
         name: conv.title || `${conv.agent} · ${conv.id.slice(0, 8)}`,
         body,

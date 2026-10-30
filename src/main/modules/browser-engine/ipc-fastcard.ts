@@ -48,20 +48,19 @@ export function setupBrowserFastCardIPC(options: BrowserFastCardIPCOptions): voi
     assertDatabaseConnectionReady(db, 'FastCard database')
     return new FastCardRepository(db)
   })
-  const handle = <T>(channel: string, action: (payload: unknown) => T): void => {
-    ipcMain.handle(channel, (_, payload: unknown): FastCardIPCResult<T> => {
-      try {
-        const data = action(payload)
-        return data === undefined ? { success: true } : { success: true, data }
-      } catch (error) {
-        return { success: false, error: error instanceof Error ? error.message : String(error) }
-      }
-    })
+  const receipt = <T>(action: (payload: unknown) => T) => (_: unknown, payload: unknown): FastCardIPCResult<T> => {
+    try {
+      const data = action(payload)
+      return data === undefined ? { success: true } : { success: true, data }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
   }
-  handle('browser:fastCardList', () => getRepository().list())
-  handle('browser:fastCardAdd', (payload) => getRepository().add(payload))
-  handle('browser:fastCardRemove', (payload) => getRepository().remove(payload))
-  handle('browser:fastCardClear', () => getRepository().clear())
+  // Literal channel names keep these handlers visible to the IPC contract gate.
+  ipcMain.handle('browser:fastCardList', receipt(() => getRepository().list()))
+  ipcMain.handle('browser:fastCardAdd', receipt((payload) => getRepository().add(payload)))
+  ipcMain.handle('browser:fastCardRemove', receipt((payload) => getRepository().remove(payload)))
+  ipcMain.handle('browser:fastCardClear', receipt(() => getRepository().clear()))
 
   ipcMain.handle(
     'browser:fastCardTranslateSelection',

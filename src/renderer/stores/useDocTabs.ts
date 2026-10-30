@@ -1,3 +1,4 @@
+import { createDocumentOperationSync } from '../modules/document/documentOperationSync'
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 import { getFilename } from '../utils/path'
@@ -901,3 +902,20 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
       }
     },
 }))
+
+// Install once with the store, including while the Document work surface is hidden.
+if (typeof window !== 'undefined' && typeof window.electronAPI?.document?.onOperationSync === 'function') {
+    const api = window.electronAPI.document
+    const sync = createDocumentOperationSync({
+        tabs: () => useDocTabs.getState().tabs.flatMap((tab) => tab.path ? [{ ...tab, path: tab.path }] : []),
+        replace: (tab) => {
+            const state = useDocTabs.getState()
+            if (tab.isDirty) state.updateTabContent(tab.id, tab.content)
+            else state.hydrateTabContentFromDisk(tab.id, tab.content)
+        },
+    })
+    api.onOperationSync(({ requestId, request }) => {
+        void sync(request).then((reply) => api.replyOperationSync(requestId, reply))
+    })
+    void api.registerOperationSync().catch((error) => console.error('[document-operation-sync] registration failed', error))
+}

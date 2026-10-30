@@ -181,8 +181,8 @@ export interface AgentState {
   compactCurrentSession: () => Promise<LifecycleResult>
   beginNewContext: (actionRef?: CodexBeginNewContextActionRef) => Promise<void>
   refreshCodexActionSurface: (scopeId: string) => Promise<void>
-  loadScopes: () => Promise<boolean>
-  loadScope: (scopeId: string) => Promise<void>
+  loadScopes: (targetScopeId?: string) => Promise<boolean>
+  loadScope: (scopeId: string) => Promise<boolean>
   setCurrentScope: (scopeId: string) => Promise<void>
   sendMessageToScope: (scopeId: string, content: string) => Promise<void>
   clearToolTrace: () => void

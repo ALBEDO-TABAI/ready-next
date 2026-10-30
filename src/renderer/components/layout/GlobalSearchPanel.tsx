@@ -1,3 +1,7 @@
+import { parseReadyUri, ReadyRefSchema } from '../../../shared/ready-ref'
+import { originalToSeconds } from '../../../main/modules/calendar-engine/calendar-row-codec'
+import { revealRSSReference } from '../../modules/rss/reveal-reference'
+import { openWebpageInBrowser } from '../../modules/browser/openWebpageInBrowser'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { FileText, Loader2, Database, RotateCw } from 'lucide-react'
 import { useWorkspace, computeDesiredRoots } from '../../stores/useWorkspace'
@@ -21,6 +25,35 @@ interface SearchResultItem {
   sourceType: string
   sourceMeta?: Record<string, unknown> | null
   draft?: { tabId: string }
+}
+
+/** Non-file search hits are navigation references, never document paths. */
+async function openIndexedSearchResult(item: Pick<SearchResultItem, 'path' | 'sourceType'>): Promise<void> {
+  const parsed = parseReadyUri(item.path)
+  if (!parsed.ok) throw new Error('搜索结果地址无效')
+  const ref = parsed.ref
+  if (item.sourceType === 'rss' && ref.kind === 'rss-item') {
+    const result = await window.electronAPI.rss.readArticle({ itemId: ref.id, length: 1 })
+    if (!result.success || !result.data) throw new Error(result.error || '文章无法打开')
+    revealRSSReference({ kind: 'article', read: { itemId: ref.id, expectedRevision: result.data.article.revision, offset: 0, length: 1 } })
+  } else if (item.sourceType === 'calendar' && ref.kind === 'event') {
+    let id = ref.id
+    if (ref.occurrence !== undefined) {
+      const original = /^-?\d+$/.test(ref.occurrence) ? Number(ref.occurrence) : ref.occurrence
+      if (typeof original === 'string') ReadyRefSchema.parse({ kind: 'day', date: original })
+      else if (!Number.isSafeInteger(original)) throw new Error('日程实例无效')
+      id = `${id}#${originalToSeconds(original)}`
+    }
+    const result = await window.electronAPI.calendar.revealEvent(id)
+    if (!result.success) throw new Error(result.error || '日程无法打开')
+    revealWorkbenchModeForSearchOpen('calendar')
+  } else if (item.sourceType === 'agent' && ref.kind === 'conversation') {
+    const { revealSearchConversation } = await import('../../stores/useAgent')
+    await revealSearchConversation(ref.id)
+    if (!useWorkspace.getState().chatPanelVisible) useWorkspace.getState().toggleChatPanel()
+  } else if (item.sourceType === 'bookmark' && ref.kind === 'web') {
+    if (!await openWebpageInBrowser(ref.url)) throw new Error('网页未能在 Ready 浏览器中打开')
+  } else throw new Error('搜索结果类型与地址不符')
 }
 
 const SOURCE_BADGE_LABEL: Record<string, string> = {
@@ -616,44 +649,20 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
       revealWorkbenchModeForSearchOpen('document')
       return
     }
-    // Route by source_type. Filesystem documents flow through the normal
-    // selectFile/workbench path. URL-backed sources (bookmark/rss) use
-    // openExternal when available; calendar/agent keep the renderer in the
-    // current mode and reveal the snippet — deep-linking comes in Step 6.
-    switch (item.sourceType) {
-      case 'bookmark':
-      case 'rss': {
-        const url = item.sourceType === 'bookmark'
-          ? item.path
-          : typeof item.sourceMeta?.link === 'string'
-            ? (item.sourceMeta.link as string)
-            : ''
-        if (url) {
-          // main/index.ts setWindowOpenHandler redirects window.open to
-          // shell.openExternal, so this opens in the system browser.
-          window.open(url, '_blank')
-        }
-        return
-      }
-      case 'calendar':
-        void window.electronAPI?.calendar.revealEvent(item.path.replace(/^calendar:\/\//, '')).then(result=>{if(result.success)revealWorkbenchModeForSearchOpen('calendar');else setMessage(result.error||'日程无法打开')}).catch(error=>setMessage(String(error)))
-        return
-      case 'agent':
-        revealWorkbenchModeForSearchOpen('document')
-        return
-      case 'document':
-      default:
-        if (isLocalHtmlFilePath(item.path)) {
-          selectFile(item.path)
-          void openLocalHtmlFileInBrowser(item.path, item.name).then((opened) => {
-            if (opened) revealWorkbenchModeForSearchOpen('browser')
-          })
-          return
-        }
-        openTab(item.path)
-        selectFile(item.path)
-        revealWorkbenchModeForSearchOpen(modeForPath(item.path))
+    if (item.sourceType !== 'document' || item.path.startsWith('ready://')) {
+      void openIndexedSearchResult(item).catch(error => setMessage(error instanceof Error ? error.message : String(error)))
+      return
     }
+    if (isLocalHtmlFilePath(item.path)) {
+      selectFile(item.path)
+      void openLocalHtmlFileInBrowser(item.path, item.name).then((opened) => {
+        if (opened) revealWorkbenchModeForSearchOpen('browser')
+      })
+      return
+    }
+    openTab(item.path)
+    selectFile(item.path)
+    revealWorkbenchModeForSearchOpen(modeForPath(item.path))
   }, [openTab, selectFile, setActiveTab])
 
   // Overlay unsaved (path-less or dirty) drafts from useDocTabs. Indexed search
@@ -873,8 +882,8 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
             {mergedResults.length > 0 && (
               <div className="space-y-[6px] pb-[2px]">
                 {mergedResults.map((item) => (
+                  <div key={item.path}>
                   <button
-                    key={`${item.path}`}
                     onClick={() => openResult(item)}
                     className="w-full rounded-[8px] border px-[8px] py-[6px] text-left transition-colors hover:bg-[var(--bg-hover)]"
                     style={{ borderColor: PANEL_COLORS.cardBorder, background: 'transparent' }}
@@ -932,6 +941,13 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
                       </div>
                     )}
                   </button>
+                  {item.sourceType === 'rss' && typeof item.sourceMeta?.link === 'string' && (
+                    <button type="button" className="text-[10px] underline" onClick={() => {
+                      const url = ReadyRefSchema.safeParse({ kind: 'web', url: item.sourceMeta?.link })
+                      if (url.success && url.data.kind === 'web') window.open(url.data.url, '_blank', 'noopener,noreferrer')
+                    }}>打开原文</button>
+                  )}
+                  </div>
                 ))}
               </div>
             )}
