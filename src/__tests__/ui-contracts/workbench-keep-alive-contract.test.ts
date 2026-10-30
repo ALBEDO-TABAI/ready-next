@@ -2,8 +2,15 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
+import { createRequire } from 'node:module'
+import { act, createElement } from 'react'
+import { createRoot } from 'react-dom/client'
+import { JSDOM } from 'jsdom'
+import { buildSync } from 'esbuild'
+import type { CalendarNavigationRequest } from '../../shared/calendar/desktop'
 
 function readWorkspaceFile(path: string): string {
+  // allow-source-grep: Preserve existing shell, RSS and document guards; calendar activity is exercised below.
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
@@ -96,9 +103,8 @@ test('workbench shell hides all browser hosts on unmount (show/hide during mode 
   )
 })
 
-test('rss and calendar modes gate heavyweight work behind foreground activity when kept alive', () => {
+test('rss and calendar modes gate heavyweight work behind foreground activity when kept alive', async () => {
   const rssMode = readWorkspaceFile('src/renderer/pages/modes/RSSMode.tsx')
-  const calendarMode = readWorkspaceFile('src/renderer/pages/modes/CalendarMode.tsx')
   const documentMode = readWorkspaceFile('src/renderer/pages/modes/DocumentMode.tsx')
   const previewBrowser = readWorkspaceFile('src/renderer/components/rss/PreviewBrowser.tsx')
 
@@ -110,15 +116,107 @@ test('rss and calendar modes gate heavyweight work behind foreground activity wh
   assert.match(rssMode, /if \(isSuspended\) return[\s\S]*pendingAutoRefreshSnapshotRef\.current = null[\s\S]*loadRSSData\(\{ background: true \}\)/)
   assert.match(rssMode, /useRSSWorkspace\(isActive && !isSuspended\)/)
 
-  assert.match(calendarMode, /interface CalendarModeProps \{[\s\S]*isActive\?: boolean[\s\S]*isMotionSettled\?: boolean[\s\S]*\}/)
-  assert.match(calendarMode, /export default function CalendarMode\(\{[\s\S]*isActive = true,[\s\S]*isMotionSettled = true,[\s\S]*\}: CalendarModeProps\)/)
-  assert.match(calendarMode, /const \[hasActivated, setHasActivated\] = useState\(/)
-  assert.match(calendarMode, /if \(!hasActivated\) return/)
-
   assert.match(documentMode, /interface DocumentModeProps \{[\s\S]*isActive\?: boolean[\s\S]*isMotionSettled\?: boolean[\s\S]*\}/)
   assert.match(documentMode, /export default function DocumentMode\(\{[\s\S]*isActive = true,[\s\S]*isMotionSettled = true,[\s\S]*\}: DocumentModeProps\)/)
   assert.match(documentMode, /shouldHandleSelectedDocument\(\{[\s\S]*isActive,[\s\S]*selectedFile,/)
   assert.doesNotMatch(documentMode, /const \[hasActivated, setHasActivated\] = useState\(isActive\)/)
   assert.match(previewBrowser, /export default function PreviewBrowser\(\{ item, onClose, isActive = true \}:/)
   assert.match(previewBrowser, /if \(!isActive\) \{[\s\S]*previewClose/)
+
+  const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost' })
+  Object.assign(dom.window, { matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }) })
+  const replacements = {
+    window: dom.window, document: dom.window.document, navigator: dom.window.navigator,
+    localStorage: dom.window.localStorage, clearInterval: (id: number) => dom.window.clearInterval(id),
+    ResizeObserver: class { observe() {} disconnect() {} }, IS_REACT_ACT_ENVIRONMENT: true,
+  }
+  const previous = Object.fromEntries(Object.keys(replacements).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]))
+  for (const [key, value] of Object.entries(replacements)) Object.defineProperty(globalThis, key, { value, configurable: true, writable: true })
+  const root = createRoot(dom.window.document.getElementById('root')!)
+  const counts = { snapshots: 0, login: 0, navigation: 0, subscriptions: 0, timers: 0 }
+  const changes = new Set<() => void>()
+  let listeners = 0
+  const subscribe = () => { counts.subscriptions++; listeners++; return () => { listeners-- } }
+  const timers = new Set<number>()
+  const setInterval = dom.window.setInterval.bind(dom.window), clearInterval = dom.window.clearInterval.bind(dom.window)
+  dom.window.setInterval = (handler, timeout) => {
+    counts.timers++
+    const id = setInterval(handler, timeout); timers.add(id); return id
+  }
+  dom.window.clearInterval = id => { timers.delete(id); clearInterval(id) }
+  let navigation: CalendarNavigationRequest | null = null
+  const acknowledged: string[] = []
+  let finishLoading!: () => void
+  const loading = new Promise<void>(resolve => { finishLoading = resolve })
+  try {
+    Object.assign(dom.window, { electronAPI: { calendar: {
+      snapshot: async () => { counts.snapshots++; await loading; return { success: true, data: { calendars: [], events: [] } } },
+      getLoginItem: async () => { counts.login++; return { success: true, data: false } },
+      onChanged: (handler: () => void) => { const off = subscribe(); changes.add(handler); return () => { off(); changes.delete(handler) } },
+      peekNavigation: async () => { counts.navigation++; return { success: true, data: navigation } },
+      ackNavigation: async (id: string) => { acknowledged.push(id); navigation = null; return { success: true } },
+      onNavigation: subscribe, onRemoteEventSuggested: subscribe, onReminderFired: subscribe,
+    } } })
+    // Exercise the real mode, workbench and store; replace only browser/native boundaries.
+    const compiled = buildSync({
+      entryPoints: ['src/renderer/pages/modes/CalendarMode.tsx'], bundle: true, write: false,
+      platform: 'browser', format: 'cjs', jsx: 'automatic', tsconfig: 'tsconfig.web.json',
+      loader: { '.css': 'empty' }, external: ['react', 'react-dom', 'react-dom/client', 'react/jsx-runtime'],
+    }).outputFiles[0].text
+    const loaded = { exports: {} as { default: typeof import('../../renderer/pages/modes/CalendarMode').default } }
+    new Function('require', 'module', 'exports', compiled)(createRequire(import.meta.url), loaded, loaded.exports)
+    const render = (isActive: boolean, isMotionSettled = true) => act(async () => {
+      root.render(createElement(loaded.exports.default, { isActive, isMotionSettled }))
+    })
+    await render(false)
+    await render(true, false)
+    assert.deepEqual(counts, { snapshots: 0, login: 0, navigation: 0, subscriptions: 0, timers: 0 })
+    await render(true)
+    assert.equal(counts.snapshots, 1)
+    assert.equal(counts.login, 1)
+    assert.equal(changes.size, 1)
+    assert.equal(counts.subscriptions, 1)
+    assert.equal(timers.size, 1)
+    await render(false)
+    assert.equal(timers.size, 0, 'background mode must stop its clock')
+    await render(true)
+    assert.equal(counts.snapshots, 1, 'switching while loading must not restart initialization')
+    await act(async () => finishLoading())
+    const calendar = dom.window.document.querySelector('.app')
+    assert.ok(calendar, 'the real calendar must finish loading')
+    assert.equal(listeners, 4)
+    assert.equal(counts.snapshots, 1, 'empty navigation must not read another snapshot')
+    const initialized = { ...counts }
+    await render(false)
+    assert.equal(timers.size, 0)
+    assert.deepEqual(counts, initialized, 'moving to background must not start work')
+    await render(true)
+    assert.equal(counts.snapshots, 1, 'returning to unchanged data must not initialize again')
+    assert.equal(counts.login, 1)
+    assert.equal(dom.window.document.querySelector('.app'), calendar, 'switching must preserve the calendar')
+    assert.equal(timers.size, 1, 'only one clock may be running')
+    await render(false)
+    await act(async () => { changes.forEach(handler => handler()); changes.forEach(handler => handler()) })
+    assert.equal(counts.snapshots, 1, 'background changes must defer reading')
+    await render(true)
+    assert.equal(counts.snapshots, 2, 'foreground must read back accumulated background changes once')
+    await act(async () => { changes.forEach(handler => handler()) })
+    assert.equal(counts.snapshots, 3, 'foreground changes must still refresh the calendar')
+    await render(false)
+    navigation = { id: 'pending-day', target: { kind: 'day', date: '2099-06-15' } }
+    await render(true)
+    assert.equal(counts.snapshots, 4, 'a real pending navigation must still load current data')
+    assert.deepEqual(acknowledged, ['pending-day'])
+    assert.equal(calendar.querySelector('.topbar-title .yr')?.textContent, '2099')
+  } finally {
+    finishLoading()
+    await act(async () => root.unmount())
+    dom.window.close()
+    for (const [key, descriptor] of Object.entries(previous)) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor)
+      else Reflect.deleteProperty(globalThis, key)
+    }
+  }
+  assert.equal(listeners, 0, 'unmount must release every subscription')
+  assert.equal(timers.size, 0, 'unmount must stop the clock')
 })

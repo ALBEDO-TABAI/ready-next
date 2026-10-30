@@ -20,7 +20,8 @@ export function ReadyCalendarActions({active}:{active:boolean}) {
     const consume=async()=>{
       if(consuming.current)return;consuming.current=true
       try{
-        await reload();const request=await unwrap(api().peekNavigation());if(!request)return
+        const request=await unwrap(api().peekNavigation());if(!request)return
+        await reload()
         const target=request.target
         if(target.kind==='day')goToDay(parseIsoDate(target.date))
         else if(target.kind==='event'){

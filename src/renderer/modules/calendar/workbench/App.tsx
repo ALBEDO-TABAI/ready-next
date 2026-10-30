@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useStore, isDark, getState, setState, init, reload, toast } from './store'
 import { handleKey } from './commands'
 import { api, unwrap } from './platform'
@@ -19,6 +19,8 @@ import './styles/app.css'
 
 export function App({active=true}:{active?:boolean}) {
   const root=useRef<HTMLDivElement>(null)
+  const [hasActivated,setHasActivated]=useState(false)
+  const activity=useRef({active:false,dirty:false})
   const s=useStore(x=>({ready:x.ready,dark:isDark(x),view:x.prefs.gridView,sidebar:x.prefs.sidebar,panel:x.prefs.contextPanel,overlay:x.overlay,error:x.error,busy:x.busy}))
   const theme=useTheme(x=>x.theme),dark=useTheme(x=>x.resolvedTheme==='dark')
   useEffect(()=>setState(x=>({systemDark:dark,prefs:{...x.prefs,interfaceTheme:theme}})),[theme,dark])
@@ -34,13 +36,22 @@ export function App({active=true}:{active?:boolean}) {
     return()=>observer.disconnect()
   },[s.ready])
   useEffect(()=>{
+    const current=activity.current
+    current.active=active
     if(!active)return
-    void init()
-    const off=api().onChanged(()=>{void reload()})
-    void unwrap(api().getLoginItem()).then(value=>setState(x=>({prefs:{...x.prefs,openAtLogin:value}}))).catch(error=>toast(String(error)))
+    setHasActivated(true)
+    if(current.dirty){current.dirty=false;void reload()}
     const timer=window.setInterval(()=>{const now=Date.now();setState({now,today:dayOf(now,getState().prefs.primaryTimeZone)})},15000)
-    return()=>{off();clearInterval(timer)}
+    return()=>{current.active=false;clearInterval(timer)}
   },[active])
+  useEffect(()=>{
+    if(!hasActivated)return
+    // Keep a passive invalidation listener so background changes refresh only on return.
+    const off=api().onChanged(()=>{if(activity.current.active)void reload();else activity.current.dirty=true})
+    void init()
+    void unwrap(api().getLoginItem()).then(value=>setState(x=>({prefs:{...x.prefs,openAtLogin:value}}))).catch(error=>toast(String(error)))
+    return off
+  },[hasActivated])
   useEffect(()=>{if(active&&!s.overlay&&document.activeElement===document.body)root.current?.focus({preventScroll:true})},[active,s.overlay])
   const onKeyDown=(event:React.KeyboardEvent)=>{
     if(!active)return
