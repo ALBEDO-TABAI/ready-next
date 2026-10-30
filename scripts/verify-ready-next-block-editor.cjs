@@ -19,22 +19,28 @@ async function main() {
   const env = { ...process.env, READY_USER_DATA_DIR: profile }
   delete env.ELECTRON_RUN_AS_NODE
   delete env.READY_START_HIDDEN
-  const app = await _electron.launch({ executablePath: require('electron'), args: [process.cwd()], env, timeout: 45000 })
+  const launch = async () => {
+    const launched = await _electron.launch({ executablePath: require('electron'), args: [process.cwd()], env, timeout: 45000 })
+    let window
+    const deadline = Date.now() + 45000
+    while (!window && Date.now() < deadline) {
+      window = launched.windows().find(candidate => candidate.url().includes('/renderer/index.html'))
+      if (!window) await new Promise(resolve => setTimeout(resolve, 100))
+    }
+    assert.ok(window, 'Ready Next renderer must open')
+    return { launched, window }
+  }
+  let { launched: app, window: page } = await launch()
   const mod = process.platform === 'darwin' ? 'Meta' : 'Control'
   try {
-    let page
-    const deadline = Date.now() + 45000
-    while (!page && Date.now() < deadline) {
-      page = app.windows().find(candidate => candidate.url().includes('/renderer/index.html'))
-      if (!page) await new Promise(resolve => setTimeout(resolve, 100))
-    }
-    assert.ok(page, 'Ready Next renderer must open')
     await page.evaluate(async root => {
       await window.electronAPI.vault.set(root)
       localStorage.setItem('ready-workspace-root', root)
       localStorage.setItem('ready-pinned-folders', JSON.stringify([root]))
     }, vault)
-    await page.reload()
+    // Start again on the same profile instead of reloading; a reload could stall under Playwright.
+    await app.close()
+    ;({ launched: app, window: page } = await launch())
     const enterDeadline = Date.now() + 30000
     while (!await page.getByTestId('draft-controls').isVisible()) {
       assert.ok(Date.now() < enterDeadline, 'Document mode must become visible')
@@ -43,6 +49,9 @@ async function main() {
       })))
       await page.waitForTimeout(150)
     }
+    // The sidebar opens in the 页面 view; this flow opens the fixture from the file tree.
+    const filesView = page.getByRole('group', { name: '侧栏视角' }).getByRole('button', { name: '文件', exact: true })
+    if (await filesView.isVisible().catch(() => false) && await filesView.getAttribute('aria-pressed') !== 'true') await filesView.click()
     const row = page.getByText(path.basename(file), { exact: true }).first()
     if (!await row.isVisible()) await page.getByText(path.basename(vault), { exact: true }).first().click()
     await row.click()
