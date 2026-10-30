@@ -201,6 +201,11 @@
 
 ## 7. 文档与 Widget
 
+- Ready Next M3：资料库内的 Markdown 页面在页面视角、正文预览模式中显示 `PageHeader`；文件视角、源码模式、书本阅读及资料库外文件不显示。页面头部修改前通过现有保存入口保存未保存正文；失败不继续改属性。页面属性变化订阅页面服务通知，标签位置仍由对象服务的完成通知更新。
+- `PageDocumentEditor` 只组合页面头部和现有 `MarkdownEditor`。后者保留加载与保存职责，页面预览交给 `ReadyBlockEditor`，源码使用原 textarea；两边复用 T4 的 `TabBuffer` 与统一历史，不创建第二份正文或撤销栈。新建、页面侧栏、文件打开和 `openReadyRef` 均由现有标签对象绑定去重。
+- 草稿与未保存正文由 Main 草稿服务确认；关闭标签不丢弃。草稿“保存到…”、未命名标签拖入目录、页面移动/恢复均使用 `SaveToPicker`。拖拽只预选位置，确认并完成文件回读后才通知调用方保存成功；取消保留草稿。T3b 的简化文件夹对话框及拖拽自行挑文件名的路径已删除。画板文档卡选项在消费者完成前不由文档接线开放。
+- 文档书本模式与书房保持独立：前者只读当前文本/DOCX 编辑缓冲，按文档块、源码行和块内进度定位，Widget 为静态投影；后者读取导入书籍，以章节、书内位置、目录和标注组织阅读。文档书本模式不另存书籍正文，书房不接管普通文档缓冲；不新增重复入口或通用分页框架。M3 综合检查为 `npm run verify:ready-next-m3 -- --cli`，真实窗口流程为构建后 `npm run verify:ready-next-m3`。
+
 - ready-next C3 / D4：外部文档修改统一经 Main `applyDocumentOperation({ path, expectedVersion?, operation, origin })`，同一真实路径串行；版本为全文 SHA-256。共享 `document-operations` 负责 frontmatter 字段修改、标题下追加和精确区间替换，未修改字节保持原样。未打开与 clean 文档须原子发布、回读、索引确认；dirty 文档只在原缓冲上应用操作并保持 dirty，不写盘、不发布落盘证据。回执区分 `not_open / synced_clean / merged_dirty`，后者的版本是缓冲版本。
 - 写入同步采用有请求身份、截止时间与内容快照的 prepare / commit / rollback / release 确认；保存队列与外部同步共用路径锁，迟到请求、关闭或变更的标签页不得覆盖新内容。失败码为 `version_conflict / dirty_conflict / operation_failed / write_failed / readback_mismatch`；发布失败恢复磁盘、索引和参与方，回滚冲突明确失败并保留外部新内容。行为合同由 `document-operations.test.ts`、`document-write-service-native.test.ts` 验证。
 

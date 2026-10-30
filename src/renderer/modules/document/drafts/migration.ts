@@ -10,7 +10,7 @@ export async function contentHash(content: string): Promise<string> {
   return Array.from(new Uint8Array(bytes), byte => byte.toString(16).padStart(2, '0')).join('')
 }
 export function unwrap<T>(result: DraftResult<T>): T {
-  if (!result.ok) throw new Error(result.message)
+  if (!result.ok) throw Object.assign(new Error(result.message), { code: result.code })
   return result.value
 }
 const metadataSchema = z.object({

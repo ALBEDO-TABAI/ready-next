@@ -1,5 +1,5 @@
 import { DraftBootNotice, DraftControls } from '../../modules/document/drafts/DraftControls'
-import { initializeDrafts, reportDraftError, useDraftUI } from '../../modules/document/drafts/runtime'
+import { initializeDrafts, reportDraftError, useDraftUI, watchDraftVault } from '../../modules/document/drafts/runtime'
 import { readingPositionKey } from '../../stores/objectPresentationState'
 import { registerReturnPosition } from '../../modules/workbench/reference-return'
 import { LibraryTab, OpenEpubInLibrary } from '../../modules/library/navigation'
@@ -19,7 +19,7 @@ import {
   type DocTab,
   type DocumentPaneTarget,
 } from '../../stores/useDocTabs'
-import MarkdownEditor from '../../components/document/MarkdownEditor'
+import { PageDocumentEditor } from '../../modules/document/page-ui/PageDocumentEditor'
 import DocumentVerticalTabRail from '../../components/document/DocumentVerticalTabRail'
 import FilePreview from '../../components/document/FilePreview'
 import DraggableModeSwitch from '../../components/document/DraggableModeSwitch'
@@ -157,7 +157,7 @@ function SplitResizeHandle({
 }
 
 // --- Tab content router ---
-type DocumentEditorProps = RetainedDocumentEditorProps<DocTab>
+type DocumentEditorProps = RetainedDocumentEditorProps<DocTab> & { bookReading: boolean }
 
 const DocumentEditor = memo(function DocumentEditor({
   tab,
@@ -167,6 +167,8 @@ const DocumentEditor = memo(function DocumentEditor({
   onVisibleLineChange,
   onActivate,
   isFocused,
+  isSceneVisible,
+  bookReading,
 }: DocumentEditorProps) {
   const ext = useMemo(() => (tab.path ? getFileExtension(tab.path) : ''), [tab.path])
   const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico'].includes(ext)
@@ -201,7 +203,9 @@ const DocumentEditor = memo(function DocumentEditor({
 
   // Markdown / text / docx / default
   return (
-    <MarkdownEditor
+    <PageDocumentEditor
+      bookReading={bookReading}
+      isSceneVisible={isSceneVisible}
       tab={tab}
       viewMode={viewMode}
       previewEditable={previewEditable}
@@ -210,7 +214,7 @@ const DocumentEditor = memo(function DocumentEditor({
       onActivate={onActivate}
     />
   )
-}, areRetainedDocumentEditorPropsEqual)
+}, (previous, next) => previous.bookReading === next.bookReading && areRetainedDocumentEditorPropsEqual(previous, next))
 
 // --- DocumentMode main component ---
 interface DocumentModeProps {
@@ -244,7 +248,7 @@ export default function DocumentMode({
   } = useDocTabs.getState()
 
   const draftBoot = useDraftUI(state => state.boot)
-  useEffect(() => { void initializeDrafts().catch(reportDraftError) }, [])
+  useEffect(() => { void initializeDrafts().catch(reportDraftError); return watchDraftVault() }, [])
 
   const documentRootRef = useRef<HTMLDivElement>(null)
   // Scroll restoration depends on the root being mounted; after a restart it can mount after the first restore ran.
@@ -406,6 +410,8 @@ export default function DocumentMode({
   }, [activeTab, focusedPaneTabId, splitTab])
   const panelTargetLine = panelTargetTab ? visibleLineByTabId[panelTargetTab.id] ?? null : null
   const bookReadingEligible = panelTargetTab && panelTargetTab.kind !== 'library' ? isBookReadablePath(panelTargetTab.path) : false
+  // Document book mode reads the current buffer; the library owns imported books,
+  // chapter pagination and annotations. Neither opens an editor for the other.
   const bookReadingVisible = isBookReadingSessionVisible(
     bookReadingActive,
     bookReadingTabId,
@@ -1067,6 +1073,7 @@ export default function DocumentMode({
                   {renderActiveEditor && (
                     <DocumentEditor
                       key={renderedActiveTab.id}
+                      bookReading={bookReadingVisible}
                       tab={renderedActiveTab}
                       viewMode={editorMode}
                       previewEditable={editorMode === 'preview'}
@@ -1093,6 +1100,7 @@ export default function DocumentMode({
                   {renderSplitEditor && (
                     <DocumentEditor
                       key={renderedSplitTab.id}
+                      bookReading={bookReadingVisible}
                       tab={renderedSplitTab}
                       viewMode={editorMode}
                       previewEditable={editorMode === 'preview'}
@@ -1113,6 +1121,7 @@ export default function DocumentMode({
               >
                 <DocumentEditor
                   key={renderedActiveTab.id}
+                  bookReading={bookReadingVisible}
                   tab={renderedActiveTab}
                   viewMode={editorMode}
                   previewEditable={editorMode === 'preview'}

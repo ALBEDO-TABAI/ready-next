@@ -953,7 +953,8 @@ export default function FileTree({
       showMoveNotice(`已保存「${result.fileName}」到 ${dirName}`)
       return
     }
-    if (result.reason !== 'not-untitled') {
+    // Cancelling the location picker keeps the draft; only real failures are reported.
+    if (result.reason !== 'not-untitled' && result.reason !== 'cancelled') {
       showMoveNotice(`保存到 ${dirName} 失败：${result.error || '未知错误'}`)
     }
   }, [showMoveNotice])
