@@ -1,3 +1,4 @@
+import { configureDocumentWriteService } from '../main/modules/document-engine/document-write-service'
 import { ChatStore } from '../main/modules/database/chat-store'
 import { executeFileManagementTool } from '../main/modules/tools/file-management-tools'
 import { readDocumentEditableText, writeDocumentEditableText } from '../main/modules/document-engine/document-editable-text'
@@ -92,9 +93,10 @@ test('C2 page hides ready_id while source reading and saving retain it', async t
     const read = await readDocumentEditableText(path)
     assert.equal(read.success, true); assert.equal(read.content, source)
     assert.doesNotMatch(JSON.stringify(buildStructuredNotePreview(read.content)), /portable-note|ready_id/)
+    configureDocumentWriteService({ index: async path => { const result = await f.engine.indexDocument(f.root,path); assert.ok(result.ok,result.error) } })
     const written = read.content.replace('Body', 'Edited body')
     assert.equal((await writeDocumentEditableText(path, written)).success, true)
     assert.equal(readFileSync(path, 'utf8'), written)
     assert.match(written, /ready_id: portable-note/)
-  } finally { f.close() }
+  } finally { configureDocumentWriteService(null); f.close() }
 })

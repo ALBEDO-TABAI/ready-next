@@ -9,6 +9,7 @@ import {
   isDocumentTextReadTooLarge,
 } from './attachment-size-guards'
 import { publishFileAtomically } from './atomic-file-publish'
+import { saveUserDocument, getDocumentWriteDependencies, type DocumentWriteReceipt } from './document-write-service'
 import { getDocumentWorker } from './document-worker-bridge'
 
 const TEXT_WRITE_BLOCKED_EXTENSIONS = new Set([
@@ -20,6 +21,7 @@ type PublishEditableText = (targetPath: string, data: string | Uint8Array) => Pr
 
 interface DocumentEditableTextWriteOptions {
   publish?: PublishEditableText
+  expectedVersion?: string
 }
 
 const documentWriteTails = new Map<string, Promise<void>>()
@@ -87,7 +89,7 @@ export async function writeDocumentEditableText(
   filePath: string,
   content: string,
   options: DocumentEditableTextWriteOptions = {},
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; receipt?: DocumentWriteReceipt }> {
   return runSerializedDocumentWrite(filePath, async () => {
     try {
       const extension = extname(filePath).toLowerCase()
@@ -98,8 +100,11 @@ export async function writeDocumentEditableText(
           error: `无法直接以纯文本保存到 ${extension || 'binary'} 文件。请另存为 .md/.txt，避免损坏原文件。`,
         }
       }
-      await (options.publish ?? publishFileAtomically)(filePath, content)
-      return { success: true }
+      const dependencies = getDocumentWriteDependencies()
+      if (!dependencies) throw new Error('Document write service is not initialized')
+      const receipt = await saveUserDocument({ path: filePath, content, expectedVersion: options.expectedVersion },
+        { ...dependencies, publish: options.publish ?? publishFileAtomically })
+      return { success: true, receipt }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
     }

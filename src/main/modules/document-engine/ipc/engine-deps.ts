@@ -143,7 +143,7 @@ export interface EngineDeps {
    * guards. Lifted to a dep so the group never imports the docx/text
    * write helpers directly.
    */
-  writeDocumentEditableText(filePath: string, content: string): Promise<{ success: boolean; error?: string }>
+  writeDocumentEditableText(filePath: string, content: string, options?: { expectedVersion?: string }): Promise<{ success: boolean; error?: string }>
   /**
    * Host-owned save dialog flow (window resolution + size guards + actual
    * write). Returns the structured result `document:saveAs` forwards
