@@ -22,7 +22,10 @@ INSERT INTO calendar_sources(id,name) VALUES ('local','Local');`
 const sample = (id: string): CalEvent => ({ id, uid: `${id}@test`, calendarId: 'local', title: 'Native', start: Date.parse('2026-10-28T09:00:00Z'), end: Date.parse('2026-10-28T10:00:00Z'), allDay: false, timeZone: 'UTC', status: 'confirmed', transparency: 'opaque', createdAt: Date.now(), updatedAt: Date.now() })
 function database(t: Parameters<typeof skipIfSqliteUnavailable>[0]) {
   if (skipIfSqliteUnavailable(t, 'Calendar union')) return null
-  const db = new Database(':memory:'); db.exec(legacySchema)
+  const db = new Database(':memory:'); runMigrations(db)
+  // Retain the real relation/draft schemas while testing the original calendar migration input.
+  db.exec('DROP TABLE calendar_event_overrides; DROP TABLE calendar_events; DROP TABLE calendar_sources; DROP TABLE settings;')
+  db.exec(legacySchema)
   t.after(() => db.close()); return db
 }
 test('migration preserves IDs and normalizes legacy all-day dates without current-timezone drift', t => {

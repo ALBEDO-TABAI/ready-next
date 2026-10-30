@@ -2443,6 +2443,8 @@ interface ElectronCalendarAPI {
   peekNavigation(): Promise<CalendarResponse<import('../../shared/calendar/desktop').CalendarNavigationRequest | null>>
   ackNavigation(id: string): Promise<CalendarResponse<void>>
   onNavigation(handler: () => void): () => void
+  createMeetingNote(input: import('../../shared/calendar/event-links').MeetingNoteInput): Promise<CalendarResponse<import('../../shared/calendar/event-links').MeetingNoteReceipt>>
+  pendingMeetingNote(key: string): Promise<CalendarResponse<import('../../shared/document-drafts').DraftFinalizeInput | null>>
   snapshot(): Promise<CalendarResponse<import('../../shared/calendar/commands').CalendarSnapshot>>
   mutate(command: import('../../shared/calendar/commands').CalendarCommand, versions: Record<string, number>): Promise<CalendarResponse<import('../../shared/calendar/commands').CalendarMutationReceipt>>
   restore(delta: import('../../shared/calendar/commands').CalendarDelta, versions: Record<string, number>): Promise<CalendarResponse<import('../../shared/calendar/commands').CalendarMutationReceipt>>

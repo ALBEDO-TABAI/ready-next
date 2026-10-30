@@ -1,3 +1,7 @@
+import { readCalendarLinks, replaceCalendarLinks } from '../calendar-engine/event-links'
+import { rebuildCalendarLinks } from '../search-engine/calendar-link-adapter'
+import { CalendarEventLinkSchema, calendarLinkSource } from '../../../shared/calendar/event-links'
+import { toReadyUri } from '../../../shared/ready-ref'
 import { createHash } from 'node:crypto'
 import type { DatabaseConnection } from './connection'
 import { SettingsStore } from './settings-store'
@@ -41,7 +45,7 @@ export class CalendarStore {
       const occurrenceRow = {...base, ...(parent.allDay ? {start_date:start,end_date:isoDate(Number(override.occurrence_start)/86400+duration)} : {start_time:start,end_time:Number(start)+duration}), ...patch, id:override.id,recurrence_rule:null,created_at:override.created_at,updated_at:override.updated_at,revision:parent.revision}
       events.push({...decodeCalendarRow(occurrenceRow),uid:parent.uid,rrule:undefined,exdates:undefined,rdates:undefined,recurringEventId:parent.id,originalStart})
     }
-    return {calendars,events,prefs}
+    return {calendars,events,prefs,links:readCalendarLinks(this.db)}
   }
 
   private pendingChange = false
@@ -62,9 +66,16 @@ export class CalendarStore {
     if(cal.readOnly)throw new Error('订阅日历为只读，请复制到本地日历后修改')
   }
   mutate(command:CalendarCommand, expected:Record<string,number>):CalendarMutationReceipt {
-    return this.commit(planCalendarMutation(this.snapshot(),command),expected)
+    return this.transaction(()=>this.commit(planCalendarMutation(this.snapshot(),command),expected))
   }
   restore(delta:CalendarDelta,expected:Record<string,number>):CalendarMutationReceipt { return this.commit(delta,expected) }
+  linkMeetingNote(key:string,ref:Extract<import('../../../shared/ready-ref').ReadyRef,{kind:'page'}>,expected:Record<string,number>,persist:(receipt:import('../../../shared/calendar/event-links').MeetingNoteReceipt)=>void) {
+    return this.transaction(()=>{
+      const mutation=this.mutate({type:'link',key,target:ref,purpose:'meeting-note'},expected)
+      const receipt={ref,mutation};persist(receipt);return receipt
+    })
+  }
+
 
   private commit(delta:CalendarDelta,expected:Record<string,number>, importedSource?:string):CalendarMutationReceipt {return this.transaction(()=>this.commitInside(delta,expected,importedSource))}
   private commitInside(delta:CalendarDelta,expected:Record<string,number>, importedSource?:string):CalendarMutationReceipt {
@@ -74,6 +85,7 @@ export class CalendarStore {
     const targets=new Set([...put.map(e=>e.id),...remove])
     for(const e of put)if(e.recurringEventId)targets.add(e.recurringEventId)
     for(const id of remove){const e=old.get(id);if(e?.recurringEventId)targets.add(e.recurringEventId)}
+    for(const replacement of delta.links || []) targets.add(replacement.eventId)
     for(const id of targets){
       const current=old.get(id)
       if(current && expected[id]!==current.revision)throw new Error('日程版本已变化，请刷新后重试')
@@ -88,8 +100,27 @@ export class CalendarStore {
       if(e.recurringEventId && !future.has(e.recurringEventId))throw new Error('重复日程缺少母事件')
       if(e.recurringEventId&&typeof e.originalStart!==(future.get(e.recurringEventId)!.allDay?'string':'number'))throw new Error('重复实例的原日期类型与母事件不一致')
     }
+    const replacements = (delta.links || []).map(replacement => ({eventId:replacement.eventId,links:replacement.links.map(link=>CalendarEventLinkSchema.parse(link))}))
+    for (const eventId of targets) if (!replacements.some(item=>item.eventId===eventId)) {
+      const existing = (before.links || []).filter(link=>link.eventId===eventId), parent = future.get(eventId)
+      const retained = existing.filter(link=>parent && (link.originalStart===undefined ||
+        (typeof link.originalStart===(parent.allDay?'string':'number') && findCalendarOccurrence([...future.values()],`${eventId}|${link.originalStart}`))))
+      if (retained.length!==existing.length) replacements.push({eventId,links:retained})
+    }
+    if (new Set(replacements.map(r=>r.eventId)).size !== replacements.length) throw new Error('重复的关联修改')
+    for (const replacement of replacements) for (const link of replacement.links) {
+      const parent = future.get(replacement.eventId)
+      if (!parent || parent.recurringEventId || link.eventId !== replacement.eventId) throw new Error('关联缺少正确的母事件')
+      if (link.originalStart !== undefined) {
+        if (typeof link.originalStart !== (parent.allDay?'string':'number') || (typeof link.originalStart === 'number' && link.originalStart % 1000 !== 0)) throw new Error('实例时间类型或单位无效')
+        if (!findCalendarOccurrence([...future.values()],`${parent.id}|${link.originalStart}`)) throw new Error('关联实例不存在')
+      }
+      this.writable(parent.calendarId,before.calendars)
+    }
     const undo:CalendarDelta={put:[...targets].map(id=>old.get(id)).filter((e):e is CalEvent=>!!e),remove:put.filter(e=>!old.has(e.id)).map(e=>e.id)}
+    undo.links = [...targets].filter(id => !old.get(id)?.recurringEventId).map(eventId => ({eventId,links:(before.links || []).filter(link=>link.eventId===eventId)}))
     this.transaction(()=>{
+      for(const id of remove) this.db.prepare('DELETE FROM calendar_event_links WHERE event_id=?').run(id)
       for(const id of remove){this.db.prepare('DELETE FROM calendar_event_overrides WHERE id=?').run(id);this.db.prepare('DELETE FROM calendar_event_overrides WHERE parent_event_id=?').run(id);this.db.prepare('DELETE FROM calendar_events WHERE id=?').run(id)}
       for(const event of put.filter(e=>e.recurringEventId))this.db.prepare('DELETE FROM calendar_event_overrides WHERE id=?').run(event.id)
       for(const e of put.filter(e=>!e.recurringEventId)){
@@ -106,6 +137,8 @@ export class CalendarStore {
       }
       for(const id of targets)if(old.has(id)&&!put.some(e=>e.id===id)&&!remove.includes(id))this.db.prepare('UPDATE calendar_events SET revision=revision+1,updated_at=unixepoch() WHERE id=?').run(id)
     })
+    for (const replacement of replacements) replaceCalendarLinks(this.db,replacement.eventId,replacement.links)
+    rebuildCalendarLinks(this.db)
     const snapshot=this.snapshot(), now=versionsOf(snapshot.events)
     for(const id of targets)if(!(id in now))now[id]=0
     this.changed([...targets])
@@ -137,7 +170,7 @@ export class CalendarStore {
   deleteCalendarSource(id:string):{deleted:boolean}{
     const exists=this.getCalendarSourceById(id);if(!exists)return {deleted:false}
     const snapshot=this.snapshot();if(!exists.sync_url&&snapshot.calendars.filter(c=>!c.readOnly).length<=1)throw new Error('请至少保留一个本地日历')
-    this.transaction(()=>{this.db.prepare('DELETE FROM calendar_event_overrides WHERE parent_event_id IN (SELECT id FROM calendar_events WHERE calendar_id=?)').run(id);this.db.prepare('DELETE FROM calendar_events WHERE calendar_id=?').run(id);this.db.prepare('DELETE FROM calendar_sources WHERE id=?').run(id)})
+    this.transaction(()=>{this.db.prepare('DELETE FROM calendar_event_overrides WHERE parent_event_id IN (SELECT id FROM calendar_events WHERE calendar_id=?)').run(id);this.db.prepare('DELETE FROM calendar_event_links WHERE event_id IN (SELECT id FROM calendar_events WHERE calendar_id=?)').run(id);this.db.prepare('DELETE FROM calendar_events WHERE calendar_id=?').run(id);this.db.prepare('DELETE FROM calendar_sources WHERE id=?').run(id);rebuildCalendarLinks(this.db)})
     this.changed([id]);return {deleted:true}
   }
 
@@ -211,5 +244,13 @@ export class CalendarStore {
     return {created:normalized.filter(e=>!existing.some(x=>x.id===e.id)).length,updated:normalized.filter(e=>existing.some(x=>x.id===e.id)).length,removed:remove.length}
   }
   recordSyncResult(id:string,error:string|null):void {this.db.prepare('UPDATE calendar_sources SET sync_error=?,last_synced_at=CASE WHEN ? IS NULL THEN unixepoch() ELSE last_synced_at END WHERE id=?').run(error,error,id);this.changed([id])}
-  exportCalendar(id?:string):string {const snapshot=this.snapshot();return exportIcs(snapshot.events.filter(e=>!id||e.calendarId===id),{calendarName:snapshot.calendars.find(c=>c.id===id)?.name||'Ready'})}
+  exportCalendar(id?:string):string {
+    const snapshot=this.snapshot(), events=snapshot.events.filter(e=>!id||e.calendarId===id)
+    const ids=new Set(events.map(e=>e.id))
+    const links=(snapshot.links || []).filter(link=>ids.has(link.eventId)).map(link=>
+      `X-READY-LINK:${encodeURIComponent(JSON.stringify({id:link.id,source:toReadyUri(calendarLinkSource(link)),target:toReadyUri(link.target),purpose:link.purpose}))}`)
+    // ICS extension properties are folded by UTF-8 octets (these encoded values are ASCII).
+    const folded=links.map(line=>line.match(/.{1,74}/g)!.join('\r\n ')).join('\r\n')
+    return exportIcs(events,{calendarName:snapshot.calendars.find(c=>c.id===id)?.name||'Ready'}).replace('END:VCALENDAR',`${folded ? folded+'\r\n' : ''}END:VCALENDAR`)
+  }
 }
