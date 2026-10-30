@@ -148,20 +148,8 @@ export class BrowserContextMenuService {
           click: () => this.emitFastCardAction(webContents, params, 'add-to-fastcard', 'image'),
         },
         {
-          label: '添加到 Reference 画板',
-          click: () => {
-            void this.host.addImageToActiveBoard(imageUrl)
-              .then((result) => {
-                this.host.sendToRenderer('board:activeBoardExternalImageAdded', result)
-              })
-              .catch((error) => {
-                this.host.logBrowserDiag(`[browser-v3][context] add image to board failed: ${String(error)}`)
-                this.host.sendToRenderer('board:activeBoardExternalImageAdded', {
-                  success: false,
-                  error: error instanceof Error ? error.message : String(error),
-                })
-              })
-          },
+          label: '添加到画板…',
+          click: () => this.emitFastCardAction(webContents, params, 'save-to-canvas', 'image'),
         },
         {
           label: '在新标签页打开图片',
@@ -208,6 +196,7 @@ export class BrowserContextMenuService {
           label: '添加到 FastCard',
           click: () => this.emitFastCardAction(webContents, params, 'add-to-fastcard', 'text'),
         },
+        { label: '添加到画板…', click: () => this.emitFastCardAction(webContents, params, 'save-to-canvas', 'text') },
       )
     }
 

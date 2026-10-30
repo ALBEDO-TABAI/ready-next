@@ -71,3 +71,38 @@ test('C7 store waits for receipts, serializes requests, reloads and reports fail
     else Reflect.deleteProperty(globalThis, 'sessionStorage')
   }
 })
+
+test('C13 store keeps retry identity, reports receipt and undo, and allows reselecting an unavailable target', async () => {
+  const { createFastCardStore } = await import('../renderer/stores/useFastCard')
+  const item: FastCardItem = { id: 'collected', kind: 'text', text: 'keep', createdAt: 1 }
+  let items = [item]
+  const calls: import('../shared/fastcard').FastCardTransferRequest[] = []
+  let failure: 'transport' | 'target' | null = 'transport'
+  const store = createFastCardStore(() => ({
+    listFastCardItems: async () => ({ success: true, data: items }),
+    addFastCardItem: async value => ({ success: true, data: value }), removeFastCardItem: async () => ({ success: true }), clearFastCardItems: async () => ({ success: true }),
+  }), () => ({
+    targets: async () => ({ success: true, data: [] }), pending: async () => ({ success: true, data: [] }),
+    transfer: async request => {
+      calls.push(request)
+      if (failure === 'transport') throw new Error('connection interrupted')
+      if (failure === 'target') return { success: false, error: '目标画板不可用', errorCode: 'target_unavailable' }
+      items = []
+      return { success: true, data: { state: 'completed', operationId: request.operationId, objectId: 'board', title: '灵感', nodeIds: ['node'] } }
+    },
+    undo: async () => { items = [item]; return { success: true, data: { state: 'undone' } } },
+  }))
+  await store.getState().load()
+  assert.equal(await store.getState().saveToCanvas([item.id]), false)
+  assert.equal(store.getState().items.length, 1)
+  failure = 'target'
+  assert.equal(await store.getState().saveToCanvas([item.id]), false)
+  assert.equal(calls[0].operationId, calls[1].operationId)
+  failure = null
+  assert.equal(await store.getState().saveToCanvas([item.id], { kind: 'existing', objectId: 'board' }), true)
+  assert.notEqual(calls[1].operationId, calls[2].operationId)
+  assert.equal(store.getState().items.length, 0)
+  assert.equal(store.getState().transferReceipt?.title, '灵感')
+  assert.equal(await store.getState().undoTransfer(), true)
+  assert.deepEqual(store.getState().items, [item])
+})

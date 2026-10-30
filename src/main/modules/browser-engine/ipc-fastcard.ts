@@ -1,5 +1,7 @@
 import electron, { type BrowserWindow, type IpcMain } from 'electron'
 import { getDatabase, assertDatabaseConnectionReady } from '../database'
+import { FastCardCollectionService } from '../fastcard/collection-service'
+import { FastCardMediaCache } from '../fastcard/media-cache'
 import { FastCardRepository } from '../repositories/fastcard-repository'
 import type {
   FastCardOverlayCommand,
@@ -17,6 +19,7 @@ import type { FastCardOverlayWindow } from './fastcard-overlay-window'
 interface BrowserFastCardIPCOptions {
   ipc?: Pick<IpcMain, 'handle'>
   getRepository?: () => FastCardRepository
+  getMediaCache?: () => FastCardMediaCache
   getMainWindow: () => BrowserWindow | null
   preloadPath: string
   rendererFile: string
@@ -48,6 +51,8 @@ export function setupBrowserFastCardIPC(options: BrowserFastCardIPCOptions): voi
     assertDatabaseConnectionReady(db, 'FastCard database')
     return new FastCardRepository(db)
   })
+  let collection: FastCardCollectionService | undefined
+  const getCollection = () => collection ??= new FastCardCollectionService(getRepository(), options.getMediaCache?.() ?? new FastCardMediaCache(electron.app.getPath('userData')))
   const receipt = <T>(action: (payload: unknown) => T) => (_: unknown, payload: unknown): FastCardIPCResult<T> => {
     try {
       const data = action(payload)
@@ -57,8 +62,14 @@ export function setupBrowserFastCardIPC(options: BrowserFastCardIPCOptions): voi
     }
   }
   // Literal channel names keep these handlers visible to the IPC contract gate.
-  ipcMain.handle('browser:fastCardList', receipt(() => getRepository().list()))
-  ipcMain.handle('browser:fastCardAdd', receipt((payload) => getRepository().add(payload)))
+  ipcMain.handle('browser:fastCardList', async () => {
+    try { return { success: true, data: await getCollection().list() } }
+    catch (error) { return { success: false, error: String(error) } }
+  })
+  ipcMain.handle('browser:fastCardAdd', async (_, payload: unknown) => {
+    try { return { success: true, data: await getCollection().add(payload) } }
+    catch (error) { return { success: false, error: String(error) } }
+  })
   ipcMain.handle('browser:fastCardRemove', receipt((payload) => getRepository().remove(payload)))
   ipcMain.handle('browser:fastCardClear', receipt(() => getRepository().clear()))
 

@@ -6,6 +6,8 @@ import { join } from 'node:path'
 import { createRequire } from 'node:module'
 import type { DatabaseConnection } from '../main/modules/database/connection'
 import { runMigrations } from '../main/modules/migrations'
+import { FastCardMediaCache } from '../main/modules/fastcard/media-cache'
+import { FastCardCollectionService } from '../main/modules/fastcard/collection-service'
 import { FastCardRepository } from '../main/modules/repositories/fastcard-repository'
 import { setupBrowserFastCardIPC } from '../main/modules/browser-engine/ipc-fastcard'
 import type { FastCardItem } from '../shared/fastcard'
@@ -56,12 +58,14 @@ test('C7 repository round trip, restart, ordering, repeat delivery and deletion'
 
 test('C7 registered IPC add/list/remove/clear return receipts and expose failures', async (t) => {
   if (skipIfSqliteUnavailable(t, 'FastCard IPC persistence')) return
+  const cacheRoot = mkdtempSync(join(tmpdir(), 'fastcard-ipc-'))
   const db = new Database(':memory:')
   runMigrations(db)
   const handlers = new Map<string, (event: unknown, payload?: unknown) => unknown>()
   setupBrowserFastCardIPC({
     getMainWindow: () => null, preloadPath: '', rendererFile: '',
     getRepository: () => new FastCardRepository(db),
+    getMediaCache: () => new FastCardMediaCache(cacheRoot),
     ipc: { handle: (channel, listener) => { handlers.set(channel, listener) } },
   })
   const invoke = async (action: string, payload?: unknown) => {
@@ -87,7 +91,28 @@ test('C7 registered IPC add/list/remove/clear return receipts and expose failure
     await invoke('Add', item)
     assert.deepEqual(await invoke('Clear'), { success: true })
     assert.deepEqual(await invoke('List'), { success: true, data: [] })
-  } finally { db.close() }
+  } finally { db.close(); rmSync(cacheRoot, { recursive: true, force: true }) }
   assert.partialDeepStrictEqual(await invoke('Add', item), { success: false })
   assert.partialDeepStrictEqual(await invoke('List'), { success: false })
+})
+
+
+test('C7 backfills old URLs once; failures are explicit and forged cache receipts are rejected', async t => {
+  if (skipIfSqliteUnavailable(t, 'FastCard media backfill')) return
+  const root = mkdtempSync(join(tmpdir(), 'fastcard-backfill-')), db = new Database(':memory:')
+  try {
+    runMigrations(db)
+    const repository = new FastCardRepository(db)
+    repository.add({ id: 'old', kind: 'image', createdAt: 1, imageUrl: 'https://expired.example/image' })
+    let downloads = 0
+    const cache = new FastCardMediaCache(root, async () => { downloads++; throw new Error('offline') })
+    const service = new FastCardCollectionService(repository, cache)
+    assert.equal((await service.list())[0].media?.status, 'missing')
+    assert.equal((await new FastCardCollectionService(repository, cache).list())[0].media?.status, 'missing')
+    assert.equal(downloads, 1)
+    await assert.rejects(service.add({ id: 'forged', kind: 'image', createdAt: 1, media: { status: 'missing', error: 'forged' } }), /Main-owned/)
+    const saved = await service.add({ id: 'new', kind: 'image', createdAt: 2, imageUrl: 'https://expired.example/new' })
+    assert.equal(saved.media?.status, 'missing')
+    assert.equal(repository.list().length, 2)
+  } finally { db.close(); rmSync(root, { recursive: true, force: true }) }
 })

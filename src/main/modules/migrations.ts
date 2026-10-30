@@ -4477,6 +4477,19 @@ const migrations: Migration[] = [
   } },
   { name: '143_calendar_attachment_ready_refs', up: migrateCalendarAttachmentReadyRefs },
   { name: '144_calendar_attachment_display_refs', up: migrateCalendarAttachmentDisplayRefs },
+  { name: '145_fastcard_transfers', up: (db) => {
+    db.exec(`CREATE TABLE fastcard_sequence (singleton INTEGER PRIMARY KEY CHECK(singleton=1), position INTEGER NOT NULL);
+    INSERT INTO fastcard_sequence SELECT 1,COALESCE(MAX(position),0) FROM fastcard_items;
+    CREATE TRIGGER fastcard_position_advance AFTER INSERT ON fastcard_items BEGIN
+      UPDATE fastcard_sequence SET position=MAX(position,NEW.position) WHERE singleton=1;
+    END;
+    CREATE TABLE fastcard_transfers (
+      operation_id TEXT PRIMARY KEY, library_id TEXT NOT NULL,
+      state TEXT NOT NULL CHECK(state IN ('prepared','completed','undo-prepared','undone')), payload_json TEXT NOT NULL
+    );
+    CREATE TABLE fastcard_transfer_items (item_id TEXT PRIMARY KEY, operation_id TEXT NOT NULL REFERENCES fastcard_transfers(operation_id));
+    CREATE TABLE fastcard_targets (library_id TEXT PRIMARY KEY, object_id TEXT NOT NULL);`)
+  } },
 ]
 
 /**
