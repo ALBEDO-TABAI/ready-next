@@ -116,6 +116,23 @@ test('page edits, split undo and Widget source save exact bytes through Cmd+S in
   await view('preview')
   await act(async () => { assert.equal(await runRegisteredDocumentSave(t.name), true) })
   for (const written of writes) assert.deepEqual(Buffer.from(written), Buffer.from(head + expectedBody + tail))
+  // T4b-fix: focus and save between drop and undo, as in the real window.
+  const historyCount = f.buffer.history.entries.length
+  const handle = f.rich('编辑甲乙中文').closest('[data-block-start]')!.querySelector<HTMLElement>('[aria-label="块菜单"]')!
+  await act(() => handle.focus())
+  await f.key(handle, ' '); await f.key(handle, 'ArrowDown'); await f.key(handle, 'Enter')
+  const moved = expectedBody.replace('编辑甲乙中文', '').replace(widget.replace('原文', '新文'), widget.replace('原文', '新文') + '\r\n\r\n编辑甲乙中文')
+  f.bytes(moved)
+  assert.equal(f.buffer.history.entries.length, historyCount + 1)
+  await act(() => f.rich('编辑甲乙中文').focus())
+  await save(f.rich('编辑甲乙中文'))
+  assert.deepEqual(readFileSync(path), Buffer.from(head + moved + tail))
+  const undo = new f.dom.window.KeyboardEvent('keydown', { key: 'z', metaKey: true, bubbles: true, cancelable: true })
+  await act(() => f.rich('编辑甲乙中文').dispatchEvent(undo))
+  assert.equal(undo.defaultPrevented, true, 'shared history must suppress native undo')
+  f.bytes(expectedBody)
+  await save(f.rich('编辑甲乙中文'))
+  assert.deepEqual(readFileSync(path), Buffer.from(head + expectedBody + tail))
   // A real Widget state change edits only that fence and survives saving;
   // its hydration echo after saving must leave the tab clean.
   const state = { controls: [{ index: 0, tag: 'input', type: 'text', value: '填写', checked: false }], activeTargets: [] }

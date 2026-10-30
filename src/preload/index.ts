@@ -5,6 +5,7 @@ import type { LibraryHighlightContext, LibraryHighlightCreate, LibraryHighlightU
 import type { LibraryBook, LibraryBookPatch, LibraryBookmark, LibraryImportResult, LibraryReadingPosition, LibraryResult, LibraryState } from '../shared/library'
 import type { DocumentSyncRequest, DocumentSyncReply } from '../shared/document-operations'
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
+import { createBeforeQuitFlushChannel } from './before-quit-flush'
 import {
   BROWSER_VIEW_INTENT_CHANNEL,
   type BrowserViewIntent,
@@ -112,6 +113,13 @@ import {
   type ReadyMemoryStateChange,
 } from '../shared/ready-memory'
 
+const subscribeBeforeQuitFlush = createBeforeQuitFlushChannel({
+  listen: (listener) => {
+    ipcRenderer.on('app:flushBeforeQuit', listener)
+    return () => ipcRenderer.removeListener('app:flushBeforeQuit', listener)
+  },
+  answer: (requestId, outcome) => ipcRenderer.send('app:beforeQuitFlushed', requestId, outcome),
+})
 const readAgentRuntimeReady = async (): Promise<AgentRuntimeReadinessSnapshot> => (
   parseAgentRuntimeReadinessSnapshot(await ipcRenderer.invoke('agent:readRuntimeReady'))
 )
@@ -1256,11 +1264,7 @@ const appAPI = {
     ipcRenderer.on('app:shortcut', handler)
     return () => ipcRenderer.removeListener('app:shortcut', handler)
   },
-  onBeforeQuitFlush: (callback: (requestId: string) => void) => {
-    const handler = (_: IpcRendererEvent, requestId: string): void => callback(requestId)
-    ipcRenderer.on('app:flushBeforeQuit', handler)
-    return () => ipcRenderer.removeListener('app:flushBeforeQuit', handler)
-  },
+  onBeforeQuitFlush: (callback: (requestId: string) => void) => subscribeBeforeQuitFlush(callback),
   onBeforeQuitFlushCancelled: (callback: (requestId: string) => void) => {
     const handler = (_: IpcRendererEvent, requestId: string): void => callback(requestId)
     ipcRenderer.on('app:cancelBeforeQuitFlush', handler)
