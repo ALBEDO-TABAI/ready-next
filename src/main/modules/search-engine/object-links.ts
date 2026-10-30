@@ -10,7 +10,7 @@ interface LinkRow {
   kind: ObjectLinkKind; raw_target: string; target_text: string; fragment: string | null; source_line: number | null; source_offset: number | null
   source_node_id: string | null; resolved: number; unresolved_reason: string | null
 }
-interface Target { id: string; current_path: string | null; status: string; identity_state: string }
+interface Target { id: string; kind: string; current_path: string | null; status: string; identity_state: string }
 function endpoint(id: string | null, uri: string | null): ObjectLinkEndpoint | null {
   if (id !== null) return { objectId: id }
   if (uri === null) return null
@@ -123,6 +123,9 @@ export class ObjectLinkRepository {
           }
           if (!candidates.length) candidates = this.db.prepare(`SELECT DISTINCT o.* FROM objects o JOIN file_move_receipts r ON r.object_id=o.id
             WHERE o.status='trashed' AND o.identity_state<>'conflict' AND r.old_path IN (?,?)`).all<Target>(...paths)
+          // A page X.md owns its child folder X/ (the page triplet): [[X]] means the page, never its folder.
+          const pageStems = new Set(candidates.filter(o => o.kind !== 'directory' && /\.md$/i.test(o.current_path ?? '')).map(o => o.current_path!.replace(/\.md$/i, '')))
+          candidates = candidates.filter(o => !(o.kind === 'directory' && o.current_path && pageStems.has(o.current_path)))
           if (candidates.length === 1) target = candidates[0]
           else if (candidates.length > 1) reason = '多个候选'
         }
