@@ -2440,6 +2440,7 @@ interface ElectronCalendarAPI {
   applyStandaloneImport(ticket:string,skipExamples:boolean): Promise<CalendarResponse<{ created:number; skipped:number }>>
   getAttachmentDisplayRefs(messageIds: string[]): Promise<CalendarResponse<import('../../shared/calendar-event-identity').CalendarAttachmentDisplayRef[]>>
   revealEvent(id: string): Promise<CalendarResponse<boolean>>
+  revealDay(date: string): Promise<CalendarResponse<boolean>>
   peekNavigation(): Promise<CalendarResponse<import('../../shared/calendar/desktop').CalendarNavigationRequest | null>>
   ackNavigation(id: string): Promise<CalendarResponse<void>>
   onNavigation(handler: () => void): () => void

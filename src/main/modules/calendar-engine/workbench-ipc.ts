@@ -18,6 +18,7 @@ export function setupCalendarWorkbenchIPC(): void {
     catch(error){return {success:false,mock:false,error:calendarErrorMessage(error)}}
   }
   ipcMain.handle('calendar:revealEvent',receipt((id:string)=>{if(!store().getCalendarEventReference(id))throw new Error('日程已不存在');requestCalendarNavigation({kind:'event',eventId:id});return true}))
+  ipcMain.handle('calendar:revealDay',receipt((date:unknown)=>{if(typeof date!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(date)||Number.isNaN(Date.parse(`${date}T00:00:00Z`)))throw new Error('日期无效');requestCalendarNavigation({kind:'day',date});return true}))
   ipcMain.handle('calendar:getAttachmentDisplayRefs',receipt((messageIds:unknown)=>{
     if(!Array.isArray(messageIds)||messageIds.some(id=>typeof id!=='string'||!id.trim()||id!==id.trim()))throw new Error('消息 ID 列表无效')
     const db=getDatabase().getRawDb()

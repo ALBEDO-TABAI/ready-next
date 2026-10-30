@@ -1003,6 +1003,7 @@ const calendarAPI = {
   prepareStandaloneImport: () => ipcRenderer.invoke('calendar:prepareStandaloneImport'),
   applyStandaloneImport: (ticket:string,skipExamples:boolean) => ipcRenderer.invoke('calendar:applyStandaloneImport',ticket,skipExamples),
   revealEvent: (id: string) => ipcRenderer.invoke('calendar:revealEvent', id),
+  revealDay: (date: string) => ipcRenderer.invoke('calendar:revealDay', date),
   peekNavigation: () => ipcRenderer.invoke('calendar:peekNavigation'),
   ackNavigation: (id: string) => ipcRenderer.invoke('calendar:ackNavigation', id),
   onNavigation: (handler: () => void) => { const listener = () => handler(); ipcRenderer.on('calendar:navigationPending', listener); return () => ipcRenderer.removeListener('calendar:navigationPending', listener) },

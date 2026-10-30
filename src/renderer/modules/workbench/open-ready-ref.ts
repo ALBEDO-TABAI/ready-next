@@ -70,6 +70,13 @@ export async function openReadyRef(input: string | ReadyRef, fromMode?: Workbenc
       requestWorkbenchModeOpen('calendar')
       return
     }
+    case 'day': {
+      const result = await window.electronAPI.calendar.revealDay(ref.date)
+      if (!result.success) throw new Error(result.error || '日期无法打开')
+      rememberReferenceOrigin(origin, 'calendar')
+      requestWorkbenchModeOpen('calendar')
+      return
+    }
     case 'conversation': {
       const { revealSearchConversation } = await import('../../stores/useAgent')
       await revealSearchConversation(ref.id)
