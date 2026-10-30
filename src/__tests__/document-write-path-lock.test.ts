@@ -33,8 +33,11 @@ test('a path that fails to resolve does not block later callers', async (t) => {
   t.after(() => rmSync(dir, { recursive: true, force: true }))
   const file = join(dir, 'page.md')
   writeFileSync(file, 'x')
-  const missing = withDocumentPathLock(join(dir, 'missing.md'), async () => 'never')
+  // A file nested under a regular file can never resolve; it must fail alone.
+  const broken = withDocumentPathLock(join(file, 'child.md'), async () => 'never')
   const ok = withDocumentPathLock(file, async () => 'done')
-  await assert.rejects(missing, { code: 'ENOENT' })
+  await assert.rejects(broken, { code: 'ENOTDIR' })
   assert.equal(await ok, 'done')
+  // A file that does not exist yet still takes a lock, so saving a new file is serialised too.
+  assert.equal(await withDocumentPathLock(join(dir, 'new.md'), async () => 'created'), 'created')
 })
