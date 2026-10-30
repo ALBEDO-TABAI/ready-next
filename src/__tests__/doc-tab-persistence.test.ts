@@ -232,7 +232,9 @@ describe('document tab persistence', () => {
     useDocTabs.getState().updateTabContent(baseTab.id, 'recover-me')
     await flushPendingDocTabDrafts()
     flushPendingDocTabMetadata()
-    const metadata = values.get(METADATA_KEY)!
+    const stored = JSON.parse(values.get(METADATA_KEY)!)
+    delete stored.state.tabs[0].draftId
+    const metadata = JSON.stringify(stored)
     useDocTabs.getState().closeTab(baseTab.id)
     assert.equal(fixture.discarded.length, 0)
     values.set(METADATA_KEY, metadata)
@@ -240,6 +242,7 @@ describe('document tab persistence', () => {
     await drafts.restore()
     assert.equal(useDocTabs.getState().tabs[0].content, 'recover-me')
     assert.equal(useDocTabs.getState().tabs[0].isDirty, true)
+    assert.equal(fixture.drafts.size, 1, 'rehydration must not create a second draft')
   })
 
   it('migrates embedded and separate legacy bodies before restoring, including empty content', async () => {

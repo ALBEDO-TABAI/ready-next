@@ -1,4 +1,5 @@
 import type { DocumentDraft, DocumentDraftAPI, DraftCreate, DraftFinalizeInput, DraftReceipt } from '../../../../shared/document-drafts'
+import type { DocumentPagesAPI } from '../../../../shared/document-pages'
 import type { DocTab } from '../../../stores/useDocTabs'
 import { contentHash, unwrap } from './migration'
 
@@ -30,11 +31,12 @@ interface Session {
 export class DraftController {
   private sessions = new Map<string, Session>()
   recovery: DocumentDraft[] = []
+  private earlierDrafts = new Set<string>()
   constructor(private port: DraftPort) {}
   status(id: string): DraftStatus | undefined { return this.sessions.get(id)?.state }
   private publish(session: Session, state: DraftStatus): void { session.state = state; this.port.notify() }
   changed(tab: DocTab, base?: string): void {
-    if (tab.kind === 'library') return
+    if (tab.kind === 'library' || !tab.isDirty) return
     let session = this.sessions.get(tab.id)
     if (!session) {
       session = { tab: { ...tab }, base, state: { status: 'pending' } }
@@ -68,14 +70,14 @@ export class DraftController {
       const api = this.port.api()
       let result
       if (!session.receipt) {
-        const common = { vaultRoot: await this.port.root(), content, title: session.tab.title }
-        let input: DraftCreate = { ...common, origin: 'new' }
+        const common = { tabId: id, vaultRoot: await this.port.root(), content, title: session.tab.title }
+        let input: DraftCreate & { tabId: string } = { ...common, origin: 'new' }
         if (session.tab.path) {
           if (session.base === undefined) throw new Error('缺少编辑前的磁盘版本，正文已保留')
           input = { ...common, origin: 'document', objectId: session.tab.objectId ?? await this.port.resolve(session.tab.path), baseVersion: await contentHash(session.base) }
         }
         result = await api.create(input)
-      } else result = await api.save(session.receipt.draftId, session.receipt.revision, content)
+      } else result = await api.save(session.receipt.draftId, session.receipt.revision, content, id)
       const receipt = result.ok ? result.value : result.receipt
       if (!receipt || receipt.contentHash !== await contentHash(content)) throw new Error(result.ok ? '草稿确认内容不一致' : result.message)
       session.receipt = receipt
@@ -88,6 +90,7 @@ export class DraftController {
     })().catch(error => { this.publish(session, { ...session.state, status: 'failed', message: String(error) }); throw error })
     session.pending = work
     try { await work } finally { session.pending = undefined }
+    if (session.tab.content !== session.acknowledged) await this.flush(id)
   }
   async flushAll(): Promise<void> {
     await Promise.all([...this.sessions.keys()].map(id => this.flush(id)))
@@ -106,8 +109,8 @@ export class DraftController {
         // Rebase the successor only after the file save succeeded, preserving the old
         // durable copy until its replacement is confirmed.
         const content = session.tab.content
-        const common = { vaultRoot: await this.port.root(), title: current.title, content }
-        const input: DraftCreate = current.path
+        const common = { tabId: id, vaultRoot: await this.port.root(), title: current.title, content }
+        const input: DraftCreate & { tabId: string } = current.path
           ? { ...common, origin: 'document', objectId: current.objectId ?? await this.port.resolve(current.path), baseVersion: await contentHash(snapshot) }
           : { ...common, origin: 'new' }
         const next = unwrap(await this.port.api().create(input))
@@ -132,25 +135,52 @@ export class DraftController {
     try { await work } finally { session.pending = undefined }
     if (this.sessions.has(id) && session.acknowledged !== session.tab.content) await this.flush(id)
   }
+  recoveryLabel(draftId: string): string | undefined {
+    if (this.earlierDrafts.has(draftId)) return '同一标签的较早版本'
+    const draft = this.recovery.find(item => item.draftId === draftId)
+    const latest = draft?.tabId ? this.recovery.filter(item => item.tabId === draft.tabId)
+      .sort((a, b) => b.revision - a.revision || b.updatedAt - a.updatedAt || a.draftId.localeCompare(b.draftId))[0] : undefined
+    if (latest && latest.draftId !== draftId) return '同一标签的较早版本'
+    return undefined
+  }
   async restore(): Promise<void> {
     this.recovery = unwrap(await this.port.api().list())
-    for (const tab of this.port.tabs()) {
-      if (!tab.draftId || this.recovery.some(draft => draft.draftId === tab.draftId)) continue
-      const draft = unwrap(await this.port.api().read(tab.draftId))
+    this.earlierDrafts.clear()
+    const tabIds = new Set([...this.port.tabs().filter(tab => tab.kind !== 'library').map(tab => tab.id),
+      ...this.recovery.flatMap(draft => draft.tabId ? [draft.tabId] : [])])
+    for (const tabId of tabIds) {
+      const [draft] = unwrap(await this.port.api().list(tabId))
+      for (const item of this.recovery) {
+        if (item.tabId === tabId && item.draftId !== draft?.draftId) this.earlierDrafts.add(item.draftId)
+      }
+      const tab = this.port.tabs().find(tab => tab.id === tabId && tab.kind !== 'library')
+      if (!tab) continue
       if (draft?.state === 'finalized' && draft.finalize?.receipt) {
         const receipt = draft.finalize.receipt
         this.port.patch(tab.id, { path: receipt.path, objectId: receipt.objectId, content: await this.port.read(receipt.path), isDirty: false, draftId: undefined })
-      } else if (draft?.state === 'discarded') {
-        this.port.patch(tab.id, { content: '', isDirty: false, draftId: undefined })
-      } else throw new Error('标签关联的草稿不可用，恢复未完成')
-    }
-    for (const draft of this.recovery) {
-      const tab = this.port.tabs().find(tab => tab.draftId === draft.draftId || (draft.objectId && tab.objectId === draft.objectId && !tab.isDirty))
-      if (tab) await this.attach(tab.id, draft)
+      } else if (draft && ['editing', 'conflict'].includes(draft.state)) await this.attach(tab.id, draft)
+      else this.port.patch(tab.id, { draftId: undefined, isDirty: false })
     }
     this.port.notify()
   }
   async attach(id: string, draft: DocumentDraft): Promise<void> {
+    const owner = [...this.sessions.entries()].find(([, session]) => session.receipt?.draftId === draft.draftId)
+    if (owner) {
+      if (owner[1].pending || owner[1].tab.content !== owner[1].acknowledged) await this.flush(owner[0])
+      const current = unwrap(await this.port.api().read(draft.draftId))
+      if (!current) throw new Error('草稿不存在')
+      draft = current
+    }
+    if (draft.tabId !== id) {
+      const result = await this.port.api().save(draft.draftId, draft.revision, draft.content, id)
+      const receipt = result.ok ? result.value : result.receipt
+      if (!receipt) throw new Error(result.ok ? '草稿绑定未确认' : result.message)
+      const bound = unwrap(await this.port.api().read(draft.draftId))
+      if (!bound || bound.tabId !== id || bound.revision !== receipt.revision || bound.content !== draft.content) throw new Error('草稿标签绑定回读失败')
+      draft = bound
+      this.earlierDrafts.delete(draft.draftId)
+      this.recovery = this.recovery.map(item => item.draftId === draft.draftId ? draft : item)
+    }
     const path = draft.objectId ? await this.port.locate(draft.objectId) : null
     if (path && draft.baseVersion !== await contentHash(await this.port.read(path))) {
       draft = { ...draft, state: 'conflict' }
@@ -159,6 +189,10 @@ export class DraftController {
     const patch = { content: draft.content, isDirty: true, draftId: draft.draftId, objectId: draft.objectId ?? undefined, path, title: draft.title || '未保存的草稿' }
     const tab = this.port.tabs().find(tab => tab.id === id)
     if (!tab || tab.kind === 'library') throw new Error('草稿标签不存在')
+    if (owner && owner[0] !== id) {
+      clearTimeout(owner[1].timer)
+      this.sessions.delete(owner[0])
+    }
     this.sessions.set(id, { tab: { ...tab, ...patch }, receipt: { draftId: draft.draftId, revision: draft.revision, contentHash: draft.contentHash },
       acknowledged: draft.content, finalizeIntent: draft.finalize?.request, state: { status: 'confirmed', conflict: draft.state === 'conflict' } })
     this.port.patch(id, patch)
@@ -178,9 +212,9 @@ export class DraftController {
         this.port.patch(id, { draftId: undefined })
         if (session.tab.content !== draft.content) {
           // Only the explicit discard snapshot is consumed. Later input survives.
-          const input: DraftCreate = draft.origin === 'document' && draft.objectId && draft.baseVersion
-            ? { origin: 'document', vaultRoot: draft.vaultRoot, objectId: draft.objectId, baseVersion: draft.baseVersion, content: session.tab.content, title: draft.title }
-            : { origin: 'new', vaultRoot: draft.vaultRoot, content: session.tab.content, title: draft.title }
+          const input: DraftCreate & { tabId: string } = draft.origin === 'document' && draft.objectId && draft.baseVersion
+            ? { tabId: id, origin: 'document', vaultRoot: draft.vaultRoot, objectId: draft.objectId, baseVersion: draft.baseVersion, content: session.tab.content, title: draft.title }
+            : { tabId: id, origin: 'new', vaultRoot: draft.vaultRoot, content: session.tab.content, title: draft.title }
           const saved = unwrap(await this.port.api().create(input))
           session.receipt = saved; session.acknowledged = input.content
           this.port.patch(id, { draftId: saved.draftId })
@@ -199,6 +233,26 @@ export class DraftController {
       this.publish(entry[1], { status: 'confirmed' })
     }
     return consumed
+  }
+  async overwrite(id: string, comparedDisk: string, save: DocumentPagesAPI['save']): Promise<{ status: 'saved' } | { status: 'conflict'; disk: string }> {
+    await this.flush(id)
+    const session = this.sessions.get(id)
+    if (!session?.receipt || !session.tab.path) throw new Error('草稿原文件不可用')
+    const snapshot = session.acknowledged!
+    const path = session.tab.path
+    const result = await save({ path, content: snapshot, expectedVersion: await contentHash(comparedDisk) })
+    if (!result.ok) {
+      if (result.code === 'version_conflict') {
+        this.publish(session, { status: 'confirmed', conflict: true })
+        return { status: 'conflict', disk: await this.port.read(path) }
+      }
+      throw new Error(result.message)
+    }
+    const written = await this.port.read(path)
+    if (written !== snapshot || await contentHash(written) !== result.value.afterVersion) throw new Error('覆盖后回读不一致，草稿已保留')
+    await this.saved(id, snapshot)
+    if (this.port.tabs().find(tab => tab.id === id)?.content === snapshot) this.port.patch(id, { isDirty: false })
+    return { status: 'saved' }
   }
   async finalize(id: string, input: DraftFinalizeInput): Promise<FinalizedSnapshot> {
     const existing = this.sessions.get(id)?.finalizing

@@ -31,11 +31,12 @@ export function registerDocumentDraftIPC(ipcMain: Pick<IpcMain, 'handle'>, servi
   }
   ipcMain.handle('documentDrafts:create', (_event, input: unknown) => reply(() => {
     const parsed = DraftCreateSchema.parse(input)
+    DraftIdSchema.parse(parsed.tabId)
     if (vaultRoot(parsed.vaultRoot) !== root()) throw draftError('wrong_vault', '草稿不属于当前资料库')
     return service.create(parsed)
   }))
-  ipcMain.handle('documentDrafts:save', (_event, id: unknown, revision: unknown, content: unknown) => reply(() => service.save(scoped(id), DraftRevisionSchema.parse(revision), z.string().parse(content))))
-  ipcMain.handle('documentDrafts:list', () => reply(() => service.list(root())))
+  ipcMain.handle('documentDrafts:save', (_event, id: unknown, revision: unknown, content: unknown, tabId: unknown) => reply(() => service.save(scoped(id), DraftRevisionSchema.parse(revision), z.string().parse(content), DraftIdSchema.parse(tabId))))
+  ipcMain.handle('documentDrafts:list', (_event, tabId: unknown) => reply(() => service.list(root(), tabId === undefined ? undefined : DraftIdSchema.parse(tabId))))
   ipcMain.handle('documentDrafts:read', (_event, id: unknown) => reply(() => service.read(scoped(id))))
   ipcMain.handle('documentDrafts:discard', (_event, id: unknown, revision: unknown) => reply(() => service.discard(scoped(id), DraftRevisionSchema.parse(revision))))
   ipcMain.handle('documentDrafts:finalize', (_event, id: unknown, revision: unknown, input: unknown) => reply(() => service.finalize(scoped(id), DraftRevisionSchema.parse(revision), DraftFinalizeInputSchema.parse(input))))

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import Database from 'better-sqlite3'
@@ -34,10 +35,10 @@ test('C12 restart preserves acknowledged content and rejects late saves and stal
   if (skipIfSqliteUnavailable(t, 'Draft hierarchy')) return
   const f = fixture(); let session = f.open()
   try {
-    const initial = session.service.create({ vaultRoot: f.root, origin: 'new', content: '' })
+    const initial = session.service.create({ tabId: randomUUID(), vaultRoot: f.root, origin: 'new', content: '' })
     assert.equal(initial.contentHash, documentVersion(''))
-    const saved = session.service.save(initial.draftId, initial.revision, 'new body')
-    assert.throws(() => session.service.save(initial.draftId, initial.revision, 'late old body'), /revision/)
+    const saved = session.service.save(initial.draftId, initial.revision, 'new body', session.service.read(initial.draftId)!.tabId!)
+    assert.throws(() => session.service.save(initial.draftId, initial.revision, 'late old body', session.service.read(initial.draftId)!.tabId!), /revision/)
     session.close(); session = f.open()
     assert.equal(session.service.read(initial.draftId)?.content, 'new body')
     assert.equal(session.service.read(initial.draftId)?.revision, saved.revision)
@@ -56,7 +57,7 @@ test('C12 finalize leaves parent bytes intact, registers and indexes once, never
   try {
     const parent = join(f.root, 'A.md'); writeFileSync(parent, '\uFEFF# Parent\r\n')
     const bytes = readFileSync(parent); const parentId = s.registry.register(parent).id
-    const d = s.service.create({ vaultRoot: f.root, origin: 'new', content: 'child' })
+    const d = s.service.create({ tabId: randomUUID(), vaultRoot: f.root, origin: 'new', content: 'child' })
     const input = { parentObjectId: parentId, title: 'child', operationId: 'op-child' }
     const [receipt, duplicate] = await Promise.all([
       s.service.finalize(d.draftId, d.revision, input), s.service.finalize(d.draftId, d.revision, input),
@@ -72,7 +73,7 @@ test('C12 finalize leaves parent bytes intact, registers and indexes once, never
     s.close(); s = f.open()
     assert.deepEqual(await s.service.finalize(d.draftId, d.revision, input), receipt)
     await assert.rejects(s.service.finalize(d.draftId, d.revision, { ...input, title: 'different' }), /operation/)
-    const other = s.service.create({ vaultRoot: f.root, origin: 'new', content: 'do not overwrite' })
+    const other = s.service.create({ tabId: randomUUID(), vaultRoot: f.root, origin: 'new', content: 'do not overwrite' })
     await assert.rejects(s.service.finalize(other.draftId, other.revision, { ...input, operationId: 'other' }), (error: unknown) => {
       assert.ok(error instanceof Error && 'candidateNames' in error)
       assert.deepEqual(error.candidateNames, ['child (2)']); return true
@@ -87,7 +88,7 @@ test('C12 failed publication and failed index survive restart and resume the sam
   if (skipIfSqliteUnavailable(t, 'Draft hierarchy')) return
   const f = fixture(); let s = f.open()
   try {
-    const d = s.service.create({ vaultRoot: f.root, origin: 'new', content: 'recover me' })
+    const d = s.service.create({ tabId: randomUUID(), vaultRoot: f.root, origin: 'new', content: 'recover me' })
     const input = { parentPath: f.root, title: 'recover', operationId: 'recover-op' }
     const fail = new DocumentDraftService(s.db, { ...s.dependencies, beforePublish: () => { throw new Error('injected before publish') } })
     await assert.rejects(fail.finalize(d.draftId, d.revision, input), /injected/)
@@ -109,10 +110,10 @@ test('C12 changed document base keeps both disk and latest buffer and blocks fin
   try {
     const path = join(f.root, 'source.md'); writeFileSync(path, 'base')
     const objectId = s.registry.register(path).id
-    const create = () => s.service.create({ vaultRoot: f.root, origin: 'document', objectId, baseVersion: documentVersion('base'), content: 'buffer' })
+    const create = () => s.service.create({ tabId: randomUUID(), vaultRoot: f.root, origin: 'document', objectId, baseVersion: documentVersion('base'), content: 'buffer' })
     const d = create(); const second = create()
     writeFileSync(path, 'external edit')
-    assert.throws(() => s.service.save(d.draftId, d.revision, 'latest buffer'), /base version/)
+    assert.throws(() => s.service.save(d.draftId, d.revision, 'latest buffer', s.service.read(d.draftId)!.tabId!), /base version/)
     assert.equal(s.service.read(d.draftId)?.state, 'conflict')
     assert.equal(s.service.read(d.draftId)?.content, 'latest buffer')
     assert.equal(readFileSync(path, 'utf8'), 'external edit')
@@ -126,11 +127,11 @@ test('C12 legacy import receipts are idempotent even after edits, with empty con
   if (skipIfSqliteUnavailable(t, 'Draft hierarchy')) return
   const f = fixture(); const s = f.open()
   try {
-    const items = [{ migrationKey: 'old-tab', contentHash: documentVersion(''), content: '', title: 'empty' }]
+    const items = [{ tabId: 'legacy-tab', migrationKey: 'old-tab', contentHash: documentVersion(''), content: '', title: 'empty' }]
     const first = s.service.importLegacy(f.root, items)
     assert.deepEqual(s.service.importLegacy(f.root, items), first)
     assert.equal(s.service.read(first[0].draftId)?.content, '')
-    s.service.save(first[0].draftId, first[0].revision, 'edited after import')
+    s.service.save(first[0].draftId, first[0].revision, 'edited after import', 'legacy-tab')
     assert.deepEqual(s.service.importLegacy(f.root, items), first)
     assert.equal(s.service.list(f.root).length, 1)
     assert.throws(() => s.service.importLegacy(f.root, [{ ...items[0], content: 'wrong hash' }]), /hash/)
@@ -143,7 +144,7 @@ test('C12 filenames preserve display titles and reject traversal, symlink escape
   if (skipIfSqliteUnavailable(t, 'Draft hierarchy')) return
   const f = fixture(); const s = f.open()
   try {
-    const make = () => s.service.create({ vaultRoot: f.root, origin: 'new', content: 'body' })
+    const make = () => s.service.create({ tabId: randomUUID(), vaultRoot: f.root, origin: 'new', content: 'body' })
     const d = make()
     const result = await s.service.finalize(d.draftId, d.revision, { parentPath: f.root, title: 'CON:', operationId: 'safe' })
     assert.match(readFileSync(result.path, 'utf8'), /title:.*CON:/)
@@ -169,7 +170,7 @@ test('C12 attachments are hash checked and read back; changed sources cannot pub
   try {
     const source = join(f.root, 'image.bin'); const bytes = Buffer.from([0, 1, 255, 42]); writeFileSync(source, bytes)
     const { hashBytes } = await import('../main/modules/document-drafts/files')
-    const create = () => s.service.create({ vaultRoot: f.root, origin: 'new', content: '![x](child.assets/image.bin)',
+    const create = () => s.service.create({ tabId: randomUUID(), vaultRoot: f.root, origin: 'new', content: '![x](child.assets/image.bin)',
       attachments: [{ sourcePath: source, name: 'image.bin', contentHash: hashBytes(bytes) }] })
     const d = create()
     const result = await s.service.finalize(d.draftId, d.revision, { parentPath: f.root, title: 'child', operationId: 'assets' })
@@ -186,13 +187,13 @@ test('C12 failed database writes cannot acknowledge content; legacy missing path
   if (skipIfSqliteUnavailable(t, 'Draft hierarchy')) return
   const f = fixture(); const s = f.open()
   try {
-    const d = s.service.create({ vaultRoot: f.root, origin: 'new', content: 'confirmed' })
+    const d = s.service.create({ tabId: randomUUID(), vaultRoot: f.root, origin: 'new', content: 'confirmed' })
     s.db.exec("CREATE TRIGGER fail_draft_save BEFORE UPDATE OF content ON document_drafts BEGIN SELECT RAISE(ABORT,'injected database failure'); END")
-    assert.throws(() => s.service.save(d.draftId, d.revision, 'not confirmed'), /injected database/)
+    assert.throws(() => s.service.save(d.draftId, d.revision, 'not confirmed', s.service.read(d.draftId)!.tabId!), /injected database/)
     assert.equal(s.service.read(d.draftId)?.content, 'confirmed')
     assert.equal(s.service.read(d.draftId)?.revision, d.revision)
     s.db.exec('DROP TRIGGER fail_draft_save')
-    const [imported] = s.service.importLegacy(f.root, [{ migrationKey: 'missing', content: 'saved buffer', contentHash: documentVersion('saved buffer'), path: join(f.root, 'missing.md') }])
+    const [imported] = s.service.importLegacy(f.root, [{ tabId: 'legacy-tab', migrationKey: 'missing', content: 'saved buffer', contentHash: documentVersion('saved buffer'), path: join(f.root, 'missing.md') }])
     assert.equal(s.service.read(imported.draftId)?.content, 'saved buffer')
     assert.equal(s.service.read(imported.draftId)?.state, 'conflict')
   } finally { s.close(); f.cleanup() }
@@ -212,13 +213,13 @@ test('C12 registered IPC validates inputs, scopes drafts to the current vault an
     }
     const invalid = await invoke('documentDrafts:create', { vaultRoot: f.root, origin: 'document', content: '' })
     assert.equal(invalid.ok, false)
-    const d = s.service.create({ vaultRoot: f.root, origin: 'new', content: '' })
-    assert.deepEqual(await invoke('documentDrafts:save', d.draftId, d.revision, 'saved'), {
+    const d = s.service.create({ tabId: randomUUID(), vaultRoot: f.root, origin: 'new', content: '' })
+    assert.deepEqual(await invoke('documentDrafts:save', d.draftId, d.revision, 'saved', s.service.read(d.draftId)!.tabId!), {
       ok: true, value: { draftId: d.draftId, revision: d.revision + 1, contentHash: documentVersion('saved') },
     })
-    assert.partialDeepStrictEqual(await invoke('documentDrafts:save', d.draftId, d.revision, 'stale'), { ok: false, code: 'revision_conflict' })
+    assert.partialDeepStrictEqual(await invoke('documentDrafts:save', d.draftId, d.revision, 'stale', s.service.read(d.draftId)!.tabId!), { ok: false, code: 'revision_conflict' })
     const other = join(f.root, 'another-vault'); mkdirSync(other)
-    const outside = s.service.create({ vaultRoot: other, origin: 'new', content: 'private' })
+    const outside = s.service.create({ tabId: randomUUID(), vaultRoot: other, origin: 'new', content: 'private' })
     assert.partialDeepStrictEqual(await invoke('documentDrafts:read', outside.draftId), { ok: false, code: 'wrong_vault' })
   } finally { s.close(); f.cleanup() }
 })
@@ -231,10 +232,10 @@ test('C12 finalizing freezes its snapshot and saving a document as a new file do
     const original = '---\nready_id: source-id\ntitle: Source\n---\nbody'
     writeFileSync(path, original)
     const source = s.registry.register(path)
-    const draft = s.service.create({ vaultRoot: f.root, origin: 'document', objectId: source.id,
+    const draft = s.service.create({ tabId: randomUUID(), vaultRoot: f.root, origin: 'document', objectId: source.id,
       baseVersion: documentVersion(original), content: original })
     const service = new DocumentDraftService(s.db, { ...s.dependencies, beforePublish: () => {
-      assert.throws(() => service.save(draft.draftId, draft.revision, 'late buffer'), /not editable/)
+      assert.throws(() => service.save(draft.draftId, draft.revision, 'late buffer', service.read(draft.draftId)!.tabId!), /not editable/)
       assert.throws(() => service.discard(draft.draftId, draft.revision), /cannot be discarded/)
     } })
     const result = await service.finalize(draft.draftId, draft.revision, { parentPath: f.root, title: 'copy', operationId: 'copy' })

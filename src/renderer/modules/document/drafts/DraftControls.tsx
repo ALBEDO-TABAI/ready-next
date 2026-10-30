@@ -1,3 +1,4 @@
+import { finalizeDraftTab } from './save'
 import { useEffect, useState } from 'react'
 import { useDocTabs } from '../../../stores/useDocTabs'
 import { drafts, initializeDrafts, reportDraftError, requestDraftSave, useDraftUI } from './runtime'
@@ -50,9 +51,9 @@ export function DraftControls() {
     {status?.status === 'failed' && <button onClick={() => { void run(() => drafts.flush(activeId)) }}>重试确认</button>}
     {status?.conflict && <button className="ml-3" onClick={() => { const draft = drafts.recovery.find(item => item.draftId === tabs.find(tab => tab.id === activeId)?.draftId); if (draft) void run(() => open(draft)) }}>查看版本冲突</button>}
     {tabs.find(tab => tab.id === activeId)?.path === null && <button className="ml-3" onClick={() => requestDraftSave(activeId)}>保存到…</button>}
-    {error && <p role="alert">{error}</p>}
+    {error && !saveTabId && <p role="alert">{error}</p>}
     {showList && <div>{drafts.recovery.map(draft => <div key={draft.draftId} data-testid={`draft-recovery-${draft.draftId}`}>
-      <button disabled={busy} onClick={() => { void run(() => open(draft)) }}>{draft.title || '未命名草稿'}{draft.state === 'conflict' ? '（冲突）' : ''}</button>
+      <button disabled={busy} onClick={() => { void run(() => open(draft)) }}>{draft.title || '未命名草稿'}{draft.state === 'conflict' ? '（冲突）' : ''}{drafts.recoveryLabel(draft.draftId) && `（${drafts.recoveryLabel(draft.draftId)}）`}</button>
       <button disabled={busy} className="ml-3" onClick={() => { void run(async () => {
         if (!await drafts.discard(draft.draftId)) throw new Error('放弃期间有新输入，已另存为草稿')
         for (const tab of tabs.filter(tab => tab.draftId === draft.draftId)) useDocTabs.getState().closeTab(tab.id)
@@ -60,8 +61,14 @@ export function DraftControls() {
     </div>)}</div>}
     {conflict && <section role="dialog" aria-label="草稿版本冲突" className="p-3">
       <div className="grid grid-cols-2 gap-3"><div>磁盘版本<pre className="max-h-64 overflow-auto whitespace-pre-wrap">{conflict.disk}</pre></div><div>草稿版本<pre className="max-h-64 overflow-auto whitespace-pre-wrap">{tabs.find(tab => tab.id === conflict.tabId)?.content ?? conflict.draft.content}</pre></div></div>
-      <p>当前文件保存接口尚不支持版本检查，暂不能安全地用草稿覆盖磁盘版本。</p>
-      <button disabled title="等待带版本检查的文件保存接口">用草稿覆盖</button>
+      <button disabled={busy} onClick={() => { void run(async () => {
+        const result = await drafts.overwrite(conflict.tabId, conflict.disk, input => window.electronAPI.documentPages.save(input))
+        if (result.status === 'conflict') {
+          setConflict({ ...conflict, disk: result.disk })
+          throw new Error('磁盘版本又有变化，请重新比较后再决定')
+        }
+        setConflict(null)
+      }) }}>用草稿覆盖</button>
       <button disabled={busy} className="ml-3" onClick={() => { void run(async () => {
         if (!await drafts.discard(conflict.draft.draftId)) throw new Error('放弃期间有新输入，已另存为草稿')
         useDocTabs.getState().closeTab(conflict.tabId)
@@ -85,13 +92,11 @@ export function DraftControls() {
         else if (result.error) throw new Error(result.error)
       }) }}>选择文件夹</button><span>{parentPath}</span>
       <button disabled={busy || !parentPath || !title.trim()} onClick={() => { void run(async () => {
-        const tab = useDocTabs.getState().tabs.find(tab => tab.id === saveTabId)!
-        if (!tab.isDirty && !tab.draftId) { useDocTabs.getState().updateTabContent(tab.id, tab.content) }
-        const saved = await drafts.finalize(saveTabId, { parentPath, title, operationId })
-        useDocTabs.getState().commitTabSaveSnapshot(saveTabId, saved.content, saved.writtenContent)
+        await finalizeDraftTab(saveTabId, { parentPath, title, operationId })
         useDraftUI.setState({ saveTabId: null })
       }) }}>确认保存</button>
       <button disabled={busy} onClick={() => useDraftUI.setState({ saveTabId: null })}>取消</button>
+      {error && <p role="alert">{error}</p>}
     </section>}
   </div>
 }

@@ -154,8 +154,8 @@ export function flushPendingDocTabMetadata(): void {
     }
 }
 
-export function flushPendingDocTabPersistenceForExit(): void {
-    void flushPendingDocTabDrafts().catch(reportDraftError)
+export async function flushPendingDocTabPersistenceForExit(): Promise<void> {
+    await flushPendingDocTabDrafts()
     flushPendingDocTabMetadata()
     const failures: string[] = []
     if (drafts.hasUnconfirmed()) failures.push('文档草稿正在等待 Main 确认')
@@ -775,7 +775,7 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
         ...currentState,
         ...state,
         ...next,
-        tabs: next.tabs.map(tab => ({ ...tab, content: '' as const, objectBinding: undefined })),
+        tabs: next.tabs.map(tab => ({ ...tab, content: '' as const, isDirty: false as const, draftId: undefined, objectBinding: undefined })),
         focusedPaneTabId: next.activeTabId,
       }
     },

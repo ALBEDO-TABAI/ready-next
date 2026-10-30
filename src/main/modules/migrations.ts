@@ -4470,6 +4470,10 @@ const migrations: Migration[] = [
   } },
   { name: DOCUMENT_DRAFT_MIGRATION, up: migrateDocumentDrafts },
   { name: DOCUMENT_PAGES_MIGRATION, up: migrateDocumentPages },
+  { name: '142_document_draft_tabs', up: (db) => {
+    db.exec(`ALTER TABLE document_drafts ADD COLUMN tab_id TEXT CHECK(tab_id IS NULL OR length(tab_id)>0);
+      CREATE INDEX document_drafts_tab ON document_drafts(vault_root,tab_id,revision DESC);`)
+  } },
 ]
 
 /**

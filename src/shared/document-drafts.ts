@@ -5,8 +5,9 @@ export const DraftRevisionSchema = z.number().int().positive()
 export const DraftIdSchema = id
 export const DraftHashSchema = z.string().regex(/^[0-9a-f]{64}$/)
 export const DraftAttachmentSchema = z.object({ sourcePath: id, name: id, contentHash: DraftHashSchema }).strict()
+// Main page creation has no tab; Renderer IPC requires a non-null tabId.
 const common = {
-  vaultRoot: id, content: z.string(), title: z.string().default(''), suggestedParent: id.nullable().default(null),
+  tabId: id.nullable().default(null), vaultRoot: id, content: z.string(), title: z.string().default(''), suggestedParent: id.nullable().default(null),
   attachments: z.array(DraftAttachmentSchema).default([]),
 }
 export const DraftCreateSchema = z.discriminatedUnion('origin', [
@@ -31,7 +32,7 @@ export const DraftFinalizeIntentSchema = z.object({
 })
 export type DraftFinalizeIntent = z.infer<typeof DraftFinalizeIntentSchema>
 export const DocumentDraftSchema = z.object({
-  draftId: id, vaultRoot: id, revision: DraftRevisionSchema, content: z.string(), contentHash: DraftHashSchema,
+  draftId: id, tabId: id.nullable(), vaultRoot: id, revision: DraftRevisionSchema, content: z.string(), contentHash: DraftHashSchema,
   origin: z.enum(['new', 'document', 'canvas']), objectId: id.nullable(), baseVersion: DraftHashSchema.nullable(),
   suggestedParent: id.nullable(), sourceCanvas: z.object({ objectId: id, nodeId: id }).nullable(),
   attachments: z.array(DraftAttachmentSchema), title: z.string(),
@@ -46,16 +47,16 @@ export const DocumentDraftSchema = z.object({
   }
 })
 export type DocumentDraft = z.infer<typeof DocumentDraftSchema>
-export const LegacyDraftItemSchema = z.object({ migrationKey: id, contentHash: DraftHashSchema, content: z.string(), path: id.optional(), title: z.string().optional() }).strict()
+export const LegacyDraftItemSchema = z.object({ tabId: id, migrationKey: id, contentHash: DraftHashSchema, content: z.string(), path: id.optional(), title: z.string().optional() }).strict()
 export type LegacyDraftItem = z.infer<typeof LegacyDraftItemSchema>
 export type LegacyDraftReceipt = DraftReceipt & { migrationKey: string }
 export type DraftResult<T> = { ok: true; value: T } | {
   ok: false; code: string; message: string; candidateNames?: string[]; receipt?: DraftReceipt
 }
 export interface DocumentDraftAPI {
-  create(input: DraftCreate): Promise<DraftResult<DraftReceipt>>
-  save(draftId: string, expectedRevision: number, content: string): Promise<DraftResult<DraftReceipt>>
-  list(): Promise<DraftResult<DocumentDraft[]>>
+  create(input: DraftCreate & { tabId: string }): Promise<DraftResult<DraftReceipt>>
+  save(draftId: string, expectedRevision: number, content: string, tabId: string): Promise<DraftResult<DraftReceipt>>
+  list(tabId?: string): Promise<DraftResult<DocumentDraft[]>>
   read(draftId: string): Promise<DraftResult<DocumentDraft | null>>
   discard(draftId: string, expectedRevision: number): Promise<DraftResult<DraftReceipt>>
   finalize(draftId: string, expectedRevision: number, input: DraftFinalizeInput): Promise<DraftResult<DraftFinalizeReceipt>>

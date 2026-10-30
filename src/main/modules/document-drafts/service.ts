@@ -12,14 +12,14 @@ import {
 import { readDocumentSource, setFrontmatterFields } from '../../../shared/document-operations'
 import type { DatabaseConnection } from '../database/connection'
 import { ObjectRegistry, objectTransaction } from '../object-service/registry'
-import { checkedPath, collision, draftError, ensureDirectory, existsIgnoringCase, filename, hashBytes, publishNewFile, stageFile, vaultRoot } from './files'
+import { checkedPath, collision, draftError, ensureDirectory, existsIgnoringCase, filename, hashBytes, publishNewFile, realParent, stageFile, vaultRoot } from './files'
 
 interface Dependencies {
   registry: ObjectRegistry
   index(vaultRoot: string, path: string): Promise<void>
   beforePublish?(): void | Promise<void>
 }
-const select = `SELECT draft_id AS draftId, vault_root AS vaultRoot, revision, content, content_hash AS contentHash,
+const select = `SELECT draft_id AS draftId, tab_id AS tabId, vault_root AS vaultRoot, revision, content, content_hash AS contentHash,
   origin, object_id AS objectId, base_version AS baseVersion, suggested_parent AS suggestedParent,
   source_canvas_json AS sourceCanvas, attachments_json AS attachments, title, state, finalize_json AS finalize,
   created_at AS createdAt, updated_at AS updatedAt FROM document_drafts`
@@ -42,9 +42,12 @@ export class DocumentDraftService {
     const row = this.db.prepare(`${select} WHERE draft_id=?`).get<Record<string, unknown>>(DraftIdSchema.parse(draftId))
     return row ? decode(row) : null
   }
-  list(root: string): DocumentDraft[] {
-    return this.db.prepare(`${select} WHERE vault_root=? AND state IN ('editing','conflict') ORDER BY updated_at,draft_id`)
-      .all<Record<string, unknown>>(vaultRoot(root)).map(decode)
+  list(root: string, tabId?: string): DocumentDraft[] {
+    if (tabId !== undefined) DraftIdSchema.parse(tabId)
+    return this.db.prepare(`${select} WHERE vault_root=?
+      ${tabId === undefined ? "AND state IN ('editing','conflict')" : 'AND tab_id=?'}
+      ORDER BY revision DESC,CASE WHEN state IN ('editing','conflict') THEN 0 ELSE 1 END,updated_at DESC,draft_id`)
+      .all<Record<string, unknown>>(...[vaultRoot(root), ...(tabId === undefined ? [] : [tabId])]).map(decode)
   }
   private require(draftId: string, expectedRevision?: number): DocumentDraft {
     const draft = this.read(draftId)
@@ -54,11 +57,11 @@ export class DocumentDraftService {
   }
   private write(draft: DocumentDraft, previousRevision: number): DocumentDraft {
     draft = DocumentDraftSchema.parse(draft)
-    this.db.prepare(`UPDATE document_drafts SET revision=?,content=?,content_hash=?,state=?,finalize_json=?,updated_at=?
-      WHERE draft_id=? AND revision=?`).run(draft.revision, draft.content, draft.contentHash, draft.state,
+    this.db.prepare(`UPDATE document_drafts SET tab_id=?,revision=?,content=?,content_hash=?,state=?,finalize_json=?,updated_at=?
+      WHERE draft_id=? AND revision=?`).run(draft.tabId, draft.revision, draft.content, draft.contentHash, draft.state,
       draft.finalize ? JSON.stringify(draft.finalize) : null, Date.now(), draft.draftId, previousRevision)
     const readback = this.require(draft.draftId)
-    if (readback.revision !== draft.revision || readback.contentHash !== draft.contentHash || readback.content !== draft.content ||
+    if (readback.tabId !== draft.tabId || readback.revision !== draft.revision || readback.contentHash !== draft.contentHash || readback.content !== draft.content ||
       readback.state !== draft.state || JSON.stringify(readback.finalize) !== JSON.stringify(draft.finalize)) {
       throw draftError('readback_mismatch', 'draft database readback mismatch')
     }
@@ -77,6 +80,11 @@ export class DocumentDraftService {
     throw Object.assign(draftError('base_conflict', 'document base version changed'), { receipt: receipt(saved) })
   }
 
+  private nextRevision(root: string, tabId: string | null): number {
+    const row = this.db.prepare('SELECT MAX(revision) AS revision FROM document_drafts WHERE vault_root=? AND tab_id=?')
+      .get<{ revision: number | null }>(root, tabId)
+    return (row?.revision ?? 0) + 1
+  }
   create(input: DraftCreate): DraftReceipt {
     const parsed = DraftCreateSchema.parse(input)
     const root = vaultRoot(parsed.vaultRoot)
@@ -87,7 +95,7 @@ export class DocumentDraftService {
     if (new Set(parsed.attachments.map(item => item.name.toLowerCase())).size !== parsed.attachments.length) throw draftError('invalid_attachment', 'duplicate attachment name')
     const now = Date.now()
     const draft: DocumentDraft = {
-      ...parsed, vaultRoot: root, draftId: randomUUID(), revision: 1, contentHash: hashBytes(parsed.content),
+      ...parsed, vaultRoot: root, draftId: randomUUID(), revision: this.nextRevision(root, parsed.tabId), contentHash: hashBytes(parsed.content),
       objectId: parsed.origin === 'document' ? parsed.objectId : null,
       baseVersion: parsed.origin === 'document' ? parsed.baseVersion : null,
       sourceCanvas: parsed.origin === 'canvas' ? parsed.sourceCanvas : null,
@@ -95,20 +103,23 @@ export class DocumentDraftService {
     }
     if (this.baseChanged(draft)) draft.state = 'conflict'
     this.db.prepare(`INSERT INTO document_drafts
-      (draft_id,vault_root,revision,content,content_hash,origin,object_id,base_version,suggested_parent,source_canvas_json,attachments_json,title,state,finalize_json,created_at,updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,?,?)`).run(draft.draftId, root, draft.revision, draft.content, draft.contentHash,
+      (draft_id,tab_id,vault_root,revision,content,content_hash,origin,object_id,base_version,suggested_parent,source_canvas_json,attachments_json,title,state,finalize_json,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,?,?)`).run(draft.draftId, draft.tabId, root, draft.revision, draft.content, draft.contentHash,
       draft.origin, draft.objectId, draft.baseVersion, draft.suggestedParent, draft.sourceCanvas ? JSON.stringify(draft.sourceCanvas) : null,
       JSON.stringify(draft.attachments), draft.title, draft.state, now, now)
     const saved = this.require(draft.draftId)
     if (saved.content !== draft.content || saved.contentHash !== draft.contentHash) throw draftError('readback_mismatch', 'created draft readback mismatch')
     return receipt(saved)
   }
-  save(draftId: string, expectedRevision: number, content: string): DraftReceipt {
+  save(draftId: string, expectedRevision: number, content: string, tabId: string): DraftReceipt {
     const draft = this.require(draftId, expectedRevision)
     z.string().parse(content)
-    if (draft.finalize || !['editing', 'conflict'].includes(draft.state)) throw draftError('invalid_state', 'draft is not editable; resume its pending finalization')
+    DraftIdSchema.parse(tabId)
+    if (!['editing', 'conflict'].includes(draft.state) || (draft.finalize && content !== draft.content)) throw draftError('invalid_state', 'draft is not editable; resume its pending finalization')
+    // Recovering a pending finalization may rebind its tab, but cannot revise its frozen intent.
+    if (draft.finalize) return receipt(this.write({ ...draft, tabId }, draft.revision))
     const changed = this.baseChanged(draft)
-    const saved = this.write({ ...draft, content, contentHash: hashBytes(content), revision: draft.revision + 1,
+    const saved = this.write({ ...draft, tabId, content, contentHash: hashBytes(content), revision: Math.max(draft.revision + 1, this.nextRevision(draft.vaultRoot, tabId)),
       state: changed || draft.state === 'conflict' ? 'conflict' : 'editing' }, draft.revision)
     if (saved.state === 'conflict') throw Object.assign(draftError('base_conflict', 'document base version changed'), { receipt: receipt(saved) })
     return receipt(saved)
@@ -136,7 +147,8 @@ export class DocumentDraftService {
     const registry = this.dependencies.registry
     const parent = request.parentObjectId ? registry.get(request.parentObjectId) : null
     if (request.parentObjectId && (!parent?.current_path || parent.status !== 'present')) throw draftError('invalid_parent', 'parent object is unavailable')
-    const parentPath = checkedPath(draft.vaultRoot, parent?.current_path ?? request.parentPath!)
+    // A picked folder may arrive through a system alias (/var vs /private/var); the parent exists, so check its real location.
+    const parentPath = checkedPath(draft.vaultRoot, realParent(parent?.current_path ?? request.parentPath!))
     const info = statSync(parentPath)
     registry.reconcile([parentPath], false)
     const parentObject = registry.find(parentPath)
@@ -224,7 +236,7 @@ export class DocumentDraftService {
         if (prior.content_hash !== item.contentHash) throw draftError('migration_conflict', 'migration key was already imported with different content')
         return { ...DraftReceiptSchema.parse(JSON.parse(prior.receipt_json)), migrationKey: item.migrationKey }
       }
-      const created = this.create({ vaultRoot: root, origin: 'new', content: item.content, title: item.title ?? '' })
+      const created = this.create({ tabId: item.tabId, vaultRoot: root, origin: 'new', content: item.content, title: item.title ?? '' })
       if (item.path) {
         // Legacy storage has no base version. Do not claim today's disk bytes were its base.
         const path = checkedPath(root, item.path)

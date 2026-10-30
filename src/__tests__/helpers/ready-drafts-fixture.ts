@@ -27,7 +27,7 @@ export function createDraftFixture() {
   const receipt = (draft: DocumentDraft): DraftReceipt => ({ draftId: draft.draftId, revision: draft.revision, contentHash: draft.contentHash })
   const create = async (input: DraftCreate) => {
     if (createGate) { const gate = createGate; createGate = undefined; gate.started(); await gate.wait }
-    const draft: DocumentDraft = { ...input, draftId: `draft-${++counter}`, revision: 1, contentHash: await contentHash(input.content),
+    const draft: DocumentDraft = { ...input, tabId: input.tabId ?? null, draftId: `draft-${++counter}`, revision: Math.max(0, ...[...f.drafts.values()].filter(d => d.tabId === input.tabId).map(d => d.revision)) + 1, contentHash: await contentHash(input.content),
       objectId: input.origin === 'document' ? input.objectId : null, baseVersion: input.origin === 'document' ? input.baseVersion : null,
       sourceCanvas: null, suggestedParent: null, attachments: [], title: input.title ?? '', state: 'editing', finalize: null, createdAt: 1, updatedAt: 1 }
     f.drafts.set(draft.draftId, draft)
@@ -35,15 +35,15 @@ export function createDraftFixture() {
   }
   f.api = {
     create,
-    save: async (id, revision, content) => {
+    save: async (id, revision, content, tabId) => {
       const draft = f.drafts.get(id)!
       if (draft.revision !== revision) return { ok: false, code: 'revision_conflict', message: 'revision changed' }
-      const next = { ...draft, revision: revision + 1, content, contentHash: await contentHash(content) }
+      const next = { ...draft, tabId, revision: revision + 1, content, contentHash: await contentHash(content) }
       f.drafts.set(id, next); f.saved.push(content)
       return { ok: true, value: receipt(next) }
     },
     read: async id => ({ ok: true, value: f.drafts.get(id) ?? null }),
-    list: async () => ({ ok: true, value: [...f.drafts.values()].filter(d => d.state === 'editing' || d.state === 'conflict') }),
+    list: async tabId => ({ ok: true, value: [...f.drafts.values()].filter(d => tabId === undefined ? d.state === 'editing' || d.state === 'conflict' : d.tabId === tabId).sort((a, b) => b.revision - a.revision || Number(!['editing', 'conflict'].includes(a.state)) - Number(!['editing', 'conflict'].includes(b.state))) }),
     discard: async (id, revision) => {
       const draft = f.drafts.get(id)!
       if (draft.revision !== revision) return { ok: false, code: 'revision_conflict', message: 'revision changed' }
@@ -56,7 +56,7 @@ export function createDraftFixture() {
       const result = []
       for (const item of items) {
         let saved = imports.get(item.migrationKey)
-        if (!saved) { saved = (await create({ origin: 'new', vaultRoot: '/vault', content: item.content })).value; imports.set(item.migrationKey, saved) }
+        if (!saved) { saved = (await create({ tabId: item.tabId, origin: 'new', vaultRoot: '/vault', content: item.content })).value; imports.set(item.migrationKey, saved) }
         result.push({ ...saved, migrationKey: item.migrationKey })
       }
       return { ok: true, value: result }

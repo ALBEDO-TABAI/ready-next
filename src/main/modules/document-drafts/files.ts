@@ -16,6 +16,10 @@ export function vaultRoot(path: string): string {
   if (!statSync(root).isDirectory()) throw draftError('invalid_path', 'vault must be a directory')
   return root
 }
+/** The real location of an existing parent; a missing parent keeps its given path so the caller reports it. */
+export function realParent(path: string): string {
+  try { return realpathSync(resolve(path)) } catch (error) { if (missing(error)) return resolve(path); throw error }
+}
 /** No symlink component is accepted, including dangling links and internal aliases. */
 export function checkedPath(root: string, path: string): string {
   if (realpathSync(root) !== root || lstatSync(root).isSymbolicLink()) throw draftError('invalid_path', 'vault location changed')

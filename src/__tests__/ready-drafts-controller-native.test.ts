@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import Database from 'better-sqlite3'
 import { mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
@@ -14,7 +15,8 @@ import { useDocTabs } from '../renderer/stores/useDocTabs'
 import { configureDrafts, drafts } from '../renderer/modules/document/drafts/runtime'
 
 // Real store, IPC handlers, SQLite and finalization; only the transport and index callback are supplied.
-test('Renderer to Main: interrupted finalize retries one intent, retains later input and restores after reopening SQLite', async () => {
+test('Renderer to Main: interrupted finalize retries one intent, retains later input and restores after reopening SQLite', async t => {
+  if (skipIfSqliteUnavailable(t, 'Draft controller')) return
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'ready-draft-renderer-native-')))
   const vault = join(directory, 'vault'); mkdirSync(vault)
   let db = new Database(join(directory, 'ready.db'))
@@ -34,7 +36,7 @@ test('Renderer to Main: interrupted finalize retries one intent, retains later i
     registerDocumentDraftIPC(ipc, service, () => ({ status: 'ready', root: vault, defaultSuggestion: vault }))
     const call = async <T,>(method: string, ...args: unknown[]): Promise<DraftResult<T>> => handlers.get(`documentDrafts:${method}`)!(null, ...args) as Promise<DraftResult<T>>
     configureDrafts({
-      api: () => ({ create: input => call('create', input), save: (...args) => call('save', ...args), list: () => call('list'), read: id => call('read', id),
+      api: () => ({ create: input => call('create', input), save: (...args) => call('save', ...args), list: tabId => call('list', tabId), read: id => call('read', id),
         discard: (...args) => call('discard', ...args), finalize: (...args) => call('finalize', ...args), importLegacy: items => call('importLegacy', items) }),
       tabs: () => useDocTabs.getState().tabs,
       patch: (id, patch) => useDocTabs.setState(state => ({ tabs: state.tabs.map(tab => tab.id === id && tab.kind !== 'library' ? { ...tab, ...patch } : tab) })),
@@ -52,10 +54,16 @@ test('Renderer to Main: interrupted finalize retries one intent, retains later i
     const firstId = useDocTabs.getState().tabs[0].draftId!
     await assert.rejects(drafts.finalize('native', { parentPath: vault, title: 'one', operationId: 'same-operation' }), /injected/)
     assert.equal(service.read(firstId)?.content, 'published')
+    // Recover an interrupted intent into a different tab without changing its operation/revision.
+    const original = service.read(firstId)!
+    useDocTabs.setState({ tabs: [{ id: 'recovered', path: null, title: 'recovered', content: '', isDirty: false }] })
+    await drafts.attach('recovered', original)
+    assert.equal(service.read(firstId)?.tabId, 'recovered')
+    assert.equal(service.read(firstId)?.revision, original.revision)
     fail = false
-    const pending = drafts.finalize('native', { parentPath: vault, title: 'must-not-create', operationId: 'different-ui-id' })
+    const pending = drafts.finalize('recovered', { parentPath: vault, title: 'must-not-create', operationId: 'different-ui-id' })
     await signal
-    useDocTabs.getState().updateTabContent('native', 'later typing')
+    useDocTabs.getState().updateTabContent('recovered', 'later typing')
     release()
     const saved = await pending
     assert.equal(saved.path, join(vault, 'one.md'))
@@ -66,7 +74,7 @@ test('Renderer to Main: interrupted finalize retries one intent, retains later i
     assert.equal(service.read(tab.draftId!)?.state, 'editing')
     assert.notEqual(tab.draftId, firstId)
     db.close(); db = new Database(join(directory, 'ready.db')); service = connect()
-    useDocTabs.setState({ tabs: [{ ...tab, content: '' }] })
+    useDocTabs.setState({ tabs: [{ ...tab, content: '', draftId: undefined, isDirty: false }] })
     await drafts.restore()
     assert.equal(useDocTabs.getState().tabs[0].content, 'later typing')
     assert.equal(service.list(vault).length, 1)

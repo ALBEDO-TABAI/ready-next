@@ -35,7 +35,7 @@ export async function migrateLegacyDrafts(storage: Storage, api: DocumentDraftAP
   for (const [id, item] of items) {
     const hash = await contentHash(item.content)
     const migrationKey = `renderer-tab:${id}:${hash}`
-    const receipts = unwrap(await api.importLegacy([{ migrationKey, contentHash: hash, content: item.content,
+    const receipts = unwrap(await api.importLegacy([{ tabId: id, migrationKey, contentHash: hash, content: item.content,
       ...(item.tab?.path ? { path: item.tab.path } : {}), title: item.tab?.title }]))
     const receipt = receipts.find(value => value.migrationKey === migrationKey)
     if (!receipt || receipt.contentHash !== hash) throw new Error('旧草稿迁移回执不一致，原文已保留')
