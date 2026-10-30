@@ -23,18 +23,28 @@ async function main() {
   fs.writeFileSync(html, '<html><body style="background:#4db6ac">M5-C native browser fixture</body></html>')
   const env = { ...process.env, READY_USER_DATA_DIR: profile }
   delete env.ELECTRON_RUN_AS_NODE; delete env.READY_START_HIDDEN
-  const app = await _electron.launch({ executablePath: require('electron'), args: [process.cwd()], cwd: process.cwd(), env })
-  try {
-    const page = await app.firstWindow()
+  // The first window can be a transient one; wait for the workbench renderer, and relaunch instead of reloading.
+  let app, page
+  const launch = async () => {
+    app = await _electron.launch({ executablePath: require('electron'), args: [process.cwd()], cwd: process.cwd(), env })
+    const deadline = Date.now() + 60000
+    page = undefined
+    while (!page && Date.now() < deadline) {
+      page = app.windows().find(candidate => candidate.url().includes('/renderer/index.html'))
+      if (!page) await new Promise(resolve => setTimeout(resolve, 100))
+    }
+    assert.ok(page, 'Ready Next renderer did not appear')
     await page.waitForFunction(() => Boolean(window.electronAPI?.documentPages))
+  }
+  await launch()
+  try {
     await page.evaluate(async root => {
       const result = await window.electronAPI.vault.set(root)
       if (result.status !== 'ready') throw new Error('无法打开测试资料库')
       localStorage.setItem('ready-workspace-root', root)
       localStorage.setItem('ready-pinned-folders', JSON.stringify([root]))
     }, vault)
-    await page.reload()
-    await page.waitForFunction(() => Boolean(window.electronAPI?.documentPages))
+    await app.close(); await launch()
     const ids = await page.evaluate(async root => {
       const create = async (title, content) => {
         const result = await window.electronAPI.documentPages.operate({ type: 'create', root, parentPath: root, title, content, operationId: crypto.randomUUID() })
@@ -95,6 +105,6 @@ async function main() {
     const shot = await app.evaluate(async ({ BrowserWindow }) => (await BrowserWindow.getAllWindows().find(win => win.isVisible()).capturePage()).toPNG().toString('base64'))
     fs.writeFileSync(path.join(temporary, 'window.png'), Buffer.from(shot, 'base64'))
     console.log(`PASS M5-C real-window acceptance: ${temporary}`)
-  } finally { await app.close() }
+  } finally { if (app) await app.close() }
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })

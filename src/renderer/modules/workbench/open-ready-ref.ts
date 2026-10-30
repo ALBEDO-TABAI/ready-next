@@ -36,10 +36,12 @@ export async function openReadyRef(input: string | ReadyRef, fromMode?: Workbenc
     case 'file': {
       const location = await window.electronAPI.objects.locate(ref.id)
       if (!location) throw new Error('引用文档已不存在')
-      if (ref.anchor) throw new Error('此文档锚点暂不支持定位')
+      // A missing heading or block still opens the page; only the scroll target is dropped.
+      const reveal = ref.anchor ? await anchorLines(location.path, ref.anchor) : null
       rememberReferenceOrigin(origin, 'document')
       useWorkspace.getState().selectFile(location.path)
       useDocTabs.getState().openTab(location.path)
+      if (reveal) useDocTabs.getState().setPendingReveal({ path: location.path, ...reveal, requestedAt: Date.now() })
       requestWorkbenchModeOpen('document')
       return
     }
@@ -98,4 +100,29 @@ export async function openIndexedSearchResult(item: { path: string; sourceType: 
   const matches = kinds[item.sourceType] === parsed.ref.kind || (item.sourceType === 'document' && parsed.ref.kind === 'book-location')
   if (!matches) throw new Error('搜索结果类型与地址不符')
   await openReadyRef(parsed.ref)
+}
+
+/** Source lines of a page anchor: a heading (#标题) or a block id (#^id), read from the open buffer or the file. */
+export async function anchorLines(path: string, anchor: string): Promise<{ lineStart: number; lineEnd: number; sectionTitle?: string } | null> {
+  const open = useDocTabs.getState().tabs.find(tab => tab.path === path)
+  let content = open && open.kind !== 'library' ? open.content : undefined
+  if (!content) {
+    const read = await window.electronAPI.document.readFile(path)
+    content = read.success ? read.content ?? (read.data && 'content' in read.data ? read.data.content : undefined) : undefined
+    if (typeof content !== 'string') return null
+  }
+  const lines = content.split(/\r\n|\n|\r/)
+  if (anchor.startsWith('^')) {
+    const id = anchor.slice(1)
+    const index = lines.findIndex(line => line.trimEnd().endsWith(`^${id}`) && /(^|\s)\^[\w-]+$/.test(line.trimEnd()))
+    if (index < 0) return null
+    // A standalone ^id line labels the block above it; otherwise the id ends the block's last line.
+    let end = index, start = index
+    if (/^\s*\^[\w-]+\s*$/.test(lines[index])) { end = index - 1; while (end > 0 && !lines[end].trim()) end--; start = end }
+    while (start > 0 && lines[start - 1].trim()) start--
+    return { lineStart: start + 1, lineEnd: end + 1 }
+  }
+  const wanted = anchor.trim().toLowerCase()
+  const index = lines.findIndex(line => /^#{1,6}\s/.test(line) && line.replace(/^#{1,6}\s+/, '').replace(/\s+#+\s*$/, '').trim().toLowerCase() === wanted)
+  return index < 0 ? null : { lineStart: index + 1, lineEnd: index + 1, sectionTitle: anchor }
 }

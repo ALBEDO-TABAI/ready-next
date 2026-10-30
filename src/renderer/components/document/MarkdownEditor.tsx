@@ -940,7 +940,19 @@ export default function MarkdownEditor({
       surface.scrollTop = Math.max(0, Math.min(Math.round(top), Math.max(0, surface.scrollHeight - surface.clientHeight)))
     }
 
+    // A freshly opened tab may not have its body yet; keep the reveal until there is something to land on.
+    if (!tab.content) return
     requestAnimationFrame(() => {
+      // The page view marks each block with its source line: land on the block that holds the target line.
+      const blocks = Array.from(surface.querySelectorAll<HTMLElement>('[data-ready-block-source-line]'))
+      const targetBlock = [...blocks].reverse().find((block) => Number(block.dataset.readyBlockSourceLine) <= targetLine)
+      if (targetBlock) {
+        const containerTop = surface.getBoundingClientRect().top
+        scrollToTop(targetBlock.getBoundingClientRect().top - containerTop + surface.scrollTop - 8)
+        targetBlock.animate?.([{ backgroundColor: 'var(--ready-reveal-flash, rgba(232, 64, 31, 0.12))' }, { backgroundColor: 'transparent' }], { duration: 1200, easing: 'ease-out' })
+        setPendingReveal(null)
+        return
+      }
       const headings = Array.from(surface.querySelectorAll<HTMLElement>('[data-ready-heading-title]'))
       const targetHeading = [...headings].reverse().find((heading) => (getPreviewHeadingSourceLine(heading) || 1) <= targetLine)
         || headings[0]
@@ -958,7 +970,7 @@ export default function MarkdownEditor({
       scrollToTop(ratio * Math.max(0, surface.scrollHeight - surface.clientHeight))
       setPendingReveal(null)
     })
-  }, [activeRevealTarget, setPendingReveal, viewMode])
+  }, [activeRevealTarget, setPendingReveal, tab.content, viewMode])
 
   const blockingLoadError = Boolean(loadError && tab.content.length === 0)
 

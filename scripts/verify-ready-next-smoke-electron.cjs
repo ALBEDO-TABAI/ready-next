@@ -98,37 +98,43 @@ async function checkCalendarLayers(page, root) {
       window.__layerDrag.push(`${type}@${target?.closest('[data-layer-day]')?.getAttribute('data-layer-day') ?? target?.tagName}:${event.dataTransfer?.dropEffect ?? ''}`)
     }, true)
   })
-  const dropDay = page.locator('[data-layer-day="2026-11-01"]').first()
+  // In a narrow calendar the context panel floats over the right-hand days, so drop on the leftmost day.
+  const dropDay = page.locator('[data-layer-day="2026-10-30"]').first()
   const geometry = await page.evaluate(({ source, target }) => {
-    const at = (box) => { const el = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2); return `${el?.tagName}.${String(el?.className || '').slice(0, 30)}@${el?.closest('[data-layer-day]')?.getAttribute('data-layer-day')}:${el?.getAttribute('data-layer-entry') ?? ''}` }
+    const at = (box) => {
+      const el = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)
+      const chain = []; for (let node = el; node && chain.length < 6; node = node.parentElement) chain.push(`${node.tagName}.${String(node.className || '').slice(0, 24)}[${node.getAttribute('role') || node.getAttribute('aria-label') || node.getAttribute('data-testid') || ''}]`)
+      return `${chain.join(' < ')}@${el?.closest('[data-layer-day]')?.getAttribute('data-layer-day')}:${(el?.textContent || '').slice(0, 30)}`
+    }
     const chip = document.querySelector(source), day = document.querySelector(target)
     const a = chip?.getBoundingClientRect(), b = day?.getBoundingClientRect()
     return { chip: a && [Math.round(a.x), Math.round(a.y), Math.round(a.width), Math.round(a.height), at(a)], day: b && [Math.round(b.x), Math.round(b.y), Math.round(b.width), Math.round(b.height), at(b)], viewport: [innerWidth, innerHeight] }
-  }, { source: `[data-layer-entry="page:${id.objectId}"]`, target: '[data-layer-day="2026-11-01"]' })
+  }, { source: `[data-layer-entry="page:${id.objectId}"]`, target: '[data-layer-day="2026-10-30"]' })
+  await page.screenshot({ path: path.join(os.tmpdir(), 'ready-next-smoke-c8-before-drag.png') }).catch(() => {})
   await chip.dragTo(dropDay)
   // waitForFunction does not await an async predicate, so poll the service and the disk from here.
   const moveDeadline = Date.now() + 10000
   let dragged = fs.readFileSync(source, 'utf8')
   while (Date.now() < moveDeadline) {
     const shown = await page.evaluate(async () => {
-      const result = await window.electronAPI.calendarLayers.query({ from: '2026-11-01', to: '2026-11-02', timeZone: 'Asia/Tokyo' })
-      return result.ok && result.value.some(entry => entry.title === 'c8-layer' && entry.date === '2026-11-01')
+      const result = await window.electronAPI.calendarLayers.query({ from: '2026-10-30', to: '2026-10-31', timeZone: 'Asia/Tokyo' })
+      return result.ok && result.value.some(entry => entry.title === 'c8-layer' && entry.date === '2026-10-30')
     })
     dragged = fs.readFileSync(source, 'utf8')
-    if (shown && dragged.includes('2026-11-01')) break
+    if (shown && dragged.includes('2026-10-30')) break
     await page.waitForTimeout(100)
   }
   const layerAlerts = await page.locator('[data-layer-day] [role="alert"]').allTextContents()
   // Diagnostics only when the drag did not land: the entry as the service sees it, and a direct service move.
-  const diagnosis = dragged.includes('2026-11-01') ? null : await page.evaluate(async () => {
+  const diagnosis = dragged.includes('2026-10-30') ? null : await page.evaluate(async () => {
     const range = { from: '2026-10-28', to: '2026-11-04', timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }
     const query = await window.electronAPI.calendarLayers.query(range)
     const entry = query.ok ? query.value.find(item => item.title === 'c8-layer') : null
     const chips = [...document.querySelectorAll('[data-layer-entry]')].map(chip => [chip.getAttribute('data-layer-entry'), chip.closest('[data-layer-day]')?.getAttribute('data-layer-day'), chip.getAttribute('draggable')])
-    const move = entry ? await window.electronAPI.calendarLayers.move({ range, id: entry.id, expectedVersion: entry.version, date: '2026-11-01' }) : null
+    const move = entry ? await window.electronAPI.calendarLayers.move({ range, id: entry.id, expectedVersion: entry.version, date: '2026-10-30' }) : null
     return { range, query: query.ok ? null : query, entry, chips, events: window.__layerDrag, move }
   })
-  ok('C8 drag changes only the source date', dragged === '---\ndate: 2026-11-01\n---\nC8 layer smoke\n', JSON.stringify({ dragged, layerAlerts, diagnosis, geometry }))
+  ok('C8 drag changes only the source date', dragged === '---\ndate: 2026-10-30\n---\nC8 layer smoke\n', JSON.stringify({ dragged, layerAlerts, diagnosis, geometry }))
 }
 
 // I2: exercise a real file-tree open, the Ready move command, the live watcher and restart.
