@@ -1,6 +1,6 @@
 import type { WorkbenchMode } from '../../stores/useMode'
 import { parseReadyUri, ReadyRefSchema, type ReadyRef } from '../../../shared/ready-ref'
-import { originalToSeconds } from '../../../main/modules/calendar-engine/calendar-row-codec'
+import { calendarEventReferenceId } from '../../../shared/calendar-event-identity'
 import { revealRSSReference } from '../rss/reveal-reference'
 import { openWebpageInBrowser } from '../browser/openWebpageInBrowser'
 import { useWorkspace } from '../../stores/useWorkspace'
@@ -39,13 +39,7 @@ export async function openReadyRef(input: string | ReadyRef, fromMode?: Workbenc
       return
     }
     case 'event': {
-      let id = ref.id
-      if (ref.occurrence !== undefined) {
-        const original = /^-?\d+$/.test(ref.occurrence) ? Number(ref.occurrence) : ref.occurrence
-        if (typeof original === 'string') ReadyRefSchema.parse({ kind: 'day', date: original })
-        else if (!Number.isSafeInteger(original)) throw new Error('日程实例无效')
-        id = `${id}#${originalToSeconds(original)}`
-      }
+      const id = calendarEventReferenceId(ref)
       const result = await window.electronAPI.calendar.revealEvent(id)
       if (!result.success) throw new Error(result.error || '日程无法打开')
       rememberReferenceOrigin(origin, 'calendar')

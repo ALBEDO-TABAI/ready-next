@@ -1,5 +1,4 @@
 import { rssQueryKey } from '../modules/rss/workspace-query'
-import { persistableCalendarEventId } from '../../shared/calendar-event-identity'
 import type { SendScopedResourceSelection } from '../../shared/ipc-contracts/agent-runtime'
 import { useCalendarSession } from './useCalendarSession'
 import { useMode } from './useMode'
@@ -31,13 +30,13 @@ export function collectWorkbenchSurfaceResources(): SendScopedResourceSelection[
         end: calendar.visibleRangeEnd,
       })
     }
-    const persistableEventId = persistableCalendarEventId(calendar.selectedEventId)
-    if (persistableEventId) {
+    const selectedEventId = calendar.selectedEventId?.trim()
+    if (selectedEventId) {
       resources.push({
         kind: 'calendar_event',
-        id: `calendar-event-${persistableEventId}`,
+        id: `calendar-event-${selectedEventId}`,
         name: calendar.selectedEventTitle || '日程',
-        eventId: persistableEventId,
+        eventId: selectedEventId,
       })
     }
   }

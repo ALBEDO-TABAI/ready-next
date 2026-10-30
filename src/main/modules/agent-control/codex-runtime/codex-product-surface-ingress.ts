@@ -1,7 +1,10 @@
+import { isoDate } from '../../../../shared/calendar/dates'
+import { dayOf } from '../../../../shared/calendar/tz'
+import { toReadyUri } from '../../../../shared/ready-ref'
 import { calendarRecordToEvent } from '../../calendar-engine/calendar-row-codec'
 import { createHash } from 'node:crypto'
 
-import { persistableCalendarEventId } from '../../../../shared/calendar-event-identity'
+import { calendarEventReadyRef } from '../../../../shared/calendar-event-identity'
 import type {
   CodexCurrentDocumentAnchor,
   SendScopedRequest,
@@ -55,6 +58,14 @@ export function trustedBrowserReferenceInput(
 
 export function trustedCalendarReferenceInput(event: NonNullable<ReturnType<DatabaseManager['calendar']['getCalendarEventById']>>): CodexResolvedInlineResource {
   const details = calendarRecordToEvent(event)
+  // Instance records carry projected times; a generated all-day instance can still
+  // carry its series' date columns. Read the dates of the resolved instance.
+  if (details.allDay && event.id.includes('#')) {
+    details.start = isoDate(dayOf(event.start_time * 1000, details.timeZone || 'UTC'))
+    details.end = isoDate(dayOf(event.end_time * 1000, details.timeZone || 'UTC'))
+  }
+  const ref = calendarEventReadyRef(event.id, details.allDay)
+  if (!ref) throw new Error('codex_explicit_calendar_reference_unavailable')
   const canonical = {
     id: event.id,
     calendarId: event.calendar_id,
@@ -81,12 +92,12 @@ export function trustedCalendarReferenceInput(event: NonNullable<ReturnType<Data
   }
   return {
     name: event.title || '日程',
-    path: `calendar-event://${event.id}`,
+    path: toReadyUri(ref),
     text: [
       '用户明确引用的日程（由 Ready 主进程现场读取）：',
       `标题：${event.title || '(无标题日程)'}`,
-      `开始：${new Date(event.start_time * 1000).toISOString()}`,
-      `结束：${new Date(event.end_time * 1000).toISOString()}`,
+      `开始：${details.allDay ? details.start : new Date(event.start_time * 1000).toISOString()}`,
+      `结束：${details.allDay ? details.end : new Date(event.end_time * 1000).toISOString()}`,
       `全天：${event.all_day === 1 ? '是' : '否'}`,
       event.location ? `地点：${event.location}` : null,
       event.description ? `备注：${event.description}` : null,

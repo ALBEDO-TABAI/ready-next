@@ -240,7 +240,7 @@ describe('document widget target context', () => {
         {
           id: 'cal-1',
           name: '周会',
-          path: 'calendar-event://event-1',
+          path: 'ready://calendar/event/event-1',
           type: 'text',
           size: 12,
           ext: '.calendar',

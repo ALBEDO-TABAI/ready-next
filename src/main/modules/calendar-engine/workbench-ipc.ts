@@ -1,4 +1,5 @@
 import { prepareStandaloneImport, applyStandaloneImport } from './standalone-import'
+import { readCalendarAttachmentDisplayRefs } from './ready-ref-migration'
 import { calendarErrorMessage } from './calendar-error'
 import { BrowserWindow, app, ipcMain, shell } from 'electron'
 import { readCalendarFile, saveCalendarFile } from './calendar-files'
@@ -15,6 +16,12 @@ export function setupCalendarWorkbenchIPC(): void {
     catch(error){return {success:false,mock:false,error:calendarErrorMessage(error)}}
   }
   ipcMain.handle('calendar:revealEvent',receipt((id:string)=>{if(!store().getCalendarEventReference(id))throw new Error('日程已不存在');requestCalendarNavigation({kind:'event',eventId:id});return true}))
+  ipcMain.handle('calendar:getAttachmentDisplayRefs',receipt((messageIds:unknown)=>{
+    if(!Array.isArray(messageIds)||messageIds.some(id=>typeof id!=='string'||!id.trim()||id!==id.trim()))throw new Error('消息 ID 列表无效')
+    const db=getDatabase().getRawDb()
+    if(!db)throw new Error('历史数据库不可用')
+    return readCalendarAttachmentDisplayRefs(db,messageIds)
+  }))
   ipcMain.handle('calendar:prepareStandaloneImport',receipt(prepareStandaloneImport))
   ipcMain.handle('calendar:applyStandaloneImport',receipt(applyStandaloneImport))
   ipcMain.handle('calendar:snapshot',receipt(()=>store().snapshot()))

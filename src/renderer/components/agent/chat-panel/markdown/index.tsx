@@ -1,5 +1,6 @@
 import { parseRSSCitationUrl, type RSSNavigableReference } from '../../../../../shared/rss-reference'
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
+import { openReadyRef } from '../../../../modules/workbench/open-ready-ref'
 import { MessageCodeBlock } from './MessageCodeBlock'
 import { LocalFileChip, LocalMentionChip } from './LocalReferenceChip'
 import {
@@ -14,11 +15,7 @@ import {
 // ---------------------------------------------------------------------------
 //
 // Stage V V1.2 — extracted from ChatPanel.tsx (was lines 88-98 + 173-522).
-// This module owns the pure markdown rendering pipeline used by ChatMessages
-// via ChatPanel's `renderMarkdown` callback. It has zero `useAgent` / store /
-// IPC dependencies — purely string -> ReactNode rendering. Behavior must
-// remain byte-for-byte identical to the previous inline implementation; the
-// V6 fixture (`chat-panel-baseline.test.ts`) snapshot diff must stay at 0.
+// This module owns Markdown rendering; calendar links delegate navigation to openReadyRef.
 
 export interface MarkdownNode {
   type: 'text' | 'bold' | 'italic' | 'code' | 'codeblock' | 'header' | 'bullet' | 'ordered-list' | 'table' | 'br'
@@ -354,7 +351,17 @@ function splitBareUrl(raw: string): { href: string; trailing: string } {
   return { href: raw.slice(0, end), trailing: raw.slice(end) }
 }
 
+function CalendarReferenceLink({ href, label }: { href: string; label: string }) {
+  const [error, setError] = useState<string | null>(null)
+  return <><a href={href} className="ready-agent-link" onClick={event => {
+    event.preventDefault()
+    setError(null)
+    void openReadyRef(href).catch(error => setError(error instanceof Error ? error.message : String(error)))
+  }}>{label}</a>{error && <span role="alert">{error}</span>}</>
+}
+
 function externalLink(href: string, label: string, key: string, onRSSReference?: (reference: RSSNavigableReference) => void): React.ReactNode {
+  if (href.startsWith('ready://calendar/')) return <CalendarReferenceLink key={key} href={href} label={label} />
   if (href.startsWith('ready-rss:')) {
     const reference = parseRSSCitationUrl(href)
     return reference && onRSSReference ? <button key={key} className="rss-citation-link" onClick={() => onRSSReference(reference)}>{label === href ? '查看 RSS 引用' : label}</button> : <span key={key}>{label}</span>
@@ -436,7 +443,7 @@ export function renderInline(
   const parts: React.ReactNode[] = []
   // Ordering is significant: code consumes URLs before the bare-URL branch;
   // labelled links consume their URL before that same branch.
-  const regex = /(`([^`]+)`)|(\[([^\]]+)\]\(((?:https?:\/\/|file:\/\/|ready-rss:\/\/)[^\s)]+)\))|(\*\*(.+?)\*\*)|(\*(.+?)\*)|((?:https?|ready-rss):\/\/[^\s<>"'`]+)/g
+  const regex = /(`([^`]+)`)|(\[([^\]]+)\]\(((?:https?:\/\/|file:\/\/|ready-rss:\/\/|ready:\/\/calendar\/)[^\s)]+)\))|(\*\*(.+?)\*\*)|(\*(.+?)\*)|((?:https?:\/\/|ready-rss:\/\/|ready:\/\/calendar\/)[^\s<>"'`]+)/g
   let lastIndex = 0
   let match: RegExpExecArray | null
   let key = 0

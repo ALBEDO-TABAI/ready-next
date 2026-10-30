@@ -129,7 +129,7 @@ test('request envelope records calendar event references as structured resources
   const calendarResource = envelope.resources.find((resource) => resource.kind === 'calendar_event')
   assert.ok(calendarResource)
   assert.equal(calendarResource.name, '周会')
-  assert.equal(calendarResource.path, 'calendar-event://event-1')
+  assert.equal(calendarResource.path, 'ready://calendar/event/event-1')
   assert.equal(calendarResource.source, 'calendar_context')
   assert.equal(calendarResource.canRead, true)
   assert.equal(calendarResource.canWrite, false)
@@ -213,4 +213,15 @@ test('an RSS reference label is data: a title that looks like a file never becom
   assert.equal(envelope.primaryInstruction.includes('article.md'), false)
   assert.deepEqual(envelope.resources.map((resource) => resource.kind), ['rss_reference'])
   assert.equal(envelopeHasLocalDocumentResource(envelope), false)
+})
+
+test('calendar text blocks retain original timed/all-day occurrences and do not invent missing IDs', () => {
+  for (const [eventId, allDay, expected] of [
+    ['series#1793318400', '否', 'ready://calendar/event/series#occurrence=1793318400000'],
+    ['series#1793318400', '是', 'ready://calendar/event/series#occurrence=2026-10-30'],
+    ['', '是', null],
+  ]) {
+    const envelope = buildRequestEnvelope({ userText: `Read\n\n### 日程事件引用\n- 标题: Test\n- eventId: ${eventId}\n- 全天: ${allDay}` })
+    assert.equal(envelope.resources.find(r => r.kind === 'calendar_event')?.path, expected)
+  }
 })

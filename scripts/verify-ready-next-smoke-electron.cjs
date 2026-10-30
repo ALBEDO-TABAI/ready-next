@@ -49,6 +49,17 @@ async function launch(profile) {
   throw new Error('Ready Next renderer did not start')
 }
 
+// The workbench listens for mode requests only after it mounts; repeat the request until the scene is current.
+async function requestMode(page, mode) {
+  const scene = page.locator(`[data-workbench-mode-panel="${mode}"][data-mode-visual-state="current"]`)
+  const deadline = Date.now() + 30000
+  while (!(await scene.count())) {
+    if (Date.now() > deadline) throw new Error(`${mode} mode did not become current`)
+    await page.evaluate(mode => window.dispatchEvent(new CustomEvent('ready:workbench-mode-change-request', { detail: { mode, placement: 'open', presentation: 'immediate' } })), mode)
+    await page.waitForTimeout(400)
+  }
+}
+
 // I2: exercise a real file-tree open, the Ready move command, the live watcher and restart.
 async function checkObjectPresentationBeforeRestart(app, page, root) {
   const from = path.join(root, 'i2-a.md'), internal = path.join(root, 'i2-b.md'), external = path.join(root, 'i2-c.md')
@@ -67,7 +78,7 @@ async function checkObjectPresentationBeforeRestart(app, page, root) {
     localStorage.setItem('ready-document-reading-positions-v1', JSON.stringify([{ key: from, updatedAt: Date.now(), top: 400, ratio: 0.1, maxScroll: 4000, anchorTitle: null, anchorOrdinal: null, anchorProgress: null }]))
   }, { root, from })
   await page.reload()
-  await page.evaluate(() => window.dispatchEvent(new CustomEvent('ready:workbench-mode-change-request', { detail: { mode: 'document', placement: 'open', presentation: 'immediate' } })))
+  await requestMode(page, 'document')
   // The vault is a pinned folder that starts collapsed; expand it the way a person would.
   const fileRow = page.getByText('i2-a.md', { exact: true }).first()
   if (!await fileRow.isVisible().catch(() => false)) await page.getByText(path.basename(root), { exact: true }).first().click({ timeout: 20000 })
@@ -92,7 +103,7 @@ async function checkObjectPresentationBeforeRestart(app, page, root) {
 }
 
 async function checkObjectPresentationAfterRestart(page, identity) {
-  await page.evaluate(() => window.dispatchEvent(new CustomEvent('ready:workbench-mode-change-request', { detail: { mode: 'document', placement: 'open', presentation: 'immediate' } })))
+  await requestMode(page, 'document')
   await page.waitForFunction(({ objectId, path }) => JSON.parse(localStorage.getItem('ready-doc-tabs-v2') || '{}').state?.tabs.some(tab => tab.objectId === objectId && tab.path === path && tab.objectBinding?.status === 'resolved'), identity)
   const restored = await page.evaluate(({ objectId }) => ({
     tabs: JSON.parse(localStorage.getItem('ready-doc-tabs-v2')).state.tabs.filter(tab => tab.objectId === objectId),
@@ -109,6 +120,133 @@ async function checkObjectPresentationAfterRestart(page, identity) {
   const iconShown = await page.waitForFunction(name => [...document.querySelectorAll('[title]')]
     .some(el => el.getAttribute('title').startsWith(name) && el.textContent.includes('🐙')), path.basename(identity.path), { timeout: 15000 }).then(() => true, () => false)
   ok('C2 the reopened tab visibly retains its custom icon', iconShown)
+}
+
+// R3b: calendar-union currently has no reference item in its chip context menu,
+// and its pointer drag edits dates rather than exporting a chat payload. Construct
+// the occurrence from production calendar IPC, then exercise the real composer
+// drop handler and attachment button. No model request or renderer-store injection.
+async function checkCalendarReference(page) {
+  let reference
+  await requestMode(page, 'calendar')
+  await page.locator('.ready-calendar').waitFor()
+  if (!reference) {
+    reference = await page.evaluate(async () => {
+      const api = window.electronAPI.calendar
+      const snapshot = await api.snapshot()
+      if (!snapshot.success) throw Error(snapshot.error)
+      const calendar = snapshot.data.calendars.find(c => c.primary && !c.readOnly)
+      if (!calendar) throw Error('No writable calendar')
+      const start = Date.parse('2026-11-03T09:00:00Z'), second = start + 86400000
+      const id = 'r3b-repeat', title = 'R3b second occurrence'
+      const saved = await api.mutate({ type: 'create', event: {
+        id, uid: id + '@test', calendarId: calendar.id, title, allDay: false,
+        start, end: start + 3600000, timeZone: 'UTC', rrule: 'FREQ=DAILY;COUNT=3',
+        status: 'confirmed', transparency: 'opaque', createdAt: start, updatedAt: start,
+      } }, {})
+      if (!saved.success) throw Error(saved.error)
+      const rows = await api.getEvents(new Date(second), new Date(second + 86400000), 'UTC')
+      if (!rows.success) throw Error(rows.error)
+      const eventId = `${id}#${second / 1000}`
+      const occurrence = rows.data.find(row => row.id === eventId)
+      if (!occurrence || occurrence.startTime * 1000 !== second) throw Error('Second occurrence readback failed')
+      return { type: 'calendar-event', name: title, title, eventId, allDay: false,
+        startTime: new Date(second).toISOString(), endTime: new Date(second + 3600000).toISOString(), second, seriesId: id }
+    })
+  }
+  // Exercise draft drop once; the post-restart check below clicks persisted history.
+  await page.locator('[data-chat-composer-shell="true"]').waitFor()
+  await page.locator('[data-chat-composer-shell="true"]').evaluate((element, payload) => {
+    const transfer = new DataTransfer()
+    transfer.setData('application/x-ready-drag', JSON.stringify(payload))
+    element.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }))
+  }, reference)
+  const attachment = page.locator('.chat-reference-chip button').filter({ hasText: reference.title }).first()
+  await attachment.waitFor()
+  // Clear any existing selection so a stale selected chip cannot satisfy the check.
+  await page.locator('.ready-calendar').focus()
+  await page.keyboard.press('Escape')
+  await attachment.click()
+  await page.waitForFunction(({ seriesId, second }) => [...document.querySelectorAll('.ready-calendar .chip.selected')]
+    .some(el => el.getAttribute('data-key') === `${seriesId}|${second}`), reference)
+  const selectedStart = await page.locator('.ready-calendar .chip.selected').first().getAttribute('data-key')
+  ok('C1 calendar attachment selects the second occurrence start', Number(selectedStart.split('|')[1]) === reference.second, selectedStart)
+  return reference
+}
+
+// No local IPC writes arbitrary chat messages. Remote receive requires a bound
+// account, so seed through the real stores only after closing this throwaway app.
+// Closed scopes remain invisible by product contract; keep a separate closed
+// fixture for migration/readback, never reopen its tombstone to fake a UI pass.
+async function seedCalendarHistory(profile, reference) {
+  const realProfile = fs.realpathSync(profile)
+  const tempRoot = fs.realpathSync(os.tmpdir())
+  if (path.dirname(realProfile) !== tempRoot || !path.basename(realProfile).startsWith('ready-next-smoke-')) throw Error('Fixture requires an isolated smoke profile')
+  const dbPath = fs.realpathSync(path.join(realProfile, 'ready.db'))
+  if (path.dirname(dbPath) !== realProfile) throw Error('Fixture database escaped profile')
+  const { pathToFileURL } = require('node:url')
+  const { ChatStore } = await import(pathToFileURL(path.resolve('src/main/modules/database/chat-store.ts')).href)
+  const { toReadyUri } = await import(pathToFileURL(path.resolve('src/shared/ready-ref.ts')).href)
+  const Database = require('better-sqlite3')
+  const db = new Database(dbPath)
+  const history = { scopeId: 'r3c-saved-history', messageId: 'r3c-saved-message', title: 'R3c saved calendar history',
+    closedId: 'r3c-closed-history', closedMessageId: 'r3c-closed-message' }
+  try {
+    db.transaction(() => {
+      const chat = new ChatStore(() => db)
+      const attachment = { id: 'r3c-second', name: reference.title, source: 'calendar-event', type: 'text', size: 0, ext: '',
+        path: toReadyUri({ kind: 'event', id: reference.seriesId, occurrence: String(reference.second) }) }
+      chat.createConversation(history.scopeId, 'butler', history.title)
+      chat.addChatMessage(history.messageId, history.scopeId, 'user', 'R3c saved attachment before restart', new Date().toISOString(), { attachments: [attachment] }, 0)
+      chat.createConversation(history.closedId, 'butler', 'R3c closed calendar history')
+      chat.addChatMessage(history.closedMessageId, history.closedId, 'user', 'R3c immutable original', new Date().toISOString(), {
+        attachments: [{ ...attachment, path: 'calendar-event://' + encodeURIComponent(reference.eventId) },
+          { ...attachment, id: 'missing', name: 'Gone', path: 'calendar-event://missing' }],
+      }, 0)
+      db.prepare('UPDATE chat_conversations SET closed_at=? WHERE id=?').run(new Date().toISOString(), history.closedId)
+      // Simulate the pre-142 profile; the next real boot must build the mapping.
+      db.prepare('DELETE FROM migrations WHERE name=?').run('144_calendar_attachment_display_refs')
+    })()
+    return history
+  } finally { db.close() }
+}
+
+async function readChatMessages(page, id) {
+  // Chat persistence registers its IPC after the window loads; retry until the handler answers.
+  const deadline = Date.now() + 30000
+  for (;;) {
+    try { return await page.evaluate(id => window.electronAPI.chat.getMessages(id), id) }
+    catch (error) { if (!/No handler registered/.test(String(error)) || Date.now() > deadline) throw error }
+    await page.waitForTimeout(250)
+  }
+}
+
+async function checkCalendarHistoryAfterRestart(page, reference, history) {
+  const saved = await readChatMessages(page, history.scopeId)
+  ok('C1 saved chat attachment is read from persisted history after restart', saved.success && saved.data.some(row => row.id === history.messageId), JSON.stringify(saved))
+  await page.getByRole('button', { name: /当前会话：.*点击查看历史对话/ }).click()
+  // The title appears in the header and in the history list; either opens the conversation.
+  const row = page.locator('.chat-header-floating-menu').getByText(history.title, { exact: true }).first()
+  if (!await row.isVisible()) await page.getByRole('button', { name: '展开历史会话', exact: true }).first().click()
+  await row.click()
+  // The saved history repeats the reference; any enabled copy must open the same occurrence.
+  const attachment = page.locator('[data-chat-message-attachment="true"]:not([disabled])').filter({ hasText: reference.title }).first()
+  await attachment.waitFor()
+  // Clear selection; a restored calendar selection cannot satisfy the click check.
+  await requestMode(page, 'calendar')
+  await page.locator('.ready-calendar').focus()
+  await page.keyboard.press('Escape')
+  await attachment.click()
+  await page.waitForFunction(({ seriesId, second }) => [...document.querySelectorAll('.ready-calendar .chip.selected')]
+    .some(el => el.getAttribute('data-key') === `${seriesId}|${second}`), reference)
+  ok('C1 clicking persisted history after restart selects the second occurrence', true)
+  const display = await page.evaluate(id => window.electronAPI.calendar.getAttachmentDisplayRefs([id]), history.closedMessageId)
+  ok('C1 closed history migration survives real boot with resolved and unavailable mappings', display.success
+    && display.data[0]?.target.ref?.occurrence === String(reference.second)
+    && display.data[1]?.target.status === 'unlocatable', JSON.stringify(display))
+  const closed = await readChatMessages(page, history.closedId)
+  ok('C1 closed scope remains hidden under the current product contract', closed.success && closed.data.length === 0)
+  step('Closed-history UI click remains blocked by the product visibility contract; this is not a closed-history UI pass')
 }
 
 async function checkIdentityAndFastCard() {
@@ -135,11 +273,19 @@ async function checkIdentityAndFastCard() {
     const added = await withTimeout(page.evaluate(entry => window.electronAPI.browser.addFastCardItem(entry), item), 20000, 'add FastCard item')
     ok('C7 FastCard add returns a persisted receipt', added?.success === true && added.data?.id === item.id, JSON.stringify(added))
     const objectIdentity = await checkObjectPresentationBeforeRestart(app, page, created.root)
+    const calendarReference = await checkCalendarReference(page)
     step('close app')
     await withTimeout(app.close(), 150000, 'close app')
+    app = undefined
+    const seeded = spawnSync(require('electron'), ['--import', 'tsx', __filename, '--seed-calendar-history', profile, JSON.stringify(calendarReference)], {
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8', timeout: 30000,
+    })
+    if (seeded.status !== 0) throw Error(`Calendar history fixture failed: ${seeded.stderr || seeded.stdout}`)
+    const history = JSON.parse(seeded.stdout.trim())
 
     ;({ app, page } = await launch(profile))
     await checkObjectPresentationAfterRestart(page, objectIdentity)
+    await checkCalendarHistoryAfterRestart(page, calendarReference, history)
     const reopenedVault = await withTimeout(page.evaluate(() => window.electronAPI.vault.get()), 20000, 'read vault after restart')
     ok('D17 the vault setting survives a restart', reopenedVault.status === 'ready' && reopenedVault.root === created.root, JSON.stringify(reopenedVault))
     const listed = await withTimeout(page.evaluate(() => window.electronAPI.browser.listFastCardItems()), 20000, 'list FastCard items')
@@ -177,7 +323,11 @@ function checkDailyDataRefusal() {
   }
 }
 
-;(async () => {
+module.exports = { seedCalendarHistory }
+
+if (require.main === module && process.argv[2] === '--seed-calendar-history') {
+  seedCalendarHistory(process.argv[3], JSON.parse(process.argv[4])).then(result => console.log(JSON.stringify(result)), error => { console.error(error); process.exitCode = 1 })
+} else if (require.main === module) void (async () => {
   try {
     await checkIdentityAndFastCard()
     checkDailyDataRefusal()

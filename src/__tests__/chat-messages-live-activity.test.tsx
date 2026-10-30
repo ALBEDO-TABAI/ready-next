@@ -12,6 +12,7 @@ const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></
 
 Object.defineProperties(globalThis, {
   window: { value: dom.window, configurable: true },
+  CustomEvent: { value: dom.window.CustomEvent, configurable: true },
   document: { value: dom.window.document, configurable: true },
   HTMLElement: { value: dom.window.HTMLElement, configurable: true },
   Element: { value: dom.window.Element, configurable: true },
@@ -31,6 +32,7 @@ const channel = new Proxy({}, {
 })
 ;(dom.window as unknown as { electronAPI: Record<string, unknown> }).electronAPI = {
   agentInteraction: channel,
+  calendar: channel,
 }
 
 const ChatMessages = (await import('../renderer/components/agent/ChatMessages')).default
@@ -115,4 +117,77 @@ test('installed reply framing selects the real markdown surface rather than assu
   const targets = [...host.querySelectorAll('[data-liquid-scroll-root="chat-messages"] .ready-agent-prose')]
     .filter((element) => element.textContent?.trim() === marker)
   assert.equal(targets.length, 1)
+})
+
+
+test('R3c history renders mapped and unavailable attachments, and opens the mapped occurrence', async t => {
+  const { useAttachmentPreview } = await import('../renderer/components/agent/chat-panel/attachments-preview/use-attachment-preview')
+  const opened: string[] = []
+  const queried: string[][] = []
+  let resolve!: (value: unknown) => void
+  const pending = new Promise(r => { resolve = r })
+  const api = {
+    getAttachmentDisplayRefs: (ids: string[]) => { queried.push(ids); return pending },
+    revealEvent: async (id: string) => { opened.push(id); return { success: true } },
+  }
+  Object.defineProperty(dom.window.electronAPI, 'calendar', { value: api, configurable: true })
+  t.after(() => Object.defineProperty(dom.window.electronAPI, 'calendar', { value: channel, configurable: true }))
+  let preview!: ReturnType<typeof useAttachmentPreview>
+  const previewRoot = createRoot(document.createElement('div'))
+  function Preview() {
+    preview = useAttachmentPreview({ setActiveAttachmentPreview: value => assert.fail(value?.error || 'unexpected preview error'), setAttachmentPreviewLoading: () => {} })
+    return null
+  }
+  flushSync(() => previewRoot.render(createElement(Preview)))
+  t.after(() => flushSync(() => previewRoot.unmount()))
+  const attachments = [
+    { id: 'one', name: 'Second', path: 'calendar-event://old', type: 'text' as const, size: 0, ext: '' },
+    { id: 'two', name: 'Gone', path: 'calendar-event://gone', type: 'text' as const, size: 0, ext: '' },
+    { id: 'three', name: 'Missing（无法定位）', path: '', source: 'calendar-event' as const, description: '缺少事件身份', type: 'text' as const, size: 0, ext: '' },
+  ]
+  const original = JSON.stringify(attachments)
+  const host = renderMessages(t, {
+    isStreaming: false, pendingTaskRun: null, streamingMessageId: null,
+    messages: [{ id: 'closed-message', agent: 'butler', type: 'user', content: 'Saved', timestamp: new Date(), attachments }],
+    onAttachmentPreview: att => preview(att),
+  })
+  assert.deepEqual(queried, [['closed-message']])
+  assert.equal(host.querySelector<HTMLButtonElement>('[data-chat-message-attachment]')!.disabled, true)
+  resolve({ success: true, data: [
+    { messageId: 'closed-message', attachmentIndex: 0, target: { status: 'resolved', ref: { kind: 'event', id: 'timed', occurrence: '1793350800000' } } },
+    { messageId: 'closed-message', attachmentIndex: 1, target: { status: 'unlocatable', reason: '真实事件或原始实例不存在' } },
+  ] })
+  await new Promise(r => setTimeout(r, 30))
+  const buttons = host.querySelectorAll<HTMLButtonElement>('[data-chat-message-attachment]')
+  assert.equal(buttons[0].disabled, false)
+  assert.match(buttons[0].title, /ready:\/\/calendar\/event\/timed#occurrence=1793350800000/)
+  assert.match(buttons[1].textContent!, /无法定位/)
+  assert.match(buttons[1].title, /真实事件或原始实例不存在/)
+  assert.equal(buttons[1].disabled, true)
+  assert.equal(buttons[2].textContent, 'Missing（无法定位）')
+  assert.match(buttons[2].title, /缺少事件身份/)
+  assert.equal(buttons[2].disabled, true)
+  buttons[0].click(); buttons[1].click()
+  await new Promise(r => setTimeout(r, 20))
+  assert.deepEqual(opened, ['timed#1793350800'])
+  assert.equal(JSON.stringify(attachments), original)
+})
+
+test('R3c a failed mapping read is visible and cannot open the original attachment', async t => {
+  Object.defineProperty(dom.window.electronAPI, 'calendar', { configurable: true, value: {
+    getAttachmentDisplayRefs: async () => ({ success: false, error: '历史附件原值摘要不匹配' }),
+  } })
+  t.after(() => Object.defineProperty(dom.window.electronAPI, 'calendar', { value: channel, configurable: true }))
+  const host = renderMessages(t, {
+    isStreaming: false, pendingTaskRun: null, streamingMessageId: null,
+    messages: [{ id: 'failed-map', agent: 'butler', type: 'user', content: '', timestamp: new Date(),
+      attachments: [{ id: 'a', name: 'Saved', type: 'text', size: 0, ext: '', path: 'opaque-original' }] }],
+    onAttachmentPreview: () => assert.fail('must not open unverified history'),
+  })
+  await new Promise(r => setTimeout(r, 20))
+  const button = host.querySelector<HTMLButtonElement>('[data-chat-message-attachment]')!
+  assert.equal(button.disabled, true)
+  assert.match(button.textContent!, /读取失败/)
+  assert.match(button.title, /摘要不匹配/)
+  button.click()
 })

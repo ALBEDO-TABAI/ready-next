@@ -262,3 +262,21 @@ test('failed or late image imports never add a broken attachment or cross conver
     assert.deepEqual(useAgent.getState().attachments, [])
   })
 })
+
+test('calendar drag uses the same ReadyRef identity as right-click including all-day instances and placeholders', async () => {
+  for (const [eventId, allDay, path] of [
+    ['one', false, 'ready://calendar/event/one'],
+    ['one', true, 'ready://calendar/event/one'],
+    ['series#1793318400', false, 'ready://calendar/event/series#occurrence=1793318400000'],
+    ['series#1793318400', true, 'ready://calendar/event/series#occurrence=2026-10-30'],
+    [undefined, false, ''],
+  ] as const) {
+    setComposerSession('a')
+    await withMountedIntake({}, async handle => {
+      await handle.handleDrop(makeDropEvent({ readyPayload: { type: 'calendar-event', name: 'Meeting', eventId, allDay } }))
+      assert.equal(useAgent.getState().attachments[0]?.path, path)
+      assert.equal(useAgent.getState().attachments[0]?.eventId, eventId)
+      if (!eventId) assert.match(useAgent.getState().attachments[0].name, /无法定位/)
+    })
+  }
+})
