@@ -115,8 +115,9 @@ async function checkObjectPresentationAfterRestart(page, identity) {
   ok('C2 reopening retains one tab, appearance and reading position', restored.tabs.length === 1 && restored.appearance?.icon === '🐙' && restored.position?.top > 0, JSON.stringify(restored))
   await page.locator('.document-path-bar').getByText(identity.path, { exact: true }).waitFor({ timeout: 20000 })
   ok('C2 the visible document header shows the final path', true)
-  await page.waitForFunction(path => Array.from(document.querySelectorAll('[data-ready-document-scroll-key]')).some(scope =>
-    scope.getAttribute('data-ready-document-scroll-key') === path && [scope, ...scope.querySelectorAll('*')].some(element => element.scrollTop > 0)), identity.path, { timeout: 20000 })
+  // Scroll scopes are keyed by object id (path only for files without one).
+  await page.waitForFunction(({ path, objectId }) => Array.from(document.querySelectorAll('[data-ready-document-scroll-key]')).some(scope =>
+    [objectId, path].includes(scope.getAttribute('data-ready-document-scroll-key')) && [scope, ...scope.querySelectorAll('*')].some(element => element.scrollTop > 0)), identity, { timeout: 20000 })
   ok('C2 the reopened document visibly restores its reading position', true)
   // The document tab rail renders each tab with its title attribute; the custom icon is its visible glyph.
   const iconShown = await page.waitForFunction(name => [...document.querySelectorAll('[title]')]
