@@ -1,6 +1,5 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { basename, extname, join } from 'node:path'
-import { ReadyCanvasSchema } from '../../../shared/ready-canvas'
 import { readDocumentSource } from '../../../shared/document-operations'
 import { PageRootSchema, type PageNode, type PageRoot } from '../../../shared/document-pages'
 import { vaultRoot } from '../document-drafts/files'
@@ -11,8 +10,15 @@ export function readPageTree(input: PageRoot,
 ): PageNode {
   const root = vaultRoot(PageRootSchema.parse(input).path)
   if (root.split(/[\\/]/).includes('.ready')) throw new Error('Internal metadata is not a page root')
+  // Display metadata only: a foreign or damaged canvas is still listed under its file name, and opening it reports the problem.
+  const canvasFields = (path: string): Record<string, unknown> => {
+    try {
+      const ready = (JSON.parse(readFileSync(path, 'utf8')) as { ready?: unknown } | null)?.ready
+      return ready && typeof ready === 'object' && !Array.isArray(ready) ? ready as Record<string, unknown> : {}
+    } catch { return {} }
+  }
   const node = (path: string, kind: PageNode['kind'], position: number): PageNode => {
-    const name = basename(path), fields: Record<string, unknown> = kind === 'page' ? readDocumentSource(readFileSync(path, 'utf8')).frontmatter : kind === 'canvas' ? ReadyCanvasSchema.parse(JSON.parse(readFileSync(path, 'utf8'))).ready : {}
+    const name = basename(path), fields: Record<string, unknown> = kind === 'page' ? readDocumentSource(readFileSync(path, 'utf8')).frontmatter : kind === 'canvas' ? canvasFields(path) : {}
     return { ...identify(path), path, name, kind, title: typeof fields.title === 'string' ? fields.title : kind === 'page' || kind === 'canvas' ? name.slice(0, -extname(name).length) : name,
       icon: typeof fields.icon === 'string' ? fields.icon : undefined, cover: typeof fields.cover === 'string' ? fields.cover : undefined,
       children: [], hasChildren: false, position }

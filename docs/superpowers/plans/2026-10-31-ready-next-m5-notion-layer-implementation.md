@@ -50,7 +50,7 @@ enforce: true
 | DB1 格式、字段/视图/行往返、未知内容、具体错误、公式不落盘 | ready-database-roundtrip.test.ts |
 | DB2 安全表达式、循环/除零、筛选排序分组/全量列计算、截断汇总、七视图与内联 | ready-database-roundtrip.test.ts |
 | DB3 真实 SQLite、临时资料库、局部字段写、版本冲突、迁移中断/重试、回收站、缓存失效 | ready-database-native.test.ts，加入 verify:native；开头 skipIfSqliteUnavailable，Electron 无 skip 才算通过 |
-| DB4 1000 行查询，记录 p95 | ready-database-performance.test.ts |
+| DB4 1000 行查询，记录 p95 | ready-database-performance.serial.test.ts（计时测试，串行运行） |
 | DB5 阅读定义备份、恢复、回读及往返，自定义字段/视图和嵌套来源保留 | ready-database-native.test.ts |
 | DB6 导入保真（整合计划 §4） | M5-E 的 ready-library-import.test.ts：层级、正文、字段、视图、附件逐项一致；源不变，缺失明确，中断可恢复，重试不重复；A 不宣称完成导入 |
 
