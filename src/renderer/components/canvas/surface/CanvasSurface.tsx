@@ -10,12 +10,21 @@ import { silhouettePath } from '../../../modules/canvas/interaction/outline'
 import { CanvasCard } from './CanvasCard'
 import { useCanvasBuffer } from './useCanvasBuffer'
 import type { CanvasSurfaceProps, Tool } from './types'
+import { CanvasEditorLifecycle } from './editor-lifecycle'
 
 export function CanvasSurface(props: CanvasSurfaceProps) {
   const buffer = useCanvasBuffer(props), { canvas, busy, commit } = buffer
   const [selected, setSelected] = useState<string[]>([]), [tool, setTool] = useState<Tool>('select'), [trash, setTrash] = useState(false)
+  const finishEditor = useRef<(() => Promise<void>) | null>(null), exiting = useRef(false)
+  const [editorError, setEditorError] = useState(''), [closing, setClosing] = useState(false)
+  const registerFinish = useCallback((finish: () => Promise<void>) => {
+    finishEditor.current = finish
+    return () => { if (finishEditor.current === finish) finishEditor.current = null }
+  }, [])
   const [editing, setEditing] = useState<string | null>(null), [camera, setCamera] = useState<Camera>(props.initialCamera ?? { x: 40, y: 80, zoom: 1 })
   const [size, setSize] = useState({ width: 1000, height: 700 })
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
+  const [composing, setComposing] = useState(false), [compositionError, setCompositionError] = useState('')
   const root = useRef<HTMLDivElement>(null), world = useRef<HTMLDivElement>(null), overlay = useRef<SVGSVGElement>(null)
   const elements = useRef(new Map<string, HTMLElement>()), edgeElements = useRef<GestureScene['edgeElements']>(new Map())
   const latest = useRef({ buffer, props }), scene = useRef<GestureScene | null>(null)
@@ -38,6 +47,8 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
   const marker = `canvas-arrow-${useId().replace(/:/g, '')}`
   const bindElement = useCallback((id: string, el: HTMLDivElement | null) => { if (el) elements.current.set(id, el); else elements.current.delete(id) }, [])
   const open = useCallback((node: CanvasNode) => {
+    if (scene.current?.busy) return
+    setEditorError('')
     if (node.ready.kind === 'subcanvas') latest.current.props.onNavigateSubcanvas?.(node)
     else if (node.type === 'text' && node.ready.kind !== 'draft' && latest.current.props.renderTextEditor) setEditing(node.id)
     else latest.current.props.onOpenNode?.(node)
@@ -60,6 +71,17 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     observer?.observe(el)
     return () => { el.removeEventListener('wheel', wheel); view.removeEventListener('blur', cancel); observer?.disconnect(); gestures.dispose(); scene.current = null }
   }, [gestures])
+  async function closeEditor() {
+    if (exiting.current) return
+    const boardId = props.canvas.ready.id
+    exiting.current = true; setClosing(true); setEditorError('')
+    try {
+      await finishEditor.current?.()
+      if (latest.current.props.canvas.ready.id === boardId) setEditing(current => current === editing ? null : current)
+    } catch (error) {
+      if (latest.current.props.canvas.ready.id === boardId) setEditorError(error instanceof Error ? error.message : String(error))
+    } finally { exiting.current = false; setClosing(false) }
+  }
   function recycle() {
     if (!chosen.length) return
     void commit([{ type: 'trash', ids: chosen.map(n => n.id), trash: { operationId: crypto.randomUUID(), deletedAt: new Date().toISOString() } }])
@@ -81,7 +103,20 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
   }
   const tools: Array<[Tool, string]> = [['select', '选择'], ['pan', '平移'], ['rect', '矩形'], ['arrow', '箭头'], ['edge', '连线'], ['path', '手绘']]
   const recycled = canvas.nodes.filter(n => n.ready.trash)
+  async function addToDocument() {
+    if (composing || !props.onAddToDocument) return
+    setComposing(true); setCompositionError('')
+    try { await props.onAddToDocument(chosen.map(n => n.id)); setMenu(null) }
+    catch (error) { setCompositionError(error instanceof Error ? error.message : String(error)) }
+    finally { setComposing(false) }
+  }
   return <div className="rn-canvas" data-canvas-surface tabIndex={0} ref={root} aria-label={canvas.ready.title || '画板'}
+    onContextMenu={event => {
+      if (!props.onAddToDocument || busy || trash || editing || !chosen.length || (event.target instanceof Element && event.target.closest('[data-canvas-ui]'))) return
+      event.preventDefault(); gestures.cancel()
+      const rect = event.currentTarget.getBoundingClientRect()
+      setMenu({ x: event.clientX - rect.left, y: event.clientY - rect.top })
+    }}
     onKeyDown={shortcut} onKeyUp={e => { if (e.key === ' ') gestures.space = false }}
     onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) gestures.cancel() }}
     onPointerDown={e => gestures.down(e.nativeEvent)} onPointerMove={e => gestures.move(e.nativeEvent)} onPointerUp={e => gestures.up(e.nativeEvent)}
@@ -91,7 +126,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
       <div role="toolbar" aria-label="画板工具">
         {tools.map(([value, label]) => <button key={value} disabled={busy || trash || !!editing || (['rect', 'arrow', 'path'].includes(value) && !props.prepareGraphic)} aria-pressed={tool === value} onClick={() => { gestures.cancel(); setTool(value); root.current?.focus() }}>{label}</button>)}
         <button disabled={busy || !buffer.canUndo} onClick={() => void buffer.undo()}>撤销</button><button disabled={busy || !buffer.canRedo} onClick={() => void buffer.redo()}>重做</button>
-        <button disabled={busy} aria-pressed={trash} onClick={() => { gestures.cancel(); setEditing(null); setTrash(!trash) }}>回收站</button>
+        <button disabled={busy || !!editing} aria-pressed={trash} onClick={() => { gestures.cancel(); setEditing(null); setTrash(!trash) }}>回收站</button>
       </div>
       {!trash && <div role="toolbar" aria-label="选区操作">
         <button disabled={busy || chosen.length < 2} onClick={() => void commit(groupOperations(chosen, crypto.randomUUID()))}>分组</button>
@@ -105,6 +140,11 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
       </div>}
     </div>
     {buffer.error && <div className="canvas-message" role="alert" data-canvas-ui>{buffer.error}</div>}
+    {menu && <div role="menu" aria-label="选区菜单" data-canvas-ui style={{ position: 'absolute', left: menu.x, top: menu.y, zIndex: 5, background: 'var(--bg-primary)', padding: 8 }}>
+      <button role="menuitem" disabled={composing || busy} onClick={() => void addToDocument()}>{composing ? '正在添加…' : '添加到文档'}</button>
+      <button disabled={composing} onClick={() => setMenu(null)}>关闭</button>
+      {compositionError && <p role="alert">{compositionError}</p>}
+    </div>}
     {busy && <div className="canvas-message" role="status">正在处理…</div>}
     {trash ? <section className="canvas-trash" data-canvas-ui aria-label="回收的卡片">
       <h2>回收站 · {recycled.length}</h2><button disabled={busy || !recycled.length} onClick={() => void commit([{ type: 'restore', ids: recycled.map(n => n.id) }])}>全部恢复</button>
@@ -119,7 +159,11 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
       </svg>
       {active.nodes.map(node => <CanvasCard key={node.id} node={node} selected={selected.includes(node.id)} visible={visibleIds.has(node.id)} element={bindElement} open={open} resolveAsset={props.resolveAsset}
         content={visibleIds.has(node.id) ? props.renderCard?.(node) : undefined}
-        editor={editing === node.id ? <div data-canvas-ui className="canvas-editor">{props.renderTextEditor?.({ node, commit, close: () => setEditing(null) })}<button onClick={() => setEditing(null)}>完成编辑</button></div> : undefined} />)}
+        editor={editing === node.id ? <CanvasEditorLifecycle.Provider value={registerFinish}><div data-canvas-ui className="canvas-editor">
+          <div inert={closing}>{props.renderTextEditor?.({ node, commit, close: () => { void closeEditor() } })}</div>
+          {editorError && <p role="alert">{editorError}</p>}
+          <button disabled={closing} onClick={() => void closeEditor()}>{closing ? '正在完成…' : '完成编辑'}</button>
+        </div></CanvasEditorLifecycle.Provider> : undefined} />)}
       <svg className="canvas-overlay" ref={overlay} data-arrow-marker={marker} aria-hidden="true" />
     </div>}
     <div className="canvas-hint" aria-live="polite">{selected.length} 已选 · 空格拖动画布 · Shift 多选 · P / L / R 排版</div>

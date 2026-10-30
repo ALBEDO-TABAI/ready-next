@@ -11,6 +11,8 @@ import { SearchEngine } from '../main/modules/search-engine/indexer'
 import { DocumentDraftService } from '../main/modules/document-drafts/service'
 import { documentVersion } from '../main/modules/document-engine/document-write-service'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+import { CanvasService } from '../main/modules/board-engine/canvas-service'
+import { CanvasCompositionService } from '../main/modules/canvas-composition/service'
 
 function fixture() {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'ready-c12-')))
@@ -29,6 +31,50 @@ function fixture() {
       close: () => { engine.cancelPendingWorkspaceResolves(); db.close() } }
   }
   return { root, open, cleanup: () => rmSync(directory, { recursive: true, force: true }) }
+}
+
+for (const keep of [true, false]) {
+  for (const phase of ['final-prepared', 'final-card'] as const) {
+    test(`C12 canvas finalization survives database reopen at ${phase}; keep card = ${keep}`, async t => {
+      if (skipIfSqliteUnavailable(t, 'Draft hierarchy canvas')) return
+      const f = fixture(); let s = f.open()
+      try {
+        let canvas = new CanvasService(s.registry, f.root)
+        const board = await canvas.create({ path: 'X.canvas', operationId: 'board' })
+        const added = await canvas.write({ objectId: board.objectId, handleId: board.handleId, operationId: 'text', expectedVersion: board.version,
+          commands: [{ type: 'addNode', node: { id: 'text', type: 'text', text: '正文', x: 0, y: 0, width: 100, height: 100, ready: { kind: 'text' } } }] })
+        assert.equal(added.state, 'completed')
+        let composition: CanvasCompositionService
+        let drafts = new DocumentDraftService(s.db, { ...s.dependencies, completeCanvas: (...args) => composition.complete(...args) })
+        composition = new CanvasCompositionService(canvas, drafts, { checkpoint: at => { if (at === phase) throw new Error('interrupted') } })
+        const created = await composition.compose({ objectId: board.objectId, operationId: 'compose', expectedVersion: (await canvas.read(board.handleId)).version,
+          nodeIds: ['text'], tabId: 'tab', title: '正文' })
+        const input = { parentObjectId: board.objectId, operationId: 'save', title: '成文', keepDocumentCard: keep }
+        await assert.rejects(drafts.finalize(created.draftId, created.revision, input), /文档已保存，画板待完成/)
+        const published = drafts.read(created.draftId)!.finalize!.publishedReceipt!
+        assert.ok(published)
+        assert.ok(s.db.prepare('SELECT id FROM documents WHERE object_id=?').get(published.objectId))
+        const bytes = readFileSync(published.path)
+        s.close(); s = f.open()
+        canvas = new CanvasService(s.registry, f.root)
+        drafts = new DocumentDraftService(s.db, { registry: s.registry,
+          index: async () => { throw new Error('must not index twice') },
+          beforePublish: () => { throw new Error('must not publish twice') },
+          completeCanvas: (...args) => composition.complete(...args) })
+        composition = new CanvasCompositionService(canvas, drafts)
+        const result = await drafts.finalize(created.draftId, created.revision, input)
+        assert.deepEqual(result, published)
+        assert.deepEqual(readFileSync(result.path), bytes)
+        assert.equal(readdirSync(join(f.root, 'X')).filter(path => path.endsWith('.md')).length, 1)
+        assert.equal(drafts.read(created.draftId)?.state, 'finalized')
+        const opened = await canvas.open(board.objectId)
+        const card = opened.canvas.nodes.find(node => node.id === created.cardId)
+        if (keep) { assert.equal(card?.ready.kind, 'document'); assert.deepEqual(card?.ready.ref, { kind: 'page', id: result.objectId }) }
+        else assert.equal(card, undefined)
+        assert.equal(opened.canvas.nodes.find(node => node.id === 'text')?.type, 'text')
+      } finally { s.close(); f.cleanup() }
+    })
+  }
 }
 
 test('C12 restart preserves acknowledged content and rejects late saves and stale discard', (t) => {

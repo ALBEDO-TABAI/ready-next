@@ -4,7 +4,7 @@ import { useDocTabs } from '../../../stores/useDocTabs'
 import { actionableBlocks, BLOCK_KINDS, convertBlock } from './catalog'
 import { CommandMenu, type MenuAnchor, type MenuItem } from './CommandMenu'
 import { inlineMarkdown, newline } from './editing'
-import type { TabBuffer } from './tab-buffer'
+import type { EditorBuffer } from './editor-buffer'
 
 interface Drag { block: DocumentBlock; snapshot: DocumentBuffer; target: DocumentBlock; placement: 'before' | 'after' }
 interface Controls {
@@ -38,18 +38,18 @@ function moveEdit(snapshot: DocumentBuffer, block: DocumentBlock, target: Docume
   return createRangeEdit(snapshot, [...remove.operation.ranges, ...insert.operation.ranges], remove.selectionBefore, { anchor: cursor, focus: cursor })
 }
 
-export function BlockControls({ buffer, report, children }: { buffer: TabBuffer; report(error: unknown): void; children: ReactNode }) {
+export function BlockControls({ buffer, editorId, report, children }: { editorId: string; buffer: EditorBuffer; report(error: unknown): void; children: ReactNode }) {
   const [menu, setMenu] = useState<{ block: DocumentBlock; snapshot: DocumentBuffer; anchor: MenuAnchor } | null>(null)
   const [drag, setDrag] = useState<Drag | null>(null), dragRef = useRef<Drag | null>(null)
   const [busy, setBusy] = useState(false), busyRef = useRef(false)
   const [restoreAt, setRestoreAt] = useState<number | null>(null)
   useLayoutEffect(() => {
     if (restoreAt === null) return
-    const editor = [...document.querySelectorAll<HTMLElement>('[data-ready-block-editor]')].find(el => el.dataset.readyBlockEditor === buffer.tabId)
+    const editor = [...document.querySelectorAll<HTMLElement>('[data-ready-block-editor]')].find(el => el.dataset.readyBlockEditor === editorId)
     const block = [...(editor?.querySelectorAll<HTMLElement>('[data-block-start]') ?? [])].find(el => Number(el.dataset.blockStart) >= restoreAt)
     ;(block?.querySelector<HTMLElement>('[data-rich-start], button') ?? editor?.querySelector<HTMLElement>('button'))?.focus()
     setRestoreAt(null)
-  }, [restoreAt, buffer.tabId])
+  }, [restoreAt, editorId])
   const closeMenu = () => { if (menu) setRestoreAt(menu.block.start); setMenu(null) }
   const changeDrag = (next: Drag | null) => { dragRef.current = next; setDrag(next) }
   useEffect(() => {
@@ -90,8 +90,8 @@ export function BlockControls({ buffer, report, children }: { buffer: TabBuffer;
         const target = siblings[siblings.findIndex(item => item.id === block.id) + (index ? 1 : -1)]
         if (target) buffer.apply(moveEdit(snapshot, block, target, placement), 'drag')
       })),
-      action('reference', '复制块引用', async () => {
-        const tab = useDocTabs.getState().tabs.find(item => item.id === buffer.tabId)
+      ...(buffer.owner.kind === 'document' ? [action('reference', '复制块引用', async () => {
+        const tab = useDocTabs.getState().tabs.find(item => item.id === (buffer.owner.kind === 'document' ? buffer.owner.tabId : undefined))
         if (!tab) throw new Error('文档已关闭')
         const page = (tab.path ?? tab.title).replace(/\.md$/i, '')
         if (/[[\]|#\r\n]/.test(page)) throw new Error('页面路径不能表示为 Wiki 引用')
@@ -101,7 +101,7 @@ export function BlockControls({ buffer, report, children }: { buffer: TabBuffer;
         const id = existing ?? `block-${crypto.randomUUID()}`
         if (!existing) replace(block.raw + (['paragraph', 'heading'].includes(block.type) ? ' ' : eol + eol) + '^' + id)
         await navigator.clipboard.writeText(`[[${page}#^${id}]]`)
-      }),
+      })] : []),
       ...Object.entries(DOCUMENT_PALETTE).map(([color, label]) => action(`color-${color}`, `文字颜色：${label}`, () => {
         if (!isDocumentColor(color)) throw new Error('无效颜色')
         const blocks = parseDocumentBlocks(snapshot.content).blocks.filter(part => part.start >= block.start && part.end <= block.end

@@ -1,4 +1,5 @@
 import { migrateChatReadyRefs } from './database/ready-ref-migration'
+import { migrateCanvasComposition } from './canvas-composition/schema'
 import { DOCUMENT_DATABASE_MIGRATION, migrateDocumentDatabase } from './document-database/schema'
 import { DOCUMENT_PAGES_MIGRATION, migrateDocumentPages } from './document-pages/schema'
 import { migrateCalendarAttachmentReadyRefs, migrateCalendarAttachmentDisplayRefs } from './calendar-engine/ready-ref-migration'
@@ -4514,6 +4515,7 @@ const migrations: Migration[] = [
     );
     CREATE INDEX library_reading_sessions_range ON library_reading_sessions(workspace_root,started_at,ended_at);`)
   } },
+  { name: '150_canvas_compositions', up: migrateCanvasComposition },
 ]
 
 /**

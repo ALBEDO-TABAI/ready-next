@@ -72,10 +72,11 @@ export async function findReferences(query: string, wiki: boolean, tabId?: strin
   return choices.filter((choice, index) => choices.findIndex(other => other.id === choice.id) === index)
 }
 
-export async function openInlineReference(reference: InlineReference, tabId: string) {
+export async function openInlineReference(reference: InlineReference, tabId?: string) {
   const { openReadyRef } = await import('../../workbench/open-ready-ref')
   if (reference.kind === 'ready') return openReadyRef(reference.ref, 'document')
   if (reference.kind === 'wiki') {
+    if (!tabId) throw new Error('尚未提供画板文件路径，无法打开相对页面链接')
     const [path, anchor] = reference.target.split('#', 2)
     const tab = useDocTabs.getState().tabs.find(item => item.id === tabId)
     const file = /\.md$/i.test(path) ? path : `${path}.md`

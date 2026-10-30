@@ -14,6 +14,7 @@ export interface CanvasSurfaceProps {
   prepareGraphic?: (draft: GraphicDraft) => Promise<string>
   renderTextEditor?: (context: { node: CanvasNode; commit: (operations: CanvasOperation[]) => Promise<boolean>; close: () => void }) => ReactNode
   renderCard?: (node: CanvasNode) => ReactNode
+  onAddToDocument?: (nodeIds: string[]) => Promise<void>
   resolveAsset?: (path: string) => string | undefined
   onOpenNode?: (node: CanvasNode) => void
   onNavigateSubcanvas?: (node: CanvasNode) => void

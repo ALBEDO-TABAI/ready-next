@@ -1,3 +1,4 @@
+import type { EditorBuffer } from './editor-buffer'
 import { changedSpan } from './text-edit'
 import { useDocTabs } from '../../../stores/useDocTabs'
 import {
@@ -5,7 +6,12 @@ import {
 } from '../../../../shared/document-blocks'
 
 /** The tab owns text; this session owns its revision and unified history, across view mounts. */
-export class TabBuffer {
+export class TabBuffer implements EditorBuffer {
+  readonly error = ''
+  get owner() { return { kind: 'document' as const, tabId: this.tabId } }
+  private listeners = new Set<() => void>()
+  subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
+  private notify() { for (const listener of this.listeners) listener() }
   history: DocumentHistory
   readonly flushers = new Set<() => void>()
   constructor(readonly tabId: string, content: string) { this.history = new DocumentHistory(content) }
@@ -17,6 +23,7 @@ export class TabBuffer {
       throw new Error(result.message)
     }
     useDocTabs.getState().updateTabContent(this.tabId, result.buffer.content)
+    this.notify()
     return result.selection
   }
   apply(edit: BlockEdit, kind: HistoryKind = 'edit', group?: string) {
@@ -44,10 +51,11 @@ export class TabBuffer {
     if (before.content === content) return
     // Initial hydration is a baseline; subsequent changes, including external
     // writes and disk refreshes, are part of the same revision stream.
-    if (!dirty && !before.content && !this.history.entries.length) { this.history = new DocumentHistory(content, before.version + 1); return }
+    if (!dirty && !before.content && !this.history.entries.length) { this.history = new DocumentHistory(content, before.version + 1); this.notify(); return }
     const result = this.history.applyExternal({ type: 'replaceRanges', expectedVersion: before.version,
       ranges: [{ start: 0, end: before.content.length, expectedText: before.content, replacement: content }] }, { anchor: 0, focus: 0 })
     if (!result.ok) throw new Error(result.message)
+    this.notify()
   }
 }
 const sessions = new Map<string, TabBuffer>()

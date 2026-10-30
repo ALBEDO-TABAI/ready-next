@@ -2,12 +2,12 @@ import { useLayoutEffect, useRef } from 'react'
 import { createBlockCommand, fragmentHash, parseInlineBlock, type DocumentBlock, type InlineModel, type InlineSpan } from '../../../../shared/document-blocks'
 import { atVerticalEdge, drawInline, getCaret, plainText, readInline, setCaret, sliceSpans } from './dom-inline'
 import { inlineMarkdown, inputRule, newline, spliceRich } from './editing'
-import type { TabBuffer } from './tab-buffer'
+import type { EditorBuffer } from './editor-buffer'
 
 interface Props {
   block: DocumentBlock
   model: InlineModel
-  buffer: TabBuffer
+  buffer: EditorBuffer
   continuation: string
   focus(at: number, empty?: boolean, textOffset?: number): void
   merge(block: DocumentBlock, model: InlineModel): void
