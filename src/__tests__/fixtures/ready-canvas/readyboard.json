@@ -1,0 +1,116 @@
+{
+  "version": 1,
+  "engineVersion": "1.0.0",
+  "title": "旧画板",
+  "viewport": {
+    "x": 20,
+    "y": 30,
+    "zoom": 1.5
+  },
+  "updatedAt": "2026-10-31T00:00:00Z",
+  "nodes": [
+    {
+      "id": "text",
+      "type": "text",
+      "x": 0.4,
+      "y": 2.6,
+      "width": 200,
+      "height": 120,
+      "rotation": 30,
+      "text": "保留\r\n😀",
+      "fontSize": 36,
+      "color": "#181818"
+    },
+    {
+      "id": "note",
+      "type": "note",
+      "x": 20.4,
+      "y": 2.6,
+      "width": 200,
+      "height": 120,
+      "rotation": 30,
+      "text": "便签",
+      "color": "#000000",
+      "background": "#ffffff"
+    },
+    {
+      "id": "image",
+      "type": "image",
+      "x": 40.4,
+      "y": 2.6,
+      "width": 200,
+      "height": 120,
+      "rotation": 30,
+      "src": "assets/image.png",
+      "alt": "替代文字",
+      "externalReceiptId": "receipt1"
+    },
+    {
+      "id": "video",
+      "type": "video",
+      "x": 60.4,
+      "y": 2.6,
+      "width": 200,
+      "height": 120,
+      "rotation": 30,
+      "src": "assets/video.mp4"
+    },
+    {
+      "id": "markdown",
+      "type": "markdown",
+      "x": 80.4,
+      "y": 2.6,
+      "width": 200,
+      "height": 120,
+      "rotation": 30,
+      "src": "assets/copied.md",
+      "title": "副本",
+      "excerpt": "旧摘录"
+    },
+    {
+      "id": "rect",
+      "type": "rect",
+      "x": 100.4,
+      "y": 2.6,
+      "width": 200,
+      "height": 120,
+      "rotation": 30,
+      "fill": "#ffffff",
+      "stroke": "#000000"
+    },
+    {
+      "id": "arrow",
+      "type": "arrow",
+      "x": 120.4,
+      "y": 2.6,
+      "width": 200,
+      "height": 120,
+      "rotation": 30,
+      "x2": -100,
+      "y2": 80,
+      "stroke": "#ff0000",
+      "strokeWidth": 3
+    },
+    {
+      "id": "path",
+      "type": "path",
+      "x": 140.4,
+      "y": 2.6,
+      "width": 200,
+      "height": 120,
+      "rotation": 30,
+      "points": [
+        {
+          "x": 1,
+          "y": 2
+        },
+        {
+          "x": 3,
+          "y": 4
+        }
+      ],
+      "stroke": "#000000",
+      "strokeWidth": 4
+    }
+  ]
+}

@@ -1,4 +1,5 @@
 import { useCallback } from 'react'
+import { openReadyRef } from '../../../../modules/workbench/open-ready-ref'
 
 import {
   useAgent,
@@ -28,6 +29,15 @@ export function useAttachmentPreview({
   return useCallback(async (attachment: ChatAttachment) => {
     if (!attachment.path) return
     const composerAuthority = captureComposerAuthority(useAgent.getState())
+    if (attachment.source === 'calendar-event') {
+      try { await openReadyRef(attachment.path) }
+      catch (error) {
+        if (isComposerAuthorityCurrent(useAgent.getState(), composerAuthority)) {
+          setActiveAttachmentPreview({ attachment, mode: 'file', error: error instanceof Error ? error.message : String(error) })
+        }
+      }
+      return
+    }
     if (attachment.source === 'rss-reference') {
       setActiveAttachmentPreview({ attachment, mode: 'text' })
       return

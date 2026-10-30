@@ -283,7 +283,8 @@ export default function MarkdownEditor({
   const [selectionAnchor, setSelectionAnchor] = useState<{ x: number; y: number } | null>(null)
 
   const currentExt = useMemo(() => getFileExt(tab.path), [tab.path])
-  const documentScrollKey = useMemo(() => tab.path || tab.id, [tab.id, tab.path])
+  // The object id comes back with the tab at startup, before path-to-object lookups are known.
+  const documentScrollKey = useMemo(() => tab.objectId || tab.path || tab.id, [tab.id, tab.objectId, tab.path])
   const activeRevealTarget = useMemo(() => {
     if (!tab.path || !pendingReveal || pendingReveal.path !== tab.path) return null
     return pendingReveal

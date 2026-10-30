@@ -122,19 +122,19 @@ test('C1: calendar day and event targets agree with the existing deep-link parse
     { kind: 'day', date: '2024-02-29' },
     { kind: 'day', date: '2026-11-03', at: '15:00', remind: 10 },
     { kind: 'event', id: special },
-    { kind: 'event', id: special, occurrence: '1793660400' },
+    { kind: 'event', id: special, occurrence: '1793660400000' },
   ] satisfies ReadyRef[]) {
     const uri = toReadyUri(ref)
     const parsed = parseReadyUri(uri)
     assert.deepEqual(parsed, { ok: true, ref })
-    // The current calendar API exposes only the base target; C1 also preserves the qualifiers above.
+    // Navigation converts ReadyRef milliseconds to the calendar resource identity.
     assert.deepEqual(parseCalendarDeepLink(uri), ref.kind === 'day'
       ? { kind: 'day', date: ref.date }
-      : { kind: 'event', eventId: ref.id })
+      : { kind: 'event', eventId: ref.occurrence ? `${ref.id}#${Number(ref.occurrence) / 1000}` : ref.id })
   }
   for (const date of ['2023-02-29', '2026-04-31']) {
     const uri = `ready://calendar/day/${date}`
-    assert.throws(() => parseCalendarDeepLink(uri))
+    assert.equal(parseCalendarDeepLink(uri), null)
     assert.equal(parseReadyUri(uri).ok, false)
   }
   assert.equal(parseCalendarDeepLink('ready://calendar/event/'), null)

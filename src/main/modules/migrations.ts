@@ -1,4 +1,5 @@
 import { DOCUMENT_PAGES_MIGRATION, migrateDocumentPages } from './document-pages/schema'
+import { migrateCalendarAttachmentReadyRefs, migrateCalendarAttachmentDisplayRefs } from './calendar-engine/ready-ref-migration'
 import { migrateObjectLinks } from './search-engine/object-link-schema'
 import { migrateDocumentDrafts, DOCUMENT_DRAFT_MIGRATION } from './document-drafts/schema'
 import { migrateObjects, OBJECT_MIGRATION } from './object-service/schema'
@@ -4474,6 +4475,8 @@ const migrations: Migration[] = [
     db.exec(`ALTER TABLE document_drafts ADD COLUMN tab_id TEXT CHECK(tab_id IS NULL OR length(tab_id)>0);
       CREATE INDEX document_drafts_tab ON document_drafts(vault_root,tab_id,revision DESC);`)
   } },
+  { name: '143_calendar_attachment_ready_refs', up: migrateCalendarAttachmentReadyRefs },
+  { name: '144_calendar_attachment_display_refs', up: migrateCalendarAttachmentDisplayRefs },
 ]
 
 /**

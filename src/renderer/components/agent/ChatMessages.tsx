@@ -1,4 +1,4 @@
-import { Fragment, useRef, useEffect, useMemo, useCallback } from 'react'
+import { Fragment, useRef, useEffect, useMemo, useCallback, useState } from 'react'
 import type { ReactNode } from 'react'
 
 // EP2 dogfood gap 5 — safety margin appended to the measured composer tail.
@@ -23,6 +23,8 @@ import {
   generatedImagesFromMessage,
 } from '../../modules/image-generation/generatedImageArtifacts'
 import { submitAskUserQuestionsAnswers, cancelAskUserQuestionsCard } from '../../stores/useAgent'
+import type { CalendarAttachmentDisplayRef } from '../../../shared/calendar-event-identity'
+import { parseReadyUri, toReadyUri } from '../../../shared/ready-ref'
 import { isImageGenerationReferencePath } from '../../../shared/image-generation'
 import WelcomePanel from './WelcomePanel'
 import { renderInline } from './chat-panel/markdown'
@@ -102,6 +104,26 @@ export default function ChatMessages({
   renderAttachmentIcon,
   renderMarkdown,
 }: ChatMessagesProps) {
+  const displayKey = JSON.stringify(messages.filter(msg => msg.type === 'user' && msg.attachments?.length).map(msg => msg.id))
+  const [displayRefs, setDisplayRefs] = useState<
+    { key: string; status: 'ready'; rows: CalendarAttachmentDisplayRef[] }
+    | { key: string; status: 'error'; reason: string } | null
+  >(null)
+  useEffect(() => {
+    if (displayKey === '[]') return
+    let cancelled = false
+    void (async () => {
+      try {
+        const result = await window.electronAPI.calendar.getAttachmentDisplayRefs(JSON.parse(displayKey))
+        if (!result.success || !result.data) throw new Error(result.error || '历史附件展示读取失败')
+        if (!cancelled) setDisplayRefs({ key: displayKey, status: 'ready', rows: result.data })
+      } catch (error) {
+        if (!cancelled) setDisplayRefs({ key: displayKey, status: 'error', reason: error instanceof Error ? error.message : String(error) })
+      }
+    })()
+    return () => { cancelled = true }
+  }, [displayKey])
+  const displayState = displayRefs?.key === displayKey ? displayRefs : null
   const head = useAgent((state) => state.activeSessionId
     ? state.sessions[state.activeSessionId]?.scopeHeadActionProjection ?? null : null)
   const workbenchMode = useMode((state) => state.workbenchMode)
@@ -269,7 +291,18 @@ export default function ChatMessages({
                 >
                   {msg.attachments && msg.attachments.length > 0 && (
                     <div className="flex flex-wrap justify-end gap-1.5">
-                      {msg.attachments.map((att) => {
+                      {msg.attachments.map((original, attachmentIndex) => {
+                        const target = displayState?.status === 'ready'
+                          ? displayState.rows.find(row => row.messageId === msg.id && row.attachmentIndex === attachmentIndex)?.target : undefined
+                        const att: ChatAttachment = target?.status === 'resolved'
+                          ? { ...original, source: 'calendar-event', path: toReadyUri(target.ref) } : original
+                        const calendarRef = displayState?.status === 'ready' && att.source === 'calendar-event' ? parseReadyUri(att.path) : null
+                        const unlocatable = target?.status === 'unlocatable' ? target.reason
+                          : calendarRef && (!calendarRef.ok || calendarRef.ref.kind !== 'event') ? att.description || '缺少有效的日程引用' : null
+                        const displayError = displayState?.status === 'error' ? displayState.reason : null
+                        const label = unlocatable ? (att.name.endsWith('（无法定位）') ? att.name : `${att.name}（无法定位）`) : displayError ? `${att.name}（读取失败）` : att.name
+                        const tooltip = !displayState ? '正在读取历史附件' : unlocatable ? `无法定位：${unlocatable}` : displayError || (att.source === 'calendar-event' ? `${att.name}\n${att.path}` : att.name)
+
                         const referenceOrder = att.type === 'image' && isImageGenerationReferencePath(att.path)
                           ? msg.attachments!
                             .filter((item) => item.type === 'image' && isImageGenerationReferencePath(item.path))
@@ -283,6 +316,7 @@ export default function ChatMessages({
                           key={att.id}
                           type="button"
                           data-chat-message-attachment="true"
+                          disabled={!displayState || !!unlocatable || !!displayError}
                           onClick={() => {
                             if (att.source === 'document-quote') {
                               onRevealDocumentQuote(att)
@@ -297,9 +331,9 @@ export default function ChatMessages({
                             fontSize: 'var(--text-sm)',
                             color: 'var(--text-body)',
                             maxWidth: att.source === 'document-quote' ? 220 : 180,
-                            cursor: 'pointer',
+                            cursor: !displayState || unlocatable || displayError ? 'default' : 'pointer',
                           }}
-                          title={att.source === 'document-quote' ? getDocumentQuoteTooltip(att) : att.name}
+                          title={att.source === 'document-quote' && !displayError ? getDocumentQuoteTooltip(att) : tooltip}
                         >
                           {getAttachmentPreviewSrc(att) ? (
                             <img
@@ -327,7 +361,7 @@ export default function ChatMessages({
                               overflow: 'hidden',
                             }}
                           >
-                            <span className="truncate" style={{ maxWidth: '100%' }}>{att.name}</span>
+                            <span className="truncate" style={{ maxWidth: '100%' }}>{label}</span>
                             {metaSummary ? (
                               <span
                                 style={{

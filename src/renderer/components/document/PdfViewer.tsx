@@ -106,7 +106,7 @@ export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
   const visiblePageEntriesRef = useRef<Map<number, IntersectionObserverEntry>>(new Map())
   const saveScrollTimerRef = useRef<number | null>(null)
   const restoredScrollKeyRef = useRef<string | null>(null)
-  const documentScrollKey = useMemo(() => tab.path || tab.id, [tab.id, tab.path])
+  const documentScrollKey = useMemo(() => tab.objectId || tab.path || tab.id, [tab.id, tab.objectId, tab.path])
 
   useEffect(() => {
     setNumPages(0)

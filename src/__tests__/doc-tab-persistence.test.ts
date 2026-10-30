@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { beforeEach, describe, it } from 'node:test'
 import { createDraftFixture } from './helpers/ready-drafts-fixture'
-import { migrateLegacyDrafts, getDocTabDraftStorageKey } from '../renderer/modules/document/drafts/migration'
+import { captureLegacyDrafts, migrateLegacyDrafts, getDocTabDraftStorageKey } from '../renderer/modules/document/drafts/migration'
 import { configureDrafts, drafts, useDraftUI } from '../renderer/modules/document/drafts/runtime'
 
 const values = new Map<string, string>()
@@ -76,7 +76,7 @@ async function resetStore(): Promise<void> {
   fixture = createDraftFixture()
   configureDrafts({ ...fixture.port, tabs: () => useDocTabs.getState().tabs,
     patch: (id, patch) => useDocTabs.setState(state => ({ tabs: state.tabs.map(tab => tab.id === id && tab.kind !== 'library' ? { ...tab, ...patch } : tab) })),
-  }, () => useDocTabs.persist.rehydrate())
+  })
   useDraftUI.setState({ boot: 'ready', error: '' })
   flushPendingDocTabMetadata()
   writes.length = 0
@@ -251,8 +251,9 @@ describe('document tab persistence', () => {
       { ...baseTab, id: 'empty', path: null, content: 'older', isDirty: true },
     ], activeTabId: baseTab.id } }))
     values.set(getDocTabDraftStorageKey('empty'), '')
-    await migrateLegacyDrafts(localStorageMock, fixture.api)
+    captureLegacyDrafts(localStorageMock)
     await useDocTabs.persist.rehydrate()
+    await migrateLegacyDrafts(localStorageMock, fixture.api)
     await drafts.restore()
     assert.equal(useDocTabs.getState().tabs[0].content, 'embedded')
     assert.equal(useDocTabs.getState().tabs[1].content, '')

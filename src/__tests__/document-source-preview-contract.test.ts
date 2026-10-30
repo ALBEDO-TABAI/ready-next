@@ -57,7 +57,7 @@ test('document edit and preview modes share reading scroll position when remount
   const documentMode = readWorkspaceFile('src/renderer/pages/modes/DocumentMode.tsx')
   const scrollRuntime = readWorkspaceFile('src/renderer/modules/document/documentScrollRuntime.ts')
 
-  assert.match(markdownEditor, /const documentScrollKey = useMemo\(\(\) => tab\.path \|\| tab\.id, \[tab\.id, tab\.path\]\)/)
+  // Edit and preview share one scroll key; the object id comes first so positions restore before path lookups exist.\n  assert.match(markdownEditor, /const documentScrollKey = useMemo\(\(\) => tab\.objectId \|\| tab\.path \|\| tab\.id, \[tab\.id, tab\.objectId, tab\.path\]\)/)
   assert.match(markdownEditor, /data-ready-document-scroll-key=\{documentScrollKey\}/)
 
   assert.match(documentMode, /captureVisibleDocumentScrollPositions\(\)/)

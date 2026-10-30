@@ -39,7 +39,7 @@ function installFakeDocumentApi(fs: FakeFs): () => void {
   configureDrafts({ ...fixture.port, tabs: () => useDocTabs.getState().tabs,
     read: async path => fs.written.find(item => item.path === path)!.content,
     patch: (id, patch) => useDocTabs.setState(state => ({ tabs: state.tabs.map(tab => tab.id === id && tab.kind !== 'library' ? { ...tab, ...patch } : tab) })),
-  }, () => {})
+  })
   const electronAPI = {
     documentDrafts: fixture.api,
     document: {

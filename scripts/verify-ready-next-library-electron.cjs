@@ -303,7 +303,8 @@ function electronEnv(extra) {
     ok('EPUB metadata reaches the source note', epubBook && epubBook.title === '验收用书' && epubBook.author === '测试作者', JSON.stringify(epubBook))
     ok('the source note lives under 阅读/ in the vault', epubBook && fs.existsSync(path.join(vault.root, '阅读', '验收用书.md')))
 
-    await page.getByRole('button', { name: '阅读', exact: true }).first().click()
+    // The vault also has a 阅读 page (the library database); open the reading room through its own entry.
+    await page.locator('[data-library-entry="true"]').click()
     await page.locator('.rn-library').waitFor({ timeout: 20000 })
     await page.locator('.rn-library .spine').first().waitFor({ timeout: 20000 })
     await page.waitForTimeout(1200)

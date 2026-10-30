@@ -146,7 +146,8 @@ export class ObjectMutations {
     let failure: Error | undefined
     if (transport) for (const row of objects.filter(row => row.kind === 'markdown')) {
       try {
-        const reply = await requestDocumentTab(transport, { id: `${id}:${row.id}`, path: row.current_path!, deadline: Date.now()+10000, phase: 'release' }, 10000)
+        // The move only locked the tab (no content was applied), so the lease is closed with rollback, not release.
+        const reply = await requestDocumentTab(transport, { id: `${id}:${row.id}`, path: row.current_path!, deadline: Date.now()+10000, phase: 'rollback' }, 10000)
         if (!reply.ok) failure = new Error(reply.message)
       } catch (error) { failure = new Error(String(error)) }
     }
@@ -282,7 +283,7 @@ export class ObjectMutations {
           const row=objects.find(row=>row.current_path===path)!
           let failure:string|undefined
           try {
-            const reply=await requestDocumentTab(transport,{id:`${id}:${row.id}`,path,deadline:Date.now()+10000,phase:'release'},10000)
+            const reply=await requestDocumentTab(transport,{id:`${id}:${row.id}`,path,deadline:Date.now()+10000,phase:'rollback'},10000) // lock-only lease
             if(!reply.ok)failure=reply.message
           } catch(error) { failure=String(error) }
           if(failure) {

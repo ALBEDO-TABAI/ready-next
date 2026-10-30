@@ -313,6 +313,8 @@ M5 的数据库往返/导入保真另由计划 `src/__tests__/ready-database-rou
 
 ### M4 画板与 FastCard
 
+实施合同：[M4 画板与 FastCard](2026-10-31-ready-next-m4-canvas-fastcard-implementation.md)。
+
 **依赖：**M3（及 M1 地基）；使用 M2 共享视觉基础。**对应合同：**C10、C13，回归 C3/C7/C12/C14/C15。
 
 **交付物：**按需搬入 Stillroom 画板交互和视觉，合并 Ready 白板工具；JSON Canvas 与旧格式迁移、FastCard 保存/拖入、无需先开画板的右键入口、卡片块编辑器、文档卡、添加到文档/草稿卡、快记、Stillroom 导入、共用链接预览。
@@ -425,4 +427,10 @@ M5 的数据库往返/导入保真另由计划 `src/__tests__/ready-database-rou
   - R1/R1b：`object_links` 关系索引（迁移 139）与修复记录、出链/反链接口、C5 可重建；单文档解析恢复 perf-rescue B8 的范围约束，按文件名查候选走表达式索引。
   - M3 T1：Markdown 区间内核与编辑命令（C4 黄金语料）；T3a：Main 草稿服务（迁移 140）。M3 实施合同见 `2026-10-31-ready-next-m3-document-kernel-implementation.md`。
   - 检查：typecheck、迁移编号 1–140、IPC、SQLite 跳过、CSS 分层与书房样式全部通过；`verify:native` 331/331；`verify:tag-forge`、`verify:file-emergence`、`verify:widget-ready` 通过；`npm test` 7487 项中 1 项按对象键改写的阅读位置用例已更新为新合同；真实 Electron 中 `verify:ready-next-smoke` 19/19（含打开不写文件、迁移、改名、外部 mv、重启保留标签/位置/图标）、`verify:ready-next-library` 21/21（含引用卡、回到原文与返回）。
-- **尚未实现**：C8–C14 与 C12 的 Renderer/画板部分；M1 的 ReadyRef 第 3–7 批；M2 的藏书阁导入与反链界面；M3 的 T2–T6；M4–M8。
+- **第二合并批次（2026-10-31）**：
+  - M3 T2：页面树（`A.md`+`A/` 合并、歧义不合并、`.ready` 排除）、页面三件套操作与持久操作记录、资料库内回收站（迁移 141）、带版本与回读的用户保存入口。
+  - M3 T3a–c：Main 草稿（迁移 140、142 绑定标签）、Renderer 接入、旧草稿一次交接；真实窗口发现并修复：欢迎正文误建草稿、同一标签重复草稿、草稿与标签对应只在 localStorage、"保存到"文件夹经系统别名被误判出界、启动后用户操作被延后的标签恢复覆盖（改为启动即恢复、旧正文先写入可回读的交接键）、文档滚动范围改按对象 id。
+  - M3 T5：页面/文件视角侧栏、页面操作与回收站界面、`PageHeader` 与 `SaveToPicker` 组件、无根目录不再读取 `/`；真实窗口发现对象服务移动用"只锁定不应用"的标签租约却以 release 结束，改为 rollback。
+  - M1 R3：日历附件、深链与重复实例改用 ReadyRef（迁移 143、144），已关闭会话写展示映射。M2 L5：藏书阁一次导入。M4-A：画板格式与转换合同（`src/shared/ready-canvas/`）。
+  - 检查：typecheck、迁移编号 1–144、IPC、SQLite 跳过、CSS 分层与书房样式；`verify:native` 353/353；`verify:tag-forge`、`verify:file-emergence`、`verify:widget-ready`、`verify:calendar`；真实 Electron 中 smoke 24/24、书房 28/28、草稿（强制退出恢复与定稿回读）、页面（6 步磁盘回读）。
+- **尚未实现**：M3 的 T4（块编辑界面，进行中）与 T6 接线；M1 的 ReadyRef 第 4–7 批（第 4–5 批进行中）；M4 的 B–F（B、C、D 进行中）；M5–M8；C8–C9、C13–C14 与 C12 的画板部分。
