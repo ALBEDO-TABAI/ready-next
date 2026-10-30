@@ -1,0 +1,26 @@
+[
+  {
+    "name": "obsidian-crlf",
+    "target": "重复段落",
+    "replacement": "第二段已修改😀",
+    "occurrence": 1
+  },
+  {
+    "name": "notion-lf",
+    "target": "需要修改",
+    "replacement": "已经修改 **内容**",
+    "occurrence": 0
+  },
+  {
+    "name": "special-mixed",
+    "target": "需要修改",
+    "replacement": "新段落",
+    "occurrence": 0
+  },
+  {
+    "name": "columns",
+    "target": "需要修改",
+    "replacement": "修改后",
+    "occurrence": 0
+  }
+]
