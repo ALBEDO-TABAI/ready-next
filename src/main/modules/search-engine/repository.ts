@@ -3,6 +3,7 @@ import type { DatabaseConnection, DatabaseStatement } from '../database/connecti
 
 import type { AttachmentRef } from '../../../shared/document-graph-parse'
 import { ObjectLinkRepository } from './object-links'
+import { extractCanvasLinks } from './canvas-links'
 import { extractObjectLinks } from './object-link-extract'
 import { parseReadyUri } from '../../../shared/ready-ref'
 import { createHash } from 'node:crypto'
@@ -212,7 +213,7 @@ export class SearchRepository {
     const parsed = parseReadyUri(doc.path)
     const source = doc.object_id ? {objectId:doc.object_id} : parsed.ok ? {ref:parsed.ref} : null
     if (!source) throw new Error('Link source requires an object or ReadyRef')
-    new ObjectLinkRepository(this.db).replace(source, extractObjectLinks(raw), createHash('sha256').update(raw).digest('hex'))
+    new ObjectLinkRepository(this.db).replace(source, (doc.path.endsWith('.canvas') ? extractCanvasLinks(raw) : extractObjectLinks(raw)), createHash('sha256').update(raw).digest('hex'))
   }
 
   replaceAttachments(documentId: number, attachments: AttachmentRef[]): void {

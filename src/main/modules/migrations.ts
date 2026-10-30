@@ -4477,6 +4477,17 @@ const migrations: Migration[] = [
   } },
   { name: '143_calendar_attachment_ready_refs', up: migrateCalendarAttachmentReadyRefs },
   { name: '144_calendar_attachment_display_refs', up: migrateCalendarAttachmentDisplayRefs },
+  { name: '145_canvas_operations', up: (db) => {
+    db.exec(`ALTER TABLE object_links ADD COLUMN source_node_id TEXT;
+      CREATE INDEX object_links_source_node ON object_links(source_id,source_node_id);
+      CREATE TABLE canvas_operations (
+        id TEXT PRIMARY KEY, object_id TEXT NOT NULL, input_hash TEXT NOT NULL,
+        state TEXT NOT NULL CHECK(state IN ('prepared','awaiting-buffer','published','indexed','completed','conflict','recovery-required')),
+        plan_json TEXT NOT NULL, result_json TEXT, error TEXT
+      );
+      CREATE TABLE canvas_buffers (object_id TEXT PRIMARY KEY, snapshot_json TEXT NOT NULL);
+      CREATE TABLE canvas_imports (id TEXT PRIMARY KEY, input_hash TEXT NOT NULL, plan_json TEXT NOT NULL, result_json TEXT);`)
+  } },
 ]
 
 /**

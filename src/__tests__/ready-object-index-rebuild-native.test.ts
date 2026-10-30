@@ -114,7 +114,7 @@ test('C5 migration keeps pending binding and old edge, then reconstructs fragmen
   const { runMigrations, __runMigrationForTests } = await import('../main/modules/migrations')
   const f = fixture(), db = new Database(':memory:')
   try {
-    db.exec("CREATE TABLE migrations(id INTEGER PRIMARY KEY,name TEXT NOT NULL UNIQUE,applied_at TEXT NOT NULL); INSERT INTO migrations(name,applied_at) VALUES('139_object_links','test'),('141_document_pages','test')")
+    db.exec("CREATE TABLE migrations(id INTEGER PRIMARY KEY,name TEXT NOT NULL UNIQUE,applied_at TEXT NOT NULL); INSERT INTO migrations(name,applied_at) VALUES('139_object_links','test'),('141_document_pages','test'),('145_canvas_operations','test')")
     runMigrations(db)
     const source = join(f.root, 'source.md'), target = join(f.root, 'moved.md')
     writeFileSync(source, '[[old#Heading]]'); writeFileSync(target, 'target')
@@ -125,7 +125,7 @@ test('C5 migration keeps pending binding and old edge, then reconstructs fragmen
     }
     db.exec("INSERT INTO doc_links(src_doc_id,kind,target_text,target_doc_id,resolved) VALUES(1,'wikilink','old',2,1); INSERT INTO object_link_targets VALUES('s','wikilink','old','t','original-version','pending')")
     __runMigrationForTests('139_object_links',db)
-    db.prepare("DELETE FROM migrations WHERE name='141_document_pages'").run()
+    db.prepare("DELETE FROM migrations WHERE name IN ('141_document_pages','145_canvas_operations')").run()
     runMigrations(db)
     const links = new ObjectLinkRepository(db)
     assert.equal(links.incoming({objectId:'t'})[0].rawTarget,'old')
@@ -160,4 +160,22 @@ test('relation IPC returns positioned edges and rejects malformed endpoints', as
     assert.equal(rejected.success,false)
     dispose.dispose();assert.equal(handlers.size,0)
   }finally{f.close()}
+})
+
+test('M4 canvas node identities survive rebuild twice and FastCard refresh preserves canvas sources', async t => {
+  if (skipIfSqliteUnavailable(t, 'Canvas relations')) return
+  const f = fixture()
+  try {
+    const { CanvasService } = await import('../main/modules/board-engine/canvas-service')
+    const { refreshCardLinks } = await import('../main/modules/search-engine/object-index-rebuild')
+    const service = new CanvasService(f.registry, f.root)
+    const node = { id: 'a', type: 'link' as const, x: 0, y: 0, width: 100, height: 100, url: 'https://example.com/', ready: { kind: 'link' as const, sources: [{ uri: 'https://source.example/', method: 'clip' }] } }
+    const h = await service.create({ path: 'Links.canvas', operationId: 'create-links', canvas: { nodes: [node, { ...node, id: 'b' }, { ...node, id: 'trash', ready: { ...node.ready, trash: { operationId: 'del', deletedAt: '2026-10-31T00:00:00Z' } } }], edges: [], ready: { id: 'links-board', schemaVersion: 1 } } })
+    const links = new ObjectLinkRepository(f.db), snapshot = () => links.outgoing({ objectId: h.objectId })
+    const before = snapshot(); assert.equal(before.length, 4)
+    refreshCardLinks(f.engine); assert.deepEqual(snapshot(), before)
+    assert.equal(links.outgoing({ ref: { kind: 'canvas', id: h.objectId, node: 'a' } }).length, 2)
+    for (let i = 0; i < 2; i++) { await rebuildObjectIndex(f.engine, [f.root]); assert.deepEqual(snapshot(), before) }
+    assert.equal(f.registry.list().filter(o => o.kind === 'canvas').length, 1)
+  } finally { f.close() }
 })
