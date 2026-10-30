@@ -1,3 +1,4 @@
+import { setupDocumentDraftIPC } from './modules/document-drafts/runtime'
 import { captureCalendarOpen } from './calendar-open-intents'
 import { startCalendarDesktop } from './modules/calendar-engine/calendar-desktop'
 import { onCalendarChanged } from './modules/calendar-engine/calendar-change'
@@ -674,6 +675,7 @@ function setupGlobalIPC(): void {
   setupBoardIPC({ getMainWindow: () => mainWindow })
   setupSearchIPC()
   setupLibraryIPC()
+  setupDocumentDraftIPC()
   setupFileEmergenceIPC()
   setupRendererStateFlushIPC()
   setupTagForgeIPC()

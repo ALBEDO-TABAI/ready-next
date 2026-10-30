@@ -3368,6 +3368,7 @@ interface ElectronAPI {
   theme: ElectronThemeAPI
   settings: ElectronSettingsAPI
   vault: import('../../shared/vault').VaultAPI
+  documentDrafts: import('../../shared/document-drafts').DocumentDraftAPI
   bookSources: import('../../shared/library-sources').BookSourcesAPI
   library: import('../../shared/library').LibraryHighlightAPI & {
     get(): Promise<LibraryResult<LibraryState>>

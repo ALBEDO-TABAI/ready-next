@@ -1320,6 +1320,16 @@ const themeAPI = {
   },
 }
 
+const documentDraftsAPI: import('../shared/document-drafts').DocumentDraftAPI = {
+  create: (input) => ipcRenderer.invoke('documentDrafts:create', input),
+  save: (id, revision, content) => ipcRenderer.invoke('documentDrafts:save', id, revision, content),
+  list: () => ipcRenderer.invoke('documentDrafts:list'),
+  read: (id) => ipcRenderer.invoke('documentDrafts:read', id),
+  discard: (id, revision) => ipcRenderer.invoke('documentDrafts:discard', id, revision),
+  finalize: (id, revision, input) => ipcRenderer.invoke('documentDrafts:finalize', id, revision, input),
+  importLegacy: (items) => ipcRenderer.invoke('documentDrafts:importLegacy', items),
+}
+
 const vaultAPI: import('../shared/vault').VaultAPI = {
   get: () => ipcRenderer.invoke('vault:get'),
   set: (path) => ipcRenderer.invoke('vault:set', path),
@@ -1570,6 +1580,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   theme: themeAPI,
   settings: settingsAPI,
   vault: vaultAPI,
+  documentDrafts: documentDraftsAPI,
   library: libraryAPI,
   bookSources: bookSourcesAPI,
   imageGeneration: imageGenerationAPI,
@@ -1606,6 +1617,7 @@ declare global {
       theme: typeof themeAPI
       settings: typeof settingsAPI
       vault: typeof vaultAPI
+      documentDrafts: typeof documentDraftsAPI
       bookSources: typeof bookSourcesAPI
       library: typeof libraryAPI
       imageGeneration: typeof imageGenerationAPI
