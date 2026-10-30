@@ -1,3 +1,4 @@
+import type { ObjectLinkQuery, ObjectLinksResponse } from '../../shared/object-links'
 import type { LibraryBook, LibraryBookPatch, LibraryBookmark, LibraryImportResult, LibraryReadingPosition, LibraryResult, LibraryState } from '../../shared/library'
 import type { DocumentSyncRequest, DocumentSyncReply } from '../../shared/document-operations'
 import type { ChatGptOAuthStatus } from '../../shared/chatgpt-oauth'
@@ -1868,6 +1869,8 @@ interface ElectronDocumentAPI {
   }) => Promise<DocumentSearchIndexResponse>
   reindexAllSources: (root: string) => Promise<DocumentReindexAllSourcesResponse>
   listSources: () => Promise<DocumentListSourcesResponse>
+  getObjectOutgoingLinks: (payload: ObjectLinkQuery) => Promise<ObjectLinksResponse>
+  getObjectIncomingLinks: (payload: ObjectLinkQuery) => Promise<ObjectLinksResponse>
   getBacklinks: (payload: { path: string; limit?: number }) => Promise<DocumentBacklinksResponse>
   getGraph: (payload?: { centerPath?: string; depth?: number; workspaceRoot?: string }) => Promise<DocumentGraphResponse>
   listMarks: (payload: { documentPath: string }) => Promise<DocumentMarksResponse>

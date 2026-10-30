@@ -702,10 +702,10 @@ async function runFileGetBacklinks(
   if (!target) return toJsonString({ ok: true, path, references: [] })
   const rows = db
     .prepare(
-      `SELECT src.path AS path, src.name AS name, dl.kind AS kind
-       FROM doc_links dl
-       JOIN documents src ON src.id = dl.src_doc_id
-       WHERE dl.target_doc_id = ? AND src.source_type = 'document'
+      `SELECT DISTINCT src.path AS path, src.name AS name, dl.kind AS kind
+       FROM object_links dl
+       JOIN documents src ON src.object_id = dl.source_id
+       WHERE dl.target_id = (SELECT object_id FROM documents WHERE id=?) AND dl.resolved=1 AND src.source_type = 'document'
        LIMIT ?`,
     )
     .all<{ path: string; name: string; kind: string }>(target.id, limit)

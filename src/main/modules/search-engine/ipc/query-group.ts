@@ -1,3 +1,5 @@
+import { ObjectLinkQuerySchema, type ObjectLinksResponse } from '../../../../shared/object-links'
+import { ObjectLinkRepository } from '../object-links'
 // Stage V V2.4b — search-engine SearchQueryGroup channel cluster.
 //
 // Bundles the 3 read-side channels that drive the FTS search surface +
@@ -5,7 +7,7 @@
 //
 //   document:searchIndex    (FTS scan over the document index — worker
 //                            first → in-process fallback)
-//   document:getBacklinks   (in-process repository read: `doc_links` join
+//   document:getBacklinks   (in-process repository read: `object_links` join
 //                            against `documents` — no worker path because
 //                            backlinks are a tiny join, not a full scan)
 //   document:getGraph       (graph BFS — worker only; structured error
@@ -61,6 +63,8 @@ const CHANNELS = [
   'document:searchIndex',
   'document:getBacklinks',
   'document:getGraph',
+  'document:getObjectOutgoingLinks',
+  'document:getObjectIncomingLinks',
 ] as const
 
 export const searchQueryGroup: IpcChannelGroup<SearchQueryGroupDeps> = {
@@ -181,10 +185,10 @@ export const searchQueryGroup: IpcChannelGroup<SearchQueryGroupDeps> = {
           if (!target) return { success: true, data: { references: [] } }
           const rows = db
             .prepare(
-              `SELECT src.path AS path, src.name AS name, dl.kind AS kind
-               FROM doc_links dl
-               JOIN documents src ON src.id = dl.src_doc_id
-               WHERE dl.target_doc_id = ? AND src.source_type = 'document'
+              `SELECT DISTINCT src.path AS path, src.name AS name, dl.kind AS kind
+               FROM object_links dl
+               JOIN documents src ON src.object_id = dl.source_id
+               WHERE dl.target_id = (SELECT object_id FROM documents WHERE id=?) AND dl.resolved=1 AND src.source_type = 'document'
                LIMIT ?`,
             )
             .all<{ path: string; name: string; kind: string }>(target.id, limit)
@@ -217,6 +221,17 @@ export const searchQueryGroup: IpcChannelGroup<SearchQueryGroupDeps> = {
         }
       },
     )
+
+    const queryLinks = (payload: unknown, direction: 'outgoing' | 'incoming'): ObjectLinksResponse => {
+      try {
+        const query = ObjectLinkQuerySchema.parse(payload)
+        const engine = deps.getSearchEngine()
+        if (!engine) return {success:false,error:'search engine unavailable'}
+        return {success:true,data:new ObjectLinkRepository(engine.getRepository().getConnection())[direction](query.endpoint, query.limit)}
+      } catch (error) { return {success:false,error:error instanceof Error ? error.message : String(error)} }
+    }
+    ipcMain.handle('document:getObjectOutgoingLinks', (_event, payload: unknown) => queryLinks(payload, 'outgoing'))
+    ipcMain.handle('document:getObjectIncomingLinks', (_event, payload: unknown) => queryLinks(payload, 'incoming'))
 
     return {
       dispose(): void {

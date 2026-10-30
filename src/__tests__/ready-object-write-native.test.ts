@@ -52,7 +52,7 @@ test('C2 link writeback uses the write service and retains unresolved work for d
   const {renameSync}=await import('node:fs');const {repairObjectLinks}=await import('../main/modules/object-service/link-repair')
   renameSync(join(f.root,'renamed.md'),join(f.root,'again.md'));f.registry.reconcile([join(f.root,'renamed.md'),join(f.root,'again.md')]);await repairObjectLinks(f.registry)
   assert.match(readFileSync(source,'utf8'),/\[\[renamed\]\]/)
-  assert.ok(f.db.prepare("SELECT * FROM object_link_targets WHERE state='pending'").all().length)
-  assert.ok(f.db.prepare('SELECT * FROM doc_links WHERE resolved=1').all().length>=2)
+  assert.ok(f.db.prepare("SELECT * FROM object_link_repairs WHERE state='pending'").all().length)
+  assert.ok(f.db.prepare('SELECT * FROM object_links WHERE resolved=1').all().length>=2)
  }finally{configureDocumentWriteService(prior);f.close()}
 })

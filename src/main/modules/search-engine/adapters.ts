@@ -327,7 +327,7 @@ export class FileSystemAdapter implements IndexSourceAdapter {
               result.skipped += 1
             } else {
               ctx.repository.replaceTags(upsert.documentId, parsed.tags)
-              ctx.repository.replaceLinks(upsert.documentId, parsed.wikilinks, parsed.mdlinks)
+              ctx.repository.replaceLinks(upsert.documentId, parsed.raw)
               ctx.repository.replaceAttachments(upsert.documentId, parsed.attachments)
               result.indexed += 1
             }
@@ -441,6 +441,7 @@ export class FileSystemAdapter implements IndexSourceAdapter {
       const graph = parseDocumentGraph(raw)
       const frontmatterJson = graph.frontmatter ? JSON.stringify(graph.frontmatter) : null
       return {
+        raw,
         path: filePath,
         name: basename(filePath),
         ext,
@@ -474,6 +475,7 @@ function decideOverrideOnly(filePath: string): FileFilterDecision {
 }
 
 export interface LoadedFile {
+  raw: string
   path: string
   name: string
   ext: string
@@ -575,7 +577,7 @@ function syncShared(
       else result.indexed += 1
       if (!upsert.skipped) {
         ctx.repository.replaceTags(upsert.documentId, [])
-        ctx.repository.replaceLinks(upsert.documentId, [], [])
+        ctx.repository.replaceLinks(upsert.documentId, row.body)
         ctx.repository.replaceAttachments(upsert.documentId, [])
       }
       existingPaths.delete(row.path)

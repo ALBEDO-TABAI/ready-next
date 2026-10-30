@@ -124,7 +124,7 @@ test('real adapters, search, graph and file tools preserve non-file references w
     'ready://web?url=https%3A%2F%2Fexample.com%2Fpath%3Fq%3D1%23top',
   ])
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM browser_bookmarks').get<{n:number}>()?.n, 3)
-  const beforeMigration = db.prepare('SELECT id, path FROM documents ORDER BY id').all()
+  const beforeMigration = db.prepare('SELECT id, path FROM documents ORDER BY id').all<{id:number;path:string}>()
   const identities = db.prepare('SELECT id, source_type, source_id, source_meta_json FROM documents').all<{
     id: number; source_type: string; source_id: string; source_meta_json: string
   }>()
@@ -132,7 +132,8 @@ test('real adapters, search, graph and file tools preserve non-file references w
     const oldPath = row.source_type === 'bookmark' ? JSON.parse(row.source_meta_json).url : `${row.source_type}://${row.source_id}`
     db.prepare('UPDATE documents SET path=? WHERE id=?').run(oldPath, row.id)
   }
-  db.prepare("INSERT INTO doc_links(src_doc_id,kind,target_text,target_doc_id,resolved) VALUES (?,'wikilink','article',?,1)").run(identities[0].id, identities[1].id)
+  const stablePaths = beforeMigration
+  db.prepare("INSERT INTO object_links(id,source_ref,kind,raw_target,target_text,target_ref,resolved) VALUES ('test',?,'wikilink','article','article',?,1)").run(stablePaths.find(r=>r.id===identities[0].id)!.path,stablePaths.find(r=>r.id===identities[1].id)!.path)
   migrate(db)
   assert.deepEqual(db.prepare('SELECT id, path FROM documents ORDER BY id').all(), beforeMigration)
   assert.equal(queryDocumentGraph(db).edges.length, 1)

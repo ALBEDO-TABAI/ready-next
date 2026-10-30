@@ -256,6 +256,11 @@
 - 内部移动由同一对象服务完成文件操作、对象位置和搜索关系更新；失败补偿，跨工作区先核对两端范围。外部变化按同一批次先识别同路径原子保存，再依次按唯一 inode、完整内容哈希、文件内 ID 配对；冲突 ID 有否决权，重复副本隔离，不擅自写文件。窗口外仅文件内 ID 可恢复墓碑。
 - 书签、阅读会话、活动和标签按对象关联；路径快照只解释历史，不参与运行时认领。用户新建书签/笔记经写入服务补齐 Markdown `ready_id`；自动打开/阅读不写。失败保留本地关系并返回原失败码及不可跨机器恢复状态。已有书签的补写仅针对对应 Markdown。Renderer 状态迁移和真实窗口验收不属于本轮 Main 合同。
 - C2 命令行验收：`ready-object-migration-native.test.ts`、`ready-object-identity-native.test.ts`、`ready-object-write-native.test.ts`，以真实临时文件与 Electron SQLite 断言迁移保真、身份稳定、反链、无孤儿行及失败可见；界面验收由独立 Ready Next 环境承担。
+- C5 关系索引：迁移 139 以 `object_links` 取代 `doc_links`；端点为稳定对象 id 或经共享 ReadyRef 校验的规范 URI，查询返回结构化端点。`document:getObjectOutgoingLinks` / `document:getObjectIncomingLinks` 返回原始目标、片段、原文行号与 UTF-16 偏移、解析状态及原因。路径优先；无法唯一匹配时返回“多个候选”，禁止取首个候选。
+- 关系抽取消费原始 Markdown，保留每次出现的位置；支持 wiki、标题/块、嵌入、相对链接、ReadyRef 和书房 `[原文]` 出处，忽略代码块/代码片段。frontmatter 只抽取值中明确写出的 `[[…]]` / `ready://…` 引用，不猜测普通标题、标签或项目名称。画板节点、日程关联等专用边种类已预留，其业务接线随所属模块实施。
+- 改名绑定由 `object_link_repairs` 持久保存，迁移完整保留 pending 状态、目标 id 与原文版本；片段属于边，绑定按目标对象路径归并。此表是改名操作的业务记录，不属于可删除索引。引用方只读、存在未保存修改或版本不符时，正文不变、修复记录保留，查询继续指向原对象。目标缺失时保留目标身份并显式返回不可用。
+- `rebuildObjectIndex` 只清除搜索与关系投影；保留对象身份登记、改名回执、日程、草稿、FastCard 和资料库文件。以所有已登记资料库及现行 ready.db 来源适配器重建，FastCard 出处参与关系查询。当前 `.ready/anchors` 是书房锚点缓存，关系来源仍是 Markdown 的原文引用；`.ready/` 内容不删除、不改写，不将缓存提升为正文真值。`ready-object-index-rebuild-native.test.ts` 接入 `verify:native`，比较稳定对象身份、边、反链及两次重建，覆盖旧记录迁移、待修复记录、只读/脏正文和关系 IPC。
+
 
 - Tag Forge 的文件发布与补偿只经文档写入服务；标签规则、审核和 durable creation receipt 仍归 Tag Forge。文件、打开标签页、索引与 `file_tag_assignments` 属于同一可回滚单元，读回失败不得发布成功；未保存缓冲合并不充当 durable receipt。
 
