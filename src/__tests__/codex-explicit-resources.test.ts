@@ -113,7 +113,7 @@ test('browser, calendar and document-quote references use Main-resolved or expli
     }),
     resolveCalendar: () => ({
       name: 'Main calendar title',
-      path: 'calendar-event://event-1',
+      path: 'ready://calendar/event/event-1',
       text: 'MAIN_CALENDAR_CONTEXT',
       digest: 'b'.repeat(64),
     }),
@@ -138,7 +138,7 @@ test('browser, calendar and document-quote references use Main-resolved or expli
     },
     {
       kind: 'calendar_event', source: 'calendar_context', name: 'Main calendar title',
-      path: 'calendar-event://event-1', text: '', canWrite: false,
+      path: 'ready://calendar/event/event-1', text: '', canWrite: false,
     },
     {
       kind: 'document_quote', source: 'document_quote', name: '方案.md',

@@ -1,3 +1,4 @@
+import { toReadyUri } from '../../../shared/ready-ref'
 import { RSSReferenceSchema } from '../../../shared/rss-reference'
 import type { ChatAttachment } from './types'
 import { buildActiveDocumentContext } from './documentActions'
@@ -8,7 +9,7 @@ import {
   resolveAIConfigCapabilities,
   type AIModelConfig,
 } from '../../../shared/ai-providers'
-import { persistableCalendarEventId } from '../../../shared/calendar-event-identity'
+import { calendarEventReadyRef, calendarEventReferenceId } from '../../../shared/calendar-event-identity'
 import type {
   AgentIngressMessageBlock,
   SendScopedResourceSelection,
@@ -164,7 +165,7 @@ export function extractAttachmentsFromMeta(meta?: Record<string, unknown>): Chat
       const record = item as Record<string, unknown>
       const name = String(record.name || '').trim()
       const path = String(record.path || '').trim()
-      if (!name || !path) return null
+      if (!name || (!path && record.source !== 'calendar-event')) return null
       return {
         id: String(record.id || `remote-attachment-${index}`),
         name,
@@ -494,8 +495,14 @@ export async function buildCodexIngressInputWithDiagnostics(params: {
       diagnostics.inputIncludedCount += 1
       continue
     }
-    if (attachment.source === 'calendar-event' && attachment.eventId) {
-      const eventId = persistableCalendarEventId(attachment.eventId) || attachment.eventId
+    if (attachment.source === 'calendar-event') {
+      const ref = calendarEventReadyRef(attachment.eventId, attachment.allDay)
+      if (!ref || attachment.path !== toReadyUri(ref)) {
+        diagnostics.inputFailedCount += 1
+        diagnostics.inputFailures.push({ id: attachment.id, name: attachment.name, path: attachment.path, reason: '日程无法定位：引用身份无效' })
+        continue
+      }
+      const eventId = calendarEventReferenceId(ref)
       resources.push({
         kind: 'calendar_event',
         id: attachment.id,

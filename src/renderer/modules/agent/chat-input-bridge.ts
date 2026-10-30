@@ -1,3 +1,5 @@
+import { calendarEventReadyRef } from '../../../shared/calendar-event-identity'
+import { toReadyUri } from '../../../shared/ready-ref'
 import { RSSReferenceSchema, rssReferencePath, type RSSReference } from '../../../shared/rss-reference'
 import { useAgent } from '../../stores/useAgent'
 import { useWorkspace } from '../../stores/useWorkspace'
@@ -186,7 +188,7 @@ export function createSkillReferenceAttachment(skill: ReadySkillReference): Chat
   }
 }
 
-async function createReadyContextAttachment(reference: ReadyContextReference): Promise<ChatAttachment> {
+export async function createReadyContextAttachment(reference: ReadyContextReference): Promise<ChatAttachment> {
   if (reference.type === 'skill-folder') {
     return createSkillReferenceAttachment(reference)
   }
@@ -239,23 +241,22 @@ async function createReadyContextAttachment(reference: ReadyContextReference): P
   }
 
   const title = reference.title || reference.name || '日程'
-  const path = reference.eventId
-    ? `calendar-event://${encodeURIComponent(reference.eventId)}`
-    : `calendar-event://${Date.now()}`
+  const ref = calendarEventReadyRef(reference.eventId, reference.allDay)
+  const path = ref ? toReadyUri(ref) : ''
   return {
     id: createAttachmentId('attach-calendar'),
-    name: title,
+    name: ref ? title : `${title}（无法定位）`,
     path,
     type: 'text',
     size: String(reference.description || '').length,
     ext: '.calendar',
     source: 'calendar-event',
     title,
-    eventId: reference.eventId,
+    eventId: ref ? reference.eventId : undefined,
     startTime: reference.startTime,
     endTime: reference.endTime,
     calendarId: reference.calendarId,
-    description: reference.description,
+    description: ref ? reference.description : '无法定位：缺少有效事件身份或原始实例信息。',
     location: reference.location,
     allDay: reference.allDay,
     contentType: reference.contentType,

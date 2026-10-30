@@ -1,3 +1,4 @@
+import { createReadyContextAttachment } from '../../../../modules/agent/chat-input-bridge'
 import { useCallback } from 'react'
 import type { DragEvent } from 'react'
 import { useAgent, type ChatAttachment } from '../../../../stores/useAgent'
@@ -84,6 +85,8 @@ export function useAttachmentIntake(params: UseAttachmentIntakeParams): Attachme
             eventId?: string
             startTime?: string
             endTime?: string
+            allDay?: boolean
+            location?: string
             calendarId?: string
             description?: string
             projectId?: string
@@ -227,19 +230,10 @@ export function useAttachmentIntake(params: UseAttachmentIntakeParams): Attachme
             setInputValue(currentInput ? `${currentInput}\n${snippet}` : snippet)
             focusInputWithResize()
           } else if (data.type === 'calendar-event') {
-            if (data.eventId) {
-              addAttachments([{
-                id: `attach-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-                name: data.title || data.name || '日程',
-                path: `calendar-event://${data.eventId}`,
-                type: 'text',
-                size: 0,
-                ext: '.calendar',
-                source: 'calendar-event',
-                eventId: data.eventId,
-              }])
-              focusInputWithResize()
-            }
+            const attachment = await createReadyContextAttachment({ ...data, type: 'calendar-event' })
+            if (!isComposerAuthorityCurrent(useAgent.getState(), composerAuthority)) return
+            if (attachment) addAttachments([attachment])
+            focusInputWithResize()
           } else if (data.type === 'doc-tab' && data.selection?.trim() && (data.dirty || !data.path)) {
             addAttachments([{
               id: `attach-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,

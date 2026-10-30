@@ -111,7 +111,7 @@ test('browser, calendar and selected document text use narrow structured referen
         size: 0, ext: '', source: 'browser-tab', browserTabId: 'tab-1',
       },
       {
-        id: 'calendar-1', name: '评审会', path: 'calendar-event://event-1', type: 'text',
+        id: 'calendar-1', name: '评审会', path: 'ready://calendar/event/event-1', type: 'text',
         size: 0, ext: '.calendar', source: 'calendar-event', eventId: 'event-1',
       },
       {

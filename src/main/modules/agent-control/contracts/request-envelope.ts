@@ -1,3 +1,5 @@
+import { calendarEventReadyRef } from '../../../../shared/calendar-event-identity'
+import { toReadyUri } from '../../../../shared/ready-ref'
 import type { RSSReference } from '../../../../shared/rss-reference'
 import { extractPrimaryUserInstruction as extractPrimaryUserInstructionFromText } from '../../claude-bridge/tool-policy-heuristics'
 import { validateWorkspaceRoot } from '../../../../shared/workspace-validation'
@@ -268,7 +270,7 @@ function stripStructuredResourceBoilerplate(text: string): string {
 }
 
 function extractNamedBlockValue(text: string, label: string): string | null {
-  const match = text.match(new RegExp(`(?:^|\\n)-\\s*${escapeRegExp(label)}:\\s*([^\\n]+)`))
+  const match = text.match(new RegExp(`(?:^|\\n)-\\s*${escapeRegExp(label)}:[ \t]*([^\\n]+)`))
   return match?.[1]?.trim() || null
 }
 
@@ -366,7 +368,9 @@ function buildResourceFromBlock(
   if (block.marker === '### 日程事件引用') {
     const name = extractNamedBlockValue(block.text, '标题') || '日程事件'
     const eventId = extractNamedBlockValue(block.text, 'eventId')
-    const path = eventId ? `calendar-event://${encodeURIComponent(eventId)}` : null
+    const allDay = extractNamedBlockValue(block.text, '全天')
+    const ref = calendarEventReadyRef(eventId, allDay === '是' ? true : allDay === '否' ? false : undefined)
+    const path = ref ? toReadyUri(ref) : null
     const text = stripStructuredResourceBoilerplate(block.text)
     return {
       id: `${block.marker}-${order}-${name}`,
