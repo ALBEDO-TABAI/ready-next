@@ -7,18 +7,15 @@ export const useDraftUI = create<{ epoch: number; boot: 'loading' | 'ready' | 'f
   epoch: 0, boot: 'loading', error: '', saveTabId: null,
 }))
 export let drafts: DraftController
-let hydrate: () => Promise<void> | void
 let initialization: Promise<void> | undefined
-export function configureDrafts(port: Omit<DraftPort, 'notify'>, rehydrate: () => Promise<void> | void): void {
+export function configureDrafts(port: Omit<DraftPort, 'notify'>): void {
   drafts = new DraftController({ ...port, notify: () => useDraftUI.setState(state => ({ epoch: state.epoch + 1 })) })
-  hydrate = rehydrate
 }
 export function initializeDrafts(): Promise<void> {
   if (initialization) return initialization
   useDraftUI.setState({ boot: 'loading', error: '' })
   initialization = (async () => {
     await migrateLegacyDrafts(localStorage, window.electronAPI.documentDrafts)
-    await hydrate()
     await drafts.restore()
     useDraftUI.setState({ boot: 'ready' })
   })().catch(error => {

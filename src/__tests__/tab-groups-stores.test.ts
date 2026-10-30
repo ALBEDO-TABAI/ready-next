@@ -8,7 +8,7 @@ import {
   useBrowserTabs,
 } from '../renderer/stores/useBrowserTabs'
 import { useDocTabs } from '../renderer/stores/useDocTabs'
-import { migrateLegacyDrafts, TAB_METADATA_KEY } from '../renderer/modules/document/drafts/migration'
+import { captureLegacyDrafts, migrateLegacyDrafts, TAB_METADATA_KEY } from '../renderer/modules/document/drafts/migration'
 import { createDraftFixture } from './helpers/ready-drafts-fixture'
 
 function btab(id: string, groupId?: string | null): BrowserTab {
@@ -190,7 +190,10 @@ describe('useDocTabs legacy groups and draft migration', () => {
     const fixture = createDraftFixture()
     fixture.storage.setItem(TAB_METADATA_KEY, v2)
     const imported = t.mock.method(fixture.api, 'importLegacy')
-    // M3 §4.1: migrate bodies before hydrating metadata, as at application boot.
+    // FX2: hand off bodies, hydrate metadata immediately, then import into Main.
+    captureLegacyDrafts(fixture.storage)
+    useDocTabs.persist.setOptions({ storage: createJSONStorage(() => fixture.storage) })
+    await useDocTabs.persist.rehydrate()
     await migrateLegacyDrafts(fixture.storage, fixture.api)
     assert.deepEqual(imported.mock.calls.flatMap(call => call.arguments[0]).map(item => ({
       tabId: item.tabId, content: item.content,
@@ -198,10 +201,8 @@ describe('useDocTabs legacy groups and draft migration', () => {
     const metadata = JSON.parse(fixture.storage.getItem(TAB_METADATA_KEY)!)
     for (const tab of metadata.state.tabs) {
       assert.equal('content' in tab, false, 'metadata no longer stores bodies')
-      assert.equal(fixture.drafts.get(tab.draftId)?.content, tab.id === 'doc-2' ? 'hello' : '', 'imported body remains recoverable')
+      assert.equal([...fixture.drafts.values()].find(draft => draft.tabId === tab.id)?.content, tab.id === 'doc-2' ? 'hello' : '', 'imported body remains recoverable by tabId')
     }
-    useDocTabs.persist.setOptions({ storage: createJSONStorage(() => fixture.storage) })
-    await useDocTabs.persist.rehydrate()
     const s = useDocTabs.getState()
     // Additive group fields.
     assert.ok(Array.isArray(s.tabGroups), 'tabGroups added by migration')

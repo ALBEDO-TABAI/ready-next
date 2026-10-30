@@ -43,7 +43,7 @@ test('Renderer to Main: interrupted finalize retries one intent, retains later i
       root: async () => vault, resolve: async path => registry.register(path).id,
       locate: async id => { const path = registry.get(id)?.current_path; if (!path) throw new Error('missing'); return path },
       read: async path => readFileSync(path, 'utf8'),
-    }, () => {})
+    })
     return service
   }
   try {

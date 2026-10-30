@@ -35,7 +35,7 @@ async function fixture(t: TestContext, dirty?: boolean) {
   const draftFixture = createDraftFixture()
   configureDrafts({ ...draftFixture.port, tabs: () => useDocTabs.getState().tabs,
     patch: (id, patch) => useDocTabs.setState(state => ({ tabs: state.tabs.map(tab => tab.id === id && tab.kind !== 'library' ? { ...tab, ...patch } : tab) })),
-  }, () => {})
+  })
   useDocTabs.setState({ tabs: [], activeTabId: '' })
   let tabId = ''
   if (dirty !== undefined) {

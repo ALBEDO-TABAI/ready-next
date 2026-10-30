@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { DraftController } from '../renderer/modules/document/drafts/controller'
-import { contentHash as contentHashForTest, migrateLegacyDrafts } from '../renderer/modules/document/drafts/migration'
+import { contentHash as contentHashForTest, captureLegacyDrafts, LEGACY_HANDOFF_KEY, migrateLegacyDrafts } from '../renderer/modules/document/drafts/migration'
 import { createDraftFixture } from './helpers/ready-drafts-fixture'
 
 // C12: confirmation belongs to the submitted snapshot; closing is not discarding.
@@ -47,9 +47,10 @@ test('legacy migration keeps failed source, verifies readback and retries withou
   const f = createDraftFixture()
   const storage = f.storage
   storage.setItem('ready-doc-tabs-v2', JSON.stringify({ version: 3, state: { tabs: [{ id: 'tab', path: null, content: '', isDirty: true }] } }))
+  captureLegacyDrafts(storage)
   f.failImport = true
   await assert.rejects(migrateLegacyDrafts(storage, f.api))
-  assert.equal(JSON.parse(storage.getItem('ready-doc-tabs-v2')!).state.tabs[0].content, '')
+  assert.equal(JSON.parse(JSON.parse(storage.getItem(LEGACY_HANDOFF_KEY)!).metadata).state.tabs[0].content, '')
   f.failImport = false
   await migrateLegacyDrafts(storage, f.api)
   await migrateLegacyDrafts(storage, f.api)
@@ -98,14 +99,15 @@ test('migration mismatch never deletes legacy source and unrelated drafts surviv
   const f = createDraftFixture()
   f.storage.setItem('ready-doc-tab-draft-v1:a', 'first')
   f.storage.setItem('ready-doc-tab-draft-v1:b', 'second')
+  captureLegacyDrafts(f.storage)
   const read = f.api.read
   f.api.read = async id => {
     const result = await read(id)
     return result.ok && result.value?.content === 'second' ? { ok: true, value: { ...result.value, content: 'corrupt' } } : result
   }
   await assert.rejects(migrateLegacyDrafts(f.storage, f.api), /回读不一致/)
-  assert.equal(f.storage.getItem('ready-doc-tab-draft-v1:a'), null)
-  assert.equal(f.storage.getItem('ready-doc-tab-draft-v1:b'), 'second')
+  assert.equal(JSON.parse(f.storage.getItem(LEGACY_HANDOFF_KEY)!).drafts['ready-doc-tab-draft-v1:a'], undefined)
+  assert.equal(JSON.parse(f.storage.getItem(LEGACY_HANDOFF_KEY)!).drafts['ready-doc-tab-draft-v1:b'], 'second')
   f.api.read = read
   await migrateLegacyDrafts(f.storage, f.api)
   assert.equal(f.drafts.size, 2)

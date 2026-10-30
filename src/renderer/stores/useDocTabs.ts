@@ -1,4 +1,5 @@
 import { configureDrafts, draftChanged, drafts, reportDraftError, useDraftUI } from '../modules/document/drafts/runtime'
+import { captureLegacyDrafts } from '../modules/document/drafts/migration'
 import { initializeObjectPresentation, objectLocationForPath, objectPresentationAPI, onObjectMoved, rememberObjectLocation, resolvePresentationObject } from './objectPresentationState'
 import { registerDocumentSaveHandler } from '../modules/document/documentSaveRegistry'
 import { createDocumentOperationSync } from '../modules/document/documentOperationSync'
@@ -138,7 +139,7 @@ function cancelPendingMetadataSchedules(): void {
 
 export function flushPendingDocTabMetadata(): void {
     const pending = pendingMetadataWrite
-    if (!pending || useDraftUI.getState().boot !== 'ready') return
+    if (!pending) return
     cancelPendingMetadataSchedules()
     const storage = getDocTabStorage()
     if (!storage) {
@@ -402,6 +403,8 @@ const fallbackStorage = {
     setItem: () => undefined,
     removeItem: () => undefined,
 }
+
+if (typeof localStorage !== 'undefined') captureLegacyDrafts(localStorage)
 
 export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
     tabs: [
@@ -749,7 +752,6 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
 }), {
     name: STORAGE_KEY,
     version: 5,
-    skipHydration: true,
     storage: createJSONStorage(() => (typeof localStorage !== 'undefined' ? coalescedMetadataStorage : fallbackStorage)),
     partialize: (state) => {
         const tabs = state.tabs.map(({ content: _content, ...metadata }) => metadata)
@@ -822,7 +824,7 @@ configureDrafts({
         if (!result.success || typeof result.content !== 'string') throw new Error(result.error || '文件读取失败')
         return result.content
     },
-}, () => useDocTabs.persist.rehydrate())
+})
 useDraftUI.subscribe((state, previous) => {
     if (state.boot === 'ready' && previous.boot !== 'ready') { useDocTabs.setState({}); flushPendingDocTabMetadata() }
 })
