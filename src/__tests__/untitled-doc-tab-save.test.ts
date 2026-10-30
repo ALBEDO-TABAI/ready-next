@@ -7,11 +7,14 @@ import {
   saveUntitledDocTabToDirectory,
 } from '../renderer/modules/document/untitledDocSave'
 import { parseUntitledDocTabDragPayload } from '../renderer/components/layout/fileTreeExternalDrop'
+import { configureDrafts } from '../renderer/modules/document/drafts/runtime'
+import { createDraftFixture } from './helpers/ready-drafts-fixture'
+import { contentHash } from '../renderer/modules/document/drafts/migration'
 import { useDocTabs } from '../renderer/stores/useDocTabs'
 
 /**
  * 行为合同：标签栏新建的未保存文档（path=null）拖到目录后落盘——
- * 文件名由标题派生并自动避让重名；createFile 先占名防止覆盖；
+ * 文件名由标题派生并自动避让重名；通过 Main 草稿定稿防止覆盖；
  * 已保存的标签不走这条路径。
  */
 
@@ -24,20 +27,25 @@ type FakeFs = {
 
 function installFakeDocumentApi(fs: FakeFs): () => void {
   const previous = (globalThis as { window?: unknown }).window
+  const fixture = createDraftFixture()
+  fixture.api.finalize = async (id, revision, input) => {
+    if (fs.failCreate) return { ok: false, code: 'write_failed', message: '磁盘拒绝' }
+    const path = `${input.parentPath}/${input.title}.md`
+    if (fs.existing.has(path)) return { ok: false, code: 'collision', message: '已存在' }
+    const draft = fixture.drafts.get(id)!
+    fs.existing.add(path); fs.created.push(path); fs.written.push({ path, content: draft.content })
+    return { ok: true, value: { draftId: id, revision, contentHash: await contentHash(draft.content), path, objectId: 'object', parentObjectId: null, operationId: input.operationId } }
+  }
+  configureDrafts({ ...fixture.port, tabs: () => useDocTabs.getState().tabs,
+    read: async path => fs.written.find(item => item.path === path)!.content,
+    patch: (id, patch) => useDocTabs.setState(state => ({ tabs: state.tabs.map(tab => tab.id === id && tab.kind !== 'library' ? { ...tab, ...patch } : tab) })),
+  }, () => {})
   const electronAPI = {
+    documentDrafts: fixture.api,
     document: {
       stat: async (path: string) => (fs.existing.has(path) ? { success: true } : { success: false }),
-      createFile: async (path: string) => {
-        if (fs.failCreate) return { success: false, error: '磁盘拒绝' }
-        if (fs.existing.has(path)) return { success: false, error: '已存在' }
-        fs.existing.add(path)
-        fs.created.push(path)
-        return { success: true }
-      },
-      writeFile: async (path: string, content: string) => {
-        fs.written.push({ path, content })
-        return { success: true }
-      },
+      createFile: async () => { assert.fail('drag must finalize a draft') },
+      writeFile: async () => { assert.fail('drag must finalize a draft') },
     },
   }
   Object.defineProperty(globalThis, 'window', {

@@ -1,3 +1,4 @@
+import { drafts } from './drafts/runtime'
 import { RENDERER_STATE_FLUSH_TIMEOUT_MS } from '../../../shared/renderer-state-flush'
 import {
   flushPendingDocTabPersistenceForExit,
@@ -14,7 +15,7 @@ export interface DocumentExitFlushPort {
   runSerialized<T>(tabId: string, path: string, operation: () => Promise<T>): Promise<T>
   writeFile(path: string, content: string): Promise<{ success?: boolean; error?: string }>
   commitTabSaveSnapshot(tabId: string, expectedContent: string, writtenContent: string): boolean
-  flushDraftPersistence(): void
+  flushDraftPersistence(): Promise<void> | void
   now(): number
 }
 
@@ -33,7 +34,7 @@ function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-export async function flushDirtyDocumentTabsForExit(
+async function flushDirtyTabs(
   port: DocumentExitFlushPort,
   options: DocumentExitFlushOptions = {},
 ): Promise<void> {
@@ -44,7 +45,7 @@ export async function flushDirtyDocumentTabsForExit(
   for (let pass = 0; pass < maxPasses; pass += 1) {
     let draftError: unknown = null
     try {
-      port.flushDraftPersistence()
+      await port.flushDraftPersistence()
     } catch (error) {
       // silent-catch: retain this failure and report it after every independent path write has been attempted.
       draftError = error
@@ -57,6 +58,7 @@ export async function flushDirtyDocumentTabsForExit(
       if (!queuedTab?.isDirty || !queuedTab.path) return
       const queuedPath = queuedTab.path
       await port.runSerialized(tabId, queuedPath, async () => {
+        if (port.now() - startedAt >= timeoutMs) throw new Error('退出前保存超时，已取消关闭以保留最新内容')
         const tab = port.getTabs().find((candidate) => candidate.id === tabId)
         if (!tab?.isDirty || tab.path !== queuedPath) return
         const snapshot = tab.content
@@ -68,7 +70,7 @@ export async function flushDirtyDocumentTabsForExit(
       })
     }))
     try {
-      port.flushDraftPersistence()
+      await port.flushDraftPersistence()
       draftError = null
     } catch (error) {
       // silent-catch: retain the final draft failure and aggregate it with any path write failures below.
@@ -91,6 +93,22 @@ export async function flushDirtyDocumentTabsForExit(
   throw new Error('退出前文档持续变化次数过多，已取消关闭以保留最新内容')
 }
 
+export async function flushDirtyDocumentTabsForExit(
+  port: DocumentExitFlushPort,
+  options: DocumentExitFlushOptions = {},
+): Promise<void> {
+  const timeoutMs = options.timeoutMs ?? RENDERER_STATE_FLUSH_TIMEOUT_MS - EXIT_FLUSH_SAFETY_MARGIN_MS
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    await Promise.race([
+      flushDirtyTabs(port, { ...options, timeoutMs }),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('退出前保存超时，已取消关闭以保留最新内容')), timeoutMs)
+      }),
+    ])
+  } finally { clearTimeout(timer) }
+}
+
 export async function flushCurrentDocumentTabsForExit(): Promise<void> {
   await flushDirtyDocumentTabsForExit({
     getTabs: () => useDocTabs.getState().tabs,
@@ -101,6 +119,8 @@ export async function flushCurrentDocumentTabsForExit(): Promise<void> {
     writeFile: async (path, content) => {
       const api = window.electronAPI?.document
       if (!api) return { success: false, error: '文档保存服务不可用' }
+      const tab = useDocTabs.getState().tabs.find(tab => tab.path === path && tab.isDirty)
+      if (tab && drafts.status(tab.id)?.conflict) return { success: false, error: '磁盘版本已变化，请先处理草稿冲突' }
       return api.writeFile(path, content)
     },
     commitTabSaveSnapshot: (tabId, expectedContent, writtenContent) => (

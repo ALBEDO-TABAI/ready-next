@@ -301,7 +301,8 @@ export default function MarkdownEditor({
     const load = async () => {
       if (!tab.path) {
         if (!tab.content && !tab.isDirty) {
-          updateTabContent(tab.id, DEFAULT_CONTENT)
+          // The welcome text is initial content, not a user edit, so it must not start a draft.
+          hydrateTabContentFromDisk(tab.id, DEFAULT_CONTENT)
         }
         setLoadError(null)
         setContentReady(true)

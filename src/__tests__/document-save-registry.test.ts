@@ -51,25 +51,18 @@ test('document save commits only the snapshot written and preserves newer typing
   assert.equal(dirty, true)
 })
 
-test('untitled document save-as updates its path and reports failures', async () => {
-  const updates: string[] = []
-  let suggestedName = ''
+test('untitled document opens the finalize dialog; disk failures remain visible', async () => {
+  const { useDraftUI } = await import('../renderer/modules/document/drafts/runtime')
+  let writes = 0
   const saved = await saveDocumentTabSnapshot({
     tab: { id: 'draft', path: null, title: 'Draft.md', content: '# Draft' },
-    api: {
-      writeFile: async () => ({ success: false }),
-      saveFileAs: async (input) => {
-        suggestedName = input.suggestedName
-        return { success: true, path: 'C:\\notes\\Draft.md' }
-      },
-    },
-    setTabPath: (_id, path) => { updates.push(path) },
-    renameTab: (_id, title) => { updates.push(title) },
-    commitTabSaveSnapshot: () => true,
+    api: { writeFile: async () => { writes++; return { success: false } }, saveFileAs: async () => { writes++; return { success: false } } },
+    setTabPath: () => assert.fail('must await finalize'), renameTab: () => assert.fail('must await finalize'),
+    commitTabSaveSnapshot: () => assert.fail('must await finalize'),
   })
-  assert.deepEqual(saved, { status: 'saved', path: 'C:\\notes\\Draft.md' })
-  assert.equal(suggestedName, 'Draft.md')
-  assert.deepEqual(updates, ['C:\\notes\\Draft.md', 'Draft.md'])
+  assert.equal(saved.status, 'cancelled')
+  assert.equal(useDraftUI.getState().saveTabId, 'draft')
+  assert.equal(writes, 0)
 
   const failed = await saveDocumentTabSnapshot({
     tab: { id: 'doc', path: '/tmp/doc.md', title: 'doc.md', content: 'body' },

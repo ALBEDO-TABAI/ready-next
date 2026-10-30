@@ -208,3 +208,37 @@ test('a timed-out old tab write cannot overwrite a reopened tab saving the same 
     await rm(directory, { recursive: true, force: true })
   }
 })
+
+test('exit waits for the draft acknowledgement and rejects an unresponsive writer before Main deadline', async () => {
+  const tabs: DocTab[] = [{ id: 'draft', path: null, title: 'Draft', content: 'latest', isDirty: true }]
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  let finished = false
+  const work = flushDirtyDocumentTabsForExit(createPort(() => tabs, { flushDraftPersistence: () => gate })).then(() => { finished = true })
+  await new Promise(resolve => setImmediate(resolve)); assert.equal(finished, false)
+  release(); await work; assert.equal(finished, true)
+  await assert.rejects(flushDirtyDocumentTabsForExit(createPort(() => tabs, {
+    flushDraftPersistence: () => new Promise<void>(() => {}),
+  }), { timeoutMs: 20 }), /超时/)
+})
+
+test('draft flush timeout reaches the existing exit warning and never closes the database or window', async () => {
+  const { GracefulWindowCloseCoordinator } = await import('../main/modules/process-cleanup/graceful-window-close-coordinator')
+  const tabs: DocTab[] = [{ id: 'draft', path: null, title: 'Draft', content: 'latest', isDirty: true }]
+  let warned!: (error: unknown) => void
+  const warning = new Promise<unknown>(resolve => { warned = resolve })
+  const coordinator = new GracefulWindowCloseCoordinator({
+    flushRendererState: async () => {
+      await flushDirtyDocumentTabsForExit(createPort(() => tabs, { flushDraftPersistence: () => new Promise<void>(() => {}) }), { timeoutMs: 20 })
+      return { release() {} }
+    },
+    cleanupBeforeQuit: async () => { assert.fail('database must stay open') },
+    requestWindowClose: () => { assert.fail('window must stay open') },
+    requestAppQuit: () => { assert.fail('app must stay open') },
+    onFailure: (error, action) => { assert.equal(action, 'quit_app'); warned(error) },
+  })
+  coordinator.handleBeforeQuit({ preventDefault() {} })
+  assert.match(String(await warning), /超时/)
+  assert.equal(coordinator.getStateForTests(), 'idle')
+  assert.equal(tabs[0].content, 'latest')
+})

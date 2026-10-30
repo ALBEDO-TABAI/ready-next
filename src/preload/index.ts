@@ -1350,8 +1350,8 @@ const documentPagesAPI: import('../shared/document-pages').DocumentPagesAPI = {
 
 const documentDraftsAPI: import('../shared/document-drafts').DocumentDraftAPI = {
   create: (input) => ipcRenderer.invoke('documentDrafts:create', input),
-  save: (id, revision, content) => ipcRenderer.invoke('documentDrafts:save', id, revision, content),
-  list: () => ipcRenderer.invoke('documentDrafts:list'),
+  save: (id, revision, content, tabId) => ipcRenderer.invoke('documentDrafts:save', id, revision, content, tabId),
+  list: tabId => ipcRenderer.invoke('documentDrafts:list', tabId),
   read: (id) => ipcRenderer.invoke('documentDrafts:read', id),
   discard: (id, revision) => ipcRenderer.invoke('documentDrafts:discard', id, revision),
   finalize: (id, revision, input) => ipcRenderer.invoke('documentDrafts:finalize', id, revision, input),

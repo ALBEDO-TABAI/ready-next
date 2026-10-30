@@ -1,3 +1,4 @@
+import { configureDrafts, draftChanged, drafts, reportDraftError, useDraftUI } from '../modules/document/drafts/runtime'
 import { initializeObjectPresentation, objectLocationForPath, objectPresentationAPI, onObjectMoved, rememberObjectLocation, resolvePresentationObject } from './objectPresentationState'
 import { registerDocumentSaveHandler } from '../modules/document/documentSaveRegistry'
 import { createDocumentOperationSync } from '../modules/document/documentOperationSync'
@@ -22,6 +23,7 @@ import {
 interface DocTabBase {
     id: string
     title: string
+    draftId?: string
     objectId?: string
     objectRevision?: number
     objectBinding?: { status: 'resolving' } | { status: 'resolved' } | { status: 'failed'; message: string }
@@ -95,8 +97,6 @@ let tabCounter = 0
 const makeId = () => `doc-${++tabCounter}`
 
 const STORAGE_KEY = 'ready-doc-tabs-v2'
-const DRAFT_STORAGE_PREFIX = 'ready-doc-tab-draft-v1:'
-const DRAFT_WRITE_DELAY_MS = 300
 const METADATA_WRITE_MAX_DELAY_MS = 500
 const METADATA_IDLE_QUIET_MS = 120
 const IMAGE_PREVIEW_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico'])
@@ -107,12 +107,6 @@ interface DocTabStorage {
     removeItem: (key: string) => void
 }
 
-interface PendingDraftWrite {
-    content: string
-    timer: ReturnType<typeof setTimeout> | null
-}
-
-const pendingDraftWrites = new Map<string, PendingDraftWrite>()
 let pendingMetadataWrite: { key: string; value: string } | null = null
 let pendingMetadataTimer: ReturnType<typeof setTimeout> | null = null
 let pendingMetadataQuietTimer: ReturnType<typeof setTimeout> | null = null
@@ -127,45 +121,8 @@ function getDocTabStorage(): DocTabStorage | null {
     }
 }
 
-export function getDocTabDraftStorageKey(id: string): string {
-    return `${DRAFT_STORAGE_PREFIX}${encodeURIComponent(id)}`
-}
-
-function writePendingDraft(id: string): boolean {
-    const pending = pendingDraftWrites.get(id)
-    if (!pending) return true
-    const storage = getDocTabStorage()
-    if (!storage) {
-        pending.timer = null
-        return false
-    }
-    try {
-        storage.setItem(getDocTabDraftStorageKey(id), pending.content)
-        pendingDraftWrites.delete(id)
-        return true
-    } catch {
-        // silent-catch: keep the draft queued so a later flush can retry it.
-        pending.timer = null
-        return false
-    }
-}
-
-function queueDraftWrite(id: string, content: string): void {
-    const previous = pendingDraftWrites.get(id)
-    if (previous?.timer) clearTimeout(previous.timer)
-    const pending: PendingDraftWrite = { content, timer: null }
-    const timer = setTimeout(() => writePendingDraft(id), DRAFT_WRITE_DELAY_MS)
-    if (typeof timer === 'object' && 'unref' in timer && typeof timer.unref === 'function') timer.unref()
-    pending.timer = timer
-    pendingDraftWrites.set(id, pending)
-}
-
-export function flushPendingDocTabDrafts(): void {
-    for (const [id, pending] of pendingDraftWrites) {
-        if (pending.timer) clearTimeout(pending.timer)
-        pending.timer = null
-        writePendingDraft(id)
-    }
+export function flushPendingDocTabDrafts(): Promise<void> {
+    return drafts.flushAll()
 }
 
 function cancelPendingMetadataSchedules(): void {
@@ -181,7 +138,7 @@ function cancelPendingMetadataSchedules(): void {
 
 export function flushPendingDocTabMetadata(): void {
     const pending = pendingMetadataWrite
-    if (!pending) return
+    if (!pending || useDraftUI.getState().boot !== 'ready') return
     cancelPendingMetadataSchedules()
     const storage = getDocTabStorage()
     if (!storage) {
@@ -197,11 +154,11 @@ export function flushPendingDocTabMetadata(): void {
     }
 }
 
-export function flushPendingDocTabPersistenceForExit(): void {
-    flushPendingDocTabDrafts()
+export async function flushPendingDocTabPersistenceForExit(): Promise<void> {
+    await flushPendingDocTabDrafts()
     flushPendingDocTabMetadata()
     const failures: string[] = []
-    if (pendingDraftWrites.size > 0) failures.push(`${pendingDraftWrites.size} 份文档草稿`)
+    if (drafts.hasUnconfirmed()) failures.push('文档草稿正在等待 Main 确认')
     if (pendingMetadataWrite) failures.push('文档标签恢复信息')
     if (failures.length > 0) {
         throw new Error(`${failures.join('、')}未能写入本地恢复存储`)
@@ -248,59 +205,10 @@ const coalescedMetadataStorage: DocTabStorage = {
     },
 }
 
-function discardDraft(id: string): void {
-    const pending = pendingDraftWrites.get(id)
-    if (pending?.timer) clearTimeout(pending.timer)
-    pendingDraftWrites.delete(id)
-    try {
-        getDocTabStorage()?.removeItem(getDocTabDraftStorageKey(id))
-    } catch {
-        // silent-catch: a clean/saved tab never needs a renderer draft to be authoritative.
-    }
-}
-
-function readDraft(id: string): string | null {
-    const pending = pendingDraftWrites.get(id)
-    if (pending) return pending.content
-    try {
-        return getDocTabStorage()?.getItem(getDocTabDraftStorageKey(id)) ?? null
-    } catch {
-        // silent-catch: an unreadable draft is treated as absent.
-        return null
-    }
-}
-
-function needsPersistedDraft(tab: DocTab): boolean {
-    return tab.kind !== 'library' && (tab.isDirty || tab.path === null)
-}
-
-function persistLegacyDrafts(tabs: DocTab[]): void {
-    const storage = getDocTabStorage()
-    if (!storage) return
-    for (const tab of tabs) {
-        if (!needsPersistedDraft(tab)) continue
-        try {
-            storage.setItem(getDocTabDraftStorageKey(tab.id), tab.content)
-        } catch {
-            // silent-catch: re-attempt after the middleware replaces the larger legacy metadata record.
-            queueDraftWrite(tab.id, tab.content)
-        }
-    }
-}
-
-function restorePersistedDrafts(tabs: DocTab[]): DocTab[] {
-    return tabs.map((tab): DocTab => {
-        if (tab.kind === 'library') return { ...tab, path: null, content: '' as const, isDirty: false }
-        if (!needsPersistedDraft(tab)) return { ...tab, content: '' }
-        const draft = readDraft(tab.id)
-        return draft === null ? tab : { ...tab, content: draft }
-    })
-}
-
 function installDraftFlushListeners(): void {
     if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return
     const flushAll = () => {
-        flushPendingDocTabDrafts()
+        void flushPendingDocTabDrafts().catch(reportDraftError)
         flushPendingDocTabMetadata()
     }
     window.addEventListener('pagehide', flushAll)
@@ -463,7 +371,6 @@ function replaceDirtyTabContent(tabs: DocTab[], id: string, content: string): Do
     const current = tabs.find((tab) => tab.id === id)
     if (!current || current.kind === 'library') return tabs
     if (current.content === content && current.isDirty) return tabs
-    if (current.content !== content || !current.isDirty) queueDraftWrite(id, content)
     return tabs.map((tab) => tab.id === id && tab.kind !== 'library' ? { ...tab, content, isDirty: true } : tab)
 }
 
@@ -634,7 +541,6 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
                 },
             ],
         })
-        if (options?.content) queueDraftWrite(id, options.content)
         return id
     },
 
@@ -647,6 +553,10 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
     },
 
     closeTab: (id: string) => {
+        if (drafts.status(id) && drafts.status(id)?.status !== 'confirmed') {
+            void drafts.flush(id).then(() => get().closeTab(id)).catch(reportDraftError)
+            return
+        }
         const { tabs, tabGroups, activeTabId, splitTabId } = get()
         const remaining = tabs.filter(t => t.id !== id)
 
@@ -660,7 +570,6 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
                 splitTabId: null,
                 focusedPaneTabId: newId,
             })
-            discardDraft(id)
             return
         }
 
@@ -688,7 +597,6 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
         }
 
         set(updates)
-        discardDraft(id)
     },
 
     setActiveTab: (id: string) => {
@@ -744,10 +652,9 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
     hydrateTabContentFromDisk: (id: string, content: string) => {
         set({
             tabs: get().tabs.map((tab) =>
-                tab.id === id && tab.kind !== 'library' ? { ...tab, content, isDirty: false } : tab
+                tab.id === id && tab.kind !== 'library' && !tab.isDirty ? { ...tab, content, isDirty: false } : tab
             ),
         })
-        discardDraft(id)
     },
 
     commitTabSaveSnapshot: (id: string, expectedContent: string, writtenContent: string) => {
@@ -759,7 +666,7 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
                 return { ...tab, content: writtenContent, isDirty: false }
             }),
         })
-        if (committed) discardDraft(id)
+        void drafts.saved(id, expectedContent).catch(reportDraftError)
         return committed
     },
 
@@ -769,7 +676,6 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
                 t.id === id ? { ...t, isDirty: false } : t
             )
         })
-        discardDraft(id)
     },
 
     reorderTabs: (fromIndex: number, toIndex: number) => {
@@ -842,10 +748,11 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
     },
 }), {
     name: STORAGE_KEY,
-    version: 4,
+    version: 5,
+    skipHydration: true,
     storage: createJSONStorage(() => (typeof localStorage !== 'undefined' ? coalescedMetadataStorage : fallbackStorage)),
     partialize: (state) => {
-        const tabs = state.tabs.map((tab) => tab.kind === 'library' ? tab : ({ ...tab, content: '' }))
+        const tabs = state.tabs.map(({ content: _content, ...metadata }) => metadata)
         return {
             tabs,
             tabGroups: state.tabGroups,
@@ -868,11 +775,11 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
         ...currentState,
         ...state,
         ...next,
-        tabs: restorePersistedDrafts(next.tabs).map(tab => ({ ...tab, objectBinding: undefined })),
+        tabs: next.tabs.map(tab => ({ ...tab, content: '' as const, isDirty: false as const, draftId: undefined, objectBinding: undefined })),
         focusedPaneTabId: next.activeTabId,
       }
     },
-    migrate: (persistedState, persistedVersion) => {
+    migrate: (persistedState) => {
       const state = persistedState as (Partial<DocTabsState> & { splitRatio?: number }) | undefined
       if (!state) return persistedState
       const legacyDocumentSplitRatio = typeof state.documentSplitRatio === 'number'
@@ -880,8 +787,6 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
         : typeof state.splitRatio === 'number'
           ? state.splitRatio
           : 50
-      // v2 → v3 adds tab groups. v3 → v4 moves recoverable draft bodies out of
-      // the frequently-written tab metadata record; persistLegacyDrafts preserves them first.
       const next = ensureTabsState({
         tabs: Array.isArray(state.tabs) ? state.tabs : [],
         tabGroups: Array.isArray(state.tabGroups) ? state.tabGroups : [],
@@ -889,7 +794,6 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
         splitTabId: typeof state.splitTabId === 'string' ? state.splitTabId : null,
         documentSplitRatio: legacyDocumentSplitRatio,
       })
-      if (persistedVersion < 4) persistLegacyDrafts(next.tabs)
       const { splitRatio: _legacySplitRatio, ...rest } = state
       return {
         ...rest,
@@ -897,6 +801,39 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
       }
     },
 }))
+
+configureDrafts({
+    api: () => window.electronAPI.documentDrafts,
+    tabs: () => useDocTabs.getState().tabs,
+    patch: (id, patch) => useDocTabs.setState(state => ({ tabs: state.tabs.map(tab => tab.id === id && tab.kind !== 'library' ? { ...tab, ...patch } : tab) })),
+    root: async () => {
+        const vault = await window.electronAPI.vault.get()
+        if (vault.status !== 'ready') throw new Error('请先配置可用的资料库')
+        return vault.root
+    },
+    locate: async (id) => {
+        const location = await objectPresentationAPI().locate(id)
+        if (!location) throw new Error('草稿原文件的位置不可用，草稿仍已保留')
+        return location.path
+    },
+    resolve: async (path) => (await resolvePresentationObject(path)).objectId,
+    read: async (path) => {
+        const result = await window.electronAPI.document.readFile(path)
+        if (!result.success || typeof result.content !== 'string') throw new Error(result.error || '文件读取失败')
+        return result.content
+    },
+}, () => useDocTabs.persist.rehydrate())
+useDraftUI.subscribe((state, previous) => {
+    if (state.boot === 'ready' && previous.boot !== 'ready') { useDocTabs.setState({}); flushPendingDocTabMetadata() }
+})
+useDocTabs.subscribe((state, previous) => {
+    for (const tab of state.tabs) {
+        const before = previous.tabs.find(item => item.id === tab.id)
+        if (tab.kind !== 'library' && tab.isDirty && (!before || tab.content !== before.content || !before.isDirty)) {
+            draftChanged(tab, before)
+        }
+    }
+})
 
 // System tabs own their save capability for their whole lifetime, including while
 // their pane is hidden. Consume Save so the global pathless-document fallback
@@ -919,9 +856,9 @@ if (typeof window !== 'undefined' && typeof window.electronAPI?.document?.onOper
     const api = window.electronAPI.document
     const sync = createDocumentOperationSync({
         tabs: () => useDocTabs.getState().tabs.flatMap((tab) => tab.path ? [{ ...tab, path: tab.path }] : []),
-        replace: (tab) => {
+        replace: async (tab) => {
             const state = useDocTabs.getState()
-            if (tab.isDirty) state.updateTabContent(tab.id, tab.content)
+            if (tab.isDirty) { state.updateTabContent(tab.id, tab.content); await drafts.flush(tab.id) }
             else state.hydrateTabContentFromDisk(tab.id, tab.content)
         },
     })
