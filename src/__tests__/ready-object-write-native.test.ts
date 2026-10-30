@@ -7,8 +7,10 @@ import { ensurePortableIdentity } from '../main/modules/object-service/portable'
 import { documentWriteError } from '../main/modules/document-engine/document-write-service'
 import { publishFileAtomically } from '../main/modules/document-engine/atomic-file-publish'
 import { DocumentMarksRepository } from '../main/modules/document-engine/document-marks-repository'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
-test('C2 portable identity uses structured writing, preserves bytes, and reports each failure without losing local marks',async()=>{
+test('C2 portable identity uses structured writing, preserves bytes, and reports each failure without losing local marks', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'Object identity')) return
  const f=fixture();try{
   const path=join(f.root,'note.md');const original='\uFEFF---\r\n# comment\r\ntitle: "Keep me" # inline\r\nlist: [one, two]\r\n---\r\n正文\r\n';writeFileSync(path,original)
   const id=f.registry.register(path).id;const mark=new DocumentMarksRepository(f.db).create({documentPath:path,kind:'note',noteText:'local'})
@@ -33,7 +35,8 @@ test('C2 portable identity uses structured writing, preserves bytes, and reports
  }finally{f.close()}
 })
 
-test('C2 link writeback uses the write service and retains unresolved work for dirty sources',async()=>{
+test('C2 link writeback uses the write service and retains unresolved work for dirty sources', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'Object identity')) return
  const {configureDocumentWriteService,getDocumentWriteDependencies}=await import('../main/modules/document-engine/document-write-service')
  const {ObjectMutations}=await import('../main/modules/object-service/mutations')
  const f=fixture();const prior=getDocumentWriteDependencies()

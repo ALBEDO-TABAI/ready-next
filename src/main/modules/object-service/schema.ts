@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { extname } from 'node:path'
+import { chmodSync, mkdirSync } from 'node:fs'
+import { dirname, extname, join } from 'node:path'
 import type { DatabaseConnection } from '../database/connection'
 
 export const OBJECT_MIGRATION = '138_object_identity'
@@ -26,6 +27,18 @@ CREATE UNIQUE INDEX objects_live_path ON objects(path_key) WHERE status='present
 CREATE INDEX objects_inode ON objects(device,inode);
 CREATE INDEX objects_hash ON objects(content_hash);
 CREATE INDEX objects_embedded_id ON objects(embedded_ready_id);`
+
+/** Full copy (committed WAL included) before 137 rebuilds file identity and the tables that reference it. */
+export function backupBeforeObjectMigration(db: Pick<DatabaseConnection, 'prepare'>, databasePath: string): string | null {
+  if (databasePath === ':memory:') return null
+  if (!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='file_identities'").get()) return null
+  const directory = join(dirname(databasePath), 'backups')
+  mkdirSync(directory, { recursive: true, mode: 0o700 })
+  const backup = join(directory, `before-objects-137-${Date.now()}-${randomUUID()}.sqlite`)
+  db.prepare('VACUUM INTO ?').run(backup)
+  chmodSync(backup, 0o600)
+  return backup
+}
 
 export function objectKind(path: string): 'markdown' | 'canvas' | 'file' {
   const ext = extname(path).toLowerCase()

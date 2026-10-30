@@ -2,8 +2,10 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import Database from 'better-sqlite3'
 import { __getMigrationNamesForTests, __runMigrationForTests, runMigrations } from '../main/modules/migrations'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
-test('C2 migrates UUIDs and dependent records once without retaining the old identity writer', () => {
+test('C2 migrates UUIDs and dependent records once without retaining the old identity writer', (t) => {
+  if (skipIfSqliteUnavailable(t, 'Object identity migration')) return
   const db = new Database(':memory:')
   try {
     db.pragma('foreign_keys = OFF')

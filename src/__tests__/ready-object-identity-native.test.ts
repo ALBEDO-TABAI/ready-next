@@ -8,8 +8,10 @@ import { fixture } from './utils/ready-object-fixture'
 import { FileActivityRepository } from '../main/modules/repositories/file-activity-repository'
 import { FileAttentionRepository } from '../main/modules/repositories/file-attention-repository'
 import { DocumentMarksRepository } from '../main/modules/document-engine/document-marks-repository'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
-test('C2 internal and external moves, atomic save and same-window recreation retain relationships',async()=>{
+test('C2 internal and external moves, atomic save and same-window recreation retain relationships', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'Object identity')) return
   const f=fixture()
   try {
     let path=join(f.root,'a.md');writeFileSync(path,'# A\nbody');writeFileSync(join(f.root,'source.md'),'[[a]]')
@@ -44,7 +46,8 @@ test('C2 internal and external moves, atomic save and same-window recreation ret
     assert.deepEqual(f.db.prepare('SELECT resolved,target_doc_id FROM doc_links').all(),[{resolved:0,target_doc_id:null}])
   } finally {f.close()}
 })
-test('C2 duplicate portable IDs are quarantined, initial duplicates have no guessed owner, fresh machine restores IDs',async()=>{
+test('C2 duplicate portable IDs are quarantined, initial duplicates have no guessed owner, fresh machine restores IDs', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'Object identity')) return
   const f=fixture()
   try {
     const a=join(f.root,'a.md'),b=join(f.root,'b.md');writeFileSync(a,'---\nready_id: portable\n---\ntext')
@@ -57,7 +60,8 @@ test('C2 duplicate portable IDs are quarantined, initial duplicates have no gues
     const second=fixture();try{const p=join(second.root,'restored.md');writeFileSync(p,readFileSync(a));assert.equal(second.registry.register(p).id,'portable')}finally{second.close()}
   }finally{f.close()}
 })
-test('C2 directory and cross-workspace moves preserve descendants and reject unauthorized destination before moving',async()=>{
+test('C2 directory and cross-workspace moves preserve descendants and reject unauthorized destination before moving', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'Object identity')) return
  const f=fixture();try{
   const dir=join(f.root,'dir');mkdirSync(dir);const file=join(dir,'a.md');writeFileSync(file,'body');f.registry.scan(f.root)
   const id=f.registry.find(file)!.id;const target=join(f.root,'target');mkdirSync(target);f.engine.getRepository().ensureWorkspace(target)
@@ -69,7 +73,8 @@ test('C2 directory and cross-workspace moves preserve descendants and reject una
  }finally{f.close()}
 })
 
-test('C2 registered Ready handlers and Agent dispatcher share the object move owner, including organize undo',async()=>{
+test('C2 registered Ready handlers and Agent dispatcher share the object move owner, including organize undo', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'Object identity')) return
  const {fileMutationGroup}=await import('../main/modules/document-engine/ipc/file-mutation-group')
  const {executeFileManagementMutationTool:tool}=await import('../main/modules/tools/file-management-organize-tools')
  const f=fixture();try{
@@ -99,7 +104,9 @@ test('C2 registered Ready handlers and Agent dispatcher share the object move ow
  }finally{f.close()}
 })
 
-for(const backend of ['native','chokidar'] as const)test(`C2 real ${backend} watcher delivers external mv into the settlement window`,{timeout:15000},async()=>{
+for(const backend of ['native','chokidar'] as const)test(`C2 real ${backend} watcher delivers external mv into the settlement window`,{timeout:15000},async(t)=>{
+  if (skipIfSqliteUnavailable(t, "Object identity watcher")) return
+
  const {createFileWatcher}=await import('../main/modules/search-engine/file-watcher')
  const {default:chokidar}=await import('chokidar')
  const f=fixture();let handle:Awaited<ReturnType<typeof createFileWatcher>>|undefined
@@ -116,7 +123,8 @@ for(const backend of ['native','chokidar'] as const)test(`C2 real ${backend} wat
  }finally{if(handle && !('kind' in handle))await handle.close();f.close()}
 })
 
-test('C2 path swaps, window boundaries and interrupted moves do not invent or steal identity',async()=>{
+test('C2 path swaps, window boundaries and interrupted moves do not invent or steal identity', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'Object identity')) return
  const f=fixture();try{
   const a=join(f.root,'a.md'),b=join(f.root,'b.md'),temp=join(f.root,'swap');writeFileSync(a,'---\nready_id: alpha\n---\nA');writeFileSync(b,'---\nready_id: beta\n---\nB');f.registry.reconcile([a,b])
   renameSync(a,temp);renameSync(b,a);renameSync(temp,b);f.registry.reconcile([a,b]);assert.equal(f.registry.find(a)!.id,'beta');assert.equal(f.registry.find(b)!.id,'alpha')
@@ -129,7 +137,8 @@ test('C2 path swaps, window boundaries and interrupted moves do not invent or st
  }finally{f.close()}
 })
 
-test('C2 EXDEV uses a real verified copy and removes the source only after publication',async()=>{
+test('C2 EXDEV uses a real verified copy and removes the source only after publication', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'Object identity')) return
  const {createRequire,syncBuiltinESMExports}=await import('node:module');const fs=createRequire(import.meta.url)('node:fs') as typeof import('node:fs')
  const f=fixture();const original=fs.renameSync
  try {

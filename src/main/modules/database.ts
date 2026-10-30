@@ -1,4 +1,5 @@
 import { backupBeforeCalendarMigration } from './calendar-engine/calendar-schema'
+import { backupBeforeObjectMigration } from './object-service/schema'
 import type { DatabaseConnection } from './database/connection'
 import { DatabaseUnavailableError, assertDatabaseConnectionReady } from './database/connection'
 export { DatabaseUnavailableError, assertDatabaseConnectionReady } from './database/connection'
@@ -219,6 +220,8 @@ export class DatabaseManager {
     // Run the migration system to create/update all tables and indexes
     const calendarBackup = backupBeforeCalendarMigration(this.db, this.dbPath)
     if (calendarBackup) logDatabase(`Calendar migration backup created: ${calendarBackup}`)
+    const objectBackup = backupBeforeObjectMigration(this.db, this.dbPath)
+    if (objectBackup) logDatabase(`Object identity migration backup created: ${objectBackup}`)
     runMigrations(this.db)
 
     // Seed default calendar sources
