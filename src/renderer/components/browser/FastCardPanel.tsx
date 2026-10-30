@@ -179,7 +179,7 @@ export function FastCardSaveDialog({ onSave, onRetry, onCancel }: {
     } catch (failure) { return { ok: false, code: 'save_failed', message: String(failure) } }
     finally { setBusy(false) }
   }
-  if (creating) return <SaveToPicker trees={trees} initialTitle="新画板" onCancel={() => setCreating(false)} onConfirm={selection => save({ kind: 'new', title: selection.title,
+  if (creating) return <SaveToPicker trees={trees} initialTitle="新画板" extension=".canvas" onCancel={() => setCreating(false)} onConfirm={selection => save({ kind: 'new', title: selection.title,
     ...(selection.parentObjectId ? { parentObjectId: selection.parentObjectId } : {}), ...(selection.parentPath ? { parentPath: selection.parentPath } : {}) })} />
   return <section role="dialog" aria-label="保存到画板" className="p-4 rounded space-y-3" style={{ background: 'var(--bg-primary)', color: 'var(--text-primary)' }}>
     <h2>保存到画板</h2>

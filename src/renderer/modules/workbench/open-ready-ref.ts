@@ -1,3 +1,4 @@
+import { requestCanvasNode } from '../canvas/navigation'
 import { rssReferenceFromReadyRef } from '../../../shared/rss-reference'
 import type { WorkbenchMode } from '../../stores/useMode'
 import { parseReadyUri, ReadyRefSchema, type ReadyRef } from '../../../shared/ready-ref'
@@ -32,12 +33,14 @@ export async function openReadyRef(input: string | ReadyRef, fromMode?: Workbenc
       requestWorkbenchModeOpen('document')
       return
     }
+    case 'canvas':
     case 'page':
     case 'file': {
       const location = await window.electronAPI.objects.locate(ref.id)
       if (!location) throw new Error('引用文档已不存在')
-      if (ref.anchor) throw new Error('此文档锚点暂不支持定位')
+      if ('anchor' in ref && ref.anchor) throw new Error('此文档锚点暂不支持定位')
       rememberReferenceOrigin(origin, 'document')
+      if (ref.kind === 'canvas') requestCanvasNode(ref.id, ref.node)
       useWorkspace.getState().selectFile(location.path)
       useDocTabs.getState().openTab(location.path)
       requestWorkbenchModeOpen('document')

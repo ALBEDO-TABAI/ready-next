@@ -6,7 +6,6 @@ import { VaultService } from './modules/settings-engine/vault-service'
 import { AppSettingsRepository } from './modules/repositories/app-settings-repository'
 import { getDocumentWriteDependencies } from './modules/document-engine/document-write-service'
 import { setupDocumentPagesIPC } from './modules/document-pages/runtime'
-import { setupDocumentDraftIPC } from './modules/document-drafts/runtime'
 import { captureCalendarOpen } from './calendar-open-intents'
 import { startCalendarDesktop } from './modules/calendar-engine/calendar-desktop'
 import { onCalendarChanged } from './modules/calendar-engine/calendar-change'
@@ -81,7 +80,7 @@ import { captureReadyWindow, type ReadyWindowCaptureResult } from './modules/app
 import { isPathAllowed } from './modules/app-control/local-path-safety'
 import { createLocalFileResponse } from './modules/app-control/local-file-response'
 import { reconcileStartupRunsOnStartup } from './modules/app-control/startup-run-reconciler'
-import { setupBoardIPC } from './modules/board-engine/ipc-handler'
+import { setupCanvasRuntime } from './modules/board-engine/runtime'
 import { setupSkillsIPC } from './modules/skills-runtime/ipc-handler'
 import { setupImageGenerationIPC } from './modules/image-generation/ipc-handler'
 import { rsshubManager } from './modules/rss-engine/rsshub-process'
@@ -147,6 +146,8 @@ let calendarSyncScheduler: SyncScheduler | null = null
 let stopCalendarDesktop: (() => void) | null = null
 let rssAutoRefreshScheduler: RSSAutoRefreshScheduler | null = null
 let chatGptOAuthService: ChatGptOAuthService | null = null
+let canvasRuntime: ReturnType<typeof setupCanvasRuntime> | undefined
+
 // Guard to prevent re-registering window-dependent IPC handlers on macOS dock re-open
 let windowIPCRegistered = false
 const THEME_SETTING_KEY = 'ui_theme_option'
@@ -680,11 +681,10 @@ function setupGlobalIPC(): void {
     mainWindow && !mainWindow.isDestroyed() ? [mainWindow.webContents] : []
   ))
   setupDocumentIPC(DOCUMENT_USE_MOCK)  // Always real fs
-  setupBoardIPC({ getMainWindow: () => mainWindow })
   setupSearchIPC()
   setupLibraryIPC()
-  setupDocumentDraftIPC()
   const documentPages = setupDocumentPagesIPC()
+  canvasRuntime = setupCanvasRuntime(documentPages.ready, { preloadPath: join(__dirname, '../preload/index.mjs'), rendererFile: join(__dirname, '../renderer/index.html'), rendererUrl: process.env.ELECTRON_RENDERER_URL })
   setupFileEmergenceIPC()
   setupRendererStateFlushIPC()
   setupTagForgeIPC()
@@ -1268,6 +1268,8 @@ function getGracefulWindowCloseCoordinator(): GracefulWindowCloseCoordinator {
   })
   return gracefulWindowCloseCoordinator
 }
+
+app.on('will-quit', () => canvasRuntime?.stop())
 
 app.on('before-quit', (event) => {
   getGracefulWindowCloseCoordinator().handleBeforeQuit(event)

@@ -1,9 +1,4 @@
 import type React from 'react'
-import {
-  parseReadyBoardResourceDragPayload,
-  READY_BOARD_RESOURCE_MIME,
-  type ReadyBoardResourceDragPayload,
-} from '../../utils/boardTransfer'
 import { canAttemptVisualAnalysis } from '../../../shared/browser-tab-resource-classifier'
 import type { WorkspaceDragPayload } from './fileTreeDragPayload'
 import type { GeneratedImageDragPayload } from '../../modules/image-generation/generatedImageDrag'
@@ -48,7 +43,6 @@ export type FileTreeExternalDropPayload =
   | BrowserTabDragPayload
   | RSSItemDragPayload
   | WebDownloadDragPayload
-  | ReadyBoardResourceDragPayload
   | UntitledDocTabDragPayload
   | GeneratedImageDragPayload
 
@@ -273,11 +267,6 @@ export function parseWebDownloadDragPayload(dataTransfer: Pick<DataTransfer, 'ge
   return buildWebDownloadPayload(dataTransfer.getData('text/plain'), 'url-list')
 }
 
-export function parseReadyBoardFileTreeDropPayload(dataTransfer: Pick<DataTransfer, 'getData'>): ReadyBoardResourceDragPayload | null {
-  const payload = parseReadyBoardResourceDragPayload(dataTransfer.getData(READY_BOARD_RESOURCE_MIME))
-  if (!payload || payload.paths.length === 0) return null
-  return payload
-}
 
 interface SetRssItemDragInput {
   id: string

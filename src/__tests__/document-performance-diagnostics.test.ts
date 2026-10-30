@@ -101,14 +101,7 @@ test('document performance fixtures cover dual documents, multiple boards, and w
   }
 })
 
-test('ordinary board node drag frames participate in the shared interaction counter', () => {
-  const source = readFileSync(new URL('../renderer/components/document/BoardEditor.tsx', import.meta.url), 'utf8')
-  const start = source.indexOf('const scheduleNodeDragFrame')
-  const end = source.indexOf('const scheduleBoardInteractionFrame', start)
-  assert.ok(start >= 0 && end > start)
-  const scheduler = source.slice(start, end)
-  assert.match(scheduler, /requestAnimationFrame\(\(\) => \{[\s\S]*recordDocumentPerformanceCounter\('boardInteractionFrames'\)[\s\S]*updateBoardNodeDragSession/)
-})
+
 
 test('widget fence signature ignores ordinary text edits around an unchanged widget', () => {
   const fence = '```show-widget\n{"title":"A","widgetCode":"<div>A</div>"}\n```'

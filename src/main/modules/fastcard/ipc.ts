@@ -6,17 +6,17 @@ import { getLinkPreview } from '../link-preview'
 
 /** F registers once after the isolated userData/library guards and supplies B's library-scoped port. */
 export function registerFastCardServicesIPC(ipcMain: Pick<IpcMain, 'handle'>, services: {
-  transfer: () => FastCardTransferService
+  transfer: () => Promise<FastCardTransferService>
   quickNote: FastCardQuickNoteService
 }): void {
   const receipt = <T>(action: (input: unknown) => T | Promise<T>) => async (_event: unknown, input: unknown) => {
     try { return { success: true, data: await action(input) } }
     catch (error) { return { success: false, error: error instanceof Error ? error.message : String(error), ...(error instanceof FastCardTargetUnavailableError ? { errorCode: error.code } : {}) } }
   }
-  ipcMain.handle('fastcard:transfer', receipt(input => services.transfer().transfer(input)))
-  ipcMain.handle('fastcard:undo', receipt(input => services.transfer().undo(z.string().parse(input))))
-  ipcMain.handle('fastcard:targets', receipt(() => services.transfer().targets()))
-  ipcMain.handle('fastcard:pending', receipt(() => services.transfer().pending()))
+  ipcMain.handle('fastcard:transfer', receipt(async input => (await services.transfer()).transfer(input)))
+  ipcMain.handle('fastcard:undo', receipt(async input => (await services.transfer()).undo(z.string().parse(input))))
+  ipcMain.handle('fastcard:targets', receipt(async () => (await services.transfer()).targets()))
+  ipcMain.handle('fastcard:pending', receipt(async () => (await services.transfer()).pending()))
   ipcMain.handle('fastcard:quickClose', receipt(() => services.quickNote.close()))
   ipcMain.handle('fastcard:quickStatus', receipt(() => services.quickNote.getStatus()))
   ipcMain.handle('fastcard:quickText', receipt(input => {

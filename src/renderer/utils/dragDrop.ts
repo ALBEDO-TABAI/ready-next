@@ -1,8 +1,4 @@
 import { EBOOK_EXTENSIONS } from '../../shared/ebook'
-import {
-  parseReadyBoardResourceDragPayload,
-  READY_BOARD_RESOURCE_MIME,
-} from './boardTransfer'
 
 export interface DroppedFile {
   path: string
@@ -93,13 +89,6 @@ function parseReadyDrag(data: string): DroppedFile[] {
 
 export function getDroppedFilesFromDataTransfer(dataTransfer: DataTransfer): DroppedFile[] {
   const files: DroppedFile[] = []
-
-  const boardPayload = parseReadyBoardResourceDragPayload(dataTransfer.getData(READY_BOARD_RESOURCE_MIME))
-  if (boardPayload) {
-    files.push(...boardPayload.resources
-      .filter((resource) => resource.kind === 'file')
-      .map((resource) => toDroppedFile(resource.path, resource.name, resource.ext, resource.size ?? 0)))
-  }
 
   const readyDragRaw = dataTransfer.getData('application/x-ready-drag')
   if (readyDragRaw) {

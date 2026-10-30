@@ -180,7 +180,7 @@ test('M4 IPC uses real handles, validates payloads and awaits startup recovery',
   try {
     const handlers = new Map<string, Parameters<import('electron').IpcMain['handle']>[1]>()
     const authorized: string[] = []
-    registerCanvasIPC({ handle: (channel, handler) => { handlers.set(channel, handler) } }, f.service, new CanvasImportService(f.service), Promise.resolve(), (_event, path) => { authorized.push(path) })
+    registerCanvasIPC({ handle: (channel, handler) => { handlers.set(channel, handler) } }, async () => ({ canvas: f.service, imports: new CanvasImportService(f.service) }), (_event, path) => { authorized.push(path) })
     const call = (channel: string, input: unknown) => Reflect.apply(handlers.get(channel)!, undefined, [{}, input])
     const created = z.object({ ok: z.literal(true), value: z.object({ objectId: z.string(), handleId: z.string(), version: z.string() }) }).parse(await call('canvas:create', { operationId: 'ipc-create', path: 'IPC.canvas' }))
     assert.equal((await call('canvas:read', created.value.handleId)).ok, true)

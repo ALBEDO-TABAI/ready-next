@@ -874,27 +874,7 @@ const documentAPI = {
     ipcRenderer.invoke('document:stopWatcher', payload),
 }
 
-const boardAPI = {
-  create: (payload: { parentDir: string }) => ipcRenderer.invoke('board:create', payload),
-  open: (payload: { path: string }) => ipcRenderer.invoke('board:open', payload),
-  setActive: (payload: { boardId: string | null; expectedBoardId?: string }) => ipcRenderer.invoke('board:setActive', payload),
-  save: (payload: { boardId: string; state: unknown }) => ipcRenderer.invoke('board:save', payload),
-  ackExternalAssets: (payload: { boardId: string; receiptIds: string[] }) =>
-    ipcRenderer.invoke('board:ackExternalAssets', payload),
-  importAsset: (payload: { boardId: string; srcPath: string; kind?: 'image' | 'video' | 'markdown' }) =>
-    ipcRenderer.invoke('board:importAsset', payload),
-  importRemoteImage: (payload: { boardId: string; url: string }) =>
-    ipcRenderer.invoke('board:importRemoteImage', payload),
-  pickAsset: (payload: { boardId: string; kind?: 'image' | 'video' | 'markdown' | 'any' }) =>
-    ipcRenderer.invoke('board:pickAsset', payload),
-  openInDocument: (payload: { boardId: string; relativePath: string }) =>
-    ipcRenderer.invoke('board:openInDocument', payload),
-  onActiveBoardExternalImageAdded: (callback: (data: unknown) => void) => {
-    const handler = (_: unknown, data: unknown): void => callback(data)
-    ipcRenderer.on('board:activeBoardExternalImageAdded', handler)
-    return () => { ipcRenderer.removeListener('board:activeBoardExternalImageAdded', handler) }
-  },
-}
+
 
 // RSS API
 const rssAPI = {
@@ -1356,6 +1336,43 @@ const documentPagesAPI: import('../shared/document-pages').DocumentPagesAPI = {
   },
 }
 
+const canvasAPI: import('../main/modules/board-engine/ipc').CanvasAPI = {
+  create: input => ipcRenderer.invoke('canvas:create', input),
+  open: id => ipcRenderer.invoke('canvas:open', id),
+  read: id => ipcRenderer.invoke('canvas:read', id),
+  release: id => ipcRenderer.invoke('canvas:release', id),
+  write: input => ipcRenderer.invoke('canvas:write', input),
+  updateBuffer: input => ipcRenderer.invoke('canvas:updateBuffer', input),
+  readBuffer: id => ipcRenderer.invoke('canvas:readBuffer', id),
+  saveBuffer: input => ipcRenderer.invoke('canvas:saveBuffer', input),
+  prepareAttachment: path => ipcRenderer.invoke('canvas:prepareAttachment', path),
+  import: input => ipcRenderer.invoke('canvas:import', input),
+  onChanged: listener => {
+    const handler = (_event: Electron.IpcRendererEvent, value: { root: string }) => listener(value)
+    ipcRenderer.on('canvas:changed', handler)
+    return () => ipcRenderer.removeListener('canvas:changed', handler)
+  },
+}
+const canvasCompositionAPI: import('../shared/document-drafts').CanvasCompositionAPI = {
+  compose: input => ipcRenderer.invoke('canvasComposition:compose', input),
+  recover: () => ipcRenderer.invoke('canvasComposition:recover'),
+  preview: input => ipcRenderer.invoke('canvasComposition:preview', input),
+}
+const fastCardAPI: import('../shared/fastcard').FastCardTransferAPI & import('../shared/fastcard').FastCardQuickNoteAPI = {
+  transfer: input => ipcRenderer.invoke('fastcard:transfer', input),
+  undo: id => ipcRenderer.invoke('fastcard:undo', id),
+  targets: () => ipcRenderer.invoke('fastcard:targets'),
+  pending: () => ipcRenderer.invoke('fastcard:pending'),
+  quickClose: () => ipcRenderer.invoke('fastcard:quickClose'),
+  quickStatus: () => ipcRenderer.invoke('fastcard:quickStatus'),
+  quickText: input => ipcRenderer.invoke('fastcard:quickText', input),
+  quickClipboard: id => ipcRenderer.invoke('fastcard:quickClipboard', id),
+  quickRecording: input => ipcRenderer.invoke('fastcard:quickRecording', input),
+  transcribe: id => ipcRenderer.invoke('fastcard:transcribe', id),
+  playback: id => ipcRenderer.invoke('fastcard:playback', id),
+}
+const linkPreviewAPI = { get: (url: string) => ipcRenderer.invoke('link-preview:get', url) }
+
 const documentDraftsAPI: import('../shared/document-drafts').DocumentDraftAPI = {
   create: (input) => ipcRenderer.invoke('documentDrafts:create', input),
   save: (id, revision, content, tabId) => ipcRenderer.invoke('documentDrafts:save', id, revision, content, tabId),
@@ -1617,7 +1634,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   browser: browserAPI,
   objects: objectsAPI,
   document: documentAPI,
-  board: boardAPI,
+  canvas: canvasAPI,
+  canvasComposition: canvasCompositionAPI,
+  fastCard: fastCardAPI,
+  linkPreview: linkPreviewAPI,
   rss: rssAPI,
   calendarLayers: {
     query: (range: import('../shared/calendar-layers').LayerRange) => ipcRenderer.invoke('calendarLayers:query', range),
@@ -1669,7 +1689,10 @@ declare global {
       browser: typeof browserAPI
       objects: typeof objectsAPI
       document: typeof documentAPI
-      board: typeof boardAPI
+      canvas: typeof canvasAPI
+      canvasComposition: typeof canvasCompositionAPI
+      fastCard: typeof fastCardAPI
+      linkPreview: typeof linkPreviewAPI
       rss: typeof rssAPI
       calendar: typeof calendarAPI
       skills: typeof skillsAPI

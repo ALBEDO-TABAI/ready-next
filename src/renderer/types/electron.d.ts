@@ -116,12 +116,6 @@ import type {
   FastCardTranslateResult,
 } from '../../shared/fastcard'
 import type {
-  ReadyBoardAsset,
-  ReadyBoardAssetKind,
-  ReadyBoardExternalAssetReceipt,
-  ReadyBoardState,
-} from '../../shared/ready-board'
-import type {
   ReadyMemoryAddRequest,
   ReadyMemoryConversationPolicyRequest,
   ReadyMemoryDeleteRequest,
@@ -1882,45 +1876,6 @@ interface ElectronDocumentAPI {
   stopWatcher: (payload: { watcherId: string }) => Promise<DocumentStopWatcherResponse>
 }
 
-interface BoardOpenData {
-  boardId: string
-  path: string
-  state: ReadyBoardState
-  pendingExternalAssets?: ReadyBoardExternalAssetReceipt[]
-}
-
-interface BoardExternalImageEventData {
-  boardId: string
-  path: string
-  receiptId: string
-  asset: ReadyBoardAsset
-}
-
-interface ElectronBoardAPI {
-  create: (payload: { parentDir: string }) => Promise<IPCResponse<BoardOpenData>>
-  open: (payload: { path: string }) => Promise<IPCResponse<BoardOpenData>>
-  setActive: (payload: { boardId: string | null; expectedBoardId?: string }) => Promise<IPCResponse>
-  save: (payload: { boardId: string; state: ReadyBoardState }) => Promise<IPCResponse<BoardOpenData>>
-  ackExternalAssets: (payload: {
-    boardId: string
-    receiptIds: string[]
-  }) => Promise<IPCResponse<{ acknowledged: number }>>
-  importAsset: (payload: {
-    boardId: string
-    srcPath: string
-    kind?: ReadyBoardAssetKind
-  }) => Promise<IPCResponse<ReadyBoardAsset>>
-  importRemoteImage: (payload: { boardId: string; url: string }) => Promise<IPCResponse<ReadyBoardAsset>>
-  pickAsset: (payload: {
-    boardId: string
-    kind?: ReadyBoardAssetKind | 'any'
-  }) => Promise<IPCResponse<ReadyBoardAsset>>
-  openInDocument: (payload: { boardId: string; relativePath: string }) => Promise<IPCResponse<{ path: string }>>
-  onActiveBoardExternalImageAdded: (
-    callback: (data: IPCResponse<BoardExternalImageEventData>) => void
-  ) => () => void
-}
-
 interface DocumentStartWatcherResponse {
   success: boolean
   data?: { watcherId: string; workspaceRoot: string }
@@ -3363,7 +3318,10 @@ interface ElectronAPI {
   browser: ElectronBrowserAPI
   objects: ObjectPresentationAPI
   document: ElectronDocumentAPI
-  board: ElectronBoardAPI
+  canvas: import('../../main/modules/board-engine/ipc').CanvasAPI
+  canvasComposition: import('../../shared/document-drafts').CanvasCompositionAPI
+  fastCard: import('../../shared/fastcard').FastCardTransferAPI & import('../../shared/fastcard').FastCardQuickNoteAPI
+  linkPreview: { get(url: string): Promise<import('../../shared/fastcard').FastCardIPCResult<import('../../main/modules/link-preview').LinkPreview>> }
   rss: ElectronRSSAPI
   calendarLayers: import('../../shared/calendar-layers').CalendarLayersAPI
   calendar: ElectronCalendarAPI

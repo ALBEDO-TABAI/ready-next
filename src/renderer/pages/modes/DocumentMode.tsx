@@ -68,7 +68,6 @@ import {
 import { invalidateImageGalleryDirectories } from '../../modules/document/imageGalleryDirectoryCache'
 import { subscribeDocumentDirectoryChanges } from '../../modules/document/directoryChangeBridge'
 import { registerBeforeQuitFlushHandler } from '../../modules/app/beforeQuitFlushRegistry'
-import { releaseClosedBoardHandles } from '../../modules/document/boardHandleRegistry'
 import {
   canAcceptDocumentPaneDrop,
   getDocumentPaneDropPath,
@@ -100,7 +99,7 @@ import {
 } from '../../modules/file-emergence/readingIntentContext'
 
 const UniverSheet = lazy(() => import('../../components/document/UniverSheet'))
-const BoardEditor = lazy(() => import('../../components/document/BoardEditor'))
+const CanvasDocument = lazy(() => import('../../components/canvas/CanvasDocument'))
 
 type ReadingSessionDraft = {
   path: string
@@ -166,7 +165,6 @@ const DocumentEditor = memo(function DocumentEditor({
   previewFocusWidgetTitle,
   onVisibleLineChange,
   onActivate,
-  isFocused,
   isSceneVisible,
   bookReading,
 }: DocumentEditorProps) {
@@ -181,10 +179,10 @@ const DocumentEditor = memo(function DocumentEditor({
   if (tab.path && tab.objectBinding?.status !== 'resolved') return <div role="status">{tab.objectBinding?.status === 'failed' ? `无法打开文件：${tab.objectBinding.message}` : '正在确认文件位置…'}</div>
   if (ext === 'epub' && tab.path) return <OpenEpubInLibrary path={tab.path} sourceTabId={tab.id} />
 
-  if (isReadyBoardFile(tab.path)) {
+  if (isReadyBoardFile(tab.path) || ext === 'canvas') {
     return (
       <Suspense fallback={<div className="flex-1 flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin text-[var(--text-muted)]" /></div>}>
-        <BoardEditor tab={tab} onActivate={onActivate} isFocused={isFocused} />
+        <CanvasDocument tab={tab} />
       </Suspense>
     )
   }
@@ -345,7 +343,7 @@ export default function DocumentMode({
         setEditorMode('preview')
         const { tabs: currentTabs, activeTabId: currentActiveTabId } = useDocTabs.getState()
         const activeTab = currentTabs.find((tab) => tab.id === currentActiveTabId)
-        const keepBoardActive = isReadyBoardFile(activeTab?.path) && !isReadyBoardFile(selectedFile)
+        const keepBoardActive = /\.canvas$/i.test(activeTab?.path ?? '') && !/\.canvas$/i.test(selectedFile)
         if (isImagePreviewPath(selectedFile)) {
           openImageTab(selectedFile, { activate: !keepBoardActive })
         } else if (keepBoardActive) {
@@ -519,9 +517,6 @@ export default function DocumentMode({
 
   useEffect(() => {
     const openIds = new Set(useDocTabs.getState().tabs.map((tab) => tab.id))
-    void releaseClosedBoardHandles(openIds, (expectedBoardId) => (
-      window.electronAPI?.board?.setActive?.({ boardId: null, expectedBoardId })
-    ))
     setVisibleLineByTabId((current) => {
       const next: Record<string, number | null> = {}
       let changed = false

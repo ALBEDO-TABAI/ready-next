@@ -62,7 +62,7 @@ export function CanvasCompositionSurface(props: CanvasCompositionSurfaceProps) {
   }
   return <>
     <CanvasSurface {...props} onAddToDocument={add}
-      renderTextEditor={({ node, commit }) => node.type === 'text' ? <TextCard key={node.id} node={node} commit={commit} renderEditor={props.renderBlockEditor} /> : null}
+      renderTextEditor={({ node, commit }) => node.type === 'text' ? <TextCard key={node.id} canvasPath={props.path} node={node} commit={commit} renderEditor={props.renderBlockEditor} /> : null}
       renderCard={node => {
         if (node.ready.kind === 'document') return <DocumentCard node={node} source={props.documentPreview} />
         if (node.type === 'link') return <LinkCard node={node} source={props.linkPreview} />
