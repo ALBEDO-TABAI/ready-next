@@ -1,4 +1,5 @@
 import { migrateChatReadyRefs } from './database/ready-ref-migration'
+import { DOCUMENT_DATABASE_MIGRATION, migrateDocumentDatabase } from './document-database/schema'
 import { DOCUMENT_PAGES_MIGRATION, migrateDocumentPages } from './document-pages/schema'
 import { migrateCalendarAttachmentReadyRefs, migrateCalendarAttachmentDisplayRefs } from './calendar-engine/ready-ref-migration'
 import { migrateObjectLinks } from './search-engine/object-link-schema'
@@ -4490,6 +4491,7 @@ const migrations: Migration[] = [
       CREATE TABLE canvas_buffers (object_id TEXT PRIMARY KEY, snapshot_json TEXT NOT NULL);
       CREATE TABLE canvas_imports (id TEXT PRIMARY KEY, input_hash TEXT NOT NULL, plan_json TEXT NOT NULL, result_json TEXT);`)
   } },
+  { name: DOCUMENT_DATABASE_MIGRATION, up: migrateDocumentDatabase },
 ]
 
 /**
