@@ -225,16 +225,16 @@ M7 随各阶段交付：资料库约定技能说明 frontmatter、链接、标�
 | 合同 | 可执行验收标准 | 计划入口与状态 |
 | --- | --- | --- |
 | C1 引用往返 | 对每类 ReadyRef 及日期参数、书锚点、节点、run、编码字符、重复日程实例执行 `parseReadyUri(toReadyUri(x))`，断言深相等；畸形 URI/非法字段明确拒绝；点击/拖入解析为同一目标。迁移后生产代码出现旧伪协议字面量时 lint 失败，迁移夹具与迁移器单列范围。 | `src/__tests__/ready-ref.test.ts`；`scripts/check-ready-ref-protocols.cjs`；**待实现**。字面量 lint 仅守结构边界，不代替往返/跳转行为。 |
-| C2 身份不断 | 临时资料库中分别由 Ready、Agent、外部 `mv` 改名，再对唯一候选执行删除后原内容重建；读回同一对象 id、可解析反链、书签/阅读记录，无孤儿行。另测同内容并存不误合并、携带 `ready_id` 跨库副本重建；使用真实 SQLite。 | `src/__tests__/ready-object-identity-native.test.ts`；接入 `npm run verify:native`；**待实现**。 |
+| C2 身份不断 | 临时资料库中分别由 Ready、Agent、外部 `mv` 改名，再对唯一候选执行删除后原内容重建；读回同一对象 id、可解析反链、书签/阅读记录，无孤儿行。另测同内容并存不误合并、携带 `ready_id` 跨库副本重建；使用真实 SQLite。 | `src/__tests__/ready-object-identity-native.test.ts`、`ready-object-migration-native.test.ts`、`ready-object-write-native.test.ts`；接入 `npm run verify:native`；Main 侧**已实现**（2026-10-31），Renderer 标签/阅读位置/外观与真实窗口改名流程待 I2。 |
 | C3 写入不覆盖 | 真实文件与打开缓冲同时发生内外修改，分别触发文档服务和画板句柄；结果必须是合并两方内容或明确冲突且保留双方版本，旧缓冲不能覆盖磁盘。覆盖迟到确认、关闭标签页、旧 revision、失败回读、同一操作重试，不能重复追加。 | `src/__tests__/ready-write-conflict.test.ts`；`scripts/verify-ready-next-write-conflict.mjs`；**待实现**。 |
 | C4 Markdown 保真 | 黄金语料含 Obsidian/Notion 导出、frontmatter、嵌入、HTML、代码围栏、不同换行；从编辑入口仅改一个块后保存，逐字节比较其余区间不变；失效区间拒绝写入，源码模式仍可用。 | `src/__tests__/ready-markdown-roundtrip.test.ts`；**待实现**。 |
 | C5 索引可重建 | 保存对象/关系查询快照，只删除派生索引，以资料库、`.ready/` 及 `ready.db` 权威业务记录重建；按稳定 id 比较对象、边、反链一致，第二次重建不增重复边；日程、草稿、FastCard 原记录不丢。 | `src/__tests__/ready-object-index-rebuild-native.test.ts`；接入 `npm run verify:native`；**待实现**。 |
-| C6 标注定位 | 同一标注在改字号、单双页、分屏宽度后跳到相同文字；修改原文导致原位置失效时按引文重定位，删除引文/无法唯一确定则显示未定位；不落在相邻或重复的错误段落。 | `src/__tests__/ready-library-anchors.test.ts`；`scripts/verify-ready-next-library.mjs`；**待实现**。 |
+| C6 标注定位 | 同一标注在改字号、单双页、分屏宽度后跳到相同文字；修改原文导致原位置失效时按引文重定位，删除引文/无法唯一确定则显示未定位；不落在相邻或重复的错误段落。 | `src/__tests__/ready-library-anchors.test.ts`、`ready-library-highlights-native.test.ts`；真实窗口 `npm run verify:ready-next-library`（拖选划线、来源页回读、重开、改字号与单页后仍落在同一段文字）；**已实现**（2026-10-31）。分屏宽度用例随 M8 视觉定稿补入。 |
 | C7 FastCard 落盘 | 添加文本/图片后收到成功回执，立即强制结束进程并用同一隔离 userData 重启；内容、出处、缓存图片可读且仅一份。写入失败不能返回成功；清空 Renderer sessionStorage 不影响恢复。 | `src/__tests__/ready-fastcard-persistence-native.test.ts`；`scripts/verify-ready-next-fastcard-restart.mjs`；接入 `npm run verify:native`；**待实现**。 |
 | C8 日历图层 | 外部写入日期字段完成后开始计时，1 秒内日历显示新值；从 UI 拖动日期后回读 frontmatter 一致。带日期待办只改对应行；日程经既有服务；足迹拒绝拖动；冲突返回时不显示虚假成功。 | `src/__tests__/ready-calendar-layers.test.ts`；`scripts/verify-ready-next-calendar-layers.mjs`；**待实现**。 |
 | C9 提醒唯一 | 在隔离时钟与真实持久化送达账本下创建带提醒日期提及，到期由日历提醒引擎送达一次，重启、重扫、重复消费仍仅一次；删除提及在到期前取消提醒，修改时间不会遗留旧提醒。 | `src/__tests__/ready-date-mention-reminder-native.test.ts`；接入 `npm run verify:native`；**待实现**。 |
 | C10 画板格式 | 经实际保存与导入入口生成文字、文件、链接、白板图形、子画板及回收站节点，再从磁盘读取；每个 `.canvas` 同时通过 JSON Canvas 1.0 和 Ready 扩展 schema；非法输入不得留下损坏文件。 | `src/__tests__/ready-canvas-format.test.ts`；`scripts/check-ready-canvas-schema.cjs`；**待实现**。 |
-| C11 书源开关 | 分别构建 ctfile 关闭/开启夹具包；关闭包的模块清单与实际资源均无城通网盘/电子书宝库代码，设置无入口；开启包有入口。本地导入/Z-Library 不受影响；发布回执记录开关且与包体一致。 | `scripts/verify-ready-next-book-sources.mjs`；**待实现**。必须检查构建产物，不只查源码条件。 |
+| C11 书源开关 | 分别构建 ctfile 关闭/开启夹具包；关闭包的模块清单与实际资源均无城通网盘/电子书宝库代码，设置无入口；开启包有入口。本地导入/Z-Library 不受影响；发布回执记录开关且与包体一致。 | `scripts/verify-ready-next-book-sources.mjs`（`npm run verify:ctfile-excluded`）；**已实现**（2026-10-31）：默认构建通过、开启构建被识别并拒绝作发布证据，发布回执记录开关；必须检查构建产物，不只查源码条件。 |
 | C12 草稿与层级 | 文档、画板草稿产生未保存内容并获持久确认后强制退出，重启恢复原文；“保存到…”选择父页面后回读文件位置、父页面与画板文档卡一致，父文件不移动。保存中断后可恢复或明确失败，不能丢草稿或产生重复文件。 | `src/__tests__/ready-draft-hierarchy-native.test.ts`；`scripts/verify-ready-next-draft-restart.mjs`；接入 `npm run verify:native`；**待实现**。 |
 | C13 保存到画板 | 无打开画板时从 FastCard/右键保存到指定、新建或默认《灵感》；成功回执后直接读 `.canvas`，卡片与出处一致，图片在对应 `.assets` 且可打开。重试不重复卡片，失败保留暂存；成功移出暂存及撤销均可回读。 | `src/__tests__/ready-fastcard-to-canvas.test.ts`；**待实现**。 |
 | C14 样式隔离 | 同一平台、固定主题/窗口/夹具下，在模块加载前后截图对比既有四模式，除明确新增模块区域外基线不变；窄区/分屏不溢出，卸载后无残留样式/快捷键影响。运行既有 reset 检查；真实 Electron 验证 BrowserView 让位与恢复。 | `scripts/verify-ready-next-style-isolation.mjs`（**待实现**）；既有 `scripts/check-css-cascade-layer-reset.cjs`；整体验收**待实现**。 |
@@ -411,4 +411,10 @@ M5 的数据库往返/导入保真另由计划 `src/__tests__/ready-database-rou
   - 写入服务修正：同一路径的并发写入改为严格按调用顺序执行（原先 realpath 先返回的调用会插队），并补了回归测试。
   - 检查：typecheck 通过；`verify:native` 233/233；`npm test` 全部通过；样式隔离与 cascade 检查通过；IPC 合同检查全部通过。真实 Electron 中，`verify:ready-next-library` 7/7（导入、元数据、书架、取书、阅读、翻页保存进度、无渲染错误），`verify:ready-next-smoke` 10/10。
   - 已知问题，交给 L1c 修复：排版里的行距设置无效（`--rn-lh` 与 `--lh` 变量名不一致）；章首页最后一行被截掉一半；资料库在别处修改后渲染进程不刷新。另有一项基线就存在的问题：没有任何根目录时文件树会列出 `/`，放到 M3 的侧栏重做里处理。
-- **尚未实现**：C2、C4–C6、C8–C14，M1 其余部分（身份统一正在独立 worktree 里开发、关系索引、ReadyRef 第 3–7 批、跨模式返回），M2 其余部分（标注、书源），以及 M3–M8。
+- **M2.1 修正**（2026-10-30）：书页测量与贴图统一使用书页自己的 `--lh`，排版行距生效，章首页不再截掉最后一行；保存资料库后 Main 推送 `vault:changed`，界面即时更新。`verify:ready-next-library` 增加正文末行越界与行距检查。
+- **基线修复（续）**：保活合同的日历部分改为行为测试，日历首次进入前台才初始化，后台停时钟、只记数据变化，回到前台刷新一次。SQLite 跳过检查清零：`calendar-union-native` 每个测试显式守卫并加入 `verify:native`（此前从未在 Electron ABI 下运行；其中的搜索用例改为按 ReadyRef 打开），四个只经传递引用触及数据库的测试登记豁免，两条过期豁免删除。
+- **M2.2 划线**：来源页「## 标注」引用块与 `.ready/anchors` 定位文件（D9、C6）；颜色条、页边批注、笔记面板、复制引用、在来源页中打开；重叠划线合并。真实窗口验收发现并修复两处移植缺陷：文本列缺少 `user-select: text`，以及翻角热区宽于页边距、吞掉左页每行开头的选区。
+- **M2.3 书源**：Z-Library 命令行书源与设置页；电子书宝库、城通网盘在构建开关之后；下载任务持久化（迁移 137），退出时先收口再关库；`verify:ctfile-excluded` 对默认构建通过、对开启构建拒绝。
+- **M1 身份统一（C2 Main 侧）合入**：`objects` 取代 `file_identities`（迁移 138，迁移前用 VACUUM INTO 备份）；Ready、Agent 与外部 mv 的改名、移动经对象服务；书签、阅读会话、活动、标签按对象关联。全量测试暴露的回归已修：恢复异步改名与跨卷"复制后删除"、监听只在索引落地后发布、书签按对象跟随搬家。Renderer 的标签、阅读位置、外观与 Agent 附件身份留给 I2。
+- **检查证据（合入后）**：合入后的 ready-next 上 typecheck、迁移编号（1–138）、IPC、SQLite 跳过、CSS 分层与书房样式检查全部通过；`verify:native` 310/310；`verify:tag-forge` 143 通过、1 项基线跳过；`verify:file-emergence` 91/91；`npm test` 7435 项 0 失败（跳过项为 ABI 跳过，已由 verify:native 覆盖）；真实 Electron 中 `verify:ready-next-smoke` 10/10、`verify:ready-next-library` 16/16。
+- **尚未实现**：C4–C5、C8–C14 与 C2 的 Renderer 部分；M1 其余部分（Renderer 按对象记录、关系索引、ReadyRef 第 3–7 批、跨模式返回）；M2 其余部分（引用卡与反链、藏书阁导入）；M3–M8。

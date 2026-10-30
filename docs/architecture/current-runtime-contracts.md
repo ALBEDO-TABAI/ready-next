@@ -227,6 +227,9 @@
 - 阅读背景默认跟随应用昼夜，也可保存自选颜色；颜色变化不能触发全文测量或移动阅读位置。左右纸堆按总页数及阅读进度互补变化，切口细纹沿页高竖向延伸，前页与纸堆上下齐边，圆角只放在最外侧轮廓；厚度逐帧跟随翻页且不改变正文平面，不得落页后再播放一次厚度布局动画。
 - 阅读中的 Widget 只允许静态投影：先移除脚本、事件、外部 CSS URL、fixed/sticky 和重复 id，再放入可克隆的受约束 ShadowRoot；不得创建 iframe、receiver、状态写回或把 Widget 样式泄漏到主界面。
 - reduced-motion 不启动动态叶片，直接落到同一静态分页与位置合同。阅读专项回归入口是 `npm run verify:document-reading`；同时保留 `npm run verify:document-perf` 与 `npm run verify:widget-ready`。详细设计见 `docs/superpowers/plans/2026-09-05-document-reading-paper-implementation.md`、`docs/superpowers/plans/2026-08-04-document-reading-mode-implementation.md`、`docs/superpowers/plans/2026-07-17-document-mode-performance-implementation.md` 与 `docs/superpowers/plans/2026-07-11-document-widget-ready-design-language-implementation.md`。
+- ready-next 书房（M2）是 Document 模式的系统标签页，不新增 Workbench mode；入口是文件面板顶部的"阅读"。每本书以 `阅读/<书名>.md` 来源页为身份（frontmatter `ready_id`），书文件与封面在同名 `.assets/`；阅读位置和书签按书 id 存 ready.db；书目修改与划线都经写入服务。样式只在 `.rn-library` 下且分层（`npm run verify:library-styles`）；书页测量与贴图使用书页自己的 `--lh` 等变量，不读取 Ready 界面令牌。
+- 书房划线（M2.2，C6）：来源页「## 标注」下的引用块加 `^hl-<id>` 是唯一真值；`.ready/anchors/<书 id>.json` 只是可重建定位，来源页写入成功后才发布，内容未变不重写。`.ready/` 被搜索索引和监听忽略、界面隐藏。重定位依次为：存储位置核对原文 → 本章引文与前后文 → 全书；多处相同或找不到即"未定位"，在笔记面板列出，不在书页绘制，不猜位置。舞台为 `user-select: none`，只有文本列可选；文本列上选区优先，翻角只在页边距与页外出现。
+- 书房书源（M2.3，C11）：Z-Library 只经本机 zlib 命令行的 JSON 输出与退出码，Ready 不接触账号密码。电子书宝库与城通网盘受构建常量 `__READY_FEATURE_CTFILE__` 控制（`READY_BUILD_FEATURES=ctfile` 才开启）；默认构建不得包含其代码，`npm run verify:ctfile-excluded` 检查构建产物，发布回执记录开关。下载任务持久在 ready.db，重启时未完成任务标为"应用退出时中断"，退出流程在关闭数据库前等待任务收口。真实窗口回归入口 `npm run verify:ready-next-library`。
 
 ## 8. 行动确认、知识与专项 Agent
 
