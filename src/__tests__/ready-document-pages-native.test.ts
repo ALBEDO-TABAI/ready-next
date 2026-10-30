@@ -6,7 +6,7 @@ import { rebuildObjectIndex } from '../main/modules/search-engine/object-index-r
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import Database from 'better-sqlite3'
-import { mkdtempSync, realpathSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs'
+import { mkdtempSync, realpathSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { runMigrations } from '../main/modules/migrations'
@@ -15,6 +15,8 @@ import { SearchEngine } from '../main/modules/search-engine/indexer'
 import { DocumentPageService } from '../main/modules/document-pages/service'
 import { configureDocumentWriteService, documentVersion, saveUserDocument } from '../main/modules/document-engine/document-write-service'
 import { ObjectLinkRepository } from '../main/modules/search-engine/object-links'
+import { ObjectEventWindow } from '../main/modules/object-service/event-window'
+import { createFileWatcher } from '../main/modules/search-engine/file-watcher'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 function fixture() {
@@ -27,6 +29,60 @@ function fixture() {
   const service = new DocumentPageService(registry, { index })
   return { root, db, registry, engine, index, service, close: () => { configureDocumentWriteService(null); engine.cancelPendingWorkspaceResolves(); db.close(); rmSync(root, { recursive: true, force: true }) } }
 }
+
+for (const external of [false, true]) test(`MOVE-LINKS ${external ? 'external mv settlement' : 'page move return'} repairs root and nested references`, { timeout: 15000 }, async t => {
+  if (skipIfSqliteUnavailable(t, 'Document page move links')) return
+  const f = fixture()
+  let watcher: Awaited<ReturnType<typeof createFileWatcher>> | undefined
+  let events: ObjectEventWindow | undefined
+  try {
+    let sequence = 0
+    const create = (title: string, content: string) => f.service.operate({ type: 'create', root: f.root, operationId: `create-${++sequence}`, parentPath: f.root, title, content })
+    const target = await create('验收页', '验收正文')
+    const destination = await create('目标页', '目标正文')
+    await f.service.operate({ type: 'create', root: f.root, operationId: 'create-child', parentObjectId: target.objectId, title: '子页面', content: '子页面正文' })
+    const rootRef = join(f.root, '引用页.md')
+    const nestedRef = join(f.root, '笔记', '引用页.md')
+    await create('引用页', '[[验收页]]')
+    mkdirSync(join(f.root, '笔记'))
+    await saveUserDocument({ path: nestedRef, content: '[[../验收页]]' })
+    const links = new ObjectLinkRepository(f.db)
+
+    if (external) {
+      const { default: chokidar } = await import('chokidar')
+      events = new ObjectEventWindow(f.registry, async paths => {
+        for (const path of paths) if (existsSync(path) && path.endsWith('.md')) await f.index(path)
+      })
+      mkdirSync(join(f.root, '目标页'))
+      const moved = join(f.root, '目标页', '验收页.md')
+      let settled!: () => void, failed!: (error: unknown) => void
+      const done = new Promise<void>((resolve, reject) => { settled = resolve; failed = reject })
+      watcher = await createFileWatcher({ workspaceRoot: f.root, debounceMs: 10,
+        chokidarFactory: (paths, options) => Object.assign(chokidar.watch(paths, { ...options, usePolling: true, interval: 50 }), { startupConfirmationRequired: true }),
+        onChange: change => { void events!.add(change.filePath).then(() => { if (f.registry.find(moved)?.id === target.objectId) settled() }, failed) },
+      })
+      assert.equal('kind' in watcher, false, JSON.stringify(watcher))
+      renameSync(target.path!, moved)
+      renameSync(join(f.root, '验收页'), join(f.root, '目标页', '验收页'))
+      await done
+    } else {
+      await f.service.operate({ type: 'move', root: f.root, operationId: 'move-links', objectId: target.objectId, parentObjectId: destination.objectId })
+    }
+    // Completion is the service return or the watcher settlement promise, without a later repair call.
+    assert.deepEqual([rootRef, nestedRef].map(path => readFileSync(path, 'utf8')), ['[[目标页/验收页]]', '[[../目标页/验收页]]'])
+    assert.equal(f.registry.find(join(f.root, '目标页', '验收页.md'))!.id, target.objectId)
+    for (const path of [rootRef, nestedRef]) {
+      const outgoing = links.outgoing({ objectId: f.registry.find(path)!.id })
+      assert.equal(outgoing.length, 1)
+      assert.equal(outgoing[0].resolved, true)
+      assert.deepEqual(outgoing[0].target, { objectId: target.objectId })
+    }
+  } finally {
+    if (watcher && !('kind' in watcher)) await watcher.close()
+    await events?.drain()
+    f.close()
+  }
+})
 
 test('M3-P2 child creation, triplet rename/move, trash/restore and deletion retain identity and links', async t => {
   if (skipIfSqliteUnavailable(t, 'Document pages')) return
