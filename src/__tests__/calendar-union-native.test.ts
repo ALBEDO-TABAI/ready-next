@@ -11,7 +11,8 @@ import { runMigrations } from '../main/modules/migrations'
 import { SearchEngine, probeFts5Availability } from '../main/modules/search-engine/indexer'
 import { createCalendarWidgetFetcher } from '../renderer/modules/calendar/widget-data-provider'
 import { serializeEventToWire } from '../shared/calendar-wire'
-import { calendarEventToRecord } from '../main/modules/calendar-engine/calendar-row-codec'
+import { calendarEventToRecord, originalToSeconds } from '../main/modules/calendar-engine/calendar-row-codec'
+import { parseReadyUri, toReadyUri } from '../shared/ready-ref'
 
 const legacySchema = `CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT NOT NULL,updated_at TEXT NOT NULL);
 CREATE TABLE calendar_sources(id TEXT PRIMARY KEY,name TEXT NOT NULL,color TEXT DEFAULT '#4CA8DF',type TEXT DEFAULT 'local',sync_url TEXT,sync_interval INTEGER DEFAULT 60,enabled INTEGER DEFAULT 1,created_at INTEGER DEFAULT (unixepoch()));
@@ -25,6 +26,7 @@ function database(t: Parameters<typeof skipIfSqliteUnavailable>[0]) {
   t.after(() => db.close()); return db
 }
 test('migration preserves IDs and normalizes legacy all-day dates without current-timezone drift', t => {
+  if (skipIfSqliteUnavailable(t, 'Calendar union')) return
   const db = database(t); if (!db) return
   const start = Date.parse('2026-10-27T16:00:00Z') / 1000
   db.prepare('INSERT INTO calendar_events(id,calendar_id,title,start_time,end_time,all_day) VALUES (?,?,?,?,?,1)').run('day', 'local', 'Day', start, start + 86340)
@@ -35,6 +37,7 @@ test('migration preserves IDs and normalizes legacy all-day dates without curren
   assert.equal(db.prepare('PRAGMA integrity_check').get()['integrity_check'], 'ok')
 })
 test('fields round trip, stale writes fail, and undo is a confirmed database mutation', t => {
+  if (skipIfSqliteUnavailable(t, 'Calendar union')) return
   const db = database(t); if (!db) return
   migrateCalendarUnion(db as never); const store = new CalendarStore(() => db as never)
   const created = store.mutate({ type: 'create', event: { ...sample('a'), conferenceUrl: 'https://example.test/room', attendees: [{ email: 'a@example.test', rsvp: 'tentative' }] } }, {})
@@ -45,6 +48,7 @@ test('fields round trip, stale writes fail, and undo is a confirmed database mut
   assert.equal(store.snapshot().events.length, 0)
 })
 test('batch validation failure leaves every row untouched', t => {
+  if (skipIfSqliteUnavailable(t, 'Calendar union')) return
   const db = database(t); if (!db) return
   migrateCalendarUnion(db as never); const store = new CalendarStore(() => db as never)
   assert.throws(() => store.restore({ put: [sample('a'), { ...sample('b'), calendarId: 'missing' }], remove: [] }, { a: 0, b: 0 }), /日历/)
@@ -55,6 +59,7 @@ test('batch validation failure leaves every row untouched', t => {
 })
 
 test('calendar preferences and default calendar use Ready settings timestamps and read back', t => {
+  if (skipIfSqliteUnavailable(t, 'Calendar union')) return
   const db=database(t);if(!db)return
   migrateCalendarUnion(db as never);const store=new CalendarStore(()=>db as never)
   store.savePreferences({format24HourTime:true,locale:'zh-CN'})
@@ -79,15 +84,19 @@ test('global search indexes changed recurring instances and opens their exact sa
   const engine=new SearchEngine(db as never,{fts5Available:probeFts5Availability(db as never)})
   await engine.reindexCalendar()
   const results=await engine.search('Unique changed meeting',{sources:['calendar']})
-  const hit=results.items.find(item=>item.path===`calendar://${event.id}#${original/1000}`)
+  const hit=results.items.find(item=>item.path===toReadyUri({kind:'event',id:event.id,occurrence:String(original)}))
   assert.ok(hit,'the exception must be searchable by its changed title')
-  assert.equal(store.getCalendarEventReference(hit.path.slice('calendar://'.length))?.title,'Unique changed meeting')
+  // Open the hit the way GlobalSearchPanel does: series id plus the occurrence in seconds.
+  const parsed=parseReadyUri(hit.path)
+  assert.ok(parsed.ok&&parsed.ref.kind==='event'&&parsed.ref.occurrence!==undefined)
+  assert.equal(store.getCalendarEventReference(`${parsed.ref.id}#${originalToSeconds(Number(parsed.ref.occurrence))}`)?.title,'Unique changed meeting')
   store.mutate({type:'delete',keys:[`${event.id}|${original}`],scope:'this'},Object.fromEntries(store.snapshot().events.map(e=>[e.id,e.revision||1])))
   await engine.reindexCalendar()
   assert.equal((await engine.search('Unique changed meeting',{sources:['calendar']})).items.length,0)
 })
 
 test('widgets pass display timezone to the stored all-day occurrence query', async t => {
+  if (skipIfSqliteUnavailable(t, 'Calendar union')) return
   const db=database(t);if(!db)return
   migrateCalendarUnion(db as never);const store=new CalendarStore(()=>db as never)
   store.mutate({type:'create',event:{...sample('all-day-zone'),allDay:true,start:'2026-10-28',end:'2026-10-29',timeZone:'Asia/Tokyo'}},{})
@@ -104,6 +113,7 @@ test('widgets pass display timezone to the stored all-day occurrence query', asy
 })
 
 test('production calendar actions retain new fields and require an exact recurring scope', async t => {
+  if (skipIfSqliteUnavailable(t, 'Calendar union')) return
   const db = database(t); if (!db) return
   migrateCalendarUnion(db as never); const store = new CalendarStore(() => db as never)
   let listed: readonly string[] = []
@@ -133,6 +143,7 @@ test('production calendar actions retain new fields and require an exact recurri
 })
 
 test('retiming stored exceptions keeps stable IDs and preserves EXDATE plus replacement', t => {
+  if (skipIfSqliteUnavailable(t, 'Calendar union')) return
   const db=database(t);if(!db)return
   migrateCalendarUnion(db as never);const store=new CalendarStore(()=>db as never)
   const start=Number(sample('a').start)
@@ -152,6 +163,7 @@ test('retiming stored exceptions keeps stable IDs and preserves EXDATE plus repl
 
 
 test('successive recurring-instance undo uses saved content while rejecting external edits', t => {
+  if (skipIfSqliteUnavailable(t, 'Calendar union')) return
   const db=database(t);if(!db)return
   migrateCalendarUnion(db as never);const store=new CalendarStore(()=>db as never)
   const event={...sample('undo-series'),rrule:'FREQ=DAILY;COUNT=3'}
@@ -171,6 +183,7 @@ test('successive recurring-instance undo uses saved content while rejecting exte
 })
 
 test('file import is repeatable, explicit source updates preserve identity, subscriptions stay read-only', t => {
+  if (skipIfSqliteUnavailable(t, 'Calendar union')) return
   const db=database(t);if(!db)return
   migrateCalendarUnion(db as never);const store=new CalendarStore(()=>db as never)
   const raw=['BEGIN:VCALENDAR','VERSION:2.0','BEGIN:VEVENT','UID:stable-import@test','DTSTART:20261028T090000Z','DTEND:20261028T100000Z','SUMMARY:Original','END:VEVENT','END:VCALENDAR'].join('\r\n')

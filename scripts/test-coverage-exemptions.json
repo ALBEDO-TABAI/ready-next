@@ -129,12 +129,6 @@
       "owner": "image-generation-service"
     },
     {
-      "path": "src/__tests__/document-widget-insert-position.test.ts",
-      "reason": "Document widget W10b: tests only the exported insertWidgetIntoDocument text transformation with string fixtures; no path opens better-sqlite3 or reads a repository. The execute module's transitive imports trigger the scanner, while the complete suite passes on host Node with the Electron native module present.",
-      "since": "2026-07-11",
-      "owner": "document-widget-ready"
-    },
-    {
       "path": "src/__tests__/codex-map-provider-routing.test.ts",
       "reason": "Map routing coverage constructs AgentSdkRuntime only to read its deterministic tool definitions and supplies literal capability inputs. The host-Node suite passes while the native module has the Electron ABI; no test path opens SQLite.",
       "since": "2026-08-21",
@@ -561,12 +555,6 @@
       "owner": "calendar-ui-assistant-verification"
     },
     {
-      "path": "src/__tests__/calendar-widget-data-provider.test.ts",
-      "reason": "Stage calendar UI verification cleanup: static C4 scan reaches native-backed modules through shared wrappers, but this test exercises pure contracts or fake-injected paths and does not open better-sqlite3 under host Node.",
-      "since": "2026-05-17",
-      "owner": "calendar-ui-assistant-verification"
-    },
-    {
       "path": "src/__tests__/calendar-widget-wire-integration.test.ts",
       "reason": "Stage calendar UI verification cleanup: static C4 scan reaches native-backed modules through shared wrappers, but this test exercises pure contracts or fake-injected paths and does not open better-sqlite3 under host Node.",
       "since": "2026-05-17",
@@ -805,6 +793,30 @@
       "reason": "Lists the default tool surface through AgentSdkToolExecutor with an injected empty skill catalog and reads the isolated test log; no executor dispatch, session or database is opened.",
       "since": "2026-10-09",
       "owner": "lint-gate-cleanup"
+    },
+    {
+      "path": "src/__tests__/ebook-support.test.ts",
+      "reason": "EPUB import and index-eligibility coverage uses temporary files and JSZip fixtures. The search-engine adapter and ebook importer reach native-backed modules only through transitive imports; no test path opens getDatabase or better-sqlite3, so host-Node coverage must remain active.",
+      "since": "2026-10-30",
+      "owner": "ready-next-gate-cleanup"
+    },
+    {
+      "path": "src/__tests__/file-filter-hardening.test.ts",
+      "reason": "Index file-filter coverage exercises decideFileForIndex, isLikelyTextContent and FileSystemAdapter against temporary directories. The adapter module reaches native-backed modules only through transitive imports; no test path opens getDatabase or better-sqlite3, so host-Node coverage must remain active.",
+      "since": "2026-10-30",
+      "owner": "ready-next-gate-cleanup"
+    },
+    {
+      "path": "src/__tests__/browser-cdp-page-map.test.ts",
+      "reason": "Browser CDP page-map coverage imports tools/browser-probe, whose browser-engine/ipc-handler value import registers the FastCard IPC module; that module reaches database.ts only when a handler runs. The tests use fake BrowserController targets and never register IPC handlers or open getDatabase/better-sqlite3, so host-Node coverage must remain active.",
+      "since": "2026-10-30",
+      "owner": "ready-next-gate-cleanup"
+    },
+    {
+      "path": "src/__tests__/browser-trusted-input.test.ts",
+      "reason": "Browser trusted-input guard coverage imports tools/browser-probe, whose browser-engine/ipc-handler value import registers the FastCard IPC module; that module reaches database.ts only when a handler runs. The tests use fake BrowserController targets and never register IPC handlers or open getDatabase/better-sqlite3, so host-Node coverage must remain active.",
+      "since": "2026-10-30",
+      "owner": "ready-next-gate-cleanup"
     }
   ]
 }
