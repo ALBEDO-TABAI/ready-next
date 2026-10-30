@@ -1,9 +1,8 @@
-import { ObjectRegistry } from '../object-service/registry'
 import { ipcMain, type WebContents } from 'electron'
 import { createDocumentTabTransport } from './document-write-transport'
 import { parseDocumentSyncReply, type DocumentSyncReply } from '../../../shared/document-operations'
-import { buildSearchIndexContentHash } from '../search-engine/adapters'
-import { configureDocumentWriteService, documentWriteError } from './document-write-service'
+import { configureDocumentWriteService } from './document-write-service'
+import { confirmDocumentIndex } from './document-index-confirmation'
 
 const owners = new Map<number, WebContents>()
 const pending = new Map<string, { owner: number; resolve(reply: DocumentSyncReply): void }>()
@@ -48,13 +47,7 @@ export function setupDocumentWriteIPC(): void {
     tabs: transport,
     index: async (path, content) => {
       const { getSearchEngine } = await import('../search-engine/ipc-handler')
-      const engine = getSearchEngine()
-      const root = engine?.findWorkspaceRootForPath(path)
-      if (!engine || !root) throw new Error('Document search workspace unavailable')
-      const result = await engine.indexDocument(root, path, content)
-      if (!result.ok) throw documentWriteError('write_failed', result.error || 'Document index update failed')
-      const row = engine.getRepository().getConnection().prepare('SELECT d.content_hash AS hash FROM documents d WHERE d.object_id=?').get<{ hash: string }>(new ObjectRegistry(engine.getRepository().getConnection()).find(path)?.id ?? null)
-      if (row?.hash !== buildSearchIndexContentHash(content)) throw documentWriteError('readback_mismatch', 'Document index readback mismatch')
+      await confirmDocumentIndex(getSearchEngine(), path, content)
     },
   })
 }
