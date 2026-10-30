@@ -1,3 +1,4 @@
+import { InlineDatabase, parseDatabaseLink, remarkDatabaseViews } from '../../modules/document/database'
 import { LibraryQuoteCard } from './LibraryQuoteCard'
 import { openReadyRef } from '../../modules/workbench/open-ready-ref'
 import { createMarkdownComponents, copyTextToClipboard } from './MarkdownContent'
@@ -9,6 +10,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
+import type { Element as HastElement, ElementContent } from 'hast'
 import ReactMarkdown, { defaultUrlTransform, type Components, type Options as MarkdownOptions } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
@@ -359,8 +361,23 @@ const MarkdownPreviewBlock = memo(function MarkdownPreviewBlock({
   remarkPlugins: MarkdownOptions['remarkPlugins']
 }) {
   recordDocumentPerformanceCounter('previewBlockRenders')
+  const databaseComponents = useMemo<Components>(() => {
+    const Link = components.a
+    const Paragraph = components.p
+    const hasDatabase = (node: HastElement | ElementContent): boolean => node.type === 'element'
+      && (node.tagName === 'a' && String(node.properties.href).startsWith('ready-db:') || node.children.some(hasDatabase))
+    return {
+      ...components,
+      a: ({ node, href, ...props }) => {
+        const reference = parseDatabaseLink(href ?? '')
+        return reference ? <InlineDatabase {...reference} /> : Link && typeof Link !== 'string' ? <Link node={node} href={href} {...props} /> : <a href={href} {...props} />
+      },
+      p: ({ node, ...props }) => node && hasDatabase(node) ? <div {...props} /> : Paragraph && typeof Paragraph !== 'string' ? <Paragraph node={node} {...props} /> : <p {...props} />,
+    }
+  }, [components])
+  const databasePlugins = useMemo(() => [...remarkPlugins ?? [], remarkDatabaseViews], [remarkPlugins])
   return (
-    <ReactMarkdown urlTransform={href => href.startsWith('ready://') ? href : defaultUrlTransform(href)} remarkPlugins={remarkPlugins} components={components}>
+    <ReactMarkdown urlTransform={href => href.startsWith('ready://') || href.startsWith('ready-db:') ? href : defaultUrlTransform(href)} remarkPlugins={databasePlugins} components={databaseComponents}>
       {markdown}
     </ReactMarkdown>
   )

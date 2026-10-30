@@ -23,23 +23,51 @@ export class DocumentDatabaseService {
     private readonly dependencies: DocumentWriteDependencies & { afterMigrationWrite?(index: number): void | Promise<void> }) { this.root = vaultRoot(root) }
   private serial<T>(work: () => Promise<T>): Promise<T> { const result = this.tail.then(work); this.tail = result.then(() => undefined, () => undefined); return result }
   private object(id: string): ObjectRecord & { current_path: string } {
-    const object = this.registry.get(z.string().min(1).parse(id))
+    return this.availableObject(this.registry.get(z.string().min(1).parse(id)), id)
+  }
+  private availableObject(object: ObjectRecord | null, id: string): ObjectRecord & { current_path: string } {
     if (!object || !object.current_path || object.status !== 'present' || object.kind !== 'markdown' || object.identity_state === 'conflict') throw new Error(`Object unavailable: ${id}`)
     checkedPath(this.root, object.current_path)
     return { ...object, current_path: object.current_path }
   }
   private load(id: string): Cached {
-    let object = this.object(id)
-    const stat = statSync(object.current_path, { bigint: true }), signature = `${object.current_path}:${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`
-    const cached = this.cache.get(id)
-    if (cached && cached.revision === object.revision && cached.signature === signature) return cached
-    const current = this.registry.register(object.current_path)
-    if (current.id !== id) throw new Error('Object identity changed')
-    object = this.object(id)
-    const content = readFileSync(object.current_path, 'utf8'), version = documentVersion(content)
-    if (version !== object.content_hash) throw new Error('Document changed while reading')
-    const loaded = { signature, revision: object.revision, content, version, values: readDocumentSource(content).frontmatter }
-    this.cache.set(id, loaded); return loaded
+    const object = this.object(id)
+    const result = this.loadPaths([object.current_path], new Map([[object.current_path, object]]))[0]
+    if (result.id !== id) throw new Error('Object identity changed')
+    return result.loaded
+  }
+  private loadPaths(paths: string[], objects: ReadonlyMap<string | null, ObjectRecord>) {
+    const pending = paths.map(path => {
+      const found = objects.get(path), object = found ? this.availableObject(found, found.id) : null
+      if (!object) checkedPath(this.root, path)
+      const stat = statSync(path, { bigint: true }), signature = `${path}:${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`
+      const previous = object ? this.cache.get(object.id) : undefined
+      const cached = previous && previous.revision === object?.revision && previous.signature === signature ? previous : undefined
+      const content = cached?.content ?? readFileSync(path, 'utf8'), version = cached?.version ?? documentVersion(content)
+      // A cold cache is not an unverified object. Reconcile only changed observations,
+      // together, so registration does not traverse the entire registry for every row.
+      const changed = !object || object.content_hash !== version || object.device !== String(stat.dev)
+        || object.inode !== String(stat.ino) || object.birthtime_ns !== String(stat.birthtimeNs)
+        || object.size !== Number(stat.size) || object.mtime_ns !== String(stat.mtimeNs)
+      return { path, object, signature, cached, content, version, changed }
+    })
+    const changed = pending.filter(item => item.changed).map(item => item.path)
+    if (changed.length) {
+      this.registry.reconcile(changed, false)
+      objects = new Map(this.registry.list().map(object => [object.current_path, object]))
+    }
+    return pending.map(item => {
+      const current = objects.get(item.path)
+      if (!current || item.object && current.id !== item.object.id) throw new Error('Object identity changed')
+      const object = changed.length ? this.availableObject(current, current.id) : current
+      if (item.cached && item.cached.revision === object.revision) return { id: object.id, loaded: item.cached }
+      const content = item.changed ? readFileSync(item.path, 'utf8') : item.content
+      const version = item.changed ? documentVersion(content) : item.version
+      if (version !== object.content_hash) throw new Error('Document changed while reading')
+      const loaded = { signature: item.signature, revision: object.revision, content, version, values: readDocumentSource(content).frontmatter }
+      this.cache.set(object.id, loaded)
+      return { id: object.id, loaded }
+    })
   }
   private assertIdle(id: string): void {
     if (this.registry.db.prepare("SELECT id FROM document_database_operations WHERE database_id=? AND state<>'committed'").get(id)) throw new Error('migration_in_progress: resume the recorded operation')
@@ -50,8 +78,8 @@ export class DocumentDatabaseService {
     return { definition, version: loaded.version, source, content: loaded.content }
   }
   private rows(id: string, definition: DatabaseDefinition, source: string): DatabaseRow[] {
-    const rows: DatabaseRow[] = []
-    if (!existsSync(source)) return rows
+    const paths: string[] = []
+    if (!existsSync(source)) return []
     const scan = (path: string) => {
       checkedPath(this.root, path)
       for (const entry of readdirSync(path, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
@@ -59,13 +87,14 @@ export class DocumentDatabaseService {
         const child = checkedPath(this.root, join(path, entry.name))
         if (entry.isDirectory()) { if (definition.recursive) scan(child); continue }
         if (!entry.name.toLowerCase().endsWith('.md')) continue
-        const object = this.registry.find(child) ?? this.registry.register(child)
-        if (object.id === id) throw new Error('Database cannot include itself')
-        const loaded = this.load(object.id)
-        rows.push({ id: object.id, title: typeof loaded.values.title === 'string' ? loaded.values.title : basename(child).replace(/\.md$/i, ''), version: loaded.version, values: structuredClone(loaded.values) })
+        paths.push(child)
       }
     }
-    scan(source); return rows
+    scan(source)
+    return this.loadPaths(paths, new Map(this.registry.list().map(object => [object.current_path, object]))).map(({ id: rowId, loaded }, index) => {
+      if (rowId === id) throw new Error('Database cannot include itself')
+      return { id: rowId, title: typeof loaded.values.title === 'string' ? loaded.values.title : basename(paths[index]).replace(/\.md$/i, ''), version: loaded.version, values: structuredClone(loaded.values) }
+    })
   }
   read(id: string) {
     this.assertIdle(id)
