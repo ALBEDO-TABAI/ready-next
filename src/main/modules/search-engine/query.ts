@@ -69,7 +69,8 @@ function classifyToken(raw: string): QueryToken | null {
 const CJK_REGEX = /[㐀-鿿぀-ヿ가-힯]/
 const CJK_SEQUENCE_REGEX = /[㐀-鿿぀-ヿ가-힯]+/g
 
-export const SEARCH_INDEX_CONTENT_VERSION = 'fts-cjk-bigram-v1'
+// v2: letter/number runs glued to Chinese text ("M5验收目标", "Q4计划") are indexed and queried as their own tokens.
+export const SEARCH_INDEX_CONTENT_VERSION = 'fts-cjk-bigram-v2'
 
 function containsCjk(value: string): boolean {
   return CJK_REGEX.test(value)
@@ -88,6 +89,11 @@ function toBigrams(value: string): string[] {
   return grams
 }
 
+/** Letter/number runs inside a word that also holds Chinese: the tokenizer would otherwise keep them glued to it. */
+function gluedRuns(word: string): string[] {
+  return word.split(CJK_SEQUENCE_REGEX).map((part) => part.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '')).filter(Boolean)
+}
+
 export function buildFtsSearchText(value: string): string {
   const normalized = normalizeSearchText(value)
   if (!containsCjk(normalized)) return value
@@ -97,6 +103,9 @@ export function buildFtsSearchText(value: string): string {
       if (containsCjk(gram)) extra.add(gram)
     }
   }
+  for (const word of normalized.split(/\s+/)) {
+    if (containsCjk(word)) for (const run of gluedRuns(word)) extra.add(run)
+  }
   if (extra.size === 0) return value
   return `${value}\n${Array.from(extra).join(' ')}`
 }
@@ -105,8 +114,14 @@ function termToFtsClauses(term: string): string {
   if (!containsCjk(term)) {
     return `"${escapeFtsPhrase(term)}"`
   }
-  const grams = toBigrams(term).map((g) => `"${escapeFtsPhrase(g)}"`)
-  return grams.length > 1 ? grams.join(' ') : grams.join('')
+  // Chinese runs become bigrams; letter/number runs glued to them stay whole, matching the index side.
+  const clauses: string[] = []
+  for (const part of term.split(/([㐀-鿿぀-ヿ가-힯]+)/)) {
+    if (!part) continue
+    if (containsCjk(part)) clauses.push(...toBigrams(part).map((g) => `"${escapeFtsPhrase(g)}"`))
+    else for (const run of gluedRuns(part)) clauses.push(`"${escapeFtsPhrase(run)}"`)
+  }
+  return clauses.join(' ')
 }
 
 function phraseToFts(value: string): string {

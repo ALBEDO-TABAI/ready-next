@@ -66,7 +66,18 @@ async function main() {
       return input
     }
     await search('M5验收目标')
-    await page.getByRole('option').filter({ hasText: 'M5验收目标' }).locator('button').first().click()
+    const option = page.getByRole('option').filter({ hasText: 'M5验收目标' }).locator('button').first()
+    if (!await option.waitFor({ timeout: 10000 }).then(() => true, () => false)) {
+      const state = await page.evaluate(async root => ({
+        roots: (() => { try { return [localStorage.getItem('ready-workspace-root'), localStorage.getItem('ready-pinned-folders')] } catch { return null } })(),
+        direct: await window.electronAPI.document.searchIndex({ query: 'M5验收目标', workspaceRoots: [root] }),
+        listbox: document.querySelector('[role="listbox"]')?.textContent?.slice(0, 300),
+        alerts: [...document.querySelectorAll('[role="alert"]')].map(alert => alert.textContent),
+      }), vault)
+      await page.screenshot({ path: path.join(temporary, 'switcher-failure.png') })
+      throw new Error(`⌘K found no option: ${JSON.stringify(state).slice(0, 1500)} (screenshot in ${temporary})`)
+    }
+    await option.click()
     await page.getByLabel('关联面板').waitFor()
     console.log('PASS 1: ⌘K 搜索页面并打开')
     await page.getByLabel('关联面板').locator('summary').click()

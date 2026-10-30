@@ -41,6 +41,13 @@ describe('search-engine query planner', () => {
     assert.match(indexed, /预算/)
   })
 
+  it('keeps letter/number runs glued to Chinese as their own tokens on both sides', () => {
+    assert.equal(parseSearchQuery('M5验收目标').ftsMatch, '"M5" "验收" "收目" "目标"')
+    assert.equal(parseSearchQuery('Q4计划').ftsMatch, '"Q4" "计划"')
+    const indexed = buildFtsSearchText('M5验收目标 与 2026年度总结')
+    for (const token of ['M5', '2026', '验收', '目标', '年度']) assert.match(indexed, new RegExp(`(^|\\s)${token}(\\s|$)`))
+  })
+
   it('collapses CJK phrases before bigram expansion', () => {
     const parsed = parseSearchQuery('"机器 学习"')
     assert.equal(parsed.ftsMatch, '"机器" "器学" "学习"')
