@@ -31,7 +31,7 @@ test('conflict UI shows both versions, uses checked overwrite, preserves disk an
   const { createRoot } = await import('react-dom/client')
   configureDrafts({ ...f.port, read: async path => path === '/vault/Test.md' && checkedWrites > 0 ? disk : f.port.read(path), tabs: () => useDocTabs.getState().tabs,
     patch: (id, patch) => useDocTabs.setState(state => ({ tabs: state.tabs.map(tab => tab.id === id && tab.kind !== 'library' ? { ...tab, ...patch } : tab) })),
-  }, () => {})
+  })
   const { drafts } = await import('../renderer/modules/document/drafts/runtime')
   const hash = await contentHash('draft version')
   f.drafts.set('conflict', { draftId: 'conflict', tabId: 'tab', revision: 2, content: 'draft version', contentHash: hash, origin: 'document', objectId: 'object', baseVersion: hash,

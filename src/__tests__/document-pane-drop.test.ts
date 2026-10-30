@@ -166,7 +166,7 @@ test('closing primary promotes the visible split document and clears split mode'
   const fixture = createDraftFixture()
   configureDrafts({ ...fixture.port, tabs: () => useDocTabs.getState().tabs,
     patch: (id, patch) => useDocTabs.setState(state => ({ tabs: state.tabs.map(tab => tab.id === id && tab.kind !== 'library' ? { ...tab, ...patch } : tab) })),
-  }, () => {})
+  })
   resetDocTabs()
   drafts.changed(useDocTabs.getState().tabs[0], 'disk left')
   await drafts.flush('left')

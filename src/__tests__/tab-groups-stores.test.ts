@@ -8,6 +8,8 @@ import {
   useBrowserTabs,
 } from '../renderer/stores/useBrowserTabs'
 import { useDocTabs } from '../renderer/stores/useDocTabs'
+import { captureLegacyDrafts, migrateLegacyDrafts, TAB_METADATA_KEY } from '../renderer/modules/document/drafts/migration'
+import { createDraftFixture } from './helpers/ready-drafts-fixture'
 
 function btab(id: string, groupId?: string | null): BrowserTab {
   return {
@@ -165,14 +167,14 @@ describe('useDocTabs group methods + normalize choke', () => {
   })
 })
 
-describe('useDocTabs persistence migration v2 → v3', () => {
+describe('useDocTabs legacy groups and draft migration', () => {
   afterEach(() => {
     // Restore the default in-memory storage so the singleton store is clean for
     // any later test importing it.
     useDocTabs.persist.setOptions({ storage: createJSONStorage(() => undefined as unknown as Storage) })
   })
 
-  it('a v2 snapshot migrates additively to v3 with NO data loss (round-trip)', async () => {
+  it('a v2 snapshot preserves groups, panes and draft bodies through migration (round-trip)', async (t) => {
     const v2 = JSON.stringify({
       state: {
         tabs: [
@@ -185,24 +187,30 @@ describe('useDocTabs persistence migration v2 → v3', () => {
       },
       version: 2,
     })
-    const mock: Storage = {
-      getItem: () => v2,
-      setItem: () => undefined,
-      removeItem: () => undefined,
-      clear: () => undefined,
-      key: () => null,
-      length: 0,
-    }
-    useDocTabs.persist.setOptions({ storage: createJSONStorage(() => mock) })
+    const fixture = createDraftFixture()
+    fixture.storage.setItem(TAB_METADATA_KEY, v2)
+    const imported = t.mock.method(fixture.api, 'importLegacy')
+    // FX2: hand off bodies, hydrate metadata immediately, then import into Main.
+    captureLegacyDrafts(fixture.storage)
+    useDocTabs.persist.setOptions({ storage: createJSONStorage(() => fixture.storage) })
     await useDocTabs.persist.rehydrate()
+    await migrateLegacyDrafts(fixture.storage, fixture.api)
+    assert.deepEqual(imported.mock.calls.flatMap(call => call.arguments[0]).map(item => ({
+      tabId: item.tabId, content: item.content,
+    })), [{ tabId: 'doc-1', content: '' }, { tabId: 'doc-2', content: 'hello' }])
+    const metadata = JSON.parse(fixture.storage.getItem(TAB_METADATA_KEY)!)
+    for (const tab of metadata.state.tabs) {
+      assert.equal('content' in tab, false, 'metadata no longer stores bodies')
+      assert.equal([...fixture.drafts.values()].find(draft => draft.tabId === tab.id)?.content, tab.id === 'doc-2' ? 'hello' : '', 'imported body remains recoverable by tabId')
+    }
     const s = useDocTabs.getState()
     // Additive group fields.
     assert.ok(Array.isArray(s.tabGroups), 'tabGroups added by migration')
     assert.equal(s.tabGroups.length, 0)
-    // No data loss: every tab + its fields, and the pane/ratio state, round-trip.
+    // Tab metadata and pane state still round-trip; bodies belong to Main drafts.
     assert.equal(s.tabs.length, 2, 'no tab dropped by migration')
     assert.deepEqual(s.tabs.map((t) => t.title), ['A', 'B'])
-    assert.equal(s.tabs.find((t) => t.id === 'doc-2')?.content, 'hello', 'dirty content preserved')
+    assert.ok(s.tabs.every(tab => tab.content === ''), 'metadata hydration does not restore legacy bodies')
     assert.equal(s.tabs.every((t) => (t.groupId ?? null) === null), true, 'legacy tabs are ungrouped')
     assert.equal(s.activeTabId, 'doc-2')
     assert.equal(s.splitTabId, 'doc-1')
