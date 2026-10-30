@@ -419,4 +419,10 @@ M5 的数据库往返/导入保真另由计划 `src/__tests__/ready-database-rou
 - **M2.3 书源**：Z-Library 命令行书源与设置页；电子书宝库、城通网盘在构建开关之后；下载任务持久化（迁移 137），退出时先收口再关库；`verify:ctfile-excluded` 对默认构建通过、对开启构建拒绝。
 - **M1 身份统一（C2 Main 侧）合入**：`objects` 取代 `file_identities`（迁移 138，迁移前用 VACUUM INTO 备份）；Ready、Agent 与外部 mv 的改名、移动经对象服务；书签、阅读会话、活动、标签按对象关联。全量测试暴露的回归已修：恢复异步改名与跨卷"复制后删除"、监听只在索引落地后发布、书签按对象跟随搬家。Renderer 的标签、阅读位置、外观与 Agent 附件身份留给 I2。
 - **检查证据（合入后）**：合入后的 ready-next 上 typecheck、迁移编号（1–138）、IPC、SQLite 跳过、CSS 分层与书房样式检查全部通过；`verify:native` 310/310；`verify:tag-forge` 143 通过、1 项基线跳过；`verify:file-emergence` 91/91；`npm test` 7435 项 0 失败（跳过项为 ABI 跳过，已由 verify:native 覆盖）；真实 Electron 中 `verify:ready-next-smoke` 10/10、`verify:ready-next-library` 16/16。
-- **尚未实现**：C4–C5、C8–C14 与 C2 的 Renderer 部分；M1 其余部分（Renderer 按对象记录、关系索引、ReadyRef 第 3–7 批、跨模式返回）；M2 其余部分（引用卡与反链、藏书阁导入）；M3–M8。
+- **合并批次（2026-10-31）**：
+  - I2：Renderer 的标签、阅读位置、外观按对象 id 记录；旧状态一次握手迁移；Agent 本地附件改用对象 id；页面视角隐藏 `ready_id`。真实窗口验收发现重启后自定义图标丢失（恢复的标签先于工作区 store 订阅完成对象绑定），已修。
+  - L4：书房引用卡、统一的 ReadyRef 打开函数、跨模式"返回"胶囊；书内位置跳转并短暂高亮。真实窗口验收发现普通阅读的位置锚点被保留不更新，导致重开后偏离划线所在页，已改为只在引用跳转时保留锚点。
+  - R1/R1b：`object_links` 关系索引（迁移 139）与修复记录、出链/反链接口、C5 可重建；单文档解析恢复 perf-rescue B8 的范围约束，按文件名查候选走表达式索引。
+  - M3 T1：Markdown 区间内核与编辑命令（C4 黄金语料）；T3a：Main 草稿服务（迁移 140）。M3 实施合同见 `2026-10-31-ready-next-m3-document-kernel-implementation.md`。
+  - 检查：typecheck、迁移编号 1–140、IPC、SQLite 跳过、CSS 分层与书房样式全部通过；`verify:native` 331/331；`verify:tag-forge`、`verify:file-emergence`、`verify:widget-ready` 通过；`npm test` 7487 项中 1 项按对象键改写的阅读位置用例已更新为新合同；真实 Electron 中 `verify:ready-next-smoke` 19/19（含打开不写文件、迁移、改名、外部 mv、重启保留标签/位置/图标）、`verify:ready-next-library` 21/21（含引用卡、回到原文与返回）。
+- **尚未实现**：C8–C14 与 C12 的 Renderer/画板部分；M1 的 ReadyRef 第 3–7 批；M2 的藏书阁导入与反链界面；M3 的 T2–T6；M4–M8。

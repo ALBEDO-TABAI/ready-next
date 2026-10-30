@@ -11,6 +11,7 @@ import {
   sourceLineForCharOffset,
 } from '../renderer/modules/document/book/bookReadingPosition'
 import { readDocumentReadingPositionMap } from '../renderer/modules/document/documentScrollAnchor'
+import { rememberObjectLocation } from '../renderer/stores/objectPresentationState'
 
 test('sourceLineForCharOffset：逐行计数与越界夹取', () => {
   const content = 'aa\nbb\ncc'
@@ -41,6 +42,10 @@ test('位置保存/读取往返：ratio 与章节锚点透传', () => {
   ;(globalThis as { localStorage?: unknown }).localStorage = storage
   try {
     const content = '# 第一章\n正文第一页。\n# 第二章\n后半部分。'
+    // Positions are keyed by object id; a path the Renderer has not resolved to an object is not persisted.
+    saveBookReadingPosition({ key: '/tmp/unresolved.md', content, pageIndex: 1, pageCount: 6, anchorLine: 1 })
+    assert.equal(readDocumentReadingPositionMap().size, 0)
+    rememberObjectLocation({ objectId: 'obj-book', path: '/tmp/book.md', revision: 1 })
     saveBookReadingPosition({
       key: '/tmp/book.md',
       content,
@@ -48,9 +53,9 @@ test('位置保存/读取往返：ratio 与章节锚点透传', () => {
       pageCount: 6,
       anchorLine: 3,
     })
-    const ratio = readDocumentReadingPositionMap().get('/tmp/book.md')?.ratio ?? null
+    const ratio = readDocumentReadingPositionMap().get('obj-book')?.ratio ?? null
     assert.ok(ratio !== null && Math.abs(ratio - 0.6) < 1e-9, `ratio 应≈0.6，实际 ${ratio}`)
-    const snapshot = readDocumentReadingPositionMap().get('/tmp/book.md')
+    const snapshot = readDocumentReadingPositionMap().get('obj-book')
     assert.equal(snapshot?.anchorTitle, '第二章')
     assert.equal(snapshot?.top, 3)
     assert.equal(snapshot?.maxScroll, 5)
