@@ -305,7 +305,7 @@ html[data-theme='dark'] .ink-scope {
 
 /* ---------------- topbar ---------------- */
 .ink-topbar { height: 46px; flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 12px; background: transparent; font-size: 12px; line-height: 16.8px; position: relative; z-index: 5; }
-.ink-topbar-left { display: flex; align-items: center; min-width: 0; gap: 0; flex: 1; }
+.ink-topbar-left { display: flex; align-items: center; min-width: 0; gap: 0; flex: 1; overflow: hidden; }
 .ink-crumb-wrap { display: flex; align-items: center; min-width: 0; }
 .ink-crumb { display: flex; align-items: center; gap: 6px; height: 28px; padding: 2px 8px; border-radius: 18px; white-space: nowrap; color: var(--ink-text-primary); min-width: 0; border: 0; background: none; font: inherit; }
 .ink-crumb:hover { background: var(--ink-button-hovered-background); }
@@ -499,13 +499,13 @@ html[data-theme='dark'] .ink-scope {
 .ink-topbar .document-floating-toggle.is-active, .ink-topbar .document-floating-toggle[aria-pressed='true'] { background: var(--studio-accent-soft); color: var(--studio-accent-text); }
 .ink-topbar .document-floating-toggle svg { width: 17px; height: 17px; stroke-width: 1.7; }
 .ink-topbar .document-floating-toggle:disabled { opacity: .35; }
-.ink-scope .ink-topbar .draggable-mode-switch { height: 28px; padding: 2px; border-radius: 18px; background: var(--studio-fill); box-shadow: none; border: 0; margin-left: 4px; }
-.ink-scope .ink-topbar .draggable-mode-switch::before, .ink-scope .ink-topbar .draggable-mode-switch::after { content: none; }
-.ink-scope .ink-topbar .draggable-mode-switch__thumb { top: 2px; height: calc(100% - 4px); border-radius: 14px; background: var(--studio-paper); box-shadow: 0 1px 2px rgba(10, 10, 20, .1); }
-.ink-scope .ink-topbar .draggable-mode-switch__thumb-glow { display: none; }
-.ink-scope .ink-topbar .draggable-mode-switch__thumb-label { color: var(--ink-text-primary); text-shadow: none; font-size: 12px; }
-.ink-scope .ink-topbar .draggable-mode-switch__label { font-size: 12px; color: var(--ink-text-secondary); }
-.ink-scope .ink-topbar .draggable-mode-switch__label.is-active { color: var(--ink-text-primary); }
+.ink-scope.ink-doc-app .ink-topbar .draggable-mode-switch { height: 28px; padding: 2px; border-radius: 18px; background: var(--studio-fill); box-shadow: none; border: 0; margin-left: 4px; }
+.ink-scope.ink-doc-app .ink-topbar .draggable-mode-switch::before, .ink-scope.ink-doc-app .ink-topbar .draggable-mode-switch::after { content: none; }
+.ink-scope.ink-doc-app .ink-topbar .draggable-mode-switch__thumb { top: 2px; height: calc(100% - 4px); border-radius: 14px; background: var(--studio-paper); box-shadow: 0 1px 2px rgba(10, 10, 20, .1); }
+.ink-scope.ink-doc-app .ink-topbar .draggable-mode-switch__thumb-glow { display: none; }
+.ink-scope.ink-doc-app .ink-topbar .draggable-mode-switch__thumb-label { color: var(--ink-text-primary); text-shadow: none; font-size: 12px; }
+.ink-scope.ink-doc-app .ink-topbar .draggable-mode-switch__label { font-size: 12px; color: var(--ink-text-secondary); }
+.ink-scope.ink-doc-app .ink-topbar .draggable-mode-switch__label.is-active { color: var(--ink-text-primary); }
 .ink-topbar [data-testid='draft-controls'] { display: flex; align-items: center; gap: 4px; padding: 0; font-size: 12px; }
 
 /* ---------------- home ---------------- */
@@ -646,3 +646,31 @@ html[data-theme='dark'] .ink-scope {
 .rn-switch-foot { position: sticky; bottom: 0; display: flex; align-items: center; gap: 14px; height: 38px; padding: 0 18px; font-size: 11px; color: var(--ink-text-tertiary); box-shadow: inset 0 1px 0 var(--studio-line); background: inherit; }
 .rn-switch-foot button { margin-left: auto; border: 0; background: none; font: inherit; font-size: 12px; color: var(--ink-text-secondary); cursor: pointer; }
 .rn-switch-foot button:hover { color: var(--ink-text-primary); }
+
+/* ---------------- block editor popovers (slash menu, block menu, text toolbar) in Inkwell's menu style ----------------
+   They are portaled to the body, outside .ink-scope, so the studio values are spelled out with a dark variant. */
+.ready-block-popover {
+  width: 300px; padding: 6px; border: 0; border-radius: 16px; color: #151518;
+  font: 14px/20px 'RN Inter', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  background: rgba(252, 250, 247, .8); -webkit-backdrop-filter: blur(22px) saturate(150%); backdrop-filter: blur(22px) saturate(150%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .88), inset 0 0 0 1px rgba(11, 11, 14, .10), 0 2px 5px rgba(10, 10, 20, .04), 0 14px 30px -20px rgba(10, 10, 30, .24);
+}
+html[data-theme='dark'] .ready-block-popover {
+  color: #f4f4f6; background: rgba(34, 33, 35, .84);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .13), inset 0 0 0 1px rgba(255, 255, 255, .10), 0 14px 32px -20px rgba(0, 0, 0, .6);
+}
+.ready-block-popover [role=listbox] { margin-top: 4px; max-height: 288px; }
+.ready-block-popover button { border-radius: 9px; padding: 5px 8px; font: inherit; }
+.ready-block-popover [role=option] { gap: 1px; min-height: 32px; justify-content: center; }
+.ready-block-popover [role=option] small { font-size: 12px; line-height: 16px; opacity: 1; color: rgba(11, 11, 14, .48); }
+html[data-theme='dark'] .ready-block-popover [role=option] small { color: rgba(255, 255, 255, .5); }
+.ready-block-popover button:hover, .ready-block-popover [aria-selected=true] { background: rgba(11, 11, 14, .075); }
+html[data-theme='dark'] .ready-block-popover button:hover, html[data-theme='dark'] .ready-block-popover [aria-selected=true] { background: rgba(255, 255, 255, .08); }
+.ready-block-popover [role=status] { margin: 6px 8px; font-size: 13px; color: rgba(11, 11, 14, .48); }
+.ready-block-popover.ready-block-toolbar { width: auto; max-width: 420px; gap: 2px; padding: 4px; border-radius: 14px; }
+.ready-block-popover.ready-block-toolbar button { height: 28px; padding: 0 8px; border-radius: 8px; white-space: nowrap; }
+.ready-block-popover.ready-block-toolbar [aria-pressed=true] { color: #bd3b0c; background: rgba(255, 90, 31, .10); }
+html[data-theme='dark'] .ready-block-popover.ready-block-toolbar [aria-pressed=true] { color: #ff9368; background: rgba(255, 106, 44, .13); }
+
+/* A confirmed draft is the normal state: keep it for assistive technology, show only pending or failed. */
+.ink-topbar-status.is-quiet { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

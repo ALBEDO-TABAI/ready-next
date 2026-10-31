@@ -61,7 +61,7 @@ export function DraftControls() {
   }
   // Lives in the document topbar: a quiet status, the drafts pill when there are drafts, and dropdown panels below it.
   return <div className="ink-draft-controls" data-testid="draft-controls">
-    {status && <span role="status" className={`ink-topbar-status${status.status === 'failed' ? ' is-error' : ''}`} data-testid="draft-status">{status.status === 'confirmed' ? '已持久确认' : status.status === 'pending' ? '等待确认' : `确认失败，内容已保留：${status.message}`}</span>}
+    {status && <span role="status" className={`ink-topbar-status${status.status === 'failed' ? ' is-error' : status.status === 'confirmed' ? ' is-quiet' : ''}`} data-testid="draft-status">{status.status === 'confirmed' ? '已持久确认' : status.status === 'pending' ? '等待确认' : `确认失败，内容已保留：${status.message}`}</span>}
     {status?.status === 'failed' && <button className="ink-topbar-btn" onClick={() => { void run(() => drafts.flush(activeId)) }}>重试确认</button>}
     {status?.conflict && <button className="ink-topbar-btn" onClick={() => { const draft = drafts.recovery.find(item => item.draftId === tabs.find(tab => tab.id === activeId)?.draftId); if (draft) void run(() => open(draft)) }}>查看版本冲突</button>}
     {drafts.recovery.length > 0 && <button className={`ink-topbar-btn${showList ? ' is-open' : ''}`} aria-expanded={showList} onClick={() => setShowList(!showList)}>未保存的草稿（{drafts.recovery.length}）</button>}
