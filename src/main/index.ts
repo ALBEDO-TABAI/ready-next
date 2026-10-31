@@ -1,3 +1,4 @@
+import { registerCalendarLinkageIPC } from './modules/calendar-linkage/ipc'
 import { ObjectRelationsService, registerObjectRelationsIPC } from './modules/object-relations/service'
 import { registerDocumentAnnotationsIPC } from './modules/document-annotations/ipc'
 import { setupDateMentions } from './modules/calendar-engine/date-mentions/runtime'
@@ -815,7 +816,9 @@ function setupGlobalIPC(): void {
   registerDocumentAnnotationsIPC(ipcMain, { pages: documentPages.service, ready: documentPages.ready,
     vault: new VaultService(new AppSettingsRepository(), { home: app.getPath('home'), userData: app.getPath('userData'), isPackaged: app.isPackaged }),
   })
-  registerCalendarLayersIPC(ipcMain, createCalendarLayersResolver({ pages: documentPages.service, writer: getDocumentWriteDependencies, database: documentDatabase }))
+  const calendarLayers = createCalendarLayersResolver({ pages: documentPages.service, writer: getDocumentWriteDependencies, database: documentDatabase })
+  registerCalendarLayersIPC(ipcMain, calendarLayers)
+  registerCalendarLinkageIPC(ipcMain, calendarLayers, () => getDatabase().calendar)
   chatGptOAuthService = setupSettingsIPC({
     onModelChanged: wakeRSSProcessing,
     onSettingChanged: (key) => {

@@ -1,3 +1,5 @@
+import { occurrenceRef } from '../../../../../shared/calendar-linkage'
+import { writeEventTransfer } from '../../linkage/transfer'
 import { CSSProperties, memo } from 'react';
 import { colorFamily, Occurrence } from '@shared/calendar';
 import { calendarOf, getState, isDark } from '../store';
@@ -31,9 +33,10 @@ export const Chip = memo(function Chip(p: ChipProps) {
   const declined = ev.attendees?.some((a) => a.self && a.rsvp === 'declined');
   const cls = ['chip', p.kind === 'allday' && 'allday', p.kind === 'dot' && 'dot', p.selected && 'selected', p.moving && 'moving', p.ghost && 'ghost',
     ev.status === 'tentative' && 'tentative', declined && 'declined', ev.transparency === 'transparent' && p.kind === 'timed' && 'free', p.clipL && 'clipL', p.clipR && 'clipR'].filter(Boolean).join(' ');
+  // Alt-drag keeps the native transfer separate from the calendar's move gesture.
   const title = ev.title || t('noTitle');
-  const down = (part: 'body' | 'n' | 's' | 'w' | 'e') => (e: React.PointerEvent) => { e.stopPropagation(); p.onDown?.(e, p.occ, part); };
-  const common = { 'data-key': p.occ.key, className: cls, style, onPointerDown: down('body'), onContextMenu: (e: React.MouseEvent) => { e.preventDefault(); e.stopPropagation(); p.onContext?.(e, p.occ); }, onDoubleClick: (e: React.MouseEvent) => { e.stopPropagation(); p.onDbl?.(p.occ); } };
+  const down = (part: 'body' | 'n' | 's' | 'w' | 'e') => (e: React.PointerEvent) => { e.stopPropagation(); if (e.altKey && part === 'body') return; p.onDown?.(e, p.occ, part); };
+  const common = { draggable: !p.ghost, onDragStart: (e: React.DragEvent) => { e.stopPropagation(); writeEventTransfer(e.dataTransfer, occurrenceRef(p.occ), title, p.occ.allDay) }, 'data-key': p.occ.key, className: cls, style, onPointerDown: down('body'), onContextMenu: (e: React.MouseEvent) => { e.preventDefault(); e.stopPropagation(); p.onContext?.(e, p.occ); }, onDoubleClick: (e: React.MouseEvent) => { e.stopPropagation(); p.onDbl?.(p.occ); } };
   if (p.kind === 'allday') {
     return <div {...common}><div className="ttl">{title}</div>{!p.occ.allDay && !p.occ.isMultiDay && <div className="tm" style={{ marginTop: 0, marginLeft: 4 }}>{timeOf(start, tz, h24)}</div>}{!p.clipL && <div className="rz w" onPointerDown={down('w')} />}{!p.clipR && <div className="rz e" onPointerDown={down('e')} />}</div>;
   }

@@ -3325,6 +3325,7 @@ interface ElectronAPI {
   linkPreview: { get(url: string): Promise<import('../../shared/fastcard').FastCardIPCResult<import('../../main/modules/link-preview').LinkPreview>> }
   rss: ElectronRSSAPI
   dateMentions: import('../../shared/calendar/date-mentions').DateMentionsAPI
+  calendarLinkage: import('../../shared/calendar-linkage').CalendarLinkageAPI
   calendarLayers: import('../../shared/calendar-layers').CalendarLayersAPI
   calendar: ElectronCalendarAPI
   skills: ElectronSkillsAPI

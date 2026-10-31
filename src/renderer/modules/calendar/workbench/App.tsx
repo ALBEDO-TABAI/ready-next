@@ -1,3 +1,5 @@
+import { ThisDay } from '../linkage/ThisDay'
+import { isoDate } from '../../../../shared/calendar/dates'
 import { useEffect, useRef, useState } from 'react'
 import { useStore, isDark, getState, setState, init, reload, toast } from './store'
 import { handleKey } from './commands'
@@ -21,7 +23,7 @@ export function App({active=true}:{active?:boolean}) {
   const root=useRef<HTMLDivElement>(null)
   const [hasActivated,setHasActivated]=useState(false)
   const activity=useRef({active:false,dirty:false})
-  const s=useStore(x=>({ready:x.ready,dark:isDark(x),view:x.prefs.gridView,sidebar:x.prefs.sidebar,panel:x.prefs.contextPanel,overlay:x.overlay,error:x.error,busy:x.busy}))
+  const s=useStore(x=>({anchor:x.anchor,days:x.prefs.daysPerPeriod,zone:x.prefs.primaryTimeZone,ready:x.ready,dark:isDark(x),view:x.prefs.gridView,sidebar:x.prefs.sidebar,panel:x.prefs.contextPanel,overlay:x.overlay,error:x.error,busy:x.busy}))
   const theme=useTheme(x=>x.theme),dark=useTheme(x=>x.resolvedTheme==='dark')
   useEffect(()=>setState(x=>({systemDark:dark,prefs:{...x.prefs,interfaceTheme:theme}})),[theme,dark])
   useEffect(()=>{
@@ -62,7 +64,7 @@ export function App({active=true}:{active?:boolean}) {
     {!s.ready ? <div className="calendar-load-state">{s.error||'正在读取日程…'}{s.error&&<button className="btn" onClick={()=>void init()}>重新读取</button>}</div> : <>
       <div className="app" data-view={s.view}>
         {s.sidebar&&<Sidebar/>}
-        <main className="main" data-liquid-scroll-root="calendar-workbench-main"><TopBar/>{s.view==='month'?<MonthGrid active={active}/>:<TimeGrid active={active}/>}</main>
+        <main className="main" data-liquid-scroll-root="calendar-workbench-main"><TopBar/>{s.view==='month'?<MonthGrid active={active}/>:<TimeGrid active={active}/>}{active&&s.view!=='month'&&s.days===1&&<ThisDay date={isoDate(s.anchor)} timeZone={s.zone}/>}</main>
         {s.panel&&<Panel/>}
         <Menus/>{s.overlay==='cmdk'&&<CommandMenu/>}{s.overlay==='settings'&&<Settings/>}{s.overlay==='goto'&&<GotoDialog/>}{s.overlay==='recurrence'&&<RecurrenceDialog/>}<ScopeDialog/><Toasts/>
         <ReadyCalendarActions active={active}/>

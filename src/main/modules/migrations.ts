@@ -4531,6 +4531,29 @@ const migrations: Migration[] = [
     CREATE TABLE fastcard_transfer_items (item_id TEXT PRIMARY KEY, operation_id TEXT NOT NULL REFERENCES fastcard_transfers(operation_id));
     CREATE TABLE fastcard_targets (library_id TEXT PRIMARY KEY, object_id TEXT NOT NULL);`)
   } },
+  { name: '153_calendar_card_schedules', up: (db) => {
+    db.exec(`CREATE TABLE calendar_card_schedules (
+      root TEXT NOT NULL, operation_id TEXT NOT NULL, event_id TEXT NOT NULL UNIQUE, input_json TEXT NOT NULL,
+      state TEXT NOT NULL CHECK(state IN ('pending','completed')), PRIMARY KEY(root,operation_id)
+    );
+    CREATE TRIGGER calendar_card_schedule_committed AFTER INSERT ON calendar_events BEGIN
+      UPDATE calendar_card_schedules SET state='completed' WHERE event_id=NEW.id;
+    END;
+    CREATE TRIGGER calendar_object_created AFTER INSERT ON objects
+    WHEN NEW.kind IN ('markdown','canvas') AND NEW.status='present' AND NEW.content_hash IS NOT NULL
+    BEGIN
+      INSERT INTO file_activity_events(id,object_id,path_at_event,workspace_root,event_type,source,weight,created_at)
+      VALUES(lower(hex(randomblob(16))),NEW.id,NEW.current_path,(SELECT root FROM workspaces WHERE id=NEW.workspace_id),
+        'external_change','watcher',1,CAST(CAST(NEW.mtime_ns AS REAL)/1000000 AS INTEGER));
+    END;
+    CREATE TRIGGER calendar_object_modified AFTER UPDATE OF content_hash ON objects
+    WHEN NEW.kind IN ('markdown','canvas') AND NEW.status='present' AND NEW.content_hash IS NOT NULL AND OLD.content_hash IS NOT NEW.content_hash
+    BEGIN
+      INSERT INTO file_activity_events(id,object_id,path_at_event,workspace_root,event_type,source,weight,created_at)
+      VALUES(lower(hex(randomblob(16))),NEW.id,NEW.current_path,(SELECT root FROM workspaces WHERE id=NEW.workspace_id),
+        'external_change','watcher',1,CAST(CAST(NEW.mtime_ns AS REAL)/1000000 AS INTEGER));
+    END;`)
+  } },
 ]
 
 /**

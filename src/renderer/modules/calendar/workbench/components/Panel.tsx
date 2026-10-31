@@ -1,7 +1,10 @@
+import { occurrenceRef } from '../../../../../shared/calendar-linkage'
+import { attachEvent } from '../../linkage/attachments'
+import { writeEventTransfer } from '../../linkage/transfer'
+import { openWebpageInBrowser } from '../../../browser/openWebpageInBrowser'
 import { EventLinks } from './EventLinks';
 import { findCalendarOccurrence } from '@shared/calendar/commands';
 import { searchCalendar } from '@shared/calendar/search';
-import { api, unwrap } from '../platform';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Search, PanelRight, Clock, ArrowRight, Users, Video, MapPin, Link2, AlignLeft, Bell, MoreHorizontal, Globe, Palette, Repeat, X, ChevronDown } from 'lucide-react';
 import { CalEvent, Occurrence, colorFamily, PALETTE, parseIsoDate, isoDate, startOfDayMs, toWall, fromWall, ymd, dayOf, parseRRule, Attendee } from '@shared/calendar';
@@ -163,9 +166,11 @@ function EventPanel({ occKey }: { occKey: string }) {
           <button className="ev-f" data-field="y" disabled={ro} onClick={menuAt('visibility')}>{ev.visibility === 'private' ? t('privateV') : ev.visibility === 'public' ? t('publicV') : t('defaultVisibility')}</button>
         </div>
         <div className="ev-r"><button className="ev-f" data-field="m" disabled={ro} onClick={menuAt('reminder')}><Bell size={18} /><span className="dim">{t('reminders')}</span></button></div>
-        {ev.location && <div className="ev-r ind"><button className="ev-f" onClick={()=>{const query=encodeURIComponent(ev.location!);const url=s.prefs.mapsProvider==='apple'?`https://maps.apple.com/?q=${query}`:s.prefs.mapsProvider==='osm'?`https://www.openstreetmap.org/search?query=${query}`:`https://www.google.com/maps/search/?api=1&query=${query}`;void unwrap(api().openLink(url)).catch(e=>toast(String(e)));}}>在地图中查看</button></div>}
-        {ev.conferenceUrl && <div className="ev-r ind"><button className="ev-f" onClick={()=>void unwrap(api().openLink(ev.conferenceUrl!)).catch(e=>toast(String(e)))}>加入会议</button></div>}
-        {ev.url && <div className="ev-r ind"><button className="ev-f" onClick={()=>void unwrap(api().openLink(ev.url!)).catch(e=>toast(String(e)))}>打开相关链接</button></div>}
+        <div className="ev-r ind"><button className="ev-f" draggable onDragStart={e => writeEventTransfer(e.dataTransfer, occurrenceRef(occ), ev.title, occ.allDay)} title="拖到文档或画板">拖出日程</button><button className="ev-f" onClick={() => void attachEvent(occurrenceRef(occ), ev.title, occ.allDay).catch(e => toast(String(e)))}>加入对话</button></div>
+        {[...new Set(`${ev.description || ''} ${ev.location || ''}`.match(/https?:\/\/[^\s<>"）)]+/g) || [])].map(url => <div className="ev-r ind" key={url}><button className="ev-f" onClick={() => void openWebpageInBrowser(url).catch(e => toast(String(e)))}>{url}</button></div>)}
+        {ev.location && <div className="ev-r ind"><button className="ev-f" onClick={()=>{const query=encodeURIComponent(ev.location!);const url=s.prefs.mapsProvider==='apple'?`https://maps.apple.com/?q=${query}`:s.prefs.mapsProvider==='osm'?`https://www.openstreetmap.org/search?query=${query}`:`https://www.google.com/maps/search/?api=1&query=${query}`;void openWebpageInBrowser(url).catch(e=>toast(String(e)));}}>在地图中查看</button></div>}
+        {ev.conferenceUrl && <div className="ev-r ind"><button className="ev-f" onClick={()=>void openWebpageInBrowser(ev.conferenceUrl!).catch(e=>toast(String(e)))}>加入会议</button></div>}
+        {ev.url && <div className="ev-r ind"><button className="ev-f" onClick={()=>void openWebpageInBrowser(ev.url!).catch(e=>toast(String(e)))}>打开相关链接</button></div>}
         {(ev.reminders ?? []).map((r, i) => (
           <div key={i} className="ev-r ind"><div className="ev-f"><span style={{ flex: 1 }}>{reminderLabel(r.minutes)}{r.method==='email'?' · 邮件（仅保留记录）':''}</span>
             {!ro && <button className="ibtn xs" onClick={() => patch({ reminders: ev.reminders!.filter((_, j) => j !== i) })}><X size={12} /></button>}</div></div>
