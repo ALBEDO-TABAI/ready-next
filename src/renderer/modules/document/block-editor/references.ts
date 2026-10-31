@@ -4,6 +4,9 @@ import { useWorkspace } from '../../../stores/useWorkspace'
 import { useDocTabs } from '../../../stores/useDocTabs'
 import { plainText } from './dom-inline'
 
+/** Host-owned paths; a file parent is expanded to its same-name folder by the page service. */
+export interface EditorLinkBase { filePath: string | null; parentPath: string | null }
+
 export interface ReferenceChoice { id: string; label: string; detail: string; text: string; reference: InlineReference }
 export function workspaceRoots(): string[] {
   const { workspaceRoot, pinnedFolders } = useWorkspace.getState()
@@ -21,13 +24,12 @@ export function linkPath(fromFile: string, toFile: string): string {
  * Wiki targets use the canonical form the link repair keeps: relative to the page's folder, computed from registry
  * paths. Inserting any other form would make Main rewrite the link after saving, adding a step to the undo history.
  */
-export async function wikiTarget(tabId: string | undefined, file: string): Promise<string> {
-  const page = tabId ? useDocTabs.getState().tabs.find(item => item.id === tabId)?.path : null
-  if (!page) return file.replace(/\.md$/i, '')
-  const [from, to] = await Promise.all([window.electronAPI.objects.resolvePath(page), window.electronAPI.objects.resolvePath(file)])
+export async function wikiTarget(filePath: string | null | undefined, file: string): Promise<string> {
+  if (!filePath) return file.replace(/\.md$/i, '')
+  const [from, to] = await Promise.all([window.electronAPI.objects.resolvePath(filePath), window.electronAPI.objects.resolvePath(file)])
   return linkPath(from.path, to.path).replace(/\.md$/i, '')
 }
-export async function findReferences(query: string, wiki: boolean, tabId?: string): Promise<ReferenceChoice[]> {
+export async function findReferences(query: string, wiki: boolean, filePath?: string | null): Promise<ReferenceChoice[]> {
   const choices: ReferenceChoice[] = []
   const addReady = (label: string, detail: string, ref: ReadyRef) => choices.push({ id: JSON.stringify(ref), label, detail, text: label, reference: { kind: 'ready', ref } })
   if (!wiki) {
@@ -50,7 +52,7 @@ export async function findReferences(query: string, wiki: boolean, tabId?: strin
       addReady(item.name, item.path, { kind: 'page', id: location.objectId })
       continue
     }
-    const path = await wikiTarget(tabId, item.path)
+    const path = await wikiTarget(filePath, item.path)
     if (/[[\]|\r\n]/.test(path)) continue
     const addWiki = (target: string, label: string) => choices.push({ id: target, label, detail: item.path, text: target, reference: { kind: 'wiki', target } })
     if (anchorQuery === undefined) addWiki(path, item.name)
@@ -72,18 +74,17 @@ export async function findReferences(query: string, wiki: boolean, tabId?: strin
   return choices.filter((choice, index) => choices.findIndex(other => other.id === choice.id) === index)
 }
 
-export async function openInlineReference(reference: InlineReference, tabId?: string) {
+export async function openInlineReference(reference: InlineReference, filePath?: string | null) {
   const { openReadyRef } = await import('../../workbench/open-ready-ref')
   if (reference.kind === 'ready') return openReadyRef(reference.ref, 'document')
   if (reference.kind === 'wiki') {
-    if (!tabId) throw new Error('尚未提供画板文件路径，无法打开相对页面链接')
+    if (filePath === undefined) throw new Error('尚未提供画板文件路径，无法打开相对页面链接')
     const [path, anchor] = reference.target.split('#', 2)
-    const tab = useDocTabs.getState().tabs.find(item => item.id === tabId)
     const file = /\.md$/i.test(path) ? path : `${path}.md`
     // Canonical targets are relative to this page's folder; a hand-written vault-relative link is the fallback.
     const roots = workspaceRoots()
-    const vault = roots.find(root => tab?.path?.startsWith(`${root.replace(/[/\\]+$/, '')}/`)) ?? roots[0]
-    const folder = tab?.path?.replace(/[/\\][^/\\]+$/, '')
+    const vault = roots.find(root => filePath?.startsWith(`${root.replace(/[/\\]+$/, '')}/`)) ?? roots[0]
+    const folder = filePath?.replace(/[/\\][^/\\]+$/, '')
     const candidates = file.startsWith('/') || /^[A-Za-z]:[\\/]/.test(file) ? [file]
       : [...new Set([folder, vault].filter((base): base is string => Boolean(base)).map(base => `${base}/${file}`))]
     let target: string | undefined

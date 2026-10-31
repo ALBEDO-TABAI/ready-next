@@ -232,3 +232,56 @@ test('C3 adding an attachment to a dirty canvas retains both contents and later 
     assert.equal(readFileSync(join(f.root, String(final.canvas.nodes[1].file)), 'utf8'), 'cached attachment')
   } finally { f.close() }
 })
+
+// M4-E3: real page service, canvas handle, disk readback and relation repository.
+test('M4-E3 canvas subpage is created in X and its link is committed through the node buffer', async () => {
+  const { DocumentPageService } = await import('../main/modules/document-pages/service')
+  const { NodeBuffer } = await import('../renderer/components/canvas/cards/node-buffer')
+  const { mkdirSync } = await import('node:fs')
+  const f = canvasFixture()
+  try {
+    mkdirSync(join(f.root, '项目'))
+    let opened = await f.service.create({ path: '项目/X.canvas', operationId: 'create', canvas: {
+      nodes: [{ ...textNode('one'), type: 'text', text: '/' }], edges: [], ready: { schemaVersion: 1, id: 'board' },
+    } })
+    const pages = new DocumentPageService(f.registry, { index: async () => {} })
+    const input = { type: 'create' as const, root: f.root, operationId: 'child', parentPath: join(f.root, '项目/X.canvas'), title: '子页', content: '子页正文' }
+    const receipt = await pages.operate(input)
+    assert.equal(receipt.path, join(f.root, '项目/X/子页.md'))
+    assert.equal(readFileSync(receipt.path!, 'utf8'), '子页正文')
+    assert.deepEqual(await pages.operate(input), receipt, 'retry creates no second page')
+    const node = opened.canvas.nodes[0]; assert.equal(node.type, 'text'); if (node.type !== 'text') throw new Error('fixture')
+    const buffer = new NodeBuffer(node, async commands => {
+      const written = await f.service.write({ ...opened, operationId: 'insert', expectedVersion: opened.version, commands })
+      assert.equal(written.state, 'completed')
+      opened = await f.service.read(opened.handleId)
+      return true
+    })
+    buffer.replace('[[X/子页]]'); await buffer.finish()
+    assert.equal(JSON.parse(readFileSync(join(f.root, '项目/X.canvas'), 'utf8')).nodes[0].text, '[[X/子页]]')
+  } finally { f.close() }
+})
+
+test('M4-E3 node wiki relations resolve from the canvas folder before the vault root', async () => {
+  const { mkdirSync, writeFileSync } = await import('node:fs')
+  const { ObjectLinkRepository } = await import('../main/modules/search-engine/object-links')
+  const f = canvasFixture()
+  try {
+    mkdirSync(join(f.root, '项目')); mkdirSync(join(f.root, '资料'))
+    const page = (path: string) => { const full = join(f.root, path); writeFileSync(full, '正文'); return f.registry.register(full).id }
+    const target = page('资料/某页.md'), neighbor = page('项目/同名.md')
+    page('同名.md') // root collision must not override the adjacent page
+    const rootTarget = page('根页面.md')
+    const h = await f.service.create({ path: '项目/X.canvas', operationId: 'create', canvas: {
+      nodes: [{ ...textNode('one'), type: 'text', text: '[[../资料/某页]] [[同名]] [[根页面]]' }],
+      edges: [], ready: { schemaVersion: 1, id: 'board' },
+    } })
+    const links = new ObjectLinkRepository(f.db).outgoing({ ref: { kind: 'canvas', id: h.objectId, node: 'one' } })
+    assert.equal(links.length, 3)
+    for (const [raw, id] of [['../资料/某页', target], ['同名', neighbor], ['根页面', rootTarget]]) {
+      const link = links.find(link => link.rawTarget === raw)
+      assert.ok(link, raw); assert.equal(link.sourceNodeId, 'one')
+      assert.equal(link.resolved, true, raw); assert.deepEqual(link.target, { objectId: id }, raw)
+    }
+  } finally { f.close() }
+})
