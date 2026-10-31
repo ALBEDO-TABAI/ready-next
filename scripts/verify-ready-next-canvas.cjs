@@ -98,11 +98,13 @@ async function main() {
     assert.match(fs.readFileSync(path.join(vault, 'X/成文.md'), 'utf8'), /中文成文验收/)
     await poll(() => readCanvas().nodes.filter(node => node.ready.kind === 'document').length === 2, 'Draft was not replaced by document card')
     await snapshot('03-composition-under-X')
-    // Close every document tab using its normal close control before transferring.
-    const closeButtons = page.locator('[data-workbench-mode-panel="document"] button[title="关闭"]')
-    assert.ok(await closeButtons.count(), 'Cannot find document tab close controls')
-    // The tab's close control can sit under the rail's new-document button; click the control itself.
-    while (await closeButtons.count()) await closeButtons.first().click({ force: true })
+    // Close the canvas with the close-document shortcut so the transfer happens while it is not open.
+    const canvasOpen = () => page.evaluate(() => (JSON.parse(localStorage.getItem('ready-doc-tabs-v2') || '{}').state?.tabs ?? []).some(tab => /\.canvas$/i.test(tab.path || '')))
+    for (let i = 0; i < 10 && await canvasOpen(); i++) {
+      await page.locator('[data-workbench-mode-panel="document"] .canvas-toolbar').first().click({ position: { x: 4, y: 4 } }).catch(() => {})
+      await page.keyboard.press(`${mod}+w`); await page.waitForTimeout(400)
+    }
+    assert.equal(await canvasOpen(), false, 'The canvas tab is still open before the FastCard transfer')
     const receipt = await page.evaluate(async objectId => {
       const item = { id: crypto.randomUUID(), kind: 'text', text: '浏览器 FastCard 文字', createdAt: Date.now(), source: { pageUrl: 'https://example.com', pageTitle: 'Example' } }
       const added = await window.electronAPI.browser.addFastCardItem(item)
