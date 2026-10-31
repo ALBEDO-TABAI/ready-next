@@ -1,62 +1,35 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 import test from 'node:test'
+import { JSDOM } from 'jsdom'
 import { readRendererStyles } from './utils/read-renderer-styles'
 
-function readWorkspaceFile(path: string): string {
-  return readFileSync(resolve(process.cwd(), path), 'utf8')
-}
-
-test('document canvas and rss canvas share one module surface background token', () => {
-  const styles = readRendererStyles()
-  const documentMode = readWorkspaceFile('src/renderer/pages/modes/DocumentMode.tsx')
-  const markdownEditor = readWorkspaceFile('src/renderer/components/document/MarkdownEditor.tsx')
-  const documentPanels = readWorkspaceFile('src/renderer/components/document/DocumentFloatingPanels.tsx')
-  const documentPanelCss = readWorkspaceFile('src/renderer/components/document/documentFloatingPanels.css')
-  const rssMode = readWorkspaceFile('src/renderer/pages/modes/RSSMode.tsx')
-  const rssFeed = readWorkspaceFile('src/renderer/components/rss/RSSFeed.tsx')
-  const previewBrowser = readWorkspaceFile('src/renderer/components/rss/PreviewBrowser.tsx')
-
-  assert.match(styles, /--workbench-module-surface-bg:/)
-  assert.match(
-    styles,
-    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\]\s*\{[\s\S]*?--workbench-module-surface-bg:\s*var\(--lg-material-panel\);/,
-  )
-
-  assert.match(documentMode, /background: 'var\(--workbench-module-surface-bg\)'/)
-  assert.match(documentMode, /workbench-canvas-shell document-workbench-canvas-shell/)
-  assert.match(documentMode, /className="document-workbench-body flex min-h-0 flex-1"/)
-  assert.match(markdownEditor, /className="flex-1 overflow-hidden flex" style=\{\{ background: 'transparent' \}\}/)
-  assert.match(documentPanels, /withProjection=\{false\}/)
-  assert.match(documentPanels, /blur=\{3\}/)
-  assert.match(documentPanelCss, /--ready-app-panel-glass-bg:\s*rgba\(241,\s*244,\s*249,\s*0\.96\);/)
-  assert.match(documentPanelCss, /\.document-floating-panel\.ready-app-liquid-panel \.ready-app-liquid-panel__lens \{[\s\S]*opacity:\s*0\.36;/)
-  assert.match(readWorkspaceFile('src/renderer/styles/rss-workspace.css'), /background: var\(--workbench-module-surface-bg\)/)
-  assert.match(rssMode, /background: 'var\(--workbench-module-surface-bg\)'/)
-  assert.match(rssFeed, /background: 'transparent'/)
-  assert.match(previewBrowser, /rss-preview-surface/)
-  assert.match(previewBrowser, /rss-preview-content/)
-  assert.match(previewBrowser, /background: 'var\(--workbench-module-surface-bg\)'/)
-  assert.match(previewBrowser, /background: 'transparent'/)
-  assert.match(
-    styles,
-    /html\[data-skin='liquid-glass'\] \.document-content-frame \{[\s\S]*background:\s*var\(--workbench-module-surface-bg\) !important;/,
-  )
-  assert.match(
-    styles,
-    /html\[data-skin='liquid-glass'\] \.document-workbench-canvas-shell \{[\s\S]*background:\s*var\(--workbench-module-surface-bg\) !important;/,
-  )
-  assert.match(
-    styles,
-    /html\[data-skin='liquid-glass'\] \.document-workbench-body \{[\s\S]*background:\s*var\(--workbench-module-surface-bg\) !important;/,
-  )
-  assert.match(
-    styles,
-    /html\[data-skin='liquid-glass'\] \.document-editor-surface,[\s\S]*\.document-preview-surface,[\s\S]*\.rss-feed-list \{[\s\S]*background:\s*transparent !important;/,
-  )
-  assert.match(
-    styles,
-    /\.rss-mode-shell \.rss-feed-sheet \{[\s\S]*background:\s*var\(--workbench-module-surface-bg\) !important;/,
-  )
+// Apply the shipped styles to the two surface hierarchies. JSDOM reports CSS
+// variable references, not painted pixels; real-window acceptance owns the latter.
+test('Inkwell has its own stage and paper surfaces while RSS retains its module surface', () => {
+  const dom = new JSDOM(`<html data-theme="dark" data-skin="liquid-glass"><head></head><body>
+    <div class="ink-scope ink-doc-app"><main class="ink-main"><div class="document-content-frame"><div class="document-preview-surface"></div></div></main></div>
+    <div class="rss-mode-shell"><div class="rss-feed-sheet"><div class="rss-feed-list"></div></div></div>
+    <div class="document-floating-panel ready-app-liquid-panel"><div class="ready-app-liquid-panel__lens"></div></div>
+  </body></html>`, { url: 'http://localhost' })
+  try {
+    const style = dom.window.document.createElement('style')
+    style.textContent = [readRendererStyles(), ...[
+      'src/renderer/styles/rss-workspace.css',
+      'src/renderer/components/document/documentFloatingPanels.css',
+      'src/renderer/modules/document/ink/ink.css',
+    ].map(path => readFileSync(path, 'utf8'))].join('\n')
+    dom.window.document.head.append(style)
+    const computed = (selector: string) => dom.window.getComputedStyle(dom.window.document.querySelector(selector)!)
+    assert.equal(computed('html').getPropertyValue('--workbench-module-surface-bg'), 'var(--lg-material-panel)')
+    assert.equal(computed('.ink-doc-app').background, 'var(--studio-stage)')
+    assert.equal(computed('.ink-main').background, 'var(--studio-paper)')
+    assert.equal(computed('.ink-doc-app').display, 'flex')
+    assert.equal(computed('.ink-main').display, 'flex')
+    assert.equal(computed('.document-content-frame').backgroundColor, 'rgba(0, 0, 0, 0)')
+    assert.equal(computed('.document-preview-surface').backgroundColor, 'rgba(0, 0, 0, 0)')
+    assert.equal(computed('.rss-feed-sheet').background, 'var(--workbench-module-surface-bg)')
+    assert.equal(computed('.rss-feed-list').backgroundColor, 'rgba(0, 0, 0, 0)')
+    assert.equal(computed('.ready-app-liquid-panel__lens').opacity, '0.36')
+  } finally { dom.window.close() }
 })

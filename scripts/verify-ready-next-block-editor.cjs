@@ -44,16 +44,14 @@ async function main() {
     await app.close()
     ;({ launched: app, window: page } = await launch())
     const enterDeadline = Date.now() + 30000
-    while (!await page.getByTestId('draft-controls').isVisible()) {
+    while (!await page.locator('.ink-doc-app').isVisible()) {
       assert.ok(Date.now() < enterDeadline, 'Document mode must become visible')
       await page.evaluate(() => window.dispatchEvent(new CustomEvent('ready:workbench-mode-change-request', {
         detail: { mode: 'document', placement: 'open', presentation: 'immediate' },
       })))
       await page.waitForTimeout(150)
     }
-    // The sidebar opens in the 页面 view; this flow opens the fixture from the file tree.
-    const filesView = page.getByRole('group', { name: '侧栏视角' }).getByRole('button', { name: '文件', exact: true })
-    if (await filesView.isVisible().catch(() => false) && await filesView.getAttribute('aria-pressed') !== 'true') await filesView.click()
+    // The outer sidebar is the file manager.
     const row = page.getByText(path.basename(file), { exact: true }).first()
     if (!await row.isVisible()) await page.getByText(path.basename(vault), { exact: true }).first().click()
     await row.click()

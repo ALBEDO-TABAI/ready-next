@@ -38,12 +38,12 @@ async function main() {
     }, vault)
     await app.close(); page = await launch()
     const deadline = Date.now() + 30000
-    while (!await page.getByTestId('draft-controls').isVisible()) {
+    while (!await page.locator('.ink-doc-app').isVisible()) {
       assert.ok(Date.now() < deadline, 'Document mode must open')
       await page.evaluate(() => window.dispatchEvent(new CustomEvent('ready:workbench-mode-change-request', { detail: { mode: 'document', placement: 'open', presentation: 'immediate' } })))
       await page.waitForTimeout(150)
     }
-    await page.getByRole('group', { name: '侧栏视角' }).getByRole('button', { name: '文件', exact: true }).click()
+    await page.locator('.ink-doc-app').waitFor({ state: 'visible' })
     const open = async name => {
       const row = page.getByText(name, { exact: true }).first()
       if (!await row.isVisible()) await page.getByText(path.basename(vault), { exact: true }).first().click()
