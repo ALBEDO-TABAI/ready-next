@@ -201,8 +201,9 @@ export function BufferedBlockEditor({ buffer, linkBase, content: displayedConten
     {(writeError || error) && <p role="alert">{writeError || error}</p>}
     {parsed.blocks.some(block => block.issue) && <p role="status">分栏格式需修复，其他段落仍可编辑。</p>}
     {segments.map((block, index) => renderBlock(block, String(index)))}
-    {/* The page tail: clicking below the last block continues the text, as in Inkwell. */}
-    <button type="button" className="ready-block-tail" onClick={() => {
+    {/* The page tail: clicking below the last block continues the text, as in Inkwell. The label keeps the empty-page
+        placeholder (CSS generated text) out of the button's accessible name. */}
+    <button type="button" className="ready-block-tail" aria-label="添加文字" onClick={() => {
       try {
         buffer.flush()
         const end = buffer.snapshot.content.length

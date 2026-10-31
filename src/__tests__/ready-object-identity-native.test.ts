@@ -143,6 +143,25 @@ test('C2/C8 the event window settles known-file changes fast and keeps a split m
   } finally { f.close() }
 })
 
+test('C2 a caller resolving the new path before the watcher batch closes still keeps the moved identity', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'Object identity')) return
+  const f=fixture()
+  try {
+    const { subscribeObjectMoves } = await import('../main/modules/object-service/events')
+    const a=join(f.root,'a.md'),b=join(f.root,'b.md');writeFileSync(a,'moved by another program');const id=f.registry.register(a).id
+    const moves:Array<{objectId:string;to:string}>=[];const stop=subscribeObjectMoves(f.db,event=>moves.push(event))
+    const eventWindow=new ObjectEventWindow(f.registry,async()=>{})
+    renameSync(a,b)
+    // The watcher has both halves queued (the batch waits for more events); the open tab asks for the new path first.
+    const settled=Promise.all([eventWindow.add(a),eventWindow.add(b)])
+    assert.equal(f.registry.register(b).id,id,'the new path keeps the object id')
+    assert.deepEqual(moves.map(move=>[move.objectId,move.to]),[[id,b]],'the move is published once')
+    await settled
+    assert.equal(f.registry.find(b)!.id,id);assert.equal(moves.length,1)
+    stop()
+  } finally { f.close() }
+})
+
 test('C2 path swaps, window boundaries and interrupted moves do not invent or steal identity', async (t) => {
   if (skipIfSqliteUnavailable(t, 'Object identity')) return
  const f=fixture();try{

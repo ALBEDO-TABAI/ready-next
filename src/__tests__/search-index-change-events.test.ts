@@ -1,4 +1,5 @@
 import { writeFileSync, unlinkSync } from 'node:fs'
+import { EventEmitter } from 'node:events'
 import { join } from 'node:path'
 import { fixture } from './utils/ready-object-fixture'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
@@ -36,14 +37,15 @@ function eventCapture(): {
 } {
   const sent: DocumentIndexChangedEvent[] = []
   const watcherFailures: DocumentWatcherFailedEvent[] = []
+  // A WebContents is an event emitter: watchers bind to its reload and destruction.
   const event = {
-    sender: {
+    sender: Object.assign(new EventEmitter(), {
       isDestroyed: () => false,
       send(channel: string, payload: DocumentIndexChangedEvent | DocumentWatcherFailedEvent) {
         if (channel === 'document:indexChanged') sent.push(payload as DocumentIndexChangedEvent)
         if (channel === 'document:watcherFailed') watcherFailures.push(payload as DocumentWatcherFailedEvent)
       },
-    },
+    }),
   } as unknown as IpcMainInvokeEvent
   return { event, sent, watcherFailures }
 }

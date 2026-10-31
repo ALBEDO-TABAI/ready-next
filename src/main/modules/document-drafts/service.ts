@@ -165,7 +165,8 @@ export class DocumentDraftService {
       throw draftError('invalid_canvas_path', '画板无法引用此路径，请使用不含 #、% 等特殊字符的名称或位置')
     }
     if (existsIgnoringCase(path)) throw collision(path)
-    const claimed = this.db.prepare("SELECT draft_id FROM document_drafts WHERE json_extract(finalize_json,'$.path')=? AND state<>'discarded'").get(path)
+    // Only drafts still on their way to disk claim a path; a finalized page may since have been renamed away.
+    const claimed = this.db.prepare("SELECT draft_id FROM document_drafts WHERE json_extract(finalize_json,'$.path')=? AND state NOT IN ('discarded','finalized')").get(path)
     if (claimed) throw collision(path)
     const operation = this.db.prepare("SELECT draft_id FROM document_drafts WHERE json_extract(finalize_json,'$.request.operationId')=?").get(request.operationId)
     if (operation) throw draftError('operation_conflict', 'operation id already belongs to a draft')

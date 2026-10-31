@@ -34,7 +34,7 @@ import { ObjectRegistry } from '../../object-service/registry'
 // `isInotifyExhaustionError` is imported directly because it's a pure
 // predicate over an `unknown` error — no module state, no I/O, no dep
 // injection benefit.
-import type { IpcMain } from 'electron'
+import type { IpcMain, WebContents } from 'electron'
 import { isInotifyExhaustionError } from '../file-watcher'
 import type { EngineDeps } from './engine-deps'
 import { publishDocumentIndexChanged, publishDocumentWatcherFailed } from './document-index-events'
@@ -51,6 +51,23 @@ export type WatcherGroupDeps = Pick<
   | 'createFileWatcher'
   | 'getFileWatcherRegistry'
 >
+
+/**
+ * A watcher belongs to the renderer that started it. A reload or a closed window releases it: the reloaded
+ * renderer starts its own watchers, and two watchers on one root would split a rename across two move batches
+ * (the object goes missing instead of moving). In-page and sub-frame navigations keep the watcher.
+ */
+function releaseWithRenderer(sender: WebContents, release: () => void): () => void {
+  const navigation = (details: { isMainFrame?: boolean; isSameDocument?: boolean }) => {
+    if (details.isMainFrame && !details.isSameDocument) release()
+  }
+  sender.on('did-start-navigation', navigation)
+  sender.once('destroyed', release)
+  return () => {
+    sender.removeListener('did-start-navigation', navigation)
+    sender.removeListener('destroyed', release)
+  }
+}
 
 interface SearchIPCResponse<T> {
   success: boolean
@@ -127,10 +144,14 @@ export const watcherGroup: IpcChannelGroup<WatcherGroupDeps> = {
           }
         }
 
-        const registered = deps.getFileWatcherRegistry().add({...result, close:async()=>{await result.close();await window.drain()}}, (failure) => {
+        const watchers = deps.getFileWatcherRegistry()
+        const unbind = releaseWithRenderer(event.sender, () => { void watchers.stop(result.id) })
+        const registered = watchers.add({...result, close:async()=>{unbind();await result.close();await window.drain()}}, (failure) => {
+          unbind()
           publishDocumentWatcherFailed(event.sender, failure)
         })
         if (!registered) {
+          unbind()
           return {
             success: false,
             error: 'file watcher stopped before registration completed',

@@ -21,6 +21,8 @@
 
 | 评估日期 | 任务 | 文件 | 总行数 | 本次新增 | 结论 | 判断与后续动作 | 状态 |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
+| 2026-10-31 | Inkwell 顶部标签栏、退役预览/编辑开关 | `src/renderer/pages/modes/DocumentMode.tsx` | 1057 | 净 +27 | 一般 | 标签栏与就地导航放在 `modules/document/ink/`（`InkTabStrip.tsx`、`layout-state.ts`），入口只多一层列容器和源码开关接线；开关组件已删除。复查分栏与阅读会话是否还要留在主入口。 | 已排期：2026-11-30 |
+| 2026-10-31 | M5-F PDF 来源页 | `src/preload/index.ts` | 1769 | 净 +1 | 一般 | 只加 `sourceAnnotations.pdf` 透传，锚点模块放在 `src/shared/`；复查按域拆分声明。 | 已排期：2026-11-30 |
 | 2026-10-31 | Inkwell 文档界面 | `src/renderer/pages/modes/DocumentMode.tsx` | 1030 | 净 -145 | 一般 | 删除标签栏及其分组、拖放、右键处理；新增界面放在 `modules/document/ink/`，入口只组合侧栏、顶栏与主页。复查分栏与阅读会话是否还要留在主入口。 | 已排期：2026-11-30 |
 | 2026-10-31 | M4-F 画板公共接线 | `src/main/index.ts` | 1276 | 净 +2 | 一般 | 入口只注册画板组合与退出清理；领域逻辑留在 board-engine/runtime。复查启动恢复与退出顺序。 | 已排期：2026-11-30 |
 | 2026-10-31 | M4-F 画板公共接线 | `src/preload/index.ts` | 1722 | 净 +23 | 一般 | 移除旧画板 API，增加新画板、成文、FastCard、链接预览透传；IPC 全项通过。复查按域拆分声明边界。 | 已排期：2026-11-30 |

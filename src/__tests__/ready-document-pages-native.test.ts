@@ -84,6 +84,20 @@ for (const external of [false, true]) test(`MOVE-LINKS ${external ? 'external mv
   }
 })
 
+test('a new untitled page can reuse the name of an earlier page that was renamed away', async t => {
+  if (skipIfSqliteUnavailable(t, 'Document pages')) return
+  const f = fixture()
+  try {
+    // Inkwell's flow: every new page starts as 未命名 and is renamed in place.
+    const first = await f.service.operate({ type: 'create', root: f.root, operationId: 'untitled-1', parentPath: f.root, title: '未命名', content: '' })
+    await f.service.operate({ type: 'rename', root: f.root, operationId: 'rename-1', objectId: first.objectId, title: '父页' })
+    const second = await f.service.operate({ type: 'create', root: f.root, operationId: 'untitled-2', parentPath: f.root, title: '未命名', content: '' })
+    assert.equal(second.path, join(f.root, '未命名.md'))
+    assert.notEqual(second.objectId, first.objectId)
+    assert.ok(existsSync(join(f.root, '父页.md')) && existsSync(join(f.root, '未命名.md')))
+  } finally { f.close() }
+})
+
 test('M3-P2 child creation, triplet rename/move, trash/restore and deletion retain identity and links', async t => {
   if (skipIfSqliteUnavailable(t, 'Document pages')) return
   const f = fixture()

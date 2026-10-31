@@ -5,6 +5,7 @@ import type { DatabaseConnection } from '../database/connection'
 import { ReadyRefSchema } from '../../../shared/ready-ref'
 import { readDocumentSource } from '../../../shared/document-operations'
 import { objectKind } from './schema'
+import { settleQueuedObjectEvents } from './pending-events'
 
 export interface ObjectRecord {
   id: string
@@ -91,6 +92,7 @@ export class ObjectRegistry {
   /** Registration is owned here; callers never mint IDs or assert existence from an event. */
   register(path:string):ObjectRecord {
     if (!isAbsolute(path)) throw new Error('Object path must be absolute')
+    settleQueuedObjectEvents(this.db)
     this.reconcile([path])
     const object = this.find(path)
     if (!object) throw new Error(`Object is not present: ${path}`)

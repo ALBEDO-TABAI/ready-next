@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs'
 import { publishObjectMoves } from './events'
+import { queueObjectEvents, releaseObjectEvents } from './pending-events'
 import { repairObjectLinks } from './link-repair'
 import { ObjectRegistry } from './registry'
 
@@ -16,6 +17,7 @@ export class ObjectEventWindow {
   add(path:string):Promise<void> {
     if(!this.paths.size)this.startedAt=Date.now()
     this.paths.add(path)
+    queueObjectEvents(this.registry.db,this)
     // Moves are paired inside one batch. A vanished or not yet registered path may be half of a move, so the batch
     // stays open for its other half; changes to known files settle fast (dated documents reach the calendar in < 1 s).
     if(!this.pairing&&(!existsSync(path)||!this.registry.find(path))){this.pairing=true;clearTimeout(this.maximum);this.maximum=undefined}
@@ -29,15 +31,24 @@ export class ObjectEventWindow {
   flush():void {
     clearTimeout(this.quiet);clearTimeout(this.maximum);this.maximum=undefined;this.pairing=false
     const paths=[...this.paths];const waiters=this.pending;this.paths.clear();this.pending=[]
+    releaseObjectEvents(this.registry.db,this)
     if(!paths.length)return
-    const run=this.tail.then(async()=>{
+    const settle=()=>{
       const indexedPaths=()=>this.registry.db.prepare("SELECT path FROM documents WHERE source_type='document'").all<{path:string}>().map(row=>row.path)
       const before=indexedPaths()
       const objectsBefore = this.registry.list()
       this.registry.reconcile(paths)
       publishObjectMoves(this.registry, objectsBefore)
       const after=new Set(indexedPaths())
-      await this.indexed(paths,before.filter(path=>!after.has(path)))
+      return before.filter(path=>!after.has(path))
+    }
+    // Identity settles as soon as the batch closes, so a later single-path registration sees the move; indexing still
+    // follows the previous batch. Inside an enclosing transaction the batch settles in order after it instead.
+    let removed:string[]|null=null,failure:unknown=null
+    if(!this.registry.db.inTransaction){try{removed=settle()}catch(error){failure=error}}
+    const run=this.tail.then(async()=>{
+      if(failure)throw failure
+      await this.indexed(paths,removed??settle())
       await repairObjectLinks(this.registry)
     })
     this.tail=run.then(()=>{for(const waiter of waiters)waiter.resolve()},error=>{for(const waiter of waiters)waiter.reject(error)})

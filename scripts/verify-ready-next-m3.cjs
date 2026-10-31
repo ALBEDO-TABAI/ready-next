@@ -153,8 +153,8 @@ async function main() {
     while (fs.readFileSync(parentFile, 'utf8') !== original && Date.now() < savedDeadline) await page.waitForTimeout(100)
     assert.equal(fs.readFileSync(parentFile, 'utf8'), original)
     await snapshot('04-sigkill-restored')
-    // Create an untitled document through the app shortcut.
-    await page.keyboard.press(`${mod}+t`)
+    // Create an untitled document from the tab bar (⌘T is ignored while the source editor has focus).
+    await page.getByRole('button', { name: '新建标签页', exact: true }).click()
     await setSource(true)
     await source.fill('子页草稿正文')
     await page.getByTestId('draft-status').filter({ hasText: '已持久确认' }).waitFor()

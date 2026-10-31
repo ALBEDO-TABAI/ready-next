@@ -146,7 +146,7 @@ async function main() {
     const pdfEntry = await page.evaluate(async ({ file, root }) => {
       const object = await window.electronAPI.objects.resolvePath(file)
       const uri = `ready://doc/file/${encodeURIComponent(object.objectId)}#${encodeURIComponent('pdf:' + JSON.stringify({ page: 1 }))}`
-      const result = await window.electronAPI.documentPages.operate({ type: 'create', root, operationId: 'pdf-source-entry', title: 'PDF 验收入口', content: `[打开 PDF](${uri})` })
+      const result = await window.electronAPI.documentPages.operate({ type: 'create', root, parentPath: root, operationId: 'pdf-source-entry', title: 'PDF 验收入口', content: `[打开 PDF](${uri})` })
       if (!result.ok) throw new Error(result.message)
       return result.value.path
     }, { file: pdfFile, root: vault })

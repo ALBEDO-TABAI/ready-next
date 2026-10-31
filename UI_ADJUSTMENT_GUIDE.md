@@ -48,8 +48,8 @@ BrowserView 是原生覆盖层。弹层、hover flyout 和模式切换问题先�
 ### Document
 
 - 页面：`src/renderer/pages/modes/DocumentMode.tsx`
-- 竖向标签：`src/renderer/components/document/DocumentVerticalTabRail.tsx`
-- 编辑/预览：`src/renderer/components/document/`
+- Inkwell 外壳（侧栏、顶部标签栏、顶栏、主页、弹层）：`src/renderer/modules/document/ink/`；标签栏与就地导航见 `InkTabStrip.tsx`、`layout-state.ts`
+- 页面视图与 Markdown 源码（源码开关在顶栏「…」菜单）：`src/renderer/components/document/`、`src/renderer/modules/document/page-ui/`
 - 状态：`src/renderer/stores/useDocTabs.ts`
 - Widget 主题与结构：`src/shared/document-widget-theme.ts`、`src/shared/document-widget-skeletons.ts`
 - 书本阅读组件：`src/renderer/components/document/book/`；分页、翻页和偏好：`src/renderer/modules/document/book/`

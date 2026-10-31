@@ -16,6 +16,7 @@ import { FileReadingSessionRepository } from '../main/modules/repositories/file-
 import { rebuildObjectIndex } from '../main/modules/search-engine/object-index-rebuild'
 import { writeDatabase } from '../shared/document-database'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+import { EventEmitter } from 'node:events'
 
 const range = { from: '2026-10-30', to: '2026-11-03', timeZone: 'Asia/Tokyo' }
 function fixture() {
@@ -109,7 +110,7 @@ test('C8 external writes reach the subscribed layer through real watcher, identi
   }, getFileWatcherRegistry: () => watchers })
   t.after(async () => { await watchers.stopAll(); group.dispose(); f.close() })
   let changed: (() => void) | undefined
-  const event = { sender: { isDestroyed: () => false, send: (channel: string) => { if (channel === 'document:indexChanged') changed?.() } } } as unknown as import('electron').IpcMainInvokeEvent
+  const event = { sender: Object.assign(new EventEmitter(), { isDestroyed: () => false, send: (channel: string) => { if (channel === 'document:indexChanged') changed?.() } }) } as unknown as import('electron').IpcMainInvokeEvent
   const start = async () => { const result = await handlers.get('document:startWatcher')!(event, { workspaceRoot: f.root }); assert.ok(result && typeof result === 'object' && 'success' in result && result.success, JSON.stringify(result)) }
   await start()
   if (process.env.READY_LAYER_TEST_POLLING === '1') { t.diagnostic('Alternate real polling backend; macOS FSEvents acceptance remains required'); await new Promise(resolve => setTimeout(resolve, 200)) }
