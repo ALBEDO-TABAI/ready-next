@@ -75,12 +75,14 @@ export interface ChatAttachment {
     | 'document-quote'
     | 'document-widget-target'
     | 'calendar-event'
+    | 'calendar-day'
     | 'rss-reference'
     | 'rss-item'
     | 'rss-source'
     | 'mcp-resource'
     | 'channel'
     | 'generated-image'
+  libraryResource?: import('../../../shared/ipc-contracts/agent-runtime').LibraryResourceSelection
   browserTabId?: string
   url?: string
   title?: string

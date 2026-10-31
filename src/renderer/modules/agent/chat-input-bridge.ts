@@ -19,6 +19,7 @@ export const READY_FOCUS_CHAT_INPUT_EVENT = 'ready:focus-chat-input'
 export const READY_WIDGET_MESSAGE_EVENT = 'ready:widget-message'
 
 export interface DocumentQuoteContext {
+  sourceRange?: { start: number; end: number }
   title: string
   path: string | null
   selection: string
@@ -300,13 +301,16 @@ export function addDocumentWidgetTargetReference(context: DocumentWidgetTargetCo
 }
 
 export async function addDocumentQuoteReference(context: DocumentQuoteContext): Promise<void> {
-  const selection = context.selection.trim()
-  if (!selection) return
+  const selection = context.selection
+  if (!selection.trim()) return
   const authority = captureComposerAuthority(useAgent.getState())
   let path = '', description: string | undefined
   if (context.path) {
     try { path = await documentReferencePath(context.path) }
-    catch (error) { description = `无法定位来源：${error instanceof Error ? error.message : String(error)}` }
+    catch (error) {
+      // silent-catch: preserve the reason on the attachment; sending uses the attachment-unavailable notice.
+      description = `无法定位来源：${error instanceof Error ? error.message : String(error)}`
+    }
   }
   if (!isComposerAuthorityCurrent(useAgent.getState(), authority)) return
   const attachment: ChatAttachment = {
@@ -319,11 +323,25 @@ export async function addDocumentQuoteReference(context: DocumentQuoteContext): 
     ext: '.quote',
     source: 'document-quote',
     documentTitle: context.title,
-    selection: selection.slice(0, 30_000),
+    selection,
     sectionTitle: context.sectionTitle || undefined,
     lineStart: context.lineStart || undefined,
     lineEnd: context.lineEnd || undefined,
   }
+  const { useDocTabs } = await import('../../stores/useDocTabs')
+  const state = useDocTabs.getState()
+  const matches = state.tabs.filter(tab => context.path ? tab.path === context.path : tab.id === (state.focusedPaneTabId || state.activeTabId))
+  if (matches.length === 1) {
+    attachment.tabId = matches[0].id
+    if (!matches[0].isDirty && (matches[0].objectId || matches[0].draftId)) {
+      const vault = await window.electronAPI.vault.get()
+      if (vault.status === 'ready') {
+        const { buildLibraryDocumentSelection } = await import('./libraryResourceSelection')
+        attachment.libraryResource = await buildLibraryDocumentSelection(attachment, matches[0], vault.root, undefined, context.sourceRange)
+      }
+    }
+  }
+  if (!isComposerAuthorityCurrent(useAgent.getState(), authority)) return
   useWorkspace.setState({ chatPanelVisible: true })
   useAgent.getState().addAttachments([attachment])
   window.dispatchEvent(new CustomEvent(READY_FOCUS_CHAT_INPUT_EVENT))

@@ -446,7 +446,7 @@ try {
         scopeId: freshScopeId, requestId, message: text,
         expectedAliasGeneration: 2, expectedMessageVisibilityEpoch: freshSurface.data.scopeEpoch,
         explicitRetry: { predecessorRunId: freshRunId, predecessorPresentationDigest: freshPresentation.data.presentationDigest },
-        ...(variant === 'resource' ? { resources: [{ kind: 'quoted_text', id: 'new-resource', name: 'new', text: 'new target' }] } : {}),
+        ...(variant === 'resource' ? { resources: [{ kind: 'calendar_day', id: 'new-resource', name: 'new', libraryId: 'a'.repeat(64), date: '2026-10-31', timeZone: 'UTC', categories: [], items: [] }] } : {}),
         userMessage: { id: requestId + '-message', content: text, timestamp: new Date().toISOString(),
           meta: { sourceKind: freshScope.sourceKind, sourceId: freshScope.sourceId, threadKey: freshScope.threadKey,
             direction: 'local-input', workbenchMode: 'document', actionAuthorizationMode: freshScope.meta?.actionAuthorizationMode || 'ask' },

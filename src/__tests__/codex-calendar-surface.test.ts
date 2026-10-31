@@ -46,7 +46,7 @@ test('invalid or oversized calendar windows are rejected', () => {
   assert.equal(ok.start, '2026-01-01')
 })
 
-test('calendar window becomes a structured resource without event bodies', async () => {
+test('calendar window becomes a Main-versioned structured resource without event bodies', async () => {
   const resolved = await resolveCodexExplicitResources({
     selections: [{
       kind: 'calendar_window',
@@ -56,6 +56,7 @@ test('calendar window becomes a structured resource without event bodies', async
       end: '2026-01-08',
     }],
     resolveSkill: () => null,
+    resolveLibrary: async () => ({ selection: { kind: 'calendar_window', id: 'w1', name: '本周', libraryId: 'a'.repeat(64), start: '2026-01-01', end: '2026-01-08' }, version: 'b'.repeat(64) }),
   })
   assert.equal(resolved.requestResources[0]?.kind, 'calendar_window')
   assert.equal(JSON.stringify(resolved.input).includes('会议纪要正文'), false)
@@ -86,4 +87,30 @@ test('conflicting calendar event target refuses update', async () => {
     () => dispatch('calendar.updateEvent', { id: 'other-event' }),
     (error: unknown) => error instanceof CodexProductActionError && error.code === 'product_action_calendar_event_conflict',
   )
+})
+
+for (const reason of ['vault_missing', 'vault_directory_missing', 'remote_scope']) test(`M7 calendar window sends without library: ${reason}`, async () => {
+  let libraryCalls = 0
+  const resolved = await resolveCodexExplicitResources({
+    selections: [{ kind: 'calendar_window', id: 'window', name: '本周', start: '2026-10-31', end: '2026-11-07' }],
+    resolveSkill: () => null,
+    resolveLibrary: async () => { libraryCalls++; throw new Error(reason) },
+  })
+  assert.equal(libraryCalls, 0)
+  assert.equal(resolved.requestResources[0].kind, 'calendar_window')
+  assert.equal(resolved.libraryResources.length, 0)
+  assert.match(JSON.stringify(resolved.input), /2026-10-31/)
+})
+
+test('M7 unavailable library item is marked without losing calendar context or authorizing reads', async () => {
+  const result = await resolveCodexExplicitResources({
+    selections: [
+      { kind: 'calendar_day', id: 'day', name: '这一天', libraryId: 'a'.repeat(64), date: '2026-10-31', timeZone: 'UTC', categories: [], items: [] },
+      { kind: 'calendar_window', id: 'window', name: '窗口', start: '2026-10-31', end: '2026-11-01' },
+    ], resolveSkill: () => null, resolveLibrary: async () => { throw new Error('library_resource_unavailable') },
+  })
+  assert.equal(result.libraryResources.length, 0)
+  assert.equal(result.requestResources.find(r => r.id === 'day')?.canRead, false)
+  assert.equal(result.requestResources.some(r => r.kind === 'calendar_window'), true)
+  assert.match(JSON.stringify(result.input), /重新选择/)
 })

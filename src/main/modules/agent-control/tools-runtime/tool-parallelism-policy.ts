@@ -1,3 +1,4 @@
+import { isLibraryReadTool } from '../codex-runtime/library-read-tools'
 import {
   FRAME_PATCH_EMITTING_TOOL_NAMES,
   isFramePatchEmittingToolName,
@@ -127,6 +128,7 @@ const READ_ONLY_SKILL_TOOL_NAMES = new Set([
 })()
 
 export function getToolResourceTag(toolName: string): ToolResourceTag {
+  if (isLibraryReadTool(toolName)) return { domain: 'document', accessMode: 'read' }
   const normalized = String(toolName || '').trim()
 
   if (normalized.startsWith('browser_')) {

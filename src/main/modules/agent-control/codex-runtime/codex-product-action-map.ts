@@ -1,4 +1,6 @@
+import { LIBRARY_READ_ACTIONS } from './library-read-tools'
 export const CODEX_PRODUCT_ACTION_MAP: Readonly<Record<string, readonly string[]>> = {
+  ...Object.fromEntries(Object.entries(LIBRARY_READ_ACTIONS).map(([tool, action]) => [tool, [action]])),
   document_read_section: ['document.readSection'],
   document_list_widgets: ['document.listWidgets'],
   document_insert_widget: ['document.insertWidget'],

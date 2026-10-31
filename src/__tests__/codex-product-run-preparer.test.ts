@@ -763,3 +763,30 @@ test('explicit retry freezes control, stable root, current seed, and no prior ar
   assert.notEqual(result.prepared.ingress.originUserMessageId, 'message-root')
   assert.equal(isPreparedCodexProductRun(result.prepared), true)
 })
+
+test('M7 prepared turns retain and validate exact library grants across serialization', async () => {
+  const { libraryResourceVersion, libraryGrantSchema, libraryTools } = await import('../main/modules/agent-control/codex-runtime/library-read-resources')
+  const grant = libraryGrantSchema.parse({ selection: { kind: 'board_selection', id: 'selected-board', name: 'Board', libraryId: 'a'.repeat(64), uri: 'ready://canvas/board', version: 'b'.repeat(64), nodeIds: ['one'] }, version: 'b'.repeat(64) })
+  const reference = libraryResourceVersion(grant)
+  const input = { ...base, libraryResources: [grant], resourceAdditionalContext: [reference], explicitResourceEnvelope: { input: [textUserInput(JSON.stringify({ resource: grant.selection, version: grant.version, readWith: libraryTools(grant.selection) }))], resourceRefs: [reference] }, ...createCodexToolFixture(['library_read_board']) }
+  const result = preparer.prepare(input)
+  assert.equal(result.ok, true)
+  if (!result.ok) assert.fail('prepare failed')
+  const restored = JSON.parse(JSON.stringify(result.prepared))
+  assert.equal(isPreparedCodexProductRun(restored), true)
+  assert.deepEqual(restored.libraryResources, [grant])
+  restored.libraryResources[0].selection.nodeIds.push('outside')
+  assert.equal(isPreparedCodexProductRun(restored), false)
+  assert.equal(preparer.prepare({ ...input, ...createCodexToolFixture(['ask_user_questions']) }).ok, false)
+})
+
+
+test('M7 library preparation failures ask for attachment reselection or a new context, never automatic service retry', async () => {
+  const { classifyCodexIngressPreparationError } = await import('../main/modules/agent-control/codex-runtime/codex-ingress-preparation-error')
+  const { mapBackendErrorToFriendly } = await import('../renderer/modules/agent/error-message-mapping')
+  for (const [message, kind] of [['library_resource_unavailable', 'attachment_unavailable'], ['library_read_tool_surface_missing', 'native_tool_surface_extension_required']]) {
+    const result = classifyCodexIngressPreparationError(new Error(message))
+    assert.equal(result.code, kind)
+    assert.notEqual(mapBackendErrorToFriendly({ errorKind: result.code }).retryStrategy, 'auto')
+  }
+})

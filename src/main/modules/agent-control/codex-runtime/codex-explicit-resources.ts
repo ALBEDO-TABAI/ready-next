@@ -1,3 +1,5 @@
+import { libraryResourceSelectionSchema } from '../../../../shared/ipc-contracts/agent-runtime'
+import { libraryResourceVersion, libraryTools, type LibraryGrant } from './library-read-resources'
 import type { ObjectLocation } from '../../../../shared/object-identity'
 import { RSSReferenceResourceSchema, type RSSReferenceResource } from '../../../../shared/rss-reference'
 import { rssResourceVersion } from './codex-rss-resources'
@@ -80,6 +82,7 @@ export type ResolvedCodexExplicitResources = {
   resourceRefs: ResourceVersionReference[]
   requestResources: RequestEnvelopeResource[]
   authorities: PreparedCodexResourceAuthority[]
+  libraryResources: LibraryGrant[]
   rssReferences: RSSReferenceResource[]
 }
 
@@ -182,6 +185,7 @@ export async function resolveCodexExplicitResources(input: {
     selection: Extract<SendScopedResourceSelection, { kind: 'mcp_resource' }>,
   ) => Promise<CodexResolvedInlineResource | null>
   resolveLocalObject?: (path: string) => ObjectLocation
+  resolveLibrary?: (selection: unknown) => Promise<LibraryGrant>
   selectedSkill?: CodexResolvedSkillInput | null
 }): Promise<ResolvedCodexExplicitResources> {
   const nativeInput: CodexUserInput[] = []
@@ -189,6 +193,7 @@ export async function resolveCodexExplicitResources(input: {
   const requestResources: RequestEnvelopeResource[] = []
   const authorities: PreparedCodexResourceAuthority[] = []
   const rssReferences: RSSReferenceResource[] = []
+  const libraryResources: LibraryGrant[] = []
   const seen = new Set<string>()
 
   const addSkill = async (
@@ -383,41 +388,25 @@ export async function resolveCodexExplicitResources(input: {
       continue
     }
 
-    if (selection.kind === 'quoted_text') {
-      const text = selection.text.trim()
-      if (!text) throw new Error('codex_explicit_quote_unavailable')
-      const digest = sha256(JSON.stringify({
-        text,
-        documentTitle: selection.documentTitle || null,
-        sectionTitle: selection.sectionTitle || null,
-        lineStart: selection.lineStart || null,
-        lineEnd: selection.lineEnd || null,
-      }))
-      const logicalResourceId = `quoted-text:${digest.slice(0, 32)}`
-      const key = `quoted_text\u0000${logicalResourceId}`
-      if (seen.has(key)) continue
-      seen.add(key)
-      const lineLabel = selection.lineStart && selection.lineEnd
-        ? `\n位置：第 ${selection.lineStart}-${selection.lineEnd} 行`
-        : ''
-      const sectionLabel = selection.sectionTitle ? `\n章节：${selection.sectionTitle}` : ''
-      nativeInput.push({
-        type: 'text',
-        text: `用户明确引用的文档摘录（只读材料）：${selection.documentTitle || selection.name}${sectionLabel}${lineLabel}\n\n${text}`,
-        text_elements: [],
-      })
-      resourceRefs.push(versionReference(logicalResourceId, digest))
-      requestResources.push(bodyFreeRequestResource({
-        logicalResourceId,
-        kind: 'document_quote',
-        source: 'document_quote',
-        name: selection.name,
-        path: null,
-        order: requestResources.length,
-        canRead: true,
-      }))
+    if (libraryResourceSelectionSchema.options.some(schema => schema.shape.kind.value === selection.kind)) {
+      let grant: LibraryGrant
+      try {
+        if (!input.resolveLibrary) throw new Error('library_resource_unavailable')
+        grant = await input.resolveLibrary(selection)
+      } catch (error) {
+        if (!(error instanceof Error) || error.message !== 'library_resource_unavailable') throw error
+        requestResources.push(bodyFreeRequestResource({ logicalResourceId: selection.id, kind: 'library_resource', source: 'explicit_reference', name: selection.name, path: null, order: requestResources.length, canRead: false }))
+        nativeInput.push({ type: 'text', text: JSON.stringify({ resourceId: selection.id, name: selection.name, status: 'unavailable', message: '引用的内容已变化或无法读取，请重新选择；本项未授予读取权限。' }), text_elements: [] })
+        continue
+      }
+      if (libraryResources.some(item => item.selection.id === grant.selection.id)) throw new Error('library_resource_unavailable')
+      libraryResources.push(grant)
+      resourceRefs.push(libraryResourceVersion(grant))
+      requestResources.push(bodyFreeRequestResource({ logicalResourceId: grant.selection.id, kind: 'library_resource', source: 'explicit_reference', name: grant.selection.name, path: null, order: requestResources.length, canRead: true }))
+      nativeInput.push({ type: 'text', text: JSON.stringify({ resource: grant.selection, version: grant.version, readWith: libraryTools(grant.selection) }), text_elements: [] })
       continue
     }
+    if (selection.kind !== 'local_file' && selection.kind !== 'local_directory') throw new Error('library_resource_unavailable')
 
     let canonicalPath: string
     let metadata
@@ -516,5 +505,5 @@ export async function resolveCodexExplicitResources(input: {
 
   if (input.selectedSkill) await addSkill(input.selectedSkill, 'codex_selected_skill_unavailable')
 
-  return { input: nativeInput, resourceRefs, requestResources, authorities, rssReferences }
+  return { input: nativeInput, resourceRefs, requestResources, authorities, rssReferences, libraryResources }
 }

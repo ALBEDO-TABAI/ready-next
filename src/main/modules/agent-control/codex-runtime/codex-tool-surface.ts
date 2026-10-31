@@ -4,6 +4,7 @@ import type { ToolDefinition } from '../tools-runtime/tool-definition'
 import { isToolStatePatchEmittingToolName } from '../contracts/skill-frame-patch-tool-names'
 import type { CodexDynamicToolSpec } from './codex-native-runtime'
 import { canonicalJson, digestCanonicalJson } from './codex-model-gateway-contract'
+import { isLibraryReadTool } from './library-read-tools'
 
 export type ReadyToolSurfaceEntry = Readonly<{
   name: string
@@ -576,11 +577,20 @@ export function resolveReadyToolTurnSnapshot(input: {
   resolutionInput: ReadyLiveToolResolutionInput
   frozenToolSurface?: ReadyToolSurface
 }): ReadyToolTurnSnapshot {
+  const envelope = input.resolutionInput.requestEnvelope
+  const hasLibraryResource = isRecord(envelope) && Array.isArray(envelope.resources)
+    && envelope.resources.some((resource) => (
+      isRecord(resource) && resource.kind === 'library_resource' && resource.canRead === true
+    ))
+  const includeForTurn = (definition: ToolDefinition) => (
+    !isLibraryReadTool(definition.name) || hasLibraryResource
+  )
   const listed = input.source.listDefaultToolDefinitionsForTurn(input.resolutionInput)
   const toolDefinitions = listed.filter((definition) => (
     !CODEX_ROOT_EXCLUDED_CONTROL_TOOLS.has(definition.name)
     && !isToolStatePatchEmittingToolName(definition.name)
     && (definition.domain !== 'skill' || definition.codexExecutionSafe === true)
+    && includeForTurn(definition)
   ))
   if (toolDefinitions.length === 0) {
     if (listed.some((definition) => isToolStatePatchEmittingToolName(definition.name))) {
@@ -599,7 +609,7 @@ export function resolveReadyToolTurnSnapshot(input: {
   const frozen = input.frozenToolSurface || buildReadyToolSurface({
     surfaceId: input.surfaceId,
     toolDefinitions: selectCodexRootToolDefinitions(
-      input.source.listCodexThreadToolDefinitions?.() || toolDefinitions,
+      (input.source.listCodexThreadToolDefinitions?.() || toolDefinitions).filter(includeForTurn),
     ),
   })
   assertReadyToolSurface(frozen)

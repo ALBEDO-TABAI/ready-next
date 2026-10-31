@@ -1,3 +1,4 @@
+import { productionLibraryReader } from '../library-read-production'
 import { join } from 'node:path'
 import { createBrowserTurnLease } from '../../../browser-engine/agent-browser-turn-lease'
 import { getActivePetWindowManager } from '../../../pet/active-pet-window-manager'
@@ -363,6 +364,7 @@ export function createRuntimeStart(deps: RuntimeStartDeps) {
                 : undefined,
               targets: product.prepared.productSurfaceTargets,
               rssReferences: product.prepared.rssReferences,
+              libraryRead: async (tool, args) => (await productionLibraryReader(input.database)).execute(tool, args, product.prepared.libraryResources ?? []),
               waitForRssAnalysisResult: product.prepared.actionObligations?.requirements.some((requirement) => (
                 requirement.domain === 'rss' && requirement.outcome === 'job_terminal_artifact'
               )),

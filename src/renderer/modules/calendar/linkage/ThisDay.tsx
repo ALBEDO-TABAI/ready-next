@@ -19,7 +19,7 @@ export function ThisDay({ date, timeZone }: DayInput) {
     return () => { disposed = true; off.forEach(stop => stop()) }
   }, [date, timeZone])
   return <section aria-label="这一天" style={{ padding: 12, maxHeight: '35%', overflow: 'auto', flexShrink: 0 }}>
-    <header><strong>这一天 · {date}</strong> <button className="btn sm" disabled={!summary} onClick={() => { try { attachDay(summary!) } catch (cause) { setError(String(cause)) } }}>加入对话</button></header>
+    <header><strong>这一天 · {date}</strong> <button className="btn sm" disabled={!summary} onClick={async () => { try { await attachDay(summary!); setError('') } catch (cause) { setError(String(cause)) } }}>加入对话</button></header>
     {error && <p role="alert">{error}</p>}
     {!summary && !error && <p role="status">正在读取…</p>}
     {summary?.items.length === 0 && <p>这一天还没有记录</p>}

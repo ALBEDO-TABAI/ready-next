@@ -1,3 +1,5 @@
+import { productionLibraryReader } from '../library-read-production'
+import { libraryTools } from '../library-read-resources'
 import { ObjectPresentationService } from '../../../object-service/presentation'
 import { ObjectRegistry } from '../../../object-service/registry'
 import { createHash } from 'node:crypto'
@@ -285,6 +287,10 @@ export function createIngressPrepare(deps: IngressPrepareDeps) {
       const explicitResources = await resolveCodexExplicitResources({
         resolveLocalObject: path => new ObjectPresentationService(new ObjectRegistry(rawDb)).resolve(path),
         selections: currentResourceSelections,
+        resolveLibrary: async selection => {
+          if (scope.sourceKind !== 'local') throw new Error('library_resource_unavailable')
+          return (await productionLibraryReader(input.database)).admit(selection)
+        },
         resolveSkill: (selection) => {
           const resolved = boundHost.resolveNativeSkillInput?.({
             skillId: selection.skillId,
@@ -468,6 +474,7 @@ export function createIngressPrepare(deps: IngressPrepareDeps) {
           externalReadAllowedToolNames: externalReadSlice?.allowedToolNames,
           explicitResourceAllowedToolNames: explicitAllowedToolNames,
           hasRSSResource: turnResources.rssReferences.length > 0,
+          libraryReadTools: turnResources.libraryResources.flatMap(grant => libraryTools(grant.selection)),
           workbenchMode: trustedEnvironment.workbenchMode,
           exclusiveAllowSet,
           browserAdmission,
@@ -797,6 +804,7 @@ export function createIngressPrepare(deps: IngressPrepareDeps) {
         externalReadSlice,
         resourceAuthorities: turnResources.authorities,
         rssReferences: turnResources.rssReferences,
+        libraryResources: turnResources.libraryResources,
         ...(executionPageRef
           ? { browserPageRef: executionPageRef }
           : {}),

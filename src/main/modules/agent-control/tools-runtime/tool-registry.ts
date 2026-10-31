@@ -1,3 +1,4 @@
+import { isLibraryReadTool, LIBRARY_READ_TOOL_NAMES, LIBRARY_READ_SCHEMAS, libraryReadToolSchemas } from '../codex-runtime/library-read-tools'
 import { existsSync, readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import type { ZodObject, ZodRawShape } from 'zod'
@@ -209,6 +210,7 @@ export interface ToolSchemaResolution {
 }
 
 const DOCUMENT_TOOL_NAMES = [
+  ...LIBRARY_READ_TOOL_NAMES,
   'document_new_tab',
   'document_open_tab',
   'document_switch_tab',
@@ -758,8 +760,8 @@ const GROUP_TOOL_PROVIDERS: Record<CapabilityGroupId, ToolRegistryProvider> = {
   document: {
     staticToolNames: DOCUMENT_TOOL_NAMES,
     getToolDefinitions: () => buildToolDefinitions('document', DOCUMENT_TOOL_NAMES),
-    getAnthropicTools: () => getDocumentAnthropicTools(),
-    getOpenAITools: () => getDocumentOpenAITools(),
+    getAnthropicTools: () => [...getDocumentAnthropicTools(), ...libraryReadToolSchemas('anthropic')],
+    getOpenAITools: () => [...getDocumentOpenAITools(), ...libraryReadToolSchemas('openai')],
   },
   file_management: {
     staticToolNames: FILE_MANAGEMENT_TOOL_NAMES,
@@ -1422,6 +1424,7 @@ export function getRegisteredToolNames(): Set<string> {
 export function resolveToolInputSchemaForExecution(
   toolName: string,
 ): ZodObject<ZodRawShape> | null {
+  if (isLibraryReadTool(toolName)) return LIBRARY_READ_SCHEMAS[toolName]
   const staticSchemas = getToolInputSchemas()
   const staticSchema = staticSchemas[toolName]
   if (staticSchema) return staticSchema

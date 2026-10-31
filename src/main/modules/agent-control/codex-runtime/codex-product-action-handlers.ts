@@ -1,3 +1,4 @@
+import { LIBRARY_READ_TOOL_NAMES, LIBRARY_READ_ACTIONS, type LibraryReadTool } from './library-read-tools'
 import { isRecurring } from '../../../../shared/calendar/model'
 import type { DatabaseManager } from '../../database'
 import type { Reminder } from '../../../../shared/calendar-types'
@@ -66,6 +67,7 @@ export type CodexProductSurfaceTargets = {
 
 export function createProductionProductActionHandlers(input: {
   database: DatabaseManager
+  libraryRead?: (tool: LibraryReadTool, args: Record<string, unknown>) => Promise<Record<string, unknown>>
   rss: CodexProductRssPorts
   pet: CodexProductPetPort
   requestRendererToolAction: RendererToolActionRequester
@@ -91,6 +93,11 @@ export function createProductionProductActionHandlers(input: {
   const targets = input.targets || {}
   return {
     async dispatch(action, args) {
+      const libraryTool = LIBRARY_READ_TOOL_NAMES.find(tool => LIBRARY_READ_ACTIONS[tool] === action)
+      if (libraryTool) {
+        if (!input.libraryRead) throw new CodexProductActionError('library_resource_unavailable')
+        return input.libraryRead(libraryTool, args)
+      }
       if (action.startsWith('document.')) {
         if (!input.documentRequester) {
           throw new CodexProductActionError('product_action_document_anchor_missing')
