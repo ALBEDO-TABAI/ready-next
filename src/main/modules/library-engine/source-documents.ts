@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { mkdir, readFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { basename, extname, join } from 'node:path'
 import { toReadyUri } from '../../../shared/ready-ref'
 import { readDocumentSource } from '../../../shared/document-operations'
 import { applyDocumentOperation, saveUserDocument, type DocumentWriteDependencies } from '../document-engine/document-write-service'
@@ -8,8 +8,12 @@ import { filename } from '../document-drafts/files'
 import { ObjectRegistry, isInside } from '../object-service/registry'
 import { LibraryHighlightService } from './highlight-service'
 import type { LibraryEngine } from './library-engine'
-import { exists, insideVault, sourceNoteContent } from './source-note'
-import { sourceHighlightCodec, type SourceDocument, type SourceSelection } from './source-adapters'
+import { exists, insideVault, isMissing, sourceNoteContent } from './source-note'
+import { publishFileAtomically } from '../document-engine/atomic-file-publish'
+import { anchorFileSchema, compact, type AnchorFile } from './highlight-anchors'
+import { parseHighlights } from './highlight-markdown'
+import { PdfSelectionSchema } from '../../../shared/pdf-source-anchor'
+import { pdfSelection, sourceHighlightCodec, type SourceDocument, type SourceSelection } from './source-adapters'
 
 export class SourceDocumentService {
   private tail: Promise<unknown> = Promise.resolve()
@@ -55,16 +59,57 @@ export class SourceDocumentService {
     this.registry.register(notePath)
     return { id, notePath }
   }
-  annotate(selection: SourceSelection) {
+  annotatePdf(raw: unknown) {
+    const input = PdfSelectionSchema.parse(raw)
     return this.serial(async () => {
-      const page = await this.ensureSource(selection.source)
-      const highlights = new LibraryHighlightService({ vaultRoot: () => this.root, findBook: async () => page }, {
-        write: input => applyDocumentOperation(input, this.writer), codec: sourceHighlightCodec(selection),
-      })
-      const context = { bookId: page.id, chapters: [{ title: selection.source.title, text: selection.text }] }
-      const before = await highlights.list(context)
-      return highlights.create({ ...context, expectedVersion: before.version, chapter: 0, from: selection.from, to: selection.to, color: 'yellow' })
+      this.registry.scan(this.root)
+      const object = this.registry.get(input.id)
+      if (!object?.current_path || object.status !== 'present' || object.identity_state === 'conflict' || extname(object.current_path).toLowerCase() !== '.pdf') throw new Error('PDF 不存在或身份冲突')
+      await insideVault(this.root, object.current_path)
+      const bytes = await readFile(object.current_path)
+      if (createHash('sha256').update(bytes).digest('hex') !== input.expectedHash) throw new Error('PDF 已变化，请重新打开后划线')
+      return this.annotateSource(pdfSelection(input, basename(object.current_path, extname(object.current_path))))
     })
+  }
+  annotate(selection: SourceSelection) { return this.serial(() => this.annotateSource(selection)) }
+  private async annotateSource(selection: SourceSelection) {
+    const page = await this.ensureSource(selection.source)
+    const outsideScope = new Set<string>(), pdfQuotes = new Map<string, { exact: string; prefix: string; suffix: string }>()
+    const codec = sourceHighlightCodec(selection, outsideScope, pdfQuotes)
+    // PDF links retain context in the source itself. Seed only missing cache entries before the shared merger runs.
+    if (selection.page) {
+      const blocks = parseHighlights(await readFile(page.notePath, 'utf8'), page.id, codec)
+      if (pdfQuotes.size) {
+        const cachePath = join(this.root, '.ready', 'anchors', `${page.id}.highlights.json`)
+        for (const directory of [join(this.root, '.ready'), join(this.root, '.ready', 'anchors')]) {
+          if (!await exists(directory)) await mkdir(directory)
+          await insideVault(this.root, directory)
+        }
+        let cache: AnchorFile = { version: 1, highlights: {} }
+        if (await exists(cachePath)) {
+          await insideVault(this.root, cachePath)
+          try {
+            const parsed = anchorFileSchema.safeParse(JSON.parse(await readFile(cachePath, 'utf8')))
+            if (parsed.success) cache = parsed.data
+          } catch (error) { if (!isMissing(error) && !(error instanceof SyntaxError)) throw error }
+        }
+        let changed = false
+        for (const { highlight: h } of blocks) {
+          const quote = pdfQuotes.get(h.id)
+          if (cache.highlights[h.id] || !quote || compact(quote.exact) !== compact(h.text) || h.location.status === 'malformed') continue
+          cache.highlights[h.id] = { chapter: h.chapter, from: h.from, to: h.to, quote, color: h.color, createdAt: Date.now(), updatedAt: Date.now() }
+          changed = true
+        }
+        if (changed) await publishFileAtomically(cachePath, JSON.stringify(cache, null, 2) + '\n')
+      }
+    }
+    const highlights = new LibraryHighlightService({ vaultRoot: () => this.root, findBook: async () => page }, {
+      write: input => applyDocumentOperation(input, this.writer), codec,
+    })
+    const context = { bookId: page.id, chapters: [{ title: selection.page ? `${selection.source.title} · 第 ${selection.page} 页` : selection.source.title, text: selection.text }] }
+    const before = await highlights.list(context)
+    const result = await highlights.create({ ...context, expectedVersion: before.version, chapter: 0, from: selection.from, to: selection.to, color: 'yellow' })
+    return { ...result, highlights: result.highlights.filter(h => !outsideScope.has(h.id)) }
   }
   /** Book adapter retains the original book identity, files and annotation behavior. */
   static books(engine: LibraryEngine, dependencies: ConstructorParameters<typeof LibraryHighlightService>[1] = {}) {

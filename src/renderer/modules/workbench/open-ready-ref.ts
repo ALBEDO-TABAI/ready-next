@@ -1,3 +1,5 @@
+import { create } from 'zustand'
+import { parsePdfAnchor, type PdfAnchor } from '../../../shared/pdf-source-anchor'
 import { useMentionNavigation } from '../calendar/workbench/layers/mention-navigation'
 import { requestCanvasNode } from '../canvas/navigation'
 import { rssReferenceFromReadyRef } from '../../../shared/rss-reference'
@@ -14,6 +16,8 @@ import { requestBookLocation } from '../library/reader/navigation-state'
 import { requestWorkbenchModeOpen } from './mode-transition'
 import { captureReferenceOrigin, rememberReferenceOrigin } from './reference-return'
 import { openInCurrentTab } from '../document/ink/layout-state'
+
+export const usePdfReference = create<{ target: { id: string; path: string; anchor: PdfAnchor } | null }>(() => ({ target: null }))
 
 /** All Ready reference entry points share validation and destination owners. */
 export async function openReadyRef(input: string | ReadyRef, fromMode?: WorkbenchMode): Promise<void> {
@@ -40,6 +44,16 @@ export async function openReadyRef(input: string | ReadyRef, fromMode?: Workbenc
     case 'file': {
       const location = await window.electronAPI.objects.locate(ref.id)
       if (!location) throw new Error('引用文档已不存在')
+      if (ref.kind === 'file' && ref.anchor?.startsWith('pdf:')) {
+        if (!/\.pdf$/i.test(location.path)) throw new Error('引用对象已不是 PDF')
+        const anchor = parsePdfAnchor(ref.anchor)
+        rememberReferenceOrigin(origin, 'document')
+        usePdfReference.setState({ target: { id: ref.id, path: location.path, anchor } })
+        useWorkspace.getState().selectFile(location.path)
+        useDocTabs.getState().openTab(location.path)
+        requestWorkbenchModeOpen('document')
+        return
+      }
       if (ref.kind === 'file' && ref.anchor?.startsWith('date-mention:')) {
         const target = await window.electronAPI.dateMentions.locate(ref)
         rememberReferenceOrigin(origin, 'document')

@@ -1319,6 +1319,7 @@ const documentImportAPI: import('../shared/document-import').DocumentImportAPI =
 }
 
 const sourceAnnotationsAPI: import('../main/modules/library-engine/source-document-ipc').SourceAnnotationsAPI = {
+  pdf: input => ipcRenderer.invoke('sourceAnnotations:pdf', input),
   rss: input => ipcRenderer.invoke('sourceAnnotations:rss', input),
   web: input => ipcRenderer.invoke('sourceAnnotations:web', input),
 }

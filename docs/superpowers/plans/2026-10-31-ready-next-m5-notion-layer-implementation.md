@@ -83,7 +83,7 @@ M5 尚未全部收口。2026-10-31 M5-F 核对结果：
 - C：`ObjectUIHost` 在 Workbench 挂载，速览/快速切换与 DocumentMode 的关系面板已接线；Main 的 ObjectRelations 注册已存在。
 - D：Main/preload 的文档标注注册、块编辑器的评论/模板/同步块入口已接线。本次修复与阅读划线缓存同名冲突：阅读定位缓存迁至 `.ready/anchors/<id>.highlights.json`；评论继续使用 `<id>.json`。阅读入口及评论准入共用一次迁移，旧缓存只移动一次，不留双读路径。
 - E：当前工作树未找到 Notion/Inkwell 导入服务或 `ready-library-import.test.ts`，没有可补接的模块。等待 M5-E 交付，不能宣称导入保真完成。
-- F：书、RSS、网页共用来源页生成与标注写入/合并逻辑；RSS 阅读选区与 BrowserMode 的 FastCard 来源标注入口已接通。网页捕获现存页签的真实选区、前后文和快照版本，页面换代拒绝保存。重复划线保留已有块身份；原文改写后保留旧摘录及旧版本引用。PDF 仅有来源建页适配，真实选区与页内回跳尚未接通。
+- F：书、RSS、网页共用来源页生成与标注写入/合并逻辑；RSS 阅读选区与 BrowserMode 的 FastCard 来源标注入口已接通。网页捕获现存页签的真实选区、前后文和快照版本，页面换代拒绝保存。重复划线保留已有块身份；原文改写后保留旧摘录及旧版本引用。PDF 选区与页内回跳由下述 PDF-SOURCE 合同接通；真实窗口结果仍待 Claude 验收。
 - 本次命令行结果：来源及书房/引用/导入/关联专项 22 项通过、零跳过；完整 verify:native 同批替代执行 458 项，455 通过、3 项文件监听因 `EMFILE` 失败、零跳过。失败来自 `calendar-layers-native`、`library-engine`、`ready-object-identity-native` 的真实监听，未改断言或将失败记作通过。Widget 同批替代执行 163 项全部通过。类型、IPC 对应、SQLite skip 规则、CSS reset 与改动文件 ESLint 通过。
 - `verify:ready-next-sources` 已提供真实窗口脚本：回环网页/订阅源、隔离 userData、realpath 临时资料库、书/RSS/网页划线、来源页预览、原文定位与高亮、重启回读。脚本仅完成语法检查，本沙箱未运行窗口验收；界面可用性与高亮效果须由 Claude 验证。
 - 缓存分离后，现有 `scripts/verify-ready-next-library-electron.cjs` 的两处旧缓存路径断言也需改为 `.highlights.json`。该脚本不在本次允许范围，未修改；新来源窗口脚本不依赖旧路径。
@@ -120,6 +120,10 @@ M5-D 实施补充：模板新建复用“保存到…”选择位置，再经页
 - 所有标注链接使用 ReadyRef，交给现有 open-ready-ref。精确定位必须核对原文，失效不能冒充成功。保存的摘录在脱机时仍可阅读，来源页明确注明原文不可用时无法回跳。
 - 同一来源写入串行，经共享文档写入服务检查版本并同步索引；未保存编辑只能返回待保存，不能发布已保存回执。重复及重叠划线沿现有区间合并规则处理，书房颜色、批注和定位行为保持不变。
 - 网页划线 IPC 只读取指定的现存浏览器页签，采集前后核对页面身份。任何 DOM 覆盖面先隐藏 BrowserView；本次采用不打开覆盖面的划线按钮，保存结果显示在浏览器工具栏。
-- PDF 阅读器已有文本层，但尚无导出版本绑定选区或消费页内范围的回跳入口。`PdfViewer.tsx`、`open-ready-ref.ts` 不在本次允许修改范围；本次交付 PDF 来源适配与建页，不伪造 PDF 划线/高亮。后续须同时接通真实选区与回跳消费者。
+- PDF-SOURCE：独立 PDF 的来源页仍放在 `文章/`，frontmatter 含 `ready_id`、`类型: PDF`、`title`、`作者`、`链接`、`加入`、`来源版本`（文件 SHA-256）及 `来源引用`（文件对象 ReadyRef，`pdf:` 锚点，固定第 1 页）。来源页身份只由文件对象 id 决定，不能由选中页、文件名或版本派生。
+- PDF 标注锚点使用文件 ReadyRef 的 `anchor = pdf:<JSON>`，JSON 为 `{ page, start, end, exact, prefix, suffix }`；页码从 1 开始，区间为该页文字层 textContent 的 UTF-16 半开区间，不能截断代理对；prefix/suffix 各取约 32 字符。页级引用仅含 `{ page }`。正文原文链接包含完整锚点，删除定位缓存后仍可回跳。
+- 选区限定一个已渲染页面；跨页、空白选区不能写入。Renderer 绑定本次 PDF 加载字节的 SHA-256，Main 解析请求、核对资料库内当前 PDF 对象与文件哈希后，复用来源服务和文档写入服务；文件已变化必须重新打开后划线。只在写入回执返回后提示成功，失败用 role=alert，待保存状态不能冒充落盘。
+- 合并只处理当前页，其他页的标注原样保留；相同页的重复/重叠划线复用已有块身份。回跳按对象 id 查当前路径，打开 PDF 并挂起目标直至文字层就绪；核对区间和引文，必要时使用引文与前后文在该页唯一重定位，不跨页猜测。找到后高亮准确区间约 2 秒；页已不存在、引文消失或多处匹配时保留原摘录，明确提示“已打开 PDF，但无法定位引文，请以来源页摘录为准”，不得高亮任意第一处。无文字层的扫描 PDF 不提供划线。
+- PDF-SOURCE 可执行验收：`ready-sources-native.test.ts` 通过真实 SQLite/临时资料库检查 PDF 建页、重复/重叠合并、页间隔离、文件及来源页改名移动、缓存删除/索引重建与关系不变；`ready-pdf-source-ui.test.tsx` 检查真实 DOM 选区、按钮请求、回跳与失效提示。`verify-ready-next-sources.cjs` 用现场生成的小 PDF 检查划线、来源页、原文高亮和重启回读，交由 Claude 运行，不将命令行组件测试称为窗口验收。
 
 可执行合同：`ready-sources-native.test.ts` 使用真实 SQLite 与 realpath 临时资料库验证四来源、重复合并、改名移动、重建索引及关系；原有 library-engine/highlights/quote 测试验证书房不回退；`ready-sources-ui.test.tsx` 验证 RSS 和网页划线调用与失败显示。`verify:ready-next-sources` 为 Claude 的隔离真实窗口验收入口，命令行通过不等于窗口通过。
