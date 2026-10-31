@@ -704,6 +704,9 @@ describe('BrowserTabLifecycleService', () => {
     let activeTabId: string | null = 'tab-0'
     const service = new BrowserTabLifecycleService({
       tabs: tabs as any,
+      buildTabPayload: (tab) => new BrowserTabMetaService({
+        tabs: new Map(), getActiveTabId: () => activeTabId, queueTabUpdate: () => undefined,
+      }).buildTabPayload(tab),
       getActiveTabId: () => activeTabId,
       setActiveTabId: (tabId) => {
         activeTabId = tabId
@@ -765,6 +768,9 @@ describe('BrowserTabLifecycleService', () => {
     let activeTabId: string | null = null
     const service = new BrowserTabLifecycleService({
       tabs,
+      buildTabPayload: (tab) => new BrowserTabMetaService({
+        tabs: new Map(), getActiveTabId: () => activeTabId, queueTabUpdate: () => undefined,
+      }).buildTabPayload(tab),
       getActiveTabId: () => activeTabId,
       setActiveTabId: (tabId) => {
         activeTabId = tabId
@@ -822,6 +828,9 @@ describe('BrowserTabLifecycleService', () => {
     let activeTabId: string | null = null
     const service = new BrowserTabLifecycleService({
       tabs: new Map<string, BrowserLifecycleTabRecord>(),
+      buildTabPayload: (tab) => new BrowserTabMetaService({
+        tabs: new Map(), getActiveTabId: () => activeTabId, queueTabUpdate: () => undefined,
+      }).buildTabPayload(tab),
       getActiveTabId: () => activeTabId,
       setActiveTabId: (tabId) => {
         activeTabId = tabId
@@ -866,6 +875,9 @@ describe('BrowserTabLifecycleService', () => {
     let nextId = 0
     const service = new BrowserTabLifecycleService({
       tabs,
+      buildTabPayload: (tab) => new BrowserTabMetaService({
+        tabs: new Map(), getActiveTabId: () => activeTabId, queueTabUpdate: () => undefined,
+      }).buildTabPayload(tab),
       getActiveTabId: () => activeTabId,
       setActiveTabId: (tabId) => { activeTabId = tabId },
       getNextTabId: () => `tab-${++nextId}`,

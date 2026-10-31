@@ -319,7 +319,9 @@ export const useBrowserTabs = create<BrowserTabsState>((set) => {
       }),
 
     addTab: (tab) =>
-      set((state) => commit(state, { tabs: [...state.tabs, tab], tabGroups: state.tabGroups })),
+      set((state) => state.tabs.some((existing) => existing.id === tab.id)
+        ? state
+        : commit(state, { tabs: [...state.tabs, tab], tabGroups: state.tabGroups })),
 
     // Insert a newly-opened tab right after its opener, inheriting the opener's group
     // (Phase 4). Appends when the opener is absent. commit() re-normalizes so the group

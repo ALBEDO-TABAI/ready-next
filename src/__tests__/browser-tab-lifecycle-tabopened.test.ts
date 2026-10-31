@@ -1,22 +1,30 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { EventEmitter } from 'node:events'
 import { describe, it } from 'node:test'
 
 import {
   BrowserTabLifecycleService,
   type BrowserLifecycleTabRecord,
 } from '../main/modules/browser-engine/tab-lifecycle-service'
+import { BrowserTabMetaService } from '../main/modules/browser-engine/tab-meta-service'
+import { BrowserVisibilityCommandState } from '../main/modules/browser-engine/visibility-command-state'
+import type { BrowserHostView } from '../main/modules/browser-engine/host-types'
+import { READY_BROWSER_BLANK_URL } from '../shared/browser-defaults'
 
 function makeMockHost() {
   const sent: Array<{ channel: string; data: Record<string, unknown> }> = []
   const tabs = new Map<string, BrowserLifecycleTabRecord>()
   let activeTabId: string | null = null
   let counter = 0
+  const metadata = new BrowserTabMetaService({ tabs, getActiveTabId: () => activeTabId, queueTabUpdate: () => {} })
   const host = {
     tabs,
     getActiveTabId: () => activeTabId,
     setActiveTabId: (tabId: string | null) => { activeTabId = tabId },
+    setSplitTabId: () => {},
+    observeRestoredTabId: (tabId: string) => { counter = Math.max(counter, Number(tabId.slice(4))) },
     getNextTabId: () => `tab-${++counter}`,
     getViewBounds: () => ({ x: 0, y: 0, width: 0, height: 0 }),
     shouldPresentHosts: () => false,
@@ -31,22 +39,8 @@ function makeMockHost() {
     sendToRenderer: (channel: string, data: unknown) => {
       sent.push({ channel, data: data as Record<string, unknown> })
     },
-    buildTabPayload: (tab: BrowserLifecycleTabRecord) => ({
-      id: tab.id,
-      url: tab.url,
-      title: tab.title,
-      domain: tab.domain,
-      favicon: tab.favicon,
-      owner: tab.owner,
-      required: tab.required,
-      activity: tab.activity,
-      lastAuditedAt: tab.lastAuditedAt,
-      active: tab.id === activeTabId,
-      loading: tab.loading,
-      canGoBack: tab.canGoBack,
-      canGoForward: tab.canGoForward,
-      error: tab.error,
-    }),
+    queueTabUpdate: () => {},
+    buildTabPayload: (tab: BrowserLifecycleTabRecord) => metadata.buildTabPayload(tab),
     emitTabMeta: () => {},
     logBrowserDiag: () => {},
     bindPopup: () => {},
@@ -60,7 +54,7 @@ function makeMockHost() {
     browserUserAgent: 'test-agent',
     useMock: true,
   }
-  return { host, sent, getActive: () => activeTabId }
+  return { host, sent, metadata, getActive: () => activeTabId }
 }
 
 describe('D1 (P1-b): createTab announces background tabs to the renderer tab strip', () => {
@@ -79,7 +73,7 @@ describe('D1 (P1-b): createTab announces background tabs to the renderer tab str
     assert.equal(getActive(), null, 'background create must not preempt the active tab')
   })
 
-  it('foreground create keeps legacy semantics: no tabOpened emission, active switches', async () => {
+  it('foreground create announces the active tab even when the caller does not update the renderer', async () => {
     const { host, sent, getActive } = makeMockHost()
     const service = new BrowserTabLifecycleService(host)
 
@@ -88,9 +82,62 @@ describe('D1 (P1-b): createTab announces background tabs to the renderer tab str
     assert.equal(getActive(), result.tabId, 'foreground create activates the tab (unchanged)')
 
     const opened = sent.filter((event) => event.channel === 'browser:tabOpened')
-    assert.equal(opened.length, 0, 'foreground path is renderer-driven today; no duplicate announcement')
+    assert.equal(opened.length, 1)
+    assert.equal(opened[0].data.id, result.tabId)
+    assert.equal(opened[0].data.active, true)
+    assert.equal(opened[0].data.activate, true)
   })
 })
+
+for (const url of ['http://127.0.0.1:18202/page.html', 'file:///tmp/ready-browser-tabs/page.html']) {
+  it(`restored tabs remain consistent after document-mode hide and foreground create: ${url}`, async () => {
+    const { host, sent, metadata } = makeMockHost()
+    const visibility = new BrowserVisibilityCommandState()
+    const shown: BrowserHostView[] = []
+    const service = new BrowserTabLifecycleService({
+      ...host,
+      useMock: false,
+      shouldPresentHosts: () => visibility.shouldPresentHosts(),
+      showHost: (view) => { shown.push(view) },
+      createHost: () => {
+        // Only Electron's view is substituted; registration, creation and list
+        // readback execute the production services against their shared records.
+        let loadedUrl = ''
+        const webContents = Object.assign(new EventEmitter(), {
+          setUserAgent: () => {},
+          setWindowOpenHandler: () => {},
+          loadURL: async (target: string) => { loadedUrl = target },
+          getURL: () => loadedUrl,
+        })
+        return { webContents } as unknown as BrowserHostView
+      },
+    })
+    assert.equal(service.registerDormantTabs({
+      tabs: [{ id: 'tab-1', url: READY_BROWSER_BLANK_URL, title: 'New Tab' }],
+      activeTabId: 'tab-1',
+      splitTabId: null,
+    }).success, true)
+    visibility.applyHide(1)
+    shown.length = 0
+
+    const result = await service.createTab(url)
+    assert.deepEqual(result, { success: true, tabId: 'tab-2' })
+    const listed = metadata.getTabList()
+    assert.deepEqual(listed.map((tab) => tab.id), ['tab-1', 'tab-2'])
+    assert.equal(listed.find((tab) => tab.active)?.id, result.tabId)
+    assert.equal(host.tabs.get('tab-2')?.view?.webContents.getURL(), url)
+    assert.equal(shown.length, 0, 'creating a tab must not expose the native host over the document')
+    assert.equal(sent.length, 1, 'the renderer must learn about the newly created tab')
+    assert.equal(sent[0].data.id, result.tabId)
+    assert.equal(sent[0].data.activate, true)
+
+    const background = await service.createTab(`${url}?background`, { background: true, owner: 'agent' })
+    assert.equal(background.success, true)
+    assert.equal(metadata.getTabList().find((tab) => tab.id === background.tabId)?.active, false)
+    assert.equal(metadata.getTabList().find((tab) => tab.active)?.id, result.tabId)
+    assert.equal(sent[1].data.activate, false)
+  })
+}
 
 describe('D1 renderer contract: activate:false must not steal focus', () => {
   // Structure contract (justified): the renderer hook wires zustand + RAF +
