@@ -21,6 +21,14 @@
 
 | 评估日期 | 任务 | 文件 | 总行数 | 本次新增 | 结论 | 判断与后续动作 | 状态 |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
+| 2026-10-31 | M7-A/B 结构化资源与只读工具 | `src/main/modules/agent-control/tools-runtime/tool-registry.ts` | 1588 | 净增（M7 只读工具登记） | 一般 | 只登记九个资料库只读工具及其仅在带资源轮次进入工具面的条件；登记表可按能力维度拆分。 | 已排期：2026-11-09 |
+| 2026-10-31 | M7-A/B 结构化资源与只读工具 | `src/main/modules/tools/tool-executor.ts` | 1505 | 净增（只读工具接线） | 一般 | 只加新只读工具的调用接线，不改现有工具；执行分派可按域拆分。 | 已排期：2026-11-09 |
+| 2026-10-31 | M7-A/B 结构化资源与只读工具 | `src/shared/ipc-contracts/agent-runtime.ts` | 1415 | 净增（资源 schema） | 健康 | 集中的 IPC 合同与 schema 声明，有类型检查与合同测试覆盖。 | 记录结论 |
+| 2026-10-31 | M7-A/B 复审修复 | `src/renderer/components/agent/ChatPanel.tsx` | 1404 | 净增（发送失败提示） | 一般 | 只捕获发送准备错误并走既有提示；复查发送编排是否移出面板组件。 | 已排期：2026-11-07 |
+| 2026-10-31 | M7-A/B 复审修复 | `src/renderer/components/document/MarkdownEditor.tsx` | 1162 | 净增（引用区间传递） | 一般 | 只改引用调用的 await、错误处理与精确区间；复查引用桥接是否独立成模块。 | 已排期：2026-11-07 |
+| 2026-10-31 | M7-A/B | `src/renderer/modules/agent/messageComposer.ts` | 1101 | 净增（资源序列化） | 一般 | 资源附件序列化可独立成模块。 | 已排期：2026-11-09 |
+| 2026-10-31 | M7-A/B | `src/main/modules/agent-control/codex-runtime/composition/ingress-prepare.ts` | 1019 | 净增（资源准入） | 一般 | 只接入资料库资源准入；准入步骤可按资源类型拆分。 | 已排期：2026-11-09 |
+| 2026-10-31 | M7-A/B | `src/main/modules/agent-control/codex-runtime/codex-product-run-preparer.ts` | 1012 | 999 → 1012 | 一般 | 只加资源冻结与恢复绑定；复查是否把资源绑定移到独立模块。 | 已排期：2026-11-09 |
 | 2026-10-31 | Inkwell 顶部标签栏、退役预览/编辑开关 | `src/renderer/pages/modes/DocumentMode.tsx` | 1057 | 净 +27 | 一般 | 标签栏与就地导航放在 `modules/document/ink/`（`InkTabStrip.tsx`、`layout-state.ts`），入口只多一层列容器和源码开关接线；开关组件已删除。复查分栏与阅读会话是否还要留在主入口。 | 已排期：2026-11-30 |
 | 2026-10-31 | M5-F PDF 来源页 | `src/preload/index.ts` | 1769 | 净 +1 | 一般 | 只加 `sourceAnnotations.pdf` 透传，锚点模块放在 `src/shared/`；复查按域拆分声明。 | 已排期：2026-11-30 |
 | 2026-10-31 | Inkwell 文档界面 | `src/renderer/pages/modes/DocumentMode.tsx` | 1030 | 净 -145 | 一般 | 删除标签栏及其分组、拖放、右键处理；新增界面放在 `modules/document/ink/`，入口只组合侧栏、顶栏与主页。复查分栏与阅读会话是否还要留在主入口。 | 已排期：2026-11-30 |

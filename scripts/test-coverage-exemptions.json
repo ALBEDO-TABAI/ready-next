@@ -817,6 +817,12 @@
       "reason": "Browser trusted-input guard coverage imports tools/browser-probe, whose browser-engine/ipc-handler value import registers the FastCard IPC module; that module reaches database.ts only when a handler runs. The tests use fake BrowserController targets and never register IPC handlers or open getDatabase/better-sqlite3, so host-Node coverage must remain active.",
       "since": "2026-10-30",
       "owner": "ready-next-gate-cleanup"
+    },
+    {
+      "path": "src/__tests__/codex-tool-surface-union.test.ts",
+      "reason": "Tool surface composition is tested with injected tool definitions and request envelopes; the library read tool names are imported only as constants. No test path opens getDatabase or better-sqlite3 (passes under plain Node).",
+      "since": "2026-10-31",
+      "owner": "ready-next-m7"
     }
   ]
 }

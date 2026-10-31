@@ -14,6 +14,7 @@ import { sourceNoteContent } from '../main/modules/library-engine/source-note'
 import { type LibraryResourceSelection, libraryResourceSelectionSchema } from '../shared/ipc-contracts/agent-runtime'
 import { ObjectLinkRepository } from '../main/modules/search-engine/object-links'
 import { textNode } from './utils/canvas-fixture'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 type DocumentSelection = Extract<LibraryResourceSelection, { kind: 'document_selection' }>
 function setup() {
@@ -42,7 +43,8 @@ function setup() {
   return { ...f, calendar, sources, reader, page, snapshot }
 }
 
-test('M7 admission rejects forged, ambiguous, cross-library, stale, unsupported-buffer, unidentified, out-of-range and malformed selections without disclosure or writes', async () => {
+test('M7 admission rejects forged, ambiguous, cross-library, stale, unsupported-buffer, unidentified, out-of-range and malformed selections without disclosure or writes', async t => {
+  if (skipIfSqliteUnavailable(t, 'M7 library resources')) return
   const f = setup()
   try {
     const selection = f.page('private.md', 'PRIVATE_FULL_BODY')
@@ -70,7 +72,8 @@ test('M7 admission rejects forged, ambiguous, cross-library, stale, unsupported-
   } finally { f.close() }
 })
 
-test('M7 actual model input carries identity, scope, version and read method, never selected body; frozen binding cannot be widened', async () => {
+test('M7 actual model input carries identity, scope, version and read method, never selected body; frozen binding cannot be widened', async t => {
+  if (skipIfSqliteUnavailable(t, 'M7 library resources')) return
   const f = setup()
   try {
     const selection = f.page('selected.md', 'SECRET_FULL_TEXT unique')
@@ -91,6 +94,7 @@ test('M7 actual model input carries identity, scope, version and read method, ne
 })
 
 test('M7 every read tool enforces resource authority, pagination, versions and no disk/database mutation', async t => {
+  if (skipIfSqliteUnavailable(t, 'M7 library resources')) return
   const f = setup()
   try {
     mkdirSync(join(f.root, 'rows'))
@@ -188,7 +192,8 @@ test('M7 every read tool enforces resource authority, pagination, versions and n
   } finally { f.close() }
 })
 
-test('M7 invalid calendar zones/dates, foreign paths and selection-body fields fail closed', async () => {
+test('M7 invalid calendar zones/dates, foreign paths and selection-body fields fail closed', async t => {
+  if (skipIfSqliteUnavailable(t, 'M7 library resources')) return
   const f = setup(), other = setup()
   try {
     const target = other.page('foreign.md', 'FOREIGN')
@@ -205,7 +210,8 @@ test('M7 invalid calendar zones/dates, foreign paths and selection-body fields f
 })
 
 
-test('M7 day preserves moved documents, tasks and reading; deleted and unreadable objects are individually unavailable', async () => {
+test('M7 day preserves moved documents, tasks and reading; deleted and unreadable objects are individually unavailable', async t => {
+  if (skipIfSqliteUnavailable(t, 'M7 library resources')) return
   const f = setup()
   try {
     const content = '---\ntitle: Moved page\ndate: 2026-10-31\n---\n- [ ] Finish [today](ready://calendar/day/2026-10-31)'
@@ -252,7 +258,8 @@ test('M7 day preserves moved documents, tasks and reading; deleted and unreadabl
   } finally { f.close() }
 })
 
-for (const extension of ['txt', 'markdown']) test(`M7 ${extension} renderer selection reads the exact saved text`, async () => {
+for (const extension of ['txt', 'markdown']) test(`M7 ${extension} renderer selection reads the exact saved text`, async t => {
+  if (skipIfSqliteUnavailable(t, 'M7 library resources')) return
   const f = setup()
   try {
     const { buildLibraryDocumentSelection } = await import('../renderer/modules/agent/libraryResourceSelection')
@@ -267,6 +274,7 @@ for (const extension of ['txt', 'markdown']) test(`M7 ${extension} renderer sele
 
 
 test('M7 file/link cards return card data without opening their targets', async t => {
+  if (skipIfSqliteUnavailable(t, 'M7 library resources')) return
   const fetch = t.mock.method(globalThis, 'fetch', async () => { throw new Error('unexpected_target_fetch') })
   const f = setup()
   try {
@@ -286,7 +294,8 @@ test('M7 file/link cards return card data without opening their targets', async 
   } finally { f.close() }
 })
 
-test('M7 relation fields preserve references and mark aggregates incomplete without reading targets', async () => {
+test('M7 relation fields preserve references and mark aggregates incomplete without reading targets', async t => {
+  if (skipIfSqliteUnavailable(t, 'M7 library resources')) return
   const f = setup()
   try {
     mkdirSync(join(f.root, 'rows'))
