@@ -203,7 +203,8 @@ html[data-theme='dark'] .note-preview-shell {
 }
 
 .note-preview-shell .note-preview-markdown-link::after {
-  content: '↗';
+  /* Decorative: empty alt text keeps the arrow out of the link's accessible name. */
+  content: '↗' / '';
   display: inline-block;
   margin-left: 2px;
   color: var(--rd-3);

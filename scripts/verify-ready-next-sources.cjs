@@ -70,15 +70,19 @@ async function main() {
     const directory = path.join(vault, folder)
     return fs.existsSync(directory) && fs.readdirSync(directory).filter(name => name.endsWith('.md')).map(name => path.join(directory, name)).find(file => fs.readFileSync(file, 'utf8').includes('^hl-'))
   }
-  const select = async (surface, selector) => {
-    await surface.locator(selector).first().evaluate(element => {
-      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT), node = walker.nextNode()
+  // Selects characters 1–6 of the first text in the surface, or the given words wherever they appear in it.
+  const select = async (surface, selector, words = null) => {
+    await surface.locator(selector).first().evaluate((element, words) => {
+      const walker = document.createTreeWalker(words ? element.closest('.rss-reader-body') ?? element : element, NodeFilter.SHOW_TEXT)
+      let node = walker.nextNode()
+      if (words) while (node && !node.textContent.includes(words)) node = walker.nextNode()
       if (!node || node.textContent.length < 6) throw new Error('Selection fixture missing')
-      const range = document.createRange(); range.setStart(node, 1); range.setEnd(node, 6)
+      const start = words ? node.textContent.indexOf(words) : 1
+      const range = document.createRange(); range.setStart(node, start); range.setEnd(node, start + (words ? words.length : 5))
       const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range)
       element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
       document.dispatchEvent(new Event('selectionchange'))
-    })
+    }, words)
   }
   try {
     await launch()
@@ -122,7 +126,8 @@ async function main() {
     // The reader can re-render right after opening (read state); select again until the menu sees the selection.
     const rssHighlight = page.getByRole('button', { name: '划线到来源页', exact: true })
     for (let attempt = 0; ; attempt++) {
-      await select(page, '.rss-reader-body [data-ready-reading-run]')
+      // The reader shows the article fetched from its link; the quote is its second paragraph.
+      await select(page, '.rss-reader-body [data-ready-reading-run]', '乙丙丁戊己')
       if (!await rssHighlight.isVisible()) await page.getByRole('button', { name: '引用', exact: true }).click()
       const deadline = Date.now() + 3000
       while (Date.now() < deadline && !await rssHighlight.isEnabled().catch(() => false)) await page.waitForTimeout(100)
@@ -151,7 +156,8 @@ async function main() {
       return result.value.path
     }, { file: pdfFile, root: vault })
     await openFile(pdfEntry)
-    await page.getByRole('link', { name: '打开 PDF', exact: true }).click()
+    // Links in an editable page follow on ⌘/Ctrl-click; a plain click places the caret.
+    await page.getByRole('link', { name: '打开 PDF', exact: true }).click({ modifiers: [process.platform === 'darwin' ? 'Meta' : 'Control'] })
     await poll(() => page.locator('[data-pdf-text-state="ready"] .react-pdf__Page__textContent').count().then(n => n > 0), 'PDF text layer missing')
     await page.getByRole('button', { name: '下一页', exact: true }).click()
     await select(page, '[data-page="2"] .react-pdf__Page__textContent')
@@ -166,19 +172,24 @@ async function main() {
     const saved = files.map(file => fs.readFileSync(file, 'utf8'))
     for (let i = 0; i < files.length; i++) {
       await openFile(files[i])
-      assert.ok((await page.locator('[data-ready-block-editor]:visible').first().textContent()).includes(i === 3 ? 'DF so' : '乙丙丁戊己'))
+      // The page body loads after the tab switches; wait for this page's quote.
+      await poll(() => page.locator('[data-ready-block-editor]:visible').first().textContent().then(text => text.includes(i === 3 ? 'DF so' : '乙丙丁戊己')), `Source page ${i} body missing`)
       await page.screenshot({ path: path.join(evidence, `source-${i}.png`) })
       await page.locator('[data-ready-block-editor]:visible').first().getByRole('link', { name: '原文', exact: true }).first().click()
       if (i === 0) await poll(() => page.locator('[data-book-location]').count().then(n => n > 0), 'Book return highlight missing')
       if (i === 1) await poll(() => page.evaluate(() => window.getSelection()?.toString().includes('乙丙丁戊己')), 'RSS return highlight missing')
+      // Electron does not apply text fragments to loadURL navigations; Ready highlights the quote itself.
       if (i === 2) await poll(() => app.evaluate(async ({ webContents }) => {
-        const target = webContents.getAllWebContents().filter(w => w.getURL().includes('/page')).at(-1)
+        const target = webContents.getAllWebContents().filter(w => w.getURL().includes('/page') && w.getURL().includes(':~:text=')).at(-1)
         if (!target) return false
+        const quoted = await target.executeJavaScript("(() => { const h = CSS.highlights.get('ready-source-quote'); return h ? [...h][0].toString() : '' })()").catch(() => '')
+        if (quoted !== '乙丙丁戊己') return false
         const pixels = (await target.capturePage()).toBitmap()
         let count = 0
-        for (let at = 0; at < pixels.length; at += 4) if (pixels[at] === 255 && pixels[at + 1] === 0 && pixels[at + 2] === 255) count++
+        // Bitmaps are BGRA; the amber highlight over white is about rgb(255, 229, 140).
+        for (let at = 0; at < pixels.length; at += 4) if (pixels[at] > 115 && pixels[at] < 170 && pixels[at + 1] > 205 && pixels[at + 2] > 240) count++
         return count > 20
-      }), 'Web text-fragment highlight missing')
+      }), 'Web quote highlight missing')
       if (i === 3) {
         await poll(() => page.locator('[data-page="2"] [data-ready-pdf-highlight]').evaluateAll(marks => marks.map(mark => mark.textContent).join('') === 'DF so' && marks.every(mark => {
           const style = getComputedStyle(mark), rect = mark.getBoundingClientRect()
@@ -190,7 +201,7 @@ async function main() {
     await app.close(); await launch()
     for (let i = 0; i < files.length; i++) {
       assert.equal(fs.readFileSync(files[i], 'utf8'), saved[i]); await openFile(files[i])
-      assert.ok((await page.locator('[data-ready-block-editor]:visible').first().textContent()).includes(i === 3 ? 'DF so' : '乙丙丁戊己'))
+      await poll(() => page.locator('[data-ready-block-editor]:visible').first().textContent().then(text => text.includes(i === 3 ? 'DF so' : '乙丙丁戊己')), `Source page ${i} body missing after restart`)
     }
     await page.locator('[data-ready-block-editor]:visible').first().getByRole('link', { name: '原文', exact: true }).first().click()
     await poll(() => page.locator('[data-page="2"] [data-ready-pdf-highlight]').allTextContents().then(parts => parts.join('') === 'DF so'), 'PDF return highlight missing after restart')

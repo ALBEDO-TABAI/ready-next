@@ -4,6 +4,7 @@ import { Icon } from './icons'
 import { InkPageIcon } from './InkPageIcon'
 import { goBack, goForward, useInkHistory, useInkLayout } from './layout-state'
 import { tip } from './overlay'
+import { returnFromReference, useReferenceReturn } from '../../workbench/reference-return'
 
 const MOD = /Mac|iPhone|iPad/i.test(navigator.platform) ? '⌘' : 'Ctrl+'
 const tabLabel = (tab: DocTab) => tab.kind === 'library' ? '阅读' : tab.title.replace(/\.(md|canvas)$/i, '') || '未命名'
@@ -21,6 +22,7 @@ export function InkTabStrip({ active, onNewTab }: { active: boolean; onNewTab():
   const home = useInkLayout(state => state.home)
   const sidebarOpen = useInkLayout(state => state.open)
   const { canBack, canForward } = useInkHistory()
+  const back = useReferenceReturn(state => state.destination === 'document' ? state.entry : null)
   const strip = useRef<HTMLDivElement>(null)
   const dragged = useRef<string | null>(null)
   const [dropAt, setDropAt] = useState<string | null>(null)
@@ -82,5 +84,9 @@ export function InkTabStrip({ active, onNewTab }: { active: boolean; onNewTab():
       })}
     </div>
     <button type="button" className="ink-tbar-icon ink-tbar-new" aria-label="新建标签页" {...tip('新建标签页', `${MOD}T`)} onClick={onNewTab}><Icon name="plus" size={16} /></button>
+    {/* After following a reference from another place, the way back sits at the end of the bar. */}
+    {back && <button type="button" className="ink-return-chip" aria-label={`返回 ${back.label}`} title={`返回 ${back.label}`} onClick={returnFromReference}>
+      <Icon name="chevronLeft" size={14} stroke={2} /><span>返回 {back.label}</span>
+    </button>}
   </div>
 }

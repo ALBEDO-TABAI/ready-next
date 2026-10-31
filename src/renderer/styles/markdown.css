@@ -604,7 +604,8 @@
 }
 
 .ready-agent-link:not(.ready-agent-citation)::after {
-  content: '↗';
+  /* Decorative: empty alt text keeps the arrow out of the link's accessible name. */
+  content: '↗' / '';
   display: inline-block;
   margin-left: 2px;
   color: var(--text-light);

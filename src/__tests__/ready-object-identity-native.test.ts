@@ -162,6 +162,32 @@ test('C2 a caller resolving the new path before the watcher batch closes still k
   } finally { f.close() }
 })
 
+test('C2 an external move is paired whichever path a caller resolves first, before any watcher event', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'Object identity')) return
+  const f=fixture()
+  try {
+    const { subscribeObjectMoves } = await import('../main/modules/object-service/events')
+    const moves:Array<{objectId:string;from:string;to:string}>=[];const stop=subscribeObjectMoves(f.db,event=>moves.push(event))
+    // New path first: the file tree refreshes before the identity watcher has queued anything.
+    const a=join(f.root,'a.md'),b=join(f.root,'b.md');writeFileSync(a,'first');const first=f.registry.register(a).id
+    renameSync(a,b)
+    assert.equal(f.registry.register(b).id,first,'the new path is the moved object')
+    assert.deepEqual(moves.map(move=>[move.objectId,move.from,move.to]),[[first,a,b]])
+    // Vanished path first: a tab resolves the old path (the object goes missing), then the new path appears.
+    const c=join(f.root,'c.md'),d=join(f.root,'d.md');writeFileSync(c,'second');const second=f.registry.register(c).id
+    renameSync(c,d)
+    assert.throws(()=>f.registry.register(c),/not present/)
+    assert.equal(f.registry.register(d).id,second,'a missing object is found again by its file identity')
+    assert.deepEqual(moves.at(-1) && [moves.at(-1)!.objectId,moves.at(-1)!.from,moves.at(-1)!.to],[second,c,d])
+    // Equal content alone never revives a missing object.
+    const e=join(f.root,'e.md');writeFileSync(e,'third');const third=f.registry.register(e).id
+    rmSync(e);assert.throws(()=>f.registry.register(e),/not present/)
+    const copy=join(f.root,'copy.md');writeFileSync(copy,'third')
+    assert.notEqual(f.registry.register(copy).id,third)
+    stop()
+  } finally { f.close() }
+})
+
 test('C2 path swaps, window boundaries and interrupted moves do not invent or steal identity', async (t) => {
   if (skipIfSqliteUnavailable(t, 'Object identity')) return
  const f=fixture();try{

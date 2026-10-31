@@ -6,6 +6,7 @@ import {
   BROWSER_LOCAL_MEDIA_UPLOAD_EXTENSIONS,
 } from '../../../shared/browser-local-media-upload'
 import { READY_LOCAL_MEDIA_DROP_SCHEME } from '../../../shared/browser-local-media-drop'
+import { buildWebQuoteRevealScript, textDirectiveFromUrl } from '../library-engine/web-quote-reveal'
 import type {
   RegisterDormantBrowserTabsRequest,
   RegisterDormantBrowserTabsResult,
@@ -544,6 +545,11 @@ export class BrowserTabLifecycleService {
       this.host.syncPageBackground(view)
       void view.webContents.executeJavaScript(buildLocalMediaDropBridgeScript(), true).catch((error) => {
         this.host.logBrowserDiag(`[browser-v3][local-media-drop][tab:${tabId}] inject failed: ${error instanceof Error ? error.message : String(error)}`)
+      })
+      // A source page's "原文" link carries a text directive that Electron does not apply; reveal the quote here.
+      const directive = textDirectiveFromUrl(view.webContents.getURL())
+      if (directive) void view.webContents.executeJavaScript(buildWebQuoteRevealScript(directive)).catch((error) => {
+        this.host.logBrowserDiag(`[browser-v3][quote-reveal][tab:${tabId}] failed: ${error instanceof Error ? error.message : String(error)}`)
       })
     })
 

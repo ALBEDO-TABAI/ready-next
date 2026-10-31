@@ -140,7 +140,8 @@ export function InkSidebar({ roots, visible, api = window.electronAPI.documentPa
       }} /> })
   }
   const openLocation = (kind: 'move' | 'restore', root: string, subject: { objectId: string; title: string; parentPath?: string }) => {
-    openPopover({ id: 'ink-location', anchor: { left: 0, top: 0, right: 0, bottom: 0 }, placement: 'center', modal: true, label: kind === 'move' ? '移动到…' : '恢复到…',
+    // The picker is itself the labelled dialog; the frame stays unnamed so there is one dialog, not two.
+    openPopover({ id: 'ink-location', anchor: { left: 0, top: 0, right: 0, bottom: 0 }, placement: 'center', modal: true,
       render: close => <div className="ink-menu" style={{ width: 440, padding: 8 }}>
         <SaveToPicker trees={trees.filter(tree => tree.path === root)} mode={kind} initialTitle={subject.title}
           excludeObjectId={kind === 'move' ? subject.objectId : undefined}

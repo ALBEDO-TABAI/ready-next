@@ -1,11 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { closeSync, openSync, readFileSync, readSync, realpathSync, statSync, readdirSync, lstatSync } from 'node:fs'
+import { closeSync, existsSync, openSync, readFileSync, readSync, realpathSync, statSync, readdirSync, lstatSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative } from 'node:path'
 import type { DatabaseConnection } from '../database/connection'
 import { ReadyRefSchema } from '../../../shared/ready-ref'
 import { readDocumentSource } from '../../../shared/document-operations'
 import { objectKind } from './schema'
 import { settleQueuedObjectEvents } from './pending-events'
+import { publishObjectMoves } from './events'
 
 export interface ObjectRecord {
   id: string
@@ -93,7 +94,9 @@ export class ObjectRegistry {
   register(path:string):ObjectRecord {
     if (!isAbsolute(path)) throw new Error('Object path must be absolute')
     settleQueuedObjectEvents(this.db)
-    this.reconcile([path])
+    const touched=this.reconcile([path])
+    // A single-path pass can complete a move (see reconcile); open tabs follow it unless an enclosing transaction owns it.
+    if(!this.db.inTransaction)publishObjectMoves(this,touched)
     const object = this.find(path)
     if (!object) throw new Error(`Object is not present: ${path}`)
     return object
@@ -118,7 +121,7 @@ export class ObjectRegistry {
     this.reconcile([...paths,...this.list().filter(row=>isInside(canonicalObjectPath(root),canonicalObjectPath(row.current_path??row.last_known_path))).map(row=>row.current_path??row.last_known_path)],false)
   }
   /** One complete event window; releases locations before assignment to support path swaps. */
-  reconcile(paths:readonly string[],expandDirectories=true):void {
+  reconcile(paths:readonly string[],expandDirectories=true):ObjectRecord[] {
     paths=paths.map(canonicalObjectPath).filter(path => !path.split(/[\\/]/).includes('.ready'))
     const before=this.list().filter(row => row.status !== 'trashed' && row.status !== 'deleted')
     const expanded=new Set(paths)
@@ -136,6 +139,16 @@ export class ObjectRegistry {
     const observed=new Map<string,Observation>()
     const missing=new Set<string>()
     for(const path of expanded) {const item=observe(path);if(item)observed.set(item.path,item);else missing.add(path)}
+    // A file seen where no object lives, whose device, inode and birth time match an object whose recorded path has
+    // vanished, is that object moved: the pass that sees the new path first pairs them, whether it is a watcher batch
+    // or a single-path registration that ran before the watcher noticed the move.
+    for(const item of observed.values()) {
+      if(item.links!==1 || item.inode==='0' || !item.birth || item.birth==='0' || before.some(row=>(row.current_path??row.last_known_path)===item.path))continue
+      for(const row of this.db.prepare("SELECT * FROM objects WHERE device=? AND inode=? AND birthtime_ns=? AND status IN ('present','missing')").all<ObjectRecord>(item.device,item.inode,item.birth)) {
+        const at=row.current_path??row.last_known_path
+        if(!observed.has(at) && !existsSync(at)) {missing.add(at);expanded.add(at)}
+      }
+    }
     const old=before.filter(row => expanded.has(row.current_path??row.last_known_path) || observed.has(row.current_path??row.last_known_path))
     const assigned=new Map<string,{item:Observation;id:string;conflict:boolean}>()
     const used=new Set<string>()
@@ -152,7 +165,8 @@ export class ObjectRegistry {
     for(const phase of ['inode','hash','embedded'] as const) {
       for(const item of observed.values()) {
         if(assigned.has(item.path))continue
-        const candidates=available().filter(row=>(phase==='embedded'||row.status==='present') && compatible(row,item) && (
+        // A missing object comes back only on full file identity (inode and a real birth time), never on equal content.
+        const candidates=available().filter(row=>(phase==='embedded'||row.status==='present'||(phase==='inode'&&row.status==='missing'&&!!row.birthtime_ns&&row.birthtime_ns!=='0')) && compatible(row,item) && (
           phase==='inode' ? item.links===1 && row.device===item.device && row.inode===item.inode && row.birthtime_ns===item.birth && item.inode!=='0'
           : phase==='hash' ? item.hash!==null && row.content_hash===item.hash && row.size===item.size
           : item.embedded!==null && row.id===item.embedded))
@@ -196,6 +210,7 @@ export class ObjectRegistry {
       }
       this.syncProjection()
     })
+    return old
   }
   captureLinks():void {
     this.db.exec(`UPDATE object_link_repairs SET source_hash=(SELECT content_hash FROM objects WHERE id=source_id) WHERE state='confirmed'`)

@@ -277,9 +277,11 @@ export default function DocumentMode({
     if (!workspace.sidebarVisible) workspace.toggleSidebar()
     await workspace.revealFile(node.path)
   }, [])
-  // Opening or switching a document leaves the home view.
+  // Opening or switching a document leaves the home view. Markdown source is a per-visit escape hatch: another tab or
+  // page opens in the page view again.
   useEffect(() => useDocTabs.subscribe((state, previous) => {
     if (state.activeTabId !== previous.activeTabId || state.tabs.length > previous.tabs.length) useInkLayout.getState().setHome(false)
+    if (state.activeTabId !== previous.activeTabId) setEditorMode('preview')
   }), [])
   useEffect(() => { void initializeDrafts().catch(reportDraftError); return watchDraftVault() }, [])
 

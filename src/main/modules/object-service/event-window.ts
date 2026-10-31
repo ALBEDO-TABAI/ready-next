@@ -36,9 +36,7 @@ export class ObjectEventWindow {
     const settle=()=>{
       const indexedPaths=()=>this.registry.db.prepare("SELECT path FROM documents WHERE source_type='document'").all<{path:string}>().map(row=>row.path)
       const before=indexedPaths()
-      const objectsBefore = this.registry.list()
-      this.registry.reconcile(paths)
-      publishObjectMoves(this.registry, objectsBefore)
+      publishObjectMoves(this.registry, this.registry.reconcile(paths))
       const after=new Set(indexedPaths())
       return before.filter(path=>!after.has(path))
     }

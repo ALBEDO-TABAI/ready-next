@@ -128,7 +128,8 @@ function highlightPdfRange(layer: Element, start: number, end: number): () => vo
     offset += length
     if (from >= to) continue
     const range = document.createRange(); range.setStart(node, from); range.setEnd(node, to)
-    const mark = document.createElement('span'); mark.dataset.readyPdfHighlight = 'true'
+    // pdf.js's "highlight appended" keeps the mark in the text flow (text layer spans are absolutely positioned).
+    const mark = document.createElement('span'); mark.className = 'highlight appended'; mark.dataset.readyPdfHighlight = 'true'
     // The text layer sits over the rendered page, so the mark has to stay translucent to keep the quote readable.
     Object.assign(mark.style, { backgroundColor: 'rgba(255, 196, 0, 0.42)', mixBlendMode: 'multiply', borderRadius: '2px', transition: 'background-color 400ms ease' })
     range.surroundContents(mark); marks.push(mark)
