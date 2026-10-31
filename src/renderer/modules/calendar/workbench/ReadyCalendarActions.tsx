@@ -8,7 +8,7 @@ import { appendToAgentInput } from '../../agent/chat-input-bridge'
 import { registerModuleAgentHandler } from '../../../utils/moduleAgentBridge'
 import { useCalendarSession } from '../../../stores/useCalendarSession'
 
-export function ReadyCalendarActions({active}:{active:boolean}) {
+export function ReadyCalendarActions({active,buttons=true}:{active:boolean;buttons?:boolean}) {
   const s=useStore(x=>({anchor:x.anchor,prefs:x.prefs,events:x.events,calendars:x.calendars,editing:x.editing,today:x.today,busy:x.busy}))
   const [panel,setPanel]=useState<'subscribe'|'quick'|'assistant'|null>(null)
   const [importPreview,setImportPreview]=useState<{ticket:string;fileName:string;calendars:number;events:number;possibleExamples:number}|null>(null),[skipExamples,setSkipExamples]=useState(false),[importing,setImporting]=useState(false)
@@ -87,7 +87,7 @@ export function ReadyCalendarActions({active}:{active:boolean}) {
   const next=weekEvents.find(o=>o.end>Date.now())
   const ask=(instruction:string)=>{appendToAgentInput(instruction);setPanel(null)}
   return <>
-    <div className="ready-calendar-actions"><button className="btn sm" onClick={()=>open('quick')}>快建</button><button className="btn sm" onClick={()=>open('subscribe')}>订阅</button><button className="btn sm" onClick={()=>open('assistant')}>助手</button><button className="btn sm" title="从独立日历迁入数据" onClick={()=>void prepareImport()}>迁入</button></div>
+    {buttons&&<div className="ready-calendar-actions"><button className="btn sm" onClick={()=>open('quick')}>快建</button><button className="btn sm" onClick={()=>open('subscribe')}>订阅</button><button className="btn sm" onClick={()=>open('assistant')}>助手</button><button className="btn sm" title="从独立日历迁入数据" onClick={()=>void prepareImport()}>迁入</button></div>}
     {importPreview&&<><div className="scrim dim"/><section className="ready-calendar-dialog" role="dialog" aria-label="迁入独立日历"><header><strong>迁入独立日历</strong></header><p>{importPreview.fileName}：{importPreview.calendars} 个分类，{importPreview.events} 条日程。</p><p>将保存为 Ready 本地日程；已经迁入的日程不会重复或被覆盖。</p>{importPreview.possibleExamples>0&&<label style={{display:'block',margin:'12px 0'}}><input type="checkbox" checked={skipExamples} onChange={e=>setSkipExamples(e.target.checked)}/> 跳过与内置示例同名且未修改的 {importPreview.possibleExamples} 条日程</label>}<button className="btn primary" disabled={importing} onClick={()=>void importStandalone()}>确认迁入</button> <button className="btn" disabled={importing} onClick={()=>setImportPreview(null)}>取消</button></section></>}
     {panel&&<><div className="scrim dim" onPointerDown={()=>setPanel(null)}/><section className="ready-calendar-dialog" role="dialog" aria-label={panel==='subscribe'?'订阅日历':panel==='quick'?'快速创建日程':'日程助手'} onKeyDown={e=>e.stopPropagation()}>
       <header><strong>{panel==='subscribe'?'订阅日历':panel==='quick'?'快速创建日程':'日程助手'}</strong><button className="btn sm" onClick={()=>setPanel(null)}>关闭</button></header>

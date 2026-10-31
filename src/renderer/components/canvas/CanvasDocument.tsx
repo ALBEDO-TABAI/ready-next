@@ -114,14 +114,14 @@ export default function CanvasDocument({ tab }: { tab: DocTab }) {
     }
   }
   return <div className="flex flex-col flex-1 min-h-0" data-testid="canvas-document">
-    <div className="flex gap-2 p-2" data-canvas-ui>
+    <div className="canvas-addbar" data-canvas-ui aria-label="添加卡片">
       <button onClick={() => add({ type: 'addNode', node: { ...geometry(), type: 'text', text: '新文字卡', ready: { kind: 'text' } } })}>添加文字卡</button>
-      <input aria-label="链接网址" value={link} onChange={event => setLink(event.target.value)} />
+      <input aria-label="链接网址" placeholder="https://" value={link} onChange={event => setLink(event.target.value)} />
       <button onClick={() => add({ type: 'addNode', node: { ...geometry(), type: 'link', url: link, ready: { kind: 'link' } } })}>添加链接卡</button>
       <select aria-label="文档卡来源" value={documentId} onChange={event => setDocumentId(event.target.value)}><option value="">选择文档</option>{pages.map(page => <option key={page.objectId} value={page.objectId}>{page.title}</option>)}</select>
       <button disabled={!documentId} onClick={() => { const page = pages.find(page => page.objectId === documentId)!; add({ type: 'addNode', node: { ...geometry(), type: 'file', file: page.path.slice(root.length + 1), ready: { kind: 'document', ref: { kind: 'page', id: page.objectId } } } }) }}>添加文档卡</button>
     </div>
-    {error && <p role="alert">{error}</p>}
+    {error && <p role="alert" className="canvas-addbar-error">{error.replace(/^Error:\s*/, '')}</p>}
     {scheduling && calendarSnapshot && <ScheduleCardDialog key={scheduling.id} objectId={opened.objectId} nodeId={scheduling.id} version={opened.version}
       title={scheduling.type === 'text' ? scheduling.text.slice(0, 120) : scheduling.ready.preview?.title || '卡片日程'} snapshot={calendarSnapshot}
       close={() => setScheduling(null)} saved={refreshCalendar} />}

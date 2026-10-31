@@ -67,7 +67,8 @@ export function App({active=true}:{active?:boolean}) {
         <main className="main" data-liquid-scroll-root="calendar-workbench-main"><TopBar/>{s.view==='month'?<MonthGrid active={active}/>:<TimeGrid active={active}/>}{active&&s.view!=='month'&&s.days===1&&<ThisDay date={isoDate(s.anchor)} timeZone={s.zone}/>}</main>
         {s.panel&&<Panel/>}
         <Menus/>{s.overlay==='cmdk'&&<CommandMenu/>}{s.overlay==='settings'&&<Settings/>}{s.overlay==='goto'&&<GotoDialog/>}{s.overlay==='recurrence'&&<RecurrenceDialog/>}<ScopeDialog/><Toasts/>
-        <ReadyCalendarActions active={active}/>
+        {/* Its buttons sit at the foot of the sidebar; with the sidebar hidden they would cover the grid. */}
+        <ReadyCalendarActions active={active} buttons={s.sidebar}/>
       </div>
       {s.error&&<div role="alert" className="calendar-save-status error">未保存：{s.error}</div>}
       {s.busy&&<div role="status" className="calendar-save-status">正在保存…</div>}

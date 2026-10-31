@@ -62,7 +62,7 @@ export function Settings() {
               <div className="set-line"><Drop value={p.upcomingHours} opts={[1, 2, 4, 8, 12, 24].map((n) => [n, `${t('hoursN', { n })} ${t('before')}`])} onChange={(v) => setPrefs({ upcomingHours: v })} /></div>
             </Sec>
             <Sec title={t('language')}>
-              <div className="set-line"><Drop<Locale> value={p.locale} opts={[['en', 'English'], ['zh-TW', '中文（繁體）'], ['zh-CN', '中文（简体）']]} onChange={(v) => setPrefs({ locale: v })} testid="set-locale" /></div>
+              <div className="set-line"><Drop<Locale> value={p.locale} opts={[['en', 'English'], ['zh-TW', '中文（繁體）'], ['zh-CN', '中文（简体）']]} onChange={(v) => setPrefs({ locale: v, localeChosen: true })} testid="set-locale" /></div>
               <div className="set-txt hint">{t('languageHint')}</div>
             </Sec>
             <Sec title={t('timeFormat')}>

@@ -113,8 +113,3 @@ export function t(k: Key, vars?: Record<string, string | number>): string {
   if (vars) for (const [a, b] of Object.entries(vars)) s = s.split(`{${a}}`).join(String(b));
   return s;
 }
-export function detectLocale(): Locale {
-  const l = (navigator.languages?.[0] || navigator.language || 'en').toLowerCase();
-  if (l.startsWith('zh')) return /tw|hk|mo|hant/.test(l) ? 'zh-TW' : 'zh-CN';
-  return 'en';
-}

@@ -570,3 +570,79 @@ html[data-theme='dark'] .ink-scope {
 .ink-scope .ink-main [aria-label='关联面板'] li button { border: 0; background: none; padding: 2px 6px; border-radius: 6px; font: inherit; font-size: 13px; color: var(--ink-text-primary); cursor: pointer; }
 .ink-scope .ink-main [aria-label='关联面板'] li button:hover { background: var(--ink-button-hovered-background); }
 .ink-scope .ink-main [aria-label='关联面板'] li small { padding-left: 6px; color: var(--ink-text-tertiary); }
+
+/* ---------------- databases: Inkwell's table, board and tools over Ready's database views ---------------- */
+.ink-scope .ink-page-database { width: calc(100% - 96px); max-width: none; margin: 0 auto 12px; }
+@container (max-width: 760px) { .ink-scope .ink-page .ink-page-database { width: calc(100% - 48px); } }
+.ink-scope .ready-database { --rdb-line: var(--ink-border-secondary-translucent); color: var(--ink-text-primary); font: 14px/21px var(--ink-font-sans-zh); }
+.ink-scope .ready-database .rdb-toolbar { flex-wrap: nowrap; gap: 2px; min-height: 32px; margin-bottom: 4px; border-bottom: 0; }
+.ink-scope .ready-database .rdb-tabs { gap: 1px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.ink-scope .ready-database .rdb-tabs::-webkit-scrollbar { display: none; }
+.ink-scope .ready-database .rdb-tabs button { height: 32px; padding: 6px 12px; border: 0; border-radius: 20px; font-size: 14px; font-weight: 500; line-height: 16.8px; color: var(--ink-text-secondary); }
+.ink-scope .ready-database .rdb-tabs button:hover { background: var(--ink-background-interactive-translucent); }
+.ink-scope .ready-database .rdb-tabs [aria-selected='true'] { background: var(--studio-accent-soft); color: var(--studio-accent-text); }
+.ink-scope .ready-database .rdb-toolbar > button { flex: none; height: 28px; padding: 0 10px; border-radius: 14px; font-size: 13px; color: var(--ink-text-secondary); white-space: nowrap; }
+.ink-scope .ready-database .rdb-toolbar > button:hover { background: var(--ink-background-interactive-translucent); color: var(--ink-text-primary); }
+.ink-scope .ready-database .rdb-toolbar > .rdb-new { margin-left: 4px; padding: 0 14px; background: var(--studio-inverse); color: var(--studio-on-inverse); font-weight: 500; }
+.ink-scope .ready-database .rdb-toolbar > .rdb-new:hover { background: var(--studio-inverse); color: var(--studio-on-inverse); filter: brightness(.9); }
+.ink-scope .ready-database .rdb-status { padding: 4px 2px 8px; font-size: 12px; color: var(--ink-text-tertiary); }
+.ink-scope .ready-database .rdb-scroll { border-block: 0; box-shadow: inset 0 1px 0 var(--rdb-line); }
+.ink-scope .ready-database .rdb-table-head { height: 36px; background: var(--studio-paper); color: var(--ink-text-secondary); box-shadow: inset 0 -1px 0 var(--rdb-line); }
+.ink-scope .ready-database :where([role='columnheader'], [role='cell']) { display: flex; align-items: center; height: 36px; padding: 0 8px; border: 0; box-shadow: inset -1px 0 0 var(--rdb-line); font-size: 14px; }
+.ink-scope .ready-database [role='columnheader'] { font-weight: 400; color: var(--ink-text-secondary); }
+.ink-scope .ready-database .rdb-table-row { box-shadow: inset 0 -1px 0 var(--rdb-line); }
+.ink-scope .ready-database .rdb-table-row:hover [role='cell'] { background: color-mix(in srgb, var(--studio-paper), var(--ink-text-primary) 2%); }
+.ink-scope .ready-database :where([role='columnheader'], [role='cell']):last-child { box-shadow: none; }
+.ink-scope .ready-database :where(.rdb-title, .rdb-cell) { padding: 0; height: 100%; display: flex; align-items: center; border-radius: 0; }
+.ink-scope .ready-database .rdb-title { font-weight: 500; }
+.ink-scope .ready-database .rdb-title:hover, .ink-scope .ready-database .rdb-cell:hover { background: none; text-decoration: underline; text-decoration-color: var(--ink-link-decoration-color); text-underline-offset: 3px; }
+.ink-scope .ready-database :where(.rdb-cell-select, .rdb-cell-multi_select, .rdb-cell-status, .rdb-tag) { display: inline-flex; align-items: center; width: auto; height: 20px; padding: 0 8px; border-radius: 10px; background: var(--ink-background-tertiary-translucent); font-size: 13px; }
+.ink-scope .ready-database .rdb-board { gap: 12px; padding: 4px 0 16px; }
+.ink-scope .ready-database .rdb-column { flex-basis: 260px; min-height: 120px; padding: 6px; border-radius: 14px; background: var(--studio-fill); }
+.ink-scope .ready-database .rdb-column h3 { padding: 4px 6px 10px; font-size: 13px; font-weight: 500; color: var(--ink-text-secondary); }
+.ink-scope .ready-database .rdb-card { margin-bottom: 8px; padding: 10px 12px; border: 0; border-radius: 10px; background: var(--studio-paper); box-shadow: rgba(25, 25, 25, .027) 0 4px 12px, rgba(25, 25, 25, .02) 0 1px 2px, rgba(42, 28, 0, .07) 0 0 0 1px; font-size: 14px; }
+.ink-scope .ready-database .rdb-card-field { font-size: 13px; color: var(--ink-text-secondary); }
+.ink-scope .ready-database .rdb-list .rdb-card { box-shadow: inset 0 -1px 0 var(--rdb-line); border-radius: 0; background: none; padding: 8px 4px; }
+.ink-scope .ready-database .rdb-gallery .rdb-card { padding-top: 48px; background: linear-gradient(var(--studio-fill), var(--studio-fill) 40px, var(--studio-paper) 40px); }
+.ink-scope .ready-database .rdb-calendar { border-radius: 12px; overflow: hidden; box-shadow: inset 0 0 0 1px var(--rdb-line); }
+.ink-scope .ready-database .rdb-weekday { font-size: 12px; color: var(--ink-text-tertiary); }
+.ink-scope .ready-database .rdb-day { border: 0; box-shadow: inset -1px -1px 0 var(--rdb-line); }
+.ink-scope .ready-database .rdb-day .rdb-card { padding: 2px 6px; border-radius: 6px; font-size: 12px; }
+.ink-scope .ready-database :where(.rdb-time-head, .rdb-time-track) { border: 0; box-shadow: inset -1px -1px 0 var(--rdb-line); }
+.ink-scope .ready-database .rdb-calculations { font-size: 12px; color: var(--ink-text-tertiary); }
+.ink-scope .ready-database :where(.rdb-editor, .rdb-settings) { border: 0; border-radius: 16px; background: var(--studio-glass); -webkit-backdrop-filter: blur(22px) saturate(150%); backdrop-filter: blur(22px) saturate(150%);
+  box-shadow: inset 0 1px 0 var(--studio-rim), inset 0 0 0 1px var(--studio-line), var(--studio-shadow); }
+.ink-scope .ready-database .rdb-actions button:last-child { background: var(--studio-inverse); color: var(--studio-on-inverse); border-radius: 14px; padding: 4px 14px; }
+.ink-scope .ready-database .rdb-empty { color: var(--ink-text-tertiary); font-size: 13px; }
+
+/* ---------------- ⌘K and quick look: Inkwell's search palette ---------------- */
+.rn-object-overlay { position: fixed; inset: 0; z-index: 200; display: flex; align-items: flex-start; justify-content: center; padding-top: 12vh; background: rgba(15, 15, 20, .25); -webkit-backdrop-filter: blur(5px); backdrop-filter: blur(5px); animation: rn-fade-in .14s ease-out; }
+.rn-object-panel { width: min(680px, 90vw); max-height: 72vh; overflow: auto; border-radius: 24px; color: var(--ink-text-primary); font-size: 14px; line-height: 20px;
+  background: var(--studio-glass); -webkit-backdrop-filter: blur(22px) saturate(150%); backdrop-filter: blur(22px) saturate(150%);
+  box-shadow: inset 0 1px 0 var(--studio-rim), inset 0 0 0 1px var(--studio-line), 0 30px 80px -30px rgba(10, 10, 30, .45);
+  animation: rn-pop-in .18s cubic-bezier(.22, 1, .36, 1); }
+@keyframes rn-fade-in { from { opacity: 0; } }
+@keyframes rn-pop-in { from { opacity: 0; transform: translateY(-6px) scale(.985); } }
+@media (prefers-reduced-motion: reduce) { .rn-object-overlay, .rn-object-panel { animation: none; } }
+.rn-object-panel:not(:has(.rn-switch-input)) { padding: 20px; }
+.rn-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.rn-switch-input { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 10px; height: 54px; padding: 0 18px; color: var(--ink-icon-secondary); box-shadow: inset 0 -1px 0 var(--studio-line); background: inherit; }
+.rn-switch-field { flex: 1; min-width: 0; height: 100%; border: 0; outline: none; background: transparent; font: inherit; font-size: 16px; color: var(--ink-text-primary); }
+.rn-switch-field::placeholder { color: var(--ink-text-tertiary); }
+.rn-switch-label { margin: 0; padding: 12px 18px 6px; font-size: 11px; font-weight: 500; letter-spacing: .035em; color: var(--ink-text-tertiary); list-style: none; }
+.rn-switch-list { margin: 0; padding: 4px 8px 8px; list-style: none; }
+.rn-switch-item { display: flex; align-items: center; gap: 4px; border-radius: 12px; }
+.rn-switch-item[aria-selected='true'] { background: var(--ink-background-interactive-translucent); }
+.rn-switch-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 10px; border: 0; background: none; font: inherit; color: var(--ink-text-primary); text-align: left; cursor: pointer; }
+.rn-switch-icon { display: flex; flex: none; color: var(--ink-icon-secondary); }
+.rn-switch-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rn-switch-type { flex: none; font-size: 12px; color: var(--ink-text-tertiary); }
+.rn-switch-peek { flex: none; height: 26px; margin-right: 6px; padding: 0 10px; border: 0; border-radius: 13px; background: none; font: inherit; font-size: 12px; color: var(--ink-text-tertiary); opacity: 0; cursor: pointer; }
+.rn-switch-item:hover .rn-switch-peek, .rn-switch-item[aria-selected='true'] .rn-switch-peek { opacity: 1; }
+.rn-switch-peek:hover { background: var(--ink-background-interactive-translucent); color: var(--ink-text-primary); }
+.rn-switch-empty { padding: 18px 10px; text-align: center; color: var(--ink-text-tertiary); list-style: none; }
+.rn-switch-note { margin: 0 18px 8px; font-size: 12px; color: var(--ink-text-secondary); }
+.rn-switch-note.is-error { color: var(--ink-red-text-secondary); }
+.rn-switch-foot { position: sticky; bottom: 0; display: flex; align-items: center; gap: 14px; height: 38px; padding: 0 18px; font-size: 11px; color: var(--ink-text-tertiary); box-shadow: inset 0 1px 0 var(--studio-line); background: inherit; }
+.rn-switch-foot button { margin-left: auto; border: 0; background: none; font: inherit; font-size: 12px; color: var(--ink-text-secondary); cursor: pointer; }
+.rn-switch-foot button:hover { color: var(--ink-text-primary); }

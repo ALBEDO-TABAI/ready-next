@@ -41,6 +41,11 @@ describe('search-engine query planner', () => {
     assert.match(indexed, /预算/)
   })
 
+  it('a single Chinese character searches as a prefix of the indexed bigrams and runs', () => {
+    assert.equal(parseSearchQuery('周').ftsMatch, '"周"*')
+    assert.equal(parseSearchQuery('A周').ftsMatch, '"A" "周"*')
+  })
+
   it('keeps letter/number runs glued to Chinese as their own tokens on both sides', () => {
     assert.equal(parseSearchQuery('M5验收目标').ftsMatch, '"M5" "验收" "收目" "目标"')
     assert.equal(parseSearchQuery('Q4计划').ftsMatch, '"Q4" "计划"')

@@ -7,7 +7,7 @@ import {
 import { api, unwrap } from './platform';
 import { findCalendarOccurrence, splitOccurrenceKey, rebaseCalendarHistory, type CalendarCommand, type CalendarSnapshot, type CalendarMutationReceipt, type CalendarDelta } from '@shared/calendar/commands';
 import { useTheme } from '../../../stores/useTheme';
-import { Locale, setLocale, detectLocale, t } from './i18n';
+import { Locale, setLocale, t } from './i18n';
 
 import type { CalendarLayer } from '../../../../shared/calendar-layers';
 
@@ -17,7 +17,7 @@ export interface Prefs {
   gridView: GridView; daysPerPeriod: number; densityZoomLevel: number; weekStartsOn: number;
   showWeekends: boolean; showDeclined: boolean; showWeekNumbers: boolean; format24HourTime: boolean;
   interfaceTheme: 'system' | 'light' | 'dark'; sidebar: boolean; contextPanel: boolean;
-  primaryTimeZone: string; additionalTimeZones: string[]; locale: Locale; defaultEventDuration: number;
+  primaryTimeZone: string; additionalTimeZones: string[]; locale: Locale; localeChosen?: boolean; defaultEventDuration: number;
   collapseAllDaySection: boolean; todayKey: 'today' | 'alignToday';
   upcomingHours: number; mapsProvider: 'google' | 'apple' | 'osm'; openAtLogin: boolean; showAdditionalTz: boolean;
   notifications: boolean; defaultReminder: number; defaultAllDayReminder: number; notifySound: boolean; menuBarNext: boolean; menuBarMaxLen: number;
@@ -27,7 +27,7 @@ export const defaultPrefs = (): Prefs => ({
   layers: { events: true, documents: true, tasks: true, footprints: true },
   gridView: 'default', daysPerPeriod: 7, densityZoomLevel: 0, weekStartsOn: 0, showWeekends: true, showDeclined: true, showWeekNumbers: false,
   format24HourTime: false, interfaceTheme: 'system', sidebar: true, contextPanel: true, primaryTimeZone: systemTimeZone(), additionalTimeZones: [],
-  locale: detectLocale(), defaultEventDuration: 30, collapseAllDaySection: false, todayKey: 'today',
+  locale: 'zh-CN', defaultEventDuration: 30, collapseAllDaySection: false, todayKey: 'today',
   upcomingHours: 4, mapsProvider: 'google', openAtLogin: false, showAdditionalTz: true,
   notifications: true, defaultReminder: 10, defaultAllDayReminder: -1, notifySound: true, menuBarNext: true, menuBarMaxLen: 32,
   displayName: '', email: '', videoProvider: 'none', videoUrl: '', autoAddVideo: false,
@@ -108,6 +108,8 @@ let queue: Promise<unknown> = Promise.resolve();
 let pending = 0;
 function receive(snapshot: CalendarSnapshot) {
   const prefs = { ...defaultPrefs(), ...snapshot.prefs, ...(state.ready ? { sidebar: state.prefs.sidebar, contextPanel: state.prefs.contextPanel } : {}), interfaceTheme: useTheme.getState().theme, openAtLogin: state.prefs.openAtLogin } as Prefs;
+  // The calendar follows Ready's interface language; a locale it detected on its own earlier is not a choice.
+  if (prefs.locale !== 'zh-CN' && !prefs.localeChosen) prefs.locale = 'zh-CN'
   setLocale(prefs.locale);
   setState({ ready: true, calendars: snapshot.calendars, events: Object.fromEntries(snapshot.events.map(e=>[e.id,e])), prefs,
     accounts: [{id:'local',kind:'local',name:'本地日历'}, ...(snapshot.calendars.some(c=>c.syncUrl) ? [{id:'subscriptions',kind:'ics' as const,name:'订阅日历'}] : [])] });

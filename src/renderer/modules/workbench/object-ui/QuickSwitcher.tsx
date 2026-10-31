@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { CornerDownLeft, File, FileText, Search, Shapes } from 'lucide-react'
 import { useDocTabs } from '../../../stores/useDocTabs'
 import { computeDesiredRoots, useWorkspace } from '../../../stores/useWorkspace'
 import type { WorkbenchMode } from '../../../stores/useMode'
@@ -75,24 +76,38 @@ export function QuickSwitcher({ onClose, onPreview, onSettings }: {
     } catch (error) { if (mounted.current) setError(String(error)) }
     finally { running.current = false }
   }
+  // Inkwell's search palette: the field is the header, results are icon rows, keys are hinted at the foot.
   return <MaskedObjectOverlay onClose={onClose}>
-    <h2>快速切换</h2>
-    <input autoFocus aria-label="搜索所有对象和命令" role="combobox" aria-expanded="true" aria-controls="ready-object-results" aria-activedescendant={count ? `ready-object-option-${index}` : undefined}
-      value={query} className="my-3 w-full rounded border p-2" onChange={event => { selectionVersion.current++; setQuery(event.target.value); setSelected(0); setError('') }}
-      onKeyDown={event => {
-        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); setSelected((index + (event.key === 'ArrowDown' ? 1 : -1) + count) % Math.max(1, count)) }
-        if (event.key === 'Enter' && count) { event.preventDefault(); void activate(index, event.altKey) }
-      }} />
-    {!query && <p>最近打开</p>}
-    <ul id="ready-object-results" role="listbox">
-      {items.map((item, row) => <li key={item.path} id={`ready-object-option-${row}`} role="option" aria-selected={index === row} className="flex gap-2 py-2">
-        <button className="flex-1 text-left" onClick={event => void activate(row, event.altKey)}>{item.name} · {item.sourceType}{item.draft && tabs.some(tab => tab.id === item.draft?.tabId && (!tab.path || tab.isDirty)) && ' · 未保存'}</button>
-        <button aria-label={`速览 ${item.name}`} onClick={() => void activate(row, true)}>速览</button>
+    <h2 className="rn-sr-only">快速切换</h2>
+    <div className="rn-switch-input">
+      <Search size={18} strokeWidth={1.8} aria-hidden />
+      <input autoFocus aria-label="搜索所有对象和命令" role="combobox" aria-expanded="true" aria-controls="ready-object-results" aria-activedescendant={count ? `ready-object-option-${index}` : undefined}
+        value={query} placeholder="搜索页面、文件和命令…" className="rn-switch-field ready-input-slot-inner" onChange={event => { selectionVersion.current++; setQuery(event.target.value); setSelected(0); setError('') }}
+        onKeyDown={event => {
+          if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); setSelected((index + (event.key === 'ArrowDown' ? 1 : -1) + count) % Math.max(1, count)) }
+          if (event.key === 'Enter' && count) { event.preventDefault(); void activate(index, event.altKey) }
+        }} />
+    </div>
+    {!query && items.length > 0 && <p className="rn-switch-label">最近打开</p>}
+    <ul id="ready-object-results" role="listbox" className="rn-switch-list">
+      {items.map((item, row) => <li key={item.path} id={`ready-object-option-${row}`} role="option" aria-selected={index === row} className="rn-switch-item" onMouseMove={() => { if (index !== row) setSelected(row) }}>
+        <button className="rn-switch-open" onClick={event => void activate(row, event.altKey)}>
+          <span className="rn-switch-icon">{/\.canvas$/i.test(item.path) ? <Shapes size={17} strokeWidth={1.5} /> : /\.md$/i.test(item.path) || item.draft ? <FileText size={17} strokeWidth={1.5} /> : <File size={17} strokeWidth={1.5} />}</span>
+          <span className="rn-switch-name">{item.name}</span>
+          <span className="rn-switch-type">{SOURCE_LABELS[item.sourceType] ?? item.sourceType}{item.draft && tabs.some(tab => tab.id === item.draft?.tabId && (!tab.path || tab.isDirty)) && ' · 未保存'}</span>
+        </button>
+        <button className="rn-switch-peek" aria-label={`速览 ${item.name}`} onClick={() => void activate(row, true)}>速览</button>
       </li>)}
-      {commands.map((command, i) => <li key={command.name} id={`ready-object-option-${items.length + i}`} role="option" aria-selected={index === items.length + i}><button onClick={() => void activate(items.length + i)}>{command.name}</button></li>)}
+      {commands.length > 0 && <li role="presentation" className="rn-switch-label">命令</li>}
+      {commands.map((command, i) => <li key={command.name} id={`ready-object-option-${items.length + i}`} role="option" aria-selected={index === items.length + i} className="rn-switch-item" onMouseMove={() => { if (index !== items.length + i) setSelected(items.length + i) }}>
+        <button className="rn-switch-open" onClick={() => void activate(items.length + i)}><span className="rn-switch-icon"><CornerDownLeft size={16} strokeWidth={1.6} /></span><span className="rn-switch-name">{command.name}</span></button>
+      </li>)}
+      {query && !count && response?.query === query && <li role="presentation" className="rn-switch-empty">没有找到「{query}」</li>}
     </ul>
-    {response?.query === query && response.warning && <p role="status">{response.warning}</p>}
-    {error && <p role="alert">{error}</p>}
-    <button onClick={onClose}>关闭</button>
+    {response?.query === query && response.warning && <p role="status" className="rn-switch-note">{response.warning}</p>}
+    {error && <p role="alert" className="rn-switch-note is-error">{error}</p>}
+    <footer className="rn-switch-foot"><span>↑↓ 选择</span><span>↵ 打开</span><span>⌥↵ 速览</span><button onClick={onClose}>关闭</button></footer>
   </MaskedObjectOverlay>
 }
+
+const SOURCE_LABELS: Record<string, string> = { page: '页面', file: '文件', canvas: '画板', document: '文档', draft: '草稿', book: '书', rss: '文章', event: '日程' }

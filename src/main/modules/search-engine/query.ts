@@ -118,7 +118,8 @@ function termToFtsClauses(term: string): string {
   const clauses: string[] = []
   for (const part of term.split(/([㐀-鿿぀-ヿ가-힯]+)/)) {
     if (!part) continue
-    if (containsCjk(part)) clauses.push(...toBigrams(part).map((g) => `"${escapeFtsPhrase(g)}"`))
+    // One character has no bigram of its own: match the bigrams and runs that start with it.
+    if (containsCjk(part)) clauses.push(...(part.length === 1 ? [`"${escapeFtsPhrase(part)}"*`] : toBigrams(part).map((g) => `"${escapeFtsPhrase(g)}"`)))
     else for (const run of gluedRuns(part)) clauses.push(`"${escapeFtsPhrase(run)}"`)
   }
   return clauses.join(' ')
