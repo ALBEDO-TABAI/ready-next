@@ -4537,6 +4537,15 @@ const migrations: Migration[] = [
       UNIQUE(root,target)
     );`)
   } },
+  { name: '154_calendar_card_schedules', up: (db) => {
+    db.exec(`CREATE TABLE calendar_card_schedules (
+      root TEXT NOT NULL, operation_id TEXT NOT NULL, event_id TEXT NOT NULL UNIQUE, input_json TEXT NOT NULL,
+      state TEXT NOT NULL CHECK(state IN ('pending','completed')), PRIMARY KEY(root,operation_id)
+    );
+    CREATE TRIGGER calendar_card_schedule_committed AFTER INSERT ON calendar_events BEGIN
+      UPDATE calendar_card_schedules SET state='completed' WHERE event_id=NEW.id;
+    END;`)
+  } },
 ]
 
 /**

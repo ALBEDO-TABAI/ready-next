@@ -249,3 +249,24 @@ test('a canvas node navigation request selects and centers the requested node', 
     assert.equal(ui.commits, 0, 'navigation does not change the file')
   } finally { await ui.close() }
 })
+
+test('M6-D event drop commits one reference card; context schedule selects the actual card', async () => {
+  const { writeEventTransfer } = await import('../renderer/modules/calendar/linkage/transfer')
+  const scheduled: string[] = []
+  const ui = await mount(3, { onScheduleNode: node => { scheduled.push(node.id) } })
+  try {
+    const values = new Map<string, string>()
+    writeEventTransfer({ setData: (key, value) => { values.set(key, value) } }, { kind: 'event', id: 'series', occurrence: '2026-11-01' }, '全天日程', true)
+    const intake = JSON.parse(values.get('application/x-ready-drag')!)
+    assert.equal(intake.type, 'calendar-event'); assert.equal(intake.allDay, true)
+    assert.equal(intake.eventId, `series#${Date.parse('2026-11-01') / 1000}`)
+    const drop = new ui.dom.window.MouseEvent('drop', { bubbles: true, cancelable: true, clientX: 400, clientY: 300 })
+    Object.defineProperty(drop, 'dataTransfer', { value: { getData: (key: string) => values.get(key) || '', types: [...values.keys()] } })
+    await act(async () => ui.surface.dispatchEvent(drop))
+    assert.equal(ui.commits, 1)
+    assert.deepEqual(ui.canvas.nodes.at(-1)?.ready.ref, { kind: 'event', id: 'series', occurrence: '2026-11-01' })
+    await act(async () => ui.card('n0').dispatchEvent(new ui.dom.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 20 })))
+    await ui.click('安排日程…'); assert.deepEqual(scheduled, ['n0'])
+    await ui.click('撤销'); assert.equal(ui.canvas.nodes.length, 3)
+  } finally { await ui.close() }
+})

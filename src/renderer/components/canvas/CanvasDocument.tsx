@@ -1,3 +1,6 @@
+import type { CalendarSnapshot } from '../../../shared/calendar/commands'
+import type { CanvasNode } from '../../../shared/ready-canvas'
+import { ScheduleCardDialog } from '../../modules/calendar/linkage/ScheduleCardDialog'
 import { flushCanvasWrites, trackCanvasWrite } from '../../modules/canvas/pending-writes'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CanvasOpen } from '../../../main/modules/board-engine/canvas-service'
@@ -23,7 +26,19 @@ export default function CanvasDocument({ tab }: { tab: DocTab }) {
   const [link, setLink] = useState(''), [documentId, setDocumentId] = useState('')
   const pending = useRef(false), generation = useRef(0), importId = useRef(crypto.randomUUID())
   const target = useCanvasNavigation(state => state.target)
+  const [calendarSnapshot, setCalendarSnapshot] = useState<CalendarSnapshot>(), [scheduling, setScheduling] = useState<CanvasNode | null>(null)
   const api = window.electronAPI
+  const refreshCalendar = useCallback(async () => {
+    const result = await api.calendar.snapshot()
+    if (!result.success || !result.data) throw new Error(result.error || '无法读取日程')
+    setCalendarSnapshot(result.data)
+  }, [api])
+  useEffect(() => {
+    let disposed = false, ticket = 0
+    const reload = async () => { const current = ++ticket; try { const result = await api.calendar.snapshot(); if (!result.success || !result.data) throw new Error(result.error || '无法读取日程'); if (!disposed && current === ticket) setCalendarSnapshot(result.data) } catch (cause) { if (!disposed && current === ticket) setError(String(cause)) } }
+    const off = api.calendar.onChanged(() => { void reload() }); void reload()
+    return () => { disposed = true; off() }
+  }, [api])
   const refresh = useCallback(async () => {
     const before = current.current, epoch = generation.current
     if (!before) return
@@ -33,7 +48,7 @@ export default function CanvasDocument({ tab }: { tab: DocTab }) {
   useEffect(() => {
     const epoch = ++generation.current
     let handle: string | undefined
-    current.current = null; setOpened(null); setError('')
+    current.current = null; setOpened(null); setScheduling(null); setError('')
     const load = async () => {
       const state = await api.vault.get()
       if (state.status !== 'ready') throw new Error('请先配置资料库')
@@ -107,7 +122,10 @@ export default function CanvasDocument({ tab }: { tab: DocTab }) {
       <button disabled={!documentId} onClick={() => { const page = pages.find(page => page.objectId === documentId)!; add({ type: 'addNode', node: { ...geometry(), type: 'file', file: page.path.slice(root.length + 1), ready: { kind: 'document', ref: { kind: 'page', id: page.objectId } } } }) }}>添加文档卡</button>
     </div>
     {error && <p role="alert">{error}</p>}
-    <CanvasCompositionSurface canvas={opened.canvas} path={`${root}/${opened.path}`} version={opened.version} tabId={tab.id}
+    {scheduling && calendarSnapshot && <ScheduleCardDialog key={scheduling.id} objectId={opened.objectId} nodeId={scheduling.id} version={opened.version}
+      title={scheduling.type === 'text' ? scheduling.text.slice(0, 120) : scheduling.ready.preview?.title || '卡片日程'} snapshot={calendarSnapshot}
+      close={() => setScheduling(null)} saved={refreshCalendar} />}
+    <CanvasCompositionSurface calendarSnapshot={calendarSnapshot} onScheduleNode={node => { if (!calendarSnapshot) setError('日程尚未加载'); else setScheduling(node) }} canvas={opened.canvas} path={`${root}/${opened.path}`} version={opened.version} tabId={tab.id}
       trees={trees} composition={api.canvasComposition} drafts={api.documentDrafts} documentPreview={previews} linkPreview={links}
       refreshCanvas={refresh} openDraft={openDraft} onOperations={write}
       revealNode={target?.objectId === opened.objectId ? target : undefined}

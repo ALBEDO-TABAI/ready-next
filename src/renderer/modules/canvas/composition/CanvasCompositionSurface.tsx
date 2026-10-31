@@ -1,3 +1,5 @@
+import type { CalendarSnapshot } from '../../../../shared/calendar/commands'
+import { EventCard, ScheduleMark } from '../../calendar/linkage/EventCard'
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { CanvasComposeInput, CanvasCompositionAPI, DocumentDraftAPI, DocumentDraft } from '../../../../shared/document-drafts'
 import type { PageNode } from '../../../../shared/document-pages'
@@ -7,6 +9,7 @@ import { DocumentCard, LinkCard, TextCard, type CardEditorHost, type DocumentPre
 import { SaveToPicker } from '../../document/page-ui/SaveToPicker'
 
 export interface CanvasCompositionSurfaceProps extends Omit<CanvasSurfaceProps, 'renderCard' | 'renderTextEditor' | 'onAddToDocument'> {
+  calendarSnapshot?: CalendarSnapshot
   version: string; path: string; tabId: string; trees: PageNode[]
   composition: CanvasCompositionAPI; drafts: DocumentDraftAPI
   documentPreview: DocumentPreviewSource; linkPreview?: LinkPreviewSource
@@ -64,7 +67,10 @@ export function CanvasCompositionSurface(props: CanvasCompositionSurfaceProps) {
     <CanvasSurface {...props} onAddToDocument={add}
       renderTextEditor={({ node, commit }) => node.type === 'text' ? <TextCard key={node.id} canvasPath={props.path} node={node} commit={commit} renderEditor={props.renderBlockEditor} /> : null}
       renderCard={node => {
-        if (node.ready.kind === 'document') return <DocumentCard node={node} source={props.documentPreview} />
+        const mark = <ScheduleMark canvasId={props.canvas.ready.id} nodeId={node.id} snapshot={props.calendarSnapshot} report={e => setError(String(e))} />
+        if (node.ready.kind === 'document') return <><DocumentCard node={node} source={props.documentPreview} />{mark}</>
+        if (node.type === 'text' && ['text', 'note'].includes(node.ready.kind)) return <><div className="canvas-text">{node.text}</div>{mark}</>
+        if (node.ready.ref?.kind === 'event') return <EventCard reference={node.ready.ref} snapshot={props.calendarSnapshot} />
         if (node.type === 'link') return <LinkCard node={node} source={props.linkPreview} />
         if (node.ready.kind === 'draft' && node.ready.draftId) return <article data-canvas-ui>
           <strong>{node.type === 'text' ? node.text : '草稿'}</strong>

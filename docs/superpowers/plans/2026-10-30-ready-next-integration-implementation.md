@@ -341,6 +341,20 @@ M5 的数据库往返/导入保真另由计划 `src/__tests__/ready-database-rou
 
 **完成标志：**文件日期 1 秒内反映到日历，拖动后文件值一致；重复实例不丢身份，提醒跨重启不重复；同日的事、文、书与卡片都能跳回真实对象。
 
+#### M6-D 联动合同与交付状态（2026-10-31）
+
+- C8/C12：事件拖出使用 ReadyRef 并保留原始重复实例；文档插入只走公开缓冲历史，一次撤销；画板存标准 link 引用节点，经现有句柄提交，不复制事件内容。实时卡从日历快照读取标题、时间、地点，删除显示失效。
+- 卡片安排日程：Main 验证当前资料库、画板版本与存活文字/文档卡；新事件和卡片关联以同一 CalendarStore delta 提交。持久操作意图阻止响应丢失、重启或删除后的重试重复创建。关联与反链仍由 M6-A 唯一维护。
+- “这一天”按当前显示时区的半开日界汇总日程、文档日期、待办、提醒、阅读与对象活动；不受图层开关影响，不截断活动数量；跳转统一走 open-ready-ref。提醒复用 C9 正本及送达记录。
+- 对话沿用 R3 事件附件；“这一天”作为有日期 ReadyRef 的已选摘要附件，不授予额外读取权限。产品动作继续用原 product action bridge，不新增 Agent 工具。
+- C14：仅模块内布局与现有令牌；Node 行为测试不替代 Claude 的窗口验收。
+- 对象活动来自现有活动表。迁移 153 在对象内容确认边界记录页面/画板实际变更（使用文件修改时间，不以查询时刻伪造活动）；同一对象当天去重，阅读和提醒保持原有记录。安排日程的完成回执与事件、关联同次提交，失败整体回滚。
+- **本轮已实现：**事件拖入文档/画板、实时卡与失效提示、卡片右键安排日程及日程标记、当天全部类别汇总和统一回跳、事件面板网址内开、事件和当天摘要附件。文档/画板拖出入口为事件面板“拖出日程”，事件块也支持 Alt 拖出；对话沿用既有拖拽接收格式。
+- **命令行验证：**新增原生合同 2 项通过；M6-A/B/C/D 原生回归 23 项通过、0 skip（沙箱下 M6-B 用已有 `READY_LAYER_TEST_POLLING=1` 真实磁盘轮询入口）；日历回归 166 项通过；画板/编辑器组件回归通过。全量原生清单 454 项中 451 项通过，3 项在原生文件监听处报 EMFILE；日历项已替代验证，另两项为范围外的 `library-engine.test.ts`、`ready-object-identity-native.test.ts`，不据此宣布全量 native 通过。
+- **M6 尚未整体验收：**Claude 需构建后运行 `npm run verify:ready-next-timeline`，核对拖入、一次撤销、实时卡、安排日程、“这一天”及强制重启回读；同时沿既有 M6-C smoke 证明真实提醒及 C14 窗口隔离。本轮未启动真实窗口。
+- **范围外入口待办：**`src/renderer/modules/calendar/workbench/commands.ts` 的“加入下一场会议”快捷键仍调用 `calendar.openLink`（系统浏览器）。该文件不在本轮允许的组件/store 范围内，未改；后续应同样改用 `openWebpageInBrowser`，再将 M6 标为全部完成。
+- 可执行合同：`calendar-linkage-native.test.ts`、`calendar-linkage-ui.test.tsx`、`canvas-surface.test.tsx`；窗口 `verify-ready-next-timeline.cjs`。新原生/组件测试已分别加入 `verify:native`、`verify:calendar`。
+
 #### C9 补充：一次送达（M6-C）
 
 - 正文格式沿用 `[日期](ready://calendar/day/YYYY-MM-DD?at=HH:mm&remind=N)`。`at` 可选，省略时取 09:00；`remind` 为提前分钟数，省略表示不提醒，0 表示到时提醒。只解析 Markdown 正文链接，不解析代码、frontmatter 或普通日期文字。

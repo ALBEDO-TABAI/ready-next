@@ -1,3 +1,5 @@
+import { readEventTransfer, READY_REF_MIME } from '../../../modules/calendar/linkage/transfer'
+import { eventCard } from '../../../../shared/calendar-linkage'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import type { CanvasNode } from '../../../../shared/ready-canvas/schema'
@@ -117,9 +119,22 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     finally { setComposing(false) }
   }
   return <div className="rn-canvas" data-canvas-surface tabIndex={0} ref={root} aria-label={canvas.ready.title || '画板'}
+    onDragOver={event => { if (event.dataTransfer.types.includes(READY_REF_MIME)) { event.preventDefault(); event.stopPropagation() } }}
+    onDrop={event => {
+      try {
+        const dropped = readEventTransfer(event.dataTransfer)
+        if (!dropped) return
+        event.preventDefault(); event.stopPropagation()
+        if (busy || trash || editing) throw new Error('请先完成当前编辑')
+        const rect = event.currentTarget.getBoundingClientRect(), point = screenToWorld({ x: event.clientX - rect.left, y: event.clientY - rect.top }, camera)
+        void commit([{ type: 'addNode', node: eventCard(dropped.ref, { id: crypto.randomUUID(), x: Math.round(point.x), y: Math.round(point.y) }) }])
+      } catch (cause) { setCompositionError(String(cause)) }
+    }}
     onContextMenu={event => {
-      if (!props.onAddToDocument || busy || trash || editing || !chosen.length || (event.target instanceof Element && event.target.closest('[data-canvas-ui]'))) return
+      if ((!props.onAddToDocument && !props.onScheduleNode) || busy || trash || editing || (event.target instanceof Element && event.target.closest('[data-canvas-ui]'))) return
       event.preventDefault(); gestures.cancel()
+      const card = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-node-id]') : null
+      if (card?.dataset.nodeId && !selected.includes(card.dataset.nodeId)) setSelected([card.dataset.nodeId])
       const rect = event.currentTarget.getBoundingClientRect()
       setMenu({ x: event.clientX - rect.left, y: event.clientY - rect.top })
     }}
@@ -152,9 +167,11 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
         <button onClick={() => setCamera(c => zoomAt(c, { x: size.width / 2, y: size.height / 2 }, c.zoom * 1.25))}>＋</button>
       </div>}
     </div>
+    {compositionError && !menu && <p role="alert" data-canvas-ui>{compositionError}</p>}
     {buffer.error && <div className="canvas-message" role="alert" data-canvas-ui>{buffer.error}</div>}
     {menu && <div role="menu" aria-label="选区菜单" data-canvas-ui style={{ position: 'absolute', left: menu.x, top: menu.y, zIndex: 5, background: 'var(--bg-primary)', padding: 8 }}>
       <button role="menuitem" disabled={composing || busy} onClick={() => void addToDocument()}>{composing ? '正在添加…' : '添加到文档'}</button>
+      {props.onScheduleNode && chosen.length === 1 && ['text', 'note', 'document'].includes(chosen[0].ready.kind) && <button role="menuitem" disabled={busy || composing} onClick={() => { props.onScheduleNode!(chosen[0]); setMenu(null) }}>安排日程…</button>}
       <button disabled={composing} onClick={() => setMenu(null)}>关闭</button>
       {compositionError && <p role="alert">{compositionError}</p>}
     </div>}

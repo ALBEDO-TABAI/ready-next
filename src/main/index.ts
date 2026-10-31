@@ -2,6 +2,7 @@ import { registerDocumentImportIPC } from './modules/document-import/ipc'
 import { migrateHighlightCaches } from './modules/library-engine/highlight-cache-migration'
 import { registerSourceAnnotationsIPC } from './modules/library-engine/source-document-ipc'
 import { SourceDocumentService } from './modules/library-engine/source-documents'
+import { registerCalendarLinkageIPC } from './modules/calendar-linkage/ipc'
 import { ObjectRelationsService, registerObjectRelationsIPC } from './modules/object-relations/service'
 import { registerDocumentAnnotationsIPC } from './modules/document-annotations/ipc'
 import { setupDateMentions } from './modules/calendar-engine/date-mentions/runtime'
@@ -844,7 +845,9 @@ function setupGlobalIPC(): void {
       return state
     } },
   })
-  registerCalendarLayersIPC(ipcMain, createCalendarLayersResolver({ pages: documentPages.service, writer: getDocumentWriteDependencies, database: documentDatabase }))
+  const calendarLayers = createCalendarLayersResolver({ pages: documentPages.service, writer: getDocumentWriteDependencies, database: documentDatabase })
+  registerCalendarLayersIPC(ipcMain, calendarLayers)
+  registerCalendarLinkageIPC(ipcMain, calendarLayers, () => getDatabase().calendar)
   chatGptOAuthService = setupSettingsIPC({
     onModelChanged: wakeRSSProcessing,
     onSettingChanged: (key) => {

@@ -3326,6 +3326,7 @@ interface ElectronAPI {
   sourceAnnotations: import('../../main/modules/library-engine/source-document-ipc').SourceAnnotationsAPI
   rss: ElectronRSSAPI
   dateMentions: import('../../shared/calendar/date-mentions').DateMentionsAPI
+  calendarLinkage: import('../../shared/calendar-linkage').CalendarLinkageAPI
   calendarLayers: import('../../shared/calendar-layers').CalendarLayersAPI
   calendar: ElectronCalendarAPI
   skills: ElectronSkillsAPI

@@ -1675,6 +1675,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return () => ipcRenderer.removeListener('dateMentions:open', listener)
     },
   } satisfies import('../shared/calendar/date-mentions').DateMentionsAPI,
+  calendarLinkage: {
+    day: (input: import('../shared/calendar-linkage').DayInput) => ipcRenderer.invoke('calendarLinkage:day', input),
+    schedule: (input: import('../shared/calendar-linkage').ScheduleCard) => ipcRenderer.invoke('calendarLinkage:schedule', input),
+  } satisfies import('../shared/calendar-linkage').CalendarLinkageAPI,
   calendarLayers: {
     query: (range: import('../shared/calendar-layers').LayerRange) => ipcRenderer.invoke('calendarLayers:query', range),
     move: (input: import('../shared/calendar-layers').LayerMove) => ipcRenderer.invoke('calendarLayers:move', input),
