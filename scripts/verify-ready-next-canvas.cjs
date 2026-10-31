@@ -49,9 +49,9 @@ async function main() {
       return tree.value.children.find(node => node.objectId === objectId)
     }, { objectId, vault })
     assert.ok(result, 'Object missing from page tree')
-    await page.getByRole('group', { name: '侧栏视角' }).getByRole('button', { name: '页面', exact: true }).click()
+    await page.locator('.ink-doc-app').waitFor({ state: 'visible' })
     const row = page.getByLabel('页面侧栏', { exact: true }).locator(`[data-page-id="${objectId}"]`)
-    await row.getByRole('button', { name: result.title, exact: true }).click()
+    await row.locator(':scope > .ink-sb-row > .ink-sb-label-btn').click()
   }
   try {
     await launch()

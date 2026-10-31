@@ -1,6 +1,6 @@
 // Build first (electron-vite build). Real-Electron acceptance for the Library (书房):
-// import an EPUB and a TXT into a throwaway vault, open the Library from the files
-// panel, open a book, read and turn a page. Screenshots go to READY_LIBRARY_SHOTS
+// import an EPUB and a TXT into a throwaway vault, open the Library from the document
+// sidebar, open a book, read and turn a page. Screenshots go to READY_LIBRARY_SHOTS
 // (default: outputs/ready-next/library). The daily Ready data is never opened.
 const { _electron } = require('playwright')
 const JSZip = require('jszip')
@@ -221,7 +221,7 @@ async function checkQuoteReturn(page, book, id, selected) {
   await page.getByRole('button', { name: '复制引用', exact: true }).click()
   const reference = await page.evaluate(() => navigator.clipboard.readText())
   ok('reader copies a source-block embed', reference === `![[${path.basename(book.notePath, '.md')}#^${id}]]`, reference)
-  await page.getByTitle('新建', { exact: true }).click()
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+t' : 'Control+t')
   await page.getByRole('button', { name: '编辑', exact: true }).click()
   const sourceEditor = page.getByRole('textbox', { name: 'Markdown source editor' })
   await sourceEditor.fill(`# 引用验收\n\n${reference}`)
@@ -303,6 +303,12 @@ function electronEnv(extra) {
     ok('EPUB metadata reaches the source note', epubBook && epubBook.title === '验收用书' && epubBook.author === '测试作者', JSON.stringify(epubBook))
     ok('the source note lives under 阅读/ in the vault', epubBook && fs.existsSync(path.join(vault.root, '阅读', '验收用书.md')))
 
+    const documentDeadline = Date.now() + 30000
+    while (!await page.locator('.ink-doc-app').isVisible()) {
+      if (Date.now() >= documentDeadline) throw new Error('Document mode must open before the library entry is available')
+      await page.evaluate(() => window.dispatchEvent(new CustomEvent('ready:workbench-mode-change-request', { detail: { mode: 'document', placement: 'open', presentation: 'immediate' } })))
+      await page.waitForTimeout(150)
+    }
     // The vault also has a 阅读 page (the library database); open the reading room through its own entry.
     await page.locator('[data-library-entry="true"]').click()
     await page.locator('.rn-library').waitFor({ timeout: 20000 })

@@ -27,9 +27,9 @@ async function launch() {
 }
 async function enterDocument(page) {
   // The workbench listens for mode requests only after it mounts; repeat the request until Document is visible.
-  const controls = page.getByTestId('draft-controls')
+  const documentApp = page.locator('.ink-doc-app')
   const deadline = Date.now() + 30000
-  while (!await controls.isVisible().catch(() => false)) {
+  while (!await documentApp.isVisible().catch(() => false)) {
     if (Date.now() > deadline) throw new Error('Document mode did not become visible')
     await page.evaluate(() => window.dispatchEvent(new CustomEvent('ready:workbench-mode-change-request', {
       detail: { mode: 'document', placement: 'open', presentation: 'immediate' },
@@ -52,6 +52,7 @@ try {
   }, vault)
   await page.reload()
   await enterDocument(page)
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+t' : 'Control+t')
   await (await sourceEditor(page)).fill(text)
   await page.getByTestId('draft-status').filter({ hasText: '已持久确认' }).waitFor()
   const original = await page.evaluate(async content => {
@@ -75,7 +76,7 @@ try {
   await page.reload()
   await enterDocument(page)
   await page.getByRole('button', { name: /^未保存的草稿/ }).click()
-  await page.getByTestId(`draft-recovery-${original.draftId}`).getByRole('button', { name: original.title || '未命名草稿', exact: true }).click()
+  await page.getByTestId(`draft-recovery-${original.draftId}`).locator('button.ink-sb-label-btn').click()
   assert.equal(await (await sourceEditor(page)).inputValue(), text)
   await page.getByRole('button', { name: '保存到…', exact: true }).click()
   // The shared location picker (M3 T6) serves drafts, page moves and tab drops alike.

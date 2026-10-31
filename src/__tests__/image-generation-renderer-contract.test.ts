@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { registerHooks } from 'node:module'
+import { editorFixture } from './helpers/ready-block-editor-fixture'
 import test from 'node:test'
-import { createElement } from 'react'
+import { act, createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import ChatAttachments from '../renderer/components/agent/ChatAttachments'
@@ -16,7 +16,7 @@ import {
   generatedImagesFromMessage,
 } from '../renderer/modules/image-generation/generatedImageArtifacts'
 import {
-  parseGeneratedImageDragPayload,
+  parseGeneratedImageDragPayload, READY_GENERATED_IMAGE_MIME,
 } from '../renderer/modules/image-generation/generatedImageDrag'
 import { isImageGenerationReferencePath } from '../shared/image-generation'
 import { buildCanonicalCoreCloseoutMessage } from '../main/modules/repositories/canonical-core-closeout-message'
@@ -168,19 +168,35 @@ test('generated image card uses a quiet green dot for the current image', () => 
   assert.doesNotMatch(html, /已激活/)
 })
 
-test('generated images can drop into both document editing surfaces', () => {
-  // eslint-disable-next-line ready/no-source-grep-test -- reviewed UI wiring contract; real Electron live proof covers preview-mode asset copy and rendered insertion.
-  const source = readFileSync(resolve(process.cwd(), 'src/renderer/components/document/MarkdownEditor.tsx'), 'utf8')
-  const editSurface = source.slice(
-    source.indexOf('className="panel-hover-scrollbar document-editor-surface'),
-    source.indexOf('{/* ── Preview pane'),
-  )
-  const previewSurface = source.slice(
-    source.indexOf('className="panel-hover-scrollbar document-preview-surface'),
-    source.indexOf('<WidgetEditDrawer'),
-  )
-  for (const surface of [editSurface, previewSurface]) {
-    assert.match(surface, /onDragOver=\{handleEditorDragOver\}/)
-    assert.match(surface, /onDrop=\{handleEditorDrop\}/)
+test('generated images can drop into both document editing surfaces', async t => {
+  const f = await editorFixture(t, '保留正文')
+  const css = registerHooks({ load(url, context, next) { return url.endsWith('.css') ? { format: 'module', source: '', shortCircuit: true } : next(url, context) } })
+  t.after(() => css.deregister())
+  const { default: MarkdownEditor } = await import('../renderer/components/document/MarkdownEditor')
+  const { MemoryRouter } = await import('react-router-dom')
+  const copied: { sourcePath: string; documentPath: string }[] = []
+  Object.assign(window, { electronAPI: { imageGeneration: { persistToDocument: async (input: { sourcePath: string; documentPath: string }) => {
+    copied.push(input); return { success: true, data: { relativePath: 'note.assets/ready-image.png' } }
+  } } } })
+  const initial = f.useDocTabs.getState().tabs[0].content
+  for (const mode of ['edit', 'preview'] as const) {
+    await act(async () => f.useDocTabs.setState({ tabs: [{ id: t.name, path: '/vault/note.md', title: 'note', content: initial, isDirty: false }], activeTabId: t.name }))
+    function Surface() { const tab = f.useDocTabs(state => state.tabs[0]); return createElement(MarkdownEditor, { tab, viewMode: mode, previewEditable: true, previewClassName: 'ink-page' }) }
+    await act(async () => f.root.render(createElement(MemoryRouter, null, createElement(Surface))))
+    const surface = document.querySelector(`.document-${mode === 'edit' ? 'editor' : 'preview'}-surface`); assert.ok(surface)
+    const raw = JSON.stringify({ type: 'generated-image', id: artifact.id, path: artifact.path, name: artifact.label, ext: 'png', size: 0, mimeType: 'image/png' })
+    const dataTransfer = { types: [READY_GENERATED_IMAGE_MIME, 'application/x-ready-drag'], getData: (type: string) => type === READY_GENERATED_IMAGE_MIME ? raw : '', dropEffect: '' }
+    for (const type of ['dragover', 'drop']) {
+      const event = new f.dom.window.Event(type, { bubbles: true, cancelable: true })
+      Object.defineProperty(event, 'dataTransfer', { value: dataTransfer })
+      await act(async () => surface.dispatchEvent(event))
+      assert.equal(event.defaultPrevented, true)
+    }
+    assert.equal(dataTransfer.dropEffect, 'copy')
+    const tab = f.useDocTabs.getState().tabs[0]
+    assert.ok(tab.content.includes('保留正文'))
+    assert.ok(tab.content.includes('![ready-image](note.assets/ready-image.png)'))
+    assert.equal(tab.isDirty, true)
   }
+  assert.deepEqual(copied, Array.from({ length: 2 }, () => ({ sourcePath: artifact.path, documentPath: '/vault/note.md' })))
 })

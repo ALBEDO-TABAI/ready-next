@@ -30,8 +30,8 @@ async function main() {
       return tree.value.children.find(node => node.objectId === id)
     }, { id, vault })
     assert.ok(result)
-    await page.getByRole('group', { name: '侧栏视角' }).getByRole('button', { name: '页面', exact: true }).click()
-    await page.getByLabel('页面侧栏', { exact: true }).locator(`[data-page-id="${id}"]`).getByRole('button', { name: result.title, exact: true }).click()
+    await page.locator('.ink-doc-app').waitFor({ state: 'visible' })
+    await page.getByLabel('页面侧栏', { exact: true }).locator(`[data-page-id="${id}"]`).locator(':scope > .ink-sb-row > .ink-sb-label-btn').click()
   }
   const shot = async name => { await page.screenshot({ path: path.join(temporary, `${name}.png`) }); console.log(`PASS ${name}`) }
   try {

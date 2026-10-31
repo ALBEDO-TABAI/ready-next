@@ -36,14 +36,12 @@ async function main() {
   const wizard = () => page.getByRole('dialog', { name: '导入 Notion / Inkwell', exact: true })
   const showWizard = async () => {
     await wait(async () => {
-      if (await page.getByRole('group', { name: '侧栏视角' }).isVisible()) return true
+      if (await page.locator('.ink-doc-app').isVisible()) return true
       await page.evaluate(() => window.dispatchEvent(new CustomEvent('ready:workbench-mode-change-request', { detail: { mode: 'document', placement: 'open', presentation: 'immediate' } })))
       return false
     }, 'Document sidebar missing')
-    await page.getByRole('group', { name: '侧栏视角' }).getByRole('button', { name: '页面', exact: true }).click()
-    const menu = page.locator('details[aria-label="页面更多"]')
-    if (!await menu.evaluate(element => element.open)) await menu.locator('summary').click()
-    await menu.getByRole('button', { name: '导入 Notion / Inkwell', exact: true }).click()
+    await page.locator('.ink-doc-app').waitFor({ state: 'visible' })
+    await page.getByRole('navigation', { name: '文档侧栏' }).getByRole('button', { name: '导入', exact: true }).click()
   }
   try {
     await launch()

@@ -15,6 +15,7 @@ import { DocumentPageService } from '../main/modules/document-pages/service'
 import { DocumentDraftService } from '../main/modules/document-drafts/service'
 import { configureDocumentWriteService } from '../main/modules/document-engine/document-write-service'
 import { writeDocumentEditableText } from '../main/modules/document-engine/document-editable-text'
+import { refreshCleanDocumentTabsFromDisk } from '../renderer/modules/document/documentExternalRefresh'
 import { createDocumentOperationSync } from '../renderer/modules/document/documentOperationSync'
 import type { DocumentPagesAPI } from '../shared/document-pages'
 import type { ObjectPresentationAPI } from '../shared/object-identity'
@@ -24,6 +25,9 @@ import type { ObjectPresentationAPI } from '../shared/object-identity'
 test('M3: create, header edit, shared block/source history, save, child draft and object navigation', async t => {
   if (skipIfSqliteUnavailable(t, 'M3 integration (Electron)')) return
   const f = await editorFixture(t, '正文')
+  const previousResize = Object.getOwnPropertyDescriptor(globalThis, 'ResizeObserver')
+  Object.defineProperty(globalThis, 'ResizeObserver', { value: class { observe() {} disconnect() {} }, configurable: true })
+  t.after(() => { if (previousResize) Object.defineProperty(globalThis, 'ResizeObserver', previousResize); else Reflect.deleteProperty(globalThis, 'ResizeObserver') })
   const previousEvent = globalThis.CustomEvent
   Object.defineProperty(globalThis, 'CustomEvent', { value: f.dom.window.CustomEvent, configurable: true, writable: true })
   t.after(() => { globalThis.CustomEvent = previousEvent })
@@ -38,9 +42,9 @@ test('M3: create, header edit, shared block/source history, save, child draft an
   const { useDocTabs, settleDocTabObjects } = await import('../renderer/stores/useDocTabs')
   const { useVault } = await import('../renderer/stores/useVault')
   const { useWorkspace } = await import('../renderer/stores/useWorkspace')
-  const { usePageView } = await import('../renderer/modules/document/page-ui/page-panel-state')
   const { PageDocumentEditor } = await import('../renderer/modules/document/page-ui/PageDocumentEditor')
-  const { ConnectedPageSidebar } = await import('../renderer/modules/document/page-ui/PagePanel')
+  const { InkSidebar } = await import('../renderer/modules/document/ink/InkSidebar')
+  const { OverlayHost } = await import('../renderer/modules/document/ink/overlay')
   const { DraftControls } = await import('../renderer/modules/document/drafts/DraftControls')
   const { openReadyRef } = await import('../renderer/modules/workbench/open-ready-ref')
   const { runRegisteredDocumentSave } = await import('../renderer/modules/document/documentSaveRegistry')
@@ -87,16 +91,16 @@ test('M3: create, header edit, shared block/source history, save, child draft an
   const roots = [{ path: directory, kind: 'vault' as const }]
   function Surface({ mode = 'preview', book = false }: { mode?: 'edit' | 'preview'; book?: boolean }) {
     const tab = useDocTabs(state => state.tabs.find(item => item.id === state.activeTabId))
-    return <><ConnectedPageSidebar roots={roots} onFiles={() => usePageView.getState().setView('files')} />
+    return <><InkSidebar visible roots={roots} /><OverlayHost />
       <DraftControls />{tab && <PageDocumentEditor key={tab.id} tab={tab} viewMode={mode} previewEditable isSceneVisible bookReading={book} />}</>
   }
-  const render = async (mode: 'edit' | 'preview' = 'preview', book = false) => { await act(() => f.root.render(<MemoryRouter><Surface mode={mode} book={book} /></MemoryRouter>)) }
+  const render = async (mode: 'edit' | 'preview' = 'preview', book = false) => { await act(async () => f.root.render(<MemoryRouter><Surface mode={mode} book={book} /></MemoryRouter>)) }
   const input = async (label: string, value: string) => {
     const element = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[aria-label="${label}"]`); assert.ok(element, label)
-    await act(() => { Object.getOwnPropertyDescriptor(element.tagName === 'TEXTAREA' ? f.dom.window.HTMLTextAreaElement.prototype : f.dom.window.HTMLInputElement.prototype, 'value')!.set!.call(element, value); element.dispatchEvent(new f.dom.window.Event('input', { bubbles: true })) })
+    await act(async () => { Object.getOwnPropertyDescriptor(element.tagName === 'TEXTAREA' ? f.dom.window.HTMLTextAreaElement.prototype : f.dom.window.HTMLInputElement.prototype, 'value')!.set!.call(element, value); element.dispatchEvent(new f.dom.window.Event('input', { bubbles: true })) })
   }
   const click = async (label: string, scope: ParentNode = document) => {
-    const element = [...scope.querySelectorAll('button')].find(item => item.textContent === label || item.getAttribute('aria-label') === label)
+    const element = [...scope.querySelectorAll<HTMLElement>('button, [role=menuitem]')].find(item => item.textContent === label || item.getAttribute('aria-label') === label)
     assert.ok(element, label); await act(async () => { element.click(); await new Promise(resolve => setTimeout(resolve, 120)) })
   }
   const eventually = async (check: () => boolean) => {
@@ -104,15 +108,29 @@ test('M3: create, header edit, shared block/source history, save, child draft an
     while (!check() && Date.now() < deadline) await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
     assert.ok(check(), document.body.textContent || 'UI did not settle')
   }
+  // The component surface does not mount DocumentMode's directory watcher. Bridge page
+  // notifications to the same real disk refresh owner instead of leaving a stale buffer after rename.
+  const refreshes: Promise<Set<string>>[] = []
+  const inFlight = new Map<string, import('../renderer/modules/document/documentExternalRefresh').ExternalRefreshInFlightRequest>()
+  const stopRefresh = pages.subscribe(() => {
+    refreshes.push(refreshCleanDocumentTabsFromDisk(useDocTabs.getState().tabs, {
+      readFile: async path => ({ success: true, content: readFileSync(path, 'utf8') }),
+      getCurrentTab: id => useDocTabs.getState().tabs.find(tab => tab.id === id) ?? null,
+      hydrateTab: useDocTabs.getState().hydrateTabContentFromDisk, inFlight,
+    }))
+  })
+  t.after(async () => { stopRefresh(); await Promise.all(refreshes) })
   await render()
-  await click('新建页面'); await input('标题', '父页'); await click('确认')
-  await click('父页', document.querySelector('[aria-label="页面侧栏"]')!)
-  await act(() => settleDocTabObjects())
+  await click(`在 ${directory.split('/').pop()} 中新建页面`)
+  await act(async () => settleDocTabObjects())
   await render()
   const parent = useDocTabs.getState().tabs.find(tab => tab.id === useDocTabs.getState().activeTabId)!
   assert.ok(document.querySelector('[aria-label="页面头部"]'))
-  await input('图标', '🌱'); await input('页面标题', '改名页'); await click('保存页面属性')
-  await eventually(() => { const button = document.querySelector<HTMLButtonElement>('header button[type=submit]'); return !!button && !button.disabled })
+  await click('添加图标'); await input('自定义图标', '🌱'); await click('使用')
+  await input('页面标题', '改名页')
+  await act(async () => { const title = document.querySelector<HTMLTextAreaElement>('[aria-label="页面标题"]')!; title.focus(); title.blur(); await new Promise(resolve => setTimeout(resolve, 120)) })
+  await eventually(() => useDocTabs.getState().tabs.find(tab => tab.id === parent.id)?.path === join(directory, '改名页.md'))
+  await eventually(() => { const title = document.querySelector<HTMLTextAreaElement>('[aria-label="页面标题"]'); return !!title && !title.disabled && useDocTabs.getState().tabs.find(tab => tab.id === parent.id)?.content === readFileSync(join(directory, '改名页.md'), 'utf8') })
   assert.equal(useDocTabs.getState().tabs.find(tab => tab.id === parent.id)?.path, join(directory, '改名页.md'))
   assert.equal(pages.properties(parent.objectId!).properties.icon, '🌱')
   await eventually(() => document.querySelector('[aria-label="页面侧栏"]')!.textContent!.includes('改名页'))
@@ -130,19 +148,18 @@ test('M3: create, header edit, shared block/source history, save, child draft an
   assert.equal(readFileSync(join(directory, '改名页.md'), 'utf8'), beforeSource)
   // Header changes first save a dirty body through the registered editor owner.
   await f.input(f.rich('中文正文'), '继续输入'); await f.blur(f.rich('继续输入'))
-  await input('图标', '📚'); await click('保存页面属性')
-  await eventually(() => { const button = document.querySelector<HTMLButtonElement>('header button[type=submit]'); return !!button && !button.disabled })
+  await click('更换图标'); await input('自定义图标', '📚'); await click('使用')
+  await eventually(() => pages.properties(parent.objectId!).properties.icon === '📚')
   assert.match(readFileSync(join(directory, '改名页.md'), 'utf8'), /继续输入/)
   assert.equal(pages.properties(parent.objectId!).properties.icon, '📚')
-  await act(() => useVault.setState({ view: { phase: 'loaded', data: { status: 'ready', root: join(directory, '别的资料库'), defaultSuggestion: directory } } }))
+  await act(async () => useVault.setState({ view: { phase: 'loaded', data: { status: 'ready', root: join(directory, '别的资料库'), defaultSuggestion: directory } } }))
   assert.equal(document.querySelector('[aria-label="页面头部"]'), null, 'an external file has no page header')
-  await act(() => useVault.setState({ view: { phase: 'loaded', data: { status: 'ready', root: directory, defaultSuggestion: directory } } }))
+  await act(async () => useVault.setState({ view: { phase: 'loaded', data: { status: 'ready', root: directory, defaultSuggestion: directory } } }))
   await render('preview', true); assert.equal(document.querySelector('[aria-label="页面头部"]'), null)
-  await act(() => usePageView.getState().setView('files')); await render(); assert.equal(document.querySelector('[aria-label="页面头部"]'), null)
+  await render(); assert.ok(document.querySelector('[aria-label="页面头部"]'))
   await act(async () => { useDocTabs.getState().openTab(join(directory, '改名页.md')); await settleDocTabObjects(); await openReadyRef({ kind: 'page', id: parent.objectId! }); await settleDocTabObjects() })
   assert.equal(useDocTabs.getState().tabs.filter(tab => tab.objectId === parent.objectId).length, 1)
   assert.equal(useDocTabs.getState().activeTabId, parent.id)
-  await act(() => usePageView.getState().setView('pages'))
   let draftId = ''
   await act(async () => {
     draftId = useDocTabs.getState().createBackgroundTab({ title: '子稿' }); useDocTabs.getState().setActiveTab(draftId)
@@ -162,7 +179,7 @@ test('M3: create, header edit, shared block/source history, save, child draft an
   await act(async () => { await runtime.drafts.flush(draftId); await pages.operate({ type: 'create', root: directory, parentPath: directory, operationId: 'target-page', title: '目标页' }) })
   await eventually(() => document.querySelector('[aria-label="页面侧栏"]')!.textContent!.includes('目标页'))
   const parentRow = document.querySelector(`[data-page-id="${parent.objectId}"]`); assert.ok(parentRow)
-  await click('移动到…', parentRow)
+  await click('改名页 操作', parentRow); await click('移动到…', document.querySelector('[role="menu"]')!)
   const move = document.querySelector('[aria-label="移动到…"]'); assert.ok(move)
   await click('目标页', move.querySelector('[aria-label="保存位置"]')!); await click('确认', move)
   await eventually(() => useDocTabs.getState().tabs.find(tab => tab.id === parent.id)?.path === join(directory, '目标页', '改名页.md'))

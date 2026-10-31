@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import React, { act } from 'react'
-import { PageSidebar } from '../renderer/modules/document/page-ui/PageSidebar'
+import { InkSidebar } from '../renderer/modules/document/ink/InkSidebar'
+import { InkHome } from '../renderer/modules/document/ink/InkHome'
+import { InkTopbar } from '../renderer/modules/document/ink/InkTopbar'
+import { useDocTabs } from '../renderer/stores/useDocTabs'
+import { registerDocumentSaveHandler } from '../renderer/modules/document/documentSaveRegistry'
 import { PageHeader } from '../renderer/modules/document/page-ui/PageHeader'
 import { SaveToPicker, type SaveToSelection } from '../renderer/modules/document/page-ui/SaveToPicker'
 import { createPageTreeStore, pageRoots } from '../renderer/modules/document/page-ui/page-state'
@@ -15,32 +19,38 @@ function fixture() {
 
 test('page operations: create child, rename, favorite, visit, move, recycle, restore conflict, permanent delete', async () => {
   const f = fixture(), ui = await mountPageUI(), saved: string[] = [], opened: string[] = []
-  const row = (id: string) => { const result = ui.body.querySelector(`[data-page-id="${id}"]`); assert.ok(result); return result }
+  const previousTabs = useDocTabs.getState().tabs
+  useDocTabs.setState({ tabs: [{ id: 'save-A', path: '/vault/A.md', title: 'A', content: 'unsaved', isDirty: true }] })
+  const release = registerDocumentSaveHandler('save-A', () => { saved.push('A'); useDocTabs.setState(state => ({ tabs: state.tabs.map(tab => ({ ...tab, isDirty: false })) })) })
+  const row = (id: string) => { const result = ui.body.querySelector(`section[aria-label="页面"] [data-page-id="${id}"]`); assert.ok(result); return result }
   try {
-    await ui.render(<PageSidebar roots={[{ path: '/vault', kind: 'vault' }]} api={f.api} onOpen={node => { opened.push(node.objectId) }} onShowFiles={() => {}} beforeTrash={async node => { saved.push(node.objectId) }} />)
-    await ui.click('新建子页面', row('A')); await ui.input('标题', '子页'); await ui.click('确认')
+    await ui.render(<InkSidebar visible roots={[{ path: '/vault', kind: 'vault' }]} api={f.api} onOpen={node => { opened.push(node.objectId) }} onShowFiles={() => {}} />)
+    await ui.click('在 A 中新建页面', row('A'))
     const created = f.calls.at(-1)!; assert.equal(created.type, 'create'); assert.equal('parentObjectId' in created && created.parentObjectId, 'A')
-    await ui.click('展开 A'); assert.match(row('A').textContent!, /子页/)
-    await ui.click('改名', row('A')); await ui.input('页面名称', '新标题'); await ui.click('确认改名')
+    assert.match(row('A').textContent!, /未命名/); assert.deepEqual(opened, ['created-1'])
+    await ui.click('A 操作', row('A')); await ui.click('改名'); await ui.input('页面名称', '新标题'); await ui.click('确定')
     assert.match(row('A').textContent!, /新标题/)
-    await ui.click('收藏', row('A')); assert.match(ui.body.querySelector('[aria-label="收藏"]')!.textContent!, /新标题/)
-    await ui.click('新标题', row('A')); assert.deepEqual(opened, ['A']); assert.match(ui.body.querySelector('[aria-label="最近"]')!.textContent!, /新标题/)
-    await ui.click('移动到…', row('A')); await ui.click('B', ui.body.querySelector('[aria-label="保存位置"]')!); await ui.click('确认')
+    await ui.click('新标题 操作', row('A')); await ui.click('收藏'); assert.match(ui.body.querySelector('[aria-label="收藏"]')!.textContent!, /新标题/)
+    await ui.click('新标题', row('A')); assert.deepEqual(opened, ['created-1', 'A']); assert.deepEqual(await f.api.states(), success([{ objectId: 'A', favorite: true, lastVisitedAt: 100 }]))
+    await ui.click('新标题 操作', row('A')); await ui.click('移动到…'); await ui.click('B', ui.body.querySelector('[aria-label="保存位置"]')!); await ui.click('确认')
     assert.equal(f.calls.at(-1)?.type, 'move'); await ui.click('展开 B'); assert.ok(row('B').querySelector('[data-page-id="A"]'))
-    await ui.click('移到回收站', row('A')); assert.deepEqual(saved, ['A']); assert.equal(ui.body.querySelector('[data-page-id="A"]'), null)
-    await ui.click('回收站'); f.setRestoreConflict(); await ui.click('恢复')
-    assert.match(ui.body.textContent!, /原位置不可用/)
+    await ui.click('新标题 操作', row('A')); await ui.click('移到回收站'); assert.deepEqual(saved, ['A']); assert.equal(ui.body.querySelector('section[aria-label="页面"] [data-page-id="A"]'), null)
+    await ui.click('回收站'); f.setRestoreConflict(); await ui.click('恢复 新标题')
+    assert.ok(ui.body.querySelector('[role="dialog"][aria-label="恢复到…"]'))
     await ui.click('vault', ui.body.querySelector('[aria-label="保存位置"]')!); await ui.click('确认')
-    assert.ok(row('A')); assert.equal(ui.body.querySelector('[aria-label="回收站内容"]')!.textContent, '回收站为空')
-    await ui.click('移到回收站', row('A')); await ui.click('永久删除'); await ui.click('取消')
+    assert.ok(row('A')); await ui.click('回收站'); assert.match(ui.body.querySelector('[aria-label="回收站内容"]')!.textContent!, /回收站为空/); assert.equal(ui.body.querySelector('[data-trash-id]'), null)
+    await ui.click('新标题 操作', row('A')); await ui.click('移到回收站'); await ui.click('回收站'); await ui.click('永久删除 新标题'); await ui.click('取消')
     assert.equal(f.calls.at(-1)?.type, 'trash')
-    await ui.click('永久删除'); await ui.click('确认永久删除'); assert.equal(f.calls.at(-1)?.type, 'delete')
+    await ui.click('永久删除 新标题'); await ui.click('确认永久删除'); assert.equal(f.calls.at(-1)?.type, 'delete')
     assert.match(ui.body.querySelector('[aria-label="回收站内容"]')!.textContent!, /回收站为空/)
-  } finally { await ui.close() }
+  } finally { release(); useDocTabs.setState({ tabs: previousTabs }); await ui.close() }
 })
 
 test('page drag sorts siblings and moves into a page; failed pre-trash save does not recycle', async () => {
   const f = fixture(), ui = await mountPageUI()
+  const previousTabs = useDocTabs.getState().tabs
+  useDocTabs.setState({ tabs: [{ id: 'failed-save', path: '/vault/A.md', title: 'A', content: 'unsaved', isDirty: true }] })
+  const release = registerDocumentSaveHandler('failed-save', () => { throw new Error('保存失败') })
   const drag = async (source: string, target: string) => {
     await act(async () => {
       const start = new ui.dom.window.Event('dragstart', { bubbles: true })
@@ -50,16 +60,16 @@ test('page drag sorts siblings and moves into a page; failed pre-trash save does
     })
   }
   try {
-    await ui.render(<PageSidebar roots={[{ path: '/vault', kind: 'vault' }]} api={f.api} onOpen={() => {}} onShowFiles={() => {}} beforeTrash={async () => { throw new Error('保存失败') }} />)
+    await ui.render(<InkSidebar visible roots={[{ path: '/vault', kind: 'vault' }]} api={f.api} onOpen={() => {}} onShowFiles={() => {}} />)
     await drag('B', '[aria-label="排在 A 之前"]')
     assert.deepEqual(f.orders, [{ parent: 'vault', ids: ['B', 'A'] }])
     await drag('B', '[data-page-id="A"] [draggable="true"]')
     assert.equal(f.calls.at(-1)?.type, 'move')
-    await ui.click('展开 A'); assert.ok(ui.body.querySelector('[data-page-id="A"] [data-page-id="B"]'))
-    await ui.click('移到回收站', ui.body.querySelector('[data-page-id="A"]')!)
+    assert.ok(ui.body.querySelector('[data-page-id="A"] [data-page-id="B"]'))
+    await ui.click('A 操作', ui.body.querySelector('[data-page-id="A"]')!); await ui.click('移到回收站')
     assert.match(ui.body.querySelector('[role="alert"]')!.textContent!, /保存失败/)
     assert.equal(f.calls.some(call => call.type === 'trash'), false)
-  } finally { await ui.close() }
+  } finally { release(); useDocTabs.setState({ tabs: previousTabs }); await ui.close() }
 })
 
 test('SaveToPicker search, breadcrumbs, preview, Main collision candidates, saved default, canvas and cancellation', async () => {
@@ -95,42 +105,50 @@ test('SaveToPicker search, breadcrumbs, preview, Main collision candidates, save
   } finally { await ui.close() }
 })
 
-test('PageHeader changes icon, cover, title, cover position and display options through versioned Main API', async () => {
+test('PageHeader and InkTopbar save icon, cover, title, position and display options through versioned Main API', async () => {
   const f = fixture(), ui = await mountPageUI()
+  Object.defineProperty(ui.dom.window, 'electronAPI', { value: { documentPages: f.api } })
   try {
-    await ui.render(<PageHeader objectId="A" root="/vault" title="A" api={f.api} />)
-    await ui.input('图标', 'lucide:star'); await ui.input('封面', 'https://example.test/cover.png')
-    await ui.input('页面标题', '改名标题'); await ui.input('字体', 'serif'); await ui.input('封面位置', '0.25')
-    await act(async () => { for (const box of ui.body.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')) box.click() })
-    await ui.click('保存页面属性')
-    assert.equal(f.calls[0].type, 'rename'); assert.equal(f.patches.length, 1)
-    assert.deepEqual(f.patches[0], { icon: 'lucide:star', cover: 'https://example.test/cover.png', ready_page: { font: 'serif', small_text: true, full_width: true, cover_y: 0.25 } })
+    await ui.render(<><PageHeader objectId="A" root="/vault" title="A" api={f.api} /><InkTopbar tab={{ id: 'A', objectId: 'A', path: '/vault/A.md', title: 'A', content: '', isDirty: false }} roots={[{ path: '/vault', kind: 'vault' }]} home={false} /></>)
+    await ui.click('更换图标'); await ui.input('自定义图标', 'lucide:star'); await ui.click('使用')
+    await ui.click('添加封面'); await ui.input('封面', 'https://example.test/cover.png'); await ui.click('使用')
+    await ui.input('页面标题', '改名标题')
+    await act(async () => { const title = ui.body.querySelector<HTMLTextAreaElement>('[aria-label="页面标题"]')!; title.focus(); title.dispatchEvent(new ui.dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) })
+    assert.equal(f.calls[0].type, 'rename')
+    await ui.click('调整位置')
+    // JSDOM has no geometry: give the cover a 100px frame, then drag down 25px.
+    const cover = ui.body.querySelector<HTMLElement>('.ink-cover')!
+    cover.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, right: 100, bottom: 100, width: 100, height: 100, toJSON() {} })
+    await act(async () => { cover.dispatchEvent(new ui.dom.window.MouseEvent('pointerdown', { clientY: 0, bubbles: true })); ui.dom.window.dispatchEvent(new ui.dom.window.MouseEvent('pointermove', { clientY: 25 })); ui.dom.window.dispatchEvent(new ui.dom.window.MouseEvent('pointerup')) })
+    await ui.click('保存位置')
     assert.equal(ui.body.querySelector<HTMLImageElement>('img')!.style.objectPosition, 'center 25%')
-    await ui.click('保存页面属性'); assert.equal(f.patches.length, 1)
-    await ui.input('封面', ''); await ui.click('保存页面属性'); assert.equal(ui.body.querySelector('img'), null)
+    await ui.click('页面选项'); await ui.click('衬线'); await ui.click('小字'); await ui.click('全宽')
+    assert.deepEqual(f.patches, [{ icon: 'lucide:star' }, { cover: 'https://example.test/cover.png' }, { ready_page: { cover_y: 0.25 } }, { ready_page: { font: 'serif' } }, { ready_page: { small_text: true } }, { ready_page: { full_width: true } }])
+    const properties = await f.api.properties('A'); assert.ok(properties.ok)
+    assert.deepEqual(properties.value.properties.ready_page, { cover_y: 0.25, font: 'serif', small_text: true, full_width: true })
+    await ui.click('更换封面'); await ui.click('移除封面'); assert.equal(ui.body.querySelector('img'), null)
+    await ui.click('更换图标'); await ui.click('移除'); await ui.click('添加图标'); await ui.input('自定义图标', '📚'); await ui.click('使用')
+    assert.ok(ui.body.querySelector('[aria-label="更换图标"]'))
   } finally { await ui.close() }
 })
 
-test('real workspace and view switch keep selection; missing vault is visible and not queried', async () => {
+test('InkSidebar root notice shows a missing vault without querying it', async () => {
   const ui = await mountPageUI(), f = fixture()
   let reads = 0
   Object.defineProperty(ui.dom.window, 'electronAPI', { value: { documentPages: f.api, document: { listFiles: async () => { reads++; return { success: true, items: [] } } }, vault: {
     get: async () => ({ status: 'missing', root: '/lost', defaultSuggestion: '/default' }), onChanged: () => () => {},
   } } })
-  const { PageViewSwitch, PageRootNotice } = await import('../renderer/modules/document/page-ui/PagePanel')
   const { useWorkspace } = await import('../renderer/stores/useWorkspace')
   const { useVault } = await import('../renderer/stores/useVault')
   const { usePagePanel } = await import('../renderer/modules/document/page-ui/page-panel-state')
-  function Panel() { const panel = usePagePanel(); return <><PageViewSwitch view={panel.view} onChange={panel.setView} /><PageRootNotice hasRoots={panel.roots.length > 0} />{panel.roots.length > 0 && <PageSidebar roots={panel.roots} api={f.api} onOpen={() => {}} onShowFiles={() => {}} beforeTrash={async () => {}} />}</> }
+  function Panel() { const panel = usePagePanel(); return <InkSidebar visible roots={panel.roots} api={f.api} onOpen={() => {}} /> }
   try {
     useWorkspace.getState().clearWorkspace()
     await ui.render(<Panel />)
     assert.match(ui.body.textContent!, /找不到资料库：\/lost/); assert.match(ui.body.textContent!, /重新选择资料库/)
-    await ui.click('文件'); assert.equal(ui.body.querySelector('[aria-pressed="true"]')!.textContent, '文件')
-    await ui.render(<Panel key="remount" />); assert.equal(ui.body.querySelector('[aria-pressed="true"]')!.textContent, '文件')
     await useWorkspace.getState().refreshFiles(); assert.equal(reads, 0); assert.equal(f.treeCalls, 0)
     await act(async () => useVault.setState({ view: { phase: 'loaded', data: { status: 'unconfigured', defaultSuggestion: '/default' } } }))
-    assert.match(ui.body.textContent!, /设置资料库 \/ 打开文件夹/)
+    assert.match(ui.body.textContent!, /设置资料库.*打开文件夹/)
     assert.deepEqual(pageRoots({ status: 'missing', root: '/lost', defaultSuggestion: '' }, '/lost', ['/lost', '/external']), [{ path: '/external', kind: 'external' }])
   } finally { await ui.close() }
 })
@@ -149,13 +167,16 @@ test('late page-tree responses never replace a new empty root', async () => {
 test('favorite and recent updates do not rescan the page tree', async () => {
   const f = fixture(), ui = await mountPageUI()
   try {
-    await ui.render(<PageSidebar roots={[{ path: '/vault', kind: 'vault' }]} api={f.api} onOpen={() => {}} onShowFiles={() => {}} beforeTrash={async () => {}} />)
+    await ui.render(<InkSidebar visible roots={[{ path: '/vault', kind: 'vault' }]} api={f.api} onOpen={() => {}} onShowFiles={() => {}} />)
     const initialReads = f.treeCalls
-    await ui.click('收藏', ui.body.querySelector('[data-page-id="A"]')!)
+    await ui.click('A 操作', ui.body.querySelector('[data-page-id="A"]')!); await ui.click('收藏')
     await ui.click('A', ui.body.querySelector('[data-page-id="A"]')!)
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 100)) })
     assert.equal(f.treeCalls, initialReads)
     assert.match(ui.body.querySelector('[aria-label="收藏"]')!.textContent!, /A/)
-    assert.match(ui.body.querySelector('[aria-label="最近"]')!.textContent!, /A/)
+    Object.defineProperty(ui.dom.window, 'electronAPI', { value: { documentPages: f.api } })
+    await ui.render(<InkHome roots={[{ path: '/vault', kind: 'vault' }]} visible />)
+    assert.match(ui.body.querySelector('[aria-label="最近访问"]')!.textContent!, /A/)
   } finally { await ui.close() }
 })
 
@@ -168,7 +189,6 @@ test('connected page sidebar and file opening share one object-bound tab', async
     completeMigration: async migrationId => ({ migrationId, state: 'completed', resolved: [], unresolved: [] }),
   }
   Object.defineProperty(ui.dom.window, 'electronAPI', { value: { documentPages: f.api, objects } })
-  const { ConnectedPageSidebar } = await import('../renderer/modules/document/page-ui/PagePanel')
   const { useDocTabs, settleDocTabObjects } = await import('../renderer/stores/useDocTabs')
   try {
     useDocTabs.getState().openTab('/vault/A.md') // Same entry as FileTree.
@@ -177,7 +197,7 @@ test('connected page sidebar and file opening share one object-bound tab', async
     assert.ok(original)
     useDocTabs.getState().openTab('')
     assert.notEqual(useDocTabs.getState().activeTabId, original.id)
-    await ui.render(<ConnectedPageSidebar roots={[{ path: '/vault', kind: 'vault' }]} onFiles={() => {}} />)
+    await ui.render(<InkSidebar visible roots={[{ path: '/vault', kind: 'vault' }]} />)
     await ui.click('A', ui.body.querySelector('[data-page-id="A"]')!)
     await settleDocTabObjects()
     assert.equal(ui.body.querySelector('[role="alert"]'), null)

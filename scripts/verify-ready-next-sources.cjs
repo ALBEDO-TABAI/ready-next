@@ -69,6 +69,7 @@ async function main() {
       localStorage.setItem('ready-workspace-root', root); localStorage.setItem('ready-pinned-folders', JSON.stringify([root]))
     }, vault)
     await app.close(); await launch(); await mode('document')
+    await page.locator('.ink-doc-app').waitFor({ state: 'visible' })
     const imported = await page.evaluate(file => window.electronAPI.library.importFiles([file]), bookFile)
     assert.ok(imported.success && imported.data.imported.length === 1)
     await page.locator('[data-library-entry="true"]').click()

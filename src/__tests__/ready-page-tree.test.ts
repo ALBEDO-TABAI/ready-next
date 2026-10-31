@@ -58,7 +58,7 @@ test('Renderer without an opened root issues zero directory reads, including ref
 
 test('Renderer consumes the merged Main tree and shows ambiguity with a file-view exit', async () => {
   const React = await import('react')
-  const { PageSidebar } = await import('../renderer/modules/document/page-ui/PageSidebar')
+  const { InkSidebar } = await import('../renderer/modules/document/ink/InkSidebar')
   const { mountPageUI, pageAPI } = await import('./utils/page-ui-harness')
   const rootPath = realpathSync(mkdtempSync(join(tmpdir(), 'ready-page-renderer-')))
   mkdirSync(join(rootPath, 'A')); mkdirSync(join(rootPath, 'b'))
@@ -68,12 +68,12 @@ test('Renderer consumes the merged Main tree and shows ambiguity with a file-vie
   const fixture = pageAPI(tree), ui = await mountPageUI()
   let fileView = ''
   try {
-    await ui.render(React.createElement(PageSidebar, { roots: [{ path: rootPath, kind: 'vault' }], api: fixture.api, onOpen: () => {}, beforeTrash: async () => {}, onShowFiles: node => { fileView = node.path } }))
+    await ui.render(React.createElement(InkSidebar, { visible: true, roots: [{ path: rootPath, kind: 'vault' }], api: fixture.api, onOpen: () => {}, onShowFiles: node => { fileView = node.path } }))
     assert.equal(ui.body.querySelectorAll(`[data-page-id="${join(rootPath, 'A')}"]`).length, 0)
     await ui.click('展开 合并页面')
     assert.match(ui.body.textContent!, /child/)
     assert.ok(ui.body.querySelector('[role="note"]'))
-    await ui.click('在文件视角中查看')
+    await ui.click('在文件中查看')
     assert.ok([join(rootPath, 'B.md'), join(rootPath, 'b')].includes(fileView))
   } finally { await ui.close(); rmSync(rootPath, { recursive: true, force: true }) }
   assert.equal(fixture.subscribed, false)

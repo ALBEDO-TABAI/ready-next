@@ -65,9 +65,9 @@ async function launch(profile) {
 
 // The workbench listens for mode requests only after it mounts; repeat the request until the scene is current.
 async function requestMode(page, mode) {
-  const scene = page.locator(`[data-workbench-mode-panel="${mode}"][data-mode-visual-state="current"]`)
+  const scene = mode === 'document' ? page.locator('.ink-doc-app') : page.locator(`[data-workbench-mode-panel="${mode}"][data-mode-visual-state="current"]`)
   const deadline = Date.now() + 30000
-  while (!(await scene.count())) {
+  while (!await scene.isVisible()) {
     if (Date.now() > deadline) throw new Error(`${mode} mode did not become current`)
     await page.evaluate(mode => window.dispatchEvent(new CustomEvent('ready:workbench-mode-change-request', { detail: { mode, placement: 'open', presentation: 'immediate' } })), mode)
     await page.waitForTimeout(400)
@@ -202,7 +202,7 @@ async function checkDateMentionBeforeRestart(app, page, root, profile) {
   const supported = await app.evaluate(({ Notification }) => Notification.isSupported())
   ok('M6-C notification is attempted once where supported', popups === (supported ? 1 : 0), `attempts=${popups}; supported=${supported}`)
   await chip.click()
-  await page.locator('[data-workbench-mode-panel="document"][data-mode-visual-state="current"]').waitFor()
+  await page.locator('.ink-doc-app').waitFor({ state: 'visible' })
   await page.locator('[data-ready-block-editor] a[data-ready-date-mention]').filter({ hasText: title }).waitFor({ state: 'visible' })
   ok('M6-C reminder opens its original document', true)
   return { id: row.id, date, title, path: location.path, deliveredAt: delivered.deliveredAt, popups }
@@ -240,9 +240,8 @@ async function checkObjectPresentationBeforeRestart(app, page, root) {
   }, { root, from })
   await page.reload()
   await requestMode(page, 'document')
-  // This step is about the file tree: show the 文件 view, then expand the collapsed vault folder as a person would.
-  const filesView = page.getByRole('group', { name: '侧栏视角' }).getByRole('button', { name: '文件', exact: true })
-  if (await filesView.isVisible().catch(() => false) && await filesView.getAttribute('aria-pressed') !== 'true') await filesView.click()
+  await page.locator('.ink-doc-app').waitFor({ state: 'visible' })
+  // Expand the outer file manager's vault folder.
   const fileRow = page.getByText('i2-a.md', { exact: true }).first()
   if (!await fileRow.isVisible().catch(() => false)) await page.getByText(path.basename(root), { exact: true }).first().click({ timeout: 20000 })
   await fileRow.click({ timeout: 20000 })
@@ -274,19 +273,20 @@ async function checkObjectPresentationAfterRestart(page, identity) {
     position: JSON.parse(localStorage.getItem('ready-object-reading-positions-v1') || '[]').find(row => row.key === objectId),
   }), identity)
   ok('C2 reopening retains one tab, appearance and reading position', restored.tabs.length === 1 && restored.appearance?.icon === '🐙' && restored.position?.top > 0, JSON.stringify(restored))
-  // The M6 meeting note opens its own tab before the restart; bring this tab to the front through the tab rail.
-  const activeTab = await page.evaluate(() => JSON.parse(localStorage.getItem('ready-doc-tabs-v2') || '{}').state?.activeTabId)
-  if (activeTab !== restored.tabs[0].id) await page.locator(`[title^="${path.basename(identity.path)}"]`).first().click({ timeout: 20000 })
-  await page.locator('.document-path-bar').getByText(identity.path, { exact: true }).waitFor({ timeout: 20000 })
-  ok('C2 the visible document header shows the final path', true)
+  // Reopen through the file manager; the document topbar exposes the path on its breadcrumb.
+  const fileLabel = page.getByText(path.basename(identity.path), { exact: true }).first()
+  if (!await fileLabel.isVisible()) await page.getByText(path.basename(path.dirname(identity.path)), { exact: true }).first().click()
+  await fileLabel.click()
+  await page.getByLabel('文档顶栏', { exact: true }).getByTitle(identity.path, { exact: true }).waitFor({ timeout: 20000 })
+  ok('C2 the visible document breadcrumb retains the final path', true)
   // Scroll scopes are keyed by object id (path only for files without one).
   await page.waitForFunction(({ path, objectId }) => Array.from(document.querySelectorAll('[data-ready-document-scroll-key]')).some(scope =>
     [objectId, path].includes(scope.getAttribute('data-ready-document-scroll-key')) && [scope, ...scope.querySelectorAll('*')].some(element => element.scrollTop > 0)), identity, { timeout: 20000 })
   ok('C2 the reopened document visibly restores its reading position', true)
-  // The document tab rail renders each tab with its title attribute; the custom icon is its visible glyph.
-  const iconShown = await page.waitForFunction(name => [...document.querySelectorAll('[title]')]
-    .some(el => el.getAttribute('title').startsWith(name) && el.textContent.includes('🐙')), path.basename(identity.path), { timeout: 15000 }).then(() => true, () => false)
-  ok('C2 the reopened tab visibly retains its custom icon', iconShown)
+  // File appearance now remains visible in the file manager, while page icons belong to page properties.
+  const fileRow = fileLabel.locator('xpath=ancestor::*[@draggable][1]')
+  await fileRow.getByText('🐙', { exact: true }).waitFor({ timeout: 15000 })
+  ok('C2 the reopened file visibly retains its custom icon', true)
 }
 
 // R3b: calendar-union currently has no reference item in its chip context menu,

@@ -40,8 +40,8 @@ async function main() {
       if (!page) await new Promise(resolve => setTimeout(resolve, 100))
     }
     assert.ok(page, 'Ready Next renderer did not appear')
-    // The draft bar only appears once a vault is open; the mode panel is the stable signal on a fresh profile.
-    while (!await page.locator('[data-workbench-mode-panel="document"][data-mode-visual-state="current"]').isVisible().catch(() => false)) {
+    // The document shell is visible even when the topbar has no draft controls to show.
+    while (!await page.locator('.ink-doc-app').isVisible().catch(() => false)) {
       assert.ok(Date.now() < deadline, 'Document mode did not open')
       await page.evaluate(() => window.dispatchEvent(new CustomEvent('ready:workbench-mode-change-request', { detail: { mode: 'document', placement: 'open', presentation: 'immediate' } })))
       await page.waitForTimeout(150)
@@ -65,12 +65,13 @@ async function main() {
     console.log(`PASS ${label}: disk/database readback + screenshot`)
   }
   const sidebar = () => page.getByLabel('页面侧栏', { exact: true })
-  const row = id => sidebar().locator(`[data-page-id="${id}"]`)
+  const row = id => sidebar().locator(`section[aria-label="页面"] [data-page-id="${id}"]`)
   const createPage = async title => {
-    await sidebar().getByRole('button', { name: '新建页面', exact: true }).first().click()
-    const picker = sidebar().getByRole('dialog', { name: '保存到…', exact: true })
-    await picker.getByLabel('标题', { exact: true }).fill(title)
-    await picker.getByRole('button', { name: '确认', exact: true }).click(); await picker.waitFor({ state: 'detached' })
+    await sidebar().getByRole('button', { name: '在 测试资料库 中新建页面', exact: true }).click()
+    await page.waitForFunction(() => { const input = document.querySelector('textarea[aria-label="页面标题"]'); return input?.value === '未命名' && !input.disabled })
+    const input = page.getByRole('textbox', { name: '页面标题', exact: true })
+    await input.fill(title); await input.press('Enter')
+    await sidebar().locator('.ink-sb-label-btn').filter({ hasText: new RegExp(`^${title}$`) }).waitFor()
     return page.evaluate(async ({ vault, title }) => {
       const result = await window.electronAPI.documentPages.tree({ path: vault, kind: 'vault' })
       if (!result.ok) throw new Error(result.message)
@@ -79,18 +80,23 @@ async function main() {
       return node.objectId
     }, { vault, title })
   }
-  const actions = async id => { const details = row(id).locator('details').first(); if (!await details.evaluate(element => element.open)) await details.locator('summary').click() }
+  const action = async (id, title, label) => {
+    await row(id).getByRole('button', { name: `${title} 操作`, exact: true }).click()
+    await page.getByRole('menu').getByRole('menuitem', { name: label, exact: true }).click()
+  }
   const mod = process.platform === 'darwin' ? 'Meta' : 'Control'
   try {
     await launch()
     await page.evaluate(async root => { const result = await window.electronAPI.vault.set(root); if (result.status !== 'ready') throw new Error('Vault not ready') }, vault)
-    await page.getByRole('group', { name: '侧栏视角' }).getByRole('button', { name: '页面', exact: true }).click()
+    await page.locator('.ink-doc-app').waitFor({ state: 'visible' })
     await snapshot('01-empty-profile-vault')
     const parentId = await createPage('父页')
     await row(parentId).getByRole('button', { name: '父页', exact: true }).click()
-    const header = page.getByRole('banner', { name: '页面头部' })
-    await header.getByLabel('图标', { exact: true }).fill('🌱'); await header.getByLabel('页面标题').fill('验收页')
-    await header.getByRole('button', { name: '保存页面属性' }).click()
+    const header = page.getByLabel('页面头部', { exact: true })
+    await header.getByRole('button', { name: '添加图标', exact: true }).click()
+    const icon = page.getByRole('dialog', { name: '选择图标', exact: true })
+    await icon.getByLabel('自定义图标').fill('🌱'); await icon.getByRole('button', { name: '使用', exact: true }).click()
+    await header.getByLabel('页面标题').fill('验收页'); await header.getByLabel('页面标题').press('Enter')
     await row(parentId).getByRole('button', { name: '验收页', exact: true }).waitFor()
     const parentFile = path.join(vault, '验收页.md')
     assert.match(fs.readFileSync(parentFile, 'utf8'), /🌱/)
@@ -121,7 +127,7 @@ async function main() {
     if (tabOpen) await row(parentId).getByRole('button', { name: '验收页', exact: true }).click()
     else {
       await page.getByRole('button', { name: /^未保存的草稿/ }).click()
-      await page.getByTestId(`draft-recovery-${recovered.draftId}`).getByRole('button', { name: recovered.title || '未命名草稿', exact: true }).click()
+      await page.getByTestId(`draft-recovery-${recovered.draftId}`).locator('button.ink-sb-label-btn').click()
     }
     await page.locator('.draggable-mode-switch__label--edit:visible').first().click()
     const source = page.locator('textarea.document-source-textarea:visible').first()
@@ -132,8 +138,8 @@ async function main() {
     while (fs.readFileSync(parentFile, 'utf8') !== original && Date.now() < savedDeadline) await page.waitForTimeout(100)
     assert.equal(fs.readFileSync(parentFile, 'utf8'), original)
     await snapshot('04-sigkill-restored')
-    // Create an untitled tab through the actual tab-rail button.
-    await page.getByRole('button', { name: '新建', exact: true }).first().click()
+    // Create an untitled document through the app shortcut.
+    await page.keyboard.press(`${mod}+t`)
     await page.locator('.draggable-mode-switch__label--edit:visible').first().click()
     await source.fill('子页草稿正文')
     await page.getByTestId('draft-status').filter({ hasText: '已持久确认' }).waitFor()
@@ -148,8 +154,8 @@ async function main() {
     // A real indexed reference, created through the page service, follows the move.
     const ref = await page.evaluate(async root => window.electronAPI.documentPages.operate({ type: 'create', root, parentPath: root, operationId: crypto.randomUUID(), title: '引用页', content: '[[验收页]]' }), vault)
     assert.ok(ref.ok)
-    await actions(parentId); await row(parentId).getByRole('button', { name: '移动到…', exact: true }).click()
-    const move = sidebar().getByRole('dialog', { name: '移动到…', exact: true })
+    await action(parentId, '验收页', '移动到…')
+    const move = page.getByRole('dialog', { name: '移动到…', exact: true })
     await move.getByRole('treeitem', { name: '目标页', exact: true }).click(); await move.getByRole('button', { name: '确认', exact: true }).click(); await move.waitFor({ state: 'detached' })
     const moved = path.join(vault, '目标页', '验收页.md')
     assert.ok(fs.existsSync(moved)); assert.ok(!fs.existsSync(parentFile))
@@ -160,10 +166,10 @@ async function main() {
     assert.match(fs.readFileSync(path.join(vault, '目标页', '验收页', '子稿.md'), 'utf8'), /子页草稿正文/)
     await snapshot('06-move-reference')
     await row(targetId).getByRole('button', { name: '展开 目标页', exact: true }).click()
-    await actions(parentId); await row(parentId).getByRole('button', { name: '移到回收站', exact: true }).click(); await row(parentId).waitFor({ state: 'detached' })
+    await action(parentId, '验收页', '移到回收站'); await row(parentId).waitFor({ state: 'detached' })
     assert.ok(!fs.existsSync(moved)); await snapshot('07-trash')
-    await sidebar().getByRole('button', { name: '回收站', exact: true }).click()
-    await sidebar().getByRole('button', { name: '恢复', exact: true }).click(); await sidebar().getByText('回收站为空', { exact: true }).waitFor()
+    await page.getByRole('navigation', { name: '文档侧栏' }).getByRole('button', { name: '回收站', exact: true }).click()
+    await page.getByLabel('回收站内容', { exact: true }).getByRole('button', { name: '恢复 验收页', exact: true }).click(); await page.getByText('回收站为空', { exact: true }).waitFor()
     assert.ok(fs.existsSync(moved)); assert.match(fs.readFileSync(moved, 'utf8'), /中文第一段\n\n第二段/)
     await snapshot('08-restored')
     assert.deepEqual(await page.getByRole('alert').allTextContents(), [])
