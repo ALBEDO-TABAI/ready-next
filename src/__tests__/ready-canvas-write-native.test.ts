@@ -234,7 +234,8 @@ test('C3 adding an attachment to a dirty canvas retains both contents and later 
 })
 
 // M4-E3: real page service, canvas handle, disk readback and relation repository.
-test('M4-E3 canvas subpage is created in X and its link is committed through the node buffer', async () => {
+test('M4-E3 canvas subpage is created in X and its link is committed through the node buffer', async t => {
+  if (skipIfSqliteUnavailable(t, 'canvas subpages')) return
   const { DocumentPageService } = await import('../main/modules/document-pages/service')
   const { NodeBuffer } = await import('../renderer/components/canvas/cards/node-buffer')
   const { mkdirSync } = await import('node:fs')
@@ -262,7 +263,8 @@ test('M4-E3 canvas subpage is created in X and its link is committed through the
   } finally { f.close() }
 })
 
-test('M4-E3 node wiki relations resolve from the canvas folder before the vault root', async () => {
+test('M4-E3 node wiki relations resolve from the canvas folder before the vault root', async t => {
+  if (skipIfSqliteUnavailable(t, 'canvas relations')) return
   const { mkdirSync, writeFileSync } = await import('node:fs')
   const { ObjectLinkRepository } = await import('../main/modules/search-engine/object-links')
   const f = canvasFixture()
