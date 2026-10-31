@@ -118,6 +118,11 @@ async function main() {
     }
     assert.equal(fields(fs.readFileSync(rowFile, 'utf8')).内容, '外部修改')
     await snapshot('05-external-refresh')
+    // The database page itself shows the full database in the page view, under its header.
+    await page.getByRole('group', { name: '侧栏视角' }).getByRole('button', { name: '页面', exact: true }).click()
+    await page.getByLabel('页面侧栏', { exact: true }).getByRole('button', { name: '验收库', exact: true }).first().click()
+    await page.locator('[data-ready-database-page] .ready-database[data-view-type]:visible').first().waitFor({ timeout: 20000 })
+    await snapshot('06-database-page')
     console.log(`PASS M5-B real UI; evidence=${evidence}`)
   } finally {
     if (app) await app.close()
