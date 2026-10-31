@@ -33,26 +33,30 @@ function electronEnv(extra) {
 
 async function launch(profile) {
   step('launch Electron')
-  // Instrument the real notification call before Main boot, including cold-start recovery.
-  const traceHook = path.join(profile, 'm6c-notification-hook.cjs')
-  fs.writeFileSync(traceHook, `if (process.type === 'browser') {
-    const { Notification } = require('electron'), fs = require('node:fs')
-    const show = Notification.prototype.show
-    Notification.prototype.show = function () {
-      fs.appendFileSync(${JSON.stringify(path.join(profile, 'm6c-notifications.jsonl'))}, JSON.stringify({ title: this.title, at: Date.now() }) + '\\n')
-      return show.apply(this, arguments)
-    }
-  }`)
   const app = await _electron.launch({
     executablePath: require('electron'),
     args: [process.cwd()],
-    env: electronEnv({ READY_USER_DATA_DIR: profile, NODE_OPTIONS: `${process.env.NODE_OPTIONS || ''} --require=${JSON.stringify(traceHook)}` }),
+    env: electronEnv({ READY_USER_DATA_DIR: profile }),
     timeout: 45000,
   })
   const deadline = Date.now() + 90000
   while (Date.now() < deadline) {
     const page = app.windows().find(w => w.url().includes('/renderer/index.html'))
-    if (page) { step(`renderer ready: ${page.url()}`); return { app, page } }
+    if (page) {
+      step(`renderer ready: ${page.url()}`)
+      // Electron ignores --require in NODE_OPTIONS, so record notification attempts from inside Main once it is up.
+      await app.evaluate(({ Notification }, file) => {
+        const fs = process.getBuiltinModule('node:fs')
+        if (Notification.prototype.show.__readySmoke) return
+        const show = Notification.prototype.show
+        Notification.prototype.show = function () {
+          fs.appendFileSync(file, JSON.stringify({ title: this.title, at: Date.now() }) + '\n')
+          return show.apply(this, arguments)
+        }
+        Notification.prototype.show.__readySmoke = true
+      }, path.join(profile, 'm6c-notifications.jsonl'))
+      return { app, page }
+    }
     await new Promise(resolve => setTimeout(resolve, 250))
   }
   await app.close()
@@ -162,7 +166,7 @@ function mentionPopups(profile, title) {
   const file = path.join(profile, 'm6c-notifications.jsonl')
   return fs.existsSync(file) ? fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)).filter(row => row.title === title).length : 0
 }
-async function checkDateMentionBeforeRestart(page, root, profile) {
+async function checkDateMentionBeforeRestart(app, page, root, profile) {
   const title = 'M6-C one-minute reminder'
   // The date format has minute precision: use the first complete minute at least 60 seconds away.
   const at = new Date(Math.ceil((Date.now() + 60000) / 60000) * 60000)
@@ -193,7 +197,10 @@ async function checkDateMentionBeforeRestart(page, root, profile) {
   await chip.filter({ hasText: '已提醒' }).waitFor({ state: 'visible' })
   ok('M6-C due reminder remains visible in calendar', true)
   const popups = mentionPopups(profile, title)
-  ok('M6-C notification is attempted once', popups === 1, `attempts=${popups}; OS notification support required`)
+  // Where the OS offers notifications Ready shows exactly one; where it does not, none is attempted and the
+  // reminder still counts as delivered and stays visible (checked above).
+  const supported = await app.evaluate(({ Notification }) => Notification.isSupported())
+  ok('M6-C notification is attempted once where supported', popups === (supported ? 1 : 0), `attempts=${popups}; supported=${supported}`)
   await chip.click()
   await page.locator('[data-workbench-mode-panel="document"][data-mode-visual-state="current"]').waitFor()
   await page.locator('[data-ready-block-editor] a[data-ready-date-mention]').filter({ hasText: title }).waitFor({ state: 'visible' })
@@ -554,7 +561,7 @@ async function checkIdentityAndFastCard() {
     const calendarReference = { ...await checkCalendarReference(page), r45Url }
     const calendarLinks = await checkCalendarLinksBeforeRestart(page, calendarReference, created.root)
     await checkCalendarLayers(page, created.root)
-    const dateMention = await checkDateMentionBeforeRestart(page, created.root, profile)
+    const dateMention = await checkDateMentionBeforeRestart(app, page, created.root, profile)
     step('close app')
     await withTimeout(app.close(), 150000, 'close app')
     app = undefined

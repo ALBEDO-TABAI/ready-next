@@ -126,7 +126,14 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     onKeyDown={shortcut} onKeyUp={e => { if (e.key === ' ') gestures.space = false }}
     onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) gestures.cancel() }}
     onPointerDown={e => gestures.down(e.nativeEvent)} onPointerMove={e => gestures.move(e.nativeEvent)} onPointerUp={e => gestures.up(e.nativeEvent)}
-    onPointerCancel={() => gestures.cancel()} onLostPointerCapture={() => gestures.cancel()}>
+    onPointerCancel={() => gestures.cancel()} onLostPointerCapture={() => gestures.cancel()}
+    onDoubleClick={e => {
+      // A drag gesture captures the pointer on the root, so the browser retargets the double-click to the root:
+      // find the card under the pointer instead of relying on the card's own handler.
+      const hit = e.target instanceof Element && e.target !== e.currentTarget ? e.target : document.elementFromPoint(e.clientX, e.clientY)
+      const card = hit?.closest<HTMLElement>('[data-node-id]'), node = card?.dataset.nodeId ? byId.get(card.dataset.nodeId) : undefined
+      if (node && !hit?.closest('[data-canvas-ui]')) open(node)
+    }}>
     <div className="canvas-toolbar" data-canvas-ui>
       <nav aria-label="画板路径">{props.breadcrumbs?.map(b => <button key={b.id} onClick={() => props.onNavigateAncestor?.(b.id)} disabled={!props.onNavigateAncestor || busy}>{b.title} /</button>)}<strong>{canvas.ready.title || '画板'}</strong></nav>
       <div role="toolbar" aria-label="画板工具">
@@ -163,7 +170,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
           {e.label && <text x={(from.x + to.x) / 2} y={(from.y + to.y) / 2}>{e.label}</text>}
         </g> })}
       </svg>
-      {active.nodes.map(node => <CanvasCard key={node.id} node={node} selected={selected.includes(node.id)} visible={visibleIds.has(node.id)} element={bindElement} open={open} resolveAsset={props.resolveAsset}
+      {active.nodes.map(node => <CanvasCard key={node.id} node={node} selected={selected.includes(node.id)} visible={visibleIds.has(node.id)} element={bindElement} resolveAsset={props.resolveAsset}
         content={visibleIds.has(node.id) ? props.renderCard?.(node) : undefined}
         editor={editing === node.id ? <CanvasEditorLifecycle.Provider value={registerFinish}><div data-canvas-ui className="canvas-editor">
           <div inert={closing}>{props.renderTextEditor?.({ node, commit, close: () => { void closeEditor() } })}</div>

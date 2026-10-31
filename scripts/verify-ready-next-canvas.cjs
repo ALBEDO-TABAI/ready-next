@@ -58,7 +58,7 @@ async function main() {
     await page.evaluate(async root => { const state = await window.electronAPI.vault.set(root); if (state.status !== 'ready') throw new Error('Vault not ready') }, vault)
     const seeded = await page.evaluate(async root => {
       const api = window.electronAPI
-      const doc = await api.documentPages.operate({ type: 'create', root, title: '来源文档', content: '# 来源\n\n真实正文', operationId: crypto.randomUUID() })
+      const doc = await api.documentPages.operate({ type: 'create', root, parentPath: root, title: '来源文档', content: '# 来源\n\n真实正文', operationId: crypto.randomUUID() })
       if (!doc.ok) throw new Error(doc.message)
       const canvas = await api.canvas.create({ path: 'X.canvas', operationId: crypto.randomUUID(), canvas: { nodes: [], edges: [], ready: { id: crypto.randomUUID(), schemaVersion: 1, title: 'X' } } })
       if (!canvas.ok) throw new Error(canvas.error)
@@ -87,7 +87,7 @@ async function main() {
     await snapshot('02-chinese-undo')
     await page.locator(`[data-node-id="${textId}"]`).click()
     await page.locator(`[data-node-id="${textId}"]`).click({ button: 'right' })
-    await page.getByRole('button', { name: '添加到文档', exact: true }).click()
+    await page.getByRole('menuitem', { name: '添加到文档', exact: true }).click()
     await poll(() => readCanvas().nodes.some(node => node.ready.kind === 'draft'), 'Draft card missing')
     await reveal(seeded.canvasId)
     await page.locator('[data-kind="draft"]').getByRole('button', { name: '保存到…', exact: true }).click()

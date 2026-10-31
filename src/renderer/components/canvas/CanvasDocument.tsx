@@ -90,7 +90,14 @@ export default function CanvasDocument({ tab }: { tab: DocTab }) {
   </section>
   if (!opened || !previews) return <p role={error ? 'alert' : 'status'}>{error || '正在打开画板…'}</p>
   const add = (node: Parameters<typeof write>[0][number]) => run(() => write([node]))
-  const geometry = () => ({ id: crypto.randomUUID(), x: 80 + opened.canvas.nodes.length * 32, y: 80, width: 300, height: 180 })
+  // New cards take the first free slot on a grid, so they never land on top of an existing card.
+  const geometry = () => {
+    const width = 300, height = 180, gap = 32, nodes = opened.canvas.nodes
+    for (let slot = 0; ; slot++) {
+      const x = 80 + (slot % 4) * (width + gap), y = 80 + Math.floor(slot / 4) * (height + gap)
+      if (!nodes.some(node => x < node.x + node.width && x + width > node.x && y < node.y + node.height && y + height > node.y)) return { id: crypto.randomUUID(), x, y, width, height }
+    }
+  }
   return <div className="flex flex-col flex-1 min-h-0" data-testid="canvas-document">
     <div className="flex gap-2 p-2" data-canvas-ui>
       <button onClick={() => add({ type: 'addNode', node: { ...geometry(), type: 'text', text: '新文字卡', ready: { kind: 'text' } } })}>添加文字卡</button>

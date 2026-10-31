@@ -8,7 +8,6 @@ interface Props {
   node: CanvasNode; visible: boolean; selected: boolean; editor?: ReactNode; content?: ReactNode
   element: (id: string, el: HTMLDivElement | null) => void
   resolveAsset?: (path: string) => string | undefined
-  open: (node: CanvasNode) => void
 }
 function Preview({ node: n, resolveAsset }: Pick<Props, 'node' | 'resolveAsset'>) {
   const g = n.ready.graphic
@@ -24,7 +23,7 @@ function Preview({ node: n, resolveAsset }: Pick<Props, 'node' | 'resolveAsset'>
   if (src && n.ready.kind === 'audio') return <audio controls preload="none" src={src} />
   return <><small>{({ image: '图片', audio: '音频', video: '视频', document: '文档', subcanvas: '子画板' })[n.ready.kind] || n.ready.kind}</small><strong>{n.ready.preview?.title || n.file}</strong><p>{n.ready.preview?.description}</p></>
 }
-export const CanvasCard = memo(function CanvasCard({ node, visible, selected, editor, content, element, resolveAsset, open }: Props) {
+export const CanvasCard = memo(function CanvasCard({ node, visible, selected, editor, content, element, resolveAsset }: Props) {
   const a = node.ready.appearance, frame = cardFrame(node)
   const style: CSSProperties = { left: frame.x, top: frame.y, width: frame.width, height: frame.height,
     borderStyle: node.ready.kind === 'draft' ? 'dashed' : undefined,
@@ -32,7 +31,7 @@ export const CanvasCard = memo(function CanvasCard({ node, visible, selected, ed
     background: a?.background, color: a?.color, fontSize: a?.fontScale ? `${a.fontScale * 24}px` : undefined,
     textAlign: a?.align, fontWeight: a?.weight ? ({ light: 300, regular: 400, medium: 500, bold: 700 })[a.weight] : undefined }
   return <div ref={el => element(node.id, el)} data-node-id={node.id} data-selected={selected} data-kind={node.ready.kind}
-    data-lightweight={!visible && !editor} className="canvas-card" style={style} onDoubleClick={() => open(node)}>
+    data-lightweight={!visible && !editor} className="canvas-card" style={style}>
     {(visible || editor) && <div data-node-detail className="canvas-card-content">{editor ?? content ?? <Preview node={node} resolveAsset={resolveAsset} />}</div>}
     {selected && visible && <button type="button" data-resize aria-label="调整卡片尺寸" className="canvas-resize" />}
   </div>
