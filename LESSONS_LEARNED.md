@@ -190,4 +190,16 @@ macOS 的 `/var` 指向 `/private/var`。页面服务等按规范路径比较的
 
 本轮这些问题都只在真实 Electron 中出现：手柄裁剪、双击失效、注释成为移动停靠点、撤销后偏移失效、首次运行草稿卡住。每项功能至少有一条真实窗口脚本，每一步都回读磁盘。
 
+### 9.8 全局输入框材质带 !important
+
+`base-chrome.css` 用 `!important` 给所有输入框套 Ready 的槽位材质。自定义输入（如页面大标题）要加 `ready-input-slot-inner` 退出，否则会多出一圈边框和底色。
+
+### 9.9 iframe 自适应高度要量内容
+
+`documentElement.scrollHeight` 不会小于 iframe 自身高度。一旦变高，内容变短后也缩不回去，会留下空白。应测量内容底部，例如 body 子元素的底边。
+
+### 9.10 传送到 body 的弹层拿不到作用域令牌
+
+令牌限定在 `.ink-scope` 时，传送到 body 的弹层根节点也要带上这个类，或者直接写明取值，否则变量全部失效。
+
 文档导航、状态与归档规则见 `docs/README.md`。
