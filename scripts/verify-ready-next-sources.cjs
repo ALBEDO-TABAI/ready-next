@@ -43,7 +43,9 @@ async function main() {
     await page.keyboard.press(process.platform === 'darwin' ? 'Meta+k' : 'Control+k')
     await page.getByRole('combobox', { name: '搜索所有对象和命令' }).fill(path.basename(file, '.md'))
     await page.getByRole('listbox').getByRole('button').filter({ hasText: path.basename(file) }).first().click()
-    await page.getByRole('button', { name: '预览', exact: true }).click()
+    // Pages open in the page view already; switch only when the source editor is showing.
+    await page.waitForTimeout(500)
+    if (!await page.locator('.note-preview-body:visible').count()) await page.getByRole('button', { name: '预览', exact: true }).click({ force: true })
     await poll(() => page.locator('.note-preview-body:visible').count().then(n => n > 0), 'Source preview missing')
   }
   const markFile = folder => {

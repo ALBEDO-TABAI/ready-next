@@ -39,7 +39,7 @@ async function main() {
     await page.evaluate(async root => { const state = await window.electronAPI.vault.set(root); if (state.status !== 'ready') throw new Error('Vault not ready') }, vault)
     const seeded = await page.evaluate(async root => {
       const api = window.electronAPI, date = new Date().toISOString().slice(0, 10), start = Date.parse(`${date}T09:00:00Z`)
-      const page = await api.documentPages.operate({ type: 'create', root, title: '联动文档', content: '# 联动\n\n保留原文', operationId: crypto.randomUUID() })
+      const page = await api.documentPages.operate({ type: 'create', root, parentPath: root, title: '联动文档', content: '# 联动\n\n保留原文', operationId: crypto.randomUUID() })
       if (!page.ok) throw new Error(page.message)
       const canvas = await api.canvas.create({ path: '联动画板.canvas', operationId: crypto.randomUUID(), canvas: { ready: { id: crypto.randomUUID(), schemaVersion: 1, title: '联动画板' }, nodes: [], edges: [] } })
       if (!canvas.ok) throw new Error(canvas.error)

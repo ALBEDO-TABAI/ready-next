@@ -101,7 +101,8 @@ async function main() {
     // Close every document tab using its normal close control before transferring.
     const closeButtons = page.locator('[data-workbench-mode-panel="document"] button[title="关闭"]')
     assert.ok(await closeButtons.count(), 'Cannot find document tab close controls')
-    while (await closeButtons.count()) await closeButtons.first().click()
+    // The tab's close control can sit under the rail's new-document button; click the control itself.
+    while (await closeButtons.count()) await closeButtons.first().click({ force: true })
     const receipt = await page.evaluate(async objectId => {
       const item = { id: crypto.randomUUID(), kind: 'text', text: '浏览器 FastCard 文字', createdAt: Date.now(), source: { pageUrl: 'https://example.com', pageTitle: 'Example' } }
       const added = await window.electronAPI.browser.addFastCardItem(item)

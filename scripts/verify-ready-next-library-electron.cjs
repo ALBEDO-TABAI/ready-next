@@ -69,7 +69,7 @@ async function checkArchiveImport(app, page, fixtures, vaultRoot) {
     if (!book) throw new Error('archive fixture book missing')
     const md = fs.readFileSync(book.notePath, 'utf8')
     ok('archive source preserves annotations and unlocated text', md.includes('原批注') && md.includes('未定位') && md.includes('找不到'))
-    ok('archive anchors exist', fs.existsSync(path.join(vaultRoot, '.ready', 'anchors', `${book.id}.json`)))
+    ok('archive anchors exist', fs.existsSync(path.join(vaultRoot, '.ready', 'anchors', `${book.id}.highlights.json`)))
     const reading = await page.evaluate(async id => ({ position: await window.electronAPI.library.getPosition(id), bookmarks: await window.electronAPI.library.listBookmarks(id) }), book.id)
     ok('archive reading records persist', reading.position.success && reading.position.data.offset === 5 && reading.bookmarks.success && reading.bookmarks.data.length === 1)
     await modal.getByRole('button', { name: '关闭', exact: true }).click()
@@ -170,7 +170,7 @@ async function checkHighlights(page, book, vaultRoot) {
   const id = source.match(/^\^(hl-[\w-]+)$/m)?.[1]
   ok('drag writes the quote block into the source note', id && source.includes('> [!quote|yellow]') && source.includes(`> ${selected}`), source)
   if (!id) throw new Error('highlight id missing from source note')
-  const anchors = JSON.parse(fs.readFileSync(path.join(vaultRoot, '.ready', 'anchors', `${book.id}.json`), 'utf8'))
+  const anchors = JSON.parse(fs.readFileSync(path.join(vaultRoot, '.ready', 'anchors', `${book.id}.highlights.json`), 'utf8'))
   ok('sidecar is published after the source block', anchors.version === 1 && anchors.highlights[id]?.quote.exact === selected)
   const restoredOnVisiblePage = async () => page.waitForFunction(({ id, selected }) => {
     const folios = document.querySelector('.rn-library .rd-dock span')?.textContent.split('/')[0].match(/\d+/g)?.map(Number) ?? []
