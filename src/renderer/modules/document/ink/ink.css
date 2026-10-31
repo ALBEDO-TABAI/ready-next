@@ -674,3 +674,6 @@ html[data-theme='dark'] .ready-block-popover.ready-block-toolbar [aria-pressed=t
 
 /* A confirmed draft is the normal state: keep it for assistive technology, show only pending or failed. */
 .ink-topbar-status.is-quiet { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.ink-topbar-left { min-width: 96px; }
+.ink-draft-badge { position: relative; }
+.ink-draft-badge > span { position: absolute; top: 1px; right: 0; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; background: var(--studio-accent); color: #fff; font-size: 9px; line-height: 14px; font-weight: 600; text-align: center; }

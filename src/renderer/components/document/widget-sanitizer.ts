@@ -243,7 +243,11 @@ function invokeInlineHandler(target, attrName, event){
 function notifyResize(){
   if(resizeTimer) clearTimeout(resizeTimer);
   resizeTimer=setTimeout(function(){
-    var h=Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+    // Measure the content, not the frame: documentElement.scrollHeight never drops below the frame's own height,
+    // so a frame sized for taller content would keep its blank space forever.
+    var bottom=document.body.scrollHeight;
+    for(var i=0;i<document.body.children.length;i++){var child=document.body.children[i];var box=child.getBoundingClientRect();bottom=Math.max(bottom,box.bottom+window.scrollY+(parseFloat(getComputedStyle(child).marginBottom)||0));}
+    var h=Math.ceil(bottom);
     parent.postMessage({type:'widget:resize',height:h,token:widgetToken},'*');
   },30);
 }
