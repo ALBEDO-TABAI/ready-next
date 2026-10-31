@@ -19,10 +19,13 @@ function saved(): { open: boolean; width: number } {
 /** The document shell's sidebar (open, width) and whether the home view covers the editor. */
 export const useInkLayout = create<{
   open: boolean; width: number; resizing: boolean; home: boolean
+  /** A page created from the sidebar whose title should take focus when its header loads. */
+  titleFocus: string | null
   setOpen(open: boolean): void; setWidth(width: number): void; commitWidth(): void; resetWidth(): void
-  setResizing(resizing: boolean): void; setHome(home: boolean): void
+  setResizing(resizing: boolean): void; setHome(home: boolean): void; setTitleFocus(objectId: string | null): void
 }>((set, get) => ({
-  ...saved(), resizing: false, home: false,
+  ...saved(), resizing: false, home: false, titleFocus: null,
+  setTitleFocus: titleFocus => set({ titleFocus }),
   setOpen: open => { set({ open }); writeStorage(KEY, JSON.stringify({ open, width: get().width })) },
   setWidth: width => set({ width: clamp(width) }),
   commitWidth: () => writeStorage(KEY, JSON.stringify({ open: get().open, width: get().width })),

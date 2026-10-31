@@ -47,11 +47,12 @@ test('browser rss and calendar shells align their left edge with the shared work
   assert.match(browserHeader, /className="browser-header-surface glass-surface-panel flex-shrink-0"/)
   assert.match(browserHeader, /paddingLeft: WORKBENCH_HEADER_EDGE_X/)
   assert.match(workbenchTabs, /className="workbench-tabs-surface glass-surface-panel flex-shrink-0"/)
-  assert.match(documentMode, /className="workbench-canvas-shell document-workbench-canvas-shell flex min-h-0 h-full flex-col"/)
-  assert.match(documentMode, /className="document-workbench-body flex min-h-0 flex-1"/)
-  assert.match(documentMode, /className="document-path-bar workbench-tabs-surface glass-surface-panel flex-shrink-0 flex items-center no-drag"/)
+  // Document mode, like the calendar, has no shell surface of its own: Inkwell's sidebar and page panels fill it.
+  assert.match(documentMode, /className="workbench-canvas-shell flex min-h-0 h-full flex-col" style=\{\{ background: 'transparent', boxShadow: 'none' \}\}/)
+  assert.match(documentMode, /className=\{`ink-scope ink-doc-app/)
+  assert.doesNotMatch(styles, /document-workbench-canvas-shell|document-workbench-body|document-path-bar/)
   assert.match(markdownEditor, /className="panel-hover-scrollbar document-editor-surface flex-1 overflow-auto"/)
-  assert.match(markdownEditor, /className="panel-hover-scrollbar document-preview-surface flex-1 overflow-auto"/)
+  assert.match(markdownEditor, /panel-hover-scrollbar document-preview-surface flex-1 overflow-auto/)
 
   // RSS shares the Document/Browser frame: a top bar and a left rail on the canvas form one L-shaped layer,
   // and every RSS view lives in a content frame rounded on all four corners.
@@ -81,12 +82,9 @@ test('browser rss and calendar shells align their left edge with the shared work
   assert.match(calendarMode, /workbench-canvas-shell/)
   assert.match(calendarMode, /background:'transparent',boxShadow:'none'/)
   assert.match(styles, /--workbench-liquid-chrome-bg:\s*rgba\(249,\s*252,\s*255,\s*0\.56\);/)
-  assert.match(styles, /html\[data-skin='liquid-glass'\] \.browser-header-surface,[\s\S]*\.workbench-tabs-surface,[\s\S]*\.document-path-bar,[\s\S]*\.rss-preview-surface \{/)
+  assert.match(styles, /html\[data-skin='liquid-glass'\] \.browser-header-surface,[\s\S]*\.workbench-tabs-surface,[\s\S]*\.rss-preview-surface \{/)
   assert.match(styles, /html\[data-skin='liquid-glass'\] \.browser-header-surface,[\s\S]*backdrop-filter:\s*blur\(24px\) saturate\(0%\) !important;/)
   assert.match(styles, /html\[data-skin='liquid-glass'\] \.document-content-frame \{[\s\S]*background:\s*var\(--workbench-module-surface-bg\) !important;/)
-  assert.match(styles, /html\[data-skin='liquid-glass'\] \.document-workbench-canvas-shell \{[\s\S]*background:\s*var\(--workbench-module-surface-bg\) !important;/)
-  assert.match(styles, /html\[data-skin='liquid-glass'\] \.document-workbench-body \{[\s\S]*background:\s*var\(--workbench-module-surface-bg\) !important;/)
-  assert.match(styles, /html\[data-skin='liquid-glass'\] \.document-workbench-body \.document-vertical-tab-rail \{[\s\S]*background:\s*transparent !important;/)
   assert.match(styles, /html\[data-skin='liquid-glass'\] \.document-editor-surface,[\s\S]*\.document-preview-surface,[\s\S]*\.rss-feed-list \{[\s\S]*background:\s*transparent !important;/)
   assert.match(styles, /html\[data-skin='liquid-glass'\] \.rss-workbench-surface,[\s\S]*\.rss-feed-list \{/)
   assert.match(styles, /html\[data-skin='liquid-glass'\] \.rss-workbench-surface,[\s\S]*backdrop-filter:\s*none !important;/)

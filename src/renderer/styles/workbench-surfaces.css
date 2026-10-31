@@ -166,7 +166,6 @@ html[data-skin='liquid-glass'] .ready-glass-button {
 
 html[data-skin='liquid-glass'] .browser-header-surface,
 html[data-skin='liquid-glass'] .workbench-tabs-surface,
-html[data-skin='liquid-glass'] .document-path-bar,
 html[data-skin='liquid-glass'] .rss-preview-surface {
   background: var(--workbench-module-surface-bg) !important;
   backdrop-filter: blur(24px) saturate(0%) !important;

@@ -106,7 +106,7 @@ function PropertyRow({
   onOpen: (href: string, localPath?: string | null) => void
 }) {
   return (
-    <div className="note-preview-property-row">
+    <div className="note-preview-property-row" data-property-key={property.key}>
       <div className="note-preview-property-key">{property.label}</div>
       <div className="note-preview-property-value">
         {property.kind === 'chips' && property.chips ? (

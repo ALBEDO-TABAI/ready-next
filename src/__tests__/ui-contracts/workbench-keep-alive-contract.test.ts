@@ -133,7 +133,7 @@ test('rss and calendar modes gate heavyweight work behind foreground activity wh
   const previous = Object.fromEntries(Object.keys(replacements).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]))
   for (const [key, value] of Object.entries(replacements)) Object.defineProperty(globalThis, key, { value, configurable: true, writable: true })
   const root = createRoot(dom.window.document.getElementById('root')!)
-  const counts = { snapshots: 0, login: 0, navigation: 0, subscriptions: 0, timers: 0 }
+  const counts: { snapshots: number; login: number; navigation: number; subscriptions: number; timers: number; mentions?: number; layers?: number } = { snapshots: 0, login: 0, navigation: 0, subscriptions: 0, timers: 0 }
   const changes = new Set<() => void>()
   let listeners = 0
   const subscribe = () => { counts.subscriptions++; listeners++; return () => { listeners-- } }
@@ -156,7 +156,14 @@ test('rss and calendar modes gate heavyweight work behind foreground activity wh
       peekNavigation: async () => { counts.navigation++; return { success: true, data: navigation } },
       ackNavigation: async (id: string) => { acknowledged.push(id); navigation = null; return { success: true } },
       onNavigation: subscribe, onRemoteEventSuggested: subscribe, onReminderFired: subscribe,
-    } } })
+    }, dateMentions: {
+      // The calendar's date-mention layer (M6-C) opens reminders only while the calendar is in front.
+      takeOpen: async () => { counts.mentions = (counts.mentions ?? 0) + 1; return null }, onOpen: subscribe, onChanged: subscribe,
+    }, calendarLayers: {
+      // The four calendar layers (M6-B) read their entries the same way.
+      query: async () => { counts.layers = (counts.layers ?? 0) + 1; return { ok: true, value: { entries: [] } } }, onChanged: subscribe,
+    }, vault: { onChanged: subscribe }, canvas: { onChanged: subscribe }, documentPages: { onChanged: subscribe },
+    calendarLinkage: { day: async () => ({ ok: true, value: { date: '', events: [], dates: [], reminders: [], reading: [], objects: [] } }) } } })
     // Exercise the real mode, workbench and store; replace only browser/native boundaries.
     const compiled = buildSync({
       entryPoints: ['src/renderer/pages/modes/CalendarMode.tsx'], bundle: true, write: false,
