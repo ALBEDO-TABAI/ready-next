@@ -95,3 +95,15 @@ A 的格式、查询、服务、书房升级和持久恢复已实现；公共 Ma
 M5-D 实施补充：模板新建复用“保存到…”选择位置，再经页面服务创建可恢复草稿并定稿。`.ready/template-operations/<operationId>.json` 固定请求、展开正文、附件暂存位置与哈希；资料库服务首次接入时自动恢复未完成建页。插入模板同样固定展开结果并复制附件，但恢复绝不把旧插入操作重放到另一份编辑缓冲；正文撤销不删除已经复制的附件。附件暂存和操作记录保留用于重试核验。正文未保存时添加评论明确拒绝，要求先保存；已有评论定位即时对当前缓冲重新核对。无显式 id 的重复原文只有前后相邻原文同时唯一匹配时定位，否则失联。编辑器移动/删除代码等带独立标记行的块时，标记与源块作为一次操作处理。
 
 命令行验收入口：`npm run verify:ready-next-annotations -- --checks`；真实窗口入口：构建当前分支后 `npm run verify:ready-next-annotations`，使用独立临时资料库和 userData，逐步保存磁盘回读与截图。窗口流程未在无窗口沙箱执行，不能据命令行结果宣称窗口验收完成。共享锚点供 M6-C 复用：`createAnchor`、`relocateAnchor`、`explicitBlockId`，存储格式以相应 Zod schema 为权威；评论、模板与同步块跨进程面为 `documentAnnotations`。
+
+## M5-E 导入规则
+
+- 入口：页面侧栏“更多 → 导入 Notion / Inkwell”。向导依次选择来源、只读预检、ConnectedSaveToPicker 选择目标、核对目标冲突、执行进度、结果/缺失清单及打开结果。中断记录可在向导重新打开后继续。
+- Notion 支持 Markdown & CSV ZIP：按导出路径及 32 位身份匹配页面与 CSV 行，同名页面保留独立身份并确定性改名；目录映射为页面三件套 `A.md + A/ + A.assets/`。Markdown 标题、列表、引用、代码及表格保留；`<aside>` 转引用，`<details><summary>` 转带标题的列表，展开内容保留。CSV 无字段类型元数据，第一列为标题，其余列原样映射 text，编号不推断为数字；CSV 行合并对应 Markdown。默认表格视图；原视图、公式、评论等导出未提供的信息逐库列为缺失，不宣称无损恢复。
+- Inkwell 选择其真实导出 `format: inkwell-backup, version: 1` JSON（`packages/app/src/app/io.ts:exportWorkspace`），不启动原应用，不读其日常目录。页面树与块位于 blocks，数据库为 collection_view(_page)，schema/views 位于 props，行值在子 page.props，附件为 props.src/url 的 data URI 或相对文件。无需读取运行中的 SQLite，避开 WAL 快照风险。支持正文、列表、引用、代码、表格、callout/toggle、内嵌附件及数据库；缺失块/附件和未知块逐项报告。同步块、评论、外部媒体、布局/交互/用户信息不假装已恢复，保留可转换内容并列不支持项。
+- Inkwell 字段：title→页面标题；text/email/phone_number→text；number/checkbox/url/select/multi_select/date/relation 同类型，status→select；created_time→ISO date；person/file→保留原值的文本并报告降级；formula/rollup 保留原定义为文本并报告不支持计算。视图保留 table/board/list/gallery/calendar/timeline、顺序、可见列、卡片字段、日期字段、可映射筛选排序分组/汇总；无法映射的选项逐项列出。字段存储键统一为稳定导入键，避免与 Ready 保留字段冲突。
+- 内部页面链接转换成 `[[规范相对路径|原标签]]`；关联值无别名。无法唯一匹配的链接保留原文并列缺失。附件复制到所属页面 `.assets/` 并核对大小和 SHA-256；未引用 ZIP 文件也保留在导入根页附件中。不下载远程附件。
+- 预检不写文件/SQLite：扫描并返回页数、数据库数、行数、附件数、逐项路径映射、缺失/不支持/重名映射及目标冲突。选择目标后重新核对三件套冲突；冲突阻止执行，不自动覆盖。源 ZIP/JSON 限 64 MiB，最多 5000 条目，单附件/解压条目最多 16 MiB，总解压/附件最多 128 MiB，压缩比最多 200，路径深度最多 32。拒绝绝对路径、穿越、符号链接、加密/ZIP64、不支持压缩法和规范化重名；解压前核验目录大小，解压时硬限制输出长度。
+- Main 为单一执行者。持久操作记录固定源内容哈希、目标、完整转换清单及附件字节；操作身份由源哈希与目标确定，重复执行复用同一记录。状态为 prepared/running/interrupted/completed/incomplete；prepared 后不再依赖源文件。逐页使用页面服务的持久 create，数据库经共享定义校验及数据库服务回读；附件使用现有写入服务的暂存/独占发布，不另写覆盖路径。每个阶段可注入中断，恢复以同一页面操作身份和发布证据继续，不重复建页，不覆盖后来修改。
+- 完成前逐页、逐库、逐附件回读并核对身份和哈希；任何缺失/降级或回读差异都返回 incomplete 及明细，只有清单完全一致才 completed。源始终只读。操作日志留存以支持重试、重启回读和追踪，不把 Renderer 进度当完成真值。
+- DB6/C2/C3/C12 验收：`ready-library-import.test.ts` 合成 Notion ZIP 与真实 Inkwell backup；真实 SQLite/临时资料库验证逐项往返、源不变、每阶段失败恢复、重名/冲突/目标修改与恶意 ZIP；`ready-library-import-ui.test.tsx` 验证向导。原生测试进入 verify:native；`verify:ready-next-import` 为真实窗口验收，Claude 执行，命令行通过不代替窗口通过。

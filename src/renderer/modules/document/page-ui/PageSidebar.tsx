@@ -1,3 +1,4 @@
+import { ImportWizard } from '../import/ImportWizard'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from 'zustand'
 import type { DocumentPagesAPI, PageNode, PageOperation, PageResult, PageRoot, PageTrashEntry } from '../../../../shared/document-pages'
@@ -24,6 +25,7 @@ export function PageSidebar({ roots, api = window.electronAPI.documentPages, onO
   const [trash, setTrash] = useState<{ root: string; item: PageTrashEntry }[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
   const lock = useRef(false)
   const dragged = useRef<{ node: PageNode; parent: PageNode; root: string } | null>(null)
   const refresh = () => store.getState().load(rootsRef.current)
@@ -120,6 +122,8 @@ export function PageSidebar({ roots, api = window.electronAPI.documentPages, onO
       : { type: dialog.kind, root: dialog.root, operationId: selection.operationId, objectId: 'item' in dialog ? dialog.item.objectId : dialog.node.objectId, ...target })
   }
   return <div aria-label="页面侧栏" className="flex-1 min-h-0 overflow-auto px-3 py-2 text-[13px]" style={{ color: 'var(--text-primary)' }}>
+    <details aria-label="页面更多"><summary>更多</summary><button onClick={() => setImportOpen(true)}>导入 Notion / Inkwell</button></details>
+    {importOpen && <ImportWizard onClose={() => { setImportOpen(false); void refresh() }} />}
     {(error || loadError) && <p role="alert">{error || loadError}</p>}
     {loading && <p role="status">正在读取页面…</p>}
     <fieldset disabled={busy || !!dialog}>
