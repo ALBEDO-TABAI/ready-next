@@ -202,6 +202,11 @@ async function checkDateMentionBeforeRestart(app, page, root, profile) {
   const supported = await app.evaluate(({ Notification }) => Notification.isSupported())
   ok('M6-C notification is attempted once where supported', popups === (supported ? 1 : 0), `attempts=${popups}; supported=${supported}`)
   await chip.click()
+  // Mode changes go through the workbench transition; repeat the request until the document shell shows.
+  for (let attempt = 0; attempt < 100 && !await page.locator('.ink-doc-app').isVisible().catch(() => false); attempt++) {
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('ready:workbench-mode-change-request', { detail: { mode: 'document', placement: 'open', presentation: 'immediate' } })))
+    await page.waitForTimeout(200)
+  }
   await page.locator('.ink-doc-app').waitFor({ state: 'visible' })
   await page.locator('[data-ready-block-editor] a[data-ready-date-mention]').filter({ hasText: title }).waitFor({ state: 'visible' })
   ok('M6-C reminder opens its original document', true)
@@ -240,6 +245,11 @@ async function checkObjectPresentationBeforeRestart(app, page, root) {
   }, { root, from })
   await page.reload()
   await requestMode(page, 'document')
+  // Mode changes go through the workbench transition; repeat the request until the document shell shows.
+  for (let attempt = 0; attempt < 100 && !await page.locator('.ink-doc-app').isVisible().catch(() => false); attempt++) {
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('ready:workbench-mode-change-request', { detail: { mode: 'document', placement: 'open', presentation: 'immediate' } })))
+    await page.waitForTimeout(200)
+  }
   await page.locator('.ink-doc-app').waitFor({ state: 'visible' })
   // Expand the outer file manager's vault folder.
   const fileRow = page.getByText('i2-a.md', { exact: true }).first()

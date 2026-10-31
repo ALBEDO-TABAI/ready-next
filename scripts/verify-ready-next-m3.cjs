@@ -88,6 +88,11 @@ async function main() {
   try {
     await launch()
     await page.evaluate(async root => { const result = await window.electronAPI.vault.set(root); if (result.status !== 'ready') throw new Error('Vault not ready') }, vault)
+    // Mode changes go through the workbench transition; repeat the request until the document shell shows.
+    for (let attempt = 0; attempt < 100 && !await page.locator('.ink-doc-app').isVisible().catch(() => false); attempt++) {
+      await page.evaluate(() => window.dispatchEvent(new CustomEvent('ready:workbench-mode-change-request', { detail: { mode: 'document', placement: 'open', presentation: 'immediate' } })))
+      await page.waitForTimeout(200)
+    }
     await page.locator('.ink-doc-app').waitFor({ state: 'visible' })
     await snapshot('01-empty-profile-vault')
     const parentId = await createPage('父页')

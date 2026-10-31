@@ -69,6 +69,11 @@ async function main() {
       localStorage.setItem('ready-workspace-root', root); localStorage.setItem('ready-pinned-folders', JSON.stringify([root]))
     }, vault)
     await app.close(); await launch(); await mode('document')
+    // Mode changes go through the workbench transition; repeat the request until the document shell shows.
+    for (let attempt = 0; attempt < 100 && !await page.locator('.ink-doc-app').isVisible().catch(() => false); attempt++) {
+      await page.evaluate(() => window.dispatchEvent(new CustomEvent('ready:workbench-mode-change-request', { detail: { mode: 'document', placement: 'open', presentation: 'immediate' } })))
+      await page.waitForTimeout(200)
+    }
     await page.locator('.ink-doc-app').waitFor({ state: 'visible' })
     const imported = await page.evaluate(file => window.electronAPI.library.importFiles([file]), bookFile)
     assert.ok(imported.success && imported.data.imported.length === 1)

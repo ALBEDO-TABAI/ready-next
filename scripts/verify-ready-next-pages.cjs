@@ -41,6 +41,11 @@ require(${JSON.stringify(entry)})
     }
     assert.ok(page, 'Ready renderer did not open')
     await page.evaluate(() => window.dispatchEvent(new CustomEvent('ready:workbench-mode-change-request', { detail: { mode: 'document', placement: 'open', presentation: 'immediate' } })))
+    // Mode changes go through the workbench transition; repeat the request until the document shell shows.
+    for (let attempt = 0; attempt < 100 && !await page.locator('.ink-doc-app').isVisible().catch(() => false); attempt++) {
+      await page.evaluate(() => window.dispatchEvent(new CustomEvent('ready:workbench-mode-change-request', { detail: { mode: 'document', placement: 'open', presentation: 'immediate' } })))
+      await page.waitForTimeout(200)
+    }
     await page.locator('.ink-doc-app').waitFor({ state: 'visible' })
     const snapshot = async label => {
       const files = []
@@ -50,12 +55,22 @@ require(${JSON.stringify(entry)})
       await page.screenshot({ path: path.join(evidence, `${label}.png`) })
       console.log(`PASS ${label}: disk readback + screenshot`)
     }
+    // Mode changes go through the workbench transition; repeat the request until the document shell shows.
+    for (let attempt = 0; attempt < 100 && !await page.locator('.ink-doc-app').isVisible().catch(() => false); attempt++) {
+      await page.evaluate(() => window.dispatchEvent(new CustomEvent('ready:workbench-mode-change-request', { detail: { mode: 'document', placement: 'open', presentation: 'immediate' } })))
+      await page.waitForTimeout(200)
+    }
     await page.locator('.ink-doc-app').waitFor({ state: 'visible' })
     await page.getByLabel('页面位置', { exact: true }).getByRole('button', { name: '打开文件夹…', exact: true }).waitFor()
     const reads = await app.evaluate(() => globalThis.__pageDirectoryReads)
     assert.deepEqual(reads, [], `Empty profile issued directory reads: ${JSON.stringify(reads)}`)
     await snapshot('01-empty-no-directory-reads')
     await page.evaluate(async root => { const state = await window.electronAPI.vault.set(root); if (state.status !== 'ready') throw new Error('Vault not ready') }, vault)
+    // Mode changes go through the workbench transition; repeat the request until the document shell shows.
+    for (let attempt = 0; attempt < 100 && !await page.locator('.ink-doc-app').isVisible().catch(() => false); attempt++) {
+      await page.evaluate(() => window.dispatchEvent(new CustomEvent('ready:workbench-mode-change-request', { detail: { mode: 'document', placement: 'open', presentation: 'immediate' } })))
+      await page.waitForTimeout(200)
+    }
     await page.locator('.ink-doc-app').waitFor({ state: 'visible' })
     const sidebar = page.getByLabel('页面侧栏', { exact: true })
     const renameNewPage = async title => {

@@ -82,6 +82,11 @@ async function main() {
     await snapshot('01-create')
     await app.close(); page = await launch()
     await page.evaluate(() => window.dispatchEvent(new CustomEvent('ready:workbench-mode-change-request', { detail: { mode: 'document', placement: 'open', presentation: 'immediate' } })))
+    // Mode changes go through the workbench transition; repeat the request until the document shell shows.
+    for (let attempt = 0; attempt < 100 && !await page.locator('.ink-doc-app').isVisible().catch(() => false); attempt++) {
+      await page.evaluate(() => window.dispatchEvent(new CustomEvent('ready:workbench-mode-change-request', { detail: { mode: 'document', placement: 'open', presentation: 'immediate' } })))
+      await page.waitForTimeout(200)
+    }
     await page.locator('.ink-doc-app').waitFor({ state: 'visible' })
     const note = page.getByText('视图验收.md', { exact: true }).first()
     if (!await note.isVisible()) await page.getByText(path.basename(vault), { exact: true }).first().click()
@@ -119,6 +124,11 @@ async function main() {
     assert.equal(fields(fs.readFileSync(rowFile, 'utf8')).内容, '外部修改')
     await snapshot('05-external-refresh')
     // The database page itself shows the full database in the page view, under its header.
+    // Mode changes go through the workbench transition; repeat the request until the document shell shows.
+    for (let attempt = 0; attempt < 100 && !await page.locator('.ink-doc-app').isVisible().catch(() => false); attempt++) {
+      await page.evaluate(() => window.dispatchEvent(new CustomEvent('ready:workbench-mode-change-request', { detail: { mode: 'document', placement: 'open', presentation: 'immediate' } })))
+      await page.waitForTimeout(200)
+    }
     await page.locator('.ink-doc-app').waitFor({ state: 'visible' })
     await page.locator('.ink-sidebar section[aria-label="页面"] .ink-sb-label-btn').filter({ hasText: /^验收库$/ }).click()
     await page.locator('[data-ready-database-page] .ready-database[data-view-type]:visible').first().waitFor({ timeout: 20000 })

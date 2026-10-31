@@ -49,6 +49,11 @@ async function main() {
       return tree.value.children.find(node => node.objectId === objectId)
     }, { objectId, vault })
     assert.ok(result, 'Object missing from page tree')
+    // Mode changes go through the workbench transition; repeat the request until the document shell shows.
+    for (let attempt = 0; attempt < 100 && !await page.locator('.ink-doc-app').isVisible().catch(() => false); attempt++) {
+      await page.evaluate(() => window.dispatchEvent(new CustomEvent('ready:workbench-mode-change-request', { detail: { mode: 'document', placement: 'open', presentation: 'immediate' } })))
+      await page.waitForTimeout(200)
+    }
     await page.locator('.ink-doc-app').waitFor({ state: 'visible' })
     const row = page.getByLabel('页面侧栏', { exact: true }).locator(`[data-page-id="${objectId}"]`)
     await row.locator(':scope > .ink-sb-row > .ink-sb-label-btn').click()

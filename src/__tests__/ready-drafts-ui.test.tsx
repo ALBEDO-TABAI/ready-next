@@ -47,7 +47,8 @@ test('conflict UI shows both versions, uses checked overwrite, preserves disk an
     dom.window.close()
   })
   const button = (text: string) => {
-    const element = [...dom.window.document.querySelectorAll('button')].find(item => item.textContent === text)
+    // By visible text or, for icon buttons such as the drafts badge, by accessible name.
+    const element = [...dom.window.document.querySelectorAll('button')].find(item => item.textContent === text || item.getAttribute('aria-label') === text)
     assert.ok(element, text); return element
   }
   const click = async (text: string) => { await act(async () => { button(text).click(); await new Promise(resolve => setTimeout(resolve, 10)) }) }
