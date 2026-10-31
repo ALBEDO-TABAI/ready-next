@@ -60,8 +60,14 @@ async function main() {
   }
   const openFile = async file => {
     await mode('document')
-    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+k' : 'Control+k')
-    await page.getByRole('combobox', { name: '搜索所有对象和命令' }).fill(path.basename(file, '.md'))
+    // Right after a restart the shortcuts may not be listening yet, and a focused editor ignores them: retry ⌘K.
+    const search = page.getByRole('combobox', { name: '搜索所有对象和命令' })
+    for (let attempt = 0; attempt < 20 && !await search.isVisible().catch(() => false); attempt++) {
+      await page.evaluate(() => { if (document.activeElement instanceof HTMLElement) document.activeElement.blur() })
+      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+k' : 'Control+k')
+      await search.waitFor({ timeout: 1500 }).catch(() => {})
+    }
+    await search.fill(path.basename(file, '.md'))
     await page.getByRole('listbox').getByRole('button').filter({ hasText: path.basename(file) }).first().click()
     // Pages always open in the page view.
     await poll(() => page.locator('.note-preview-body:visible').count().then(n => n > 0), 'Source preview missing')
