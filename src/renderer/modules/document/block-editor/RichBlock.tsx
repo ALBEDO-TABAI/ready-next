@@ -24,6 +24,11 @@ export function RichBlock({ block, model, buffer, continuation, focus, merge, re
   useLayoutEffect(() => {
     const el = ref.current!
     if (composing.current || session.current.dirty) return
+    // History travel and external edits end the old typing session. Its caret
+    // belongs to the previous source and must not become selectionBefore again.
+    if (session.current.version !== buffer.snapshot.version) {
+      previousCaret.current = null; typingGroup.current++
+    }
     if (document.activeElement !== el || session.current.block.raw !== block.raw) {
       const caret = document.activeElement === el ? getCaret(el) : null
       drawInline(el, model.spans)
