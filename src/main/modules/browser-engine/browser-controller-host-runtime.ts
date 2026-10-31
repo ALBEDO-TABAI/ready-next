@@ -341,8 +341,6 @@ export abstract class BrowserControllerHostRuntime extends BrowserControllerComp
           this.syncPopupContextForTab(result.tabId)
           this.attachAgentTabSupervision(result.tabId)
         }
-
-        this.sendToRenderer('browser:tabOpened', this.tabMetaService.buildTabPayload(tab))
       })
       .catch((error) => {
         this.logBrowserDiag(`[browser-v3][popup] create tab failed: ${String(error)}`)

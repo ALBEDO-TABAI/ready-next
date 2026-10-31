@@ -3,6 +3,8 @@ import test from 'node:test'
 import { JSDOM } from 'jsdom'
 import { act, createElement, useRef } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
+import { BrowserTabLifecycleService, type BrowserLifecycleTabRecord } from '../main/modules/browser-engine/tab-lifecycle-service'
+import { BrowserTabMetaService } from '../main/modules/browser-engine/tab-meta-service'
 
 type TestGlobal = typeof globalThis & Record<string, unknown>
 
@@ -93,22 +95,55 @@ const existingTab: BrowserOpenedTestTab = {
   active: true,
 }
 
-test('renderer syncs a main-created popup tab into the visible tab store', async () => {
+test('direct main creates reach the mounted tab store across document and browser modes without stealing background focus', async () => {
   const handle = installDom()
   let root: Root | null = null
   try {
     let openedHandler: ((tab: BrowserOpenedTestTab) => void) | null = null
     let createTabCalls = 0
     let boundsSyncs = 0
+    let activeTabId: string | null = existingTab.id
+    const tabs = new Map<string, BrowserLifecycleTabRecord>([[existingTab.id, existingTab]])
+    const metadata = new BrowserTabMetaService({ tabs, getActiveTabId: () => activeTabId, queueTabUpdate: () => {} })
+    const lifecycle = new BrowserTabLifecycleService({
+      tabs,
+      getActiveTabId: () => activeTabId,
+      setActiveTabId: (id) => { activeTabId = id },
+      setSplitTabId: () => {},
+      observeRestoredTabId: () => {},
+      getNextTabId: () => `tab-${++createTabCalls}`,
+      getViewBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }),
+      shouldPresentHosts: () => false,
+      isAllowedUrl: () => true,
+      extractDomain: (url) => new URL(url).hostname,
+      createHost: () => { throw new Error('mock mode must not create native hosts') },
+      resetPageBackground: () => {},
+      syncPageBackground: () => {},
+      applyBounds: () => {},
+      detachHost: () => {},
+      showHost: () => {},
+      sendToRenderer: (_channel, data) => openedHandler?.(data as BrowserOpenedTestTab),
+      queueTabUpdate: () => {},
+      buildTabPayload: (tab) => metadata.buildTabPayload(tab),
+      emitTabMeta: () => {},
+      logBrowserDiag: () => {},
+      bindPopup: () => {},
+      bindAppShortcutBridge: () => {},
+      installContextMenu: () => {},
+      handleWindowOpen: () => ({ action: 'deny' }),
+      ensureDownloadSession: () => {},
+      addHistoryEntry: () => {},
+      updateHistoryEntryTitle: () => {},
+      handleLocalMediaDropNavigation: () => false,
+      browserUserAgent: 'test',
+      useMock: true,
+    })
     Object.defineProperty(handle.dom.window, 'electronAPI', {
       configurable: true,
       value: {
       browser: {
-        getTabs: async () => [existingTab],
-        createTab: async () => {
-          createTabCalls += 1
-          return { success: false, error: 'renderer should not create popup tabs' }
-        },
+        getTabs: async () => metadata.getTabList(),
+        createTab: lifecycle.createTab.bind(lifecycle),
         switchTab: async () => ({ success: true }),
         onTabUpdate: () => () => undefined,
         onTabOpened: (callback: (tab: BrowserOpenedTestTab) => void) => {
@@ -131,11 +166,11 @@ test('renderer syncs a main-created popup tab into the visible tab store', async
       urlInput: '',
     })
 
-    function Harness() {
+    function Harness({ isActive }: { isActive: boolean }) {
       const isAddressEditingRef = useRef(false)
       useBrowserRuntimeEffects({
         isElectron: true,
-        isActive: true,
+        isActive,
         isAddressEditingRef,
         sendBoundsImmediate: async () => {
           boundsSyncs += 1
@@ -148,28 +183,35 @@ test('renderer syncs a main-created popup tab into the visible tab store', async
     assert.ok(host)
     root = createRoot(host)
     await act(async () => {
-      root?.render(createElement(Harness))
+      root?.render(createElement(Harness, { isActive: false }))
       await new Promise((resolve) => setTimeout(resolve, 10))
     })
 
     assert.ok(openedHandler)
-    openedHandler({
-      ...existingTab,
-      id: 'tab-popup',
-      url: 'http://127.0.0.1:18202/popup.html',
-      title: 'Popup',
-      domain: '127.0.0.1',
-      active: true,
-    })
+    assert.equal(createTabCalls, 0)
+    const url = 'http://127.0.0.1:18202/page.html'
     await act(async () => {
+      const created = await window.electronAPI.browser.createTab(url)
+      assert.equal(created.success, true)
+      assert.equal(created.tabId, 'tab-1')
       await new Promise((resolve) => setTimeout(resolve, 10))
     })
 
+    assert.equal(useBrowserTabs.getState().activeTabId, 'tab-1')
+    assert.equal(useBrowserTabs.getState().urlInput, url)
+    // Renderer-driven callers also add the returned tab; the announcement must
+    // not leave a duplicate row whichever side arrives first.
+    useBrowserTabs.getState().addTab({ ...existingTab, id: 'tab-1', url })
+    await act(async () => {
+      root?.render(createElement(Harness, { isActive: true }))
+      await window.electronAPI.browser.createTab(`${url}?background`, { background: true })
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    })
     const state = useBrowserTabs.getState()
-    assert.equal(createTabCalls, 0)
-    assert.equal(state.activeTabId, 'tab-popup')
-    assert.equal(state.urlInput, 'http://127.0.0.1:18202/popup.html')
-    assert.equal(state.tabs.some((tab) => tab.id === 'tab-popup' && tab.title === 'Popup'), true)
+    assert.equal(state.activeTabId, 'tab-1')
+    assert.equal(state.urlInput, url)
+    assert.deepEqual(state.tabs.map((tab) => tab.id), [existingTab.id, 'tab-1', 'tab-2'])
+    assert.deepEqual(metadata.getTabList().map((tab) => tab.id), state.tabs.map((tab) => tab.id))
     assert.equal(boundsSyncs > 0, true)
   } finally {
     if (root) {

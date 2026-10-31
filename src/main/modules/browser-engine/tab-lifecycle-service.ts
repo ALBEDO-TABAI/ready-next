@@ -386,7 +386,7 @@ export class BrowserTabLifecycleService {
       }
       this.host.tabs.set(tabId, tab)
       if (!background) this.host.setActiveTabId(tabId)
-      this.emitBackgroundTabOpened(tab, background)
+      this.emitTabOpened(tab, background)
       return { success: true, tabId }
     }
 
@@ -418,7 +418,7 @@ export class BrowserTabLifecycleService {
       this.host.tabs.delete(tabId)
       return materialized
     }
-    this.emitBackgroundTabOpened(tab, background)
+    this.emitTabOpened(tab, background)
     return { success: true, tabId }
   }
 
@@ -529,19 +529,12 @@ export class BrowserTabLifecycleService {
     return { success: true, tabId }
   }
 
-  /**
-   * D1 (P1-b): background tabs (agent collection tabs and other main-created
-   * background tabs) never reached the renderer tab strip — only the popup path
-   * emitted browser:tabOpened, so these tabs stayed invisible until the next
-   * switchTab-triggered list refresh. Emit with activate:false so the renderer
-   * lists the tab WITHOUT preempting the user's active tab. Foreground creates
-   * keep today's semantics (renderer-initiated ones update their store locally).
-   */
-  private emitBackgroundTabOpened(tab: BrowserLifecycleTabRecord, background: boolean): void {
-    if (!background) return
+  // Every successful create announces its record, including calls made outside
+  // the renderer's tab actions. Background tabs must never preempt focus.
+  private emitTabOpened(tab: BrowserLifecycleTabRecord, background: boolean): void {
     this.host.sendToRenderer('browser:tabOpened', {
       ...this.host.buildTabPayload(tab),
-      activate: false,
+      activate: !background,
     })
   }
 
