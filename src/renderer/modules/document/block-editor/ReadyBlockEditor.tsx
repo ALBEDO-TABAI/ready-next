@@ -143,10 +143,13 @@ export function BufferedBlockEditor({ buffer, linkBase, content: displayedConten
     const parent = parsed.blocks.find(item => item.id === block.parentId)
     const actionable = block.type !== 'frontmatter' && block.type !== 'column' && !isNonContentBlock(block) && (!block.parentId || parent?.type === 'column')
     const shell = (body: ReactNode) => <BlockShell key={key} block={block} line={line} actionable={actionable}>{body}</BlockShell>
-    if (['columns', 'column', 'list', 'listItem', 'taskItem', 'blockquote', 'callout'].includes(block.type)) {
+    // A callout's [!type] header and its first body lines form one Markdown paragraph, so its children
+    // cannot be edited inline without showing the raw marker. Render it whole, like the preview does.
+    if (block.type === 'callout') return shell(<SourceBlock block={block} buffer={buffer} report={report}>{renderSource(block)}</SourceBlock>)
+    if (['columns', 'column', 'list', 'listItem', 'taskItem', 'blockquote'].includes(block.type)) {
       const isList = block.type === 'listItem' || block.type === 'taskItem'
       const prefix = isList ? /^(?:\s*)(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s*)?/.exec(block.raw)?.[0] ?? ''
-        : block.type === 'blockquote' || block.type === 'callout' ? '> ' : continuation
+        : block.type === 'blockquote' ? '> ' : continuation
       const body = children.length ? children.map((child, index) => renderBlock(child, `${key}/${index}`, prefix))
         : renderBlock(emptyBlock(block.end, block.id), `${key}/empty`, prefix)
       if (block.type === 'columns') return shell(<div data-ready-columns style={{ display: 'grid', gridTemplateColumns: block.widths?.map(width => `minmax(0, ${width}fr)`).join(' '), gap: 24 }}>{body}</div>)

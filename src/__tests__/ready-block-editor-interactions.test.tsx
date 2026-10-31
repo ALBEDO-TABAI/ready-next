@@ -378,6 +378,17 @@ test('container color changes its text in a single undo entry and retains list m
   await f.key(f.rich('甲'), 'z', { ctrlKey: true }); f.bytes('- 甲\r\n- 乙')
 })
 
+test('a callout renders whole through the source renderer, never as a raw [!type] paragraph', async t => {
+  const source = '> [!quote|yellow] 书 · [原文](ready://read/book/b#c0:6+5)\r\n> 摘录'
+  const f = await editorFixture(t, source)
+  const callout = document.querySelector<HTMLElement>('[data-block-start][data-block-type="callout"]')!
+  assert.ok(callout, 'the callout keeps its block shell and menu')
+  assert.equal(callout.querySelectorAll('[data-rich-start]').length, 0, 'no inline child shows the marker line')
+  assert.equal(callout.querySelectorAll('[data-block-type="paragraph"]').length, 0)
+  assert.equal(callout.querySelector('pre')!.textContent, source)
+  f.bytes(source)
+})
+
 test('converting a callout retains its authored title as well as its body', async t => {
   const f = await editorFixture(t, '> [!NOTE] 标题\r\n> 正文')
   const handle = document.querySelector<HTMLElement>('[data-block-start][data-block-type="callout"] [aria-label="块菜单"]')!

@@ -94,9 +94,17 @@ async function main() {
     await mode('rss')
     await page.getByText('来源验收文章', { exact: true }).first().click()
     await poll(() => page.locator('.rss-reader-body [data-ready-reading-run]').count().then(n => n > 0), 'RSS body missing')
-    await select(page, '.rss-reader-body [data-ready-reading-run]')
-    await page.getByRole('button', { name: '引用', exact: true }).click()
-    await page.getByRole('button', { name: '划线到来源页', exact: true }).click()
+    // The reader can re-render right after opening (read state); select again until the menu sees the selection.
+    const rssHighlight = page.getByRole('button', { name: '划线到来源页', exact: true })
+    for (let attempt = 0; ; attempt++) {
+      await select(page, '.rss-reader-body [data-ready-reading-run]')
+      if (!await rssHighlight.isVisible()) await page.getByRole('button', { name: '引用', exact: true }).click()
+      const deadline = Date.now() + 3000
+      while (Date.now() < deadline && !await rssHighlight.isEnabled().catch(() => false)) await page.waitForTimeout(100)
+      if (await rssHighlight.isEnabled().catch(() => false)) { await rssHighlight.click(); break }
+      assert.ok(attempt < 4, 'RSS selection never reached the highlight menu')
+      await page.waitForTimeout(500)
+    }
     await poll(() => Boolean(markFile('文章')), 'RSS mark not saved')
 
     await mode('browser')
@@ -112,9 +120,9 @@ async function main() {
     const saved = files.map(file => fs.readFileSync(file, 'utf8'))
     for (let i = 0; i < files.length; i++) {
       await openFile(files[i])
-      assert.ok((await page.locator('.note-preview-body:visible').textContent()).includes('乙丙丁戊己'))
+      assert.ok((await page.locator('[data-ready-block-editor]:visible').first().textContent()).includes('乙丙丁戊己'))
       await page.screenshot({ path: path.join(evidence, `source-${i}.png`) })
-      await page.locator('.note-preview-body:visible').getByRole('link', { name: '原文', exact: true }).click()
+      await page.locator('[data-ready-block-editor]:visible').first().getByRole('link', { name: '原文', exact: true }).first().click()
       if (i === 0) await poll(() => page.locator('[data-book-location]').count().then(n => n > 0), 'Book return highlight missing')
       if (i === 1) await poll(() => page.evaluate(() => window.getSelection()?.toString().includes('乙丙丁戊己')), 'RSS return highlight missing')
       if (i === 2) await poll(() => app.evaluate(async ({ webContents }) => {
@@ -130,7 +138,7 @@ async function main() {
     await app.close(); await launch()
     for (let i = 0; i < files.length; i++) {
       assert.equal(fs.readFileSync(files[i], 'utf8'), saved[i]); await openFile(files[i])
-      assert.ok((await page.locator('.note-preview-body:visible').textContent()).includes('乙丙丁戊己'))
+      assert.ok((await page.locator('[data-ready-block-editor]:visible').first().textContent()).includes('乙丙丁戊己'))
     }
     fs.writeFileSync(path.join(evidence, 'sources.json'), JSON.stringify({ files, saved }, null, 2))
     console.log(`PASS book/RSS/web selections, source pages, return highlights and restart readback. Evidence: ${evidence}`)
