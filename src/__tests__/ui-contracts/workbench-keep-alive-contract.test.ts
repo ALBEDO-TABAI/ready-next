@@ -191,7 +191,8 @@ test('rss and calendar modes gate heavyweight work behind foreground activity wh
     await act(async () => finishLoading())
     const calendar = dom.window.document.querySelector('.app')
     assert.ok(calendar, 'the real calendar must finish loading')
-    assert.equal(listeners, 4)
+    // Navigation, remote events and reminders, plus the date-mention and layer subscriptions the calendar gained in M6.
+    assert.equal(listeners, 8)
     assert.equal(counts.snapshots, 1, 'empty navigation must not read another snapshot')
     const initialized = { ...counts }
     await render(false)
