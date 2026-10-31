@@ -49,8 +49,9 @@ export async function openReadyRef(input: string | ReadyRef, fromMode?: Workbenc
         const anchor = parsePdfAnchor(ref.anchor)
         rememberReferenceOrigin(origin, 'document')
         usePdfReference.setState({ target: { id: ref.id, path: location.path, anchor } })
+        if (origin.mode === 'document') openInCurrentTab(location.path)
+        else useDocTabs.getState().openTab(location.path)
         useWorkspace.getState().selectFile(location.path)
-        useDocTabs.getState().openTab(location.path)
         requestWorkbenchModeOpen('document')
         return
       }
