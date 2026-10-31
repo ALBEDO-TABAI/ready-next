@@ -46,8 +46,8 @@ async function fixture(t: test.TestContext, body = '原文😀', canvasPath?: st
     }
   })
   const rich = () => { const el = document.querySelector<HTMLElement>('[contenteditable="true"]'); assert.ok(el, 'card has the shared editor'); return el }
-  const input = async (value: string) => { const el = rich(); await act(() => { el.focus(); el.textContent = value; setCaret(el, value.length); el.dispatchEvent(new dom.window.InputEvent('input', { bubbles: true })) }) }
-  const key = async (key: string, options: KeyboardEventInit = {}, target = rich()) => { await act(() => target.dispatchEvent(new dom.window.KeyboardEvent('keydown', { bubbles: true, cancelable: true, key, ...options }))) }
+  const input = async (value: string) => { const el = rich(); await act(async () => { el.focus(); el.textContent = value; setCaret(el, value.length); el.dispatchEvent(new dom.window.InputEvent('input', { bubbles: true })) }) }
+  const key = async (key: string, options: KeyboardEventInit = {}, target = rich()) => { await act(async () => { target.dispatchEvent(new dom.window.KeyboardEvent('keydown', { bubbles: true, cancelable: true, key, ...options })) }) }
   const bytes = (expected: string) => {
     assert.equal(canvas.nodes[0].type === 'text' && canvas.nodes[0].text, expected)
     assert.equal(JSON.stringify(canvas.nodes[1]), untouched, 'other node bytes remain identical')
@@ -62,6 +62,38 @@ test('M4-E2 edits only one card with an expected version and supports local undo
     ranges: [{ start: 0, end: 4, expectedText: '原文😀', replacement: '修改😀' }] }])
   await f.key('z', { metaKey: true }); f.bytes('原文😀')
   await f.key('z', { metaKey: true, shiftKey: true }); f.bytes('修改😀')
+})
+
+// NODE-BUFFER contract: after an acknowledged undo, both the visible editor
+// and its next range must use the restored body; finishing waits for that write.
+test('NODE-BUFFER input, persisted undo, input and finish save the new text and close', async t => {
+  const f = await fixture(t, '新文字卡')
+  await f.input('中文画板验收'); f.bytes('中文画板验收')
+  await f.key('z', { metaKey: true }); f.bytes('新文字卡')
+  assert.equal(f.rich().textContent, '新文字卡')
+  await f.input('中文成文验收')
+  const done = [...document.querySelectorAll('button')].find(button => button.textContent === '完成编辑')!
+  await act(async () => done.click())
+  assert.ok(!document.querySelector('[role="alert"]'), document.querySelector('[role="alert"]')?.textContent ?? '')
+  f.bytes('中文成文验收')
+  assert.equal(document.querySelector('[aria-label="文字卡编辑"]'), null)
+})
+
+for (const change of ['redo', 'external'] as const) test(`NODE-BUFFER typing after ${change} starts a new undo step`, async t => {
+  const f = await fixture(t, '新文字卡')
+  await f.input('中文画板验收'); f.bytes('中文画板验收')
+  if (change === 'redo') {
+    await f.key('z', { metaKey: true }); f.bytes('新文字卡')
+    await f.key('z', { metaKey: true, shiftKey: true })
+  } else await f.external('外')
+  const restored = change === 'redo' ? '中文画板验收' : '外'
+  f.bytes(restored); assert.equal(f.rich().textContent, restored)
+  await f.input('再次编辑')
+  assert.ok(!document.querySelector('[role="alert"]'), document.querySelector('[role="alert"]')?.textContent ?? '')
+  f.bytes('再次编辑')
+  await f.key('z', { metaKey: true }); f.bytes(restored)
+  await f.key('z', { metaKey: true }); f.bytes(change === 'redo' ? '新文字卡' : '中文画板验收')
+  if (change === 'external') { await f.key('z', { metaKey: true }); f.bytes('新文字卡') }
 })
 
 test('M4-E2 Chinese composition commits only at compositionend', async t => {
