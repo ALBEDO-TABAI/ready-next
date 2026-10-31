@@ -1,5 +1,14 @@
 import { RelationsPanel } from '../../modules/workbench/object-ui/RelationsPanel'
 import { DraftBootNotice, DraftControls } from '../../modules/document/drafts/DraftControls'
+import { InkSidebar } from '../../modules/document/ink/InkSidebar'
+import { InkTopbar } from '../../modules/document/ink/InkTopbar'
+import { InkHome } from '../../modules/document/ink/InkHome'
+import { OverlayHost } from '../../modules/document/ink/overlay'
+import { recycleDocumentTabs, useInkLayout } from '../../modules/document/ink/layout-state'
+import { usePagePanel } from '../../modules/document/page-ui/page-panel-state'
+import type { PageNode } from '../../../shared/document-pages'
+import '../../modules/document/ink/ink.css'
+import '../../modules/document/callouts.css'
 import { initializeDrafts, reportDraftError, useDraftUI, watchDraftVault } from '../../modules/document/drafts/runtime'
 import { readingPositionKey } from '../../stores/objectPresentationState'
 import { registerReturnPosition } from '../../modules/workbench/reference-return'
@@ -21,7 +30,6 @@ import {
   type DocumentPaneTarget,
 } from '../../stores/useDocTabs'
 import { PageDocumentEditor } from '../../modules/document/page-ui/PageDocumentEditor'
-import DocumentVerticalTabRail from '../../components/document/DocumentVerticalTabRail'
 import FilePreview from '../../components/document/FilePreview'
 import DraggableModeSwitch from '../../components/document/DraggableModeSwitch'
 import DocumentFloatingPanels, { DocumentPanelToggleButtons } from '../../components/document/DocumentFloatingPanels'
@@ -35,15 +43,9 @@ import {
 } from '../../modules/document/book/bookTabEligibility'
 import { READY_DOCUMENT_REVEAL_EVENT } from '../../modules/agent/document-quote-navigation'
 import {
-  addReadyContextReferenceToAgentInput,
-  showReferenceToInputMenu,
-} from '../../modules/agent/chat-input-bridge'
-import {
   WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM,
   WORKBENCH_CANVAS_OUTER_PADDING_TOP,
   WORKBENCH_CANVAS_OUTER_PADDING_X,
-  WORKBENCH_HEADER_EDGE_X,
-  WORKBENCH_TAB_ROW_HEIGHT,
 } from '../../modules/workbench/chrome'
 import { useRafResizeDrag } from '../../modules/workbench/useRafResizeDrag'
 import { freezeVisibleDocumentLayoutWidths } from '../../modules/document/documentLayoutFreeze'
@@ -73,14 +75,7 @@ import {
   canAcceptDocumentPaneDrop,
   getDocumentPaneDropPath,
 } from '../../modules/document/documentPaneDrop'
-import {
-  endUntitledDocTabDragSession,
-  setUntitledDocTabDragPayload,
-} from '../../components/layout/fileTreeExternalDrop'
-import { getFileAppearanceColorValue } from '../../stores/fileAppearance'
-import { startBrowserLocalMediaNativeFileDrag } from '../../modules/browser/localMediaDragBridge'
 import { getFileExtension } from '../../utils/path'
-import { getDocumentTabFileTypeColor } from '../../modules/document/documentTabPresentation'
 import {
   areRetainedDocumentEditorPropsEqual,
   resolveRetainedDocumentScene,
@@ -230,23 +225,35 @@ export default function DocumentMode({
   const selectedFile = useWorkspace((state) => state.selectedFile)
   const workspaceRoot = useWorkspace((state) => state.workspaceRoot)
   const pinnedFolders = useWorkspace((state) => state.pinnedFolders)
-  const fileAppearances = useWorkspace((state) => state.fileAppearances)
   const tabs = useDocTabs((state) => state.tabs)
-  const tabGroups = useDocTabs((state) => state.tabGroups)
   const activeTabId = useDocTabs((state) => state.activeTabId)
   const splitTabId = useDocTabs((state) => state.splitTabId)
   const focusedPaneTabId = useDocTabs((state) => state.focusedPaneTabId)
   const documentSplitRatio = useDocTabs((state) => state.documentSplitRatio)
   const {
-    openTab, closeTab, setActiveTab, setSplitTab, setDocumentSplitRatio,
+    openTab, setDocumentSplitRatio,
     hydrateTabContentFromDisk, setPendingReveal, openTabInPane,
-    openImageTab, ensureTabForPath, createBackgroundTab,
-    createTabGroupFromDrop, addTabToGroup, reorderTabToRank,
-    renameTabGroup, recolorTabGroup, setTabGroupCollapsed, disbandTabGroup,
+    openImageTab, ensureTabForPath,
     setFocusedPaneTab,
   } = useDocTabs.getState()
 
   const draftBoot = useDraftUI(state => state.boot)
+  const pagePanel = usePagePanel()
+  const inkSidebarOpen = useInkLayout(state => state.open)
+  const inkSidebarWidth = useInkLayout(state => state.width)
+  const inkResizing = useInkLayout(state => state.resizing)
+  const inkHome = useInkLayout(state => state.home)
+  const revealInFiles = useCallback(async (node: PageNode) => {
+    const workspace = useWorkspace.getState()
+    if (!workspace.sidebarVisible) workspace.toggleSidebar()
+    await workspace.revealFile(node.path)
+  }, [])
+  // Opening or switching a document leaves the home view. Without a tab strip, the workspace shows one page at a
+  // time like Inkwell, so pages left behind are recycled once more than a few are open (never unsaved ones).
+  useEffect(() => useDocTabs.subscribe((state, previous) => {
+    if (state.activeTabId !== previous.activeTabId || state.tabs.length > previous.tabs.length) useInkLayout.getState().setHome(false)
+    if (state.activeTabId && state.activeTabId !== previous.activeTabId) recycleDocumentTabs(state.activeTabId)
+  }), [])
   useEffect(() => { void initializeDrafts().catch(reportDraftError); return watchDraftVault() }, [])
 
   const documentRootRef = useRef<HTMLDivElement>(null)
@@ -402,7 +409,6 @@ export default function DocumentMode({
   const renderedSplitTab = nextRetainedDocumentScene.splitTab
   const renderActiveEditor = isSceneVisible || nextRetainedDocumentScene.retainActiveEditor
   const renderSplitEditor = isSceneVisible || nextRetainedDocumentScene.retainSplitEditor
-  const activeTabPathLabel = activeTab?.path || activeTab?.title || '未打开文档'
   const panelTargetTab = useMemo(() => {
     const visibleTabs = [activeTab, splitTab].filter((tab): tab is DocTab => Boolean(tab))
     return visibleTabs.find((tab) => tab.id === focusedPaneTabId) || activeTab || splitTab || null
@@ -802,131 +808,6 @@ export default function DocumentMode({
     void replaceDocumentPaneFromDrop(path, pane)
   }, [replaceDocumentPaneFromDrop])
 
-  // Tab click handler
-  const handleTabClick = useCallback((id: string, e: React.MouseEvent) => {
-    captureVisibleDocumentScrollPositions()
-    if (e.shiftKey && id !== activeTabId) {
-      setSplitTab(id)
-    } else {
-      setActiveTab(id)
-    }
-  }, [activeTabId, captureVisibleDocumentScrollPositions, setActiveTab, setSplitTab])
-
-  // Drag & drop reorder
-  const handleDragStart = useCallback((e: React.DragEvent, id: string) => {
-    e.dataTransfer.effectAllowed = 'copyMove'
-    // Attach ready-drag data for cross-component drop (e.g. ChatPanel)
-    const tab = useDocTabs.getState().tabs.find((candidate) => candidate.id === id)
-    if (tab && tab.path) {
-      const ext = getFileExtension(tab.path)
-      const data = JSON.stringify({
-        type: 'doc-tab' as const,
-        path: tab.path,
-        name: tab.title,
-        title: tab.title,
-        tabId: tab.id,
-        selection: tab.isDirty ? tab.content : undefined,
-        dirty: tab.isDirty,
-        ext: ext ? `.${ext}` : undefined,
-      })
-      e.dataTransfer.setData('application/x-ready-document-tab', data)
-      e.dataTransfer.setData('application/x-ready-drag', data)
-      e.dataTransfer.setData('text/plain', tab.path)
-      e.dataTransfer.setData('text/uri-list', `file://${encodeURI(tab.path)}`)
-      startBrowserLocalMediaNativeFileDrag(e)
-    } else if (tab && tab.kind !== 'library') {
-      // Untitled draft (未保存的新建文档): dropping it onto a file-tree
-      // directory confirms the save location.
-      setUntitledDocTabDragPayload(e, { tabId: tab.id, title: tab.title })
-      e.dataTransfer.setData('application/x-ready-drag', JSON.stringify({
-        type: 'doc-tab' as const,
-        name: tab.title,
-        title: tab.title,
-        tabId: tab.id,
-        selection: tab.content,
-        dirty: true,
-      }))
-    }
-  }, [])
-
-  const handleDragEnd = useCallback(() => {
-    endUntitledDocTabDragSession()
-  }, [])
-
-  // Delete a group = close its member tabs. closeTab normalizes groups (drops the
-  // group once its last member is gone) and keeps the doc store never-empty (a blank
-  // untitled tab replaces the last one), so no manual empty-guard is needed.
-  const handleDeleteGroup = useCallback((groupId: string) => {
-    const memberIds = useDocTabs.getState().tabs.filter((tab) => tab.groupId === groupId).map((tab) => tab.id)
-    for (const id of memberIds) closeTab(id)
-  }, [closeTab])
-
-  // New tab in group = create a background (non-activating) untitled tab, then move it
-  // into the group's tail (§11.1 default background).
-  const handleNewTabInGroup = useCallback((groupId: string) => {
-    const newId = createBackgroundTab()
-    addTabToGroup(newId, groupId)
-  }, [addTabToGroup, createBackgroundTab])
-
-  const handleTabContextMenu = useCallback((event: React.MouseEvent, id: string) => {
-    const tab = useDocTabs.getState().tabs.find((candidate) => candidate.id === id)
-    if (!tab || tab.kind === 'library') return
-    event.preventDefault()
-    event.stopPropagation()
-    void showReferenceToInputMenu({ x: event.clientX, y: event.clientY }).then((selected) => {
-      if (!selected) return
-      void addReadyContextReferenceToAgentInput({
-        type: 'doc-tab',
-        name: tab.title,
-        title: tab.title,
-        path: tab.path,
-        tabId: tab.id,
-        content: tab.content,
-        ext: tab.path ? getFileExtension(tab.path) : '',
-        size: tab.content.length,
-        dirty: tab.isDirty,
-      })
-    })
-  }, [])
-
-  const railProjectionSignature = tabs.map((tab) => {
-    const appearance = tab.path ? fileAppearances[tab.path] : undefined
-    return [
-      tab.id,
-      tab.path || '',
-      tab.title,
-      tab.isDirty ? '1' : '0',
-      tab.groupId || '',
-      tab.id === activeTabId ? '1' : '0',
-      tab.id === splitTabId ? '1' : '0',
-      appearance?.color || '',
-      appearance?.icon || '',
-    ].join('\u0000')
-  }).join('\u0001')
-  const documentRailTabs = useMemo(() => useDocTabs.getState().tabs.map((tab) => {
-    const isPrimary = tab.id === useDocTabs.getState().activeTabId
-    const isSplit = tab.id === useDocTabs.getState().splitTabId
-    const appearance = tab.path ? useWorkspace.getState().fileAppearances[tab.path] : undefined
-    return {
-      id: tab.id,
-      label: tab.title,
-      pathLabel: tab.path || undefined,
-      title: `${tab.title}${isSplit ? ' (分栏)' : ''}\n按住 Shift 点击可分栏`,
-      dotColor: getFileAppearanceColorValue(appearance?.color) ?? getDocumentTabFileTypeColor(tab.path),
-      customIcon: appearance?.icon ?? null,
-      active: isPrimary,
-      secondaryActive: isSplit && !isPrimary,
-      dirty: tab.isDirty,
-      groupId: tab.groupId ?? null,
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- railProjectionSignature is a deliberate cache-busting key: the memo reads the stores via getState() and rebuilds only when a rail-visible tab field or file appearance changes
-  }), [railProjectionSignature])
-  const handleRailTabClose = useCallback((id: string) => closeTab(id), [closeTab])
-  const handleRailNewTab = useCallback(() => {
-    setEditorMode('preview')
-    openTab('')
-  }, [openTab])
-
   // Split resize
   const handleSplitResize = useCallback((delta: number) => {
     if (!splitContainerRef.current) return
@@ -963,7 +844,6 @@ export default function DocumentMode({
 
   return (
     <div className="workbench-mode-root" ref={attachDocumentRoot}>
-      <DraftControls />
       <div
         className="flex-1 min-h-0"
         style={{
@@ -971,102 +851,121 @@ export default function DocumentMode({
         }}
       >
         <div className="workbench-canvas-shell document-workbench-canvas-shell flex min-h-0 h-full flex-col">
-          {/* Top bar: file path (moved up from the old second row) + panel/mode actions */}
-          <div
-            className="document-path-bar workbench-tabs-surface glass-surface-panel flex-shrink-0 flex items-center no-drag"
-            style={{
-              minHeight: WORKBENCH_TAB_ROW_HEIGHT,
-              paddingLeft: WORKBENCH_HEADER_EDGE_X,
-              paddingRight: WORKBENCH_HEADER_EDGE_X,
-              gap: 8,
-            }}
-          >
-            <div
-              className="min-w-0 flex-1 truncate"
-              style={{ fontSize: 12, color: 'var(--text-light)' }}
-              title={activeTabPathLabel}
-            >
-              {activeTabPathLabel}
-            </div>
-            {panelTargetTab?.kind !== 'library' && <div className="flex flex-shrink-0 items-center" style={{ gap: 8 }}>
-              <DocumentPanelToggleButtons
-                outlineOpen={outlinePanelOpen}
-                marksOpen={marksPanelOpen}
-                onToggleOutline={() => setOutlinePanelOpen((value) => !value)}
-                onToggleMarks={() => setMarksPanelOpen((value) => !value)}
-                rail
+          {/* Inkwell's document interface: tab rail, glass sidebar, then the paper page with its topbar. */}
+          <div className={`ink-scope ink-doc-app${inkResizing ? ' is-resizing' : ''}`}>
+            {inkSidebarOpen && (
+              <div className="ink-sb-shell" style={{ width: inkSidebarWidth }}>
+                <InkSidebar roots={pagePanel.roots} visible={isSceneVisible} onShowFiles={revealInFiles} />
+              </div>
+            )}
+            <main className="ink-main" aria-label="文档">
+              <InkTopbar
+                tab={panelTargetTab}
+                roots={pagePanel.roots}
+                home={inkHome}
+                status={<DraftControls />}
+                actions={panelTargetTab?.kind !== 'library' ? <>
+                            <DocumentPanelToggleButtons
+                              outlineOpen={outlinePanelOpen}
+                              marksOpen={marksPanelOpen}
+                              onToggleOutline={() => setOutlinePanelOpen((value) => !value)}
+                              onToggleMarks={() => setMarksPanelOpen((value) => !value)}
+                              rail
+                            />
+                            <DocumentExportButton tab={panelTargetTab} />
+                            <DocumentBookReadingButton
+                              active={bookReadingVisible}
+                              disabled={!bookReadingEligible}
+                              onToggle={() => {
+                                if (bookReadingVisible) {
+                                  setBookReadingActive(false)
+                                } else if (panelTargetTab && bookReadingEligible) {
+                                  captureVisibleDocumentScrollPositions()
+                                  setBookReadingTabId(panelTargetTab.id)
+                                  setBookReadingActive(true)
+                                }
+                              }}
+                            />
+                            <DraggableModeSwitch
+                              mode={editorMode}
+                              onChange={handleEditorModeChange}
+                              onModeIntent={handleEditorModeIntent}
+                            />
+                </> : null}
               />
-              <DocumentExportButton tab={panelTargetTab} />
-              <DocumentBookReadingButton
-                active={bookReadingVisible}
-                disabled={!bookReadingEligible}
-                onToggle={() => {
-                  if (bookReadingVisible) {
-                    setBookReadingActive(false)
-                  } else if (panelTargetTab && bookReadingEligible) {
-                    captureVisibleDocumentScrollPositions()
-                    setBookReadingTabId(panelTargetTab.id)
-                    setBookReadingActive(true)
-                  }
-                }}
-              />
-              <DraggableModeSwitch
-                mode={editorMode}
-                onChange={handleEditorModeChange}
-                onModeIntent={handleEditorModeIntent}
-              />
-            </div>}
-          </div>
-
-          <div className="document-workbench-body flex min-h-0 flex-1">
-            <DocumentVerticalTabRail
-              tabs={documentRailTabs}
-              groups={tabGroups}
-              onTabClick={handleTabClick}
-              onTabClose={handleRailTabClose}
-              onNewTab={handleRailNewTab}
-              onTabDragStart={handleDragStart}
-              onTabDragEnd={handleDragEnd}
-              onTabContextMenu={handleTabContextMenu}
-              onCreateGroup={createTabGroupFromDrop}
-              onAddToGroup={addTabToGroup}
-              onReorderToRank={reorderTabToRank}
-              onRenameGroup={renameTabGroup}
-              onRecolorGroup={recolorTabGroup}
-              onSetGroupCollapsed={setTabGroupCollapsed}
-              onDisbandGroup={disbandTabGroup}
-              onDeleteGroup={handleDeleteGroup}
-              onNewTabInGroup={handleNewTabInGroup}
-            />
-
-          {/* Content Area — rounded on all four corners so the editor reads as an inset card
-              like the browser content viewport. */}
-          <div
-            className="document-content-frame relative flex flex-col flex-1 min-h-0 overflow-hidden"
-            style={{
-              borderRadius: 'var(--workbench-canvas-radius)',
-              background: 'var(--workbench-module-surface-bg)',
-            }}
-          >
-            <div
-              className="flex-1 min-h-0"
-              style={bookReadingVisible ? { visibility: 'hidden' } : undefined}
-              inert={bookReadingVisible || undefined}
-              aria-hidden={bookReadingVisible || undefined}
-            >
-            {renderedSplitTab && renderedActiveTab ? (
-              <div className="h-full flex min-w-0 overflow-hidden" ref={splitContainerRef} style={{ gap: 0 }}>
+              <div className="ink-main-body">
+                {inkHome && <InkHome roots={pagePanel.roots} visible={isSceneVisible} />}
                 <div
-                  ref={primarySplitPaneRef}
-                  className={`document-pane-drop-target flex flex-col min-w-0 overflow-hidden${documentPaneDropTarget === 'primary' ? ' is-document-pane-drop-target' : ''}`}
-                  style={{ flexBasis: `${documentSplitRatio}%`, flexShrink: 0, flexGrow: 0 }}
-                  onFocusCapture={() => handlePaneActivate(renderedActiveTab.id)}
-                  onPointerDownCapture={() => handlePaneActivate(renderedActiveTab.id)}
-                  onDragOverCapture={(event) => handleDocumentPaneDragOver(event, 'primary')}
-                  onDragLeaveCapture={(event) => handleDocumentPaneDragLeave(event, 'primary')}
-                  onDropCapture={(event) => handleDocumentPaneDrop(event, 'primary')}
+                  className="document-content-frame relative flex flex-col flex-1 min-h-0 overflow-hidden"
+                  style={inkHome ? { display: 'none' } : undefined}
                 >
-                  {renderActiveEditor && (
+                <div
+                  className="flex-1 min-h-0"
+                  style={bookReadingVisible ? { visibility: 'hidden' } : undefined}
+                  inert={bookReadingVisible || undefined}
+                  aria-hidden={bookReadingVisible || undefined}
+                >
+                {renderedSplitTab && renderedActiveTab ? (
+                  <div className="h-full flex min-w-0 overflow-hidden" ref={splitContainerRef} style={{ gap: 0 }}>
+                    <div
+                      ref={primarySplitPaneRef}
+                      className={`document-pane-drop-target flex flex-col min-w-0 overflow-hidden${documentPaneDropTarget === 'primary' ? ' is-document-pane-drop-target' : ''}`}
+                      style={{ flexBasis: `${documentSplitRatio}%`, flexShrink: 0, flexGrow: 0 }}
+                      onFocusCapture={() => handlePaneActivate(renderedActiveTab.id)}
+                      onPointerDownCapture={() => handlePaneActivate(renderedActiveTab.id)}
+                      onDragOverCapture={(event) => handleDocumentPaneDragOver(event, 'primary')}
+                      onDragLeaveCapture={(event) => handleDocumentPaneDragLeave(event, 'primary')}
+                      onDropCapture={(event) => handleDocumentPaneDrop(event, 'primary')}
+                    >
+                      {renderActiveEditor && (
+                        <DocumentEditor
+                          key={renderedActiveTab.id}
+                          bookReading={bookReadingVisible}
+                          tab={renderedActiveTab}
+                          viewMode={editorMode}
+                          previewEditable={editorMode === 'preview'}
+                          previewFocusWidgetTitle={previewFocusWidgetTitle}
+                          onVisibleLineChange={handlePrimaryVisibleLineChange}
+                          onActivate={handlePrimaryActivate}
+                          isFocused={!focusedPaneTabId || focusedPaneTabId === renderedActiveTab.id}
+                          isSceneVisible={isSceneVisible}
+                        />
+                      )}
+                    </div>
+                    <SplitResizeHandle
+                      onResize={handleSplitResize}
+                      onResizeStateChange={handleSplitResizeStateChange}
+                    />
+                    <div
+                      className={`document-pane-drop-target flex-1 flex flex-col min-w-0 overflow-hidden${documentPaneDropTarget === 'split' ? ' is-document-pane-drop-target' : ''}`}
+                      onFocusCapture={() => handlePaneActivate(renderedSplitTab.id)}
+                      onPointerDownCapture={() => handlePaneActivate(renderedSplitTab.id)}
+                      onDragOverCapture={(event) => handleDocumentPaneDragOver(event, 'split')}
+                      onDragLeaveCapture={(event) => handleDocumentPaneDragLeave(event, 'split')}
+                      onDropCapture={(event) => handleDocumentPaneDrop(event, 'split')}
+                    >
+                      {renderSplitEditor && (
+                        <DocumentEditor
+                          key={renderedSplitTab.id}
+                          bookReading={bookReadingVisible}
+                          tab={renderedSplitTab}
+                          viewMode={editorMode}
+                          previewEditable={editorMode === 'preview'}
+                          previewFocusWidgetTitle={previewFocusWidgetTitle}
+                          onVisibleLineChange={handleSplitVisibleLineChange}
+                          onActivate={handleSplitActivate}
+                          isFocused={focusedPaneTabId === renderedSplitTab.id}
+                          isSceneVisible={isSceneVisible}
+                        />
+                      )}
+                    </div>
+                  </div>
+                ) : renderedActiveTab && renderActiveEditor ? (
+                  <div
+                    className="h-full flex flex-col min-w-0 overflow-hidden"
+                    onFocusCapture={() => handlePaneActivate(renderedActiveTab.id)}
+                    onPointerDownCapture={() => handlePaneActivate(renderedActiveTab.id)}
+                  >
                     <DocumentEditor
                       key={renderedActiveTab.id}
                       bookReading={bookReadingVisible}
@@ -1079,96 +978,51 @@ export default function DocumentMode({
                       isFocused={!focusedPaneTabId || focusedPaneTabId === renderedActiveTab.id}
                       isSceneVisible={isSceneVisible}
                     />
-                  )}
+                  </div>
+                ) : (
+                  <div className="h-full flex items-center justify-center text-[var(--text-muted)]">
+                    <div className="text-center">
+                      <FileText className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                      <p className="text-[13px]">点击左侧文件打开文档</p>
+                    </div>
+                  </div>
+                )}
                 </div>
-                <SplitResizeHandle
-                  onResize={handleSplitResize}
-                  onResizeStateChange={handleSplitResizeStateChange}
-                />
-                <div
-                  className={`document-pane-drop-target flex-1 flex flex-col min-w-0 overflow-hidden${documentPaneDropTarget === 'split' ? ' is-document-pane-drop-target' : ''}`}
-                  onFocusCapture={() => handlePaneActivate(renderedSplitTab.id)}
-                  onPointerDownCapture={() => handlePaneActivate(renderedSplitTab.id)}
-                  onDragOverCapture={(event) => handleDocumentPaneDragOver(event, 'split')}
-                  onDragLeaveCapture={(event) => handleDocumentPaneDragLeave(event, 'split')}
-                  onDropCapture={(event) => handleDocumentPaneDrop(event, 'split')}
-                >
-                  {renderSplitEditor && (
-                    <DocumentEditor
-                      key={renderedSplitTab.id}
-                      bookReading={bookReadingVisible}
-                      tab={renderedSplitTab}
-                      viewMode={editorMode}
-                      previewEditable={editorMode === 'preview'}
-                      previewFocusWidgetTitle={previewFocusWidgetTitle}
-                      onVisibleLineChange={handleSplitVisibleLineChange}
-                      onActivate={handleSplitActivate}
-                      isFocused={focusedPaneTabId === renderedSplitTab.id}
-                      isSceneVisible={isSceneVisible}
-                    />
-                  )}
-                </div>
-              </div>
-            ) : renderedActiveTab && renderActiveEditor ? (
-              <div
-                className="h-full flex flex-col min-w-0 overflow-hidden"
-                onFocusCapture={() => handlePaneActivate(renderedActiveTab.id)}
-                onPointerDownCapture={() => handlePaneActivate(renderedActiveTab.id)}
-              >
-                <DocumentEditor
-                  key={renderedActiveTab.id}
-                  bookReading={bookReadingVisible}
-                  tab={renderedActiveTab}
-                  viewMode={editorMode}
-                  previewEditable={editorMode === 'preview'}
-                  previewFocusWidgetTitle={previewFocusWidgetTitle}
-                  onVisibleLineChange={handlePrimaryVisibleLineChange}
-                  onActivate={handlePrimaryActivate}
-                  isFocused={!focusedPaneTabId || focusedPaneTabId === renderedActiveTab.id}
-                  isSceneVisible={isSceneVisible}
-                />
-              </div>
-            ) : (
-              <div className="h-full flex items-center justify-center text-[var(--text-muted)]">
-                <div className="text-center">
-                  <FileText className="w-12 h-12 mx-auto mb-3 opacity-30" />
-                  <p className="text-[13px]">点击左侧文件打开文档</p>
+
+                {isSceneVisible && panelTargetTab?.objectId && (
+                  <RelationsPanel key={panelTargetTab.objectId} objectId={panelTargetTab.objectId} />
+                )}
+
+                {bookReadingVisible && panelTargetTab && (
+                  <DocumentBookReadingView
+                    initialPosition={scrollSnapshots.get(panelTargetTab.objectId || `draft:${panelTargetTab.id}`) ?? readDocumentReadingPositionMap().get(panelTargetTab.objectId || `draft:${panelTargetTab.id}`) ?? null}
+                    onPositionChange={handleBookPositionChange}
+                    key={panelTargetTab.id}
+                    tab={panelTargetTab}
+                    isSceneVisible={isSceneVisible}
+                    onExit={() => setBookReadingActive(false)}
+                  />
+                )}
+
+                {isSceneVisible && panelTargetTab && panelTargetTab.kind !== 'library' && (
+                  <DocumentFloatingPanels
+                    documentPath={panelTargetTab.path}
+                    documentTitle={panelTargetTab.title}
+                    content={panelTargetTab.content}
+                    activeLine={panelTargetLine}
+                    outlineOpen={outlinePanelOpen}
+                    marksOpen={marksPanelOpen}
+                    onToggleOutline={() => setOutlinePanelOpen((value) => !value)}
+                    onToggleMarks={() => setMarksPanelOpen((value) => !value)}
+                    onReveal={handlePanelReveal}
+                    showToggles={false}
+                  />
+                )}
                 </div>
               </div>
-            )}
-            </div>
-
-            {isSceneVisible && panelTargetTab?.objectId && (
-              <RelationsPanel key={panelTargetTab.objectId} objectId={panelTargetTab.objectId} />
-            )}
-
-            {bookReadingVisible && panelTargetTab && (
-              <DocumentBookReadingView
-                initialPosition={scrollSnapshots.get(panelTargetTab.objectId || `draft:${panelTargetTab.id}`) ?? readDocumentReadingPositionMap().get(panelTargetTab.objectId || `draft:${panelTargetTab.id}`) ?? null}
-                onPositionChange={handleBookPositionChange}
-                key={panelTargetTab.id}
-                tab={panelTargetTab}
-                isSceneVisible={isSceneVisible}
-                onExit={() => setBookReadingActive(false)}
-              />
-            )}
-
-            {isSceneVisible && panelTargetTab && panelTargetTab.kind !== 'library' && (
-              <DocumentFloatingPanels
-                documentPath={panelTargetTab.path}
-                documentTitle={panelTargetTab.title}
-                content={panelTargetTab.content}
-                activeLine={panelTargetLine}
-                outlineOpen={outlinePanelOpen}
-                marksOpen={marksPanelOpen}
-                onToggleOutline={() => setOutlinePanelOpen((value) => !value)}
-                onToggleMarks={() => setMarksPanelOpen((value) => !value)}
-                onReveal={handlePanelReveal}
-                showToggles={false}
-              />
-            )}
+            </main>
           </div>
-          </div>
+          {isSceneVisible && <OverlayHost />}
         </div>
       </div>
     </div>

@@ -1,5 +1,3 @@
-import { useDocTabs } from '../../stores/useDocTabs'
-import { requestWorkbenchModeOpen } from '../../modules/workbench/mode-transition'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import {
@@ -18,8 +16,6 @@ import {
 
 import { useWorkspace } from '../../stores/useWorkspace'
 import FileTree, { DEFAULT_FILE_FILTERS, type FileFilterMap, type FileViewMode } from './FileTree'
-import { usePagePanel } from '../../modules/document/page-ui/page-panel-state'
-import { ConnectedPageSidebar, PageRootNotice, PageViewSwitch } from '../../modules/document/page-ui/PagePanel'
 import Modal from '../ui/Modal'
 import { LiquidFloatingPanel } from '../ui/liquid-glass/LiquidFloatingPanel'
 import { computeNextGridHistory, type GridNavigationEntry } from './gridNavigation'
@@ -53,7 +49,6 @@ const ICON_BTN =
   'flex items-center justify-center rounded transition-[background-color,box-shadow] duration-100 hover:bg-[var(--files-panel-state-hover-bg)] hover:shadow-[var(--files-panel-state-hover-shadow)]'
 
 export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
-  const pagePanel = usePagePanel()
   const [query, setQuery] = useState('')
   const [viewMode, setViewMode] = useState<FileViewMode>('tree')
   const [filters, setFilters] = useState<FileFilterMap>({ ...DEFAULT_FILE_FILTERS })
@@ -99,7 +94,11 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
   } = useWorkspace()
   const [isRefreshing, setIsRefreshing] = useState(false)
 
-  const isConnected = pagePanel.view === 'files' && pagePanel.roots.length > 0
+  const isConnected = useMemo(() => {
+    if (workspaceRoot) return true
+    if (typeof window === 'undefined') return false
+    return !!window.electronAPI
+  }, [workspaceRoot])
 
   useEffect(() => {
     if (!showFilterMenu && !showMoreMenu) return
@@ -345,24 +344,15 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
         background: 'transparent',
       }}
     >
-      <div className="text-[13px] font-semibold" style={{ color: PANEL_TOKENS.title }}>
-        <PageViewSwitch view={pagePanel.view} onChange={pagePanel.setView} />
-      </div>
+      <span className="text-[13px] font-semibold" style={{ color: PANEL_TOKENS.title }}>
+        文件管理
+      </span>
       <span aria-hidden="true" />
     </div>
   )
 
   const body = (
     <>
-      <PageRootNotice hasRoots={pagePanel.roots.length > 0} />
-      <button type="button" className="shrink-0 text-left text-[13px] rounded hover:bg-[var(--files-panel-state-hover-bg)]"
-        style={{ margin: '4px 12px', padding: '8px 10px', color: PANEL_TOKENS.text }}
-        title="打开书房" data-library-entry="true"
-        onClick={() => { useDocTabs.getState().openLibraryTab(); requestWorkbenchModeOpen('document') }}>
-        阅读
-      </button>
-      {pagePanel.view === 'pages' && pagePanel.roots.length > 0 && isVisible && <ConnectedPageSidebar roots={pagePanel.roots} onFiles={() => pagePanel.setView('files')} />}
-      {isConnected && <>
       <div
         ref={toolbarRef}
         className="shrink-0 flex items-center justify-between"
@@ -551,8 +541,7 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
         onGridPathChange={handleGridPathChange}
         onThumbnailSizeChange={setThumbnailSize}
       />
-      </>}
-      {isConnected && portalRoot && showFilterMenu && filterMenuPosition && createPortal(
+      {portalRoot && showFilterMenu && filterMenuPosition && createPortal(
         <LiquidFloatingPanel
           ref={filterMenuRef}
           style={{
@@ -586,7 +575,7 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
         </LiquidFloatingPanel>,
         document.body,
       )}
-      {isConnected && portalRoot && showMoreMenu && moreMenuPosition && createPortal(
+      {portalRoot && showMoreMenu && moreMenuPosition && createPortal(
         <LiquidFloatingPanel
           ref={moreMenuRef}
           style={{

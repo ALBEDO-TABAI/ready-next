@@ -1,7 +1,7 @@
 import { textAreaContent, textAreaOffset } from '../../modules/document/block-editor/text-edit'
 import { useSourceHistory } from '../../modules/document/block-editor/use-source-history'
 import { parseDocumentBlocks } from '../../../shared/document-blocks'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useDocTabs, type DocTab } from '../../stores/useDocTabs'
 import EditorContextMenu from './EditorContextMenu'
 import MarkdownSelectionToolbar, {
@@ -107,6 +107,10 @@ interface MarkdownEditorProps {
   previewFocusWidgetTitle?: string | null
   onVisibleLineChange?: (line: number | null) => void
   onActivate?: () => void
+  /** Page view: shown at the top of the preview scroll area (icon, cover, title), so it scrolls with the page. */
+  previewHeader?: ReactNode
+  /** Page view classes on the preview scroll area; its layout then comes from the page stylesheet. */
+  previewClassName?: string
 }
 
 function escapeHtmlAttr(value: string): string {
@@ -240,6 +244,8 @@ export default function MarkdownEditor({
   previewFocusWidgetTitle,
   onVisibleLineChange,
   onActivate,
+  previewHeader,
+  previewClassName,
 }: MarkdownEditorProps) {
   const updateTabContent = useDocTabs((state) => state.updateTabContent)
   const hydrateTabContentFromDisk = useDocTabs((state) => state.hydrateTabContentFromDisk)
@@ -1068,7 +1074,7 @@ export default function MarkdownEditor({
           {viewMode === 'preview' && (
             <div
               ref={previewSurfaceRef}
-              className="panel-hover-scrollbar document-preview-surface flex-1 overflow-auto"
+              className={`panel-hover-scrollbar document-preview-surface flex-1 overflow-auto${previewClassName ? ` ${previewClassName}` : ''}`}
               style={{ background: 'transparent' }}
               onContextMenu={handleContextMenu}
               onDragOver={handleEditorDragOver}
@@ -1076,7 +1082,8 @@ export default function MarkdownEditor({
               onPointerDownCapture={handleSurfacePointerDown}
               onScroll={handlePreviewSurfaceScroll}
             >
-              <div className="document-preview-layout" style={{ padding: '56px 48px 120px', maxWidth: 816, margin: '0 auto' }}>
+              {previewHeader}
+              <div className="document-preview-layout" style={previewClassName ? undefined : { padding: '56px 48px 120px', maxWidth: 816, margin: '0 auto' }}>
                 {blockingLoadError ? (
                   renderLoadState()
                 ) : (

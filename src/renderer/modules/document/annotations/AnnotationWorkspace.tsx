@@ -82,10 +82,10 @@ export function AnnotationWorkspace({ buffer, children }: { buffer: EditorBuffer
   }
   return <AnnotationMenuContext.Provider value={extensions}><div ref={root} style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
     <div style={{ minWidth: 0, flex: 1 }}>{children}
-      {tabId && <div><button type="button" onClick={() => setVisible(!visible)}>评论</button><button type="button" onClick={() => setTemplate({ insert: null })}>从模板新建页面</button></div>}
+      {tabId && <div className="ready-annotation-actions"><button type="button" aria-pressed={visible} onClick={() => setVisible(!visible)}>评论</button><button type="button" onClick={() => setTemplate({ insert: null })}>从模板新建页面</button></div>}
       {error && <p role="alert">{error}</p>}
     </div>
-    {visible && <aside aria-label="评论面板" style={{ width: 260, flexShrink: 0 }}>
+    {visible && <aside aria-label="评论面板" className="ready-comments-panel" style={{ width: 260, flexShrink: 0 }}>
       <button type="button" disabled={busy} onClick={() => { if (path) void mutate({ type: 'read', path }) }}>刷新评论</button>
       {selected && <form onSubmit={event => { event.preventDefault(); void add() }}><label>评论内容<textarea aria-label="评论内容" value={text} onChange={event => setText(event.target.value)} /></label><button disabled={busy || !snapshot || !text.trim()}>发表评论</button></form>}
       {reference && !sync && <div><p>源块已保留，请保存后在其他位置插入：</p><code>{reference}</code></div>}

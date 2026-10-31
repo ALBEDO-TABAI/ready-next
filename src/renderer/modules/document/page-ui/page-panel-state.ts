@@ -1,27 +1,20 @@
 import { useEffect, useMemo } from 'react'
-import { create } from 'zustand'
 import type { PageNode } from '../../../../shared/document-pages'
 import { useWorkspace } from '../../../stores/useWorkspace'
 import { useVault } from '../../../stores/useVault'
 import { useDocTabs } from '../../../stores/useDocTabs'
 import { runRegisteredDocumentSave } from '../documentSaveRegistry'
-import { readStorage, writeStorage } from '../../../utils/storage'
 import { pageRoots } from './page-state'
 
-const VIEW_KEY = 'ready-page-panel-view'
-export const usePageView = create<{ view: 'pages' | 'files'; setView(view: 'pages' | 'files'): void }>(set => ({
-  view: readStorage(VIEW_KEY) === 'files' ? 'files' : 'pages',
-  setView: view => { writeStorage(VIEW_KEY, view); set({ view }) },
-}))
+/** The page roots the document shell lists: the vault, the workspace folder and pinned folders. */
 export function usePagePanel() {
-  const { view, setView } = usePageView()
   const vault = useVault(state => state.view)
   const load = useVault(state => state.load)
   const workspaceRoot = useWorkspace(state => state.workspaceRoot)
   const pinned = useWorkspace(state => state.pinnedFolders)
   useEffect(() => { void load() }, [load])
   const roots = useMemo(() => pageRoots(vault.data, workspaceRoot, pinned), [vault.data, workspaceRoot, pinned])
-  return { view, roots, setView }
+  return { roots }
 }
 
 export async function saveBeforePageTrash(node: PageNode): Promise<void> {

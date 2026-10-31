@@ -1,7 +1,9 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import type { DocumentPagesAPI, PageProperties } from '../../../../shared/document-pages'
 import { errorMessage, joinPagePath } from './page-state'
-import { PageIcon, PageIconOptions } from './PageIcon'
+import { Icon } from '../ink/icons'
+import { InkPageIcon, PAGE_ICON_CHOICES } from '../ink/InkPageIcon'
+import { closePopover, openPopover } from '../ink/overlay'
 
 export interface PageHeaderProps {
   objectId: string
@@ -11,97 +13,156 @@ export interface PageHeaderProps {
   beforeSave?(): Promise<void>
 }
 
+/** Inkwell's page header: icon, cover and title above the page body. Every change goes through the versioned page API. */
 export function PageHeader({ objectId, root, title, beforeSave, api = window.electronAPI.documentPages }: PageHeaderProps) {
-  const iconList = useId()
   const [reload, setReload] = useState(0)
   const renameIntent = useRef<{ title: string; objectId: string; id: string } | null>(null)
-  const [loaded, setLoaded] = useState<{ properties: PageProperties; version: string } | null>(null)
-  const [draft, setDraft] = useState<PageProperties>({})
+  const [properties, setProperties] = useState<PageProperties | null>(null)
+  const [titleDraft, setTitleDraft] = useState(title)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [reposition, setReposition] = useState<number | null>(null)
   const lock = useRef(false)
   const owner = useRef(objectId)
   owner.current = objectId
+  const titleRef = useRef<HTMLTextAreaElement>(null)
+
   useEffect(() => {
     let active = true
-    setLoaded(null); setError(null)
+    setError(null)
     void api.properties(objectId).then(result => {
       if (!active) return
       if (!result.ok) { setError(result.message); return }
-      setLoaded(result.value); setDraft({ ...result.value.properties, title: result.value.properties.title ?? title })
+      setProperties(result.value.properties); setTitleDraft(result.value.properties.title ?? title)
     }).catch(failure => { if (active) setError(errorMessage(failure)) })
     return () => { active = false }
   }, [api, objectId, title, reload])
-
   useEffect(() => api.onChanged(event => {
     if ('objectId' in event && event.objectId === objectId) setReload(value => value + 1)
   }), [api, objectId])
+  useLayoutEffect(() => {
+    const element = titleRef.current
+    if (!element) return
+    element.style.height = '0px'; element.style.height = `${element.scrollHeight}px`
+  }, [titleDraft, properties])
 
-  const save = async () => {
-    if (!loaded || lock.current) return
+  const run = async (work: () => Promise<void>) => {
+    if (lock.current) return false
     lock.current = true; setBusy(true); setError(null)
-    try {
-      await beforeSave?.()
-      let version = loaded.version
-      if (beforeSave) {
-        const current = await api.properties(objectId)
-        if (!current.ok) throw new Error(current.message)
-        if (JSON.stringify(current.value.properties) !== JSON.stringify(loaded.properties)) throw new Error('页面属性已有变化，请重新读取后再修改。')
-        version = current.value.version
-      }
-      if (draft.title !== (loaded.properties.title ?? title)) {
-        const nextTitle = draft.title ?? ''
-        if (renameIntent.current?.title !== nextTitle || renameIntent.current.objectId !== objectId) renameIntent.current = { title: nextTitle, objectId, id: crypto.randomUUID() }
-        const rename = await api.operate({ type: 'rename', operationId: renameIntent.current.id, root, objectId, title: nextTitle })
-        if (!rename.ok) throw new Error(rename.message)
-        const current = await api.properties(objectId)
-        if (!current.ok) throw new Error(current.message)
-        version = current.value.version
-      }
-      const set: PageProperties = {}
-      const remove: (keyof PageProperties)[] = []
-      for (const key of ['icon', 'cover'] as const) {
-        if (draft[key] !== loaded.properties[key]) {
-          if (draft[key]) set[key] = draft[key]
-          else remove.push(key)
-        }
-      }
-      const options: NonNullable<PageProperties['ready_page']> = {}
-      if (draft.ready_page?.font !== loaded.properties.ready_page?.font) options.font = draft.ready_page?.font
-      if (draft.ready_page?.small_text !== loaded.properties.ready_page?.small_text) options.small_text = draft.ready_page?.small_text
-      if (draft.ready_page?.full_width !== loaded.properties.ready_page?.full_width) options.full_width = draft.ready_page?.full_width
-      if (draft.ready_page?.cover_y !== loaded.properties.ready_page?.cover_y) options.cover_y = draft.ready_page?.cover_y
-      if (Object.keys(options).length) set.ready_page = options
-      if (Object.keys(set).length || remove.length) {
-        const result = await api.patchProperties(objectId, version, set, remove)
-        if (!result.ok) throw new Error(result.message)
-      }
-      const result = await api.properties(objectId)
-      if (!result.ok) throw new Error(result.message)
-      if (owner.current === objectId) { setLoaded(result.value); setDraft({ ...result.value.properties, title: result.value.properties.title ?? title }) }
-    } catch (failure) { if (owner.current === objectId) setError(errorMessage(failure)) }
+    try { await work(); return true } catch (failure) { if (owner.current === objectId) setError(errorMessage(failure)); return false }
     finally { lock.current = false; setBusy(false) }
   }
-  const display = (patch: NonNullable<PageProperties['ready_page']>) => setDraft(value => ({ ...value, ready_page: { ...value.ready_page, ...patch } }))
-  const cover = draft.cover?.startsWith('https://') ? draft.cover : draft.cover ? `local-file://${joinPagePath(root, draft.cover)}` : undefined
-  return <header aria-label="页面头部" className="p-4 space-y-3" style={{ color: 'var(--text-primary)' }}>
-    {cover && <img src={cover} alt="页面封面" className="w-full h-40 object-cover rounded" style={{ objectPosition: `center ${(draft.ready_page?.cover_y ?? 0.5) * 100}%` }} />}
-    {error && <p role="alert">{error} <button disabled={busy} onClick={() => setReload(value => value + 1)}>重新读取页面属性</button></p>}
-    {!loaded ? !error && <p role="status">正在读取页面属性…</p> : <form onSubmit={event => { event.preventDefault(); void save() }}>
-      <fieldset disabled={busy} className="space-y-3">
-        <div className="flex items-center gap-2"><PageIcon value={draft.icon} /><label>图标<input aria-label="图标" list={iconList} value={draft.icon || ''} onChange={event => setDraft(value => ({ ...value, icon: event.target.value }))} placeholder="Emoji 或 lucide:star" /></label></div>
-        <PageIconOptions id={iconList} />
-        <label className="block">标题<input aria-label="页面标题" className="block w-full text-2xl bg-transparent" value={draft.title || ''} onChange={event => setDraft(value => ({ ...value, title: event.target.value }))} /></label>
-        <label className="block">封面<input aria-label="封面" className="w-full" placeholder="资料库内图片路径或 https URL" value={draft.cover || ''} onChange={event => setDraft(value => ({ ...value, cover: event.target.value }))} /></label>
-        {draft.cover && <label className="block">封面位置<input aria-label="封面位置" type="range" min="0" max="1" step="0.01" value={draft.ready_page?.cover_y ?? 0.5} onChange={event => display({ cover_y: Number(event.target.value) })} /></label>}
-        <label>字体<select aria-label="字体" value={draft.ready_page?.font || 'sans'} onChange={event => {
-          const font = event.target.value
-          if (font === 'sans' || font === 'serif' || font === 'mono') display({ font })
-        }}><option value="sans">无衬线</option><option value="serif">衬线</option><option value="mono">等宽</option></select></label>
-        <label><input type="checkbox" checked={draft.ready_page?.small_text ?? false} onChange={event => display({ small_text: event.target.checked })} />小字</label>
-        <label><input type="checkbox" checked={draft.ready_page?.full_width ?? false} onChange={event => display({ full_width: event.target.checked })} />全宽</label>
-        <button type="submit">{busy ? '正在保存…' : '保存页面属性'}</button>
-      </fieldset>
-    </form>}
+  const refresh = async () => {
+    const result = await api.properties(objectId)
+    if (!result.ok) throw new Error(result.message)
+    if (owner.current === objectId) { setProperties(result.value.properties); setTitleDraft(result.value.properties.title ?? title) }
+  }
+  const patch = (set: PageProperties, remove: (keyof PageProperties)[] = []) => run(async () => {
+    await beforeSave?.()
+    const current = await api.properties(objectId)
+    if (!current.ok) throw new Error(current.message)
+    const result = await api.patchProperties(objectId, current.value.version, set, remove)
+    if (!result.ok) throw new Error(result.message)
+    await refresh()
+  })
+  const rename = () => {
+    const next = titleDraft.trim()
+    const currentTitle = properties?.title ?? title
+    if (!properties || !next || next === currentTitle) { if (!next) setTitleDraft(currentTitle); return }
+    void run(async () => {
+      await beforeSave?.()
+      if (renameIntent.current?.title !== next || renameIntent.current.objectId !== objectId) renameIntent.current = { title: next, objectId, id: crypto.randomUUID() }
+      const result = await api.operate({ type: 'rename', operationId: renameIntent.current.id, root, objectId, title: next })
+      if (!result.ok) throw new Error(result.message)
+      await refresh()
+    })
+  }
+  const pickIcon = (anchor: DOMRect, current?: string) => openPopover({ id: 'ink-icon-picker', anchor, placement: 'bottom-start', offset: 6, label: '选择图标',
+    render: close => <IconPicker value={current} onPick={value => { close(); void (value ? patch({ icon: value }) : patch({}, ['icon'])) }} /> })
+  const pickCover = (anchor: DOMRect) => openPopover({ id: 'ink-cover-picker', anchor, placement: 'bottom-end', offset: 6, label: '更换封面',
+    render: close => <CoverPicker value={properties?.cover} onPick={value => { close(); void (value ? patch({ cover: value }) : patch({}, ['cover'])) }} /> })
+  const dragCover = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (reposition === null) return
+    event.preventDefault()
+    const frame = event.currentTarget.getBoundingClientRect(), startY = event.clientY, start = reposition
+    const move = (next: PointerEvent) => setReposition(Math.max(0, Math.min(1, start - (next.clientY - startY) / Math.max(1, frame.height))))
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up)
+  }
+
+  const icon = properties?.icon
+  const cover = properties?.cover
+  const coverUrl = cover?.startsWith('https://') ? cover : cover ? `local-file://${joinPagePath(root, cover)}` : undefined
+  const coverY = reposition ?? properties?.ready_page?.cover_y ?? 0.5
+  return <header aria-label="页面头部" className={`ink-page-header${icon ? ' has-icon' : ''}${coverUrl ? ' has-cover' : ''}`}>
+    {coverUrl ? <div className={`ink-cover${reposition !== null ? ' is-repos' : ''}`} onPointerDown={dragCover}>
+      <img src={coverUrl} alt="页面封面" draggable={false} style={{ objectPosition: `center ${coverY * 100}%` }} />
+      {reposition !== null && <div className="ink-cover-hint">拖动图片调整位置</div>}
+      <div className="ink-cover-actions">
+        {reposition === null ? <>
+          <button type="button" disabled={busy} onClick={event => pickCover(event.currentTarget.getBoundingClientRect())}>更换封面</button>
+          <button type="button" disabled={busy} onClick={() => setReposition(properties?.ready_page?.cover_y ?? 0.5)}>调整位置</button>
+        </> : <>
+          <button type="button" disabled={busy} onClick={() => { const value = reposition; setReposition(null); void patch({ ready_page: { cover_y: Math.round(value * 100) / 100 } }) }}>保存位置</button>
+          <button type="button" onClick={() => setReposition(null)}>取消</button>
+        </>}
+      </div>
+    </div> : <div className="ink-page-top-pad" />}
+    <div className="ink-page-header-inner">
+      {icon && <button type="button" className="ink-page-icon" aria-label="更换图标" disabled={busy}
+        onClick={event => pickIcon(event.currentTarget.getBoundingClientRect(), icon)}>
+        <InkPageIcon value={icon} size={78} emojiSize={70} />
+      </button>}
+      <div className="ink-page-controls">
+        {!icon && <button type="button" className="ink-page-ctl" disabled={busy || !properties} onClick={event => pickIcon(event.currentTarget.getBoundingClientRect())}>
+          <Icon name="smile" size={16} stroke={1.6} />添加图标</button>}
+        {!coverUrl && <button type="button" className="ink-page-ctl" disabled={busy || !properties} onClick={event => pickCover(event.currentTarget.getBoundingClientRect())}>
+          <Icon name="image" size={16} stroke={1.6} />添加封面</button>}
+      </div>
+      <div className="ink-page-title">
+        <textarea ref={titleRef} className="ink-title-editable ready-input-slot-inner" aria-label="页面标题" rows={1} placeholder="无标题" spellCheck={false}
+          value={titleDraft} disabled={busy || !properties}
+          onChange={event => setTitleDraft(event.target.value.replace(/[\r\n]+/g, ' '))}
+          onKeyDown={event => {
+            if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.blur() }
+            if (event.key === 'Escape') { setTitleDraft(properties?.title ?? title); event.currentTarget.blur() }
+          }}
+          onBlur={rename} />
+      </div>
+      {error && <p role="alert" className="ink-page-error">{error}<button type="button" className="ink-btn" disabled={busy} onClick={() => setReload(value => value + 1)}>重新读取页面属性</button></p>}
+      {!properties && !error && <p role="status" className="ink-page-error" style={{ color: 'var(--ink-text-tertiary)' }}>正在读取页面属性…</p>}
+    </div>
   </header>
+}
+
+function IconPicker({ value, onPick }: { value?: string; onPick(value: string | null): void }) {
+  const [custom, setCustom] = useState('')
+  return <div className="ink-menu ink-panel" style={{ width: 300 }}>
+    <div className="ink-panel-row" style={{ justifyContent: 'space-between' }}>
+      <span className="ink-panel-title">图标</span>
+      {value && <button type="button" className="ink-btn" onClick={() => onPick(null)}>移除</button>}
+    </div>
+    <div className="ink-icon-grid" role="listbox" aria-label="图标">
+      {PAGE_ICON_CHOICES.map(choice => <button key={choice} type="button" role="option" aria-selected={choice === value} aria-label={choice} className="ink-icon-cell" onClick={() => onPick(choice)}>
+        <InkPageIcon value={choice} size={22} emojiSize={21} />
+      </button>)}
+    </div>
+    <form className="ink-panel-row" onSubmit={event => { event.preventDefault(); if (custom.trim()) onPick(custom.trim()) }}>
+      <input className="ink-input" aria-label="自定义图标" placeholder="其他 Emoji，或 lucide:名称" value={custom} onChange={event => setCustom(event.target.value)} />
+      <button type="submit" className="ink-btn" disabled={!custom.trim()}>使用</button>
+    </form>
+  </div>
+}
+
+function CoverPicker({ value, onPick }: { value?: string; onPick(value: string | null): void }) {
+  const [draft, setDraft] = useState(value ?? '')
+  return <form className="ink-menu ink-panel" style={{ width: 340 }} onSubmit={event => { event.preventDefault(); if (draft.trim()) onPick(draft.trim()) }}>
+    <span className="ink-panel-title">封面</span>
+    <input className="ink-input" data-autofocus aria-label="封面" placeholder="资料库内的图片路径，或 https 链接" value={draft} onChange={event => setDraft(event.target.value)} />
+    <div className="ink-panel-actions">
+      {value && <button type="button" className="ink-btn is-danger" onClick={() => onPick(null)}>移除封面</button>}
+      <button type="button" className="ink-btn" onClick={() => closePopover('ink-cover-picker')}>取消</button>
+      <button type="submit" className="ink-btn ink-btn-primary" disabled={!draft.trim()}>使用</button>
+    </div>
+  </form>
 }

@@ -1,4 +1,5 @@
 import { remarkSyncedBlocks } from '../../modules/document/annotations/inline-links'
+import { remarkCallouts } from '../../modules/document/callouts'
 import { createContext, useContext } from 'react'
 import { SyncedBlock } from '../../modules/document/annotations/SyncedBlock'
 import { InlineDatabase, parseDatabaseLink, remarkDatabaseViews } from '../../modules/document/database'
@@ -383,7 +384,7 @@ const MarkdownPreviewBlock = memo(function MarkdownPreviewBlock({
       p: ({ node, ...props }) => node && hasDatabase(node) ? <div {...props} /> : Paragraph && typeof Paragraph !== 'string' ? <Paragraph node={node} {...props} /> : <p {...props} />,
     }
   }, [components, syncedPath])
-  const databasePlugins = useMemo(() => [...remarkPlugins ?? [], remarkSyncedBlocks, remarkDatabaseViews], [remarkPlugins])
+  const databasePlugins = useMemo(() => [...remarkPlugins ?? [], remarkCallouts, remarkSyncedBlocks, remarkDatabaseViews], [remarkPlugins])
   return (
     <ReactMarkdown urlTransform={href => href.startsWith('ready://') || href.startsWith('ready-db:') || href.startsWith('ready-sync:') ? href : defaultUrlTransform(href)} remarkPlugins={databasePlugins} components={databaseComponents}>
       {markdown}

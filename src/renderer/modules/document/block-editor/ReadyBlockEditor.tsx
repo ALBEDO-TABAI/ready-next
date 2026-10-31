@@ -154,9 +154,11 @@ export function BufferedBlockEditor({ buffer, linkBase, content: displayedConten
         : renderBlock(emptyBlock(block.end, block.id), `${key}/empty`, prefix)
       if (block.type === 'columns') return shell(<div data-ready-columns style={{ display: 'grid', gridTemplateColumns: block.widths?.map(width => `minmax(0, ${width}fr)`).join(' '), gap: 24 }}>{body}</div>)
       if (block.type === 'list') return shell(<div role="list">{body}</div>)
-      return shell(<div role={isList ? 'listitem' : undefined} style={{ minWidth: 0, paddingLeft: isList || prefix === '> ' ? 24 : 0,
-        borderLeft: prefix === '> ' ? '2px solid var(--border-color)' : undefined }}>
-        {isList && <span aria-hidden style={{ float: 'left', marginLeft: -24 }}>{block.type === 'taskItem' ? (/\[[xX]\]/.test(prefix) ? '☑' : '☐') : /^\s*\d/.test(prefix) ? prefix.trim() : '•'}</span>}{body}
+      const quote = prefix === '> ', task = block.type === 'taskItem'
+      return shell(<div role={isList ? 'listitem' : undefined} className={`ready-block-container${isList || quote ? ' is-indented' : ''}${quote ? ' is-quote' : ''}`}
+        data-checked={task ? /\[[xX]\]/.test(prefix) : undefined}>
+        {isList && <span aria-hidden className={`ready-block-marker${task ? ' is-task' : /^\s*\d/.test(prefix) ? ' is-number' : ' is-bullet'}`}
+          data-checked={task ? /\[[xX]\]/.test(prefix) : undefined}>{task ? '' : /^\s*\d/.test(prefix) ? prefix.trim() : '•'}</span>}{body}
       </div>)
     }
     const model = block.id.startsWith('empty:') && block.start === emptyAt && appendPrefix
@@ -199,7 +201,8 @@ export function BufferedBlockEditor({ buffer, linkBase, content: displayedConten
     {(writeError || error) && <p role="alert">{writeError || error}</p>}
     {parsed.blocks.some(block => block.issue) && <p role="status">分栏格式需修复，其他段落仍可编辑。</p>}
     {segments.map((block, index) => renderBlock(block, String(index)))}
-    <button type="button" onClick={() => {
+    {/* The page tail: clicking below the last block continues the text, as in Inkwell. */}
+    <button type="button" className="ready-block-tail" onClick={() => {
       try {
         buffer.flush()
         const end = buffer.snapshot.content.length

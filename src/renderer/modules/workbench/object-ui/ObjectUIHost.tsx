@@ -23,9 +23,12 @@ export function ObjectUIHost({ onSettings }: { onSettings: () => void }) {
       if (!parsed.ok) return
       event.preventDefault(); event.stopImmediatePropagation(); preview(parsed.ref)
     }
+    // The document sidebar's search field opens the same switcher.
+    const openSwitcher = () => setSurface({ kind: 'switcher' })
     window.addEventListener('keydown', key, true)
     window.addEventListener('click', click, true)
-    return () => { window.removeEventListener('keydown', key, true); window.removeEventListener('click', click, true) }
+    window.addEventListener('ready:open-quick-switcher', openSwitcher)
+    return () => { window.removeEventListener('keydown', key, true); window.removeEventListener('click', click, true); window.removeEventListener('ready:open-quick-switcher', openSwitcher) }
   }, [preview])
   return surface?.kind === 'switcher' ? <QuickSwitcher onClose={close} onPreview={preview} onSettings={onSettings} />
     : surface?.kind === 'preview' ? <QuickLook reference={surface.target} onClose={close} /> : null
