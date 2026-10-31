@@ -280,7 +280,7 @@ html[data-theme='dark'] .ink-scope {
 .ink-sb-tree:hover .ink-sb-disclosure, .ink-sb-tree:focus-within .ink-sb-disclosure { display: flex; }
 .ink-sb-tree:hover .ink-sb-icon-glyph, .ink-sb-tree:focus-within .ink-sb-icon-glyph { visibility: hidden; }
 .ink-sb-row-actions { display: none; align-items: center; gap: 2px; margin-left: 4px; margin-right: -4px; }
-.ink-sb-row:hover .ink-sb-row-actions, .ink-sb-row:focus-within .ink-sb-row-actions, .ink-sb-row.is-menu-open .ink-sb-row-actions, .ink-sb-section-head:hover .ink-sb-row-actions { display: flex; }
+.ink-sb-row:hover .ink-sb-row-actions, .ink-sb-row:focus-within .ink-sb-row-actions, .ink-sb-row.is-menu-open .ink-sb-row-actions, .ink-sb-section-head:hover .ink-sb-row-actions, .ink-sb-section-head:focus-within .ink-sb-row-actions { display: flex; }
 .ink-sb-action { width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; border-radius: 4px; color: var(--ink-icon-secondary); border: 0; background: none; padding: 0; }
 .ink-sb-action:hover { background: var(--ink-button-hovered-background); }
 .ink-sb-section-head { display: flex; align-items: center; gap: 4px; height: 30px; padding: 0 8px; border-radius: 6px; }
@@ -499,13 +499,6 @@ html[data-theme='dark'] .ink-scope {
 .ink-topbar .document-floating-toggle.is-active, .ink-topbar .document-floating-toggle[aria-pressed='true'] { background: var(--studio-accent-soft); color: var(--studio-accent-text); }
 .ink-topbar .document-floating-toggle svg { width: 17px; height: 17px; stroke-width: 1.7; }
 .ink-topbar .document-floating-toggle:disabled { opacity: .35; }
-.ink-scope.ink-doc-app .ink-topbar .draggable-mode-switch { height: 28px; padding: 2px; border-radius: 18px; background: var(--studio-fill); box-shadow: none; border: 0; margin-left: 4px; }
-.ink-scope.ink-doc-app .ink-topbar .draggable-mode-switch::before, .ink-scope.ink-doc-app .ink-topbar .draggable-mode-switch::after { content: none; }
-.ink-scope.ink-doc-app .ink-topbar .draggable-mode-switch__thumb { top: 2px; height: calc(100% - 4px); border-radius: 14px; background: var(--studio-paper); box-shadow: 0 1px 2px rgba(10, 10, 20, .1); }
-.ink-scope.ink-doc-app .ink-topbar .draggable-mode-switch__thumb-glow { display: none; }
-.ink-scope.ink-doc-app .ink-topbar .draggable-mode-switch__thumb-label { color: var(--ink-text-primary); text-shadow: none; font-size: 12px; }
-.ink-scope.ink-doc-app .ink-topbar .draggable-mode-switch__label { font-size: 12px; color: var(--ink-text-secondary); }
-.ink-scope.ink-doc-app .ink-topbar .draggable-mode-switch__label.is-active { color: var(--ink-text-primary); }
 .ink-topbar [data-testid='draft-controls'] { display: flex; align-items: center; gap: 4px; padding: 0; font-size: 12px; }
 
 /* ---------------- home ---------------- */
@@ -543,9 +536,6 @@ html[data-theme='dark'] .ink-scope {
 /* ---------------- page tail, page actions and comments ---------------- */
 .ink-scope .ink-page .ready-block-tail { min-height: 120px; padding: 6px 2px; color: transparent; font-size: 14px; }
 .ink-scope .ink-page .ready-block-tail:hover { color: var(--ink-text-tertiary); }
-.ready-annotation-actions { display: flex; gap: 4px; margin-top: 4px; }
-.ready-annotation-actions button { display: flex; align-items: center; height: 28px; padding: 0 10px; border: 0; border-radius: 14px; background: none; font: inherit; font-size: 12px; color: var(--ink-text-tertiary, var(--text-muted)); cursor: pointer; }
-.ready-annotation-actions button:hover, .ready-annotation-actions button[aria-pressed='true'] { background: var(--ink-button-hovered-background, rgba(0, 0, 0, .05)); color: var(--ink-text-secondary, var(--text-secondary)); }
 .ink-scope .ready-comments-panel { position: sticky; top: 12px; display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: 16px; font-size: 13px; line-height: 19px;
   background: var(--studio-glass); -webkit-backdrop-filter: blur(22px) saturate(150%); backdrop-filter: blur(22px) saturate(150%);
   box-shadow: inset 0 1px 0 var(--studio-rim), inset 0 0 0 1px var(--studio-line), var(--studio-shadow); }
@@ -697,3 +687,50 @@ html[data-theme='dark'] .ready-block-popover.ready-block-toolbar [aria-pressed=t
 
 /* Under the liquid-glass skin the content frame carries its own surface; inside the paper page it must not. */
 html[data-skin='liquid-glass'] .ink-main .document-content-frame { background: transparent !important; border-radius: 0 !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+
+.ink-scope .ready-comments-panel .ready-comments-close { align-self: flex-end; height: 24px; padding: 0 10px; border: 0; background: none; color: var(--ink-text-tertiary); }
+.ink-scope .ready-comments-panel .ready-comments-close:hover { color: var(--ink-text-primary); background: var(--studio-fill); }
+.ink-template-panel form[role='dialog'] { display: flex; flex-direction: column; gap: 10px; }
+.ink-template-panel label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--ink-text-secondary); }
+.ink-template-panel button { align-self: flex-start; height: 28px; padding: 0 14px; border: 0; border-radius: 14px; background: var(--studio-inverse); color: var(--studio-on-inverse); font: inherit; font-size: 13px; cursor: pointer; }
+
+/* ---------------- first run and draft recovery, before the shell ---------------- */
+.ink-boot { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.ink-boot-card { width: min(420px, 100%); display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 36px 32px 30px; border-radius: 24px; text-align: center;
+  background: var(--studio-paper); box-shadow: inset 0 0 0 1px var(--studio-line), var(--studio-paper-shadow); }
+.ink-boot-mark { width: 56px; height: 56px; display: flex; align-items: center; justify-content: center; border-radius: 18px; color: var(--studio-accent-text); background: var(--studio-accent-soft); }
+.ink-boot-title { margin: 6px 0 0; font-family: var(--studio-display); font-size: 22px; line-height: 28px; font-weight: 600; letter-spacing: -.015em; color: var(--ink-text-primary); }
+.ink-boot-text { margin: 0; font-size: 14px; line-height: 22px; color: var(--ink-text-secondary); }
+.ink-boot-actions { display: flex; gap: 8px; margin-top: 8px; }
+.ink-boot-error { color: var(--ink-red-text-secondary); font-size: 13px; }
+
+/* ---------------- tab bar along the top edge (Inkwell's studio tabs) ---------------- */
+.ink-column { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+.ink-tabbar { height: 32px; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 4px; user-select: none; color: var(--ink-text-secondary); }
+.ink-tabbar-nav { display: flex; align-items: center; gap: 2px; flex: none; }
+.ink-tbar-icon { width: 28px; height: 28px; flex: none; display: flex; align-items: center; justify-content: center; border: 0; border-radius: 50%; background: none; padding: 0; color: var(--ink-text-secondary); cursor: pointer; }
+.ink-tbar-icon:hover { background: var(--studio-hover); color: var(--ink-text-primary); }
+.ink-tbar-icon:disabled { opacity: .35; cursor: default; background: none; }
+/* The strip is as wide as its tabs, so "+" follows the last tab and stays in view when the strip has to scroll. */
+.ink-tabstrip { flex: 0 1 auto; min-width: 0; position: relative; display: flex; align-items: center; gap: 4px; overflow-x: auto; scrollbar-width: none; }
+.ink-tabstrip::-webkit-scrollbar { display: none; }
+.ink-tab { position: relative; flex: 0 1 auto; width: 190px; min-width: 36px; height: 28px; display: flex; align-items: center; gap: 0; padding: 0 6px 0 12px; border-radius: 16px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--ink-text-secondary); cursor: default; transition: background .15s, color .15s; }
+.ink-tab:hover { background: var(--studio-fill); color: var(--ink-text-primary); }
+.ink-tab.is-active { background: var(--studio-glass); color: var(--ink-text-primary); box-shadow: inset 0 1px 0 var(--studio-rim), inset 0 0 0 1px var(--studio-line), 0 1px 4px rgba(0, 0, 0, .06); -webkit-backdrop-filter: blur(22px) saturate(150%); backdrop-filter: blur(22px) saturate(150%); }
+.ink-tab.is-active::before { content: ''; width: 5px; height: 5px; margin-right: 8px; flex: none; border-radius: 50%; background: var(--studio-accent); }
+.ink-tab.is-drop { box-shadow: inset 2px 0 0 rgba(35, 131, 226, .6); }
+.ink-tab:focus-visible { outline: 2px solid var(--studio-accent-soft); outline-offset: 1px; }
+.ink-tab-icon { display: flex; flex: none; margin-right: 7px; opacity: .75; }
+.ink-tab.is-active .ink-tab-icon { opacity: 1; }
+.ink-tab-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 10px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 10px), transparent); }
+.ink-tab-dirty { flex: none; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--ink-text-tertiary); }
+.ink-tab-close { flex: none; width: 20px; height: 20px; margin-left: 2px; display: flex; align-items: center; justify-content: center; border: 0; border-radius: 50%; background: none; padding: 0; color: var(--ink-text-tertiary); opacity: 0; cursor: pointer; transition: opacity .15s; }
+.ink-tab:hover .ink-tab-close, .ink-tab.is-active .ink-tab-close { opacity: 1; }
+.ink-tab-close:hover { background: var(--studio-hover); color: var(--ink-text-primary); }
+.ink-tbar-new { margin-left: -2px; }
+.ink-source-chip { display: flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px 0 9px; margin-right: 4px; border: 0; border-radius: 12px; background: var(--studio-accent-soft); color: var(--studio-accent-text); font: inherit; font-size: 11px; font-weight: 600; cursor: pointer; }
+.ink-source-chip:hover { filter: brightness(.96); }
+/* The active tab keeps its whole title (up to 220px); the others share what is left. The title's end padding
+   takes the fade unless the title overflows. */
+.ink-tab.is-active { flex: 0 0 auto; width: auto; max-width: min(220px, 60%); }
+.ink-tab-title { padding-right: 10px; }

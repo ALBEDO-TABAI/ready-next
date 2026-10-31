@@ -2,10 +2,9 @@ import { useEffect, useState, type ReactNode } from 'react'
 import type { PageNode, PageProperties, PageRoot, PageUserState } from '../../../../shared/document-pages'
 import { toReadyUri } from '../../../../shared/ready-ref'
 import type { DocTab } from '../../../stores/useDocTabs'
-import { useDocTabs } from '../../../stores/useDocTabs'
 import { Icon } from './icons'
 import { InkPageIcon } from './InkPageIcon'
-import { useInkLayout } from './layout-state'
+import { openInCurrentTab } from './layout-state'
 import { openPopover, tip } from './overlay'
 
 type Crumb = { objectId?: string; path?: string; title: string; icon?: string; kind?: PageNode['kind'] }
@@ -49,9 +48,13 @@ function useBreadcrumb(tab: DocTab | null, roots: PageRoot[]): { crumbs: Crumb[]
   }
 }
 
-export function InkTopbar({ tab, roots, home, actions, status }: { tab: DocTab | null; roots: PageRoot[]; home: boolean; actions?: ReactNode; status?: ReactNode }) {
-  const open = useInkLayout(state => state.open)
+export function InkTopbar({ tab, roots, home, actions, status, sourceMode, onSourceMode }: {
+  tab: DocTab | null; roots: PageRoot[]; home: boolean; actions?: ReactNode; status?: ReactNode
+  /** Markdown source editing, kept as a quiet escape hatch now that pages are the normal view. */
+  sourceMode: boolean; onSourceMode(on: boolean): void
+}) {
   const { crumbs, favorite, toggleFavorite } = useBreadcrumb(home ? null : tab, roots)
+  const markdown = !!tab && tab.kind !== 'library' && (!tab.path || /\.md$/i.test(tab.path))
   const [copied, setCopied] = useState(false)
   const fallback: Crumb[] = home ? [{ title: '主页' }]
     : !tab ? []
@@ -59,17 +62,19 @@ export function InkTopbar({ tab, roots, home, actions, status }: { tab: DocTab |
         : crumbs.length ? crumbs : [{ title: tab.title.replace(/\.(md|canvas)$/i, '') || '未命名', path: tab.path ?? undefined, kind: /\.canvas$/i.test(tab.path ?? '') ? 'canvas' : 'page' }]
   return <header className="ink-topbar" aria-label="文档顶栏">
     <div className="ink-topbar-left">
-      {!open && <button type="button" className="ink-topbar-icon" aria-label="展开侧栏" {...tip('展开侧栏')} onClick={() => useInkLayout.getState().setOpen(true)}><Icon name="sidebarOpen" size={18} /></button>}
       {fallback.map((crumb, index) => <span key={`${crumb.objectId ?? crumb.title}:${index}`} className="ink-crumb-wrap">
         {index > 0 && <span className="ink-crumb-sep">/</span>}
         <button type="button" className={`ink-crumb${index < fallback.length - 1 ? ' is-muted' : ''}`} title={crumb.path}
-          onClick={() => { if (crumb.path && index < fallback.length - 1) { useInkLayout.getState().setHome(false); useDocTabs.getState().openTab(crumb.path) } }}>
+          onClick={() => { if (crumb.path && index < fallback.length - 1) openInCurrentTab(crumb.path) }}>
           {(crumb.icon || index === fallback.length - 1) && <span className="ink-crumb-icon">{home ? <Icon name="home" size={14} stroke={2} /> : tab?.kind === 'library' ? <Icon name="library" size={14} /> : <InkPageIcon value={crumb.icon} kind={crumb.kind} size={16} emojiSize={14} />}</span>}
           <span className="ink-crumb-text">{crumb.title}</span>
         </button>
       </span>)}
     </div>
     <div className="ink-topbar-right">
+      {!home && sourceMode && markdown && <button type="button" className="ink-source-chip" aria-label="返回页面视图" {...tip('返回页面视图')} onClick={() => onSourceMode(false)}>
+        <Icon name="code" size={13} stroke={2} />源码<Icon name="x" size={12} stroke={2} />
+      </button>}
       {!home && status}
       {!home && tab?.objectId && favorite !== null && <>
         <button type="button" className="ink-topbar-icon" aria-label={copied ? '已复制链接' : '复制链接'} {...tip(copied ? '已复制' : '复制链接')}
@@ -81,9 +86,9 @@ export function InkTopbar({ tab, roots, home, actions, status }: { tab: DocTab |
         </button>
       </>}
       {!home && actions}
-      {!home && tab?.objectId && favorite !== null && <button type="button" className="ink-topbar-icon" aria-label="页面选项" {...tip('样式、全宽等')}
+      {!home && markdown && <button type="button" className="ink-topbar-icon" aria-label="页面选项" {...tip('样式、源码等')}
         onClick={event => openPopover({ id: 'ink-page-options', anchor: event.currentTarget.getBoundingClientRect(), placement: 'bottom-end', offset: 6, label: '页面选项',
-          render: () => <PageOptions objectId={tab.objectId!} /> })}>
+          render: close => <PageOptions objectId={favorite !== null ? tab!.objectId! : null} sourceMode={sourceMode} onSourceMode={on => { close(); onSourceMode(on) }} /> })}>
         <Icon name="more" size={18} stroke={2} />
       </button>}
     </div>
@@ -93,15 +98,17 @@ export function InkTopbar({ tab, roots, home, actions, status }: { tab: DocTab |
 type PageDisplay = NonNullable<PageProperties['ready_page']>
 
 /** Inkwell's page menu: font style cards, small text and full width, saved to the page's frontmatter. */
-function PageOptions({ objectId }: { objectId: string }) {
+function PageOptions({ objectId, sourceMode, onSourceMode }: { objectId: string | null; sourceMode: boolean; onSourceMode(on: boolean): void }) {
   const api = window.electronAPI.documentPages
   const [display, setDisplay] = useState<PageDisplay | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   useEffect(() => {
+    if (!objectId) return
     void api.properties(objectId).then(result => { if (result.ok) setDisplay(result.value.properties.ready_page ?? {}); else setError(result.message) })
   }, [api, objectId])
   const update = async (change: PageDisplay) => {
+    if (!objectId) return
     setBusy(true); setError(null)
     try {
       const current = await api.properties(objectId)
@@ -112,6 +119,14 @@ function PageOptions({ objectId }: { objectId: string }) {
     } catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)) } finally { setBusy(false) }
   }
   const font = display?.font ?? 'sans'
+  const source = <div className="ink-menu-group">
+    <div role="menuitemcheckbox" aria-checked={sourceMode} aria-label="Markdown 源码" tabIndex={0} className="ink-menu-item" onClick={() => onSourceMode(!sourceMode)}
+      onKeyDown={event => { if (event.key === 'Enter') onSourceMode(!sourceMode) }}>
+      <span className="ink-menu-icon"><Icon name="code" size={18} /></span><span className="ink-menu-text">Markdown 源码</span>
+      <span className={`ink-switch${sourceMode ? ' is-on' : ''}`} aria-hidden><span className="ink-switch-knob" /></span>
+    </div>
+  </div>
+  if (!objectId) return <div className="ink-menu" style={{ width: 240 }}>{source}</div>
   return <div className="ink-menu" style={{ width: 286 }}>
     <div className="ink-menu-group">
       <div className="ink-menu-label">字体样式</div>
@@ -130,6 +145,8 @@ function PageOptions({ objectId }: { objectId: string }) {
         <span className={`ink-switch${display?.[key] ? ' is-on' : ''}`} aria-hidden><span className="ink-switch-knob" /></span>
       </div>)}
     </div>
+    <div className="ink-menu-divider" />
+    {source}
     {error && <div role="alert" className="ink-menu-footer ink-panel-error">{error}</div>}
   </div>
 }

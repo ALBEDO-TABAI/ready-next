@@ -49,7 +49,7 @@ test('liquid glass skin defines shell-level fresnel, noise, and atmosphere contr
   assert.match(styles, /--lg-noise-opacity:/)
   assert.match(styles, /--lg-lens-violet:/)
   assert.match(styles, /--workbench-liquid-chrome-bg:/)
-  assert.match(styles, /html\[data-skin='liquid-glass'\] \.browser-header-surface,[\s\S]*\.document-path-bar,[\s\S]*\.rss-preview-surface \{/)
+  assert.match(styles, /html\[data-skin='liquid-glass'\] \.browser-header-surface,[\s\S]*\.rss-preview-surface \{/)
   assert.match(styles, /\.rss-mode-shell \.rss-feed-sheet \{[\s\S]*background:\s*var\(--workbench-module-surface-bg\) !important;/)
   assert.match(styles, /ready-app-bg/)
   assert.match(scene, /data-scene=\{scene\}/)
@@ -185,14 +185,9 @@ test('liquid glass sliders preserve the groove and use lens-backed convex thumbs
   const appStyles = readRendererStyles()
   const iconRail = readWorkspaceFile('src/renderer/components/motion/MorphIconRailGroup.tsx')
   const modeTabs = readWorkspaceFile('src/renderer/components/layout/DraggableModeTabs.tsx')
-  const modeSwitch = readWorkspaceFile('src/renderer/components/document/DraggableModeSwitch.tsx')
 
   const modeTabsGroove = findCssBlock(sliderStyles, "html[data-skin='liquid-glass'] .draggable-mode-tabs")
-  const documentSwitchGroove = findCssBlock(appStyles, "html[data-skin='liquid-glass'] .draggable-mode-switch")
   const modeTabsThumb = findCssBlock(sliderStyles, "html[data-skin='liquid-glass'] .draggable-mode-tabs__thumb")
-  const documentSwitchThumb = findCssBlock(appStyles, "html[data-skin='liquid-glass'] .draggable-mode-switch__thumb")
-  const darkDocumentSwitchGroove = findCssBlock(appStyles, "html[data-theme='dark'][data-skin='liquid-glass'] .draggable-mode-switch")
-  const darkDocumentSwitchThumb = findCssBlock(appStyles, "html[data-theme='dark'][data-skin='liquid-glass'] .draggable-mode-switch__thumb")
   const chatModeDock = findCssBlock(appStyles, ".ready-chat-mode-tabs-dock")
   const chatComposerContextRow = findCssBlock(appStyles, ".ready-chat-composer-context-row")
   const chatPanelBody = readWorkspaceFile('src/renderer/components/agent/chat-panel/ChatPanelBody.tsx')
@@ -227,14 +222,6 @@ test('liquid glass sliders preserve the groove and use lens-backed convex thumbs
   )
   assert.match(modeTabsGroove, /inset 0 1px 0 rgba\(255, 255, 255, 0\.22\)/)
   assert.match(modeTabsGroove, /backdrop-filter:\s*none;/)
-  // 8ab48cd7 — 文档切换槽 thumb 放大退役（1.1 → 1）。
-  assert.match(documentSwitchGroove, /--ready-document-switch-thumb-scale:\s*1;/)
-  assert.match(documentSwitchGroove, /border-color:\s*transparent;/)
-  assert.match(documentSwitchGroove, /background:\s*color-mix\(in srgb, var\(--workbench-rail-slot-bg\) 86%, rgba\(255, 255, 255, 0\.34\)\);/)
-  assert.match(documentSwitchGroove, /box-shadow:\s*var\(--workbench-rail-slot-shadow\);/)
-  assert.match(documentSwitchGroove, /blur\(calc\(var\(--lg-blur-soft\) \* 0\.25\)\)/)
-  assert.doesNotMatch(documentSwitchGroove, /0\.045/)
-  assert.match(appStyles, /html\[data-skin='liquid-glass'\] \.draggable-mode-switch::before\s*\{[\s\S]*?display:\s*none;/)
   // 74ebfa98 — the dock now sits in the composer context row beside the project selector;
   // the -12px overlap onto the composer moved from the dock to that shared row.
   assert.match(chatPanelBody, /<div className="ready-chat-composer-context-row">\s*<ProjectSelector \/>\s*\{modeSwitcher\}\s*<\/div>/)
@@ -250,7 +237,8 @@ test('liquid glass sliders preserve the groove and use lens-backed convex thumbs
   assert.match(chatModeDockSurface, /inset 0 1px 0 rgba\(255,\s*255,\s*255,\s*0\.42\)/)
   assert.match(chatModeDockProjection, /filter:\s*blur\(4\.5px\) saturate\(1\.18\) contrast\(0\.82\) brightness\(1\.04\);/)
 
-  for (const darkGrooveBlock of [darkDocumentSwitchGroove, darkAppModeTabsGroove]) {
+  // The document preview/edit switch is retired (pages are the normal view); the workbench mode tabs keep the groove.
+  for (const darkGrooveBlock of [darkAppModeTabsGroove]) {
     assert.match(darkGrooveBlock, /border-color:\s*transparent;/)
     assert.match(darkGrooveBlock, /background:\s*var\(--workbench-rail-slot-bg\);/)
     assert.match(darkGrooveBlock, /box-shadow:\s*var\(--workbench-rail-slot-shadow\);/)
@@ -283,27 +271,15 @@ test('liquid glass sliders preserve the groove and use lens-backed convex thumbs
   assert.doesNotMatch(modeTabsThumb, /rgba\(233, 229, 221/)
   assert.doesNotMatch(modeTabsThumb, /0 6px 20px rgba\(0, 0, 0/)
   // 8ab48cd7 — 文档模式切换 thumb 改为 Ready 橙实体（#ff5032 → #ff4b2b）。
-  assert.match(documentSwitchThumb, /linear-gradient\(180deg, #ff5032 0%, #ff4b2b 100%\)/)
-  assert.match(documentSwitchThumb, /inset 0 0 0 1px rgba\(255, 255, 255, 0\.14\)/)
-  assert.match(documentSwitchThumb, /border-color:\s*rgba\(255, 255, 255, 0\.20\);/)
-  assert.doesNotMatch(documentSwitchThumb, /rgba\(244, 242, 237/)
-  assert.doesNotMatch(documentSwitchThumb, /rgba\(233, 229, 221/)
-  assert.doesNotMatch(documentSwitchThumb, /0 6px 20px rgba\(0, 0, 0/)
   assert.match(darkAppModeTabsThumb, /rgba\(235, 235, 230, 0\.16\)/)
   assert.match(darkAppModeTabsThumb, /inset 0 -2px 4px rgba\(0, 0, 0, 0\.20\)/)
   assert.doesNotMatch(darkAppModeTabsThumb, /rgba\(232, 240, 255/)
   // 8ab48cd7 — 暗色文档切换 thumb 同步 Ready 橙实体（#ff5d40 → #ff5638）。
-  assert.match(darkDocumentSwitchThumb, /linear-gradient\(180deg, #ff5d40 0%, #ff5638 100%\)/)
-  assert.match(darkDocumentSwitchThumb, /inset 0 0 0 1px rgba\(255, 255, 255, 0\.13\)/)
-  assert.doesNotMatch(darkDocumentSwitchThumb, /rgba\(232, 240, 255/)
 
   assert.match(modeTabs, /from '..\/ui\/liquid-glass\/LiquidBackdropProjection'/)
   assert.match(modeTabs, /<LiquidLens[\s\S]*className="draggable-mode-tabs__surface"[\s\S]*bevel=\{6\}[\s\S]*depth=\{18\.5\}[\s\S]*ior=\{1\.34\}[\s\S]*dome=\{0\.65\}[\s\S]*profile="squircle"[\s\S]*strength=\{2\}[\s\S]*blur=\{3\.5\}[\s\S]*blurBeforeRefraction[\s\S]*backdropContent=\{\(/)
   assert.match(modeTabs, /<LiquidBackdropProjection[\s\S]*className="draggable-mode-tabs__projection"[\s\S]*sourceMaskRadius=\{19\}/)
   assert.match(modeTabs, /<LiquidLens[\s\S]*className="ready-slider-thumb-lens"[\s\S]*bevel=\{6\}[\s\S]*depth=\{14\}[\s\S]*ior=\{1\.3\}[\s\S]*dome=\{1\.15\}[\s\S]*strength=\{1\.42\}[\s\S]*blur=\{0\}/)
-  assert.match(modeSwitch, /<LiquidLens[\s\S]*className="ready-slider-thumb-lens"[\s\S]*ior=\{1\.22\}[\s\S]*dome=\{0\.7\}[\s\S]*blur=\{0\}/)
   assert.match(sliderStyles, /\.draggable-mode-tabs__thumb\s*\{[\s\S]*transform:\s*translateX\(calc\(var\(--dmt-thumb-pos[\s\S]*scale\(var\(--ready-workbench-slider-thumb-scale, 1\)\);/)
-  // 皮肤缩放变量与预览下沉缩放（sinkScale）在同一 transform 相乘：变量仍生效。
-  assert.match(modeSwitch, /scale\(calc\(var\(--ready-document-switch-thumb-scale, 1\) \* \$\{sinkScale\}\)\)/)
   assert.match(appStyles, /\.ready-slider-thumb-lens\s*\{[\s\S]*z-index:\s*1;/)
 })

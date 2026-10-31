@@ -12,10 +12,12 @@ export interface PageHeaderProps {
   title: string
   api?: DocumentPagesAPI
   beforeSave?(): Promise<void>
+  /** The document tab showing this page; its comments panel opens from the header. */
+  tabId?: string
 }
 
 /** Inkwell's page header: icon, cover and title above the page body. Every change goes through the versioned page API. */
-export function PageHeader({ objectId, root, title, beforeSave, api = window.electronAPI.documentPages }: PageHeaderProps) {
+export function PageHeader({ objectId, root, title, beforeSave, tabId, api = window.electronAPI.documentPages }: PageHeaderProps) {
   const [reload, setReload] = useState(0)
   const renameIntent = useRef<{ title: string; objectId: string; id: string } | null>(null)
   const [properties, setProperties] = useState<PageProperties | null>(null)
@@ -125,6 +127,8 @@ export function PageHeader({ objectId, root, title, beforeSave, api = window.ele
           <Icon name="smile" size={16} stroke={1.6} />添加图标</button>}
         {!coverUrl && <button type="button" className="ink-page-ctl" disabled={busy || !properties} onClick={event => pickCover(event.currentTarget.getBoundingClientRect())}>
           <Icon name="image" size={16} stroke={1.6} />添加封面</button>}
+        {tabId && <button type="button" className="ink-page-ctl" onClick={() => window.dispatchEvent(new CustomEvent('ready:page-comments', { detail: { tabId } }))}>
+          <Icon name="comment" size={16} stroke={1.6} />评论</button>}
       </div>
       <div className="ink-page-title">
         <textarea ref={titleRef} className="ink-title-editable ready-input-slot-inner" aria-label="页面标题" rows={1} placeholder="无标题" spellCheck={false}

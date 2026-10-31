@@ -6,7 +6,7 @@ import { readRendererStyles } from './utils/read-renderer-styles'
 
 // Apply the shipped styles to the two surface hierarchies. JSDOM reports CSS
 // variable references, not painted pixels; real-window acceptance owns the latter.
-test('Inkwell has its own stage and paper surfaces while RSS retains its module surface', () => {
+test('Inkwell pages sit on paper panels straight on the workspace while RSS retains its module surface', () => {
   const dom = new JSDOM(`<html data-theme="dark" data-skin="liquid-glass"><head></head><body>
     <div class="ink-scope ink-doc-app"><main class="ink-main"><div class="document-content-frame"><div class="document-preview-surface"></div></div></main></div>
     <div class="rss-mode-shell"><div class="rss-feed-sheet"><div class="rss-feed-list"></div></div></div>
@@ -22,7 +22,8 @@ test('Inkwell has its own stage and paper surfaces while RSS retains its module 
     dom.window.document.head.append(style)
     const computed = (selector: string) => dom.window.getComputedStyle(dom.window.document.querySelector(selector)!)
     assert.equal(computed('html').getPropertyValue('--workbench-module-surface-bg'), 'var(--lg-material-panel)')
-    assert.equal(computed('.ink-doc-app').background, 'var(--studio-stage)')
+    // Like the calendar, the document workspace has no stage layer of its own: the panels touch the workspace edges.
+    assert.equal(computed('.ink-doc-app').backgroundColor, 'rgba(0, 0, 0, 0)')
     assert.equal(computed('.ink-main').background, 'var(--studio-paper)')
     assert.equal(computed('.ink-doc-app').display, 'flex')
     assert.equal(computed('.ink-main').display, 'flex')

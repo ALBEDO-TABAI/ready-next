@@ -1,4 +1,4 @@
-import { Inbox } from 'lucide-react'
+import { Inbox, Library } from 'lucide-react'
 import { finalizeDraftTab } from './save'
 import { useState } from 'react'
 import { ConnectedSaveToPicker } from '../page-ui/ConnectedSaveToPicker'
@@ -18,20 +18,27 @@ export function DraftBootNotice() {
         setSetup({ busy: false, error: state && state.status !== 'ready' ? '这个文件夹现在无法作为资料库使用，请换一个。' : '' })
       } catch (failure) { setSetup({ busy: false, error: failure instanceof Error ? failure.message : String(failure) }) }
     }
-    return <div role="status" className="p-6 space-y-3">
-      <p>页面、草稿和书房都保存在资料库里。先选一个资料库，就可以开始写了。</p>
-      <div className="flex gap-3">
-        <button disabled={setup.busy} onClick={() => void run(() => window.electronAPI.vault.createDefault())}>新建默认资料库</button>
-        <button disabled={setup.busy} onClick={() => void run(async () => {
-          const picked = await window.electronAPI.document.openFolder({ validateAsWorkspace: true })
-          return picked.success && picked.path ? window.electronAPI.vault.set(picked.path) : null
-        })}>选择文件夹…</button>
+    return <div className="ink-scope ink-boot" data-draft-boot="no_vault">
+      <div role="status" className="ink-boot-card">
+        <div className="ink-boot-mark" aria-hidden><Library size={26} strokeWidth={1.5} /></div>
+        <h2 className="ink-boot-title">先选一个资料库</h2>
+        <p className="ink-boot-text">页面、草稿和书房都保存在资料库这个文件夹里。选好之后，就可以开始写了。</p>
+        <div className="ink-boot-actions">
+          <button className="ink-btn ink-btn-primary" disabled={setup.busy} onClick={() => void run(() => window.electronAPI.vault.createDefault())}>新建默认资料库</button>
+          <button className="ink-btn" disabled={setup.busy} onClick={() => void run(async () => {
+            const picked = await window.electronAPI.document.openFolder({ validateAsWorkspace: true })
+            return picked.success && picked.path ? window.electronAPI.vault.set(picked.path) : null
+          })}>选择文件夹…</button>
+        </div>
+        {setup.error && <p role="alert" className="ink-boot-error">{setup.error}</p>}
       </div>
-      {setup.error && <p role="alert">{setup.error}</p>}
     </div>
   }
-  return <div role="status" className="p-4">{boot === 'loading' ? '正在恢复未保存的草稿…' : error}
-    {boot === 'failed' && <button onClick={() => { void initializeDrafts().catch(reportDraftError) }}>重试恢复（原数据已保留）</button>}
+  return <div className="ink-scope ink-boot" data-draft-boot={boot}>
+    <div role="status" className="ink-boot-card">
+      {boot === 'loading' ? <p className="ink-boot-text">正在恢复未保存的草稿…</p> : <p className="ink-boot-text ink-boot-error">{error}</p>}
+      {boot === 'failed' && <div className="ink-boot-actions"><button className="ink-btn" onClick={() => { void initializeDrafts().catch(reportDraftError) }}>重试恢复（原数据已保留）</button></div>}
+    </div>
   </div>
 }
 

@@ -1,13 +1,12 @@
 import { useEffect, useMemo } from 'react'
 import { useStore } from 'zustand'
 import type { PageNode, PageRoot } from '../../../../shared/document-pages'
-import { useDocTabs } from '../../../stores/useDocTabs'
 import { useWorkspace } from '../../../stores/useWorkspace'
 import { requestWorkbenchModeOpen } from '../../workbench/mode-transition'
 import { createPageTreeStore, flattenPages } from '../page-ui/page-state'
 import { Icon } from './icons'
 import { InkPageIcon } from './InkPageIcon'
-import { eventTimeLabel, useInkLayout, useUpcomingEvents } from './layout-state'
+import { eventTimeLabel, openInCurrentTab, useUpcomingEvents } from './layout-state'
 
 function greeting(now = new Date()): string {
   const hour = now.getHours()
@@ -37,9 +36,8 @@ export function InkHome({ roots, visible }: { roots: PageRoot[]; visible: boolea
     .sort((a, b) => b.lastVisitedAt! - a.lastVisitedAt!).slice(0, 8).map(state => ({ node: byId.get(state.objectId)!, at: state.lastVisitedAt! }))
   const favorites = states.filter(state => state.favorite && byId.has(state.objectId)).map(state => byId.get(state.objectId)!)
   const open = (node: PageNode) => {
+    openInCurrentTab(node.path)
     useWorkspace.getState().selectFile(node.path)
-    useInkLayout.getState().setHome(false)
-    useDocTabs.getState().openTab(node.path)
     void api.visit(node.objectId)
   }
   return <div className="ink-home" aria-label="主页">

@@ -240,8 +240,6 @@ async function pageRunner(input) {
     })
   }
 
-  const previewButton = document.querySelector('.draggable-mode-switch__label--preview')
-  if (previewButton instanceof HTMLElement) previewButton.click()
   await delay(1500)
   const enablePreview = document.querySelector('.ready-doc-widget-card-action')
   if (enablePreview instanceof HTMLElement && /启用预览/.test(enablePreview.textContent || '')) {

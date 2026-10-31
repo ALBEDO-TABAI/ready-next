@@ -5,7 +5,7 @@ import type { CSSProperties } from 'react'
 const REG = {
   home: L.House, chat: L.MessageCircle, calendar: L.CalendarDays, search: L.Search, library: L.LibraryBig,
   newChat: L.MessageCirclePlus, page: L.FileText, table: L.Table2, plus: L.Plus, more: L.Ellipsis,
-  chevronRight: L.ChevronRight, chevronDown: L.ChevronDown, star: L.Star, link: L.Link2, smile: L.Smile, image: L.Image,
+  chevronRight: L.ChevronRight, chevronLeft: L.ChevronLeft, chevronDown: L.ChevronDown, file: L.File, code2: L.FileCode2, star: L.Star, link: L.Link2, smile: L.Smile, image: L.Image,
   trash: L.Trash2, copy: L.Copy, move: L.CornerUpRight, rename: L.PencilLine, check: L.Check, x: L.X,
   sliders: L.SlidersHorizontal, comment: L.MessageSquareText, panelRight: L.PanelRight, toc: L.TableOfContents,
   fullWidth: L.MoveHorizontal, smallText: L.AArrowDown, book: L.BookOpen, download: L.Download, folder: L.Folder,

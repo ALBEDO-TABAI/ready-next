@@ -43,9 +43,7 @@ async function main() {
     await page.keyboard.press(process.platform === 'darwin' ? 'Meta+k' : 'Control+k')
     await page.getByRole('combobox', { name: '搜索所有对象和命令' }).fill(path.basename(file, '.md'))
     await page.getByRole('listbox').getByRole('button').filter({ hasText: path.basename(file) }).first().click()
-    // Pages open in the page view already; switch only when the source editor is showing.
-    await page.waitForTimeout(500)
-    if (!await page.locator('.note-preview-body:visible').count()) await page.getByRole('button', { name: '预览', exact: true }).click({ force: true })
+    // Pages always open in the page view.
     await poll(() => page.locator('.note-preview-body:visible').count().then(n => n > 0), 'Source preview missing')
   }
   const markFile = folder => {
@@ -82,7 +80,8 @@ async function main() {
     await poll(() => spine.isVisible(), 'Book missing from shelf')
     const box = await spine.boundingBox(); await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
     const cover = page.getByRole('button', { name: '翻看封面' }); await cover.click({ force: true })
-    await page.getByRole('button', { name: '开始阅读' }).click()
+    // The open book follows the pointer, so a pointer click chases a moving button; click it directly.
+    await page.getByRole('button', { name: '开始阅读' }).evaluate(button => (button).click())
     await poll(() => page.locator('.rd-book .leaf .pg-flow p').count().then(n => n > 0), 'Book page missing')
     // Real mouse drag exercises the book reader's pointer/selection gate.
     const drag = await page.locator('.rd-book .leaf .pg-flow p').first().evaluate(element => {

@@ -39,7 +39,11 @@ async function enterDocument(page) {
 }
 async function sourceEditor(page) {
   const editor = page.locator('textarea.document-source-textarea:visible').first()
-  if (!await editor.isVisible()) await page.locator('.draggable-mode-switch__label--edit:visible').first().click()
+  // Pages are the normal view; Markdown source editing lives in the page menu.
+  if (!await editor.isVisible()) {
+    await page.getByLabel('文档顶栏', { exact: true }).getByRole('button', { name: '页面选项', exact: true }).click()
+    await page.getByRole('menuitemcheckbox', { name: 'Markdown 源码', exact: true }).click()
+  }
   await editor.waitFor()
   return editor
 }
@@ -52,7 +56,8 @@ try {
   }, vault)
   await page.reload()
   await enterDocument(page)
-  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+t' : 'Control+t')
+  // Type into the tab that already existed at launch: a tab opened seconds before a hard kill may not have its
+  // metadata on disk yet (Chromium flushes localStorage lazily); that case is the orphan recovery checked below.
   await (await sourceEditor(page)).fill(text)
   await page.getByTestId('draft-status').filter({ hasText: '已持久确认' }).waitFor()
   const original = await page.evaluate(async content => {

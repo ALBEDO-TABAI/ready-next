@@ -41,7 +41,7 @@ async function main() {
     }
     assert.ok(page, 'Ready Next renderer did not appear')
     // The document shell is visible even when the topbar has no draft controls to show.
-    while (!await page.locator('.ink-doc-app').isVisible().catch(() => false)) {
+    while (!await page.locator('.ink-doc-app, [data-draft-boot="no_vault"]').first().isVisible().catch(() => false)) {
       assert.ok(Date.now() < deadline, 'Document mode did not open')
       await page.evaluate(() => window.dispatchEvent(new CustomEvent('ready:workbench-mode-change-request', { detail: { mode: 'document', placement: 'open', presentation: 'immediate' } })))
       await page.waitForTimeout(150)
@@ -67,6 +67,8 @@ async function main() {
   const sidebar = () => page.getByLabel('页面侧栏', { exact: true })
   const row = id => sidebar().locator(`section[aria-label="页面"] [data-page-id="${id}"]`)
   const createPage = async title => {
+    // The section's add button shows on hover, as in Inkwell.
+    await sidebar().locator('section[aria-label="页面"] .ink-sb-section-head').hover()
     await sidebar().getByRole('button', { name: '在 测试资料库 中新建页面', exact: true }).click()
     await page.waitForFunction(() => { const input = document.querySelector('textarea[aria-label="页面标题"]'); return input?.value === '未命名' && !input.disabled })
     const input = page.getByRole('textbox', { name: '页面标题', exact: true })
@@ -81,14 +83,22 @@ async function main() {
     }, { vault, title })
   }
   const action = async (id, title, label) => {
-    await row(id).getByRole('button', { name: `${title} 操作`, exact: true }).click()
+    await row(id).locator('.ink-sb-row').first().hover(); await row(id).getByRole('button', { name: `${title} 操作`, exact: true }).click()
     await page.getByRole('menu').getByRole('menuitem', { name: label, exact: true }).click()
   }
   const mod = process.platform === 'darwin' ? 'Meta' : 'Control'
+  // Pages are the normal view; Markdown source editing lives in the page menu.
+  const setSource = async on => {
+    const editor = page.locator('textarea.document-source-textarea:visible').first()
+    if (await editor.isVisible().catch(() => false) === on) return
+    await page.getByLabel('文档顶栏', { exact: true }).getByRole('button', { name: '页面选项', exact: true }).click()
+    await page.getByRole('menuitemcheckbox', { name: 'Markdown 源码', exact: true }).click()
+    if (on) await editor.waitFor()
+  }
   try {
     await launch()
     await page.evaluate(async root => { const result = await window.electronAPI.vault.set(root); if (result.status !== 'ready') throw new Error('Vault not ready') }, vault)
-    // Mode changes go through the workbench transition; repeat the request until the document shell shows.
+    // With a vault the drafts start and the document shell replaces the first-run notice.
     for (let attempt = 0; attempt < 100 && !await page.locator('.ink-doc-app').isVisible().catch(() => false); attempt++) {
       await page.evaluate(() => window.dispatchEvent(new CustomEvent('ready:workbench-mode-change-request', { detail: { mode: 'document', placement: 'open', presentation: 'immediate' } })))
       await page.waitForTimeout(200)
@@ -134,7 +144,7 @@ async function main() {
       await page.getByRole('button', { name: /^未保存的草稿/ }).click()
       await page.getByTestId(`draft-recovery-${recovered.draftId}`).locator('button.ink-sb-label-btn').click()
     }
-    await page.locator('.draggable-mode-switch__label--edit:visible').first().click()
+    await setSource(true)
     const source = page.locator('textarea.document-source-textarea:visible').first()
     await source.waitFor(); assert.equal(await source.inputValue(), original)
     await source.press(`${mod}+s`)
@@ -145,7 +155,7 @@ async function main() {
     await snapshot('04-sigkill-restored')
     // Create an untitled document through the app shortcut.
     await page.keyboard.press(`${mod}+t`)
-    await page.locator('.draggable-mode-switch__label--edit:visible').first().click()
+    await setSource(true)
     await source.fill('子页草稿正文')
     await page.getByTestId('draft-status').filter({ hasText: '已持久确认' }).waitFor()
     await page.getByTestId('draft-controls').getByRole('button', { name: '保存到…', exact: true }).click()

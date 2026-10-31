@@ -4,7 +4,8 @@ import { InkSidebar } from '../../modules/document/ink/InkSidebar'
 import { InkTopbar } from '../../modules/document/ink/InkTopbar'
 import { InkHome } from '../../modules/document/ink/InkHome'
 import { OverlayHost } from '../../modules/document/ink/overlay'
-import { recycleDocumentTabs, useInkLayout } from '../../modules/document/ink/layout-state'
+import { openInCurrentTab, useInkLayout } from '../../modules/document/ink/layout-state'
+import { InkTabStrip } from '../../modules/document/ink/InkTabStrip'
 import { usePagePanel } from '../../modules/document/page-ui/page-panel-state'
 import type { PageNode } from '../../../shared/document-pages'
 import '../../modules/document/ink/ink.css'
@@ -31,7 +32,6 @@ import {
 } from '../../stores/useDocTabs'
 import { PageDocumentEditor } from '../../modules/document/page-ui/PageDocumentEditor'
 import FilePreview from '../../components/document/FilePreview'
-import DraggableModeSwitch from '../../components/document/DraggableModeSwitch'
 import DocumentFloatingPanels, { DocumentPanelToggleButtons } from '../../components/document/DocumentFloatingPanels'
 import DocumentExportButton from '../../components/document/DocumentExportButton'
 import DocumentBookReadingButton from '../../components/document/book/DocumentBookReadingButton'
@@ -277,11 +277,9 @@ export default function DocumentMode({
     if (!workspace.sidebarVisible) workspace.toggleSidebar()
     await workspace.revealFile(node.path)
   }, [])
-  // Opening or switching a document leaves the home view. Without a tab strip, the workspace shows one page at a
-  // time like Inkwell, so pages left behind are recycled once more than a few are open (never unsaved ones).
+  // Opening or switching a document leaves the home view.
   useEffect(() => useDocTabs.subscribe((state, previous) => {
     if (state.activeTabId !== previous.activeTabId || state.tabs.length > previous.tabs.length) useInkLayout.getState().setHome(false)
-    if (state.activeTabId && state.activeTabId !== previous.activeTabId) recycleDocumentTabs(state.activeTabId)
   }), [])
   useEffect(() => { void initializeDrafts().catch(reportDraftError); return watchDraftVault() }, [])
 
@@ -386,7 +384,7 @@ export default function DocumentMode({
         } else if (keepBoardActive) {
           ensureTabForPath(selectedFile)
         } else {
-          openTab(selectedFile)
+          openInCurrentTab(selectedFile)
         }
         await recordFileEmergenceActivity({
           path: selectedFile,
@@ -403,10 +401,8 @@ export default function DocumentMode({
   }, [ensureTabForPath, isActive, openImageTab, openTab, selectedFile])
 
   useEffect(() => {
-    const handler = () => {
-      setBookReadingActive(false)
-      setEditorMode('edit')
-    }
+    // The page view lands on the quoted lines itself; only book reading has to step aside.
+    const handler = () => setBookReadingActive(false)
     window.addEventListener(READY_DOCUMENT_REVEAL_EVENT, handler as EventListener)
     return () => window.removeEventListener(READY_DOCUMENT_REVEAL_EVENT, handler as EventListener)
   }, [])
@@ -760,13 +756,6 @@ export default function DocumentMode({
     setEditorMode(nextMode)
   }, [captureVisibleDocumentScrollPositions, editorMode])
 
-  const handleEditorModeIntent = useCallback((): boolean => {
-    if (!bookReadingVisible) return false
-    setBookReadingActive(false)
-    setBookReadingTabId(null)
-    return true
-  }, [bookReadingVisible])
-
   const handlePanelReveal = useCallback((lineStart: number, lineEnd?: number | null) => {
     if (!panelTargetTab?.path) return
     setPendingReveal({
@@ -896,11 +885,15 @@ export default function DocumentMode({
                 <InkSidebar roots={pagePanel.roots} visible={isSceneVisible} onShowFiles={revealInFiles} />
               </div>
             )}
+            <div className="ink-column">
+            <InkTabStrip active={isSceneVisible} onNewTab={() => { setEditorMode('preview'); openTab('') }} />
             <main className="ink-main" aria-label="文档">
               <InkTopbar
                 tab={panelTargetTab}
                 roots={pagePanel.roots}
                 home={inkHome}
+                sourceMode={editorMode === 'edit'}
+                onSourceMode={on => handleEditorModeChange(on ? 'edit' : 'preview')}
                 status={<DraftControls />}
                 actions={panelTargetTab?.kind !== 'library' ? <>
                             <DocumentPanelToggleButtons
@@ -923,11 +916,6 @@ export default function DocumentMode({
                                   setBookReadingActive(true)
                                 }
                               }}
-                            />
-                            <DraggableModeSwitch
-                              mode={editorMode}
-                              onChange={handleEditorModeChange}
-                              onModeIntent={handleEditorModeIntent}
                             />
                 </> : null}
               />
@@ -1059,6 +1047,7 @@ export default function DocumentMode({
                 </div>
               </div>
             </main>
+            </div>
           </div>
           {isSceneVisible && <OverlayHost />}
         </div>

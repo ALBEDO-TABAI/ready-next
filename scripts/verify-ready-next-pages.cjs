@@ -42,11 +42,11 @@ require(${JSON.stringify(entry)})
     assert.ok(page, 'Ready renderer did not open')
     await page.evaluate(() => window.dispatchEvent(new CustomEvent('ready:workbench-mode-change-request', { detail: { mode: 'document', placement: 'open', presentation: 'immediate' } })))
     // Mode changes go through the workbench transition; repeat the request until the document shell shows.
-    for (let attempt = 0; attempt < 100 && !await page.locator('.ink-doc-app').isVisible().catch(() => false); attempt++) {
+    for (let attempt = 0; attempt < 100 && !await page.locator('.ink-doc-app, [data-draft-boot="no_vault"]').first().isVisible().catch(() => false); attempt++) {
       await page.evaluate(() => window.dispatchEvent(new CustomEvent('ready:workbench-mode-change-request', { detail: { mode: 'document', placement: 'open', presentation: 'immediate' } })))
       await page.waitForTimeout(200)
     }
-    await page.locator('.ink-doc-app').waitFor({ state: 'visible' })
+    await page.locator('.ink-doc-app, [data-draft-boot="no_vault"]').first().waitFor({ state: 'visible' })
     const snapshot = async label => {
       const files = []
       const walk = directory => { for (const entry of fs.readdirSync(directory, { withFileTypes: true })) { const file = path.join(directory, entry.name); if (entry.isDirectory()) walk(file); else files.push({ path: path.relative(vault, file), ...(file.endsWith('.md') ? { content: fs.readFileSync(file, 'utf8') } : {}) }) } }
@@ -56,17 +56,17 @@ require(${JSON.stringify(entry)})
       console.log(`PASS ${label}: disk readback + screenshot`)
     }
     // Mode changes go through the workbench transition; repeat the request until the document shell shows.
-    for (let attempt = 0; attempt < 100 && !await page.locator('.ink-doc-app').isVisible().catch(() => false); attempt++) {
+    for (let attempt = 0; attempt < 100 && !await page.locator('.ink-doc-app, [data-draft-boot="no_vault"]').first().isVisible().catch(() => false); attempt++) {
       await page.evaluate(() => window.dispatchEvent(new CustomEvent('ready:workbench-mode-change-request', { detail: { mode: 'document', placement: 'open', presentation: 'immediate' } })))
       await page.waitForTimeout(200)
     }
-    await page.locator('.ink-doc-app').waitFor({ state: 'visible' })
-    await page.getByLabel('页面位置', { exact: true }).getByRole('button', { name: '打开文件夹…', exact: true }).waitFor()
+    // An empty profile has no vault: Document mode offers the first-run choice instead of the shell.
+    await page.locator('[data-draft-boot="no_vault"]').getByRole('button', { name: '选择文件夹…', exact: true }).waitFor()
     const reads = await app.evaluate(() => globalThis.__pageDirectoryReads)
     assert.deepEqual(reads, [], `Empty profile issued directory reads: ${JSON.stringify(reads)}`)
     await snapshot('01-empty-no-directory-reads')
     await page.evaluate(async root => { const state = await window.electronAPI.vault.set(root); if (state.status !== 'ready') throw new Error('Vault not ready') }, vault)
-    // Mode changes go through the workbench transition; repeat the request until the document shell shows.
+    // With a vault the drafts start and the document shell replaces the first-run notice.
     for (let attempt = 0; attempt < 100 && !await page.locator('.ink-doc-app').isVisible().catch(() => false); attempt++) {
       await page.evaluate(() => window.dispatchEvent(new CustomEvent('ready:workbench-mode-change-request', { detail: { mode: 'document', placement: 'open', presentation: 'immediate' } })))
       await page.waitForTimeout(200)
@@ -79,9 +79,10 @@ require(${JSON.stringify(entry)})
       await input.fill(title); await input.press('Enter')
       await sidebar.locator('.ink-sb-label-btn').filter({ hasText: new RegExp(`^${title}$`) }).waitFor()
     }
-    const newRootPage = async title => { await sidebar.getByRole('button', { name: '在 测试资料库 中新建页面', exact: true }).click(); await renameNewPage(title) }
+    // Add buttons show on hover, as in Inkwell.
+    const newRootPage = async title => { await sidebar.locator('section[aria-label="页面"] .ink-sb-section-head').hover(); await sidebar.getByRole('button', { name: '在 测试资料库 中新建页面', exact: true }).click(); await renameNewPage(title) }
     const action = async (row, title, label) => {
-      await row.getByRole('button', { name: `${title} 操作`, exact: true }).click()
+      await row.locator('.ink-sb-row').first().hover(); await row.getByRole('button', { name: `${title} 操作`, exact: true }).click()
       await page.getByRole('menu').getByRole('menuitem', { name: label, exact: true }).click()
     }
     await newRootPage('父页')
@@ -98,7 +99,7 @@ require(${JSON.stringify(entry)})
       return sidebar.locator(`section[aria-label="页面"] [data-page-id="${id}"]`)
     }
     let parentRow = await row('父页')
-    await parentRow.getByRole('button', { name: '在 父页 中新建页面', exact: true }).click(); await renameNewPage('子页')
+    await parentRow.locator('.ink-sb-row').first().hover(); await parentRow.getByRole('button', { name: '在 父页 中新建页面', exact: true }).click(); await renameNewPage('子页')
     assert.ok(fs.existsSync(path.join(vault, '父页', '子页.md')))
     assert.deepEqual(fs.readFileSync(path.join(vault, '父页.md')), parentBytes)
     await snapshot('02-create-parent-child')

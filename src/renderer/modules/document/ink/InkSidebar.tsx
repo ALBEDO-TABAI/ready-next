@@ -7,12 +7,13 @@ import { useVault } from '../../../stores/useVault'
 import { useWorkspace } from '../../../stores/useWorkspace'
 import { requestWorkbenchModeOpen } from '../../workbench/mode-transition'
 import { ImportWizard } from '../import/ImportWizard'
+import { TemplatePicker } from '../templates/TemplatePicker'
 import { saveBeforePageTrash } from '../page-ui/page-panel-state'
 import { createPageTreeStore, errorMessage, flattenPages } from '../page-ui/page-state'
 import { SaveToPicker, type SaveToSelection } from '../page-ui/SaveToPicker'
 import { CalendarBadge, Icon, type IconName } from './icons'
 import { InkPageIcon } from './InkPageIcon'
-import { eventTimeLabel, useInkLayout, useUpcomingEvents } from './layout-state'
+import { eventTimeLabel, openInCurrentTab, useInkLayout, useUpcomingEvents } from './layout-state'
 import { openMenu } from './menu'
 import { openPopover, tip } from './overlay'
 
@@ -22,7 +23,8 @@ export interface InkSidebarProps {
   roots: PageRoot[]
   visible: boolean
   api?: DocumentPagesAPI
-  onOpen?(node: PageNode): void | Promise<void>
+  /** Opens in the current tab, or a new one for ⌘/Ctrl-click. */
+  onOpen?(node: PageNode, newTab?: boolean): void | Promise<void>
   onShowFiles?(node: PageNode): void | Promise<void>
   /** The hover-peek copy shown over the page while the sidebar is collapsed. */
   floating?: boolean
@@ -33,10 +35,9 @@ const readExpanded = () => { try { return new Set<string>(JSON.parse(localStorag
 const checked = <T,>(result: PageResult<T>): T => { if (!result.ok) throw new Error(result.message); return result.value }
 const canHoldPages = (node: PageNode) => ['page', 'folder', 'vault'].includes(node.kind) && !node.ambiguity
 
-function openNode(node: PageNode) {
+function openNode(node: PageNode, newTab = false) {
+  openInCurrentTab(node.path, { newTab })
   useWorkspace.getState().selectFile(node.path)
-  useDocTabs.getState().openTab(node.path)
-  useInkLayout.getState().setHome(false)
   requestWorkbenchModeOpen('document')
 }
 
@@ -93,7 +94,7 @@ export function InkSidebar({ roots, visible, api = window.electronAPI.documentPa
   const all = flattenPages(trees)
   const rootOf = (node: PageNode) => trees.find(tree => tree.objectId === node.objectId || flattenPages(tree.children).some(item => item.objectId === node.objectId))
   const isFavorite = (node: PageNode) => states.some(state => state.objectId === node.objectId && state.favorite)
-  const open = (node: PageNode) => run(async () => { await onOpen(node); if (node.kind !== 'vault') checked(await api.visit(node.objectId)); await store.getState().loadStates() })
+  const open = (node: PageNode, newTab = false) => run(async () => { await onOpen(node, newTab); if (node.kind !== 'vault') checked(await api.visit(node.objectId)); await store.getState().loadStates() })
   const toggleFavorite = (node: PageNode) => run(async () => { checked(await api.favorite(node.objectId, !isFavorite(node))); await store.getState().loadStates() })
 
   /** Notion's flow: a new page appears at once as "未命名" and opens; its title is edited in the page itself. */
@@ -174,6 +175,11 @@ export function InkSidebar({ roots, visible, api = window.electronAPI.documentPa
       render: close => <TrashPanel api={api} roots={rootsRef.current} onChanged={refresh}
         onRestoreElsewhere={(item, root) => { close(); openLocation('restore', root, { objectId: item.objectId, title: item.originalPath.split(/[\\/]/).pop()!.replace(/\.md$/i, '') }) }} /> })
   }
+  const openTemplates = () => {
+    const path = useDocTabs.getState().tabs.find(tab => tab.id === useDocTabs.getState().activeTabId)?.path ?? null
+    openPopover({ id: 'ink-templates', anchor: { left: 0, top: 0, right: 0, bottom: 0 }, placement: 'center', modal: true, label: '模板',
+      render: close => <div className="ink-menu ink-panel ink-template-panel" style={{ width: 460 }}><TemplatePicker path={path && /\.md$/i.test(path) ? path : null} title="新页面" insert={null} close={close} /></div> })
+  }
   const openImport = () => {
     openPopover({ id: 'ink-import', anchor: { left: 0, top: 0, right: 0, bottom: 0 }, placement: 'center', modal: true, label: '导入',
       render: close => <div className="ink-menu" style={{ width: 560, padding: 12 }}><ImportWizard onClose={() => { close(); void refresh() }} /></div> })
@@ -191,7 +197,7 @@ export function InkSidebar({ roots, visible, api = window.electronAPI.documentPa
     const expandable = canHoldPages(node)
     const sortable = !!parent && !keyPrefix
     const toggle = () => setExpanded(id, !isOpen)
-    const activate = () => { if (node.kind === 'folder' || node.kind === 'vault') toggle(); else void open(node) }
+    const activate = (event?: ReactMouseEvent) => { if (node.kind === 'folder' || node.kind === 'vault') toggle(); else void open(node, !!event && (event.metaKey || event.ctrlKey)) }
     return <div key={id} role="treeitem" aria-label={node.title} aria-expanded={expandable ? isOpen : undefined} aria-selected={selected} data-page-id={node.objectId}>
       {sortable && <div aria-label={`排在 ${node.title} 之前`} className={`ink-sb-drop-gap${dropTarget === `before:${id}` ? ' is-active' : ''}`}
         onDragOver={event => { if (dragged.current) { event.preventDefault(); setDropTarget(`before:${id}`) } }}
@@ -204,7 +210,7 @@ export function InkSidebar({ roots, visible, api = window.electronAPI.documentPa
         onDragOver={event => { if (dragged.current && sortable && expandable) { event.preventDefault(); setDropTarget(`into:${id}`) } }}
         onDragLeave={() => setDropTarget(current => current === `into:${id}` ? null : current)}
         onDrop={event => { event.preventDefault(); event.stopPropagation(); if (parent) void drop(node, parent, root, false) }}
-        onClick={activate}
+        onClick={event => activate(event)}
         onContextMenu={event => { event.preventDefault(); openRowMenu(event.currentTarget, node, { x: event.clientX, y: event.clientY }) }}>
         <span className="ink-sb-indent" style={{ width: level * 8 }} />
         <span className="ink-sb-icon">
@@ -214,7 +220,7 @@ export function InkSidebar({ roots, visible, api = window.electronAPI.documentPa
             <svg width="12" height="12" viewBox="0 0 12 12" style={{ transform: isOpen ? 'rotate(90deg)' : 'none' }} aria-hidden><path d="M4.4 2.6L7.8 6l-3.4 3.4" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
           </button>}
         </span>
-        <button type="button" className="ink-sb-label ink-sb-label-btn" title={node.path} onClick={event => { event.stopPropagation(); activate() }}>{node.title}</button>
+        <button type="button" className="ink-sb-label ink-sb-label-btn" title={node.path} onClick={event => { event.stopPropagation(); activate(event) }}>{node.title}</button>
         <span className="ink-sb-row-actions">
           {node.kind === 'page' && !node.ambiguity && <button type="button" className="ink-sb-action" aria-label={`在 ${node.title} 中新建页面`} {...tip('在其中添加页面')}
             onClick={event => { event.stopPropagation(); void createIn(node, root) }}><Icon name="plus" size={16} stroke={1.8} /></button>}
@@ -280,6 +286,7 @@ export function InkSidebar({ roots, visible, api = window.electronAPI.documentPa
       </div>
       <div className="ink-sb-bottom">
         <div className="ink-sb-divider" />
+        <NavRow icon="template" label="模板" ariaLabel="从模板新建页面" muted onClick={openTemplates} />
         <NavRow icon="import" label="导入" muted onClick={openImport} />
         <NavRow icon="trash" label="回收站" muted onClick={event => openTrash(event.currentTarget)} />
       </div>
@@ -294,8 +301,8 @@ function useVaultTitle(trees: PageNode[]): string {
   return tree?.title || (vault?.status === 'ready' ? vault.root.split(/[\\/]/).pop() || '' : '')
 }
 
-function NavRow({ icon, iconNode, label, muted, selected, onClick, weight, dataAttr }: { icon?: IconName; iconNode?: ReactNode; label: string; muted?: boolean; selected?: boolean; onClick?: (event: ReactMouseEvent<HTMLElement>) => void; weight?: number; dataAttr?: Record<string, string> }) {
-  return <div className={`ink-sb-row ink-sb-nav${muted ? ' is-muted' : ''}${selected ? ' is-selected' : ''}`} role="button" tabIndex={0} aria-label={label} {...dataAttr}
+function NavRow({ icon, iconNode, label, ariaLabel, muted, selected, onClick, weight, dataAttr }: { icon?: IconName; iconNode?: ReactNode; label: string; ariaLabel?: string; muted?: boolean; selected?: boolean; onClick?: (event: ReactMouseEvent<HTMLElement>) => void; weight?: number; dataAttr?: Record<string, string> }) {
+  return <div className={`ink-sb-row ink-sb-nav${muted ? ' is-muted' : ''}${selected ? ' is-selected' : ''}`} role="button" tabIndex={0} aria-label={ariaLabel ?? label} {...dataAttr}
     onClick={onClick} onKeyDown={event => { if (event.key === 'Enter') (event.currentTarget as HTMLElement).click() }}>
     <span className="ink-sb-icon">{iconNode || (icon && <Icon name={icon} size={18} stroke={1.5} />)}</span>
     <span className="ink-sb-label" style={weight ? { fontWeight: weight } : undefined}>{label}</span>

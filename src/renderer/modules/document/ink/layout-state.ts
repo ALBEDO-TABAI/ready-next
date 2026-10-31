@@ -34,26 +34,50 @@ export const useInkLayout = create<{
   setHome: home => set({ home }),
 }))
 
-const KEEP_OPEN = 8
-const recent: string[] = []
-/** Keeps the most recently shown documents open; older ones close only when nothing in them is unsaved. */
-export function recycleDocumentTabs(activeId: string) {
-  const index = recent.indexOf(activeId)
-  if (index >= 0) recent.splice(index, 1)
-  recent.unshift(activeId)
-  const state = useDocTabs.getState()
-  if (state.tabs.length <= KEEP_OPEN) return
-  const pinned = new Set([state.activeTabId, state.splitTabId, state.focusedPaneTabId].filter(Boolean))
-  // Oldest first: tabs not shown since start, then the least recently shown.
-  const order = [...state.tabs.filter(tab => !recent.includes(tab.id)).map(tab => tab.id), ...[...recent].reverse()]
-  for (const id of order) {
-    const current = useDocTabs.getState()
-    if (current.tabs.length <= KEEP_OPEN) break
-    const tab = current.tabs.find(item => item.id === id)
-    if (!tab || pinned.has(id) || tab.isDirty || !tab.path) continue
-    current.closeTab(id)
-  }
+// Inkwell's navigation: opening a page from the sidebar, home, breadcrumb, file manager or a link replaces the page in
+// the current tab (a clean file tab or an empty new tab keeps its place in the strip); ⌘/Ctrl-click opens a new tab and
+// unsaved tabs are never replaced. Each tab keeps its own back/forward history, which moves with it when it is replaced.
+type History = { back: string[]; forward: string[] }
+const histories = new Map<string, History>()
+export const useInkHistory = create<{ canBack: boolean; canForward: boolean }>(() => ({ canBack: false, canForward: false }))
+function syncHistory() {
+  const { activeTabId, tabs } = useDocTabs.getState()
+  for (const id of histories.keys()) if (!tabs.some(tab => tab.id === id)) histories.delete(id)
+  const history = activeTabId ? histories.get(activeTabId) : undefined
+  useInkHistory.setState({ canBack: !!history?.back.length, canForward: !!history?.forward.length })
 }
+useDocTabs.subscribe((state, previous) => { if (state.activeTabId !== previous.activeTabId || state.tabs.length !== previous.tabs.length) syncHistory() })
+
+export function openInCurrentTab(path: string, { newTab = false, record = true }: { newTab?: boolean; record?: boolean } = {}) {
+  const state = useDocTabs.getState()
+  const current = state.tabs.find(tab => tab.id === state.activeTabId)
+  useInkLayout.getState().setHome(false)
+  if (current?.path === path) return
+  const replaceable = current && current.kind !== 'library' && !current.isDirty && (current.path ? true : current.content === '')
+  if (newTab || !replaceable || state.tabs.some(tab => tab.path === path)) { state.openTab(path); return }
+  const history = histories.get(current.id) ?? { back: [], forward: [] }
+  if (record && current.path) { history.back.push(current.path); history.forward.length = 0 }
+  const slot = state.tabs.indexOf(current)
+  state.openTab(path)
+  const next = useDocTabs.getState()
+  const created = next.tabs.findIndex(tab => tab.id === next.activeTabId)
+  if (created >= 0 && created !== slot) next.reorderTabs(created, slot)
+  if (next.activeTabId) histories.set(next.activeTabId, history)
+  useDocTabs.getState().closeTab(current.id)
+  syncHistory()
+}
+function step(from: 'back' | 'forward') {
+  const { activeTabId, tabs } = useDocTabs.getState()
+  const current = tabs.find(tab => tab.id === activeTabId)
+  const history = activeTabId ? histories.get(activeTabId) : undefined
+  const path = history?.[from].pop()
+  if (!path || !current?.path || !history) return
+  history[from === 'back' ? 'forward' : 'back'].push(current.path)
+  openInCurrentTab(path, { record: false })
+  syncHistory()
+}
+export const goBack = () => step('back')
+export const goForward = () => step('forward')
 
 export interface UpcomingEvent { key: string; eventId: string; title: string; start: number; allDay: boolean; color: string; day: string }
 

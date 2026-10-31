@@ -13,6 +13,7 @@ import { parseBookLocation } from '../library/reader/location'
 import { requestBookLocation } from '../library/reader/navigation-state'
 import { requestWorkbenchModeOpen } from './mode-transition'
 import { captureReferenceOrigin, rememberReferenceOrigin } from './reference-return'
+import { openInCurrentTab } from '../document/ink/layout-state'
 
 /** All Ready reference entry points share validation and destination owners. */
 export async function openReadyRef(input: string | ReadyRef, fromMode?: WorkbenchMode): Promise<void> {
@@ -52,8 +53,10 @@ export async function openReadyRef(input: string | ReadyRef, fromMode?: Workbenc
       const reveal = ref.kind !== 'canvas' && ref.anchor ? await anchorLines(location.path, ref.anchor) : null
       rememberReferenceOrigin(origin, 'document')
       if (ref.kind === 'canvas') requestCanvasNode(ref.id, ref.node)
+      // A link followed inside Document mode navigates the current tab, as in Inkwell; other modes open a tab.
+      if (origin.mode === 'document') openInCurrentTab(location.path)
+      else useDocTabs.getState().openTab(location.path)
       useWorkspace.getState().selectFile(location.path)
-      useDocTabs.getState().openTab(location.path)
       if (reveal) useDocTabs.getState().setPendingReveal({ path: location.path, ...reveal, requestedAt: Date.now() })
       requestWorkbenchModeOpen('document')
       return

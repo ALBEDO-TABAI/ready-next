@@ -260,8 +260,6 @@ async function pageRunner(input) {
       splitTabId: null,
     })
     await delay(1000)
-    const previewButton = document.querySelector('.draggable-mode-switch__label--preview')
-    if (previewButton instanceof HTMLElement) previewButton.click()
     await delay(2500)
     for (const button of Array.from(document.querySelectorAll('.ready-doc-widget-card-action'))) {
       if (!(button instanceof HTMLElement)) continue

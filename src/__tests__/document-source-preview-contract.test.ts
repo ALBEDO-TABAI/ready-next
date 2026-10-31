@@ -71,7 +71,8 @@ test('document edit and preview modes share reading scroll position when remount
   assert.match(scrollRuntime, /element\.addEventListener\('scroll', handleScroll, \{ passive: true \}\)/)
   assert.match(documentMode, /restoreVisibleDocumentScrollPositions\(\)/)
   assert.match(documentMode, /useLayoutEffect\(\(\) => \{/)
-  assert.match(documentMode, /onChange=\{handleEditorModeChange\}/)
+  // Source editing is a page-menu toggle now; switching still goes through the scroll-capturing handler.
+  assert.match(documentMode, /onSourceMode=\{on => handleEditorModeChange\(on \? 'edit' : 'preview'\)\}/)
   assert.match(documentMode, /\[data-ready-document-scroll-key\]/)
   assert.match(documentMode, /findCurrentScrollElement\(scope\)/)
   assert.match(documentMode, /captureElementScroll\(element, content, options\)/)

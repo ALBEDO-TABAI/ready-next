@@ -33,7 +33,7 @@ export function PageDocumentEditor({ bookReading = false, ...props }: RetainedDo
   const classes = ['ink-page', display.font === 'serif' ? 'font-serif' : display.font === 'mono' ? 'font-mono' : '',
     display.small_text ? 'is-small' : '', display.full_width ? 'is-full' : '', page ? 'has-header' : ''].filter(Boolean).join(' ')
   return <MarkdownEditor {...props} previewClassName={classes} previewHeader={page ? <>
-    <PageHeader key={tab.objectId} objectId={tab.objectId!} root={root} title={tab.title.replace(/\.md$/i, '')} beforeSave={beforeSave} />
+    <PageHeader key={tab.objectId} objectId={tab.objectId!} root={root} title={tab.title.replace(/\.md$/i, '')} beforeSave={beforeSave} tabId={tab.id} />
     {/* A database page shows its database under the header, like the inline views; the body below stays editable. */}
     {source.ready_database ? <section data-ready-database-page className="ink-page-database"><Database key={tab.objectId} databaseId={tab.objectId!} /></section> : null}
   </> : undefined} />

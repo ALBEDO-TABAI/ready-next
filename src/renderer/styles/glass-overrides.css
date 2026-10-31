@@ -166,7 +166,7 @@ html[data-theme='dark'][data-skin='liquid-glass']:is([data-glass-variant='solid-
 }
 
 /* thumb 承载白色图标，必须用 --ready-accent-fill（两种主题下都对白字 ≥4.5:1），不能用夜间会变亮的 brand accent。 */
-html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glass-variant='solid-blue']) .draggable-mode-switch__thumb {
+html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'] {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.08) 0%, transparent 26%),
     linear-gradient(
@@ -182,7 +182,7 @@ html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glas
     inset 0 -0.5px 0 color-mix(in srgb, var(--ready-accent-fill) 42%, rgba(0, 0, 0, 0.16));
 }
 
-html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glass-variant='solid-blue']) .draggable-mode-switch__thumb::before {
+html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'] {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.13),
     inset 0 -1px 0 color-mix(in srgb, var(--ready-accent-fill) 28%, rgba(0, 0, 0, 0.12));

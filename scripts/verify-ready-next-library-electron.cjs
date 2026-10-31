@@ -222,10 +222,18 @@ async function checkQuoteReturn(page, book, id, selected) {
   const reference = await page.evaluate(() => navigator.clipboard.readText())
   ok('reader copies a source-block embed', reference === `![[${path.basename(book.notePath, '.md')}#^${id}]]`, reference)
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+t' : 'Control+t')
-  await page.getByRole('button', { name: '编辑', exact: true }).click()
+  // Pages are the normal view; Markdown source editing lives in the page menu.
+  const setSource = async on => {
+    const editor = page.locator('textarea.document-source-textarea:visible').first()
+    if (await editor.isVisible().catch(() => false) === on) return
+    await page.getByLabel('文档顶栏', { exact: true }).getByRole('button', { name: '页面选项', exact: true }).click()
+    await page.getByRole('menuitemcheckbox', { name: 'Markdown 源码', exact: true }).click()
+    if (on) await editor.waitFor()
+  }
+  await setSource(true)
   const sourceEditor = page.getByRole('textbox', { name: 'Markdown source editor' })
   await sourceEditor.fill(`# 引用验收\n\n${reference}`)
-  await page.getByRole('button', { name: '预览', exact: true }).click()
+  await setSource(false)
   const card = page.locator('[data-library-quote="true"]')
   await card.getByRole('button', { name: '回到原文', exact: true }).waitFor()
   await page.screenshot({ path: path.join(shots, '6b-quote-card.png') })
@@ -240,7 +248,7 @@ async function checkQuoteReturn(page, book, id, selected) {
   await page.getByRole('button', { name: /^返回 / }).click()
   await card.getByRole('button', { name: '回到原文', exact: true }).waitFor()
   ok('return restores the originating document tab', await page.locator('[data-ready-document-scroll-key]').getAttribute('data-ready-document-scroll-key') === before)
-  await page.getByRole('button', { name: '编辑', exact: true }).click()
+  await setSource(true)
   ok('source view preserves the embed text', await sourceEditor.inputValue() === `# 引用验收\n\n${reference}`)
   await page.screenshot({ path: path.join(shots, '7-quote-return.png') })
 }
