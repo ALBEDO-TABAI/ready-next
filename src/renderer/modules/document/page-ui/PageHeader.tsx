@@ -4,6 +4,7 @@ import { errorMessage, joinPagePath } from './page-state'
 import { Icon } from '../ink/icons'
 import { InkPageIcon, PAGE_ICON_CHOICES } from '../ink/InkPageIcon'
 import { closePopover, openPopover } from '../ink/overlay'
+import { useInkLayout } from '../ink/layout-state'
 
 export interface PageHeaderProps {
   objectId: string
@@ -45,6 +46,12 @@ export function PageHeader({ objectId, root, title, beforeSave, api = window.ele
     if (!element) return
     element.style.height = '0px'; element.style.height = `${element.scrollHeight}px`
   }, [titleDraft, properties])
+  // A page just created from the sidebar opens with its "未命名" title selected, ready to be typed over.
+  useEffect(() => {
+    if (!properties || useInkLayout.getState().titleFocus !== objectId) return
+    useInkLayout.getState().setTitleFocus(null)
+    titleRef.current?.focus(); titleRef.current?.select()
+  }, [properties, objectId])
 
   const run = async (work: () => Promise<void>) => {
     if (lock.current) return false

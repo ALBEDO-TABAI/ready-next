@@ -24,6 +24,8 @@ export interface InkSidebarProps {
   api?: DocumentPagesAPI
   onOpen?(node: PageNode): void | Promise<void>
   onShowFiles?(node: PageNode): void | Promise<void>
+  /** The hover-peek copy shown over the page while the sidebar is collapsed. */
+  floating?: boolean
 }
 
 const EXPANDED_KEY = 'ready-ink-expanded'
@@ -38,7 +40,7 @@ function openNode(node: PageNode) {
   requestWorkbenchModeOpen('document')
 }
 
-export function InkSidebar({ roots, visible, api = window.electronAPI.documentPages, onOpen = openNode, onShowFiles }: InkSidebarProps) {
+export function InkSidebar({ roots, visible, api = window.electronAPI.documentPages, onOpen = openNode, onShowFiles, floating = false }: InkSidebarProps) {
   const store = useMemo(() => createPageTreeStore(api), [api])
   const { trees, states, loading, error: loadError } = useStore(store)
   const width = useInkLayout(state => state.width)
@@ -102,6 +104,7 @@ export function InkSidebar({ roots, visible, api = window.electronAPI.documentPa
     const target = parent.kind === 'vault' ? { parentPath: parent.path } : { parentObjectId: parent.objectId }
     const receipt = checked(await operate({ type: 'create', root, operationId: crypto.randomUUID(), title, ...target }))
     if (parent.kind !== 'vault') setExpanded(parent.objectId, true)
+    useInkLayout.getState().setTitleFocus(receipt.objectId)
     if (receipt.path) await onOpen({ objectId: receipt.objectId, revision: receipt.revision, path: receipt.path, name: `${title}.md`, kind: 'page', title, children: [], hasChildren: false, position: 0 })
   })
   const trash = (node: PageNode) => run(async () => {
@@ -227,11 +230,13 @@ export function InkSidebar({ roots, visible, api = window.electronAPI.documentPa
 
   const favorites = states.filter(state => state.favorite).map(state => all.find(node => node.objectId === state.objectId)).filter((node): node is PageNode => !!node)
   const vaultTitle = useVaultTitle(trees)
-  return <nav className="ink-sidebar" style={{ width }} aria-label="文档侧栏">
+  return <nav className={`ink-sidebar${floating ? ' is-floating' : ''}`} style={{ width }} aria-label={floating ? '文档侧栏（悬停）' : '文档侧栏'}>
     <div className="ink-sb-inner">
       <div className="ink-sb-top">
         <span className="ink-sb-top-title">{vaultTitle}</span>
-        <button type="button" className="ink-sb-collapse" aria-label="收起侧栏" {...tip('收起侧栏')} onClick={() => useInkLayout.getState().setOpen(false)}><Icon name="sidebarClose" size={18} /></button>
+        {floating
+          ? <button type="button" className="ink-sb-collapse" aria-label="固定侧栏" {...tip('固定侧栏')} onClick={() => useInkLayout.getState().setOpen(true)}><Icon name="sidebarOpen" size={18} /></button>
+          : <button type="button" className="ink-sb-collapse" aria-label="收起侧栏" {...tip('收起侧栏')} onClick={() => useInkLayout.getState().setOpen(false)}><Icon name="sidebarClose" size={18} /></button>}
       </div>
       <div className="ink-sb-search-wrap">
         <div className="ink-sb-search" role="button" tabIndex={0} aria-label="搜索" onClick={() => window.dispatchEvent(new CustomEvent('ready:open-quick-switcher'))}
@@ -279,7 +284,7 @@ export function InkSidebar({ roots, visible, api = window.electronAPI.documentPa
         <NavRow icon="trash" label="回收站" muted onClick={event => openTrash(event.currentTarget)} />
       </div>
     </div>
-    <Resizer />
+    {!floating && <Resizer />}
   </nav>
 }
 

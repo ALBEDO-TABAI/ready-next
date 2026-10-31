@@ -62,24 +62,6 @@ html[data-skin='liquid-glass'] .workbench-canvas-shell {
   box-shadow: none !important;
 }
 
-html[data-skin='liquid-glass'] .document-workbench-canvas-shell {
-  background: var(--workbench-module-surface-bg) !important;
-  border-radius: var(--workbench-canvas-radius) !important;
-  overflow: hidden;
-  background-clip: padding-box;
-}
-
-html[data-skin='liquid-glass'] .document-workbench-body {
-  background: var(--workbench-module-surface-bg) !important;
-  backdrop-filter: blur(24px) saturate(0%) !important;
-  -webkit-backdrop-filter: blur(24px) saturate(0%) !important;
-}
-
-html[data-skin='liquid-glass'] .document-workbench-body .document-vertical-tab-rail {
-  background: transparent !important;
-  border-right-color: transparent !important;
-}
-
 html[data-skin='liquid-glass'] .rss-mode-shell .workbench-canvas-shell {
   border-color: transparent !important;
   box-shadow: none !important;

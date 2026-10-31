@@ -243,6 +243,35 @@ export default function DocumentMode({
   const inkSidebarWidth = useInkLayout(state => state.width)
   const inkResizing = useInkLayout(state => state.resizing)
   const inkHome = useInkLayout(state => state.home)
+  // Collapsed, the sidebar peeks in when the pointer reaches the card's left edge, as in Inkwell.
+  const [inkPeek, setInkPeek] = useState(false)
+  const inkPeekTimer = useRef<number | undefined>(undefined)
+  useEffect(() => { if (inkSidebarOpen) setInkPeek(false) }, [inkSidebarOpen])
+  useEffect(() => {
+    if (!inkPeek) return
+    const move = (event: MouseEvent) => {
+      const target = event.target as Element | null
+      // Anything left of the panel's final right edge counts as inside (the panel may still be sliding in), so the
+      // edge that opened it does not close it.
+      const app = document.querySelector('.ink-doc-app')?.getBoundingClientRect()
+      const right = app ? app.left + useInkLayout.getState().width + 8 : 0
+      const inside = target?.closest?.('.ink-sb-peek, [data-popover-id]') || (app && event.clientX <= right && event.clientY >= app.top && event.clientY <= app.bottom)
+      if (inside) { window.clearTimeout(inkPeekTimer.current); inkPeekTimer.current = undefined; return }
+      if (inkPeekTimer.current === undefined) inkPeekTimer.current = window.setTimeout(() => { inkPeekTimer.current = undefined; setInkPeek(false) }, 300)
+    }
+    window.addEventListener('mousemove', move)
+    return () => { window.removeEventListener('mousemove', move); window.clearTimeout(inkPeekTimer.current); inkPeekTimer.current = undefined }
+  }, [inkPeek])
+  // The sidebar slides in and out like Inkwell's: it stays mounted while it closes.
+  const [inkSidebarMotion, setInkSidebarMotion] = useState<null | 'opening' | 'closing'>(null)
+  const inkSidebarWasOpen = useRef(inkSidebarOpen)
+  useLayoutEffect(() => {
+    if (inkSidebarWasOpen.current === inkSidebarOpen) return
+    inkSidebarWasOpen.current = inkSidebarOpen
+    setInkSidebarMotion(inkSidebarOpen ? 'opening' : 'closing')
+    const timer = window.setTimeout(() => setInkSidebarMotion(null), 360)
+    return () => window.clearTimeout(timer)
+  }, [inkSidebarOpen])
   const revealInFiles = useCallback(async (node: PageNode) => {
     const workspace = useWorkspace.getState()
     if (!workspace.sidebarVisible) workspace.toggleSidebar()
@@ -850,11 +879,20 @@ export default function DocumentMode({
           padding: `${WORKBENCH_CANVAS_OUTER_PADDING_TOP}px ${WORKBENCH_CANVAS_OUTER_PADDING_X}px ${WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM}px`,
         }}
       >
-        <div className="workbench-canvas-shell document-workbench-canvas-shell flex min-h-0 h-full flex-col">
+        {/* Like the calendar: no shell surface of its own; the sidebar and page panels fill the workspace. */}
+        <div className="workbench-canvas-shell flex min-h-0 h-full flex-col" style={{ background: 'transparent', boxShadow: 'none' }}>
           {/* Inkwell's document interface: tab rail, glass sidebar, then the paper page with its topbar. */}
-          <div className={`ink-scope ink-doc-app${inkResizing ? ' is-resizing' : ''}`}>
-            {inkSidebarOpen && (
-              <div className="ink-sb-shell" style={{ width: inkSidebarWidth }}>
+          <div className={`ink-scope ink-doc-app${inkResizing ? ' is-resizing' : ''}`}
+            onMouseMove={inkSidebarOpen || inkPeek ? undefined : (event) => {
+              if (event.clientX - event.currentTarget.getBoundingClientRect().left <= 14) setInkPeek(true)
+            }}>
+            {!inkSidebarOpen && inkSidebarMotion !== 'closing' && (
+              <div className={`ink-sb-peek${inkPeek ? ' is-visible' : ''}`} aria-hidden={!inkPeek}>
+                {inkPeek && <InkSidebar roots={pagePanel.roots} visible={isSceneVisible} onShowFiles={revealInFiles} floating />}
+              </div>
+            )}
+            {(inkSidebarOpen || inkSidebarMotion === 'closing') && (
+              <div className={`ink-sb-shell${inkSidebarMotion ? ` is-${inkSidebarMotion}` : ''}`} style={{ width: inkSidebarWidth }}>
                 <InkSidebar roots={pagePanel.roots} visible={isSceneVisible} onShowFiles={revealInFiles} />
               </div>
             )}
