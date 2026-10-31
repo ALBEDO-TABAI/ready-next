@@ -108,6 +108,22 @@ M3 编辑器、SaveToPicker 归原负责人；M4 只消费公开接口。其他�
 
 2026-10-31：合同冻结；A 格式、转换、纯操作与命令行入口已完成：34 项行为测试、2 个合法夹具、13 个非法夹具；类型和 eslint 检查通过。B–F、完整 C10/C13、原生持久化和窗口验收尚未完成。
 
+### E3 文字卡链接合同（实施前冻结）
+
+- 块编辑器公开 `linkBase: { filePath: string | null; parentPath: string | null }`。文档宿主从标签提供两条路径；未保存文档仍允许选择 Wiki 链接，创建子页面时提示先保存。画板宿主从 `canvasPath` 提供两条路径，不伪装文档标签；没有路径则隐藏 Wiki 选择、子页面和复制引用并说明原因。
+- `wikiTarget`、引用打开和子页面创建只消费链接基准，不自行查询文档标签。Wiki 插入目标是规范文件路径之间相对于当前文件所在文件夹的路径，省略 `.md`；打开先当前文件夹、后资料库根。`项目/X.canvas` 引用 `资料/某页.md` 写作 `[[../资料/某页]]`。
+- 新建子页面把 `parentPath=X.canvas` 交给现有页面服务，由服务负责创建 `X/标题.md`；成功后插入 `[[X/标题]]`。插入沿用原选区和正文版本，经 NodeBuffer → textRanges → 画板句柄确认；页面创建期间正文变化则拒绝插入，错误提示保留已创建的页面位置，重试复用 operationId。
+- 有画板路径和稳定 nodeId 的文字卡开放“复制块引用”，复制 `ready://canvas/<objectId>#node=<nodeId>`（由 ReadyRef 编码）。该地址定位整张文字卡，不承诺卡内段落定位，不往正文添加页面块标记；画板身份由对象服务解析后才能复制。文档块引用仍为 `[[页面#^块ID]]`。
+- 画板链接抽取保留 sourceNodeId，关系解析以画板所在文件夹优先、资料库根其次。CLI 合同：canvas-text-editor 验证真实卡片选择/创建/打开/复制和区间提交；ready-canvas-write-native 验证页面服务落盘、句柄写入与关系回读；既有块编辑器交互、Wiki 打开与保存测试保持通过。窗口验收由 Claude 执行。
+
+### E3 CLI 交付边界（2026-10-31）
+
+- 已接公开链接基准、文字卡 Wiki/子页面/整卡引用，未保存文档保持原行为。新增卡片行为测试先失败后通过；编辑器共 96 项通过，Widget 163 项、文档性能 152 项通过，类型检查及改动文件 eslint 通过。
+- 原生定向检查 14 项：13 通过、1 失败、0 跳过。子页面服务真实落盘、重试复用回执及 NodeBuffer 经句柄保存已通过；唯一失败是画板文字 Wiki 的关系解析。
+- `verify:native` 原测试清单使用已安装 Electron 执行：454 项，450 通过、4 失败、0 跳过。除上述关系解析失败，另三项范围外失败为 calendar-layers-native、library-engine、ready-object-identity-native 的文件监听 EMFILE/通知超时；未改实现或断言。日志 `/tmp/m4e3-native.log`，定向日志 `/tmp/m4e3-native-focused-final.log`。
+- 阻碍位于允许范围外的 `src/main/modules/search-engine/object-links.ts`：`source_node_id` 让文字 Wiki 与画板 file 节点一样从资料库根解析。需要区分文字引用和资料库相对的 file 节点路径；不能直接改变所有画板节点的基准。抽取器无路径基准，未在其中制造补偿规则；保留原生失败回归，E3 不标整体完成。实际窗口验收仍交 Claude。
+- Widget/性能 npm 入口因 `tsx` 管道 `listen EPERM` 失败，改用已安装 `node --import tsx --test` 执行原清单，性能夹具也用 `node --import tsx` 生成。原生使用已安装 Electron Node 模式，不安装或重编依赖。
+
 ### F 接线验收合同（实施前冻结）
 
 - `ready-canvas-ipc.test.ts` 调用真实注册函数与资料库解析器：未配置拒绝、恢复完成前不执行、每次请求读取当前库、恢复失败不放行；恢复期间切库不得返回旧实例。

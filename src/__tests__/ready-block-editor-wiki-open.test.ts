@@ -21,7 +21,7 @@ test('wiki links open page-relative targets first, then vault-relative ones', as
     const { useDocTabs } = await import('../renderer/stores/useDocTabs')
     useWorkspace.setState({ workspaceRoot: '/vault', pinnedFolders: [] })
     useDocTabs.setState({ tabs: [{ id: 'page', title: 'page', path: '/vault/a/page.md', content: '', isDirty: false }], activeTabId: 'page', splitTabId: null })
-    const open = (target: string) => openInlineReference({ kind: 'wiki', target }, 'page')
+    const open = (target: string) => openInlineReference({ kind: 'wiki', target }, '/vault/a/page.md')
     await assert.rejects(open('sub/target#标题'), /stop after resolving/)
     await assert.rejects(open('neighbor'), /stop after resolving/)
     await assert.rejects(open('missing'), /找不到页面：missing/)

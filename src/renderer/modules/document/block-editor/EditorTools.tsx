@@ -15,7 +15,7 @@ import { useSceneVisible } from './scene'
 import { BLOCK_KINDS, convertBlock } from './catalog'
 import { getCaret, plainText, setCaret, sliceSpans } from './dom-inline'
 import { emptyBlock, inlineMarkdown, newline, plainModel } from './editing'
-import { findReferences, openInlineReference, wikiTarget, workspaceRoots, type ReferenceChoice } from './references'
+import { findReferences, openInlineReference, wikiTarget, workspaceRoots, type ReferenceChoice, type EditorLinkBase } from './references'
 import type { EditorBuffer } from './editor-buffer'
 
 interface Selection {
@@ -24,7 +24,7 @@ interface Selection {
 type Picker = Selection & { kind: 'slash' | 'wiki' | 'mention' }
 const widgetInput = { title: '新信息卡', widgetCode: '', skeletonSpec: { skeleton: 'single_focus', size: 'doc_block', props: { title: '新信息卡', body: '填写内容' } } }
 
-export function EditorTools({ buffer, children, report }: { buffer: EditorBuffer; children: ReactNode; report(error: unknown): void }) {
+export function EditorTools({ buffer, linkBase, children, report }: { buffer: EditorBuffer; linkBase?: EditorLinkBase; children: ReactNode; report(error: unknown): void }) {
   const extensions = useAnnotationMenus()
   const tabId = buffer.owner.kind === 'document' ? buffer.owner.tabId : undefined
   const root = useRef<HTMLDivElement>(null)
@@ -109,11 +109,11 @@ export function EditorTools({ buffer, children, report }: { buffer: EditorBuffer
     let cancelled = false
     setLoading(true); setResults([])
     const timer = window.setTimeout(() => {
-      findReferences(query, picker.kind === 'wiki', tabId).then(items => { if (!cancelled) setResults(items) })
+      findReferences(query, picker.kind === 'wiki', linkBase?.filePath).then(items => { if (!cancelled) setResults(items) })
         .catch(error => { if (!cancelled) report(error) }).finally(() => { if (!cancelled) setLoading(false) })
     }, 150)
     return () => { cancelled = true; window.clearTimeout(timer) }
-  }, [tabId, picker, query, report])
+  }, [linkBase?.filePath, picker, query, report])
   const attempt = (action: () => void) => { try { action() } catch (error) { report(error) } }
   function slashMarkdown(state: Picker, markdown: string) {
     // Only the typed trigger is consumed; existing following text is retained.
@@ -135,14 +135,13 @@ export function EditorTools({ buffer, children, report }: { buffer: EditorBuffer
     items.push({ id: 'widget', label: '插入 Widget', run: () => { setPicker(null); setWidget(current) } },
       { id: 'mermaid', label: '插入 Mermaid', run: () => attempt(() => slashMarkdown(current, `\`\`\`mermaid${eol}graph TD${eol}  A --> B${eol}\`\`\``)) },
       { id: 'columns', label: '插入分栏', run: () => attempt(() => slashMarkdown(current, `<!-- ready:columns widths=1,1 -->${eol}${eol}<!-- ready:column -->${eol}${eol}<!-- ready:columns-end -->`)) },
-      ...(tabId ? [{ id: 'page', label: '插入子页面链接', run: () => { setPicker(null); setPage({ picker: current, title: '', operationId: crypto.randomUUID(), state: 'editing' }) } }] : []))
+      ...(linkBase ? [{ id: 'page', label: '插入子页面链接', run: () => { setPicker(null); setPage({ picker: current, title: '', operationId: crypto.randomUUID(), state: 'editing' }) } }] : []))
   } else if (picker) items = results.map(result => ({ ...result, run: () => attempt(() => replaceSelection(picker, [{ text: result.text, marks: { reference: result.reference } }])) }))
   async function createPage() {
     if (!page || pagePending.current) return
     pagePending.current = true; setPage({ ...page, state: 'pending' })
     try {
-      const tab = useDocTabs.getState().tabs.find(item => item.id === tabId)
-      const path = tab?.path
+      const path = linkBase?.parentPath
       if (!path) throw new Error('请先保存当前页面，再创建子页面')
       if (/[[\]|#\r\n]/.test(path + page.title)) throw new Error('页面路径或名称不能表示为 Wiki 引用')
       const rootPath = workspaceRoots().filter(root => path.startsWith(root.replace(/[/\\]$/, '') + '/')).sort((a, b) => b.length - a.length)[0]
@@ -151,7 +150,7 @@ export function EditorTools({ buffer, children, report }: { buffer: EditorBuffer
       const result = await window.electronAPI.documentPages.operate({ type: 'create', operationId: page.operationId, root: rootPath, parentPath: path, title: page.title })
       if (!result.ok) throw new Error(result.message)
       if (!result.value.path) throw new Error('新页面没有返回路径')
-      const target = await wikiTarget(tabId, result.value.path)
+      const target = await wikiTarget(linkBase?.filePath, result.value.path)
       if (buffer.snapshot.version !== page.picker.snapshot.version) throw new Error(`页面已创建在 ${result.value.path}；正文已变化，未插入链接。请取消并从 [[ 选择器插入。`)
       replaceSelection(page.picker, [{ text: target, marks: { reference: { kind: 'wiki', target } } }])
       setPage(null)
@@ -165,7 +164,7 @@ export function EditorTools({ buffer, children, report }: { buffer: EditorBuffer
       const trigger = /^(\/)\S*$/.exec(prefix) ?? /(\[\[)([^[\]\r\n]*)$/.exec(prefix) ?? /(?:^|\s)(@)([^@\r\n]*)$/.exec(prefix)
       if (!trigger) return
       const token = trigger[1], at = prefix.lastIndexOf(token)
-      if (token === '[[' && !tabId) return
+      if (token === '[[' && !linkBase) return
       setSelection(null); setQuery(prefix.slice(at + token.length)); setResults([])
       setPicker({ ...state, start: at, kind: token === '/' ? 'slash' : token === '[[' ? 'wiki' : 'mention' })
     }}
@@ -208,18 +207,18 @@ export function EditorTools({ buffer, children, report }: { buffer: EditorBuffer
       if (!(event.metaKey || event.ctrlKey)) return
       const reference = anchor.dataset.readyWiki ? { kind: 'wiki' as const, target: anchor.dataset.readyWiki }
         : { kind: 'link' as const, href: anchor.getAttribute('href') ?? anchor.dataset.readyHref ?? '' }
-      void openInlineReference(reference, tabId).catch(report)
+      void openInlineReference(reference, linkBase?.filePath).catch(report)
     }}>
     <BlockEditorStyles />{children}
     {sceneVisible && dateMention && <DateMentionPicker value={dateMention.ref} anchor={dateMention.selection.anchor} report={report}
-      close={() => setDateMention(null)} open={() => openInlineReference({ kind: 'ready', ref: dateMention.ref }, tabId)}
+      close={() => setDateMention(null)} open={() => openInlineReference({ kind: 'ready', ref: dateMention.ref }, linkBase?.filePath)}
       save={ref => {
         replaceSelection(dateMention.selection, [{ text: `${ref.date}${ref.at ? ` ${ref.at}` : ''}`, marks: { reference: { kind: 'ready', ref } } }])
         setDateMention(null)
       }} />}
     {sceneVisible && selection && !picker && <InlineToolbar anchor={selection.anchor}
       marks={sliceSpans(selection.model.spans, selection.start, selection.end)[0]?.marks ?? {}}
-      apply={patch => applyMarks(selection, patch)} close={close} report={report} open={ref => openInlineReference(ref, tabId)} />}
+      apply={patch => applyMarks(selection, patch)} close={close} report={report} open={ref => openInlineReference(ref, linkBase?.filePath)} />}
     {sceneVisible && picker && <CommandMenu label={picker.kind === 'slash' ? '插入块' : picker.kind === 'wiki' ? '页面和标题' : '提及'} anchor={picker.anchor} items={items} close={close} initialQuery={query}
       {...(picker.kind !== 'slash' ? { query, onQuery: setQuery, pending: loading } : {})} />}
     <WidgetEditDrawer open={Boolean(widget)} input={widgetInput} onClose={() => setWidget(null)} onSave={result => {

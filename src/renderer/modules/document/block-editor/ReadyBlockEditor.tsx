@@ -16,6 +16,7 @@ import { BlockControls, BlockShell } from './BlockControls'
 import { EditorTools } from './EditorTools'
 import { isNonContentBlock } from './catalog'
 import { textAreaContent } from './text-edit'
+import type { EditorLinkBase } from './references'
 
 function SourceBlock({ block, buffer, children, report }: { block: DocumentBlock; buffer: EditorBuffer; children: ReactNode; report(error: unknown): void }) {
   const [draft, setDraft] = useState<{ block: DocumentBlock; version: number; text: string } | null>(null)
@@ -57,13 +58,15 @@ function SourceBlock({ block, buffer, children, report }: { block: DocumentBlock
 export function ReadyBlockEditor({ tabId, content: displayedContent, renderSource }: { tabId: string; content?: string; renderSource(block: DocumentBlock): ReactNode }) {
   // A retained hidden DocumentMode supplies its frozen snapshot. Do not bypass it.
   const content = useDocTabs(state => displayedContent ?? state.tabs.find(tab => tab.id === tabId)?.content ?? '')
+  const path = useDocTabs(state => state.tabs.find(tab => tab.id === tabId)?.path ?? null)
+  const linkBase = useMemo(() => ({ filePath: path, parentPath: path }), [path])
   const buffer = useMemo(() => getTabBuffer(tabId), [tabId])
-  return <BufferedBlockEditor buffer={buffer} content={content} renderSource={renderSource} />
+  return <BufferedBlockEditor buffer={buffer} linkBase={linkBase} content={content} renderSource={renderSource} />
 }
 
 /** Both document tabs and canvas cards render this exact editor. */
-export function BufferedBlockEditor({ buffer, content: displayedContent, renderSource }: {
-  buffer: EditorBuffer; content?: string; renderSource(block: DocumentBlock): ReactNode
+export function BufferedBlockEditor({ buffer, linkBase, content: displayedContent, renderSource }: {
+  buffer: EditorBuffer; linkBase?: EditorLinkBase; content?: string; renderSource(block: DocumentBlock): ReactNode
 }) {
   const content = useSyncExternalStore(buffer.subscribe, () => displayedContent ?? buffer.snapshot.content)
   const writeError = useSyncExternalStore(buffer.subscribe, () => buffer.error)
@@ -173,7 +176,7 @@ export function BufferedBlockEditor({ buffer, content: displayedContent, renderS
       event.preventDefault(); event.stopPropagation()
       travel(event.shiftKey ? 'redo' : 'undo')
     }}>
-    <BlockControls editorId={editorId} buffer={buffer} report={report}><EditorTools buffer={buffer} report={report}>
+    <BlockControls editorId={editorId} buffer={buffer} linkBase={linkBase} report={report}><EditorTools buffer={buffer} linkBase={linkBase} report={report}>
     {(writeError || error) && <p role="alert">{writeError || error}</p>}
     {parsed.blocks.some(block => block.issue) && <p role="status">分栏格式需修复，其他段落仍可编辑。</p>}
     {segments.map((block, index) => renderBlock(block, String(index)))}

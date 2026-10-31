@@ -103,7 +103,8 @@ export class ObjectLinkRepository {
         let text: string
         try { text = decodeURIComponent(row.target_text) } catch { reason = '无效链接编码'; text = '' }
         if (!reason) {
-          const root = row.source_node_id ? this.db.prepare('SELECT root FROM workspaces WHERE id=?').get<{ root: string }>(source.workspace_id)?.root : undefined
+          // File cards store vault-relative paths (JSON Canvas); links written inside a text card are relative to the canvas file's folder.
+          const root = row.source_node_id && row.kind === 'canvas-node' ? this.db.prepare('SELECT root FROM workspaces WHERE id=?').get<{ root: string }>(source.workspace_id)?.root : undefined
           const absolute = text ? resolve(root ?? dirname(source.current_path), text) : source.current_path
           const paths = [absolute, absolute + '.md']
           let candidates = this.db.prepare(`SELECT * FROM objects WHERE status='present' AND identity_state<>'conflict' AND current_path IN (?,?)`).all<Target>(...paths)

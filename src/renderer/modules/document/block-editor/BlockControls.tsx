@@ -8,6 +8,8 @@ import { actionableBlocks, BLOCK_KINDS, convertBlock } from './catalog'
 import { CommandMenu, type MenuAnchor, type MenuItem } from './CommandMenu'
 import { inlineMarkdown, newline } from './editing'
 import type { EditorBuffer } from './editor-buffer'
+import type { EditorLinkBase } from './references'
+import { toReadyUri } from '../../../../shared/ready-ref'
 
 interface Drag { block: DocumentBlock; snapshot: DocumentBuffer; target: DocumentBlock; placement: 'before' | 'after' }
 interface Controls {
@@ -42,8 +44,10 @@ function moveEdit(snapshot: DocumentBuffer, block: DocumentBlock, target: Docume
   return createRangeEdit(snapshot, [...remove.operation.ranges, ...insert.operation.ranges], remove.selectionBefore, { anchor: cursor, focus: cursor })
 }
 
-export function BlockControls({ buffer, editorId, report, children }: { editorId: string; buffer: EditorBuffer; report(error: unknown): void; children: ReactNode }) {
+export function BlockControls({ buffer, linkBase, editorId, report, children }: { editorId: string; linkBase?: EditorLinkBase; buffer: EditorBuffer; report(error: unknown): void; children: ReactNode }) {
   const extensions = useAnnotationMenus()
+  const owner = buffer.owner
+  const canvasPath = linkBase?.filePath
   const [menu, setMenu] = useState<{ block: DocumentBlock; snapshot: DocumentBuffer; anchor: MenuAnchor } | null>(null)
   const sceneVisible = useSceneVisible(() => [...document.querySelectorAll('[data-ready-block-editor]')].find(element => element instanceof HTMLElement && element.dataset.readyBlockEditor === editorId))
   const [drag, setDrag] = useState<Drag | null>(null), dragRef = useRef<Drag | null>(null)
@@ -97,12 +101,18 @@ export function BlockControls({ buffer, editorId, report, children }: { editorId
         const target = siblings[siblings.findIndex(item => item.id === block.id) + (index ? 1 : -1)]
         if (target) buffer.apply(moveEdit(snapshot, block, target, placement), 'drag')
       })),
-      ...(buffer.owner.kind === 'document' ? [action('reference', '复制块引用', async () => {
-        const tab = useDocTabs.getState().tabs.find(item => item.id === (buffer.owner.kind === 'document' ? buffer.owner.tabId : undefined))
+      ...(owner.kind === 'document' || (canvasPath && owner.nodeId) ? [action('reference', '复制块引用', async () => {
+        if (!navigator.clipboard) throw new Error('当前环境无法访问剪贴板')
+        if (owner.kind === 'canvas') {
+          if (!canvasPath) throw new Error('尚未提供画板文件路径')
+          const location = await window.electronAPI.objects.resolvePath(canvasPath)
+          await navigator.clipboard.writeText(toReadyUri({ kind: 'canvas', id: location.objectId, node: owner.nodeId }))
+          return
+        }
+        const tab = useDocTabs.getState().tabs.find(item => item.id === owner.tabId)
         if (!tab) throw new Error('文档已关闭')
         const page = (tab.path ?? tab.title).replace(/\.md$/i, '')
         if (/[[\]|#\r\n]/.test(page)) throw new Error('页面路径不能表示为 Wiki 引用')
-        if (!navigator.clipboard) throw new Error('当前环境无法访问剪贴板')
         const existing = explicitBlockId(snapshot.content, block)
         const id = existing ?? `block-${crypto.randomUUID()}`
         if (!existing) replace(markBlock(snapshot.content, block, id))

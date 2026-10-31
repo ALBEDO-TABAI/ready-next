@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { posix } from 'node:path'
 import React, { act, useState } from 'react'
 import { JSDOM } from 'jsdom'
 import { applyCanvasOperations, type CanvasOperation, type ReadyCanvas } from '../shared/ready-canvas'
@@ -7,10 +8,11 @@ import { fragmentHash } from '../shared/document-blocks'
 
 // M4-E2 contract: real card + shared editor + surface commit path. Only the
 // host acknowledgement and browser geometry are substitutes; no document tab.
-async function fixture(t: test.TestContext, body = '原文😀') {
+async function fixture(t: test.TestContext, body = '原文😀', canvasPath?: string) {
   const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost', pretendToBeVisual: true })
   const globals = { window: dom.window, document: dom.window.document, navigator: dom.window.navigator,
-    HTMLElement: dom.window.HTMLElement, Element: dom.window.Element, Node: dom.window.Node,
+    localStorage: dom.window.localStorage, HTMLElement: dom.window.HTMLElement, Element: dom.window.Element, Node: dom.window.Node,
+    CustomEvent: dom.window.CustomEvent,
     getComputedStyle: dom.window.getComputedStyle.bind(dom.window), MutationObserver: dom.window.MutationObserver,
     requestAnimationFrame: dom.window.requestAnimationFrame.bind(dom.window), cancelAnimationFrame: dom.window.cancelAnimationFrame.bind(dom.window),
     IS_REACT_ACT_ENVIRONMENT: true }
@@ -32,7 +34,7 @@ async function fixture(t: test.TestContext, body = '原文😀') {
       operations.push(ops); await wait
       if (reject) throw new Error('version_conflict')
       canvas = applyCanvasOperations(canvas, ops).canvas; setValue(canvas)
-    }} renderTextEditor={({ node, commit }) => node.type === 'text' && <TextCard node={node} commit={commit} />} />
+    }} renderTextEditor={({ node, commit }) => node.type === 'text' && <TextCard node={node} commit={commit} canvasPath={canvasPath} />} />
   }
   const root = createRoot(document.getElementById('root')!)
   await act(() => root.render(<Host />))
@@ -169,4 +171,104 @@ test('M4-E2 finishing flushes a source block before unmounting', async t => {
   const done = [...document.querySelectorAll('button')].find(button => button.textContent === '完成编辑')!
   await act(() => done.click())
   f.bytes('```js\nnew\n```'); assert.equal(document.querySelector('[aria-label="文字卡编辑"]'), null)
+})
+
+// M4-E3: services are IPC substitutes; rendering, selection, navigation and
+// canvas range application remain real. Native tests cover the same writes on disk.
+async function linkAPI(t: test.TestContext) {
+  const { useWorkspace } = await import('../renderer/stores/useWorkspace')
+  const { useDocTabs } = await import('../renderer/stores/useDocTabs')
+  const previous = useWorkspace.getState(), tabs = useDocTabs.getState()
+  useWorkspace.setState({ workspaceRoot: '/vault', pinnedFolders: [] })
+  useDocTabs.setState({ tabs: [], activeTabId: null })
+  t.after(() => { useWorkspace.setState(previous); useDocTabs.setState(tabs) })
+  const requests: Array<{ operationId: string; parentPath: string; title: string }> = []
+  const resolved: string[] = [], copied: string[] = []
+  const api = {
+    document: {
+      searchIndex: async () => ({ success: true, data: { items: [{ path: '/vault/资料/某页.md', name: '某页', sourceType: 'document' }] } }),
+      readFile: async () => ({ success: true, data: { content: '正文' } }),
+      stat: async (path: string) => ({ success: posix.normalize(path) === '/vault/资料/某页.md' }),
+    },
+    objects: {
+      onMoved: () => () => {},
+      prepareMigration: async () => ({ resolved: [], state: 'prepared' }),
+      completeMigration: async () => ({ state: 'completed' }),
+      resolvePath: async (path: string) => { resolved.push(posix.normalize(path)); return { path: posix.normalize(path), objectId: path.endsWith('.canvas') ? 'board' : 'page', revision: 1 } },
+      locate: async (id: string) => ({ path: id === 'board' ? '/vault/项目/X.canvas' : '/vault/资料/某页.md', objectId: id, revision: 1 }),
+    },
+    documentPages: { operate: async (request: typeof requests[number]) => {
+      requests.push(request)
+      return { ok: true, value: { path: '/vault/项目/X/子页.md' } }
+    } },
+  }
+  Object.defineProperty(window, 'electronAPI', { configurable: true, value: api })
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (text: string) => { copied.push(text) } } })
+  return { api, requests, resolved, copied, useDocTabs }
+}
+
+test('M4-E3 wiki picker inserts a canvas-folder-relative target through the exact node range', async t => {
+  const f = await fixture(t, '前缀 [[某页', '/vault/项目/X.canvas')
+  await linkAPI(t)
+  await f.input('前缀 [[某页')
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 200)) })
+  const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(el => el.textContent?.includes('某页'))
+  assert.ok(option, 'canvas wiki picker available')
+  await act(() => option.click())
+  f.bytes('前缀 [[../资料/某页]]')
+  assert.deepEqual(f.operations.at(-1), [{ type: 'textRanges', id: 'one', expectedTextVersion: fragmentHash('前缀 [[某页'),
+    ranges: [{ start: 0, end: 7, expectedText: '前缀 [[某页', replacement: '前缀 [[../资料/某页]]' }] }])
+  await f.key('z', { metaKey: true }); f.bytes('前缀 [[某页')
+})
+
+for (const changed of [false, true]) test(`M4-E3 subpage confirmation respects the canvas parent and intervening edits (${changed})`, async t => {
+  const f = await fixture(t, '/', '/vault/项目/X.canvas'), api = await linkAPI(t)
+  await f.input('/')
+  const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(el => el.textContent === '插入子页面链接')
+  assert.ok(option); await act(() => option.click())
+  const input = document.querySelector<HTMLInputElement>('[aria-label="子页面标题"]')!
+  await act(() => {
+    Object.getOwnPropertyDescriptor(f.dom.window.HTMLInputElement.prototype, 'value')!.set!.call(input, '子页')
+    input.dispatchEvent(new f.dom.window.Event('input', { bubbles: true }))
+  })
+  let confirm!: () => void
+  const operate = api.api.documentPages.operate
+  api.api.documentPages.operate = async request => { await new Promise<void>(resolve => { confirm = resolve }); return operate(request) }
+  await act(() => input.closest('form')!.dispatchEvent(new f.dom.window.Event('submit', { bubbles: true, cancelable: true })))
+  f.bytes('/'); assert.equal(f.operations.length, 0)
+  if (changed) await f.external('外部正文')
+  await act(async () => { confirm() })
+  assert.equal(api.requests[0].parentPath, '/vault/项目/X.canvas')
+  assert.equal(api.requests[0].title, '子页')
+  if (changed) {
+    f.bytes('外部正文'); assert.equal(f.operations.length, 0)
+    assert.match(document.querySelector('[role="alert"]')!.textContent!, /页面已创建在.*X\/子页.md.*未插入链接/)
+  } else {
+    f.bytes('[[X/子页]]'); assert.equal(f.operations.at(-1)![0].type, 'textRanges')
+  }
+})
+
+test('M4-E3 opening a card wiki link selects its page without a document owner', async t => {
+  const f = await fixture(t, '[[../资料/某页]]', '/vault/项目/X.canvas'), api = await linkAPI(t)
+  const anchor = f.rich().querySelector('a')!
+  await act(async () => { anchor.dispatchEvent(new f.dom.window.MouseEvent('click', { bubbles: true, metaKey: true })) })
+  const state = api.useDocTabs.getState()
+  assert.equal(state.tabs.find(tab => tab.id === state.activeTabId)?.path, '/vault/资料/某页.md')
+  assert.ok(api.resolved.includes('/vault/资料/某页.md'))
+  assert.equal(document.querySelector('[role="alert"]'), null)
+  assert.equal(f.operations.length, 0)
+})
+
+test('M4-E3 copy block reference addresses the stable card and leaves its body untouched', async t => {
+  const f = await fixture(t, '原文😀', '/vault/项目/X.canvas'), api = await linkAPI(t)
+  await f.key('Enter', {}, document.querySelector<HTMLElement>('[aria-label="块菜单"]')!)
+  const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(el => el.textContent === '复制块引用')
+  assert.ok(option); await act(async () => option.click())
+  assert.deepEqual(api.copied, ['ready://canvas/board#node=one'])
+  f.bytes('原文😀'); assert.equal(f.operations.length, 0)
+  const { openReadyRef } = await import('../renderer/modules/workbench/open-ready-ref')
+  const { useCanvasNavigation } = await import('../renderer/modules/canvas/navigation')
+  await act(() => openReadyRef(api.copied[0], 'document'))
+  assert.equal(useCanvasNavigation.getState().target?.objectId, 'board')
+  assert.equal(useCanvasNavigation.getState().target?.nodeId, 'one')
 })
