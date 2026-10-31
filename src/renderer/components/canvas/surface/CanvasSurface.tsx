@@ -171,6 +171,9 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     {buffer.error && <div className="canvas-message" role="alert" data-canvas-ui>{buffer.error}</div>}
     {menu && <div role="menu" aria-label="选区菜单" data-canvas-ui style={{ position: 'absolute', left: menu.x, top: menu.y, zIndex: 5, background: 'var(--bg-primary)', padding: 8 }}>
       <button role="menuitem" disabled={composing || busy} onClick={() => void addToDocument()}>{composing ? '正在添加…' : '添加到文档'}</button>
+      {props.onAskAI && chosen.length > 0 && <button role="menuitem" disabled={busy || composing} onClick={() => {
+        void props.onAskAI!(chosen.map(n => n.id)).then(() => setMenu(null), cause => setCompositionError(cause instanceof Error ? cause.message : String(cause)))
+      }}>问 AI</button>}
       {props.onScheduleNode && chosen.length === 1 && ['text', 'note', 'document'].includes(chosen[0].ready.kind) && <button role="menuitem" disabled={busy || composing} onClick={() => { props.onScheduleNode!(chosen[0]); setMenu(null) }}>安排日程…</button>}
       <button disabled={composing} onClick={() => setMenu(null)}>关闭</button>
       {compositionError && <p role="alert">{compositionError}</p>}

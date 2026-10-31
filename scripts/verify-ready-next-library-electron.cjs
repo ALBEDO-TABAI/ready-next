@@ -218,6 +218,12 @@ async function checkQuoteReturn(page, book, id, selected) {
     return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
   }, id)
   await page.mouse.click(point.x, point.y)
+  // M7: the passage goes to the AI chat as a book location.
+  await page.getByRole('button', { name: '问 AI', exact: true }).click()
+  await page.locator('.chat-reference-chip').first().waitFor({ timeout: 15000 })
+  ok('reader sends the passage to the AI chat', true)
+  await page.screenshot({ path: path.join(shots, '6a-ask-ai.png') })
+  await page.mouse.click(point.x, point.y)
   await page.getByRole('button', { name: '复制引用', exact: true }).click()
   const reference = await page.evaluate(() => navigator.clipboard.readText())
   ok('reader copies a source-block embed', reference === `![[${path.basename(book.notePath, '.md')}#^${id}]]`, reference)

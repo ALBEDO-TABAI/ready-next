@@ -15,6 +15,8 @@ export interface CanvasSurfaceProps {
   renderTextEditor?: (context: { node: CanvasNode; commit: (operations: CanvasOperation[]) => Promise<boolean>; close: () => void }) => ReactNode
   renderCard?: (node: CanvasNode) => ReactNode
   onScheduleNode?: (node: CanvasNode) => void
+  /** Sends the selected cards to the AI chat as a structured, read-only selection. */
+  onAskAI?: (nodeIds: string[]) => Promise<void>
   onAddToDocument?: (nodeIds: string[]) => Promise<void>
   resolveAsset?: (path: string) => string | undefined
   onOpenNode?: (node: CanvasNode) => void

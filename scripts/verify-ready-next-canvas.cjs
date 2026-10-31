@@ -92,6 +92,11 @@ async function main() {
     await snapshot('02-chinese-undo')
     await page.locator(`[data-node-id="${textId}"]`).click()
     await page.locator(`[data-node-id="${textId}"]`).click({ button: 'right' })
+    // M7: the selected cards go to the AI chat as a structured, read-only attachment.
+    await page.getByRole('menuitem', { name: '问 AI', exact: true }).click()
+    await page.locator('.chat-reference-chip').first().waitFor({ timeout: 15000 })
+    await snapshot('02b-ask-ai')
+    await page.locator(`[data-node-id="${textId}"]`).click({ button: 'right' })
     await page.getByRole('menuitem', { name: '添加到文档', exact: true }).click()
     await poll(() => readCanvas().nodes.some(node => node.ready.kind === 'draft'), 'Draft card missing')
     await reveal(seeded.canvasId)

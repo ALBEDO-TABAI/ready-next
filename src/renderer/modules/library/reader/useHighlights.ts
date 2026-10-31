@@ -6,6 +6,7 @@ import type { LoadedBook } from './book'
 import type { Layout } from './paginate'
 import type { createFlipbook } from './flipbook.js'
 import { anchorOf } from './marks'
+import { addBookLocationToAgentInput } from '../../agent/chat-input-bridge'
 
 export type HighlightLens = { x: number; y: number } & ({ id: string; draft?: never } | { id?: never; draft: NonNullable<ReturnType<typeof anchorOf>> })
 export function useHighlights({ record, api, book, layout, flip, onError }: {
@@ -82,6 +83,17 @@ export function useHighlights({ record, api, book, layout, flip, onError }: {
       if (live.current) close()
     } catch (error) { fail.current(`复制失败：${String(error)}`) }
   }
+  // Sends the passage to the AI chat as a book location (read-only; the reader's location counting is kept).
+  const ask = async () => {
+    try {
+      const located = selected?.location.status === 'located' ? selected.location : null
+      const location = located ? { chapter: located.chapter, from: located.from, to: located.to }
+        : lens?.draft ? { chapter: lens.draft.chapter, from: lens.draft.from, to: lens.draft.to } : null
+      if (!location) throw new Error('请先选中一段文字')
+      await addBookLocationToAgentInput(record.id, location, record.title, selected?.text ?? lens?.draft?.text)
+      if (live.current) close()
+    } catch (error) { fail.current(error instanceof Error ? error.message : String(error)) }
+  }
   const openSource = async () => {
     if (!selected) return
     try {
@@ -96,5 +108,5 @@ export function useHighlights({ record, api, book, layout, flip, onError }: {
       close()
     } catch (error) { fail.current(String(error)) }
   }
-  return { state, listRef, lens, selected, busy: busy || !state || state.persistence === 'pending_save', onSelect, onMark, close, save, remove, copy, openSource, refresh }
+  return { state, listRef, lens, selected, busy: busy || !state || state.persistence === 'pending_save', onSelect, onMark, close, save, remove, copy, ask, openSource, refresh }
 }

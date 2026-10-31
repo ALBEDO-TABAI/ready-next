@@ -103,6 +103,10 @@ async function main() {
     await table.getByRole('dialog').waitFor({ state: 'detached' })
     assert.deepEqual(fields(fs.readFileSync(rowFile, 'utf8')), { ...fields(before), 内容: '表格修改' })
     await snapshot('02-table-edit')
+    // M7: the current view's rows go to the AI chat, each row as its own page.
+    await table.getByRole('button', { name: '把当前视图发给 AI', exact: true }).click()
+    await page.locator('.chat-reference-chip').first().waitFor({ timeout: 15000 })
+    await snapshot('02b-ask-ai')
     await board.getByLabel('刷新数据库', { exact: true }).click()
     await board.locator(`[data-row-id="${rowId}"]`).dragTo(board.locator('[data-group="完成"]'))
     await board.locator('[data-group="完成"]').locator(`[data-row-id="${rowId}"]`).waitFor()

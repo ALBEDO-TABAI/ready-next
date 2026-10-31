@@ -5,10 +5,10 @@ import { MARKERS, markerColor } from './marks'
 import type { HighlightLens } from './useHighlights'
 import type { FlipView } from './flipbook.js'
 
-export function HighlightPopover({ lens, highlight, busy, onSave, onRemove, onCopy, onSource, onClose }: {
+export function HighlightPopover({ lens, highlight, busy, onSave, onRemove, onCopy, onSource, onAsk, onClose }: {
   lens: HighlightLens; highlight?: LibraryHighlight; busy: boolean;
   onSave: (color: LibraryHighlightColor, note?: string) => Promise<void>; onRemove: () => Promise<void>;
-  onCopy: (reference: boolean) => Promise<void>; onSource: () => Promise<void>; onClose: () => void
+  onCopy: (reference: boolean) => Promise<void>; onSource: () => Promise<void>; onAsk: () => Promise<void>; onClose: () => void
 }) {
   const [writing, setWriting] = useState(false), [note, setNote] = useState(highlight?.note ?? '')
   const ref = useRef<HTMLDivElement>(null)
@@ -22,6 +22,7 @@ export function HighlightPopover({ lens, highlight, busy, onSave, onRemove, onCo
     <Glass className="highlight-tools"><div role="group" aria-label="划线颜色">{MARKERS.map(m => <button type="button" key={m.key} aria-label={m.label} title={m.label} disabled={busy || highlight?.location.status === 'malformed'} aria-pressed={highlight?.color === m.key} style={{ '--marker': m.color } as React.CSSProperties} onClick={() => void onSave(m.key)}>{m.label}</button>)}</div>
       <button type="button" disabled={busy || highlight?.location.status === 'malformed'} onClick={() => setWriting(v => !v)}>{highlight?.note ? '改批注' : '批注'}</button>
       <button type="button" onClick={() => void onCopy(false)}>复制</button>
+      <button type="button" disabled={busy} onClick={() => void onAsk()}>问 AI</button>
       {highlight && <><button type="button" onClick={() => void onCopy(true)}>复制引用</button><button type="button" onClick={() => void onSource()}>在来源页中打开</button><button type="button" disabled={busy} onClick={() => void onRemove()}>删除划线</button></>}
       <button type="button" disabled={busy} onClick={onClose}>关闭划线浮层</button>
       {writing && <div className="highlight-write"><textarea aria-label="批注内容" value={note} onChange={e => setNote(e.target.value)} rows={4} autoFocus /><button type="button" disabled={busy} onClick={() => void onSave(highlight?.color ?? 'yellow', note)}>保存批注</button></div>}

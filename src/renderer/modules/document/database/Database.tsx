@@ -5,6 +5,10 @@ import { CellEditor } from './CellEditor'
 import { cellText } from './cell-text'
 import { ViewSettings } from './ViewSettings'
 import { TableView, CardViews, TimeViews, Calculations, type ViewProps } from './Views'
+import { addDatabaseRowsToAgentInput } from '../../agent/chat-input-bridge'
+
+// Each row is sent as its own page; keep a view's hand-off to a readable size.
+const ASK_ROWS = 25
 
 interface DatabaseProps {
   databaseId: string
@@ -130,7 +134,9 @@ function DatabaseContent({ databaseId, api = databaseAPI, initialViewId, viewNam
       if (v.id === view.id) return
       selected.current = v.id; setEditing(null); setSettings(false)
       void (async () => { await flushPersonal(); await savePersonal(api, databaseId, { currentViewId: v.id, scroll: { x: 0, y: 0 } }); await load() })().catch(fail)
-    }}>{v.name}</button>)}</div><button aria-label="视图设置" disabled={disabled} onClick={() => setSettings(current => !current)}>筛选 · 排序 · 设置</button><button aria-label="刷新数据库" disabled={busy} onClick={() => { void refresh() }}>刷新</button><button className="rdb-new" aria-label="新建行" disabled={disabled} onClick={() => setCreating({ operationId: crypto.randomUUID(), title: '', submitted: false })}>＋ 新建</button></header>
+    }}>{v.name}</button>)}</div><button aria-label="视图设置" disabled={disabled} onClick={() => setSettings(current => !current)}>筛选 · 排序 · 设置</button><button aria-label="刷新数据库" disabled={busy} onClick={() => { void refresh() }}>刷新</button><button aria-label="把当前视图发给 AI" title={query.total > ASK_ROWS ? `发送前 ${ASK_ROWS} 行` : undefined} disabled={busy || !query.rows.length} onClick={() => {
+      void addDatabaseRowsToAgentInput({ title: snapshot.definition.source || '数据库', objectId: databaseId }, query.rows.slice(0, ASK_ROWS).map(row => ({ title: row.title, objectId: row.id }))).catch(fail)
+    }}>问 AI</button><button className="rdb-new" aria-label="新建行" disabled={disabled} onClick={() => setCreating({ operationId: crypto.randomUUID(), title: '', submitted: false })}>＋ 新建</button></header>
     <div className="rdb-status" role="status">{busy ? '正在保存…' : conflict ? '冲突' : pending.size ? '已合入未保存缓冲' : '已保存'}<span>{query.total} 行</span></div>
     {error && <p role="alert">{error}</p>}
     {!!pending.size && <p>请在原页面保存后刷新；当前修改尚未写入磁盘。</p>}

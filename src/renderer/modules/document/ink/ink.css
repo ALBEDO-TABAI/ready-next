@@ -738,3 +738,6 @@ html[data-skin='liquid-glass'] .ink-main .document-content-frame { background: t
 .ink-return-chip span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .ink-return-chip:hover { filter: brightness(.96); }
 .ink-return-chip:focus-visible { outline: 2px solid var(--studio-accent-soft); outline-offset: 2px; }
+/* An inline database has its own toolbar in that corner, as in Inkwell; its embed source stays editable through the
+   page menu's "Markdown 源码". */
+.ink-scope .ink-page .ready-block-shell:has(.ready-database.is-inline) .ready-block-source-edit { display: none; }

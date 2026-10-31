@@ -217,6 +217,6 @@ function ReadyReader({ record, api, loaded, target, onBack, onError }: { record:
     </Glass></aside>}
     {annotations.state?.warning && <p role="status" className="rd-highlight-warning">{annotations.state.warning}</p>}
     <MarginNotes root={root} book={bookEl} view={view} list={annotations.state?.highlights ?? []} hidden={turning || !!panel || !!annotations.lens} onOpen={(h, el) => onMark(h.id, el)} />
-    {annotations.lens && <HighlightPopover key={annotations.lens.id ?? 'selection'} lens={annotations.lens} highlight={annotations.selected} busy={annotations.busy} onSave={annotations.save} onRemove={annotations.remove} onCopy={annotations.copy} onSource={annotations.openSource} onClose={closeHighlight} />}
+    {annotations.lens && <HighlightPopover key={annotations.lens.id ?? 'selection'} lens={annotations.lens} highlight={annotations.selected} busy={annotations.busy} onSave={annotations.save} onRemove={annotations.remove} onCopy={annotations.copy} onSource={annotations.openSource} onAsk={annotations.ask} onClose={closeHighlight} />}
   </div>
 }

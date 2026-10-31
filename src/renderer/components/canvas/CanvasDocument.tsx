@@ -15,6 +15,7 @@ import { openReadyRef } from '../../modules/workbench/open-ready-ref'
 import { drafts } from '../../modules/document/drafts/runtime'
 import { toLocalFileUrl } from '../../utils/dragDrop'
 import './surface/surface.css'
+import { addBoardSelectionToAgentInput } from '../../modules/agent/chat-input-bridge'
 
 function confirmed<T>(result: { ok: true; value: T } | { ok: false; error: string }): T {
   if (!result.ok) throw new Error(result.error)
@@ -132,6 +133,7 @@ export default function CanvasDocument({ tab }: { tab: DocTab }) {
       prepareGraphic={async draft => `${opened.path.slice(0, -7)}.assets/${sha256(graphicSvg(draft.graphic, draft.width, draft.height))}.svg`}
       resolveAsset={path => toLocalFileUrl(`${root}/${path}`)}
       onOpenNode={node => { if (node.ready.ref) run(() => openReadyRef(node.ready.ref!, 'document')); else if (node.type === 'link') run(() => openReadyRef({ kind: 'web', url: node.url }, 'document')) }}
-      onNavigateSubcanvas={node => { if (node.ready.ref) run(() => openReadyRef(node.ready.ref!, 'document')) }} />
+      onNavigateSubcanvas={node => { if (node.ready.ref) run(() => openReadyRef(node.ready.ref!, 'document')) }}
+      onAskAI={nodeIds => addBoardSelectionToAgentInput({ title: opened.canvas.ready.title || '画板', objectId: opened.objectId }, nodeIds)} />
   </div>
 }
