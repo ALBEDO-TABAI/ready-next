@@ -14,7 +14,8 @@ test('M6-D C4 drop an occurrence into the real editor, render its capsule and un
   const event = new f.dom.window.Event('drop', { bubbles: true, cancelable: true })
   Object.defineProperty(event, 'dataTransfer', { value: { getData: (k: string) => data.get(k) || '', types: [...data.keys()] } })
   await act(async () => f.rich('之后').dispatchEvent(event))
-  f.bytes('之前\n\n[开会](ready://calendar/event/series#occurrence=1793437200000)\n\n之后')
+  // Inserted separators follow the document's line ending (the fixture file is CRLF), as other block insertions do.
+  f.bytes('之前\n\n[开会](ready://calendar/event/series#occurrence=1793437200000)\r\n\r\n之后')
   assert.ok(document.querySelector('a[href="ready://calendar/event/series#occurrence=1793437200000"]'))
   assert.equal(f.buffer.history.entries.length, 1)
   await f.key(f.rich('之后'), 'z', { ctrlKey: true })

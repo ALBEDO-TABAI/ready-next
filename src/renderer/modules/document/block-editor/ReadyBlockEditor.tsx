@@ -172,17 +172,18 @@ export function BufferedBlockEditor({ buffer, linkBase, content: displayedConten
     ? null : emptyBlock(emptyAt, containing?.id ?? null)
   if (extra && !extra.parentId) { segments.push(extra); segments.sort((a, b) => a.start - b.start) }
   return <AnnotationWorkspace buffer={buffer}><div ref={root} className="note-preview-body" data-ready-block-editor={editorId}
-    onDragOverCapture={event => { if (event.dataTransfer.types.includes(READY_REF_MIME)) { event.preventDefault(); event.stopPropagation() } }}
+    onDragOverCapture={event => { if (event.dataTransfer?.types.includes(READY_REF_MIME)) { event.preventDefault(); event.stopPropagation() } }}
     onDropCapture={event => {
       try {
-        const dropped = readEventTransfer(event.dataTransfer)
+        const dropped = event.dataTransfer ? readEventTransfer(event.dataTransfer) : null
         if (!dropped) return
         event.preventDefault(); event.stopPropagation(); buffer.flush()
         const snapshot = buffer.snapshot
         const target = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-block-start]') : null
         const at = target ? Number(target.dataset.blockStart) : snapshot.content.length
         const title = inlineMarkdown(plainModel(), [{ text: dropped.title.replace(/[\r\n]/g, ' '), marks: { reference: { kind: 'ready', ref: dropped.ref } } }])
-        const text = `${at && !snapshot.content.slice(0, at).endsWith('\n') ? '\n\n' : ''}${title}\n\n`
+        const eol = newline(snapshot.content)
+        const text = `${at && !snapshot.content.slice(0, at).endsWith('\n') ? eol + eol : ''}${title}${eol}${eol}`
         buffer.apply(createRangeEdit(snapshot, [{ start: at, end: at, expectedText: '', replacement: text }], { anchor: at, focus: at }, { anchor: at, focus: at + text.length }))
       } catch (cause) { event.preventDefault(); event.stopPropagation(); report(cause) }
     }}
