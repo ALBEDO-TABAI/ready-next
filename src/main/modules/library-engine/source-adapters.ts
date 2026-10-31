@@ -4,6 +4,7 @@ import { readingRuns, readingExcerpt, type RSSReadingRange } from '../../../shar
 import type { RSSArticle } from '../../../shared/rss-workspace'
 import type { LibraryHighlight, LibraryBook } from '../../../shared/library'
 import type { HighlightCodec } from './highlight-markdown'
+import { PdfSelectionSchema, pdfAnchor, parsePdfAnchor, pdfQuote } from '../../../shared/pdf-source-anchor'
 import { compact, sliceText } from './highlight-anchors'
 
 export interface SourceDocument {
@@ -23,6 +24,7 @@ export interface SourceSelection {
   text: string
   from: number
   to: number
+  page?: number
   reference(highlight: LibraryHighlight): ReadyRef
 }
 const pointOffset = (text: string, offset: number) => compact(text.slice(0, offset)).length
@@ -73,12 +75,25 @@ export function webSource(raw: unknown, snapshot: string): SourceSelection {
   }
 }
 
-/** PDF metadata can be saved now; the reader must supply a real page/range before annotation is exposed. */
+/** A fixed first-page reference keeps the source identity independent of the selected page. */
 export function pdfSource(input: { id: string; title: string; hash: string }): SourceDocument {
-  return { kind: 'pdf', ref: { kind: 'file', id: input.id }, title: input.title, author: '', url: '', snapshot: input.hash }
+  return { kind: 'pdf', ref: { kind: 'file', id: input.id, anchor: pdfAnchor({ page: 1 }) }, title: input.title, author: '', url: '', snapshot: input.hash }
 }
 
-export function sourceHighlightCodec(selection: SourceSelection): HighlightCodec {
+export function pdfSelection(raw: unknown, title: string): SourceSelection {
+  const input = PdfSelectionSchema.parse(raw)
+  return {
+    source: pdfSource({ id: input.id, title, hash: input.expectedHash }), page: input.page,
+    text: input.text, from: pointOffset(input.text, input.start), to: pointOffset(input.text, input.end),
+    reference: h => {
+      const offsets = [...input.text.matchAll(/\S/g)].map(match => match.index)
+      const start = offsets[h.from], end = offsets[h.to - 1] + 1
+      return { kind: 'file', id: input.id, anchor: pdfAnchor(pdfQuote(input.text, input.page, start, end)) }
+    },
+  }
+}
+
+export function sourceHighlightCodec(selection: SourceSelection, outsideScope = new Set<string>(), pdfQuotes = new Map<string, { exact: string; prefix: string; suffix: string }>()): HighlightCodec {
   const original = new Map<string, string>()
   return {
     parseHeader(header, id) {
@@ -89,6 +104,14 @@ export function sourceHighlightCodec(selection: SourceSelection): HighlightCodec
       const ref = parsed.ref
       if (source.kind === 'rss-item' && (ref.kind !== 'rss-item' || ref.id !== source.id)) return null
       if (source.kind === 'web' && (ref.kind !== 'web' || ref.url.split(':~:text=')[0].replace(/#$/, '') !== source.url)) return null
+      if (source.kind === 'file') {
+        if (ref.kind !== 'file' || ref.id !== source.id || !ref.anchor) return null
+        try {
+          const anchor = parsePdfAnchor(ref.anchor)
+          if (anchor.page !== selection.page) { outsideScope.add(id); return null }
+          if ('exact' in anchor) pdfQuotes.set(id, { exact: anchor.exact, prefix: anchor.prefix, suffix: anchor.suffix })
+        } catch { return null }
+      }
       original.set(id, header)
       return { color: m[1], title: m[2], chapter: Number(m[4]), from: Number(m[5]), to: Number(m[5]) + Number(m[6]) }
     },

@@ -241,6 +241,7 @@
     "verify:canvas-format": "node --import tsx --test src/__tests__/ready-canvas-schema.test.ts src/__tests__/ready-canvas-conversion.test.ts src/__tests__/ready-canvas-operations.test.ts && node scripts/check-ready-canvas-schema.cjs src/__tests__/fixtures/ready-canvas/valid && node scripts/check-ready-canvas-schema.cjs --expect-invalid src/__tests__/fixtures/ready-canvas/invalid",
     "verify:ready-next-object-ui": "node scripts/verify-ready-next-object-ui.cjs",
     "verify:object-presentation": "node --import tsx --test src/__tests__/ready-object-presentation-renderer.test.ts src/__tests__/note-preview-parser.test.ts",
+    "verify:pdf-sources": "ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx --test --test-concurrency=1 src/__tests__/ready-sources-native.test.ts src/__tests__/ready-sources-ui.test.tsx src/__tests__/ready-pdf-source-ui.test.tsx",
     "verify:ready-next-sources": "node scripts/verify-ready-next-sources.cjs",
     "verify:ready-next-annotations": "node scripts/verify-ready-next-annotations.cjs",
     "verify:ready-next-canvas": "node scripts/verify-ready-next-canvas.cjs",

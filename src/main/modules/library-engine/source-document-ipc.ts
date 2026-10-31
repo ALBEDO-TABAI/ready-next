@@ -1,3 +1,4 @@
+import type { PdfSelection } from '../../../shared/pdf-source-anchor'
 import type { IpcMain } from 'electron'
 import { z } from 'zod'
 import { createHash } from 'node:crypto'
@@ -11,6 +12,7 @@ import type { SourceDocumentService } from './source-documents'
 
 export type SourceReply = { success: true; data: LibraryHighlightState } | { success: false; error: string }
 export interface SourceAnnotationsAPI {
+  pdf(input: PdfSelection): Promise<SourceReply>
   rss(input: RSSReadExcerptInput): Promise<SourceReply>
   web(input: { tabId: string }): Promise<SourceReply>
 }
@@ -35,6 +37,7 @@ export function registerSourceAnnotationsIPC(ipcMain: Pick<IpcMain, 'handle'>, d
     try { return { success: true, data: await work() } }
     catch (error) { return { success: false, error: error instanceof Error ? error.message : String(error) } }
   }
+  ipcMain.handle('sourceAnnotations:pdf', (_event, raw: unknown) => reply(async () => (await dependencies.service()).annotatePdf(raw)))
   ipcMain.handle('sourceAnnotations:rss', (_event, raw: unknown) => reply(async () => {
     const input = RSSReadExcerptSchema.parse(raw), store = dependencies.rss()
     store.readExcerpt(input)

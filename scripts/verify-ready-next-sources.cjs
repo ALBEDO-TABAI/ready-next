@@ -6,12 +6,32 @@ const os = require('node:os')
 const http = require('node:http')
 const { _electron } = require('playwright')
 
+// A deterministic two-page PDF with a real selectable text layer; no network or extra dependency.
+function pdfFixture() {
+  const stream = 'BT /F1 18 Tf 50 720 Td (PDF source selection remains after restart.) Tj ET'
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 6 0 R >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 6 0 R >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    `<< /Length ${Buffer.byteLength(stream)} >>\nstream\n${stream}\nendstream`,
+  ]
+  let pdf = '%PDF-1.4\n', offsets = [0]
+  for (const [index, object] of objects.entries()) { offsets.push(Buffer.byteLength(pdf)); pdf += `${index + 1} 0 obj\n${object}\nendobj\n` }
+  const start = Buffer.byteLength(pdf)
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n` + offsets.slice(1).map(offset => `${String(offset).padStart(10, '0')} 00000 n \n`).join('')
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${start}\n%%EOF\n`
+  return pdf
+}
+
 async function main() {
   const temporary = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ready-next-sources-')))
   const vault = path.join(temporary, 'vault'), profile = path.join(temporary, 'profile'), evidence = path.join(temporary, 'evidence')
   fs.mkdirSync(vault); fs.mkdirSync(evidence)
   const text = '甲乙丙丁戊己庚辛壬癸，来源页应保留这段文字。'
   const bookFile = path.join(temporary, '来源验收书.txt'); fs.writeFileSync(bookFile, text + '\n\n' + '这是分页用的其他文字。'.repeat(200))
+  const pdfFile = path.join(vault, '来源验收.pdf'); fs.writeFileSync(pdfFile, pdfFixture())
   let port
   const server = http.createServer((request, response) => {
     if (request.url === '/feed') {
@@ -123,10 +143,31 @@ async function main() {
     await poll(() => Boolean(markFile('网页')), 'Web mark not saved')
 
     const files = ['阅读', '文章', '网页'].map(markFile)
+    // Binary PDFs are not full-text search entries. Open one through a real ReadyRef in a fixture page.
+    const pdfEntry = await page.evaluate(async ({ file, root }) => {
+      const object = await window.electronAPI.objects.resolvePath(file)
+      const uri = `ready://doc/file/${encodeURIComponent(object.objectId)}#${encodeURIComponent('pdf:' + JSON.stringify({ page: 1 }))}`
+      const result = await window.electronAPI.documentPages.operate({ type: 'create', root, operationId: 'pdf-source-entry', title: 'PDF 验收入口', content: `[打开 PDF](${uri})` })
+      if (!result.ok) throw new Error(result.message)
+      return result.value.path
+    }, { file: pdfFile, root: vault })
+    await openFile(pdfEntry)
+    await page.getByRole('link', { name: '打开 PDF', exact: true }).click()
+    await poll(() => page.locator('[data-pdf-text-state="ready"] .react-pdf__Page__textContent').count().then(n => n > 0), 'PDF text layer missing')
+    await page.getByRole('button', { name: '下一页', exact: true }).click()
+    await select(page, '[data-page="2"] .react-pdf__Page__textContent')
+    await page.getByRole('button', { name: '划线到来源页', exact: true }).click()
+    let pdfSource
+    await poll(() => {
+      pdfSource = fs.readdirSync(path.join(vault, '文章')).filter(name => name.endsWith('.md')).map(name => path.join(vault, '文章', name))
+        .find(file => { const content = fs.readFileSync(file, 'utf8'); return content.includes('DF so') && content.includes('^hl-') })
+      return Boolean(pdfSource)
+    }, 'PDF annotation was not saved to its source page')
+    files.push(pdfSource)
     const saved = files.map(file => fs.readFileSync(file, 'utf8'))
     for (let i = 0; i < files.length; i++) {
       await openFile(files[i])
-      assert.ok((await page.locator('[data-ready-block-editor]:visible').first().textContent()).includes('乙丙丁戊己'))
+      assert.ok((await page.locator('[data-ready-block-editor]:visible').first().textContent()).includes(i === 3 ? 'DF so' : '乙丙丁戊己'))
       await page.screenshot({ path: path.join(evidence, `source-${i}.png`) })
       await page.locator('[data-ready-block-editor]:visible').first().getByRole('link', { name: '原文', exact: true }).first().click()
       if (i === 0) await poll(() => page.locator('[data-book-location]').count().then(n => n > 0), 'Book return highlight missing')
@@ -139,15 +180,24 @@ async function main() {
         for (let at = 0; at < pixels.length; at += 4) if (pixels[at] === 255 && pixels[at + 1] === 0 && pixels[at + 2] === 255) count++
         return count > 20
       }), 'Web text-fragment highlight missing')
+      if (i === 3) {
+        await poll(() => page.locator('[data-page="2"] [data-ready-pdf-highlight]').evaluateAll(marks => marks.map(mark => mark.textContent).join('') === 'DF so' && marks.every(mark => {
+          const style = getComputedStyle(mark), rect = mark.getBoundingClientRect()
+          return style.position !== 'absolute' && style.backgroundColor !== 'rgba(0, 0, 0, 0)' && rect.width > 0 && rect.height > 0
+        })), 'PDF return highlight missing or not visibly painted')
+      }
       await page.screenshot({ path: path.join(evidence, `return-${i}.png`) })
     }
     await app.close(); await launch()
     for (let i = 0; i < files.length; i++) {
       assert.equal(fs.readFileSync(files[i], 'utf8'), saved[i]); await openFile(files[i])
-      assert.ok((await page.locator('[data-ready-block-editor]:visible').first().textContent()).includes('乙丙丁戊己'))
+      assert.ok((await page.locator('[data-ready-block-editor]:visible').first().textContent()).includes(i === 3 ? 'DF so' : '乙丙丁戊己'))
     }
+    await page.locator('[data-ready-block-editor]:visible').first().getByRole('link', { name: '原文', exact: true }).first().click()
+    await poll(() => page.locator('[data-page="2"] [data-ready-pdf-highlight]').allTextContents().then(parts => parts.join('') === 'DF so'), 'PDF return highlight missing after restart')
     fs.writeFileSync(path.join(evidence, 'sources.json'), JSON.stringify({ files, saved }, null, 2))
-    console.log(`PASS book/RSS/web selections, source pages, return highlights and restart readback. Evidence: ${evidence}`)
+    console.log(`PASS book/RSS/web/PDF selections, source pages, return highlights and restart readback. Evidence: ${evidence}`)
   } finally { if (app) await app.close(); await new Promise(resolve => server.close(resolve)) }
 }
-main().catch(error => { console.error(error); process.exitCode = 1 })
+if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1 })
+module.exports = { pdfFixture }

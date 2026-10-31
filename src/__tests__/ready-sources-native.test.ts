@@ -126,3 +126,64 @@ test('changed RSS text preserves the old unavailable quote and its original vers
   const parsed = parseReadyUri(original); assert.ok(parsed.ok && parsed.ref.kind === 'rss-item' && parsed.ref.excerpt)
   assert.throws(() => f.rss.content.readExcerpt({ itemId: parsed.ref.id, ...parsed.ref.excerpt }), /article_changed/)
 })
+
+test('PDF selections merge only within a page and retain file identity through moves and index rebuild', async t => {
+  if (skipIfSqliteUnavailable(t, 'PDF source persistence')) return
+  const f = await fixture(t)
+  const { createHash } = await import('node:crypto')
+  const file = join(f.root, '原稿.pdf'), bytes = '%PDF-1.7\nsource fixture'
+  await writeFile(file, bytes)
+  const id = f.registry.register(file).id
+  const input = { id, expectedHash: createHash('sha256').update(bytes).digest('hex'), page: 2, text: '前文 选中文字 后文', start: 3, end: 7, exact: '选中文字' }
+  const { registerSourceAnnotationsIPC } = await import('../main/modules/library-engine/source-document-ipc')
+  const handlers = new Map<string, Parameters<import('electron').IpcMain['handle']>[1]>()
+  // These source handlers do not inspect the Electron event; substitute only that process envelope.
+  const event = {} as import('electron').IpcMainInvokeEvent
+  registerSourceAnnotationsIPC({ handle: (channel, handler) => { handlers.set(channel, handler) } }, { service: async () => f.service, rss: () => f.rss.content, browser: () => null })
+  const reply = await handlers.get('sourceAnnotations:pdf')!(event, input)
+  assert.ok(reply.success)
+  const first = reply.data
+  const again = await f.service.annotatePdf(input)
+  assert.equal(again.highlights.length, 1)
+  assert.equal(again.highlights[0].id, first.highlights[0].id)
+  await f.service.annotatePdf({ ...input, page: 1 })
+  const merged = await f.service.annotatePdf({ ...input, start: 4, end: 9, exact: input.text.slice(4, 9) })
+  const content = await readFile(merged.sourcePath, 'utf8')
+  assert.equal((content.match(/\^hl-/g) ?? []).length, 2)
+  const originals = [...content.matchAll(/\[原文\]\((ready:\/\/\S+)\) <!--/g)].map(m => m[1])
+  const refs = originals.map(uri => { const parsed = parseReadyUri(uri); assert.ok(parsed.ok && parsed.ref.kind === 'file'); return parsed.ref })
+  assert.deepEqual(refs.map(ref => JSON.parse(ref.anchor!.slice(4)).page).sort(), [1, 2])
+  assert.ok(refs.every(ref => ref.id === id))
+  const metadata = readDocumentSource(content).frontmatter
+  assert.equal(metadata.类型, 'PDF'); assert.equal(metadata.来源版本, input.expectedHash)
+  const sourceRef = parseReadyUri(String(metadata.来源引用)); assert.ok(sourceRef.ok && sourceRef.ref.kind === 'file')
+  assert.equal(sourceRef.ref.id, id); assert.equal(JSON.parse(sourceRef.ref.anchor!.slice(4)).page, 1)
+  const pageTwo = refs.find(ref => JSON.parse(ref.anchor!.slice(4)).page === 2)!
+  assert.deepEqual(JSON.parse(pageTwo.anchor!.slice(4)), { page: 2, start: 3, end: 9, exact: '选中文字 后', prefix: '前文 ', suffix: '文' })
+  const sourceId = f.registry.find(merged.sourcePath)!.id
+  const links = new ObjectLinkRepository(f.db), before = links.outgoing({ objectId: sourceId }).map(link => link.rawTarget).sort()
+  assert.equal(before.length, 3)
+  await mkdir(join(f.root, '移动'))
+  const movedFile = join(f.root, '移动', '改名.pdf'), movedPage = join(f.root, '移动', '来源.md')
+  await rename(file, movedFile); await rename(merged.sourcePath, movedPage); f.registry.scan(f.root)
+  assert.equal(f.registry.get(id)!.current_path, movedFile)
+  await rm(join(f.root, '.ready', 'anchors', `${sourceId}.highlights.json`))
+  await rebuildObjectIndex(f.search, [f.root])
+  assert.deepEqual(links.outgoing({ objectId: sourceId }).map(link => link.rawTarget).sort(), before)
+  const restarted = new SourceDocumentService(f.root, f.registry, f.writer)
+  const restored = await restarted.annotatePdf(input)
+  assert.equal(restored.sourcePath, movedPage)
+  assert.equal((await readFile(movedPage, 'utf8')).match(/\^hl-/g)!.length, 2)
+  assert.equal(f.registry.get(id)!.current_path, movedFile)
+  const repeatedText = { ...input, page: 3, text: input.text + input.text }
+  const repeatedFirst = await restarted.annotatePdf(repeatedText)
+  await rm(join(f.root, '.ready', 'anchors', `${sourceId}.highlights.json`))
+  const repeatedAgain = await restarted.annotatePdf(repeatedText)
+  assert.equal(repeatedAgain.highlights.length, 1, 'The source link context must survive cache loss even with repeated text')
+  assert.equal(repeatedAgain.highlights[0].id, repeatedFirst.highlights[0].id)
+  await writeFile(movedFile, bytes + ' changed')
+  await assert.rejects(restarted.annotatePdf(input), /已变化/)
+  const invalid = await handlers.get('sourceAnnotations:pdf')!(event, { ...input, end: 99 })
+  assert.equal(invalid.success, false)
+  if (!invalid.success) assert.match(invalid.error, /选区/)
+})
