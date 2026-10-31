@@ -1,3 +1,4 @@
+import { libraryResourceSelectionSchema } from '../../../shared/ipc-contracts/agent-runtime'
 import { parseReadyUri, toReadyUri } from '../../../shared/ready-ref'
 import { RSSReferenceSchema } from '../../../shared/rss-reference'
 import type { ChatAttachment } from './types'
@@ -145,6 +146,7 @@ function normalizeAttachmentSource(value: unknown): ChatAttachment['source'] {
   if (normalized === 'document-tab') return 'document-tab'
   if (normalized === 'document-quote') return 'document-quote'
   if (normalized === 'document-widget-target') return 'document-widget-target'
+  if (normalized === 'calendar-day') return 'calendar-day'
   if (normalized === 'calendar-event') return 'calendar-event'
   if (normalized === 'rss-reference') return 'rss-reference'
   if (normalized === 'rss-item') return 'rss-item'
@@ -207,6 +209,7 @@ export function extractAttachmentsFromMeta(meta?: Record<string, unknown>): Chat
         mcpResourceUri: typeof record.mcpResourceUri === 'string' ? record.mcpResourceUri : undefined,
         mcpCatalogGeneration: typeof record.mcpCatalogGeneration === 'number' ? record.mcpCatalogGeneration : undefined,
         mcpCatalogDigest: typeof record.mcpCatalogDigest === 'string' ? record.mcpCatalogDigest : undefined,
+        libraryResource: libraryResourceSelectionSchema.safeParse(record.libraryResource).success ? libraryResourceSelectionSchema.parse(record.libraryResource) : undefined,
         rssReference: RSSReferenceSchema.safeParse(record.rssReference).success ? RSSReferenceSchema.parse(record.rssReference) : undefined,
         mcpContentDigest: typeof record.mcpContentDigest === 'string' ? record.mcpContentDigest : undefined,
         dirty: typeof record.dirty === 'boolean' ? record.dirty : undefined,
@@ -446,6 +449,7 @@ export function serializePersistedAttachments(attachments: ChatAttachment[]): Ar
       mcpCatalogGeneration: attachment.mcpCatalogGeneration,
       mcpCatalogDigest: attachment.mcpCatalogDigest,
       mcpContentDigest: attachment.mcpContentDigest,
+      libraryResource: attachment.libraryResource,
       rssReference: attachment.rssReference,
     }))
 }
@@ -559,6 +563,11 @@ export async function buildCodexIngressInputWithDiagnostics(params: {
       diagnostics.inputIncludedCount += 1
       continue
     }
+    if (attachment.libraryResource) {
+      resources.push(attachment.libraryResource)
+      diagnostics.inputIncludedCount += 1
+      continue
+    }
     if (attachment.source === 'document-widget-target') {
       const anchor = params.currentDocumentAnchor
       const widgetId = String(attachment.widgetId || '').trim()
@@ -609,16 +618,13 @@ export async function buildCodexIngressInputWithDiagnostics(params: {
         || (attachment.source === 'document-tab' && (!isAbsoluteLocalPath(documentPath) || attachment.dirty)))
       && attachment.selection?.trim()
     ) {
-      resources.push({
-        kind: 'quoted_text',
-        id: attachment.id,
-        name: attachment.name,
-        text: attachment.selection.trim().slice(0, 30_000),
-        ...(attachment.documentTitle ? { documentTitle: attachment.documentTitle } : {}),
-        ...(attachment.sectionTitle ? { sectionTitle: attachment.sectionTitle } : {}),
-        ...(attachment.lineStart ? { lineStart: attachment.lineStart } : {}),
-        ...(attachment.lineEnd ? { lineEnd: attachment.lineEnd } : {}),
-      })
+      if (attachment.source === 'document-quote') throw new Error('library_selection_identity_unavailable')
+      if (!attachment.tabId || params.currentDocumentAnchor?.tabId !== attachment.tabId) throw new Error('library_buffer_identity_unavailable')
+      const [{ useDocTabs }, { buildLibraryDocumentSelection }] = await Promise.all([import('../../stores/useDocTabs'), import('./libraryResourceSelection')])
+      const vault = await window.electronAPI.vault.get()
+      if (vault.status !== 'ready') throw new Error('library_resource_unavailable')
+      const tab = useDocTabs.getState().tabs.find(item => item.id === attachment.tabId)
+      resources.push(await buildLibraryDocumentSelection(attachment, tab, vault.root, params.currentDocumentAnchor ?? undefined))
       diagnostics.inputIncludedCount += 1
       continue
     }

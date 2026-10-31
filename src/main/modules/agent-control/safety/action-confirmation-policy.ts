@@ -1,3 +1,4 @@
+import { LIBRARY_READ_TOOL_NAMES } from '../codex-runtime/library-read-tools'
 /**
  * EP1-I3-1 — Action confirmation policy (四态闸门首批静态表).
  *
@@ -169,6 +170,7 @@ function sensitiveLarkCliOutboundCandidates(args: Record<string, unknown>): stri
 }
 
 const FIRST_BATCH_RULES: readonly ConfirmationRule[] = [
+  { id: 'm4-library-explicit-read', designRef: '2026-10-31-ready-next-m7-ab-implementation', mode: 'M4', tools: new Set(LIBRARY_READ_TOOL_NAMES), reason: '仅在本轮明确选择的对象和范围内读取' },
   {
     id: 'm1-lark-cli-unsupported-domain',
     designRef: '2026-08-13 Ready 专用飞书 CLI 通道 — 文档、表格、云空间与日历只读',

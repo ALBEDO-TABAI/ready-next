@@ -1,3 +1,4 @@
+import { libraryGrantSchema, libraryBindingsMatch, type LibraryGrant } from './library-read-resources'
 import { RSSReferenceResourceSchema, type RSSReferenceResource } from '../../../../shared/rss-reference'
 import { rssResourceBindingsMatch } from './codex-rss-resources'
 import { createHash } from 'node:crypto'
@@ -130,6 +131,7 @@ export type PreparedCodexProductRun = {
   readyTurnToolAuthorization: ReadyTurnToolAuthorizationRef
   readyToolHostIdentity: ReadyToolHostIdentity
   externalReadSlice?: PreparedCodexExternalReadSlice
+  libraryResources?: LibraryGrant[]
   rssReferences?: RSSReferenceResource[]
   resourceAuthorities?: PreparedCodexResourceAuthority[]
   outputContract?: CodexOutputContract
@@ -182,6 +184,7 @@ export type CodexProductRunPreparationInput = {
   authorizationOwnerId: string
   resourceOwnerId: string
   externalReadSlice?: PreparedCodexExternalReadSlice | null
+  libraryResources?: LibraryGrant[]
   rssReferences?: RSSReferenceResource[]
   resourceAuthorities?: PreparedCodexResourceAuthority[]
   browserPageRef?: NonNullable<TrustedRequestEnvironment['browserPageRef']>
@@ -426,6 +429,7 @@ const preparationInputSchema = z.object({
   authorizationOwnerId: nonEmptyString,
   resourceOwnerId: nonEmptyString,
   externalReadSlice: preparedExternalReadSliceSchema.nullable().optional(),
+  libraryResources: z.array(libraryGrantSchema).optional(),
   rssReferences: z.array(RSSReferenceResourceSchema).optional(),
   resourceAuthorities: z.array(preparedCodexResourceAuthoritySchema).optional(),
   browserPageRef: browserPageRefSchema.optional(),
@@ -495,6 +499,7 @@ const preparedRunSchema = z.object({
     resourceOwnerId: nonEmptyString,
   }).strict(),
   externalReadSlice: preparedExternalReadSliceSchema.optional(),
+  libraryResources: z.array(libraryGrantSchema).optional(),
   rssReferences: z.array(RSSReferenceResourceSchema).optional(),
   resourceAuthorities: z.array(preparedCodexResourceAuthoritySchema).optional(),
   outputContract: outputContractSchema.optional(),
@@ -536,6 +541,7 @@ function resourceAnchorDigest(input: {
   currentDocumentAnchor?: unknown
   externalReadSlice?: Parameters<typeof externalReadResourceAuthority>[0] | null
   resourceAuthorities?: readonly unknown[]
+  libraryResources?: readonly unknown[]
   rssReferences?: readonly unknown[]
   browserPageRef?: unknown
 }): string {
@@ -547,6 +553,7 @@ function resourceAnchorDigest(input: {
       ? { externalReadResourceAuthority: externalReadResourceAuthority(input.externalReadSlice) }
       : {}),
     ...(input.resourceAuthorities?.length ? { resourceAuthorities: input.resourceAuthorities } : {}),
+    ...(input.libraryResources?.length ? { libraryResources: input.libraryResources } : {}),
     ...(input.rssReferences?.length ? { rssReferences: input.rssReferences } : {}),
     ...(input.browserPageRef ? { browserPageRef: input.browserPageRef } : {}),
   })
@@ -642,6 +649,7 @@ export function isPreparedCodexProductRun(value: unknown): value is PreparedCode
   const parsed = preparedRunSchema.safeParse(value)
   if (!parsed.success) return false
   const prepared = parsed.data
+  if (!libraryBindingsMatch(prepared.libraryResources ?? [], prepared.ingress.resourceAdditionalContext, prepared.readyTurnToolAuthorization.allowedToolNames)) return false
   if (!rssResourceBindingsMatch(prepared.rssReferences || [], prepared.ingress.resourceAdditionalContext, prepared.readyTurnToolAuthorization.allowedToolNames)) return false
   const directoryAuthorities = (prepared.resourceAuthorities ?? [])
     .filter((authority) => authority.kind === 'local_directory')
@@ -713,6 +721,7 @@ export function isPreparedCodexProductRun(value: unknown): value is PreparedCode
       currentDocumentAnchor: prepared.ingress.currentDocumentAnchor,
       externalReadSlice: prepared.externalReadSlice,
       resourceAuthorities: prepared.resourceAuthorities,
+      libraryResources: prepared.libraryResources,
       rssReferences: prepared.rssReferences,
       browserPageRef: prepared.browserPageRef,
     })
@@ -847,6 +856,8 @@ export class CodexProductRunPreparer {
     const currentDocumentAnchor = input.currentDocumentAnchor ?? null
     const externalReadSlice = input.externalReadSlice ?? null
     const resourceAuthorities = input.resourceAuthorities ?? []
+    const libraryResources = input.libraryResources ?? []
+    if (!libraryBindingsMatch(libraryResources, input.resourceAdditionalContext, input.readyTurnToolAuthorization.allowedToolNames)) return { ok: false, code: 'invalid_product_ingress' }
     const rssReferences = input.rssReferences ?? []
     if (!rssResourceBindingsMatch(rssReferences, input.resourceAdditionalContext, input.readyTurnToolAuthorization.allowedToolNames)) return { ok: false, code: 'invalid_product_ingress' }
     const actionObligations = input.actionObligations ?? emptyReadyActionObligationSet()
@@ -952,6 +963,7 @@ export class CodexProductRunPreparer {
           currentDocumentAnchor,
           externalReadSlice,
           resourceAuthorities,
+          libraryResources,
           rssReferences,
           browserPageRef: input.browserPageRef,
         }),
@@ -980,6 +992,7 @@ export class CodexProductRunPreparer {
         },
         ...(externalReadSlice ? { externalReadSlice } : {}),
         ...(resourceAuthorities.length > 0 ? { resourceAuthorities } : {}),
+        ...(libraryResources.length > 0 ? { libraryResources } : {}),
         ...(rssReferences.length > 0 ? { rssReferences } : {}),
         ...(outputContract ? { outputContract } : {}),
         ...(currentDocumentAnchor && input.currentDocumentAmbient ? { currentDocumentAmbient: true as const } : {}),

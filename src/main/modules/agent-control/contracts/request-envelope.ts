@@ -41,6 +41,7 @@ export type RequestEnvelopeResourceKind =
   // P1-1 — 显式 @[技能] 引用：未被解析成任何既有资源的 @[token]。envelope 不校验技能存在性（授权层校验）。
   | 'skill_reference'
   | 'rss_reference'
+  | 'library_resource'
 
 export type RequestEnvelopeResourceSource =
   | 'user_attachment'

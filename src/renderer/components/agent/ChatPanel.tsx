@@ -879,6 +879,9 @@ export default function ChatPanel({
           ...(result.recoveryActionRef ? { recoveryActionRef: result.recoveryActionRef } : {}),
         })
       }
+    } catch (error) {
+      const friendly = mapBackendErrorToFriendly({ errorKind: 'attachment_unavailable', error: String(error) })
+      setComposerNoticeFor(sendSessionId, { message: friendly.friendlyMessage, errorKind: 'attachment_unavailable' })
     } finally {
       sendingSessionsRef.current.delete(sendSessionId)
     }

@@ -28,7 +28,7 @@ test('M6-D ThisDay opens every category through ReadyRef, rejects stale day resp
   const previous = Object.fromEntries(Object.keys(globals).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]))
   for (const [key, value] of Object.entries(globals)) Object.defineProperty(globalThis, key, { value, configurable: true, writable: true })
   const navigation = 'data:text/javascript,' + encodeURIComponent('export const opened=[];export async function openReadyRef(ref){opened.push(ref)}')
-  const attachments = 'data:text/javascript,' + encodeURIComponent('export function attachDay(){}')
+  const attachments = 'data:text/javascript,' + encodeURIComponent('export async function attachDay(){throw new Error("请先配置资料库")}')
   const hooks = registerHooks({ resolve(specifier, context, next) {
     if (context.parentURL?.includes('/calendar/linkage/') && specifier.endsWith('/workbench/open-ready-ref')) return { url: navigation, shortCircuit: true }
     if (context.parentURL?.includes('/calendar/linkage/ThisDay') && specifier === './attachments') return { url: attachments, shortCircuit: true }
@@ -41,12 +41,14 @@ test('M6-D ThisDay opens every category through ReadyRef, rejects stale day resp
   const summary: DaySummary = { date: '2026-10-31', timeZone: 'UTC', items: kinds.map((kind, i) => ({ id: String(i), kind, title: kind, ref: { kind: 'page', id: String(i) } })) }
   let resolveOld: ((s: DaySummary) => void) | undefined, delay = false, changed: (() => void) | undefined
   Object.assign(dom.window, { electronAPI: { calendarLinkage: { day: async () => delay ? new Promise(resolve => { resolveOld = resolve; delay = false }) : summary },
-    canvas: { onChanged: () => () => {} }, calendar: { onChanged: (cb: () => void) => { changed = cb; return () => {} } }, calendarLayers: { onChanged: () => () => {} }, dateMentions: { onChanged: () => () => {} }, vault: { onChanged: () => () => {} } } })
+    canvas: { onChanged: () => () => {} }, calendar: { onChanged: (cb: () => void) => { changed = cb; return () => {} } }, calendarLayers: { onChanged: () => () => {} }, dateMentions: { onChanged: () => () => {} }, vault: { get: async () => ({ status: 'ready', root: '/fixture' }), onChanged: () => () => {} } } })
   const root = createRoot(document.getElementById('root')!)
   t.after(async () => { await act(async () => root.unmount()); hooks.deregister(); dom.window.close(); for (const [key, value] of Object.entries(previous)) { if (value) Object.defineProperty(globalThis, key, value); else Reflect.deleteProperty(globalThis, key) } })
   await act(async () => root.render(<ThisDay date={summary.date} timeZone="UTC" />))
   for (const button of document.querySelectorAll<HTMLButtonElement>('[data-day-item]')) await act(async () => button.click())
   const { opened } = await import(navigation); assert.deepEqual(opened, summary.items.map(item => item.ref))
+  await act(async () => document.querySelector<HTMLButtonElement>('header button')!.click())
+  assert.match(document.querySelector('[role=alert]')?.textContent || '', /请先配置资料库/)
   delay = true; await act(async () => changed!())
   await act(async () => root.render(<ThisDay date="2026-11-01" timeZone="UTC" />))
   await act(async () => resolveOld!({ ...summary, items: [{ ...summary.items[0], title: '过期内容' }] }))
@@ -61,15 +63,16 @@ test('M6-D ThisDay opens every category through ReadyRef, rejects stale day resp
   const { useWorkspace } = await import('../renderer/stores/useWorkspace')
   const agentBefore = useAgent.getState(), workspaceBefore = useWorkspace.getState()
   try {
-    attachDay(summary)
+    await attachDay(summary)
     await attachEvent({ kind: 'event', id: 'series', occurrence: '2026-11-01' }, '全天事件', true)
     const added = useAgent.getState().attachments.slice(-2)
     assert.equal(added[0].path, 'ready://calendar/day/2026-10-31')
     const { buildCodexIngressInputWithDiagnostics } = await import('../renderer/modules/agent/messageComposer')
     const input = await buildCodexIngressInputWithDiagnostics({ content: '整理这些资料', attachments: added })
     assert.equal(input.diagnostics.inputFailedCount, 0)
-    assert.deepEqual(input.resources?.map(resource => resource.kind), ['quoted_text', 'calendar_event'])
-    assert.match(added[0].selection!, /ready:\/\/calendar\/day\/2026-10-31/)
+    assert.deepEqual(input.resources?.map(resource => resource.kind), ['calendar_day', 'calendar_event'])
+    assert.equal(added[0].selection, undefined)
+    assert.equal(added[0].libraryResource?.kind, 'calendar_day')
     assert.equal(added[1].eventId, `series#${Date.parse('2026-11-01') / 1000}`)
   } finally { useAgent.setState(agentBefore, true); useWorkspace.setState(workspaceBefore, true) }
 })

@@ -359,16 +359,7 @@ export type SendScopedResourceSelection =
       name: string
       eventId: string
     }
-  | {
-      kind: 'quoted_text'
-      id: string
-      name: string
-      text: string
-      documentTitle?: string
-      sectionTitle?: string
-      lineStart?: number
-      lineEnd?: number
-    }
+  | LibraryResourceSelection
   | {
       kind: 'rss_item'
       id: string
@@ -783,6 +774,29 @@ export const codexCurrentDocumentAnchorSchema: z.ZodType<CodexCurrentDocumentAnc
   }).strict(),
 }).strict()
 
+const libraryIdentity = { id: z.string().min(1), name: z.string().min(1).max(300), libraryId: z.string().regex(/^[a-f0-9]{64}$/) }
+const libraryRange = z.object({ start: z.number().int().nonnegative().safe(), end: z.number().int().nonnegative().safe() }).strict()
+const libraryHash = z.string().regex(/^[a-f0-9]{64}$/)
+export const libraryResourceSelectionSchema = z.discriminatedUnion('kind', [
+  z.object({
+    ...libraryIdentity, kind: z.literal('document_selection'), version: libraryHash,
+    target: z.discriminatedUnion('kind', [
+      z.object({ kind: z.literal('object'), uri: z.string().min(1) }).strict(),
+      z.object({ kind: z.literal('draft'), draftId: z.string().min(1) }).strict(),
+    ]),
+    range: libraryRange, summary: z.object({ characters: z.number().int().nonnegative().safe(), digest: libraryHash }).strict(),
+    access: z.enum(['text', 'database', 'highlights']),
+    buffer: codexCurrentDocumentAnchorSchema.optional(),
+  }).strict(),
+  z.object({ ...libraryIdentity, kind: z.literal('board_selection'), uri: z.string().min(1), version: libraryHash, nodeIds: z.array(z.string().min(1)).min(1).max(1000) }).strict(),
+  z.object({ ...libraryIdentity, kind: z.literal('book_location'), uri: z.string().min(1), version: libraryHash, chapter: z.number().int().nonnegative().safe(), range: libraryRange }).strict(),
+  z.object({ ...libraryIdentity, kind: z.literal('calendar_day'), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), timeZone: z.string().min(1),
+    categories: z.array(z.enum(['events', 'documents', 'tasks', 'reminders', 'footprints', 'activity'])).max(6),
+    items: z.array(z.object({ id: z.string().min(1), uri: z.string().min(1) }).strict()).max(10000),
+  }).strict(),
+])
+export type LibraryResourceSelection = z.infer<typeof libraryResourceSelectionSchema>
+
 export const sendScopedRequestSchema: z.ZodType<SendScopedRequest> = z.object({
   scopeId: nonEmptyString,
   requestId: nonEmptyString,
@@ -837,16 +851,7 @@ export const sendScopedRequestSchema: z.ZodType<SendScopedRequest> = z.object({
       name: nonEmptyString,
       eventId: nonEmptyString,
     }).strict(),
-    z.object({
-      kind: z.literal('quoted_text'),
-      id: nonEmptyString,
-      name: nonEmptyString,
-      text: z.string().min(1).max(30_000),
-      documentTitle: z.string().optional(),
-      sectionTitle: z.string().optional(),
-      lineStart: z.number().int().positive().safe().optional(),
-      lineEnd: z.number().int().positive().safe().optional(),
-    }).strict(),
+    ...libraryResourceSelectionSchema.options,
     z.object({ kind: z.literal('rss_reference'), id: z.string().uuid(), name: nonEmptyString, reference: RSSReferenceSchema, origin: z.literal('workbench').optional() }).strict(),
     z.object({
       kind: z.literal('rss_item'),

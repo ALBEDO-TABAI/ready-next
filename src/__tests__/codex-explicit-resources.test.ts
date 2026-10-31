@@ -1,3 +1,4 @@
+import { libraryResourceSelectionSchema } from '../shared/ipc-contracts/agent-runtime'
 import { resolveTestObject } from './utils/object-resolver'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
@@ -94,17 +95,17 @@ test('explicit and selected skill inputs are Main-validated and deduplicated by 
   }
 })
 
-test('browser, calendar and document-quote references use Main-resolved or explicit-user text without widening file authority', async () => {
+test('browser, calendar and document selections use Main-resolved resource input without widening file authority', async () => {
   const result = await resolveCodexExplicitResources({ resolveLocalObject: resolveTestObject,
     selections: [
       { kind: 'browser_tab', id: 'browser-1', name: 'forged title', tabId: 'tab-1' },
       { kind: 'calendar_event', id: 'calendar-1', name: 'forged event', eventId: 'event-1' },
       {
-        kind: 'quoted_text', id: 'quote-1', name: '方案.md', text: '用户选中的准确原文',
-        documentTitle: '方案.md', sectionTitle: '结论', lineStart: 8, lineEnd: 9,
+        kind: 'document_selection', id: 'quote-1', name: '方案.md', libraryId: 'c'.repeat(64), target: { kind: 'object', uri: 'ready://doc/page/page' }, version: 'd'.repeat(64), range: { start: 1, end: 2 }, summary: { characters: 1, digest: 'e'.repeat(64) }, access: 'text',
       },
     ],
     resolveSkill: () => null,
+    resolveLibrary: async raw => ({ selection: libraryResourceSelectionSchema.parse(raw), version: 'd'.repeat(64) }),
     resolveBrowser: async () => ({
       name: 'Main read title',
       path: 'https://example.com/main-read',
@@ -122,7 +123,7 @@ test('browser, calendar and document-quote references use Main-resolved or expli
   assert.deepEqual(result.input.map((entry) => entry.type === 'text' ? entry.text : entry.type), [
     'MAIN_BROWSER_CONTEXT',
     'MAIN_CALENDAR_CONTEXT',
-    '用户明确引用的文档摘录（只读材料）：方案.md\n章节：结论\n位置：第 8-9 行\n\n用户选中的准确原文',
+    JSON.stringify({ resource: result.libraryResources[0].selection, version: 'd'.repeat(64), readWith: ['library_list_pages', 'library_read_page', 'library_query_links'] }),
   ])
   assert.deepEqual(result.requestResources.map((resource) => ({
     kind: resource.kind,
@@ -141,7 +142,7 @@ test('browser, calendar and document-quote references use Main-resolved or expli
       path: 'ready://calendar/event/event-1', text: '', canWrite: false,
     },
     {
-      kind: 'document_quote', source: 'document_quote', name: '方案.md',
+      kind: 'library_resource', source: 'explicit_reference', name: '方案.md',
       path: null, text: '', canWrite: false,
     },
   ])

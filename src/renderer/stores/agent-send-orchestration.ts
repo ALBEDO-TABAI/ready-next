@@ -217,11 +217,17 @@ export async function sendAgentMessage(input: {
       messageAttachments.push(attachment)
     }
   }
-  const composedInput = await buildCodexIngressInputWithDiagnostics({
-    content,
-    attachments: messageAttachments,
-    currentDocumentAnchor,
-  })
+  let composedInput
+  try {
+    composedInput = await buildCodexIngressInputWithDiagnostics({
+      content,
+      attachments: messageAttachments,
+      currentDocumentAnchor,
+    })
+  } catch {
+    // silent-catch: preparation failures use the existing attachment notice and retain the draft.
+    return rejectedMessageResult('attachment_unavailable')
+  }
   if (composedInput.diagnostics.inputFailedCount > 0) {
     emitRendererAgentMetric('renderer_attachment_input_failed', {
       scopeId: activeScopeId,

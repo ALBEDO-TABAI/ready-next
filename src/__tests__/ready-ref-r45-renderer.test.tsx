@@ -53,9 +53,10 @@ test('R45 generators, persistence, drop and click share ReadyRef while resource 
   const restored = extractAttachmentsFromMeta({ attachments: serializePersistedAttachments([browser, doc, draft, quote]) })!
   assert.deepEqual(restored.map(a => a.selection), [undefined, 'saved text', 'unsaved text', 'original quote'])
   assert.equal(restored[0].browserTabId, undefined)
-  const live = await buildCodexIngressInputWithDiagnostics({ content: 'read', attachments: [browser, doc, draft, quote] })
-  assert.deepEqual(live.resources.map(r => r.kind), ['browser_tab', 'local_file', 'quoted_text', 'quoted_text'])
+  const live = await buildCodexIngressInputWithDiagnostics({ content: 'read', attachments: [browser, doc] })
+  assert.deepEqual(live.resources.map(r => r.kind), ['browser_tab', 'local_file'])
   assert.equal(live.resources[1].kind === 'local_file' && live.resources[1].path, '/fixture/renamed.md')
+  await assert.rejects(buildCodexIngressInputWithDiagnostics({ content: 'read', attachments: [draft, quote] }), /library_(buffer|selection)_identity_unavailable/)
   const historical = await buildCodexIngressInputWithDiagnostics({ content: 'read', attachments: [restored[0]] })
   assert.equal(historical.resources.length, 0, 'a navigable URL cannot grant a browser tab')
 

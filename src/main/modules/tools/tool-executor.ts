@@ -1,3 +1,4 @@
+import { isLibraryReadTool, LIBRARY_READ_ACTIONS } from '../agent-control/codex-runtime/library-read-tools'
 import { rssReferencesFromEnvelope } from '../../../shared/rss-reference'
 /**
  * Unified tool dispatcher.
@@ -906,6 +907,10 @@ async function executeToolCallInner(
         }
 
         case 'document':
+          if (isLibraryReadTool(toolName)) {
+            if (!context.requestModuleToolAction) throw new Error('library_product_bridge_unavailable')
+            return JSON.stringify(await context.requestModuleToolAction(LIBRARY_READ_ACTIONS[toolName], args))
+          }
           return executeDocumentTool(toolName, args, {
             emitToolAction: context.emitToolAction,
             requestModuleToolAction: context.requestModuleToolAction,

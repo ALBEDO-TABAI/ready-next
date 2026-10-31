@@ -192,3 +192,92 @@ test('without a current document no document tool is offered, while file and fol
     assert.ok(allowed.includes(name), name)
   }
 })
+
+test('M7 resources add only their exact read floor and reject missing or exclusive surfaces', async () => {
+  const { LIBRARY_READ_TOOL_NAMES } = await import('../main/modules/agent-control/codex-runtime/library-read-tools')
+  const base = { resolved: workbenchTestSnapshot([...LIBRARY_READ_TOOL_NAMES, 'web_search']), authorizationId: 'library-auth', authorization: buildExplicitNoSkillAuthorization('no_skill_signal') }
+  const selected = composeCodexTurnToolSnapshot({ ...base, libraryReadTools: ['library_read_board'] })
+  assert.equal(selected.readyTurnToolAuthorization.allowedToolNames.includes('library_read_board'), true)
+  assert.equal(selected.readyTurnToolAuthorization.allowedToolNames.includes('library_read_page'), false)
+  assert.equal(selected.readyTurnToolAuthorization.allowedToolNames.includes('web_search'), true)
+  assert.throws(() => composeCodexTurnToolSnapshot({ ...base, resolved: workbenchTestSnapshot(['web_search']), libraryReadTools: ['library_read_board'] }), /library_read_tool_surface_missing/)
+  const { classifyCodexIngressPreparationError } = await import('../main/modules/agent-control/codex-runtime/codex-ingress-preparation-error')
+  assert.throws(() => composeCodexTurnToolSnapshot({ ...base, exclusiveAllowSet: TAG_FORGE_EXCLUSIVE_TOOL_NAMES, libraryReadTools: ['library_read_board'] }), error => {
+    assert.deepEqual(classifyCodexIngressPreparationError(error), { code: 'native_tool_surface_extension_required', retryableByUser: false, error: 'library_read_tool_surface_missing' })
+    return true
+  })
+  assert.equal(composeCodexTurnToolSnapshot(base).readyTurnToolAuthorization.allowedToolNames.some(name => LIBRARY_READ_TOOL_NAMES.some(tool => tool === name)), false)
+})
+
+test('M7 actual registry definitions freeze real read-only schemas', async () => {
+  const { defaultToolRegistry } = await import('../main/modules/agent-control/tools-runtime/tool-registry')
+  const { buildReadyToolSurface } = await import('../main/modules/agent-control/codex-runtime/codex-tool-surface')
+  const { LIBRARY_READ_TOOL_NAMES } = await import('../main/modules/agent-control/codex-runtime/library-read-tools')
+  const definitions = defaultToolRegistry.getToolDefinitionsForGroup('document', undefined, buildExplicitNoSkillAuthorization('no_skill_signal')).filter(d => LIBRARY_READ_TOOL_NAMES.some(name => name === d.name))
+  assert.equal(definitions.length, 9)
+  const surface = buildReadyToolSurface({ surfaceId: 'actual-library', toolDefinitions: definitions })
+  for (const entry of surface.entries) {
+    assert.equal(entry.effectProfile.domain, 'document'); assert.equal(entry.effectProfile.kind, 'read')
+    assert.equal(entry.inputSchema.additionalProperties, false)
+    assert.deepEqual((entry.inputSchema.required as string[]).slice(0, 2), ['resourceId', 'expectedVersion'])
+  }
+})
+
+
+test('M7 turns without library resources preserve the pre-M7 frozen surface', async () => {
+  const { listLiveCodexThreadToolDefinitions } = await import('../main/modules/agent-control/runtime-core/agent-sdk-tool-executor')
+  const { buildReadyToolSurface, resolveReadyToolTurnSnapshot, selectCodexRootToolDefinitions } = await import('../main/modules/agent-control/codex-runtime/codex-tool-surface')
+  const { isLibraryReadTool } = await import('../main/modules/agent-control/codex-runtime/library-read-tools')
+  const all = listLiveCodexThreadToolDefinitions()
+  const before = buildReadyToolSurface({ surfaceId: 'pre-m7', toolDefinitions: selectCodexRootToolDefinitions(all.filter(d => !isLibraryReadTool(d.name))) })
+  const current = all.filter(d => d.groupId === 'document')
+  const authorization = buildExplicitNoSkillAuthorization('no_skill_signal')
+  const result = resolveReadyToolTurnSnapshot({ surfaceId: 'next', authorizationId: 'turn', authorization,
+    frozenToolSurface: before, source: { listDefaultToolDefinitionsForTurn: () => current, listCodexThreadToolDefinitions: () => all },
+    resolutionInput: { message: { text: 'hello' }, config: {} as never, browserHostAvailable: false, feishuConnected: false, authorization },
+  })
+  assert.equal(result.readyToolSurface.toolSurfaceDigest, before.toolSurfaceDigest)
+  assert.equal(result.readyToolSurface.toolNames.some(isLibraryReadTool), false)
+})
+
+test('M7 one session switches no resource, library resource, no resource without resetting ordinary turns', async () => {
+  const { listLiveCodexThreadToolDefinitions } = await import('../main/modules/agent-control/runtime-core/agent-sdk-tool-executor')
+  const { resolveReadyToolTurnSnapshot, CodexToolSurfaceError } = await import('../main/modules/agent-control/codex-runtime/codex-tool-surface')
+  const { isLibraryReadTool, LIBRARY_READ_TOOL_NAMES } = await import('../main/modules/agent-control/codex-runtime/library-read-tools')
+  const all = listLiveCodexThreadToolDefinitions()
+  const authorization = buildExplicitNoSkillAuthorization('no_skill_signal')
+  const base = {
+    surfaceId: 'session-m7', authorizationId: 'turn-1', authorization,
+    source: { listDefaultToolDefinitionsForTurn: () => all.filter(d => d.groupId === 'document'), listCodexThreadToolDefinitions: () => all },
+    resolutionInput: { sessionId: 'session-m7', scopeId: 'session-m7', message: { text: 'hello' }, config: {} as never, browserHostAvailable: false, feishuConnected: false, authorization },
+  }
+  const first = resolveReadyToolTurnSnapshot(base)
+  assert.equal(first.readyToolSurface.toolNames.some(isLibraryReadTool), false)
+  assert.equal(first.readyTurnToolAuthorization.allowedToolNames.some(isLibraryReadTool), false)
+  assert.ok(first.readyToolSurface.toolNames.length > 0)
+  const withResource = {
+    ...base, authorizationId: 'turn-2',
+    resolutionInput: { ...base.resolutionInput, requestEnvelope: { resources: [{ kind: 'library_resource', canRead: true }] } },
+  }
+  assert.throws(() => resolveReadyToolTurnSnapshot({ ...withResource, frozenToolSurface: first.readyToolSurface }), error =>
+    error instanceof CodexToolSurfaceError && error.code === 'native_tool_surface_extension_required')
+  // A new context may register the floor; a running native thread may not expand itself.
+  const second = composeCodexTurnToolSnapshot({
+    resolved: resolveReadyToolTurnSnapshot(withResource), authorizationId: 'turn-2', authorization,
+    libraryReadTools: ['library_read_board'],
+  })
+  assert.deepEqual(second.readyToolSurface.toolNames.filter(isLibraryReadTool).sort(), [...LIBRARY_READ_TOOL_NAMES].sort())
+  assert.deepEqual(second.readyTurnToolAuthorization.allowedToolNames.filter(isLibraryReadTool), ['library_read_board'])
+  for (const frozenToolSurface of [first.readyToolSurface, second.readyToolSurface]) {
+    const third = resolveReadyToolTurnSnapshot({ ...base, authorizationId: 'turn-3', frozenToolSurface })
+    assert.equal(third.readyToolSurface, frozenToolSurface)
+    assert.deepEqual(third.readyTurnToolAuthorization.allowedToolNames, first.readyTurnToolAuthorization.allowedToolNames)
+    assert.equal(third.readyTurnToolAuthorization.allowedToolNames.some(isLibraryReadTool), false)
+  }
+  const unavailable = resolveReadyToolTurnSnapshot({
+    ...base, frozenToolSurface: first.readyToolSurface,
+    resolutionInput: { ...base.resolutionInput, requestEnvelope: { resources: [{ kind: 'library_resource', canRead: false }] } },
+  })
+  assert.equal(unavailable.readyToolSurface, first.readyToolSurface)
+  assert.deepEqual(unavailable.readyTurnToolAuthorization.allowedToolNames, first.readyTurnToolAuthorization.allowedToolNames)
+})

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { validateExplicitRetryControl } from '../main/modules/agent-control/codex-runtime/codex-explicit-retry-control'
-import type { SendScopedRequest } from '../shared/ipc-contracts/agent-runtime'
+import { parseSendScopedRequest, type SendScopedRequest } from '../shared/ipc-contracts/agent-runtime'
 
 const scope = {
   id: 'scope-1',
@@ -53,7 +53,7 @@ test('explicit retry rejects new text, nontext input, resources, counts, and ext
   const cases: SendScopedRequest[] = [
     request({ message: '总结另一份文档' }),
     request({ message: [{ type: 'text', text: '再试一次' }] }),
-    request({ resources: [{ kind: 'quoted_text', id: 'q', name: 'q', text: 'context' }] }),
+    request({ resources: [{ kind: 'calendar_day', id: 'q', name: 'q', libraryId: 'a'.repeat(64), date: '2026-10-31', timeZone: 'UTC', categories: [], items: [] }] }),
     request({
       userMessage: {
         ...request().userMessage,
@@ -75,4 +75,10 @@ test('explicit retry rejects new text, nontext input, resources, counts, and ext
   for (const candidate of cases) {
     assert.equal(validateExplicitRetryControl({ request: candidate, scope }).ok, false)
   }
+})
+
+
+test('M7 installed resource rejection probe passes preload parsing before retry rejects it', () => {
+  const parsed = parseSendScopedRequest(request({ resources: [{ kind: 'calendar_day', id: 'new-resource', name: 'new', libraryId: 'a'.repeat(64), date: '2026-10-31', timeZone: 'UTC', categories: [], items: [] }] }))
+  assert.equal(validateExplicitRetryControl({ request: parsed, scope }).ok, false)
 })

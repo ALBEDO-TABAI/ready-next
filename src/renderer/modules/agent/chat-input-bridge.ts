@@ -1,3 +1,5 @@
+import type { BookLocation } from '../library/reader/location'
+import { buildLibraryBoardSelection, buildLibraryBookLocation, buildLibraryDatabaseRows, type LibrarySelectionObject } from './libraryResourceSelection'
 import { calendarEventReadyRef } from '../../../shared/calendar-event-identity'
 import { ReadyRefSchema, toReadyUri } from '../../../shared/ready-ref'
 import { RSSReferenceSchema, rssReferencePath, type RSSReference } from '../../../shared/rss-reference'
@@ -19,6 +21,7 @@ export const READY_FOCUS_CHAT_INPUT_EVENT = 'ready:focus-chat-input'
 export const READY_WIDGET_MESSAGE_EVENT = 'ready:widget-message'
 
 export interface DocumentQuoteContext {
+  sourceRange?: { start: number; end: number }
   title: string
   path: string | null
   selection: string
@@ -300,13 +303,16 @@ export function addDocumentWidgetTargetReference(context: DocumentWidgetTargetCo
 }
 
 export async function addDocumentQuoteReference(context: DocumentQuoteContext): Promise<void> {
-  const selection = context.selection.trim()
-  if (!selection) return
+  const selection = context.selection
+  if (!selection.trim()) return
   const authority = captureComposerAuthority(useAgent.getState())
   let path = '', description: string | undefined
   if (context.path) {
     try { path = await documentReferencePath(context.path) }
-    catch (error) { description = `无法定位来源：${error instanceof Error ? error.message : String(error)}` }
+    catch (error) {
+      // silent-catch: preserve the reason on the attachment; sending uses the attachment-unavailable notice.
+      description = `无法定位来源：${error instanceof Error ? error.message : String(error)}`
+    }
   }
   if (!isComposerAuthorityCurrent(useAgent.getState(), authority)) return
   const attachment: ChatAttachment = {
@@ -319,12 +325,58 @@ export async function addDocumentQuoteReference(context: DocumentQuoteContext): 
     ext: '.quote',
     source: 'document-quote',
     documentTitle: context.title,
-    selection: selection.slice(0, 30_000),
+    selection,
     sectionTitle: context.sectionTitle || undefined,
     lineStart: context.lineStart || undefined,
     lineEnd: context.lineEnd || undefined,
   }
+  const { useDocTabs } = await import('../../stores/useDocTabs')
+  const state = useDocTabs.getState()
+  const matches = state.tabs.filter(tab => context.path ? tab.path === context.path : tab.id === (state.focusedPaneTabId || state.activeTabId))
+  if (matches.length === 1) {
+    attachment.tabId = matches[0].id
+    if (!matches[0].isDirty && (matches[0].objectId || matches[0].draftId)) {
+      const vault = await window.electronAPI.vault.get()
+      if (vault.status === 'ready') {
+        const { buildLibraryDocumentSelection } = await import('./libraryResourceSelection')
+        attachment.libraryResource = await buildLibraryDocumentSelection(attachment, matches[0], vault.root, undefined, context.sourceRange)
+      }
+    }
+  }
+  if (!isComposerAuthorityCurrent(useAgent.getState(), authority)) return
   useWorkspace.setState({ chatPanelVisible: true })
   useAgent.getState().addAttachments([attachment])
   window.dispatchEvent(new CustomEvent(READY_FOCUS_CHAT_INPUT_EVENT))
+}
+
+async function addLibrarySelectionsToAgentInput(build: () => Promise<Array<{ resource: import('../../../shared/ipc-contracts/agent-runtime').LibraryResourceSelection; path: string }>>): Promise<void> {
+  const authority = captureComposerAuthority(useAgent.getState())
+  const resources = await build()
+  if (!isComposerAuthorityCurrent(useAgent.getState(), authority)) throw new Error('聊天会话已切换，请在当前会话重新选择资料。')
+  const attachments: ChatAttachment[] = resources.map(({ resource, path }) => ({
+    id: resource.id, name: resource.name, type: 'text', source: 'file', ext: '.reference', size: 0, path,
+    libraryResource: resource,
+  }))
+  useAgent.getState().addAttachments(attachments)
+  useWorkspace.setState({ chatPanelVisible: true })
+  window.dispatchEvent(new CustomEvent(READY_FOCUS_CHAT_INPUT_EVENT))
+}
+
+export function addBoardSelectionToAgentInput(board: LibrarySelectionObject, nodeIds: readonly string[]): Promise<void> {
+  return addLibrarySelectionsToAgentInput(async () => {
+    const resource = await buildLibraryBoardSelection(board, nodeIds)
+    return [{ resource, path: resource.uri }]
+  })
+}
+
+export function addBookLocationToAgentInput(bookId: string, location: BookLocation, title: string, quote?: string): Promise<void> {
+  return addLibrarySelectionsToAgentInput(async () => {
+    const position = { ...location }
+    const resource = await buildLibraryBookLocation(bookId, position, title, quote)
+    return [{ resource, path: toReadyUri({ kind: 'book-location', book: bookId, loc: `c${position.chapter}:${position.from}+${position.to - position.from}` }) }]
+  })
+}
+
+export function addDatabaseRowsToAgentInput(database: LibrarySelectionObject, rows: readonly LibrarySelectionObject[]): Promise<void> {
+  return addLibrarySelectionsToAgentInput(async () => (await buildLibraryDatabaseRows(database, rows)).map(resource => ({ resource, path: resource.target.uri })))
 }

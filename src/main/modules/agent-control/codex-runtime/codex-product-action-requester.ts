@@ -1,3 +1,4 @@
+import { isLibraryReadTool } from './library-read-tools'
 import { CodexToolBridgeError } from './codex-tool-bridge'
 import type { ReadyToolActionReceiptPort } from './codex-tool-action-journal'
 import { digestCanonicalJson } from './codex-model-gateway-contract'
@@ -46,6 +47,13 @@ export function createCodexProductActionRequester(input: {
     }
     if (!isAllowedProductAction(input.executingToolName, action)) {
       throw new CodexProductActionError('product_action_tool_mismatch')
+    }
+    // Read snapshots have no external effect to commit or replay. Revalidate on every call.
+    if (isLibraryReadTool(input.executingToolName)) {
+      const payload = await input.handlers.dispatch(action, args)
+      input.assertEffectAuthority()
+      if (input.abortSignal.aborted) throw new CodexProductActionError('product_action_aborted')
+      return normalizeProductPayload(action, payload)
     }
     const actionOrdinal = nextOrdinal
     nextOrdinal += 1

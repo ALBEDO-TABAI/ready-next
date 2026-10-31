@@ -1,3 +1,4 @@
+import { librarySelectionRangeFromDOM } from '../../modules/agent/libraryResourceSelection'
 import { textAreaContent, textAreaOffset } from '../../modules/document/block-editor/text-edit'
 import { useSourceHistory } from '../../modules/document/block-editor/use-source-history'
 import { parseDocumentBlocks } from '../../../shared/document-blocks'
@@ -282,7 +283,7 @@ export default function MarkdownEditor({
     y: number
   }>({ visible: false, x: 0, y: 0 })
   const [contextSelection, setContextSelection] = useState<string>('')
-  const [contextSelectionRange, setContextSelectionRange] = useState<SelectionRange | null>(null)
+  const [contextSelectionRange, setContextSelectionRange] = useState<(SelectionRange & { text: string }) | null>(null)
 
   // Selection toolbar state (markdown formatting on highlighted text)
   const [selectionRange, setSelectionRange] = useState<SelectionRange | null>(null)
@@ -611,13 +612,25 @@ export default function MarkdownEditor({
     e.preventDefault()
     const rawEditor = rawEditorRef.current
     const editSelectionRange = viewMode === 'edit' && rawEditor && rawEditor.selectionStart !== rawEditor.selectionEnd
-      ? { start: rawEditor.selectionStart, end: rawEditor.selectionEnd }
+      ? { start: textAreaOffset(tabContentRef.current, rawEditor.selectionStart), end: textAreaOffset(tabContentRef.current, rawEditor.selectionEnd) }
       : null
     const selectedText = viewMode === 'edit' && rawEditor
       ? rawEditor.value.slice(rawEditor.selectionStart, rawEditor.selectionEnd)
       : window.getSelection?.()?.toString() || ''
+    let sourceRange = editSelectionRange
+    if (!sourceRange && selectedText) {
+      try {
+        const selection = window.getSelection()
+        if (!selection?.rangeCount) throw new Error('library_selection_ambiguous')
+        sourceRange = librarySelectionRangeFromDOM(tabContentRef.current, selection.getRangeAt(0))
+      } catch {
+        setSaveState('error'); setSaveError('无法确定引用范围，请切换到源码视图重新选择。')
+        setContextSelection(''); setContextSelectionRange(null)
+        return
+      }
+    }
     setContextSelection(selectedText)
-    setContextSelectionRange(editSelectionRange)
+    setContextSelectionRange(sourceRange ? { ...sourceRange, text: tabContentRef.current.slice(sourceRange.start, sourceRange.end) } : null)
     setContextMenu({ visible: true, x: e.clientX, y: e.clientY })
   }, [viewMode])
 
@@ -736,19 +749,23 @@ export default function MarkdownEditor({
     setContextMenu((prev) => ({ ...prev, visible: false }))
   }, [])
 
-  const quoteSelectionToAgent = useCallback(() => {
-    const selection = contextSelection.trim()
-    if (!selection) return
-
+  const quoteSelectionToAgent = useCallback(async () => {
+    const selection = contextSelectionRange?.text ?? contextSelection
+    if (!selection.trim()) return
     const location = findDocumentSelectionLocation(tabContentRef.current, selection, contextSelectionRange)
-    addDocumentQuoteReference({
-      title: tab.title,
-      path: tab.path,
-      selection,
-      sectionTitle: location.sectionTitle,
-      lineStart: location.lineStart,
-      lineEnd: location.lineEnd,
-    })
+    try {
+      await addDocumentQuoteReference({
+        title: tab.title,
+        path: tab.path,
+        selection,
+        sourceRange: contextSelectionRange ?? undefined,
+        sectionTitle: location.sectionTitle,
+        lineStart: location.lineStart,
+        lineEnd: location.lineEnd,
+      })
+    } catch {
+      setSaveState('error'); setSaveError('引用的内容已变化或无法确定范围，请重新选择。')
+    }
   }, [contextSelection, contextSelectionRange, tab.path, tab.title])
 
   const pasteSelectionToStickyNote = useCallback(async () => {

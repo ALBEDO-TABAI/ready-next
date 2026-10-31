@@ -3343,6 +3343,7 @@ interface ElectronAPI {
   bookSources: import('../../shared/library-sources').BookSourcesAPI
   libraryArchive: import('../../shared/library').LibraryArchiveAPI
   library: import('../../shared/library').LibraryHighlightAPI & {
+    prepareAgentSelection(input: import('../modules/agent/libraryResourceSelection').LibrarySelectionRequest): Promise<LibraryResult<import('../../shared/ipc-contracts/agent-runtime').LibraryResourceSelection[]>>
     get(): Promise<LibraryResult<LibraryState>>
     importFiles(paths: string[]): Promise<LibraryResult<LibraryImportResult>>
     pickAndImport(): Promise<LibraryResult<LibraryImportResult>>

@@ -1,0 +1,10 @@
+{
+  "id": "library-reference",
+  "name": "library-reference",
+  "displayName": "资料库阅读",
+  "description": "阅读并整理明确选择的 Ready 资料库页面、数据库、画板、书籍与当天资料；用于跨资料理解、比较与引用，不执行写入。",
+  "version": "0.1.0",
+  "runtime": "reference",
+  "execution": { "mode": "advisory" },
+  "actions": { "read_skill": { "runtime": "reference", "visibility": "internal" } }
+}

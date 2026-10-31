@@ -311,3 +311,24 @@ test('RSS tools without a requester fail closed instead of queueing', async () =
   assert.equal(result.errorKind, 'product_action_bridge_missing')
   assert.equal(String(result.message || '').includes('已排队'), false)
 })
+
+test('M7 registered library reads traverse executor and exact product bridge with explicit no-confirmation rules', async () => {
+  const { executeToolCall } = await import('../main/modules/tools/tool-executor')
+  const { LIBRARY_READ_TOOL_NAMES, LIBRARY_READ_ACTIONS } = await import('../main/modules/agent-control/codex-runtime/library-read-tools')
+  const { resolveConfirmationGate } = await import('../main/modules/agent-control/safety/action-confirmation-policy')
+  for (const tool of LIBRARY_READ_TOOL_NAMES) {
+    const { requester, calls, journal } = makeRequester({ tool, allowed: [tool] })
+    const args = { resourceId: 'selected', expectedVersion: 'a'.repeat(64),
+      ...(tool === 'library_read_database' ? {} : tool === 'library_read_page' || tool === 'library_read_book' ? { offset: 0, length: 2 } : { offset: 0, limit: 1 }),
+      ...(tool === 'library_query_database' ? { viewId: 'view' } : {}), ...(tool === 'library_query_links' ? { direction: 'outgoing' } : {}) }
+    const decision = resolveConfirmationGate(tool, args)
+    assert.equal(decision.ruleId, 'm4-library-explicit-read')
+    assert.equal(decision.action, 'allow')
+    const executed = await executeToolCall(tool, args, { allowedToolNames: [tool], requestModuleToolAction: requester })
+    assert.deepEqual(calls, [LIBRARY_READ_ACTIONS[tool]], JSON.stringify(executed))
+    await assert.rejects(requester('document.saveTab', {}), /product_action_tool_mismatch/)
+    assert.equal(journal.records.size + journal.pending.size + journal.unknown.size + journal.absent.size, 0)
+    const denied = await executeToolCall(tool, args, { allowedToolNames: [], requestModuleToolAction: async () => { assert.fail('not authorized') } })
+    assert.match(JSON.stringify(denied), /tool_restricted_this_turn/)
+  }
+})

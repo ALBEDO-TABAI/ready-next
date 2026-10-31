@@ -41,6 +41,7 @@ const CONFIGURATION_CODES = new Set([
 ])
 
 const ATTACHMENT_CODES = new Set([
+  'library_resource_unavailable',
   'codex_explicit_resource_kind_mismatch',
   'codex_explicit_resource_unavailable',
   'codex_explicit_resource_unsupported',
@@ -84,6 +85,9 @@ export function classifyCodexIngressPreparationError(
     }
   }
   const internalCode = stableCode(error)
+  if (internalCode === 'library_read_tool_surface_missing') {
+    return { code: 'native_tool_surface_extension_required', retryableByUser: false, error: internalCode }
+  }
   if (CONFIGURATION_CODES.has(internalCode)) {
     return { code: 'configuration_unavailable', retryableByUser: true, error: internalCode }
   }
