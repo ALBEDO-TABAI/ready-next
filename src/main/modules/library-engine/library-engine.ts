@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { lstat, mkdir, readdir, readFile, rm } from 'node:fs/promises'
 import { basename, extname, isAbsolute, join } from 'node:path'
-import { stringify } from 'yaml'
+import { toReadyUri } from '../../../shared/ready-ref'
 import { z } from 'zod'
 import { LIBRARY_DATABASE_PAGE, LIBRARY_FOLDER, LIBRARY_FIELDS as F, LIBRARY_KIND_BOOK, type LibraryBook, type LibraryState, type LibraryImportResult } from '../../../shared/library'
 import type { VaultState } from '../../../shared/vault'
@@ -10,7 +10,7 @@ import { readDocumentSource } from '../../../shared/document-operations'
 import { applyDocumentOperation, documentVersion } from '../document-engine/document-write-service'
 import { publishFileAtomically } from '../document-engine/atomic-file-publish'
 import { decodeBookText, epubMetadata, nameMetadata, type BookMetadata } from './book-metadata'
-import { exists, insideVault, isMissing, readBook } from './source-note'
+import { exists, insideVault, isMissing, readBook, sourceNoteContent } from './source-note'
 import { bookIdSchema, formats, importSchema, updateSchema } from './validation'
 
 import { readingDatabasePage as databasePage, readingSourceText, upgradeReadingDatabase } from './database-upgrade'
@@ -218,7 +218,7 @@ export class LibraryEngine {
       else await upgradeReadingDatabase(root, { write: this.dependencies.write })
       if (await exists(notePath)) throw new Error('来源页已被其他程序创建')
       ownsNote = true
-      await publish(notePath, `---\n${stringify(fields)}---\n\n## 标注\n\n## 我的笔记\n`)
+      await publish(notePath, sourceNoteContent({ ...fields, 来源引用: toReadyUri({ kind: 'book-location', book: fields[F.id], loc: 'c0:0+1' }), 链接: fields[F.source].url ?? '' }))
       const book = await readBook(root, notePath)
       if (!book) throw new Error('来源页写入后无法读取')
       return book

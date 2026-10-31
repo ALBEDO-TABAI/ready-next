@@ -1,4 +1,7 @@
 import { registerDocumentImportIPC } from './modules/document-import/ipc'
+import { migrateHighlightCaches } from './modules/library-engine/highlight-cache-migration'
+import { registerSourceAnnotationsIPC } from './modules/library-engine/source-document-ipc'
+import { SourceDocumentService } from './modules/library-engine/source-documents'
 import { ObjectRelationsService, registerObjectRelationsIPC } from './modules/object-relations/service'
 import { registerDocumentAnnotationsIPC } from './modules/document-annotations/ipc'
 import { setupDateMentions } from './modules/calendar-engine/date-mentions/runtime'
@@ -814,8 +817,32 @@ function setupGlobalIPC(): void {
   })
   registerDocumentDatabaseIPC(ipcMain, documentDatabase)
   registerDocumentImportIPC(ipcMain, { pages: documentPages.service, database: documentDatabase })
+  let sourceDocuments: SourceDocumentService | null = null
+  const sourceVault = new VaultService(new AppSettingsRepository(), { home: app.getPath('home'), userData: app.getPath('userData'), isPackaged: app.isPackaged })
+  registerSourceAnnotationsIPC(ipcMain, {
+    service: async () => {
+      await documentPages.ready
+      const state = sourceVault.get(), writer = getDocumentWriteDependencies()
+      if (state.status !== 'ready' || !writer) throw new Error('请先配置可用的资料库')
+      if (sourceDocuments?.root !== state.root) {
+        documentPages.service.registry.db.prepare('INSERT INTO workspaces(root) VALUES (?) ON CONFLICT(root) DO NOTHING').run(state.root)
+        sourceDocuments = new SourceDocumentService(state.root, documentPages.service.registry, writer)
+      }
+      return sourceDocuments
+    },
+    rss: () => getDatabase().rss.content,
+    browser: () => browserController,
+  })
+  const migratedHighlightRoots = new Set<string>()
   registerDocumentAnnotationsIPC(ipcMain, { pages: documentPages.service, ready: documentPages.ready,
-    vault: new VaultService(new AppSettingsRepository(), { home: app.getPath('home'), userData: app.getPath('userData'), isPackaged: app.isPackaged }),
+    vault: { get: () => {
+      const state = sourceVault.get()
+      if (state.status === 'ready' && !migratedHighlightRoots.has(state.root)) {
+        migrateHighlightCaches(state.root)
+        migratedHighlightRoots.add(state.root)
+      }
+      return state
+    } },
   })
   registerCalendarLayersIPC(ipcMain, createCalendarLayersResolver({ pages: documentPages.service, writer: getDocumentWriteDependencies, database: documentDatabase }))
   chatGptOAuthService = setupSettingsIPC({

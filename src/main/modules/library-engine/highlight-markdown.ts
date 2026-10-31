@@ -2,6 +2,11 @@ import { readDocumentSource } from '../../../shared/document-operations'
 import type { LibraryHighlight } from '../../../shared/library'
 import { colorSchema } from './highlight-anchors'
 
+export interface HighlightCodec {
+  parseHeader(header: string, id: string): { color: string; title: string; chapter: number; from: number; to: number } | null
+  formatHeader(highlight: LibraryHighlight): string
+}
+
 export interface HighlightBlock { start: number; end: number; raw: string; highlight: LibraryHighlight }
 export function annotationSection(content: string): { start: number; end: number } | null {
   const { bodyStart } = readDocumentSource(content)
@@ -18,7 +23,7 @@ export function annotationSection(content: string): { start: number; end: number
   return start === undefined ? null : { start, end: content.length }
 }
 
-export function parseHighlights(content: string, bookId: string): HighlightBlock[] {
+export function parseHighlights(content: string, bookId: string, codec?: HighlightCodec): HighlightBlock[] {
   const section = annotationSection(content)
   const { bodyStart } = readDocumentSource(content)
   const body = content.slice(bodyStart)
@@ -43,11 +48,12 @@ export function parseHighlights(content: string, bookId: string): HighlightBlock
       const strip = (row: string) => row.replace(/^> ?/, '')
       const text = (divider < 0 ? quoteRows : quoteRows.slice(0, divider)).map(strip).join('\n')
       const note = divider < 0 ? '' : quoteRows.slice(divider + 1).map(strip).join('\n')
-      const chapter = Number(header?.[4] ?? 0), from = Number(header?.[5] ?? 0), to = from + Number(header?.[6] ?? 0)
-      const valid = section && bodyStart + start >= section.start && bodyStart + offset < section.end && header && header[3] === encodeURIComponent(bookId) && text.trim() && quoteRows.every(row => /^>( |$)/.test(row)) && to > from && [chapter, from, to].every(Number.isSafeInteger)
+      const source = codec?.parseHeader(rows[0] ?? '', id[1])
+      const chapter = source?.chapter ?? Number(header?.[4] ?? 0), from = source?.from ?? Number(header?.[5] ?? 0), to = source?.to ?? from + Number(header?.[6] ?? 0)
+      const valid = section && bodyStart + start >= section.start && bodyStart + offset < section.end && (source || (header && header[3] === encodeURIComponent(bookId))) && text.trim() && quoteRows.every(row => /^>( |$)/.test(row)) && to > from && [chapter, from, to].every(Number.isSafeInteger)
       const highlight: LibraryHighlight = {
-        id: id[1], chapter, from, to, chapterTitle: header?.[2] ?? '结构已修改',
-        text: text || raw, note, color: colorSchema.parse(header?.[1] ?? 'yellow'),
+        id: id[1], chapter, from, to, chapterTitle: source?.title ?? header?.[2] ?? '结构已修改',
+        text: text || raw, note, color: colorSchema.parse(source?.color ?? header?.[1] ?? 'yellow'),
         location: valid ? { status: 'unlocated', reason: '等待定位' } : { status: 'malformed', reason: '来源页中的标注格式已修改，请在来源页检查' },
         sourceLine: content.slice(0, bodyStart + start).split('\n').length,
       }
@@ -62,14 +68,15 @@ export function parseHighlights(content: string, bookId: string): HighlightBlock
   return blocks
 }
 
-export function formatHighlight(h: LibraryHighlight, bookId: string): string {
+export function formatHighlight(h: LibraryHighlight, bookId: string, codec?: HighlightCodec): string {
   const quote = (s: string) => s.split(/\r?\n/).map(line => line ? `> ${line}` : '>').join('\n')
-  return `> [!quote|${h.color}] ${h.chapterTitle.replace(/[\r\n]/g, ' ')} · [原文](ready://read/book/${encodeURIComponent(bookId)}#c${h.chapter}:${h.from}+${h.to - h.from})\n${quote(h.text)}${h.note ? `\n>\n${quote(h.note)}` : ''}\n\n^${h.id}\n`
+  const header = codec?.formatHeader(h) ?? `> [!quote|${h.color}] ${h.chapterTitle.replace(/[\r\n]/g, ' ')} · [原文](ready://read/book/${encodeURIComponent(bookId)}#c${h.chapter}:${h.from}+${h.to - h.from})`
+  return `${header}\n${quote(h.text)}${h.note ? `\n>\n${quote(h.note)}` : ''}\n\n^${h.id}\n`
 }
 
 /** Replace only managed blocks. Malformed blocks and the user's other prose retain their bytes. */
-export function rewriteHighlights(content: string, bookId: string, next: LibraryHighlight[], removed: Set<string>): string {
-  const blocks = parseHighlights(content, bookId)
+export function rewriteHighlights(content: string, bookId: string, next: LibraryHighlight[], removed: Set<string>, codec?: HighlightCodec): string {
+  const blocks = parseHighlights(content, bookId, codec)
   let stripped = content
   for (const b of [...blocks].reverse()) {
     if (b.highlight.location.status !== 'malformed' || removed.has(b.highlight.id)) stripped = stripped.slice(0, b.start) + stripped.slice(b.end)
@@ -77,7 +84,7 @@ export function rewriteHighlights(content: string, bookId: string, next: Library
   const section = annotationSection(stripped)
   const managed = next.filter(h => h.location.status !== 'malformed').sort((a, b) => a.chapter - b.chapter || a.from - b.from)
   const newline = content.includes('\r\n') ? '\r\n' : '\n'
-  const markdown = managed.map(h => formatHighlight(h, bookId)).join('\n').replace(/\n/g, newline)
+  const markdown = managed.map(h => formatHighlight(h, bookId, codec)).join('\n').replace(/\n/g, newline)
   const body = section ? stripped.slice(section.start, section.end) : ''
   const replacement = newline + markdown + (markdown ? newline : '') + body.replace(/^\s+/, '')
   return section ? stripped.slice(0, section.start) + replacement + stripped.slice(section.end) : stripped + `${newline}## 标注${newline}${replacement}`

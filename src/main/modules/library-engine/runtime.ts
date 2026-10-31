@@ -9,7 +9,7 @@ import { AppSettingsRepository } from '../repositories/app-settings-repository'
 import { VaultService } from '../settings-engine/vault-service'
 import { getSearchEngine } from '../search-engine/ipc-handler'
 import { applyDocumentOperation } from '../document-engine/document-write-service'
-import { LibraryHighlightService } from './highlight-service'
+import { SourceDocumentService } from './source-documents'
 import { LibraryEngine } from './library-engine'
 import { LibraryReadingRepository } from './reading-repository'
 import { registerLibraryIPC } from './ipc-handler'
@@ -48,7 +48,7 @@ export function setupLibraryIPC(): void {
     }
   }
   const reading = new LibraryReadingRepository(db)
-  const highlights = new LibraryHighlightService(engine, { write: async input => {
+  const highlights = SourceDocumentService.books(engine, { write: async input => {
     const root = engine.vaultRoot()
     if (!root) throw new Error('请先配置可用的资料库')
     const search = getSearchEngine()

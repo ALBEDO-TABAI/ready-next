@@ -76,13 +76,17 @@ enforce: true
 
 ## 7. 交付状态
 
-A 的格式、查询、服务、书房升级和持久恢复已实现；公共 Main 注册仍由 M5-F 调用 `registerDocumentDatabaseIPC` 并提供资料库授权与恢复屏障。本次只增加 preload/types 透传及 145 迁移登记，未改 Main 入口。
+M5 尚未全部收口。2026-10-31 M5-F 核对结果：
 
-- `ready-database-roundtrip` 与性能测试通过；8 项真实 SQLite 测试通过且无 skip，其中包含子进程发布一行后退出、重开 SQLite 再恢复。
-- CRLF 关联尚未通过：`ready-database-relations.test.ts` 固定复现现有 `search-engine/object-link-extract.ts` 截取 YAML 时留下孤立 CR 的缺陷。该公共文件不在 A 允许范围，未修改、未旁路；修复前 A 不宣称完整完成。
-- 完整原生检查仍有范围外失败：旧 `library-engine.test.ts` 要求旧定义的精确断言；两项文件监听测试受环境 `EMFILE` 阻塞。旧断言需由整合负责人按新合同更新。
-- 视图改名记录待修复引用并在 read 回执公开，引用修复由公共接线负责人收口；新建行先创建页面，关联随后经 setFields 单独校验与补身份。
-- B–F、导入保真、已有索引首屏 500ms 及真实窗口验收待对应负责人完成。纯查询性能不能替代 Main 首次读取或界面性能证据。
+- A：Main 已注册 `registerDocumentDatabaseIPC`，使用资料库授权及页面恢复屏障；preload/types 已接通。原 CRLF 关联缺陷在当前工作树已修复，`ready-database-relations.test.ts` 本次回归通过。
+- B：七视图组件、`NotePreview` 内联视图及样式已存在。独立数据库页没有挂载 `Database`；需要在 `DocumentMode.tsx` 的文档路由接入。该文件未列入本次“允许改动”，故只记录，不越界修改。视图改名引用修复仍不是已完成回执。
+- C：`ObjectUIHost` 在 Workbench 挂载，速览/快速切换与 DocumentMode 的关系面板已接线；Main 的 ObjectRelations 注册已存在。
+- D：Main/preload 的文档标注注册、块编辑器的评论/模板/同步块入口已接线。本次修复与阅读划线缓存同名冲突：阅读定位缓存迁至 `.ready/anchors/<id>.highlights.json`；评论继续使用 `<id>.json`。阅读入口及评论准入共用一次迁移，旧缓存只移动一次，不留双读路径。
+- E：当前工作树未找到 Notion/Inkwell 导入服务或 `ready-library-import.test.ts`，没有可补接的模块。等待 M5-E 交付，不能宣称导入保真完成。
+- F：书、RSS、网页共用来源页生成与标注写入/合并逻辑；RSS 阅读选区与 BrowserMode 的 FastCard 来源标注入口已接通。网页捕获现存页签的真实选区、前后文和快照版本，页面换代拒绝保存。重复划线保留已有块身份；原文改写后保留旧摘录及旧版本引用。PDF 仅有来源建页适配，真实选区与页内回跳尚未接通。
+- 本次命令行结果：来源及书房/引用/导入/关联专项 22 项通过、零跳过；完整 verify:native 同批替代执行 458 项，455 通过、3 项文件监听因 `EMFILE` 失败、零跳过。失败来自 `calendar-layers-native`、`library-engine`、`ready-object-identity-native` 的真实监听，未改断言或将失败记作通过。Widget 同批替代执行 163 项全部通过。类型、IPC 对应、SQLite skip 规则、CSS reset 与改动文件 ESLint 通过。
+- `verify:ready-next-sources` 已提供真实窗口脚本：回环网页/订阅源、隔离 userData、realpath 临时资料库、书/RSS/网页划线、来源页预览、原文定位与高亮、重启回读。脚本仅完成语法检查，本沙箱未运行窗口验收；界面可用性与高亮效果须由 Claude 验证。
+- 缓存分离后，现有 `scripts/verify-ready-next-library-electron.cjs` 的两处旧缓存路径断言也需改为 `.highlights.json`。该脚本不在本次允许范围，未修改；新来源窗口脚本不依赖旧路径。
 
 ## M5-D 格式与规则
 
@@ -107,3 +111,15 @@ M5-D 实施补充：模板新建复用“保存到…”选择位置，再经页
 - Main 为单一执行者。持久操作记录固定源内容哈希、目标、完整转换清单及附件字节；操作身份由源哈希与目标确定，重复执行复用同一记录。状态为 prepared/running/interrupted/completed/incomplete；prepared 后不再依赖源文件。逐页使用页面服务的持久 create，数据库经共享定义校验及数据库服务回读；附件使用现有写入服务的暂存/独占发布，不另写覆盖路径。每个阶段可注入中断，恢复以同一页面操作身份和发布证据继续，不重复建页，不覆盖后来修改。
 - 完成前逐页、逐库、逐附件回读并核对身份和哈希；任何缺失/降级或回读差异都返回 incomplete 及明细，只有清单完全一致才 completed。源始终只读。操作日志留存以支持重试、重启回读和追踪，不把 Renderer 进度当完成真值。
 - DB6/C2/C3/C12 验收：`ready-library-import.test.ts` 合成 Notion ZIP 与真实 Inkwell backup；真实 SQLite/临时资料库验证逐项往返、源不变、每阶段失败恢复、重名/冲突/目标修改与恶意 ZIP；`ready-library-import-ui.test.tsx` 验证向导。原生测试进入 verify:native；`verify:ready-next-import` 为真实窗口验收，Claude 执行，命令行通过不代替窗口通过。
+
+## M5-F 来源页规则
+
+- 来源包括书、RSS 文章、PDF、网页；统一文件与标注规则，不合并阅读器。书保留 `阅读/`，RSS 与独立 PDF 来源页使用 `文章/`（避免混入仅收书籍的阅读数据库），网页使用 `网页/`。来源身份与页面路径分开，重复采集复用来源身份，改名、移动或重建索引不能新建第二页。
+- frontmatter 保留现有字段；新增来源页记录 `ready_id`、`类型`、`作者`、`链接`、`加入`、`来源引用`（ReadyRef URI）。书的原 `来源` 是导入元数据，不能覆盖。正文包含 `## 标注`、`## 我的笔记`。标注正文只有来源页这一份权威，`.ready/anchors/<id>.highlights.json` 只是可重建定位缓存，与文档评论锚点分开。
+- 书用章节/分页位置与非空白字区间；RSS 用文章身份、版本和 reading-v1 映射区间；PDF 用文件身份、哈希、页码与文本区间；网页用原 URL、快照哈希、文本引文及前后文，回跳使用文本片段。不能只靠 XPath 猜测原位置。
+- 所有标注链接使用 ReadyRef，交给现有 open-ready-ref。精确定位必须核对原文，失效不能冒充成功。保存的摘录在脱机时仍可阅读，来源页明确注明原文不可用时无法回跳。
+- 同一来源写入串行，经共享文档写入服务检查版本并同步索引；未保存编辑只能返回待保存，不能发布已保存回执。重复及重叠划线沿现有区间合并规则处理，书房颜色、批注和定位行为保持不变。
+- 网页划线 IPC 只读取指定的现存浏览器页签，采集前后核对页面身份。任何 DOM 覆盖面先隐藏 BrowserView；本次采用不打开覆盖面的划线按钮，保存结果显示在浏览器工具栏。
+- PDF 阅读器已有文本层，但尚无导出版本绑定选区或消费页内范围的回跳入口。`PdfViewer.tsx`、`open-ready-ref.ts` 不在本次允许修改范围；本次交付 PDF 来源适配与建页，不伪造 PDF 划线/高亮。后续须同时接通真实选区与回跳消费者。
+
+可执行合同：`ready-sources-native.test.ts` 使用真实 SQLite 与 realpath 临时资料库验证四来源、重复合并、改名移动、重建索引及关系；原有 library-engine/highlights/quote 测试验证书房不回退；`ready-sources-ui.test.tsx` 验证 RSS 和网页划线调用与失败显示。`verify:ready-next-sources` 为 Claude 的隔离真实窗口验收入口，命令行通过不等于窗口通过。
