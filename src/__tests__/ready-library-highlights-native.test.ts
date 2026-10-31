@@ -49,7 +49,7 @@ test('highlight IPC writes indexed source, rejects stale edits, and keeps dirty-
   assert.partialDeepStrictEqual(await invoke('updateHighlight', { ...context, expectedVersion: state.version, id, patch: { color: 'blue' } }), { success: true })
   const updated = await highlights.list(context)
   assert.equal(updated.highlights[0].color, 'blue')
-  const anchorPath = join(root, '.ready', 'anchors', `${book.id}.json`)
+  const anchorPath = join(root, '.ready', 'anchors', `${book.id}.highlights.json`)
   const original = await readFile(book.notePath, 'utf8'), anchors = await readFile(anchorPath, 'utf8')
   tab = { ...tab, isDirty: true, content: original + '\n用户还没保存的笔记\n' }
   const pending = await highlights.create({ ...context, expectedVersion: updated.version, chapter: 0, from: 4, to: 6, color: 'yellow' })

@@ -1,3 +1,4 @@
+import { BrowserSourceHighlight } from './BrowserSourceHighlight'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FastCardSaveDialog } from '../../components/browser/FastCardPanel'
 import { createModeSwitchAckWaiter } from '../../modules/browser/modeSwitchAckWaiter'
@@ -1239,6 +1240,8 @@ export default function BrowserMode({
             onToggleFastCard={handleToggleFastCard}
             ownershipStatus={browserOwnershipStatus}
           />
+
+          {fastCardPanelOpen && activeTabId && <BrowserSourceHighlight key={activeTabId} tabId={activeTabId} />}
 
           <div className="flex min-h-0 flex-1">
             <VerticalTabRail

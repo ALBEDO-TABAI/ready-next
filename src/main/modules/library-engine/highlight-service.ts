@@ -1,3 +1,4 @@
+import { migrateHighlightCache } from './highlight-cache-migration'
 import { randomUUID } from 'node:crypto'
 import { mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -6,6 +7,7 @@ import type { LibraryHighlight, LibraryHighlightState } from '../../../shared/li
 import { applyDocumentOperation, documentVersion } from '../document-engine/document-write-service'
 import { publishFileAtomically } from '../document-engine/atomic-file-publish'
 import type { LibraryEngine } from './library-engine'
+import type { HighlightCodec } from './highlight-markdown'
 import { exists, insideVault, isMissing } from './source-note'
 import { anchorFileSchema, colorSchema, compact, offsetSchema, quoteAt, relocate, sliceText, type AnchorFile, type HighlightAnchor } from './highlight-anchors'
 import { parseHighlights, rewriteHighlights } from './highlight-markdown'
@@ -21,9 +23,10 @@ const message = (e: unknown) => e instanceof Error ? e.message : String(e)
 /** One queue per book. The md write receipt precedes sidecar publication, including every retry. */
 export class LibraryHighlightService {
   private readonly tails = new Map<string, Promise<unknown>>()
-  constructor(private readonly engine: LibraryEngine, private readonly dependencies: {
+  constructor(private readonly engine: Pick<LibraryEngine, 'vaultRoot'> & { findBook(id: string): Promise<{ id: string; notePath: string }> }, private readonly dependencies: {
     write?: typeof applyDocumentOperation
     publish?: typeof publishFileAtomically
+    codec?: HighlightCodec
   } = {}) {}
 
   private serial<T>(id: string, work: () => Promise<T>): Promise<T> {
@@ -41,9 +44,11 @@ export class LibraryHighlightService {
     if (this.engine.vaultRoot() !== root) throw new Error('资料库已切换，请重新打开书籍')
     await insideVault(root, book.notePath)
     const md = await readFile(book.notePath, 'utf8')
-    const path = join(root, '.ready', 'anchors', `${book.id}.json`)
+    const path = join(root, '.ready', 'anchors', `${book.id}.highlights.json`)
+    const previousPath = join(root, '.ready', 'anchors', `${book.id}.json`)
     // Do not follow a sidecar or its directory outside this vault, even on rebuild.
-    for (const p of [join(root, '.ready'), join(root, '.ready', 'anchors'), path]) if (await exists(p)) await insideVault(root, p)
+    for (const p of [join(root, '.ready'), join(root, '.ready', 'anchors'), path, previousPath]) if (await exists(p)) await insideVault(root, p)
+    migrateHighlightCache(root, book.id)
     let cache: AnchorFile = { version: 1, highlights: {} }, cacheText: string | null = null
     try {
       cacheText = await readFile(path, 'utf8')
@@ -56,7 +61,7 @@ export class LibraryHighlightService {
 
   private project(md: string, input: Context, cache: AnchorFile) {
     const anchors: AnchorFile = { version: 1, highlights: {} }
-    const highlights = parseHighlights(md, input.bookId).map(({ highlight: h }) => {
+    const highlights = parseHighlights(md, input.bookId, this.dependencies.codec).map(({ highlight: h }) => {
       const old = cache.highlights[h.id]
       if (h.location.status === 'malformed') { if (old) anchors.highlights[h.id] = old; return h }
       const same = old && compact(old.quote.exact) === compact(h.text)
@@ -107,17 +112,17 @@ export class LibraryHighlightService {
     if (documentVersion(current.md) !== input.expectedVersion) throw new Error('Document version has changed，请刷新标注后重试')
     const { next, removed } = edit(this.project(current.md, input, current.cache).highlights)
     const normalized = next.map(h => h.location.status === 'located' ? { ...h, chapter: h.location.chapter, from: h.location.from, to: h.location.to, chapterTitle: input.chapters[h.location.chapter].title } : h)
-    const before = parseHighlights(current.md, input.bookId)
+    const before = parseHighlights(current.md, input.bookId, this.dependencies.codec)
     for (const h of normalized) {
       const old = before.find(b => b.highlight.id === h.id)?.highlight
-      if ((h.location.status === 'located' && (!old || old.color !== h.color || old.note !== h.note)) || importedAt?.has(h.id)) {
+      if ((h.location.status === 'located' && (!old || old.text !== h.text || old.color !== h.color || old.note !== h.note)) || importedAt?.has(h.id)) {
         const now = Date.now()
         current.cache.highlights[h.id] = { chapter: h.chapter, from: h.from, to: h.to,
           quote: h.location.status === 'located' ? { ...quoteAt(input.chapters[h.chapter].text, h.from, h.to), exact: h.text } : { exact: h.text, prefix: '', suffix: '' }, color: h.color,
           createdAt: current.cache.highlights[h.id]?.createdAt ?? importedAt?.get(h.id) ?? now, updatedAt: importedAt?.get(h.id) ?? now }
       }
     }
-    const md = rewriteHighlights(current.md, input.bookId, normalized, removed)
+    const md = rewriteHighlights(current.md, input.bookId, normalized, removed, this.dependencies.codec)
     if (this.engine.vaultRoot() !== current.root) throw new Error('资料库已切换')
     // Bind the fixed offset to the whole preceding text: dirty edits before an
     // insertion must conflict, never shift the quote into unrelated content.
@@ -138,7 +143,7 @@ export class LibraryHighlightService {
   importMissing(input: Context & { expectedVersion: string }, imported: (LibraryHighlight & { createdAt: number })[]): Promise<LibraryHighlightState> {
     return this.serial(input.bookId, async () => {
       const current = await this.read(input)
-      const ids = new Set(parseHighlights(current.md, input.bookId).map(b => b.highlight.id))
+      const ids = new Set(parseHighlights(current.md, input.bookId, this.dependencies.codec).map(b => b.highlight.id))
       const missing = imported.filter(h => !ids.has(h.id))
       if (!missing.length) return this.snapshot(input, current, current.md)
       return this.change(input, list => ({ next: [...list, ...missing], removed: new Set() }), new Map(missing.map(h => [h.id, h.createdAt])))
@@ -165,7 +170,7 @@ export class LibraryHighlightService {
       }
       const notes = [...overlaps].sort((a, b) => a.from - b.from).map(h => h.note).concat(input.note ?? '').filter(Boolean)
       const h: LibraryHighlight = {
-        id: `hl-${randomUUID()}`, chapter: input.chapter, chapterTitle: chapter.title, from, to, text: sliceText(chapter.text, from, to).replace(/\s+/g, ' ').trim(),
+        id: [...overlaps][0]?.id ?? `hl-${randomUUID()}`, chapter: input.chapter, chapterTitle: chapter.title, from, to, text: sliceText(chapter.text, from, to).replace(/\s+/g, ' ').trim(),
         note: notes.join('\n\n'), color: input.color, sourceLine: 0, location: { status: 'located', chapter: input.chapter, from, to },
       }
       return { next: [...list.filter(old => !overlaps.has(old)), h], removed: new Set([...overlaps].map(old => old.id)) }

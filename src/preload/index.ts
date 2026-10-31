@@ -1309,6 +1309,11 @@ const themeAPI = {
   },
 }
 
+const sourceAnnotationsAPI: import('../main/modules/library-engine/source-document-ipc').SourceAnnotationsAPI = {
+  rss: input => ipcRenderer.invoke('sourceAnnotations:rss', input),
+  web: input => ipcRenderer.invoke('sourceAnnotations:web', input),
+}
+
 const documentAnnotationsAPI: import('../shared/document-comments').DocumentAnnotationsAPI = {
   comments: input => ipcRenderer.invoke('documentAnnotations:comments', input),
   synced: input => ipcRenderer.invoke('documentAnnotations:synced', input),
@@ -1682,6 +1687,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   vault: vaultAPI,
   documentDrafts: documentDraftsAPI,
   documentPages: documentPagesAPI,
+  sourceAnnotations: sourceAnnotationsAPI,
   documentAnnotations: documentAnnotationsAPI,
   documentDatabase: (request: import('../shared/document-database').DatabaseRequest): Promise<import('../shared/document-database').DatabaseReply> => ipcRenderer.invoke('documentDatabase:request', request),
   library: libraryAPI,
@@ -1726,6 +1732,7 @@ declare global {
       vault: typeof vaultAPI
       documentDrafts: typeof documentDraftsAPI
       documentPages: typeof documentPagesAPI
+      sourceAnnotations: typeof sourceAnnotationsAPI
       documentAnnotations: typeof documentAnnotationsAPI
       bookSources: typeof bookSourcesAPI
       libraryArchive: LibraryArchiveAPI

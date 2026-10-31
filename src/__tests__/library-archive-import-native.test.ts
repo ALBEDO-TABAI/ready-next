@@ -80,7 +80,7 @@ test('L5 imports EPUB/TXT metadata, annotations, anchors and reading records wit
   const md = await readFile(epub.notePath, 'utf8'), fields = readDocumentSource(md).frontmatter
   assert.equal(fields['收藏'], true); assert.equal(fields['简介'], '简介')
   assert.match(md, /\[!quote\|pink\]/); assert.match(md, /原批注/); assert.match(md, /未定位/); assert.match(md, /仍保留/)
-  const anchors = JSON.parse(await readFile(join(f.root, '.ready', 'anchors', `${epub.id}.json`), 'utf8'))
+  const anchors = JSON.parse(await readFile(join(f.root, '.ready', 'anchors', `${epub.id}.highlights.json`), 'utf8'))
   assert.equal(Object.keys(anchors.highlights).length, 3)
   assert.ok(Object.values<{ createdAt: number }>(anchors.highlights).every(h => h.createdAt === 1700010000000))
   assert.ok(Object.values<{ from: number; quote: { exact: string } }>(anchors.highlights).some(h => h.from === 5 && h.quote.exact === '丙丁'))

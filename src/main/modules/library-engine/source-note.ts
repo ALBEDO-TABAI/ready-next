@@ -1,3 +1,4 @@
+import { stringify } from 'yaml'
 import { lstat, readFile, realpath } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path'
 import { z } from 'zod'
@@ -56,4 +57,8 @@ export async function readBook(root: string, notePath: string): Promise<LibraryB
     notePath, filePath, coverPath: cover ? await asset(cover) : undefined,
     format: z.enum(formats).parse(extname(filePath).slice(1).toLowerCase()),
   }
+}
+
+export function sourceNoteContent(fields: Record<string, unknown>): string {
+  return `---\n${stringify(fields)}---\n\n## 标注\n\n## 我的笔记\n`
 }

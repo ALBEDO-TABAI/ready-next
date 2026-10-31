@@ -25,7 +25,7 @@ async function fixture(t: test.TestContext) {
     publish: async (...args) => { if (failAnchor) throw new Error('injected anchor failure'); await publishFileAtomically(...args) },
   })
   const context: LibraryHighlightContext = { bookId: book.id, chapters: [{ title: '第一章', text: '甲乙丙丁戊己庚辛壬癸' }, { title: '第二章', text: '春夏秋冬' }] }
-  const anchorPath = join(root, '.ready', 'anchors', `${book.id}.json`)
+  const anchorPath = join(root, '.ready', 'anchors', `${book.id}.highlights.json`)
   const list = () => service.list(context)
   const create = async (chapter: number, from: number, to: number, note = '') => service.create({ ...context, expectedVersion: (await list()).version, chapter, from, to, color: 'yellow', note })
   return { engine, service, context, book, anchorPath, list, create, failWrite: () => { failWrite = true }, failAnchor: (value: boolean) => { failAnchor = value } }
