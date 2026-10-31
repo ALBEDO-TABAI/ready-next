@@ -180,6 +180,8 @@ async function main() {
     assert.match(fs.readFileSync(ref.value.path, 'utf8'), /\[\[目标页\/验收页\]\]/)
     assert.match(fs.readFileSync(path.join(vault, '目标页', '验收页', '子稿.md'), 'utf8'), /子页草稿正文/)
     await snapshot('06-move-reference')
+    // The disclosure replaces the page icon on hover, as in Inkwell.
+    await row(targetId).locator('.ink-sb-row').first().hover()
     await row(targetId).getByRole('button', { name: '展开 目标页', exact: true }).click()
     await action(parentId, '验收页', '移到回收站'); await row(parentId).waitFor({ state: 'detached' })
     assert.ok(!fs.existsSync(moved)); await snapshot('07-trash')

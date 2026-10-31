@@ -77,6 +77,18 @@ export function objectTransaction<T>(db:DatabaseConnection, work:()=>T):T {
   db.exec('SAVEPOINT object_change')
   try { const value = work(); db.exec('RELEASE object_change'); return value } catch(error) { db.exec('ROLLBACK TO object_change; RELEASE object_change'); throw error }
 }
+/** Publishes the moves among these rows now, or once an enclosing transaction has settled (none if it rolled back). */
+function announceMoves(registry:ObjectRegistry,before:readonly ObjectRecord[]):void {
+  if(!before.length)return
+  if(!registry.db.inTransaction){publishObjectMoves(registry,before);return}
+  let tries=0
+  const later=()=>{
+    // A connection closed meanwhile (shutdown, a finished test) has nothing left to announce.
+    if((registry.db as {open?:boolean}).open===false)return
+    if(!registry.db.inTransaction)publishObjectMoves(registry,before); else if(++tries<100)setImmediate(later)
+  }
+  setImmediate(later)
+}
 export class ObjectRegistry {
   constructor(readonly db: DatabaseConnection) {}
   get(id:string):ObjectRecord|null { return this.db.prepare('SELECT * FROM objects WHERE id=?').get<ObjectRecord>(id) ?? null }
@@ -94,9 +106,7 @@ export class ObjectRegistry {
   register(path:string):ObjectRecord {
     if (!isAbsolute(path)) throw new Error('Object path must be absolute')
     settleQueuedObjectEvents(this.db)
-    const touched=this.reconcile([path])
-    // A single-path pass can complete a move (see reconcile); open tabs follow it unless an enclosing transaction owns it.
-    if(!this.db.inTransaction)publishObjectMoves(this,touched)
+    this.reconcile([path])
     const object = this.find(path)
     if (!object) throw new Error(`Object is not present: ${path}`)
     return object
@@ -210,6 +220,8 @@ export class ObjectRegistry {
       }
       this.syncProjection()
     })
+    // Whichever pass completes a move (watcher batch, registration, page tree) announces it, so open tabs follow.
+    announceMoves(this,old)
     return old
   }
   captureLinks():void {

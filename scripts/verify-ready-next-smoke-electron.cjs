@@ -285,7 +285,8 @@ async function checkObjectPresentationAfterRestart(page, identity) {
   ok('C2 reopening retains one tab, appearance and reading position', restored.tabs.length === 1 && restored.appearance?.icon === '🐙' && restored.position?.top > 0, JSON.stringify(restored))
   // Reopen through the file manager; the document topbar exposes the path on its breadcrumb.
   const fileLabel = page.getByText(path.basename(identity.path), { exact: true }).first()
-  if (!await fileLabel.isVisible()) await page.getByText(path.basename(path.dirname(identity.path)), { exact: true }).first().click()
+  // The vault name also heads the document sidebar; expand the folder row of the file manager itself.
+  if (!await fileLabel.isVisible()) await page.locator('[draggable="true"]').filter({ has: page.getByText(path.basename(path.dirname(identity.path)), { exact: true }) }).first().click()
   await fileLabel.click()
   await page.getByLabel('文档顶栏', { exact: true }).getByTitle(identity.path, { exact: true }).waitFor({ timeout: 20000 })
   ok('C2 the visible document breadcrumb retains the final path', true)
@@ -373,6 +374,10 @@ async function checkCalendarLinksBeforeRestart(page, reference, root) {
   const picker = panel.getByRole('dialog', {name:'保存到…'})
   await picker.getByLabel('标题', {exact:true}).fill('M6 meeting notes')
   await picker.getByRole('button', {name:'确认',exact:true}).click()
+  // Creating the note opens it in Document mode; come back to the event to see its link.
+  await page.getByRole('tab', {name:/M6 meeting notes/}).first().waitFor()
+  await requestMode(page, 'calendar')
+  await page.evaluate(id => window.electronAPI.calendar.revealEvent(id), reference.eventId)
   await panel.getByRole('button', {name:'打开会议笔记',exact:true}).waitFor()
   const links = await page.evaluate(async ({seriesId,second}) => {
     const result=await window.electronAPI.calendar.snapshot()

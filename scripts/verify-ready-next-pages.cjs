@@ -124,6 +124,8 @@ require(${JSON.stringify(entry)})
     assert.ok(fs.existsSync(path.join(vault, '目标页', '改名页', '子页.md')))
     assert.equal(fs.readFileSync(path.join(vault, '目标页', '改名页.assets', 'fixture.txt'), 'utf8'), 'attachment')
     await snapshot('04-move')
+    // The disclosure replaces the page icon on hover, as in Inkwell.
+    const targetRow = await row('目标页'); await targetRow.locator('.ink-sb-row').first().hover()
     await sidebar.getByRole('button', { name: '展开 目标页', exact: true }).click()
     parentRow = await row('改名页'); await action(parentRow, '改名页', '移到回收站')
     await parentRow.waitFor({ state: 'detached' })

@@ -1,5 +1,4 @@
 import { existsSync } from 'node:fs'
-import { publishObjectMoves } from './events'
 import { queueObjectEvents, releaseObjectEvents } from './pending-events'
 import { repairObjectLinks } from './link-repair'
 import { ObjectRegistry } from './registry'
@@ -36,7 +35,7 @@ export class ObjectEventWindow {
     const settle=()=>{
       const indexedPaths=()=>this.registry.db.prepare("SELECT path FROM documents WHERE source_type='document'").all<{path:string}>().map(row=>row.path)
       const before=indexedPaths()
-      publishObjectMoves(this.registry, this.registry.reconcile(paths))
+      this.registry.reconcile(paths)
       const after=new Set(indexedPaths())
       return before.filter(path=>!after.has(path))
     }

@@ -179,6 +179,11 @@ test('C2 an external move is paired whichever path a caller resolves first, befo
     assert.throws(()=>f.registry.register(c),/not present/)
     assert.equal(f.registry.register(d).id,second,'a missing object is found again by its file identity')
     assert.deepEqual(moves.at(-1) && [moves.at(-1)!.objectId,moves.at(-1)!.from,moves.at(-1)!.to],[second,c,d])
+    // A pass that only reconciles what it walks (the page tree) announces the move too.
+    const g=join(f.root,'g.md'),h=join(f.root,'h.md');writeFileSync(g,'walked');const walked=f.registry.register(g).id
+    renameSync(g,h);f.registry.reconcile([h])
+    assert.equal(f.registry.find(h)!.id,walked)
+    assert.deepEqual(moves.at(-1) && [moves.at(-1)!.objectId,moves.at(-1)!.from,moves.at(-1)!.to],[walked,g,h])
     // Equal content alone never revives a missing object.
     const e=join(f.root,'e.md');writeFileSync(e,'third');const third=f.registry.register(e).id
     rmSync(e);assert.throws(()=>f.registry.register(e),/not present/)
