@@ -1,3 +1,5 @@
+import type { BookLocation } from '../library/reader/location'
+import { buildLibraryBoardSelection, buildLibraryBookLocation, buildLibraryDatabaseRows, type LibrarySelectionObject } from './libraryResourceSelection'
 import { calendarEventReadyRef } from '../../../shared/calendar-event-identity'
 import { ReadyRefSchema, toReadyUri } from '../../../shared/ready-ref'
 import { RSSReferenceSchema, rssReferencePath, type RSSReference } from '../../../shared/rss-reference'
@@ -345,4 +347,36 @@ export async function addDocumentQuoteReference(context: DocumentQuoteContext): 
   useWorkspace.setState({ chatPanelVisible: true })
   useAgent.getState().addAttachments([attachment])
   window.dispatchEvent(new CustomEvent(READY_FOCUS_CHAT_INPUT_EVENT))
+}
+
+async function addLibrarySelectionsToAgentInput(build: () => Promise<Array<{ resource: import('../../../shared/ipc-contracts/agent-runtime').LibraryResourceSelection; path: string }>>): Promise<void> {
+  const authority = captureComposerAuthority(useAgent.getState())
+  const resources = await build()
+  if (!isComposerAuthorityCurrent(useAgent.getState(), authority)) throw new Error('聊天会话已切换，请在当前会话重新选择资料。')
+  const attachments: ChatAttachment[] = resources.map(({ resource, path }) => ({
+    id: resource.id, name: resource.name, type: 'text', source: 'file', ext: '.reference', size: 0, path,
+    libraryResource: resource,
+  }))
+  useAgent.getState().addAttachments(attachments)
+  useWorkspace.setState({ chatPanelVisible: true })
+  window.dispatchEvent(new CustomEvent(READY_FOCUS_CHAT_INPUT_EVENT))
+}
+
+export function addBoardSelectionToAgentInput(board: LibrarySelectionObject, nodeIds: readonly string[]): Promise<void> {
+  return addLibrarySelectionsToAgentInput(async () => {
+    const resource = await buildLibraryBoardSelection(board, nodeIds)
+    return [{ resource, path: resource.uri }]
+  })
+}
+
+export function addBookLocationToAgentInput(bookId: string, location: BookLocation, title: string, quote?: string): Promise<void> {
+  return addLibrarySelectionsToAgentInput(async () => {
+    const position = { ...location }
+    const resource = await buildLibraryBookLocation(bookId, position, title, quote)
+    return [{ resource, path: toReadyUri({ kind: 'book-location', book: bookId, loc: `c${position.chapter}:${position.from}+${position.to - position.from}` }) }]
+  })
+}
+
+export function addDatabaseRowsToAgentInput(database: LibrarySelectionObject, rows: readonly LibrarySelectionObject[]): Promise<void> {
+  return addLibrarySelectionsToAgentInput(async () => (await buildLibraryDatabaseRows(database, rows)).map(resource => ({ resource, path: resource.target.uri })))
 }

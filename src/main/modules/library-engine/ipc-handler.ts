@@ -1,3 +1,4 @@
+import { registerLibraryAgentSelectionIPC } from './agent-selection-ipc'
 import { LibraryHighlightService } from './highlight-service'
 import type { IpcMain } from 'electron'
 import type { LibraryResult, LibraryState } from '../../../shared/library'
@@ -12,6 +13,10 @@ export function registerLibraryIPC(ipcMain: Pick<IpcMain, 'handle'>, dependencie
   pickFiles(): Promise<string[]>
   changed(state: LibraryState): void
 }): void {
+  registerLibraryAgentSelectionIPC(ipcMain, async () => {
+    const [{ getDatabase }, { productionLibraryReader }] = await Promise.all([import('../database'), import('../agent-control/codex-runtime/library-read-production')])
+    return productionLibraryReader(getDatabase())
+  })
   const { engine, reading } = dependencies
   const highlights = dependencies.highlights ?? new LibraryHighlightService(engine)
   const result = async <T>(work: () => Promise<T> | T): Promise<LibraryResult<T>> => {

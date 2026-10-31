@@ -99,3 +99,12 @@ enforce: true
 
 
 第 1–8 项历史验收（第 9 项续作前）：typecheck 通过；verify:ready-next-m7-read 的 Electron 读取测试 18/18、其余 64/65，唯一失败为第 9 项保留的工具冻结回归。工作台原脚本遇到 tsx listen EPERM 后按同一清单直接运行，Node 222 通过、同一回归失败、2 项 ABI guard；这两个文件已用 Electron 补跑 34/34，工作台原生段 8/8。额外 Codex 回归 40/40，新增验收脚本资源解析测试所在文件 3/3。完整 native 清单用现有 Electron 依赖直接运行（先 native:check，未执行 rebuild/install-app-deps），474 项中 471 通过、3 失败、0 跳过，失败来自范围外 calendar-layers-native、library-engine、ready-object-identity-native 的 EMFILE 文件监听。library-reference skills:lint、check-ipc-contract、改动文件 eslint（0 errors，4 个既有 warnings）及 diff --check 通过。额外 silent-catch 检查中，本范围已处理，仍有 59 处范围外告警；未修改那些文件。实际窗口和 installed-proof 整段运行仍由 Claude 验收。
+
+## M7-UI-DATA 三类选择入口合同（先于实现）
+
+- Renderer 提供 `buildLibraryBoardSelection(board, nodeIds)`、`buildLibraryBookLocation(bookId, location, title, quote?)`、`buildLibraryDatabaseRows(database, rows)`；对应聊天入口为 `addBoardSelectionToAgentInput`、`addBookLocationToAgentInput`、`addDatabaseRowsToAgentInput`，参数相同，返回 `Promise<void>`。对象参数为 `{ title, objectId }` 或 `{ title, path }`，只能指定一种身份。
+- 新增只读 `library:prepareAgentSelection` IPC，复用 Main 的 `LibraryReadSources` 和 `LibraryReadResources.admit`。只查已登记对象，不 locate/register/reconcile，不扫描、升级、保存或打开画板句柄。资料库身份取规范根目录摘要；画板/页面版本取文件原字节摘要，书籍版本取书籍资产摘要。IPC 的准备结果不是发送授权，真实发送仍重新准入。
+- 画板必须非空、无重复且节点存在；只授权显式节点，不展开群组。书籍输入使用 `reader/location.ts` 的 `BookLocation {chapter, from, to}`：章节零基，from/to 为忽略空白的 UTF-16 半开范围；只读入口转换为 Main 章节原文中含空白的 UTF-16 范围，不允许切开 emoji 代理对。标签中的章号显示为 chapter + 1，quote 仅用于可读标签，不作为正文授权。附件 path 保留阅读器原位置用于返回原文；libraryResource.uri/range 使用 Main 章节原文范围，导航地址不产生读取授权。
+- 数据库一次选择形成 N+1 个独立资源及附件：数据库定义为完整页、`access: database`，显式选中的每行分别为完整页、`access: text`。拒绝重复行、库自身和不属于该数据库的行。零行允许，仅授权定义；不查询未选择行。
+- 任一项失败时整批不加入附件；三种入口均抛出中文错误。准备后校验聊天归属，期间切换会话则拒绝；全部成功后一次加入 chip、展开并聚焦输入框。资料库切换后旧选择仍由发送时的 Main 准入拒绝。
+- 可执行合同 `ready-next-m7-ui-data.test.ts`：真实 Renderer store/入口与已注册只读 IPC 经真实临时文件及 SQLite 贯通到 codex-explicit-resources；检查 schema、标签、聚焦、输入资源、无隐式行授权、无写入、过期版本拒绝，以及非法选择/聊天切换不产生部分附件。加入 `verify:ready-next-m7-read` 的 Electron 段；界面按钮与真实窗口仍由 Claude 完成。

@@ -1425,6 +1425,7 @@ const libraryArchiveAPI: LibraryArchiveAPI = {
 }
 
 const libraryAPI = {
+  prepareAgentSelection: (input: import('../renderer/modules/agent/libraryResourceSelection').LibrarySelectionRequest): Promise<LibraryResult<import('../shared/ipc-contracts/agent-runtime').LibraryResourceSelection[]>> => ipcRenderer.invoke('library:prepareAgentSelection', input),
   listHighlights: (input: LibraryHighlightContext): Promise<LibraryResult<LibraryHighlightState>> => ipcRenderer.invoke('library:listHighlights', input),
   createHighlight: (input: LibraryHighlightCreate): Promise<LibraryResult<LibraryHighlightState>> => ipcRenderer.invoke('library:createHighlight', input),
   updateHighlight: (input: LibraryHighlightUpdate): Promise<LibraryResult<LibraryHighlightState>> => ipcRenderer.invoke('library:updateHighlight', input),

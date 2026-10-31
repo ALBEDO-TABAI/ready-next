@@ -1,7 +1,7 @@
 import type { Nodes } from 'mdast'
 import { markdownTree } from '../../../shared/document-blocks/markdown'
 import { assertBoundary } from '../../../shared/document-blocks/positions'
-import type { CodexCurrentDocumentAnchor, LibraryResourceSelection } from '../../../shared/ipc-contracts/agent-runtime'
+import { libraryResourceSelectionSchema, type CodexCurrentDocumentAnchor, type LibraryResourceSelection } from '../../../shared/ipc-contracts/agent-runtime'
 import { toReadyUri } from '../../../shared/ready-ref'
 import { digestCodexDocumentValue } from './codexCurrentDocumentAnchor'
 import type { ChatAttachment } from './types'
@@ -75,4 +75,48 @@ export function librarySelectionRangeFromDOM(content: string, range: Range): { s
   const start = endpoint(range.startContainer, range.startOffset, false), end = endpoint(range.endContainer, range.endOffset, true)
   if (end <= start) throw new Error('library_selection_ambiguous')
   return { start, end }
+}
+
+export type LibrarySelectionObject = { title: string } & ({ objectId: string; path?: never } | { path: string; objectId?: never })
+type LibraryPageSelection = Extract<LibraryResourceSelection, { kind: 'document_selection' }> & { target: { kind: 'object'; uri: string } }
+type SelectionItem = { id: string; name: string; target: { objectId: string } | { path: string } }
+export type LibrarySelectionRequest =
+  | (SelectionItem & { kind: 'board'; nodeIds: string[] })
+  | { kind: 'book'; id: string; name: string; bookId: string; location: import('../library/reader/location').BookLocation }
+  | (SelectionItem & { kind: 'database'; rows: SelectionItem[] })
+
+function selectionItem(object: LibrarySelectionObject, name = object.title): SelectionItem {
+  return { id: crypto.randomUUID(), name: [...name].slice(0, 300).join(''),
+    target: object.objectId !== undefined ? { objectId: object.objectId } : { path: object.path } }
+}
+async function prepareSelection(request: LibrarySelectionRequest): Promise<LibraryResourceSelection[]> {
+  try {
+    const result = await window.electronAPI.library.prepareAgentSelection(request)
+    if (!result.success) throw new Error(result.error)
+    return result.data.map(resource => libraryResourceSelectionSchema.parse(resource))
+  } catch (error) {
+    throw new Error('无法引用所选资料，请确认资料已保存、位置有效且仍在当前资料库中，然后重新选择。', { cause: error })
+  }
+}
+
+export async function buildLibraryBoardSelection(board: LibrarySelectionObject, nodeIds: readonly string[]): Promise<Extract<LibraryResourceSelection, { kind: 'board_selection' }>> {
+  const [resource] = await prepareSelection({ ...selectionItem(board, `${board.title} · ${nodeIds.length} 张卡`), kind: 'board', nodeIds: [...nodeIds] })
+  if (resource?.kind !== 'board_selection') throw new Error('画板引用返回异常，请重新选择。')
+  return resource
+}
+
+/** location uses the reader's non-whitespace UTF-16 offsets; Main converts to chapter source offsets. */
+export async function buildLibraryBookLocation(bookId: string, location: import('../library/reader/location').BookLocation, title: string, quote?: string): Promise<Extract<LibraryResourceSelection, { kind: 'book_location' }>> {
+  const name = `《${title}》第 ${location.chapter + 1} 章${quote ? ` · ${[...quote].slice(0, 12).join('')}` : ''}`
+  const [resource] = await prepareSelection({ kind: 'book', id: crypto.randomUUID(), name: [...name].slice(0, 300).join(''), bookId, location: { ...location } })
+  if (resource?.kind !== 'book_location') throw new Error('书籍引用返回异常，请重新选择。')
+  return resource
+}
+
+export async function buildLibraryDatabaseRows(database: LibrarySelectionObject, rows: readonly LibrarySelectionObject[]): Promise<LibraryPageSelection[]> {
+  const resources = await prepareSelection({ ...selectionItem(database, `${database.title} · ${rows.length} 行`), kind: 'database', rows: rows.map(row => selectionItem(row)) })
+  return resources.map(resource => {
+    if (resource.kind !== 'document_selection' || resource.target.kind !== 'object') throw new Error('数据库引用返回异常，请重新选择。')
+    return { ...resource, target: resource.target }
+  })
 }
