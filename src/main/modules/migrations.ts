@@ -4531,6 +4531,12 @@ const migrations: Migration[] = [
     CREATE TABLE fastcard_transfer_items (item_id TEXT PRIMARY KEY, operation_id TEXT NOT NULL REFERENCES fastcard_transfers(operation_id));
     CREATE TABLE fastcard_targets (library_id TEXT PRIMARY KEY, object_id TEXT NOT NULL);`)
   } },
+  { name: '153_document_import_operations', up: (db) => {
+    db.exec(`CREATE TABLE document_import_operations (
+      id TEXT PRIMARY KEY, root TEXT NOT NULL, target TEXT NOT NULL, source_hash TEXT NOT NULL, journal_json TEXT NOT NULL,
+      UNIQUE(root,target)
+    );`)
+  } },
 ]
 
 /**

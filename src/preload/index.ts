@@ -1309,6 +1309,15 @@ const themeAPI = {
   },
 }
 
+const documentImportAPI: import('../shared/document-import').DocumentImportAPI = {
+  choose: kind => ipcRenderer.invoke('documentImport:choose', kind),
+  preflight: (sourceId, target) => ipcRenderer.invoke('documentImport:preflight', sourceId, target),
+  execute: id => ipcRenderer.invoke('documentImport:execute', id),
+  resume: id => ipcRenderer.invoke('documentImport:resume', id),
+  status: id => ipcRenderer.invoke('documentImport:status', id),
+  list: () => ipcRenderer.invoke('documentImport:list'),
+}
+
 const documentAnnotationsAPI: import('../shared/document-comments').DocumentAnnotationsAPI = {
   comments: input => ipcRenderer.invoke('documentAnnotations:comments', input),
   synced: input => ipcRenderer.invoke('documentAnnotations:synced', input),
@@ -1683,6 +1692,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   documentDrafts: documentDraftsAPI,
   documentPages: documentPagesAPI,
   documentAnnotations: documentAnnotationsAPI,
+  documentImport: documentImportAPI,
   documentDatabase: (request: import('../shared/document-database').DatabaseRequest): Promise<import('../shared/document-database').DatabaseReply> => ipcRenderer.invoke('documentDatabase:request', request),
   library: libraryAPI,
   libraryArchive: libraryArchiveAPI,
@@ -1727,6 +1737,7 @@ declare global {
       documentDrafts: typeof documentDraftsAPI
       documentPages: typeof documentPagesAPI
       documentAnnotations: typeof documentAnnotationsAPI
+      documentImport: typeof documentImportAPI
       bookSources: typeof bookSourcesAPI
       libraryArchive: LibraryArchiveAPI
       library: typeof libraryAPI

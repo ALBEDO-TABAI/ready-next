@@ -1,3 +1,4 @@
+import { registerDocumentImportIPC } from './modules/document-import/ipc'
 import { ObjectRelationsService, registerObjectRelationsIPC } from './modules/object-relations/service'
 import { registerDocumentAnnotationsIPC } from './modules/document-annotations/ipc'
 import { setupDateMentions } from './modules/calendar-engine/date-mentions/runtime'
@@ -812,6 +813,7 @@ function setupGlobalIPC(): void {
     pages: documentPages.service, ready: documentPages.ready, writer: getDocumentWriteDependencies,
   })
   registerDocumentDatabaseIPC(ipcMain, documentDatabase)
+  registerDocumentImportIPC(ipcMain, { pages: documentPages.service, database: documentDatabase })
   registerDocumentAnnotationsIPC(ipcMain, { pages: documentPages.service, ready: documentPages.ready,
     vault: new VaultService(new AppSettingsRepository(), { home: app.getPath('home'), userData: app.getPath('userData'), isPackaged: app.isPackaged }),
   })
