@@ -5,13 +5,14 @@ import test from 'node:test'
 import { readRendererStyles } from './utils/read-renderer-styles'
 
 function readWorkspaceFile(path: string): string {
+  // allow-source-grep: native material initialization and cross-file CSS hooks are static integration contracts, without opening Electron.
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
 test('workbench shell exposes dedicated liquid glass hooks on primary chrome surfaces', () => {
   const topBar = readWorkspaceFile('src/renderer/components/layout/TopBar.tsx')
   const iconRail = readWorkspaceFile('src/renderer/modules/workbench/shell/ShellRail.tsx')
-  const sidePanel = readWorkspaceFile('src/renderer/components/layout/SidePanel.tsx')
+  const sidePanel = readWorkspaceFile('src/renderer/modules/workbench/shell/ShellSidebar.tsx')
   const tabs = readWorkspaceFile('src/renderer/components/workbench/WorkbenchProjectTabs.tsx')
   const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
 
@@ -40,7 +41,7 @@ test('workbench has no backdrop scene; liquid test exercises the composer lens',
   const chatInput = readWorkspaceFile('src/renderer/components/agent/ChatInput.tsx')
   const workbenchMode = readWorkspaceFile('src/renderer/pages/WorkbenchMode.tsx')
   const topBar = readWorkspaceFile('src/renderer/components/layout/TopBar.tsx')
-  const sidePanel = readWorkspaceFile('src/renderer/components/layout/SidePanel.tsx')
+  const sidePanel = readWorkspaceFile('src/renderer/modules/workbench/shell/ShellSidebar.tsx')
   const tabs = readWorkspaceFile('src/renderer/components/workbench/WorkbenchProjectTabs.tsx')
   const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
 

@@ -24,7 +24,6 @@ import { requestShellAction } from '../../workbench/commands/shell-actions'
 // their own places, so the navigator carries none of them (W2 §2.2).
 export interface InkSidebarProps {
   roots: PageRoot[]
-  visible: boolean
   api?: DocumentPagesAPI
   /** Opens in the current tab, or a new one for ⌘/Ctrl-click. */
   onOpen?(node: PageNode, newTab?: boolean): void | Promise<void>
@@ -42,7 +41,7 @@ function openNode(node: PageNode, newTab = false) {
   requestWorkbenchModeOpen('document')
 }
 
-export function InkSidebar({ roots, visible, api = window.electronAPI.documentPages, onOpen = openNode, onShowFiles }: InkSidebarProps) {
+export function InkSidebar({ roots, api = window.electronAPI.documentPages, onOpen = openNode, onShowFiles }: InkSidebarProps) {
   const store = useMemo(() => createPageTreeStore(api), [api])
   const { trees, states, loading, error: loadError } = useStore(store)
   const home = useInkLayout(state => state.home)

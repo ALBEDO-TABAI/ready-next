@@ -16,6 +16,32 @@ function check(name, pass, detail = '') {
 const modeScene = mode => mode === 'document'
   ? '.ink-doc-app'
   : `[data-workbench-mode-panel="${mode}"][data-mode-visual-state="current"]`
+const MODES = [['1', 'browser'], ['2', 'document'], ['3', 'rss'], ['4', 'calendar']]
+
+// S1: the shell's one sidebar shows the current mode's navigator; no navigator is left inside a mode
+// panel. S8: both bands stay 52px in every mode (a tall navigator once squeezed the top band).
+async function shellFrame(page) {
+  return page.evaluate(() => {
+    const visible = el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== 'hidden' }
+    const sidebars = document.querySelectorAll('[data-shell-sidebar]')
+    const shown = [...document.querySelectorAll('[data-shell-navigator]')].filter(node => !node.hidden).map(node => node.getAttribute('data-shell-navigator'))
+    const inside = shown.length === 1 && Boolean(sidebars[0]?.querySelector(`[data-shell-navigator="${shown[0]}"]:not([hidden])`))
+    const leftovers = document.querySelectorAll('[data-workbench-mode-panel] :is(.ink-sidebar, .rss-nav, .sidebar[data-testid="sidebar"], [data-browser-tab-list], .vertical-tab-rail)').length
+    const bands = ['top', 'bottom'].map(side => Math.round(document.querySelector(`[data-shell-band="${side}"]`)?.getBoundingClientRect().height ?? -1))
+    const railTop = Math.round(document.querySelector('[data-shell-region="rail"]')?.getBoundingClientRect().top ?? -1)
+    // S5: one main entry each (counted by accessible name, visible elements only).
+    const named = name => [...document.querySelectorAll('button, [role="button"], a')].filter(el => visible(el) && ((el.getAttribute('aria-label') || '').trim() === name || (el.getAttribute('aria-label') || '').startsWith(`${name} `)))
+    return {
+      sidebars: sidebars.length, shown, inside, leftovers, bands, railTop,
+      search: named('搜索').filter(el => el.closest('[data-shell-region="rail"]')).length + document.querySelectorAll('.ink-sb-search').length,
+      settings: named('设置').length,
+      calendar: named('日历').length,
+      browser: named('浏览器').length,
+      backlinks: named('反向链接').length,
+      modeTabs: document.querySelectorAll('[data-chat-mode-tabs-dock], .draggable-mode-tabs').length,
+    }
+  })
+}
 
 async function waitFor(page, predicate, arg, timeout = 15000) {
   return page.waitForFunction(predicate, arg, { timeout }).then(() => true, () => false)
@@ -77,6 +103,52 @@ async function main() {
       check(`⌘${key} switches to ${mode}`, await waitFor(page, sel => Boolean(document.querySelector(sel)), modeScene(mode)))
     }
     const sidebarWidth = () => page.evaluate(() => document.querySelector('[data-shell-sidebar]')?.getBoundingClientRect().width ?? 0)
+    // S1 / S5 / S8 in each of the four modes.
+    for (const [key, mode] of MODES) {
+      await page.keyboard.press(`Meta+${key}`)
+      await waitFor(page, sel => Boolean(document.querySelector(sel)), modeScene(mode))
+      await harness.sleep(600)
+      const frame = await shellFrame(page)
+      check(`S1 ${mode}: one sidebar showing the ${mode} navigator`, frame.sidebars === 1 && frame.shown.length === 1 && frame.shown[0] === mode && frame.inside, JSON.stringify({ sidebars: frame.sidebars, shown: frame.shown }))
+      check(`S1 ${mode}: no navigator left inside a mode panel`, frame.leftovers === 0, String(frame.leftovers))
+      check(`S8 ${mode}: both bands 52px and the rail starts under the top band`, frame.bands[0] === 52 && frame.bands[1] === 52 && frame.railTop === 52, `${frame.bands.join('/')} rail ${frame.railTop}`)
+      check(`S5 ${mode}: one entry each for search, settings, calendar and mode switching; no backlinks entry`,
+        frame.search === 1 && frame.settings === 1 && frame.calendar === 1 && frame.browser === 1 && frame.backlinks === 0 && frame.modeTabs === 0,
+        JSON.stringify({ search: frame.search, settings: frame.settings, calendar: frame.calendar, browser: frame.browser, backlinks: frame.backlinks, modeTabs: frame.modeTabs }))
+    }
+
+    // S7: inside the calendar, ⌘, is global settings and ⌘\ is the theme, as everywhere else.
+    await page.keyboard.press('Meta+4')
+    await waitFor(page, sel => Boolean(document.querySelector(sel)), modeScene('calendar'))
+    await page.locator('[data-testid="ready-calendar"]').click({ position: { x: 600, y: 400 } }).catch(() => {})
+    const themeBefore = await page.evaluate(() => document.documentElement.dataset.theme)
+    await page.keyboard.press('Meta+Backslash')
+    const themeFlipped = await waitFor(page, previous => document.documentElement.dataset.theme && document.documentElement.dataset.theme !== previous, themeBefore, 5000)
+    await page.keyboard.press('Meta+Backslash')
+    await waitFor(page, previous => document.documentElement.dataset.theme === previous, themeBefore, 5000)
+    check('S7 ⌘\\ in the calendar switches the theme', themeFlipped)
+    await page.keyboard.press('Meta+Comma')
+    const settingsOpened = await waitFor(page, () => location.hash.startsWith('#/settings'), undefined, 5000)
+    const calendarSettings = await page.locator('[data-testid="settings"]').count()
+    check('S7 ⌘, in the calendar opens the global settings', settingsOpened && calendarSettings === 0)
+    if (settingsOpened) {
+      await page.evaluate(() => { location.hash = '#/workbench' })
+      await waitFor(page, () => Boolean(document.querySelector('[data-workbench-shell]')), undefined, 20000)
+      await harness.sleep(1500)
+    }
+
+    // The collapsed sidebar slides out from the window's left edge, and the header button pins it back.
+    await page.keyboard.press('Meta+2')
+    await waitFor(page, sel => Boolean(document.querySelector(sel)), modeScene('document'))
+    await page.locator('[data-shell-navigator="document"] button[aria-label="收起侧栏"]').click()
+    // Collapsed on a wide window the sidebar is a zero-width column; only a slide-out carries data-open.
+    const collapsedByButton = await waitFor(page, () => (document.querySelector('[data-shell-sidebar]')?.getBoundingClientRect().width ?? 1) < 1)
+    await page.mouse.move(56, 420)
+    const peeked = await waitFor(page, () => document.querySelector('[data-shell-sidebar]')?.getAttribute('data-open') === 'true')
+    await page.locator('[data-shell-navigator="document"] button[aria-label="固定侧栏"]').click()
+    const pinned = await waitFor(page, () => { const el = document.querySelector('[data-shell-sidebar]'); return !el?.hasAttribute('data-open') && (el?.getBoundingClientRect().width ?? 0) > 100 })
+    check('the header button collapses the sidebar, the left edge peeks it, the pin docks it', collapsedByButton && peeked && pinned, JSON.stringify({ collapsedByButton, peeked, pinned }))
+
     const before = await sidebarWidth()
     await page.keyboard.press('Meta+b')
     await harness.sleep(700)
@@ -127,11 +199,42 @@ async function main() {
     const dot = await page.locator('[data-shell-band="top"] button[aria-label="今日"]').boundingBox()
     check('the brand dot sits in the top-right corner', dot && dot.x > 1440 - 140 && dot.y < 52, JSON.stringify(dot))
     await page.locator('[data-shell-band="top"] button[aria-label="今日"]').click()
-    check('the brand dot opens 今日', await waitFor(page, () => Boolean(document.querySelector('.ink-doc-app .ink-sb-home-pill.is-active'))))
+    check('the brand dot opens 今日', await waitFor(page, () => Boolean(document.querySelector('[data-shell-navigator="document"]:not([hidden]) .ink-sb-home-pill.is-active'))))
 
     // DL11a: the two bands are equally tall.
     const bands = await page.evaluate(() => ['top', 'bottom'].map(side => Math.round(document.querySelector(`[data-shell-band="${side}"]`)?.getBoundingClientRect().height ?? -1)))
     check('the top and bottom bands are equally tall (52px)', bands[0] === 52 && bands[1] === 52, bands.join('/'))
+
+    // S6: settings are honest — no sample data, the W2 §3.2 groups, the new sections render, and every
+    // toggle reads back after a restart.
+    const openSettings = async section => {
+      await session.page.evaluate(id => { location.hash = `#/settings?section=${id}` }, section)
+      await waitFor(session.page, () => Boolean(document.querySelector('.settings-page-shell')), undefined, 20000)
+      await harness.sleep(900)
+    }
+    await openSettings('appearance')
+    const settingsText = await session.page.evaluate(() => document.querySelector('.settings-page-shell')?.textContent ?? '')
+    const groups = await session.page.evaluate(() => [...document.querySelectorAll('.sx-nav-group-label')].map(node => node.textContent?.trim()))
+    check('S6 settings carry no sample account data and no unsaved general switches', !/Ready User|user@ready\.app|界面语言|推送通知|使用分析|崩溃报告/.test(settingsText))
+    check('S6 settings are grouped as 通用 / 助手 / 内容 / 隐私与数据 / 关于', JSON.stringify(groups) === JSON.stringify(['通用', '助手', '内容', '隐私与数据', '关于']), JSON.stringify(groups))
+    await openSettings('library')
+    check('S6 设置 › 资料库 shows where the library lives', await waitFor(session.page, root => document.querySelector('.settings-page-shell')?.textContent?.includes(root), path.join(temp, '测试资料库'), 10000))
+    await openSettings('calendar')
+    check('S6 设置 › 日历 holds the calendar\'s own preference pages', await waitFor(session.page, () => Boolean(document.querySelector('[data-testid="calendar-settings"] [data-testid="set-nav-general"]')), undefined, 15000))
+    await openSettings('privacy')
+    const readToggles = () => session.page.evaluate(() => [...document.querySelectorAll('.settings-page-shell [role="switch"]')].map(node => node.getAttribute('aria-checked')))
+    const toggleCount = (await readToggles()).length
+    const original = await readToggles()
+    const switches = session.page.locator('.settings-page-shell [role="switch"]')
+    for (let index = 0; index < toggleCount; index++) { await switches.nth(index).click(); await harness.sleep(300) }
+    const flipped = await readToggles()
+    await harness.close(session.app)
+    session = await harness.launch(profile)
+    await openSettings('privacy')
+    const reread = await readToggles()
+    check('S6 every privacy switch reads back after a restart', toggleCount === 2 && JSON.stringify(reread) === JSON.stringify(flipped) && JSON.stringify(flipped) !== JSON.stringify(original), JSON.stringify({ original, flipped, reread }))
+    const restore = session.page.locator('.settings-page-shell [role="switch"]')
+    for (let index = 0; index < toggleCount; index++) { await restore.nth(index).click(); await harness.sleep(300) }
   } finally {
     if (session) await harness.close(session.app)
     fixture.server.close()

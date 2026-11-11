@@ -21,13 +21,15 @@
 
 | 目标 | 入口 |
 | --- | --- |
-| 面板切换/动画壳 | `src/renderer/components/layout/SidePanel.tsx` |
+| 唯一侧栏与导航器槽位（宽度、收起和悬停滑出由外壳负责） | `src/renderer/modules/workbench/shell/ShellSidebar.tsx`、`src/renderer/pages/WorkbenchMode.tsx` |
+| 文档导航器（页面 / 文件） | `src/renderer/modules/document/navigator/DocumentNavigator.tsx` |
 | 文件面板标题与主体 | `src/renderer/components/layout/FilesPanel.tsx` |
 | 文件树编排 | `src/renderer/components/layout/FileTree.tsx` |
 | 文件树子行为 | `src/renderer/components/layout/file-tree/` |
 | 文件夹缩略图 | `FolderPreview.tsx`、`folderPreviewModel.ts` |
-| 全局搜索 | `GlobalSearchPanel.tsx` |
-| 技能中心 | `SkillsCenterPanel.tsx` |
+| 全局查找与替换 | `src/renderer/components/search/FindReplaceWorkspace.tsx` |
+| 技能中心整页 | `src/renderer/pages/SkillsCenter.tsx`（`/skills`） |
+| 关系图谱（全工作区 / 当前文档） | `src/renderer/components/graph/GraphWorkspace.tsx` |
 | 文件涌现 | `FileEmergenceSection.tsx`、`fileEmergenceViewModel.ts` |
 
 瞬时菜单不要挂在带 `overflow-hidden` 的侧栏布局内；使用顶层弹层并由拥有菜单的组件计算位置。文件选择、拖放、移动和删除优先查 `file-tree/`，不要继续把所有逻辑塞回 `FileTree.tsx`。

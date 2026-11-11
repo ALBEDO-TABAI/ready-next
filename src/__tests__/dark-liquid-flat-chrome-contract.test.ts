@@ -21,17 +21,12 @@ test('dark liquid chrome removes the old top-edge glow from shared panel surface
   assert.doesNotMatch(cardBlock[1], /radial-gradient\(/)
 })
 
-test('files side panel advertises its variant and stays fused with surrounding dark liquid chrome via shared shell tokens', () => {
-  const sidePanel = readWorkspaceFile('src/renderer/components/layout/SidePanel.tsx')
-  const styles = readRendererStyles()
+test('the shared sidebar identifies its mode and stays transparent on the window glass', () => {
+  const sidebar = readWorkspaceFile('src/renderer/modules/workbench/shell/ShellSidebar.tsx')
+  const styles = readWorkspaceFile('src/renderer/modules/workbench/shell/shell.css')
 
-  assert.match(sidePanel, /data-side-panel-variant=\{panelWidth > 0 \? variant : 'hidden'\}/)
-  assert.match(
-    styles,
-    /\.workbench-panel-frame\[data-side-panel-variant='files'\]\s*\{[\s\S]*?background:\s*var\(--workbench-side-panel-bg\)/,
-  )
-  assert.match(
-    styles,
-    /html\[data-theme='dark'\]:root\s*\{[\s\S]*?--workbench-side-panel-bg:\s*transparent;/,
-  )
+  assert.match(sidebar, /data-shell-sidebar="true"/)
+  assert.match(sidebar, /data-shell-sidebar-mode=\{mode\}/)
+  assert.match(sidebar, /className=\{`shell-sidebar workbench-panel-frame/)
+  assert.match(styles, /\.shell-sidebar:not\(\.shell-float-drawer\)\s*\{\s*background:\s*transparent;\s*box-shadow:\s*none;/)
 })

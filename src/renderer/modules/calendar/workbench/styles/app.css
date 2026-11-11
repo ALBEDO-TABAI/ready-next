@@ -267,6 +267,9 @@
 /* ---------- settings modal ---------- */
 .ready-calendar .modal { position: fixed; left: 50%; top: max(24px, min(100px, calc((100vh - 650px) / 2))); width: 954px; height: 650px; max-width: calc(100vw - 48px); max-height: calc(100vh - 48px); transform: translateX(-50%); z-index: 407; background: var(--c-modal);
   border-radius: 24px; backdrop-filter: blur(24px) saturate(150%); box-shadow: 0 0 0 1px var(--glass-rim), var(--sh-lg); display: flex; overflow: hidden; animation: popin var(--t-def) var(--ease); }
+/* 设置 › 日历: the calendar's preference pages inline in the global settings page (W2 §3.2). */
+.ready-calendar.calendar-settings-embed { height: auto; overflow: visible; contain: none; }
+.ready-calendar .set-page { display: flex; min-height: 560px; border-radius: 18px; background: var(--c-modal); box-shadow: inset 0 0 0 1px var(--c-ring); overflow: hidden; }
 .ready-calendar .modal-nav { width: 253px; flex: none; background: var(--c-modal-nav); padding: 8px; overflow-y: auto; margin: 1px 0 1px 1px; border-radius: 23px 0 0 23px; }
 .ready-calendar .set-grp { height: 28px; padding: 6px 8px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--c-text3); }
 .ready-calendar .set-nav-row { display: flex; align-items: center; gap: 8px; height: 28px; margin-top: 2px; padding: 0 6px; border-radius: 6px; font-size: 14px; line-height: 20px; font-weight: 500; color: var(--c-text-nav, var(--c-text2)); cursor: default; }

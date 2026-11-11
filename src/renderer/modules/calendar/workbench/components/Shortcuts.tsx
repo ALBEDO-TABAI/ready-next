@@ -2,7 +2,7 @@ import { appShortcut, shortcutKeycaps } from '../../../../../shared/app-shortcut
 import { t, Key } from '../i18n';
 import { MOD } from '../commands';
 import { isMac } from '../platform';
-import { setState } from '../store';
+import { openCalendarSettings } from '../store';
 import { Kbd } from './Panel';
 
 // Row = [label, alternatives]; a string row is a sub-heading ("Selected events…").
@@ -29,7 +29,7 @@ export function ShortcutList({ filter = '' }: { filter?: string }) {
         return <div key={g} className="ps-grp">
           <div className="ps-title">{t(g)}</div>
           <ul className="ps-list">{vis.map((r) => typeof r === 'string' ? <li key={r} className="sub">{t(r)}</li> : <li key={r[0]}><span>{t(r[0])}</span><span className="kbds">{r[1].map((k, i) => <span key={i} className="kbds">{i > 0 && <span className="or">{t('or')}</span>}<Kbd keys={k.map(cap)} /></span>)}{r[2] && <span className="or">{t(r[2] === 'click' ? 'sClick' : 'drag')}</span>}</span></li>)}
-            {g === 'shortcutsGlobal' && !q && <li className="link" onClick={() => setState({ overlay: 'settings', settingsPage: 'menubar' })}><span>{t('menuBarSettings')} →</span></li>}</ul>
+            {g === 'shortcutsGlobal' && !q && <li className="link" onClick={() => openCalendarSettings('menubar')}><span>{t('menuBarSettings')} →</span></li>}</ul>
         </div>;
       })}
     </div>

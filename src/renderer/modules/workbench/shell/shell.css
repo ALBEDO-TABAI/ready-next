@@ -201,6 +201,13 @@
   overflow: clip;
 }
 
+/* overflow: clip is not a scroll container, so as a flex item the shell row would keep its content's
+   height as a minimum: a tall navigator (the calendar's) would grow the row and squeeze the top band.
+   The row takes exactly the space between the bands; the sidebar clips its own content. */
+[data-workbench-shell] {
+  min-height: 0;
+}
+
 /* A thin hover strip at the window's left edge brings the slide-out sidebar back. */
 .shell-edge-reveal {
   position: absolute;

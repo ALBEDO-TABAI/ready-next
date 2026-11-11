@@ -32,7 +32,7 @@ export const defaultPrefs = (): Prefs => ({
   notifications: true, defaultReminder: 10, defaultAllDayReminder: -1, notifySound: true, menuBarNext: true, menuBarMaxLen: 32,
   displayName: '', email: '', videoProvider: 'none', videoUrl: '', autoAddVideo: false,
 });
-export type Overlay = null | 'settings' | 'shortcuts' | 'search' | 'goto' | 'recurrence';
+export type Overlay = null | 'shortcuts' | 'search' | 'goto' | 'recurrence';
 export interface MenuState { kind: 'view' | 'chip' | 'grid' | 'calendar' | 'repeat' | 'busy' | 'visibility' | 'reminder' | 'calendarPick' | 'time' | 'tz' | 'color' | 'evColor' | 'recurrence'; x: number; y: number; data?: any }
 export interface Toast { id: number; text: string; undo?: () => void }
 export interface ScopeAsk { kind: 'edit' | 'delete'; resolve: (s: 'this' | 'following' | 'all' | null) => void }
@@ -153,6 +153,8 @@ export function goToDay(d:DayNum){setState({anchor:d,cursorDay:d})}
 export function step(dir:1|-1){const p=state.prefs;setState({anchor:p.gridView==='month'?addMonths(startOfMonth(state.anchor),dir):(p.daysPerPeriod===7?startOfWeek(state.anchor,p.weekStartsOn):state.anchor)+dir*p.daysPerPeriod})}
 export function zoom(d:1|-1|0){void setPrefs({densityZoomLevel:d===0?0:Math.max(state.minDensity,Math.min(20,state.prefs.densityZoomLevel+d))})}
 export function openOverlay(overlay:Overlay){setState({overlay,menu:null,prefs:{...state.prefs,contextPanel:overlay==='search'||overlay==='shortcuts'||state.prefs.contextPanel}})}
+// The calendar's preferences are a section of the global settings page (W2 §3.2); `page` picks its sub-page.
+export function openCalendarSettings(page?: string) { if (page) setState({ settingsPage: page }); window.location.hash = '#/settings?section=calendar'; }
 export function openMenu(menu:MenuState|null){const rect=document.querySelector('.ready-calendar')?.getBoundingClientRect();setState({menu:menu&&rect?{...menu,x:menu.x-rect.left,y:menu.y-rect.top}:menu})}
 let toastSeq=0;
 export function toast(text:string,undo?:()=>void){const id=++toastSeq;setState(s=>({toasts:[...s.toasts.slice(-2),{id,text,undo}]}));window.setTimeout(()=>setState(s=>({toasts:s.toasts.filter(x=>x.id!==id)})),5000)}

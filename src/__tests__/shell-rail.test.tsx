@@ -35,12 +35,12 @@ test('ShellRail dispatches mode, split and global actions and renders current st
       else Reflect.deleteProperty(globalThis, key)
     }
   })
-  const modes: string[] = [], splits: string[] = [], panels: string[] = []
+  const modes: string[] = [], splits: string[] = []
   let assistantOpens = 0, searches = 0
   dom.window.addEventListener('ready:open-quick-switcher', () => { searches += 1 })
-  const props: ShellRailProps = { mode: 'document', splitMode: 'rss', activePanel: 'files', panelOpen: true,
+  const props: ShellRailProps = { mode: 'document', splitMode: 'rss',
     onModeChange: mode => modes.push(mode), onSplitToggle: mode => splits.push(mode),
-    onPanelClick: panel => panels.push(panel), assistantOpen: true, onAssistantOpen: () => { assistantOpens += 1 } }
+    assistantOpen: true, onAssistantOpen: () => { assistantOpens += 1 } }
   function Location() { return <output>{useLocation().pathname}</output> }
   const render = (patch: Partial<ShellRailProps> = {}) => act(async () => root.render(
     <MemoryRouter><ShellRail {...props} {...patch} /><Location /></MemoryRouter>,
@@ -69,17 +69,14 @@ test('ShellRail dispatches mode, split and global actions and renders current st
   assert.equal(button('资讯').getAttribute('aria-pressed'), 'false')
   assert.equal(button('资讯').getAttribute('data-split'), 'true')
   assert.equal(button('文档').hasAttribute('data-split'), false)
-  await render({ mode: 'rss', splitMode: null, panelOpen: false })
+  await render({ mode: 'rss', splitMode: null })
   assert.equal(button('资讯').getAttribute('aria-pressed'), 'true')
   assert.equal(button('资讯').getAttribute('data-active-glyph'), 'stroke')
   assert.equal(button('资讯').querySelector('.is-filled'), null)
   assert.equal(button('文档').getAttribute('aria-pressed'), 'false')
   assert.equal(dom.window.document.querySelector('[data-split="true"]'), null)
-  assert.ok(button('文件').classList.contains('is-remembered'))
-  assert.equal(button('文件').getAttribute('aria-pressed'), 'false')
-  for (const [label, id] of [['文件', 'files'], ['查找与替换', 'search'], ['技能中心', 'skills'], ['反向链接', 'backlinks'], ['关系图谱', 'graph']]) {
-    await act(async () => button(label).click())
-    assert.equal(panels.at(-1), id)
+  for (const label of ['文件', '查找与替换', '技能中心', '反向链接', '关系图谱']) {
+    assert.equal(dom.window.document.querySelector(`button[aria-label="${label}"]`), null)
   }
   assert.equal(dom.window.document.querySelector('[aria-label="助手 Tab"]'), null)
   await render({ assistantOpen: false })

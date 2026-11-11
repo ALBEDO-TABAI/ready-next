@@ -1,6 +1,6 @@
 import { api, unwrap } from './platform';
 // Command registry: shared by the keyboard handler, ⌘K menu, shortcuts panel and native menu.
-import { getState, setState, setView, goToday, step, zoom, openOverlay, setPrefs, deleteOccurrences, duplicateOccurrences, copyOccurrences, paste, undo, redo, select, occurrencesIn, periodDays, monthRange, importIcsFile, exportCalendar, clearSelection, toast } from './store';
+import { getState, setState, setView, goToday, step, zoom, openOverlay, setPrefs, deleteOccurrences, duplicateOccurrences, copyOccurrences, paste, undo, redo, select, occurrencesIn, periodDays, monthRange, importIcsFile, exportCalendar, clearSelection, toast , openCalendarSettings } from './store';
 import { newEventNow } from './components/Sidebar';
 import { toggleAvailability, stopAvailability } from './availability';
 import { Key, translate } from './i18n';
@@ -116,7 +116,7 @@ export function handleKey(e: KeyboardEvent): boolean {
   // two-key sequences: g s (settings), g t (today), g . (go to date); e <field> edits a field of the open event
   if (!(e.metaKey || e.ctrlKey || e.altKey) && seq && Date.now() - seq.t < 1200) {
     const p = seq.k; seq = null;
-    if (p === 'g') { if (k === 's') { openOverlay('settings'); return true; } if (k === 't') { goToday(); return true; } if (k === '.') { openOverlay('goto'); return true; } return false; }
+    if (p === 'g') { if (k === 's') { openCalendarSettings(); return true; } if (k === 't') { goToday(); return true; } if (k === '.') { openOverlay('goto'); return true; } return false; }
     if (p === 'e') return editField(k);
   }
   if (!(e.metaKey || e.ctrlKey || e.altKey) && (k === 'g' || (k === 'e' && (s.editing || s.selected.length === 1)))) { seq = { k, t: Date.now() }; return true; }

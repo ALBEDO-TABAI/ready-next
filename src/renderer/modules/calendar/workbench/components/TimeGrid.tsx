@@ -6,7 +6,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronUp, Plus, X } from 'lucide-react';
 import { addSlot, removeSlot } from '../availability';
 import { layoutDay, packSpans, fromWall, toWall, dayOf, startOfDayMs, minutesOfDay, weekday, ymd, Occurrence, isoDate, DayNum } from '@shared/calendar';
-import { useStore, getState, setState, periodDays, occurrencesIn, select, clearSelection, createEvent, updateOccurrence, openMenu, setPrefs, calendarOf, primaryCalendar } from '../store';
+import { useStore, getState, setState, periodDays, occurrencesIn, select, clearSelection, createEvent, updateOccurrence, openMenu, setPrefs, calendarOf, primaryCalendar, openCalendarSettings } from '../store';
 import { useSize } from '../hooks';
 import { G, gutterWidth, colWidth, hourHeight, minDensityLevel, allDayHeight } from '../geometry';
 import { hourLabel, timeOfFull, wdShort, gmtLabel, panelTime } from '../fmt';
@@ -236,7 +236,7 @@ export function TimeGrid({active=true}:{active?:boolean}) {
     <div className="gridwrap" ref={wrap} data-testid="timegrid" data-colw={cw} data-hourh={hourH} data-gutter={gutter}>
       <div className="colheads" style={{ height: G.colHeader }}>
         <div className="gutterhead" style={{ width: gutter, justifyContent: 'space-between', paddingLeft: 6 }}>
-          <button className="ibtn xs" style={{ width: 16, height: 16, padding: 0 }} title={t('addTz')} onClick={() => setState({ overlay: 'settings', settingsPage: 'general' })}><Plus size={10} /></button>
+          <button className="ibtn xs" style={{ width: 16, height: 16, padding: 0 }} title={t('addTz')} onClick={() => openCalendarSettings('general')}><Plus size={10} /></button>
           {tzs.slice().reverse().map((z) => <span key={z}>{gmtLabel(z, s.now)}</span>)}
         </div>
         {days.map((d) => {

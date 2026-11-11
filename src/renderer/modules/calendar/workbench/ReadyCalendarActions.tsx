@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { dayOf, isoDate, parseIsoDate, startOfDayMs } from '@shared/calendar'
 import type { RemoteCalendarEventSuggestion } from '@shared/calendar-remote-channel'
 import type { ReminderFirePayload } from '@shared/calendar-types'
-import { useStore, getState, setState, periodDays, monthRange, findOccurrence, reload, createEvent, primaryCalendar, goToDay, select, toast, openOverlay, setView } from './store'
+import { useStore, getState, setState, periodDays, monthRange, findOccurrence, reload, createEvent, primaryCalendar, goToDay, select, toast, openOverlay, setView, openCalendarSettings } from './store'
 import { api, unwrap } from './platform'
 import { registerModuleAgentHandler } from '../../../utils/moduleAgentBridge'
 import { useCalendarSession } from '../../../stores/useCalendarSession'
@@ -33,7 +33,8 @@ export function ReadyCalendarActions({active,buttonsHost}:{active:boolean;button
         }else if(target.command==='create'){
           const id=`native-${request.id}`,now=Math.ceil(Date.now()/900000)*900000
           if(getState().events[id])select([id]);else if(!await createEvent({id,uid:`${id}@ready.local`,start:now,end:now+getState().prefs.defaultEventDuration*60000,allDay:false},{draft:true}))return
-        }else if(target.command==='settings'||target.command==='search')openOverlay(target.command)
+        }else if(target.command==='settings')openCalendarSettings()
+        else if(target.command==='search')openOverlay('search')
         else setView(target.command==='month'?'month':'default',target.command==='day'?1:7)
         await unwrap(api().ackNavigation(request.id))
       }catch(error){ console.warn('[ReadyCalendarActions] consume navigation request failed:', error instanceof Error ? error.message : String(error));toast(String(error))}finally{consuming.current=false}

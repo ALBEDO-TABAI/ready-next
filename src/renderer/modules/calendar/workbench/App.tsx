@@ -10,7 +10,6 @@ import { TimeGrid } from './components/TimeGrid'
 import { MonthGrid } from './components/MonthGrid'
 import { Panel } from './components/Panel'
 import { Menus } from './components/Menus'
-import { Settings } from './components/Settings'
 import { Toasts, ScopeDialog, GotoDialog, RecurrenceDialog } from './components/Overlays'
 import { useTheme } from '../../../stores/useTheme'
 import { dayOf } from '@shared/calendar'
@@ -69,7 +68,7 @@ export function App({active=true}:{active?:boolean}) {
         <ShellNavigator mode="calendar" label="日历" scopeClassName={`ready-calendar${s.dark?' dark':''}`}><Sidebar actionsHost={setActionsHost}/></ShellNavigator>
         <main className="main" data-liquid-scroll-root="calendar-workbench-main"><TopBar/>{s.view==='month'?<MonthGrid active={active}/>:<TimeGrid active={active}/>}{active&&s.view!=='month'&&s.days===1&&<ThisDay date={isoDate(s.anchor)} timeZone={s.zone}/>}</main>
         {s.panel&&<Panel/>}
-        <Menus/>{s.overlay==='settings'&&<Settings/>}{s.overlay==='goto'&&<GotoDialog/>}{s.overlay==='recurrence'&&<RecurrenceDialog/>}<ScopeDialog/><Toasts/>
+        <Menus/>{s.overlay==='goto'&&<GotoDialog/>}{s.overlay==='recurrence'&&<RecurrenceDialog/>}<ScopeDialog/><Toasts/>
         <ReadyCalendarActions active={active} buttonsHost={actionsHost}/>
       </div>
       {s.error&&<div role="alert" className="calendar-save-status error">未保存：{s.error}</div>}

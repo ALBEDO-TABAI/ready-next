@@ -89,16 +89,17 @@ test('file tree scroll root opts into the Chromium 148 liquid glass repaint guar
 
 test('workbench side and chat panels stay transparent while slots use the shared neutral glass tokens', () => {
   const styles = readRendererStyles()
-  const sidePanel = readWorkspaceFile('src/renderer/components/layout/SidePanel.tsx')
+  const sidePanel = readWorkspaceFile('src/renderer/modules/workbench/shell/ShellSidebar.tsx')
   const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
 
-  assert.match(styles, /\.workbench-panel-frame\[data-side-panel-variant='files'\]\s*\{[\s\S]*?background:\s*var\(--workbench-side-panel-bg\)/)
   // html:root now includes the FastCard window without a separate selector.
   assert.match(styles, /html:root\s*\{[\s\S]*?--workbench-side-panel-bg:\s*transparent;/)
   assert.match(styles, /html:root\s*\{[\s\S]*?--workbench-rail-slot-bg:\s*rgba\(222,\s*222,\s*220,\s*0\.64\);/)
   // c17b8883 Polish liquid glass workbench controls — 槽位内阴影收敛 0.11 → 0.10
   assert.match(styles, /html:root\s*\{[\s\S]*?--workbench-rail-slot-shadow:\s*[\s\S]*?inset 0 1\.5px 3px rgba\(24,\s*39,\s*77,\s*0\.10\)/)
-  assert.match(sidePanel, /background:\s*'transparent'/)
+  assert.match(sidePanel, /className=\{`shell-sidebar workbench-panel-frame/)
+  const shellStyles = readWorkspaceFile('src/renderer/modules/workbench/shell/shell.css')
+  assert.match(shellStyles, /\.shell-sidebar:not\(\.shell-float-drawer\)\s*\{\s*background:\s*transparent;\s*box-shadow:\s*none;/)
   assert.match(chatPanel, /background:\s*'transparent'/)
   assert.doesNotMatch(styles, /html:root \[data-liquid-shell='chat-panel'\],[\s\S]*?\[data-liquid-shell='side-panel'\]:not\(\[data-side-panel-variant='hidden'\]\)\s*\{[\s\S]*?background:/)
   assert.doesNotMatch(styles, /html:root \[data-liquid-shell='chat-panel'\],[\s\S]*?\[data-liquid-shell='side-panel'\]:not\(\[data-side-panel-variant='hidden'\]\)\s*\{[\s\S]*?backdrop-filter:/)
@@ -158,10 +159,11 @@ test('compact utility settings opt into short control slots so labels do not col
   assert.match(settingsPage, /case 'readonly':[\s\S]*?<ShortcutKeys value=[\s\S]*?className="sx-value"/)
   assert.match(settingsPage, /case 'button':[\s\S]*?className=\{settingsButtonClass\(/)
   assert.match(settingsPage, /settings: READY_SHORTCUT_GUIDE\.map\(\(item\) => \(\{ \.\.\.item, type: 'readonly' as const \}\)\)/)
-  assert.match(shortcutCatalog, /id: 'captureWindow'/)
-  assert.match(shortcutCatalog, /id: 'sendMessage'/)
-  assert.match(shortcutCatalog, /id: 'toggleSidebar'/)
-  assert.match(shortcutCatalog, /id: 'switchMode'/)
+  assert.match(shortcutCatalog, /id: 'capture-window'/)
+  assert.match(shortcutCatalog, /id: 'toggle-sidebar'/)
+  for (const mode of ['browser', 'document', 'rss', 'calendar']) {
+    assert.ok(shortcutCatalog.includes(`id: 'switch-${mode}'`))
+  }
   assert.doesNotMatch(shortcutCatalog, /id: 'newTask'/)
   assert.doesNotMatch(shortcutCatalog, /id: 'globalSearch'/)
   assert.match(settingsPage, /id: 'version'[\s\S]*?type: 'readonly'/)

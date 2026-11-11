@@ -169,12 +169,12 @@ test('settling frames fit the finished layout once and preserve a manually adjus
   }
 })
 
-test('document nodes reveal a content card, click through, and open the large graph workspace', async () => {
+test('document nodes reveal a content card, click through, and switch the graph workspace between library and current document', async () => {
   const handle = installDom()
   try {
-    const [{ default: GraphView }, { default: GraphCenterPanel }, { useWorkspace }, { useDocTabs }, modeModule] = await Promise.all([
+    const [{ default: GraphView }, { default: GraphWorkspace }, { useWorkspace }, { useDocTabs }, modeModule] = await Promise.all([
       import('../renderer/components/graph/GraphView'),
-      import('../renderer/components/layout/GraphCenterPanel'),
+      import('../renderer/components/graph/GraphWorkspace'),
       import('../renderer/stores/useWorkspace'),
       import('../renderer/stores/useDocTabs'),
       import('../renderer/stores/useMode'),
@@ -266,35 +266,37 @@ test('document nodes reveal a content card, click through, and open the large gr
       await unmount(root)
     }
 
-    let globalRequest: { centerPath?: string; depth?: number } | null = null
+    const queries: Array<{ workspaceRoot: string; centerPath?: string; depth?: number }> = []
+    handle.dom.window.electronAPI.document.getGraph = async query => {
+      queries.push(query)
+      return { success: true, data: { nodes: [], edges: [] } }
+    }
+    let closes = 0
     const panelRoot = createRoot(container)
     await act(async () => {
-      panelRoot.render(createElement(GraphCenterPanel, {
-        onOpenGlobal: (request) => { globalRequest = request },
+      panelRoot.render(createElement(GraphWorkspace, {
+        workspaceRoot: '/graph-workspace-scope-proof', request: {}, onClose: () => { closes += 1 },
       }))
     })
     await flush()
     try {
-      const globalButton = [...container.querySelectorAll('button')].find((button) => button.textContent?.trim() === '全局浏览')
-      assert.ok(globalButton, 'graph panel should expose the global browse entry')
-      await act(async () => globalButton.click())
-      assert.deepEqual(globalRequest, { centerPath: undefined, depth: undefined })
-
-      const focusButton = [...container.querySelectorAll('button')].find((button) => button.textContent?.trim() === '聚焦当前')
-      assert.ok(focusButton)
-      await act(async () => focusButton.click())
-      await act(async () => globalButton.click())
-      assert.deepEqual(globalRequest, { centerPath: path, depth: 2 })
-
-      await act(async () => {
-        panelRoot.render(createElement(GraphCenterPanel, {
-          onOpenGlobal: (request) => { globalRequest = request },
-          globalBrowseOpen: true,
-        }))
-      })
+      const scopeButton = (label: string) => {
+        const button = [...container.querySelectorAll('button')].find(button => button.textContent?.trim() === label)
+        assert.ok(button, `${label} scope must be available`)
+        return button
+      }
+      assert.ok(container.querySelector('[role="dialog"]'))
+      assert.equal(scopeButton('全工作区').getAttribute('aria-checked'), 'true')
+      assert.deepEqual(queries.at(-1), { workspaceRoot: '/graph-workspace-scope-proof', centerPath: undefined, depth: undefined })
+      await act(async () => scopeButton('当前文档').click())
       await flush()
-      assert.equal(container.querySelector('[data-graph-view="true"]'), null)
-      assert.match(container.textContent || '', /已在中央工作区打开/)
+      assert.equal(scopeButton('当前文档').getAttribute('aria-checked'), 'true')
+      assert.deepEqual(queries.at(-1), { workspaceRoot: '/graph-workspace-scope-proof', centerPath: path, depth: 2 })
+      await act(async () => scopeButton('全工作区').click())
+      assert.equal(scopeButton('全工作区').getAttribute('aria-checked'), 'true')
+      assert.equal(scopeButton('当前文档').getAttribute('aria-checked'), 'false')
+      await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="关闭全局浏览"]')!.click())
+      assert.equal(closes, 1)
     } finally {
       await unmount(panelRoot)
     }

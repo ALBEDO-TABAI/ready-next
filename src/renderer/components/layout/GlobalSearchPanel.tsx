@@ -2,12 +2,11 @@ import { ReadyRefSchema } from '../../../shared/ready-ref'
 import { openIndexedSearchResult } from '../../modules/workbench/open-ready-ref'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { FileText, Loader2, Database, RotateCw } from 'lucide-react'
-import { useWorkspace, computeDesiredRoots } from '../../stores/useWorkspace'
-import { reduceReindexResponse } from './reindex-response-reducer'
+import { useWorkspace } from '../../stores/useWorkspace'
+import { formatIndexedAt, useLibraryIndex } from '../../modules/search/useLibraryIndex'
 import type { WorkbenchMode } from '../../stores/useMode'
 import { useDocTabs } from '../../stores/useDocTabs'
 import { draftSearchResults, mergeDraftResults, queryObjectIndex, type SearchResultItem } from '../../modules/workbench/object-ui/query'
-import { readJsonStorage, writeJsonStorage, removeStorage } from '../../utils/storage'
 import { GLOBAL_SEARCH_DIMENSIONS, PANEL_TOKENS } from './panelTokens'
 import Modal from '../ui/Modal'
 import { isLocalHtmlFilePath, openLocalHtmlFileInBrowser } from '../../modules/browser/localHtmlFileOpen'
@@ -135,57 +134,6 @@ function renderSnippet(snippet: string): ReactNode {
 // this workspace" across panel toggles and app restarts, so we know whether to
 // show the "Build Index" empty state vs. the "Rebuild Index" affordance. Keyed
 // by workspace root because different workspaces have separate FTS5 stores.
-interface IndexStatus {
-  docCount: number
-  lastIndexedAt: string // ISO timestamp
-  workspaceRoot: string
-}
-
-const INDEX_STATUS_KEY_PREFIX = 'ready-search-index-status:'
-
-function indexStatusKey(workspaceRoot: string): string {
-  return `${INDEX_STATUS_KEY_PREFIX}${workspaceRoot}`
-}
-
-function loadIndexStatus(workspaceRoot: string | null): IndexStatus | null {
-  if (!workspaceRoot) return null
-  const raw = readJsonStorage<IndexStatus | null>(indexStatusKey(workspaceRoot), null)
-  if (!raw || typeof raw !== 'object') return null
-  if (raw.workspaceRoot !== workspaceRoot) return null
-  if (typeof raw.docCount !== 'number' || typeof raw.lastIndexedAt !== 'string') return null
-  return raw
-}
-
-function persistIndexStatus(status: IndexStatus): void {
-  writeJsonStorage(indexStatusKey(status.workspaceRoot), status)
-}
-
-function clearIndexStatus(workspaceRoot: string): void {
-  removeStorage(indexStatusKey(workspaceRoot))
-}
-
-function formatLastIndexedAt(iso: string): string {
-  try {
-    const d = new Date(iso)
-    if (Number.isNaN(d.getTime())) return iso
-    const now = new Date()
-    const sameDay = d.toDateString() === now.toDateString()
-    if (sameDay) {
-      const hh = String(d.getHours()).padStart(2, '0')
-      const mm = String(d.getMinutes()).padStart(2, '0')
-      return `今天 ${hh}:${mm}`
-    }
-    const yyyy = d.getFullYear()
-    const mo = String(d.getMonth() + 1).padStart(2, '0')
-    const dd = String(d.getDate()).padStart(2, '0')
-    const hh = String(d.getHours()).padStart(2, '0')
-    const mi = String(d.getMinutes()).padStart(2, '0')
-    return `${yyyy}-${mo}-${dd} ${hh}:${mi}`
-  } catch {
-    return iso
-  }
-}
-
 function highlightText(source: string, query: string): ReactNode {
   const keyword = query.trim()
   if (!keyword) return source
@@ -220,22 +168,14 @@ function highlightText(source: string, query: string): ReactNode {
 }
 
 export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalSearchPanelProps) {
-  const workspaceRoot = useWorkspace((state) => state.workspaceRoot)
-  const pinnedFolders = useWorkspace((state) => state.pinnedFolders)
   const selectFile = useWorkspace((state) => state.selectFile)
   const tabs = useDocTabs((state) => state.tabs)
   const setActiveTab = useDocTabs((state) => state.setActiveTab)
   const openTab = useDocTabs((state) => state.openTab)
 
-  // Multi-root scope: every safe pinned folder (∪ workspaceRoot) is searched
-  // and indexed in one batch. `computeDesiredRoots` is the single rule
-  // source — outside this file we never re-derive the union or its safety
-  // filter. Memoized so downstream useCallback deps stay stable.
-  const roots = useMemo(
-    () => computeDesiredRoots({ workspaceRoot, pinnedFolders }),
-    [workspaceRoot, pinnedFolders],
-  )
-  const indexStatusKey = roots[0] ?? null
+  // The library index (one build path, shared with 设置 › 资料库): the roots, the last success, and the
+  // build itself. Rebuilding lives in settings; a library without an index can still be built from here.
+  const { roots, status: indexStatus, indexing: isIndexing, error: indexError, rebuild: runReindex } = useLibraryIndex()
 
   const [query, setQuery] = useState('')
   const [replaceText, setReplaceText] = useState('')
@@ -246,18 +186,7 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
   const [message, setMessage] = useState('')
   const [degraded, setDegraded] = useState(false)
   const searchVersionRef = useRef(0)
-
-  // Explicit index lifecycle. The previous behaviour auto-triggered
-  // reindexAllSources whenever the workspace root changed, which on a Home
-  // directory could scan 600K+ files and balloon FTS5 storage past 80GB.
-  // Building the index is now an opt-in user action gated by a confirmation
-  // modal, and we remember the success so the panel can show "Rebuild" instead
-  // of "Build" on subsequent visits.
-  const [indexStatus, setIndexStatus] = useState<IndexStatus | null>(() => loadIndexStatus(indexStatusKey))
-  const [isIndexing, setIsIndexing] = useState(false)
-  const [indexError, setIndexError] = useState<string | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
-  const indexingRef = useRef(false)
 
   const clearAll = useCallback(() => {
     searchVersionRef.current += 1
@@ -274,88 +203,6 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
     clearAll()
   }, [resetSignal, clearAll])
 
-  // Reload persisted index status whenever the active root set's primary
-  // root changes (the first element of `roots` — workspaceRoot when set, else
-  // the first safe pinned folder). The status itself is an aggregate across
-  // all roots; we just use the primary as a stable storage key. We
-  // intentionally do NOT trigger reindexAllSources here.
-  useEffect(() => {
-    setIndexStatus(loadIndexStatus(indexStatusKey))
-    setIndexError(null)
-  }, [indexStatusKey])
-
-  const runReindex = useCallback(async () => {
-    if (roots.length === 0 || typeof window === 'undefined') return
-    const doc = window.electronAPI?.document
-    if (!doc?.reindexAllSources && !doc?.reindexWorkspace) {
-      setIndexError('当前环境不支持索引')
-      return
-    }
-    if (indexingRef.current) return
-    indexingRef.current = true
-    setIsIndexing(true)
-    setIndexError(null)
-    try {
-      // Multi-root reindex contract:
-      //   - First root → `reindexAllSources` (rebuilds the FS index for the
-      //     root PLUS the shared sources bucket — bookmarks / RSS / calendar
-      //     / agent messages — which lives in a single SHARED workspace_id).
-      //   - Subsequent roots → `reindexWorkspace` (FS only). The shared
-      //     sources have already been refreshed by the first call; running
-      //     `reindexAllSources` again would duplicate that work N times.
-      let docCount = 0
-      let rootsSucceeded = 0
-      const errors: string[] = []
-      for (let i = 0; i < roots.length; i++) {
-        const root = roots[i]
-        if (i === 0 && doc.reindexAllSources) {
-          const response = await doc.reindexAllSources(root)
-          const outcome = reduceReindexResponse(root, response, 'all-sources')
-          docCount += outcome.docCount
-          if (outcome.error) errors.push(outcome.error)
-          // `rootIndexed` distinguishes "root failed" (FS pass blew up) from
-          // "partial source failure" (FS ok, but RSS / bookmark / calendar
-          // adapter erred). The latter keeps the FS index valid for this
-          // root, so it still counts as a success — the error becomes a
-          // non-blocking warning. Treating any error as failure would discard
-          // a successful file-tree index just because one shared adapter
-          // timed out.
-          if (outcome.rootIndexed) rootsSucceeded += 1
-        } else if (doc.reindexWorkspace) {
-          const response = await doc.reindexWorkspace(root)
-          const outcome = reduceReindexResponse(root, response, 'fs-only')
-          docCount += outcome.docCount
-          if (outcome.error) errors.push(outcome.error)
-          if (outcome.rootIndexed) rootsSucceeded += 1
-        }
-      }
-      // Throw only when EVERY root failed at the root level. Partial-source
-      // failures (rootIndexed=true with a warning error) still persist a
-      // success status — the warning is surfaced via setIndexError below.
-      if (rootsSucceeded === 0 && errors.length > 0) {
-        throw new Error(errors.join('; '))
-      }
-      const next: IndexStatus = {
-        docCount,
-        lastIndexedAt: new Date().toISOString(),
-        workspaceRoot: indexStatusKey ?? '',
-      }
-      persistIndexStatus(next)
-      setIndexStatus(next)
-      if (errors.length > 0) {
-        // Partial success: surface a non-blocking note so the user knows at
-        // least one root failed (e.g. ENOSPC, validation reject) while others
-        // succeeded.
-        setIndexError(`搜索结果可能不完整：${errors.join('; ')}`)
-      }
-    } catch (error) {
-      setIndexError(error instanceof Error ? error.message : String(error))
-    } finally {
-      indexingRef.current = false
-      setIsIndexing(false)
-    }
-  }, [roots, indexStatusKey])
-
   const handleBuildIndexClick = useCallback(() => {
     if (roots.length === 0) return
     setConfirmOpen(true)
@@ -369,18 +216,6 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
   const handleCancelBuildIndex = useCallback(() => {
     setConfirmOpen(false)
   }, [])
-
-  // If the active root set was emptied while a stale status was cached for a
-  // different root, drop it so the empty state renders correctly.
-  useEffect(() => {
-    if (roots.length === 0 && indexStatus) {
-      const stale = indexStatus.workspaceRoot
-      if (stale) {
-        clearIndexStatus(stale)
-      }
-      setIndexStatus(null)
-    }
-  }, [roots, indexStatus])
 
   const runSearch = useCallback(async (keyword: string) => {
     if (roots.length === 0 || typeof window === 'undefined' || !window.electronAPI?.document?.searchIndex) {
@@ -775,14 +610,13 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
       {indexStatus && (
         <div className="flex items-center justify-between gap-[8px] pt-[2px]">
           <p className="text-[10px] font-medium leading-[1.4]" style={{ color: PANEL_COLORS.mutedStrong }}>
-            已索引 {indexStatus.docCount} 项 · {formatLastIndexedAt(indexStatus.lastIndexedAt)}
+            已索引 {indexStatus.docCount} 项 · {formatIndexedAt(indexStatus.lastIndexedAt)}
           </p>
           <button
             type="button"
-            onClick={handleBuildIndexClick}
-            disabled={isIndexing}
-            title="重新扫描当前工作区"
-            className="border px-[8px] flex items-center gap-[4px] text-[10px] font-medium transition-colors disabled:opacity-45"
+            onClick={() => { window.location.hash = '#/settings?section=library' }}
+            title="在 设置 › 资料库 里重建索引"
+            className="border px-[8px] flex items-center gap-[4px] text-[10px] font-medium transition-colors"
             style={{
               height: 22,
               borderRadius: 8,
@@ -792,7 +626,7 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
             }}
           >
             <RotateCw className="h-3 w-3" />
-            重建索引
+            管理索引
           </button>
         </div>
       )}

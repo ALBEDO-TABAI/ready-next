@@ -30,7 +30,7 @@ export default function DocumentNavigator({ roots, visible, onShowFiles }: {
         <ShellSidebarToggle />
       </div>
       <div className="document-navigator__view ink-scope" hidden={view !== 'pages'}>
-        <InkSidebar roots={roots} visible={visible && view === 'pages'} onShowFiles={onShowFiles} />
+        <InkSidebar roots={roots} onShowFiles={onShowFiles} />
       </div>
       <div className="document-navigator__view" hidden={view !== 'files'}>
         <FilesPanel isVisible={visible && view === 'files'}>

@@ -28,15 +28,21 @@ import {
 } from '../renderer/modules/document/notePreviewBlockIdentity'
 import { scopeMermaidSvgIds } from '../renderer/modules/document/mermaidRenderCache'
 import {
-  isDocumentSaveShortcutAvailable,
-  readyShortcutBypassesEditableGuard,
-  resolveDocumentSaveTarget,
-} from '../renderer/hooks/useKeyboardShortcuts'
-import {
   areRetainedDocumentEditorPropsEqual,
   resolveRetainedDocumentScene,
   shouldRetainDocumentSceneWhileHidden,
 } from '../renderer/modules/document/documentSceneRetention'
+
+// The shortcut module now initializes the real theme store. Supply only its browser APIs
+// during import; preview rendering below keeps its original server-rendering environment.
+const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
+Object.defineProperty(globalThis, 'window', { configurable: true, value: {
+  matchMedia: () => ({ matches: false, addEventListener() {} }),
+} })
+const { isDocumentSaveShortcutAvailable, readyShortcutBypassesEditableGuard, resolveDocumentSaveTarget } = await import('../renderer/hooks/useKeyboardShortcuts').finally(() => {
+  if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow)
+  else Reflect.deleteProperty(globalThis, 'window')
+})
 
 afterEach(() => {
   __resetDocumentWidgetRenderCodeCacheForTests()

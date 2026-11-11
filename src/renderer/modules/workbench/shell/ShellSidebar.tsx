@@ -91,10 +91,6 @@ export default function ShellSidebar({ mode, panelWidth, presentation, floatingO
   )
 }
 
-export function useShellNavigatorMode(): WorkbenchMode {
-  return useContext(ShellSidebarSlotContext).mode
-}
-
 /** The collapse button in a navigator's header: collapses the docked sidebar, or pins a slide-out. */
 export function ShellSidebarToggle({ className = 'shell-sidebar-toggle' }: { className?: string }) {
   const { pinnable, toggle } = useContext(ShellSidebarSlotContext)

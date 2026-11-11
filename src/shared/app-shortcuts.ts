@@ -32,32 +32,36 @@ export interface ReadyShortcutGuideItem {
 export interface AppShortcut {
   readonly id: string
   readonly keys: string
-  readonly scope: 'global' | 'calendar' | 'document' | 'canvas' | 'skills'
+  readonly scope: 'global' | 'calendar' | 'document' | 'canvas' | 'skills' | 'assistant'
   readonly description: string
   readonly action?: ReadyAppShortcutAction
+  /** Listed in 设置 › 快捷键 (the everyday keys, not the operating system's editing keys). */
+  readonly guide?: true
 }
 export const APP_SHORTCUTS: readonly AppShortcut[] = [
-  { id: 'switch-browser', keys: 'CommandOrControl+1', scope: 'global', description: '切换到浏览器', action: 'switch-browser' },
+  { id: 'switch-browser', keys: 'CommandOrControl+1', scope: 'global', description: '切换到浏览器', action: 'switch-browser', guide: true },
   { id: 'switch-browser-function', keys: 'F1', scope: 'global', description: '切换到浏览器', action: 'switch-browser' },
-  { id: 'switch-document', keys: 'CommandOrControl+2', scope: 'global', description: '切换到文档', action: 'switch-document' },
+  { id: 'switch-document', keys: 'CommandOrControl+2', scope: 'global', description: '切换到文档', action: 'switch-document', guide: true },
   { id: 'switch-document-function', keys: 'F2', scope: 'global', description: '切换到文档', action: 'switch-document' },
-  { id: 'switch-rss', keys: 'CommandOrControl+3', scope: 'global', description: '切换到资讯', action: 'switch-rss' },
+  { id: 'switch-rss', keys: 'CommandOrControl+3', scope: 'global', description: '切换到资讯', action: 'switch-rss', guide: true },
   { id: 'switch-rss-function', keys: 'F3', scope: 'global', description: '切换到资讯', action: 'switch-rss' },
-  { id: 'switch-calendar', keys: 'CommandOrControl+4', scope: 'global', description: '切换到日历', action: 'switch-calendar' },
+  { id: 'switch-calendar', keys: 'CommandOrControl+4', scope: 'global', description: '切换到日历', action: 'switch-calendar', guide: true },
   { id: 'switch-calendar-function', keys: 'F4', scope: 'global', description: '切换到日历', action: 'switch-calendar' },
-  { id: 'capture-window', keys: 'CommandOrControl+Shift+S', scope: 'global', description: '截取 Ready 窗口', action: 'capture-window' },
-  { id: 'open-ready', keys: 'Home', scope: 'global', description: '打开 Ready 主页', action: 'open-ready' },
-  { id: 'open-settings', keys: 'CommandOrControl+,', scope: 'global', description: '打开设置', action: 'open-settings' },
-  { id: 'toggle-sidebar', keys: 'CommandOrControl+B', scope: 'global', description: '收起或展开侧栏', action: 'toggle-sidebar' },
-  { id: 'save-document', keys: 'CommandOrControl+S', scope: 'global', description: '保存当前文档', action: 'save-document' },
-  { id: 'close-document', keys: 'CommandOrControl+W', scope: 'global', description: '关闭当前文档', action: 'close-document' },
-  { id: 'new-document', keys: 'CommandOrControl+T', scope: 'global', description: '新建文档', action: 'new-document' },
-  { id: 'toggle-theme', keys: 'CommandOrControl+\\', scope: 'global', description: '切换主题', action: 'toggle-theme' },
-  { id: 'open-search', keys: 'CommandOrControl+K', scope: 'global', description: '搜索对象和命令', action: 'open-search' },
-  { id: 'toggle-assistant', keys: 'Tab', scope: 'global', description: '收起或展开助手' },
+  { id: 'capture-window', keys: 'CommandOrControl+Shift+S', scope: 'global', description: '截取 Ready 窗口', action: 'capture-window', guide: true },
+  { id: 'open-ready', keys: 'Home', scope: 'global', description: '打开 Ready 主页', action: 'open-ready', guide: true },
+  { id: 'open-settings', keys: 'CommandOrControl+,', scope: 'global', description: '打开设置', action: 'open-settings', guide: true },
+  { id: 'toggle-sidebar', keys: 'CommandOrControl+B', scope: 'global', description: '收起或展开侧栏', action: 'toggle-sidebar', guide: true },
+  { id: 'save-document', keys: 'CommandOrControl+S', scope: 'global', description: '保存当前文档', action: 'save-document', guide: true },
+  { id: 'close-document', keys: 'CommandOrControl+W', scope: 'global', description: '关闭当前文档', action: 'close-document', guide: true },
+  { id: 'new-document', keys: 'CommandOrControl+T', scope: 'global', description: '新建文档', action: 'new-document', guide: true },
+  { id: 'toggle-theme', keys: 'CommandOrControl+\\', scope: 'global', description: '切换主题', action: 'toggle-theme', guide: true },
+  { id: 'open-search', keys: 'CommandOrControl+K', scope: 'global', description: '搜索对象和命令', action: 'open-search', guide: true },
+  { id: 'toggle-assistant', keys: 'Tab', scope: 'global', description: '收起或展开助手', guide: true },
+  { id: 'assistant.send', keys: 'Enter', scope: 'assistant', description: '发送消息', guide: true },
+  { id: 'assistant.newline', keys: 'Shift+Enter', scope: 'assistant', description: '消息内换行', guide: true },
   { id: 'sidebar-backquote', keys: '`', scope: 'global', description: '收起或展开侧栏' },
   { id: 'sidebar-dot', keys: '·', scope: 'global', description: '收起或展开侧栏' },
-  { id: 'quick-note', keys: 'Alt+Command+Space', scope: 'global', description: '快记' },
+  { id: 'quick-note', keys: 'Alt+Command+Space', scope: 'global', description: '快记', guide: true },
   { id: 'calendar-tray-mac', keys: 'Control+Command+K', scope: 'global', description: '菜单栏日历（macOS）' },
   { id: 'calendar-join-mac', keys: 'Control+Command+J', scope: 'global', description: '加入下一场会议（macOS）' },
   { id: 'calendar-tray-other', keys: 'Control+Alt+K', scope: 'global', description: '菜单栏日历（Windows/Linux）' },
@@ -154,6 +158,6 @@ export function resolveReadyAppShortcut(input: ReadyShortcutInput): ReadyAppShor
   return APP_SHORTCUTS.find(shortcut => shortcut.action && matchesAppShortcut(shortcut, input))?.action ?? null
 }
 
-export const READY_SHORTCUT_GUIDE: ReadyShortcutGuideItem[] = APP_SHORTCUTS.filter(item => item.scope === 'global').map(item => ({
+export const READY_SHORTCUT_GUIDE: ReadyShortcutGuideItem[] = APP_SHORTCUTS.filter(item => item.guide).map(item => ({
   id: item.id, label: item.description, value: shortcutKeycaps(item).join(' + ').replace('⌘', item.keys.includes('CommandOrControl') ? '⌘ / Ctrl' : '⌘'),
 }))

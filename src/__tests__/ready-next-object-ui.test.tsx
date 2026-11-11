@@ -173,7 +173,7 @@ test('W2 switcher lists registered commands by mode, searches keywords, and exec
   assert.doesNotMatch(ui.text(), /日历测试命令/)
 })
 
-test('W2 shell keyboard and event actions use the real theme/sidebar owners; native browser Cmd+K opens the same switcher', async t => {
+test('W2 keyboard handles theme and delegates sidebar actions to the shell; native browser Cmd+K opens the same switcher', async t => {
   const ui = await setup(t)
   Object.assign(ui.dom.window, { matchMedia: (query: string) => ({ matches: query.includes('reduced-motion'), addEventListener() {}, removeEventListener() {} }) })
   const { useKeyboardShortcuts } = await import('../renderer/hooks/useKeyboardShortcuts')
@@ -197,8 +197,16 @@ test('W2 shell keyboard and event actions use the real theme/sidebar owners; nat
   await act(async () => requestShellAction('toggle-theme'))
   assert.equal(useTheme.getState().resolvedTheme, previousTheme)
   const sidebar = ui.useWorkspace.getState().sidebarVisible
+  const actions: string[] = []
+  ui.dom.window.addEventListener('ready:shell-action', event => actions.push(event.detail.action))
+  // The keyboard hook only emits the action. WorkbenchMode owns the responsive toggle;
+  // shell-presentation.test.tsx covers docked state versus a narrow-window slide-out.
+  input.blur()
+  await act(async () => ui.dom.window.dispatchEvent(new ui.dom.window.KeyboardEvent('keydown', { key: 'b', metaKey: true, bubbles: true })))
+  assert.deepEqual(actions, ['toggle-sidebar'])
+  assert.equal(ui.useWorkspace.getState().sidebarVisible, sidebar)
   await act(async () => requestShellAction('toggle-sidebar'))
-  assert.equal(ui.useWorkspace.getState().sidebarVisible, !sidebar)
+  assert.equal(ui.useWorkspace.getState().sidebarVisible, sidebar)
   await act(async () => input.dispatchEvent(new ui.dom.window.KeyboardEvent('keydown', { key: ',', metaKey: true, bubbles: true })))
   assert.equal(ui.dom.window.document.querySelector('[data-location]')?.textContent, '/settings')
   const bridge = new BrowserAppShortcutBridgeService({ sendToRenderer: (_channel, data) => nativeShortcut!(data as { key: string; metaKey: boolean }) })

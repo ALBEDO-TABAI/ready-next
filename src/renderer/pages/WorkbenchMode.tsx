@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useRef, useMemo, useState } from 'react'
+import { useEffect, useCallback, useRef, useMemo, useState, lazy, Suspense } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ObjectUIHost } from '../modules/workbench/object-ui/ObjectUIHost'
 import { useWorkspace, reconcileWorkspaceWatchersFromStore, formatWorkspaceWatcherFailure } from '../stores/useWorkspace'
@@ -13,7 +13,6 @@ import ChatPanel from '../components/agent/ChatPanel'
 import GraphWorkspace, { type GraphWorkspaceRequest } from '../components/graph/GraphWorkspace'
 import { invalidateGraphWorkspace } from '../components/graph/graph-session'
 import StatusBar from '../components/layout/StatusBar'
-import FindReplaceWorkspace from '../components/search/FindReplaceWorkspace'
 import { SHELL_ACTION_EVENT } from '../modules/workbench/commands/shell-actions'
 import { useInkLayout } from '../modules/document/ink/layout-state'
 import { useFastCard } from '../stores/useFastCard'
@@ -39,6 +38,9 @@ import { nextIntentId } from '../../shared/browser-view-intent'
 import { createModeSwitchAckWaiter } from '../modules/browser/modeSwitchAckWaiter'
 import { cancelRitual, withRitual, setPanelResizingSignal } from '../modules/overlay/useRitualOverlay'
 import '../styles/knowledge-graph.css'
+
+// Off the startup path: the find-and-replace view loads when it first opens.
+const FindReplaceWorkspace = lazy(() => import('../components/search/FindReplaceWorkspace'))
 
 const INSTANT_PANEL_TOGGLE_SETTLE_MS = 80
 const TRANSPARENT_SURFACE_REFRESH_DELAYS_MS = [240, 900] as const
@@ -927,7 +929,7 @@ export default function WorkbenchMode() {
                   onClose={() => setGraphWorkspaceRequest(null)}
                 />
               )}
-              {findReplaceOpen && <FindReplaceWorkspace onClose={() => setFindReplaceOpen(false)} />}
+              {findReplaceOpen && <Suspense fallback={null}><FindReplaceWorkspace onClose={() => setFindReplaceOpen(false)} /></Suspense>}
             </div>
 
             {shell.assistantResizable && (

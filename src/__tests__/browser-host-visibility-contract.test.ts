@@ -25,7 +25,7 @@ test('browser host visibility is explicitly gated and browser bounds keep Browse
   const tabShell = readWorkspaceFile('src/main/modules/browser-engine/tab-shell-service.ts')
   const lifecycle = readWorkspaceFile('src/main/modules/browser-engine/tab-lifecycle-service.ts')
   const hostLayout = readWorkspaceFile('src/main/modules/browser-engine/host-layout-service.ts')
-  const sidePanel = readWorkspaceFile('src/renderer/components/layout/SidePanel.tsx')
+  const sidePanel = readWorkspaceFile('src/renderer/modules/workbench/shell/ShellSidebar.tsx')
   const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
   const styles = readRendererStyles()
 
@@ -138,7 +138,7 @@ test('browser host visibility is explicitly gated and browser bounds keep Browse
 
   assert.match(browserShellLayout, /isolation: 'isolate'/)
   assert.match(browserMode, /zIndex: 1/)
-  assert.match(sidePanel, /className=\{`workbench-panel-frame/)
+  assert.match(sidePanel, /className=\{`shell-sidebar workbench-panel-frame/)
   assert.match(chatPanel, /className=\{`workbench-panel-frame/)
   assert.match(styles, /\.workbench-panel-frame\s*\{/)
   assert.match(styles, /border-radius:\s*var\(--workbench-canvas-radius\);/)
