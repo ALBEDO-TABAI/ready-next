@@ -353,7 +353,7 @@ test('trusted build launcher uses an isolated offline fixture', {
     assert.equal(lease.acquired, true)
     mkdirSync(headerParent, { recursive: true })
     const headers = trustedElectronGypProvenance()
-    cpSync(headers.root, join(headerParent, '42.3.0'), {
+    cpSync(headers.root, join(headerParent, '45.3.0'), {
       recursive: true,
       verbatimSymlinks: true,
     })

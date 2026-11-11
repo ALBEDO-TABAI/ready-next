@@ -52,7 +52,6 @@ const SITE_STORAGE_TYPES: readonly string[] = [
   'indexdb',
   'localstorage',
   'shadercache',
-  'websql',
   'serviceworkers',
   'cachestorage',
 ]

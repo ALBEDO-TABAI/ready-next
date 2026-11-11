@@ -69,11 +69,11 @@ const ALLOWED_ENV_KEYS = new Set([
   'SDKROOT',
 ])
 const PINNED_ELECTRON_ARCHIVE = Object.freeze({
-  cacheDirectory: 'bc80a13ebe4734629db853b3fc870b18ba9e388b795710fdbbd075694e548d03',
-  fileName: 'electron-v42.3.0-darwin-arm64.zip',
-  path: path.join(os.homedir(), 'Library', 'Caches', 'electron', 'electron-v42.3.0-darwin-arm64.zip'),
-  bytes: 117895187,
-  sha256: '19f4b0a4fcc3574e79befb53495cca8de02a126210d04363cf76f67099d128ef',
+  cacheDirectory: '32d6810bdb41db079ea2849687603e6a51fc93cdaaa9d2741fea0eca9dd8509d',
+  fileName: 'electron-v45.3.0-darwin-arm64.zip',
+  path: path.join(os.homedir(), 'Library', 'Caches', 'electron', 'electron-v45.3.0-darwin-arm64.zip'),
+  bytes: 121100277,
+  sha256: 'b0c7cbb70f98ff72beffa98b4c449a7d92d8b51d3d25817cfcdcb6ee2d61711a',
 })
 const PINNED_DMGBUILD_ARCHIVE = Object.freeze({
   path: path.join(

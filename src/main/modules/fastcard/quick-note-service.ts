@@ -13,7 +13,7 @@ export interface QuickNoteHost {
   unregister(accelerator: string): void
   show(): Promise<void>
   hide(): void
-  readClipboard(): { kind: 'text'; text: string } | { kind: 'image'; bytes: Buffer }
+  readClipboard(): Promise<{ kind: 'text'; text: string } | { kind: 'image'; bytes: Buffer }>
   notify(status: QuickNoteStatus): void
 }
 export interface AudioTranscriptionProvider {
@@ -62,8 +62,8 @@ export class FastCardQuickNoteService {
     }
     return this.collection.add({ id: itemId, kind: 'text', text, createdAt: Date.now() })
   }
-  clipboard(itemId: string = randomUUID()): Promise<FastCardItem> {
-    const content = this.host.readClipboard()
+  async clipboard(itemId: string = randomUUID()): Promise<FastCardItem> {
+    const content = await this.host.readClipboard()
     if (content.kind === 'text') return this.text(content.text, itemId)
     const media = this.cache.save(content.bytes, 'image/png')
     const existing = this.repository.list().find(item => item.id === itemId)

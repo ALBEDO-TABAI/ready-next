@@ -30,7 +30,7 @@ export function setupCanvasRuntime(ready: Promise<void>, paths: { preloadPath: s
   const quickNote = new FastCardQuickNoteService({
     register: (key, callback) => globalShortcut.register(key, callback), unregister: key => globalShortcut.unregister(key),
     show: () => quickWindow.show(), hide: () => quickWindow.hide(),
-    readClipboard: () => { const image = clipboard.readImage(); return image.isEmpty() ? { kind: 'text', text: clipboard.readText() } : { kind: 'image', bytes: image.toPNG() } },
+    readClipboard: async () => { const image = (await clipboard.read()).find(item => item.types.includes('image/png')); return image ? { kind: 'image', bytes: Buffer.from(await (await image.getType('image/png')).arrayBuffer()) } : { kind: 'text', text: await clipboard.readText() } },
     notify: status => { if (!status.registered) dialog.showErrorBox('快记', status.error) },
   }, collection, repository, cache)
   const drafts = setupDocumentDraftIPC(async (draft, receipt, keep) => (await resolve()).composition.complete(draft, receipt, keep))

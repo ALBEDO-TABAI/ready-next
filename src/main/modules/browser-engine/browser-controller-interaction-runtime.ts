@@ -246,9 +246,9 @@ export abstract class BrowserControllerInteractionRuntime extends BrowserLivePro
     const currentUrl = view.webContents.getURL()
     const origin = requestedOrigin || new URL(currentUrl).origin
     const requested = new Set(dataTypes?.length ? dataTypes : ['cookies', 'cache', 'storage', 'service_workers'])
-    const storages: Array<'cookies' | 'localstorage' | 'indexdb' | 'websql' | 'cachestorage' | 'serviceworkers'> = []
+    const storages: Array<'cookies' | 'localstorage' | 'indexdb' | 'cachestorage' | 'serviceworkers'> = []
     if (requested.has('cookies')) storages.push('cookies')
-    if (requested.has('storage')) storages.push('localstorage', 'indexdb', 'websql', 'cachestorage')
+    if (requested.has('storage')) storages.push('localstorage', 'indexdb', 'cachestorage')
     if (requested.has('service_workers')) storages.push('serviceworkers')
     if (storages.length > 0) await view.webContents.session.clearStorageData({ origin, storages })
     if (requested.has('cache')) await view.webContents.session.clearCache()

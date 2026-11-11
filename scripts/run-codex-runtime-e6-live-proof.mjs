@@ -172,7 +172,7 @@ async function main() {
   const isolatedSidecarPythonPath = resolve(isolatedSidecarRuntimePath, 'python')
   const buildHomePath = resolve(sensitiveRunRoot, 'build-home')
   const buildToolchainBinPath = resolve(buildHomePath, 'trusted-bin')
-  const isolatedElectronGypPath = resolve(buildHomePath, '.electron-gyp/42.3.0')
+  const isolatedElectronGypPath = resolve(buildHomePath, '.electron-gyp/45.3.0')
   const gatewayCapturePath = resolve(profilePath, 'e5-gateway-capture.ndjson')
   const retainedGatewayCapturePath = resolve(evidenceRoot, 'e6-gateway-capture.ndjson')
   const redactedEvidencePath = resolve(evidenceRoot, 'e6-redacted-evidence.json')

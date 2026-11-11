@@ -4,7 +4,7 @@
 
 ## 1. 当前基线
 
-- 应用 0.8.0，Electron 42.3.0，固定 Codex runtime 0.160.1（2026-10-07 升级，旧对话按续接证据继续）；版本以 `package.json` 与 `assets/codex-runtime/runtime-manifest.json` 为准。
+- 应用 0.8.0，Electron 45.3.0（2026-11-11 由 42.3.0 升级），固定 Codex runtime 0.160.1（2026-10-07 升级，旧对话按续接证据继续）；版本以 `package.json` 与 `assets/codex-runtime/runtime-manifest.json` 为准。
 - 四个工作面：Browser、Document、RSS、Calendar；跨工作面的单一 Ready 助手、文件、技能、MCP、手动长期记忆和远程助手。
 - Agent 生产入口为 `CodexHostOrchestrator`，经原生回合与统一结果保存呈现。旧 SDK 模型循环、Dynamic Delivery/Boost、专项人格、旧记忆和 Agent 定时任务均已退役。
 - 当前发布配置是 macOS arm64。精简包不内置技能运行时；完整包需要单独置备并核对运行时清单。
