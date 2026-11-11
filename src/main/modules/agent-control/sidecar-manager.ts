@@ -2,6 +2,7 @@ import { app } from 'electron'
 import { createServer } from 'net'
 import { ChildProcess, execFile, spawn } from 'child_process'
 import { promisify } from 'util'
+import { setTimeout as wait } from 'timers/promises'
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'fs'
 import { join } from 'path'
 import { randomBytes } from 'crypto'
@@ -38,10 +39,6 @@ const SIDECAR_REQUIRED_IMPORTS = [
   'cryptography',
 ]
 
-function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
 function hashText(value: string): string {
   let hash = 0
   for (let i = 0; i < value.length; i += 1) {
@@ -54,6 +51,8 @@ function hashText(value: string): string {
 export class SidecarManager {
   private process: ChildProcess | null = null
   private startup: Promise<SidecarStatus> | null = null
+  private startupAbort: AbortController | null = null
+  private stopping: Promise<void> | null = null
   private lifecycleGeneration = 0
   private status: SidecarStatus
   private host: string
@@ -113,32 +112,46 @@ export class SidecarManager {
   }
 
   async start(): Promise<SidecarStatus> {
+    if (this.stopping) {
+      await this.stopping
+      return this.getStatus()
+    }
     if (this.startup) return this.startup
-    const pending = this.startOnce(this.lifecycleGeneration)
+    const controller = new AbortController()
+    this.startupAbort = controller
+    const pending = this.startOnce(this.lifecycleGeneration, controller.signal)
     this.startup = pending
-    try { return await pending } finally { if (this.startup === pending) this.startup = null }
+    try { return await pending } finally {
+      if (this.startup === pending) {
+        this.startup = null
+        this.startupAbort = null
+      }
+    }
   }
 
-  private async startOnce(generation: number): Promise<SidecarStatus> {
+  private async startOnce(generation: number, signal: AbortSignal): Promise<SidecarStatus> {
     if (this.isRunning()) return this.getStatus()
     if (this.process && this.process.exitCode === null) {
       try {
-        await this.heartbeat()
+        await this.request('/heartbeat', { signal })
+        signal.throwIfAborted()
         this.status.state = 'running'
         this.status.error = null
         return this.getStatus()
       } catch {
         // silent-catch: an unresponsive owned process is stopped before replacement; startup failure is returned below.
+        if (signal.aborted) return this.getStatus()
         await this.stopProcess()
       }
     }
+    if (signal.aborted) return this.getStatus()
     this.status.state = 'starting'
     this.status.error = null
 
     try {
       this.ensureRuntimeDirs()
-      const port = await this.pickFreePort()
-      const python = await this.ensurePythonRuntime()
+      const port = await this.pickFreePort(signal)
+      const python = await this.ensurePythonRuntime(signal)
       if (generation !== this.lifecycleGeneration) return this.getStatus()
       this.token = randomBytes(24).toString('hex')
 
@@ -183,7 +196,7 @@ export class SidecarManager {
       this.status.pid = this.process.pid || null
       this.status.startedAt = new Date().toISOString()
 
-      await this.waitForHealth()
+      await this.waitForHealth(signal)
       if (generation !== this.lifecycleGeneration) return this.getStatus()
       this.status.state = 'running'
       this.status.error = null
@@ -193,6 +206,7 @@ export class SidecarManager {
       // silent-catch: callers and the settings health panel receive the persisted startup status/error.
       if (generation !== this.lifecycleGeneration) return this.getStatus()
       await this.stopProcess()
+      if (generation !== this.lifecycleGeneration) return this.getStatus()
       this.status.state = 'error'
       this.status.error = error instanceof Error ? error.message : String(error)
       return this.getStatus()
@@ -200,8 +214,14 @@ export class SidecarManager {
   }
 
   async stop(): Promise<void> {
+    if (this.stopping) return this.stopping
     this.lifecycleGeneration += 1
-    await this.stopProcess()
+    this.startupAbort?.abort()
+    this.status.state = 'stopped'
+    this.status.error = null
+    const pending = Promise.all([this.stopProcess(), this.startup]).then(() => undefined)
+    this.stopping = pending
+    try { await pending } finally { if (this.stopping === pending) this.stopping = null }
   }
 
   private async stopProcess(): Promise<void> {
@@ -377,7 +397,10 @@ export class SidecarManager {
         ...(init?.headers || {}),
       },
       body: init?.body,
-      signal: AbortSignal.timeout(path === '/channels/send' ? 180_000 : 45_000),
+      signal: AbortSignal.any([
+        AbortSignal.timeout(path === '/channels/send' ? 180_000 : 45_000),
+        ...(init?.signal ? [init.signal] : []),
+      ]),
     })
     const text = await resp.text()
     let json: Record<string, unknown> = {}
@@ -392,20 +415,23 @@ export class SidecarManager {
     return json
   }
 
-  private async waitForHealth(): Promise<void> {
+  private async waitForHealth(signal: AbortSignal): Promise<void> {
     const started = Date.now()
     let lastError = 'Sidecar health check timed out'
     while (Date.now() - started < SIDECAR_HEALTH_TIMEOUT_MS) {
+      signal.throwIfAborted()
       if (!this.process || this.process.exitCode !== null) {
         throw new Error(this.status.error || 'Sidecar exited before health check')
       }
       try {
-        await this.request('/health')
+        await this.request('/health', { signal })
+        signal.throwIfAborted()
         this.status.lastHeartbeatAt = new Date().toISOString()
         return
       } catch (error) {
+        // silent-catch: retry health failures until the deadline; cancellation interrupts the delay.
         lastError = error instanceof Error ? error.message : String(error)
-        await wait(400)
+        await wait(400, undefined, { signal })
       }
     }
     throw new Error(lastError)
@@ -418,8 +444,24 @@ export class SidecarManager {
     }
   }
 
-  private async ensurePythonRuntime(): Promise<string> {
-    const packagedPythonPath = await this.resolvePackagedPythonPath()
+  private async runPython(python: string, args: string[], signal: AbortSignal, options: { timeout: number; maxBuffer?: number; env?: NodeJS.ProcessEnv }) {
+    signal.throwIfAborted()
+    const pending = execFileAsync(python, args, { ...options, signal, killSignal: 'SIGKILL' })
+    const closed = new Promise<void>((resolve) => pending.child.once('close', () => resolve()))
+    let result: Awaited<typeof pending>
+    try {
+      result = await pending
+    } finally {
+      // Abort rejects execFile before close; drain the child before touching its files.
+      await closed
+    }
+    signal.throwIfAborted()
+    return result
+  }
+
+  private async ensurePythonRuntime(signal: AbortSignal): Promise<string> {
+    signal.throwIfAborted()
+    const packagedPythonPath = await this.resolvePackagedPythonPath(signal)
     if (packagedPythonPath) return packagedPythonPath
 
     const venvPython = this.getVenvPythonPath()
@@ -439,46 +481,54 @@ export class SidecarManager {
     }
 
     if (existsSync(venvPython)) {
-      const venvVersion = await this.getPythonVersion(venvPython)
-      const venvSslVersionText = await this.getPythonSslVersionText(venvPython)
+      const venvVersion = await this.getPythonVersion(venvPython, signal)
+      const venvSslVersionText = await this.getPythonSslVersionText(venvPython, signal)
       if (!isSupportedReadyPythonVersion(venvVersion) || !isSupportedReadyPythonSslVersion(venvSslVersionText)) {
         rmSync(this.venvRoot, { recursive: true, force: true })
       }
     }
 
     if (!existsSync(venvPython)) {
-      const basePython = await this.resolveBasePython()
-      await execFileAsync(basePython, ['-m', 'venv', this.venvRoot], {
-        timeout: 180_000,
-        maxBuffer: 8 * 1024 * 1024,
-      })
-      await execFileAsync(venvPython, ['-m', 'pip', 'install', '--disable-pip-version-check', '--upgrade', 'pip', 'setuptools', 'wheel'], {
-        timeout: 240_000,
-        maxBuffer: 12 * 1024 * 1024,
-        env: { ...process.env, ...SIDECAR_PIP_ENV },
-      })
+      const basePython = await this.resolveBasePython(signal)
+      try {
+        await this.runPython(basePython, ['-m', 'venv', this.venvRoot], signal, {
+          timeout: 180_000,
+          maxBuffer: 8 * 1024 * 1024,
+        })
+        await this.runPython(venvPython, ['-m', 'pip', 'install', '--disable-pip-version-check', '--upgrade', 'pip', 'setuptools', 'wheel'], signal, {
+          timeout: 240_000,
+          maxBuffer: 12 * 1024 * 1024,
+          env: { ...process.env, ...SIDECAR_PIP_ENV },
+        })
+      } catch (error) {
+        rmSync(this.venvRoot, { recursive: true, force: true })
+        throw error
+      }
     }
 
     if (existsSync(requirementsPath) && (
-      stateDigest !== digest || !(await this.hasRequiredPythonModules(venvPython))
+      stateDigest !== digest || !(await this.hasRequiredPythonModules(venvPython, signal))
     )) {
-      await execFileAsync(venvPython, ['-m', 'pip', 'install', '--disable-pip-version-check', '-r', requirementsPath], {
+      rmSync(this.runtimeStatePath, { force: true })
+      await this.runPython(venvPython, ['-m', 'pip', 'install', '--disable-pip-version-check', '-r', requirementsPath], signal, {
         timeout: 300_000,
         maxBuffer: 16 * 1024 * 1024,
         env: { ...process.env, ...SIDECAR_PIP_ENV },
       })
+      signal.throwIfAborted()
       atomicWriteJson(this.runtimeStatePath, { digest, updatedAt: new Date().toISOString() })
     }
 
     return venvPython
   }
 
-  private async hasRequiredPythonModules(pythonBin: string): Promise<boolean> {
+  private async hasRequiredPythonModules(pythonBin: string, signal: AbortSignal): Promise<boolean> {
     try {
-      await execFileAsync(
+      await this.runPython(
         pythonBin,
         ['-c', [...SIDECAR_REQUIRED_IMPORTS.map((name) => `import ${name}`),
           "import importlib.metadata; assert importlib.metadata.version('lark-oapi') == '1.7.3'"].join('; ')],
+        signal,
         {
           timeout: 10_000,
           env: this.getPythonRuntimeEnv(),
@@ -487,6 +537,7 @@ export class SidecarManager {
       return true
     } catch {
       // silent-catch: dependency probe failure means requirements must be reinstalled below.
+      signal.throwIfAborted()
       return false
     }
   }
@@ -496,7 +547,7 @@ export class SidecarManager {
     return join(this.venvRoot, 'bin', 'python')
   }
 
-  private async resolveBasePython(): Promise<string> {
+  private async resolveBasePython(signal: AbortSignal): Promise<string> {
     const sharedSkillPython = process.platform === 'win32'
       ? join(app.getPath('userData'), 'skill-runtime', 'python', 'Scripts', 'python.exe')
       : join(app.getPath('userData'), 'skill-runtime', 'python', 'bin', 'python')
@@ -507,35 +558,36 @@ export class SidecarManager {
 
     for (const candidate of candidates) {
       try {
-        const { stdout, stderr } = await execFileAsync(candidate, ['--version'], { timeout: 5_000 })
+        const { stdout, stderr } = await this.runPython(candidate, ['--version'], signal, { timeout: 5_000 })
         const versionText = `${stdout} ${stderr}`.trim()
         if (!isSupportedReadyPythonVersion(parsePythonVersionText(versionText))) continue
-        const sslVersionText = await this.getPythonSslVersionText(candidate)
+        const sslVersionText = await this.getPythonSslVersionText(candidate, signal)
         if (!isSupportedReadyPythonSslVersion(sslVersionText)) continue
         return candidate
       } catch {
-        // try next
+        signal.throwIfAborted()
+        // silent-catch: an unusable candidate falls through; cancellation is rethrown above.
       }
     }
     throw new Error('No usable Python 3.9-3.12 interpreter found for sidecar runtime')
   }
 
-  private async resolvePackagedPythonPath(): Promise<string | null> {
+  private async resolvePackagedPythonPath(signal: AbortSignal): Promise<string | null> {
     if (!this.packagedRuntimeRoot) return null
     const pythonPath = getPackagedSkillPythonPath(this.packagedRuntimeRoot)
     if (!existsSync(pythonPath)) {
       throw new Error(`Packaged Python runtime is missing: ${pythonPath}`)
     }
     const runtimeEnv = this.getPythonRuntimeEnv()
-    const version = await this.getPythonVersion(pythonPath, runtimeEnv)
+    const version = await this.getPythonVersion(pythonPath, signal, runtimeEnv)
     if (!isSupportedReadyPythonVersion(version)) {
-      throw new Error(`Packaged Python runtime has unsupported sidecar version: ${await this.getPythonVersionText(pythonPath, runtimeEnv) || 'unknown'}`)
+      throw new Error(`Packaged Python runtime has unsupported sidecar version: ${await this.getPythonVersionText(pythonPath, signal, runtimeEnv) || 'unknown'}`)
     }
-    const sslVersionText = await this.getPythonSslVersionText(pythonPath, runtimeEnv)
+    const sslVersionText = await this.getPythonSslVersionText(pythonPath, signal, runtimeEnv)
     if (!isSupportedReadyPythonSslVersion(sslVersionText)) {
       throw new Error(`Packaged Python runtime has unsupported sidecar OpenSSL: ${sslVersionText || 'unknown'}`)
     }
-    if (!(await this.hasRequiredPythonModules(pythonPath))) {
+    if (!(await this.hasRequiredPythonModules(pythonPath, signal))) {
       throw new Error('安装包内的远程通讯组件缺失或版本不匹配，请更新安装包')
     }
     return pythonPath
@@ -554,65 +606,70 @@ export class SidecarManager {
     }
   }
 
-  private async getPythonVersion(pythonBin: string, env?: NodeJS.ProcessEnv): Promise<{ major: number; minor: number } | null> {
-    const versionText = await this.getPythonVersionText(pythonBin, env)
+  private async getPythonVersion(pythonBin: string, signal: AbortSignal, env?: NodeJS.ProcessEnv): Promise<{ major: number; minor: number } | null> {
+    const versionText = await this.getPythonVersionText(pythonBin, signal, env)
     return parsePythonVersionText(versionText || '')
   }
 
-  private async getPythonVersionText(pythonBin: string, env?: NodeJS.ProcessEnv): Promise<string | null> {
+  private async getPythonVersionText(pythonBin: string, signal: AbortSignal, env?: NodeJS.ProcessEnv): Promise<string | null> {
     try {
-      const { stdout, stderr } = await execFileAsync(pythonBin, ['--version'], { timeout: 5_000, env })
+      const { stdout, stderr } = await this.runPython(pythonBin, ['--version'], signal, { timeout: 5_000, env })
       return `${stdout} ${stderr}`.trim()
     } catch {
+      // silent-catch: failed probes mark this interpreter unusable; cancellation must propagate.
+      signal.throwIfAborted()
       return null
     }
   }
 
-  private async getPythonSslVersionText(pythonBin: string, env?: NodeJS.ProcessEnv): Promise<string | null> {
+  private async getPythonSslVersionText(pythonBin: string, signal: AbortSignal, env?: NodeJS.ProcessEnv): Promise<string | null> {
     try {
-      const { stdout, stderr } = await execFileAsync(
+      const { stdout, stderr } = await this.runPython(
         pythonBin,
         ['-c', 'import ssl; print(ssl.OPENSSL_VERSION)'],
+        signal,
         { timeout: 5_000, env },
       )
       return `${stdout} ${stderr}`.trim()
     } catch {
+      // silent-catch: failed probes mark this interpreter unusable; cancellation must propagate.
+      signal.throwIfAborted()
       return null
     }
   }
 
-  private async pickFreePort(): Promise<number> {
+  private async pickFreePort(signal: AbortSignal): Promise<number> {
     if (this.preferredPort && this.preferredPort > 0) {
-      const ok = await this.isPortFree(this.preferredPort)
-      if (ok) return this.preferredPort
+      try {
+        return await this.pickPort(this.preferredPort, signal)
+      } catch {
+        signal.throwIfAborted()
+        // silent-catch: an occupied preferred port falls back; cancellation propagates above.
+      }
     }
-    return await this.pickAnyFreePort()
+    return this.pickPort(0, signal)
   }
 
-  private async pickAnyFreePort(): Promise<number> {
-    return await new Promise<number>((resolve, reject) => {
-      const srv = createServer()
-      srv.once('error', reject)
-      srv.listen(0, this.host, () => {
-        const info = srv.address()
-        if (!info || typeof info === 'string') {
-          srv.close(() => reject(new Error('Failed to pick sidecar port')))
-          return
-        }
-        const port = info.port
-        srv.close(() => resolve(port))
+  private async pickPort(port: number, signal: AbortSignal): Promise<number> {
+    signal.throwIfAborted()
+    const srv = createServer()
+    let onAbort: () => void = () => undefined
+    try {
+      return await new Promise<number>((resolve, reject) => {
+        onAbort = () => reject(signal.reason)
+        signal.addEventListener('abort', onAbort, { once: true })
+        srv.once('error', reject)
+        srv.listen({ port, host: this.host, signal }, () => {
+          const info = srv.address()
+          srv.close(() => {
+            if (!info || typeof info === 'string') reject(new Error('Failed to pick sidecar port'))
+            else resolve(info.port)
+          })
+        })
       })
-    })
-  }
-
-  private async isPortFree(port: number): Promise<boolean> {
-    return await new Promise<boolean>((resolve) => {
-      const srv = createServer()
-      srv.once('error', () => resolve(false))
-      srv.listen(port, this.host, () => {
-        srv.close(() => resolve(true))
-      })
-    })
+    } finally {
+      signal.removeEventListener('abort', onAbort)
+    }
   }
 
   // ============================================================

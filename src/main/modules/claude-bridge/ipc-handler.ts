@@ -75,7 +75,7 @@ import type { IngressAdmittedEvent } from '../../../shared/ipc-contracts/agent-r
 import type { TaskProjectionChangeEvent } from '../agent-control/contracts/run-contracts'
 import { getDocumentWorker } from '../document-engine/document-worker-bridge'
 import { readHeavyDocumentAttachmentForAI } from './document-attachment-text'
-import { RuntimeStartupSlot } from './runtime-startup-slot'
+import { RuntimeStartupSlot, agentRuntimeStartCancelled } from './runtime-startup-slot'
 import {
   beginAgentRuntimeRegistration,
   markAgentRuntimeUnavailable,
@@ -464,7 +464,7 @@ export async function setupAgentIPC(
   if (!runtime) {
     if (startingRuntime) {
       await startingRuntime.startPromise
-      if (!runtime) throw new Error('agent_runtime_start_cancelled')
+      if (!runtime) throw agentRuntimeStartCancelled()
     }
   }
   if (!runtime) {
@@ -497,7 +497,7 @@ export async function setupAgentIPC(
     startingRuntime = startup
     try {
       const started = await startup.promote()
-      if (startingRuntime !== startup) throw new Error('agent_runtime_start_cancelled')
+      if (startingRuntime !== startup) throw agentRuntimeStartCancelled()
       runtime = started
     } finally {
       if (startingRuntime === startup) startingRuntime = null

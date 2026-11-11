@@ -545,7 +545,8 @@ function showMainWindowAfterStartup(): void {
   }, TRANSPARENT_SURFACE_REFRESH_DELAY_MS)
 }
 
-async function createWindow(): Promise<void> {
+// 'cancelled' when quitting interrupted the runtime start: callers must not start background work for a closing app.
+async function createWindow(): Promise<'ready' | 'cancelled'> {
   logBootStage('create-window:start')
   try {
     migrateLegacyAppearanceSettings(getDatabase().settings)
@@ -664,7 +665,7 @@ async function createWindow(): Promise<void> {
     browserController = currentBrowserController
     setRSSBrowserController(currentBrowserController)
     logBootStage('agent-ipc:start')
-    await startRendererBeforeRuntimeReady({
+    const runtimeStart = await startRendererBeforeRuntimeReady({
       startRuntime: () => setupAgentIPC(
         agentManager,
         window,
@@ -679,6 +680,11 @@ async function createWindow(): Promise<void> {
         })
       },
     })
+    // Quitting while the runtime was still starting cancels it; the window setup ends here as part of the quit.
+    if (runtimeStart === 'cancelled') {
+      logBootStage('agent-ipc:cancelled')
+      return 'cancelled'
+    }
     logBootStage('agent-ipc:done')
     windowIPCRegistered = true
   } else {
@@ -697,6 +703,7 @@ async function createWindow(): Promise<void> {
   if (app.isPackaged) {
     setupAutoUpdater(mainWindow)
   }
+  return 'ready'
 }
 
 // --- Register all ipcMain.handle() handlers once (not per-window) ---
@@ -1231,7 +1238,8 @@ app.whenReady().then(async () => {
 
   await yieldToPresentation()
   stopCalendarDesktop = startCalendarDesktop(async () => { await showMainWindow(); return mainWindow })
-  void createWindow().then(() => {
+  void createWindow().then((outcome) => {
+    if (outcome === 'cancelled') return
     rssAutoRefreshScheduler?.start()
     return petWindowManager?.restoreIfEnabled()
   })
