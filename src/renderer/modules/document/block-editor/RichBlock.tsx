@@ -60,7 +60,7 @@ export function RichBlock({ block, model, buffer, continuation, focus, merge, re
     state.dirty = false
   }
   flush.current = commit
-  const attempt = (action: () => void) => { try { action() } catch (error) { report(error) } }
+  const attempt = (action: () => void) => { try { action() } catch (error) { console.warn('[RichBlock] edit rich block failed:', error instanceof Error ? error.message : String(error)); report(error) } }
   return <div ref={ref} role="textbox" aria-label="编辑段落" contentEditable suppressContentEditableWarning
     data-rich-start={block.start} data-ready-heading-title={block.type === 'heading' ? plainText(model.spans) : undefined}
     className={block.type === 'heading' ? `note-preview-markdown-h${Math.min(6, /^#+/.exec(model.prefix)?.[0].length ?? 1)}` : 'note-preview-markdown-p'}

@@ -581,6 +581,7 @@ export default function BrowserMode({
       if ((await waiter.wait).outcome !== 'ack') throw new Error('网页尚未让出选择器位置，请重试')
       setFastCardSaveItems(itemIds)
     } catch (error) {
+      console.warn('[BrowserMode] open FastCard save picker failed:', error instanceof Error ? error.message : String(error))
       useFastCard.setState({ syncState: { kind: 'error', message: String(error) }, panelOpen: true, collapsed: false })
     } finally { setFastCardOpeningPicker(false) }
   }, [fastCardOpeningPicker])

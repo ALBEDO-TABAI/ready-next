@@ -54,7 +54,7 @@ function dropped(e: DragEvent, rows: ViewRow[]): { row: ViewRow; from: unknown }
   const raw = e.dataTransfer.getData(dragType)
   if (!raw) return null
   let data: unknown
-  try { data = JSON.parse(raw) } catch { return null } // Foreign drag data is not a database operation.
+  try { data = JSON.parse(raw) } catch { /* silent-catch: Malformed foreign drag data is not a database operation; leave rows unchanged. */ return null }
   if (!data || typeof data !== 'object' || !('id' in data) || typeof data.id !== 'string' || !('from' in data)) return null
   const row = rows.find(row => row.id === data.id)
   return row ? { row, from: data.from } : null

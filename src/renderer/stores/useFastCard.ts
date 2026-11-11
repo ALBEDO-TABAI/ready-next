@@ -44,6 +44,7 @@ export function createFastCardStore(getAPI: () => FastCardStorageAPI, getTransfe
           set({ syncState: { kind: 'ready' } })
           return true
         } catch (error) {
+          console.warn('[useFastCard] synchronize FastCard failed:', error instanceof Error ? error.message : String(error))
           set({ syncState: { kind: 'error', message: error instanceof Error ? error.message : String(error) },
             panelOpen: true, collapsed: false })
           return false

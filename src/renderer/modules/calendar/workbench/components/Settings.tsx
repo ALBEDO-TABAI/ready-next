@@ -9,7 +9,7 @@ import { gmtLabel, timeOfFull } from '../fmt';
 import { reminderLabel, REMINDER_OPTS, Kbd } from './Panel';
 import { MOD } from '../commands';
 
-const ZONES = (() => { try { return (Intl as any).supportedValuesOf('timeZone') as string[]; } catch { return ['UTC', 'Asia/Tokyo', 'Asia/Shanghai', 'Europe/London', 'America/New_York', 'America/Los_Angeles']; } })();
+const ZONES = (() => { try { return (Intl as any).supportedValuesOf('timeZone') as string[]; } catch { /* silent-catch: Intl time-zone enumeration may be unavailable; the built-in zone list keeps the picker usable. */ return ['UTC', 'Asia/Tokyo', 'Asia/Shanghai', 'Europe/London', 'America/New_York', 'America/Los_Angeles']; } })();
 const zoneLabel = (z: string) => `${gmtLabel(z)} ${z.split('/').pop()!.replace(/_/g, ' ')}`;
 function Toggle({ on, onChange, label, testid }: { on: boolean; onChange: (v: boolean) => void; label: string; testid?: string }) {
   return <label className="set-tgl" data-testid={testid}><button role="switch" aria-checked={on} className={`toggle${on ? ' on' : ''}`} onClick={() => onChange(!on)} /><span onClick={() => onChange(!on)}>{label}</span></label>;

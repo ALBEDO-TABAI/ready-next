@@ -31,7 +31,7 @@ export interface InkSidebarProps {
 }
 
 const EXPANDED_KEY = 'ready-ink-expanded'
-const readExpanded = () => { try { return new Set<string>(JSON.parse(localStorage.getItem(EXPANDED_KEY) || '[]')) } catch { return new Set<string>() } }
+const readExpanded = () => { try { return new Set<string>(JSON.parse(localStorage.getItem(EXPANDED_KEY) || '[]')) } catch { /* silent-catch: Unavailable storage or invalid cached JSON only loses expansion preferences; start with collapsed folders. */ return new Set<string>() } }
 const checked = <T,>(result: PageResult<T>): T => { if (!result.ok) throw new Error(result.message); return result.value }
 const canHoldPages = (node: PageNode) => ['page', 'folder', 'vault'].includes(node.kind) && !node.ambiguity
 
@@ -77,7 +77,7 @@ export function InkSidebar({ roots, visible, api = window.electronAPI.documentPa
   const setExpanded = (id: string, value: boolean) => setExpandedState(previous => {
     const next = new Set(previous)
     if (value) next.add(id); else next.delete(id)
-    try { localStorage.setItem(EXPANDED_KEY, JSON.stringify([...next])) } catch { /* the tree still works without memory */ }
+    try { localStorage.setItem(EXPANDED_KEY, JSON.stringify([...next])) } catch { /* silent-catch: Expansion remains in component state when storage is unavailable; only restoration after reopening is lost. */ }
     return next
   })
   const run = async (action: () => Promise<void>) => {
@@ -312,10 +312,10 @@ function NavRow({ icon, iconNode, label, ariaLabel, muted, selected, onClick, we
 
 function Section({ id, title, children, onAdd, addLabel }: { id: string; title: string; children: ReactNode; onAdd?: () => void; addLabel?: string }) {
   const key = 'ready-ink-sections'
-  const [open, setOpen] = useState(() => { try { return (JSON.parse(localStorage.getItem(key) || '{}') as Record<string, boolean>)[id] !== false } catch { return true } })
+  const [open, setOpen] = useState(() => { try { return (JSON.parse(localStorage.getItem(key) || '{}') as Record<string, boolean>)[id] !== false } catch { /* silent-catch: Unavailable storage or invalid cached JSON only loses section preferences; show the section by default. */ return true } })
   const toggle = () => {
     setOpen(!open)
-    try { localStorage.setItem(key, JSON.stringify({ ...(JSON.parse(localStorage.getItem(key) || '{}') as Record<string, boolean>), [id]: !open })) } catch { /* sections still toggle */ }
+    try { localStorage.setItem(key, JSON.stringify({ ...(JSON.parse(localStorage.getItem(key) || '{}') as Record<string, boolean>), [id]: !open })) } catch { /* silent-catch: The section has already toggled in memory; unavailable storage only prevents restoring it after reopening. */ }
   }
   return <section className="ink-sb-section" aria-label={title}>
     <div className="ink-sb-section-head" role="button" tabIndex={0} aria-expanded={open} onClick={toggle} onKeyDown={event => { if (event.key === 'Enter') toggle() }}>

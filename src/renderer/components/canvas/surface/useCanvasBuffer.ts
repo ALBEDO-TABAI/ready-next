@@ -35,7 +35,7 @@ export function useCanvasBuffer(props: CanvasSurfaceProps) {
       const change = await prepare(before)
       if (generation.current !== version) return false
       return await publish(change, version)
-    } catch (e) { if (generation.current === version) report(e); return false }
+    } catch (e) { console.warn('[useCanvasBuffer] apply canvas edit failed:', e instanceof Error ? e.message : String(e)); if (generation.current === version) report(e); return false }
     finally { if (generation.current === version) { pending.current = null; locked.current = false; setBusy(false) } }
   }, [publish, report])
   const commit = useCallback((ops: CanvasOperation[]) => ops.length ? run(before => history.current.prepare(before, ops)) : Promise.resolve(false), [run])

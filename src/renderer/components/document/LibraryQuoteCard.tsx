@@ -32,6 +32,7 @@ export function LibraryQuoteCard({ raw }: { raw: string }) {
         if (!card) throw new Error('引用块已删除或格式已修改')
         if (live && request === sequence) setState({ status: 'ready', card })
       } catch (cause) {
+        console.warn('[LibraryQuoteCard] read quote source failed:', cause instanceof Error ? cause.message : String(cause))
         if (live && request === sequence) setState({ status: 'invalid', reason: cause instanceof Error ? cause.message : String(cause) })
       }
     }

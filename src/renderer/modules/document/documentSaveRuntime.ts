@@ -30,7 +30,7 @@ export async function saveDocumentTabSnapshot(input: {
 }): Promise<DocumentSaveOutcome> {
   if (!input.tab.path) { requestDraftSave(input.tab.id); return { status: 'cancelled' } }
   if (drafts?.status(input.tab.id)) {
-    try { await drafts.flush(input.tab.id) } catch (error) { return { status: 'error', error: String(error) } }
+    try { await drafts.flush(input.tab.id) } catch (error) { console.warn('[documentSaveRuntime] flush draft before save failed:', error instanceof Error ? error.message : String(error)); return { status: 'error', error: String(error) } }
   }
   if (drafts?.status(input.tab.id)?.conflict) return { status: 'error', error: '磁盘版本已变化，请在草稿入口处理冲突' }
   const snapshot = input.tab.content

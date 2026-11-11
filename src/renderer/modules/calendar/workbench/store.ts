@@ -117,7 +117,7 @@ function receive(snapshot: CalendarSnapshot) {
 export async function reload() {
   const request = ++generation;
   try { const snapshot = await unwrap(api().snapshot()); if(request === generation && !pending)receive(snapshot); }
-  catch(error){setState({error:error instanceof Error?error.message:String(error)})}
+  catch(error){ console.warn('[CalendarStore] reload snapshot failed:', error instanceof Error ? error.message : String(error));setState({error:error instanceof Error?error.message:String(error)})}
 }
 export async function init() { const first=!state.ready;await reload(); const today=dayOf(Date.now(),tz());setState({today,...(first?{anchor:today,cursorDay:today}:{})}); }
 function execute<T>(fn:()=>Promise<T>):Promise<T|undefined> {
@@ -164,7 +164,7 @@ function makeEvent(p:Partial<CalEvent>&{start:number|string;end:number|string;al
   return {id,uid:`${id}@ready.local`,calendarId,title:'',status:'confirmed',transparency:p.allDay?'transparent':'opaque',timeZone:tz(),createdAt:now,updatedAt:now,reminders:minutes>=0?[{minutes,method:'notification'}]:[],...p};
 }
 export async function createEvent(p:Partial<CalEvent>&{start:number|string;end:number|string;allDay:boolean},opts:{select?:boolean;draft?:boolean}={}){
-  let event:CalEvent;try{event=makeEvent(p)}catch(error){toast(String(error));return undefined}
+  let event:CalEvent;try{event=makeEvent(p)}catch(error){ console.warn('[CalendarStore] prepare event failed:', error instanceof Error ? error.message : String(error));toast(String(error));return undefined}
   const result=await mutate({type:'create',event});if(!result)return undefined;
   if(opts.select!==false)setState(s=>({selected:[event.id],editing:event.id,draftId:opts.draft?event.id:null,focusTitle:s.focusTitle+1,overlay:null,menu:null,prefs:{...s.prefs,contextPanel:true}}));
   return event.id;
@@ -197,8 +197,8 @@ export async function updateCalendar(id:string,patch:Partial<Calendar>){return e
 export async function addCalendar(name:string,color:string){const id=newId('cal');const result=await execute(async()=>{receive(await unwrap(api().putCalendar({id,accountId:'local',name,color,visible:true,order:state.calendars.length})));return id});return result}
 export async function removeCalendar(id:string){return execute(async()=>{receive(await unwrap(api().deleteCalendar(id)))})}
 export async function importIcsText(text:string,name='Imported',sourceId?:string){return execute(async()=>{const result=await unwrap(api().importCalendar(text,name,sourceId));receive(await unwrap(api().snapshot()));toast(t('imported',{n:result.created+result.updated}))})}
-export async function importIcsFile(){try{const file=await unwrap(api().openIcs());if(file)await importIcsText(file.text,file.name,file.sourceId)}catch(error){toast(String(error))}}
-export async function exportCalendar(id?:string){try{const raw=await unwrap(api().exportIcs(id));await unwrap(api().saveIcs(`${calendarOf(id||'')?.name||'Ready'}.ics`,raw))}catch(error){toast(String(error))}}
+export async function importIcsFile(){try{const file=await unwrap(api().openIcs());if(file)await importIcsText(file.text,file.name,file.sourceId)}catch(error){ console.warn('[CalendarStore] import ICS file failed:', error instanceof Error ? error.message : String(error));toast(String(error))}}
+export async function exportCalendar(id?:string){try{const raw=await unwrap(api().exportIcs(id));await unwrap(api().saveIcs(`${calendarOf(id||'')?.name||'Ready'}.ics`,raw))}catch(error){ console.warn('[CalendarStore] export ICS file failed:', error instanceof Error ? error.message : String(error));toast(String(error))}}
 
 export async function showOnlyCalendar(id:string){return execute(async()=>{receive(await unwrap(api().putCalendars(state.calendars.map(c=>({...c,visible:c.id===id})))));return true})}
 export async function syncCalendar(id:string){return execute(async()=>{const result=await unwrap(api().syncSourceNow(id));receive(await unwrap(api().snapshot()));toast(`已同步 ${result.eventsCreated+result.eventsUpdated} 条日程`);return true})}

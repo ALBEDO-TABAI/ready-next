@@ -50,7 +50,7 @@ export function AnnotationWorkspace({ buffer, children }: { buffer: EditorBuffer
       if (!result.ok) throw new Error(result.message)
       if (token === generation.current) { setSnapshot(result.value); if (command.type !== 'read') { setSelected(null); setText('') } return true }
       return false
-    } catch (cause) { if (token === generation.current) report(cause); return false } finally { if (token === generation.current) setBusy(false) }
+    } catch (cause) { console.warn('[AnnotationWorkspace] apply annotation command failed:', cause instanceof Error ? cause.message : String(cause)); if (token === generation.current) report(cause); return false } finally { if (token === generation.current) setBusy(false) }
   }
   async function add() {
     if (!path || !selected || !snapshot) return
@@ -62,7 +62,7 @@ export function AnnotationWorkspace({ buffer, children }: { buffer: EditorBuffer
       const expectedVersion = [...new Uint8Array(bytes)].map(n => n.toString(16).padStart(2, '0')).join('')
       if (token !== generation.current) return
       await mutate({ type: 'add', path, expectedRevision: snapshot.revision, expectedVersion, start: selected.block.start, end: selected.block.end, text })
-    } catch (cause) { report(cause) }
+    } catch (cause) { console.warn('[AnnotationWorkspace] add annotation failed:', cause instanceof Error ? cause.message : String(cause)); report(cause) }
   }
   const extensions: AnnotationMenus = {
     blockItems: (block, source) => !tabId ? [] : [
@@ -79,7 +79,7 @@ export function AnnotationWorkspace({ buffer, children }: { buffer: EditorBuffer
           if (marked !== block.raw) buffer.apply(createBlockCommand(source, { type: 'replace', mode: 'source', block, markdown: marked }))
           setReference(`![[${path.replace(/\.md$/i, '')}#^${id}]]`)
           setVisible(true)
-        } catch (cause) { report(cause) }
+        } catch (cause) { console.warn('[AnnotationWorkspace] create block reference failed:', cause instanceof Error ? cause.message : String(cause)); report(cause) }
       } },
     ],
     slashItems: insert => !tabId ? [] : [
@@ -117,7 +117,7 @@ export function AnnotationWorkspace({ buffer, children }: { buffer: EditorBuffer
     {template && <TemplatePicker path={path ?? null} title={title} insert={template.insert} close={() => setTemplate(null)} />}
     {sync && <form role="dialog" aria-label="插入同步块" onSubmit={event => {
       event.preventDefault()
-      try { if (!parseSyncedBlock(reference)) throw new Error('请输入 ![[页面#^块编号]]'); sync.insert(reference); setSync(null) } catch (cause) { report(cause) }
+      try { if (!parseSyncedBlock(reference)) throw new Error('请输入 ![[页面#^块编号]]'); sync.insert(reference); setSync(null) } catch (cause) { console.warn('[AnnotationWorkspace] insert synced block failed:', cause instanceof Error ? cause.message : String(cause)); report(cause) }
     }}><input aria-label="同步块引用" value={reference} onChange={event => setReference(event.target.value)} /><button>插入</button><button type="button" onClick={() => setSync(null)}>取消</button></form>}
   </div></AnnotationMenuContext.Provider>
 }

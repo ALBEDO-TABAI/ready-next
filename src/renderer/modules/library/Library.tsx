@@ -32,7 +32,7 @@ export function Library({ api: providedAPI, requestedPath, requestedTarget, onOp
   const apiError = useRef('')
   if (!apiRef.current) {
     try { apiRef.current = providedAPI ?? getLibraryAPI() }
-    catch (error) { apiError.current = String(error) }
+    catch (error) { console.warn('[Library] initialize library API failed:', error instanceof Error ? error.message : String(error)); apiError.current = String(error) }
   }
   const api = apiRef.current
   const reportError = useCallback((message: string) => setError(message), [])

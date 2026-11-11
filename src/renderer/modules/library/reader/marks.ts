@@ -93,7 +93,7 @@ function point(node: Node, offset: number, L: Layout): Point | null {
   if (flow.contains(node)) {
     const r = document.createRange();
     r.setStart(flow, 0);
-    try { r.setEnd(node, offset); } catch { return null; }
+    try { r.setEnd(node, offset); } catch { /* silent-catch: Pagination may invalidate the selection offset; discard this stale range and wait for a fresh selection. */ return null; }
     n = nonWs(r.toString());
   } else n = flow.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_PRECEDING ? 0 : nonWs(flow.textContent);
   return { pi, chapter: pg.chapter, at: pg.start + n, flow };

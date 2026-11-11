@@ -100,7 +100,7 @@ function DatabaseContent({ databaseId, api = databaseAPI, initialViewId, viewNam
     if (writing.current || pending.size || conflict) return false
     writing.current = true; setBusy(true); setError('')
     try { await work(); await load(); publishDatabase(api, { databaseId, origin: origin.current }); return true }
-    catch (reason) { fail(reason); return false }
+    catch (reason) { console.error('[Database] write database view failed:', reason instanceof Error ? reason.message : String(reason)); fail(reason); return false }
     finally { writing.current = false; if (active.current) setBusy(false) }
   }
   const setField = async (row: ViewRow, fieldId: string, value: unknown) => mutate(async () => {
@@ -111,7 +111,7 @@ function DatabaseContent({ databaseId, api = databaseAPI, initialViewId, viewNam
       pending.set(row.id, buffer)
     }
   })
-  const refresh = async () => { if (writing.current) return; setError(''); try { await load(); setConflict(false); setEditing(null) } catch (reason) { fail(reason) } }
+  const refresh = async () => { if (writing.current) return; setError(''); try { await load(); setConflict(false); setEditing(null) } catch (reason) { console.error('[Database] refresh database view failed:', reason instanceof Error ? reason.message : String(reason)); fail(reason) } }
   const open = (row: ViewRow) => { void api.openRow(row.id).catch(fail) }
   if (!loaded) return <div className="ready-database" aria-busy={!error}>{error ? <><p role="alert">{error}</p><button onClick={() => { void refresh() }}>重试</button></> : <p role="status">正在读取数据库…</p>}</div>
   const { snapshot, query, view, personal } = loaded

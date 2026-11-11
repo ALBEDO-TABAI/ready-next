@@ -34,7 +34,7 @@ export function ReadyCalendarActions({active,buttons=true}:{active:boolean;butto
         }else if(target.command==='settings'||target.command==='search')openOverlay(target.command)
         else setView(target.command==='month'?'month':'default',target.command==='day'?1:7)
         await unwrap(api().ackNavigation(request.id))
-      }catch(error){toast(String(error))}finally{consuming.current=false}
+      }catch(error){ console.warn('[ReadyCalendarActions] consume navigation request failed:', error instanceof Error ? error.message : String(error));toast(String(error))}finally{consuming.current=false}
     }
     const off=api().onNavigation(()=>{void consume()});void consume();return off
   },[active,s.busy])
@@ -59,8 +59,8 @@ export function ReadyCalendarActions({active,buttons=true}:{active:boolean;butto
     const off1=api().onRemoteEventSuggested(setSuggestion),off2=api().onReminderFired(setReminder)
     return()=>{off1();off2()}
   },[])
-  const prepareImport=async()=>{try{setImportPreview(await unwrap(api().prepareStandaloneImport()));setSkipExamples(false)}catch(error){toast(String(error))}}
-  const importStandalone=async()=>{if(!importPreview||importing)return;setImporting(true);try{const result=await unwrap(api().applyStandaloneImport(importPreview.ticket,skipExamples));await reload();setImportPreview(null);toast(`已迁入 ${result.created} 条日程，跳过 ${result.skipped} 条已存在记录`)}catch(error){toast(String(error))}finally{setImporting(false)}}
+  const prepareImport=async()=>{try{setImportPreview(await unwrap(api().prepareStandaloneImport()));setSkipExamples(false)}catch(error){ console.warn('[ReadyCalendarActions] prepare standalone import failed:', error instanceof Error ? error.message : String(error));toast(String(error))}}
+  const importStandalone=async()=>{if(!importPreview||importing)return;setImporting(true);try{const result=await unwrap(api().applyStandaloneImport(importPreview.ticket,skipExamples));await reload();setImportPreview(null);toast(`已迁入 ${result.created} 条日程，跳过 ${result.skipped} 条已存在记录`)}catch(error){ console.warn('[ReadyCalendarActions] apply standalone import failed:', error instanceof Error ? error.message : String(error));toast(String(error))}finally{setImporting(false)}}
   const open=(next:typeof panel)=>{setPanel(next);setText('')}
   const jump=(payload:ReminderFirePayload)=>{
     const [id,origin]=payload.eventId.split('#'),event=getState().events[id]
@@ -73,14 +73,14 @@ export function ReadyCalendarActions({active,buttons=true}:{active:boolean;butto
     const id=await createEvent({title:suggestion.suggestedTitle,description:suggestion.source.text,allDay,start:allDay?isoDate(day):suggestion.suggestedStartUnix*1000,end:allDay?isoDate(day+1):suggestion.suggestedEndUnix*1000,calendarId:primaryCalendar()?.id})
     if(id){goToDay(day);setSuggestion(null)}
   }
-  const subscribe=async()=>{try{const response=await unwrap(api().subscribeUrl({url,name,syncIntervalMinutes:interval}));await reload();toast(`已订阅，读取 ${response.initialEvents} 条日程`);setPanel(null)}catch(error){toast(String(error))}}
+  const subscribe=async()=>{try{const response=await unwrap(api().subscribeUrl({url,name,syncIntervalMinutes:interval}));await reload();toast(`已订阅，读取 ${response.initialEvents} 条日程`);setPanel(null)}catch(error){ console.warn('[ReadyCalendarActions] subscribe calendar failed:', error instanceof Error ? error.message : String(error));toast(String(error))}}
   const quick=async()=>{try{
     const found=await unwrap(api().detectTimeExpressions({text}));if(!found.length){toast('没有识别到明确时间，请补充日期和时间');return}
     if(found.length>1){toast('识别到多个时间，请每次输入一条日程');return}
     const e=found[0],day=dayOf(e.startTime*1000,s.prefs.primaryTimeZone)
     const id=await createEvent({title:text,allDay:!e.hasTime,start:e.hasTime?e.startTime*1000:isoDate(day),end:e.hasTime?e.endTime*1000:isoDate(day+1)})
     if(id){goToDay(day);setPanel(null)}
-  }catch(error){toast(String(error))}}
+  }catch(error){ console.warn('[ReadyCalendarActions] create event from text failed:', error instanceof Error ? error.message : String(error));toast(String(error))}}
   const week=startOfWeek(s.today,s.prefs.weekStartsOn)
   const weekEvents=occurrences(Object.values(s.events),week,week+7,s.prefs.primaryTimeZone)
   const today=weekEvents.filter(o=>o.startDay<=s.today&&o.endDay>=s.today)

@@ -24,5 +24,5 @@ export function remarkDatabaseViews() {
 export function parseDatabaseLink(href: string): { target: string; viewName: string } | null {
   const match = /^ready-db:([^#]+)#(.+)$/.exec(href)
   if (!match) return null
-  try { return { target: decodeURIComponent(match[1]), viewName: decodeURIComponent(match[2]) } } catch { return null }
+  try { return { target: decodeURIComponent(match[1]), viewName: decodeURIComponent(match[2]) } } catch { /* silent-catch: Malformed percent escapes are not a database link; leave the input as an ordinary link. */ return null }
 }

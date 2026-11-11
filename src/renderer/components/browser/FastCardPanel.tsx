@@ -176,7 +176,7 @@ export function FastCardSaveDialog({ onSave, onRetry, onCancel }: {
     try {
       if (!await onSave(target)) return { ok: false, code: 'save_failed', message: '保存未完成，暂存仍保留；请查看错误后重试' }
       onCancel(); return { ok: true, value: undefined }
-    } catch (failure) { return { ok: false, code: 'save_failed', message: String(failure) } }
+    } catch (failure) { console.warn('[FastCardPanel] save to canvas failed:', failure instanceof Error ? failure.message : String(failure)); return { ok: false, code: 'save_failed', message: String(failure) } }
     finally { setBusy(false) }
   }
   if (creating) return <SaveToPicker trees={trees} initialTitle="新画板" extension=".canvas" onCancel={() => setCreating(false)} onConfirm={selection => save({ kind: 'new', title: selection.title,

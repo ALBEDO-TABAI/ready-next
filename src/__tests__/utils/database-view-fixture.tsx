@@ -37,9 +37,9 @@ export async function drop(ui: DatabaseUI, source: string, target: string) {
 }
 
 export async function settle(ui: Pick<DatabaseUI, 'host'>) {
-  const deadline = Date.now() + 5000
+  const deadline = performance.now() + 5000
   while (ui.host.querySelector('[aria-busy="true"]') || [...ui.host.querySelectorAll('[role="status"]')].some(node => node.textContent?.startsWith('正在'))) {
-    assert.ok(Date.now() < deadline, `Database did not settle: ${ui.host.textContent}`)
+    assert.ok(performance.now() < deadline, `Database did not settle: ${ui.host.textContent}`)
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 5)) })
   }
 }

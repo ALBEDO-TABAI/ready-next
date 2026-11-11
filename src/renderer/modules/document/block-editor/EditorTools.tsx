@@ -59,7 +59,7 @@ export function EditorTools({ buffer, linkBase, children, report }: { buffer: Ed
       if (!element) throw new Error('日期提及所在段落尚不可用')
       element.scrollIntoView({ block: 'center' })
       element.animate([{ backgroundColor: 'rgba(220,145,45,.35)' }, { backgroundColor: 'transparent' }], { duration: 1800 })
-    } catch (error) { report(error) }
+    } catch (error) { console.warn('[EditorTools] locate date mention failed:', error instanceof Error ? error.message : String(error)); report(error) }
     useMentionNavigation.setState({ target: null })
   }, [mentionTarget, tabId, buffer.snapshot.content, report])
   function readSelection(el: HTMLElement): Selection | null {
@@ -90,7 +90,7 @@ export function EditorTools({ buffer, linkBase, children, report }: { buffer: Ed
       const selected = sliceSpans(state.model.spans, state.start, state.end).map(span => ({ ...span, marks: { ...span.marks, ...patch } }))
       replaceSelection(state, selected)
       setRestore({ at: state.block.start, start: state.start, end: state.end })
-    } catch (error) { report(error) }
+    } catch (error) { console.warn('[EditorTools] apply inline marks failed:', error instanceof Error ? error.message : String(error)); report(error) }
   }
   function select() {
     if (document.activeElement?.closest('[data-block-popup]')) return
@@ -114,7 +114,7 @@ export function EditorTools({ buffer, linkBase, children, report }: { buffer: Ed
     }, 150)
     return () => { cancelled = true; window.clearTimeout(timer) }
   }, [linkBase?.filePath, picker, query, report])
-  const attempt = (action: () => void) => { try { action() } catch (error) { report(error) } }
+  const attempt = (action: () => void) => { try { action() } catch (error) { console.warn('[EditorTools] run editor action failed:', error instanceof Error ? error.message : String(error)); report(error) } }
   function slashMarkdown(state: Picker, markdown: string) {
     // Only the typed trigger is consumed; existing following text is retained.
     const remainder = inlineMarkdown(plainModel(), sliceSpans(state.model.spans, state.end))
@@ -154,7 +154,7 @@ export function EditorTools({ buffer, linkBase, children, report }: { buffer: Ed
       if (buffer.snapshot.version !== page.picker.snapshot.version) throw new Error(`页面已创建在 ${result.value.path}；正文已变化，未插入链接。请取消并从 [[ 选择器插入。`)
       replaceSelection(page.picker, [{ text: target, marks: { reference: { kind: 'wiki', target } } }])
       setPage(null)
-    } catch (error) { report(error); setPage({ ...page, state: 'failed' }) } finally { pagePending.current = false }
+    } catch (error) { console.warn('[EditorTools] create child page failed:', error instanceof Error ? error.message : String(error)); report(error); setPage({ ...page, state: 'failed' }) } finally { pagePending.current = false }
   }
   return <div ref={root} onMouseUp={select} onKeyUp={select}
     onInput={event => {
