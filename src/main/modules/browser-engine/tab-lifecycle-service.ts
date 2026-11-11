@@ -517,14 +517,12 @@ export class BrowserTabLifecycleService {
         })
       } else {
         // fire-and-forget: load failures surface via did-fail-load.
-        void (async () => {
-          await this.host.preparePageObservation?.(tabId)
-          if (this.host.tabs.get(tabId)?.view !== view || view.webContents.isDestroyed()) return
-          await view.webContents.loadURL(tab.url)
-        })().catch(error => {
-          tab.error = error instanceof Error ? error.message : String(error)
-          tab.loading = false
-          this.host.onTabLoadStateMayChange?.(tabId, 'load-failed')
+        void view.webContents.loadURL(tab.url).catch(() => undefined)
+        // Network tracking (W7 network idle) starts alongside the first load and never gates it: on a page that has
+        // not navigated yet Network.enable waits for the renderer, and gating the load on it left every new tab
+        // blank. A failure only means the next wait retries tracking.
+        void this.host.preparePageObservation?.(tabId)?.catch(error => {
+          console.warn('[browser] network tracking not started; waits retry it', tabId, error instanceof Error ? error.message : String(error))
         })
       }
     } catch (error) {
