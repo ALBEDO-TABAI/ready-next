@@ -15,6 +15,7 @@ const operation = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('textRanges'), id, expectedTextVersion: z.string().min(1), ranges: z.array(z.strictObject({ start: z.number().int().nonnegative(), end: z.number().int().nonnegative(), expectedText: z.string(), replacement: z.string() })) }),
   z.strictObject({ type: z.literal('trash'), ids: z.array(id), edgeIds: z.array(id).optional(), trash: TrashSchema }),
   z.strictObject({ type: z.literal('restore'), ids: z.array(id), edgeIds: z.array(id).optional() }),
+  z.strictObject({ type: z.literal('purge'), ids: z.array(id), edgeIds: z.array(id).optional() }),
 ])
 export const WriteSchema = z.object({ objectId: id, handleId: id, expectedVersion: Sha256Schema, operationId: id, commands: z.array(z.union([operation,
   z.strictObject({ type: z.literal('batch'), operations: z.array(operation) }),

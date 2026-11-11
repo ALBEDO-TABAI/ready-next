@@ -1,3 +1,5 @@
+import { homedir } from 'node:os'
+import { registerCanvasImageExportIPC } from './export-image'
 import { fastCardBoardPort } from './fastcard-board-port'
 import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain } from 'electron'
 import { getDatabase } from '../database'
@@ -52,6 +54,16 @@ export function setupCanvasRuntime(ready: Promise<void>, paths: { preloadPath: s
     if (state.status !== 'ready' || !isInside(canonicalObjectPath(state.root), canonicalObjectPath(path))) throw new Error('路径不在当前资料库中')
   }
   registerCanvasIPC(ipcMain, resolve, authorize)
+  const exportWindow = (sender: Electron.WebContents) => {
+    const window = BrowserWindow.fromWebContents(sender)
+    if (!window || window.isDestroyed() || window.webContents !== sender) throw new Error('发起导出的窗口已不可用')
+    return window
+  }
+  registerCanvasImageExportIPC(ipcMain, {
+    contentSize: sender => { const [width, height] = exportWindow(sender).getContentSize(); return [width, height] },
+    showSaveDialog: (sender, request) => dialog.showSaveDialog(exportWindow(sender), request),
+    getFallbackExportDir: homedir,
+  })
   registerCanvasCompositionIPC(ipcMain, async event => { const services = await resolve(); authorize(event, services.canvas.root); return services.composition })
   registerFastCardServicesIPC(ipcMain, { transfer: async () => (await resolve()).transfer, quickNote })
   // First-run setup may have no library. Requests resolve the newly configured library lazily.

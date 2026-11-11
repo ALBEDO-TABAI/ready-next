@@ -25,6 +25,7 @@ test('each semantic operation returns an exact inverse preserving extensions and
     [{ type: 'textRanges', id: 'text', expectedTextVersion: fragmentHash('第一段\r\n第二段 😀'), ranges: [{ start: 0, end: 3, expectedText: '第一段', replacement: '首段' }] }],
     [{ type: 'trash', ids: ['text', 'note'], trash }],
     [{ type: 'restore', ids: ['trashed'] }],
+    [{ type: 'purge', ids: ['trashed'], edgeIds: ['edge-trash'] }],
   ]
   for (const ops of cases) {
     const before = serializeCanvas(canvas), result = applyCanvasOperations(canvas, ops)
@@ -88,4 +89,17 @@ test('independent edge recycle and restore does not change node bodies', () => {
   assert.ok(activeCanvasContent(restored).edges.some(e => e.id === 'edge'))
   assert.deepEqual(restored.nodes, canvas.nodes)
   assert.equal(serializeCanvas(applyCanvasInverse(result.canvas, result.inverse)), before)
+})
+
+
+test('purge uses existing current-session undo and redo without losing recycled state', async () => {
+  const { CanvasHistory } = await import('../renderer/modules/canvas/interaction/operations')
+  const before = initial(), history = new CanvasHistory()
+  const change = history.prepare(before, [{ type: 'purge', ids: ['trashed'], edgeIds: ['edge-trash'] }])
+  history.accept(change)
+  const undo = history.prepareUndo(change.after)!
+  assert.equal(serializeCanvas(applyCanvasOperations(change.after, undo.operations).canvas), serializeCanvas(before))
+  history.accept(undo)
+  const redo = history.prepareRedo(undo.after)!
+  assert.equal(serializeCanvas(applyCanvasOperations(undo.after, redo.operations).canvas), serializeCanvas(change.after))
 })
