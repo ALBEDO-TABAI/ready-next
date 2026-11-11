@@ -3,6 +3,7 @@ import type { CanvasNode, CanvasOperation } from '../../../shared/ready-canvas'
 import { eventCard } from '../../../shared/calendar-linkage'
 import { referenceMarkdown } from '../workbench/capture'
 import { loadObjectPreview } from '../workbench/object-ui/preview'
+import { useFastCard } from '../../stores/useFastCard'
 
 export async function dropCanvasReference(data: Pick<DataTransfer, 'getData'>, at: { x: number; y: number }, target: {
   objectId: string; root: string; write(operations: CanvasOperation[]): Promise<void>; refresh(): Promise<void>
@@ -13,6 +14,8 @@ export async function dropCanvasReference(data: Pick<DataTransfer, 'getData'>, a
       const result = await window.electronAPI.fastCard.transfer({ operationId: crypto.randomUUID(), itemIds: all.map(item => { if (item.ref.kind !== 'fastcard') throw new Error('Invalid card'); return item.ref.id }), target: { kind: 'existing', objectId: target.objectId }, position: at })
       if (!result.success) throw new Error(result.error || '未存入画板')
       await target.refresh()
+      // The cards moved to the board: the shelf shows what is left.
+      void useFastCard.getState().load()
     } else {
       if (all.some(item => item.ref.kind === 'fastcard')) throw new Error('请分开拖入暂存与其他引用')
       const operations: CanvasOperation[] = []
@@ -32,6 +35,7 @@ export async function dropCanvasReference(data: Pick<DataTransfer, 'getData'>, a
     const result = await api.fastCard.transfer({ operationId: crypto.randomUUID(), itemIds: [ref.id], target: { kind: 'existing', objectId: target.objectId }, position: at })
     if (!result.success) throw new Error(result.error || '未存入画板')
     await target.refresh()
+    void useFastCard.getState().load()
     return true
   }
   const frame = { id: crypto.randomUUID(), x: Math.round(at.x), y: Math.round(at.y), width: 300, height: 180 }

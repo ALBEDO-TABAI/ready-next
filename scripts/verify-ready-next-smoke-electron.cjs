@@ -337,9 +337,11 @@ async function checkCalendarReference(page) {
   }
   // Exercise draft drop once; the post-restart check below clicks persisted history.
   await page.locator('[data-chat-composer-shell="true"]').waitFor()
+  // The one internal drag format (W6 K3): the occurrence as a ReadyRef, its title as the plain text.
   await page.locator('[data-chat-composer-shell="true"]').evaluate((element, payload) => {
     const transfer = new DataTransfer()
-    transfer.setData('application/x-ready-drag', JSON.stringify(payload))
+    transfer.setData('application/x-ready-ref', JSON.stringify({ kind: 'event', id: payload.seriesId, occurrence: String(payload.second) }))
+    transfer.setData('text/plain', payload.title)
     element.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }))
   }, reference)
   const attachment = page.locator('.chat-reference-chip button').filter({ hasText: reference.title }).first()
@@ -525,9 +527,11 @@ async function checkR45References(app, page, history, createDrafts) {
     const tab = await page.evaluate(url => window.electronAPI.browser.createTab(url), history.url)
     if (!tab.success || !tab.tabId) throw Error('R45 browser fixture failed')
     await page.locator('[data-chat-composer-shell="true"]').evaluate((element, payload) => {
-      const transfer = new DataTransfer(); transfer.setData('application/x-ready-drag', JSON.stringify(payload))
+      // The one internal drag format (W6 K3): an open page is a web ReadyRef; the composer finds its tab by address.
+      const transfer = new DataTransfer(); transfer.setData('application/x-ready-ref', JSON.stringify({ kind: 'web', url: payload.url }))
+      transfer.setData('text/plain', payload.name)
       element.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }))
-    }, { type: 'browser-tab', name: 'R45 draft webpage', tabId: tab.tabId, url: history.url })
+    }, { name: 'R45 draft webpage', url: history.url })
     await page.locator('.chat-reference-chip button').filter({ hasText: 'R45 draft webpage' }).click()
   } else await page.locator('[data-chat-message-attachment="true"]:not([disabled])').filter({ hasText: 'R45 webpage' }).first().click()
   await page.locator('[data-workbench-mode-panel="browser"][data-mode-visual-state="current"]').waitFor()
@@ -538,14 +542,16 @@ async function checkR45References(app, page, history, createDrafts) {
   }
   ok(`R45 ${createDrafts ? 'new' : 'restarted history'} browser reference opens its webpage`, true)
   await page.locator('[data-chat-message-attachment="true"]:not([disabled])').filter({ hasText: 'R45 saved excerpt' }).first().click()
-  await page.getByRole('button', { name: '在 RSS 中定位', exact: true }).click()
+  // The preview names its source as a reference capsule (W6 K1); its click opens and selects the quote in 资讯.
+  await page.locator('.attachment-preview-content a[data-ready-ref-capsule]').first().click()
   await page.locator('.rss-reader-title').filter({ hasText: 'R45 saved article' }).waitFor()
   await page.waitForFunction(() => window.getSelection()?.toString() === 'exact')
   if (createDrafts) {
-    await page.getByRole('button', { name: '引用', exact: true }).click()
-    await page.getByRole('button', { name: '引用所选文字', exact: true }).click()
+    // The selection's actions are the shared bar's: it shows when a selection ends (here, a mouseup in the reader).
+    await page.locator('.rss-reader-body').evaluate(body => body.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })))
+    await page.locator('[data-ready-selection-bar]').getByRole('button', { name: '问 AI', exact: true }).click()
     await page.locator('.chat-reference-chip button').filter({ hasText: 'R45 saved article · 选区' }).click()
-    await page.getByRole('button', { name: '在 RSS 中定位', exact: true }).click()
+    await page.locator('.attachment-preview-content a[data-ready-ref-capsule]').first().click()
     await page.waitForFunction(() => window.getSelection()?.toString() === 'exact')
   }
   ok(`R45 ${createDrafts ? 'new' : 'restarted history'} RSS reference selects the original exact text`, true)

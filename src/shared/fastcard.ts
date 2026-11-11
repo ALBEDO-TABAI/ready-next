@@ -85,6 +85,14 @@ export interface BrowserFastCardContextActionEvent {
   target: BrowserFastCardTarget
 }
 
+/** A browser tab's selected words (W6 §3.2), sent when a pointer or keyboard selection ends; empty text clears it. */
+export interface BrowserSelectionEvent {
+  tabId: string
+  text: string
+  url: string
+  title: string
+}
+
 export interface FastCardTranslateRequest {
   text: string
   targetLanguage: string
@@ -167,6 +175,7 @@ export type FastCardOverlayCommand =
   | { type: 'save-canvas'; itemIds: string[] }
   | { type: 'insert-chat'; itemIds?: string[] }
   | { type: 'remove-item'; id: string }
+  | { type: 'insert-document'; id: string }
   | { type: 'target-language-change'; targetLanguage: string }
 
 export interface FastCardIPCResult<T> {

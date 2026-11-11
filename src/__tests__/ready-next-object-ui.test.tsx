@@ -114,8 +114,10 @@ test('M5-C relations group unresolved and incoming pages and open through the un
   const { RelationsPanel } = await import('../renderer/modules/workbench/object-ui/RelationsPanel')
   await ui.render(<RelationsPanel objectId="page" />)
   assert.match(ui.text(), /反链 1/); assert.match(ui.text(), /未解析/); assert.match(ui.text(), /来源页面/)
-  const button = [...ui.dom.window.document.querySelectorAll('button')].find(button => button.textContent === '来源页面')!
-  await act(async () => button.click())
+  // Each reference is a capsule (W6 K1): its click opens through the same entry as everywhere else.
+  const capsule = [...ui.dom.window.document.querySelectorAll<HTMLAnchorElement>('a[data-ready-ref-capsule]')].find(link => link.textContent === '来源页面')!
+  assert.equal(capsule.getAttribute('aria-label'), '页面 来源页面')
+  await act(async () => { capsule.click(); await new Promise(resolve => setTimeout(resolve, 20)) })
   assert.equal(ui.useWorkspace.getState().selectedFile, '/fixture/source.md')
 })
 

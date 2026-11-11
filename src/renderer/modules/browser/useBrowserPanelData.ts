@@ -68,7 +68,7 @@ export function useBrowserPanelData({
     return () => { cleanup?.() }
   }, [activeTab?.url, isElectron, refreshBookmarks])
 
-  // P1.4 — bridge utility-menu "剪藏到 Obsidian 笔记" click → preload
+  // P1.4 — bridge utility-menu "剪藏到资料库" click → preload
   // `clipCurrentTab()` IPC. The menu service emits
   // `browser:clipCurrentTabRequested`; here we react to it. Result is
   // logged for P1 (renderer toast UI is P2.9). Any rejection from the

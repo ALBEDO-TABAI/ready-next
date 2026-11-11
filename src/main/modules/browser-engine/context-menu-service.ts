@@ -9,6 +9,7 @@ import {
   type WebContents,
 } from 'electron'
 import {
+  type BrowserSelectionEvent,
   type BrowserFastCardContextAction,
   type BrowserFastCardContextActionEvent,
   type BrowserFastCardImageTarget,
@@ -23,7 +24,7 @@ interface BrowserContextMenuHost {
   isAllowedUrl(url: string): boolean
   createTab(url: string, options?: { background?: boolean; openerTabId?: string | null }): Promise<{ success: boolean; tabId?: string; error?: string }>
   getTabIdForWebContents(webContents: WebContents): string | null
-  sendToRenderer(channel: 'browser:fastCardContextAction', data: unknown): void
+  sendToRenderer(channel: 'browser:fastCardContextAction' | 'browser:selectionChanged', data: unknown): void
   logBrowserDiag(message: string): void
 }
 
@@ -46,6 +47,9 @@ interface ElementFastCardMetadata {
   sources?: string[]
 }
 
+// Read-only and in the page's own world: the words a selection covers, nothing else.
+const SELECTED_TEXT_SCRIPT = `(() => { const s = window.getSelection(); return s && !s.isCollapsed ? String(s).trim().slice(0, 24000) : '' })()`
+
 export class BrowserContextMenuService {
   constructor(private readonly host: BrowserContextMenuHost) {}
 
@@ -54,6 +58,7 @@ export class BrowserContextMenuService {
   }
 
   install(webContents: WebContents): void {
+    this.watchSelection(webContents)
     webContents.on('context-menu', (_event, params) => {
       try {
         const template = this.build(webContents, params)
@@ -64,6 +69,35 @@ export class BrowserContextMenuService {
         this.host.logBrowserDiag(`[browser-v3][context] build menu failed: ${String(error)}`)
       }
     })
+  }
+
+  /**
+   * The selection bar of the reading scenes (W6 §3.2) sits in the band under the native page, so the renderer needs
+   * the page's selection: read when a pointer or keyboard selection ends, sent for tabs only, cleared on navigation.
+   */
+  private watchSelection(webContents: WebContents): void {
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const send = (text: string) => {
+      const tabId = this.host.getTabIdForWebContents(webContents)
+      if (!tabId || webContents.isDestroyed()) return
+      const event: BrowserSelectionEvent = { tabId, text, url: webContents.getURL(), title: webContents.getTitle() }
+      this.host.sendToRenderer('browser:selectionChanged', event)
+    }
+    const read = () => {
+      timer = null
+      if (webContents.isDestroyed()) return
+      webContents.executeJavaScript(SELECTED_TEXT_SCRIPT).then(
+        (text: unknown) => send(typeof text === 'string' ? text : ''),
+        (error: unknown) => this.host.logBrowserDiag(`[browser-v3][selection] read failed: ${String(error)}`),
+      )
+    }
+    webContents.on('input-event', (_event, input) => {
+      if (input.type !== 'mouseUp' && input.type !== 'keyUp') return
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(read, 60)
+    })
+    webContents.on('did-start-navigation', (_event, _url, inPlace, mainFrame) => { if (mainFrame && !inPlace) send('') })
+    webContents.once('destroyed', () => { if (timer) clearTimeout(timer) })
   }
 
   private build(webContents: WebContents, params: ContextMenuParams): MenuItemConstructorOptions[] {

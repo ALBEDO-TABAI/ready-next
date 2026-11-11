@@ -1,12 +1,11 @@
-import RSSSelectionReferences from './RSSSelectionReferences'
-import { revealReadingRange } from '../../modules/rss/reading-selection'
+import { highlightReadingSelection, readingSelectionCapture, revealReadingRange, selectedReadingRange } from '../../modules/rss/reading-selection'
 import type { RSSReadingRange } from '../../../shared/rss-reading'
 import type { RSSDefinition } from '../../../shared/rss-organization'
 import RSSMembershipEditor from './RSSMembershipEditor'
 import RSSEventPanel from './RSSEventPanel'
 import RSSReferenceButton from './RSSReferenceButton'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowLeft, ArrowUpRight, Check, ChevronDown, Copy, Loader2, MessageSquareQuote, RefreshCw, Star } from 'lucide-react'
+import { ArrowLeft, ArrowUpRight, Check, ChevronDown, Copy, Inbox, Loader2, MessageSquareQuote, RefreshCw, Shapes, Star, TextQuote } from 'lucide-react'
 import { MarkdownContent, copyTextToClipboard } from '../document/MarkdownContent'
 import { readSavedRSSArticle, isOutdatedRSSExtraction } from '../../modules/rss/read-article'
 import { openWebpageInBrowser } from '../../modules/browser/openWebpageInBrowser'
@@ -23,6 +22,10 @@ import { FloatPanel } from '../ui/float/FloatPanel'
 import { RefCapsule } from '../ui/RefCapsule'
 import { ReadyRefSchema } from '../../../shared/ready-ref'
 import { chatMenuSurfaceStyle } from '../agent/chatMenuStyles'
+import { anchorOf, openMenu } from '../ui'
+import { useSelectionBar } from '../../modules/workbench/selection-bar/open-selection-bar'
+import type { CaptureSelection } from '../../modules/workbench/capture'
+import { askAboutSelection, receiveToCanvas, receiveToDocument, receiveToFastCard, reportCaptureError } from '../../modules/workbench/capture-receipt'
 
 // Items re-extracted in this session; a page that still extracts badly is not fetched again on every open.
 const reextracted = new Set<string>()
@@ -62,6 +65,7 @@ export default function RSSArticleReader({ item, expectedRevision, reveal, onClo
   const [copied, setCopied] = useState(false)
   const [reload, setReload] = useState(0)
   const [referenceMenuOpen, setReferenceMenuOpen] = useState(false)
+  const [paragraph, setParagraph] = useState<RSSReadingRange | null>(null)
   const forceReload = useRef(false)
   const [headings, setHeadings] = useState<Array<{ title: string; level: number }>>([])
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -152,6 +156,26 @@ export default function RSSArticleReader({ item, expectedRevision, reveal, onClo
   const originalRef = originalLink ? ReadyRefSchema.safeParse({ kind: 'web', url: originalLink }).data ?? null : null
   const included = (article?.classifications || item.classifications || []).filter((entry) => entry.included)
   const closeReferenceMenu = () => setReferenceMenuOpen(false)
+  // Selections in the source text share the reading scenes' bar (W6 §3.2); a translation has no reading ranges.
+  const readSelection = () => bodyRef.current && article ? readingSelectionCapture(bodyRef.current, article, window.getSelection()) : null
+  useSelectionBar(bodyRef, { enabled: active && !busy && !!article && translation.view === 'source', read: readSelection,
+    highlight: () => highlightReadingSelection(readSelection()),
+    // The composer names a selection as 引用本段 names a paragraph: the article, then its scope.
+    ask: async () => {
+      const selection = readSelection()
+      if (!selection) throw new Error('选区已经变了，请重新选择文字')
+      await askAboutSelection({ ...selection, title: `${selection.title} · 选区` })
+    } })
+  // 收下 the whole article: its summary (or the opening of its text) with the article as the source.
+  const articleCapture = (): CaptureSelection => {
+    if (!article || !content) throw new Error('文章还没有读出来')
+    return { ref: { kind: 'rss-item', id: article.id }, title: article.title, text: article.summary.trim() || content.text.replace(/\s+/g, ' ').trim().slice(0, 280) }
+  }
+  const openCaptureMenu = (element: HTMLElement) => openMenu(anchorOf(element), [
+    { id: 'fastcard', label: '存入 FastCard', icon: <Inbox />, onSelect: () => { void receiveToFastCard(articleCapture()).catch(reportCaptureError) } },
+    { id: 'canvas', label: '保存到画板', icon: <Shapes />, onSelect: () => { void receiveToCanvas(articleCapture()).catch(reportCaptureError) } },
+    { id: 'document', label: '引用到文档', icon: <TextQuote />, onSelect: () => { void receiveToDocument(articleCapture()).catch(reportCaptureError) } },
+  ], { placement: 'bottom-end', label: '收下这篇文章' })
 
   return <section className="rss-article-reader" aria-label="资讯阅读" data-rss-article-id={item.id}>
     <RSSTopbarTools slot="lead" show={active}>
@@ -161,7 +185,10 @@ export default function RSSArticleReader({ item, expectedRevision, reveal, onClo
     <RSSTopbarTools show={active}>
       <div ref={referenceMenuRef} className="relative">
         <button type="button" className="rss-btn" aria-haspopup="menu" aria-expanded={referenceMenuOpen} disabled={busy && !content}
-          onMouseDown={(event) => event.preventDefault()} onClick={() => setReferenceMenuOpen((open) => !open)} title="把这篇文章、所选文字或当前段落交给助手">
+          onMouseDown={(event) => event.preventDefault()} onClick={() => {
+            setParagraph(bodyRef.current && translation.view === 'source' ? selectedReadingRange(bodyRef.current, window.getSelection()).paragraph : null)
+            setReferenceMenuOpen((open) => !open)
+          }} title="把这篇文章或当前段落交给助手">
           <MessageSquareQuote size={15} strokeWidth={1.8} />引用<ChevronDown size={12} strokeWidth={2} />
         </button>
         {referenceMenuOpen && <FloatPanel className="rss-reference-menu-panel overflow-hidden rounded-[14px]" role="menu" radius={14}
@@ -169,10 +196,15 @@ export default function RSSArticleReader({ item, expectedRevision, reveal, onClo
           <div className="rss-menu">
             <RSSReferenceButton className="rss-menu-item ready-floating-menu-item" name={title} label="引用文章" disabled={busy} onDone={closeReferenceMenu}
               reference={article ? { kind: 'article', read: { itemId: article.id, expectedRevision: article.revision, offset: 0, length: 12000 } } : null} />
-            {article && <RSSSelectionReferences bodyRef={bodyRef} article={article} active={active && !busy && translation.view === 'source'} className="rss-menu-item ready-floating-menu-item" onDone={closeReferenceMenu} />}
+            {article && <RSSReferenceButton preserveSelection className="rss-menu-item ready-floating-menu-item" onDone={closeReferenceMenu} name={`${article.title} · 段落`} label="引用本段"
+              reference={paragraph ? { kind: 'excerpt', read: { format: 'reading-v1', itemId: article.id, expectedRevision: article.revision, range: paragraph, offset: 0, length: 12000 } } : null} />}
           </div>
         </FloatPanel>}
       </div>
+      <button type="button" className="rss-btn" aria-haspopup="menu" disabled={!content} onMouseDown={(event) => event.preventDefault()}
+        onClick={(event) => openCaptureMenu(event.currentTarget)} title="把这篇文章存入 FastCard、画板或当前文档">
+        <Inbox size={15} strokeWidth={1.8} />收下<ChevronDown size={12} strokeWidth={2} />
+      </button>
       <RSSTranslationControl state={translation} disabled={busy} />
       <button type="button" className="rss-btn rss-btn--icon" title={item.starred ? '取消收藏' : '收藏文章'} aria-label={item.starred ? '取消收藏' : '收藏文章'} aria-pressed={item.starred} onClick={() => onToggleStar(item.id)}>
         <Star size={16} strokeWidth={1.8} fill={item.starred ? 'currentColor' : 'none'} />

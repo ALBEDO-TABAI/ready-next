@@ -34,7 +34,11 @@ test('reader drag creates a durable mark; popover edits/copies/removes; N groups
   Object.assign(dom.window, { electronAPI: { calendarLayers: {
     beginReading: async (input: ReadingBegin) => { reading.begin(input); return { ok: true, value: undefined } },
     endReading: async (input: ReadingEnd) => { reading.end(input); return { ok: true, value: undefined } },
-  } } })
+  },
+  // The highlight's source page is a reference capsule (W6 K1): it opens through the one ReadyRef entry, by identity.
+  objects: { locate: async (id: string) => id === record.id ? { objectId: id, path: record.notePath, revision: 1 } : null, onMoved: () => () => {},
+    prepareMigration: async () => ({ resolved: [] }), completeMigration: async () => ({ state: 'completed' }), resolvePath: async (path: string) => ({ objectId: record.id, path, revision: 1 }) },
+  document: { readFile: async (path: string) => ({ success: true, content: await readFile(path, 'utf8') }) } } })
   let width = 1100, copied = ''
   const observers = new Set<() => void>()
   class Observer { constructor(private cb: () => void) { observers.add(cb) } observe() {} disconnect() { observers.delete(this.cb) } }
@@ -42,7 +46,7 @@ test('reader drag creates a durable mark; popover edits/copies/removes; N groups
   Object.defineProperty(dom.window.HTMLCanvasElement.prototype, 'getContext', { value: () => null })
   const replacements = {
     window: dom.window, document: dom.window.document, localStorage: dom.window.localStorage, navigator: Object.assign(dom.window.navigator, { clipboard: { writeText: async (value: string) => { copied = value } } }),
-    DOMParser: dom.window.DOMParser, XMLSerializer: dom.window.XMLSerializer, HTMLElement: dom.window.HTMLElement, Element: dom.window.Element,
+    DOMParser: dom.window.DOMParser, XMLSerializer: dom.window.XMLSerializer, HTMLElement: dom.window.HTMLElement, Element: dom.window.Element, CustomEvent: dom.window.CustomEvent,
     Node: dom.window.Node, NodeFilter: dom.window.NodeFilter, ResizeObserver: Observer, MutationObserver: dom.window.MutationObserver,
     getSelection: () => dom.window.getSelection(), matchMedia: () => ({ matches: true }), getComputedStyle: dom.window.getComputedStyle.bind(dom.window),
     requestAnimationFrame: (callback: FrameRequestCallback) => dom.window.requestAnimationFrame(() => callback(performance.now())), cancelAnimationFrame: dom.window.cancelAnimationFrame.bind(dom.window),
@@ -95,8 +99,11 @@ test('reader drag creates a durable mark; popover edits/copies/removes; N groups
     })
     assert.equal(d.querySelector('.rd-dock')!.textContent, dock, 'drag must not turn the page')
     assert.equal(notesBadge(), null)
-    await click('黄')
+    // Selected words show the reading scenes' shared bar; its 划线 uses the first marker.
+    assert.deepEqual([...d.querySelectorAll('[data-ready-selection-bar] button')].map(b => b.textContent), ['划线', '存入 FastCard', '引用到文档', '问 AI', '保存到画板', '批注', '复制'])
+    await click('划线')
     assert.equal(d.querySelector('mark.hl')?.textContent, '段真正的书籍')
+    assert.equal(d.querySelector('mark.hl')?.getAttribute('data-c'), 'yellow')
     assert.equal(notesBadge(), '1')
     assert.match(await readFile(record.notePath, 'utf8'), /> 段真正的书籍/)
     await openMark(); await click('蓝')
@@ -116,7 +123,11 @@ test('reader drag creates a durable mark; popover edits/copies/removes; N groups
     const reader = d.querySelector('[aria-label="阅读器"]')!
     await act(async () => reader.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'n', bubbles: true }))); await flush()
     assert.match(d.querySelector('aside[aria-label="笔记"]')?.textContent ?? '', /第一章 开始[\s\S]*想到这里停一下/)
-    await click('编辑划线 段真正的书籍'); await click('在来源页中打开')
+    await click('编辑划线 段真正的书籍')
+    const source = d.querySelector<HTMLAnchorElement>('.highlight-source a[data-ready-ref-capsule]')!
+    assert.equal(source.getAttribute('data-ref-kind'), 'highlight')
+    assert.equal(source.getAttribute('aria-label'), '划线 山海 · 第一章 开始')
+    await act(async () => source.click()); await flush()
     assert.equal(useDocTabs.getState().pendingReveal?.path, record.notePath)
     const line = useDocTabs.getState().pendingReveal!.lineStart!
     assert.match((await readFile(record.notePath, 'utf8')).split('\n')[line - 1], /^> \[!quote\|blue\]/)

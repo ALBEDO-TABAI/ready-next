@@ -10,6 +10,7 @@ import { inlineMarkdown, newline } from './editing'
 import type { EditorBuffer } from './editor-buffer'
 import type { EditorLinkBase } from './references'
 import { toReadyUri, writeReadyRefTransfer } from '../../../../shared/ready-ref'
+import { receiveToCanvas } from '../../workbench/capture-receipt'
 
 interface Drag { block: DocumentBlock; snapshot: DocumentBuffer; target: DocumentBlock; placement: 'before' | 'after' }
 interface Controls {
@@ -117,6 +118,14 @@ export function BlockControls({ buffer, linkBase, editorId, report, children }: 
         const id = existing ?? `block-${crypto.randomUUID()}`
         if (!existing) replace(markBlock(snapshot.content, block, id))
         await navigator.clipboard.writeText(`[[${page}#^${id}]]`)
+      })] : []),
+      // 发送到画板 (W6 §3.2): the block's text as a card; its source is the block when it has an id, else the page.
+      ...(owner.kind === 'document' ? [action('canvas', '发送到画板', async () => {
+        const tab = useDocTabs.getState().tabs.find(item => item.id === owner.tabId)
+        if (!tab?.objectId) throw new Error('请先把页面保存到资料库，再发送到画板')
+        const id = explicitBlockId(snapshot.content, block)
+        await receiveToCanvas({ ref: { kind: 'page', id: tab.objectId, ...(id ? { anchor: `^${id}` } : {}) },
+          title: tab.title.replace(/\.md$/i, ''), text: block.raw.replace(/[ \t]+\^[\w-]+\s*$/, '').trim() })
       })] : []),
       ...Object.entries(DOCUMENT_PALETTE).map(([color, label]) => action(`color-${color}`, `文字颜色：${label}`, () => {
         if (!isDocumentColor(color)) throw new Error('无效颜色')

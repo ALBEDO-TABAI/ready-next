@@ -222,13 +222,14 @@ await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.
       document.dispatchEvent(new Event('selectionchange'))
       return node.getAttribute('data-ready-reading-run')
     })
-    await page.getByRole('button', { name: '引用', exact: true }).click()
-    await page.getByRole('button', { name: '引用所选文字', exact: true }).click()
+    // A selection's actions are the shared bar's, which shows when a selection ends (a mouseup in the reader).
+    await page.locator('.rss-reader-body').evaluate(body => body.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })))
+    await page.locator('[data-ready-selection-bar]').getByRole('button', { name: '问 AI', exact: true }).click()
     await page.locator('.chat-reference-chip').getByRole('button', { name: '可读资讯 10 · 选区 RSS 选区引用', exact: true }).click()
     await referencePreview.getByText(/已保存正文中的选区/).waitFor()
     assert.match(await referencePreview.innerText(), /二部/)
     assert.doesNotMatch(await referencePreview.innerText(), /真实保存长文/)
-    await referencePreview.getByRole('button', { name: '在 RSS 中定位', exact: true }).click()
+    await referencePreview.locator('a[data-ready-ref-capsule]').first().click()
     await page.waitForFunction((run) => {
       const selection = window.getSelection()
       return selection?.toString() === '二部' && selection.anchorNode?.parentElement?.getAttribute('data-ready-reading-run') === run

@@ -1,8 +1,10 @@
-import { BrowserSourceHighlight } from './BrowserSourceHighlight'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FastCardSaveDialog } from '../../components/browser/FastCardPanel'
 import { createModeSwitchAckWaiter } from '../../modules/browser/modeSwitchAckWaiter'
 import { openReadyRef } from '../../modules/workbench/open-ready-ref'
+import { receiveFastCardToDocument, reportCaptureError } from '../../modules/workbench/capture-receipt'
+import { useWebSelectionBar } from '../../modules/browser/web-selection-bar'
+import { itemTitle } from '../../components/browser/fastcard-presentation'
 import BrowserModeEmptyState from '../../components/browser/BrowserModeEmptyState'
 import BrowserDiagnosticsDock from '../../components/browser/BrowserDiagnosticsDock'
 import { AgentBrowserSupervisionPanel } from '../../components/browser/AgentBrowserSupervisionPanel'
@@ -651,6 +653,12 @@ export default function BrowserMode({
     })
   }, [])
 
+  // The reading scenes' selection bar, in the band under the page (W6 §3.2); 翻译 is the web page's own extra.
+  useWebSelectionBar({ active: isActive, activeTabId, page: shellRef, translate: selection => {
+    void runFastCardTranslation({ kind: 'text', text: selection.text, pageUrl: selection.url, pageTitle: selection.title,
+      domain: extractBrowserDomain(selection.url), tabId: selection.tabId, capturedAt: Date.now() }, detectFastCardTargetLanguage(selection.text))
+  } })
+
   const runFastCardImageDescription = useCallback(async (target: BrowserFastCardImageTarget) => {
     const requestId = ++fastCardResultRequestIdRef.current
     fastCardResultTargetRef.current = target
@@ -795,6 +803,11 @@ export default function BrowserMode({
       }
       if (command.type === 'remove-item') {
         removeFastCardItem(command.id)
+        return
+      }
+      if (command.type === 'insert-document') {
+        const item = useFastCard.getState().items.find(entry => entry.id === command.id)
+        if (item) void receiveFastCardToDocument(item, itemTitle(item)).catch(reportCaptureError)
         return
       }
       if (command.type === 'target-language-change') {
@@ -1240,8 +1253,6 @@ export default function BrowserMode({
             onToggleFastCard={handleToggleFastCard}
             ownershipStatus={browserOwnershipStatus}
           />
-
-          {fastCardPanelOpen && activeTabId && <BrowserSourceHighlight key={activeTabId} tabId={activeTabId} />}
 
           <div className="flex min-h-0 flex-1">
             {/* The tab list lives in the shell's one sidebar (W2-T3). */}

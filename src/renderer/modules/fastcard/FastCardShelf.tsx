@@ -5,6 +5,8 @@ import { Button } from '../../components/ui/Button'
 import { useFastCard } from '../../stores/useFastCard'
 import { appendToAgentInput } from '../agent/chat-input-bridge'
 import { openReadyRef } from '../workbench/open-ready-ref'
+import { receiveFastCardToDocument, reportCaptureError } from '../workbench/capture-receipt'
+import { itemTitle } from '../../components/browser/fastcard-presentation'
 
 // The FastCard shelf outside the browser (W4 §6, MS6). In the browser the same panel sits in its overlay window
 // above the native web layer; in the document, 资讯 and calendar modes it is a drawer in the content area.
@@ -36,6 +38,10 @@ export function FastCardShelf({ visible }: { visible: boolean }) {
           onInsertToChat={itemIds => {
             const chosen = items.filter(item => itemIds.includes(item.id))
             if (chosen.length) appendToAgentInput(renderFastCardMarkdown(chosen))
+          }}
+          onInsertToDocument={id => {
+            const item = items.find(entry => entry.id === id)
+            if (item) void receiveFastCardToDocument(item, itemTitle(item)).catch(reportCaptureError)
           }}
           onRemoveItem={id => { void store().removeItem(id) }} />}
   </div>

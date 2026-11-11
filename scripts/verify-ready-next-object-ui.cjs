@@ -130,11 +130,12 @@ async function main() {
     await page.getByLabel('关联面板').waitFor()
     console.log('PASS 1: ⌘K 搜索页面并打开')
     await page.getByLabel('关联面板').locator('summary').click()
-    await page.getByLabel('关联面板').getByRole('button', { name: 'M5验收来源', exact: true }).click()
+    // References in the panel are capsules (W6 K1): click opens, ⌥-click quick-looks.
+    await page.getByLabel('关联面板').getByRole('link', { name: '页面 M5验收来源', exact: true }).click()
     await page.waitForFunction(() => document.querySelector('[aria-label="关联面板"]')?.textContent.includes('出链'))
     await page.getByLabel('关联面板').locator('summary').click()
     console.log('PASS 3: 从关联面板打开反链')
-    await page.getByLabel('关联面板').getByRole('button', { name: '速览 M5验收目标', exact: true }).click()
+    await page.getByLabel('关联面板').getByRole('link', { name: '页面 M5验收目标', exact: true }).click({ modifiers: ['Alt'] })
     await page.getByRole('dialog').getByText('速览正文', { exact: true }).waitFor()
     await page.evaluate(async ({ root, id }) => {
       const result = await window.electronAPI.documentPages.operate({ type: 'trash', root, objectId: id, operationId: crypto.randomUUID() })
@@ -143,8 +144,8 @@ async function main() {
     await page.getByRole('dialog').getByText('引用已失效', { exact: true }).waitFor()
     await page.keyboard.press('Escape')
     console.log('PASS 4: 速览引用，回收后立即显示失效')
-    const shot = await app.evaluate(async ({ BrowserWindow }) => (await BrowserWindow.getAllWindows().find(win => win.isVisible()).capturePage()).toPNG().toString('base64'))
-    fs.writeFileSync(path.join(temporary, 'window.png'), Buffer.from(shot, 'base64'))
+    // The window may be hidden (READY_START_HIDDEN): the renderer's own capture works either way.
+    await page.screenshot({ path: path.join(temporary, 'window.png') })
     console.log(`PASS M5-C real-window acceptance: ${temporary}`)
   } finally { if (app) await app.close(); server.close() }
 }

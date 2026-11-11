@@ -17,14 +17,14 @@ test('PDF anchors relocate after whitespace/text shifts and reject ambiguous or 
   assert.equal(locatePdfQuote('原文已经删除', anchor), null)
 })
 
-test('PdfViewer enables a single-page selection, sends scoped IPC, and reveals ReadyRef quotes after page rendering', async t => {
+test('PdfViewer: a single-page selection gets the shared bar (划线 sends scoped IPC, 问 AI hands the PDF and quote to the composer); ReadyRef quotes reveal after rendering', async t => {
   const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost' })
   const globals = new Map<string, PropertyDescriptor | undefined>()
   const tick = () => new Promise(resolve => setTimeout(resolve, 20))
   class Observer { observe() {} disconnect() {} }
   for (const [key, value] of Object.entries({ window: dom.window, document: dom.window.document, localStorage: dom.window.localStorage,
-    HTMLElement: dom.window.HTMLElement, NodeFilter: dom.window.NodeFilter, CustomEvent: dom.window.CustomEvent,
-    MutationObserver: dom.window.MutationObserver, IntersectionObserver: Observer, IS_REACT_ACT_ENVIRONMENT: true,
+    HTMLElement: dom.window.HTMLElement, Element: dom.window.Element, Node: dom.window.Node, NodeFilter: dom.window.NodeFilter, CustomEvent: dom.window.CustomEvent,
+    MutationObserver: dom.window.MutationObserver, IntersectionObserver: Observer, ResizeObserver: Observer, IS_REACT_ACT_ENVIRONMENT: true,
     requestAnimationFrame: (fn: FrameRequestCallback) => setTimeout(fn, 0), cancelAnimationFrame: clearTimeout })) {
     globals.set(key, Object.getOwnPropertyDescriptor(globalThis, key)); Object.defineProperty(globalThis, key, { configurable: true, value })
   }
@@ -49,37 +49,59 @@ test('PdfViewer enables a single-page selection, sends scoped IPC, and reveals R
   const calls: unknown[] = [], opened: string[] = []
   let fail = false
   Object.defineProperty(dom.window, 'electronAPI', { value: {
-    sourceAnnotations: { pdf: async (input: unknown) => { calls.push(input); return fail ? { success: false, error: 'PDF 已变化，请重新打开后划线' } : { success: true, data: { persistence: 'saved' } } } },
+    sourceAnnotations: { pdf: async (input: unknown) => { calls.push(input); return fail ? { success: false, error: 'PDF 已变化，请重新打开后划线' } : { success: true, data: { persistence: 'saved', version: 'v1', sourcePath: '/vault/PDF/改名.md', highlights: [], anchors: 'synced' } } } },
     objects: { onMoved: () => () => {}, prepareMigration: async () => ({ resolved: [] }), completeMigration: async () => ({ state: 'completed' }), locate: async (id: string) => { assert.equal(id, 'pdf-object'); return { path: '/vault/改名.pdf' } } },
+    document: { stat: async () => ({ success: true, data: { isDirectory: false } }) },
   } })
   const { default: PdfViewer } = await import('../renderer/components/document/PdfViewer')
+  const { FloatHost, ToastHost } = await import('../renderer/components/ui')
+  const { useAgent } = await import('../renderer/stores/useAgent')
+  const agentBefore = useAgent.getState()
   const { openReadyRef, usePdfReference } = await import('../renderer/modules/workbench/open-ready-ref')
   const { useDocTabs } = await import('../renderer/stores/useDocTabs')
   const previous = useDocTabs.getState().openTab
   useDocTabs.setState({ openTab: path => { opened.push(path) } })
   const root = createRoot(document.getElementById('root')!)
   t.after(async () => {
-    await act(async () => root.unmount()); useDocTabs.setState({ openTab: previous }); usePdfReference.setState({ target: null })
+    await act(async () => root.unmount()); useDocTabs.setState({ openTab: previous }); usePdfReference.setState({ target: null }); useAgent.setState(agentBefore, true)
     hooks.deregister(); dom.window.close()
     for (const [key, descriptor] of globals) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key) }
   })
-  await act(async () => { root.render(<PdfViewer tab={{ id: 'tab', objectId: 'pdf-object', path: '/vault/改名.pdf', title: '改名', content: '', isDirty: false }} fileUrl="file:///vault/改名.pdf" />) })
+  await act(async () => { root.render(<><PdfViewer tab={{ id: 'tab', objectId: 'pdf-object', path: '/vault/改名.pdf', title: '改名', content: '', isDirty: false }} fileUrl="file:///vault/改名.pdf" /><FloatHost /><ToastHost /></>) })
   await act(tick); await act(tick)
-  const button = document.querySelector<HTMLButtonElement>('[aria-label="划线到来源页"]')!
-  assert.equal(button.disabled, true)
+  const bar = () => document.querySelector('[data-ready-selection-bar]')
+  const action = (label: string) => [...bar()!.querySelectorAll('button')].find(button => button.textContent === label)!
+  const toast = () => [...document.querySelectorAll('.rn-toast')].at(-1)
+  assert.equal(bar(), null)
+  // jsdom has no layout: the selection and the scroll area get boxes, as a rendered page has.
+  const box = (top: number, bottom: number) => ({ left: 0, right: 800, top, bottom, width: 800, height: bottom - top, x: 0, y: top, toJSON: () => ({}) })
+  dom.window.Range.prototype.getBoundingClientRect = () => box(200, 220)
+  dom.window.HTMLElement.prototype.getBoundingClientRect = () => box(0, 1000)
   const layer = document.querySelector('[data-page="1"] .react-pdf__Page__textContent')!
-  const range = document.createRange(); range.selectNodeContents(layer.children[1])
-  await act(async () => { dom.window.getSelection()!.addRange(range); document.dispatchEvent(new dom.window.Event('selectionchange')) })
-  assert.equal(button.disabled, false)
-  await act(async () => button.click())
+  const select = async (range: Range) => {
+    await act(async () => { dom.window.getSelection()!.removeAllRanges(); dom.window.getSelection()!.addRange(range); layer.dispatchEvent(new dom.window.MouseEvent('mouseup', { bubbles: true })) })
+    await act(tick)
+  }
+  const range = () => { const value = document.createRange(); value.selectNodeContents(layer.children[1]); return value }
+  await select(range())
+  assert.deepEqual([...bar()!.querySelectorAll('button')].map(button => button.textContent), ['划线', '存入 FastCard', '引用到文档', '问 AI', '保存到画板'])
+  await act(async () => action('划线').click()); await act(tick)
   assert.deepEqual(calls[0], { id: 'pdf-object', expectedHash: createHash('sha256').update('pdf bytes').digest('hex'), page: 1, text, start: 3, end: 7, exact: '选中文字' })
-  assert.equal(document.querySelector('[role=status]')!.textContent, '已划线到来源页')
-  fail = true; await act(async () => button.click())
-  assert.match(document.querySelector('[role=alert]')!.textContent!, /PDF 已变化/)
-  // A cross-page range must never be attributed to just its first page.
-  range.setEnd(document.querySelector('[data-page="2"] .react-pdf__Page__textContent')!.lastChild!.firstChild!, 2)
-  await act(async () => document.dispatchEvent(new dom.window.Event('selectionchange')))
-  assert.equal(button.disabled, true)
+  assert.match(toast()!.textContent!, /^已划线到来源页打开$/, 'a source page has no remove path: the toast offers 打开 only')
+  fail = true
+  await select(range())
+  await act(async () => action('划线').click()); await act(tick)
+  assert.equal(toast()!.getAttribute('data-tone'), 'bad')
+  assert.match(toast()!.textContent!, /PDF 已变化/)
+  // 问 AI: the PDF itself as a resource, the selected words quoted in the composer; nothing is sent.
+  await select(range())
+  await act(async () => action('问 AI').click()); await act(tick)
+  assert.ok(useAgent.getState().attachments.some(item => item.path === '/vault/改名.pdf'))
+  assert.match(useAgent.getState().inputValue, /> 选中文字/)
+  // A cross-page range must never be attributed to just its first page: no bar for it.
+  const across = range(); across.setEnd(document.querySelector('[data-page="2"] .react-pdf__Page__textContent')!.lastChild!.firstChild!, 2)
+  await select(across)
+  assert.equal(bar(), null)
   await act(async () => { dom.window.getSelection()!.removeAllRanges(); await openReadyRef({ kind: 'file', id: 'pdf-object', anchor: pdfAnchor(pdfQuote(text, 8, 3, 7)) }) })
   await act(tick)
   assert.deepEqual(opened, ['/vault/改名.pdf']); assert.equal(scrolledPage, 8)

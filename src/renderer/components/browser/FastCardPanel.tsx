@@ -4,7 +4,7 @@ import { SaveToPicker } from '../../modules/document/page-ui/SaveToPicker'
 import type { PageNode, PageResult } from '../../../shared/document-pages'
 import type { FastCardCanvasTarget, FastCardTransferRequest } from '../../../shared/fastcard'
 import { getFastCardTransferAPI, getFastCardQuickNoteAPI } from '../../stores/useFastCard'
-import { FileText, Image as ImageIcon, Languages, Mic, PanelRightClose, Save, Send, Sparkles, Trash2, Video, X } from 'lucide-react'
+import { FileText, Image as ImageIcon, Languages, Mic, PanelRightClose, Save, Send, Sparkles, TextQuote, Trash2, Video, X } from 'lucide-react'
 import { Button, IconButton } from '../ui/Button'
 import { itemPreview, itemTitle, sourceLabel, timeLabel } from './fastcard-presentation'
 import type { FastCardItem, FastCardSyncState } from '../../../shared/fastcard'
@@ -18,6 +18,8 @@ interface FastCardPanelProps {
   onSaveCanvas: (itemIds: string[]) => void
   /** The chosen items, or every item when none is chosen. */
   onInsertToChat: (itemIds: string[]) => void
+  /** 插入到文档 (W6 §3.2): the card into the current page, as dropping it there does. */
+  onInsertToDocument: (id: string) => void
   onRemoveItem: (id: string) => void
 }
 
@@ -31,7 +33,7 @@ function itemIcon(kind: FastCardItem['kind']) {
 }
 
 // The FastCard shelf (W4 §6): the same panel in the browser's overlay window and in the shell's drawer.
-export default function FastCardPanel({ revealTarget, items, syncState, onCollapse, onClear, onSaveCanvas, onInsertToChat, onRemoveItem }: FastCardPanelProps) {
+export default function FastCardPanel({ revealTarget, items, syncState, onCollapse, onClear, onSaveCanvas, onInsertToChat, onInsertToDocument, onRemoveItem }: FastCardPanelProps) {
   const root = useRef<HTMLElement>(null)
   useEffect(() => {
     if (!revealTarget) return
@@ -68,6 +70,7 @@ export default function FastCardPanel({ revealTarget, items, syncState, onCollap
               <input type="checkbox" className="fc-card__check" aria-label={`选择 ${title}`} checked={checked} onChange={event => toggle(item.id, event.target.checked)} />
               <span className="fc-card__kind" aria-hidden>{itemIcon(item.kind)}</span>
               <span className="fc-card__title">{title}</span>
+              <IconButton size="sm" icon={<TextQuote size={14} />} title="插入到文档" onClick={() => onInsertToDocument(item.id)} />
               <IconButton size="sm" icon={<X size={14} />} title="移除" onClick={() => onRemoveItem(item.id)} />
             </div>
             {preview && <p className="fc-card__body">{preview}</p>}

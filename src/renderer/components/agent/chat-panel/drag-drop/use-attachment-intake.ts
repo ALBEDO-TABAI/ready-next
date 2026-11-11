@@ -36,7 +36,7 @@ export function useAttachmentIntake(params: UseAttachmentIntakeParams): Attachme
       if (e.dataTransfer.types.includes(READY_REF_MIME)) {
         try {
           if (await dropAgentReference(e.dataTransfer, addAttachments)) focusInputWithResize()
-        } catch (error) { showToast(error instanceof Error ? error.message : String(error), { tone: 'bad' }) }
+        } catch (error) { /* silent-catch: the reason is shown to the person as a toast */ showToast(error instanceof Error ? error.message : String(error), { tone: 'bad' }) }
         return
       }
 

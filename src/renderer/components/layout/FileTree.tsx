@@ -1108,7 +1108,7 @@ export default function FileTree({
     const payloads = readWorkspaceDragPayloads(e.dataTransfer)
     clearFileTreeDragState()
     if (!payloads.length && e.dataTransfer.types.includes(READY_REF_MIME)) {
-      try { await dropPageTreeReference(e.dataTransfer, { parentPath: currentPath }) } catch (error) { showMoveNotice(String(error)) }
+      try { await dropPageTreeReference(e.dataTransfer, { parentPath: currentPath }) } catch (error) { /* silent-catch: the reason is shown in the tree's move notice */ showMoveNotice(String(error)) }
       return
     }
     if (canMoveAllToDirectory(payloads, currentPath)) {

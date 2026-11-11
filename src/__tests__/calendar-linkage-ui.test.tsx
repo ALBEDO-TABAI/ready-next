@@ -24,7 +24,7 @@ test('M6-D C4 drop an occurrence into the real editor, render its capsule and un
 
 test('M6-D ThisDay opens every category through ReadyRef, rejects stale day responses, and event cards show live/deleted content', async t => {
   const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost' })
-  const globals = { window: dom.window, document: dom.window.document, navigator: dom.window.navigator, HTMLElement: dom.window.HTMLElement, CustomEvent: dom.window.CustomEvent, IS_REACT_ACT_ENVIRONMENT: true }
+  const globals = { window: dom.window, document: dom.window.document, navigator: dom.window.navigator, HTMLElement: dom.window.HTMLElement, CustomEvent: dom.window.CustomEvent, localStorage: dom.window.localStorage, IS_REACT_ACT_ENVIRONMENT: true }
   const previous = Object.fromEntries(Object.keys(globals).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]))
   for (const [key, value] of Object.entries(globals)) Object.defineProperty(globalThis, key, { value, configurable: true, writable: true })
   const navigation = 'data:text/javascript,' + encodeURIComponent('export const opened=[];export async function openReadyRef(ref){opened.push(ref)}')
@@ -40,13 +40,17 @@ test('M6-D ThisDay opens every category through ReadyRef, rejects stale day resp
   const kinds = ['events', 'documents', 'tasks', 'reminders', 'footprints', 'activity'] as const
   const summary: DaySummary = { date: '2026-10-31', timeZone: 'UTC', items: kinds.map((kind, i) => ({ id: String(i), kind, title: kind, ref: { kind: 'page', id: String(i) } })) }
   let resolveOld: ((s: DaySummary) => void) | undefined, delay = false, changed: (() => void) | undefined
-  Object.assign(dom.window, { electronAPI: { calendarLinkage: { day: async () => delay ? new Promise(resolve => { resolveOld = resolve; delay = false }) : summary },
+  // Day entries are reference capsules (W6 K1): a click opens through the one ReadyRef entry, which locates the object.
+  const located: string[] = []
+  Object.assign(dom.window, { electronAPI: { objects: { locate: async (id: string) => { located.push(id); return { objectId: id, path: `/fixture/${id}.md`, revision: 1 } }, onMoved: () => () => {},
+    prepareMigration: async () => ({ resolved: [] }), completeMigration: async () => ({ state: 'completed' }), resolvePath: async (path: string) => ({ objectId: path, path, revision: 1 }) },
+    calendarLinkage: { day: async () => delay ? new Promise(resolve => { resolveOld = resolve; delay = false }) : summary },
     canvas: { onChanged: () => () => {} }, calendar: { onChanged: (cb: () => void) => { changed = cb; return () => {} } }, calendarLayers: { onChanged: () => () => {} }, dateMentions: { onChanged: () => () => {} }, vault: { get: async () => ({ status: 'ready', root: '/fixture' }), onChanged: () => () => {} } } })
   const root = createRoot(document.getElementById('root')!)
   t.after(async () => { await act(async () => root.unmount()); hooks.deregister(); dom.window.close(); for (const [key, value] of Object.entries(previous)) { if (value) Object.defineProperty(globalThis, key, value); else Reflect.deleteProperty(globalThis, key) } })
   await act(async () => root.render(<ThisDay date={summary.date} timeZone="UTC" />))
-  for (const button of document.querySelectorAll<HTMLButtonElement>('[data-day-item]')) await act(async () => button.click())
-  const { opened } = await import(navigation); assert.deepEqual(opened, summary.items.map(item => item.ref))
+  for (const capsule of document.querySelectorAll<HTMLAnchorElement>('[data-day-item] a[data-ready-ref-capsule]')) await act(async () => { capsule.click(); await new Promise(resolve => setTimeout(resolve, 5)) })
+  assert.deepEqual(located, summary.items.map(item => item.ref.kind === 'page' ? item.ref.id : null))
   await act(async () => document.querySelector<HTMLButtonElement>('header button')!.click())
   assert.match(document.querySelector('[role=alert]')?.textContent || '', /请先配置资料库/)
   delay = true; await act(async () => changed!())

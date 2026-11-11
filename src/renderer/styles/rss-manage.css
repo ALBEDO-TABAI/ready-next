@@ -303,24 +303,6 @@ html .rss-mode-shell .rss-settings-warning.is-notice {
   color: var(--text-secondary);
 }
 
-/* ── 聊天面板里的 RSS 引用预览 ─────────────────────────────────────────── */
-
-.rss-reference-preview__locate {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 10px;
-  border-radius: 9px;
-  font-size: 12.5px;
-  color: var(--text-secondary);
-}
-
-.rss-reference-preview__locate:hover {
-  background: var(--sx-hover);
-  color: var(--text-title);
-}
-
 @media (prefers-reduced-motion: reduce) {
   .rss-nav,
   .rss-search,

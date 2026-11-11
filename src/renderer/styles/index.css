@@ -8,6 +8,8 @@
 @import '../design/next/materials.css';
 @import '../components/ui/primitives.css';
 @import '../modules/workbench/object-ui/object-ui.css';
+@import '../modules/workbench/selection-bar/selection-bar.css';
+@import '../modules/document/drafts/draft-save-dialog.css';
 @import '../components/browser/fastcard-shelf.css';
 @import './theme-tokens.css';
 @import './base-chrome.css';
