@@ -315,6 +315,7 @@ export default function RSSSettingsPanel({
       await loadPanelData()
       await onReloadData()
     } catch (cause) {
+      // silent-catch: the failure is shown in the panel's notice; nothing was imported.
       setNotice({ kind: 'error', message: cause instanceof Error ? cause.message : String(cause) })
     } finally {
       setBusyKey(null)
