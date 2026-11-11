@@ -22,6 +22,7 @@
 
 | 日期 | 文档与用途 |
 | --- | --- |
+| 2026-11-11 | [Ready Next 收束路线图](superpowers/plans/2026-11-11-ready-next-coherence-roadmap.md) 与 W1–W7 实施计划（`2026-11-11-ready-next-w*-implementation.md`）、[全局盘点](superpowers/audits/2026-11-11-ready-next-coherence-audit/README.md)、[设计基准页](design/ready-next-design-reference.html) — 接手整合计划的 M8：一个外壳、一套设计语言、资讯筛子、模块串联与今日页、浏览器 Agent；均为计划，不宣称产品已实现 |
 | 2026-10-30 | [Ready Next 四项目整合](superpowers/plans/2026-10-30-ready-next-integration-implementation.md) — 已确认方案 v2 的仓库计划；D1–D18、待实现 C1–C15、调整后的 M0–M8；独立数据环境与 Claude 审阅合入，不宣称产品已实现 |
 | 2026-09-13 | [技能与提示词指引应用记录](maintenance/2026-09-13-skills-and-prompts-refresh.md) — 本项目协作规则、技能描述与执行边界的调整和验证 |
 | 2026-09-15 | [书本图片分页](superpowers/plans/2026-09-15-document-reading-images-implementation.md) — 图片尺寸、独页与后文接续合同 |

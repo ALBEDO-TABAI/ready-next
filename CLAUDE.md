@@ -39,7 +39,7 @@
 
 修改 Agent、Browser、Skill、Document/Widget、文件涌现、窗口或 Windows 的行为、授权或状态合同前，读 `docs/architecture/current-runtime-contracts.md` 对应章节。纯文案、排版或链接修正只核对相关条目和消费者。若文档与代码/gate 冲突，先定性为实现回归或文档漂移，再同步修正。
 
-- ready-next 分支：应用身份为 Ready Next，开发与验收只用隔离 userData 和测试资料库；启动守卫在打开数据库前拒绝日常 Ready 数据（C15，`npm run verify:ready-next-smoke`）。整合计划与合同见 `docs/superpowers/plans/2026-10-30-ready-next-integration-implementation.md`。
+- ready-next 分支：应用身份为 Ready Next，开发与验收只用隔离 userData 和测试资料库；启动守卫在打开数据库前拒绝日常 Ready 数据（C15，`npm run verify:ready-next-smoke`）。整合计划与合同见 `docs/superpowers/plans/2026-10-30-ready-next-integration-implementation.md`；界面与产品流的收束（一个外壳、一套设计语言、资讯筛子、串联、浏览器 Agent）按 `docs/superpowers/plans/2026-11-11-ready-next-coherence-roadmap.md` 及其 W1–W7 计划执行。
 - 保留 Renderer bootstrap 白屏兜底与 `/workbench` 路由 fallback。
 - Renderer 通用 reset 必须在 `@layer base`；禁止层外通用 margin/padding reset，运行 `scripts/check-css-cascade-layer-reset.cjs`。
 - 代码文件只要净增行数，收尾就检查总行数；超过 1000 行按“危险 / 一般 / 健康”更新 `docs/code-health/large-file-health-log.md`。危险项必须在最终回复提醒，一般项写复查日期。

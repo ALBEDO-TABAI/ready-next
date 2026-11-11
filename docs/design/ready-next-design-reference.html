@@ -1,0 +1,694 @@
+<meta charset="utf-8">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Ready 设计基准</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700&display=swap">
+<style>
+/* 布局：一页长文。开头是按 1440×900 等比缩放的外壳样机（可切模式），后面依次是材质、空间、信号色、令牌、基元。
+   令牌名与产品里的 --rn-* 一致，值可以直接抄进 src/renderer/design/next/tokens.css。 */
+:root {
+  --rn-font-ui: 'Inter', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  --rn-font-serif: 'Instrument Serif', 'Songti SC', Georgia, serif;
+  --rn-font-mono: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --rn-stage: #ebebee;
+  --rn-ink: #0b0b0e;
+  --rn-ink-2: rgb(11 11 14 / .64);
+  --rn-ink-3: rgb(11 11 14 / .44);
+  --rn-ink-4: rgb(11 11 14 / .22);
+  --rn-hair: rgb(11 11 14 / .08);
+  --rn-hair-2: rgb(11 11 14 / .14);
+  --rn-fill: rgb(11 11 14 / .045);
+  --rn-fill-2: rgb(11 11 14 / .08);
+  --rn-accent: #ff5a1f;
+  --rn-accent-text: #c8410f;
+  --rn-accent-soft: rgb(255 90 31 / .13);
+  --rn-inverse: #0b0b0e;
+  --rn-on-inverse: #fafafa;
+  --rn-sheet: #fdfdfc;
+  --rn-sheet-shadow: 0 1px 2px rgb(10 10 20 / .05), 0 8px 24px -12px rgb(10 10 30 / .14);
+  --rn-well: rgb(11 11 14 / .045);
+  --rn-float: rgb(252 252 253 / .82);
+  --rn-glass: rgb(252 252 253 / .52);
+  --rn-glass-blur: 22px;
+  --rn-shadow-3: 0 4px 12px rgb(10 10 20 / .06), 0 24px 64px -20px rgb(10 10 30 / .28);
+  --rn-card-shadow: 0 1px 2px rgb(10 10 20 / .06), 0 6px 16px -8px rgb(10 10 30 / .18);
+  --rn-band-h: 52px;
+  --rn-liquid-a: rgb(255 255 255 / .36); --rn-liquid-b: rgb(255 255 255 / .10);
+  --rn-liquid-rim: rgb(255 255 255 / .78); --rn-liquid-hi: rgb(255 255 255 / .95); --rn-liquid-sheen: rgb(255 255 255 / .4);
+  --rn-liquid-shadow: 0 16px 36px -18px rgb(10 10 30 / .34), 0 2px 6px rgb(10 10 30 / .06);
+  --rn-r-sheet: 20px; --rn-r-float: 16px; --rn-r-control: 9px; --rn-r-xs: 6px;
+  --rn-ease: cubic-bezier(.22, 1, .36, 1);
+  --wall-a: #f3c9a8; --wall-b: #b9c7ea; --wall-c: #d8e6d2; --wall-base: #dfdfe6;
+  --ok: #1a8f5a; --bad: #d23f44;
+  --tag-a: rgb(80 132 231 / .16); --tag-a-ink: #2f5fc4;
+  --tag-b: rgb(26 143 90 / .16); --tag-b-ink: #17734a;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --rn-stage: #0e0e11; --rn-ink: #f4f4f6; --rn-ink-2: rgb(244 244 246 / .68); --rn-ink-3: rgb(244 244 246 / .46); --rn-ink-4: rgb(244 244 246 / .22);
+  --rn-hair: rgb(255 255 255 / .08); --rn-hair-2: rgb(255 255 255 / .14); --rn-fill: rgb(255 255 255 / .05); --rn-fill-2: rgb(255 255 255 / .09);
+  --rn-accent: #ff5a1f; --rn-accent-text: #ff8a5c; --rn-accent-soft: rgb(255 106 44 / .18);
+  --rn-inverse: #f4f4f6; --rn-on-inverse: #0b0b0e; --rn-sheet: #1c1c1f;
+  --rn-sheet-shadow: 0 1px 2px rgb(0 0 0 / .4), 0 8px 24px -12px rgb(0 0 0 / .6);
+  --rn-well: rgb(0 0 0 / .26); --rn-float: rgb(28 28 32 / .86); --rn-glass: rgb(28 28 32 / .5);
+  --rn-shadow-3: 0 4px 12px rgb(0 0 0 / .4), 0 24px 64px -20px rgb(0 0 0 / .7);
+  --rn-card-shadow: 0 1px 2px rgb(0 0 0 / .4), 0 6px 16px -8px rgb(0 0 0 / .6);
+  --rn-liquid-a: rgb(255 255 255 / .13); --rn-liquid-b: rgb(255 255 255 / .03);
+  --rn-liquid-rim: rgb(255 255 255 / .2); --rn-liquid-hi: rgb(255 255 255 / .34); --rn-liquid-sheen: rgb(255 255 255 / .1);
+  --rn-liquid-shadow: 0 16px 36px -18px rgb(0 0 0 / .7), 0 2px 6px rgb(0 0 0 / .3);
+  --wall-a: #5a3423; --wall-b: #232d4d; --wall-c: #23362b; --wall-base: #141419;
+  --ok: #4ac59d; --bad: #f0676b; --tag-a: rgb(114 163 253 / .2); --tag-a-ink: #9dbdff; --tag-b: rgb(74 197 157 / .2); --tag-b-ink: #7fdcbb;
+  color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --rn-stage: #0e0e11; --rn-ink: #f4f4f6; --rn-ink-2: rgb(244 244 246 / .68); --rn-ink-3: rgb(244 244 246 / .46); --rn-ink-4: rgb(244 244 246 / .22);
+  --rn-hair: rgb(255 255 255 / .08); --rn-hair-2: rgb(255 255 255 / .14); --rn-fill: rgb(255 255 255 / .05); --rn-fill-2: rgb(255 255 255 / .09);
+  --rn-accent: #ff5a1f; --rn-accent-text: #ff8a5c; --rn-accent-soft: rgb(255 106 44 / .18);
+  --rn-inverse: #f4f4f6; --rn-on-inverse: #0b0b0e; --rn-sheet: #1c1c1f;
+  --rn-sheet-shadow: 0 1px 2px rgb(0 0 0 / .4), 0 8px 24px -12px rgb(0 0 0 / .6);
+  --rn-well: rgb(0 0 0 / .26); --rn-float: rgb(28 28 32 / .86); --rn-glass: rgb(28 28 32 / .5);
+  --rn-shadow-3: 0 4px 12px rgb(0 0 0 / .4), 0 24px 64px -20px rgb(0 0 0 / .7);
+  --rn-card-shadow: 0 1px 2px rgb(0 0 0 / .4), 0 6px 16px -8px rgb(0 0 0 / .6);
+  --rn-liquid-a: rgb(255 255 255 / .13); --rn-liquid-b: rgb(255 255 255 / .03);
+  --rn-liquid-rim: rgb(255 255 255 / .2); --rn-liquid-hi: rgb(255 255 255 / .34); --rn-liquid-sheen: rgb(255 255 255 / .1);
+  --rn-liquid-shadow: 0 16px 36px -18px rgb(0 0 0 / .7), 0 2px 6px rgb(0 0 0 / .3);
+  --wall-a: #5a3423; --wall-b: #232d4d; --wall-c: #23362b; --wall-base: #141419;
+  --ok: #4ac59d; --bad: #f0676b; --tag-a: rgb(114 163 253 / .2); --tag-a-ink: #9dbdff; --tag-b: rgb(74 197 157 / .2); --tag-b-ink: #7fdcbb;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { background: var(--rn-stage); color: var(--rn-ink); font: 14px/1.6 var(--rn-font-ui); -webkit-font-smoothing: antialiased; }
+.wrap { max-width: 1240px; margin: 0 auto; padding-block: 40px 72px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: flex; flex-direction: column; gap: 56px; }
+h1, h2, h3, p { margin: 0; }
+h1 { font: 400 44px/1.1 var(--rn-font-serif); letter-spacing: -.01em; text-wrap: balance; }
+h2 { font: 600 20px/1.3 var(--rn-font-ui); text-wrap: balance; }
+h3 { font: 600 14px/1.4 var(--rn-font-ui); }
+.lead { color: var(--rn-ink-2); max-width: 62ch; font-size: 15px; }
+.eyebrow { font: 500 11px/1 var(--rn-font-mono); letter-spacing: .08em; color: var(--rn-ink-3); text-transform: uppercase; }
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--rn-accent); }
+header.top { display: flex; flex-direction: column; gap: 14px; }
+section { display: flex; flex-direction: column; gap: 18px; }
+.sec-head { display: flex; flex-direction: column; gap: 6px; }
+.note { color: var(--rn-ink-3); font-size: 12.5px; }
+code, .mono { font-family: var(--rn-font-mono); font-size: .92em; }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--rn-accent); outline-offset: 2px; }
+
+/* ---------- 样机控制条 ---------- */
+.controls { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; }
+.seg { display: inline-flex; padding: 3px; border-radius: 999px; background: var(--rn-fill-2); gap: 2px; flex-wrap: wrap; }
+.seg button { border: 0; background: transparent; padding: 5px 13px; border-radius: 999px; font-size: 13px; color: var(--rn-ink-2); cursor: pointer; transition: background 200ms var(--rn-ease), color 200ms var(--rn-ease); }
+.seg button[aria-pressed="true"] { background: var(--rn-sheet); color: var(--rn-ink); box-shadow: var(--rn-card-shadow); font-weight: 500; }
+.toggle { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--rn-ink-2); cursor: pointer; }
+.sw { width: 34px; height: 20px; border-radius: 999px; background: var(--rn-fill-2); position: relative; border: 0; padding: 0; cursor: pointer; transition: background 200ms var(--rn-ease); }
+.sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--rn-sheet); box-shadow: 0 1px 3px rgb(0 0 0 / .25); transition: transform 200ms var(--rn-ease); }
+.sw[aria-checked="true"] { background: var(--rn-inverse); }
+.sw[aria-checked="true"]::after { transform: translateX(14px); }
+
+/* ---------- 样机：按 1440×900 画，再整体缩放 ---------- */
+.mock-fit { position: relative; width: 100%; border-radius: 14px; overflow: hidden; box-shadow: var(--rn-shadow-3); }
+.mock { position: absolute; top: 0; left: 0; width: 1440px; height: 900px; transform-origin: 0 0; font-size: 13px; line-height: 1.45;
+  background:
+    radial-gradient(60% 70% at 12% 18%, var(--wall-a), transparent 70%),
+    radial-gradient(55% 60% at 88% 12%, var(--wall-b), transparent 70%),
+    radial-gradient(60% 60% at 70% 96%, var(--wall-c), transparent 70%),
+    var(--wall-base); }
+.glass { position: absolute; inset: 0; background: var(--rn-glass); backdrop-filter: blur(var(--rn-glass-blur)) saturate(170%); -webkit-backdrop-filter: blur(var(--rn-glass-blur)) saturate(170%); display: grid; grid-template-columns: 52px 248px minmax(0, 1fr) 380px; }
+.mock[data-reduced="true"] .glass { background: var(--rn-stage); backdrop-filter: none; -webkit-backdrop-filter: none; }
+.mock[data-assistant="off"] .glass { grid-template-columns: 52px 248px minmax(0, 1fr) 0; }
+.mock[data-assistant="off"] .assistant { display: none; }
+.i { width: 16px; height: 16px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.i.lg { width: 20px; height: 20px; }
+
+/* 外框：上留白与下留白等高，都等于图标栏的宽度。纸、台、助手的正文都落在两条留白之间。 */
+.zt, .zb { height: var(--rn-band-h); flex: none; display: flex; align-items: center; }
+.corner-dot { position: absolute; top: 19px; right: 19px; width: 14px; height: 14px; border-radius: 50%; background: var(--rn-accent); box-shadow: 0 0 0 5px var(--rn-accent-soft); }
+.rail { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 0; }
+.rail .lights { justify-content: center; gap: 6px; width: 100%; }
+.rail .lights i { width: 9px; height: 9px; border-radius: 50%; background: var(--rn-ink-4); }
+.rail .zb { justify-content: center; width: 100%; }
+.rail .rb { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 10px; color: var(--rn-ink-2); }
+.rail .rb.on { background: var(--rn-ink-4); color: #fff; filter: drop-shadow(0 0 5px rgb(255 255 255 / .55)); }
+.rail .rb.on .i { stroke-width: 2; }
+.rail .sp { flex: 1; }
+.rail .badge { position: relative; }
+.rail .badge::after { content: "3"; position: absolute; top: 3px; right: 2px; min-width: 14px; height: 14px; border-radius: 7px; background: var(--rn-accent); color: #fff; font: 600 9px/14px var(--rn-font-ui); text-align: center; }
+
+.side { padding: 0 10px 0 2px; display: flex; flex-direction: column; min-width: 0; }
+.side [data-side] { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 2px; }
+.side h4 { margin: 0; height: var(--rn-band-h); flex: none; font: 600 13px/1 var(--rn-font-ui); padding: 0 10px; display: flex; align-items: center; justify-content: space-between; }
+.side .grp { font: 500 11px/1 var(--rn-font-ui); color: var(--rn-ink-3); padding: 14px 10px 6px; display: flex; justify-content: space-between; }
+.row { height: 30px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border-radius: 8px; color: var(--rn-ink-2); white-space: nowrap; overflow: hidden; }
+.row span.t { overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
+.row.hov { background: var(--rn-fill); }
+.row.cur { background: var(--rn-accent-soft); color: var(--rn-accent-text); font-weight: 500; }
+.row .meta { font: 400 11px/1 var(--rn-font-mono); color: var(--rn-ink-3); }
+.row.sub { padding-left: 34px; }
+.side .foot { height: var(--rn-band-h); flex: none; display: flex; align-items: center; gap: 2px; padding: 0 4px; color: var(--rn-ink-3); font-size: 12px; justify-content: space-between; }
+.side .foot span { padding: 5px 6px; border-radius: 7px; }
+.miniseg { display: inline-flex; background: var(--rn-fill-2); border-radius: 7px; padding: 2px; font: 500 11px/1 var(--rn-font-ui); }
+.miniseg b { padding: 4px 8px; border-radius: 5px; font-weight: 500; color: var(--rn-ink-3); }
+.miniseg b.on { background: var(--rn-sheet); color: var(--rn-ink); }
+
+.main { padding: 0 8px 0 0; display: flex; flex-direction: column; min-width: 0; }
+.bar { height: var(--rn-band-h); flex: none; display: flex; align-items: center; gap: 6px; padding: 0 6px; color: var(--rn-ink-2); }
+.bar .tab { height: 28px; padding: 0 12px; border-radius: 8px; display: flex; align-items: center; gap: 7px; max-width: 200px; white-space: nowrap; }
+.bar .tab.on { background: var(--rn-fill-2); color: var(--rn-ink); font-weight: 500; }
+.bar .addr { flex: 1; height: 28px; border-radius: 999px; background: var(--rn-fill); display: flex; align-items: center; gap: 8px; padding: 0 12px; color: var(--rn-ink-3); }
+.sheet { flex: 1; background: var(--rn-sheet); border-radius: var(--rn-r-sheet); box-shadow: var(--rn-sheet-shadow); min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.well { flex: 1; background: var(--rn-well); border-radius: var(--rn-r-sheet); box-shadow: inset 0 0 0 1px var(--rn-hair); min-height: 0; position: relative; overflow: hidden; }
+.crumb { height: 44px; display: flex; align-items: center; gap: 8px; padding: 0 18px; color: var(--rn-ink-2); flex: none; }
+.crumb .sp { flex: 1; }
+.crumb .ib { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; color: var(--rn-ink-3); }
+.back { color: var(--rn-ink-3); display: flex; align-items: center; gap: 4px; padding-right: 10px; border-right: 1px solid var(--rn-hair); margin-right: 4px; }
+.prose { padding: 26px 0 0; width: 640px; max-width: calc(100% - 72px); margin: 0 auto; font-size: 16px; line-height: 1.75; }
+.prose .title { font: 700 34px/1.2 var(--rn-font-ui); letter-spacing: -.01em; margin-bottom: 14px; }
+.prose h5 { margin: 22px 0 6px; font: 600 20px/1.4 var(--rn-font-ui); }
+.callout { background: var(--rn-fill); border-radius: 12px; padding: 12px 16px; margin: 12px 0; }
+.todo { display: flex; gap: 10px; align-items: center; }
+.cb { width: 16px; height: 16px; border-radius: 5px; border: 1.5px solid var(--rn-ink-4); flex: none; display: grid; place-items: center; }
+.cb.done { background: var(--rn-inverse); border-color: var(--rn-inverse); color: var(--rn-on-inverse); }
+.cap { display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px 1px 6px; border-radius: 7px; background: var(--rn-fill-2); font-size: .88em; line-height: 1.6; vertical-align: 1px; white-space: nowrap; }
+.cap .i { width: 13px; height: 13px; color: var(--rn-ink-3); }
+.date { color: var(--rn-ink-3); font: 400 .82em var(--rn-font-mono); }
+
+.assistant { padding: 0 12px 0 4px; display: flex; flex-direction: column; min-width: 0; }
+.assistant .hd { display: flex; align-items: center; justify-content: space-between; height: var(--rn-band-h); flex: none; padding: 0 46px 0 6px; font-weight: 600; }
+.assistant .hd span { display: flex; gap: 10px; color: var(--rn-ink-3); }
+.msg { margin: 14px 6px 0; color: var(--rn-ink-2); }
+.msg b { color: var(--rn-ink); font-weight: 600; }
+.sugg { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: auto 0 12px; }
+.sugg div { border: 1px solid var(--rn-hair-2); border-radius: 12px; padding: 10px 12px; font-size: 12px; color: var(--rn-ink-3); }
+.sugg div b { display: block; color: var(--rn-ink); font-weight: 600; font-size: 13px; }
+/* 液态玻璃：全应用只有助手输入框用。更透，有高光边和一道斜向的反光。 */
+.liquid { position: relative; overflow: hidden; background: linear-gradient(180deg, var(--rn-liquid-a), var(--rn-liquid-b)); backdrop-filter: blur(16px) saturate(210%) brightness(1.05); -webkit-backdrop-filter: blur(16px) saturate(210%) brightness(1.05); border: 1px solid var(--rn-liquid-rim); box-shadow: inset 0 1px 0 var(--rn-liquid-hi), inset 0 -12px 20px -14px var(--rn-liquid-sheen), var(--rn-liquid-shadow); }
+.liquid::before { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: radial-gradient(120% 70% at 12% -10%, var(--rn-liquid-sheen), transparent 60%), linear-gradient(115deg, transparent 58%, var(--rn-liquid-sheen) 74%, transparent 86%); }
+.liquid > * { position: relative; }
+.mock[data-reduced="true"] .liquid { background: var(--rn-sheet); backdrop-filter: none; -webkit-backdrop-filter: none; border-color: var(--rn-hair-2); box-shadow: var(--rn-card-shadow); }
+.mock[data-reduced="true"] .liquid::before { display: none; }
+.composer { border-radius: 24px; padding: 16px 16px 12px; display: flex; flex-direction: column; gap: 24px; color: var(--rn-ink-2); }
+.composer .ft { display: flex; align-items: center; gap: 12px; font-size: 12px; }
+.composer .send { margin-left: auto; width: 30px; height: 30px; border-radius: 50%; background: var(--rn-inverse); color: var(--rn-on-inverse); display: grid; place-items: center; }
+
+/* 今日 */
+.today { padding: 54px 0 0; width: 720px; max-width: calc(100% - 72px); margin: 0 auto; display: flex; flex-direction: column; gap: 30px; }
+.today .hello { font: 400 46px/1.1 var(--rn-font-serif); }
+.today .hello small { display: block; font: 400 13px/1.6 var(--rn-font-ui); color: var(--rn-ink-3); margin-top: 8px; }
+.blk { display: flex; flex-direction: column; gap: 4px; }
+.blk > .lbl { font: 500 12px/1 var(--rn-font-ui); color: var(--rn-ink-3); padding-bottom: 8px; border-bottom: 1px solid var(--rn-hair); margin-bottom: 4px; display: flex; justify-content: space-between; }
+.li { display: flex; align-items: baseline; gap: 12px; padding: 6px 0; }
+.li .tm { font: 400 12px/1.6 var(--rn-font-mono); color: var(--rn-ink-3); width: 86px; flex: none; }
+.li .ti { font-weight: 500; }
+.li .why { color: var(--rn-ink-3); font-size: 12px; margin-left: auto; white-space: nowrap; }
+.li .now { color: var(--rn-accent-text); font-weight: 600; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 36px; }
+
+/* 资讯 */
+.feed { padding: 30px 0 0; width: 700px; max-width: calc(100% - 72px); margin: 0 auto; display: flex; flex-direction: column; }
+.feed .hh { font: 700 26px/1.2 var(--rn-font-ui); }
+.feed .sub { color: var(--rn-ink-3); font-size: 12px; margin: 6px 0 18px; }
+.art { padding: 16px 0; border-top: 1px solid var(--rn-hair); display: flex; flex-direction: column; gap: 4px; }
+.art .src { font-size: 12px; color: var(--rn-ink-3); display: flex; gap: 8px; }
+.art .ttl { font: 600 16px/1.45 var(--rn-font-ui); }
+.art .sum { color: var(--rn-ink-2); }
+.art .why { font-size: 12px; color: var(--rn-accent-text); display: flex; align-items: center; gap: 6px; }
+.art .why::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--rn-accent); }
+.rest { padding: 14px 0; border-top: 1px solid var(--rn-hair); color: var(--rn-ink-3); }
+
+/* 日历 */
+.cal { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.cal .hd { display: flex; align-items: flex-end; gap: 12px; padding: 18px 24px 12px; }
+.cal .mon { font: 400 34px/1 var(--rn-font-serif); }
+.cal .mon i { color: var(--rn-ink-3); font-style: normal; }
+.cal .hd .sp { flex: 1; }
+.pill { height: 28px; padding: 0 12px; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--rn-hair-2); display: inline-flex; align-items: center; gap: 6px; }
+.grid { flex: 1; display: grid; grid-template-columns: 56px repeat(7, 1fr); grid-template-rows: 30px repeat(8, 1fr); border-top: 1px solid var(--rn-hair); position: relative; }
+.grid > div { border-right: 1px solid var(--rn-hair); border-bottom: 1px solid var(--rn-hair); font-size: 11px; color: var(--rn-ink-3); padding: 6px 8px; }
+.grid .dh { font-size: 12px; text-align: left; }
+.grid .dh.td { color: var(--rn-ink); font-weight: 600; }
+.grid .dh.td b { background: var(--rn-accent); color: #fff; border-radius: 6px; padding: 1px 6px; margin-left: 4px; font-weight: 600; }
+.ev { position: absolute; border-radius: 7px; padding: 4px 8px; font-size: 11px; line-height: 1.35; background: var(--rn-accent-soft); color: var(--rn-accent-text); border-left: 3px solid var(--rn-accent); }
+.ev.b { background: var(--tag-a); color: var(--tag-a-ink); border-color: var(--tag-a-ink); }
+.nowline { position: absolute; left: 56px; right: 0; top: 47%; height: 1px; background: var(--rn-accent); }
+.nowline::before { content: "10:24"; position: absolute; left: -52px; top: -9px; font: 500 10px/18px var(--rn-font-mono); background: var(--rn-accent); color: #fff; padding: 0 6px; border-radius: 9px; }
+.mini { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; padding: 4px 8px 10px; font: 400 11px/24px var(--rn-font-mono); text-align: center; color: var(--rn-ink-2); }
+.mini b { background: var(--rn-accent); color: #fff; border-radius: 50%; font-weight: 500; }
+.mini i { font-style: normal; color: var(--rn-ink-3); }
+.sw-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+
+/* 画板 */
+.card { position: absolute; background: var(--rn-sheet); border-radius: 14px; box-shadow: var(--rn-card-shadow); padding: 14px 16px; font-size: 13px; line-height: 1.6; }
+.card b { display: block; font-size: 16px; margin-bottom: 4px; }
+.card.note { background: #ffe9a8; color: #3a2c00; }
+.card.sel { box-shadow: var(--rn-card-shadow), 0 0 0 2px var(--rn-ink); }
+.wtop { position: absolute; top: 12px; left: 16px; right: 16px; display: flex; align-items: center; gap: 8px; color: var(--rn-ink-2); }
+.wtop .sp { flex: 1; }
+.fl { background: var(--rn-float); backdrop-filter: blur(var(--rn-glass-blur)); -webkit-backdrop-filter: blur(var(--rn-glass-blur)); box-shadow: var(--rn-shadow-3), inset 0 0 0 1px var(--rn-hair); border-radius: var(--rn-r-float); }
+.tools { position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; gap: 2px; padding: 6px; }
+.tools span, .selbar span { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 10px; color: var(--rn-ink-2); }
+.tools span.on { background: var(--rn-inverse); color: var(--rn-on-inverse); }
+.tools hr, .selbar hr { width: 1px; height: 20px; border: 0; background: var(--rn-hair-2); margin: 7px 4px; }
+.selbar { position: absolute; display: flex; gap: 2px; padding: 4px; border-radius: 12px; }
+.selbar span.txt { width: auto; padding: 0 10px; font-size: 12px; }
+svg.wire { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+svg.wire path { stroke: var(--rn-ink-3); stroke-width: 1.5; fill: none; }
+
+/* ---------- 页面其余部分 ---------- */
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+.mat { border-radius: 16px; padding: 16px; min-height: 172px; display: flex; flex-direction: column; gap: 8px; position: relative; overflow: hidden; min-width: 0; }
+.mat p { font-size: 13px; color: var(--rn-ink-2); }
+.mat .tk { margin-top: auto; font: 400 11px/1.5 var(--rn-font-mono); color: var(--rn-ink-3); }
+.mat.g { background: radial-gradient(70% 90% at 10% 10%, var(--wall-a), transparent 70%), radial-gradient(70% 90% at 95% 90%, var(--wall-b), transparent 70%), var(--wall-base); padding: 0; }
+.mat.g > div { background: var(--rn-glass); backdrop-filter: blur(var(--rn-glass-blur)); -webkit-backdrop-filter: blur(var(--rn-glass-blur)); padding: 16px; flex: 1; display: flex; flex-direction: column; gap: 8px; }
+.mat.s { background: var(--rn-sheet); box-shadow: var(--rn-sheet-shadow); border-radius: var(--rn-r-sheet); }
+.mat.w { background: var(--rn-well); box-shadow: inset 0 0 0 1px var(--rn-hair); border-radius: var(--rn-r-sheet); }
+.mat.f { background: var(--rn-float); box-shadow: var(--rn-shadow-3), inset 0 0 0 1px var(--rn-hair); border-radius: var(--rn-r-float); }
+.panel { background: var(--rn-sheet); border-radius: var(--rn-r-sheet); box-shadow: var(--rn-sheet-shadow); padding: 22px; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.barrow { display: grid; grid-template-columns: 96px minmax(0, 1fr) 54px; gap: 12px; align-items: center; font-size: 12.5px; }
+.barrow .nm { color: var(--rn-ink-2); }
+.barrow .pct { font: 500 13px/1 var(--rn-font-mono); text-align: right; font-variant-numeric: tabular-nums; }
+.stack { display: flex; height: 34px; border-radius: 9px; overflow: hidden; gap: 2px; }
+.stack span { display: grid; place-items: center; font-size: 11px; color: var(--rn-ink-3); background: var(--rn-fill-2); min-width: 0; overflow: hidden; white-space: nowrap; }
+.stack span.c { background: var(--rn-inverse); color: var(--rn-on-inverse); font-weight: 600; }
+.rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px 28px; }
+.rule { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; color: var(--rn-ink-2); }
+.rule::before { content: ""; width: 7px; height: 7px; border-radius: 50%; margin-top: 7px; flex: none; }
+.rule.y::before { background: var(--ok); }
+.rule.n::before { background: var(--bad); }
+.tbl { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; padding: 8px 14px 8px 0; border-bottom: 1px solid var(--rn-hair); vertical-align: middle; white-space: nowrap; }
+th { font-weight: 500; color: var(--rn-ink-3); font-size: 12px; }
+td.v { font-family: var(--rn-font-mono); font-size: 12px; color: var(--rn-ink-2); }
+.chip-c { display: inline-block; width: 22px; height: 22px; border-radius: 6px; box-shadow: inset 0 0 0 1px var(--rn-hair-2); vertical-align: middle; }
+.kit { display: flex; flex-wrap: wrap; gap: 12px 14px; align-items: center; }
+.btn { height: 32px; padding: 0 14px; border-radius: var(--rn-r-control); border: 0; display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 500; cursor: pointer; }
+.btn.p { background: var(--rn-inverse); color: var(--rn-on-inverse); }
+.btn.s { background: var(--rn-fill-2); color: var(--rn-ink); }
+.btn.g { background: transparent; color: var(--rn-ink-2); }
+.btn.sm { height: 28px; padding: 0 10px; }
+.ibtn { width: 32px; height: 32px; border-radius: var(--rn-r-control); display: inline-grid; place-items: center; color: var(--rn-ink-2); background: transparent; border: 0; }
+.ibtn.h { background: var(--rn-fill-2); color: var(--rn-ink); }
+.field { height: 32px; border-radius: var(--rn-r-control); background: var(--rn-fill); box-shadow: inset 0 0 0 1px var(--rn-hair); border: 0; padding: 0 12px; font: inherit; font-size: 13px; color: var(--rn-ink); min-width: 0; width: 200px; max-width: 100%; }
+.kbd { font: 500 11px/1 var(--rn-font-mono); padding: 4px 6px; border-radius: 5px; background: var(--rn-fill-2); color: var(--rn-ink-2); }
+.tag { font-size: 12px; padding: 2px 9px; border-radius: 999px; background: var(--tag-a); color: var(--tag-a-ink); }
+.tag.b { background: var(--tag-b); color: var(--tag-b-ink); }
+.menu { width: 240px; max-width: 100%; padding: 6px; font-size: 13px; }
+.menu .g { font: 500 11px/1 var(--rn-font-ui); color: var(--rn-ink-3); padding: 8px 10px 5px; }
+.menu .mi { height: 32px; border-radius: 8px; display: flex; align-items: center; gap: 10px; padding: 0 10px; }
+.menu .mi.h { background: var(--rn-fill-2); }
+.menu .mi small { margin-left: auto; color: var(--rn-ink-3); font: 400 11px var(--rn-font-mono); }
+.type-s { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 10px 20px; align-items: baseline; }
+.type-s .k { font: 400 11px/1.5 var(--rn-font-mono); color: var(--rn-ink-3); }
+@media (max-width: 560px) { h1 { font-size: 34px; } .type-s { grid-template-columns: 1fr; gap: 2px 0; } .type-s .k { margin-top: 10px; } .barrow { grid-template-columns: 70px minmax(0, 1fr) 46px; } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div class="eyebrow">Ready Next · 设计基准 · 2026-11-11</div>
+    <h1><span class="dot" style="vertical-align:.18em;margin-right:.3em"></span>一块玻璃，几张纸，一个信号色</h1>
+    <p class="lead">整个窗口是一块磨砂玻璃，导航、工具和助手都长在这块玻璃上；内容是放在玻璃上的纸。玻璃不再被切成卡片，信息靠纸来分开。橘红只表示“此刻”。下面的样机按 1440×900 等比缩小，可以切换模式。</p>
+  </header>
+
+  <section aria-label="外壳样机">
+    <div class="controls">
+      <div class="seg" role="group" aria-label="切换样机里的模式" id="modes">
+        <button type="button" data-m="today" aria-pressed="true">今日</button>
+        <button type="button" data-m="browser" aria-pressed="false">浏览器</button>
+        <button type="button" data-m="doc" aria-pressed="false">文档</button>
+        <button type="button" data-m="canvas" aria-pressed="false">画板</button>
+        <button type="button" data-m="rss" aria-pressed="false">资讯</button>
+        <button type="button" data-m="cal" aria-pressed="false">日历</button>
+      </div>
+      <span class="toggle"><button type="button" class="sw" role="switch" aria-checked="true" id="swAssistant" aria-label="显示助手"></button>助手</span>
+      <span class="toggle"><button type="button" class="sw" role="switch" aria-checked="false" id="swReduced" aria-label="减少透明"></button>减少透明</span>
+    </div>
+    <div class="mock-fit" id="fit">
+      <div class="mock" id="mock" data-assistant="on" data-reduced="false">
+        <div class="glass">
+          <nav class="rail" aria-label="图标栏">
+            <span class="zt lights" title="窗口控制按钮"><i></i><i></i><i></i></span>
+            <span class="rb" data-rail="browser"><svg class="i lg" data-i="globe"></svg></span>
+            <span class="rb" data-rail="doc"><svg class="i lg" data-i="file"></svg></span>
+            <span class="rb" data-rail="rss"><svg class="i lg" data-i="rss"></svg></span>
+            <span class="rb" data-rail="cal"><svg class="i lg" data-i="calendar"></svg></span>
+            <span class="sp"></span>
+            <span class="rb"><svg class="i lg" data-i="search"></svg></span>
+            <span class="rb badge"><svg class="i lg" data-i="tray"></svg></span>
+            <span class="zb"><span class="rb"><svg class="i lg" data-i="sliders"></svg></span></span>
+          </nav>
+
+          <aside class="side" aria-label="侧栏">
+            <div data-side="doc">
+              <h4>我的资料库 <span class="miniseg"><b class="on">页面</b><b>文件</b></span></h4>
+              <div class="grp">收藏</div>
+              <div class="row"><svg class="i" data-i="star"></svg><span class="t">新书发布</span></div>
+              <div class="grp"><span>页面</span><span>＋</span></div>
+              <div class="row" data-cur="doc"><svg class="i" data-i="chev"></svg><span class="t">📘 新书发布</span></div>
+              <div class="row sub"><span class="t">会议 11-03</span></div>
+              <div class="row sub"><span class="t">发行渠道调研</span></div>
+              <div class="row"><svg class="i" data-i="table"></svg><span class="t">选题库</span><span class="meta">5</span></div>
+              <div class="row" data-cur="canvas"><svg class="i" data-i="shapes"></svg><span class="t">灵感</span></div>
+              <div class="row"><svg class="i" data-i="file"></svg><span class="t">读书笔记</span></div>
+              <div class="grp"><span>文件夹</span><span>＋</span></div>
+              <div class="row"><svg class="i" data-i="folder"></svg><span class="t">~/Downloads/素材</span></div>
+            </div>
+            <div data-side="browser" hidden>
+              <h4>标签 <span style="color:var(--rn-ink-3)">＋</span></h4>
+              <div class="row cur"><svg class="i" data-i="globe"></svg><span class="t">浏览器里的智能体：从截图到语义快照</span></div>
+              <div class="row"><svg class="i" data-i="globe"></svg><span class="t">JSON Canvas 规范</span></div>
+              <div class="row"><svg class="i" data-i="globe"></svg><span class="t">独立出版人手册</span></div>
+              <div class="grp">助手正在用 · 调研印厂报价</div>
+              <div class="row"><span class="sw-dot" style="background:var(--rn-accent)"></span><span class="t">印厂 A 报价页</span><span class="meta">读取中</span></div>
+              <div class="row"><span class="sw-dot" style="background:var(--rn-ink-4)"></span><span class="t">印厂 B 报价页</span><span class="meta">已读</span></div>
+              <div class="row"><span class="sw-dot" style="background:var(--ok)"></span><span class="t">登录 · 印厂 C</span><span class="meta">等你</span></div>
+              <div class="grp">收藏</div>
+              <div class="row"><svg class="i" data-i="star"></svg><span class="t">设计参考</span></div>
+              <div class="row"><svg class="i" data-i="clock"></svg><span class="t">历史</span></div>
+            </div>
+            <div data-side="rss" hidden>
+              <h4>资讯</h4>
+              <div class="row cur"><svg class="i" data-i="filter"></svg><span class="t">为你筛过的</span><span class="meta">7</span></div>
+              <div class="row"><svg class="i" data-i="tray"></svg><span class="t">全部</span><span class="meta">128</span></div>
+              <div class="row"><svg class="i" data-i="dot"></svg><span class="t">未读</span><span class="meta">64</span></div>
+              <div class="row"><svg class="i" data-i="star"></svg><span class="t">收藏</span></div>
+              <div class="grp"><span>主题</span><span>＋</span></div>
+              <div class="row"><span class="t">AI 视频制作</span><span class="meta">12</span></div>
+              <div class="row"><span class="t">独立出版</span><span class="meta">4</span></div>
+              <div class="row"><span class="t">设计系统</span><span class="meta">9</span></div>
+              <div class="grp">整理</div>
+              <div class="row"><svg class="i" data-i="file"></svg><span class="t">日报与简报</span></div>
+            </div>
+            <div data-side="cal" hidden>
+              <h4>十一月 2026</h4>
+              <div class="mini"><i>日</i><i>一</i><i>二</i><i>三</i><i>四</i><i>五</i><i>六</i><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span><b>11</b><span>12</span><span>13</span><span>14</span><span>15</span><span>16</span><span>17</span><span>18</span><span>19</span><span>20</span><span>21</span></div>
+              <div class="grp">图层</div>
+              <div class="row"><span class="cb done"><svg class="i" data-i="check" style="width:11px;height:11px"></svg></span><span class="t">日程</span></div>
+              <div class="row"><span class="cb done"><svg class="i" data-i="check" style="width:11px;height:11px"></svg></span><span class="t">文档日期</span></div>
+              <div class="row"><span class="cb done"><svg class="i" data-i="check" style="width:11px;height:11px"></svg></span><span class="t">待办</span></div>
+              <div class="row"><span class="cb"></span><span class="t">阅读足迹</span></div>
+              <div class="grp"><span>待办</span><span>3</span></div>
+              <div class="row"><span class="cb"></span><span class="t">封面三稿确认</span><span class="meta">今天</span></div>
+              <div class="row"><span class="cb"></span><span class="t">联系印厂报价</span><span class="meta">未安排</span></div>
+              <div class="grp"><span>日历</span><span>＋</span></div>
+              <div class="row"><span class="sw-dot" style="background:var(--rn-accent)"></span><span class="t">内容创作</span></div>
+              <div class="row"><span class="sw-dot" style="background:var(--tag-a-ink)"></span><span class="t">工作日程</span></div>
+            </div>
+            <div class="foot" data-foot="doc"><span>阅读</span><span>图谱</span><span>模板</span><span>导入</span><span>回收站</span></div>
+          </aside>
+
+          <main class="main">
+            <!-- 今日 -->
+            <div data-main="today" style="display:contents">
+              <div class="bar"><span class="tab on"><span class="dot" style="width:7px;height:7px"></span>今日</span><span class="tab"><svg class="i" data-i="file"></svg>新书发布</span><span style="padding:0 8px;color:var(--rn-ink-3)">＋</span></div>
+              <div class="sheet"><div class="today">
+                <div class="hello">上午好<small>11 月 11 日，星期三 · 今天有 2 个日程、3 条待办</small></div>
+                <div class="two">
+                  <div class="blk"><div class="lbl"><span>接下来</span></div>
+                    <div class="li"><span class="tm now">25 分钟后</span><span class="ti">选题会</span></div>
+                    <div class="li"><span class="tm">15:00</span><span class="ti">写作：RSS 的筛子理论</span></div>
+                    <div class="li"><span class="cb"></span><span class="ti" style="font-weight:400">封面三稿确认</span></div>
+                    <div class="li"><span class="cb"></span><span class="ti" style="font-weight:400">联系印厂报价</span></div>
+                  </div>
+                  <div class="blk"><div class="lbl"><span>继续</span></div>
+                    <div class="li"><svg class="i" data-i="file" style="align-self:center"></svg><span class="ti">新书发布</span><span class="why">昨天编辑</span></div>
+                    <div class="li"><svg class="i" data-i="book" style="align-self:center"></svg><span class="ti">城市漫游者</span><span class="why">读到 21%</span></div>
+                    <div class="li"><svg class="i" data-i="tray" style="align-self:center"></svg><span class="ti">3 条收集待整理</span><span class="why">整理到画板</span></div>
+                  </div>
+                </div>
+                <div class="blk"><div class="lbl"><span>为你筛过的</span><span>资讯 · 7 篇</span></div>
+                  <div class="li"><span class="ti">RSS 没有死，只是换了读法</span><span class="why">因为你在写《RSS 的筛子理论》</span></div>
+                  <div class="li"><span class="ti">一个人的出版社：独立作者如何做发行</span><span class="why">符合：独立出版</span></div>
+                  <div class="li"><span class="ti">设计系统的令牌分层实践</span><span class="why">你常读这个来源</span></div>
+                </div>
+              </div></div>
+            </div>
+            <!-- 浏览器 -->
+            <div data-main="browser" style="display:contents" hidden>
+              <div class="bar"><svg class="i" data-i="back"></svg><svg class="i" data-i="fwd" style="opacity:.4"></svg><span class="addr"><svg class="i" data-i="globe"></svg>example.com/essay/browser-agents<span style="margin-left:auto;color:var(--rn-accent-text);font-size:12px">订阅</span></span><svg class="i" data-i="star"></svg><svg class="i" data-i="more"></svg></div>
+              <div class="sheet"><div class="prose" style="width:680px">
+                <div class="title" style="font-size:30px">浏览器里的智能体：从截图到语义快照</div>
+                <p style="color:var(--rn-ink-2)">网页本身就是这张纸。地址栏和标签在玻璃上，不占纸的位置。助手打开的标签在侧栏单列一组，能看到它正在读哪一页、哪一页在等你登录。</p>
+                <p style="color:var(--rn-ink-2);margin-top:12px">选中一段文字后出现同一条浮动条：划线、存入收集、引用到文档、问 AI。这条浮动条在网页、资讯、书和 PDF 里是同一个。</p>
+                <div class="selbar fl" style="position:static;display:inline-flex;margin-top:18px"><span class="txt">划线</span><span class="txt">存入收集</span><span class="txt">引用到文档</span><span class="txt">问 AI</span><hr><span class="txt">翻译</span></div>
+              </div></div>
+            </div>
+            <!-- 文档 -->
+            <div data-main="doc" style="display:contents" hidden>
+              <div class="bar"><svg class="i" data-i="back"></svg><svg class="i" data-i="fwd" style="opacity:.4"></svg><span class="tab"><span class="dot" style="width:7px;height:7px"></span>今日</span><span class="tab on">📘 新书发布</span><span class="tab"><svg class="i" data-i="table"></svg>选题库</span><span style="padding:0 8px;color:var(--rn-ink-3)">＋</span></div>
+              <div class="sheet">
+                <div class="crumb"><span class="back"><svg class="i" data-i="back"></svg>资讯</span><span>新书发布</span><span class="sp"></span><span class="ib"><svg class="i" data-i="star"></svg></span><span class="ib"><svg class="i" data-i="list"></svg></span><span class="ib"><svg class="i" data-i="more"></svg></span></div>
+                <div class="prose">
+                  <div style="font-size:44px;line-height:1">📘</div>
+                  <div class="title" style="margin-top:10px">新书发布</div>
+                  <p>这是项目主页。相关：<span class="cap"><svg class="i" data-i="table"></svg>选题库</span>、<span class="cap"><svg class="i" data-i="file"></svg>会议 11-03</span>、<span class="cap"><svg class="i" data-i="calendar"></svg>封面评审</span></p>
+                  <div class="callout"><b>本周重点</b><br>确认封面与发行渠道，周五前给出定稿。</div>
+                  <h5>待办</h5>
+                  <div class="todo"><span class="cb"></span>封面三稿确认 <span class="cap"><svg class="i" data-i="calendar"></svg>今天</span></div>
+                  <div class="todo"><span class="cb"></span>联系印厂报价</div>
+                  <div class="todo" style="color:var(--rn-ink-3)"><span class="cb done"><svg class="i" data-i="check" style="width:11px;height:11px"></svg></span><s>书号申请</s></div>
+                  <h5>时间线</h5>
+                  <p style="color:var(--rn-ink-2)">标题只出现一次；链接是胶囊；页面右上只留收藏、大纲和“…”。</p>
+                </div>
+              </div>
+            </div>
+            <!-- 画板 -->
+            <div data-main="canvas" style="display:contents" hidden>
+              <div class="bar"><svg class="i" data-i="back"></svg><svg class="i" data-i="fwd" style="opacity:.4"></svg><span class="tab">📘 新书发布</span><span class="tab on"><svg class="i" data-i="shapes"></svg>灵感</span><span style="padding:0 8px;color:var(--rn-ink-3)">＋</span></div>
+              <div class="well">
+                <svg class="wire" viewBox="0 0 752 796" preserveAspectRatio="none" aria-hidden="true"><path d="M316 165 C 380 165, 380 119, 440 119"/><path d="M560 384 C 560 452, 420 452, 420 520"/></svg>
+                <div class="wtop"><span>灵感</span><span style="color:var(--rn-ink-3)">›</span><span style="color:var(--rn-ink-3)">筛子</span><span class="sp"></span><svg class="i" data-i="search"></svg><span class="mono" style="font-size:11px">100%</span><svg class="i" data-i="trash"></svg></div>
+                <div class="card" style="left:56px;top:120px;width:260px"><b>筛子</b>先理解你在做什么，再决定给你看什么。</div>
+                <div class="card note sel" style="left:440px;top:96px;width:240px">注意力才是稀缺品。</div>
+                <div class="selbar fl" style="left:440px;top:46px"><span><svg class="i" data-i="group"></svg></span><span><svg class="i" data-i="grid"></svg></span><hr><span class="txt">添加到文档</span><span class="txt">问 AI</span></div>
+                <div class="card" style="left:440px;top:290px;width:240px">· 订阅源<br>· 规则<br>· 反馈</div>
+                <div class="card" style="left:260px;top:520px;width:320px"><span style="color:var(--rn-ink-3);font-size:11px">example.com</span><b style="font-size:14px;margin-top:2px">RSS 没有死，只是换了读法</b><span style="color:var(--rn-ink-2)">来自资讯 · 11 月 11 日收下</span></div>
+                <div class="tools fl"><span class="on"><svg class="i" data-i="cursor"></svg></span><span><svg class="i" data-i="hand"></svg></span><hr><span><svg class="i" data-i="type"></svg></span><span><svg class="i" data-i="square"></svg></span><span><svg class="i" data-i="link"></svg></span><span><svg class="i" data-i="pen"></svg></span><hr><span><svg class="i" data-i="undo"></svg></span><span><svg class="i" data-i="redo"></svg></span></div>
+              </div>
+            </div>
+            <!-- 资讯 -->
+            <div data-main="rss" style="display:contents" hidden>
+              <div class="bar"><span class="addr" style="max-width:360px"><svg class="i" data-i="search"></svg>搜索资讯</span><span style="flex:1"></span><svg class="i" data-i="refresh"></svg><svg class="i" data-i="more"></svg></div>
+              <div class="sheet"><div class="feed">
+                <div class="hh">为你筛过的</div>
+                <div class="sub">今天 7 篇 · 来自 128 条新动态 · 按“对你现在的价值”排序</div>
+                <div class="art"><div class="src"><span>少数派</span><span>09:12</span></div><div class="ttl">RSS 没有死，只是换了读法</div><div class="sum">订阅没有消失，变的是读的方式：先过一遍筛子，再决定哪些值得打开。</div><div class="why">因为你在写《RSS 的筛子理论》</div></div>
+                <div class="art"><div class="src"><span>出版人周刊</span><span>昨天</span></div><div class="ttl">一个人的出版社：独立作者如何做发行</div><div class="sum">三位独立作者的发行渠道对比，附各渠道的结算周期。</div><div class="why">符合：独立出版</div></div>
+                <div class="art"><div class="src"><span>Design Tokens Weekly</span><span>昨天</span></div><div class="ttl">设计系统的令牌分层实践</div><div class="sum">原始值、语义、组件三层如何对应到一份可以被检查的预算。</div><div class="why">你常读这个来源</div></div>
+                <div class="rest">其余 121 条 ›</div>
+              </div></div>
+            </div>
+            <!-- 日历 -->
+            <div data-main="cal" style="display:contents" hidden>
+              <div class="bar"><span style="flex:1"></span><span class="pill">周 ▾</span><span class="pill">今天</span><svg class="i" data-i="back"></svg><svg class="i" data-i="fwd"></svg></div>
+              <div class="sheet"><div class="cal">
+                <div class="hd"><span class="mon">十一月 <i>2026</i></span></div>
+                <div class="grid">
+                  <div></div><div class="dh">周日 8</div><div class="dh">周一 9</div><div class="dh">周二 10</div><div class="dh td">周三<b>11</b></div><div class="dh">周四 12</div><div class="dh">周五 13</div><div class="dh">周六 14</div>
+                  <div>08:00</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
+                  <div>09:00</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
+                  <div>10:00</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
+                  <div>11:00</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
+                  <div>12:00</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
+                  <div>13:00</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
+                  <div>14:00</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
+                  <div>15:00</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
+                  <div class="nowline"></div>
+                  <div class="ev" style="left:calc(56px + (100% - 56px) * 3 / 7 + 4px);width:calc((100% - 56px) / 7 - 8px);top:50%;height:11%">选题会<br>10:50–11:50</div>
+                  <div class="ev b" style="left:calc(56px + (100% - 56px) * 4 / 7 + 4px);width:calc((100% - 56px) / 7 - 8px);top:25%;height:11%">封面评审<br>09:00</div>
+                  <div class="ev" style="left:calc(56px + (100% - 56px) * 3 / 7 + 4px);width:calc((100% - 56px) / 7 - 8px);top:87%;height:11%">写作：筛子理论</div>
+                </div>
+              </div></div>
+            </div>
+            <div class="zb"></div>
+          </main>
+
+          <aside class="assistant" aria-label="助手">
+            <div class="hd">助手 <span><svg class="i" data-i="clock"></svg><svg class="i" data-i="plus"></svg><svg class="i" data-i="more"></svg></span></div>
+            <p class="msg"><b>这里只有助手。</b>模式切换在左边的图标栏；按 Tab 收起后，内容区独占宽度。</p>
+            <div class="sugg"><div><b>梳理当前工作</b>从资料库里找出最值得推进的事</div><div><b>安排下一步</b>按轻重缓急整理成行动</div></div>
+            <div class="composer liquid"><span>今天有什么可以帮到你</span><div class="ft"><svg class="i" data-i="plus"></svg><span>选择项目</span><span>询问授权</span><span class="send"><svg class="i" data-i="up"></svg></span></div></div>
+            <div class="zb"></div>
+          </aside>
+          <span class="corner-dot" title="今日"></span>
+        </div>
+      </div>
+    </div>
+    <p class="note">外框是对称的：纸的上方和下方各留 52，与左边图标栏同宽。上留白放标签条或地址栏，下留白保持安静。品牌红点留在右上角，点它回到今日；左上角是系统的窗口按钮。助手输入框是液态玻璃，全应用只有这一处。</p>
+    <p class="note">样机里的毛玻璃用一张模糊的壁纸来示意；真实窗口里由系统的窗口材质提供，DOM 不做模糊。“减少透明”打开后玻璃变成不透明的底色，这也是 Windows 与低性能机器上的样子。</p>
+  </section>
+
+  <section>
+    <div class="sec-head"><div class="eyebrow">材质</div><h2>四种材质各管一件事，外加一处液态玻璃</h2></div>
+    <div class="cols">
+      <div class="mat g"><div><h3>玻璃</h3><p>窗口本身，只有一块。图标栏、侧栏、工具条、助手都是它上面的区域，没有自己的背景、边框、圆角、阴影。</p><span class="tk">--rn-glass · 系统窗口材质</span></div></div>
+      <div class="mat s"><h3>纸</h3><p>内容。一个内容区一张，分屏两张。纸上不再放纸，内部用排版、留白、发丝线分区。</p><span class="tk">--rn-sheet · 圆角 20 · 贴地影</span></div>
+      <div class="mat w"><h3>台</h3><p>画板、书架、阅读的书这类空间型内容的底。台上的卡片、书、书页才是纸。</p><span class="tk">--rn-well · 圆角 20 · 内侧发丝线</span></div>
+      <div class="mat f"><h3>浮层</h3><p>菜单、弹出、对话框、⌘K、提示。全应用一份实现，出现时网页层让位，最多叠两层。</p><span class="tk">--rn-float · 圆角 16 · 模糊 22</span></div>
+      <div class="mat g"><div><div class="liquid" style="border-radius:20px;padding:14px 16px;display:flex;flex-direction:column;gap:8px;flex:1"><h3>液态玻璃</h3><p>只有助手输入框用。比浮层更透，有高光边和一道反光，是全应用唯一的签名元素。“减少透明”时退回纸色。</p><span class="tk">--rn-liquid-* · 圆角 24</span></div></div></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><div class="eyebrow">空间</div><h2>内容区从三成多回到一半以上</h2><p class="lead">同样是 1440 宽的窗口。现在两层导航并排，正文只剩约 36%；合成一个侧栏后是 53%，助手收起后是 79%。</p></div>
+    <div class="panel">
+      <div class="barrow"><span class="nm">现在</span><div class="stack"><span style="flex:3.5"></span><span style="flex:15.3">文件管理</span><span style="flex:17.2">模块侧栏</span><span class="c" style="flex:36">内容</span><span style="flex:28">助手</span></div><span class="pct">36%</span></div>
+      <div class="barrow"><span class="nm">合并后</span><div class="stack"><span style="flex:3.6"></span><span style="flex:17.2">侧栏</span><span class="c" style="flex:52.8">内容</span><span style="flex:26.4">助手</span></div><span class="pct">53%</span></div>
+      <div class="barrow"><span class="nm">助手收起</span><div class="stack"><span style="flex:3.6"></span><span style="flex:17.2">侧栏</span><span class="c" style="flex:79.2">内容</span></div><span class="pct">79%</span></div>
+      <p class="note">尺寸：图标栏 52，侧栏 248（200–420），助手 380（320–560），内容区最小 560。窗口变窄时，助手先改成浮在内容上的抽屉，然后侧栏改成悬停滑出；内容区不被挤压。</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><div class="eyebrow">信号色</div><h2>橘红只表示“此刻”</h2></div>
+    <div class="panel">
+      <div class="rules">
+        <div class="rule y">当前所在的位置：侧栏的当前项、图标栏的品牌圆点</div>
+        <div class="rule n">不做按钮的默认颜色。主按钮是墨色实心，一屏最多一个</div>
+        <div class="rule y">今天、现在：日历的今天、当前时间线、“25 分钟后”</div>
+        <div class="rule n">不做装饰：分隔线、图标底色、标题、插画都不用</div>
+        <div class="rule y">正在进行：助手运行中、录音中、未保存、筛子给出的理由</div>
+        <div class="rule n">不做正文链接的颜色。链接是墨色加下划线，或者引用胶囊</div>
+      </div>
+      <p class="note">橘红在白底上的对比度约 3:1，够做圆点、色条和大字，不够做小字。文字用 <code>--rn-accent-text</code>。</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><div class="eyebrow">令牌</div><h2>值</h2><p class="lead">名字与产品里的 <code>--rn-*</code> 一致。表里是当前主题下的值；切换系统的明暗可以看另一组。</p></div>
+    <div class="panel"><div class="tbl"><table>
+      <thead><tr><th>令牌</th><th>样子</th><th>浅色</th><th>深色</th><th>用途</th></tr></thead>
+      <tbody>
+        <tr><td class="v">--rn-sheet</td><td><span class="chip-c" style="background:var(--rn-sheet)"></span></td><td class="v">#fdfdfc</td><td class="v">#1c1c1f</td><td>纸</td></tr>
+        <tr><td class="v">--rn-stage</td><td><span class="chip-c" style="background:var(--rn-stage)"></span></td><td class="v">#ebebee</td><td class="v">#0e0e11</td><td>“减少透明”时玻璃的底色</td></tr>
+        <tr><td class="v">--rn-well</td><td><span class="chip-c" style="background:var(--rn-well)"></span></td><td class="v">墨 4.5%</td><td class="v">黑 26%</td><td>台</td></tr>
+        <tr><td class="v">--rn-float</td><td><span class="chip-c" style="background:var(--rn-float)"></span></td><td class="v">252 252 253 / .82</td><td class="v">28 28 32 / .86</td><td>浮层</td></tr>
+        <tr><td class="v">--rn-ink</td><td><span class="chip-c" style="background:var(--rn-ink)"></span></td><td class="v">#0b0b0e</td><td class="v">#f4f4f6</td><td>正文、图标</td></tr>
+        <tr><td class="v">--rn-ink-2</td><td><span class="chip-c" style="background:var(--rn-ink-2)"></span></td><td class="v">墨 64%</td><td class="v">墨 68%</td><td>次要文字</td></tr>
+        <tr><td class="v">--rn-ink-3</td><td><span class="chip-c" style="background:var(--rn-ink-3)"></span></td><td class="v">墨 44%</td><td class="v">墨 46%</td><td>提示、标注</td></tr>
+        <tr><td class="v">--rn-hair</td><td><span class="chip-c" style="background:var(--rn-hair)"></span></td><td class="v">墨 8%</td><td class="v">白 8%</td><td>发丝线</td></tr>
+        <tr><td class="v">--rn-fill / -2</td><td><span class="chip-c" style="background:var(--rn-fill-2)"></span></td><td class="v">墨 4.5% / 8%</td><td class="v">白 5% / 9%</td><td>悬停、选中的底</td></tr>
+        <tr><td class="v">--rn-accent</td><td><span class="chip-c" style="background:var(--rn-accent)"></span></td><td class="v">#ff5a1f</td><td class="v">#ff5a1f</td><td>信号色：圆点、色条、填充</td></tr>
+        <tr><td class="v">--rn-accent-text</td><td><span class="chip-c" style="background:var(--rn-accent-text)"></span></td><td class="v">#c8410f</td><td class="v">#ff8a5c</td><td>信号色的文字</td></tr>
+        <tr><td class="v">--rn-accent-soft</td><td><span class="chip-c" style="background:var(--rn-accent-soft)"></span></td><td class="v">橘红 13%</td><td class="v">橘红 18%</td><td>当前项的底</td></tr>
+        <tr><td class="v">圆角</td><td></td><td class="v" colspan="2">纸 20 · 浮层 16 · 控件 9 · 小元素 6 · 胶囊全圆</td><td></td></tr>
+        <tr><td class="v">动效</td><td></td><td class="v" colspan="2">120 / 200 / 320ms · cubic-bezier(.22, 1, .36, 1)</td><td>只在状态变化时</td></tr>
+        <tr><td class="v">密度</td><td></td><td class="v" colspan="2">行高 30 · 控件 28 / 32 · 图标 16 线宽 1.5 · 图标栏 20</td><td></td></tr>
+        <tr><td class="v">外框</td><td></td><td class="v" colspan="2">图标栏宽 52 · 上留白 52 · 下留白 52（--rn-band-h）</td><td>纸的上下留白等高；红点在右上角</td></tr>
+      </tbody>
+    </table></div></div>
+  </section>
+
+  <section>
+    <div class="sec-head"><div class="eyebrow">字</div><h2>三种字体，各有位置</h2></div>
+    <div class="panel"><div class="type-s">
+      <span class="k">展示 · 衬线 40</span><span style="font:400 40px/1.1 var(--rn-font-serif)">上午好 · 十一月 <span style="color:var(--rn-ink-3)">2026</span></span>
+      <span class="k">页面标题 · 34 / 700</span><span style="font:700 34px/1.2 var(--rn-font-ui)">新书发布</span>
+      <span class="k">纸上正文 · 16 / 1.75</span><span style="font-size:16px;line-height:1.75">一个好的筛子，应该先理解你在做什么，再决定把什么放到你面前。</span>
+      <span class="k">界面 · 13 / 1.45</span><span style="font-size:13px;line-height:1.45">为你筛过的 · 全部 · 未读 · 收藏 · 日报与简报</span>
+      <span class="k">标注 · 12</span><span style="font-size:12px;color:var(--rn-ink-3)">因为你在写《RSS 的筛子理论》</span>
+      <span class="k">等宽 · 数字与快捷键</span><span class="mono" style="font-size:13px">10:50–11:50 · 5 / 24 · ⌘K · 2026-11-11</span>
+    </div><p class="note">衬线只用于展示时刻，一屏最多一处：今日页的问候、日历的月份、书房的标题。</p></div>
+  </section>
+
+  <section>
+    <div class="sec-head"><div class="eyebrow">基元</div><h2>全应用共用的一套控件</h2><p class="lead">现在按钮至少五套、菜单四套、开关三套。之后每类一份，放在 <code>components/ui</code>。</p></div>
+    <div class="panel">
+      <div class="kit"><button type="button" class="btn p">新建页面</button><button type="button" class="btn s">保存到…</button><button type="button" class="btn g">取消</button><button type="button" class="btn s sm">筛选</button><button type="button" class="ibtn" aria-label="收藏"><svg class="i" data-i="star"></svg></button><button type="button" class="ibtn h" aria-label="更多"><svg class="i" data-i="more"></svg></button><input class="field" id="demoField" placeholder="搜索或输入…" aria-label="输入框示例"><button type="button" class="sw" role="switch" aria-checked="true" aria-label="开关示例" id="demoSwitch"></button><span class="miniseg"><b class="on">页面</b><b>文件</b></span></div>
+      <div class="kit"><span class="cap"><svg class="i" data-i="file"></svg>会议 11-03</span><span class="cap"><svg class="i" data-i="calendar"></svg>封面评审</span><span class="cap"><svg class="i" data-i="book"></svg>城市漫游者 · 第 3 章</span><span class="tag">写作中</span><span class="tag b">已发布</span><span class="kbd">⌘K</span><span class="kbd">⌥ 点击 速览</span></div>
+      <div class="kit" style="align-items:flex-start">
+        <div style="width:230px;max-width:100%"><div class="row"><svg class="i" data-i="file"></svg><span class="t">默认</span></div><div class="row hov"><svg class="i" data-i="file"></svg><span class="t">悬停</span></div><div class="row" style="background:var(--rn-fill-2);color:var(--rn-ink);font-weight:500"><svg class="i" data-i="file"></svg><span class="t">选中（多选）</span></div><div class="row cur"><svg class="i" data-i="file"></svg><span class="t">当前所在</span></div></div>
+        <div class="menu fl"><div class="g">基础</div><div class="mi h"><svg class="i" data-i="type"></svg>文本<small>/t</small></div><div class="mi"><svg class="i" data-i="list"></svg>待办<small>/todo</small></div><div class="g">嵌入</div><div class="mi"><svg class="i" data-i="table"></svg>数据库<small>/db</small></div><div class="mi"><svg class="i" data-i="shapes"></svg>画板<small>/canvas</small></div><div class="mi"><svg class="i" data-i="calendar"></svg>日期<small>@</small></div></div>
+      </div>
+      <p class="note">引用胶囊的操作全应用一致：点击打开，⌥ 点击速览，⌘ 点击在另一侧打开，拖动带走引用。</p>
+    </div>
+  </section>
+</div>
+
+<script>
+(function () {
+  var P = {
+    globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.2 3 14.8 0 18M12 3c-3 3.2-3 14.8 0 18"/>',
+    file: '<path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5M10 13h6M10 17h4"/>',
+    rss: '<path d="M5 11a8 8 0 0 1 8 8M5 5a14 14 0 0 1 14 14"/><circle cx="6" cy="18" r="1.4"/>',
+    calendar: '<rect x="4" y="5" width="16" height="15" rx="2.5"/><path d="M4 10h16M9 3v4M15 3v4"/>',
+    search: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>',
+    tray: '<path d="M4 13l2.5-8h11L20 13v5a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18z"/><path d="M4 13h4.5a3.5 3.5 0 0 0 7 0H20"/>',
+    sliders: '<path d="M5 7h9M18 7h1M5 17h3M12 17h7"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>',
+    star: '<path d="M12 4l2.4 5 5.4.7-4 3.8 1 5.4-4.8-2.6-4.8 2.6 1-5.4-4-3.8 5.4-.7z"/>',
+    chev: '<path d="M10 7l5 5-5 5"/>',
+    table: '<rect x="4" y="5" width="16" height="14" rx="2.5"/><path d="M4 10h16M10 10v9"/>',
+    shapes: '<path d="M12 4l4 6H8z"/><rect x="5" y="14" width="5.5" height="5.5" rx="1.2"/><circle cx="16.5" cy="16.7" r="2.8"/>',
+    folder: '<path d="M4 7.5A1.5 1.5 0 0 1 5.5 6H10l2 2.5h6.5A1.5 1.5 0 0 1 20 10v7.5a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z"/>',
+    clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+    filter: '<path d="M4 6h16l-6 7.5V19l-4-2v-3.5z"/>',
+    dot: '<circle cx="12" cy="12" r="3.5"/>',
+    check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+    back: '<path d="M14 6l-6 6 6 6"/>',
+    fwd: '<path d="M10 6l6 6-6 6"/>',
+    more: '<circle cx="6" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="18" cy="12" r="1"/>',
+    list: '<path d="M9 7h11M9 12h11M9 17h7M4.5 7h.01M4.5 12h.01M4.5 17h.01"/>',
+    book: '<path d="M5 5h3v14H5zM10 5h3v14h-3z"/><path d="M15.5 6.5l2.8-.8 3 12.6-2.8.8z"/>',
+    trash: '<path d="M5 7h14M10 7V4.5h4V7M7 7l1 12.5h8L17 7M10.5 11v5M13.5 11v5"/>',
+    cursor: '<path d="M6 4l12 7-5.2 1.6L10.5 18z"/>',
+    hand: '<path d="M8 12V6.5a1.5 1.5 0 0 1 3 0V11M11 10V5a1.5 1.5 0 0 1 3 0v6M14 10.5V7a1.5 1.5 0 0 1 3 0v8c0 3-2 5-5 5s-4.5-1.5-6-4.5l-1.6-3.2a1.4 1.4 0 0 1 2.4-1.3L8 13"/>',
+    type: '<path d="M6 7V5h12v2M12 5v14M9.5 19h5"/>',
+    square: '<rect x="5" y="5" width="14" height="14" rx="2.5"/>',
+    link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+    pen: '<path d="M4 20l1-4.5L16 4.5l3.5 3.5-11 11z"/><path d="M14 6.5l3.5 3.5"/>',
+    undo: '<path d="M8 9H15a4.5 4.5 0 0 1 0 9H10"/><path d="M11 6L8 9l3 3"/>',
+    redo: '<path d="M16 9H9a4.5 4.5 0 0 0 0 9h5"/><path d="M13 6l3 3-3 3"/>',
+    group: '<rect x="4" y="4" width="9" height="9" rx="2"/><rect x="11" y="11" width="9" height="9" rx="2"/>',
+    grid: '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>',
+    refresh: '<path d="M19 12a7 7 0 1 1-2.2-5.1"/><path d="M19 4.5V8.5h-4"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    up: '<path d="M12 19V6M6.5 11.5L12 6l5.5 5.5"/>'
+  };
+  document.querySelectorAll('svg[data-i]').forEach(function (el) {
+    el.setAttribute('viewBox', '0 0 24 24');
+    el.setAttribute('aria-hidden', 'true');
+    el.innerHTML = P[el.getAttribute('data-i')] || '';
+  });
+
+  var mock = document.getElementById('mock');
+  var fit = document.getElementById('fit');
+  function scale() {
+    var k = fit.clientWidth / 1440;
+    mock.style.transform = 'scale(' + k + ')';
+    fit.style.height = Math.round(900 * k) + 'px';
+  }
+  scale();
+  window.addEventListener('resize', scale);
+
+  var sideFor = { today: 'doc', doc: 'doc', canvas: 'doc', browser: 'browser', rss: 'rss', cal: 'cal' };
+  var railFor = { today: 'doc', doc: 'doc', canvas: 'doc', browser: 'browser', rss: 'rss', cal: 'cal' };
+  function show(mode) {
+    document.querySelectorAll('#modes button').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.m === mode)); });
+    mock.querySelectorAll('[data-main]').forEach(function (el) { el.hidden = el.dataset.main !== mode; });
+    mock.querySelectorAll('[data-side]').forEach(function (el) { el.hidden = el.dataset.side !== sideFor[mode]; });
+    mock.querySelectorAll('[data-foot]').forEach(function (el) { el.style.visibility = sideFor[mode] === 'doc' ? 'visible' : 'hidden'; });
+    mock.querySelectorAll('[data-rail]').forEach(function (el) { el.classList.toggle('on', el.dataset.rail === railFor[mode]); });
+    mock.querySelectorAll('[data-cur]').forEach(function (el) { el.classList.toggle('cur', el.dataset.cur === mode); });
+    try { localStorage.setItem('ready-ref-mode', mode); } catch (e) {}
+  }
+  document.getElementById('modes').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-m]');
+    if (b) show(b.dataset.m);
+  });
+  var saved = null;
+  try { saved = localStorage.getItem('ready-ref-mode'); } catch (e) {}
+  show(sideFor[saved] ? saved : 'today');
+
+  function bindSwitch(id, apply) {
+    var el = document.getElementById(id);
+    el.addEventListener('click', function () {
+      var on = el.getAttribute('aria-checked') !== 'true';
+      el.setAttribute('aria-checked', String(on));
+      if (apply) apply(on);
+    });
+  }
+  bindSwitch('swAssistant', function (on) { mock.dataset.assistant = on ? 'on' : 'off'; });
+  bindSwitch('swReduced', function (on) { mock.dataset.reduced = String(on); });
+  bindSwitch('demoSwitch');
+})();
+</script>
