@@ -2,7 +2,7 @@ import { CanvasService } from '../board-engine/canvas-service'
 import { canvasPageMoveIds, repairCanvasPageMoves } from '../board-engine/page-moves'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
-import { basename, dirname, extname, join, resolve, isAbsolute } from 'node:path'
+import { basename, dirname, extname, join, resolve, isAbsolute, relative, sep } from 'node:path'
 import { z } from 'zod'
 import { PageOperationSchema, PagePropertiesSchema, type PageOperation, type PageReceipt, type PageChange, type PageRoot, type PageUserState, type PageProperties, type PageOperationRecord, type PageTrashEntry } from '../../../shared/document-pages'
 import { readDocumentSource, setFrontmatterFields } from '../../../shared/document-operations'
@@ -111,7 +111,9 @@ export class DocumentPageService {
   }
   recentEdited(root: string | null): Array<{ ref: import('../../../shared/ready-ref').ReadyRef; title: string; editedAt: number }> {
     if (!root) return []
-    return this.registry.list().filter(row => row.kind === 'markdown' && row.status === 'present' && row.current_path && isInside(root, row.current_path))
+    // The person's own pages: 书房's database page and book entries (阅读.md, 阅读/) and 模板 are not “recent work”.
+    const ownPage = (path: string) => { const [first, ...rest] = relative(vaultRoot(root), path).split(sep); return !(first === '阅读.md' || first === '模板' || (first === '阅读' && rest.length)) }
+    return this.registry.list().filter(row => row.kind === 'markdown' && row.status === 'present' && row.current_path && isInside(root, row.current_path) && ownPage(row.current_path))
       .sort((a, b) => Number(b.mtime_ns ?? 0) - Number(a.mtime_ns ?? 0)).slice(0, 3)
       .map(row => ({ ref: { kind: 'page', id: row.id }, title: basename(row.current_path!, '.md'), editedAt: Number(row.mtime_ns ?? 0) / 1e6 }))
   }

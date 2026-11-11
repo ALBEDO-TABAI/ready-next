@@ -87,6 +87,7 @@ test(`Today ${populated ? 'populated' : 'empty'} vault reads existing owners wit
     assert.equal(first.upcoming.events.length, 3); assert.equal(first.upcoming.nextStart, now + 3600000)
     assert.equal(first.upcoming.todos.length, 5); assert.ok(first.upcoming.todos.every(item => item.todo.date === '2026-11-11'))
     assert.equal(first.continue.pages.length, 3); assert.equal(first.continue.books[0].progress, .4);
+    assert.ok(!first.continue.pages.some(page => ['书', '论文', '阅读'].includes(page.title)), '书房 pages and book entries are not recent work')
     assert.deepEqual(first.continue.books[1].ref, { kind: 'book-location', book: 'paper', loc: 'c0:0+1' }, 'non-paragraph readers reopen through their supported file entry'); assert.equal(first.continue.drafts.length, 1)
     assert.deepEqual(first.collection.items.map(item => item.title), ['收集4', '收集3', '收集2']); assert.equal(first.collection.total, 5)
     assert.equal(first.emergence.length, 1)

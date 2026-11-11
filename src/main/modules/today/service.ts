@@ -48,7 +48,8 @@ export class TodayService {
       emergence: emergence?.enabled ? emergence.buckets.today.flatMap(project => project.files).filter(file => {
         if (!file.fileKey || seen.has(file.fileKey) || emergence.suppressedFilePaths?.includes(file.path)) return false
         seen.add(file.fileKey); return true
-      }).slice(0, 5).map(file => ({ ref: { kind: 'file', id: file.fileKey! }, title: file.name, reason: file.reason })) : [],
+      // A Markdown file is a page: it opens and previews as one and is titled without its extension.
+      }).slice(0, 5).map(file => ({ ref: { kind: /\.md$/i.test(file.name) ? 'page' as const : 'file' as const, id: file.fileKey! }, title: file.name.replace(/\.md$/i, ''), reason: file.reason })) : [],
     }
   }
   async sieve(): Promise<TodaySieve> {
