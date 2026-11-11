@@ -18,11 +18,6 @@ const privateDesignImports = [
     regex: '(?:^|/)workbench/components/(?:Menus|Overlays)(?:\\.[jt]sx?)?$',
     message: '日历的私有菜单、弹层只能在 modules/calendar/workbench 内使用；跨模块请使用公共基元。',
   },
-  {
-    owner: 'src/renderer/modules/library/**/*.{js,jsx,ts,tsx}',
-    regex: '(?:^|/)library/ArchiveImport(?:\\.[jt]sx?)?$',
-    message: 'ArchiveImport 对话框只能在 modules/library 内使用；跨模块请使用公共基元。',
-  },
 ]
 
 export default [

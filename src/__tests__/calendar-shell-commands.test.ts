@@ -36,8 +36,8 @@ test('calendar leaves global settings/theme keys alone and requests shell action
   assert.equal(handleKey(new dom.window.KeyboardEvent('keydown', { key: 'L', metaKey: true, shiftKey: true })), true)
   assert.deepEqual(actions, ['toggle-sidebar', 'toggle-theme'])
   assert.deepEqual(store.getState().prefs, before.prefs)
-  assert.equal(handleKey(new dom.window.KeyboardEvent('keydown', { key: 'g' })), true)
-  assert.equal(handleKey(new dom.window.KeyboardEvent('keydown', { key: 'k' })), false)
+  // The g-chords are gone (⌘, opens settings; t and . remain): g is not consumed and opens nothing.
+  assert.equal(handleKey(new dom.window.KeyboardEvent('keydown', { key: 'g' })), false)
   assert.equal(store.getState().overlay, null)
   let prefs = before.prefs
   Object.assign(dom.window, { electronAPI: { calendar: { snapshot: async () => ({ success: true, data: { prefs, events: [], calendars: [], revision: 1 } }), putPreferences: async (patch: Partial<typeof prefs>) => { prefs = { ...prefs, ...patch }; return { success: true, data: { prefs, events: [], calendars: [], revision: 1 } } } } } })

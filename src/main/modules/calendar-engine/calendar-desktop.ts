@@ -1,5 +1,5 @@
 import { appShortcut } from '../../../shared/app-shortcuts'
-import { app, BrowserWindow, Menu, MenuItem, Tray, nativeImage, globalShortcut, shell, dialog } from 'electron'
+import { app, BrowserWindow, Menu, MenuItem, Tray, nativeImage, globalShortcut, dialog } from 'electron'
 import { consumeCalendarOpens } from '../../calendar-open-intents'
 import { parseCalendarDeepLink, type CalendarNavigation } from '../../../shared/calendar/desktop'
 import { getDatabase } from '../database'
@@ -23,10 +23,8 @@ export function startCalendarDesktop(getWindow:()=>Promise<BrowserWindow|null>):
   const report=(error:unknown)=>{console.error('[calendar desktop]',error);if(!stopped)void dialog.showMessageBox({type:'error',message:'日历操作未完成',detail:error instanceof Error?error.message:String(error)})}
   const perform=(work:()=>Promise<unknown>)=>{void work().catch(report)}
   const importFile=async(path?:string)=>{const file=await readCalendarFile(path);if(!file||stopped)return;store().importCalendar(file.text,file.sourceId,file.name);await show()}
-  const join=async()=>{
-    const now=Date.now()/1000,event=store().listOccurrences(now,now+7*86400).find(o=>!o.allDay&&o.event.conferenceUrl)
-    if(event?.event.conferenceUrl)await shell.openExternal(event.event.conferenceUrl);else await show()
-  }
+  // The meeting opens in Ready's own browser (W4 §4): the calendar window finds the next meeting and opens its link there.
+  const join=async()=>{await show({kind:'command',command:'join'})}
   const menu=Menu.getApplicationMenu()
   const calendarMenu=new MenuItem({id:'ready-calendar-menu',label:'日历',submenu:[
     {label:'打开日历',click:()=>perform(()=>show())},

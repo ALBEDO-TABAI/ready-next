@@ -265,13 +265,6 @@ body.resizing .browser-split-resize-handle__grip {
   font-weight: 600;
 }
 
-.browser-fastcard-kicker {
-  margin-bottom: 3px;
-  color: var(--text-light);
-  font-size: 11px;
-  line-height: 1;
-}
-
 .browser-fastcard-title-row {
   display: flex;
   align-items: center;
@@ -296,7 +289,6 @@ body.resizing .browser-split-resize-handle__grip {
   background: color-mix(in srgb, var(--text-gray) 10%, transparent);
 }
 
-.browser-fastcard-list,
 .browser-fastcard-result-body {
   flex: 1;
   min-height: 0;
@@ -304,67 +296,15 @@ body.resizing .browser-split-resize-handle__grip {
   padding: 12px;
 }
 
-.browser-fastcard-list::-webkit-scrollbar,
 .browser-fastcard-result-body::-webkit-scrollbar {
   width: 8px;
 }
 
-.browser-fastcard-list::-webkit-scrollbar-thumb,
 .browser-fastcard-result-body::-webkit-scrollbar-thumb {
   border-radius: 999px;
   background: color-mix(in srgb, var(--text-gray) 18%, transparent);
 }
 
-.browser-fastcard-empty {
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-light);
-  font-size: 13px;
-}
-
-.browser-fastcard-item {
-  border: 1px solid color-mix(in srgb, var(--text-gray) 12%, transparent);
-  border-radius: 8px;
-  padding: 10px;
-  background: color-mix(in srgb, var(--bg-secondary) 72%, transparent);
-}
-
-.browser-fastcard-item + .browser-fastcard-item {
-  margin-top: 10px;
-}
-
-.browser-fastcard-item-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.browser-fastcard-item-kind {
-  width: 22px;
-  height: 22px;
-  border-radius: 8px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-gray);
-  background: color-mix(in srgb, var(--text-gray) 8%, transparent);
-}
-
-.browser-fastcard-item-title {
-  min-width: 0;
-  flex: 1;
-  overflow: hidden;
-  color: var(--text-primary);
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.35;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.browser-fastcard-item p,
 .browser-fastcard-result-body p {
   margin: 8px 0 0;
   color: var(--text-secondary);
@@ -372,16 +312,6 @@ body.resizing .browser-split-resize-handle__grip {
   line-height: 1.55;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
-}
-
-.browser-fastcard-source {
-  display: block;
-  margin-top: 8px;
-  color: var(--text-light);
-  font-size: 11px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .browser-fastcard-result-body section {

@@ -161,7 +161,7 @@ export type FastCardOverlayCommand =
   | { type: 'add-result' }
   | { type: 'clear' }
   | { type: 'save-canvas'; itemIds: string[] }
-  | { type: 'insert-chat' }
+  | { type: 'insert-chat'; itemIds?: string[] }
   | { type: 'remove-item'; id: string }
   | { type: 'target-language-change'; targetLanguage: string }
 

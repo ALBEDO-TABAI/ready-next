@@ -16,7 +16,7 @@ export function createDocumentDatabaseResolver(dependencies: {
   return async () => {
     await dependencies.ready
     const state = dependencies.vault.get(), writer = dependencies.writer()
-    if (state.status !== 'ready') throw new Error('请先配置可用的资料库')
+    if (state.status !== 'ready') throw Object.assign(new Error('请先配置可用的资料库'), { code: 'no_vault' })
     if (!writer) throw new Error('Document writer unavailable')
     if (current?.service.root !== vaultRoot(state.root) || current.writer !== writer) {
       dependencies.pages.registry.db.prepare('INSERT INTO workspaces(root) VALUES (?) ON CONFLICT(root) DO NOTHING').run(state.root)

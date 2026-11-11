@@ -7,11 +7,12 @@ import { resolve, join } from 'node:path'
 import { createRequire } from 'node:module'
 import { build } from 'esbuild'
 import type { BookSourcesAPI, SourceJob } from '../shared/library-sources'
+import type { LibraryState } from '../shared/library'
 import { FindSheet } from '../renderer/modules/library/find/FindSheet'
 import { JobView } from '../renderer/modules/library/find/JobView'
 const require = createRequire(import.meta.url)
 
-test('C11 search/download, pushed task states, captcha, cancel/retry/manual and settings feature entry', async t => {
+test('C11 search/download, pushed task states, captcha, cancel/retry/manual, settings feature entry and the shelf 导入 menu', async t => {
   const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost', pretendToBeVisual: true })
   // JSDOM has no layout engine; glass measurement is unrelated to these search controls.
   class Observer { observe() {} disconnect() {} }
@@ -71,15 +72,46 @@ test('C11 search/download, pushed task states, captcha, cancel/retry/manual and 
     await click('保存并检查连接')
   }
   assert.ok(calls.includes('configure'))
+  let pushLibrary = (_state: LibraryState) => {}, picked = 0
   Object.defineProperty(dom.window, 'electronAPI', { configurable: true, value: {
     bookSources: api,
-    library: { get: async () => ({ success: true, data: { status: 'no_vault' } }), onChanged: () => () => {} },
+    library: {
+      get: async () => ({ success: true, data: { status: 'no_vault' } }), onChanged: (listener: (state: LibraryState) => void) => { pushLibrary = listener; return () => {} },
+      pickAndImport: async () => { picked++; return { success: true, data: { imported: [], failed: [] } } },
+    },
   } })
   const { Library } = await import('../renderer/modules/library/Library')
-  await act(async () => root.render(<Library />))
-  const library = dom.window.document.querySelector<HTMLElement>('.rn-library')!
+  const { FloatHost } = await import('../renderer/components/ui')
+  await act(async () => root.render(<><Library /><FloatHost /></>))
+  const d = dom.window.document, sheet = () => d.querySelector('[role="dialog"][aria-label="找书"]')
+  const library = d.querySelector<HTMLElement>('.rn-library')!
   await act(async () => library.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'f', bubbles: true, cancelable: true })))
-  assert.ok(dom.window.document.querySelector('[aria-label="找书"]'))
-  await click('关闭找书'); assert.equal(dom.window.document.querySelector('[aria-label="找书"]'), null)
-  await click('找书 F'); assert.ok(dom.window.document.querySelector('[aria-label="找书"]'))
+  assert.ok(sheet())
+  await click('关闭找书'); assert.equal(sheet(), null)
+  // The bottom bar keeps 找书 as a button; its tooltip names the key.
+  const find = [...d.querySelectorAll('button')].find(b => b.textContent === '找书')!
+  assert.equal(find.title, '找书（F）'); assert.equal(find.getAttribute('aria-keyshortcuts'), 'F')
+  await act(async () => find.click()); assert.ok(sheet())
+  await click('关闭找书')
+  // One 导入 button replaces 导入本地书 and 从藏书阁导入; with book sources it opens a menu: local files or 找书.
+  const imports = [...d.querySelectorAll<HTMLButtonElement>('button')].filter(b => /导入|藏书阁/.test(b.textContent ?? ''))
+  assert.deepEqual(imports.map(b => b.textContent), ['导入'])
+  const importButton = imports[0]
+  const menuItems = async () => {
+    await act(async () => importButton.click())
+    assert.equal(importButton.getAttribute('aria-expanded'), 'true')
+    return [...d.querySelectorAll<HTMLElement>('[role="menu"][aria-label="导入"] [role="menuitem"]')]
+  }
+  let items = await menuItems()
+  assert.deepEqual(items.map(item => [item.querySelector('.rn-menu__label')?.textContent, item.querySelector('.rn-menu__hint')?.textContent ?? null]), [['本地文件…', null], ['找书…', 'F']])
+  assert.equal(items[0].getAttribute('aria-disabled'), 'true', 'no vault: nothing to import into')
+  await act(async () => items[1].click())
+  assert.equal(d.querySelector('[role="menu"]'), null); assert.ok(sheet())
+  await click('关闭找书')
+  await act(async () => pushLibrary({ status: 'ready', vaultRoot: '/vault', books: [], issues: [] }))
+  items = await menuItems()
+  assert.equal(items[0].getAttribute('aria-disabled'), null)
+  await act(async () => items[0].click())
+  assert.equal(picked, 1); assert.equal(d.querySelector('[role="menu"]'), null); assert.equal(sheet(), null)
+  assert.equal(importButton.getAttribute('aria-expanded'), 'false')
 })

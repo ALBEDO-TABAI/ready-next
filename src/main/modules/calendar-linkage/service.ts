@@ -12,6 +12,12 @@ import { ObjectRegistry, isInside } from '../object-service/registry'
 import { checkedPath, hashBytes, vaultRoot } from '../document-drafts/files'
 import type { CalendarStore } from '../database/calendar-store'
 
+/** The day's events alone: all that 这一天 has to show while no vault is configured. */
+export function eventsOfDay(calendar: CalendarStore, raw: DayInput): DaySummary {
+  const input = DayInputSchema.parse(raw), day = parseIsoDate(input.date)
+  return { ...input, items: occurrences(calendar.snapshot().events, day, day + 1, input.timeZone).map(o => ({ id: `event:${o.key}`, kind: 'events', title: o.event.title || '无标题日程', ref: occurrenceRef(o), detail: [o.allDay ? '全天' : new Date(o.start).toLocaleTimeString('zh-CN', { timeZone: input.timeZone, hour: '2-digit', minute: '2-digit' }), o.event.location].filter(Boolean).join(' · ') })) }
+}
+
 export class CalendarLinkageService {
   readonly root: string
   constructor(readonly registry: ObjectRegistry, root: string, readonly calendar: CalendarStore) { this.root = vaultRoot(root) }
@@ -42,7 +48,7 @@ export class CalendarLinkageService {
   day(raw: DayInput, layers: LayerEntry[], reminders: DateMentionReminder[]): DaySummary {
     const input = DayInputSchema.parse(raw), day = parseIsoDate(input.date), toDate = isoDate(day + 1)
     const from = startOfDayMs(day, input.timeZone), to = startOfDayMs(day + 1, input.timeZone)
-    const summary: DaySummary = { ...input, items: occurrences(this.calendar.snapshot().events, day, day + 1, input.timeZone).map(o => ({ id: `event:${o.key}`, kind: 'events', title: o.event.title || '无标题日程', ref: occurrenceRef(o), detail: [o.allDay ? '全天' : new Date(o.start).toLocaleTimeString('zh-CN', { timeZone: input.timeZone, hour: '2-digit', minute: '2-digit' }), o.event.location].filter(Boolean).join(' · ') })) }
+    const summary = eventsOfDay(this.calendar, input)
     summary.items.push(...layers.filter(e => e.date < toDate && e.lastDate >= input.date).map(e => ({ id: e.id, kind: e.layer, title: e.title, ref: e.ref })))
     for (const row of reminders) {
       const object = this.registry.get(row.objectId)

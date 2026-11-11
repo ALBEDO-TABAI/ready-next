@@ -1,8 +1,10 @@
 import { LayerSwitches } from '../layers/LayerDays';
+import { TodoSection } from '../layers/TodoSection';
 import { useState } from 'react';
-import { ChevronUp, ChevronDown, Search, SquarePen, Eye, EyeOff, MoreHorizontal, Plus, CalendarSearch, Download, HelpCircle } from 'lucide-react';
+import { ChevronUp, ChevronDown, Search, SquarePen, Eye, EyeOff, MoreHorizontal, Plus, CalendarSearch, HelpCircle } from 'lucide-react';
 import { startOfWeek, startOfMonth, addMonths, weekday, ymd, parseIsoDate, DayNum, colorFamily } from '@shared/calendar';
-import { useStore, getState, setState, goToDay, updateCalendar, openMenu, openOverlay, createEvent, importIcsFile, isDark, tz } from '../store';
+import { useStore, getState, setState, goToDay, updateCalendar, openMenu, openOverlay, createEvent, importIcsFile, isDark, tz, openCalendarAction } from '../store';
+import { openMenu as openFloatMenu } from '../../../../components/ui/float/open-menu';
 import { miniTitle, wdMini } from '../fmt';
 import { t } from '../i18n';
 import { parseDateInput } from '../dateinput';
@@ -41,7 +43,7 @@ export function MiniMonth() {
   );
 }
 
-export function Sidebar({ actionsHost }: { actionsHost?: (element: HTMLDivElement | null) => void }) {
+export function Sidebar() {
   const s = useStore((x) => ({ calendars: x.calendars, accounts: x.accounts, dark: isDark(x) }));
   const [q, setQ] = useState('');
   const go = () => { const d = parseDateInput(q, getState().today); if (d !== null) { goToDay(d); setQ(''); } };
@@ -50,12 +52,13 @@ export function Sidebar({ actionsHost }: { actionsHost?: (element: HTMLDivElemen
       <div className="sidebar-top">
         <span className="sidebar-title">日历</span>
         <button className="ibtn sm" title={t('search')} onClick={() => openOverlay('search')}><Search size={16} /></button>
-        <button className="ibtn sm sidebar-new" title={t('newEvent')} onClick={() => newEventNow()}><SquarePen size={16} /></button>
+        <button className="ibtn sm sidebar-new" title="新建日程（可以直接写时间，比如“明天下午三点开会”）" aria-label={t('newEvent')} onClick={() => openCalendarAction('quick')}><SquarePen size={16} /></button>
         <ShellSidebarToggle className="ibtn sm" />
       </div>
       <div className="sidebar-scroll panel-hover-scrollbar">
         <MiniMonth />
         <LayerSwitches />
+        <TodoSection />
         <div style={{ padding: '0 0 0' }}>
           <div style={{ position: 'relative' }}>
             <CalendarSearch size={16} style={{ position: 'absolute', left: 18, top: 15, color: 'var(--c-text3)' }} />
@@ -82,16 +85,20 @@ export function Sidebar({ actionsHost }: { actionsHost?: (element: HTMLDivElemen
                 </div>
               );
             })}
-            <div className="side-row" onClick={(e) => { const r=e.currentTarget.getBoundingClientRect(); openMenu({ kind: 'calendar', x: r.left, y: r.bottom, data: { create: true } }); }} style={{ color: 'var(--c-text2)' }}><Plus size={14} style={{ marginLeft: 0 }} /><span className="lbl">{t('addCalendar')}</span></div>
+            <div className="side-row" role="button" tabIndex={0} style={{ color: 'var(--c-text2)' }}
+              onClick={(e) => {
+                const r = e.currentTarget.getBoundingClientRect();
+                // 新建日历 (W4 §4): a local calendar, a subscription, or a file — one menu instead of three entries.
+                openFloatMenu(r, [
+                  { id: 'local', label: t('newLocalCalendar'), onSelect: () => openMenu({ kind: 'calendar', x: r.left, y: r.bottom, data: { create: true } }) },
+                  { id: 'subscribe', label: t('subscribeUrl'), onSelect: () => openCalendarAction('subscribe') },
+                  { id: 'import', label: t('importIcs'), onSelect: () => importIcsFile() },
+                ], { placement: 'bottom-start', label: t('addCalendar') });
+              }}><Plus size={14} /><span className="lbl">{t('addCalendar')}</span></div>
           </div>
         ))}
-        <div className="sidebar-sep" />
-        <div className="side-sec">
-          <div className="side-row" style={{ color: 'var(--c-text2)' }} onClick={() => importIcsFile()}><Download size={14} /><span className="lbl">{t('importIcs')}</span></div>
-        </div>
       </div>
       <div className="sidebar-foot">
-        <div className="sidebar-actions" ref={actionsHost} />
         <button className="ibtn sm" title={t('allShortcuts')} onClick={() => openOverlay('shortcuts')}><HelpCircle size={16} /></button>
       </div>
     </aside>

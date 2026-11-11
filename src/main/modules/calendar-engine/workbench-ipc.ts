@@ -1,17 +1,22 @@
+import { withSystemTimeFormat } from './time-format'
 import { createCalendarMeetingNotesRuntime } from './meeting-notes-runtime'
 import { prepareStandaloneImport, applyStandaloneImport } from './standalone-import'
 import { readCalendarAttachmentDisplayRefs } from './ready-ref-migration'
 import { calendarErrorMessage } from './calendar-error'
-import { BrowserWindow, app, ipcMain, shell } from 'electron'
+import { BrowserWindow, app, ipcMain, shell, systemPreferences } from 'electron'
 import { readCalendarFile, saveCalendarFile } from './calendar-files'
 import { peekCalendarNavigation, acknowledgeCalendarNavigation, onCalendarNavigation, requestCalendarNavigation } from './calendar-navigation'
 import { getDatabase } from '../database'
 import { onCalendarChanged } from './calendar-change'
-import type { CalendarCommand, CalendarDelta } from '../../../shared/calendar/commands'
+import type { CalendarCommand, CalendarDelta, CalendarSnapshot } from '../../../shared/calendar/commands'
 import type { Calendar } from '../../../shared/calendar/model'
 
 export function setupCalendarWorkbenchIPC(): void {
   const store = () => getDatabase().calendar
+  const displaySnapshot = (value: CalendarSnapshot) => withSystemTimeFormat(value, () => process.platform === 'darwin'
+    ? systemPreferences.getUserDefault('AppleICUForce24HourTime', 'boolean')
+    : ['h23', 'h24'].includes(new Intl.DateTimeFormat(undefined, { hour: 'numeric' }).resolvedOptions().hourCycle!))
+  const snapshot = () => displaySnapshot(store().snapshot())
   const createMeetingNote = createCalendarMeetingNotesRuntime()
   const receipt = <Args extends unknown[], T>(fn:(...args:Args)=>T) => async (_event:unknown,...args:Args)=>{
     try {return {success:true,mock:false,data:await fn(...args)}}
@@ -29,13 +34,13 @@ export function setupCalendarWorkbenchIPC(): void {
   ipcMain.handle('calendar:applyStandaloneImport',receipt(applyStandaloneImport))
   ipcMain.handle('calendar:createMeetingNote',receipt(createMeetingNote.create))
   ipcMain.handle('calendar:pendingMeetingNote',receipt(createMeetingNote.pending))
-  ipcMain.handle('calendar:snapshot',receipt(()=>store().snapshot()))
-  ipcMain.handle('calendar:mutate',receipt((command:CalendarCommand,versions:Record<string,number>)=>store().mutate(command,versions)))
-  ipcMain.handle('calendar:restore',receipt((delta:CalendarDelta,versions:Record<string,number>)=>store().restore(delta,versions)))
-  ipcMain.handle('calendar:putCalendars',receipt((calendars:Calendar[])=>{store().putCalendars(calendars);return store().snapshot()}))
-  ipcMain.handle('calendar:putCalendar',receipt((calendar:Calendar)=>{store().putCalendar(calendar);return store().snapshot()}))
-  ipcMain.handle('calendar:deleteCalendar',receipt((id:string)=>{store().deleteCalendarSource(id);return store().snapshot()}))
-  ipcMain.handle('calendar:putPreferences',receipt((prefs:Record<string,unknown>)=>{store().savePreferences(prefs);return store().snapshot()}))
+  ipcMain.handle('calendar:snapshot',receipt(snapshot))
+  ipcMain.handle('calendar:mutate',receipt((command:CalendarCommand,versions:Record<string,number>)=>{const result=store().mutate(command,versions);return {...result,snapshot:displaySnapshot(result.snapshot)}}))
+  ipcMain.handle('calendar:restore',receipt((delta:CalendarDelta,versions:Record<string,number>)=>{const result=store().restore(delta,versions);return {...result,snapshot:displaySnapshot(result.snapshot)}}))
+  ipcMain.handle('calendar:putCalendars',receipt((calendars:Calendar[])=>{store().putCalendars(calendars);return snapshot()}))
+  ipcMain.handle('calendar:putCalendar',receipt((calendar:Calendar)=>{store().putCalendar(calendar);return snapshot()}))
+  ipcMain.handle('calendar:deleteCalendar',receipt((id:string)=>{store().deleteCalendarSource(id);return snapshot()}))
+  ipcMain.handle('calendar:putPreferences',receipt((prefs:Record<string,unknown>)=>{store().savePreferences(prefs);return snapshot()}))
   ipcMain.handle('calendar:exportIcs',receipt((id?:string)=>store().exportCalendar(id)))
   ipcMain.handle('calendar:importCalendar',receipt((raw:string,name:string,sourceId?:string)=>store().importCalendar(raw,sourceId,name)))
   ipcMain.handle('calendar:openIcs',receipt(()=>readCalendarFile()))

@@ -3312,6 +3312,7 @@ interface ElectronAPI {
   rss: ElectronRSSAPI
   dateMentions: import('../../shared/calendar/date-mentions').DateMentionsAPI
   calendarLinkage: import('../../shared/calendar-linkage').CalendarLinkageAPI
+  /** Calendar projections and Markdown todo list/toggle/schedule receipts. */
   calendarLayers: import('../../shared/calendar-layers').CalendarLayersAPI
   calendar: ElectronCalendarAPI
   skills: ElectronSkillsAPI

@@ -2,7 +2,9 @@ import { pageOf, resolveBookLocation } from './location'
 import { requestBookLocation, type BookTarget } from './navigation-state'
 import { registerReturnPosition } from '../../workbench/reference-return'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { ALargeSmall, ArrowLeft, Bookmark, BookmarkPlus, BookMarked, ChevronLeft, ChevronRight, NotebookPen, TableOfContents } from 'lucide-react'
 import type { LibraryBook, LibraryBookmark, LibraryReadingPosition } from '../../../../shared/library'
+import { Button, IconButton, Toolbar } from '../../../components/ui'
 import { toLocalFileUrl } from '../../../utils/dragDrop'
 import { confirmed, savePosition, type LibraryAPI } from '../access'
 import { loadBook, type LoadedBook } from './book'
@@ -17,6 +19,10 @@ import { HighlightPopover, MarginNotes, NotesList } from './Notes'
 type Loaded = { css: string; book: LoadedBook; position: LibraryReadingPosition | null; bookmarks: LibraryBookmark[] }
 type Load = { status: 'loading' } | { status: 'ready'; data: Loaded } | { status: 'error'; error: string }
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error)
+/** A count on an icon button; nothing at zero. The button keeps its plain name. */
+function CountBadge({ count }: { count: number }) {
+  return count > 0 ? <span className="library-badge" aria-hidden="true">{count > 99 ? '99+' : count}</span> : null
+}
 
 export function Reader({ record, api, target, onBack, onError }: { record: LibraryBook; api: LibraryAPI; target?: BookTarget; onBack: () => void; onError: (error: string) => void }) {
   const [load, setLoad] = useState<Load>({ status: 'loading' })
@@ -41,7 +47,7 @@ export function Reader({ record, api, target, onBack, onError }: { record: Libra
     return () => { abort.abort(); owned?.urls.forEach(url => URL.revokeObjectURL(url)) }
   }, [api, record.id, record.filePath, record.title, record.format])
   if (load.status === 'ready') return <ReadyReader key={record.id} record={record} api={api} loaded={load.data} target={target} onBack={onBack} onError={onError} />
-  return <div className="reader-loading"><button type="button" onClick={onBack}>回到书架</button><p role={load.status === 'error' ? 'alert' : 'status'}>{load.status === 'error' ? load.error : '正在打开书…'}</p></div>
+  return <div className="reader-loading"><Button variant="ghost" icon={<ArrowLeft />} onClick={onBack}>回到书架</Button><p role={load.status === 'error' ? 'alert' : 'status'}>{load.status === 'error' ? load.error : '正在打开书…'}</p></div>
 }
 
 function ReadyReader({ record, api, loaded, target, onBack, onError }: { record: LibraryBook; api: LibraryAPI; loaded: Loaded; target?: BookTarget; onBack: () => void; onError: (error: string) => void }) {
@@ -190,6 +196,8 @@ function ReadyReader({ record, api, loaded, target, onBack, onError }: { record:
     finally { markPending.current = false; setMarkBusy(false) }
   }
   const go = (page: number) => { void flip.current?.gotoPage(page).catch(error => fail.current(errorText(error))) }
+  const togglePanel = (next: NonNullable<typeof panel>) => { setPanel(panel === next ? null : next); if (next === 'notes') void annotations.refresh() }
+  const notes = annotations.state?.highlights.length ?? 0
   return <div ref={root} className="reader" tabIndex={-1} aria-label="阅读器" data-layout={view?.spread ? 'spread' : 'single'} style={{ '--paper-face': paper.pp, '--paper-edge': paper.pp2 } as React.CSSProperties}
     onKeyDown={e => {
       if (e.metaKey || e.ctrlKey || e.altKey || (e.target instanceof Element && e.target.closest('input,textarea,select,[contenteditable]'))) return
@@ -198,11 +206,24 @@ function ReadyReader({ record, api, loaded, target, onBack, onError }: { record:
       if (e.key.toLowerCase() === 'b') { e.preventDefault(); e.stopPropagation(); void toggleMark() }
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); if (annotations.lens) closeHighlight(); else if (panel) setPanel(null); else onBack() }
     }}>
-    <header className="library-toolbar rd-ui"><div className="rn-float"><button type="button" onClick={onBack}>回到书架</button><b>{record.title}</b></div>
-      <div className="rn-float"><button type="button" onClick={() => setPanel(panel === 'toc' ? null : 'toc')}>目录</button><button type="button" disabled={markBusy} onClick={() => void toggleMark()}>{currentMark ? '取下书签' : '夹一张书签'}</button><button type="button" onClick={() => setPanel(panel === 'marks' ? null : 'marks')}>书签 {marks.length}</button><button type="button" onClick={() => { setPanel(panel === 'notes' ? null : 'notes'); void annotations.refresh() }}>笔记 {annotations.state?.highlights.length ?? 0}</button><button type="button" onClick={() => setPanel(panel === 'type' ? null : 'type')}>排版</button></div></header>
+    {/* Icon buttons with tooltips (W4 §3). The name stays the plain word; the tooltip adds the key; counts are badges. */}
+    <header className="library-toolbar rd-ui">
+      <div className="rn-float library-pill is-title"><IconButton size="lg" icon={<ArrowLeft />} title="回到书架（Esc）" aria-label="回到书架" onClick={onBack} /><b>{record.title}</b></div>
+      <div className="rn-float library-pill"><Toolbar label="阅读">
+        <IconButton size="lg" icon={<TableOfContents />} title="目录（T）" aria-label="目录" aria-keyshortcuts="T" active={panel === 'toc'} onClick={() => togglePanel('toc')} />
+        <IconButton size="lg" icon={currentMark ? <Bookmark className="library-marked" /> : <BookmarkPlus />} title={currentMark ? '取下书签（B）' : '夹一张书签（B）'} aria-label={currentMark ? '取下书签' : '夹一张书签'} aria-keyshortcuts="B" disabled={markBusy} onClick={() => void toggleMark()} />
+        <IconButton size="lg" className="library-count" icon={<><BookMarked /><CountBadge count={marks.length} /></>} title="书签" active={panel === 'marks'} onClick={() => togglePanel('marks')} />
+        <IconButton size="lg" className="library-count" icon={<><NotebookPen /><CountBadge count={notes} /></>} title="笔记（N）" aria-label="笔记" aria-keyshortcuts="N" active={panel === 'notes'} onClick={() => togglePanel('notes')} />
+        <IconButton size="lg" icon={<ALargeSmall />} title="排版" active={panel === 'type'} onClick={() => togglePanel('type')} />
+      </Toolbar></div>
+    </header>
     <div ref={stage} className="rd-stage is-in"><div ref={bookEl} className="rd-book" /></div>
     {rendering && <p role="status" className="reading-status">正在排版…</p>}
-    <div className="rd-dock rd-ui"><button type="button" disabled={!view || view.atStart} onClick={() => { void flip.current?.prev().catch(error => fail.current(errorText(error))) }}>上一页</button><span>{view?.a ?? 0}{view?.spread ? `–${view.b}` : ''} / {view?.count ?? 0}</span><button type="button" disabled={!view || view.atEnd} onClick={() => { void flip.current?.next().catch(error => fail.current(errorText(error))) }}>下一页</button></div>
+    <div className="rd-dock rd-ui rn-float library-pill"><Toolbar label="翻页">
+      <IconButton size="lg" icon={<ChevronLeft />} title="上一页（←）" aria-label="上一页" disabled={!view || view.atStart} onClick={() => { void flip.current?.prev().catch(error => fail.current(errorText(error))) }} />
+      <span className="rd-folio">{view?.a ?? 0}{view?.spread ? `–${view.b}` : ''} / {view?.count ?? 0}</span>
+      <IconButton size="lg" icon={<ChevronRight />} title="下一页（→）" aria-label="下一页" disabled={!view || view.atEnd} onClick={() => { void flip.current?.next().catch(error => fail.current(errorText(error))) }} />
+    </Toolbar></div>
     {panel && <aside className="rd-panel" aria-label={panel === 'toc' ? '目录' : panel === 'marks' ? '书签' : panel === 'notes' ? '笔记' : '排版'}><div className="rn-float panel-body">
       <button type="button" onClick={() => setPanel(null)}>关闭面板</button>
       {panel === 'toc' && <div className="rd-toc">{toc.map((t, i) => <button type="button" key={i} onClick={() => { if (layout) go((('anchor' in t && t.anchor ? layout.idPage.get(`${t.chapter}#${t.anchor}`) : undefined) ?? layout.chapterPage[t.chapter]) + 1) }}>{t.label}</button>)}</div>}

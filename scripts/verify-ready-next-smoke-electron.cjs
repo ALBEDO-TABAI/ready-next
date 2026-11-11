@@ -251,9 +251,12 @@ async function checkObjectPresentationBeforeRestart(app, page, root) {
     await page.waitForTimeout(200)
   }
   await page.locator('.ink-doc-app').waitFor({ state: 'visible' })
-  // Expand the outer file manager's vault folder.
-  const fileRow = page.getByText('i2-a.md', { exact: true }).first()
-  if (!await fileRow.isVisible().catch(() => false)) await page.getByText(path.basename(root), { exact: true }).first().click({ timeout: 20000 })
+  // Files are listed by name in the navigator's 文件 view (W3: 页面 lists pages by title); expand the vault folder there.
+  await page.getByRole('radiogroup', { name: '资料库视角' }).getByRole('radio', { name: '文件', exact: true }).click({ timeout: 20000 })
+  // Scoped to the file list: the navigator's title is also the vault's folder name.
+  const files = page.locator('.document-navigator__files')
+  const fileRow = files.getByText('i2-a.md', { exact: true }).first()
+  if (!await fileRow.isVisible().catch(() => false)) await files.getByText(path.basename(root), { exact: true }).first().click({ timeout: 20000 })
   await fileRow.click({ timeout: 20000 })
   await page.waitForFunction(from => JSON.parse(localStorage.getItem('ready-doc-tabs-v2') || '{}').state?.tabs.some(tab => tab.path === from && tab.objectId), from)
   const identity = await page.evaluate(from => window.electronAPI.objects.resolvePath(from), from)
@@ -307,7 +310,7 @@ async function checkObjectPresentationAfterRestart(page, identity) {
 async function checkCalendarReference(page) {
   let reference
   await requestMode(page, 'calendar')
-  await page.locator('.ready-calendar').waitFor()
+  await page.locator('[data-testid=ready-calendar]').waitFor()
   if (!reference) {
     reference = await page.evaluate(async () => {
       const api = window.electronAPI.calendar
@@ -342,7 +345,7 @@ async function checkCalendarReference(page) {
   const attachment = page.locator('.chat-reference-chip button').filter({ hasText: reference.title }).first()
   await attachment.waitFor()
   // Clear any existing selection so a stale selected chip cannot satisfy the check.
-  await page.locator('.ready-calendar').focus()
+  await page.locator('[data-testid=ready-calendar]').focus()
   await page.keyboard.press('Escape')
   await attachment.click()
   await page.waitForFunction(({ seriesId, second }) => [...document.querySelectorAll('.ready-calendar .chip.selected')]
@@ -366,9 +369,10 @@ async function checkCalendarLinksBeforeRestart(page, reference, root) {
   await page.evaluate(id => window.electronAPI.calendar.revealEvent(id), reference.eventId)
   const panel = page.getByRole('region', {name:'日程关联'})
   await panel.waitFor()
-  const uri = `ready://doc/page/${encodeURIComponent(created.objectId)}`
-  await panel.getByLabel('关联地址', {exact:true}).fill(uri)
+  // No address to paste (W4 O9): "+" opens the same search as @, and the page is chosen from it.
   await panel.getByRole('button', {name:'添加关联',exact:true}).click()
+  await page.getByLabel('搜索关联', {exact:true}).fill('M6 linked page')
+  await page.getByRole('option', {name:/M6 linked page/}).first().click()
   await panel.getByRole('button', {name:'解除关联 M6 linked page',exact:true}).waitFor()
   await panel.getByRole('button', {name:'会议笔记',exact:true}).click()
   const picker = panel.getByRole('dialog', {name:'保存到…'})
@@ -471,7 +475,7 @@ async function checkCalendarHistoryAfterRestart(page, reference, history) {
   await attachment.waitFor()
   // Clear selection; a restored calendar selection cannot satisfy the click check.
   await requestMode(page, 'calendar')
-  await page.locator('.ready-calendar').focus()
+  await page.locator('[data-testid=ready-calendar]').focus()
   await page.keyboard.press('Escape')
   await attachment.click()
   await page.waitForFunction(({ seriesId, second }) => [...document.querySelectorAll('.ready-calendar .chip.selected')]

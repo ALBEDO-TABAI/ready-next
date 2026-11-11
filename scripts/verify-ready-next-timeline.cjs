@@ -82,8 +82,14 @@ async function main() {
     })
     await page.getByLabel('事件卡', { exact: true }).getByText('会议室 B').waitFor()
     await shot('02-event-canvas-live')
-    await page.getByRole('button', { name: '添加文字卡', exact: true }).click()
-    await poll(() => readCanvas().nodes.some(n => n.type === 'text'), 'Text card missing')
+    // The board's dock places a text card that opens ready to type (W4 MS1); it is named by its text.
+    const stage = page.locator('[data-workbench-mode-panel="document"] .rn-canvas').first()
+    await stage.getByRole('button', { name: '文字卡', exact: true }).click()
+    const cardEditor = page.getByLabel('文字卡编辑').locator('[contenteditable="true"]').first()
+    await poll(async () => await cardEditor.count() > 0, 'Text card editor did not open')
+    await cardEditor.click(); await page.keyboard.insertText('新文字卡')
+    await stage.getByRole('button', { name: '完成编辑', exact: true }).click()
+    await poll(() => readCanvas().nodes.some(n => n.type === 'text' && n.text.includes('新文字卡')), 'Text card missing')
     const textId = readCanvas().nodes.find(n => n.type === 'text').id
     await page.locator(`[data-node-id="${textId}"]`).click({ button: 'right' })
     await page.getByRole('menuitem', { name: '安排日程…', exact: true }).click()

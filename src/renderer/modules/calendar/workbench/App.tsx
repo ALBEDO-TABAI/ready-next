@@ -21,8 +21,6 @@ import './styles/app.css'
 export function App({active=true}:{active?:boolean}) {
   useEffect(() => active ? registerCalendarCommands() : undefined, [active])
   const root=useRef<HTMLDivElement>(null)
-  // The sidebar lives in the shell's one sidebar (W2-T4); its foot hosts the calendar's action buttons.
-  const [actionsHost,setActionsHost]=useState<HTMLDivElement|null>(null)
   const [hasActivated,setHasActivated]=useState(false)
   const activity=useRef({active:false,dirty:false})
   const s=useStore(x=>({anchor:x.anchor,days:x.prefs.daysPerPeriod,zone:x.prefs.primaryTimeZone,ready:x.ready,dark:isDark(x),view:x.prefs.gridView,panel:x.prefs.contextPanel,overlay:x.overlay,error:x.error,busy:x.busy}))
@@ -65,11 +63,11 @@ export function App({active=true}:{active?:boolean}) {
   return <div ref={root} className={`ready-calendar${s.dark?' dark':''}`} data-testid="ready-calendar" tabIndex={-1} onPointerDownCapture={event=>{if(!(event.target as HTMLElement).closest('input,textarea,button,select,[contenteditable=true]'))root.current?.focus({preventScroll:true})}} onKeyDownCapture={onKeyDown}>
     {!s.ready ? <div className="calendar-load-state">{s.error||'正在读取日程…'}{s.error&&<button className="btn" onClick={()=>void init()}>重新读取</button>}</div> : <>
       <div className="app" data-view={s.view}>
-        <ShellNavigator mode="calendar" label="日历" scopeClassName={`ready-calendar${s.dark?' dark':''}`}><Sidebar actionsHost={setActionsHost}/></ShellNavigator>
+        <ShellNavigator mode="calendar" label="日历" scopeClassName={`ready-calendar${s.dark?' dark':''}`}><Sidebar/></ShellNavigator>
         <main className="main" data-liquid-scroll-root="calendar-workbench-main"><TopBar/>{s.view==='month'?<MonthGrid active={active}/>:<TimeGrid active={active}/>}{active&&s.view!=='month'&&s.days===1&&<ThisDay date={isoDate(s.anchor)} timeZone={s.zone}/>}</main>
         {s.panel&&<Panel/>}
         <Menus/>{s.overlay==='goto'&&<GotoDialog/>}{s.overlay==='recurrence'&&<RecurrenceDialog/>}<ScopeDialog/><Toasts/>
-        <ReadyCalendarActions active={active} buttonsHost={actionsHost}/>
+        <ReadyCalendarActions active={active}/>
       </div>
       {s.error&&<div role="alert" className="calendar-save-status error">未保存：{s.error}</div>}
       {s.busy&&<div role="status" className="calendar-save-status">正在保存…</div>}

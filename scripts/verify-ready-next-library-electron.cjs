@@ -1,7 +1,8 @@
 // Build first (electron-vite build). Real-Electron acceptance for the Library (书房):
-// import an EPUB and a TXT into a throwaway vault, open the Library from the document
-// sidebar, open a book, read and turn a page. Screenshots go to READY_LIBRARY_SHOTS
-// (default: outputs/ready-next/library). The daily Ready data is never opened.
+// open the Library from the document sidebar of a throwaway vault, import an EPUB and a TXT
+// through its 导入 menu, use the shelf's and the reader's controls, open a book, read and turn
+// a page. Screenshots go to READY_LIBRARY_SHOTS (default: outputs/ready-next/library).
+// The daily Ready data is never opened.
 const { _electron } = require('playwright')
 const JSZip = require('jszip')
 const path = require('node:path')
@@ -30,8 +31,8 @@ async function writeEpub(file) {
   fs.writeFileSync(file, await zip.generateAsync({ type: 'nodebuffer', mimeType: 'application/epub+zip' }))
 }
 
-// L5: exercise the visible chooser against fixture-only native dialog replies.
-// Originals are restored immediately; no test endpoint or production bypass exists.
+// L5: the one-time 藏书阁 import is a row in Settings › 阅读 (W4 §3). Exercise its chooser against fixture-only
+// native dialog replies; originals are restored immediately; no test endpoint or production bypass exists.
 async function checkArchiveImport(app, page, fixtures, vaultRoot) {
   const source = path.join(fixtures, '藏书阁夹具')
   fs.mkdirSync(path.join(source, 'files'), { recursive: true })
@@ -55,7 +56,14 @@ async function checkArchiveImport(app, page, fixtures, vaultRoot) {
     dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false })
   }, source)
   try {
-    await page.getByRole('button', { name: '从藏书阁导入…', exact: true }).click()
+    await page.evaluate(() => { window.location.hash = '#/settings?section=reading' })
+    const row = page.locator('.sx-row').filter({ hasText: '从藏书阁导入' })
+    await row.waitFor({ timeout: 20000 })
+    const start = row.getByRole('button', { name: '导入…', exact: true })
+    ok('Settings › 阅读 has the 从藏书阁导入 row', await start.isVisible())
+    await page.waitForTimeout(400)
+    await page.screenshot({ path: path.join(shots, '8-settings-reading.png') })
+    await start.click()
     const modal = page.getByRole('dialog', { name: '从藏书阁导入', exact: true })
     await modal.getByText('桌面版建议位置', { exact: false }).waitFor()
     await modal.getByRole('button', { name: '选择目录并导入' }).click()
@@ -73,7 +81,7 @@ async function checkArchiveImport(app, page, fixtures, vaultRoot) {
     const reading = await page.evaluate(async id => ({ position: await window.electronAPI.library.getPosition(id), bookmarks: await window.electronAPI.library.listBookmarks(id) }), book.id)
     ok('archive reading records persist', reading.position.success && reading.position.data.offset === 5 && reading.bookmarks.success && reading.bookmarks.data.length === 1)
     await modal.getByRole('button', { name: '关闭', exact: true }).click()
-    await page.getByRole('button', { name: '从藏书阁导入…', exact: true }).click()
+    await start.click()
     await modal.getByRole('button', { name: '选择目录并导入' }).click()
     await modal.getByText('导入结束：成功 0 本，跳过 1 本，失败 1 本；未定位划线 0 条。', { exact: true }).waitFor()
     ok('archive retry does not duplicate source blocks', fs.readFileSync(book.notePath, 'utf8') === md)
@@ -86,6 +94,118 @@ async function checkArchiveImport(app, page, fixtures, vaultRoot) {
       delete globalThis.__archiveDialogs
     })
   }
+}
+
+// W4 §3: the shelf's controls are W1 buttons. 导入 is one button with a menu (local files or 找书), the four sorts
+// are one 排序 menu, and the shelf's keys still work.
+async function importThroughMenu(app, page, files, expected) {
+  await app.evaluate(({ dialog }, paths) => {
+    globalThis.__importDialog = dialog.showOpenDialog
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: paths })
+  }, files)
+  try {
+    await page.locator('.rn-library .library-toolbar').getByRole('button', { name: '导入', exact: true }).click()
+    await page.getByRole('menu', { name: '导入', exact: true }).getByRole('menuitem', { name: '本地文件…', exact: true }).click()
+    // The fixture reply stays in place until the import has used it.
+    await page.locator('.rn-library .spine').nth(expected - 1).waitFor({ timeout: 20000 })
+  } finally {
+    await app.evaluate(({ dialog }) => { dialog.showOpenDialog = globalThis.__importDialog; delete globalThis.__importDialog })
+  }
+}
+
+async function checkShelfControls(page) {
+  const top = await page.evaluate(() => [...document.querySelectorAll('.rn-library .library-toolbar button')].map(b => b.textContent.trim()))
+  ok('the shelf top bar has one 导入 button', JSON.stringify(top) === JSON.stringify(['导入']), JSON.stringify(top))
+  const bottom = await page.evaluate(() => [...document.querySelectorAll('.rn-library .library-footer button')].map(b => b.getAttribute('aria-label') || b.textContent.trim()))
+  ok('the shelf bottom bar is 找书 · 排序 · 抽一本', JSON.stringify(bottom) === JSON.stringify(['找书', '排序：分类', '抽一本']), JSON.stringify(bottom))
+  const importButton = page.locator('.rn-library .library-toolbar').getByRole('button', { name: '导入', exact: true })
+  const importMenu = page.getByRole('menu', { name: '导入', exact: true })
+  await importButton.click()
+  await importMenu.waitFor()
+  const items = await importMenu.getByRole('menuitem').evaluateAll(list => list.map(item => item.querySelector('.rn-menu__label').textContent))
+  ok('导入 opens a menu of 本地文件… and 找书…', JSON.stringify(items) === JSON.stringify(['本地文件…', '找书…']), JSON.stringify(items))
+  await page.screenshot({ path: path.join(shots, '1a-import-menu.png') })
+  await page.keyboard.press('Escape')
+  await importMenu.waitFor({ state: 'hidden' })
+  ok('Esc closes the menu and focus returns to 导入', await importButton.evaluate(el => el === document.activeElement))
+  await importButton.click()
+  await importMenu.getByRole('menuitem', { name: /^找书…/ }).click()
+  const finder = page.getByRole('dialog', { name: '找书', exact: true })
+  await finder.waitFor()
+  ok('找书… opens the existing 找书 sheet', true)
+  await page.keyboard.press('Escape')
+  await finder.waitFor({ state: 'hidden' })
+
+  const sortButton = page.locator('.rn-library .library-footer').getByRole('button', { name: /^排序：/ })
+  const sortMenu = page.getByRole('menu', { name: '排序', exact: true })
+  const labels = () => page.locator('.rn-library .pane-label').count()
+  const grouped = await labels()
+  await sortButton.click()
+  await sortMenu.waitFor()
+  const sorts = await sortMenu.getByRole('menuitemcheckbox').evaluateAll(list => list.map(item => [item.textContent, item.getAttribute('aria-checked')]))
+  ok('排序 is one menu of four checkable sorts', JSON.stringify(sorts) === JSON.stringify([['分类', 'true'], ['最近', 'false'], ['颜色', 'false'], ['厚薄', 'false']]), JSON.stringify(sorts))
+  await page.screenshot({ path: path.join(shots, '1b-sort-menu.png') })
+  await sortMenu.getByRole('menuitemcheckbox', { name: '颜色', exact: true }).click()
+  await page.waitForTimeout(1000)
+  ok('choosing 颜色 re-sorts the shelf and the button names it', await sortButton.getAttribute('aria-label') === '排序：颜色' && grouped > 0 && await labels() === 0)
+  await page.screenshot({ path: path.join(shots, '1c-sorted-by-colour.png') })
+  await sortButton.click()
+  await sortMenu.getByRole('menuitemcheckbox', { name: '分类', exact: true }).click()
+  await page.waitForTimeout(1000)
+  ok('choosing 分类 brings the topic runs back', await sortButton.getAttribute('aria-label') === '排序：分类' && await labels() === grouped)
+
+  const shelf = page.locator('.rn-library')
+  await shelf.focus()
+  await page.keyboard.press('r')
+  const drawn = page.locator('.rn-library .book-dialog')
+  await drawn.waitFor()
+  ok('R still draws a book from the shelf', true)
+  await page.keyboard.press('Escape')
+  await drawn.waitFor({ state: 'hidden' })
+  await shelf.focus()
+  await page.keyboard.press('f')
+  await finder.waitFor()
+  ok('F still opens 找书', true)
+  await page.keyboard.press('Escape')
+  await finder.waitFor({ state: 'hidden' })
+  await shelf.focus()
+  await page.keyboard.press('/')
+  ok('/ still focuses the shelf search', await page.evaluate(() => document.activeElement?.getAttribute('aria-label') === '搜索书架'))
+}
+
+// W4 §3: the reader's top bar is icon buttons named with plain words (tooltips add keys, counts are badges);
+// the dock's chevrons turn pages.
+async function checkReaderControls(page) {
+  const bar = await page.evaluate(() => [...document.querySelectorAll('.rn-library .library-toolbar button')].map(b => [b.getAttribute('aria-label'), b.textContent.trim(), b.title]))
+  ok('the reader top bar is icon buttons with tooltips', JSON.stringify(bar.map(b => b[0])) === JSON.stringify(['回到书架', '目录', '夹一张书签', '书签', '笔记', '排版']) && bar.every(b => b[1] === '' && b[2].startsWith(b[0])), JSON.stringify(bar))
+  const top = page.locator('.rn-library .library-toolbar'), dock = page.locator('.rn-library .rd-dock')
+  const badge = name => top.locator(`button[aria-label="${name}"] .library-badge`)
+  const reader = page.locator('.rn-library [aria-label="阅读器"]')
+  await reader.focus()
+  await page.keyboard.press('b')
+  const marked = top.getByRole('button', { name: '取下书签', exact: true })
+  await marked.waitFor()
+  ok('B bookmarks the spread and the 书签 badge counts it', await badge('书签').textContent() === '1')
+  const marks = top.getByRole('button', { name: '书签', exact: true })
+  await marks.click()
+  await page.locator('.rn-library aside[aria-label="书签"]').waitFor()
+  ok('书签 opens its panel and shows as pressed', await marks.getAttribute('aria-pressed') === 'true')
+  await page.waitForTimeout(600)
+  await page.screenshot({ path: path.join(shots, '3a-reader-bookmark-panel.png') })
+  await page.getByRole('button', { name: '关闭面板', exact: true }).click()
+  await marked.click()
+  await top.getByRole('button', { name: '夹一张书签', exact: true }).waitFor()
+  ok('取下书签 removes it and the badge goes', await badge('书签').count() === 0)
+  const folio = () => dock.locator('.rd-folio').textContent()
+  const before = await folio()
+  await dock.getByRole('button', { name: '下一页', exact: true }).click()
+  await page.waitForFunction(text => document.querySelector('.rn-library .rd-dock .rd-folio')?.textContent !== text, before)
+  await page.waitForTimeout(900)
+  await dock.getByRole('button', { name: '上一页', exact: true }).click()
+  await page.waitForFunction(text => document.querySelector('.rn-library .rd-dock .rd-folio')?.textContent === text, before)
+  await page.waitForTimeout(900)
+  ok('the dock turns a page forward and back', true)
+  await reader.focus()
 }
 
 // Resting pages may be covered by WebGL. Inspect both the DOM and the actual SVG
@@ -140,7 +260,7 @@ async function checkVisibleLines(page, label) {
 }
 
 // L2 / C6: real mouse drag, source-file readback and a freshly mounted reader.
-async function checkHighlights(page, book, vaultRoot) {
+async function checkHighlights(app, page, book, vaultRoot) {
   await page.getByRole('button', { name: '关闭面板', exact: true }).click()
   const drag = await page.evaluate(() => {
     const folios = document.querySelector('.rn-library .rd-dock span').textContent.split('/')[0].match(/\d+/g).map(Number)
@@ -169,6 +289,7 @@ async function checkHighlights(page, book, vaultRoot) {
   const source = fs.readFileSync(book.notePath, 'utf8')
   const id = source.match(/^\^(hl-[\w-]+)$/m)?.[1]
   ok('drag writes the quote block into the source note', id && source.includes('> [!quote|yellow]') && source.includes(`> ${selected}`), source)
+  ok('the 笔记 badge counts the highlight', await page.locator('.rn-library .library-toolbar button[aria-label="笔记"] .library-badge').textContent() === '1')
   if (!id) throw new Error('highlight id missing from source note')
   const anchors = JSON.parse(fs.readFileSync(path.join(vaultRoot, '.ready', 'anchors', `${book.id}.highlights.json`), 'utf8'))
   ok('sidecar is published after the source block', anchors.version === 1 && anchors.highlights[id]?.quote.exact === selected)
@@ -205,11 +326,11 @@ async function checkHighlights(page, book, vaultRoot) {
   await restoredOnVisiblePage()
   ok('font and single-page changes retain the highlighted words on the visible page', true)
   await page.screenshot({ path: path.join(shots, '6-highlight-reopened.png') })
-  await checkQuoteReturn(page, book, id, selected)
+  await checkQuoteReturn(app, page, book, id, selected)
 }
 
 // L4: use the reader's copied reference, the real document editor and return capsule.
-async function checkQuoteReturn(page, book, id, selected) {
+async function checkQuoteReturn(app, page, book, id, selected) {
   const point = await page.evaluate(id => {
     const folio = Number(document.querySelector('.rn-library .rd-dock span').textContent.split('/')[0].trim())
     const mark = document.querySelector(`.rn-library .rd-book .leaf .sheet[data-pi="${folio - 1}"] mark[data-hl="${id}"]`)
@@ -224,8 +345,11 @@ async function checkQuoteReturn(page, book, id, selected) {
   ok('reader sends the passage to the AI chat', true)
   await page.screenshot({ path: path.join(shots, '6a-ask-ai.png') })
   await page.mouse.click(point.x, point.y)
+  // The copy lands on this Mac's clipboard: put back what was there, unless something else was copied meanwhile.
+  const clipboardBefore = await app.evaluate(({ clipboard }) => clipboard.readText())
   await page.getByRole('button', { name: '复制引用', exact: true }).click()
   const reference = await page.evaluate(() => navigator.clipboard.readText())
+  await app.evaluate(({ clipboard }, { before, copied }) => { if (clipboard.readText() === copied) clipboard.writeText(before) }, { before: clipboardBefore, copied: reference })
   ok('reader copies a source-block embed', reference === `![[${path.basename(book.notePath, '.md')}#^${id}]]`, reference)
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+t' : 'Control+t')
   // Pages are the normal view; Markdown source editing lives in the page menu.
@@ -260,7 +384,8 @@ async function checkQuoteReturn(page, book, id, selected) {
 }
 
 function electronEnv(extra) {
-  const env = { ...process.env, ...extra }
+  // Verification never puts a window in front of the person (READY_START_HIDDEN keeps it unshown).
+  const env = { ...process.env, READY_START_HIDDEN: '1', ...extra }
   delete env.ELECTRON_RUN_AS_NODE
   return env
 }
@@ -311,11 +436,6 @@ function electronEnv(extra) {
     })
     const vault = await page.evaluate(() => window.electronAPI.vault.createDefault())
     ok('vault is ready inside the throwaway profile', vault.status === 'ready' && fs.realpathSync(vault.root).startsWith(fs.realpathSync(profile)), JSON.stringify(vault))
-    const imported = await page.evaluate(paths => window.electronAPI.library.importFiles(paths), [epub, txt])
-    ok('two books import into the vault', imported.success && imported.data.imported.length === 2 && imported.data.failed.length === 0, JSON.stringify(imported))
-    const epubBook = imported.success && imported.data.imported.find(b => b.format === 'epub')
-    ok('EPUB metadata reaches the source note', epubBook && epubBook.title === '验收用书' && epubBook.author === '测试作者', JSON.stringify(epubBook))
-    ok('the source note lives under 阅读/ in the vault', epubBook && fs.existsSync(path.join(vault.root, '阅读', '验收用书.md')))
 
     const documentDeadline = Date.now() + 30000
     while (!await page.locator('.ink-doc-app').isVisible()) {
@@ -326,11 +446,20 @@ function electronEnv(extra) {
     // The vault also has a 阅读 page (the library database); open the reading room through its own entry.
     await page.locator('[data-library-entry="true"]').click()
     await page.locator('.rn-library').waitFor({ timeout: 20000 })
-    await page.locator('.rn-library .spine').first().waitFor({ timeout: 20000 })
+    // The books arrive the way a reader brings them, with the vault open in the app: 导入 › 本地文件… (W4 §3).
+    // (Notes written before the app watches the vault are not registered as objects, so they cannot record
+    // reading sessions; that would show an error banner over the reader.)
+    await importThroughMenu(app, page, [epub, txt], 2)
+    const library = await page.evaluate(() => window.electronAPI.library.get())
+    const books = library.success && library.data.status === 'ready' ? library.data.books : []
+    ok('two books import into the vault through 导入 › 本地文件…', books.length === 2 && await page.locator('.rn-library .library-error').count() === 0, JSON.stringify(library).slice(0, 500))
+    const epubBook = books.find(b => b.format === 'epub')
+    ok('EPUB metadata reaches the source note', epubBook && epubBook.title === '验收用书' && epubBook.author === '测试作者', JSON.stringify(epubBook))
+    ok('the source note lives under 阅读/ in the vault', epubBook && fs.existsSync(path.join(vault.root, '阅读', '验收用书.md')))
     await page.waitForTimeout(1200)
     await page.screenshot({ path: path.join(shots, '1-shelf.png') })
     ok('the shelf shows both books', await page.locator('.rn-library .spine').count() >= 2)
-    await checkArchiveImport(app, page, fixtures, vault.root)
+    await checkShelfControls(page)
 
     // Spines sway and tilt, so Playwright's stability check never settles; click the spine's centre.
     const spine = page.locator('.rn-library .spine', { hasText: '验收用书' }).first()
@@ -349,7 +478,10 @@ function electronEnv(extra) {
     await page.getByRole('button', { name: '开始阅读' }).click()
     await page.waitForTimeout(3000)
     await page.screenshot({ path: path.join(shots, '3-reader.png') })
+    const banner = page.locator('.rn-library .library-error')
+    ok('opening the book records a reading session (no error banner)', await banner.count() === 0, await banner.count() ? await banner.textContent() : '')
     await checkVisibleLines(page, 'chapter opening')
+    await checkReaderControls(page)
     await page.keyboard.press('ArrowRight')
     await page.waitForTimeout(1500)
     await page.keyboard.press('ArrowRight')
@@ -357,8 +489,8 @@ function electronEnv(extra) {
     await page.screenshot({ path: path.join(shots, '4-reader-turned.png') })
     await checkVisibleLines(page, 'continuation')
     await page.waitForTimeout(1500)
-    const books = await page.evaluate(() => window.electronAPI.library.get())
-    const opened = books.success && books.data.status === 'ready' && books.data.books.find(b => b.format === 'epub')
+    const current = await page.evaluate(() => window.electronAPI.library.get())
+    const opened = current.success && current.data.status === 'ready' && current.data.books.find(b => b.format === 'epub')
     const position = opened ? await page.evaluate(id => window.electronAPI.library.getPosition(id), opened.id) : null
     ok('turning pages saves a reading position', position?.success && position.data && (position.data.offset > 0 || position.data.chapter > 0), JSON.stringify(position))
     await page.getByRole('button', { name: '排版', exact: true }).click()
@@ -366,7 +498,8 @@ function electronEnv(extra) {
     await page.waitForTimeout(2000)
     const spaced = await checkVisibleLines(page, 'line spacing 2.2')
     ok('line spacing changes body layout', spaced.length > 0 && spaced.every(c => Math.abs(c.lead - 18 * 2.2) < 0.5), JSON.stringify(spaced))
-    await checkHighlights(page, epubBook, vault.root)
+    await checkHighlights(app, page, epubBook, vault.root)
+    await checkArchiveImport(app, page, fixtures, vault.root)
     ok('no uncaught renderer errors', errors.length === 0, errors.join(' | '))
   } catch (error) {
     ok('library acceptance completed', false, error instanceof Error ? error.stack : String(error))

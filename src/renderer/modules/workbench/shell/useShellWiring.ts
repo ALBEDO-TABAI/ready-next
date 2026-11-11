@@ -49,7 +49,7 @@ export function useShellActions(handlers: {
         case 'open-skills': h.openSkills(); break
         case 'open-graph': h.openGraph(); break
         case 'open-find-replace': h.openFindReplace(); break
-        case 'open-fastcard': requestWorkbenchModeOpen('browser'); void useFastCard.getState().open(); break
+        case 'open-fastcard': void useFastCard.getState().open(); break
       }
     }
     window.addEventListener(SHELL_ACTION_EVENT, onAction)

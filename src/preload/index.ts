@@ -1662,6 +1662,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     schedule: (input: import('../shared/calendar-linkage').ScheduleCard) => ipcRenderer.invoke('calendarLinkage:schedule', input),
   } satisfies import('../shared/calendar-linkage').CalendarLinkageAPI,
   calendarLayers: {
+    listTodos: () => ipcRenderer.invoke('calendarLayers:listTodos'),
+    toggleTodo: (input: import('../shared/calendar-layers').ToggleTodo) => ipcRenderer.invoke('calendarLayers:toggleTodo', input),
+    scheduleTodo: (input: import('../shared/calendar-layers').ScheduleTodo) => ipcRenderer.invoke('calendarLayers:scheduleTodo', input),
     query: (range: import('../shared/calendar-layers').LayerRange) => ipcRenderer.invoke('calendarLayers:query', range),
     move: (input: import('../shared/calendar-layers').LayerMove) => ipcRenderer.invoke('calendarLayers:move', input),
     beginReading: (input: import('../shared/calendar-layers').ReadingBegin) => ipcRenderer.invoke('calendarLayers:beginReading', input),

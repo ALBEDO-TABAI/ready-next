@@ -284,7 +284,6 @@ html[data-fastcard-overlay-window='true'] .browser-fastcard-footer {
   background: var(--fastcard-overlay-surface-bg);
 }
 
-html[data-fastcard-overlay-window='true'] .browser-fastcard-item,
 html[data-fastcard-overlay-window='true'] .browser-fastcard-result-body section {
   background: var(--fastcard-overlay-card-bg);
   border-color: var(--fastcard-overlay-border);

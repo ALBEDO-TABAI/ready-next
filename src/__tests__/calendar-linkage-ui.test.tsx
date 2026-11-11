@@ -76,3 +76,16 @@ test('M6-D ThisDay opens every category through ReadyRef, rejects stale day resp
     assert.equal(added[1].eventId, `series#${Date.parse('2026-11-01') / 1000}`)
   } finally { useAgent.setState(agentBefore, true); useWorkspace.setState(workspaceBefore, true) }
 })
+
+test('a chip carries the event out only on Alt-drag; a plain drag stays the calendar move gesture', async () => {
+  const { startChipTransfer } = await import('../renderer/modules/calendar/linkage/transfer')
+  const data = new Map<string, string>()
+  let prevented = 0
+  const event = (altKey: boolean) => ({ altKey, preventDefault: () => { prevented++ }, dataTransfer: { setData: (k: string, v: string) => { data.set(k, v) } } })
+  assert.equal(startChipTransfer(event(false), { kind: 'event', id: 'e1' }, '开会'), false)
+  assert.equal(prevented, 1, 'the native drag is cancelled so pointer events reach the move gesture')
+  assert.equal(data.size, 0)
+  assert.equal(startChipTransfer(event(true), { kind: 'event', id: 'e1' }, '开会'), true)
+  assert.equal(prevented, 1)
+  assert.equal(JSON.parse(data.get('application/x-ready-ref')!).id, 'e1')
+})
