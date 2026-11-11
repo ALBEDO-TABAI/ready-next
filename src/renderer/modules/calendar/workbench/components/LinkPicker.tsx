@@ -2,21 +2,13 @@ import { useEffect, useState, type KeyboardEvent } from 'react'
 import { CalendarLinkTargetSchema } from '../../../../../shared/calendar/event-links'
 import type { ReadyRef } from '../../../../../shared/ready-ref'
 import { Input } from '../../../../components/ui/Field'
-import { openFloat } from '../../../../components/ui/float/float-store'
 import { findReferences } from '../../../document/block-editor/references'
 
 // The event panel's "+": the same search as @ in a page (pages, documents, boards and other Ready references), with
 // no address to paste (W4 §4, O9). Only targets an event can link to are offered.
 type Choice = { id: string; label: string; detail: string; ref: ReadyRef }
 
-export function openLinkPicker(anchor: DOMRect, choose: (ref: ReadyRef, label: string) => void): void {
-  openFloat({
-    anchor, placement: 'bottom-end', offset: 6, role: 'dialog', label: '添加关联',
-    render: close => <LinkPicker close={close} choose={(ref, label) => { close(); choose(ref, label) }} />,
-  })
-}
-
-function LinkPicker({ choose, close }: { choose(ref: ReadyRef, label: string): void; close(): void }) {
+export function LinkPicker({ choose, close }: { choose(ref: ReadyRef, label: string): void; close(): void }) {
   const [query, setQuery] = useState(''), [choices, setChoices] = useState<Choice[]>([])
   const [active, setActive] = useState(0), [pending, setPending] = useState(false), [error, setError] = useState('')
   useEffect(() => {

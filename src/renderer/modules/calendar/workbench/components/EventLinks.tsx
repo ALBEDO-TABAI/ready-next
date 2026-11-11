@@ -9,7 +9,8 @@ import { flattenPages } from '../../../document/page-ui/page-state'
 import { openReadyRef } from '../../../workbench/open-ready-ref'
 import { reload } from '../store'
 import { Link2, NotebookPen, Plus, X } from 'lucide-react'
-import { openLinkPicker } from './LinkPicker'
+import { LinkPicker } from './LinkPicker'
+import { openFloat } from '../../../../components/ui/float/float-store'
 
 const value = async <T,>(request:Promise<{success:boolean;data?:T;error?:string}>):Promise<T> => {
   const result = await request
@@ -18,6 +19,11 @@ const value = async <T,>(request:Promise<{success:boolean;data?:T;error?:string}
 }
 const message = (error:unknown) => error instanceof Error ? error.message : String(error)
 const kindLabel:Partial<Record<ReadyRef['kind'],string>> = {page:'页面',file:'文档',canvas:'画板',web:'网页','book-location':'书'}
+
+function openLinkPicker(anchor:DOMRect, choose:(ref:ReadyRef)=>void) {
+  openFloat({anchor,placement:'bottom-end',offset:6,role:'dialog',label:'添加关联',
+    render:close=><LinkPicker close={close} choose={ref=>{close();choose(ref)}}/>})
+}
 
 export function EventLinks({occKey,title,readOnly}:{occKey:string;title:string;readOnly:boolean}) {
   const [snapshot,setSnapshot] = useState<CalendarSnapshot | null>(null)
