@@ -183,6 +183,13 @@ export abstract class BrowserControllerHostRuntime extends BrowserControllerComp
   }
 
   detachHost(view: BrowserHostView): void {
+    const tabId = this.getTabIdForWebContents(view.webContents.id)
+    const owner = tabId ? this.taskWorkTabs.get(tabId) : null
+    if (tabId && owner && owner.physicalTargetToken === this.getPhysicalTargetToken(tabId)
+      && this.isAgentActivelyDrivingTab(tabId) && process.env.READY_BROWSER_BACKGROUND_SURFACE === '1') {
+      this.hostLayoutService.mountBackgroundWorkHost(view)
+      return
+    }
     this.hostLayoutService.detachHost(view)
   }
 
@@ -193,6 +200,12 @@ export abstract class BrowserControllerHostRuntime extends BrowserControllerComp
   hideHost(view: BrowserHostView): void {
     const tabId = this.getTabIdForWebContents(view.webContents.id)
     if (tabId && this.isAgentActivelyDrivingTab(tabId)) {
+      const owner = this.taskWorkTabs.get(tabId)
+      if (owner && owner.physicalTargetToken === this.getPhysicalTargetToken(tabId)
+        && process.env.READY_BROWSER_BACKGROUND_SURFACE === '1') {
+        this.hostLayoutService.mountBackgroundWorkHost(view)
+        return
+      }
       this.hostLayoutService.parkHost(view, this.currentBoundsForTab(tabId))
       return
     }

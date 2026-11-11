@@ -74,7 +74,8 @@ function seed(root, overrides = {}) {
     'src/main/modules/browser-engine/tab-lifecycle-service.ts': "const view = this.host.createHost(profile ? `persist:browser-profile-${profile}` : 'persist:browser')\n",
     'src/main/modules/browser-engine/browser-controller-tab-runtime.ts': [
       'async ensureAgentWorkTab(',
-      "const created = await this.createTab(url, { background: true, owner: 'agent' })",
+      "return this.createAgentWorkTab(browserTaskId, url, null)",
+      "const created = await this.createTab(url, { background: true, owner: 'agent', openerTabId })",
     ].join('\n'),
     'src/main/modules/browser-engine/browser-controller-capture-runtime.ts': [
       "partition: 'persist:browser'",

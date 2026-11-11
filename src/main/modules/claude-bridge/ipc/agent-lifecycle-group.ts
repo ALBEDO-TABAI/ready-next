@@ -1,4 +1,5 @@
 import type { IpcMain } from 'electron'
+import { browserAttentionReadSchema, parseBrowserAttentionAction, type BrowserAttentionActionRequest, type BrowserUserAttention } from '../../../../shared/browser-user-attention'
 import { isDeepStrictEqual } from 'node:util'
 
 import {
@@ -27,6 +28,8 @@ import type { IpcChannelGroup, IpcDisposeHandle } from './types'
 import type { LifecycleOperationProjectionV2 } from '../../../../shared/ipc-contracts/agent-lifecycle-snapshot'
 
 export interface AgentLifecycleGroupDeps {
+  getBrowserTaskAttention(request: { scopeId: string; browserTaskId: string }): BrowserUserAttention | null
+  actOnBrowserTaskAttention(request: BrowserAttentionActionRequest): Promise<SendScopedResponse>
   sendScoped(payload: SendScopedRequest): Promise<SendScopedResponse>
   createSession(request: CreateSessionRequest): Promise<CreateSessionResult>
   beginNewContext(request: BeginNewContextRequest): BeginNewContextResult
@@ -70,6 +73,8 @@ function validateActionRequest(
 }
 
 const CHANNELS = [
+  'agent:getBrowserTaskAttention',
+  'agent:actOnBrowserTaskAttention',
   'agent:sendScoped',
   'agent:createSession',
   'agent:beginNewContext',
@@ -87,6 +92,8 @@ export const agentLifecycleGroup: IpcChannelGroup<AgentLifecycleGroupDeps> = {
       try { ipcMain.removeHandler(channel) } catch { /* handler may not exist */ }
     }
 
+    ipcMain.handle('agent:getBrowserTaskAttention', (_, payload: unknown) => deps.getBrowserTaskAttention(browserAttentionReadSchema.parse(payload)))
+    ipcMain.handle('agent:actOnBrowserTaskAttention', async (_, payload: unknown) => parseSendScopedResponse(await deps.actOnBrowserTaskAttention(parseBrowserAttentionAction(payload))))
     ipcMain.handle('agent:sendScoped', async (_, rawPayload: unknown): Promise<SendScopedResponse> => {
       const payload = parseSendScopedRequest(rawPayload)
       deps.log(`[ipc] agent:sendScoped start scopeId=${payload.scopeId} requestId=${payload.requestId}`)

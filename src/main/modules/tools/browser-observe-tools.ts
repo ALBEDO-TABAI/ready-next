@@ -1021,6 +1021,9 @@ export async function executeBrowserObserveTool(
       }
 
       case 'status': {
+        if (args.needs_user === 'login' || args.needs_user === 'captcha') {
+          return browserStructuredOutput({ ok: true, needsUserReason: args.needs_user })
+        }
         const startedAt = Date.now()
         const tabId = (args.tab_id as string) || null
         const prompt = String(args.prompt || '')

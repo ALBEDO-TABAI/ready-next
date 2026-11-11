@@ -1,4 +1,7 @@
-import { app } from 'electron'
+import { app, Notification } from 'electron'
+import { randomUUID } from 'node:crypto'
+import { BROWSER_ATTENTION_COPY, type BrowserAttentionReason, type BrowserAttentionTarget, type BrowserUserAttention } from '../../../shared/browser-user-attention'
+import { readBrowserUserAttention } from './browser-user-attention'
 import { getDatabase } from '../database'
 import { ObjectRegistry } from '../object-service/registry'
 import { AppSettingsRepository } from '../repositories/app-settings-repository'
@@ -52,6 +55,47 @@ export type { BrowserTabActivity, BrowserTabOwner } from './browser-controller-c
 export { isAllowedBrowserURL } from './popup-policy'
 
 export class BrowserController extends BrowserControllerCaptureRuntime {
+  private attentionNotificationPort: (body: string) => void = body => {
+    if (Notification.isSupported()) new Notification({ title: 'Ready Next', body }).show()
+  }
+
+  setAttentionNotificationPort(port: (body: string) => void): void {
+    this.attentionNotificationPort = port
+  }
+
+  getTaskAttention(browserTaskId: string): BrowserUserAttention | null {
+    const task = this.taskPersistenceService.getTask(browserTaskId)
+    const payload = this.taskPersistenceService.getTaskPayload(browserTaskId)
+    return task && payload ? readBrowserUserAttention(task, payload) : null
+  }
+
+  recordTaskAttention(target: BrowserAttentionTarget, reason: BrowserAttentionReason): void {
+    const task = this.taskPersistenceService.getTask(target.browserTaskId)
+    if (!task || task.createdByRunId !== target.ownerRunId || task.parentTaskId !== target.parentTaskId) {
+      throw new Error('browser_attention_owner_mismatch')
+    }
+    if (this.getTaskAttention(target.browserTaskId)) return
+    if (!this.taskPersistenceService.patchTaskPayload(target.browserTaskId, { userAttention: {
+      id: randomUUID(), reason, tabId: target.tabId, physicalTargetToken: target.physicalTargetToken,
+    } })) throw new Error('browser_attention_write_failed')
+    if (reason === 'login' || reason === 'captcha') {
+      if (this.getPhysicalTargetToken(target.tabId) !== target.physicalTargetToken) throw new Error('browser_attention_target_changed')
+      const result = this.switchTab(target.tabId)
+      if (!result.success) throw new Error(result.error || 'browser_attention_present_failed')
+      const tab = this.getTabList().find(item => item.id === target.tabId)
+      if (tab) this.sendToRenderer('browser:tabOpened', { ...tab, activate: true })
+    }
+    this.notifyTaskAttention(target.browserTaskId)
+  }
+
+  notifyTaskAttention(browserTaskId: string): void {
+    const attention = this.getTaskAttention(browserTaskId)
+    if (!attention || this.mainWindow.isDestroyed() || this.mainWindow.isFocused()) return
+    try { this.attentionNotificationPort(BROWSER_ATTENTION_COPY[attention.reason].notification) } catch (error) {
+      this.logBrowserDiag(`browser attention notification failed: ${String(error)}`)
+    }
+  }
+
   approveTaskWriteOrigin(browserTaskId: string, ownerRunId: string, origin: string): void {
     const task = this.taskPersistenceService.getTask(browserTaskId)
     if (!task || task.createdByRunId !== ownerRunId || ['completed', 'failed', 'cancelled'].includes(task.status)) throw new Error('browser_origin_task_not_active')
@@ -188,14 +232,21 @@ export class BrowserController extends BrowserControllerCaptureRuntime {
   bindBrowserWorkflowPhysicalTarget(input: BrowserWorkflowWriteTarget): () => void {
     const binding = { ...input }
     this.workflowPhysicalBindings.set(input.tabId, binding)
+    const owner = this.taskWorkTabs.get(input.tabId)
+    const view = this.tabs.get(input.tabId)?.view
+    if (view && owner?.browserTaskId === input.browserTaskId && owner.physicalTargetToken === input.physicalTargetToken
+      && !this.hostLayoutService.isHostVisible(view)) this.hostLayoutService.mountBackgroundWorkHost(view)
     return () => {
       if (this.workflowPhysicalBindings.get(input.tabId) === binding) {
         this.workflowPhysicalBindings.delete(input.tabId)
+        const view = this.tabs.get(input.tabId)?.view
+        if (view) this.hostLayoutService.releaseBackgroundWorkHost(view)
       }
     }
   }
 
   isBrowserWorkflowWriteAdmitted(input: BrowserWorkflowWriteTarget): boolean {
+    if (this.getTaskAttention(input.browserTaskId)) return false
     const current = this.workflowPhysicalBindings.get(input.tabId)
     if (!current || !sameBrowserWorkflowWriteTarget(current, input)) return false
     if (this.pendingPhysicalTakeovers.has(input.tabId)) return false
@@ -267,8 +318,11 @@ export class BrowserController extends BrowserControllerCaptureRuntime {
     mainWindowForeground: boolean
     hostPresentation: BrowserHostPresentationState
     tabActive: boolean
+    backgroundWorkSurfaceAdmitted?: boolean
   } {
     const resolved = this.resolveTabView(tabId)
+    const owner = this.taskWorkTabs.get(resolved.tabId)
+    const binding = this.workflowPhysicalBindings.get(resolved.tabId)
     return {
       mainWindowForeground: !this.mainWindow.isDestroyed()
         && this.mainWindow.isVisible()
@@ -276,6 +330,10 @@ export class BrowserController extends BrowserControllerCaptureRuntime {
         && this.mainWindow.isFocused(),
       hostPresentation: this.hostLayoutService.getHostPresentationState(resolved.view),
       tabActive: resolved.tabId === this.activeTabId,
+      backgroundWorkSurfaceAdmitted: process.env.READY_BROWSER_BACKGROUND_SURFACE === '1'
+        && !!owner && !!binding && owner.browserTaskId === binding.browserTaskId
+        && owner.physicalTargetToken === binding.physicalTargetToken
+        && this.isBrowserWorkflowWriteAdmitted(binding),
     }
   }
 

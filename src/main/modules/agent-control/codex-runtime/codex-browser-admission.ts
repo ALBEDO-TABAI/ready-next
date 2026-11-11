@@ -54,7 +54,7 @@ export const BROWSER_CURRENT_PAGE_TOOL_NAMES = [
   'browser_status',
 ] as const satisfies readonly BrowserPublicToolName[]
 
-const BROWSER_SKILL_ONLY_TOOL_NAMES = new Set<BrowserPublicToolName>([
+export const BROWSER_SKILL_ONLY_TOOL_NAMES: ReadonlySet<BrowserPublicToolName> = new Set([
   'browser_task',
   'browser_console',
   'browser_network',

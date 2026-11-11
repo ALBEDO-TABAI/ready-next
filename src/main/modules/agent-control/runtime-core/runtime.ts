@@ -2,6 +2,8 @@ import { app, shell } from 'electron'
 import { EventEmitter } from 'events'
 import { join } from 'path'
 import { existsSync } from 'node:fs'
+import { sendBrowserAttentionInput } from './browser-attention-action'
+import type { BrowserAttentionActionRequest } from '../../../../shared/browser-user-attention'
 import {
   getDefaultConfig,
   normalizeAIConfig,
@@ -1524,6 +1526,32 @@ export class AgentControlRuntime extends EventEmitter {
       })
       return { workbenchMode }
     }
+  }
+
+  getBrowserTaskAttention(request: { scopeId: string; browserTaskId: string }) {
+    const attention = this.browserController?.getTaskAttention(request.browserTaskId) || null
+    if (!attention) return null
+    const parent = this.getTaskProjection(attention.parentTaskId)
+    const scope = this.db.chat.getConversationScope(request.scopeId)
+    if (!parent || !scope || scope.source_kind !== 'local' || parent.scopeId !== scope.id
+      || parent.runId !== attention.ownerRunId || parent.messageVisibilityEpoch !== scope.message_visibility_epoch) return null
+    const id = `browser-help:${attention.browserTaskId}:${attention.id}`
+    const db = this.db.getRawDb()
+    if (!db) throw new Error('browser_attention_database_unavailable')
+    return db.prepare('SELECT 1 FROM chat_messages WHERE id = ?').get(id) ? null : attention
+  }
+
+  async actOnBrowserTaskAttention(request: BrowserAttentionActionRequest): Promise<SendScopedResponse> {
+    const db = this.db.getRawDb()
+    if (!db) throw new Error('browser_attention_database_unavailable')
+    return sendBrowserAttentionInput(request, {
+      readAttention: id => this.browserController?.getTaskAttention(id) || null,
+      readPhysicalTarget: id => this.browserController?.getPhysicalTargetToken(id) || null,
+      readParent: id => this.getTaskProjection(id),
+      readScope: id => this.db.chat.getConversationScope(id) || null,
+      messageExists: id => Boolean(db.prepare('SELECT 1 FROM chat_messages WHERE id = ?').get(id)),
+      send: input => this.sendScoped(input),
+    })
   }
 
   async sendScoped(payload: SendScopedRequest): Promise<SendScopedResponse> {

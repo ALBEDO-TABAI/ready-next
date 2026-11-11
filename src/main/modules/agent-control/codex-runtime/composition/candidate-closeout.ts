@@ -557,6 +557,7 @@ export function createCandidateCloseout(deps: CandidateCloseoutDeps) {
             !productCloseout
             || productCloseout.productTerminalDigest !== committedFailure.productTerminalDigest
           ) throw new Error('codex_verifier_rejected_closeout_readback_missing')
+          if (workflowBundle) boundHost.browserController?.notifyTaskAttention(workflowBundle.browserTaskId)
           const execution: ExecutionHostResult = {
             success: false,
             finalText: publicMessage,

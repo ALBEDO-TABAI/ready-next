@@ -128,6 +128,7 @@ export async function runBrowserControllerTakeoverNativeSignalTest(): Promise<vo
   const mainWindow = new BrowserWindow({ show: false, width: 900, height: 700 })
   await mainWindow.loadURL(url)
   const controller = new BrowserController(mainWindow)
+  controller.setAttentionNotificationPort(() => undefined)
   let claimService = getBrowserTargetClaimService()
   const cleanCheckpoint = repository.current(parentTaskId, 'clean_base')
   assert.ok(cleanCheckpoint)

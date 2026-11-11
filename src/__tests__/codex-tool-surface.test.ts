@@ -22,6 +22,7 @@ import {
   buildReadyToolSurface,
   buildReadyTurnToolAuthorization,
   codexRequestToolsDigest,
+  compareReadyToolSurfaceCompatibility,
   CodexToolSurfaceError,
   digestCodexRootToolSurface,
   normalizeCodexDynamicToolSchema,
@@ -52,6 +53,27 @@ function definition(name: string): ToolDefinition {
     resultShape: 'json',
   }
 }
+
+test('deferred browser definitions stay frozen and authorized independently of loading', () => {
+  const surface = buildReadyToolSurface({ surfaceId: 'deferred', toolDefinitions: [definition('browser_cdp'), definition('browser_click')] })
+  assertReadyToolSurface(surface)
+  assert.equal(surface.dynamicTools.find(tool => tool.name === 'browser_cdp')?.deferLoading, true)
+  assert.equal(surface.responsesTools.find(tool => tool.name === 'browser_cdp')?.defer_loading, true)
+  assert.equal(surface.dynamicTools.find(tool => tool.name === 'browser_click')?.deferLoading, undefined)
+  assert.equal(codexRequestToolsDigest(surface), surface.toolSurfaceDigest)
+  const authorization = buildReadyTurnToolAuthorization({ authorizationId: 'allowed-click',
+    authorization: buildExplicitNoSkillAuthorization(), toolSurface: surface, allowedToolNames: ['browser_click'] })
+  assert.deepEqual(authorization.allowedToolNames, ['browser_click'])
+  const tampered = structuredClone(surface)
+  delete tampered.dynamicTools[0].deferLoading
+  assert.throws(() => assertReadyToolSurface(tampered), /tool_surface_digest_mismatch/)
+  delete tampered.responsesTools[0].defer_loading
+  tampered.toolSurfaceDigest = digestCanonicalJson(tampered.responsesTools)
+  tampered.surfaceSnapshotDigest = digestCanonicalJson({ entries: tampered.entries,
+    dynamicTools: tampered.dynamicTools, responsesTools: tampered.responsesTools })
+  assertReadyToolSurface(tampered)
+  assert.equal(compareReadyToolSurfaceCompatibility({ frozen: tampered, current: surface }).kind, 'native_tool_definition_changed')
+})
 
 test('root Codex surface digest ignores control tools and stays deterministic', () => {
   const root = [

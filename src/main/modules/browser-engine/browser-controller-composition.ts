@@ -3,6 +3,7 @@ import { BrowserAppShortcutBridgeService } from './app-shortcut-service'
 import { BrowserAutomationService } from './automation-service'
 import { BrowserCapabilityService } from './capability-service'
 import { BrowserCdpSessionService } from './cdp-session-service'
+import { browserInputEnvironmentReadiness } from './browser-input-readiness'
 import { BrowserDialogService } from './browser-dialog-service'
 import { AgentInputPassthroughRegistry } from './agent-input-passthrough'
 import { getBrowserTargetClaimService } from './browser-target-claim-singleton'
@@ -104,7 +105,7 @@ export abstract class BrowserControllerComposition extends BrowserControllerCont
   /** Most recently created task-owned work tab, used only for supervision display. */
   protected agentTabId: string | null = null
   protected readonly agentWorkTabs = new Map<string, string>()
-  protected readonly taskWorkTabs = new Map<string, { browserTaskId: string; openerTabId: string; physicalTargetToken: string }>()
+  protected readonly taskWorkTabs = new Map<string, { browserTaskId: string; openerTabId: string | null; physicalTargetToken: string }>()
   protected readonly tabLifecycleService: BrowserTabLifecycleService
   protected readonly tabMetaService: BrowserTabMetaService<Tab>
   protected readonly tabShellService: BrowserTabShellService
@@ -203,6 +204,19 @@ export abstract class BrowserControllerComposition extends BrowserControllerCont
     this.cdpSessionService = new BrowserCdpSessionService({
       resolveTabView: (tabId) => this.resolveTabView(tabId),
       createBrowserError: (code, message) => this.createBrowserError(code, message),
+      captureInputGuard: (tabId, method) => {
+        if (!method.startsWith('Input.')) return undefined
+        const resolved = this.resolveTabView(tabId)
+        const binding = this.workflowPhysicalBindings.get(resolved.tabId)
+        if (!binding) return undefined
+        return () => {
+          if (!this.isBrowserWorkflowWriteAdmitted(binding)) throw new Error('browser_write_admission_closed')
+          if ((method === 'Input.dispatchMouseEvent' || method === 'Input.dispatchDragEvent')
+            && !browserInputEnvironmentReadiness(this, resolved.tabId, 'trusted_pointer').ready) {
+            throw new Error('browser_pointer_surface_unavailable')
+          }
+        }
+      },
     })
     this.dialogService = new BrowserDialogService(this.cdpSessionService, () => {
       this.performanceRuntime.reconcile()

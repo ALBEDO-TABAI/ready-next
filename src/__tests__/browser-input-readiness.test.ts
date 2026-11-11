@@ -15,19 +15,32 @@ import {
 
 function controllerFor(
   hostPresentation: BrowserHostPresentationState,
-  options: { foreground?: boolean; active?: boolean } = {},
+  options: { foreground?: boolean; active?: boolean; backgroundWorkSurfaceAdmitted?: boolean } = {},
 ): BrowserController {
   return {
     getBrowserInputEnvironment: () => ({
       mainWindowForeground: options.foreground ?? false,
       hostPresentation,
       tabActive: options.active ?? false,
+      backgroundWorkSurfaceAdmitted: options.backgroundWorkSurfaceAdmitted,
     }),
     getPhysicalTargetToken: () => 'physical-tab-a',
   } as unknown as BrowserController
 }
 
 const readyDocument = { ready: true, focused: true, activeElementEditable: true }
+
+test('background pointer requires an admitted task surface, never just a hidden host', () => {
+  assert.equal(browserInputEnvironmentReadiness(controllerFor('background-work', {
+    backgroundWorkSurfaceAdmitted: true,
+  }), 'tab-a', 'trusted_pointer').ready, true)
+  for (const state of ['background-work', 'hidden', 'parked'] as const) {
+    assert.equal(browserInputEnvironmentReadiness(controllerFor(state), 'tab-a', 'trusted_pointer').ready, false)
+  }
+  assert.equal(browserInputEnvironmentReadiness(controllerFor('hidden', {
+    backgroundWorkSurfaceAdmitted: true,
+  }), 'tab-a', 'trusted_pointer').ready, false)
+})
 
 test('pointer needs a visible foreground host while target-bound CDP keyboard does not', async () => {
   const pointer = await browserInputReadiness(

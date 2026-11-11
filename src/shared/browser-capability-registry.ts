@@ -15,7 +15,7 @@ export const BROWSER_OPERATION_IDS = [
   'collect_images', 'collect_structured', 'collect_scroll', 'collect_visible',
   'download_urls', 'download_advanced', 'download_resolve',
   'archive', 'task_get', 'task_result',
-  'status', 'console_list', 'console_clear',
+  'status', 'request_user', 'console_list', 'console_clear',
   'network_start', 'network_stop', 'network_list', 'network_details',
   'resources', 'resources_forensics', 'eval', 'cdp',
   'session_status', 'session_clear_origin', 'session_clear_site_data', 'session_switch_profile',
@@ -119,7 +119,7 @@ export const BROWSER_CAPABILITY_REGISTRY = {
   browser_archive: { operations: ['archive'], resolveOperationId: () => 'archive' },
   browser_task: { operations: ['task_get', 'task_result'], resolveOperationId: (args) => ({ get: 'task_get', result: 'task_result' } as const)[action(args, 'get') as 'get' | 'result'] || null },
 
-  browser_status: { operations: ['status'], resolveOperationId: () => 'status' },
+  browser_status: { operations: ['status', 'request_user'], resolveOperationId: (args) => args.needs_user ? 'request_user' : 'status' },
   browser_console: { operations: ['console_list', 'console_clear'], resolveOperationId: (args) => ({ list: 'console_list', clear: 'console_clear' } as const)[action(args, 'list') as 'list' | 'clear'] || null },
   browser_network: { operations: ['network_start', 'network_stop', 'network_list', 'network_details'], resolveOperationId: (args) => ({ start: 'network_start', stop: 'network_stop', list: 'network_list', details: 'network_details' } as const)[action(args, 'list') as 'start' | 'stop' | 'list' | 'details'] || null },
   browser_resources: { operations: ['resources', 'resources_forensics'], resolveOperationId: (args) => args.include_response_bodies === true ? 'resources_forensics' : 'resources' },
@@ -168,6 +168,7 @@ const OPERATION_CAPABILITIES: Readonly<Record<BrowserOperationId, BrowserOperati
   research_start: operation('collection', 'control', ['observe'], 'workflow_metadata'), research_evidence: operation('collection', 'control', ['observe'], 'workflow_metadata'), research_complete: operation('collection', 'observe', ['observe'], 'workflow_metadata'),
   collect_images: operation('collection', 'observe', ['observe'], 'page_observe'), collect_structured: operation('collection', 'observe', ['observe'], 'page_observe'), collect_scroll: operation('collection', 'mutate', ['observe', 'page_mutation'], 'page_mutate'), collect_visible: operation('collection', 'mutate', ['observe', 'page_mutation'], 'page_mutate'),
   download_urls: operation('collection', 'mutate', ['download'], 'workflow_transport'), download_advanced: operation('power', 'mutate', ['download'], 'workflow_transport'), download_resolve: operation('collection', 'observe', ['observe'], 'workflow_metadata'), archive: operation('system', 'mutate', ['download'], 'document_control'), task_get: operation('collection', 'observe', ['observe'], 'workflow_metadata'), task_result: operation('collection', 'observe', ['observe'], 'workflow_metadata'),
+  request_user: operation('observe', 'observe', ['observe'], 'owner_document_control'),
   status: operation('observe', 'observe', ['observe'], 'management'), console_list: operation('system', 'observe', ['observe'], 'management'), console_clear: operation('system', 'mutate', ['page_mutation'], 'workflow_transport'), network_start: operation('system', 'control', ['observe'], 'owner_document_control'), network_stop: operation('system', 'control', ['observe'], 'owner_document_control'), network_list: operation('system', 'observe', ['observe'], 'management'), network_details: operation('system', 'observe', ['observe'], 'management'), resources: operation('collection', 'observe', ['observe'], 'page_observe'), resources_forensics: operation('power', 'observe', ['observe'], 'page_observe'), eval: operation('power', 'mutate', ['observe', 'page_mutation'], 'page_mutate'), cdp: operation('power', 'mutate', ['observe', 'page_mutation'], 'page_mutate'), session_status: operation('system', 'observe', ['observe'], 'management'), session_clear_origin: operation('system', 'mutate', ['page_mutation'], 'workflow_transport'), session_clear_site_data: operation('system', 'mutate', ['page_mutation'], 'workflow_transport'), session_switch_profile: operation('system', 'mutate', ['page_mutation'], 'workflow_transport'), permission_status: operation('system', 'observe', ['observe'], 'management'), permission_set: operation('system', 'mutate', ['page_mutation'], 'workflow_transport'), permission_reset: operation('system', 'mutate', ['page_mutation'], 'workflow_transport'),
 }
 

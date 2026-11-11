@@ -701,6 +701,8 @@ export async function setupAgentIPC(
     agentLifecycleGroupDispose = null
   }
   agentLifecycleGroupDispose = agentLifecycleGroup.register(ipcMain, {
+    getBrowserTaskAttention: request => runtime!.getBrowserTaskAttention(request),
+    actOnBrowserTaskAttention: request => runtime!.actOnBrowserTaskAttention(request),
     sendScoped: (payload) => runtime!.sendScoped(payload),
     createSession: (request) => runtime!.createCodexSession(request),
     beginNewContext: (request) => runtime!.beginCodexNewContext(request),

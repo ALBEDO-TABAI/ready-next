@@ -5,6 +5,7 @@ import { isToolStatePatchEmittingToolName } from '../contracts/skill-frame-patch
 import type { CodexDynamicToolSpec } from './codex-native-runtime'
 import { canonicalJson, digestCanonicalJson } from './codex-model-gateway-contract'
 import { isLibraryReadTool } from './library-read-tools'
+import { READY_DEFERRED_BROWSER_TOOLS } from './codex-capability-catalog'
 
 export type ReadyToolSurfaceEntry = Readonly<{
   name: string
@@ -33,6 +34,7 @@ export type ReadyResponsesFunctionTool = Readonly<{
   description: string
   strict: false
   parameters: Record<string, unknown>
+  defer_loading?: true
 }>
 
 export type ReadyToolSurface = Readonly<{
@@ -345,6 +347,7 @@ function codexRequestTools(dynamicTools: readonly CodexDynamicToolSpec[]): Ready
     description: tool.description,
     strict: false,
     parameters: normalizeCodexDynamicToolSchema(tool.inputSchema),
+    ...(tool.deferLoading ? { defer_loading: true as const } : {}),
   }))
 }
 
@@ -407,6 +410,7 @@ export function buildReadyToolSurface(input: {
     name: entry.name,
     description: entry.description,
     inputSchema: entry.inputSchema,
+    ...(READY_DEFERRED_BROWSER_TOOLS.has(entry.name) ? { deferLoading: true } : {}),
   }))
   const responsesTools = codexRequestTools(dynamicTools)
   const snapshot = { entries, dynamicTools, responsesTools }
@@ -486,12 +490,23 @@ export function assertReadyToolSurface(value: ReadyToolSurface): void {
   // what was stored, but a later runtime's serialization (codexRequestToolsDigest) may differ.
   if (
     canonicalJson(rebuilt.entries) !== canonicalJson(value.entries)
-    || canonicalJson(rebuilt.dynamicTools) !== canonicalJson(value.dynamicTools)
+    || value.dynamicTools.length !== rebuilt.dynamicTools.length
+    || value.dynamicTools.some((tool, index) => (
+      !isRecord(tool)
+      || !hasExactKeys(tool, ['type', 'name', 'description', 'inputSchema', ...(tool.deferLoading === undefined ? [] : ['deferLoading'])])
+      || (tool.deferLoading !== undefined && typeof tool.deferLoading !== 'boolean')
+      || tool.type !== 'function'
+      || tool.name !== rebuilt.dynamicTools[index].name
+      || tool.description !== rebuilt.dynamicTools[index].description
+      || canonicalJson(tool.inputSchema) !== canonicalJson(rebuilt.dynamicTools[index].inputSchema)
+    ))
     || canonicalJson(rebuilt.toolNames) !== canonicalJson(value.toolNames)
     || value.responsesTools.length !== value.dynamicTools.length
     || value.responsesTools.some((tool, index) => (
       !isRecord(tool)
-      || !hasExactKeys(tool, ['type', 'name', 'description', 'strict', 'parameters'])
+      || !hasExactKeys(tool, ['type', 'name', 'description', 'strict', 'parameters',
+        ...(value.dynamicTools[index].deferLoading ? ['defer_loading'] : [])])
+      || (tool.defer_loading === true) !== (value.dynamicTools[index].deferLoading === true)
       || tool.type !== 'function'
       || tool.strict !== false
       || tool.name !== value.dynamicTools[index].name
@@ -525,7 +540,9 @@ export function compareReadyToolSurfaceCompatibility(input: {
       continue
     }
     const entryCompatibility = compareReadyToolSurfaceEntry(frozenEntry, currentEntry)
-    if (entryCompatibility === 'native_tool_definition_changed') {
+    const frozenLoading = input.frozen.dynamicTools.find(tool => tool.name === currentEntry.name)?.deferLoading === true
+    const currentLoading = input.current.dynamicTools.find(tool => tool.name === currentEntry.name)?.deferLoading === true
+    if (entryCompatibility === 'native_tool_definition_changed' || frozenLoading !== currentLoading) {
       modelContractChangedToolNames.push(currentEntry.name)
       continue
     }

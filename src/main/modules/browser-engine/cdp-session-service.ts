@@ -10,6 +10,7 @@ interface BrowserCdpTabRecord {
 interface BrowserCdpHost {
   resolveTabView(tabId: string | null): { tabId: string; tab: BrowserCdpTabRecord; view: BrowserHostView }
   createBrowserError: (code: BrowserCDPErrorCode, message: string) => Error
+  captureInputGuard?: (tabId: string | null, method: string) => (() => void) | undefined
 }
 
 export interface BrowserCdpEvent {
@@ -86,6 +87,7 @@ export class BrowserCdpSessionService {
     params?: Record<string, unknown>,
     options?: BrowserCdpCommandOptions,
   ): Promise<unknown> {
+    const inputGuard = this.host.captureInputGuard?.(tabId, method)
     const { tabId: resolvedTabId, view } = await this.ensureAttached(tabId)
     const timeoutMs = Math.max(1, Math.floor(options?.timeoutMs || 15_000))
     const controller = new AbortController()
@@ -96,6 +98,7 @@ export class BrowserCdpSessionService {
     let operation: Promise<unknown> | null = null
     this.inFlightCommandsByTab.set(resolvedTabId, (this.inFlightCommandsByTab.get(resolvedTabId) ?? 0) + 1)
     try {
+      inputGuard?.()
       operation = view.webContents.debugger.sendCommand(method, params)
       return await Promise.race([
         operation,

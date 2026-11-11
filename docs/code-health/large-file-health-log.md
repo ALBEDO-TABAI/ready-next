@@ -897,3 +897,16 @@
 | 日期 | 文件 | 总行数 | 本轮净增 | 评级 | 说明与复查 |
 |---|---|---:|---:|---|---|
 | 2026-11-12 | `src/preload/index.ts` | 1764 | +2 | 一般 | 仅转发筛子设置的读取与保存；校验和存储位于 Main，Renderer 继承共享接口。2026-12-12 复查接口分组边界。 |
+
+
+## 2026-11-12 W7 第二批 Main
+
+| 日期 | 文件 | 总行数 | 本轮净增 | 评级 | 说明与复查 |
+|---|---|---:|---:|---|---|
+| 2026-11-12 | `src/__tests__/codex-browser-verifier-closeout-native.test.ts` | 1807 | +5 | 一般 | 仅在原生复核拒绝用例增加持久原因断言；2026-12-12 复查夹具分组。 |
+| 2026-11-12 | `src/main/modules/agent-control/codex-runtime/composition/candidate-closeout.ts` | 1043 | +1 | 一般 | 终态读回后发送用户处理通知，判定仍在同一收口；2026-12-12 复查收口依赖。 |
+| 2026-11-12 | `src/main/modules/agent-control/runtime-core/runtime.ts` | 1964 | +28 | 一般 | 接入用户处理动作，固定输入构造与校验位于独立模块；2026-12-12 复查入口接线。 |
+| 2026-11-12 | `src/main/modules/claude-bridge/ipc-handler.ts` | 1336 | +2 | 一般 | 仅增加两条既有生命周期组接线；2026-12-12 复查分组。 |
+| 2026-11-12 | `src/main/modules/tools/browser-observe-tools.ts` | 1264 | +3 | 一般 | 状态工具声明登录或验证码时返回结构化结果；2026-12-12 复查观察工具边界。 |
+| 2026-11-12 | `src/preload/index.ts` | 1773 | +2 | 一般 | 仅增加两个调用转发；2026-12-12 复查按域拆分。 |
+| 2026-11-12 | `src/renderer/types/electron.d.ts` | 3450 | +2 | 健康 | 仅引用共享状态与请求类型，类型及 IPC 对应检查覆盖。 |

@@ -139,6 +139,30 @@ node scripts/browser-eval/tool-layer/run.mjs --only form,spa   # 只跑几组
 
 边界：工作标签分组由 Main 返回 `browserTaskId`，关闭动作通过 `browser.closeTaskTabs({ browserTaskId })`，下载记录通过 `browser.getTaskDownloadReceipts({ browserTaskId })` 读取；截图标注不插入网页 DOM。差分基线按任务和标签隔离，任务清理时丢弃；较大的差分退回完整快照。网络统计在首次加载前安装，默认网络等待上限 15 秒；WebSocket/EventSource/event-stream 排除，重复 Fetch/XHR 及超过 10 秒的 Fetch/XHR 按轮询排除。
 
+## W7 第二批 Main：后台承载面与需要用户处理
+
+`READY_BROWSER_BACKGROUND_SURFACE=1` 打开实验后台承载面；未设置时仍要求前台指针。只挂载任务自己创建的工作标签，每页一个 1280×800 隐藏窗口；用户展示时迁回主窗口，运行清理时销毁承载窗口、保留标签。此开关尚待真实窗口验收，不能默认打开。
+
+所有命令应使用工作区外的短临时 HOME，并保持隐藏启动；不需要模型或远程调试端口：
+
+```bash
+task_home=$(mktemp -d /private/tmp/w7.XXXXXX)
+trap 'rm -rf "$task_home"' EXIT
+env HOME="$task_home" READY_START_HIDDEN=1 node_modules/.bin/electron scripts/browser-eval/background-surface-probe.mjs
+env HOME="$task_home" READY_START_HIDDEN=1 READY_BROWSER_BACKGROUND_SURFACE=1 node scripts/browser-eval/tool-layer/run.mjs --only background,attention
+env HOME="$task_home" READY_START_HIDDEN=1 npm run verify:browser-surface
+env HOME="$task_home" READY_START_HIDDEN=1 npm run verify:browser-eval-tools
+node --import tsx scripts/browser-eval/measure-tool-surface.ts
+```
+
+独立 probe 不开本地站点端口，检查真实 CDP 点击、滚轮、拖拽、持续 rAF、IntersectionObserver 懒加载、visible 文档状态与 focus emulation 并存；禁止窗口显示/聚焦。工具层 `background` 组再通过生产工具入口核对命中、任务身份、接管后零投递和释放；`attention` 组声明登录/验证码、冷读需要用户处理状态、选择该标签并确认旧任务不能写入，通知使用替代端口。
+
+资源测量：probe 输出承载面建立前的 `app.getAppMetrics()` 和建立后 5 次、每次间隔 1 秒的进程采样（CPU 百分比、内存 KiB、PID）。对同机同页重复三次，比较总 workingSetSize 的前后差值及 5 次 CPU 均值；工具层也输出运行期间的 5 次采样。原始数字随报告保留，不设置未经确认的资源阈值。当前沙箱 Electron 在启动阶段 SIGABRT，尚无有效 CPU/内存实测值。
+
+登录/验证码声明入口是 `browser_status({tab_id, needs_user: 'login' | 'captcha'})`：助手只判断语义，代码验证页面/任务归属、持久记录、封住写入并请用户处理。不使用网页关键词识别。需要用户处理的接口是 `agent.getBrowserTaskAttention` 与 `agent.actOnBrowserTaskAttention`；固定用户输入进入普通发送流程，完整形状和验收结果见 [Main 交付报告](../../docs/superpowers/audits/2026-11-12-w7-main-batch2.md)。
+
+令牌测量按生产冻结面 JSON 的 UTF-8 字节数除以 4 并向上取整：`before` 是同一组定义全部展开，`after` 排除带 `defer_loading` 的 schema；`registered` 是仍完整注册的工具。它不计工具检索额外开销，不代表模型费用或任务通过率。
+
 ## 任务层
 
 24 个任务，四类各 6 个。每个任务都有机器可判的终点：服务端记下的操作、资料库里的文件或文档内容。判定只看终点状态，不看助手的自述。D 类另外要求人工介入为 0。

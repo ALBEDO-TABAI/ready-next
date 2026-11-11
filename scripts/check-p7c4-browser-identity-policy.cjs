@@ -66,7 +66,8 @@ const tabLifecycle = assertIncludes('src/main/modules/browser-engine/tab-lifecyc
 
 const controllerTab = assertIncludes('src/main/modules/browser-engine/browser-controller-tab-runtime.ts', [
   'async ensureAgentWorkTab(',
-  "const created = await this.createTab(url, { background: true, owner: 'agent' })",
+  "return this.createAgentWorkTab(browserTaskId, url, null)",
+  "const created = await this.createTab(url, { background: true, owner: 'agent', openerTabId })",
 ])
 
 const controllerComposition = assertIncludes('src/main/modules/browser-engine/browser-controller-composition.ts', [
