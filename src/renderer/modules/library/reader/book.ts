@@ -199,7 +199,7 @@ const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
 function loadText(buf: ArrayBuffer, ext: string, title: string): LoadedBook {
   let text: string;
   try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); }
-  catch { text = new TextDecoder('gb18030').decode(buf); }
+  catch { /* silent-catch: Legacy text books may use GB18030 instead of UTF-8; retry that decoder and let its failure propagate. */ text = new TextDecoder('gb18030').decode(buf); }
   text = text.replace(/^﻿/, '').replace(/\r\n?/g, '\n');
   const lines = text.split('\n');
   const chapters: Chapter[] = [];

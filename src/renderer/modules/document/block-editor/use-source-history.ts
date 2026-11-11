@@ -30,7 +30,7 @@ export function useSourceHistory(tabId: string, report: (message: string) => voi
           const normalized = (at: number) => buffer.snapshot.content.slice(0, at).replace(/\r\n?/g, '\n').length
           requestAnimationFrame(() => editor.setSelectionRange(normalized(selection.anchor), normalized(selection.focus)))
         }
-      } catch (error) { report(error instanceof Error ? error.message : String(error)) }
+      } catch (error) { console.warn('[use-source-history] travel source history failed:', error instanceof Error ? error.message : String(error)); report(error instanceof Error ? error.message : String(error)) }
     },
   }
 }

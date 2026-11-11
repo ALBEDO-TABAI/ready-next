@@ -64,7 +64,7 @@ export function createDocumentOperationSync(port: TabPort): (request: DocumentSy
               pendingPaths.set(request.path, request.id)
               resolve({ ok: true, tabs: before, content: next })
               await held
-            } catch (error) { resolve({ ok: false, code: before.some((tab) => tab.isDirty) ? 'dirty_conflict' : 'operation_failed', message: String(error) }) }
+            } catch (error) { console.error('[document-operation-sync] prepare synchronization failed:', error instanceof Error ? error.message : String(error)); resolve({ ok: false, code: before.some((tab) => tab.isDirty) ? 'dirty_conflict' : 'operation_failed', message: String(error) }) }
           })
           void queue.catch((error) => resolve({ ok: false, message: String(error) }))
         })
@@ -95,6 +95,6 @@ export function createDocumentOperationSync(port: TabPort): (request: DocumentSy
       if (pendingPaths.get(lease.path) === request.id) pendingPaths.delete(lease.path)
       lease.release()
       return { ok: true, tabs: lease.after, content: lease.after[0]?.content }
-    } catch (error) { return { ok: false, message: error instanceof Error ? error.message : String(error) } }
+    } catch (error) { console.error('[document-operation-sync] apply synchronization phase failed:', error instanceof Error ? error.message : String(error)); return { ok: false, message: error instanceof Error ? error.message : String(error) } }
   }
 }

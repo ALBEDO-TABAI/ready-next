@@ -13,7 +13,7 @@ function saved(): { open: boolean; width: number } {
   try {
     const value = JSON.parse(readStorage(KEY) || '{}') as { open?: unknown; width?: unknown }
     return { open: value.open !== false, width: typeof value.width === 'number' ? clamp(value.width) : DEFAULT }
-  } catch { return { open: true, width: DEFAULT } }
+  } catch { /* silent-catch: Invalid cached layout JSON is only a display preference; use the default open sidebar and width. */ return { open: true, width: DEFAULT } }
 }
 
 /** The document shell's sidebar (open, width) and whether the home view covers the editor. */

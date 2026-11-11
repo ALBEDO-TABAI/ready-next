@@ -46,9 +46,9 @@ function SourceBlock({ block, buffer, children, report }: { block: DocumentBlock
         onChange={event => setDraft({ ...draft, text: event.target.value })}
         onKeyDown={event => {
           if (event.key === 'Escape') { event.preventDefault(); setDraft(null) }
-          if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); try { commit() } catch (error) { report(error) } }
+          if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); try { commit() } catch (error) { console.warn('[ReadyBlockEditor] commit block source with shortcut failed:', error instanceof Error ? error.message : String(error)); report(error) } }
         }} />
-      <button type="button" onClick={() => { try { commit() } catch (error) { report(error) } }}>完成</button>
+      <button type="button" onClick={() => { try { commit() } catch (error) { console.warn('[ReadyBlockEditor] commit block source failed:', error instanceof Error ? error.message : String(error)); report(error) } }}>完成</button>
       <button type="button" onClick={() => setDraft(null)}>取消</button>
     </div> : <button type="button" className="ready-block-source-edit" onClick={() => setDraft({ block, version: buffer.snapshot.version, text: block.raw.replace(/\r\n?/g, '\n') })}>
       {block.capability === 'readonly' ? '编辑这段源码' : '编辑源码'}
@@ -84,7 +84,7 @@ export function BufferedBlockEditor({ buffer, linkBase, content: displayedConten
   const report = useCallback((cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause)), [])
   const focus = (at: number, empty = false, textOffset?: number) => { setAppendPrefix(''); setEmptyAt(empty ? at : null); setFocusRequest({ at, textOffset }) }
   function travel(direction: 'undo' | 'redo') {
-    try { const selection = buffer.travel(direction); if (selection) focus(selection.focus); setError('') } catch (cause) { report(cause) }
+    try { const selection = buffer.travel(direction); if (selection) focus(selection.focus); setError('') } catch (cause) { console.warn('[ReadyBlockEditor] travel edit history failed:', cause instanceof Error ? cause.message : String(cause)); report(cause) }
   }
   useLayoutEffect(() => {
     // Native Edit-menu commands arrive as beforeinput, without a keydown.
@@ -190,7 +190,7 @@ export function BufferedBlockEditor({ buffer, linkBase, content: displayedConten
         const eol = newline(snapshot.content)
         const text = `${at && !snapshot.content.slice(0, at).endsWith('\n') ? eol + eol : ''}${title}${eol}${eol}`
         buffer.apply(createRangeEdit(snapshot, [{ start: at, end: at, expectedText: '', replacement: text }], { anchor: at, focus: at }, { anchor: at, focus: at + text.length }))
-      } catch (cause) { event.preventDefault(); event.stopPropagation(); report(cause) }
+      } catch (cause) { console.warn('[ReadyBlockEditor] insert dropped reference failed:', cause instanceof Error ? cause.message : String(cause)); event.preventDefault(); event.stopPropagation(); report(cause) }
     }}
     onKeyDownCapture={event => {
       if (event.nativeEvent.isComposing || !(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'z') return
@@ -209,7 +209,7 @@ export function BufferedBlockEditor({ buffer, linkBase, content: displayedConten
         const end = buffer.snapshot.content.length
         // The insertion's separator is committed with its text, not on click.
         setAppendPrefix(end ? newline(buffer.snapshot.content).repeat(2) : ''); setEmptyAt(end); setFocusRequest({ at: end })
-      } catch (cause) { report(cause) }
+      } catch (cause) { console.warn('[ReadyBlockEditor] append text block failed:', cause instanceof Error ? cause.message : String(cause)); report(cause) }
     }}>添加文字</button>
     </EditorTools></BlockControls>
   </div></AnnotationWorkspace>

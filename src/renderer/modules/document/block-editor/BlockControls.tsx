@@ -77,12 +77,12 @@ export function BlockControls({ buffer, linkBase, editorId, report, children }: 
       const result = action()
       if (result instanceof Promise) { void result.then(closeMenu).catch(report).finally(done); return }
       closeMenu(); done()
-    } catch (error) { report(error); done() }
+    } catch (error) { console.warn('[BlockControls] run block action failed:', error instanceof Error ? error.message : String(error)); report(error); done() }
   }
   const drop = () => {
     const current = dragRef.current; changeDrag(null)
     if (!current || current.block.id === current.target.id) return
-    try { buffer.apply(moveEdit(current.snapshot, current.block, current.target, current.placement), 'drag') } catch (error) { report(error) }
+    try { buffer.apply(moveEdit(current.snapshot, current.block, current.target, current.placement), 'drag') } catch (error) { console.warn('[BlockControls] move block failed:', error instanceof Error ? error.message : String(error)); report(error) }
   }
   let items: MenuItem[] = []
   if (menu) {
@@ -133,8 +133,8 @@ export function BlockControls({ buffer, linkBase, editorId, report, children }: 
       })))
   }
   return <Context.Provider value={{ drag, cancel: () => changeDrag(null), drop,
-    menu: (block, anchor) => { try { buffer.flush(); setMenu({ block, snapshot: buffer.snapshot, anchor }) } catch (error) { report(error) } },
-    start: block => { try { buffer.flush(); changeDrag({ block, snapshot: buffer.snapshot, target: block, placement: 'before' }) } catch (error) { report(error) } },
+    menu: (block, anchor) => { try { buffer.flush(); setMenu({ block, snapshot: buffer.snapshot, anchor }) } catch (error) { console.warn('[BlockControls] open block menu failed:', error instanceof Error ? error.message : String(error)); report(error) } },
+    start: block => { try { buffer.flush(); changeDrag({ block, snapshot: buffer.snapshot, target: block, placement: 'before' }) } catch (error) { console.warn('[BlockControls] start block drag failed:', error instanceof Error ? error.message : String(error)); report(error) } },
     over: (target, placement) => { if (dragRef.current) changeDrag({ ...dragRef.current, target, placement }) },
     step: direction => {
       const current = dragRef.current; if (!current) return

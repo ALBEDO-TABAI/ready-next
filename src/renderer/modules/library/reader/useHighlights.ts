@@ -31,7 +31,7 @@ export function useHighlights({ record, api, book, layout, flip, onError }: {
     try {
       const result = confirmed(await api.listHighlights(context))
       if (live.current && sequence === request.current && pendingDiskVersion.current !== result.version) { pendingDiskVersion.current = null; setState(result) }
-    } catch (error) { if (live.current && sequence === request.current) fail.current(String(error)) }
+    } catch (error) { console.warn('[useHighlights] read highlights failed:', error instanceof Error ? error.message : String(error)); if (live.current && sequence === request.current) fail.current(String(error)) }
   }, [api, context])
   useEffect(() => {
     live.current = true
@@ -61,7 +61,7 @@ export function useHighlights({ record, api, book, layout, flip, onError }: {
     try {
       const result = confirmed(await work(state.version))
       if (live.current) { pendingDiskVersion.current = result.persistence === 'pending_save' ? state.version : null; setState(result); close() }
-    } catch (error) { if (live.current) fail.current(String(error)) }
+    } catch (error) { console.warn('[useHighlights] save highlight change failed:', error instanceof Error ? error.message : String(error)); if (live.current) fail.current(String(error)) }
     finally { pending.current = false; if (live.current) setBusy(false) }
   }
   const save = (color: LibraryHighlightColor, note?: string) => mutate(version => {
@@ -81,7 +81,7 @@ export function useHighlights({ record, api, book, layout, flip, onError }: {
       const text = reference && selected ? `![[${name}#^${selected.id}]]` : `${selected?.text ?? lens?.draft?.text ?? ''}\n——${record.author}《${record.title}》`
       await navigator.clipboard.writeText(text)
       if (live.current) close()
-    } catch (error) { fail.current(`复制失败：${String(error)}`) }
+    } catch (error) { console.warn('[useHighlights] copy highlight failed:', error instanceof Error ? error.message : String(error)); fail.current(`复制失败：${String(error)}`) }
   }
   // Sends the passage to the AI chat as a book location (read-only; the reader's location counting is kept).
   const ask = async () => {
@@ -92,7 +92,7 @@ export function useHighlights({ record, api, book, layout, flip, onError }: {
       if (!location) throw new Error('请先选中一段文字')
       await addBookLocationToAgentInput(record.id, location, record.title, selected?.text ?? lens?.draft?.text)
       if (live.current) close()
-    } catch (error) { fail.current(error instanceof Error ? error.message : String(error)) }
+    } catch (error) { console.warn('[useHighlights] attach book location failed:', error instanceof Error ? error.message : String(error)); fail.current(error instanceof Error ? error.message : String(error)) }
   }
   const openSource = async () => {
     if (!selected) return
@@ -106,7 +106,7 @@ export function useHighlights({ record, api, book, layout, flip, onError }: {
       tabs.openTab(latest.sourcePath)
       tabs.setPendingReveal({ path: latest.sourcePath, lineStart: h.sourceLine, selection: h.text, requestedAt: Date.now() })
       close()
-    } catch (error) { fail.current(String(error)) }
+    } catch (error) { console.warn('[useHighlights] open highlight source failed:', error instanceof Error ? error.message : String(error)); fail.current(String(error)) }
   }
   return { state, listRef, lens, selected, busy: busy || !state || state.persistence === 'pending_save', onSelect, onMark, close, save, remove, copy, ask, openSource, refresh }
 }

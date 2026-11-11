@@ -10,7 +10,7 @@ export function BrowserSourceHighlight({ tabId }: { tabId: string }) {
       const result = await window.electronAPI.sourceAnnotations.web({ tabId })
       if (!result.success) throw new Error(result.error)
       setMessage(result.data.persistence === 'saved' ? '已划线到来源页' : '已加入来源页，请保存笔记')
-    } catch (error) { setMessage(error instanceof Error ? error.message : String(error)) }
+    } catch (error) { console.warn('[BrowserSourceHighlight] save web highlight failed:', error instanceof Error ? error.message : String(error)); setMessage(error instanceof Error ? error.message : String(error)) }
     finally { setSaving(false) }
   }
   return <div className="flex items-center gap-2 px-3 py-1 text-xs" aria-label="FastCard 来源标注">

@@ -118,6 +118,7 @@ export default function ChatMessages({
         if (!result.success || !result.data) throw new Error(result.error || '历史附件展示读取失败')
         if (!cancelled) setDisplayRefs({ key: displayKey, status: 'ready', rows: result.data })
       } catch (error) {
+        console.warn('[ChatMessages] load attachment display references failed:', error instanceof Error ? error.message : String(error))
         if (!cancelled) setDisplayRefs({ key: displayKey, status: 'error', reason: error instanceof Error ? error.message : String(error) })
       }
     })()

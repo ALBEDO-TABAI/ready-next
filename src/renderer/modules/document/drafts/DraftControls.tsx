@@ -16,7 +16,7 @@ export function DraftBootNotice() {
       try {
         const state = await choose()
         setSetup({ busy: false, error: state && state.status !== 'ready' ? '这个文件夹现在无法作为资料库使用，请换一个。' : '' })
-      } catch (failure) { setSetup({ busy: false, error: failure instanceof Error ? failure.message : String(failure) }) }
+      } catch (failure) { console.warn('[DraftControls] select vault failed:', failure instanceof Error ? failure.message : String(failure)); setSetup({ busy: false, error: failure instanceof Error ? failure.message : String(failure) }) }
     }
     return <div className="ink-scope ink-boot" data-draft-boot="no_vault">
       <div role="status" className="ink-boot-card">

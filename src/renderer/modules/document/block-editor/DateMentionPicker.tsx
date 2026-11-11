@@ -18,7 +18,7 @@ export function DateMentionPicker({ value, anchor, save, close, open, report }: 
       try {
         const ref = ReadyRefSchema.parse({ kind: 'day', date, ...(at ? { at } : {}), ...(remind !== '' ? { remind: Number(remind) } : {}) })
         if (ref.kind === 'day') save(ref)
-      } catch (error) { report(error) }
+      } catch (error) { console.warn('[DateMentionPicker] save date mention failed:', error instanceof Error ? error.message : String(error)); report(error) }
     }}>
     <label>日期<input aria-label="日期" type="date" required value={date} onChange={event => setDate(event.target.value)} /></label>
     <label>时间<input aria-label="时间" type="time" value={at} onChange={event => setAt(event.target.value)} /></label>

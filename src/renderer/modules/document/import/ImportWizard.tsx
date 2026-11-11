@@ -56,7 +56,7 @@ export function ImportWizard({ onClose, api = window.electronAPI.documentImport,
         const target: ImportLocation = { parentPath: selection.parentPath, parentObjectId: selection.parentObjectId, title: selection.title }
         const report = checked(await api.preflight(step.sourceId, target))
         setStep({ kind: 'confirm', sourceId: step.sourceId, report }); return { ok: true, value: report }
-      } catch (error) { return { ok: false, code: 'import_failed', message: String(error) } }
+      } catch (error) { console.warn('[ImportWizard] preflight import target failed:', error instanceof Error ? error.message : String(error)); return { ok: false, code: 'import_failed', message: String(error) } }
     }} />}
     {step.kind === 'confirm' && <><p>目标：{step.report.target?.parentPath}/{step.report.target?.title}</p><button onClick={() => setStep({ ...step, kind: 'target' })}>更换位置</button><button disabled={busy || step.report.issues.some(issue => issue.kind === 'conflict')} onClick={() => void execute(step.report.id, false)}>开始导入</button></>}
     {step.kind === 'running' && <p role="status">正在导入：{progress?.done ?? 0}/{progress?.total ?? '…'}，可以在中断后继续。</p>}

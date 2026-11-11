@@ -17,7 +17,8 @@ export const definition: DatabaseDefinition = {
 }
 export function memoryAPI(count = 2) {
   let def = structuredClone(definition), version = 'v1', state = {}
-  const rows: DatabaseRow[] = Array.from({ length: count }, (_, i) => ({ id: `row-${i}`, title: `页面${i}`, version: `r${i}`, values: { 文本: '原文', 分数: i + 1, 状态: '待办', 标签: ['甲', '乙'], 日期: { start: '2026-10-15', end: '2026-10-17' }, 类型: '书' } }))
+  const today = new Date(), month = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
+  const rows: DatabaseRow[] = Array.from({ length: count }, (_, i) => ({ id: `row-${i}`, title: `页面${i}`, version: `r${i}`, values: { 文本: '原文', 分数: i + 1, 状态: '待办', 标签: ['甲', '乙'], 日期: { start: `${month}-15`, end: `${month}-17` }, 类型: '书' } }))
   const calls: DatabaseRequest[] = []
   const api = {
     request: async (request: DatabaseRequest) => {

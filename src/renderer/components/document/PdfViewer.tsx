@@ -222,6 +222,7 @@ export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
       const digest = await crypto.subtle.digest('SHA-256', new Uint8Array(bytes).buffer)
       if (generation.current === current) setPdfHash(Array.from(new Uint8Array(digest), n => n.toString(16).padStart(2, '0')).join(''))
     } catch (error) {
+      console.error('[PdfViewer] read PDF version failed:', error instanceof Error ? error.message : String(error))
       if (generation.current === current) setNotice({ role: 'alert', text: `无法读取 PDF 版本：${error instanceof Error ? error.message : String(error)}` })
     }
   }, [])
@@ -319,6 +320,7 @@ export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
       if (!result.success) throw new Error(result.error)
       setNotice({ role: 'status', text: result.data.warning || (result.data.persistence === 'saved' ? '已划线到来源页' : '已合并到来源页，请保存') })
     } catch (error) {
+      console.error('[PdfViewer] save PDF highlight failed:', error instanceof Error ? error.message : String(error))
       if (generation.current === current) setNotice({ role: 'alert', text: error instanceof Error ? error.message : String(error) })
     } finally { if (generation.current === current) setSaving(false) }
   }

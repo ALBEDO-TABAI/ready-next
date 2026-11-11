@@ -61,6 +61,7 @@ export class NodeBuffer implements EditorBuffer {
           if (this.observed !== write.content) this.acknowledgements.push(write.content)
           this.queue.shift()
         } catch (cause) {
+          console.warn('[node-buffer] commit text card failed:', cause instanceof Error ? cause.message : String(cause))
           if (write.generation !== this.generation) continue
           this.queue = []; this.generation++
           this.error = cause instanceof Error ? cause.message : String(cause)

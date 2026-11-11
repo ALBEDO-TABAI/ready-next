@@ -40,5 +40,5 @@ export function PageDocumentEditor({ bookReading = false, ...props }: RetainedDo
 }
 
 function frontmatter(content: string): Record<string, unknown> {
-  try { return readDocumentSource(content).frontmatter } catch { return {} }
+  try { return readDocumentSource(content).frontmatter } catch { /* silent-catch: Frontmatter can be incomplete while typing; use default page presentation without changing the source text. */ return {} }
 }

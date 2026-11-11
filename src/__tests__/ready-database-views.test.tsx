@@ -6,7 +6,8 @@ import { definition, memoryAPI } from './utils/database-memory-fixture'
 import { mountDatabase, input, click, drop } from './utils/database-view-fixture'
 
 
-test('DB-B seven real views edit through the service; board/date drops change only their field', async t => {
+for (const month of ['2026-10', '2026-12']) test(`DB-B seven real views edit through the service; board/date drops change only their field (${month})`, async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: new Date(`${month}-11T12:00:00`).getTime() })
   const f = memoryAPI(), ui = await mountDatabase(t)
   for (const view of definition.views) {
     await ui.render(<Database databaseId="db" initialViewId={view.id} api={f.api} key={view.id} />)
@@ -20,9 +21,9 @@ test('DB-B seven real views edit through the service; board/date drops change on
       assert.deepEqual(f.calls.filter(c => c.type === 'setFields').at(-1)?.set, { status: '完成' })
     }
     if (view.type === 'calendar' || view.type === 'timeline') {
-      await input(ui, '[aria-label="显示月份"]', '2026-10')
-      await drop(ui, '[data-row-id="row-0"]', '[data-date="2026-10-20"]')
-      assert.deepEqual(f.calls.filter(c => c.type === 'setFields').at(-1)?.set, { date: { start: '2026-10-20', end: '2026-10-22' } })
+      await input(ui, '[aria-label="显示月份"]', month)
+      await drop(ui, '[data-row-id="row-0"]', `[data-date="${month}-20"]`)
+      assert.deepEqual(f.calls.filter(c => c.type === 'setFields').at(-1)?.set, { date: { start: `${month}-20`, end: `${month}-22` } })
     }
     await click(ui, '[aria-label="新建行"]')
     await input(ui, '[aria-label="页面标题"]', `新建-${view.id}`)

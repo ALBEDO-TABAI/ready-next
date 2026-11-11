@@ -26,7 +26,7 @@ export default function RSSSelectionReferences({ bodyRef, article, active, class
         expectedRevision: article.revision, range: ranges.selection, offset: 0, length: 24000 })
       if (!result.success) throw new Error(result.error)
       setMessage(result.data.persistence === 'saved' ? '已划线到来源页' : '已加入来源页，请保存笔记')
-    } catch (error) { setMessage(error instanceof Error ? error.message : String(error)) }
+    } catch (error) { console.warn('[RSSSelectionReferences] save RSS highlight failed:', error instanceof Error ? error.message : String(error)); setMessage(error instanceof Error ? error.message : String(error)) }
     finally { setSaving(false) }
   }
   return <>

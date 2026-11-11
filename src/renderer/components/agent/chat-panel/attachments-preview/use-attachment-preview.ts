@@ -39,6 +39,7 @@ export function useAttachmentPreview({
         }
       }
       catch (error) {
+        console.warn('[use-attachment-preview] open attachment reference failed:', error instanceof Error ? error.message : String(error))
         if (isComposerAuthorityCurrent(useAgent.getState(), composerAuthority)) {
           setActiveAttachmentPreview({ attachment, mode: 'file', error: error instanceof Error ? error.message : String(error) })
         }

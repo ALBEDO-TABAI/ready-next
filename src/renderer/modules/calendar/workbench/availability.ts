@@ -45,7 +45,7 @@ export function availabilityText(slots = getState().avail.slots): string {
   return [t('availIntro', { tz: `${gmtLabel(z)} ${z.split('/').pop()!.replace(/_/g, ' ')}` }), ...lines.map((l) => `• ${l}`)].join('\n');
 }
 export async function copyAvailability() {
-  const txt = availabilityText(); try { await navigator.clipboard.writeText(txt); } catch { toast('未能复制，请重试'); return null; }
+  const txt = availabilityText(); try { await navigator.clipboard.writeText(txt); } catch (error) { console.warn('[CalendarAvailability] copy availability failed:', error instanceof Error ? error.message : String(error)); toast('未能复制，请重试'); return null; }
   toast(t('availCopied'));
   return txt;
 }
