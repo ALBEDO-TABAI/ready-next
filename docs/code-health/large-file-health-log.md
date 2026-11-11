@@ -882,3 +882,15 @@
 | 2026-11-12 | `src/preload/index.ts` | 1755 | +2 | 一般 | 增加对象、数据库速览与资讯理由透传，书源改为返回网址，退役日历外开；2026-12-12 复查按域接线边界。 |
 | 2026-11-12 | `src/renderer/pages/modes/BrowserMode.tsx` | 1494 | +3 | 一般 | 只转发 FastCard 定位目标到现有浮窗；2026-12-12 复查模式页的功能接线边界。 |
 | 2026-11-12 | `src/renderer/types/electron.d.ts` | 3444 | +2 | 健康 | 补速览与搜索展示字段，移除未使用的日历外开声明；类型和 IPC 检查覆盖。 |
+
+
+## 2026-11-12 W6 统一拖拽与收下接线
+
+| 日期 | 文件 | 总行数 | 本轮净增 | 评级 | 说明与复查 |
+|---|---|---:|---:|---|---|
+| 2026-11-12 | `src/main/modules/agent-control/codex-runtime/composition/ingress-prepare.ts` | 1039 | +20 | 一般 | 只装配 Main 读取收集、可见对话与已保存网页摘录的入口；不增加工具或写授权。2026-12-12 复查装配边界。 |
+| 2026-11-12 | `src/preload/index.ts` | 1756 | +1 | 一般 | 只增加图片复制到页面附件目录的接口透传；2026-12-12 复查按域分组。 |
+| 2026-11-12 | `src/renderer/components/document/MarkdownEditor.tsx` | 1133 | +10 | 一般 | 源码视图拖入引用转交共享插入函数；保留原正文与撤销。2026-12-12 复查保存与拖入接线。 |
+| 2026-11-12 | `src/renderer/components/layout/FileTree.tsx` | 1889 | +1 | 一般 | 替换内部接收路径，页面与文件分别调用所属移动入口；不扩展外部剪藏。2026-12-12 复查接收边界。 |
+| 2026-11-12 | `src/renderer/modules/agent/messageComposer.ts` | 1109 | +8 | 一般 | 透传并校验当前选入的收集、对话与网页引用，历史显示不提供额外授权；2026-12-12 复查资源接线。 |
+| 2026-11-12 | `src/shared/ipc-contracts/agent-runtime.ts` | 1418 | +3 | 健康 | 增加结构化只读引用形状，实际准入在 Main 读取原服务；由类型、IPC 和行为测试覆盖。 |

@@ -1,4 +1,5 @@
 import type { FastCardItem } from '../../../shared/fastcard'
+import { ReadyRefSchema } from '../../../shared/ready-ref'
 import { fastCardItemSchema, type FastCardRepository } from '../repositories/fastcard-repository'
 import type { FastCardMediaCache } from './media-cache'
 
@@ -11,6 +12,8 @@ export class FastCardCollectionService {
   add(input: unknown): Promise<FastCardItem> {
     return this.serial(async () => {
       const parsed = fastCardItemSchema.parse(input)
+      // The shared capture entry owns provenance; callers cannot disagree about a web source.
+      if (parsed.source?.pageUrl) parsed.source.ref = ReadyRefSchema.parse({ kind: 'web', url: parsed.source.pageUrl })
       // Renderer cannot mint local-file receipts or transcription state.
       if (parsed.media || parsed.transcription || parsed.kind === 'audio') throw new Error('Media receipts are Main-owned')
       const existing = this.repository.list().find(item => item.id === parsed.id)

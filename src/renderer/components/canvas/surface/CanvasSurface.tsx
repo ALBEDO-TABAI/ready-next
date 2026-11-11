@@ -1,3 +1,4 @@
+import { writeReadyRefTransfer } from '../../../../shared/ready-ref'
 import { readEventTransfer, READY_REF_MIME } from '../../../modules/calendar/linkage/transfer'
 import { eventCard } from '../../../../shared/calendar-linkage'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -224,6 +225,13 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     finally { setComposing(false) }
   }
   return <div className="rn-canvas" data-canvas-surface data-capturing={capturing || undefined} tabIndex={0} ref={root} aria-label={canvas.ready.title || '画板'}
+    onDragStart={event => {
+      const card = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-node-id]') : null
+      const node = card?.dataset.nodeId ? byId.get(card.dataset.nodeId) : null
+      if (!event.altKey || !node || editing) { event.preventDefault(); return }
+      event.stopPropagation()
+      writeReadyRefTransfer(event.dataTransfer, { kind: 'canvas', id: canvas.ready.id, node: node.id }, node.ready.preview?.title || (node.type === 'text' ? node.text.slice(0, 100) : '画板卡片'))
+    }}
     onDragOver={event => { if (event.dataTransfer.types.includes(READY_REF_MIME) || props.acceptsDrop?.(event.dataTransfer.types)) { event.preventDefault(); event.stopPropagation() } }}
     onDrop={event => {
       try {
@@ -250,7 +258,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     }}
     onKeyDown={shortcut} onKeyUp={e => { if (e.key === ' ') gestures.space = false }}
     onFocus={() => commands.focus()} onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) gestures.cancel() }}
-    onPointerDown={e => gestures.down(e.nativeEvent)} onPointerMove={e => gestures.move(e.nativeEvent)} onPointerUp={e => gestures.up(e.nativeEvent)}
+    onPointerDown={e => { if (!e.altKey) gestures.down(e.nativeEvent) }} onPointerMove={e => gestures.move(e.nativeEvent)} onPointerUp={e => gestures.up(e.nativeEvent)}
     onPointerCancel={() => gestures.cancel()} onLostPointerCapture={() => gestures.cancel()}
     onDoubleClick={e => {
       // A drag gesture captures the pointer on the root, so the browser retargets the double-click to the root:

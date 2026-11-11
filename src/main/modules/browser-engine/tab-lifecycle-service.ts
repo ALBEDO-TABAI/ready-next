@@ -116,12 +116,6 @@ export function buildLocalMediaDropBridgeScript(): string {
       });
       const mediaExts = new Set(${mediaExts});
       const dropScheme = ${dropScheme};
-      const mimeTypes = [
-        'application/x-ready-drag',
-        'application/x-ready-file',
-        'application/x-ready-document-tab',
-        'application/x-ready-workspace-item',
-      ];
       let lastDropSignature = '';
       let lastDropAt = 0;
       const cleanExt = (value) => String(value || '').trim().toLowerCase().replace(/^\\./, '');
@@ -168,22 +162,9 @@ export function buildLocalMediaDropBridgeScript(): string {
         if (!path.startsWith('/') || !isMediaPath(path) || paths.includes(path)) return;
         paths.push(path);
       };
-      const parseReadyPayload = (raw, paths) => {
-        if (!raw) return;
-        try {
-          const parsed = JSON.parse(raw);
-          const items = parsed && parsed.type === 'batch' && Array.isArray(parsed.items)
-            ? parsed.items
-            : [parsed];
-          for (const item of items) {
-            if (item && item.type !== 'folder' && !item.isDirectory) pushPath(paths, item.path);
-          }
-        } catch {}
-      };
       const collectPaths = (dataTransfer) => {
         const paths = [];
         if (!dataTransfer) return paths;
-        for (const type of mimeTypes) parseReadyPayload(dataTransfer.getData(type), paths);
         const uriList = dataTransfer.getData('text/uri-list') || '';
         for (const line of uriList.split(/\\r?\\n/)) {
           const trimmed = line.trim();

@@ -1,3 +1,4 @@
+import { useFileDragRef } from '../../../modules/workbench/file-drag-ref'
 import { useState } from 'react'
 import {
   IconChevronDown as ChevronDown,
@@ -60,13 +61,14 @@ export function FileTreeItem({
   onRenameConfirm: (newName: string) => void
   onRenameCancel: () => void
 }) {
+  const dragRef = useFileDragRef(item.path, item.isDirectory, Number(new Date(item.modified)))
   const lineInset = 12 + depth * 22
   const isBrowserDropAccent = isBrowserDropInside || Boolean(browserDropLine)
   const [isHovered, setIsHovered] = useState(false)
 
   return (
     <div
-      draggable={draggableEnabled ?? true}
+      draggable={!!dragRef && (draggableEnabled ?? true)}
       onDragStart={(e) => {
         onDragStart?.(e)
         putDragData(e, item, dragMovable ?? true, {

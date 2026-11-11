@@ -1,36 +1,15 @@
+import { readReadyRefTransfer } from '../shared/ready-ref'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
   clampDropMenuPositionToBoundary,
-  parseBrowserTabDragPayload,
   resolveFileTreeDropTarget,
 } from '../renderer/components/layout/fileTreeExternalDrop'
 
-test('parseBrowserTabDragPayload accepts browser tab drags and rejects other payloads', () => {
-  const validPayload = JSON.stringify({
-    type: 'browser-tab',
-    tabId: 'tab-1',
-    title: 'Ready',
-    name: 'Ready',
-    url: 'https://ready.local',
-  })
-  const rssPayload = JSON.stringify({
-    type: 'rss-item',
-    id: 'rss-1',
-    name: 'Feed item',
-    link: 'https://example.com/rss',
-  })
-
-  assert.deepStrictEqual(parseBrowserTabDragPayload(validPayload), {
-    type: 'browser-tab',
-    tabId: 'tab-1',
-    title: 'Ready',
-    name: 'Ready',
-    url: 'https://ready.local',
-  })
-  assert.strictEqual(parseBrowserTabDragPayload(rssPayload), null)
-  assert.strictEqual(parseBrowserTabDragPayload('not-json'), null)
+test('retired browser-tab payload is rejected by the unified receiver', () => {
+  const payload = JSON.stringify({ type: 'browser-tab', tabId: 'tab', url: 'https://example.com', title: '网页', name: '网页' })
+  assert.equal(readReadyRefTransfer({ getData: type => type === 'application/x-ready-ref' ? payload : '' }), null)
 })
 
 test('resolveFileTreeDropTarget highlights directory bodies as inside drops', () => {

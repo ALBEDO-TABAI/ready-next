@@ -1,3 +1,4 @@
+import { READY_REF_MIME } from '../../../shared/ready-ref'
 import { useCallback, useMemo } from 'react'
 
 import type { BrowserTab } from '../../stores/useBrowserTabs'
@@ -259,8 +260,7 @@ export function useBrowserTabActions({
     const types = new Set(Array.from(event.dataTransfer.types || []))
     const canAccept =
       types.has('Files') ||
-      types.has('application/x-ready-drag') ||
-      types.has('application/x-ready-file') ||
+      types.has(READY_REF_MIME) ||
       types.has('text/plain')
     if (!canAccept) return
     event.preventDefault()

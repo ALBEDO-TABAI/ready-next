@@ -178,9 +178,24 @@ export function isReadyUri(uri: string): boolean {
 
 /** The one internal drag format (W6 §3.1): the reference as JSON, its ready:// address, and the title as plain text. */
 export const READY_REF_MIME = 'application/x-ready-ref'
-export function writeReadyRefTransfer(data: { setData(format: string, value: string): void }, input: ReadyRef, title: string): void {
-  const ref = ReadyRefSchema.parse(input)
-  data.setData(READY_REF_MIME, JSON.stringify(ref))
-  data.setData('text/uri-list', toReadyUri(ref))
+export function writeReadyRefTransfer(data: { setData(format: string, value: string): void }, input: ReadyRef | ReadyRef[], title: string): void {
+  const refs = z.array(ReadyRefSchema).min(1).max(500).parse(Array.isArray(input) ? input : [input])
+  data.setData(READY_REF_MIME, JSON.stringify(refs.length === 1 ? refs[0] : refs))
+  data.setData('text/uri-list', refs.map(toReadyUri).join('\n'))
   data.setData('text/plain', title)
+}
+
+/** Foreign or malformed drops are rejected, never interpreted as a title or a filesystem path. */
+export function readReadyRefTransfer(data: { getData(format: string): string }): { ref: ReadyRef; title: string } | null {
+  return readReadyRefTransfers(data)[0] ?? null
+}
+
+export function readReadyRefTransfers(data: { getData(format: string): string }): Array<{ ref: ReadyRef; title: string }> {
+  const raw = data.getData(READY_REF_MIME)
+  if (!raw) return []
+  let value: unknown
+  try { value = JSON.parse(raw) } catch { return [] }
+  const parsed = z.array(ReadyRefSchema).min(1).max(500).safeParse(Array.isArray(value) ? value : [value])
+  const titles = data.getData('text/plain').split('\n')
+  return parsed.success ? parsed.data.map((ref, i) => ({ ref, title: titles[i] || titles[0] || '引用' })) : []
 }

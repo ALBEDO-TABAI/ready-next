@@ -104,6 +104,7 @@ export async function loadObjectPreview(input: ReadyRef): Promise<ObjectPreview>
       const result = await api.agent.getConversationScopeMessages(ref.id)
       if (!result.success || !result.data) throw new Error(result.error || '会话无法读取')
       const turn = conversationTurn(result.data, ref.run)
+      turn.answer = turn.answer.slice(0, 1200)
       return summary(scope.title || '对话', [turn.question, turn.answer].join('\n\n'), { kind: 'conversation', scopeId: ref.id, run: ref.run, ...turn })
     }
     case 'fastcard': {

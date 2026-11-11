@@ -1,3 +1,5 @@
+import { prepareFileDragRef } from '../renderer/modules/workbench/file-drag-ref'
+import { beginWorkspaceDragSession } from '../renderer/components/layout/workspaceDragSession'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
@@ -46,16 +48,24 @@ const folder: FileItem = {
   modified: new Date('2026-01-01T00:00:00Z'),
 }
 
-test('file tree drag writes a Ready payload for a single unselected file', () => {
+async function prepare() {
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { electronAPI: { objects: { resolvePath: async (path: string) => ({ objectId: path.split('/').pop(), path }) } } } })
+  try { await prepareFileDragRef(fileA.path); await prepareFileDragRef(fileB.path) }
+  finally { Reflect.deleteProperty(globalThis, 'window') }
+}
+
+test('file tree drag writes a Ready payload for a single unselected file', async () => {
+  await prepare()
   const payload = buildWorkspaceDragTransferPayload(fileA, true)
   const dataTransfer = new FakeDataTransfer()
 
+  beginWorkspaceDragSession(payload.type === 'batch' ? payload.items : [payload])
   writeWorkspaceDragData(dataTransfer, payload)
 
   assert.deepEqual(getWorkspaceDragPaths(payload), ['/workspace/a.md'])
   assert.equal(dataTransfer.effectAllowed, 'copyMove')
-  assert.equal(dataTransfer.getData('text/plain'), '/workspace/a.md')
-  assert.equal(dataTransfer.getData('text/uri-list'), 'file:///workspace/a.md')
+  assert.equal(dataTransfer.getData('text/plain'), 'a.md')
+  assert.equal(dataTransfer.getData('text/uri-list'), 'ready://doc/page/a.md')
   assert.deepEqual(parseWorkspaceDragPayloads(dataTransfer), [
     {
       type: 'file',
@@ -69,14 +79,16 @@ test('file tree drag writes a Ready payload for a single unselected file', () =>
   ])
 })
 
-test('file tree drag keeps multi-selected files as a batch payload', () => {
+test('file tree drag keeps multi-selected files as a batch payload', async () => {
+  await prepare()
   const payload = buildWorkspaceDragTransferPayload(fileA, true, [fileA, folder, fileB, fileA])
   const dataTransfer = new FakeDataTransfer()
 
+  beginWorkspaceDragSession(payload.type === 'batch' ? payload.items : [payload])
   writeWorkspaceDragData(dataTransfer, payload)
 
   assert.deepEqual(getWorkspaceDragPaths(payload), ['/workspace/a.md', '/workspace/b.md'])
-  assert.equal(dataTransfer.getData('text/plain'), '/workspace/a.md\n/workspace/b.md')
+  assert.equal(dataTransfer.getData('text/plain'), 'a.md\nb.md')
   assert.deepEqual(
     parseWorkspaceDragPayloads(dataTransfer).map((item) => item.path),
     ['/workspace/a.md', '/workspace/b.md'],

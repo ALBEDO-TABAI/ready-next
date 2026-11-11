@@ -1,5 +1,5 @@
 import { libraryResourceSelectionSchema } from '../../../shared/ipc-contracts/agent-runtime'
-import { parseReadyUri, toReadyUri } from '../../../shared/ready-ref'
+import { parseReadyUri, toReadyUri, ReadyRefSchema } from '../../../shared/ready-ref'
 import { RSSReferenceSchema } from '../../../shared/rss-reference'
 import type { ChatAttachment } from './types'
 import { buildActiveDocumentContext } from './documentActions'
@@ -169,7 +169,9 @@ export function extractAttachmentsFromMeta(meta?: Record<string, unknown>): Chat
       const name = String(record.name || '').trim()
       const path = String(record.path || '').trim()
       if (!name || (!path && !['calendar-event', 'document-tab', 'document-quote', 'browser-tab', 'rss-reference'].includes(String(record.source)))) return null
+      const ready = ReadyRefSchema.safeParse(record.readyRef)
       return {
+        readyRef: ready.success && (ready.data.kind === 'fastcard' || ready.data.kind === 'conversation' || ready.data.kind === 'web') ? ready.data : undefined,
         id: String(record.id || `remote-attachment-${index}`),
         name,
         path,
@@ -419,6 +421,7 @@ export function serializePersistedAttachments(attachments: ChatAttachment[]): Ar
       size: attachment.size,
       ext: attachment.ext,
       source: attachment.source,
+      readyRef: attachment.readyRef,
       url: attachment.url,
       title: attachment.title,
       documentTitle: attachment.documentTitle,
@@ -481,6 +484,11 @@ export async function buildCodexIngressInputWithDiagnostics(params: {
   const resources: SendScopedResourceSelection[] = []
 
   for (const attachment of params.attachments) {
+    if (attachment.readyRef) {
+      resources.push({ kind: 'ready_reference', id: attachment.id, name: attachment.name, ref: attachment.readyRef })
+      diagnostics.inputIncludedCount += 1
+      continue
+    }
     if (attachment.source === 'skill-folder') {
       resources.push({
         kind: 'skill',

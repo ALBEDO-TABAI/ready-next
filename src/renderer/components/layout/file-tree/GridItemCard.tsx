@@ -1,3 +1,4 @@
+import { useFileDragRef } from '../../../modules/workbench/file-drag-ref'
 import type React from 'react'
 import { IconFolder as Folder } from '@tabler/icons-react'
 import type { FileItem } from '../../../stores/useWorkspace'
@@ -50,6 +51,7 @@ export function GridItemCard({
   onDragLeave?: (e: React.DragEvent) => void
   onDrop?: (e: React.DragEvent) => void
 }) {
+  const dragRef = useFileDragRef(item.path, item.isDirectory, Number(new Date(item.modified)))
   const kind = getFileKind(item)
   const canPreviewImage = kind === 'image' && !item.isDirectory
   const previewHeight = Math.max(52, Math.round(thumbnailSize * 0.62))
@@ -60,7 +62,7 @@ export function GridItemCard({
 
   return (
     <button
-      draggable
+      draggable={!!dragRef}
       onDragStart={(e) => {
         onDragStart?.(e)
         putDragData(e, item, dragMovable ?? true, {

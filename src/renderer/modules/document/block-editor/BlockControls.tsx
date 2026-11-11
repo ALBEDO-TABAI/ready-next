@@ -9,13 +9,13 @@ import { CommandMenu, type MenuAnchor, type MenuItem } from './CommandMenu'
 import { inlineMarkdown, newline } from './editing'
 import type { EditorBuffer } from './editor-buffer'
 import type { EditorLinkBase } from './references'
-import { toReadyUri } from '../../../../shared/ready-ref'
+import { toReadyUri, writeReadyRefTransfer } from '../../../../shared/ready-ref'
 
 interface Drag { block: DocumentBlock; snapshot: DocumentBuffer; target: DocumentBlock; placement: 'before' | 'after' }
 interface Controls {
   menu(block: DocumentBlock, anchor: MenuAnchor): void
   drag: Drag | null
-  start(block: DocumentBlock): void
+  start(block: DocumentBlock, data?: DataTransfer): void
   over(block: DocumentBlock, placement: 'before' | 'after'): void
   drop(): void
   cancel(): void
@@ -134,7 +134,17 @@ export function BlockControls({ buffer, linkBase, editorId, report, children }: 
   }
   return <Context.Provider value={{ drag, cancel: () => changeDrag(null), drop,
     menu: (block, anchor) => { try { buffer.flush(); setMenu({ block, snapshot: buffer.snapshot, anchor }) } catch (error) { console.warn('[BlockControls] open block menu failed:', error instanceof Error ? error.message : String(error)); report(error) } },
-    start: block => { try { buffer.flush(); changeDrag({ block, snapshot: buffer.snapshot, target: block, placement: 'before' }) } catch (error) { console.warn('[BlockControls] start block drag failed:', error instanceof Error ? error.message : String(error)); report(error) } },
+    start: (block, data) => { try {
+      buffer.flush()
+      if (data && owner.kind === 'document') {
+        const tab = useDocTabs.getState().tabs.find(tab => tab.id === owner.tabId)
+        if (tab?.objectId) {
+          const id = explicitBlockId(buffer.snapshot.content, block)
+          writeReadyRefTransfer(data, { kind: 'page', id: tab.objectId, ...(id ? { anchor: '^' + id } : {}) }, block.raw.slice(0, 120).replace(/[\r\n]/g, ' '))
+        }
+      }
+      changeDrag({ block, snapshot: buffer.snapshot, target: block, placement: 'before' })
+    } catch (error) { console.warn('[BlockControls] start block drag failed:', error instanceof Error ? error.message : String(error)); report(error) } },
     over: (target, placement) => { if (dragRef.current) changeDrag({ ...dragRef.current, target, placement }) },
     step: direction => {
       const current = dragRef.current; if (!current) return
@@ -161,7 +171,7 @@ export function BlockShell({ block, line, actionable, children }: { block: Docum
       controls.over(block, event.clientY < rect.top + rect.height / 2 ? 'before' : 'after')
     }} onDrop={event => { if (actionable) { event.preventDefault(); event.stopPropagation(); controls.drop() } }}>
     {actionable && <button type="button" className="ready-block-handle" aria-label="块菜单" title="块菜单；空格开始移动" draggable
-      onDragStart={event => { event.stopPropagation(); event.dataTransfer.setData('text/plain', block.raw); controls.start(block) }}
+      onDragStart={event => { event.stopPropagation(); controls.start(block, event.dataTransfer) }}
       onDragEnd={() => controls.cancel()} onClick={event => controls.menu(block, event.currentTarget.getBoundingClientRect())}
       onKeyDown={event => {
         if (![' ', 'Enter', 'Escape', 'ArrowUp', 'ArrowDown'].includes(event.key)) return

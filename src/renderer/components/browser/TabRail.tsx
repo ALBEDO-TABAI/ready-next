@@ -1,3 +1,4 @@
+import { ReadyRefSchema, writeReadyRefTransfer } from '../../../shared/ready-ref'
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { ChevronLeft, ChevronRight, Globe, Loader2, Lock, Plus, Star, X } from 'lucide-react'
 import { MorphTabButton, MorphTabStrip } from '../motion/MorphTabStrip'
@@ -136,8 +137,8 @@ export default function TabRail({
       draggedAt: Date.now(),
     }
     beginBrowserTabDragSession(payload)
-    const data = JSON.stringify(payload)
-    event.dataTransfer.setData('application/x-ready-drag', data)
+    const ref = ReadyRefSchema.safeParse({ kind: 'web', url: tab.url })
+    if (ref.success) writeReadyRefTransfer(event.dataTransfer, ref.data, tab.title || tab.url)
   }, [])
 
   const referenceBrowserTab = useCallback((event: React.MouseEvent, tab: BrowserTab) => {

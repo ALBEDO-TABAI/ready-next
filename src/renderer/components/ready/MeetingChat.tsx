@@ -1,3 +1,4 @@
+import { READY_REF_MIME, readReadyRefTransfer } from '../../../shared/ready-ref'
 import { useRef, useEffect, useState, useCallback } from 'react'
 import { useAgent } from '../../stores/useAgent'
 
@@ -61,7 +62,7 @@ export default function MeetingChat({ onFileDrop }: MeetingChatProps) {
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    if (e.dataTransfer.types.includes('application/x-ready-file')) {
+    if (e.dataTransfer.types.includes(READY_REF_MIME)) {
       setIsDragOver(true)
       e.dataTransfer.dropEffect = 'copy'
     }
@@ -78,14 +79,11 @@ export default function MeetingChat({ onFileDrop }: MeetingChatProps) {
     e.stopPropagation()
     setIsDragOver(false)
 
-    const fileData = e.dataTransfer.getData('application/x-ready-file')
-    if (fileData) {
-      try {
-        const { path, name } = JSON.parse(fileData)
-        onFileDrop?.(path, name)
-      } catch {
-        // Ignore parse errors
-      }
+    const dropped = readReadyRefTransfer(e.dataTransfer)
+    if (dropped?.ref.kind === 'file' || dropped?.ref.kind === 'page') {
+      void window.electronAPI.objects.locate(dropped.ref.id).then(location => {
+        if (location) onFileDrop?.(location.path, dropped.title)
+      }).catch(error => console.warn('[MeetingChat] drop failed', error))
     }
   }, [onFileDrop])
 

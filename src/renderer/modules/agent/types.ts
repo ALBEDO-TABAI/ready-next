@@ -59,6 +59,7 @@ export interface Agent {
 }
 
 export interface ChatAttachment {
+  readyRef?: Extract<import('../../../shared/ready-ref').ReadyRef, { kind: 'fastcard' | 'conversation' | 'web' }>
   id: string
   name: string
   path: string

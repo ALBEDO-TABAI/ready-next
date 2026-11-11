@@ -1,3 +1,4 @@
+import { prepareFileDragRef } from '../renderer/modules/workbench/file-drag-ref'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createElement, type DragEvent as ReactDragEvent } from 'react'
@@ -20,6 +21,13 @@ import {
 import { useMode } from '../renderer/stores/useMode'
 import { useBrowserTabActions } from '../renderer/modules/browser/useBrowserTabActions'
 import { getDroppedFilesFromDataTransfer } from '../renderer/utils/dragDrop'
+
+async function readyPayload(path: string) {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'window')
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { electronAPI: { objects: { resolvePath: async () => ({ objectId: path, path }) } } } })
+  try { return JSON.stringify(await prepareFileDragRef(path)) }
+  finally { if (previous) Object.defineProperty(globalThis, 'window', previous); else Reflect.deleteProperty(globalThis, 'window') }
+}
 
 test('browser local media upload accepts image and video files only', () => {
   assert.equal(isBrowserLocalMediaUploadFile({ path: '/tmp/a.png' }), true)
@@ -56,16 +64,11 @@ test('browser local media drop URL preserves coordinates and filters non-media f
   assert.equal(parseBrowserLocalMediaDropUrl('file:///tmp/a.png'), null)
 })
 
-test('browser local media drag parsing accepts document tab and standard file URI payloads', () => {
-  const docTabPayload = JSON.stringify({
-    type: 'doc-tab',
-    path: '/tmp/from-tab.webp',
-    name: 'from-tab.webp',
-    ext: '.webp',
-  })
+test('browser local media drag parsing accepts Ready references and standard file URI payloads', async () => {
+  const docTabPayload = await readyPayload('/tmp/from-tab.webp')
   const files = getDroppedFilesFromDataTransfer({
     getData: (format: string) => {
-      if (format === 'application/x-ready-drag') return docTabPayload
+      if (format === 'application/x-ready-ref') return docTabPayload
       if (format === 'text/uri-list') return 'file:///tmp/from-uri.mp4'
       return ''
     },
@@ -74,7 +77,7 @@ test('browser local media drag parsing accepts document tab and standard file UR
   assert.deepEqual(files.map((file) => file.path), ['/tmp/from-tab.webp', '/tmp/from-uri.mp4'])
 })
 
-test('browser local media drag bridge starts native file drag when browser is visible', () => {
+test('browser local media drag bridge starts native file drag when browser is visible', async () => {
   const previousWindow = (globalThis as { window?: unknown }).window
   const eventTarget = new EventTarget() as EventTarget & {
     electronAPI?: { startNativeFileDrag?: (paths: string[]) => void }
@@ -91,19 +94,13 @@ test('browser local media drag bridge starts native file drag when browser is vi
   const previousSplitMode = previousMode.splitMode
   previousMode.setWorkbenchMode('browser')
   previousMode.setSplitMode(null)
-  const payload = JSON.stringify({
-    type: 'file',
-    path: '/tmp/upload.jpg',
-    name: 'upload.jpg',
-    ext: 'jpg',
-    isDirectory: false,
-  })
+  const payload = await readyPayload('/tmp/upload.jpg')
   let prevented = false
 
   try {
     const didStart = startBrowserLocalMediaNativeFileDrag({
       dataTransfer: {
-        getData: (format: string) => format === 'application/x-ready-drag' ? payload : '',
+        getData: (format: string) => format === 'application/x-ready-ref' ? payload : '',
         files: [],
       } as unknown as DataTransfer,
       preventDefault: () => {
@@ -177,18 +174,13 @@ test('generated image HTML drop uploads the cached image to the active webpage',
     flushSync(() => root.render(createElement(Harness)))
     assert.ok(handleDrop)
     let prevented = false
+    const payload = await readyPayload('/tmp/ready-image-generation/generated.png')
     handleDrop({
       dataTransfer: {
-        types: ['application/x-ready-drag'],
+        types: ['application/x-ready-ref'],
         files: [],
-        getData: (format: string) => format === 'application/x-ready-drag'
-          ? JSON.stringify({
-            type: 'file',
-            path: '/tmp/ready-image-generation/generated.png',
-            name: 'generated.png',
-            ext: 'png',
-            size: 128,
-          })
+        getData: (format: string) => format === 'application/x-ready-ref'
+          ? payload
           : '',
       },
       preventDefault: () => { prevented = true },

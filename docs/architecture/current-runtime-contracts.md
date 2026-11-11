@@ -204,6 +204,8 @@
 
 ## 7. 文档与 Widget
 
+- Ready Next W6 T5/T6：内部对象拖拽只写 `application/x-ready-ref`（单个 ReadyRef，或批量 ReadyRef 数组），并附 `text/uri-list`、标题纯文本；旧 MIME 的生产字面量由 `scripts/check-drag-formats.cjs` 阻断。文件在展示时准备对象身份，拖放不传路径或授权；模块内排序保留本次手势状态。文档经原缓冲插入 Markdown 引用，图片 FastCard 由 Main 校验缓存并复制到页面 `.assets` 后才插入；异步期间的正文修改不能被覆盖。画板经现有写入/转存，日历一次提交事件和关联，页面树只接整个页面或文件，带锚点的块、划线与 PDF 选区不能移动整个来源。FastCard 新收下内容复用 `browser:fastCardAdd`，`source.ref` 由共享 schema 校验，`pageUrl` 存在时由 Main 确定网页出处；画板保留该出处。助手沿现有资源准入，新增 `ready_reference` 只读取 Main 保存的 FastCard/对话/网页摘录（未打开的网页只带地址与已有摘录），不签发工具或写权限；回答存为页面经可恢复草稿、现有保存位置请求和定稿入口，保留 `ready_source`。非视觉接线见 `modules/workbench/capture.ts`、`modules/agent/drop-reference.ts`；隐藏窗口验收入口 `scripts/verify-ready-next-capture.cjs` 使用合成选区输入，覆盖内容、出处及附件读回，不代替按钮与选区浮动条验收。
+
 ### Ready Next M4 画板与 FastCard（2026-10-31）
 
 - `.canvas` 在 DocumentMode 使用 CanvasSurface 与成文卡片组合；生产写入统一经过 CanvasService，确认落盘后刷新画板。文字卡消费现有块编辑器，提交携带文件及正文版本；跨窗口更新不能把旧正文直接覆盖到文件。

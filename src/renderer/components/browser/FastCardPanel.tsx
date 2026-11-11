@@ -1,3 +1,4 @@
+import { writeReadyRefTransfer } from '../../../shared/ready-ref'
 import { useEffect, useRef, useState } from 'react'
 import { SaveToPicker } from '../../modules/document/page-ui/SaveToPicker'
 import type { PageNode, PageResult } from '../../../shared/document-pages'
@@ -62,7 +63,7 @@ export default function FastCardPanel({ revealTarget, items, syncState, onCollap
         ) : items.map(item => {
           const title = itemTitle(item), preview = itemPreview(item), checked = chosen.includes(item.id)
           return <article data-fastcard-id={item.id} tabIndex={-1} className="fc-card" data-selected={checked || undefined} key={item.id} draggable
-            onDragStart={event => { event.dataTransfer.setData('application/x-ready-fastcard', JSON.stringify({ itemIds: checked ? chosen : [item.id], operationId: crypto.randomUUID() })); event.dataTransfer.effectAllowed = 'move' }}>
+            onDragStart={event => { writeReadyRefTransfer(event.dataTransfer, (checked ? chosen : [item.id]).map(id => ({ kind: 'fastcard', id })), (checked ? items.filter(value => chosen.includes(value.id)) : [item]).map(value => value.title || '收集').join('\n')); event.dataTransfer.effectAllowed = 'move' }}>
             <div className="fc-card__head">
               <input type="checkbox" className="fc-card__check" aria-label={`选择 ${title}`} checked={checked} onChange={event => toggle(item.id, event.target.checked)} />
               <span className="fc-card__kind" aria-hidden>{itemIcon(item.kind)}</span>

@@ -1360,6 +1360,7 @@ const canvasCompositionAPI: import('../shared/document-drafts').CanvasCompositio
   preview: input => ipcRenderer.invoke('canvasComposition:preview', input),
 }
 const fastCardAPI: import('../shared/fastcard').FastCardTransferAPI & import('../shared/fastcard').FastCardQuickNoteAPI = {
+  documentImage: input => ipcRenderer.invoke('fastcard:documentImage', input),
   transfer: input => ipcRenderer.invoke('fastcard:transfer', input),
   undo: id => ipcRenderer.invoke('fastcard:undo', id),
   targets: () => ipcRenderer.invoke('fastcard:targets'),

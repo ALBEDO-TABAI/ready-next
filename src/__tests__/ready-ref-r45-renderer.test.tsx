@@ -21,7 +21,8 @@ test('R45 generators, persistence, drop and click share ReadyRef while resource 
   let stale = false
   Object.defineProperty(dom.window, 'electronAPI', { value: {
     objects: { onMoved: () => () => {}, resolvePath: async (path: string) => ({ objectId: 'doc', path, revision: 1 }), locate: async () => ({ objectId: 'doc', path: '/fixture/renamed.md', revision: 2 }) },
-    browser: { createTab: async (url: string) => { calls.push(['web', url]); return { success: true, tabId: 'opened', title: 'Page' } } },
+    document: { stat: async () => ({ success: true, data: { isDirectory: false } }) },
+    browser: { getTabs: async () => [{ id: 'drop', url: 'https://example.test/drop' }], createTab: async (url: string) => { calls.push(['web', url]); return { success: true, tabId: 'opened', title: 'Page' } } },
     rss: {
       readArticle: async (read: unknown) => { calls.push(['article', read]); return { success: true, data: { article: { revision: 'v1' } } } },
       readExcerpt: async (read: unknown) => { calls.push(['excerpt', read]); return stale ? { success: false, error: 'article_changed' } : { success: true, data: { text: 'exact' } } },
@@ -79,14 +80,14 @@ test('R45 generators, persistence, drop and click share ReadyRef while resource 
   }
   root = createRoot(dom.window.document.getElementById('root')!)
   flushSync(() => root!.render(createElement(Harness)))
-  for (const payload of [{ type: 'browser-tab', name: 'Drop web', tabId: 'drop', url: 'https://example.test/drop' }, { type: 'doc-tab', name: 'Drop doc', path: '/fixture/a.md', selection: 'new edits', dirty: true }]) {
+  for (const payload of [{ kind: 'web', url: 'https://example.test/drop' }, { kind: 'page', id: 'doc' }]) {
     const event = new dom.window.Event('drop', { bubbles: true, cancelable: true })
-    Object.defineProperty(event, 'dataTransfer', { value: { files: [], getData: (mime: string) => mime === 'application/x-ready-drag' ? JSON.stringify(payload) : '' } })
+    Object.defineProperty(event, 'dataTransfer', { value: { files: [], types: ['application/x-ready-ref'], getData: (mime: string) => mime === 'application/x-ready-ref' ? JSON.stringify(payload) : '' } })
     dom.window.document.getElementById('root')!.firstElementChild!.dispatchEvent(event)
     await new Promise(resolve => setImmediate(resolve))
   }
-  assert.deepEqual(dropped.map(a => a.path), ['ready://web?url=https%3A%2F%2Fexample.test%2Fdrop', 'ready://doc/page/doc'])
-  assert.equal(dropped[1].selection, 'new edits')
+  assert.deepEqual(dropped.map(a => a.path), ['ready://web?url=https%3A%2F%2Fexample.test%2Fdrop', '/fixture/renamed.md'])
+  assert.equal(dropped[1].source, 'file')
   await preview(restored[0]); assert.deepEqual(calls.at(-1), ['web', 'https://example.test/page'])
   await preview(doc); assert.equal(useDocTabs.getState().tabs.find(tab => tab.id === useDocTabs.getState().activeTabId)?.path, '/fixture/renamed.md')
   await preview(savedQuote); assert.equal(useDocTabs.getState().pendingReveal?.selection, 'saved selection')

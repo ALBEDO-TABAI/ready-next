@@ -1,4 +1,8 @@
 import { productionLibraryReader } from '../library-read-production'
+import { readCapturedReference } from '../captured-reference'
+import { readStoredObjectPreview } from '../../../object-service/preview'
+import { toReadyUri } from '../../../../../shared/ready-ref'
+import { FastCardRepository } from '../../../repositories/fastcard-repository'
 import { libraryTools } from '../library-read-resources'
 import { ObjectPresentationService } from '../../../object-service/presentation'
 import { ObjectRegistry } from '../../../object-service/registry'
@@ -285,6 +289,22 @@ export function createIngressPrepare(deps: IngressPrepareDeps) {
       }
       const currentResourceSelections = withProjectDirectorySelection(settledRSS.selections, projectDirectory)
       const explicitResources = await resolveCodexExplicitResources({
+        resolveReadyReference: async selection => {
+          if (scope.sourceKind !== 'local') throw new Error('引用只允许在本地对话中选入')
+          if (selection.ref.kind === 'web') {
+            const preview = await readStoredObjectPreview(new ObjectRegistry(rawDb), selection.ref)
+            if (preview?.kind !== 'web') throw new Error('网页引用不可用')
+            const text = JSON.stringify(preview)
+            return { name: preview.title, text, path: toReadyUri(selection.ref), digest: sha256(text) }
+          }
+          return readCapturedReference(selection.ref, {
+            cards: () => new FastCardRepository(rawDb).list(),
+            conversation: id => {
+              if (!input.database.chat.getConversationScope(id)) throw new Error('对话已不存在或不可见')
+              return input.database.chat.getChatMessages(id).map(row => ({ id: row.id, role: row.role, content: row.content, meta: JSON.parse(row.meta_json || '{}') }))
+            },
+          })
+        },
         resolveLocalObject: path => new ObjectPresentationService(new ObjectRegistry(rawDb)).resolve(path),
         selections: currentResourceSelections,
         resolveLibrary: async selection => {
