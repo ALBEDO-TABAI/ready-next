@@ -14,6 +14,7 @@ import RSSExportButton from '../../components/rss/RSSExportButton'
 import AddSourceModal from '../../components/rss/AddSourceModal'
 import RSSSettingsPanel from '../../components/rss/RSSSettingsPanel'
 import { RSSSieveView } from '../../components/rss/RSSSieveView'
+import { RSSSieveSettings } from '../../components/rss/RSSSieveSettings'
 import { noteRSSBehavior } from '../../modules/rss/record-behavior'
 import Modal from '../../components/ui/Modal'
 import { useModal } from '../../components/ui/useModal'
@@ -119,6 +120,8 @@ export default function RSSMode({
   const [showOrganization, setShowOrganization] = useState(false)
   // Set when the editor opens on one column from another view (the digest's 收录范围); closing returns there.
   const [organizationFocus, setOrganizationFocus] = useState<string | undefined>()
+  // A topic opened from 筛子设置 returns there when its editor closes; opened from elsewhere, closing leaves both.
+  const [editorFromSettings, setEditorFromSettings] = useState(false)
   // The live page opened beside the reader; it belongs to the article being read.
   const [originalItem, setOriginalItem] = useState<RSSItem | null>(null)
   const [selectedItem, setSelectedItem] = useState<RSSItem | null>(null)
@@ -618,7 +621,7 @@ export default function RSSMode({
                 managing={showOrganization}
                 onSieve={() => { closeOverlays(); setDigestView(false); setShowOrganization(false); setSieveView(true) }}
                 onDigests={() => { closeOverlays(); setShowOrganization(false); setSieveView(false); setDigestView(true) }}
-                onManage={(focus) => { closeOverlays(); setDigestView(false); setOrganizationFocus(focus); setShowOrganization(true) }}
+                onManage={(focus) => { closeOverlays(); setDigestView(false); setEditorFromSettings(false); setOrganizationFocus(focus); setShowOrganization(true) }}
                 onSources={() => setSettingsOpen((open) => !open)}
                 onNavigate={(patch) => { closeOverlays(); setDigestView(false); setShowOrganization(false); setSieveView(false); setQuery(patch) }}
               />
@@ -695,7 +698,10 @@ export default function RSSMode({
                   />
                 </div>
 
-                {showOrganization && <RSSDefinitionEditor key={organizationFocus || 'manage'} initialId={organizationFocus} definitions={definitions} active={surfaceActive} onClose={() => { setShowOrganization(false); setOrganizationFocus(undefined) }} onSaved={(deletedId) => {
+                {showOrganization && !organizationFocus && <RSSSieveSettings definitions={definitions} active={surfaceActive}
+                  onEditTopic={(id) => { setEditorFromSettings(true); setOrganizationFocus(id) }} />}
+                {showOrganization && organizationFocus && <RSSDefinitionEditor key={organizationFocus} initialId={organizationFocus} definitions={definitions} active={surfaceActive}
+                  onClose={() => { setOrganizationFocus(undefined); if (editorFromSettings) setEditorFromSettings(false); else setShowOrganization(false) }} onSaved={(deletedId) => {
                   const current = useRSSSession.getState().query
                   if (deletedId && (current.collectionId === deletedId || current.categoryId === deletedId)) setQuery({ collectionId: undefined, categoryId: undefined, scope: 'inbox', filter: 'all' })
                 }} />}

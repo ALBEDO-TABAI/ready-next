@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity,
   CheckCircle2,
   Database,
   Download,
+  Upload,
   ExternalLink,
   Loader2,
   RefreshCw,
@@ -297,6 +298,29 @@ export default function RSSSettingsPanel({
     }
   }, [])
 
+  // OPML import (W5-T6): sources already subscribed stay as they are; the file is read here, parsed and saved in Main.
+  const opmlInput = useRef<HTMLInputElement>(null)
+  const importOpml = useCallback(async (file: File) => {
+    setBusyKey('import-opml')
+    try {
+      const result = await window.electronAPI.rss.importOpml({ xml: await file.text() })
+      if (!result.success) {
+        setNotice({ kind: 'error', message: result.error || '导入 OPML 失败' })
+        return
+      }
+      const { added, existing } = result.data
+      setNotice({ kind: 'success', message: added
+        ? `已导入 ${added} 个订阅源${existing ? `，另有 ${existing} 个本来就在订阅里` : ''}`
+        : `文件里的 ${existing} 个订阅源都已在订阅里，没有新增` })
+      await loadPanelData()
+      await onReloadData()
+    } catch (cause) {
+      setNotice({ kind: 'error', message: cause instanceof Error ? cause.message : String(cause) })
+    } finally {
+      setBusyKey(null)
+    }
+  }, [loadPanelData, onReloadData])
+
   const exportCurrentFeed = useCallback(async () => {
     if (!window.electronAPI?.rss?.exportFeed) return
     setBusyKey('export-feed')
@@ -572,9 +596,20 @@ export default function RSSSettingsPanel({
             导入导出
           </div>
           <div className="rss-settings-section-note">
-            导出会写入 Ready 的 RSS 产物目录，不改变当前订阅源。
+            导入 OPML 会把文件里的订阅源加进来，已有的不变；导出会写入 Ready 的 RSS 产物目录，不改变当前订阅源。
           </div>
           <div className="rss-settings-actions">
+            <button
+              type="button"
+              className="rss-settings-button"
+              disabled={busyKey === 'import-opml'}
+              onClick={() => opmlInput.current?.click()}
+            >
+              {busyKey === 'import-opml' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+              导入 OPML
+            </button>
+            <input ref={opmlInput} type="file" accept=".opml,.xml,text/xml,application/xml" hidden aria-label="选择 OPML 文件"
+              onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void importOpml(file) }} />
             <button
               type="button"
               className="rss-settings-button"

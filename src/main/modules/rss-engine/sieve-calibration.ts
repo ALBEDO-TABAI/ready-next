@@ -2,6 +2,8 @@ import { z } from 'zod'
 import type { RSSStore } from '../database/rss-store'
 import type { RSSCompletionRequest } from './model-completion'
 
+// Models often wrap the promised JSON in a ```json fence; a proposal is never retried, so the fence must not fail it.
+const unfence=(reply:string)=>reply.trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'')
 const ProposalSchema=z.object({text:z.string().trim().min(1).max(8000),explanation:z.string().trim().min(1).max(200)}).strict()
 export class RSSCalibrationService {
   private active:Promise<void>|null=null
@@ -28,7 +30,7 @@ export class RSSCalibrationService {
     try {
       const text=await complete()
       this.controller.signal.throwIfAborted()
-      rss.learning.finish(proposal.week,ProposalSchema.parse(JSON.parse(text)),now())
+      rss.learning.finish(proposal.week,ProposalSchema.parse(JSON.parse(unfence(text))),now())
     }
     catch(error) { rss.learning.finish(proposal.week,null,now(),error instanceof Error?error.message:String(error)) }
     this.deps.notify()

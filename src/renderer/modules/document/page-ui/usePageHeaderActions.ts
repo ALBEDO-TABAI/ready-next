@@ -8,6 +8,7 @@ import { countMarkdownHeadings } from './heading-count'
 import { isInLibrary, useLibraryRoot } from './library-membership'
 import { adoptIntoLibrary } from '../navigator/adopt'
 import { useWorkspace } from '../../../stores/useWorkspace'
+import { useSieveExclusions } from '../../rss/sieve-exclusions'
 
 /** The page header's outline toggle (three or more headings) and the “…” menu's page actions (W3 §4.1). */
 export function usePageHeaderActions({ tab, outlineOpen, toggleOutline, marksOpen, toggleMarks, bookReading }: {
@@ -18,6 +19,10 @@ export function usePageHeaderActions({ tab, outlineOpen, toggleOutline, marksOpe
 }): { outline?: { open: boolean; toggle(): void }; pageMenu?: InkPageMenuActions } {
   const libraryRoot = useLibraryRoot()
   const pinned = useWorkspace(state => state.pinnedFolders)
+  const sieveHidden = useSieveExclusions(state => state.ids)
+  useEffect(() => {
+    if (!useSieveExclusions.getState().ids) void useSieveExclusions.getState().load().catch((error: unknown) => console.warn('[page-menu] sieve exclusions not read', error))
+  }, [])
   if (!tab || tab.kind === 'library') return {}
   const path = tab.path
   const mounted = !!path && !!libraryRoot && !isInLibrary(path, libraryRoot) && pinned.some(folder => folder !== libraryRoot && isInLibrary(path, folder))
@@ -34,6 +39,16 @@ export function usePageHeaderActions({ tab, outlineOpen, toggleOutline, marksOpe
       bookReading,
       marks: { open: marksOpen, toggle: toggleMarks },
       adopt: mounted ? () => { void adoptIntoLibrary(path!) } : undefined,
+      // Only library pages are ever listed for the sieve; a mounted folder's files never are.
+      sieve: !mounted && tab.objectId && sieveHidden ? {
+        hidden: sieveHidden.has(tab.objectId),
+        toggle: () => {
+          const objectId = tab.objectId!, hide = !sieveHidden.has(objectId)
+          void useSieveExclusions.getState().setHidden(objectId, hide)
+            .then(() => showToast(hide ? '这页的标题不会再随资讯判断发出' : '筛子又可以参考这页了'))
+            .catch((error: unknown) => showToast(`没有改成：${error instanceof Error ? error.message : String(error)}`))
+        },
+      } : undefined,
     },
   }
 }

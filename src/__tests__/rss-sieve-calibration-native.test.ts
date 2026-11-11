@@ -108,3 +108,13 @@ test('stopping calibration aborts the request and a late result never becomes a 
   assert.equal(f.rss.sieve.focus().text,'')
   await service.wake();assert.equal(f.rss.processing.status(f.now,true).callsToday,1)
 })
+
+test('a proposal wrapped in a ```json fence is still read; it is never retried, so the fence must not fail it',async t=>{
+  skipIfSqliteUnavailable({skip:message=>{throw new Error(message)}},'B10 requires native SQLite')
+  const f=rssB10Fixture(t);evidence(f)
+  const service=calibration(f,{complete:async()=>'```json\n'+JSON.stringify({text:'围栏里的关注',explanation:'模型加了代码块'})+'\n```'})
+  await service.wake()
+  const proposal=f.rss.learning.calibration(f.now)!
+  assert.equal(proposal.status,'pending')
+  assert.equal(proposal.text,'围栏里的关注')
+})
