@@ -65,7 +65,7 @@ export function CanvasCorner({ zoom, search, results, hit, recycled, trash, busy
           if (event.key === 'Enter') { event.preventDefault(); onStep(event.shiftKey ? -1 : 1) }
           if (event.key === 'Escape') { event.preventDefault(); onSearch(null) }
         }} />
-      <output aria-live="polite">{search.trim() ? results ? `${hit + 1}/${results}` : '无结果' : ''}</output>
+      <output aria-live="polite">{search.trim() ? results ? hit >= 0 ? `${hit + 1}/${results}` : `${results} 张` : '无结果' : ''}</output>
       <IconButton label="上一个" icon={ChevronUp} disabled={!results} onClick={() => onStep(-1)} />
       <IconButton label="下一个" icon={ChevronDown} disabled={!results} onClick={() => onStep(1)} />
       <IconButton label="关闭搜索" icon={X} onClick={() => onSearch(null)} />

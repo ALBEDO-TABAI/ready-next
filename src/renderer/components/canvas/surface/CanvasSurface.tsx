@@ -39,7 +39,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
 
   const [menu, setMenu] = useState<{ x: number; y: number; kind: 'card' | 'canvas'; world: { x: number; y: number } } | null>(null)
   const [lastShape, setLastShape] = useState<Tool>('rect'), [shapesOpen, setShapesOpen] = useState(false), [arrangeOpen, setArrangeOpen] = useState(false)
-  const [search, setSearch] = useState<string | null>(null), [hit, setHit] = useState(0)
+  const [search, setSearch] = useState<string | null>(null), [hit, setHit] = useState(-1)
   const [moreOpen, setMoreOpen] = useState(false), [capturing, setCapturing] = useState(false)
   const [composing, setComposing] = useState(false), [compositionError, setCompositionError] = useState('')
   const root = useRef<HTMLDivElement>(null), world = useRef<HTMLDivElement>(null), overlay = useRef<SVGSVGElement>(null)
@@ -149,7 +149,8 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     const before = camera, keep = selected
     setMoreOpen(false); setCapturing(true); setSelected([]); fit(chosen.length ? chosen : active.nodes, { x: 64, y: 64 })
     try {
-      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      // A timer, not animation frames: a hidden or throttled window may never paint one, and the camera must settle first.
+      await new Promise(resolve => setTimeout(resolve, 120))
       const rect = root.current.getBoundingClientRect()
       await props.captureImage({ x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) }, canvas.ready.title || '画板')
     } catch (cause) { setCompositionError(cause instanceof Error ? cause.message : String(cause)) }
@@ -169,7 +170,8 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
   const matchIds = new Set(matches.map(node => node.id))
   function step(delta: 1 | -1) {
     if (!matches.length) return
-    const next = (Math.min(hit, matches.length - 1) + delta + matches.length) % matches.length, node = matches[next], frame = cardFrame(node)
+    // The first step goes to the first match, either way.
+    const next = hit < 0 ? (delta > 0 ? 0 : matches.length - 1) : (Math.min(hit, matches.length - 1) + delta + matches.length) % matches.length, node = matches[next], frame = cardFrame(node)
     setHit(next); setSelected([node.id])
     setCamera(c => ({ ...c, x: size.width / 2 - (frame.x + frame.width / 2) * c.zoom, y: size.height / 2 - (frame.y + frame.height / 2) * c.zoom }))
   }
@@ -231,8 +233,8 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
       if (node && !hit?.closest('[data-canvas-ui]')) open(node)
     }}>
     {!capturing && <CanvasCrumbs title={canvas.ready.title || '画板'} breadcrumbs={props.breadcrumbs} busy={busy} onNavigate={props.onNavigateAncestor} />}
-    {!capturing && <CanvasCorner zoom={camera.zoom} moreOpen={moreOpen} more={exportItems} onMore={setMoreOpen} search={search} results={matches.length} hit={Math.min(hit, Math.max(0, matches.length - 1))} recycled={recycled.length} trash={trash} busy={busy || !!editing}
-      onSearch={value => { setSearch(value); setHit(0) }} onStep={step} onFit={fit}
+    {!capturing && <CanvasCorner zoom={camera.zoom} moreOpen={moreOpen} more={exportItems} onMore={setMoreOpen} search={search} results={matches.length} hit={Math.min(hit, matches.length - 1)} recycled={recycled.length} trash={trash} busy={busy || !!editing}
+      onSearch={value => { setSearch(value); setHit(-1) }} onStep={step} onFit={() => fit()}
       onZoomReset={() => setCamera(c => zoomAt(c, { x: size.width / 2, y: size.height / 2 }, 1))}
       onTrash={() => { gestures.cancel(); setEditing(null); setSearch(null); setTrash(!trash) }} />}
     {!trash && !capturing && <CanvasDock tool={tool} lastShape={lastShape} shapesOpen={shapesOpen} disabled={busy || !!editing} graphics={!!props.prepareGraphic}
