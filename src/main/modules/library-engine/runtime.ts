@@ -3,7 +3,7 @@ import { registerLibraryArchiveIPC } from './archive-ipc'
 import { join } from 'node:path'
 import { BookSourceService } from './source-service'
 import { registerBookSourceIPC } from './source-ipc'
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import { getDatabase } from '../database'
 import { AppSettingsRepository } from '../repositories/app-settings-repository'
 import { VaultService } from '../settings-engine/vault-service'
@@ -84,7 +84,6 @@ export function setupLibraryIPC(): void {
       }
     },
     libraryChanged: async () => changed(await engine.get()),
-    openExternal: url => shell.openExternal(url),
   })
   activeBookSources = sources
   registerBookSourceIPC(ipcMain, sources)

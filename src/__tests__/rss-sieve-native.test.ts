@@ -97,6 +97,13 @@ test('V6 settings preview and actual request use identical title snapshot; updat
     f.rss.sieve.configurePrivacy({...f.rss.sieve.privacy(),enabled:false})
     assert.equal((await send('disabled')).workContext,undefined)
     assert.equal(f.rss.processing.status(now,true).callsToday,6)
+    // W6 preview reads the saved, revision-checked reason even after the article leaves today's unread sieve.
+    f.rss.markRSSRead('enabled')
+    const explanation = handlers.get('rss:sieveRelevance')!(null, 'enabled')
+    assert.deepEqual(explanation, { success: true, data: f.rss.sieve.relevance('enabled') })
+    assert.ok(f.rss.sieve.relevance('enabled')?.reason)
+    assert.equal(f.rss.sieve.query({}, now + 72 * 3600000).items.some(item => item.id === 'enabled'), false)
+    assert.deepEqual(handlers.get('rss:sieveRelevance')!(null, 'missing'), { success: true, data: null })
     handle.dispose();assert.equal(handlers.size,0)
   }finally{f.db.close()}
 })

@@ -361,7 +361,13 @@ export default function RSSMode({
     void (async () => {
       try {
         const reference = request.reference
-        if (reference.kind === 'digest') {
+        if (reference.kind === 'query') {
+          const result = await window.electronAPI.rss.queryItems(reference.query)
+          if (!result.success || !result.data) throw new Error(result.error || '资讯查询无法读取')
+          if (!current()) return
+          setSelectedItem(null); setShowOrganization(false)
+          useRSSSession.getState().replaceQuery(reference.query, result.data)
+        } else if (reference.kind === 'digest') {
           const result = await window.electronAPI.rss.readDigests({ view: 'entries', ...reference.read, limit: 1 })
           if (!result.success) throw new Error(result.error || '刊物无法读取。')
           if (!current()) return

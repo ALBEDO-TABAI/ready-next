@@ -9,6 +9,7 @@ import { openReadyRef } from '../workbench/open-ready-ref'
 // The FastCard shelf outside the browser (W4 §6, MS6). In the browser the same panel sits in its overlay window
 // above the native web layer; in the document, 资讯 and calendar modes it is a drawer in the content area.
 export function FastCardShelf({ visible }: { visible: boolean }) {
+  const revealTarget = useFastCard(state => state.revealTarget)
   const open = useFastCard(state => state.panelOpen)
   const items = useFastCard(state => state.items)
   const syncState = useFastCard(state => state.syncState)
@@ -28,7 +29,7 @@ export function FastCardShelf({ visible }: { visible: boolean }) {
         <Button size="sm" variant="ghost" disabled={syncState.kind === 'saving'} onClick={() => { void store().undoTransfer() }}>撤销</Button>
         <Button size="sm" variant="ghost" onClick={() => store().dismissReceipt()}>关闭</Button>
       </div>
-        : <FastCardPanel items={items} syncState={syncState}
+        : <FastCardPanel revealTarget={revealTarget} items={items} syncState={syncState}
           onCollapse={() => store().collapse()}
           onClear={() => { void store().clear() }}
           onSaveCanvas={itemIds => setSaving(itemIds)}

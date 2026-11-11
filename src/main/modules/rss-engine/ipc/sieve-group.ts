@@ -2,7 +2,7 @@ import type { IpcChannelGroup } from './types'
 import type { RSSSieveStore } from '../../database/rss-sieve-store'
 import { RSSBehaviorSchema, RSSWorkPrivacyPatchSchema, RSSSieveQuerySchema, type RSSWorkContextSnapshot } from '../../../../shared/rss-sieve'
 import { z } from 'zod'
-const CHANNELS = ['rss:sieveQuery','rss:sieveToday','rss:sieveRecordBehavior','rss:sievePrivacy','rss:sieveConfigurePrivacy',
+const CHANNELS = ['rss:sieveRelevance','rss:sieveQuery','rss:sieveToday','rss:sieveRecordBehavior','rss:sievePrivacy','rss:sieveConfigurePrivacy',
   'rss:sieveWorkContext','rss:sieveExcludedPages','rss:sieveExcludePage','rss:sieveFocus','rss:sieveSaveFocus'] as const
 export const sieveGroup: IpcChannelGroup<{ store(): RSSSieveStore; workContext(): RSSWorkContextSnapshot; notify(): void }> = {
   namespace:'rss:sieve',
@@ -12,6 +12,7 @@ export const sieveGroup: IpcChannelGroup<{ store(): RSSSieveStore; workContext()
       try { const data = action(); if (changed) deps.notify(); return {success:true,data} }
       catch (error) { return {success:false,error:error instanceof Error ? error.message : String(error)} }
     }
+    ipcMain.handle('rss:sieveRelevance',(_event,input:unknown) => respond(() => deps.store().relevance(z.string().min(1).parse(input))))
     ipcMain.handle('rss:sieveQuery',(_event,input:unknown) => respond(() => deps.store().query(RSSSieveQuerySchema.parse(input ?? {}))))
     ipcMain.handle('rss:sieveToday',() => respond(() => deps.store().today()))
     ipcMain.handle('rss:sieveRecordBehavior',(_event,input:unknown) => respond(() => deps.store().recordBehavior(RSSBehaviorSchema.parse(input)),true))

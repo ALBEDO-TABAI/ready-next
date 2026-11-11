@@ -16,18 +16,22 @@ async function setup(t: TestContext) {
   let deleted = false
   const api = {
     browser: { onIntentAck: (cb: (ack: { intentId: number }) => void) => { listeners.add(cb); return () => listeners.delete(cb) }, sendIntent: (intent: { intentId: number }) => { intents.push(intent.intentId); if (autoAck) queueMicrotask(() => listeners.forEach(cb => cb({ intentId: intent.intentId }))) }, listFastCardItems: async () => ({ success: true, data: [{ id: 'card', title: '卡片标题', text: '卡片内容' }] }) },
-    objects: { onMoved: () => () => {}, locate: async (id: string) => deleted || id === 'gone' ? null : ({ objectId: id, path: `/fixture/${id}.md`, revision: 1 }), resolvePath: async (path: string) => ({ objectId: 'page', path, revision: 1 }) },
+    objects: { preview: async (ref: ReadyRef) => ref.kind === 'canvas' ? { kind: 'canvas', title: '画板', nodes: [{ title: '卡片正文' }] }
+      : ref.kind === 'book-location' ? { kind: 'book', book: { title: '书名', author: '作者' }, passage: null }
+      : ref.kind === 'web' ? { kind: 'web', title: new URL(ref.url).hostname, url: ref.url, excerpts: [] } : null, onMoved: () => () => {}, locate: async (id: string) => deleted || id === 'gone' ? null : ({ objectId: id, path: `/fixture/${id}.md`, revision: 1 }), resolvePath: async (path: string) => ({ objectId: 'page', path, revision: 1 }) },
     document: { readFile: async () => ({ success: true, content: '# 磁盘正文' }), searchIndex: async (_input: { query: string }) => ({ success: true, data: { items: [] as ReturnType<typeof hit>[], stats: { returned: 0, elapsedMs: 1 }, degraded: false } }) },
     documentPages: { states: async () => ({ ok: true, value: [] }), onChanged: (_cb: () => void) => () => {} },
     library: { get: async () => ({ success: true, data: { status: 'ready', books: [{ id: 'book', title: '书名', author: '作者', format: 'epub', status: '在读' }] } }) },
+    calendarLinkage: { day: async ({ date }: { date: string }) => ({ date, timeZone: 'UTC', items: [{ title: '当天会议' }] }) },
     calendar: { snapshot: async () => ({ success: true, data: { events: [{ id: 'event', calendarId: 'cal', title: '会议', start: '2026-10-31', end: '2026-11-01', allDay: true }], calendars: [] } }) },
     rss: {
+      sieveRelevance: async () => ({ success: true, data: null }),
       readArticle: async () => ({ success: true, data: { article: { title: '文章标题', summary: '文章摘要' } } }),
       readExcerpt: async () => ({ success: true, data: { text: '准确片段' } }),
       queryItems: async () => ({ success: true, data: { total: 1, items: [{ title: '查询文章' }] } }),
       readDigests: async () => ({ success: true, data: { view: 'entries', report: { scopeLabel: '刊物' }, entries: [{ source: { title: '条目', quote: '依据' } }] } }),
     },
-    agent: { listConversationScopes: async () => ({ success: true, data: [{ id: 'chat', title: '对话' }] }), getConversationScopeMessages: async () => ({ success: true, data: [{ content: '会话正文' }] }) },
+    agent: { listConversationScopes: async () => ({ success: true, data: [{ id: 'chat', title: '对话' }] }), getConversationScopeMessages: async () => ({ success: true, data: [{ id: 'm', role: 'user', content: '会话正文', meta: {} }] }) },
     objectRelations: { query: async (_id: string) => ({ ok: true, value: { outgoing: [{ id: 'a', title: '未找到', ref: null, sourceType: 'unresolved', reason: '尚未解析', relation: 'wikilink' }], incoming: [{ id: 'b', title: '来源页面', ref: { kind: 'page', id: 'source' }, sourceType: 'page', reason: null, relation: 'wikilink' }], backlinkCount: 1, truncated: false } }) },
   }
   Object.defineProperty(dom.window, 'electronAPI', { value: api })
@@ -84,7 +88,7 @@ test('M5-C previews each reference kind, current unsaved content, deletion and s
   const cases: Array<[ReadyRef, string]> = [
     [{ kind: 'page', id: 'page' }, '磁盘正文'], [{ kind: 'file', id: 'file' }, '磁盘正文'], [{ kind: 'canvas', id: 'canvas' }, '画板'],
     [{ kind: 'web', url: 'https://example.com' }, 'example.com'], [{ kind: 'day', date: '2026-10-31' }, '2026-10-31'],
-    [{ kind: 'book-location', book: 'book', loc: 'chapter:0' }, '作者'], [{ kind: 'event', id: 'event' }, '会议'],
+    [{ kind: 'book-location', book: 'book', loc: 'c0:0+1' }, '作者'], [{ kind: 'event', id: 'event' }, '会议'],
     [{ kind: 'rss-item', id: 'article' }, '文章摘要'], [{ kind: 'rss-digest', id: 'digest', offset: 0, limit: 10 }, '依据'],
     [{ kind: 'rss-query', query: { expectedRevision: 0, scope: 'inbox', filter: 'all', search: '', searchIn: 'title_summary', sort: 'newest', limit: 50 } }, '查询文章'], [{ kind: 'conversation', id: 'chat' }, '会话正文'], [{ kind: 'fastcard', id: 'card' }, '卡片内容'],
   ]
