@@ -498,6 +498,8 @@ const browserAPI = {
   registerDormantTabs: (request: import('../shared/browser-tab-session').RegisterDormantBrowserTabsRequest) =>
     ipcRenderer.invoke('browser:registerDormantTabs', request),
   openForCaptureTarget: (url: string) => ipcRenderer.invoke('browser:openForCaptureTarget', url),
+  getTaskDownloadReceipts: (request: { browserTaskId: string }) => ipcRenderer.invoke('browser:getTaskDownloadReceipts', request),
+  closeTaskTabs: (request: { browserTaskId: string }) => ipcRenderer.invoke('browser:closeTaskTabs', request),
   closeTab: (tabId: string) => ipcRenderer.invoke('browser:closeTab', tabId),
   switchTab: (tabId: string) => ipcRenderer.invoke('browser:switchTab', tabId),
   navigate: (tabId: string, url: string) => ipcRenderer.invoke('browser:navigate', { tabId, url }),

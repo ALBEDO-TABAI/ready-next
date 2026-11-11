@@ -99,6 +99,7 @@ interface BrowserTabLifecycleHost {
   }): void
   updateHistoryEntryTitle(url: string, title: string, favicon?: string | null): void
   handleLocalMediaDropNavigation(tabId: string, url: string): boolean
+  preparePageObservation?(tabId: string): Promise<void>
   onTabLoadStateMayChange?(tabId: string, reason: string): void
   browserUserAgent: string
   useMock: boolean
@@ -516,7 +517,15 @@ export class BrowserTabLifecycleService {
         })
       } else {
         // fire-and-forget: load failures surface via did-fail-load.
-        void view.webContents.loadURL(tab.url).catch(() => undefined)
+        void (async () => {
+          await this.host.preparePageObservation?.(tabId)
+          if (this.host.tabs.get(tabId)?.view !== view || view.webContents.isDestroyed()) return
+          await view.webContents.loadURL(tab.url)
+        })().catch(error => {
+          tab.error = error instanceof Error ? error.message : String(error)
+          tab.loading = false
+          this.host.onTabLoadStateMayChange?.(tabId, 'load-failed')
+        })
       }
     } catch (error) {
       this.host.detachHost(view)

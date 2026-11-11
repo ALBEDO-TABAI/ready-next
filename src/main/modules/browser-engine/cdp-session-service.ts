@@ -1,3 +1,4 @@
+import { NetworkIdleTracker } from './network-idle-tracker'
 import type { BrowserHostView } from './host-types'
 import type { BrowserCDPErrorCode } from './automation-types'
 
@@ -36,6 +37,32 @@ export class BrowserCdpSessionService {
   private readonly subscribersByTab = new Map<string, Set<BrowserDebuggerMessageListener>>()
   private readonly inFlightCommandsByTab = new Map<string, number>()
   private readonly attachmentRefsByTab = new Map<string, number>()
+
+  private readonly idleTrackers = new Map<string, Promise<NetworkIdleTracker>>()
+
+  async networkInFlight(tabId: string | null): Promise<number> {
+    const resolved = this.host.resolveTabView(tabId).tabId
+    await this.ensureNetworkTracking(resolved)
+    return (await this.idleTrackers.get(resolved)!).inFlight()
+  }
+
+  async ensureNetworkTracking(tabId: string): Promise<void> {
+    let pending = this.idleTrackers.get(tabId)
+    if (!pending) {
+      pending = (async () => {
+        const tracker = new NetworkIdleTracker()
+        const unsubscribe = this.subscribe(tabId, event => tracker.record(event))
+        try { await this.retainDomain(tabId, 'Network') } catch (error) {
+          unsubscribe()
+          this.idleTrackers.delete(tabId)
+          throw error
+        }
+        return tracker
+      })()
+      this.idleTrackers.set(tabId, pending)
+    }
+    await pending
+  }
 
   constructor(private readonly host: BrowserCdpHost) {}
 
@@ -181,6 +208,7 @@ export class BrowserCdpSessionService {
   }
 
   disposeTab(tabId: string): void {
+    this.idleTrackers.delete(tabId)
     let view: BrowserHostView | null = null
     try {
       view = this.host.resolveTabView(tabId).view

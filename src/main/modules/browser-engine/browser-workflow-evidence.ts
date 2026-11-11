@@ -730,6 +730,30 @@ export function resolveTrustedBrowserPageRefFromControlledNavigation(
   return current
 }
 
+/** Only settled opens descending from an admitted page can introduce another tab. */
+export function resolveTaskBrowserPageRef(
+  roots: readonly TrustedBrowserPageRefPin[],
+  outcomes: readonly BrowserActionOutcome[],
+  tabId: string,
+): TrustedBrowserPageRefPin | null {
+  const pages = new Map(roots.map((pin) => [pin.tabId, pin]))
+  for (const outcome of [...outcomes].sort((a, b) => a.actionSeq - b.actionSeq)) {
+    if (outcome.dispatch === 'rejected' || outcome.delivery === 'not_delivered') continue
+    const predecessor = outcome.identity.tabId ? pages.get(outcome.identity.tabId) : null
+    if (!predecessor || !pinMatchesPredecessor(predecessor, outcome.identity)) continue
+    const next = outcome.successorIdentity
+    if (!hasCompleteBrowserDocumentIdentity(next) || next.frameId !== '0') continue
+    if (next.tabId !== predecessor.tabId && outcome.operationId !== 'tabs_open') continue
+    if (next.tabId === predecessor.tabId && next.physicalTargetToken !== predecessor.physicalTargetToken) continue
+    pages.set(next.tabId, {
+      tabId: next.tabId,
+      physicalTargetToken: next.physicalTargetToken,
+      mainFrameDocumentToken: next.frameDocumentToken,
+    })
+  }
+  return pages.get(tabId) || null
+}
+
 export function resolveBrowserObservationSuccessorIdentity(
   outcome: BrowserActionOutcome,
   observedIdentity: BrowserActionTargetIdentity,

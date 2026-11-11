@@ -61,7 +61,7 @@ node scripts/browser-eval/tool-layer/run.mjs --only form,spa   # 只跑几组
 
 1. 用户当前页打开基准站点；
 2. 用生产代码 `resolveTrustedBrowserEnvironment` 绑定这一页的 pageRef；
-3. 用生产代码 `composeBrowserAdmissionToolNames` 冻结当前页工具面（18 项；有附件时加 `browser_upload`）；
+3. 用生产代码 `composeBrowserAdmissionToolNames` 冻结当前页工具面（20 项；有附件时加 `browser_upload`）；
 4. 每次调用都走生产入口 `executeToolCall`，`invoker: 'model'`，上下文与 Codex 工具桥一致：turn lease、browser workflow route、journal、写权限端口。
 
 不经过模型，也不经过 Codex 运行时，不开调试端口。资料目录、数据库、日志（`TMPDIR`）和 `HOME` 都在一次性的临时目录里，跑完删除；会话续接只留在内存里（没有设置路径时不写文件）。
@@ -123,6 +123,21 @@ node scripts/browser-eval/tool-layer/run.mjs --only form,spa   # 只跑几组
 10. `browser_read` 不读 iframe 里的文字。
 11. 快照里没有 canvas 元素本身。
 12. `network_idle` 在慢请求仍在途时就判定空闲（BA5 / T6）。
+
+## B12 Main 侧新增用例
+
+历史基线保留在上表。当前页工具面新增 `browser_tabs` 与 `browser_download`；显式网页引用仍只授予读取工具。
+
+- `w7.tabs-lineage`：后台开页、任务因果、只列任务页和本轮引用页、切换不抢前台。
+- `w7.tabs-close-release`：用户页不可关闭，释放后保留工作页，Main 批量关闭只处理该任务。
+- `downloads.download-receipt`：落盘文件大小/哈希、任务回执、ReadyRef 一致；`download-outside` 在请求前拒绝越界；`download-public-local-redirect` 用仅在测试进程映射到回环地址的公开名称，检查跳转本地网络被拒绝且没有临时文件残留。
+- `wait.network-idle-longpoll`：3 秒慢请求完成前不得空闲，长轮询不阻止有限时间内空闲（失败不再记为已知差距）。
+- `w7.target-appear` / `target-text-disappear`：延迟目标、文字变化、消失；`snapshot-tokens` 返回完整与差分的字节/4令牌估算。
+- `w7.foreign-origin-write`：跨来源输入触发行动确认且页面没有输入。
+- `w7.numbered-screenshot`：默认关闭的编号截图返回图片及编号到目标引用的映射；沿用隐藏承载面无法截图时的明确“未开放”结果，不记通过。编号当前限 viewport 主 frame，最多 100 个可见目标。
+- 任务层 B2、C1 加入网页注入文字与 `no-exfil` 判定，连同已有 A6、D3 保持 24 个任务。只跑判定：`node --test scripts/browser-eval/__tests__/judges.test.mjs scripts/browser-eval/__tests__/w7-injection.test.mjs`。
+
+边界：工作标签分组由 Main 返回 `browserTaskId`，关闭动作通过 `browser.closeTaskTabs({ browserTaskId })`，下载记录通过 `browser.getTaskDownloadReceipts({ browserTaskId })` 读取；截图标注不插入网页 DOM。差分基线按任务和标签隔离，任务清理时丢弃；较大的差分退回完整快照。网络统计在首次加载前安装，默认网络等待上限 15 秒；WebSocket/EventSource/event-stream 排除，重复 Fetch/XHR 及超过 10 秒的 Fetch/XHR 按轮询排除。
 
 ## 任务层
 

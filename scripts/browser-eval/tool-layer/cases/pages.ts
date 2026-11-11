@@ -377,17 +377,17 @@ export const waitGroup: CaseGroup = {
       'network_idle：有长轮询且有 3 秒慢请求时',
       ['browser_wait'],
       async () => {
-        const waited = await fresh.call('browser_wait', { condition: 'network_idle', timeout_ms: 10_000 })
+        const waited = await fresh.call('browser_wait', { condition: 'network_idle', timeout_ms: 15_000 })
         const since = Date.now() - freshOpened
         const slowDone = await fresh.pageEval<boolean>("return Boolean(document.querySelector('#slow'))")
         if (waited.data.matched === true && slowDone)
           return pass(`在慢请求完成后判定空闲（开页后 ${since}ms）`)
         if (waited.data.matched === true)
-          return gap(
+          return fail(
             `慢请求仍在途就判定空闲（开页后 ${since
             }ms）：network_idle 不看在途请求（BA5 / T6）`
           )
-        return gap(`长轮询页面上等到超时（${since}ms）：network_idle 不排除长连接（BA5 / T6）`)
+        return fail(`长轮询页面上等到超时（${since}ms）：network_idle 不排除长连接（BA5 / T6）`)
       })
   },
 }

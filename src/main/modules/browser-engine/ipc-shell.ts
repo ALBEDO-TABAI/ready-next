@@ -44,6 +44,8 @@ interface BrowserShellIPCController {
   openForCaptureTarget(url: string): Promise<{ success: boolean; tabId?: string; reused?: boolean; error?: string }>
   navigate(tabId: string | null, url: string): Promise<{ success: boolean; error?: string }>
   reorderTabs(tabIds: string[]): { success: boolean; error?: string }
+  getTaskDownloadReceipts(request: { browserTaskId: string }): { success: boolean; downloadReceipts: import('../../../shared/browser-download-receipt').BrowserDownloadReceipt[]; error?: string }
+  closeTaskTabs(request: { browserTaskId: string }): { success: boolean; closedTabIds: string[]; error?: string }
   closeTab(tabId: string): { success: boolean; error?: string }
   notifyTabClosed(tabId: string): void
   switchTab(tabId: string): {
@@ -138,6 +140,10 @@ export function setupBrowserShellIPC(controller: BrowserShellIPCController): voi
       return { success: false, error: error instanceof Error ? error.message : String(error) }
     }
   })
+
+  ipcMain.handle('browser:getTaskDownloadReceipts', (_event, request: { browserTaskId: string }) => controller.getTaskDownloadReceipts(request))
+
+  ipcMain.handle('browser:closeTaskTabs', (_event, request: { browserTaskId: string }) => controller.closeTaskTabs(request))
 
   ipcMain.handle('browser:closeTab', (event, tabId: string) => {
     void event

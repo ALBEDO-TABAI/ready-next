@@ -18,6 +18,7 @@ import type {
 } from './capability-types'
 
 interface BrowserCapabilityHost {
+  networkInFlight?(tabId: string | null): Promise<number>
   getActiveTab(): { id: string; url: string } | undefined
   executeJS(tabId: string | null, code: string): Promise<unknown>
   dispatchMouse?(
@@ -350,14 +351,18 @@ export class BrowserCapabilityService {
     signal?: AbortSignal,
   ): Promise<{ matched: boolean; elapsedMs: number; value?: unknown }> {
     const startedAt = Date.now()
-    const timeoutMs = Math.max(500, Math.min(60_000, Number(options.timeoutMs || 8_000)))
+    const timeoutMs = Math.max(500, Math.min(60_000, Number(options.timeoutMs || (options.condition === 'network_idle' ? 15_000 : 8_000))))
     const checkIntervalMs = Math.max(50, Math.min(2_000, Number(options.checkIntervalMs || 250)))
     const stableIterations = Math.max(1, Math.min(10, Number(options.stableIterations || 2)))
     let consecutiveMatches = 0
     let lastValue: unknown = null
+    let idleSince: number | null = null
 
     while (Date.now() - startedAt <= timeoutMs) {
       throwIfAborted(signal)
+      const inFlight = options.condition === 'network_idle'
+        ? await this.host.networkInFlight?.(tabId) : null
+      if (options.condition === 'network_idle' && inFlight === undefined) throw new Error('network_tracking_unavailable')
       const result = await this.host.executeJS(
         tabId,
         `
@@ -367,7 +372,13 @@ export class BrowserCapabilityService {
             const selector = ${JSON.stringify(options.selector || '')}
             const customJs = ${JSON.stringify(options.customJs || '')}
             const bodyText = normalize(document.body?.innerText || '')
-            const contentSignature = [bodyText.length, document.body?.scrollHeight || 0, document.body?.childElementCount || 0].join(':')
+            const key = '__readyWaitMutations'
+            if (!globalThis[key]) {
+              const state = { revision: 0 }
+              new MutationObserver(() => state.revision++).observe(document, { subtree: true, childList: true, characterData: true, attributes: true })
+              globalThis[key] = state
+            }
+            const contentSignature = String(globalThis[key].revision)
             let matched = false
             let value = null
 
@@ -378,12 +389,17 @@ export class BrowserCapabilityService {
               matched = Boolean(selector && document.querySelector(selector))
               value = matched
             } else if (__READY_WAIT_CONDITION__ === 'network_idle') {
-              const resourceCount = performance.getEntriesByType('resource').length
-              matched = document.readyState === 'complete'
-              value = { resourceCount, contentSignature }
+              matched = document.readyState !== 'loading' && ${JSON.stringify(inFlight)} === 0
+              value = { inFlight: ${JSON.stringify(inFlight)}, contentSignature }
             } else if (__READY_WAIT_CONDITION__ === 'content_stable') {
               matched = bodyText.length > 0
               value = { contentSignature }
+            } else if (['target_appeared', 'target_disappeared', 'text_changed'].includes(__READY_WAIT_CONDITION__)) {
+              const target = selector ? document.querySelector(selector) : null
+              value = target ? String(target.textContent || '') : null
+              matched = __READY_WAIT_CONDITION__ === 'target_appeared' ? Boolean(target)
+                : __READY_WAIT_CONDITION__ === 'target_disappeared' ? !target
+                : Boolean(target) && value !== ${JSON.stringify(options.previousText ?? '')}
             } else if (__READY_WAIT_CONDITION__ === 'custom_js') {
               value = customJs ? eval(customJs) : false
               matched = Boolean(value)
@@ -396,13 +412,16 @@ export class BrowserCapabilityService {
 
       if (options.condition === 'content_stable' || options.condition === 'network_idle') {
         const signature = JSON.stringify(result?.value || null)
+        const changed = signature !== JSON.stringify(lastValue)
         if (result?.matched && signature === JSON.stringify(lastValue)) {
           consecutiveMatches += 1
         } else {
           consecutiveMatches = result?.matched ? 1 : 0
           lastValue = result?.value ?? null
         }
-        if (consecutiveMatches >= stableIterations) {
+        if (!result?.matched || changed) idleSince = null
+        if (result?.matched && idleSince === null) idleSince = Date.now()
+        if (consecutiveMatches >= stableIterations && (options.condition !== 'network_idle' || (idleSince !== null && Date.now() - idleSince >= 500))) {
           return { matched: true, elapsedMs: Date.now() - startedAt, value: result?.value }
         }
       } else if (result?.matched) {

@@ -15,8 +15,9 @@ export interface BrowserStructuredFieldMapping {
 }
 
 export interface BrowserWaitForConditionOptions {
-  condition: 'page_readable' | 'selector' | 'network_idle' | 'content_stable' | 'custom_js'
+  condition: 'page_readable' | 'selector' | 'network_idle' | 'content_stable' | 'custom_js' | 'target_appeared' | 'target_disappeared' | 'text_changed'
   selector?: string
+  previousText?: string
   customJs?: string
   timeoutMs?: number
   checkIntervalMs?: number

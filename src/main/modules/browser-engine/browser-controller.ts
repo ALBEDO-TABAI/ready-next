@@ -1,3 +1,10 @@
+import { app } from 'electron'
+import { getDatabase } from '../database'
+import { ObjectRegistry } from '../object-service/registry'
+import { AppSettingsRepository } from '../repositories/app-settings-repository'
+import { VaultService } from '../settings-engine/vault-service'
+import { browserDownloadDirectory, consumeBrowserDownload } from './download-receipt-consumer'
+import type { BrowserDownloadReceipt } from '../../../shared/browser-download-receipt'
 import type {
   BrowserAggregateOptions,
   BrowserCapabilityTaskHandle,
@@ -45,6 +52,50 @@ export type { BrowserTabActivity, BrowserTabOwner } from './browser-controller-c
 export { isAllowedBrowserURL } from './popup-policy'
 
 export class BrowserController extends BrowserControllerCaptureRuntime {
+  approveTaskWriteOrigin(browserTaskId: string, ownerRunId: string, origin: string): void {
+    const task = this.taskPersistenceService.getTask(browserTaskId)
+    if (!task || task.createdByRunId !== ownerRunId || ['completed', 'failed', 'cancelled'].includes(task.status)) throw new Error('browser_origin_task_not_active')
+    const payload = this.taskPersistenceService.getTaskPayload(browserTaskId)
+    const previous = Array.isArray(payload?.approvedWriteOrigins) ? payload.approvedWriteOrigins.filter((value): value is string => typeof value === 'string') : []
+    if (!this.taskPersistenceService.patchTaskPayload(browserTaskId, { approvedWriteOrigins: [...new Set([...previous, origin])] })) throw new Error('browser_origin_grant_write_failed')
+  }
+
+  resolveTaskDownloadDirectory(requested: unknown, roots: readonly string[]): string {
+    const vault = new VaultService(new AppSettingsRepository(), {
+      home: app.getPath('home'), userData: app.getPath('userData'), isPackaged: app.isPackaged,
+    }).get()
+    return browserDownloadDirectory(requested, roots, vault.status === 'ready' ? vault.root : null)
+  }
+
+  getTaskDownloadReceipts(request: { browserTaskId: string }): { success: boolean; downloadReceipts: BrowserDownloadReceipt[]; error?: string } {
+    const payload = request && typeof request.browserTaskId === 'string'
+      ? this.taskPersistenceService.getTaskPayload(request.browserTaskId) : null
+    if (!payload) return { success: false, downloadReceipts: [], error: 'browser_task_not_found' }
+    if (payload.downloadReceipts !== undefined && !Array.isArray(payload.downloadReceipts)) {
+      return { success: false, downloadReceipts: [], error: 'download_receipts_corrupt' }
+    }
+    return { success: true, downloadReceipts: (payload.downloadReceipts || []) as BrowserDownloadReceipt[] }
+  }
+
+  consumeTaskDownload(file: unknown, directory: string, browserTaskId: string, ownerRunId: string): BrowserDownloadReceipt {
+    const db = getDatabase().getRawDb()
+    if (!db) throw new Error('download_receipt_database_unavailable')
+    const task = this.taskPersistenceService.getTask(browserTaskId)
+    if (!task || task.createdByRunId !== ownerRunId) throw new Error('download_receipt_task_mismatch')
+    return consumeBrowserDownload({
+      file, directory, browserTaskId, ownerRunId, registry: new ObjectRegistry(db),
+      readReceipts: () => {
+        const payload = this.taskPersistenceService.getTaskPayload(browserTaskId)
+        return (payload?.downloadReceipts || []) as BrowserDownloadReceipt[]
+      },
+      saveReceipts: downloadReceipts => {
+        if (!this.taskPersistenceService.patchTaskPayload(browserTaskId, { downloadReceipts })) {
+          throw new Error('download_receipt_task_write_failed')
+        }
+      },
+    })
+  }
+
   updateTabRuntimeState(
     tabId: string | null,
     updates: Partial<Pick<Tab, 'owner' | 'required' | 'activity' | 'lastAuditedAt'>>,
@@ -75,7 +126,10 @@ export class BrowserController extends BrowserControllerCaptureRuntime {
   }
 
   getTabList() {
-    return this.tabMetaService.getTabList()
+    return this.tabMetaService.getTabList().map(tab => {
+      const owner = this.taskWorkTabs.get(tab.id)
+      return owner ? { ...tab, browserTaskId: owner.browserTaskId, openerTabId: owner.openerTabId } : tab
+    })
   }
 
   getDiagnostics(options?: { includePerformance?: boolean }) {
@@ -228,8 +282,9 @@ export class BrowserController extends BrowserControllerCaptureRuntime {
   async waitForCondition(
     tabId: string | null,
     options: BrowserWaitForConditionOptions,
+    signal?: AbortSignal,
   ): Promise<{ matched: boolean; elapsedMs: number; value?: unknown }> {
-    return this.capabilityService.waitForCondition(tabId, options)
+    return this.capabilityService.waitForCondition(tabId, options, signal)
   }
 
   async extractStructured(

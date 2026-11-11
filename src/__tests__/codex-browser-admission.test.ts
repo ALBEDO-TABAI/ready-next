@@ -112,8 +112,8 @@ test('current browser page plus document anchor keeps browser work set', () => {
   const names = composed.readyTurnToolAuthorization.allowedToolNames
   assert.ok(names.includes('document_read_section'))
   assert.ok(names.includes('browser_click'))
-  assert.equal(names.includes('browser_tabs'), false)
-  assert.equal(names.includes('browser_download'), false)
+  assert.equal(names.includes('browser_tabs'), true)
+  assert.equal(names.includes('browser_download'), true)
   assert.equal(names.includes('browser_research'), false)
 })
 
@@ -190,13 +190,13 @@ test('document anchor does not rewrite a browser workbench in the product envelo
   assert.ok(envelope.resources.some((resource) => resource.kind === 'document_context'))
 })
 
-test('current page admission hides mixed browser_tabs until successor authority exists', () => {
+test('current page admission exposes task-scoped browser_tabs', () => {
   const names = composeBrowserAdmissionToolNames(buildBrowserAdmissionAuthoritySnapshot({
     authorityId: 'no-tabs',
     activeWorkbenchMode: 'browser',
     currentBrowserPageRef: pageRef,
   }))
-  assert.equal(names.includes('browser_tabs'), false)
+  assert.equal(names.includes('browser_tabs'), true)
   assert.ok(names.includes('browser_click'))
 })
 

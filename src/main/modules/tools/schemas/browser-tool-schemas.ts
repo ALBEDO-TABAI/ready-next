@@ -70,6 +70,7 @@ export const BROWSER_TOOL_SCHEMAS = {
     max_chars: z.number().optional().describe('最大正文字符数'),
   }),
   browser_screenshot: z.object({
+    annotate: z.boolean().optional().describe('在视口截图上标出当前快照目标编号，默认 false'),
     tab_id: tabId,
     mode: z.enum(['viewport', 'clip', 'full_page']).optional().describe('截图模式，默认 viewport'),
     clip: arbitraryObject.optional().describe('裁剪区域 {x,y,width,height}'),
@@ -79,14 +80,16 @@ export const BROWSER_TOOL_SCHEMAS = {
     tab_id: tabId,
     timeout_ms: z.number().optional().describe('最长等待时间'),
     duration_ms: z.number().optional().describe('固定等待时长'),
-    condition: z.enum(['ready', 'selector', 'text', 'url', 'network_idle', 'content_stable']).optional().describe('等待条件'),
-    selector: z.string().optional().describe('等待出现的选择器'),
+    condition: z.enum(['ready', 'selector', 'text', 'url', 'network_idle', 'content_stable', 'target_appeared', 'target_disappeared', 'text_changed']).optional().describe('等待条件'),
+    selector: z.string().optional().describe('等待目标的 CSS 选择器'),
+    previous_text: z.string().optional().describe('text_changed 必须提供的原始目标文字'),
     text: z.string().optional().describe('等待出现的文本'),
     url: z.string().optional().describe('等待匹配的 URL 片段'),
     check_interval_ms: z.number().optional().describe('条件检查间隔'),
     stable_iterations: z.number().optional().describe('内容稳定所需连续命中次数'),
   }).superRefine((value, ctx) => {
-    const requiredField = value.condition === 'selector' ? 'selector' : value.condition === 'text' ? 'text' : value.condition === 'url' ? 'url' : null
+    const requiredField = ['selector', 'target_appeared', 'target_disappeared', 'text_changed'].includes(value.condition || '') ? 'selector' : value.condition === 'text' ? 'text' : value.condition === 'url' ? 'url' : null
+    if (value.condition === 'text_changed' && value.previous_text === undefined) ctx.addIssue({ code: 'custom', path: ['previous_text'], message: 'previous_text is required' })
     if (requiredField && !value[requiredField]?.trim()) {
       ctx.addIssue({ code: 'custom', path: [requiredField], message: `${requiredField} is required when condition is ${value.condition}` })
     }

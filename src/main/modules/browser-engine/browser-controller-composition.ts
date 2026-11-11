@@ -104,6 +104,7 @@ export abstract class BrowserControllerComposition extends BrowserControllerCont
   /** Most recently created task-owned work tab, used only for supervision display. */
   protected agentTabId: string | null = null
   protected readonly agentWorkTabs = new Map<string, string>()
+  protected readonly taskWorkTabs = new Map<string, { browserTaskId: string; openerTabId: string; physicalTargetToken: string }>()
   protected readonly tabLifecycleService: BrowserTabLifecycleService
   protected readonly tabMetaService: BrowserTabMetaService<Tab>
   protected readonly tabShellService: BrowserTabShellService
@@ -289,6 +290,7 @@ export abstract class BrowserControllerComposition extends BrowserControllerCont
       },
     })
     this.capabilityService = new BrowserCapabilityService({
+      networkInFlight: tabId => this.cdpSessionService.networkInFlight(tabId),
       getActiveTab: () => this.getActiveTab(),
       executeJS: (tabId, code) => this.executeJS(tabId, code),
       dispatchMouse: (tabId, payload) => this.dispatchMouse(tabId, payload as unknown as BrowserMouseEventPayload),
@@ -346,6 +348,7 @@ export abstract class BrowserControllerComposition extends BrowserControllerCont
       addHistoryEntry: (url, title, metadata) => this.dataService.addHistoryEntry(url, title, metadata),
       updateHistoryEntryTitle: (url, title, favicon) => this.dataService.updateHistoryEntryTitle(url, title, favicon),
       handleLocalMediaDropNavigation: (tabId, url) => this.handleLocalMediaDropNavigation(tabId, url),
+      preparePageObservation: tabId => this.cdpSessionService.ensureNetworkTracking(tabId),
       onTabLoadStateMayChange: (tabId, reason) => this.performanceRuntime.onLoadStateMayChange(tabId, reason),
       browserUserAgent: this.browserUserAgent,
       useMock: this.useMock,

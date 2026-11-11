@@ -6,6 +6,10 @@ import { join } from 'node:path'
 import { app, BrowserWindow, shell } from 'electron'
 import 'tsx/esm'
 
+// Deterministic public-name redirect fixture; DNS never leaves loopback.
+app.commandLine.appendSwitch('host-resolver-rules', 'MAP public.browser-eval.test 127.0.0.1')
+app.commandLine.appendSwitch('no-proxy-server')
+
 const guardViolations = []
 function refuse(name) {
   return function refused(...args) {

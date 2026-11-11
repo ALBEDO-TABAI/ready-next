@@ -1,3 +1,4 @@
+import { browserWriteOrigins } from '../../browser-engine/browser-origin-write-scope'
 import { calendarEventReadyRef } from '../../../../shared/calendar-event-identity'
 import { toReadyUri } from '../../../../shared/ready-ref'
 import type { RSSReference } from '../../../../shared/rss-reference'
@@ -87,12 +88,14 @@ export interface TrustedFolderReference {
 }
 
 export interface TrustedRequestEnvironment {
+  browserReadRefs?: NonNullable<TrustedRequestEnvironment['browserPageRef']>[]
   workbenchMode?: 'browser' | 'document' | 'rss' | 'calendar'
   browserPageRef?: {
     tabId: string
     physicalTargetToken: string
     mainFrameId: string
     mainFrameDocumentToken: string
+    origin?: string | null
     profileId?: string | null
   } | null
 }
@@ -111,6 +114,8 @@ export interface RequestEnvelope {
     hasBootstrapContext: boolean
     workspaceRoots?: string[]
     workbenchMode?: TrustedRequestEnvironment['workbenchMode']
+    browserWriteOrigins?: string[]
+    browserReadRefs?: TrustedRequestEnvironment['browserReadRefs']
     browserPageRef?: TrustedRequestEnvironment['browserPageRef']
   }
   provenanceSummary: {
@@ -638,6 +643,7 @@ export function buildRequestEnvelope(params: {
       ...carriedContextRefs,
     ].filter((ref, index, all) => all.findIndex((candidate) => candidate.kind === ref.kind && candidate.value === ref.value) === index),
     environmentHints: {
+      browserWriteOrigins: browserWriteOrigins(pureUserText, [params.trustedEnvironment?.browserPageRef?.origin, ...(params.trustedEnvironment?.browserReadRefs || []).map(ref => ref.origin)]),
       hasDocumentContext: rawUserText.includes('### 当前文档上下文') || rawUserText.includes('### 文档引用'),
       hasWidgetTargetContext: rawUserText.includes('### Widget 更新上下文'),
       hasAttachments: rawUserText.includes('--- 引用文件:') || rawUserText.includes('--- 附件:'),
@@ -649,6 +655,7 @@ export function buildRequestEnvelope(params: {
       ...(params.trustedEnvironment?.workbenchMode
         ? { workbenchMode: params.trustedEnvironment.workbenchMode }
         : {}),
+      ...(params.trustedEnvironment?.browserReadRefs ? { browserReadRefs: params.trustedEnvironment.browserReadRefs } : {}),
       ...(params.trustedEnvironment?.browserPageRef
         ? { browserPageRef: { ...params.trustedEnvironment.browserPageRef } }
         : {}),

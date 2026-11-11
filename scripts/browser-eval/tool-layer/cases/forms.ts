@@ -49,8 +49,10 @@ export const surfaceGroup: CaseGroup = {
   async run(ctx) {
     const run = await ctx.run('surface')
     await run.open(ctx.url('/form/'))
-    await ctx.check('current-page-tools', '当前页工具面 18 项，与准入组合器一致', [], async () => {
+    await ctx.check('current-page-tools', '当前页工具面 20 项，与准入组合器一致', [], async () => {
       const expected = [
+        'browser_tabs',
+        'browser_download',
         'browser_click',
         'browser_collect',
         'browser_dialog',
@@ -76,22 +78,11 @@ export const surfaceGroup: CaseGroup = {
       if (missing.length === 0 && extra.length === 0) return pass(`${got.length} 项`)
       return fail(`工具面变化：缺 ${missing.join(',') || '无'}，多 ${extra.join(',') || '无'}`, got)
     })
-    await ctx.check('tabs-closed', '跨标签 browser_tabs 不在本轮工具面', ['browser_tabs'], async () => (
-      closedTool(
-        await run.call('browser_tabs', { action: 'list' }),
-        '跨标签未开放：browser_tabs 被准入拒绝（T3）'
-      )
-    ))
-    await ctx.check(
-      'download-closed',
-      '下载 browser_download 不在本轮工具面',
-      ['browser_download'],
-      async () => (
-        closedTool(
-          await run.call('browser_download', { mode: 'urls', urls: [ctx.url('/downloads/files/report-2026-q3.csv')] }),
-          '下载未开放：browser_download 被准入拒绝（T4）'
-        )
-      ))
+    await ctx.check('tabs-scoped', '跨标签只列钉住页和任务页', ['browser_tabs'], async () => {
+      const listed = await run.call('browser_tabs', { action: 'list' })
+      const tabs = listed.data.tabs as { id: string }[]
+      return tabs?.length === 1 && tabs[0].id === run.tabId ? pass('只列本轮页面') : fail(listed.text)
+    })
     await ctx.check(
       'research-closed',
       'browser_research 不属于当前页工具面',
