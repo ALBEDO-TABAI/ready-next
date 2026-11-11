@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { ObjectUIHost } from '../modules/workbench/object-ui/ObjectUIHost'
 import { useWorkspace, reconcileWorkspaceWatchersFromStore, formatWorkspaceWatcherFailure } from '../stores/useWorkspace'
 import { useMode, type WorkbenchMode as WorkbenchModeType } from '../stores/useMode'
+import { FastCardShelf } from '../modules/fastcard/FastCardShelf'
 import { useDocTabs } from '../stores/useDocTabs'
 import TopBar from '../components/layout/TopBar'
 import ShellRail from '../modules/workbench/shell/ShellRail'
@@ -902,6 +903,7 @@ export default function WorkbenchMode() {
                 />
               )}
               {findReplaceOpen && <Suspense fallback={null}><FindReplaceWorkspace onClose={() => setFindReplaceOpen(false)} /></Suspense>}
+              <FastCardShelf visible={workbenchMode !== 'browser' && splitMode !== 'browser'} />
             </div>
 
             {shell.assistantResizable && (

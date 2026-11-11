@@ -3,7 +3,9 @@ import { SaveToPicker } from '../../modules/document/page-ui/SaveToPicker'
 import type { PageNode, PageResult } from '../../../shared/document-pages'
 import type { FastCardCanvasTarget, FastCardTransferRequest } from '../../../shared/fastcard'
 import { getFastCardTransferAPI, getFastCardQuickNoteAPI } from '../../stores/useFastCard'
-import { FileText, Image as ImageIcon, Languages, PanelRightClose, Save, Send, Sparkles, Trash2, Video, X } from 'lucide-react'
+import { FileText, Image as ImageIcon, Languages, Mic, PanelRightClose, Save, Send, Sparkles, Trash2, Video, X } from 'lucide-react'
+import { Button, IconButton } from '../ui/Button'
+import { parseReadyUri } from '../../../shared/ready-ref'
 import type { FastCardItem, FastCardSyncState } from '../../../shared/fastcard'
 
 interface FastCardPanelProps {
@@ -12,7 +14,8 @@ interface FastCardPanelProps {
   onCollapse: () => void
   onClear: () => void
   onSaveCanvas: (itemIds: string[]) => void
-  onInsertToChat: () => void
+  /** The chosen items, or every item when none is chosen. */
+  onInsertToChat: (itemIds: string[]) => void
   onRemoveItem: (id: string) => void
 }
 
@@ -21,6 +24,7 @@ function itemIcon(kind: FastCardItem['kind']) {
   if (kind === 'video') return <Video size={14} />
   if (kind === 'translation') return <Languages size={14} />
   if (kind === 'image-description') return <Sparkles size={14} />
+  if (kind === 'audio') return <Mic size={14} />
   return <FileText size={14} />
 }
 
@@ -42,96 +46,84 @@ function itemPreview(item: FastCardItem): string {
   return item.text || ''
 }
 
-export default function FastCardPanel({
-  items,
-  syncState,
-  onCollapse,
-  onClear,
-  onSaveCanvas,
-  onInsertToChat,
-  onRemoveItem,
-}: FastCardPanelProps) {
+/** Where a card came from (W4 §6): 网页 with its site, 资讯, 书, PDF, or 快记 for what was jotted down directly. */
+function sourceLabel(item: FastCardItem): string {
+  const url = item.source?.pageUrl || item.video?.pageUrl || ''
+  if (!url) return '快记'
+  const ready = parseReadyUri(url)
+  if (ready.ok && ready.ref.kind === 'rss-item') return '资讯'
+  if (ready.ok && ready.ref.kind === 'book-location') return '书'
+  if (/\.pdf(?:$|[?#])/i.test(url)) return 'PDF'
+  const site = item.source?.domain || item.source?.pageTitle
+  return site ? `网页 · ${site}` : '网页'
+}
+
+function timeLabel(at: number): string {
+  const date = new Date(at), now = new Date()
+  const clock = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+  return date.toDateString() === now.toDateString() ? clock : `${date.getMonth() + 1}月${date.getDate()}日 ${clock}`
+}
+
+// The FastCard shelf (W4 §6): the same panel in the browser's overlay window and in the shell's drawer.
+export default function FastCardPanel({ items, syncState, onCollapse, onClear, onSaveCanvas, onInsertToChat, onRemoveItem }: FastCardPanelProps) {
   const [playback, setPlayback] = useState<Record<string, string>>({})
   const [playbackError, setPlaybackError] = useState('')
-  const [selected, setSelected] = useState<string[] | null>(null)
-  const itemIds = items.filter(item => selected === null || selected.includes(item.id)).map(item => item.id)
+  const [selected, setSelected] = useState<string[]>([])
+  const chosen = selected.filter(id => items.some(item => item.id === id))
+  const target = chosen.length ? chosen : items.map(item => item.id)
+  const saving = syncState?.kind === 'saving'
+  const toggle = (id: string, on: boolean) => setSelected(current => on ? [...current.filter(item => item !== id), id] : current.filter(item => item !== id))
   return (
-    <aside className="browser-fastcard-drawer browser-fastcard-surface content-surface-panel ready-app-liquid-panel is-entered" aria-label="FastCard">
-      <header className="browser-fastcard-header">
-        <div>
-          <div className="browser-fastcard-kicker">FastCard</div>
-          <h2>{items.length} 条暂存</h2>
-        </div>
-        <button className="browser-fastcard-icon-button" type="button" aria-label="收起" title="收起" onClick={onCollapse}>
-          <PanelRightClose size={16} />
-        </button>
+    <aside className="fc-shelf" aria-label="FastCard">
+      <header className="fc-shelf__head">
+        <div><h2>暂存</h2><span className="fc-shelf__count">{items.length} 条{chosen.length ? ` · 已选 ${chosen.length} 条` : ''}</span></div>
+        <IconButton icon={<PanelRightClose size={16} />} title="收起" onClick={onCollapse} />
       </header>
-
-      {playbackError && <p role="alert">{playbackError}</p>}
-      {syncState?.kind === 'error' && <p role="alert">{syncState.message}</p>}
+      {playbackError && <p role="alert" className="fc-shelf__status">{playbackError}</p>}
+      {syncState?.kind === 'error' && <p role="alert" className="fc-shelf__status">{syncState.message}</p>}
       {(syncState?.kind === 'loading' || syncState?.kind === 'saving') && (
-        <p role="status">{syncState.kind === 'loading' ? '正在读取暂存…' : '正在保存…'}</p>
+        <p role="status" className="fc-shelf__status">{syncState.kind === 'loading' ? '正在读取暂存…' : '正在保存…'}</p>
       )}
-      <div className="browser-fastcard-list">
+      <div className="fc-shelf__list">
         {items.length === 0 ? (
-          <div className="browser-fastcard-empty">暂无内容</div>
-        ) : (
-          items.map((item) => (
-            <article className="browser-fastcard-item" key={item.id} draggable
-              onDragStart={event => { event.dataTransfer.setData('application/x-ready-fastcard', JSON.stringify({ itemIds: [item.id], operationId: crypto.randomUUID() })); event.dataTransfer.effectAllowed = 'move' }}>
-              <label><input type="checkbox" aria-label={`选择 ${itemTitle(item)}`} checked={itemIds.includes(item.id)}
-                onChange={event => setSelected(event.target.checked ? [...itemIds, item.id] : itemIds.filter(id => id !== item.id))} />选择</label>
-              <div className="browser-fastcard-item-head">
-                <span className="browser-fastcard-item-kind">{itemIcon(item.kind)}</span>
-                <div className="browser-fastcard-item-title">{itemTitle(item)}</div>
-                <button
-                  className="browser-fastcard-icon-button"
-                  type="button"
-                  aria-label="移除"
-                  title="移除"
-                  onClick={() => onRemoveItem(item.id)}
-                >
-                  <X size={14} />
-                </button>
-              </div>
-              <p>{itemPreview(item)}</p>
-              {item.media?.status === 'missing' && <p role="alert">媒体缺失：{item.media.error}</p>}
-              {(item.kind === 'image' || item.kind === 'image-description') && !item.media && <p role="status">图片尚未完成离线保存</p>}
-              {item.media?.status === 'cached' && <span>已离线保存</span>}
-              {item.kind === 'audio' && <div>
-                {playback[item.id] ? <audio controls src={playback[item.id]} /> : <button onClick={() => {
-                  void getFastCardQuickNoteAPI().playback(item.id).then(result => {
-                    const url = result.data
-                    if (!result.success || !url) throw new Error(result.error || '无法读取录音')
-                    setPlayback(current => ({ ...current, [item.id]: url }))
-                  }).catch(error => setPlaybackError(String(error)))
-                }}>播放录音</button>}
-              </div>}
-              {item.kind === 'audio' && <p>{item.transcription?.status === 'ready' ? item.transcription.text : item.transcription?.status === 'failed' ? `转写失败：${item.transcription.error}` : item.transcription?.status === 'running' ? '正在转写' : '音频已保存，尚未转写'}</p>}
-              {item.source?.domain && <span className="browser-fastcard-source">{item.source.domain}</span>}
-            </article>
-          ))
-        )}
+          <p className="fc-shelf__empty">还没有暂存的内容。在网页上选中文字或图片收进来，或用快记（⌥⌘Space）随手记一条。</p>
+        ) : items.map(item => {
+          const title = itemTitle(item), preview = itemPreview(item), checked = chosen.includes(item.id)
+          return <article className="fc-card" data-selected={checked || undefined} key={item.id} draggable
+            onDragStart={event => { event.dataTransfer.setData('application/x-ready-fastcard', JSON.stringify({ itemIds: checked ? chosen : [item.id], operationId: crypto.randomUUID() })); event.dataTransfer.effectAllowed = 'move' }}>
+            <div className="fc-card__head">
+              <input type="checkbox" className="fc-card__check" aria-label={`选择 ${title}`} checked={checked} onChange={event => toggle(item.id, event.target.checked)} />
+              <span className="fc-card__kind" aria-hidden>{itemIcon(item.kind)}</span>
+              <span className="fc-card__title">{title}</span>
+              <IconButton size="sm" icon={<X size={14} />} title="移除" onClick={() => onRemoveItem(item.id)} />
+            </div>
+            {preview && <p className="fc-card__body">{preview}</p>}
+            {item.media?.status === 'missing' && <p role="alert" className="fc-card__note">媒体缺失：{item.media.error}</p>}
+            {(item.kind === 'image' || item.kind === 'image-description') && !item.media && <p role="status" className="fc-card__note">图片尚未完成离线保存</p>}
+            {item.kind === 'audio' && <div className="fc-card__note">
+              {playback[item.id] ? <audio controls src={playback[item.id]} /> : <Button size="sm" variant="ghost" onClick={() => {
+                void getFastCardQuickNoteAPI().playback(item.id).then(result => {
+                  const url = result.data
+                  if (!result.success || !url) throw new Error(result.error || '无法读取录音')
+                  setPlayback(current => ({ ...current, [item.id]: url }))
+                }).catch(error => setPlaybackError(String(error)))
+              }}>播放录音</Button>}
+              <p>{item.transcription?.status === 'ready' ? item.transcription.text : item.transcription?.status === 'failed' ? `转写失败：${item.transcription.error}` : item.transcription?.status === 'running' ? '正在转写' : '音频已保存，尚未转写'}</p>
+            </div>}
+            <div className="fc-card__meta">{sourceLabel(item)} · {timeLabel(item.createdAt)}{item.media?.status === 'cached' ? ' · 已离线保存' : ''}</div>
+          </article>
+        })}
       </div>
-
-      <footer className="browser-fastcard-footer">
-        <button className="browser-fastcard-action" type="button" onClick={() => onSaveCanvas(itemIds)} disabled={itemIds.length === 0 || syncState?.kind === 'saving'}>
-          <Save size={14} />
-          <span>保存到画板</span>
-        </button>
-        <button className="browser-fastcard-action" type="button" onClick={onInsertToChat} disabled={items.length === 0}>
-          <Send size={14} />
-          <span>引入到对话框</span>
-        </button>
-        <button className="browser-fastcard-action subtle" type="button" onClick={onClear} disabled={items.length === 0}>
-          <Trash2 size={14} />
-          <span>清空</span>
-        </button>
+      <footer className="fc-shelf__foot">
+        <Button size="sm" icon={<Save size={14} />} disabled={!target.length || saving} onClick={() => onSaveCanvas(target)}>保存到画板…</Button>
+        <Button size="sm" icon={<Send size={14} />} disabled={!target.length} onClick={() => onInsertToChat(target)}>引入对话</Button>
+        {chosen.length
+          ? <Button size="sm" variant="danger" icon={<Trash2 size={14} />} onClick={() => { chosen.forEach(onRemoveItem); setSelected([]) }}>删除</Button>
+          : <Button size="sm" variant="ghost" icon={<Trash2 size={14} />} disabled={!items.length} onClick={onClear}>清空</Button>}
       </footer>
     </aside>
   )
 }
-
 
 export function FastCardSaveDialog({ onSave, onRetry, onCancel }: {
   onSave(target?: FastCardCanvasTarget): Promise<boolean>

@@ -1023,8 +1023,6 @@ html:root .rss-task-menu-panel .rn-float-panel__content > div:first-child {
   border-color: transparent !important;
 }
 
-html:root .browser-fastcard-item,
-html[data-fastcard-overlay-window='true'] .browser-fastcard-item,
 html:root .browser-fastcard-result-body section,
 html[data-fastcard-overlay-window='true'] .browser-fastcard-result-body section,
 html:root .browser-fastcard-field select,
@@ -1051,8 +1049,6 @@ html:root .calendar-timezone-menu input {
   -webkit-backdrop-filter: none !important;
 }
 
-html:root .ready-app-liquid-panel .browser-fastcard-item,
-html[data-fastcard-overlay-window='true'] .ready-app-liquid-panel .browser-fastcard-item,
 html:root .ready-app-liquid-panel .browser-fastcard-result-body section,
 html[data-fastcard-overlay-window='true'] .ready-app-liquid-panel .browser-fastcard-result-body section,
 html:root .ready-app-liquid-panel .rss-settings-card,
