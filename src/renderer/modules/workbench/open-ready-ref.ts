@@ -1,3 +1,5 @@
+import { useFastCard } from '../../stores/useFastCard'
+import { revealConversation } from '../agent/conversation-navigation'
 import { create } from 'zustand'
 import { parsePdfAnchor, type PdfAnchor } from '../../../shared/pdf-source-anchor'
 import { useMentionNavigation } from '../calendar/workbench/layers/mention-navigation'
@@ -19,8 +21,12 @@ import { openInCurrentTab } from '../document/ink/layout-state'
 
 export const usePdfReference = create<{ target: { id: string; path: string; anchor: PdfAnchor } | null }>(() => ({ target: null }))
 
-/** All Ready reference entry points share validation and destination owners. */
-export async function openReadyRef(input: string | ReadyRef, fromMode?: WorkbenchMode): Promise<void> {
+/**
+ * All Ready reference entry points share validation and destination owners. `newTab` (⌘-click, ⌘↵) keeps the current
+ * document tab and opens pages, files and boards in a tab of their own, as Inkwell does; the document mode has no
+ * second pane to open into, and the other destinations have no tabs, so for them it opens as usual.
+ */
+export async function openReadyRef(input: string | ReadyRef, fromMode?: WorkbenchMode, { newTab = false }: { newTab?: boolean } = {}): Promise<void> {
   const parsed = typeof input === 'string' ? parseReadyUri(input) : { ok: true as const, ref: ReadyRefSchema.parse(input) }
   if (!parsed.ok) throw new Error('引用地址无效')
   const ref = parsed.ref
@@ -31,7 +37,14 @@ export async function openReadyRef(input: string | ReadyRef, fromMode?: Workbenc
       const state = confirmed(await getLibraryAPI().get())
       const book = state.status === 'ready' && state.books.find(b => b.id === ref.book)
       if (!book) throw new Error('书籍不存在或已从书房移除')
-      if (!['epub', 'txt', 'md'].includes(book.format)) throw new Error('此书籍格式暂不支持段落定位')
+      if (!['epub', 'txt', 'md'].includes(book.format)) {
+        if (ref.loc !== 'c0:0+1') throw new Error('此书籍格式暂不支持段落定位')
+        rememberReferenceOrigin(origin, 'document')
+        useDocTabs.getState().openTab(book.filePath)
+        useWorkspace.getState().selectFile(book.filePath)
+        requestWorkbenchModeOpen('document')
+        return
+      }
       rememberReferenceOrigin(origin, 'document')
       requestBookLocation({ book: ref.book, location })
       useWorkspace.getState().selectFile(null)
@@ -49,7 +62,7 @@ export async function openReadyRef(input: string | ReadyRef, fromMode?: Workbenc
         const anchor = parsePdfAnchor(ref.anchor)
         rememberReferenceOrigin(origin, 'document')
         usePdfReference.setState({ target: { id: ref.id, path: location.path, anchor } })
-        if (origin.mode === 'document') openInCurrentTab(location.path)
+        if (origin.mode === 'document') openInCurrentTab(location.path, { newTab })
         else useDocTabs.getState().openTab(location.path)
         useWorkspace.getState().selectFile(location.path)
         requestWorkbenchModeOpen('document')
@@ -69,11 +82,21 @@ export async function openReadyRef(input: string | ReadyRef, fromMode?: Workbenc
       rememberReferenceOrigin(origin, 'document')
       if (ref.kind === 'canvas') requestCanvasNode(ref.id, ref.node)
       // A link followed inside Document mode navigates the current tab, as in Inkwell; other modes open a tab.
-      if (origin.mode === 'document') openInCurrentTab(location.path)
+      if (origin.mode === 'document') openInCurrentTab(location.path, { newTab })
       else useDocTabs.getState().openTab(location.path)
       useWorkspace.getState().selectFile(location.path)
       if (reveal) useDocTabs.getState().setPendingReveal({ path: location.path, ...reveal, requestedAt: Date.now() })
       requestWorkbenchModeOpen('document')
+      return
+    }
+    case 'fastcard':
+      if (!await useFastCard.getState().reveal(ref.id)) throw new Error('暂存条目无法打开')
+      return
+    case 'rss-query': {
+      const result = await window.electronAPI.rss.queryItems(ref.query)
+      if (!result.success || !result.data) throw new Error(result.error || '资讯查询无法打开')
+      rememberReferenceOrigin(origin, 'rss')
+      revealRSSReference({ kind: 'query', query: ref.query })
       return
     }
     case 'rss-digest':
@@ -111,8 +134,7 @@ export async function openReadyRef(input: string | ReadyRef, fromMode?: Workbenc
       return
     }
     case 'conversation': {
-      const { revealSearchConversation } = await import('../../stores/useAgent')
-      await revealSearchConversation(ref.id)
+      await revealConversation(ref)
       if (!useWorkspace.getState().chatPanelVisible) useWorkspace.getState().toggleChatPanel()
       return
     }
@@ -127,7 +149,7 @@ export async function openReadyRef(input: string | ReadyRef, fromMode?: Workbenc
 export async function openIndexedSearchResult(item: { path: string; sourceType: string }): Promise<void> {
   const parsed = parseReadyUri(item.path)
   if (!parsed.ok) throw new Error('搜索结果地址无效')
-  const kinds: Record<string, ReadyRef['kind']> = { rss: 'rss-item', calendar: 'event', agent: 'conversation', bookmark: 'web', library: 'book-location' }
+  const kinds: Record<string, ReadyRef['kind']> = { rss: 'rss-item', calendar: 'event', agent: 'conversation', bookmark: 'web', library: 'book-location', book: 'book-location', highlight: 'page', fastcard: 'fastcard' }
   const matches = kinds[item.sourceType] === parsed.ref.kind || (item.sourceType === 'document' && parsed.ref.kind === 'book-location')
   if (!matches) throw new Error('搜索结果类型与地址不符')
   await openReadyRef(parsed.ref)

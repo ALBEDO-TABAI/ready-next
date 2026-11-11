@@ -10,6 +10,8 @@
 .ds-specimen__title { margin: 0 0 12px; font: 500 var(--rn-fs-xs)/1 var(--rn-font-ui); color: var(--rn-ink-3); }
 .ds-specimen__body { display: flex; flex-direction: column; gap: 12px; }
 .ds-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+/* Reference capsules sit in prose (W6 §2.1), at the paper's reading size. */
+.ds-prose { margin: 0; font-size: var(--rn-prose-size); line-height: var(--rn-prose-lh); color: var(--rn-ink); }
 .ds-stack { display: flex; flex-direction: column; gap: 8px; }
 .ds-stack .rn-field { width: 100%; }
 .ds-grow { flex: 1; min-width: 0; }

@@ -96,7 +96,7 @@ test('only valid internal citation URLs become navigation controls; source Markd
   if (reference.kind !== 'article') throw new Error('wrong reference')
   const url = rssCitationUrl(reference)
   assert.deepEqual(parseRSSCitationUrl(url), reference)
-  assert.match(renderToStaticMarkup(<>{renderInline(`[Source](${url})`)}</>), /rss-citation-link/)
+  assert.match(renderToStaticMarkup(<>{renderInline(`[Source](${url})`)}</>), /data-ready-ref-capsule/)
   assert.doesNotMatch(renderToStaticMarkup(<>{renderInline('[Fake](ready-rss://reference?data=broken)')}</>), /<button|<a/)
   assert.doesNotMatch(renderToStaticMarkup(<MarkdownContent readingAnchors content={`[Fake](${url})`} externalBaseUrl="https://example.test" onOpenLink={() => {}} />), /href=|<button/)
 })

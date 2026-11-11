@@ -1913,6 +1913,8 @@ interface DocumentGraphResponse {
 }
 
 interface DocumentSearchHit {
+  title: string
+  typeLabel: import('../../shared/search-presentation').SearchPresentation['typeLabel']
   path: string
   name: string
   snippet: string
@@ -2394,7 +2396,6 @@ interface ElectronCalendarAPI {
   importCalendar(raw: string, name: string, sourceId?: string): Promise<CalendarResponse<{ sourceId: string; created: number; updated: number; skipped: number }>>
   openIcs(): Promise<CalendarResponse<{ name: string; text: string; sourceId: string } | null>>
   saveIcs(name: string, text: string): Promise<CalendarResponse<boolean>>
-  openLink(url: string): Promise<CalendarResponse<boolean>>
   getLoginItem(): Promise<CalendarResponse<boolean>>
   setLoginItem(enabled: boolean): Promise<CalendarResponse<boolean>>
   onChanged(handler: () => void): () => void
@@ -3325,6 +3326,7 @@ interface ElectronAPI {
   documentPages: import('../../shared/document-pages').DocumentPagesAPI
   documentAnnotations: import('../../shared/document-comments').DocumentAnnotationsAPI
   documentImport: import('../../shared/document-import').DocumentImportAPI
+  databasePreview: (id: string) => Promise<import('../../shared/object-preview').DatabasePreview>
   documentDatabase: (request: import('../../shared/document-database').DatabaseRequest) => Promise<import('../../shared/document-database').DatabaseReply>
   bookSources: import('../../shared/library-sources').BookSourcesAPI
   libraryArchive: import('../../shared/library').LibraryArchiveAPI

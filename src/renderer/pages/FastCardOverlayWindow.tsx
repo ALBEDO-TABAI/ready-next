@@ -61,6 +61,7 @@ export default function FastCardOverlayWindow() {
       ) : (
         <div className="fc-overlay rn-float"><FastCardPanel
           items={snapshot.items}
+          revealTarget={snapshot.revealTarget}
           syncState={snapshot.syncState}
           onCollapse={() => send({ type: 'collapse' })}
           onClear={() => send({ type: 'clear' })}

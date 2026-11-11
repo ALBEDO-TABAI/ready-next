@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import ReactMarkdown from 'react-markdown'
+import { X } from 'lucide-react'
 import { toReadyUri } from '../../../../shared/ready-ref'
 import { useDocTabs } from '../../../stores/useDocTabs'
+import { Button, IconButton } from '../../../components/ui/Button'
+import { REF_CAPSULE_KINDS, refCapsuleKind } from '../../../components/ui/ref-capsule-kinds'
 import { beginBrowserMask, endPersistentBrowserMask } from '../../overlay/browserViewMask'
 import { openObjectTarget, type PreviewTarget } from './navigation'
 import { loadObjectPreview, type ObjectPreview } from './preview'
+import { QuickLookBody } from './QuickLookContent'
 
 /** The children are never mounted until native hide has been acknowledged. */
 export function MaskedObjectOverlay({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
@@ -52,14 +55,26 @@ export function QuickLook({ reference, onClose }: { reference: PreviewTarget; on
     return () => { active = false; off?.() }
   }, [reference, key, tabs])
   const preview = value?.key === key ? value.preview : null
-  const open = async () => { try { await openObjectTarget(reference); onClose() } catch (error) { setError(String(error)) } }
+  const open = async (newTab = false) => { try { await openObjectTarget(reference, { newTab }); onClose() } catch (error) { setError(String(error)) } }
+  const kind = reference.kind === 'draft' ? 'page' : refCapsuleKind(reference, preview?.state === 'ready' && preview.data?.kind === 'database' ? '数据库' : undefined)
+  const Icon = REF_CAPSULE_KINDS[kind].icon
+  // A capsule inside the quick look opens its object, so the look steps aside; ⌥-click looks at it here instead.
   return <MaskedObjectOverlay onClose={onClose}>
-    <header className="flex justify-between gap-3"><h2>{preview?.title || '正在读取…'}</h2><button onClick={onClose}>关闭</button></header>
-    {preview?.state === 'ready' ? <>
-      {preview.unsaved && <p role="status">未保存</p>}
-      <div className="my-4 whitespace-pre-wrap">{preview.markdown ? <ReactMarkdown>{preview.body}</ReactMarkdown> : preview.body}</div>
-      <button onClick={() => void open()}>打开</button>
-    </> : preview && <p role="status">{preview.message}</p>}
-    {error && <p role="alert">{error}</p>}
+    <div className="rn-ql rn-ui" onClickCapture={event => { if (!event.altKey && event.target instanceof Element && event.target.closest('[data-ready-ref-capsule]')) window.setTimeout(onClose) }}>
+      <header className="rn-ql__head">
+        <span className="rn-ql__kind"><Icon aria-hidden />{REF_CAPSULE_KINDS[kind].label}</span>
+        <IconButton size="sm" icon={<X />} title="关闭" onClick={onClose} />
+      </header>
+      <h2 className="rn-ql__title">{preview?.title || '正在读取…'}</h2>
+      {preview?.state === 'ready' && preview.unsaved && <p className="rn-ql__badge" role="status">未保存</p>}
+      <div className="rn-ql__body">
+        {preview?.state === 'ready' ? <QuickLookBody preview={preview} reference={reference} /> : preview ? <p role="status" className="rn-ql-note">{preview.message}</p> : <div className="rn-ql__loading" aria-hidden />}
+      </div>
+      {preview?.state === 'ready' && <footer className="rn-ql__foot">
+        <span>⌘ 点击在新标签打开 · Esc 关闭</span>
+        <Button variant="primary" size="sm" onClick={event => void open(event.metaKey || event.ctrlKey)}>打开</Button>
+      </footer>}
+      {error && <p role="alert" className="rn-ql-note is-error">{error}</p>}
+    </div>
   </MaskedObjectOverlay>
 }

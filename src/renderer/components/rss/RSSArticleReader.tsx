@@ -20,6 +20,8 @@ import RSSTopbarTools from './RSSTopbarTools'
 import { RSSTranslatedBody, RSSTranslationControl } from './RSSTranslationControl'
 import { rssReaderHeadings, useRSSArticleTranslation } from '../../modules/rss/article-translation'
 import { FloatPanel } from '../ui/float/FloatPanel'
+import { RefCapsule } from '../ui/RefCapsule'
+import { ReadyRefSchema } from '../../../shared/ready-ref'
 import { chatMenuSurfaceStyle } from '../agent/chatMenuStyles'
 
 // Items re-extracted in this session; a page that still extracts badly is not fetched again on every open.
@@ -145,6 +147,9 @@ export default function RSSArticleReader({ item, expectedRevision, reveal, onClo
   const date = article?.publishedAt ?? article?.collectedAt
   const author = article?.author || item.author
   const source = article?.source || item.source
+  // 出处: the source names the original page, a reference capsule that opens it in Ready's browser (W6 §2.1).
+  const originalLink = article?.link || item.link
+  const originalRef = originalLink ? ReadyRefSchema.safeParse({ kind: 'web', url: originalLink }).data ?? null : null
   const included = (article?.classifications || item.classifications || []).filter((entry) => entry.included)
   const closeReferenceMenu = () => setReferenceMenuOpen(false)
 
@@ -187,7 +192,7 @@ export default function RSSArticleReader({ item, expectedRevision, reveal, onClo
       </nav>}
       <article className="rss-reader-content">
         <p className="rss-reader-source">
-          <strong>{source}</strong>
+          {originalRef ? <RefCapsule reference={originalRef} title={source} /> : <strong>{source}</strong>}
           {author && author !== source ? <span>· {author}</span> : null}
           {date != null ? <span>· {article?.publishedAt == null ? '收录于 ' : ''}{readerTime(date)}</span> : null}
         </p>

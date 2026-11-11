@@ -148,6 +148,7 @@ export interface FastCardStorageAPI {
 }
 
 export interface FastCardOverlaySnapshot {
+  revealTarget?: { id: string; requestId: string } | null
   mode: 'fastcard' | 'result'
   syncState?: FastCardSyncState
   items: FastCardItem[]

@@ -38,6 +38,5 @@ export async function openWebpageInBrowser(href: string, opts: OpenWebpageOption
     }
   }
 
-  window.open(href, '_blank', 'noopener,noreferrer')
   return false
 }

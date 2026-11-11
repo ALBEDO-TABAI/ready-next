@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import type { DayInput, DaySummary } from '../../../../shared/calendar-linkage'
 import { openReadyRef } from '../../workbench/open-ready-ref'
 import { attachDay } from './attachments'
-const labels = { events: '日程', documents: '文档日期', tasks: '待办', reminders: '提醒', footprints: '阅读足迹', activity: '页面与画板' }
+/** What each kind of entry on a day is called (这一天, its quick look). */
+export const DAY_ITEM_LABELS = { events: '日程', documents: '文档日期', tasks: '待办', reminders: '提醒', footprints: '阅读足迹', activity: '页面与画板' } as const
 export function ThisDay({ date, timeZone }: DayInput) {
   const [summary, setSummary] = useState<DaySummary | null>(null), [error, setError] = useState('')
   useEffect(() => {
@@ -25,7 +26,7 @@ export function ThisDay({ date, timeZone }: DayInput) {
     {summary?.items.length === 0 && <p>这一天还没有记录</p>}
     {summary?.items.map(item => <button key={item.id} className="ready-calendar-agenda" data-day-item={item.kind}
       onClick={() => void openReadyRef(item.ref, 'calendar').catch(cause => setError(String(cause)))}>
-      <small>{labels[item.kind]} · </small>{item.title}{item.detail && ` · ${item.detail}`}
+      <small>{DAY_ITEM_LABELS[item.kind]} · </small>{item.title}{item.detail && ` · ${item.detail}`}
     </button>)}
   </section>
 }

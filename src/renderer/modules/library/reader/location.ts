@@ -1,14 +1,8 @@
 import type { Layout } from './paginate'
 import { chapterText } from './marks'
 
-export interface BookLocation { chapter: number; from: number; to: number }
-export function parseBookLocation(loc: string): BookLocation {
-  const match = /^c(\d+):(\d+)\+(\d+)$/.exec(loc)
-  if (!match) throw new Error('书内位置无效')
-  const chapter = Number(match[1]), from = Number(match[2]), length = Number(match[3]), to = from + length
-  if (![chapter, from, length, to].every(Number.isSafeInteger) || length < 1) throw new Error('书内位置无效')
-  return { chapter, from, to }
-}
+import { parseBookLocation, type BookLocation } from '../../../../shared/book-location'
+export { parseBookLocation, type BookLocation }
 
 /** Folios are one-based, offsets count non-whitespace UTF-16 units, just like paginate. */
 export function pageOf(layout: Layout, at: { chapter: number; offset: number }): number {

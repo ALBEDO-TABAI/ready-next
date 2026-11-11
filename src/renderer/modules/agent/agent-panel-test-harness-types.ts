@@ -50,6 +50,7 @@ export type StoreState = {
   clearAttachments?: () => void
   createNewSession?: () => Promise<CreateSessionResult>
   setActiveSessionId?: (id: string) => void
+  addMessage?: (message: AgentMessage) => void
 }
 
 export type StoreLike = {
@@ -294,6 +295,8 @@ export interface AgentPanelTestHarness {
     contentLength?: number
     error?: string
   }>
+  /** A message shown in the open conversation and never persisted: real-window checks of message rendering, no model call. */
+  addMessageFixture: (input: { content: string; type?: 'agent' | 'user' }) => Promise<{ ok: boolean; id?: string; error?: string }>
   setWorkbenchMode: (mode: 'browser' | 'document' | 'rss' | 'calendar') => Promise<{
     ok: boolean
     mode: 'browser' | 'document' | 'rss' | 'calendar'

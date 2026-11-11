@@ -54,7 +54,7 @@
   .rn-canvas .canvas-menu-gap { width: 16px; flex: none; }
   .rn-canvas .canvas-menu-error { margin: 6px 8px 2px; color: var(--rn-bad); font-size: 12px; white-space: normal; max-width: 240px; }
   /* While a PNG is captured only the cards show. */
-  .rn-canvas[data-capturing] :where(.canvas-link-open, .canvas-message, [role='alert'], .canvas-resize) { display: none; }
+  .rn-canvas[data-capturing] :where(.canvas-message, [role='alert'], .canvas-resize) { display: none; }
   .rn-canvas .canvas-card[data-matched='true'] { box-shadow: 0 0 0 3px var(--rn-accent-soft), var(--rn-shadow-1); }
   .rn-canvas .canvas-card[data-kind='note'] { background: var(--ink-yellow-background-secondary, var(--canvas-card)); }
   .rn-canvas .canvas-world { position: absolute; inset: 0; transform-origin: 0 0; }
@@ -70,7 +70,7 @@
   .rn-canvas .canvas-card small { opacity: .65; }
   .rn-canvas .canvas-link-card small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .rn-canvas .canvas-link-note { margin: 8px 0 0; color: var(--rn-ink-3); font-size: 12px; }
-  .rn-canvas .canvas-link-open { margin-top: 8px; height: 28px; padding: 0 10px; border-radius: var(--rn-r-pill); background: var(--rn-fill-2); font-size: 12px; }
+  .rn-canvas :where(.canvas-link-ref, .canvas-schedule-mark) { display: block; margin-top: 8px; font-size: 13px; }
   .rn-canvas .canvas-card img, .rn-canvas .canvas-card video { width: 100%; height: 100%; object-fit: contain; }
   .rn-canvas .canvas-card audio { width: 100%; }
   .rn-canvas .canvas-card .canvas-graphic { position: absolute; max-width: none; pointer-events: none; }

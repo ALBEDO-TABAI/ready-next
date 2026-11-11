@@ -1,3 +1,5 @@
+import { BookAdapter, HighlightAdapter, FastCardAdapter } from './library-adapters'
+import { searchPresentation, type SearchPresentation } from '../../../shared/search-presentation'
 import { refreshCardLinks } from './object-index-rebuild'
 import { ObjectRegistry, canonicalObjectPath, isInside } from '../object-service/registry'
 import { ObjectMutations } from '../object-service/mutations'
@@ -66,7 +68,7 @@ export interface SearchEngineOptions {
 export class SearchEngine {
   private readonly repository: SearchRepository
   private readonly fsAdapter: FileSystemAdapter
-  private readonly sharedAdapters: IndexSourceAdapter[]
+  private readonly sourceAdapters: IndexSourceAdapter[]
   private readonly adaptersByType: Map<string, IndexSourceAdapter>
   // perf-rescue B8: debounced workspace-wide wikilink resolve. Each per-doc
   // index call only resolves THAT doc's outgoing + incoming links; an edge
@@ -86,14 +88,15 @@ export class SearchEngine {
   constructor(private readonly db: DatabaseConnection, private readonly options: SearchEngineOptions) {
     this.repository = new SearchRepository(db, options.fts5Available)
     this.fsAdapter = new FileSystemAdapter()
-    this.sharedAdapters = [
+    this.sourceAdapters = [
+      new BookAdapter(), new HighlightAdapter(), new FastCardAdapter(),
       new BookmarkAdapter(),
       new RssAdapter(),
       new CalendarAdapter(),
       new AgentMessageAdapter(),
     ]
     this.adaptersByType = new Map()
-    for (const adapter of [this.fsAdapter, ...this.sharedAdapters]) {
+    for (const adapter of [this.fsAdapter, ...this.sourceAdapters]) {
       this.adaptersByType.set(adapter.sourceType, adapter)
     }
   }
@@ -185,7 +188,7 @@ export class SearchEngine {
 
     // Shared adapters run under the @shared workspace
     const sharedWorkspaceId = this.repository.ensureWorkspace(SHARED_WORKSPACE_ROOT)
-    for (const adapter of this.sharedAdapters) {
+    for (const adapter of this.sourceAdapters) {
       if (signal?.aborted) {
         perSource[adapter.sourceType] = { indexed: 0, skipped: 0, removed: 0, scanned: 0, error: 'aborted' }
         continue
@@ -193,8 +196,8 @@ export class SearchEngine {
       try {
 
         const r = await adapter.reindex({
-          workspaceId: sharedWorkspaceId,
-          workspaceRoot: SHARED_WORKSPACE_ROOT,
+          workspaceId: adapter.workspaceScope === 'shared' ? sharedWorkspaceId : fsResult.workspaceId,
+          workspaceRoot: adapter.workspaceScope === 'shared' ? SHARED_WORKSPACE_ROOT : root,
           repository: this.repository,
           signal,
         })
@@ -377,7 +380,7 @@ export class SearchEngine {
     query: string,
     opts: { limit?: number; workspaceRoot?: string; workspaceRoots?: string[]; sources?: string[] } = {},
   ): Promise<{
-    items: Array<SearchHit & { sourceType: string; sourceMeta?: Record<string, unknown> | null }>
+    items: Array<SearchHit & SearchPresentation & { sourceType: string; sourceMeta?: Record<string, unknown> | null }>
     stats: { returned: number; elapsedMs: number }
     degraded: boolean
   }> {
@@ -458,7 +461,7 @@ export class SearchEngine {
     limit: number,
     normalizedQuery: string,
     sources: string[] | null,
-  ): Array<SearchHit & { sourceType: string; sourceMeta?: Record<string, unknown> | null }> {
+  ): Array<SearchHit & SearchPresentation & { sourceType: string; sourceMeta?: Record<string, unknown> | null }> {
     if (limit <= 0 || workspaceIds.length === 0) return []
     const fts5 = this.options.fts5Available
     const usingFts = fts5 && parsed.ftsMatch !== null
@@ -466,11 +469,11 @@ export class SearchEngine {
     const bindings: Array<string | number> = []
     const selectFields = usingFts
       ? `d.id AS id, d.path AS path, d.name AS name,
-         d.source_type AS sourceType, d.source_meta_json AS sourceMetaJson,
+         d.source_type AS sourceType, d.source_meta_json AS sourceMetaJson, d.frontmatter_json AS frontmatterJson,
          bm25(documents_fts, 2.0, 1.0) AS rank,
          snippet(documents_fts, 1, char(1), char(2), '…', 12) AS snip`
       : `d.id AS id, d.path AS path, d.name AS name,
-         d.source_type AS sourceType, d.source_meta_json AS sourceMetaJson,
+         d.source_type AS sourceType, d.source_meta_json AS sourceMetaJson, d.frontmatter_json AS frontmatterJson,
          0 AS rank, '' AS snip`
     let sql = `SELECT ${selectFields} FROM documents d`
     if (usingFts) sql += ' JOIN documents_fts f ON f.rowid = d.id'
@@ -505,6 +508,7 @@ export class SearchEngine {
       name: string
       sourceType: string
       sourceMetaJson: string | null
+      frontmatterJson: string | null
       rank: number
       snip: string
     }> = []
@@ -517,6 +521,7 @@ export class SearchEngine {
           name: string
           sourceType: string
           sourceMetaJson: string | null
+          frontmatterJson: string | null
           rank: number
           snip: string
         }>(...bindings)
@@ -567,6 +572,7 @@ export class SearchEngine {
         try { sourceMeta = JSON.parse(row.sourceMetaJson) } catch { sourceMeta = null }
       }
       return {
+        ...searchPresentation(row, row.frontmatterJson ? JSON.parse(row.frontmatterJson) : undefined),
         path: row.path,
         name: row.name,
         snippet: row.snip || '',

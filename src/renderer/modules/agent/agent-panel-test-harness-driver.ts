@@ -660,6 +660,15 @@ export function createAgentPanelTestHarness(store: StoreLike): AgentPanelTestHar
     }
   }
 
+  const addMessageFixture: AgentPanelTestHarness['addMessageFixture'] = async ({ content, type = 'agent' }) => {
+    const add = store.getState().addMessage
+    if (!add) return { ok: false, error: 'addMessage not available' }
+    const id = `fixture-${Date.now().toString(36)}`
+    add({ id, agent: store.getState().currentAgent, content, type, timestamp: new Date(), meta: { transient: true } })
+    await delay(50)
+    return { ok: store.getState().messages.some((message) => message.id === id), id }
+  }
+
   const setWorkbenchMode: AgentPanelTestHarness['setWorkbenchMode'] = async (mode) => {
     useMode.getState().setAppMode('workbench')
     useMode.getState().setWorkbenchMode(mode)
@@ -681,6 +690,7 @@ export function createAgentPanelTestHarness(store: StoreLike): AgentPanelTestHar
     createVisibleSession,
     activateSession,
     setDocumentFixture,
+    addMessageFixture,
     setWorkbenchMode,
     events: () => [...events],
     clearEvents: () => {

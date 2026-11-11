@@ -4,6 +4,8 @@ import type { FastCardItem, FastCardIPCResult, FastCardStorageAPI, FastCardSyncS
 
 interface FastCardState {
   items: FastCardItem[]
+  revealTarget: { id: string; requestId: string } | null
+  reveal: (id: string) => Promise<boolean>
   panelOpen: boolean
   collapsed: boolean
   syncState: FastCardSyncState
@@ -78,6 +80,12 @@ export function createFastCardStore(getAPI: () => FastCardStorageAPI, getTransfe
         if (!items) throw new Error('未收到暂存恢复回执')
         set({ items, transferReceipt: null })
       }),
+      revealTarget: null,
+      reveal: id => run('loading', async () => {
+        const items = receipt(await getAPI().listFastCardItems())
+        if (!items?.some(item => item.id === id)) throw new Error('暂存条目已不存在')
+        set({ items, revealTarget: { id, requestId: crypto.randomUUID() }, panelOpen: true, collapsed: false, transferReceipt: null })
+      }),
       items: [], panelOpen: false, collapsed: true, syncState: { kind: 'idle' },
       load: () => run('loading', async () => {
         const items = receipt(await getAPI().listFastCardItems())
@@ -102,7 +110,7 @@ export function createFastCardStore(getAPI: () => FastCardStorageAPI, getTransfe
         set({ panelOpen: true, collapsed: false })
         return get().load()
       },
-      collapse: () => set({ panelOpen: false, collapsed: true }),
+      collapse: () => set({ panelOpen: false, collapsed: true, revealTarget: null }),
     }
   })
 }

@@ -540,7 +540,7 @@ export function buildSearchIndexContentHash(body: string): string {
   return `${SEARCH_INDEX_CONTENT_VERSION}:${digest}`
 }
 
-function syncShared(
+export function syncShared(
   adapter: IndexSourceAdapter,
   ctx: AdapterContext,
   rows: Array<{

@@ -10,7 +10,8 @@ async function main() {
   const temporary = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ready-next-timeline-')))
   const vault = path.join(temporary, 'vault'), profile = path.join(temporary, 'profile')
   fs.mkdirSync(vault)
-  const env = { ...process.env, READY_USER_DATA_DIR: profile, READY_DB_PATH: path.join(profile, 'ready.db') }; delete env.ELECTRON_RUN_AS_NODE
+  // Verification never puts a window in front of the person.
+  const env = { ...process.env, READY_START_HIDDEN: '1', READY_USER_DATA_DIR: profile, READY_DB_PATH: path.join(profile, 'ready.db') }; delete env.ELECTRON_RUN_AS_NODE
   let app, page
   const poll = async (check, label) => {
     const deadline = Date.now() + 30000
@@ -96,7 +97,7 @@ async function main() {
     await page.getByLabel('日程开始', { exact: true }).fill(`${seeded.date}T14:00`)
     await page.getByLabel('日程结束', { exact: true }).fill(`${seeded.date}T15:00`)
     await page.getByRole('button', { name: '创建日程', exact: true }).click()
-    await page.getByRole('button', { name: '查看卡片日程' }).waitFor()
+    await page.locator('.canvas-schedule-mark a[data-ready-ref-capsule][data-ref-kind="event"]').first().waitFor()
     const related = await page.evaluate(() => window.electronAPI.calendar.snapshot())
     assert.ok(related.data.links.some(link => link.target.kind === 'canvas' && link.target.node === textId))
     await shot('03-card-schedule')
@@ -110,7 +111,7 @@ async function main() {
     assert.deepEqual(fs.readFileSync(path.join(vault, '联动画板.canvas')), before)
     assert.deepEqual(fs.readFileSync(path.join(vault, '联动文档.md')), docBefore)
     await page.getByLabel('事件卡', { exact: true }).getByText('会议室 B').waitFor()
-    await page.getByRole('button', { name: '查看卡片日程' }).waitFor()
+    await page.locator('.canvas-schedule-mark a[data-ready-ref-capsule][data-ref-kind="event"]').first().waitFor()
     const summary = await page.evaluate(date => window.electronAPI.calendarLinkage.day({ date, timeZone: 'UTC' }), seeded.date)
     assert.ok(summary.items.some(item => item.kind === 'events' && item.title === '新文字卡'))
     await shot('05-restart-readback')

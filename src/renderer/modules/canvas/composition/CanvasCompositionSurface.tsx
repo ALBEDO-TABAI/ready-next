@@ -68,11 +68,11 @@ export function CanvasCompositionSurface(props: CanvasCompositionSurfaceProps) {
     <CanvasSurface {...props} onAddToDocument={add}
       renderTextEditor={({ node, commit }) => node.type === 'text' ? <TextCard key={node.id} canvasPath={props.path} node={node} commit={commit} renderEditor={props.renderBlockEditor} /> : null}
       renderCard={node => {
-        const mark = <ScheduleMark canvasId={props.canvas.ready.id} nodeId={node.id} snapshot={props.calendarSnapshot} report={e => setError(String(e))} />
+        const mark = <ScheduleMark canvasId={props.canvas.ready.id} nodeId={node.id} snapshot={props.calendarSnapshot} />
         if (node.ready.kind === 'document') return <><DocumentCard node={node} source={props.documentPreview} />{mark}</>
         if (node.type === 'text' && ['text', 'note'].includes(node.ready.kind)) return <><CardMarkdown text={node.text} />{mark}</>
         if (node.ready.ref?.kind === 'event') return <EventCard reference={node.ready.ref} snapshot={props.calendarSnapshot} />
-        if (node.type === 'link') return <LinkCard node={node} source={props.linkPreview} open={props.onOpenNode ? () => props.onOpenNode!(node) : undefined} />
+        if (node.type === 'link') return <LinkCard node={node} source={props.linkPreview} />
         if (node.ready.kind === 'draft' && node.ready.draftId) return <article data-canvas-ui>
           <strong>{node.type === 'text' ? node.text : '草稿'}</strong>
           <button onClick={() => void props.openDraft(node.ready.draftId!).catch(e => setError(String(e)))}>打开草稿</button>

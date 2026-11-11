@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { splitOccurrenceKey, type CalendarMutationReceipt, type CalendarSnapshot } from '../../../../../shared/calendar/commands'
 import { CalendarLinkTargetSchema, type CalendarEventLink } from '../../../../../shared/calendar/event-links'
-import { toReadyUri, type ReadyRef } from '../../../../../shared/ready-ref'
+import type { ReadyRef } from '../../../../../shared/ready-ref'
 import type { ObjectLink } from '../../../../../shared/object-links'
 import type { PageNode } from '../../../../../shared/document-pages'
 import { SaveToPicker, type SaveToSelection } from '../../../document/page-ui/SaveToPicker'
@@ -11,6 +11,8 @@ import { reload } from '../store'
 import { Link2, NotebookPen, Plus, X } from 'lucide-react'
 import { LinkPicker } from './LinkPicker'
 import { openFloat } from '../../../../components/ui/float/float-store'
+import { RefCapsule } from '../../../../components/ui/RefCapsule'
+import { REF_CAPSULE_KINDS, refCapsuleKind } from '../../../../components/ui/ref-capsule-kinds'
 
 const value = async <T,>(request:Promise<{success:boolean;data?:T;error?:string}>):Promise<T> => {
   const result = await request
@@ -18,7 +20,6 @@ const value = async <T,>(request:Promise<{success:boolean;data?:T;error?:string}
   return result.data
 }
 const message = (error:unknown) => error instanceof Error ? error.message : String(error)
-const kindLabel:Partial<Record<ReadyRef['kind'],string>> = {page:'页面',file:'文档',canvas:'画板',web:'网页','book-location':'书'}
 
 function openLinkPicker(anchor:DOMRect, choose:(ref:ReadyRef)=>void) {
   openFloat({anchor,placement:'bottom-end',offset:6,role:'dialog',label:'添加关联',
@@ -39,8 +40,11 @@ export function EventLinks({occKey,title,readOnly}:{occKey:string;title:string;r
   const note = links.find(link=>link.purpose==='meeting-note')
   const related = links.filter(link=>link.purpose!=='meeting-note')
   const nodes = flattenPages(trees)
-  const label = (ref:ReadyRef) => ref.kind==='web' ? ref.url : ref.kind==='book-location' ? `书 ${ref.book}`
-    : 'id' in ref ? nodes.find(node=>node.objectId===ref.id)?.title || `${kindLabel[ref.kind] || '对象'} ${ref.id}` : toReadyUri(ref)
+  // Capsules (W6 §2.1) take their titles from the page tree (pages, boards, databases, books' source pages).
+  const node = (ref:ReadyRef) => nodes.find(node=>node.objectId===(ref.kind==='book-location' ? ref.book : 'id' in ref ? ref.id : null))
+  const refTitle = (ref:ReadyRef) => ref.kind==='web' ? ref.url.replace(/^https?:\/\//,'') : node(ref)?.title || REF_CAPSULE_KINDS[refCapsuleKind(ref)].label
+  const capsule = (ref:ReadyRef, key?:string) => { const found = node(ref)
+    return <RefCapsule key={key} reference={ref} title={refTitle(ref)} typeHint={found?.database ? '数据库' : found?.kind==='canvas' ? '画板' : undefined} /> }
   const refresh = useCallback(async () => {
     const request = ++generation.current
     const api = window.electronAPI
@@ -75,7 +79,6 @@ export function EventLinks({occKey,title,readOnly}:{occKey:string;title:string;r
   }
   const expected = () => Object.fromEntries((snapshot?.events || []).map(event=>[event.id,event.revision || 1]))
   const accept = async (receipt:CalendarMutationReceipt) => {setUndo(receipt);setSnapshot(receipt.snapshot);await reload();await refresh()}
-  const open = (ref:ReadyRef) => run(()=>openReadyRef(ref,'calendar'))
   const add = (ref:ReadyRef) => run(async()=>{
     const target = CalendarLinkTargetSchema.parse(ref)
     await accept(await value(window.electronAPI.calendar.mutate({type:'link',key:occKey,target},expected())))
@@ -104,16 +107,16 @@ export function EventLinks({occKey,title,readOnly}:{occKey:string;title:string;r
       <Link2 size={18} />
       <div className="ev-chips">
         {related.map(link=><span key={link.id} className="ev-chip">
-          <button type="button" disabled={busy} onClick={()=>void open(link.target)}>{label(link.target)}</button>
-          {!readOnly && <button type="button" className="ev-chip-x" aria-label={`解除关联 ${label(link.target)}`} disabled={busy} onClick={()=>void remove(link)}><X size={12} /></button>}
+          {capsule(link.target)}
+          {!readOnly && <button type="button" className="ev-chip-x" aria-label={`解除关联 ${refTitle(link.target)}`} disabled={busy} onClick={()=>void remove(link)}><X size={12} /></button>}
         </span>)}
         {!related.length && <span className="dim">关联</span>}
       </div>
       {!readOnly && <button type="button" className="ibtn sm" aria-label="添加关联" title="添加关联" disabled={busy || !snapshot}
         onClick={event=>openLinkPicker(event.currentTarget.getBoundingClientRect(),ref=>void add(ref))}><Plus size={16} /></button>}
     </div></div>
-    <div className="ev-r"><button type="button" className="ev-f" aria-label={note?'打开会议笔记':'会议笔记'} disabled={busy || !snapshot || (readOnly && !note)}
-      onClick={()=>note ? void open(note.target) : setPicker(true)}><NotebookPen size={18} /><span className={note?'':'dim'}>{note ? label(note.target) : '会议笔记'}</span></button></div>
+    <div className="ev-r">{note ? <div className="ev-f ev-link-row"><NotebookPen size={18} /><div className="ev-chips">{capsule(note.target)}</div></div>
+      : <button type="button" className="ev-f" aria-label="会议笔记" disabled={busy || !snapshot || readOnly} onClick={()=>setPicker(true)}><NotebookPen size={18} /><span className="dim">会议笔记</span></button>}</div>
     {pendingNote && !readOnly && <div className="ev-r ind"><button type="button" className="btn sm" disabled={busy} onClick={()=>void run(async()=>{const result=await createNote(pendingNote);if(!result.ok)throw new Error(result.message)})}>继续保存会议笔记</button></div>}
     {picker && !pendingNote && !readOnly && <SaveToPicker trees={trees} initialTitle={`${title || '日程'} 会议笔记`} onConfirm={createNote} onCancel={()=>setPicker(false)}/>}
     {undo && !readOnly && <div className="ev-r ind"><button type="button" className="btn sm" disabled={busy} onClick={()=>void run(async()=>{
@@ -121,8 +124,8 @@ export function EventLinks({occKey,title,readOnly}:{occKey:string;title:string;r
       setUndo(null);setSnapshot(restored.snapshot);await reload();await refresh()
     })}>撤销上次关联修改</button></div>}
     <details className="ev-backlinks"><summary>反链 {backlinks.length}{backlinks.length===1000?'+':''}</summary>
-      {backlinks.map(link=><button type="button" key={link.id} disabled={busy} onClick={()=>void open('ref' in link.source ? link.source.ref : {kind:'file',id:link.source.objectId})}>
-        {label('ref' in link.source ? link.source.ref : {kind:'file',id:link.source.objectId})}</button>)}
+      {backlinks.map(link=>{ const id = 'ref' in link.source ? null : link.source.objectId, kind = id ? nodes.find(node=>node.objectId===id)?.kind : null
+        return capsule('ref' in link.source ? link.source.ref : {kind:kind==='page' ? 'page' : kind==='canvas' ? 'canvas' : 'file', id:id!}, link.id) })}
       {!backlinks.length && <p className="dim">还没有页面链接到这个日程</p>}
     </details>
     {error && <p role="alert" className="ev-links-error">{error}</p>}

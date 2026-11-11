@@ -107,7 +107,7 @@ test('the digest view opens the latest daily issue as an edition led by its most
     readArticle: async () => ({ success: false, error: 'not needed' }),
     onDigestsChanged: () => () => {}, onOrganizationChanged: () => () => {},
   } } })
-  await act(async () => root.render(<RSSDigestPanel active view={null} onReadArticle={() => {}} />))
+  await act(async () => root.render(<RSSDigestPanel active view={null} />))
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)) })
   assert.equal(useRSSSession.getState().selectedDigestId, 'daily-oct-2', 'the newest daily issue, not the newer range brief')
   assert.deepEqual(opened, ['daily-oct-2'])
@@ -180,7 +180,7 @@ test('a new brief starts from the feed scope, can be narrowed in place, and pins
     generateDigest: async (input: unknown) => { generated.push(input); return { success: true, data: { id: 'brief-1' } } },
   } } })
   const view = { query: RSSQuerySchema.parse({ collectionId: 'all', categoryId: 'ai', sourceId: 's1', search: 'model' }), revision: 1 } as never
-  await act(async () => root.render(<RSSDigestPanel active view={view} definitions={briefDefinitions} feedSources={[{ id: 's1', name: 'Publisher' }]} onReadArticle={() => {}} />))
+  await act(async () => root.render(<RSSDigestPanel active view={view} definitions={briefDefinitions} feedSources={[{ id: 's1', name: 'Publisher' }]} />))
   const button = (text: string) => [...dom.window.document.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === text)!
   await act(async () => button('新建简报').click())
   const form = dom.window.document.querySelector('form[aria-label="新建简报"]')!
@@ -207,7 +207,7 @@ test('daily settings name the curated standard that scopes every issue and open 
   useRSSSession.getState().reset(); useRSSSession.getState().setDigestView(true)
   Object.assign(window, { electronAPI: { rss: { readDigests: noEditions, digestSettings: scheduleOff, onDigestsChanged: () => () => {}, onOrganizationChanged: () => () => {} } } })
   const edited: string[] = []
-  await act(async () => root.render(<RSSDigestPanel active view={null} definitions={briefDefinitions} onReadArticle={() => {}} onEditDefinition={(id) => edited.push(id)} />))
+  await act(async () => root.render(<RSSDigestPanel active view={null} definitions={briefDefinitions} onEditDefinition={(id) => edited.push(id)} />))
   await act(async () => dom.window.document.querySelector<HTMLButtonElement>('[aria-label="日报设置"]')!.click())
   assert.match(dom.window.document.body.textContent!, /收录范围每天收录“精选”栏目里新入选的资讯/)
   assert.match(dom.window.document.body.textContent!, /标准：Primary sources with concrete progress\./)

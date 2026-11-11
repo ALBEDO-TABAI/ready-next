@@ -74,13 +74,15 @@ export async function findReferences(query: string, wiki: boolean, filePath?: st
   return choices.filter((choice, index) => choices.findIndex(other => other.id === choice.id) === index)
 }
 
-export async function openInlineReference(reference: InlineReference, filePath?: string | null) {
-  const { openReadyRef } = await import('../../workbench/open-ready-ref')
-  if (reference.kind === 'ready') return openReadyRef(reference.ref, 'document')
+/** Where a link in the text points: a [[wiki]] target resolves against the page's folder first, then the vault. */
+export async function resolveInlineReference(reference: InlineReference, filePath?: string | null): Promise<ReadyRef> {
+  if (reference.kind === 'ready') return reference.ref
   if (reference.kind === 'wiki') {
     if (filePath === undefined) throw new Error('尚未提供画板文件路径，无法打开相对页面链接')
     const [path, anchor] = reference.target.split('#', 2)
-    const file = /\.md$/i.test(path) ? path : `${path}.md`
+    // [[x]] names a page; a board's target keeps its .canvas extension.
+    const board = /\.canvas$/i.test(path)
+    const file = board || /\.md$/i.test(path) ? path : `${path}.md`
     // Canonical targets are relative to this page's folder; a hand-written vault-relative link is the fallback.
     const roots = workspaceRoots()
     const vault = roots.find(root => filePath?.startsWith(`${root.replace(/[/\\]+$/, '')}/`)) ?? roots[0]
@@ -89,11 +91,43 @@ export async function openInlineReference(reference: InlineReference, filePath?:
       : [...new Set([folder, vault].filter((base): base is string => Boolean(base)).map(base => `${base}/${file}`))]
     let target: string | undefined
     for (const candidate of candidates) if ((await window.electronAPI.document.stat(candidate)).success) { target = candidate; break }
-    if (!target) throw new Error(`找不到页面：${path}`)
+    if (!target) throw new Error(`找不到${board ? '画板' : '页面'}：${path}`)
     const location = await window.electronAPI.objects.resolvePath(target)
-    return openReadyRef({ kind: 'page', id: location.objectId, ...(anchor ? { anchor } : {}) }, 'document')
+    return board ? { kind: 'canvas', id: location.objectId } : { kind: 'page', id: location.objectId, ...(anchor ? { anchor } : {}) }
   }
-  if (reference.href.startsWith('ready://')) return openReadyRef(reference.href, 'document')
+  if (reference.href.startsWith('ready://')) {
+    const parsed = parseReadyUri(reference.href)
+    if (!parsed.ok) throw new Error('引用地址无效')
+    return parsed.ref
+  }
   if (!/^https?:\/\//i.test(reference.href)) throw new Error('只支持网页或 Ready 内部链接')
-  return openReadyRef({ kind: 'web', url: reference.href }, 'document')
+  return { kind: 'web', url: reference.href }
+}
+
+export async function openInlineReference(reference: InlineReference, filePath?: string | null, options?: { newTab?: boolean }) {
+  const { openReadyRef } = await import('../../workbench/open-ready-ref')
+  return openReadyRef(await resolveInlineReference(reference, filePath), 'document', options)
+}
+
+// A capsule in the text (W6 §2.1) is the drawn link itself. Its reference comes from the link: a Ready address is
+// read directly, a [[wiki]] target is resolved once per drawn link (a drag needs it at once, so hovering resolves it).
+const resolving = new WeakMap<Element, Promise<ReadyRef>>()
+const settled = new WeakMap<Element, ReadyRef>()
+export function capsuleSource(anchor: HTMLAnchorElement, filePath?: string | null): ReadyRef | (() => Promise<ReadyRef>) {
+  const wiki = anchor.dataset.readyWiki
+  const parsed = wiki ? null : parseReadyUri(anchor.getAttribute('href') ?? '')
+  if (parsed?.ok) return parsed.ref
+  return () => {
+    let pending = resolving.get(anchor)
+    if (!pending) {
+      pending = resolveInlineReference(wiki ? { kind: 'wiki', target: wiki } : { kind: 'link', href: anchor.getAttribute('href') ?? '' }, filePath)
+      resolving.set(anchor, pending)
+      pending.then(ref => settled.set(anchor, ref), () => resolving.delete(anchor))
+    }
+    return pending
+  }
+}
+export function settledCapsuleReference(anchor: HTMLAnchorElement): ReadyRef | null {
+  const parsed = anchor.dataset.readyWiki ? null : parseReadyUri(anchor.getAttribute('href') ?? '')
+  return parsed?.ok ? parsed.ref : settled.get(anchor) ?? null
 }

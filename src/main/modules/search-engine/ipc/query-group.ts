@@ -90,7 +90,7 @@ export const searchQueryGroup: IpcChannelGroup<SearchQueryGroupDeps> = {
           sources?: string[]
         },
       ): Promise<SearchIPCResponse<{
-        items: Array<SearchHit & { sourceType: string; sourceMeta?: Record<string, unknown> | null }>
+        items: Array<SearchHit & import('../../../../shared/search-presentation').SearchPresentation & { sourceType: string; sourceMeta?: Record<string, unknown> | null }>
         stats: { returned: number; elapsedMs: number }
         degraded: boolean
       }> & {

@@ -1,3 +1,4 @@
+import { readStoredObjectPreview } from './preview'
 import { isAbsolute } from 'node:path'
 import { z } from 'zod'
 import type { ObjectLocation, ObjectStateMigrationReport } from '../../../shared/object-identity'
@@ -56,6 +57,8 @@ export function registerObjectIPC(ipcMain: {
   removeHandler(channel: string): void
   handle(channel: string, listener: (event: unknown, payload: unknown) => unknown): void
 }, service: () => ObjectPresentationService): void {
+  ipcMain.removeHandler('object:preview')
+  ipcMain.handle('object:preview', (_event, ref) => readStoredObjectPreview(service().registry, ref))
   ipcMain.removeHandler('object:resolve-path')
   ipcMain.handle('object:resolve-path', (_event, path) => service().resolve(path))
   ipcMain.removeHandler('object:locate')

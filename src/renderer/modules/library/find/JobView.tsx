@@ -1,3 +1,4 @@
+import { openWebpageInBrowser } from '../../browser/openWebpageInBrowser'
 import { useEffect, useState } from 'react'
 import type { BookSourcesAPI, SourceJob } from '../../../../shared/library-sources'
 import { confirmed } from '../access'
@@ -17,7 +18,7 @@ function JobLine({ job, api }: { job: SourceJob; api: BookSourcesAPI }) {
     </form>}
     {['queued', 'downloading', 'captcha', 'extracting'].includes(job.status) && <button type="button" disabled={busy} onClick={() => void run(async () => confirmed(await api.cancel(job.id)))}>取消</button>}
     {['failed', 'cancelled'].includes(job.status) && !job.book_id && <button type="button" disabled={busy} onClick={() => void run(async () => confirmed(await api.retry(job.id)))}>重试下载</button>}
-    {job.status === 'failed' && job.source !== 'zlib' && <button type="button" disabled={busy} onClick={() => void run(async () => confirmed(await api.openManual(job.id)))}>去网盘手动下载</button>}
+    {job.status === 'failed' && job.source !== 'zlib' && <button type="button" disabled={busy} onClick={() => void run(async () => { if (!await openWebpageInBrowser(confirmed(await api.manualLink(job.id)))) throw new Error('网页未能在 Ready 浏览器中打开') })}>去网盘手动下载</button>}
     {error && <p role="alert">{error}</p>}
   </article>
 }

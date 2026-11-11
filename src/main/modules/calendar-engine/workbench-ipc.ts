@@ -3,7 +3,7 @@ import { createCalendarMeetingNotesRuntime } from './meeting-notes-runtime'
 import { prepareStandaloneImport, applyStandaloneImport } from './standalone-import'
 import { readCalendarAttachmentDisplayRefs } from './ready-ref-migration'
 import { calendarErrorMessage } from './calendar-error'
-import { BrowserWindow, app, ipcMain, shell, systemPreferences } from 'electron'
+import { BrowserWindow, app, ipcMain, systemPreferences } from 'electron'
 import { readCalendarFile, saveCalendarFile } from './calendar-files'
 import { peekCalendarNavigation, acknowledgeCalendarNavigation, onCalendarNavigation, requestCalendarNavigation } from './calendar-navigation'
 import { getDatabase } from '../database'
@@ -47,7 +47,6 @@ export function setupCalendarWorkbenchIPC(): void {
   ipcMain.handle('calendar:saveIcs',receipt(saveCalendarFile))
   ipcMain.handle('calendar:peekNavigation',receipt(peekCalendarNavigation))
   ipcMain.handle('calendar:ackNavigation',receipt(acknowledgeCalendarNavigation))
-  ipcMain.handle('calendar:openLink',receipt(async(url:string)=>{const parsed=new URL(url);if(!['http:','https:'].includes(parsed.protocol))throw new Error('不支持的链接');await shell.openExternal(parsed.href);return true}))
   ipcMain.handle('calendar:getLoginItem',receipt(()=>app.getLoginItemSettings().openAtLogin))
   ipcMain.handle('calendar:setLoginItem',receipt((openAtLogin:boolean)=>{if(typeof openAtLogin!=='boolean')throw new Error('启动项参数无效');app.setLoginItemSettings({openAtLogin});return app.getLoginItemSettings().openAtLogin}))
   onCalendarNavigation(()=>{for(const window of BrowserWindow.getAllWindows())if(!window.isDestroyed())window.webContents.send('calendar:navigationPending')})

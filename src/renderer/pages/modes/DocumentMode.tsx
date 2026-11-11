@@ -1,7 +1,7 @@
 import { RelationsPanel } from '../../modules/workbench/object-ui/RelationsPanel'
 import { DraftBootNotice, DraftControls } from '../../modules/document/drafts/DraftControls'
 import DocumentNavigator from '../../modules/document/navigator/DocumentNavigator'
-import { useDocumentNavigator } from '../../modules/document/navigator/useDocumentNavigator'
+import { revealPathInFiles } from '../../modules/document/navigator/useDocumentNavigator'
 import { ShellNavigator } from '../../modules/workbench/shell/ShellSidebar'
 import { InkTopbar } from '../../modules/document/ink/InkTopbar'
 import { InkHome } from '../../modules/document/ink/InkHome'
@@ -240,12 +240,7 @@ export default function DocumentMode({
   const pagePanel = usePagePanel()
   const inkHome = useInkLayout(state => state.home)
   useHomeOnFirstVisit(isActive)
-  const revealInFiles = useCallback(async (node: PageNode) => {
-    const workspace = useWorkspace.getState()
-    if (!workspace.sidebarVisible) workspace.toggleSidebar()
-    useDocumentNavigator.getState().setView('files')
-    await workspace.revealFile(node.path)
-  }, [])
+  const revealInFiles = useCallback((node: PageNode) => revealPathInFiles(node.path), [])
   // Opening or switching a document leaves the home view. Markdown source is a per-visit escape hatch: another tab or
   // page opens in the page view again.
   useEffect(() => useDocTabs.subscribe((state, previous) => {
