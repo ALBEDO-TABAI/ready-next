@@ -14,7 +14,7 @@ export function setupDocumentPagesIPC() {
   if (!db) throw new Error('Page database unavailable')
   const vault = new VaultService(new AppSettingsRepository(), { home: app.getPath('home'), userData: app.getPath('userData'), isPackaged: app.isPackaged })
   const registry = new ObjectRegistry(db)
-  const service = new DocumentPageService(registry, { index: async path => {
+  const service = new DocumentPageService(registry, { vaultRoot: () => { const state = vault.get(); return state.status === 'ready' ? state.root : null }, index: async path => {
     const search = getSearchEngine(), root = search?.findWorkspaceRootForPath(path)
     if (!search || !root) throw new Error('Page index is unavailable')
     const content = await readFile(path,'utf8'), result = await search.indexDocument(root,path,content)

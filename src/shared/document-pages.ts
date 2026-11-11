@@ -19,6 +19,7 @@ const target = { parentObjectId: z.string().min(1).optional(), parentPath: z.str
 export const PageOperationSchema = z.discriminatedUnion('type', [
   z.object({ ...base, type: z.literal('create'), ...target, title: z.string(), content: z.string().default('') }).strict(),
   z.object({ ...base, type: z.literal('rename'), objectId: z.string().min(1), title: z.string() }).strict(),
+  z.object({ ...base, type: z.literal('adopt'), source: z.string().min(1), ...target }).strict(),
   z.object({ ...base, type: z.literal('move'), objectId: z.string().min(1), ...target }).strict(),
   z.object({ ...base, type: z.literal('trash'), objectId: z.string().min(1) }).strict(),
   z.object({ ...base, type: z.literal('restore'), objectId: z.string().min(1), ...target }).strict(),
