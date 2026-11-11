@@ -1,0 +1,9 @@
+<tr>
+<td>{{title}}</td>
+<td>{{category}}</td>
+<td>
+<form method="post" action="/admin/posts/{{id}}/delete" onsubmit="return confirm({{confirmation}})">
+<button type="submit">删除</button>
+</form>
+</td>
+</tr>

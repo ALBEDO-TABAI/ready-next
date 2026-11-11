@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Eval · 富文本编辑器</title>
+<link rel="stylesheet" href="/assets/site.css">
+<script src="/assets/eval-probe.js" defer>
+</script>
+<script src="/assets/eval-editor.js" defer>
+</script>
+</head>
+<body>
+<main>
+<h1>富文本编辑器</h1>
+<label for="doc-title">标题</label>
+<input id="doc-title" name="title" type="text" value="" >
+<div role="toolbar">
+<button type="button" aria-label="加粗" data-command="bold">加粗</button>
+<button type="button" aria-label="斜体" data-command="italic">斜体</button>
+<button type="button" aria-label="项目列表" data-command="insertUnorderedList">项目列表</button>
+</div>
+<div id="editor" contenteditable="true" role="textbox" aria-multiline="true" aria-label="正文编辑器">
+</div>
+<button id="save-editor" data-endpoint="/editor/api/save">保存</button>
+<p id="save-status" role="status">
+</p>
+</main>
+</body>
+</html>

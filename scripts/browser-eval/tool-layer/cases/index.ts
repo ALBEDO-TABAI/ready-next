@@ -1,0 +1,26 @@
+// Case groups in run order. The takeover group runs last: it fences its own run only, but a
+// late position keeps any surprise from leaking into earlier groups.
+import type { CaseGroup } from '../harness'
+import { formGroup, keyboardGroup, loginGroup, surfaceGroup, wizardGroup } from './forms'
+import { framesGroup, pagingGroup, shadowGroup, spaGroup, waitGroup } from './pages'
+import { canvasGroup, dialogsGroup, downloadsGroup, editorGroup, popupGroup, takeoverGroup, uploadGroup } from './interactions'
+
+export const CASE_GROUPS: CaseGroup[] = [
+  surfaceGroup,
+  formGroup,
+  keyboardGroup,
+  wizardGroup,
+  spaGroup,
+  framesGroup,
+  shadowGroup,
+  pagingGroup,
+  loginGroup,
+  downloadsGroup,
+  uploadGroup,
+  dialogsGroup,
+  popupGroup,
+  editorGroup,
+  canvasGroup,
+  waitGroup,
+  takeoverGroup,
+]

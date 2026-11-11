@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Eval · 配送订单</title>
+<link rel="stylesheet" href="/assets/site.css">
+<script src="/assets/eval-probe.js" defer>
+</script>
+</head>
+<body>
+<main>
+<h1>第 1 步：联系人</h1>{{error}}<form method="post" action="/wizard/step2" >
+<input type="hidden" name="token" value="{{token}}">
+<label for="w-name">姓名</label>
+<input id="w-name" name="name" type="text" value="{{name}}" required>
+<label for="w-phone">手机</label>
+<input id="w-phone" name="phone" type="tel" value="{{phone}}" >
+<button type="submit">下一步</button>
+</form>
+</main>
+</body>
+</html>

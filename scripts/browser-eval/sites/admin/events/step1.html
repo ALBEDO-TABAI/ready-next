@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Eval · 活动向导</title>
+<link rel="stylesheet" href="/assets/site.css">
+<script src="/assets/eval-probe.js" defer>
+</script>
+<script src="/assets/eval-components.js" defer>
+</script>
+<script src="/assets/event.js" defer>
+</script>
+</head>
+<body>
+<main>
+<h1>第 1 步：活动信息</h1>
+<form method="post" action="/admin/events/step2" id="event-form">
+<input type="hidden" name="token" value="{{token}}">
+<label for="e-name">名称</label>
+<input id="e-name" name="name" type="text" value="" required>
+<label for="e-date">日期</label>
+<select id="e-date" name="date">
+<option value="2026-12-06" >2026-12-06</option>
+<option value="2026-12-13" >2026-12-13</option>
+<option value="2026-12-20" >2026-12-20</option>
+</select>
+<button type="submit">下一步</button>
+</form>
+</main>
+</body>
+</html>

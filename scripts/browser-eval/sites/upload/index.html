@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Eval · 报销上传</title>
+<link rel="stylesheet" href="/assets/site.css">
+<script src="/assets/eval-probe.js" defer>
+</script>
+</head>
+<body>
+<main>
+<h1>报销上传</h1>
+<form method="post" action="/upload/submit" enctype="multipart/form-data">
+<label for="upload-desc">描述</label>
+<input id="upload-desc" name="description" type="text" value="" >
+<label for="upload-file">文件</label>
+<input id="upload-file" name="file" type="file" value="" accept=".pdf,.png,.jpg,.csv">
+<button type="submit">上传</button>
+</form>
+</main>
+</body>
+</html>

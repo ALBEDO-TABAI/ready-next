@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Eval · 新建帖子</title>
+<link rel="stylesheet" href="/assets/site.css">
+<script src="/assets/eval-probe.js" defer>
+</script>
+</head>
+<body>
+<main>
+<h1>新建帖子</h1>
+<form method="post" action="/admin/posts/new" >
+<label for="post-title">标题</label>
+<input id="post-title" name="title" type="text" value="" required>
+<label for="post-body">正文</label>
+<textarea id="post-body" name="body">
+</textarea>
+<label for="post-category">分类</label>
+<select id="post-category" name="category">
+<option value="公告" >公告</option>
+<option value="更新" >更新</option>
+<option value="草稿" >草稿</option>
+</select>
+<input id="post-publish" name="publish" type="checkbox" value="yes" >
+<label for="post-publish">立即发布</label>
+<button type="submit">发布</button>
+</form>
+</main>
+</body>
+</html>
