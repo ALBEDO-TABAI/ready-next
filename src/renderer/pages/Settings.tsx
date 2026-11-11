@@ -1,4 +1,4 @@
-import { BookSourceSettingsPanel } from './settings/BookSourceSettingsPanel'
+import { ReadingSettingsPanel } from './settings/ReadingSettingsPanel'
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
 import {
   ChevronLeft, Shield, Database, CalendarDays, FolderOpen, Puzzle, Newspaper,
@@ -131,7 +131,7 @@ const settingsData: SettingSection[] = [
     description: '资料库位置、挂载的文件夹和全文索引',
     settings: []
   },
-  { id: 'reading', group: 'content', title: '阅读', icon: HardDrive, description: '书源与下载设置', settings: [] },
+  { id: 'reading', group: 'content', title: '阅读', icon: HardDrive, description: '书源与下载，以及从藏书阁迁移', settings: [] },
   {
     id: 'rss-storage',
     group: 'content',
@@ -500,7 +500,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
   }
 
   const isDynamicSection = currentSection
-    ? ['ai', 'memory', 'skills', 'remote-im', 'external-services', 'mcp', 'tag-forge', 'pet', 'library', 'rss-storage', 'calendar', MODELS_RUNTIME_SETTINGS_SECTION, 'storage', 'browser-privacy'].includes(currentSection.id)
+    ? ['ai', 'memory', 'skills', 'remote-im', 'external-services', 'mcp', 'tag-forge', 'pet', 'library', 'reading', 'rss-storage', 'calendar', MODELS_RUNTIME_SETTINGS_SECTION, 'storage', 'browser-privacy'].includes(currentSection.id)
     : false
 
   const renderSettingControl = (sectionId: string, setting: SettingItem) => {
@@ -681,7 +681,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                 {/* AI Settings Panel — dynamic, wired to backend */}
                 {currentSection.id === 'ai' && <AISettingsPanel />}
                 {currentSection.id === 'memory' && <ReadyMemorySettingsPanel />}
-                {currentSection.id === 'reading' && <BookSourceSettingsPanel />}
+                {currentSection.id === 'reading' && <ReadingSettingsPanel />}
                 {currentSection.id === 'rss-storage' && <RSSDraftStoreSettingsPanel />}
                 {currentSection.id === MODELS_RUNTIME_SETTINGS_SECTION && <ModelsRuntimeSettingsPanel />}
                 {currentSection.id === 'storage' && <StorageSettingsPanel />}
