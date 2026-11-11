@@ -114,6 +114,34 @@ async function main() {
     assert.match(fs.readFileSync(path.join(vault, 'X/成文.md'), 'utf8'), /中文成文验收/)
     await poll(() => readCanvas().nodes.filter(node => node.ready.kind === 'document').length === 2, 'Draft was not replaced by document card')
     await snapshot('03-composition-under-X')
+    // W4 MS2: a note written as Markdown renders at rest; the file keeps the source.
+    await stage.getByRole('button', { name: '便签', exact: true }).click()
+    await page.getByLabel('文字卡编辑').locator('[contenteditable="true"]').first().fill('# 卡片标题')
+    await stage.getByRole('button', { name: '完成编辑', exact: true }).click()
+    await poll(() => readCanvas().nodes.some(node => node.ready.kind === 'note' && node.text.includes('# 卡片标题')), 'Note Markdown not persisted')
+    await stage.locator('.canvas-card[data-kind="note"] .canvas-markdown h1', { hasText: '卡片标题' }).waitFor()
+    // MS3: search marks the matching card.
+    await stage.getByRole('button', { name: '在画板中搜索', exact: true }).click()
+    await page.keyboard.type('卡片标题')
+    await stage.locator('.canvas-card[data-matched="true"]').first().waitFor()
+    assert.equal(await stage.locator('.canvas-card[data-matched="true"]').count(), 1)
+    await page.keyboard.press('Escape')
+    // MS3: a sub-board from 新建, entered by double-click, left by the breadcrumb.
+    await stage.click({ button: 'right', position: { x: 820, y: 640 } })
+    await stage.getByRole('menuitem', { name: '子画板', exact: true }).click()
+    await poll(() => fs.existsSync(path.join(vault, 'X', '子画板.canvas')) && readCanvas().nodes.some(node => node.ready.kind === 'subcanvas'), 'Sub-board missing')
+    await stage.locator('.canvas-card[data-kind="subcanvas"]').first().dblclick()
+    const sub = page.locator('[data-workbench-mode-panel="document"] .rn-canvas[aria-label="子画板"]').first()
+    await sub.waitFor()
+    await sub.locator('.canvas-crumbs').getByRole('button', { name: 'X', exact: true }).click()
+    await page.locator('[data-workbench-mode-panel="document"] .rn-canvas[aria-label="X"]').first().waitFor()
+    // MS3: 导出 Markdown (Main's save dialog answered with a fixed path).
+    const exportPath = path.join(temporary, 'X 导出.zip')
+    await app.evaluate(({ dialog }, file) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: file }) }, exportPath)
+    await stage.getByRole('button', { name: '更多', exact: true }).click()
+    await stage.getByRole('menuitem', { name: '导出为 Markdown', exact: true }).click()
+    await poll(() => fs.existsSync(exportPath) && fs.statSync(exportPath).size > 0, 'Markdown export missing')
+    await snapshot('03b-markdown-search-subboard-export')
     // Close the canvas with the close-document shortcut so the transfer happens while it is not open.
     const canvasOpen = () => page.evaluate(() => (JSON.parse(localStorage.getItem('ready-doc-tabs-v2') || '{}').state?.tabs ?? []).some(tab => /\.canvas$/i.test(tab.path || '')))
     for (let i = 0; i < 10 && await canvasOpen(); i++) {
@@ -136,7 +164,13 @@ async function main() {
     await page.getByText('浏览器 FastCard 文字', { exact: true }).waitFor()
     await snapshot('04-transfer-closed-canvas')
     const before = fs.readFileSync(path.join(vault, 'X.canvas'))
-    const exited = once(app.process(), 'exit'); app.process().kill('SIGKILL'); await exited; app = undefined
+    // Kill by pid and confirm the exit within a bound: a lost signal must fail this check, never hang it.
+    const pid = app.process().pid, exited = once(app.process(), 'exit')
+    process.kill(pid, 'SIGKILL')
+    const outcome = await Promise.race([exited.then(() => 'exited'), new Promise(resolve => setTimeout(() => resolve('timeout'), 10000))])
+    if (outcome !== 'exited') { try { process.kill(pid, 0); process.kill(pid, 'SIGKILL') } catch { /* silent-catch: already gone */ } }
+    assert.equal(outcome, 'exited', `Ready Next (pid ${pid}) did not exit after SIGKILL`)
+    app = undefined
     await launch(); await reveal(seeded.canvasId)
     assert.deepEqual(fs.readFileSync(path.join(vault, 'X.canvas')), before)
     assert.match(fs.readFileSync(path.join(vault, 'X/成文.md'), 'utf8'), /中文成文验收/)

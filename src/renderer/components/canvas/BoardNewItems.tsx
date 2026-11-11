@@ -44,7 +44,8 @@ export function BoardNewItems({ at, close, pages, root, boardPath, add, report }
       for (let n = 2; (await api.document.stat(`${root}/${folder}/${name}.canvas`))?.success; n++) name = `子画板 ${n}`
       const made = await api.document.mkdir(`${root}/${folder}`)
       if (!made.success) throw new Error(made.error || '无法建立画板文件夹')
-      const created = await api.canvas.create({ path: `${folder}/${name}.canvas`, operationId: crypto.randomUUID() })
+      // The sub-board carries its name as its title, so its breadcrumb and label read it.
+      const created = await api.canvas.create({ path: `${folder}/${name}.canvas`, operationId: crypto.randomUUID(), canvas: { nodes: [], edges: [], ready: { id: crypto.randomUUID(), schemaVersion: 1, title: name } } })
       if (!created.ok) throw new Error(created.error)
       await api.canvas.release(created.value.handleId)
       await add({ ...frame(at, 195), type: 'file', file: created.value.path, ready: { kind: 'subcanvas', ref: { kind: 'canvas', id: created.value.objectId } } })
