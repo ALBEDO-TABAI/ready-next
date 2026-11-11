@@ -10,7 +10,8 @@ async function main() {
   const temporary = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ready-next-timeline-')))
   const vault = path.join(temporary, 'vault'), profile = path.join(temporary, 'profile')
   fs.mkdirSync(vault)
-  const env = { ...process.env, READY_USER_DATA_DIR: profile, READY_DB_PATH: path.join(profile, 'ready.db') }; delete env.ELECTRON_RUN_AS_NODE
+  // Verification never puts a window in front of the person.
+  const env = { ...process.env, READY_START_HIDDEN: '1', READY_USER_DATA_DIR: profile, READY_DB_PATH: path.join(profile, 'ready.db') }; delete env.ELECTRON_RUN_AS_NODE
   let app, page
   const poll = async (check, label) => {
     const deadline = Date.now() + 30000
