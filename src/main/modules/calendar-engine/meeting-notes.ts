@@ -56,7 +56,7 @@ export class CalendarMeetingNotes {
     if (snapshot.links?.some(link=>link.eventId===eventId && String(link.originalStart)===String(original) && link.purpose==='meeting-note')) throw new Error('该日程已有会议笔记')
     if (!intent) intent = objectTransaction(this.db,()=>{
       const draft = this.drafts.create({vaultRoot:root,origin:'new',title:input.destination.title,
-        content:`# ${input.destination.title}\n\n[日程](${toReadyUri(source)})\n\n`})
+        content:`[日程](${toReadyUri(source)})\n\n`})
       this.db.prepare("INSERT INTO calendar_meeting_note_intents(event_key,vault_root,draft_id,destination_json,state) VALUES (?,?,?,?,'prepared')")
         .run(eventKey,root,draft.draftId,JSON.stringify(input.destination))
       return this.db.prepare('SELECT * FROM calendar_meeting_note_intents WHERE event_key=?').get<Intent>(eventKey)!

@@ -192,7 +192,7 @@ describe('document widget ready design language', () => {
   })
 
   it('document widget shell actions use the Ready accent instead of the legacy functional blue', () => {
-    const css = readFileSync(resolve(process.cwd(), 'src/renderer/styles/tiptap.css'), 'utf8')
+    const css = readFileSync(resolve(process.cwd(), 'src/renderer/styles/document-widget-editor.css'), 'utf8')
     const actionBlock = css.match(/\.ready-doc-widget-primary-action\s*\{[\s\S]*?html\[data-theme='dark'\] \.ready-doc-widget-primary-action:hover[\s\S]*?\}/)?.[0] || ''
     assert.ok(actionBlock, '应能读取 widget 操作栏样式块')
     assert.doesNotMatch(actionBlock, /--color-blue(?:-light)?/)

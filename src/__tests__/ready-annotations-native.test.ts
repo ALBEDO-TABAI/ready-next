@@ -65,11 +65,12 @@ test('M5-D durable template retry after interrupted response creates exactly one
   const f = fixture(); let s = f.open()
   try {
     mkdirSync(join(f.root, '模板')); writeFileSync(join(f.root, '模板', 'image.png'), Buffer.from([1, 2, 3]))
-    writeFileSync(join(f.root, '模板', '会.md'), '---\nready_id: template-old\n---\n{{title}} {{date}}\n\n![图](image.png)\n\n源 ^id\n\n![[#^id]]')
+    writeFileSync(join(f.root, '模板', '会.md'), '---\nready_id: template-old\n---\n# {{title}}\n\n{{title}} {{date}}\n\n![图](image.png)\n\n源 ^id\n\n![[#^id]]')
     const request = { type: 'create' as const, template: '会.md', title: '会议', operationId: 'template-once', parentPath: f.root }
     const failing = new DocumentTemplateService(s.storage, s.pages, () => { throw new Error('interrupted response') })
     await assert.rejects(failing.execute(request), /interrupted response/)
     const bytes = readFileSync(join(f.root, '会议.md'))
+    assert.equal(bytes.toString().split('# 会议').length - 1, 1, 'preserve the user-authored template H1 without injecting another')
     f.stop(); s = f.open(); await s.pages.recover(); await s.templates.recover()
     writeFileSync(join(f.root, '模板', '会.md'), 'template changed')
     const retried = await s.templates.execute(request)

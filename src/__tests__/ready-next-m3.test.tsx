@@ -121,7 +121,8 @@ test('M3: create, header edit, shared block/source history, save, child draft an
   })
   t.after(async () => { stopRefresh(); await Promise.all(refreshes) })
   await render()
-  await click(`在 ${directory.split('/').pop()} 中新建页面`)
+  await click(`在 ${directory.split('/').pop()} 中新建`)
+  await click('页面')
   await act(async () => settleDocTabObjects())
   await render()
   const parent = useDocTabs.getState().tabs.find(tab => tab.id === useDocTabs.getState().activeTabId)!

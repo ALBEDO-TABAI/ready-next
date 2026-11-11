@@ -1,3 +1,4 @@
+import type { ContextMenuItem } from '../ContextMenu'
 import type { FileItem } from '../../../stores/useWorkspace'
 import { EBOOK_EXTENSIONS } from '../../../../shared/ebook'
 
@@ -50,6 +51,12 @@ export interface FileTreeProps {
   onGridPathChange?: (path: string | null) => void
   onThumbnailSizeChange?: (size: number) => void
   onResultCountChange?: (count: number) => void
+  /** Which top-level folders this tree shows (the page view lists only mounted folders, W3 §3). */
+  rootFilter?: (root: string) => boolean
+  /** Show the file-emergence section and load its snapshot (activity is still recorded either way). */
+  showEmergence?: boolean
+  /** Extra context-menu items for an entry (the mounted folders add 收进资料库). */
+  contextExtras?: (item: FileItem) => ContextMenuItem[]
 }
 
 export function isFileAllowed(item: FileItem): boolean {

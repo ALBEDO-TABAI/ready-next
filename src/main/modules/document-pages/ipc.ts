@@ -21,7 +21,7 @@ export function registerDocumentPagesIPC(ipcMain: Pick<IpcMain,'handle'>, servic
   ipcMain.handle('documentPages:tree', (_e, input: unknown) => reply(() => { const root = PageRootSchema.parse(input); authorize(root.path); return service.tree(root) }))
   ipcMain.handle('documentPages:properties', (_e, input: unknown) => reply(() => service.properties(id(input))))
   ipcMain.handle('documentPages:patchProperties', (_e, input: unknown, version: unknown, fields: unknown, remove: unknown) => reply(() => service.patchProperties(id(input), z.string().min(1).parse(version), PagePropertiesSchema.parse(fields), z.array(z.enum(['title','icon','cover','ready_page'])).optional().parse(remove))))
-  ipcMain.handle('documentPages:operate', (_e, input: unknown) => reply(() => { const request = PageOperationSchema.parse(input); authorize(request.root); return service.operate(request) }))
+  ipcMain.handle('documentPages:operate', (_e, input: unknown) => reply(() => { const request = PageOperationSchema.parse(input); authorize(request.root); if (request.type === 'adopt') authorize(request.source); return service.operate(request) }))
   ipcMain.handle('documentPages:operation', (_e, input: unknown) => reply(() => service.operation(z.string().min(1).parse(input))))
   ipcMain.handle('documentPages:trash', (_e, input: unknown) => reply(() => { const root = z.string().min(1).parse(input); authorize(root); return service.trash(root) }))
   ipcMain.handle('documentPages:order', (_e, parent: unknown, ids: unknown) => reply(() => service.order(id(parent), z.array(z.string().min(1)).parse(ids).map(id))))

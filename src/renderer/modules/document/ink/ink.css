@@ -233,11 +233,7 @@ html[data-theme='dark'] .ink-scope {
 .ink-sb-scroll > * { flex: none; }
 .ink-sb-scroll.has-more { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 36px), rgba(0,0,0,.25)); mask-image: linear-gradient(to bottom, #000 calc(100% - 36px), rgba(0,0,0,.25)); }
 .ink-sb-scroll::-webkit-scrollbar { width: 0; }
-.ink-sb-home { display: flex; align-items: center; height: 32px; gap: 0; margin-bottom: 12px; }
-.ink-sb-home-pill { display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px 0 11px; margin-left: 3px; border-radius: 18px; font-size: 12px; line-height: 21px; color: var(--ink-text-primary); }
-.ink-sb-home-pill.is-active { background: var(--ink-background-interactive-translucent); }
-.ink-sb-home-pill:hover { background: var(--ink-background-interactive-translucent); }
-.ink-sb-group, .ink-sb-section { display: flex; flex-direction: column; gap: 1px; margin-bottom: 12px; }
+.ink-sb-section { display: flex; flex-direction: column; gap: 1px; margin-bottom: 12px; }
 .ink-sb-section { margin-bottom: 16px; }
 .ink-sb-row {
   display: flex; align-items: center; height: 34px; min-height: 27px; padding: 5px 8px; border-radius: 10px;
@@ -467,13 +463,6 @@ html[data-theme='dark'] .ink-scope {
 .ink-scope .ink-page.is-full .ink-page-database { max-width: none; }
 
 /* ---------------- Ready's document controls inside the topbar ---------------- */
-.ink-topbar .document-floating-toggles { display: flex; align-items: center; gap: 2px; padding: 0; margin: 0; background: none; border: 0; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
-.ink-topbar .document-floating-toggles::before, .ink-topbar .document-floating-toggles::after { content: none; }
-.ink-topbar .document-floating-toggle { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 18px; border: 0; background: none; box-shadow: none; color: var(--ink-icon-primary); }
-.ink-topbar .document-floating-toggle:hover { background: var(--ink-button-hovered-background); }
-.ink-topbar .document-floating-toggle.is-active, .ink-topbar .document-floating-toggle[aria-pressed='true'] { background: var(--studio-accent-soft); color: var(--studio-accent-text); }
-.ink-topbar .document-floating-toggle svg { width: 17px; height: 17px; stroke-width: 1.7; }
-.ink-topbar .document-floating-toggle:disabled { opacity: .35; }
 .ink-topbar [data-testid='draft-controls'] { display: flex; align-items: center; gap: 4px; padding: 0; font-size: 12px; }
 
 /* ---------------- home ---------------- */
@@ -612,30 +601,26 @@ html[data-theme='dark'] .ink-scope {
 .rn-switch-foot button { margin-left: auto; border: 0; background: none; font: inherit; font-size: 12px; color: var(--ink-text-secondary); cursor: pointer; }
 .rn-switch-foot button:hover { color: var(--ink-text-primary); }
 
-/* ---------------- block editor popovers (slash menu, block menu, text toolbar) in Inkwell's menu style ----------------
-   They are portaled to the body, outside .ink-scope, so the studio values are spelled out with a dark variant. */
-.ready-block-popover {
-  width: 300px; padding: 6px; border: 0; border-radius: 16px; color: #151518;
-  font: 14px/20px 'RN Inter', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
-  background: rgba(252, 250, 247, .8); -webkit-backdrop-filter: blur(22px) saturate(150%); backdrop-filter: blur(22px) saturate(150%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .88), inset 0 0 0 1px rgba(11, 11, 14, .10), 0 2px 5px rgba(10, 10, 20, .04), 0 14px 30px -20px rgba(10, 10, 30, .24);
-}
-html[data-theme='dark'] .ready-block-popover {
-  color: #f4f4f6; background: rgba(34, 33, 35, .84);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .13), inset 0 0 0 1px rgba(255, 255, 255, .10), 0 14px 32px -20px rgba(0, 0, 0, .6);
-}
+/* ---------------- block editor popovers (block menu, [[ and @ pickers, text toolbar) ----------------
+   W1's float and menu language (W3 §4.3): .rn-float gives the surface, these rules only the layout. They are
+   portaled to the body, outside .ink-scope, so only --rn-* tokens (which carry the dark values). */
+.ready-block-popover { width: 300px; padding: 6px; border: 0; }
 .ready-block-popover [role=listbox] { margin-top: 4px; max-height: 288px; }
-.ready-block-popover button { border-radius: 9px; padding: 5px 8px; font: inherit; }
+.ready-block-popover .rn-field { width: 100%; height: var(--rn-control-h); }
+.ready-block-popover button { border-radius: 8px; padding: 5px 8px; font: inherit; color: inherit; }
 .ready-block-popover [role=option] { gap: 1px; min-height: 32px; justify-content: center; }
-.ready-block-popover [role=option] small { font-size: 12px; line-height: 16px; opacity: 1; color: rgba(11, 11, 14, .48); }
-html[data-theme='dark'] .ready-block-popover [role=option] small { color: rgba(255, 255, 255, .5); }
-.ready-block-popover button:hover, .ready-block-popover [aria-selected=true] { background: rgba(11, 11, 14, .075); }
-html[data-theme='dark'] .ready-block-popover button:hover, html[data-theme='dark'] .ready-block-popover [aria-selected=true] { background: rgba(255, 255, 255, .08); }
-.ready-block-popover [role=status] { margin: 6px 8px; font-size: 13px; color: rgba(11, 11, 14, .48); }
-.ready-block-popover.ready-block-toolbar { width: auto; max-width: 420px; gap: 2px; padding: 4px; border-radius: 14px; }
-.ready-block-popover.ready-block-toolbar button { height: 28px; padding: 0 8px; border-radius: 8px; white-space: nowrap; }
-.ready-block-popover.ready-block-toolbar [aria-pressed=true] { color: #bd3b0c; background: rgba(255, 90, 31, .10); }
-html[data-theme='dark'] .ready-block-popover.ready-block-toolbar [aria-pressed=true] { color: #ff9368; background: rgba(255, 106, 44, .13); }
+.ready-block-popover [role=option] small { font-size: var(--rn-fs-sm); line-height: 16px; opacity: 1; color: var(--rn-ink-3); }
+.ready-block-popover button:hover, .ready-block-popover [aria-selected=true] { background: var(--rn-fill-2); }
+.ready-block-popover [role=status] { margin: 6px 8px; font-size: var(--rn-fs-md); color: var(--rn-ink-3); }
+.ready-block-popover.ready-block-toolbar { display: flex; flex-wrap: wrap; align-items: center; width: auto; max-width: 460px; gap: 2px; padding: 4px; }
+.ready-block-toolbar .ready-toolbar-icon { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; color: var(--rn-ink-2); }
+.ready-block-toolbar .ready-toolbar-icon svg { width: 16px; height: 16px; stroke-width: 1.8; }
+.ready-block-toolbar .ready-toolbar-icon[aria-pressed=true] { color: var(--rn-accent-text); background: var(--rn-accent-soft); }
+.ready-block-toolbar .ready-toolbar-sep { width: 1px; height: 18px; margin: 0 4px; background: var(--rn-hair); }
+.ready-block-toolbar .ready-toolbar-select .rn-field { height: 28px; max-width: 116px; font-size: var(--rn-fs-sm); }
+.ready-block-toolbar .ready-toolbar-link { display: flex; flex-basis: 100%; align-items: center; gap: 4px; padding: 4px 2px 2px; }
+.ready-block-toolbar .ready-toolbar-link .rn-field { flex: 1; height: 28px; }
+.ready-block-toolbar .ready-toolbar-text { height: 28px; padding: 0 8px; white-space: nowrap; font-size: var(--rn-fs-sm); }
 
 /* A confirmed draft is the normal state: keep it for assistive technology, show only pending or failed. */
 .ink-topbar-status.is-quiet { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
@@ -699,8 +684,9 @@ html:root .ink-main .document-content-frame { background: transparent !important
 .ink-source-chip { display: flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px 0 9px; margin-right: 4px; border: 0; border-radius: 12px; background: var(--studio-accent-soft); color: var(--studio-accent-text); font: inherit; font-size: 11px; font-weight: 600; cursor: pointer; }
 .ink-source-chip:hover { filter: brightness(.96); }
 /* The active tab keeps its whole title (up to 220px); the others share what is left. The title's end padding
-   takes the fade unless the title overflows. */
-.ink-tab.is-active { flex: 0 0 auto; width: auto; max-width: min(220px, 60%); }
+   takes the fade unless the title overflows. The cap is a length: the strip is as wide as its tabs, so a
+   percentage would resolve against the tab's own width and clip its title. */
+.ink-tab.is-active { flex: 0 0 auto; width: auto; max-width: 220px; }
 .ink-tab-title { padding-right: 10px; }
 .ink-return-chip { margin-left: auto; flex: 0 1 auto; min-width: 0; max-width: 40%; height: 28px; display: flex; align-items: center; gap: 4px; padding: 0 12px 0 8px; border: 0; border-radius: 14px; background: var(--studio-accent-soft); color: var(--studio-accent-text); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; transition: filter .15s; }
 .ink-return-chip span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }

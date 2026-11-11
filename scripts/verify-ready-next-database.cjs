@@ -30,7 +30,7 @@ async function main() {
   const entry = path.resolve(process.cwd(), require('../package.json').main)
   assert.ok(fs.existsSync(entry), '先构建 Ready Next，并由 M5-F 注册 documentDatabase IPC')
   const env = { ...process.env, READY_USER_DATA_DIR: profile }
-  delete env.ELECTRON_RUN_AS_NODE; delete env.READY_START_HIDDEN
+  delete env.ELECTRON_RUN_AS_NODE
   let app
   const launch = async () => {
     app = await _electron.launch({ executablePath: require('electron'), args: [process.cwd()], cwd: process.cwd(), env, timeout: 45000 })
@@ -88,8 +88,8 @@ async function main() {
       await page.waitForTimeout(200)
     }
     await page.locator('.ink-doc-app').waitFor({ state: 'visible' })
-    const note = page.getByText('视图验收.md', { exact: true }).first()
-    if (!await note.isVisible()) await page.getByText(path.basename(vault), { exact: true }).first().click()
+    // The navigator opens on its 页面 view, which lists the library's pages by title (W3 §3).
+    const note = page.locator('[data-shell-navigator="document"] section[aria-label="页面"] .ink-sb-label-btn').filter({ hasText: /^视图验收$/ }).first()
     await note.click()
     const table = page.locator('.ready-database[data-view-type="table"]:visible').first()
     const board = page.locator('.ready-database[data-view-type="board"]:visible').first()
@@ -107,7 +107,7 @@ async function main() {
     await table.getByRole('button', { name: '把当前视图发给 AI', exact: true }).click()
     await page.locator('.chat-reference-chip').first().waitFor({ timeout: 15000 })
     await snapshot('02b-ask-ai')
-    await board.getByLabel('刷新数据库', { exact: true }).click()
+    // Another view's write reaches this one by itself (observeDatabase); there is no 刷新 button (W3 §4.4).
     await board.locator(`[data-row-id="${rowId}"]`).dragTo(board.locator('[data-group="完成"]'))
     await board.locator('[data-group="完成"]').locator(`[data-row-id="${rowId}"]`).waitFor()
     assert.deepEqual(fields(fs.readFileSync(rowFile, 'utf8')), { ...fields(before), 内容: '表格修改', 状态: '完成' })
@@ -120,8 +120,8 @@ async function main() {
     const current = fs.readFileSync(rowFile, 'utf8')
     assert.ok(current.endsWith('保留正文\n'))
     fs.writeFileSync(rowFile, current.replace('表格修改', '外部修改'))
+    // The directory watcher brings the external write into every view; nothing to click.
     for (const view of [table, board, calendar]) {
-      await view.getByLabel('刷新数据库', { exact: true }).click()
       await view.locator(`[data-row-id="${rowId}"] [data-field-id="text"]`).first().filter({ hasText: '外部修改' }).waitFor()
       assert.deepEqual(await view.getByRole('alert').allTextContents(), [])
     }

@@ -6,7 +6,7 @@ import { useDocTabs } from '../../../stores/useDocTabs'
 import { runRegisteredDocumentSave } from '../documentSaveRegistry'
 import { pageRoots } from './page-state'
 
-/** The page roots the document shell lists: the vault, the workspace folder and pinned folders. */
+/** The page roots: the vault, the workspace folder and pinned folders; libraryRoots is the vault alone (W3 M4). */
 export function usePagePanel() {
   const vault = useVault(state => state.view)
   const load = useVault(state => state.load)
@@ -14,7 +14,8 @@ export function usePagePanel() {
   const pinned = useWorkspace(state => state.pinnedFolders)
   useEffect(() => { void load() }, [load])
   const roots = useMemo(() => pageRoots(vault.data, workspaceRoot, pinned), [vault.data, workspaceRoot, pinned])
-  return { roots }
+  const libraryRoots = useMemo(() => roots.filter(root => root.kind === 'vault'), [roots])
+  return { roots, libraryRoots }
 }
 
 export async function saveBeforePageTrash(node: PageNode): Promise<void> {

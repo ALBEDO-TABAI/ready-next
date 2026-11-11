@@ -29,7 +29,7 @@ async function main() {
   fs.mkdirSync(vault); fs.mkdirSync(evidence)
   assert.ok(fs.existsSync(path.resolve(require('../package.json').main)), 'Build this checkout first')
   const env = { ...process.env, READY_USER_DATA_DIR: profile }
-  delete env.ELECTRON_RUN_AS_NODE; delete env.READY_START_HIDDEN
+  delete env.ELECTRON_RUN_AS_NODE
   let app, page
   const launch = async () => {
     app = await _electron.launch({ executablePath: require('electron'), args: [process.cwd()], env, timeout: 45000 })
@@ -64,12 +64,16 @@ async function main() {
     await page.screenshot({ path: path.join(evidence, `${label}.png`) })
     console.log(`PASS ${label}: disk/database readback + screenshot`)
   }
+  // page.evaluate has no timeout of its own: a call Main never answers must fail this check with its name, not hang it.
+  const bounded = (promise, label, ms = 20000) => Promise.race([promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} did not answer within ${ms} ms`)), ms))])
   const sidebar = () => page.getByLabel('页面侧栏', { exact: true })
   const row = id => sidebar().locator(`section[aria-label="页面"] [data-page-id="${id}"]`)
   const createPage = async title => {
     // The section's add button shows on hover, as in Inkwell.
     await sidebar().locator('section[aria-label="页面"] .ink-sb-section-head').hover()
-    await sidebar().getByRole('button', { name: '在 测试资料库 中新建页面', exact: true }).click()
+    await sidebar().getByRole('button', { name: '在 测试资料库 中新建', exact: true }).click()
+    await page.getByRole('menuitem', { name: '页面', exact: true }).click()
     await page.waitForFunction(() => { const input = document.querySelector('textarea[aria-label="页面标题"]'); return input?.value === '未命名' && !input.disabled })
     const input = page.getByRole('textbox', { name: '页面标题', exact: true })
     await input.fill(title); await input.press('Enter')
@@ -128,17 +132,23 @@ async function main() {
       return draft.content
     }, parentId)
     await snapshot('03-chinese-split-confirmed')
-    const exited = once(app.process(), 'exit'); app.process().kill('SIGKILL'); await exited; app = undefined
+    // Kill by pid and confirm the exit within a bound: a lost signal must fail this check, never hang it.
+    const pid = app.process().pid, exited = once(app.process(), 'exit')
+    process.kill(pid, 'SIGKILL')
+    const outcome = await Promise.race([exited.then(() => 'exited'), new Promise(resolve => setTimeout(() => resolve('timeout'), 10000))])
+    if (outcome !== 'exited') { try { process.kill(pid, 0); process.kill(pid, 'SIGKILL') } catch { /* silent-catch: already gone */ } }
+    assert.equal(outcome, 'exited', `Ready Next (pid ${pid}) did not exit after SIGKILL`)
+    app = undefined
     await launch()
     // The confirmed body is durable in Main. The tab list lives in localStorage and may not reach disk before a
     // SIGKILL, so an orphaned draft comes back through "未保存的草稿" (the designed recovery path).
-    const recovered = await page.evaluate(async id => {
+    const recovered = await bounded(page.evaluate(async id => {
       const result = await window.electronAPI.documentDrafts.list()
       if (!result.ok) throw new Error(result.message)
       return result.value.find(draft => draft.objectId === id) ?? null
-    }, parentId)
+    }, parentId), 'documentDrafts.list after the restart')
     assert.equal(recovered?.content, original, 'the confirmed draft survives SIGKILL in Main')
-    const tabOpen = await page.evaluate(id => JSON.parse(localStorage.getItem('ready-doc-tabs-v2') || '{}').state?.tabs?.some(tab => tab.objectId === id), parentId)
+    const tabOpen = await bounded(page.evaluate(id => JSON.parse(localStorage.getItem('ready-doc-tabs-v2') || '{}').state?.tabs?.some(tab => tab.objectId === id), parentId), 'reading the tab list after the restart')
     if (tabOpen) await row(parentId).getByRole('button', { name: '验收页', exact: true }).click()
     else {
       await page.getByRole('button', { name: /^未保存的草稿/ }).click()

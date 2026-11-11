@@ -18,7 +18,7 @@ async function main() {
   const file = path.join(vault, '原页.md'), target = path.join(vault, '引用.md')
   const original = '原块 ^source\n\n第二块'
   fs.writeFileSync(file, original); fs.writeFileSync(target, '插入位置'); fs.writeFileSync(path.join(vault, '模板', '会议.md'), '# {{title}}\n\n日期 {{date}}')
-  const env = { ...process.env, READY_USER_DATA_DIR: profile }; delete env.ELECTRON_RUN_AS_NODE; delete env.READY_START_HIDDEN
+  const env = { ...process.env, READY_USER_DATA_DIR: profile }; delete env.ELECTRON_RUN_AS_NODE
   let app
   const launch = async () => {
     app = await _electron.launch({ executablePath: require('electron'), args: [process.cwd()], env, timeout: 45000 })
@@ -44,9 +44,9 @@ async function main() {
       await page.waitForTimeout(150)
     }
     await page.locator('.ink-doc-app').waitFor({ state: 'visible' })
+    // The navigator opens on its 页面 view, which lists the library's pages by title (W3 §3).
     const open = async name => {
-      const row = page.getByText(name, { exact: true }).first()
-      if (!await row.isVisible()) await page.getByText(path.basename(vault), { exact: true }).first().click()
+      const row = page.locator('[data-shell-navigator="document"] section[aria-label="页面"] .ink-sb-label-btn').filter({ hasText: new RegExp(`^${name.replace(/\.md$/, '')}$`) }).first()
       await row.click(); await page.locator('[data-ready-block-editor]:visible').first().waitFor()
     }
     const editor = () => page.locator('[data-ready-block-editor]:visible').first()
@@ -89,8 +89,8 @@ async function main() {
     await open('引用.md')
     const rich = editor().locator('[contenteditable]').first(); await rich.focus()
     await rich.evaluate(element => { const range = document.createRange(); range.selectNodeContents(element); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range) })
-    await page.keyboard.insertText('/')
-    await page.getByRole('combobox', { name: '搜索操作' }).fill('插入同步块'); await page.keyboard.press('Enter')
+    await page.keyboard.insertText('/同步块')
+    await page.locator('.ready-slash-menu [data-slash-item="synced"][aria-selected="true"]').waitFor(); await page.keyboard.press('Enter')
     const dialog = page.getByRole('dialog', { name: '插入同步块', exact: true })
     await dialog.getByLabel('同步块引用', { exact: true }).fill('![[原页#^source]]'); await dialog.getByRole('button', { name: '插入', exact: true }).click()
     assert.equal((await save(target, text => text.trim() === '![[原页#^source]]')).trim(), '![[原页#^source]]')

@@ -68,7 +68,7 @@ async function backToWorkbench(page) {
 }
 
 const FIXED_SCREENS = [
-  { name: 'doc-home', mode: 'document', run: async page => { await sidebar(page).getByText('主页', { exact: true }).click(); await harness.sleep(1200) } },
+  { name: 'doc-home', mode: 'document', run: async page => { await page.locator('[data-shell-band="top"] button[aria-label="今日"]').click(); await harness.sleep(1200) } },
   { name: 'doc-page', mode: 'document', run: page => openPage(page, '新书发布') },
   {
     name: 'doc-slash', mode: 'document',

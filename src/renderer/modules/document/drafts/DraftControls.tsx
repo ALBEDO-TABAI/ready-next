@@ -3,6 +3,7 @@ import { finalizeDraftTab } from './save'
 import { useState } from 'react'
 import { ConnectedSaveToPicker } from '../page-ui/ConnectedSaveToPicker'
 import { useDocTabs } from '../../../stores/useDocTabs'
+import { useInkLayout } from '../ink/layout-state'
 import { completeDraftSave, drafts, initializeDrafts, reportDraftError, requestDraftSave, useDraftUI } from './runtime'
 import type { DocumentDraft } from '../../../../shared/document-drafts'
 
@@ -46,6 +47,8 @@ export function DraftControls() {
   const { error, saveTabId, saveParentPath, saveRequestId } = useDraftUI()
   const tabs = useDocTabs(state => state.tabs)
   const activeId = useDocTabs(state => state.focusedPaneTabId || state.activeTabId)
+  // On 今日 there is no page: only the recovery badge and its panel show (the active tab's status does not).
+  const home = useInkLayout(state => state.home)
   const [showList, setShowList] = useState(false)
   const [conflict, setConflict] = useState<{ draft: DocumentDraft; tabId: string; disk: string } | null>(null)
   const [busy, setBusy] = useState(false)
@@ -69,12 +72,12 @@ export function DraftControls() {
   }
   // Lives in the document topbar: a quiet status, the drafts pill when there are drafts, and dropdown panels below it.
   return <div className="ink-draft-controls" data-testid="draft-controls">
-    {status && <span role="status" className={`ink-topbar-status${status.status === 'failed' ? ' is-error' : status.status === 'confirmed' ? ' is-quiet' : ''}`} data-testid="draft-status">{status.status === 'confirmed' ? '已持久确认' : status.status === 'pending' ? '等待确认' : `确认失败，内容已保留：${status.message}`}</span>}
-    {status?.status === 'failed' && <button className="ink-topbar-btn" onClick={() => { void run(() => drafts.flush(activeId)) }}>重试确认</button>}
-    {status?.conflict && <button className="ink-topbar-btn" onClick={() => { const draft = drafts.recovery.find(item => item.draftId === tabs.find(tab => tab.id === activeId)?.draftId); if (draft) void run(() => open(draft)) }}>查看版本冲突</button>}
+    {!home && status && <span role="status" className={`ink-topbar-status${status.status === 'failed' ? ' is-error' : status.status === 'confirmed' ? ' is-quiet' : ''}`} data-testid="draft-status">{status.status === 'confirmed' ? '已持久确认' : status.status === 'pending' ? '等待确认' : `确认失败，内容已保留：${status.message}`}</span>}
+    {!home && status?.status === 'failed' && <button className="ink-topbar-btn" onClick={() => { void run(() => drafts.flush(activeId)) }}>重试确认</button>}
+    {!home && status?.conflict && <button className="ink-topbar-btn" onClick={() => { const draft = drafts.recovery.find(item => item.draftId === tabs.find(tab => tab.id === activeId)?.draftId); if (draft) void run(() => open(draft)) }}>查看版本冲突</button>}
     {drafts.recovery.length > 0 && <button className={`ink-topbar-icon ink-draft-badge${showList ? ' is-open' : ''}`} aria-expanded={showList} aria-label={`未保存的草稿（${drafts.recovery.length}）`} title="未保存的草稿"
       onClick={() => setShowList(!showList)}><Inbox size={18} strokeWidth={1.6} aria-hidden /><span aria-hidden>{drafts.recovery.length}</span></button>}
-    {(() => { const tab = tabs.find(item => item.id === activeId); return tab?.path === null && tab.kind !== 'library' })() && <button className="ink-topbar-btn is-accent" onClick={() => requestDraftSave(activeId)}>保存到…</button>}
+    {!home && (() => { const tab = tabs.find(item => item.id === activeId); return tab?.path === null && tab.kind !== 'library' })() && <button className="ink-topbar-btn is-accent" onClick={() => requestDraftSave(activeId)}>保存到…</button>}
     {error && !saveTabId && <p role="alert" className="ink-draft-panel ink-panel-error">{error}</p>}
     {showList && <div className="ink-draft-panel ink-trash-list" role="dialog" aria-label="未保存的草稿">{drafts.recovery.map(draft => <div key={draft.draftId} className="ink-trash-item" data-testid={`draft-recovery-${draft.draftId}`}>
       <button disabled={busy} className="ink-sb-label-btn ink-menu-text" onClick={() => { void run(() => open(draft)) }}>{draft.title || '未命名草稿'}{draft.state === 'conflict' ? '（冲突）' : ''}{drafts.recoveryLabel(draft.draftId) && `（${drafts.recoveryLabel(draft.draftId)}）`}</button>

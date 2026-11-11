@@ -2,21 +2,22 @@ import { CanvasService } from '../board-engine/canvas-service'
 import { canvasPageMoveIds, repairCanvasPageMoves } from '../board-engine/page-moves'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
-import { basename, dirname, extname, join } from 'node:path'
+import { basename, dirname, extname, join, resolve, isAbsolute } from 'node:path'
 import { z } from 'zod'
 import { PageOperationSchema, PagePropertiesSchema, type PageOperation, type PageReceipt, type PageChange, type PageRoot, type PageUserState, type PageProperties, type PageOperationRecord, type PageTrashEntry } from '../../../shared/document-pages'
 import { readDocumentSource, setFrontmatterFields } from '../../../shared/document-operations'
+import { readDatabase, writeDatabase } from '../../../shared/document-database/format'
 import { DocumentDraftService } from '../document-drafts/service'
-import { checkedPath, collision, ensureDirectory, existsIgnoringCase, filename, vaultRoot } from '../document-drafts/files'
+import { checkedPath, collision, draftError, ensureDirectory, existsIgnoringCase, filename, vaultRoot } from '../document-drafts/files'
 import { commitDocumentOperation, documentVersion, documentWriteError, getDocumentWriteDependencies, publishDocumentContent, saveUserDocument } from '../document-engine/document-write-service'
-import { ObjectRegistry, isInside, objectTransaction } from '../object-service/registry'
+import { ObjectRegistry, canonicalObjectPath, isInside, objectTransaction } from '../object-service/registry'
 import { ObjectMutations, type ObjectMoveGroup } from '../object-service/mutations'
 import { publishObjectMoves } from '../object-service/events'
 import { repairObjectLinks } from '../object-service/link-repair'
 import { readPageTree } from './tree'
 
-interface Dependencies { canvases?: CanvasService; index(path: string): Promise<void>; afterMove?(index: number): void | Promise<void> }
-type Intent = { kind: 'create'; draftId: string; revision: number } | { kind: 'group'; title: string; group: ObjectMoveGroup; parentObjectId: string | null; originalPath: string; trashId?: string; canvasPathMoves?: ObjectMoveGroup['moves'] }
+interface Dependencies { vaultRoot?(): string | null; canvases?: CanvasService; index(path: string): Promise<void>; afterMove?(index: number): void | Promise<void> }
+type Intent = { kind: 'create'; draftId: string; revision: number; database?: { name: string } } | { kind: 'group'; title: string; group: ObjectMoveGroup; parentObjectId: string | null; originalPath: string; trashId?: string; canvasPathMoves?: ObjectMoveGroup['moves'] }
   | { kind: 'delete'; trashId: string; directory: string; objectIds: string[] }
 type VersionedPageOperation = z.output<typeof PageOperationSchema> & { expectedVersion?: string }
 interface RecordRow { id: string; request_json: string; intent_json: string; state: PageOperationRecord['state']; receipt_json: string | null; error: string | null }
@@ -140,12 +141,42 @@ export class DocumentPageService {
     this.registry.db.prepare('INSERT INTO workspaces(root) VALUES (?) ON CONFLICT(root) DO NOTHING').run(root)
     if (request.type === 'create') {
       const parent = this.parent(root,request)
-      const path = join(parent.path,filename(request.title)+'.md')
+      const stem = filename(request.title)
+      let name = stem
+      if (request.database) {
+        let suffix = 2
+        while (['.md', '', '.canvas', '.assets'].some(ext => existsIgnoringCase(join(parent.path, name + ext)))) name = filename(`${stem} (${suffix++})`)
+      }
+      const path = join(parent.path, name + '.md')
       if (existsIgnoringCase(path)) throw collision(path)
-      const draft = this.drafts.create({ vaultRoot: root, origin: 'new', content: request.content })
-      return { kind: 'create', draftId: draft.draftId, revision: draft.revision }
+      const content = request.database ? writeDatabase(request.content, {
+        version: 1, source: name,
+        fields: {
+          状态: { id: 'status', name: '状态', type: 'select', options: ['未开始', '进行中', '完成'] },
+          日期: { id: 'date', name: '日期', type: 'date' },
+          标签: { id: 'tags', name: '标签', type: 'multi_select', options: [] },
+        },
+        views: [{ id: 'table', name: '表格', type: 'table', visibleFields: ['$title', 'status', 'date', 'tags'] }],
+      }) : request.content
+      const draft = this.drafts.create({ vaultRoot: root, origin: 'new', content })
+      return { kind: 'create', draftId: draft.draftId, revision: draft.revision, ...(request.database ? { database: { name } } : {}) }
     }
-    const object = this.object(request.objectId)
+    let sourceRoot = root
+    if (request.type === 'adopt') {
+      if (this.dependencies.vaultRoot?.() !== root) throw draftError('invalid_path', '收进的目标必须是当前资料库')
+      const source = canonicalObjectPath(resolve(request.source))
+      if (!isAbsolute(request.source) || isInside(root, source) || isInside(source, root) || source.split(/[\\/]/).includes('.ready')) {
+        throw draftError('invalid_path', '源必须位于资料库之外，且不能包含资料库')
+      }
+      const workspace = this.registry.db.prepare('SELECT root FROM workspaces ORDER BY length(root) DESC').all<{ root: string }>()
+        .find(row => isAbsolute(row.root) && isInside(row.root, source))
+      if (!workspace) throw draftError('invalid_path', '源不在已登记的挂载文件夹内')
+      checkedPath(workspace.root, request.source)
+      if (!existsSync(source)) throw draftError('source_unavailable', '要收进的文件或文件夹已不存在')
+      // A mounted root itself disappears during a move; recovery must anchor at its surviving parent.
+      sourceRoot = source === workspace.root ? dirname(workspace.root) : workspace.root
+    }
+    const object = request.type === 'adopt' ? this.registry.register(request.source) : this.object(request.objectId)
     if (request.type === 'restore' || request.type === 'delete') {
       const trash = this.trash(root).find(item => item.objectId === object.id)
       if (!trash) throw new Error('Object is not in this trash')
@@ -164,14 +195,18 @@ export class DocumentPageService {
       })
       return { kind: 'group', title: previous.title, group: { id: request.operationId, root, moves, objects, status: 'present' }, originalPath: moves[0].target, parentObjectId: destination.id, trashId: trash.operationId, canvasPathMoves: previous.group.moves.map((move, index) => ({ source: move.source, target: moves[index].target })) }
     }
-    if (!['markdown', 'canvas'].includes(object.kind) || !object.current_path) throw new Error('Page is not present')
-    const path = checkedPath(root,object.current_path), base = path.slice(0,-extname(path).length), name = basename(base)
+    const page = ['markdown', 'canvas'].includes(object.kind)
+    if ((!page && request.type !== 'adopt') || !object.current_path) throw new Error('Page is not present')
+    const path = checkedPath(sourceRoot,object.current_path), base = page ? path.slice(0,-extname(path).length) : path, name = basename(base)
     // Reuse the read model's ambiguity decision, so operations never guess a partner.
-    const tree = this.tree({ path: dirname(path), kind: 'external' })
-    if (tree.children.find(node => node.path === path)?.ambiguity) throw new Error('ambiguous page: use file view')
-    const sources = [path, base, base+'.assets'].filter(existsSync)
+    if (page) {
+      const tree = this.tree({ path: dirname(path), kind: 'external' })
+      if (tree.children.find(node => node.path === path)?.ambiguity) throw new Error('ambiguous page: use file view')
+    }
+    const sources = page ? [path, base, base+'.assets'].filter(existsSync) : [path]
+    for (const source of sources) checkedPath(sourceRoot,source)
     const originalParent = this.registry.find(dirname(path))!
-    const destination = request.type === 'move' ? this.parent(root,request) : { path: dirname(path), id: originalParent.id }
+    const destination = request.type === 'move' || request.type === 'adopt' ? this.parent(root,request) : { path: dirname(path), id: originalParent.id }
     const nextName = request.type === 'rename' ? filename(request.title) : name
     const trashDir = join(root,'.ready','trash',request.operationId)
     const targetBase = join(request.type === 'trash' ? trashDir : destination.path,nextName)
@@ -182,15 +217,23 @@ export class DocumentPageService {
     const objects = this.registry.list().filter(row => row.current_path && sources.some(source => isInside(source,row.current_path!)))
     if (objects.some(row => row.identity_state === 'conflict')) throw new Error('ambiguous object identity')
     // Persisted unsaved drafts also count when their window is closed.
-    if (request.type === 'trash') for (const row of objects) {
+    if (request.type === 'trash' || request.type === 'adopt') for (const row of objects) {
       const drafts = this.registry.db.prepare("SELECT content_hash FROM document_drafts WHERE object_id=? AND state IN ('editing','conflict','finalizing')").all<{content_hash:string}>(row.id)
-      if (drafts.some(d => d.content_hash !== row.content_hash)) throw new Error('dirty_conflict: save draft before recycling page')
+      if (drafts.some(d => d.content_hash !== row.content_hash)) throw new Error('dirty_conflict: save draft before moving or recycling page')
     }
-    const original = readFileSync(path,'utf8')
+    const original = page ? readFileSync(path,'utf8') : ''
     if (request.expectedVersion !== undefined && documentVersion(original) !== request.expectedVersion) throw documentWriteError('version_conflict', 'version_conflict: page changed before rename or move')
+    let renamed = original
+    if (request.type === 'rename' && object.kind === 'markdown') {
+      renamed = setFrontmatterFields(original, { set: { title: request.title } })
+      if (readDocumentSource(original).frontmatter.ready_database !== undefined) {
+        const definition = readDatabase(original)
+        if (definition.source === name) renamed = writeDatabase(renamed, { ...definition, source: nextName })
+      }
+    }
     const title = object.kind === 'canvas' ? JSON.parse(original).ready?.title : readDocumentSource(original).frontmatter.title
-    return { kind: 'group', title: request.type === 'rename' ? request.title : typeof title === 'string' ? title : name, group: { id: request.operationId, root, moves, objects, status: request.type === 'trash' ? 'trashed' : 'present',
-      ...(request.type === 'rename' && object.kind === 'markdown' ? { patch: { path: targetBase+'.md', original, content: setFrontmatterFields(original,{set:{title:request.title}}) } } : {}) },
+    return { kind: 'group', title: request.type === 'rename' ? request.title : typeof title === 'string' ? title : name, group: { id: request.operationId, root, ...(request.type === 'adopt' ? { sourceRoot } : {}), moves, objects, status: request.type === 'trash' ? 'trashed' : 'present',
+      ...(request.type === 'rename' && object.kind === 'markdown' ? { patch: { path: targetBase+'.md', original, content: renamed } } : {}) },
       parentObjectId: destination.id, originalPath: path }
   }
   operate(input: PageOperation, expectedVersion?: string): Promise<PageReceipt> {
@@ -217,7 +260,8 @@ export class DocumentPageService {
       let objectId: string
       if (intent.kind === 'create') {
         if (request.type !== 'create') throw new Error('Invalid create intent')
-        const result = await this.drafts.finalize(intent.draftId,intent.revision,{ operationId: request.operationId, title: request.title, parentObjectId: request.parentObjectId, parentPath: request.parentPath })
+        const result = await this.drafts.finalize(intent.draftId,intent.revision,{ operationId: request.operationId, title: intent.database?.name ?? request.title, parentObjectId: request.parentObjectId, parentPath: request.parentPath })
+        if (intent.database) ensureDirectory(request.root, join(dirname(result.path), intent.database.name))
         objectId = result.objectId
       } else if (intent.kind === 'delete') {
         if (request.type !== 'delete') throw new Error('Invalid delete intent')
@@ -242,7 +286,7 @@ export class DocumentPageService {
         }))
         await repairCanvasPageMoves(canvases, pathGroup, request.type === 'rename' ? { objectId: request.objectId, value: request.title } : undefined)
         for (const id of canvasIds) canvases.refreshRelations(id)
-        objectId = request.objectId
+        objectId = request.type === 'adopt' ? intent.group.objects.find(row => row.current_path === intent.originalPath)!.id : request.objectId
         if (intent.group.status === 'present') {
           for (const row of intent.group.objects) { const current = this.registry.get(row.id); if (current?.kind === 'markdown' && current.current_path) await this.dependencies.index(current.current_path) }
         }

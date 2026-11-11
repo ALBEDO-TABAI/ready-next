@@ -10,10 +10,21 @@ import { databaseFixture } from './utils/database-native-fixture'
 import { mountDatabase, input, click, drop } from './utils/database-view-fixture'
 import { definition } from './utils/database-memory-fixture'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+import { installDocumentDirectoryChangeBridge, resetDocumentDirectoryChangeBridgeForTests } from '../renderer/modules/document/directoryChangeBridge'
+
+// The view follows the disk (no 刷新 button, W3 §4.4): a test announces a write the way the directory watcher does.
+function directoryChanges(t: test.TestContext) {
+  let emit: ((event: { paths: string[]; timestamp: number }) => void) | null = null
+  installDocumentDirectoryChangeBridge({ onDirectoryChange: handler => { emit = handler; return () => { emit = null } } })
+  t.after(() => resetDocumentDirectoryChangeBridgeForTests())
+  return async (path: string) => {
+    await act(async () => { emit?.({ paths: [path], timestamp: Date.now() }); await new Promise(resolve => setTimeout(resolve, 450)) })
+  }
+}
 
 test('DB-B native: seven real views and inline share files; edits, moves, creation, external refresh, personal state', async t => {
   if (skipIfSqliteUnavailable(t, 'M5-B real database views')) return
-  const f = databaseFixture(), ui = await mountDatabase(t)
+  const f = databaseFixture(), ui = await mountDatabase(t), changed = directoryChanges(t)
   t.after(() => f.close())
   const rowSelector = `[data-row-id="${f.ids[0]}"]`
   const original = f.read()
@@ -49,7 +60,7 @@ test('DB-B native: seven real views and inline share files; edits, moves, creati
   await ui.render(<Database databaseId={f.databaseId} api={f.api} initialViewId="table" />)
   assert.equal(ui.host.querySelector(`${rowSelector} [data-field-id="text"]`)?.textContent, '内联编辑')
   writeFileSync(f.paths[0], f.read().replace('文本: 内联编辑', '文本: 外部修改'))
-  await click(ui, '[aria-label="刷新数据库"]')
+  await changed(f.paths[0])
   assert.equal(ui.host.querySelector(`${rowSelector} [data-field-id="text"]`)?.textContent, '外部修改')
   await click(ui, `${rowSelector} .rdb-title`); assert.equal(f.opened.at(-1), f.ids[0])
   await click(ui, '[aria-label="视图设置"]'); await input(ui, '[aria-label="分组字段"]', 'status'); await click(ui, '[aria-label="保存视图设置"]')
@@ -72,7 +83,7 @@ test('DB-B native: stale cell conflicts; dirty receipt is visibly unsaved until 
     if (!dirty) return { ok: true, tabs: [] }
     if (request.phase === 'prepare') buffer = applyDocumentOperation(buffer, request.operation)
     return { ok: true, tabs: [{ id: 'dirty-tab', path: request.path, content: buffer, isDirty: true }], content: buffer }
-  }), ui = await mountDatabase(t)
+  }), ui = await mountDatabase(t), changed = directoryChanges(t)
   t.after(() => f.close())
   const cell = `[data-row-id="${f.ids[0]}"] [data-field-id="text"]`
   await ui.render(<Database databaseId={f.databaseId} api={f.api} />)
@@ -81,14 +92,14 @@ test('DB-B native: stale cell conflicts; dirty receipt is visibly unsaved until 
   const external = f.read()
   await click(ui, '[aria-label="保存单元格"]')
   assert.match(ui.host.querySelector('.rdb-status')?.textContent ?? '', /冲突/); assert.equal(f.read(), external)
-  await click(ui, '[aria-label="刷新数据库"]')
+  await click(ui, '[aria-label="重新读取数据库"]')
   dirty = true; buffer = external + '未保存正文\n'
   await click(ui, cell); await input(ui, '[aria-label="字段值"]', '缓冲值'); await click(ui, '[aria-label="保存单元格"]')
   assert.match(ui.host.querySelector('.rdb-status')?.textContent ?? '', /已合入未保存缓冲/)
   assert.equal(f.read(), external); assert.match(buffer, /文本: 缓冲值/)
   assert.equal(ui.host.querySelector(cell)?.textContent, '缓冲值')
-  await click(ui, '[aria-label="刷新数据库"]'); assert.match(ui.host.querySelector('.rdb-status')?.textContent ?? '', /未保存缓冲/)
+  await click(ui, '[aria-label="重新读取数据库"]'); assert.match(ui.host.querySelector('.rdb-status')?.textContent ?? '', /未保存缓冲/)
   dirty = false; writeFileSync(f.paths[0], buffer)
-  await click(ui, '[aria-label="刷新数据库"]'); assert.match(ui.host.querySelector('.rdb-status')?.textContent ?? '', /已保存/)
+  await changed(f.paths[0]); assert.match(ui.host.querySelector('.rdb-status')?.textContent ?? '', /已保存/)
   assert.equal(ui.host.querySelector(cell)?.textContent, '缓冲值'); assert.ok(f.read().endsWith('未保存正文\n'))
 })

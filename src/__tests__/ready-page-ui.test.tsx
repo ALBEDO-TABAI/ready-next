@@ -228,3 +228,35 @@ test('recycling a page saves dirty descendants and hidden attachments, and refus
     await assert.rejects(saveBeforePageTrash(pageNode('A')), /未保存内容/)
   } finally { releases.forEach(release => release()); useDocTabs.setState({ tabs: previous }); await ui.close() }
 })
+
+test('W3 M4 收进资料库 sends the mounted path to the chosen library place and unpins an adopted mounted root', async () => {
+  const f = fixture(), ui = await mountPageUI()
+  const requests: import('../shared/document-pages').PageOperation[] = []
+  const { useWorkspace } = await import('../renderer/stores/useWorkspace')
+  const prior = useWorkspace.getState().pinnedFolders
+  Object.defineProperty(window, 'electronAPI', { configurable: true, value: {
+    vault: { get: async () => ({ status: 'ready', root: '/vault' }) },
+    documentPages: { ...f.api, operate: async (input: import('../shared/document-pages').PageOperation) => {
+      requests.push(input)
+      return success({ operationId: input.operationId, state: 'committed' as const, objectId: 'adopted', revision: 1, path: '/vault/A/笔记.md' })
+    } },
+  } })
+  try {
+    useWorkspace.setState({ pinnedFolders: ['/vault', '/mounted'] })
+    await ui.render(<></>)
+    const { adoptIntoLibrary } = await import('../renderer/modules/document/navigator/adopt')
+    await act(async () => { await adoptIntoLibrary('/mounted/笔记.md') })
+    const dialog = ui.body.querySelector('[role="dialog"][aria-label="收进资料库…"]')
+    assert.ok(dialog, 'the picker opens for library places')
+    assert.ok(![...dialog.querySelectorAll('button')].some(button => button.textContent === '其他位置…'), 'only library places')
+    await ui.click('A'); await ui.click('确认')
+    assert.equal(requests.length, 1)
+    const { operationId, ...request } = requests[0] as Extract<import('../shared/document-pages').PageOperation, { type: 'adopt' }>
+    assert.ok(operationId)
+    assert.deepEqual(request, { type: 'adopt', root: '/vault', source: '/mounted/笔记.md', parentObjectId: 'A' })
+    assert.deepEqual(useWorkspace.getState().pinnedFolders, ['/vault', '/mounted'], 'a file inside stays mounted')
+    await act(async () => { await adoptIntoLibrary('/mounted') })
+    await ui.click('确认')
+    assert.deepEqual(useWorkspace.getState().pinnedFolders, ['/vault'], 'an adopted mounted root is no longer mounted')
+  } finally { useWorkspace.setState({ pinnedFolders: prior }); await ui.close() }
+})

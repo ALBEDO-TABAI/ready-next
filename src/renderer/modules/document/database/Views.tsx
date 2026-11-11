@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState, type ReactNode, type DragEvent, type
 import type { DatabaseDefinition, DatabaseView } from '../../../../shared/document-database'
 import type { PersonalState, Query, ViewRow } from './access'
 import { cellText } from './cell-text'
+import { FieldIcon } from './cells'
 import { addDays, dateRange, dayDistance, moveGroup, shiftDate } from './moves'
 
 export interface ViewProps {
@@ -35,14 +36,18 @@ export function TableView(props: ViewProps) {
     const cancel = () => { target.removeEventListener('pointerup', up); target.removeEventListener('pointercancel', cancel) }
     target.addEventListener('pointerup', up); target.addEventListener('pointercancel', cancel)
   }
-  return <div className="rdb-scroll" ref={scroll} data-testid="table-scroll" style={{ height: viewportHeight }} onScroll={e => { setTop(e.currentTarget.scrollTop); savePersonal({ scroll: { x: e.currentTarget.scrollLeft, y: e.currentTarget.scrollTop } }) }}>
+  // A short table is as tall as its rows (the ＋ 新页面 row follows it); a long one scrolls inside the viewport.
+  return <div className="rdb-scroll" ref={scroll} data-testid="table-scroll" style={{ height: Math.min(viewportHeight, rowHeight + items.length * rowHeight + 2) }} onScroll={e => { setTop(e.currentTarget.scrollTop); savePersonal({ scroll: { x: e.currentTarget.scrollLeft, y: e.currentTarget.scrollTop } }) }}>
     <div role="table" aria-label="数据库表格" aria-rowcount={items.length + 1} style={{ width, minWidth: '100%' }}>
-      <div className="rdb-table-head" role="row" style={{ gridTemplateColumns: columns }}>{fields.map(id => <div role="columnheader" key={id}>
-        {id === '$title' ? '标题' : id === '$id' ? '身份' : Object.values(definition.fields).find(f => f.id === id)?.name}
+      <div className="rdb-table-head" role="row" style={{ gridTemplateColumns: columns }}>{fields.map(id => {
+        const field = Object.values(definition.fields).find(f => f.id === id)
+        return <div role="columnheader" key={id} data-col={id === '$title' ? 'title' : undefined}>
+        <span className="rdb-head-label">{id === '$title' ? <FieldIcon field="title" /> : field ? <FieldIcon field={field} /> : null}<span>{id === '$title' ? '标题' : id === '$id' ? '身份' : field?.name}</span></span>
         <button className="rdb-resize" aria-label={`调整列宽 ${id}`} onPointerDown={e => resize(e, id)} onKeyDown={e => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); savePersonal({ widths: { [id]: Math.max(80, (personal.widths?.[id] ?? 160) + (e.key === 'ArrowLeft' ? -20 : 20)) } }) } }} />
-      </div>)}</div>
+      </div>
+      })}</div>
       <div style={{ height: items.length * rowHeight, position: 'relative' }}>
-        {items.slice(start, end).map((item, i) => <div className="rdb-table-row" role="row" aria-rowindex={start + i + 2} data-row-id={item.kind === 'row' ? item.row.id : undefined} key={item.key} style={{ position: 'absolute', top: (start + i) * rowHeight, height: rowHeight, gridTemplateColumns: columns, width: '100%' }}>{item.kind === 'group' ? <div role="cell" style={{ gridColumn: '1 / -1' }}>{item.label}</div> : fields.map(id => <div role="cell" key={id}>{cell(item.row, id)}</div>)}</div>)}
+        {items.slice(start, end).map((item, i) => <div className="rdb-table-row" role="row" aria-rowindex={start + i + 2} data-row-id={item.kind === 'row' ? item.row.id : undefined} key={item.key} style={{ position: 'absolute', top: (start + i) * rowHeight, height: rowHeight, gridTemplateColumns: columns, width: '100%' }}>{item.kind === 'group' ? <div role="cell" style={{ gridColumn: '1 / -1' }}>{item.label}</div> : fields.map(id => <div role="cell" key={id} data-col={id === '$title' ? 'title' : undefined}>{cell(item.row, id)}</div>)}</div>)}
       </div>
     </div>
   </div>

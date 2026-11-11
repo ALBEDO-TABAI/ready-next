@@ -14,7 +14,8 @@ const cell = z.discriminatedUnion('status', [
   z.object({ status: z.literal('error'), code: z.string(), message: z.string() }),
   z.object({ status: z.literal('incomplete'), reasons: z.array(z.string()) }),
 ])
-export const SnapshotSchema = z.object({ databaseId: z.string(), definition: DatabaseDefinitionSchema, version: z.string(), rows: z.array(row) })
+/** sourcePath: the row folder on disk, which the view watches while it is open. */
+export const SnapshotSchema = z.object({ databaseId: z.string(), definition: DatabaseDefinitionSchema, version: z.string(), rows: z.array(row), sourcePath: z.string().optional() })
 export const QuerySchema = z.object({
   databaseId: z.string(), version: z.string(), viewId: z.string(), type: z.string(),
   rows: z.array(row.extend({ cells: z.record(z.string(), cell) })), total: z.number(),

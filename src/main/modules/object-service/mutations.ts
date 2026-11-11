@@ -32,6 +32,8 @@ async function moveFile(source:string,target:string):Promise<void> {
 export interface ObjectMoveGroup {
   id: string
   root: string
+  /** Source boundary for a cross-workspace adoption; root remains the destination boundary. */
+  sourceRoot?: string
   moves: Array<{ source: string; target: string }>
   objects: ObjectRecord[]
   status: 'present' | 'trashed'
@@ -41,7 +43,7 @@ function validateGroupFiles(group: ObjectMoveGroup, side: 'source' | 'target'): 
   for (const row of group.objects) {
     const move = group.moves.find(item => isInside(item.source, row.current_path!)) ?? { source: row.current_path!, target: row.current_path! }
     const path = move[side] + row.current_path!.slice(move.source.length)
-    checkedPath(group.root, path)
+    checkedPath(side === 'source' ? group.sourceRoot ?? group.root : group.root, path)
     if (row.kind !== 'directory') {
       const patched = side === 'target' && group.patch?.path === path
       if (fullHash(path) !== (patched ? documentVersion(group.patch!.content) : row.content_hash)) throw new Error('version_conflict: group contents changed')
@@ -62,8 +64,11 @@ export class ObjectMutations {
       const move = group.moves.find(item => isInside(item.source,row.current_path!))
       return [row.current_path!, ...(move ? [move.target+row.current_path!.slice(move.source.length)] : [])]
     }))].sort()
-    for (const move of group.moves) for (let path of [move.source,move.target]) {
-      while (isInside(group.root,path)) { if (!files.includes(path)) files.push(path); if (path === group.root) break; path = dirname(path) }
+    for (const move of group.moves) for (const [boundary, location] of [[group.sourceRoot ?? group.root, move.source], [group.root, move.target]]) {
+      for (let path = location; isInside(boundary,path); path = dirname(path)) {
+        if (!files.includes(path)) files.push(path)
+        if (path === boundary) break
+      }
     }
     files.sort()
     const locked = (i: number): Promise<void> => i < files.length ? withDocumentPathLock(files[i], () => locked(i + 1)) : execute()
@@ -83,7 +88,7 @@ export class ObjectMutations {
         }
         validateGroupFiles(group, 'source')
         for (const move of group.moves) {
-          checkedPath(group.root, move.source); checkedPath(group.root, move.target)
+          checkedPath(group.sourceRoot ?? group.root, move.source); checkedPath(group.root, move.target)
           if (existsIgnoringCase(move.target)) throw new Error('name_collision: target exists')
           if (isInside(move.source, move.target)) throw new Error('Cannot move a page inside itself')
         }
@@ -117,6 +122,7 @@ export class ObjectMutations {
               db.prepare('UPDATE objects SET status=?,current_path=?,path_key=?,last_known_path=?,workspace_id=?,content_hash=?,revision=revision+1 WHERE id=?')
                 .run(group.status, group.status === 'present' ? next : null, group.status === 'present' ? next : null, next,
                   this.registry.workspace(next), row.kind === 'directory' ? null : fullHash(next), row.id)
+              if (group.sourceRoot) db.prepare('UPDATE document_drafts SET vault_root=?,revision=revision+1,updated_at=? WHERE object_id=?').run(group.root,Date.now(),row.id)
               if (group.patch?.path === next) db.prepare('UPDATE object_link_repairs SET source_hash=? WHERE source_id=?').run(fullHash(next),row.id)
               db.prepare(`INSERT INTO file_move_receipts(receipt_id,object_id,workspace_root,old_path,new_path,move_kind,moved_at,operation_id) VALUES (?,?,?,?,?,?,?,?)
                 ON CONFLICT(object_id,old_path,new_path) DO UPDATE SET moved_at=excluded.moved_at,operation_id=excluded.operation_id`)
@@ -194,7 +200,7 @@ export class ObjectMutations {
     }
     // Both locations can exist when the process exits during a copy. Remove only verified copies.
     const rollback = async (source: string, target: string): Promise<void> => {
-      checkedPath(group.root,source); checkedPath(group.root,target)
+      checkedPath(group.sourceRoot ?? group.root,source); checkedPath(group.root,target)
       if (!existsSync(target)) { if (!existsSync(source)) throw new Error('Recovery conflict: both paths missing'); return }
       const owner = this.registry.db.prepare('SELECT device,inode FROM object_move_group_locations WHERE operation_id=? AND path=?').get<{device:string;inode:string}>(group.id,target)
       const actual = lstatSync(target,{bigint:true})

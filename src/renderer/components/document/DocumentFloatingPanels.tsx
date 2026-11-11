@@ -3,7 +3,6 @@ import {
   Bookmark,
   ChevronDown,
   ChevronRight,
-  ListTree,
   Pencil,
   Plus,
   StickyNote,
@@ -21,6 +20,10 @@ import {
   type DocumentOutlineSnapshot,
 } from '../../../shared/document-side-panels'
 import './documentFloatingPanels.css'
+import { useVault } from '../../stores/useVault'
+import { useDocTabs } from '../../stores/useDocTabs'
+import { duplicatePageHeading, pageHeaderTitle } from '../../modules/document/page-ui/page-title'
+import { parseDocumentBlocks } from '../../../shared/document-blocks'
 
 type MarkTab = 'bookmark' | 'note'
 const PANEL_EXIT_ANIMATION_MS = 180
@@ -52,7 +55,6 @@ interface DocumentFloatingPanelsProps {
   onToggleOutline: () => void
   onToggleMarks: () => void
   onReveal: (lineStart: number, lineEnd?: number | null) => void
-  showToggles?: boolean
 }
 
 function normalizeGroupName(value: string): string {
@@ -173,46 +175,6 @@ function saveMarkDraft(next: MarkDraftCacheEntry): void {
   }
 }
 
-export function DocumentPanelToggleButtons({
-  outlineOpen,
-  marksOpen,
-  onToggleOutline,
-  onToggleMarks,
-  rail = false,
-}: {
-  outlineOpen: boolean
-  marksOpen: boolean
-  onToggleOutline: () => void
-  onToggleMarks: () => void
-  rail?: boolean
-}) {
-  return (
-    <div
-      className={`document-floating-toggles${rail ? ' document-floating-toggles--rail' : ''}`}
-      aria-label="文档辅助面板"
-    >
-      <button
-        type="button"
-        className={`document-floating-toggle${outlineOpen ? ' is-active' : ''}`}
-        onClick={onToggleOutline}
-        title="内容速览"
-        aria-pressed={outlineOpen}
-      >
-        <ListTree className="h-[14px] w-[14px]" strokeWidth={2} />
-      </button>
-      <button
-        type="button"
-        className={`document-floating-toggle${marksOpen ? ' is-active' : ''}`}
-        onClick={onToggleMarks}
-        title="书签和笔记"
-        aria-pressed={marksOpen}
-      >
-        <Bookmark className="h-[14px] w-[14px]" strokeWidth={2} />
-      </button>
-    </div>
-  )
-}
-
 export default function DocumentFloatingPanels({
   documentPath,
   documentTitle,
@@ -223,8 +185,15 @@ export default function DocumentFloatingPanels({
   onToggleOutline,
   onToggleMarks,
   onReveal,
-  showToggles = true,
 }: DocumentFloatingPanelsProps) {
+  // The outline leaves out the heading the page body hides: the one repeating the page header's title (M5).
+  const vaultRoot = useVault(state => state.view.data?.status === 'ready' ? state.view.data.root : null)
+  const tab = useDocTabs(state => documentPath ? state.tabs.find(item => item.path === documentPath) : undefined)
+  const pageTitle = tab ? pageHeaderTitle({ ...tab, content }, vaultRoot) : undefined
+  const hiddenTitleLine = useMemo(() => {
+    const block = duplicatePageHeading(parseDocumentBlocks(content), pageTitle)
+    return block ? content.slice(0, block.start).split(/\r\n|\n|\r/).length : null
+  }, [content, pageTitle])
   const [outline, setOutline] = useState(EMPTY_DOCUMENT_OUTLINE)
   const [outlineContent, setOutlineContent] = useState('')
   const [outlineLoading, setOutlineLoading] = useState(false)
@@ -430,14 +399,6 @@ export default function DocumentFloatingPanels({
 
   return (
     <>
-      {showToggles && (
-        <DocumentPanelToggleButtons
-          outlineOpen={outlineOpen}
-          marksOpen={marksOpen}
-          onToggleOutline={onToggleOutline}
-          onToggleMarks={onToggleMarks}
-        />
-      )}
 
       {outlinePanelRendered && (
         <aside
@@ -467,10 +428,10 @@ export default function DocumentFloatingPanels({
             {outlineLoading && (
               <div className="document-floating-empty">正在整理文档结构...</div>
             )}
-            {!outlineLoading && outline.nodes.length === 0 && (
+            {!outlineLoading && outline.nodes.filter(node => node.lineStart !== hiddenTitleLine).length === 0 && (
               <div className="document-floating-empty">这篇文档暂时没有可预览的结构。</div>
             )}
-            {!outlineLoading && outline.nodes.map((node) => (
+            {!outlineLoading && outline.nodes.filter(node => node.lineStart !== hiddenTitleLine).map((node) => (
               <OutlineRow
                 key={node.id}
                 node={node}

@@ -5,7 +5,7 @@ export const OPEN_QUICK_SWITCHER_EVENT = 'ready:open-quick-switcher'
 export type ShellAction =
   | 'toggle-theme' | 'toggle-sidebar' | 'toggle-assistant'
   | 'open-today' | 'open-skills' | 'open-graph' | 'open-find-replace'
-  | 'open-settings' | 'open-fastcard' | 'new-page'
+  | 'open-settings' | 'open-fastcard' | 'new-page' | 'new-database'
 export interface ShellActionDetail { action: ShellAction }
 
 declare global {

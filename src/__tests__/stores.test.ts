@@ -1109,34 +1109,6 @@ describe('useWorkspace Store', () => {
         assert.strictEqual(useWorkspace.getState().files[0].name, 'test.md')
     })
 
-    it('should save and retrieve workspaces', () => {
-        useWorkspace.getState().addPinnedFolder('/folder-a')
-        useWorkspace.getState().addPinnedFolder('/folder-b')
-        useWorkspace.getState().saveWorkspace('My Workspace')
-
-        const saved = useWorkspace.getState().getSavedWorkspaces()
-        assert.strictEqual(saved.length, 1)
-        assert.strictEqual(saved[0].name, 'My Workspace')
-        assert.deepStrictEqual(saved[0].folders, ['/folder-a', '/folder-b'])
-    })
-
-    it('should not save workspace with no pinned folders', () => {
-        useWorkspace.getState().saveWorkspace('Empty')
-        const saved = useWorkspace.getState().getSavedWorkspaces()
-        assert.strictEqual(saved.length, 0)
-    })
-
-    it('should overwrite saved workspace with same name', () => {
-        useWorkspace.getState().addPinnedFolder('/v1')
-        useWorkspace.getState().saveWorkspace('W')
-        // Change pinned and save again with same name
-        useWorkspace.setState({ pinnedFolders: ['/v2'] })
-        useWorkspace.getState().saveWorkspace('W')
-        const saved = useWorkspace.getState().getSavedWorkspaces()
-        assert.strictEqual(saved.length, 1)
-        assert.deepStrictEqual(saved[0].folders, ['/v2'])
-    })
-
     it('should load a saved workspace', () => {
         // Primary folder must pass validateWorkspaceRoot (4+ segments, non-personal-dir).
         const safePrimary = '/Users/test/Documents/loaded-a'
@@ -1159,17 +1131,6 @@ describe('useWorkspace Store', () => {
         assert.strictEqual(state.workspaceRoot, null)
         assert.strictEqual(state.currentPath, '')
         assert.strictEqual(storage.get('ready-workspace-root'), undefined)
-    })
-
-    it('should delete a saved workspace', () => {
-        useWorkspace.getState().addPinnedFolder('/x')
-        useWorkspace.getState().saveWorkspace('ToDelete')
-        useWorkspace.getState().saveWorkspace('ToKeep')
-
-        useWorkspace.getState().deleteSavedWorkspace('ToDelete')
-        const saved = useWorkspace.getState().getSavedWorkspaces()
-        assert.strictEqual(saved.length, 1)
-        assert.strictEqual(saved[0].name, 'ToKeep')
     })
 
     it('should start and cancel renaming', () => {

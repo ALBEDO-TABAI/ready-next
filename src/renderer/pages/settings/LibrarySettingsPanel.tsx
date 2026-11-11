@@ -3,6 +3,7 @@ import { useVault } from '../../stores/useVault'
 import { useWorkspace } from '../../stores/useWorkspace'
 import { confirmDialog } from '../../components/ui'
 import { formatIndexedAt, useLibraryIndex } from '../../modules/search/useLibraryIndex'
+import { mountFolder } from '../../modules/document/mountFolder'
 import { SettingsCard, SettingsRow, settingsButtonClass } from './settings-shared'
 
 // 设置 › 资料库 (W2 §3.2): where the library lives, the folders mounted beside it, and the full-text index.
@@ -10,7 +11,6 @@ import { SettingsCard, SettingsRow, settingsButtonClass } from './settings-share
 export function LibrarySettingsPanel() {
   const { view, load, chooseFolder } = useVault()
   const pinnedFolders = useWorkspace(state => state.pinnedFolders)
-  const addPinnedFolder = useWorkspace(state => state.addPinnedFolder)
   const removePinnedFolder = useWorkspace(state => state.removePinnedFolder)
   const index = useLibraryIndex()
   const [folderError, setFolderError] = useState<string | null>(null)
@@ -20,12 +20,9 @@ export function LibrarySettingsPanel() {
   const vaultRoot = view.data?.status === 'ready' ? view.data.root : null
   const mounted = pinnedFolders.filter(folder => folder !== vaultRoot)
 
-  const mountFolder = async () => {
+  const mount = async () => {
     setFolderError(null)
-    const result = await window.electronAPI?.document?.openFolder?.({ validateAsWorkspace: true })
-    if (!result) { setFolderError('当前环境未提供文件夹选择能力。'); return }
-    if (!result.success || !result.path) { if (result.error && result.error !== 'cancelled') setFolderError(result.error); return }
-    addPinnedFolder(result.path)
+    setFolderError(await mountFolder())
   }
 
   const buildIndex = async () => {
@@ -50,7 +47,7 @@ export function LibrarySettingsPanel() {
       <SettingsCard
         title="挂载的文件夹"
         description="资料库之外的文件夹，在文档侧栏的“文件”视角里一起浏览，也一起建立索引。"
-        actions={<button type="button" className={settingsButtonClass('secondary', { size: 'sm' })} onClick={() => void mountFolder()}>挂载文件夹…</button>}
+        actions={<button type="button" className={settingsButtonClass('secondary', { size: 'sm' })} onClick={() => void mount()}>挂载文件夹…</button>}
       >
         {mounted.length === 0 && <SettingsRow label="没有挂载的文件夹" />}
         {mounted.map(folder => (

@@ -35,7 +35,6 @@ test('files panel dropdown menus stay within the sidebar and do not hide browser
   assert.match(filesPanel, /document\.body/)
   assert.match(filesPanel, /position:\s*'fixed'/)
   assert.match(filesPanel, /const filterMenuStyle = buildFloatingMenuSurfaceStyle\(168/)
-  assert.match(filesPanel, /const moreMenuStyle = buildFloatingMenuSurfaceStyle\(188/)
 })
 
 test('file tree context menus use a native popup above BrowserView without hiding browser content', () => {

@@ -1304,6 +1304,8 @@ async function cleanupBeforeAppQuit(startedAt: number): Promise<void> {
 function showGracefulExitFailure(error: unknown, action: GracefulExitAction): void {
   const detail = error instanceof Error ? error.message : String(error)
   console.error(`[before-quit] state flush failed; ${action} cancelled`, error)
+  // A hidden (verification) launch has nobody to answer: it never shows the window or a dialog; the log keeps the failure.
+  if (READY_START_HIDDEN) return
   const options = {
     type: 'error' as const,
     title: '仍有内容没有保存',

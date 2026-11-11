@@ -106,8 +106,8 @@
       "fontFace": 0
     },
     "components/document": {
-      "color": 73,
-      "backdropFilter": 4,
+      "color": 69,
+      "backdropFilter": 2,
       "fontFace": 0
     },
     "components/document/book": {
@@ -126,7 +126,7 @@
       "fontFace": 0
     },
     "components/layout": {
-      "color": 25,
+      "color": 24,
       "backdropFilter": 2,
       "fontFace": 0
     },
@@ -276,8 +276,8 @@
       "fontFace": 0
     },
     "modules/document/block-editor": {
-      "color": 12,
-      "backdropFilter": 1,
+      "color": 9,
+      "backdropFilter": 0,
       "fontFace": 0
     },
     "modules/document/book": {
@@ -306,8 +306,8 @@
       "fontFace": 0
     },
     "modules/document/ink": {
-      "color": 228,
-      "backdropFilter": 17,
+      "color": 208,
+      "backdropFilter": 15,
       "fontFace": 1
     },
     "modules/document/page-ui": {
@@ -401,7 +401,7 @@
       "fontFace": 0
     },
     "styles": {
-      "color": 580,
+      "color": 578,
       "backdropFilter": 53,
       "fontFace": 0
     },
@@ -438,10 +438,6 @@
     {
       "glob": "src/renderer/modules/calendar/workbench/geometry-tokens.ts",
       "reason": "日历生成的明暗颜色数据，与 tokens.css 同源；也混有界面颜色和几何数据。"
-    },
-    {
-      "glob": "src/renderer/components/document/EditorFloatingToolbar.tsx",
-      "reason": "TEXT_COLORS / BG_COLORS 是用户正文和高亮色板；按文件白名单也会豁免该文件的界面颜色。"
     },
     {
       "glob": "src/renderer/modules/library/reader/marks.ts",

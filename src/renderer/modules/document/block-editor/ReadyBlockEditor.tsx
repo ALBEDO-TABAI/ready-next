@@ -16,8 +16,10 @@ import { RichBlock } from './RichBlock'
 import { BlockControls, BlockShell } from './BlockControls'
 import { EditorTools } from './EditorTools'
 import { isNonContentBlock } from './catalog'
+import { duplicatePageHeading } from '../page-ui/page-title'
 import { textAreaContent } from './text-edit'
 import type { EditorLinkBase } from './references'
+import { useInLibrary } from '../page-ui/library-membership'
 
 function SourceBlock({ block, buffer, children, report }: { block: DocumentBlock; buffer: EditorBuffer; children: ReactNode; report(error: unknown): void }) {
   const [draft, setDraft] = useState<{ block: DocumentBlock; version: number; text: string } | null>(null)
@@ -56,24 +58,27 @@ function SourceBlock({ block, buffer, children, report }: { block: DocumentBlock
   </div>
 }
 
-export function ReadyBlockEditor({ tabId, content: displayedContent, renderSource }: { tabId: string; content?: string; renderSource(block: DocumentBlock): ReactNode }) {
+export function ReadyBlockEditor({ tabId, content: displayedContent, pageTitle, renderSource }: { tabId: string; content?: string; pageTitle?: string; renderSource(block: DocumentBlock): ReactNode }) {
   // A retained hidden DocumentMode supplies its frozen snapshot. Do not bypass it.
   const content = useDocTabs(state => displayedContent ?? state.tabs.find(tab => tab.id === tabId)?.content ?? '')
   const path = useDocTabs(state => state.tabs.find(tab => tab.id === tabId)?.path ?? null)
-  const linkBase = useMemo(() => ({ filePath: path, parentPath: path }), [path])
+  // Sub-pages are a library feature: a file in a mounted folder has no parent for them (W3 M4).
+  const inLibrary = useInLibrary(path)
+  const linkBase = useMemo(() => ({ filePath: path, parentPath: inLibrary ? path : null }), [inLibrary, path])
   const buffer = useMemo(() => getTabBuffer(tabId), [tabId])
-  return <BufferedBlockEditor buffer={buffer} linkBase={linkBase} content={content} renderSource={renderSource} />
+  return <BufferedBlockEditor pageTitle={pageTitle} buffer={buffer} linkBase={linkBase} content={content} renderSource={renderSource} />
 }
 
 /** Both document tabs and canvas cards render this exact editor. */
-export function BufferedBlockEditor({ buffer, linkBase, content: displayedContent, renderSource }: {
-  buffer: EditorBuffer; linkBase?: EditorLinkBase; content?: string; renderSource(block: DocumentBlock): ReactNode
+export function BufferedBlockEditor({ buffer, linkBase, content: displayedContent, pageTitle, renderSource }: {
+  pageTitle?: string; buffer: EditorBuffer; linkBase?: EditorLinkBase; content?: string; renderSource(block: DocumentBlock): ReactNode
 }) {
   const content = useSyncExternalStore(buffer.subscribe, () => displayedContent ?? buffer.snapshot.content)
   const writeError = useSyncExternalStore(buffer.subscribe, () => buffer.error)
   const instanceId = useId()
   const editorId = buffer.owner.kind === 'document' ? buffer.owner.tabId : instanceId
   const parsed = useMemo(() => parseDocumentBlocks(content), [content])
+  const hiddenHeading = useMemo(() => duplicatePageHeading(parsed, pageTitle), [parsed, pageTitle])
   const identities = useRef(new BlockIdentity())
   const keys = useMemo(() => identities.current.resolve(parsed), [parsed])
   const [error, setError] = useState('')
@@ -113,7 +118,7 @@ export function BufferedBlockEditor({ buffer, linkBase, content: displayedConten
     const unit = parent && ['listItem', 'taskItem'].includes(parent.type) ? parent : live
     const siblings = current.blocks.filter(item => item.parentId === unit.parentId)
     const previous = siblings[siblings.indexOf(unit) - 1]
-    if (!previous || previous.capability !== 'rich') return
+    if (!previous || previous.start === hiddenHeading?.start || previous.capability !== 'rich') return
     const previousText = previous.children.filter((part): part is DocumentBlock => part.kind === 'block').at(-1) ?? previous
     const before = parseInlineBlock(previousText.raw), right = parseInlineBlock(live.raw)
     if (before.capability !== 'rich' || right.capability !== 'rich') return
@@ -136,6 +141,10 @@ export function BufferedBlockEditor({ buffer, linkBase, content: displayedConten
   }
   function renderBlock(block: DocumentBlock, fallbackKey: string, continuation = ''): ReactNode {
     if (isNonContentBlock(block)) return null
+    // Keep a textless anchor in source order: duplicate heading ordinals and old
+    // scroll positions must not shift when the title disappears visually.
+    if (block === hiddenHeading) return <span key={block.id} aria-hidden data-ready-hidden-title style={{ display: 'block', height: 0 }} data-ready-heading-title={pageTitle?.trim()}
+      data-block-start={block.start} data-ready-block-source-line={content.slice(0, block.start).split(/\r\n|\n|\r/).length} />
     const key = keys.get(block.id) ?? fallbackKey
     const children = block.children.filter((part): part is DocumentBlock => part.kind === 'block')
     if (extra?.parentId === block.id) { children.push(extra); children.sort((a, b) => a.start - b.start) }

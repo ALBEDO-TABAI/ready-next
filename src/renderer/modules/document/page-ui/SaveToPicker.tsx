@@ -10,7 +10,8 @@ export interface SaveToPickerProps {
   initialTitle: string
   extension?: '.md' | '.canvas'
   initialParentPath?: string
-  mode?: 'save' | 'move' | 'restore'
+  /** adopt: bring a mounted folder's file or folder into the library (W3 M4); only library locations. */
+  mode?: 'save' | 'move' | 'restore' | 'adopt'
   excludeObjectId?: string
   sourceCanvas?: { title: string; path: string }
   onConfirm(selection: SaveToSelection): Promise<PageResult<unknown>>
@@ -41,7 +42,7 @@ export function SaveToPicker({ trees, initialTitle, initialParentPath, extension
   const preview = parent ? joinPagePath(parent, filename) : ''
   const duplicate = flattenPages(trees).some(node => node.objectId !== excludeObjectId && node.path.toLocaleLowerCase() === preview.toLocaleLowerCase())
   const crumbs = nodes.filter(node => parent === parentDirectory(node) || parent.startsWith(`${parentDirectory(node)}/`) || parent.startsWith(`${parentDirectory(node)}\\`))
-  const label = mode === 'move' ? '移动到…' : mode === 'restore' ? '恢复到…' : '保存到…'
+  const label = mode === 'move' ? '移动到…' : mode === 'restore' ? '恢复到…' : mode === 'adopt' ? '收进资料库…' : '保存到…'
 
   const confirm = async () => {
     if (submitting.current || !parent) return
@@ -85,6 +86,6 @@ export function SaveToPicker({ trees, initialTitle, initialParentPath, extension
     {error && <p role="alert">{error}</p>}
     {candidates.length > 0 && <div>重名候选：{candidates.map(name => <button key={name} disabled={mode !== 'save'} onClick={() => { setTitle(name); setCandidates([]); setError(null) }}>{name}</button>)}{mode !== 'save' && <p>移动或恢复不改名，请另选位置。</p>}</div>}
     {sourceCanvas && <label className="block">来源画板：{sourceCanvas.title} <input type="checkbox" checked={keepCard} disabled={busy} onChange={event => setKeepCard(event.target.checked)} />保留文档卡</label>}
-    <div className="flex gap-3"><button disabled={busy} onClick={() => void chooseOther()}>其他位置…</button><button disabled={busy} onClick={onCancel}>取消</button><button disabled={busy || !parent} onClick={() => void confirm()}>{busy ? '正在处理…' : '确认'}</button></div>
+    <div className="flex gap-3">{mode !== 'adopt' && <button disabled={busy} onClick={() => void chooseOther()}>其他位置…</button>}<button disabled={busy} onClick={onCancel}>取消</button><button disabled={busy || !parent} onClick={() => void confirm()}>{busy ? '正在处理…' : '确认'}</button></div>
   </section>
 }

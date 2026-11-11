@@ -20,7 +20,7 @@ async function main() {
   await fs.writeFile(linkedFile, '# 链接目标\n\n## 章节一\n\n引用正文')
   const env = { ...process.env, READY_USER_DATA_DIR: profile }
   delete env.ELECTRON_RUN_AS_NODE
-  delete env.READY_START_HIDDEN
+  // Verification windows stay hidden when the caller asks (READY_START_HIDDEN=1); nothing here needs a shown window.
   const launch = async () => {
     const launched = await _electron.launch({ executablePath: require('electron'), args: [process.cwd()], env, timeout: 45000 })
     let window
@@ -51,9 +51,9 @@ async function main() {
       })))
       await page.waitForTimeout(150)
     }
-    // The outer sidebar is the file manager.
-    const row = page.getByText(path.basename(file), { exact: true }).first()
-    if (!await row.isVisible()) await page.getByText(path.basename(vault), { exact: true }).first().click()
+    // The navigator opens on its 页面 view, which lists the library's pages by title (W3 §3): the fixture's
+    // frontmatter title, 保留标题.
+    const row = page.locator('[data-shell-navigator="document"] section[aria-label="页面"] .ink-sb-label-btn', { hasText: '保留标题' }).first()
     await row.click()
     const panel = page.locator('[data-workbench-mode-panel="document"][data-mode-visual-state="current"]')
     await panel.waitFor({ state: 'visible' })
@@ -158,11 +158,13 @@ async function main() {
       const selection = window.getSelection(), range = document.createRange()
       range.selectNodeContents(element); selection.removeAllRanges(); selection.addRange(range)
     })
-    await page.keyboard.insertText('/')
-    await page.getByRole('combobox', { name: '搜索操作' }).fill('Widget'); await page.keyboard.press('Enter')
+    // The slash query is typed in the page itself (W3 §4.3): no search field.
+    await page.keyboard.insertText('/widget')
+    await page.locator('.ready-slash-menu [data-slash-item="widget"][aria-selected="true"]').waitFor(); await page.keyboard.press('Enter')
     await page.getByRole('dialog', { name: '编辑 widget', exact: true }).waitFor()
     await page.keyboard.press('Escape')
-    await editor.locator('[contenteditable="true"]').filter({ hasText: /^\/$/ }).focus()
+    // The typed query stays in the page until a block is chosen; one undo removes it.
+    await editor.locator('[contenteditable="true"]').filter({ hasText: /^\/widget$/ }).focus()
     await page.keyboard.press(`${mod}+z`); await readback(expected)
     console.log('PASS slash → existing Widget drawer → cancel without inserting a placeholder')
 

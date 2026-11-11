@@ -43,48 +43,10 @@ import {
   registerDocumentSaveHandler,
 } from '../../modules/document/documentSaveRegistry'
 import { saveDocumentTabSnapshot } from '../../modules/document/documentSaveRuntime'
-import '../../styles/tiptap.css'
+import '../../styles/document-widget-editor.css'
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
 
-const DEFAULT_CONTENT = `# 欢迎使用 Ready 文档编辑器
-
-这是一个支持 Markdown 的文档编辑器，支持**实时预览**。
-
-## 功能特点
-
-- **编辑模式**：直接编写 Markdown 原文
-- **预览模式**：实时渲染 Markdown 为富文本
-- **分栏模式**：左侧编辑，右侧预览
-- 支持文件读取和保存（Electron 环境）
-
-## Markdown 语法示例
-
-### 文本格式
-**粗体** / *斜体* / ~~删除线~~ / \`行内代码\`
-
-### 列表
-1. 有序列表第一项
-2. 有序列表第二项
-
-- 无序列表项
-- 另一个无序列表项
-
-### 代码块
-\`\`\`javascript
-function hello() {
-  console.log("Hello, Ready!");
-}
-\`\`\`
-
-### 引用
-> 这是一段引用文字。
-> Ready 让自媒体创作更高效。
-
----
-
-*按 Cmd+S 保存文档*
-`
 
 interface ReadResult {
   success?: boolean
@@ -109,6 +71,7 @@ interface MarkdownEditorProps {
   onVisibleLineChange?: (line: number | null) => void
   onActivate?: () => void
   /** Page view: shown at the top of the preview scroll area (icon, cover, title), so it scrolls with the page. */
+  previewPageTitle?: string
   previewHeader?: ReactNode
   /** Page view classes on the preview scroll area; its layout then comes from the page stylesheet. */
   previewClassName?: string
@@ -245,6 +208,7 @@ export default function MarkdownEditor({
   previewFocusWidgetTitle,
   onVisibleLineChange,
   onActivate,
+  previewPageTitle,
   previewHeader,
   previewClassName,
 }: MarkdownEditorProps) {
@@ -312,10 +276,7 @@ export default function MarkdownEditor({
     }
     const load = async () => {
       if (!tab.path) {
-        if (!tab.content && !tab.isDirty) {
-          // The welcome text is initial content, not a user edit, so it must not start a draft.
-          hydrateTabContentFromDisk(tab.id, DEFAULT_CONTENT)
-        }
+        // A new, untitled page starts empty (W3 §4.2: no welcome document).
         setLoadError(null)
         setContentReady(true)
         setIsLoading(false)
@@ -1105,6 +1066,7 @@ export default function MarkdownEditor({
                   renderLoadState()
                 ) : (
                   <NotePreview
+                    pageTitle={previewPageTitle}
                     content={tab.content}
                     notePath={tab.path}
                     focusWidgetTitle={previewFocusWidgetTitle}
@@ -1149,7 +1111,6 @@ export default function MarkdownEditor({
 
       {/* ── Editor Context Menu (fixed position, portal-like) ── */}
       <EditorContextMenu
-        editor={null}
         visible={contextMenu.visible}
         position={{ x: contextMenu.x, y: contextMenu.y }}
         onClose={closeContextMenu}

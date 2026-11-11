@@ -13,7 +13,6 @@ import type {
   DocumentWidgetSkeletonSpecSummary,
 } from '../../../shared/document-widget-parse'
 import { collectDocumentWidgets } from '../../../shared/document-widget-parse'
-import { resolveDocumentWidgetRenderCode } from '../../../shared/document-widget-render-code'
 import { recordDocumentPerformanceCounter } from '../../../shared/document-performance-diagnostics'
 import { buildWidgetFenceSignatureSnapshot } from '../../modules/document/widgetFenceSignature'
 
@@ -76,22 +75,6 @@ export function widgetNeedsManualPreview(widgetCode: string): boolean {
   const emojiCount = normalized.match(/\p{Extended_Pictographic}/gu)?.length || 0
   if (emojiCount >= 4) return true
   return false
-}
-
-export function getDocumentWidgetRenderBudget(content: string): {
-  widgetCount: number
-  totalWidgetChars: number
-  forceManualPreviewAll: boolean
-} {
-  const widgets = parseShowWidgetFences(content)
-    .filter((segment) => segment.type === 'widget')
-    .map((segment) => resolveDocumentWidgetRenderCode({
-      widgetCode: segment.data.widgetCode,
-      skeletonSpec: segment.data.skeletonSpec,
-      componentSpec: segment.data.componentSpec,
-    }).widgetCode)
-
-  return getDocumentWidgetRenderBudgetFromCodes(widgets)
 }
 
 export function getDocumentWidgetRenderBudgetFromCodes(widgetCodes: readonly string[]): {

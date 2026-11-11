@@ -13,6 +13,7 @@ import { runMigrations } from '../main/modules/migrations'
 import { ObjectRegistry } from '../main/modules/object-service/registry'
 import { SearchEngine } from '../main/modules/search-engine/indexer'
 import { DocumentPageService } from '../main/modules/document-pages/service'
+import { readDocumentSource } from '../shared/document-operations'
 import { configureDocumentWriteService, documentVersion, saveUserDocument } from '../main/modules/document-engine/document-write-service'
 import { ObjectLinkRepository } from '../main/modules/search-engine/object-links'
 import { ObjectEventWindow } from '../main/modules/object-service/event-window'
@@ -94,6 +95,10 @@ test('a new untitled page can reuse the name of an earlier page that was renamed
     const second = await f.service.operate({ type: 'create', root: f.root, operationId: 'untitled-2', parentPath: f.root, title: '未命名', content: '' })
     assert.equal(second.path, join(f.root, '未命名.md'))
     assert.notEqual(second.objectId, first.objectId)
+    assert.equal(readDocumentSource(readFileSync(join(f.root, '父页.md'), 'utf8')).body, '')
+    assert.equal(readDocumentSource(readFileSync(second.path!, 'utf8')).body, '')
+    const child = await f.service.operate({ type: 'create', root: f.root, operationId: 'empty-child', parentObjectId: first.objectId, title: '子页' })
+    assert.equal(readDocumentSource(readFileSync(child.path!, 'utf8')).body, '')
     assert.ok(existsSync(join(f.root, '父页.md')) && existsSync(join(f.root, '未命名.md')))
   } finally { f.close() }
 })

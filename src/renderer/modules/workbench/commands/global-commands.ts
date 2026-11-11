@@ -10,7 +10,7 @@ export function registerGlobalCommands(): () => void {
     ['toggle-assistant', '收起或展开助手', 'toggle-assistant'],
     ['open-today', '今日'], ['open-skills', '技能中心'], ['open-graph', '关系图谱'],
     ['open-find-replace', '在资料库中查找与替换'],
-    ['new-page', '新建页面'],
+    ['new-page', '新建页面'], ['new-database', '新建数据库'],
     ['open-fastcard', '打开 FastCard'], ['open-settings', '打开设置', 'open-settings'],
   ]
   const commands: ReadyCommand[] = actions.map(([action, title, shortcut]) => ({

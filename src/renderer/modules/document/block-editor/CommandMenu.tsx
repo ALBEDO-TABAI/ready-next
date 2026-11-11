@@ -20,7 +20,7 @@ export function CommandMenu({ label, anchor, items, close, query: controlled, on
   const index = Math.min(active, Math.max(0, filtered.length - 1))
   useEffect(() => { input.current?.focus() }, [])
   useEffect(() => { list.current?.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: 'nearest' }) }, [index, filtered.length])
-  return createPortal(<div ref={panel} className="ready-block-popover" data-block-popup data-ready-native-overlay="" role="dialog" aria-label={label}
+  return createPortal(<div ref={panel} className="rn-ui rn-float ready-block-popover" data-block-popup data-ready-native-overlay="" role="dialog" aria-label={label}
     style={{ left: Math.max(8, Math.min(anchor.left, window.innerWidth - 340)), top: Math.max(8, Math.min(anchor.bottom + 5, window.innerHeight - 340)) }}
     onKeyDown={event => {
       event.stopPropagation()
@@ -29,7 +29,7 @@ export function CommandMenu({ label, anchor, items, close, query: controlled, on
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); setActive((index + (event.key === 'ArrowDown' ? 1 : -1) + filtered.length) % Math.max(1, filtered.length)) }
       if (event.key === 'Enter') { event.preventDefault(); if (!pending) void filtered[index]?.run() }
     }}>
-    <input ref={input} aria-label="搜索操作" role="combobox" aria-expanded aria-controls={id} aria-activedescendant={filtered[index] ? `${id}-${index}` : undefined}
+    <input ref={input} className="rn-field" aria-label="搜索操作" placeholder="搜索" role="combobox" aria-expanded aria-controls={id} aria-activedescendant={filtered[index] ? `${id}-${index}` : undefined}
       value={query} onChange={event => { setActive(0); if (onQuery) onQuery(event.target.value); else setLocal(event.target.value) }} />
     <div ref={list} id={id} role="listbox" aria-label={label} aria-busy={pending}>
       {filtered.map((item, i) => <button type="button" id={`${id}-${i}`} key={item.id} role="option" aria-selected={i === index} disabled={pending}
@@ -63,14 +63,22 @@ export function BlockEditorStyles() {
     .ready-block-shell:hover .ready-block-source-edit, .ready-block-source-edit:focus-visible { opacity:1; }
     .ready-block-shell[data-drop=before] { box-shadow:0 -2px var(--accent-color, #e8401f); }
     .ready-block-shell[data-drop=after] { box-shadow:0 2px var(--accent-color, #e8401f); }
-    .ready-block-popover { position:fixed; z-index:1000; width:320px; max-width:calc(100vw - 16px); padding:8px; border:1px solid var(--border-color); border-radius:14px; background:var(--bg-secondary, #fafafa); color:var(--text-primary); box-shadow:0 12px 40px #0002; backdrop-filter:blur(24px); font:13px/1.5 var(--font-sans, sans-serif); }
+    .ready-block-popover { position:fixed; z-index:1000; width:320px; max-width:calc(100vw - 16px); padding:8px; color:var(--rn-ink); }
     .ready-block-popover [role=listbox] { max-height:270px; overflow:auto; }
-    .ready-block-popover input { width:100%; padding:6px 8px; border:1px solid var(--border-color); border-radius:6px; color:inherit; background:transparent; }
     .ready-block-popover button { border:0; color:inherit; background:transparent; border-radius:6px; padding:6px 10px; text-align:left; }
     .ready-block-popover [role=option] { display:flex; flex-direction:column; width:100%; }
-    .ready-block-popover button:hover, .ready-block-popover [aria-selected=true] { background:var(--bg-hover, #8882); }
-    .ready-block-popover small { opacity:.65; overflow-wrap:anywhere; }
-    .ready-block-toolbar { display:flex; flex-wrap:wrap; width:360px; gap:2px; }
-    .ready-block-toolbar select { max-width:110px; background:transparent; color:inherit; }
+    .ready-block-popover button:hover, .ready-block-popover [aria-selected=true] { background:var(--rn-fill-2); }
+    .ready-block-popover small { color:var(--rn-ink-3); overflow-wrap:anywhere; }
+    /* The slash menu (W3 §4.3): W1's float and menu language, --rn-* tokens only. */
+    .ready-slash-menu { position: fixed; z-index: 1000; width: 300px; max-width: calc(100vw - 16px); padding: 6px; }
+    .ready-slash-menu__list { max-height: 360px; overflow-y: auto; scrollbar-width: thin; }
+    .ready-slash-menu__item { display: flex; align-items: center; gap: 10px; padding: 5px 8px; border-radius: 8px; cursor: pointer; }
+    .ready-slash-menu__item[aria-selected='true'] { background: var(--rn-fill-2); }
+    .ready-slash-menu__icon { display: flex; flex: none; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 8px; background: var(--rn-sheet); box-shadow: inset 0 0 0 1px var(--rn-hair); color: var(--rn-ink-2); }
+    .ready-slash-menu__icon svg { width: 17px; height: 17px; stroke-width: var(--rn-icon-stroke); }
+    .ready-slash-menu__text { display: flex; min-width: 0; flex-direction: column; gap: 1px; }
+    .ready-slash-menu__label { overflow: hidden; color: var(--rn-ink); font-size: var(--rn-fs-md); line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
+    .ready-slash-menu__description { overflow: hidden; color: var(--rn-ink-3); font-size: var(--rn-fs-xs); line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
+    .ready-slash-menu__empty { margin: 0; padding: 10px; color: var(--rn-ink-3); font-size: var(--rn-fs-sm); }
   }`}</style>
 }

@@ -373,6 +373,7 @@ export function ContextMenuBridge({
   workspaceRoot,
   onOpenColorMenu,
   onOpenIconPrompt,
+  extraItems,
 }: {
   contextMenu: { x: number; y: number; item: FileItem | null }
   pinnedFolders: string[]
@@ -386,6 +387,8 @@ export function ContextMenuBridge({
   workspaceRoot: string | null
   onOpenColorMenu: (item: FileItem, x: number, y: number) => void
   onOpenIconPrompt: (item: FileItem) => void
+  /** Items the host adds for an entry, after 在 Finder 中显示 (e.g. 收进资料库 for mounted folders). */
+  extraItems?: (item: FileItem) => ContextMenuItem[]
 }) {
   const {
     fileAppearances,
@@ -590,6 +593,7 @@ export function ContextMenuBridge({
         icon: <FolderOpen style={{ width: 16, height: 16 }} />,
         onClick: () => void showInFolder(item.path)
       },
+      ...(extraItems?.(item) ?? []),
       ...(pinnedFolderSet.has(item.path) || item.path === workspaceRoot ? [
         {
           id: 'removeFromList',
@@ -607,7 +611,7 @@ export function ContextMenuBridge({
         onClick: () => onRequestDelete(deleteTargets)
       }
     ]
-  }, [clearFileAppearance, contextMenu.x, contextMenu.y, fileAppearances, onOpenFile, onCreateBoard, onOpenColorMenu, onOpenIconPrompt, setFileIcon, startRenaming, copyPathToClipboard, getMoveTargets, moveTargetDialogAvailable, isPinnedRootMoveTarget, handleMoveTo, startCreating, showInFolder, refreshFiles, pinnedFolderSet, workspaceRoot, selectedDeleteTargets, onRequestDelete, onRequestUnpin])
+  }, [clearFileAppearance, contextMenu.x, contextMenu.y, fileAppearances, onOpenFile, onCreateBoard, onOpenColorMenu, onOpenIconPrompt, setFileIcon, startRenaming, copyPathToClipboard, getMoveTargets, moveTargetDialogAvailable, isPinnedRootMoveTarget, handleMoveTo, startCreating, showInFolder, refreshFiles, pinnedFolderSet, workspaceRoot, selectedDeleteTargets, onRequestDelete, onRequestUnpin, extraItems])
 
   const contextItems = useMemo(() => getContextItems(contextMenu.item), [contextMenu.item, getContextItems])
 
