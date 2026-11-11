@@ -25,6 +25,8 @@ export async function exportDocument(kind: DocumentExportKind, target: DocTab): 
     if (result.canceled) return { status: 'canceled' }
     return { status: 'error', error: result.error || '导出失败' }
   } catch (error) {
-    return { status: 'error', error: error instanceof Error ? error.message : String(error) }
+    const message = error instanceof Error ? error.message : String(error)
+    console.warn('[document-export] export failed:', message)
+    return { status: 'error', error: message }
   }
 }

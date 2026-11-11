@@ -87,7 +87,11 @@ export function InkTopbar({ tab, roots, home, outline, pageMenu, status, sourceM
         await saveBeforePageTrash(node)
         const result = await window.electronAPI.documentPages.operate({ type: 'trash', objectId: node.objectId, root: rootPath, operationId: crypto.randomUUID() })
         if (!result.ok) throw new Error(result.message)
-      } catch (failure) { showToast(failure instanceof Error ? failure.message : String(failure)) }
+      } catch (failure) {
+        const message = failure instanceof Error ? failure.message : String(failure)
+        console.warn('[InkTopbar] move page to trash failed:', message)
+        showToast(message)
+      }
     }
     : undefined
   const fallback: Crumb[] = home ? [{ title: '主页' }]

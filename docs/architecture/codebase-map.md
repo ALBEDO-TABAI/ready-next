@@ -133,6 +133,7 @@ claude-bridge IPC
 - 工作台壳：`src/renderer/pages/WorkbenchMode.tsx`；外壳部件（图标栏、唯一侧栏与导航器槽位、窄窗口让位、外壳动作）在 `src/renderer/modules/workbench/shell/`，⌘K 命令注册表在 `src/renderer/modules/workbench/commands/`
 - Agent：`src/renderer/components/agent/ChatPanel.tsx`、`src/renderer/stores/useAgent.ts`
 - 文件管理与全局面板组件：`src/renderer/components/layout/`；各模式导航器：浏览器 `components/browser/BrowserTabList.tsx`、文档 `modules/document/navigator/`、资讯 `components/rss/RSSNavigation.tsx`、日历 `modules/calendar/workbench/components/Sidebar.tsx`
+- 资料库的页面与文件（W3）：资料库内外判断 `modules/document/page-ui/library-membership.ts`，挂载文件夹 `modules/document/mountFolder.ts`、收进资料库 `modules/document/navigator/adopt.tsx`；窗口目录监听的合并登记 `modules/document/directoryWatchRegistry.ts`；斜杠菜单目录与菜单 `modules/document/block-editor/slash-items.ts`、`SlashMenu.tsx`；数据库单元格与图标 `modules/document/database/cells.tsx`、`cell-colors.ts`
 - Browser：`src/renderer/components/browser/`、`src/renderer/stores/useBrowserTabs.ts`
 - Document：`src/renderer/components/document/`、`src/renderer/stores/useDocTabs.ts`
 - RSS：`src/renderer/components/rss/`、`src/renderer/stores/useRSSSession.ts`
