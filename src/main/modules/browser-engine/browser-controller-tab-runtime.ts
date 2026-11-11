@@ -63,6 +63,49 @@ export abstract class BrowserControllerTabRuntime extends BrowserControllerInter
     return created
   }
 
+  getTaskWorkTabIds(browserTaskId: string): string[] {
+    return [...this.taskWorkTabs].filter(([tabId, owner]) =>
+      owner.browserTaskId === browserTaskId
+      && this.tabs.get(tabId)?.owner === 'agent'
+      && this.getPhysicalTargetToken(tabId) === owner.physicalTargetToken,
+    ).map(([tabId]) => tabId)
+  }
+
+  async createAgentWorkTab(browserTaskId: string, url: string, openerTabId: string) {
+    const created = await this.createTab(url, { background: true, owner: 'agent', openerTabId })
+    if (!created.success || !created.tabId) return created
+    const physicalTargetToken = this.getPhysicalTargetToken(created.tabId)
+    if (!physicalTargetToken) {
+      this.closeTab(created.tabId)
+      return { success: false, error: 'browser_physical_target_unavailable' }
+    }
+    this.taskWorkTabs.set(created.tabId, { browserTaskId, openerTabId, physicalTargetToken })
+    this.agentWorkTabs.set(browserTaskId, created.tabId)
+    return created
+  }
+
+  selectTaskWorkTab(browserTaskId: string, tabId: string) {
+    if (!this.getTaskWorkTabIds(browserTaskId).includes(tabId)) {
+      return { success: false, error: 'browser_task_tab_not_owned' }
+    }
+    this.agentWorkTabs.set(browserTaskId, tabId)
+    return { success: true, tabId, presented: false }
+  }
+
+  closeTaskTabs(request: { browserTaskId: string }) {
+    const closedTabIds: string[] = []
+    if (!request || typeof request.browserTaskId !== 'string' || !request.browserTaskId.trim()) {
+      return { success: false, closedTabIds, error: 'browser_task_id_required' }
+    }
+    for (const tabId of this.getTaskWorkTabIds(request.browserTaskId)) {
+      const result = this.closeTab(tabId)
+      if (!result.success) return { ...result, closedTabIds }
+      this.notifyTabClosed(tabId)
+      closedTabIds.push(tabId)
+    }
+    return { success: true, closedTabIds }
+  }
+
   registerDormantTabs(request: RegisterDormantBrowserTabsRequest): RegisterDormantBrowserTabsResult {
     const result = this.tabLifecycleService.registerDormantTabs(request)
     this.performanceRuntime.reconcile()
@@ -182,6 +225,7 @@ export abstract class BrowserControllerTabRuntime extends BrowserControllerInter
     const result = this.tabShellService.closeTab(tabId)
     if (result.success) {
       if (partition) getBrowserTargetClaimService().closeTarget({ partition, tabId })
+      this.taskWorkTabs.delete(tabId)
       this.workflowPhysicalBindings.delete(tabId)
       this.pendingPhysicalTakeovers.delete(tabId)
       this.performanceRuntime.disposeTab(tabId)

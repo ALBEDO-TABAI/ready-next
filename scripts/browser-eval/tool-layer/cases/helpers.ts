@@ -16,7 +16,7 @@ export interface SnapshotTarget {
 }
 
 export function snapshotTargets(result: ToolCallResult): SnapshotTarget[] {
-  const pageMap = result.data.pageMap as { targets?: SnapshotTarget[] } | undefined
+  const pageMap = (result.snapshotData || result.data).pageMap as { targets?: SnapshotTarget[] } | undefined
   return Array.isArray(pageMap?.targets) ? pageMap.targets : []
 }
 
@@ -48,7 +48,7 @@ export function targetSummary(targets: SnapshotTarget[], size = 700): string {
 export async function allTargets(run: AgentRun): Promise<{ targets: SnapshotTarget[]; first: ToolCallResult }> {
   const first = await run.call('browser_snapshot', {})
   const targets = [...snapshotTargets(first)]
-  let cursor = (first.data.pageMap as { nextCursor?: string | null } | undefined)?.nextCursor || null
+  let cursor = ((first.snapshotData || first.data).pageMap as { nextCursor?: string | null } | undefined)?.nextCursor || null
   let guard = 0
   while (cursor && guard < 8) {
     const page = await run.call('browser_find', { cursor, limit: 200 })

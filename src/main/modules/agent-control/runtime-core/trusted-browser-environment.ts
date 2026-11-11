@@ -1,3 +1,4 @@
+import { httpOrigin } from '../../browser-engine/browser-origin-write-scope'
 import type { BrowserController } from '../../browser-engine/ipc-handler'
 import type { BrowserTabContextData } from '../../browser-engine/automation-types'
 import { browserSnapshotService } from '../../browser-engine/browser-snapshot-service'
@@ -33,6 +34,7 @@ export async function resolveTrustedBrowserEnvironment(
       physicalTargetToken: identity.physicalTargetToken,
       mainFrameId: '0',
       mainFrameDocumentToken: identity.frameDocumentToken,
+      origin: httpOrigin(identity.url),
       profileId: targetTab.profile || null,
     },
   }
@@ -63,6 +65,7 @@ export async function resolveTrustedBrowserReference(
         physicalTargetToken: after.physicalTargetToken,
         mainFrameId: '0',
         mainFrameDocumentToken: after.frameDocumentToken,
+        origin: httpOrigin(after.url),
         profileId: targetTab.profile || null,
       },
     },

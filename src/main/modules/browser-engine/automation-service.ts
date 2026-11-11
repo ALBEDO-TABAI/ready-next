@@ -385,7 +385,7 @@ export class BrowserAutomationService {
     const mode = options?.mode || 'viewport'
 
     if (mode === 'viewport') {
-      const image = await view.webContents.capturePage()
+      const image = await view.webContents.capturePage(undefined, { stayHidden: true })
       // 2026-07-23 K3 400 根因面：Retina 全尺寸 PNG 轻松到 3.5MB base64（按
       // 文本计 token 的 provider 一张就超 1M tokens）。模型视觉不需要 2x
       // 物理像素——缩到最长边 1280 + JPEG 80，尺寸降到 ~100-200KB 量级。
