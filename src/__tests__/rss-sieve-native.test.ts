@@ -53,7 +53,7 @@ test('V1/V2 queries enforce 48h, unread, threshold, top12/top5, remainder and im
     const before=f.rss.sieve.query({},now)
     assert.equal(before.items.length,12);assert.equal(before.remainingCount,3)
     assert.equal(f.rss.sieve.today(now).length,5)
-    assert.equal(before.items[0].sieve.reason,'符合：精选')
+    assert.equal(before.items[0].sieve.reason,'符合：基础标准')
     assert.ok(![...before.items,...before.remaining].some(i=>['old','read'].includes(i.id)))
     const score=before.items.find(i=>i.id==='new-0')!.sieve.score
     f.rss.sieve.recordBehavior({id:'feedback',itemId:'new-1',action:'less',reason:'source',at:now})

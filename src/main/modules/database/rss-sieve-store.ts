@@ -129,13 +129,14 @@ export class RSSSieveStore {
         const included = memberships.filter(c => c.included)
         const topics = included.filter(c => c.kind === 'topic').sort((a,b) => this.preference('topic',b.definitionId)-this.preference('topic',a.definitionId))
         const supported = included.filter(c => c.origin === 'manual' || Boolean(c.evidence))
+        // The curated definition is shown to the person as 基础标准 (W5 §4); topics keep their own names.
         const topic = topics.find(c => supported.includes(c)) ?? supported[0]
         const manual = memberships.some(c => c.origin === 'manual' && c.included === false && (topicId || c.kind === 'curated')) ? false
           : memberships.some(c => c.origin === 'manual' && c.included && (topicId || c.kind === 'curated')) ? true : null
         const relevance = this.relevance(article.id)
         const scoring: RSSScoreInput = { relevance,recentTopicInterest:topics.some(c => recentTopics.has(c.definitionId)),sourcePreference:sources.get(article.sourceId) ?? 0.5,
           topicPreference:topics.length ? topics.reduce((sum,c) => sum + this.preference('topic',c.definitionId),0) / topics.length : 0.5,
-          ageHours:(now - (article.publishedAt ?? article.collectedAt)) / 3600000,duplicate:false,manual,topicName:topic?.name ?? '', standardIncluded:supported.length > 0 }
+          ageHours:(now - (article.publishedAt ?? article.collectedAt)) / 3600000,duplicate:false,manual,topicName:topic ? (topic.kind === 'curated' ? '基础标准' : topic.name) : '', standardIncluded:supported.length > 0 }
         inputs.set(article.id, scoring)
         const sieve = scoreRSSArticle(scoring)
         articles.push({ ...article,relevance,sieve })

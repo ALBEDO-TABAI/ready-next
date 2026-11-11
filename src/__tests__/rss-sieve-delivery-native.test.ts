@@ -16,7 +16,7 @@ test('daily entries preserve edition intake, sort by final score and snapshot th
   assert.deepEqual(result.entries.map(e=>e.source.itemId),expected.map(i=>i.id))
   for(const entry of result.entries) {
     assert.deepEqual(entry.source.sieve,expected.find(i=>i.id===entry.source.itemId)!.sieve)
-    assert.equal(entry.source.sieve!.reason,'符合：精选')
+    assert.equal(entry.source.sieve!.reason,'符合：基础标准')
   }
   assert.equal(f.rss.digests.generate({kind:'daily',from:f.now-86400000,until:report.until,timezone:'UTC'},f.now).id,report.id)
 })
@@ -27,7 +27,7 @@ test('today exposes only its top five, each with a score and truthful reason',as
   await f.judge()
   const items=f.rss.sieve.today(f.now)
   assert.equal(items.length,5)
-  assert.ok(items.every(item=>item.sieve.reason==='符合：精选'))
+  assert.ok(items.every(item=>item.sieve.reason==='符合：基础标准'))
   assert.ok(items.every((item,i)=>i===0 || item.sieve.score<=items[i-1].sieve.score))
   assert.equal(f.rss.learning.metrics(f.now).screened,5)
 })
