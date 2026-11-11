@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react'
-import { ArrowDownUp } from 'lucide-react'
+import { Archive, ArrowDownUp } from 'lucide-react'
+import { openFloat } from '../ui/float/float-store'
+import { MenuList } from '../ui/float/Menu'
 import type { RSSDefinition } from '../../../shared/rss-organization'
 import type { RSSQueryResult } from '../../../shared/rss-workspace'
 import { useRSSSession } from '../../stores/useRSSSession'
@@ -21,7 +23,14 @@ export default function RSSWorkspaceHeading({ view, loading, definitions, status
   const query = useRSSSession((state) => state.query)
   const setQuery = useRSSSession((state) => state.setQuery)
   const collection = definitions.find((entry) => entry.id === (query.collectionId || (query.scope === 'library' ? 'history' : query.filter === 'all' ? 'all' : query.filter)))
-  const title = collection?.name || '资讯'
+  // 全部 / 未读 / 收藏 go by their kind's short name, as in the navigator (W5 §4).
+  const title = collection?.kind === 'all' ? '全部' : collection?.kind === 'unread' ? '未读' : collection?.kind === 'starred' ? '收藏' : collection?.name || '资讯'
+  const sortLabel = query.sort === 'relevance' ? '按相关度' : query.sort === 'oldest' ? '最早在前' : '最新在前'
+  const chooseSort = (anchor: HTMLElement) => openFloat({
+    anchor: anchor.getBoundingClientRect(), placement: 'bottom-end', offset: 6, role: 'menu', label: '资讯排序',
+    render: close => <MenuList label="资讯排序" onDone={close} items={([['newest', '最新在前'], ['oldest', '最早在前'], ['relevance', '按相关度']] as const)
+      .map(([sort, label]) => ({ id: sort, label, checked: query.sort === sort, onSelect: () => setQuery({ sort }) }))} />,
+  })
   const description = collection && ['topic', 'curated'].includes(collection.kind) ? collection.description.trim() : ''
   const filters = definitions.filter((entry) => collection?.filterIds.includes(entry.id) || entry.id === query.categoryId)
   const groups = view?.cardTotal !== undefined && view.cardTotal !== view.total ? view.cardTotal : null
@@ -48,9 +57,14 @@ export default function RSSWorkspaceHeading({ view, loading, definitions, status
         : null}
       <div className="rss-heading-aside">
         {filtersAside}
-        <button type="button" className="rss-quiet-select" aria-label={`资讯排序：${query.sort === 'oldest' ? '最早在前' : '最新在前'}`}
-          title="切换排序" onClick={() => setQuery({ sort: query.sort === 'oldest' ? 'newest' : 'oldest' })}>
-          <ArrowDownUp size={13} strokeWidth={1.9} /><span>{query.sort === 'oldest' ? '最早在前' : '最新在前'}</span>
+        {/* 历史底稿 left the navigator (W5 §4): in 全部 it is this switch. */}
+        {collection?.kind === 'all' && <button type="button" className="rss-quiet-select" aria-pressed={query.scope === 'library'}
+          title="包含已移出收件箱、仍保留在历史底稿里的文章" onClick={() => setQuery({ scope: query.scope === 'library' ? 'inbox' : 'library' })}>
+          <Archive size={13} strokeWidth={1.9} /><span>包含已移出的</span>
+        </button>}
+        <button type="button" className="rss-quiet-select" aria-label={`资讯排序：${sortLabel}`} aria-haspopup="menu"
+          title="排序" onClick={event => chooseSort(event.currentTarget)}>
+          <ArrowDownUp size={13} strokeWidth={1.9} /><span>{sortLabel}</span>
         </button>
       </div>
     </div>

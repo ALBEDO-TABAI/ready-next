@@ -10,7 +10,7 @@ const REG = {
   sliders: L.SlidersHorizontal, comment: L.MessageSquareText, panelRight: L.PanelRight, toc: L.TableOfContents,
   fullWidth: L.MoveHorizontal, smallText: L.AArrowDown, book: L.BookOpen, download: L.Download, folder: L.Folder,
   folderOpen: L.FolderOpen, template: L.LayoutTemplate, import: L.Import, sidebarClose: L.PanelLeftClose,
-  sidebarOpen: L.PanelLeftOpen, code: L.Code, eye: L.Eye, restore: L.RotateCcw, archiveRestore: L.ArchiveRestore,
+  sidebarOpen: L.PanelLeftOpen, code: L.Code, eye: L.Eye, eyeOff: L.EyeOff, restore: L.RotateCcw, archiveRestore: L.ArchiveRestore,
   newPage: L.FilePlus2, ai: L.Sparkles, externalLink: L.ExternalLink, graph: L.Network, upload: L.Upload,
   columns: L.Columns2, undo: L.Undo2, bookmark: L.BookMarked, shapes: L.Shapes, outline: L.ListTree, inbox: L.Inbox,
 }

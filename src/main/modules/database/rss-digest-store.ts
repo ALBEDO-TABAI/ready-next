@@ -1,3 +1,4 @@
+import type { RSSSieveStore } from './rss-sieve-store'
 import { randomUUID } from 'node:crypto'
 import { assertDatabaseConnectionReady, type DatabaseConnection } from './connection'
 import type { RSSContentStore } from './rss-content-store'
@@ -12,7 +13,7 @@ type ReportRow = { id: string; edition_key: string; version: number; kind: 'dail
 const localMinute = (value: number, timeZone: string) => new Intl.DateTimeFormat('zh-CN', { timeZone, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(value))
 
 export class RSSDigestStore {
-  constructor(private readonly getConnection: () => DatabaseConnection | null, private readonly content: RSSContentStore, private readonly organization: RSSOrganizationStore) {}
+  constructor(private readonly getConnection: () => DatabaseConnection | null, private readonly content: RSSContentStore, private readonly organization: RSSOrganizationStore, private readonly sieve: RSSSieveStore) {}
   private get db(): DatabaseConnection { const db = this.getConnection(); assertDatabaseConnectionReady(db, 'RSS digest database'); return db }
   transaction<T>(action: () => T): T {
     this.db.exec('SAVEPOINT rss_digest')
@@ -90,6 +91,7 @@ export class RSSDigestStore {
       const items = [...first.items]
       let cursor = first.nextCursor
       while (cursor) { const page = this.content.query({ ...query, limit: 100, cursor, expectedRevision: first.revision }); items.push(...page.items); cursor = page.nextCursor }
+      const ranked = new Map(this.sieve.rank(items, now).map(item => [item.id,item.sieve]))
       const id = randomUUID(), references: Array<{ groupKey: string; originFactId: string | null; source: RSSDigestSource }> = []
       let suppressed = 0, matchingArticles = 0
       for (const item of items) {
@@ -106,12 +108,13 @@ export class RSSDigestStore {
         let quoteEnd = Math.min(text.length, 1200)
         if (quoteEnd < text.length && /[\uD800-\uDBFF]/.test(text[quoteEnd - 1]) && /[\uDC00-\uDFFF]/.test(text[quoteEnd])) quoteEnd--
         references.push({ groupKey: event ? `fact:${event.origin_fact_id}` : `article:${item.id}:${item.revision}`, originFactId: event?.origin_fact_id || null,
-          source: { itemId: item.id, articleRevision: item.revision, title: item.title, link: item.link, sourceId: item.sourceId, source: item.source,
+          source: { sieve: ranked.get(item.id)!, itemId: item.id, articleRevision: item.revision, title: item.title, link: item.link, sourceId: item.sourceId, source: item.source,
             quote: text.slice(0, quoteEnd), quoteKind: event ? 'event_evidence' : article.summary ? 'source_summary' : article.body.markdown ? 'saved_body' : 'title', quoteTruncated: text.length > quoteEnd,
             sourceRole: event?.source_role || 'unknown', bodyStatus: item.bodyStatus, factId: event?.fact_id || null, eventId: event?.event_id || null, evidenceId: event?.id || null,
             availableAt: available?.available_at ?? item.collectedAt, carriedOver: input.kind === 'daily' && available!.available_at < input.from,
             curation: selected.find((m) => m.kind === 'curated') || null, topics: selected.filter((m) => m.kind === 'topic') } })
       }
+      if(input.kind==='daily') references.sort((a,b)=>b.source.sieve!.score-a.source.sieve!.score)
       const pendingArticles = this.db.prepare(`SELECT COUNT(DISTINCT j.item_id) AS n FROM rss_processing_jobs j JOIN rss_items i ON i.id=j.item_id
         LEFT JOIN rss_article_content c ON c.item_id=i.id WHERE j.status IN ('queued','running') AND j.article_revision=(${RSS_EVENT_ARTICLE_REVISION_SQL})
         AND ${input.kind === 'daily' ? `EXISTS (SELECT 1 FROM rss_digest_intake intake WHERE intake.item_id=i.id AND intake.article_revision=(${RSS_EVENT_ARTICLE_REVISION_SQL}) AND intake.received_at<${input.until})` : 'i.id IN (SELECT value FROM json_each(?))'}`).get<{ n: number }>(...(input.kind === 'range' ? [JSON.stringify(items.map((i) => i.id))] : []))!.n
@@ -174,9 +177,9 @@ export class RSSDigestStore {
         return { view: 'sources', report, sources, total, nextOffset: next(total, sources.length) }
       }
       const entries = this.db.prepare(`WITH ranked AS (SELECT group_key,payload_json,position,COUNT(*) OVER(PARTITION BY group_key) AS referenceCount,
-        ROW_NUMBER() OVER(PARTITION BY group_key ORDER BY CASE WHEN json_extract(payload_json,'$.sourceRole')='direct' THEN 0 ELSE 1 END,
+        ROW_NUMBER() OVER(PARTITION BY group_key ORDER BY CASE WHEN (SELECT kind FROM rss_digests WHERE id=report_id)='daily' THEN position END,CASE WHEN json_extract(payload_json,'$.sourceRole')='direct' THEN 0 ELSE 1 END,
           CASE WHEN json_extract(payload_json,'$.bodyStatus')='ready' THEN 0 ELSE 1 END,position) AS n FROM rss_digest_entries WHERE report_id=?)
-        SELECT group_key,payload_json,referenceCount FROM ranked WHERE n=1 ORDER BY COALESCE((SELECT json_extract(value,'$.position')
+        SELECT group_key,payload_json,referenceCount FROM ranked WHERE n=1 ORDER BY CASE WHEN '${report.kind}'='daily' THEN position END,COALESCE((SELECT json_extract(value,'$.position')
           FROM json_each((SELECT definitions_json FROM rss_digests WHERE id=?)) WHERE json_extract(value,'$.id')=json_extract(ranked.payload_json,'$.topics[0].definitionId')),2147483647),position LIMIT ? OFFSET ?`).all<{ group_key: string; payload_json: string; referenceCount: number }>(report.id, report.id, params.limit, params.offset)
         .map((r) => { const source = JSON.parse(r.payload_json) as RSSDigestSource; return { section: source.topics[0]?.name || '未分类', groupKey: r.group_key, referenceCount: r.referenceCount, source } })
       return { view: 'entries', report, entries, total: report.total, nextOffset: next(report.total, entries.length) }

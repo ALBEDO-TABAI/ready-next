@@ -1,3 +1,6 @@
+import { detectPlatform } from '../rss-engine/scrapers'
+import { parseSubscriptionsOpml } from '../rss-engine/opml'
+import { RSSSieveLearningStore } from './rss-sieve-learning-store'
 import { RSSSieveStore } from './rss-sieve-store'
 import { RSSDigestStore } from './rss-digest-store'
 import { RSSCatalogStore } from './rss-catalog-store'
@@ -10,6 +13,7 @@ import { RSSTranslationStore } from './rss-translation-store'
 import type { RSSSource, RSSItem, RSSDraftStoreSourceSummary, RSSStats, RSSAnalysisAction, RSSAnalysisJobStatus, RSSAnalysisJob } from './records'
 
 export class RSSStore {
+  readonly learning: RSSSieveLearningStore
   readonly sieve: RSSSieveStore
   readonly content: RSSContentStore
   readonly organization: RSSOrganizationStore
@@ -24,9 +28,10 @@ export class RSSStore {
     this.catalog = new RSSCatalogStore(getConnection, this.organization)
     this.events = new RSSEventStore(getConnection)
     this.content = new RSSContentStore(getConnection, this.organization, (id, origin) => { if (origin === 'reader') this.processing.enqueueBodyChange(id); this.organization.recordDigestIntake(id) }, this.events)
-    this.digests = new RSSDigestStore(getConnection, this.content, this.organization)
     this.processing = new RSSProcessingStore(getConnection, this.content, this.organization, this.events)
     this.sieve = new RSSSieveStore(getConnection, this.content)
+    this.learning = new RSSSieveLearningStore(getConnection, this.sieve, this.processing)
+    this.digests = new RSSDigestStore(getConnection, this.content, this.organization, this.sieve)
     this.translations = new RSSTranslationStore(getConnection)
   }
 
@@ -49,6 +54,27 @@ export class RSSStore {
       'INSERT INTO rss_sources (id, name, url, group_name, icon, platform) VALUES (?, ?, ?, ?, ?, ?)'
     ).run(id, source.name, source.url, source.group || 'default', source.icon || null, source.platform || 'rss')
     return id
+  }
+
+  importOpml(xml: string): {added:number;existing:number;sourceIds:string[]} {
+    const sources=parseSubscriptionsOpml(xml)
+    if(!this.db) throw new Error('资讯数据库不可用')
+    this.db.exec('SAVEPOINT rss_import')
+    try {
+      const addresses=new Map(this.db.prepare('SELECT id,url FROM rss_sources').all<{id:string;url:string}>().map(row=>{
+        let url=row.url
+        try { url=new URL(url).href } catch { /* Existing non-URL platform sources retain their identity. */ }
+        return [url,row.id]
+      }))
+      const sourceIds:string[]=[];let added=0,existing=0
+      for(const source of sources) {
+        let id=addresses.get(source.url)
+        if(id) existing++
+        else { id=this.addRSSSource({...source,platform:detectPlatform(source.url)});addresses.set(source.url,id);added++ }
+        sourceIds.push(id)
+      }
+      this.db.exec('RELEASE rss_import');return {added,existing,sourceIds:[...new Set(sourceIds)]}
+    } catch(error) { this.db.exec('ROLLBACK TO rss_import; RELEASE rss_import');throw error }
   }
 
   updateRSSSourcePlatform(id: string, platform: string): void {

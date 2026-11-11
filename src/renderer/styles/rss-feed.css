@@ -131,6 +131,13 @@
   transition: background-color var(--sx-dur, 160ms) var(--rss-ease), color var(--sx-dur, 160ms) var(--rss-ease);
 }
 
+/* A switch among the quiet controls (包含已移出的): on reads as a raised chip, like the selected navigator row. */
+.rss-quiet-select[aria-pressed='true'] {
+  background: var(--sx-raised-bg);
+  box-shadow: var(--sx-raised-shadow);
+  color: var(--text-title);
+}
+
 .rss-quiet-select > span {
   min-width: 0;
   overflow: hidden;

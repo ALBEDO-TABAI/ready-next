@@ -23,6 +23,7 @@ export const RSSDigestGenerateSchema = z.discriminatedUnion('kind', [
 ])
 export type RSSDigestGenerateInput = z.infer<typeof RSSDigestGenerateSchema>
 export interface RSSDigestSource {
+  sieve?: import('./rss-sieve').RSSSieveScore;
   itemId: string; articleRevision: string; title: string; link: string; sourceId: string; source: string;
   quote: string; quoteKind: 'event_evidence' | 'source_summary' | 'saved_body' | 'title'; quoteTruncated: boolean;
   sourceRole: 'direct' | 'secondary' | 'unknown'; bodyStatus: string; factId: string | null; eventId: string | null; evidenceId: string | null;

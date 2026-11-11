@@ -16,7 +16,7 @@ export const RSSQuerySchema = z.object({
   searchIn: z.enum(['title_summary', 'body']).optional().default('title_summary').describe('title_summary 标题摘要；body 已保存正文'),
   from: z.number().int().nonnegative().optional().describe('时间范围起点，Unix 毫秒，包含'),
   until: z.number().int().nonnegative().optional().describe('时间范围终点，Unix 毫秒，不包含'),
-  sort: z.enum(['newest', 'oldest']).optional().default('newest').describe('newest 或 oldest'),
+  sort: z.enum(['newest', 'oldest', 'relevance']).optional().default('newest').describe('newest、oldest 或 relevance（最终分从高到低）'),
   limit: z.number().int().min(1).max(100).optional().default(50).describe('每页 1–100 条，默认 50'),
   cursor: z.string().max(1000).optional().describe('上一页返回的 nextCursor；其他查询条件保持相同'),
   expectedRevision: z.number().int().nonnegative().optional().describe('可选，固定当前界面或导出所引用的资料版本'),

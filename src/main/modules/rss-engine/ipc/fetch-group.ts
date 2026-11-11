@@ -81,7 +81,6 @@ export interface DBRSSSourceRow {
   group_name: string
   icon: string | null
   last_fetched: number | null
-  fetch_interval: number
   enabled: number
   created_at: number
   platform: string
