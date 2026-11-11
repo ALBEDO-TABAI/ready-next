@@ -1,43 +1,45 @@
 /* ═══ liquid-composer.css — 聊天输入框液态玻璃（白纱/边缘高光/投影层雾化；现行合同 current-runtime-contracts.md §1；调参与实测 2026-09-15-liquid-glass-scroll-implementation.md）；由 index.css 序保拆分（2026-07-06），在 index.css 中按原段落顺序 @import，勿改导入次序。 ═══ */
 /* The assistant composer is the one liquid glass of Ready Next (W1 DL4a). The refraction is a
-   LiquidLens (canvas displacement map → feDisplacementMap → backdrop-filter: url()); CSS adds the
-   material from the --rn-liquid-* tokens, as the design reference's .liquid does: a gradient veil,
-   a rim, a top highlight, a sheen and a shadow. Dark values come from the tokens. Reduce
-   transparency (DL12) turns the lens off (ChatInput) and the composer into paper (below). */
+   LiquidLens (canvas displacement map → feDisplacementMap → backdrop-filter: url()); CSS only adds
+   the material: a veil, a hairline rim and an edge ring. This is the composer's pre-B4 look, kept
+   at the user's request (2026-11-11); light, dark and reduce-transparency values live in the
+   --rn-liquid-* tokens. Reduce transparency (DL12) also turns the lens off (ChatInput). */
 .ready-liquid-composer__surface {
   position: relative;
   z-index: 0;
   overflow: hidden;
-  border-radius: 24px;
+  border-radius: var(--workbench-canvas-radius);
   transform: translateZ(0);
-  background: linear-gradient(180deg, var(--rn-liquid-a), var(--rn-liquid-b));
-  box-shadow:
-    inset 0 1px 0 var(--rn-liquid-hi),
-    inset 0 -12px 20px -14px var(--rn-liquid-sheen),
-    var(--rn-liquid-shadow);
+  background: var(--rn-liquid-veil);
+  box-shadow: var(--rn-liquid-veil-edge);
 }
 
 .ready-liquid-composer__surface::before,
 .ready-liquid-composer__surface::after {
   content: '';
   position: absolute;
-  inset: 0;
   border-radius: inherit;
   pointer-events: none;
 }
 
-/* Rim, above the content like a border. */
 .ready-liquid-composer__surface::before {
+  inset: 0;
   z-index: 4;
-  border: 1px solid var(--rn-liquid-rim);
+  border: 0.5px solid var(--rn-liquid-rim);
+  box-shadow: var(--rn-liquid-rim-edge);
 }
 
-/* Sheen: above the lens layer (z 1), below the content (z 2). */
+/* Edge ring: the gradient shows only in the 1px padding band (mask), like a lit bevel. */
 .ready-liquid-composer__surface::after {
-  z-index: 1;
-  background:
-    radial-gradient(120% 70% at 12% -10%, var(--rn-liquid-sheen), transparent 60%),
-    linear-gradient(115deg, transparent 58%, var(--rn-liquid-sheen) 74%, transparent 86%);
+  inset: 0;
+  z-index: 5;
+  padding: 1px;
+  background: var(--rn-liquid-ring);
+  opacity: 0.38;
+  -webkit-mask: linear-gradient(black 0 0) content-box, linear-gradient(black 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(black 0 0) content-box, linear-gradient(black 0 0);
+  mask-composite: exclude;
 }
 
 .ready-liquid-composer__content {
@@ -61,12 +63,7 @@
   content: '';
   position: absolute;
   inset: -18px;
-  background: linear-gradient(
-    160deg,
-    color-mix(in srgb, var(--rn-liquid-a) 55%, transparent),
-    var(--rn-liquid-b) 52%,
-    color-mix(in srgb, var(--rn-liquid-a) 33%, transparent)
-  );
+  background: var(--rn-liquid-projection-veil);
   pointer-events: none;
 }
 
@@ -75,24 +72,24 @@
   opacity: 0.82;
 }
 
-.ready-liquid-composer:focus-within .ready-liquid-composer__surface::before {
-  border-color: var(--rn-liquid-hi);
+.ready-liquid-composer:focus-within .ready-liquid-composer__surface::after {
+  opacity: 0.52;
 }
 
-.ready-liquid-composer[data-drag-over='true'] .ready-liquid-composer__surface::before {
-  border: 1.5px solid var(--rn-ink-3);
+.ready-liquid-composer[data-drag-over='true'] .ready-liquid-composer__surface::after {
+  background: var(--rn-liquid-ring-drag);
+  opacity: 1;
 }
 
-/* 减少透明（DL12）：纸色、发丝边、卡片投影，没有反光。 */
-[data-transparency='reduced'] .ready-liquid-composer__surface {
-  background: var(--rn-sheet);
-  box-shadow: var(--rn-card-shadow);
+html[data-theme='dark']:root .ready-liquid-composer__surface::before {
+  opacity: 0.84;
 }
 
-[data-transparency='reduced'] .ready-liquid-composer .ready-liquid-composer__surface::before {
-  border-color: var(--rn-hair-2);
+html[data-theme='dark']:root .ready-liquid-composer__surface::after {
+  opacity: 0.18;
 }
 
+/* 减少透明（DL12）：纸色、发丝边、卡片投影（tokens.css），没有高光环。 */
 [data-transparency='reduced'] .ready-liquid-composer__surface::after {
   display: none;
 }

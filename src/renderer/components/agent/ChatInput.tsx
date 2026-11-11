@@ -708,7 +708,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
           className="ready-liquid-composer__surface"
           // 减少透明（DL12）：不折射、不投影，退回纸色（liquid-composer.css）。
           engine={reducedTransparency ? 'off' : 'backdrop'}
-          radius={24}
+          radius={18}
           bevel={22}
           depth={37}
           ior={1.34}
@@ -723,12 +723,12 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
           brightness={1.05}
           contrast={0.84}
           aberration={0}
-          backdropContent={<LiquidBackdropProjection className="ready-liquid-composer__projection" sourceMaskRadius={24} />}
+          backdropContent={<LiquidBackdropProjection className="ready-liquid-composer__projection" />}
         >
           <div
             className="ready-liquid-composer__content flex flex-col"
             style={{
-              borderRadius: 24,
+              borderRadius: 'var(--workbench-canvas-radius)',
               background: 'transparent',
               padding: isDragOver ? '13px 15px 10px' : '14px 16px 11px',
               position: 'relative',
