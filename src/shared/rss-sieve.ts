@@ -33,7 +33,14 @@ export type RSSBehavior = RSSBehaviorInput & { sourceId: string; topicIds: strin
 export const RSSSieveQuerySchema = z.object({ topicId: z.string().min(1).optional(), threshold: z.number().min(0).max(100).default(60) }).strict()
 export type RSSSieveQuery = z.input<typeof RSSSieveQuerySchema>
 export type RSSSieveFactor = 'model' | 'source' | 'topic' | 'freshness' | 'duplicate' | 'manual'
-export interface RSSSieveScore { score: number; eligible: boolean; pinned: boolean; reason: string; factors: { factor: RSSSieveFactor; contribution: number }[] }
+export interface RSSSieveScore {
+  explore?: boolean
+  score: number
+  eligible: boolean
+  pinned: boolean
+  reason: string
+  factors: { factor: RSSSieveFactor; contribution: number }[]
+}
 export interface RSSSieveItem extends RSSArticleSummary { sieve: RSSSieveScore; relevance: RSSRelevance | null }
 export interface RSSSieveResult { items: RSSSieveItem[]; remaining: RSSSieveItem[]; remainingCount: number }
 export interface RSSWorkContextSnapshot { text: string; entries: RSSWorkEntry[] }
@@ -51,3 +58,32 @@ export interface RSSSieveAPI {
   sieveSaveFocus(input: { text: string; expectedVersion: number }): Promise<RSSSieveResponse<RSSFocus>>
 }
 export type RSSSieveResponse<T> = { success: true; data: T } | { success: false; error: string }
+
+export const RSSCalibrationDecisionSchema = z.object({ week:z.string().regex(/^\d{4}-\d{2}-\d{2}$/), expectedVersion:z.number().int().nonnegative(), text:z.string().max(8000).optional() }).strict()
+export type RSSCalibrationDecision = z.infer<typeof RSSCalibrationDecisionSchema>
+export interface RSSCalibration { week:string; baseVersion:number; status:'queued'|'running'|'pending'|'accepted'|'dismissed'|'failed'|'unknown'; text:string|null; explanation:string|null; stale:boolean }
+export interface RSSSieveMetrics { from:number; until:number; screened:number; hits:number; hitRate:number|null; missed:number }
+export const RSSNotificationSettingsSchema = z.object({ quietStart:z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/), quietEnd:z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/) }).strict()
+export type RSSNotificationSettings = z.infer<typeof RSSNotificationSettingsSchema>
+export const RSSTopicNotificationSchema = z.object({ topicId:z.string().min(1), urgent:z.boolean() }).strict()
+export interface RSSSieveAPI {
+  sievePendingOpen(): Promise<RSSSieveResponse<{id:string;itemId:string}|null>>
+  sieveAckOpen(id:string): Promise<RSSSieveResponse<void>>
+  onSieveOpenPending(handler:()=>void): ()=>void
+  sieveCalibration(): Promise<RSSSieveResponse<RSSCalibration|null>>
+  sieveAcceptCalibration(input: RSSCalibrationDecision): Promise<RSSSieveResponse<RSSFocus>>
+  sieveDismissCalibration(input: { week:string }): Promise<RSSSieveResponse<RSSCalibration>>
+  sieveMetrics(): Promise<RSSSieveResponse<RSSSieveMetrics>>
+  sieveNotificationSettings(): Promise<RSSSieveResponse<RSSNotificationSettings>>
+  sieveSaveNotificationSettings(input: RSSNotificationSettings): Promise<RSSSieveResponse<RSSNotificationSettings>>
+  sieveTopicNotifications(): Promise<RSSSieveResponse<{topicId:string;urgent:boolean}[]>>
+  sieveSaveTopicNotification(input: {topicId:string;urgent:boolean}): Promise<RSSSieveResponse<{topicId:string;urgent:boolean}>>
+  importOpml(input: {xml:string}): Promise<RSSSieveResponse<{added:number;existing:number;sourceIds:string[]}>>
+}
+
+export const RSSSieveSettingsSchema = z.object({ explore: z.boolean() }).strict()
+export type RSSSieveSettings = z.infer<typeof RSSSieveSettingsSchema>
+export interface RSSSieveAPI {
+  sieveSettings(): Promise<RSSSieveResponse<RSSSieveSettings>>
+  sieveSaveSettings(input: RSSSieveSettings): Promise<RSSSieveResponse<RSSSieveSettings>>
+}

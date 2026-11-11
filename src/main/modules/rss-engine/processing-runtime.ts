@@ -1,7 +1,10 @@
-import { sendableCurrentRSSWorkContext } from './work-context-runtime'
+import { startRSSSieve, stopRSSSieve } from './sieve-runtime'
+import { sendableCurrentRSSWorkContext, setRSSWorkContextLibraryRoot } from './work-context-runtime'
 import { getRSSContentService } from './content-runtime'
 import type { AIModelConfig } from '../../../shared/ai-providers'
-import { BrowserWindow } from 'electron'
+import { BrowserWindow, app } from 'electron'
+import { AppSettingsRepository } from '../repositories/app-settings-repository'
+import { VaultService } from '../settings-engine/vault-service'
 import { getDatabase } from '../database'
 import { completeRSSModel, validateRSSModelRequest } from './model-completion'
 import { hasRSSProcessingModel, rssModelConfig, setRSSProviderReadiness } from './model-readiness'
@@ -21,6 +24,7 @@ export function getRSSProcessingService(): RSSProcessingService {
     const rss = getDatabase().rss
     service = new RSSProcessingService({ store: rss.processing, getArticle: (id) => rss.content.getArticle(id),
       loadArticle: (id) => getRSSContentService().loadForJudgment(id),
+      focus: () => rss.sieve.focus().text,
       workContext: () => sendableCurrentRSSWorkContext(),
       hasModel: hasRSSProcessingModel, now: () => Date.now(), notify: notifyRSSProcessing,
       prepare: (input, jobId) => {
@@ -34,9 +38,12 @@ export function getRSSProcessingService(): RSSProcessingService {
   }
   return service
 }
-export function startRSSProcessing(options?: { isProviderReady(config: AIModelConfig): boolean }): Promise<void> {
-  if (options) setRSSProviderReadiness(options.isProviderReady)
-  return getRSSProcessingService().start()
+export function startRSSProcessing(options: { isProviderReady(config: AIModelConfig): boolean; getWindow(): BrowserWindow | null }): Promise<void> {
+  setRSSProviderReadiness(options.isProviderReady)
+  // 在做的事 lists only the active library's pages (W5 §3); the root is read fresh on every request.
+  const vault = new VaultService(new AppSettingsRepository(), { home: app.getPath('home'), userData: app.getPath('userData'), isPackaged: app.isPackaged })
+  setRSSWorkContextLibraryRoot(() => { const state = vault.get(); return state.status === 'ready' ? state.root : null })
+  return Promise.all([getRSSProcessingService().start(), startRSSSieve(options.getWindow)]).then(() => undefined)
 }
-export async function stopRSSProcessing(): Promise<void> { await service?.stop() }
+export async function stopRSSProcessing(): Promise<void> { await Promise.all([stopRSSSieve(), service?.stop()]) }
 export function wakeRSSProcessing(): void { if (service) void service.wake() }

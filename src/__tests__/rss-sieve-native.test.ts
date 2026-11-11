@@ -53,13 +53,17 @@ test('V1/V2 queries enforce 48h, unread, threshold, top12/top5, remainder and im
     const before=f.rss.sieve.query({},now)
     assert.equal(before.items.length,12);assert.equal(before.remainingCount,3)
     assert.equal(f.rss.sieve.today(now).length,5)
-    assert.equal(before.items[0].sieve.reason,'符合：精选')
+    assert.equal(before.items[0].sieve.reason,'符合：基础标准')
     assert.ok(![...before.items,...before.remaining].some(i=>['old','read'].includes(i.id)))
     const score=before.items.find(i=>i.id==='new-0')!.sieve.score
     f.rss.sieve.recordBehavior({id:'feedback',itemId:'new-1',action:'less',reason:'source',at:now})
     const after=f.rss.sieve.query({threshold:0},now)
     assert.ok(after.items.find(i=>i.id==='new-0')!.sieve.score<score)
-    assert.equal(f.rss.sieve.query({threshold:100},now).remainingCount,15)
+    const highThreshold = f.rss.sieve.query({ threshold: 100 }, now)
+    assert.equal(highThreshold.items.length, 1)
+    assert.equal(highThreshold.items[0].sieve.explore, true)
+    assert.ok(highThreshold.items[0].sieve.score < 100)
+    assert.equal(highThreshold.remainingCount, 14)
     f.rss.organization.setManual({itemId:'new-0',expectedArticleRevision:f.rss.content.getArticle('new-0')!.revision,definitionId:'curated',expectedRuleRevision:1,decision:false})
     assert.ok(!f.rss.sieve.query({threshold:0},now).items.some(i=>i.id==='new-0'))
   } finally {f.db.close()}
@@ -134,7 +138,16 @@ test('T2 source projections read only titles and filter excluded, non-present an
       db.prepare("INSERT INTO documents(workspace_id,path,name,ext,object_id,frontmatter_json,indexed_at) VALUES(?,?,?,'md',?,?,?)").run(workspace,`/fixture/${title}`,title,id,metadata,now)
     }
     f.rss.sieve.configurePrivacy(RSSWorkPrivacySchema.parse({answer:'enabled',enabled:true}))
-    const sources=rssWorkContextSources(db,()=>[{title:'会议',startsAt:now+1}])
+    // Mounted folders, the 书房 page and 模板 are not the person's work; only the library's own pages are listed.
+    db.prepare("INSERT INTO workspaces(root) VALUES('/mounted')").run()
+    const mounted=db.prepare("SELECT id FROM workspaces WHERE root='/mounted'").get<{id:number}>()!.id
+    for(const [id,path,ws]of [['mounted','/mounted/私人.md',mounted],['reading','/fixture/阅读.md',workspace],['template','/fixture/模板/周报.md',workspace]] as const){
+      db.prepare("INSERT INTO objects(id,kind,workspace_id,current_path,path_key,last_known_path,status,identity_state,mtime_ns,observed_since) VALUES(?,'markdown',?,?,?,?,'present','local',?,?)")
+        .run(id,ws,path,path,path,String(BigInt(now)*1000000n),now)
+      db.prepare("INSERT INTO documents(workspace_id,path,name,ext,object_id,frontmatter_json,indexed_at) VALUES(?,?,?,'md',?,?,?)").run(ws,path,path.split('/').pop(),id,'{}',now)
+    }
+    assert.equal(previewRSSWorkContext(f.rss.sieve,rssWorkContextSources(db,()=>[],null),now).text,'','no library, no pages or books')
+    const sources=rssWorkContextSources(db,()=>[{title:'会议',startsAt:now+1}],'/fixture')
     assert.equal(previewRSSWorkContext(f.rss.sieve,sources,now).text,'页面\n会议\n书籍')
     f.rss.sieve.excludePage({objectId:'page',excluded:true})
     assert.equal(previewRSSWorkContext(f.rss.sieve,sources,now).text,'会议\n书籍')
@@ -194,5 +207,17 @@ test('V1/V2 event duplicates lose rank, manual topic decisions win, and every fe
     f.rss.sieve.recordBehavior({id:'shallow',itemId:other.id,action:'less',reason:'shallow',at:now})
     assert.ok(f.rss.sieve.preference('source',f.source)<source)
     assert.equal(f.rss.sieve.behaviors(other.id).length,4)
+  }finally{f.db.close()}
+})
+
+test('an article stamped hours in the future still counts as new: windows use the earlier of its date and first sight',t=>{
+  if(skipIfSqliteUnavailable(t,'RSS sieve'))return
+  const f=setup()
+  try{
+    // A feed that publishes local time as UTC: the article says it is six hours from now; Ready saw it an hour ago.
+    f.put('ahead',f.source,now+6*3600000)
+    f.db.getRawDb()!.prepare('UPDATE rss_items SET first_seen_at=? WHERE id=?').run(Math.floor((now-3600000)/1000),'ahead')
+    const seen=f.rss.sieve.query({},now,false)
+    assert.ok([...seen.items,...seen.remaining].some(item=>item.id==='ahead'),'the future-dated article is in the 48-hour window')
   }finally{f.db.close()}
 })
