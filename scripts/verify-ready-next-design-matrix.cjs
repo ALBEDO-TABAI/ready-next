@@ -8,7 +8,8 @@
 //     --themes light,dark       themes to run (default: both)
 //     --transparency normal,reduced   (default: every value this build supports)
 //     --quick                   the four modes at 1440×900 only; never writes the budget
-//     --write-budget            lower scripts/design-matrix-budget.json to this run's counts (never raises)
+//     --write-budget            compare, then lower scripts/design-matrix-budget.json to this run's counts (never raises;
+//                               refuses to write when any count is above budget)
 //     --no-budget               report only
 //     --keep                    keep the temporary profile and vault
 //
@@ -342,13 +343,15 @@ async function main() {
   if (failures.length) verdict.push(`${failures.length} step(s) failed — fix the script or the screen before trusting the counts`)
   if (options.budget && !options.quick) {
     const budget = readJson(BUDGET_PATH)
-    if (options.writeBudget && !failures.length) {
+    // Always compare first: writing a lower-only budget must never hide a count that went up.
+    const { problems, lowerable } = compareBudget(counts, budget)
+    if (problems.length) { failed = true; verdict.push(...problems) }
+    if (options.writeBudget && !failures.length && !problems.length) {
       writeBudget(counts, budget)
       verdict.push(`budget written to ${path.relative(REPO, BUDGET_PATH)} (lower-only)`)
     } else {
-      const { problems, lowerable } = compareBudget(counts, budget)
-      if (problems.length) { failed = true; verdict.push(...problems) }
-      if (lowerable.length) verdict.push(`can lower: ${lowerable.join('; ')} — run --write-budget`)
+      if (options.writeBudget && problems.length) verdict.push('budget not written: counts above budget must be fixed first')
+      if (lowerable.length && !options.writeBudget) verdict.push(`can lower: ${lowerable.join('; ')} — run --write-budget`)
       if (!problems.length) verdict.push('within budget')
     }
   } else verdict.push('budget not checked (quick run or --no-budget)')
