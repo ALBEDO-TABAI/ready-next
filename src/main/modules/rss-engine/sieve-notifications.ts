@@ -9,7 +9,7 @@ export function deliverRSSNotifications(rss:RSSStore,port:RSSNotificationPort,no
   if(quietStart<quietEnd ? minute>=quietStart && minute<quietEnd : quietStart>quietEnd && (minute>=quietStart || minute<quietEnd)) return 0
   const urgent=new Set(rss.learning.topicNotifications().filter(topic=>topic.urgent).map(topic=>topic.topicId))
   if(!urgent.size) return 0
-  const selection=rss.sieve.query({threshold:85},now,false)
+  const selection = rss.sieve.query({ threshold: 85 }, now, false, false)
   const candidates=[...selection.items,...selection.remaining].filter(item=>item.sieve.eligible && item.sieve.score>=85
     && item.classifications.some(c=>c.included && !c.stale && urgent.has(c.definitionId))).sort((a,b)=>b.sieve.score-a.sieve.score)
   let delivered=0
