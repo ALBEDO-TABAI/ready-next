@@ -4,6 +4,8 @@ import type { RSSContentStore } from './rss-content-store'
 import type { RSSOrganizationStore } from './rss-organization-store'
 import { RSS_EVENT_ARTICLE_REVISION_SQL, type RSSEventStore } from './rss-event-store'
 import type { RSSEventContext } from '../../../shared/rss-events'
+import { RSS_RELEVANCE_METHOD } from '../../../shared/rss-sieve'
+import { RSS_SOURCE_PREFERENCE_SQL } from './rss-sieve-store'
 import { SettingsStore } from './settings-store'
 import { RSS_PROCESSING_METHOD, RSS_PROCESSING_SETTINGS_KEY, RSSProcessingSettingsSchema, RSSProcessingListSchema,
   type RSSProcessingSettings, type RSSProcessingJob, type RSSProcessingListInput, type RSSProcessingList,
@@ -76,34 +78,31 @@ export class RSSProcessingStore {
     const ids = this.transaction(() => {
       const article = this.content.getArticle(itemId)
       if (!article || expectedRevision && expectedRevision !== article.revision) throw new Error('文章已变化，请重新读取后整理。')
-      if (trigger === 'automatic' && !this.settings().enabled) return []
+      if (trigger === 'automatic' && (!this.settings().enabled || ['failed', 'unknown'].includes(this.db.prepare('SELECT status FROM rss_processing_jobs WHERE item_id=? ORDER BY created_at DESC,id DESC LIMIT 1').get<{status:string}>(itemId)?.status ?? ''))) return []
       const definitions = this.organization.list().filter((d) => ['topic', 'curated'].includes(d.kind)).sort((a, b) => a.id.localeCompare(b.id))
+      if (!definitions.length) return []
+      const targets = definitions.map(({ id, name, description, ruleRevision }) => ({ id, name, description, ruleRevision }))
       const previousEvent = this.events.memberships([itemId])[itemId]
-      const ids: string[] = []
-      for (let i = 0; i < definitions.length; i += 8) {
-        const targets = definitions.slice(i, i + 8).map(({ id, name, description, ruleRevision }) => ({ id, name, description, ruleRevision }))
-        const eventReprocess = i === 0 && trigger === 'manual' && !previousEvent?.manual && this.events.canReuse(itemId, article.revision)
-        const eventRequested = i === 0 && !previousEvent?.manual && (eventReprocess || !this.events.canReuse(itemId, article.revision))
-        const fingerprint = createHash('sha256').update(JSON.stringify([itemId, article.revision, RSS_PROCESSING_METHOD, targets.map((d) => [d.id, d.ruleRevision])])).digest('hex')
-        const previous = this.db.prepare(`SELECT id,status FROM rss_processing_jobs WHERE fingerprint=? ORDER BY created_at DESC,id DESC`).all<{ id: string; status: string }>(fingerprint)
-        const active = previous.find((p) => ['queued', 'running'].includes(p.status))
-        if (active) {
-          const current = this.get(active.id)!
-          if (trigger === 'manual' && current.status === 'queued' && current.trigger === 'automatic') {
-            this.finish(current.id, 'canceled', '已由本篇的手工整理请求接替。', Date.now())
-          } else { ids.push(active.id); continue }
-        }
-        if (trigger === 'automatic' && previous.length) {
-          restored = this.organization.restore(itemId, article.revision, targets) || restored
-          if (i === 0) this.events.restore(itemId, article.revision)
-          continue
-        }
-        const id = randomUUID()
-        this.db.prepare(`INSERT INTO rss_processing_jobs(id,item_id,title,article_revision,fingerprint,method,definitions_json,trigger_kind,status,created_at,event_requested,event_reprocess)
-          VALUES (?,?,?,?,?,?,?,?,'queued',?,?,?)`).run(id, itemId, article.title, article.revision, fingerprint, RSS_PROCESSING_METHOD, JSON.stringify(targets), trigger, Date.now(), Number(eventRequested), Number(eventReprocess))
-        ids.push(id)
+      const eventReprocess = trigger === 'manual' && !previousEvent?.manual && this.events.canReuse(itemId, article.revision)
+      const eventRequested = !previousEvent?.manual && (eventReprocess || !this.events.canReuse(itemId, article.revision))
+      const fingerprint = createHash('sha256').update(JSON.stringify([itemId, article.revision, RSS_PROCESSING_METHOD, targets.map((d) => [d.id, d.ruleRevision])])).digest('hex')
+      const previous = this.db.prepare(`SELECT id,status FROM rss_processing_jobs WHERE fingerprint=? ORDER BY created_at DESC,id DESC`).all<{ id: string; status: string }>(fingerprint)
+      const active = previous.find((p) => ['queued', 'running'].includes(p.status))
+      if (active) {
+        const current = this.get(active.id)!
+        if (trigger === 'manual' && current.status === 'queued' && current.trigger === 'automatic') {
+          this.finish(current.id, 'canceled', '已由本篇的手工整理请求接替。', Date.now())
+        } else return [active.id]
       }
-      return ids
+      if (trigger === 'automatic' && previous.length) {
+        restored = this.organization.restore(itemId, article.revision, targets)
+        this.events.restore(itemId, article.revision)
+        return []
+      }
+      const id = randomUUID()
+      this.db.prepare(`INSERT INTO rss_processing_jobs(id,item_id,title,article_revision,fingerprint,method,definitions_json,trigger_kind,status,created_at,event_requested,event_reprocess)
+        VALUES (?,?,?,?,?,?,?,?,'queued',?,?,?)`).run(id, itemId, article.title, article.revision, fingerprint, RSS_PROCESSING_METHOD, JSON.stringify(targets), trigger, Date.now(), Number(eventRequested), Number(eventReprocess))
+      return [id]
     })
     if (ids.length || restored) this.changed()
     return ids
@@ -123,7 +122,7 @@ export class RSSProcessingStore {
     return { queued: itemIds.length, jobIds }
   }
   next(): RSSProcessingJob | null {
-    const row = this.db.prepare(`SELECT * FROM rss_processing_jobs WHERE status='queued' AND (?=1 OR trigger_kind='manual') ORDER BY created_at,id LIMIT 1`).get<JobRow>(Number(this.settings().enabled))
+    const row = this.db.prepare(`SELECT j.* FROM rss_processing_jobs j JOIN rss_items i ON i.id=j.item_id LEFT JOIN (${RSS_SOURCE_PREFERENCE_SQL}) p ON p.source_id=i.source_id WHERE j.status='queued' AND (?=1 OR j.trigger_kind='manual') ORDER BY (j.trigger_kind='manual') DESC,COALESCE(p.value,0.5) DESC,j.created_at,j.id LIMIT 1`).get<JobRow>(Number(this.settings().enabled))
     return row ? this.present(row) : null
   }
   enqueueBodyChange(itemId: string): void {
@@ -132,6 +131,23 @@ export class RSSProcessingStore {
     // Reading a historical article is not authorization to reprocess it. Only extend the same automatically admitted source version.
     if (this.db.prepare("SELECT id FROM rss_processing_jobs WHERE item_id=? AND trigger_kind='automatic' AND article_revision LIKE ? LIMIT 1")
       .get(itemId, `${article.sourceRevision}:%`)) this.enqueue(itemId, 'automatic')
+  }
+  refreshBody(jobId: string): void {
+    this.transaction(() => {
+      const current = this.get(jobId)
+      if (!current || current.status !== 'queued') return
+      const article = this.content.getArticle(current.itemId)
+      if (!article || !current.articleRevision.startsWith(`${article.sourceRevision}:`)) return
+      // Preserve the admitted rules; an edit during fetching must still invalidate this job.
+      const fingerprint = createHash('sha256').update(JSON.stringify([current.itemId, article.revision, current.method, current.definitions.map(d => [d.id, d.ruleRevision])])).digest('hex')
+      this.db.prepare("UPDATE rss_processing_jobs SET article_revision=?,fingerprint=? WHERE id=? AND status='queued'").run(article.revision,fingerprint,jobId)
+      const duplicates = this.db.prepare("SELECT id,trigger_kind FROM rss_processing_jobs WHERE fingerprint=? AND status='queued' AND id<>?")
+        .all<{id:string;trigger_kind:string}>(fingerprint,jobId)
+      for (const duplicate of duplicates) {
+        const canceled = current.trigger === 'manual' && duplicate.trigger_kind === 'automatic' ? duplicate.id : jobId
+        this.finish(canceled, 'canceled', '已由本篇的相同整理请求接替。', Date.now())
+      }
+    })
   }
   isCurrent(value: RSSProcessingJob): boolean {
     if (value.method !== RSS_PROCESSING_METHOD || this.content.getArticle(value.itemId)?.revision !== value.articleRevision) return false
@@ -162,6 +178,10 @@ export class RSSProcessingStore {
           this.events.apply(value.itemId, value.articleRevision, value.eventContext, result.event)
         }
       }
+      const relevance = result.relevance, base = value.definitions.find(d => d.id === 'curated')
+      // Only a request that saw the base standard can publish relevance tied to that rule version.
+      if (base) this.db.prepare('INSERT INTO rss_relevance(job_id,item_id,score,because,reason,work_ref,summary_only,method,article_revision,base_rule_revision,work_kind) VALUES(?,?,?,?,?,?,?,?,?,?,?)')
+        .run(id,value.itemId,relevance.score,relevance.because,relevance.reason,relevance.workRef,Number(relevance.summaryOnly),RSS_RELEVANCE_METHOD,value.articleRevision,base.ruleRevision,relevance.workKind ?? null)
       this.finish(id, 'success', '整理完成', now)
       return true
     })

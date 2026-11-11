@@ -1,3 +1,4 @@
+import { RSSSieveStore } from './rss-sieve-store'
 import { RSSDigestStore } from './rss-digest-store'
 import { RSSCatalogStore } from './rss-catalog-store'
 import { RSSOrganizationStore, rssIncludedClassificationSQL } from './rss-organization-store'
@@ -9,6 +10,7 @@ import { RSSTranslationStore } from './rss-translation-store'
 import type { RSSSource, RSSItem, RSSDraftStoreSourceSummary, RSSStats, RSSAnalysisAction, RSSAnalysisJobStatus, RSSAnalysisJob } from './records'
 
 export class RSSStore {
+  readonly sieve: RSSSieveStore
   readonly content: RSSContentStore
   readonly organization: RSSOrganizationStore
   readonly processing: RSSProcessingStore
@@ -21,9 +23,10 @@ export class RSSStore {
     this.organization = new RSSOrganizationStore(getConnection, (id) => this.content.getArticle(id)?.revision || null)
     this.catalog = new RSSCatalogStore(getConnection, this.organization)
     this.events = new RSSEventStore(getConnection)
-    this.content = new RSSContentStore(getConnection, this.organization, (id) => { this.processing.enqueueBodyChange(id); this.organization.recordDigestIntake(id) }, this.events)
+    this.content = new RSSContentStore(getConnection, this.organization, (id, origin) => { if (origin === 'reader') this.processing.enqueueBodyChange(id); this.organization.recordDigestIntake(id) }, this.events)
     this.digests = new RSSDigestStore(getConnection, this.content, this.organization)
     this.processing = new RSSProcessingStore(getConnection, this.content, this.organization, this.events)
+    this.sieve = new RSSSieveStore(getConnection, this.content)
     this.translations = new RSSTranslationStore(getConnection)
   }
 

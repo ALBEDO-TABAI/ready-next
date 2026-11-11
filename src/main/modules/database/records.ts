@@ -34,7 +34,6 @@ export interface RSSItem {
   inbox_visible?: number
   read: number
   starred: number
-  ai_score: number | null
   classifications: RSSMembership[]
 }
 

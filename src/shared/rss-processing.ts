@@ -1,3 +1,4 @@
+import { RSSRelevanceSchema } from './rss-sieve'
 import { z } from 'zod'
 import { RSSEventDecisionSchema } from './rss-events'
 
@@ -30,7 +31,7 @@ export type RSSProcessingListInput = z.input<typeof RSSProcessingListSchema>
 export interface RSSProcessingList { jobs: RSSProcessingJob[]; total: number; nextOffset: number | null; snapshot: number }
 export const RSSReprocessSchema = z.object({ itemId: z.string().min(1), expectedArticleRevision: z.string().min(1) }).strict()
 
-export const RSSJudgmentSchema = z.object({ event: RSSEventDecisionSchema.optional(), decisions: z.array(z.object({
+export const RSSJudgmentSchema = z.object({ relevance: RSSRelevanceSchema, event: RSSEventDecisionSchema.optional(), decisions: z.array(z.object({
   definitionId: z.string().min(1), included: z.boolean().nullable(), reason: z.string().trim().min(1).max(600), evidence: z.string().trim().min(1).max(500).nullable(),
-}).strict()).min(1).max(8) }).strict()
-export type RSSJudgment = z.infer<typeof RSSJudgmentSchema>
+}).strict()).min(1) }).strict()
+export type RSSJudgment = Omit<z.infer<typeof RSSJudgmentSchema>, 'relevance'> & { relevance: import('./rss-sieve').RSSRelevance }

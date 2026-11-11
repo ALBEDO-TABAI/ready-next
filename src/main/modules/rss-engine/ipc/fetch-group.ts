@@ -102,7 +102,6 @@ export interface DBRSSItemRow {
   inbox_visible?: number
   read: number
   starred: number
-  ai_score: number | null
   classifications: RSSMembership[]
   source_name?: string
 }

@@ -1,3 +1,4 @@
+import type { RSSWorkContextSnapshot } from '../../../shared/rss-sieve'
 import { ProviderOutputIncompleteError, ProviderOutputMissingTextError } from '../agent-control/runtime-core/provider-output-status'
 import type { RSSArticle } from '../../../shared/rss-workspace'
 import type { RSSProcessingStore } from '../database/rss-processing-store'
@@ -6,6 +7,8 @@ import { buildRSSJudgmentInput, parseRSSJudgment, type RSSJudgmentInput } from '
 interface ProcessingDeps {
   store: RSSProcessingStore; getArticle(id: string): RSSArticle | null; hasModel(): boolean
   prepare(input: RSSJudgmentInput, jobId: string): (signal: AbortSignal) => Promise<string>
+  loadArticle?(id: string): Promise<RSSArticle>
+  workContext?(): RSSWorkContextSnapshot
   now(): number; notify(): void
 }
 
@@ -63,13 +66,27 @@ export class RSSProcessingService {
   private async drain(): Promise<void> {
     const { store, now } = this.deps
     while (!this.stopped) {
-      const next = store.next()
+      let next = store.next()
       if (!next) break
       if (!this.deps.hasModel()) break
-      const article = this.deps.getArticle(next.itemId)
+      if (store.status(now(), true).blocked === 'limit') break
+      let article = this.deps.getArticle(next.itemId)
       if (!article || !store.isCurrent(next)) { store.finish(next.id, 'stale', '文章或分类标准已变化，请选择是否重新整理。', now()); continue }
+      if (this.deps.loadArticle && article.summary.length < 800 && !['ready','partial','failed','login_required'].includes(article.body.status)) {
+        try { article = await this.deps.loadArticle(next.itemId) }
+        catch (error) { console.warn('[rss-processing] prefetch unavailable; using summary', error) }
+        if (this.stopped) break
+        store.refreshBody(next.id)
+        const refreshed = store.get(next.id)
+        if (!refreshed || refreshed.status !== 'queued') continue
+        next = refreshed
+        if (!store.isCurrent(next)) { store.finish(next.id, 'stale', '文章或分类标准已变化，请选择是否重新整理。', now()); continue }
+      }
       const eventContext = store.eventContext(next, now())
-      const input = buildRSSJudgmentInput(article, next.definitions, eventContext)
+      let context: RSSWorkContextSnapshot | undefined
+      try { context = this.deps.workContext?.() }
+      catch (error) { console.warn('[rss-processing] work context unavailable; omitting it', error) }
+      const input = buildRSSJudgmentInput(article, next.definitions, eventContext, context)
       let complete: (signal: AbortSignal) => Promise<string>
       try { complete = this.deps.prepare(input, next.id) }
       catch (error) { store.finish(next.id, 'failed', error instanceof Error ? error.message : String(error), now()); this.deps.notify(); continue }
@@ -87,6 +104,7 @@ export class RSSProcessingService {
         if (controller.signal.aborted || this.stopped) continue
         store.publish(current.id, parseRSSJudgment(text, input), now())
       } catch (error) {
+        if (this.stopped) continue
         responded ||= error instanceof ProviderOutputIncompleteError || error instanceof ProviderOutputMissingTextError
         store.finish(current.id, responded ? 'failed' : 'unknown', `${responded ? '结果未通过核对' : '请求结果未知，不会自动重试'}：${error instanceof Error ? error.message : String(error)}`, now())
       } finally { this.active = null; this.deps.notify() }
