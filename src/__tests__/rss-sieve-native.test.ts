@@ -138,7 +138,16 @@ test('T2 source projections read only titles and filter excluded, non-present an
       db.prepare("INSERT INTO documents(workspace_id,path,name,ext,object_id,frontmatter_json,indexed_at) VALUES(?,?,?,'md',?,?,?)").run(workspace,`/fixture/${title}`,title,id,metadata,now)
     }
     f.rss.sieve.configurePrivacy(RSSWorkPrivacySchema.parse({answer:'enabled',enabled:true}))
-    const sources=rssWorkContextSources(db,()=>[{title:'会议',startsAt:now+1}])
+    // Mounted folders, the 书房 page and 模板 are not the person's work; only the library's own pages are listed.
+    db.prepare("INSERT INTO workspaces(root) VALUES('/mounted')").run()
+    const mounted=db.prepare("SELECT id FROM workspaces WHERE root='/mounted'").get<{id:number}>()!.id
+    for(const [id,path,ws]of [['mounted','/mounted/私人.md',mounted],['reading','/fixture/阅读.md',workspace],['template','/fixture/模板/周报.md',workspace]] as const){
+      db.prepare("INSERT INTO objects(id,kind,workspace_id,current_path,path_key,last_known_path,status,identity_state,mtime_ns,observed_since) VALUES(?,'markdown',?,?,?,?,'present','local',?,?)")
+        .run(id,ws,path,path,path,String(BigInt(now)*1000000n),now)
+      db.prepare("INSERT INTO documents(workspace_id,path,name,ext,object_id,frontmatter_json,indexed_at) VALUES(?,?,?,'md',?,?,?)").run(ws,path,path.split('/').pop(),id,'{}',now)
+    }
+    assert.equal(previewRSSWorkContext(f.rss.sieve,rssWorkContextSources(db,()=>[],null),now).text,'','no library, no pages or books')
+    const sources=rssWorkContextSources(db,()=>[{title:'会议',startsAt:now+1}],'/fixture')
     assert.equal(previewRSSWorkContext(f.rss.sieve,sources,now).text,'页面\n会议\n书籍')
     f.rss.sieve.excludePage({objectId:'page',excluded:true})
     assert.equal(previewRSSWorkContext(f.rss.sieve,sources,now).text,'会议\n书籍')
