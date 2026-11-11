@@ -2,21 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { createPortal } from 'react-dom'
 import {
   IconAdjustmentsHorizontal as SlidersHorizontal,
-  IconDotsVertical as MoreVertical,
-  IconDownload as Download,
   IconFilePlus as FilePlus,
-  IconFolderOpen as FolderOpen,
   IconFolderPlus as FolderPlus,
   IconLayoutGrid as LayoutGrid,
   IconLayoutList as LayoutList,
-  IconRefresh as RefreshCw,
   IconSearch as Search,
-  IconUpload as Upload,
 } from '@tabler/icons-react'
 
 import { useWorkspace } from '../../stores/useWorkspace'
 import FileTree, { DEFAULT_FILE_FILTERS, type FileFilterMap, type FileViewMode } from './FileTree'
-import Modal from '../ui/Modal'
 import { FloatPanel } from '../ui/float/FloatPanel'
 import { computeNextGridHistory, type GridNavigationEntry } from './gridNavigation'
 import { FILES_PANEL_DIMENSIONS, PANEL_TOKENS } from './panelTokens'
@@ -53,12 +47,7 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
   const [viewMode, setViewMode] = useState<FileViewMode>('tree')
   const [filters, setFilters] = useState<FileFilterMap>({ ...DEFAULT_FILE_FILTERS })
   const [showFilterMenu, setShowFilterMenu] = useState(false)
-  const [showMoreMenu, setShowMoreMenu] = useState(false)
   const [filterMenuPosition, setFilterMenuPosition] = useState<FloatingMenuPosition | null>(null)
-  const [moreMenuPosition, setMoreMenuPosition] = useState<FloatingMenuPosition | null>(null)
-  const [saveWorkspacePrompt, setSaveWorkspacePrompt] = useState<{ defaultName: string } | null>(null)
-  const [clearWorkspaceConfirm, setClearWorkspaceConfirm] = useState(false)
-  const [workspaceFeedback, setWorkspaceFeedback] = useState<{ kind: 'success' | 'error'; message: string } | null>(null)
   const [thumbnailSize, setThumbnailSize] = useState(132)
   const [gridNavigation, setGridNavigation] = useState<{
     path: GridNavigationEntry
@@ -71,9 +60,7 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
   })
   const toolbarRef = useRef<HTMLDivElement>(null)
   const filterTriggerRef = useRef<HTMLButtonElement>(null)
-  const moreTriggerRef = useRef<HTMLButtonElement>(null)
   const filterMenuRef = useRef<HTMLDivElement>(null)
-  const moreMenuRef = useRef<HTMLDivElement>(null)
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const refreshRunStateRef = useRef({ running: false, pending: false })
   const wasAutoRefreshActiveRef = useRef(false)
@@ -82,17 +69,11 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
     workspaceRoot,
     pinnedFolders,
     startCreating,
-    clearWorkspace,
-    getSavedWorkspaces,
-    loadSavedWorkspace,
-    exportWorkspaceToFile,
-    importWorkspaceFromFile,
     refreshFiles,
     loadDirChildren,
     expandedDirs,
     currentPath,
   } = useWorkspace()
-  const [isRefreshing, setIsRefreshing] = useState(false)
 
   const isConnected = useMemo(() => {
     if (workspaceRoot) return true
@@ -101,24 +82,19 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
   }, [workspaceRoot])
 
   useEffect(() => {
-    if (!showFilterMenu && !showMoreMenu) return
+    if (!showFilterMenu) return
     const handler = (e: MouseEvent) => {
       const target = e.target as Node
       const clickedFilterMenu = !!(
         filterMenuRef.current?.contains(target) ||
         filterTriggerRef.current?.contains(target)
       )
-      const clickedMoreMenu = !!(
-        moreMenuRef.current?.contains(target) ||
-        moreTriggerRef.current?.contains(target)
-      )
 
       if (showFilterMenu && !clickedFilterMenu) setShowFilterMenu(false)
-      if (showMoreMenu && !clickedMoreMenu) setShowMoreMenu(false)
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
-  }, [showFilterMenu, showMoreMenu])
+  }, [showFilterMenu])
 
   const toggleFilter = useCallback((key: keyof FileFilterMap) => {
     setFilters((prev) => ({ ...prev, [key]: !prev[key] }))
@@ -136,14 +112,8 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
     { key: 'other', label: '其他' },
   ]
 
-  const savedWorkspaces = useMemo(() => getSavedWorkspaces(), [getSavedWorkspaces])
   const filterMenuStyle = buildFloatingMenuSurfaceStyle(168, {
     maxHeight: 360,
-    padding: 6,
-    zIndex: 250,
-  })
-  const moreMenuStyle = buildFloatingMenuSurfaceStyle(188, {
-    maxHeight: 320,
     padding: 6,
     zIndex: 250,
   })
@@ -167,7 +137,6 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
   }, [])
 
   const toggleFilterMenu = useCallback(() => {
-    setShowMoreMenu(false)
     setShowFilterMenu((prev) => {
       const next = !prev
       setFilterMenuPosition(next ? computeMenuPosition(filterTriggerRef.current, 168) : null)
@@ -175,24 +144,12 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
     })
   }, [computeMenuPosition])
 
-  const toggleMoreMenu = useCallback(() => {
-    setShowFilterMenu(false)
-    setShowMoreMenu((prev) => {
-      const next = !prev
-      setMoreMenuPosition(next ? computeMenuPosition(moreTriggerRef.current, 188) : null)
-      return next
-    })
-  }, [computeMenuPosition])
-
   useEffect(() => {
-    if (!showFilterMenu && !showMoreMenu) return
+    if (!showFilterMenu) return
 
     const syncMenuPositions = () => {
       if (showFilterMenu) {
         setFilterMenuPosition(computeMenuPosition(filterTriggerRef.current, 168))
-      }
-      if (showMoreMenu) {
-        setMoreMenuPosition(computeMenuPosition(moreTriggerRef.current, 188))
       }
     }
 
@@ -202,7 +159,7 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
       unsubscribeWindowResize()
       window.removeEventListener('scroll', syncMenuPositions, true)
     }
-  }, [computeMenuPosition, showFilterMenu, showMoreMenu])
+  }, [computeMenuPosition, showFilterMenu])
 
   const handleConnectedRefresh = useCallback(async () => {
     if (!isConnected) return
@@ -211,7 +168,6 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
       return
     }
     refreshRunStateRef.current.running = true
-    setIsRefreshing(true)
     try {
       await refreshFiles()
       const dirs = new Set<string>(Array.from(expandedDirs))
@@ -221,7 +177,6 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
       await Promise.all(Array.from(dirs).map((dir) => loadDirChildren(dir)))
     } finally {
       refreshRunStateRef.current.running = false
-      setIsRefreshing(false)
       if (refreshRunStateRef.current.pending) {
         refreshRunStateRef.current.pending = false
         void handleConnectedRefresh()
@@ -417,15 +372,6 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
           <button
             className={ICON_BTN}
             style={{ width: 24, height: 24, color: PANEL_TOKENS.mutedStrong }}
-            onClick={handleConnectedRefresh}
-            disabled={!isConnected}
-            title="刷新文件"
-          >
-            <RefreshCw className={isRefreshing ? 'animate-spin' : ''} style={{ width: 14, height: 14 }} strokeWidth={1.8} />
-          </button>
-          <button
-            className={ICON_BTN}
-            style={{ width: 24, height: 24, color: PANEL_TOKENS.mutedStrong }}
             onClick={() => startCreating('file')}
             title="新建文档"
           >
@@ -440,23 +386,6 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
             <FolderPlus style={{ width: 14, height: 14 }} />
           </button>
 
-          <div className="relative">
-            <button
-              ref={moreTriggerRef}
-              className={ICON_BTN}
-              style={{
-                width: 24,
-                height: 24,
-                color: PANEL_TOKENS.mutedStrong,
-                background: showMoreMenu ? 'var(--files-panel-state-active-bg)' : 'transparent',
-                boxShadow: showMoreMenu ? 'var(--files-panel-state-active-shadow)' : 'none',
-              }}
-              onClick={toggleMoreMenu}
-              title="更多"
-            >
-              <MoreVertical style={{ width: 14, height: 14 }} />
-            </button>
-          </div>
         </div>
       </div>
 
@@ -575,172 +504,6 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
         </FloatPanel>,
         document.body,
       )}
-      {portalRoot && showMoreMenu && moreMenuPosition && createPortal(
-        <FloatPanel
-          ref={moreMenuRef}
-          style={{
-            ...moreMenuStyle,
-            position: 'fixed',
-            left: moreMenuPosition.left,
-            top: moreMenuPosition.top,
-            minWidth: 188,
-          }}
-          onClick={() => setShowMoreMenu(false)}
-        >
-          <button
-            onClick={() => {
-              if (pinnedFolders.length === 0) {
-                setWorkspaceFeedback({ kind: 'error', message: '当前没有可保存的文件夹' })
-                return
-              }
-              const defaultName =
-                pinnedFolders.map((p) => p.split('/').pop()).join(' + ') || '我的工作区'
-              setSaveWorkspacePrompt({ defaultName })
-            }}
-            className="ready-floating-menu-item w-full text-left flex items-center gap-2"
-            style={{
-              ...buildFloatingMenuItemStyle({ compact: true }),
-              display: 'flex',
-              alignItems: 'center',
-              gap: 10,
-              fontSize: 12,
-              color: PANEL_TOKENS.text,
-            }}
-          >
-            <Download style={{ width: 14, height: 14, color: PANEL_TOKENS.mutedStrong }} />
-            保存当前工作区
-          </button>
-          <button
-            onClick={() => {
-              void (async () => {
-                const result = await importWorkspaceFromFile()
-                if (result.ok) {
-                  setWorkspaceFeedback({ kind: 'success', message: `已导入工作区 "${result.name}"` })
-                } else {
-                  if (result.reason !== 'cancelled') {
-                    setWorkspaceFeedback({ kind: 'error', message: result.reason })
-                  }
-                }
-              })()
-            }}
-            className="ready-floating-menu-item w-full text-left flex items-center gap-2"
-            style={{
-              ...buildFloatingMenuItemStyle({ compact: true }),
-              display: 'flex',
-              alignItems: 'center',
-              gap: 10,
-              fontSize: 12,
-              color: PANEL_TOKENS.text,
-            }}
-          >
-            <Upload style={{ width: 14, height: 14, color: PANEL_TOKENS.mutedStrong }} />
-            导入工作区
-          </button>
-          <button
-            onClick={() => {
-              if (!workspaceRoot) {
-                clearWorkspace()
-                return
-              }
-              setClearWorkspaceConfirm(true)
-            }}
-            className="ready-floating-menu-item w-full text-left flex items-center gap-2"
-            style={{
-              ...buildFloatingMenuItemStyle({ compact: true }),
-              display: 'flex',
-              alignItems: 'center',
-              gap: 10,
-              fontSize: 12,
-              color: PANEL_TOKENS.text,
-            }}
-          >
-            <FolderOpen style={{ width: 14, height: 14, color: PANEL_TOKENS.mutedStrong }} />
-            新建工作区
-          </button>
-
-          {savedWorkspaces.length > 0 && (
-            <>
-              <div
-                style={{
-                  borderTop: '1px solid color-mix(in srgb, var(--border-default) 76%, rgba(255,255,255,0.28))',
-                  margin: '6px 0',
-                }}
-              />
-              <div style={{ padding: '4px 12px 6px', fontSize: 10, color: PANEL_TOKENS.mutedStrong, fontWeight: 600, letterSpacing: '0.04em' }}>
-                已保存的工作区
-              </div>
-              {savedWorkspaces.map((w) => (
-                <button
-                  key={w.name}
-                  onClick={() => loadSavedWorkspace(w.folders)}
-                  className="ready-floating-menu-item w-full text-left flex items-center gap-2"
-                  style={{
-                    ...buildFloatingMenuItemStyle({ compact: true }),
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 10,
-                    fontSize: 12,
-                    color: PANEL_TOKENS.text,
-                  }}
-                >
-                  <FolderOpen style={{ width: 14, height: 14, color: PANEL_TOKENS.mutedStrong }} />
-                  <span className="truncate">{w.name}</span>
-                </button>
-              ))}
-            </>
-          )}
-        </FloatPanel>,
-        document.body,
-      )}
-
-      <Modal
-        open={saveWorkspacePrompt !== null}
-        mode="prompt"
-        title="保存当前工作区"
-        message="为这次工作区起一个名字，稍后可以通过「导入工作区」恢复。"
-        defaultValue={saveWorkspacePrompt?.defaultName ?? '我的工作区'}
-        placeholder="工作区名称"
-        confirmLabel="保存"
-        cancelLabel="取消"
-        onConfirm={(value) => {
-          const name = (value || saveWorkspacePrompt?.defaultName || '').trim()
-          setSaveWorkspacePrompt(null)
-          if (!name) return
-          void (async () => {
-            const result = await exportWorkspaceToFile(name)
-            if (result.ok) {
-              setWorkspaceFeedback({ kind: 'success', message: `已保存工作区 "${result.name}"` })
-            } else if (result.reason !== 'cancelled') {
-              setWorkspaceFeedback({ kind: 'error', message: result.reason })
-            }
-          })()
-        }}
-        onCancel={() => setSaveWorkspacePrompt(null)}
-      />
-
-      <Modal
-        open={clearWorkspaceConfirm}
-        mode="confirm"
-        danger
-        title="新建工作区"
-        message="确定新建工作区？当前文件列表将被清空。已保存的工作区不会被删除。"
-        confirmLabel="清空"
-        cancelLabel="取消"
-        onConfirm={() => {
-          setClearWorkspaceConfirm(false)
-          clearWorkspace()
-        }}
-        onCancel={() => setClearWorkspaceConfirm(false)}
-      />
-
-      <Modal
-        open={workspaceFeedback !== null}
-        mode="alert"
-        title={workspaceFeedback?.kind === 'success' ? '已完成' : '操作未完成'}
-        message={workspaceFeedback?.message ?? ''}
-        confirmLabel="知道了"
-        onConfirm={() => setWorkspaceFeedback(null)}
-      />
     </>
   )
 

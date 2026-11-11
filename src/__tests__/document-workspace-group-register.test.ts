@@ -6,20 +6,20 @@
 // its own per-group deps; this file pins the two pieces of the group
 // contract that the V5 IPC contract gate cannot prove on its own:
 //
-//   1. `register` registers EXACTLY the 3 channel names the group owns
+//   1. `register` registers EXACTLY the home-directory channel the group owns
 //      (no extras, no missing ones)
 //   2. The returned dispose handle calls `removeHandler` for each of those
-//      same 3 channels — so dev-reload re-registration does not leak
+//      same home-directory channel — so dev-reload re-registration does not leak
 //      listeners.
 //
 // Handler bodies are NOT exercised here (the V5 gate confirms the channel
-// literals still exist on both sides of the IPC boundary, and the inline
-// behavior is fs/promises + dialog facades). The point of this file is the
+// literals still exist on both sides of the IPC boundary, and the handler
+// reads the home-directory dependency). The point of this file is the
 // GROUP MECHANISM, not handler semantics.
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import type { BrowserWindow, IpcMain, IpcMainInvokeEvent, WebContents } from 'electron'
+import type { IpcMain, IpcMainInvokeEvent } from 'electron'
 
 import {
   workspaceGroup,
@@ -54,21 +54,12 @@ function createMockIpc(): MockIpc {
 }
 
 function createMockDeps(): WorkspaceGroupDeps {
-  // The 3 handler bodies touch resolveDialogWindow, the BrowserWindow
-  // lookup, the two dialog facades, and the home-directory probe. The
-  // mocks below are no-ops because this file only exercises the GROUP
-  // MECHANISM (channel registration + dispose); accidental handler
-  // invocation would surface as an assertion failure elsewhere.
   return {
-    resolveDialogWindow: () => null,
-    getBrowserWindowFromWebContents: (_sender: WebContents) => null,
-    showSaveWorkspaceDialog: async (_win: BrowserWindow, _options) => ({ canceled: true }),
-    showOpenWorkspaceFileDialog: async (_win: BrowserWindow, _options) => ({ canceled: true, filePaths: [] }),
     getHomeDirectory: () => '/tmp/ready-test-home',
   }
 }
 
-test('workspaceGroup.register wires the 3 documented channels exactly once each', () => {
+test('workspaceGroup.register wires the home-directory channel exactly once', () => {
   const { ipc, handleCalls } = createMockIpc()
   workspaceGroup.register(ipc, createMockDeps())
 
@@ -77,17 +68,15 @@ test('workspaceGroup.register wires the 3 documented channels exactly once each'
   assert.deepEqual(
     registered,
     expected,
-    'register must subscribe to exactly the 3 document workspace channels',
+    'register must subscribe to exactly the home-directory channel',
   )
-  assert.equal(handleCalls.length, 3, 'each channel must be registered exactly once')
+  assert.equal(handleCalls.length, 1, 'each channel must be registered exactly once')
 
   // Spot-check the exact channel names per the plan (V2.3d, §3 V2.3) so
   // accidental renames trip this test even if the channel count happens
-  // to still be 3. The V5 IPC contract gate catches the renderer side;
+  // to still be 1. The V5 IPC contract gate catches the renderer side;
   // this pins the main-side literals.
   for (const required of [
-    'document:exportWorkspace',
-    'document:importWorkspace',
     'document:getHome',
   ]) {
     assert.ok(
@@ -104,7 +93,7 @@ test('workspaceGroup namespace is the documented label so dispose ordering can r
   assert.equal(workspaceGroup.namespace, 'document:workspace')
 })
 
-test('IpcDisposeHandle.dispose removes the same 3 channels that register added', () => {
+test('IpcDisposeHandle.dispose removes the same home-directory channel that register added', () => {
   const { ipc, removeHandlerCalls } = createMockIpc()
   const handle = workspaceGroup.register(ipc, createMockDeps())
 
@@ -135,7 +124,7 @@ test('dispose is idempotent — calling twice does not throw and removes nothing
   // invocation must NOT throw. We allow the call to issue removeHandler
   // again — what we care about is no exception, no listener leak.
   assert.doesNotThrow(() => handle.dispose())
-  // Second dispose runs the same 3 removeHandler calls; total count grows
+  // Second dispose runs the same removeHandler call; total count grows
   // by exactly the channel count, never more.
   assert.equal(
     removeHandlerCalls.length - afterFirst,
