@@ -10,6 +10,8 @@ export const head = '\uFEFF---\r\ntitle: "保留" # 注释\r\n---\r\n\r\n'
 export const tail = '\r\n\r\n```js\r\nconst untouched = "😀";\r\n```\n\n尾段 é'
 export async function editorFixture(t: test.TestContext, body: string) {
   const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost', pretendToBeVisual: true })
+  // jsdom has no matchMedia; the theme store (reached through the keyboard shortcuts) reads it on import.
+  dom.window.matchMedia = (query: string) => ({ matches: false, media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false }) as MediaQueryList
   const globals = { window: dom.window, document: dom.window.document, navigator: dom.window.navigator,
     HTMLElement: dom.window.HTMLElement, Element: dom.window.Element, Node: dom.window.Node,
     getComputedStyle: dom.window.getComputedStyle.bind(dom.window), MutationObserver: dom.window.MutationObserver,
