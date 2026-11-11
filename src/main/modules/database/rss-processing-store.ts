@@ -47,7 +47,7 @@ export class RSSProcessingStore {
   }
   status(now: number, hasModel: boolean): RSSProcessingStatus {
     const settings = this.settings(), start = new Date(now); start.setHours(0, 0, 0, 0)
-    const callsToday = this.db.prepare('SELECT COUNT(*) AS n FROM rss_processing_jobs WHERE started_at>=? AND started_at<=?').get<{ n: number }>(start.getTime(), now)!.n
+    const callsToday = this.db.prepare(`SELECT COUNT(*) AS n FROM (SELECT started_at FROM rss_processing_jobs UNION ALL SELECT started_at FROM rss_calibrations) WHERE started_at>=? AND started_at<=?`).get<{ n: number }>(start.getTime(), now)!.n
     const counts = this.db.prepare("SELECT SUM(status='queued') AS pending,SUM(status='running') AS running FROM rss_processing_jobs").get<{ pending: number | null; running: number | null }>()!
     return { settings, callsToday, pending: counts.pending || 0, running: counts.running || 0, unresolved: this.unresolvedItemIds().length,
       blocked: !hasModel ? 'model' : callsToday >= settings.dailyLimit ? 'limit' : !settings.enabled ? 'disabled' : null }

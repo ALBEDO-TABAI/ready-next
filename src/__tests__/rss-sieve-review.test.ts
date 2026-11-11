@@ -39,7 +39,7 @@ test('R1 v2 classifications and queued jobs survive the sieve upgrade',async t=>
   if(skipIfSqliteUnavailable(t,'RSS upgrade'))return
   const Sqlite=createRequire(import.meta.url)('better-sqlite3') as new(path:string)=>DatabaseConnection
   const db=new Sqlite(':memory:');t.after(()=>db.close())
-  for(const name of __getMigrationNamesForTests().filter(name=>!name.startsWith('155_'))) __runMigrationForTests(name,db)
+  for(const name of __getMigrationNamesForTests().filter(name=>Number(name.slice(0,3))<155)) __runMigrationForTests(name,db)
   const rss=new RSSStore(()=>db)
   db.exec("INSERT INTO rss_sources(id,name,url) VALUES('s','Source','https://example.test/feed')")
   for(const id of ['saved','queued'])db.prepare("INSERT INTO rss_items(id,source_id,guid,title,link,summary) VALUES(?,'s',?,?,'https://example.test/article','摘要')").run(id,id,id)
@@ -50,6 +50,7 @@ test('R1 v2 classifications and queued jobs survive the sieve upgrade',async t=>
   db.prepare("INSERT INTO rss_processing_jobs(id,item_id,title,article_revision,fingerprint,method,definitions_json,trigger_kind,status,created_at,event_requested) VALUES('old-queue','queued','queued',?,'old-fingerprint','rss-organize-v2',?,'automatic','queued',?,0)")
     .run(rss.content.getArticle('queued')!.revision,JSON.stringify(definitions),now)
   __runMigrationForTests('155_rss_sieve',db)
+  __runMigrationForTests('156_rss_sieve_learning_delivery',db)
   assert.equal(rss.content.getArticle('saved')!.classifications[0].stale,false)
   assert.equal(rss.content.query({collectionId:'curated'}).items[0].id,'saved')
   await new RSSProcessingService({store:rss.processing,getArticle:id=>rss.content.getArticle(id),hasModel:()=>true,now:()=>now,notify:()=>{},prepare:input=>async()=>response(input)}).wake()

@@ -1,3 +1,4 @@
+import { startRSSSieve, stopRSSSieve } from './sieve-runtime'
 import { sendableCurrentRSSWorkContext } from './work-context-runtime'
 import { getRSSContentService } from './content-runtime'
 import type { AIModelConfig } from '../../../shared/ai-providers'
@@ -21,6 +22,7 @@ export function getRSSProcessingService(): RSSProcessingService {
     const rss = getDatabase().rss
     service = new RSSProcessingService({ store: rss.processing, getArticle: (id) => rss.content.getArticle(id),
       loadArticle: (id) => getRSSContentService().loadForJudgment(id),
+      focus: () => rss.sieve.focus().text,
       workContext: () => sendableCurrentRSSWorkContext(),
       hasModel: hasRSSProcessingModel, now: () => Date.now(), notify: notifyRSSProcessing,
       prepare: (input, jobId) => {
@@ -34,9 +36,9 @@ export function getRSSProcessingService(): RSSProcessingService {
   }
   return service
 }
-export function startRSSProcessing(options?: { isProviderReady(config: AIModelConfig): boolean }): Promise<void> {
-  if (options) setRSSProviderReadiness(options.isProviderReady)
-  return getRSSProcessingService().start()
+export function startRSSProcessing(options: { isProviderReady(config: AIModelConfig): boolean; getWindow(): BrowserWindow | null }): Promise<void> {
+  setRSSProviderReadiness(options.isProviderReady)
+  return Promise.all([getRSSProcessingService().start(), startRSSSieve(options.getWindow)]).then(() => undefined)
 }
-export async function stopRSSProcessing(): Promise<void> { await service?.stop() }
+export async function stopRSSProcessing(): Promise<void> { await Promise.all([stopRSSSieve(), service?.stop()]) }
 export function wakeRSSProcessing(): void { if (service) void service.wake() }

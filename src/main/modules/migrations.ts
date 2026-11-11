@@ -1,3 +1,4 @@
+import { RSS_SIEVE_LEARNING_MIGRATION, migrateRSSSieveLearning } from './rss-engine/sieve-learning-schema'
 import { RSS_SIEVE_MIGRATION, migrateRSSSieve } from './rss-engine/sieve-schema'
 import { migrateDateMentions } from './calendar-engine/date-mentions/schema'
 import { migrateChatReadyRefs } from './database/ready-ref-migration'
@@ -4548,6 +4549,7 @@ const migrations: Migration[] = [
     END;`)
   } },
   { name: RSS_SIEVE_MIGRATION, up: migrateRSSSieve },
+  { name: RSS_SIEVE_LEARNING_MIGRATION, up: migrateRSSSieveLearning },
 ]
 
 /**
