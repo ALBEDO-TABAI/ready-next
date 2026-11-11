@@ -1,3 +1,4 @@
+import { setCalendarColorLocale } from '../../../../shared/calendar/color';
 // UI strings (Tempo's own). Keys are flat; {x} placeholders.
 export type Locale = 'en' | 'zh-TW' | 'zh-CN';
 const en = {
@@ -73,40 +74,46 @@ const zhTW: Dict = {
   newCalendar: '新日曆', rename: '重新命名', hideCal: '隱藏', showCal: '顯示', onlyThis: '只顯示此日曆', deleteCalendar: '刪除日曆',
   jumpTo: '跳至', enterDate: '輸入日期,例如 2026-11-03', durationMin: '{n}分鐘', durationH: '{n}小時', durationHM: '{h}小時{m}分鐘', declined: '已拒絕',
 };
-const zhCN: Dict = {
-  ...zhTW,
-  showWeekends: '显示周末', showDeclined: '显示已拒绝的活动', showWeekNumbers: '显示周数', week: '周', viewSettings: '视图设置',
-  allDay: '全天', noTitle: '(无标题)', newEvent: '新活动', search: '搜索活动', searchShortcuts: '搜索快捷键',
+export const zhCN: Dict = {
+  today: '今天', day: '天', week: '周', month: '月', days: '天数', nDays: '{n} 天', viewSettings: '视图设置',
+  showWeekends: '显示周末', showDeclined: '显示已拒绝的日程', showWeekNumbers: '显示周数',
+  allDay: '全天', noTitle: '(无标题)', newEvent: '新建日程', search: '搜索日程', searchShortcuts: '搜索快捷键',
   usefulShortcuts: '常用快捷键', commandMenu: '命令菜单', toggleSidebar: '切换侧边栏', goToDate: '前往日期',
   allShortcuts: '所有快捷键', calendars: '日历', addCalendar: '新建日历', importIcs: '导入 .ics…', exportIcs: '导出 .ics…',
   local: '在这台 Mac 上', defaultTag: '默认', typeCommand: '输入命令…', navigate: '导航', select: '选择', close: '关闭',
-  secCalendar: '日历', secNavigation: '导航', secView: '视图', secPrefs: '偏好设置', secEvent: '活动',
-  createEvent: '创建活动…', switchDay: '切换到日视图', switchWeek: '切换到周视图', switchMonth: '切换到月视图', switchNDays: '切换到 {n} 天视图',
+  secCalendar: '日历', secNavigation: '导航', secView: '视图', secPrefs: '偏好设置', secEvent: '日程',
+  createEvent: '新建日程…', goToday: '前往今天', nextPeriod: '前往下一时段', prevPeriod: '前往上一时段',
+  switchDay: '切换到日视图', switchWeek: '切换到周视图', switchMonth: '切换到月视图', switchNDays: '切换到 {n} 天视图',
   zoomIn: '放大时段', zoomOut: '缩小时段', zoomReset: '默认时段大小', toggleTheme: '切换浅色 / 深色主题',
-  openSettings: '打开设置', toggleAllDay: '收起 / 展开全天区', deleteEvent: '删除活动', duplicateEvent: '复制活动',
+  openSettings: '打开设置', toggleAllDay: '收起 / 展开全天区', deleteEvent: '删除日程', duplicateEvent: '复制日程',
   settings: '设置', general: '通用', profile: '个人资料', notifications: '通知', menuBar: '菜单栏', appearance: '外观',
   calendarView: '日历视图', weekStartsOn: '每周开始于', timeFormat: '时间格式', h12: '12 小时制', h24: '24 小时制',
   theme: '主题', themeSystem: '跟随系统', themeLight: '浅色', themeDark: '深色', language: '语言',
-  timeZones: '时区', primaryTz: '主要时区', addTz: '添加时区', defaultDuration: '默认活动时长',
-  reminders: '提醒事项', eventColor: '活动颜色', calendarColor: '日历颜色', addReminder: '添加提醒', participants: '参与者', addParticipants: '添加参与者', location: '地点', description: '描述',
-  conferencing: '视频通话', addLink: '添加链接或附件', busy: '忙碌', free: '空闲', defaultVisibility: '默认可见性', publicV: '公开', privateV: '私密',
-  repeat: '重复', timeZone: '时区', doesNotRepeat: '不重复', daily: '每天', weekly: '每周{d}', weekdays: '每个工作日(周一至周五)', customRepeat: '自定义重复', every: '每', uDay: '天', uWeek: '周', uMonth: '个月', uYear: '年', uDays: '天', uWeeks: '周', uMonths: '个月', uYears: '年', repeatOn: '重复于', ends: '结束', never: '永不', onDate: '于', after: '重复', occurrencesN: '次后', done: '完成', cancel: '取消', monthDayN: '每月 {n} 日', monthNth: '每月{o}个{d}', ordN: '第一|第二|第三|第四|最后一', ruleEvery: '每 {n} {u}', ruleOn: '的{d}', ruleCount: ',共 {n} 次', ruleUntil: ',直到 {d}', monthly: '每月 {n} 日', yearly: '每年 {d}', custom: '自定义…', grpPrefs: '账号', shortcutsGlobal: '全系统', sTrayCal: '菜单栏日历', sJoinGlobal: '加入下一场在线会议', menuBarSettings: '菜单栏设置', sAddSel: '添加 / 移除所选项目', sClick: '点按', sJoin: '加入在线会议', sAvail: '分享空闲时段', sSelectedHdr: '所选的活动…', sCopiedHdr: '剪切 / 复制的活动…', sEditField: '编辑字段（再按字母）', sTzToggle: '显示其他时区', conferencingPage: '在线会议', displayName: '名称', emailL: '电子邮件', profileHint: '用作你创建之活动的组织者，以及分享空闲时段时的名称。', confHint: '选择要加入有参与者之新活动的视频链接。', defaultVideo: '默认视频会议', customLink: '自定义链接', personalLink: '个人会议链接', autoAddVideo: '为每个有参与者的新活动添加链接', alignToday: '对齐今天', grpCalendars: '日历', onThisMac: '这台 Mac 上', addCalendarAcc: '添加日历', calNav: '日历导览', press: '按', toDo: '可以：', alignHint: '按 {k} 即可将视图对齐今天（周视图靠左，月视图靠上）。', viewHint: '直接在网格上设置视图和显示天数。', allViewsList: '所有视图快捷键', meetings: '会议', meetingsHint: '有参与者的活动将视为会议。', showUpcoming: '在内容面板中显示即将举行的会议：', before: '之前', hoursN: '{n} 小时', languageHint: '更改语言后界面会刷新。', tzHint: '直接在网格上设置你的时区。', tzTip: '提示：按 {k} 可显示或隐藏其他时区。', askTz: '旅行时询问是否更新时区', locationTitle: '位置', openLocIn: '打开位置链接：', themeAuto: '自动', startup: '系统启动', openAtLogin: '登录时打开日历', notifyOn: '活动提醒', notifyHint: '提醒会以通知和菜单栏旁的卡片显示。', defReminder: '默认提醒', defAllDayReminder: '全天活动的默认提醒', none: '无', sound: '播放声音', menuNext: '在菜单栏显示下一个活动', menuLen: '标题最大长度', calsHint: '日历只存储在这台电脑上。', colorL: '颜色', otherTz: '其他时区', shareAvail: '分享空闲时间', availHint: '在日历上拖动以添加时段，或自动填入空闲时间。', fillFree: '填入空闲时间', copyText: '拷贝为文字', createHolds: '创建保留时段', clearAll: '清除', availCopied: '已拷贝空闲时间', availIntro: '以下是我方便的时间（{tz}）：', holdTitle: '保留', holdsCreated: '已创建 {n} 个保留时段', noSlots: '尚未选择时段', exitAvail: '完成',
+  timeZones: '时区', primaryTz: '主要时区', addTz: '添加时区', defaultDuration: '默认日程时长', minutes: '{n} 分钟',
+  reminders: '提醒事项', eventColor: '日程颜色', calendarColor: '日历颜色', addReminder: '添加提醒', minutesBefore: '{n} 分钟前', hoursBefore: '{n} 小时前', daysBefore: '{n} 天前', atStart: '日程开始时',
+  participants: '参与者', addParticipants: '添加参与者', location: '地点', description: '描述', conferencing: '视频通话', addLink: '添加链接或附件',
+  busy: '忙碌', free: '空闲', defaultVisibility: '默认可见性', publicV: '公开', privateV: '私密',
+  repeat: '重复', timeZone: '时区', doesNotRepeat: '不重复', daily: '每天', weekly: '每周{d}', weekdays: '每个工作日（周一至周五）',
+  monthly: '每月 {n} 日', yearly: '每年 {d}', custom: '自定义…', event: '日程', grpPrefs: '账号', shortcutsGlobal: '全系统', sTrayCal: '菜单栏日历', sJoinGlobal: '加入下一场在线会议', menuBarSettings: '菜单栏设置', sAddSel: '添加 / 移除所选项目', sClick: '点按', sJoin: '加入在线会议', sAvail: '分享空闲时段', sSelectedHdr: '所选的日程…', sCopiedHdr: '剪切 / 复制的日程…', sEditField: '编辑字段（再按字母）', sTzToggle: '显示其他时区', conferencingPage: '在线会议', displayName: '名称', emailL: '电子邮件', profileHint: '用于新建日程的组织者信息，以及分享空闲时间时的名称。', confHint: '选择新建日程包含参与者时要添加的视频链接。', defaultVideo: '默认视频会议', customLink: '自定义链接', personalLink: '个人会议链接', autoAddVideo: '为每个包含参与者的新日程添加链接', alignToday: '对齐今天', grpCalendars: '日历', onThisMac: '这台 Mac 上', addCalendarAcc: '新建日历', calNav: '日历导航', press: '按', toDo: '可以：', alignHint: '按 {k} 即可将视图对齐今天（周视图靠左，月视图靠上）。', viewHint: '直接在网格上设置视图和显示天数。', allViewsList: '所有视图快捷键', meetings: '会议', meetingsHint: '有参与者的日程将视为会议。', showUpcoming: '在内容面板中显示即将举行的会议：', before: '之前', hoursN: '{n} 小时', languageHint: '更改语言后界面会刷新。', tzHint: '直接在网格上设置你的时区。', tzTip: '提示：按 {k} 可显示或隐藏其他时区。', askTz: '旅行时询问是否更新时区', locationTitle: '位置', openLocIn: '打开位置链接：', themeAuto: '自动', startup: '系统启动', openAtLogin: '登录时打开日历', notifyOn: '日程提醒', notifyHint: '提醒会以通知和菜单栏旁的卡片显示。', defReminder: '默认提醒', defAllDayReminder: '全天日程的默认提醒', none: '无', sound: '播放声音', menuNext: '在菜单栏显示下一个日程', menuLen: '标题最大长度', calsHint: '日历只存储在这台电脑上。', colorL: '颜色', otherTz: '其他时区', shareAvail: '分享空闲时间', availHint: '在日历上拖动以添加时段，或自动填入空闲时间。', fillFree: '填入空闲时间', copyText: '拷贝为文字', createHolds: '创建保留时段', clearAll: '清除', availCopied: '已拷贝空闲时间', availIntro: '以下是我方便的时间（{tz}）：', holdTitle: '保留', holdsCreated: '已创建 {n} 个保留时段', noSlots: '尚未选择时段', exitAvail: '完成', customRepeat: '自定义重复', every: '每', uDay: '天', uWeek: '周', uMonth: '个月', uYear: '年', uDays: '天', uWeeks: '周', uMonths: '个月', uYears: '年', repeatOn: '重复于', ends: '结束', never: '永不', onDate: '于', after: '重复', occurrencesN: '次后', done: '完成', cancel: '取消', monthDayN: '每月 {n} 日', monthNth: '每月{o}个{d}', ordN: '第一|第二|第三|第四|最后一', ruleEvery: '每 {n} {u}', ruleOn: '的{d}', ruleCount: '，共 {n} 次', ruleUntil: '，直到 {d}',
   cut: '剪切', copy: '拷贝', paste: '粘贴', duplicate: '复制', del: '删除', deleteKey: '删除', changeColor: '颜色',
-  undo: '撤销', deleted: '已删除活动', moved: '已移动活动', created: '已创建活动', imported: '已导入 {n} 个活动', updated: '已更新活动',
-  thisEvent: '此活动', thisAndFollowing: '此活动及后续活动', allEvents: '所有活动', editRecurring: '编辑重复活动', deleteRecurring: '删除重复活动',
-  noResults: '没有结果', events: '活动', upcoming: '即将开始', past: '过去', week_n: '第{n}周', more: '其他 {n} 个',
-  shortcutsViews: '视图', shortcutsNav: '导航', shortcutsGrid: '网格',
-  sSave: '保存或确认', sSelectAll: '选择所有可见项', sCut: '剪切', sCopy: '拷贝', sDuplicate: '复制', sPaste: '粘贴', sUndo: '撤销', sRedo: '重做',
-  sDay: '天', sWeek: '周', sNext: '下一时段', sPrev: '上一时段', sZoomReset: '重置缩放', sAllDay: '切换全天区', sSettings: '设置',
-  sShortcuts: '键盘快捷键', sSidebar: '切换侧边栏', sPanel: '切换侧面板', drag: '拖动',
-  nextEvent: '下一个:{t}', cardJoin: '加入', cardOpen: '打开', cardDismiss: '关闭', startsNow: '即将开始', startsIn: '{n} 分钟后', noUpcoming: '没有即将开始的活动',
-  newCalendar: '新日历', rename: '重命名', hideCal: '隐藏', showCal: '显示', onlyThis: '只显示此日历', deleteCalendar: '删除日历',
-  jumpTo: '跳转到', enterDate: '输入日期,例如 2026-11-03', declined: '已拒绝',
+  undo: '撤销', deleted: '已删除日程', moved: '已移动日程', created: '已创建日程', imported: '已导入 {n} 个日程', updated: '已更新日程',
+  thisEvent: '此日程', thisAndFollowing: '此日程及后续日程', allEvents: '所有日程', editRecurring: '编辑重复日程', deleteRecurring: '删除重复日程',
+  noResults: '没有结果', events: '日程', upcoming: '即将开始', past: '过去', mon: '星期一', sun: '星期日', sat: '星期六',
+  rsvpGoing: '是否参加？', yes: '是', no: '否', maybe: '待定', organizer: '组织者', more: '其他 {n} 个', week_n: '第 {n} 周',
+  shortcutsGeneral: '通用', shortcutsViews: '视图', shortcutsNav: '导航', shortcutsEvents: '日程', shortcutsGrid: '网格',
+  sCreate: '新建日程', sSearch: '搜索', sSave: '保存或确认', sEsc: '关闭或返回', sSelectAll: '选择所有可见项',
+  sDelete: '删除', sDeleteNow: '立即删除', sCut: '剪切', sCopy: '拷贝', sDuplicate: '复制', sPaste: '粘贴', sUndo: '撤销', sRedo: '重做',
+  sDay: '天', sWeek: '周', sMonth: '月', sNDays: '2–9 天', sToday: '今天', sNext: '下一时段', sPrev: '上一时段',
+  sZoomIn: '放大', sZoomOut: '缩小', sZoomReset: '重置缩放', sAllDay: '切换全天区', sTheme: '切换主题', sSettings: '设置',
+  sShortcuts: '键盘快捷键', sSidebar: '切换侧边栏', sPanel: '切换侧面板', or: '或', drag: '拖动',
+  nextEvent: '下一个：{t}', cardJoin: '加入', cardOpen: '打开', cardDismiss: '关闭', startsNow: '即将开始', startsIn: '{n} 分钟后', noUpcoming: '没有即将开始的日程',
+  newCalendar: '新建日历', rename: '重命名', hideCal: '隐藏', showCal: '显示', onlyThis: '只显示此日历', deleteCalendar: '删除日历',
+  jumpTo: '跳转到', enterDate: '输入日期，例如 2026-11-03', durationMin: '{n} 分钟', durationH: '{n} 小时', durationHM: '{h} 小时 {m} 分钟', declined: '已拒绝',
 };
 export type Key = keyof typeof en;
 const DICTS: Record<Locale, Dict> = { en, 'zh-TW': zhTW, 'zh-CN': zhCN };
 let cur: Locale = 'en';
-export function setLocale(l: Locale) { cur = l; document.documentElement.lang = l; }
+export function setLocale(l: Locale) { cur = l; setCalendarColorLocale(l); document.documentElement.lang = l; }
 export function locale(): Locale { return cur; }
 export function t(k: Key, vars?: Record<string, string | number>): string {
   return translate(cur, k, vars);

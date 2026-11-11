@@ -35,8 +35,11 @@ export const ReadingBeginSchema = z.object({ id: z.string().min(1), objectId: z.
 export const ReadingEndSchema = z.object({ id: z.string().min(1), endedAt: z.number().int().nonnegative() }).strict()
 export type ReadingBegin = z.infer<typeof ReadingBeginSchema>
 export type ReadingEnd = z.infer<typeof ReadingEndSchema>
-export type LayerReply<T> = { ok: true; value: T } | { ok: false; message: string }
+export type LayerReply<T> = { ok: true; value: T } | { ok: false; message: string; code?: string }
 export interface CalendarLayersAPI {
+  listTodos(): Promise<LayerReply<TodoEntry[]>>
+  toggleTodo(input: ToggleTodo): Promise<LayerReply<TodoWriteReceipt>>
+  scheduleTodo(input: ScheduleTodo): Promise<LayerReply<TodoWriteReceipt>>
   query(range: LayerRange): Promise<LayerReply<LayerEntry[]>>
   move(input: LayerMove): Promise<LayerReply<{ state: 'saved' | 'unsaved' }>>
   beginReading(input: ReadingBegin): Promise<LayerReply<void>>
@@ -44,28 +47,76 @@ export interface CalendarLayersAPI {
   onChanged(callback: () => void): () => void
 }
 
-/** Actual Markdown links in task paragraphs only; code and nested tasks are not double counted. */
-export function datedTasks(content: string) {
-  const { bodyStart } = readDocumentSource(content), body = content.slice(bodyStart)
-  const result: Array<{ date: string; title: string; start: number; end: number; text: string }> = []
+export interface TodoRange { start: number; end: number; text: string }
+export interface ParsedTodo {
+  title: string; heading: string | null; checked: boolean
+  /** UTF-16 offsets for document operations, plus half-open UTF-8 byte offsets. */
+  checkbox: TodoRange & { byteStart: number; byteEnd: number }
+  firstLineEnd: number
+  date: { source: 'ready' | 'obsidian'; value: string; range: TodoRange } | null
+}
+export interface TodoEntry {
+  id: string; title: string; heading: string | null; version: string
+  page: { objectId: string; title: string; ref: ReadyRef }
+  date: string | null; dateSource: 'ready' | 'obsidian' | null
+}
+const TodoIdentitySchema = z.object({ id: z.string().min(1), expectedVersion: z.string().min(1) })
+export const ToggleTodoSchema = TodoIdentitySchema.extend({ checked: z.boolean() }).strict()
+export const ScheduleTodoSchema = TodoIdentitySchema.extend({ date: calendarDate, rewriteObsidianDate: z.boolean().optional() }).strict()
+export type ToggleTodo = z.infer<typeof ToggleTodoSchema>
+export type ScheduleTodo = z.infer<typeof ScheduleTodoSchema>
+export type TodoWriteReceipt = { state: 'saved' | 'unsaved' }
+
+/** GFM task items only: frontmatter, code and nested list contents never become parent tasks. */
+export function parseTodos(content: string): ParsedTodo[] {
+  const { bodyStart, body } = readDocumentSource(content)
+  const result: ParsedTodo[] = []
   const label = (node: Nodes): string => 'children' in node ? node.children.map(label).join('') : 'value' in node ? String(node.value) : ''
-  function visit(node: Nodes, task?: string) {
-    const title = node.type === 'listItem' ? (typeof node.checked === 'boolean' ? `${node.checked ? '☑' : '☐'} ${node.children[0] ? label(node.children[0]) : ''}` : undefined) : task
-    if (title && node.type === 'link') {
-      const parsed = parseReadyUri(node.url)
-      if (parsed.ok && parsed.ref.kind === 'day') {
-        const offset = node.position!.start.offset!, raw = body.slice(offset, node.position!.end.offset!)
-        const urlOffset = raw.indexOf(node.url)
-        const dateToken = /^ready:\/\/calendar\/day\/([^?#]+)/.exec(node.url)
-        if (urlOffset >= 0 && dateToken) {
-          const start = bodyStart + offset + urlOffset + 'ready://calendar/day/'.length
-          result.push({ date: parsed.ref.date, title, start, end: start + dateToken[1].length, text: dateToken[1] })
+  let heading: string | null = null
+  function visit(node: Nodes) {
+    if (node.type === 'heading') heading = label(node)
+    if (node.type === 'listItem' && typeof node.checked === 'boolean') {
+      const start = bodyStart + node.position!.start.offset!
+      const line = content.slice(start).split(/\r?\n/, 1)[0]
+      const marker = /^(?:[-+*]|\d+[.)])[ \t]+(\[[ xX]\])(?=[ \t]|$)/.exec(line)
+      if (marker) {
+        const at = start + marker[0].length - marker[1].length
+        const byteStart = new TextEncoder().encode(content.slice(0, at)).length
+        const task: ParsedTodo = { title: node.children[0] ? label(node.children[0]) : '', heading, checked: node.checked,
+          checkbox: { start: at, end: at + 3, text: marker[1], byteStart, byteEnd: byteStart + 3 }, firstLineEnd: start + line.length, date: null }
+        function dateIn(part: Nodes) {
+          if (part.type === 'list' || part.type === 'code' || part.type === 'inlineCode') return
+          if (part.type === 'link') {
+            const parsed = parseReadyUri(part.url)
+            const offset = bodyStart + part.position!.start.offset!, end = bodyStart + part.position!.end.offset!
+            const raw = content.slice(offset, end)
+            const labelEnd = bodyStart + (part.children.at(-1)?.position?.end.offset ?? part.position!.start.offset!)
+            const urlAt = raw.indexOf(part.url, labelEnd - offset)
+            if (parsed.ok && parsed.ref.kind === 'day' && urlAt >= 0 && task.date?.source !== 'ready') {
+              const dateStart = offset + urlAt + 'ready://calendar/day/'.length
+              task.date = { source: 'ready', value: parsed.ref.date, range: { start: dateStart, end: dateStart + 10, text: parsed.ref.date } }
+            }
+            return
+          }
+          if (part.type === 'text' && !task.date) {
+            const offset = bodyStart + part.position!.start.offset!, raw = content.slice(offset, bodyStart + part.position!.end.offset!)
+            const match = /📅[ \t]+(\d{4}-\d{2}-\d{2})(?![\d-])/.exec(raw)
+            if (match && calendarDate.safeParse(match[1]).success) task.date = { source: 'obsidian', value: match[1], range: { start: offset + match.index, end: offset + match.index + match[0].length, text: match[0] } }
+          }
+          if ('children' in part) for (const child of part.children) dateIn(child)
         }
+        for (const child of node.children) dateIn(child)
+        result.push(task)
       }
     }
-    if ('children' in node) for (const child of node.children) visit(child, title)
+    if ('children' in node) for (const child of node.children) visit(child)
   }
   visit(markdownTree(body)); return result
+}
+
+export function datedTasks(content: string) {
+  return parseTodos(content).flatMap(task => task.date?.source === 'ready'
+    ? [{ date: task.date.value, title: `${task.checked ? '☑' : '☐'} ${task.title}`, ...task.date.range }] : [])
 }
 
 /** Half-open sessions split by civil days in the calendar's timezone, including DST. */

@@ -118,7 +118,7 @@ test('R3b closed history gets digest-bound display refs without changing protect
 test('R3c registered display IPC returns verified mappings and reports invalid input or stale originals', async t => {
   if (skipIfSqliteUnavailable(t, 'calendar display IPC')) return
   const { registerHooks } = await import('node:module')
-  const { db, add } = fixture(); t.after(() => db.close())
+  const { db, calendar, add } = fixture(); t.after(() => db.close())
   add('ipc-message', 'user', [{ path: 'calendar-event://timed%231793350800' }])
   db.prepare("UPDATE chat_conversations SET closed_at='closed' WHERE id='chat'").run()
   __runMigrationForTests('144_calendar_attachment_display_refs', db)
@@ -127,10 +127,11 @@ test('R3c registered display IPC returns verified mappings and reports invalid i
     export const ipcMain = { handle: (name, fn) => handlers.set(name, fn) };
     export const BrowserWindow = { getAllWindows: () => [] };
     export const app = {}, dialog = {}, shell = {};
+    export const systemPreferences = { getUserDefault: (key, type) => { if(key !== 'AppleICUForce24HourTime' || type !== 'boolean') throw new Error('Unexpected system preference'); return true; } };
   `)
   const databaseStub = 'data:text/javascript,' + encodeURIComponent(`
-    let db; export const setDb = value => { db = value };
-    export const getDatabase = () => ({ getRawDb: () => db });
+    let db, calendar; export const setDb = (value, store) => { db = value; calendar = store };
+    export const getDatabase = () => ({ getRawDb: () => db, calendar });
   `)
   const hook = registerHooks({ resolve(specifier, context, next) {
     const url = specifier === 'electron' ? electronStub
@@ -138,10 +139,27 @@ test('R3c registered display IPC returns verified mappings and reports invalid i
     return url ? { url, shortCircuit: true } : next(specifier, context)
   } })
   t.after(() => hook.deregister())
-  const stub = await import(databaseStub); stub.setDb(db)
+  const stub = await import(databaseStub); stub.setDb(db, calendar)
   const { setupCalendarWorkbenchIPC } = await import('../main/modules/calendar-engine/workbench-ipc')
   setupCalendarWorkbenchIPC()
   const { handlers } = await import(electronStub)
+  await t.test('system time default survives edits, undo and unrelated preferences without being saved', async () => {
+    const system24 = process.platform === 'darwin' || ['h23', 'h24'].includes(new Intl.DateTimeFormat(undefined, { hour: 'numeric' }).resolvedOptions().hourCycle!)
+    const snapshot = await handlers.get('calendar:snapshot')({})
+    assert.equal(snapshot.data.prefs.format24HourTime, system24)
+    const changed = await handlers.get('calendar:mutate')({}, { type: 'update', key: 'timed', scope: 'all', patch: { title: 'Changed' } }, { timed: calendar.snapshot().events.find(e => e.id === 'timed')!.revision })
+    assert.equal(changed.success, true); assert.equal(changed.data.snapshot.prefs.format24HourTime, system24)
+    const restored = await handlers.get('calendar:restore')({}, changed.data.undo, changed.data.versions)
+    assert.equal(restored.success, true); assert.equal(restored.data.snapshot.prefs.format24HourTime, system24)
+    const unrelated = await handlers.get('calendar:putPreferences')({}, { showWeekends: false })
+    assert.equal(unrelated.data.prefs.format24HourTime, system24)
+    assert.equal(calendar.snapshot().prefs?.format24HourTime, undefined)
+    for (const chosen of [false, true]) {
+      const saved = await handlers.get('calendar:putPreferences')({}, { format24HourTime: chosen })
+      assert.equal(saved.data.prefs.format24HourTime, chosen)
+      assert.equal(new CalendarStore(() => db).snapshot().prefs?.format24HourTime, chosen)
+    }
+  })
   const invoke = handlers.get('calendar:getAttachmentDisplayRefs')
   assert.equal(typeof invoke, 'function')
   assert.deepEqual(await invoke({}, ['ipc-message', 'ipc-message', 'missing']), {
