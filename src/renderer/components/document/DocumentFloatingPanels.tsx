@@ -3,7 +3,6 @@ import {
   Bookmark,
   ChevronDown,
   ChevronRight,
-  ListTree,
   Pencil,
   Plus,
   StickyNote,
@@ -52,7 +51,6 @@ interface DocumentFloatingPanelsProps {
   onToggleOutline: () => void
   onToggleMarks: () => void
   onReveal: (lineStart: number, lineEnd?: number | null) => void
-  showToggles?: boolean
 }
 
 function normalizeGroupName(value: string): string {
@@ -173,46 +171,6 @@ function saveMarkDraft(next: MarkDraftCacheEntry): void {
   }
 }
 
-export function DocumentPanelToggleButtons({
-  outlineOpen,
-  marksOpen,
-  onToggleOutline,
-  onToggleMarks,
-  rail = false,
-}: {
-  outlineOpen: boolean
-  marksOpen: boolean
-  onToggleOutline: () => void
-  onToggleMarks: () => void
-  rail?: boolean
-}) {
-  return (
-    <div
-      className={`document-floating-toggles${rail ? ' document-floating-toggles--rail' : ''}`}
-      aria-label="文档辅助面板"
-    >
-      <button
-        type="button"
-        className={`document-floating-toggle${outlineOpen ? ' is-active' : ''}`}
-        onClick={onToggleOutline}
-        title="内容速览"
-        aria-pressed={outlineOpen}
-      >
-        <ListTree className="h-[14px] w-[14px]" strokeWidth={2} />
-      </button>
-      <button
-        type="button"
-        className={`document-floating-toggle${marksOpen ? ' is-active' : ''}`}
-        onClick={onToggleMarks}
-        title="书签和笔记"
-        aria-pressed={marksOpen}
-      >
-        <Bookmark className="h-[14px] w-[14px]" strokeWidth={2} />
-      </button>
-    </div>
-  )
-}
-
 export default function DocumentFloatingPanels({
   documentPath,
   documentTitle,
@@ -223,7 +181,6 @@ export default function DocumentFloatingPanels({
   onToggleOutline,
   onToggleMarks,
   onReveal,
-  showToggles = true,
 }: DocumentFloatingPanelsProps) {
   const [outline, setOutline] = useState(EMPTY_DOCUMENT_OUTLINE)
   const [outlineContent, setOutlineContent] = useState('')
@@ -430,14 +387,6 @@ export default function DocumentFloatingPanels({
 
   return (
     <>
-      {showToggles && (
-        <DocumentPanelToggleButtons
-          outlineOpen={outlineOpen}
-          marksOpen={marksOpen}
-          onToggleOutline={onToggleOutline}
-          onToggleMarks={onToggleMarks}
-        />
-      )}
 
       {outlinePanelRendered && (
         <aside

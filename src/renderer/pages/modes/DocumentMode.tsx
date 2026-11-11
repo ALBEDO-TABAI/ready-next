@@ -32,9 +32,8 @@ import {
 } from '../../stores/useDocTabs'
 import { PageDocumentEditor } from '../../modules/document/page-ui/PageDocumentEditor'
 import FilePreview from '../../components/document/FilePreview'
-import DocumentFloatingPanels, { DocumentPanelToggleButtons } from '../../components/document/DocumentFloatingPanels'
-import DocumentExportButton from '../../components/document/DocumentExportButton'
-import DocumentBookReadingButton from '../../components/document/book/DocumentBookReadingButton'
+import DocumentFloatingPanels from '../../components/document/DocumentFloatingPanels'
+import { useHomeOnFirstVisit, usePageHeaderActions } from '../../modules/document/page-ui/usePageHeaderActions'
 import DocumentBookReadingView from '../../components/document/book/DocumentBookReadingView'
 import {
   isBookReadablePath,
@@ -240,6 +239,7 @@ export default function DocumentMode({
   const draftBoot = useDraftUI(state => state.boot)
   const pagePanel = usePagePanel()
   const inkHome = useInkLayout(state => state.home)
+  useHomeOnFirstVisit(isActive)
   const revealInFiles = useCallback(async (node: PageNode) => {
     const workspace = useWorkspace.getState()
     if (!workspace.sidebarVisible) workspace.toggleSidebar()
@@ -420,6 +420,18 @@ export default function DocumentMode({
     bookReadingEligible,
     isSceneVisible,
   )
+  const pageHeaderActions = usePageHeaderActions({
+    tab: panelTargetTab ?? null,
+    outlineOpen: outlinePanelOpen, toggleOutline: () => setOutlinePanelOpen((value) => !value),
+    marksOpen: marksPanelOpen, toggleMarks: () => setMarksPanelOpen((value) => !value),
+    bookReading: {
+      active: bookReadingVisible, eligible: bookReadingEligible,
+      toggle: () => {
+        if (bookReadingVisible) setBookReadingActive(false)
+        else if (panelTargetTab && bookReadingEligible) { captureVisibleDocumentScrollPositions(); setBookReadingTabId(panelTargetTab.id); setBookReadingActive(true) }
+      },
+    },
+  })
   useEffect(() => {
     if (shouldFinalizeBookReadingSession(
       bookReadingActive,
@@ -856,29 +868,7 @@ export default function DocumentMode({
                 sourceMode={editorMode === 'edit'}
                 onSourceMode={on => handleEditorModeChange(on ? 'edit' : 'preview')}
                 status={<DraftControls />}
-                actions={panelTargetTab?.kind !== 'library' ? <>
-                            <DocumentPanelToggleButtons
-                              outlineOpen={outlinePanelOpen}
-                              marksOpen={marksPanelOpen}
-                              onToggleOutline={() => setOutlinePanelOpen((value) => !value)}
-                              onToggleMarks={() => setMarksPanelOpen((value) => !value)}
-                              rail
-                            />
-                            <DocumentExportButton tab={panelTargetTab} />
-                            <DocumentBookReadingButton
-                              active={bookReadingVisible}
-                              disabled={!bookReadingEligible}
-                              onToggle={() => {
-                                if (bookReadingVisible) {
-                                  setBookReadingActive(false)
-                                } else if (panelTargetTab && bookReadingEligible) {
-                                  captureVisibleDocumentScrollPositions()
-                                  setBookReadingTabId(panelTargetTab.id)
-                                  setBookReadingActive(true)
-                                }
-                              }}
-                            />
-                </> : null}
+                {...pageHeaderActions}
               />
               <div className="ink-main-body">
                 {inkHome && <InkHome roots={pagePanel.roots} visible={isSceneVisible} />}
@@ -1002,7 +992,6 @@ export default function DocumentMode({
                     onToggleOutline={() => setOutlinePanelOpen((value) => !value)}
                     onToggleMarks={() => setMarksPanelOpen((value) => !value)}
                     onReveal={handlePanelReveal}
-                    showToggles={false}
                   />
                 )}
                 </div>

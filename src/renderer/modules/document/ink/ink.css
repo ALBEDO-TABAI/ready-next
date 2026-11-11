@@ -467,13 +467,6 @@ html[data-theme='dark'] .ink-scope {
 .ink-scope .ink-page.is-full .ink-page-database { max-width: none; }
 
 /* ---------------- Ready's document controls inside the topbar ---------------- */
-.ink-topbar .document-floating-toggles { display: flex; align-items: center; gap: 2px; padding: 0; margin: 0; background: none; border: 0; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
-.ink-topbar .document-floating-toggles::before, .ink-topbar .document-floating-toggles::after { content: none; }
-.ink-topbar .document-floating-toggle { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 18px; border: 0; background: none; box-shadow: none; color: var(--ink-icon-primary); }
-.ink-topbar .document-floating-toggle:hover { background: var(--ink-button-hovered-background); }
-.ink-topbar .document-floating-toggle.is-active, .ink-topbar .document-floating-toggle[aria-pressed='true'] { background: var(--studio-accent-soft); color: var(--studio-accent-text); }
-.ink-topbar .document-floating-toggle svg { width: 17px; height: 17px; stroke-width: 1.7; }
-.ink-topbar .document-floating-toggle:disabled { opacity: .35; }
 .ink-topbar [data-testid='draft-controls'] { display: flex; align-items: center; gap: 4px; padding: 0; font-size: 12px; }
 
 /* ---------------- home ---------------- */
