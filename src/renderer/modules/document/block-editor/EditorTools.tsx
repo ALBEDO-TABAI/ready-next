@@ -10,6 +10,9 @@ import { createBlockCommand, parseDocumentBlocks, parseInlineBlock, type Documen
 import WidgetEditDrawer from '../../../components/document/WidgetEditDrawer'
 import { useDocTabs } from '../../../stores/useDocTabs'
 import { CommandMenu, BlockEditorStyles, type MenuAnchor, type MenuItem } from './CommandMenu'
+import { SlashMenu } from './SlashMenu'
+import { SLASH_META, filterSlashItems, type SlashItem } from './slash-items'
+import { Sparkles } from 'lucide-react'
 import { InlineToolbar } from './InlineToolbar'
 import { useSceneVisible } from './scene'
 import { BLOCK_KINDS, convertBlock } from './catalog'
@@ -31,6 +34,7 @@ export function EditorTools({ buffer, linkBase, children, report }: { buffer: Ed
   const sceneVisible = useSceneVisible(() => root.current)
   const [selection, setSelection] = useState<Selection | null>(null)
   const [picker, setPicker] = useState<Picker | null>(null), [query, setQuery] = useState('')
+  const [slashIndex, setSlashIndex] = useState(0)
   const [results, setResults] = useState<ReferenceChoice[]>([]), [loading, setLoading] = useState(false)
   const [dateMention, setDateMention] = useState<{ selection: Selection; ref: DateMentionRef } | null>(null)
   const [widget, setWidget] = useState<Picker | null>(null)
@@ -123,20 +127,56 @@ export function EditorTools({ buffer, linkBase, children, report }: { buffer: Ed
     setPicker(null); setRestore({ at: state.block.start, start: 0, end: 0 })
   }
   let items: MenuItem[] = []
+  let slashItems: SlashItem[] = []
   if (picker?.kind === 'slash') {
     const current = picker, eol = newline(current.snapshot.content)
-    items = BLOCK_KINDS.map(([kind, label]) => ({ id: kind, label, run: () => attempt(() => {
+    const item = (id: string, run: () => void | Promise<void>, label?: string): SlashItem =>
+      ({ ...(SLASH_META[id] ?? { group: '嵌入', label: label ?? id, description: '', icon: Sparkles, keywords: '' }), id, run })
+    const all: SlashItem[] = BLOCK_KINDS.map(([kind]) => item(kind, () => attempt(() => {
       const body = inlineMarkdown(plainModel(), sliceSpans(current.model.spans, current.end))
       const block = { ...emptyBlock(0), raw: body }
       buffer.apply(createBlockCommand(current.snapshot, { type: 'replace', block: current.block, markdown: convertBlock(block, kind, eol) }))
       setPicker(null); setRestore({ at: current.block.start, start: 0, end: 0 })
-    }) }))
-    items.push(...extensions.slashItems(markdown => slashMarkdown(current, markdown)).map(item => ({ ...item, run: () => { setPicker(null); item.run() } })))
-    items.push({ id: 'widget', label: '插入 Widget', run: () => { setPicker(null); setWidget(current) } },
-      { id: 'mermaid', label: '插入 Mermaid', run: () => attempt(() => slashMarkdown(current, `\`\`\`mermaid${eol}graph TD${eol}  A --> B${eol}\`\`\``)) },
-      { id: 'columns', label: '插入分栏', run: () => attempt(() => slashMarkdown(current, `<!-- ready:columns widths=1,1 -->${eol}${eol}<!-- ready:column -->${eol}${eol}<!-- ready:columns-end -->`)) },
-      ...(linkBase?.parentPath ? [{ id: 'page', label: '插入子页面链接', run: () => { setPicker(null); setPage({ picker: current, title: '', operationId: crypto.randomUUID(), state: 'editing' }) } }] : []))
+    })))
+    all.push(...extensions.slashItems(markdown => slashMarkdown(current, markdown)).map(extension => item(extension.id, () => { setPicker(null); extension.run() }, extension.label)))
+    all.push(item('widget', () => { setPicker(null); setWidget(current) }),
+      item('mermaid', () => attempt(() => slashMarkdown(current, `\`\`\`mermaid${eol}graph TD${eol}  A --> B${eol}\`\`\``))),
+      item('columns', () => attempt(() => slashMarkdown(current, `<!-- ready:columns widths=1,1 -->${eol}${eol}<!-- ready:column -->${eol}${eol}<!-- ready:columns-end -->`))),
+      item('table', () => attempt(() => slashMarkdown(current, `| 列 1 | 列 2 |${eol}| --- | --- |${eol}|  |  |`))),
+      // Today as a date mention: the same capsule the date picker writes, editable by clicking it.
+      item('date', () => attempt(() => {
+        const now = new Date(), date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+        replaceSelection({ ...current, start: 0 }, [{ text: date, marks: { reference: { kind: 'ready', ref: { kind: 'day', date } } } }])
+      })),
+      // 引用对象 hands the typed “/…” over to the [[ picker, which replaces it with the chosen page or heading.
+      item('reference', () => { setQuery(''); setResults([]); setPicker({ ...current, start: 0, kind: 'wiki' }) }),
+      ...(linkBase?.parentPath ? [
+        item('page', () => { setPicker(null); setPage({ picker: current, title: '', operationId: crypto.randomUUID(), state: 'editing' }) }),
+        item('board', () => { setPicker(null); void createBoard(current) }),
+      ] : []))
+    slashItems = filterSlashItems(all, query)
   } else if (picker) items = results.map(result => ({ ...result, run: () => attempt(() => replaceSelection(picker, [{ text: result.text, marks: { reference: result.reference } }])) }))
+  /** 画板: a new board in the page's own folder (A.md → A/), linked from where “/” was typed. */
+  async function createBoard(state: Picker) {
+    try {
+      const parent = linkBase?.parentPath
+      if (!parent) throw new Error('请先保存当前页面，再新建画板')
+      const vault = await window.electronAPI.vault.get()
+      if (vault.status !== 'ready') throw new Error('请先设置资料库')
+      const root = vault.root.replace(/\\/g, '/').replace(/\/$/, ''), folder = parent.replace(/\\/g, '/').replace(/\.md$/i, '')
+      if (!folder.startsWith(`${root}/`)) throw new Error('当前页面不在资料库中')
+      let name = '未命名画板'
+      for (let n = 2; (await window.electronAPI.document.stat(`${folder}/${name}.canvas`))?.success; n++) name = `未命名画板 ${n}`
+      const mkdir = await window.electronAPI.document.mkdir(folder)
+      if (!mkdir.success) throw new Error(mkdir.error || '无法建立页面文件夹')
+      const created = await window.electronAPI.canvas.create({ path: `${folder.slice(root.length + 1)}/${name}.canvas`, operationId: crypto.randomUUID() })
+      if (!created.ok) throw new Error(created.error)
+      await window.electronAPI.canvas.release(created.value.handleId)
+      const target = await wikiTarget(linkBase?.filePath, `${root}/${created.value.path}`)
+      if (buffer.snapshot.version !== state.snapshot.version) throw new Error(`画板已建在 ${created.value.path}；正文已变化，未插入链接。`)
+      replaceSelection(state, [{ text: target, marks: { reference: { kind: 'wiki', target } } }])
+    } catch (error) { console.warn('[EditorTools] create board failed:', error instanceof Error ? error.message : String(error)); report(error) }
+  }
   async function createPage() {
     if (!page || pagePending.current) return
     pagePending.current = true; setPage({ ...page, state: 'pending' })
@@ -156,20 +196,46 @@ export function EditorTools({ buffer, linkBase, children, report }: { buffer: Ed
       setPage(null)
     } catch (error) { console.warn('[EditorTools] create child page failed:', error instanceof Error ? error.message : String(error)); report(error); setPage({ ...page, state: 'failed' }) } finally { pagePending.current = false }
   }
+  /**
+   * Opens or updates a picker from the text before the caret. The slash menu reads its query from the page (“/标题”),
+   * so it updates on every input and closes once the “/” is gone; [[ and @ open their own search field.
+   */
+  function detectPicker(target: EventTarget) {
+    if (!(target instanceof HTMLElement) || !target.matches('[data-rich-start]')) return
+    const state = readSelection(target)
+    if (!state || state.start !== state.end) { if (picker?.kind === 'slash') setPicker(null); return }
+    const prefix = plainText(state.model.spans).slice(0, state.end)
+    const slash = /^\/([^\r\n]*)$/.exec(prefix)
+    if (slash) {
+      if (picker?.kind !== 'slash' || query !== slash[1]) setSlashIndex(0)
+      setSelection(null); setQuery(slash[1]); setPicker({ ...state, start: 0, kind: 'slash' })
+      return
+    }
+    if (picker?.kind === 'slash') setPicker(null)
+    const trigger = /(\[\[)([^[\]\r\n]*)$/.exec(prefix) ?? /(?:^|\s)(@)([^@\r\n]*)$/.exec(prefix)
+    if (!trigger) return
+    const token = trigger[1], at = prefix.lastIndexOf(token)
+    if (token === '[[' && !linkBase) return
+    setSelection(null); setQuery(prefix.slice(at + token.length)); setResults([])
+    setPicker({ ...state, start: at, kind: token === '[[' ? 'wiki' : 'mention' })
+  }
+  // A query that matches nothing and ends with a space means the writer moved on.
+  const slashStale = picker?.kind === 'slash' && !slashItems.length && /\s$/.test(query)
+  useEffect(() => { if (slashStale) setPicker(null) }, [slashStale])
   return <div ref={root} onMouseUp={select} onKeyUp={select}
-    onInput={event => {
-      if (!(event.target instanceof HTMLElement) || !event.target.matches('[data-rich-start]') || ('isComposing' in event.nativeEvent && event.nativeEvent.isComposing)) return
-      const state = readSelection(event.target); if (!state || state.start !== state.end) return
-      const prefix = plainText(state.model.spans).slice(0, state.end)
-      const trigger = /^(\/)\S*$/.exec(prefix) ?? /(\[\[)([^[\]\r\n]*)$/.exec(prefix) ?? /(?:^|\s)(@)([^@\r\n]*)$/.exec(prefix)
-      if (!trigger) return
-      const token = trigger[1], at = prefix.lastIndexOf(token)
-      if (token === '[[' && !linkBase) return
-      setSelection(null); setQuery(prefix.slice(at + token.length)); setResults([])
-      setPicker({ ...state, start: at, kind: token === '/' ? 'slash' : token === '[[' ? 'wiki' : 'mention' })
-    }}
+    onInput={event => { if (!('isComposing' in event.nativeEvent && event.nativeEvent.isComposing)) detectPicker(event.target) }}
+    onCompositionEnd={event => detectPicker(event.target)}
     onKeyDownCapture={event => {
       if (event.nativeEvent.isComposing || !(event.target instanceof HTMLElement) || event.target.closest('[data-block-popup]')) return
+      if (picker?.kind === 'slash') {
+        const count = slashItems.length, index = Math.min(slashIndex, Math.max(0, count - 1))
+        if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && count) {
+          event.preventDefault(); event.stopPropagation()
+          setSlashIndex((index + (event.key === 'ArrowDown' ? 1 : -1) + count) % count); return
+        }
+        if (event.key === 'Enter' && count) { event.preventDefault(); event.stopPropagation(); void slashItems[index].run(); return }
+        if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); return }
+      }
       const el = event.target.closest<HTMLElement>('[data-rich-start]'); if (!el) return
       const state = readSelection(el)
       if (event.altKey && event.key === 'F10' && state && state.start !== state.end) {
@@ -219,8 +285,10 @@ export function EditorTools({ buffer, linkBase, children, report }: { buffer: Ed
     {sceneVisible && selection && !picker && <InlineToolbar anchor={selection.anchor}
       marks={sliceSpans(selection.model.spans, selection.start, selection.end)[0]?.marks ?? {}}
       apply={patch => applyMarks(selection, patch)} close={close} report={report} open={ref => openInlineReference(ref, linkBase?.filePath)} />}
-    {sceneVisible && picker && <CommandMenu label={picker.kind === 'slash' ? '插入块' : picker.kind === 'wiki' ? '页面和标题' : '提及'} anchor={picker.anchor} items={items} close={close} initialQuery={query}
-      {...(picker.kind !== 'slash' ? { query, onQuery: setQuery, pending: loading } : {})} />}
+    {sceneVisible && picker?.kind === 'slash' && <SlashMenu anchor={picker.anchor} items={slashItems} active={Math.min(slashIndex, Math.max(0, slashItems.length - 1))}
+      onActive={setSlashIndex} onChoose={choice => { void choice.run() }} onClose={close} />}
+    {sceneVisible && picker && picker.kind !== 'slash' && <CommandMenu label={picker.kind === 'wiki' ? '页面和标题' : '提及'} anchor={picker.anchor} items={items} close={close}
+      initialQuery={query} query={query} onQuery={setQuery} pending={loading} />}
     <WidgetEditDrawer open={Boolean(widget)} input={widgetInput} onClose={() => setWidget(null)} onSave={result => {
       if (!widget) return
       const eol = newline(widget.snapshot.content)
@@ -229,9 +297,9 @@ export function EditorTools({ buffer, linkBase, children, report }: { buffer: Ed
       const fence = '`'.repeat(Math.max(3, ...[...json.matchAll(/`+/g)].map(match => match[0].length + 1)))
       slashMarkdown(widget, `${fence}show-widget${eol}${json}${eol}${fence}`); setWidget(null)
     }} />
-    {sceneVisible && page && createPortal(<form className="ready-block-popover" data-block-popup data-ready-native-overlay="" role="dialog" aria-label="新建子页面" style={{ left: page.picker.anchor.left, top: page.picker.anchor.bottom }}
+    {sceneVisible && page && createPortal(<form className="rn-ui rn-float ready-block-popover" data-block-popup data-ready-native-overlay="" role="dialog" aria-label="新建子页面" style={{ left: page.picker.anchor.left, top: page.picker.anchor.bottom }}
       onSubmit={event => { event.preventDefault(); void createPage() }} onKeyDown={event => { event.stopPropagation(); if (event.key === 'Escape' && page.state !== 'pending') setPage(null) }}>
-      <input autoFocus aria-label="子页面标题" required value={page.title} disabled={page.state !== 'editing'} onChange={event => setPage({ ...page, title: event.target.value })} />
+      <input autoFocus className="rn-field" aria-label="子页面标题" required value={page.title} disabled={page.state !== 'editing'} onChange={event => setPage({ ...page, title: event.target.value })} />
       <button disabled={page.state === 'pending'} type="submit">{page.state === 'failed' ? '重试' : '创建并插入'}</button>
       <button disabled={page.state === 'pending'} type="button" onClick={() => setPage(null)}>取消</button>
     </form>, document.body)}

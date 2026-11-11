@@ -136,7 +136,7 @@ test('M4-E2 hides page-only actions when the canvas path is unavailable', async 
   await f.input('/')
   assert.ok(document.querySelector('[role="listbox"]'), 'slash menu available')
   assert.doesNotMatch(document.querySelector('[role="listbox"]')!.textContent!, /子页面|保存到/)
-  await f.key('Escape', {}, document.querySelector<HTMLElement>('[aria-label="搜索操作"]')!)
+  await f.key('Escape', {}, document.querySelector<HTMLElement>('[data-rich-start]')!)
   await f.input('[[')
   assert.equal(document.querySelector('[aria-label="页面和标题"]'), null)
   await f.key('Enter', {}, document.querySelector<HTMLElement>('[aria-label="块菜单"]')!)
@@ -150,7 +150,7 @@ test('M4-E2 inline toolbar formats the card and its undo never touches a neighbo
   await f.key('F10', { altKey: true })
   const toolbar = document.querySelector('[aria-label="文字格式"]')!
   assert.ok(toolbar)
-  const bold = [...toolbar.querySelectorAll('button')].find(button => button.textContent === '粗体')!
+  const bold = toolbar.querySelector<HTMLButtonElement>('button[aria-label="粗体"]')!
   assert.ok(bold); await act(() => bold.click()); f.bytes('**原文**😀')
   await f.key('z', { metaKey: true }); f.bytes('原文😀')
 })
@@ -256,7 +256,7 @@ test('M4-E3 wiki picker inserts a canvas-folder-relative target through the exac
 for (const changed of [false, true]) test(`M4-E3 subpage confirmation respects the canvas parent and intervening edits (${changed})`, async t => {
   const f = await fixture(t, '/', '/vault/项目/X.canvas'), api = await linkAPI(t)
   await f.input('/')
-  const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(el => el.textContent === '插入子页面链接')
+  const option = document.querySelector<HTMLElement>('.ready-slash-menu [data-slash-item="page"]')
   assert.ok(option); await act(() => option.click())
   const input = document.querySelector<HTMLInputElement>('[aria-label="子页面标题"]')!
   await act(() => {

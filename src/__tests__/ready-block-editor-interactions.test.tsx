@@ -14,6 +14,22 @@ async function search(f: Fixture, text: string) {
   })
   await f.key(input, 'Enter')
 }
+/** The slash menu takes no focus: ↓ moves to the item, Enter in the editor chooses it (W3 §4.3). */
+async function pick(f: Fixture, id: string) {
+  const options = [...document.querySelectorAll<HTMLElement>('.ready-slash-menu [role="option"]')]
+  const index = options.findIndex(option => option.dataset.slashItem === id)
+  assert.ok(index >= 0, `slash item ${id}`)
+  const editor = document.activeElement instanceof f.dom.window.HTMLElement && document.activeElement.matches('[data-rich-start]')
+    ? document.activeElement : document.querySelector<HTMLElement>('[data-rich-start]')!
+  for (let i = 0; i < index; i++) await f.key(editor, 'ArrowDown')
+  await f.key(editor, 'Enter')
+}
+async function libraryAt(t: test.TestContext, root: string) {
+  const { useVault } = await import('../renderer/stores/useVault')
+  const prior = useVault.getState().view
+  await act(async () => useVault.setState({ view: { phase: 'loaded', data: { status: 'ready', root, defaultSuggestion: root } } }))
+  t.after(() => useVault.setState({ view: prior }))
+}
 async function blockMenu(f: Fixture, text: string, action: string) {
   const handle = f.rich(text).closest('[data-block-start]')!.querySelector<HTMLElement>('[aria-label="块菜单"]')!
   assert.ok(handle); await f.key(handle, 'Enter'); await search(f, action)
@@ -75,7 +91,7 @@ for (const action of ['keyboard drag', 'pointer drag', 'conversion', 'toolbar', 
     } else if (action === 'toolbar') {
       await toolbar(f); await buttonKey(f, '粗体'); f.bytes('**正文**\r\n\r\n目标')
     } else {
-      await trigger(f, '/'); await search(f, '标题 2'); f.bytes('## ')
+      await trigger(f, '/'); await pick(f, 'h2'); f.bytes('## ')
     }
     assert.equal(f.buffer.history.entries.length, 1)
     const edited = f.buffer.snapshot.content
@@ -134,7 +150,7 @@ test('slash Widget opens the existing drawer, cancellation leaves bytes untouche
   const f = await editorFixture(t, '/')
   const el = f.rich('/'); await f.caret(el, 1)
   await act(() => el.dispatchEvent(new f.dom.window.InputEvent('input', { bubbles: true })))
-  await search(f, 'Widget')
+  await pick(f, 'widget')
   assert.ok(document.querySelector('[role="dialog"][aria-label="编辑 widget"]'))
   f.bytes('/'); await f.key(document.body, 'Escape'); f.bytes('/')
 })
@@ -142,7 +158,7 @@ test('slash Widget opens the existing drawer, cancellation leaves bytes untouche
 test('slash Mermaid and columns are real source blocks', async t => {
   const f = await editorFixture(t, '/'); const el = f.rich('/'); await f.caret(el, 1)
   await act(() => el.dispatchEvent(new f.dom.window.InputEvent('input', { bubbles: true })))
-  await search(f, 'Mermaid'); f.bytes('```mermaid\r\ngraph TD\r\n  A --> B\r\n```')
+  await pick(f, 'mermaid'); f.bytes('```mermaid\r\ngraph TD\r\n  A --> B\r\n```')
 })
 
 async function field(f: Fixture, label: string, value: string) {
@@ -179,7 +195,8 @@ test('editor popups leave with their scene: switching mode removes the toolbar a
 })
 
 async function buttonKey(f: Fixture, label: string) {
-  const el = [...document.querySelectorAll('button')].find(el => el.textContent === label)!
+  // Toolbar buttons are icons named by their label (W1); menu rows still carry their text.
+  const el = [...document.querySelectorAll('button')].find(el => el.textContent === label || el.getAttribute('aria-label') === label)!
   assert.ok(el, label); await f.key(el, 'Enter')
 }
 
@@ -198,7 +215,7 @@ test('toolbar link editing/removal and token colors preserve source around selec
 })
 
 test('Widget drawer confirmation inserts a compiled widget, not a markdown stand-in', async t => {
-  const f = await editorFixture(t, '/'); await trigger(f, '/'); await search(f, 'Widget')
+  const f = await editorFixture(t, '/'); await trigger(f, '/'); await pick(f, 'widget')
   const dialog = document.querySelector('[aria-label="编辑 widget"]')!
   const save = [...dialog.querySelectorAll('button')].find(button => button.textContent?.includes('保存'))!
   assert.ok(save)
@@ -310,7 +327,7 @@ test('drag into an empty column preserves valid markers and one undo restores it
 })
 
 test('subpage is inserted only after the page service confirms; retry keeps its operation id', async t => {
-  const f = await editorFixture(t, '/'); await referenceAPI(f, t)
+  const f = await editorFixture(t, '/'); await referenceAPI(f, t); await libraryAt(t, '/vault')
   // Renderer fixture starts from an already resolved parent; page-service transport is the only write substitute.
   await act(() => f.useDocTabs.setState(state => ({ tabs: state.tabs.map(tab => ({ ...tab, path: '/vault/父页.md', objectId: 'parent', objectBinding: { status: 'resolved' as const } })) })))
   const requests: Array<{ operationId: string; parentPath: string; title: string }> = []
@@ -320,7 +337,7 @@ test('subpage is inserted only after the page service confirms; retry keeps its 
     if (fail) return { ok: false, message: '测试写入失败' }
     return { ok: true, value: { operationId: input.operationId, state: 'committed', path: '/vault/父页/子页.md', objectId: 'child', revision: 1 } }
   } } })
-  await trigger(f, '/'); await search(f, '子页面')
+  await trigger(f, '/'); await pick(f, 'page')
   const input = await field(f, '子页面标题', '子页')
   const form = input.closest('form')!
   await act(async () => { form.dispatchEvent(new f.dom.window.Event('submit', { bubbles: true, cancelable: true })); await Promise.resolve() })
@@ -364,7 +381,7 @@ test('whole Mermaid blocks can be dragged and undone without touching their sour
 })
 
 test('slash columns creates two editable empty columns, keeping their comment markers', async t => {
-  const f = await editorFixture(t, '/'); await trigger(f, '/'); await search(f, '分栏')
+  const f = await editorFixture(t, '/'); await trigger(f, '/'); await pick(f, 'columns')
   f.bytes('<!-- ready:columns widths=1,1 -->\r\n\r\n<!-- ready:column -->\r\n\r\n<!-- ready:columns-end -->')
   assert.equal(document.querySelectorAll('[data-block-type="column"] [contenteditable="true"]').length, 2)
 })
@@ -393,4 +410,43 @@ test('converting a callout retains its authored title as well as its body', asyn
   const f = await editorFixture(t, '> [!NOTE] 标题\r\n> 正文')
   const handle = document.querySelector<HTMLElement>('[data-block-start][data-block-type="callout"] [aria-label="块菜单"]')!
   await f.key(handle, 'Enter'); await search(f, '段落'); f.bytes('标题\r\n正文')
+})
+
+test('W3 slash query is typed in the page: pinyin, English and Chinese find blocks; Esc keeps the text', async t => {
+  const f = await editorFixture(t, '/'); await referenceAPI(f, t)
+  const editor = () => document.querySelector<HTMLElement>('[data-rich-start]')!
+  const type = async (text: string) => {
+    await act(() => { editor().textContent = text })
+    await f.caret(editor(), text.length)
+    await act(() => editor().dispatchEvent(new f.dom.window.InputEvent('input', { bubbles: true })))
+  }
+  const first = () => document.querySelector<HTMLElement>('.ready-slash-menu [role="option"]')?.dataset.slashItem
+  await type('/bt'); assert.equal(first(), 'h1')
+  await type('/biaoge'); assert.equal(first(), 'table')
+  await type('/todo'); assert.equal(first(), 'task')
+  await type('/无序'); assert.equal(first(), 'bullet')
+  assert.equal(document.querySelector('.ready-slash-menu input'), null, 'no search field: the query is the page text')
+  assert.equal(document.activeElement?.closest('.ready-slash-menu'), null, 'focus stays in the editor')
+  assert.ok(document.querySelector('.ready-slash-menu [role="group"][aria-label="列表"]'), 'items sit under their group')
+  await f.key(editor(), 'Escape')
+  assert.equal(document.querySelector('.ready-slash-menu'), null); f.bytes('/无序')
+  await type('/zzz '); assert.equal(document.querySelector('.ready-slash-menu'), null, 'a dead query followed by a space closes the menu')
+  await type('/bt'); await f.key(editor(), 'Enter'); f.bytes('# ')
+})
+
+test('W3 slash table inserts a real Markdown table', async t => {
+  const table = await editorFixture(t, '/'); await trigger(table, '/'); await pick(table, 'table')
+  table.bytes('| 列 1 | 列 2 |\r\n| --- | --- |\r\n|  |  |')
+})
+
+test('W3 slash date writes today as a day reference', async t => {
+  const f = await editorFixture(t, '/'); await trigger(f, '/'); await pick(f, 'date')
+  const now = new Date(), today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  f.bytes(`[${today}](ready://calendar/day/${today})`)
+})
+
+test('W3 slash 引用对象 hands over to the page and heading picker', async t => {
+  const f = await editorFixture(t, '/'); await referenceAPI(f, t); await trigger(f, '/'); await pick(f, 'reference')
+  assert.ok(document.querySelector('[role="dialog"][aria-label="页面和标题"]'))
+  assert.equal(document.querySelector('.ready-slash-menu'), null)
 })

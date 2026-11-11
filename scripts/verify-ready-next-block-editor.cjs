@@ -158,8 +158,9 @@ async function main() {
       const selection = window.getSelection(), range = document.createRange()
       range.selectNodeContents(element); selection.removeAllRanges(); selection.addRange(range)
     })
-    await page.keyboard.insertText('/')
-    await page.getByRole('combobox', { name: '搜索操作' }).fill('Widget'); await page.keyboard.press('Enter')
+    // The slash query is typed in the page itself (W3 §4.3): no search field.
+    await page.keyboard.insertText('/widget')
+    await page.locator('.ready-slash-menu [data-slash-item="widget"][aria-selected="true"]').waitFor(); await page.keyboard.press('Enter')
     await page.getByRole('dialog', { name: '编辑 widget', exact: true }).waitFor()
     await page.keyboard.press('Escape')
     await editor.locator('[contenteditable="true"]').filter({ hasText: /^\/$/ }).focus()
