@@ -9,7 +9,14 @@ export function registerCalendarLayersIPC(ipcMain: Pick<IpcMain, 'handle' | 'rem
   async function reply<T>(work: () => T | Promise<T>): Promise<LayerReply<T>> {
     try { return { ok: true, value: await work() } } catch (error) { return { ok: false, message: String(error), ...(error instanceof Error && 'code' in error && typeof error.code === 'string' ? { code: error.code } : {}) } }
   }
-  ipcMain.handle('calendarLayers:listTodos', event => reply(async () => (await resolve(event)).layers.listTodos()))
+  // Reads with no vault configured have nothing to show: no layer entries, no to-dos. Writes still report it.
+  async function whenVault<T>(event: IpcMainInvokeEvent, read: (layers: CalendarLayersService) => T | Promise<T>, empty: T): Promise<T> {
+    try { return await read((await resolve(event)).layers) } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'no_vault') return empty
+      throw error
+    }
+  }
+  ipcMain.handle('calendarLayers:listTodos', event => reply(() => whenVault(event, layers => layers.listTodos(), [])))
   ipcMain.handle('calendarLayers:toggleTodo', (event, input: unknown) => reply(async () => {
     const result = await (await resolve(event)).layers.toggleTodo(ToggleTodoSchema.parse(input))
     event.sender.send('calendarLayers:changed'); return result
@@ -18,7 +25,7 @@ export function registerCalendarLayersIPC(ipcMain: Pick<IpcMain, 'handle' | 'rem
     const result = await (await resolve(event)).layers.scheduleTodo(ScheduleTodoSchema.parse(input))
     event.sender.send('calendarLayers:changed'); return result
   }))
-  ipcMain.handle('calendarLayers:query', (event, input: unknown) => reply(async () => (await resolve(event)).layers.query(LayerRangeSchema.parse(input))))
+  ipcMain.handle('calendarLayers:query', (event, input: unknown) => reply(() => { const range = LayerRangeSchema.parse(input); return whenVault(event, layers => layers.query(range), []) }))
   ipcMain.handle('calendarLayers:move', (event, input: unknown) => reply(async () => {
     const result = await (await resolve(event)).layers.move(LayerMoveSchema.parse(input))
     event.sender.send('calendarLayers:changed'); return result

@@ -15,7 +15,7 @@ const results=[];
    await page.locator(selector).waitFor();
  };
  // 导入 lives in the 新建日历 menu (W4 §4); the dialog is answered by the stubbed native picker.
- const importFromMenu=async()=>{await root.locator('.side-row',{hasText:'新增日曆'}).click();await page.getByRole('menuitem',{name:'匯入 .ics…'}).click()};
+ const importFromMenu=async()=>{await page.locator('.ready-calendar .side-row',{hasText:'新增日曆'}).click();await page.getByRole('menuitem',{name:'匯入 .ics…'}).click()};
  // The shell rail has no English titles (W2): ask the workbench for the calendar until its grid shows.
  const showCalendar=async()=>{
    for(let i=0;i<100&&!await page.locator('[data-testid=timegrid]').isVisible().catch(()=>false);i++){
@@ -33,7 +33,8 @@ const results=[];
  };
  if(process.env.CALENDAR_CDP_URL){browser=await chromium.connectOverCDP(process.env.CALENDAR_CDP_URL);page=browser.contexts()[0].pages().find(p=>p.url().includes('/renderer/index.html'))}else await launch();
  const errors=[];page.on('pageerror',e=>errors.push(e.message));
- let root=page.locator('.ready-calendar');
+ // The app root; since W2 the calendar's sidebar renders in the shell navigator under its own .ready-calendar scope.
+ let root=page.locator('[data-testid=ready-calendar]');
  const api=async(method,...args)=>page.evaluate(async({method,args})=>{const r=await window.electronAPI.calendar[method](...args);if(!r.success)throw Error(r.error);return r.data},{method,args});
  const snap=()=>api('snapshot');const events=async()=>(await snap()).events;
  const ok=(name,pass,detail='')=>{results.push({name,pass:!!pass,detail});console.log(`${pass?'PASS':'FAIL'} ${name}`);assert.ok(pass,`${name}: ${detail}`)};
@@ -71,7 +72,10 @@ const results=[];
   await focus();await key('Backspace');await page.locator('[data-testid=scope] .btn').nth(2).click();await idle();ok('delete all removes series and overrides',(await events()).length===0);
   await focus();await key('Control+k');ok('command menu opens',await page.locator('[data-testid=cmdk]').isVisible());await page.keyboard.type('月');await key('Enter');ok('command selects month',(await snap()).prefs.gridView==='month');
   for(const [k,view,days]of [['w','default',7],['d','default',1],['4','default',4],['m','month',4],['w','default',7]]){await focus();await key(k);const p=(await snap()).prefs;ok(`view shortcut ${k}`,p.gridView===view&&(view==='month'||p.daysPerPeriod===days))}
-  await key('Backslash');ok('sidebar hide',await root.locator('.sidebar').count()===0);await key('Backslash');ok('sidebar show',await root.locator('.sidebar').count()===1);
+  // \ collapses and restores the shell sidebar that holds the calendar navigator.
+  const sideWidth=()=>page.locator('[data-shell-sidebar]').evaluate(el=>el.getBoundingClientRect().width);
+  await key('Backslash');await page.waitForFunction(()=>document.querySelector('[data-shell-sidebar]').getBoundingClientRect().width<1).catch(()=>{});ok('sidebar hide',await sideWidth()<1);
+  await key('Backslash');await page.waitForFunction(()=>document.querySelector('[data-shell-sidebar]').getBoundingClientRect().width>100).catch(()=>{});ok('sidebar show',await sideWidth()>100);
   await key('Control+Backslash');ok('panel hide',await root.locator('.panel').count()===0);await key('Control+Backslash');ok('panel show',await root.locator('.panel').count()===1);
   await key('Shift+Slash');ok('shortcuts visible',(await root.innerText()).includes('快速鍵'));await key('Escape');await focus();await key('Period');ok('date navigation opens',await page.locator('[data-testid=goto]').isVisible());await page.locator('[data-testid=goto] input').fill('2026-12-25');await key('Enter');ok('date navigation changes month',(await page.locator('[data-testid=title]').innerText()).includes('十二月'));await key('t');
   // Calendar settings are a section of Ready's settings (W2); the app menu's 日历设置… opens them.
@@ -92,7 +96,7 @@ const results=[];
   const saved=await events();await page.reload();await showCalendar();await root.locator('[data-testid=timegrid]').waitFor();ok('reload preserves all saved records',JSON.stringify((await events()).map(e=>[e.id,e.title,e.start,e.end]))===JSON.stringify(saved.map(e=>[e.id,e.title,e.start,e.end])));
   await showMode('rss','.rss-mode-shell');await page.keyboard.press('d');await page.keyboard.press('c');ok('other module shortcuts do not create calendar events',(await events()).length===saved.length);
   await settle('.rss-mode-shell .workbench-canvas-shell');const rss=await page.locator('.rss-mode-shell .workbench-canvas-shell').boundingBox();await showCalendar();await root.locator('[data-testid=timegrid]').waitFor();await settle('.calendar-union-mode .workbench-canvas-shell');const cal=await page.locator('.calendar-union-mode .workbench-canvas-shell').boundingBox();ok('calendar boundaries match RSS',Math.abs(cal.x-rss.x)<1&&Math.abs(cal.y-rss.y)<1&&Math.abs(cal.width-rss.width)<1&&Math.abs(cal.height-rss.height)<1,JSON.stringify({cal,rss}));
-  const style=await root.evaluate(el=>({root:getComputedStyle(el).backgroundColor,rows:[...el.querySelectorAll('.mini-row')].map(e=>getComputedStyle(e).backgroundColor),panels:[...el.querySelectorAll('.sidebar,.main,.panel')].map(e=>({radius:getComputedStyle(e).borderRadius,shadow:getComputedStyle(e).boxShadow}))}));ok('no extra background or row pills',style.root==='rgba(0, 0, 0, 0)'&&style.rows.every(x=>x==='rgba(0, 0, 0, 0)'));ok('rounded cards without floating shadow',style.panels.every(x=>x.radius==='24px'&&x.shadow==='none'));
+  const style=await root.evaluate(el=>({root:getComputedStyle(el).backgroundColor,rows:[...document.querySelectorAll('.ready-calendar .mini-row')].map(e=>getComputedStyle(e).backgroundColor),panels:[...el.querySelectorAll('.sidebar,.main,.panel')].map(e=>({radius:getComputedStyle(e).borderRadius,shadow:getComputedStyle(e).boxShadow}))}));ok('no extra background or row pills',style.root==='rgba(0, 0, 0, 0)'&&style.rows.every(x=>x==='rgba(0, 0, 0, 0)'));ok('rounded cards without floating shadow',style.panels.every(x=>x.radius==='24px'&&x.shadow==='none'));
   let feed=ics;
   const server=createServer((_req,res)=>{res.writeHead(200,{'Content-Type':'text/calendar'});res.end(feed)});
   await new Promise(r=>server.listen(0,'127.0.0.1',r));
@@ -126,7 +130,7 @@ const results=[];
     ok('background reminder fires while calendar is hidden',true);
     await app.evaluate(({powerMonitor})=>powerMonitor.emit('resume'));await page.waitForTimeout(300);
     ok('resume handler does not redeliver the reminder',await page.evaluate(()=>window.__calendarReminderProof.filter(p=>p.eventId==='accept-reminder').length)===1);
-    const persisted=(await events()).map(e=>[e.id,e.title,e.start,e.end]);await app.close();app=null;page=null;await launch();root=page.locator('.ready-calendar');
+    const persisted=(await events()).map(e=>[e.id,e.title,e.start,e.end]);await app.close();app=null;page=null;await launch();root=page.locator('[data-testid=ready-calendar]');
     ok('process restart preserves real SQLite records',JSON.stringify((await events()).map(e=>[e.id,e.title,e.start,e.end]))===JSON.stringify(persisted));
     const countRows=require('node:child_process').spawnSync(require('electron'),['-e',`const DB=require('better-sqlite3');const db=new DB(process.argv[1],{readonly:true});console.log(db.prepare("SELECT count(*) n FROM calendar_reminder_deliveries WHERE event_id='accept-reminder'").get().n);db.close()`,path.join(profile,'ready.db')],{env:{...process.env,ELECTRON_RUN_AS_NODE:'1'},encoding:'utf8'});
     ok('reminder delivery remains once after restart',countRows.status===0&&countRows.stdout.trim()==='1',countRows.stderr);

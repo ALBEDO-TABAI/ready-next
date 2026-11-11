@@ -310,7 +310,7 @@ async function checkObjectPresentationAfterRestart(page, identity) {
 async function checkCalendarReference(page) {
   let reference
   await requestMode(page, 'calendar')
-  await page.locator('.ready-calendar').waitFor()
+  await page.locator('[data-testid=ready-calendar]').waitFor()
   if (!reference) {
     reference = await page.evaluate(async () => {
       const api = window.electronAPI.calendar
@@ -345,7 +345,7 @@ async function checkCalendarReference(page) {
   const attachment = page.locator('.chat-reference-chip button').filter({ hasText: reference.title }).first()
   await attachment.waitFor()
   // Clear any existing selection so a stale selected chip cannot satisfy the check.
-  await page.locator('.ready-calendar').focus()
+  await page.locator('[data-testid=ready-calendar]').focus()
   await page.keyboard.press('Escape')
   await attachment.click()
   await page.waitForFunction(({ seriesId, second }) => [...document.querySelectorAll('.ready-calendar .chip.selected')]
@@ -475,7 +475,7 @@ async function checkCalendarHistoryAfterRestart(page, reference, history) {
   await attachment.waitFor()
   // Clear selection; a restored calendar selection cannot satisfy the click check.
   await requestMode(page, 'calendar')
-  await page.locator('.ready-calendar').focus()
+  await page.locator('[data-testid=ready-calendar]').focus()
   await page.keyboard.press('Escape')
   await attachment.click()
   await page.waitForFunction(({ seriesId, second }) => [...document.querySelectorAll('.ready-calendar .chip.selected')]
