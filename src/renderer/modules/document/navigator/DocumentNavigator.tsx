@@ -9,6 +9,9 @@ import { useDocumentNavigator, type DocumentNavigatorView } from './useDocumentN
 import { ShellSidebarToggle } from '../../workbench/shell/ShellSidebar'
 import { InkSidebar } from '../ink/InkSidebar'
 import { mountFolder } from '../mountFolder'
+import { adoptIntoLibrary } from './adopt'
+import type { ContextMenuItem } from '../../../components/layout/ContextMenu'
+import type { FileItem } from '../../../stores/useWorkspace'
 import './document-navigator.css'
 
 // The document mode's navigator in the shell sidebar (W3 §3): one library, two views.
@@ -35,6 +38,9 @@ export default function DocumentNavigator({ roots, visible, onShowFiles }: {
   const title = vaultRoot?.split(/[\\/]/).filter(Boolean).pop() || '资料库'
   const hasMounted = useWorkspace(state => state.pinnedFolders.some(folder => folder !== vaultRoot))
   const isMounted = useCallback((root: string) => root !== vaultRoot, [vaultRoot])
+  // A mounted folder's entries can be brought into the library (M4).
+  const adoptItem = useCallback((item: FileItem): ContextMenuItem[] => vaultRoot
+    ? [{ id: 'adopt', label: '收进资料库…', onClick: () => { void adoptIntoLibrary(item.path) } }] : [], [vaultRoot])
   const [mountError, setMountError] = useState<string | null>(null)
 
   const mount = async () => {
@@ -56,7 +62,7 @@ export default function DocumentNavigator({ roots, visible, onShowFiles }: {
           onMountFolder={() => { void mount() }}
           mountedFolders={hasMounted || mountError ? (
             <>
-              {hasMounted && <FileTree rootFilter={isMounted} showEmergence={false} />}
+              {hasMounted && <FileTree rootFilter={isMounted} showEmergence={false} contextExtras={adoptItem} />}
               {mountError && <div role="alert" className="ink-sb-banner">{mountError}</div>}
             </>
           ) : undefined}

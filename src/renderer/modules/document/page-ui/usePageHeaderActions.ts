@@ -5,6 +5,9 @@ import { useDocTabs, type DocTab } from '../../../stores/useDocTabs'
 import type { InkPageMenuActions } from '../ink/InkTopbar'
 import { useInkLayout } from '../ink/layout-state'
 import { countMarkdownHeadings } from './heading-count'
+import { isInLibrary, useLibraryRoot } from './library-membership'
+import { adoptIntoLibrary } from '../navigator/adopt'
+import { useWorkspace } from '../../../stores/useWorkspace'
 
 /** The page header's outline toggle (three or more headings) and the “…” menu's page actions (W3 §4.1). */
 export function usePageHeaderActions({ tab, outlineOpen, toggleOutline, marksOpen, toggleMarks, bookReading }: {
@@ -13,7 +16,11 @@ export function usePageHeaderActions({ tab, outlineOpen, toggleOutline, marksOpe
   marksOpen: boolean; toggleMarks(): void
   bookReading: InkPageMenuActions['bookReading']
 }): { outline?: { open: boolean; toggle(): void }; pageMenu?: InkPageMenuActions } {
+  const libraryRoot = useLibraryRoot()
+  const pinned = useWorkspace(state => state.pinnedFolders)
   if (!tab || tab.kind === 'library') return {}
+  const path = tab.path
+  const mounted = !!path && !!libraryRoot && !isInLibrary(path, libraryRoot) && pinned.some(folder => folder !== libraryRoot && isInLibrary(path, folder))
   return {
     outline: countMarkdownHeadings(tab.content) >= 3 ? { open: outlineOpen, toggle: toggleOutline } : undefined,
     pageMenu: {
@@ -26,6 +33,7 @@ export function usePageHeaderActions({ tab, outlineOpen, toggleOutline, marksOpe
       },
       bookReading,
       marks: { open: marksOpen, toggle: toggleMarks },
+      adopt: mounted ? () => { void adoptIntoLibrary(path!) } : undefined,
     },
   }
 }

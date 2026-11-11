@@ -59,6 +59,8 @@ export interface InkPageMenuActions {
   onExport(kind: DocumentExportKind): void
   bookReading: { active: boolean; eligible: boolean; toggle(): void }
   marks: { open: boolean; toggle(): void }
+  /** A file in a mounted folder can be brought into the library (W3 M4). */
+  adopt?(): void
 }
 
 // The page header (W3 §4.1): breadcrumb on the left; on the right only 收藏, 大纲 (when the page has three or
@@ -174,6 +176,7 @@ function PageOptions({ objectId, sourceMode, onSourceMode, close, copyLink, acti
       {actions && item('导出 Markdown（含资源）', 'download', () => actions.onExport('md-bundle'), { disabled: !actions.exportable })}
       {actions && toggle('书本阅读', 'book', actions.bookReading.active, actions.bookReading.toggle, !actions.bookReading.eligible)}
       {actions && toggle('书签与笔记', 'bookmark', actions.marks.open, actions.marks.toggle)}
+      {actions?.adopt && item('收进资料库…', 'import', actions.adopt)}
     </div>
     <div className="ink-menu-divider" />
   </> : null

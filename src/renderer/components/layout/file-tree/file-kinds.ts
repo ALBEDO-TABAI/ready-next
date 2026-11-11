@@ -1,3 +1,4 @@
+import type { ContextMenuItem } from '../ContextMenu'
 import type { FileItem } from '../../../stores/useWorkspace'
 import { EBOOK_EXTENSIONS } from '../../../../shared/ebook'
 
@@ -54,6 +55,8 @@ export interface FileTreeProps {
   rootFilter?: (root: string) => boolean
   /** Show the file-emergence section and load its snapshot (activity is still recorded either way). */
   showEmergence?: boolean
+  /** Extra context-menu items for an entry (the mounted folders add 收进资料库). */
+  contextExtras?: (item: FileItem) => ContextMenuItem[]
 }
 
 export function isFileAllowed(item: FileItem): boolean {

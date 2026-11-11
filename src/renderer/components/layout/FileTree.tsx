@@ -115,6 +115,7 @@ export default function FileTree({
   onResultCountChange,
   rootFilter,
   showEmergence = true,
+  contextExtras,
 }: FileTreeProps) {
   const {
     files,
@@ -1788,6 +1789,7 @@ export default function FileTree({
           workspaceRoot={workspaceRoot}
           onOpenColorMenu={(item, x, y) => setColorMenu({ item, x, y })}
           onOpenIconPrompt={(item) => setIconPromptItem(item)}
+          extraItems={contextExtras}
         />
       )}
 
