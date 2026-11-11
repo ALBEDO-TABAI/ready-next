@@ -22,7 +22,7 @@ async function main() {
   zip.file(dbName + '.csv', 'Name,编号\n事项,00123\n')
   const source = path.join(temporary, 'notion.zip'), original = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
   fs.writeFileSync(source, original)
-  const env = { ...process.env, READY_USER_DATA_DIR: profile }; delete env.ELECTRON_RUN_AS_NODE; delete env.READY_START_HIDDEN
+  const env = { ...process.env, READY_USER_DATA_DIR: profile }; delete env.ELECTRON_RUN_AS_NODE
   let app, page
   const wait = async (predicate, label, timeout = 30000) => {
     const deadline = Date.now() + timeout
