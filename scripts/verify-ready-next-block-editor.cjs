@@ -51,8 +51,9 @@ async function main() {
       })))
       await page.waitForTimeout(150)
     }
-    // The navigator opens on its 页面 view, which lists the library's pages by title (W3 §3).
-    const row = page.locator('[data-shell-navigator="document"] section[aria-label="页面"] .ink-sb-label-btn', { hasText: path.basename(file, '.md') }).first()
+    // The navigator opens on its 页面 view, which lists the library's pages by title (W3 §3): the fixture's
+    // frontmatter title, 保留标题.
+    const row = page.locator('[data-shell-navigator="document"] section[aria-label="页面"] .ink-sb-label-btn', { hasText: '保留标题' }).first()
     await row.click()
     const panel = page.locator('[data-workbench-mode-panel="document"][data-mode-visual-state="current"]')
     await panel.waitFor({ state: 'visible' })

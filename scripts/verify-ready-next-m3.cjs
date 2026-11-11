@@ -129,7 +129,13 @@ async function main() {
       return draft.content
     }, parentId)
     await snapshot('03-chinese-split-confirmed')
-    const exited = once(app.process(), 'exit'); app.process().kill('SIGKILL'); await exited; app = undefined
+    // Kill by pid and confirm the exit within a bound: a lost signal must fail this check, never hang it.
+    const pid = app.process().pid, exited = once(app.process(), 'exit')
+    process.kill(pid, 'SIGKILL')
+    const outcome = await Promise.race([exited.then(() => 'exited'), new Promise(resolve => setTimeout(() => resolve('timeout'), 10000))])
+    if (outcome !== 'exited') { try { process.kill(pid, 0); process.kill(pid, 'SIGKILL') } catch { /* silent-catch: already gone */ } }
+    assert.equal(outcome, 'exited', `Ready Next (pid ${pid}) did not exit after SIGKILL`)
+    app = undefined
     await launch()
     // The confirmed body is durable in Main. The tab list lives in localStorage and may not reach disk before a
     // SIGKILL, so an orphaned draft comes back through "未保存的草稿" (the designed recovery path).
