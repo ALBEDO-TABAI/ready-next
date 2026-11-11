@@ -39,6 +39,7 @@ export interface RSSSieveResult { items: RSSSieveItem[]; remaining: RSSSieveItem
 export interface RSSWorkContextSnapshot { text: string; entries: RSSWorkEntry[] }
 export interface RSSFocus { version: number; text: string }
 export interface RSSSieveAPI {
+  sieveRelevance(itemId: string): Promise<RSSSieveResponse<RSSRelevance | null>>
   sieveQuery(input?: RSSSieveQuery): Promise<RSSSieveResponse<RSSSieveResult>>
   sieveToday(): Promise<RSSSieveResponse<RSSSieveItem[]>>
   sieveRecordBehavior(input: RSSBehaviorInput): Promise<RSSSieveResponse<RSSBehavior>>

@@ -1,5 +1,5 @@
 import type { BrowserMainPushChannel } from '../../../shared/browser-ipc-channels'
-import { BrowserWindow, shell } from 'electron'
+import { BrowserWindow } from 'electron'
 import { getBrowserTargetClaimService } from './browser-target-claim-singleton'
 import { findReusableCaptureTabId } from './capture-url-utils'
 import {
@@ -321,7 +321,6 @@ export abstract class BrowserControllerHostRuntime extends BrowserControllerComp
       .then((result) => {
         if (!result.success || !result.tabId) {
           this.logBrowserDiag(`[browser-v3][popup] create tab failed: ${result.error || 'unknown error'}`)
-          shell.openExternal(url)
           return
         }
 
@@ -344,7 +343,6 @@ export abstract class BrowserControllerHostRuntime extends BrowserControllerComp
       })
       .catch((error) => {
         this.logBrowserDiag(`[browser-v3][popup] create tab failed: ${String(error)}`)
-        shell.openExternal(url)
       })
   }
 

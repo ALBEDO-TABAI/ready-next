@@ -1,3 +1,4 @@
+import { searchPresentation } from '../../../../shared/search-presentation'
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { CornerDownLeft, File, FileText, Search, Shapes } from 'lucide-react'
 import { useDocTabs } from '../../../stores/useDocTabs'
@@ -27,7 +28,7 @@ export function QuickSwitcher({ onClose, onPreview }: {
       if (!result.ok) throw new Error(result.message)
       const rows = await Promise.all(result.value.filter(row => row.lastVisitedAt).sort((a, b) => b.lastVisitedAt! - a.lastVisitedAt!).slice(0, 20).map(async row => {
         const location = await window.electronAPI.objects.locate(row.objectId)
-        return location ? { path: location.path, name: location.path.split(/[\\/]/).pop()!, nameMatch: false, snippet: '', tagsHit: [], linksHit: [], sourceType: 'document' } : null
+        return location ? { ...searchPresentation({ path: location.path, name: location.path.split(/[\\/]/).pop()!, sourceType: 'document' }), path: location.path, name: location.path.split(/[\\/]/).pop()!, nameMatch: false, snippet: '', tagsHit: [], linksHit: [], sourceType: 'document' } : null
       }))
       if (active) setRecent(rows.filter(row => row !== null))
     }).catch(error => { if (active) setError(String(error)) })
@@ -42,7 +43,7 @@ export function QuickSwitcher({ onClose, onPreview }: {
   }, [query, roots])
   const items = useMemo(() => {
     if (query.trim()) return mergeDraftResults(response?.query === query && response.roots === roots ? response.items : [], draftSearchResults(query, tabs), tabs)
-    const open = [...tabs].filter(tab => tab.kind !== 'library').sort((a, b) => (b.lastActivatedAt ?? 0) - (a.lastActivatedAt ?? 0)).map(tab => ({ path: tab.path ?? `draft://${tab.id}`, name: tab.title, nameMatch: false, snippet: '', tagsHit: [], linksHit: [], sourceType: 'document', draft: { tabId: tab.id } }))
+    const open = [...tabs].filter(tab => tab.kind !== 'library').sort((a, b) => (b.lastActivatedAt ?? 0) - (a.lastActivatedAt ?? 0)).map(tab => ({ ...searchPresentation({ path: tab.path ?? '', name: tab.title, sourceType: 'document' }), path: tab.path ?? `draft://${tab.id}`, name: tab.title, nameMatch: false, snippet: '', tagsHit: [], linksHit: [], sourceType: 'document', draft: { tabId: tab.id } }))
     const paths = new Set(open.map(item => item.path))
     return [...open, ...recent.filter(item => !paths.has(item.path))]
   }, [query, roots, response, tabs, recent])

@@ -1,9 +1,15 @@
+import { z } from 'zod'
+import type { DatabasePreview } from '../../../shared/object-preview'
 import type { IpcMain } from 'electron'
 import { DatabaseRequestSchema, type DatabaseReply } from '../../../shared/document-database'
 import type { DocumentDatabaseService } from './service'
 
 /** Each request resolves the active vault's service after startup recovery; an unconfigured or switched vault is refused. */
 export function registerDocumentDatabaseIPC(ipcMain: Pick<IpcMain, 'handle'>, resolve: () => Promise<DocumentDatabaseService>): void {
+  ipcMain.handle('documentDatabase:preview', async (_event, input: unknown): Promise<DatabasePreview> => {
+    const service = await resolve(), id = z.string().min(1).parse(input)
+    return service.preview(id)
+  })
   ipcMain.handle('documentDatabase:request', async (_event, input: unknown): Promise<DatabaseReply> => {
     try {
       const service = await resolve()

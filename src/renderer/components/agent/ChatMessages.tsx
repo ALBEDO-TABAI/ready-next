@@ -1,3 +1,4 @@
+import { useConversationReveal } from '../../modules/agent/conversation-navigation'
 import { Fragment, useRef, useEffect, useMemo, useCallback, useState } from 'react'
 import type { ReactNode } from 'react'
 
@@ -125,6 +126,8 @@ export default function ChatMessages({
     return () => { cancelled = true }
   }, [displayKey])
   const displayState = displayRefs?.key === displayKey ? displayRefs : null
+  const revealTarget = useConversationReveal(state => state.target)
+  const conversationId = useAgent(state => state.conversationId)
   const head = useAgent((state) => state.activeSessionId
     ? state.sessions[state.activeSessionId]?.scopeHeadActionProjection ?? null : null)
   const workbenchMode = useMode((state) => state.workbenchMode)
@@ -159,9 +162,18 @@ export default function ChatMessages({
   // already near the bottom. If they have scrolled up (reading a tall ask-user
   // card), composer-resize-driven inset changes must not drag the view back down.
   useEffect(() => {
-    if (!isNearBottomRef.current) return
+    if (revealTarget?.scopeId === conversationId || !isNearBottomRef.current) return
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [visibleMessages.length, bottomOverlayInset])
+  }, [visibleMessages.length, bottomOverlayInset, revealTarget, conversationId])
+  useEffect(() => {
+    if (!revealTarget) return
+    if (revealTarget.scopeId !== conversationId) { useConversationReveal.setState({ target: null }); return }
+    const node = Array.from(scrollRootRef.current?.querySelectorAll<HTMLElement>('[data-message-id]') ?? []).find(node => node.dataset.messageId === revealTarget.messageId)
+    if (!node) return
+    isNearBottomRef.current = false
+    node.scrollIntoView({ block: 'start' })
+    useConversationReveal.setState({ target: null })
+  }, [revealTarget, conversationId, visibleMessages])
 
   const visibleGlobalToolTrace = useMemo(() => filterUserVisibleToolTraceEvents(toolTrace), [toolTrace])
   const shouldRenderGlobalToolTraceCapsule = showToolTraceCapsule
@@ -256,7 +268,7 @@ export default function ChatMessages({
           : null
 
         return (
-          <div key={msg.id} className="flex flex-col" style={{ gap: 10 }}>
+          <div key={msg.id} data-message-id={msg.id} className="flex flex-col" style={{ gap: 10 }}>
             {taskSnapshot ? (
               <div
                 data-chat-message-task-snapshot={msg.id}

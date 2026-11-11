@@ -59,7 +59,7 @@ interface IncomingMessage {
 
 export type GraphResult = DocumentGraphResult
 
-export type SearchResult = SearchHit & {
+export type SearchResult = SearchHit & import('../../../shared/search-presentation').SearchPresentation & {
   sourceType: string
   sourceMeta?: Record<string, unknown> | null
 }

@@ -1,9 +1,12 @@
+import { searchPresentation } from '../../../../shared/search-presentation'
 import type { DocTab } from '../../../stores/useDocTabs'
 import { parseDocumentGraph, normalizeSearchText } from '../../../../shared/document-graph-parse'
 
 export interface SearchResultItem {
   path: string
   name: string
+  title: string
+  typeLabel: import('../../../../shared/search-presentation').SearchPresentation['typeLabel']
   nameMatch: boolean
   snippet: string
   tagsHit: string[]
@@ -111,6 +114,7 @@ function matchDraftTab(tab: DocTab, parsed: ParsedLocalQuery): SearchResultItem 
   const linksHit = parsed.wikilinks.filter((link) => graph.wikilinks.some((w) => w.target.toLowerCase() === link))
 
   return {
+    ...searchPresentation({ path: tab.path ?? '', name: tab.title || '新文档', sourceType: 'document' }, graph.frontmatter),
     path: tab.path ?? `draft://${tab.id}`,
     name: tab.title || '新文档',
     nameMatch,

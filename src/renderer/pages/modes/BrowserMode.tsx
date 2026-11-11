@@ -252,6 +252,7 @@ export default function BrowserMode({
   const splitTabHasNativeSurface = visibleSplitTab ? !visibleSplitTab.error && !isReadyBrowserBlankUrl(visibleSplitTab.url) : false
   const shouldHideAllBrowserHosts = (hasError || isReadyBlankTab) && !splitTabHasNativeSurface
   const fastCardItems = useFastCard(s => s.items)
+  const fastCardRevealTarget = useFastCard(s => s.revealTarget)
   const fastCardSyncState = useFastCard(s => s.syncState)
   const fastCardTransferReceipt = useFastCard(s => s.transferReceipt)
   const [fastCardSaveItems, setFastCardSaveItems] = useState<string[] | null>(null)
@@ -267,6 +268,7 @@ export default function BrowserMode({
   const openFastCard = useFastCard(s => s.open)
   const collapseFastCard = useFastCard(s => s.collapse)
   const [fastCardResultPanel, setFastCardResultPanel] = useState<FastCardResultPanelData | null>(null)
+  useEffect(() => { if (fastCardRevealTarget) setFastCardResultPanel(null) }, [fastCardRevealTarget])
   const [localMediaUploadStatus, setLocalMediaUploadStatus] = useState<{ kind: 'uploading' | 'success' | 'error'; message: string } | null>(null)
   const [generatedImageDragActive, setGeneratedImageDragActive] = useState(false)
   const suppressNativeBrowserSurface = generatedImageDragActive || localMediaUploadStatus !== null || fastCardTransferVisible || fastCardOpeningPicker
@@ -848,6 +850,7 @@ export default function BrowserMode({
       const snapshot: FastCardOverlaySnapshot = {
         mode: fastCardResultPanel ? 'result' : 'fastcard',
         items: fastCardItems,
+        revealTarget: fastCardRevealTarget,
         syncState: fastCardSyncState,
         resultPanel: fastCardResultPanel,
         bounds: {
@@ -874,7 +877,7 @@ export default function BrowserMode({
       observer.disconnect()
       window.removeEventListener('resize', scheduleSnapshot)
     }
-  }, [fastCardItems, fastCardSyncState, fastCardPanelOpen, fastCardResultPanel, fastCardTransferVisible, fastCardOpeningPicker, isActive, isElectron])
+  }, [fastCardItems, fastCardRevealTarget, fastCardSyncState, fastCardPanelOpen, fastCardResultPanel, fastCardTransferVisible, fastCardOpeningPicker, isActive, isElectron])
 
   useEffect(() => {
     if (!isElectron) return

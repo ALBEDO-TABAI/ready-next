@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { SaveToPicker } from '../../modules/document/page-ui/SaveToPicker'
 import type { PageNode, PageResult } from '../../../shared/document-pages'
 import type { FastCardCanvasTarget, FastCardTransferRequest } from '../../../shared/fastcard'
@@ -9,6 +9,7 @@ import { parseReadyUri } from '../../../shared/ready-ref'
 import type { FastCardItem, FastCardSyncState } from '../../../shared/fastcard'
 
 interface FastCardPanelProps {
+  revealTarget?: { id: string; requestId: string } | null
   items: FastCardItem[]
   syncState?: FastCardSyncState
   onCollapse: () => void
@@ -65,7 +66,14 @@ function timeLabel(at: number): string {
 }
 
 // The FastCard shelf (W4 §6): the same panel in the browser's overlay window and in the shell's drawer.
-export default function FastCardPanel({ items, syncState, onCollapse, onClear, onSaveCanvas, onInsertToChat, onRemoveItem }: FastCardPanelProps) {
+export default function FastCardPanel({ revealTarget, items, syncState, onCollapse, onClear, onSaveCanvas, onInsertToChat, onRemoveItem }: FastCardPanelProps) {
+  const root = useRef<HTMLElement>(null)
+  useEffect(() => {
+    if (!revealTarget) return
+    const card = Array.from(root.current?.querySelectorAll<HTMLElement>('[data-fastcard-id]') ?? []).find(node => node.dataset.fastcardId === revealTarget.id)
+    card?.scrollIntoView({ block: 'center' })
+    card?.focus({ preventScroll: true })
+  }, [revealTarget])
   const [playback, setPlayback] = useState<Record<string, string>>({})
   const [playbackError, setPlaybackError] = useState('')
   const [selected, setSelected] = useState<string[]>([])
@@ -74,7 +82,7 @@ export default function FastCardPanel({ items, syncState, onCollapse, onClear, o
   const saving = syncState?.kind === 'saving'
   const toggle = (id: string, on: boolean) => setSelected(current => on ? [...current.filter(item => item !== id), id] : current.filter(item => item !== id))
   return (
-    <aside className="fc-shelf" aria-label="FastCard">
+    <aside ref={root} className="fc-shelf" aria-label="FastCard">
       <header className="fc-shelf__head">
         <div><h2>暂存</h2><span className="fc-shelf__count">{items.length} 条{chosen.length ? ` · 已选 ${chosen.length} 条` : ''}</span></div>
         <IconButton icon={<PanelRightClose size={16} />} title="收起" onClick={onCollapse} />
@@ -89,7 +97,7 @@ export default function FastCardPanel({ items, syncState, onCollapse, onClear, o
           <p className="fc-shelf__empty">还没有暂存的内容。在网页上选中文字或图片收进来，或用快记（⌥⌘Space）随手记一条。</p>
         ) : items.map(item => {
           const title = itemTitle(item), preview = itemPreview(item), checked = chosen.includes(item.id)
-          return <article className="fc-card" data-selected={checked || undefined} key={item.id} draggable
+          return <article data-fastcard-id={item.id} tabIndex={-1} className="fc-card" data-selected={checked || undefined} key={item.id} draggable
             onDragStart={event => { event.dataTransfer.setData('application/x-ready-fastcard', JSON.stringify({ itemIds: checked ? chosen : [item.id], operationId: crypto.randomUUID() })); event.dataTransfer.effectAllowed = 'move' }}>
             <div className="fc-card__head">
               <input type="checkbox" className="fc-card__check" aria-label={`选择 ${title}`} checked={checked} onChange={event => toggle(item.id, event.target.checked)} />

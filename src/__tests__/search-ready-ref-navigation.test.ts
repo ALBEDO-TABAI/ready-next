@@ -73,7 +73,7 @@ test('search panel clicks open four exact targets and show unavailable conversat
     assert.equal(useAgent.getState().currentScopeId, 'wanted')
     assert.equal(useAgent.getState().messages[0]?.content, 'Exact transcript')
     assert.equal(useWorkspace.getState().chatPanelVisible, true)
-    assert.deepEqual(calls, ['rss:article', 'original:https://example.com/original', 'calendar:series#1800000000', 'calendar:day#1793318400', 'web:https://example.com', 'agent:wanted'])
+    assert.deepEqual(calls, ['rss:article', 'web:https://example.com/original', 'calendar:series#1800000000', 'calendar:day#1793318400', 'web:https://example.com', 'agent:wanted'])
     visible = false
     await click('Agent target')
     assert.match(dom.window.document.body.textContent || '', /会话已关闭、已删除或不可见/)

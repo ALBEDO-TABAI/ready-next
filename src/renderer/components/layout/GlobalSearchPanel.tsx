@@ -1,3 +1,4 @@
+import { openWebpageInBrowser } from '../../modules/browser/openWebpageInBrowser'
 import { ReadyRefSchema } from '../../../shared/ready-ref'
 import { openIndexedSearchResult } from '../../modules/workbench/open-ready-ref'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
@@ -590,7 +591,7 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
                   {item.sourceType === 'rss' && typeof item.sourceMeta?.link === 'string' && (
                     <button type="button" className="text-[10px] underline" onClick={() => {
                       const url = ReadyRefSchema.safeParse({ kind: 'web', url: item.sourceMeta?.link })
-                      if (url.success && url.data.kind === 'web') window.open(url.data.url, '_blank', 'noopener,noreferrer')
+                      if (url.success && url.data.kind === 'web') void openWebpageInBrowser(url.data.url).then(opened => { if (!opened) setMessage('网页未能在 Ready 浏览器中打开') }).catch(error => setMessage(String(error)))
                     }}>打开原文</button>
                   )}
                   </div>

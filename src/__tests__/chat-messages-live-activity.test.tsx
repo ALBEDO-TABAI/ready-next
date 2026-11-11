@@ -191,3 +191,28 @@ test('R3c a failed mapping read is visible and cannot open the original attachme
   assert.match(button.title, /摘要不匹配/)
   button.click()
 })
+
+
+test('W6 conversation reveal scrolls to the exact question and does not auto-scroll to the latest answer', async t => {
+  const { useAgent } = await import('../renderer/stores/useAgent')
+  const { useConversationReveal } = await import('../renderer/modules/agent/conversation-navigation')
+  const saved = useAgent.getState(), reveal = useConversationReveal.getState(), scroll = dom.window.HTMLElement.prototype.scrollIntoView
+  const targets: Array<string | null> = []
+  dom.window.HTMLElement.prototype.scrollIntoView = function () { targets.push(this.getAttribute('data-message-id')) }
+  t.after(() => { useAgent.setState(saved, true); useConversationReveal.setState(reveal, true); dom.window.HTMLElement.prototype.scrollIntoView = scroll })
+  useAgent.setState({ conversationId: 'scope' })
+  useConversationReveal.setState({ target: { scopeId: 'scope', messageId: 'wanted', requestId: 'request' } })
+  renderMessages(t, { messages: [
+    { id: 'wanted', type: 'user', content: '问题', timestamp: new Date() },
+    { id: 'answer', type: 'assistant', content: '回答', timestamp: new Date() },
+    { id: 'latest', type: 'user', content: '之后的问题', timestamp: new Date() },
+  ], isStreaming: false, pendingTaskRun: null })
+  assert.deepEqual(targets, ['wanted'])
+  assert.equal(useConversationReveal.getState().target, null)
+  flushSync(() => {
+    useConversationReveal.setState({ target: { scopeId: 'scope', messageId: 'wanted', requestId: 'stale' } })
+    useAgent.setState({ conversationId: 'other' })
+  })
+  assert.deepEqual(targets, ['wanted'])
+  assert.equal(useConversationReveal.getState().target, null)
+})

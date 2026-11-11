@@ -12,6 +12,7 @@ export interface ObjectStateMigrationReport {
   unresolved: Array<{ path: string; reason: string }>
 }
 export interface ObjectPresentationAPI {
+  preview(ref: import('./ready-ref').ReadyRef): Promise<import('./object-preview').StoredObjectPreview | null>
   resolvePath(path: string): Promise<ObjectLocation>
   locate(objectId: string): Promise<ObjectLocation | null>
   prepareMigration(request: ObjectStateMigrationRequest): Promise<ObjectStateMigrationReport>

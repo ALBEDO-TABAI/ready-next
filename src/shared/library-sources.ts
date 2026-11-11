@@ -21,6 +21,6 @@ export interface BookSourcesAPI {
   cancel(id: string): Promise<LibraryResult<SourceJob>>
   retry(id: string): Promise<LibraryResult<SourceJob>>
   answer(input: { id: string; token: string; text: string }): Promise<LibraryResult<void>>
-  openManual(id: string): Promise<LibraryResult<void>>
+  manualLink(id: string): Promise<LibraryResult<string>>
   onChanged(listener: (jobs: SourceJob[]) => void): () => void
 }
