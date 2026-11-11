@@ -3,6 +3,7 @@ import { useStore } from 'zustand'
 import type { DocumentPagesAPI, PageNode, PageOperation, PageResult, PageRoot, PageTrashEntry } from '../../../../shared/document-pages'
 import { toReadyUri } from '../../../../shared/ready-ref'
 import { LIBRARY_DATABASE_PAGE } from '../../../../shared/library'
+import { READY_REF_MIME } from '../../calendar/linkage/transfer'
 import { useDocTabs } from '../../../stores/useDocTabs'
 import { useVault } from '../../../stores/useVault'
 import { useWorkspace } from '../../../stores/useWorkspace'
@@ -259,7 +260,7 @@ export function InkSidebar({ roots, api = window.electronAPI.documentPages, onOp
         onDrop={event => { event.preventDefault(); event.stopPropagation(); void drop(node, parent!, root, true) }} />}
       <div className={`ink-sb-row ink-sb-tree${selected ? ' is-selected' : ''}${dropTarget === `into:${id}` ? ' is-drop-into' : ''}`}
         draggable={sortable && !busy && node.kind === 'page' && !node.ambiguity}
-        onDragStart={(event: DragEvent) => { event.stopPropagation(); dragged.current = { node, parent: parent!, root }; event.dataTransfer.setData('text/plain', node.objectId); event.dataTransfer.effectAllowed = 'move' }}
+        onDragStart={(event: DragEvent) => { event.stopPropagation(); dragged.current = { node, parent: parent!, root }; event.dataTransfer.setData('text/plain', node.objectId); if (node.kind === 'page') event.dataTransfer.setData(READY_REF_MIME, JSON.stringify({ kind: 'page', id: node.objectId })); event.dataTransfer.effectAllowed = 'move' }}
         onDragEnd={() => { dragged.current = null; setDropTarget(null) }}
         onDragOver={event => { if (dragged.current && sortable && expandable) { event.preventDefault(); setDropTarget(`into:${id}`) } }}
         onDragLeave={() => setDropTarget(current => current === `into:${id}` ? null : current)}

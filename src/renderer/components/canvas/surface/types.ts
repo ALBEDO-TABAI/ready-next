@@ -26,5 +26,10 @@ export interface CanvasSurfaceProps {
   revealNode?: { nodeId?: string; requestId: string }
   initialCamera?: Camera
   onFrameWork?: (work: FrameWork) => void
+  /** More 新建 items on the canvas's right-click menu (链接, 文档卡, 子画板), placed at the clicked world point. */
+  extraNewItems?: (at: { x: number; y: number }, close: () => void) => ReactNode
+  /** Drops the host understands (FastCard items, pages from the sidebar): return true when handled. */
+  onDropData?: (data: DataTransfer, at: { x: number; y: number }) => boolean
+  acceptsDrop?: (types: readonly string[]) => boolean
 }
 export type Tool = 'select' | 'pan' | 'rect' | 'arrow' | 'edge' | 'path'

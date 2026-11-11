@@ -13,6 +13,11 @@ import { CanvasCard } from './CanvasCard'
 import { useCanvasBuffer } from './useCanvasBuffer'
 import type { CanvasSurfaceProps, Tool } from './types'
 import { CanvasEditorLifecycle } from './editor-lifecycle'
+import { CanvasCorner, CanvasCrumbs, CanvasDock, ChromeMenu, MenuItem, SelectionBar } from './CanvasChrome'
+import { cardFrame } from '../../../modules/canvas/interaction/graphics'
+import { CalendarPlus, ClipboardPaste, FilePlus2, Sparkles, StickyNote, Trash2, Type } from 'lucide-react'
+
+const TOOL_KEYS: Record<string, Tool> = { v: 'select', h: 'pan', b: 'rect', a: 'arrow', c: 'edge', d: 'path' }
 
 export function CanvasSurface(props: CanvasSurfaceProps) {
   const buffer = useCanvasBuffer(props), { canvas, busy, commit } = buffer
@@ -31,7 +36,9 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     setSelected([node.id]); setCamera({ x: size.width / 2 - node.x - node.width / 2, y: size.height / 2 - node.y - node.height / 2, zoom: 1 })
   }, [props.revealNode?.requestId, size.width, size.height]) // eslint-disable-line react-hooks/exhaustive-deps -- a navigation request runs once; editing must not recenter
 
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
+  const [menu, setMenu] = useState<{ x: number; y: number; kind: 'card' | 'canvas'; world: { x: number; y: number } } | null>(null)
+  const [lastShape, setLastShape] = useState<Tool>('rect'), [shapesOpen, setShapesOpen] = useState(false), [arrangeOpen, setArrangeOpen] = useState(false)
+  const [search, setSearch] = useState<string | null>(null), [hit, setHit] = useState(0)
   const [composing, setComposing] = useState(false), [compositionError, setCompositionError] = useState('')
   const root = useRef<HTMLDivElement>(null), world = useRef<HTMLDivElement>(null), overlay = useRef<SVGSVGElement>(null)
   const elements = useRef(new Map<string, HTMLElement>()), edgeElements = useRef<GestureScene['edgeElements']>(new Map())
@@ -107,9 +114,56 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     else if (mod && key === 'g') { e.preventDefault(); void commit(e.shiftKey ? ungroupOperations(canvas, selected) : groupOperations(chosen, crypto.randomUUID())) }
     else if (!mod && (e.key === 'Delete' || e.key === 'Backspace')) { e.preventDefault(); recycle() }
     else if (!mod && ['p', 'l', 'r'].includes(key)) { e.preventDefault(); arrange(key.toUpperCase() as 'P' | 'L' | 'R') }
+    else if (mod && key === 'f') { e.preventDefault(); setSearch(current => current ?? '') }
+    else if (!mod && e.shiftKey && e.key === '!') { e.preventDefault(); fit() }
+    else if (!mod && !e.shiftKey && TOOL_KEYS[key]) { e.preventDefault(); chooseTool(TOOL_KEYS[key]) }
+    else if (!mod && !e.shiftKey && (key === 't' || key === 'n')) { e.preventDefault(); placeCard(key === 't' ? 'text' : 'note') }
     else if (!mod && (e.key === '+' || e.key === '=' || e.key === '-')) { e.preventDefault(); setCamera(zoomAt(camera, { x: size.width / 2, y: size.height / 2 }, camera.zoom * (e.key === '-' ? 0.8 : 1.25))) }
   }
-  const tools: Array<[Tool, string]> = [['select', '选择'], ['pan', '平移'], ['rect', '矩形'], ['arrow', '箭头'], ['edge', '连线'], ['path', '手绘']]
+  function chooseTool(next: Tool) {
+    if (['rect', 'arrow', 'path'].includes(next) && !props.prepareGraphic) return
+    gestures.cancel(); setTool(next); if (['rect', 'arrow', 'edge'].includes(next)) setLastShape(next)
+  }
+  /** 文字卡 and 便签: a new card where you are looking (or where you right-clicked), opened for writing. */
+  function placeCard(kind: 'text' | 'note', at?: { x: number; y: number }) {
+    if (busy || trash || editing) return
+    const point = at ?? screenToWorld({ x: size.width / 2, y: size.height / 2 }, camera)
+    const node = { id: crypto.randomUUID(), x: Math.round(point.x - 130), y: Math.round(point.y - 40), width: 260, height: 120, type: 'text' as const, text: '',
+      ...(kind === 'note' ? { color: '3' } : {}), ready: { kind } }
+    void commit([{ type: 'addNode', node }]).then(ok => { if (ok) { setSelected([node.id]); if (props.renderTextEditor) setEditing(node.id) } })
+  }
+  /** Fit every card in view (at most 100%), as the corner's 适应内容 and ⇧1 do. */
+  function fit() {
+    if (!active.nodes.length) { setCamera({ x: 40, y: 80, zoom: 1 }); return }
+    const frames = active.nodes.map(cardFrame)
+    const minX = Math.min(...frames.map(f => f.x)), minY = Math.min(...frames.map(f => f.y))
+    const maxX = Math.max(...frames.map(f => f.x + f.width)), maxY = Math.max(...frames.map(f => f.y + f.height))
+    const zoom = Math.max(0.05, Math.min(1, (size.width - 160) / Math.max(1, maxX - minX), (size.height - 220) / Math.max(1, maxY - minY)))
+    setCamera({ zoom, x: size.width / 2 - (minX + maxX) / 2 * zoom, y: size.height / 2 - (minY + maxY) / 2 * zoom + 20 })
+  }
+  const needle = search?.trim().toLocaleLowerCase() ?? ''
+  const matches = needle ? active.nodes.filter(node => [node.type === 'text' ? node.text : '', node.type === 'link' ? node.url : '', node.type === 'group' ? node.label ?? '' : '',
+    node.type === 'file' ? node.file : '', node.ready.preview?.title ?? '', node.ready.preview?.description ?? ''].some(text => text.toLocaleLowerCase().includes(needle))) : []
+  const matchIds = new Set(matches.map(node => node.id))
+  function step(delta: 1 | -1) {
+    if (!matches.length) return
+    const next = (Math.min(hit, matches.length - 1) + delta + matches.length) % matches.length, node = matches[next], frame = cardFrame(node)
+    setHit(next); setSelected([node.id])
+    setCamera(c => ({ ...c, x: size.width / 2 - (frame.x + frame.width / 2) * c.zoom, y: size.height / 2 - (frame.y + frame.height / 2) * c.zoom }))
+  }
+  const selectionBox = chosen.length && !editing && !trash && !menu ? (() => {
+    const frames = chosen.map(cardFrame)
+    const left = Math.min(...frames.map(f => f.x)) * camera.zoom + camera.x, right = Math.max(...frames.map(f => f.x + f.width)) * camera.zoom + camera.x
+    const top = Math.min(...frames.map(f => f.y)) * camera.zoom + camera.y
+    return { left: Math.max(180, Math.min(size.width - 180, (left + right) / 2)), top: Math.max(68, top - 52) }
+  })() : null
+  const schedulable = props.onScheduleNode && chosen.length === 1 && ['text', 'note', 'document'].includes(chosen[0].ready.kind)
+  async function paste(at: { x: number; y: number }) {
+    const text = (await navigator.clipboard?.readText?.())?.trim()
+    if (!text) throw new Error('剪贴板里没有文字或链接')
+    const frame = { id: crypto.randomUUID(), x: Math.round(at.x - 130), y: Math.round(at.y - 40), width: 260, height: /^https?:\/\/\S+$/i.test(text) ? 195 : 120 }
+    await commit([{ type: 'addNode', node: /^https?:\/\/\S+$/i.test(text) ? { ...frame, type: 'link', url: text, ready: { kind: 'link' } } : { ...frame, type: 'text', text, ready: { kind: 'text' } } }])
+  }
   const recycled = canvas.nodes.filter(n => n.ready.trash)
   async function addToDocument() {
     if (composing || !props.onAddToDocument) return
@@ -119,9 +173,13 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     finally { setComposing(false) }
   }
   return <div className="rn-canvas" data-canvas-surface tabIndex={0} ref={root} aria-label={canvas.ready.title || '画板'}
-    onDragOver={event => { if (event.dataTransfer.types.includes(READY_REF_MIME)) { event.preventDefault(); event.stopPropagation() } }}
+    onDragOver={event => { if (event.dataTransfer.types.includes(READY_REF_MIME) || props.acceptsDrop?.(event.dataTransfer.types)) { event.preventDefault(); event.stopPropagation() } }}
     onDrop={event => {
       try {
+        if (props.onDropData && !busy && !trash && !editing) {
+          const rect = event.currentTarget.getBoundingClientRect(), at = screenToWorld({ x: event.clientX - rect.left, y: event.clientY - rect.top }, camera)
+          if (props.onDropData(event.dataTransfer, { x: Math.round(at.x), y: Math.round(at.y) })) { event.preventDefault(); event.stopPropagation(); return }
+        }
         const dropped = readEventTransfer(event.dataTransfer)
         if (!dropped) return
         event.preventDefault(); event.stopPropagation()
@@ -131,12 +189,13 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
       } catch (cause) { setCompositionError(String(cause)) }
     }}
     onContextMenu={event => {
-      if ((!props.onAddToDocument && !props.onScheduleNode) || busy || trash || editing || (event.target instanceof Element && event.target.closest('[data-canvas-ui]'))) return
+      if (busy || trash || editing || (event.target instanceof Element && event.target.closest('[data-canvas-ui]'))) return
       event.preventDefault(); gestures.cancel()
       const card = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-node-id]') : null
       if (card?.dataset.nodeId && !selected.includes(card.dataset.nodeId)) setSelected([card.dataset.nodeId])
-      const rect = event.currentTarget.getBoundingClientRect()
-      setMenu({ x: event.clientX - rect.left, y: event.clientY - rect.top })
+      if (!card) setSelected([])
+      const rect = event.currentTarget.getBoundingClientRect(), x = event.clientX - rect.left, y = event.clientY - rect.top
+      setMenu({ x, y, kind: card ? 'card' : 'canvas', world: screenToWorld({ x, y }, camera) })
     }}
     onKeyDown={shortcut} onKeyUp={e => { if (e.key === ' ') gestures.space = false }}
     onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) gestures.cancel() }}
@@ -149,39 +208,51 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
       const card = hit?.closest<HTMLElement>('[data-node-id]'), node = card?.dataset.nodeId ? byId.get(card.dataset.nodeId) : undefined
       if (node && !hit?.closest('[data-canvas-ui]')) open(node)
     }}>
-    <div className="canvas-toolbar" data-canvas-ui>
-      <nav aria-label="画板路径">{props.breadcrumbs?.map(b => <button key={b.id} onClick={() => props.onNavigateAncestor?.(b.id)} disabled={!props.onNavigateAncestor || busy}>{b.title} /</button>)}<strong>{canvas.ready.title || '画板'}</strong></nav>
-      <div role="toolbar" aria-label="画板工具">
-        {tools.map(([value, label]) => <button key={value} disabled={busy || trash || !!editing || (['rect', 'arrow', 'path'].includes(value) && !props.prepareGraphic)} aria-pressed={tool === value} onClick={() => { gestures.cancel(); setTool(value); root.current?.focus() }}>{label}</button>)}
-        <button disabled={busy || !buffer.canUndo} onClick={() => void buffer.undo()}>撤销</button><button disabled={busy || !buffer.canRedo} onClick={() => void buffer.redo()}>重做</button>
-        <button disabled={busy || !!editing} aria-pressed={trash} onClick={() => { gestures.cancel(); setEditing(null); setTrash(!trash) }}>回收站</button>
-      </div>
-      {!trash && <div role="toolbar" aria-label="选区操作">
-        <button disabled={busy || chosen.length < 2} onClick={() => void commit(groupOperations(chosen, crypto.randomUUID()))}>分组</button>
-        <button disabled={busy || !chosen.some(n => n.ready.groupId || n.type === 'group')} onClick={() => void commit(ungroupOperations(canvas, selected))}>解组</button>
-        {(['P', 'L', 'R'] as const).map(k => <button key={k} title={{ P: '画廊排版', L: '瀑布排版', R: '散开排版' }[k]} disabled={busy || chosen.length < 2} onClick={() => arrange(k)}>{k}</button>)}
-        <button disabled={busy || !chosen.length} onClick={() => void commit(layerOperations(canvas, selected, 'front'))}>置顶</button><button disabled={busy || !chosen.length} onClick={() => void commit(layerOperations(canvas, selected, 'back'))}>置底</button>
-        <button disabled={busy || !chosen.length} onClick={recycle}>回收</button>
-        <button onClick={() => setCamera(c => zoomAt(c, { x: size.width / 2, y: size.height / 2 }, c.zoom / 1.25))}>−</button>
-        <output aria-label="缩放比例">{Math.round(camera.zoom * 100)}%</output>
-        <button onClick={() => setCamera(c => zoomAt(c, { x: size.width / 2, y: size.height / 2 }, c.zoom * 1.25))}>＋</button>
-      </div>}
-    </div>
+    <CanvasCrumbs title={canvas.ready.title || '画板'} breadcrumbs={props.breadcrumbs} busy={busy} onNavigate={props.onNavigateAncestor} />
+    <CanvasCorner zoom={camera.zoom} search={search} results={matches.length} hit={Math.min(hit, Math.max(0, matches.length - 1))} recycled={recycled.length} trash={trash} busy={busy || !!editing}
+      onSearch={value => { setSearch(value); setHit(0) }} onStep={step} onFit={fit}
+      onZoomReset={() => setCamera(c => zoomAt(c, { x: size.width / 2, y: size.height / 2 }, 1))}
+      onTrash={() => { gestures.cancel(); setEditing(null); setSearch(null); setTrash(!trash) }} />
+    {!trash && <CanvasDock tool={tool} lastShape={lastShape} shapesOpen={shapesOpen} disabled={busy || !!editing} graphics={!!props.prepareGraphic}
+      canUndo={buffer.canUndo} canRedo={buffer.canRedo} busy={busy} onTool={chooseTool} onShapes={setShapesOpen} onCard={kind => placeCard(kind)}
+      onUndo={() => void buffer.undo()} onRedo={() => void buffer.redo()} />}
+    {selectionBox && <SelectionBar left={selectionBox.left} top={selectionBox.top} count={chosen.length} busy={busy || composing}
+      canGroup={chosen.length > 1} canUngroup={chosen.some(n => n.ready.groupId || n.type === 'group')} arrangeOpen={arrangeOpen}
+      actions={{
+        group: () => void commit(groupOperations(chosen, crypto.randomUUID())), ungroup: () => void commit(ungroupOperations(canvas, selected)),
+        arrange: setArrangeOpen, layout: arrange, front: () => void commit(layerOperations(canvas, selected, 'front')), back: () => void commit(layerOperations(canvas, selected, 'back')),
+        remove: recycle,
+        addToDocument: props.onAddToDocument ? () => void addToDocument() : undefined,
+        askAI: props.onAskAI ? () => { void props.onAskAI!(chosen.map(n => n.id)).catch(cause => setCompositionError(cause instanceof Error ? cause.message : String(cause))) } : undefined,
+        schedule: schedulable ? () => props.onScheduleNode!(chosen[0]) : undefined,
+      }} />}
     {compositionError && !menu && <p role="alert" data-canvas-ui>{compositionError}</p>}
     {buffer.error && <div className="canvas-message" role="alert" data-canvas-ui>{buffer.error}</div>}
-    {menu && <div role="menu" aria-label="选区菜单" data-canvas-ui style={{ position: 'absolute', left: menu.x, top: menu.y, zIndex: 5, background: 'var(--bg-primary)', padding: 8 }}>
-      <button role="menuitem" disabled={composing || busy} onClick={() => void addToDocument()}>{composing ? '正在添加…' : '添加到文档'}</button>
-      {props.onAskAI && chosen.length > 0 && <button role="menuitem" disabled={busy || composing} onClick={() => {
-        void props.onAskAI!(chosen.map(n => n.id)).then(() => setMenu(null), cause => setCompositionError(cause instanceof Error ? cause.message : String(cause)))
-      }}>问 AI</button>}
-      {props.onScheduleNode && chosen.length === 1 && ['text', 'note', 'document'].includes(chosen[0].ready.kind) && <button role="menuitem" disabled={busy || composing} onClick={() => { props.onScheduleNode!(chosen[0]); setMenu(null) }}>安排日程…</button>}
-      <button disabled={composing} onClick={() => setMenu(null)}>关闭</button>
-      {compositionError && <p role="alert">{compositionError}</p>}
+    {menu && <div className="canvas-context" data-canvas-ui style={{ left: menu.x, top: menu.y }}>
+      <ChromeMenu label={menu.kind === 'card' ? '选区菜单' : '新建'} onClose={() => { setMenu(null); setCompositionError('') }}>
+        {menu.kind === 'card' ? <>
+          {props.onAddToDocument && <MenuItem label={composing ? '正在添加…' : '添加到文档'} icon={FilePlus2} disabled={composing || busy} onSelect={() => void addToDocument()} />}
+          {props.onAskAI && chosen.length > 0 && <MenuItem label="问 AI" icon={Sparkles} disabled={busy || composing} onSelect={() => {
+            void props.onAskAI!(chosen.map(n => n.id)).then(() => setMenu(null), cause => setCompositionError(cause instanceof Error ? cause.message : String(cause)))
+          }} />}
+          {schedulable && <MenuItem label="安排日程…" icon={CalendarPlus} disabled={busy || composing} onSelect={() => { props.onScheduleNode!(chosen[0]); setMenu(null) }} />}
+          <MenuItem label="删除" icon={Trash2} shortcut="Delete" danger disabled={busy || composing} onSelect={() => { recycle(); setMenu(null) }} />
+        </> : <>
+          <MenuItem label="文字卡" icon={Type} shortcut="T" onSelect={() => { placeCard('text', menu.world); setMenu(null) }} />
+          <MenuItem label="便签" icon={StickyNote} shortcut="N" onSelect={() => { placeCard('note', menu.world); setMenu(null) }} />
+          {props.extraNewItems?.(menu.world, () => setMenu(null))}
+          <MenuItem label="粘贴" icon={ClipboardPaste} shortcut="⌘V" onSelect={() => { void paste(menu.world).then(() => setMenu(null), cause => setCompositionError(cause instanceof Error ? cause.message : String(cause))) }} />
+        </>}
+        {compositionError && <p role="alert" className="canvas-menu-error">{compositionError}</p>}
+      </ChromeMenu>
     </div>}
     {busy && <div className="canvas-message" role="status">正在处理…</div>}
     {trash ? <section className="canvas-trash" data-canvas-ui aria-label="回收的卡片">
-      <h2>回收站 · {recycled.length}</h2><button disabled={busy || !recycled.length} onClick={() => void commit([{ type: 'restore', ids: recycled.map(n => n.id) }])}>全部恢复</button>
-      {recycled.map(n => <article key={n.id}><span>{n.type === 'text' ? n.text : n.type === 'link' ? n.url : n.type === 'group' ? n.label : n.file}</span><button disabled={busy} onClick={() => void commit([{ type: 'restore', ids: [n.id] }])}>恢复 {n.id}</button></article>)}
+      <div className="canvas-trash-head"><h2>回收站 · {recycled.length}</h2>
+        <button disabled={busy || !recycled.length} onClick={() => void commit([{ type: 'restore', ids: recycled.map(n => n.id) }])}>全部恢复</button></div>
+      {!recycled.length && <p className="canvas-menu-empty">回收站是空的。</p>}
+      {recycled.map(n => <article key={n.id}><span>{n.type === 'text' ? n.text : n.type === 'link' ? n.url : n.type === 'group' ? n.label : n.file}</span>
+        <div className="canvas-trash-actions"><button disabled={busy} aria-label={`恢复 ${n.id}`} onClick={() => void commit([{ type: 'restore', ids: [n.id] }])}>恢复</button></div></article>)}
     </section> : <div className="canvas-world" ref={world} style={{ transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.zoom})` }}>
       <svg className="canvas-clusters" aria-hidden="true">{outlines.map(o => <path key={o.id} d={o.d} />)}</svg>
       <svg className="canvas-edges" aria-hidden="true"><defs><marker id={marker} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 Z" /></marker></defs>
@@ -190,7 +261,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
           {e.label && <text x={(from.x + to.x) / 2} y={(from.y + to.y) / 2}>{e.label}</text>}
         </g> })}
       </svg>
-      {active.nodes.map(node => <CanvasCard key={node.id} node={node} selected={selected.includes(node.id)} visible={visibleIds.has(node.id)} element={bindElement} resolveAsset={props.resolveAsset}
+      {active.nodes.map(node => <CanvasCard key={node.id} node={node} selected={selected.includes(node.id)} matched={matchIds.has(node.id)} visible={visibleIds.has(node.id)} element={bindElement} resolveAsset={props.resolveAsset}
         content={visibleIds.has(node.id) ? props.renderCard?.(node) : undefined}
         editor={editing === node.id ? <CanvasEditorLifecycle.Provider value={registerFinish}><div data-canvas-ui className="canvas-editor">
           <div inert={closing}>{props.renderTextEditor?.({ node, commit, close: () => { void closeEditor() } })}</div>
@@ -199,6 +270,5 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
         </div></CanvasEditorLifecycle.Provider> : undefined} />)}
       <svg className="canvas-overlay" ref={overlay} data-arrow-marker={marker} aria-hidden="true" />
     </div>}
-    <div className="canvas-hint" aria-live="polite">{selected.length} 已选 · 空格拖动画布 · Shift 多选 · P / L / R 排版</div>
   </div>
 }

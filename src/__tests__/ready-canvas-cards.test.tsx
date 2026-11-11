@@ -22,7 +22,8 @@ async function mount() {
   const { createRoot } = await import('react-dom/client')
   const root = createRoot(document.getElementById('root')!)
   return { dom, async render(node: React.ReactNode) { await act(async () => root.render(node)) },
-    async click(label: string) { const button = [...document.querySelectorAll('button')].find(b => b.textContent === label); assert.ok(button); await act(async () => button.click()) },
+    // Board chrome buttons are icons named by their label (W4 MS1).
+    async click(label: string) { const button = [...document.querySelectorAll('button')].find(b => b.textContent === label || b.getAttribute('aria-label') === label); assert.ok(button, label); await act(async () => button.click()) },
     async close() { await act(async () => root.unmount()); dom.window.close(); for (const [key, descriptor] of Object.entries(saved)) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key)
     } } }
