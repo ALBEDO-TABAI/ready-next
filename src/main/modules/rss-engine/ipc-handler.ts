@@ -1,3 +1,4 @@
+import { sieveLearningGroup } from './ipc/sieve-learning-group'
 import { sieveGroup } from './ipc/sieve-group'
 import { previewCurrentRSSWorkContext } from './work-context-runtime'
 import { digestGroup } from './ipc/digest-group'
@@ -120,7 +121,6 @@ interface DBRSSSource {
   group_name: string
   icon: string | null
   last_fetched: number | null
-  fetch_interval: number
   enabled: number
   created_at: number
   platform: string
@@ -248,6 +248,7 @@ let diagnosticsGroupDispose: IpcDisposeHandle | null = null
 let exportGroupDispose: IpcDisposeHandle | null = null
 let contentGroupDispose: IpcDisposeHandle | null = null
 let organizationGroupDispose: IpcDisposeHandle | null = null
+let sieveLearningGroupDispose: IpcDisposeHandle | null = null
 let sieveGroupDispose: IpcDisposeHandle | null = null
 let processingGroupDispose: IpcDisposeHandle | null = null
 let digestGroupDispose: IpcDisposeHandle | null = null
@@ -1033,6 +1034,8 @@ export function setupRSSIPC(useMock = false): void {
   eventGroupDispose = eventGroup.register(ipcMain, { store: () => getDatabase().rss.events, notify: notifyRSSProcessing,
     notifySeen: () => { for (const window of BrowserWindow.getAllWindows()) if (!window.webContents.isDestroyed()) window.webContents.send('rss:eventSeenChanged') },
   })
+  sieveLearningGroupDispose?.dispose()
+  sieveLearningGroupDispose = sieveLearningGroup.register(ipcMain, { store: () => getDatabase().rss, notify: notifyRSSProcessing })
   sieveGroupDispose?.dispose()
   sieveGroupDispose = sieveGroup.register(ipcMain, { store: () => getDatabase().rss.sieve, workContext: previewCurrentRSSWorkContext, notify: notifyRSSProcessing })
   processingGroupDispose?.dispose()

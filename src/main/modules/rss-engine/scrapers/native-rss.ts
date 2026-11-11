@@ -1,3 +1,4 @@
+import { z } from 'zod'
 /**
  * NativeRSSScraper: Generic RSS 2.0 / Atom / RDF parser using fast-xml-parser.
  * Replaces the old regex-based parser.
@@ -77,10 +78,10 @@ export class NativeRSSScraper extends BaseScraper {
     try {
       const { text: xml } = await this.httpGet(url, {
         headers: {
-          Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*'
+          Accept: 'application/feed+json, application/json, application/rss+xml, application/atom+xml, application/xml, text/xml, */*'
         }
       })
-      return this.parseXML(xml)
+      return this.parseFeed(xml,url)
     } catch (err) {
       return {
         items: [],
@@ -89,6 +90,20 @@ export class NativeRSSScraper extends BaseScraper {
         error: err instanceof Error ? err.message : String(err)
       }
     }
+  }
+
+  parseFeed(text:string,sourceUrl:string):ScrapeResult {
+    if(!text.trimStart().startsWith('{')) return this.parseXML(text)
+    try {
+      const feed=JSONFeedSchema.parse(JSON.parse(text))
+      return {feedTitle:feed.title,platform:this.platform,items:feed.items.slice(0,50).map(item=>({
+        itemId:this.generateItemId(JSON.stringify([sourceUrl,item.id])),title:item.title || '(Untitled)',link:item.url || item.external_url || '',
+        description:stripHtml(item.content_text || item.content_html || item.summary || '').slice(0,500),
+        author:(item.authors ?? (item.author?[item.author]:feed.authors ?? (feed.author?[feed.author]:[]))).map(author=>author.name || '').filter(Boolean).join(', '),
+        pubDate:parseDate(item.date_published || item.date_modified),coverImage:item.image || item.banner_image || null,
+        metadata:{jsonFeedVersion:feed.version},
+      }))}
+    } catch(error) { return {items:[],feedTitle:'',platform:this.platform,error:`JSON Feed 格式错误：${error instanceof Error?error.message:String(error)}`} }
   }
 
   parseXML(xml: string, platformOverride?: string): ScrapeResult {
@@ -228,3 +243,11 @@ export class NativeRSSScraper extends BaseScraper {
     return { items, feedTitle, platform: plat }
   }
 }
+
+const JSONFeedAuthor=z.object({name:z.string().optional()})
+const JSONFeedSchema=z.object({version:z.enum(['https://jsonfeed.org/version/1','https://jsonfeed.org/version/1.1']),title:z.string(),author:JSONFeedAuthor.optional(),authors:z.array(JSONFeedAuthor).optional(),items:z.array(z.object({
+  id:z.string().min(1),url:z.string().optional(),external_url:z.string().optional(),title:z.string().optional(),
+  content_text:z.string().optional(),content_html:z.string().optional(),summary:z.string().optional(),
+  author:JSONFeedAuthor.optional(),authors:z.array(JSONFeedAuthor).optional(),date_published:z.string().optional(),date_modified:z.string().optional(),
+  image:z.string().optional(),banner_image:z.string().optional(),
+}).refine(item=>item.content_text!==undefined || item.content_html!==undefined,'条目缺少正文'))})
