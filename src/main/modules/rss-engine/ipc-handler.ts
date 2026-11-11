@@ -1,3 +1,5 @@
+import { sieveGroup } from './ipc/sieve-group'
+import { previewCurrentRSSWorkContext } from './work-context-runtime'
 import { digestGroup } from './ipc/digest-group'
 import { getRSSDigestService, generateRSSDigest } from './digest-runtime'
 import { organizationGroup } from './ipc/organization-group'
@@ -107,7 +109,6 @@ interface DBRSSItem {
   inbox_visible?: number
   read: number
   starred: number
-  ai_score: number | null
   classifications: RSSMembership[]
   source_name?: string
 }
@@ -247,6 +248,7 @@ let diagnosticsGroupDispose: IpcDisposeHandle | null = null
 let exportGroupDispose: IpcDisposeHandle | null = null
 let contentGroupDispose: IpcDisposeHandle | null = null
 let organizationGroupDispose: IpcDisposeHandle | null = null
+let sieveGroupDispose: IpcDisposeHandle | null = null
 let processingGroupDispose: IpcDisposeHandle | null = null
 let digestGroupDispose: IpcDisposeHandle | null = null
 let eventGroupDispose: IpcDisposeHandle | null = null
@@ -306,7 +308,6 @@ const mockItems = [
     read: false,
     starred: false,
     coverImage: null,
-    aiScore: null,
   },
 ]
 
@@ -1032,6 +1033,8 @@ export function setupRSSIPC(useMock = false): void {
   eventGroupDispose = eventGroup.register(ipcMain, { store: () => getDatabase().rss.events, notify: notifyRSSProcessing,
     notifySeen: () => { for (const window of BrowserWindow.getAllWindows()) if (!window.webContents.isDestroyed()) window.webContents.send('rss:eventSeenChanged') },
   })
+  sieveGroupDispose?.dispose()
+  sieveGroupDispose = sieveGroup.register(ipcMain, { store: () => getDatabase().rss.sieve, workContext: previewCurrentRSSWorkContext, notify: notifyRSSProcessing })
   processingGroupDispose?.dispose()
   processingGroupDispose = processingGroup.register(ipcMain, {
     store: () => getDatabase().rss.processing, service: getRSSProcessingService, hasModel: hasRSSProcessingModel, notify: notifyRSSProcessing,

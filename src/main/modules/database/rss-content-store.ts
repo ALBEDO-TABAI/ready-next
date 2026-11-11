@@ -78,7 +78,7 @@ function queryPredicate(query: ReturnType<typeof RSSQuerySchema.parse>, definiti
 }
 
 export class RSSContentStore {
-  constructor(private readonly getConnection: () => DatabaseConnection | null, private readonly organization: RSSOrganizationStore, private readonly onBodySaved?: (itemId: string) => void, private readonly events?: RSSEventStore) {}
+  constructor(private readonly getConnection: () => DatabaseConnection | null, private readonly organization: RSSOrganizationStore, private readonly onBodySaved?: (itemId: string, origin: 'reader' | 'judgment') => void, private readonly events?: RSSEventStore) {}
 
   private connection(): DatabaseConnection {
     const db = this.getConnection()
@@ -245,7 +245,7 @@ export class RSSContentStore {
     return result ? { itemId, itemRevision: result.item_revision, requestId } : null
   }
 
-  finishLoad(claim: RSSContentClaim, result: RSSContentResult): boolean {
+  finishLoad(claim: RSSContentClaim, result: RSSContentResult, origin: 'reader' | 'judgment' = 'reader'): boolean {
     const text = result.markdown ?? null
     if ((result.status === 'ready' || result.status === 'partial') && !text?.trim()) throw new Error('body_empty')
     const db = this.connection()
@@ -261,7 +261,7 @@ export class RSSContentStore {
         text, result.status, text, text === null ? null : hash(text), text, result.sourceUrl, text, Date.now(), result.error ?? (['failed', 'login_required'].includes(result.status) ? result.status : null),
         claim.itemId, claim.itemRevision, claim.requestId, claim.itemId, claim.itemRevision,
       ) as { changes: number }
-      if (updated.changes === 1 && text !== null) this.onBodySaved?.(claim.itemId)
+      if (updated.changes === 1 && text !== null) this.onBodySaved?.(claim.itemId, origin)
       db.exec('RELEASE rss_body_save')
       return updated.changes === 1
     } catch (error) { db.exec('ROLLBACK TO rss_body_save; RELEASE rss_body_save'); throw error }

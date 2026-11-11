@@ -2,12 +2,12 @@
 'use strict'
 const { readdirSync } = require('node:fs')
 const { spawnSync } = require('node:child_process')
-const files = readdirSync('src/__tests__')
+const files = process.argv.length > 2 ? process.argv.slice(2) : readdirSync('src/__tests__')
   .filter((name) => /^rss-.*\.test\.(ts|tsx)$/.test(name))
   .map((name) => `src/__tests__/${name}`)
 if (files.length === 0) throw new Error('No RSS tests found.')
 const result = spawnSync(require('electron'), [
-  'node_modules/tsx/dist/cli.mjs', '--test', '--test-concurrency=1', '--test-reporter=tap', ...files,
+  '--import', 'tsx', '--test', '--test-concurrency=1', '--test-reporter=tap', ...files,
 ], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 })
 if (result.error) throw result.error
 process.stdout.write(result.stdout)

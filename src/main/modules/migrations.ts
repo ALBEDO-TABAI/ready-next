@@ -1,3 +1,4 @@
+import { RSS_SIEVE_MIGRATION, migrateRSSSieve } from './rss-engine/sieve-schema'
 import { migrateDateMentions } from './calendar-engine/date-mentions/schema'
 import { migrateChatReadyRefs } from './database/ready-ref-migration'
 import { migrateCanvasComposition } from './canvas-composition/schema'
@@ -4546,6 +4547,7 @@ const migrations: Migration[] = [
       UPDATE calendar_card_schedules SET state='completed' WHERE event_id=NEW.id;
     END;`)
   } },
+  { name: RSS_SIEVE_MIGRATION, up: migrateRSSSieve },
 ]
 
 /**

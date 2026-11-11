@@ -23,6 +23,10 @@
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
 | 2026-11-11 | W1-T1 令牌合并与旧主题退役 | `src/main/index.ts` | 1338 | 净 +13 | 一般 | 只把主题快照从皮肤换成透明度并接入一次性迁移；外观逻辑已放到 `window-material/theme-appearance.ts`。复查：主题快照与窗口材质的装配可整体移出入口（W2 外壳批次）。 | 已排期：2026-11-30 |
 | 2026-11-11 | W1-T1 令牌合并与旧主题退役 | `src/renderer/types/electron.d.ts` | 3459 | 净 +3 | 健康 | 预加载接口的类型声明聚合，`verify:ipc-contract` 逐项核对暴露与声明。 | 记录结论 |
+| 2026-11-11 | W5-T1/T2 资讯筛子引擎 | `src/main/modules/migrations.ts` | 4633 | 净 +2 | 健康 | 只登记迁移 155；迁移体在 `rss-engine/sieve-schema.ts`，编号与重放由既有检查覆盖。 | 记录结论 |
+| 2026-11-11 | W5-T1/T2 资讯筛子引擎 | `src/main/modules/rss-engine/ipc-handler.ts` | 1258 | 净 +3 | 一般 | 只装配筛子 IPC 组（`ipc/sieve-group.ts`），领域逻辑不进入口。N1–N8 轮仅改用具名预览入口，行数不变；本轮净增的代码文件均未超过 1000 行。复查：其余 IPC 也按组拆出。 | 已排期：2026-11-30 |
+| 2026-11-11 | W5-T1/T2 资讯筛子引擎 | `src/preload/index.ts` | 1780 | 净 +10 | 一般 | 只加筛子的 10 个调用；`verify:ipc-contract` 核对。复查：预加载按域拆文件。 | 已排期：2026-11-30 |
+| 2026-11-11 | W5-T1/T2 资讯筛子引擎 | `src/renderer/types/electron.d.ts` | 3457 | 净 +1 | 健康 | 引用共享的筛子类型，声明聚合由 IPC 检查覆盖。 | 记录结论 |
 | 2026-10-31 | M7-A/B 结构化资源与只读工具 | `src/main/modules/agent-control/tools-runtime/tool-registry.ts` | 1588 | 净增（M7 只读工具登记） | 一般 | 只登记九个资料库只读工具及其仅在带资源轮次进入工具面的条件；登记表可按能力维度拆分。 | 已排期：2026-11-09 |
 | 2026-10-31 | M7-A/B 结构化资源与只读工具 | `src/main/modules/tools/tool-executor.ts` | 1505 | 净增（只读工具接线） | 一般 | 只加新只读工具的调用接线，不改现有工具；执行分派可按域拆分。 | 已排期：2026-11-09 |
 | 2026-10-31 | M7-A/B 结构化资源与只读工具 | `src/shared/ipc-contracts/agent-runtime.ts` | 1415 | 净增（资源 schema） | 健康 | 集中的 IPC 合同与 schema 声明，有类型检查与合同测试覆盖。 | 记录结论 |

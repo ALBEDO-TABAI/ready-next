@@ -1,3 +1,4 @@
+import type { RSSSieveAPI } from '../../shared/rss-sieve'
 import type { ObjectPresentationAPI } from '../../shared/object-identity'
 import type { ObjectLinkQuery, ObjectLinksResponse } from '../../shared/object-links'
 import type { LibraryBook, LibraryBookPatch, LibraryBookmark, LibraryImportResult, LibraryReadingPosition, LibraryResult, LibraryState } from '../../shared/library'
@@ -2119,7 +2120,7 @@ interface RSSItemAnalysisProgress {
   updatedAt: string
 }
 
-interface ElectronRSSAPI {
+interface ElectronRSSAPI extends RSSSieveAPI {
   readExcerpt: (input: import('../../shared/rss-excerpt').RSSReadExcerptInput) => Promise<RSSResponse<import('../../shared/rss-excerpt').RSSSelectionExcerpt>>
   readDigests: (input?: import('../../shared/rss-digests').RSSDigestReadInput) => Promise<RSSResponse<import('../../shared/rss-digests').RSSDigestReadResult>>
   digestSettings: () => Promise<RSSResponse<import('../../shared/rss-digests').RSSDigestScheduleState | null>>

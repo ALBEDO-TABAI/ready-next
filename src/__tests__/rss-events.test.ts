@@ -126,7 +126,7 @@ test('insufficient evidence remains explicit and deleting members invalidates ev
   } finally { f.db.close() }
 })
 
-test('one explicit batch owns event judgment and saving the identical body never creates another paid input', async (testContext) => {
+test('one article request owns event judgment and saving the identical body never creates another paid input', async (testContext) => {
   if (skipIfSqliteUnavailable(testContext, 'RSS native storage')) return
   const f = fixture()
   try {
@@ -142,13 +142,13 @@ test('one explicit batch owns event judgment and saving the identical body never
         calls++
         const event = input.eventContext ? { kind: 'new', eventId: null, factId: null, quote: 'Version 2 was released.', sourceRole: 'direct', reason: 'Independent release.' } : undefined
         if (event) eventCalls++
-        return JSON.stringify({ ...(event ? { event } : {}), decisions: input.definitions.map((d) => ({ definitionId: d.id, included: true, reason: 'Relevant', evidence: 'Version 2' })) })
+        return JSON.stringify({ relevance:{score:80,because:'standard',reason:'相关',workRef:null}, ...(event ? { event } : {}), decisions: input.definitions.map((d) => ({ definitionId: d.id, included: true, reason: 'Relevant', evidence: 'Version 2' })) })
       } })
     await worker.wake()
-    assert.equal(calls, 3); assert.equal(eventCalls, 1)
+    assert.equal(calls, 1); assert.equal(eventCalls, 1)
     const first = f.db.rss.events.memberships(['one']).one!
     saveBody(); await worker.wake()
-    assert.equal(calls, 3)
+    assert.equal(calls, 1)
     assert.equal(f.db.rss.events.memberships(['one']).one!.factId, first.factId)
   } finally { f.db.close() }
 })
@@ -239,7 +239,7 @@ test('a second queued classification plan reuses an event judgment completed for
         const event = input.eventContext && !input.eventContext.manual && !input.eventContext.reused
           ? { kind: 'new', eventId: null, factId: null, quote: 'Version 2 was released.', sourceRole: 'direct', reason: 'Independent release' } : undefined
         if (event) eventCalls++
-        return JSON.stringify({ ...(event ? { event } : {}), decisions: input.definitions.map((d) => ({ definitionId: d.id, included: true, reason: 'Relevant', evidence: 'Version 2' })) })
+        return JSON.stringify({ relevance:{score:80,because:'standard',reason:'相关',workRef:null}, ...(event ? { event } : {}), decisions: input.definitions.map((d) => ({ definitionId: d.id, included: true, reason: 'Relevant', evidence: 'Version 2' })) })
       } })
     await worker.wake()
     assert.equal(eventCalls, 1)

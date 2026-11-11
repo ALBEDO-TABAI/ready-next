@@ -241,7 +241,7 @@ function quantile(values: number[], percentile: number): number | null {
   return sorted[index] ?? null
 }
 
-function classifyRouteFailure(message: string): RSSRouteErrorInfo {
+export function classifyRouteFailure(message: string): RSSRouteErrorInfo {
   const normalized = message.trim()
   const lower = normalized.toLowerCase()
 

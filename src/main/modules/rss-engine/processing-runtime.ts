@@ -1,9 +1,11 @@
+import { sendableCurrentRSSWorkContext } from './work-context-runtime'
+import { getRSSContentService } from './content-runtime'
 import type { AIModelConfig } from '../../../shared/ai-providers'
 import { BrowserWindow } from 'electron'
 import { getDatabase } from '../database'
 import { completeRSSModel, validateRSSModelRequest } from './model-completion'
 import { hasRSSProcessingModel, rssModelConfig, setRSSProviderReadiness } from './model-readiness'
-import { RSS_JUDGMENT_INSTRUCTIONS } from './processing-judgment'
+import { buildRSSJudgmentRequest } from './processing-judgment'
 import { RSSProcessingService } from './processing-service'
 
 export { hasRSSProcessingModel } from './model-readiness'
@@ -18,10 +20,13 @@ export function getRSSProcessingService(): RSSProcessingService {
   if (!service) {
     const rss = getDatabase().rss
     service = new RSSProcessingService({ store: rss.processing, getArticle: (id) => rss.content.getArticle(id),
+      loadArticle: (id) => getRSSContentService().loadForJudgment(id),
+      workContext: () => sendableCurrentRSSWorkContext(),
       hasModel: hasRSSProcessingModel, now: () => Date.now(), notify: notifyRSSProcessing,
       prepare: (input, jobId) => {
         const config = rssModelConfig()
-        const request = { system: RSS_JUDGMENT_INSTRUCTIONS, user: JSON.stringify(input), maxTokens: 6000, runId: jobId }
+        if (!config) throw new Error('请先在 Ready 中配置用于资讯分析的模型。')
+        const request = buildRSSJudgmentRequest(input, jobId, config)
         validateRSSModelRequest(config, request)
         return (signal) => completeRSSModel(config, { ...request, signal })
       },

@@ -16,7 +16,7 @@ function fixture() {
   const db = new DatabaseManager(true), rss = db.rss
   const source = rss.addRSSSource({ name: 'Versioned source', url: 'https://restore.test/feed' })
   rss.setRSSSourceDraftSeeded(source, true)
-  rss.upsertRSSItems([{ id: 'story', source_id: source, guid: 'story', title: 'Project update', summary: 'Source summary', link: 'https://restore.test/story' }])
+  rss.upsertRSSItems([{ id: 'story', source_id: source, guid: 'story', title: 'Project update', summary: 'Summary', link: 'https://restore.test/story' }])
   const body = (text: string) => {
     const claim = rss.content.beginLoad('story')!
     assert.equal(rss.content.finishLoad(claim, { status: 'ready', markdown: text, sourceUrl: 'https://restore.test/story' }), true)
@@ -26,7 +26,7 @@ function fixture() {
     now: () => Date.now(), notify: () => {}, prepare: (input: RSSJudgmentInput) => async () => {
       calls++
       const isA = input.source.text.includes('Release A'), quote = isA ? 'Release A' : 'Release B'
-      return JSON.stringify({ decisions: input.definitions.map((d) => ({ definitionId: d.id, included: override ?? isA, reason: quote, evidence: quote })),
+      return JSON.stringify({ relevance:{score:80,because:'standard',reason:'相关',workRef:null}, decisions: input.definitions.map((d) => ({ definitionId: d.id, included: override ?? isA, reason: quote, evidence: quote })),
         ...(input.eventContext && !input.eventContext.manual && !input.eventContext.reused ? { event: { kind: isA ? 'new' : 'insufficient', eventId: null, factId: null,
           quote: isA ? quote : null, sourceRole: 'direct', reason: quote } } : {}) })
     } })

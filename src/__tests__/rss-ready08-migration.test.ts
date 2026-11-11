@@ -51,7 +51,7 @@ test('full Ready 0.8 schema upgrades RSS atomically and retains conversation/cha
     assert.ok(article.classifications.some((entry) => entry.name === '旧标签,完整名称'))
     assert.equal(db.prepare('SELECT daily_eligible AS value FROM rss_items WHERE id=?').get<{ value: number }>('old')!.value, 0)
     assert.deepEqual(db.prepare('SELECT name FROM migrations WHERE applied_at=? ORDER BY id').all<{ name: string }>('synthetic-old').map((row) => row.name), oldNames)
-    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM migrations').get<{ n: number }>()!.n, 132)
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM migrations').get<{ n: number }>()!.n, __getMigrationNamesForTests().length)
     assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), [])
     assert.ok(readdirSync(join(root, 'backups')).length > 0)
     const old = new SQLite(backup)
