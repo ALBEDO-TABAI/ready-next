@@ -882,7 +882,7 @@ function setupGlobalIPC(): void {
       }
     },
   })
-  if (!RSS_USE_MOCK) void startRSSProcessing({ isProviderReady: (config) => !chatGptOAuthService?.isLifecycleBusy() && (!isChatGptOAuthConfig(config) || chatGptOAuthService?.getStatus().state === 'ready') })
+  if (!RSS_USE_MOCK) void startRSSProcessing({ getWindow: () => mainWindow, isProviderReady: (config) => !chatGptOAuthService?.isLifecycleBusy() && (!isChatGptOAuthConfig(config) || chatGptOAuthService?.getStatus().state === 'ready') })
   petWindowManager = setupPetIPC({
     preloadPath: join(__dirname, '../preload/index.mjs'),
       rendererFile: join(__dirname, '../renderer/index.html'),

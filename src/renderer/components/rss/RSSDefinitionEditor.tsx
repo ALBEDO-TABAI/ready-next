@@ -38,7 +38,7 @@ export default function RSSDefinitionEditor({ definitions, initialId, onSaved, o
   }
   const choose = (definition: RSSDefinition | null) => { setDraft(definition ? edit(definition) : blank()); setMessage('') }
   return <section className="rss-definition-editor" aria-label="栏目设置">
-    <RSSTopbarTools slot="lead" show={active}><span>管理栏目</span></RSSTopbarTools>
+    <RSSTopbarTools slot="lead" show={active}><span>筛子设置 · 主题</span></RSSTopbarTools>
     <nav className="rss-definition-list" aria-label="选择编辑栏目">
       <button type="button" className="rss-definition-new" aria-current={!draft.id ? 'true' : undefined} disabled={busy} onClick={() => choose(null)}>
         <Plus size={15} strokeWidth={1.9} /><span>新建主题</span>

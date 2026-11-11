@@ -14,7 +14,9 @@ export interface RefCapsuleProps extends Pick<HTMLAttributes<HTMLAnchorElement>,
 }
 
 // Keyboard focus shows the preview as hovering does; a pointer focus does not.
-const focusVisible = (element: Element) => { try { return element.matches(':focus-visible') } catch { return false } }
+const focusVisible = (element: Element) => {
+  try { return element.matches(':focus-visible') } catch { /* silent-catch: without :focus-visible support (jsdom), focus counts as pointer focus. */ return false }
+}
 
 /**
  * A reference to a Ready object (W6 §2.1): its type icon and title, with the same operations everywhere — click opens,

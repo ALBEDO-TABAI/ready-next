@@ -8,6 +8,7 @@ interface ProcessingDeps {
   store: RSSProcessingStore; getArticle(id: string): RSSArticle | null; hasModel(): boolean
   prepare(input: RSSJudgmentInput, jobId: string): (signal: AbortSignal) => Promise<string>
   loadArticle?(id: string): Promise<RSSArticle>
+  focus?(): string
   workContext?(): RSSWorkContextSnapshot
   now(): number; notify(): void
 }
@@ -86,7 +87,7 @@ export class RSSProcessingService {
       let context: RSSWorkContextSnapshot | undefined
       try { context = this.deps.workContext?.() }
       catch (error) { console.warn('[rss-processing] work context unavailable; omitting it', error) }
-      const input = buildRSSJudgmentInput(article, next.definitions, eventContext, context)
+      const input = buildRSSJudgmentInput(article, next.definitions, eventContext, context, this.deps.focus?.())
       let complete: (signal: AbortSignal) => Promise<string>
       try { complete = this.deps.prepare(input, next.id) }
       catch (error) { store.finish(next.id, 'failed', error instanceof Error ? error.message : String(error), now()); this.deps.notify(); continue }

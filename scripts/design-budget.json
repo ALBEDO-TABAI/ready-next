@@ -151,7 +151,7 @@
       "fontFace": 0
     },
     "components/rss": {
-      "color": 46,
+      "color": 8,
       "backdropFilter": 0,
       "fontFace": 0
     },
@@ -253,7 +253,7 @@
     "modules/calendar/workbench/styles": {
       "color": 96,
       "backdropFilter": 4,
-      "fontFace": 2
+      "fontFace": 0
     },
     "modules/canvas/composition": {
       "color": 0,

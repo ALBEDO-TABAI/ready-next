@@ -46,7 +46,7 @@ export async function copyRefCapsule(source: RefSource, title: string) {
       'text/plain': new Blob([markdown], { type: 'text/plain' }),
       'text/html': new Blob([`<a href="${escapeHtml(uri)}">${escapeHtml(title)}</a>`], { type: 'text/html' }),
     })])
-  } catch { await navigator.clipboard.writeText(markdown) }
+  } catch { /* silent-catch: no rich clipboard here; the Markdown link alone is copied. */ await navigator.clipboard.writeText(markdown) }
   showToast('已复制引用')
 }
 

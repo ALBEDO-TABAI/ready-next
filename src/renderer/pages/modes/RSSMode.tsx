@@ -13,6 +13,9 @@ import RSSReferenceButton from '../../components/rss/RSSReferenceButton'
 import RSSExportButton from '../../components/rss/RSSExportButton'
 import AddSourceModal from '../../components/rss/AddSourceModal'
 import RSSSettingsPanel from '../../components/rss/RSSSettingsPanel'
+import { RSSSieveView } from '../../components/rss/RSSSieveView'
+import { RSSSieveSettings } from '../../components/rss/RSSSieveSettings'
+import { noteRSSBehavior } from '../../modules/rss/record-behavior'
 import Modal from '../../components/ui/Modal'
 import { useModal } from '../../components/ui/useModal'
 import { useRSSSelectionCommandBridge } from '../../modules/rss/useRSSSelectionCommandBridge'
@@ -105,6 +108,9 @@ export default function RSSMode({
   const pendingReveal = useRSSSession((state) => state.pendingReveal)
   const digestVisible = useRSSSession((state) => state.digestVisible)
   const setDigestView = useRSSSession((state) => state.setDigestView)
+  const sieveVisible = useRSSSession((state) => state.sieveVisible)
+  const setSieveView = useRSSSession((state) => state.setSieveView)
+  const notificationOpenRevision = useRSSSession((state) => state.notificationOpenRevision)
   const selectedSourceId = query.sourceId || null
   const setQuery = useRSSSession((state) => state.setQuery)
   const setSelection = useRSSSession((state) => state.setSelection)
@@ -114,6 +120,8 @@ export default function RSSMode({
   const [showOrganization, setShowOrganization] = useState(false)
   // Set when the editor opens on one column from another view (the digest's 收录范围); closing returns there.
   const [organizationFocus, setOrganizationFocus] = useState<string | undefined>()
+  // A topic opened from 筛子设置 returns there when its editor closes; opened from elsewhere, closing leaves both.
+  const [editorFromSettings, setEditorFromSettings] = useState(false)
   // The live page opened beside the reader; it belongs to the article being read.
   const [originalItem, setOriginalItem] = useState<RSSItem | null>(null)
   const [selectedItem, setSelectedItem] = useState<RSSItem | null>(null)
@@ -351,7 +359,29 @@ export default function RSSMode({
     useRSSSession.getState().cancelReveal()
     setItemStateError(null)
     setSelectedItem(item)
+    noteRSSBehavior({ itemId: item.id, action: 'open' })
   }, [])
+
+  // A 必须知道 notification was clicked: open that article, then tell Main it was handled. An older request never
+  // clears a newer one, because Main acknowledges by request id.
+  useEffect(() => {
+    if (!isActive || isSuspended) return
+    let live = true
+    void (async () => {
+      const api = window.electronAPI.rss
+      const pending = await api.sievePendingOpen()
+      if (!live || !pending.success || !pending.data) return
+      const request = pending.data
+      const result = await api.readArticle({ itemId: request.itemId, length: 1 })
+      if (!live) return
+      if (result.success && result.data) {
+        setDigestView(false); setShowOrganization(false)
+        handleItemClick(toRSSItem(result.data.article))
+      } else setStatusMessage(`通知里的文章打不开了：${result.error || '它可能已被删除'}`)
+      await api.sieveAckOpen(request.id)
+    })().catch((error: unknown) => { if (live) setStatusMessage(`通知里的文章打不开了：${error instanceof Error ? error.message : String(error)}`) })
+    return () => { live = false }
+  }, [isActive, isSuspended, notificationOpenRevision, handleItemClick, setDigestView])
 
   useEffect(() => {
     if (!isActive || isSuspended || !pendingReveal) return
@@ -401,13 +431,15 @@ export default function RSSMode({
     setSelectedItem((prev) => prev?.id === itemId ? prev.pinnedRevision
       ? { ...prev, read: state.read, starred: state.starred }
       : { ...prev, ...toRSSItem(state) } : prev)
+    return state
   }, [loadRSSData])
 
   const handleToggleStar = useCallback(async (itemId: string) => {
     try {
       const result = await window.electronAPI.rss.toggleStarred(itemId)
       if (!result.success) throw new Error(result.error || '收藏保存失败')
-      await applySavedItemState(itemId)
+      const state = await applySavedItemState(itemId)
+      if (state.starred) noteRSSBehavior({ itemId, action: 'star' })
       setItemStateError((previous) => previous?.itemId === itemId && previous.action === 'star' ? null : previous)
     } catch (cause) { setItemStateError({ itemId, action: 'star', message: cause instanceof Error ? cause.message : String(cause) }) }
   }, [applySavedItemState])
@@ -481,6 +513,7 @@ export default function RSSMode({
     try {
       const result = await window.electronAPI.rss.deleteItems({ itemIds: [itemId] })
       if (!result.success) throw new Error(result.error || '移出收件箱失败')
+      noteRSSBehavior({ itemId, action: 'remove' })
       await loadRSSData()
       setStatusMessage('已移出收件箱，历史底稿仍保留')
       setSelectedItem((prev) => prev?.id === itemId ? null : prev)
@@ -565,7 +598,8 @@ export default function RSSMode({
     }).catch((cause) => setStatusMessage(String(cause)))
   }, [loadRSSData, setQuery, setSelection])
 
-  const feedVisible = !selectedItem && !digestVisible && !showOrganization
+  const sieveShown = sieveVisible && !selectedItem && !digestVisible && !showOrganization
+  const feedVisible = !sieveVisible && !selectedItem && !digestVisible && !showOrganization
   const readingId = selectedItem && !digestVisible && !showOrganization ? selectedItem.id : null
   useEffect(() => { setOriginalItem((current) => current && current.id === readingId ? current : null) }, [readingId])
   const surfaceActive = isActive && !isSuspended
@@ -591,9 +625,11 @@ export default function RSSMode({
               <RSSNavigation
                 definitions={definitions}
                 managing={showOrganization}
-                onDigests={() => { closeOverlays(); setShowOrganization(false); setDigestView(true) }}
-                onManage={() => { closeOverlays(); setDigestView(false); setOrganizationFocus(undefined); setShowOrganization((value) => !value) }}
-                onNavigate={(patch) => { closeOverlays(); setDigestView(false); setShowOrganization(false); setQuery(patch) }}
+                onSieve={() => { closeOverlays(); setDigestView(false); setShowOrganization(false); setSieveView(true) }}
+                onDigests={() => { closeOverlays(); setShowOrganization(false); setSieveView(false); setDigestView(true) }}
+                onManage={(focus) => { closeOverlays(); setDigestView(false); setEditorFromSettings(false); setOrganizationFocus(focus); setShowOrganization(true) }}
+                onSources={() => setSettingsOpen((open) => !open)}
+                onNavigate={(patch) => { closeOverlays(); setDigestView(false); setShowOrganization(false); setSieveView(false); setQuery(patch) }}
               />
             </ShellNavigator>
             <div className="rss-topbar workbench-tabs-surface no-drag">
@@ -605,6 +641,8 @@ export default function RSSMode({
             <div className="rss-workbench-body">
               {/* The list stays mounted so returning from reading preserves scroll. */}
               <div className={`rss-feed-sheet content-surface-panel rss-content-frame`}>
+                {/* 为你筛过的 stays mounted while an article from it is open, so closing the article returns to the same place. */}
+                {sieveVisible && <RSSSieveView shown={sieveShown && surfaceActive} onOpen={(item) => handleItemClick(toRSSItem(item))} />}
                 <div className="flex min-h-0 flex-1 flex-col" style={{ display: feedVisible ? undefined : 'none' }}>
                   <RSSFeed
                     active={surfaceActive && feedVisible}
@@ -666,7 +704,10 @@ export default function RSSMode({
                   />
                 </div>
 
-                {showOrganization && <RSSDefinitionEditor key={organizationFocus || 'manage'} initialId={organizationFocus} definitions={definitions} active={surfaceActive} onClose={() => { setShowOrganization(false); setOrganizationFocus(undefined) }} onSaved={(deletedId) => {
+                {showOrganization && !organizationFocus && <RSSSieveSettings definitions={definitions} active={surfaceActive}
+                  onEditTopic={(id) => { setEditorFromSettings(true); setOrganizationFocus(id) }} />}
+                {showOrganization && organizationFocus && <RSSDefinitionEditor key={organizationFocus} initialId={organizationFocus} definitions={definitions} active={surfaceActive}
+                  onClose={() => { setOrganizationFocus(undefined); if (editorFromSettings) setEditorFromSettings(false); else setShowOrganization(false) }} onSaved={(deletedId) => {
                   const current = useRSSSession.getState().query
                   if (deletedId && (current.collectionId === deletedId || current.categoryId === deletedId)) setQuery({ collectionId: undefined, categoryId: undefined, scope: 'inbox', filter: 'all' })
                 }} />}

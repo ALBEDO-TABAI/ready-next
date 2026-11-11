@@ -1,3 +1,4 @@
+import { migrateRSSSieveLearning, RSS_SIEVE_LEARNING_MIGRATION } from '../main/modules/rss-engine/sieve-learning-schema'
 import { migrateRSSSieve, RSS_SIEVE_MIGRATION } from '../main/modules/rss-engine/sieve-schema'
 import { migrateRSSDigests, RSS_DIGEST_MIGRATION } from '../main/modules/rss-engine/digest-schema'
 import { migrateRSSCatalog, RSS_CATALOG_MIGRATION } from '../main/modules/rss-engine/catalog-schema'
@@ -122,6 +123,15 @@ test('RSS migration backs up existing WAL data and rolls back without losing rea
     db.prepare('INSERT INTO migrations VALUES(?)').run(RSS_SIEVE_MIGRATION); db.exec('COMMIT')
     assert.equal(db.prepare('PRAGMA table_info(rss_items)').all<{name:string}>().some(c => c.name === 'ai_score'), false)
     assert.deepEqual(db.prepare('SELECT read,starred,inbox_visible FROM rss_items').get(), { read:1,starred:1,inbox_visible:0 })
+    assert.ok(backupBeforeRSSMigration(db, path)?.includes('before-rss-156-'))
+    db.exec('BEGIN')
+    migrateRSSSieveLearning(db)
+    db.exec('ROLLBACK')
+    assert.equal(db.prepare('PRAGMA table_info(rss_sources)').all<{name:string}>().some(c=>c.name==='fetch_interval'),true)
+    db.exec('BEGIN')
+    migrateRSSSieveLearning(db)
+    db.prepare('INSERT INTO migrations VALUES(?)').run(RSS_SIEVE_LEARNING_MIGRATION)
+    db.exec('COMMIT')
     assert.equal(backupBeforeRSSMigration(db, path), null, 'all RSS migrations have completed')
     assert.equal(snapshot.prepare('SELECT title FROM rss_items').get<{ title: string }>()?.title, 'Saved title')
   } finally {

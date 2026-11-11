@@ -1,3 +1,4 @@
+import { rssHighlightedItems } from './rss-highlighted-items'
 import { rebuildCalendarLinks } from './calendar-link-adapter'
 import { canonicalObjectPath } from '../object-service/registry'
 import { ReadyRefSchema, toReadyUri } from '../../../shared/ready-ref'
@@ -622,12 +623,16 @@ export class RssAdapter implements IndexSourceAdapter {
 
   async reindex(ctx: AdapterContext): Promise<AdapterReindexResult> {
     const db = ctx.repository.getConnection()
+    const highlighted=await rssHighlightedItems(db)
     const items = db
       .prepare(
-        `SELECT id, source_id, title, link, summary, author, published_at, starred
-         FROM rss_items
-         ORDER BY published_at DESC
-         LIMIT 5000`,
+        `SELECT i.id,i.source_id,i.title,i.link,i.summary,i.author,i.published_at,i.starred,
+           CASE WHEN (i.starred=1 OR i.id IN (SELECT value FROM json_each(?))) AND c.item_revision=i.content_revision
+             AND c.status IN ('ready','partial') THEN c.markdown END AS full_text
+         FROM rss_items i LEFT JOIN rss_article_content c ON c.item_id=i.id
+         WHERE i.id IN (SELECT id FROM rss_items ORDER BY published_at DESC LIMIT 5000)
+           OR i.starred=1 OR i.id IN (SELECT value FROM json_each(?))
+         ORDER BY i.published_at DESC`,
       )
       .all<{
         id: string
@@ -637,13 +642,14 @@ export class RssAdapter implements IndexSourceAdapter {
         summary: string | null
         author: string | null
         published_at: number | null
+        full_text: string | null
         starred: number | null
-      }>()
+      }>(JSON.stringify([...highlighted]),JSON.stringify([...highlighted]))
     const rows = items.map((item) => ({
       path: toReadyUri({ kind: 'rss-item', id: item.id }),
       sourceId: item.id,
       name: item.title || item.link,
-      body: [item.title || '', stripHtml(item.summary), item.author || '', item.link].filter(Boolean).join(' '),
+      body: [item.title || '', stripHtml(item.summary), item.author || '', item.link, item.full_text || ''].filter(Boolean).join(' '),
       meta: {
         link: item.link,
         sourceId: item.source_id,

@@ -1,9 +1,8 @@
 /* Tempo — Poster Printer visual study. Calendar geometry stays in the existing grid rules. */
-@font-face { font-family: 'Ready Calendar Sans'; src: url('../../../../assets/calendar/Inter.woff2') format('woff2'); font-weight: 100 900; font-display: swap; }
-@font-face { font-family: 'Ready Calendar Serif'; src: url('../../../../assets/calendar/InstrumentSerif.woff2') format('woff2'); font-weight: 400; font-display: swap; }
 .ready-calendar {
-  --font: 'Ready Calendar Sans', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  --font-serif: 'Ready Calendar Serif', Georgia, serif;
+  /* One type system (W1): the calendar's own Inter and Instrument Serif copies were the same files as the shared ones. */
+  --font: var(--rn-font-ui);
+  --font-serif: var(--rn-font-serif);
   --stage: #ebebee; --stage-dot: rgba(35, 35, 45, .12);
   --c-page: #fcfcfd; --c-wash: rgba(252, 252, 253, .58);
   --c-text: #18181d; --c-text2: #686871; --c-text3: #878790;
