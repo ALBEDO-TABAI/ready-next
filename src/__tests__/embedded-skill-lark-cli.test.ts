@@ -296,6 +296,7 @@ test('Codex production ingress keeps Feishu wording as a candidate method, not a
     assert.deepEqual(requestEnvelope.resources, [])
     assert.deepEqual(requestEnvelope.referencedResources, [])
     assert.deepEqual(requestEnvelope.environmentHints, {
+      browserWriteOrigins: [],
       hasAttachments: false,
       hasBootstrapContext: false,
       hasDocumentContext: false,

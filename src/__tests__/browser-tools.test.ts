@@ -208,15 +208,17 @@ describe('browser semantic tool facade', () => {
   it('opens a routed browser workflow in its task-owned background tab', async () => {
     const calls: string[] = []
     const controller = createControllerMock({
-      ensureAgentWorkTab: async (browserTaskId, url) => {
-        calls.push(`ensure:${browserTaskId}:${url}`)
+      createAgentWorkTab: async (browserTaskId, url, openerTabId) => {
+        calls.push(`create:${browserTaskId}:${url}:${openerTabId}`)
         return { success: true, tabId: 'agent-weather-tab' }
       },
+      waitForCondition: async () => ({ matched: true, elapsedMs: 0 }),
       getAgentWorkTab: () => 'agent-weather-tab',
       createTab: async () => {
         calls.push('create-visible-tab')
         return { success: true, tabId: 'visible-tab' }
       },
+      switchTab: () => { throw new Error('must not switch the foreground tab') },
       getTabList: () => [{
         id: 'agent-weather-tab',
         title: 'Weather',
@@ -236,8 +238,9 @@ describe('browser semantic tool facade', () => {
     assert.equal(opened.tabId, 'agent-weather-tab')
     assert.equal(opened.browserActionOutcome.postActionTabId, 'agent-weather-tab')
     assert.deepEqual(calls, [
-      'ensure:browser-workflow-tools-test:https://example.test/weather',
+      'create:browser-workflow-tools-test:https://example.test/weather:',
     ])
+    assert.equal(controller.getActiveTab()?.id, 'tab-1')
   })
 
   it('returns opaque, current-document target references and ambiguity groups', async () => {
