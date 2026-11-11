@@ -1,6 +1,4 @@
 import { existsSync, readFileSync, rmSync } from 'fs'
-import { homedir } from 'os'
-import { join } from 'path'
 import { atomicWriteJson } from '../atomic-write'
 import type { ContinuationState } from '../contracts/continuation-state'
 import { normalizeContinuationState } from '../contracts/continuation-state'
@@ -138,7 +136,11 @@ const recentSkillRuns = new Map<string, SkillRunRecord[]>()
 const recentContinuationStates = new Map<string, ContinuationStateRecord[]>()
 const MAX_CONTINUITY_SESSIONS = 200
 let continuityHydrated = false
-let continuityStoragePathOverride: string | null = null
+// Where this profile keeps its continuity file. Main sets it from userData at startup; until then (and
+// in tests that never set it) continuity stays in memory. There is no shared default: a file in the home
+// folder was read and pruned by every Ready build at once, so Ready Next and the tests rewrote the
+// daily app's records (C15).
+let continuityStoragePath: string | null = null
 
 function pruneToRecent<T extends { updatedAt: number }>(items: T[], limit: number): T[] {
   return items
@@ -163,10 +165,10 @@ interface PersistedSessionContinuity {
   }>
 }
 
-function resolveContinuityStoragePath(): string {
-  return continuityStoragePathOverride
-    || process.env.READY_SESSION_CONTINUITY_PATH
-    || join(homedir(), '.ready-session-continuity.json')
+export function configureSessionContinuityStorage(path: string): void {
+  continuityStoragePath = path
+  continuityHydrated = false
+  clearInMemoryState()
 }
 
 function toPersistedPayload(): PersistedSessionContinuity {
@@ -251,8 +253,8 @@ function pruneStaleSessions(): boolean {
 function hydrateFromDisk(): void {
   if (continuityHydrated) return
   continuityHydrated = true
-  const path = resolveContinuityStoragePath()
-  if (!existsSync(path)) return
+  const path = continuityStoragePath
+  if (!path || !existsSync(path)) return
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<PersistedSessionContinuity>
     clearInMemoryState()
@@ -380,7 +382,8 @@ function hydrateFromDisk(): void {
 
 function persistToDisk(): void {
   hydrateFromDisk()
-  const path = resolveContinuityStoragePath()
+  const path = continuityStoragePath
+  if (!path) return
   try {
     atomicWriteJson(path, toPersistedPayload())
   } catch {
@@ -813,7 +816,7 @@ export function forgetSession(sessionId: string): void {
 }
 
 export function __setSessionContinuityStoragePathForTests(path: string | null): void {
-  continuityStoragePathOverride = path
+  continuityStoragePath = path
   continuityHydrated = false
   clearInMemoryState()
 }
@@ -826,8 +829,8 @@ export function __resetSessionContinuityForTests(options?: { keepPersisted?: boo
   clearInMemoryState()
   continuityHydrated = false
   if (options?.keepPersisted) return
-  const path = resolveContinuityStoragePath()
-  if (existsSync(path)) {
+  const path = continuityStoragePath
+  if (path && existsSync(path)) {
     try {
       rmSync(path, { force: true })
     } catch {
