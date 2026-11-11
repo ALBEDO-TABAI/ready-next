@@ -12,7 +12,7 @@ const books: LibraryBook[] = [
   { id: 'c', title: '旧城', author: '丙', topic: 'history', words: 80000, addedAt: 2 },
 ].map(b => ({ ...b, tags: [], status: '想读', format: 'txt', notePath: `/vault/${b.title}.md`, filePath: `/vault/${b.id}.txt`, source: { kind: 'local' } }))
 
-test('shelf renders, sorts, scopes keys, opens a real text reader and switches to a single page when narrow', async () => {
+test('shelf renders, sorts from its menu, scopes keys, opens a real text reader and switches to a single page when narrow', async () => {
   const dom = new JSDOM('<button id="outside">外部</button><div id="root"></div>', { url: 'http://localhost', pretendToBeVisual: true })
   Object.assign(dom.window, { matchMedia: () => ({ matches: true, addEventListener() {}, removeEventListener() {} }) })
   const runtimeErrors: unknown[] = []
@@ -41,7 +41,7 @@ test('shelf renders, sorts, scopes keys, opens a real text reader and switches t
     fetch: async (url: string | URL) => new Response(String(url).endsWith('.epub') ? epubBytes : '第一章 开始\n一段真正的书籍内容。\n第二章 回家\n走过山海，回到家中。'), IS_REACT_ACT_ENVIRONMENT: true }
   const previous = Object.fromEntries(Object.keys(replacements).map(k => [k, Object.getOwnPropertyDescriptor(globalThis, k)]))
   for (const [k, value] of Object.entries(replacements)) Object.defineProperty(globalThis, k, { value, configurable: true, writable: true })
-  let saved = 0
+  let saved = 0, picked = 0
   let currentBooks = books
   let importPaths: string[] = []
   const api: LibraryAPI = {
@@ -53,7 +53,7 @@ test('shelf renders, sorts, scopes keys, opens a real text reader and switches t
       currentBooks = [...books, imported]
       return { success: true, data: { imported: [imported], failed: [] } }
     },
-    pickAndImport: async () => ({ success: true, data: { imported: [], failed: [] } }),
+    pickAndImport: async () => { picked++; return { success: true, data: { imported: [], failed: [] } } },
     updateBook: async ({ id, patch }) => ({ success: true, data: { ...books.find(b => b.id === id)!, ...patch } }),
     getPosition: async () => ({ success: true, data: null }), setPosition: async p => { saved++; return { success: true, data: p } },
     listBookmarks: async () => ({ success: true, data: [] }), setBookmarks: async p => ({ success: true, data: p.bookmarks }),
@@ -69,14 +69,42 @@ test('shelf renders, sorts, scopes keys, opens a real text reader and switches t
   const root = createRoot(dom.window.document.getElementById('root')!)
   try {
     const { Library } = await import('../renderer/modules/library/Library')
-    await act(async () => root.render(<Library api={api} />))
+    const { FloatHost } = await import('../renderer/components/ui')
+    await act(async () => root.render(<><Library api={api} /><FloatHost /></>))
     const d = dom.window.document
     const click = async (label: string) => { const b = [...d.querySelectorAll('button')].find(b => b.textContent === label || b.getAttribute('aria-label') === label); assert.ok(b, label); await act(async () => b.click()) }
     const order = () => [...d.querySelectorAll('[data-book]')].map(b => b.getAttribute('data-book'))
     assert.deepEqual(order(), ['a', 'c', 'b'])
-    await click('最近'); assert.deepEqual(order(), ['b', 'c', 'a'])
-    await click('厚薄'); assert.deepEqual(order(), ['b', 'c', 'a'])
-    await click('颜色'); assert.deepEqual(order(), ['a', 'c', 'b'])
+    // The four sorts are one 排序 menu: checkable items, the button names the current one, focus comes back to it.
+    const sortButton = () => [...d.querySelectorAll<HTMLButtonElement>('button[aria-haspopup="menu"]')].find(b => b.getAttribute('aria-label')?.startsWith('排序'))!
+    const sortBy = async (label: string, from: string) => {
+      assert.equal(sortButton().getAttribute('aria-label'), `排序：${from}`)
+      await act(async () => sortButton().click())
+      assert.equal(sortButton().getAttribute('aria-expanded'), 'true')
+      const items = [...d.querySelectorAll<HTMLElement>('[role="menu"][aria-label="排序"] [role="menuitemcheckbox"]')]
+      assert.deepEqual(items.map(item => item.textContent), ['分类', '最近', '颜色', '厚薄'])
+      assert.deepEqual(items.filter(item => item.getAttribute('aria-checked') === 'true').map(item => item.textContent), [from])
+      await act(async () => items.find(item => item.textContent === label)!.click())
+      assert.equal(d.querySelector('[role="menu"]'), null)
+      assert.equal(sortButton().getAttribute('aria-label'), `排序：${label}`)
+      assert.equal(sortButton().getAttribute('aria-expanded'), 'false')
+      assert.equal(d.activeElement, sortButton())
+    }
+    await sortBy('最近', '分类'); assert.deepEqual(order(), ['b', 'c', 'a'])
+    await sortBy('厚薄', '最近'); assert.deepEqual(order(), ['b', 'c', 'a'])
+    await sortBy('颜色', '厚薄'); assert.deepEqual(order(), ['a', 'c', 'b'])
+    // Pressing 排序 again closes its menu without choosing (the press is not a click outside); Esc also closes it.
+    const press = async (button: HTMLElement) => act(async () => { button.dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true, cancelable: true })); button.click() })
+    await press(sortButton()); assert.ok(d.querySelector('[role="menu"]'))
+    await press(sortButton()); assert.equal(d.querySelector('[role="menu"]'), null)
+    await press(sortButton())
+    await act(async () => d.querySelector('[role="menu"]')!.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+    assert.equal(d.querySelector('[role="menu"]'), null); assert.equal(d.activeElement, sortButton())
+    assert.deepEqual(order(), ['a', 'c', 'b'])
+    // Without book sources, 导入 imports local files at once; 找书 is not offered.
+    assert.equal(d.querySelector('button[aria-haspopup="menu"]:not([aria-label^="排序"])'), null)
+    assert.equal([...d.querySelectorAll('button')].some(b => b.textContent === '找书'), false)
+    await click('导入'); assert.equal(picked, 1)
     const key = async (el: Element, value: string) => { await act(async () => el.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true }))) }
     const outside = d.getElementById('outside')!
     outside.focus(); await key(outside, '/'); assert.equal(d.activeElement, outside)
@@ -95,14 +123,22 @@ test('shelf renders, sorts, scopes keys, opens a real text reader and switches t
     width = 500
     await act(async () => { observers.forEach(cb => cb()); await new Promise(r => setTimeout(r, 150)) })
     assert.equal(d.querySelector('[aria-label="阅读器"]')?.getAttribute('data-layout'), 'single')
+    // The top bar is icon buttons named with plain words; counts are badges, absent at zero.
+    const bar = (name: string) => d.querySelector<HTMLButtonElement>(`.library-toolbar button[aria-label="${name}"]`)
+    const badge = (name: string) => bar(name)?.querySelector('.library-badge')?.textContent ?? null
+    for (const name of ['回到书架', '目录', '夹一张书签', '书签', '笔记', '排版']) assert.equal(bar(name)?.textContent, '', name)
+    assert.equal(bar('目录')!.title, '目录（T）')
     outside.focus(); await key(outside, 't'); await key(outside, 'b')
-    assert.equal(d.querySelector('[aria-label="目录"]'), null)
-    assert.match(d.body.textContent || '', /书签 0/)
+    assert.equal(d.querySelector('aside[aria-label="目录"]'), null)
+    assert.equal(badge('书签'), null)
     const reader = d.querySelector<HTMLElement>('[aria-label="阅读器"]')!
-    reader.focus(); await key(reader, 't'); assert.ok(d.querySelector('[aria-label="目录"]'))
-    await key(reader, 'b'); assert.match(d.body.textContent || '', /取下书签/)
+    reader.focus(); await key(reader, 't'); assert.ok(d.querySelector('aside[aria-label="目录"]'))
+    assert.equal(bar('目录')!.getAttribute('aria-pressed'), 'true')
+    await key(reader, 'b'); assert.ok(bar('取下书签')); assert.equal(bar('夹一张书签'), null)
+    assert.equal(badge('书签'), '1')
     assert.ok(saved > 0)
-    await key(reader, 't')
+    await key(reader, 't'); assert.equal(bar('目录')!.getAttribute('aria-pressed'), 'false')
+    assert.deepEqual([...d.querySelectorAll('.rd-dock button')].map(button => [button.getAttribute('aria-label'), button.textContent]), [['上一页', ''], ['下一页', '']])
     await click('下一页')
     await act(async () => { await new Promise(r => setTimeout(r, 40)) })
     assert.match(d.querySelector('.rd-dock')?.textContent || '', /6 \/ 8/)

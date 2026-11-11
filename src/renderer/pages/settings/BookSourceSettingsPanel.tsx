@@ -43,7 +43,7 @@ export function BookSourceSettingsPanel({ api = window.electronAPI.bookSources }
         </select>
       </SettingsRow>
       {extra && ExtraSourceSettings && <Suspense fallback={<SettingsStatus tone="muted">加载中…</SettingsStatus>}><ExtraSourceSettings value={value} onChange={setValue} /></Suspense>}
-      <div className="flex justify-end pt-2">
+      <div className="sx-card__footer">
         <button type="button" className={settingsButtonClass('primary')} disabled={busy} onClick={() => void save()}>{busy ? '保存并检查中…' : '保存并检查连接'}</button>
       </div>
     </>}

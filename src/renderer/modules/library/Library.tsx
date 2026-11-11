@@ -1,18 +1,21 @@
-import { ArchiveImport } from './ArchiveImport'
 import type { BookTarget } from './reader/navigation-state'
 import { FindSheet } from './find/FindSheet'
 import { JobView } from './find/JobView'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ArrowDownUp, FolderOpen, Import, Search, Shuffle } from 'lucide-react'
 import type { LibraryBook, LibraryState } from '../../../shared/library'
+import { Button, closeFloat, Toolbar, type MenuEntry } from '../../components/ui'
 import { getLibraryAPI, confirmed, type LibraryAPI } from './access'
 import { Shelf } from './Shelf'
 import { BookOpen } from './BookOpen'
 import { Reader } from './reader/Reader'
 import { SORTS, sortBooks, TOPICS, type Sort } from './topics'
 import { shelfBook } from './presentation'
+import { toggleMenu } from './menu'
 
 type Route = { kind: 'shelf' } | { kind: 'info'; id: string; origin: HTMLElement } | { kind: 'read'; id: string; target?: BookTarget }
 type Snapshot = { status: 'loading' } | LibraryState
+const IMPORT_MENU = 'library-import-menu', SORT_MENU = 'library-sort-menu'
 
 export function Library({ api: providedAPI, requestedPath, requestedTarget, onOpenOther }: { api?: LibraryAPI; requestedPath?: string; requestedTarget?: BookTarget; onOpenOther?: (path: string) => void }) {
   const [finding, setFinding] = useState(false)
@@ -26,6 +29,7 @@ export function Library({ api: providedAPI, requestedPath, requestedTarget, onOp
   const [topic, setTopic] = useState('')
   const [busy, setBusy] = useState(false)
   const [revision, setRevision] = useState(0)
+  const [menu, setMenu] = useState<string | null>(null)
   const root = useRef<HTMLDivElement>(null), search = useRef<HTMLInputElement>(null)
   const apiRef = useRef<LibraryAPI | null>(null)
   const apiError = useRef('')
@@ -96,6 +100,20 @@ export function Library({ api: providedAPI, requestedPath, requestedTarget, onOp
     } catch (error) { setError(String(error)) }
     finally { setBusy(false) }
   }
+  const canImport = !busy && snapshot.status === 'ready'
+  const sortLabel = SORTS.find(s => s.key === sort)?.label ?? ''
+  const onShelf = route.kind !== 'read'
+  // The shelf's menus belong to its buttons: they close when the reader takes over or the library closes.
+  useEffect(() => onShelf ? () => { closeFloat(IMPORT_MENU); closeFloat(SORT_MENU) } : undefined, [onShelf])
+  const showMenu = (button: HTMLElement, id: string, label: string, items: MenuEntry[], placement: 'bottom-end' | 'top') => toggleMenu(button, {
+    id, label, items, placement,
+    onOpenChange: open => setMenu(current => open ? id : current === id ? null : current),
+  })
+  const importMenu = (button: HTMLElement) => showMenu(button, IMPORT_MENU, '导入', [
+    { id: 'local', label: '本地文件…', icon: <FolderOpen />, disabled: !canImport, onSelect: () => void importBooks() },
+    { id: 'find', label: '找书…', icon: <Search />, hint: 'F', onSelect: () => setFinding(true) },
+  ], 'bottom-end')
+  const sortMenu = (button: HTMLElement) => showMenu(button, SORT_MENU, '排序', SORTS.map(s => ({ id: s.key, label: s.label, checked: s.key === sort, onSelect: () => setSort(s.key) })), 'top')
   return <div ref={root} className="rn-library rn-design" tabIndex={0} aria-label="书房" onPointerDown={e => { if (e.target === e.currentTarget) e.currentTarget.focus() }} onKeyDown={e => {
     if (route.kind !== 'shelf' || e.metaKey || e.ctrlKey || e.altKey || (e.target instanceof Element && e.target.closest('input,textarea,select,[contenteditable]'))) return
     if (finding) return
@@ -106,7 +124,13 @@ export function Library({ api: providedAPI, requestedPath, requestedTarget, onOp
     {route.kind === 'read' && snapshot.status === 'ready' && !current && <p role="alert">书籍不存在或已从书房移除</p>}
     {error && <div className="library-error" role="alert">{error}<button type="button" onClick={() => { setError(''); setRevision(n => n + 1) }}>重试</button><button type="button" onClick={() => setError('')}>关闭提示</button></div>}
     {route.kind === 'read' && current && api ? <Reader key={current.id} record={current} api={api} target={route.target} onBack={() => setRoute({ kind: 'shelf' })} onError={reportError} /> : <>
-      <header className="library-toolbar"><div className="rn-float"><b>书房</b><input ref={search} aria-label="搜索书架" placeholder="在书架上找… /" value={query} onChange={e => setQuery(e.target.value)} /></div><div className="rn-float"><button type="button" disabled={busy || snapshot.status !== 'ready'} onClick={() => void importBooks()}>导入本地书</button>{window.electronAPI?.libraryArchive && <ArchiveImport api={window.electronAPI.libraryArchive} disabled={busy || snapshot.status !== 'ready'} onBusy={setBusy} />}</div></header>
+      <header className="library-toolbar">
+        <div className="rn-float library-pill is-text"><b>书房</b><input ref={search} aria-label="搜索书架" placeholder="在书架上找… /" value={query} onChange={e => setQuery(e.target.value)} /></div>
+        {/* With book sources, 导入 is a menu (local files or 找书); without them it imports local files at once. */}
+        <div className="rn-float library-pill">{sourceAPI
+          ? <Button variant="ghost" icon={<Import />} aria-haspopup="menu" aria-expanded={menu === IMPORT_MENU} data-float-anchor={IMPORT_MENU} onClick={e => importMenu(e.currentTarget)}>导入</Button>
+          : <Button variant="ghost" icon={<Import />} disabled={!canImport} onClick={() => void importBooks()}>导入</Button>}</div>
+      </header>
       <div className="library-scroll"><header className="library-hero"><h1>我的<em>藏书</em></h1><div className="library-statistics"><span>{books.length} 本藏书</span><span>{new Set(books.map(b => b.topic)).size} 个分类</span><span>{books.filter(b => b.status === '在读').length} 本在读</span><span>{books.filter(b => b.status === '读完').length} 本读完</span></div></header>
         {snapshot.status === 'loading' && !error && <p role="status">正在整理书架…</p>}
         {snapshot.status === 'no_vault' && <p>请先在文件面板设置资料库。</p>}
@@ -120,7 +144,11 @@ export function Library({ api: providedAPI, requestedPath, requestedTarget, onOp
           </>}
         </>}
       </div>
-      <footer className="library-footer"><div className="rn-float">{sourceAPI && <button type="button" onClick={() => setFinding(true)}>找书 F</button>}{SORTS.map(s => <button type="button" key={s.key} aria-pressed={sort === s.key} onClick={() => setSort(s.key)}>{s.label}</button>)}<button type="button" disabled={!shown.size} onClick={draw}>抽一本</button></div></footer>
+      <footer className="library-footer"><div className="rn-float library-pill"><Toolbar label="书架">
+        {sourceAPI && <Button variant="ghost" icon={<Search />} title="找书（F）" aria-keyshortcuts="F" onClick={() => setFinding(true)}>找书</Button>}
+        <Button variant="ghost" icon={<ArrowDownUp />} aria-label={`排序：${sortLabel}`} aria-haspopup="menu" aria-expanded={menu === SORT_MENU} data-float-anchor={SORT_MENU} onClick={e => sortMenu(e.currentTarget)}>排序<span className="library-sort-value">{sortLabel}</span></Button>
+        <Button variant="ghost" icon={<Shuffle />} title="随手抽一本（R）" aria-keyshortcuts="R" disabled={!shown.size} onClick={draw}>抽一本</Button>
+      </Toolbar></div></footer>
       {route.kind === 'info' && current && <BookOpen key={current.id} book={shelfBook(current)} record={current} origin={route.origin} onClose={() => setRoute({ kind: 'shelf' })} onRead={() => read(current)} />}
     </>}
     {finding && sourceAPI && <FindSheet api={sourceAPI} onClose={() => { setFinding(false); root.current?.focus() }} />}

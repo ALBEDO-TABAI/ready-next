@@ -75,6 +75,8 @@ test('reader drag creates a durable mark; popover edits/copies/removes; N groups
     const e = new dom.window.MouseEvent(type, { bubbles: true, clientX: x, clientY: 200, button: 0 })
     Object.defineProperty(e, 'pointerType', { value: 'mouse' }); el.dispatchEvent(e)
   }
+  // The top bar's 笔记 button keeps its plain name; the number of highlights is a badge, absent at zero.
+  const notesBadge = () => d.querySelector('.library-toolbar button[aria-label="笔记"] .library-badge')?.textContent ?? null
   const openMark = async () => {
     const mark = d.querySelector('mark.hl')!; assert.ok(mark)
     await act(async () => { pointer(mark, 'pointerdown', 100); pointer(mark, 'pointerup', 100) })
@@ -92,8 +94,10 @@ test('reader drag creates a durable mark; popover edits/copies/removes; N groups
       pointer(paragraph, 'pointermove', 160); pointer(paragraph, 'pointerup', 160)
     })
     assert.equal(d.querySelector('.rd-dock')!.textContent, dock, 'drag must not turn the page')
+    assert.equal(notesBadge(), null)
     await click('黄')
     assert.equal(d.querySelector('mark.hl')?.textContent, '段真正的书籍')
+    assert.equal(notesBadge(), '1')
     assert.match(await readFile(record.notePath, 'utf8'), /> 段真正的书籍/)
     await openMark(); await click('蓝')
     assert.equal(d.querySelector('mark.hl')?.getAttribute('data-c'), 'blue')
@@ -141,6 +145,7 @@ test('reader drag creates a durable mark; popover edits/copies/removes; N groups
     await writeFile(record.notePath, savedSource); await click('刷新标注'); await click('关闭面板')
     await openMark(); await click('删除划线')
     assert.equal(d.querySelector('mark.hl'), null)
+    assert.equal(notesBadge(), null)
     assert.ok(!(await readFile(record.notePath, 'utf8')).includes(`^${id}`))
     // A plain click on body text still turns the page.
     const plain = d.querySelector('.pg-flow p')!, before = d.querySelector('.rd-dock')!.textContent
