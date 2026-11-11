@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Eval · 本地搜索</title>
+<link rel="stylesheet" href="/assets/site.css">
+<script src="/assets/eval-probe.js" defer>
+</script>
+</head>
+<body>
+<main>
+<h1>本地搜索</h1>
+<form action="/search/" role="search">
+<label for="search-q">搜索</label>
+<input id="search-q" type="search" name="q" aria-label="搜索" value="{{q}}">
+<button>搜索</button>
+</form>
+<ol id="results">{{results}}</ol>{{empty}}</main>
+</body>
+</html>

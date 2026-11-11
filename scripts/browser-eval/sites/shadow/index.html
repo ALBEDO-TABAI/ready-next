@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Eval · Shadow DOM 控件</title>
+<link rel="stylesheet" href="/assets/site.css">
+<script src="/assets/eval-probe.js" defer>
+</script>
+<script src="/assets/eval-components.js" defer>
+</script>
+<script src="/assets/simple-actions.js" defer>
+</script>
+</head>
+<body>
+<main>
+<h1>寄件单</h1>
+<eval-closed-button label="生成编号">
+</eval-closed-button>
+<p id="shadow-result">
+</p>
+<form method="post" action="/shadow/api/submit" id="shadow-form">
+<eval-field label="收件人" name="recipient">
+</eval-field>
+<eval-switch label="加急" name="urgent">
+</eval-switch>
+<button type="submit">提交寄件单</button>
+</form>
+<p id="shadow-status">
+</p>
+</main>
+</body>
+</html>

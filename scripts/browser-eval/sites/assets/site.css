@@ -1,0 +1,78 @@
+body {
+  font-family: system-ui, sans-serif;
+  color: #193043;
+  background: #f5f7fa;
+  margin: 0;
+  line-height: 1.6;
+}
+main {
+  max-width: 960px;
+  margin: 24px auto;
+  padding: 24px;
+  background: white;
+}
+label {
+  display: block;
+  margin-top: 12px;
+}
+input,
+select,
+textarea,
+button {
+  font: inherit;
+  padding: 8px;
+  margin: 4px;
+}
+textarea {
+  display: block;
+  width: 85%;
+  min-height: 100px;
+}
+button {
+  cursor: pointer;
+}
+nav a {
+  display: inline-block;
+  margin: 8px;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 20px 0;
+}
+th,
+td {
+  border: 1px solid #b9c4cf;
+  padding: 8px;
+  text-align: left;
+}
+iframe {
+  width: 95%;
+  height: 420px;
+  border: 1px solid #b9c4cf;
+}
+article {
+  min-height: 110px;
+  border-bottom: 1px solid #b9c4cf;
+  padding: 16px;
+}
+[role='alert'] {
+  color: #a51818;
+}
+#editor {
+  min-height: 240px;
+  padding: 16px;
+  border: 1px solid #899dad;
+}
+#sentinel {
+  height: 20px;
+}
+canvas {
+  max-width: 100%;
+  border: 1px solid #899dad;
+}
+eval-field,
+eval-switch {
+  display: block;
+  margin: 16px 0;
+}

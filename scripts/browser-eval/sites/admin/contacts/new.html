@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Eval · 新建联系人</title>
+<link rel="stylesheet" href="/assets/site.css">
+<script src="/assets/eval-probe.js" defer>
+</script>
+</head>
+<body>
+<main>
+<h1>新建联系人</h1>
+<form method="post" action="/admin/contacts/new" >
+<label for="c-name">姓名</label>
+<input id="c-name" name="name" type="text" value="" >
+<label for="c-email">邮箱</label>
+<input id="c-email" name="email" type="email" value="" >
+<label for="c-company">公司</label>
+<input id="c-company" name="company" type="text" value="" >
+<label for="c-phone">电话</label>
+<input id="c-phone" name="phone" type="tel" value="" >
+<button type="submit">保存联系人</button>
+</form>
+</main>
+</body>
+</html>

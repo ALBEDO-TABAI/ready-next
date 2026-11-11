@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Eval · 活动向导</title>
+<link rel="stylesheet" href="/assets/site.css">
+<script src="/assets/eval-probe.js" defer>
+</script>
+<script src="/assets/eval-components.js" defer>
+</script>
+<script src="/assets/event.js" defer>
+</script>
+</head>
+<body>
+<main>
+<h1>第 2 步：地点与报名</h1>
+<form method="post" action="/admin/events/step3" id="event-form">
+<input type="hidden" name="token" value="{{token}}">
+<eval-field label="地点" name="place">
+</eval-field>
+<eval-switch label="需要报名" name="signup">
+</eval-switch>
+<input type="hidden" name="place" value="">
+<input type="hidden" name="signup" value="">
+<button type="submit">下一步</button>
+</form>
+</main>
+</body>
+</html>

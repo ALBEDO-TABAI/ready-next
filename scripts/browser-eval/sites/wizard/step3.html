@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Eval · 配送订单</title>
+<link rel="stylesheet" href="/assets/site.css">
+<script src="/assets/eval-probe.js" defer>
+</script>
+</head>
+<body>
+<main>
+<h1>第 3 步：确认</h1>{{error}}<form method="post" action="/wizard/submit" >
+<input type="hidden" name="token" value="{{token}}">
+<dl>{{details}}</dl>
+<input id="w-agree" name="agree" type="checkbox" value="yes" >
+<label for="w-agree">我已确认信息无误</label>
+<button type="submit">提交订单</button>
+</form>
+</main>
+</body>
+</html>
