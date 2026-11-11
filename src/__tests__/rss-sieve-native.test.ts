@@ -59,7 +59,11 @@ test('V1/V2 queries enforce 48h, unread, threshold, top12/top5, remainder and im
     f.rss.sieve.recordBehavior({id:'feedback',itemId:'new-1',action:'less',reason:'source',at:now})
     const after=f.rss.sieve.query({threshold:0},now)
     assert.ok(after.items.find(i=>i.id==='new-0')!.sieve.score<score)
-    assert.equal(f.rss.sieve.query({threshold:100},now).remainingCount,15)
+    const highThreshold = f.rss.sieve.query({ threshold: 100 }, now)
+    assert.equal(highThreshold.items.length, 1)
+    assert.equal(highThreshold.items[0].sieve.explore, true)
+    assert.ok(highThreshold.items[0].sieve.score < 100)
+    assert.equal(highThreshold.remainingCount, 14)
     f.rss.organization.setManual({itemId:'new-0',expectedArticleRevision:f.rss.content.getArticle('new-0')!.revision,definitionId:'curated',expectedRuleRevision:1,decision:false})
     assert.ok(!f.rss.sieve.query({threshold:0},now).items.some(i=>i.id==='new-0'))
   } finally {f.db.close()}

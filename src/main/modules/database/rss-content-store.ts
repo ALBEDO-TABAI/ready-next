@@ -1,3 +1,5 @@
+import { z } from 'zod'
+import { RSSSieveStore } from './rss-sieve-store'
 import { RSSReadExcerptSchema, type RSSReadExcerptInput, type RSSSelectionExcerpt } from '../../../shared/rss-excerpt'
 import { readingExcerpt } from '../../../shared/rss-reading'
 import { rssIncludedClassificationSQL, type RSSOrganizationStore } from './rss-organization-store'
@@ -37,6 +39,15 @@ const ARTICLE_FROM = `FROM rss_items i LEFT JOIN rss_sources s ON s.id=i.source_
 const ARTICLE_SELECT = `SELECT ${ARTICLE_COLUMNS},c.markdown ${ARTICLE_FROM}`
 const LIST_SELECT = `SELECT ${ARTICLE_COLUMNS},NULL AS markdown ${ARTICLE_FROM}`
 const hash = (value: string) => createHash('sha256').update(value).digest('hex')
+
+const readCursorSchema = z.object({
+  offset: z.number().int().nonnegative(),
+  revision: z.number().int().nonnegative(),
+  query: z.string(),
+  sort: z.enum(['newest', 'oldest', 'relevance']),
+  rankedAt: z.number().int().nonnegative().optional(),
+  ranking: z.string().optional(),
+})
 
 function summary(row: ArticleRow, classifications: RSSMembership[]): RSSArticleSummary {
   const currentBody = row.body_item_revision === row.content_revision
@@ -112,21 +123,30 @@ export class RSSContentStore {
       const { cursor, expectedRevision: requestedRevision, ...query } = this.normalizeQuery(input, definitions)
       const fingerprint = hash(JSON.stringify([grouped ? 'cards' : 'articles', query]))
       let offset = 0, expectedRevision: number | undefined = requestedRevision
+      let rankedAt = Date.now(), expectedRanking: string | undefined
       if (cursor) {
         let parsed: unknown
         try { parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) } catch { throw new Error('invalid_cursor') }
-        const token = parsed as { offset?: number; revision?: number; query?: string } | null
-        if (!token || !Number.isSafeInteger(token.offset) || token.offset! < 0 || !Number.isSafeInteger(token.revision)) throw new Error('invalid_cursor')
-        if (token.query !== fingerprint) throw new Error('cursor_query_mismatch')
+        const result = readCursorSchema.safeParse(parsed)
+        if (!result.success) throw new Error('invalid_cursor')
+        const token = result.data
+        if (token.query !== fingerprint || token.sort !== query.sort) throw new Error('cursor_query_mismatch')
         if (requestedRevision !== undefined && requestedRevision !== token.revision) throw new Error('cursor_stale')
-        offset = token.offset!
+        if (query.sort === 'relevance') {
+          if (token.rankedAt === undefined || token.ranking === undefined) throw new Error('invalid_cursor')
+          rankedAt = token.rankedAt
+          expectedRanking = token.ranking
+        }
+        offset = token.offset
         expectedRevision = token.revision
       }
       const revision = db.prepare('SELECT revision FROM rss_workspace_state WHERE id=1').get<{ revision: number }>()!.revision
       if (expectedRevision !== undefined && expectedRevision !== revision) throw new Error('cursor_stale')
       const { predicate, args } = queryPredicate(query, definitions)
       const total = db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(i.read=0),0) AS unread FROM rss_items i LEFT JOIN rss_article_content c ON c.item_id=i.id${predicate}`).get<{ count: number; unread: number }>(...args)!
-      const direction = query.sort === 'newest' ? 'DESC' : 'ASC'
+      const direction = query.sort === 'oldest' ? 'ASC' : 'DESC'
+      const limit = query.sort === 'relevance' ? -1 : query.limit
+      const start = query.sort === 'relevance' ? 0 : offset
       type CardRow = ArticleRow & { group_id?: string | null; matching_count?: number; matching_unread?: number; matching_starred?: number; display_time?: number }
       let rows: CardRow[], cardTotal = total.count
       if (grouped) {
@@ -135,16 +155,39 @@ export class RSSContentStore {
         const matches = `WITH matches AS (SELECT i.id,${eventKey} AS group_id,${bucket} AS bucket,
           COUNT(*) OVER (PARTITION BY ${bucket}) AS matching_count,SUM(i.read=0) OVER (PARTITION BY ${bucket}) AS matching_unread,
           SUM(i.starred=1) OVER (PARTITION BY ${bucket}) AS matching_starred,
-          ${query.sort === 'newest' ? 'MAX' : 'MIN'}(COALESCE(i.published_at,i.first_seen_at)) OVER (PARTITION BY ${bucket}) AS display_time,
+          ${query.sort === 'oldest' ? 'MIN' : 'MAX'}(COALESCE(i.published_at,i.first_seen_at)) OVER (PARTITION BY ${bucket}) AS display_time,
           ROW_NUMBER() OVER (PARTITION BY ${bucket} ORDER BY ${rssEventRepresentativeOrder('ee', 'em')}) AS representative
           FROM rss_items i LEFT JOIN rss_article_content c ON c.item_id=i.id
           LEFT JOIN rss_event_members em ON em.item_id=i.id LEFT JOIN rss_event_evidence ee ON ee.id=em.evidence_id LEFT JOIN rss_event_facts ef ON ef.id=ee.fact_id${predicate})`
         cardTotal = db.prepare(`${matches} SELECT COUNT(*) AS n FROM matches WHERE representative=1`).get<{ n: number }>(...args)!.n
         rows = db.prepare(`${matches} SELECT ${ARTICLE_COLUMNS},NULL AS markdown,matched.group_id,matched.matching_count,matched.matching_unread,matched.matching_starred,matched.display_time
           ${ARTICLE_FROM} JOIN matches matched ON matched.id=i.id WHERE matched.representative=1
-          ORDER BY matched.display_time ${direction},matched.bucket ${direction} LIMIT ? OFFSET ?`).all<CardRow>(...args, query.limit, offset)
+          ORDER BY matched.display_time ${direction},matched.bucket ${direction} LIMIT ? OFFSET ?`).all<CardRow>(...args, limit, start)
       } else rows = db.prepare(`${LIST_SELECT}${predicate} ORDER BY COALESCE(i.published_at,i.first_seen_at) ${direction},i.id ${direction} LIMIT ? OFFSET ?`)
-        .all<CardRow>(...args, query.limit, offset)
+        .all<CardRow>(...args, limit, start)
+      let ranking: string | undefined
+      if (query.sort === 'relevance') {
+        const candidates = grouped ? db.prepare(`${LIST_SELECT}${predicate}`).all<ArticleRow>(...args) : rows
+        const ids = candidates.map(row => row.id)
+        const memberships = this.organization.memberships(ids)
+        const events = this.events?.memberships(ids) || {}
+        const topicId = query.categoryId ?? definitions.find(d => d.id === query.collectionId && d.kind === 'topic')?.id
+        const ranked = new RSSSieveStore(this.getConnection, this).rank(candidates.map(row => ({
+          ...summary(row, memberships[row.id] || []),
+          ...(events[row.id] ? { event: events[row.id] } : {}),
+        })), rankedAt, topicId)
+        const scores = new Map<string, number>()
+        for (const item of ranked) {
+          const key = grouped && item.event?.eventId && !item.event.stale ? `event:${item.event.eventId}` : `article:${item.id}`
+          scores.set(key, Math.max(scores.get(key) ?? -Infinity, item.sieve.score))
+        }
+        const key = (row: CardRow) => row.group_id ? `event:${row.group_id}` : `article:${row.id}`
+        const time = (row: CardRow) => row.display_time ?? row.published_at ?? row.first_seen_at
+        rows.sort((a, b) => scores.get(key(b))! - scores.get(key(a))! || time(b) - time(a) || key(a).localeCompare(key(b)))
+        ranking = hash(JSON.stringify(rows.map(row => [key(row), scores.get(key(row))])))
+        if (expectedRanking !== undefined && expectedRanking !== ranking) throw new Error('cursor_stale')
+        rows = rows.slice(offset, offset + query.limit)
+      }
       const lastFetch = query.sourceId
         ? db.prepare('SELECT last_fetched AS time FROM rss_sources WHERE id=?').get<{ time: number | null }>(query.sourceId)?.time
         : db.prepare('SELECT MAX(last_fetched) AS time FROM rss_sources').get<{ time: number | null }>()?.time
@@ -155,7 +198,7 @@ export class RSSContentStore {
         query, definitions, revision, total: total.count, ...(grouped ? { cardTotal } : {}), unreadTotal: total.unread, lastFetchAt: lastFetch == null ? null : lastFetch * 1000,
         items: rows.map((row) => ({ ...summary(row, memberships[row.id] || []), ...(events[row.id] ? { event: events[row.id] } : {}),
           ...(row.group_id && this.events ? { eventGroup: { ...this.events.summary(row.group_id), matchingCount: row.matching_count!, matchingUnread: row.matching_unread!, matchingStarred: row.matching_starred!, displayTime: row.display_time! * 1000 } } : {}) })),
-        nextCursor: nextOffset < cardTotal ? Buffer.from(JSON.stringify({ offset: nextOffset, revision, query: fingerprint })).toString('base64url') : null,
+        nextCursor: nextOffset < cardTotal ? Buffer.from(JSON.stringify({ offset: nextOffset, revision, query: fingerprint, sort: query.sort, ...(ranking ? { rankedAt, ranking } : {}) })).toString('base64url') : null,
       }
     } finally { db.exec('RELEASE rss_read_query') }
   }

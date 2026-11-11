@@ -22,7 +22,13 @@ test('learning IPC registers, validates, reads back writes and disposes every ch
   assert.equal((call('sieveSaveTopicNotification',{topicId:'curated',urgent:true}) as {success:boolean}).success,false)
   assert.equal((call('importOpml',{xml:'broken'}) as {success:boolean}).success,false)
   assert.deepEqual(call('importOpml',{xml:'<opml><body/></opml>'}),{success:true,data:{added:0,existing:0,sourceIds:[]}})
-  assert.equal(changes,3)
-  assert.equal(handlers.size,11)
+  assert.deepEqual(call('sieveSettings'), { success: true, data: { explore: true } })
+  assert.deepEqual(call('sieveSaveSettings', { explore: false }), { success: true, data: { explore: false } })
+  assert.deepEqual(call('sieveSettings'), { success: true, data: { explore: false } })
+  for (const input of [{}, { explore: 'false' }, { explore: true, extra: 1 }]) {
+    assert.equal((call('sieveSaveSettings', input) as { success: boolean }).success, false)
+  }
+  assert.equal(changes, 4)
+  assert.equal(handlers.size, 13)
   handle.dispose();assert.equal(handlers.size,0)
 })

@@ -33,7 +33,14 @@ export type RSSBehavior = RSSBehaviorInput & { sourceId: string; topicIds: strin
 export const RSSSieveQuerySchema = z.object({ topicId: z.string().min(1).optional(), threshold: z.number().min(0).max(100).default(60) }).strict()
 export type RSSSieveQuery = z.input<typeof RSSSieveQuerySchema>
 export type RSSSieveFactor = 'model' | 'source' | 'topic' | 'freshness' | 'duplicate' | 'manual'
-export interface RSSSieveScore { score: number; eligible: boolean; pinned: boolean; reason: string; factors: { factor: RSSSieveFactor; contribution: number }[] }
+export interface RSSSieveScore {
+  explore?: boolean
+  score: number
+  eligible: boolean
+  pinned: boolean
+  reason: string
+  factors: { factor: RSSSieveFactor; contribution: number }[]
+}
 export interface RSSSieveItem extends RSSArticleSummary { sieve: RSSSieveScore; relevance: RSSRelevance | null }
 export interface RSSSieveResult { items: RSSSieveItem[]; remaining: RSSSieveItem[]; remainingCount: number }
 export interface RSSWorkContextSnapshot { text: string; entries: RSSWorkEntry[] }
@@ -72,4 +79,11 @@ export interface RSSSieveAPI {
   sieveTopicNotifications(): Promise<RSSSieveResponse<{topicId:string;urgent:boolean}[]>>
   sieveSaveTopicNotification(input: {topicId:string;urgent:boolean}): Promise<RSSSieveResponse<{topicId:string;urgent:boolean}>>
   importOpml(input: {xml:string}): Promise<RSSSieveResponse<{added:number;existing:number;sourceIds:string[]}>>
+}
+
+export const RSSSieveSettingsSchema = z.object({ explore: z.boolean() }).strict()
+export type RSSSieveSettings = z.infer<typeof RSSSieveSettingsSchema>
+export interface RSSSieveAPI {
+  sieveSettings(): Promise<RSSSieveResponse<RSSSieveSettings>>
+  sieveSaveSettings(input: RSSSieveSettings): Promise<RSSSieveResponse<RSSSieveSettings>>
 }

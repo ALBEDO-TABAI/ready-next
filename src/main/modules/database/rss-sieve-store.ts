@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import type { RSSArticleSummary } from '../../../shared/rss-workspace'
 import { z } from 'zod'
 import type { DatabaseConnection } from './connection'
@@ -5,7 +6,7 @@ import { assertDatabaseConnectionReady } from './connection'
 import type { RSSContentStore } from './rss-content-store'
 import { RSS_EVENT_ARTICLE_REVISION_SQL } from './rss-event-store'
 import { SettingsStore } from './settings-store'
-import { RSSBehaviorSchema, RSS_FEEDBACK_TARGET, RSSWorkPrivacySchema, RSSWorkPrivacyPatchSchema, RSS_RELEVANCE_METHOD, RSSSieveQuerySchema, type RSSBehavior, type RSSBehaviorInput,
+import { RSSBehaviorSchema, RSS_FEEDBACK_TARGET, RSSWorkPrivacySchema, RSSWorkPrivacyPatchSchema, RSS_RELEVANCE_METHOD, RSSSieveQuerySchema, RSSSieveSettingsSchema, type RSSSieveSettings, type RSSBehavior, type RSSBehaviorInput,
   type RSSFocus, type RSSRelevance, type RSSWorkPrivacy, type RSSSieveItem, type RSSSieveQuery, type RSSSieveResult } from '../../../shared/rss-sieve'
 import { scoreRSSArticle, smoothPreference, type RSSScoreInput } from '../rss-engine/sieve-scoring'
 
@@ -151,26 +152,64 @@ export class RSSSieveStore {
     articles.sort(rank)
     return articles
   }
-  query(input: RSSSieveQuery = {}, now = Date.now(), recordExposure = true): RSSSieveResult {
-    const params = RSSSieveQuerySchema.parse(input), candidates: RSSArticleSummary[] = []
+  settings(): RSSSieveSettings {
+    const raw = new SettingsStore(this.connection).getSetting('rss:sieve-settings')
+    return RSSSieveSettingsSchema.parse(raw ? JSON.parse(raw) : { explore: true })
+  }
+
+  saveSettings(input: RSSSieveSettings): RSSSieveSettings {
+    const settings = RSSSieveSettingsSchema.parse(input)
+    new SettingsStore(this.connection).setSetting('rss:sieve-settings', JSON.stringify(settings))
+    return settings
+  }
+
+  private explore(articles: RSSSieveItem[], threshold: number, now: number, topicId?: string): RSSSieveItem | undefined {
+    if (!this.settings().explore) return undefined
+    const date = new Date(now)
+    const day = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+    const settings = new SettingsStore(this.connection)
+    const raw = settings.getSetting('rss:sieve-explore-choice')
+    const saved = raw ? z.object({ day: z.string(), itemId: z.string() }).strict().parse(JSON.parse(raw)) : null
+    const candidates = articles.filter(item => item.sieve.score < threshold && item.inboxVisible &&
+      !item.classifications.some(c => !c.stale && c.origin === 'manual' && !c.included &&
+        (topicId ? c.definitionId === topicId : c.kind === 'curated')))
+    let itemId = saved?.day === day ? saved.itemId : undefined
+    if (itemId === undefined) {
+      const choices = candidates.map(item => ({ item, hash: createHash('sha256').update(`${day}:${item.id}`).digest('hex') }))
+      choices.sort((a, b) => a.hash.localeCompare(b.hash) || a.item.id.localeCompare(b.item.id))
+      itemId = choices[0]?.item.id
+      if (itemId === undefined) return undefined
+      settings.setSetting('rss:sieve-explore-choice', JSON.stringify({ day, itemId }))
+    }
+    const item = candidates.find(candidate => candidate.id === itemId)
+    return item ? { ...item, sieve: { ...item.sieve, explore: true, reason: '换换口味' } } : undefined
+  }
+
+  query(input: RSSSieveQuery = {}, now = Date.now(), recordExposure = true, includeExplore = true): RSSSieveResult {
+    const params = RSSSieveQuerySchema.parse(input)
+    const candidates: RSSArticleSummary[] = []
     let cursor: string | undefined
     do {
-      const page = this.content.query({ filter:'unread',from:now-48*3600000,until:now+1,categoryId:params.topicId,limit:100,cursor })
-      candidates.push(...page.items); cursor=page.nextCursor ?? undefined
-    } while(cursor)
-    const articles=this.rank(candidates,now,params.topicId)
-    const items = articles.filter(a => a.sieve.eligible && a.sieve.score >= params.threshold).slice(0,12)
+      const page = this.content.query({ filter: 'unread', from: now - 48 * 3600000, until: now + 1, categoryId: params.topicId, limit: 100, cursor })
+      candidates.push(...page.items)
+      cursor = page.nextCursor ?? undefined
+    } while (cursor)
+    const articles = this.rank(candidates, now, params.topicId)
+    const items = articles.filter(a => a.sieve.eligible && a.sieve.score >= params.threshold).slice(0, 12)
+    const explore = includeExplore ? this.explore(articles, params.threshold, now, params.topicId) : undefined
+    if (explore) items.push(explore)
     const chosen = new Set(items.map(a => a.id))
-    const remaining = articles.filter(a => !chosen.has(a.id)).sort((a,b) => (b.publishedAt ?? b.collectedAt)-(a.publishedAt ?? a.collectedAt) || a.id.localeCompare(b.id))
-    if(recordExposure && !params.topicId && params.threshold===60) {
-      const save=this.db.prepare('INSERT OR IGNORE INTO rss_sieve_exposures VALUES(?,?)')
-      for(const item of items) save.run(item.id,now)
+    const remaining = articles.filter(a => !chosen.has(a.id)).sort((a, b) => (b.publishedAt ?? b.collectedAt) - (a.publishedAt ?? a.collectedAt) || a.id.localeCompare(b.id))
+    if (recordExposure && !params.topicId && params.threshold === 60) {
+      const save = this.db.prepare('INSERT OR IGNORE INTO rss_sieve_exposures VALUES(?,?)')
+      for (const item of items) save.run(item.id, now)
     }
-    return { items,remaining,remainingCount:remaining.length }
+    return { items, remaining, remainingCount: remaining.length }
   }
+
   today(now = Date.now()): RSSSieveItem[] {
-    const items=this.query({},now,false).items.slice(0,5)
-    for(const item of items) this.db.prepare('INSERT OR IGNORE INTO rss_sieve_exposures VALUES(?,?)').run(item.id,now)
+    const items = this.query({}, now, false, false).items.slice(0, 5)
+    for (const item of items) this.db.prepare('INSERT OR IGNORE INTO rss_sieve_exposures VALUES(?,?)').run(item.id, now)
     return items
   }
 }
