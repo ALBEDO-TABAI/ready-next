@@ -4,6 +4,7 @@ import { useDocTabs } from '../../stores/useDocTabs'
 import { useMode } from '../../stores/useMode'
 import type { AgentMessage, ChatAttachment } from './types'
 import { diagnoseAgentPanelSnapshot } from './agent-panel-test-harness-diagnostics'
+import { createHarnessFixtures } from './agent-panel-test-harness-fixtures'
 import {
   asRecord,
   createAgentPanelSnapshot,
@@ -660,22 +661,6 @@ export function createAgentPanelTestHarness(store: StoreLike): AgentPanelTestHar
     }
   }
 
-  const addMessageFixture: AgentPanelTestHarness['addMessageFixture'] = async ({ content, type = 'agent' }) => {
-    const add = store.getState().addMessage
-    if (!add) return { ok: false, error: 'addMessage not available' }
-    const id = `fixture-${Date.now().toString(36)}`
-    add({ id, agent: store.getState().currentAgent, content, type, timestamp: new Date(), meta: { transient: true } })
-    await delay(50)
-    return { ok: store.getState().messages.some((message) => message.id === id), id }
-  }
-
-  const setWorkbenchMode: AgentPanelTestHarness['setWorkbenchMode'] = async (mode) => {
-    useMode.getState().setAppMode('workbench')
-    useMode.getState().setWorkbenchMode(mode)
-    await delay(50)
-    return { ok: useMode.getState().workbenchMode === mode, mode }
-  }
-
   return {
     snapshot,
     diagnose: async () => (await snapshot()).diagnostics,
@@ -690,8 +675,7 @@ export function createAgentPanelTestHarness(store: StoreLike): AgentPanelTestHar
     createVisibleSession,
     activateSession,
     setDocumentFixture,
-    addMessageFixture,
-    setWorkbenchMode,
+    ...createHarnessFixtures(store),
     events: () => [...events],
     clearEvents: () => {
       events.splice(0, events.length)
