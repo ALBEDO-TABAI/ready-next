@@ -1,0 +1,178 @@
+/* Ready Next shell (W2): the rail and the bands live on the window glass (W1 DL1), so nothing here
+   paints a panel background, border or shadow. Only --rn-* tokens (W1 DS1). */
+
+.shell-rail {
+  --icon-rail-slot-inset-x: 8px;
+  --icon-rail-slot-size: 36px;
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+  height: 100%;
+  /* The rail sits between the top and bottom bands, which are full-width rows of the shell. */
+  padding: 4px 0 8px;
+  background: transparent;
+}
+
+.shell-rail__group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+}
+
+.shell-rail .icon-rail-slider-shell {
+  justify-content: center;
+  padding-left: 0;
+  margin-top: 0;
+}
+
+.shell-rail .icon-rail-slider {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.shell-rail .icon-rail-slider__button {
+  position: relative;
+  width: var(--rn-control-h-lg);
+  height: var(--rn-control-h-lg);
+}
+
+.shell-rail .icon-rail-slider__button-icon,
+.shell-rail .icon-rail-slider__glyph {
+  width: 18px;
+  height: 18px;
+}
+
+/* The side of a split view: present but not the selection. */
+.shell-rail .icon-rail-slider__button[data-split='true']::after {
+  content: '';
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  width: 4px;
+  height: 4px;
+  margin-top: -2px;
+  border-radius: var(--rn-r-pill);
+  background: var(--rn-ink-3);
+}
+
+.shell-rail__rule {
+  display: block;
+  width: 18px;
+  height: 1px;
+  margin: 6px 0;
+  background: var(--rn-hair-2);
+}
+
+.shell-rail__button {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: var(--rn-control-h-lg);
+  height: var(--rn-control-h-lg);
+  padding: 0;
+  border: 0;
+  border-radius: var(--rn-r-control);
+  background: transparent;
+  color: var(--rn-ink-2);
+  cursor: pointer;
+  transition: background-color var(--rn-d-1) var(--rn-ease-out), color var(--rn-d-1) var(--rn-ease-out);
+}
+
+.shell-rail__button:hover {
+  color: var(--rn-ink);
+  background: var(--rn-fill-2);
+}
+
+.shell-rail__button:focus-visible {
+  outline: 1.5px solid var(--rn-ink-3);
+  outline-offset: 1px;
+}
+
+.shell-rail__glyph {
+  width: 18px;
+  height: 18px;
+}
+
+.shell-rail__badge {
+  position: absolute;
+  top: 2px;
+  right: 1px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: var(--rn-r-pill);
+  background: var(--rn-inverse);
+  color: var(--rn-on-inverse);
+  font: 600 9px/14px var(--rn-font-mono);
+  text-align: center;
+  pointer-events: none;
+}
+
+/* Narrow windows (W2 §2.5): the assistant becomes a drawer over the content and the sidebar slides
+   out on hover. They are floats (DL4); until the shared Float material lands (W1-T3/T4) they use the
+   opaque paper colour instead of a second blur implementation. */
+.shell-float-drawer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 40;
+  display: flex;
+  background: var(--rn-sheet);
+  box-shadow: var(--rn-shadow-3);
+  transition: transform var(--rn-d-2) var(--rn-ease-out), opacity var(--rn-d-2) var(--rn-ease-out);
+}
+
+.shell-float-drawer[data-side='right'] {
+  right: 0;
+  border-radius: var(--rn-r-float) 0 0 var(--rn-r-float);
+}
+
+.shell-float-drawer[data-side='left'] {
+  left: 0;
+  border-radius: 0 var(--rn-r-float) var(--rn-r-float) 0;
+}
+
+/* A closed drawer is out of reach: invisible to focus and clicks (visibility flips after the slide). */
+.shell-float-drawer[data-open='false'] {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: transform var(--rn-d-2) var(--rn-ease-out), opacity var(--rn-d-2) var(--rn-ease-out), visibility 0s linear var(--rn-d-2);
+}
+
+.shell-float-drawer[data-open='false'][data-side='right'] {
+  transform: translateX(100%);
+}
+
+.shell-float-drawer[data-open='false'][data-side='left'] {
+  transform: translateX(-100%);
+}
+
+/* Focus moving into a drawer must not scroll the shell sideways: a scrolled shell row would shift
+   the content and leave the native web view placed against the shifted rectangle. */
+[data-workbench-shell],
+[data-shell-region='content'] {
+  overflow: clip;
+}
+
+/* A thin hover strip at the window's left edge brings the slide-out sidebar back. */
+.shell-edge-reveal {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 39;
+  width: 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shell-float-drawer {
+    transition: none;
+  }
+}

@@ -11,6 +11,7 @@
   "scripts": {
     "verify:design-tokens": "node scripts/check-design-tokens.cjs && node --test scripts/__tests__/check-design-tokens.test.cjs",
     "verify:ready-next-design-matrix": "node scripts/verify-ready-next-design-matrix.cjs",
+    "verify:ready-next-shell": "node scripts/verify-ready-next-shell.cjs",
     "verify:ctfile-excluded": "node scripts/verify-ready-next-book-sources.mjs",
     "verify:library-sources": "node --import tsx --test src/__tests__/library-sources.test.ts src/__tests__/library-ctfile.test.ts src/__tests__/library-source-feature.test.ts src/__tests__/library-source-ui.test.tsx",
     "verify:library-styles": "node scripts/check-library-style-isolation.cjs",

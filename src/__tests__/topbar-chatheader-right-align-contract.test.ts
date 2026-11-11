@@ -8,21 +8,17 @@ function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-test('TopBar right padding collapses to the shared 14px constant so it shares the viewport edge with ChatHeader and CollapsedChatRail', () => {
+test('TopBar right padding collapses to the shared 14px constant so it shares the viewport edge with ChatHeader', () => {
   const topbar = readWorkspaceFile('src/renderer/components/layout/TopBar.tsx')
   const workbench = readWorkspaceFile('src/renderer/pages/WorkbenchMode.tsx')
   const chatHeader = readWorkspaceFile('src/renderer/components/agent/ChatHeader.tsx')
-  // Stage V V1.3 — `CollapsedChatRail` (and its `paddingRight:
-  // WORKBENCH_TOPBAR_PADDING_RIGHT` rail edge alignment) moved to
-  // `chat-panel/layout/MotionLayer.tsx`.
-  const motionLayer = readWorkspaceFile('src/renderer/components/agent/chat-panel/layout/MotionLayer.tsx')
+
 
   assert.match(topbar, /paddingRight:\s*WORKBENCH_TOPBAR_PADDING_RIGHT,/)
   assert.doesNotMatch(topbar, /--workbench-right-gutter/)
   assert.doesNotMatch(workbench, /--workbench-right-gutter/)
   assert.match(chatHeader, /padding:\s*'0 14px'/)
   assert.match(chatHeader, /marginRight:\s*-5/)
-  assert.match(motionLayer, /paddingRight:\s*WORKBENCH_TOPBAR_PADDING_RIGHT/)
 })
 
 test('TopBar no longer participates in the panel-width transition tree, leaving only side-panel + chat-panel in the resizing + reduced-motion selectors', () => {

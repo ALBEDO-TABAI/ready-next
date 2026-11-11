@@ -17,8 +17,8 @@ import {
 // ---------------------------------------------------------------------------
 // Stage V V1.3 — ChatPanel layout primitives extracted from ChatPanel.tsx.
 // `ChatPanelMotionLayer` is the framer-motion wrapper that hosts the
-// expanded/collapsing panel content; `CollapsedChatRail` is the right-edge
-// rail shown when the panel is collapsed. Both are pure React components
+// expanded/collapsing panel content (a collapsed assistant takes no width; the shell rail shows
+// its button, W2 §2.4). It is a pure React component
 // with zero `useAgent` / store / IPC dependencies — the only hooks are
 // framer-motion's `useIsPresent` / `useReducedMotion`. Signatures are
 // preserved byte-for-byte; the V6 fixture (`chat-panel-baseline.test.ts`)
@@ -92,59 +92,5 @@ export function ChatPanelMotionLayer({
     >
       {content}
     </motion.div>
-  )
-}
-
-export function CollapsedChatRail({
-  onTogglePanel,
-  onHistoryOpen,
-  onNewSession,
-}: {
-  onTogglePanel: () => void
-  onHistoryOpen: () => void
-  onNewSession: () => void
-}) {
-  return (
-    <div
-      className="flex h-full w-full flex-col"
-      style={{
-        width: WORKBENCH_EDGE_RAIL_SIZE,
-        minWidth: WORKBENCH_EDGE_RAIL_SIZE,
-        background: 'transparent',
-        alignItems: 'flex-end',
-        paddingRight: WORKBENCH_TOPBAR_PADDING_RIGHT,
-        boxSizing: 'border-box'
-      }}
-    >
-      <div
-        className="flex w-full items-center justify-end"
-        style={{
-          height: WORKBENCH_TOPBAR_HEIGHT,
-          borderBottom: '1px solid transparent'
-        }}
-      >
-        <IconButton
-          icon={<PanelLeftClose style={{ width: 15, height: 15 }} strokeWidth={2} />}
-          onClick={onTogglePanel}
-          title="展开聊天面板"
-          style={{ border: 'none', background: 'transparent', boxShadow: 'none' }}
-        />
-      </div>
-
-      <div className="flex w-full flex-col items-end gap-2 pt-3">
-        <IconButton
-          icon={<History style={{ width: 14, height: 14 }} strokeWidth={2} />}
-          onClick={onHistoryOpen}
-          title="打开历史对话"
-          style={{ border: 'none', background: 'transparent', boxShadow: 'none' }}
-        />
-        <IconButton
-          icon={<Plus style={{ width: 14, height: 14 }} strokeWidth={2} />}
-          onClick={onNewSession}
-          title="新建对话"
-          style={{ border: 'none', background: 'transparent', boxShadow: 'none' }}
-        />
-      </div>
-    </div>
   )
 }

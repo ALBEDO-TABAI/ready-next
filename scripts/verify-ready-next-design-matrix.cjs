@@ -13,7 +13,8 @@
 //     --keep                    keep the temporary profile and vault
 //
 // Screenshots go to outputs/design-matrix/<date>-<label>/ with report.json and report.md.
-// Every check counts distinct violation signatures; the counts may only go down (DS1–DS7, G1, G4, G5).
+// Every check counts distinct violation signatures per combination; the counts may only go down
+// (DS1–DS7, G1, G4, G5).
 // page.screenshot cannot see the system glass behind the window or the native web view, so glass
 // quality still needs one look at a visible window per batch (W1 §6).
 const fs = require('node:fs')
@@ -195,11 +196,18 @@ async function runCombo(session, ctx, options) {
 
 // ---- budget ----
 
+// Counts distinct defects per combination: the same control or text node seen on several screens
+// is one defect, so a layout that exposes more of the interface is not mistaken for a regression.
 function tally(results, contrastByCombo) {
   const counts = {}
+  const seen = {}
   for (const result of results) {
     counts[result.combo] ??= Object.fromEntries(CHECKS.map(check => [check, 0]))
-    for (const [check, list] of Object.entries(result.violations)) counts[result.combo][check] += list.length
+    seen[result.combo] ??= Object.fromEntries(CHECKS.map(check => [check, new Set()]))
+    for (const [check, list] of Object.entries(result.violations)) {
+      for (const signature of list) seen[result.combo][check].add(signature)
+      counts[result.combo][check] = seen[result.combo][check].size
+    }
   }
   for (const [combo, value] of Object.entries(contrastByCombo)) {
     counts[combo] ??= Object.fromEntries(CHECKS.map(check => [check, 0]))

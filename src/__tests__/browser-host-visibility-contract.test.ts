@@ -138,8 +138,8 @@ test('browser host visibility is explicitly gated and browser bounds keep Browse
 
   assert.match(browserShellLayout, /isolation: 'isolate'/)
   assert.match(browserMode, /zIndex: 1/)
-  assert.match(sidePanel, /className="workbench-panel-frame/)
-  assert.match(chatPanel, /className="workbench-panel-frame/)
+  assert.match(sidePanel, /className=\{`workbench-panel-frame/)
+  assert.match(chatPanel, /className=\{`workbench-panel-frame/)
   assert.match(styles, /\.workbench-panel-frame\s*\{/)
   assert.match(styles, /border-radius:\s*var\(--workbench-canvas-radius\);/)
 })

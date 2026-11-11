@@ -1,13 +1,16 @@
 // Geometry source of truth for workbench chrome.
 // Keep only dimensions and alignment numbers here; do not place visual colors or surface styling in this file.
-export const WORKBENCH_EDGE_RAIL_SIZE = 44
-export const WORKBENCH_EDGE_RAIL_SLOT_INSET_X = 6
+// The shell sizes themselves live in shared/workbench-shell-geometry.ts (W2): rail 52, bands 52.
+import { SHELL_BAND_HEIGHT, SHELL_RAIL_WIDTH } from '../../../shared/workbench-shell-geometry'
+
+export const WORKBENCH_EDGE_RAIL_SIZE = SHELL_RAIL_WIDTH
+export const WORKBENCH_EDGE_RAIL_SLOT_INSET_X = 8
 export const WORKBENCH_EDGE_RAIL_SLOT_SIZE = WORKBENCH_EDGE_RAIL_SIZE - WORKBENCH_EDGE_RAIL_SLOT_INSET_X
 export const WORKBENCH_EDGE_ICON_INSET = 14.5
 export const WORKBENCH_TAB_ROW_HEIGHT = 38
 export const WORKBENCH_TOOLBAR_ROW_HEIGHT = 38
-export const WORKBENCH_TOPBAR_HEIGHT = WORKBENCH_EDGE_RAIL_SIZE
-export const WORKBENCH_STATUSBAR_HEIGHT = WORKBENCH_EDGE_RAIL_SIZE
+export const WORKBENCH_TOPBAR_HEIGHT = SHELL_BAND_HEIGHT
+export const WORKBENCH_STATUSBAR_HEIGHT = SHELL_BAND_HEIGHT
 export const WORKBENCH_ROW_PADDING_X = 12
 export const WORKBENCH_CANVAS_OUTER_PADDING_X = 6
 export const WORKBENCH_CANVAS_OUTER_PADDING_TOP = 6

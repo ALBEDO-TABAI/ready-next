@@ -21,6 +21,7 @@
 
 | 评估日期 | 任务 | 文件 | 总行数 | 本次新增 | 结论 | 判断与后续动作 | 状态 |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
+| 2026-11-11 | W2-T1/T2 外壳骨架（B3） | `src/main/index.ts` | 1341 | 净 +3 | 一般 | 只给主窗口加最小宽度（外壳几何来自 `shared/workbench-shell-geometry.ts`）。同批 `WorkbenchMode.tsx` 967 → 952、`ChatPanel.tsx` 1404 → 1378，外壳逻辑放在 `modules/workbench/shell/`。复查：主题快照与窗口材质、窗口创建参数一起移出入口。 | 已排期：2026-11-30 |
 | 2026-11-11 | ready-next 静默 catch 修复 | `src/renderer/pages/modes/BrowserMode.tsx` | 1496 | 净 +1 | 一般 | 仅为打开 FastCard 保存选择器失败增加日志，保留原有错误面板和网页显隐流程；复查浏览器工作面与暂存选择器的接线边界。 | 已排期：2026-11-30 |
 | 2026-11-11 | W1-T1 令牌合并与旧主题退役 | `src/main/index.ts` | 1338 | 净 +13 | 一般 | 只把主题快照从皮肤换成透明度并接入一次性迁移；外观逻辑已放到 `window-material/theme-appearance.ts`。复查：主题快照与窗口材质的装配可整体移出入口（W2 外壳批次）。 | 已排期：2026-11-30 |
 | 2026-11-11 | W1-T1 令牌合并与旧主题退役 | `src/renderer/types/electron.d.ts` | 3459 | 净 +3 | 健康 | 预加载接口的类型声明聚合，`verify:ipc-contract` 逐项核对暴露与声明。 | 记录结论 |

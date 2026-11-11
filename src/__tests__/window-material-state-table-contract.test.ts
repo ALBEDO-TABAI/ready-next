@@ -165,16 +165,16 @@ test('controller exposes isFullscreen() flag, not mainWindow.isFullScreen()', ()
 })
 
 test('controller preserves constructor-applied darwin material without duplicate setters', () => {
-  const setters: { bg: string[]; vibrancy: (string | null)[]; buttonPos: number } = {
+  const setters: { bg: string[]; vibrancy: (string | null)[]; buttonPos: { x: number; y: number }[] } = {
     bg: [],
     vibrancy: [],
-    buttonPos: 0,
+    buttonPos: [],
   }
   const fakeWindow = {
     isDestroyed: () => false,
     setBackgroundColor: (c: string) => { setters.bg.push(c) },
     setVibrancy: (v: 'under-window' | null) => { setters.vibrancy.push(v) },
-    setWindowButtonPosition: () => { setters.buttonPos += 1 },
+    setWindowButtonPosition: (position: { x: number; y: number }) => { setters.buttonPos.push(position) },
   } as unknown as Parameters<typeof createWindowMaterialController>[0]['window']
 
   const controller = createWindowMaterialController({
@@ -188,7 +188,7 @@ test('controller preserves constructor-applied darwin material without duplicate
   controller.sync()
   assert.deepEqual(setters.bg, [], 'constructor-applied transparent bg should not be set again')
   assert.deepEqual(setters.vibrancy, [], 'constructor-applied vibrancy should not be set again')
-  assert.equal(setters.buttonPos, 1, 'traffic light position still applies on initial setup')
+  assert.deepEqual(setters.buttonPos, [{ x: 20, y: 20 }], 'traffic lights are centered in the 52px top band')
 })
 
 test('验证 2 — controller.sync() on darwin is no-op regardless of theme/skin (no setter calls after applyInitial)', () => {

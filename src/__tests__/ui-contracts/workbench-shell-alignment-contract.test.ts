@@ -8,25 +8,6 @@ function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-test('chat composer dock hosts the module switcher without changing the icon logic', () => {
-  const topBar = readWorkspaceFile('src/renderer/components/layout/TopBar.tsx')
-  const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
-  const chatPanelBody = readWorkspaceFile('src/renderer/components/agent/chat-panel/ChatPanelBody.tsx')
-  const draggableModeTabs = readWorkspaceFile('src/renderer/components/layout/DraggableModeTabs.tsx')
-  const iconRail = readWorkspaceFile('src/renderer/components/layout/IconRail.tsx')
-
-  assert.doesNotMatch(topBar, /<DraggableModeTabs/)
-  assert.doesNotMatch(topBar, /GooeySegmentedControl/)
-  assert.match(chatPanel, /<DraggableModeTabs/)
-  assert.match(chatPanel, /data-chat-mode-tabs-dock="true"/)
-  assert.match(chatPanelBody, /\{modeSwitcher\}[\s\S]*<ChatInput/)
-  assert.match(draggableModeTabs, /className="draggable-mode-tabs"/)
-  assert.match(draggableModeTabs, /className={`draggable-mode-tabs__icon/)
-  // Thumb translateX now lives in CSS via the --dmt-thumb-pos variable.
-  assert.match(draggableModeTabs, /el\.style\.setProperty\('--dmt-thumb-pos'/)
-  assert.match(iconRail, /hover:bg-\[var\(--bg-hover\)\]/)
-})
-
 test('workbench shell does not show the default no-workspace reminder banner', () => {
   const workbenchMode = readWorkspaceFile('src/renderer/pages/WorkbenchMode.tsx')
 

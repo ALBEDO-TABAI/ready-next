@@ -1,4 +1,4 @@
-import type { CSSProperties, ElementType } from 'react'
+import type { CSSProperties, ElementType, MouseEvent } from 'react'
 import { MotionConfig, motion, useReducedMotion } from 'framer-motion'
 import {
   REDUCED_MOTION_TRANSITION,
@@ -11,13 +11,18 @@ interface RailItem {
   icon: ElementType
   /** 闭合图形的激活态实心（负向填充）字形；缺省时激活态改为加粗描边 + 发光。 */
   activeIcon?: ElementType
+  /** Shown in the tooltip after the label, e.g. a shortcut. */
+  hint?: string
 }
 
 interface MorphIconRailGroupProps {
   items: RailItem[]
   activeId: string
   expanded?: boolean
-  onSelect?: (id: string) => void
+  /** The click event is passed so callers can read modifier keys (⌥/⇧-click opens a split). */
+  onSelect?: (id: string, event: MouseEvent<HTMLButtonElement>) => void
+  /** A second item marked as present without being the selection (the split side). */
+  secondaryId?: string | null
   layoutId: string
   className?: string
   style?: CSSProperties
@@ -28,6 +33,7 @@ export default function MorphIconRailGroup({
   activeId,
   expanded = true,
   onSelect,
+  secondaryId = null,
   layoutId: _layoutId,
   className,
   style,
@@ -42,18 +48,19 @@ export default function MorphIconRailGroup({
         className={['icon-rail-slider', className].filter(Boolean).join(' ')}
         style={style}
       >
-        {items.map(({ id, label, icon: Icon, activeIcon: ActiveIcon }) => {
+        {items.map(({ id, label, hint, icon: Icon, activeIcon: ActiveIcon }) => {
           const isActive = activeId === id && expanded
           const isRemembered = activeId === id && !expanded
           return (
             <motion.button
               key={id}
               type="button"
-              onClick={() => onSelect?.(id)}
-              title={label}
+              onClick={event => onSelect?.(id, event)}
+              title={hint ? `${label} ${hint}` : label}
               aria-label={label}
               aria-pressed={isActive}
               data-active-glyph={ActiveIcon ? 'fill' : 'stroke'}
+              data-split={secondaryId === id ? 'true' : undefined}
               whileHover={!reduceMotion ? { y: -0.4 } : undefined}
               whileTap={!reduceMotion ? { scale: 0.992, y: 0.4 } : undefined}
               className={`icon-rail-slider__button ${isRemembered ? 'is-remembered' : ''}${isActive ? ' is-active' : ''}`}

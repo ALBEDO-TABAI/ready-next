@@ -55,8 +55,7 @@ import {
 // Stage V V1.3 — layout primitives (motion wrapper + collapsed rail) extracted
 // to `./chat-panel/layout/MotionLayer`. Both are pure React with zero
 // `useAgent` / store / IPC dependencies; signatures preserved byte-for-byte.
-import { ChatPanelMotionLayer, CollapsedChatRail } from './chat-panel/layout/MotionLayer'
-import DraggableModeTabs from '../layout/DraggableModeTabs'
+import { ChatPanelMotionLayer } from './chat-panel/layout/MotionLayer'
 import SessionCompleteToast from './chat-panel/session-tabs/SessionCompleteToast'
 import { resolveChatSessionTitle } from './chat-panel/helpers/session-title'
 import { resolveSessionDotStatus, type SessionDotStatus } from './chat-panel/helpers/session-status'
@@ -154,10 +153,10 @@ export type ChatPanelState = 'expanding' | 'expanded' | 'collapsing' | 'collapse
 interface ChatPanelProps {
   shellWidth: number
   panelState: ChatPanelState
+  /** docked: the shell's right column; drawer: floats over the content on narrow windows (W2 §2.5). */
+  presentation?: 'docked' | 'drawer'
+  /** The current work surface, read for the assistant's context; switching modes is the rail's job (W2 §2.4). */
   workbenchMode?: WorkbenchMode
-  splitMode?: WorkbenchMode | null
-  onWorkbenchModeChange?: (mode: WorkbenchMode) => void | Promise<void>
-  onWorkbenchSplitToggle?: (mode: WorkbenchMode) => void
   onTogglePanel?: () => void
 }
 
@@ -171,10 +170,8 @@ function stopFailureMessage(code: string): string {
 export default function ChatPanel({
   shellWidth,
   panelState,
+  presentation = 'docked',
   workbenchMode,
-  splitMode = null,
-  onWorkbenchModeChange,
-  onWorkbenchSplitToggle,
   onTogglePanel,
 }: ChatPanelProps) {
   const {
@@ -1198,20 +1195,6 @@ export default function ChatPanel({
   const actionAuthorizationMode = parseActionAuthorizationMode(
     currentScope?.meta.actionAuthorizationMode,
   )
-  const modeSwitcher = workbenchMode && onWorkbenchModeChange
-    ? (
-        <div className="ready-chat-mode-tabs-dock" data-chat-mode-tabs-dock="true">
-          <DraggableModeTabs
-            activeMode={workbenchMode}
-            splitMode={splitMode}
-            onChange={(mode) => {
-              void onWorkbenchModeChange(mode)
-            }}
-            onSplitToggle={onWorkbenchSplitToggle}
-          />
-        </div>
-      )
-    : null
 
   const expandedPanelHeader = (
     <ChatHeader
@@ -1301,7 +1284,6 @@ export default function ChatPanel({
       attachedSessionRecallCapsules={attachedSessionRecallCapsules}
       onDetachSessionRecall={handleDetachSessionRecall}
       dismissSoftError={dismissSoftError}
-      modeSwitcher={modeSwitcher}
       attachments={attachments}
       removeAttachment={removeAttachment}
       inputValue={inputValue}
@@ -1347,40 +1329,32 @@ export default function ChatPanel({
   )
 
   const showExpandedPanel = panelState !== 'collapsed'
+  const drawer = presentation === 'drawer'
 
   return (
     <div
       data-chat-panel-root="true"
       data-liquid-shell="chat-panel"
-      className="workbench-panel-frame relative flex-shrink-0 flex flex-col overflow-hidden"
+      data-shell-region="assistant"
+      data-side="right"
+      data-open={drawer ? String(showExpandedPanel) : undefined}
+      // The drawer floats over the content, so the native web view steps aside while it is open (W1 DL4).
+      data-ready-native-overlay={drawer && showExpandedPanel ? 'shell-assistant' : undefined}
+      className={`workbench-panel-frame relative flex-shrink-0 flex flex-col overflow-hidden${drawer ? ' shell-float-drawer' : ''}`}
       style={{
         width: shellWidth,
         minWidth: shellWidth,
-        background: 'transparent',
-        boxShadow: 'none',
-        border: '1px solid transparent',
+        ...(drawer ? {} : { background: 'transparent', boxShadow: 'none' }),
+        // Collapsed means no width at all, frame border included.
+        ...(shellWidth === 0 ? { borderWidth: 0 } : null),
       }}
       onDrop={handleDrop}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
     >
+      {/* Collapsed takes no width at all; the rail shows the assistant button instead (W2 §2.4). */}
       <AnimatePresence initial={false} mode="wait">
-        {panelState === 'collapsed' ? (
-          <ChatPanelMotionLayer key="collapsed-chat-panel">
-            <CollapsedChatRail
-              onTogglePanel={toggleChatPanel}
-              onHistoryOpen={() => {
-                void loadScopes()
-                toggleChatPanel()
-              }}
-              onNewSession={() => {
-                void handleNewSession().then((result) => {
-                  if (result?.ok) toggleChatPanel()
-                })
-              }}
-            />
-          </ChatPanelMotionLayer>
-        ) : showExpandedPanel ? (
+        {showExpandedPanel ? (
           <ChatPanelMotionLayer
             key="expanded-chat-panel"
             header={expandedPanelHeader}

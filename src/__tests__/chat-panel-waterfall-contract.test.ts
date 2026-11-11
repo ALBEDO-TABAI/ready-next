@@ -37,7 +37,7 @@ test('chat panel collapse uses the new single-layer motion handoff instead of th
   assert.match(chatPanel, /width: shellWidth,/)
   assert.match(chatPanel, /minWidth: shellWidth,/)
   assert.match(chatPanel, /const showExpandedPanel = panelState !== 'collapsed'/)
-  assert.match(chatPanel, /panelState === 'collapsed' \? \(/)
+  assert.match(chatPanel, /\{showExpandedPanel \? \(/)
   assert.doesNotMatch(chatPanel, /transition:\s*'width 260ms cubic-bezier\(0\.22, 1, 0\.36, 1\), min-width 260ms cubic-bezier\(0\.22, 1, 0\.36, 1\)'/)
   assert.doesNotMatch(chatPanel, /const \{ chatPanelVisible, chatPanelWidth, toggleChatPanel \} = useWorkspace\(\)/)
   assert.doesNotMatch(chatPanel, /HEADER_STREAM_DURATION/)

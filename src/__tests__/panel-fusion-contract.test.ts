@@ -9,7 +9,7 @@ function readWorkspaceFile(path: string): string {
 }
 
 test('liquid glass chrome removes prominent shell edges so panels read as one fused surface', () => {
-  const iconRail = readWorkspaceFile('src/renderer/components/layout/IconRail.tsx')
+  const iconRail = readWorkspaceFile('src/renderer/modules/workbench/shell/ShellRail.tsx')
   const sidePanel = readWorkspaceFile('src/renderer/components/layout/SidePanel.tsx')
   const skillsPanel = readWorkspaceFile('src/renderer/components/layout/SkillsCenterPanel.tsx')
   const statusBar = readWorkspaceFile('src/renderer/components/layout/StatusBar.tsx')

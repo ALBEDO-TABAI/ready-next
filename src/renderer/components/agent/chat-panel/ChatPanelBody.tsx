@@ -83,7 +83,6 @@ interface ChatPanelBodyProps extends Omit<TaskToolSnapshotProps, 'children' | 'c
   }>
   onDetachSessionRecall: (conversationId: string) => void | Promise<void>
   dismissSoftError: (scopeId: string) => void
-  modeSwitcher?: ReactNode
   attachments: ChatAttachment[]
   removeAttachment: (id: string) => void
   inputValue: string
@@ -162,7 +161,6 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
     attachedSessionRecallCapsules,
     onDetachSessionRecall,
     dismissSoftError,
-    modeSwitcher,
     attachments,
     removeAttachment,
     inputValue,
@@ -590,7 +588,6 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
 
             <div className="ready-chat-composer-context-row">
               <ProjectSelector />
-              {modeSwitcher}
             </div>
 
             <ChatInput

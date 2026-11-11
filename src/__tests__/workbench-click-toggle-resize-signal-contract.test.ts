@@ -26,7 +26,7 @@ test('useTogglePanelWithResize short-circuits stale tokens when the user retrigg
   assert.match(source, /if \(resolvingToken !== tokenRef\.current\) return/)
 })
 
-test('WorkbenchMode wires the wrapped handlers so every UI-triggered panel toggle flows through the resize-signal hook', () => {
+test('WorkbenchMode wires the wrapped handlers so docked panel toggles retain the resize-signal hook through shell presentation', () => {
   const source = readWorkspaceFile('src/renderer/pages/WorkbenchMode.tsx')
 
   assert.match(source, /useTogglePanelWithResize/)
@@ -39,12 +39,12 @@ test('WorkbenchMode wires the wrapped handlers so every UI-triggered panel toggl
     /handleToggleSidebarWithResize\s*=\s*useTogglePanelWithResize\(\s*"\[data-liquid-shell='side-panel'\]"/,
   )
   assert.doesNotMatch(source, /onToggleChatPanel=\{handleToggleChatPanelWithResize\}/)
-  assert.match(source, /<ChatPanel[^>]*onTogglePanel=\{handleToggleChatPanelWithResize\}/)
+  assert.match(source, /<ChatPanel[^>]*onTogglePanel=\{shell\.toggleAssistant\}/)
   assert.match(source, /handleToggleSidebarWithResize\(\)/)
-  assert.match(source, /handleToggleChatPanelWithResize\(\)/)
+  assert.match(source, /toggleDockedAssistant: handleToggleChatPanelWithResize/)
 })
 
-test('ChatPanel prefers the wrapped onTogglePanel prop over the raw useWorkspace toggle so header/collapsed rail keep the resize signal', () => {
+test('ChatPanel prefers the wrapped onTogglePanel prop over the raw useWorkspace toggle so header actions keep the resize signal', () => {
   const source = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
 
   assert.match(source, /onTogglePanel\?:\s*\(\)\s*=>\s*void/)

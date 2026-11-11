@@ -89,7 +89,6 @@ test('file tree scroll root opts into the Chromium 148 liquid glass repaint guar
 
 test('workbench side and chat panels stay transparent while slots use the shared neutral glass tokens', () => {
   const styles = readRendererStyles()
-  const sliderStyles = readWorkspaceFile('src/renderer/styles/workbench-sliders.css')
   const sidePanel = readWorkspaceFile('src/renderer/components/layout/SidePanel.tsx')
   const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
 
@@ -99,9 +98,6 @@ test('workbench side and chat panels stay transparent while slots use the shared
   assert.match(styles, /html:root\s*\{[\s\S]*?--workbench-rail-slot-bg:\s*rgba\(222,\s*222,\s*220,\s*0\.64\);/)
   // c17b8883 Polish liquid glass workbench controls — 槽位内阴影收敛 0.11 → 0.10
   assert.match(styles, /html:root\s*\{[\s\S]*?--workbench-rail-slot-shadow:\s*[\s\S]*?inset 0 1\.5px 3px rgba\(24,\s*39,\s*77,\s*0\.10\)/)
-  // 8ab48cd7 style(ui): checkpoint liquid glass polish — 槽位不再引用共享 rail-slot token：
-  // 四模式槽改 Ready 橙渐变轨道（真值详钉在 workbench-liquid-shell-contract）；icon rail 2026-10-30 起贴边无槽。
-  assert.match(sliderStyles, /html:root \.draggable-mode-tabs\s*\{[\s\S]*?background:\s*linear-gradient\(180deg, color-mix\(in srgb, var\(--color-ready-orange, #ff4b2b\) 82%, white\) 0%/)
   assert.match(sidePanel, /background:\s*'transparent'/)
   assert.match(chatPanel, /background:\s*'transparent'/)
   assert.doesNotMatch(styles, /html:root \[data-liquid-shell='chat-panel'\],[\s\S]*?\[data-liquid-shell='side-panel'\]:not\(\[data-side-panel-variant='hidden'\]\)\s*\{[\s\S]*?background:/)

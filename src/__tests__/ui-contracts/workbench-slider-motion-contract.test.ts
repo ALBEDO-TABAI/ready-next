@@ -7,24 +7,11 @@ function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-test('icon rail buttons reuse the same motion profile as the workbench mode slider', () => {
-  const modeTabs = readWorkspaceFile('src/renderer/components/layout/DraggableModeTabs.tsx')
+test('icon rail buttons retain direct click feedback and reduced-motion support', () => {
   const iconRailGroup = readWorkspaceFile('src/renderer/components/motion/MorphIconRailGroup.tsx')
-  const motionProfile = readWorkspaceFile('src/renderer/modules/workbench/slider-motion.ts')
-
-  assert.match(modeTabs, /from '\.\.\/\.\.\/modules\/workbench\/slider-motion'/)
-  assert.match(modeTabs, /WORKBENCH_SLIDER_SPRING/)
-  assert.match(modeTabs, /WORKBENCH_SLIDER_FRAME_STEP/)
-  assert.match(modeTabs, /WORKBENCH_SLIDER_CLICK_DURATION_MS/)
-  assert.match(modeTabs, /easeWorkbenchSliderClick/)
-  assert.match(modeTabs, /const startClickAnimation = useCallback\(\(\) => \{/)
-  assert.match(modeTabs, /useEffect\(\(\) => \{[\s\S]*startClickAnimation\(\)/)
-  assert.match(modeTabs, /handleMouseUp[\s\S]*startSpringAnimation\(\)/)
 
   assert.match(iconRailGroup, /from '\.\.\/\.\.\/modules\/workbench\/slider-motion'/)
-  // The rail buttons' hover/tap feedback uses the same direct ease-out click
-  // profile as the mode slider, not the heavy drag spring. The sliding thumb
-  // itself retired with the flush-rail redesign (2026-10-30).
+  // Retain direct hover/tap feedback and reduced-motion support without a sliding thumb.
   assert.match(iconRailGroup, /WORKBENCH_SLIDER_CLICK_TRANSITION/)
   assert.match(iconRailGroup, /REDUCED_MOTION_TRANSITION/)
   assert.doesNotMatch(iconRailGroup, /thumbOffset/)
@@ -34,13 +21,4 @@ test('icon rail buttons reuse the same motion profile as the workbench mode slid
   assert.doesNotMatch(iconRailGroup, /THUMB_PRESS_SETTLE_MS = 750/)
   assert.doesNotMatch(iconRailGroup, /stiffness:\s*60/)
   assert.doesNotMatch(iconRailGroup, /mass:\s*3\.2/)
-
-  // The drag spring stays available for the mode slider's pointer drag.
-  assert.match(motionProfile, /stiffness:\s*120/)
-  assert.match(motionProfile, /damping:\s*40/)
-  assert.match(motionProfile, /mass:\s*1\.8/)
-  assert.match(motionProfile, /WORKBENCH_SLIDER_FRAME_STEP = 0\.016/)
-  assert.match(motionProfile, /WORKBENCH_SLIDER_CLICK_DURATION_MS = 200/)
-  assert.match(motionProfile, /export function easeWorkbenchSliderClick\(progress: number\)/)
-  assert.match(motionProfile, /WORKBENCH_SLIDER_CLICK_TRANSITION/)
 })

@@ -16,7 +16,6 @@ if (packageLock.version !== packageJson.version || packageLock.packages?.['']?.v
 
 const requiredSources = [
   ['src/shared/app-version.ts', /import packageJson from '..\/..\/package\.json'/, /APP_VERSION = packageJson\.version/, /READY_VERSION_LABEL/],
-  ['src/renderer/components/layout/StatusBar.tsx', /READY_VERSION_LABEL/],
   ['src/renderer/pages/Settings.tsx', /READY_VERSION_LABEL/],
   ['src/main/modules/mcp/client.ts', /APP_VERSION/],
   ['src/main/modules/agent-control/sidecar-manager.ts', /READY_APP_VERSION: app\.getVersion\(\)/],

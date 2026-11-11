@@ -8,27 +8,9 @@ function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-function findCssBlock(source: string, selector: string): string {
-  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const start = source.search(new RegExp(`${escaped}(?=\\s*[,\\{])`))
-  assert.notEqual(start, -1, `${selector} should exist`)
-  const open = source.indexOf('{', start)
-  assert.notEqual(open, -1, `${selector} should have a declaration block`)
-  let depth = 0
-  for (let index = open; index < source.length; index += 1) {
-    const character = source[index]
-    if (character === '{') depth += 1
-    if (character === '}') {
-      depth -= 1
-      if (depth === 0) return source.slice(start, index + 1)
-    }
-  }
-  assert.fail(`${selector} declaration block should close`)
-}
-
 test('workbench shell exposes dedicated liquid glass hooks on primary chrome surfaces', () => {
   const topBar = readWorkspaceFile('src/renderer/components/layout/TopBar.tsx')
-  const iconRail = readWorkspaceFile('src/renderer/components/layout/IconRail.tsx')
+  const iconRail = readWorkspaceFile('src/renderer/modules/workbench/shell/ShellRail.tsx')
   const sidePanel = readWorkspaceFile('src/renderer/components/layout/SidePanel.tsx')
   const tabs = readWorkspaceFile('src/renderer/components/workbench/WorkbenchProjectTabs.tsx')
   const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
@@ -156,106 +138,22 @@ test('Stage 1 — nativeTheme.updated handler refreshes material AND broadcasts'
   assert.match(handlerBody, /broadcastThemeChanged\(\)/)
 })
 
-test('liquid glass sliders preserve the groove and use lens-backed convex thumbs', () => {
-  const sliderStyles = readWorkspaceFile('src/renderer/styles/workbench-sliders.css')
-  const appStyles = readRendererStyles()
-  const iconRail = readWorkspaceFile('src/renderer/components/motion/MorphIconRailGroup.tsx')
-  const modeTabs = readWorkspaceFile('src/renderer/components/layout/DraggableModeTabs.tsx')
-
-  const modeTabsGroove = findCssBlock(sliderStyles, "html:root .draggable-mode-tabs")
-  const modeTabsThumb = findCssBlock(sliderStyles, "html:root .draggable-mode-tabs__thumb")
-  const chatModeDock = findCssBlock(appStyles, ".ready-chat-mode-tabs-dock")
-  const chatComposerContextRow = findCssBlock(appStyles, ".ready-chat-composer-context-row")
-  const chatPanelBody = readWorkspaceFile('src/renderer/components/agent/chat-panel/ChatPanelBody.tsx')
-  const chatModeDockGroove = findCssBlock(appStyles, "html:root .ready-chat-mode-tabs-dock .draggable-mode-tabs")
-  // 74ebfa98 — the chat dock surface/projection share one :is() rule with the project selector capsule.
-  const chatDockSurfaceSelector = ':is(.ready-chat-mode-tabs-dock .draggable-mode-tabs__surface, .ready-chat-project-surface)'
-  const chatDockProjectionSelector = ':is(.ready-chat-mode-tabs-dock .draggable-mode-tabs__projection, .ready-chat-project-projection)'
-  const chatModeDockSurface = findCssBlock(appStyles, `html:root ${chatDockSurfaceSelector}`)
-  const chatModeDockProjection = findCssBlock(appStyles, `html:root ${chatDockProjectionSelector}`)
-  const darkChatModeDockGroove = findCssBlock(appStyles, "html[data-theme='dark']:root .ready-chat-mode-tabs-dock .draggable-mode-tabs")
-  const darkChatModeDockSurface = findCssBlock(appStyles, `html[data-theme='dark']:root ${chatDockSurfaceSelector}`)
-  const darkChatModeDockProjection = findCssBlock(appStyles, `html[data-theme='dark']:root ${chatDockProjectionSelector}`)
-  const appModeTabsSectionStart = appStyles.indexOf('/* Draggable Mode Tabs - 4-way switch')
-  assert.notEqual(appModeTabsSectionStart, -1, 'index.css should keep the draggable mode tabs section')
-  const appModeTabsSection = appStyles.slice(appModeTabsSectionStart)
-  const appModeTabsThumb = findCssBlock(appModeTabsSection, "html:root .draggable-mode-tabs__thumb")
-  const darkAppModeTabsGroove = findCssBlock(appModeTabsSection, "html[data-theme='dark']:root .draggable-mode-tabs")
-  const darkAppModeTabsThumb = findCssBlock(appModeTabsSection, "html[data-theme='dark']:root .draggable-mode-tabs__thumb")
-
-  // 2026-10-30 icon rail 退出凹槽 + 透镜 thumb 体系，改为贴边图标列：liquid 皮肤不再给它槽底或 thumb。
-  assert.doesNotMatch(sliderStyles, /html:root \.icon-rail-slider(?:__thumb)?\s*\{/)
-  assert.doesNotMatch(iconRail, /LiquidLens/)
-  // 8ab48cd7 — 工作台四模式槽改为 Ready 橙渐变轨道（thumb 1.04，实体投影，无 backdrop 模糊）。
-  assert.match(modeTabsGroove, /--ready-workbench-slider-thumb-scale:\s*1\.04;/)
-  assert.match(
-    modeTabsGroove,
-    /border-color:\s*color-mix\(in srgb, var\(--color-ready-orange\) 42%, rgba\(92, 26, 10, 0\.32\)\);/,
-  )
-  assert.match(
-    modeTabsGroove,
-    /linear-gradient\(180deg, color-mix\(in srgb, var\(--color-ready-orange, #ff4b2b\) 82%, white\) 0%, var\(--color-ready-orange, #ff4b2b\) 54%, color-mix\(in srgb, var\(--color-ready-orange, #ff4b2b\) 88%, black\) 100%\)/,
-  )
-  assert.match(modeTabsGroove, /inset 0 1px 0 rgba\(255, 255, 255, 0\.22\)/)
-  assert.match(modeTabsGroove, /backdrop-filter:\s*none;/)
-  // 74ebfa98 — the dock now sits in the composer context row beside the project selector;
-  // the -12px overlap onto the composer moved from the dock to that shared row.
-  assert.match(chatPanelBody, /<div className="ready-chat-composer-context-row">\s*<ProjectSelector \/>\s*\{modeSwitcher\}\s*<\/div>/)
-  assert.match(chatComposerContextRow, /margin-bottom:\s*-12px;/)
-  assert.doesNotMatch(chatModeDock, /margin-bottom/)
-  // 聊天 dock 外壳不再叠加第二层底色与边框，材质与输入框共用。
-  assert.match(chatModeDockGroove, /--ready-workbench-slider-thumb-scale:\s*1\.08;/)
-  assert.match(chatModeDockGroove, /border-color:\s*transparent;/)
-  assert.match(chatModeDockGroove, /background:\s*transparent;/)
-  assert.match(chatModeDockGroove, /box-shadow:\s*none;/)
-  assert.match(chatModeDockGroove, /backdrop-filter:\s*none;/)
-  assert.match(chatModeDockSurface, /background:\s*rgba\(248,\s*250,\s*252,\s*0\.32\);/)
-  assert.match(chatModeDockSurface, /inset 0 1px 0 rgba\(255,\s*255,\s*255,\s*0\.42\)/)
-  assert.match(chatModeDockProjection, /filter:\s*blur\(4\.5px\) saturate\(1\.18\) contrast\(0\.82\) brightness\(1\.04\);/)
-
-  // The document preview/edit switch is retired (pages are the normal view); the workbench mode tabs keep the groove.
-  for (const darkGrooveBlock of [darkAppModeTabsGroove]) {
-    assert.match(darkGrooveBlock, /border-color:\s*transparent;/)
-    assert.match(darkGrooveBlock, /background:\s*var\(--workbench-rail-slot-bg\);/)
-    assert.match(darkGrooveBlock, /box-shadow:\s*var\(--workbench-rail-slot-shadow\);/)
-    assert.match(darkGrooveBlock, /saturate\(100%\)/)
-  }
-  assert.match(darkChatModeDockGroove, /border-color:\s*transparent;/)
-  assert.match(darkChatModeDockGroove, /background:\s*transparent;/)
-  assert.match(darkChatModeDockGroove, /box-shadow:\s*none;/)
-  assert.match(darkChatModeDockSurface, /background:\s*rgba\(26,\s*26,\s*26,\s*0\.62\);/)
-  assert.match(darkChatModeDockSurface, /inset 0 1px 0 rgba\(232,\s*232,\s*232,\s*0\.14\)/)
-  assert.match(darkChatModeDockProjection, /filter:\s*blur\(3\.5px\) saturate\(0\) contrast\(0\.78\) brightness\(0\.78\);/)
-
-  for (const thumbBlock of [appModeTabsThumb]) {
-    assert.match(thumbBlock, /radial-gradient\(ellipse 110% 62% at 50% -12%/)
-    assert.match(thumbBlock, /inset 0 -2px 4px/)
-    assert.match(thumbBlock, /inset 2px 0 4px/)
-    assert.doesNotMatch(thumbBlock, /rgba\(244, 242, 237/)
-    assert.doesNotMatch(thumbBlock, /rgba\(233, 229, 221/)
-    assert.doesNotMatch(thumbBlock, /0 6px 20px rgba\(0, 0, 0/)
-  }
-  // 8ab48cd7 style(ui): checkpoint liquid glass polish — 四模式 thumb（sliders.css 侧）改为暖白实体渐变 + 细 inset 描边。
-  assert.match(modeTabsThumb, /radial-gradient\(ellipse 118% 72% at 42% -8%/)
-  assert.match(
-    modeTabsThumb,
-    /linear-gradient\(180deg, rgba\(248, 248, 244, 0\.96\) 0%, rgba\(209, 211, 205, 0\.94\) 100%\)/,
-  )
-  assert.match(modeTabsThumb, /inset 0 1px 0 rgba\(255, 255, 255, 0\.76\)/)
-  assert.match(modeTabsThumb, /border-color:\s*rgba\(255, 255, 255, 0\.66\);/)
-  assert.doesNotMatch(modeTabsThumb, /rgba\(244, 242, 237/)
-  assert.doesNotMatch(modeTabsThumb, /rgba\(233, 229, 221/)
-  assert.doesNotMatch(modeTabsThumb, /0 6px 20px rgba\(0, 0, 0/)
-  // 8ab48cd7 — 文档模式切换 thumb 改为 Ready 橙实体（#ff5032 → #ff4b2b）。
-  assert.match(darkAppModeTabsThumb, /rgba\(235, 235, 230, 0\.16\)/)
-  assert.match(darkAppModeTabsThumb, /inset 0 -2px 4px rgba\(0, 0, 0, 0\.20\)/)
-  assert.doesNotMatch(darkAppModeTabsThumb, /rgba\(232, 240, 255/)
-  // 8ab48cd7 — 暗色文档切换 thumb 同步 Ready 橙实体（#ff5d40 → #ff5638）。
-
-  assert.match(modeTabs, /from '..\/ui\/liquid-glass\/LiquidBackdropProjection'/)
-  assert.match(modeTabs, /<LiquidLens[\s\S]*className="draggable-mode-tabs__surface"[\s\S]*bevel=\{6\}[\s\S]*depth=\{18\.5\}[\s\S]*ior=\{1\.34\}[\s\S]*dome=\{0\.65\}[\s\S]*profile="squircle"[\s\S]*strength=\{2\}[\s\S]*blur=\{3\.5\}[\s\S]*blurBeforeRefraction[\s\S]*backdropContent=\{\(/)
-  assert.match(modeTabs, /<LiquidBackdropProjection[\s\S]*className="draggable-mode-tabs__projection"[\s\S]*sourceMaskRadius=\{19\}/)
-  assert.match(modeTabs, /<LiquidLens[\s\S]*className="ready-slider-thumb-lens"[\s\S]*bevel=\{6\}[\s\S]*depth=\{14\}[\s\S]*ior=\{1\.3\}[\s\S]*dome=\{1\.15\}[\s\S]*strength=\{1\.42\}[\s\S]*blur=\{0\}/)
-  assert.match(sliderStyles, /\.draggable-mode-tabs__thumb\s*\{[\s\S]*transform:\s*translateX\(calc\(var\(--dmt-thumb-pos[\s\S]*scale\(var\(--ready-workbench-slider-thumb-scale, 1\)\);/)
-  assert.match(appStyles, /\.ready-slider-thumb-lens\s*\{[\s\S]*z-index:\s*1;/)
-})
+// This shared material also belongs to the retained project selector, so retiring mode tabs
+// must not retire these assertions. CSS is applied to the consumer classes, not source-grepped.
+for (const theme of ['light', 'dark'] as const) {
+  test(`project selector retains its shared composer material in ${theme} mode`, async () => {
+    const { JSDOM } = await import('jsdom')
+    const dom = new JSDOM(`<html data-theme="${theme}"><head></head><body><div class="ready-chat-composer-context-row"><div class="ready-chat-project-surface"></div><div class="ready-chat-project-projection"></div></div></body></html>`)
+    try {
+      const style = dom.window.document.createElement('style')
+      style.textContent = readWorkspaceFile('src/renderer/styles/liquid-composer.css')
+      dom.window.document.head.appendChild(style)
+      assert.equal(dom.window.getComputedStyle(dom.window.document.querySelector('.ready-chat-composer-context-row')!).marginBottom, '-12px')
+      const surface = dom.window.getComputedStyle(dom.window.document.querySelector('.ready-chat-project-surface')!)
+      const projection = dom.window.getComputedStyle(dom.window.document.querySelector('.ready-chat-project-projection')!)
+      assert.equal(surface.backgroundColor, theme === 'light' ? 'rgba(248, 250, 252, 0.32)' : 'rgba(26, 26, 26, 0.62)')
+      assert.match(surface.boxShadow, theme === 'light' ? /inset 0 1px 0 rgba\(255, 255, 255, 0\.42\)/ : /inset 0 1px 0 rgba\(232, 232, 232, 0\.14\)/)
+      assert.equal(projection.filter, theme === 'light' ? 'blur(4.5px) saturate(1.18) contrast(0.82) brightness(1.04)' : 'blur(3.5px) saturate(0) contrast(0.78) brightness(0.78)')
+    } finally { dom.window.close() }
+  })
+}

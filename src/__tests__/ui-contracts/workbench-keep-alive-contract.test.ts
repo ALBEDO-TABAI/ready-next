@@ -46,9 +46,9 @@ test('workbench outlet keeps all modes mounted and routes mode switching through
   assert.doesNotMatch(outlet, /contentVisibility:/)
 
   assert.doesNotMatch(topBar, /onWorkbenchModeChange/)
-  assert.match(chatPanel, /onWorkbenchModeChange\?: \(mode: WorkbenchMode\) => void \| Promise<void>/)
-  assert.match(chatPanel, /void onWorkbenchModeChange\(mode\)/)
-  assert.match(workbenchMode, /<ChatPanel[\s\S]*workbenchMode=\{workbenchMode\}[\s\S]*onWorkbenchModeChange=\{handleWorkbenchModeChange\}[\s\S]*\/>/)
+  assert.doesNotMatch(chatPanel, /onWorkbenchModeChange|DraggableModeTabs/)
+  assert.match(workbenchMode, /<ChatPanel[\s\S]*workbenchMode=\{workbenchMode\}/)
+  assert.match(workbenchMode, /<ShellRail[\s\S]*onModeChange=\{\(mode\) => \{ void handleWorkbenchModeChange\(mode\) \}\}/)
 
   assert.match(workbenchMode, /import \{[^}]*withRitual[^}]*\} from '\.\.\/modules\/overlay\/useRitualOverlay'/)
   assert.match(workbenchMode, /resolveModeTransitionStrategy\(workbenchMode, nextMode\)/)

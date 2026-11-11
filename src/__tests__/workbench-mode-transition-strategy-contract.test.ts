@@ -49,15 +49,10 @@ test('WorkbenchMode.tsx routes mode switches through the strategy function and o
   assert.match(source, /browserVisibilityRecoveryNeededRef/)
 })
 
-test('RitualOverlay toggles html[data-mode-switching] during mode-switch phases and the slider thumb disables its transition under that attribute', () => {
+test('RitualOverlay toggles html[data-mode-switching] during mode-switch phases', () => {
   const overlay = readWorkspaceFile('src/renderer/components/overlay/RitualOverlay.tsx')
-  const css = readWorkspaceFile('src/renderer/styles/workbench-sliders.css')
 
   assert.match(overlay, /session\.stage === 'mode-switch'/)
   assert.match(overlay, /setAttribute\('data-mode-switching', 'true'\)/)
   assert.match(overlay, /removeAttribute\('data-mode-switching'\)/)
-  assert.match(
-    css,
-    /html\[data-mode-switching='true'\] \.draggable-mode-tabs__thumb \{\s*transition:\s*none;\s*\}/,
-  )
 })

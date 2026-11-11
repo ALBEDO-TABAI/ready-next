@@ -27,9 +27,9 @@ test('workbench side/chat shells interpolate width via CSS transition', () => {
     /@media \(prefers-reduced-motion: reduce\)\s*\{\s*\[data-liquid-shell='side-panel'\][\s\S]*?transition-duration:\s*80ms/,
   )
 
-  // WorkbenchMode: widths are derived from visibility flags directly (no deferred shell timer).
-  assert.match(workbenchMode, /const sidebarShellWidth = sidebarVisible \? sidePanelWidths\.shared : 0/)
-  assert.match(workbenchMode, /const chatShellWidth = chatPanelVisible \? chatPanelWidth : WORKBENCH_EDGE_RAIL_SIZE/)
+  // The responsive shell supplies widths without deferred shell timers (behavior: shell-presentation.test.tsx).
+  assert.match(workbenchMode, /panelWidth=\{shell\.sidebarPanelWidth\}/)
+  assert.match(workbenchMode, /shellWidth=\{shell\.assistantPanelWidth\}/)
   assert.doesNotMatch(workbenchMode, /shouldRenderSidebarShell/)
   assert.doesNotMatch(workbenchMode, /sidebarShellTimerRef/)
   assert.doesNotMatch(workbenchMode, /chatPanelStateTimerRef/)

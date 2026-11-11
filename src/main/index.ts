@@ -124,6 +124,7 @@ import {
   THEME_SETTING_KEY,
   type Transparency,
 } from './modules/window-material/theme-appearance'
+import { SHELL_WINDOW_MIN_WIDTH } from '../shared/workbench-shell-geometry'
 import { createStartupSplashWindow, finishStartupSplashThen, getStartupSplashWindow, yieldToPresentation } from './startup-splash-window'
 import { logBootStage } from './boot-timing'
 import pkg from 'electron-updater'
@@ -563,6 +564,8 @@ async function createWindow(): Promise<void> {
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
+    // The content column never drops below its minimum (W2 §2.5): rail + 560px.
+    minWidth: SHELL_WINDOW_MIN_WIDTH,
     icon: resolveAppIconPath(),
     show: false,
     autoHideMenuBar: true,

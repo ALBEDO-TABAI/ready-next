@@ -19,6 +19,13 @@ interface SidePanelProps {
   variant?: SidePanelVariant
   panelWidth: number
   contentVisible?: boolean
+  /** docked: a column of the shell row; floating: a slide-out over the content (narrow windows, W2 §2.5). */
+  presentation?: 'docked' | 'floating'
+  floatingOpen?: boolean
+  /** Left offset of the slide-out (the rail's width). */
+  floatingInset?: number
+  /** Opens the slide-out (hovering the window's left edge) and closes it (leaving the panel). */
+  onFloatingPeek?: (open: boolean) => void
   onGraphWorkspaceOpen?: (request: GraphWorkspaceRequest) => void
   graphWorkspaceOpen?: boolean
 }
@@ -110,9 +117,14 @@ export default function SidePanel({
   variant = 'files',
   panelWidth,
   contentVisible = true,
+  presentation = 'docked',
+  floatingOpen = false,
+  floatingInset = 0,
+  onFloatingPeek,
   onGraphWorkspaceOpen,
   graphWorkspaceOpen = false,
 }: SidePanelProps) {
+  const floating = presentation === 'floating'
   const reduceMotion = useReducedMotion()
   const lastVisibleVariantRef = useRef<RenderableSidePanelVariant>('files')
 
@@ -193,16 +205,26 @@ export default function SidePanel({
   }
 
   return (
+    <>
+    {floating && !floatingOpen && (
+      <div className="shell-edge-reveal" style={{ left: floatingInset }} aria-hidden="true" onMouseEnter={() => onFloatingPeek?.(true)} />
+    )}
     <div
       data-liquid-shell="side-panel"
+      data-shell-sidebar="true"
       data-side-panel-variant={panelWidth > 0 ? variant : 'hidden'}
-      className="workbench-panel-frame flex-shrink-0 flex flex-col select-none overflow-hidden"
+      data-side="left"
+      data-open={floating ? String(floatingOpen) : undefined}
+      // A slide-out over the browser makes the native web view step aside while it is open (W1 DL4).
+      data-ready-native-overlay={floating && floatingOpen ? 'shell-sidebar' : undefined}
+      className={`workbench-panel-frame flex-shrink-0 flex flex-col select-none overflow-hidden${floating ? ' shell-float-drawer' : ''}`}
+      onMouseLeave={floating ? () => onFloatingPeek?.(false) : undefined}
       style={{
         width: panelWidth,
         minWidth: panelWidth,
-        background: 'transparent',
-        boxShadow: 'none',
-        fontFamily: 'Inter, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif',
+        ...(floating ? { left: floatingInset } : { background: 'transparent', boxShadow: 'none' }),
+        ...(panelWidth === 0 ? { borderWidth: 0 } : null),
+        fontFamily: 'var(--rn-font-ui)',
       }}
     >
       <div className="relative flex h-full min-h-0 flex-col overflow-hidden">
@@ -211,5 +233,6 @@ export default function SidePanel({
         </AnimatePresence>
       </div>
     </div>
+    </>
   )
 }
