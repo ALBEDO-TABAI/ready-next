@@ -1,6 +1,6 @@
 // Date/time display formatting (locale-aware, original).
 import { locale, t } from './i18n';
-import { toWall, ymd, weekday as wdOf, DayNum, dayOf } from '@shared/calendar';
+import { toWall, ymd, weekday as wdOf, DayNum, dayOf } from '../../../../shared/calendar';
 
 const TH = '\u2009', HAIR = '\u200a';
 const WD_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -25,28 +25,30 @@ export function longDate(day: DayNum) {
 export function hourLabel(h: number, h24: boolean) {
   if (h24) return `${String(h).padStart(2, '0')}:00`;
   const ap = h < 12 ? 'AM' : 'PM'; const hh = h % 12 || 12;
-  return zh() ? `${ap}${hh}` : `${hh}${TH}${ap}`;
+  return zh() ? `${h < 12 ? '上午' : '下午'} ${hh} 时` : `${hh}${TH}${ap}`;
 }
 function hm(h: number, mi: number, h24: boolean, withAp = true) {
   if (h24) return `${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}`;
   const hh = h % 12 || 12; const s = mi ? `${hh}:${String(mi).padStart(2, '0')}` : `${hh}`;
+  if (zh()) return `${withAp ? `${h < 12 ? '上午' : '下午'} ` : ''}${s}${mi ? '' : ' 时'}`;
   return withAp ? `${s}${TH}${h < 12 ? 'AM' : 'PM'}` : s;
 }
 export function timeOf(ms: number, tz: string, h24: boolean) { const w = toWall(ms, tz); return hm(w.h, w.mi, h24); }
 export function timeOfFull(ms: number, tz: string, h24: boolean) {
   const w = toWall(ms, tz); if (h24) return hm(w.h, w.mi, true);
+  if (zh()) return hm(w.h, w.mi, false);
   return `${w.h % 12 || 12}:${String(w.mi).padStart(2, '0')}${TH}${w.h < 12 ? 'AM' : 'PM'}`;
 }
 /** Chip range: "9 – 11:30 AM", "11 AM – 12 PM". */
 export function rangeOf(s: number, e: number, tz: string, h24: boolean) {
   const a = toWall(s, tz), b = toWall(e, tz);
   const sameAp = (a.h < 12) === (b.h < 12) && !h24;
-  return `${hm(a.h, a.mi, h24, !sameAp)}${HAIR}–${HAIR}${hm(b.h, b.mi, h24)}`;
+  return `${hm(a.h, a.mi, h24, zh() || !sameAp)}${HAIR}–${HAIR}${hm(b.h, b.mi, h24)}`;
 }
 export function panelTime(ms: number, tz: string, h24: boolean) {
   const w = toWall(ms, tz); if (h24) return hm(w.h, w.mi, true);
   const ap = w.h < 12 ? 'AM' : 'PM'; const hh = w.h % 12 || 12; const s = w.mi ? `${hh}:${String(w.mi).padStart(2, '0')}` : `${hh}`;
-  return zh() ? `${ap} ${s}` : `${s} ${ap}`;
+  return zh() ? hm(w.h, w.mi, false) : `${s} ${ap}`;
 }
 export function durationLabel(min: number, tk: (k: any, v?: any) => string) {
   if (min < 60) return tk('durationMin', { n: min });
@@ -59,7 +61,7 @@ export function gmtLabel(tz: string, ms = Date.now()) {
 }
 
 /** Localised one-line description of an RRULE (panel + repeat menu). */
-export function ruleLabel(r: import('@shared/calendar').RRule): string {
+export function ruleLabel(r: import('../../../../shared/calendar').RRule): string {
   const units: Record<string, [string, string]> = { DAILY: [t('uDay'), t('uDays')], WEEKLY: [t('uWeek'), t('uWeeks')], MONTHLY: [t('uMonth'), t('uMonths')], YEARLY: [t('uYear'), t('uYears')] };
   const [one, many] = units[r.freq] ?? [r.freq.toLowerCase(), r.freq.toLowerCase()];
   const zhL = locale() !== 'en';
