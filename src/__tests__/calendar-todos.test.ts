@@ -6,7 +6,7 @@ test('todos parse nested GFM tasks, headings, completed items and exact UTF-8 by
   const content = '\uFEFF---\r\ntitle: 中文😀\r\nfake: "- [ ] hidden"\r\n---\r\n# 项目\r\n- [ ] 父项\r\n  - [X] 子项 📅 2026-11-12\r\n## 下一步\r\n1. [x] 已完成 [日期](ready://calendar/day/2026-11-13)\r\n'
   const tasks = parseTodos(content)
   assert.deepEqual(tasks.map(t => [t.title, t.heading, t.checked, t.date?.source]), [
-    ['父项', '项目', false, undefined], ['子项 📅 2026-11-12', '项目', true, 'obsidian'], ['已完成 日期', '下一步', true, 'ready'],
+    ['父项', '项目', false, undefined], ['子项', '项目', true, 'obsidian'], ['已完成 日期', '下一步', true, 'ready'],
   ])
   for (const { checkbox } of tasks) {
     assert.equal(content.slice(checkbox.start, checkbox.end), checkbox.text)

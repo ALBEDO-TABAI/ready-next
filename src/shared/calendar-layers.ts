@@ -117,6 +117,13 @@ export function parseTodos(content: string): ParsedTodo[] {
           if ('children' in part) for (const child of part.children) dateIn(child)
         }
         for (const child of node.children) dateIn(child)
+        // The list shows what to do, not when: drop the date Ready wrote ([2026-11-12](…)) or the 📅 token. A custom
+        // label such as [明天](…) reads as part of the sentence and stays.
+        const dateText = task.date?.source === 'obsidian' ? task.date.range.text : task.date?.source === 'ready' && task.date.range.whole ? task.date.value : null
+        if (dateText) {
+          const at = task.title.lastIndexOf(dateText)
+          if (at >= 0) task.title = `${task.title.slice(0, at)}${task.title.slice(at + dateText.length)}`.replace(/\s{2,}/g, ' ').trim()
+        }
         result.push(task)
       }
     }

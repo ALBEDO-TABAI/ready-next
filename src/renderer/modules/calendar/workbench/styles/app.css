@@ -388,7 +388,9 @@
   .ready-calendar .app { padding: 0; gap: 6px; }
   .ready-calendar .panel { width: 252px; }
 }
-@container calendar (max-width: 1049px) {
+/* Inside Ready the calendar is usually 700–900px wide (sidebar and assistant beside it). The event panel stays a
+   column and the grid makes room (W4 §4); only when no week could fit beside it does it float over the grid. */
+@container calendar (max-width: 639px) {
   .ready-calendar .panel { position: fixed; right: 0; top: 0; bottom: 0; height: auto; width: 284px; z-index: 403; background: var(--c-page); box-shadow: none; }
 }
 @container calendar (max-width: 760px) {
