@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent a
 import { useStore } from 'zustand'
 import type { DocumentPagesAPI, PageNode, PageOperation, PageResult, PageRoot, PageTrashEntry } from '../../../../shared/document-pages'
 import { toReadyUri } from '../../../../shared/ready-ref'
+import { LIBRARY_DATABASE_PAGE } from '../../../../shared/library'
 import { useDocTabs } from '../../../stores/useDocTabs'
 import { useVault } from '../../../stores/useVault'
 import { useWorkspace } from '../../../stores/useWorkspace'
@@ -9,7 +10,7 @@ import { requestWorkbenchModeOpen } from '../../workbench/mode-transition'
 import { ImportWizard } from '../import/ImportWizard'
 import { TemplatePicker } from '../templates/TemplatePicker'
 import { saveBeforePageTrash } from '../page-ui/page-panel-state'
-import { createPageTreeStore, errorMessage, flattenPages } from '../page-ui/page-state'
+import { createPageTreeStore, errorMessage, flattenPages, joinPagePath } from '../page-ui/page-state'
 import { SaveToPicker, type SaveToSelection } from '../page-ui/SaveToPicker'
 import { Icon, type IconName } from './icons'
 import { InkPageIcon } from './InkPageIcon'
@@ -28,6 +29,9 @@ export interface InkSidebarProps {
   /** Opens in the current tab, or a new one for ⌘/Ctrl-click. */
   onOpen?(node: PageNode, newTab?: boolean): void | Promise<void>
   onShowFiles?(node: PageNode): void | Promise<void>
+  /** Folders mounted beside the library, shown as files (W3 M4); the navigator supplies the tree. */
+  mountedFolders?: ReactNode
+  onMountFolder?(): void
 }
 
 const EXPANDED_KEY = 'ready-ink-expanded'
@@ -35,13 +39,18 @@ const readExpanded = () => { try { return new Set<string>(JSON.parse(localStorag
 const checked = <T,>(result: PageResult<T>): T => { if (!result.ok) throw new Error(result.message); return result.value }
 const canHoldPages = (node: PageNode) => ['page', 'folder', 'vault'].includes(node.kind) && !node.ambiguity
 
+function isSystemObject(node: PageNode, vault: PageNode): boolean {
+  const name = node.path.slice(vault.path.length).replace(/^[\\/]+/, '')
+  return name === LIBRARY_DATABASE_PAGE || name === LIBRARY_DATABASE_PAGE.replace(/\.md$/, '') || name === '模板'
+}
+
 function openNode(node: PageNode, newTab = false) {
   openInCurrentTab(node.path, { newTab })
   useWorkspace.getState().selectFile(node.path)
   requestWorkbenchModeOpen('document')
 }
 
-export function InkSidebar({ roots, api = window.electronAPI.documentPages, onOpen = openNode, onShowFiles }: InkSidebarProps) {
+export function InkSidebar({ roots, api = window.electronAPI.documentPages, onOpen = openNode, onShowFiles, mountedFolders, onMountFolder }: InkSidebarProps) {
   const store = useMemo(() => createPageTreeStore(api), [api])
   const { trees, states, loading, error: loadError } = useStore(store)
   const home = useInkLayout(state => state.home)
@@ -106,6 +115,40 @@ export function InkSidebar({ roots, api = window.electronAPI.documentPages, onOp
     useInkLayout.getState().setTitleFocus(receipt.objectId)
     if (receipt.path) await onOpen({ objectId: receipt.objectId, revision: receipt.revision, path: receipt.path, name: `${title}.md`, kind: 'page', title, children: [], hasChildren: false, position: 0 })
   })
+  const uniqueName = (parent: PageNode, base: string, taken = new Set(parent.children.map(child => child.title))) => {
+    let name = base
+    for (let n = 2; taken.has(name); n++) name = `${base} ${n}`
+    return name
+  }
+  const createBoard = (tree: PageNode) => run(async () => {
+    const name = uniqueName(tree, '未命名画板')
+    const result = await window.electronAPI.canvas.create({ path: `${name}.canvas`, operationId: crypto.randomUUID() })
+    if (!result.ok) throw new Error(result.error)
+    await window.electronAPI.canvas.release(result.value.handleId)
+    const path = joinPagePath(tree.path, result.value.path)
+    await onOpen({ objectId: result.value.objectId, revision: 0, path, name: `${name}.canvas`, kind: 'canvas', title: name, children: [], hasChildren: false, position: 0 })
+  })
+  /** A folder has no page operations (rename, move), so it is named before it exists. */
+  const openNewFolder = (anchor: HTMLElement, tree: PageNode) => {
+    const name = uniqueName(tree, '未命名文件夹')
+    openPopover({ id: 'ink-new-folder', anchor: anchor.getBoundingClientRect(), placement: 'bottom-start', offset: 4, label: '新建文件夹',
+      render: close => <RenamePanel label="文件夹名称" node={{ ...tree, title: name, kind: 'folder', icon: undefined }} onCancel={close} onConfirm={async title => {
+        const clean = title.trim()
+        if (/[\\/:]/.test(clean) || clean.startsWith('.')) return { ok: false, code: 'invalid_name', message: '名称不能包含 / \\ : ，也不能以 . 开头。' }
+        if (tree.children.some(child => child.name === clean || child.title === clean)) return { ok: false, code: 'exists', message: '已有同名的页面或文件夹。' }
+        const result = await window.electronAPI.document.mkdir(joinPagePath(tree.path, clean))
+        if (!result.success) return { ok: false, code: 'mkdir_failed', message: result.error || '无法新建文件夹' }
+        close(); await refresh()
+        return { ok: true, value: null }
+      }} /> })
+  }
+  const openNewMenu = (anchor: HTMLElement, tree: PageNode) => {
+    openMenu(anchor.getBoundingClientRect(), { width: 180, label: '新建', groups: [[
+      { id: 'page', label: '页面', icon: 'newPage', onSelect: () => { void createIn(tree, tree.path) } },
+      ...(tree.kind === 'vault' ? [{ id: 'board', label: '画板', icon: 'shapes' as IconName, onSelect: () => { void createBoard(tree) } }] : []),
+      { id: 'folder', label: '文件夹', icon: 'folder', onSelect: () => openNewFolder(anchor, tree) },
+    ]] }, { anchorEl: anchor, placement: 'bottom-start' })
+  }
   const trash = (node: PageNode) => run(async () => {
     const root = rootOf(node); if (!root) throw new Error('找不到页面所在的资料库')
     await saveBeforePageTrash(node)
@@ -185,8 +228,10 @@ export function InkSidebar({ roots, api = window.electronAPI.documentPages, onOp
   }
 
   const renderChildren = (parent: PageNode, root: string, level: number): ReactNode => {
-    if (!parent.children.length) return <div className="ink-sb-empty" style={{ paddingLeft: 8 + level * 8 + 30 }}>暂无页面</div>
-    return <div role="group">{parent.children.map(node => renderRow(node, parent, root, level))}</div>
+    // System objects have their own entries (阅读 below, 模板 at the foot) and stay out of the page tree (W3 M7).
+    const children = parent.kind === 'vault' ? parent.children.filter(node => !isSystemObject(node, parent)) : parent.children
+    if (!children.length) return <div className="ink-sb-empty" style={{ paddingLeft: 8 + level * 8 + 30 }}>暂无页面</div>
+    return <div role="group">{children.map(node => renderRow(node, parent, root, level))}</div>
   }
   /** One tree row; favorites reuse it with a key prefix and without drag ordering. */
   const renderRow = (node: PageNode, parent: PageNode | null, root: string, level: number, keyPrefix = ''): ReactNode => {
@@ -234,22 +279,9 @@ export function InkSidebar({ roots, api = window.electronAPI.documentPages, onOp
   }
 
   const favorites = states.filter(state => state.favorite).map(state => all.find(node => node.objectId === state.objectId)).filter((node): node is PageNode => !!node)
-  const vaultTitle = useVaultTitle(trees)
   return <nav className="ink-sidebar" aria-label="文档侧栏">
     <div className="ink-sb-inner">
-      <div className="ink-sb-top">
-        <span className="ink-sb-top-title">{vaultTitle}</span>
-      </div>
       <div className="ink-sb-scroll" aria-label="页面侧栏">
-        <div className="ink-sb-home">
-          <div className={`ink-sb-home-pill${home ? ' is-active' : ''}`} role="button" tabIndex={0} aria-pressed={home} onClick={() => useInkLayout.getState().setHome(true)}>
-            <Icon name="home" size={16} stroke={2} style={{ fill: 'currentColor' }} /><span>主页</span>
-          </div>
-        </div>
-        <div className="ink-sb-group">
-          <NavRow icon="library" label="阅读" selected={libraryActive && !home} dataAttr={{ 'data-library-entry': 'true' }}
-            onClick={() => { useInkLayout.getState().setHome(false); useDocTabs.getState().openLibraryTab(); requestWorkbenchModeOpen('document') }} />
-        </div>
         {(error || loadError) && <div role="alert" className="ink-sb-banner">{error || loadError}</div>}
         {favorites.length > 0 && <Section id="favorites" title="收藏">
           <div role="group">{favorites.map(node => renderRow(node, null, rootOf(node)?.path ?? '', 0, 'fav:'))}</div>
@@ -257,12 +289,17 @@ export function InkSidebar({ roots, api = window.electronAPI.documentPages, onOp
         {loading && !trees.length && <div role="status" className="ink-sb-empty" style={{ paddingLeft: 8 }}>正在读取页面…</div>}
         {!roots.length && <RootNotice />}
         {trees.map(tree => <Section key={tree.objectId} id={`root:${tree.objectId}`} title={tree.kind === 'vault' ? '页面' : tree.title}
-          addLabel={`在 ${tree.title} 中新建页面`} onAdd={() => { void createIn(tree, tree.path) }}>
+          addLabel={`在 ${tree.title} 中新建`} addTip="新建" onAdd={anchor => openNewMenu(anchor, tree)}>
           {renderChildren(tree, tree.path, 0)}
         </Section>)}
+        {onMountFolder && <Section id="mounted" title="文件夹" addLabel="挂载文件夹" addTip="挂载文件夹" onAdd={() => onMountFolder()}>
+          {mountedFolders ?? <div className="ink-sb-empty" style={{ paddingLeft: 8 }}>还没有挂载文件夹</div>}
+        </Section>}
       </div>
       <div className="ink-sb-bottom">
         <div className="ink-sb-divider" />
+        <NavRow icon="library" label="阅读" muted selected={libraryActive && !home} dataAttr={{ 'data-library-entry': 'true' }}
+          onClick={() => { useInkLayout.getState().setHome(false); useDocTabs.getState().openLibraryTab(); requestWorkbenchModeOpen('document') }} />
         <NavRow icon="graph" label="关系图谱" muted onClick={() => requestShellAction('open-graph')} />
         <NavRow icon="search" label="查找与替换" ariaLabel="在资料库中查找与替换" muted onClick={() => requestShellAction('open-find-replace')} />
         <NavRow icon="template" label="模板" ariaLabel="从模板新建页面" muted onClick={openTemplates} />
@@ -273,12 +310,6 @@ export function InkSidebar({ roots, api = window.electronAPI.documentPages, onOp
   </nav>
 }
 
-function useVaultTitle(trees: PageNode[]): string {
-  const vault = useVault(state => state.view.data)
-  const tree = trees.find(item => item.kind === 'vault')
-  return tree?.title || (vault?.status === 'ready' ? vault.root.split(/[\\/]/).pop() || '' : '')
-}
-
 function NavRow({ icon, iconNode, label, ariaLabel, muted, selected, onClick, weight, dataAttr }: { icon?: IconName; iconNode?: ReactNode; label: string; ariaLabel?: string; muted?: boolean; selected?: boolean; onClick?: (event: ReactMouseEvent<HTMLElement>) => void; weight?: number; dataAttr?: Record<string, string> }) {
   return <div className={`ink-sb-row ink-sb-nav${muted ? ' is-muted' : ''}${selected ? ' is-selected' : ''}`} role="button" tabIndex={0} aria-label={ariaLabel ?? label} {...dataAttr}
     onClick={onClick} onKeyDown={event => { if (event.key === 'Enter') (event.currentTarget as HTMLElement).click() }}>
@@ -287,7 +318,7 @@ function NavRow({ icon, iconNode, label, ariaLabel, muted, selected, onClick, we
   </div>
 }
 
-function Section({ id, title, children, onAdd, addLabel }: { id: string; title: string; children: ReactNode; onAdd?: () => void; addLabel?: string }) {
+function Section({ id, title, children, onAdd, addLabel, addTip }: { id: string; title: string; children: ReactNode; onAdd?: (anchor: HTMLElement) => void; addLabel?: string; addTip?: string }) {
   const key = 'ready-ink-sections'
   const [open, setOpen] = useState(() => { try { return (JSON.parse(localStorage.getItem(key) || '{}') as Record<string, boolean>)[id] !== false } catch { /* silent-catch: Unavailable storage or invalid cached JSON only loses section preferences; show the section by default. */ return true } })
   const toggle = () => {
@@ -298,7 +329,7 @@ function Section({ id, title, children, onAdd, addLabel }: { id: string; title: 
     <div className="ink-sb-section-head" role="button" tabIndex={0} aria-expanded={open} onClick={toggle} onKeyDown={event => { if (event.key === 'Enter') toggle() }}>
       <span className="ink-sb-section-title">{title}</span>
       {onAdd && <span className="ink-sb-row-actions">
-        <button type="button" className="ink-sb-action" aria-label={addLabel || '新建页面'} {...tip('添加页面')} onClick={event => { event.stopPropagation(); onAdd() }}><Icon name="plus" size={16} stroke={1.8} /></button>
+        <button type="button" className="ink-sb-action" aria-label={addLabel || '新建页面'} {...tip(addTip || '添加页面')} onClick={event => { event.stopPropagation(); onAdd(event.currentTarget) }}><Icon name="plus" size={16} stroke={1.8} /></button>
       </span>}
     </div>
     {open && children}
@@ -317,7 +348,7 @@ function RootNotice() {
   </div>
 }
 
-function RenamePanel({ node, onConfirm, onCancel }: { node: PageNode; onConfirm(title: string, operationId: string): Promise<PageResult<unknown>>; onCancel(): void }) {
+function RenamePanel({ node, label = '页面名称', onConfirm, onCancel }: { node: PageNode; label?: string; onConfirm(title: string, operationId: string): Promise<PageResult<unknown>>; onCancel(): void }) {
   const [title, setTitle] = useState(node.title)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -333,7 +364,7 @@ function RenamePanel({ node, onConfirm, onCancel }: { node: PageNode; onConfirm(
   }}>
     <div className="ink-panel-row">
       <InkPageIcon value={node.icon} kind={node.kind} size={20} />
-      <input className="ink-input" aria-label="页面名称" data-autofocus value={title} disabled={busy} onChange={event => setTitle(event.target.value)} />
+      <input className="ink-input" aria-label={label} data-autofocus value={title} disabled={busy} onChange={event => setTitle(event.target.value)} />
     </div>
     {error && <div role="alert" className="ink-panel-error">{error}</div>}
     <div className="ink-panel-actions">

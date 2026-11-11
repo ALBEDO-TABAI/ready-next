@@ -199,7 +199,7 @@ async function main() {
     const dot = await page.locator('[data-shell-band="top"] button[aria-label="今日"]').boundingBox()
     check('the brand dot sits in the top-right corner', dot && dot.x > 1440 - 140 && dot.y < 52, JSON.stringify(dot))
     await page.locator('[data-shell-band="top"] button[aria-label="今日"]').click()
-    check('the brand dot opens 今日', await waitFor(page, () => Boolean(document.querySelector('[data-shell-navigator="document"]:not([hidden]) .ink-sb-home-pill.is-active'))))
+    check('the brand dot opens 今日', await waitFor(page, () => (document.querySelector('.ink-home')?.getBoundingClientRect().width ?? 0) > 0))
 
     // DL11a: the two bands are equally tall.
     const bands = await page.evaluate(() => ['top', 'bottom'].map(side => Math.round(document.querySelector(`[data-shell-band="${side}"]`)?.getBoundingClientRect().height ?? -1)))

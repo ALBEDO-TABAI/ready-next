@@ -113,6 +113,8 @@ export default function FileTree({
   onGridPathChange,
   onThumbnailSizeChange,
   onResultCountChange,
+  rootFilter,
+  showEmergence = true,
 }: FileTreeProps) {
   const {
     files,
@@ -260,6 +262,7 @@ export default function FileTree({
 
   const refreshFileEmergenceSnapshot = useCallback(async (forceRefresh = false) => {
     if (
+      !showEmergence ||
       fileEmergenceEnabled !== true ||
       safeWorkspaceRoots.length === 0 ||
       viewMode !== 'tree' ||
@@ -287,7 +290,7 @@ export default function FileTree({
     } finally {
       setFileEmergenceRefreshing(false)
     }
-  }, [fileEmergenceEnabled, fileEmergenceProjectContext, queryLower, safeWorkspaceRoots, viewMode])
+  }, [fileEmergenceEnabled, fileEmergenceProjectContext, queryLower, safeWorkspaceRoots, viewMode, showEmergence])
 
   const refreshFileEmergenceSnapshotRef = useRef(refreshFileEmergenceSnapshot)
   refreshFileEmergenceSnapshotRef.current = refreshFileEmergenceSnapshot
@@ -321,7 +324,7 @@ export default function FileTree({
   }, [fileEmergenceEnabled, fileEmergenceProjectContextSignature, queryLower, safeWorkspaceRootsKey, viewMode])
 
   useEffect(() => {
-    if (fileEmergenceEnabled !== true || safeWorkspaceRoots.length === 0) {
+    if (!showEmergence || fileEmergenceEnabled !== true || safeWorkspaceRoots.length === 0) {
       setFileEmergenceReadingProgress([])
       return undefined
     }
@@ -332,7 +335,7 @@ export default function FileTree({
     return () => {
       disposed = true
     }
-  }, [fileEmergenceEnabled, safeWorkspaceRoots, safeWorkspaceRootsKey])
+  }, [fileEmergenceEnabled, safeWorkspaceRoots, safeWorkspaceRootsKey, showEmergence])
 
   useEffect(() => {
     const handleDragCleanup = () => clearFileTreeDragState()
@@ -388,7 +391,7 @@ export default function FileTree({
 
   const treeOrderedItems = useMemo(() => {
     if (pinnedFolders.length > 0) {
-      const pinnedItems = pinnedFolders.map((folderPath) => ({
+      const pinnedItems = pinnedFolders.filter((folderPath) => !rootFilter || rootFilter(folderPath)).map((folderPath) => ({
         name: folderPath.split('/').pop() || folderPath,
         path: folderPath,
         isDirectory: true,
@@ -398,7 +401,7 @@ export default function FileTree({
       return getVisibleTreeItems(pinnedItems, expandedDirs, dirChildren, queryLower, filters)
     }
     return getVisibleTreeItems(filteredCurrentItems, expandedDirs, dirChildren, queryLower, filters)
-  }, [dirChildren, expandedDirs, filteredCurrentItems, filters, pinnedFolders, queryLower])
+  }, [dirChildren, expandedDirs, filteredCurrentItems, filters, pinnedFolders, queryLower, rootFilter])
 
   const treeOrderedPaths = useMemo(() => treeOrderedItems.map((item) => item.path), [treeOrderedItems])
   const treeDragItemsByPath = useMemo(
@@ -1203,7 +1206,7 @@ export default function FileTree({
   )
 
   const renderTreeContent = () => {
-    const emergenceNode = fileEmergenceViewModel ? (
+    const emergenceNode = showEmergence && fileEmergenceViewModel ? (
       <FileEmergenceSection
         viewModel={fileEmergenceViewModel}
         isRefreshing={fileEmergenceRefreshing}
@@ -1215,6 +1218,7 @@ export default function FileTree({
 
     if (pinnedFolders.length > 0) {
       const visiblePinned = pinnedFolders.filter((folderPath) => {
+        if (rootFilter && !rootFilter(folderPath)) return false
         const folderName = folderPath.split('/').pop() || folderPath
         if (!filters.folder) return false
         if (!queryLower) return true

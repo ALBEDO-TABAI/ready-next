@@ -233,11 +233,7 @@ html[data-theme='dark'] .ink-scope {
 .ink-sb-scroll > * { flex: none; }
 .ink-sb-scroll.has-more { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 36px), rgba(0,0,0,.25)); mask-image: linear-gradient(to bottom, #000 calc(100% - 36px), rgba(0,0,0,.25)); }
 .ink-sb-scroll::-webkit-scrollbar { width: 0; }
-.ink-sb-home { display: flex; align-items: center; height: 32px; gap: 0; margin-bottom: 12px; }
-.ink-sb-home-pill { display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px 0 11px; margin-left: 3px; border-radius: 18px; font-size: 12px; line-height: 21px; color: var(--ink-text-primary); }
-.ink-sb-home-pill.is-active { background: var(--ink-background-interactive-translucent); }
-.ink-sb-home-pill:hover { background: var(--ink-background-interactive-translucent); }
-.ink-sb-group, .ink-sb-section { display: flex; flex-direction: column; gap: 1px; margin-bottom: 12px; }
+.ink-sb-section { display: flex; flex-direction: column; gap: 1px; margin-bottom: 12px; }
 .ink-sb-section { margin-bottom: 16px; }
 .ink-sb-row {
   display: flex; align-items: center; height: 34px; min-height: 27px; padding: 5px 8px; border-radius: 10px;
@@ -692,8 +688,9 @@ html:root .ink-main .document-content-frame { background: transparent !important
 .ink-source-chip { display: flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px 0 9px; margin-right: 4px; border: 0; border-radius: 12px; background: var(--studio-accent-soft); color: var(--studio-accent-text); font: inherit; font-size: 11px; font-weight: 600; cursor: pointer; }
 .ink-source-chip:hover { filter: brightness(.96); }
 /* The active tab keeps its whole title (up to 220px); the others share what is left. The title's end padding
-   takes the fade unless the title overflows. */
-.ink-tab.is-active { flex: 0 0 auto; width: auto; max-width: min(220px, 60%); }
+   takes the fade unless the title overflows. The cap is a length: the strip is as wide as its tabs, so a
+   percentage would resolve against the tab's own width and clip its title. */
+.ink-tab.is-active { flex: 0 0 auto; width: auto; max-width: 220px; }
 .ink-tab-title { padding-right: 10px; }
 .ink-return-chip { margin-left: auto; flex: 0 1 auto; min-width: 0; max-width: 40%; height: 28px; display: flex; align-items: center; gap: 4px; padding: 0 12px 0 8px; border: 0; border-radius: 14px; background: var(--studio-accent-soft); color: var(--studio-accent-text); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; transition: filter .15s; }
 .ink-return-chip span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }

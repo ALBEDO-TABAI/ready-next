@@ -69,7 +69,8 @@ async function main() {
   const createPage = async title => {
     // The section's add button shows on hover, as in Inkwell.
     await sidebar().locator('section[aria-label="页面"] .ink-sb-section-head').hover()
-    await sidebar().getByRole('button', { name: '在 测试资料库 中新建页面', exact: true }).click()
+    await sidebar().getByRole('button', { name: '在 测试资料库 中新建', exact: true }).click()
+    await page.getByRole('menuitem', { name: '页面', exact: true }).click()
     await page.waitForFunction(() => { const input = document.querySelector('textarea[aria-label="页面标题"]'); return input?.value === '未命名' && !input.disabled })
     const input = page.getByRole('textbox', { name: '页面标题', exact: true })
     await input.fill(title); await input.press('Enter')

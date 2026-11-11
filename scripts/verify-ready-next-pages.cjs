@@ -80,7 +80,7 @@ require(${JSON.stringify(entry)})
       await sidebar.locator('.ink-sb-label-btn').filter({ hasText: new RegExp(`^${title}$`) }).waitFor()
     }
     // Add buttons show on hover, as in Inkwell.
-    const newRootPage = async title => { await sidebar.locator('section[aria-label="页面"] .ink-sb-section-head').hover(); await sidebar.getByRole('button', { name: '在 测试资料库 中新建页面', exact: true }).click(); await renameNewPage(title) }
+    const newRootPage = async title => { await sidebar.locator('section[aria-label="页面"] .ink-sb-section-head').hover(); await sidebar.getByRole('button', { name: '在 测试资料库 中新建', exact: true }).click(); await page.getByRole('menuitem', { name: '页面', exact: true }).click(); await renameNewPage(title) }
     const action = async (row, title, label) => {
       await row.locator('.ink-sb-row').first().hover(); await row.getByRole('button', { name: `${title} 操作`, exact: true }).click()
       await page.getByRole('menu').getByRole('menuitem', { name: label, exact: true }).click()

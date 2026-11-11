@@ -50,6 +50,10 @@ export interface FileTreeProps {
   onGridPathChange?: (path: string | null) => void
   onThumbnailSizeChange?: (size: number) => void
   onResultCountChange?: (count: number) => void
+  /** Which top-level folders this tree shows (the page view lists only mounted folders, W3 §3). */
+  rootFilter?: (root: string) => boolean
+  /** Show the file-emergence section and load its snapshot (activity is still recorded either way). */
+  showEmergence?: boolean
 }
 
 export function isFileAllowed(item: FileItem): boolean {
