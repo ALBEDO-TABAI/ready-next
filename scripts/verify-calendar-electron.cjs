@@ -59,7 +59,7 @@ const results=[];
   await page.locator('[data-testid=ev-title]').fill('取消的修改');await key('Escape');ok('title Escape preserves saved content',(await events())[0].title==='验收日程');
   await page.locator('[data-field=u]').fill('invalid-link');await page.keyboard.press('Meta+Enter');await root.locator('[role=alert]').waitFor();ok('failed edit shows error and does not persist',(await events())[0].url===undefined);await page.locator('[data-field=u]').fill('https://example.test/calendar');await key('Control+Enter');ok('correcting failed edit saves successfully',(await events())[0].url==='https://example.test/calendar');
   const chip=()=>page.locator(`.chip[data-key="${id}"]`).first().boundingBox();let b=await chip(),g=await geo();
-  await drag({x:b.x+b.width/2,y:b.y+12},{x:b.x+b.width/2+g.colW,y:b.y+12+g.hourH/2});event=(await events())[0];ok('drag moves day and time',event.start===at(2,10,30)&&event.end===at(2,11,30));
+  await drag({x:b.x+b.width/2,y:b.y+12},{x:b.x+b.width/2+g.colW,y:b.y+12+g.hourH/2});event=(await events())[0];ok('drag moves day and time',event.start===at(2,10,30)&&event.end===at(2,11,30),JSON.stringify({got:[new Date(event.start).toISOString(),new Date(event.end).toISOString()],want:[new Date(at(2,10,30)).toISOString(),new Date(at(2,11,30)).toISOString()],from:b,geo:g}));
   b=await chip();g=await geo();await drag({x:b.x+b.width/2,y:b.y+b.height-2},{x:b.x+b.width/2,y:b.y+b.height-2+g.hourH/2});ok('resize commits end time',(await events())[0].end===at(2,12));
   await page.locator('[data-field=l]').fill('会议室 A');await key('Control+Enter');ok('Cmd Enter saves focused input',(await events())[0].location==='会议室 A');
   await focus();await key('Backspace');ok('delete persists',(await events()).length===0);await key('Control+z');ok('undo restores',(await events()).length===1);await key('Control+Shift+z');ok('redo deletes',(await events()).length===0);await key('Control+z');
@@ -137,5 +137,5 @@ const results=[];
     await api('putPreferences',{notifications:false});
   }
   await page.screenshot({path:'outputs/calendar-union/acceptance-final.png'});ok('no renderer exceptions',errors.length===0,errors.join('\n'));
- }finally{try{fs.writeFileSync('outputs/calendar-union/electron-acceptance.json',JSON.stringify(results,null,2))}finally{if(browser)await browser.close();if(app)await app.close()}}
+ }catch(error){if(page)await page.screenshot({path:'outputs/calendar-union/failure.png'}).catch(()=>{});throw error}finally{try{fs.writeFileSync('outputs/calendar-union/electron-acceptance.json',JSON.stringify(results,null,2))}finally{if(browser)await browser.close();if(app)await app.close()}}
 })().catch(e=>{console.error(e);process.exitCode=1});
