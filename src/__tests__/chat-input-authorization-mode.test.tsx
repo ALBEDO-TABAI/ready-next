@@ -12,6 +12,7 @@ test('chat input exposes and switches the three conversation authorization modes
     url: 'http://localhost',
     pretendToBeVisual: true,
   })
+  Object.defineProperty(dom.window, 'matchMedia', { value: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }) })
   const previousWindow = globalThis.window
   const previousDocument = globalThis.document
   const previousNode = globalThis.Node
@@ -132,7 +133,7 @@ test('chat input exposes and switches the three conversation authorization modes
     )
     assert.equal(menu?.parentElement, dom.window.document.body, 'the selector must escape the clipped composer surface')
     assert.equal(menu?.style.position, 'fixed')
-    assert.ok(menu?.classList.contains('ready-liquid-popover'), 'the selector must use Ready liquid glass')
+    assert.ok(menu?.classList.contains('rn-float'), 'the selector must use the shared float material')
     const assertContained = () => {
       assert.ok(menu)
       const left = Number.parseFloat(menu.style.left)

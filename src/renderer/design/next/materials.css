@@ -1,0 +1,35 @@
+/* The four materials of Ready Next (W1 §4, DL1–DL4). Only --rn-* tokens.
+   glass — the window itself (one pane; regions on it have no background of their own);
+   sheet — paper that content sits on; one per content area, never paper on paper;
+   well  — a slightly sunken area on the glass for spatial content (canvas, shelf, open book);
+   float — menus, popovers, dialogs, ⌘K, tooltips: thicker glass with blur and a shadow.
+   backdrop-filter is allowed here and on the assistant composer only (W1 §4). */
+@layer ready-next.materials {
+  .rn-glass-root {
+    background: rgb(var(--rn-glass-tint) / var(--rn-glass-alpha));
+  }
+
+  .rn-sheet {
+    background: var(--rn-sheet);
+    border-radius: var(--rn-r-sheet);
+    box-shadow: var(--rn-sheet-shadow);
+  }
+
+  .rn-well {
+    background: var(--rn-well);
+    border-radius: var(--rn-r-sheet);
+    box-shadow: inset 0 0 0 1px var(--rn-hair);
+  }
+
+  .rn-float {
+    background: var(--rn-float);
+    border-radius: var(--rn-r-float);
+    box-shadow: var(--rn-shadow-3), inset 0 0 0 1px var(--rn-hair);
+    backdrop-filter: blur(var(--rn-glass-blur)) saturate(var(--rn-glass-sat));
+  }
+
+  /* 减少透明 (DL12): the glass becomes the opaque stage; --rn-float is already opaque there. */
+  [data-transparency='reduced'] .rn-glass-root {
+    background: var(--rn-stage);
+  }
+}

@@ -72,9 +72,14 @@ test('dark liquid composer dims only the material while preserving semantic cont
     styles,
     /html\[data-theme='dark'\]:root \.ready-liquid-composer \{[\s\S]*--text-body:\s*rgba\(232, 232, 232, 0\.86\);[\s\S]*--text-placeholder:\s*rgba\(176, 176, 176, 0\.62\);/,
   )
+  // The dark material comes from the dark --rn-liquid-* tokens (W1 DL4a); the surface only uses them.
   assert.match(
-    styles,
-    /html\[data-theme='dark'\]:root \.ready-liquid-composer__surface \{[\s\S]*background:\s*rgba\(26, 26, 26, 0\.62\);/,
+    readWorkspaceFile('src/renderer/styles/liquid-composer.css'),
+    /\.ready-liquid-composer__surface \{[\s\S]*?background:\s*linear-gradient\(180deg, var\(--rn-liquid-a\), var\(--rn-liquid-b\)\);/,
+  )
+  assert.match(
+    readWorkspaceFile('src/renderer/design/next/tokens.css'),
+    /\[data-theme='dark'\] \{[\s\S]*?--rn-liquid-a:\s*rgb\(255 255 255 \/ \.13\);/,
   )
   assert.match(
     styles,

@@ -13,7 +13,6 @@ import ChatPanel from '../components/agent/ChatPanel'
 import GraphWorkspace, { type GraphWorkspaceRequest } from '../components/graph/GraphWorkspace'
 import { invalidateGraphWorkspace } from '../components/graph/graph-session'
 import StatusBar from '../components/layout/StatusBar'
-import { LiquidSceneProvider } from '../components/ui/LiquidGlassScene'
 import { clampAssistantWidth as clampWorkbenchChatPanelWidth, clampSidebarWidth as clampWorkbenchSidePanelWidth, SHELL_RAIL_WIDTH } from '../../shared/workbench-shell-geometry'
 import {
   READY_WORKBENCH_MODE_CHANGE_EVENT,
@@ -140,7 +139,6 @@ export default function WorkbenchMode() {
   const setSplitMode = useMode((state) => state.setSplitMode)
   const documentSplitTabId = useDocTabs(s => s.splitTabId)
   const navigate = useNavigate()
-  const sceneRef = useRef<HTMLDivElement>(null)
   const splitContainerRef = useRef<HTMLDivElement>(null)
   const splitPrimaryPaneRef = useRef<HTMLDivElement>(null)
   const liveWorkbenchSplitRatioRef = useRef(clampWorkbenchSplitRatio(workbenchSplitRatio))
@@ -413,6 +411,7 @@ export default function WorkbenchMode() {
     toggleDockedSidebar: handleToggleSidebarWithResize,
     toggleDockedAssistant: handleToggleChatPanelWithResize,
   })
+  const { toggleSidebar: toggleShellSidebar, toggleAssistant: toggleShellAssistant } = shell
 
 
   useEffect(() => () => {
@@ -773,7 +772,7 @@ export default function WorkbenchMode() {
 
       event.preventDefault()
       if (handledAction === 'toggle-sidebar') {
-        shell.toggleSidebar()
+        toggleShellSidebar()
         return
       }
       if (handledAction === 'cycle-side-panel') {
@@ -784,21 +783,20 @@ export default function WorkbenchMode() {
         }
         return
       }
-      shell.toggleAssistant()
+      toggleShellAssistant()
     }
 
     window.addEventListener('keydown', handlePanelShortcut)
     return () => {
       window.removeEventListener('keydown', handlePanelShortcut)
     }
-  }, [creatingType, renamingPath, shell.toggleSidebar, shell.toggleAssistant, handleToggleSidebarWithResize])
+  }, [creatingType, renamingPath, toggleShellSidebar, toggleShellAssistant, handleToggleSidebarWithResize])
 
   return (
-    <LiquidSceneProvider mouseContainer={sceneRef}>
+    <>
       {/* M5-C: the one global ⌘K switcher and quick look, mounted once for every mode. */}
       <ObjectUIHost onSettings={() => navigate('/settings')} />
       <div
-        ref={sceneRef}
         className="workbench-mode-root relative flex h-full flex-col overflow-hidden"
       >
         <div className="relative z-10 flex h-full flex-col">
@@ -946,6 +944,6 @@ export default function WorkbenchMode() {
           <StatusBar />
         </div>
       </div>
-    </LiquidSceneProvider>
+    </>
   )
 }

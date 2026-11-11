@@ -20,7 +20,6 @@ import ChatInput, { type ChatInputHandle } from '../ChatInput'
 import { SoftFailureCapsule } from '../SoftFailureCapsule'
 import ChatAttachments from '../ChatAttachments'
 import ContextMenu from '../../layout/ContextMenu'
-import { LiquidSurfaceLayer } from '../../ui/liquid-glass/LiquidFloatingPanel'
 import { MarkdownContent } from './markdown'
 import ModelSelector from './model-selector/ModelSelector'
 import {
@@ -406,12 +405,11 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
 
             {referenceSkillHint && (
               <div
-                className="ready-liquid-card"
+                className="ready-liquid-card rn-float"
                 data-reference-skill-hint="true"
                 style={{
                   borderRadius: 18,
                   border: 'none',
-                  background: 'var(--ready-liquid-card-base-bg, rgba(248, 250, 252, 0.54))',
                   padding: '8px 10px',
                   display: 'flex',
                   alignItems: 'center',
@@ -422,15 +420,6 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
                   isolation: 'isolate',
                 }}
               >
-                <LiquidSurfaceLayer
-                  className="ready-liquid-popover__lens ready-liquid-card__lens"
-                  radius={18}
-                  blur={14}
-                  withProjection={false}
-                  saturation={1.18}
-                  brightness={1.05}
-                  contrast={0.84}
-                />
                 <div
                   className="ready-liquid-card__content"
                   style={{

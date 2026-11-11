@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Check, ChevronDown, Languages, Loader2 } from 'lucide-react'
 import { MarkdownContent } from '../document/MarkdownContent'
-import { LiquidFloatingPanel } from '../ui/liquid-glass/LiquidFloatingPanel'
+import { FloatPanel } from '../ui/float/FloatPanel'
 import { chatMenuSurfaceStyle } from '../agent/chatMenuStyles'
 import { RSS_TRANSLATION_LANGUAGES, rssTranslatedSegments, type RSSArticleTranslation } from '../../../shared/rss-translation'
 import type { RSSArticleTranslationState } from '../../modules/rss/article-translation'
@@ -42,7 +42,7 @@ export function RSSTranslationControl({ state, disabled }: { state: RSSArticleTr
       disabled={disabled || !state.available} onMouseDown={(event) => event.preventDefault()} onClick={() => setOpen((value) => !value)}>
       <ChevronDown size={12} strokeWidth={2} />
     </button>
-    {open && <LiquidFloatingPanel className="rss-reference-menu-panel overflow-hidden rounded-[14px]" role="menu" radius={14}
+    {open && <FloatPanel className="rss-reference-menu-panel overflow-hidden rounded-[14px]" role="menu" radius={14}
       style={{ ...chatMenuSurfaceStyle, position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 30, width: 220 }}>
       <div className="rss-menu">
         <p className="rss-menu-label">翻译为</p>
@@ -67,7 +67,7 @@ export function RSSTranslationControl({ state, disabled }: { state: RSSArticleTr
         {(state.error || (!running && translation?.error && translation.error !== 'interrupted' ? translation.error : null)) &&
           <p className="rss-menu-note" role="alert">{state.error || translation?.error}</p>}
       </div>
-    </LiquidFloatingPanel>}
+    </FloatPanel>}
   </div>
 }
 

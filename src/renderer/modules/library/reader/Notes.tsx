@@ -1,6 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import type { LibraryHighlight, LibraryHighlightColor } from '../../../../shared/library'
-import { Glass } from '../../../design/next/GlassSurface'
 import { MARKERS, markerColor } from './marks'
 import type { HighlightLens } from './useHighlights'
 import type { FlipView } from './flipbook.js'
@@ -19,7 +18,7 @@ export function HighlightPopover({ lens, highlight, busy, onSave, onRemove, onCo
   }, [lens.x, lens.y, writing])
   return <div ref={ref} role="dialog" aria-label="划线" className="rd-highlight-popover rd-ui" style={{ left: at.x, top: at.y }}
     onKeyDown={e => { e.stopPropagation(); if (e.key === 'Escape') onClose() }}>
-    <Glass className="highlight-tools"><div role="group" aria-label="划线颜色">{MARKERS.map(m => <button type="button" key={m.key} aria-label={m.label} title={m.label} disabled={busy || highlight?.location.status === 'malformed'} aria-pressed={highlight?.color === m.key} style={{ '--marker': m.color } as React.CSSProperties} onClick={() => void onSave(m.key)}>{m.label}</button>)}</div>
+    <div className="rn-float highlight-tools"><div role="group" aria-label="划线颜色">{MARKERS.map(m => <button type="button" key={m.key} aria-label={m.label} title={m.label} disabled={busy || highlight?.location.status === 'malformed'} aria-pressed={highlight?.color === m.key} style={{ '--marker': m.color } as React.CSSProperties} onClick={() => void onSave(m.key)}>{m.label}</button>)}</div>
       <button type="button" disabled={busy || highlight?.location.status === 'malformed'} onClick={() => setWriting(v => !v)}>{highlight?.note ? '改批注' : '批注'}</button>
       <button type="button" onClick={() => void onCopy(false)}>复制</button>
       <button type="button" disabled={busy} onClick={() => void onAsk()}>问 AI</button>
@@ -28,7 +27,7 @@ export function HighlightPopover({ lens, highlight, busy, onSave, onRemove, onCo
       {writing && <div className="highlight-write"><textarea aria-label="批注内容" value={note} onChange={e => setNote(e.target.value)} rows={4} autoFocus /><button type="button" disabled={busy} onClick={() => void onSave(highlight?.color ?? 'yellow', note)}>保存批注</button></div>}
       {!writing && highlight?.note && <p>{highlight.note}</p>}
       {highlight && highlight.location.status !== 'located' && <p role="status">{highlight.location.reason}</p>}
-    </Glass>
+    </div>
   </div>
 }
 

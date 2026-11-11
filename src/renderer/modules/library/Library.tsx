@@ -5,7 +5,6 @@ import { JobView } from './find/JobView'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { LibraryBook, LibraryState } from '../../../shared/library'
 import { getLibraryAPI, confirmed, type LibraryAPI } from './access'
-import { Glass } from '../../design/next/GlassSurface'
 import { Shelf } from './Shelf'
 import { BookOpen } from './BookOpen'
 import { Reader } from './reader/Reader'
@@ -107,7 +106,7 @@ export function Library({ api: providedAPI, requestedPath, requestedTarget, onOp
     {route.kind === 'read' && snapshot.status === 'ready' && !current && <p role="alert">书籍不存在或已从书房移除</p>}
     {error && <div className="library-error" role="alert">{error}<button type="button" onClick={() => { setError(''); setRevision(n => n + 1) }}>重试</button><button type="button" onClick={() => setError('')}>关闭提示</button></div>}
     {route.kind === 'read' && current && api ? <Reader key={current.id} record={current} api={api} target={route.target} onBack={() => setRoute({ kind: 'shelf' })} onError={reportError} /> : <>
-      <header className="library-toolbar"><Glass><b>书房</b><input ref={search} aria-label="搜索书架" placeholder="在书架上找… /" value={query} onChange={e => setQuery(e.target.value)} /></Glass><Glass><button type="button" disabled={busy || snapshot.status !== 'ready'} onClick={() => void importBooks()}>导入本地书</button>{window.electronAPI?.libraryArchive && <ArchiveImport api={window.electronAPI.libraryArchive} disabled={busy || snapshot.status !== 'ready'} onBusy={setBusy} />}</Glass></header>
+      <header className="library-toolbar"><div className="rn-float"><b>书房</b><input ref={search} aria-label="搜索书架" placeholder="在书架上找… /" value={query} onChange={e => setQuery(e.target.value)} /></div><div className="rn-float"><button type="button" disabled={busy || snapshot.status !== 'ready'} onClick={() => void importBooks()}>导入本地书</button>{window.electronAPI?.libraryArchive && <ArchiveImport api={window.electronAPI.libraryArchive} disabled={busy || snapshot.status !== 'ready'} onBusy={setBusy} />}</div></header>
       <div className="library-scroll"><header className="library-hero"><h1>我的<em>藏书</em></h1><div className="library-statistics"><span>{books.length} 本藏书</span><span>{new Set(books.map(b => b.topic)).size} 个分类</span><span>{books.filter(b => b.status === '在读').length} 本在读</span><span>{books.filter(b => b.status === '读完').length} 本读完</span></div></header>
         {snapshot.status === 'loading' && !error && <p role="status">正在整理书架…</p>}
         {snapshot.status === 'no_vault' && <p>请先在文件面板设置资料库。</p>}
@@ -121,7 +120,7 @@ export function Library({ api: providedAPI, requestedPath, requestedTarget, onOp
           </>}
         </>}
       </div>
-      <footer className="library-footer"><Glass>{sourceAPI && <button type="button" onClick={() => setFinding(true)}>找书 F</button>}{SORTS.map(s => <button type="button" key={s.key} aria-pressed={sort === s.key} onClick={() => setSort(s.key)}>{s.label}</button>)}<button type="button" disabled={!shown.size} onClick={draw}>抽一本</button></Glass></footer>
+      <footer className="library-footer"><div className="rn-float">{sourceAPI && <button type="button" onClick={() => setFinding(true)}>找书 F</button>}{SORTS.map(s => <button type="button" key={s.key} aria-pressed={sort === s.key} onClick={() => setSort(s.key)}>{s.label}</button>)}<button type="button" disabled={!shown.size} onClick={draw}>抽一本</button></div></footer>
       {route.kind === 'info' && current && <BookOpen key={current.id} book={shelfBook(current)} record={current} origin={route.origin} onClose={() => setRoute({ kind: 'shelf' })} onRead={() => read(current)} />}
     </>}
     {finding && sourceAPI && <FindSheet api={sourceAPI} onClose={() => { setFinding(false); root.current?.focus() }} />}

@@ -32,6 +32,11 @@ function installDom(): { dom: JSDOM; restore: () => void } {
     value: { skills: { list: async () => ({ success: true, data: [] }) } },
     configurable: true,
   })
+  // The composer reads the theme store, which follows the system color scheme at load.
+  Object.defineProperty(dom.window, 'matchMedia', {
+    value: (query: string) => ({ matches: false, media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false }),
+    configurable: true,
+  })
   return {
     dom,
     restore() {

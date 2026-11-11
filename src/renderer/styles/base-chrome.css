@@ -451,10 +451,10 @@ html[data-transparency='reduced'] *::after {
     box-shadow 160ms ease;
 }
 
-/* 设置页的 sx-input / sx-select / sx-textarea 自带槽位材质与强调色焦点环（settings-surfaces.css），不吃这条全局兜底。 */
-.ready-app-shell input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']):not([type='hidden']):not([type='submit']):not([type='button']):not([type='reset']):not([type='image']):not(.ready-input-slot-inner):not(.sx-input),
-.ready-app-shell textarea:not(.ready-input-slot-inner):not(.sx-textarea),
-.ready-app-shell select:not(.ready-input-slot-inner):not(.sx-select) {
+/* 设置页的 sx-input / sx-select / sx-textarea（settings-surfaces.css）与共用基元的 rn-field（components/ui/primitives.css）自带槽位材质，不吃这条全局兜底。 */
+.ready-app-shell input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']):not([type='hidden']):not([type='submit']):not([type='button']):not([type='reset']):not([type='image']):not(.ready-input-slot-inner):not(.sx-input):not(.rn-field),
+.ready-app-shell textarea:not(.ready-input-slot-inner):not(.sx-textarea):not(.rn-field),
+.ready-app-shell select:not(.ready-input-slot-inner):not(.sx-select):not(.rn-field) {
   background: var(--input-slot-bg) !important;
   border-color: var(--input-slot-border) !important;
   box-shadow: var(--input-slot-shadow) !important;
@@ -470,9 +470,9 @@ html[data-transparency='reduced'] *::after {
   outline: none !important;
 }
 
-.ready-app-shell input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']):not([type='hidden']):not([type='submit']):not([type='button']):not([type='reset']):not([type='image']):not(.ready-input-slot-inner):not(.sx-input):focus,
-.ready-app-shell textarea:not(.ready-input-slot-inner):not(.sx-textarea):focus,
-.ready-app-shell select:not(.ready-input-slot-inner):not(.sx-select):focus {
+.ready-app-shell input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']):not([type='hidden']):not([type='submit']):not([type='button']):not([type='reset']):not([type='image']):not(.ready-input-slot-inner):not(.sx-input):not(.rn-field):focus,
+.ready-app-shell textarea:not(.ready-input-slot-inner):not(.sx-textarea):not(.rn-field):focus,
+.ready-app-shell select:not(.ready-input-slot-inner):not(.sx-select):not(.rn-field):focus {
   border-color: var(--input-slot-focus-border) !important;
   box-shadow: var(--input-slot-shadow-focus) !important;
   outline: none !important;

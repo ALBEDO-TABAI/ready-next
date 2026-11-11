@@ -100,11 +100,6 @@ html[data-theme='dark']:root .document-floating-panel.ready-app-liquid-panel {
   --ready-app-panel-glass-bg: color-mix(in srgb, var(--bg-editor) 92%, transparent);
 }
 
-html:root .document-floating-panel.ready-app-liquid-panel .ready-app-liquid-panel__lens {
-  background: rgba(255, 255, 255, 0.12);
-  opacity: 0.36;
-}
-
 html:root .document-floating-panel__header {
   background: var(--ready-app-panel-glass-band-bg, rgba(255, 255, 255, 0.26));
   border-bottom: 1px solid var(--ready-app-panel-glass-inner-border, rgba(210, 220, 234, 0.42));

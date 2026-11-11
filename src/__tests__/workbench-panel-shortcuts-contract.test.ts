@@ -18,8 +18,9 @@ test('workbench shell handles plain `·` and plain Tab only through a guarded pa
   assert.match(workbenchMode, /creatingType,/)
   assert.match(workbenchMode, /if \(!handledAction\) return/)
   assert.match(workbenchMode, /event\.preventDefault\(\)/)
-  assert.match(workbenchMode, /if \(handledAction === 'toggle-sidebar'\) \{\s*shell\.toggleSidebar\(\)/)
-  assert.match(workbenchMode, /shell\.toggleAssistant\(\)/)
+  assert.match(workbenchMode, /const \{ toggleSidebar: toggleShellSidebar, toggleAssistant: toggleShellAssistant \} = shell/)
+  assert.match(workbenchMode, /if \(handledAction === 'toggle-sidebar'\) \{\s*toggleShellSidebar\(\)/)
+  assert.match(workbenchMode, /toggleShellAssistant\(\)/)
 
   assert.match(helper, /export type WorkbenchPanelShortcutAction = 'toggle-sidebar' \| 'toggle-chat'/)
   assert.match(helper, /key === 'Tab'/)

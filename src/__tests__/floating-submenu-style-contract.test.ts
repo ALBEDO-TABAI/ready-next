@@ -13,14 +13,13 @@ function readWorkspaceFile(path: string): string {
 test('button-triggered dropdown menus opt into the shared frosted submenu treatment', () => {
   const filesPanel = readWorkspaceFile('src/renderer/components/layout/FilesPanel.tsx')
 
-  // 8ab48cd7 style(ui): checkpoint liquid glass polish — 下拉面从字面 class 组合改为共享 LiquidFloatingPanel；
-  // glass-surface-floating / ready-floating-menu 由面板内部拼类注入（见 LiquidFloatingPanel.tsx classes 数组）。
-  const floatingPanel = readWorkspaceFile('src/renderer/components/ui/liquid-glass/LiquidFloatingPanel.tsx')
-  assert.match(filesPanel, /import \{ LiquidFloatingPanel \} from '\.\.\/ui\/liquid-glass\/LiquidFloatingPanel'/)
-  assert.match(filesPanel, /<LiquidFloatingPanel/)
+  // W1: dropdowns use FloatPanel while retaining their placement and item behavior.
+  const floatingPanel = readWorkspaceFile('src/renderer/components/ui/float/FloatPanel.tsx')
+  assert.match(filesPanel, /import \{ FloatPanel \} from '\.\.\/ui\/float\/FloatPanel'/)
+  assert.match(filesPanel, /<FloatPanel/)
   assert.match(
     floatingPanel,
-    /const classes = \['glass-surface-floating', 'ready-floating-menu', 'ready-liquid-popover', className\]/,
+    /className=\{\['rn-float', 'rn-float-panel', className\]/,
   )
   assert.match(filesPanel, /ready-floating-menu-item/)
   assert.match(filesPanel, /position:\s*'fixed'/)

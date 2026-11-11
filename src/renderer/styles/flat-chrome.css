@@ -1004,26 +1004,16 @@ html[data-theme='dark'][data-fastcard-overlay-window='true'] {
   --ready-app-panel-glass-card-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
 }
 
+/* Floating panels (RSS settings drawer, add-source dialog, FastCard) carry the float material
+   (W1 §4, DL4); they no longer sit on a refraction lens — liquid glass is the composer's alone. */
 html:root .ready-app-liquid-panel,
 html[data-fastcard-overlay-window='true'] .ready-app-liquid-panel {
   isolation: isolate;
   overflow: hidden;
-  background: transparent !important;
-  border: 0.5px solid var(--ready-app-panel-glass-border) !important;
-  box-shadow: var(--ready-app-panel-glass-shadow) !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-}
-
-html:root .ready-app-liquid-panel__lens,
-html[data-fastcard-overlay-window='true'] .ready-app-liquid-panel__lens {
-  z-index: 0;
-}
-
-html:root .ready-app-liquid-panel > :not(.ready-app-liquid-panel__lens),
-html[data-fastcard-overlay-window='true'] .ready-app-liquid-panel > :not(.ready-app-liquid-panel__lens) {
-  position: relative;
-  z-index: 2;
+  background: var(--rn-float) !important;
+  border: 0 !important;
+  box-shadow: var(--rn-shadow-3), inset 0 0 0 1px var(--rn-hair) !important;
+  backdrop-filter: blur(var(--rn-glass-blur)) saturate(var(--rn-glass-sat)) !important;
 }
 
 html:root .browser-fastcard-header,
@@ -1034,7 +1024,7 @@ html:root .rss-settings-header,
 html:root .rss-settings-notice,
 html:root .calendar-assistant-header,
 html:root .calendar-assistant-composer,
-html:root .rss-task-menu-panel .ready-liquid-popover__content > div:first-child {
+html:root .rss-task-menu-panel .rn-float-panel__content > div:first-child {
   background: var(--ready-app-panel-glass-band-bg) !important;
   border-color: transparent !important;
 }

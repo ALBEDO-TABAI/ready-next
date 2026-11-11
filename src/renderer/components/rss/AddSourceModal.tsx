@@ -5,7 +5,6 @@ import {
   SETTINGS_PRIMARY_BUTTON_STYLE,
   SETTINGS_SECONDARY_BUTTON_STYLE,
 } from '../settings/settings-theme'
-import { LiquidSurfaceLayer } from '../ui/liquid-glass/LiquidFloatingPanel'
 
 interface AddSourceModalProps {
   open: boolean
@@ -122,16 +121,6 @@ export default function AddSourceModal({
       <div
         className="rss-add-source-modal ready-app-liquid-panel w-[408px] rounded-2xl"
       >
-        <LiquidSurfaceLayer
-          className="ready-liquid-popover__lens ready-app-liquid-panel__lens"
-          radius={18}
-          sourceSelector="[data-liquid-scroll-root='rss-feed-list']"
-          blur={8}
-          frost={0}
-          saturation={1.16}
-          brightness={1.06}
-          contrast={0.82}
-        />
         <div
           className="rss-add-source-modal__header flex items-center justify-between"
           style={{

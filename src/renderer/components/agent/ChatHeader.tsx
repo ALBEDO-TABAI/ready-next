@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { AtSign, ChevronDown, ChevronRight, MessageSquare, Minimize2, MoreHorizontal, PanelLeftClose, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react'
-import { IconButton } from '../ui/IconButton'
-import { LiquidFloatingPanel } from '../ui/liquid-glass/LiquidFloatingPanel'
+import { IconButton } from '../ui'
+import { FloatPanel } from '../ui/float/FloatPanel'
 import Modal from '../ui/Modal'
 import type { SessionRecallHit } from '../../../shared/session-recall'
 import { SESSION_DOT_COLOR, recallStatusToDot, type SessionDotStatus } from './chat-panel/helpers/session-status'
@@ -614,7 +614,7 @@ export default function ChatHeader({
       </div>
 
       {portalRoot && operationMenuPosition && createPortal(
-        <LiquidFloatingPanel
+        <FloatPanel
           ref={operationMenuRef}
           className="chat-header-floating-menu"
           style={{
@@ -651,12 +651,12 @@ export default function ChatHeader({
             <Minimize2 style={{ width: 14, height: 14 }} strokeWidth={2} />
             <span style={{ fontSize: 12.5, fontWeight: 500 }}>压缩上下文</span>
           </button>
-        </LiquidFloatingPanel>,
+        </FloatPanel>,
         portalRoot,
       )}
 
       {portalRoot && showHistory && historyMenuPosition && createPortal(
-        <LiquidFloatingPanel
+        <FloatPanel
           ref={historyMenuRef}
           className="chat-header-floating-menu"
           style={historyMenuStyle}
@@ -857,12 +857,12 @@ export default function ChatHeader({
               暂无会话来源
             </div>
           )}
-        </LiquidFloatingPanel>,
+        </FloatPanel>,
         document.body,
       )}
 
       {portalRoot && showHistory && rowMenu && createPortal(
-        <LiquidFloatingPanel
+        <FloatPanel
           ref={rowMenuRef}
           className="chat-header-floating-menu"
           style={{
@@ -906,7 +906,7 @@ export default function ChatHeader({
             <Trash2 style={{ width: 13, height: 13, flexShrink: 0, color: 'var(--color-red)' }} strokeWidth={2} />
             <span style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--color-red)' }}>删除</span>
           </button>
-        </LiquidFloatingPanel>,
+        </FloatPanel>,
         document.body,
       )}
 

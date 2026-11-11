@@ -5,7 +5,6 @@ import type { FastCardCanvasTarget, FastCardTransferRequest } from '../../../sha
 import { getFastCardTransferAPI, getFastCardQuickNoteAPI } from '../../stores/useFastCard'
 import { FileText, Image as ImageIcon, Languages, PanelRightClose, Save, Send, Sparkles, Trash2, Video, X } from 'lucide-react'
 import type { FastCardItem, FastCardSyncState } from '../../../shared/fastcard'
-import { LiquidSurfaceLayer } from '../ui/liquid-glass/LiquidFloatingPanel'
 
 interface FastCardPanelProps {
   items: FastCardItem[]
@@ -58,16 +57,6 @@ export default function FastCardPanel({
   const itemIds = items.filter(item => selected === null || selected.includes(item.id)).map(item => item.id)
   return (
     <aside className="browser-fastcard-drawer browser-fastcard-surface content-surface-panel ready-app-liquid-panel is-entered" aria-label="FastCard">
-      <LiquidSurfaceLayer
-        className="ready-liquid-popover__lens ready-app-liquid-panel__lens"
-        radius={18}
-        withProjection={false}
-        blur={8}
-        frost={0}
-        saturation={1.16}
-        brightness={1.06}
-        contrast={0.82}
-      />
       <header className="browser-fastcard-header">
         <div>
           <div className="browser-fastcard-kicker">FastCard</div>

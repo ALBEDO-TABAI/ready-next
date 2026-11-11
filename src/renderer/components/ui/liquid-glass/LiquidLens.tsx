@@ -71,7 +71,8 @@ export interface LiquidLensProps {
    * 'layer': filter: url(#f) on a layer that carries backdrop-filter blur —
    * the liquid-glass-react trick, kept as a fallback switch.
    */
-  engine?: 'backdrop' | 'layer'
+  /** 'off' renders the host and children only: no map, no lens layer, no projection (reduce transparency, W1 DL12). */
+  engine?: 'backdrop' | 'layer' | 'off'
   /** Render the displacement map for inspection. */
   debugMap?: boolean
   className?: string
@@ -121,7 +122,7 @@ export function LiquidLens({
 
   useLayoutEffect(() => {
     const host = hostRef.current
-    if (!host) return
+    if (!host || engine === 'off') return
     let frame = 0
     let lastKey = ''
     const requestFrame = typeof requestAnimationFrame === 'function'
@@ -177,11 +178,19 @@ export function LiquidLens({
       observer?.disconnect()
       if (frame && cancelFrame) cancelFrame(frame)
     }
-  }, [radius, bevel, depth, ior, dome, profile])
+  }, [radius, bevel, depth, ior, dome, profile, engine])
 
   // Chromium never re-renders a bound backdrop reference filter when its
   // primitives mutate in place — every graph-affecting param must be part of
   // the id so changes force a re-bind.
+  if (engine === 'off') {
+    return (
+      <div ref={hostRef} className={className} style={{ position: 'relative', borderRadius: radius, ...style }}>
+        {children != null && <div style={{ position: 'relative', zIndex: 2 }}>{children}</div>}
+      </div>
+    )
+  }
+
   const filterKey = `${map?.generation ?? 0}-${strength}-${aberration}-${frost}`.replace(/\./g, '_')
   const filterId = map ? `liquid-lens-${uid}-${filterKey}` : null
   const scale = map ? 2 * map.maxDisplacement * strength : 0

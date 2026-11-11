@@ -40,12 +40,6 @@ html:root .ready-floating-menu-item.is-selected {
   box-shadow: var(--chat-menu-selected-shadow) !important;
 }
 
-html:root .ready-liquid-popover.ready-floating-menu {
-  background: transparent !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-}
-
 /*
  * Transient confirmation glow applied to the FileTree row that was the drop
  * target of a successful background obsidian-web-clip. The row is NOT

@@ -5,7 +5,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { LibraryBook, LibraryBookmark, LibraryReadingPosition } from '../../../../shared/library'
 import { toLocalFileUrl } from '../../../utils/dragDrop'
 import { confirmed, savePosition, type LibraryAPI } from '../access'
-import { Glass } from '../../../design/next/GlassSurface'
 import { loadBook, type LoadedBook } from './book'
 import { paginate, PAPERS, fontStack, type Layout, type Typo } from './paginate'
 import { createFlipbook, type FlipView } from './flipbook.js'
@@ -199,12 +198,12 @@ function ReadyReader({ record, api, loaded, target, onBack, onError }: { record:
       if (e.key.toLowerCase() === 'b') { e.preventDefault(); e.stopPropagation(); void toggleMark() }
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); if (annotations.lens) closeHighlight(); else if (panel) setPanel(null); else onBack() }
     }}>
-    <header className="library-toolbar rd-ui"><Glass><button type="button" onClick={onBack}>回到书架</button><b>{record.title}</b></Glass>
-      <Glass><button type="button" onClick={() => setPanel(panel === 'toc' ? null : 'toc')}>目录</button><button type="button" disabled={markBusy} onClick={() => void toggleMark()}>{currentMark ? '取下书签' : '夹一张书签'}</button><button type="button" onClick={() => setPanel(panel === 'marks' ? null : 'marks')}>书签 {marks.length}</button><button type="button" onClick={() => { setPanel(panel === 'notes' ? null : 'notes'); void annotations.refresh() }}>笔记 {annotations.state?.highlights.length ?? 0}</button><button type="button" onClick={() => setPanel(panel === 'type' ? null : 'type')}>排版</button></Glass></header>
+    <header className="library-toolbar rd-ui"><div className="rn-float"><button type="button" onClick={onBack}>回到书架</button><b>{record.title}</b></div>
+      <div className="rn-float"><button type="button" onClick={() => setPanel(panel === 'toc' ? null : 'toc')}>目录</button><button type="button" disabled={markBusy} onClick={() => void toggleMark()}>{currentMark ? '取下书签' : '夹一张书签'}</button><button type="button" onClick={() => setPanel(panel === 'marks' ? null : 'marks')}>书签 {marks.length}</button><button type="button" onClick={() => { setPanel(panel === 'notes' ? null : 'notes'); void annotations.refresh() }}>笔记 {annotations.state?.highlights.length ?? 0}</button><button type="button" onClick={() => setPanel(panel === 'type' ? null : 'type')}>排版</button></div></header>
     <div ref={stage} className="rd-stage is-in"><div ref={bookEl} className="rd-book" /></div>
     {rendering && <p role="status" className="reading-status">正在排版…</p>}
     <div className="rd-dock rd-ui"><button type="button" disabled={!view || view.atStart} onClick={() => { void flip.current?.prev().catch(error => fail.current(errorText(error))) }}>上一页</button><span>{view?.a ?? 0}{view?.spread ? `–${view.b}` : ''} / {view?.count ?? 0}</span><button type="button" disabled={!view || view.atEnd} onClick={() => { void flip.current?.next().catch(error => fail.current(errorText(error))) }}>下一页</button></div>
-    {panel && <aside className="rd-panel" aria-label={panel === 'toc' ? '目录' : panel === 'marks' ? '书签' : panel === 'notes' ? '笔记' : '排版'}><Glass className="panel-body">
+    {panel && <aside className="rd-panel" aria-label={panel === 'toc' ? '目录' : panel === 'marks' ? '书签' : panel === 'notes' ? '笔记' : '排版'}><div className="rn-float panel-body">
       <button type="button" onClick={() => setPanel(null)}>关闭面板</button>
       {panel === 'toc' && <div className="rd-toc">{toc.map((t, i) => <button type="button" key={i} onClick={() => { if (layout) go((('anchor' in t && t.anchor ? layout.idPage.get(`${t.chapter}#${t.anchor}`) : undefined) ?? layout.chapterPage[t.chapter]) + 1) }}>{t.label}</button>)}</div>}
       {panel === 'marks' && <div className="rd-toc">{marks.length ? marks.map(m => <button type="button" key={m.id} onClick={() => { if (layout) go(pageOf(layout, m)) }}>{m.label}</button>) : <p>还没有书签，按 B 夹一张。</p>}</div>}
@@ -214,7 +213,7 @@ function ReadyReader({ record, api, loaded, target, onBack, onError }: { record:
         <div>{(['song', 'hei', 'kai'] as const).map((font, i) => <button type="button" key={font} aria-pressed={typo.font === font} onClick={() => setTypo(t => ({ ...t, font }))}>{['宋体', '黑体', '楷体'][i]}</button>)}</div>
         <div>{(['white', 'cream', 'night'] as const).map((p, i) => <button type="button" key={p} aria-pressed={typo.paper === p} onClick={() => setTypo(t => ({ ...t, paper: p }))}>{['白纸', '米黄', '夜间'][i]}</button>)}</div>
         <button type="button" aria-pressed={!single} onClick={() => setSingle(false)}>双页</button><button type="button" aria-pressed={single} onClick={() => setSingle(true)}>单页</button><p>{engine} · 窄区自动单页</p></div>}
-    </Glass></aside>}
+    </div></aside>}
     {annotations.state?.warning && <p role="status" className="rd-highlight-warning">{annotations.state.warning}</p>}
     <MarginNotes root={root} book={bookEl} view={view} list={annotations.state?.highlights ?? []} hidden={turning || !!panel || !!annotations.lens} onOpen={(h, el) => onMark(h.id, el)} />
     {annotations.lens && <HighlightPopover key={annotations.lens.id ?? 'selection'} lens={annotations.lens} highlight={annotations.selected} busy={annotations.busy} onSave={annotations.save} onRemove={annotations.remove} onCopy={annotations.copy} onSource={annotations.openSource} onAsk={annotations.ask} onClose={closeHighlight} />}

@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom'
 import { ArrowUp, Plus, Square, ChevronDown, ImagePlus, LoaderCircle, Puzzle, ShieldCheck } from 'lucide-react'
 import { LiquidLens } from '../ui/liquid-glass/LiquidLens'
 import { LiquidBackdropProjection } from '../ui/liquid-glass/LiquidBackdropProjection'
-import { LiquidFloatingPanel } from '../ui/liquid-glass/LiquidFloatingPanel'
+import { FloatPanel } from '../ui/float/FloatPanel'
+import { useTheme } from '../../stores/useTheme'
 import type { ChatAttachment } from '../../stores/useAgent'
 import type { ReadySkillReference } from '../../modules/agent/chat-input-bridge'
 import type { ContextUsageSnapshot } from '../../../shared/context-usage-types'
@@ -98,6 +99,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   ModelSelector,
   admissionReady = true,
 }: ChatInputProps, ref) {
+  const reducedTransparency = useTheme(state => state.transparency === 'reduced')
   const [showAuthorizationModeSelect, setShowAuthorizationModeSelect] = useState(false)
   const [authorizationModeUpdating, setAuthorizationModeUpdating] = useState(false)
   const [showAtMenu, setShowAtMenu] = useState(false)
@@ -461,7 +463,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   const authorizationMenuWidth = authorizationMenuFrame?.width ?? 260
 
   const atMenu = showAtMenu && filteredFilePool.length > 0 ? (
-    <LiquidFloatingPanel
+    <FloatPanel
       ref={atMenuRef}
       style={{
         ...chatMenuSurfaceStyle,
@@ -476,7 +478,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
         maxHeight: Math.min(208, composerMenuMaxHeight - 12),
         overflowY: 'auto',
       }}
-      contentClassName="ready-liquid-popover__content panel-hover-scrollbar"
+      contentClassName="rn-float-panel__content panel-hover-scrollbar"
     >
       <div style={{ fontSize: 10, color: 'var(--text-light)', padding: '2px 8px', marginBottom: 2 }}>
         引用文件 / 文件夹
@@ -531,11 +533,11 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
           </span>
         </button>
       ))}
-    </LiquidFloatingPanel>
+    </FloatPanel>
   ) : null
 
   const slashMenu = showSlashMenu ? (
-    <LiquidFloatingPanel
+    <FloatPanel
       ref={slashMenuRef}
       className="panel-hover-scrollbar"
       style={{
@@ -551,7 +553,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
         maxHeight: Math.min(248, composerMenuMaxHeight - 12),
         overflowY: 'auto',
       }}
-      contentClassName="ready-liquid-popover__content panel-hover-scrollbar"
+      contentClassName="rn-float-panel__content panel-hover-scrollbar"
     >
       <div style={{ fontSize: 10, color: 'var(--text-light)', padding: '2px 8px', marginBottom: 2 }}>
         命令与 Skill
@@ -630,11 +632,11 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
           没有匹配的 skill
         </div>
       ) : null}
-    </LiquidFloatingPanel>
+    </FloatPanel>
   ) : null
 
   const authorizationMenu = showAuthorizationModeSelect ? (
-    <LiquidFloatingPanel
+    <FloatPanel
       ref={authorizationMenuRef}
       data-ready-action-authorization-menu="true"
       style={{
@@ -676,7 +678,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
           <div style={{ marginTop: 2, fontSize: 10, lineHeight: 1.35, color: 'var(--text-light)' }}>{option.description}</div>
         </button>
       ))}
-    </LiquidFloatingPanel>
+    </FloatPanel>
   ) : null
 
   return (
@@ -704,7 +706,9 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
       >
         <LiquidLens
           className="ready-liquid-composer__surface"
-          radius={18}
+          // 减少透明（DL12）：不折射、不投影，退回纸色（liquid-composer.css）。
+          engine={reducedTransparency ? 'off' : 'backdrop'}
+          radius={24}
           bevel={22}
           depth={37}
           ior={1.34}
@@ -719,13 +723,12 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
           brightness={1.05}
           contrast={0.84}
           aberration={0}
-          engine="backdrop"
-          backdropContent={<LiquidBackdropProjection className="ready-liquid-composer__projection" />}
+          backdropContent={<LiquidBackdropProjection className="ready-liquid-composer__projection" sourceMaskRadius={24} />}
         >
           <div
             className="ready-liquid-composer__content flex flex-col"
             style={{
-              borderRadius: 'var(--workbench-canvas-radius)',
+              borderRadius: 24,
               background: 'transparent',
               padding: isDragOver ? '13px 15px 10px' : '14px 16px 11px',
               position: 'relative',

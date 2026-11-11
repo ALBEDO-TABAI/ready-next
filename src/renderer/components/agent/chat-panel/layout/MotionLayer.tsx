@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { motion, useIsPresent, useReducedMotion } from 'framer-motion'
 import { PanelLeftClose, History, Plus } from 'lucide-react'
-import { IconButton } from '../../../ui/IconButton'
 import {
   WORKBENCH_EDGE_RAIL_SIZE,
   WORKBENCH_TOPBAR_HEIGHT,

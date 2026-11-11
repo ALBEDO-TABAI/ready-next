@@ -19,7 +19,7 @@ import RSSCoverImage from './RSSCoverImage'
 import RSSTopbarTools from './RSSTopbarTools'
 import { RSSTranslatedBody, RSSTranslationControl } from './RSSTranslationControl'
 import { rssReaderHeadings, useRSSArticleTranslation } from '../../modules/rss/article-translation'
-import { LiquidFloatingPanel } from '../ui/liquid-glass/LiquidFloatingPanel'
+import { FloatPanel } from '../ui/float/FloatPanel'
 import { chatMenuSurfaceStyle } from '../agent/chatMenuStyles'
 
 // Items re-extracted in this session; a page that still extracts badly is not fetched again on every open.
@@ -159,14 +159,14 @@ export default function RSSArticleReader({ item, expectedRevision, reveal, onClo
           onMouseDown={(event) => event.preventDefault()} onClick={() => setReferenceMenuOpen((open) => !open)} title="把这篇文章、所选文字或当前段落交给助手">
           <MessageSquareQuote size={15} strokeWidth={1.8} />引用<ChevronDown size={12} strokeWidth={2} />
         </button>
-        {referenceMenuOpen && <LiquidFloatingPanel className="rss-reference-menu-panel overflow-hidden rounded-[14px]" role="menu" radius={14}
+        {referenceMenuOpen && <FloatPanel className="rss-reference-menu-panel overflow-hidden rounded-[14px]" role="menu" radius={14}
           style={{ ...chatMenuSurfaceStyle, position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 30, width: 200 }}>
           <div className="rss-menu">
             <RSSReferenceButton className="rss-menu-item ready-floating-menu-item" name={title} label="引用文章" disabled={busy} onDone={closeReferenceMenu}
               reference={article ? { kind: 'article', read: { itemId: article.id, expectedRevision: article.revision, offset: 0, length: 12000 } } : null} />
             {article && <RSSSelectionReferences bodyRef={bodyRef} article={article} active={active && !busy && translation.view === 'source'} className="rss-menu-item ready-floating-menu-item" onDone={closeReferenceMenu} />}
           </div>
-        </LiquidFloatingPanel>}
+        </FloatPanel>}
       </div>
       <RSSTranslationControl state={translation} disabled={busy} />
       <button type="button" className="rss-btn rss-btn--icon" title={item.starred ? '取消收藏' : '收藏文章'} aria-label={item.starred ? '取消收藏' : '收藏文章'} aria-pressed={item.starred} onClick={() => onToggleStar(item.id)}>
