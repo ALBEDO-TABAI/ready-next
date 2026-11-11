@@ -29,7 +29,7 @@ async function main() {
   fs.mkdirSync(vault); fs.mkdirSync(evidence)
   assert.ok(fs.existsSync(path.resolve(require('../package.json').main)), 'Build this checkout first')
   const env = { ...process.env, READY_USER_DATA_DIR: profile }
-  delete env.ELECTRON_RUN_AS_NODE; delete env.READY_START_HIDDEN
+  delete env.ELECTRON_RUN_AS_NODE
   let app, page
   const launch = async () => {
     app = await _electron.launch({ executablePath: require('electron'), args: [process.cwd()], env, timeout: 45000 })

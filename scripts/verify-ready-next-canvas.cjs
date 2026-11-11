@@ -14,7 +14,7 @@ async function main() {
   const oldBytes = fs.readFileSync(path.join(__dirname, 'fixtures/ready-next-canvas.readyboard'))
   fs.writeFileSync(oldPath, oldBytes)
   const env = { ...process.env, READY_USER_DATA_DIR: profile }
-  delete env.ELECTRON_RUN_AS_NODE; delete env.READY_START_HIDDEN
+  delete env.ELECTRON_RUN_AS_NODE
   let app, page
   const poll = async (check, message) => {
     const deadline = Date.now() + 45000

@@ -44,9 +44,9 @@ async function main() {
       await page.waitForTimeout(150)
     }
     await page.locator('.ink-doc-app').waitFor({ state: 'visible' })
+    // The navigator opens on its 页面 view, which lists the library's pages by title (W3 §3).
     const open = async name => {
-      const row = page.getByText(name, { exact: true }).first()
-      if (!await row.isVisible()) await page.getByText(path.basename(vault), { exact: true }).first().click()
+      const row = page.locator('[data-shell-navigator="document"] section[aria-label="页面"] .ink-sb-label-btn').filter({ hasText: new RegExp(`^${name.replace(/\.md$/, '')}$`) }).first()
       await row.click(); await page.locator('[data-ready-block-editor]:visible').first().waitFor()
     }
     const editor = () => page.locator('[data-ready-block-editor]:visible').first()

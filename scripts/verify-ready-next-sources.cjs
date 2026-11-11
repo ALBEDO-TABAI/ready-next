@@ -46,7 +46,7 @@ async function main() {
   port = server.address().port
   const webURL = `http://127.0.0.1:${port}/page`
   const env = { ...process.env, READY_USER_DATA_DIR: profile }
-  delete env.ELECTRON_RUN_AS_NODE; delete env.READY_START_HIDDEN
+  delete env.ELECTRON_RUN_AS_NODE
   let app, page
   const poll = async (check, message) => {
     const deadline = Date.now() + 45000
