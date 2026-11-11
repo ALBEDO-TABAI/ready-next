@@ -75,7 +75,8 @@ test('openWebpageInBrowser creates a browser tab and requests browser mode witho
   })
 })
 
-test('openWebpageInBrowser falls back to window.open without entering browser mode when createTab fails', async () => {
+// W6 K7: an internal link never leaks to the system browser; a failed tab is reported, not opened elsewhere.
+test('openWebpageInBrowser reports failure and does not leak to the system browser when createTab fails', async () => {
   await withDom(async (dom) => {
     useMode.getState().setWorkbenchMode('document')
     let modeRequestCount = 0
@@ -98,7 +99,7 @@ test('openWebpageInBrowser falls back to window.open without entering browser mo
     assert.equal(opened, false)
     assert.equal(modeRequestCount, 0)
     assert.equal(useMode.getState().workbenchMode, 'document')
-    assert.deepEqual(openedExternally, ['https://example.com/fallback'])
+    assert.deepEqual(openedExternally, [])
     assert.equal(useBrowserTabs.getState().tabs.length, 0)
     assert.equal(useBrowserTabs.getState().activeTabId, null)
   })
