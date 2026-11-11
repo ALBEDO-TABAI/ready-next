@@ -65,12 +65,14 @@
   --rn-well: rgb(11 11 14 / .045);
   --rn-float: rgb(252 252 253 / .82);
   --rn-card-shadow: 0 1px 2px rgb(10 10 20 / .06), 0 6px 16px -8px rgb(10 10 30 / .18);
-  --rn-liquid-a: rgb(255 255 255 / .36);
-  --rn-liquid-b: rgb(255 255 255 / .10);
-  --rn-liquid-rim: rgb(255 255 255 / .78);
-  --rn-liquid-hi: rgb(255 255 255 / .95);
-  --rn-liquid-sheen: rgb(255 255 255 / .4);
-  --rn-liquid-shadow: 0 16px 36px -18px rgb(10 10 30 / .34), 0 2px 6px rgb(10 10 30 / .06);
+  /* The assistant composer keeps its pre-B4 liquid glass (user, 2026-11-11): veil, hairline rim, edge ring. */
+  --rn-liquid-veil: rgba(248, 250, 252, 0.32);
+  --rn-liquid-veil-edge: inset 0 1px 0 rgba(255, 255, 255, 0.42), inset 0 -1px 0 rgba(255, 255, 255, 0.14);
+  --rn-liquid-rim: rgba(255, 255, 255, 0.24);
+  --rn-liquid-rim-edge: inset 0 0 0 1px rgba(255, 255, 255, 0.07), inset 0 1px 0 rgba(255, 255, 255, 0.24);
+  --rn-liquid-ring: linear-gradient(132deg, rgba(255, 255, 255, 0.02) 0%, rgba(255, 255, 255, 0.42) 30%, rgba(255, 255, 255, 0.02) 56%, rgba(255, 255, 255, 0.28) 78%, rgba(255, 255, 255, 0.02) 100%);
+  --rn-liquid-ring-drag: linear-gradient(132deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.86) 32%, rgba(255, 255, 255, 0.18) 55%, rgba(255, 255, 255, 0.48) 82%, rgba(255, 255, 255, 0.06) 100%);
+  --rn-liquid-projection-veil: linear-gradient(160deg, rgba(255, 255, 255, 0.20), rgba(248, 250, 252, 0.06) 52%, rgba(255, 255, 255, 0.12));
   --rn-r-sheet: 20px; --rn-r-float: 16px; --rn-r-control: 9px;
 
   /* ---- shell and density (DL11, DL11a) ---- */
@@ -143,12 +145,12 @@
   --rn-well: rgb(0 0 0 / .26);
   --rn-float: rgb(28 28 32 / .86);
   --rn-card-shadow: 0 1px 2px rgb(0 0 0 / .4), 0 6px 16px -8px rgb(0 0 0 / .6);
-  --rn-liquid-a: rgb(255 255 255 / .13);
-  --rn-liquid-b: rgb(255 255 255 / .03);
-  --rn-liquid-rim: rgb(255 255 255 / .2);
-  --rn-liquid-hi: rgb(255 255 255 / .34);
-  --rn-liquid-sheen: rgb(255 255 255 / .1);
-  --rn-liquid-shadow: 0 16px 36px -18px rgb(0 0 0 / .7), 0 2px 6px rgb(0 0 0 / .3);
+  --rn-liquid-veil: rgba(26, 26, 26, 0.62);
+  --rn-liquid-veil-edge: inset 0 1px 0 rgba(232, 232, 232, 0.14), inset 0 -1px 0 rgba(0, 0, 0, 0.16);
+  --rn-liquid-rim: rgba(232, 232, 232, 0.14);
+  --rn-liquid-rim-edge: inset 0 1px 0 rgba(255, 255, 255, 0.18), inset 0 -1px 0 rgba(255, 255, 255, 0.05);
+  --rn-liquid-ring: linear-gradient(132deg, rgba(255, 255, 255, 0.01) 0%, rgba(232, 232, 232, 0.18) 30%, rgba(255, 255, 255, 0.01) 56%, rgba(232, 232, 232, 0.12) 78%, rgba(255, 255, 255, 0.01) 100%);
+  --rn-liquid-ring-drag: var(--rn-liquid-ring);
   --rn-paper: #202022;
   --rn-paper-2: #2a2a2d;
   --rn-hl: rgb(255 200 60 / .42);
@@ -181,8 +183,8 @@
 [data-transparency='reduced'] {
   --rn-float: rgb(252 252 253);
   --rn-glass-alpha: 1; --rn-glass-alpha-strong: 1; --rn-glass-alpha-clear: 1;
-  --rn-liquid-a: var(--rn-sheet); --rn-liquid-b: var(--rn-sheet);
-  --rn-liquid-sheen: transparent;
+  --rn-liquid-veil: var(--rn-sheet); --rn-liquid-veil-edge: var(--rn-card-shadow);
+  --rn-liquid-rim: var(--rn-hair-2); --rn-liquid-rim-edge: none;
 }
 
 [data-theme='dark'][data-transparency='reduced'] {
