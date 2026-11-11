@@ -304,3 +304,22 @@ test('M4-E3 copy block reference addresses the stable card and leaves its body u
   assert.equal(useCanvasNavigation.getState().target?.objectId, 'board')
   assert.equal(useCanvasNavigation.getState().target?.nodeId, 'one')
 })
+
+// W4 B8: a card placed from the dock starts empty. Opening it must put the caret in a new paragraph (no extra
+// "添加文字" click); opening a card with text puts the caret at its end. Typing then writes the card.
+test('W4 an empty card opens ready to type', async t => {
+  const empty = await fixture(t, '')
+  const editable = empty.rich()
+  assert.equal(empty.dom.window.document.activeElement, editable, 'the new paragraph has focus')
+  await empty.input('第一句'); empty.bytes('第一句')
+})
+
+test('W4 a card with text opens with the caret at its end', async t => {
+  const f = await fixture(t, '原文😀')
+  const editable = f.rich()
+  assert.equal(f.dom.window.document.activeElement, editable)
+  const selection = f.dom.window.getSelection()!
+  assert.equal(selection.rangeCount, 1)
+  const range = selection.getRangeAt(0).cloneRange(); range.setStart(editable, 0)
+  assert.equal(range.toString(), '原文😀', 'the caret sits after the existing text')
+})

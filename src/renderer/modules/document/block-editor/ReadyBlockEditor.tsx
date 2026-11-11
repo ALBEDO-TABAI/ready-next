@@ -70,8 +70,10 @@ export function ReadyBlockEditor({ tabId, content: displayedContent, pageTitle, 
 }
 
 /** Both document tabs and canvas cards render this exact editor. */
-export function BufferedBlockEditor({ buffer, linkBase, content: displayedContent, pageTitle, renderSource }: {
+export function BufferedBlockEditor({ buffer, linkBase, content: displayedContent, pageTitle, renderSource, startTyping }: {
   pageTitle?: string; buffer: EditorBuffer; linkBase?: EditorLinkBase; content?: string; renderSource(block: DocumentBlock): ReactNode
+  /** Opening the editor places the caret: in a new paragraph when it is empty, otherwise at the end (text cards). */
+  startTyping?: boolean
 }) {
   const content = useSyncExternalStore(buffer.subscribe, () => displayedContent ?? buffer.snapshot.content)
   const writeError = useSyncExternalStore(buffer.subscribe, () => buffer.error)
@@ -103,6 +105,14 @@ export function BufferedBlockEditor({ buffer, linkBase, content: displayedConten
     editor.addEventListener('beforeinput', beforeInput)
     return () => editor.removeEventListener('beforeinput', beforeInput)
   })
+  const started = useRef(false)
+  useLayoutEffect(() => {
+    if (!startTyping || started.current) return
+    started.current = true
+    const end = buffer.snapshot.content.length
+    if (end) setFocusRequest({ at: end })
+    else { setAppendPrefix(''); setEmptyAt(0); setFocusRequest({ at: 0 }) }
+  }, [startTyping, buffer])
   useLayoutEffect(() => {
     if (!focusRequest) return
     const elements = [...root.current!.querySelectorAll<HTMLElement>('[data-rich-start]')]
