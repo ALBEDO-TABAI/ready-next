@@ -11,6 +11,9 @@ interface RSSSessionState {
   finishReveal(id: string): void
   query: RSSQuery
   digestVisible: boolean
+  /** 为你筛过的 is where 资讯 opens (W5 V8); choosing any other view turns it off for the session. */
+  sieveVisible: boolean
+  setSieveView(visible: boolean): void
   selectedDigestId: string | null
   setDigestView(visible: boolean, reportId?: string | null): void
   view: RSSQueryResult | null
@@ -36,6 +39,8 @@ export const useRSSSession = create<RSSSessionState>((set, get) => ({
   query: parsed.success ? parsed.data : RSSQuerySchema.parse({}),
   view: null,
   digestVisible: false, selectedDigestId: null,
+  sieveVisible: true,
+  setSieveView: (sieveVisible) => set({ interactionRevision: get().interactionRevision + 1, sieveVisible }),
   setDigestView: (digestVisible, reportId) => set({ interactionRevision: get().interactionRevision + 1, digestVisible, ...(reportId !== undefined ? { selectedDigestId: reportId } : {}) }),
   selectedExcerpt: null, selectedItemExpectedRevision: null,
   selectedItemId: null,
@@ -47,7 +52,7 @@ export const useRSSSession = create<RSSSessionState>((set, get) => ({
   },
   setView: (view) => set({ view }),
   setSelection: (payload) => set({ interactionRevision: get().interactionRevision + 1, selectedExcerpt: null, selectedItemExpectedRevision: null, ...payload }),
-  reset: () => set({ interactionRevision: get().interactionRevision + 1, pendingReveal: null, digestVisible: false, selectedDigestId: null, query: RSSQuerySchema.parse({}), view: null,
+  reset: () => set({ interactionRevision: get().interactionRevision + 1, pendingReveal: null, digestVisible: false, sieveVisible: true, selectedDigestId: null, query: RSSQuerySchema.parse({}), view: null,
     selectedExcerpt: null, selectedItemExpectedRevision: null,
     selectedItemId: null, selectedItemTitle: null }),
 }))
