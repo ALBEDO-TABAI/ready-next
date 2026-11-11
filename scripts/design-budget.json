@@ -106,8 +106,8 @@
       "fontFace": 0
     },
     "components/document": {
-      "color": 73,
-      "backdropFilter": 4,
+      "color": 69,
+      "backdropFilter": 2,
       "fontFace": 0
     },
     "components/document/book": {
@@ -126,7 +126,7 @@
       "fontFace": 0
     },
     "components/layout": {
-      "color": 25,
+      "color": 24,
       "backdropFilter": 2,
       "fontFace": 0
     },
@@ -276,8 +276,8 @@
       "fontFace": 0
     },
     "modules/document/block-editor": {
-      "color": 12,
-      "backdropFilter": 1,
+      "color": 9,
+      "backdropFilter": 0,
       "fontFace": 0
     },
     "modules/document/book": {
@@ -306,8 +306,8 @@
       "fontFace": 0
     },
     "modules/document/ink": {
-      "color": 228,
-      "backdropFilter": 17,
+      "color": 208,
+      "backdropFilter": 15,
       "fontFace": 1
     },
     "modules/document/page-ui": {

@@ -53,8 +53,17 @@ async function setContentSize(app, page, width, height) {
   await sleep(700)
 }
 
-async function close(app) {
-  await app.close().catch(() => {})
+// A quit that does not finish is reported and then killed: the profile is throwaway, and an unbounded close would
+// hang the whole matrix (a fresh profile's first-launch setup can hold the quit for minutes).
+async function close(app, { timeoutMs = 20000 } = {}) {
+  const pid = app.process().pid
+  const outcome = await Promise.race([
+    app.close().then(() => 'closed', () => 'closed'),
+    sleep(timeoutMs).then(() => 'timeout'),
+  ])
+  if (outcome === 'closed') return
+  console.warn(`[design-matrix] Ready Next (pid ${pid}) did not quit within ${timeoutMs} ms; killing it`)
+  try { process.kill(pid, 'SIGKILL') } catch { /* silent-catch: it exited between the timeout and the kill */ }
 }
 
 // The workbench only switches when the scene reports it is current, so the request is repeated

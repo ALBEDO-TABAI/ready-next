@@ -64,6 +64,9 @@ async function main() {
     await page.screenshot({ path: path.join(evidence, `${label}.png`) })
     console.log(`PASS ${label}: disk/database readback + screenshot`)
   }
+  // page.evaluate has no timeout of its own: a call Main never answers must fail this check with its name, not hang it.
+  const bounded = (promise, label, ms = 20000) => Promise.race([promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} did not answer within ${ms} ms`)), ms))])
   const sidebar = () => page.getByLabel('页面侧栏', { exact: true })
   const row = id => sidebar().locator(`section[aria-label="页面"] [data-page-id="${id}"]`)
   const createPage = async title => {
@@ -139,13 +142,13 @@ async function main() {
     await launch()
     // The confirmed body is durable in Main. The tab list lives in localStorage and may not reach disk before a
     // SIGKILL, so an orphaned draft comes back through "未保存的草稿" (the designed recovery path).
-    const recovered = await page.evaluate(async id => {
+    const recovered = await bounded(page.evaluate(async id => {
       const result = await window.electronAPI.documentDrafts.list()
       if (!result.ok) throw new Error(result.message)
       return result.value.find(draft => draft.objectId === id) ?? null
-    }, parentId)
+    }, parentId), 'documentDrafts.list after the restart')
     assert.equal(recovered?.content, original, 'the confirmed draft survives SIGKILL in Main')
-    const tabOpen = await page.evaluate(id => JSON.parse(localStorage.getItem('ready-doc-tabs-v2') || '{}').state?.tabs?.some(tab => tab.objectId === id), parentId)
+    const tabOpen = await bounded(page.evaluate(id => JSON.parse(localStorage.getItem('ready-doc-tabs-v2') || '{}').state?.tabs?.some(tab => tab.objectId === id), parentId), 'reading the tab list after the restart')
     if (tabOpen) await row(parentId).getByRole('button', { name: '验收页', exact: true }).click()
     else {
       await page.getByRole('button', { name: /^未保存的草稿/ }).click()

@@ -163,7 +163,8 @@ async function main() {
     await page.locator('.ready-slash-menu [data-slash-item="widget"][aria-selected="true"]').waitFor(); await page.keyboard.press('Enter')
     await page.getByRole('dialog', { name: '编辑 widget', exact: true }).waitFor()
     await page.keyboard.press('Escape')
-    await editor.locator('[contenteditable="true"]').filter({ hasText: /^\/$/ }).focus()
+    // The typed query stays in the page until a block is chosen; one undo removes it.
+    await editor.locator('[contenteditable="true"]').filter({ hasText: /^\/widget$/ }).focus()
     await page.keyboard.press(`${mod}+z`); await readback(expected)
     console.log('PASS slash → existing Widget drawer → cancel without inserting a placeholder')
 
