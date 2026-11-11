@@ -14,6 +14,9 @@ interface RSSSessionState {
   /** 为你筛过的 is where 资讯 opens (W5 V8); choosing any other view turns it off for the session. */
   sieveVisible: boolean
   setSieveView(visible: boolean): void
+  /** Bumped when a notification asks 资讯 to open an article; 资讯 reads the request from Main. */
+  notificationOpenRevision: number
+  takeNotificationOpen(): void
   selectedDigestId: string | null
   setDigestView(visible: boolean, reportId?: string | null): void
   view: RSSQueryResult | null
@@ -40,6 +43,8 @@ export const useRSSSession = create<RSSSessionState>((set, get) => ({
   view: null,
   digestVisible: false, selectedDigestId: null,
   sieveVisible: true,
+  notificationOpenRevision: 0,
+  takeNotificationOpen: () => set({ notificationOpenRevision: get().notificationOpenRevision + 1 }),
   setSieveView: (sieveVisible) => set({ interactionRevision: get().interactionRevision + 1, sieveVisible }),
   setDigestView: (digestVisible, reportId) => set({ interactionRevision: get().interactionRevision + 1, digestVisible, ...(reportId !== undefined ? { selectedDigestId: reportId } : {}) }),
   selectedExcerpt: null, selectedItemExpectedRevision: null,
