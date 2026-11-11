@@ -23,3 +23,11 @@
 - 书和划线按资料库来源页重建（`book`、`highlight`），FastCard 按 ready.db 重建（`fastcard`）；划线搜索结果以来源页 `^hl-id` 为稳定落点。书的默认入口为 `c0:0+1`；PDF 等非段落阅读格式在该入口打开书文件，其他段落位置仍明确拒绝。C5 重建只清投影。
 - 书源 `bookSources.manualLink(id)` 返回 Main 校验的网址；渲染层经 `openWebpageInBrowser` 打开。资讯原文同路，日历加入会议既有接线已核对。Ready 浏览器创建失败不得自动外开。
 - `scripts/check-external-open.cjs` 随 `verify` 检查 Renderer 的 `window.open` 与 Main 的 `shell.openExternal`；只允许脚本内具名调用点及数量，注释和字符串不算调用。白名单仅记录现有认证/外部协议、明确外开菜单和其 Main 承接入口。
+
+## W6 引用胶囊、速览呈现与 ⌘K（T1–T3 界面，2026-11-12）
+
+- 胶囊：`components/ui/RefCapsule.tsx`（行为 `ref-capsule-actions.tsx`，类型与图标 `ref-capsule-kinds.ts`）。点击经 `openReadyRef`；⌥ 点击、悬停后按空格、键盘焦点在胶囊上按空格，都发 `ready:open-quick-look`（`requestQuickLook`），只由 ObjectUIHost 承接，不另建预览面；⌘ 点击（及中键）为 `openReadyRef(ref, from, { newTab: true })`：页面、文件、画板在新标签打开。文档模式没有分屏，资讯、日历、对话、收集没有标签，这些去向 ⌘ 点击与点击相同。拖动写 `writeReadyRefTransfer`：`application/x-ready-ref` + `text/uri-list` + 标题。右键：打开 / 速览 / 复制引用 / 在文件视角中显示（只给页面、数据库、划线、画板、文件）。打开失败一律 toast。可访问名称为“类型 标题”。
+- 可编辑正文：胶囊就是 `dom-inline` 画出的同一个链接，只加 class 与 data（图标是遮罩生成框，不是文本节点），文本、光标、输入法与 Markdown 源不变。`[[wiki]]` 引用悬停时解析一次，拖动时用已解析的引用。日期胶囊点击仍打开日期与提醒（C9），右键多一项“修改日期与提醒…”，⌥、⌘、拖动与其他胶囊一致。普通网页链接不是胶囊。
+- 速览：`QuickLookContent.tsx` 按 `data.kind` 画内容——数据库前几行、画板缩略图（卡片位置与标题）、书与划线（封面、书名、作者；划线与段落另有原文、前后各约 60 字的上下文与批注；书的默认入口 `c0:0+1` 只显示书）、资讯（出处胶囊、摘要或片段、筛子理由）、这一天（按类分组的胶囊）、日程（时间、地点、说明）、网页（网址与摘录）、对话（问题与回答开头）、收集（卡片与出处）、媒体文件（图像、音视频，其他文件给类型与大小）。页面与文本文件沿用原正文预览（页面按 GFM 显示表格与任务，去掉重复的标题行，`[[wiki]]` 显示为页面名，只影响显示）；失效与不可用仍明确写出。速览里的胶囊打开时速览让开。
+- ⌘K：显示 `title` 与中文 `typeLabel`（图标随类型）；↵ 打开，⌥↵ 速览，⌘↵ 新标签打开；点击读同样的修饰键。空输入的“最近打开”仍是现有的文档列表，跨模式历史属 T7。
+- 验证：`ready-ref-capsule.test.tsx`（四种操作、菜单、键盘与悬停）、`ready-block-editor-capsule.test.tsx`（可编辑正文）、`ready-quick-look-content.test.tsx`（速览内容与 ⌘K）；真实窗口 `npm run verify:ready-next-capsule`。

@@ -185,19 +185,27 @@
   .rn-resize:hover::after, .rn-resize[data-dragging='true']::after { opacity: 1; }
 
   /* ---- RefCapsule (W6 §2.1): a reference to a Ready object, its type icon and title, one look everywhere.
-     It stays an inline text run, so inside editable prose the caret and input methods treat it as ordinary text;
-     the icon is a generated box (Lucide paths as a mask), never a node of the text. ---- */
+     Outside editable text it is one unit that never breaks; a title too long for the line ends in an ellipsis.
+     The icon is a generated box (Lucide paths as a mask), never a node of the text. ---- */
   .rn-ref {
+    display: inline-flex; align-items: baseline; max-width: 100%; vertical-align: baseline;
     padding: 1px 6px 1px 5px; border-radius: var(--rn-r-xs); background: var(--rn-fill-2);
-    color: var(--rn-ink); font-size: .88em; font-weight: 500; text-decoration: none; overflow-wrap: anywhere;
-    -webkit-box-decoration-break: clone; box-decoration-break: clone; cursor: pointer;
-    transition: background-color var(--rn-d-1) var(--rn-ease-out);
+    color: var(--rn-ink); font-size: max(.88em, 12px); font-weight: 500; line-height: 1.45; text-decoration: none; white-space: nowrap;
+    cursor: pointer; transition: background-color var(--rn-d-1) var(--rn-ease-out);
   }
+  .rn-ref__title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .rn-ref::before {
-    content: ''; display: inline-block; width: .95em; height: .95em; margin-right: .3em; vertical-align: -.14em;
+    content: ''; flex: none; align-self: center; width: .95em; height: .95em; margin-right: .3em;
     background-color: var(--rn-ink-3);
     -webkit-mask: var(--rn-ref-icon) center / contain no-repeat; mask: var(--rn-ref-icon) center / contain no-repeat;
   }
+  /* In editable text the capsule stays a run of text (the drawn link itself), so the caret and input methods treat it
+     as ordinary text and it wraps like words do. */
+  [contenteditable] .rn-ref {
+    display: inline; line-height: inherit; white-space: normal; overflow-wrap: anywhere;
+    -webkit-box-decoration-break: clone; box-decoration-break: clone;
+  }
+  [contenteditable] .rn-ref::before { display: inline-block; vertical-align: -.14em; }
   .rn-ref:hover { background: var(--rn-fill-3); }
   .rn-ref:hover::before { background-color: var(--rn-ink-2); }
   .rn-ref:focus-visible { outline: 1.5px solid var(--rn-ink-3); outline-offset: 1px; }

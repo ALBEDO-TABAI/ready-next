@@ -1,4 +1,5 @@
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import type { ReactNode } from 'react'
 import type { BookPreview, CanvasPreview, DatabasePreview, WebPreview } from '../../../../shared/object-preview'
 import type { RSSRelevance } from '../../../../shared/rss-sieve'
@@ -9,6 +10,7 @@ import { cellText, dateText } from '../../document/database/cell-text'
 import { DAY_ITEM_LABELS } from '../../calendar/linkage/ThisDay'
 import { toLocalFileUrl } from '../../../utils/dragDrop'
 import type { ObjectPreview, ObjectPreviewData } from './preview'
+import type { PreviewTarget } from './navigation'
 
 // What a quick look shows (W6 §2.2): the object's content, never its path — the first rows of a database, a board's
 // cards, the passage of a book, an article and why the sieve kept it, the day, the saved excerpts, the turn, the card.
@@ -36,6 +38,9 @@ function DatabaseLook({ data }: { data: DatabasePreview }) {
   </>
 }
 
+/** A card's first line as it reads on the board: no heading, list or quote marker, a web address without its scheme. */
+const cardLabel = (title: string) => title.replace(/^\s*(?:#{1,6}\s+|[-*+]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+|>\s*)/, '').replace(/^https?:\/\//, '')
+
 /** The board in miniature: every card at its place and size, in the board's proportions (kept between 6:5 and 13:5). */
 function CanvasLook({ data }: { data: CanvasPreview }) {
   const nodes = data.nodes.map(node => ({ ...node, x: node.x || 0, y: node.y || 0, width: node.width || 240, height: node.height || 120 }))
@@ -49,18 +54,24 @@ function CanvasLook({ data }: { data: CanvasPreview }) {
   left -= padX; top -= padY; width += padX * 2; height += padY * 2
   const at = (value: number, from: number, size: number) => `${(value - from) / size * 100}%`
   return <>
-    <div className="rn-ql-board" style={{ aspectRatio: String(width / height) }} role="img" aria-label={`画板缩略图：${nodes.length} 张卡片`}>
+    <div className="rn-ql-board" style={{ aspectRatio: String(width / height), width: `min(100%, ${Math.round(320 * width / height)}px)` }} role="img" aria-label={`画板缩略图：${nodes.length} 张卡片`}>
       {nodes.map((node, index) => <div key={node.id ?? index} className="rn-ql-board__card"
         style={{ left: at(node.x, left, width), top: at(node.y, top, height), width: at(node.width, 0, width), height: at(node.height, 0, height) }}>
-        {node.title && <span>{node.title}</span>}
+        {node.title && <span>{cardLabel(node.title)}</span>}
       </div>)}
     </div>
     <Note>{nodes.length} 张卡片</Note>
   </>
 }
 
-function BookLook({ data }: { data: BookPreview }) {
-  const { book, passage } = data
+const CONTEXT = 60
+/** A book, and for a passage or highlight its text with a little of what comes before and after. The book's own entry
+ *  (c0:0+1, what search and 打开 use) is the book itself, not a one-character passage. */
+function BookLook({ data, entry }: { data: BookPreview; entry: boolean }) {
+  const { book } = data
+  const passage = entry ? null : data.passage
+  const before = passage?.located && passage.prefix ? (passage.prefix.length > CONTEXT ? `…${passage.prefix.slice(-CONTEXT)}` : passage.prefix) : ''
+  const after = passage?.located && passage.suffix ? (passage.suffix.length > CONTEXT ? `${passage.suffix.slice(0, CONTEXT)}…` : passage.suffix) : ''
   return <>
     <div className="rn-ql-book">
       <div className="rn-ql-book__cover" aria-hidden>{book.coverPath ? <img src={toLocalFileUrl(book.coverPath)} alt="" /> : <span>{book.title}</span>}</div>
@@ -71,9 +82,9 @@ function BookLook({ data }: { data: BookPreview }) {
       </div>
     </div>
     {passage && <blockquote className="rn-ql-passage">
-      {passage.located && passage.prefix && <span className="rn-ql-passage__context">…{passage.prefix}</span>}
+      {before && <span className="rn-ql-passage__context">{before}</span>}
       <mark>{passage.text}</mark>
-      {passage.located && passage.suffix && <span className="rn-ql-passage__context">{passage.suffix}…</span>}
+      {after && <span className="rn-ql-passage__context">{after}</span>}
     </blockquote>}
     {passage?.note && <p className="rn-ql-annotation">{passage.note}</p>}
     {passage && !passage.located && <Note>原文已变化，找不到这段的位置，只显示划线本身</Note>}
@@ -161,13 +172,26 @@ function FileLook({ data }: { data: Of<'file'> }) {
   return <Note>{label}{file.size ? ` · ${size(file.size)}` : ''} · 打开后阅读</Note>
 }
 
+/**
+ * A page as it reads, for the look only: no front matter, no heading that repeats the title, [[wiki]] links as their
+ * alias or page name, callouts without their [!type] marker. The source itself is never touched.
+ */
+function readablePage(body: string, title: string) {
+  const lines = body.replace(/^\uFEFF?---\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/, '').split(/\r?\n/)
+  const first = lines.findIndex(line => line.trim())
+  if (first >= 0 && /^#\s/.test(lines[first]) && lines[first].replace(/^#\s+/, '').trim() === title.trim()) lines.splice(first, 1)
+  return lines.join('\n')
+    .replace(/(^|[^!])\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, before: string, target: string, alias?: string) => before + (alias ?? target.split('#')[0].split('/').pop() ?? target))
+    .replace(/^(\s*>\s*)\[![\w-]+\][+-]?\s*/gm, '$1')
+}
+
 /** The body of a quick look; pages and text files keep the existing text preview. */
-export function QuickLookBody({ preview }: { preview: Extract<ObjectPreview, { state: 'ready' }> }) {
+export function QuickLookBody({ preview, reference }: { preview: Extract<ObjectPreview, { state: 'ready' }>; reference?: PreviewTarget }) {
   const data = preview.data
   switch (data?.kind) {
     case 'database': return <DatabaseLook data={data} />
     case 'canvas': return <CanvasLook data={data} />
-    case 'book': return <BookLook data={data} />
+    case 'book': return <BookLook data={data} entry={reference?.kind === 'book-location' && reference.loc === 'c0:0+1'} />
     case 'rss-item': return <ArticleLook data={data} />
     case 'rss-digest': return <ul className="rn-ql-list">{data.entries.map((entry, index) => <li key={entry.groupKey ?? index}><strong>{entry.source.title}</strong><span>{entry.source.quote}</span></li>)}</ul>
     case 'rss-query': return <><Note>共 {data.total} 篇</Note><ul className="rn-ql-list">{data.items.map((item, index) => <li key={item.id ?? index}><strong>{item.title}</strong>{item.source && <span>{item.source}</span>}</li>)}</ul></>
@@ -178,6 +202,7 @@ export function QuickLookBody({ preview }: { preview: Extract<ObjectPreview, { s
     case 'fastcard': return <FastCardLook data={data} />
     case 'file': return <FileLook data={data} />
   }
-  return preview.markdown ? <div className="rn-ql-prose"><ReactMarkdown>{preview.body}</ReactMarkdown></div> : <pre className="rn-ql-text">{preview.body}</pre>
+  return preview.markdown ? <div className="rn-ql-prose"><ReactMarkdown remarkPlugins={[remarkGfm]}>{readablePage(preview.body, preview.title)}</ReactMarkdown></div>
+    : <pre className="rn-ql-text">{preview.body}</pre>
 }
 

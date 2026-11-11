@@ -117,7 +117,7 @@ test('W6 T2 quick look renders content: database rows, a board in miniature, a h
   assert.equal(panel.querySelector('.rn-ql-book__author')!.textContent, '白')
   assert.equal(panel.querySelector('.rn-ql-book__chapter')!.textContent, '第一章 街道的记忆')
   assert.equal(panel.querySelector('.rn-ql-passage mark')!.textContent, '城市像一本摊开的书')
-  assert.deepEqual(h.all(panel, '.rn-ql-passage__context'), ['…他开始注意那些被忽略的招牌。', '，每一条巷子都是脚注。…'])
+  assert.deepEqual(h.all(panel, '.rn-ql-passage__context'), ['他开始注意那些被忽略的招牌。', '，每一条巷子都是脚注。'])
   assert.equal(panel.querySelector('.rn-ql-annotation')!.textContent, '这个比喻留着')
 
   panel = await h.look({ kind: 'rss-item', id: 'a1' })

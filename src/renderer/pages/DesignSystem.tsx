@@ -3,7 +3,7 @@ import { Bold, Copy, FileText, Inbox, Italic, Link2, MoreHorizontal, Plus, Searc
 import {
   Button, Checkbox, Chip, confirmDialog, EmptyState, IconButton, Input, Kbd, ListRow, MenuList, openMenu, ResizeHandle,
   ScrollArea, SectionHeader, Segmented, Select, showToast, Skeleton, Switch, Tabs, Textarea, Toolbar, ToolbarSeparator, tooltip,
-  anchorOf, type MenuEntry,
+  anchorOf, RefCapsule, type MenuEntry,
 } from '../components/ui'
 import './design-system.css'
 
@@ -125,6 +125,10 @@ function Column({ theme }: { theme: 'light' | 'dark' }) {
           <Chip onClick={() => showToast('筛选：AI')}>AI</Chip>
           <Kbd>⌘K</Kbd><Kbd>⌘⇧P</Kbd>
         </div>
+      </Specimen>
+
+      <Specimen title="引用胶囊（W6）">
+        <p className="ds-prose">相关：<RefCapsule reference={{ kind: 'page', id: 'ds-page' }} title="新书发布" />、<RefCapsule reference={{ kind: 'page', id: 'ds-db' }} typeHint="数据库" title="选题库" />、<RefCapsule reference={{ kind: 'canvas', id: 'ds-board' }} title="灵感" />、<RefCapsule reference={{ kind: 'book-location', book: 'ds-book', loc: 'c2:0+1' }} title="城市漫游者 · 第 3 章" />、<RefCapsule reference={{ kind: 'event', id: 'ds-event' }} title="封面评审" />、<RefCapsule reference={{ kind: 'day', date: '2026-11-14' }} title="11月14日" />、<RefCapsule reference={{ kind: 'rss-item', id: 'ds-article' }} title="RSS 没有死，只是换了读法" />、<RefCapsule reference={{ kind: 'web', url: 'https://example.com/' }} title="example.com" />、<RefCapsule reference={{ kind: 'conversation', id: 'ds-chat' }} title="筛子讨论" />、<RefCapsule reference={{ kind: 'fastcard', id: 'ds-card' }} title="一个好的筛子" />。</p>
       </Specimen>
 
       <Specimen title="浮层：菜单 · 提示 · 对话框 · 通知">

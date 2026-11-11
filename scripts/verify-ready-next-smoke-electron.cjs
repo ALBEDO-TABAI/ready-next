@@ -382,7 +382,8 @@ async function checkCalendarLinksBeforeRestart(page, reference, root) {
   await page.getByRole('tab', {name:/M6 meeting notes/}).first().waitFor()
   await requestMode(page, 'calendar')
   await page.evaluate(id => window.electronAPI.calendar.revealEvent(id), reference.eventId)
-  await panel.getByRole('button', {name:'打开会议笔记',exact:true}).waitFor()
+  // The meeting note is a reference capsule in its row (W6 T1).
+  await panel.getByRole('link', {name:'页面 M6 meeting notes',exact:true}).waitFor()
   const links = await page.evaluate(async ({seriesId,second}) => {
     const result=await window.electronAPI.calendar.snapshot()
     if(!result.success)throw new Error(result.error)

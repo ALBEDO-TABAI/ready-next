@@ -38,5 +38,5 @@ export function RefCapsule({ reference, title, typeHint, canvasUi, className, id
       if (event.key !== ' ' || event.altKey || event.metaKey || event.ctrlKey || event.shiftKey) return
       event.preventDefault(); event.stopPropagation()
       quickLookRef(reference)
-    }}>{title}</a>
+    }}><span className="rn-ref__title">{title}</span></a>
 }

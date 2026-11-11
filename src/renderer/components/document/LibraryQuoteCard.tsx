@@ -51,7 +51,7 @@ export function LibraryQuoteCard({ raw }: { raw: string }) {
       <blockquote className="note-preview-markdown-quote" style={{ whiteSpace: 'pre-wrap' }}>{state.card.text}</blockquote>
       {state.card.note && <p style={{ whiteSpace: 'pre-wrap' }}>{state.card.note}</p>}
       {/* 出处 (W6 §2.1): the book and chapter as a reference capsule; it opens the passage in 书房. */}
-      {source?.ok && <p className="note-preview-embed-caption"><RefCapsule reference={source.ref} title={[state.card.title, state.card.chapter].filter(Boolean).join(' · ')} /></p>}
+      {source?.ok && <p className="note-preview-embed-caption" style={{ marginTop: 10 }}><RefCapsule reference={source.ref} title={[state.card.title, state.card.chapter].filter(Boolean).join(' · ')} /></p>}
     </> : <><strong>{state.status === 'loading' ? '正在读取引用…' : '引用已失效'}</strong><p>{raw}</p>{state.status === 'invalid' && <small>{state.reason}</small>}</>}
   </figure>
 }

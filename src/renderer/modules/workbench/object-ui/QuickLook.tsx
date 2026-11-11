@@ -68,7 +68,7 @@ export function QuickLook({ reference, onClose }: { reference: PreviewTarget; on
       <h2 className="rn-ql__title">{preview?.title || '正在读取…'}</h2>
       {preview?.state === 'ready' && preview.unsaved && <p className="rn-ql__badge" role="status">未保存</p>}
       <div className="rn-ql__body">
-        {preview?.state === 'ready' ? <QuickLookBody preview={preview} /> : preview ? <p role="status" className="rn-ql-note">{preview.message}</p> : <div className="rn-ql__loading" aria-hidden />}
+        {preview?.state === 'ready' ? <QuickLookBody preview={preview} reference={reference} /> : preview ? <p role="status" className="rn-ql-note">{preview.message}</p> : <div className="rn-ql__loading" aria-hidden />}
       </div>
       {preview?.state === 'ready' && <footer className="rn-ql__foot">
         <span>⌘ 点击在新标签打开 · Esc 关闭</span>
