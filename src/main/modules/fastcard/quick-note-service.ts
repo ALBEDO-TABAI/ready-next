@@ -1,3 +1,4 @@
+import { appShortcut } from '../../../shared/app-shortcuts'
 import { randomUUID } from 'node:crypto'
 import type { AIModelConfig } from '../../../shared/ai-providers'
 import { resolveAIConfigCapabilities } from '../../../shared/ai-providers'
@@ -6,7 +7,7 @@ import type { FastCardRepository } from '../repositories/fastcard-repository'
 import type { FastCardCollectionService } from './collection-service'
 import type { FastCardMediaCache } from './media-cache'
 
-export const QUICK_NOTE_SHORTCUT = 'Alt+Command+Space'
+export const QUICK_NOTE_SHORTCUT = appShortcut('quick-note').keys
 export type QuickNoteStatus = { registered: true } | { registered: false; error: string }
 export interface QuickNoteHost {
   register(accelerator: string, callback: () => void): boolean

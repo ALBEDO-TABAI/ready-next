@@ -109,7 +109,10 @@ let cur: Locale = 'en';
 export function setLocale(l: Locale) { cur = l; document.documentElement.lang = l; }
 export function locale(): Locale { return cur; }
 export function t(k: Key, vars?: Record<string, string | number>): string {
-  let s = DICTS[cur][k] ?? en[k];
+  return translate(cur, k, vars);
+}
+export function translate(language: Locale, k: Key, vars?: Record<string, string | number>): string {
+  let s = DICTS[language][k] ?? en[k];
   if (vars) for (const [a, b] of Object.entries(vars)) s = s.split(`{${a}}`).join(String(b));
   return s;
 }

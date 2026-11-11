@@ -2,7 +2,7 @@ import { ThisDay } from '../linkage/ThisDay'
 import { isoDate } from '../../../../shared/calendar/dates'
 import { useEffect, useRef, useState } from 'react'
 import { useStore, isDark, getState, setState, init, reload, toast } from './store'
-import { handleKey } from './commands'
+import { handleKey, registerCalendarCommands } from './commands'
 import { api, unwrap } from './platform'
 import { Sidebar } from './components/Sidebar'
 import { TopBar } from './components/TopBar'
@@ -10,7 +10,6 @@ import { TimeGrid } from './components/TimeGrid'
 import { MonthGrid } from './components/MonthGrid'
 import { Panel } from './components/Panel'
 import { Menus } from './components/Menus'
-import { CommandMenu } from './components/CommandMenu'
 import { Settings } from './components/Settings'
 import { Toasts, ScopeDialog, GotoDialog, RecurrenceDialog } from './components/Overlays'
 import { useTheme } from '../../../stores/useTheme'
@@ -21,12 +20,13 @@ import { ShellNavigator } from '../../workbench/shell/ShellSidebar'
 import './styles/app.css'
 
 export function App({active=true}:{active?:boolean}) {
+  useEffect(() => active ? registerCalendarCommands() : undefined, [active])
   const root=useRef<HTMLDivElement>(null)
   // The sidebar lives in the shell's one sidebar (W2-T4); its foot hosts the calendar's action buttons.
   const [actionsHost,setActionsHost]=useState<HTMLDivElement|null>(null)
   const [hasActivated,setHasActivated]=useState(false)
   const activity=useRef({active:false,dirty:false})
-  const s=useStore(x=>({anchor:x.anchor,days:x.prefs.daysPerPeriod,zone:x.prefs.primaryTimeZone,ready:x.ready,dark:isDark(x),view:x.prefs.gridView,sidebar:x.prefs.sidebar,panel:x.prefs.contextPanel,overlay:x.overlay,error:x.error,busy:x.busy}))
+  const s=useStore(x=>({anchor:x.anchor,days:x.prefs.daysPerPeriod,zone:x.prefs.primaryTimeZone,ready:x.ready,dark:isDark(x),view:x.prefs.gridView,panel:x.prefs.contextPanel,overlay:x.overlay,error:x.error,busy:x.busy}))
   const theme=useTheme(x=>x.theme),dark=useTheme(x=>x.resolvedTheme==='dark')
   useEffect(()=>setState(x=>({systemDark:dark,prefs:{...x.prefs,interfaceTheme:theme}})),[theme,dark])
   useEffect(()=>{
@@ -69,7 +69,7 @@ export function App({active=true}:{active?:boolean}) {
         <ShellNavigator mode="calendar" label="日历" scopeClassName={`ready-calendar${s.dark?' dark':''}`}><Sidebar actionsHost={setActionsHost}/></ShellNavigator>
         <main className="main" data-liquid-scroll-root="calendar-workbench-main"><TopBar/>{s.view==='month'?<MonthGrid active={active}/>:<TimeGrid active={active}/>}{active&&s.view!=='month'&&s.days===1&&<ThisDay date={isoDate(s.anchor)} timeZone={s.zone}/>}</main>
         {s.panel&&<Panel/>}
-        <Menus/>{s.overlay==='cmdk'&&<CommandMenu/>}{s.overlay==='settings'&&<Settings/>}{s.overlay==='goto'&&<GotoDialog/>}{s.overlay==='recurrence'&&<RecurrenceDialog/>}<ScopeDialog/><Toasts/>
+        <Menus/>{s.overlay==='settings'&&<Settings/>}{s.overlay==='goto'&&<GotoDialog/>}{s.overlay==='recurrence'&&<RecurrenceDialog/>}<ScopeDialog/><Toasts/>
         <ReadyCalendarActions active={active} buttonsHost={actionsHost}/>
       </div>
       {s.error&&<div role="alert" className="calendar-save-status error">未保存：{s.error}</div>}

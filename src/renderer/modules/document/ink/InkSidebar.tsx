@@ -16,6 +16,7 @@ import { InkPageIcon } from './InkPageIcon'
 import { openInCurrentTab, useInkLayout } from './layout-state'
 import { openMenu } from './menu'
 import { openPopover, tip } from './overlay'
+import { requestShellAction } from '../../workbench/commands/shell-actions'
 
 // Inkwell's page tree, the document navigator in the shell's one sidebar (W2-T5). Pages come from Ready's page
 // service; everything else that Inkwell showed (workspace switcher, team spaces, promotions) has no counterpart in
@@ -263,6 +264,8 @@ export function InkSidebar({ roots, visible, api = window.electronAPI.documentPa
       </div>
       <div className="ink-sb-bottom">
         <div className="ink-sb-divider" />
+        <NavRow icon="graph" label="关系图谱" muted onClick={() => requestShellAction('open-graph')} />
+        <NavRow icon="search" label="查找与替换" ariaLabel="在资料库中查找与替换" muted onClick={() => requestShellAction('open-find-replace')} />
         <NavRow icon="template" label="模板" ariaLabel="从模板新建页面" muted onClick={openTemplates} />
         <NavRow icon="import" label="导入" muted onClick={openImport} />
         <NavRow icon="trash" label="回收站" muted onClick={event => openTrash(event.currentTarget)} />

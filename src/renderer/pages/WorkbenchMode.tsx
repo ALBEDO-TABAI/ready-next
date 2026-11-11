@@ -13,9 +13,14 @@ import ChatPanel from '../components/agent/ChatPanel'
 import GraphWorkspace, { type GraphWorkspaceRequest } from '../components/graph/GraphWorkspace'
 import { invalidateGraphWorkspace } from '../components/graph/graph-session'
 import StatusBar from '../components/layout/StatusBar'
+import FindReplaceWorkspace from '../components/search/FindReplaceWorkspace'
+import { SHELL_ACTION_EVENT } from '../modules/workbench/commands/shell-actions'
+import { useInkLayout } from '../modules/document/ink/layout-state'
+import { useFastCard } from '../stores/useFastCard'
 import { clampAssistantWidth as clampWorkbenchChatPanelWidth, clampSidebarWidth as clampWorkbenchSidePanelWidth, SHELL_RAIL_WIDTH } from '../../shared/workbench-shell-geometry'
 import {
   READY_WORKBENCH_MODE_CHANGE_EVENT,
+  requestWorkbenchModeOpen,
   resolveBrowserVisibilityTransition,
   resolveWorkbenchModeOpenDecision,
   type WorkbenchModeChangePresentation,
@@ -150,6 +155,7 @@ export default function WorkbenchMode() {
   const [isPanelResizing, setIsPanelResizing] = useState(false)
   const [browserLayoutMotionPhase, setBrowserLayoutMotionPhase] = useState<BrowserHostLayoutPhase>('idle')
   const [graphWorkspaceRequest, setGraphWorkspaceRequest] = useState<GraphWorkspaceRequest | null>(null)
+  const [findReplaceOpen, setFindReplaceOpen] = useState(false)
   // The shell's one sidebar shows the navigator of the current mode; in split view, of the pane last used (W2 §2.2).
   const [sidebarSlot, setSidebarSlot] = useState<HTMLElement | null>(null)
   const [focusedPane, setFocusedPane] = useState<'primary' | 'split'>('primary')
@@ -200,10 +206,6 @@ export default function WorkbenchMode() {
       }, delay)
     ))
   }, [clearScheduledWorkbenchSurfaceRefresh])
-
-  const handleGraphWorkspaceOpen = useCallback((request: GraphWorkspaceRequest) => {
-    setGraphWorkspaceRequest(request)
-  }, [])
 
   useEffect(() => {
     scheduleWorkbenchSurfaceRefresh()
@@ -393,6 +395,23 @@ export default function WorkbenchMode() {
     toggleDockedAssistant: handleToggleChatPanelWithResize,
   })
   const { toggleSidebar: toggleShellSidebar, toggleAssistant: toggleShellAssistant } = shell
+  // Shell actions from ⌘K, the navigators and the assistant's header land here: the shell owns these
+  // switches and views (W2 §3.1). Theme and settings are handled by the keyboard hook and the object UI.
+  useEffect(() => {
+    const onShellAction = (event: WindowEventMap['ready:shell-action']) => {
+      switch (event.detail.action) {
+        case 'toggle-sidebar': toggleShellSidebar(); break
+        case 'toggle-assistant': toggleShellAssistant(); break
+        case 'open-today': requestWorkbenchModeOpen('document'); useInkLayout.getState().setHome(true); break
+        case 'open-skills': navigate('/skills'); break
+        case 'open-graph': setGraphWorkspaceRequest({}); break
+        case 'open-find-replace': setFindReplaceOpen(true); break
+        case 'open-fastcard': requestWorkbenchModeOpen('browser'); void useFastCard.getState().open(); break
+      }
+    }
+    window.addEventListener(SHELL_ACTION_EVENT, onShellAction)
+    return () => window.removeEventListener(SHELL_ACTION_EVENT, onShellAction)
+  }, [navigate, toggleShellAssistant, toggleShellSidebar])
   const sidebarPinnable = shell.sidebarCollapsed && shell.sidebarSlideOut
   const sidebarSlotValue = useMemo(
     () => ({ element: sidebarSlot, mode: navigatorMode, pinnable: sidebarPinnable, toggle: toggleShellSidebar }),
@@ -908,6 +927,7 @@ export default function WorkbenchMode() {
                   onClose={() => setGraphWorkspaceRequest(null)}
                 />
               )}
+              {findReplaceOpen && <FindReplaceWorkspace onClose={() => setFindReplaceOpen(false)} />}
             </div>
 
             {shell.assistantResizable && (

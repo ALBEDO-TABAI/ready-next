@@ -7,6 +7,7 @@ import {
 
 test('global shortcut resolver matches the shortcuts shown in Settings', () => {
   assert.equal(resolveReadyAppShortcut({ key: 's', metaKey: true, shiftKey: true }), 'capture-window')
+  assert.equal(resolveReadyAppShortcut({ key: 'k', metaKey: true }), 'open-search')
   assert.equal(resolveReadyAppShortcut({ key: ',', metaKey: true }), 'open-settings')
   assert.equal(resolveReadyAppShortcut({ key: 'b', metaKey: true }), 'toggle-sidebar')
   assert.equal(resolveReadyAppShortcut({ key: 't', metaKey: true }), 'new-document')
@@ -20,8 +21,8 @@ test('global shortcut resolver matches the shortcuts shown in Settings', () => {
   assert.equal(resolveReadyAppShortcut({ key: '1', metaKey: true }), 'switch-browser')
   assert.equal(resolveReadyAppShortcut({ key: '4', ctrlKey: true }), 'switch-calendar')
 
-  assert.ok(READY_SHORTCUT_GUIDE.some((item) => item.id === 'captureWindow' && item.value.includes('S')))
-  assert.ok(READY_SHORTCUT_GUIDE.some((item) => item.id === 'switchMode' && item.value.includes('1–4')))
+  assert.ok(READY_SHORTCUT_GUIDE.some((item) => item.id === 'capture-window' && item.value.includes('S')))
+  assert.ok(READY_SHORTCUT_GUIDE.some((item) => item.id === 'switch-calendar' && item.value.includes('4')))
   assert.equal(READY_SHORTCUT_GUIDE.some((item) => item.id === 'newTask'), false)
   assert.equal(READY_SHORTCUT_GUIDE.some((item) => item.id === 'globalSearch'), false)
 })
