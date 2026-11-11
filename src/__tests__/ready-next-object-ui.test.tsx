@@ -50,7 +50,8 @@ async function setup(t: TestContext) {
     key: async (key: string) => { await act(async () => dom.window.document.querySelector('input')!.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key, bubbles: true }))) },
   }
 }
-function hit(name: string, path = `ready://doc/page/${name}`) { return { path, name, sourceType: 'document', nameMatch: true, snippet: '', tagsHit: [], linksHit: [] } }
+// Search results always carry a title and a Chinese type label (W6 T3).
+function hit(name: string, path = `ready://doc/page/${name}`) { return { path, name, title: name, typeLabel: '页面' as const, sourceType: 'document', nameMatch: true, snippet: '', tagsHit: [], linksHit: [] } }
 
 test('M5-C switcher searches shared query, discards late responses, selects with keyboard and opens through real stores', async t => {
   const ui = await setup(t)

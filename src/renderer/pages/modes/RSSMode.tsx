@@ -672,8 +672,7 @@ export default function RSSMode({
                 }} />}
 
                 {digestVisible && !showOrganization && <RSSDigestPanel active={surfaceActive} view={view} definitions={definitions} feedSources={sources}
-                  onEditDefinition={(id) => { setOrganizationFocus(id); setShowOrganization(true) }}
-                  onReadArticle={(item) => { setDigestView(false); handleItemClick(item) }} />}
+                  onEditDefinition={(id) => { setOrganizationFocus(id); setShowOrganization(true) }} />}
 
                 {/* Article rendering shares the document typography, without active widgets. */}
                 {selectedItem && !digestVisible && !showOrganization && (

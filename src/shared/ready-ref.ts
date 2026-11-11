@@ -175,3 +175,12 @@ export function parseReadyUri(uri: string): ReadyUriParseResult {
 export function isReadyUri(uri: string): boolean {
   return parseReadyUri(uri).ok
 }
+
+/** The one internal drag format (W6 §3.1): the reference as JSON, its ready:// address, and the title as plain text. */
+export const READY_REF_MIME = 'application/x-ready-ref'
+export function writeReadyRefTransfer(data: { setData(format: string, value: string): void }, input: ReadyRef, title: string): void {
+  const ref = ReadyRefSchema.parse(input)
+  data.setData(READY_REF_MIME, JSON.stringify(ref))
+  data.setData('text/uri-list', toReadyUri(ref))
+  data.setData('text/plain', title)
+}

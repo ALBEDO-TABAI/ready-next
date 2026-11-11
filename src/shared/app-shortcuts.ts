@@ -56,6 +56,10 @@ export const APP_SHORTCUTS: readonly AppShortcut[] = [
   { id: 'new-document', keys: 'CommandOrControl+T', scope: 'global', description: '新建文档', action: 'new-document', guide: true },
   { id: 'toggle-theme', keys: 'CommandOrControl+\\', scope: 'global', description: '切换主题', action: 'toggle-theme', guide: true },
   { id: 'open-search', keys: 'CommandOrControl+K', scope: 'global', description: '搜索对象和命令', action: 'open-search', guide: true },
+  // W6 §2.1, §2.3: a reference is quick-looked with Space (hovered or focused); ⌘K's result with ⌥↵, or opened in a new tab with ⌘↵.
+  { id: 'reference.quick-look', keys: 'Space', scope: 'global', description: '速览悬停或选中的引用', guide: true },
+  { id: 'search.quick-look', keys: 'Alt+Enter', scope: 'global', description: '速览搜索结果' },
+  { id: 'search.open-new-tab', keys: 'CommandOrControl+Enter', scope: 'global', description: '在新标签打开搜索结果' },
   { id: 'toggle-assistant', keys: 'Tab', scope: 'global', description: '收起或展开助手', guide: true },
   { id: 'assistant.send', keys: 'Enter', scope: 'assistant', description: '发送消息', guide: true },
   { id: 'assistant.newline', keys: 'Shift+Enter', scope: 'assistant', description: '消息内换行', guide: true },

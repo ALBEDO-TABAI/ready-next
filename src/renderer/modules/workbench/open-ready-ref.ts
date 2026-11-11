@@ -21,8 +21,12 @@ import { openInCurrentTab } from '../document/ink/layout-state'
 
 export const usePdfReference = create<{ target: { id: string; path: string; anchor: PdfAnchor } | null }>(() => ({ target: null }))
 
-/** All Ready reference entry points share validation and destination owners. */
-export async function openReadyRef(input: string | ReadyRef, fromMode?: WorkbenchMode): Promise<void> {
+/**
+ * All Ready reference entry points share validation and destination owners. `newTab` (⌘-click, ⌘↵) keeps the current
+ * document tab and opens pages, files and boards in a tab of their own, as Inkwell does; the document mode has no
+ * second pane to open into, and the other destinations have no tabs, so for them it opens as usual.
+ */
+export async function openReadyRef(input: string | ReadyRef, fromMode?: WorkbenchMode, { newTab = false }: { newTab?: boolean } = {}): Promise<void> {
   const parsed = typeof input === 'string' ? parseReadyUri(input) : { ok: true as const, ref: ReadyRefSchema.parse(input) }
   if (!parsed.ok) throw new Error('引用地址无效')
   const ref = parsed.ref
@@ -58,7 +62,7 @@ export async function openReadyRef(input: string | ReadyRef, fromMode?: Workbenc
         const anchor = parsePdfAnchor(ref.anchor)
         rememberReferenceOrigin(origin, 'document')
         usePdfReference.setState({ target: { id: ref.id, path: location.path, anchor } })
-        if (origin.mode === 'document') openInCurrentTab(location.path)
+        if (origin.mode === 'document') openInCurrentTab(location.path, { newTab })
         else useDocTabs.getState().openTab(location.path)
         useWorkspace.getState().selectFile(location.path)
         requestWorkbenchModeOpen('document')
@@ -78,7 +82,7 @@ export async function openReadyRef(input: string | ReadyRef, fromMode?: Workbenc
       rememberReferenceOrigin(origin, 'document')
       if (ref.kind === 'canvas') requestCanvasNode(ref.id, ref.node)
       // A link followed inside Document mode navigates the current tab, as in Inkwell; other modes open a tab.
-      if (origin.mode === 'document') openInCurrentTab(location.path)
+      if (origin.mode === 'document') openInCurrentTab(location.path, { newTab })
       else useDocTabs.getState().openTab(location.path)
       useWorkspace.getState().selectFile(location.path)
       if (reveal) useDocTabs.getState().setPendingReveal({ path: location.path, ...reveal, requestedAt: Date.now() })

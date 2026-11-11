@@ -2,14 +2,14 @@ import { useEffect, useState } from 'react'
 import { useDocTabs } from '../../stores/useDocTabs'
 import { confirmed, getLibraryAPI } from '../../modules/library/access'
 import { markerColor } from '../../modules/library/reader/marks'
-import { openReadyRef } from '../../modules/workbench/open-ready-ref'
+import { parseReadyUri } from '../../../shared/ready-ref'
+import { RefCapsule } from '../ui/RefCapsule'
 import { parseQuoteEmbed, readQuoteCard } from './library-quote'
 
 type Card = NonNullable<ReturnType<typeof readQuoteCard>>
 type State = { status: 'loading' } | { status: 'ready'; card: Card } | { status: 'invalid'; reason: string }
 export function LibraryQuoteCard({ raw }: { raw: string }) {
   const [state, setState] = useState<State>({ status: 'loading' })
-  const [error, setError] = useState('')
   useEffect(() => {
     let live = true, sequence = 0
     const refresh = async () => {
@@ -44,14 +44,14 @@ export function LibraryQuoteCard({ raw }: { raw: string }) {
     window.addEventListener('focus', update)
     return () => { live = false; sequence++; stops.forEach(stop => stop?.()); window.removeEventListener('focus', update) }
   }, [raw])
+  const source = state.status === 'ready' ? parseReadyUri(state.card.uri) : null
   return <figure className="glass-surface-card" data-library-quote="true" style={{ padding: '20px 24px', margin: '16px 0', borderRadius: 18, border: '1px solid var(--border-subtle)', background: 'var(--surface-card-bg)' }}>
     {state.status === 'ready' ? <>
       <figcaption style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span aria-label={`${state.card.color}标记`} style={{ width: 8, height: 24, borderRadius: 4, background: markerColor(state.card.color) }} /><strong>{state.card.title}</strong><span>{state.card.author}</span></figcaption>
-      <p className="note-preview-embed-caption">{state.card.chapter}</p>
       <blockquote className="note-preview-markdown-quote" style={{ whiteSpace: 'pre-wrap' }}>{state.card.text}</blockquote>
       {state.card.note && <p style={{ whiteSpace: 'pre-wrap' }}>{state.card.note}</p>}
-      <button type="button" className="note-preview-chip" onClick={() => { setError(''); void openReadyRef(state.card.uri, 'document').catch(cause => setError(String(cause))) }}>回到原文</button>
+      {/* 出处 (W6 §2.1): the book and chapter as a reference capsule; it opens the passage in 书房. */}
+      {source?.ok && <p className="note-preview-embed-caption"><RefCapsule reference={source.ref} title={[state.card.title, state.card.chapter].filter(Boolean).join(' · ')} /></p>}
     </> : <><strong>{state.status === 'loading' ? '正在读取引用…' : '引用已失效'}</strong><p>{raw}</p>{state.status === 'invalid' && <small>{state.reason}</small>}</>}
-    {error && <p role="alert">{error}</p>}
   </figure>
 }

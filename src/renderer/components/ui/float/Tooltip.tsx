@@ -3,7 +3,8 @@ import { anchorOf, closeFloat, openFloat, type FloatPlacement } from './float-st
 
 // Tooltip (W1 §5): an ink chip after a short pause on hover or keyboard focus; never takes focus.
 const TOOLTIP_ID = 'rn-tooltip'
-const DELAY_MS = 450
+/** The pause before a hover hint appears; the reference capsule's preview waits the same. */
+export const TOOLTIP_DELAY_MS = 450
 let timer: number | undefined
 
 function show(target: HTMLElement, text: ReactNode, hint: string | undefined, placement: FloatPlacement) {
@@ -14,7 +15,7 @@ function show(target: HTMLElement, text: ReactNode, hint: string | undefined, pl
       id: TOOLTIP_ID, anchor: anchorOf(target), placement, offset: 6, noFocus: true, bare: true, role: 'tooltip', dismissOnOutside: true,
       render: () => <div className="rn-tooltip">{text}{hint && <span className="rn-tooltip__hint">{hint}</span>}</div>,
     })
-  }, DELAY_MS)
+  }, TOOLTIP_DELAY_MS)
 }
 
 function hide() {

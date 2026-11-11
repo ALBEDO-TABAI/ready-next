@@ -1,6 +1,7 @@
 import { searchPresentation } from '../../../../shared/search-presentation'
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import { CornerDownLeft, File, FileText, Search, Shapes } from 'lucide-react'
+import { Bookmark, CornerDownLeft, Search, type LucideIcon } from 'lucide-react'
+import { REF_CAPSULE_KINDS, type RefCapsuleKind } from '../../../components/ui/ref-capsule-kinds'
 import { useDocTabs } from '../../../stores/useDocTabs'
 import { computeDesiredRoots, useWorkspace } from '../../../stores/useWorkspace'
 import { useMode } from '../../../stores/useMode'
@@ -56,7 +57,8 @@ export function QuickSwitcher({ onClose, onPreview }: {
   })
   const count = items.length + commands.length
   const index = Math.min(selected, Math.max(0, count - 1))
-  const activate = async (row: number, preview = false) => {
+  // ↵ opens, ⌥↵ quick-looks, ⌘↵ opens in a new tab (W6 §2.3); clicks read the same modifiers.
+  const activate = async (row: number, how: 'open' | 'preview' | 'tab' = 'open') => {
     if (running.current) return
     running.current = true
     const version = selectionVersion.current
@@ -64,8 +66,8 @@ export function QuickSwitcher({ onClose, onPreview }: {
       if (row < items.length) {
         const target = await searchResultTarget(items[row])
         if (!mounted.current || selectionVersion.current !== version) return
-        if (preview) { onPreview(target); return }
-        await openObjectTarget(target)
+        if (how === 'preview') { onPreview(target); return }
+        await openObjectTarget(target, { newTab: how === 'tab' })
       }
       else await commands[row - items.length]?.run()
       if (mounted.current) onClose()
@@ -81,19 +83,19 @@ export function QuickSwitcher({ onClose, onPreview }: {
         value={query} placeholder="搜索页面、文件和命令…" className="rn-switch-field ready-input-slot-inner" onChange={event => { selectionVersion.current++; setQuery(event.target.value); setSelected(0); setError('') }}
         onKeyDown={event => {
           if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); setSelected((index + (event.key === 'ArrowDown' ? 1 : -1) + count) % Math.max(1, count)) }
-          if (event.key === 'Enter' && count) { event.preventDefault(); void activate(index, event.altKey) }
+          if (event.key === 'Enter' && count) { event.preventDefault(); void activate(index, how(event)) }
         }} />
     </div>
     {!query && items.length > 0 && <p className="rn-switch-label">最近打开</p>}
     <ul id="ready-object-results" role="listbox" className="rn-switch-list">
-      {items.map((item, row) => <li key={item.path} id={`ready-object-option-${row}`} role="option" aria-selected={index === row} className="rn-switch-item" onMouseMove={() => { if (index !== row) setSelected(row) }}>
-        <button className="rn-switch-open" onClick={event => void activate(row, event.altKey)}>
-          <span className="rn-switch-icon">{/\.canvas$/i.test(item.path) ? <Shapes size={17} strokeWidth={1.5} /> : /\.md$/i.test(item.path) || item.draft ? <FileText size={17} strokeWidth={1.5} /> : <File size={17} strokeWidth={1.5} />}</span>
-          <span className="rn-switch-name">{item.name}</span>
-          <span className="rn-switch-type">{SOURCE_LABELS[item.sourceType] ?? item.sourceType}{item.draft && tabs.some(tab => tab.id === item.draft?.tabId && (!tab.path || tab.isDirty)) && ' · 未保存'}</span>
+      {items.map((item, row) => { const Icon = TYPE_ICONS[item.typeLabel] ?? REF_CAPSULE_KINDS.page.icon; return <li key={item.path} id={`ready-object-option-${row}`} role="option" aria-selected={index === row} className="rn-switch-item" onMouseMove={() => { if (index !== row) setSelected(row) }}>
+        <button className="rn-switch-open" onClick={event => void activate(row, how(event))}>
+          <span className="rn-switch-icon"><Icon size={17} strokeWidth={1.5} /></span>
+          <span className="rn-switch-name">{item.title}</span>
+          <span className="rn-switch-type">{item.typeLabel}{item.draft && tabs.some(tab => tab.id === item.draft?.tabId && (!tab.path || tab.isDirty)) && ' · 未保存'}</span>
         </button>
-        <button className="rn-switch-peek" aria-label={`速览 ${item.name}`} onClick={() => void activate(row, true)}>速览</button>
-      </li>)}
+        <button className="rn-switch-peek" aria-label={`速览 ${item.title}`} onClick={() => void activate(row, 'preview')}>速览</button>
+      </li> })}
       {commands.length > 0 && <li role="presentation" className="rn-switch-label">命令</li>}
       {commands.map((command, i) => <li key={command.id} id={`ready-object-option-${items.length + i}`} role="option" aria-selected={index === items.length + i} className="rn-switch-item" onMouseMove={() => { if (index !== items.length + i) setSelected(items.length + i) }}>
         <button className="rn-switch-open" onClick={() => void activate(items.length + i)}><span className="rn-switch-icon"><CornerDownLeft size={16} strokeWidth={1.6} /></span><span className="rn-switch-name">{command.title}</span>{command.shortcut && <span className="rn-switch-type">{shortcutKeycaps(command.shortcut, /Mac/.test(navigator.platform)).join(' ')}</span>}</button>
@@ -102,8 +104,13 @@ export function QuickSwitcher({ onClose, onPreview }: {
     </ul>
     {response?.query === query && response.warning && <p role="status" className="rn-switch-note">{response.warning}</p>}
     {error && <p role="alert" className="rn-switch-note is-error">{error}</p>}
-    <footer className="rn-switch-foot"><span>↑↓ 选择</span><span>↵ 打开</span><span>⌥↵ 速览</span><button onClick={onClose}>关闭</button></footer>
+    <footer className="rn-switch-foot"><span>↑↓ 选择</span><span>↵ 打开</span><span>⌥↵ 速览</span><span>⌘↵ 新标签打开</span><button onClick={onClose}>关闭</button></footer>
   </MaskedObjectOverlay>
 }
 
-const SOURCE_LABELS: Record<string, string> = { page: '页面', file: '文件', canvas: '画板', document: '文档', draft: '草稿', book: '书', rss: '文章', event: '日程' }
+const how = (event: { altKey: boolean; metaKey: boolean; ctrlKey: boolean }) => event.altKey ? 'preview' as const : event.metaKey || event.ctrlKey ? 'tab' as const : 'open' as const
+// Each search type shows the icon of the object it opens; 书签 are saved web pages.
+const KIND_OF: Record<SearchResultItem['typeLabel'], RefCapsuleKind | null> = {
+  页面: 'page', 数据库: 'database', 画板: 'canvas', 书: 'book', 划线: 'highlight', 资讯: 'rss', 日程: 'event', 对话: 'conversation', 书签: null, 收集: 'fastcard', 命令: null,
+}
+const TYPE_ICONS = Object.fromEntries(Object.entries(KIND_OF).map(([label, kind]) => [label, kind ? REF_CAPSULE_KINDS[kind].icon : label === '书签' ? Bookmark : CornerDownLeft])) as Record<SearchResultItem['typeLabel'], LucideIcon>

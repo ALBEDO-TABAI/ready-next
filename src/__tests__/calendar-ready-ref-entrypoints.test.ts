@@ -64,7 +64,9 @@ test('workbench, attachment click and rendered message links retain the selected
     assert.equal((errors[0] as { error: string }).error, '日程已不存在')
     links[0].dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, cancelable: true }))
     await new Promise(resolve => setTimeout(resolve, 20))
-    assert.equal(dom.window.document.querySelector('[role="alert"]')?.textContent, '日程已不存在')
+    // A reference capsule reports a failed open as a toast (W6 §2.1), the same in every place.
+    const { getToasts } = await import('../renderer/components/ui/toast-store')
+    assert.equal(getToasts().at(-1)?.message, '日程已不存在')
     // No legacy URI gets a clickable runtime parser.
     const old = renderInline('[old](calendar-event://series)')
     assert.equal(old.some(node => typeof node === 'object' && node !== null && ['a','button'].includes(String((node as ReactElement).type))), false)

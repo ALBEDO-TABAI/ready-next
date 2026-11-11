@@ -640,15 +640,14 @@
   overflow-wrap: anywhere;
 }
 
-.rss-digest-sources > div button {
-  margin-right: 14px;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-muted);
-}
-
-.rss-digest-sources > div button:hover {
-  color: var(--text-title);
+/* 出处: the quoted article version and its site, as reference capsules (W6 §2.1). */
+.rss-digest-sources .rss-digest-source-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+  font-size: 13px;
 }
 
 .rss-digest-settings {

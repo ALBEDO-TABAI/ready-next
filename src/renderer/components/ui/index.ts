@@ -14,3 +14,8 @@ export { MenuList, type MenuEntry } from './float/Menu'
 export { openMenu, openContextMenu } from './float/open-menu'
 export { tooltip } from './float/Tooltip'
 export { openDialog, confirmDialog, type DialogSpec, type DialogAction } from './float/Dialog'
+export { RefCapsule, type RefCapsuleProps } from './RefCapsule'
+export { REF_CAPSULE_KINDS, refCapsuleKind, type RefCapsuleKind, type RefSource } from './ref-capsule-kinds'
+export {
+  openRef, quickLookRef, activateRefCapsule, copyRefCapsule, openRefCapsuleMenu, startRefCapsuleDrag, enterRefCapsule, leaveRefCapsule, hideRefPreview,
+} from './ref-capsule-actions'

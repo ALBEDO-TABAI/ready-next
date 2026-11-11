@@ -1,0 +1,95 @@
+/* Quick look content (W6 §2.2): the object itself, never its path. The panel's own material stays with ⌘K in ink.css;
+   these rules lay out what is inside it, with --rn-* tokens only (DS1). A board is a well and its cards are paper (DL3). */
+@layer ready-next.primitives {
+  .rn-ql { display: flex; flex-direction: column; min-width: 0; font: 400 var(--rn-fs-md)/1.6 var(--rn-font-ui); color: var(--rn-ink); }
+  .rn-ql__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .rn-ql__kind { display: inline-flex; align-items: center; gap: 6px; font: 500 var(--rn-fs-sm)/1 var(--rn-font-ui); color: var(--rn-ink-3); }
+  .rn-ql__kind svg { width: 14px; height: 14px; stroke-width: var(--rn-icon-stroke); }
+  .rn-ql__title { margin: 4px 0 0; font: 600 var(--rn-fs-xl)/1.35 var(--rn-font-ui); color: var(--rn-ink); overflow-wrap: anywhere; }
+  .rn-ql__badge { align-self: flex-start; margin: 8px 0 0; padding: 1px 8px; border-radius: var(--rn-r-pill); background: var(--rn-accent-soft); color: var(--rn-accent-text); font: 500 var(--rn-fs-xs)/1.6 var(--rn-font-ui); }
+  .rn-ql__body { min-width: 0; margin-top: 14px; }
+  .rn-ql__loading { height: 72px; border-radius: var(--rn-r-control); background: var(--rn-fill); }
+  .rn-ql__foot {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 18px; padding-top: 12px;
+    box-shadow: inset 0 1px 0 var(--rn-hair); font-size: var(--rn-fs-xs); color: var(--rn-ink-3);
+  }
+
+  .rn-ql-note { margin: 8px 0 0; font-size: var(--rn-fs-sm); color: var(--rn-ink-3); }
+  .rn-ql-note.is-error { color: var(--rn-bad); }
+  .rn-ql-meta { margin: 0 0 10px; font-size: var(--rn-fs-sm); color: var(--rn-ink-2); }
+  .rn-ql-url { margin: 0 0 12px; font: 400 var(--rn-fs-sm)/1.45 var(--rn-font-mono); color: var(--rn-ink-2); overflow-wrap: anywhere; }
+  .rn-ql-summary { margin: 0; color: var(--rn-ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .rn-ql-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 400 var(--rn-fs-sm)/1.65 var(--rn-font-mono); color: var(--rn-ink); }
+  .rn-ql-prose { overflow-wrap: anywhere; }
+  .rn-ql-prose > :first-child { margin-top: 0; }
+  .rn-ql-prose > :last-child { margin-bottom: 0; }
+  .rn-ql-prose :where(h1, h2, h3, h4) { margin: 14px 0 6px; font-weight: 600; line-height: 1.35; }
+  .rn-ql-prose h1 { font-size: var(--rn-fs-xl); }
+  .rn-ql-prose h2 { font-size: var(--rn-fs-lg); }
+  .rn-ql-prose :where(h3, h4) { font-size: var(--rn-fs-md); }
+  .rn-ql-prose :where(p, ul, ol, blockquote, pre) { margin: 0 0 8px; }
+  .rn-ql-prose :where(ul, ol) { padding-left: 20px; }
+  .rn-ql-prose ul { list-style: disc; }
+  .rn-ql-prose ol { list-style: decimal; }
+  .rn-ql-prose blockquote { padding-left: 12px; box-shadow: inset 2px 0 0 var(--rn-hair-2); color: var(--rn-ink-2); }
+  .rn-ql-prose code { padding: 1px 4px; border-radius: 4px; background: var(--rn-fill-2); font: 12px var(--rn-font-mono); }
+  .rn-ql-prose pre { padding: 8px 10px; border-radius: var(--rn-r-control); background: var(--rn-fill); overflow: auto; }
+  .rn-ql-prose pre code { padding: 0; background: none; }
+
+  /* Database: the default view's first rows. */
+  .rn-ql-table { overflow-x: auto; border-radius: var(--rn-r-control); box-shadow: inset 0 0 0 1px var(--rn-hair); }
+  .rn-ql-table table { width: 100%; border-collapse: collapse; font-size: var(--rn-fs-sm); }
+  .rn-ql-table th { padding: 7px 10px; background: var(--rn-fill); color: var(--rn-ink-3); font-weight: 500; text-align: left; white-space: nowrap; }
+  .rn-ql-table td { max-width: 220px; padding: 7px 10px; box-shadow: inset 0 1px 0 var(--rn-hair); color: var(--rn-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rn-ql-table td:first-child { font-weight: 500; }
+
+  /* Board: a well with its cards at their places. */
+  .rn-ql-board { position: relative; width: 100%; max-height: 320px; overflow: hidden; border-radius: var(--rn-r-md); background: var(--rn-well); box-shadow: inset 0 0 0 1px var(--rn-hair); }
+  .rn-ql-board__card { position: absolute; box-sizing: border-box; overflow: hidden; padding: 4px 6px; border-radius: var(--rn-r-xs); background: var(--rn-sheet); box-shadow: var(--rn-card-shadow); }
+  .rn-ql-board__card span { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; font: 500 10px/1.35 var(--rn-font-ui); color: var(--rn-ink-2); overflow-wrap: anywhere; }
+
+  /* Book and highlight: the book, then the passage in its context. */
+  .rn-ql-book { display: flex; align-items: flex-start; gap: 14px; }
+  .rn-ql-book__cover {
+    display: grid; flex: none; place-items: center; width: 60px; height: 84px; overflow: hidden; padding: 6px; border-radius: 3px;
+    background: var(--rn-fill-2); box-shadow: var(--rn-book-shadow); font: 500 10px/1.3 var(--rn-font-serif); color: var(--rn-ink-2); text-align: center;
+  }
+  .rn-ql-book__cover:has(img) { padding: 0; }
+  .rn-ql-book__cover img { width: 100%; height: 100%; object-fit: cover; }
+  .rn-ql-book__meta { min-width: 0; padding-top: 2px; }
+  .rn-ql-book__title { font: 600 var(--rn-fs-lg)/1.35 var(--rn-font-ui); color: var(--rn-ink); }
+  .rn-ql-book__author { margin-top: 2px; color: var(--rn-ink-2); }
+  .rn-ql-book__chapter { margin-top: 6px; font-size: var(--rn-fs-sm); color: var(--rn-ink-3); }
+  .rn-ql-passage { margin: 14px 0 0; padding: 1px 0 1px 12px; box-shadow: inset 2px 0 0 var(--rn-hair-2); color: var(--rn-ink); line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .rn-ql-passage mark { padding: 0 1px; border-radius: 2px; background: var(--rn-hl); color: inherit; }
+  .rn-ql-passage__context { color: var(--rn-ink-3); }
+  .rn-ql-annotation { margin: 8px 0 0; padding: 6px 10px; border-radius: var(--rn-r-control); background: var(--rn-fill); color: var(--rn-ink-2); font-size: var(--rn-fs-sm); white-space: pre-wrap; }
+
+  /* Article: where it came from, its summary, and the sieve's reason. */
+  .rn-ql-reason { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 14px 0 0; font-size: var(--rn-fs-sm); color: var(--rn-ink-2); }
+  .rn-ql-reason__why { padding: 1px 8px; border-radius: var(--rn-r-pill); background: var(--rn-fill-2); color: var(--rn-ink); font-weight: 500; }
+
+  /* Day, digest, query and excerpts: quiet lists, separated by hairlines. */
+  .rn-ql-group + .rn-ql-group { margin-top: 12px; }
+  .rn-ql-group h3 { margin: 0 0 4px; font: 500 var(--rn-fs-xs)/1.3 var(--rn-font-ui); color: var(--rn-ink-3); }
+  .rn-ql-group ul, .rn-ql-list, .rn-ql-excerpts { margin: 0; padding: 0; list-style: none; }
+  .rn-ql-group li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; padding: 3px 0; }
+  .rn-ql-detail { font-size: var(--rn-fs-sm); color: var(--rn-ink-3); }
+  .rn-ql-list li { display: flex; flex-direction: column; gap: 2px; padding: 8px 0; box-shadow: inset 0 -1px 0 var(--rn-hair); }
+  .rn-ql-list li:last-child { box-shadow: none; }
+  .rn-ql-list li span { font-size: var(--rn-fs-sm); color: var(--rn-ink-2); }
+  .rn-ql-excerpts li + li { margin-top: 12px; }
+  .rn-ql-excerpts .rn-ql-passage { margin-top: 0; }
+
+  /* Conversation: the question and the start of the answer. */
+  .rn-ql-turn { display: flex; flex-direction: column; gap: 12px; }
+  .rn-ql-turn__question, .rn-ql-turn__answer { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 10px; align-items: start; }
+  .rn-ql-turn__label { display: grid; place-items: center; width: 22px; height: 22px; border-radius: var(--rn-r-pill); background: var(--rn-fill-2); font: 600 11px/1 var(--rn-font-ui); color: var(--rn-ink-2); }
+  .rn-ql-turn__question p { margin: 1px 0 0; font-weight: 500; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .rn-ql-turn__answer .rn-ql-note { margin-top: 2px; }
+
+  .rn-ql-card .rn-ql-passage { margin: 0 0 10px; }
+  .rn-ql-card .rn-ql-meta { margin: 12px 0 0; }
+  .rn-ql-media { display: block; max-width: 100%; max-height: 46vh; margin: 0 auto; border-radius: var(--rn-r-control); }
+  .rn-ql-audio { width: 100%; }
+}

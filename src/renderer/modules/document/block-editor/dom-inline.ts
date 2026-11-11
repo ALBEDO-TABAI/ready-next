@@ -1,5 +1,6 @@
 import { isDocumentColor, type InlineMarks, type InlineSpan } from '../../../../shared/document-blocks'
 import { parseReadyUri, toReadyUri } from '../../../../shared/ready-ref'
+import { refCapsuleKind } from '../../../components/ui/ref-capsule-kinds'
 
 export function sliceSpans(spans: readonly InlineSpan[], start: number, end = Infinity): InlineSpan[] {
   let position = 0
@@ -71,10 +72,16 @@ export function drawInline(root: HTMLElement, spans: readonly InlineSpan[]) {
         else wrapper.dataset.readyHref = href
         if (marks.reference.kind === 'link' && marks.reference.title) wrapper.title = marks.reference.title
       }
-      if (marks.reference.kind === 'ready' && marks.reference.ref.kind === 'day') {
-        wrapper.dataset.readyDateMention = ''
-        wrapper.style.cssText = 'border-radius:999px;padding:2px 7px;background:var(--bg-secondary);border:1px solid var(--border-color);cursor:pointer;text-decoration:none'
-        wrapper.title = marks.reference.ref.remind === undefined ? '设置日期与提醒' : `提前 ${marks.reference.ref.remind} 分钟提醒`
+      // A Ready reference reads as a capsule (W6 §2.1): only a class and data on this same link, so the text, the
+      // caret and input methods are untouched and the source stays the Markdown link it was.
+      const reference = marks.reference
+      if (reference.kind !== 'link') {
+        wrapper.className = 'rn-ref'
+        wrapper.dataset.readyRefCapsule = ''
+        // A [[wiki]] target names a page, or a board when it keeps its .canvas extension.
+        wrapper.dataset.refKind = reference.kind === 'ready' ? refCapsuleKind(reference.ref) : /\.canvas$/i.test(reference.target.split('#')[0]) ? 'canvas' : 'page'
+        wrapper.draggable = true
+        if (reference.kind === 'ready' && reference.ref.kind === 'day') wrapper.dataset.readyDateMention = ''
       }
       wrapper.append(node); node = wrapper
     }

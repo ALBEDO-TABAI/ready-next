@@ -5,7 +5,7 @@ import type { FastCardCanvasTarget, FastCardTransferRequest } from '../../../sha
 import { getFastCardTransferAPI, getFastCardQuickNoteAPI } from '../../stores/useFastCard'
 import { FileText, Image as ImageIcon, Languages, Mic, PanelRightClose, Save, Send, Sparkles, Trash2, Video, X } from 'lucide-react'
 import { Button, IconButton } from '../ui/Button'
-import { parseReadyUri } from '../../../shared/ready-ref'
+import { itemPreview, itemTitle, sourceLabel, timeLabel } from './fastcard-presentation'
 import type { FastCardItem, FastCardSyncState } from '../../../shared/fastcard'
 
 interface FastCardPanelProps {
@@ -27,42 +27,6 @@ function itemIcon(kind: FastCardItem['kind']) {
   if (kind === 'image-description') return <Sparkles size={14} />
   if (kind === 'audio') return <Mic size={14} />
   return <FileText size={14} />
-}
-
-function itemTitle(item: FastCardItem): string {
-  if (item.title) return item.title
-  if (item.kind === 'audio') return '录音'
-  if (item.kind === 'translation') return '翻译'
-  if (item.kind === 'image-description') return '图片反推描述'
-  if (item.kind === 'image') return item.alt || item.caption || '图片'
-  if (item.kind === 'video') return item.video?.title || '视频'
-  return '文字'
-}
-
-function itemPreview(item: FastCardItem): string {
-  if (item.kind === 'translation') return item.translatedText || item.originalText || ''
-  if (item.kind === 'image-description') return item.description || ''
-  if (item.kind === 'video') return item.video?.playableUrl || item.video?.originalUrl || item.source?.pageUrl || ''
-  if (item.kind === 'image') return item.caption || item.alt || item.imageUrl || ''
-  return item.text || ''
-}
-
-/** Where a card came from (W4 §6): 网页 with its site, 资讯, 书, PDF, or 快记 for what was jotted down directly. */
-function sourceLabel(item: FastCardItem): string {
-  const url = item.source?.pageUrl || item.video?.pageUrl || ''
-  if (!url) return '快记'
-  const ready = parseReadyUri(url)
-  if (ready.ok && ready.ref.kind === 'rss-item') return '资讯'
-  if (ready.ok && ready.ref.kind === 'book-location') return '书'
-  if (/\.pdf(?:$|[?#])/i.test(url)) return 'PDF'
-  const site = item.source?.domain || item.source?.pageTitle
-  return site ? `网页 · ${site}` : '网页'
-}
-
-function timeLabel(at: number): string {
-  const date = new Date(at), now = new Date()
-  const clock = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
-  return date.toDateString() === now.toDateString() ? clock : `${date.getMonth() + 1}月${date.getDate()}日 ${clock}`
 }
 
 // The FastCard shelf (W4 §6): the same panel in the browser's overlay window and in the shell's drawer.
