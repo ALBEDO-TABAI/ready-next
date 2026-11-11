@@ -179,10 +179,10 @@ body {
   }
 }
 
-html[data-skin='liquid-glass'],
-html[data-skin='liquid-glass'] body,
-html[data-skin='liquid-glass'] #root,
-html[data-skin='liquid-glass'] .ready-app-shell {
+html:root,
+html:root body,
+html:root #root,
+html:root .ready-app-shell {
   background: transparent !important;
 }
 
@@ -219,9 +219,9 @@ html[data-skin='liquid-glass'] .ready-app-shell {
   background: transparent;
 }
 
-html[data-skin='liquid-glass'] [data-liquid-shell='settings-sidebar'],
-html[data-skin='liquid-glass'] [data-liquid-shell='settings-content'],
-html[data-skin='liquid-glass'] [data-liquid-scroll-root] {
+html:root [data-liquid-shell='settings-sidebar'],
+html:root [data-liquid-shell='settings-content'],
+html:root [data-liquid-scroll-root] {
   contain: paint;
   isolation: isolate;
   transform: translateZ(0);
@@ -298,6 +298,19 @@ html[data-theme='dark'] .ready-app-bg::before {
 
 html[data-theme='dark'] .ready-app-bg::after {
   opacity: 1;
+}
+
+/* 减少透明（W1 DL12，“设置 › 外观”，也跟随系统）：窗口底是不透明的 --rn-stage，任何地方都不再模糊。 */
+html[data-transparency='reduced'] .ready-app-bg::before,
+html[data-transparency='reduced'] .ready-app-bg::after {
+  background: var(--rn-stage);
+}
+
+html[data-transparency='reduced'] *,
+html[data-transparency='reduced'] *::before,
+html[data-transparency='reduced'] *::after {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
 }
 
 /* Scrollbar styles */

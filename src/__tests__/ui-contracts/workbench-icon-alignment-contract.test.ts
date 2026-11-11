@@ -74,5 +74,5 @@ test('topbar and rail icon controls use direct-on-surface styling without extra 
   assert.match(iconRail, /hover:bg-\[var\(--bg-hover\)\]/)
   assert.match(modeSlider, /role="img"/)
   assert.match(modeSlider, /aria-label="Ready"/)
-  assert.match(modeSlider, /var\(--ready-brand-accent, var\(--color-ready-orange\)\)/)
+  assert.match(modeSlider, /background: 'var\(--rn-accent\)'/)
 })

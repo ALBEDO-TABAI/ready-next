@@ -1,4 +1,4 @@
-import type { ThemeOption, ThemeSkin } from '../stores/useTheme'
+import type { ThemeOption, Transparency } from '../stores/useTheme'
 import type { AIModelConfig, AIProviderWorkspace } from '../../shared/ai-providers'
 import { previewNamespaces as aiPreview } from './settings-preview/ai'
 import { previewNamespaces as browserPrivacyPreview } from './settings-preview/browser-privacy'
@@ -392,9 +392,9 @@ function successNoData(): SuccessNoData {
 
 function applyPreviewTheme(previewUrl: URL): void {
   const theme = (previewUrl.searchParams.get('theme') || 'light') as ThemeOption
-  const skin = (previewUrl.searchParams.get('skin') || 'liquid-glass') as ThemeSkin
+  const transparency: Transparency = previewUrl.searchParams.get('transparency') === 'reduced' ? 'reduced' : 'normal'
   localStorage.setItem('ready-theme', theme)
-  localStorage.setItem('ready-theme-skin', skin)
+  localStorage.setItem('ready-transparency', transparency)
 }
 
 export function installSettingsPreviewMocks(): void {
@@ -402,7 +402,7 @@ export function installSettingsPreviewMocks(): void {
   applyPreviewTheme(previewUrl)
   const option = (localStorage.getItem('ready-theme') || 'light') as ThemeOption
   const resolved = option === 'system' ? 'light' : option
-  const skin = (localStorage.getItem('ready-theme-skin') || 'liquid-glass') as ThemeSkin
+  const transparency: Transparency = localStorage.getItem('ready-transparency') === 'reduced' ? 'reduced' : 'normal'
 
   const api = {
     theme: {
@@ -411,7 +411,8 @@ export function installSettingsPreviewMocks(): void {
         data: {
           option,
           resolved,
-          skin,
+          transparency,
+          reduceTransparency: transparency === 'reduced',
           isNativeFullscreen: false,
         },
       }),

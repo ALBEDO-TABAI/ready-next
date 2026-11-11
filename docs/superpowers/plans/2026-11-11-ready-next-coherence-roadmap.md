@@ -169,3 +169,4 @@ B0–B3 是地基，先做。B0 合入之后，截图巡检的基线在新的 El
 - 2026-11-11：完成全局盘点、路线图与 W1–W7 实施计划、设计基准页。尚未开始任何实现。
 - 2026-11-11：用户审阅设计基准页，认可整体方向，补充三点并已写入 W1、W2 与基准页第 2 版：上下留白对称、品牌红点留在右上角、助手输入框用液态玻璃。
 - 2026-11-11：原先留给用户的四件事由用户交给本路线图决定，结论见 §9，并已写入 W3、W4、W5、W7：Electron 升级提前到 B0；链接预览在 fake-IP 代理下有条件放行；筛子的“在做的事”首次询问；向量检索的触发条件与方案定死。
+- 2026-11-11：开工。B0（Electron 升级，独立 worktree `ready-next-electron`）、B2（筛子引擎，`ready-next-sieve`）与 B1 并行。B1 完成：W1-T7 的令牌预算检查与截图巡检脚本（`npm run verify:design-tokens`、`npm run verify:ready-next-design-matrix`），W1-T1 的令牌合并、强调色与皮肤退役、“减少透明”开关；详情与证据见 [W1 交付状态](2026-11-11-ready-next-w1-design-system-implementation.md#10-交付状态)。截图巡检的基线在 Electron 42 上拍；B0 合入后重拍。

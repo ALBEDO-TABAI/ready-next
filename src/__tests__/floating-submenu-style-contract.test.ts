@@ -82,7 +82,7 @@ test('shared submenu styles use the denser browser-like frosted background and h
   assert.match(styles, /\.ready-floating-menu\s*\{/)
   assert.match(styles, /background:\s*var\(--chat-menu-frost-bg\) !important/)
   assert.match(styles, /background:\s*var\(--chat-menu-hover-bg\) !important/)
-  assert.match(styles, /html\[data-skin='liquid-glass'\] \.ready-floating-menu\s*\{/)
+  assert.match(styles, /html:root \.ready-floating-menu\s*\{/)
   assert.match(styles, /backdrop-filter:\s*blur\(calc\(var\(--lg-blur-strong\) \* 1\.28\)\)/)
   assert.match(styles, /\.ready-floating-menu-item:hover\s*\{/)
   assert.match(themeStyles, /html\[data-theme='dark'\]\s*\{[\s\S]*--chat-menu-frost-bg:\s*color-mix\(in srgb,\s*var\(--surface-floating-bg\) 88%,\s*rgba\(255,\s*255,\s*255,\s*0\.02\)\);/)

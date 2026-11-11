@@ -49,23 +49,13 @@ test('liquid glass skin defines shell-level fresnel, noise, and atmosphere contr
   assert.match(styles, /--lg-noise-opacity:/)
   assert.match(styles, /--lg-lens-violet:/)
   assert.match(styles, /--workbench-liquid-chrome-bg:/)
-  assert.match(styles, /html\[data-skin='liquid-glass'\] \.browser-header-surface,[\s\S]*\.rss-preview-surface \{/)
+  assert.match(styles, /html:root \.browser-header-surface,[\s\S]*\.rss-preview-surface \{/)
   assert.match(styles, /\.rss-mode-shell \.rss-feed-sheet \{[\s\S]*background:\s*var\(--workbench-module-surface-bg\) !important;/)
   assert.match(styles, /ready-app-bg/)
   assert.match(scene, /data-scene=\{scene\}/)
   // 2026-06-10: liquid-glass-react 退役，折射由自研 LiquidLens 承担；
   // 场景文件不得再引入第三方玻璃库。
   assert.doesNotMatch(scene, /liquid-glass-react/)
-})
-
-test('theme and settings are single-track liquid glass by default', () => {
-  const themeStore = readWorkspaceFile('src/renderer/stores/useTheme.ts')
-  const settingsPage = readWorkspaceFile('src/renderer/pages/Settings.tsx')
-  const previewMocks = readWorkspaceFile('src/renderer/preview/installSettingsPreviewMocks.ts')
-
-  assert.match(themeStore, /return 'liquid-glass'/)
-  assert.doesNotMatch(settingsPage, /value:\s*'classic'/)
-  assert.match(previewMocks, /searchParams\.get\('skin'\) \|\| 'liquid-glass'/)
 })
 
 test('workbench keeps the liquid scene; liquid test exercises the composer lens', () => {
@@ -166,49 +156,35 @@ test('Stage 1 — nativeTheme.updated handler refreshes material AND broadcasts'
   assert.match(handlerBody, /broadcastThemeChanged\(\)/)
 })
 
-test('Stage 1 — theme:setSkin IPC handler exists and persists skin to DB', () => {
-  const mainIndex = readWorkspaceFile('src/main/index.ts')
-
-  assert.match(mainIndex, /ipcMain\.handle\('theme:setSkin'/)
-  // skin 输入必须校验为 'liquid-glass' | 'ready-glass' | 'solid-green-glass' | 'solid-blue-glass'，非法值 fall back 到 'liquid-glass'
-  // a948f82d style(ui): polish Ready glass theme surfaces（新增 solid-green-glass）+ 26a3ce1c style(ui): add solid blue glass theme（新增 solid-blue-glass）
-  assert.match(
-    mainIndex,
-    /skin === 'ready-glass' \|\| skin === 'solid-green-glass' \|\| skin === 'solid-blue-glass' \? skin : 'liquid-glass'/,
-  )
-  // 持久化到 DB 后必须调 sync (刷新材料) + broadcastThemeChanged (通知 renderer)
-  assert.match(mainIndex, /THEME_SKIN_SETTING_KEY/)
-})
-
 test('liquid glass sliders preserve the groove and use lens-backed convex thumbs', () => {
   const sliderStyles = readWorkspaceFile('src/renderer/styles/workbench-sliders.css')
   const appStyles = readRendererStyles()
   const iconRail = readWorkspaceFile('src/renderer/components/motion/MorphIconRailGroup.tsx')
   const modeTabs = readWorkspaceFile('src/renderer/components/layout/DraggableModeTabs.tsx')
 
-  const modeTabsGroove = findCssBlock(sliderStyles, "html[data-skin='liquid-glass'] .draggable-mode-tabs")
-  const modeTabsThumb = findCssBlock(sliderStyles, "html[data-skin='liquid-glass'] .draggable-mode-tabs__thumb")
+  const modeTabsGroove = findCssBlock(sliderStyles, "html:root .draggable-mode-tabs")
+  const modeTabsThumb = findCssBlock(sliderStyles, "html:root .draggable-mode-tabs__thumb")
   const chatModeDock = findCssBlock(appStyles, ".ready-chat-mode-tabs-dock")
   const chatComposerContextRow = findCssBlock(appStyles, ".ready-chat-composer-context-row")
   const chatPanelBody = readWorkspaceFile('src/renderer/components/agent/chat-panel/ChatPanelBody.tsx')
-  const chatModeDockGroove = findCssBlock(appStyles, "html[data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs")
+  const chatModeDockGroove = findCssBlock(appStyles, "html:root .ready-chat-mode-tabs-dock .draggable-mode-tabs")
   // 74ebfa98 — the chat dock surface/projection share one :is() rule with the project selector capsule.
   const chatDockSurfaceSelector = ':is(.ready-chat-mode-tabs-dock .draggable-mode-tabs__surface, .ready-chat-project-surface)'
   const chatDockProjectionSelector = ':is(.ready-chat-mode-tabs-dock .draggable-mode-tabs__projection, .ready-chat-project-projection)'
-  const chatModeDockSurface = findCssBlock(appStyles, `html[data-skin='liquid-glass'] ${chatDockSurfaceSelector}`)
-  const chatModeDockProjection = findCssBlock(appStyles, `html[data-skin='liquid-glass'] ${chatDockProjectionSelector}`)
-  const darkChatModeDockGroove = findCssBlock(appStyles, "html[data-theme='dark'][data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs")
-  const darkChatModeDockSurface = findCssBlock(appStyles, `html[data-theme='dark'][data-skin='liquid-glass'] ${chatDockSurfaceSelector}`)
-  const darkChatModeDockProjection = findCssBlock(appStyles, `html[data-theme='dark'][data-skin='liquid-glass'] ${chatDockProjectionSelector}`)
+  const chatModeDockSurface = findCssBlock(appStyles, `html:root ${chatDockSurfaceSelector}`)
+  const chatModeDockProjection = findCssBlock(appStyles, `html:root ${chatDockProjectionSelector}`)
+  const darkChatModeDockGroove = findCssBlock(appStyles, "html[data-theme='dark']:root .ready-chat-mode-tabs-dock .draggable-mode-tabs")
+  const darkChatModeDockSurface = findCssBlock(appStyles, `html[data-theme='dark']:root ${chatDockSurfaceSelector}`)
+  const darkChatModeDockProjection = findCssBlock(appStyles, `html[data-theme='dark']:root ${chatDockProjectionSelector}`)
   const appModeTabsSectionStart = appStyles.indexOf('/* Draggable Mode Tabs - 4-way switch')
   assert.notEqual(appModeTabsSectionStart, -1, 'index.css should keep the draggable mode tabs section')
   const appModeTabsSection = appStyles.slice(appModeTabsSectionStart)
-  const appModeTabsThumb = findCssBlock(appModeTabsSection, "html[data-skin='liquid-glass'] .draggable-mode-tabs__thumb")
-  const darkAppModeTabsGroove = findCssBlock(appModeTabsSection, "html[data-theme='dark'][data-skin='liquid-glass'] .draggable-mode-tabs")
-  const darkAppModeTabsThumb = findCssBlock(appModeTabsSection, "html[data-theme='dark'][data-skin='liquid-glass'] .draggable-mode-tabs__thumb")
+  const appModeTabsThumb = findCssBlock(appModeTabsSection, "html:root .draggable-mode-tabs__thumb")
+  const darkAppModeTabsGroove = findCssBlock(appModeTabsSection, "html[data-theme='dark']:root .draggable-mode-tabs")
+  const darkAppModeTabsThumb = findCssBlock(appModeTabsSection, "html[data-theme='dark']:root .draggable-mode-tabs__thumb")
 
   // 2026-10-30 icon rail 退出凹槽 + 透镜 thumb 体系，改为贴边图标列：liquid 皮肤不再给它槽底或 thumb。
-  assert.doesNotMatch(sliderStyles, /html\[data-skin='liquid-glass'\] \.icon-rail-slider(?:__thumb)?\s*\{/)
+  assert.doesNotMatch(sliderStyles, /html:root \.icon-rail-slider(?:__thumb)?\s*\{/)
   assert.doesNotMatch(iconRail, /LiquidLens/)
   // 8ab48cd7 — 工作台四模式槽改为 Ready 橙渐变轨道（thumb 1.04，实体投影，无 backdrop 模糊）。
   assert.match(modeTabsGroove, /--ready-workbench-slider-thumb-scale:\s*1\.04;/)

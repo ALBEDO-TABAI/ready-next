@@ -40,9 +40,9 @@ test('settings page keeps the main workbench transparent shell structure', () =>
   assert.doesNotMatch(styles, /--settings-list-item-bg\s*:/)
   assert.match(styles, /\.settings-page-shell\s*\{[\s\S]*?isolation:\s*isolate;[\s\S]*?background:\s*transparent;/)
   assert.doesNotMatch(styles, /--settings-page-clear-bg\s*:/)
-  assert.doesNotMatch(styles, /html\[data-skin='liquid-glass'\] \[data-liquid-shell='settings-content'\]\s*\{[\s\S]*?background:/)
-  assert.match(styles, /html\[data-skin='liquid-glass'\] \.workbench-mode-root\s*\{[^}]*background:\s*transparent/)
-  assert.match(styles, /html\[data-skin='liquid-glass'\] \[data-liquid-shell='settings-sidebar'\],[\s\S]*?html\[data-skin='liquid-glass'\] \[data-liquid-shell='settings-content'\],[\s\S]*?html\[data-skin='liquid-glass'\] \[data-liquid-scroll-root\]\s*\{[\s\S]*?contain:\s*paint;[\s\S]*?isolation:\s*isolate;[\s\S]*?transform:\s*translateZ\(0\);[\s\S]*?backface-visibility:\s*hidden;/)
+  assert.doesNotMatch(styles, /html:root \[data-liquid-shell='settings-content'\]\s*\{[\s\S]*?background:/)
+  assert.match(styles, /html:root \.workbench-mode-root\s*\{[^}]*background:\s*transparent/)
+  assert.match(styles, /html:root \[data-liquid-shell='settings-sidebar'\],[\s\S]*?html:root \[data-liquid-shell='settings-content'\],[\s\S]*?html:root \[data-liquid-scroll-root\]\s*\{[\s\S]*?contain:\s*paint;[\s\S]*?isolation:\s*isolate;[\s\S]*?transform:\s*translateZ\(0\);[\s\S]*?backface-visibility:\s*hidden;/)
 
   const main = readWorkspaceFile('src/main/index.ts')
   const preload = readWorkspaceFile('src/preload/index.ts')
@@ -84,7 +84,7 @@ test('file tree scroll root opts into the Chromium 148 liquid glass repaint guar
   assert.match(fileTree, /onMouseLeave=\{scheduleFileTreeSurfaceRefresh\}/)
   assert.match(chatMessages, /data-liquid-scroll-root="chat-messages"/)
   assert.doesNotMatch(chatMessages, /MaskImage|maskImage/)
-  assert.match(styles, /html\[data-skin='liquid-glass'\] \[data-liquid-scroll-root\]\s*\{[\s\S]*?contain:\s*paint;[\s\S]*?transform:\s*translateZ\(0\)/)
+  assert.match(styles, /html:root \[data-liquid-scroll-root\]\s*\{[\s\S]*?contain:\s*paint;[\s\S]*?transform:\s*translateZ\(0\)/)
 })
 
 test('workbench side and chat panels stay transparent while slots use the shared neutral glass tokens', () => {
@@ -94,18 +94,18 @@ test('workbench side and chat panels stay transparent while slots use the shared
   const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
 
   assert.match(styles, /\.workbench-panel-frame\[data-side-panel-variant='files'\]\s*\{[\s\S]*?background:\s*var\(--workbench-side-panel-bg\)/)
-  // 079189aa Add browser FastCard context actions — liquid-glass 皮肤块与 fastcard overlay 窗口共用同一选择器组
-  assert.match(styles, /html\[data-skin='liquid-glass'\],\s*html\[data-fastcard-overlay-window='true'\]\s*\{[\s\S]*?--workbench-side-panel-bg:\s*transparent;/)
-  assert.match(styles, /html\[data-skin='liquid-glass'\],\s*html\[data-fastcard-overlay-window='true'\]\s*\{[\s\S]*?--workbench-rail-slot-bg:\s*rgba\(222,\s*222,\s*220,\s*0\.64\);/)
+  // html:root now includes the FastCard window without a separate selector.
+  assert.match(styles, /html:root\s*\{[\s\S]*?--workbench-side-panel-bg:\s*transparent;/)
+  assert.match(styles, /html:root\s*\{[\s\S]*?--workbench-rail-slot-bg:\s*rgba\(222,\s*222,\s*220,\s*0\.64\);/)
   // c17b8883 Polish liquid glass workbench controls — 槽位内阴影收敛 0.11 → 0.10
-  assert.match(styles, /html\[data-skin='liquid-glass'\],\s*html\[data-fastcard-overlay-window='true'\]\s*\{[\s\S]*?--workbench-rail-slot-shadow:\s*[\s\S]*?inset 0 1\.5px 3px rgba\(24,\s*39,\s*77,\s*0\.10\)/)
+  assert.match(styles, /html:root\s*\{[\s\S]*?--workbench-rail-slot-shadow:\s*[\s\S]*?inset 0 1\.5px 3px rgba\(24,\s*39,\s*77,\s*0\.10\)/)
   // 8ab48cd7 style(ui): checkpoint liquid glass polish — 槽位不再引用共享 rail-slot token：
   // 四模式槽改 Ready 橙渐变轨道（真值详钉在 workbench-liquid-shell-contract）；icon rail 2026-10-30 起贴边无槽。
-  assert.match(sliderStyles, /html\[data-skin='liquid-glass'\] \.draggable-mode-tabs\s*\{[\s\S]*?background:\s*linear-gradient\(180deg, color-mix\(in srgb, var\(--color-ready-orange, #ff4b2b\) 82%, white\) 0%/)
+  assert.match(sliderStyles, /html:root \.draggable-mode-tabs\s*\{[\s\S]*?background:\s*linear-gradient\(180deg, color-mix\(in srgb, var\(--color-ready-orange, #ff4b2b\) 82%, white\) 0%/)
   assert.match(sidePanel, /background:\s*'transparent'/)
   assert.match(chatPanel, /background:\s*'transparent'/)
-  assert.doesNotMatch(styles, /html\[data-skin='liquid-glass'\] \[data-liquid-shell='chat-panel'\],[\s\S]*?\[data-liquid-shell='side-panel'\]:not\(\[data-side-panel-variant='hidden'\]\)\s*\{[\s\S]*?background:/)
-  assert.doesNotMatch(styles, /html\[data-skin='liquid-glass'\] \[data-liquid-shell='chat-panel'\],[\s\S]*?\[data-liquid-shell='side-panel'\]:not\(\[data-side-panel-variant='hidden'\]\)\s*\{[\s\S]*?backdrop-filter:/)
+  assert.doesNotMatch(styles, /html:root \[data-liquid-shell='chat-panel'\],[\s\S]*?\[data-liquid-shell='side-panel'\]:not\(\[data-side-panel-variant='hidden'\]\)\s*\{[\s\S]*?background:/)
+  assert.doesNotMatch(styles, /html:root \[data-liquid-shell='chat-panel'\],[\s\S]*?\[data-liquid-shell='side-panel'\]:not\(\[data-side-panel-variant='hidden'\]\)\s*\{[\s\S]*?backdrop-filter:/)
 })
 
 test('shared settings theme maps every inline constant onto the sx glass tokens', () => {

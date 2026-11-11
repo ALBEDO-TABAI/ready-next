@@ -61,7 +61,7 @@ import type {
   RSSDiagnosticsData, RSSHubRuntimeStatusData,
   RSSStatusData
 } from '../modules/rss/types'
-import type { ThemeOption, ResolvedTheme, ThemeSkin } from '../stores/useTheme'
+import type { ThemeOption, ResolvedTheme, Transparency } from '../stores/useTheme'
 import type { TaskType } from '../../shared/task-types'
 import type {
   FileEmergenceGetSnapshotPayload,
@@ -2810,15 +2810,18 @@ interface ElectronWindowAPI {
 interface ThemeSnapshotPayload {
   option: ThemeOption
   resolved: ResolvedTheme
-  skin: ThemeSkin
+  /** 生效的透明度：用户的“减少透明”或系统的“减少透明度”任一打开即为 reduced（W1 DL12） */
+  transparency: Transparency
+  /** 用户自己的“减少透明”开关 */
+  reduceTransparency: boolean
   /** 主窗口当前是否在 macOS 原生 fullscreen 态。renderer 启动 reconciliation 用以同步 data-native-fullscreen attr */
   isNativeFullscreen: boolean
 }
 
 interface ElectronThemeAPI {
   set: (theme: string) => Promise<void>
-  /** 切换玻璃风格；不触发昼夜 ritual，仅影响窗口材料和 .ready-app-bg 渐变可见性 */
-  setSkin: (skin: ThemeSkin) => Promise<void>
+  /** “减少透明”开关；不触发昼夜 ritual，只改变 DOM 层的不透明底与浮层模糊 */
+  setReduceTransparency: (enabled: boolean) => Promise<ThemeSnapshotPayload>
   get: () => Promise<{ success: boolean; data?: ThemeSnapshotPayload; error?: string }>
   onChanged: (listener: (snapshot: ThemeSnapshotPayload) => void) => () => void
 }

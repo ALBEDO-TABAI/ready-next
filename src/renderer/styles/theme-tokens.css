@@ -1,8 +1,9 @@
 /* ═══ theme-tokens.css — Design tokens — @theme 字体/字号刻度 + 全部 CSS 自定义变量（明/暗两态）；由 index.css 序保拆分（2026-07-06），在 index.css 中按原段落顺序 @import，勿改导入次序。 ═══ */
 @theme {
-  --font-ui: 'SF Pro Text', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  /* W1-T1 / DL7: the interface font is the design system's (Inter + PingFang, Geist Mono). */
+  --font-ui: var(--rn-font-ui);
   --font-head: var(--font-ui);
-  --font-mono: 'SF Mono', 'Fira Code', 'Roboto Mono', Menlo, ui-monospace, monospace;
+  --font-mono: var(--rn-font-mono);
   --font-numeric: var(--font-mono);
   --text-2xs: 9px;
   --text-xs: 10px;
@@ -28,6 +29,8 @@
 /* Visual token source of truth for renderer UI.
    Keep shared colors, surfaces, shadows, and shell classes here; component files should only override when behavior requires it. */
 /* Custom CSS Variables */
+/* `html:root` below replaces the retired always-on skin attribute selector with the same specificity
+   (an attribute and a pseudo-class both count 0,1,0), so the cascade did not move when skins retired (W1-T1). */
 :root {
   color-scheme: light dark;
   /* Single source of truth for the two workbench canvas colors. The theme-transition ritual
@@ -38,36 +41,48 @@
   --workbench-mode-bg-dark: #192131;
   /* Overlay background used by the theme-transition ritual; tracks the actual canvas color per theme/skin. */
   --ritual-overlay-bg: var(--workbench-mode-bg);
+
+  /* W1-T1: the shell tokens below are aliases of the --rn-* design tokens (design/next/tokens.css).
+     Text uses the four ink levels (DL6); --color-blue and --color-ready-orange are the one signal colour (DL5).
+     They resolve per theme through --rn-*, so the dark block does not repeat them. Delete each alias once its
+     last use has moved to --rn-* (W1-T5/T6). */
+  --bg-primary: var(--rn-sheet);
+  --bg-content: var(--rn-sheet);
+  --bg-editor: var(--rn-sheet);
+  --bg-active-tab: var(--rn-sheet);
+  --bg-panel: var(--rn-stage);
+  --bg-toolbar: var(--rn-stage);
+  --bg-canvas: var(--rn-stage);
+  --panel-unified-bg: var(--rn-stage);
+  --border-default: var(--rn-hair-2);
+  --border-input: var(--rn-hair-2);
+  --border-vertical: var(--rn-hair);
+  --bg-hover: var(--rn-fill-2);
+  --bg-slider: var(--rn-fill-2);
+  --bg-avatar: var(--rn-fill-2);
+  --bg-code: var(--rn-fill);
+  --text-title: var(--rn-ink);
+  --text-body: var(--rn-ink);
+  --text-secondary: var(--rn-ink-2);
+  --text-muted: var(--rn-ink-2);
+  --text-gray: var(--rn-ink-3);
+  --text-light: var(--rn-ink-3);
+  --text-placeholder: var(--rn-ink-3);
+  --color-blue: var(--rn-accent);
+  --color-blue-light: var(--rn-accent-soft);
+  --color-ready-orange: var(--rn-accent);
+  --color-ready-orange-light: var(--rn-accent-soft);
   /* Colors from UI-SPEC-V5.md — Light Mode (default) */
-  --bg-primary: #FFFFFF;
-  --bg-panel: #F6F5F1;
-  --bg-content: #FDFCFA;
   --workbench-mode-bg: #FAF8F2;
-  --bg-editor: #F8F7F4;
-  --bg-toolbar: #FAFAF9;
-  --bg-canvas: #F0EFED;
-  --border-default: #E8E5DE;
-  --border-input: #D5D5D5;
-  --text-title: #1A1A1A;
-  --text-body: #333333;
-  --text-secondary: #3D3D3D;
-  --text-muted: #666666;
-  --text-gray: #8A8A8A;
-  --text-light: #999999;
-  --text-placeholder: #AAAAAA;
 
   /* UI Optimization: Unified panel color (light beige) */
-  --panel-unified-bg: #F6F5F1;
 
   /* UI Optimization: Subtle vertical borders */
-  --border-vertical: rgba(232, 229, 222, 0.4);
 
   /* UI Optimization: Hide horizontal borders */
   --border-horizontal: transparent;
 
   /* Semantic colors */
-  --color-blue: #5084E7;
-  --color-blue-light: rgba(80, 132, 231, 0.1);
   --accent-primary: var(--color-blue);
   --accent-primary-light: var(--color-blue-light);
   --color-green: #34D399;
@@ -76,8 +91,6 @@
   --color-green-subtle: rgba(52, 211, 153, 0.09);
   --color-orange: #E97A2B;
   --color-orange-light: rgba(233, 122, 43, 0.1);
-  --color-ready-orange: #FF4B2B;
-  --color-ready-orange-light: rgba(255, 75, 43, 0.12);
   --color-purple: #8B5CF6;
   --color-purple-light: rgba(139, 92, 246, 0.1);
   --color-red: #EB5757;
@@ -92,11 +105,6 @@
   --shadow-chat: -3px 0 12px rgba(0,0,0,0.06);
 
   /* Component-specific */
-  --bg-hover: rgba(0,0,0,0.05);
-  --bg-active-tab: #FFFFFF;
-  --bg-slider: #EBE8E1;
-  --bg-avatar: #E8E8E8;
-  --bg-code: rgba(0,0,0,0.06);
 
   /* Surface tokens */
   --surface-panel-bg: var(--panel-unified-bg);
@@ -200,42 +208,21 @@
 /* Dark Mode */
 html[data-theme='dark'] {
   color-scheme: dark;
-  --bg-primary: #1A1B1E;
-  --bg-panel: #202124;
-  --bg-content: #1E1F22;
   --workbench-mode-bg: #23262B;
-  --bg-editor: #232427;
-  --bg-toolbar: #2A2B2E;
-  --bg-canvas: #171819;
-  --border-default: #333538;
-  --border-input: #444648;
-  --text-title: #D9DBE1;
-  --text-body: #C4C7CF;
-  --text-secondary: #B3B7C2;
-  --text-muted: #8F96A3;
-  --text-gray: #7E8796;
-  --text-light: #6E7787;
-  --text-placeholder: #6A7382;
 
   /* UI Optimization: Dark mode panel color */
-  --panel-unified-bg: #202124;
 
   /* UI Optimization: Subtle vertical borders in dark mode */
-  --border-vertical: rgba(51, 53, 56, 0.4);
 
   /* UI Optimization: Hide horizontal borders */
   --border-horizontal: transparent;
 
-  --color-blue: #72A3FD;
-  --color-blue-light: rgba(114, 163, 253, 0.15);
   --color-green: #3EE8A8;
   --color-green-light: rgba(62, 232, 168, 0.15);
   --color-green-medium: rgba(62, 232, 168, 0.22);
   --color-green-subtle: rgba(62, 232, 168, 0.12);
   --color-orange: #F08A3B;
   --color-orange-light: rgba(240, 138, 59, 0.15);
-  --color-ready-orange: #FF6345;
-  --color-ready-orange-light: rgba(255, 99, 69, 0.16);
   --color-purple: #9B6CFF;
   --color-purple-light: rgba(155, 108, 255, 0.15);
   --color-red: #F06060;
@@ -250,11 +237,6 @@ html[data-theme='dark'] {
   --shadow-chat: -3px 0 12px rgba(0,0,0,0.25);
 
   /* Component-specific dark */
-  --bg-hover: rgba(255,255,255,0.06);
-  --bg-active-tab: #2A2B2E;
-  --bg-slider: #333538;
-  --bg-avatar: #333538;
-  --bg-code: rgba(255,255,255,0.06);
 
   /* Surface tokens dark */
   --surface-panel-bg: var(--panel-unified-bg);
@@ -327,18 +309,8 @@ html[data-theme='dark'] {
   --workbench-module-surface-bg: color-mix(in srgb, var(--bg-content) 18%, transparent);
 }
 
-html[data-skin='liquid-glass'],
-html[data-fastcard-overlay-window='true'] {
-  --bg-primary: #F7F9FC;
-  --bg-panel: #EFF3F9;
-  --bg-content: #F1F5FB;
+html:root {
   --workbench-mode-bg: var(--workbench-mode-bg-light);
-  --bg-editor: #FAFCFF;
-  --bg-toolbar: #F3F6FB;
-  --bg-canvas: #EEF3FA;
-  --border-default: rgba(150, 169, 205, 0.34);
-  --border-input: rgba(126, 148, 189, 0.42);
-  --bg-hover: rgba(78, 114, 182, 0.12);
   --shadow-sm: 0 8px 26px rgba(24, 39, 77, 0.10);
   --shadow-md: 0 14px 34px rgba(24, 39, 77, 0.14);
   --shadow-lg: 0 22px 56px rgba(24, 39, 77, 0.16);
@@ -417,17 +389,8 @@ html[data-fastcard-overlay-window='true'] {
   --workbench-module-surface-bg: var(--workbench-liquid-chrome-bg);
 }
 
-html[data-theme='dark'][data-skin='liquid-glass'] {
-  --bg-primary: #171D29;
-  --bg-panel: #1B2230;
-  --bg-content: #141C29;
+html[data-theme='dark']:root {
   --workbench-mode-bg: var(--workbench-mode-bg-dark);
-  --bg-editor: #1B2333;
-  --bg-toolbar: #1A2231;
-  --bg-canvas: #141A26;
-  --border-default: rgba(121, 138, 171, 0.42);
-  --border-input: rgba(137, 158, 202, 0.52);
-  --bg-hover: rgba(165, 190, 255, 0.14);
 
   --lg-material-panel: rgba(25, 36, 56, 0.30);
   --lg-material-card: rgba(33, 47, 70, 0.36);
@@ -504,36 +467,33 @@ html[data-theme='dark'][data-skin='liquid-glass'] {
 }
 
 /*
- * data-glass-backdrop 修饰符 —— 'liquid-glass' skin 现在有两种 backdrop:
- *   - 'native'（默认）: 用 macOS vibrancy 桌面壁纸做底，叠一层连续的低强度中性提亮
- *   - 'ready':         用 .ready-app-bg 自己的渐变层做底，不依赖 vibrancy
+ * 窗口底（.ready-app-bg）的不透明度。macOS 上窗口永远是透明背景 + under-window 毛玻璃，
+ * 所有“不透明底”都由 DOM 层 .ready-app-bg 承担（验证 2 架构，2026-05-16：不再切换 CALayer，
+ * 否则 NSVisualEffectView 会被静默 quiesce，退出全屏后黑屏）。
  *
- * 这条规则**必须** 用 [data-skin='liquid-glass'] 限定（不要写成 :root），
- * 因为 data-skin 永远是 liquid-glass，data-glass-backdrop 才是差异化开关。
+ *   - 普通透明度（data-transparency='normal'）：浅色叠一层 0.53 的中性提亮，深色不叠；
+ *   - 原生全屏：底必须立刻不透明（否则全屏期间桌面壁纸会被采样进窗口）；
+ *   - 减少透明（data-transparency='reduced'）：不匹配下面任何一条，沿用上面 html:root 块里的 1，
+ *     底色由 base-chrome.css 换成 --rn-stage。
+ *
+ * 选择器的优先级与退役前按皮肤属性写的规则逐条相同（W1-T1）。
  */
-html[data-skin='liquid-glass'][data-glass-backdrop='native'] {
+html[data-transparency='normal']:root {
   --app-bg-overlay-opacity: 0.53;
 }
 
-html[data-theme='dark'][data-skin='liquid-glass'][data-glass-backdrop='native'] {
+html[data-theme='dark'][data-transparency='normal']:root {
   --app-bg-overlay-opacity: 0;
 }
 
-/*
- * **验证 2 架构（2026-05-16）**：进入 macOS 原生全屏时，liquid-glass + native backdrop
- * 必须立刻让 `.ready-app-bg` 渐变可见（opacity=1），承担 fullscreen backing 角色——
- * 否则 vibrancy 在全屏期间会把桌面壁纸采样到窗口（Bug 2，原始"湖水绿"诉求）。
- *
- * 历史上这层 backing 由 BrowserWindow.setBackgroundColor 在 main 进程切到不透明色实现，
- * 但任何"opaque → transparent"的 CALayer 切换都会让 macOS NSVisualEffectView 静默 quiesce，
- * 退回 windowed 时 vibrancy backdrop 不重新渲染 → 用户看到深黑屏。
- *
- * 现在 BrowserWindow 的 bg 在 darwin 上永远是 '#00000000'，fullscreen backing 由 DOM 层
- * `.ready-app-bg` 承担：CSS 变量级联触发 opacity 过渡（260ms ease），无 CALayer opaque 覆盖，
- * NSVisualEffectView 永远不被 quiesce。
- *
- * 选择器优先级：四个 attr 同时存在时优先级高于上面 native+windowed 的低强度提亮规则。
- */
-html[data-skin='liquid-glass'][data-glass-backdrop='native'][data-native-fullscreen='true'] {
+html[data-native-fullscreen='true'][data-transparency='normal']:root {
   --app-bg-overlay-opacity: 1;
+}
+
+/* 减少透明（DL12）：浮层不再模糊，所以浮层与常驻材质改用不透明的纸色。 */
+html[data-transparency='reduced']:root {
+  --lg-material-floating: var(--rn-sheet);
+  --surface-floating-bg: var(--rn-sheet);
+  --chat-menu-frost-bg: var(--rn-sheet);
+  --workbench-liquid-chrome-bg: var(--rn-stage);
 }

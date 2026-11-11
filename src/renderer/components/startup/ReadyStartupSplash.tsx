@@ -3,10 +3,6 @@ import { createReadyLogoDotPattern } from '../../../shared/ready-logo-dots'
 import readyWordmarkSvg from '../../assets/ready-wordmark.svg?raw'
 import '../../styles/startup-preview.css'
 
-export type ReadyStartupVariant = 'orange' | 'pink'
-
-type ReadyStartupSkin = 'liquid-glass' | 'ready-glass' | 'solid-green-glass' | 'solid-blue-glass'
-
 const GRID_ROWS = 8
 const GRID_COLUMNS = 37
 const MATRIX_ROW_STEP = 137
@@ -36,27 +32,11 @@ const RESTART_PAUSE_MS = 850
 const EXIT_TOTAL_MS = LOGO_COMPLETE_MS + FINAL_LOGO_HOLD_MS + CARD_EXIT_MS
 const DEMO_LOOP_MS = SIMULATED_READY_MS + EXIT_TOTAL_MS + RESTART_PAUSE_MS
 
-const VARIANT_COLORS: Record<ReadyStartupVariant, { logo: string; glow: string }> = {
-  orange: {
-    logo: '#FF4B2B',
-    glow: 'rgba(255, 75, 43, 0.18)'
-  },
-  pink: {
-    logo: '#B6467A',
-    glow: 'rgba(182, 70, 122, 0.20)'
-  }
-}
-
-export function resolveReadyStartupVariantFromSkin(
-  skin: string | null | undefined
-): ReadyStartupVariant {
-  return skin === 'solid-green-glass' || skin === 'solid-blue-glass' ? 'pink' : 'orange'
-}
-
-export function readStoredReadyStartupVariant(): ReadyStartupVariant {
-  if (typeof window === 'undefined') return 'orange'
-  const stored = window.localStorage.getItem('ready-theme-skin') as ReadyStartupSkin | null
-  return resolveReadyStartupVariantFromSkin(stored)
+// The brand mark in the one signal colour (--rn-accent). Inline because the splash paints before
+// the stylesheets load.
+const SPLASH_COLORS = {
+  logo: '#ff5a1f',
+  glow: 'rgba(255, 90, 31, 0.18)'
 }
 
 function clamp01(value: number): number {
@@ -103,7 +83,6 @@ function resolveLogoDotOpacity(
 }
 
 interface ReadyStartupSplashProps {
-  variant?: ReadyStartupVariant
   ready?: boolean
   demo?: boolean
   overlay?: boolean
@@ -111,7 +90,6 @@ interface ReadyStartupSplashProps {
 }
 
 export default function ReadyStartupSplash({
-  variant = 'orange',
   ready = false,
   demo = false,
   overlay = false,
@@ -176,7 +154,7 @@ export default function ReadyStartupSplash({
       : GRID_COLUMNS
   const backdropOpacity = resolveFinishBackdropOpacity(finishElapsedMs)
   const cardOpacity = resolveCardOpacity(finishElapsedMs)
-  const colors = VARIANT_COLORS[variant]
+  const colors = SPLASH_COLORS
 
   return (
     <main

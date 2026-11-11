@@ -55,7 +55,6 @@ export default function PetWindow() {
 
   useEffect(() => {
     document.documentElement.classList.add('pet-window-root')
-    document.documentElement.setAttribute('data-skin', 'liquid-glass')
     document.body.classList.add('pet-window-body')
     return () => {
       document.documentElement.classList.remove('pet-window-root')
@@ -70,19 +69,19 @@ export default function PetWindow() {
 
   useEffect(() => {
     let cancelled = false
-    const applyTheme = (resolved: 'light' | 'dark') => {
+    const applyTheme = (snapshot: { resolved: 'light' | 'dark'; transparency: 'normal' | 'reduced' }) => {
       if (cancelled) return
-      document.documentElement.setAttribute('data-theme', resolved)
-      document.documentElement.setAttribute('data-skin', 'liquid-glass')
+      document.documentElement.setAttribute('data-theme', snapshot.resolved)
+      document.documentElement.setAttribute('data-transparency', snapshot.transparency)
     }
     const syncTheme = async () => {
       const result = await window.electronAPI.theme.get().catch(() => null)
       if (cancelled || !result?.success || !result.data) return
-      applyTheme(result.data.resolved)
+      applyTheme(result.data)
     }
     void syncTheme()
     const unsubscribe = window.electronAPI.theme.onChanged((snapshot) => {
-      applyTheme(snapshot.resolved)
+      applyTheme(snapshot)
     })
     return () => {
       cancelled = true

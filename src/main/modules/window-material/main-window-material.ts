@@ -34,14 +34,12 @@ export const NON_DARWIN_BACKGROUND_DARK = '#1A1B1E'
 
 // ----- 类型 -----
 
-export type ThemeSkin = 'liquid-glass' | 'ready-glass' | 'solid-green-glass' | 'solid-blue-glass'
 export type ResolvedTheme = 'light' | 'dark'
 export type SupportedPlatform = 'darwin' | 'win32' | 'linux'
 
 export interface MaterialInputs {
   /** 显式输入，让 computeMaterial 不偷读 process.platform；测试可以直接覆盖三平台分支 */
   platform: SupportedPlatform
-  skin: ThemeSkin
   resolvedTheme: ResolvedTheme
   /** 内部追踪态。不能用 mainWindow.isFullScreen() —— will-enter-full-screen 触发时它仍 false */
   isFullscreen: boolean
@@ -59,7 +57,7 @@ export interface MaterialOutputs {
 /**
  * 计算给定输入下的材料目标。
  *
- * darwin: bg 永远透明，vibrancy 永远 'under-window'。skin / fullscreen 差异**不**走 BrowserWindow，
+ * darwin: bg 永远透明，vibrancy 永远 'under-window'。“减少透明”与 fullscreen 差异**不**走 BrowserWindow，
  *         走 DOM 层 `.ready-app-bg`（见 src/renderer/styles/index.css）。
  *         这样 CALayer 永远不会 opaque 覆盖 NSVisualEffectView → 永远不会 quiesce →
  *         永远不会出现"切换后 vibrancy 静默死掉 = 黑屏"。
@@ -145,7 +143,7 @@ export function applyNonDarwinPlatformExtras(window: BrowserWindow, platform: Su
  *   const controller = createWindowMaterialController({ window, platform, getTheme })
  *   controller.applyInitial()    // createWindow 后调一次
  *   controller.attachLifecycle() // 挂 fullscreen lifecycle handler
- *   // theme:set / theme:setSkin / nativeTheme.updated 上游仍调 sync()，
+ *   // theme:set / nativeTheme.updated 上游仍调 sync()，
  *   // win32/linux 会刷新 bg，darwin 是 no-op。
  */
 export interface WindowMaterialControllerOptions {
@@ -154,7 +152,7 @@ export interface WindowMaterialControllerOptions {
   /** 已由 BrowserWindow 构造参数应用的材料；传入后 controller 不重复 set 同值。 */
   initialMaterial?: MaterialOutputs | null
   /** 实时读取，每次 sync 拉一次（非 darwin 上让 theme 切换刷新 bg） */
-  getTheme: () => { skin: ThemeSkin; resolvedTheme: ResolvedTheme }
+  getTheme: () => { resolvedTheme: ResolvedTheme }
   /** fullscreen 状态改变后通知 renderer，让 renderer 设置 data-native-fullscreen attr */
   notifyFullscreenChanged?: (isFullscreen: boolean) => void
 }
@@ -178,10 +176,9 @@ export function createWindowMaterialController(options: WindowMaterialController
 
   const sync = (): void => {
     if (window.isDestroyed()) return
-    const { skin, resolvedTheme } = getTheme()
+    const { resolvedTheme } = getTheme()
     const target = computeMaterial({
       platform,
-      skin,
       resolvedTheme,
       isFullscreen: materialFullscreenState,
     })

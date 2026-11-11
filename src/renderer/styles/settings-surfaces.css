@@ -28,7 +28,7 @@
   --sx-accent-wash: color-mix(in srgb, var(--color-blue) 9%, transparent);
   --sx-focus-ring: 0 0 0 3px color-mix(in srgb, var(--color-blue) 22%, transparent);
 
-  --sx-ink: var(--ready-ink-green, #1C1D21);
+  --sx-ink: var(--rn-ink);
   --sx-ink-hover: color-mix(in srgb, var(--sx-ink) 86%, #fff);
   --sx-on-ink: #FFFFFF;
 
@@ -95,7 +95,7 @@ html[data-theme='dark'] {
   --sx-accent-wash: color-mix(in srgb, var(--color-blue) 14%, transparent);
   --sx-focus-ring: 0 0 0 3px color-mix(in srgb, var(--color-blue) 30%, transparent);
 
-  --sx-ink: var(--ready-ink-green, #ECEEF2);
+  --sx-ink: var(--rn-ink);
   --sx-ink-hover: #FFFFFF;
   --sx-on-ink: #15171C;
 
@@ -140,17 +140,6 @@ html[data-theme='dark'] {
 }
 
 /* 实色玻璃：墨色跟随底板自身的墨（绿/蓝），强调玫瑰仍只做点缀。 */
-html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glass-variant='solid-blue']) {
-  --sx-title: var(--ready-ink-green);
-  --sx-body: color-mix(in srgb, var(--ready-ink-green) 88%, transparent);
-  --sx-muted: color-mix(in srgb, var(--ready-ink-green) 70%, transparent);
-  --sx-subtle: color-mix(in srgb, var(--ready-ink-green) 56%, transparent);
-  --sx-card-bg: rgba(255, 255, 255, 0.46);
-}
-
-html[data-theme='dark'][data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glass-variant='solid-blue']) {
-  --sx-card-bg: rgba(255, 255, 255, 0.05);
-}
 
 /* 设置页内的原生控件（下拉弹层、滚动条、日期框）跟随应用主题，而不是跟随系统外观。 */
 .settings-page-shell {

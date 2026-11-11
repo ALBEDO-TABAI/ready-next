@@ -19,11 +19,15 @@ test('typography tokens are a single deduplicated source in @theme', async () =>
   const css = readRendererStyles()
 
   // Font roles: CJK-preserving stack, head/numeric defined by reference (one source).
-  assert.match(css, /--font-ui:[^;]*PingFang SC[^;]*Inter[^;]*sans-serif;/)
+  const tokens = await readRepoFile('src/renderer/design/next/tokens.css')
+  assert.match(css, /--font-ui:\s*var\(--rn-font-ui\);/)
+  assert.match(css, /--font-mono:\s*var\(--rn-font-mono\);/)
+  assert.match(tokens, /--rn-font-ui:[^;]*RN Inter[^;]*PingFang SC[^;]*sans-serif;/)
   assert.match(css, /--font-head:\s*var\(--font-ui\);/)
   assert.match(css, /--font-numeric:\s*var\(--font-mono\);/)
   // The UI/body face must never become a Latin-only display font (would drop CJK).
   assert.doesNotMatch(css, /--font-ui:[^;]*\bDoto\b[^;]*;/)
+  assert.doesNotMatch(tokens, /--rn-font-ui:[^;]*\bDoto\b[^;]*;/)
 
   // Size scale anchors.
   assert.match(css, /--text-2xs:\s*9px;/)

@@ -13,6 +13,7 @@ import './styles/index.css'
 import './styles/ritual-overlay.css'
 import './styles/workbench-sliders.css'
 import { writeStorage } from './utils/storage'
+import { removeRetiredThemeStorage } from './stores/theme-legacy-storage'
 import {
   installBeforeQuitFlushBridge,
   registerBeforeQuitFlushHandler,
@@ -23,7 +24,7 @@ import { flushCurrentDocumentTabsForExit } from './modules/document/documentExit
 type StartupThemeSnapshot = {
   option: string
   resolved: 'light' | 'dark'
-  skin: string
+  transparency: 'normal' | 'reduced'
   isNativeFullscreen: boolean
 }
 
@@ -34,38 +35,22 @@ async function reconcileStartupTheme(): Promise<StartupThemeSnapshot | null> {
   const themeResult = await window.electronAPI?.theme.get()
   if (!themeResult?.success || !themeResult.data) return null
 
-  const { option, resolved, skin, isNativeFullscreen } = themeResult.data
+  const { option, resolved, isNativeFullscreen } = themeResult.data
+  const transparency = themeResult.data.transparency === 'reduced' ? 'reduced' : 'normal'
   const root = document.documentElement
 
-  // Main 进程是主题/皮肤的真值来源；localStorage 是 FOUC 兜底。这里把 stale localStorage 覆盖。
+  // Main 进程是主题与“减少透明”的真值来源；localStorage 是 FOUC 兜底。这里把 stale localStorage 覆盖。
   writeStorage('ready-theme', option)
-  if (
-    skin === 'liquid-glass' ||
-    skin === 'ready-glass' ||
-    skin === 'solid-green-glass' ||
-    skin === 'solid-blue-glass'
-  ) {
-    writeStorage('ready-theme-skin', skin)
-  }
+  writeStorage('ready-transparency', transparency)
+  writeStorage('ready-reduce-transparency', String(themeResult.data.reduceTransparency === true))
+  removeRetiredThemeStorage()
 
-  // 同步四个 <html> attr：CSS selector
-  //   html[data-native-fullscreen='true'][data-skin='liquid-glass'][data-glass-backdrop='native']
-  // 同时依赖三个 attr，缺一不可。
+  // 同步 <html> attr：data-theme、data-transparency、data-native-fullscreen 共同决定窗口底
+  // （theme-tokens.css 的 --app-bg-overlay-opacity 规则）。
   if (root.getAttribute('data-theme') !== resolved) {
     root.setAttribute('data-theme', resolved)
   }
-  // data-skin 永远是 'liquid-glass'（与 useTheme.applySkin 行为一致，兼容现有 CSS）
-  root.setAttribute('data-skin', 'liquid-glass')
-  root.setAttribute(
-    'data-glass-backdrop',
-    skin === 'ready-glass' || skin === 'solid-green-glass' || skin === 'solid-blue-glass'
-      ? 'ready'
-      : 'native'
-  )
-  const variant =
-    skin === 'solid-green-glass' ? 'solid-green' : skin === 'solid-blue-glass' ? 'solid-blue' : ''
-  if (variant) root.setAttribute('data-glass-variant', variant)
-  else root.removeAttribute('data-glass-variant')
+  root.setAttribute('data-transparency', transparency)
   // 启动 reconciliation：data-native-fullscreen 只在 "纯原生窗口全屏"（IPC isNativeFullscreen=true）
   // 且当前**没有 HTML5 fullscreen 活跃**时设置。HTML5 fullscreen 期间不需要 .ready-app-bg backing
   // （iframe :fullscreen + ::backdrop 已经盖了一切），设了反而会因为 OOPIF 路径 IPC 不可靠卡死成黑屏。
@@ -77,7 +62,7 @@ async function reconcileStartupTheme(): Promise<StartupThemeSnapshot | null> {
     root.removeAttribute('data-native-fullscreen')
   }
 
-  return { option, resolved, skin, isNativeFullscreen }
+  return { option, resolved, transparency, isNativeFullscreen }
 }
 
 type AppComponent = React.ComponentType

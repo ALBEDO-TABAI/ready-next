@@ -21,7 +21,7 @@
   box-shadow: var(--chat-menu-selected-shadow) !important;
 }
 
-html[data-skin='liquid-glass'] .ready-floating-menu {
+html:root .ready-floating-menu {
   background: var(--chat-menu-frost-bg) !important;
   border-color: var(--chat-menu-frost-border) !important;
   box-shadow: var(--chat-menu-shadow) !important;
@@ -29,18 +29,18 @@ html[data-skin='liquid-glass'] .ready-floating-menu {
   -webkit-backdrop-filter: blur(calc(var(--lg-blur-strong) * 1.28)) saturate(calc(var(--surface-saturate) - 8%)) contrast(1.01) !important;
 }
 
-html[data-skin='liquid-glass'] .ready-floating-menu-item:hover {
+html:root .ready-floating-menu-item:hover {
   background: var(--chat-menu-hover-bg) !important;
   box-shadow: var(--chat-menu-hover-shadow);
 }
 
-html[data-skin='liquid-glass'] .ready-floating-menu-item.is-selected {
+html:root .ready-floating-menu-item.is-selected {
   background: var(--chat-menu-selected-bg) !important;
   border-color: var(--chat-menu-selected-border) !important;
   box-shadow: var(--chat-menu-selected-shadow) !important;
 }
 
-html[data-skin='liquid-glass'] .ready-liquid-popover.ready-floating-menu {
+html:root .ready-liquid-popover.ready-floating-menu {
   background: transparent !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;

@@ -103,7 +103,7 @@
 }
 
 /* 顶栏与导航列连成一片，内容框再叠一层而显得更亮。 */
-html[data-skin='liquid-glass'] .rss-mode-shell .rss-workbench-body {
+html:root .rss-mode-shell .rss-workbench-body {
   background: var(--workbench-module-surface-bg);
   backdrop-filter: blur(24px) saturate(0%);
   -webkit-backdrop-filter: blur(24px) saturate(0%);

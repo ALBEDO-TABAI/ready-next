@@ -686,7 +686,7 @@ html[data-theme='dark'] .ready-block-popover.ready-block-toolbar [aria-pressed=t
 @media (prefers-reduced-motion: reduce) { .ink-sb-peek { transition: none; } }
 
 /* Under the liquid-glass skin the content frame carries its own surface; inside the paper page it must not. */
-html[data-skin='liquid-glass'] .ink-main .document-content-frame { background: transparent !important; border-radius: 0 !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+html:root .ink-main .document-content-frame { background: transparent !important; border-radius: 0 !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
 
 .ink-scope .ready-comments-panel .ready-comments-close { align-self: flex-end; height: 24px; padding: 0 10px; border: 0; background: none; color: var(--ink-text-tertiary); }
 .ink-scope .ready-comments-panel .ready-comments-close:hover { color: var(--ink-text-primary); background: var(--studio-fill); }

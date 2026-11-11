@@ -36,9 +36,8 @@ function MainAppShell() {
     })
   }), [])
 
-  // `data-theme` 与 `data-skin` / `data-glass-backdrop` 都由 useTheme 单点拥有
-  // （useTheme.applySkin 在模块初始化时设置，setSkin/toggleSkin 时更新）。
-  // 这里**不再**重复设置 data-skin，避免与 applySkin 形成 race。
+  // `data-theme` 与 `data-transparency` 都由 useTheme 单点拥有（模块初始化时设置，
+  // setTheme / setReduceTransparency 与 Main 的 theme:changed 推送时更新），这里不再重复设置。
 
   useEffect(() => {
     // `data-native-fullscreen` attr 控制 `.ready-app-bg` 是否承担 fullscreen backing（防壁纸泄漏）。

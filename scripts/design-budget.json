@@ -1,0 +1,461 @@
+{
+  "directories": {
+    ".": {
+      "color": 67,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "components/agent": {
+      "color": 16,
+      "backdropFilter": 2,
+      "fontFace": 0
+    },
+    "components/agent/chat-panel": {
+      "color": 3,
+      "backdropFilter": 2,
+      "fontFace": 0
+    },
+    "components/agent/chat-panel/attachments-helpers": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "components/agent/chat-panel/attachments-preview": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "components/agent/chat-panel/drag-drop": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "components/agent/chat-panel/helpers": {
+      "color": 4,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "components/agent/chat-panel/layout": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "components/agent/chat-panel/markdown": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "components/agent/chat-panel/model-selector": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "components/agent/chat-panel/recall-state": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "components/agent/chat-panel/reference-skill": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "components/agent/chat-panel/session-tabs": {
+      "color": 8,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "components/agent/chat-panel/task": {
+      "color": 1,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "components/agent/chat-panel/task-interaction": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "components/agent/chat-panel/task-merge": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "components/agent/chat-panel/task-snapshot": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "components/browser": {
+      "color": 4,
+      "backdropFilter": 13,
+      "fontFace": 0
+    },
+    "components/canvas": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "components/canvas/cards": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "components/canvas/surface": {
+      "color": 6,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "components/document": {
+      "color": 76,
+      "backdropFilter": 4,
+      "fontFace": 0
+    },
+    "components/document/book": {
+      "color": 8,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "components": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "components/graph": {
+      "color": 18,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "components/layout": {
+      "color": 25,
+      "backdropFilter": 2,
+      "fontFace": 0
+    },
+    "components/layout/file-tree": {
+      "color": 33,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "components/motion": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "components/overlay": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "components/ready": {
+      "color": 19,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "components/rss": {
+      "color": 46,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "components/settings": {
+      "color": 2,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "components/skill": {
+      "color": 13,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "components/startup": {
+      "color": 2,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "components/tabs": {
+      "color": 6,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "components/ui/dot-matrix": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "components/ui": {
+      "color": 40,
+      "backdropFilter": 4,
+      "fontFace": 0
+    },
+    "components/ui/liquid-glass": {
+      "color": 1,
+      "backdropFilter": 4,
+      "fontFace": 0
+    },
+    "components/workbench": {
+      "color": 1,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "design/next": {
+      "color": 0,
+      "backdropFilter": 5,
+      "fontFace": 4
+    },
+    "hooks": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "modules/agent": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "modules/agent/document-actions": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "modules/app": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "modules/browser": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "modules/calendar/linkage": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "modules/calendar": {
+      "color": 3,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "modules/calendar/workbench": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "modules/calendar/workbench/components": {
+      "color": 9,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "modules/calendar/workbench/layers": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "modules/calendar/workbench/styles": {
+      "color": 96,
+      "backdropFilter": 5,
+      "fontFace": 2
+    },
+    "modules/canvas/composition": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "modules/canvas/interaction": {
+      "color": 1,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "modules/canvas": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "modules/document/annotations": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "modules/document/block-editor": {
+      "color": 12,
+      "backdropFilter": 1,
+      "fontFace": 0
+    },
+    "modules/document/book": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "modules/document": {
+      "color": 81,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "modules/document/database": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "modules/document/drafts": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "modules/document/import": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "modules/document/ink": {
+      "color": 232,
+      "backdropFilter": 19,
+      "fontFace": 1
+    },
+    "modules/document/page-ui": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "modules/document/templates": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "modules/file-emergence": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "modules/image-generation": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "modules/keyboard": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "modules/library": {
+      "color": 54,
+      "backdropFilter": 3,
+      "fontFace": 0
+    },
+    "modules/library/find": {
+      "color": 1,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "modules/library/reader": {
+      "color": 61,
+      "backdropFilter": 0,
+      "fontFace": 1
+    },
+    "modules/overlay": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "modules/rss": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "modules/workbench": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "modules/workbench/object-ui": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "pages": {
+      "color": 35,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "pages/modes": {
+      "color": 0,
+      "backdropFilter": 2,
+      "fontFace": 0
+    },
+    "pages/settings": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "preview": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "preview/settings-preview": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "stores": {
+      "color": 7,
+      "backdropFilter": 0,
+      "fontFace": 0
+    },
+    "styles": {
+      "color": 888,
+      "backdropFilter": 68,
+      "fontFace": 0
+    },
+    "utils": {
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
+    }
+  },
+  "retired": {
+    "data-skin": 0,
+    "data-glass-variant": 0,
+    "data-glass-backdrop": 0,
+    "data-accent": 0,
+    "ThemeAccent": 0,
+    "ThemeSkin": 0,
+    "ready-theme-accent": 0,
+    "ready-theme-skin": 0,
+    "accentPalettes": 0,
+    "setAccent": 0
+  },
+  "retiredAllowFiles": [
+    "src/renderer/stores/theme-legacy-storage.ts"
+  ],
+  "whitelist": [
+    {
+      "glob": "src/renderer/design/next/**",
+      "reason": "W1 §3.1 的共享设计令牌来源。"
+    },
+    {
+      "glob": "src/renderer/modules/calendar/workbench/styles/tokens.css",
+      "reason": "W1 §3.2 指定保留的日历明暗色板；文件同时含界面颜色，后续迁移仍需移走这些值。"
+    },
+    {
+      "glob": "src/renderer/modules/calendar/workbench/geometry-tokens.ts",
+      "reason": "日历生成的明暗颜色数据，与 tokens.css 同源；也混有界面颜色和几何数据。"
+    },
+    {
+      "glob": "src/renderer/components/document/EditorFloatingToolbar.tsx",
+      "reason": "TEXT_COLORS / BG_COLORS 是用户正文和高亮色板；按文件白名单也会豁免该文件的界面颜色。"
+    },
+    {
+      "glob": "src/renderer/modules/library/reader/marks.ts",
+      "reason": "MARKERS / markerColor 定义用户阅读划线颜色。"
+    },
+    {
+      "glob": "src/renderer/modules/library/topics.ts",
+      "reason": "lookOf 生成书脊布色与配套前景色；布色色板本体在扫描范围外的 src/shared/library-topics.ts。"
+    }
+  ],
+  "goals": {
+    "color": "模块样式颜色字面量为 0",
+    "backdropFilter": "只在材质文件",
+    "fontFace": "只在 src/renderer/design/next/tokens.css",
+    "retired": "全部为 0"
+  }
+}

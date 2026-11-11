@@ -1,7 +1,6 @@
 import readyWordmarkSvg from '../renderer/assets/ready-wordmark.svg?raw'
 import { createReadyLogoDotPattern, type ReadyLogoDot } from '../shared/ready-logo-dots'
 
-type StartupSplashVariant = 'orange' | 'pink'
 
 const GRID_ROWS = 8
 const GRID_COLUMNS = 37
@@ -32,15 +31,10 @@ const FINAL_LOGO_HOLD_MS = 460
 const CARD_EXIT_MS = 280
 const EXIT_TOTAL_MS = LOGO_COMPLETE_MS + FINAL_LOGO_HOLD_MS + CARD_EXIT_MS
 
-const VARIANT_COLORS: Record<StartupSplashVariant, { logo: string; glow: string }> = {
-  orange: {
-    logo: '#FF4B2B',
-    glow: 'rgba(255, 75, 43, 0.18)'
-  },
-  pink: {
-    logo: '#B6467A',
-    glow: 'rgba(182, 70, 122, 0.20)'
-  }
+// The brand mark in the one signal colour (--rn-accent, W1 DL5).
+const SPLASH_COLORS = {
+  logo: '#ff5a1f',
+  glow: 'rgba(255, 90, 31, 0.18)'
 }
 
 interface LogoColumn {
@@ -120,8 +114,8 @@ function renderLogoColumnSvgs(): string {
   }).join('')
 }
 
-export function createStartupSplashDataUrl(variant: StartupSplashVariant): string {
-  const colors = VARIANT_COLORS[variant]
+export function createStartupSplashDataUrl(): string {
+  const colors = SPLASH_COLORS
   const scanPeriodMs = READY_LOGO_PATTERN.columnCount * LOGO_COLUMN_MS
   const litSlicePct = (100 / READY_LOGO_PATTERN.columnCount).toFixed(4)
   const html = `<!doctype html>

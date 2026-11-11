@@ -6,6 +6,25 @@ import reactHooksPlugin from 'eslint-plugin-react-hooks'
 import reactRefreshPlugin from 'eslint-plugin-react-refresh'
 import readyPlugin from './eslint-rules/index.mjs'
 
+const privateDesignImports = [
+  {
+    // The document module (its page UI and its mode page) owns ink's menu and overlay.
+    owner: ['src/renderer/modules/document/**/*.{js,jsx,ts,tsx}', 'src/renderer/pages/modes/DocumentMode.tsx'],
+    regex: '(?:^|/)ink/(?:menu|overlay)(?:\\.[jt]sx?)?$',
+    message: 'ink 的私有菜单、弹层只能在文档模块内使用；跨模块请使用公共基元。',
+  },
+  {
+    owner: 'src/renderer/modules/calendar/workbench/**/*.{js,jsx,ts,tsx}',
+    regex: '(?:^|/)workbench/components/(?:Menus|Overlays)(?:\\.[jt]sx?)?$',
+    message: '日历的私有菜单、弹层只能在 modules/calendar/workbench 内使用；跨模块请使用公共基元。',
+  },
+  {
+    owner: 'src/renderer/modules/library/**/*.{js,jsx,ts,tsx}',
+    regex: '(?:^|/)library/ArchiveImport(?:\\.[jt]sx?)?$',
+    message: 'ArchiveImport 对话框只能在 modules/library 内使用；跨模块请使用公共基元。',
+  },
+]
+
 export default [
   {
     ignores: ['out/**', 'dist/**', 'exports/**', 'outputs/**', 'Packer/.staging/**', 'node_modules/**', '.claude/codex-audit/**', '.claude/worktrees/**', '.worktrees/**', 'build/release-skill-runtime/**']
@@ -76,6 +95,14 @@ export default [
       'ready/no-task-card-run-cast': 'error'
     }
   },
+  ...[null, ...privateDesignImports].map(owner => ({
+    files: owner ? [owner.owner].flat() : ['src/renderer/**/*.{js,jsx,ts,tsx}'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: privateDesignImports.filter(entry => entry !== owner).map(({ regex, message }) => ({ regex, message })),
+      }],
+    },
+  })),
   {
     files: ['src/main/**/*.{ts,tsx}', 'src/__tests__/**/*.{ts,tsx}'],
     rules: {

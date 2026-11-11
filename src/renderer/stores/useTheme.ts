@@ -14,30 +14,18 @@ let themeDomReconcileTimer: number | null = null
 
 export type ThemeOption = 'light' | 'dark' | 'system'
 export type ResolvedTheme = 'light' | 'dark'
-export type ThemeAccent = 'blue' | 'green' | 'purple' | 'orange'
-/**
- * 玻璃风格。
- * - `liquid-glass`（默认）：真半透明，macOS 用 `under-window` vibrancy 让桌面壁纸做底。
- * - `ready-glass`（可选）：Ready 自己持有稳定底色（`.ready-app-bg` 渐变），不使用 macOS vibrancy。
- * - `solid-green-glass`（实验）：Ready 自持实色绿色玻璃底。
- * - `solid-blue-glass`（实验）：Ready 自持实色蓝色玻璃底。
- *
- * 注意：DOM 层始终设 `data-skin='liquid-glass'`（与现有玻璃面板 selector 兼容），
- * backdrop 差异通过 `data-glass-backdrop` ∈ `{native, ready}` 区分，颜色变体通过
- * `data-glass-variant` 区分。
- */
-export type ThemeSkin = 'liquid-glass' | 'ready-glass' | 'solid-green-glass' | 'solid-blue-glass'
+/** 生效的透明度（W1 DL12）：用户的“减少透明”或系统的“减少透明度”任一打开即为 reduced。 */
+export type Transparency = 'normal' | 'reduced'
 
 interface ThemeState {
     theme: ThemeOption
     resolvedTheme: ResolvedTheme
-    skin: ThemeSkin
-    accent: ThemeAccent
+    transparency: Transparency
+    /** 用户自己的“减少透明”开关（真值在 Main；这里是它的回显）。 */
+    reduceTransparency: boolean
     setTheme: (theme: ThemeOption) => void
     toggleTheme: () => void
-    setSkin: (skin: ThemeSkin) => void
-    toggleSkin: () => void
-    setAccent: (accent: ThemeAccent) => void
+    setReduceTransparency: (enabled: boolean) => void
 }
 
 // Read initial theme from localStorage
@@ -47,74 +35,14 @@ const getStoredTheme = (): ThemeOption => {
     return 'light'
 }
 
-const getStoredSkin = (): ThemeSkin => {
-    const stored = readStorage('ready-theme-skin')
-    if (stored === 'liquid-glass' || stored === 'ready-glass' || stored === 'solid-green-glass' || stored === 'solid-blue-glass') return stored
-    return 'liquid-glass'
-}
+// Startup cache written by main.tsx from Main's snapshot (Main owns the setting).
+const getStoredTransparency = (): Transparency => (readStorage('ready-transparency') === 'reduced' ? 'reduced' : 'normal')
+const getStoredReduceTransparency = (): boolean => readStorage('ready-reduce-transparency') === 'true'
 
-const getStoredAccent = (): ThemeAccent => {
-    const stored = readStorage('ready-theme-accent')
-    if (stored === 'blue' || stored === 'green' || stored === 'purple' || stored === 'orange') return stored
-    return 'blue'
-}
-
-// 四档强调色按 OKLCH 等明度配平（以 Ready 橘红 L≈0.67 为锚）：日间 L≈0.61–0.63、夜间 L≈0.71–0.75，
-// 让任一档在暖纸底 / 深色底上的视觉分量一致。原薄荷绿 L=0.77 在纸底只有 1.8:1，改为翡翠绿。
-const accentPalettes: Record<ThemeAccent, Record<ResolvedTheme, { color: string; light: string }>> = {
-    blue: {
-        light: { color: '#5084E7', light: 'rgba(80, 132, 231, 0.1)' },
-        dark: { color: '#72A3FD', light: 'rgba(114, 163, 253, 0.15)' },
-    },
-    green: {
-        light: { color: '#099F79', light: 'rgba(9, 159, 121, 0.1)' },
-        dark: { color: '#4AC59D', light: 'rgba(74, 197, 157, 0.15)' },
-    },
-    purple: {
-        light: { color: '#8A61EC', light: 'rgba(138, 97, 236, 0.1)' },
-        dark: { color: '#A886FF', light: 'rgba(168, 134, 255, 0.15)' },
-    },
-    orange: {
-        light: { color: '#FF4B2B', light: 'rgba(255, 75, 43, 0.12)' },
-        dark: { color: '#FF6345', light: 'rgba(255, 99, 69, 0.16)' },
-    },
-}
-
-// 实色玻璃皮肤的玫瑰强调（仅接管 purple 档）：日间深玫瑰可承载白字（≥4.5:1），
-// 夜间亮玫瑰只做 glyph/描边；绿底配暖玫瑰(H358)、蓝底配冷玫瑰(H352)，与各自底板色相呼应。
-const solidSkinRoseAccents: Partial<Record<ThemeSkin, Record<ResolvedTheme, { color: string; light: string }>>> = {
-    'solid-green-glass': {
-        light: { color: '#B84574', light: 'rgba(184, 69, 116, 0.14)' },
-        dark: { color: '#F298BA', light: 'rgba(242, 152, 186, 0.16)' },
-    },
-    'solid-blue-glass': {
-        light: { color: '#B5467E', light: 'rgba(181, 70, 126, 0.14)' },
-        dark: { color: '#EE99C1', light: 'rgba(238, 153, 193, 0.16)' },
-    },
-}
-
-export const resolveAccentPalette = (accent: ThemeAccent, resolved: ResolvedTheme, skin: ThemeSkin) => {
-    const skinPalette = accent === 'purple' ? solidSkinRoseAccents[skin] : undefined
-    return (skinPalette ?? accentPalettes[accent])[resolved]
-}
-
-const applyAccent = (accent: ThemeAccent, resolved: ResolvedTheme, skin: ThemeSkin) => {
+const applyTransparency = (transparency: Transparency) => {
     if (typeof document === 'undefined') return
-    const palette = resolveAccentPalette(accent, resolved, skin)
-    const root = document.documentElement
-    root.setAttribute('data-accent', accent)
-    if (!root.style?.setProperty) return
-    root.style.setProperty('--color-blue', palette.color)
-    root.style.setProperty('--color-blue-light', palette.light)
-    root.style.setProperty('--accent-primary', palette.color)
-    root.style.setProperty('--accent-primary-light', palette.light)
-}
-
-const syncNativeSkin = (skin: ThemeSkin) => {
-    if (typeof window !== 'undefined' && window.electronAPI?.theme?.setSkin) {
-        // fire-and-forget: native vibrancy update; renderer-side CSS already applied the skin, so a missed native sync only affects window-chrome material until the next setSkin call.
-        window.electronAPI.theme.setSkin(skin).catch(() => { /* ignore in browser-only dev */ })
-    }
+    document.documentElement.setAttribute('data-transparency', transparency)
+    writeStorage('ready-transparency', transparency)
 }
 
 // Resolve the effective theme (system -> actual light/dark)
@@ -256,40 +184,28 @@ const applyColorTheme = (
     }, THEME_DOM_RECONCILE_FALLBACK_MS)
 }
 
-/**
- * 把 skin 状态应用到 DOM。
- *
- * - `data-skin` 永远是 `'liquid-glass'`：兼容现有 CSS selector（`html[data-skin='liquid-glass']
- *   .glass-surface-*` 等数百条规则），避免大规模重写。
- * - `data-glass-backdrop` 才是真正区分两种风格的开关：
- *   - `'native'`（默认）：使用 macOS vibrancy + 透明窗口（真半透明）
- *   - `'ready'`：Ready 自持稳定底（`.ready-app-bg` 渐变层可见）
- * - `data-glass-variant` 只负责实验色彩，不改变窗口材料。
- *
- * CSS 用 `[data-glass-backdrop='native']` / `[data-glass-backdrop='ready']` 修饰符选区分。
- */
-const applySkin = (skin: ThemeSkin) => {
-    const root = document.documentElement
-    root.setAttribute('data-skin', 'liquid-glass')
-    root.setAttribute('data-glass-backdrop', skin === 'ready-glass' || skin === 'solid-green-glass' || skin === 'solid-blue-glass' ? 'ready' : 'native')
-    const variant = skin === 'solid-green-glass'
-        ? 'solid-green'
-        : skin === 'solid-blue-glass'
-            ? 'solid-blue'
-            : ''
-    if (variant) root.setAttribute('data-glass-variant', variant)
-    else root.removeAttribute('data-glass-variant')
-}
-
 export const useTheme = create<ThemeState>((set, get) => {
     // Apply initial theme on load
     const initial = getStoredTheme()
-    const initialSkin = getStoredSkin()
-    const initialAccent = getStoredAccent()
+    const initialTransparency = getStoredTransparency()
     const resolved = resolveTheme(initial)
     applyColorTheme(resolved, initial, resolved, { animate: false })
-    applySkin(initialSkin)
-    applyAccent(initialAccent, resolved, initialSkin)
+    applyTransparency(initialTransparency)
+
+    // Main broadcasts a snapshot when the switch or the system's "reduce transparency" changes.
+    // Only the transparency fields are taken from it; light/dark keeps its ritual-driven path.
+    const followSnapshot = (snapshot: { transparency?: Transparency; reduceTransparency?: boolean } | null | undefined) => {
+        if (!snapshot) return
+        const transparency: Transparency = snapshot.transparency === 'reduced' ? 'reduced' : 'normal'
+        const reduceTransparency = snapshot.reduceTransparency === true
+        writeStorage('ready-reduce-transparency', String(reduceTransparency))
+        const state = get()
+        if (state.transparency !== transparency) applyTransparency(transparency)
+        if (state.transparency !== transparency || state.reduceTransparency !== reduceTransparency) {
+            set({ transparency, reduceTransparency })
+        }
+    }
+    window.electronAPI?.theme?.onChanged?.(followSnapshot)
 
     // Listen for system theme changes
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
@@ -298,7 +214,6 @@ export const useTheme = create<ThemeState>((set, get) => {
         if (state.theme === 'system') {
             const newResolved = resolveTheme('system')
             applyColorTheme(newResolved, 'system', state.resolvedTheme, { animate: false })
-            applyAccent(state.accent, newResolved, state.skin)
             set({ resolvedTheme: newResolved })
         }
     }
@@ -307,14 +222,12 @@ export const useTheme = create<ThemeState>((set, get) => {
     return {
         theme: initial,
         resolvedTheme: resolved,
-        skin: initialSkin,
-        accent: initialAccent,
+        transparency: initialTransparency,
+        reduceTransparency: getStoredReduceTransparency(),
         setTheme: (theme) => {
             const prevResolved = get().resolvedTheme
             const newResolved = resolveTheme(theme)
             applyColorTheme(newResolved, theme, prevResolved)
-            const state = get()
-            applyAccent(state.accent, newResolved, state.skin)
             writeStorage('ready-theme', theme)
             set({ theme, resolvedTheme: newResolved })
         },
@@ -326,32 +239,23 @@ export const useTheme = create<ThemeState>((set, get) => {
             // re-enable it from Settings.
             const next: ThemeOption = state.resolvedTheme === 'dark' ? 'light' : 'dark'
             applyColorTheme(next, next, state.resolvedTheme)
-            applyAccent(state.accent, next, state.skin)
             writeStorage('ready-theme', next)
             set({ theme: next, resolvedTheme: next })
         },
-        setSkin: (skin) => {
-            const state = get()
-            applySkin(skin)
-            applyAccent(state.accent, state.resolvedTheme, skin)
-            syncNativeSkin(skin)
-            writeStorage('ready-theme-skin', skin)
-            set({ skin })
-        },
-        toggleSkin: () => {
-            const state = get()
-            const next: ThemeSkin = get().skin === 'liquid-glass' ? 'ready-glass' : 'liquid-glass'
-            applySkin(next)
-            applyAccent(state.accent, state.resolvedTheme, next)
-            syncNativeSkin(next)
-            writeStorage('ready-theme-skin', next)
-            set({ skin: next })
-        },
-        setAccent: (accent) => {
-            const state = get()
-            applyAccent(accent, state.resolvedTheme, state.skin)
-            writeStorage('ready-theme-accent', accent)
-            set({ accent })
+        setReduceTransparency: (enabled) => {
+            // Turning it on is immediate; turning it off waits for Main, because the system's own
+            // "reduce transparency" may still hold the window opaque.
+            if (enabled) applyTransparency('reduced')
+            set(enabled ? { reduceTransparency: true, transparency: 'reduced' } : { reduceTransparency: false })
+            const api = window.electronAPI?.theme
+            if (!api?.setReduceTransparency) {
+                // No Main (browser-only preview): nothing else can hold the window opaque.
+                followSnapshot({ transparency: enabled ? 'reduced' : 'normal', reduceTransparency: enabled })
+                return
+            }
+            api.setReduceTransparency(enabled).then(followSnapshot).catch((error: unknown) => {
+                console.warn('[theme] reduce-transparency switch failed:', error instanceof Error ? error.message : String(error))
+            })
         },
     }
 })

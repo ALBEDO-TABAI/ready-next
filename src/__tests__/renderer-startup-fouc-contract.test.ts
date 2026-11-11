@@ -8,7 +8,7 @@ function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-test('renderer first frame already carries data-theme + data-skin to prevent FOUC into the debug-white state', () => {
+test('renderer first frame already carries data-theme + data-transparency to prevent FOUC into the debug-white state', () => {
   const indexHtml = readWorkspaceFile('src/renderer/index.html')
   const rendererMain = readWorkspaceFile('src/renderer/main.tsx')
   const mainIndex = readWorkspaceFile('src/main/index.ts')
@@ -20,15 +20,15 @@ test('renderer first frame already carries data-theme + data-skin to prevent FOU
     'CSP must declare the nonce used by the head theme-bootstrap',
   )
 
-  // An inline <script> in <head> must synchronously seed data-theme + data-skin from localStorage
+  // An inline <script> in <head> must synchronously seed data-theme + data-transparency from localStorage
   // so the first paint already resolves the liquid-glass cascade instead of the :root default.
   const headMatch = indexHtml.match(/<head[\s\S]*?<\/head>/i)
   assert.ok(headMatch, 'index.html must have a <head>')
   const headSection = headMatch![0]
   assert.match(headSection, /<script nonce="cmVhZHktd2lkZ2V0">[\s\S]*localStorage\.getItem\(['"]ready-theme['"]\)[\s\S]*<\/script>/)
   assert.match(headSection, /setAttribute\(['"]data-theme['"]/)
-  assert.match(headSection, /setAttribute\(['"]data-skin['"]/)
-  assert.match(headSection, /localStorage\.getItem\(['"]ready-theme-skin['"]\)/)
+  assert.match(headSection, /setAttribute\(['"]data-transparency['"]/)
+  assert.match(headSection, /localStorage\.getItem\(['"]ready-transparency['"]\)/)
   // system mode should resolve to prefers-color-scheme result, not fall back to light.
   assert.match(headSection, /prefers-color-scheme: dark/)
 
@@ -51,20 +51,17 @@ test('renderer first frame already carries data-theme + data-skin to prevent FOU
   assert.match(mainIndex, /nonMacFirstFrameBg = nativeTheme\.shouldUseDarkColors \? '#1A1B1E' : '#F7F9FC'/)
 })
 
-test('Stage 1 — reconcileStartupTheme syncs four <html> attrs from main snapshot', () => {
+test('Stage 1 — reconcileStartupTheme syncs theme, transparency and fullscreen attrs from main snapshot', () => {
   const rendererMain = readWorkspaceFile('src/renderer/main.tsx')
 
-  // theme:get 现在返回 { option, resolved, skin, isNativeFullscreen }；
-  // reconcileStartupTheme 必须把这四个值映射到 4 个 <html> attr。
-  assert.match(rendererMain, /skin/, 'reconcileStartupTheme should read skin from snapshot')
+  // Main owns theme, effective transparency and native fullscreen; startup reconciles all three attributes.
+  assert.match(rendererMain, /transparency/, 'reconcileStartupTheme reads effective transparency')
   assert.match(rendererMain, /isNativeFullscreen/, 'reconcileStartupTheme should read isNativeFullscreen')
 
   // data-theme = resolved
   assert.match(rendererMain, /setAttribute\(['"]data-theme['"]/)
-  // data-skin 永远是 'liquid-glass'（与 useTheme.applySkin 行为一致，兼容 CSS selector）
-  assert.match(rendererMain, /setAttribute\(['"]data-skin['"],\s*['"]liquid-glass['"]\)/)
-  // data-glass-backdrop = 'ready' 或 'native'（按 skin 派生）
-  assert.match(rendererMain, /setAttribute\(\s*['"]data-glass-backdrop['"]/)
+  // Effective transparency comes from Main, including the system preference.
+  assert.match(rendererMain, /setAttribute\(['"]data-transparency['"],\s*transparency\)/)
   // data-native-fullscreen 仅在 isNativeFullscreen=true 时设置；否则 removeAttribute
   assert.match(rendererMain, /setAttribute\(['"]data-native-fullscreen['"]/)
   assert.match(rendererMain, /removeAttribute\(['"]data-native-fullscreen['"]\)/)
@@ -115,20 +112,21 @@ test('验证 3 — App.tsx subscribes to fullscreenchange + IPC, AND-NOT reconci
   )
 })
 
-test('Stage 1 — theme:get IPC response shape includes skin and isNativeFullscreen', () => {
+test('Stage 1 — theme:get IPC response shape includes transparency and isNativeFullscreen', () => {
   const mainIndex = readWorkspaceFile('src/main/index.ts')
 
-  // ThemeSnapshot type must carry skin + isNativeFullscreen
-  assert.match(mainIndex, /skin:\s*ThemeSkin/)
+  // ThemeSnapshot carries effective transparency, the user preference and fullscreen state.
+  assert.match(mainIndex, /transparency:\s*Transparency/)
   assert.match(mainIndex, /isNativeFullscreen:/)
 
-  // getThemeSnapshot must populate all four fields
+  // getThemeSnapshot must populate all five fields
   const snapshotFnMatch = mainIndex.match(/function getThemeSnapshot[\s\S]*?\n\}/)
   assert.ok(snapshotFnMatch, 'getThemeSnapshot function should exist')
   const snapshotBody = snapshotFnMatch![0]
   assert.match(snapshotBody, /option:/)
   assert.match(snapshotBody, /resolved:/)
-  assert.match(snapshotBody, /skin:/)
+  assert.match(snapshotBody, /transparency:/)
+  assert.match(snapshotBody, /reduceTransparency:/)
   assert.match(snapshotBody, /isNativeFullscreen:/)
 })
 
@@ -142,8 +140,8 @@ test('验证 2 — fullscreen backing is handled by DOM .ready-app-bg, not Brows
   // NSVisualEffectView 静默 quiesce（用户报：全屏退出 / ready-glass→liquid-glass 后整片黑屏）。
   assert.match(
     styles,
-    /html\[data-skin='liquid-glass'\]\[data-glass-backdrop='native'\]\[data-native-fullscreen='true'\]\s*\{[\s\S]*?--app-bg-overlay-opacity:\s*1/,
-    'liquid-glass + native + fullscreen must opt .ready-app-bg into visible (opacity=1) via --app-bg-overlay-opacity (validation 2)',
+    /html\[data-native-fullscreen='true'\]\[data-transparency='normal'\]:root\s*\{[\s\S]*?--app-bg-overlay-opacity:\s*1/,
+    'normal transparency + fullscreen must make .ready-app-bg visible (opacity=1)',
   )
 
   // 旧的 .ready-app-shell 全屏 backing 规则（Stage 2.5 删除）不能复活
@@ -154,21 +152,21 @@ test('验证 2 — fullscreen backing is handled by DOM .ready-app-bg, not Brows
   )
   assert.doesNotMatch(styles, /--ready-native-fullscreen-bg:/, '--ready-native-fullscreen-bg variable retired')
 
-  // data-glass-backdrop='native' 默认（无 fullscreen）只允许连续的低强度提亮；
+  // Normal transparency without fullscreen only allows low-intensity brightening;
   // 暗色 native 仍单独关掉。
   assert.match(
     styles,
-    /html\[data-skin='liquid-glass'\]\[data-glass-backdrop='native'\]\s*\{[\s\S]*?--app-bg-overlay-opacity:\s*0\.53/,
+    /html\[data-transparency='normal'\]:root\s*\{[\s\S]*?--app-bg-overlay-opacity:\s*0\.53/,
   )
   assert.match(
     styles,
-    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\]\[data-glass-backdrop='native'\]\s*\{[\s\S]*?--app-bg-overlay-opacity:\s*0/,
+    /html\[data-theme='dark'\]\[data-transparency='normal'\]:root\s*\{[\s\S]*?--app-bg-overlay-opacity:\s*0/,
   )
 
   // 不再有 .ready-app-bg { opacity: 0 } 硬覆盖（旧的两条规则已删，改用变量级联）
   assert.doesNotMatch(
     styles,
-    /html\[data-skin='liquid-glass'\]\s*\.ready-app-bg\s*\{\s*background:\s*transparent;\s*opacity:\s*0/,
+    /html:root\s*\.ready-app-bg\s*\{\s*background:\s*transparent;\s*opacity:\s*0/,
     '.ready-app-bg opacity:0 hard overrides should be removed (variable cascade handles it)',
   )
 })

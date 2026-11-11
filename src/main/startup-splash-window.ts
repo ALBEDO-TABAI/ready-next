@@ -42,7 +42,7 @@ function showStartupSplashWindow(splashWindow: BrowserWindow): void {
   startupSplashShownAtMs ??= Date.now()
 }
 
-export async function createStartupSplashWindow(variant: 'orange' | 'pink' = 'orange'): Promise<void> {
+export async function createStartupSplashWindow(): Promise<void> {
   if (startupSplashWindow && !startupSplashWindow.isDestroyed()) return
 
   startupSplashFinishing = false
@@ -85,7 +85,7 @@ export async function createStartupSplashWindow(variant: 'orange' | 'pink' = 'or
   })
 
   try {
-    await splashWindow.loadURL(createStartupSplashDataUrl(variant))
+    await splashWindow.loadURL(createStartupSplashDataUrl())
     // 不在首帧就绪前强制 show：透明窗口在首帧 commit 前 show 出来是全透明的；
     // 若随后主线程立刻被重模块求值长时间阻塞（boot-entry 的动态 import），
     // 首帧握手会被永久卡死——真机复现过"窗口 isVisible 但屏幕全程无像素"。

@@ -111,11 +111,19 @@ import { registerMainProcessHandlers } from './process-handlers'
 import {
   createWindowMaterialController,
   DARWIN_LIQUID_GLASS_TRANSPARENT,
-  type ThemeSkin,
   type ResolvedTheme as MaterialResolvedTheme,
   type SupportedPlatform,
   type WindowMaterialController,
 } from './modules/window-material/main-window-material'
+import {
+  migrateLegacyAppearanceSettings,
+  readReduceTransparency,
+  readThemeOption,
+  REDUCE_TRANSPARENCY_SETTING_KEY,
+  resolveTransparency,
+  THEME_SETTING_KEY,
+  type Transparency,
+} from './modules/window-material/theme-appearance'
 import { createStartupSplashWindow, finishStartupSplashThen, getStartupSplashWindow, yieldToPresentation } from './startup-splash-window'
 import { logBootStage } from './boot-timing'
 import pkg from 'electron-updater'
@@ -159,8 +167,6 @@ let canvasRuntime: ReturnType<typeof setupCanvasRuntime> | undefined
 
 // Guard to prevent re-registering window-dependent IPC handlers on macOS dock re-open
 let windowIPCRegistered = false
-const THEME_SETTING_KEY = 'ui_theme_option'
-const THEME_SKIN_SETTING_KEY = 'ui_theme_skin'
 
 // 窗口材料状态机控制器（单一职责：管理窗口 bg + vibrancy + fullscreen 内部追踪）
 // 在 createWindow() 内实例化；createWindow 之外的所有材料读写都通过它进行。
@@ -169,29 +175,30 @@ let windowMaterialController: WindowMaterialController | null = null
 type ThemeSnapshot = {
   option: 'light' | 'dark' | 'system'
   resolved: MaterialResolvedTheme
-  skin: ThemeSkin
+  /** 生效的透明度：用户的“减少透明”开关或系统的“减少透明度”任一打开即为 reduced（W1 DL12）。 */
+  transparency: Transparency
+  /** 用户自己的开关（设置页显示它）；系统设置单独体现在 transparency 上。 */
+  reduceTransparency: boolean
   /** 由 windowMaterialController.isFullscreen() 派生，主要给 renderer 启动 reconciliation 用 */
   isNativeFullscreen: boolean
 }
 
 function resolveStoredThemeSource(): 'light' | 'dark' | 'system' {
   try {
-    const raw = String(getDatabase().settings.getSetting(THEME_SETTING_KEY) || '').trim().toLowerCase()
-    if (raw === 'light' || raw === 'dark' || raw === 'system') return raw
+    return readThemeOption(getDatabase().settings)
   } catch {
-    // ignore persisted theme read failures
+    // ignore persisted theme read failures: fall back to light
   }
   return 'light'
 }
 
-function resolveStoredThemeSkin(): ThemeSkin {
+function resolveStoredReduceTransparency(): boolean {
   try {
-    const raw = String(getDatabase().settings.getSetting(THEME_SKIN_SETTING_KEY) || '').trim().toLowerCase()
-    if (raw === 'liquid-glass' || raw === 'ready-glass' || raw === 'solid-green-glass' || raw === 'solid-blue-glass') return raw
+    return readReduceTransparency(getDatabase().settings)
   } catch {
-    // ignore persisted skin read failures
+    // ignore persisted setting read failures: fall back to the system preference alone
   }
-  return 'liquid-glass'
+  return false
 }
 
 function resolveSupportedPlatform(): SupportedPlatform {
@@ -211,7 +218,11 @@ function getThemeSnapshot(): ThemeSnapshot {
   return {
     option: resolveStoredThemeSource(),
     resolved: resolveResolvedTheme(),
-    skin: resolveStoredThemeSkin(),
+    transparency: resolveTransparency({
+      userReduce: resolveStoredReduceTransparency(),
+      systemReduce: nativeTheme.prefersReducedTransparency,
+    }),
+    reduceTransparency: resolveStoredReduceTransparency(),
     isNativeFullscreen: windowMaterialController?.isFullscreen() ?? false,
   }
 }
@@ -293,7 +304,7 @@ function applyAppIcon(): void {
 
 // 注：applyNativeWindowMaterial 已被 windowMaterialController 替代。
 // 旧函数手动写死 setVibrancy('under-window') / setBackgroundMaterial('mica')，没法响应
-// skin / fullscreen 切换；新模块按 4 行状态表自动算目标值并 diff 应用。
+// 主题 / fullscreen 切换；新模块按状态表自动算目标值并 diff 应用。
 
 async function runBookmarkMenuAction(action: 'import' | 'export'): Promise<void> {
   if (!browserController) return
@@ -534,6 +545,11 @@ function showMainWindowAfterStartup(): void {
 
 async function createWindow(): Promise<void> {
   logBootStage('create-window:start')
+  try {
+    migrateLegacyAppearanceSettings(getDatabase().settings)
+  } catch (error) {
+    console.warn('[theme] legacy appearance migration failed:', error instanceof Error ? error.message : String(error))
+  }
   nativeTheme.themeSource = resolveStoredThemeSource()
   ensureDockIconVisible()
   // 首帧材料：macOS 从构造期就是透明 under-window，非 macOS 用主题匹配色避免白闪。
@@ -568,7 +584,6 @@ async function createWindow(): Promise<void> {
     platform,
     initialMaterial: constructorMaterial,
     getTheme: () => ({
-      skin: resolveStoredThemeSkin(),
       resolvedTheme: resolveResolvedTheme(),
     }),
     notifyFullscreenChanged: (isFullscreen) => broadcastFullscreenChanged(isFullscreen),
@@ -967,18 +982,16 @@ function setupGlobalIPC(): void {
     broadcastThemeChanged()
   })
 
-  // Skin sync — switches between liquid-glass (真半透明) and ready-glass (Ready 自持稳定底);
-  // Persists to DB and refreshes window material (vibrancy / opaque bg 切换走状态表).
-  // 切换 skin **不** 触发 ritual（ritual 只为昼夜主题切换），renderer 端通过 onChanged 收新 snapshot.
-  ipcMain.handle('theme:setSkin', (_event, skin: string) => {
-    const nextSkin: ThemeSkin = skin === 'ready-glass' || skin === 'solid-green-glass' || skin === 'solid-blue-glass' ? skin : 'liquid-glass'
+  // “减少透明”开关（W1 DL12）：只改 DOM 层的不透明底，不碰窗口的 vibrancy（验证 2 架构）。
+  // 持久化后广播新 snapshot，renderer 据此更新 data-transparency。
+  ipcMain.handle('theme:setReduceTransparency', (_event, enabled: unknown) => {
     try {
-      getDatabase().settings.setSetting(THEME_SKIN_SETTING_KEY, nextSkin)
+      getDatabase().settings.setSetting(REDUCE_TRANSPARENCY_SETTING_KEY, enabled === true ? 'true' : 'false')
     } catch {
-      // ignore persistence failures
+      // ignore persistence failures: the snapshot below still reflects the stored value
     }
-    windowMaterialController?.sync()
     broadcastThemeChanged()
+    return getThemeSnapshot()
   })
 
   ipcMain.handle('theme:get', () => {

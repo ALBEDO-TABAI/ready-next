@@ -7,7 +7,7 @@ import {
   Plug2, Boxes, Cookie, Tags, Brain, Check, Loader2, RefreshCw,
 } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { resolveAccentPalette, useTheme, type ThemeAccent, type ThemeOption, type ThemeSkin } from '../stores/useTheme'
+import { useTheme, type ThemeOption } from '../stores/useTheme'
 import { READY_VERSION_LABEL } from '../../shared/app-version'
 import { nextIntentId } from '../../shared/browser-view-intent'
 import { BROWSER_POWER_MODE_SETTING_KEY } from '../../shared/browser-power'
@@ -63,15 +63,8 @@ const settingsData: SettingSection[] = [
     group: 'general',
     title: '外观',
     icon: Palette,
-    description: '自定义应用的主题和视觉风格',
-    settings: [
-      { id: 'theme', label: '主题色', description: '应用的强调色', type: 'select', value: 'blue', options: [
-        { value: 'blue', label: '蓝色' },
-        { value: 'green', label: '翡翠绿' },
-        { value: 'purple', label: '紫色' },
-        { value: 'orange', label: '橘红色' }
-      ]}
-    ]
+    description: '主题与透明度',
+    settings: []
   },
   {
     id: 'notifications',
@@ -242,27 +235,6 @@ const themeOptions: { value: ThemeOption; label: string; icon: React.ElementType
   { value: 'system', label: '跟随系统', icon: Monitor, description: '自动跟随系统设置' }
 ]
 
-const skinOptions: { value: ThemeSkin; label: string; description: string }[] = [
-  { value: 'liquid-glass', label: '通透玻璃', description: '真半透明液态玻璃，背后透出 macOS 桌面壁纸（默认）' },
-  { value: 'ready-glass', label: '稳定玻璃', description: 'Ready 自持稳定底色，不透出桌面（更稳定但失去通透感）' },
-  { value: 'solid-green-glass', label: '实色绿玻璃', description: '自持实色绿色磨砂底，带柔和青绿渐变' },
-  { value: 'solid-blue-glass', label: '实色蓝玻璃', description: '自持实色蓝色渐变底，搭配玫瑰强调色' },
-]
-
-const ACCENT_ORDER: ThemeAccent[] = ['orange', 'blue', 'purple', 'green']
-
-// 预览缩略图只表达「底材」差异：同一个玻璃小窗放在四种底板上。
-const SKIN_PREVIEW_BACKDROP: Record<ThemeSkin, string> = {
-  'liquid-glass':
-    'radial-gradient(60% 80% at 18% 20%, rgba(123, 169, 255, 0.85), transparent 70%), radial-gradient(55% 70% at 82% 30%, rgba(178, 140, 255, 0.7), transparent 70%), radial-gradient(70% 70% at 60% 100%, rgba(255, 196, 140, 0.75), transparent 70%), #C9D4E8',
-  'ready-glass':
-    'radial-gradient(70% 90% at 12% 10%, rgba(255, 255, 255, 0.9), transparent 70%), linear-gradient(142deg, #FBFAF6 0%, #F2EEE5 100%)',
-  'solid-green-glass':
-    'radial-gradient(80% 90% at 8% 6%, rgba(225, 250, 240, 0.7), transparent 60%), linear-gradient(142deg, #D0F5E8 0%, #A0E1D3 46%, #56B2AC 100%)',
-  'solid-blue-glass':
-    'radial-gradient(80% 90% at 8% 6%, rgba(227, 247, 255, 0.72), transparent 58%), linear-gradient(142deg, #D3F0FD 0%, #ABD6F0 45%, #6BA5D4 100%)',
-}
-
 const SETTINGS_PREVIEW_SHADOW = '0 1px 2px rgba(24, 39, 77, 0.08), 0 6px 16px -8px rgba(24, 39, 77, 0.22)'
 
 function OptionTick() {
@@ -310,32 +282,6 @@ function ThemeModePreview({ mode }: { mode: ThemeOption }) {
   )
 }
 
-function SkinPreview({ skin }: { skin: ThemeSkin }) {
-  const solid = skin === 'solid-green-glass' || skin === 'solid-blue-glass'
-  return (
-    <div
-      className="relative h-[72px] w-full overflow-hidden rounded-[10px]"
-      style={{ background: SKIN_PREVIEW_BACKDROP[skin], boxShadow: SETTINGS_PREVIEW_SHADOW }}
-      aria-hidden
-    >
-      <div
-        className="absolute left-[14%] top-[20%] h-[62%] w-[72%] rounded-[8px] p-[7px]"
-        style={{
-          background: skin === 'liquid-glass' ? 'rgba(255,255,255,0.42)' : 'rgba(255,255,255,0.62)',
-          border: '0.5px solid rgba(255,255,255,0.85)',
-          boxShadow: '0 6px 16px -6px rgba(24,39,77,0.3), inset 0 1px 0 rgba(255,255,255,0.9)',
-          backdropFilter: 'blur(6px)',
-          WebkitBackdropFilter: 'blur(6px)',
-        }}
-      >
-        <span className="block h-[4px] w-[42%] rounded-full" style={{ background: solid ? 'rgba(2,45,43,0.5)' : 'rgba(24,39,77,0.4)' }} />
-        <span className="mt-[5px] block h-[3px] w-[70%] rounded-full" style={{ background: solid ? 'rgba(2,45,43,0.18)' : 'rgba(24,39,77,0.14)' }} />
-        <span className="absolute bottom-[7px] right-[7px] h-[6px] w-[6px] rounded-full" style={{ background: solid ? '#B84574' : 'var(--color-ready-orange)' }} />
-      </div>
-    </div>
-  )
-}
-
 function ShortcutKeys({ value }: { value: string }) {
   const alternatives = value.split(' 或 ')
   return (
@@ -366,7 +312,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
   const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'not-available' | 'error'>('idle')
   const [updateMessage, setUpdateMessage] = useState('查看是否有新版本可用')
   const [updatePercent, setUpdatePercent] = useState<number | null>(null)
-  const { theme, setTheme, skin, setSkin, accent, setAccent, resolvedTheme } = useTheme()
+  const { theme, setTheme, transparency, reduceTransparency, setReduceTransparency } = useTheme()
   const didMountRef = useRef(false)
   const settingsSurfaceRefreshTimerRef = useRef<number | null>(null)
 
@@ -571,12 +517,6 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
   const isDynamicSection = currentSection
     ? ['ai', 'memory', 'remote-im', 'external-services', 'mcp', 'tag-forge', 'pet', 'rss-storage', MODELS_RUNTIME_SETTINGS_SECTION, 'storage', 'browser-privacy'].includes(currentSection.id)
     : false
-
-  const accentLabel = (value: ThemeAccent) => {
-    const option = settingsData.find((section) => section.id === 'appearance')?.settings[0]?.options?.find((item) => item.value === value)
-    if (value === 'purple' && (skin === 'solid-green-glass' || skin === 'solid-blue-glass')) return '玫瑰'
-    return option?.label ?? value
-  }
 
   const renderSettingControl = (sectionId: string, setting: SettingItem) => {
     const isUpdateButton = sectionId === 'about' && setting.id === 'checkUpdate'
@@ -821,70 +761,17 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                       </div>
                     </SettingsGroup>
 
-                    <SettingsGroup label="视觉风格">
-                      <div role="radiogroup" aria-label="视觉风格" className="grid grid-cols-2 gap-3">
-                        {skinOptions.map((opt) => {
-                          const isActive = skin === opt.value
-                          return (
-                            <button
-                              key={opt.value}
-                              type="button"
-                              role="radio"
-                              aria-checked={isActive}
-                              onClick={() => setSkin(opt.value)}
-                              className="sx-option items-center"
-                              style={{ padding: 10, gap: 14 }}
-                            >
-                              <div className="w-[132px] shrink-0">
-                                <SkinPreview skin={opt.value} />
-                              </div>
-                              <div className="min-w-0 pr-5">
-                                <div className="text-[13px]" style={{ color: 'var(--sx-title)', fontWeight: isActive ? 600 : 500 }}>
-                                  {opt.label}
-                                </div>
-                                <div className="mt-1 text-[11.5px] leading-[1.55]" style={{ color: 'var(--sx-muted)' }}>
-                                  {opt.description}
-                                </div>
-                              </div>
-                              <OptionTick />
-                            </button>
-                          )
-                        })}
-                      </div>
-                    </SettingsGroup>
-
-                    <SettingsGroup label="主题色" hint="只用于当前状态、焦点与少量点缀">
-                      <div role="radiogroup" aria-label="主题色" className="flex items-center gap-2">
-                        {ACCENT_ORDER.map((value) => {
-                          const isActive = accent === value
-                          const swatch = resolveAccentPalette(value, resolvedTheme, skin).color
-                          return (
-                            <button
-                              key={value}
-                              type="button"
-                              role="radio"
-                              aria-checked={isActive}
-                              aria-label={accentLabel(value)}
-                              onClick={() => setAccent(value)}
-                              className="sx-option items-center"
-                              style={{ padding: '8px 14px 8px 10px', gap: 8, borderRadius: 999 }}
-                            >
-                              <span
-                                className="grid h-[18px] w-[18px] place-items-center rounded-full"
-                                style={{
-                                  background: `radial-gradient(circle at 32% 28%, color-mix(in srgb, ${swatch} 70%, white) 0%, ${swatch} 62%)`,
-                                  boxShadow: '0 1px 2px rgba(15, 18, 24, 0.16)',
-                                }}
-                              >
-                                {isActive && <Check className="h-[11px] w-[11px] text-white" strokeWidth={3.2} />}
-                              </span>
-                              <span className="text-[12.5px]" style={{ color: isActive ? 'var(--sx-title)' : 'var(--sx-muted)', fontWeight: isActive ? 600 : 500 }}>
-                                {accentLabel(value)}
-                              </span>
-                            </button>
-                          )
-                        })}
-                      </div>
+                    <SettingsGroup label="透明度">
+                      <SettingsCard>
+                        <SettingsRow
+                          label="减少透明"
+                          description={transparency === 'reduced' && !reduceTransparency
+                            ? '系统已开启“减少透明度”，窗口现在不透明。'
+                            : '玻璃改为不透明的底色，菜单与弹层不再模糊。系统开启“减少透明度”时也会这样。'}
+                        >
+                          <SettingsSwitch checked={reduceTransparency} ariaLabel="减少透明" onChange={setReduceTransparency} />
+                        </SettingsRow>
+                      </SettingsCard>
                     </SettingsGroup>
                   </div>
                 )}

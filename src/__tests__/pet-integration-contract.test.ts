@@ -114,7 +114,7 @@ test('desktop pet bubble follows Ready theme updates from the main process', () 
 
   assert.doesNotMatch(petWindow, /useTheme/)
   assert.match(petWindow, /theme\.onChanged/)
-  assert.match(petWindow, /data-skin', 'liquid-glass'/)
+  assert.match(petWindow, /setAttribute\('data-transparency', snapshot\.transparency\)/)
   assert.match(preload, /onChanged:\s*\(listener/)
   assert.match(electronTypes, /onChanged:\s*\(listener/)
   assert.match(mainIndex, /theme:changed/)

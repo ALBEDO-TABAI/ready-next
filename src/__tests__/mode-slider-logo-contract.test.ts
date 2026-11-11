@@ -11,14 +11,14 @@ test('frozen mode slider renders the Ready brand dot instead of the wordmark ima
   const modeSlider = readWorkspaceFile('src/renderer/components/layout/ModeSlider.tsx')
 
   // 8ab48cd7 style(ui): checkpoint liquid glass polish — Ready 侧从 wordmark 图片改为 14px 品牌圆点
-  //（背景走 --ready-brand-accent token，随皮肤换色；wordmark 资产保留在仓库但不再被 ModeSlider 引用）。
+  //（背景走唯一的 --rn-accent token；wordmark 资产保留在仓库但不再被 ModeSlider 引用）。
   assert.ok(existsSync(resolve(process.cwd(), 'src/renderer/assets/ready-wordmark.png')))
   assert.doesNotMatch(modeSlider, /import readyWordmark/)
   assert.doesNotMatch(modeSlider, /<img/)
   assert.match(modeSlider, /role="img"/)
   assert.match(modeSlider, /aria-label="Ready"/)
   assert.match(modeSlider, /width: 14,\s+height: 14,\s+borderRadius: 999,/)
-  assert.match(modeSlider, /background: 'var\(--ready-brand-accent, var\(--color-ready-orange\)\)'/)
+  assert.match(modeSlider, /background: 'var\(--rn-accent\)'/)
   assert.doesNotMatch(modeSlider, /motion\.button/)
   assert.doesNotMatch(modeSlider, /opacity-50/)
   assert.doesNotMatch(modeSlider, /cursor-not-allowed/)

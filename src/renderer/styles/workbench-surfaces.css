@@ -1,8 +1,5 @@
 /* ═══ workbench-surfaces.css — 工作台共享外壳表面 + 磨砂玻璃滑钮（icon-rail-slider 族）；由 index.css 序保拆分（2026-07-06），在 index.css 中按原段落顺序 @import，勿改导入次序。 ═══ */
 /* Shared workbench shell surfaces */
-html:not([data-skin='liquid-glass']) .workbench-mode-root {
-  --bg-content: var(--workbench-mode-bg);
-}
 
 .workbench-mode-root {
   height: 100%;
@@ -11,7 +8,7 @@ html:not([data-skin='liquid-glass']) .workbench-mode-root {
   background: var(--workbench-mode-bg);
 }
 
-html[data-skin='liquid-glass'] .workbench-mode-root {
+html:root .workbench-mode-root {
   background: transparent;
 }
 
@@ -32,7 +29,7 @@ html[data-skin='liquid-glass'] .workbench-mode-root {
   background: var(--workbench-mode-bg);
 }
 
-html[data-skin='liquid-glass'] .workbench-content {
+html:root .workbench-content {
   background: transparent;
 }
 
@@ -68,20 +65,20 @@ html[data-skin='liquid-glass'] .workbench-content {
   -webkit-backdrop-filter: blur(var(--lg-blur-strong)) saturate(var(--surface-saturate)) contrast(1.03);
 }
 
-html[data-skin='liquid-glass'] .glass-surface-panel::before,
-html[data-skin='liquid-glass'] .glass-surface-card::before,
-html[data-skin='liquid-glass'] .glass-surface-floating::before {
+html:root .glass-surface-panel::before,
+html:root .glass-surface-card::before,
+html:root .glass-surface-floating::before {
   display: none !important;
 }
 
-html[data-skin='liquid-glass'] .glass-surface-panel::after,
-html[data-skin='liquid-glass'] .glass-surface-card::after,
-html[data-skin='liquid-glass'] .glass-surface-floating::after {
+html:root .glass-surface-panel::after,
+html:root .glass-surface-card::after,
+html:root .glass-surface-floating::after {
   display: none !important;
 }
 
-html[data-skin='liquid-glass'] .glass-surface-panel,
-html[data-skin='liquid-glass'] .glass-surface-card {
+html:root .glass-surface-panel,
+html:root .glass-surface-card {
   box-shadow: none !important;
 }
 
@@ -146,7 +143,7 @@ html[data-skin='liquid-glass'] .glass-surface-card {
   transform: none;
 }
 
-html[data-skin='liquid-glass'] .ready-glass-button {
+html:root .ready-glass-button {
   backdrop-filter: blur(calc(var(--lg-blur-soft) * 0.25)) saturate(calc(var(--surface-saturate) - 8%));
   -webkit-backdrop-filter: blur(calc(var(--lg-blur-soft) * 0.25)) saturate(calc(var(--surface-saturate) - 8%));
   background:
@@ -164,15 +161,15 @@ html[data-skin='liquid-glass'] .ready-glass-button {
   border-color: rgba(255, 255, 255, 0.7);
 }
 
-html[data-skin='liquid-glass'] .browser-header-surface,
-html[data-skin='liquid-glass'] .workbench-tabs-surface,
-html[data-skin='liquid-glass'] .rss-preview-surface {
+html:root .browser-header-surface,
+html:root .workbench-tabs-surface,
+html:root .rss-preview-surface {
   background: var(--workbench-module-surface-bg) !important;
   backdrop-filter: blur(24px) saturate(0%) !important;
   -webkit-backdrop-filter: blur(24px) saturate(0%) !important;
 }
 
-html[data-skin='liquid-glass'] .document-content-frame {
+html:root .document-content-frame {
   background: var(--workbench-module-surface-bg) !important;
   backdrop-filter: blur(24px) saturate(0%) !important;
   -webkit-backdrop-filter: blur(24px) saturate(0%) !important;
@@ -181,21 +178,21 @@ html[data-skin='liquid-glass'] .document-content-frame {
   background-clip: padding-box;
 }
 
-html[data-skin='liquid-glass'] .document-editor-surface,
-html[data-skin='liquid-glass'] .document-preview-surface,
-html[data-skin='liquid-glass'] .rss-workbench-surface,
-html[data-skin='liquid-glass'] .rss-feed-list,
-html[data-skin='liquid-glass'] .rss-preview-content {
+html:root .document-editor-surface,
+html:root .document-preview-surface,
+html:root .rss-workbench-surface,
+html:root .rss-feed-list,
+html:root .rss-preview-content {
   background: transparent !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
 }
 
-html[data-theme='dark'][data-skin='liquid-glass'] .glass-surface-panel {
+html[data-theme='dark']:root .glass-surface-panel {
   background: var(--lg-material-panel) !important;
 }
 
-html[data-theme='dark'][data-skin='liquid-glass'] .glass-surface-card {
+html[data-theme='dark']:root .glass-surface-card {
   background: var(--lg-material-card) !important;
 }
 
@@ -213,20 +210,15 @@ html[data-theme='dark'][data-skin='liquid-glass'] .glass-surface-card {
   --calendar-event-chip-bg: color-mix(in srgb, var(--surface-card-bg) 38%, transparent);
 }
 
-html[data-skin='liquid-glass'] .calendar-mode-shell {
+html:root .calendar-mode-shell {
   --calendar-canvas-bg: var(--workbench-module-surface-bg);
   --calendar-canvas-border: transparent;
   --calendar-sidebar-bg: var(--calendar-canvas-bg);
-}
-
-html[data-skin='liquid-glass'][data-glass-backdrop='native'] .calendar-mode-shell {
-  --calendar-canvas-bg: var(--workbench-module-surface-bg);
-  --calendar-canvas-border: transparent;
   --calendar-assistant-bg: rgba(241, 244, 249, 0.96);
   --calendar-assistant-card-bg: rgba(255, 255, 255, 0.34);
 }
 
-html[data-theme='dark'][data-skin='liquid-glass'][data-glass-backdrop='native'] .calendar-mode-shell {
+html[data-theme='dark']:root .calendar-mode-shell {
   --calendar-canvas-bg: var(--workbench-module-surface-bg);
   --calendar-canvas-border: transparent;
   --calendar-control-bg: color-mix(in srgb, var(--surface-card-bg) 44%, transparent);
@@ -238,38 +230,7 @@ html[data-theme='dark'][data-skin='liquid-glass'][data-glass-backdrop='native'] 
   --calendar-assistant-card-border: color-mix(in srgb, var(--surface-border) 62%, transparent);
 }
 
-html[data-skin='liquid-glass'][data-glass-backdrop='ready'] .calendar-mode-shell {
-  --calendar-canvas-bg: var(--workbench-module-surface-bg);
-  --calendar-canvas-border: transparent;
-  --calendar-sidebar-bg: var(--calendar-canvas-bg);
-  --calendar-control-bg: color-mix(in srgb, var(--bg-primary) 82%, var(--bg-panel) 18%);
-  --calendar-control-bg-hover: color-mix(in srgb, var(--bg-primary) 92%, var(--bg-panel) 8%);
-  --calendar-control-bg-active: color-mix(in srgb, var(--color-blue) 16%, var(--bg-primary) 84%);
-  --calendar-assistant-bg: color-mix(in srgb, var(--bg-content) 96%, var(--bg-panel) 4%);
-  --calendar-assistant-card-bg: color-mix(in srgb, var(--bg-primary) 88%, var(--bg-panel) 12%);
-  --calendar-assistant-card-border: color-mix(in srgb, var(--border-default) 82%, transparent);
-}
-
-html[data-theme='dark'][data-skin='liquid-glass'][data-glass-backdrop='ready'] .calendar-mode-shell {
-  --calendar-canvas-bg: var(--workbench-module-surface-bg);
-  --calendar-canvas-border: transparent;
-  --calendar-control-bg: color-mix(in srgb, var(--bg-toolbar) 76%, var(--bg-content) 24%);
-  --calendar-control-bg-hover: color-mix(in srgb, var(--bg-toolbar) 92%, var(--bg-content) 8%);
-  --calendar-control-bg-active: color-mix(in srgb, var(--color-blue) 20%, var(--bg-toolbar) 80%);
-  --calendar-control-border: color-mix(in srgb, var(--border-default) 80%, transparent);
-  --calendar-assistant-bg: color-mix(in srgb, var(--bg-content) 94%, var(--bg-toolbar) 6%);
-  --calendar-assistant-card-bg: color-mix(in srgb, var(--bg-primary) 72%, var(--bg-content) 28%);
-  --calendar-assistant-card-border: color-mix(in srgb, var(--border-default) 78%, transparent);
-}
-
-/*
- * 注：原有 `html[data-skin='liquid-glass'] .ready-app-bg { opacity: 0 }` 两条硬覆盖已删除。
- * 改用变量级联：
- *   - 默认 'native' backdrop: `--app-bg-overlay-opacity: 0.53` 在 [data-glass-backdrop='native'] 设置（连续中性提亮）
- *   - 可选 'ready' backdrop:  `--app-bg-overlay-opacity: 1` 沿用 light/dark liquid-glass 默认值（让 .ready-app-bg 渐变可见）
- *
- * 不再用硬覆盖，因为它会阻止 ready-glass 模式看到 .ready-app-bg 渐变层。
- */
+/* .ready-app-bg 的不透明度只由 --app-bg-overlay-opacity 级联决定（见 theme-tokens.css），这里不做硬覆盖。 */
 
 .content-surface-panel,
 .content-surface-card {
@@ -398,8 +359,8 @@ html[data-fastcard-overlay-window='true'] .browser-fastcard-action {
   background: var(--chat-menu-hover-bg) !important;
 }
 
-html[data-skin='liquid-glass'] .ready-floating-menu,
-html[data-skin='liquid-glass'] .chat-header-floating-menu {
+html:root .ready-floating-menu,
+html:root .chat-header-floating-menu {
   background: var(--chat-menu-frost-bg, rgba(236, 239, 243, 0.92)) !important;
   border-color: var(--chat-menu-frost-border, rgba(255, 255, 255, 0.42)) !important;
   box-shadow: var(--chat-menu-shadow) !important;
@@ -407,20 +368,20 @@ html[data-skin='liquid-glass'] .chat-header-floating-menu {
   -webkit-backdrop-filter: blur(calc(var(--lg-blur-strong) * 1.28)) saturate(calc(var(--surface-saturate) - 8%)) contrast(1.01) !important;
 }
 
-html[data-skin='liquid-glass'] .ready-floating-menu-item:hover,
-html[data-skin='liquid-glass'] .chat-header-floating-menu-item:hover {
+html:root .ready-floating-menu-item:hover,
+html:root .chat-header-floating-menu-item:hover {
   background: var(--chat-menu-hover-bg, rgba(246, 248, 251, 0.72)) !important;
   box-shadow: var(--chat-menu-hover-shadow);
 }
 
-html[data-skin='liquid-glass'] .ready-floating-menu-item.is-selected,
-html[data-skin='liquid-glass'] .chat-header-floating-menu-item.is-selected {
+html:root .ready-floating-menu-item.is-selected,
+html:root .chat-header-floating-menu-item.is-selected {
   background: var(--chat-menu-selected-bg, rgba(239, 242, 246, 0.66)) !important;
   border-color: var(--chat-menu-selected-border, rgba(222, 228, 236, 0.42)) !important;
   box-shadow: var(--chat-menu-selected-shadow) !important;
 }
 
-html[data-skin='liquid-glass'] .chat-header-menu-delete-button:hover {
+html:root .chat-header-menu-delete-button:hover {
   background: var(--chat-menu-hover-bg, rgba(246, 248, 251, 0.72)) !important;
   box-shadow: var(--chat-menu-hover-shadow);
 }
@@ -509,14 +470,14 @@ html[data-skin='liquid-glass'] .chat-header-menu-delete-button:hover {
   opacity: 0.82;
 }
 
-html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-popover__lens {
+html[data-theme='dark']:root .ready-liquid-popover__lens {
   background: rgba(26, 26, 26, 0.62);
   box-shadow:
     inset 0 1px 0 rgba(232, 232, 232, 0.14),
     inset 0 -1px 0 rgba(0, 0, 0, 0.16);
 }
 
-html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-popover__lens::before {
+html[data-theme='dark']:root .ready-liquid-popover__lens::before {
   border-color: rgba(232, 232, 232, 0.14);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.18),
@@ -524,26 +485,26 @@ html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-popover__lens::b
   opacity: 0.84;
 }
 
-html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-popover__lens::after {
+html[data-theme='dark']:root .ready-liquid-popover__lens::after {
   background:
     linear-gradient(132deg, rgba(255, 255, 255, 0.01) 0%, rgba(232, 232, 232, 0.18) 30%, rgba(255, 255, 255, 0.01) 56%, rgba(232, 232, 232, 0.12) 78%, rgba(255, 255, 255, 0.01) 100%);
   opacity: 0.18;
 }
 
-html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-popover__projection {
+html[data-theme='dark']:root .ready-liquid-popover__projection {
   opacity: 0.52;
   filter: blur(3.5px) saturate(0) contrast(0.78) brightness(0.78);
 }
 
-html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-popover__projection::after {
+html[data-theme='dark']:root .ready-liquid-popover__projection::after {
   background:
     radial-gradient(circle at 20% 18%, rgba(232, 232, 232, 0.09), transparent 28%),
     radial-gradient(circle at 76% 62%, rgba(232, 232, 232, 0.06), transparent 36%),
     linear-gradient(180deg, rgba(46, 46, 46, 0.26), rgba(18, 18, 18, 0.44));
 }
 
-html[data-skin='liquid-glass'] .ready-liquid-popover.ready-floating-menu,
-html[data-skin='liquid-glass'] .ready-liquid-popover.chat-header-floating-menu {
+html:root .ready-liquid-popover.ready-floating-menu,
+html:root .ready-liquid-popover.chat-header-floating-menu {
   background: transparent !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
@@ -926,7 +887,7 @@ body.pet-window-body {
   box-shadow: var(--input-slot-shadow);
 }
 
-html[data-skin='liquid-glass'] .morph-segmented-track {
+html:root .morph-segmented-track {
   background: var(--input-slot-bg);
   border: 1px solid var(--input-slot-border);
   box-shadow: var(--input-slot-shadow);
@@ -1065,7 +1026,7 @@ html[data-skin='liquid-glass'] .morph-segmented-track {
   outline: none;
 }
 
-html[data-skin='liquid-glass'] .document-mode-switch {
+html:root .document-mode-switch {
   border-color: var(--workbench-rail-slot-border) !important;
   background: var(--workbench-rail-slot-bg) !important;
   box-shadow: var(--workbench-rail-slot-shadow) !important;
@@ -1073,7 +1034,7 @@ html[data-skin='liquid-glass'] .document-mode-switch {
   -webkit-backdrop-filter: blur(calc(var(--lg-blur-soft) * 0.25)) saturate(calc(var(--surface-saturate) - 8%));
 }
 
-html[data-skin='liquid-glass'] .document-mode-switch__thumb {
+html:root .document-mode-switch__thumb {
   background:
     /* Top highlight - thinner */
     linear-gradient(180deg, rgba(255, 255, 255, 0.85) 0%, rgba(255, 255, 255, 0.2) 20%, transparent 40%),

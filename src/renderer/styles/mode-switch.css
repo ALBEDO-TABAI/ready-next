@@ -182,7 +182,7 @@
 }
 
 /* Liquid Glass skin */
-html[data-skin='liquid-glass'] .draggable-mode-tabs {
+html:root .draggable-mode-tabs {
   --ready-workbench-slider-thumb-scale: 1.1;
   border-color: transparent;
   background: color-mix(in srgb, var(--workbench-rail-slot-bg) 86%, rgba(255, 255, 255, 0.34));
@@ -191,7 +191,7 @@ html[data-skin='liquid-glass'] .draggable-mode-tabs {
   -webkit-backdrop-filter: blur(calc(var(--lg-blur-soft) * 0.18)) saturate(calc(var(--surface-saturate) - 18%));
 }
 
-html[data-skin='liquid-glass'] .draggable-mode-tabs__thumb {
+html:root .draggable-mode-tabs__thumb {
   isolation: isolate;
   overflow: hidden;
   background:
@@ -208,7 +208,7 @@ html[data-skin='liquid-glass'] .draggable-mode-tabs__thumb {
   border-color: rgba(255, 255, 255, 0.46);
 }
 
-html[data-skin='liquid-glass'] .draggable-mode-tabs__thumb::before {
+html:root .draggable-mode-tabs__thumb::before {
   z-index: 2;
   border-color: rgba(255, 255, 255, 0.46);
   box-shadow:
@@ -217,7 +217,7 @@ html[data-skin='liquid-glass'] .draggable-mode-tabs__thumb::before {
     inset -1.4px 0 3px rgba(63, 78, 102, 0.08);
 }
 
-html[data-skin='liquid-glass'] .draggable-mode-tabs__thumb::after {
+html:root .draggable-mode-tabs__thumb::after {
   z-index: 3;
   inset: 1px;
   height: auto;
@@ -229,7 +229,7 @@ html[data-skin='liquid-glass'] .draggable-mode-tabs__thumb::after {
   opacity: 0.46;
 }
 
-html[data-theme='dark'][data-skin='liquid-glass'] .draggable-mode-tabs {
+html[data-theme='dark']:root .draggable-mode-tabs {
   border-color: transparent;
   background: var(--workbench-rail-slot-bg);
   box-shadow: var(--workbench-rail-slot-shadow);
@@ -237,7 +237,7 @@ html[data-theme='dark'][data-skin='liquid-glass'] .draggable-mode-tabs {
   -webkit-backdrop-filter: blur(calc(var(--lg-blur-soft) * 0.18)) saturate(100%);
 }
 
-html[data-theme='dark'][data-skin='liquid-glass'] .draggable-mode-tabs__thumb {
+html[data-theme='dark']:root .draggable-mode-tabs__thumb {
   background:
     radial-gradient(ellipse 104% 58% at 50% -12%, rgba(235, 235, 230, 0.16) 0%, rgba(235, 235, 230, 0.05) 34%, transparent 60%),
     radial-gradient(ellipse 108% 66% at 50% 112%, rgba(0, 0, 0, 0.20) 0%, rgba(0, 0, 0, 0.08) 40%, transparent 64%),
@@ -251,7 +251,7 @@ html[data-theme='dark'][data-skin='liquid-glass'] .draggable-mode-tabs__thumb {
   border-color: rgba(235, 235, 230, 0.13);
 }
 
-html[data-theme='dark'][data-skin='liquid-glass'] .draggable-mode-tabs__thumb::before {
+html[data-theme='dark']:root .draggable-mode-tabs__thumb::before {
   border-color: rgba(235, 235, 230, 0.13);
   box-shadow:
     inset 0 0 0 1px rgba(235, 235, 230, 0.055),
@@ -259,7 +259,7 @@ html[data-theme='dark'][data-skin='liquid-glass'] .draggable-mode-tabs__thumb::b
     inset -1.4px 0 3px rgba(0, 0, 0, 0.10);
 }
 
-html[data-theme='dark'][data-skin='liquid-glass'] .draggable-mode-tabs__thumb::after {
+html[data-theme='dark']:root .draggable-mode-tabs__thumb::after {
   background:
     radial-gradient(ellipse 88% 46% at 50% -12%, rgba(235, 235, 230, 0.18) 0%, transparent 52%),
     linear-gradient(90deg, rgba(235, 235, 230, 0.09) 0%, transparent 16%, transparent 84%, rgba(235, 235, 230, 0.06) 100%),
@@ -386,7 +386,7 @@ html[data-theme='dark'][data-skin='liquid-glass'] .draggable-mode-tabs__thumb::a
 }
 
 /* Liquid glass variant */
-html[data-skin='liquid-glass'] .ios-segmented-control {
+html:root .ios-segmented-control {
   border-color: var(--workbench-rail-slot-border);
   background: var(--workbench-rail-slot-bg);
   box-shadow: var(--workbench-rail-slot-shadow);
@@ -394,7 +394,7 @@ html[data-skin='liquid-glass'] .ios-segmented-control {
   -webkit-backdrop-filter: blur(calc(var(--lg-blur-soft) * 0.25)) saturate(calc(var(--surface-saturate) - 8%));
 }
 
-html[data-skin='liquid-glass'] .ios-segmented-control::after {
+html:root .ios-segmented-control::after {
   background:
     /* Top highlight - thinner */
     linear-gradient(180deg, rgba(255, 255, 255, 0.85) 0%, rgba(255, 255, 255, 0.2) 20%, transparent 40%),
@@ -463,8 +463,8 @@ html[data-skin='liquid-glass'] .ios-segmented-control::after {
   box-shadow: none;
 }
 
-html[data-skin='liquid-glass'] .morph-pill-primary,
-html[data-skin='liquid-glass'] .morph-pill-secondary {
+html:root .morph-pill-primary,
+html:root .morph-pill-secondary {
   background:
     radial-gradient(140% 120% at 14% 0%, color-mix(in srgb, var(--lg-border-strong) 56%, transparent), transparent 46%),
     radial-gradient(140% 120% at 100% 100%, color-mix(in srgb, var(--lg-lens-violet) 54%, transparent), transparent 54%),
@@ -479,8 +479,8 @@ html[data-skin='liquid-glass'] .morph-pill-secondary {
   -webkit-backdrop-filter: blur(calc(var(--lg-blur-soft) * 0.8)) saturate(calc(var(--surface-saturate) + 20%));
 }
 
-html[data-skin='liquid-glass'] .resize-handle:hover,
-html[data-skin='liquid-glass'] .resize-handle.active {
+html:root .resize-handle:hover,
+html:root .resize-handle.active {
   box-shadow: none;
 }
 

@@ -85,14 +85,15 @@ test('browser startup gates chrome until host restoration completes and main pro
   assert.doesNotMatch(rendererMain, /useBrowserTabs\.setState\(/)
   assert.doesNotMatch(rendererMain, /readyToShow/)
   assert.match(preload, /get: \(\) => ipcRenderer\.invoke\('theme:get'\)/)
-  // Stage 1: theme.get 返回类型从 inline shape 改为命名的 ThemeSnapshotPayload（含 skin + isNativeFullscreen）
+  // Stage 1: theme.get 返回类型从 inline shape 改为命名的 ThemeSnapshotPayload（含 transparency、reduceTransparency + isNativeFullscreen）
   assert.match(electronTypes, /get: \(\) => Promise<\{ success: boolean; data\?: ThemeSnapshotPayload; error\?: string \}>/)
   assert.match(electronTypes, /interface ThemeSnapshotPayload/)
-  assert.match(electronTypes, /skin: ThemeSkin/)
+  assert.match(electronTypes, /transparency: Transparency/)
+  assert.match(electronTypes, /reduceTransparency: boolean/)
   assert.match(electronTypes, /isNativeFullscreen: boolean/)
   assert.doesNotMatch(preload, /readyToShow:/)
   assert.doesNotMatch(electronTypes, /readyToShow:/)
-  assert.match(mainIndex, /const THEME_SETTING_KEY = 'ui_theme_option'/)
+  assert.match(mainIndex, /THEME_SETTING_KEY,[\s\S]*from '.\/modules\/window-material\/theme-appearance'/)
   assert.match(mainIndex, /ipcMain\.handle\('theme:get'/)
   assert.doesNotMatch(mainIndex, /window:readyToShow/)
   assert.doesNotMatch(mainIndex, /flushWindowReveal/)

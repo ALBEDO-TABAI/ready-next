@@ -86,7 +86,7 @@
   -webkit-backdrop-filter: blur(calc(var(--surface-blur) * 1.25)) saturate(var(--surface-saturate));
 }
 
-html[data-skin='liquid-glass'] .document-floating-panel.ready-app-liquid-panel {
+html:root .document-floating-panel.ready-app-liquid-panel {
   --ready-app-panel-glass-bg: rgba(241, 244, 249, 0.96);
   background: var(--ready-app-panel-glass-bg) !important;
   border: 0.5px solid var(--ready-app-panel-glass-border, rgba(255, 255, 255, 0.66)) !important;
@@ -96,20 +96,16 @@ html[data-skin='liquid-glass'] .document-floating-panel.ready-app-liquid-panel {
   background-clip: padding-box;
 }
 
-html[data-skin='liquid-glass'][data-glass-backdrop='ready'] .document-floating-panel.ready-app-liquid-panel {
-  --ready-app-panel-glass-bg: color-mix(in srgb, var(--bg-content) 96%, var(--bg-panel) 4%);
-}
-
-html[data-theme='dark'][data-skin='liquid-glass'] .document-floating-panel.ready-app-liquid-panel {
+html[data-theme='dark']:root .document-floating-panel.ready-app-liquid-panel {
   --ready-app-panel-glass-bg: color-mix(in srgb, var(--bg-editor) 92%, transparent);
 }
 
-html[data-skin='liquid-glass'] .document-floating-panel.ready-app-liquid-panel .ready-app-liquid-panel__lens {
+html:root .document-floating-panel.ready-app-liquid-panel .ready-app-liquid-panel__lens {
   background: rgba(255, 255, 255, 0.12);
   opacity: 0.36;
 }
 
-html[data-skin='liquid-glass'] .document-floating-panel__header {
+html:root .document-floating-panel__header {
   background: var(--ready-app-panel-glass-band-bg, rgba(255, 255, 255, 0.26));
   border-bottom: 1px solid var(--ready-app-panel-glass-inner-border, rgba(210, 220, 234, 0.42));
 }
@@ -234,7 +230,7 @@ html[data-skin='liquid-glass'] .document-floating-panel__header {
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.24), 0 4px 14px rgba(15,23,42,0.05);
 }
 
-html[data-skin='liquid-glass'] .document-panel-row:hover {
+html:root .document-panel-row:hover {
   background: var(--ready-app-panel-glass-hover-bg, rgba(255, 255, 255, 0.38));
   box-shadow: var(--ready-app-panel-glass-card-shadow, inset 0 1px 0 rgba(255,255,255,0.42));
 }
@@ -256,8 +252,8 @@ html[data-skin='liquid-glass'] .document-panel-row:hover {
   background: color-mix(in srgb, var(--color-blue-light) 42%, rgba(255,255,255,0.20));
 }
 
-html[data-skin='liquid-glass'] .document-panel-row.is-active,
-html[data-skin='liquid-glass'] .document-panel-row.is-selected {
+html:root .document-panel-row.is-active,
+html:root .document-panel-row.is-selected {
   background: color-mix(in srgb, var(--color-blue) 10%, var(--ready-app-panel-glass-card-bg, rgba(255,255,255,0.30)));
   box-shadow: var(--ready-app-panel-glass-card-shadow, inset 0 1px 0 rgba(255,255,255,0.42));
 }
@@ -348,12 +344,12 @@ html[data-skin='liquid-glass'] .document-panel-row.is-selected {
   background: color-mix(in srgb, var(--bg-hover) 58%, transparent);
 }
 
-html[data-skin='liquid-glass'] .document-mark-tabs,
-html[data-skin='liquid-glass'] .document-mark-create input,
-html[data-skin='liquid-glass'] .document-mark-create textarea,
-html[data-skin='liquid-glass'] .document-mark-create button,
-html[data-skin='liquid-glass'] .document-panel-row__actions span,
-html[data-skin='liquid-glass'] .document-mark-group__edit {
+html:root .document-mark-tabs,
+html:root .document-mark-create input,
+html:root .document-mark-create textarea,
+html:root .document-mark-create button,
+html:root .document-panel-row__actions span,
+html:root .document-mark-group__edit {
   background: var(--ready-app-panel-glass-card-bg, rgba(255, 255, 255, 0.30));
   border-color: var(--ready-app-panel-glass-inner-border, rgba(210, 220, 234, 0.42));
   box-shadow: var(--ready-app-panel-glass-card-shadow, inset 0 1px 0 rgba(255,255,255,0.42));
@@ -382,7 +378,7 @@ html[data-skin='liquid-glass'] .document-mark-group__edit {
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.3);
 }
 
-html[data-skin='liquid-glass'] .document-mark-tabs button.is-active {
+html:root .document-mark-tabs button.is-active {
   background: var(--ready-app-panel-glass-hover-bg, rgba(255, 255, 255, 0.38));
 }
 

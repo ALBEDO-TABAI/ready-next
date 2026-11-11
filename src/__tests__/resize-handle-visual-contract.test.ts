@@ -22,5 +22,5 @@ test('workbench resize handle stays hidden by default and only reveals a short r
   assert.match(styles, /\.resize-handle::before\s*\{[\s\S]*opacity:\s*0;/)
   assert.match(styles, /\.resize-handle:hover::before,\s*\.resize-handle.active::before\s*\{[\s\S]*background:\s*color-mix\(in srgb, var\(--text-gray\) 38%, transparent\);/)
   assert.match(styles, /\.resize-handle:hover::before,\s*\.resize-handle.active::before\s*\{[\s\S]*opacity:\s*0\.94;/)
-  assert.match(styles, /html\[data-skin='liquid-glass'\] \.resize-handle:hover,\s*html\[data-skin='liquid-glass'\] \.resize-handle.active\s*\{[\s\S]*box-shadow:\s*none;/)
+  assert.match(styles, /html:root \.resize-handle:hover,\s*html:root \.resize-handle.active\s*\{[\s\S]*box-shadow:\s*none;/)
 })

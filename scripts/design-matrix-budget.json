@@ -1,0 +1,49 @@
+{
+  "note": "W1 design matrix budget: distinct violation signatures per theme/transparency combination. Counts only go down; the target is 0 everywhere (G1, G4, G5, DS5, DS7). Written by --write-budget, which never raises a value.",
+  "combos": {
+    "light-normal": {
+      "contentWidth": 8,
+      "bandSymmetry": 8,
+      "composerAlign": 0,
+      "overflow": 2,
+      "uiFont": 240,
+      "currentAccent": 0,
+      "nativeControls": 6,
+      "focusRing": 0,
+      "contrast": 0
+    },
+    "dark-normal": {
+      "contentWidth": 8,
+      "bandSymmetry": 8,
+      "composerAlign": 0,
+      "overflow": 1,
+      "uiFont": 238,
+      "currentAccent": 0,
+      "nativeControls": 6,
+      "focusRing": 0,
+      "contrast": 0
+    },
+    "light-reduced": {
+      "contentWidth": 8,
+      "bandSymmetry": 8,
+      "composerAlign": 0,
+      "overflow": 1,
+      "uiFont": 238,
+      "currentAccent": 0,
+      "nativeControls": 6,
+      "focusRing": 0,
+      "contrast": 0
+    },
+    "dark-reduced": {
+      "contentWidth": 8,
+      "bandSymmetry": 8,
+      "composerAlign": 0,
+      "overflow": 1,
+      "uiFont": 238,
+      "currentAccent": 0,
+      "nativeControls": 6,
+      "focusRing": 0,
+      "contrast": 0
+    }
+  }
+}

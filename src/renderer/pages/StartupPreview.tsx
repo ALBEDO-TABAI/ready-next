@@ -1,12 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import ReadyStartupSplash, {
-  type ReadyStartupVariant
-} from '../components/startup/ReadyStartupSplash'
-
-function resolvePreviewVariant(value: string | null): ReadyStartupVariant {
-  return value === 'pink' ? 'pink' : 'orange'
-}
+import ReadyStartupSplash from '../components/startup/ReadyStartupSplash'
 
 export default function StartupPreview() {
   const [searchParams] = useSearchParams()
@@ -29,7 +23,6 @@ export default function StartupPreview() {
     <ReadyStartupSplash
       demo={!isSplashWindow}
       ready={ready}
-      variant={resolvePreviewVariant(searchParams.get('variant'))}
       onExitComplete={isSplashWindow ? () => window.close() : undefined}
     />
   )

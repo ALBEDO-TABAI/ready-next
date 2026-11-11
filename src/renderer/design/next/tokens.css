@@ -1,6 +1,8 @@
-/* Shared foundation: Library paper/glass; Inkwell paper/type; Stillroom materials;
-   Calendar 13/14/17/22px scale. Module-specific cloth and shelf tokens stay namespaced.
-   Use --rn-* in new modules; no global --sr/--ink/--tp overrides of existing surfaces. */
+/* The one token source of Ready Next (W1 §3). Values follow docs/design/ready-next-design-reference.html.
+   Materials: one glass (the window), paper (--rn-sheet) for content, well (--rn-well) for spatial content,
+   float (--rn-float) for menus and dialogs; the liquid glass (--rn-liquid-*) is only the assistant composer.
+   --rn-paper is the colour of a book page in the reader, not the app's paper.
+   Module-specific cloth and shelf tokens stay namespaced. */
 @font-face { font-family: 'RN Inter'; src: url('./fonts/Inter.woff2') format('woff2'); font-weight: 100 900; font-display: swap; }
 @font-face { font-family: 'RN Serif'; src: url('./fonts/InstrumentSerif.woff2') format('woff2'); font-display: swap; }
 @font-face { font-family: 'RN Serif'; src: url('./fonts/InstrumentSerifItalic.woff2') format('woff2'); font-style: italic; font-display: swap; }
@@ -42,7 +44,7 @@
   --rn-stage-2: #e3e3e8;
   --rn-ink: #0b0b0e;
   --rn-ink-2: rgba(11, 11, 14, .64);
-  --rn-ink-3: rgba(11, 11, 14, .42);
+  --rn-ink-3: rgba(11, 11, 14, .46);
   --rn-ink-4: rgba(11, 11, 14, .22);
   --rn-hair: rgba(11, 11, 14, .08);
   --rn-hair-2: rgba(11, 11, 14, .14);
@@ -51,10 +53,31 @@
   --rn-fill-3: rgba(11, 11, 14, .13);
   --rn-accent: #ff5a1f;           /* "Print signal" — the one accent */
   --rn-accent-ink: #ffffff;
-  --rn-accent-soft: rgba(255, 90, 31, .14);
+  --rn-accent-text: #c8410f;       /* the accent as small text: #ff5a1f is only ~3:1 on white */
+  --rn-accent-soft: rgba(255, 90, 31, .13);
   --rn-ok: #1fae6b; --rn-warn: #e2a400; --rn-bad: #e5484d;
   --rn-inverse: #0b0b0e; --rn-on-inverse: #fafafa;
   --rn-logo-ink: #ebebee;
+
+  /* ---- materials (W1 §3.1, DL1–DL4a) ---- */
+  --rn-sheet: #fdfdfc;
+  --rn-sheet-shadow: 0 1px 2px rgb(10 10 20 / .05), 0 8px 24px -12px rgb(10 10 30 / .14);
+  --rn-well: rgb(11 11 14 / .045);
+  --rn-float: rgb(252 252 253 / .82);
+  --rn-card-shadow: 0 1px 2px rgb(10 10 20 / .06), 0 6px 16px -8px rgb(10 10 30 / .18);
+  --rn-liquid-a: rgb(255 255 255 / .36);
+  --rn-liquid-b: rgb(255 255 255 / .10);
+  --rn-liquid-rim: rgb(255 255 255 / .78);
+  --rn-liquid-hi: rgb(255 255 255 / .95);
+  --rn-liquid-sheen: rgb(255 255 255 / .4);
+  --rn-liquid-shadow: 0 16px 36px -18px rgb(10 10 30 / .34), 0 2px 6px rgb(10 10 30 / .06);
+  --rn-r-sheet: 20px; --rn-r-float: 16px; --rn-r-control: 9px;
+
+  /* ---- shell and density (DL11, DL11a) ---- */
+  --rn-rail-w: 52px; --rn-sidebar-w: 248px; --rn-assistant-w: 380px; --rn-band-h: 52px;
+  --rn-row-h: 30px; --rn-control-h: 28px; --rn-control-h-lg: 32px;
+  --rn-icon: 16px; --rn-icon-stroke: 1.5;
+  --rn-prose-size: 16px; --rn-prose-lh: 1.75;
 
   /* ---- paper: the page, a bookplate, a ribbon ---- */
   --rn-paper: #f7f4ee;
@@ -99,21 +122,33 @@
 }
 
 [data-theme='dark'] {
-  --rn-stage: #0b0b0d;
+  --rn-stage: #0e0e11;
   --rn-stage-2: #111114;
   --rn-ink: #f4f4f6;
-  --rn-ink-2: rgba(244, 244, 246, .66);
-  --rn-ink-3: rgba(244, 244, 246, .42);
-  --rn-ink-4: rgba(244, 244, 246, .2);
+  --rn-ink-2: rgba(244, 244, 246, .68);
+  --rn-ink-3: rgba(244, 244, 246, .46);
+  --rn-ink-4: rgba(244, 244, 246, .22);
   --rn-hair: rgba(255, 255, 255, .08);
   --rn-hair-2: rgba(255, 255, 255, .14);
   --rn-fill: rgba(255, 255, 255, .05);
-  --rn-fill-2: rgba(255, 255, 255, .085);
+  --rn-fill-2: rgba(255, 255, 255, .09);
   --rn-fill-3: rgba(255, 255, 255, .13);
   --rn-accent: #ff5a1f;
+  --rn-accent-text: #ff8a5c;
   --rn-accent-soft: rgba(255, 106, 44, .18);
   --rn-inverse: #f4f4f6; --rn-on-inverse: #0b0b0e;
   --rn-logo-ink: #0b0b0e;
+  --rn-sheet: #1c1c1f;
+  --rn-sheet-shadow: 0 1px 2px rgb(0 0 0 / .4), 0 8px 24px -12px rgb(0 0 0 / .6);
+  --rn-well: rgb(0 0 0 / .26);
+  --rn-float: rgb(28 28 32 / .86);
+  --rn-card-shadow: 0 1px 2px rgb(0 0 0 / .4), 0 6px 16px -8px rgb(0 0 0 / .6);
+  --rn-liquid-a: rgb(255 255 255 / .13);
+  --rn-liquid-b: rgb(255 255 255 / .03);
+  --rn-liquid-rim: rgb(255 255 255 / .2);
+  --rn-liquid-hi: rgb(255 255 255 / .34);
+  --rn-liquid-sheen: rgb(255 255 255 / .1);
+  --rn-liquid-shadow: 0 16px 36px -18px rgb(0 0 0 / .7), 0 2px 6px rgb(0 0 0 / .3);
   --rn-paper: #202022;
   --rn-paper-2: #2a2a2d;
   --rn-hl: rgb(255 200 60 / .42);
@@ -140,6 +175,18 @@
   --rn-bracket: #3a3a40;
   --rn-amb-alpha: .14;
   color-scheme: dark;
+}
+
+/* 减少透明（DL12）：玻璃变成不透明的底色，浮层不再透出与模糊，液态玻璃退回纸色（DL4a）。 */
+[data-transparency='reduced'] {
+  --rn-float: rgb(252 252 253);
+  --rn-glass-alpha: 1; --rn-glass-alpha-strong: 1; --rn-glass-alpha-clear: 1;
+  --rn-liquid-a: var(--rn-sheet); --rn-liquid-b: var(--rn-sheet);
+  --rn-liquid-sheen: transparent;
+}
+
+[data-theme='dark'][data-transparency='reduced'] {
+  --rn-float: rgb(28 28 32);
 }
 
 }

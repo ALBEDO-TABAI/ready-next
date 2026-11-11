@@ -110,13 +110,13 @@ test('theme transitions route through the ritual overlay and the per-selector tr
   assert.doesNotMatch(ritualCss, /html\[data-theme-ritual-phase='entering'\]\s+\.ready-app-shell\s*\{[\s\S]*opacity:\s*0/)
 
   // Constant colors live in :root so there's one source of truth for the light/dark canvas
-  // colors. data-theme/data-skin branches alias these via var() to prevent drift.
+  // colors. light/dark root selectors alias these via var() to prevent drift.
   assert.match(styles, /:root\s*\{[\s\S]*--workbench-mode-bg-light:\s*#F6F1E7/)
   assert.match(styles, /:root\s*\{[\s\S]*--workbench-mode-bg-dark:\s*#192131/)
   assert.match(styles, /:root\s*\{[\s\S]*--ritual-overlay-bg:\s*var\(--workbench-mode-bg\)/)
   // [^{]* 容忍选择器列表（fastcard overlay 窗口与主窗共享此规则块）
-  assert.match(styles, /html\[data-skin='liquid-glass'\][^{]*\{[\s\S]*?--workbench-mode-bg:\s*var\(--workbench-mode-bg-light\)/)
-  assert.match(styles, /html\[data-theme='dark'\]\[data-skin='liquid-glass'\]\s*\{[\s\S]*--workbench-mode-bg:\s*var\(--workbench-mode-bg-dark\)/)
+  assert.match(styles, /html:root[^{]*\{[\s\S]*?--workbench-mode-bg:\s*var\(--workbench-mode-bg-light\)/)
+  assert.match(styles, /html\[data-theme='dark'\]:root\s*\{[\s\S]*--workbench-mode-bg:\s*var\(--workbench-mode-bg-dark\)/)
   // color-scheme hint is present so native form controls/scrollbars render in the right scheme from the first frame.
   assert.match(styles, /:root\s*\{[\s\S]*color-scheme:\s*light dark/)
   assert.match(styles, /html\[data-theme='dark'\]\s*\{[\s\S]*color-scheme:\s*dark/)

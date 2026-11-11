@@ -1776,7 +1776,6 @@ describe('useTheme Store', () => {
         useTheme.setState({
             theme: 'light',
             resolvedTheme: 'light',
-            skin: 'liquid-glass',
         })
     })
 
@@ -1784,7 +1783,6 @@ describe('useTheme Store', () => {
         const state = useTheme.getState()
         assert.strictEqual(state.theme, 'light')
         assert.strictEqual(state.resolvedTheme, 'light')
-        assert.strictEqual(state.skin, 'liquid-glass')
     })
 
     it('should set theme to dark', () => {
@@ -1879,29 +1877,7 @@ describe('useTheme Store', () => {
         assert.strictEqual(useTheme.getState().resolvedTheme, 'light')
     })
 
-    it('should set skin to liquid-glass and persist it', () => {
-        useTheme.getState().setSkin('liquid-glass')
-        const state = useTheme.getState()
-        assert.strictEqual(state.skin, 'liquid-glass')
-        assert.strictEqual(storage.get('ready-theme-skin'), 'liquid-glass')
-        assert.strictEqual(documentAttributes.get('data-skin'), 'liquid-glass')
-    })
 
-    it('should toggle the glass backdrop while keeping skin selectors compatible', () => {
-        assert.strictEqual(useTheme.getState().skin, 'liquid-glass')
-
-        useTheme.getState().toggleSkin()
-        assert.strictEqual(useTheme.getState().skin, 'ready-glass')
-        assert.strictEqual(storage.get('ready-theme-skin'), 'ready-glass')
-        assert.strictEqual(documentAttributes.get('data-skin'), 'liquid-glass')
-        assert.strictEqual(documentAttributes.get('data-glass-backdrop'), 'ready')
-
-        useTheme.getState().toggleSkin()
-        assert.strictEqual(useTheme.getState().skin, 'liquid-glass')
-        assert.strictEqual(storage.get('ready-theme-skin'), 'liquid-glass')
-        assert.strictEqual(documentAttributes.get('data-skin'), 'liquid-glass')
-        assert.strictEqual(documentAttributes.get('data-glass-backdrop'), 'native')
-    })
 })
 
 describe('useSettings Store', () => {

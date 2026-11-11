@@ -1261,11 +1261,13 @@ const appAPI = {
 }
 
 // Window API
-type ThemeSkinIPC = 'liquid-glass' | 'ready-glass' | 'solid-green-glass' | 'solid-blue-glass'
 interface ThemeSnapshotIPC {
   option: string
   resolved: 'light' | 'dark'
-  skin: ThemeSkinIPC
+  /** 生效的透明度：用户开关或系统“减少透明度”任一打开即为 reduced（W1 DL12）。 */
+  transparency: 'normal' | 'reduced'
+  /** 用户自己的“减少透明”开关。 */
+  reduceTransparency: boolean
   isNativeFullscreen: boolean
 }
 
@@ -1291,14 +1293,8 @@ const windowAPI = {
 // Theme API
 const themeAPI = {
   set: (theme: string) => ipcRenderer.invoke('theme:set', theme),
-  /**
-   * 切换玻璃风格：'liquid-glass'（真半透明，macOS 用 vibrancy under-window）/
-   * 'ready-glass'（Ready 自持稳定底，不启用 vibrancy）/
-   * 'solid-green-glass'（Ready 自持实色绿玻璃底）/
-   * 'solid-blue-glass'（Ready 自持实色蓝玻璃底）。
-   * 切换 skin **不** 触发昼夜 ritual，仅改变窗口材料与 .ready-app-bg 渐变可见性。
-   */
-  setSkin: (skin: ThemeSkinIPC) => ipcRenderer.invoke('theme:setSkin', skin),
+  /** “减少透明”开关：玻璃变成不透明的底色、浮层不再模糊；不触发昼夜 ritual。 */
+  setReduceTransparency: (enabled: boolean) => ipcRenderer.invoke('theme:setReduceTransparency', enabled),
   get: () => ipcRenderer.invoke('theme:get'),
   onChanged: (listener: (snapshot: ThemeSnapshotIPC) => void) => {
     const handler = (_event: IpcRendererEvent, snapshot: ThemeSnapshotIPC) => {

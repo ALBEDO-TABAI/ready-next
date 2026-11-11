@@ -37,8 +37,6 @@ test('DraggableModeTabs writes thumb position through CSS variables and does not
   assert.match(styles, /--dmt-icon-index/)
   assert.match(styles, /--dmt-icon-shift/)
   assert.match(styles, /--dmt-icon-proximity/)
-  // a948f82d style(ui): polish Ready glass theme surfaces — 强调色从固定 --color-blue 改走品牌 accent token（蓝色为回退值）
-  assert.match(styles, /color-mix\(in srgb,\s*var\(--ready-brand-accent,\s*var\(--color-blue\)\)/)
 
   // Per-icon visual index and reordering shift are passed through style for the CSS variable cascade.
   assert.match(source, /\['--dmt-icon-index' as string\]:\s*String\(visualIndex\)/)

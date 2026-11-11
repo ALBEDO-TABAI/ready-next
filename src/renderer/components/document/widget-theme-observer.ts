@@ -16,7 +16,7 @@ function ensureObserver(): void {
   })
   observer.observe(document.documentElement, {
     attributes: true,
-    attributeFilter: ['class', 'data-theme', 'data-skin'],
+    attributeFilter: ['class', 'data-theme', 'data-transparency'],
   })
 }
 

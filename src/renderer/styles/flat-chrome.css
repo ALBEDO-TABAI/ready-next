@@ -27,20 +27,8 @@
 }
 
 /* Override surface tokens for unified look */
-html:not([data-skin='liquid-glass']) {
-  --surface-toolbar-bg: var(--panel-unified-bg);
-  --surface-panel-bg: var(--panel-unified-bg);
-  --lg-content-bg: var(--panel-unified-bg);
-  --lg-content-card-bg: var(--panel-unified-bg);
-}
 
 /* Keep main content areas aligned with the shared light-beige module surface for non-liquid skins */
-html:not([data-skin='liquid-glass']) .workbench-content,
-html:not([data-skin='liquid-glass']) .workbench-mode-root,
-html:not([data-skin='liquid-glass']) [class*="content-area"],
-html:not([data-skin='liquid-glass']) [class*="editor-area"] {
-  background: var(--bg-content) !important;
-}
 
 .workbench-canvas-shell {
   min-height: 0;
@@ -51,26 +39,26 @@ html:not([data-skin='liquid-glass']) [class*="editor-area"] {
   box-shadow: 0 4px 14px rgba(15, 23, 42, 0.03);
 }
 
-html[data-skin='liquid-glass'] .workbench-canvas-shell,
-html[data-skin='liquid-glass'] .workbench-content,
-html[data-skin='liquid-glass'] .workbench-mode-root {
+html:root .workbench-canvas-shell,
+html:root .workbench-content,
+html:root .workbench-mode-root {
   background: transparent !important;
 }
 
-html[data-skin='liquid-glass'] .workbench-canvas-shell {
+html:root .workbench-canvas-shell {
   border-color: transparent !important;
   box-shadow: none !important;
 }
 
-html[data-skin='liquid-glass'] .rss-mode-shell .workbench-canvas-shell {
+html:root .rss-mode-shell .workbench-canvas-shell {
   border-color: transparent !important;
   box-shadow: none !important;
 }
 
-html[data-skin='liquid-glass'] [style*="border-right"],
-html[data-skin='liquid-glass'] [style*="border-left"],
-html[data-skin='liquid-glass'] [class*="border-right"],
-html[data-skin='liquid-glass'] [class*="border-left"] {
+html:root [style*="border-right"],
+html:root [style*="border-left"],
+html:root [class*="border-right"],
+html:root [class*="border-left"] {
   border-right-color: transparent !important;
   border-left-color: transparent !important;
 }
@@ -121,13 +109,13 @@ body.resizing [data-liquid-shell='chat-panel'] {
   box-shadow: var(--workbench-side-panel-shadow);
 }
 
-html[data-skin='liquid-glass'] .calendar-mode-shell .workbench-canvas-shell {
+html:root .calendar-mode-shell .workbench-canvas-shell {
   background: var(--calendar-canvas-bg) !important;
   border: 1px solid var(--calendar-canvas-border) !important;
   box-shadow: none !important;
 }
 
-html[data-theme='dark'][data-skin='liquid-glass'] .calendar-mode-shell .workbench-canvas-shell {
+html[data-theme='dark']:root .calendar-mode-shell .workbench-canvas-shell {
   background: var(--calendar-canvas-bg) !important;
   border-color: var(--calendar-canvas-border) !important;
   box-shadow: none !important;
@@ -502,20 +490,6 @@ html[data-theme='dark'][data-skin='liquid-glass'] .calendar-mode-shell .workbenc
   }
 }
 
-html:not([data-skin='liquid-glass']) .rss-mode-shell .workbench-canvas-shell,
-html:not([data-skin='liquid-glass']) .rss-mode-shell .content-surface-panel,
-html:not([data-skin='liquid-glass']) .rss-mode-shell .content-surface-card {
-  background: var(--bg-content) !important;
-}
-
-html:not([data-skin='liquid-glass']) .rss-mode-shell,
-html:not([data-skin='liquid-glass']) .rss-mode-shell .workbench-mode-root,
-html:not([data-skin='liquid-glass']) .rss-mode-shell .workbench-content,
-html:not([data-skin='liquid-glass']) .rss-mode-shell [class*="content-area"],
-html:not([data-skin='liquid-glass']) .rss-mode-shell [class*="editor-area"] {
-  background: var(--bg-content) !important;
-}
-
 .rss-mode-shell .rss-feed-sheet {
   --rss-settings-bg: color-mix(in srgb, var(--workbench-module-surface-bg) 94%, var(--bg-content) 6%);
   --rss-settings-card-bg: color-mix(in srgb, var(--surface-card-bg) 42%, transparent);
@@ -576,15 +550,15 @@ html:not([data-skin='liquid-glass']) .rss-mode-shell [class*="editor-area"] {
   box-shadow: 0 18px 42px rgba(15, 23, 42, 0.12), 0 6px 14px rgba(15, 23, 42, 0.06);
 }
 
-html[data-skin='liquid-glass'] .rss-add-source-modal {
+html:root .rss-add-source-modal {
   background: transparent;
 }
 
-html[data-skin='liquid-glass'] .rss-add-source-modal__header {
+html:root .rss-add-source-modal__header {
   background: var(--ready-app-panel-glass-band-bg);
 }
 
-html[data-skin='liquid-glass'] .rss-add-source-modal__preset {
+html:root .rss-add-source-modal__preset {
   box-shadow: var(--ready-app-panel-glass-card-shadow);
 }
 
@@ -1004,7 +978,7 @@ html[data-skin='liquid-glass'] .rss-add-source-modal__preset {
   }
 }
 
-html[data-skin='liquid-glass'],
+html:root,
 html[data-fastcard-overlay-window='true'] {
   --ready-app-panel-glass-bg: var(--chat-menu-frost-bg);
   --ready-app-panel-glass-band-bg: transparent;
@@ -1017,7 +991,7 @@ html[data-fastcard-overlay-window='true'] {
   --ready-app-panel-glass-card-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.20);
 }
 
-html[data-theme='dark'][data-skin='liquid-glass'],
+html[data-theme='dark']:root,
 html[data-theme='dark'][data-fastcard-overlay-window='true'] {
   --ready-app-panel-glass-bg: var(--chat-menu-frost-bg);
   --ready-app-panel-glass-band-bg: transparent;
@@ -1030,7 +1004,7 @@ html[data-theme='dark'][data-fastcard-overlay-window='true'] {
   --ready-app-panel-glass-card-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
 }
 
-html[data-skin='liquid-glass'] .ready-app-liquid-panel,
+html:root .ready-app-liquid-panel,
 html[data-fastcard-overlay-window='true'] .ready-app-liquid-panel {
   isolation: isolate;
   overflow: hidden;
@@ -1041,51 +1015,51 @@ html[data-fastcard-overlay-window='true'] .ready-app-liquid-panel {
   -webkit-backdrop-filter: none !important;
 }
 
-html[data-skin='liquid-glass'] .ready-app-liquid-panel__lens,
+html:root .ready-app-liquid-panel__lens,
 html[data-fastcard-overlay-window='true'] .ready-app-liquid-panel__lens {
   z-index: 0;
 }
 
-html[data-skin='liquid-glass'] .ready-app-liquid-panel > :not(.ready-app-liquid-panel__lens),
+html:root .ready-app-liquid-panel > :not(.ready-app-liquid-panel__lens),
 html[data-fastcard-overlay-window='true'] .ready-app-liquid-panel > :not(.ready-app-liquid-panel__lens) {
   position: relative;
   z-index: 2;
 }
 
-html[data-skin='liquid-glass'] .browser-fastcard-header,
+html:root .browser-fastcard-header,
 html[data-fastcard-overlay-window='true'] .browser-fastcard-header,
-html[data-skin='liquid-glass'] .browser-fastcard-footer,
+html:root .browser-fastcard-footer,
 html[data-fastcard-overlay-window='true'] .browser-fastcard-footer,
-html[data-skin='liquid-glass'] .rss-settings-header,
-html[data-skin='liquid-glass'] .rss-settings-notice,
-html[data-skin='liquid-glass'] .calendar-assistant-header,
-html[data-skin='liquid-glass'] .calendar-assistant-composer,
-html[data-skin='liquid-glass'] .rss-task-menu-panel .ready-liquid-popover__content > div:first-child {
+html:root .rss-settings-header,
+html:root .rss-settings-notice,
+html:root .calendar-assistant-header,
+html:root .calendar-assistant-composer,
+html:root .rss-task-menu-panel .ready-liquid-popover__content > div:first-child {
   background: var(--ready-app-panel-glass-band-bg) !important;
   border-color: transparent !important;
 }
 
-html[data-skin='liquid-glass'] .browser-fastcard-item,
+html:root .browser-fastcard-item,
 html[data-fastcard-overlay-window='true'] .browser-fastcard-item,
-html[data-skin='liquid-glass'] .browser-fastcard-result-body section,
+html:root .browser-fastcard-result-body section,
 html[data-fastcard-overlay-window='true'] .browser-fastcard-result-body section,
-html[data-skin='liquid-glass'] .browser-fastcard-field select,
+html:root .browser-fastcard-field select,
 html[data-fastcard-overlay-window='true'] .browser-fastcard-field select,
-html[data-skin='liquid-glass'] .browser-fastcard-action,
+html:root .browser-fastcard-action,
 html[data-fastcard-overlay-window='true'] .browser-fastcard-action,
-html[data-skin='liquid-glass'] .rss-settings-card,
-html[data-skin='liquid-glass'] .rss-settings-choice,
-html[data-skin='liquid-glass'] .rss-settings-warning,
-html[data-skin='liquid-glass'] .rss-settings-button,
-html[data-skin='liquid-glass'] .rss-settings-icon-button,
-html[data-skin='liquid-glass'] .rss-settings-runtime-grid div,
-html[data-skin='liquid-glass'] .rss-settings-source-row,
-html[data-skin='liquid-glass'] .calendar-assistant-card,
-html[data-skin='liquid-glass'] .calendar-assistant-event,
-html[data-skin='liquid-glass'] .calendar-assistant-chip,
-html[data-skin='liquid-glass'] .calendar-assistant-composer input,
-html[data-skin='liquid-glass'] .rss-task-menu-row,
-html[data-skin='liquid-glass'] .calendar-timezone-menu input {
+html:root .rss-settings-card,
+html:root .rss-settings-choice,
+html:root .rss-settings-warning,
+html:root .rss-settings-button,
+html:root .rss-settings-icon-button,
+html:root .rss-settings-runtime-grid div,
+html:root .rss-settings-source-row,
+html:root .calendar-assistant-card,
+html:root .calendar-assistant-event,
+html:root .calendar-assistant-chip,
+html:root .calendar-assistant-composer input,
+html:root .rss-task-menu-row,
+html:root .calendar-timezone-menu input {
   background: var(--ready-app-panel-glass-card-bg) !important;
   border-color: var(--ready-app-panel-glass-inner-border) !important;
   box-shadow: var(--ready-app-panel-glass-card-shadow);
@@ -1093,43 +1067,43 @@ html[data-skin='liquid-glass'] .calendar-timezone-menu input {
   -webkit-backdrop-filter: none !important;
 }
 
-html[data-skin='liquid-glass'] .ready-app-liquid-panel .browser-fastcard-item,
+html:root .ready-app-liquid-panel .browser-fastcard-item,
 html[data-fastcard-overlay-window='true'] .ready-app-liquid-panel .browser-fastcard-item,
-html[data-skin='liquid-glass'] .ready-app-liquid-panel .browser-fastcard-result-body section,
+html:root .ready-app-liquid-panel .browser-fastcard-result-body section,
 html[data-fastcard-overlay-window='true'] .ready-app-liquid-panel .browser-fastcard-result-body section,
-html[data-skin='liquid-glass'] .ready-app-liquid-panel .rss-settings-card,
-html[data-skin='liquid-glass'] .ready-app-liquid-panel .calendar-assistant-card,
-html[data-skin='liquid-glass'] .ready-app-liquid-panel .calendar-assistant-event,
-html[data-skin='liquid-glass'] .ready-app-liquid-panel .rss-settings-source-row {
+html:root .ready-app-liquid-panel .rss-settings-card,
+html:root .ready-app-liquid-panel .calendar-assistant-card,
+html:root .ready-app-liquid-panel .calendar-assistant-event,
+html:root .ready-app-liquid-panel .rss-settings-source-row {
   background: transparent !important;
   border-color: transparent !important;
   box-shadow: none !important;
 }
 
-html[data-skin='liquid-glass'] .ready-app-liquid-panel .rss-settings-choice,
-html[data-skin='liquid-glass'] .ready-app-liquid-panel .rss-settings-button,
-html[data-skin='liquid-glass'] .ready-app-liquid-panel .rss-settings-icon-button,
-html[data-skin='liquid-glass'] .ready-app-liquid-panel .rss-settings-runtime-grid div,
-html[data-skin='liquid-glass'] .ready-app-liquid-panel .calendar-assistant-chip,
-html[data-skin='liquid-glass'] .ready-app-liquid-panel .calendar-assistant-composer input,
-html[data-skin='liquid-glass'] .ready-app-liquid-panel .browser-fastcard-field select,
+html:root .ready-app-liquid-panel .rss-settings-choice,
+html:root .ready-app-liquid-panel .rss-settings-button,
+html:root .ready-app-liquid-panel .rss-settings-icon-button,
+html:root .ready-app-liquid-panel .rss-settings-runtime-grid div,
+html:root .ready-app-liquid-panel .calendar-assistant-chip,
+html:root .ready-app-liquid-panel .calendar-assistant-composer input,
+html:root .ready-app-liquid-panel .browser-fastcard-field select,
 html[data-fastcard-overlay-window='true'] .ready-app-liquid-panel .browser-fastcard-field select,
-html[data-skin='liquid-glass'] .ready-app-liquid-panel .browser-fastcard-action,
+html:root .ready-app-liquid-panel .browser-fastcard-action,
 html[data-fastcard-overlay-window='true'] .ready-app-liquid-panel .browser-fastcard-action {
   background: var(--ready-app-panel-glass-control-bg) !important;
   box-shadow: var(--ready-app-panel-glass-card-shadow) !important;
 }
 
-html[data-skin='liquid-glass'] .rss-settings-choice:hover,
-html[data-skin='liquid-glass'] .rss-settings-button:hover:not(:disabled),
-html[data-skin='liquid-glass'] .rss-settings-icon-button:hover:not(:disabled),
-html[data-skin='liquid-glass'] .calendar-assistant-chip:hover,
-html[data-skin='liquid-glass'] .browser-fastcard-action:hover:not(:disabled),
+html:root .rss-settings-choice:hover,
+html:root .rss-settings-button:hover:not(:disabled),
+html:root .rss-settings-icon-button:hover:not(:disabled),
+html:root .calendar-assistant-chip:hover,
+html:root .browser-fastcard-action:hover:not(:disabled),
 html[data-fastcard-overlay-window='true'] .browser-fastcard-action:hover:not(:disabled),
-html[data-skin='liquid-glass'] .rss-task-menu-row:hover {
+html:root .rss-task-menu-row:hover {
   background: var(--ready-app-panel-glass-hover-bg) !important;
 }
 
-html[data-skin='liquid-glass'] .rss-settings-choice.is-active {
+html:root .rss-settings-choice.is-active {
   background: color-mix(in srgb, var(--color-blue) 12%, var(--ready-app-panel-glass-card-bg)) !important;
 }

@@ -65,24 +65,24 @@ test('chat composer delegates its material to the liquid lens instead of the ins
 
 test('dark liquid composer dims only the material while preserving semantic controls', () => {
   const styles = readRendererStyles()
-  const darkComposerBlock = styles.match(/html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.ready-liquid-composer \{([\s\S]*?)\n\}/)
+  const darkComposerBlock = styles.match(/html\[data-theme='dark'\]:root \.ready-liquid-composer \{([\s\S]*?)\n\}/)
   assert.ok(darkComposerBlock, 'dark liquid composer block should exist')
 
   assert.match(
     styles,
-    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.ready-liquid-composer \{[\s\S]*--text-body:\s*rgba\(232, 232, 232, 0\.86\);[\s\S]*--text-placeholder:\s*rgba\(176, 176, 176, 0\.62\);/,
+    /html\[data-theme='dark'\]:root \.ready-liquid-composer \{[\s\S]*--text-body:\s*rgba\(232, 232, 232, 0\.86\);[\s\S]*--text-placeholder:\s*rgba\(176, 176, 176, 0\.62\);/,
   )
   assert.match(
     styles,
-    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.ready-liquid-composer__surface \{[\s\S]*background:\s*rgba\(26, 26, 26, 0\.62\);/,
+    /html\[data-theme='dark'\]:root \.ready-liquid-composer__surface \{[\s\S]*background:\s*rgba\(26, 26, 26, 0\.62\);/,
   )
   assert.match(
     styles,
-    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.ready-liquid-composer__projection \{[\s\S]*saturate\(0\)[\s\S]*brightness\(0\.78\)/,
+    /html\[data-theme='dark'\]:root \.ready-liquid-composer__projection \{[\s\S]*saturate\(0\)[\s\S]*brightness\(0\.78\)/,
   )
   assert.match(
     styles,
-    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.ready-liquid-composer \[data-ready-agent-send='true'\] \{[\s\S]*?background:\s*rgba\(255, 255, 255, 0\.96\) !important;/,
+    /html\[data-theme='dark'\]:root \.ready-liquid-composer \[data-ready-agent-send='true'\] \{[\s\S]*?background:\s*rgba\(255, 255, 255, 0\.96\) !important;/,
   )
   assert.match(
     styles,

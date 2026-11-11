@@ -2,7 +2,7 @@
 /* The refracting layer is a LiquidLens (canvas displacement map →
    feDisplacementMap → backdrop-filter: url()). CSS only adds the material
    veil and rim highlights; the optics live in the component. */
-html[data-skin='liquid-glass'] :is(.ready-chat-mode-tabs-dock .draggable-mode-tabs__surface, .ready-chat-project-surface),
+html:root :is(.ready-chat-mode-tabs-dock .draggable-mode-tabs__surface, .ready-chat-project-surface),
 .ready-liquid-composer__surface {
   position: relative;
   z-index: 0;
@@ -15,8 +15,8 @@ html[data-skin='liquid-glass'] :is(.ready-chat-mode-tabs-dock .draggable-mode-ta
     inset 0 -1px 0 rgba(255, 255, 255, 0.14);
 }
 
-html[data-skin='liquid-glass'] :is(.ready-chat-mode-tabs-dock .draggable-mode-tabs__surface, .ready-chat-project-surface)::before,
-html[data-skin='liquid-glass'] :is(.ready-chat-mode-tabs-dock .draggable-mode-tabs__surface, .ready-chat-project-surface)::after,
+html:root :is(.ready-chat-mode-tabs-dock .draggable-mode-tabs__surface, .ready-chat-project-surface)::before,
+html:root :is(.ready-chat-mode-tabs-dock .draggable-mode-tabs__surface, .ready-chat-project-surface)::after,
 .ready-liquid-composer__surface::before,
 .ready-liquid-composer__surface::after {
   content: '';
@@ -25,7 +25,7 @@ html[data-skin='liquid-glass'] :is(.ready-chat-mode-tabs-dock .draggable-mode-ta
   pointer-events: none;
 }
 
-html[data-skin='liquid-glass'] :is(.ready-chat-mode-tabs-dock .draggable-mode-tabs__surface, .ready-chat-project-surface)::before,
+html:root :is(.ready-chat-mode-tabs-dock .draggable-mode-tabs__surface, .ready-chat-project-surface)::before,
 .ready-liquid-composer__surface::before {
   inset: 0;
   z-index: 4;
@@ -35,7 +35,7 @@ html[data-skin='liquid-glass'] :is(.ready-chat-mode-tabs-dock .draggable-mode-ta
     inset 0 1px 0 rgba(255, 255, 255, 0.24);
 }
 
-html[data-skin='liquid-glass'] :is(.ready-chat-mode-tabs-dock .draggable-mode-tabs__surface, .ready-chat-project-surface)::after,
+html:root :is(.ready-chat-mode-tabs-dock .draggable-mode-tabs__surface, .ready-chat-project-surface)::after,
 .ready-liquid-composer__surface::after {
   inset: 0;
   z-index: 5;
@@ -54,7 +54,7 @@ html[data-skin='liquid-glass'] :is(.ready-chat-mode-tabs-dock .draggable-mode-ta
   z-index: 3;
 }
 
-html[data-skin='liquid-glass'] :is(.ready-chat-mode-tabs-dock .draggable-mode-tabs__projection, .ready-chat-project-projection),
+html:root :is(.ready-chat-mode-tabs-dock .draggable-mode-tabs__projection, .ready-chat-project-projection),
 .ready-liquid-composer__projection {
   position: absolute;
   inset: 0;
@@ -67,7 +67,7 @@ html[data-skin='liquid-glass'] :is(.ready-chat-mode-tabs-dock .draggable-mode-ta
   transform: translateZ(0);
 }
 
-html[data-skin='liquid-glass'] :is(.ready-chat-mode-tabs-dock .draggable-mode-tabs__projection, .ready-chat-project-projection)::after,
+html:root :is(.ready-chat-mode-tabs-dock .draggable-mode-tabs__projection, .ready-chat-project-projection)::after,
 .ready-liquid-composer__projection::after {
   content: '';
   position: absolute;
@@ -92,7 +92,7 @@ html[data-skin='liquid-glass'] :is(.ready-chat-mode-tabs-dock .draggable-mode-ta
   opacity: 1;
 }
 
-html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-composer {
+html[data-theme='dark']:root .ready-liquid-composer {
   --text-body: rgba(232, 232, 232, 0.86);
   --text-gray: rgba(202, 202, 202, 0.74);
   --text-light: rgba(164, 164, 164, 0.64);
@@ -100,8 +100,8 @@ html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-composer {
   --surface-border: rgba(232, 232, 232, 0.18);
 }
 
-html[data-theme='dark'][data-skin='liquid-glass'] :is(.ready-chat-mode-tabs-dock .draggable-mode-tabs__surface, .ready-chat-project-surface)::before,
-html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-composer__surface::before {
+html[data-theme='dark']:root :is(.ready-chat-mode-tabs-dock .draggable-mode-tabs__surface, .ready-chat-project-surface)::before,
+html[data-theme='dark']:root .ready-liquid-composer__surface::before {
   border-color: rgba(232, 232, 232, 0.14);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.18),
@@ -109,71 +109,71 @@ html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-composer__surfac
   opacity: 0.84;
 }
 
-html[data-theme='dark'][data-skin='liquid-glass'] :is(.ready-chat-mode-tabs-dock .draggable-mode-tabs__surface, .ready-chat-project-surface),
-html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-composer__surface {
+html[data-theme='dark']:root :is(.ready-chat-mode-tabs-dock .draggable-mode-tabs__surface, .ready-chat-project-surface),
+html[data-theme='dark']:root .ready-liquid-composer__surface {
   background: rgba(26, 26, 26, 0.62);
   box-shadow:
     inset 0 1px 0 rgba(232, 232, 232, 0.14),
     inset 0 -1px 0 rgba(0, 0, 0, 0.16);
 }
 
-html[data-theme='dark'][data-skin='liquid-glass'] :is(.ready-chat-mode-tabs-dock .draggable-mode-tabs__surface, .ready-chat-project-surface)::after,
-html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-composer__surface::after {
+html[data-theme='dark']:root :is(.ready-chat-mode-tabs-dock .draggable-mode-tabs__surface, .ready-chat-project-surface)::after,
+html[data-theme='dark']:root .ready-liquid-composer__surface::after {
   background:
     linear-gradient(132deg, rgba(255, 255, 255, 0.01) 0%, rgba(232, 232, 232, 0.18) 30%, rgba(255, 255, 255, 0.01) 56%, rgba(232, 232, 232, 0.12) 78%, rgba(255, 255, 255, 0.01) 100%);
   opacity: 0.18;
 }
 
-html[data-theme='dark'][data-skin='liquid-glass'] :is(.ready-chat-mode-tabs-dock .draggable-mode-tabs__projection, .ready-chat-project-projection),
-html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-composer__projection {
+html[data-theme='dark']:root :is(.ready-chat-mode-tabs-dock .draggable-mode-tabs__projection, .ready-chat-project-projection),
+html[data-theme='dark']:root .ready-liquid-composer__projection {
   opacity: 0.52;
   filter: blur(3.5px) saturate(0) contrast(0.78) brightness(0.78);
 }
 
-html[data-theme='dark'][data-skin='liquid-glass'] :is(.ready-chat-mode-tabs-dock .draggable-mode-tabs__projection, .ready-chat-project-projection)::after,
-html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-composer__projection::after {
+html[data-theme='dark']:root :is(.ready-chat-mode-tabs-dock .draggable-mode-tabs__projection, .ready-chat-project-projection)::after,
+html[data-theme='dark']:root .ready-liquid-composer__projection::after {
   background:
     radial-gradient(circle at 20% 18%, rgba(232, 232, 232, 0.09), transparent 28%),
     radial-gradient(circle at 76% 62%, rgba(232, 232, 232, 0.06), transparent 36%),
     linear-gradient(180deg, rgba(46, 46, 46, 0.26), rgba(18, 18, 18, 0.44));
 }
 
-html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-composer .ready-input-slot-inner {
+html[data-theme='dark']:root .ready-liquid-composer .ready-input-slot-inner {
   caret-color: var(--color-blue);
 }
 
-html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-composer button {
+html[data-theme='dark']:root .ready-liquid-composer button {
   color: var(--text-gray);
 }
 
-html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-composer button:hover:not(:disabled) {
+html[data-theme='dark']:root .ready-liquid-composer button:hover:not(:disabled) {
   background: rgba(232, 232, 232, 0.08) !important;
 }
 
-html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-composer button svg {
+html[data-theme='dark']:root .ready-liquid-composer button svg {
   color: var(--text-gray) !important;
 }
 
 html[data-theme='dark'] .ready-liquid-composer [data-ready-agent-send='true'],
-html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-composer [data-ready-agent-send='true'] {
+html[data-theme='dark']:root .ready-liquid-composer [data-ready-agent-send='true'] {
   background: rgba(255, 255, 255, 0.96) !important;
   border-color: rgba(255, 255, 255, 0.72) !important;
   color: rgba(10, 10, 10, 0.94) !important;
 }
 
 html[data-theme='dark'] .ready-liquid-composer [data-ready-agent-send='true']:hover:not(:disabled),
-html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-composer [data-ready-agent-send='true']:hover:not(:disabled) {
+html[data-theme='dark']:root .ready-liquid-composer [data-ready-agent-send='true']:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.90) !important;
 }
 
 html[data-theme='dark'] .ready-liquid-composer [data-ready-agent-send='true'] svg,
-html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-composer [data-ready-agent-send='true'] svg {
+html[data-theme='dark']:root .ready-liquid-composer [data-ready-agent-send='true'] svg {
   color: rgba(10, 10, 10, 0.94) !important;
 }
 
 .ready-liquid-composer [data-ready-agent-send='true']:disabled,
 html[data-theme='dark'] .ready-liquid-composer [data-ready-agent-send='true']:disabled,
-html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-composer [data-ready-agent-send='true']:disabled {
+html[data-theme='dark']:root .ready-liquid-composer [data-ready-agent-send='true']:disabled {
   opacity: 1;
 }
 
@@ -215,23 +215,23 @@ html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-composer [data-r
   mask: none !important;
 }
 
-html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-card {
+html[data-theme='dark']:root .ready-liquid-card {
   --ready-liquid-card-base-bg: rgba(24, 24, 24, 0.58);
   --ready-liquid-card-lens-bg: rgba(26, 26, 26, 0.26);
 }
 
-html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-card__lens {
+html[data-theme='dark']:root .ready-liquid-card__lens {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.10),
     inset 0 -1px 0 rgba(0, 0, 0, 0.12) !important;
 }
 
-html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-card__lens::before {
+html[data-theme='dark']:root .ready-liquid-card__lens::before {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.10) !important;
 }
 
-html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-card__lens::after {
+html[data-theme='dark']:root .ready-liquid-card__lens::after {
   background:
     radial-gradient(circle at 18% 0%, rgba(255, 255, 255, 0.10), transparent 34%),
     linear-gradient(132deg, rgba(255, 255, 255, 0.01) 0%, rgba(255, 255, 255, 0.10) 30%, rgba(255, 255, 255, 0.01) 60%, rgba(255, 255, 255, 0.06) 100%) !important;
@@ -256,7 +256,7 @@ html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-card__lens::afte
   border-radius: 19px;
 }
 
-html[data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs {
+html:root .ready-chat-mode-tabs-dock .draggable-mode-tabs {
   --ready-workbench-slider-thumb-scale: 1.08;
   border-color: transparent;
   background: transparent;
@@ -266,31 +266,31 @@ html[data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs {
   -webkit-backdrop-filter: none;
 }
 
-html[data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs::before {
+html:root .ready-chat-mode-tabs-dock .draggable-mode-tabs::before {
   display: none;
 }
 
-html[data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__track {
+html:root .ready-chat-mode-tabs-dock .draggable-mode-tabs__track {
   display: none;
 }
 
-html[data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__thumb {
+html:root .ready-chat-mode-tabs-dock .draggable-mode-tabs__thumb {
   display: none;
 }
 
-html[data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__thumb-glow {
+html:root .ready-chat-mode-tabs-dock .draggable-mode-tabs__thumb-glow {
   display: none;
 }
 
-html[data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__icon,
-html[data-skin='liquid-glass'] .ready-chat-project-pill svg {
+html:root .ready-chat-mode-tabs-dock .draggable-mode-tabs__icon,
+html:root .ready-chat-project-pill svg {
   color: rgba(56, 38, 32, 0.58);
   opacity: 0.66;
   filter: none;
 }
 
-html[data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__icon.is-active,
-html[data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__icon.is-split-active {
+html:root .ready-chat-mode-tabs-dock .draggable-mode-tabs__icon.is-active,
+html:root .ready-chat-mode-tabs-dock .draggable-mode-tabs__icon.is-split-active {
   color: rgba(255, 255, 255, 0.98);
   opacity: 1;
   filter:
@@ -299,11 +299,11 @@ html[data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__
     drop-shadow(0 0 8px rgba(255, 255, 255, 0.38));
 }
 
-html[data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__icon.is-split-active::after {
+html:root .ready-chat-mode-tabs-dock .draggable-mode-tabs__icon.is-split-active::after {
   display: none;
 }
 
-html[data-theme='dark'][data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs {
+html[data-theme='dark']:root .ready-chat-mode-tabs-dock .draggable-mode-tabs {
   border-color: transparent;
   background: transparent;
   box-shadow:
@@ -312,18 +312,18 @@ html[data-theme='dark'][data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .dr
   -webkit-backdrop-filter: none;
 }
 
-html[data-theme='dark'][data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__thumb {
+html[data-theme='dark']:root .ready-chat-mode-tabs-dock .draggable-mode-tabs__thumb {
   display: none;
 }
 
-html[data-theme='dark'][data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__icon,
-html[data-theme='dark'][data-skin='liquid-glass'] .ready-chat-project-pill svg {
+html[data-theme='dark']:root .ready-chat-mode-tabs-dock .draggable-mode-tabs__icon,
+html[data-theme='dark']:root .ready-chat-project-pill svg {
   color: rgba(232, 232, 232, 0.54);
   opacity: 0.68;
 }
 
-html[data-theme='dark'][data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__icon.is-active,
-html[data-theme='dark'][data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__icon.is-split-active {
+html[data-theme='dark']:root .ready-chat-mode-tabs-dock .draggable-mode-tabs__icon.is-active,
+html[data-theme='dark']:root .ready-chat-mode-tabs-dock .draggable-mode-tabs__icon.is-split-active {
   color: rgba(255, 255, 255, 0.98);
   opacity: 1;
 }

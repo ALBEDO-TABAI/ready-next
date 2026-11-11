@@ -8,14 +8,20 @@ function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-test('dark theme text tokens use softer gray-white defaults for regular text and icons', () => {
+test('shell text aliases use the shared ink levels with softer dark gray-white values', () => {
   const styles = readRendererStyles()
-
-  assert.match(styles, /html\[data-theme='dark'\]\s*\{[\s\S]*--text-title:\s*#D9DBE1;/)
-  assert.match(styles, /html\[data-theme='dark'\]\s*\{[\s\S]*--text-body:\s*#C4C7CF;/)
-  assert.match(styles, /html\[data-theme='dark'\]\s*\{[\s\S]*--text-secondary:\s*#B3B7C2;/)
-  assert.match(styles, /html\[data-theme='dark'\]\s*\{[\s\S]*--text-muted:\s*#8F96A3;/)
-  assert.match(styles, /html\[data-theme='dark'\]\s*\{[\s\S]*--text-gray:\s*#7E8796;/)
-  assert.match(styles, /html\[data-theme='dark'\]\s*\{[\s\S]*--text-light:\s*#6E7787;/)
-  assert.match(styles, /html\[data-theme='dark'\]\s*\{[\s\S]*--text-placeholder:\s*#6A7382;/)
+  const tokens = readWorkspaceFile('src/renderer/design/next/tokens.css')
+  assert.match(styles, /--text-title:\s*var\(--rn-ink\);/)
+  assert.match(styles, /--text-body:\s*var\(--rn-ink\);/)
+  assert.match(styles, /--text-secondary:\s*var\(--rn-ink-2\);/)
+  assert.match(styles, /--text-muted:\s*var\(--rn-ink-2\);/)
+  assert.match(styles, /--text-gray:\s*var\(--rn-ink-3\);/)
+  assert.match(styles, /--text-light:\s*var\(--rn-ink-3\);/)
+  assert.match(styles, /--text-placeholder:\s*var\(--rn-ink-3\);/)
+  const dark = tokens.match(/\[data-theme='dark'\] \{([^}]+)\}/)?.[1]
+  assert.ok(dark)
+  assert.match(dark, /--rn-ink: #f4f4f6;/)
+  assert.match(dark, /--rn-ink-2: rgba\(244, 244, 246, \.68\);/)
+  assert.match(dark, /--rn-ink-3: rgba\(244, 244, 246, \.46\);/)
+  assert.match(dark, /--rn-ink-4: rgba\(244, 244, 246, \.22\);/)
 })

@@ -5,9 +5,8 @@ import { act } from 'react'
 import { JSDOM } from 'jsdom'
 
 // 设置页设计系统的行为合同：
-// 1) 四档强调色在 OKLCH 上等明度配平（科学配色，不靠肉眼）；
-// 2) 共享控件（分段、开关、按钮类名）对外的可访问语义与交互；
-// 3) 设置页外壳：分组导航、aria-current、外观页把主题色写到根节点。
+// 1) 共享控件（分段、开关、按钮类名）对外的可访问语义与交互；
+// 2) 设置页外壳：分组导航、aria-current、外观页的减少透明开关写到根节点。
 
 function installDom(): () => void {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', {
@@ -44,34 +43,6 @@ function installDom(): () => void {
     dom.window.close()
   }
 }
-
-function oklchLightness(hex: string): number {
-  const channel = (offset: number) => {
-    const value = parseInt(hex.slice(offset, offset + 2), 16) / 255
-    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
-  }
-  const [r, g, b] = [channel(1), channel(3), channel(5)]
-  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b)
-  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b)
-  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b)
-  return 0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s
-}
-
-test('accent palettes are lightness-balanced in OKLCH for both themes', async () => {
-  const restore = installDom()
-  try {
-    const { resolveAccentPalette } = await import('../renderer/stores/useTheme')
-    const accents = ['blue', 'green', 'purple', 'orange'] as const
-    const light = accents.map((accent) => oklchLightness(resolveAccentPalette(accent, 'light', 'liquid-glass').color))
-    const dark = accents.map((accent) => oklchLightness(resolveAccentPalette(accent, 'dark', 'liquid-glass').color))
-    for (const value of light) assert.ok(value >= 0.58 && value <= 0.7, `light accent L=${value.toFixed(3)} out of band`)
-    for (const value of dark) assert.ok(value >= 0.68 && value <= 0.78, `dark accent L=${value.toFixed(3)} out of band`)
-    assert.ok(Math.max(...light) - Math.min(...light) <= 0.07, 'light accents should share one lightness band')
-    assert.ok(Math.max(...dark) - Math.min(...dark) <= 0.07, 'dark accents should share one lightness band')
-  } finally {
-    restore()
-  }
-})
 
 test('settings button class helper maps variants onto the shared sx-btn system', async () => {
   const { settingsButtonClass } = await import('../renderer/pages/settings/settings-shared')
@@ -135,7 +106,7 @@ test('segmented control and switch expose accessible state and report changes', 
   }
 })
 
-test('settings shell groups navigation, tracks the current section and applies the chosen accent', async () => {
+test('settings shell groups navigation, tracks the current section and applies reduced transparency', async () => {
   const restore = installDom()
   try {
     const { createRoot } = await import('react-dom/client')
@@ -158,14 +129,15 @@ test('settings shell groups navigation, tracks the current section and applies t
     const appearance = Array.from(nav.querySelectorAll('button')).find((button) => button.textContent === '外观')!
     await act(async () => { appearance.click() })
     assert.deepEqual(current(), ['外观'])
-    for (const label of ['主题模式', '视觉风格', '主题色']) {
-      assert.ok(document.querySelector(`[role="radiogroup"][aria-label="${label}"]`), `${label} picker renders`)
-    }
-
-    const blue = document.querySelector('[role="radiogroup"][aria-label="主题色"] [aria-label="蓝色"]') as HTMLButtonElement
-    await act(async () => { blue.click() })
-    assert.equal(blue.getAttribute('aria-checked'), 'true')
-    assert.equal(document.documentElement.getAttribute('data-accent'), 'blue')
+    assert.ok(document.querySelector('[role="radiogroup"][aria-label="主题模式"]'))
+    assert.equal(document.querySelector('[role="radiogroup"][aria-label="视觉风格"]'), null)
+    assert.equal(document.querySelector('[role="radiogroup"][aria-label="主题色"]'), null)
+    const reduce = document.querySelector('button[role="switch"][aria-label="减少透明"]') as HTMLButtonElement
+    assert.ok(reduce)
+    assert.equal(reduce.getAttribute('aria-checked'), 'false')
+    await act(async () => { reduce.click() })
+    assert.equal(reduce.getAttribute('aria-checked'), 'true')
+    assert.equal(document.documentElement.getAttribute('data-transparency'), 'reduced')
 
     await act(async () => { root.unmount() })
   } finally {

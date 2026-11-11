@@ -10,10 +10,10 @@ function readWorkspaceFile(path: string): string {
 
 test('dark liquid chrome removes the old top-edge glow from shared panel surfaces', () => {
   const styles = readRendererStyles()
-  const panelBlock = styles.match(/html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.glass-surface-panel\s*\{([\s\S]*?)\n\}/)
-  const cardBlock = styles.match(/html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.glass-surface-card\s*\{([\s\S]*?)\n\}/)
+  const panelBlock = styles.match(/html\[data-theme='dark'\]:root \.glass-surface-panel\s*\{([\s\S]*?)\n\}/)
+  const cardBlock = styles.match(/html\[data-theme='dark'\]:root \.glass-surface-card\s*\{([\s\S]*?)\n\}/)
 
-  assert.match(styles, /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.glass-surface-panel\s*\{/)
+  assert.match(styles, /html\[data-theme='dark'\]:root \.glass-surface-panel\s*\{/)
   assert.ok(panelBlock)
   assert.ok(cardBlock)
   assert.doesNotMatch(panelBlock[1], /radial-gradient\(/)
@@ -32,7 +32,7 @@ test('files side panel advertises its variant and stays fused with surrounding d
   )
   assert.match(
     styles,
-    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\]\s*\{[\s\S]*?--workbench-side-panel-bg:\s*transparent;/,
+    /html\[data-theme='dark'\]:root\s*\{[\s\S]*?--workbench-side-panel-bg:\s*transparent;/,
   )
 })
 
@@ -48,40 +48,40 @@ test('the four-mode switch track kills the old top sheen through shared dark liq
   )
   assert.match(
     themeStyles,
-    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\]\s*\{[\s\S]*?--workbench-rail-slot-overlay:\s*none;/,
+    /html\[data-theme='dark'\]:root\s*\{[\s\S]*?--workbench-rail-slot-overlay:\s*none;/,
   )
   // 079189aa Add browser FastCard context actions — liquid-glass 皮肤块与 fastcard overlay 窗口共用选择器组
   assert.match(
     themeStyles,
-    /html\[data-skin='liquid-glass'\],\s*html\[data-fastcard-overlay-window='true'\]\s*\{[\s\S]*?--workbench-rail-slot-bg:\s*rgba\(222,\s*222,\s*220,\s*0\.64\);/,
+    /html:root\s*\{[\s\S]*?--workbench-rail-slot-bg:\s*rgba\(222,\s*222,\s*220,\s*0\.64\);/,
   )
   // c17b8883 Polish liquid glass workbench controls — 槽位内阴影 0.11 → 0.10
   assert.match(
     themeStyles,
-    /html\[data-skin='liquid-glass'\],\s*html\[data-fastcard-overlay-window='true'\]\s*\{[\s\S]*?--workbench-rail-slot-border:\s*transparent;[\s\S]*?--workbench-rail-slot-shadow:\s*[\s\S]*?inset 0 1\.5px 3px rgba\(24,\s*39,\s*77,\s*0\.10\)/,
+    /html:root\s*\{[\s\S]*?--workbench-rail-slot-border:\s*transparent;[\s\S]*?--workbench-rail-slot-shadow:\s*[\s\S]*?inset 0 1\.5px 3px rgba\(24,\s*39,\s*77,\s*0\.10\)/,
   )
   assert.match(
     themeStyles,
-    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\]\s*\{[\s\S]*?--workbench-rail-slot-bg:\s*rgba\(45,\s*45,\s*43,\s*0\.48\);/,
+    /html\[data-theme='dark'\]:root\s*\{[\s\S]*?--workbench-rail-slot-bg:\s*rgba\(45,\s*45,\s*43,\s*0\.48\);/,
   )
   assert.match(
     themeStyles,
-    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\]\s*\{[\s\S]*?--workbench-rail-slot-shadow:\s*[\s\S]*?inset 0 1\.5px 3px rgba\(0,\s*0,\s*0,\s*0\.36\)/,
+    /html\[data-theme='dark'\]:root\s*\{[\s\S]*?--workbench-rail-slot-shadow:\s*[\s\S]*?inset 0 1\.5px 3px rgba\(0,\s*0,\s*0,\s*0\.36\)/,
   )
   // 2026-10-30 — icon rail 改为贴边图标列：无 track、无槽底（明暗两套均无专属槽块）
   assert.doesNotMatch(styles, /\.icon-rail-slider__track/)
-  assert.doesNotMatch(styles, /html\[data-skin='liquid-glass'\] \.icon-rail-slider\s*\{/)
+  assert.doesNotMatch(styles, /html:root \.icon-rail-slider\s*\{/)
   // 8ab48cd7 — 四模式槽改 Ready 橙渐变轨道（无 backdrop 模糊）
   assert.match(
     styles,
-    /html\[data-skin='liquid-glass'\] \.draggable-mode-tabs\s*\{[\s\S]*?background:\s*linear-gradient\(180deg, color-mix\(in srgb, var\(--color-ready-orange, #ff4b2b\) 82%, white\) 0%[\s\S]*?backdrop-filter:\s*none;/,
+    /html:root \.draggable-mode-tabs\s*\{[\s\S]*?background:\s*linear-gradient\(180deg, color-mix\(in srgb, var\(--color-ready-orange, #ff4b2b\) 82%, white\) 0%[\s\S]*?backdrop-filter:\s*none;/,
   )
   // 8ab48cd7 — 暗色四模式槽自带深橙渐变材质，无 backdrop；icon rail 2026-10-30 起无暗色槽块
-  assert.doesNotMatch(styles, /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.icon-rail-slider\s*\{/)
+  assert.doesNotMatch(styles, /html\[data-theme='dark'\]:root \.icon-rail-slider\s*\{/)
   assert.match(
     styles,
-    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.draggable-mode-tabs\s*\{[\s\S]*?linear-gradient\(180deg, color-mix\(in srgb, var\(--color-ready-orange, #ff6345\) 72%, #2a0b04\) 0%[\s\S]*?backdrop-filter:\s*none;/,
+    /html\[data-theme='dark'\]:root \.draggable-mode-tabs\s*\{[\s\S]*?linear-gradient\(180deg, color-mix\(in srgb, var\(--color-ready-orange, #ff6345\) 72%, #2a0b04\) 0%[\s\S]*?backdrop-filter:\s*none;/,
   )
   // 8ab48cd7 — 暗色四模式 thumb 改暖灰实体渐变 + 亮描边
-  assert.match(styles, /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.draggable-mode-tabs__thumb\s*\{\s*background:\s*linear-gradient\(180deg, rgba\(225, 225, 218, 0\.90\) 0%, rgba\(176, 178, 171, 0\.86\) 100%\)[\s\S]*?border-color:\s*rgba\(235, 235, 230, 0\.22\);/)
+  assert.match(styles, /html\[data-theme='dark'\]:root \.draggable-mode-tabs__thumb\s*\{\s*background:\s*linear-gradient\(180deg, rgba\(225, 225, 218, 0\.90\) 0%, rgba\(176, 178, 171, 0\.86\) 100%\)[\s\S]*?border-color:\s*rgba\(235, 235, 230, 0\.22\);/)
 })

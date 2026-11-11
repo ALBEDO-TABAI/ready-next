@@ -43,7 +43,7 @@ export function ReadyDotRMark(): React.ReactElement {
         width: 40,
         height: 40,
         display: 'block',
-        color: 'var(--ready-brand-accent, var(--color-ready-orange))',
+        color: 'var(--rn-accent)',
       }}
     >
       {READY_R_DOTS.map(([column, row]) => (
@@ -113,7 +113,7 @@ export function WelcomePanelView({
                 marginTop: 5,
                 borderRadius: '50%',
                 flex: '0 0 auto',
-                background: 'var(--ready-brand-accent, var(--color-ready-orange))',
+                background: 'var(--rn-accent)',
               }}
             />
             <span className="flex min-w-0 flex-1 flex-col" style={{ gap: 5 }}>

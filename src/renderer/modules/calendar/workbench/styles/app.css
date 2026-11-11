@@ -9,7 +9,7 @@
   --c-text: #18181d; --c-text2: #686871; --c-text3: #878790;
   --c-line: rgba(11, 11, 14, .08); --c-ring: rgba(11, 11, 14, .09); --c-line-soft: var(--c-line);
   --c-hover: rgba(11, 11, 14, .045); --c-press: rgba(11, 11, 14, .08); --c-input: rgba(11, 11, 14, .04);
-  --c-accent: #ed511c; --c-blue: var(--c-accent); --accent-soft: rgba(255, 90, 31, .10);
+  --c-accent: var(--rn-accent); --c-blue: var(--c-accent); --accent-soft: rgba(255, 90, 31, .10);
   --c-btn-a: rgba(255, 255, 255, .90); --c-btn-b: rgba(255, 255, 255, .64);
   --c-kbd-bg: rgba(11, 11, 14, .045); --c-kbd: #72727b;
   --c-glass: rgba(252, 252, 253, .78); --c-modal: rgba(252, 252, 253, .94); --c-modal-nav: rgba(230, 230, 235, .42);
@@ -29,7 +29,7 @@
   --c-text: #f0f0f3; --c-text2: #a5a5af; --c-text3: #80808c;
   --c-line: rgba(255, 255, 255, .08); --c-ring: rgba(255, 255, 255, .10);
   --c-hover: rgba(255, 255, 255, .055); --c-press: rgba(255, 255, 255, .09); --c-input: rgba(255, 255, 255, .045);
-  --c-accent: #ff6a2c; --accent-soft: rgba(255, 106, 44, .14);
+  --c-accent: var(--rn-accent); --accent-soft: rgba(255, 106, 44, .14);
   --c-btn-a: rgba(255, 255, 255, .08); --c-btn-b: rgba(255, 255, 255, .045);
   --c-kbd-bg: rgba(255, 255, 255, .06); --c-kbd: #a5a5af;
   --c-glass: rgba(32, 32, 38, .8); --c-modal: rgba(32, 32, 38, .96); --c-modal-nav: rgba(10, 10, 14, .25);
