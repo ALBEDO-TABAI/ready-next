@@ -2,6 +2,7 @@ import { readDocumentSource } from '../../../../shared/document-operations'
 import { markdownTree } from '../../../../shared/document-blocks/markdown'
 import type { ParsedDocument } from '../../../../shared/document-blocks'
 import type { DocTab } from '../../../stores/useDocTabs'
+import { isInLibrary } from './library-membership'
 
 export function pageFrontmatter(content: string): Record<string, unknown> {
   try { return readDocumentSource(content).frontmatter } catch { /* silent-catch: Incomplete frontmatter while typing uses default presentation, without changing source. */ return {} }
@@ -13,9 +14,7 @@ export function pageFrontmatter(content: string): Record<string, unknown> {
  * heading repeats the title follows the header, never the navigator's 页面 | 文件 switch (L4: once).
  */
 export function pageHeaderTitle(tab: Pick<DocTab, 'path' | 'title' | 'content' | 'objectId' | 'objectBinding'>, vaultRoot: string | null): string | undefined {
-  const path = tab.path?.replace(/\\/g, '/')
-  const root = vaultRoot?.replace(/\\/g, '/').replace(/\/$/, '')
-  if (!root || !path?.startsWith(`${root}/`) || !/\.md$/i.test(path) || !tab.objectId || tab.objectBinding?.status !== 'resolved') return undefined
+  if (!isInLibrary(tab.path, vaultRoot) || !/\.md$/i.test(tab.path!) || !tab.objectId || tab.objectBinding?.status !== 'resolved') return undefined
   const title = pageFrontmatter(tab.content).title
   return typeof title === 'string' ? title : tab.title.replace(/\.md$/i, '')
 }

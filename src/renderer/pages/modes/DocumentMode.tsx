@@ -855,7 +855,7 @@ export default function DocumentMode({
         <div className="workbench-canvas-shell flex min-h-0 h-full flex-col" style={{ background: 'transparent', boxShadow: 'none' }}>
           {/* Inkwell's document interface: tab rail, glass sidebar, then the paper page with its topbar. */}
           <ShellNavigator mode="document" label="资料库">
-            <DocumentNavigator roots={pagePanel.roots} visible={isSceneVisible} onShowFiles={revealInFiles} />
+            <DocumentNavigator roots={pagePanel.libraryRoots} visible={isSceneVisible} onShowFiles={revealInFiles} />
           </ShellNavigator>
           <div className="ink-scope ink-doc-app">
             <div className="ink-column">
@@ -863,7 +863,7 @@ export default function DocumentMode({
             <main className="ink-main" aria-label="文档">
               <InkTopbar
                 tab={panelTargetTab}
-                roots={pagePanel.roots}
+                roots={pagePanel.libraryRoots}
                 home={inkHome}
                 sourceMode={editorMode === 'edit'}
                 onSourceMode={on => handleEditorModeChange(on ? 'edit' : 'preview')}

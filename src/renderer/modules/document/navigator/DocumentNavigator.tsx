@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useState } from 'react'
 import type { PageNode, PageRoot } from '../../../../shared/document-pages'
 import { Segmented } from '../../../components/ui'
 import FilesPanel from '../../../components/layout/FilesPanel'
@@ -23,6 +23,7 @@ const VIEW_OPTIONS: { value: DocumentNavigatorView; label: string }[] = [
 ]
 
 export default function DocumentNavigator({ roots, visible, onShowFiles }: {
+  /** The library alone: other folders are files, listed once under 文件夹 (M4). */
   roots: PageRoot[]
   visible: boolean
   onShowFiles(node: PageNode): void | Promise<void>
@@ -35,8 +36,6 @@ export default function DocumentNavigator({ roots, visible, onShowFiles }: {
   const hasMounted = useWorkspace(state => state.pinnedFolders.some(folder => folder !== vaultRoot))
   const isMounted = useCallback((root: string) => root !== vaultRoot, [vaultRoot])
   const [mountError, setMountError] = useState<string | null>(null)
-  // Only the library is a page tree; other folders are files, listed once under 文件夹 (M4).
-  const libraryRoots = useMemo(() => roots.filter(root => root.kind === 'vault'), [roots])
 
   const mount = async () => {
     setMountError(null)
@@ -52,7 +51,7 @@ export default function DocumentNavigator({ roots, visible, onShowFiles }: {
       </div>
       <div className="document-navigator__view ink-scope" hidden={view !== 'pages'}>
         <InkSidebar
-          roots={libraryRoots}
+          roots={roots}
           onShowFiles={onShowFiles}
           onMountFolder={() => { void mount() }}
           mountedFolders={hasMounted || mountError ? (

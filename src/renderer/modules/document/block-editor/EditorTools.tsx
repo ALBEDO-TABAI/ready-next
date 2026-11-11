@@ -135,7 +135,7 @@ export function EditorTools({ buffer, linkBase, children, report }: { buffer: Ed
     items.push({ id: 'widget', label: '插入 Widget', run: () => { setPicker(null); setWidget(current) } },
       { id: 'mermaid', label: '插入 Mermaid', run: () => attempt(() => slashMarkdown(current, `\`\`\`mermaid${eol}graph TD${eol}  A --> B${eol}\`\`\``)) },
       { id: 'columns', label: '插入分栏', run: () => attempt(() => slashMarkdown(current, `<!-- ready:columns widths=1,1 -->${eol}${eol}<!-- ready:column -->${eol}${eol}<!-- ready:columns-end -->`)) },
-      ...(linkBase ? [{ id: 'page', label: '插入子页面链接', run: () => { setPicker(null); setPage({ picker: current, title: '', operationId: crypto.randomUUID(), state: 'editing' }) } }] : []))
+      ...(linkBase?.parentPath ? [{ id: 'page', label: '插入子页面链接', run: () => { setPicker(null); setPage({ picker: current, title: '', operationId: crypto.randomUUID(), state: 'editing' }) } }] : []))
   } else if (picker) items = results.map(result => ({ ...result, run: () => attempt(() => replaceSelection(picker, [{ text: result.text, marks: { reference: result.reference } }])) }))
   async function createPage() {
     if (!page || pagePending.current) return

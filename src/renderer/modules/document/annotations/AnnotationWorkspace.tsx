@@ -6,12 +6,15 @@ import type { EditorBuffer } from '../block-editor/editor-buffer'
 import { AnnotationMenuContext, type AnnotationMenus } from './menus'
 import { useDocTabs } from '../../../stores/useDocTabs'
 import { TemplatePicker } from '../templates/TemplatePicker'
+import { useInLibrary } from '../page-ui/library-membership'
 
 type Selected = { block: DocumentBlock; snapshot: DocumentBuffer }
 export function AnnotationWorkspace({ buffer, children }: { buffer: EditorBuffer; children: ReactNode }) {
   const content = useSyncExternalStore(buffer.subscribe, () => buffer.snapshot.content)
   const tabId = buffer.owner.kind === 'document' ? buffer.owner.tabId : undefined
   const path = useDocTabs(state => state.tabs.find(tab => tab.id === tabId)?.path)
+  // Comments and synced blocks live in the library's metadata; a mounted folder's file offers neither (W3 M4).
+  const inLibrary = useInLibrary(path)
   const title = useDocTabs(state => state.tabs.find(tab => tab.id === tabId)?.title ?? '')
   const [snapshot, setSnapshot] = useState<AnnotationSnapshot | null>(null)
   const [selected, setSelected] = useState<Selected | null>(null)
@@ -65,7 +68,7 @@ export function AnnotationWorkspace({ buffer, children }: { buffer: EditorBuffer
     } catch (cause) { console.warn('[AnnotationWorkspace] add annotation failed:', cause instanceof Error ? cause.message : String(cause)); report(cause) }
   }
   const extensions: AnnotationMenus = {
-    blockItems: (block, source) => !tabId ? [] : [
+    blockItems: (block, source) => !tabId || !inLibrary ? [] : [
       { id: 'comment', label: '添加评论', run: () => {
         if (!path) { setError('请先保存页面，再添加评论'); return }
         setSelected({ block, snapshot: source }); setText(''); setVisible(true)
@@ -84,7 +87,7 @@ export function AnnotationWorkspace({ buffer, children }: { buffer: EditorBuffer
     ],
     slashItems: insert => !tabId ? [] : [
       { id: 'template', label: '插入模板', run: () => setTemplate({ insert }) },
-      { id: 'synced', label: '插入同步块', run: () => { setReference(''); setSync({ insert }) } },
+      ...(inLibrary ? [{ id: 'synced', label: '插入同步块', run: () => { setReference(''); setSync({ insert }) } }] : []),
     ],
   }
   return <AnnotationMenuContext.Provider value={extensions}><div ref={root} style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>

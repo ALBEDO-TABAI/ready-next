@@ -6,6 +6,7 @@ import type { RetainedDocumentEditorProps } from '../documentSceneRetention'
 import { PageHeader } from './PageHeader'
 import { runRegisteredDocumentSave } from '../documentSaveRegistry'
 import { pageFrontmatter, pageHeaderTitle } from './page-title'
+import { isInLibrary } from './library-membership'
 import type { PageProperties } from '../../../../shared/document-pages'
 import { Database } from '../database'
 
@@ -18,7 +19,7 @@ export function PageDocumentEditor({ bookReading = false, ...props }: RetainedDo
   const { tab } = props
   const path = tab.path?.replace(/\\/g, '/')
   const root = vault?.status === 'ready' ? vault.root : null
-  const inVault = root && path?.startsWith(`${root.replace(/\\/g, '/').replace(/\/$/, '')}/`)
+  const inVault = isInLibrary(path, root)
   const beforeSave = async () => {
     if (!useDocTabs.getState().tabs.find(item => item.id === tab.id)?.isDirty) return
     if (!await runRegisteredDocumentSave(tab.id) || useDocTabs.getState().tabs.find(item => item.id === tab.id)?.isDirty) {

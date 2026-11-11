@@ -5,6 +5,14 @@ import { editorFixture, head } from './helpers/ready-block-editor-fixture'
 import type { AnnotationCommand } from '../shared/document-comments'
 import { createAnchor } from '../shared/document-anchors'
 
+// Comments and synced blocks exist only in the library (W3 M4): the fixture page lives in a library at /vault.
+async function libraryAt(t: test.TestContext, root: string) {
+  const { useVault } = await import('../renderer/stores/useVault')
+  const prior = useVault.getState().view
+  await act(async () => useVault.setState({ view: { phase: 'loaded', data: { status: 'ready', root, defaultSuggestion: root } } }))
+  t.after(() => useVault.setState({ view: prior }))
+}
+
 async function clickText(label: string) {
   const button = [...document.querySelectorAll('button')].find(button => button.textContent === label)
   assert.ok(button, label)
@@ -24,6 +32,7 @@ test('M5-D block menu submits comment without changing editor bytes', async t =>
       }] : [] } }
     } },
   } })
+  await libraryAt(t, '/vault')
   await act(async () => f.useDocTabs.setState(state => ({ tabs: state.tabs.map(tab => ({ ...tab, path: '/vault/page.md' })) })))
   const shell = f.rich('评论块').closest('[data-block-start]')!
   await act(() => shell.querySelector<HTMLButtonElement>('[aria-label="块菜单"]')!.click())
@@ -68,4 +77,34 @@ test('M5-D moving a fenced block moves its standalone persistent marker in the s
   assert.match(content, /源块\r\n```\r\n\r\n\^source/)
   await f.key(document.querySelector<HTMLElement>('[data-ready-block-editor]')!, 'z', { ctrlKey: true })
   assert.equal(f.buffer.snapshot.content, before)
+})
+
+test('W3 M4 a file in a mounted folder offers no comments, synced blocks or sub-pages; templates stay', async t => {
+  const f = await editorFixture(t, '/')
+  Object.defineProperty(window, 'electronAPI', { configurable: true, value: {
+    documentPages: { onChanged: () => () => {} }, documentAnnotations: {
+      comments: async () => ({ ok: true, value: { objectId: 'object', revision: 0, threads: [] } }),
+    },
+  } })
+  await libraryAt(t, '/vault')
+  const menus = async (path: string) => {
+    await act(async () => f.useDocTabs.setState(state => ({ tabs: state.tabs.map(tab => ({ ...tab, path })) })))
+    const el = f.rich('/')
+    await f.caret(el, 1); await act(() => el.dispatchEvent(new f.dom.window.InputEvent('input', { bubbles: true })))
+    const slash = [...document.querySelectorAll<HTMLElement>('button, [role="option"]')].map(item => item.textContent ?? '')
+    await f.key(el, 'Escape')
+    const shell = el.closest('[data-block-start]')!
+    await act(() => shell.querySelector<HTMLButtonElement>('[aria-label="块菜单"]')!.click())
+    const block = [...document.querySelectorAll<HTMLElement>('button')].map(item => item.textContent ?? '')
+    await f.key(document.body, 'Escape')
+    return { slash, block }
+  }
+  const inside = await menus('/vault/page.md')
+  for (const label of ['插入同步块', '插入子页面链接', '插入模板']) assert.ok(inside.slash.includes(label), `library slash: ${label}`)
+  for (const label of ['添加评论', '转为同步块引用']) assert.ok(inside.block.includes(label), `library block menu: ${label}`)
+  const outside = await menus('/外部素材/page.md')
+  assert.ok(outside.slash.includes('插入模板'), 'templates stay for any Markdown')
+  for (const label of ['插入同步块', '插入子页面链接']) assert.ok(!outside.slash.includes(label), `mounted slash hides ${label}`)
+  assert.ok(outside.block.includes('下移'), 'the block menu itself opened')
+  for (const label of ['添加评论', '转为同步块引用']) assert.ok(!outside.block.includes(label), `mounted block menu hides ${label}`)
 })

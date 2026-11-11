@@ -19,6 +19,7 @@ import { isNonContentBlock } from './catalog'
 import { duplicatePageHeading } from '../page-ui/page-title'
 import { textAreaContent } from './text-edit'
 import type { EditorLinkBase } from './references'
+import { useInLibrary } from '../page-ui/library-membership'
 
 function SourceBlock({ block, buffer, children, report }: { block: DocumentBlock; buffer: EditorBuffer; children: ReactNode; report(error: unknown): void }) {
   const [draft, setDraft] = useState<{ block: DocumentBlock; version: number; text: string } | null>(null)
@@ -61,7 +62,9 @@ export function ReadyBlockEditor({ tabId, content: displayedContent, pageTitle, 
   // A retained hidden DocumentMode supplies its frozen snapshot. Do not bypass it.
   const content = useDocTabs(state => displayedContent ?? state.tabs.find(tab => tab.id === tabId)?.content ?? '')
   const path = useDocTabs(state => state.tabs.find(tab => tab.id === tabId)?.path ?? null)
-  const linkBase = useMemo(() => ({ filePath: path, parentPath: path }), [path])
+  // Sub-pages are a library feature: a file in a mounted folder has no parent for them (W3 M4).
+  const inLibrary = useInLibrary(path)
+  const linkBase = useMemo(() => ({ filePath: path, parentPath: inLibrary ? path : null }), [inLibrary, path])
   const buffer = useMemo(() => getTabBuffer(tabId), [tabId])
   return <BufferedBlockEditor pageTitle={pageTitle} buffer={buffer} linkBase={linkBase} content={content} renderSource={renderSource} />
 }
