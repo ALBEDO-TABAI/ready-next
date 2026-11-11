@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { Settings as CalendarSettings } from '../../modules/calendar/workbench/components/Settings'
+import { StandaloneImport } from '../../modules/calendar/workbench/components/StandaloneImport'
 import { getState, init, isDark, useStore } from '../../modules/calendar/workbench/store'
 import '../../modules/calendar/workbench/styles/tokens.css'
 import '../../modules/calendar/workbench/styles/app.css'
@@ -15,7 +16,7 @@ export function CalendarSettingsPanel() {
   useEffect(() => { if (!getState().ready) void init() }, [])
   return (
     <div className={`ready-calendar calendar-settings-embed${dark ? ' dark' : ''}`}>
-      {ready ? <CalendarSettings variant="page" /> : <div className="calendar-load-state">{error || '正在读取日历…'}</div>}
+      {ready ? <><CalendarSettings variant="page" /><StandaloneImport /></> : <div className="calendar-load-state">{error || '正在读取日历…'}</div>}
     </div>
   )
 }

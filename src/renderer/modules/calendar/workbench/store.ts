@@ -42,14 +42,14 @@ export interface State {
   ready: boolean; busy: boolean; error: string | null; prefs: Prefs; accounts: Account[]; calendars: Calendar[]; events: Record<string, CalEvent>;
   anchor: DayNum; today: DayNum; now: number; systemDark: boolean;
   selected: string[]; editing: string | null; draftId: string | null; focusTitle: number;
-  overlay: Overlay; menu: MenuState | null; toasts: Toast[]; scopeAsk: ScopeAsk | null; settingsPage: string; recKey: string | null; avail: { active: boolean; slots: { start: number; end: number }[]; duration: number };
+  overlay: Overlay; menu: MenuState | null; toasts: Toast[]; scopeAsk: ScopeAsk | null; settingsPage: string; actionPanel: 'quick' | 'subscribe' | null; recKey: string | null; avail: { active: boolean; slots: { start: number; end: number }[]; duration: number };
   minDensity: number; cursorDay: DayNum; clipboard: CalEvent[]; searchQuery: string;
 }
 const tzNow = () => dayOf(Date.now(), systemTimeZone());
 let state: State = {
   ready: false, busy: false, error: null, prefs: defaultPrefs(), accounts: [], calendars: [], events: {}, anchor: tzNow(), today: tzNow(), now: Date.now(),
   systemDark: typeof matchMedia !== 'undefined' && matchMedia('(prefers-color-scheme: dark)').matches,
-  selected: [], editing: null, draftId: null, focusTitle: 0, overlay: null, menu: null, toasts: [], scopeAsk: null, settingsPage: 'general', recKey: null, avail: { active: false, slots: [], duration: 30 },
+  selected: [], editing: null, draftId: null, focusTitle: 0, overlay: null, menu: null, toasts: [], scopeAsk: null, settingsPage: 'general', actionPanel: null, recKey: null, avail: { active: false, slots: [], duration: 30 },
   minDensity: -4, cursorDay: tzNow(), clipboard: [], searchQuery: '',
 };
 const subs = new Set<() => void>();
@@ -156,6 +156,8 @@ export function step(dir:1|-1){const p=state.prefs;setState({anchor:p.gridView==
 export function zoom(d:1|-1|0){void setPrefs({densityZoomLevel:d===0?0:Math.max(state.minDensity,Math.min(20,state.prefs.densityZoomLevel+d))})}
 export function openOverlay(overlay:Overlay){setState({overlay,menu:null,prefs:{...state.prefs,contextPanel:overlay==='search'||overlay==='shortcuts'||state.prefs.contextPanel}})}
 // The calendar's preferences are a section of the global settings page (W2 §3.2); `page` picks its sub-page.
+/** Opens the quick-create sentence box or the subscription form (both live in ReadyCalendarActions). */
+export function openCalendarAction(kind: 'quick' | 'subscribe') { setState({ actionPanel: kind }); }
 export function openCalendarSettings(page?: string) { if (page) setState({ settingsPage: page }); window.location.hash = '#/settings?section=calendar'; }
 export function openMenu(menu:MenuState|null){const rect=document.querySelector('.ready-calendar')?.getBoundingClientRect();setState({menu:menu&&rect?{...menu,x:menu.x-rect.left,y:menu.y-rect.top}:menu})}
 let toastSeq=0;

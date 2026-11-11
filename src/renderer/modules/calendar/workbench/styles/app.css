@@ -430,3 +430,11 @@
 
 .ready-calendar ::-webkit-scrollbar-thumb { background:transparent; }
 .ready-calendar:hover ::-webkit-scrollbar-thumb { background:var(--c-line); }
+
+/* 设置 › 日历: the one-time move from the standalone calendar app (W4 §4). */
+.ready-calendar .calendar-migrate { margin: 28px 0 8px; padding-top: 18px; border-top: 1px solid var(--c-line); font-size: 13px; color: var(--c-text); }
+.ready-calendar .calendar-migrate h3 { margin: 0 0 6px; font-size: 14px; font-weight: 600; }
+.ready-calendar .calendar-migrate p { margin: 0 0 10px; color: var(--c-text2); line-height: 1.5; }
+.ready-calendar .calendar-migrate label { display: block; margin: 0 0 10px; color: var(--c-text2); }
+.ready-calendar .calendar-migrate-actions { display: flex; gap: 8px; }
+.ready-calendar .ready-calendar-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }

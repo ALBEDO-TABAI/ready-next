@@ -14,7 +14,7 @@ const GROUPS: [Key, Row[]][] = [
     ['sUndo', [[MOD, 'Z']]], ['sRedo', [['⇧', MOD, 'Z']]], ['sAddSel', [['⇧'], [MOD]], 'click'], ['sSelectAll', [[MOD, 'A']]], ['sSearch', [['/'], [MOD, 'F']]], ['sSettings', [[MOD, ',']]], ['sShortcuts', [['?']]]]],
   ['shortcutsEvents', [['sCreate', [['C'], [MOD, 'N']]], ['sJoin', [[MOD, 'J']]], ['sAvail', [['S']]], 'sSelectedHdr', ['sDelete', [['delete']]], ['sCut', [[MOD, 'X']]], ['sCopy', [[MOD, 'C']]], ['sDuplicate', [[MOD, 'D'], [ALT]], 'drag'], ['sEditField', [['E']]], 'sCopiedHdr', ['sPaste', [[MOD, 'V']]]]],
   ['shortcutsViews', [['sDay', [['1'], ['D']]], ['sWeek', [['0'], ['W']]], ['sNDays', [['2 – 9']]], ['sMonth', [['M']]], ['sZoomIn', [['⇧', MOD, '.']]], ['sZoomOut', [['⇧', MOD, ',']]], ['sZoomReset', [['⇧', MOD, '0']]], ['sAllDay', [['⇧', MOD, 'A']]], ['showWeekends', [['⇧', MOD, 'E']]], ['showDeclined', [['⇧', MOD, 'D']]], ['sTzToggle', [['Z']]]]],
-  ['shortcutsNav', [['sToday', [['T']]], ['alignToday', [[ALT, 'T']]], ['sNext', [['J'], ['→']]], ['sPrev', [['K'], ['←']]], ['goToDate', [['.'], ['G', '.']]]]],
+  ['shortcutsNav', [['sToday', [['T']]], ['alignToday', [[ALT, 'T']]], ['sNext', [['J'], ['→']]], ['sPrev', [['K'], ['←']]], ['goToDate', [['.']]]]],
 ];
 // Mac keycaps spell modifiers out, like the system menus do in this style.
 const WORD: Record<string, string> = { '⇧': 'shift', '⌥': 'option', '⌃': 'control' };

@@ -3,7 +3,7 @@ import { calendarEventReferenceId } from '../calendar-event-identity'
 export type CalendarNavigation =
   | { kind:'event'; eventId:string }
   | { kind:'day'; date:string }
-  | { kind:'command'; command:'create'|'settings'|'search'|'day'|'week'|'month' }
+  | { kind:'command'; command:'create'|'settings'|'search'|'day'|'week'|'month'|'join' }
 export interface CalendarNavigationRequest { id:string; target:CalendarNavigation }
 export function parseCalendarDeepLink(raw:string):CalendarNavigation|null {
   const parsed = parseReadyUri(raw)
