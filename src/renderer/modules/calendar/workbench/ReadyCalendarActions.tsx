@@ -37,7 +37,7 @@ export function ReadyCalendarActions({active}:{active:boolean}) {
         else if(target.kind==='event'){
           const [id,origin]=target.eventId.split('#'),event=getState().events[id]
           const key=origin?`${id}|${event?.allDay?new Date(Number(origin)*1000).toISOString().slice(0,10):Number(origin)*1000}`:id
-          const found=findOccurrence(key);if(found){goToDay(found.startDay);select([key])}else toast('日程已不存在')
+          const found=findOccurrence(key);if(found){goToDay(found.startDay);select([key],{record:false})}else toast('日程已不存在')
         }else if(target.command==='create'){
           const id=`native-${request.id}`,now=Math.ceil(Date.now()/900000)*900000
           if(getState().events[id])select([id]);else if(!await createEvent({id,uid:`${id}@ready.local`,start:now,end:now+getState().prefs.defaultEventDuration*60000,allDay:false},{draft:true}))return

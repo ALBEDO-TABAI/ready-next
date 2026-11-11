@@ -15,6 +15,8 @@ interface RSSSessionState {
   sieveVisible: boolean
   setSieveView(visible: boolean): void
   /** Bumped when a notification asks 资讯 to open an article; 资讯 reads the request from Main. */
+  requestedCalibration: string | null
+  requestCalibration(week: string | null): void
   notificationOpenRevision: number
   takeNotificationOpen(): void
   selectedDigestId: string | null
@@ -44,6 +46,8 @@ export const useRSSSession = create<RSSSessionState>((set, get) => ({
   view: null,
   digestVisible: false, selectedDigestId: null,
   sieveVisible: true,
+  requestedCalibration: null,
+  requestCalibration: requestedCalibration => set({ requestedCalibration }),
   notificationOpenRevision: 0,
   takeNotificationOpen: () => set({ notificationOpenRevision: get().notificationOpenRevision + 1 }),
   setSieveView: (sieveVisible) => set({ interactionRevision: get().interactionRevision + 1, sieveVisible }),
@@ -64,7 +68,7 @@ export const useRSSSession = create<RSSSessionState>((set, get) => ({
   },
   setView: (view) => set({ view }),
   setSelection: (payload) => set({ interactionRevision: get().interactionRevision + 1, selectedExcerpt: null, selectedItemExpectedRevision: null, ...payload }),
-  reset: () => set({ interactionRevision: get().interactionRevision + 1, pendingReveal: null, digestVisible: false, sieveVisible: true, selectedDigestId: null, query: RSSQuerySchema.parse({}), view: null,
+  reset: () => set({ interactionRevision: get().interactionRevision + 1, pendingReveal: null, requestedCalibration: null, digestVisible: false, sieveVisible: true, selectedDigestId: null, query: RSSQuerySchema.parse({}), view: null,
     selectedExcerpt: null, selectedItemExpectedRevision: null,
     selectedItemId: null, selectedItemTitle: null }),
 }))

@@ -55,10 +55,12 @@ export class LibraryEngine {
 
   get(): Promise<LibraryState> { return this.serial(() => this.scan()) }
 
-  private async scan(): Promise<LibraryState> {
+  readOnly(): Promise<LibraryState> { return this.serial(() => this.scan(false)) }
+
+  private async scan(upgrade = true): Promise<LibraryState> {
     const root = this.vaultRoot()
     if (!root) return { status: 'no_vault' }
-    await upgradeReadingDatabase(root, { write: this.dependencies.write })
+    if (upgrade) await upgradeReadingDatabase(root, { write: this.dependencies.write })
     const state: Extract<LibraryState, { status: 'ready' }> = { status: 'ready', vaultRoot: root, books: [], issues: [] }
     const scanDirectory = async (path: string): Promise<void> => {
       try {

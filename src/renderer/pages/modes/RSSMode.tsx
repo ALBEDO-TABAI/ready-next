@@ -1,3 +1,4 @@
+import { userOpenedObject } from '../../modules/workbench/navigation-open-event'
 import RSSDigestPanel from '../../components/rss/RSSDigestPanel'
 import RSSDefinitionEditor from '../../components/rss/RSSDefinitionEditor'
 import PreviewBrowser from '../../components/rss/PreviewBrowser'
@@ -355,7 +356,16 @@ export default function RSSMode({
     await loadRSSData()
   }, [loadRSSData, selectedSourceId, setQuery])
 
-  const handleItemClick = useCallback((item: RSSItem) => {
+  const requestedCalibration = useRSSSession(state => state.requestedCalibration)
+  useEffect(() => {
+    if (!isActive || isSuspended || !requestedCalibration) return
+    useRSSSession.getState().cancelReveal()
+    setSelectedItem(null); setDigestView(false); setShowOrganization(false); setSieveView(true)
+    useRSSSession.getState().requestCalibration(null)
+  }, [requestedCalibration, isActive, isSuspended, setDigestView, setSieveView])
+
+  const handleItemClick = useCallback((item: RSSItem, record = true) => {
+    if (record) userOpenedObject({ mode: 'rss', ref: { kind: 'rss-item', id: item.id }, title: item.title })
     useRSSSession.getState().cancelReveal()
     setItemStateError(null)
     setSelectedItem(item)
@@ -409,7 +419,7 @@ export default function RSSMode({
           if (!current()) return
           setDigestView(false); setShowOrganization(false)
           handleItemClick({ ...toRSSItem(result.data.article), pinnedRevision: reference.read.expectedRevision,
-            ...(reference.kind === 'excerpt' ? { reveal: { id: request.id, range: reference.read.range } } : {}) })
+            ...(reference.kind === 'excerpt' ? { reveal: { id: request.id, range: reference.read.range } } : {}) }, false)
         }
       } catch (cause) {
         // silent-catch: a failed reveal is reported in the RSS status area.

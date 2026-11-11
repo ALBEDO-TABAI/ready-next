@@ -1301,6 +1301,8 @@ describe('BrowserAppShortcutBridgeService', () => {
     } as Electron.Input
 
     assert.strictEqual(service.isAppShortcutInput(input), true)
+    assert.strictEqual(service.isAppShortcutInput({ ...input, key: '[' }), true)
+    assert.strictEqual(service.isAppShortcutInput({ ...input, key: ']' }), true)
     service.dispatchAppShortcut(input)
 
     assert.deepStrictEqual(emitted, [

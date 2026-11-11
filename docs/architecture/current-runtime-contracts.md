@@ -295,6 +295,9 @@
 - Agent 本地文件与目录使用对象 id 派生 logicalResourceId；只影响新回合准备，授权仍冻结路径、内容版本及原工具范围，历史回执不改写。页面只隐藏 ready_id 元数据，源码及保存正文保留。行为合同入口：`ready-object-presentation-native.test.ts`、`ready-object-presentation-renderer.test.ts` 与 `note-preview-parser.test.ts`；真实窗口流程在 `verify-ready-next-smoke-electron.cjs`。
 - C2 命令行验收：`ready-object-migration-native.test.ts`、`ready-object-identity-native.test.ts`、`ready-object-write-native.test.ts`，以真实临时文件与 Electron SQLite 断言迁移保真、身份稳定、反链、无孤儿行及失败可见；界面验收由独立 Ready Next 环境承担。
 - W6 对象打开与速览：FastCard 定位复用浮窗/抽屉，资讯查询验证版本后整体应用，对话按可见轮次定位；只读速览形状与搜索展示字段见 `src/renderer/modules/workbench/object-ui/CONTRACT.md`。书、划线与收集由来源适配器重建，正文/身份仍归原服务；外开白名单由 `scripts/check-external-open.cjs` 检查。
+- W6 T7 全局导航由 `navigationHistory` 维护，迁移 157 存入 ready.db，最多 50 条及当前位置；只由成功打开动作追加，滚动/输入不追加，历史重放不重复追加。文档标签历史优先并同步全局位置；普通模式切换不清空历史。返回接口与最近打开共用 `modules/workbench/navigation-history.ts`，原单步 `reference-return.ts` 已移除。快捷键归共享目录，原生浏览器沿用 app shortcut bridge。
+- W6 T8 今日页分 `today.firstScreen()` 与 `today.sieve()`；共享形状在 `src/shared/today.ts`，Renderer 入口在 `modules/today/data.ts`。只消费现有日历、待办、页面、书房、草稿、FastCard 与涌现快照；不升级书房文件、不下载卡片媒体、不生成涌现快照、不记录资讯曝光。草稿与当周校准使用正式 ReadyRef；空数组/空提案由界面决定隐藏。只读与耗时证据见 `docs/audits/2026-11-12-ready-next-w6-data-report.md`。
+
 - C5 关系索引：迁移 139 以 `object_links` 取代 `doc_links`；端点为稳定对象 id 或经共享 ReadyRef 校验的规范 URI，查询返回结构化端点。`document:getObjectOutgoingLinks` / `document:getObjectIncomingLinks` 返回原始目标、片段、原文行号与 UTF-16 偏移、解析状态及原因。路径优先；无法唯一匹配时返回“多个候选”，禁止取首个候选。
 - 关系抽取消费原始 Markdown，保留每次出现的位置；支持 wiki、标题/块、嵌入、相对链接、ReadyRef 和书房 `[原文]` 出处，忽略代码块/代码片段。frontmatter 只抽取值中明确写出的 `[[…]]` / `ready://…` 引用，不猜测普通标题、标签或项目名称。画板节点、日程关联等专用边种类已预留，其业务接线随所属模块实施。
 - 改名绑定由 `object_link_repairs` 持久保存，迁移完整保留 pending 状态、目标 id 与原文版本；片段属于边，绑定按目标对象路径归并。此表是改名操作的业务记录，不属于可删除索引。引用方只读、存在未保存修改或版本不符时，正文不变、修复记录保留，查询继续指向原对象。目标缺失时保留目标身份并显式返回不可用。

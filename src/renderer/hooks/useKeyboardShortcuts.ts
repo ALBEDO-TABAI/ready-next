@@ -1,3 +1,4 @@
+import { navigateHistory } from '../modules/workbench/navigation-history'
 import { useEffect, useCallback, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useTheme } from '../stores/useTheme'
@@ -165,6 +166,12 @@ export function useKeyboardShortcuts() {
       preventDefault()
       if (action === 'capture-window') void captureCurrentWindow()
       else void saveActiveDocument()
+      return true
+    }
+
+    if (action === 'navigate-back' || action === 'navigate-forward') {
+      preventDefault()
+      void navigateHistory(action === 'navigate-back' ? -1 : 1).catch(error => console.error('[navigation] shortcut failed', error))
       return true
     }
 

@@ -3322,6 +3322,8 @@ interface ElectronAPI {
   theme: ElectronThemeAPI
   settings: ElectronSettingsAPI
   vault: import('../../shared/vault').VaultAPI
+  today: import('../../shared/today').TodayAPI
+  navigationHistory: import('../../shared/navigation-history').NavigationHistoryAPI
   documentDrafts: import('../../shared/document-drafts').DocumentDraftAPI
   documentPages: import('../../shared/document-pages').DocumentPagesAPI
   documentAnnotations: import('../../shared/document-comments').DocumentAnnotationsAPI

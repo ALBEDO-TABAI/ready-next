@@ -1,3 +1,4 @@
+import { userOpenedObject } from '../../workbench/navigation-open-event'
 import { useEffect, useState } from 'react'
 import { create } from 'zustand'
 import { isoDate } from '../../../../shared/calendar/dates'
@@ -37,6 +38,7 @@ export function openInCurrentTab(path: string, { newTab = false, record = true }
   const current = state.tabs.find(tab => tab.id === state.activeTabId)
   useInkLayout.getState().setHome(false)
   if (current?.path === path) return
+  if (record) userOpenedObject({ mode: 'document', path, title: path.split(/[\\/]/).pop()!.replace(/\.(md|canvas)$/i, '') })
   const replaceable = current && current.kind !== 'library' && !current.isDirty && (current.path ? true : current.content === '')
   if (newTab || !replaceable || state.tabs.some(tab => tab.path === path)) { state.openTab(path); return }
   const history = histories.get(current.id) ?? { back: [], forward: [] }
@@ -59,6 +61,10 @@ function step(from: 'back' | 'forward') {
   history[from === 'back' ? 'forward' : 'back'].push(current.path)
   openInCurrentTab(path, { record: false })
   syncHistory()
+}
+export function tabHistoryTarget(direction: -1 | 1): string | undefined {
+  const id = useDocTabs.getState().activeTabId
+  return id ? histories.get(id)?.[direction === -1 ? 'back' : 'forward'].at(-1) : undefined
 }
 export const goBack = () => step('back')
 export const goForward = () => step('forward')

@@ -109,6 +109,12 @@ export class DocumentPageService {
     this.registry.db.prepare('INSERT INTO document_page_state(object_id,last_visited_at) VALUES (?,?) ON CONFLICT(object_id) DO UPDATE SET last_visited_at=excluded.last_visited_at').run(id,Date.now())
     this.notify({ operationId: 'visit', objectId: id, revision: row.revision })
   }
+  recentEdited(root: string | null): Array<{ ref: import('../../../shared/ready-ref').ReadyRef; title: string; editedAt: number }> {
+    if (!root) return []
+    return this.registry.list().filter(row => row.kind === 'markdown' && row.status === 'present' && row.current_path && isInside(root, row.current_path))
+      .sort((a, b) => Number(b.mtime_ns ?? 0) - Number(a.mtime_ns ?? 0)).slice(0, 3)
+      .map(row => ({ ref: { kind: 'page', id: row.id }, title: basename(row.current_path!, '.md'), editedAt: Number(row.mtime_ns ?? 0) / 1e6 }))
+  }
   states(): PageUserState[] {
     return this.registry.db.prepare('SELECT object_id,favorite,last_visited_at FROM document_page_state').all<{object_id:string;favorite:number;last_visited_at:number|null}>()
       .map(row => ({ objectId: row.object_id, favorite: !!row.favorite, lastVisitedAt: row.last_visited_at }))

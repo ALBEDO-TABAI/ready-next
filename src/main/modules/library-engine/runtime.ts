@@ -24,7 +24,7 @@ export async function shutdownLibrarySources(): Promise<void> {
   if (activeBookSources) { await activeBookSources.ready; await activeBookSources.jobs.shutdown() }
 }
 
-export function setupLibraryIPC(): void {
+export function setupLibraryIPC() {
   const db = getDatabase().getRawDb()
   if (!db) throw new Error('Library database unavailable')
   const vault = new VaultService(new AppSettingsRepository(), {
@@ -89,4 +89,5 @@ export function setupLibraryIPC(): void {
   registerBookSourceIPC(ipcMain, sources)
   const stopWatching = watchLibrary(engine, changed, error => console.error('[library] change notification failed', error))
   app.once('before-quit', () => { void stopWatching().catch(error => console.error('[library] watcher shutdown failed', error)) })
+  return { engine, reading }
 }

@@ -153,7 +153,7 @@ export default function RSSArticleReader({ item, expectedRevision, reveal, onClo
   const included = (article?.classifications || item.classifications || []).filter((entry) => entry.included)
   const closeReferenceMenu = () => setReferenceMenuOpen(false)
 
-  return <section className="rss-article-reader" aria-label="资讯阅读" data-rss-article-id={item.id}>
+  return <section className="rss-article-reader" aria-label="资讯阅读" data-rss-article-id={item.id} data-navigation-loaded={!!content && !busy}>
     <RSSTopbarTools slot="lead" show={active}>
       <button type="button" className="rss-topbar__back" onClick={onClose}><ArrowLeft size={14} strokeWidth={2} />返回列表</button>
       <span title={source}>{source}</span>

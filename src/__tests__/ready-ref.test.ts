@@ -6,6 +6,7 @@ import { ReadyRefSchema, isReadyUri, parseReadyUri, toReadyUri, type ReadyRef } 
 
 const special = '中文 空格#?/%%2F+&=😀'
 const refs: ReadyRef[] = [
+  { kind: 'draft', id: '未保存/草稿' }, { kind: 'rss-calibration', id: '2026-11-09' },
   { kind: 'page', id: special, anchor: `#标题 ${special}` },
   { kind: 'page', id: '.', anchor: `^块${special}` },
   { kind: 'page', id: '..' },

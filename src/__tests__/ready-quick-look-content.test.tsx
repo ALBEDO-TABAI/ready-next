@@ -1,3 +1,4 @@
+import { memoryNavigationAPI } from './utils/navigation-memory'
 import assert from 'node:assert/strict'
 import test, { type TestContext } from 'node:test'
 import React, { act } from 'react'
@@ -18,6 +19,7 @@ async function setup(t: TestContext) {
   const acks = new Set<(ack: { intentId: number }) => void>()
   const databaseContent = '---\nready_database: {}\n---\n选题与发布节奏。\n'
   const api = {
+    navigationHistory: memoryNavigationAPI(),
     browser: {
       onIntentAck: (cb: (ack: { intentId: number }) => void) => { acks.add(cb); return () => acks.delete(cb) },
       sendIntent: (intent: { intentId: number }) => queueMicrotask(() => acks.forEach(cb => cb({ intentId: intent.intentId }))),

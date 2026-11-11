@@ -15,7 +15,7 @@ export async function searchResultTarget(item: SearchResultItem): Promise<Previe
 }
 /** `newTab` (⌘↵, ⌘-click) keeps the current document tab; see openReadyRef. A draft is already a tab of its own. */
 export async function openObjectTarget(target: PreviewTarget, options: { newTab?: boolean } = {}): Promise<void> {
-  if (target.kind !== 'draft') return openReadyRef(target, undefined, options)
+  if (target.kind !== 'draft' || 'id' in target) return openReadyRef(target, undefined, options)
   const tab = useDocTabs.getState().tabs.find(tab => tab.id === target.tabId)
   if (!tab) throw new Error('草稿已关闭')
   useDocTabs.getState().setActiveTab(tab.id)

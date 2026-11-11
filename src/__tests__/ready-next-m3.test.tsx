@@ -1,3 +1,4 @@
+import { memoryNavigationAPI } from './utils/navigation-memory'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import React, { act } from 'react'
@@ -78,7 +79,7 @@ test('M3: create, header edit, shared block/source history, save, child draft an
     tabs: () => useDocTabs.getState().tabs.flatMap(tab => tab.path ? [{ ...tab, path: tab.path }] : []),
     replace: tab => { useDocTabs.getState().hydrateTabContentFromDisk(tab.id, tab.content) },
   }) })
-  Object.assign(window, { electronAPI: { documentPages: api, objects, vault: {
+  Object.assign(window, { electronAPI: { navigationHistory: memoryNavigationAPI(), documentPages: api, objects, vault: {
     get: async () => ({ status: 'ready', root: directory, defaultSuggestion: directory }), onChanged: () => () => {},
   }, document: { listFiles: async () => ({ success: true, items: [] }), readFile: async (path: string) => ({ success: true, content: readFileSync(path, 'utf8') }), writeFile: writeDocumentEditableText } } })
   t.after(async () => { configureDocumentWriteService(null); db.close(); rmSync(directory, { recursive: true, force: true }) })

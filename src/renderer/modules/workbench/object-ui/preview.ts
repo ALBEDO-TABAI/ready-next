@@ -29,6 +29,19 @@ const summary = (title: string, body: string, data?: ObjectPreviewData): ObjectP
 export async function loadObjectPreview(input: ReadyRef): Promise<ObjectPreview> {
   const ref = ReadyRefSchema.parse(input), api = window.electronAPI
   switch (ref.kind) {
+    case 'rss-calibration': {
+      const result = await api.rss.sieveCalibration()
+      if (!result.success) throw new Error(result.error)
+      return result.data?.week === ref.id ? summary('筛子校准', [result.data.text, result.data.explanation].filter(Boolean).join('\n')) : invalid()
+    }
+    case 'draft': {
+      const result = await api.documentDrafts.read(ref.id)
+      if (!result.ok) throw new Error(result.message)
+      if (!result.value) return invalid()
+      const tab = useDocTabs.getState().tabs.find(tab => tab.draftId === ref.id)
+      return { state: 'ready', title: result.value.title || '未保存的草稿', body: tab?.content ?? result.value.content, markdown: true, unsaved: true }
+    }
+
     case 'page': case 'file': case 'canvas': {
       const location = await api.objects.locate(ref.id)
       if (!location) return invalid()

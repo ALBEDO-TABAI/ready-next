@@ -1,4 +1,5 @@
-import { searchPresentation } from '../../../../shared/search-presentation'
+import { navigationHistory } from '../navigation-history'
+import { recentOpenedResults } from './recent-opened'
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { Bookmark, CornerDownLeft, Search, type LucideIcon } from 'lucide-react'
 import { REF_CAPSULE_KINDS, type RefCapsuleKind } from '../../../components/ui/ref-capsule-kinds'
@@ -20,19 +21,12 @@ export function QuickSwitcher({ onClose, onPreview }: {
   const roots = useMemo(() => computeDesiredRoots({ workspaceRoot, pinnedFolders }), [workspaceRoot, pinnedFolders])
   const [query, setQuery] = useState(''), [selected, setSelected] = useState(0), [error, setError] = useState('')
   const [response, setResponse] = useState<{ query: string; roots: string[]; items: SearchResultItem[]; warning: string } | null>(null)
-  const [recent, setRecent] = useState<SearchResultItem[]>([])
+  const history = useSyncExternalStore(navigationHistory.subscribe, navigationHistory.getSnapshot)
   const running = useRef(false), mounted = useRef(true), selectionVersion = useRef(0)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   useEffect(() => {
     let active = true
-    void window.electronAPI.documentPages.states().then(async result => {
-      if (!result.ok) throw new Error(result.message)
-      const rows = await Promise.all(result.value.filter(row => row.lastVisitedAt).sort((a, b) => b.lastVisitedAt! - a.lastVisitedAt!).slice(0, 20).map(async row => {
-        const location = await window.electronAPI.objects.locate(row.objectId)
-        return location ? { ...searchPresentation({ path: location.path, name: location.path.split(/[\\/]/).pop()!, sourceType: 'document' }), path: location.path, name: location.path.split(/[\\/]/).pop()!, nameMatch: false, snippet: '', tagsHit: [], linksHit: [], sourceType: 'document' } : null
-      }))
-      if (active) setRecent(rows.filter(row => row !== null))
-    }).catch(error => { if (active) setError(String(error)) })
+    void navigationHistory.load().catch(error => { if (active) setError(String(error)) })
     return () => { active = false }
   }, [])
   useEffect(() => {
@@ -44,10 +38,8 @@ export function QuickSwitcher({ onClose, onPreview }: {
   }, [query, roots])
   const items = useMemo(() => {
     if (query.trim()) return mergeDraftResults(response?.query === query && response.roots === roots ? response.items : [], draftSearchResults(query, tabs), tabs)
-    const open = [...tabs].filter(tab => tab.kind !== 'library').sort((a, b) => (b.lastActivatedAt ?? 0) - (a.lastActivatedAt ?? 0)).map(tab => ({ ...searchPresentation({ path: tab.path ?? '', name: tab.title, sourceType: 'document' }), path: tab.path ?? `draft://${tab.id}`, name: tab.title, nameMatch: false, snippet: '', tagsHit: [], linksHit: [], sourceType: 'document', draft: { tabId: tab.id } }))
-    const paths = new Set(open.map(item => item.path))
-    return [...open, ...recent.filter(item => !paths.has(item.path))]
-  }, [query, roots, response, tabs, recent])
+    return recentOpenedResults(history)
+  }, [query, roots, response, tabs, history])
   const mode = useMode(state => state.workbenchMode)
   useSyncExternalStore(subscribeCommands, commandRegistryRevision)
   const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean)

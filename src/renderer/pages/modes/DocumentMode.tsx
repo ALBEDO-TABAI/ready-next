@@ -14,7 +14,7 @@ import '../../modules/document/ink/ink.css'
 import '../../modules/document/callouts.css'
 import { initializeDrafts, reportDraftError, useDraftUI, watchDraftVault } from '../../modules/document/drafts/runtime'
 import { readingPositionKey } from '../../stores/objectPresentationState'
-import { registerReturnPosition } from '../../modules/workbench/reference-return'
+import { registerNavigationPosition } from '../../modules/workbench/navigation-history'
 import { LibraryTab, OpenEpubInLibrary } from '../../modules/library/navigation'
 import '../../modules/library/shelf.css'
 import '../../modules/library/reader.css'
@@ -717,10 +717,8 @@ export default function DocumentMode({
     return restoreVisibleDocumentScrollPositions()
   }, [activeTabId, bookReadingVisible, documentRootElement, editorMode, isSceneVisible, restoreVisibleDocumentScrollPositions, splitTabId])
 
-  useEffect(() => registerReturnPosition('document', () => {
+  useEffect(() => registerNavigationPosition('document', () => {
     captureVisibleDocumentScrollPositions()
-    const captured = new Map(scrollSnapshots)
-    return () => { captured.forEach((snapshot, key) => scrollSnapshots.set(key, snapshot)) }
   }), [captureVisibleDocumentScrollPositions, scrollSnapshots])
 
   const handleBookPositionChange = useCallback((key: string, snapshot: DocumentScrollAnchorSnapshot) => {

@@ -1,3 +1,5 @@
+import { calendarOccurrenceReadyRef } from '../../../../shared/calendar-event-identity'
+import { userOpenedObject } from '../../workbench/navigation-open-event'
 // App state: a tiny observable store with actions. Original implementation.
 import { useSyncExternalStore, useRef } from 'react';
 import {
@@ -176,7 +178,7 @@ export async function createEvent(p:Partial<CalEvent>&{start:number|string;end:n
 }
 export async function createEvents(items:Array<Partial<CalEvent>&{start:number|string;end:number|string;allDay:boolean}>){return applyBatch({put:items.map(makeEvent),remove:[]})}
 export function settleDraft(next:string|null){const id=state.draftId;if(!id||id===next)return;setState({draftId:null});void execute(async()=>{const e=state.events[id];if(e&&!e.title.trim()){const result=await unwrap(api().mutate({type:'delete',keys:[id],scope:'all'},versions()));receive(result.snapshot);const i=undoStack.findIndex(r=>r.undo.remove.includes(id));if(i>=0)undoStack.splice(i,1)}})}
-export function select(keys:string[],opts:{additive?:boolean;edit?:boolean}={}){const selected=opts.additive?[...new Set([...state.selected,...keys])]:keys;settleDraft(selected[0]||null);setState({selected,editing:opts.edit===false?state.editing:selected.length===1?selected[0]:selected.length?state.editing:null,menu:null,prefs:{...state.prefs,contextPanel:(opts.edit!==false&&selected.length===1)||state.prefs.contextPanel}})}
+export function select(keys:string[],opts:{additive?:boolean;edit?:boolean;record?:boolean}={}){if(opts.record!==false&&keys.length===1&&state.selected[0]!==keys[0]){const o=findOccurrence(keys[0]);if(o)userOpenedObject({mode:'calendar',title:o.event.title,ref:calendarOccurrenceReadyRef(o)})};const selected=opts.additive?[...new Set([...state.selected,...keys])]:keys;settleDraft(selected[0]||null);setState({selected,editing:opts.edit===false?state.editing:selected.length===1?selected[0]:selected.length?state.editing:null,menu:null,prefs:{...state.prefs,contextPanel:(opts.edit!==false&&selected.length===1)||state.prefs.contextPanel}})}
 export function clearSelection(){settleDraft(null);setState({selected:[],editing:null,menu:null})}
 async function askScope(kind:'edit'|'delete'):Promise<'this'|'following'|'all'|null>{return new Promise(resolve=>setState({scopeAsk:{kind,resolve:value=>{setState({scopeAsk:null});resolve(value)}}}))}
 export async function updateOccurrence(key:string,patch:Partial<CalEvent>,opts:{scope?:'this'|'following'|'all';label?:string;expectedRevision?:number}={}){

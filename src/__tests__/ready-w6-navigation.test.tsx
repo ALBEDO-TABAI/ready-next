@@ -1,3 +1,4 @@
+import { memoryNavigationAPI } from './utils/navigation-memory'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import React, { act } from 'react'
@@ -34,7 +35,7 @@ test('W6 every ReadyRef opens its destination and exposes preview content', asyn
     { id: 'later', role: 'user', content: '之后的问题', timestamp: '2026-11-13', meta: { runId: 'later' } }]
   const scope = { id: 'chat', title: '对话', agent: 'butler', sourceKind: 'local', sourceId: 'app', threadKey: 'chat', meta: {}, createdAt: '2026-11-12', updatedAt: '2026-11-12', messageVisibilityEpoch: 0 }
   let calendarTarget = '', webUrl = '', queryStale = false
-  Object.assign(dom.window, { electronAPI: {
+  Object.assign(dom.window, { electronAPI: { navigationHistory: memoryNavigationAPI(),
     objects: { onMoved: () => () => {}, resolvePath: async (path: string) => ({ objectId: path.split('/').pop()!.split('.')[0], path, revision: 1 }), locate: async (id: string) => ({ objectId: id, path: `/fixture/${id}.${id === 'canvas' ? 'canvas' : id === 'binary' ? 'pdf' : 'md'}`, revision: 1 }),
       preview: async (ref: ReadyRef) => ref.kind === 'canvas' ? { kind: 'canvas', title: '画板', nodes: [{ id: 'node', title: '画板卡片', x: 0, y: 0, width: 100, height: 100 }] }
         : ref.kind === 'web' ? { kind: 'web', title: '网页标题', url: ref.url, excerpts: [{ id: 'h', text: '网页摘录', note: '' }] }
@@ -73,6 +74,21 @@ test('W6 every ReadyRef opens its destination and exposes preview content', asyn
     const preview = await loadObjectPreview(entry.ref)
     assert.equal(preview.state, 'ready')
     assert.ok(preview.state === 'ready' && preview.body.includes(entry.text), JSON.stringify(preview))
+  })
+  await t.test('Today draft preserves live edits; pending calibration opens and previews its own proposal', async () => {
+    const draft = { draftId: 'draft', tabId: 'draft-tab', title: '未保存', state: 'editing', content: '磁盘草稿' }
+    Object.assign(dom.window.electronAPI, { documentDrafts: { read: async () => ({ ok: true, value: draft }) } })
+    useDocTabs.setState({ tabs: [{ id: 'draft-tab', draftId: 'draft', path: null, title: '未保存', content: '尚未落盘的新修改', isDirty: true }], activeTabId: 'draft-tab' })
+    await openReadyRef({ kind: 'draft', id: 'draft' })
+    assert.equal(useDocTabs.getState().tabs.find(tab => tab.id === 'draft-tab')?.content, '尚未落盘的新修改')
+    const preview = await loadObjectPreview({ kind: 'draft', id: 'draft' })
+    assert.equal(preview.state === 'ready' && preview.body, '尚未落盘的新修改')
+    Object.assign(dom.window.electronAPI.rss, { sieveCalibration: async () => ({ success: true, data: { week: '2026-11-09', status: 'pending', text: '关注新书', explanation: '最近阅读' } }) })
+    await openReadyRef({ kind: 'rss-calibration', id: '2026-11-09' })
+    assert.equal(useRSSSession.getState().requestedCalibration, '2026-11-09')
+    const calibration = await loadObjectPreview({ kind: 'rss-calibration', id: '2026-11-09' })
+    assert.equal(calibration.state === 'ready' && calibration.body, '关注新书\n最近阅读')
+    await assert.rejects(openReadyRef({ kind: 'rss-calibration', id: '2026-11-02' }), /提案已失效/)
   })
   await t.test('query replacement removes old filters; stale query fails before navigation', async () => {
     useRSSSession.getState().setQuery({ sourceId: 'old', categoryId: 'old' })

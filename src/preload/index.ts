@@ -1698,6 +1698,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   theme: themeAPI,
   settings: settingsAPI,
   vault: vaultAPI,
+  today: { firstScreen: () => ipcRenderer.invoke('today:firstScreen'), sieve: () => ipcRenderer.invoke('today:sieve') },
+  navigationHistory: { browserPosition: () => ipcRenderer.invoke('navigationHistory:browserPosition'), restoreBrowserPosition: (position: import('../shared/navigation-history').BrowserNavigationPosition) => ipcRenderer.invoke('navigationHistory:restoreBrowserPosition', position), read: () => ipcRenderer.invoke('navigationHistory:read'), save: (state: import('../shared/navigation-history').NavigationState) => ipcRenderer.invoke('navigationHistory:save', state) },
   documentDrafts: documentDraftsAPI,
   documentPages: documentPagesAPI,
   sourceAnnotations: sourceAnnotationsAPI,

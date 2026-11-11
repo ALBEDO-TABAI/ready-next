@@ -1,3 +1,4 @@
+import { memoryNavigationAPI } from './utils/navigation-memory'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { registerHooks } from 'node:module'
@@ -48,7 +49,7 @@ test('PdfViewer enables a single-page selection, sends scoped IPC, and reveals R
   }, load(url, context, next) { return url.endsWith('.css') ? { format: 'module', source: '', shortCircuit: true } : next(url, context) } })
   const calls: unknown[] = [], opened: string[] = []
   let fail = false
-  Object.defineProperty(dom.window, 'electronAPI', { value: {
+  Object.defineProperty(dom.window, 'electronAPI', { value: { navigationHistory: memoryNavigationAPI(),
     sourceAnnotations: { pdf: async (input: unknown) => { calls.push(input); return fail ? { success: false, error: 'PDF 已变化，请重新打开后划线' } : { success: true, data: { persistence: 'saved' } } } },
     objects: { onMoved: () => () => {}, prepareMigration: async () => ({ resolved: [] }), completeMigration: async () => ({ state: 'completed' }), locate: async (id: string) => { assert.equal(id, 'pdf-object'); return { path: '/vault/改名.pdf' } } },
   } })
