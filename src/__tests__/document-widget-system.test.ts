@@ -1,3 +1,4 @@
+import { resolveDocumentWidgetRenderCode } from '../shared/document-widget-render-code'
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -8,7 +9,7 @@ import { buildWidgetReceiverSrcdoc, sanitizeWidgetHtml, widgetHtmlNeedsSandbox }
 import { clampNumericInputValue } from '../renderer/components/document/widget-runtime-helpers'
 import { buildDocumentWidgetFenceSource } from '../shared/document-widget-parse'
 import {
-  getDocumentWidgetRenderBudget,
+  getDocumentWidgetRenderBudgetFromCodes,
   widgetNeedsManualPreview,
 } from '../renderer/components/document/widget-card-helpers'
 
@@ -163,7 +164,7 @@ describe('document widget renderer contract', () => {
       '```',
     ].join('\n')
 
-    const budget = getDocumentWidgetRenderBudget(content)
+    const budget = getDocumentWidgetRenderBudgetFromCodes(buildStructuredNotePreview(content).widgets.map(widget => resolveDocumentWidgetRenderCode(widget).widgetCode))
 
     assert.equal(budget.widgetCount, 4)
     assert.equal(budget.forceManualPreviewAll, true)
@@ -177,7 +178,7 @@ describe('document widget renderer contract', () => {
       },
     })
 
-    const budget = getDocumentWidgetRenderBudget(content)
+    const budget = getDocumentWidgetRenderBudgetFromCodes(buildStructuredNotePreview(content).widgets.map(widget => resolveDocumentWidgetRenderCode(widget).widgetCode))
 
     assert.ok(budget.totalWidgetChars >= 12_000)
     assert.equal(budget.forceManualPreviewAll, true)
@@ -204,14 +205,6 @@ describe('document widget renderer contract', () => {
   // 渲染舞台（iframe 运行时 / 静态投影 / 休眠与启用）的行为合同已迁到真实挂载测试
   // document-widget-stage.test.tsx：沙箱 srcdoc、脚本与内联事件不进宿主、休眠态不挂 iframe。
 
-  it('does not describe non-script widgets as static html only', () => {
-    const source = readFileSync(
-      resolve(process.cwd(), 'src/renderer/components/document/TiptapEditor.tsx'),
-      'utf8',
-    )
-
-    assert.doesNotMatch(source, /静态 HTML/)
-  })
 
   it('documents local inline interactivity in document widget guidance', () => {
     // 合同随实现同步（Phase C C4/C5，2026-07-05）：DirectChatEngine 退役，其内嵌
@@ -239,15 +232,6 @@ describe('document widget renderer contract', () => {
     // pipeline' 用例钉住）；待 SDK 侧 prompt 资产补齐后再恢复模型侧锚点。
   })
 
-  it('does not keep an edit-mode placeholder that blocks scripted widget previews', () => {
-    const source = readFileSync(
-      resolve(process.cwd(), 'src/renderer/components/document/DocumentWidgetBlockCard.tsx'),
-      'utf8',
-    )
-
-    assert.doesNotMatch(source, /ScriptWidgetPreviewPlaceholder/)
-    assert.doesNotMatch(source, /isScriptWidget/)
-  })
 
   it('declares a color-scheme matching the host theme so the transparent frame never paints an opaque canvas', () => {
     // 宿主 html[data-theme=dark] 声明 color-scheme: dark；iframe 文档若不声明一致的
@@ -311,36 +295,4 @@ describe('document widget renderer contract', () => {
     assert.match(receiverSource, /widget:hydrate/)
   })
 
-  it('uses unified widget card header actions in edit and preview surfaces', () => {
-    const blockCardSource = readFileSync(
-      resolve(process.cwd(), 'src/renderer/components/document/DocumentWidgetBlockCard.tsx'),
-      'utf8',
-    )
-    const shellSource = readFileSync(
-      resolve(process.cwd(), 'src/renderer/components/document/DocumentWidgetCardShell.tsx'),
-      'utf8',
-    )
-    const notePreviewSource = readFileSync(
-      resolve(process.cwd(), 'src/renderer/components/document/NotePreview.tsx'),
-      'utf8',
-    )
-    const previewBlockSource = readFileSync(
-      resolve(process.cwd(), 'src/renderer/components/document/DocumentWidgetPreviewBlock.tsx'),
-      'utf8',
-    )
-    const markdownEditorSource = readFileSync(
-      resolve(process.cwd(), 'src/renderer/components/document/MarkdownEditor.tsx'),
-      'utf8',
-    )
-
-    assert.match(blockCardSource, /DocumentWidgetCardShell/)
-    assert.match(shellSource, /label="引用"/)
-    assert.match(shellSource, /label="导出"/)
-    assert.doesNotMatch(blockCardSource, /modeLabel=\{modeLabel\}/)
-    assert.doesNotMatch(blockCardSource, /hint=\{/)
-    assert.match(notePreviewSource, /DocumentWidgetPreviewBlock/)
-    assert.match(previewBlockSource, /DocumentWidgetCardShell/)
-    assert.match(markdownEditorSource, /handleWidgetQuoteToAgent/)
-    assert.match(markdownEditorSource, /handleWidgetExport/)
-  })
 })

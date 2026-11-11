@@ -38,11 +38,9 @@ interface DocumentWidgetCardShellProps {
   onQuote?: () => void
   onExport?: () => void
   onEdit?: () => void
-  extraActions?: ReactNode
   /** 题注里常驻的状态入口（如“启用交互预览”），不随悬停隐藏。 */
   captionStatus?: ReactNode
   children: ReactNode
-  contentEditable?: boolean
   dataReadyWidgetTitle?: string
   previewClassName?: string
   /** 卡片画幅（widget-canvas 的 data-widget-size）；窄画幅时题注与卡片同宽居中。 */
@@ -62,10 +60,8 @@ export default function DocumentWidgetCardShell({
   onQuote,
   onExport,
   onEdit,
-  extraActions,
   captionStatus,
   children,
-  contentEditable = false,
   dataReadyWidgetTitle,
   previewClassName,
   canvasSize,
@@ -97,7 +93,7 @@ export default function DocumentWidgetCardShell({
   return (
     <figure
       className="ready-doc-widget-card"
-      contentEditable={contentEditable}
+      contentEditable={false}
       data-ready-widget-title={dataReadyWidgetTitle || title}
       data-widget-size={canvasSize || undefined}
     >
@@ -175,7 +171,6 @@ export default function DocumentWidgetCardShell({
             icon={<Download size={12} strokeWidth={1.8} />}
             onClick={onExport}
           />
-          {extraActions}
         </div>
       </figcaption>
     </figure>

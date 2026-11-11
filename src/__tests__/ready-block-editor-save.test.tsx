@@ -21,13 +21,14 @@ test('page edits, split undo and Widget source save exact bytes through Cmd+S in
   if (skipIfSqliteUnavailable(t, 'Block editor save (run with Electron)')) return
   const widget = '```show-widget\r\n{"title":"验收卡","widget_code":"<p>Widget 原文</p>"}\r\n```'
   const other = '```show-widget\r\n{"id":"other-card","title":"旁卡","widget_code":"<input>"}\r\n```'
-  const body = '编辑甲乙\r\n\r\n' + widget + '\r\n\r\n' + other
+  const body = '# 保留  \r\n\r\n编辑甲乙\r\n\r\n' + widget + '\r\n\r\n' + other
   const f = await editorFixture(t, body)
   const css = registerHooks({ load(url, context, next) {
     return url.endsWith('.css') ? { format: 'module', source: '', shortCircuit: true } : next(url, context)
   } })
   t.after(() => css.deregister())
-  const { default: MarkdownEditor } = await import('../renderer/components/document/MarkdownEditor')
+  const { PageDocumentEditor } = await import('../renderer/modules/document/page-ui/PageDocumentEditor')
+  const { useVault } = await import('../renderer/stores/useVault')
   const { useKeyboardShortcuts } = await import('../renderer/hooks/useKeyboardShortcuts')
   const { useMode } = await import('../renderer/stores/useMode')
   const { MemoryRouter } = await import('react-router-dom')
@@ -60,15 +61,21 @@ test('page edits, split undo and Widget source save exact bytes through Cmd+S in
   Object.defineProperty(window, 'electronAPI', { configurable: true, value: { document: {
     readFile: async () => ({ success: true, content: head + body + tail }),
     writeFile: async (target: string, content: string) => { assert.equal(target, path); writes.push(content); return writeDocumentEditableText(target, content) },
+  }, documentPages: {
+    properties: async () => ({ ok: true, value: { properties: { title: '保留' }, version: 'fixture' } }),
+    onChanged: () => () => {},
   } } })
+  const priorVault = useVault.getState().view
+  useVault.setState({ view: { phase: 'loaded', data: { status: 'ready', root: directory, defaultSuggestion: directory } } })
+  t.after(() => useVault.setState({ view: priorVault }))
   await act(() => {
-    f.useDocTabs.setState(state => ({ tabs: state.tabs.map(tab => ({ ...tab, path })), activeTabId: t.name, splitTabId: null, focusedPaneTabId: t.name }))
+    f.useDocTabs.setState(state => ({ tabs: state.tabs.map(tab => ({ ...tab, path, objectId: registry.register(path).id, objectBinding: { status: 'resolved' } })), activeTabId: t.name, splitTabId: null, focusedPaneTabId: t.name }))
     useMode.setState({ appMode: 'workbench', workbenchMode: 'document', splitMode: null })
   })
   function Surface({ view }: { view: 'edit' | 'preview' }) {
     useKeyboardShortcuts()
     const tab = f.useDocTabs(state => state.tabs.find(item => item.id === t.name)!)
-    return <MarkdownEditor tab={tab} viewMode={view} previewEditable />
+    return <PageDocumentEditor tab={tab} viewMode={view} previewEditable isSceneVisible />
   }
   const view = async (mode: 'edit' | 'preview') => {
     await act(() => f.root.render(<MemoryRouter initialEntries={['/workbench']}><Surface view={mode} /></MemoryRouter>))
@@ -80,7 +87,11 @@ test('page edits, split undo and Widget source save exact bytes through Cmd+S in
     assert.equal(writes.length, count + 1, document.body.textContent ?? 'save must write')
   }
   await view('preview')
+  assert.equal(document.querySelector<HTMLTextAreaElement>('[aria-label="页面标题"]')?.value, '保留')
+  assert.equal(Boolean(document.querySelector('[data-ready-heading-title="保留"]:not([data-ready-hidden-title])')), false, 'same-title H1 is not rendered')
   const paragraph = f.rich('编辑甲乙')
+  await f.caret(paragraph, 0); await f.key(paragraph, 'Backspace')
+  f.bytes(body) // Backspace must not merge the hidden heading into the next visible block.
   await f.caret(paragraph, 4); await f.input(paragraph, '编辑甲乙中文')
   await f.caret(paragraph, 4); await f.key(paragraph, 'Enter')
   f.bytes(body.replace('编辑甲乙', '编辑甲乙\r\n\r\n中文'))

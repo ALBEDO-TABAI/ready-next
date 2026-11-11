@@ -43,7 +43,7 @@ import {
   registerDocumentSaveHandler,
 } from '../../modules/document/documentSaveRegistry'
 import { saveDocumentTabSnapshot } from '../../modules/document/documentSaveRuntime'
-import '../../styles/tiptap.css'
+import '../../styles/document-widget-editor.css'
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
 
@@ -71,6 +71,7 @@ interface MarkdownEditorProps {
   onVisibleLineChange?: (line: number | null) => void
   onActivate?: () => void
   /** Page view: shown at the top of the preview scroll area (icon, cover, title), so it scrolls with the page. */
+  previewPageTitle?: string
   previewHeader?: ReactNode
   /** Page view classes on the preview scroll area; its layout then comes from the page stylesheet. */
   previewClassName?: string
@@ -207,6 +208,7 @@ export default function MarkdownEditor({
   previewFocusWidgetTitle,
   onVisibleLineChange,
   onActivate,
+  previewPageTitle,
   previewHeader,
   previewClassName,
 }: MarkdownEditorProps) {
@@ -1064,6 +1066,7 @@ export default function MarkdownEditor({
                   renderLoadState()
                 ) : (
                   <NotePreview
+                    pageTitle={previewPageTitle}
                     content={tab.content}
                     notePath={tab.path}
                     focusWidgetTitle={previewFocusWidgetTitle}
@@ -1108,7 +1111,6 @@ export default function MarkdownEditor({
 
       {/* ── Editor Context Menu (fixed position, portal-like) ── */}
       <EditorContextMenu
-        editor={null}
         visible={contextMenu.visible}
         position={{ x: contextMenu.x, y: contextMenu.y }}
         onClose={closeContextMenu}

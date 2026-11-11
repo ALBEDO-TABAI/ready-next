@@ -20,6 +20,10 @@ import {
   type DocumentOutlineSnapshot,
 } from '../../../shared/document-side-panels'
 import './documentFloatingPanels.css'
+import { useVault } from '../../stores/useVault'
+import { useDocumentNavigator } from '../../modules/document/navigator/useDocumentNavigator'
+import { duplicatePageHeading, pageFrontmatter } from '../../modules/document/page-ui/page-title'
+import { parseDocumentBlocks } from '../../../shared/document-blocks'
 
 type MarkTab = 'bookmark' | 'note'
 const PANEL_EXIT_ANIMATION_MS = 180
@@ -182,6 +186,16 @@ export default function DocumentFloatingPanels({
   onToggleMarks,
   onReveal,
 }: DocumentFloatingPanelsProps) {
+  const vault = useVault(state => state.view.data)
+  const view = useDocumentNavigator(state => state.view)
+  const hiddenTitleLine = useMemo(() => {
+    const path = documentPath?.replace(/\\/g, '/')
+    if (view !== 'pages' || vault?.status !== 'ready' || !path?.startsWith(vault.root.replace(/\\/g, '/').replace(/\/$/, '') + '/') || !/\.md$/i.test(path)) return null
+    const fields = pageFrontmatter(content)
+    const title = typeof fields.title === 'string' ? fields.title : documentTitle.replace(/\.md$/i, '')
+    const block = duplicatePageHeading(parseDocumentBlocks(content), title)
+    return block ? content.slice(0, block.start).split(/\r\n|\n|\r/).length : null
+  }, [content, documentPath, documentTitle, vault, view])
   const [outline, setOutline] = useState(EMPTY_DOCUMENT_OUTLINE)
   const [outlineContent, setOutlineContent] = useState('')
   const [outlineLoading, setOutlineLoading] = useState(false)
@@ -416,10 +430,10 @@ export default function DocumentFloatingPanels({
             {outlineLoading && (
               <div className="document-floating-empty">正在整理文档结构...</div>
             )}
-            {!outlineLoading && outline.nodes.length === 0 && (
+            {!outlineLoading && outline.nodes.filter(node => node.lineStart !== hiddenTitleLine).length === 0 && (
               <div className="document-floating-empty">这篇文档暂时没有可预览的结构。</div>
             )}
-            {!outlineLoading && outline.nodes.map((node) => (
+            {!outlineLoading && outline.nodes.filter(node => node.lineStart !== hiddenTitleLine).map((node) => (
               <OutlineRow
                 key={node.id}
                 node={node}

@@ -18,7 +18,7 @@ export function readRendererStyles(): string {
   const out: string[] = []
   for (const line of readFileSync(abs, 'utf8').split('\n')) {
     const local = line.match(/^@import '\.\/([^']+\.css)';$/)
-    if (local && local[1] !== 'tiptap.css') {
+    if (local && local[1] !== 'document-widget-editor.css') {
       const body = readFileSync(join(dir, local[1]), 'utf8').split('\n')
       if (body[0]?.startsWith(SECTION_BANNER_PREFIX)) body.shift()
       out.push(body.join('\n'))

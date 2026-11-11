@@ -45,6 +45,7 @@ interface NotePreviewProps {
   notePath?: string | null
   focusWidgetTitle?: string | null
   editorTabId?: string
+  pageTitle?: string
   widgetEditable?: boolean
   forceManualPreview?: boolean
   onWidgetRename?: (currentTitle: string, widgetCode: string, nextTitle: string) => void
@@ -349,7 +350,7 @@ function BrokenWidgetFallback({ reason }: { reason: string }) {
           <Wrench size={14} strokeWidth={2} />
           <span>让 AI 修复</span>
         </button>
-        <span>也可以切到编辑模式手动修复。</span>
+        <span>也可以打开 Markdown 源码手动修复。</span>
       </div>
     </div>
   )
@@ -423,6 +424,7 @@ function NotePreview({
   notePath,
   focusWidgetTitle,
   editorTabId,
+  pageTitle,
   widgetEditable = false,
   forceManualPreview = false,
   onWidgetRename,
@@ -545,7 +547,7 @@ function NotePreview({
       ) : null}
 
       <SyncedPathContext.Provider value={notePath ?? null}>{editorTabId && !isEbookMarkdown ? (
-        <ReadyBlockEditor tabId={editorTabId} content={content} renderSource={block => block.type === 'frontmatter' ? null : (
+        <ReadyBlockEditor pageTitle={pageTitle} tabId={editorTabId} content={content} renderSource={block => block.type === 'frontmatter' ? null : (
           <NotePreview content={block.raw} notePath={notePath} widgetEditable
             forceManualPreview={widgetRenderBudget.forceManualPreviewAll}
             onWidgetRename={onWidgetRename} onWidgetQuote={onWidgetQuote} onWidgetExport={onWidgetExport}

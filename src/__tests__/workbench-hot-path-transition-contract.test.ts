@@ -19,7 +19,7 @@ test('workbench hot-path surfaces avoid transition-all on interactive chrome', (
     'src/renderer/components/rss/RSSArticleReader.tsx',
     'src/renderer/components/rss/RSSFeed.tsx',
     'src/renderer/pages/modes/RSSMode.tsx',
-    'src/renderer/styles/tiptap.css',
+    'src/renderer/styles/document-widget-editor.css',
   ]
 
   for (const path of hotPathFiles) {

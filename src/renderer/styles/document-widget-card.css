@@ -1,6 +1,6 @@
 /* ═══ document-widget-card.css — 文档信息卡外壳的图注与渲染舞台。
  *
- * 外壳基础（透明卡壳、题注行、操作按钮的表面令牌）仍在 tiptap.css，由
+ * 外壳基础（透明卡壳、题注行、操作按钮的表面令牌）仍在 document-widget-editor.css，由
  * document-dark-surface-contract 测试钉住；这里只放随静态投影与图注引入的部分：
  * FIG 编号、窄画幅题注对齐、“启用交互预览”入口，以及静态投影 → iframe 的舞台切换。
  * ═══ */
