@@ -155,3 +155,14 @@ test('筛子设置 saves 我的关注 against its version, the urgent switch, an
   const moved = saved.filter(entry => entry.name === 'definition').map(entry => entry.input as { id: string; position: number })
   assert.deepEqual(moved.map(entry => [entry.id, entry.position]), [['t2', 10], ['t1', 20]])
 })
+
+test('with nothing ranked, the empty reason still shows above the daily 换换口味 pick', async t => {
+  const explore = item('x', '机核', '换换口味', { sieve: { score: 20, eligible: false, pinned: false, reason: '换换口味', factors: [], explore: true } })
+  const { api } = rssStub({ sieveQuery: () => ok({ items: [explore], remaining: [], remainingCount: 0 }),
+    processingStatus: () => ok({ settings: { enabled: true, dailyLimit: 100 }, callsToday: 0, pending: 0, running: 0, unresolved: 0, blocked: 'model' }) })
+  const h = await mount(t, api)
+  await h.render(<RSSSieveView shown onOpen={() => {}} />)
+  await h.settle()
+  assert.match(h.get('.rss-sieve__empty').textContent!, /还没有配置可用的模型/)
+  assert.ok(h.body.querySelector('[data-sieve-item="x"][data-explore]'), 'the pick still shows, marked')
+})

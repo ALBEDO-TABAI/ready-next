@@ -55,7 +55,7 @@ export function RSSSieveView({ shown, onOpen }: { shown: boolean; onOpen(item: R
       const preview = consent.answer === 'unanswered' ? await unwrapRSS(api.sieveWorkContext()) : null
       if (mine !== ticket.current) return
       setResult(sieved); setPrivacy(consent); setWork(preview); setUpdates(false); setError('')
-      hasItems.current = sieved.items.length > 0
+      hasItems.current = sieved.items.some(item => !item.sieve.explore)
       setEmpty(!sources.length ? 'sources' : status.blocked === 'model' ? 'model' : status.blocked === 'disabled' ? 'disabled' : status.blocked === 'limit' ? 'limit' : 'quiet')
     } catch (cause) { if (mine === ticket.current) setError(cause instanceof Error ? cause.message : String(cause)) }
   }, [])
@@ -75,19 +75,21 @@ export function RSSSieveView({ shown, onOpen }: { shown: boolean; onOpen(item: R
   }
   const open = (item: RSSSieveItem) => { setOpened(previous => new Set(previous).add(item.id)); onOpen(item) }
   const items = result?.items ?? []
+  // The daily 换换口味 pick rides along below the ranked list; on its own it is no answer to “why is this empty”.
+  const ranked = items.filter(item => !item.sieve.explore)
   return <section ref={scroller} className="rss-sieve" aria-label="为你筛过的" style={{ display: shown ? undefined : 'none' }}
     onScroll={event => { scrollTop.current = event.currentTarget.scrollTop }}>
     <RSSTopbarTools slot="lead" show={shown}><span>为你筛过的</span></RSSTopbarTools>
     <div className="rss-sieve__inner">
       <header className="rss-sieve__head">
         <h1>为你筛过的</h1>
-        <p>最近 48 小时，按和你的关系排序{items.length ? ` · ${items.length} 篇` : ''}</p>
+        <p>最近 48 小时，按和你的关系排序{ranked.length ? ` · ${ranked.length} 篇` : ''}</p>
         {updates && <button type="button" className="rss-sieve__updates" onClick={() => void load()}>有新结果，刷新</button>}
       </header>
       {privacy?.answer === 'unanswered' && <WorkConsent work={work} onAnswer={enabled => void answer(enabled)} />}
       <RSSCalibrationCard active={shown} />
       {error && <p role="alert" className="rss-sieve__error">{error}</p>}
-      {result && !items.length && <p className="rss-sieve__empty">{EMPTY[empty]}</p>}
+      {result && !ranked.length && <p className="rss-sieve__empty">{EMPTY[empty]}</p>}
       <ol className="rss-sieve__list">
         {items.map(item => <li key={item.id}>
           <SieveCard item={item} opened={opened.has(item.id) || item.read} onOpen={() => open(item)} onFeedback={feedback} onError={setError} />
@@ -151,7 +153,7 @@ function SieveCard({ item, opened, onOpen, onFeedback, onError }: {
       await recordRSSBehavior({ itemId: item.id, action: 'fastcard' })
     } catch (cause) { onError(cause instanceof Error ? cause.message : String(cause)) }
   }
-  return <article className="rss-sieve__card" data-sieve-item={item.id} data-opened={opened || undefined} data-explore={item.sieve.reason === '换换口味' || undefined}>
+  return <article className="rss-sieve__card" data-sieve-item={item.id} data-opened={opened || undefined} data-explore={item.sieve.explore || undefined}>
     <button type="button" className="rss-sieve__title" onClick={onOpen}>{item.title}</button>
     <p className="rss-sieve__reason">{item.sieve.reason}</p>
     <div className="rss-sieve__foot">
