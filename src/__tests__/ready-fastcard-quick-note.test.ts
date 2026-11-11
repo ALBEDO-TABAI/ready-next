@@ -23,7 +23,7 @@ test('quick note reports shortcut failure; recording is durable and playable wit
     const statuses: QuickNoteStatus[] = [], unregistered: string[] = []
     let canRegister = false
     const service = new FastCardQuickNoteService({ register: () => canRegister, unregister: key => { unregistered.push(key) },
-      show: async () => undefined, hide: () => undefined, readClipboard: () => ({ kind: 'text', text: 'clipboard text' }), notify: status => { statuses.push(status) } }, collection, repository, cache)
+      show: async () => undefined, hide: () => undefined, readClipboard: async () => ({ kind: 'text', text: 'clipboard text' }), notify: status => { statuses.push(status) } }, collection, repository, cache)
     assert.equal(service.start().registered, false)
     assert.match(JSON.stringify(statuses), /注册失败/)
     service.stop(); assert.deepEqual(unregistered, [])
@@ -39,7 +39,7 @@ test('quick note reports shortcut failure; recording is durable and playable wit
     assert.equal((await service.transcribe('recording')).transcription?.status, 'unavailable')
     assert.deepEqual(Buffer.from(service.playback('recording').split(',')[1], 'base64'), wav)
     const brokenConfig = new FastCardQuickNoteService({ register: () => false, unregister: () => undefined,
-      show: async () => undefined, hide: () => undefined, readClipboard: () => ({ kind: 'text', text: '' }), notify: () => undefined }, collection, repository, cache,
+      show: async () => undefined, hide: () => undefined, readClipboard: async () => ({ kind: 'text', text: '' }), notify: () => undefined }, collection, repository, cache,
       { configuredModels: () => { throw new Error('model configuration unavailable') }, transcribe: async () => assert.fail('unverified model must not be called') })
     assert.equal(brokenConfig.recording(wav, 'audio/wav', 'config-failure').transcription?.status, 'failed')
     assert.deepEqual(Buffer.from(brokenConfig.playback('config-failure').split(',')[1], 'base64'), wav)
@@ -60,7 +60,7 @@ test('FastCard IPC validates recordings and keeps persistence separate from tran
     const repository = new FastCardRepository(db), cache = new FastCardMediaCache(root)
     const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64')
     const service = new FastCardQuickNoteService({ register: () => false, unregister: () => assert.fail('not owned'), show: async () => undefined, hide: () => undefined,
-      readClipboard: () => ({ kind: 'image', bytes: png }), notify: () => undefined }, new FastCardCollectionService(repository, cache), repository, cache)
+      readClipboard: async () => ({ kind: 'image', bytes: png }), notify: () => undefined }, new FastCardCollectionService(repository, cache), repository, cache)
     const handlers = new Map<string, (event: unknown, input?: unknown) => unknown>()
     registerFastCardServicesIPC({ handle(channel, listener) { handlers.set(channel, listener) } }, { quickNote: service, transfer: () => { throw new Error('B not connected') } })
     const invoke = async (name: string, input?: unknown) => {

@@ -50,7 +50,7 @@ claude-bridge IPC
 
 版本与依赖只信 `package.json`：
 
-- Electron 42.3
+- Electron 45.3
 - 应用版本 0.8.0；固定 Codex runtime 0.160.1，清单见 `assets/codex-runtime/runtime-manifest.json`
 - React 19
 - TypeScript 5.7

@@ -119,7 +119,7 @@ export class BrowserContextMenuService {
           },
         },
         { label: '在外部浏览器打开链接', click: () => { void shell.openExternal(linkUrl) } },
-        { label: '复制链接地址', click: () => clipboard.writeText(linkUrl) },
+        { label: '复制链接地址', click: () => this.copyText(linkUrl, 'link') },
         {
           label: '下载链接',
           click: () => {
@@ -158,7 +158,7 @@ export class BrowserContextMenuService {
             })
           },
         },
-        { label: '复制图片地址', click: () => clipboard.writeText(imageUrl) },
+        { label: '复制图片地址', click: () => this.copyText(imageUrl, 'image url') },
         {
           label: '复制图片',
           click: () => {
@@ -210,7 +210,7 @@ export class BrowserContextMenuService {
 
     pushSeparator()
     template.push(
-      { label: '复制页面地址', click: () => clipboard.writeText(webContents.getURL()) },
+      { label: '复制页面地址', click: () => this.copyText(webContents.getURL(), 'page url') },
       {
         label: '查看网页源代码',
         click: () => {
@@ -342,6 +342,13 @@ export class BrowserContextMenuService {
       this.host.logBrowserDiag(`[browser-v3][context] fastcard element read failed: ${String(error)}`)
       return {}
     }
+  }
+
+  // clipboard writes are asynchronous since Electron 44; a failed copy is logged, never thrown into the menu.
+  private copyText(text: string, what: string): void {
+    void clipboard.writeText(text).catch((error) => {
+      this.host.logBrowserDiag(`[browser-v3][context] copy ${what} failed: ${String(error)}`)
+    })
   }
 
   private getSource(webContents: WebContents) {

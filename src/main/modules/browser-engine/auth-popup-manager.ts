@@ -53,8 +53,10 @@ export class AuthPopupManager {
       autoHideMenuBar: true,
       parent: this.mainWindow,
       titleBarStyle: 'default',
+      // No sandbox override: a popup must share the sandbox state of the browser tab that opened it
+      // (tabs keep Electron's sandboxed default). Since Electron 45 a mismatch puts the popup in its
+      // own process without an opener, so OAuth/SSO popups could no longer post back to the tab.
       webPreferences: withHtmlInCanvasWebPreferences({
-        sandbox: false,
         contextIsolation: true,
         nodeIntegration: false,
         partition: profile ? `persist:browser-profile-${profile}` : 'persist:browser',

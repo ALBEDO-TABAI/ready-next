@@ -23,7 +23,7 @@ import { stopRSSContentService } from './modules/rss-engine/content-runtime'
 import { startRSSProcessing, stopRSSProcessing, wakeRSSProcessing } from './modules/rss-engine/processing-runtime'
 // 本文件是重模块：由 boot-entry.ts（构建入口）在 splash 可见后动态加载。
 // dotenv、userData 路径、协议注册、命令行开关等 pre-ready 配置都在 boot-entry 完成。
-import { app, shell, BrowserWindow, ipcMain, protocol, nativeImage, nativeTheme, Menu, dialog, clipboard, powerMonitor, type MenuItemConstructorOptions, type NativeImage } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, protocol, nativeImage, nativeTheme, Menu, dialog, clipboard, ClipboardItem, powerMonitor, type MenuItemConstructorOptions, type NativeImage } from 'electron'
 import { join, isAbsolute, basename, resolve } from 'path'
 import { statSync, existsSync, appendFileSync } from 'fs'
 import { writeFile } from 'fs/promises'
@@ -1074,7 +1074,7 @@ function setupAutoUpdater(mainWindow: BrowserWindow): void {
       const image = nativeImage.createFromPath(imagePath)
       if (image.isEmpty()) return { success: false, error: 'Unsupported image' }
       const text = typeof payload?.text === 'string' ? payload.text : imagePath
-      clipboard.write({ image, text })
+      await clipboard.write([new ClipboardItem({ 'text/plain': text, 'image/png': new Blob([new Uint8Array(image.toPNG())], { type: 'image/png' }) })])
       return { success: true }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }

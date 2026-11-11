@@ -8,7 +8,7 @@ import {
 } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { resolveAccentPalette, useTheme, type ThemeAccent, type ThemeOption, type ThemeSkin } from '../stores/useTheme'
-import { READY_VERSION_LABEL } from '../../shared/app-version'
+import { ELECTRON_MAJOR_VERSION, READY_VERSION_LABEL } from '../../shared/app-version'
 import { nextIntentId } from '../../shared/browser-view-intent'
 import { BROWSER_POWER_MODE_SETTING_KEY } from '../../shared/browser-power'
 import RemoteIMSettingsPanel from '../components/settings/RemoteIMSettingsPanel'
@@ -740,7 +740,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
 
           {/* Footer info */}
           <div className="sx-meta mt-4 px-3">
-            {READY_VERSION_LABEL} · Electron 42
+            {READY_VERSION_LABEL} · Electron {ELECTRON_MAJOR_VERSION}
           </div>
         </nav>
 

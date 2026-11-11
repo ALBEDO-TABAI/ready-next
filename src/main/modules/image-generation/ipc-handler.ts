@@ -1,4 +1,4 @@
-import { clipboard, ipcMain, nativeImage } from 'electron'
+import { clipboard, ClipboardItem, ipcMain, nativeImage } from 'electron'
 import type {
   ImageGenerationCopyInput,
   ImageGenerationIpcResult,
@@ -49,7 +49,7 @@ export function setupImageGenerationIPC(): void {
         const bytes = await service.readCachedImage(input?.sourcePath)
         const image = nativeImage.createFromBuffer(Buffer.from(bytes))
         if (image.isEmpty()) throw new Error('生成图片无法读取')
-        clipboard.writeImage(image)
+        await clipboard.write([new ClipboardItem({ 'image/png': new Blob([new Uint8Array(image.toPNG())], { type: 'image/png' }) })])
         return { success: true }
       } catch (error) {
         return { success: false, error: errorMessage(error) }

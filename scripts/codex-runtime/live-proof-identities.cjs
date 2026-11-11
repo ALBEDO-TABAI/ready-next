@@ -42,18 +42,18 @@ const NON_DEPENDENCY_NODE_MODULE_PATHS = Object.freeze([
 ])
 const TRUSTED_ELECTRON = Object.freeze({
   relativePath: 'node_modules/electron/dist/Electron.app/Contents/MacOS/Electron',
-  sha256: '03e1f18f7d123bab134f38686759010e0f4c76d5d185704714696f0304cf059f',
+  sha256: '2d29df6b75f4ee3584479f0001dd41f5e088d390900a1537fa89b0d97e112d39',
 })
 const TRUSTED_BUILD_SCRIPTS = Object.freeze({
   build: 'npm run rebuild:native && npm run native:check && npm run typecheck && electron-vite build',
   'native:check': 'node scripts/check-better-sqlite3-electron-abi.cjs',
-  'rebuild:native': 'node scripts/patch-better-sqlite3-electron42.cjs && electron-builder install-app-deps',
+  'rebuild:native': 'node scripts/patch-better-sqlite3-v8.cjs && electron-builder install-app-deps',
   typecheck: 'node scripts/run-typecheck.cjs',
   'typecheck:node': 'tsc --noEmit -p tsconfig.node.json --composite false --incremental --tsBuildInfoFile node_modules/.cache/tsc/node.tsbuildinfo',
   'typecheck:web': 'tsc --noEmit -p tsconfig.web.json --composite false --incremental --tsBuildInfoFile node_modules/.cache/tsc/web.tsbuildinfo',
 })
 const TRUSTED_BUILD_COMMAND = [
-  'node scripts/patch-better-sqlite3-electron42.cjs',
+  'node scripts/patch-better-sqlite3-v8.cjs',
   'electron-builder install-app-deps',
   'node scripts/check-better-sqlite3-electron-abi.cjs',
   'tsc --noEmit -p tsconfig.node.json --composite false --incremental --tsBuildInfoFile "$READY_CODEX_E6_TSC_CACHE/node.tsbuildinfo"',
@@ -80,10 +80,10 @@ const TRUSTED_SIDECAR_ENVIRONMENT = Object.freeze({
   requirementsInstallDigest: '1237553332',
 })
 const TRUSTED_ELECTRON_GYP = Object.freeze({
-  path: '/Users/user/.electron-gyp/42.3.0',
-  digest: '5b92e5d861888a97469feef73757f153a160ae8196f6280705fd27fbf5c1e7f0',
+  path: '/Users/user/.electron-gyp/45.3.0',
+  digest: 'adbc714d9a8949b15dba1c6b8681b3c2e71968986f8ff1f46c2ce8a9e0815891',
   entryCount: 131,
-  fileBytes: 1564207,
+  fileBytes: 1575483,
 })
 
 const TRUSTED_GIT = Object.freeze({
