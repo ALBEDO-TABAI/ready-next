@@ -1,7 +1,9 @@
+import { toReadyUri } from '../shared/ready-ref'
+import { readDocumentSource } from '../shared/document-operations'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import Database from 'better-sqlite3'
-import { mkdtempSync, realpathSync, rmSync, readdirSync, writeFileSync, renameSync } from 'node:fs'
+import { readFileSync, mkdtempSync, realpathSync, rmSync, readdirSync, writeFileSync, renameSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { runMigrations } from '../main/modules/migrations'
@@ -118,6 +120,7 @@ test('M6-A C12 interrupted note finalize retries the same draft/file and checks 
   const [a, b] = await Promise.all([notes.create(root, input), notes.create(root, input)])
   assert.equal(a.ref.kind, 'page'); assert.deepEqual(a.ref, b.ref)
   assert.equal(readdirSync(root).filter(name => name.endsWith('.md')).length, 1)
+  assert.equal(readDocumentSource(readFileSync(join(root, 'Notes.md'), 'utf8')).body, `[日程](${toReadyUri({ kind: 'event', id: 'series', occurrence: String(second) })})\n\n`)
   assert.equal(db.prepare('SELECT count(*) n FROM document_drafts').get<{n:number}>()!.n, 1)
   assert.equal(store.snapshot().links!.filter(l => l.purpose === 'meeting-note').length, 1)
   await assert.rejects(notes.create(root, { ...input, destination: { ...input.destination, operationId: 'meeting-two', title: 'Another' } }), /已有|关联|意图/)

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { JSDOM } from 'jsdom'
-import { act, createElement } from 'react'
+import React, { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 
 import type { DocumentWidgetData } from '../shared/document-widget-parse'
@@ -145,5 +145,21 @@ test('document cards show a figure caption and move activation into the caption 
     await act(async () => activate.click())
     assert.ok(container.querySelector('iframe.document-widget-frame'))
     assert.equal(caption.querySelector('.ready-doc-widget-card-activate'), null, 'activation disappears once the runtime is mounted')
+  })
+})
+
+test('document widget chrome exposes working edit, quote and export actions after Tiptap retirement', async () => {
+  const { default: Shell } = await import('../renderer/components/document/DocumentWidgetCardShell')
+  await withDom(async (container, root) => {
+    const calls: string[] = []
+    await act(() => root.render(<Shell title="保留的卡片"
+      onEdit={() => calls.push('编辑')} onQuote={() => calls.push('引用')} onExport={() => calls.push('导出')}>内容</Shell>))
+    assert.equal(container.querySelector('figcaption .ready-doc-widget-card-title')?.textContent, '保留的卡片')
+    for (const label of ['编辑', '引用', '导出']) {
+      const button = [...container.querySelectorAll('button')].find(item => item.textContent === label)
+      assert.ok(button, label)
+      await act(() => button.click())
+    }
+    assert.deepEqual(calls, ['编辑', '引用', '导出'])
   })
 })

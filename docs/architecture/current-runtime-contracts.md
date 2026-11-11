@@ -207,14 +207,14 @@
 - `.canvas` 在 DocumentMode 使用 CanvasSurface 与成文卡片组合；生产写入统一经过 CanvasService，确认落盘后刷新画板。文字卡消费现有块编辑器，提交携带文件及正文版本；跨窗口更新不能把旧正文直接覆盖到文件。
 - Main 在页面服务恢复之后按当前资料库解析画板、导入、成文、FastCard 转存服务；每次调用重新读取资料库，恢复期间切库重新解析，未配置或恢复失败明确拒绝。FastCard 暂存及快记录音属于隔离 userData，目标、恢复任务与撤销属于相应资料库。
 - FastCard 通过同一个画板服务支持已有、新建、默认《灵感》；不依赖画板标签打开，完成后通知已打开画板回读。成文沿用草稿定稿服务，并由同一画板服务完成草稿卡到文档卡的替换；默认子文档存入画板同名目录。
-- `ready://canvas/<id>#node=<node>` 打开文档中的画板，选中并居中目标节点。旧 `.readyboard` 仅提供一次性导入提示，源字节不变；旧编辑器、保存、素材接收、拖拽协议及 HTML 构建命令已退役。打包清单仍引用的历史静态模板等待打包文件负责人一并移除，生产没有读取入口。
+- `ready://canvas/<id>#node=<node>` 打开文档中的画板，选中并居中目标节点。旧 `.readyboard` 仅提供一次性导入提示，源字节不变；旧编辑器、保存、素材接收、拖拽协议及 HTML 构建命令已退役。打包清单已不再单列历史静态模板，生产没有读取入口。
 - 快记启动登记快捷键，失败提示；真正退出时注销并销毁快记窗口。画板写入与文字卡提交参与退出等待；关闭后仍在写入的任务继续受退出等待保护。
 - 块编辑器公开 `linkBase`（基准文件路径 `filePath`、页面服务父路径 `parentPath`）：文档取标签路径，文字卡取画板路径。Wiki 插入相对于基准文件所在文件夹，打开先该文件夹再资料库根；节点关系解析要求遵循相同规则。子页面经页面服务以 `X.canvas` 为父路径建在 `X/`，链接沿原选区和版本经画板句柄提交；未保存文档保持原行为。文字卡“复制块引用”使用对象服务确认的 `ready://canvas/<objectId>#node=<nodeId>`，定位整卡；缺路径时三项入口隐藏并说明。详见 M4 合同 §8 E3。真实窗口、中文输入法、网页层恢复与强退验收入口为 `verify:ready-next-canvas`，CLI 不能代替窗口通过。
-- E3 尚未全通过：`canvas-links.ts` 正确保留节点身份和 Wiki 目标，但 `search-engine/object-links.ts` 因 `source_node_id` 将文字链接优先按资料库根解析，导致嵌套画板的 `../` 链接无法解析、同名页可能选错。该文件不在 E3 本次允许范围，未修改；`ready-canvas-write-native.test.ts` 保留失败回归，待修正解析规则后关闭。
+- E3 的画板链接解析已区分来源：文件卡按资料库根解析，文字卡内的链接先按画板文件所在目录解析，再查资料库根；嵌套 `../` 与相邻同名页由 `ready-canvas-write-native.test.ts` 覆盖。此项不替代 E3 的真实窗口验收。
 
 
-- Ready Next M3：资料库内的 Markdown 页面在页面视角、正文预览模式中显示 `PageHeader`；文件视角、源码模式、书本阅读及资料库外文件不显示。页面头部修改前通过现有保存入口保存未保存正文；失败不继续改属性。页面属性变化订阅页面服务通知，标签位置仍由对象服务的完成通知更新。
-- `PageDocumentEditor` 只组合页面头部和现有 `MarkdownEditor`。后者保留加载与保存职责，页面预览交给 `ReadyBlockEditor`，源码使用原 textarea；两边复用 T4 的 `TabBuffer` 与统一历史，不创建第二份正文或撤销栈。新建、页面侧栏、文件打开和 `openReadyRef` 均由现有标签对象绑定去重。
+- Ready Next M3：资料库内已解析对象身份的 Markdown 页面在正文页面中显示 `PageHeader`，导航器切到文件视角仍显示；Markdown 源码、书本阅读及资料库外文件不显示。页面头部修改前通过现有保存入口保存未保存正文；失败不继续改属性。页面属性变化订阅页面服务通知，标签位置仍由对象服务的完成通知更新。
+- `PageDocumentEditor` 只组合页面头部和现有 `MarkdownEditor`。后者保留加载与保存职责，页面正文交给 `ReadyBlockEditor`，Markdown 源码使用原 textarea；两边复用 T4 的 `TabBuffer` 与统一历史，不创建第二份正文或撤销栈。新建、页面侧栏、文件打开和 `openReadyRef` 均由现有标签对象绑定去重。 标题取 frontmatter 的 `title`，缺失时取不带 `.md` 的文件名；页面视角仅跳过正文第一个顶层一级标题与显示标题去首尾空白后完全相同的情况，不做大小写、行内标记或模糊归一化。大纲只过滤这一个显示条目，块区间、锚点、保存仍用完整源码；Markdown 源码和文件视角保留该标题。新建页面不自动注入正文标题行，导入与用户模板正文保留。
 - 草稿与未保存正文由 Main 草稿服务确认；关闭标签不丢弃。草稿“保存到…”、未命名标签拖入目录、页面移动/恢复均使用 `SaveToPicker`。拖拽只预选位置，确认并完成文件回读后才通知调用方保存成功；取消保留草稿。T3b 的简化文件夹对话框及拖拽自行挑文件名的路径已删除。画板文档卡选项在消费者完成前不由文档接线开放。
 - 文档书本模式与书房保持独立：前者只读当前文本/DOCX 编辑缓冲，按文档块、源码行和块内进度定位，Widget 为静态投影；后者读取导入书籍，以章节、书内位置、目录和标注组织阅读。文档书本模式不另存书籍正文，书房不接管普通文档缓冲；不新增重复入口或通用分页框架。M3 综合检查为 `npm run verify:ready-next-m3 -- --cli`，真实窗口流程为构建后 `npm run verify:ready-next-m3`。
 
@@ -251,7 +251,7 @@
 - 阅读背景默认跟随应用昼夜，也可保存自选颜色；颜色变化不能触发全文测量或移动阅读位置。左右纸堆按总页数及阅读进度互补变化，切口细纹沿页高竖向延伸，前页与纸堆上下齐边，圆角只放在最外侧轮廓；厚度逐帧跟随翻页且不改变正文平面，不得落页后再播放一次厚度布局动画。
 - 阅读中的 Widget 只允许静态投影：先移除脚本、事件、外部 CSS URL、fixed/sticky 和重复 id，再放入可克隆的受约束 ShadowRoot；不得创建 iframe、receiver、状态写回或把 Widget 样式泄漏到主界面。
 - reduced-motion 不启动动态叶片，直接落到同一静态分页与位置合同。阅读专项回归入口是 `npm run verify:document-reading`；同时保留 `npm run verify:document-perf` 与 `npm run verify:widget-ready`。详细设计见 `docs/superpowers/plans/2026-09-05-document-reading-paper-implementation.md`、`docs/superpowers/plans/2026-08-04-document-reading-mode-implementation.md`、`docs/superpowers/plans/2026-07-17-document-mode-performance-implementation.md` 与 `docs/superpowers/plans/2026-07-11-document-widget-ready-design-language-implementation.md`。
-- ready-next 书房（M2）是 Document 模式的系统标签页，不新增 Workbench mode；入口是文件面板顶部的"阅读"。每本书以 `阅读/<书名>.md` 来源页为身份（frontmatter `ready_id`），书文件与封面在同名 `.assets/`；阅读位置和书签按书 id 存 ready.db；书目修改与划线都经写入服务。样式只在 `.rn-library` 下且分层（`npm run verify:library-styles`）；书页测量与贴图使用书页自己的 `--lh` 等变量，不读取 Ready 界面令牌。
+- ready-next 书房（M2）是 Document 模式的系统标签页，不新增 Workbench mode；入口是页面侧栏的"阅读"。每本书以 `阅读/<书名>.md` 来源页为身份（frontmatter `ready_id`），书文件与封面在同名 `.assets/`；阅读位置和书签按书 id 存 ready.db；书目修改与划线都经写入服务。样式只在 `.rn-library` 下且分层（`npm run verify:library-styles`）；书页测量与贴图使用书页自己的 `--lh` 等变量，不读取 Ready 界面令牌。
 - 书房划线（M2.2，C6）：来源页「## 标注」下的引用块加 `^hl-<id>` 是唯一真值；`.ready/anchors/<书 id>.json` 只是可重建定位，来源页写入成功后才发布，内容未变不重写。`.ready/` 被搜索索引和监听忽略、界面隐藏。重定位依次为：存储位置核对原文 → 本章引文与前后文 → 全书；多处相同或找不到即"未定位"，在笔记面板列出，不在书页绘制，不猜位置。舞台为 `user-select: none`，只有文本列可选；文本列上选区优先，翻角只在页边距与页外出现。
 - 书房书源（M2.3，C11）：Z-Library 只经本机 zlib 命令行的 JSON 输出与退出码，Ready 不接触账号密码。电子书宝库与城通网盘受构建常量 `__READY_FEATURE_CTFILE__` 控制（`READY_BUILD_FEATURES=ctfile` 才开启）；默认构建不得包含其代码，`npm run verify:ctfile-excluded` 检查构建产物，发布回执记录开关。下载任务持久在 ready.db，重启时未完成任务标为"应用退出时中断"，退出流程在关闭数据库前等待任务收口。真实窗口回归入口 `npm run verify:ready-next-library`。
 

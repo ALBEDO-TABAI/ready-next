@@ -21,6 +21,7 @@
 
 | 评估日期 | 任务 | 文件 | 总行数 | 本次新增 | 结论 | 判断与后续动作 | 状态 |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
+| 2026-11-11 | W3-T3 标题与 T8 旧编辑器清理 | `src/renderer/components/document/MarkdownEditor.tsx` | 1164 | 净 +2 | 一般 | 仅透传页面标题并替换样式引入、移除退役 editor 参数；标题判断留在独立显示函数，保存职责不变。 | 复查：2026-11-30 |
 | 2026-11-11 | C15 补漏：会话续接文件进 userData | `src/main/index.ts` | 1345 | 净 +4 | 一般 | 只在启动时把会话续接文件指到本 profile 的 userData；续接逻辑留在 `session-continuity.ts`。复查同 B3 行：主题快照与窗口材质、窗口创建参数一起移出入口。 | 已排期：2026-11-30 |
 | 2026-11-11 | W2-T1/T2 外壳骨架（B3） | `src/main/index.ts` | 1341 | 净 +3 | 一般 | 只给主窗口加最小宽度（外壳几何来自 `shared/workbench-shell-geometry.ts`）。同批 `WorkbenchMode.tsx` 967 → 952、`ChatPanel.tsx` 1404 → 1378，外壳逻辑放在 `modules/workbench/shell/`。复查：主题快照与窗口材质、窗口创建参数一起移出入口。 | 已排期：2026-11-30 |
 | 2026-11-11 | ready-next 静默 catch 修复 | `src/renderer/pages/modes/BrowserMode.tsx` | 1496 | 净 +1 | 一般 | 仅为打开 FastCard 保存选择器失败增加日志，保留原有错误面板和网页显隐流程；复查浏览器工作面与暂存选择器的接线边界。 | 已排期：2026-11-30 |

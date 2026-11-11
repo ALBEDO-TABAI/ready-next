@@ -1,5 +1,5 @@
 @import 'tailwindcss';
-@import './tiptap.css';
+@import './document-widget-editor.css';
 @import './document-widget-card.css';
 
 /* index.css 已按领域序保拆分（2026-07-06）。以下 @import 顺序即原文件段落顺序，
