@@ -1,9 +1,23 @@
 import { readDocumentSource } from '../../../../shared/document-operations'
 import { markdownTree } from '../../../../shared/document-blocks/markdown'
 import type { ParsedDocument } from '../../../../shared/document-blocks'
+import type { DocTab } from '../../../stores/useDocTabs'
 
 export function pageFrontmatter(content: string): Record<string, unknown> {
   try { return readDocumentSource(content).frontmatter } catch { /* silent-catch: Incomplete frontmatter while typing uses default presentation, without changing source. */ return {} }
+}
+
+/**
+ * The title this tab's page header shows (M5: frontmatter `title`, else the file name), or undefined when the
+ * tab has no page header: outside the library, not Markdown, or not yet bound to its object. Whether a
+ * heading repeats the title follows the header, never the navigator's 页面 | 文件 switch (L4: once).
+ */
+export function pageHeaderTitle(tab: Pick<DocTab, 'path' | 'title' | 'content' | 'objectId' | 'objectBinding'>, vaultRoot: string | null): string | undefined {
+  const path = tab.path?.replace(/\\/g, '/')
+  const root = vaultRoot?.replace(/\\/g, '/').replace(/\/$/, '')
+  if (!root || !path?.startsWith(`${root}/`) || !/\.md$/i.test(path) || !tab.objectId || tab.objectBinding?.status !== 'resolved') return undefined
+  const title = pageFrontmatter(tab.content).title
+  return typeof title === 'string' ? title : tab.title.replace(/\.md$/i, '')
 }
 
 /** M5/L4: only the first top-level H1 is eligible. Strip heading delimiters and

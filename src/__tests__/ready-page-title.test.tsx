@@ -89,11 +89,14 @@ test('M5 page title, body, outline and source use exact titles without moving so
   await render('```md\r\n# 保留\r\n```\r\n\r\n> # 保留\r\n\r\n# 保留')
   assert.ok(document.querySelector('[data-ready-hidden-title]'), 'fenced and nested headings do not claim the page title')
   assert.equal(document.querySelectorAll('[data-rich-start][data-ready-heading-title="保留"]').length, 1, 'nested heading remains editable')
-  for (const options of [{ files: true }, { external: true }]) {
-    await render('# 保留', options)
-    assert.equal(document.querySelectorAll('[data-ready-heading-title="保留"]:not([data-ready-hidden-title])').length, 1)
-    assert.ok([...document.querySelectorAll('.document-outline-row')].some(row => row.textContent?.includes('保留')))
-  }
+  // The navigator's 页面 | 文件 switch changes the tree, not the page: the header still shows, so the heading stays hidden (L4).
+  await render('# 保留', { files: true })
+  assert.equal(document.querySelectorAll('[data-ready-heading-title="保留"]:not([data-ready-hidden-title])').length, 0)
+  assert.ok([...document.querySelectorAll('.document-outline-row')].every(row => !row.textContent?.includes('保留')))
+  // Outside the library there is no page header, so the heading is the only title and stays.
+  await render('# 保留', { external: true })
+  assert.equal(document.querySelectorAll('[data-ready-heading-title="保留"]:not([data-ready-hidden-title])').length, 1)
+  assert.ok([...document.querySelectorAll('.document-outline-row')].some(row => row.textContent?.includes('保留')))
   const source = await render('# 保留  \r\n\r\n正文', { view: 'edit' })
   assert.equal(document.querySelector<HTMLTextAreaElement>('.document-source-textarea')?.value, source.replace(/\r\n?/g, '\n'))
 })

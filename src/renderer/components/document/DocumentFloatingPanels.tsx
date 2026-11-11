@@ -21,8 +21,8 @@ import {
 } from '../../../shared/document-side-panels'
 import './documentFloatingPanels.css'
 import { useVault } from '../../stores/useVault'
-import { useDocumentNavigator } from '../../modules/document/navigator/useDocumentNavigator'
-import { duplicatePageHeading, pageFrontmatter } from '../../modules/document/page-ui/page-title'
+import { useDocTabs } from '../../stores/useDocTabs'
+import { duplicatePageHeading, pageHeaderTitle } from '../../modules/document/page-ui/page-title'
 import { parseDocumentBlocks } from '../../../shared/document-blocks'
 
 type MarkTab = 'bookmark' | 'note'
@@ -186,16 +186,14 @@ export default function DocumentFloatingPanels({
   onToggleMarks,
   onReveal,
 }: DocumentFloatingPanelsProps) {
-  const vault = useVault(state => state.view.data)
-  const view = useDocumentNavigator(state => state.view)
+  // The outline leaves out the heading the page body hides: the one repeating the page header's title (M5).
+  const vaultRoot = useVault(state => state.view.data?.status === 'ready' ? state.view.data.root : null)
+  const tab = useDocTabs(state => documentPath ? state.tabs.find(item => item.path === documentPath) : undefined)
+  const pageTitle = tab ? pageHeaderTitle({ ...tab, content }, vaultRoot) : undefined
   const hiddenTitleLine = useMemo(() => {
-    const path = documentPath?.replace(/\\/g, '/')
-    if (view !== 'pages' || vault?.status !== 'ready' || !path?.startsWith(vault.root.replace(/\\/g, '/').replace(/\/$/, '') + '/') || !/\.md$/i.test(path)) return null
-    const fields = pageFrontmatter(content)
-    const title = typeof fields.title === 'string' ? fields.title : documentTitle.replace(/\.md$/i, '')
-    const block = duplicatePageHeading(parseDocumentBlocks(content), title)
+    const block = duplicatePageHeading(parseDocumentBlocks(content), pageTitle)
     return block ? content.slice(0, block.start).split(/\r\n|\n|\r/).length : null
-  }, [content, documentPath, documentTitle, vault, view])
+  }, [content, pageTitle])
   const [outline, setOutline] = useState(EMPTY_DOCUMENT_OUTLINE)
   const [outlineContent, setOutlineContent] = useState('')
   const [outlineLoading, setOutlineLoading] = useState(false)
