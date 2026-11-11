@@ -10,11 +10,13 @@ const harness = require('./design-matrix/harness.cjs')
 const repo = path.resolve(__dirname, '..')
 
 async function main() {
-  const temp = fs.mkdtempSync(path.join(process.platform === 'win32' ? os.tmpdir() : '/tmp', 'w6c-'))
+  // Real path: on macOS /tmp is a link to /private/tmp, and Ready works with canonical library roots.
+  const temp = fs.realpathSync(fs.mkdtempSync(path.join(process.platform === 'win32' ? os.tmpdir() : '/tmp', 'w6c-')))
   process.once('exit', () => fs.rmSync(temp, { recursive: true, force: true }))
   const previousHome = process.env.HOME
-  const profile = path.join(temp, 'profile'), vault = path.join(temp, 'vault')
-  fs.mkdirSync(profile); fs.mkdirSync(vault)
+  // The profile stays near the short temp root (socket paths); Ready refuses a library fewer than four levels deep.
+  const profile = path.join(temp, 'profile'), vault = path.join(temp, 'w6', 'capture', '测试资料库')
+  fs.mkdirSync(profile); fs.mkdirSync(vault, { recursive: true })
   process.env.HOME = temp; process.env.READY_START_HIDDEN = '1'
   let current
   const seed = results => {
@@ -50,7 +52,10 @@ async function main() {
       bundle: true, write: false, format: 'iife', globalName: 'w6Capture', platform: 'browser', loader: { '.css': 'empty' },
       define: { 'process.env.NODE_ENV': JSON.stringify('test'), '__READY_FEATURE_CTFILE__': 'false' },
     })
-    await current.page.addScriptTag({ content: bundle.outputFiles[0].text })
+    // The renderer's CSP rightly refuses an inline <script>; DevTools-protocol evaluation is not page script.
+    const client = await current.page.context().newCDPSession(current.page)
+    const injected = await client.send('Runtime.evaluate', { expression: `${bundle.outputFiles[0].text}\n;globalThis.w6Capture = w6Capture; typeof w6Capture`, returnByValue: true })
+    if (injected.exceptionDetails || injected.result?.value !== 'object') throw new Error(`capture driver did not load: ${JSON.stringify(injected.exceptionDetails ?? injected.result).slice(0, 300)}`)
     const results = await current.page.evaluate(input => window.w6Capture.run(input), { root: vault, bookPath, pdfPath })
     for (const result of results) {
       if (result.path) {
