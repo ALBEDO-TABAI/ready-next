@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, test } from 'node:test'
@@ -10,6 +10,7 @@ import {
   __reloadSessionContinuityFromDiskForTests,
   __resetSessionContinuityForTests,
   __setSessionContinuityStoragePathForTests,
+  configureSessionContinuityStorage,
   forgetSession,
   getContinuationState,
   getBrowserWorkflowState,
@@ -35,6 +36,43 @@ afterEach(() => {
   __resetSessionContinuityForTests()
   __setSessionContinuityStoragePathForTests(null)
   rmSync(TEST_STORAGE_PATH, { force: true })
+})
+
+test('without a configured path continuity stays in memory and writes nothing to the home folder', () => {
+  const home = mkdtempSync(join(tmpdir(), 'ready-continuity-home-'))
+  const previousHome = process.env.HOME
+  process.env.HOME = home
+  try {
+    __setSessionContinuityStoragePathForTests(null)
+    rememberBrowserAction('scope-unconfigured', 'search', '杭州天气')
+    assert.equal(getRecentBrowserActions('scope-unconfigured')[0]?.value, '杭州天气')
+    assert.deepEqual(readdirSync(home), [])
+    __resetSessionContinuityForTests()
+    assert.deepEqual(readdirSync(home), [])
+  } finally {
+    // Clean up while HOME is still the throwaway folder, and leave a temp path for afterEach: if a home
+    // default ever comes back, its reset must not resolve (and delete) the real home file.
+    __resetSessionContinuityForTests()
+    __setSessionContinuityStoragePathForTests(TEST_STORAGE_PATH)
+    if (previousHome === undefined) delete process.env.HOME
+    else process.env.HOME = previousHome
+    rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('continuity persists to and reloads from the path Main configures', () => {
+  const profile = mkdtempSync(join(tmpdir(), 'ready-continuity-profile-'))
+  const path = join(profile, 'session-continuity.json')
+  try {
+    configureSessionContinuityStorage(path)
+    rememberBrowserAction('scope-configured', 'search', '苏州天气')
+    assert.ok(existsSync(path))
+    __resetSessionContinuityForTests({ keepPersisted: true })
+    __reloadSessionContinuityFromDiskForTests()
+    assert.equal(getRecentBrowserActions('scope-configured')[0]?.value, '苏州天气')
+  } finally {
+    rmSync(profile, { recursive: true, force: true })
+  }
 })
 
 test('browser workflow state survives an in-memory reset by reloading from disk', () => {

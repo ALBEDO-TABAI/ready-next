@@ -516,3 +516,9 @@ M5 的数据库往返/导入保真另由计划 `src/__tests__/ready-database-rou
 - 挂载 `PageDocumentEditor`，只有资料库 Markdown 的页面预览显示页面头部；保留 T4 的编辑缓冲与历史。主入口文件仅净增 9 行。
 - 草稿、拖拽保存与页面移动共用 `SaveToPicker`；删除简化对话框和拖拽自动挑名路径。未新增 IPC、数据库迁移或分页引擎。
 - 综合组件/数据库流程 `verify:ready-next-m3 -- --cli` 14 项通过、无跳过；其余回归、范围外失败及真实窗口待验项统一记录于 M3 合同 §8，避免把命令行证据算成窗口验收。
+
+### C15 补漏：会话续接文件（2026-11-11）
+
+- 问题：会话续接（最近浏览动作、浏览流程状态、技能运行、续接状态）默认写在 `~/.ready-session-continuity.json`，和日常 Ready 共用。Ready Next、评测进程和单元测试都会读它、合并、裁到 200 个会话再写回：B5 评测写进了 27 条 `browser-eval-*` 会话，`test:parallel` 每次写进一条 `alias-1`（用临时 HOME 跑全套确认）。旧的测试重置函数在路径未设置时还会删除这个文件；排查时用旧代码验证新测试，就这样删掉了用户的真实文件，无法恢复。
+- 修复：模块不再有默认路径。Main 启动时用 `configureSessionContinuityStorage` 设到 `<userData>/session-continuity.json`；未设置（测试）时只在内存里，不写也不删任何文件。删掉 `READY_SESSION_CONTINUITY_PATH` 环境变量。不迁移日常 Ready 的旧文件。
+- 证据：`session-continuity.test.ts` 新增两项：未设置路径时临时 HOME 保持为空（旧代码下失败）；设置后在该路径持久化并能读回。

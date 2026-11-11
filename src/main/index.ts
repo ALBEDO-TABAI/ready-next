@@ -88,6 +88,7 @@ import { captureReadyWindow, type ReadyWindowCaptureResult } from './modules/app
 import { isPathAllowed } from './modules/app-control/local-path-safety'
 import { createLocalFileResponse } from './modules/app-control/local-file-response'
 import { reconcileStartupRunsOnStartup } from './modules/app-control/startup-run-reconciler'
+import { configureSessionContinuityStorage } from './modules/agent-control/session/session-continuity'
 import { setupCanvasRuntime } from './modules/board-engine/runtime'
 import { setupSkillsIPC } from './modules/skills-runtime/ipc-handler'
 import { setupImageGenerationIPC } from './modules/image-generation/ipc-handler'
@@ -1117,6 +1118,9 @@ app.whenReady().then(async () => {
   setupApplicationMenu()
   // boot-entry 已建 splash；此 await 幂等，保底"splash 先于 boot 清理与数据库门"。
   await createStartupSplashWindow()
+
+  // Session continuity belongs to this profile's data, never to a file shared with daily Ready (C15).
+  configureSessionContinuityStorage(join(app.getPath('userData'), 'session-continuity.json'))
 
   // Reap any orphaned child processes from a previous Ready instance that was
   // force-quit / crashed. Must run BEFORE rsshub / skill runtime spawns so we
