@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { splitOccurrenceKey, type CalendarMutationReceipt, type CalendarSnapshot } from '../../../../../shared/calendar/commands'
 import { CalendarLinkTargetSchema, type CalendarEventLink } from '../../../../../shared/calendar/event-links'
-import { parseReadyUri, toReadyUri, type ReadyRef } from '../../../../../shared/ready-ref'
+import { toReadyUri, type ReadyRef } from '../../../../../shared/ready-ref'
 import type { ObjectLink } from '../../../../../shared/object-links'
 import type { PageNode } from '../../../../../shared/document-pages'
 import { SaveToPicker, type SaveToSelection } from '../../../document/page-ui/SaveToPicker'
 import { flattenPages } from '../../../document/page-ui/page-state'
 import { openReadyRef } from '../../../workbench/open-ready-ref'
 import { reload } from '../store'
+import { Link2, NotebookPen, Plus, X } from 'lucide-react'
+import { openLinkPicker } from './LinkPicker'
 
 const value = async <T,>(request:Promise<{success:boolean;data?:T;error?:string}>):Promise<T> => {
   const result = await request
@@ -21,7 +23,7 @@ export function EventLinks({occKey,title,readOnly}:{occKey:string;title:string;r
   const [snapshot,setSnapshot] = useState<CalendarSnapshot | null>(null)
   const [backlinks,setBacklinks] = useState<ObjectLink[]>([])
   const [trees,setTrees] = useState<PageNode[]>([])
-  const [address,setAddress] = useState(''), [picker,setPicker] = useState(false)
+  const [picker,setPicker] = useState(false)
   const [error,setError] = useState<string | null>(null), [busy,setBusy] = useState(false)
   const [undo,setUndo] = useState<CalendarMutationReceipt | null>(null)
   const [pendingNote,setPendingNote] = useState<SaveToSelection | null>(null)
@@ -29,6 +31,7 @@ export function EventLinks({occKey,title,readOnly}:{occKey:string;title:string;r
   const [eventId,original] = splitOccurrenceKey(occKey)
   const links = (snapshot?.links || []).filter(link=>link.eventId===eventId && String(link.originalStart)===String(original))
   const note = links.find(link=>link.purpose==='meeting-note')
+  const related = links.filter(link=>link.purpose!=='meeting-note')
   const nodes = flattenPages(trees)
   const label = (ref:ReadyRef) => ref.kind==='web' ? ref.url : ref.kind==='book-location' ? `书 ${ref.book}`
     : 'id' in ref ? nodes.find(node=>node.objectId===ref.id)?.title || `${kindLabel[ref.kind] || '对象'} ${ref.id}` : toReadyUri(ref)
@@ -67,12 +70,9 @@ export function EventLinks({occKey,title,readOnly}:{occKey:string;title:string;r
   const expected = () => Object.fromEntries((snapshot?.events || []).map(event=>[event.id,event.revision || 1]))
   const accept = async (receipt:CalendarMutationReceipt) => {setUndo(receipt);setSnapshot(receipt.snapshot);await reload();await refresh()}
   const open = (ref:ReadyRef) => run(()=>openReadyRef(ref,'calendar'))
-  const add = () => run(async()=>{
-    const parsed = parseReadyUri(address)
-    if (!parsed.ok) throw new Error('请粘贴有效的 Ready 引用地址')
-    const target = CalendarLinkTargetSchema.parse(parsed.ref)
+  const add = (ref:ReadyRef) => run(async()=>{
+    const target = CalendarLinkTargetSchema.parse(ref)
     await accept(await value(window.electronAPI.calendar.mutate({type:'link',key:occKey,target},expected())))
-    setAddress('')
   })
   const remove = (link:CalendarEventLink) => run(async()=>{
     await accept(await value(window.electronAPI.calendar.mutate({type:'unlink',key:occKey,linkId:link.id},expected())))
@@ -92,28 +92,33 @@ export function EventLinks({occKey,title,readOnly}:{occKey:string;title:string;r
       return {ok:false as const,code:'meeting_note_failed',message:message(failure)}
     }
   }
-  return <section className="ev-sec" aria-label="日程关联" onKeyDown={event=>event.stopPropagation()}>
-    <strong>关联资料</strong>
-    {links.map(link=><div key={link.id}><button disabled={busy} onClick={()=>void open(link.target)}>{label(link.target)}</button>
-      {!readOnly && <button aria-label={`解除关联 ${label(link.target)}`} disabled={busy} onClick={()=>void remove(link)}>解除</button>}</div>)}
-    {!links.length && <p>暂无关联</p>}
-    {!readOnly && <><select aria-label="选择关联资料" value="" disabled={busy} onChange={event=>setAddress(event.target.value)}>
-      <option value="">选择页面、文档或画板</option>{nodes.filter(node=>['page','file','canvas'].includes(node.kind)).map(node=>
-        <option key={node.objectId} value={toReadyUri({kind:node.kind==='page'?'page':node.kind==='canvas'?'canvas':'file',id:node.objectId})}>{node.title}</option>)}</select>
-      <input aria-label="关联地址" placeholder="粘贴 Ready 引用地址" value={address} disabled={busy} onChange={event=>setAddress(event.target.value)}/>
-      <button disabled={busy || !snapshot || !address} onClick={()=>void add()}>添加关联</button></>}
-    <div><button disabled={busy || !snapshot || (readOnly && !note)} onClick={()=>note ? void open(note.target) : setPicker(true)}>{note?'打开会议笔记':'会议笔记'}</button></div>
-    {pendingNote && !readOnly && <button disabled={busy} onClick={()=>void run(async()=>{const result=await createNote(pendingNote);if(!result.ok)throw new Error(result.message)})}>继续保存会议笔记</button>}
+  // One 关联 row like the panel's other rows (W4 §4, O9): references as chips, "+" opens the same search as @.
+  return <section className="ev-sec ev-links" aria-label="日程关联" onKeyDown={event=>event.stopPropagation()}>
+    <div className="ev-r"><div className="ev-f ev-link-row">
+      <Link2 size={18} />
+      <div className="ev-chips">
+        {related.map(link=><span key={link.id} className="ev-chip">
+          <button type="button" disabled={busy} onClick={()=>void open(link.target)}>{label(link.target)}</button>
+          {!readOnly && <button type="button" className="ev-chip-x" aria-label={`解除关联 ${label(link.target)}`} disabled={busy} onClick={()=>void remove(link)}><X size={12} /></button>}
+        </span>)}
+        {!related.length && <span className="dim">关联</span>}
+      </div>
+      {!readOnly && <button type="button" className="ibtn sm" aria-label="添加关联" title="添加关联" disabled={busy || !snapshot}
+        onClick={event=>openLinkPicker(event.currentTarget.getBoundingClientRect(),ref=>void add(ref))}><Plus size={16} /></button>}
+    </div></div>
+    <div className="ev-r"><button type="button" className="ev-f" aria-label={note?'打开会议笔记':'会议笔记'} disabled={busy || !snapshot || (readOnly && !note)}
+      onClick={()=>note ? void open(note.target) : setPicker(true)}><NotebookPen size={18} /><span className={note?'':'dim'}>{note ? label(note.target) : '会议笔记'}</span></button></div>
+    {pendingNote && !readOnly && <div className="ev-r ind"><button type="button" className="btn sm" disabled={busy} onClick={()=>void run(async()=>{const result=await createNote(pendingNote);if(!result.ok)throw new Error(result.message)})}>继续保存会议笔记</button></div>}
     {picker && !pendingNote && !readOnly && <SaveToPicker trees={trees} initialTitle={`${title || '日程'} 会议笔记`} onConfirm={createNote} onCancel={()=>setPicker(false)}/>}
-    {undo && !readOnly && <button disabled={busy} onClick={()=>void run(async()=>{
+    {undo && !readOnly && <div className="ev-r ind"><button type="button" className="btn sm" disabled={busy} onClick={()=>void run(async()=>{
       const restored = await value(window.electronAPI.calendar.restore(undo.undo,undo.versions))
       setUndo(null);setSnapshot(restored.snapshot);await reload();await refresh()
-    })}>撤销上次关联修改</button>}
-    <strong>反链</strong>
-    {backlinks.map(link=><div key={link.id}><button disabled={busy} onClick={()=>void open('ref' in link.source ? link.source.ref : {kind:'file',id:link.source.objectId})}>
-      {label('ref' in link.source ? link.source.ref : {kind:'file',id:link.source.objectId})}</button></div>)}
-    {!backlinks.length && <p>暂无反链</p>}
-    {backlinks.length===1000 && <p>仅显示前 1000 条反链</p>}
-    {error && <p role="alert">{error}</p>}
+    })}>撤销上次关联修改</button></div>}
+    <details className="ev-backlinks"><summary>反链 {backlinks.length}{backlinks.length===1000?'+':''}</summary>
+      {backlinks.map(link=><button type="button" key={link.id} disabled={busy} onClick={()=>void open('ref' in link.source ? link.source.ref : {kind:'file',id:link.source.objectId})}>
+        {label('ref' in link.source ? link.source.ref : {kind:'file',id:link.source.objectId})}</button>)}
+      {!backlinks.length && <p className="dim">还没有页面链接到这个日程</p>}
+    </details>
+    {error && <p role="alert" className="ev-links-error">{error}</p>}
   </section>
 }

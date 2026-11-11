@@ -366,9 +366,10 @@ async function checkCalendarLinksBeforeRestart(page, reference, root) {
   await page.evaluate(id => window.electronAPI.calendar.revealEvent(id), reference.eventId)
   const panel = page.getByRole('region', {name:'日程关联'})
   await panel.waitFor()
-  const uri = `ready://doc/page/${encodeURIComponent(created.objectId)}`
-  await panel.getByLabel('关联地址', {exact:true}).fill(uri)
+  // No address to paste (W4 O9): "+" opens the same search as @, and the page is chosen from it.
   await panel.getByRole('button', {name:'添加关联',exact:true}).click()
+  await page.getByLabel('搜索关联', {exact:true}).fill('M6 linked page')
+  await page.getByRole('option', {name:/M6 linked page/}).first().click()
   await panel.getByRole('button', {name:'解除关联 M6 linked page',exact:true}).waitFor()
   await panel.getByRole('button', {name:'会议笔记',exact:true}).click()
   const picker = panel.getByRole('dialog', {name:'保存到…'})

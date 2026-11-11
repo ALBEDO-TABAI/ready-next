@@ -38,7 +38,7 @@ test('M6-A panel adds/unlinks/undoes real edges, opens exact refs, saves one not
   const dom = new JSDOM('<div id="root"></div>',{url:'http://localhost'})
   Object.assign(dom.window,{matchMedia:()=>({matches:false,addEventListener(){},removeEventListener(){}})})
   const globals={window:dom.window,document:dom.window.document,navigator:dom.window.navigator,localStorage:dom.window.localStorage,
-    HTMLElement:dom.window.HTMLElement,IS_REACT_ACT_ENVIRONMENT:true}
+    HTMLElement:dom.window.HTMLElement,IS_REACT_ACT_ENVIRONMENT:true,ResizeObserver:class{observe(){}unobserve(){}disconnect(){}}}
   const previous=Object.fromEntries(Object.keys(globals).map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)]))
   for(const [key,value] of Object.entries(globals))Object.defineProperty(globalThis,key,{value,configurable:true,writable:true})
   // Only the navigation destination is replaced; component, picker, service, files and SQLite are real.
@@ -57,8 +57,12 @@ test('M6-A panel adds/unlinks/undoes real edges, opens exact refs, saves one not
       createMeetingNote:(input:MeetingNoteInput)=>reply(()=>notes.create(vault,input)),pendingMeetingNote:(key:string)=>reply(()=>notes.pendingDestination(vault,key))},
     vault:{get:async()=>({status:'ready',root:vault})},
     documentPages:{tree:async()=>({ok:true,value:await pages.tree({path:vault,kind:'vault'})}),onChanged:()=>()=>{}},
-    document:{getObjectIncomingLinks:(query:ObjectLinkQuery)=>reply(()=>relations.incoming(query.endpoint))},
+    document:{getObjectIncomingLinks:(query:ObjectLinkQuery)=>reply(()=>relations.incoming(query.endpoint)),
+      // The "+" picker uses the same search as @: a Ready web reference comes back from the index.
+      searchIndex:async({query}:{query:string})=>({success:true,data:{items:/meeting/i.test(query)?[{path:'ready://web?url=https%3A%2F%2Fexample.com%2Fmeeting',name:'https://example.com/meeting',sourceType:'web'}]:[]}})},
   }})
+  const {useWorkspace}=await import('../renderer/stores/useWorkspace');useWorkspace.setState({workspaceRoot:vault,pinnedFolders:[]})
+  const {FloatHost}=await import('../renderer/components/ui/float/Float')
   const {createRoot}=await import('react-dom/client'), {EventLinks}=await import('../renderer/modules/calendar/workbench/components/EventLinks')
   const root=createRoot(dom.window.document.getElementById('root')!)
   t.after(async()=>{await act(async()=>root.unmount());hooks.deregister();dom.window.close();engine.cancelPendingWorkspaceResolves();db.close();rmSync(vault,{recursive:true,force:true})
@@ -66,10 +70,14 @@ test('M6-A panel adds/unlinks/undoes real edges, opens exact refs, saves one not
   const flush=async()=>act(async()=>{await new Promise(resolve=>setTimeout(resolve,30))})
   const click=async(label:string)=>{const button=[...dom.window.document.querySelectorAll('button')].find(b=>b.textContent===label||b.getAttribute('aria-label')===label)
     assert.ok(button,label);assert.equal(button.disabled,false,label);await act(async()=>button.click());await flush()}
-  await act(async()=>root.render(<EventLinks occKey={key} title="Meeting" readOnly={false}/>));await flush()
-  const address=dom.window.document.querySelector<HTMLInputElement>('[aria-label="关联地址"]')!
-  await act(async()=>{Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(address,'ready://web?url=https%3A%2F%2Fexample.com%2Fmeeting');address.dispatchEvent(new dom.window.Event('input',{bubbles:true}))})
+  await act(async()=>root.render(<><EventLinks occKey={key} title="Meeting" readOnly={false}/><FloatHost/></>));await flush()
+  // No address to paste: "+" opens the search, typing finds the reference, choosing it links it.
   await click('添加关联')
+  const search=dom.window.document.querySelector<HTMLInputElement>('[aria-label="搜索关联"]')!
+  assert.ok(search,'the picker opens with a search field')
+  await act(async()=>{Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(search,'meeting');search.dispatchEvent(new dom.window.Event('input',{bubbles:true}))})
+  for(let i=0;i<20&&!dom.window.document.querySelector('[role="option"]');i++)await flush()
+  await act(async()=>dom.window.document.querySelector<HTMLButtonElement>('[role="option"]')!.click());await flush()
   assert.equal(calendar.snapshot().links![0].originalStart,second)
   await click('https://example.com/meeting')
   const {opened}=await import(navigation);assert.deepEqual(opened,[{kind:'web',url:'https://example.com/meeting'}])
@@ -85,9 +93,9 @@ test('M6-A panel adds/unlinks/undoes real edges, opens exact refs, saves one not
   await flush();await click('打开会议笔记');assert.equal(opened.at(-1).kind,'page')
   assert.ok(dom.window.document.body.textContent?.includes('反链'))
   assert.ok(relations.incoming({ref:{kind:'event',id:'series',occurrence:String(second)}}).length)
-  await act(async()=>root.render(<EventLinks occKey={key} title="Meeting" readOnly={true}/>))
-  assert.equal(dom.window.document.querySelector('[aria-label="关联地址"]'),null)
-  assert.equal([...dom.window.document.querySelectorAll('button')].some(b=>b.textContent==='解除'),false)
+  await act(async()=>root.render(<><EventLinks occKey={key} title="Meeting" readOnly={true}/><FloatHost/></>))
+  assert.equal(dom.window.document.querySelector('[aria-label="添加关联"]'),null)
+  assert.equal([...dom.window.document.querySelectorAll('button')].some(b=>b.getAttribute('aria-label')?.startsWith('解除关联')),false)
 })
 
 export const __breaksInvariants=['isolated-panel-navigation-destination-replaced'] as const
