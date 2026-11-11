@@ -88,6 +88,8 @@ async function main() {
     const textId = readCanvas().nodes.find(node => node.type === 'text').id
     await page.locator(`[data-node-id="${textId}"]`).dblclick()
     const rich = page.getByLabel('文字卡编辑').locator('[contenteditable="true"]').first()
+    // Wait for the editor explicitly, so a failure names this step instead of a generic fill timeout.
+    await poll(async () => await rich.count() > 0, 'Text card editor did not open')
     await rich.fill('中文画板验收')
     await poll(() => readCanvas().nodes.find(node => node.id === textId).text.includes('中文画板验收'), 'Chinese input not persisted')
     const mod = process.platform === 'darwin' ? 'Meta' : 'Control'
@@ -116,9 +118,12 @@ async function main() {
     await snapshot('03-composition-under-X')
     // W4 MS2: a note written as Markdown renders at rest; the file keeps the source.
     await stage.getByRole('button', { name: '便签', exact: true }).click()
-    await page.getByLabel('文字卡编辑').locator('[contenteditable="true"]').first().fill('# 卡片标题')
+    const noteEditor = page.getByLabel('文字卡编辑').locator('[contenteditable="true"]').first()
+    await poll(async () => await noteEditor.count() > 0, 'Note editor did not open')
+    // Typed as a person would: "# " turns the paragraph into a heading (filling the text at once stores a literal "\#").
+    await noteEditor.click(); await page.keyboard.type('# '); await page.keyboard.insertText('卡片标题')
     await stage.getByRole('button', { name: '完成编辑', exact: true }).click()
-    await poll(() => readCanvas().nodes.some(node => node.ready.kind === 'note' && node.text.includes('# 卡片标题')), 'Note Markdown not persisted')
+    await poll(() => readCanvas().nodes.some(node => node.ready.kind === 'note' && node.text.startsWith('# 卡片标题')), 'Note Markdown not persisted')
     await stage.locator('.canvas-card[data-kind="note"] .canvas-markdown h1', { hasText: '卡片标题' }).waitFor()
     // MS3: search marks the matching card.
     await stage.getByRole('button', { name: '在画板中搜索', exact: true }).click()
@@ -126,8 +131,18 @@ async function main() {
     await stage.locator('.canvas-card[data-matched="true"]').first().waitFor()
     assert.equal(await stage.locator('.canvas-card[data-matched="true"]').count(), 1)
     await page.keyboard.press('Escape')
+    // A context menu opened near the board's corner stays inside the board (it flips up and left).
+    const stageBox = await stage.boundingBox()
+    await stage.click({ button: 'right', position: { x: Math.round(stageBox.width - 24), y: Math.round(stageBox.height - 24) } })
+    const items = stage.getByRole('menuitem')
+    await items.first().waitFor()
+    for (const box of await items.evaluateAll(nodes => nodes.map(node => { const r = node.getBoundingClientRect(); return { x: r.x, y: r.y, right: r.right, bottom: r.bottom } }))) {
+      assert.ok(box.x >= stageBox.x && box.y >= stageBox.y && box.right <= stageBox.x + stageBox.width && box.bottom <= stageBox.y + stageBox.height, `menu item outside the board: ${JSON.stringify(box)}`)
+    }
+    await page.keyboard.press('Escape')
     // MS3: a sub-board from 新建, entered by double-click, left by the breadcrumb.
-    await stage.click({ button: 'right', position: { x: 820, y: 640 } })
+    // An empty spot above the cards, relative to the board (the assistant panel may narrow the board).
+    await stage.click({ button: 'right', position: { x: Math.round(stageBox.width * 0.4), y: Math.round(stageBox.height * 0.2) } })
     await stage.getByRole('menuitem', { name: '子画板', exact: true }).click()
     await poll(() => fs.existsSync(path.join(vault, 'X', '子画板.canvas')) && readCanvas().nodes.some(node => node.ready.kind === 'subcanvas'), 'Sub-board missing')
     await stage.locator('.canvas-card[data-kind="subcanvas"]').first().dblclick()
@@ -142,10 +157,36 @@ async function main() {
     await stage.getByRole('menuitem', { name: '导出为 Markdown', exact: true }).click()
     await poll(() => fs.existsSync(exportPath) && fs.statSync(exportPath).size > 0, 'Markdown export missing')
     await snapshot('03b-markdown-search-subboard-export')
+    // MS3: 导出 PNG — Main captures this window's stage and writes a real PNG.
+    const pngPath = path.join(temporary, 'X 导出.png')
+    await app.evaluate(({ dialog }, file) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: file }) }, pngPath)
+    await stage.getByRole('button', { name: '更多', exact: true }).click()
+    await stage.getByRole('menuitem', { name: '导出为 PNG', exact: true }).click()
+    const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    await poll(() => fs.existsSync(pngPath) && fs.statSync(pngPath).size > 1000 && fs.readFileSync(pngPath).subarray(0, 8).equals(PNG_SIGNATURE), 'PNG export missing')
+    // MS3: 永久删除 takes a recycled card out of the file; 清空 asks once more in place, then empties the bin.
+    const purgeCard = async (kind) => {
+      const id = readCanvas().nodes.find(node => node.ready.kind === kind && !node.ready.trash).id
+      await stage.locator(`.canvas-card[data-node-id="${id}"]`).click()
+      await page.keyboard.press('Delete')
+      await poll(() => readCanvas().nodes.find(node => node.id === id)?.ready.trash, `${kind} card was not recycled`)
+      return id
+    }
+    const noteId = await purgeCard('note')
+    await stage.getByRole('button', { name: '回收站', exact: true }).click()
+    await stage.getByRole('button', { name: `永久删除 ${noteId}`, exact: true }).click()
+    await poll(() => !readCanvas().nodes.some(node => node.id === noteId), 'Purged card is still in the file')
+    await stage.getByRole('button', { name: '回收站', exact: true }).click()
+    const binTextId = await purgeCard('text')
+    await stage.getByRole('button', { name: '回收站', exact: true }).click()
+    await stage.getByRole('button', { name: '清空', exact: true }).click()
+    await stage.getByRole('button', { name: '确认清空', exact: true }).click()
+    await poll(() => !readCanvas().nodes.some(node => node.id === binTextId || node.ready.trash), 'The bin was not emptied')
+    await stage.getByRole('button', { name: '回收站', exact: true }).click()
     // Close the canvas with the close-document shortcut so the transfer happens while it is not open.
     const canvasOpen = () => page.evaluate(() => (JSON.parse(localStorage.getItem('ready-doc-tabs-v2') || '{}').state?.tabs ?? []).some(tab => /\.canvas$/i.test(tab.path || '')))
     for (let i = 0; i < 10 && await canvasOpen(); i++) {
-      await page.locator('[data-workbench-mode-panel="document"] .canvas-crumbs').first().click({ position: { x: 4, y: 4 } }).catch(() => {})
+      await page.locator('[data-workbench-mode-panel="document"] [data-canvas-surface]').first().focus().catch(() => {})
       await page.keyboard.press(`${mod}+w`); await page.waitForTimeout(400)
     }
     assert.equal(await canvasOpen(), false, 'The canvas tab is still open before the FastCard transfer')

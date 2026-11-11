@@ -189,6 +189,33 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     await commit([{ type: 'addNode', node: /^https?:\/\/\S+$/i.test(text) ? { ...frame, type: 'link', url: text, ready: { kind: 'link' } } : { ...frame, type: 'text', text, ready: { kind: 'text' } } }])
   }
   const recycled = canvas.nodes.filter(n => n.ready.trash)
+  // A context menu opened near an edge flips back inside the board, and again when a form inside it grows.
+  const contextMenu = useRef<HTMLDivElement>(null)
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null)
+  useLayoutEffect(() => {
+    const element = contextMenu.current, host = root.current
+    if (!menu || !element || !host) { setMenuAt(null); return }
+    // The wrapper has no size of its own (the menu panel inside is absolutely positioned): measure the panel.
+    const panel = element.querySelector<HTMLElement>('[role="menu"]') ?? element
+    const place = () => {
+      const pad = 8, width = panel.offsetWidth, height = panel.offsetHeight
+      const x = menu.x + width > host.clientWidth - pad ? Math.max(pad, Math.min(menu.x - width, host.clientWidth - width - pad)) : menu.x
+      const y = menu.y + height > host.clientHeight - pad ? Math.max(pad, Math.min(menu.y - height, host.clientHeight - height - pad)) : menu.y
+      setMenuAt(current => current?.x === x && current.y === y ? current : { x, y })
+    }
+    place()
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place)
+    observer?.observe(panel)
+    return () => observer?.disconnect()
+  }, [menu])
+  // 清空 asks once more in place (no system dialog); it undoes like any edit while the board stays open.
+  const [confirmEmpty, setConfirmEmpty] = useState(false)
+  useEffect(() => { if (!confirmEmpty) return; const timer = setTimeout(() => setConfirmEmpty(false), 4000); return () => clearTimeout(timer) }, [confirmEmpty])
+  function emptyBin() {
+    if (!confirmEmpty) { setConfirmEmpty(true); return }
+    setConfirmEmpty(false)
+    void commit([{ type: 'purge', ids: recycled.map(n => n.id), edgeIds: canvas.edges.filter(e => e.ready?.trash).map(e => e.id) }])
+  }
   async function addToDocument() {
     if (composing || !props.onAddToDocument) return
     setComposing(true); setCompositionError('')
@@ -232,7 +259,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
       const card = hit?.closest<HTMLElement>('[data-node-id]'), node = card?.dataset.nodeId ? byId.get(card.dataset.nodeId) : undefined
       if (node && !hit?.closest('[data-canvas-ui]')) open(node)
     }}>
-    {!capturing && <CanvasCrumbs title={canvas.ready.title || '画板'} breadcrumbs={props.breadcrumbs} busy={busy} onNavigate={props.onNavigateAncestor} />}
+    {!capturing && !!props.breadcrumbs?.length && <CanvasCrumbs title={canvas.ready.title || '画板'} breadcrumbs={props.breadcrumbs} busy={busy} onNavigate={props.onNavigateAncestor} />}
     {!capturing && <CanvasCorner zoom={camera.zoom} moreOpen={moreOpen} more={exportItems} onMore={setMoreOpen} search={search} results={matches.length} hit={Math.min(hit, matches.length - 1)} recycled={recycled.length} trash={trash} busy={busy || !!editing}
       onSearch={value => { setSearch(value); setHit(-1) }} onStep={step} onFit={() => fit()}
       onZoomReset={() => setCamera(c => zoomAt(c, { x: size.width / 2, y: size.height / 2 }, 1))}
@@ -252,7 +279,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
       }} />}
     {compositionError && !menu && <p role="alert" data-canvas-ui>{compositionError}</p>}
     {buffer.error && <div className="canvas-message" role="alert" data-canvas-ui>{buffer.error}</div>}
-    {menu && <div className="canvas-context" data-canvas-ui style={{ left: menu.x, top: menu.y }}>
+    {menu && <div ref={contextMenu} className="canvas-context" data-canvas-ui style={{ left: (menuAt ?? menu).x, top: (menuAt ?? menu).y }}>
       <ChromeMenu label={menu.kind === 'card' ? '选区菜单' : '新建'} onClose={() => { setMenu(null); setCompositionError('') }}>
         {menu.kind === 'card' ? <>
           {props.onAddToDocument && <MenuItem label={composing ? '正在添加…' : '添加到文档'} icon={FilePlus2} disabled={composing || busy} onSelect={() => void addToDocument()} />}
@@ -273,10 +300,12 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     {busy && <div className="canvas-message" role="status">正在处理…</div>}
     {trash ? <section className="canvas-trash" data-canvas-ui aria-label="回收的卡片">
       <div className="canvas-trash-head"><h2>回收站 · {recycled.length}</h2>
-        <button disabled={busy || !recycled.length} onClick={() => void commit([{ type: 'restore', ids: recycled.map(n => n.id) }])}>全部恢复</button></div>
+        <button disabled={busy || !recycled.length} onClick={() => void commit([{ type: 'restore', ids: recycled.map(n => n.id) }])}>全部恢复</button>
+        <button className="is-danger" disabled={busy || !recycled.length} onClick={emptyBin}>{confirmEmpty ? '确认清空' : '清空'}</button></div>
       {!recycled.length && <p className="canvas-menu-empty">回收站是空的。</p>}
-      {recycled.map(n => <article key={n.id}><span>{n.type === 'text' ? n.text : n.type === 'link' ? n.url : n.type === 'group' ? n.label : n.file}</span>
-        <div className="canvas-trash-actions"><button disabled={busy} aria-label={`恢复 ${n.id}`} onClick={() => void commit([{ type: 'restore', ids: [n.id] }])}>恢复</button></div></article>)}
+      {recycled.map(n => <article key={n.id}>{props.renderCard?.(n) ?? <span>{n.type === 'text' ? n.text : n.type === 'link' ? n.url : n.type === 'group' ? n.label : n.file}</span>}
+        <div className="canvas-trash-actions"><button disabled={busy} aria-label={`恢复 ${n.id}`} onClick={() => void commit([{ type: 'restore', ids: [n.id] }])}>恢复</button>
+          <button className="is-danger" disabled={busy} aria-label={`永久删除 ${n.id}`} onClick={() => void commit([{ type: 'purge', ids: [n.id] }])}>永久删除</button></div></article>)}
     </section> : <div className="canvas-world" ref={world} style={{ transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.zoom})` }}>
       <svg className="canvas-clusters" aria-hidden="true">{outlines.map(o => <path key={o.id} d={o.d} />)}</svg>
       <svg className="canvas-edges" aria-hidden="true"><defs><marker id={marker} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 Z" /></marker></defs>

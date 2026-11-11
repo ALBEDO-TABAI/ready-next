@@ -323,3 +323,12 @@ test('W4 a card with text opens with the caret at its end', async t => {
   const range = selection.getRangeAt(0).cloneRange(); range.setStart(editable, 0)
   assert.equal(range.toString(), '原文😀', 'the caret sits after the existing text')
 })
+
+test('W4 undoing a new card back to empty keeps a paragraph to type into', async t => {
+  const f = await fixture(t, '')
+  await f.input('第一句'); f.bytes('第一句')
+  await f.key('z', { metaKey: true }); f.bytes('')
+  const editable = f.rich()
+  assert.equal(f.dom.window.document.activeElement, editable, 'the caret stays in the card')
+  await f.input('第二句'); f.bytes('第二句')
+})

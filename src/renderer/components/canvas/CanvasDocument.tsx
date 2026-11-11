@@ -148,6 +148,12 @@ export default function CanvasDocument({ tab }: { tab: DocTab }) {
     if (result.success) showToast(kind === 'md' ? '已导出 Markdown' : '已导出 PDF')
     else if (!result.canceled) throw new Error(result.error || '导出失败')
   }
+  // PNG: the surface frames the cards and hides its chrome; Main captures that part of this window and asks where to save.
+  const captureBoard = async (rect: { x: number; y: number; width: number; height: number }, title: string) => {
+    const result = await api.canvas.exportImage({ rect, suggestedName: title })
+    if (result.success) showToast('已导出 PNG')
+    else if (!('canceled' in result)) throw new Error(result.error)
+  }
   return <div className="flex flex-col flex-1 min-h-0" data-testid="canvas-document">
     {error && <p role="alert" className="canvas-document-error">{error.replace(/^Error:\s*/, '')}</p>}
     {scheduling && calendarSnapshot && <ScheduleCardDialog key={scheduling.id} objectId={opened.objectId} nodeId={scheduling.id} version={opened.version}
@@ -164,7 +170,7 @@ export default function CanvasDocument({ tab }: { tab: DocTab }) {
       breadcrumbs={ancestors.map(node => ({ id: node.objectId, title: node.title }))}
       onNavigateAncestor={id => { const node = ancestors.find(item => item.objectId === id); if (node) openInCurrentTab(node.path) }}
       extraNewItems={(at, close) => <BoardNewItems at={at} close={close} pages={pages} root={root} boardPath={opened.path} add={node => write([{ type: 'addNode', node }])} report={cause => setError(String(cause))} />}
-      acceptsDrop={types => types.includes('application/x-ready-fastcard')} onDropData={dropData} onExport={exportBoard}
+      acceptsDrop={types => types.includes('application/x-ready-fastcard')} onDropData={dropData} onExport={exportBoard} captureImage={captureBoard}
       onAskAI={nodeIds => addBoardSelectionToAgentInput({ title: opened.canvas.ready.title || '画板', objectId: opened.objectId }, nodeIds)} />
   </div>
 }

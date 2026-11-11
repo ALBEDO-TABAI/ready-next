@@ -91,7 +91,8 @@ export function BufferedBlockEditor({ buffer, linkBase, content: displayedConten
   const report = useCallback((cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause)), [])
   const focus = (at: number, empty = false, textOffset?: number) => { setAppendPrefix(''); setEmptyAt(empty ? at : null); setFocusRequest({ at, textOffset }) }
   function travel(direction: 'undo' | 'redo') {
-    try { const selection = buffer.travel(direction); if (selection) focus(selection.focus); setError('') } catch (cause) { console.warn('[ReadyBlockEditor] travel edit history failed:', cause instanceof Error ? cause.message : String(cause)); report(cause) }
+    // Undoing back to an empty text keeps the caret in an empty paragraph instead of leaving nothing to type into.
+    try { const selection = buffer.travel(direction); if (selection) focus(selection.focus, !buffer.snapshot.content.length); setError('') } catch (cause) { console.warn('[ReadyBlockEditor] travel edit history failed:', cause instanceof Error ? cause.message : String(cause)); report(cause) }
   }
   useLayoutEffect(() => {
     // Native Edit-menu commands arrive as beforeinput, without a keydown.
