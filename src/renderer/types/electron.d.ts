@@ -1817,14 +1817,6 @@ interface ElectronDocumentAPI {
   moveItem: (src: string, dest: string) => Promise<DocumentOperationResponse>
   stat: (path: string) => Promise<DocumentStatResponse>
   openFolder: (payload?: { validateAsWorkspace?: boolean; title?: string }) => Promise<DocumentOpenFolderResponse>
-  exportWorkspace: (payload: { name: string; folders: string[] }) => Promise<
-    | { success: true; path: string; name: string }
-    | { success: false; error: string }
-  >
-  importWorkspace: () => Promise<
-    | { success: true; path: string; name: string; folders: string[] }
-    | { success: false; error: string }
-  >
   exportPdf: (payload: DocumentExportPdfPayload) => Promise<DocumentExportResult>
   exportMarkdownBundle: (payload: DocumentExportMarkdownBundlePayload) => Promise<DocumentExportResult>
   getHome: () => Promise<DocumentHomeResponse>

@@ -264,9 +264,7 @@ let fileMutationGroupDispose: IpcDisposeHandle | null = null
 
 /**
  * Stage V V2.3d — dispose handle returned by `workspaceGroup.register`.
- * The 3 workspace-portability channels (exportWorkspace/importWorkspace/
- * getHome) live in `ipc/workspace-group.ts`; same dev-reload lifecycle as
- * the other extracted groups.
+ * The home-directory channel lives in `ipc/workspace-group.ts`.
  */
 let workspaceGroupDispose: IpcDisposeHandle | null = null
 
@@ -418,22 +416,11 @@ export function setupDocumentIPC(useMock = false): void {
     },
   })
 
-  // Stage V V2.3d — 3 workspace-portability channels
-  // (`document:exportWorkspace`, `document:importWorkspace`,
-  // `document:getHome`) moved into `workspaceGroup`. The group needs the
-  // dialog facades (save + open-file, distinct from the FileIoGroup's
-  // open-folder facade), the window-resolution helpers it shares with
-  // FileIoGroup, and the home-directory probe used by both the export
-  // default-path hint and the dedicated getHome read.
   if (workspaceGroupDispose) {
     try { workspaceGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
     workspaceGroupDispose = null
   }
   workspaceGroupDispose = workspaceGroup.register(ipcMain, {
-    resolveDialogWindow,
-    getBrowserWindowFromWebContents: (sender) => BrowserWindow.fromWebContents(sender),
-    showSaveWorkspaceDialog: (window, options) => dialog.showSaveDialog(window, options),
-    showOpenWorkspaceFileDialog: (window, options) => dialog.showOpenDialog(window, options),
     getHomeDirectory: () => homedir(),
   })
 
@@ -486,10 +473,6 @@ export function setupDocumentIPC(useMock = false): void {
   // Stage V V2.3b — `document:openFolder` moved into `fileIoGroup`. The
   // group injects the workspace-validation context (homeDir + accessSync
   // probe) so the handler stays pure.
-
-  // Stage V V2.3d — `document:exportWorkspace`, `document:importWorkspace`,
-  // and `document:getHome` moved into `workspaceGroup`. See the breadcrumb
-  // + registration block alongside the other extracted groups above.
 
   // Stage V V2.3b — `document:showInFolder`, `document:openPath`, and
   // `document:createFile` moved into `fileIoGroup` alongside the rest of

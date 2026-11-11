@@ -75,40 +75,6 @@ export interface SaveAsPayload {
 }
 
 /**
- * Shape of a save-workspace dialog options object the WorkspaceGroup passes
- * through to `dialog.showSaveDialog`. Mirror of Electron's `SaveDialogOptions`
- * narrowed to the three fields the handler wires (`title`, `defaultPath`,
- * `filters`).
- */
-export interface SaveWorkspaceDialogOptions {
-  title: string
-  defaultPath: string
-  filters: Array<{ name: string; extensions: string[] }>
-}
-
-/**
- * Shape of a save-workspace dialog return value the WorkspaceGroup consumes.
- * Mirror of Electron's `SaveDialogReturnValue` narrowed to the two fields
- * the handler reads (`canceled` + `filePath`).
- */
-export interface SaveDialogResult {
-  canceled: boolean
-  filePath?: string
-}
-
-/**
- * Shape of an open-file dialog options object the WorkspaceGroup passes
- * through to `dialog.showOpenDialog`. Distinct from `OpenFolderDialogOptions`
- * because the workspace-import flow opens FILES (single `.json`), not
- * directories, and ships a file-extension filter set.
- */
-export interface OpenWorkspaceFileDialogOptions {
-  title: string
-  properties: Array<'openFile'>
-  filters: Array<{ name: string; extensions: string[] }>
-}
-
-/**
  * Composition root. V2.3a populates the MarkGroup-relevant fields; V2.3b
  * extends it with FileIoGroup deps (mock flag is shared). Later V2.3
  * sub-stages will append further surfaces as their groups need new deps.
@@ -174,25 +140,6 @@ export interface EngineDeps {
 
   // --- V2.3d — WorkspaceGroup deps ---
 
-  /**
-   * Wrap `dialog.showSaveDialog` for the workspace-export channel. Distinct
-   * from the FileIoGroup's `showOpenDialog` facade because the workspace
-   * export flow needs a SAVE dialog with a structured filter set.
-   */
-  showSaveWorkspaceDialog(
-    window: BrowserWindow,
-    options: SaveWorkspaceDialogOptions,
-  ): Promise<SaveDialogResult>
-  /**
-   * Wrap `dialog.showOpenDialog` for the workspace-import channel. The
-   * narrowed options shape (`openFile` + filters) deliberately differs from
-   * `OpenFolderDialogOptions` so the type system catches accidental cross
-   * wiring (workspace import is a FILE picker, not a folder picker).
-   */
-  showOpenWorkspaceFileDialog(
-    window: BrowserWindow,
-    options: OpenWorkspaceFileDialogOptions,
-  ): Promise<OpenDialogResult>
   /**
    * Resolve the OS home directory. Lifted to a dep so the group does not
    * import `os` at runtime; the host owns the actual `homedir()` call so
