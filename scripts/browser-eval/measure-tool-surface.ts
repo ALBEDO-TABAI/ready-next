@@ -3,11 +3,10 @@ import { buildReadyToolSurface, selectCodexRootToolDefinitions } from '../../src
 
 const surface = buildReadyToolSurface({ surfaceId: 'browser-eval-measure',
   toolDefinitions: selectCodexRootToolDefinitions(listLiveCodexThreadToolDefinitions()) })
-const before = surface.responsesTools.map(({ defer_loading: _deferred, ...tool }) => tool)
-const eager = surface.responsesTools.filter(tool => !tool.defer_loading)
 const measure = (tools: unknown[]) => ({ tools: tools.length, bytes: Buffer.byteLength(JSON.stringify(tools)),
   estimatedTokens: Math.ceil(Buffer.byteLength(JSON.stringify(tools)) / 4) })
 console.log(JSON.stringify({ method: 'UTF-8 JSON bytes / 4, rounded up; eagerly expanded schemas only, not billing or tool search overhead',
-  before: measure(before), after: measure(eager), registered: measure(surface.responsesTools),
-  deferred: surface.dynamicTools.filter(tool => tool.deferLoading).map(tool => tool.name),
+  status: '当前未启用延迟加载；before 与 after 均为当前完整工具面，不代表历史版本对比',
+  before: measure(surface.responsesTools), after: measure(surface.responsesTools), registered: measure(surface.responsesTools),
+  deferred: [],
 }, null, 2))

@@ -20,7 +20,6 @@ export type CodexDynamicToolSpec = {
   name: string
   description: string
   inputSchema: Record<string, unknown>
-  deferLoading?: boolean
 }
 
 export type CodexThreadStartParams = {

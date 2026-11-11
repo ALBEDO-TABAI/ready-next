@@ -675,6 +675,17 @@ test('thread start serializes the frozen 0/1/2 Ready dynamic-tool surface exactl
   }
 })
 
+test('thread start rejects deferred top-level tools before writing to the runtime', async () => {
+  const input = makeClient()
+  await initializeClient(input)
+  const tool = createCodexToolFixture(['browser_archive']).readyToolSurface.dynamicTools[0]
+  await assert.rejects(input.client.threadStart({
+    ...threadStartParams(),
+    dynamicTools: [{ ...tool, ...{ deferLoading: true } }],
+  }), /rpc_params_invalid/)
+  assert.equal(input.transport.writes.length, 0)
+})
+
 test('product methods require one successful initialize handshake', async () => {
   const input = makeClient()
   await assert.rejects(

@@ -2,7 +2,6 @@ import { digestCanonicalJson } from './codex-model-gateway-contract'
 import {
   BROWSER_CURRENT_PAGE_TOOL_NAMES,
   BROWSER_EXPLICIT_READ_TOOL_NAMES,
-  BROWSER_SKILL_ONLY_TOOL_NAMES,
 } from './codex-browser-admission'
 
 export const READY_CAPABILITY_GROUP_IDS = [
@@ -14,7 +13,7 @@ export const READY_CAPABILITY_GROUP_IDS = [
 ] as const
 
 export type ReadyCapabilityGroupId = (typeof READY_CAPABILITY_GROUP_IDS)[number]
-export type ReadyCapabilityLoading = 'always' | 'mixed'
+export type ReadyCapabilityLoading = 'always' | 'deferred'
 
 export type ReadyCapabilityGroup = {
   id: ReadyCapabilityGroupId
@@ -46,12 +45,16 @@ export const BROWSER_CURRENT_ACT_TOOL_NAMES = BROWSER_CURRENT_PAGE_TOOL_NAMES.fi
   (name) => name !== 'browser_research' && !(BROWSER_EXPLICIT_READ_TOOL_NAMES as readonly string[]).includes(name),
 )
 
-/** Fixed 0.160.1 dynamic tool registration; loading never changes authorization. */
-export const READY_DEFERRED_BROWSER_TOOLS: ReadonlySet<string> = new Set([
-  ...BROWSER_SKILL_ONLY_TOOL_NAMES,
-  'browser_archive', 'browser_collect', 'browser_dialog', 'browser_drag',
-  'browser_hover', 'browser_research', 'browser_select', 'browser_upload',
-])
+/**
+ * P0 result for pinned rust-v0.149.0. This is a source-time constant, not a
+ * runtime switch. Flip only after the real app-server experiment records a
+ * pass; do not keep an eager/deferred product fork.
+ */
+export const READY_CAPABILITY_DEFERRED_LOADING_SUPPORTED = false
+
+const DEFERRED_LOADING: ReadyCapabilityLoading = READY_CAPABILITY_DEFERRED_LOADING_SUPPORTED
+  ? 'deferred'
+  : 'always'
 
 export function readyCapabilityGroups(): readonly ReadyCapabilityGroup[] {
   return [
@@ -67,14 +70,14 @@ export function readyCapabilityGroups(): readonly ReadyCapabilityGroup[] {
       description:
         'Read the already-bound browser page: snapshot, find, read, screenshot, wait, and status. Requires an exact current page or a typed browser reference.',
       tools: BROWSER_CURRENT_READ_TOOL_NAMES,
-      loading: 'always',
+      loading: DEFERRED_LOADING,
     },
     {
       id: 'browser_current_act',
       description:
         'Change the already-bound browser page: navigate, click, type, fill, select, hover, scroll, keys, drag, dialogs, and collect. Requires an exact current page and does not include browser_research.',
       tools: BROWSER_CURRENT_ACT_TOOL_NAMES,
-      loading: 'mixed',
+      loading: DEFERRED_LOADING,
     },
     {
       id: 'calendar_read',
@@ -88,7 +91,7 @@ export function readyCapabilityGroups(): readonly ReadyCapabilityGroup[] {
       description:
         'Create, update, or delete Ready in-app local calendar events. This is not Feishu calendar. Each write still requires the existing confirmation and event-id readback.',
       tools: CALENDAR_WRITE_TOOL_NAMES,
-      loading: 'always',
+      loading: DEFERRED_LOADING,
     },
   ]
 }

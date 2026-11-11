@@ -12,7 +12,7 @@ import {
   readyCapabilityCatalogDigest,
   readyCapabilityGroups,
   readyCapabilityToolOwner,
-  READY_DEFERRED_BROWSER_TOOLS,
+  READY_CAPABILITY_DEFERRED_LOADING_SUPPORTED,
 } from '../main/modules/agent-control/codex-runtime/codex-capability-catalog'
 
 test('capability catalog is stable, exclusive, and keeps observe-only reads', () => {
@@ -38,9 +38,7 @@ test('capability catalog is stable, exclusive, and keeps observe-only reads', ()
     (name) => name !== 'browser_research' && !read.has(name),
   )
   assert.deepEqual([...remainder].sort(), [...act].sort())
-  assert.equal(READY_DEFERRED_BROWSER_TOOLS.size, 16)
-  assert.equal(READY_DEFERRED_BROWSER_TOOLS.has('browser_click'), false)
-  assert.equal(READY_DEFERRED_BROWSER_TOOLS.has('browser_cdp'), true)
+  assert.equal(READY_CAPABILITY_DEFERRED_LOADING_SUPPORTED, false)
   assert.equal(first.find((group) => group.id === 'public_research')?.loading, 'always')
   assert.equal(first.find((group) => group.id === 'calendar_read')?.loading, 'always')
 })
