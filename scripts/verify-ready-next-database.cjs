@@ -107,7 +107,7 @@ async function main() {
     await table.getByRole('button', { name: '把当前视图发给 AI', exact: true }).click()
     await page.locator('.chat-reference-chip').first().waitFor({ timeout: 15000 })
     await snapshot('02b-ask-ai')
-    await board.getByLabel('刷新数据库', { exact: true }).click()
+    // Another view's write reaches this one by itself (observeDatabase); there is no 刷新 button (W3 §4.4).
     await board.locator(`[data-row-id="${rowId}"]`).dragTo(board.locator('[data-group="完成"]'))
     await board.locator('[data-group="完成"]').locator(`[data-row-id="${rowId}"]`).waitFor()
     assert.deepEqual(fields(fs.readFileSync(rowFile, 'utf8')), { ...fields(before), 内容: '表格修改', 状态: '完成' })
@@ -120,8 +120,8 @@ async function main() {
     const current = fs.readFileSync(rowFile, 'utf8')
     assert.ok(current.endsWith('保留正文\n'))
     fs.writeFileSync(rowFile, current.replace('表格修改', '外部修改'))
+    // The directory watcher brings the external write into every view; nothing to click.
     for (const view of [table, board, calendar]) {
-      await view.getByLabel('刷新数据库', { exact: true }).click()
       await view.locator(`[data-row-id="${rowId}"] [data-field-id="text"]`).first().filter({ hasText: '外部修改' }).waitFor()
       assert.deepEqual(await view.getByRole('alert').allTextContents(), [])
     }

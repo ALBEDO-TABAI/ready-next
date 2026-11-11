@@ -22,6 +22,7 @@ import {
 } from '../ui/floatingMenuStyles'
 import { subscribeWorkbenchWindowResize } from '../../modules/workbench/windowResize'
 import { subscribeDocumentDirectoryChanges } from '../../modules/document/directoryChangeBridge'
+import { releaseDirectoryWatch, watchDirectoriesFor } from '../../modules/document/directoryWatchRegistry'
 import './filesPanelFloatingMenu.css'
 
 interface FilesPanelProps {
@@ -199,19 +200,12 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
     return Array.from(dirs)
   }, [currentPath, expandedDirs, isConnected, isVisible, pinnedFolders])
 
+  // The file view's share of the window's watched folders (other owners, e.g. an open database, keep theirs).
+  const watchOwner = useRef(Symbol('files-panel'))
   useEffect(() => {
-    if (!window.electronAPI?.document?.watchDirectories) return
-    // fire-and-forget: visibility/connection edge → reset watched-directories on the main process; if the IPC drops, the worst case is a stale watcher that gets corrected on the next visibility transition.
-    if (!isVisible || !isConnected) {
-      void window.electronAPI.document.watchDirectories([]).catch(() => undefined)
-      return
-    }
-    // fire-and-forget: same rationale — apply the desired watch set; main side reconciles on next call.
-    void window.electronAPI.document.watchDirectories(watchedDirectories).catch(() => undefined)
-    return () => {
-      // fire-and-forget: cleanup on unmount; idempotent at the main-process boundary.
-      void window.electronAPI.document.watchDirectories([]).catch(() => undefined)
-    }
+    const owner = watchOwner.current
+    watchDirectoriesFor(owner, isVisible && isConnected ? watchedDirectories : [])
+    return () => releaseDirectoryWatch(owner)
   }, [isConnected, isVisible, watchedDirectories])
 
   useEffect(() => {
