@@ -128,7 +128,7 @@ export class CalendarLayersService {
       for (const task of tasks) {
         const date = task.date
         if (date && date.value >= range.from && date.value < range.to) entries.push({ ...base,
-          id: `task:${object.id}:${task.checkbox.start}`, layer: 'tasks', title: `${task.checked ? '☑' : '☐'} ${task.title}`, date: date.value, lastDate: date.value,
+          id: `task:${object.id}:${task.checkbox.start}`, layer: 'tasks', title: `${task.checked ? '☑' : '☐'} ${task.title}`, checked: task.checked, date: date.value, lastDate: date.value,
           ...(date.source === 'ready' ? { edit: { kind: 'task' as const, start: date.range.start, end: date.range.end, text: date.range.text, whole: date.range.whole } } : { readOnlyReason: 'obsidian_date_needs_consent' }),
         })
       }

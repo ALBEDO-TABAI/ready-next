@@ -14,6 +14,8 @@ import type { CalendarLayer } from '../../../../shared/calendar-layers';
 export type GridView = 'default' | 'month';
 export interface Prefs {
   layers: Record<CalendarLayer, boolean>;
+  /** Rewriting an Obsidian 📅 date as a Ready date link was allowed once and remembered. */
+  rewriteObsidianDates?: boolean;
   gridView: GridView; daysPerPeriod: number; densityZoomLevel: number; weekStartsOn: number;
   showWeekends: boolean; showDeclined: boolean; showWeekNumbers: boolean; format24HourTime: boolean;
   interfaceTheme: 'system' | 'light' | 'dark'; contextPanel: boolean;

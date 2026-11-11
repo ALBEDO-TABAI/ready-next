@@ -1,4 +1,5 @@
 import { LayerSwitches } from '../layers/LayerDays';
+import { TodoSection } from '../layers/TodoSection';
 import { useState } from 'react';
 import { ChevronUp, ChevronDown, Search, SquarePen, Eye, EyeOff, MoreHorizontal, Plus, CalendarSearch, Download, HelpCircle } from 'lucide-react';
 import { startOfWeek, startOfMonth, addMonths, weekday, ymd, parseIsoDate, DayNum, colorFamily } from '@shared/calendar';
@@ -56,6 +57,7 @@ export function Sidebar({ actionsHost }: { actionsHost?: (element: HTMLDivElemen
       <div className="sidebar-scroll panel-hover-scrollbar">
         <MiniMonth />
         <LayerSwitches />
+        <TodoSection />
         <div style={{ padding: '0 0 0' }}>
           <div style={{ position: 'relative' }}>
             <CalendarSearch size={16} style={{ position: 'absolute', left: 18, top: 15, color: 'var(--c-text3)' }} />

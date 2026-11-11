@@ -26,6 +26,8 @@ export type LayerEdit = { kind: 'page' } | { kind: 'diary' } | { kind: 'database
 export interface LayerEntry {
   id: string; layer: Exclude<CalendarLayer, 'events'>; title: string; date: string; lastDate: string
   ref: ReadyRef; objectId?: string; version?: string; edit?: LayerEdit; value?: unknown
+  /** Tasks layer only: whether the checkbox is ticked. */
+  checked?: boolean
   start?: number; end?: number; sessionStart?: number; sessionEnd?: number
   readOnlyReason?: string
 }
