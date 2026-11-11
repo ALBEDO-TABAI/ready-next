@@ -22,7 +22,7 @@ export const LayerRangeSchema = z.object({ from: calendarDate, to: calendarDate,
 }) }).strict().refine(r => r.from < r.to, 'Empty date range')
 export type LayerRange = z.infer<typeof LayerRangeSchema>
 export type LayerEdit = { kind: 'page' } | { kind: 'diary' } | { kind: 'database'; databaseId: string; fieldId: string }
-  | { kind: 'task'; start: number; end: number; text: string }
+  | { kind: 'task'; start: number; end: number; text: string; whole?: boolean }
 export interface LayerEntry {
   id: string; layer: Exclude<CalendarLayer, 'events'>; title: string; date: string; lastDate: string
   ref: ReadyRef; objectId?: string; version?: string; edit?: LayerEdit; value?: unknown
@@ -48,12 +48,18 @@ export interface CalendarLayersAPI {
 }
 
 export interface TodoRange { start: number; end: number; text: string }
+/** A Ready date link whose label is the date itself ([2026-11-12](ready://calendar/day/2026-11-12)) is rewritten
+ * whole when the date changes, so the label never shows the old date; a custom label keeps its text. */
+export type ReadyDateRange = TodoRange & { whole: boolean }
+export function rescheduledDate(range: ReadyDateRange, date: string): string {
+  return range.whole ? `[${date}](ready://calendar/day/${date})` : date
+}
 export interface ParsedTodo {
   title: string; heading: string | null; checked: boolean
   /** UTF-16 offsets for document operations, plus half-open UTF-8 byte offsets. */
   checkbox: TodoRange & { byteStart: number; byteEnd: number }
   firstLineEnd: number
-  date: { source: 'ready' | 'obsidian'; value: string; range: TodoRange } | null
+  date: { source: 'ready'; value: string; range: ReadyDateRange } | { source: 'obsidian'; value: string; range: TodoRange } | null
 }
 export interface TodoEntry {
   id: string; title: string; heading: string | null; version: string
@@ -94,7 +100,10 @@ export function parseTodos(content: string): ParsedTodo[] {
             const urlAt = raw.indexOf(part.url, labelEnd - offset)
             if (parsed.ok && parsed.ref.kind === 'day' && urlAt >= 0 && task.date?.source !== 'ready') {
               const dateStart = offset + urlAt + 'ready://calendar/day/'.length
-              task.date = { source: 'ready', value: parsed.ref.date, range: { start: dateStart, end: dateStart + 10, text: parsed.ref.date } }
+              const label = content.slice(offset + 1, labelEnd)
+              task.date = { source: 'ready', value: parsed.ref.date, range: label === parsed.ref.date && raw === `[${label}](${part.url})`
+                ? { start: offset, end, text: raw, whole: true }
+                : { start: dateStart, end: dateStart + 10, text: parsed.ref.date, whole: false } }
             }
             return
           }

@@ -4,7 +4,7 @@ import { DocumentPageService } from '../document-pages/service'
 import { readFileSync, statSync } from 'node:fs'
 import { basename } from 'node:path'
 import { Temporal } from '@js-temporal/polyfill'
-import { LayerRangeSchema, LayerMoveSchema, parseTodos, ToggleTodoSchema, ScheduleTodoSchema, type ParsedTodo, type TodoEntry, type ToggleTodo, type ScheduleTodo, splitReading, calendarDate, type LayerRange, type LayerEntry, type LayerMove } from '../../../shared/calendar-layers'
+import { LayerRangeSchema, LayerMoveSchema, parseTodos, rescheduledDate, ToggleTodoSchema, ScheduleTodoSchema, type ParsedTodo, type TodoEntry, type ToggleTodo, type ScheduleTodo, splitReading, calendarDate, type LayerRange, type LayerEntry, type LayerMove } from '../../../shared/calendar-layers'
 import { isoDate, parseIsoDate } from '../../../shared/calendar/dates'
 import { dayOf, startOfDayMs } from '../../../shared/calendar/tz'
 import { fieldValue } from '../../../shared/document-database'
@@ -95,7 +95,7 @@ export class CalendarLayersService {
     return this.writeTodo(request.id, request.expectedVersion, task => {
       const link = `[${request.date}](${toReadyUri({ kind: 'day', date: request.date })})`
       if (task.date?.source === 'obsidian' && !request.rewriteObsidianDate) throw Object.assign(new Error('Rewriting an Obsidian date requires consent'), { code: 'obsidian_date_needs_consent' })
-      if (task.date) return { ...task.date.range, replacement: task.date.source === 'ready' ? request.date : link }
+      if (task.date) return { ...task.date.range, replacement: task.date.source === 'ready' ? rescheduledDate(task.date.range, request.date) : link }
       return { start: task.firstLineEnd, end: task.firstLineEnd, text: '', replacement: ` ${link}` }
     })
   }
@@ -129,7 +129,7 @@ export class CalendarLayersService {
         const date = task.date
         if (date && date.value >= range.from && date.value < range.to) entries.push({ ...base,
           id: `task:${object.id}:${task.checkbox.start}`, layer: 'tasks', title: `${task.checked ? '☑' : '☐'} ${task.title}`, date: date.value, lastDate: date.value,
-          ...(date.source === 'ready' ? { edit: { kind: 'task' as const, ...date.range } } : { readOnlyReason: 'obsidian_date_needs_consent' }),
+          ...(date.source === 'ready' ? { edit: { kind: 'task' as const, start: date.range.start, end: date.range.end, text: date.range.text, whole: date.range.whole } } : { readOnlyReason: 'obsidian_date_needs_consent' }),
         })
       }
     }

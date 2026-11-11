@@ -43,13 +43,24 @@ test('todo scheduling appends on first line, reads back in both queries, then us
   await assert.rejects(f.service.scheduleTodo({ id: todo.id, expectedVersion: todo.version, date: '2026-11-13' }), { code: 'version_conflict' })
   assert.deepEqual(readFileSync(object.current_path!), Buffer.from(expected))
   await f.service.move({ range, id: entry.id, expectedVersion: entry.version!, date: '2026-11-13' })
-  assert.equal(readFileSync(object.current_path!, 'utf8'), expected.replace('day/2026-11-12', 'day/2026-11-13'))
+  // The label Ready wrote is the date itself: it moves with the date instead of showing the old one.
+  assert.equal(readFileSync(object.current_path!, 'utf8'), expected.replace('[2026-11-12](ready://calendar/day/2026-11-12)', '[2026-11-13](ready://calendar/day/2026-11-13)'))
   assert.equal(f.service.listTodos()[0].date, '2026-11-13')
   // A disk change before its index event must still invalidate the cached source and reject the old write.
   const current = f.service.listTodos()[0]
   writeFileSync(object.current_path!, '- [ ] externally replaced\n')
   await assert.rejects(f.service.toggleTodo({ id: current.id, expectedVersion: current.version, checked: true }), { code: 'version_conflict' })
   assert.equal(readFileSync(object.current_path!, 'utf8'), '- [ ] externally replaced\n')
+})
+
+test('rescheduling keeps a custom link label and rewrites only the date in the address', async t => {
+  if (skipIfSqliteUnavailable(t, 'calendar todo custom label')) return
+  const f = todoFixture(); t.after(() => f.close())
+  const original = '- [ ] 写周报 [明天](ready://calendar/day/2026-11-12)\n'
+  const object = f.add('page.md', original), todo = f.service.listTodos()[0]
+  assert.equal(todo.date, '2026-11-12')
+  assert.deepEqual(await f.service.scheduleTodo({ id: todo.id, expectedVersion: todo.version, date: '2026-11-14' }), { state: 'saved' })
+  assert.equal(readFileSync(object.current_path!, 'utf8'), '- [ ] 写周报 [明天](ready://calendar/day/2026-11-14)\n')
 })
 
 test('Obsidian dates are read-only until explicit consent, then only the date token is rewritten', async t => {
