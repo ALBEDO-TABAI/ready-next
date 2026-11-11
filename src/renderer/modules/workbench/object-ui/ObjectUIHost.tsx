@@ -19,14 +19,15 @@ export function ObjectUIHost({ onSettings }: { onSettings: () => void }) {
   const preview = useCallback((target: PreviewTarget) => setSurface({ kind: 'preview', target }), [])
   useEffect(registerGlobalCommands, [])
   useEffect(() => {
-    const createPage = async () => {
+    // 新建页面 and 新建数据库 (W3 §4.4): at the library root, then open; a retry reuses the operation id.
+    const createPage = async (database = false) => {
       if (creating.current) return
       creating.current = true
       try {
         const vault = await window.electronAPI.vault.get()
         if (vault.status !== 'ready') throw new Error('请先打开资料库')
         if (createRequest.current?.root !== vault.root) createRequest.current = { root: vault.root, operationId: crypto.randomUUID() }
-        const result = await window.electronAPI.documentPages.operate({ type: 'create', ...createRequest.current, parentPath: vault.root, title: '新页面', content: '' })
+        const result = await window.electronAPI.documentPages.operate({ type: 'create', ...createRequest.current, parentPath: vault.root, title: database ? '未命名数据库' : '新页面', content: '', ...(database ? { database: true } : {}) })
         if (!result.ok) throw new Error(result.message)
         if (mounted.current) await openObjectTarget({ kind: 'page', id: result.value.objectId })
         createRequest.current = null
@@ -36,6 +37,7 @@ export function ObjectUIHost({ onSettings }: { onSettings: () => void }) {
     const action = (event: WindowEventMap['ready:shell-action']) => {
       if (event.detail.action === 'open-settings') onSettings()
       if (event.detail.action === 'new-page') void createPage()
+      if (event.detail.action === 'new-database') void createPage(true)
     }
     window.addEventListener(SHELL_ACTION_EVENT, action)
     return () => window.removeEventListener(SHELL_ACTION_EVENT, action)

@@ -20,7 +20,7 @@ async function main() {
   await fs.writeFile(linkedFile, '# 链接目标\n\n## 章节一\n\n引用正文')
   const env = { ...process.env, READY_USER_DATA_DIR: profile }
   delete env.ELECTRON_RUN_AS_NODE
-  delete env.READY_START_HIDDEN
+  // Verification windows stay hidden when the caller asks (READY_START_HIDDEN=1); nothing here needs a shown window.
   const launch = async () => {
     const launched = await _electron.launch({ executablePath: require('electron'), args: [process.cwd()], env, timeout: 45000 })
     let window

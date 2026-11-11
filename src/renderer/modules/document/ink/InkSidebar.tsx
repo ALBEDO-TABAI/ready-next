@@ -120,6 +120,15 @@ export function InkSidebar({ roots, api = window.electronAPI.documentPages, onOp
     for (let n = 2; taken.has(name); n++) name = `${base} ${n}`
     return name
   }
+  /** A database page (W3 M6): Main writes the definition and its row folder; its title is edited on the page. */
+  const createDatabaseIn = (parent: PageNode, root: string) => run(async () => {
+    const title = uniqueName(parent, '未命名数据库')
+    const target = parent.kind === 'vault' ? { parentPath: parent.path } : { parentObjectId: parent.objectId }
+    const receipt = checked(await operate({ type: 'create', root, operationId: crypto.randomUUID(), title, database: true, ...target }))
+    if (parent.kind !== 'vault') setExpanded(parent.objectId, true)
+    useInkLayout.getState().setTitleFocus(receipt.objectId)
+    if (receipt.path) await onOpen({ objectId: receipt.objectId, revision: receipt.revision, path: receipt.path, name: receipt.path.split(/[\\/]/).pop()!, kind: 'page', database: true, title, children: [], hasChildren: false, position: 0 })
+  })
   const createBoard = (tree: PageNode) => run(async () => {
     const name = uniqueName(tree, '未命名画板')
     const result = await window.electronAPI.canvas.create({ path: `${name}.canvas`, operationId: crypto.randomUUID() })
@@ -145,6 +154,7 @@ export function InkSidebar({ roots, api = window.electronAPI.documentPages, onOp
   const openNewMenu = (anchor: HTMLElement, tree: PageNode) => {
     openMenu(anchor.getBoundingClientRect(), { width: 180, label: '新建', groups: [[
       { id: 'page', label: '页面', icon: 'newPage', onSelect: () => { void createIn(tree, tree.path) } },
+      { id: 'database', label: '数据库', icon: 'table', onSelect: () => { void createDatabaseIn(tree, tree.path) } },
       ...(tree.kind === 'vault' ? [{ id: 'board', label: '画板', icon: 'shapes' as IconName, onSelect: () => { void createBoard(tree) } }] : []),
       { id: 'folder', label: '文件夹', icon: 'folder', onSelect: () => openNewFolder(anchor, tree) },
     ]] }, { anchorEl: anchor, placement: 'bottom-start' })
@@ -258,7 +268,7 @@ export function InkSidebar({ roots, api = window.electronAPI.documentPages, onOp
         onContextMenu={event => { event.preventDefault(); openRowMenu(event.currentTarget, node, { x: event.clientX, y: event.clientY }) }}>
         <span className="ink-sb-indent" style={{ width: level * 8 }} />
         <span className="ink-sb-icon">
-          <span className="ink-sb-icon-glyph"><InkPageIcon value={node.icon} kind={node.kind} size={20} emojiSize={15} /></span>
+          <span className="ink-sb-icon-glyph"><InkPageIcon value={node.icon} kind={node.kind} database={node.database} size={20} emojiSize={15} /></span>
           {expandable && <button type="button" className="ink-sb-disclosure" aria-label={`${isOpen ? '收起' : '展开'} ${node.title}`}
             onClick={event => { event.stopPropagation(); toggle() }}>
             <svg width="12" height="12" viewBox="0 0 12 12" style={{ transform: isOpen ? 'rotate(90deg)' : 'none' }} aria-hidden><path d="M4.4 2.6L7.8 6l-3.4 3.4" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>

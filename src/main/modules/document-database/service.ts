@@ -101,7 +101,8 @@ export class DocumentDatabaseService {
     const database = this.definition(id)
     const referenceRepairs = this.registry.db.prepare("SELECT view_id,old_name,new_name,state FROM document_database_view_repairs WHERE database_id=? AND state<>'completed'").all<{view_id:string;old_name:string;new_name:string;state:string}>(id).filter(repair => database.definition.views.some(view => view.id === repair.view_id && view.name === repair.new_name))
     for (const repair of referenceRepairs) if (repair.state === 'prepared') this.registry.db.prepare("UPDATE document_database_view_repairs SET state='pending_reference_repair' WHERE database_id=? AND view_id=? AND old_name=?").run(id, repair.view_id, repair.old_name)
-    return { databaseId: id, definition: database.definition, version: database.version, rows: this.rows(id, database.definition, database.source), referenceRepairs: referenceRepairs.map(repair => ({ viewId: repair.view_id, oldName: repair.old_name, newName: repair.new_name, state: 'pending_reference_repair' as const })) }
+    // sourcePath: the row folder, which an open view watches so it follows the disk (W3 §4.4).
+    return { databaseId: id, definition: database.definition, version: database.version, sourcePath: database.source, rows: this.rows(id, database.definition, database.source), referenceRepairs: referenceRepairs.map(repair => ({ viewId: repair.view_id, oldName: repair.old_name, newName: repair.new_name, state: 'pending_reference_repair' as const })) }
   }
   private member(databaseId: string, rowId: string) {
     const database = this.definition(databaseId), object = this.object(rowId)

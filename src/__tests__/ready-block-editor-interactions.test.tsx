@@ -450,3 +450,21 @@ test('W3 slash 引用对象 hands over to the page and heading picker', async t 
   assert.ok(document.querySelector('[role="dialog"][aria-label="页面和标题"]'))
   assert.equal(document.querySelector('.ready-slash-menu'), null)
 })
+
+test('W3 slash 数据库 creates a database under the page and shows its table view in place', async t => {
+  const f = await editorFixture(t, '/'); await libraryAt(t, '/vault')
+  await act(() => f.useDocTabs.setState(state => ({ tabs: state.tabs.map(tab => ({ ...tab, path: '/vault/父页.md', objectId: 'parent', objectBinding: { status: 'resolved' as const } })) })))
+  const requests: Array<Record<string, unknown>> = []
+  Object.defineProperty(window, 'electronAPI', { configurable: true, value: {
+    vault: { get: async () => ({ status: 'ready', root: '/vault' }) },
+    documentPages: { onChanged: () => () => {}, operate: async (input: Record<string, unknown>) => {
+      requests.push(input)
+      return { ok: true, value: { operationId: input.operationId, state: 'committed', objectId: 'db', revision: 1, path: '/vault/父页/未命名数据库.md' } }
+    } },
+  } })
+  await trigger(f, '/'); await pick(f, 'database')
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
+  assert.equal(requests.length, 1)
+  assert.deepEqual({ ...requests[0], operationId: 'x' }, { type: 'create', operationId: 'x', root: '/vault', parentPath: '/vault/父页.md', title: '未命名数据库', database: true })
+  f.bytes('![[父页/未命名数据库#表格]]')
+})

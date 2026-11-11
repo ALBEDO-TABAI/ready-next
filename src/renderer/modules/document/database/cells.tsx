@@ -3,7 +3,7 @@ import {
   List, ListChecks, Search, Sigma, SquareCheck, Table2, type LucideIcon,
 } from 'lucide-react'
 import type { Cell, DatabaseField, DatabaseView } from '../../../../shared/document-database'
-import { cellText } from './cell-text'
+import { cellText, dateText } from './cell-text'
 import { isStatusField, optionColor, type Color } from './cell-colors'
 
 // Typed cell values and header icons (W3 §4.4, after Inkwell's cells): tags for selects, a dot and text for a
@@ -39,6 +39,8 @@ export function CellValue({ field, cell }: { field: DatabaseField | undefined; c
       return <span className={`rdb-check${value ? ' is-on' : ''}`} role="img" aria-label={value ? '已勾选' : '未勾选'} />
     case 'url':
       return <span className="rdb-cell-link">{String(value).replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '')}</span>
+    case 'date':
+      return <span className="rdb-cell-text">{typeof value === 'string' ? dateText(value) : cellText(cell)}</span>
     case 'relation':
       return <span className="rdb-tags">{(Array.isArray(value) ? value : [value]).map((item, index) => <span key={index} className="rdb-rel-chip"><ArrowUpRight aria-hidden />{itemText(item)}</span>)}</span>
     default:

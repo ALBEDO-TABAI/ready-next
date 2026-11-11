@@ -1,5 +1,5 @@
 import {
-  CalendarDays, CheckSquare, Code2, Columns2, CopyCheck, FilePlus2, Heading1, Heading2, Heading3, Info, LayoutTemplate,
+  CalendarDays, CheckSquare, Database, Code2, Columns2, CopyCheck, FilePlus2, Heading1, Heading2, Heading3, Info, LayoutTemplate,
   Lightbulb, Link2, List, ListOrdered, Minus, Pilcrow, Quote, Shapes, Sparkles, Table2, TriangleAlert, Workflow,
   type LucideIcon,
 } from 'lucide-react'
@@ -29,6 +29,7 @@ export const SLASH_META: Record<string, SlashMeta> = {
   code: { group: '媒体', label: '代码', description: '等宽的代码块', icon: Code2, keywords: 'code snippet pre daima dm' },
   table: { group: '媒体', label: '表格', description: '两列的表格，可继续添加行列', icon: Table2, keywords: 'table grid biaoge bg' },
   page: { group: '嵌入', label: '子页面', description: '在本页下新建一页并链接过去', icon: FilePlus2, keywords: 'page subpage child yemian ym ziyemian zym' },
+  database: { group: '嵌入', label: '数据库', description: '在本页下新建数据库，在这里显示它的表格', icon: Database, keywords: 'database db table shujuku sjk biao' },
   board: { group: '嵌入', label: '画板', description: '在本页下新建画板并链接过去', icon: Shapes, keywords: 'board canvas whiteboard huaban hb' },
   reference: { group: '嵌入', label: '引用对象', description: '链接到资料库里的页面或标题', icon: Link2, keywords: 'link reference mention wiki yinyong yy lianjie lj duixiang dx' },
   synced: { group: '嵌入', label: '同步块', description: '引用别处的一块，随原文更新', icon: CopyCheck, keywords: 'synced block transclusion embed tongbukuai tbk' },

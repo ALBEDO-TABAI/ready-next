@@ -152,10 +152,26 @@ export function EditorTools({ buffer, linkBase, children, report }: { buffer: Ed
       item('reference', () => { setQuery(''); setResults([]); setPicker({ ...current, start: 0, kind: 'wiki' }) }),
       ...(linkBase?.parentPath ? [
         item('page', () => { setPicker(null); setPage({ picker: current, title: '', operationId: crypto.randomUUID(), state: 'editing' }) }),
+        item('database', () => { setPicker(null); void createDatabase(current) }),
         item('board', () => { setPicker(null); void createBoard(current) }),
       ] : []))
     slashItems = filterSlashItems(all, query)
   } else if (picker) items = results.map(result => ({ ...result, run: () => attempt(() => replaceSelection(picker, [{ text: result.text, marks: { reference: result.reference } }])) }))
+  /** 数据库: a new database in the page's own folder, shown inline (its 表格 view) where “/” was typed. */
+  async function createDatabase(state: Picker) {
+    try {
+      const parent = linkBase?.parentPath
+      if (!parent) throw new Error('请先保存当前页面，再新建数据库')
+      const vault = await window.electronAPI.vault.get()
+      if (vault.status !== 'ready') throw new Error('请先设置资料库')
+      const result = await window.electronAPI.documentPages.operate({ type: 'create', operationId: crypto.randomUUID(), root: vault.root, parentPath: parent, title: '未命名数据库', database: true })
+      if (!result.ok) throw new Error(result.message)
+      if (!result.value.path) throw new Error('新数据库没有返回路径')
+      const target = result.value.path.replace(/\\/g, '/').slice(vault.root.replace(/\\/g, '/').replace(/\/$/, '').length + 1).replace(/\.md$/i, '')
+      if (buffer.snapshot.version !== state.snapshot.version) throw new Error(`数据库已建在 ${result.value.path}；正文已变化，未插入视图。`)
+      slashMarkdown(state, `![[${target}#表格]]`)
+    } catch (error) { console.warn('[EditorTools] create database failed:', error instanceof Error ? error.message : String(error)); report(error) }
+  }
   /** 画板: a new board in the page's own folder (A.md → A/), linked from where “/” was typed. */
   async function createBoard(state: Picker) {
     try {

@@ -18,7 +18,7 @@ async function main() {
   const file = path.join(vault, '原页.md'), target = path.join(vault, '引用.md')
   const original = '原块 ^source\n\n第二块'
   fs.writeFileSync(file, original); fs.writeFileSync(target, '插入位置'); fs.writeFileSync(path.join(vault, '模板', '会议.md'), '# {{title}}\n\n日期 {{date}}')
-  const env = { ...process.env, READY_USER_DATA_DIR: profile }; delete env.ELECTRON_RUN_AS_NODE; delete env.READY_START_HIDDEN
+  const env = { ...process.env, READY_USER_DATA_DIR: profile }; delete env.ELECTRON_RUN_AS_NODE
   let app
   const launch = async () => {
     app = await _electron.launch({ executablePath: require('electron'), args: [process.cwd()], env, timeout: 45000 })

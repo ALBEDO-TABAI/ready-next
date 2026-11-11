@@ -30,7 +30,7 @@ async function main() {
   const entry = path.resolve(process.cwd(), require('../package.json').main)
   assert.ok(fs.existsSync(entry), '先构建 Ready Next，并由 M5-F 注册 documentDatabase IPC')
   const env = { ...process.env, READY_USER_DATA_DIR: profile }
-  delete env.ELECTRON_RUN_AS_NODE; delete env.READY_START_HIDDEN
+  delete env.ELECTRON_RUN_AS_NODE
   let app
   const launch = async () => {
     app = await _electron.launch({ executablePath: require('electron'), args: [process.cwd()], cwd: process.cwd(), env, timeout: 45000 })
