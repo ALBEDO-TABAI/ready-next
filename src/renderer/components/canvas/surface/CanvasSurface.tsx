@@ -15,6 +15,7 @@ import type { CanvasSurfaceProps, Tool } from './types'
 import { CanvasEditorLifecycle } from './editor-lifecycle'
 import { CanvasCorner, CanvasCrumbs, CanvasDock, ChromeMenu, MenuItem, SelectionBar } from './CanvasChrome'
 import { cardFrame } from '../../../modules/canvas/interaction/graphics'
+import { useBoardCommands } from '../../../modules/canvas/board-commands'
 import { CalendarPlus, ClipboardPaste, FileDown, FilePlus2, ImageDown, Sparkles, StickyNote, Trash2, Type } from 'lucide-react'
 
 const TOOL_KEYS: Record<string, Tool> = { v: 'select', h: 'pan', b: 'rect', a: 'arrow', c: 'edge', d: 'path' }
@@ -159,6 +160,9 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     {props.onExport && <MenuItem label={chosen.length ? '把选中的卡片导出为 Markdown' : '导出为 Markdown'} icon={FileDown} onSelect={() => { setMoreOpen(false); void props.onExport!('md', selected).catch(cause => setCompositionError(String(cause))) }} />}
     {props.onExport && <MenuItem label={chosen.length ? '把选中的卡片导出为 PDF' : '导出为 PDF'} icon={FileDown} onSelect={() => { setMoreOpen(false); void props.onExport!('pdf', selected).catch(cause => setCompositionError(String(cause))) }} />}
   </> : undefined
+  const commands = useBoardCommands({ text: () => placeCard('text'), note: () => placeCard('note'), fit: () => fit(),
+    zoom100: () => setCamera(c => zoomAt(c, { x: size.width / 2, y: size.height / 2 }, 1)), search: () => setSearch(current => current ?? ''),
+    bin: () => { gestures.cancel(); setEditing(null); setSearch(null); setTrash(true) } })
   const needle = search?.trim().toLocaleLowerCase() ?? ''
   const matches = needle ? active.nodes.filter(node => [node.type === 'text' ? node.text : '', node.type === 'link' ? node.url : '', node.type === 'group' ? node.label ?? '' : '',
     node.type === 'file' ? node.file : '', node.ready.preview?.title ?? '', node.ready.preview?.description ?? ''].some(text => text.toLocaleLowerCase().includes(needle))) : []
@@ -216,7 +220,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
       setMenu({ x, y, kind: card ? 'card' : 'canvas', world: screenToWorld({ x, y }, camera) })
     }}
     onKeyDown={shortcut} onKeyUp={e => { if (e.key === ' ') gestures.space = false }}
-    onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) gestures.cancel() }}
+    onFocus={() => commands.focus()} onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) gestures.cancel() }}
     onPointerDown={e => gestures.down(e.nativeEvent)} onPointerMove={e => gestures.move(e.nativeEvent)} onPointerUp={e => gestures.up(e.nativeEvent)}
     onPointerCancel={() => gestures.cancel()} onLostPointerCapture={() => gestures.cancel()}
     onDoubleClick={e => {
