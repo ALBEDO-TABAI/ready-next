@@ -1,3 +1,4 @@
+import { httpOrigin, isBrowserOriginWrite, requiresBrowserOriginApproval } from '../browser-engine/browser-origin-write-scope'
 import { isLibraryReadTool, LIBRARY_READ_ACTIONS } from '../agent-control/codex-runtime/library-read-tools'
 import { rssReferencesFromEnvelope } from '../../../shared/rss-reference'
 /**
@@ -52,10 +53,11 @@ import {
 import { executeBrowserTool } from './browser-tools'
 import type { BrowserTurnLease } from '../browser-engine/agent-browser-turn-lease'
 import { resolveBrowserToolSurfaceBinding } from '../browser-engine/browser-surface-binding'
-import { browserSnapshotService } from '../browser-engine/browser-snapshot-service'
+import { browserSnapshotService, parseBrowserSnapshotRef } from '../browser-engine/browser-snapshot-service'
 import {
   parseBrowserWorkflowActionJournal,
   resolveTrustedBrowserPageRefFromControlledNavigation,
+  resolveTaskBrowserPageRef,
 } from '../browser-engine/browser-workflow-evidence'
 import type { BrowserActionOutcome } from '../../../shared/browser-action-outcome'
 import { executeCalendarTool } from './calendar-tools'
@@ -318,7 +320,7 @@ function browserToolTargetsReferencedPage(toolName: string, args: Record<string,
   if (toolName === 'browser_task' || toolName === 'browser_research') return false
   if (toolName !== 'browser_tabs') return true
   const action = browserTabsAction(args)
-  return action === 'list' || action === 'switch' || action === 'close'
+  return action === 'list' || action === 'open' || action === 'switch' || action === 'close'
 }
 
 function browserOriginOf(value: string | null | undefined): string | null {
@@ -567,6 +569,9 @@ async function executeToolCallInner(
     args = outcome.data
   }
 
+  if (definition.domain === 'browser' && !context.browserWorkflowRoute && context.ensureBrowserWorkflowRoute) {
+    context.browserWorkflowRoute = await context.ensureBrowserWorkflowRoute()
+  }
   const admittedBrowserPageRef = definition.domain === 'browser'
     ? requestEnvelopeBrowserPageRef(context.requestEnvelope)
     : null
@@ -577,27 +582,37 @@ async function executeToolCallInner(
       admittedBrowserPageRef,
     )
     : null
-  if (invoker !== 'host' && toolName === 'browser_tabs' && browserTabsAction(args) === 'open') {
-    return browserFailureOutput({
-      ok: false,
-      errorKind: 'browser_tabs_successor_unbound',
-      toolName,
-      dispatch: 'rejected',
-      delivery: 'not_delivered',
-      effect: 'not_applicable',
-      mayHaveCommitted: false,
-    })
+  const browserHints = (context.requestEnvelope as import('../agent-control/contracts/request-envelope').RequestEnvelope | undefined)?.environmentHints
+  const admittedBrowserRoots = [
+    ...(admittedBrowserPageRef ? [admittedBrowserPageRef] : []),
+    ...(browserHints?.browserReadRefs || []),
+  ]
+  const browserTaskId = context.browserWorkflowRoute?.browserTaskId
+  const taskTabIds = browserTaskId ? context.browserController?.getTaskWorkTabIds?.(browserTaskId) || [] : []
+  const requestedTabId = typeof args.tab_id === 'string' ? args.tab_id.trim() : ''
+  if (definition.domain === 'browser' && invoker !== 'host') {
+    if (toolName === 'browser_tabs' && ['switch', 'close'].includes(browserTabsAction(args))
+      && !taskTabIds.includes(requestedTabId)) {
+      return browserFailureOutput({ ok: false, errorKind: 'browser_task_tab_not_owned' })
+    }
+    const selectedTabId = requestedTabId || (browserTaskId
+      ? context.browserController?.getAgentWorkTab?.(browserTaskId) : null) || admittedBrowserPageRef?.tabId
+    if (selectedTabId && selectedTabId !== admittedBrowserPageRef?.tabId) {
+      trustedBrowserPageRef = admittedBrowserRoots.find((pin) => pin.tabId === selectedTabId) || (taskTabIds.includes(selectedTabId) && browserTaskId && context.browserController
+        ? resolveTaskBrowserPageRef(admittedBrowserRoots, readSettledBrowserWorkflowOutcomes(context.browserController, browserTaskId), selectedTabId)
+        : null)
+      if (!trustedBrowserPageRef) {
+        return browserFailureOutput({ ok: false, errorKind: 'browser_reference_target_mismatch', requestedTabId: selectedTabId })
+      }
+    }
+    if (toolName === 'browser_tabs' && browserTabsAction(args) === 'open') {
+      if (!trustedBrowserPageRef || (args.opener_tab_id && args.opener_tab_id !== trustedBrowserPageRef.tabId)) {
+        return browserFailureOutput({ ok: false, errorKind: 'browser_reference_target_mismatch' })
+      }
+      args = { ...args, tab_id: trustedBrowserPageRef.tabId, opener_tab_id: trustedBrowserPageRef.tabId }
+    }
   }
   if (trustedBrowserPageRef && browserToolTargetsReferencedPage(toolName, args)) {
-    const requestedTabId = typeof args.tab_id === 'string' ? args.tab_id.trim() : ''
-    if (requestedTabId && requestedTabId !== trustedBrowserPageRef.tabId) {
-      return browserFailureOutput({
-        ok: false,
-        errorKind: 'browser_reference_target_mismatch',
-        expectedTabId: trustedBrowserPageRef.tabId,
-        requestedTabId,
-      })
-    }
     args = { ...args, tab_id: trustedBrowserPageRef.tabId }
   }
 
@@ -665,12 +680,38 @@ async function executeToolCallInner(
         }
       }
     }
-    const confirmation = resolveConfirmationGate(toolName, args, {
+    let confirmation = resolveConfirmationGate(toolName, args, {
       scopeId: context.scopeId || context.scope?.id || context.sessionId || null,
       messageVisibilityEpoch: context.messageVisibilityEpoch,
       actionAuthorizationMode: readActionAuthorizationModeFromEnvelope(context.requestEnvelope),
       larkCliExecutableVersion: context.larkCliExecutableAuthority?.version || null,
     })
+    let originsToApprove: string[] = []
+    if (definition.domain === 'browser' && trustedBrowserPageRef && context.browserController
+      && isBrowserOriginWrite(toolName, args)) {
+      const controller = context.browserController
+      const stale = await assertTrustedBrowserPageIdentity(controller, trustedBrowserPageRef)
+      if (stale) return stale
+      const originTabId = trustedBrowserPageRef.tabId
+      const targetIds = [args.target_id, args.input_target_id, args.submit_target_id,
+        ...(Array.isArray(args.fields) ? args.fields.map(field => field && typeof field === 'object' ? field.target_id : null) : [])]
+      const frameIds = [...new Set(['0', ...targetIds.filter((value): value is string => typeof value === 'string')
+        .map(value => parseBrowserSnapshotRef(value)?.frameId || '0')])]
+      const targetOrigins = await Promise.all(frameIds.map(async frameId => String(frameId !== '0'
+        ? await controller.executeJSInFrame(originTabId, frameId, 'location.origin')
+        : await controller.executeJS(originTabId, 'location.origin'))))
+      if (targetOrigins.some(origin => httpOrigin(origin) !== origin)) {
+        return browserFailureOutput({ ok: false, errorKind: 'browser_origin_unavailable', delivery: 'not_delivered' })
+      }
+      const payload = context.browserWorkflowRoute ? controller.getTaskPayload(context.browserWorkflowRoute.browserTaskId) : null
+      const approved = Array.isArray(payload?.approvedWriteOrigins) ? payload.approvedWriteOrigins.filter((value): value is string => typeof value === 'string') : []
+      originsToApprove = [...new Set(targetOrigins)].filter(origin => requiresBrowserOriginApproval(toolName, args, origin,
+        context.requestEnvelope as import('../agent-control/contracts/request-envelope').RequestEnvelope, approved))
+      if (originsToApprove.length && confirmation.action !== 'manual_only') {
+        confirmation = { mode: 'M2', action: 'confirm', ruleId: 'browser-origin-write', designRef: 'W7-BA7',
+          reason: `允许当前任务在 ${originsToApprove.join('、')} 修改网页或提交内容。${confirmation.action === 'confirm' ? confirmation.reason : ''}` }
+      }
+    }
     const deniedOutput = (
       errorKind: string,
       text: string,
@@ -742,6 +783,12 @@ async function executeToolCallInner(
       })
       switch (outcome.kind) {
         case 'released':
+          if (originsToApprove.length && context.browserController) {
+            const route = context.browserWorkflowRoute || await context.ensureBrowserWorkflowRoute?.()
+            if (!route || !context.runId) return deniedOutput('browser_workflow_route_required', '无法保存当前任务的来源授权，未执行。')
+            context.browserWorkflowRoute = route
+            for (const origin of originsToApprove) context.browserController.approveTaskWriteOrigin(route.browserTaskId, context.runId, origin)
+          }
           // One-shot token consumed inside `frozen-call-store.release()`;
           // re-enter the SAME dispatch path with the FROZEN params. All
           // admission checks rerun; only this gate is skipped.
@@ -804,7 +851,7 @@ async function executeToolCallInner(
           trustedBrowserPageRef = resolveLiveTrustedBrowserPageRef(
             context.browserController,
             context.browserWorkflowRoute?.browserTaskId ?? null,
-            admittedBrowserPageRef,
+            trustedBrowserPageRef,
           )
           if (trustedBrowserPageRef && browserToolTargetsReferencedPage(toolName, args)) {
             const stale = await assertTrustedBrowserPageIdentity(
@@ -881,6 +928,7 @@ async function executeToolCallInner(
               browserTurnLease: turnLease,
               messageVisibilityEpoch: context.messageVisibilityEpoch,
               trustedPageRef: trustedBrowserPageRef,
+              visibleTabIds: [...new Set([...admittedBrowserRoots.map((pin) => pin.tabId), ...taskTabIds])],
             },
           )
           if (

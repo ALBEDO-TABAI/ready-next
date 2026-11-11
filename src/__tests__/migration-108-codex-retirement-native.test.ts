@@ -43,6 +43,12 @@ function migrateThrough107(db: NativeDb): void {
 }
 
 function freezeRealPre108CodexTurnShape(db: NativeDb): void {
+  // The shared 088 schema now includes 118 guards that depend on 108 columns.
+  // These guards did not exist in 107 and must not enter this historical fixture.
+  db.exec(`
+    DROP TRIGGER codex_pristine_contract_refresh_update;
+    DROP TRIGGER codex_product_effect_parent_insert;
+  `)
   const immutableTrigger = db.prepare(`
     SELECT sql FROM sqlite_master
      WHERE type = 'trigger' AND name = 'codex_turn_binding_immutable_update'

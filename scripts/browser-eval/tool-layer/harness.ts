@@ -48,6 +48,7 @@ export interface ToolCallResult {
   tool: string
   args: Record<string, unknown>
   data: Record<string, unknown>
+  snapshotData?: Record<string, unknown>
   text: string
   shape: string | null
   hasImage: boolean
@@ -90,6 +91,7 @@ export interface Environment {
   controller: BrowserController
   window: BrowserWindow
   server: EvalServer
+  downloadsDir: string
   attachmentsDir: string
   checkpoints: AgentSessionCheckpointRepository
   projections: TaskProjectionRepository
@@ -146,6 +148,10 @@ export class AgentRun {
   tabId = ''
   allowedToolNames: string[] = []
   calls: ToolCallResult[] = []
+  private readonly snapshots = new Map<string, Record<string, unknown>>()
+  /** Origins this turn involves besides the page's own, as a user naming them would (BA7). */
+  private extraWriteOrigins: string[] = []
+  involveOrigins(origins: string[]): void { this.extraWriteOrigins = [...new Set([...this.extraWriteOrigins, ...origins])] }
   private pageRef: Record<string, unknown> | null = null
   private lease: BrowserTurnLease
   private readonly binding: ReturnType<typeof executionBinding>
@@ -285,7 +291,7 @@ export class AgentRun {
         executionBinding: this.binding,
         resourceAnchors: [],
       }),
-      requestEnvelope: { environmentHints: { workbenchMode: 'browser', browserPageRef: this.pageRef } },
+      requestEnvelope: { environmentHints: { workbenchMode: 'browser', browserPageRef: this.pageRef, browserWriteOrigins: [this.pageRef?.origin, ...this.extraWriteOrigins], workspaceRoots: [this.env.downloadsDir] } },
       allowedToolNames: new Set(this.allowedToolNames),
       authorization: buildExplicitNoSkillAuthorization('no_skill_signal'),
       abortSignal: new AbortController().signal,
@@ -306,6 +312,25 @@ export class AgentRun {
         if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) data = parsed as Record<string, unknown>
       } catch { /* non-JSON tool text stays in `text` */ }
     }
+    let snapshotData: Record<string, unknown> | undefined
+    if (tool === 'browser_snapshot') {
+      const identity = data.pageIdentity as { tabId?: string } | undefined
+      const key = identity?.tabId || this.tabId
+      const diff = data.snapshotDiff as { changes: { path: string[]; value?: unknown; remove?: boolean }[] } | undefined
+      if (diff) {
+        const previous = this.snapshots.get(key)
+        if (!previous) throw new Error('snapshot diff has no delivered base')
+        snapshotData = structuredClone(previous)
+        for (const change of diff.changes) {
+          let target = snapshotData
+          for (const segment of change.path.slice(0, -1)) target = target[segment] as Record<string, unknown>
+          const last = change.path.at(-1)!
+          if (change.remove) delete target[last]
+          else target[last] = change.value
+        }
+      } else snapshotData = structuredClone(data)
+      this.snapshots.set(key, snapshotData)
+    }
     const content = (output as { content?: unknown }).content
     const hasImage = Array.isArray(content) && content.some((item) => {
       const type = (item as { type?: unknown })?.type
@@ -315,6 +340,7 @@ export class AgentRun {
       tool,
       args,
       data,
+      snapshotData,
       text: output.text,
       shape: output.shape ?? null,
       hasImage,
@@ -358,8 +384,10 @@ export class AgentRun {
     )
   }
 
+  releaseControls(): void { this.lease.release() }
+
   close(): void {
-    this.lease.release()
+    this.releaseControls()
     if (this.tabId) {
       try { this.controller.closeTab(this.tabId) } catch { /* the tab may already be gone */ }
     }
@@ -431,7 +459,9 @@ export async function createEnvironment(server: EvalServer, profile: string): Pr
       bindings
     ) => checkpoints.bindBrowserResearchEvidence(taskId, ownerRunId, bindings),
   })
+  const downloadsDir = join(profile, 'downloads')
+  mkdirSync(downloadsDir, { recursive: true })
   const attachmentsDir = join(profile, 'attachments')
   mkdirSync(attachmentsDir, { recursive: true })
-  return { db, controller, window, server, attachmentsDir, checkpoints, projections, runMeta }
+  return { db, controller, window, server, downloadsDir, attachmentsDir, checkpoints, projections, runMeta }
 }

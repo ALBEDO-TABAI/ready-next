@@ -1,3 +1,5 @@
+import { annotateBrowserScreenshot } from '../browser-engine/screenshot-annotations'
+import { browserSnapshotDiff, taskBrowserSnapshotDiff } from '../browser-engine/snapshot-diff'
 /**
  * P3 Phase B6（2026-07-05，纯移动拆分）— browser-tools 观察/感知组。
  *
@@ -629,6 +631,9 @@ function rankTargetsNearAnchor(
  * import browser-tools，防循环依赖。
  */
 export interface BrowserObserveToolContext {
+  snapshotTaskId?: string
+  registerRunCleanup?: (cleanup: () => void | Promise<void>) => void
+  visibleTabIds?: readonly string[]
   controller: BrowserController
   abortSignal?: AbortSignal
   sessionId?: string
@@ -659,9 +664,9 @@ export async function executeBrowserObserveTool(
         const listed = controller.getTabList() as Array<ReturnType<BrowserController['getTabList']>[number] & {
           openerTabId?: string | null
         }>
-        const tabs = allowedTabId
-          ? listed.filter((tab) => tab.id === allowedTabId)
-          : listed
+        const tabs = ctx.visibleTabIds
+          ? listed.filter((tab) => ctx.visibleTabIds!.includes(tab.id))
+          : allowedTabId ? listed.filter((tab) => tab.id === allowedTabId) : listed
         if (tabs.length === 0) return 'No tabs open.'
         const byId = new Map(tabs.map((tab) => [tab.id, tab]))
         const rootTabId = (tabId: string): string => {
@@ -725,7 +730,7 @@ export async function executeBrowserObserveTool(
                 }))
             return {
               ...tab,
-              openerTabId: tab.openerTabId || null,
+              openerTabId: tab.openerTabId && byId.has(tab.openerTabId) ? tab.openerTabId : null,
               rootTabId: rootTabId(tab.id),
               workflowBindings: bindings,
             }
@@ -881,7 +886,9 @@ export async function executeBrowserObserveTool(
           const evidenceSummary = payload.evidence as { frames?: unknown[] } | undefined
           log(`read_page_map result: targets=${Array.isArray(mapSummary?.targets) ? mapSummary.targets.length : 0} truncated=${mapSummary?.truncated === true} frames=${Array.isArray(evidenceSummary?.frames) ? evidenceSummary.frames.length : 0} maxBytes=${maxBytes}`)
         }
-        return attachBrowserToolOutput(JSON.stringify(payload, null, 2), {
+        return attachBrowserToolOutput(JSON.stringify(ctx.snapshotTaskId
+          ? taskBrowserSnapshotDiff(controller, ctx.snapshotTaskId, tabId || '', payload, ctx.registerRunCleanup)
+          : browserSnapshotDiff(null, payload)), {
           toolName,
           args,
           controller,
@@ -978,13 +985,25 @@ export async function executeBrowserObserveTool(
             height: Number((clipRaw as Record<string, unknown>).height || 0),
           }
           : undefined
-        const base64 = await controller.screenshotAdvanced(tabId, { mode, clip })
+        if (args.annotate === true && mode !== 'viewport') return browserStructuredOutput({ ok: false, errorKind: 'annotations_require_viewport' })
+        const annotatedSnapshot = args.annotate === true ? await captureAgentPageMap(controller, tabId, DEFAULT_AGENT_PAGE_MAP_MAX_BYTES) : null
+        let base64 = await controller.screenshotAdvanced(tabId, { mode, clip })
         const metrics = await controller.getViewportMetrics(tabId)
         const width = Math.round(metrics.width)
         const height = Math.round(metrics.height)
         const viewportZero = width <= 0 || height <= 0
+        let labels: { number: number; targetId: string }[] = []
+        if (annotatedSnapshot && !viewportZero) {
+          const found = browserSnapshotService.find(controller, tabId, { frameId: '0', limit: 100 })
+          if (!found) return browserStructuredOutput({ ok: false, errorKind: 'snapshot_required' })
+          const targets = found.matches
+          const annotated = await annotateBrowserScreenshot(base64, width, targets)
+          base64 = annotated.base64
+          labels = annotated.labels
+        }
         const data = {
           ok: !viewportZero,
+          ...(annotatedSnapshot ? { labels, pageIdentity: annotatedSnapshot.pageIdentity } : {}),
           width,
           height,
           mode,
@@ -997,7 +1016,7 @@ export async function executeBrowserObserveTool(
           shape: 'multimodal',
           data,
           // viewport 路径压缩为 JPEG（K3 400 修复）；clip/full_page 仍走 CDP PNG。
-          content: viewportZero ? [] : [{ type: 'image', data: base64, mediaType: mode === 'viewport' ? 'image/jpeg' : 'image/png', detail: 'auto' }],
+          content: viewportZero ? [] : [{ type: 'image', data: base64, mediaType: annotatedSnapshot || mode !== 'viewport' ? 'image/png' : 'image/jpeg', detail: 'auto' }],
         })
       }
 
@@ -1224,10 +1243,11 @@ export async function executeBrowserObserveTool(
               : requestedCondition) as never,
           selector: typeof args.selector === 'string' ? args.selector : undefined,
           customJs,
+          previousText: typeof args.previous_text === 'string' ? args.previous_text : undefined,
           timeoutMs: Number(args.timeout_ms || 0) || undefined,
           checkIntervalMs: Number(args.check_interval_ms || 0) || undefined,
           stableIterations: Number(args.stable_iterations || 0) || undefined,
-        })
+        }, abortSignal)
         return JSON.stringify({
           ...result,
           observationFresh: result.matched,

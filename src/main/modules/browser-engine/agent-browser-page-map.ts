@@ -94,6 +94,8 @@ const WRAPPER_ROLES = new Set(['generic', 'listitem', 'group', 'none', 'presenta
 
 /** Roles worth surfacing as actionable / semantic targets. */
 const TARGET_ROLES = new Set([
+  'canvas',
+  'Canvas',
   'button',
   'clickable',
   'link',

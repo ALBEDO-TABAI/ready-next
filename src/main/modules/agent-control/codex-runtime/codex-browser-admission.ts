@@ -31,6 +31,8 @@ export const BROWSER_EXPLICIT_READ_TOOL_NAMES = [
 ] as const satisfies readonly BrowserPublicToolName[]
 
 export const BROWSER_CURRENT_PAGE_TOOL_NAMES = [
+  'browser_tabs',
+  'browser_download',
   'browser_navigate',
   'browser_search',
   'browser_snapshot',

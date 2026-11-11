@@ -8,7 +8,6 @@ import type { CaseGroup } from '../harness'
 import {
   actionOutcome,
   allTargets,
-  closedTool,
   delivered,
   errorKind,
   fail,
@@ -45,16 +44,35 @@ export const downloadsGroup: CaseGroup = {
         ? pass(`${links.length} 个链接带地址`)
         : fail(`缺少 ${missing.join('、')}；看到：${targetSummary(targets)}`)
     })
-    await ctx.check(
-      'download-tool-closed',
-      '下载工具不在工具面：报表无法经工具落盘',
-      ['browser_download'],
-      async () => (
-        closedTool(
-          await run.call('browser_download', { mode: 'urls', urls: [ctx.url('/downloads/files/report-2026-q3.csv')] }),
-          '下载未开放：browser_download 被准入拒绝，没有落盘与回执（T4）'
-        )
-      ))
+    await ctx.check('download-receipt', '下载落盘、哈希、回执与 ReadyRef 一致', ['browser_download'], async () => {
+      const result = await run.call('browser_download', { mode: 'urls', urls: [ctx.url('/downloads/files/report-2026-q3.csv')] })
+      const receipts = result.data.downloadReceipts as import('../../../../src/shared/browser-download-receipt').BrowserDownloadReceipt[]
+      if (receipts?.length !== 1) return fail(result.text)
+      const receipt = receipts[0]
+      const { readFileSync } = await import('node:fs')
+      const { createHash } = await import('node:crypto')
+      const bytes = readFileSync(receipt.path)
+      const saved = run.controller.getTaskDownloadReceipts({ browserTaskId: receipt.browserTaskId }).downloadReceipts
+      return bytes.length === receipt.size && createHash('sha256').update(bytes).digest('hex') === receipt.sha256
+        && receipt.sha256 === ctx.server.fixtures.files['report-2026-q3.csv'].sha256
+        && receipt.readyUri.startsWith('ready://doc/file/') && JSON.stringify(saved) === JSON.stringify(receipts)
+        ? pass('文件和独立回执完全一致', receipts) : fail(result.text)
+    })
+    await ctx.check('download-public-local-redirect', '公开名称跳转本地网络拒绝发布', ['browser_download'], async () => {
+      const url = new URL(ctx.url('/__eval/public-download-redirect'))
+      url.hostname = 'public.browser-eval.test'
+      const result = await run.call('browser_download', { mode: 'urls', urls: [url.href] })
+      const { readdirSync } = await import('node:fs')
+      return /public_to_local|redirect.*local|local.*redirect/.test(result.text)
+        && !readdirSync(ctx.env.downloadsDir).some(name => name.endsWith('.part'))
+        ? pass('重定向被拒绝且无临时残留') : fail(result.text)
+    })
+    await ctx.check('download-outside', '下载拒绝越界目录且不发起请求', ['browser_download'], async () => {
+      const count = ctx.server.records('download').length
+      const result = await run.call('browser_download', { mode: 'urls', directory: '/', urls: [ctx.url('/downloads/files/report-2026-q3.csv')] })
+      return result.text.includes('download_directory_not_authorized') && ctx.server.records('download').length === count
+        ? pass('越界在下载前拒绝') : fail(result.text)
+    })
   },
 }
 
@@ -214,12 +232,6 @@ export const popupGroup: CaseGroup = {
         ? pass('目标齐全')
         : fail(`缺少 ${missing.join('、')}；看到：${targetSummary(targets)}`)
     })
-    await ctx.check('tabs-open-closed', '助手不能开新标签或切到新标签', ['browser_tabs'], async () => (
-      closedTool(
-        await run.call('browser_tabs', { action: 'open', url: ctx.url('/popup/child.html?from=tool') }),
-        '跨标签未开放：新标签只能由页面自己打开，助手看不到（T3）'
-      )
-    ))
     await ctx.check(
       'window-open-pointer',
       '弹窗按钮在后台点不了，也没有新窗口或新标签',

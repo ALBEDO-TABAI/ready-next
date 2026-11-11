@@ -89,19 +89,22 @@ export async function executeBrowserActNavigation(
       case 'tabs_open': {
         const url = String(args.url || 'about:blank')
         const created = ctx.agentOwnedWorkTab
-          ? await controller.ensureAgentWorkTab(ctx.agentOwnedWorkTab.browserTaskId, url)
+          ? await controller.createAgentWorkTab(ctx.agentOwnedWorkTab.browserTaskId, url, String(args.opener_tab_id || args.tab_id || ''))
           : await controller.createTab(url, {
               background: args.background === true,
               openerTabId: typeof args.opener_tab_id === 'string' ? args.opener_tab_id : null,
             })
+        if (ctx.agentOwnedWorkTab && created.success && created.tabId) {
+          await controller.waitForCondition(created.tabId, { condition: 'page_readable', timeoutMs: 15_000 }, abortSignal)
+        }
         return JSON.stringify(created, null, 2)
       }
 
       case 'tabs_switch': {
         const tabId = String(args.tab_id || '')
         if (!tabId) return 'Error: tab_id is required'
-        if (ctx.agentOwnedWorkTab && controller.getAgentWorkTab(ctx.agentOwnedWorkTab.browserTaskId) === tabId) {
-          return JSON.stringify({ success: true, tabId, presented: false }, null, 2)
+        if (ctx.agentOwnedWorkTab) {
+          return JSON.stringify(controller.selectTaskWorkTab(ctx.agentOwnedWorkTab.browserTaskId, tabId), null, 2)
         }
         return JSON.stringify(controller.switchTab(tabId), null, 2)
       }
@@ -109,6 +112,9 @@ export async function executeBrowserActNavigation(
       case 'tabs_close': {
         const tabId = String(args.tab_id || '')
         if (!tabId) return 'Error: tab_id is required'
+        if (ctx.agentOwnedWorkTab && !controller.getTaskWorkTabIds(ctx.agentOwnedWorkTab.browserTaskId).includes(tabId)) {
+          return browserStructuredOutput({ ok: false, errorKind: 'browser_task_tab_not_owned' })
+        }
         return JSON.stringify(controller.closeTab(tabId), null, 2)
       }
 

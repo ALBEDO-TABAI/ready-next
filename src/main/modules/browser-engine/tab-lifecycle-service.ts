@@ -99,6 +99,7 @@ interface BrowserTabLifecycleHost {
   }): void
   updateHistoryEntryTitle(url: string, title: string, favicon?: string | null): void
   handleLocalMediaDropNavigation(tabId: string, url: string): boolean
+  preparePageObservation?(tabId: string): Promise<void>
   onTabLoadStateMayChange?(tabId: string, reason: string): void
   browserUserAgent: string
   useMock: boolean
@@ -517,6 +518,12 @@ export class BrowserTabLifecycleService {
       } else {
         // fire-and-forget: load failures surface via did-fail-load.
         void view.webContents.loadURL(tab.url).catch(() => undefined)
+        // Network tracking (W7 network idle) starts alongside the first load and never gates it: on a page that has
+        // not navigated yet Network.enable waits for the renderer, and gating the load on it left every new tab
+        // blank. A failure only means the next wait retries tracking.
+        void this.host.preparePageObservation?.(tabId)?.catch(error => {
+          console.warn('[browser] network tracking not started; waits retry it', tabId, error instanceof Error ? error.message : String(error))
+        })
       }
     } catch (error) {
       this.host.detachHost(view)

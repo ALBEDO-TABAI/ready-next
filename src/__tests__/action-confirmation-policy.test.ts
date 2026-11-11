@@ -32,7 +32,7 @@ import {
 } from '../main/modules/agent-control/skills/skill-tool-authorization'
 
 test('action-confirmation-policy declares transitive sqlite ABI guard', (t) => {
-  skipIfSqliteUnavailable(t, 'action-confirmation-policy transitive sqlite load')
+  if (skipIfSqliteUnavailable(t, 'action-confirmation-policy transitive sqlite load')) return
 })
 
 function modelContext(overrides: Partial<ToolContext> = {}): ToolContext {
@@ -929,10 +929,32 @@ test('source pin: confirmation gate sits AFTER authorization and reads only the 
   )
   const authIdx = source.indexOf('checkSkillToolAuthorization(toolName, authorization, isPrimitive)')
   // The gate accepts persisted scope authority, never model intent/TurnFrame.
-  const gateIdx = source.indexOf('const confirmation = resolveConfirmationGate(toolName, args, {')
+  const gateIdx = source.indexOf('let confirmation = resolveConfirmationGate(toolName, args, {')
   assert.ok(authIdx > 0, 'authorization check must exist')
   assert.ok(gateIdx > 0, 'confirmation gate must exist and read the frozen request mode — no model-authored approval input')
   assert.ok(authIdx < gateIdx, 'confirmation gate must run AFTER skill tool authorization')
+  const gate = source.slice(gateIdx, source.indexOf('    let originsToApprove:', gateIdx)).trim()
+  assert.equal(gate, `let confirmation = resolveConfirmationGate(toolName, args, {
+      scopeId: context.scopeId || context.scope?.id || context.sessionId || null,
+      messageVisibilityEpoch: context.messageVisibilityEpoch,
+      actionAuthorizationMode: readActionAuthorizationModeFromEnvelope(context.requestEnvelope),
+      larkCliExecutableVersion: context.larkCliExecutableAuthority?.version || null,
+    })`, 'authority options must come only from the frozen request and host context, never args')
+  const promotion = source.slice(source.indexOf('      if (originsToApprove.length', gateIdx), source.indexOf('    const deniedOutput =', gateIdx)).trim()
+  assert.equal(promotion, `if (originsToApprove.length && confirmation.action !== 'manual_only') {
+        confirmation = { mode: 'M2', action: 'confirm', ruleId: 'browser-origin-write', designRef: 'W7-BA7',
+          reason: \`允许当前任务在 \${originsToApprove.join('、')} 修改网页或提交内容。\${confirmation.action === 'confirm' ? confirmation.reason : ''}\` }
+      }
+    }`, 'origin scope may only promote to confirmation; manual-only and existing confirmation remain protected')
+  assert.equal([...source.matchAll(/\bconfirmation\s*=(?!=)/g)].length, 2, 'no other assignment may relax the decision')
+})
+
+test('dispatch ignores model-authored approval and authorization mode arguments', async () => {
+  const output = await executeToolCall('feishu_message_send', {
+    channel_id: 'ch-1', chat_id: 'oc-1', msg_type: 'text', content: { text: '普通测试消息' },
+    actionAuthorizationMode: 'full', confirmed: true, approved: true,
+  }, modelContext({ requestEnvelope: { actionAuthorizationMode: 'ask' } }))
+  assert.equal(output.data?.errorKind, 'denied_pending_confirmation')
 })
 
 // --- W10-F6（2026-07-11 dogfood）：导出覆写并入"覆盖即销毁"确认规则 ----------

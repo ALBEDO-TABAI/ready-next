@@ -203,6 +203,7 @@ export function createIngressPrepare(deps: IngressPrepareDeps) {
           : [],
       }))
       const trustedEnvironment = {
+        ...(browserReference?.environment.browserPageRef ? { browserReadRefs: [browserReference.environment.browserPageRef] } : {}),
         ...(activeWorkbenchMode ? { workbenchMode: activeWorkbenchMode } : {}),
         ...(executionPageRef ? { browserPageRef: executionPageRef } : {}),
       }

@@ -212,7 +212,7 @@ export abstract class BrowserControllerContractBase {
       hostPresentation: BrowserHostPresentationState;
       tabActive: boolean;
   };
-  abstract waitForCondition(tabId: string | null, options: BrowserWaitForConditionOptions): Promise<{
+  abstract waitForCondition(tabId: string | null, options: BrowserWaitForConditionOptions, signal?: AbortSignal): Promise<{
       matched: boolean;
       elapsedMs: number;
       value?: unknown;
@@ -221,6 +221,10 @@ export abstract class BrowserControllerContractBase {
   abstract scrollCollect(tabId: string | null, options: BrowserScrollCollectOptions, signal?: AbortSignal): Promise<BrowserScrollCollectResult>;
   abstract aggregateResults(items: BrowserStructuredItem[], options?: BrowserAggregateOptions): BrowserStructuredItem[];
   abstract getTask(taskId: string): Promise<BrowserCapabilityTaskHandle | null>;
+  abstract approveTaskWriteOrigin(browserTaskId: string, ownerRunId: string, origin: string): void;
+  abstract resolveTaskDownloadDirectory(requested: unknown, roots: readonly string[]): string;
+  abstract getTaskDownloadReceipts(request: { browserTaskId: string }): { success: boolean; downloadReceipts: import('../../../shared/browser-download-receipt').BrowserDownloadReceipt[]; error?: string };
+  abstract consumeTaskDownload(file: unknown, directory: string, browserTaskId: string, ownerRunId: string): import('../../../shared/browser-download-receipt').BrowserDownloadReceipt;
   abstract getTaskPayload(taskId: string): Record<string, unknown> | null;
   abstract upsertBrowserResearchWorkItems(taskId: string, ownerRunId: string, workItems: BrowserResearchWorkItemInput[]): BrowserResearchAssessment;
   abstract bindBrowserResearchEvidence(taskId: string, ownerRunId: string, bindings: BrowserResearchEvidenceBindingInput[]): BrowserResearchAssessment;
@@ -446,6 +450,10 @@ export abstract class BrowserControllerContractBase {
       error?: string;
   }>;
   abstract getAgentWorkTab(browserTaskId: string): string | null;
+  abstract createAgentWorkTab(browserTaskId: string, url: string, openerTabId: string): Promise<{ success: boolean; tabId?: string; error?: string }>;
+  abstract getTaskWorkTabIds(browserTaskId: string): string[];
+  abstract selectTaskWorkTab(browserTaskId: string, tabId: string): { success: boolean; tabId?: string; presented?: boolean; error?: string };
+  abstract closeTaskTabs(request: { browserTaskId: string }): { success: boolean; closedTabIds: string[]; error?: string };
   abstract ensureAgentWorkTab(browserTaskId: string, url?: string): Promise<{
       success: boolean;
       tabId?: string;

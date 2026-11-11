@@ -1,3 +1,4 @@
+import type { BrowserActionOutcome } from '../shared/browser-action-outcome'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
@@ -138,7 +139,7 @@ test('model browser_tabs list only returns the pinned page', async () => {
   assert.deepEqual(listed.map((tab) => tab.id), ['tab-ref'])
 })
 
-test('model browser_tabs open is rejected without successor authority', async () => {
+test('model browser_tabs open refuses an unreferenced opener', async () => {
   const c = controller()
   let created = 0
   Object.assign(c, {
@@ -157,8 +158,8 @@ test('model browser_tabs open is rejected without successor authority', async ()
     browserTaskId: 'browser-task-ref',
     requestAnchorSnapshotDigest: 'anchor-ref',
   }
-  const output = await executeToolCall('browser_tabs', { action: 'open', url: 'https://created.test' }, context)
-  assert.equal(output.data?.errorKind, 'browser_tabs_successor_unbound')
+  const output = await executeToolCall('browser_tabs', { action: 'open', url: 'https://created.test', opener_tab_id: 'other-user-tab' }, context)
+  assert.equal(output.data?.errorKind, 'browser_reference_target_mismatch')
   assert.equal(created, 0)
 })
 
@@ -433,4 +434,76 @@ test('tool-executor rejects a referenced browser page after its document identit
   const output = await executeToolCall('browser_read', {}, context)
   assert.equal(output.data?.errorKind, 'browser_reference_stale')
   assert.equal(c.readCalls, 0)
+})
+
+
+test('unmentioned origin write requires an action-confirmation card and delivers no input', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'browser origin scope')) return
+  const c = controller()
+  let writes = 0
+  Object.assign(c, {
+    getTaskPayload: () => ({}),
+    getPhysicalTargetToken: () => 'physical-ref',
+    executeJS: async (_tabId: string | null, script: string) => script === 'location.origin'
+      ? 'https://foreign.test' : { url: 'https://foreign.test', title: 'Foreign', timeOrigin: 1, mutationRevision: 0, frameDocumentToken: 'document-token-ref' },
+    typeTextDirectly: async () => { writes++; return { success: true } },
+  })
+  const context = ctx(c)
+  context.requestEnvelope = referencedPageEnvelope()
+  context.browserWorkflowRoute = { browserTaskId: 'origin-task', requestAnchorSnapshotDigest: 'origin-anchor' }
+  const output = await executeToolCall('browser_type', { selector: 'input', text: 'value' }, context)
+  assert.equal(output.data?.ruleId, 'browser-origin-write')
+  assert.equal(output.data?.errorKind, 'denied_pending_confirmation')
+  assert.equal(writes, 0)
+})
+
+
+test('model opens a task page with causal journal identity then reads it without exposing other user tabs', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'task tabs')) return
+  const c = controller()
+  const outcomes: BrowserActionOutcome[] = []
+  const tabs = [
+    { id: 'tab-ref', title: 'Root', url: 'https://referenced.test', active: true },
+    { id: 'private', title: 'Private', url: 'https://private.test', active: false },
+  ]
+  let selected: string | null = null
+  Object.assign(c, {
+    getActiveTab: () => tabs[0], getTabList: () => tabs,
+    getPhysicalTargetToken: (id: string) => id === 'tab-ref' ? 'physical-ref' : 'physical-work',
+    executeJS: async (id: string, script: string) => script === 'location.origin' ? 'https://referenced.test' : {
+      url: 'https://referenced.test', title: 'Page', timeOrigin: 1, mutationRevision: 0,
+      frameDocumentToken: id === 'tab-ref' ? 'document-token-ref' : 'document-work',
+    },
+    getTaskWorkTabIds: () => selected ? [selected] : [], getAgentWorkTab: () => selected,
+    createAgentWorkTab: async (_task: string, url: string, openerTabId: string) => {
+      assert.equal(openerTabId, 'tab-ref')
+      tabs.push({ id: 'work', title: 'Work', url, active: false }); selected = 'work'
+      return { success: true, tabId: 'work' }
+    },
+    waitForCondition: async () => ({ matched: true, elapsedMs: 0 }),
+    getPageContent: async () => 'task page body',
+    beginBrowserWorkflowAction: (input: { identity: unknown }) => ({ actionId: 'open-1', actionSeq: 1, identity: input.identity }),
+    settleBrowserWorkflowAction: (_task: string, _id: string, outcome: BrowserActionOutcome) => {
+      outcomes.push(outcome); return { receiptId: 'open-receipt', outcome }
+    },
+    readBrowserWorkflowSettledOutcomes: () => outcomes,
+    recordBrowserWorkflowObservation: (input: Record<string, unknown>) => input,
+    consumeBrowserSiteNotices: () => [],
+  })
+  await browserSnapshotService.capture(c, 'tab-ref', 1024, async () => ({ targets: [] }))
+  const context = ctx(c)
+  context.requestEnvelope = referencedPageEnvelope()
+  context.browserWorkflowRoute = { browserTaskId: 'browser-task-ref', requestAnchorSnapshotDigest: 'anchor' }
+  const opened = await executeToolCall('browser_tabs', { action: 'open', url: 'https://referenced.test/next' }, context)
+  assert.equal(opened.data?.success, true, textOf(opened))
+  assert.equal(outcomes[0].identity.tabId, 'tab-ref')
+  assert.equal(outcomes[0].postActionTabId, 'work')
+  assert.equal(outcomes[0].successorIdentity.tabId, 'work')
+  const read = await executeToolCall('browser_read', { tab_id: 'work' }, context)
+  assert.match(read.text, /task page body/)
+  const listed = await executeToolCall('browser_tabs', { action: 'list' }, context)
+  assert.deepEqual((listed.data?.tabs as { id: string }[]).map(tab => tab.id), ['tab-ref', 'work'])
+  assert.equal(c.getActiveTab()?.id, 'tab-ref')
+  const denied = await executeToolCall('browser_tabs', { action: 'close', tab_id: 'private' }, context)
+  assert.equal(denied.data?.errorKind, 'browser_task_tab_not_owned')
 })

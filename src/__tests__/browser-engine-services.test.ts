@@ -69,6 +69,7 @@ function createMockView(options?: {
       setWindowOpenHandler: () => undefined,
       setUserAgent: () => undefined,
       close: () => undefined,
+      isDestroyed: () => false,
       executeJavaScript: async (code: string) => options?.executeJavaScript?.(code),
       capturePage: async () => ({
         toPNG: () => Buffer.from('mock-image'),
