@@ -210,6 +210,8 @@ async function tour(page, theme, vault, ids, checks) {
 
   // 5b · 资讯 出处: the reader's source line is a capsule to the original page.
   await harness.requestMode(page, 'rss')
+  // 资讯 opens on 为你筛过的 (W5); the article list is under 全部.
+  await page.locator('nav[aria-label="资讯导航"] [aria-label="全部"]').click({ timeout: 20000 })
   const card = page.locator('[data-rss-item-id] .rss-card-title button').first()
   await card.waitFor({ timeout: 20000 })
   await card.click()
