@@ -113,7 +113,8 @@ export function InkTopbar({ tab, roots, home, outline, pageMenu, status, sourceM
       {!home && sourceMode && markdown && <button type="button" className="ink-source-chip" aria-label="返回页面视图" {...tip('返回页面视图')} onClick={() => onSourceMode(false)}>
         <Icon name="code" size={13} stroke={2} />源码<Icon name="x" size={12} stroke={2} />
       </button>}
-      {!home && status}
+      {/* On 今日 the draft controls keep only the recovery badge: unsaved drafts stay reachable after a crash. */}
+      {status}
       {!home && tab?.objectId && favorite !== null && (
         <button type="button" className={`ink-topbar-icon${favorite ? ' is-fav' : ''}`} aria-label={favorite ? '取消收藏' : '收藏'} aria-pressed={favorite} {...tip(favorite ? '取消收藏' : '收藏')} onClick={toggleFavorite}>
           <Icon name="star" size={18} stroke={1.6} style={favorite ? { fill: '#F6C050', color: '#F6C050' } : undefined} />

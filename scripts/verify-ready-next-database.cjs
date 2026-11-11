@@ -88,8 +88,8 @@ async function main() {
       await page.waitForTimeout(200)
     }
     await page.locator('.ink-doc-app').waitFor({ state: 'visible' })
-    const note = page.getByText('视图验收.md', { exact: true }).first()
-    if (!await note.isVisible()) await page.getByText(path.basename(vault), { exact: true }).first().click()
+    // The navigator opens on its 页面 view, which lists the library's pages by title (W3 §3).
+    const note = page.locator('[data-shell-navigator="document"] section[aria-label="页面"] .ink-sb-label-btn').filter({ hasText: /^视图验收$/ }).first()
     await note.click()
     const table = page.locator('.ready-database[data-view-type="table"]:visible').first()
     const board = page.locator('.ready-database[data-view-type="board"]:visible').first()

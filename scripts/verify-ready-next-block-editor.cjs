@@ -51,9 +51,8 @@ async function main() {
       })))
       await page.waitForTimeout(150)
     }
-    // The outer sidebar is the file manager.
-    const row = page.getByText(path.basename(file), { exact: true }).first()
-    if (!await row.isVisible()) await page.getByText(path.basename(vault), { exact: true }).first().click()
+    // The navigator opens on its 页面 view, which lists the library's pages by title (W3 §3).
+    const row = page.locator('[data-shell-navigator="document"] section[aria-label="页面"] .ink-sb-label-btn', { hasText: path.basename(file, '.md') }).first()
     await row.click()
     const panel = page.locator('[data-workbench-mode-panel="document"][data-mode-visual-state="current"]')
     await panel.waitFor({ state: 'visible' })
