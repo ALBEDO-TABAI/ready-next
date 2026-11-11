@@ -17,7 +17,7 @@ test('one shell sidebar hosts mode navigators and the UI guide points to their c
 
   assert.match(sidebar, /data-shell-sidebar="true"/)
   assert.match(sidebar, /createPortal\(/)
-  assert.match(workbench, /<ShellSidebarSlotProvider value=\{sidebarSlotValue\}>/)
+  assert.match(workbench, /<ShellSidebarSlotProvider value=\{sidebarSlot\.value\}>/)
   assert.match(navigator, /import FilesPanel from '\.\.\/\.\.\/\.\.\/components\/layout\/FilesPanel'/)
   assert.match(navigator, /<FilesPanel isVisible=\{visible && view === 'files'\}>/)
   assert.match(workspaceStore, /setSidePanelWidth: \(width: number\) => void/)

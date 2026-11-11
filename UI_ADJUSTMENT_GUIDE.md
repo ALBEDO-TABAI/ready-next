@@ -40,12 +40,12 @@
 
 - 页面：`src/renderer/pages/modes/BrowserMode.tsx`
 - 顶栏：`src/renderer/components/browser/BrowserTopBar.tsx`
-- 竖向标签：`src/renderer/components/browser/VerticalTabRail.tsx`
+- 标签列表（外壳侧栏里的导航器，带标题、分组、拖到助手）：`src/renderer/components/browser/BrowserTabList.tsx`
 - 分组共用件：`src/renderer/components/tabs/TabGroupHeaderRow.tsx`、`TabGroupEditMenu.tsx`
 - BrowserView bounds：`src/renderer/modules/browser/useBrowserViewBounds.ts`
 - 状态：`src/renderer/stores/useBrowserTabs.ts`
 
-BrowserView 是原生覆盖层。弹层、hover flyout 和模式切换问题先核对 hide/show 与 bounds，不要只调 `z-index`。
+BrowserView 是原生覆盖层。弹层、侧栏滑出和模式切换问题先核对 hide/show 与 bounds，不要只调 `z-index`。
 
 ### Document
 

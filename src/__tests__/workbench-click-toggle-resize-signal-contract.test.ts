@@ -42,9 +42,12 @@ test('WorkbenchMode wires the wrapped handlers so docked panel toggles retain th
   assert.match(source, /<ChatPanel[^>]*onTogglePanel=\{shell\.toggleAssistant\}/)
   assert.match(source, /toggleDockedSidebar: handleToggleSidebarWithResize/)
   assert.match(source, /toggleDockedAssistant: handleToggleChatPanelWithResize/)
-  assert.match(source, /case 'toggle-sidebar': toggleShellSidebar\(\); break/)
-  assert.match(source, /case 'toggle-assistant': toggleShellAssistant\(\); break/)
-  assert.match(source, /window\.addEventListener\(SHELL_ACTION_EVENT, onShellAction\)/)
+  // ⌘K / navigator / header requests reach the same shell toggles (and so the same resize signal).
+  assert.match(source, /useShellActions\(\{ toggleSidebar: toggleShellSidebar, toggleAssistant: toggleShellAssistant,/)
+  const wiring = readFileSync(resolve(process.cwd(), 'src/renderer/modules/workbench/shell/useShellWiring.ts'), 'utf8')
+  assert.match(wiring, /case 'toggle-sidebar': h\.toggleSidebar\(\); break/)
+  assert.match(wiring, /case 'toggle-assistant': h\.toggleAssistant\(\); break/)
+  assert.match(wiring, /window\.addEventListener\(SHELL_ACTION_EVENT, onAction\)/)
 })
 
 test('ChatPanel prefers the wrapped onTogglePanel prop over the raw useWorkspace toggle so header actions keep the resize signal', () => {
