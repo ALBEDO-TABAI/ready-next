@@ -1,3 +1,4 @@
+import { appShortcut, shortcutKeycaps } from '../../../../../shared/app-shortcuts';
 import { t, Key } from '../i18n';
 import { MOD } from '../commands';
 import { isMac } from '../platform';
@@ -9,7 +10,7 @@ type Row = [Key, string[][], string?] | Key;
 const CTRL = isMac ? '⌃' : 'Ctrl'; const ALT = isMac ? '⌥' : 'Alt';
 const GROUPS: [Key, Row[]][] = [
   ['shortcutsGlobal', [['sTrayCal', [[CTRL, isMac?MOD:ALT, 'K']]], ['sJoinGlobal', [[CTRL, isMac?MOD:ALT, 'J']]]]],
-  ['shortcutsGeneral', [['commandMenu', [[MOD, 'K']]], ['sSidebar', [['\\']]], ['sPanel', [[MOD, '\\']]], ['sTheme', [['⇧', MOD, 'L']]], ['sSave', [['return'], [MOD, 'return']]], ['sEsc', [['esc']]],
+  ['shortcutsGeneral', [['commandMenu', [[MOD, 'K']]], ['sSidebar', [['\\']]], ['sPanel', [shortcutKeycaps(appShortcut('calendar.panel'), isMac)]], ['sTheme', [['⇧', MOD, 'L']]], ['sSave', [['return'], [MOD, 'return']]], ['sEsc', [['esc']]],
     ['sUndo', [[MOD, 'Z']]], ['sRedo', [['⇧', MOD, 'Z']]], ['sAddSel', [['⇧'], [MOD]], 'click'], ['sSelectAll', [[MOD, 'A']]], ['sSearch', [['/'], [MOD, 'F']]], ['sSettings', [[MOD, ',']]], ['sShortcuts', [['?']]]]],
   ['shortcutsEvents', [['sCreate', [['C'], [MOD, 'N']]], ['sJoin', [[MOD, 'J']]], ['sAvail', [['S']]], 'sSelectedHdr', ['sDelete', [['delete']]], ['sCut', [[MOD, 'X']]], ['sCopy', [[MOD, 'C']]], ['sDuplicate', [[MOD, 'D'], [ALT]], 'drag'], ['sEditField', [['E']]], 'sCopiedHdr', ['sPaste', [[MOD, 'V']]]]],
   ['shortcutsViews', [['sDay', [['1'], ['D']]], ['sWeek', [['0'], ['W']]], ['sNDays', [['2 – 9']]], ['sMonth', [['M']]], ['sZoomIn', [['⇧', MOD, '.']]], ['sZoomOut', [['⇧', MOD, ',']]], ['sZoomReset', [['⇧', MOD, '0']]], ['sAllDay', [['⇧', MOD, 'A']]], ['showWeekends', [['⇧', MOD, 'E']]], ['showDeclined', [['⇧', MOD, 'D']]], ['sTzToggle', [['Z']]]]],

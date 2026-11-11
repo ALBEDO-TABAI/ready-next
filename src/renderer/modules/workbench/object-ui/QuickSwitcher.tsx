@@ -1,15 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { CornerDownLeft, File, FileText, Search, Shapes } from 'lucide-react'
 import { useDocTabs } from '../../../stores/useDocTabs'
 import { computeDesiredRoots, useWorkspace } from '../../../stores/useWorkspace'
-import type { WorkbenchMode } from '../../../stores/useMode'
-import { requestWorkbenchModeOpen } from '../mode-transition'
+import { useMode } from '../../../stores/useMode'
+import { shortcutKeycaps } from '../../../../shared/app-shortcuts'
+import { commandRegistryRevision, listCommands, subscribeCommands } from '../commands/registry'
 import { draftSearchResults, mergeDraftResults, queryObjectIndex, type SearchResultItem } from './query'
 import { MaskedObjectOverlay } from './QuickLook'
 import { openObjectTarget, searchResultTarget, type PreviewTarget } from './navigation'
 
-export function QuickSwitcher({ onClose, onPreview, onSettings }: {
-  onClose: () => void; onPreview: (target: PreviewTarget) => void; onSettings: () => void
+export function QuickSwitcher({ onClose, onPreview }: {
+  onClose: () => void; onPreview: (target: PreviewTarget) => void
 }) {
   const tabs = useDocTabs(state => state.tabs)
   const workspaceRoot = useWorkspace(state => state.workspaceRoot)
@@ -19,7 +20,6 @@ export function QuickSwitcher({ onClose, onPreview, onSettings }: {
   const [response, setResponse] = useState<{ query: string; roots: string[]; items: SearchResultItem[]; warning: string } | null>(null)
   const [recent, setRecent] = useState<SearchResultItem[]>([])
   const running = useRef(false), mounted = useRef(true), selectionVersion = useRef(0)
-  const createRequest = useRef<{ root: string; operationId: string } | null>(null)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   useEffect(() => {
     let active = true
@@ -46,18 +46,13 @@ export function QuickSwitcher({ onClose, onPreview, onSettings }: {
     const paths = new Set(open.map(item => item.path))
     return [...open, ...recent.filter(item => !paths.has(item.path))]
   }, [query, roots, response, tabs, recent])
-  const commands = [
-    { name: '新建页面', run: async () => {
-      const vault = await window.electronAPI.vault.get()
-      if (vault.status !== 'ready') throw new Error('请先打开资料库')
-      if (createRequest.current?.root !== vault.root) createRequest.current = { root: vault.root, operationId: crypto.randomUUID() }
-      const result = await window.electronAPI.documentPages.operate({ type: 'create', ...createRequest.current, parentPath: vault.root, title: '新页面', content: '' })
-      if (!result.ok) throw new Error(result.message)
-      if (mounted.current) await openObjectTarget({ kind: 'page', id: result.value.objectId })
-    } },
-    ...(['document', 'browser', 'rss', 'calendar'] as WorkbenchMode[]).map((mode, i) => ({ name: `切换到${['文档', '浏览器', 'RSS', '日历'][i]}`, run: () => requestWorkbenchModeOpen(mode) })),
-    { name: '打开设置', run: onSettings },
-  ].filter(command => !query || command.name.includes(query))
+  const mode = useMode(state => state.workbenchMode)
+  useSyncExternalStore(subscribeCommands, commandRegistryRevision)
+  const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean)
+  const commands = listCommands({ mode }).filter(command => {
+    const text = [command.title, ...(command.keywords ?? [])].join(' ').toLocaleLowerCase()
+    return terms.every(term => text.includes(term))
+  })
   const count = items.length + commands.length
   const index = Math.min(selected, Math.max(0, count - 1))
   const activate = async (row: number, preview = false) => {
@@ -99,8 +94,8 @@ export function QuickSwitcher({ onClose, onPreview, onSettings }: {
         <button className="rn-switch-peek" aria-label={`速览 ${item.name}`} onClick={() => void activate(row, true)}>速览</button>
       </li>)}
       {commands.length > 0 && <li role="presentation" className="rn-switch-label">命令</li>}
-      {commands.map((command, i) => <li key={command.name} id={`ready-object-option-${items.length + i}`} role="option" aria-selected={index === items.length + i} className="rn-switch-item" onMouseMove={() => { if (index !== items.length + i) setSelected(items.length + i) }}>
-        <button className="rn-switch-open" onClick={() => void activate(items.length + i)}><span className="rn-switch-icon"><CornerDownLeft size={16} strokeWidth={1.6} /></span><span className="rn-switch-name">{command.name}</span></button>
+      {commands.map((command, i) => <li key={command.id} id={`ready-object-option-${items.length + i}`} role="option" aria-selected={index === items.length + i} className="rn-switch-item" onMouseMove={() => { if (index !== items.length + i) setSelected(items.length + i) }}>
+        <button className="rn-switch-open" onClick={() => void activate(items.length + i)}><span className="rn-switch-icon"><CornerDownLeft size={16} strokeWidth={1.6} /></span><span className="rn-switch-name">{command.title}</span>{command.shortcut && <span className="rn-switch-type">{shortcutKeycaps(command.shortcut, /Mac/.test(navigator.platform)).join(' ')}</span>}</button>
       </li>)}
       {query && !count && response?.query === query && <li role="presentation" className="rn-switch-empty">没有找到「{query}」</li>}
     </ul>

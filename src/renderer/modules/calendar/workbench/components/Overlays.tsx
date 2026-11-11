@@ -24,9 +24,9 @@ export function ScopeDialog() {
 export function GotoDialog() {
   const [q, setQ] = useState(''); const d = parseDateInput(q, getState().today);
   return <><div className="scrim" onPointerDown={() => setState({ overlay: null })} />
-    <div className="cmdk" data-testid="goto" style={{ width: 380, marginLeft: -190 }}>
-      <div className="cmdk-in"><input autoFocus placeholder={t('enterDate')} value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter' && d !== null) { goToDay(d); setState({ overlay: null }); } if (e.key === 'Escape') setState({ overlay: null }); }} /></div>
-      {d !== null && <div className="cmdk-list"><div className="cmdk-item act">{longDate(d)}</div></div>}
+    <div className="goto" data-testid="goto" style={{ width: 380, marginLeft: -190 }}>
+      <div className="goto-in"><input autoFocus placeholder={t('enterDate')} value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter' && d !== null) { goToDay(d); setState({ overlay: null }); } if (e.key === 'Escape') setState({ overlay: null }); }} /></div>
+      {d !== null && <div className="goto-list"><div className="goto-item act">{longDate(d)}</div></div>}
     </div></>;
 }
 

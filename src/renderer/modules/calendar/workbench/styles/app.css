@@ -253,24 +253,17 @@
 .ready-calendar .colors button { width: 14px; height: 14px; border-radius: 4px; display: grid; place-items: center; color: #fff; }
 .ready-calendar .colors button:hover { transform: scale(1.15); }
 
-/* ---------- command menu ---------- */
+/* ---------- dialog backdrop ---------- */
 .ready-calendar .scrim { position: fixed; inset: 0; z-index: 406; }
 .ready-calendar .scrim.dim { background: var(--c-scrim); animation: fade var(--t-def) var(--ease); }
 @keyframes fade { from { opacity: 0; } }
-.ready-calendar .cmdk { position: fixed; left: 50%; top: 200px; width: 680px; max-width: calc(100% - 32px); margin-left: 0; transform: translateX(-50%); z-index: 407; border-radius: 12px; background: var(--c-glass); backdrop-filter: blur(24px) saturate(1.6);
+.ready-calendar .goto { position: fixed; left: 50%; top: 200px; width: 680px; max-width: calc(100% - 32px); margin-left: 0; transform: translateX(-50%); z-index: 407; border-radius: 12px; background: var(--c-glass); backdrop-filter: blur(24px) saturate(1.6);
   border: 1px solid var(--c-ring); box-shadow: var(--sh-lg); color: var(--c-text); display: flex; flex-direction: column; overflow: hidden; animation: popin var(--t-def) var(--ease); transform-origin: top center; }
-.ready-calendar .cmdk-in { height: 48px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 16px; }
-.ready-calendar .cmdk-in input { flex: 1; border: 0; outline: 0; background: transparent; font-size: 16px; line-height: 24px; }
-.ready-calendar .cmdk-in svg { color: var(--c-text2); }
-.ready-calendar .cmdk-list { list-style: none; margin: 0; padding: 0 8px 8px; max-height: 407px; overflow-y: auto; }
-.ready-calendar .cmdk-sec { height: 28px; padding: 6px 10px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--c-text2); }
-.ready-calendar .cmdk-item { height: 36px; padding: 8px 10px; border-radius: 6px; display: flex; align-items: center; gap: 10px; font-size: 14px; line-height: 20px; font-weight: 500; }
-.ready-calendar .cmdk-item.act { background: var(--c-hover); }
-.ready-calendar .cmdk-item .lbl { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ready-calendar .cmdk-item .kbd { color: var(--c-text2); background: var(--c-input); }
-.ready-calendar .cmdk-foot { height: 33px; flex: none; border-top: 1px solid var(--c-ring); padding: 8px 18px; display: flex; gap: 16px; font-size: 12px; line-height: 16px; color: var(--c-text2); }
-.ready-calendar .cmdk-foot span { display: inline-flex; gap: 6px; align-items: center; }
-.ready-calendar .cmdk-empty { padding: 24px; text-align: center; font-size: 13px; color: var(--c-text2); }
+.ready-calendar .goto-in { height: 48px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 16px; }
+.ready-calendar .goto-in input { flex: 1; border: 0; outline: 0; background: transparent; font-size: 16px; line-height: 24px; }
+.ready-calendar .goto-list { list-style: none; margin: 0; padding: 0 8px 8px; max-height: 407px; overflow-y: auto; }
+.ready-calendar .goto-item { height: 36px; padding: 8px 10px; border-radius: 6px; display: flex; align-items: center; gap: 10px; font-size: 14px; line-height: 20px; font-weight: 500; }
+.ready-calendar .goto-item.act { background: var(--c-hover); }
 
 /* ---------- settings modal ---------- */
 .ready-calendar .modal { position: fixed; left: 50%; top: max(24px, min(100px, calc((100vh - 650px) / 2))); width: 954px; height: 650px; max-width: calc(100vw - 48px); max-height: calc(100vh - 48px); transform: translateX(-50%); z-index: 407; background: var(--c-modal);

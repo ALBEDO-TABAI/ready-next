@@ -1,5 +1,7 @@
 import { useEffect, useCallback, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
+import { useTheme } from '../stores/useTheme'
+import { OPEN_QUICK_SWITCHER_EVENT, SHELL_ACTION_EVENT } from '../modules/workbench/commands/shell-actions'
 import { useMode, type WorkbenchMode } from '../stores/useMode'
 import { useWorkspace } from '../stores/useWorkspace'
 import { useDocTabs } from '../stores/useDocTabs'
@@ -63,8 +65,9 @@ export function readyShortcutBypassesEditableGuard(
 export function useKeyboardShortcuts() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { appMode, workbenchMode, splitMode, setWorkbenchMode, setReadySubMode, setAppMode, toggleMode } = useMode()
+  const { appMode, workbenchMode, splitMode, setWorkbenchMode, setReadySubMode, setAppMode } = useMode()
   const { toggleSidebar } = useWorkspace()
+  const toggleTheme = useTheme(state => state.toggleTheme)
   const [captureFeedback, setCaptureFeedback] = useState<{ kind: 'success' | 'error'; message: string } | null>(null)
   const captureFeedbackTimerRef = useRef<number | null>(null)
   const documentSaveInFlightRef = useRef(false)
@@ -167,7 +170,7 @@ export function useKeyboardShortcuts() {
       return true
     }
 
-    if (shouldIgnoreGlobalKeyboardShortcut({
+    if (action !== 'open-settings' && action !== 'toggle-theme' && action !== 'open-search' && shouldIgnoreGlobalKeyboardShortcut({
       target: e.target,
       activeElement: typeof document !== 'undefined' ? document.activeElement : null,
       isComposing: e.isComposing,
@@ -195,6 +198,12 @@ export function useKeyboardShortcuts() {
     if (targetMode) {
       preventDefault()
       activateWorkbenchMode(targetMode)
+      return true
+    }
+
+    if (action === 'open-search') {
+      preventDefault()
+      window.dispatchEvent(new CustomEvent(OPEN_QUICK_SWITCHER_EVENT))
       return true
     }
 
@@ -229,12 +238,12 @@ export function useKeyboardShortcuts() {
 
     if (action === 'toggle-theme') {
       preventDefault()
-      toggleMode()
+      toggleTheme()
       return true
     }
 
     return false
-  }, [activateWorkbenchMode, appMode, captureCurrentWindow, location.pathname, navigate, saveActiveDocument, setAppMode, splitMode, toggleMode, toggleSidebar, workbenchMode])
+  }, [activateWorkbenchMode, appMode, captureCurrentWindow, location.pathname, navigate, saveActiveDocument, setAppMode, splitMode, toggleTheme, toggleSidebar, workbenchMode])
 
   useEffect(() => () => {
     if (captureFeedbackTimerRef.current !== null) {
@@ -247,6 +256,19 @@ export function useKeyboardShortcuts() {
       void handleShortcut(e)
     }
 
+    // Reserved shell keys must reach the shell even when a modal/editor stops bubbling.
+    const reservedKeydownHandler = (e: KeyboardEvent) => {
+      const action = resolveReadyAppShortcut(e)
+      if (action !== 'open-settings' && action !== 'toggle-theme') return
+      handleShortcut(e)
+      e.stopPropagation()
+    }
+    const shellAction = (event: WindowEventMap['ready:shell-action']) => {
+      if (event.detail.action === 'toggle-theme') toggleTheme()
+      if (event.detail.action === 'toggle-sidebar') toggleSidebar()
+    }
+    window.addEventListener('keydown', reservedKeydownHandler, true)
+    window.addEventListener(SHELL_ACTION_EVENT, shellAction)
     window.addEventListener('keydown', keydownHandler)
     const unsubscribeShortcut = window.electronAPI?.app?.onShortcut
       ? window.electronAPI.app.onShortcut((event) => {
@@ -258,10 +280,12 @@ export function useKeyboardShortcuts() {
       : undefined
 
     return () => {
+      window.removeEventListener('keydown', reservedKeydownHandler, true)
+      window.removeEventListener(SHELL_ACTION_EVENT, shellAction)
       window.removeEventListener('keydown', keydownHandler)
       unsubscribeShortcut?.()
     }
-  }, [handleShortcut])
+  }, [handleShortcut, toggleTheme, toggleSidebar])
 
   return { captureFeedback }
 }
