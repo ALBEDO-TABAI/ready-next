@@ -18,7 +18,7 @@ function notificationFixture(t:test.TestContext,path?:string) {
   return {...f,topic,sent,opened,clicks,port}
 }
 test('V5 opt-in and quiet hours gate notifications; persistent claims survive repeat consumption and a reopened database',t=>{
-  skipIfSqliteUnavailable({skip:message=>{throw new Error(message)}},'B10 requires native SQLite')
+  if (skipIfSqliteUnavailable(t, 'B10 requires native SQLite')) return
   const root=mkdtempSync(join(tmpdir(),'rss-notification-'));t.after(()=>rmSync(root,{recursive:true,force:true}))
   const path=join(root,'fixture.db'),f=notificationFixture(t,path),now=noon(f.now)
   for(const id of ['one','two','three','four']) {
@@ -44,7 +44,7 @@ test('V5 opt-in and quiet hours gate notifications; persistent claims survive re
   assert.equal(rss.learning.pendingOpen()!.itemId,'two','old ack cannot erase a newer click')
 })
 test('notifications reject low scores, disabled topics and unavailable ports; configured daytime silence works',async t=>{
-  skipIfSqliteUnavailable({skip:message=>{throw new Error(message)}},'B10 requires native SQLite')
+  if (skipIfSqliteUnavailable(t, 'B10 requires native SQLite')) return
   const f=notificationFixture(t),now=noon(f.now)
   f.put('low',now);await f.judge()
   f.rss.learning.saveTopicNotification({topicId:f.topic.id,urgent:true})
@@ -60,7 +60,7 @@ test('notifications reject low scores, disabled topics and unavailable ports; co
   assert.equal(deliverRSSNotifications(f.rss,f.port,end.getTime()),1)
 })
 test('an uncertain notification send stays claimed and is not retried',t=>{
-  skipIfSqliteUnavailable({skip:message=>{throw new Error(message)}},'B10 requires native SQLite')
+  if (skipIfSqliteUnavailable(t, 'B10 requires native SQLite')) return
   const f=notificationFixture(t),now=noon(f.now);f.put('one',now)
   for(const definitionId of ['curated',f.topic.id]) f.rss.organization.setManual({itemId:'one',definitionId,expectedArticleRevision:f.rss.content.getArticle('one')!.revision,expectedRuleRevision:1,decision:true})
   f.rss.learning.saveTopicNotification({topicId:f.topic.id,urgent:true})

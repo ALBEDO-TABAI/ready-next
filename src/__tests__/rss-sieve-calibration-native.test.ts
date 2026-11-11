@@ -11,7 +11,7 @@ function calibration(f:ReturnType<typeof rssB10Fixture>,options:{ready?:boolean;
 function evidence(f:ReturnType<typeof rssB10Fixture>) { f.put('read');f.rss.sieve.recordBehavior({id:'open',itemId:'read',action:'open',at:f.now}) }
 
 test('V3 a single weekly proposal leaves focus unchanged; accepting reaches the next real judgment request',async t=>{
-  skipIfSqliteUnavailable({skip:message=>{throw new Error(message)}},'B10 requires native SQLite')
+  if (skipIfSqliteUnavailable(t, 'B10 requires native SQLite')) return
   const f=rssB10Fixture(t);evidence(f)
   let calls=0
   const service=calibration(f,{complete:async request=>{calls++;assert.match(request.user,/read/);return JSON.stringify({text:'新的关注',explanation:'根据阅读记录'})}})
@@ -27,7 +27,7 @@ test('V3 a single weekly proposal leaves focus unchanged; accepting reaches the 
   assert.throws(()=>f.rss.learning.accept({week:proposal.week,expectedVersion:0}),/失效/)
 })
 test('dismissal persists this week; manual focus edits reject stale acceptance; edited proposal saves once',async t=>{
-  skipIfSqliteUnavailable({skip:message=>{throw new Error(message)}},'B10 requires native SQLite')
+  if (skipIfSqliteUnavailable(t, 'B10 requires native SQLite')) return
   const f=rssB10Fixture(t);evidence(f)
   await calibration(f).wake();const p=f.rss.learning.calibration(f.now)!
   f.rss.learning.dismiss({week:p.week})
@@ -42,7 +42,7 @@ test('dismissal persists this week; manual focus edits reject stale acceptance; 
   assert.equal(h.rss.learning.accept({week:p.week,expectedVersion:0,text:'手动改写建议'}).text,'手动改写建议')
 })
 test('model unready and exhausted shared budget leave calibration queued without a request; failed requests never retry',async t=>{
-  skipIfSqliteUnavailable({skip:message=>{throw new Error(message)}},'B10 requires native SQLite')
+  if (skipIfSqliteUnavailable(t, 'B10 requires native SQLite')) return
   const f=rssB10Fixture(t);evidence(f)
   await calibration(f,{ready:false}).wake();assert.equal(f.rss.learning.calibration(f.now)!.status,'queued')
   f.rss.processing.configure({enabled:true,dailyLimit:1});await f.judge()
@@ -57,7 +57,7 @@ test('model unready and exhausted shared budget leave calibration queued without
   assert.equal(f.rss.sieve.focus().text,'')
 })
 test('interrupted weekly call recovers as unknown and cannot be claimed twice',t=>{
-  skipIfSqliteUnavailable({skip:message=>{throw new Error(message)}},'B10 requires native SQLite')
+  if (skipIfSqliteUnavailable(t, 'B10 requires native SQLite')) return
   const f=rssB10Fixture(t);evidence(f);f.rss.learning.queue(f.now)
   assert.equal(f.rss.learning.claim(f.now,true),true)
   assert.equal(f.rss.learning.claim(f.now,true),false)
@@ -66,7 +66,7 @@ test('interrupted weekly call recovers as unknown and cannot be claimed twice',t
   assert.equal(f.rss.learning.claim(f.now,true),false)
 })
 test('V2 topic feedback immediately changes the next article score and persists in SQLite',async t=>{
-  skipIfSqliteUnavailable({skip:message=>{throw new Error(message)}},'B10 requires native SQLite')
+  if (skipIfSqliteUnavailable(t, 'B10 requires native SQLite')) return
   const f=rssB10Fixture(t),topic=f.rss.organization.save({name:'主题',description:'关注'})
   f.put('one');f.put('two');await f.judge()
   const before=f.rss.sieve.query({},f.now).items.find(i=>i.id==='two')!.sieve.score
@@ -79,7 +79,7 @@ test('V2 topic feedback immediately changes the next article score and persists 
   assert.equal(f.rss.sieve.behaviors('one').length,2)
 })
 test('14-day metrics count distinct shown articles and actions after exposure; late exposure cannot erase a miss',async t=>{
-  skipIfSqliteUnavailable({skip:message=>{throw new Error(message)}},'B10 requires native SQLite')
+  if (skipIfSqliteUnavailable(t, 'B10 requires native SQLite')) return
   const f=rssB10Fixture(t)
   for(const id of ['hit','idle','miss','older']) f.put(id)
   await f.judge()
@@ -97,7 +97,7 @@ test('14-day metrics count distinct shown articles and actions after exposure; l
 })
 
 test('stopping calibration aborts the request and a late result never becomes a pending proposal',async t=>{
-  skipIfSqliteUnavailable({skip:message=>{throw new Error(message)}},'B10 requires native SQLite')
+  if (skipIfSqliteUnavailable(t, 'B10 requires native SQLite')) return
   const f=rssB10Fixture(t);evidence(f)
   let release!:(text:string)=>void,signal:AbortSignal|undefined
   const service=calibration(f,{complete:request=>{signal=request.signal;return new Promise(resolve=>{release=resolve})}})
@@ -110,7 +110,7 @@ test('stopping calibration aborts the request and a late result never becomes a 
 })
 
 test('a proposal wrapped in a ```json fence is still read; it is never retried, so the fence must not fail it',async t=>{
-  skipIfSqliteUnavailable({skip:message=>{throw new Error(message)}},'B10 requires native SQLite')
+  if (skipIfSqliteUnavailable(t, 'B10 requires native SQLite')) return
   const f=rssB10Fixture(t);evidence(f)
   const service=calibration(f,{complete:async()=>'```json\n'+JSON.stringify({text:'围栏里的关注',explanation:'模型加了代码块'})+'\n```'})
   await service.wake()

@@ -12,7 +12,7 @@ import { rssSource } from '../main/modules/library-engine/source-adapters'
 import { rssB10Fixture } from './utils/rss-b10-fixture'
 
 test('starred full text is searchable and disappears on unstar; older saved articles bypass the recent 5000 cap',async t=>{
-  skipIfSqliteUnavailable({skip:message=>{throw new Error(message)}},'B10 requires native SQLite')
+  if (skipIfSqliteUnavailable(t, 'B10 requires native SQLite')) return
   const f=rssB10Fixture(t),engine=new SearchEngine(f.db,{fts5Available:true}),repository=engine.getRepository()
   const ctx={repository,workspaceId:repository.ensureWorkspace('@shared'),workspaceRoot:'@shared'},adapter=new RssAdapter()
   f.put('old',f.now-10000000)
@@ -33,7 +33,7 @@ test('starred full text is searchable and disappears on unstar; older saved arti
   assert.equal(f.db.prepare("SELECT 1 FROM documents WHERE source_type='rss' AND source_id='old'").get(),undefined)
 })
 test('real RSS source highlights enable full text; removing all highlight blocks withdraws it',async t=>{
-  skipIfSqliteUnavailable({skip:message=>{throw new Error(message)}},'B10 requires native SQLite')
+  if (skipIfSqliteUnavailable(t, 'B10 requires native SQLite')) return
   const f=rssB10Fixture(t),root=await realpath(await mkdtemp(join(tmpdir(),'rss-highlight-')))
   t.after(()=>rm(root,{recursive:true,force:true}))
   f.db.prepare('INSERT INTO workspaces(root) VALUES(?)').run(root)

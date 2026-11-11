@@ -6,7 +6,7 @@ import { sieveLearningGroup } from '../main/modules/rss-engine/ipc/sieve-learnin
 import { rssB10Fixture } from './utils/rss-b10-fixture'
 
 test('learning IPC registers, validates, reads back writes and disposes every channel',async t=>{
-  skipIfSqliteUnavailable({skip:message=>{throw new Error(message)}},'B10 requires native SQLite')
+  if (skipIfSqliteUnavailable(t, 'B10 requires native SQLite')) return
   const f=rssB10Fixture(t),handlers=new Map<string,(_event:unknown,input?:unknown)=>unknown>()
   let changes=0
   const ipc={handle:(name:string,handler:(_event:unknown,input?:unknown)=>unknown)=>handlers.set(name,handler),removeHandler:(name:string)=>handlers.delete(name)}

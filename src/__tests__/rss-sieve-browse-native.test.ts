@@ -21,7 +21,7 @@ function allPages(rss: RSSStore, grouped: boolean, input: RSSQueryInput) {
 }
 
 test('relevance browsing shares final scores, includes unjudged items, paginates and never exposes', async t => {
-  skipIfSqliteUnavailable({ skip: message => { throw new Error(message) } }, 'B10 requires native SQLite')
+  if (skipIfSqliteUnavailable(t, 'B10 requires native SQLite')) return
   const f = rssB10Fixture(t)
   for (let i = 0; i < 6; i++) f.put(`item-${i}`, f.now - i * 3600000)
   await f.judge()
@@ -52,7 +52,7 @@ test('relevance browsing shares final scores, includes unjudged items, paginates
 })
 
 test('relevance pagination freezes freshness and rejects changed preferences', async t => {
-  skipIfSqliteUnavailable({ skip: message => { throw new Error(message) } }, 'B10 requires native SQLite')
+  if (skipIfSqliteUnavailable(t, 'B10 requires native SQLite')) return
   const f = rssB10Fixture(t)
   f.put('older', f.now - 3600000)
   f.put('newer')
@@ -65,7 +65,7 @@ test('relevance pagination freezes freshness and rejects changed preferences', a
 })
 
 test('relevance event cards use the highest matching score and preserve all filter intersections', async t => {
-  skipIfSqliteUnavailable({ skip: message => { throw new Error(message) } }, 'B10 requires native SQLite')
+  if (skipIfSqliteUnavailable(t, 'B10 requires native SQLite')) return
   const f = rssB10Fixture(t)
   const topic = f.rss.organization.save({ name: '主题', description: '相关' })
   f.put('original', f.now - 7200000)
@@ -101,7 +101,7 @@ test('relevance event cards use the highest matching score and preserve all filt
 })
 
 test('explore appends one below-threshold unread item after top 12, exposes it and excludes it from remaining/today', async t => {
-  skipIfSqliteUnavailable({ skip: message => { throw new Error(message) } }, 'B10 requires native SQLite')
+  if (skipIfSqliteUnavailable(t, 'B10 requires native SQLite')) return
   const f = rssB10Fixture(t)
   for (let i = 0; i < 13; i++) f.put(`high-${i}`)
   await f.judge()
@@ -125,7 +125,7 @@ test('explore appends one below-threshold unread item after top 12, exposes it a
 })
 
 test('daily exploration survives reopening and does not replace a read or removed choice', t => {
-  skipIfSqliteUnavailable({ skip: message => { throw new Error(message) } }, 'B10 requires native SQLite')
+  if (skipIfSqliteUnavailable(t, 'B10 requires native SQLite')) return
   const directory = mkdtempSync(join(tmpdir(), 'rss-explore-'))
   t.after(() => rmSync(directory, { recursive: true, force: true }))
   for (const action of ['read', 'dismiss', 'delete'] as const) {
@@ -147,7 +147,7 @@ test('daily exploration survives reopening and does not replace a read or remove
 })
 
 test('explore settings default on, persist off/on, and today never selects or exposes low-score articles', t => {
-  skipIfSqliteUnavailable({ skip: message => { throw new Error(message) } }, 'B10 requires native SQLite')
+  if (skipIfSqliteUnavailable(t, 'B10 requires native SQLite')) return
   const f = rssB10Fixture(t)
   f.put('low-a')
   f.put('low-b')

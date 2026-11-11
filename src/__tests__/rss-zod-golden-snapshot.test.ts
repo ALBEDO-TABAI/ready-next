@@ -150,7 +150,7 @@ const EXPECTED_ANTHROPIC = [
         searchIn: { type: 'string', description: 'title_summary 标题摘要；body 已保存正文', enum: ['title_summary', 'body'] },
         from: { type: 'number', description: '时间范围起点，Unix 毫秒，包含' },
         until: { type: 'number', description: '时间范围终点，Unix 毫秒，不包含' },
-        sort: { type: 'string', description: 'newest 或 oldest', enum: ['newest', 'oldest'] },
+        sort: { type: 'string', description: 'newest、oldest 或 relevance（最终分从高到低）', enum: ['newest', 'oldest', 'relevance'] },
         limit: { type: 'number', description: '每页 1–100 条，默认 50' },
         cursor: { type: 'string', description: '上一页返回的 nextCursor；其他查询条件保持相同' },
         expectedRevision: { type: 'number', description: '可选，固定当前界面或导出所引用的资料版本' },

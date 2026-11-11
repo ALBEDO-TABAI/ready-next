@@ -4,7 +4,7 @@ import test from 'node:test'
 import { rssB10Fixture } from './utils/rss-b10-fixture'
 
 test('daily entries preserve edition intake, sort by final score and snapshot the same truthful reasons as sieve',async t=>{
-  skipIfSqliteUnavailable({skip:message=>{throw new Error(message)}},'B10 requires native SQLite')
+  if (skipIfSqliteUnavailable(t, 'B10 requires native SQLite')) return
   const f=rssB10Fixture(t)
   f.put('older',f.now-3600000);f.put('newer');await f.judge()
   // A source feedback change lowers both equally; recency must still determine the larger final score.
@@ -21,7 +21,7 @@ test('daily entries preserve edition intake, sort by final score and snapshot th
   assert.equal(f.rss.digests.generate({kind:'daily',from:f.now-86400000,until:report.until,timezone:'UTC'},f.now).id,report.id)
 })
 test('today exposes only its top five, each with a score and truthful reason',async t=>{
-  skipIfSqliteUnavailable({skip:message=>{throw new Error(message)}},'B10 requires native SQLite')
+  if (skipIfSqliteUnavailable(t, 'B10 requires native SQLite')) return
   const f=rssB10Fixture(t)
   for(let i=0;i<7;i++) f.put(`item-${i}`,f.now-i*1000)
   await f.judge()

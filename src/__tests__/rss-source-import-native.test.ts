@@ -8,7 +8,7 @@ import { rssB10Fixture } from './utils/rss-b10-fixture'
 import { runMigrations } from '../main/modules/migrations'
 
 test('OPML imports nested groups atomically, preserves existing and disabled sources and deduplicates repeat files',t=>{
-  skipIfSqliteUnavailable({skip:message=>{throw new Error(message)}},'B10 requires native SQLite')
+  if (skipIfSqliteUnavailable(t, 'B10 requires native SQLite')) return
   const f=rssB10Fixture(t)
   const xml=`<opml version="2.0"><body><outline text="科技"><outline text="视频"><outline text="新来源" xmlUrl="https://NEW.test/feed"/></outline><outline text="覆盖不了" xmlUrl="https://example.test/feed"/></outline></body></opml>`
   const first=f.rss.importOpml(xml)
@@ -32,8 +32,8 @@ test('OPML imports nested groups atomically, preserves existing and disabled sou
   runMigrations(f.db)
   assert.equal(f.db.prepare('PRAGMA table_info(rss_sources)').all<{name:string}>().some(c=>c.name==='fetch_interval'),false)
 })
-for(const version of ['1','1.1']) test(`JSON Feed ${version} fixture maps identity, text, authors, dates and cover without network`,async()=>{
-  skipIfSqliteUnavailable({skip:message=>{throw new Error(message)}},'B10 requires native SQLite')
+for(const version of ['1','1.1']) test(`JSON Feed ${version} fixture maps identity, text, authors, dates and cover without network`,async t=>{
+  if (skipIfSqliteUnavailable(t, 'B10 requires native SQLite')) return
   const scraper=new NativeRSSScraper(),raw=readFileSync(new URL(`./fixtures/rss/feed-${version}.json`,import.meta.url),'utf8')
   class FixtureScraper extends NativeRSSScraper {
     protected async httpGet() { return {text:raw,status:200,headers:new Headers({'content-type':'application/feed+json'})} }
