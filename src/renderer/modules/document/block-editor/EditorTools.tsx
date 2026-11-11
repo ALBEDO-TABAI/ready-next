@@ -12,13 +12,15 @@ import { useDocTabs } from '../../../stores/useDocTabs'
 import { CommandMenu, BlockEditorStyles, type MenuAnchor, type MenuItem } from './CommandMenu'
 import { SlashMenu } from './SlashMenu'
 import { SLASH_META, filterSlashItems, type SlashItem } from './slash-items'
-import { Sparkles } from 'lucide-react'
+import { CalendarClock, Sparkles } from 'lucide-react'
 import { InlineToolbar } from './InlineToolbar'
 import { useSceneVisible } from './scene'
 import { BLOCK_KINDS, convertBlock } from './catalog'
 import { getCaret, plainText, setCaret, sliceSpans } from './dom-inline'
 import { emptyBlock, inlineMarkdown, newline, plainModel } from './editing'
-import { findReferences, openInlineReference, wikiTarget, workspaceRoots, type ReferenceChoice, type EditorLinkBase } from './references'
+import { capsuleSource, findReferences, openInlineReference, settledCapsuleReference, wikiTarget, workspaceRoots, type ReferenceChoice, type EditorLinkBase } from './references'
+import { activateRefCapsule, enterRefCapsule, leaveRefCapsule, openRefCapsuleMenu, startRefCapsuleDrag } from '../../../components/ui/ref-capsule-actions'
+import type { RefCapsuleKind } from '../../../components/ui/ref-capsule-kinds'
 import type { EditorBuffer } from './editor-buffer'
 
 interface Selection {
@@ -119,6 +121,23 @@ export function EditorTools({ buffer, linkBase, children, report }: { buffer: Ed
     return () => { cancelled = true; window.clearTimeout(timer) }
   }, [linkBase?.filePath, picker, query, report])
   const attempt = (action: () => void) => { try { action() } catch (error) { console.warn('[EditorTools] run editor action failed:', error instanceof Error ? error.message : String(error)); report(error) } }
+  /** A capsule link inside the editable text (dom-inline draws them). */
+  const capsuleAt = (target: EventTarget | null) => target instanceof Element
+    ? target.closest<HTMLAnchorElement>('[data-rich-start] a[data-ready-ref-capsule]') : null
+  /** Opens the date picker on a date capsule; it replaces exactly that link's text. */
+  function editDate(anchor: HTMLAnchorElement, ref: DateMentionRef) {
+    const el = anchor.closest<HTMLElement>('[data-rich-start]')
+    if (!el) return
+    attempt(() => {
+      buffer.flush()
+      const state = readSelection(el)
+      if (!state) return
+      const range = document.createRange(); range.selectNodeContents(el); range.setEndBefore(anchor)
+      const start = range.toString().length
+      setSelection(null); setPicker(null)
+      setDateMention({ selection: { ...state, start, end: start + (anchor.textContent?.length ?? 0), anchor: anchor.getBoundingClientRect() }, ref })
+    })
+  }
   function slashMarkdown(state: Picker, markdown: string) {
     // Only the typed trigger is consumed; existing following text is retained.
     const remainder = inlineMarkdown(plainModel(), sliceSpans(state.model.spans, state.end))
@@ -273,23 +292,35 @@ export function EditorTools({ buffer, linkBase, children, report }: { buffer: Ed
       if (!anchor || !el) return
       event.preventDefault(); event.stopPropagation()
       const parsed = parseReadyUri(anchor.getAttribute('href') ?? '')
-      if (parsed.ok && parsed.ref.kind === 'day' && !(event.metaKey || event.ctrlKey)) {
-        const ref = parsed.ref
-        attempt(() => {
-          buffer.flush()
-          const state = readSelection(el)
-          if (!state) return
-          const range = document.createRange(); range.selectNodeContents(el); range.setEndBefore(anchor)
-          const start = range.toString().length
-          setSelection(null); setPicker(null)
-          setDateMention({ selection: { ...state, start, end: start + (anchor.textContent?.length ?? 0), anchor: anchor.getBoundingClientRect() }, ref })
-        })
-        return
-      }
+      // A date in the text is a value you edit: clicking it opens its picker (which can open the day), as in C9.
+      if (parsed.ok && parsed.ref.kind === 'day' && !(event.metaKey || event.ctrlKey || event.altKey)) { editDate(anchor, parsed.ref); return }
+      if (anchor.matches('[data-ready-ref-capsule]')) { activateRefCapsule(event, capsuleSource(anchor, linkBase?.filePath)); return }
       if (!(event.metaKey || event.ctrlKey)) return
-      const reference = anchor.dataset.readyWiki ? { kind: 'wiki' as const, target: anchor.dataset.readyWiki }
-        : { kind: 'link' as const, href: anchor.getAttribute('href') ?? anchor.dataset.readyHref ?? '' }
-      void openInlineReference(reference, linkBase?.filePath).catch(report)
+      void openInlineReference({ kind: 'link' as const, href: anchor.getAttribute('href') ?? anchor.dataset.readyHref ?? '' }, linkBase?.filePath).catch(report)
+    }}
+    onContextMenu={event => {
+      const anchor = capsuleAt(event.target)
+      if (!anchor) return
+      const parsed = parseReadyUri(anchor.getAttribute('href') ?? '')
+      const extra = parsed.ok && parsed.ref.kind === 'day' ? [{ id: 'edit-date', label: '修改日期与提醒…', icon: <CalendarClock />, onSelect: () => editDate(anchor, parsed.ref as DateMentionRef) }] : []
+      openRefCapsuleMenu({ clientX: event.clientX, clientY: event.clientY, currentTarget: anchor, preventDefault: () => event.preventDefault(), stopPropagation: () => event.stopPropagation() },
+        capsuleSource(anchor, linkBase?.filePath), anchor.textContent ?? '', anchor.dataset.refKind as RefCapsuleKind, extra)
+    }}
+    onDragStart={event => {
+      const anchor = capsuleAt(event.target)
+      if (anchor) startRefCapsuleDrag(event, settledCapsuleReference(anchor), anchor.textContent ?? '')
+    }}
+    onMouseOver={event => {
+      const anchor = capsuleAt(event.target)
+      if (!anchor || (event.relatedTarget instanceof Node && anchor.contains(event.relatedTarget))) return
+      const source = capsuleSource(anchor, linkBase?.filePath)
+      // Resolving a [[wiki]] target on hover lets a drag that follows carry it.
+      if (typeof source === 'function') void source().catch(() => undefined)
+      enterRefCapsule(anchor, source, anchor.textContent ?? '', anchor.dataset.refKind as RefCapsuleKind)
+    }}
+    onMouseOut={event => {
+      const anchor = capsuleAt(event.target)
+      if (anchor && !(event.relatedTarget instanceof Node && anchor.contains(event.relatedTarget))) leaveRefCapsule(anchor)
     }}>
     <BlockEditorStyles />{children}
     {sceneVisible && dateMention && <DateMentionPicker value={dateMention.ref} anchor={dateMention.selection.anchor} report={report}

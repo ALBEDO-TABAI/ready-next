@@ -32,17 +32,19 @@ test('preview shows a live quote card, follows source changes/deletion and opens
     await act(async () => root.render(<NotePreview content={`${raw}\n\n${raw}`} notePath="/vault/引用.md" />))
     const cards = dom.window.document.querySelectorAll('[data-library-quote]')
     assert.equal(cards.length, 2, 'repeated references are not suppressed')
-    assert.match(cards[0].textContent!, /山海白第一章乙丙批注一回到原文/)
+    // 出处 is a book capsule: the title and chapter, opening the passage in 书房 (W6 §2.1).
+    assert.match(cards[0].textContent!, /山海白乙丙批注一山海 · 第一章/)
     assert.equal(dom.window.document.querySelector('iframe'), null)
     assert.equal(dom.window.document.querySelector('table'), null)
     content = content.replace('批注一', '批注二')
     await act(async () => changes.forEach(cb => cb()))
     assert.match(cards[0].textContent!, /批注二/)
-    await act(async () => cards[0].querySelector('button')!.click())
+    await act(async () => cards[0].querySelector<HTMLElement>('[data-ready-ref-capsule]')!.click())
     assert.equal(useLibraryRequest.getState().target?.book, 'bk-one')
     await act(async () => root.render(<NotePreview content={content} notePath="/vault/阅读/山海.md" />))
     const original = [...dom.window.document.querySelectorAll('a')].find(a => a.textContent?.includes('原文'))!
-    assert.equal(original.getAttribute('href'), 'ready://read/book/bk-one#c0:1+2')
+    const { parseReadyUri } = await import('../shared/ready-ref')
+    assert.deepEqual(parseReadyUri(original.getAttribute('href')!), parseReadyUri('ready://read/book/bk-one#c0:1+2'))
     const sequence = useLibraryRequest.getState().sequence
     await act(async () => original.click())
     assert.equal(useLibraryRequest.getState().sequence, sequence + 1)
@@ -51,7 +53,7 @@ test('preview shows a live quote card, follows source changes/deletion and opens
     await act(async () => changes.forEach(cb => cb()))
     assert.match(dom.window.document.body.textContent!, /引用已失效/)
     assert.ok(dom.window.document.body.textContent!.includes(raw))
-    assert.equal(dom.window.document.querySelector('[data-library-quote] button'), null)
+    assert.equal(dom.window.document.querySelector('[data-library-quote] button, [data-library-quote] [data-ready-ref-capsule]'), null)
   } finally {
     await act(async () => root.unmount()); clearReferenceReturn(); useDocTabs.setState(before, true); useWorkspace.setState(beforeWorkspace, true); useLibraryRequest.setState(beforeRequest, true)
     for (const [key, value] of saved) { if (value) Object.defineProperty(globalThis, key, value); else Reflect.deleteProperty(globalThis, key) }

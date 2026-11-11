@@ -56,7 +56,8 @@ test('card adapter submits M3 range commands to the surface; one card changes an
 test('document card refreshes on object change, ignores an old read and renders passive content', async () => {
   const ui = await mount()
   let refresh: () => void = () => {}, resolveOld: (value: Awaited<ReturnType<DocumentPreviewSource['read']>>) => void = () => {}
-  let reads = 0, opened = ''
+  let reads = 0
+  Object.assign(ui.dom.window, { electronAPI: { objects: { locate: async (id: string) => ({ objectId: id, path: `/fixture/${id}.md`, revision: 1 }) } } })
   const source: DocumentPreviewSource = {
     subscribe(listener) { refresh = listener; return () => { refresh = () => {} } },
     read: async () => ++reads === 1 ? new Promise(resolve => { resolveOld = resolve })
@@ -64,25 +65,32 @@ test('document card refreshes on object change, ignores an old read and renders 
   }
   try {
     await ui.render(<DocumentCard node={{ id: 'doc', type: 'file', file: 'A.md', x: 0, y: 0, width: 200, height: 200,
-      ready: { kind: 'document', ref: { kind: 'page', id: 'page' } } }} source={source} open={async ref => { if ('id' in ref) opened = ref.id }} />)
+      ready: { kind: 'document', ref: { kind: 'page', id: 'page' } } }} source={source} />)
     await act(async () => refresh())
     assert.match(document.body.textContent!, /最新原文/)
     await act(async () => resolveOld({ ref: { kind: 'page', id: 'page' }, title: '迟到旧版', markdown: 'old', version: 'v1', truncated: false }))
     assert.doesNotMatch(document.body.textContent!, /迟到旧版/)
     assert.equal(document.querySelectorAll('script,img,iframe,[contenteditable]').length, 0)
-    await ui.click('打开'); assert.equal(opened, 'page')
+    // The card's heading is its reference capsule (W6 §2.1); a click opens the page through the one entry.
+    const capsule = document.querySelector<HTMLElement>('[data-ready-ref-capsule]')!
+    assert.equal(capsule.getAttribute('aria-label'), '页面 最新原文')
+    const { useWorkspace } = await import('../renderer/stores/useWorkspace')
+    await act(async () => { capsule.click(); await new Promise(resolve => setTimeout(resolve, 0)) })
+    assert.equal(useWorkspace.getState().selectedFile, '/fixture/page.md')
   } finally { await ui.close() }
 })
 
 test('link failure retains its original address and text cards use the shared editor', async () => {
   const ui = await mount()
   try {
-    const opened: string[] = []
     await ui.render(<><LinkCard node={{ id: 'link', type: 'link', url: 'https://example.com/original', x: 0, y: 0, width: 200, height: 100, ready: { kind: 'link' } }}
-      source={{ read: async () => { throw new Error('离线') } }} open={() => opened.push('link')} /><TextCard node={text('one')} commit={async () => true} /></>)
-    assert.match(document.body.textContent!, /https:\/\/example.com\/original/)
+      source={{ read: async () => { throw new Error('离线') } }} /><TextCard node={text('one')} commit={async () => true} /></>)
+    assert.match(document.body.textContent!, /example.com\/original/)
     assert.match(document.body.textContent!, /离线/)
-    await ui.click('在浏览器中打开'); assert.deepEqual(opened, ['link'], 'a failed preview still opens the page')
+    // A failed preview still leaves the address as a web capsule that opens the page in Ready's browser.
+    const capsule = document.querySelector('[data-ready-ref-capsule]')!
+    assert.equal(capsule.getAttribute('aria-label'), '网页 example.com/original')
+    assert.equal(capsule.getAttribute('href'), `ready://web?url=${encodeURIComponent('https://example.com/original')}`)
     assert.ok(document.querySelector('[data-ready-block-editor] [contenteditable="true"]'))
     // Main's private-network refusal reads as a plain reason (W4 §2.2 O16).
     await ui.render(<LinkCard node={{ id: 'lan', type: 'link', url: 'https://intranet.example/', x: 0, y: 0, width: 200, height: 100, ready: { kind: 'link' } }}

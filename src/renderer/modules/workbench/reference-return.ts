@@ -26,7 +26,7 @@ export function captureReferenceOrigin(mode: WorkbenchMode = useMode.getState().
   const restorePositions = [...positions.values()].filter(p => p.mode === mode || p.mode === useMode.getState().splitMode).map(p => p.capture())
   const scrolls = [...document.querySelectorAll<HTMLElement>(`[data-workbench-mode-panel="${mode}"] *`)]
     .filter(el => el.scrollTop || el.scrollLeft).map(el => ({ el, top: el.scrollTop, left: el.scrollLeft }))
-  return { mode, label: mode === 'document' ? tabs.find(t => t.id === (focusedPaneTabId || activeTabId))?.title || '文档' : { browser: '浏览器', rss: 'RSS', calendar: '日历' }[mode], restore: () => {
+  return { mode, label: mode === 'document' ? tabs.find(t => t.id === (focusedPaneTabId || activeTabId))?.title.replace(/\.(md|canvas)$/i, '') || '文档' : { browser: '浏览器', rss: 'RSS', calendar: '日历' }[mode], restore: () => {
     restorePositions.forEach(restore => restore())
     const liveTabs = useDocTabs.getState()
     if (mode === 'document') useWorkspace.getState().selectFile(liveTabs.tabs.find(t => t.id === activeTabId)?.path ?? null)

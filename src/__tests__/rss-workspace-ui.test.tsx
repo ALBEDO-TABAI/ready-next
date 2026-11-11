@@ -278,8 +278,8 @@ test('chat citation clicks enqueue the exact reference through the shared worksp
   window.addEventListener(READY_WORKBENCH_MODE_CHANGE_EVENT, capture)
   try {
     await act(async () => root.render(<ChatMarkdown content={rssCitationUrl(reference)} />))
-    const button = dom.window.document.querySelector<HTMLAnchorElement>('.rss-citation-link')!
-    assert.equal(button.textContent, '查看 RSS 引用')
+    const button = dom.window.document.querySelector<HTMLAnchorElement>('[data-ready-ref-capsule]')!
+    assert.equal(button.getAttribute('aria-label'), '资讯 资讯引用')
     await act(async () => button.click())
     assert.deepEqual(useRSSSession.getState().pendingReveal?.reference, reference)
     assert.deepEqual(requests, [{ mode: 'rss', placement: 'open', presentation: 'immediate' }])

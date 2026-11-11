@@ -104,6 +104,11 @@ export class DocumentDatabaseService {
     // sourcePath: the row folder, which an open view watches so it follows the disk (W3 §4.4).
     return { databaseId: id, definition: database.definition, version: database.version, sourcePath: database.source, rows: this.rows(id, database.definition, database.source), referenceRepairs: referenceRepairs.map(repair => ({ viewId: repair.view_id, oldName: repair.old_name, newName: repair.new_name, state: 'pending_reference_repair' as const })) }
   }
+  preview(id: string): import('../../../shared/object-preview').DatabasePreview {
+    const snapshot = this.read(id), view = snapshot.definition.views[0]
+    const { rows, total } = projectView(snapshot.definition, snapshot.rows, view, this.relations(snapshot.definition, snapshot.rows), { offset: 0, limit: 5 })
+    return { kind: 'database', definition: snapshot.definition, view, rows, total }
+  }
   private member(databaseId: string, rowId: string) {
     const database = this.definition(databaseId), object = this.object(rowId)
     if (!isInside(database.source, object.current_path) || (!database.definition.recursive && dirname(object.current_path) !== database.source)) throw new Error('Row is outside database')

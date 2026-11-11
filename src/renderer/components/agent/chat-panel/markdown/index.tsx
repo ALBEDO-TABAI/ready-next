@@ -1,6 +1,7 @@
 import { parseReadyUri } from '../../../../../shared/ready-ref'
-import { useMemo, useState } from 'react'
-import { openReadyRef } from '../../../../modules/workbench/open-ready-ref'
+import { useMemo } from 'react'
+import { RefCapsule } from '../../../ui/RefCapsule'
+import { REF_CAPSULE_KINDS, refCapsuleKind } from '../../../ui/ref-capsule-kinds'
 import { MessageCodeBlock } from './MessageCodeBlock'
 import { LocalFileChip, LocalMentionChip } from './LocalReferenceChip'
 import {
@@ -15,7 +16,7 @@ import {
 // ---------------------------------------------------------------------------
 //
 // Stage V V1.2 — extracted from ChatPanel.tsx (was lines 88-98 + 173-522).
-// This module owns Markdown rendering; calendar links delegate navigation to openReadyRef.
+// This module owns Markdown rendering; Ready references render as reference capsules (W6 §2.1).
 
 export interface MarkdownNode {
   type: 'text' | 'bold' | 'italic' | 'code' | 'codeblock' | 'header' | 'bullet' | 'ordered-list' | 'table' | 'br'
@@ -351,18 +352,12 @@ function splitBareUrl(raw: string): { href: string; trailing: string } {
   return { href: raw.slice(0, end), trailing: raw.slice(end) }
 }
 
-function ReadyReferenceLink({ href, label }: { href: string; label: string }) {
-  const [error, setError] = useState<string | null>(null)
-  return <><a href={href} className={href.startsWith('ready://rss/') ? 'rss-citation-link' : 'ready-agent-link'} onClick={event => {
-    event.preventDefault()
-    setError(null)
-    void openReadyRef(href).catch(error => setError(error instanceof Error ? error.message : String(error)))
-  }}>{label}</a>{error && <span role="alert">{error}</span>}</>
-}
-
 function externalLink(href: string, label: string, key: string): React.ReactNode {
   if (href.startsWith('ready://')) {
-    return parseReadyUri(href).ok ? <ReadyReferenceLink key={key} href={href} label={label === href && href.startsWith('ready://rss/') ? '查看 RSS 引用' : label} /> : <span key={key}>{label}</span>
+    const parsed = parseReadyUri(href)
+    if (!parsed.ok) return <span key={key}>{label}</span>
+    // A bare address carries no title; it is named by its type.
+    return <RefCapsule key={key} reference={parsed.ref} title={label === href ? `${REF_CAPSULE_KINDS[refCapsuleKind(parsed.ref)].label}引用` : label} />
   }
   const citation = /^\d+$/.test(label.trim())
   return (

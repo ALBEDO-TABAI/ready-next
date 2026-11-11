@@ -15,6 +15,8 @@ import { parseHighlights } from './highlight-markdown'
 import { PdfSelectionSchema } from '../../../shared/pdf-source-anchor'
 import { pdfSelection, sourceHighlightCodec, type SourceDocument, type SourceSelection } from './source-adapters'
 
+export function sourceDocumentId(uri: string): string { return 'source-' + createHash('sha256').update(uri).digest('hex').slice(0, 32) }
+
 export class SourceDocumentService {
   private tail: Promise<unknown> = Promise.resolve()
   constructor(readonly root: string, private readonly registry: ObjectRegistry, private readonly writer: DocumentWriteDependencies) {}
@@ -35,7 +37,7 @@ export class SourceDocumentService {
       await this.writer.index(book.current_path, await readFile(book.current_path, 'utf8'))
       return { id: book.id, notePath: book.current_path }
     }
-    const id = 'source-' + createHash('sha256').update(uri).digest('hex').slice(0, 32)
+    const id = sourceDocumentId(uri)
     let row = this.registry.get(id)
     if (!row) { this.registry.scan(this.root); row = this.registry.get(id) }
     if (row) {

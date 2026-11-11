@@ -17,7 +17,7 @@ export function registerBookSourceIPC(ipcMain: Pick<IpcMain, 'handle'>, service:
   ipcMain.handle('librarySources:download', (_event, input: unknown) => result(() => service.start(input)))
   ipcMain.handle('librarySources:cancel', (_event, input: unknown) => result(() => service.jobs.cancel(id(input))))
   ipcMain.handle('librarySources:retry', (_event, input: unknown) => result(() => service.retry(id(input))))
-  ipcMain.handle('librarySources:openManual', (_event, input: unknown) => result(() => service.openManual(id(input))))
+  ipcMain.handle('librarySources:manualLink', (_event, input: unknown) => result(() => service.manualLink(id(input))))
   ipcMain.handle('librarySources:answer', (_event, input: unknown) => result(() => {
     const answer = z.object({ id: z.string().uuid(), token: z.string().uuid(), text: z.string().trim().min(1).max(16) }).strict().parse(input)
     service.jobs.answer(answer.id, answer.token, answer.text)

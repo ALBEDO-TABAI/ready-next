@@ -7,6 +7,8 @@ import { Check, Copy, ExternalLink } from 'lucide-react'
 import { EBOOK_INLINE_IMAGE_TITLE } from '../../../shared/ebook'
 import { documentCodeBehavior } from '../../../shared/document-code-language'
 import { resolvePreviewReference } from './note-preview-parser'
+import { parseReadyUri } from '../../../shared/ready-ref'
+import { RefCapsule } from '../ui/RefCapsule'
 
 interface MarkdownOptions {
   mode: 'document' | 'external'
@@ -259,6 +261,9 @@ export function createMarkdownComponents({ mode, notePath, openHref, externalBas
     },
     a: ({ href, children, node }: { href?: string; children?: ReactNode; node?: { children?: Array<{ type: string; tagName?: string; value?: string }> } }) => {
       const reference = href || ''
+      // A Ready reference in a page is a capsule, as in the editable text (W6 §2.1).
+      const ready = !external && reference.startsWith('ready://') ? parseReadyUri(reference) : null
+      if (ready?.ok) return <RefCapsule reference={ready.ref} title={extractMarkdownText(children).trim() || reference} />
       const resolved = resolveReference(reference)
       if (!resolved.resolvedUrl) return <span>{children}</span>
       // A linked picture (`[![photo](src)](href)`) stays a full-width picture that opens its link.

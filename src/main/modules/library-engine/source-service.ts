@@ -26,7 +26,6 @@ export class BookSourceService {
     settings: { getSetting(key: string): string | undefined; setSetting(key: string, value: string): void }
     changed: ConstructorParameters<typeof BookSourceJobs>[4]
     libraryChanged(): Promise<void>
-    openExternal(url: string): Promise<void>
   }) {
     this.jobs = new BookSourceJobs(dependencies.db, join(dependencies.cache, 'work'), async (job, folder, signal, context) => {
       this.assertEnabled(job.source)
@@ -90,10 +89,10 @@ export class BookSourceService {
     if (!root) throw new Error('请先配置可用的资料库')
     const restarted = this.jobs.retry(id); this.roots.set(id, root); return restarted
   }
-  async openManual(id: string): Promise<void> {
+  async manualLink(id: string): Promise<string> {
     const job = this.jobs.get(id); this.assertEnabled(job.source)
     if (job.source === 'zlib') throw new Error('这个任务没有网盘链接')
     const link = (await this.optional()).parseLink(job.ref)
-    await this.dependencies.openExternal(link.link)
+    return link.link
   }
 }

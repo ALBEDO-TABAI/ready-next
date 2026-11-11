@@ -41,12 +41,12 @@ test('M6-A panel adds/unlinks/undoes real edges, opens exact refs, saves one not
     HTMLElement:dom.window.HTMLElement,IS_REACT_ACT_ENVIRONMENT:true,ResizeObserver:class{observe(){}unobserve(){}disconnect(){}}}
   const previous=Object.fromEntries(Object.keys(globals).map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)]))
   for(const [key,value] of Object.entries(globals))Object.defineProperty(globalThis,key,{value,configurable:true,writable:true})
-  // Only the navigation destination is replaced; component, picker, service, files and SQLite are real.
+  // Only the navigation destination is replaced (for the panel and its reference capsules); component, picker, service, files and SQLite are real.
   const navigation='data:text/javascript,'+encodeURIComponent('export const opened=[];export async function openReadyRef(ref){opened.push(ref)}')
   const hooks=registerHooks({resolve(specifier,context,next){
     if(specifier==='@shared/calendar')return next(new URL('../shared/calendar/index.ts',import.meta.url).href,context)
     if(specifier.startsWith('@shared/'))return next(new URL(`../shared/${specifier.slice(8)}.ts`,import.meta.url).href,context)
-    return specifier.endsWith('/workbench/open-ready-ref')&&context.parentURL?.includes('/EventLinks')
+    return specifier.endsWith('/workbench/open-ready-ref')&&(context.parentURL?.includes('/EventLinks')||context.parentURL?.includes('/ref-capsule-actions'))
       ?{url:navigation,shortCircuit:true}:next(specifier,context)
   }})
   const reply=async<T,>(work:()=>T|Promise<T>)=>{try{return {success:true,data:await work()}}catch(error){return {success:false,error:String(error)}}}
@@ -70,6 +70,9 @@ test('M6-A panel adds/unlinks/undoes real edges, opens exact refs, saves one not
   const flush=async()=>act(async()=>{await new Promise(resolve=>setTimeout(resolve,30))})
   const click=async(label:string)=>{const button=[...dom.window.document.querySelectorAll('button')].find(b=>b.textContent===label||b.getAttribute('aria-label')===label)
     assert.ok(button,label);assert.equal(button.disabled,false,label);await act(async()=>button.click());await flush()}
+  // Related objects are reference capsules (W6 §2.1), named by their type and title.
+  const capsule=async(name:string|RegExp)=>{const link=[...dom.window.document.querySelectorAll<HTMLElement>('a[data-ready-ref-capsule]')].find(a=>typeof name==='string'?a.getAttribute('aria-label')===name:name.test(a.getAttribute('aria-label')||''))
+    assert.ok(link,String(name));await act(async()=>link.click());await flush()}
   await act(async()=>root.render(<><EventLinks occKey={key} title="Meeting" readOnly={false}/><FloatHost/></>));await flush()
   // No address to paste: "+" opens the search, typing finds the reference, choosing it links it.
   await click('添加关联')
@@ -79,9 +82,9 @@ test('M6-A panel adds/unlinks/undoes real edges, opens exact refs, saves one not
   for(let i=0;i<20&&!dom.window.document.querySelector('[role="option"]');i++)await flush()
   await act(async()=>dom.window.document.querySelector<HTMLButtonElement>('[role="option"]')!.click());await flush()
   assert.equal(calendar.snapshot().links![0].originalStart,second)
-  await click('https://example.com/meeting')
+  await capsule('网页 example.com/meeting')
   const {opened}=await import(navigation);assert.deepEqual(opened,[{kind:'web',url:'https://example.com/meeting'}])
-  await click('解除关联 https://example.com/meeting');assert.equal(calendar.snapshot().links!.length,0)
+  await click('解除关联 example.com/meeting');assert.equal(calendar.snapshot().links!.length,0)
   await click('撤销上次关联修改');assert.equal(calendar.snapshot().links!.length,1)
   await click('会议笔记');assert.ok(dom.window.document.querySelector('[role="dialog"]'))
   await click('Parent')
@@ -90,7 +93,7 @@ test('M6-A panel adds/unlinks/undoes real edges, opens exact refs, saves one not
   assert.equal(calendar.snapshot().links!.filter(link=>link.purpose==='meeting-note').length,1)
   assert.equal(readdirSync(join(vault,'Parent')).filter(name=>name.endsWith('.md')).length,1)
   assert.equal(readFileSync(parent,'utf8'),'# Parent\n')
-  await flush();await click('打开会议笔记');assert.equal(opened.at(-1).kind,'page')
+  await flush();await capsule(/^页面 /);assert.equal(opened.at(-1).kind,'page')
   assert.ok(dom.window.document.body.textContent?.includes('反链'))
   assert.ok(relations.incoming({ref:{kind:'event',id:'series',occurrence:String(second)}}).length)
   await act(async()=>root.render(<><EventLinks occKey={key} title="Meeting" readOnly={true}/><FloatHost/></>))

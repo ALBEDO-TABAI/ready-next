@@ -1,7 +1,7 @@
 import { calendarEventReferenceId } from '../../../../shared/calendar-event-identity'
-import { ReadyRefSchema, parseReadyUri, toReadyUri, type ReadyRef } from '../../../../shared/ready-ref'
+import { READY_REF_MIME, ReadyRefSchema, parseReadyUri, toReadyUri, type ReadyRef } from '../../../../shared/ready-ref'
 import type { EventRef } from '../../../../shared/calendar-linkage'
-export const READY_REF_MIME = 'application/x-ready-ref'
+export { READY_REF_MIME }
 export function writeEventTransfer(data: Pick<DataTransfer, 'setData'>, ref: EventRef, title: string, allDay = false) {
   data.setData(READY_REF_MIME, JSON.stringify(ref))
   data.setData('text/uri-list', toReadyUri(ref))

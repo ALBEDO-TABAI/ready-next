@@ -889,6 +889,7 @@ const rssAPI = {
   sieveSaveTopicNotification: (input: { topicId: string; urgent: boolean }) => ipcRenderer.invoke('rss:sieveSaveTopicNotification', input),
   importOpml: (input: { xml: string }) => ipcRenderer.invoke('rss:importOpml', input),
   sieveQuery: (input?: import('../shared/rss-sieve').RSSSieveQuery) => ipcRenderer.invoke('rss:sieveQuery', input),
+  sieveRelevance: (itemId: string) => ipcRenderer.invoke('rss:sieveRelevance', itemId),
   sieveToday: () => ipcRenderer.invoke('rss:sieveToday'),
   sieveRecordBehavior: (input: import('../shared/rss-sieve').RSSBehaviorInput) => ipcRenderer.invoke('rss:sieveRecordBehavior', input),
   sievePrivacy: () => ipcRenderer.invoke('rss:sievePrivacy'),
@@ -1007,7 +1008,6 @@ const calendarAPI = {
   importCalendar: (raw: string, name: string, sourceId?: string) => ipcRenderer.invoke('calendar:importCalendar', raw, name, sourceId),
   openIcs: () => ipcRenderer.invoke('calendar:openIcs'),
   saveIcs: (name: string, text: string) => ipcRenderer.invoke('calendar:saveIcs', name, text),
-  openLink: (url: string) => ipcRenderer.invoke('calendar:openLink', url),
   getLoginItem: () => ipcRenderer.invoke('calendar:getLoginItem'),
   setLoginItem: (enabled: boolean) => ipcRenderer.invoke('calendar:setLoginItem', enabled),
   onChanged: (handler: () => void) => { const listener = () => handler(); ipcRenderer.on('calendar:changed', listener); return () => ipcRenderer.removeListener('calendar:changed', listener) },
@@ -1453,7 +1453,7 @@ const bookSourcesAPI: import('../shared/library-sources').BookSourcesAPI = {
   cancel: id => ipcRenderer.invoke('librarySources:cancel', id),
   retry: id => ipcRenderer.invoke('librarySources:retry', id),
   answer: input => ipcRenderer.invoke('librarySources:answer', input),
-  openManual: id => ipcRenderer.invoke('librarySources:openManual', id),
+  manualLink: id => ipcRenderer.invoke('librarySources:manualLink', id),
   onChanged: listener => {
     const handler = (_event: IpcRendererEvent, jobs: import('../shared/library-sources').SourceJob[]) => listener(jobs)
     ipcRenderer.on('librarySources:changed', handler)
@@ -1633,6 +1633,7 @@ const mcpAPI = {
 }
 
 const objectsAPI: ObjectPresentationAPI = {
+  preview: ref => ipcRenderer.invoke('object:preview', ref),
   resolvePath: (path) => ipcRenderer.invoke('object:resolve-path', path),
   locate: (id) => ipcRenderer.invoke('object:locate', id),
   prepareMigration: (request) => ipcRenderer.invoke('object:migration-prepare', request),
@@ -1704,6 +1705,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sourceAnnotations: sourceAnnotationsAPI,
   documentAnnotations: documentAnnotationsAPI,
   documentImport: documentImportAPI,
+  databasePreview: (id: string): Promise<import('../shared/object-preview').DatabasePreview> => ipcRenderer.invoke('documentDatabase:preview', id),
   documentDatabase: (request: import('../shared/document-database').DatabaseRequest): Promise<import('../shared/document-database').DatabaseReply> => ipcRenderer.invoke('documentDatabase:request', request),
   library: libraryAPI,
   libraryArchive: libraryArchiveAPI,

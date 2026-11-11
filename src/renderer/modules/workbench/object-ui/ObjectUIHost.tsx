@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { parseReadyUri } from '../../../../shared/ready-ref'
 import { appShortcut, matchesAppShortcut } from '../../../../shared/app-shortcuts'
 import { registerGlobalCommands } from '../commands/global-commands'
-import { OPEN_QUICK_SWITCHER_EVENT, SHELL_ACTION_EVENT } from '../commands/shell-actions'
+import { OPEN_QUICK_LOOK_EVENT, OPEN_QUICK_SWITCHER_EVENT, SHELL_ACTION_EVENT } from '../commands/shell-actions'
 import { openObjectTarget } from './navigation'
 import { QuickLook, MaskedObjectOverlay } from './QuickLook'
 import { QuickSwitcher } from './QuickSwitcher'
@@ -56,12 +56,17 @@ export function ObjectUIHost({ onSettings }: { onSettings: () => void }) {
       if (!parsed.ok) return
       event.preventDefault(); event.stopImmediatePropagation(); preview(parsed.ref)
     }
-    // The document sidebar's search field opens the same switcher.
+    // The document sidebar's search field opens the same switcher; reference capsules ask for a quick look.
     const openSwitcher = () => setSurface({ kind: 'switcher' })
+    const quickLook = (event: WindowEventMap['ready:open-quick-look']) => preview(event.detail.ref)
     window.addEventListener('keydown', key, true)
     window.addEventListener('click', click, true)
     window.addEventListener(OPEN_QUICK_SWITCHER_EVENT, openSwitcher)
-    return () => { window.removeEventListener('keydown', key, true); window.removeEventListener('click', click, true); window.removeEventListener(OPEN_QUICK_SWITCHER_EVENT, openSwitcher) }
+    window.addEventListener(OPEN_QUICK_LOOK_EVENT, quickLook)
+    return () => {
+      window.removeEventListener('keydown', key, true); window.removeEventListener('click', click, true)
+      window.removeEventListener(OPEN_QUICK_SWITCHER_EVENT, openSwitcher); window.removeEventListener(OPEN_QUICK_LOOK_EVENT, quickLook)
+    }
   }, [preview])
   if (error) return <MaskedObjectOverlay onClose={() => setError('')}><p role="alert">{error}</p><button onClick={() => setError('')}>关闭</button></MaskedObjectOverlay>
   return surface?.kind === 'switcher' ? <QuickSwitcher onClose={close} onPreview={preview} />

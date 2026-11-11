@@ -1,13 +1,13 @@
-import type { RSSNavigableReference } from '../../shared/rss-reference'
+import type { RSSReference } from '../../shared/rss-reference'
 import { create } from 'zustand'
 import { RSSQuerySchema, type RSSQuery, type RSSQueryInput, type RSSQueryResult } from '../../shared/rss-workspace'
 import { readJsonStorage, writeJsonStorage } from '../utils/storage'
 
 interface RSSSessionState {
   interactionRevision: number
-  pendingReveal: { id: string; reference: RSSNavigableReference } | null
+  pendingReveal: { id: string; reference: RSSReference } | null
   cancelReveal(): void
-  requestReveal(reference: RSSNavigableReference): void
+  requestReveal(reference: RSSReference): void
   finishReveal(id: string): void
   query: RSSQuery
   digestVisible: boolean
@@ -24,6 +24,7 @@ interface RSSSessionState {
   selectedItemExpectedRevision: string | null
   selectedItemId: string | null
   selectedItemTitle: string | null
+  replaceQuery(query: RSSQuery, view: RSSQueryResult): void
   setQuery(patch: RSSQueryInput): void
   setView(view: RSSQueryResult): void
   setSelection(payload: { selectedExcerpt?: import('../../shared/rss-reading').RSSReadingRange | null; selectedItemExpectedRevision?: string | null; selectedItemId?: string | null; selectedItemTitle?: string | null }): void
@@ -50,6 +51,12 @@ export const useRSSSession = create<RSSSessionState>((set, get) => ({
   selectedExcerpt: null, selectedItemExpectedRevision: null,
   selectedItemId: null,
   selectedItemTitle: null,
+  replaceQuery: (input, view) => {
+    const { cursor: _cursor, expectedRevision: _revision, ...query } = RSSQuerySchema.parse(input)
+    set({ query, view, interactionRevision: get().interactionRevision + 1, digestVisible: false, selectedDigestId: null,
+      selectedItemId: null, selectedItemTitle: null, selectedExcerpt: null, selectedItemExpectedRevision: null })
+    writeJsonStorage(KEY, { query })
+  },
   setQuery: (patch) => {
     const { cursor: _cursor, expectedRevision: _revision, ...query } = RSSQuerySchema.parse({ ...get().query, ...patch })
     set({ query, interactionRevision: get().interactionRevision + 1 })

@@ -3,10 +3,9 @@ import type { RSSDigestHeader, RSSDigestEntry, RSSDigestSource, RSSDigestCoverag
 import { RSSQuerySchema, type RSSQueryInput, type RSSQueryResult } from '../../../shared/rss-workspace'
 import type { RSSDefinition } from '../../../shared/rss-organization'
 import { useRSSSession } from '../../stores/useRSSSession'
-import { toRSSItem } from '../../modules/rss/workspace-query'
-import type { RSSItem } from './RSSFeed'
 import RSSReferenceButton from './RSSReferenceButton'
-import { openWebpageInBrowser } from '../../modules/browser/openWebpageInBrowser'
+import { RefCapsule } from '../ui/RefCapsule'
+import { ReadyRefSchema } from '../../../shared/ready-ref'
 import { ChevronRight, Download, Plus, RefreshCw, Settings2 } from 'lucide-react'
 import RSSBriefComposer from './RSSBriefComposer'
 import RSSCoverImage from './RSSCoverImage'
@@ -16,7 +15,16 @@ const time = (value: number, timezone: string) => new Date(value).toLocaleString
 const editionDate = (value: number, timezone: string, withTime: boolean) => new Date(value).toLocaleString('zh-CN', {
   timeZone: timezone, month: 'long', day: 'numeric', ...(withTime ? { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' } : {}),
 })
-function Sources({ reportId, groupKey, criteria = false, onRead }: { reportId: string; groupKey?: string; criteria?: boolean; onRead(source: RSSDigestSource): void }) {
+/** A report's 出处 (W6 §2.1): the article version it quoted, and the original site, as reference capsules. */
+function SourceLine({ row }: { row: RSSDigestSource }) {
+  const site = ReadyRefSchema.safeParse({ kind: 'web', url: row.link })
+  return <p className="rss-digest-source-line">
+    <RefCapsule reference={{ kind: 'rss-item', id: row.itemId, article: { expectedRevision: row.articleRevision, offset: 0, length: 12000 } }} title={row.title} />
+    {site.success && <RefCapsule reference={site.data} title={row.source} />}
+  </p>
+}
+
+function Sources({ reportId, groupKey, criteria = false }: { reportId: string; groupKey?: string; criteria?: boolean }) {
   const [rows, setRows] = useState<Array<RSSDigestSource | RSSDigestCoverageSource | RSSDigestCriteria>>([]), [next, setNext] = useState<number | null>(0)
   const [open, setOpen] = useState(false), [error, setError] = useState(''), [busy, setBusy] = useState(false)
   const alive = useRef(true)
@@ -36,11 +44,9 @@ function Sources({ reportId, groupKey, criteria = false, onRead }: { reportId: s
     <button type="button" onClick={() => { setOpen(!open); if (!open && !busy && rows.length === 0 && next !== null) void read() }} aria-expanded={open}>{groupKey ? '查看全部报道依据' : criteria ? '查看本刊采用的标准版本' : '查看订阅覆盖与采集情况'}</button>
     {open && <>
       {rows.map((row) => 'itemId' in row ? <div key={`${row.itemId}:${row.articleRevision}`}>
-        <strong>{row.source} · {row.title}</strong><blockquote>{row.quote}</blockquote>
+        <SourceLine row={row} /><blockquote>{row.quote}</blockquote>
         <p>{row.quoteKind === 'source_summary' ? '来源摘要' : row.quoteKind === 'title' ? '仅有标题' : '原文摘句'}{row.quoteTruncated ? ' · 节选' : ''} · {row.bodyStatus === 'ready' ? '已保存正文' : '正文不完整或尚未获取'}</p>
         {row.curation && <p>{row.curation.origin === 'manual' ? '手工精选' : '模型精选理由'}：{row.curation.reason}</p>}
-        <button type="button" onClick={() => onRead(row)}>阅读对应版本</button>
-        <button type="button" onClick={() => void openWebpageInBrowser(row.link)}>打开原网站</button>
       </div> : 'ruleRevision' in row ? <div key={row.id}><strong>{row.name} · 标准第 {row.ruleRevision} 版</strong><p>{row.description}</p></div> : <div key={row.id}><strong>{row.name}</strong><p>{row.enabled ? '已启用' : '已停用'} · {row.fetch ? `${row.fetch.attemptedAt} · ${row.fetch.success ? '最近采集成功' : '最近采集失败'}` : '缺少最近采集结果'}{row.fetch?.error ? ` · ${row.fetch.error}` : ''}{row.fetch?.warning ? ` · ${row.fetch.warning}` : ''}</p></div>)}
       {next !== null && <button type="button" disabled={busy} onClick={() => void read()}>{busy ? '读取中…' : '继续读取依据'}</button>}
       {error && <p className="rss-note rss-note--danger" role="alert">{error}</p>}
@@ -48,9 +54,9 @@ function Sources({ reportId, groupKey, criteria = false, onRead }: { reportId: s
   </div>
 }
 
-export default function RSSDigestPanel({ active, view, definitions = [], feedSources = [], onReadArticle, onEditDefinition }: {
+export default function RSSDigestPanel({ active, view, definitions = [], feedSources = [], onEditDefinition }: {
   active: boolean; view: RSSQueryResult | null; definitions?: RSSDefinition[]; feedSources?: Array<{ id: string; name: string }>
-  onReadArticle(item: RSSItem): void; onEditDefinition?(id: string): void
+  onEditDefinition?(id: string): void
 }) {
   const selected = useRSSSession((s) => s.selectedDigestId), setDigestView = useRSSSession((s) => s.setDigestView)
   const [editions, setEditions] = useState<RSSDigestHeader[]>([]), [editionNext, setEditionNext] = useState<number | null>(null), [snapshot, setSnapshot] = useState<number>()
@@ -148,12 +154,6 @@ export default function RSSDigestPanel({ active, view, definitions = [], feedSou
     setComposing(false); setDigestView(true, result.data.id)
   }
   const curated = definitions.find((definition) => definition.kind === 'curated')
-  const readArticle = (source: RSSDigestSource) => { void action(async () => {
-    const expected = useRSSSession.getState().selectedDigestId, ticket = actionTicket.current
-    const result = await window.electronAPI.rss.readArticle({ itemId: source.itemId, expectedRevision: source.articleRevision, length: 1 })
-    if (!result.success || !result.data) throw new Error('原文已变化或删除；本刊仍保留发布时的摘句，不跳到其他版本。')
-    if (ticket === actionTicket.current && useRSSSession.getState().digestVisible && useRSSSession.getState().selectedDigestId === expected) onReadArticle({ ...toRSSItem(result.data.article), pinnedRevision: source.articleRevision })
-  }) }
   const kindLabel = (kind: RSSDigestHeader['kind']) => kind === 'daily' ? '日报' : '范围简报'
 
   // Headline = the most-reported story; highlights = the next ones; sections index the rest.
@@ -194,7 +194,7 @@ export default function RSSDigestPanel({ active, view, definitions = [], feedSou
   }, [shelf])
   const scrollTo = (id: string) => mainRef.current?.querySelector(`[data-digest-anchor="${id}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   const reportDate = report ? dateParts(report.until, report.timezone) : null
-  const sources = (entry: RSSDigestEntry) => <Sources key={`${report!.id}:${entry.groupKey}`} reportId={report!.id} groupKey={entry.groupKey} onRead={readArticle} />
+  const sources = (entry: RSSDigestEntry) => <Sources key={`${report!.id}:${entry.groupKey}`} reportId={report!.id} groupKey={entry.groupKey} />
 
   return <section className="rss-digest-panel" aria-label="日报与简报">
     <RSSTopbarTools slot="lead" show={active}><span>日报与简报</span></RSSTopbarTools>
@@ -322,8 +322,8 @@ export default function RSSDigestPanel({ active, view, definitions = [], feedSou
                 <button type="button" className="rss-btn" disabled={busy} onClick={() => void action(() => generate({ kind: 'regenerate' }))}><RefreshCw size={14} strokeWidth={1.8} />重新生成新版本</button>
                 <button type="button" className="rss-btn" disabled={busy} onClick={() => void action(async () => { const ticket = actionTicket.current; const result = await window.electronAPI.rss.exportDigest({ reportId: report.id }); if (!result.success || !result.data) throw new Error(result.error); if (ticket === actionTicket.current) setNotice(result.data.canceled ? '已取消导出' : `已导出：${result.data.path}`) })}><Download size={14} strokeWidth={1.8} />导出本刊</button>
               </div>
-              <Sources key={`${report.id}:criteria`} reportId={report.id} criteria onRead={readArticle} />
-              <Sources key={`${report.id}:coverage`} reportId={report.id} onRead={readArticle} />
+              <Sources key={`${report.id}:criteria`} reportId={report.id} criteria />
+              <Sources key={`${report.id}:coverage`} reportId={report.id} />
             </section>
           </aside>
         </div>

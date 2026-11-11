@@ -127,7 +127,7 @@ if(a[0]==='download'){fs.writeFileSync(path.join(a[a.indexOf('--dir')+1],'book.t
     settings: {
       getSetting: key => db.prepare('SELECT value FROM settings WHERE key = ?').get<{ value: string }>(key)?.value,
       setSetting: (key, value) => { db.prepare('INSERT OR REPLACE INTO settings (key,value,updated_at) VALUES (?,?,?)').run(key, value, Date.now()) },
-    }, changed: () => { notifications++ }, libraryChanged: async () => {}, openExternal: async () => { throw new Error('must not open') },
+    }, changed: () => { notifications++ }, libraryChanged: async () => {},
   })
   const handlers = new Map<string, (event: unknown, input?: unknown) => unknown>()
   registerBookSourceIPC({ handle: (name, callback) => { handlers.set(name, callback) } }, service)
