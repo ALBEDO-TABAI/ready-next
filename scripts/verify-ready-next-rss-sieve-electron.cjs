@@ -112,6 +112,8 @@ async function main() {
     await page.locator('nav[aria-label="资讯导航"] [aria-label="筛子设置"]').click()
     const settings = page.locator('section[aria-label="筛子设置"]')
     await settings.waitFor({ timeout: 15000 })
+    // Sections that depend on loaded settings render once their data arrives.
+    await settings.locator('section[aria-label="额度"]').waitFor({ timeout: 15000 }).catch(() => {})
     ok('§4 筛子设置 opens with its sections', await settings.locator('section[aria-label="我的关注"]').isVisible() && await settings.locator('section[aria-label="额度"]').isVisible())
     await shot(page, 'rss-05-settings')
   } finally {
@@ -123,4 +125,5 @@ async function main() {
   if (failed) process.exitCode = 1
 }
 
-main().catch(error => { console.error(error); process.exitCode = 1 })
+// Exit explicitly: a closed app can leave handles (fixture sockets, Playwright) that keep Node alive.
+main().then(() => process.exit(process.exitCode ?? 0), error => { console.error(error); process.exit(1) })

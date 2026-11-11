@@ -119,7 +119,12 @@ const FIXED_SCREENS = [
   {
     name: 'rss-article', mode: 'rss',
     // Scoped to the mode panel: the same titles also sit, hidden, in other modes' lists.
-    run: async page => { await page.locator('[data-workbench-mode-panel="rss"]').getByText('本地模型在端侧推理上的新进展').first().click(); await harness.sleep(2500) },
+    // 资讯 opens on 为你筛过的 (W5); the article is opened from 全部.
+    run: async page => {
+      const panel = page.locator('[data-workbench-mode-panel="rss"]')
+      await page.locator('nav[aria-label="资讯导航"] [aria-label="全部"]').click()
+      await panel.getByText('本地模型在端侧推理上的新进展').first().click(); await harness.sleep(2500)
+    },
   },
   {
     name: 'calendar-event', mode: 'calendar',
