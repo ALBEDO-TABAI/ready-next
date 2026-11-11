@@ -1,0 +1,288 @@
+{
+  "version": 1,
+  "frozenBeforeFirstRun": true,
+  "note": "原创虚构资料库先完成，再一次性编写查询及可接受答案；首次运行前锁定，未根据检索结果调整。",
+  "queriesSha256": "e4330ab40ba60f72eb56be1f1bf0584fd41a5def2e193c98dd3bbc9164d52aef",
+  "pages": [
+    {
+      "path": "AI工具/上下文窗口.md",
+      "sha256": "813b57669e523c6fc2ce55122ee6b6dd82c765e3d9f11928be7053d26a710348"
+    },
+    {
+      "path": "AI工具/工具账本.md",
+      "sha256": "30456461118b798d717e04b5aab5966132741f43d3b95774edbc237bb34f4134"
+    },
+    {
+      "path": "AI工具/幻觉核查.md",
+      "sha256": "8ba69c1ab2605e5b2339a02bb37e625662e4610629b53301372087ddcd65db8f"
+    },
+    {
+      "path": "AI工具/提示词试验.md",
+      "sha256": "84a562441bafe372aeeecd65405627f007888b7770ee5346625b34f5c1503589"
+    },
+    {
+      "path": "AI工具/本地模型笔记.md",
+      "sha256": "6ca867a7703996655e3210ab921966d82cd39fa6630c66a0103a7be21988cc5b"
+    },
+    {
+      "path": "AI工具/检索笔记.md",
+      "sha256": "aec01ee2ed7d46442d579338dde826c586e91ba7a4dccef66ebbf5542d509323"
+    },
+    {
+      "path": "AI工具/自动化边界.md",
+      "sha256": "ea10ce7d5a6b97a66aa692d8c20530b491413832b456191fbd6fd9a9d81b063b"
+    },
+    {
+      "path": "AI工具/识图记录.md",
+      "sha256": "8a102fc4a8409e5a8a842883077e92b6f40003d6a7fc4882242da29bf85b5ac4"
+    },
+    {
+      "path": "AI工具/语音草稿.md",
+      "sha256": "0bc0e21be739342e2c3fd4e5ec4a4c59cd3cca7adbb5b90054f9d77fd51d8f65"
+    },
+    {
+      "path": "English/backup-routine.md",
+      "sha256": "eb4a18a162cb4334c810dcb8b553e55bac0d7db2bb7fbad62ccba902ee8e762a"
+    },
+    {
+      "path": "English/digital-garden.md",
+      "sha256": "a3fa83e2b324c7fbe2877dfe778c20660ed37a1e915f375cbfec024c0771b1c1"
+    },
+    {
+      "path": "English/meeting-notes.md",
+      "sha256": "30a6d0148c4f4faec8e6400b69c0eea089e5b6813c9dbe6d9671e7a2245f228f"
+    },
+    {
+      "path": "English/newsletter-editing.md",
+      "sha256": "70ac2900f4b3a0c08904d0960ddfbdc6a994654b23ae0338fb4ba8c8c95851b4"
+    },
+    {
+      "path": "English/prompt-evaluation.md",
+      "sha256": "63080638c67adda8c987f3b9dbf194826929cbba1053c13f20255b8fea5c18fd"
+    },
+    {
+      "path": "English/reading-journal.md",
+      "sha256": "c5d93aa85a44608594e6bbb73208ea53c27c36f8d98aaa0f11f81791df58ac9a"
+    },
+    {
+      "path": "English/readwise-export.md",
+      "sha256": "c846b244022b0bfd6a9eb4180e08431b57ee83193db65a2bcd250995f1ba7f4c"
+    },
+    {
+      "path": "写作/专栏排期.md",
+      "sha256": "f028d03f17422a0ff5e8a9bba84970fa7344015b8292683e4b2b058c7f265508"
+    },
+    {
+      "path": "写作/人物对白.md",
+      "sha256": "f3e2e835bc0151d344c2cbda450f2dcc557d9d924b1df3c9bba2d064571964f1"
+    },
+    {
+      "path": "写作/修改清单.md",
+      "sha256": "40d2ca04fca408cb828b3672b6d0d2612a35fb8c9f9d4fdf16f5807d9546d592"
+    },
+    {
+      "path": "写作/叙述视角.md",
+      "sha256": "6e2ea1db8f7271be7e7f351df3867f88dfae59c14c4c7222593e61ff3aad396c"
+    },
+    {
+      "path": "写作/周三练笔.md",
+      "sha256": "0ec3f47340317e1d8acaf6d03affaebb4638424b67070aa6beabf0c6bdc2df82"
+    },
+    {
+      "path": "写作/开头改稿.md",
+      "sha256": "c0e67e712f5f9fc3779f98fbbc11091cf7fff08b8ea3c7fb973ebec0096e6bba"
+    },
+    {
+      "path": "写作/素材卡片.md",
+      "sha256": "8210ec234083ae6d31d51e647b296905353674f85b25fadd14af5ad3d54e9ee1"
+    },
+    {
+      "path": "写作/退稿之后.md",
+      "sha256": "d1258453b17f41834219fa05ed794d8269d566601a5f7eca1cfb0873169c8f0b"
+    },
+    {
+      "path": "写作/采访准备.md",
+      "sha256": "9fbe59486e162ecbf26180ba6542a830829fe41fa66844756c6b23dda33ae0eb"
+    },
+    {
+      "path": "出版/小书/书店活动.md",
+      "sha256": "276507ded4fe8415f7d2ecebc13f8b336652f34d00a6cfbce6ba530de8f4f236"
+    },
+    {
+      "path": "出版/小书/印前校样.md",
+      "sha256": "0b5a4fc1fa4619db2b18c10e5acf667c3cbd77b269865b24d3367b5962df2997"
+    },
+    {
+      "path": "出版/小书/发行路线.md",
+      "sha256": "9f0ae35283a43a7583fdcb60e3fdea79035622d78dec79927821e1a29c557d16"
+    },
+    {
+      "path": "出版/小书/封面讨论.md",
+      "sha256": "eb1645bf6152d1ca86d97434e7f99faa6f84078b477cf6da26fa874350977664"
+    },
+    {
+      "path": "出版/小书/电子版检查.md",
+      "sha256": "24c53e3e1f28913835adc83d292f3d7ef7f9295a610add5415974c17a98cd56a"
+    },
+    {
+      "path": "出版/小书/纸张触感.md",
+      "sha256": "0af0f4f5599c330bafd1b44f2b51f0dfff9a859b872dbd99d62e47880bc01226"
+    },
+    {
+      "path": "出版/小书/译名表.md",
+      "sha256": "2c3471a1d61bab99921c35e78c16c9b6b4c3d2382513b1c52784f2e956b7e058"
+    },
+    {
+      "path": "出版/小书/赠书地址.md",
+      "sha256": "163d802b3f0b65eae771cea18bde95a9453d96930fdee806f6b080c346e30cb0"
+    },
+    {
+      "path": "出版/小书/首印复盘.md",
+      "sha256": "d27f6604a256ff46bf502e68092605b25d08a2a60284defd28eb3fe28298dfa7"
+    },
+    {
+      "path": "生活/日记/修伞记录.md",
+      "sha256": "c8806604fc8e192fd6deed7ca7b71762941b7c7116486b49dc82a51be302a389"
+    },
+    {
+      "path": "生活/日记/周日散步.md",
+      "sha256": "c2b8b5845a36140f3b2b4f84ece61431154aeeae4e7a2eb5115501fb546490b3"
+    },
+    {
+      "path": "生活/日记/周末备餐.md",
+      "sha256": "0e4c23887a206eb816451b7db648e7af7f9130202f4e39fb66ed38ceded46d54"
+    },
+    {
+      "path": "生活/日记/搬家清点.md",
+      "sha256": "6dc344fb0b93b68e52a9281b7c84ab73b4d18a8ebc2c7ed1061b635f9c16303a"
+    },
+    {
+      "path": "生活/日记/旅行收纳.md",
+      "sha256": "c851f2ddb2070a6c4e94acd2368bfee591bf91ef4e13f1ff1b5ff7c910e9b265"
+    },
+    {
+      "path": "生活/日记/旧照片.md",
+      "sha256": "a3de2bef4d84b5a599fe1ebc7e5ba591c6b63192d0ac7f0871754b7e91fd361d"
+    },
+    {
+      "path": "生活/日记/月度开销.md",
+      "sha256": "97ba7ae78c8bf9d421905f55fdfda7bfc6d836a09754c8660160c7b50a0b1e88"
+    },
+    {
+      "path": "生活/日记/睡前笔记.md",
+      "sha256": "8a5119b7e3ecb2fd66c2cccd0b337e73e5aba5824db2b041afd3c1e9d7a96ccc"
+    },
+    {
+      "path": "生活/日记/阳台种植.md",
+      "sha256": "bc06f0829bc7adc955147d83ea3cd345a1fab3ed2c53f50dbecf135a68644c68"
+    },
+    {
+      "path": "资讯/周报结构.md",
+      "sha256": "8f4ee24e0b6576f0b21ed7f52b2fc20d8e5dd23c138072642f1a9967f103b563"
+    },
+    {
+      "path": "资讯/快讯与长读.md",
+      "sha256": "b4dd91a8d135d1c1bedc336854da35a310c2028790b04a122b1cbfe5011d9a02"
+    },
+    {
+      "path": "资讯/更正记录.md",
+      "sha256": "9a608dc3da0d8dd5617b391809fe4c5139019dcfbd744e43afbc366008771546"
+    },
+    {
+      "path": "资讯/来源登记.md",
+      "sha256": "d31c8f7539f9acd231728cf0cb04c22bda8f08600339aea8382edc4ebf3a8b27"
+    },
+    {
+      "path": "资讯/标题核对.md",
+      "sha256": "276a9b21b237d48498ca16a9fe8d1220a27f016d614bdf9785d5fa4ed30ec2f5"
+    },
+    {
+      "path": "资讯/每周筛选.md",
+      "sha256": "204ddef0d715e8e729643e3f1f8f580ec642b0b4a80eca360f9b8d9c6fdd5f3b"
+    },
+    {
+      "path": "资讯/消息去重.md",
+      "sha256": "53b0038a25acad0cd2a0bb298e0c8a578ebc1ac1a0cf461d2e41a24fb1569a88"
+    },
+    {
+      "path": "资讯/订阅整理.md",
+      "sha256": "a0ac1cb706192eff1dcabba4e36abfc3ae33ccfce7247c0542b334707c147e95"
+    },
+    {
+      "path": "资讯/阅读队列.md",
+      "sha256": "eaa25260023f2aa68d63de6bfe3977d534bb9eeb197741607a11a4ddba31e363"
+    },
+    {
+      "path": "阅读/笔记/参考书架.md",
+      "sha256": "f12243b5199ccb48cf623d724c062731955d73a14b7e24d047895954f59c8537"
+    },
+    {
+      "path": "阅读/笔记/小说时间线.md",
+      "sha256": "d127702089e23142ee2aa32c9db935e3b77df339aaaf61bd2690cc306acc6849"
+    },
+    {
+      "path": "阅读/笔记/弃读记录.md",
+      "sha256": "2f8854408c62503e58fcfef29d98aa68dcc6d375eb6aefb631e2a21d6da2a984"
+    },
+    {
+      "path": "阅读/笔记/批注搬家.md",
+      "sha256": "67e6db1514ba10badfba4ad3f93205e2497ddc0dee4b02b4b5de8068c803e76f"
+    },
+    {
+      "path": "阅读/笔记/摘录与转述.md",
+      "sha256": "4e33e2ca7d0cafd7cd6ef5a3bc77bd192443d80015ef0a3dbb8719cca51efd36"
+    },
+    {
+      "path": "阅读/笔记/读书会十一月.md",
+      "sha256": "74c27da20476dc0bff32c14a8c33ce03f0c2102ad132fc818434433d9c969d0e"
+    },
+    {
+      "path": "阅读/笔记/边读边走.md",
+      "sha256": "ed7a8b3454d153481e820a0156230e40fd995c3d9903060bd0299abf466bcd3a"
+    },
+    {
+      "path": "阅读/笔记/重读的方法.md",
+      "sha256": "5362e8d2ef668f3a00ffd6998e1f70c7d9c8617bd8fff9e803cd9c8a63ee0321"
+    },
+    {
+      "path": "阅读/笔记/间隔回想.md",
+      "sha256": "9c8ecca36b9ed205e6acf026de172a7a5bf440a586f39df249837fa9a542a10d"
+    },
+    {
+      "path": "项目/工作室/专注时段.md",
+      "sha256": "197cebc86725bc45fdd18fb7aaecb427cf9e60c8992d0678dfc1b0155471caf8"
+    },
+    {
+      "path": "项目/工作室/交接清单.md",
+      "sha256": "c53ef4c95f8bb23128ae94f646df696114056ac9515757d6e027264ade3604c2"
+    },
+    {
+      "path": "项目/工作室/任务限流.md",
+      "sha256": "7ed417f86746cf9024e2d821e2317d932fc499dc55683ca9fc3ca8485b5e7d68"
+    },
+    {
+      "path": "项目/工作室/周会纪要.md",
+      "sha256": "08070b4eea615ea796b08bb60660499f0a1a699fdead177ede5ee12197c96f70"
+    },
+    {
+      "path": "项目/工作室/复盘草稿.md",
+      "sha256": "08933c6f41051ecf866d4fb5b456ab1e5c1c1c5426f768244c187bf1a7a94116"
+    },
+    {
+      "path": "项目/工作室/文件命名.md",
+      "sha256": "d426d1b519af0ea379ae13fbffa196300ccbaff307688d3209197712e8c52886"
+    },
+    {
+      "path": "项目/工作室/需求变更.md",
+      "sha256": "d7c4074201627125e72504b378ff1781587f32afec4b137a5979615cda4b00af"
+    },
+    {
+      "path": "项目/工作室/风险登记.md",
+      "sha256": "3b49a06fa6d5939a8a923a78356b9574a052a478e8e59be2b511102cc8a126c2"
+    },
+    {
+      "path": "项目/工作室/验收约定.md",
+      "sha256": "7e063b43b1309eb9c894aee788f310c7f942479e38e449197182d3607fa12135"
+    }
+  ]
+}

@@ -1,0 +1,281 @@
+[
+  {
+    "id": "exact-01",
+    "category": "exact",
+    "query": "采访提纲",
+    "acceptablePaths": [
+      "写作/采访准备.md"
+    ],
+    "rationale": "原文写有采访提纲，并列出准备方法。"
+  },
+  {
+    "id": "exact-02",
+    "category": "exact",
+    "query": "印前校样",
+    "acceptablePaths": [
+      "出版/小书/印前校样.md",
+      "出版/小书/发行路线.md"
+    ],
+    "rationale": "两页均涉及纸样检查，原词出现。"
+  },
+  {
+    "id": "exact-03",
+    "category": "exact",
+    "query": "第三人称限知",
+    "acceptablePaths": [
+      "写作/叙述视角.md"
+    ],
+    "rationale": "原词出现在视角检查笔记中。"
+  },
+  {
+    "id": "exact-04",
+    "category": "exact",
+    "query": "间隔重复",
+    "acceptablePaths": [
+      "阅读/笔记/间隔回想.md"
+    ],
+    "rationale": "原词出现在回想与复习安排中。"
+  },
+  {
+    "id": "exact-05",
+    "category": "exact",
+    "query": "资讯筛选",
+    "acceptablePaths": [
+      "资讯/每周筛选.md"
+    ],
+    "rationale": "原文明确列出筛选问题。"
+  },
+  {
+    "id": "exact-06",
+    "category": "exact",
+    "query": "消息去重",
+    "acceptablePaths": [
+      "资讯/消息去重.md"
+    ],
+    "rationale": "原文解释按事件去重。"
+  },
+  {
+    "id": "exact-07",
+    "category": "exact",
+    "query": "上下文窗口",
+    "acceptablePaths": [
+      "AI工具/上下文窗口.md"
+    ],
+    "rationale": "原文讨论长材料的使用限制。"
+  },
+  {
+    "id": "exact-08",
+    "category": "exact",
+    "query": "交接清单",
+    "acceptablePaths": [
+      "项目/工作室/交接清单.md"
+    ],
+    "rationale": "原文列出交付给接手者的材料。"
+  },
+  {
+    "id": "exact-09",
+    "category": "exact",
+    "query": "周末备餐",
+    "acceptablePaths": [
+      "生活/日记/周末备餐.md"
+    ],
+    "rationale": "原词出现在备餐记录中。"
+  },
+  {
+    "id": "exact-10",
+    "category": "exact",
+    "query": "EPUB 导出",
+    "acceptablePaths": [
+      "出版/小书/电子版检查.md"
+    ],
+    "rationale": "两词均在正文出现。"
+  },
+  {
+    "id": "paraphrase-01",
+    "category": "paraphrase",
+    "query": "怎么把书印出来卖",
+    "acceptablePaths": [
+      "出版/小书/发行路线.md"
+    ],
+    "rationale": "从书稿审读到装订入库、渠道上架，回答完整制作销售流程。"
+  },
+  {
+    "id": "paraphrase-02",
+    "category": "paraphrase",
+    "query": "文章一开始怎么让人愿意往下读",
+    "acceptablePaths": [
+      "写作/开头改稿.md"
+    ],
+    "rationale": "以现场动作取代铺垫解释，让开篇有吸引力。"
+  },
+  {
+    "id": "paraphrase-03",
+    "category": "paraphrase",
+    "query": "聊完以后怎么知道谁去干什么",
+    "acceptablePaths": [
+      "项目/工作室/周会纪要.md",
+      "English/meeting-notes.md"
+    ],
+    "rationale": "会议决定绑定负责人和下一步，避免含糊待办。"
+  },
+  {
+    "id": "paraphrase-04",
+    "category": "paraphrase",
+    "query": "收藏太多看不过来怎么办",
+    "acceptablePaths": [
+      "资讯/阅读队列.md",
+      "资讯/订阅整理.md"
+    ],
+    "rationale": "为积累的待读内容建立处理与退出方式。"
+  },
+  {
+    "id": "paraphrase-05",
+    "category": "paraphrase",
+    "query": "读过很快就忘了",
+    "acceptablePaths": [
+      "阅读/笔记/间隔回想.md",
+      "阅读/笔记/重读的方法.md",
+      "English/reading-journal.md"
+    ],
+    "rationale": "离开书本提取记忆，再次回想和应用。"
+  },
+  {
+    "id": "paraphrase-06",
+    "category": "paraphrase",
+    "query": "机器人编出来的书名怎么查",
+    "acceptablePaths": [
+      "AI工具/幻觉核查.md"
+    ],
+    "rationale": "核实虚构参考书目，确认来源存在且支持引用。"
+  },
+  {
+    "id": "paraphrase-07",
+    "category": "paraphrase",
+    "query": "手头好多活都做了一半",
+    "acceptablePaths": [
+      "项目/工作室/任务限流.md"
+    ],
+    "rationale": "限制进行中的工作，先收尾再开新任务。"
+  },
+  {
+    "id": "paraphrase-08",
+    "category": "paraphrase",
+    "query": "搬东西第一晚用的放哪里",
+    "acceptablePaths": [
+      "生活/日记/搬家清点.md"
+    ],
+    "rationale": "第一晚用品单独装箱，标注开箱优先级。"
+  },
+  {
+    "id": "paraphrase-09",
+    "category": "paraphrase",
+    "query": "客户总改主意搞得来不及交",
+    "acceptablePaths": [
+      "项目/工作室/复盘草稿.md",
+      "项目/工作室/需求变更.md"
+    ],
+    "rationale": "方向未定导致返工，需早确认和明确变更选择。"
+  },
+  {
+    "id": "paraphrase-10",
+    "category": "paraphrase",
+    "query": "人物讲话太直白像在解释剧情",
+    "acceptablePaths": [
+      "写作/人物对白.md"
+    ],
+    "rationale": "对白靠未直说的目的和动作呈现关系。"
+  },
+  {
+    "id": "crosslang-01",
+    "category": "crosslang",
+    "query": "readwise 怎么导出笔记",
+    "acceptablePaths": [
+      "English/readwise-export.md"
+    ],
+    "rationale": "英文页面记录导出与核对阅读批注的流程。"
+  },
+  {
+    "id": "crosslang-02",
+    "category": "crosslang",
+    "query": "newsletter 发送前要检查什么",
+    "acceptablePaths": [
+      "English/newsletter-editing.md",
+      "资讯/更正记录.md"
+    ],
+    "rationale": "英文发送清单与中文发送前核对记录均可提供相关检查。"
+  },
+  {
+    "id": "crosslang-03",
+    "category": "crosslang",
+    "query": "backup 怎样确认真的能恢复",
+    "acceptablePaths": [
+      "English/backup-routine.md"
+    ],
+    "rationale": "英文备份记录要求试恢复并实际打开文件。"
+  },
+  {
+    "id": "crosslang-04",
+    "category": "crosslang",
+    "query": "prompt 怎么公平比较效果",
+    "acceptablePaths": [
+      "English/prompt-evaluation.md",
+      "AI工具/提示词试验.md"
+    ],
+    "rationale": "固定任务与判断标准，保存失败输出。"
+  },
+  {
+    "id": "crosslang-05",
+    "category": "crosslang",
+    "query": "digital garden 没写完的想法怎么放",
+    "acceptablePaths": [
+      "English/digital-garden.md"
+    ],
+    "rationale": "英文笔记讲明未完成状态和证据链接。"
+  },
+  {
+    "id": "crosslang-06",
+    "category": "crosslang",
+    "query": "how to check a printed proof",
+    "acceptablePaths": [
+      "出版/小书/印前校样.md",
+      "出版/小书/发行路线.md"
+    ],
+    "rationale": "中文纸样检查，包括页码、图像与签字确认。"
+  },
+  {
+    "id": "crosslang-07",
+    "category": "crosslang",
+    "query": "limit work in progress",
+    "acceptablePaths": [
+      "项目/工作室/任务限流.md"
+    ],
+    "rationale": "中文看板记录说明限制同时进行的任务。"
+  },
+  {
+    "id": "crosslang-08",
+    "category": "crosslang",
+    "query": "weekly meal prep",
+    "acceptablePaths": [
+      "生活/日记/周末备餐.md"
+    ],
+    "rationale": "中文记录规划晚饭并分装食材。"
+  },
+  {
+    "id": "crosslang-09",
+    "category": "crosslang",
+    "query": "spaced repetition for reading notes",
+    "acceptablePaths": [
+      "阅读/笔记/间隔回想.md"
+    ],
+    "rationale": "中文读书笔记的间隔提取和复习方法。"
+  },
+  {
+    "id": "crosslang-10",
+    "category": "crosslang",
+    "query": "verify AI hallucinated references",
+    "acceptablePaths": [
+      "AI工具/幻觉核查.md"
+    ],
+    "rationale": "中文笔记讲核实模型生成的参考书目。"
+  }
+]
