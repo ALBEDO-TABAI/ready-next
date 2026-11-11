@@ -11,7 +11,7 @@
       "fontFace": 0
     },
     "components/agent/chat-panel": {
-      "color": 3,
+      "color": 2,
       "backdropFilter": 2,
       "fontFace": 0
     },
@@ -106,7 +106,7 @@
       "fontFace": 0
     },
     "components/document": {
-      "color": 76,
+      "color": 75,
       "backdropFilter": 4,
       "fontFace": 0
     },
@@ -181,8 +181,8 @@
       "fontFace": 0
     },
     "components/ui": {
-      "color": 40,
-      "backdropFilter": 4,
+      "color": 11,
+      "backdropFilter": 0,
       "fontFace": 0
     },
     "components/ui/liquid-glass": {
@@ -197,7 +197,7 @@
     },
     "design/next": {
       "color": 0,
-      "backdropFilter": 5,
+      "backdropFilter": 1,
       "fontFace": 4
     },
     "hooks": {
@@ -401,8 +401,8 @@
       "fontFace": 0
     },
     "styles": {
-      "color": 742,
-      "backdropFilter": 64,
+      "color": 581,
+      "backdropFilter": 53,
       "fontFace": 0
     },
     "utils": {

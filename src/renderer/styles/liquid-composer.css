@@ -1,52 +1,43 @@
 /* ═══ liquid-composer.css — 聊天输入框液态玻璃（白纱/边缘高光/投影层雾化；现行合同 current-runtime-contracts.md §1；调参与实测 2026-09-15-liquid-glass-scroll-implementation.md）；由 index.css 序保拆分（2026-07-06），在 index.css 中按原段落顺序 @import，勿改导入次序。 ═══ */
-/* The refracting layer is a LiquidLens (canvas displacement map →
-   feDisplacementMap → backdrop-filter: url()). CSS only adds the material
-   veil and rim highlights; the optics live in the component. */
-html:root :is(.ready-chat-project-surface),
+/* The assistant composer is the one liquid glass of Ready Next (W1 DL4a). The refraction is a
+   LiquidLens (canvas displacement map → feDisplacementMap → backdrop-filter: url()); CSS adds the
+   material from the --rn-liquid-* tokens, as the design reference's .liquid does: a gradient veil,
+   a rim, a top highlight, a sheen and a shadow. Dark values come from the tokens. Reduce
+   transparency (DL12) turns the lens off (ChatInput) and the composer into paper (below). */
 .ready-liquid-composer__surface {
   position: relative;
   z-index: 0;
   overflow: hidden;
-  border-radius: var(--workbench-canvas-radius);
+  border-radius: 24px;
   transform: translateZ(0);
-  background: rgba(248, 250, 252, 0.32);
+  background: linear-gradient(180deg, var(--rn-liquid-a), var(--rn-liquid-b));
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.42),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.14);
+    inset 0 1px 0 var(--rn-liquid-hi),
+    inset 0 -12px 20px -14px var(--rn-liquid-sheen),
+    var(--rn-liquid-shadow);
 }
 
-html:root :is(.ready-chat-project-surface)::before,
-html:root :is(.ready-chat-project-surface)::after,
 .ready-liquid-composer__surface::before,
 .ready-liquid-composer__surface::after {
   content: '';
   position: absolute;
+  inset: 0;
   border-radius: inherit;
   pointer-events: none;
 }
 
-html:root :is(.ready-chat-project-surface)::before,
+/* Rim, above the content like a border. */
 .ready-liquid-composer__surface::before {
-  inset: 0;
   z-index: 4;
-  border: 0.5px solid rgba(255, 255, 255, 0.24);
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.07),
-    inset 0 1px 0 rgba(255, 255, 255, 0.24);
+  border: 1px solid var(--rn-liquid-rim);
 }
 
-html:root :is(.ready-chat-project-surface)::after,
+/* Sheen: above the lens layer (z 1), below the content (z 2). */
 .ready-liquid-composer__surface::after {
-  inset: 0;
-  z-index: 5;
-  padding: 1px;
+  z-index: 1;
   background:
-    linear-gradient(132deg, rgba(255, 255, 255, 0.02) 0%, rgba(255, 255, 255, 0.42) 30%, rgba(255, 255, 255, 0.02) 56%, rgba(255, 255, 255, 0.28) 78%, rgba(255, 255, 255, 0.02) 100%);
-  opacity: 0.38;
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  mask-composite: exclude;
+    radial-gradient(120% 70% at 12% -10%, var(--rn-liquid-sheen), transparent 60%),
+    linear-gradient(115deg, transparent 58%, var(--rn-liquid-sheen) 74%, transparent 86%);
 }
 
 .ready-liquid-composer__content {
@@ -54,7 +45,6 @@ html:root :is(.ready-chat-project-surface)::after,
   z-index: 3;
 }
 
-html:root :is(.ready-chat-project-projection),
 .ready-liquid-composer__projection {
   position: absolute;
   inset: 0;
@@ -67,13 +57,16 @@ html:root :is(.ready-chat-project-projection),
   transform: translateZ(0);
 }
 
-html:root :is(.ready-chat-project-projection)::after,
 .ready-liquid-composer__projection::after {
   content: '';
   position: absolute;
   inset: -18px;
-  background:
-    linear-gradient(160deg, rgba(255, 255, 255, 0.20), rgba(248, 250, 252, 0.06) 52%, rgba(255, 255, 255, 0.12));
+  background: linear-gradient(
+    160deg,
+    color-mix(in srgb, var(--rn-liquid-a) 55%, transparent),
+    var(--rn-liquid-b) 52%,
+    color-mix(in srgb, var(--rn-liquid-a) 33%, transparent)
+  );
   pointer-events: none;
 }
 
@@ -82,14 +75,26 @@ html:root :is(.ready-chat-project-projection)::after,
   opacity: 0.82;
 }
 
-.ready-liquid-composer:focus-within .ready-liquid-composer__surface::after {
-  opacity: 0.52;
+.ready-liquid-composer:focus-within .ready-liquid-composer__surface::before {
+  border-color: var(--rn-liquid-hi);
 }
 
-.ready-liquid-composer[data-drag-over='true'] .ready-liquid-composer__surface::after {
-  background:
-    linear-gradient(132deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.86) 32%, rgba(255, 255, 255, 0.18) 55%, rgba(255, 255, 255, 0.48) 82%, rgba(255, 255, 255, 0.06) 100%);
-  opacity: 1;
+.ready-liquid-composer[data-drag-over='true'] .ready-liquid-composer__surface::before {
+  border: 1.5px solid var(--rn-ink-3);
+}
+
+/* 减少透明（DL12）：纸色、发丝边、卡片投影，没有反光。 */
+[data-transparency='reduced'] .ready-liquid-composer__surface {
+  background: var(--rn-sheet);
+  box-shadow: var(--rn-card-shadow);
+}
+
+[data-transparency='reduced'] .ready-liquid-composer .ready-liquid-composer__surface::before {
+  border-color: var(--rn-hair-2);
+}
+
+[data-transparency='reduced'] .ready-liquid-composer__surface::after {
+  display: none;
 }
 
 html[data-theme='dark']:root .ready-liquid-composer {
@@ -100,37 +105,11 @@ html[data-theme='dark']:root .ready-liquid-composer {
   --surface-border: rgba(232, 232, 232, 0.18);
 }
 
-html[data-theme='dark']:root :is(.ready-chat-project-surface)::before,
-html[data-theme='dark']:root .ready-liquid-composer__surface::before {
-  border-color: rgba(232, 232, 232, 0.14);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.18),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.05);
-  opacity: 0.84;
-}
-
-html[data-theme='dark']:root :is(.ready-chat-project-surface),
-html[data-theme='dark']:root .ready-liquid-composer__surface {
-  background: rgba(26, 26, 26, 0.62);
-  box-shadow:
-    inset 0 1px 0 rgba(232, 232, 232, 0.14),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.16);
-}
-
-html[data-theme='dark']:root :is(.ready-chat-project-surface)::after,
-html[data-theme='dark']:root .ready-liquid-composer__surface::after {
-  background:
-    linear-gradient(132deg, rgba(255, 255, 255, 0.01) 0%, rgba(232, 232, 232, 0.18) 30%, rgba(255, 255, 255, 0.01) 56%, rgba(232, 232, 232, 0.12) 78%, rgba(255, 255, 255, 0.01) 100%);
-  opacity: 0.18;
-}
-
-html[data-theme='dark']:root :is(.ready-chat-project-projection),
 html[data-theme='dark']:root .ready-liquid-composer__projection {
   opacity: 0.52;
   filter: blur(3.5px) saturate(0) contrast(0.78) brightness(0.78);
 }
 
-html[data-theme='dark']:root :is(.ready-chat-project-projection)::after,
 html[data-theme='dark']:root .ready-liquid-composer__projection::after {
   background:
     radial-gradient(circle at 20% 18%, rgba(232, 232, 232, 0.09), transparent 28%),
@@ -177,65 +156,15 @@ html[data-theme='dark']:root .ready-liquid-composer [data-ready-agent-send='true
   opacity: 1;
 }
 
+/* The reference-skill hint above the composer is a float (.rn-float, W1 §4): plain blur, no lens. */
 .ready-liquid-card {
-  --ready-liquid-card-base-bg: rgba(248, 250, 252, 0.54);
-  --ready-liquid-card-lens-bg: rgba(248, 250, 252, 0.18);
   border-color: transparent !important;
-  box-shadow: none !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
   transform: translateZ(0);
 }
 
 .ready-liquid-card__content {
   position: relative;
   z-index: 2;
-}
-
-.ready-liquid-card__lens {
-  background: var(--ready-liquid-card-lens-bg) !important;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.30),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.08) !important;
-}
-
-.ready-liquid-card__lens::before {
-  border: none !important;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.22) !important;
-}
-
-.ready-liquid-card__lens::after {
-  padding: 0 !important;
-  background:
-    radial-gradient(circle at 18% 0%, rgba(255, 255, 255, 0.28), transparent 34%),
-    linear-gradient(132deg, rgba(255, 255, 255, 0.02) 0%, rgba(255, 255, 255, 0.20) 30%, rgba(255, 255, 255, 0.02) 60%, rgba(255, 255, 255, 0.14) 100%) !important;
-  opacity: 0.18 !important;
-  -webkit-mask: none !important;
-  mask: none !important;
-}
-
-html[data-theme='dark']:root .ready-liquid-card {
-  --ready-liquid-card-base-bg: rgba(24, 24, 24, 0.58);
-  --ready-liquid-card-lens-bg: rgba(26, 26, 26, 0.26);
-}
-
-html[data-theme='dark']:root .ready-liquid-card__lens {
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.10),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.12) !important;
-}
-
-html[data-theme='dark']:root .ready-liquid-card__lens::before {
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.10) !important;
-}
-
-html[data-theme='dark']:root .ready-liquid-card__lens::after {
-  background:
-    radial-gradient(circle at 18% 0%, rgba(255, 255, 255, 0.10), transparent 34%),
-    linear-gradient(132deg, rgba(255, 255, 255, 0.01) 0%, rgba(255, 255, 255, 0.10) 30%, rgba(255, 255, 255, 0.01) 60%, rgba(255, 255, 255, 0.06) 100%) !important;
-  opacity: 0.14 !important;
 }
 
 .ready-chat-composer-overlay > * {

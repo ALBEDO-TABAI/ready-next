@@ -5,9 +5,7 @@ import { useAgent } from '../../stores/useAgent'
 import { useWorkspace } from '../../stores/useWorkspace'
 import { parseWorkspaceDragPayloads } from '../layout/fileTreeDragPayload'
 import { getChatMenuHorizontalFrame, subscribeChatMenuLayout } from './chatMenuLayout'
-import { LiquidLens } from '../ui/liquid-glass/LiquidLens'
-import { LiquidBackdropProjection } from '../ui/liquid-glass/LiquidBackdropProjection'
-import { LiquidFloatingPanel } from '../ui/liquid-glass/LiquidFloatingPanel'
+import { FloatPanel } from '../ui/float/FloatPanel'
 import { chatMenuItemStyle, chatMenuSurfaceStyle } from './chatMenuStyles'
 
 const folderName = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() || path
@@ -110,13 +108,9 @@ export function ProjectSelector() {
     onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragOver(false) }}
     onDrop={drop}>
     <div className="ready-chat-project-pill">
-      <LiquidLens className="ready-chat-project-surface"
-        style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
-        radius={19} bevel={6} depth={18.5} ior={1.34} dome={0.65} profile="squircle"
-        strength={2} blur={3.5} frost={0} blurBeforeRefraction saturation={1.18}
-        brightness={1.05} contrast={0.84} aberration={0} engine="backdrop"
-        backdropContent={<LiquidBackdropProjection className="ready-chat-project-projection" sourceMaskRadius={19} />}
-      />
+      {/* The pill floats over the message list on the float material; liquid glass is the composer's alone (W1 DL4a). */}
+      <span className="ready-chat-project-surface rn-float" aria-hidden="true"
+        style={{ position: 'absolute', inset: 0, pointerEvents: 'none', borderRadius: 'inherit', boxShadow: 'inset 0 0 0 1px var(--rn-hair)' }} />
       {path && <button className="ready-chat-project-clear" aria-label="取消项目选择" title="不在项目中工作"
         disabled={busy} onClick={() => void perform(() => save(null))}><Folder className="project-folder-icon" size={16} /><X className="project-clear-icon" size={16} /></button>}
       <button data-project-trigger="true" className="ready-chat-project-trigger" disabled={busy}
@@ -126,7 +120,7 @@ export function ProjectSelector() {
       </button>
     </div>
     {error && <div role="alert" className="ready-chat-project-error">{error}</div>}
-    {open && frame && createPortal(<LiquidFloatingPanel ref={menu} role="dialog" aria-label="选择项目" style={{
+    {open && frame && createPortal(<FloatPanel ref={menu} role="dialog" aria-label="选择项目" style={{
       ...chatMenuSurfaceStyle, position: 'fixed', zIndex: 540, ...frame,
     }} contentStyle={{ padding: 8, maxHeight: frame.maxHeight, overflowY: 'auto', overflowX: 'hidden' }}>
       <label className="ready-chat-project-search"><Search size={15} /><input autoFocus aria-label="搜索项目"
@@ -145,6 +139,6 @@ export function ProjectSelector() {
         })}><FolderOpen size={16} />选择其他文件夹…</button>
         {path && <button disabled={busy} className="ready-floating-menu-item" style={{ ...chatMenuItemStyle, display: 'flex', alignItems: 'center', width: '100%', gap: 8, textAlign: 'left' }} onClick={() => void perform(() => save(null))}><X size={16} />不在项目中工作</button>}
       </div>
-    </LiquidFloatingPanel>, document.body)}
+    </FloatPanel>, document.body)}
   </div>
 }

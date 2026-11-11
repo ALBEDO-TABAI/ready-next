@@ -14,19 +14,16 @@ test('workbench shell exposes dedicated liquid glass hooks on primary chrome sur
   const sidePanel = readWorkspaceFile('src/renderer/components/layout/SidePanel.tsx')
   const tabs = readWorkspaceFile('src/renderer/components/workbench/WorkbenchProjectTabs.tsx')
   const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
-  const iconButton = readWorkspaceFile('src/renderer/components/ui/IconButton.tsx')
 
   assert.match(topBar, /data-liquid-shell="topbar"/)
   assert.match(iconRail, /data-liquid-shell="icon-rail"/)
   assert.match(sidePanel, /data-liquid-shell="side-panel"/)
   assert.match(tabs, /data-liquid-shell="workbench-tabs"/)
   assert.match(chatPanel, /data-liquid-shell="chat-panel"/)
-  assert.match(iconButton, /data-liquid-button=/)
 })
 
 test('liquid glass skin defines shell-level fresnel, noise, and atmosphere contract', () => {
   const styles = readRendererStyles()
-  const scene = readWorkspaceFile('src/renderer/components/ui/LiquidGlassScene.tsx')
 
   assert.match(styles, /--lg-noise-opacity:/)
   assert.match(styles, /--lg-lens-violet:/)
@@ -34,13 +31,9 @@ test('liquid glass skin defines shell-level fresnel, noise, and atmosphere contr
   assert.match(styles, /html:root \.browser-header-surface,[\s\S]*\.rss-preview-surface \{/)
   assert.match(styles, /\.rss-mode-shell \.rss-feed-sheet \{[\s\S]*background:\s*var\(--workbench-module-surface-bg\) !important;/)
   assert.match(styles, /ready-app-bg/)
-  assert.match(scene, /data-scene=\{scene\}/)
-  // 2026-06-10: liquid-glass-react 退役，折射由自研 LiquidLens 承担；
-  // 场景文件不得再引入第三方玻璃库。
-  assert.doesNotMatch(scene, /liquid-glass-react/)
 })
 
-test('workbench keeps the liquid scene; liquid test exercises the composer lens', () => {
+test('workbench has no backdrop scene; liquid test exercises the composer lens', () => {
   // 2026-06-10: #/liquid-test 从「工作台场景复刻」转型为 LiquidLens 光学调参台。
   // 合同变为：实验页与聊天输入框消费同一个折射组件，参数可在实验页校准后回填。
   const liquidTest = readWorkspaceFile('src/renderer/LiquidTest.tsx')
@@ -56,7 +49,6 @@ test('workbench keeps the liquid scene; liquid test exercises the composer lens'
   assert.match(chatInput, /from '\.\.\/ui\/liquid-glass\/LiquidLens'/)
   assert.match(chatInput, /blurBeforeRefraction/)
   assert.match(chatInput, /frost=\{0\}/)
-  assert.match(workbenchMode, /LiquidSceneProvider/)
   assert.doesNotMatch(workbenchMode, /LiquidBackdropScene/)
   assert.match(topBar, /data-liquid-shell="topbar"/)
   assert.match(sidePanel, /data-liquid-shell="side-panel"/)
@@ -137,23 +129,3 @@ test('Stage 1 — nativeTheme.updated handler refreshes material AND broadcasts'
   assert.match(handlerBody, /windowMaterialController\?\.sync\(\)/)
   assert.match(handlerBody, /broadcastThemeChanged\(\)/)
 })
-
-// This shared material also belongs to the retained project selector, so retiring mode tabs
-// must not retire these assertions. CSS is applied to the consumer classes, not source-grepped.
-for (const theme of ['light', 'dark'] as const) {
-  test(`project selector retains its shared composer material in ${theme} mode`, async () => {
-    const { JSDOM } = await import('jsdom')
-    const dom = new JSDOM(`<html data-theme="${theme}"><head></head><body><div class="ready-chat-composer-context-row"><div class="ready-chat-project-surface"></div><div class="ready-chat-project-projection"></div></div></body></html>`)
-    try {
-      const style = dom.window.document.createElement('style')
-      style.textContent = readWorkspaceFile('src/renderer/styles/liquid-composer.css')
-      dom.window.document.head.appendChild(style)
-      assert.equal(dom.window.getComputedStyle(dom.window.document.querySelector('.ready-chat-composer-context-row')!).marginBottom, '-12px')
-      const surface = dom.window.getComputedStyle(dom.window.document.querySelector('.ready-chat-project-surface')!)
-      const projection = dom.window.getComputedStyle(dom.window.document.querySelector('.ready-chat-project-projection')!)
-      assert.equal(surface.backgroundColor, theme === 'light' ? 'rgba(248, 250, 252, 0.32)' : 'rgba(26, 26, 26, 0.62)')
-      assert.match(surface.boxShadow, theme === 'light' ? /inset 0 1px 0 rgba\(255, 255, 255, 0\.42\)/ : /inset 0 1px 0 rgba\(232, 232, 232, 0\.14\)/)
-      assert.equal(projection.filter, theme === 'light' ? 'blur(4.5px) saturate(1.18) contrast(0.82) brightness(1.04)' : 'blur(3.5px) saturate(0) contrast(0.78) brightness(0.78)')
-    } finally { dom.window.close() }
-  })
-}

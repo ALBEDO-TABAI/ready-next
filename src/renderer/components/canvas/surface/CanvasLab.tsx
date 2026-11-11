@@ -5,7 +5,6 @@ import { graphicSvg } from '../../../../shared/ready-canvas/graphics'
 import { fragmentHash } from '../../../../shared/document-blocks/positions'
 import { CanvasSurface } from './CanvasSurface'
 import type { FrameWork, CanvasSurfaceProps } from './types'
-import '../../../design/next/tokens.css'
 import './surface.css'
 
 /** Isolated synthetic buffer only: no Main, disk, Ready userData or network calls. */

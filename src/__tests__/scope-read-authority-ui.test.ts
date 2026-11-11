@@ -48,7 +48,7 @@ installGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
   return 0
 })
 installGlobal('cancelAnimationFrame', () => undefined)
-installGlobal('matchMedia', () => ({
+installGlobal('matchMedia', dom.window.matchMedia = () => ({
   matches: false,
   media: '',
   onchange: null,

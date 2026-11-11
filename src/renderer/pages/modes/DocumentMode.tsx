@@ -14,8 +14,6 @@ import { initializeDrafts, reportDraftError, useDraftUI, watchDraftVault } from 
 import { readingPositionKey } from '../../stores/objectPresentationState'
 import { registerReturnPosition } from '../../modules/workbench/reference-return'
 import { LibraryTab, OpenEpubInLibrary } from '../../modules/library/navigation'
-import '../../design/next/tokens.css'
-import '../../design/next/glass.css'
 import '../../modules/library/shelf.css'
 import '../../modules/library/reader.css'
 import '../../modules/library/reader/page.css'

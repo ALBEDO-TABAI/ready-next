@@ -20,7 +20,6 @@ import {
   type DocumentOutlineNode,
   type DocumentOutlineSnapshot,
 } from '../../../shared/document-side-panels'
-import { LiquidSurfaceLayer } from '../ui/liquid-glass/LiquidFloatingPanel'
 import './documentFloatingPanels.css'
 
 type MarkTab = 'bookmark' | 'note'
@@ -445,16 +444,6 @@ export default function DocumentFloatingPanels({
           className={`document-floating-panel document-floating-panel--left ready-app-liquid-panel${outlinePanelClosing ? ' is-closing' : ''}`}
           aria-label="内容速览"
         >
-          <LiquidSurfaceLayer
-            className="ready-liquid-popover__lens ready-app-liquid-panel__lens"
-            radius={12}
-            withProjection={false}
-            blur={3}
-            frost={0}
-            saturation={1.06}
-            brightness={1.12}
-            contrast={0.68}
-          />
           <header className="document-floating-panel__header">
             <div>
               <div className="document-floating-panel__title">内容速览</div>
@@ -499,16 +488,6 @@ export default function DocumentFloatingPanels({
           className={`document-floating-panel document-floating-panel--right ready-app-liquid-panel${marksPanelClosing ? ' is-closing' : ''}`}
           aria-label="书签和笔记"
         >
-          <LiquidSurfaceLayer
-            className="ready-liquid-popover__lens ready-app-liquid-panel__lens"
-            radius={12}
-            withProjection={false}
-            blur={3}
-            frost={0}
-            saturation={1.06}
-            brightness={1.12}
-            contrast={0.68}
-          />
           <header className="document-floating-panel__header">
             <div>
               <div className="document-floating-panel__title">书签 / 笔记</div>

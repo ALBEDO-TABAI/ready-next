@@ -17,7 +17,7 @@ import {
 import { useWorkspace } from '../../stores/useWorkspace'
 import FileTree, { DEFAULT_FILE_FILTERS, type FileFilterMap, type FileViewMode } from './FileTree'
 import Modal from '../ui/Modal'
-import { LiquidFloatingPanel } from '../ui/liquid-glass/LiquidFloatingPanel'
+import { FloatPanel } from '../ui/float/FloatPanel'
 import { computeNextGridHistory, type GridNavigationEntry } from './gridNavigation'
 import { FILES_PANEL_DIMENSIONS, PANEL_TOKENS } from './panelTokens'
 import { WORKBENCH_HEADER_EDGE_X } from '../../modules/workbench/chrome'
@@ -542,7 +542,7 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
         onThumbnailSizeChange={setThumbnailSize}
       />
       {portalRoot && showFilterMenu && filterMenuPosition && createPortal(
-        <LiquidFloatingPanel
+        <FloatPanel
           ref={filterMenuRef}
           style={{
             ...filterMenuStyle,
@@ -572,11 +572,11 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
               {label}
             </button>
           ))}
-        </LiquidFloatingPanel>,
+        </FloatPanel>,
         document.body,
       )}
       {portalRoot && showMoreMenu && moreMenuPosition && createPortal(
-        <LiquidFloatingPanel
+        <FloatPanel
           ref={moreMenuRef}
           style={{
             ...moreMenuStyle,
@@ -689,7 +689,7 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
               ))}
             </>
           )}
-        </LiquidFloatingPanel>,
+        </FloatPanel>,
         document.body,
       )}
 

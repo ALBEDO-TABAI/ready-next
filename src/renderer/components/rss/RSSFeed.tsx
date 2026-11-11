@@ -30,7 +30,7 @@ import { rssQueryKey } from '../../modules/rss/workspace-query'
 import Modal from '../ui/Modal'
 import { useModal } from '../ui/useModal'
 import { chatMenuSurfaceStyle } from '../agent/chatMenuStyles'
-import { LiquidFloatingPanel } from '../ui/liquid-glass/LiquidFloatingPanel'
+import { FloatPanel } from '../ui/float/FloatPanel'
 import RSSCoverImage from './RSSCoverImage'
 import RSSTopbarTools from './RSSTopbarTools'
 import RSSSearchField from './RSSSearchField'
@@ -508,9 +508,8 @@ export default function RSSFeed({
   const closeMenus = () => { setMoreMenuOpen(false); setTaskMenuOpen(false) }
 
   const taskMenuPanel = taskMenuOpen ? (
-    <LiquidFloatingPanel
+    <FloatPanel
       className="rss-task-menu-panel overflow-hidden rounded-[18px]"
-      sourceSelector="[data-liquid-scroll-root='rss-feed-list']"
       radius={18}
       style={{
         ...chatMenuSurfaceStyle,
@@ -612,13 +611,12 @@ export default function RSSFeed({
           })}
         </div>
       )}
-    </LiquidFloatingPanel>
+    </FloatPanel>
   ) : null
 
   const moreMenuPanel = moreMenuOpen ? (
-    <LiquidFloatingPanel
+    <FloatPanel
       className="rss-more-menu-panel overflow-hidden rounded-[14px]"
-      sourceSelector="[data-liquid-scroll-root='rss-feed-list']"
       role="menu"
       radius={14}
       style={{
@@ -653,7 +651,7 @@ export default function RSSFeed({
           <Settings size={15} strokeWidth={1.8} />订阅与刷新设置
         </button>
       </div>
-    </LiquidFloatingPanel>
+    </FloatPanel>
   ) : null
 
   return (
@@ -731,9 +729,8 @@ export default function RSSFeed({
               <ChevronDown className="h-[13px] w-[13px]" strokeWidth={2} />
             </button>
             {sourceMenuOpen && (
-              <LiquidFloatingPanel
+              <FloatPanel
                 className="rss-source-menu-panel overflow-hidden rounded-[12px]"
-                sourceSelector="[data-liquid-scroll-root='rss-feed-list']"
                 role="listbox"
                 radius={14}
                 style={{ ...chatMenuSurfaceStyle, position: 'absolute', top: 'calc(100% + 8px)', right: 0, zIndex: 30, width: 280, maxWidth: 'calc(100cqw - 32px)' }}
@@ -794,7 +791,7 @@ export default function RSSFeed({
                     <div className="px-3 py-6 text-center text-[12px]" style={{ color: 'var(--text-light)' }}>暂无订阅源</div>
                   )}
                 </div>
-              </LiquidFloatingPanel>
+              </FloatPanel>
             )}
           </div>
         )}

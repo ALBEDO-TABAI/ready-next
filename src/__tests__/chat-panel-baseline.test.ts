@@ -86,7 +86,7 @@ function installDomGlobals(): { dom: JSDOM; restore: () => void } {
     return 0
   })
   setGlobal('cancelAnimationFrame', () => undefined)
-  setGlobal('matchMedia', (_query: string) => ({
+  setGlobal('matchMedia', dom.window.matchMedia = (_query: string) => ({
     matches: false,
     media: '',
     onchange: null,

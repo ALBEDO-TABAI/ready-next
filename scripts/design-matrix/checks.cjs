@@ -174,7 +174,8 @@ function collect(input) {
     if (!visible(el)) continue
     if (el.closest('[data-liquid-shell="icon-rail"], [data-shell-region="rail"]')) continue
     // Menu and listbox options show keyboard selection, not "where you are"; they are not the signal.
-    if (['option', 'menuitem', 'menuitemradio', 'menuitemcheckbox'].includes(el.getAttribute('role'))) continue
+    // A selected tab uses the fill treatment of the design reference (.bar .tab.on), not the signal.
+    if (['option', 'menuitem', 'menuitemradio', 'menuitemcheckbox', 'tab'].includes(el.getAttribute('role'))) continue
     if (!carriesAccent(el)) add('currentAccent', signature(el))
   }
 

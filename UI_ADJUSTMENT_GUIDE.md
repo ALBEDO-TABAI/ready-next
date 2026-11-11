@@ -64,7 +64,7 @@ Widget 视觉不能在组件内另造色板；预览、导出和编辑必须从�
 - 状态：`src/renderer/stores/useRSSSession.ts`
 - 样式：`rss-workspace.css`（框架、导航、顶栏工具）、`rss-feed.css`（页头、时间轴资讯流、当前热点）、`rss-controls.css`（提示、按钮、自动整理浮层）、`rss-reader.css`（阅读）、`rss-digest.css`（日报版面与往期档案）、`rss-manage.css`（栏目管理、订阅设置抽屉、引用预览）
 
-框架与 Document/Browser 同构：画布上方 `rss-topbar`（38px）与左侧 `RSSNavigation`（收起 52px，与两者的标签列同宽）在同一层材质上连成 L 形，资讯流、阅读、日报、栏目管理都放在四角圆角的 `rss-content-frame` 里。各视图通过 `RSSTopbarTools`（`slot="lead"` / `tools`）把位置与工具放进顶栏，只有可见视图才放。视觉沿用设置页的 sx 纪律：选中与悬停是被托起的白玻璃填充，不画描边和分隔线；未读只靠字重；主操作墨色，删除类平时安静、悬停转红；菜单统一用 `LiquidFloatingPanel` + `ready-floating-menu-item`。资讯流不得引入聊天依赖（引用、导出入口由 `RSSMode` 通过 `renderMoreActions` 注入）。真实窗口验收：`npm run verify:rss-layout` 与 `node scripts/run-rss-reader-acceptance.cjs`。
+框架与 Document/Browser 同构：画布上方 `rss-topbar`（38px）与左侧 `RSSNavigation`（收起 52px，与两者的标签列同宽）在同一层材质上连成 L 形，资讯流、阅读、日报、栏目管理都放在四角圆角的 `rss-content-frame` 里。各视图通过 `RSSTopbarTools`（`slot="lead"` / `tools`）把位置与工具放进顶栏，只有可见视图才放。视觉沿用设置页的 sx 纪律：选中与悬停是被托起的白玻璃填充，不画描边和分隔线；未读只靠字重；主操作墨色，删除类平时安静、悬停转红；菜单统一用 `FloatPanel`（`components/ui/float/FloatPanel.tsx`，浮层材质，不折射）+ `ready-floating-menu-item`。资讯流不得引入聊天依赖（引用、导出入口由 `RSSMode` 通过 `renderMoreActions` 注入）。真实窗口验收：`npm run verify:rss-layout` 与 `node scripts/run-rss-reader-acceptance.cjs`。
 
 内容版面参考 AIHOT：资讯流按日分组成时间轴（左侧时刻 + 圆点竖线，未读点为强调色）。精选栏目每条带大预览图与“推荐理由”，列表顶部是“当前热点”（`modules/rss/hot-events.ts`：近 48 小时、至少两个来源的事件，按来源数、报道数、时间排序，只用已保存的事件归组）；其他栏目用标题右侧的缩略图。分类以 `#名称` 显示，精选不算标签而是“精选”标记。日报是报纸式版面：刊头、标题与期号、日期块和本月小日历、统计行、头条（本期报道依据最多的一条）、按栏目分节；“今日看点 / 本期版面”是导读，宽版在右栏，窄于 980px 移到正文前。左侧往期按月分组，日报/简报分架，打开时显示当前架最新一期。侧栏“新建简报”在正文区原位选择栏目、分类、来源、时间窗口与关键词（`RSSBriefComposer.tsx`），默认带入资讯流当前范围并实时显示篇数；“日报设置”里的“收录范围”说明日报按“精选”标准收录，并可直接打开栏目管理编辑该标准。
 

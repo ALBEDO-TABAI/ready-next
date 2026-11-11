@@ -15,10 +15,12 @@ import SkillInlinedToast from './components/skill/SkillInlinedToast'
 import AgentRuntimeListenerRoot from './modules/agent/AgentRuntimeListenerRoot'
 import { handleWorkspaceWatcherFailure } from './stores/useWorkspace'
 import { useAgent } from './stores/useAgent'
+import { FloatHost, ToastHost } from './components/ui'
 
 const CanvasLab = lazy(() => import('./components/canvas/surface/CanvasLab'))
 const LiquidTest = lazy(() => import('./LiquidTest'))
 const StartupPreview = lazy(() => import('./pages/StartupPreview'))
+const DesignSystem = lazy(() => import('./pages/DesignSystem'))
 
 function MainAppShell() {
   const { captureFeedback } = useKeyboardShortcuts()
@@ -128,11 +130,22 @@ function MainAppShell() {
                 </Suspense>
               )}
             />
+            {/* W1-T4: every primitive in both themes; the screenshot matrix's fixed screen. */}
+            <Route
+              path="/design-system"
+              element={(
+                <Suspense fallback={<div className="h-full w-full" />}>
+                  <DesignSystem />
+                </Suspense>
+              )}
+            />
             <Route path="*" element={<Navigate to="/workbench" replace />} />
           </Routes>
         </div>
       </div>
       <RitualOverlay />
+      <FloatHost />
+      <ToastHost />
       <SkillInlinedToast />
       {captureFeedback && (
         <div

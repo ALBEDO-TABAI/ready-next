@@ -10,7 +10,6 @@ test('Inkwell pages sit on paper panels straight on the workspace while RSS reta
   const dom = new JSDOM(`<html data-theme="dark" data-skin="liquid-glass"><head></head><body>
     <div class="ink-scope ink-doc-app"><main class="ink-main"><div class="document-content-frame"><div class="document-preview-surface"></div></div></main></div>
     <div class="rss-mode-shell"><div class="rss-feed-sheet"><div class="rss-feed-list"></div></div></div>
-    <div class="document-floating-panel ready-app-liquid-panel"><div class="ready-app-liquid-panel__lens"></div></div>
   </body></html>`, { url: 'http://localhost' })
   try {
     const style = dom.window.document.createElement('style')
@@ -31,6 +30,5 @@ test('Inkwell pages sit on paper panels straight on the workspace while RSS reta
     assert.equal(computed('.document-preview-surface').backgroundColor, 'rgba(0, 0, 0, 0)')
     assert.equal(computed('.rss-feed-sheet').background, 'var(--workbench-module-surface-bg)')
     assert.equal(computed('.rss-feed-list').backgroundColor, 'rgba(0, 0, 0, 0)')
-    assert.equal(computed('.ready-app-liquid-panel__lens').opacity, '0.36')
   } finally { dom.window.close() }
 })

@@ -18,7 +18,6 @@ import {
 import { useEffect } from 'react'
 import type { ChatAttachment, AttachmentPreviewState } from '../../../../stores/useAgent'
 import { toLocalFileUrl } from '../../../../utils/dragDrop'
-import { LiquidSurfaceLayer } from '../../../ui/liquid-glass/LiquidFloatingPanel'
 
 export function AttachmentIcon({ attachment, size = 16 }: { attachment: ChatAttachment; size?: number }) {
   const style = { width: size, height: size }
@@ -98,14 +97,6 @@ export function AttachmentPreviewModal({
         aria-modal="true"
         aria-label="附件预览"
       >
-        <LiquidSurfaceLayer
-          className="ready-liquid-popover__lens ready-app-liquid-panel__lens"
-          radius={16}
-          blur={7}
-          saturation={1.14}
-          brightness={1.05}
-          contrast={0.86}
-        />
         <div className="attachment-preview-toolbar" aria-label="预览操作">
             {/^(?:\/|[a-z]:[\\/])/i.test(preview.attachment.path) && <><button
               type="button"
