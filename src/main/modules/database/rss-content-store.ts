@@ -74,8 +74,11 @@ function queryPredicate(query: ReturnType<typeof RSSQuerySchema.parse>, definiti
   if (query.filter === 'starred') where.push('i.starred=1')
   if (query.sourceId) { where.push('i.source_id=?'); args.push(query.sourceId) }
   if (query.eventId) { where.push(`EXISTS (SELECT 1 FROM rss_event_members em JOIN rss_event_evidence ee ON ee.id=em.evidence_id JOIN rss_event_facts ef ON ef.id=ee.fact_id WHERE em.item_id=i.id AND ef.event_id=? AND ${rssEffectiveEventCondition()})`); args.push(query.eventId) }
-  if (query.from !== undefined) { where.push('COALESCE(i.published_at,i.first_seen_at)*1000>=?'); args.push(query.from) }
-  if (query.until !== undefined) { where.push('COALESCE(i.published_at,i.first_seen_at)*1000<?'); args.push(query.until) }
+  // Time windows use the earlier of the stated date and when Ready first saw the article: an article cannot be
+  // published after it was collected, and feeds that mislabel their time zone would otherwise sit hours “in the
+  // future”, outside every window that ends now (为你筛过的, digests). Sorting and display keep the stated date.
+  if (query.from !== undefined) { where.push('MIN(COALESCE(i.published_at,i.first_seen_at),COALESCE(i.first_seen_at,i.published_at))*1000>=?'); args.push(query.from) }
+  if (query.until !== undefined) { where.push('MIN(COALESCE(i.published_at,i.first_seen_at),COALESCE(i.first_seen_at,i.published_at))*1000<?'); args.push(query.until) }
   if (query.search) {
     const pattern = `%${query.search.replace(/[\\%_]/g, (value) => `\\${value}`)}%`
     const text = query.searchIn === 'body'

@@ -209,3 +209,15 @@ test('V1/V2 event duplicates lose rank, manual topic decisions win, and every fe
     assert.equal(f.rss.sieve.behaviors(other.id).length,4)
   }finally{f.db.close()}
 })
+
+test('an article stamped hours in the future still counts as new: windows use the earlier of its date and first sight',t=>{
+  if(skipIfSqliteUnavailable(t,'RSS sieve'))return
+  const f=setup()
+  try{
+    // A feed that publishes local time as UTC: the article says it is six hours from now; Ready saw it an hour ago.
+    f.put('ahead',f.source,now+6*3600000)
+    f.db.getRawDb()!.prepare('UPDATE rss_items SET first_seen_at=? WHERE id=?').run(Math.floor((now-3600000)/1000),'ahead')
+    const seen=f.rss.sieve.query({},now,false)
+    assert.ok([...seen.items,...seen.remaining].some(item=>item.id==='ahead'),'the future-dated article is in the 48-hour window')
+  }finally{f.db.close()}
+})

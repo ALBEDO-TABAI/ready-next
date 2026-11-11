@@ -62,8 +62,9 @@ async function main() {
       const api = window.electronAPI.rss
       const definitions = (await api.getDefinitions()).data
       const curated = (Array.isArray(definitions) ? definitions : definitions.definitions).find(entry => entry.kind === 'curated')
-      const cards = (await api.queryCards({ limit: 20 })).data.items
-      const article = cards[0]
+      // An article the sieve sees (its 其余 list), with the revision the reader's membership editor uses.
+      const candidate = (await api.sieveQuery({})).data.remaining.find(item => !item.sieve.explore)
+      const article = (await api.readArticle({ itemId: candidate.id, length: 1 })).data.article
       const result = await api.setMembership({ itemId: article.id, expectedArticleRevision: article.revision, definitionId: curated.id, expectedRuleRevision: curated.ruleRevision, decision: true })
       if (!result.success) throw new Error(result.error)
       return { id: article.id, sourceId: article.sourceId, title: article.title }
