@@ -71,11 +71,17 @@ async function main() {
       return { canvasId: canvas.value.objectId, documentId: doc.value.objectId }
     }, vault)
     await reveal(seeded.canvasId)
-    await page.getByRole('button', { name: '添加文字卡', exact: true }).click()
-    await page.getByLabel('文档卡来源').selectOption(seeded.documentId)
-    await page.getByRole('button', { name: '添加文档卡', exact: true }).click()
-    await page.getByLabel('链接网址').fill('https://example.com')
-    await page.getByRole('button', { name: '添加链接卡', exact: true }).click()
+    // No form row (W4 MS1): the dock places a text card; right-click the stage for 新建 (文档卡…, 链接…).
+    const stage = page.locator('[data-workbench-mode-panel="document"] .rn-canvas').first()
+    await stage.getByRole('button', { name: '文字卡', exact: true }).click()
+    await stage.getByRole('button', { name: '完成编辑', exact: true }).click()
+    await stage.click({ button: 'right', position: { x: 160, y: 520 } })
+    await stage.getByRole('menuitem', { name: '文档卡…', exact: true }).click()
+    await stage.getByRole('menuitem', { name: '来源文档', exact: true }).click()
+    await stage.click({ button: 'right', position: { x: 520, y: 520 } })
+    await stage.getByRole('menuitem', { name: '链接…', exact: true }).click()
+    await stage.getByLabel('链接网址').fill('https://example.com')
+    await stage.getByRole('button', { name: '添加链接卡', exact: true }).click()
     const readCanvas = () => JSON.parse(fs.readFileSync(path.join(vault, 'X.canvas'), 'utf8'))
     await poll(() => readCanvas().nodes.length === 3, 'Three card types not persisted')
     await snapshot('01-three-card-types')
@@ -111,7 +117,7 @@ async function main() {
     // Close the canvas with the close-document shortcut so the transfer happens while it is not open.
     const canvasOpen = () => page.evaluate(() => (JSON.parse(localStorage.getItem('ready-doc-tabs-v2') || '{}').state?.tabs ?? []).some(tab => /\.canvas$/i.test(tab.path || '')))
     for (let i = 0; i < 10 && await canvasOpen(); i++) {
-      await page.locator('[data-workbench-mode-panel="document"] .canvas-toolbar').first().click({ position: { x: 4, y: 4 } }).catch(() => {})
+      await page.locator('[data-workbench-mode-panel="document"] .canvas-crumbs').first().click({ position: { x: 4, y: 4 } }).catch(() => {})
       await page.keyboard.press(`${mod}+w`); await page.waitForTimeout(400)
     }
     assert.equal(await canvasOpen(), false, 'The canvas tab is still open before the FastCard transfer')
