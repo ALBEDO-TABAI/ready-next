@@ -384,7 +384,8 @@ async function checkQuoteReturn(app, page, book, id, selected) {
 }
 
 function electronEnv(extra) {
-  const env = { ...process.env, ...extra }
+  // Verification never puts a window in front of the person (READY_START_HIDDEN keeps it unshown).
+  const env = { ...process.env, READY_START_HIDDEN: '1', ...extra }
   delete env.ELECTRON_RUN_AS_NODE
   return env
 }
