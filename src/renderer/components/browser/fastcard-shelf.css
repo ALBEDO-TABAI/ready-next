@@ -22,7 +22,7 @@
   .fc-card__note[role='alert'] { color: var(--rn-bad); }
   .fc-card__meta { margin-top: 6px; font-size: var(--rn-fs-xs); color: var(--rn-ink-3); }
   /* In the document, 资讯 and calendar modes: a drawer over the right of the content area. */
-  .fc-drawer { position: absolute; z-index: 40; top: 12px; right: 12px; bottom: 12px; width: min(360px, calc(100% - 24px)); display: flex; flex-direction: column; overflow: hidden; border-radius: var(--rn-r-float); }
+  .fc-drawer { position: absolute; z-index: 40; top: 52px; right: 12px; bottom: 12px; width: min(360px, calc(100% - 24px)); display: flex; flex-direction: column; overflow: hidden; border-radius: var(--rn-r-float); }
   .fc-drawer > section[role='dialog'] { padding: 16px; overflow: auto; }
   .fc-receipt { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 14px 16px; }
   .fc-receipt > span { flex: 1 1 100%; }

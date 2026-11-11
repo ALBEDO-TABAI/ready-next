@@ -251,9 +251,12 @@ async function checkObjectPresentationBeforeRestart(app, page, root) {
     await page.waitForTimeout(200)
   }
   await page.locator('.ink-doc-app').waitFor({ state: 'visible' })
-  // Expand the outer file manager's vault folder.
-  const fileRow = page.getByText('i2-a.md', { exact: true }).first()
-  if (!await fileRow.isVisible().catch(() => false)) await page.getByText(path.basename(root), { exact: true }).first().click({ timeout: 20000 })
+  // Files are listed by name in the navigator's 文件 view (W3: 页面 lists pages by title); expand the vault folder there.
+  await page.getByRole('radiogroup', { name: '资料库视角' }).getByRole('radio', { name: '文件', exact: true }).click({ timeout: 20000 })
+  // Scoped to the file list: the navigator's title is also the vault's folder name.
+  const files = page.locator('.document-navigator__files')
+  const fileRow = files.getByText('i2-a.md', { exact: true }).first()
+  if (!await fileRow.isVisible().catch(() => false)) await files.getByText(path.basename(root), { exact: true }).first().click({ timeout: 20000 })
   await fileRow.click({ timeout: 20000 })
   await page.waitForFunction(from => JSON.parse(localStorage.getItem('ready-doc-tabs-v2') || '{}').state?.tabs.some(tab => tab.path === from && tab.objectId), from)
   const identity = await page.evaluate(from => window.electronAPI.objects.resolvePath(from), from)

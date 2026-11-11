@@ -90,10 +90,10 @@ export function Sidebar() {
                 const r = e.currentTarget.getBoundingClientRect();
                 // 新建日历 (W4 §4): a local calendar, a subscription, or a file — one menu instead of three entries.
                 openFloatMenu(r, [
-                  { id: 'local', label: '新建本地日历', onSelect: () => openMenu({ kind: 'calendar', x: r.left, y: r.bottom, data: { create: true } }) },
-                  { id: 'subscribe', label: '订阅网址…', onSelect: () => openCalendarAction('subscribe') },
-                  { id: 'import', label: '导入文件…', hint: '.ics', onSelect: () => importIcsFile() },
-                ], { placement: 'bottom-start', label: '新建日历' });
+                  { id: 'local', label: t('newLocalCalendar'), onSelect: () => openMenu({ kind: 'calendar', x: r.left, y: r.bottom, data: { create: true } }) },
+                  { id: 'subscribe', label: t('subscribeUrl'), onSelect: () => openCalendarAction('subscribe') },
+                  { id: 'import', label: t('importIcs'), onSelect: () => importIcsFile() },
+                ], { placement: 'bottom-start', label: t('addCalendar') });
               }}><Plus size={14} /><span className="lbl">{t('addCalendar')}</span></div>
           </div>
         ))}

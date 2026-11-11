@@ -14,6 +14,14 @@ import { useCalendarSession } from '../../../stores/useCalendarSession'
 export function ReadyCalendarActions({active}:{active:boolean}) {
   const s=useStore(x=>({anchor:x.anchor,prefs:x.prefs,events:x.events,calendars:x.calendars,editing:x.editing,today:x.today,busy:x.busy,actionPanel:x.actionPanel}))
   const [panel,setPanel]=useState<'subscribe'|'quick'|null>(null)
+  // Escape closes the open dialog wherever focus is: the calendar moves focus to its own root after pointer input,
+  // so a handler on the dialog alone misses the key.
+  useEffect(()=>{
+    if(!panel)return
+    const close=(event:KeyboardEvent)=>{if(event.key!=='Escape'||event.defaultPrevented)return;event.preventDefault();event.stopPropagation();setPanel(null)}
+    window.addEventListener('keydown',close,true)
+    return()=>window.removeEventListener('keydown',close,true)
+  },[panel])
   const [text,setText]=useState(''),[name,setName]=useState(''),[url,setUrl]=useState(''),[interval,setInterval]=useState(60)
   const [suggestion,setSuggestion]=useState<RemoteCalendarEventSuggestion|null>(null),[reminder,setReminder]=useState<ReminderFirePayload|null>(null)
   const consuming=useRef(false)
