@@ -18,6 +18,7 @@ export type CanvasOperation =
   | { type: 'textRanges'; id: string; expectedTextVersion: string; ranges: readonly ReplacementRange[] }
   | { type: 'trash'; ids: string[]; edgeIds?: string[]; trash: Trash }
   | { type: 'restore'; ids: string[]; edgeIds?: string[] }
+  | { type: 'purge'; ids: string[]; edgeIds?: string[] }
 export type CanvasCommand = CanvasOperation
   | { type: 'batch'; operations: CanvasOperation[] }
   | { type: 'importAttachment'; sourceToken: string; node: CanvasNode }
@@ -109,6 +110,21 @@ export function applyCanvasOperations(input: ReadyCanvas, operations: readonly C
           const e = canvas.edges.find(edge => edge.id === id)
           if (!e || e.ready?.trash) throw new Error(`Missing or already trashed edge: ${id}`)
           e.ready ??= {}; e.ready.trash = { ...trash }
+        }
+        break
+      }
+      case 'purge': {
+        const ids = new Set(operation.ids), edgeIds = new Set(operation.edgeIds ?? [])
+        for (const id of ids) if (!node(id).ready.trash) throw new Error(`只能永久删除已回收的卡片：${id}`)
+        for (const id of edgeIds) {
+          const edge = canvas.edges.find(e => e.id === id)
+          if (!edge?.ready?.trash) throw new Error(`只能永久删除已回收的连线：${id}`)
+        }
+        canvas.nodes = canvas.nodes.filter(n => !ids.has(n.id))
+        canvas.edges = canvas.edges.filter(e => !ids.has(e.fromNode) && !ids.has(e.toNode) && !edgeIds.has(e.id))
+        for (const { ready } of canvas.nodes) {
+          if (ready.groupId && ids.has(ready.groupId)) delete ready.groupId
+          for (const side of ['left', 'top'] as const) if (ready.dock?.[side] && ids.has(ready.dock[side])) delete ready.dock[side]
         }
         break
       }
