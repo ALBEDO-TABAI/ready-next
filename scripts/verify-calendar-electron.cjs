@@ -15,7 +15,8 @@ const results=[];
    await page.locator(selector).waitFor();
  };
  // 导入 lives in the 新建日历 menu (W4 §4); the dialog is answered by the stubbed native picker.
- const importFromMenu=async()=>{await page.locator('.ready-calendar .side-row',{hasText:'新增日曆'}).click();await page.getByRole('menuitem',{name:'匯入 .ics…'}).click()};
+ // The calendar follows Ready's interface language (Simplified Chinese) unless the person picked another (B9).
+ const importFromMenu=async()=>{await page.locator('.ready-calendar .side-row',{hasText:'新建日历'}).click();await page.getByRole('menuitem',{name:'导入 .ics…'}).click()};
  // The shell rail has no English titles (W2): ask the workbench for the calendar until its grid shows.
  const showCalendar=async()=>{
    for(let i=0;i<100&&!await page.locator('[data-testid=timegrid]').isVisible().catch(()=>false);i++){
@@ -49,7 +50,7 @@ const results=[];
  try{
   // Set up through the production IPC. No browser-only store or demo fixtures.
   const before=await snap();if(before.events.length){await api('restore',{put:[],remove:before.events.map(e=>e.id)},Object.fromEntries(before.events.map(e=>[e.id,e.revision])))}
-  await api('putPreferences',{primaryTimeZone:'Asia/Shanghai',locale:'zh-TW',gridView:'default',daysPerPeriod:7,weekStartsOn:0,showWeekends:true,sidebar:true,contextPanel:true,format24HourTime:false,notifications:false,additionalTimeZones:[]});
+  await api('putPreferences',{primaryTimeZone:'Asia/Shanghai',locale:'zh-CN',gridView:'default',daysPerPeriod:7,weekStartsOn:0,showWeekends:true,sidebar:true,contextPanel:true,format24HourTime:false,notifications:false,additionalTimeZones:[]});
   await page.reload();await showCalendar();await root.locator('[data-testid=timegrid]').waitFor();await focus();await key('Period');await page.locator('[data-testid=goto] input').fill('2026-10-28');await key('Enter');await scroll();
   const start=Date.parse('2026-10-25T00:00:00+08:00');const at=(d,h,m=0)=>start+d*86400000+(h*60+m)*60000;
   await drag(await pt(1,602),await pt(1,658));let list=await events(),event=list[0],id=event?.id;
@@ -78,8 +79,9 @@ const results=[];
   const sideWidth=()=>page.locator('[data-shell-sidebar]').evaluate(el=>el.getBoundingClientRect().width);
   await key('Backslash');await page.waitForFunction(()=>document.querySelector('[data-shell-sidebar]').getBoundingClientRect().width<1).catch(()=>{});ok('sidebar hide',await sideWidth()<1);
   await key('Backslash');await page.waitForFunction(()=>document.querySelector('[data-shell-sidebar]').getBoundingClientRect().width>100).catch(()=>{});ok('sidebar show',await sideWidth()>100);
-  await key('Control+Backslash');ok('panel hide',await root.locator('.panel').count()===0);await key('Control+Backslash');ok('panel show',await root.locator('.panel').count()===1);
-  await key('Shift+Slash');ok('shortcuts visible',(await root.innerText()).includes('快速鍵'));await key('Escape');await focus();await key('Period');ok('date navigation opens',await page.locator('[data-testid=goto]').isVisible());await page.locator('[data-testid=goto] input').fill('2026-12-25');await key('Enter');ok('date navigation changes month',(await page.locator('[data-testid=title]').innerText()).includes('十二月'));await key('t');
+  // The context panel is ⌘⌥\ in the shortcut registry (calendar.panel).
+  await key('Control+Alt+Backslash');ok('panel hide',await root.locator('.panel').count()===0);await key('Control+Alt+Backslash');ok('panel show',await root.locator('.panel').count()===1);
+  await key('Shift+Slash');ok('shortcuts visible',await page.locator('[data-testid=search]').getAttribute('placeholder')==='搜索快捷键'&&(await root.innerText()).includes('导航'));await key('Escape');await focus();await key('Period');ok('date navigation opens',await page.locator('[data-testid=goto]').isVisible());await page.locator('[data-testid=goto] input').fill('2026-12-25');await key('Enter');ok('date navigation changes month',(await page.locator('[data-testid=title]').innerText()).includes('十二月'));await key('t');
   // Calendar settings are a section of Ready's settings (W2); the app menu's 日历设置… opens them.
   if(app){
     await app.evaluate(({Menu})=>Menu.getApplicationMenu().getMenuItemById('ready-calendar-menu').submenu.items.find(i=>i.label==='日历设置…').click());
@@ -89,7 +91,7 @@ const results=[];
   await focus();const h0=(await geo()).hourH;await key('Control+Shift+Period');ok('zoom changes hour height',(await geo()).hourH>h0);await key('Control+Shift+Digit0');
   await key('Control+Shift+e');ok('weekends hidden',await root.locator('.colhead').count()===5);await key('Control+Shift+e');
   await key('c');await page.keyboard.type('字段保存');await key('Enter');ok('create shortcut saves event',(await events()).some(e=>e.title==='字段保存'));
-  await page.locator('[data-testid=ev-opts]').click();await page.locator('[data-testid=ev-repeat]').click();await page.locator('.mi',{hasText:'自訂'}).click();await page.locator('[data-testid=rec-interval]').fill('2');await page.locator('[data-testid=rec-end-count]').check();await page.locator('[data-testid=rec-count]').fill('3');await key('Control+Enter');ok('custom recurrence Cmd Enter saves from focused input',(await events()).some(e=>e.title==='字段保存'&&e.rrule?.includes('COUNT=3')));await focus();await key('Control+z');
+  await page.locator('[data-testid=ev-opts]').click();await page.locator('[data-testid=ev-repeat]').click();await page.locator('.mi',{hasText:'自定义'}).click();await page.locator('[data-testid=rec-interval]').fill('2');await page.locator('[data-testid=rec-end-count]').check();await page.locator('[data-testid=rec-count]').fill('3');await key('Control+Enter');ok('custom recurrence Cmd Enter saves from focused input',(await events()).some(e=>e.title==='字段保存'&&e.rrule?.includes('COUNT=3')));await focus();await key('Control+z');
   // Clear the selection using Escape twice, then availability is tested through its real controls.
   await focus();await key('Escape');await key('s');ok('availability panel opens',await page.locator('[data-testid=availpanel]').isVisible());await scroll();await drag(await pt(4,842),await pt(4,898));ok('availability drawing does not save an event',(await events()).length===1);await page.locator('[data-testid=av-holds]').click();await idle();ok('holds are tentative and free',(await events()).some(e=>e.status==='tentative'&&e.transparency==='transparent'));
   const ics=['BEGIN:VCALENDAR','VERSION:2.0','BEGIN:VEVENT','UID:accept-ny','DTSTART;TZID=America/New_York:20261028T090000','DTEND;TZID=America/New_York:20261028T100000','SUMMARY:纽约会议','END:VEVENT','BEGIN:VEVENT','UID:accept-day','DTSTART;VALUE=DATE:20261030','DTEND;VALUE=DATE:20261101','SUMMARY:两天活动','END:VEVENT','END:VCALENDAR'].join('\r\n');
