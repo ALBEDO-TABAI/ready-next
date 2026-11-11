@@ -670,6 +670,7 @@ export async function executeBrowserTool(
             try {
               downloadReceipts.push(controller.consumeTaskDownload(file, String(args.directory), browserTaskId, ownerRunId))
             } catch (error) {
+              // silent-catch: returned to the model as download_receipt_failed; the files stay published.
               return createBrowserStructuredOutput({ ...data, ok: false, errorKind: 'download_receipt_failed',
                 message: error instanceof Error ? error.message : String(error), filesPublished: true, replayAllowed: false, downloadReceipts })
             }
