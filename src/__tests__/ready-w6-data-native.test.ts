@@ -27,8 +27,8 @@ function bookFixture(f: ReturnType<typeof fixture>) {
   return { path, content, h }
 }
 
-test('W6 book, highlight and FastCard search survives two C5 rebuilds without touching source records', async () => {
-  skipIfSqliteUnavailable({ skip: reason => { throw new Error(reason) } }, 'W6 requires Electron SQLite')
+test('W6 book, highlight and FastCard search survives two C5 rebuilds without touching source records', async t => {
+  if (skipIfSqliteUnavailable(t, 'W6 requires Electron SQLite')) return
   const f = fixture()
   try {
     const book = bookFixture(f)
@@ -54,8 +54,8 @@ test('W6 book, highlight and FastCard search survives two C5 rebuilds without to
   } finally { f.close() }
 })
 
-test('W6 stored previews return book cover/context, canvas geometry and saved web excerpts without writes', async () => {
-  skipIfSqliteUnavailable({ skip: reason => { throw new Error(reason) } }, 'W6 requires Electron SQLite')
+test('W6 stored previews return book cover/context, canvas geometry and saved web excerpts without writes', async t => {
+  if (skipIfSqliteUnavailable(t, 'W6 requires Electron SQLite')) return
   const f = fixture()
   try {
     const book = bookFixture(f)
@@ -84,8 +84,8 @@ test('W6 stored previews return book cover/context, canvas geometry and saved we
   } finally { f.close() }
 })
 
-test('W6 database preview uses the default view filtering/order and only its first five rows', async () => {
-  skipIfSqliteUnavailable({ skip: reason => { throw new Error(reason) } }, 'W6 requires Electron SQLite')
+test('W6 database preview uses the default view filtering/order and only its first five rows', async t => {
+  if (skipIfSqliteUnavailable(t, 'W6 requires Electron SQLite')) return
   const f = fixture()
   try {
     mkdirSync(join(f.root, 'rows'))
