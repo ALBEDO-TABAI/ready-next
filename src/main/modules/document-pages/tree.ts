@@ -2,6 +2,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { basename, extname, join } from 'node:path'
 import { readDocumentSource } from '../../../shared/document-operations'
 import { PageRootSchema, type PageNode, type PageRoot } from '../../../shared/document-pages'
+import { DatabaseDefinitionSchema } from '../../../shared/document-database/schema'
 import { vaultRoot } from '../document-drafts/files'
 
 export function readPageTree(input: PageRoot,
@@ -17,9 +18,12 @@ export function readPageTree(input: PageRoot,
       return ready && typeof ready === 'object' && !Array.isArray(ready) ? ready as Record<string, unknown> : {}
     } catch { return {} }
   }
+  const databaseSources = new Map<string, string>()
   const node = (path: string, kind: PageNode['kind'], position: number): PageNode => {
     const name = basename(path), fields: Record<string, unknown> = kind === 'page' ? readDocumentSource(readFileSync(path, 'utf8')).frontmatter : kind === 'canvas' ? canvasFields(path) : {}
-    return { ...identify(path), path, name, kind, title: typeof fields.title === 'string' ? fields.title : kind === 'page' || kind === 'canvas' ? name.slice(0, -extname(name).length) : name,
+    const database = kind === 'page' ? DatabaseDefinitionSchema.safeParse(fields.ready_database) : undefined
+    if (database?.success) databaseSources.set(path, database.data.source)
+    return { ...(database?.success ? { database: true as const } : {}), ...identify(path), path, name, kind, title: typeof fields.title === 'string' ? fields.title : kind === 'page' || kind === 'canvas' ? name.slice(0, -extname(name).length) : name,
       icon: typeof fields.icon === 'string' ? fields.icon : undefined, cover: typeof fields.cover === 'string' ? fields.cover : undefined,
       children: [], hasChildren: false, position }
   }
@@ -48,7 +52,7 @@ export function readPageTree(input: PageRoot,
       const merge = merges.get(e.name)
       if (merge?.assets) child.assetsPath = join(directory, merge.assets)
       if (e.isDirectory()) walk(path, child)
-      else if (merge?.directory) walk(join(directory, merge.directory), child)
+      else if (merge?.directory && databaseSources.get(path) !== merge.directory) walk(join(directory, merge.directory), child)
       return child
     })
     const saved = order(parent.objectId)

@@ -5,7 +5,7 @@ export type PageRoot = z.infer<typeof PageRootSchema>
 export interface PageNode {
   objectId: string; revision: number; path: string; name: string
   kind: 'vault' | 'page' | 'folder' | 'canvas' | 'file'
-  title: string; icon?: string; cover?: string; assetsPath?: string
+  title: string; database?: true; icon?: string; cover?: string; assetsPath?: string
   ambiguity?: string; children: PageNode[]; hasChildren: boolean; position: number
 }
 export const PagePropertiesSchema = z.object({
@@ -17,7 +17,7 @@ export type PageProperties = z.infer<typeof PagePropertiesSchema>
 const base = { operationId: z.string().regex(/^[a-zA-Z0-9_-]{1,160}$/), root: z.string().min(1) }
 const target = { parentObjectId: z.string().min(1).optional(), parentPath: z.string().min(1).optional() }
 export const PageOperationSchema = z.discriminatedUnion('type', [
-  z.object({ ...base, type: z.literal('create'), ...target, title: z.string(), content: z.string().default('') }).strict(),
+  z.object({ ...base, type: z.literal('create'), ...target, title: z.string(), content: z.string().default(''), database: z.boolean().optional() }).strict(),
   z.object({ ...base, type: z.literal('rename'), objectId: z.string().min(1), title: z.string() }).strict(),
   z.object({ ...base, type: z.literal('adopt'), source: z.string().min(1), ...target }).strict(),
   z.object({ ...base, type: z.literal('move'), objectId: z.string().min(1), ...target }).strict(),
