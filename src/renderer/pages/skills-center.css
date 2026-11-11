@@ -1,0 +1,53 @@
+/* The skills centre page (W2 §2.3): the settings page frame, the panel on one sheet of paper. Only --rn-*. */
+.skills-center-page {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.skills-center-page__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 52px;
+  padding: 0 18px 0 72px;
+  flex: none;
+}
+
+.skills-center-page__title {
+  margin: 0;
+  font: 600 var(--rn-fs-md)/1 var(--rn-font-ui);
+  color: var(--rn-ink);
+}
+
+.skills-center-page__body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  justify-content: center;
+  padding: 0 12px 12px;
+}
+
+.skills-center-page__panel {
+  display: flex;
+  width: min(880px, 100%);
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: var(--rn-r-sheet);
+  background: var(--rn-sheet);
+  box-shadow: var(--rn-sheet-shadow);
+}
+
+.skills-center-page__panel-head {
+  flex: none;
+}
+
+.skills-center-page__panel-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}

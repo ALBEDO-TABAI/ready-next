@@ -20,7 +20,6 @@ interface UseBrowserViewBoundsParams {
   hostVisibleRef: RefObject<boolean>
   topInset: number
   sidebarVisible: boolean
-  sidePanelVariant: string
   effectiveSidePanelWidth: number
   skillsSplitRatio: number
   chatPanelVisible: boolean
@@ -68,7 +67,6 @@ export function useBrowserViewBounds({
   hostVisibleRef,
   topInset,
   sidebarVisible,
-  sidePanelVariant,
   effectiveSidePanelWidth,
   skillsSplitRatio,
   chatPanelVisible,
@@ -437,8 +435,7 @@ export function useBrowserViewBounds({
     isActive,
     sendBounds,
     sidebarVisible,
-    sidePanelVariant,
-    skillsSplitRatio,
+      skillsSplitRatio,
     stopDragBoundsSync,
   ])
 

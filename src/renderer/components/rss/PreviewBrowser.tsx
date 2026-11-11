@@ -47,7 +47,6 @@ export default function PreviewBrowser({ item, onClose, isActive = true }: Previ
   }, [])
 
   const sidebarVisible = useWorkspace((state) => state.sidebarVisible)
-  const sidePanelVariant = useWorkspace((state) => state.sidePanelVariant)
   const sidePanelWidths = useWorkspace((state) => state.sidePanelWidths)
   const skillsSplitRatio = useWorkspace((state) => state.skillsSplitRatio)
   const chatPanelVisible = useWorkspace((state) => state.chatPanelVisible)
@@ -105,7 +104,6 @@ export default function PreviewBrowser({ item, onClose, isActive = true }: Previ
     chatPanelWidth,
     effectiveSidePanelWidth,
     sidebarVisible,
-    sidePanelVariant,
     skillsSplitRatio,
     isActive,
     scheduleBoundsSync,

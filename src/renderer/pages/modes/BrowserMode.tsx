@@ -7,7 +7,8 @@ import BrowserModeEmptyState from '../../components/browser/BrowserModeEmptyStat
 import BrowserDiagnosticsDock from '../../components/browser/BrowserDiagnosticsDock'
 import { AgentBrowserSupervisionPanel } from '../../components/browser/AgentBrowserSupervisionPanel'
 import BrowserTopBar from '../../components/browser/BrowserTopBar'
-import VerticalTabRail, { BROWSER_VERTICAL_RAIL_WIDTH } from '../../components/browser/VerticalTabRail'
+import BrowserTabList from '../../components/browser/BrowserTabList'
+import { ShellNavigator } from '../../modules/workbench/shell/ShellSidebar'
 import BrowserShellLayout from '../../components/browser/BrowserShellLayout'
 import { nextIntentId } from '../../../shared/browser-view-intent'
 import { isBrowserSupervisionVisibleTaskStatus } from '../../../shared/browser-task-status'
@@ -199,7 +200,6 @@ export default function BrowserMode({
   const isElectron = typeof window !== 'undefined' && !!window.electronAPI
 
   const sidebarVisible = useWorkspace(s => s.sidebarVisible)
-  const sidePanelVariant = useWorkspace(s => s.sidePanelVariant)
   const sidePanelWidths = useWorkspace(s => s.sidePanelWidths)
   const skillsSplitRatio = useWorkspace(s => s.skillsSplitRatio)
   const chatPanelVisible = useWorkspace(s => s.chatPanelVisible)
@@ -303,7 +303,6 @@ export default function BrowserMode({
     hostVisibleRef,
     topInset: 0,
     sidebarVisible,
-    sidePanelVariant,
     effectiveSidePanelWidth,
     skillsSplitRatio,
     chatPanelVisible,
@@ -392,14 +391,11 @@ export default function BrowserMode({
 
   const {
     isBookmarked,
-    bookmarks,
     handleToggleBookmark,
-    handleToggleBookmarkForTab,
   } = useBrowserPanelData({
     isElectron,
     activeTab,
   })
-  const bookmarkedUrls = useMemo(() => bookmarks.map((item) => item.url), [bookmarks])
 
   const {
     toastVisible,
@@ -484,7 +480,6 @@ export default function BrowserMode({
     handleReorderToRank,
     handleCreateGroup,
     handleAddToGroup,
-    handleRemoveFromGroup,
     handleDeleteGroup,
     handleNewTabInGroup,
   } = useBrowserTabActions({
@@ -1245,28 +1240,27 @@ export default function BrowserMode({
           {fastCardPanelOpen && activeTabId && <BrowserSourceHighlight key={activeTabId} tabId={activeTabId} />}
 
           <div className="flex min-h-0 flex-1">
-            <VerticalTabRail
-              isActive={isActive}
-              tabs={tabs}
-              tabGroups={tabGroups}
-              activeTabId={activeTabId}
-              splitTabId={visibleSplitTab?.id || null}
-              bookmarkedUrls={bookmarkedUrls}
-              onTabClick={handleHeaderTabClick}
-              onTabClose={handleCloseTab}
-              onNewTab={handleNewTab}
-              onReorderToRank={handleReorderToRank}
-              onCreateGroup={handleCreateGroup}
-              onAddToGroup={handleAddToGroup}
-              onRemoveFromGroup={handleRemoveFromGroup}
-              onRenameGroup={renameTabGroup}
-              onRecolorGroup={recolorTabGroup}
-              onSetGroupCollapsed={setTabGroupCollapsed}
-              onDisbandGroup={disbandTabGroup}
-              onDeleteGroup={handleDeleteGroup}
-              onNewTabInGroup={handleNewTabInGroup}
-              onToggleBookmarkForTab={handleToggleBookmarkForTab}
-            />
+            {/* The tab list lives in the shell's one sidebar (W2-T3). */}
+            <ShellNavigator mode="browser" label="标签页">
+              <BrowserTabList
+                tabs={tabs}
+                tabGroups={tabGroups}
+                activeTabId={activeTabId}
+                splitTabId={visibleSplitTab?.id || null}
+                onTabClick={handleHeaderTabClick}
+                onTabClose={handleCloseTab}
+                onNewTab={handleNewTab}
+                onReorderToRank={handleReorderToRank}
+                onCreateGroup={handleCreateGroup}
+                onAddToGroup={handleAddToGroup}
+                onRenameGroup={renameTabGroup}
+                onRecolorGroup={recolorTabGroup}
+                onSetGroupCollapsed={setTabGroupCollapsed}
+                onDisbandGroup={disbandTabGroup}
+                onDeleteGroup={handleDeleteGroup}
+                onNewTabInGroup={handleNewTabInGroup}
+              />
+            </ShellNavigator>
 
             <div
               ref={browserContentFrameRef}
@@ -1412,7 +1406,7 @@ export default function BrowserMode({
               style={{
                 position: 'absolute',
                 top: WORKBENCH_TAB_ROW_HEIGHT,
-                left: BROWSER_VERTICAL_RAIL_WIDTH,
+                left: 0,
                 right: 0,
                 bottom: 0,
                 zIndex: 45,
@@ -1463,7 +1457,7 @@ export default function BrowserMode({
               style={{
                 position: 'absolute',
                 top: WORKBENCH_TAB_ROW_HEIGHT,
-                left: BROWSER_VERTICAL_RAIL_WIDTH,
+                left: 0,
                 right: 0,
                 bottom: 0,
                 zIndex: 50,

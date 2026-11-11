@@ -1,0 +1,211 @@
+/* The browser navigator in the shell sidebar (W2-T3). Glass underneath, so no surface of its own;
+   rows follow the shared list row (W1 primitives): current row in the accent tint. Only --rn-*. */
+.browser-tab-list {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  color: var(--rn-ink-2);
+  font-family: var(--rn-font-ui);
+}
+
+.browser-tab-list__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 36px;
+  padding: 0 6px 0 14px;
+  flex: none;
+}
+
+.browser-tab-list__head-tools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.browser-tab-list__title {
+  font: 500 var(--rn-fs-xs)/1 var(--rn-font-ui);
+  color: var(--rn-ink-3);
+}
+
+.browser-tab-list__head-button,
+.browser-tab-list__close {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--rn-ink-3);
+  cursor: pointer;
+}
+
+.browser-tab-list__head-button:hover,
+.browser-tab-list__close:hover {
+  background: var(--rn-fill-2);
+  color: var(--rn-ink);
+}
+
+.browser-tab-list__head-button svg {
+  width: var(--rn-icon);
+  height: var(--rn-icon);
+}
+
+.browser-tab-list__scroll {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 1px;
+  padding: 0 8px 8px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.browser-tab-list__row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  width: 100%;
+  min-height: 36px;
+  padding: 0 4px 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--rn-ink-2);
+  font: 400 var(--rn-fs-md)/1.25 var(--rn-font-ui);
+  text-align: left;
+  cursor: pointer;
+}
+
+.browser-tab-list__row[data-grouped='true'] {
+  padding-left: 18px;
+}
+
+.browser-tab-list__row:hover {
+  background: var(--rn-fill);
+  color: var(--rn-ink);
+}
+
+.browser-tab-list__row[data-current] {
+  background: var(--rn-accent-soft);
+  color: var(--rn-accent-text);
+}
+
+.browser-tab-list__row[data-drop='before']::before,
+.browser-tab-list__row[data-drop='after']::after {
+  content: '';
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--rn-accent);
+  pointer-events: none;
+}
+
+.browser-tab-list__row[data-drop='before']::before { top: -1px; }
+.browser-tab-list__row[data-drop='after']::after { bottom: -1px; }
+
+.browser-tab-list__glyph {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
+.browser-tab-list__icon {
+  width: 15px;
+  height: 15px;
+  color: var(--rn-ink-3);
+}
+
+.browser-tab-list__favicon {
+  border-radius: 3px;
+  object-fit: cover;
+}
+
+.browser-tab-list__badge {
+  position: absolute;
+  right: -3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1.5px var(--rn-stage);
+}
+
+.browser-tab-list__badge[data-kind='agent'] { top: -3px; background: var(--rn-ink-2); }
+.browser-tab-list__badge[data-kind='running'] { bottom: -3px; background: var(--rn-ok); }
+.browser-tab-list__badge[data-kind='attention'] { bottom: -3px; background: var(--rn-warn); }
+
+.browser-tab-list__text {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.browser-tab-list__label,
+.browser-tab-list__meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browser-tab-list__row[data-current] .browser-tab-list__label {
+  font-weight: 500;
+}
+
+.browser-tab-list__meta {
+  font-size: var(--rn-fs-2xs);
+  color: var(--rn-ink-3);
+}
+
+.browser-tab-list__lock {
+  width: 11px;
+  height: 11px;
+  flex: none;
+  color: var(--rn-ink-3);
+}
+
+.browser-tab-list__close {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  opacity: 0;
+}
+
+.browser-tab-list__close svg {
+  width: 12px;
+  height: 12px;
+}
+
+.browser-tab-list__row:hover .browser-tab-list__close,
+.browser-tab-list__close:focus-visible {
+  opacity: 1;
+}
+
+.browser-tab-list__new {
+  min-height: var(--rn-row-h);
+  color: var(--rn-ink-3);
+}
+
+/* The group edit menu opens under its header, inside the sidebar column. */
+.browser-tab-list__editor {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  z-index: 10;
+  max-width: 236px;
+  overflow: hidden;
+  border-radius: 12px;
+}

@@ -14,19 +14,17 @@ interface RSSSessionState {
   selectedDigestId: string | null
   setDigestView(visible: boolean, reportId?: string | null): void
   view: RSSQueryResult | null
-  navigationCollapsed: boolean
   selectedExcerpt: import('../../shared/rss-reading').RSSReadingRange | null
   selectedItemExpectedRevision: string | null
   selectedItemId: string | null
   selectedItemTitle: string | null
   setQuery(patch: RSSQueryInput): void
   setView(view: RSSQueryResult): void
-  setNavigationCollapsed(value: boolean): void
   setSelection(payload: { selectedExcerpt?: import('../../shared/rss-reading').RSSReadingRange | null; selectedItemExpectedRevision?: string | null; selectedItemId?: string | null; selectedItemTitle?: string | null }): void
   reset(): void
 }
 const KEY = 'ready-rss-workspace'
-const saved = readJsonStorage<{ query?: RSSQueryInput; navigationCollapsed?: boolean }>(KEY, {})
+const saved = readJsonStorage<{ query?: RSSQueryInput }>(KEY, {})
 const parsed = RSSQuerySchema.safeParse(saved?.query || {})
 
 export const useRSSSession = create<RSSSessionState>((set, get) => ({
@@ -39,22 +37,17 @@ export const useRSSSession = create<RSSSessionState>((set, get) => ({
   view: null,
   digestVisible: false, selectedDigestId: null,
   setDigestView: (digestVisible, reportId) => set({ interactionRevision: get().interactionRevision + 1, digestVisible, ...(reportId !== undefined ? { selectedDigestId: reportId } : {}) }),
-  navigationCollapsed: saved?.navigationCollapsed === true,
   selectedExcerpt: null, selectedItemExpectedRevision: null,
   selectedItemId: null,
   selectedItemTitle: null,
   setQuery: (patch) => {
     const { cursor: _cursor, expectedRevision: _revision, ...query } = RSSQuerySchema.parse({ ...get().query, ...patch })
     set({ query, interactionRevision: get().interactionRevision + 1 })
-    writeJsonStorage(KEY, { query, navigationCollapsed: get().navigationCollapsed })
+    writeJsonStorage(KEY, { query })
   },
   setView: (view) => set({ view }),
-  setNavigationCollapsed: (navigationCollapsed) => {
-    set({ navigationCollapsed })
-    writeJsonStorage(KEY, { query: get().query, navigationCollapsed })
-  },
   setSelection: (payload) => set({ interactionRevision: get().interactionRevision + 1, selectedExcerpt: null, selectedItemExpectedRevision: null, ...payload }),
-  reset: () => set({ interactionRevision: get().interactionRevision + 1, pendingReveal: null, digestVisible: false, selectedDigestId: null, query: RSSQuerySchema.parse({}), view: null, navigationCollapsed: false,
+  reset: () => set({ interactionRevision: get().interactionRevision + 1, pendingReveal: null, digestVisible: false, selectedDigestId: null, query: RSSQuerySchema.parse({}), view: null,
     selectedExcerpt: null, selectedItemExpectedRevision: null,
     selectedItemId: null, selectedItemTitle: null }),
 }))

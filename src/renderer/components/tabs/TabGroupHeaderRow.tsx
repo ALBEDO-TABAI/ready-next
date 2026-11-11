@@ -1,11 +1,9 @@
 import { useRef, type DragEvent } from 'react'
 import { ChevronDown, ChevronRight, Pencil, Plus } from 'lucide-react'
 import type { TabGroup } from '../../../shared/tab-groups'
-import { VERTICAL_RAIL_FLYOUT_GROUP_HEADER_HEIGHT } from '../../../shared/vertical-rail-flyout-layout'
 import { tabGroupColorSoft, tabGroupColorVar, tabGroupPillTextColor } from './tab-group-visuals'
 
-// Edge-style group header row, shared by the document rail flyout (P2) and the browser
-// overlay flyout (P3): a solid color pill (caret + name) that toggles collapse on click
+// Shared group header row: a solid color pill (caret + name) that toggles collapse on click
 // and opens the edit menu on right-click, plus hover-revealed new-tab / edit actions at
 // the row's right. The whole row doubles as the "drop tab onto this group" target.
 export default function TabGroupHeaderRow({
@@ -36,7 +34,7 @@ export default function TabGroupHeaderRow({
     <div
       ref={rowRef}
       className="relative flex flex-shrink-0 items-center"
-      style={{ height: VERTICAL_RAIL_FLYOUT_GROUP_HEADER_HEIGHT, paddingLeft: 6, paddingRight: 6, gap: 2 }}
+      style={{ height: 28, paddingLeft: 6, paddingRight: 6, gap: 2 }}
       onDragOver={onDragOver}
       onDrop={onDrop}
     >

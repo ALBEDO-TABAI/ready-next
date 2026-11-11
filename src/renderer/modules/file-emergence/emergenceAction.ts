@@ -2,6 +2,7 @@ import { useDocTabs } from '../../stores/useDocTabs'
 import { useMode } from '../../stores/useMode'
 import { useWorkspace } from '../../stores/useWorkspace'
 import { requestWorkbenchModeOpen } from '../workbench/mode-transition'
+import { useDocumentNavigator } from '../document/navigator/useDocumentNavigator'
 
 export type FileEmergenceAction = {
   kind: 'open_project' | 'open_artifact' | 'open_project_group'
@@ -46,7 +47,7 @@ function productionDeps(): FileEmergenceActionDeps {
     openProjectGroup: (paths,targetPath)=>openDocumentPaths(paths,targetPath,true),
     revealPath: async(path)=>{
       const workspace=useWorkspace.getState()
-      workspace.setSidePanelVariant('files')
+      useDocumentNavigator.getState().setView('files')
       workspace.selectFile(path)
       await workspace.revealFile(path)
     },

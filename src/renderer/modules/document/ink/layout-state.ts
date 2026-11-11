@@ -4,33 +4,17 @@ import { isoDate } from '../../../../shared/calendar/dates'
 import { occurrences } from '../../../../shared/calendar/model'
 import { dayOf } from '../../../../shared/calendar/tz'
 import { useDocTabs } from '../../../stores/useDocTabs'
-import { readStorage, writeStorage } from '../../../utils/storage'
 
-const KEY = 'ready-ink-sidebar'
-const MIN = 200, MAX = 420, DEFAULT = 248
-const clamp = (width: number) => Math.round(Math.max(MIN, Math.min(MAX, width)))
-function saved(): { open: boolean; width: number } {
-  try {
-    const value = JSON.parse(readStorage(KEY) || '{}') as { open?: unknown; width?: unknown }
-    return { open: value.open !== false, width: typeof value.width === 'number' ? clamp(value.width) : DEFAULT }
-  } catch { /* silent-catch: Invalid cached layout JSON is only a display preference; use the default open sidebar and width. */ return { open: true, width: DEFAULT } }
-}
-
-/** The document shell's sidebar (open, width) and whether the home view covers the editor. */
+/** Whether the home view covers the editor, and a page created from the sidebar whose title should take focus.
+ *  The sidebar's open state and width belong to the shell's one sidebar (W2 §2.2). */
 export const useInkLayout = create<{
-  open: boolean; width: number; resizing: boolean; home: boolean
+  home: boolean
   /** A page created from the sidebar whose title should take focus when its header loads. */
   titleFocus: string | null
-  setOpen(open: boolean): void; setWidth(width: number): void; commitWidth(): void; resetWidth(): void
-  setResizing(resizing: boolean): void; setHome(home: boolean): void; setTitleFocus(objectId: string | null): void
-}>((set, get) => ({
-  ...saved(), resizing: false, home: false, titleFocus: null,
+  setHome(home: boolean): void; setTitleFocus(objectId: string | null): void
+}>(set => ({
+  home: false, titleFocus: null,
   setTitleFocus: titleFocus => set({ titleFocus }),
-  setOpen: open => { set({ open }); writeStorage(KEY, JSON.stringify({ open, width: get().width })) },
-  setWidth: width => set({ width: clamp(width) }),
-  commitWidth: () => writeStorage(KEY, JSON.stringify({ open: get().open, width: get().width })),
-  resetWidth: () => { set({ width: DEFAULT }); writeStorage(KEY, JSON.stringify({ open: get().open, width: DEFAULT })) },
-  setResizing: resizing => set({ resizing }),
   setHome: home => set({ home }),
 }))
 

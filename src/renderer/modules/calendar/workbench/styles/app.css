@@ -48,12 +48,13 @@
 
 /* ---------- shell ---------- */
 .ready-calendar .app { position: fixed; inset: 0; display: flex; padding: 0; gap: 8px; }
-.ready-calendar .sidebar { position: relative; width: 240px; flex: none; height: 100%; background: var(--c-wash); border: 1px solid var(--glass-rim); border-radius: 24px; backdrop-filter: blur(22px) saturate(150%); box-shadow: none; z-index: 402; display: flex; flex-direction: column; overflow: hidden; }
-.ready-calendar .sidebar-top { height: 56px; flex: none; display: flex; align-items: center; padding: 0 8px 0 78px; gap: 4px; -webkit-app-region: drag; }
-.ready-calendar .sidebar-top > * { -webkit-app-region: no-drag; }
+/* The calendar's navigator, in the shell's one sidebar (W2-T4): it sits on the window's glass, no card of its own. */
+.ready-calendar .sidebar { position: relative; flex: 1; min-height: 0; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+.ready-calendar .sidebar-top { height: 40px; flex: none; display: flex; align-items: center; padding: 0 6px 0 22px; gap: 2px; }
+.ready-calendar .sidebar-title { flex: 1; min-width: 0; font: 500 var(--rn-fs-xs)/1 var(--rn-font-ui); color: var(--rn-ink-3); }
 .ready-calendar .sidebar-scroll { flex: 1; overflow-y: auto; overflow-x: hidden; padding-bottom: 24px; }
 .ready-calendar .sidebar-sep { height: 1px; background: var(--c-line); margin: 12px 16px; }
-.ready-calendar .sidebar-foot { height: 52px; flex: none; display: flex; align-items: center; padding: 0 8px; }
+.ready-calendar .sidebar-foot { height: 52px; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 8px 0 14px; }
 .ready-calendar .main { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--c-page); border-radius: 24px; box-shadow: none; overflow: hidden; }
 .ready-calendar .panel { position: relative; width: 284px; flex: none; height: 100%; background: var(--c-wash); border: 1px solid var(--glass-rim); border-radius: 24px; backdrop-filter: blur(22px) saturate(150%); box-shadow: none; display: flex; flex-direction: column; overflow: hidden; }
 
@@ -63,10 +64,8 @@
 .ready-calendar .topbar-row > * { -webkit-app-region: no-drag; }
 .ready-calendar .topbar-title { position: absolute; left: 24px; top: 65px; height: 38px; font-size: 28px; line-height: 38px; font-weight: 500; letter-spacing: -.04em; white-space: nowrap; }
 .ready-calendar .topbar-title .yr { font-family: var(--font-serif); font-size: 38px; font-weight: 400; color: var(--c-text2); margin-left: 5px; }
-.ready-calendar .wordmark { display: flex; align-items: center; gap: 8px; margin-right: auto; padding: 0 8px 0 4px; font-family: var(--font-serif); font-size: 27px; letter-spacing: -.03em; white-space: nowrap; }
-.ready-calendar .brand-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--c-accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-.ready-calendar .topbar:has(.collapsed-side) .wordmark { margin-left: 28px; }
-.ready-calendar .sidebar-top > button:last-child { background: var(--c-text); color: var(--c-page); }
+.ready-calendar .topbar-spacer { margin-right: auto; }
+.ready-calendar .sidebar-top > .sidebar-new { background: var(--c-text); color: var(--c-page); }
 .ready-calendar button:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 2px; }
 
 
@@ -331,7 +330,6 @@
 
 /* traffic-light spacer & drag regions */
 .ready-calendar .drag { -webkit-app-region: drag; } .ready-calendar .nodrag { -webkit-app-region: no-drag; }
-.ready-calendar .collapsed-side { position: absolute; left: 12px; top: 19px; z-index: 403; display: flex; gap: 2px; }
 .ready-calendar .pop-div { height: 1px; margin: 4px 0; background: var(--m-ring); }
 /* custom recurrence dialog */
 .ready-calendar .dialog.rec { width: 360px; }
@@ -359,23 +357,19 @@
 @container calendar (max-width: 1100px) {
   .ready-calendar .app { padding: 0; gap: 6px; }
   .ready-calendar .panel { width: 252px; }
-  .ready-calendar .sidebar { width: 224px; }
 }
 @container calendar (max-width: 1049px) {
   .ready-calendar .panel { position: fixed; right: 0; top: 0; bottom: 0; height: auto; width: 284px; z-index: 403; background: var(--c-page); box-shadow: none; }
 }
 @container calendar (max-width: 760px) {
   .ready-calendar .app { padding: 0; gap: 6px; }
-  .ready-calendar .sidebar { width: 190px; border-radius: 18px; }
   .ready-calendar .main, .ready-calendar .panel { border-radius: 18px; }
   .ready-calendar .topbar { padding-left: 10px; }
   .ready-calendar .topbar-row { gap: 3px; padding-right: 8px; }
-  .ready-calendar .wordmark { font-size: 23px; gap: 6px; padding-right: 4px; }
   .ready-calendar .topbar-title { left: 16px; }
   .ready-calendar .topbar-row .btn { padding: 0 9px; }
 }
 @container calendar (max-width: 679px) {
-  .ready-calendar .sidebar { position: fixed; left: 0; top: 0; bottom: 0; height: auto; width: 224px; background: var(--c-modal); box-shadow: none; }
   .ready-calendar .modal-nav { width: 150px; }
   .ready-calendar .modal-body { min-width: 0; padding: 24px 16px; }
   .ready-calendar .set-in.plain { max-width: 100%; }
@@ -386,13 +380,13 @@
 
 .ready-calendar { position:relative; width:100%; height:100%; min-height:0; overflow:hidden; contain:layout paint; container:calendar / inline-size; isolation:isolate; outline:none; }
 .ready-calendar .app {position:absolute;inset:0;padding:0;gap:8px;}
-.ready-calendar .sidebar-top{padding-left:12px;-webkit-app-region:no-drag;}
 .ready-calendar .topbar{-webkit-app-region:no-drag;}
 .ready-calendar .modal{top:24px;max-height:calc(100% - 48px);max-width:calc(100% - 32px);}
 .ready-calendar .calendar-load-state{height:100%;display:flex;gap:16px;align-items:center;justify-content:center;}
 .ready-calendar .calendar-save-status{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);z-index:1500;padding:8px 14px;border-radius:12px;background:var(--c-page);box-shadow:var(--sh-pop);font-size:12px;}
 .ready-calendar .calendar-save-status.error{color:#b53b2b;}
-.ready-calendar .ready-calendar-actions{position:absolute;left:26px;bottom:24px;z-index:410;display:flex;gap:5px;}
+.ready-calendar .ready-calendar-actions{display:flex;gap:5px;}
+.ready-calendar .sidebar-actions{flex:1;min-width:0;}
 .ready-calendar .ready-calendar-dialog{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:min(440px,calc(100% - 32px));max-height:calc(100% - 32px);overflow:auto;padding:24px;background:var(--c-page);color:var(--c-text);border-radius:22px;box-shadow:var(--sh-lg);z-index:1001;}
 .ready-calendar .ready-calendar-dialog header{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;}
 .ready-calendar .ready-calendar-dialog form{display:flex;flex-direction:column;gap:14px;}

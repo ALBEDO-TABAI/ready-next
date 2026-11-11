@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import { useStore } from 'zustand'
 import type { DocumentPagesAPI, PageNode, PageOperation, PageResult, PageRoot, PageTrashEntry } from '../../../../shared/document-pages'
 import { toReadyUri } from '../../../../shared/ready-ref'
@@ -11,14 +11,16 @@ import { TemplatePicker } from '../templates/TemplatePicker'
 import { saveBeforePageTrash } from '../page-ui/page-panel-state'
 import { createPageTreeStore, errorMessage, flattenPages } from '../page-ui/page-state'
 import { SaveToPicker, type SaveToSelection } from '../page-ui/SaveToPicker'
-import { CalendarBadge, Icon, type IconName } from './icons'
+import { Icon, type IconName } from './icons'
 import { InkPageIcon } from './InkPageIcon'
-import { eventTimeLabel, openInCurrentTab, useInkLayout, useUpcomingEvents } from './layout-state'
+import { openInCurrentTab, useInkLayout } from './layout-state'
 import { openMenu } from './menu'
 import { openPopover, tip } from './overlay'
 
-// Inkwell's sidebar inside Ready's document card. Pages come from Ready's page service; everything else that
-// Inkwell showed (workspace switcher, team spaces, promotions) has no counterpart in Ready and is left out.
+// Inkwell's page tree, the document navigator in the shell's one sidebar (W2-T5). Pages come from Ready's page
+// service; everything else that Inkwell showed (workspace switcher, team spaces, promotions) has no counterpart in
+// Ready and is left out. The shell owns width and collapse; search is ⌘K, the assistant and the calendar have
+// their own places, so the navigator carries none of them (W2 §2.2).
 export interface InkSidebarProps {
   roots: PageRoot[]
   visible: boolean
@@ -26,8 +28,6 @@ export interface InkSidebarProps {
   /** Opens in the current tab, or a new one for ⌘/Ctrl-click. */
   onOpen?(node: PageNode, newTab?: boolean): void | Promise<void>
   onShowFiles?(node: PageNode): void | Promise<void>
-  /** The hover-peek copy shown over the page while the sidebar is collapsed. */
-  floating?: boolean
 }
 
 const EXPANDED_KEY = 'ready-ink-expanded'
@@ -41,10 +41,9 @@ function openNode(node: PageNode, newTab = false) {
   requestWorkbenchModeOpen('document')
 }
 
-export function InkSidebar({ roots, visible, api = window.electronAPI.documentPages, onOpen = openNode, onShowFiles, floating = false }: InkSidebarProps) {
+export function InkSidebar({ roots, visible, api = window.electronAPI.documentPages, onOpen = openNode, onShowFiles }: InkSidebarProps) {
   const store = useMemo(() => createPageTreeStore(api), [api])
   const { trees, states, loading, error: loadError } = useStore(store)
-  const width = useInkLayout(state => state.width)
   const home = useInkLayout(state => state.home)
   const activeObjectId = useDocTabs(state => state.tabs.find(tab => tab.id === (state.focusedPaneTabId || state.activeTabId))?.objectId)
   const libraryActive = useDocTabs(state => state.tabs.find(tab => tab.id === state.activeTabId)?.kind === 'library')
@@ -56,7 +55,6 @@ export function InkSidebar({ roots, visible, api = window.electronAPI.documentPa
   const lock = useRef(false)
   const dragged = useRef<{ node: PageNode; parent: PageNode; root: string } | null>(null)
   const [dropTarget, setDropTarget] = useState<string | null>(null)
-  const upcoming = useUpcomingEvents(visible)
   const refresh = () => store.getState().load(rootsRef.current)
 
   useEffect(() => {
@@ -237,28 +235,16 @@ export function InkSidebar({ roots, visible, api = window.electronAPI.documentPa
 
   const favorites = states.filter(state => state.favorite).map(state => all.find(node => node.objectId === state.objectId)).filter((node): node is PageNode => !!node)
   const vaultTitle = useVaultTitle(trees)
-  return <nav className={`ink-sidebar${floating ? ' is-floating' : ''}`} style={{ width }} aria-label={floating ? '文档侧栏（悬停）' : '文档侧栏'}>
+  return <nav className="ink-sidebar" aria-label="文档侧栏">
     <div className="ink-sb-inner">
       <div className="ink-sb-top">
         <span className="ink-sb-top-title">{vaultTitle}</span>
-        {floating
-          ? <button type="button" className="ink-sb-collapse" aria-label="固定侧栏" {...tip('固定侧栏')} onClick={() => useInkLayout.getState().setOpen(true)}><Icon name="sidebarOpen" size={18} /></button>
-          : <button type="button" className="ink-sb-collapse" aria-label="收起侧栏" {...tip('收起侧栏')} onClick={() => useInkLayout.getState().setOpen(false)}><Icon name="sidebarClose" size={18} /></button>}
-      </div>
-      <div className="ink-sb-search-wrap">
-        <div className="ink-sb-search" role="button" tabIndex={0} aria-label="搜索" onClick={() => window.dispatchEvent(new CustomEvent('ready:open-quick-switcher'))}
-          onKeyDown={event => { if (event.key === 'Enter') window.dispatchEvent(new CustomEvent('ready:open-quick-switcher')) }}>
-          <span className="ink-sb-search-text">搜索</span>
-          <span className="ink-kbd-chip">⌘K</span>
-        </div>
       </div>
       <div className="ink-sb-scroll" aria-label="页面侧栏">
         <div className="ink-sb-home">
           <div className={`ink-sb-home-pill${home ? ' is-active' : ''}`} role="button" tabIndex={0} aria-pressed={home} onClick={() => useInkLayout.getState().setHome(true)}>
             <Icon name="home" size={16} stroke={2} style={{ fill: 'currentColor' }} /><span>主页</span>
           </div>
-          <div className="ink-sb-home-btn" role="button" tabIndex={0} aria-label="AI 对话" {...tip('AI 对话')} onClick={() => window.dispatchEvent(new CustomEvent('ready:focus-chat-input'))}><Icon name="chat" size={16} stroke={2} style={{ fill: 'currentColor' }} /></div>
-          <div className="ink-sb-home-btn" role="button" tabIndex={0} aria-label="日历" {...tip('日历')} onClick={() => requestWorkbenchModeOpen('calendar')}><Icon name="calendar" size={16} stroke={1.8} /></div>
         </div>
         <div className="ink-sb-group">
           <NavRow icon="library" label="阅读" selected={libraryActive && !home} dataAttr={{ 'data-library-entry': 'true' }}
@@ -268,16 +254,6 @@ export function InkSidebar({ roots, visible, api = window.electronAPI.documentPa
         {favorites.length > 0 && <Section id="favorites" title="收藏">
           <div role="group">{favorites.map(node => renderRow(node, null, rootOf(node)?.path ?? '', 0, 'fav:'))}</div>
         </Section>}
-        <Section id="upcoming" title="即将开始">
-          {upcoming === null ? <div className="ink-sb-empty" style={{ paddingLeft: 8 }}>正在读取日程…</div>
-            : upcoming.length === 0 ? <NavRow iconNode={<CalendarBadge />} label="打开日历" muted weight={400} onClick={() => requestWorkbenchModeOpen('calendar')} />
-              : upcoming.map(item => <div key={item.key} className="ink-sb-row ink-sb-nav" role="button" tabIndex={0} aria-label={`${eventTimeLabel(item)} ${item.title}`}
-                onClick={() => { void window.electronAPI.calendar.revealEvent(item.eventId); requestWorkbenchModeOpen('calendar') }}>
-                <span className="ink-sb-event-dot" style={{ background: item.color }} />
-                <span className="ink-sb-event-time">{eventTimeLabel(item)}</span>
-                <span className="ink-sb-label" style={{ fontWeight: 400 }}>{item.title}</span>
-              </div>)}
-        </Section>
         {loading && !trees.length && <div role="status" className="ink-sb-empty" style={{ paddingLeft: 8 }}>正在读取页面…</div>}
         {!roots.length && <RootNotice />}
         {trees.map(tree => <Section key={tree.objectId} id={`root:${tree.objectId}`} title={tree.kind === 'vault' ? '页面' : tree.title}
@@ -292,7 +268,6 @@ export function InkSidebar({ roots, visible, api = window.electronAPI.documentPa
         <NavRow icon="trash" label="回收站" muted onClick={event => openTrash(event.currentTarget)} />
       </div>
     </div>
-    {!floating && <Resizer />}
   </nav>
 }
 
@@ -326,28 +301,6 @@ function Section({ id, title, children, onAdd, addLabel }: { id: string; title: 
     </div>
     {open && children}
   </section>
-}
-
-function Resizer() {
-  const onDown = (event: ReactPointerEvent) => {
-    event.preventDefault()
-    const layout = useInkLayout.getState()
-    const startX = event.clientX, startWidth = layout.width
-    let moved = false
-    layout.setResizing(true)
-    const move = (next: PointerEvent) => { if (Math.abs(next.clientX - startX) > 2) moved = true; useInkLayout.getState().setWidth(startWidth + next.clientX - startX) }
-    const up = () => {
-      window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up)
-      const state = useInkLayout.getState()
-      state.setResizing(false)
-      if (!moved) state.setOpen(false); else state.commitWidth()
-    }
-    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up)
-  }
-  return <div className="ink-sb-resizer" role="separator" aria-orientation="vertical" aria-label="调整侧栏宽度" onPointerDown={onDown}
-    onDoubleClick={() => useInkLayout.getState().resetWidth()} {...tip(<><div>拖动调整宽度</div><div className="ink-tooltip-sc">点击收起</div></>, undefined, 'right-start')}>
-    <div className="ink-sb-resizer-line" />
-  </div>
 }
 
 function RootNotice() {

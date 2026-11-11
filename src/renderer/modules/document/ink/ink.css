@@ -216,38 +216,18 @@ html[data-theme='dark'] .ink-scope {
 /* ---------------- document app frame (inside Ready's document card) ---------------- */
 .ink-doc-app { display: flex; height: 100%; min-height: 0; gap: 8px; padding: 0; background: transparent; }
 .ink-doc-app.is-resizing, .ink-doc-app.is-resizing * { cursor: col-resize !important; user-select: none; }
-.ink-sb-shell { flex: none; height: 100%; min-height: 0; position: relative; }
-.ink-sb-shell.is-opening { animation: ink-sb-open .32s cubic-bezier(.22, 1, .36, 1); overflow: hidden; }
-.ink-sb-shell.is-closing { animation: ink-sb-close .24s cubic-bezier(.65, 0, .35, 1) forwards; overflow: hidden; }
-@keyframes ink-sb-open { from { width: 0; opacity: 0; } }
-@keyframes ink-sb-close { to { width: 0; opacity: 0; } }
 .ink-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; background: var(--studio-paper); border-radius: 24px; overflow: hidden; }
 .ink-main-body { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
 
 /* ---------------- sidebar ---------------- */
 .ink-sidebar {
-  position: relative; flex: none; height: 100%;
+  /* In the shell's one sidebar (W2): it sits on the window's glass, so no card, blur or rim of its own. */
+  position: relative; flex: 1; min-height: 0; height: 100%;
   color: var(--ink-text-accent-primary); font-weight: 500;
-  border-radius: 24px;
-  background: var(--studio-glass);
-  -webkit-backdrop-filter: blur(22px) saturate(150%);
-  backdrop-filter: blur(22px) saturate(150%);
-  box-shadow: inset 0 1px 0 var(--studio-rim), inset 0 0 0 1px var(--studio-line);
 }
 .ink-sb-inner { display: flex; flex-direction: column; height: 100%; overflow: hidden; border-radius: inherit; }
 .ink-sb-top { display: flex; align-items: center; justify-content: space-between; height: 44px; padding: 0 10px 0 22px; flex: none; }
 .ink-sb-top-title { font-size: 12px; line-height: 16px; font-weight: 500; color: var(--ink-text-tertiary); letter-spacing: .035em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ink-sb-collapse { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 8px; color: var(--ink-icon-secondary); opacity: 0; transition: opacity .15s; }
-.ink-sidebar:hover .ink-sb-collapse { opacity: 1; }
-.ink-sb-collapse:hover { background: var(--ink-background-interactive-translucent); }
-.ink-sb-search-wrap { padding: 0 14px 4px; flex: none; }
-.ink-sb-search {
-  display: flex; align-items: center; height: 36px; padding: 0 12px; border-radius: 18px;
-  border: 1px solid var(--studio-line); background: var(--studio-fill);
-  font-size: 12px; line-height: 16.8px; font-weight: 400; color: var(--ink-text-tertiary);
-}
-.ink-sb-search:hover { background: var(--ink-background-interactive-translucent); }
-.ink-sb-search-text { flex: 1; white-space: nowrap; overflow: hidden; }
 .ink-kbd-chip { font-family: var(--ink-font-mono); font-size: 10px; line-height: 16px; color: var(--ink-text-tertiary); padding: 0 4px; border-radius: 4px; background: var(--ink-background-tertiary-translucent); }
 .ink-sb-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 12px 12px 8px; display: flex; flex-direction: column; }
 .ink-sb-scroll > * { flex: none; }
@@ -256,8 +236,7 @@ html[data-theme='dark'] .ink-scope {
 .ink-sb-home { display: flex; align-items: center; height: 32px; gap: 0; margin-bottom: 12px; }
 .ink-sb-home-pill { display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px 0 11px; margin-left: 3px; border-radius: 18px; font-size: 12px; line-height: 21px; color: var(--ink-text-primary); }
 .ink-sb-home-pill.is-active { background: var(--ink-background-interactive-translucent); }
-.ink-sb-home-btn { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 8px; color: var(--ink-icon-secondary); }
-.ink-sb-home-btn:hover, .ink-sb-home-pill:hover { background: var(--ink-background-interactive-translucent); }
+.ink-sb-home-pill:hover { background: var(--ink-background-interactive-translucent); }
 .ink-sb-group, .ink-sb-section { display: flex; flex-direction: column; gap: 1px; margin-bottom: 12px; }
 .ink-sb-section { margin-bottom: 16px; }
 .ink-sb-row {
@@ -291,14 +270,10 @@ html[data-theme='dark'] .ink-scope {
 .ink-sb-note button { border: 0; background: none; padding: 0; color: var(--studio-accent-text); cursor: pointer; }
 .ink-sb-drop-gap { height: 2px; margin: -1px 8px; border-radius: 1px; }
 .ink-sb-drop-gap.is-active { background: rgba(35, 131, 226, .6); }
-.ink-cal-badge { display: flex; }
 .ink-sb-event-time { flex: none; min-width: 38px; margin-right: 8px; font-size: 11px; font-weight: 500; color: var(--ink-text-tertiary); font-variant-numeric: tabular-nums; }
 .ink-sb-event-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; margin: 0 8px 0 4px; }
 .ink-sb-bottom { flex: none; padding: 4px 12px 10px; display: flex; flex-direction: column; gap: 1px; }
 .ink-sb-divider { height: 1px; background: var(--ink-border-secondary); margin: 0 4px 6px; }
-.ink-sb-resizer { position: absolute; top: 0; right: -9px; width: 12px; height: 100%; cursor: col-resize; z-index: 2; }
-.ink-sb-resizer-line { position: absolute; left: 5px; top: 18px; bottom: 18px; width: 2px; border-radius: 1px; background: transparent; transition: background .15s; }
-.ink-sb-resizer:hover .ink-sb-resizer-line, .ink-doc-app.is-resizing .ink-sb-resizer-line { background: var(--studio-line); }
 .ink-sb-banner { margin: 0 12px 8px; padding: 8px 10px; border-radius: 12px; font-size: 12px; line-height: 17px; font-weight: 400; color: var(--ink-text-secondary); background: var(--studio-fill); }
 .ink-sb-banner[role='alert'] { color: var(--ink-red-text-secondary); }
 .ink-sb-banner button { margin-top: 6px; margin-right: 8px; }
@@ -671,19 +646,12 @@ html[data-theme='dark'] .ready-block-popover.ready-block-toolbar [aria-pressed=t
 /* An empty page invites writing where Notion would: the tail shows a placeholder instead of staying invisible. */
 .ink-scope .ink-page .note-preview-body:not(:has(.ready-block-shell:not([data-block-type='frontmatter']))) .ready-block-tail { font-size: 0; color: transparent; }
 .ink-scope .ink-page .note-preview-body:not(:has(.ready-block-shell:not([data-block-type='frontmatter']))) .ready-block-tail::before { content: '直接输入正文，或按 / 选择块'; font-size: 16px; color: var(--ink-text-tertiary); }
-@media (prefers-reduced-motion: reduce) { .ink-sb-shell.is-opening, .ink-sb-shell.is-closing { animation: none; } }
 
 /* The page header already shows these page fields; the properties table lists the rest. */
 .ink-scope .ink-page.has-header .note-preview-property-row:is([data-property-key='title'], [data-property-key='icon'], [data-property-key='cover'], [data-property-key='ready_page'], [data-property-key='ready_database']) { display: none; }
 .ink-scope .ink-page.has-header .note-preview-properties:not(:has(.note-preview-property-row:not([data-property-key='title'], [data-property-key='icon'], [data-property-key='cover'], [data-property-key='ready_page'], [data-property-key='ready_database']))) { display: none; }
 
-/* Hover peek: the collapsed sidebar slides over the page from the card's left edge. */
 .ink-doc-app { position: relative; }
-.ink-sb-peek { position: absolute; left: 0; top: 0; bottom: 0; z-index: 40; transform: translateX(calc(-100% - 16px)); opacity: 0; pointer-events: none; transition: transform .22s cubic-bezier(.22, 1, .36, 1), opacity .18s ease; }
-.ink-sb-peek.is-visible { transform: none; opacity: 1; pointer-events: auto; }
-.ink-sidebar.is-floating { box-shadow: inset 0 1px 0 var(--studio-rim), inset 0 0 0 1px var(--studio-line), 0 24px 60px -24px rgba(10, 10, 30, .35); }
-.ink-sidebar.is-floating .ink-sb-collapse { opacity: 1; }
-@media (prefers-reduced-motion: reduce) { .ink-sb-peek { transition: none; } }
 
 /* Under the liquid-glass skin the content frame carries its own surface; inside the paper page it must not. */
 html:root .ink-main .document-content-frame { background: transparent !important; border-radius: 0 !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }

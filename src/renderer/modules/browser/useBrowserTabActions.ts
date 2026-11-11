@@ -402,11 +402,6 @@ export function useBrowserTabActions({
     void writeBackFlatOrder()
   }, [writeBackFlatOrder])
 
-  const handleRemoveFromGroup = useCallback((tabId: string) => {
-    useBrowserTabs.getState().removeTabFromGroup(tabId)
-    void writeBackFlatOrder()
-  }, [writeBackFlatOrder])
-
   const handleReorderToRank = useCallback((movedId: string, toRank: number, intoGroupId: string | null) => {
     useBrowserTabs.getState().reorderTabToRank(movedId, toRank, intoGroupId)
     void writeBackFlatOrder()
@@ -491,7 +486,6 @@ export function useBrowserTabActions({
     handleReorderToRank,
     handleCreateGroup,
     handleAddToGroup,
-    handleRemoveFromGroup,
     handleDeleteGroup,
     handleNewTabInGroup,
     handlePrint,

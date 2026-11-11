@@ -78,10 +78,6 @@ import type {
 } from '../shared/browser-lock-overlay'
 import type { BrowserAgentPointerSnapshot } from '../shared/browser-agent-pointer'
 import type {
-  VerticalRailOverlayCommand,
-  VerticalRailOverlaySnapshot,
-} from '../shared/browser-vertical-rail-overlay'
-import type {
   FastCardItem,
   BrowserFastCardContextActionEvent,
   FastCardOverlayCommand,
@@ -636,26 +632,6 @@ const browserAPI = {
     const handler = (_: unknown, snapshot: FastCardOverlaySnapshot): void => callback(snapshot)
     ipcRenderer.on('browser:fastCardOverlaySnapshot', handler)
     return () => ipcRenderer.removeListener('browser:fastCardOverlaySnapshot', handler)
-  },
-  showVerticalRailOverlay: (payload: VerticalRailOverlaySnapshot) =>
-    ipcRenderer.invoke('browser:verticalRailOverlayShow', payload),
-  hideVerticalRailOverlay: () =>
-    ipcRenderer.invoke('browser:verticalRailOverlayHide'),
-  getVerticalRailOverlaySnapshot: () =>
-    ipcRenderer.invoke('browser:verticalRailOverlayGetSnapshot'),
-  isVerticalRailOverlayPointerInside: () =>
-    ipcRenderer.invoke('browser:verticalRailOverlayPointerInside'),
-  sendVerticalRailOverlayCommand: (command: VerticalRailOverlayCommand) =>
-    ipcRenderer.invoke('browser:verticalRailOverlayCommand', command),
-  onVerticalRailOverlayCommand: (callback: (command: VerticalRailOverlayCommand) => void) => {
-    const handler = (_: unknown, command: VerticalRailOverlayCommand): void => callback(command)
-    ipcRenderer.on('browser:verticalRailOverlayCommand', handler)
-    return () => ipcRenderer.removeListener('browser:verticalRailOverlayCommand', handler)
-  },
-  onVerticalRailOverlaySnapshot: (callback: (snapshot: VerticalRailOverlaySnapshot) => void) => {
-    const handler = (_: unknown, snapshot: VerticalRailOverlaySnapshot): void => callback(snapshot)
-    ipcRenderer.on('browser:verticalRailOverlaySnapshot', handler)
-    return () => ipcRenderer.removeListener('browser:verticalRailOverlaySnapshot', handler)
   },
   showBrowserLockOverlay: (payload: BrowserLockOverlaySnapshot) =>
     ipcRenderer.invoke('browser:lockOverlayShow', payload),

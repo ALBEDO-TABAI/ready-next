@@ -5,7 +5,8 @@ import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties }
 import { useNavigate } from 'react-router-dom'
 import { ExternalLink } from 'lucide-react'
 import RSSFeed from '../../components/rss/RSSFeed'
-import RSSNavigation, { RSSNavigationToggle } from '../../components/rss/RSSNavigation'
+import RSSNavigation from '../../components/rss/RSSNavigation'
+import { ShellNavigator } from '../../modules/workbench/shell/ShellSidebar'
 import { RSSTopbarContext } from '../../components/rss/rss-topbar-context'
 import RSSArticleReader from '../../components/rss/RSSArticleReader'
 import RSSReferenceButton from '../../components/rss/RSSReferenceButton'
@@ -579,14 +580,8 @@ export default function RSSMode({
           style={{ background: 'var(--workbench-module-surface-bg)' }}
         >
           <RSSTopbarContext.Provider value={topbarSlots}>
-            <div className="rss-topbar workbench-tabs-surface no-drag">
-              <RSSNavigationToggle />
-              <div className="rss-topbar__lead" ref={setTopbarLead}>
-                {feedVisible && <span>资讯</span>}
-              </div>
-              <div className="rss-topbar__tools" ref={setTopbarTools} />
-            </div>
-            <div className="rss-workbench-body">
+            {/* 栏目导航在外壳唯一的侧栏里（W2-T4）。 */}
+            <ShellNavigator mode="rss" label="资讯">
               <RSSNavigation
                 definitions={definitions}
                 managing={showOrganization}
@@ -594,6 +589,14 @@ export default function RSSMode({
                 onManage={() => { closeOverlays(); setDigestView(false); setOrganizationFocus(undefined); setShowOrganization((value) => !value) }}
                 onNavigate={(patch) => { closeOverlays(); setDigestView(false); setShowOrganization(false); setQuery(patch) }}
               />
+            </ShellNavigator>
+            <div className="rss-topbar workbench-tabs-surface no-drag">
+              <div className="rss-topbar__lead" ref={setTopbarLead}>
+                {feedVisible && <span>资讯</span>}
+              </div>
+              <div className="rss-topbar__tools" ref={setTopbarTools} />
+            </div>
+            <div className="rss-workbench-body">
               {/* The list stays mounted so returning from reading preserves scroll. */}
               <div className={`rss-feed-sheet content-surface-panel rss-content-frame`}>
                 <div className="flex min-h-0 flex-1 flex-col" style={{ display: feedVisible ? undefined : 'none' }}>

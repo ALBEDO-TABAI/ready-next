@@ -32,8 +32,6 @@ test('browser startup gates chrome until host restoration completes and main pro
   // Verify startup/transition masks stay below the DOM header so the tab rail is never hidden on first entry.
   assert.match(browserMode, /position:\s*'absolute'/)
   assert.match(browserMode, /top:\s*WORKBENCH_TAB_ROW_HEIGHT/)
-  // vertical-tabs：遮罩从竖栏右缘起，52px 图标栏在启动/过渡期保持可见
-  assert.match(browserMode, /left:\s*BROWSER_VERTICAL_RAIL_WIDTH/)
   assert.match(browserMode, /right:\s*0/)
   assert.match(browserMode, /bottom:\s*0/)
   assert.match(browserMode, /zIndex:\s*50/)

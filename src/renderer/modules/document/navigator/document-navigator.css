@@ -1,0 +1,47 @@
+/* The document navigator in the shell sidebar (W2-T5). Only --rn-* tokens. */
+.document-navigator {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.document-navigator__switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 40px;
+  padding: 0 6px 0 12px;
+  flex: none;
+}
+
+.document-navigator__view {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.document-navigator__view[hidden] {
+  display: none;
+}
+
+.document-navigator__files {
+  display: grid;
+  flex: 1;
+  min-height: 0;
+}
+
+.document-navigator__files-head {
+  position: relative;
+  overflow: hidden;
+}
+
+.document-navigator__files-body {
+  position: relative;
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
