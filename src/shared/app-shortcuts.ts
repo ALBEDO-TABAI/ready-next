@@ -124,6 +124,7 @@ export const APP_SHORTCUTS: readonly AppShortcut[] = [
   { id: 'calendar.days9', keys: '9', scope: 'calendar', description: '切换为9天视图' },
   { id: 'canvas.group', keys: 'CommandOrControl+G', scope: 'canvas', description: '组合所选图形' },
   { id: 'canvas.ungroup', keys: 'CommandOrControl+Shift+G', scope: 'canvas', description: '取消图形组合' },
+  { id: 'canvas.search', keys: 'CommandOrControl+F', scope: 'canvas', description: '在画板中搜索' },
   { id: 'skills.confirm', keys: 'CommandOrControl+Enter', scope: 'skills', description: '确认技能编辑' },
   { id: 'document.confirm', keys: 'CommandOrControl+Enter', scope: 'document', description: '确认当前块编辑' },
   { id: 'document.italic', keys: 'CommandOrControl+I', scope: 'document', description: '斜体' },

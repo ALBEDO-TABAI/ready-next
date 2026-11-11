@@ -3,9 +3,10 @@ import type { CSSProperties, ReactNode } from 'react'
 import type { CanvasNode } from '../../../../shared/ready-canvas/schema'
 import { graphicSvg } from '../../../../shared/ready-canvas/graphics'
 import { cardFrame } from '../../../modules/canvas/interaction/graphics'
+import { CardMarkdown } from '../cards/CardMarkdown'
 
 interface Props {
-  node: CanvasNode; visible: boolean; selected: boolean; editor?: ReactNode; content?: ReactNode
+  node: CanvasNode; visible: boolean; selected: boolean; matched?: boolean; editor?: ReactNode; content?: ReactNode
   element: (id: string, el: HTMLDivElement | null) => void
   resolveAsset?: (path: string) => string | undefined
 }
@@ -14,7 +15,7 @@ function Preview({ node: n, resolveAsset }: Pick<Props, 'node' | 'resolveAsset'>
   if (g) {
     return <img draggable={false} alt={g.type === 'rect' ? '矩形' : g.type === 'arrow' ? '自由箭头' : '手绘'} className="canvas-graphic" style={{ left: 0, top: 0, width: '100%', height: '100%' }} src={`data:image/svg+xml,${encodeURIComponent(graphicSvg(g, n.width, n.height))}`} />
   }
-  if (n.type === 'text') return <div className="canvas-text">{n.text}</div>
+  if (n.type === 'text') return <CardMarkdown text={n.text} />
   if (n.type === 'group') return <div className="canvas-group-label">{n.label || '分组'}</div>
   if (n.type === 'link') return <><strong>{n.ready.preview?.title || n.url}</strong><p>{n.ready.preview?.description}</p><small>{n.url}</small></>
   const src = resolveAsset?.(n.file)
@@ -23,14 +24,14 @@ function Preview({ node: n, resolveAsset }: Pick<Props, 'node' | 'resolveAsset'>
   if (src && n.ready.kind === 'audio') return <audio controls preload="none" src={src} />
   return <><small>{({ image: '图片', audio: '音频', video: '视频', document: '文档', subcanvas: '子画板' })[n.ready.kind] || n.ready.kind}</small><strong>{n.ready.preview?.title || n.file}</strong><p>{n.ready.preview?.description}</p></>
 }
-export const CanvasCard = memo(function CanvasCard({ node, visible, selected, editor, content, element, resolveAsset }: Props) {
+export const CanvasCard = memo(function CanvasCard({ node, visible, selected, matched = false, editor, content, element, resolveAsset }: Props) {
   const a = node.ready.appearance, frame = cardFrame(node)
   const style: CSSProperties = { left: frame.x, top: frame.y, width: frame.width, height: frame.height,
     borderStyle: node.ready.kind === 'draft' ? 'dashed' : undefined,
     transform: a?.rotation ? `rotate(${a.rotation}deg)` : undefined, borderRadius: a?.radius,
     background: a?.background, color: a?.color, fontSize: a?.fontScale ? `${a.fontScale * 24}px` : undefined,
     textAlign: a?.align, fontWeight: a?.weight ? ({ light: 300, regular: 400, medium: 500, bold: 700 })[a.weight] : undefined }
-  return <div ref={el => element(node.id, el)} data-node-id={node.id} data-selected={selected} data-kind={node.ready.kind}
+  return <div ref={el => element(node.id, el)} data-node-id={node.id} data-selected={selected} data-matched={matched || undefined} data-kind={node.ready.kind} data-color={node.color}
     data-lightweight={!visible && !editor} className="canvas-card" style={style}>
     {(visible || editor) && <div data-node-detail className="canvas-card-content">{editor ?? content ?? <Preview node={node} resolveAsset={resolveAsset} />}</div>}
     {selected && visible && <button type="button" data-resize aria-label="调整卡片尺寸" className="canvas-resize" />}

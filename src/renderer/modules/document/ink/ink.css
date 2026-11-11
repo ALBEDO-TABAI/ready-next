@@ -207,7 +207,8 @@ html[data-theme='dark'] .ink-scope {
   -webkit-font-smoothing: antialiased;
 }
 .ink-scope [role='button'] { cursor: pointer; user-select: none; }
-.ink-scope button { font: inherit; color: inherit; }
+/* A generic reset: in the base layer, so components inside the document (the board, W1 primitives) keep their own colors. */
+@layer base { .ink-scope button { font: inherit; color: inherit; } }
 .ink-scope ::selection { background: var(--studio-accent-soft); }
 .ink-emoji { display: inline-flex; align-items: center; justify-content: center; font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif; }
 .ink-muted { color: var(--ink-text-secondary); }

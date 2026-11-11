@@ -912,8 +912,28 @@ export async function settleDocTabObjects(): Promise<void> {
     while (objectBindings.size) await Promise.all(objectBindings.values())
 }
 onObjectMoved(event => {
-    useDocTabs.setState(state => ({ tabs: state.tabs.map(tab => tab.kind !== 'library' && tab.objectId === event.objectId && event.revision > (tab.objectRevision ?? -1)
-        ? { ...tab, path: event.to, title: getFilename(event.to), objectRevision: event.revision, objectBinding: { status: 'resolved' as const } } : tab) }))
+    const followed: string[] = []
+    useDocTabs.setState(state => ({ tabs: state.tabs.map(tab => {
+        if (tab.kind === 'library' || tab.objectId !== event.objectId || event.revision <= (tab.objectRevision ?? -1)) return tab
+        followed.push(tab.id)
+        return { ...tab, path: event.to, title: getFilename(event.to), objectRevision: event.revision, objectBinding: { status: 'resolved' as const } }
+    }) }))
+    if (followed.length && /\.md$/i.test(event.to)) void rereadMovedTabs(followed, event.to)
 })
+// A page rename also rewrites the page's frontmatter title. A clean tab takes the moved file's text, so the next edit
+// starts from it instead of carrying the old title back into the file.
+async function rereadMovedTabs(ids: string[], path: string): Promise<void> {
+    const read = await window.electronAPI?.document?.readFile?.(path)
+    if (!read) return
+    if (!read.success || typeof read.content !== 'string') {
+        console.warn('[doc-tabs] moved page could not be reread', path, read.error)
+        return
+    }
+    const state = useDocTabs.getState()
+    for (const id of ids) {
+        const tab = state.tabs.find(item => item.id === id)
+        if (tab && tab.path === path && !tab.isDirty && tab.content !== read.content) state.hydrateTabContentFromDisk(id, read.content)
+    }
+}
 useDocTabs.subscribe((state, previous) => { if (state.tabs !== previous.tabs) scheduleObjectBindings() })
 scheduleObjectBindings()
