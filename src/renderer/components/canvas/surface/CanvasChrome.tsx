@@ -1,6 +1,6 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import {
-  BringToFront, CalendarPlus, ChevronDown, ChevronRight, ChevronUp, FilePlus2, Group, LayoutGrid, Redo2, Scan, Search, SendToBack, Shapes, Sparkles, StickyNote, Trash2, Type, Undo2, Ungroup, X, type LucideIcon,
+  BringToFront, CalendarPlus, ChevronDown, ChevronRight, ChevronUp, Ellipsis, FilePlus2, Group, LayoutGrid, Redo2, Scan, Search, SendToBack, Shapes, Sparkles, StickyNote, Trash2, Type, Undo2, Ungroup, X, type LucideIcon,
 } from 'lucide-react'
 import type { Tool } from './types'
 import { ARRANGEMENTS, DOCK_TOOLS, DRAW_TOOL, SHAPE_TOOLS } from './chrome-tools'
@@ -12,7 +12,7 @@ export function IconButton({ label, icon: Glyph, shortcut, pressed, disabled, da
   label: string; icon: LucideIcon; shortcut?: string; pressed?: boolean; disabled?: boolean; danger?: boolean; badge?: number; onClick(): void
 }) {
   return <button type="button" className={`canvas-icon${danger ? ' is-danger' : ''}`} aria-label={label} title={shortcut ? `${label}（${shortcut}）` : label}
-    aria-pressed={pressed} disabled={disabled} onClick={onClick}>
+    aria-pressed={pressed} disabled={disabled} onClick={() => onClick()}>
     <Glyph aria-hidden />{badge ? <span className="canvas-icon-badge" aria-hidden>{badge}</span> : null}
   </button>
 }
@@ -33,7 +33,7 @@ export function MenuItem({ label, icon: Glyph, shortcut, checked, disabled, dang
   label: string; icon?: LucideIcon; shortcut?: string; checked?: boolean; disabled?: boolean; danger?: boolean; onSelect(): void
 }) {
   return <button type="button" role={checked === undefined ? 'menuitem' : 'menuitemradio'} aria-label={label} aria-checked={checked} disabled={disabled}
-    className={`canvas-menu-item${danger ? ' is-danger' : ''}`} onClick={onSelect}>
+    className={`canvas-menu-item${danger ? ' is-danger' : ''}`} onClick={() => onSelect()}>
     {Glyph ? <Glyph aria-hidden /> : <span className="canvas-menu-gap" />}<span>{label}</span>{shortcut && <kbd>{shortcut}</kbd>}
   </button>
 }
@@ -52,8 +52,9 @@ export function CanvasCrumbs({ title, breadcrumbs, busy, onNavigate }: {
 }
 
 /** Top right: search, zoom (click for 100%), fit to content, the bin. */
-export function CanvasCorner({ zoom, search, results, hit, recycled, trash, busy, onSearch, onStep, onZoomReset, onFit, onTrash }: {
+export function CanvasCorner({ zoom, search, results, hit, recycled, trash, busy, moreOpen, more, onMore, onSearch, onStep, onZoomReset, onFit, onTrash }: {
   zoom: number; search: string | null; results: number; hit: number; recycled: number; trash: boolean; busy: boolean
+  moreOpen: boolean; more?: ReactNode; onMore(open: boolean): void
   onSearch(value: string | null): void; onStep(delta: 1 | -1): void; onZoomReset(): void; onFit(): void; onTrash(): void
 }) {
   return <div className="canvas-corner rn-float" role="toolbar" aria-label="视图" data-canvas-ui>
@@ -72,6 +73,10 @@ export function CanvasCorner({ zoom, search, results, hit, recycled, trash, busy
     <button type="button" className="canvas-zoom" aria-label="缩放比例" title="回到 100%" onClick={onZoomReset}>{Math.round(zoom * 100)}%</button>
     <IconButton label="适应内容" icon={Scan} shortcut="⇧1" disabled={trash} onClick={onFit} />
     <IconButton label="回收站" icon={Trash2} pressed={trash} badge={recycled} disabled={busy} onClick={onTrash} />
+    {more && <span className="canvas-dock-anchor">
+      <IconButton label="更多" icon={Ellipsis} pressed={moreOpen} disabled={busy || trash} onClick={() => onMore(!moreOpen)} />
+      {moreOpen && <ChromeMenu label="更多" onClose={() => onMore(false)}>{more}</ChromeMenu>}
+    </span>}
   </div>
 }
 

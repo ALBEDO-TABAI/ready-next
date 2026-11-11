@@ -31,5 +31,9 @@ export interface CanvasSurfaceProps {
   /** Drops the host understands (FastCard items, pages from the sidebar): return true when handled. */
   onDropData?: (data: DataTransfer, at: { x: number; y: number }) => boolean
   acceptsDrop?: (types: readonly string[]) => boolean
+  /** 导出 Markdown / PDF of the chosen cards, or the whole board when none are chosen. */
+  onExport?: (kind: 'md' | 'pdf', nodeIds: string[]) => Promise<void>
+  /** Save the given window rectangle as a PNG (Main captures it); the surface hides its chrome and frames the cards first. */
+  captureImage?: (rect: { x: number; y: number; width: number; height: number }, title: string) => Promise<void>
 }
 export type Tool = 'select' | 'pan' | 'rect' | 'arrow' | 'edge' | 'path'

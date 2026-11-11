@@ -21,6 +21,9 @@ import { boardAncestors } from './board-ancestors'
 import { READY_REF_MIME } from '../../modules/calendar/linkage/transfer'
 import { ReadyRefSchema } from '../../../shared/ready-ref'
 import { openInCurrentTab } from '../../modules/document/ink/layout-state'
+import { boardMarkdown } from '../../modules/canvas/export'
+import { captureDocumentPreviewHtml } from '../document/document-export-capture'
+import { showToast } from '../ui'
 
 function confirmed<T>(result: { ok: true; value: T } | { ok: false; error: string }): T {
   if (!result.ok) throw new Error(result.error)
@@ -135,6 +138,16 @@ export default function CanvasDocument({ tab }: { tab: DocTab }) {
     return false
   }
   const ancestors = boardAncestors(trees, root, opened.path)
+  // 导出 (W4 §2.2): the chosen cards or the whole board as Markdown (with its assets) or PDF, through the document export.
+  const exportBoard = async (kind: 'md' | 'pdf', ids: string[]) => {
+    const title = opened.canvas.ready.title || opened.path.split('/').pop()!.replace(/\.canvas$/i, '')
+    const sourcePath = `${root}/${opened.path}`, content = boardMarkdown(opened.canvas, opened.path, ids.length ? new Set(ids) : undefined)
+    const result = kind === 'md'
+      ? await api.document.exportMarkdownBundle({ content, sourcePath, suggestedName: title })
+      : await api.document.exportPdf({ html: await captureDocumentPreviewHtml({ content, notePath: sourcePath, title }), suggestedName: title, sourcePath })
+    if (result.success) showToast(kind === 'md' ? '已导出 Markdown' : '已导出 PDF')
+    else if (!result.canceled) throw new Error(result.error || '导出失败')
+  }
   return <div className="flex flex-col flex-1 min-h-0" data-testid="canvas-document">
     {error && <p role="alert" className="canvas-document-error">{error.replace(/^Error:\s*/, '')}</p>}
     {scheduling && calendarSnapshot && <ScheduleCardDialog key={scheduling.id} objectId={opened.objectId} nodeId={scheduling.id} version={opened.version}
@@ -151,7 +164,7 @@ export default function CanvasDocument({ tab }: { tab: DocTab }) {
       breadcrumbs={ancestors.map(node => ({ id: node.objectId, title: node.title }))}
       onNavigateAncestor={id => { const node = ancestors.find(item => item.objectId === id); if (node) openInCurrentTab(node.path) }}
       extraNewItems={(at, close) => <BoardNewItems at={at} close={close} pages={pages} root={root} boardPath={opened.path} add={node => write([{ type: 'addNode', node }])} report={cause => setError(String(cause))} />}
-      acceptsDrop={types => types.includes('application/x-ready-fastcard')} onDropData={dropData}
+      acceptsDrop={types => types.includes('application/x-ready-fastcard')} onDropData={dropData} onExport={exportBoard}
       onAskAI={nodeIds => addBoardSelectionToAgentInput({ title: opened.canvas.ready.title || '画板', objectId: opened.objectId }, nodeIds)} />
   </div>
 }

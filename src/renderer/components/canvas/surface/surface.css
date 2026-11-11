@@ -51,6 +51,8 @@
   .rn-canvas .canvas-menu-item kbd { color: var(--rn-ink-3); font: 11px var(--rn-font-mono); }
   .rn-canvas .canvas-menu-gap { width: 16px; flex: none; }
   .rn-canvas .canvas-menu-error { margin: 6px 8px 2px; color: var(--rn-bad); font-size: 12px; white-space: normal; max-width: 240px; }
+  /* While a PNG is captured only the cards show. */
+  .rn-canvas[data-capturing] :where(.canvas-link-open, .canvas-message, [role='alert'], .canvas-resize) { display: none; }
   .rn-canvas .canvas-card[data-matched='true'] { box-shadow: 0 0 0 3px var(--rn-accent-soft), var(--rn-shadow-1); }
   .rn-canvas .canvas-card[data-kind='note'] { background: var(--ink-yellow-background-secondary, var(--canvas-card)); }
   .rn-canvas .canvas-world { position: absolute; inset: 0; transform-origin: 0 0; }

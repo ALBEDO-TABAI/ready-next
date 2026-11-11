@@ -15,7 +15,7 @@ import type { CanvasSurfaceProps, Tool } from './types'
 import { CanvasEditorLifecycle } from './editor-lifecycle'
 import { CanvasCorner, CanvasCrumbs, CanvasDock, ChromeMenu, MenuItem, SelectionBar } from './CanvasChrome'
 import { cardFrame } from '../../../modules/canvas/interaction/graphics'
-import { CalendarPlus, ClipboardPaste, FilePlus2, Sparkles, StickyNote, Trash2, Type } from 'lucide-react'
+import { CalendarPlus, ClipboardPaste, FileDown, FilePlus2, ImageDown, Sparkles, StickyNote, Trash2, Type } from 'lucide-react'
 
 const TOOL_KEYS: Record<string, Tool> = { v: 'select', h: 'pan', b: 'rect', a: 'arrow', c: 'edge', d: 'path' }
 
@@ -39,6 +39,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
   const [menu, setMenu] = useState<{ x: number; y: number; kind: 'card' | 'canvas'; world: { x: number; y: number } } | null>(null)
   const [lastShape, setLastShape] = useState<Tool>('rect'), [shapesOpen, setShapesOpen] = useState(false), [arrangeOpen, setArrangeOpen] = useState(false)
   const [search, setSearch] = useState<string | null>(null), [hit, setHit] = useState(0)
+  const [moreOpen, setMoreOpen] = useState(false), [capturing, setCapturing] = useState(false)
   const [composing, setComposing] = useState(false), [compositionError, setCompositionError] = useState('')
   const root = useRef<HTMLDivElement>(null), world = useRef<HTMLDivElement>(null), overlay = useRef<SVGSVGElement>(null)
   const elements = useRef(new Map<string, HTMLElement>()), edgeElements = useRef<GestureScene['edgeElements']>(new Map())
@@ -132,15 +133,32 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
       ...(kind === 'note' ? { color: '3' } : {}), ready: { kind } }
     void commit([{ type: 'addNode', node }]).then(ok => { if (ok) { setSelected([node.id]); if (props.renderTextEditor) setEditing(node.id) } })
   }
-  /** Fit every card in view (at most 100%), as the corner's 适应内容 and ⇧1 do. */
-  function fit() {
-    if (!active.nodes.length) { setCamera({ x: 40, y: 80, zoom: 1 }); return }
-    const frames = active.nodes.map(cardFrame)
+  /** Fit every card in view (at most 100%), as the corner's 适应内容 and ⇧1 do; with cards given, fit those. */
+  function fit(nodes: CanvasNode[] = active.nodes, margin = { x: 160, y: 220 }) {
+    if (!nodes.length) { setCamera({ x: 40, y: 80, zoom: 1 }); return }
+    const frames = nodes.map(cardFrame)
     const minX = Math.min(...frames.map(f => f.x)), minY = Math.min(...frames.map(f => f.y))
     const maxX = Math.max(...frames.map(f => f.x + f.width)), maxY = Math.max(...frames.map(f => f.y + f.height))
-    const zoom = Math.max(0.05, Math.min(1, (size.width - 160) / Math.max(1, maxX - minX), (size.height - 220) / Math.max(1, maxY - minY)))
-    setCamera({ zoom, x: size.width / 2 - (minX + maxX) / 2 * zoom, y: size.height / 2 - (minY + maxY) / 2 * zoom + 20 })
+    const zoom = Math.max(0.05, Math.min(1, (size.width - margin.x) / Math.max(1, maxX - minX), (size.height - margin.y) / Math.max(1, maxY - minY)))
+    setCamera({ zoom, x: size.width / 2 - (minX + maxX) / 2 * zoom, y: size.height / 2 - (minY + maxY) / 2 * zoom + (margin.y > margin.x ? 20 : 0) })
   }
+  /** 导出 PNG: frame the chosen cards (or all), hide the chrome and the selection, let Main capture the stage, put everything back. */
+  async function exportPng() {
+    if (!props.captureImage || !root.current) return
+    const before = camera, keep = selected
+    setMoreOpen(false); setCapturing(true); setSelected([]); fit(chosen.length ? chosen : active.nodes, { x: 64, y: 64 })
+    try {
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      const rect = root.current.getBoundingClientRect()
+      await props.captureImage({ x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) }, canvas.ready.title || '画板')
+    } catch (cause) { setCompositionError(cause instanceof Error ? cause.message : String(cause)) }
+    finally { setCapturing(false); setCamera(before); setSelected(keep) }
+  }
+  const exportItems = props.onExport || props.captureImage ? <>
+    {props.captureImage && <MenuItem label={chosen.length ? '把选中的卡片导出为 PNG' : '导出为 PNG'} icon={ImageDown} onSelect={() => void exportPng()} />}
+    {props.onExport && <MenuItem label={chosen.length ? '把选中的卡片导出为 Markdown' : '导出为 Markdown'} icon={FileDown} onSelect={() => { setMoreOpen(false); void props.onExport!('md', selected).catch(cause => setCompositionError(String(cause))) }} />}
+    {props.onExport && <MenuItem label={chosen.length ? '把选中的卡片导出为 PDF' : '导出为 PDF'} icon={FileDown} onSelect={() => { setMoreOpen(false); void props.onExport!('pdf', selected).catch(cause => setCompositionError(String(cause))) }} />}
+  </> : undefined
   const needle = search?.trim().toLocaleLowerCase() ?? ''
   const matches = needle ? active.nodes.filter(node => [node.type === 'text' ? node.text : '', node.type === 'link' ? node.url : '', node.type === 'group' ? node.label ?? '' : '',
     node.type === 'file' ? node.file : '', node.ready.preview?.title ?? '', node.ready.preview?.description ?? ''].some(text => text.toLocaleLowerCase().includes(needle))) : []
@@ -151,7 +169,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     setHit(next); setSelected([node.id])
     setCamera(c => ({ ...c, x: size.width / 2 - (frame.x + frame.width / 2) * c.zoom, y: size.height / 2 - (frame.y + frame.height / 2) * c.zoom }))
   }
-  const selectionBox = chosen.length && !editing && !trash && !menu ? (() => {
+  const selectionBox = chosen.length && !editing && !trash && !menu && !capturing ? (() => {
     const frames = chosen.map(cardFrame)
     const left = Math.min(...frames.map(f => f.x)) * camera.zoom + camera.x, right = Math.max(...frames.map(f => f.x + f.width)) * camera.zoom + camera.x
     const top = Math.min(...frames.map(f => f.y)) * camera.zoom + camera.y
@@ -172,7 +190,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     catch (error) { setCompositionError(error instanceof Error ? error.message : String(error)) }
     finally { setComposing(false) }
   }
-  return <div className="rn-canvas" data-canvas-surface tabIndex={0} ref={root} aria-label={canvas.ready.title || '画板'}
+  return <div className="rn-canvas" data-canvas-surface data-capturing={capturing || undefined} tabIndex={0} ref={root} aria-label={canvas.ready.title || '画板'}
     onDragOver={event => { if (event.dataTransfer.types.includes(READY_REF_MIME) || props.acceptsDrop?.(event.dataTransfer.types)) { event.preventDefault(); event.stopPropagation() } }}
     onDrop={event => {
       try {
@@ -208,12 +226,12 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
       const card = hit?.closest<HTMLElement>('[data-node-id]'), node = card?.dataset.nodeId ? byId.get(card.dataset.nodeId) : undefined
       if (node && !hit?.closest('[data-canvas-ui]')) open(node)
     }}>
-    <CanvasCrumbs title={canvas.ready.title || '画板'} breadcrumbs={props.breadcrumbs} busy={busy} onNavigate={props.onNavigateAncestor} />
-    <CanvasCorner zoom={camera.zoom} search={search} results={matches.length} hit={Math.min(hit, Math.max(0, matches.length - 1))} recycled={recycled.length} trash={trash} busy={busy || !!editing}
+    {!capturing && <CanvasCrumbs title={canvas.ready.title || '画板'} breadcrumbs={props.breadcrumbs} busy={busy} onNavigate={props.onNavigateAncestor} />}
+    {!capturing && <CanvasCorner zoom={camera.zoom} moreOpen={moreOpen} more={exportItems} onMore={setMoreOpen} search={search} results={matches.length} hit={Math.min(hit, Math.max(0, matches.length - 1))} recycled={recycled.length} trash={trash} busy={busy || !!editing}
       onSearch={value => { setSearch(value); setHit(0) }} onStep={step} onFit={fit}
       onZoomReset={() => setCamera(c => zoomAt(c, { x: size.width / 2, y: size.height / 2 }, 1))}
-      onTrash={() => { gestures.cancel(); setEditing(null); setSearch(null); setTrash(!trash) }} />
-    {!trash && <CanvasDock tool={tool} lastShape={lastShape} shapesOpen={shapesOpen} disabled={busy || !!editing} graphics={!!props.prepareGraphic}
+      onTrash={() => { gestures.cancel(); setEditing(null); setSearch(null); setTrash(!trash) }} />}
+    {!trash && !capturing && <CanvasDock tool={tool} lastShape={lastShape} shapesOpen={shapesOpen} disabled={busy || !!editing} graphics={!!props.prepareGraphic}
       canUndo={buffer.canUndo} canRedo={buffer.canRedo} busy={busy} onTool={chooseTool} onShapes={setShapesOpen} onCard={kind => placeCard(kind)}
       onUndo={() => void buffer.undo()} onRedo={() => void buffer.redo()} />}
     {selectionBox && <SelectionBar left={selectionBox.left} top={selectionBox.top} count={chosen.length} busy={busy || composing}
