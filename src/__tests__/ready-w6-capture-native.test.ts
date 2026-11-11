@@ -29,7 +29,7 @@ const sources: ReadyRef[] = [
 ]
 
 test('K4 one Main capture stores content/provenance and reads it back after reopen; retry and collision', async t => {
-  skipIfSqliteUnavailable({ skip: reason => { throw new Error(reason) } }, 'W6 requires Electron SQLite')
+  if (skipIfSqliteUnavailable(t, 'W6 requires Electron SQLite')) return
   const f = canvasFixture(); t.after(f.close)
   const repository = new FastCardRepository(f.db), cache = new FastCardMediaCache(f.root, async () => { throw new Error('network forbidden') })
   const collection = new FastCardCollectionService(repository, cache)
@@ -57,7 +57,7 @@ test('K4 one Main capture stores content/provenance and reads it back after reop
 })
 
 test('K3 image FastCard copies verified bytes beside the real page; missing media and symlinks fail', async t => {
-  skipIfSqliteUnavailable({ skip: reason => { throw new Error(reason) } }, 'W6 requires Electron SQLite')
+  if (skipIfSqliteUnavailable(t, 'W6 requires Electron SQLite')) return
   const f = canvasFixture(); t.after(f.close)
   const path = join(f.root, '页面.md'); writeFileSync(path, '正文')
   const page = f.registry.register(path), repository = new FastCardRepository(f.db), cache = new FastCardMediaCache(f.root)
@@ -74,7 +74,7 @@ test('K3 image FastCard copies verified bytes beside the real page; missing medi
 })
 
 test('K4 assistant page goes through durable draft/finalize and keeps ready_source on disk', async t => {
-  skipIfSqliteUnavailable({ skip: reason => { throw new Error(reason) } }, 'W6 requires Electron SQLite')
+  if (skipIfSqliteUnavailable(t, 'W6 requires Electron SQLite')) return
   const f = canvasFixture(); t.after(f.close)
   const service = new DocumentDraftService(f.db, { registry: f.registry, index: async (_root, path) => { f.registry.register(path) } })
   const source = toReadyUri({ kind: 'conversation', id: 'chat', run: 'run' })
@@ -88,7 +88,7 @@ test('K4 assistant page goes through durable draft/finalize and keeps ready_sour
 })
 
 test('K3 calendar links and page/file moves use the real owning stores', async t => {
-  skipIfSqliteUnavailable({ skip: reason => { throw new Error(reason) } }, 'W6 requires Electron SQLite')
+  if (skipIfSqliteUnavailable(t, 'W6 requires Electron SQLite')) return
   const f = canvasFixture(); t.after(f.close)
   const calendar = new CalendarStore(() => f.db)
   calendar.putCalendar({ id: 'local', accountId: 'local', name: '日历', visible: true, color: '#000000' })
