@@ -149,6 +149,9 @@ export class AgentRun {
   allowedToolNames: string[] = []
   calls: ToolCallResult[] = []
   private readonly snapshots = new Map<string, Record<string, unknown>>()
+  /** Origins this turn involves besides the page's own, as a user naming them would (BA7). */
+  private extraWriteOrigins: string[] = []
+  involveOrigins(origins: string[]): void { this.extraWriteOrigins = [...new Set([...this.extraWriteOrigins, ...origins])] }
   private pageRef: Record<string, unknown> | null = null
   private lease: BrowserTurnLease
   private readonly binding: ReturnType<typeof executionBinding>
@@ -288,7 +291,7 @@ export class AgentRun {
         executionBinding: this.binding,
         resourceAnchors: [],
       }),
-      requestEnvelope: { environmentHints: { workbenchMode: 'browser', browserPageRef: this.pageRef, browserWriteOrigins: [this.pageRef?.origin], workspaceRoots: [this.env.downloadsDir] } },
+      requestEnvelope: { environmentHints: { workbenchMode: 'browser', browserPageRef: this.pageRef, browserWriteOrigins: [this.pageRef?.origin, ...this.extraWriteOrigins], workspaceRoots: [this.env.downloadsDir] } },
       allowedToolNames: new Set(this.allowedToolNames),
       authorization: buildExplicitNoSkillAuthorization('no_skill_signal'),
       abortSignal: new AbortController().signal,

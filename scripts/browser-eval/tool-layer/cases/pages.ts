@@ -135,6 +135,9 @@ export const framesGroup: CaseGroup = {
   async run(ctx) {
     const run = await ctx.run('frames')
     await run.open(ctx.url('/frames/'))
+    // These cases test typing into a cross-origin frame; the turn involves that origin (BA7's ask-first rule for
+    // origins outside the turn is covered by the w7 group).
+    run.involveOrigins([new URL(ctx.url('/', 'alt')).origin])
     await run.call('browser_wait', { condition: 'text', text: '嵌套框架', timeout_ms: 6_000 })
     await new Promise((resolve) => setTimeout(resolve, 800))
     await ctx.check(
