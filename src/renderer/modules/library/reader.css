@@ -3,7 +3,8 @@
    The reader: a paper book on Ready's dotted desk.
    Book, leaves, faces and the strip turner after paper-flipbook (MIT).
    ============================================================ */
-.rn-library .reader { position: absolute; inset: 0; overflow: hidden; --font-note: 'Kaiti SC', 'STKaiti', 'KaiTi', var(--rn-font-serif); }
+/* clip, not hidden: a hidden box can still be scrolled by scrollIntoView, which slides the DOM page off the WebGL page. */
+.rn-library .reader { position: absolute; inset: 0; overflow: clip; --font-note: 'Kaiti SC', 'STKaiti', 'KaiTi', var(--rn-font-serif); }
 /* the desk is there at once (it is the same desk the shelf stood on); the reader's controls fade in on it */
 .rn-library .reader > .top, .rn-library .reader > .rd-dock { animation: rn-library-chromeIn .5s var(--rn-ease-out) .12s both; }
 @keyframes rn-library-chromeIn { from { opacity: 0; } }
