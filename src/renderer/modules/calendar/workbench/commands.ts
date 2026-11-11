@@ -1,41 +1,52 @@
 import { api, unwrap } from './platform';
 // Command registry: shared by the keyboard handler, ⌘K menu, shortcuts panel and native menu.
-import { getState, setState, setView, goToday, step, zoom, toggleTheme, openOverlay, setPrefs, deleteOccurrences, duplicateOccurrences, copyOccurrences, paste, undo, redo, select, occurrencesIn, periodDays, monthRange, importIcsFile, exportCalendar, clearSelection, toast } from './store';
+import { getState, setState, setView, goToday, step, zoom, openOverlay, setPrefs, deleteOccurrences, duplicateOccurrences, copyOccurrences, paste, undo, redo, select, occurrencesIn, periodDays, monthRange, importIcsFile, exportCalendar, clearSelection, toast , openCalendarSettings } from './store';
 import { newEventNow } from './components/Sidebar';
 import { toggleAvailability, stopAvailability } from './availability';
-import { Key } from './i18n';
+import { Key, translate } from './i18n';
+import { appShortcut, shortcutKeycaps, matchesAppShortcut } from '../../../../shared/app-shortcuts';
+import { requestShellAction } from '../../workbench/commands/shell-actions';
+import { registerCommands } from '../../workbench/commands/registry';
 import { isMac } from './platform';
 
 export interface Command { id: string; label: Key; labelVars?: Record<string, string | number>; section: 'secCalendar' | 'secNavigation' | 'secView' | 'secPrefs' | 'secEvent'; keys?: string[]; run: () => void; when?: () => boolean }
 const hasSel = () => getState().selected.length > 0;
 export const MOD = isMac ? '⌘' : 'Ctrl';
-export const COMMANDS: Command[] = [
-  { id: 'create', label: 'createEvent', section: 'secCalendar', keys: ['C'], run: () => newEventNow() },
+export const COMMANDS: Command[] = ([
+  { id: 'create', label: 'createEvent', section: 'secCalendar', run: () => newEventNow() },
   { id: 'import', label: 'importIcs', section: 'secCalendar', run: () => importIcsFile() },
   { id: 'export', label: 'exportIcs', section: 'secCalendar', run: () => exportCalendar() },
-  { id: 'availability', label: 'shareAvail', section: 'secCalendar', keys: ['S'], run: () => toggleAvailability() },
-  { id: 'goto', label: 'goToDate', section: 'secNavigation', keys: ['.'], run: () => openOverlay('goto') },
-  { id: 'today', label: 'goToday', section: 'secNavigation', keys: ['T'], run: () => goToday() },
-  { id: 'next', label: 'nextPeriod', section: 'secNavigation', keys: ['J'], run: () => step(1) },
-  { id: 'prev', label: 'prevPeriod', section: 'secNavigation', keys: ['K'], run: () => step(-1) },
-  { id: 'day', label: 'switchDay', section: 'secView', keys: ['D'], run: () => setView('default', 1) },
-  { id: 'week', label: 'switchWeek', section: 'secView', keys: ['W'], run: () => setView('default', 7) },
-  { id: 'month', label: 'switchMonth', section: 'secView', keys: ['M'], run: () => setView('month') },
-  ...[2, 3, 4, 5, 6, 8, 9].map((n): Command => ({ id: `days${n}`, label: 'switchNDays', labelVars: { n }, section: 'secView', keys: [String(n)], run: () => setView('default', n) })),
-  { id: 'zoomIn', label: 'zoomIn', section: 'secView', keys: ['⇧', MOD, '.'], run: () => zoom(1) },
-  { id: 'zoomOut', label: 'zoomOut', section: 'secView', keys: ['⇧', MOD, ','], run: () => zoom(-1) },
-  { id: 'zoomReset', label: 'zoomReset', section: 'secView', keys: ['⇧', MOD, '0'], run: () => zoom(0) },
-  { id: 'allday', label: 'toggleAllDay', section: 'secView', keys: ['⇧', MOD, 'A'], run: () => setPrefs({ collapseAllDaySection: !getState().prefs.collapseAllDaySection }) },
-  { id: 'weekends', label: 'showWeekends', section: 'secView', keys: ['⇧', MOD, 'E'], run: () => setPrefs({ showWeekends: !getState().prefs.showWeekends }) },
-  { id: 'declined', label: 'showDeclined', section: 'secView', keys: ['⇧', MOD, 'D'], run: () => setPrefs({ showDeclined: !getState().prefs.showDeclined }) },
-  { id: 'sidebar', label: 'toggleSidebar', section: 'secView', keys: ['\\'], run: () => setPrefs({ sidebar: !getState().prefs.sidebar }) },
-  { id: 'panel', label: 'sPanel', section: 'secView', keys: [MOD, '\\'], run: () => setPrefs({ contextPanel: !getState().prefs.contextPanel }) },
-  { id: 'theme', label: 'toggleTheme', section: 'secPrefs', keys: ['⇧', MOD, 'L'], run: () => toggleTheme() },
-  { id: 'settings', label: 'openSettings', section: 'secPrefs', keys: [MOD, ','], run: () => openOverlay('settings') },
-  { id: 'shortcuts', label: 'allShortcuts', section: 'secPrefs', keys: ['?'], run: () => openOverlay('shortcuts') },
-  { id: 'delete', label: 'deleteEvent', section: 'secEvent', keys: ['⌫'], run: () => deleteOccurrences(getState().selected), when: hasSel },
-  { id: 'duplicate', label: 'duplicateEvent', section: 'secEvent', keys: [MOD, 'D'], run: () => duplicateOccurrences(getState().selected), when: hasSel },
-];
+  { id: 'availability', label: 'shareAvail', section: 'secCalendar', run: () => toggleAvailability() },
+  { id: 'goto', label: 'goToDate', section: 'secNavigation', run: () => openOverlay('goto') },
+  { id: 'today', label: 'goToday', section: 'secNavigation', run: () => goToday() },
+  { id: 'next', label: 'nextPeriod', section: 'secNavigation', run: () => step(1) },
+  { id: 'prev', label: 'prevPeriod', section: 'secNavigation', run: () => step(-1) },
+  { id: 'day', label: 'switchDay', section: 'secView', run: () => setView('default', 1) },
+  { id: 'week', label: 'switchWeek', section: 'secView', run: () => setView('default', 7) },
+  { id: 'month', label: 'switchMonth', section: 'secView', run: () => setView('month') },
+  ...[2, 3, 4, 5, 6, 8, 9].map((n): Command => ({ id: `days${n}`, label: 'switchNDays', labelVars: { n }, section: 'secView', run: () => setView('default', n) })),
+  { id: 'zoomIn', label: 'zoomIn', section: 'secView', run: () => zoom(1) },
+  { id: 'zoomOut', label: 'zoomOut', section: 'secView', run: () => zoom(-1) },
+  { id: 'zoomReset', label: 'zoomReset', section: 'secView', run: () => zoom(0) },
+  { id: 'allday', label: 'toggleAllDay', section: 'secView', run: () => setPrefs({ collapseAllDaySection: !getState().prefs.collapseAllDaySection }) },
+  { id: 'weekends', label: 'showWeekends', section: 'secView', run: () => setPrefs({ showWeekends: !getState().prefs.showWeekends }) },
+  { id: 'declined', label: 'showDeclined', section: 'secView', run: () => setPrefs({ showDeclined: !getState().prefs.showDeclined }) },
+  { id: 'sidebar', label: 'toggleSidebar', section: 'secView', run: () => requestShellAction('toggle-sidebar') },
+  { id: 'panel', label: 'sPanel', section: 'secView', run: () => setPrefs({ contextPanel: !getState().prefs.contextPanel }) },
+  { id: 'theme', label: 'toggleTheme', section: 'secPrefs', run: () => requestShellAction('toggle-theme') },
+  { id: 'shortcuts', label: 'allShortcuts', section: 'secPrefs', run: () => openOverlay('shortcuts') },
+  { id: 'delete', label: 'deleteEvent', section: 'secEvent', run: () => deleteOccurrences(getState().selected), when: hasSel },
+  { id: 'duplicate', label: 'duplicateEvent', section: 'secEvent', run: () => duplicateOccurrences(getState().selected), when: hasSel },
+] satisfies Command[]).map(command => ({ ...command, keys: ['import', 'export'].includes(command.id) ? undefined : shortcutKeycaps(appShortcut(`calendar.${command.id}`), isMac) }));
+
+export function registerCalendarCommands(): () => void {
+  return registerCommands('calendar', COMMANDS.filter(command => !['delete', 'duplicate', 'sidebar', 'theme'].includes(command.id)).map(command => ({
+    id: `calendar.${command.id}`, title: translate('zh-CN', command.label, command.labelVars),
+    keywords: [command.id, '日历', ...(command.id === 'import' || command.id === 'export' ? ['ICS'] : [])],
+    shortcut: command.keys ? appShortcut(`calendar.${command.id}`) : undefined,
+    when: { mode: 'calendar' }, run: command.run,
+  })));
+}
 export function runCommand(id: string) { const c = COMMANDS.find((x) => x.id === id); if (c && (!c.when || c.when())) { c.run(); return true; } return false; }
 
 function editable(el: EventTarget | null) {
@@ -79,16 +90,16 @@ export function handleKey(e: KeyboardEvent): boolean {
     return false;
   }
   if (mod && k === 'Enter' && !s.overlay) { const a = document.activeElement as HTMLElement | null; if (editable(a)) { a!.blur(); setState({ draftId: null }); return true; } return false; }
-  // ⌘K belongs to the global object switcher (M5-C); the calendar palette stays on the g k sequence.
-  if (mod && k === ',' && !e.shiftKey) { openOverlay('settings'); return true; }
+  // The shell owns settings, theme and object search, even inside a calendar editor.
+  if (['open-settings', 'toggle-theme', 'open-search'].some(id => matchesAppShortcut(appShortcut(id), e))) return false;
   if (mod && e.shiftKey && (k === '>' || k === '.')) { zoom(1); return true; }
   if (mod && e.shiftKey && (k === '<' || k === ',')) { zoom(-1); return true; }
   if (mod && e.shiftKey && (k === ')' || k === '0')) { zoom(0); return true; }
-  if (mod && e.shiftKey && k.toLowerCase() === 'l') { toggleTheme(); return true; }
+  if (mod && e.shiftKey && k.toLowerCase() === 'l') { return runCommand('theme'); }
   if (mod && e.shiftKey && k.toLowerCase() === 'a') { return runCommand('allday'); }
   if (mod && e.shiftKey && k.toLowerCase() === 'e') { return runCommand('weekends'); }
   if (mod && e.shiftKey && k.toLowerCase() === 'd') { return runCommand('declined'); }
-  if (mod && k === '\\') { return runCommand('panel'); }
+  if (matchesAppShortcut(appShortcut('calendar.panel'), { key: e.code === 'Backslash' ? '\\' : k, metaKey: e.metaKey, ctrlKey: e.ctrlKey, altKey: e.altKey, shiftKey: e.shiftKey })) { return runCommand('panel'); }
   if (editable(e.target) || s.overlay) return false;
   if (mod && k.toLowerCase() === 'z') { if (e.shiftKey) redo(); else undo(); return true; }
   if (mod && k.toLowerCase() === 'y') { redo(); return true; }
@@ -105,7 +116,7 @@ export function handleKey(e: KeyboardEvent): boolean {
   // two-key sequences: g s (settings), g t (today), g . (go to date); e <field> edits a field of the open event
   if (!(e.metaKey || e.ctrlKey || e.altKey) && seq && Date.now() - seq.t < 1200) {
     const p = seq.k; seq = null;
-    if (p === 'g') { if (k === 's') { openOverlay('settings'); return true; } if (k === 't') { goToday(); return true; } if (k === '.') { openOverlay('goto'); return true; } if (k === 'k') { openOverlay('cmdk'); return true; } return true; }
+    if (p === 'g') { if (k === 's') { openCalendarSettings(); return true; } if (k === 't') { goToday(); return true; } if (k === '.') { openOverlay('goto'); return true; } return false; }
     if (p === 'e') return editField(k);
   }
   if (!(e.metaKey || e.ctrlKey || e.altKey) && (k === 'g' || (k === 'e' && (s.editing || s.selected.length === 1)))) { seq = { k, t: Date.now() }; return true; }

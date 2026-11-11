@@ -31,7 +31,7 @@ Renderer (React / Zustand)
 | RSS | `src/renderer/pages/modes/RSSMode.tsx` | `src/main/modules/rss-engine/` | 按改动选择 RSS 焦点测试与阶段 gate |
 | Calendar | `src/renderer/pages/modes/CalendarMode.tsx` | `src/main/modules/calendar-engine/` | `npm run verify:calendar-integration` |
 
-Agent、文件面板、技能中心和设置页是跨工作面的能力，不是额外的 Workbench mode。
+Agent、技能中心（整页 `/skills`）和设置页是跨工作面的能力，不是额外的 Workbench mode。外壳只有一个侧栏，内容由当前模式的导航器提供（W2）。
 
 ## 3. Main 模块
 
@@ -130,9 +130,9 @@ claude-bridge IPC
 
 ## 6. Renderer 入口
 
-- 工作台壳：`src/renderer/pages/WorkbenchMode.tsx`
+- 工作台壳：`src/renderer/pages/WorkbenchMode.tsx`；外壳部件（图标栏、唯一侧栏与导航器槽位、窄窗口让位、外壳动作）在 `src/renderer/modules/workbench/shell/`，⌘K 命令注册表在 `src/renderer/modules/workbench/commands/`
 - Agent：`src/renderer/components/agent/ChatPanel.tsx`、`src/renderer/stores/useAgent.ts`
-- 文件与侧栏：`src/renderer/components/layout/`
+- 文件管理与全局面板组件：`src/renderer/components/layout/`；各模式导航器：浏览器 `components/browser/BrowserTabList.tsx`、文档 `modules/document/navigator/`、资讯 `components/rss/RSSNavigation.tsx`、日历 `modules/calendar/workbench/components/Sidebar.tsx`
 - Browser：`src/renderer/components/browser/`、`src/renderer/stores/useBrowserTabs.ts`
 - Document：`src/renderer/components/document/`、`src/renderer/stores/useDocTabs.ts`
 - RSS：`src/renderer/components/rss/`、`src/renderer/stores/useRSSSession.ts`

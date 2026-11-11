@@ -56,11 +56,6 @@ export function useBrowserPanelData({
     await toggleBookmarkForTarget(activeTab.url, activeTab.title || activeTab.url)
   }, [isElectron, activeTab, toggleBookmarkForTarget])
 
-  const handleToggleBookmarkForTab = useCallback(async (tab: BrowserTab) => {
-    if (!isElectron) return
-    await toggleBookmarkForTarget(tab.url, tab.title || tab.url)
-  }, [isElectron, toggleBookmarkForTarget])
-
   useEffect(() => {
     if (!isElectron) return
     const cleanup = window.electronAPI?.browser?.onBookmarksChanged(async () => {
@@ -104,6 +99,5 @@ export function useBrowserPanelData({
     isBookmarked,
     bookmarks,
     handleToggleBookmark,
-    handleToggleBookmarkForTab,
   }
 }

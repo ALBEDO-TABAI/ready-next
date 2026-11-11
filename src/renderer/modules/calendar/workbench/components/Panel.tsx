@@ -1,3 +1,5 @@
+import { isMac } from '../platform';
+import { appShortcut, shortcutKeycaps } from '../../../../../shared/app-shortcuts';
 import { occurrenceRef } from '../../../../../shared/calendar-linkage'
 import { attachEvent } from '../../linkage/attachments'
 import { writeEventTransfer } from '../../linkage/transfer'
@@ -62,7 +64,7 @@ function AvailabilityPanel() {
 }
 
 function Useful() {
-  const rows: [string, string[]][] = [[t('commandMenu'), [MOD, 'K']], [t('toggleSidebar'), ['\\']], [t('goToDate'), ['.']], [t('sPanel'), [MOD, '\\']], [t('allShortcuts'), ['?']]];
+  const rows: [string, string[]][] = [[t('commandMenu'), [MOD, 'K']], [t('toggleSidebar'), ['\\']], [t('goToDate'), ['.']], [t('sPanel'), shortcutKeycaps(appShortcut('calendar.panel'), isMac)], [t('allShortcuts'), ['?']]];
   return (
     <div className="ps">
       <div className="ps-title">{t('usefulShortcuts')}</div>

@@ -30,10 +30,3 @@ export function PageGlyph({ size = 20, empty = false }: { size?: number; empty?:
   </svg>
 }
 
-/** Inkwell's calendar badge, used for the upcoming-events entry. */
-export function CalendarBadge() {
-  const day = new Date().getDate()
-  return <span className="ink-cal-badge" aria-hidden>
-    <svg width="16" height="16" viewBox="0 0 16 16"><rect x="1" y="1" width="14" height="14" rx="3" fill="#3478F6" /><rect x="1" y="1" width="14" height="4" rx="2" fill="#2563D9" /><text x="8" y="13" textAnchor="middle" fontSize="7.5" fontWeight="700" fill="#fff" fontFamily="var(--ink-font-sans)">{day}</text></svg>
-  </span>
-}

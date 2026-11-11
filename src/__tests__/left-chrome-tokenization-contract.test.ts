@@ -20,21 +20,16 @@ test('left chrome tokens centralize side panel shell and rail track colors', () 
   assert.match(styles, /--workbench-rail-slot-overlay:/)
 })
 
-test('files side panel shell styling comes from shared shell tokens instead of dark-only patch rules', () => {
+test('the shell sidebar sits on the window glass in both themes, with no dark-only patch rules', () => {
   const styles = readRendererStyles()
+  const shell = readWorkspaceFile('src/renderer/modules/workbench/shell/shell.css')
 
-  assert.match(
-    styles,
-    /\.workbench-panel-frame\[data-side-panel-variant='files'\]\s*\{[\s\S]*?background:\s*var\(--workbench-side-panel-bg\)/,
-  )
-  assert.match(
-    styles,
-    /\.workbench-panel-frame\[data-side-panel-variant='files'\]\s*\{[\s\S]*?border-color:\s*var\(--workbench-side-panel-border\)/,
-  )
-  assert.match(
-    styles,
-    /\.workbench-panel-frame\[data-side-panel-variant='files'\]\s*\{[\s\S]*?box-shadow:\s*var\(--workbench-side-panel-shadow\)/,
-  )
+  // W2 §2.2: one sidebar column, no frame of its own; the navigator inside draws on the glass.
+  assert.match(shell, /\.shell-sidebar:not\(\.shell-float-drawer\)\s*\{[\s\S]*?background:\s*transparent/)
+  assert.match(shell, /\.shell-sidebar:not\(\.shell-float-drawer\)\s*\{[\s\S]*?box-shadow:\s*none/)
+  // The old per-variant frame is gone, and nothing patches the sidebar for dark mode alone.
+  assert.doesNotMatch(styles, /data-side-panel-variant/)
+  assert.doesNotMatch(styles, /\[data-theme=['"]dark['"]\][^{]*(?:\.shell-sidebar|\[data-shell-sidebar)/)
 })
 
 test('icon rail stays transparent with shared glyph tokens', () => {

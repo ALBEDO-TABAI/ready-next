@@ -24,7 +24,11 @@ test('rss skills and global search surface partial failures instead of silently 
   assert.match(skillsPanel, /无法读取/)
   assert.match(skillsPanel, /pushMessage\(legacyFolders\.error\)/)
 
-  assert.match(globalSearch, /reduceReindexResponse/)
-  assert.match(globalSearch, /if \(outcome\.error\) errors\.push\(outcome\.error\)/)
-  assert.match(globalSearch, /搜索结果可能不完整/)
+  // The library index (shared by find-and-replace and 设置 › 资料库) reduces each root's reindex response
+  // and keeps a partly failed rebuild as a warning instead of discarding it.
+  const libraryIndex = readWorkspaceFile('src/renderer/modules/search/useLibraryIndex.ts')
+  assert.match(libraryIndex, /reduceReindexResponse/)
+  assert.match(globalSearch, /useLibraryIndex\(\)/)
+  assert.match(libraryIndex, /if \(outcome\.error\) errors\.push\(outcome\.error\)/)
+  assert.match(libraryIndex, /搜索结果可能不完整/)
 })

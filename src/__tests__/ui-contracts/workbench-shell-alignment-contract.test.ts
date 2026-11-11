@@ -30,20 +30,21 @@ test('browser rss and calendar shells align their left edge with the shared work
   assert.match(workbenchTabs, /className="workbench-tabs-surface glass-surface-panel flex-shrink-0"/)
   // Document mode, like the calendar, has no shell surface of its own: Inkwell's sidebar and page panels fill it.
   assert.match(documentMode, /className="workbench-canvas-shell flex min-h-0 h-full flex-col" style=\{\{ background: 'transparent', boxShadow: 'none' \}\}/)
-  assert.match(documentMode, /className=\{`ink-scope ink-doc-app/)
+  assert.match(documentMode, /className="ink-scope ink-doc-app"/)
   assert.doesNotMatch(styles, /document-workbench-canvas-shell|document-workbench-body|document-path-bar/)
   assert.match(markdownEditor, /className="panel-hover-scrollbar document-editor-surface flex-1 overflow-auto"/)
   assert.match(markdownEditor, /panel-hover-scrollbar document-preview-surface flex-1 overflow-auto/)
 
-  // RSS shares the Document/Browser frame: a top bar and a left rail on the canvas form one L-shaped layer,
-  // and every RSS view lives in a content frame rounded on all four corners.
+  // RSS shares the Document/Browser frame: a top bar on the canvas and every RSS view in a content frame
+  // rounded on all four corners. Its navigation lives in the shell's one sidebar (W2-T4), not in the body.
   const rssMode = readWorkspaceFile('src/renderer/pages/modes/RSSMode.tsx')
   assert.match(rssMode, /className="workbench-canvas-shell rss-workbench-canvas relative flex h-full min-h-0 overflow-hidden"/)
   assert.match(rssMode, /className="rss-topbar workbench-tabs-surface no-drag"/)
-  assert.match(rssMode, /<div className="rss-workbench-body">\s*<RSSNavigation/)
+  assert.match(rssMode, /<ShellNavigator mode="rss" label="资讯">\s*<RSSNavigation/)
+  assert.doesNotMatch(rssMode, /<div className="rss-workbench-body">\s*<RSSNavigation/)
   assert.match(rssMode, /className=\{`rss-feed-sheet content-surface-panel rss-content-frame`\}/)
   assert.match(styles, /\.rss-mode-shell \.rss-content-frame \{[\s\S]*?border-radius: var\(--workbench-canvas-radius\);/)
-  assert.match(styles, /\.rss-mode-shell \{[\s\S]*?--rss-rail: 52px;/)
+  assert.doesNotMatch(styles, /--rss-rail/)
   assert.match(rssFeed, /className="rss-feed-surface/)
   assert.match(rssFeed, /rss-workbench-surface/)
   assert.match(rssFeed, /content-surface-panel/)

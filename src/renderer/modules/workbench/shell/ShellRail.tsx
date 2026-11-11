@@ -3,18 +3,10 @@ import {
   IconCalendarFilled,
   IconFileText,
   IconFileTextFilled,
-  IconFolder,
-  IconFolderFilled,
   IconLayoutSidebarRight,
-  IconLink,
-  IconPuzzle,
-  IconPuzzleFilled,
-  IconReplace,
   IconRss,
   IconSearch,
   IconSettings,
-  IconSitemap,
-  IconSitemapFilled,
   IconStack2,
   IconWorld,
   IconWorldFilled,
@@ -38,28 +30,12 @@ const MODE_ITEMS: { id: WorkbenchMode; label: string; hint: string; icon: typeof
   { id: 'calendar', label: '日历', hint: '⌘4', icon: IconCalendar, activeIcon: IconCalendarFilled },
 ]
 
-// Global panels that still live in the sidebar slot until their own homes land (W2-T5/T6, batch B6):
-// the files view moves into the document navigator, find-and-replace becomes a result page, skills
-// open as a page, backlinks merge into the relations panel, the graph opens full-size.
-// The ids are the sidebar panel variants themselves.
-export type ShellPanelId = 'files' | 'search' | 'skills' | 'backlinks' | 'graph'
-const PANEL_ITEMS: { id: ShellPanelId; label: string; icon: typeof IconFolder; activeIcon?: typeof IconFolder }[] = [
-  { id: 'files', label: '文件', icon: IconFolder, activeIcon: IconFolderFilled },
-  { id: 'search', label: '查找与替换', icon: IconReplace },
-  { id: 'skills', label: '技能中心', icon: IconPuzzle, activeIcon: IconPuzzleFilled },
-  { id: 'backlinks', label: '反向链接', icon: IconLink },
-  { id: 'graph', label: '关系图谱', icon: IconSitemap, activeIcon: IconSitemapFilled },
-]
-
 export interface ShellRailProps {
   mode: WorkbenchMode
   splitMode: WorkbenchMode | null
   onModeChange: (mode: WorkbenchMode) => void
   /** ⌥-click (or ⇧-click) opens the mode beside the current one. */
   onSplitToggle: (mode: WorkbenchMode) => void
-  activePanel: ShellPanelId
-  panelOpen: boolean
-  onPanelClick: (panel: ShellPanelId) => void
   assistantOpen: boolean
   onAssistantOpen: () => void
 }
@@ -110,16 +86,6 @@ export default function ShellRail(props: ShellRailProps) {
             expanded
             onSelect={handleModeSelect}
             layoutId="shell-rail-modes"
-          />
-        </div>
-        <span className="shell-rail__rule" aria-hidden="true" />
-        <div className="icon-rail-slider-shell">
-          <MorphIconRailGroup
-            items={PANEL_ITEMS}
-            activeId={props.activePanel}
-            expanded={props.panelOpen}
-            onSelect={id => props.onPanelClick(id as ShellPanelId)}
-            layoutId="shell-rail-panels"
           />
         </div>
       </div>

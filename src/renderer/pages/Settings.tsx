@@ -1,8 +1,8 @@
 import { BookSourceSettingsPanel } from './settings/BookSourceSettingsPanel'
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
 import {
-  ChevronLeft, User, Bell, Shield, Database,
-  Palette, Keyboard, Globe, Info, Moon, Sun, Bot, Monitor,
+  ChevronLeft, Shield, Database, CalendarDays, FolderOpen, Puzzle, Newspaper,
+  Palette, Keyboard, Info, Moon, Sun, Bot, Monitor,
   ExternalLink, HardDrive, MessageSquare, Cat,
   Plug2, Boxes, Cookie, Tags, Brain, Check, Loader2, RefreshCw,
 } from 'lucide-react'
@@ -37,6 +37,7 @@ import { ExternalServicesSettingsPanel } from './settings/ExternalServicesSettin
 import { McpSettingsPanel } from './settings/McpSettingsPanel'
 import { TagForgeSettingsPanel } from './settings/TagForgeSettingsPanel'
 import { ReadyMemorySettingsPanel } from './settings/ReadyMemorySettingsPanel'
+import { LibrarySettingsPanel } from './settings/LibrarySettingsPanel'
 import { READY_SHORTCUT_GUIDE } from '../../shared/app-shortcuts'
 
 // 面板拆分后的导出保口（2026-07-05）：行为测试从 pages/Settings 导入这两个面板，import 面保持零变化。
@@ -44,20 +45,12 @@ export { StorageSettingsPanel } from './settings/StorageSettingsPanel'
 export { ExternalServicesSettingsPanel } from './settings/ExternalServicesSettingsPanel'
 
 const SETTINGS_SURFACE_REFRESH_DELAY_MS = 120
+// The calendar's preference pages bring the calendar module and its stylesheet: load them when opened.
+const CalendarSettingsPanel = lazy(() => import('./settings/CalendarSettingsPanel').then(module => ({ default: module.CalendarSettingsPanel })))
 
-// 导航按分组排列（通用 → 智能 → 内容与连接 → 隐私与数据 → 应用），组内顺序即展示顺序。
+// 导航按分组排列（通用 → 助手 → 内容 → 隐私与数据 → 关于，W2 §3.2），组内顺序即展示顺序。
+// 每个开关都落盘；没有只改页面状态的设置，也没有写死的示例数据（S6）。
 const settingsData: SettingSection[] = [
-  {
-    id: 'account',
-    group: 'general',
-    title: '帐号',
-    icon: User,
-    description: '管理你的帐号信息和个人资料',
-    settings: [
-      { id: 'username', label: '用户名', description: '显示在应用中的名称', type: 'text', value: 'Ready User' },
-      { id: 'email', label: '邮箱', description: '用于接收通知和同步', type: 'text', value: 'user@ready.app' }
-    ]
-  },
   {
     id: 'appearance',
     group: 'general',
@@ -65,31 +58,6 @@ const settingsData: SettingSection[] = [
     icon: Palette,
     description: '主题与透明度',
     settings: []
-  },
-  {
-    id: 'notifications',
-    group: 'general',
-    title: '通知',
-    icon: Bell,
-    description: '控制推送通知和声音提示',
-    settings: [
-      { id: 'pushEnabled', label: '推送通知', description: '接收任务完成和 RSS 更新通知', type: 'toggle', value: true },
-      { id: 'soundEnabled', label: '声音提示', description: '操作完成时播放提示音', type: 'toggle', value: true }
-    ]
-  },
-  {
-    id: 'language',
-    group: 'general',
-    title: '语言',
-    icon: Globe,
-    description: '设置界面显示语言',
-    settings: [
-      { id: 'language', label: '界面语言', description: '更改后需重启应用', type: 'select', value: 'zh-CN', options: [
-        { value: 'zh-CN', label: '简体中文' },
-        { value: 'en-US', label: 'English' },
-        { value: 'ja-JP', label: '日本語' }
-      ]}
-    ]
   },
   {
     id: 'shortcuts',
@@ -102,9 +70,9 @@ const settingsData: SettingSection[] = [
   {
     id: 'ai',
     group: 'intelligence',
-    title: 'AI 模型',
+    title: '模型',
     icon: Bot,
-    description: '配置 AI 助手的模型和连接参数',
+    description: '配置助手使用的模型和连接参数',
     settings: [] // Rendered dynamically via AISettingsPanel
   },
   {
@@ -116,6 +84,14 @@ const settingsData: SettingSection[] = [
     settings: [],
   },
   {
+    id: 'skills',
+    group: 'intelligence',
+    title: '技能',
+    icon: Puzzle,
+    description: '导入、启用和管理助手的技能',
+    settings: []
+  },
+  {
     id: 'mcp',
     group: 'intelligence',
     title: 'MCP',
@@ -124,36 +100,68 @@ const settingsData: SettingSection[] = [
     settings: [] // Rendered dynamically via McpSettingsPanel — Y0.7 §11.0b labeling branch
   },
   {
-    id: 'external-services',
-    group: 'intelligence',
-    title: '外部服务',
-    icon: ExternalLink,
-    description: '统一管理 AnySearch、Tavily、Jina、DuckDuckGo、RSSHub、Bilibili、GitHub、高德地图与读图模型',
-    settings: []
-  },
-  {
     id: MODELS_RUNTIME_SETTINGS_SECTION,
     group: 'intelligence',
-    title: '模型与运行时',
+    title: '本地语音模型',
     icon: Boxes,
     description: '按需下载语音识别与标点模型，支持国内 / 国外源自动切换与断点续传',
     settings: []
   },
   {
     id: 'remote-im',
-    group: 'content',
-    title: '远程 IM',
+    group: 'intelligence',
+    title: '远程助手',
     icon: MessageSquare,
     description: '绑定微信、飞书，远程发送任务并接收回复',
     settings: [] // Rendered dynamically via RemoteIMSettingsPanel
+  },
+  {
+    id: 'pet',
+    group: 'intelligence',
+    title: '宠物',
+    icon: Cat,
+    description: '管理桌面悬浮宠物和工作气泡',
+    settings: []
+  },
+  {
+    id: 'library',
+    group: 'content',
+    title: '资料库',
+    icon: FolderOpen,
+    description: '资料库位置、挂载的文件夹和全文索引',
+    settings: []
   },
   { id: 'reading', group: 'content', title: '阅读', icon: HardDrive, description: '书源与下载设置', settings: [] },
   {
     id: 'rss-storage',
     group: 'content',
-    title: 'RSS 底稿',
-    icon: HardDrive,
-    description: '管理 RSS 底稿仓库、增量收件箱和刷新重置',
+    title: '资讯',
+    icon: Newspaper,
+    description: '资讯的底稿仓库、增量收件箱和刷新重置',
+    settings: []
+  },
+  {
+    id: 'calendar',
+    group: 'content',
+    title: '日历',
+    icon: CalendarDays,
+    description: '日历视图、提醒、菜单栏与日历列表',
+    settings: []
+  },
+  {
+    id: 'browser-privacy',
+    group: 'content',
+    title: '浏览器数据',
+    icon: Cookie,
+    description: '清除浏览数据，管理 Cookie 与站点数据',
+    settings: [] // Rendered dynamically via BrowserPrivacySettingsPanel
+  },
+  {
+    id: 'external-services',
+    group: 'content',
+    title: '外部服务',
+    icon: ExternalLink,
+    description: '统一管理 AnySearch、Tavily、Jina、DuckDuckGo、RSSHub、Bilibili、GitHub、高德地图与读图模型',
     settings: []
   },
   {
@@ -165,19 +173,11 @@ const settingsData: SettingSection[] = [
     settings: []
   },
   {
-    id: 'pet',
-    group: 'content',
-    title: '宠物',
-    icon: Cat,
-    description: '管理桌面悬浮宠物和工作气泡',
-    settings: []
-  },
-  {
     id: 'privacy',
     group: 'privacy',
     title: '隐私',
     icon: Shield,
-    description: '管理数据收集和隐私偏好',
+    description: '管理 Ready 读取哪些活动来帮你',
     settings: [
       {
         id: FILE_EMERGENCE_SETTING_KEY,
@@ -193,17 +193,7 @@ const settingsData: SettingSection[] = [
         type: 'toggle',
         value: false,
       },
-      { id: 'analytics', label: '使用分析', description: '帮助我们改善产品体验（匿名数据）', type: 'toggle', value: false },
-      { id: 'crashReports', label: '崩溃报告', description: '自动发送崩溃信息协助排查问题', type: 'toggle', value: true }
     ]
-  },
-  {
-    id: 'browser-privacy',
-    group: 'privacy',
-    title: '浏览器数据',
-    icon: Cookie,
-    description: '清除浏览数据，管理 Cookie 与站点数据',
-    settings: [] // Rendered dynamically via BrowserPrivacySettingsPanel
   },
   {
     id: 'storage',
@@ -306,7 +296,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
   const location = useLocation()
   const navigate = useNavigate()
   const routeSection = new URLSearchParams(location.search).get('section') || undefined
-  const [activeSection, setActiveSection] = useState(initialSection || routeSection || 'account')
+  const [activeSection, setActiveSection] = useState(initialSection || routeSection || 'appearance')
   const [settings, setSettings] = useState(settingsData)
   const [settingErrors, setSettingErrors] = useState<Record<string, string>>({})
   const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'not-available' | 'error'>('idle')
@@ -492,11 +482,6 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
 
   const handleToggleSetting = async (sectionId: string, setting: SettingItem) => {
     const nextValue = !setting.value
-    const persistedToggleIds = new Set([FILE_EMERGENCE_SETTING_KEY, BROWSER_POWER_MODE_SETTING_KEY])
-    if (!persistedToggleIds.has(setting.id)) {
-      updateSetting(sectionId, setting.id, nextValue)
-      return
-    }
     if (typeof window === 'undefined' || !window.electronAPI?.settings?.set) {
       setSettingErrors((prev) => ({ ...prev, [setting.id]: '设置 IPC 不可用' }))
       return
@@ -515,7 +500,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
   }
 
   const isDynamicSection = currentSection
-    ? ['ai', 'memory', 'remote-im', 'external-services', 'mcp', 'tag-forge', 'pet', 'rss-storage', MODELS_RUNTIME_SETTINGS_SECTION, 'storage', 'browser-privacy'].includes(currentSection.id)
+    ? ['ai', 'memory', 'skills', 'remote-im', 'external-services', 'mcp', 'tag-forge', 'pet', 'library', 'rss-storage', 'calendar', MODELS_RUNTIME_SETTINGS_SECTION, 'storage', 'browser-privacy'].includes(currentSection.id)
     : false
 
   const renderSettingControl = (sectionId: string, setting: SettingItem) => {
@@ -527,30 +512,6 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
             checked={Boolean(setting.value)}
             ariaLabel={setting.label}
             onChange={() => { void handleToggleSetting(sectionId, setting) }}
-          />
-        )
-      case 'select':
-        return (
-          <select
-            value={setting.value as string}
-            aria-label={setting.label}
-            onChange={(e) => updateSetting(sectionId, setting.id, e.target.value)}
-            className="sx-select"
-          >
-            {setting.options?.map(opt => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
-        )
-      case 'text':
-        return (
-          <input
-            type={setting.id === 'apiKey' ? 'password' : 'text'}
-            value={setting.value as string}
-            aria-label={setting.label}
-            onChange={(e) => updateSetting(sectionId, setting.id, e.target.value)}
-            className="sx-input"
-            style={{ width: 260 }}
           />
         )
       case 'readonly':
@@ -730,6 +691,15 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                 {currentSection.id === 'mcp' && <McpSettingsPanel />}
                 {currentSection.id === 'pet' && <PetSettingsPanel />}
                 {currentSection.id === 'tag-forge' && <TagForgeSettingsPanel />}
+                {currentSection.id === 'library' && <LibrarySettingsPanel />}
+                {currentSection.id === 'calendar' && <Suspense fallback={null}><CalendarSettingsPanel /></Suspense>}
+                {currentSection.id === 'skills' && (
+                  <SettingsCard title="技能中心" description="技能属于助手：导入、启用、授权本地执行，都在技能中心整页里做。">
+                    <SettingsRow label="打开技能中心" description="也可以从助手面板顶部或 ⌘K 进入">
+                      <button type="button" className={settingsButtonClass('secondary', { size: 'sm' })} onClick={() => navigate('/skills')}>打开</button>
+                    </SettingsRow>
+                  </SettingsCard>
+                )}
 
                 {/* Appearance — 主题模式 / 视觉风格 / 主题色 */}
                 {currentSection.id === 'appearance' && (

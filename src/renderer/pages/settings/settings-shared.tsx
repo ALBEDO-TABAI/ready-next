@@ -14,17 +14,17 @@ export type SettingsNavGroup = 'general' | 'intelligence' | 'content' | 'privacy
 
 export const SETTINGS_NAV_GROUP_LABELS: Record<SettingsNavGroup, string> = {
   general: '通用',
-  intelligence: '智能',
-  content: '内容与连接',
+  intelligence: '助手',
+  content: '内容',
   privacy: '隐私与数据',
-  about: '应用',
+  about: '关于',
 }
 
 export interface SettingItem {
   id: string
   label: string
   description?: string
-  type: 'toggle' | 'select' | 'text' | 'button' | 'readonly'
+  type: 'toggle' | 'button' | 'readonly'
   value?: boolean | string
   options?: { value: string; label: string }[]
   buttonLabel?: string

@@ -103,12 +103,6 @@ body.resizing [data-liquid-shell='chat-panel'] {
   }
 }
 
-.workbench-panel-frame[data-side-panel-variant='files'] {
-  background: var(--workbench-side-panel-bg);
-  border-color: var(--workbench-side-panel-border);
-  box-shadow: var(--workbench-side-panel-shadow);
-}
-
 html:root .calendar-mode-shell .workbench-canvas-shell {
   background: var(--calendar-canvas-bg) !important;
   border: 1px solid var(--calendar-canvas-border) !important;

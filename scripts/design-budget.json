@@ -86,7 +86,7 @@
       "fontFace": 0
     },
     "components/browser": {
-      "color": 4,
+      "color": 3,
       "backdropFilter": 13,
       "fontFace": 0
     },
@@ -106,7 +106,7 @@
       "fontFace": 0
     },
     "components/document": {
-      "color": 75,
+      "color": 73,
       "backdropFilter": 4,
       "fontFace": 0
     },
@@ -252,7 +252,7 @@
     },
     "modules/calendar/workbench/styles": {
       "color": 96,
-      "backdropFilter": 5,
+      "backdropFilter": 4,
       "fontFace": 2
     },
     "modules/canvas/composition": {
@@ -306,8 +306,8 @@
       "fontFace": 0
     },
     "modules/document/ink": {
-      "color": 232,
-      "backdropFilter": 19,
+      "color": 228,
+      "backdropFilter": 17,
       "fontFace": 1
     },
     "modules/document/page-ui": {
@@ -371,7 +371,7 @@
       "fontFace": 0
     },
     "pages": {
-      "color": 35,
+      "color": 33,
       "backdropFilter": 0,
       "fontFace": 0
     },
@@ -401,7 +401,7 @@
       "fontFace": 0
     },
     "styles": {
-      "color": 581,
+      "color": 580,
       "backdropFilter": 53,
       "fontFace": 0
     },

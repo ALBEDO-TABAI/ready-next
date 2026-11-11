@@ -1,16 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
-import { startOfWeek, dayOf, isoDate, parseIsoDate, startOfDayMs, occurrences } from '@shared/calendar'
+import { createPortal } from 'react-dom'
+import { dayOf, isoDate, parseIsoDate, startOfDayMs } from '@shared/calendar'
 import type { RemoteCalendarEventSuggestion } from '@shared/calendar-remote-channel'
 import type { ReminderFirePayload } from '@shared/calendar-types'
-import { useStore, getState, setState, periodDays, monthRange, findOccurrence, reload, createEvent, primaryCalendar, goToDay, select, toast, openOverlay, setView } from './store'
+import { useStore, getState, setState, periodDays, monthRange, findOccurrence, reload, createEvent, primaryCalendar, goToDay, select, toast, openOverlay, setView, openCalendarSettings } from './store'
 import { api, unwrap } from './platform'
-import { appendToAgentInput } from '../../agent/chat-input-bridge'
 import { registerModuleAgentHandler } from '../../../utils/moduleAgentBridge'
 import { useCalendarSession } from '../../../stores/useCalendarSession'
 
-export function ReadyCalendarActions({active,buttons=true}:{active:boolean;buttons?:boolean}) {
+// The calendar's own actions. Their buttons sit in the foot of the calendar navigator (the shell sidebar, W2-T4);
+// the dialogs stay with the calendar. The assistant has its own panel, so the navigator carries no assistant entry.
+export function ReadyCalendarActions({active,buttonsHost}:{active:boolean;buttonsHost?:HTMLElement|null}) {
   const s=useStore(x=>({anchor:x.anchor,prefs:x.prefs,events:x.events,calendars:x.calendars,editing:x.editing,today:x.today,busy:x.busy}))
-  const [panel,setPanel]=useState<'subscribe'|'quick'|'assistant'|null>(null)
+  const [panel,setPanel]=useState<'subscribe'|'quick'|null>(null)
   const [importPreview,setImportPreview]=useState<{ticket:string;fileName:string;calendars:number;events:number;possibleExamples:number}|null>(null),[skipExamples,setSkipExamples]=useState(false),[importing,setImporting]=useState(false)
   const [text,setText]=useState(''),[name,setName]=useState(''),[url,setUrl]=useState(''),[interval,setInterval]=useState(60)
   const [suggestion,setSuggestion]=useState<RemoteCalendarEventSuggestion|null>(null),[reminder,setReminder]=useState<ReminderFirePayload|null>(null)
@@ -31,7 +33,8 @@ export function ReadyCalendarActions({active,buttons=true}:{active:boolean;butto
         }else if(target.command==='create'){
           const id=`native-${request.id}`,now=Math.ceil(Date.now()/900000)*900000
           if(getState().events[id])select([id]);else if(!await createEvent({id,uid:`${id}@ready.local`,start:now,end:now+getState().prefs.defaultEventDuration*60000,allDay:false},{draft:true}))return
-        }else if(target.command==='settings'||target.command==='search')openOverlay(target.command)
+        }else if(target.command==='settings')openCalendarSettings()
+        else if(target.command==='search')openOverlay('search')
         else setView(target.command==='month'?'month':'default',target.command==='day'?1:7)
         await unwrap(api().ackNavigation(request.id))
       }catch(error){ console.warn('[ReadyCalendarActions] consume navigation request failed:', error instanceof Error ? error.message : String(error));toast(String(error))}finally{consuming.current=false}
@@ -81,23 +84,12 @@ export function ReadyCalendarActions({active,buttons=true}:{active:boolean;butto
     const id=await createEvent({title:text,allDay:!e.hasTime,start:e.hasTime?e.startTime*1000:isoDate(day),end:e.hasTime?e.endTime*1000:isoDate(day+1)})
     if(id){goToDay(day);setPanel(null)}
   }catch(error){ console.warn('[ReadyCalendarActions] create event from text failed:', error instanceof Error ? error.message : String(error));toast(String(error))}}
-  const week=startOfWeek(s.today,s.prefs.weekStartsOn)
-  const weekEvents=occurrences(Object.values(s.events),week,week+7,s.prefs.primaryTimeZone)
-  const today=weekEvents.filter(o=>o.startDay<=s.today&&o.endDay>=s.today)
-  const next=weekEvents.find(o=>o.end>Date.now())
-  const ask=(instruction:string)=>{appendToAgentInput(instruction);setPanel(null)}
   return <>
-    {buttons&&<div className="ready-calendar-actions"><button className="btn sm" onClick={()=>open('quick')}>快建</button><button className="btn sm" onClick={()=>open('subscribe')}>订阅</button><button className="btn sm" onClick={()=>open('assistant')}>助手</button><button className="btn sm" title="从独立日历迁入数据" onClick={()=>void prepareImport()}>迁入</button></div>}
+    {buttonsHost&&createPortal(<div className="ready-calendar-actions"><button className="btn sm" onClick={()=>open('quick')}>快建</button><button className="btn sm" onClick={()=>open('subscribe')}>订阅</button><button className="btn sm" title="从独立日历迁入数据" onClick={()=>void prepareImport()}>迁入</button></div>,buttonsHost)}
     {importPreview&&<><div className="scrim dim"/><section className="ready-calendar-dialog" role="dialog" aria-label="迁入独立日历"><header><strong>迁入独立日历</strong></header><p>{importPreview.fileName}：{importPreview.calendars} 个分类，{importPreview.events} 条日程。</p><p>将保存为 Ready 本地日程；已经迁入的日程不会重复或被覆盖。</p>{importPreview.possibleExamples>0&&<label style={{display:'block',margin:'12px 0'}}><input type="checkbox" checked={skipExamples} onChange={e=>setSkipExamples(e.target.checked)}/> 跳过与内置示例同名且未修改的 {importPreview.possibleExamples} 条日程</label>}<button className="btn primary" disabled={importing} onClick={()=>void importStandalone()}>确认迁入</button> <button className="btn" disabled={importing} onClick={()=>setImportPreview(null)}>取消</button></section></>}
-    {panel&&<><div className="scrim dim" onPointerDown={()=>setPanel(null)}/><section className="ready-calendar-dialog" role="dialog" aria-label={panel==='subscribe'?'订阅日历':panel==='quick'?'快速创建日程':'日程助手'} onKeyDown={e=>e.stopPropagation()}>
-      <header><strong>{panel==='subscribe'?'订阅日历':panel==='quick'?'快速创建日程':'日程助手'}</strong><button className="btn sm" onClick={()=>setPanel(null)}>关闭</button></header>
-      {panel==='subscribe'?<form onSubmit={e=>{e.preventDefault();void subscribe()}}><label>日历名称<input autoFocus required value={name} onChange={e=>setName(e.target.value)}/></label><label>订阅网址<input type="url" required value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://…/calendar.ics"/></label><label>更新间隔<select value={interval} onChange={e=>setInterval(Number(e.target.value))}><option value={15}>15 分钟</option><option value={60}>1 小时</option><option value={360}>6 小时</option></select></label><button className="btn primary" type="submit">订阅</button></form>:panel==='quick'?<form onSubmit={e=>{e.preventDefault();void quick()}}><label>用一句话填写日程（按本地时间识别）<input autoFocus required value={text} onChange={e=>setText(e.target.value)} placeholder="明天下午三点开会"/></label><button className="btn primary" type="submit" disabled={s.busy}>创建并编辑</button></form>:<>
-        <p>今天 {today.length} 项 · 本周 {weekEvents.length} 项 · {Math.round(weekEvents.filter(o=>!o.allDay).reduce((sum,o)=>sum+(o.end-o.start)/3600000,0)*10)/10} 小时</p>
-        {next&&<p>接下来：{next.event.title}</p>}
-        {today.slice(0,6).map(o=><button className="ready-calendar-agenda" key={o.key} onClick={()=>{select([o.key]);goToDay(o.startDay);setPanel(null)}}>{o.allDay?'全天':new Date(o.start).toLocaleTimeString(undefined,{timeZone:s.prefs.primaryTimeZone,hour:'2-digit',minute:'2-digit'})}　{o.event.title}</button>)}
-        <div className="ready-calendar-suggestions">{['帮我安排本周','找空档','优先级建议'].map(label=><button className="btn sm" key={label} onClick={()=>ask(label)}>{label}</button>)}</div>
-        <form onSubmit={e=>{e.preventDefault();if(text.trim())ask(text.trim())}}><input placeholder="让助手帮你整理安排" value={text} onChange={e=>setText(e.target.value)}/><button className="btn primary">交给助手</button></form>
-      </>}
+    {panel&&<><div className="scrim dim" onPointerDown={()=>setPanel(null)}/><section className="ready-calendar-dialog" role="dialog" aria-label={panel==='subscribe'?'订阅日历':'快速创建日程'} onKeyDown={e=>e.stopPropagation()}>
+      <header><strong>{panel==='subscribe'?'订阅日历':'快速创建日程'}</strong><button className="btn sm" onClick={()=>setPanel(null)}>关闭</button></header>
+      {panel==='subscribe'?<form onSubmit={e=>{e.preventDefault();void subscribe()}}><label>日历名称<input autoFocus required value={name} onChange={e=>setName(e.target.value)}/></label><label>订阅网址<input type="url" required value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://…/calendar.ics"/></label><label>更新间隔<select value={interval} onChange={e=>setInterval(Number(e.target.value))}><option value={15}>15 分钟</option><option value={60}>1 小时</option><option value={360}>6 小时</option></select></label><button className="btn primary" type="submit">订阅</button></form>:<form onSubmit={e=>{e.preventDefault();void quick()}}><label>用一句话填写日程（按本地时间识别）<input autoFocus required value={text} onChange={e=>setText(e.target.value)} placeholder="明天下午三点开会"/></label><button className="btn primary" type="submit" disabled={s.busy}>创建并编辑</button></form>}
     </section></>}
     {suggestion&&<div className="ready-calendar-notice"><strong>消息中的日程建议</strong><p>{suggestion.suggestedTitle}</p><button className="btn sm" onClick={()=>void accept()} disabled={s.busy}>加入日历</button><button className="btn sm" onClick={()=>setSuggestion(null)}>忽略</button></div>}
     {reminder&&<div className="ready-calendar-notice reminder"><strong>{reminder.eventTitle}</strong><p>日程提醒</p><button className="btn sm" onClick={()=>jump(reminder)}>查看日程</button><button className="btn sm" onClick={()=>setReminder(null)}>关闭</button></div>}

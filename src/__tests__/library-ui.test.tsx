@@ -14,6 +14,7 @@ const books: LibraryBook[] = [
 
 test('shelf renders, sorts, scopes keys, opens a real text reader and switches to a single page when narrow', async () => {
   const dom = new JSDOM('<button id="outside">外部</button><div id="root"></div>', { url: 'http://localhost', pretendToBeVisual: true })
+  Object.assign(dom.window, { matchMedia: () => ({ matches: true, addEventListener() {}, removeEventListener() {} }) })
   const runtimeErrors: unknown[] = []
   dom.window.addEventListener('error', event => runtimeErrors.push(event.error))
   const epub = new JSZip()

@@ -20,15 +20,16 @@ function Drop<T extends string | number>({ value, opts, onChange, wide, testid }
 const Radio = ({ on, label, onClick }: { on: boolean; label: string; onClick: () => void }) => <label className="set-radio" onClick={onClick}><span className={`rd${on ? ' on' : ''}`} />{label}</label>;
 const Sec = ({ title, children }: { title: string; children: React.ReactNode }) => <section className="set-sec"><h2 className="set-h">{title}</h2>{children}</section>;
 
-export function Settings() {
+// The calendar's preferences. They live in 设置 › 日历 (W2 §3.2): the global settings page renders the
+// same pages inline (variant 'page'); there is no calendar-owned settings modal any more.
+export function Settings({ variant = 'page' }: { variant?: 'page' }) {
   const s = useStore((x) => ({ p: x.prefs, page: x.settingsPage, calendars: x.calendars, now: x.now }));
   const p = s.p; const page = ['general', 'profile', 'notifications', 'menubar', 'conferencing', 'calendars'].includes(s.page) ? s.page : 'general';
   const go = (id: string) => setState({ settingsPage: id });
   const NavRow = ({ id, icon, label }: { id: string; icon: React.ReactNode; label: string }) => <div className={`set-nav-row${page === id ? ' on' : ''}`} data-testid={`set-nav-${id}`} onClick={() => go(id)}><span className="ic">{icon}</span><span className="lbl">{label}</span></div>;
   return (
     <>
-      <div className="scrim dim" onPointerDown={() => setState({ overlay: null })} />
-      <div className="modal" data-testid="settings" role="dialog" onKeyDown={(e) => e.stopPropagation()}>
+      <div className={`set-page set-page--${variant}`} data-testid="calendar-settings" onKeyDown={(e) => e.stopPropagation()}>
         <nav className="modal-nav">
           <div className="set-grp">{t('grpPrefs')}</div>
           <NavRow id="general" icon={<Settings2 size={18} />} label={t('general')} />
@@ -133,7 +134,6 @@ export function Settings() {
           </>}
           {page === 'calendars' && <Calendars />}
         </div>
-        <button className="modal-x" aria-label="close" onClick={() => setState({ overlay: null })}><X size={16} /></button>
       </div>
     </>
   );

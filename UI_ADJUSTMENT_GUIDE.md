@@ -21,13 +21,15 @@
 
 | 目标 | 入口 |
 | --- | --- |
-| 面板切换/动画壳 | `src/renderer/components/layout/SidePanel.tsx` |
+| 唯一侧栏与导航器槽位（宽度、收起和悬停滑出由外壳负责） | `src/renderer/modules/workbench/shell/ShellSidebar.tsx`、`src/renderer/pages/WorkbenchMode.tsx` |
+| 文档导航器（页面 / 文件） | `src/renderer/modules/document/navigator/DocumentNavigator.tsx` |
 | 文件面板标题与主体 | `src/renderer/components/layout/FilesPanel.tsx` |
 | 文件树编排 | `src/renderer/components/layout/FileTree.tsx` |
 | 文件树子行为 | `src/renderer/components/layout/file-tree/` |
 | 文件夹缩略图 | `FolderPreview.tsx`、`folderPreviewModel.ts` |
-| 全局搜索 | `GlobalSearchPanel.tsx` |
-| 技能中心 | `SkillsCenterPanel.tsx` |
+| 全局查找与替换 | `src/renderer/components/search/FindReplaceWorkspace.tsx` |
+| 技能中心整页 | `src/renderer/pages/SkillsCenter.tsx`（`/skills`） |
+| 关系图谱（全工作区 / 当前文档） | `src/renderer/components/graph/GraphWorkspace.tsx` |
 | 文件涌现 | `FileEmergenceSection.tsx`、`fileEmergenceViewModel.ts` |
 
 瞬时菜单不要挂在带 `overflow-hidden` 的侧栏布局内；使用顶层弹层并由拥有菜单的组件计算位置。文件选择、拖放、移动和删除优先查 `file-tree/`，不要继续把所有逻辑塞回 `FileTree.tsx`。
@@ -38,12 +40,12 @@
 
 - 页面：`src/renderer/pages/modes/BrowserMode.tsx`
 - 顶栏：`src/renderer/components/browser/BrowserTopBar.tsx`
-- 竖向标签：`src/renderer/components/browser/VerticalTabRail.tsx`
+- 标签列表（外壳侧栏里的导航器，带标题、分组、拖到助手）：`src/renderer/components/browser/BrowserTabList.tsx`
 - 分组共用件：`src/renderer/components/tabs/TabGroupHeaderRow.tsx`、`TabGroupEditMenu.tsx`
 - BrowserView bounds：`src/renderer/modules/browser/useBrowserViewBounds.ts`
 - 状态：`src/renderer/stores/useBrowserTabs.ts`
 
-BrowserView 是原生覆盖层。弹层、hover flyout 和模式切换问题先核对 hide/show 与 bounds，不要只调 `z-index`。
+BrowserView 是原生覆盖层。弹层、侧栏滑出和模式切换问题先核对 hide/show 与 bounds，不要只调 `z-index`。
 
 ### Document
 

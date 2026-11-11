@@ -10,8 +10,6 @@
  */
 
 .rss-mode-shell {
-  --rss-rail: 52px;
-  --rss-rail-open: 192px;
   --rss-gutter: clamp(24px, 4.2cqw, 48px);
   --rss-row-x: calc(var(--rss-gutter) - 16px);
   --rss-ease: var(--sx-ease, cubic-bezier(0.22, 0.61, 0.36, 1));
@@ -37,18 +35,6 @@
   gap: 6px;
   min-height: 38px;
   padding: 0 14px 0 8px;
-}
-
-.rss-topbar__toggle {
-  display: inline-flex;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 30px;
-  border-radius: 9px;
-  color: var(--text-muted);
-  transition: background-color var(--sx-dur, 160ms) var(--rss-ease), color var(--sx-dur, 160ms) var(--rss-ease);
 }
 
 .rss-topbar__lead {
@@ -90,7 +76,6 @@
   gap: 2px;
 }
 
-.rss-topbar__toggle:hover,
 .rss-topbar__back:hover {
   background: var(--sx-hover);
   color: var(--text-title);
@@ -122,30 +107,34 @@ html:root .rss-mode-shell .rss-workbench-body {
   container-type: inline-size;
 }
 
-/* ── 左侧导航 ────────────────────────────────────────────────────────── */
+/* ── 导航器（在外壳侧栏里，W2-T4）──────────────────────────────────────── */
 
 .rss-nav {
-  flex: 0 0 var(--rss-rail-open);
-  width: var(--rss-rail-open);
+  --rss-ease: var(--sx-ease, cubic-bezier(0.22, 0.61, 0.36, 1));
+  flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 4px 12px 14px 8px;
+  padding: 0 8px 14px;
   overflow-x: hidden;
   overflow-y: auto;
   scrollbar-width: none;
-  transition: flex-basis 220ms var(--rss-ease), width 220ms var(--rss-ease), padding 220ms var(--rss-ease);
+}
+
+.rss-nav__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 40px;
+  padding: 0 0 0 10px;
+  flex: none;
+  font: 500 var(--rn-fs-xs)/1 var(--rn-font-ui);
+  color: var(--rn-ink-3);
 }
 
 .rss-nav::-webkit-scrollbar {
   display: none;
-}
-
-.rss-nav.is-collapsed {
-  flex-basis: var(--rss-rail);
-  width: var(--rss-rail);
-  padding: 4px 8px 14px;
 }
 
 .rss-nav__label {
@@ -157,15 +146,8 @@ html:root .rss-mode-shell .rss-workbench-body {
   white-space: nowrap;
 }
 
-.rss-nav__label:first-child {
+.rss-nav__head + .rss-nav__label {
   padding-top: 6px;
-}
-
-.rss-nav.is-collapsed .rss-nav__label {
-  height: 14px;
-  padding: 0;
-  overflow: hidden;
-  font-size: 0;
 }
 
 .rss-nav__list {
@@ -224,15 +206,7 @@ html:root .rss-mode-shell .rss-workbench-body {
   color: var(--color-blue);
 }
 
-.rss-nav.is-collapsed .rss-nav__item {
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  padding: 0;
-}
-
 .rss-nav__item:focus-visible,
-.rss-topbar__toggle:focus-visible,
 .rss-topbar__back:focus-visible {
   outline: none;
   box-shadow: var(--sx-focus-ring);

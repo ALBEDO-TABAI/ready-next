@@ -5,12 +5,13 @@ import test from 'node:test'
 import { readRendererStyles } from './utils/read-renderer-styles'
 
 function readWorkspaceFile(path: string): string {
+  // allow-source-grep: shared chrome CSS and component style declarations must keep the same transparent surface contract across owners.
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
 test('liquid glass chrome removes prominent shell edges so panels read as one fused surface', () => {
   const iconRail = readWorkspaceFile('src/renderer/modules/workbench/shell/ShellRail.tsx')
-  const sidePanel = readWorkspaceFile('src/renderer/components/layout/SidePanel.tsx')
+  const sidePanel = readWorkspaceFile('src/renderer/modules/workbench/shell/ShellSidebar.tsx')
   const skillsPanel = readWorkspaceFile('src/renderer/components/layout/SkillsCenterPanel.tsx')
   const statusBar = readWorkspaceFile('src/renderer/components/layout/StatusBar.tsx')
   const browserHeader = readWorkspaceFile('src/renderer/components/browser/BrowserHeader.tsx')
@@ -26,7 +27,9 @@ test('liquid glass chrome removes prominent shell edges so panels read as one fu
   assert.doesNotMatch(iconRail, /border-r border-\[var\(--border-default\)\]/)
   assert.doesNotMatch(iconRail, /glass-surface-panel/)
   assert.doesNotMatch(sidePanel, /className="content-surface-panel flex-shrink-0 flex flex-col select-none overflow-hidden"/)
-  assert.match(sidePanel, /background:\s*'transparent'/)
+  assert.match(sidePanel, /className=\{`shell-sidebar workbench-panel-frame/)
+  const shellStyles = readWorkspaceFile('src/renderer/modules/workbench/shell/shell.css')
+  assert.match(shellStyles, /\.shell-sidebar:not\(\.shell-float-drawer\)\s*\{\s*background:\s*transparent;\s*box-shadow:\s*none;/)
   assert.doesNotMatch(skillsPanel, /selected \? PANEL_COLORS\.blue : PANEL_COLORS\.border/)
   assert.doesNotMatch(skillsPanel, /importDropActive \? PANEL_COLORS\.blue : PANEL_COLORS\.dropBorder/)
   assert.match(skillsPanel, /background: selected \? 'var\(--bg-hover\)' : 'transparent'/)

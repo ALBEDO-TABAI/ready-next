@@ -5,7 +5,6 @@ import ReadyMode from './pages/ReadyMode'
 import Settings from './pages/Settings'
 import PetWindow from './pages/PetWindow'
 import FastCardOverlayWindow from './pages/FastCardOverlayWindow'
-import VerticalRailOverlayWindow from './pages/VerticalRailOverlayWindow'
 import BrowserLockOverlayWindow from './pages/BrowserLockOverlayWindow'
 import BrowserAgentPointerWindow from './pages/BrowserAgentPointerWindow'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
@@ -21,6 +20,7 @@ const CanvasLab = lazy(() => import('./components/canvas/surface/CanvasLab'))
 const LiquidTest = lazy(() => import('./LiquidTest'))
 const StartupPreview = lazy(() => import('./pages/StartupPreview'))
 const DesignSystem = lazy(() => import('./pages/DesignSystem'))
+const SkillsCenter = lazy(() => import('./pages/SkillsCenter'))
 
 function MainAppShell() {
   const { captureFeedback } = useKeyboardShortcuts()
@@ -113,6 +113,15 @@ function MainAppShell() {
             <Route path="/workbench" element={<WorkbenchMode />} />
             <Route path="/ready" element={<ReadyMode />} />
             <Route path="/settings" element={<Settings />} />
+            {/* W2 §2.3: the skills centre is a page beside settings, opened from the assistant and ⌘K. */}
+            <Route
+              path="/skills"
+              element={(
+                <Suspense fallback={<div className="h-full w-full" />}>
+                  <SkillsCenter />
+                </Suspense>
+              )}
+            />
             <Route path="/pet-window" element={<PetWindow />} />
             <Route
               path="/liquid-test"
@@ -191,13 +200,6 @@ function App() {
     return (
       <ErrorBoundary>
         <FastCardOverlayWindow />
-      </ErrorBoundary>
-    )
-  }
-  if (location.pathname === '/browser-vertical-rail-overlay') {
-    return (
-      <ErrorBoundary>
-        <VerticalRailOverlayWindow />
       </ErrorBoundary>
     )
   }

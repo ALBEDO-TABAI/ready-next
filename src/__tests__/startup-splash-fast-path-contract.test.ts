@@ -111,14 +111,15 @@ test('workbench defers hidden mode preloads until the first surface is idle', ()
   assert.doesNotMatch(outlet, /useLayoutEffect\(\(\) => \{\s*if \(hasPreloadedWorkbenchModes\) return\s*hasPreloadedWorkbenchModes = true\s*ALL_MODE_LOADERS/)
 })
 
-test('side panel keeps only the default files panel on the startup path', () => {
-  const sidePanel = readWorkspaceFile('src/renderer/components/layout/SidePanel.tsx')
+test('document navigator keeps files static while global find and skills load on demand', () => {
+  const navigator = readWorkspaceFile('src/renderer/modules/document/navigator/DocumentNavigator.tsx')
+  const workbench = readWorkspaceFile('src/renderer/pages/WorkbenchMode.tsx')
+  const app = readWorkspaceFile('src/renderer/App.tsx')
 
-  assert.match(sidePanel, /import FilesPanel from '\.\/FilesPanel'/)
-  assert.match(sidePanel, /lazy\(\(\) => import\('\.\/GlobalSearchPanel'\)\)/)
-  assert.match(sidePanel, /lazy\(\(\) => import\('\.\/SkillsCenterPanel'\)\)/)
-  assert.match(sidePanel, /lazy\(\(\) => import\('\.\/BacklinksCenterPanel'\)\)/)
-  assert.match(sidePanel, /lazy\(\(\) => import\('\.\/GraphCenterPanel'\)\)/)
-  assert.doesNotMatch(sidePanel, /import GlobalSearchPanel from/)
-  assert.doesNotMatch(sidePanel, /import SkillsCenterPanel from/)
+  assert.match(navigator, /import FilesPanel from '\.\.\/\.\.\/\.\.\/components\/layout\/FilesPanel'/)
+  assert.match(workbench, /const FindReplaceWorkspace = lazy\(\(\) => import\('\.\.\/components\/search\/FindReplaceWorkspace'\)\)/)
+  assert.match(app, /const SkillsCenter = lazy\(\(\) => import\('\.\/pages\/SkillsCenter'\)\)/)
+  for (const source of [navigator, workbench, app]) {
+    assert.doesNotMatch(source, /^import\s+(?!type\b).*\b(?:FindReplaceWorkspace|GlobalSearchPanel|SkillsCenter|SkillsCenterPanel)\b.*from/m)
+  }
 })

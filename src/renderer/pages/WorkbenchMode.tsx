@@ -1,18 +1,19 @@
-import { useEffect, useCallback, useRef, useMemo, useState } from 'react'
+import { useEffect, useCallback, useRef, useMemo, useState, lazy, Suspense } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ObjectUIHost } from '../modules/workbench/object-ui/ObjectUIHost'
-import { useWorkspace, type SidePanelWidthKey, reconcileWorkspaceWatchersFromStore, getNextSidePanelVariant, formatWorkspaceWatcherFailure } from '../stores/useWorkspace'
+import { useWorkspace, reconcileWorkspaceWatchersFromStore, formatWorkspaceWatcherFailure } from '../stores/useWorkspace'
 import { useMode, type WorkbenchMode as WorkbenchModeType } from '../stores/useMode'
 import { useDocTabs } from '../stores/useDocTabs'
 import TopBar from '../components/layout/TopBar'
-import ShellRail, { type ShellPanelId } from '../modules/workbench/shell/ShellRail'
+import ShellRail from '../modules/workbench/shell/ShellRail'
 import { useShellPresentation } from '../modules/workbench/shell/useShellPresentation'
-import SidePanel from '../components/layout/SidePanel'
+import ShellSidebar, { ShellSidebarSlotProvider } from '../modules/workbench/shell/ShellSidebar'
 import WorkbenchModeOutlet from '../components/layout/WorkbenchModeOutlet'
 import ChatPanel from '../components/agent/ChatPanel'
 import GraphWorkspace, { type GraphWorkspaceRequest } from '../components/graph/GraphWorkspace'
 import { invalidateGraphWorkspace } from '../components/graph/graph-session'
 import StatusBar from '../components/layout/StatusBar'
+import { useShellActions, useShellSidebarSlot } from '../modules/workbench/shell/useShellWiring'
 import { clampAssistantWidth as clampWorkbenchChatPanelWidth, clampSidebarWidth as clampWorkbenchSidePanelWidth, SHELL_RAIL_WIDTH } from '../../shared/workbench-shell-geometry'
 import {
   READY_WORKBENCH_MODE_CHANGE_EVENT,
@@ -34,6 +35,9 @@ import { nextIntentId } from '../../shared/browser-view-intent'
 import { createModeSwitchAckWaiter } from '../modules/browser/modeSwitchAckWaiter'
 import { cancelRitual, withRitual, setPanelResizingSignal } from '../modules/overlay/useRitualOverlay'
 import '../styles/knowledge-graph.css'
+
+// Off the startup path: the find-and-replace view loads when it first opens.
+const FindReplaceWorkspace = lazy(() => import('../components/search/FindReplaceWorkspace'))
 
 const INSTANT_PANEL_TOGGLE_SETTLE_MS = 80
 const TRANSPARENT_SURFACE_REFRESH_DELAYS_MS = [240, 900] as const
@@ -120,8 +124,6 @@ export default function WorkbenchMode() {
   const sidebarVisible = useWorkspace((state) => state.sidebarVisible)
   const chatPanelVisible = useWorkspace((state) => state.chatPanelVisible)
   const rawChatPanelWidth = useWorkspace((state) => state.chatPanelWidth)
-  const sidePanelVariant = useWorkspace((state) => state.sidePanelVariant)
-  const setSidePanelVariant = useWorkspace((state) => state.setSidePanelVariant)
   const renamingPath = useWorkspace((state) => state.renamingPath)
   const creatingType = useWorkspace((state) => state.creatingType)
   const workspaceRoot = useWorkspace((state) => state.workspaceRoot)
@@ -152,10 +154,10 @@ export default function WorkbenchMode() {
   const [isPanelResizing, setIsPanelResizing] = useState(false)
   const [browserLayoutMotionPhase, setBrowserLayoutMotionPhase] = useState<BrowserHostLayoutPhase>('idle')
   const [graphWorkspaceRequest, setGraphWorkspaceRequest] = useState<GraphWorkspaceRequest | null>(null)
+  const [findReplaceOpen, setFindReplaceOpen] = useState(false)
   const workspaceError = workspaceInitError ?? formatWorkspaceWatcherFailure(watcherFailure)
   const workbenchSurfaceRefreshTimersRef = useRef<number[]>([])
   const browserLayoutPhase = isPanelResizing ? 'dragging' : browserLayoutMotionPhase
-  const isSidebarContentVisible = sidebarVisible
   const hasDocumentSplitPane = Boolean(documentSplitTabId) && (workbenchMode === 'document' || splitMode === 'document')
   const hasVisibleDocumentMode = workbenchMode === 'document' || splitMode === 'document'
   const panelWidthTransitionMode = hasDocumentSplitPane ? 'instant' : 'animated'
@@ -198,10 +200,6 @@ export default function WorkbenchMode() {
       }, delay)
     ))
   }, [clearScheduledWorkbenchSurfaceRefresh])
-
-  const handleGraphWorkspaceOpen = useCallback((request: GraphWorkspaceRequest) => {
-    setGraphWorkspaceRequest(request)
-  }, [])
 
   useEffect(() => {
     scheduleWorkbenchSurfaceRefresh()
@@ -330,30 +328,11 @@ export default function WorkbenchMode() {
     handlePanelResizeStateChange(false)
   }, [handlePanelResizeStateChange, setWorkbenchSplitRatio])
 
-  const handlePanelClick = (targetVariant: ShellPanelId) => {
-    if (shell.sidebarFloating) { // a slide-out shows the picked panel; picking the open one closes it
-      shell.setSidebarPeek(!(shell.sidebarPeek && sidePanelVariant === targetVariant))
-      setSidePanelVariant(targetVariant)
-      return
-    }
-
-    if (sidebarVisible && sidePanelVariant === targetVariant) {
-      handleToggleSidebarWithResize()
-      return
-    }
-
-    setSidePanelVariant(targetVariant)
-    if (!sidebarVisible) {
-      handleToggleSidebarWithResize()
-    }
-  }
-
   const handleSidebarResize = useCallback((delta: number) => {
-    if (!['files', 'search', 'skills', 'backlinks', 'graph'].includes(sidePanelVariant)) return
     const nextWidth = clampWorkbenchSidePanelWidth(liveSidebarWidthRef.current + delta)
     liveSidebarWidthRef.current = nextWidth
     setShellWidth("[data-liquid-shell='side-panel']", nextWidth)
-  }, [sidePanelVariant])
+  }, [])
 
   const handleChatResize = useCallback((delta: number) => {
     const nextWidth = clampWorkbenchChatPanelWidth(liveChatPanelWidthRef.current + delta)
@@ -372,11 +351,9 @@ export default function WorkbenchMode() {
     setShellWillChange("[data-liquid-shell='side-panel']", false)
     const nextWidth = clampWorkbenchSidePanelWidth(liveSidebarWidthRef.current)
     liveSidebarWidthRef.current = nextWidth
-    if (['files', 'search', 'skills', 'backlinks', 'graph'].includes(sidePanelVariant)) {
-      setSidePanelWidth(sidePanelVariant as SidePanelWidthKey, nextWidth)
-    }
+    setSidePanelWidth(nextWidth)
     handlePanelResizeStateChange(false)
-  }, [handlePanelResizeStateChange, setSidePanelWidth, sidePanelVariant])
+  }, [handlePanelResizeStateChange, setSidePanelWidth])
 
   const handleChatResizeStateChange = useCallback((resizing: boolean) => {
     if (resizing) {
@@ -412,6 +389,8 @@ export default function WorkbenchMode() {
     toggleDockedAssistant: handleToggleChatPanelWithResize,
   })
   const { toggleSidebar: toggleShellSidebar, toggleAssistant: toggleShellAssistant } = shell
+  useShellActions({ toggleSidebar: toggleShellSidebar, toggleAssistant: toggleShellAssistant, openSkills: () => navigate('/skills'), openGraph: () => setGraphWorkspaceRequest({}), openFindReplace: () => setFindReplaceOpen(true) })
+  const sidebarSlot = useShellSidebarSlot({ workbenchMode, splitMode, collapsed: shell.sidebarCollapsed, slideOut: shell.sidebarSlideOut, toggle: toggleShellSidebar })
 
 
   useEffect(() => () => {
@@ -775,14 +754,6 @@ export default function WorkbenchMode() {
         toggleShellSidebar()
         return
       }
-      if (handledAction === 'cycle-side-panel') {
-        const { sidePanelVariant: current, sidebarVisible: visible, setSidePanelVariant: applyVariant } = useWorkspace.getState()
-        applyVariant(getNextSidePanelVariant(current))
-        if (!visible) {
-          handleToggleSidebarWithResize()
-        }
-        return
-      }
       toggleShellAssistant()
     }
 
@@ -826,6 +797,7 @@ export default function WorkbenchMode() {
 
           <TopBar />
 
+          <ShellSidebarSlotProvider value={sidebarSlot.value}>
           <div
             className="relative flex flex-1 overflow-hidden"
             data-workbench-shell="true"
@@ -838,22 +810,18 @@ export default function WorkbenchMode() {
               splitMode={splitMode}
               onModeChange={(mode) => { void handleWorkbenchModeChange(mode) }}
               onSplitToggle={handleWorkbenchSplitToggle}
-              activePanel={sidePanelVariant === 'hidden' ? 'files' : sidePanelVariant}
-              panelOpen={shell.sidebarFloating ? shell.sidebarPeek : sidebarVisible}
-              onPanelClick={handlePanelClick}
               assistantOpen={shell.assistantVisible}
               onAssistantOpen={shell.toggleAssistant}
             />
-            <SidePanel
-              variant={sidePanelVariant}
+            <ShellSidebar
+              mode={sidebarSlot.mode}
               panelWidth={shell.sidebarPanelWidth}
-              contentVisible={isSidebarContentVisible || shell.sidebarFloating}
-              presentation={shell.sidebarFloating ? 'floating' : 'docked'}
+              presentation={shell.sidebarSlideOut ? 'floating' : 'docked'}
               floatingOpen={shell.sidebarPeek}
               floatingInset={SHELL_RAIL_WIDTH}
               onFloatingPeek={shell.setSidebarPeek}
-              onGraphWorkspaceOpen={handleGraphWorkspaceOpen}
-              graphWorkspaceOpen={graphWorkspaceRequest !== null}
+              peekable={shell.sidebarCollapsed}
+              slotRef={sidebarSlot.setElement}
             />
 
             {shell.sidebarResizable && (
@@ -875,6 +843,8 @@ export default function WorkbenchMode() {
                 >
                   <div
                     ref={splitPrimaryPaneRef}
+                    onPointerDownCapture={sidebarSlot.focusPrimary}
+                    onFocusCapture={sidebarSlot.focusPrimary}
                     className="workbench-split-pane flex flex-col min-w-0"
                     style={{
                       flexBasis: `${workbenchSplitRatio}%`,
@@ -896,7 +866,12 @@ export default function WorkbenchMode() {
                     onResize={handleSplitResize}
                     onResizeStateChange={handleWorkbenchSplitResizeStateChange}
                   />
-                  <div className="workbench-split-pane flex-1 flex flex-col min-w-0" style={{ background: 'transparent' }}>
+                  <div
+                    className="workbench-split-pane flex-1 flex flex-col min-w-0"
+                    style={{ background: 'transparent' }}
+                    onPointerDownCapture={sidebarSlot.focusSplit}
+                    onFocusCapture={sidebarSlot.focusSplit}
+                  >
                     <WorkbenchModeOutlet
                       mode={splitMode}
                       mountedModes={[splitMode]}
@@ -926,6 +901,7 @@ export default function WorkbenchMode() {
                   onClose={() => setGraphWorkspaceRequest(null)}
                 />
               )}
+              {findReplaceOpen && <Suspense fallback={null}><FindReplaceWorkspace onClose={() => setFindReplaceOpen(false)} /></Suspense>}
             </div>
 
             {shell.assistantResizable && (
@@ -940,6 +916,7 @@ export default function WorkbenchMode() {
               onTogglePanel={shell.toggleAssistant}
             />
           </div>
+          </ShellSidebarSlotProvider>
 
           <StatusBar />
         </div>

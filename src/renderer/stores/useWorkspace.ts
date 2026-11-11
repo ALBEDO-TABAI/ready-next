@@ -24,22 +24,8 @@ export interface FileItem {
   modified: Date
 }
 
-export type SidePanelWidthKey = 'files' | 'search' | 'skills' | 'backlinks' | 'graph'
-export type WorkspaceSidePanelVariant = SidePanelWidthKey | 'hidden'
-
-// Icon-rail order the Ctrl+Tab shortcut cycles through (文件→搜索→技能→链接→图谱→文件).
-export const SIDE_PANEL_CYCLE_ORDER: SidePanelWidthKey[] = ['files', 'search', 'skills', 'backlinks', 'graph']
-
-// Next rail variant when cycling forward. A 'hidden'/unknown current (no real
-// selection) starts the cycle at 'files', matching the rail's default highlight.
-export function getNextSidePanelVariant(current: WorkspaceSidePanelVariant): SidePanelWidthKey {
-  const index = SIDE_PANEL_CYCLE_ORDER.indexOf(current as SidePanelWidthKey)
-  if (index === -1) return SIDE_PANEL_CYCLE_ORDER[0]
-  return SIDE_PANEL_CYCLE_ORDER[(index + 1) % SIDE_PANEL_CYCLE_ORDER.length]
-}
-
 interface SidePanelWidths {
-  // 三个面板共享一个宽度，避免切换时跳跃
+  // The shell's one sidebar: a single width for every mode (W2 §2.2).
   shared: number
 }
 
@@ -65,7 +51,6 @@ interface WorkspaceState {
   dirChildren: Map<string, FileItem[]>
   pinnedFolders: string[]
   sidebarVisible: boolean
-  sidePanelVariant: WorkspaceSidePanelVariant
   sidePanelWidths: SidePanelWidths
   skillsSplitRatio: number
   chatPanelVisible: boolean
@@ -80,8 +65,7 @@ interface WorkspaceState {
   setFiles: (files: FileItem[]) => void
   selectFile: (path: string | null) => void
   toggleSidebar: () => void
-  setSidePanelVariant: (variant: WorkspaceSidePanelVariant) => void
-  setSidePanelWidth: (variant: SidePanelWidthKey, width: number) => void
+  setSidePanelWidth: (width: number) => void
   setSkillsSplitRatio: (ratio: number) => void
   toggleChatPanel: () => void
   refreshFiles: () => Promise<void>
@@ -485,7 +469,6 @@ export async function reconcileWorkspaceWatchersFromStore(): Promise<WorkspaceWa
 
 const SIDE_PANEL_WIDTHS_KEY = 'ready-side-panel-widths-v2'
 const SKILLS_SPLIT_RATIO_KEY = 'ready-skills-split-ratio-v2'
-const SIDE_PANEL_VARIANT_KEY = 'ready-side-panel-variant-v1'
 const DEFAULT_SIDE_PANEL_WIDTH = 220
 const MIN_SIDE_PANEL_WIDTH = 220
 const MAX_SIDE_PANEL_WIDTH = 420
@@ -535,29 +518,6 @@ const loadSkillsSplitRatioFromStorage = (): number => {
   return clampSkillsSplitRatio(parsed)
 }
 
-const loadSidePanelVariantFromStorage = (): WorkspaceSidePanelVariant => {
-  if (typeof localStorage === 'undefined') {
-    console.log('[SidePanelVariant] localStorage undefined, returning default')
-    return 'files'
-  }
-  try {
-    const raw = readStorage(SIDE_PANEL_VARIANT_KEY)
-    console.log('[SidePanelVariant] Loaded from storage:', raw)
-    if (!raw) return 'files'
-    const parsed = raw as WorkspaceSidePanelVariant
-    // Validate the variant
-    if (['files', 'search', 'skills', 'backlinks', 'graph', 'hidden'].includes(parsed)) {
-      console.log('[SidePanelVariant] Valid variant loaded:', parsed)
-      return parsed
-    }
-    console.log('[SidePanelVariant] Invalid variant, returning default')
-    return 'files'
-  } catch (err) {
-    console.error('[SidePanelVariant] Error loading from storage:', err)
-    return 'files'
-  }
-}
-
 const remapPathAfterMove = (value: string | null, src: string, dest: string): string | null => {
   if (!value) return value
   if (value === src) return dest
@@ -567,8 +527,6 @@ const remapPathAfterMove = (value: string | null, src: string, dest: string): st
 }
 
 export const useWorkspace = create<WorkspaceState>((set, get) => {
-  const initialVariant = loadSidePanelVariantFromStorage()
-  console.log('[SidePanelVariant] Store initialized with variant:', initialVariant)
 
   const cleanupRemovedWorkspacePath = async (path: string): Promise<void> => {
     const state = get()
@@ -604,7 +562,6 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
   dirChildren: new Map<string, FileItem[]>(),
   pinnedFolders: readJsonStorage('ready-pinned-folders', [] as string[]),
   sidebarVisible: true,
-  sidePanelVariant: initialVariant,
   sidePanelWidths: loadSidePanelWidthsFromStorage(),
   skillsSplitRatio: loadSkillsSplitRatioFromStorage(),
   chatPanelVisible: true,
@@ -625,30 +582,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
 
   toggleSidebar: () => set((state) => ({ sidebarVisible: !state.sidebarVisible })),
 
-  setSidePanelVariant: (variant) => {
-    console.log('[SidePanelVariant] Setting variant:', variant)
-
-    // 先保存到 localStorage，确保持久化
-    if (typeof localStorage !== 'undefined') {
-      try {
-        writeStorage(SIDE_PANEL_VARIANT_KEY, variant)
-        console.log('[SidePanelVariant] Saved to storage:', variant)
-        // 立即验证写入是否成功
-        const saved = readStorage(SIDE_PANEL_VARIANT_KEY)
-        console.log('[SidePanelVariant] Verification read:', saved)
-        if (saved !== variant) {
-          console.error('[SidePanelVariant] Verification failed! Expected:', variant, 'Got:', saved)
-        }
-      } catch (err) {
-        console.error('[SidePanelVariant] Error saving to storage:', err)
-      }
-    }
-
-    // 然后更新 store 状态
-    set({ sidePanelVariant: variant })
-  },
-
-  setSidePanelWidth: (variant, width) => {
+  setSidePanelWidth: (width) => {
     const clamped = clampSidePanelWidth(width)
     set((state) => {
       const next: SidePanelWidths = {
@@ -1244,26 +1178,6 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
   },
   cancelCreating: () => set({ creatingType: null, creatingPath: null })
 }})
-
-// 订阅 sidePanelVariant 变化，自动保存到 localStorage
-// 这样即使有其他地方直接修改了状态，也能被捕获
-if (typeof window !== 'undefined') {
-  let previousVariant = useWorkspace.getState().sidePanelVariant
-  useWorkspace.subscribe((state) => {
-    if (state.sidePanelVariant !== previousVariant) {
-      console.log('[SidePanelVariant] Detected variant change via subscription:', previousVariant, '->', state.sidePanelVariant)
-      if (typeof localStorage !== 'undefined') {
-        try {
-          writeStorage(SIDE_PANEL_VARIANT_KEY, state.sidePanelVariant)
-          console.log('[SidePanelVariant] Auto-saved to storage via subscription:', state.sidePanelVariant)
-        } catch (err) {
-          console.error('[SidePanelVariant] Auto-save via subscription failed:', err)
-        }
-      }
-      previousVariant = state.sidePanelVariant
-    }
-  })
-}
 
 const syncObjectAppearances = () => {
   const objectAppearances = normalizeFileAppearanceMap(readJsonStorage(OBJECT_APPEARANCES_KEY, {} as FileAppearanceMap))

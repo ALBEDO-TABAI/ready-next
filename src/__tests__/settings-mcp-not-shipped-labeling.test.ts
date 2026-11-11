@@ -28,7 +28,8 @@ test('settings mcp section is a live management panel (not-shipped placeholder r
   // McpSettingsPanel exists and stays wired into the render switch
   assert.match(settingsPage, /export function McpSettingsPanel\(\)/)
   assert.match(settingsPage, /currentSection\.id === 'mcp' && <McpSettingsPanel \/>/)
-  assert.match(settingsPage, /\['ai', 'memory', 'remote-im', 'external-services', 'mcp',/)
+  // MCP is one of the live (dynamic) sections, rendered by McpSettingsPanel.
+  assert.match(settingsPage, /const isDynamicSection = currentSection\s*\?\s*\[[^\]]*'mcp'[^\]]*\]\.includes\(currentSection\.id\)/)
 
   // The not-shipped framing is fully gone (both CN and EN variants)
   assert.doesNotMatch(settingsPage, /MCP 暂未发布/)

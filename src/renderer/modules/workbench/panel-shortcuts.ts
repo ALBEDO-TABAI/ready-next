@@ -1,4 +1,4 @@
-export type WorkbenchPanelShortcutAction = 'toggle-sidebar' | 'toggle-chat' | 'cycle-side-panel'
+export type WorkbenchPanelShortcutAction = 'toggle-sidebar' | 'toggle-chat'
 
 interface ShortcutTargetLike {
   tagName?: string
@@ -66,13 +66,6 @@ export function resolveWorkbenchPanelShortcutAction({
   const selectionText = String(rawSelectionText || '')
   if (isComposing || keyCode === 229) return null
   if (renamingPath || creatingType) return null
-
-  // Ctrl+Tab cycles the icon-rail forward app-wide. It carries a modifier and
-  // isn't a text-editing key, so — unlike the bare-key shortcuts below — it is
-  // intentionally allowed even while an input is focused or text is selected.
-  if (ctrlKey && !metaKey && !altKey && !shiftKey && key === 'Tab') {
-    return 'cycle-side-panel'
-  }
 
   if (metaKey || ctrlKey || altKey) return null
   if (selectionText.trim()) return null

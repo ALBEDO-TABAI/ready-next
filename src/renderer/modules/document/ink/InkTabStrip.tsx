@@ -20,7 +20,6 @@ export function InkTabStrip({ active, onNewTab }: { active: boolean; onNewTab():
   const tabs = useDocTabs(state => state.tabs)
   const activeId = useDocTabs(state => state.activeTabId)
   const home = useInkLayout(state => state.home)
-  const sidebarOpen = useInkLayout(state => state.open)
   const { canBack, canForward } = useInkHistory()
   const back = useReferenceReturn(state => state.destination === 'document' ? state.entry : null)
   const strip = useRef<HTMLDivElement>(null)
@@ -47,7 +46,6 @@ export function InkTabStrip({ active, onNewTab }: { active: boolean; onNewTab():
   const close = (id: string) => useDocTabs.getState().closeTab(id)
   return <div className="ink-tabbar" aria-label="打开的文档">
     <div className="ink-tabbar-nav">
-      {!sidebarOpen && <button type="button" className="ink-tbar-icon" aria-label="展开侧栏" {...tip('展开侧栏')} onClick={() => useInkLayout.getState().setOpen(true)}><Icon name="sidebarOpen" size={17} /></button>}
       <button type="button" className="ink-tbar-icon" aria-label="后退" disabled={!canBack} {...tip('后退', `${MOD}[`)} onClick={goBack}><Icon name="chevronLeft" size={17} /></button>
       <button type="button" className="ink-tbar-icon" aria-label="前进" disabled={!canForward} {...tip('前进', `${MOD}]`)} onClick={goForward}><Icon name="chevronRight" size={17} /></button>
     </div>

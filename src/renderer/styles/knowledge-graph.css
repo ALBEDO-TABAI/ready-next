@@ -69,13 +69,6 @@ html[data-fastcard-overlay-window='true'] .knowledge-graph-workspace__panel {
   gap: 9px;
 }
 
-.knowledge-graph-workspace__scope {
-  padding: 5px 9px;
-  color: var(--text-secondary, #66645d) !important;
-  background: color-mix(in srgb, currentColor 6%, transparent);
-  border-radius: 999px;
-}
-
 .knowledge-graph-workspace__header button {
   display: inline-grid;
   width: 32px;
@@ -234,7 +227,6 @@ html[data-theme='dark'] .knowledge-graph-workspace__panel {
   .knowledge-graph-workspace { inset: 8px; }
   .knowledge-graph-workspace__header { padding: 18px 18px 13px; }
   .knowledge-graph-workspace__header h2 { font-size: 23px; }
-  .knowledge-graph-workspace__scope { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

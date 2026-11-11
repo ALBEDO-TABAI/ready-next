@@ -1,6 +1,8 @@
 import { RelationsPanel } from '../../modules/workbench/object-ui/RelationsPanel'
 import { DraftBootNotice, DraftControls } from '../../modules/document/drafts/DraftControls'
-import { InkSidebar } from '../../modules/document/ink/InkSidebar'
+import DocumentNavigator from '../../modules/document/navigator/DocumentNavigator'
+import { useDocumentNavigator } from '../../modules/document/navigator/useDocumentNavigator'
+import { ShellNavigator } from '../../modules/workbench/shell/ShellSidebar'
 import { InkTopbar } from '../../modules/document/ink/InkTopbar'
 import { InkHome } from '../../modules/document/ink/InkHome'
 import { OverlayHost } from '../../modules/document/ink/overlay'
@@ -237,42 +239,11 @@ export default function DocumentMode({
 
   const draftBoot = useDraftUI(state => state.boot)
   const pagePanel = usePagePanel()
-  const inkSidebarOpen = useInkLayout(state => state.open)
-  const inkSidebarWidth = useInkLayout(state => state.width)
-  const inkResizing = useInkLayout(state => state.resizing)
   const inkHome = useInkLayout(state => state.home)
-  // Collapsed, the sidebar peeks in when the pointer reaches the card's left edge, as in Inkwell.
-  const [inkPeek, setInkPeek] = useState(false)
-  const inkPeekTimer = useRef<number | undefined>(undefined)
-  useEffect(() => { if (inkSidebarOpen) setInkPeek(false) }, [inkSidebarOpen])
-  useEffect(() => {
-    if (!inkPeek) return
-    const move = (event: MouseEvent) => {
-      const target = event.target as Element | null
-      // Anything left of the panel's final right edge counts as inside (the panel may still be sliding in), so the
-      // edge that opened it does not close it.
-      const app = document.querySelector('.ink-doc-app')?.getBoundingClientRect()
-      const right = app ? app.left + useInkLayout.getState().width + 8 : 0
-      const inside = target?.closest?.('.ink-sb-peek, [data-popover-id]') || (app && event.clientX <= right && event.clientY >= app.top && event.clientY <= app.bottom)
-      if (inside) { window.clearTimeout(inkPeekTimer.current); inkPeekTimer.current = undefined; return }
-      if (inkPeekTimer.current === undefined) inkPeekTimer.current = window.setTimeout(() => { inkPeekTimer.current = undefined; setInkPeek(false) }, 300)
-    }
-    window.addEventListener('mousemove', move)
-    return () => { window.removeEventListener('mousemove', move); window.clearTimeout(inkPeekTimer.current); inkPeekTimer.current = undefined }
-  }, [inkPeek])
-  // The sidebar slides in and out like Inkwell's: it stays mounted while it closes.
-  const [inkSidebarMotion, setInkSidebarMotion] = useState<null | 'opening' | 'closing'>(null)
-  const inkSidebarWasOpen = useRef(inkSidebarOpen)
-  useLayoutEffect(() => {
-    if (inkSidebarWasOpen.current === inkSidebarOpen) return
-    inkSidebarWasOpen.current = inkSidebarOpen
-    setInkSidebarMotion(inkSidebarOpen ? 'opening' : 'closing')
-    const timer = window.setTimeout(() => setInkSidebarMotion(null), 360)
-    return () => window.clearTimeout(timer)
-  }, [inkSidebarOpen])
   const revealInFiles = useCallback(async (node: PageNode) => {
     const workspace = useWorkspace.getState()
     if (!workspace.sidebarVisible) workspace.toggleSidebar()
+    useDocumentNavigator.getState().setView('files')
     await workspace.revealFile(node.path)
   }, [])
   // Opening or switching a document leaves the home view. Markdown source is a per-visit escape hatch: another tab or
@@ -871,20 +842,10 @@ export default function DocumentMode({
         {/* Like the calendar: no shell surface of its own; the sidebar and page panels fill the workspace. */}
         <div className="workbench-canvas-shell flex min-h-0 h-full flex-col" style={{ background: 'transparent', boxShadow: 'none' }}>
           {/* Inkwell's document interface: tab rail, glass sidebar, then the paper page with its topbar. */}
-          <div className={`ink-scope ink-doc-app${inkResizing ? ' is-resizing' : ''}`}
-            onMouseMove={inkSidebarOpen || inkPeek ? undefined : (event) => {
-              if (event.clientX - event.currentTarget.getBoundingClientRect().left <= 14) setInkPeek(true)
-            }}>
-            {!inkSidebarOpen && inkSidebarMotion !== 'closing' && (
-              <div className={`ink-sb-peek${inkPeek ? ' is-visible' : ''}`} aria-hidden={!inkPeek}>
-                {inkPeek && <InkSidebar roots={pagePanel.roots} visible={isSceneVisible} onShowFiles={revealInFiles} floating />}
-              </div>
-            )}
-            {(inkSidebarOpen || inkSidebarMotion === 'closing') && (
-              <div className={`ink-sb-shell${inkSidebarMotion ? ` is-${inkSidebarMotion}` : ''}`} style={{ width: inkSidebarWidth }}>
-                <InkSidebar roots={pagePanel.roots} visible={isSceneVisible} onShowFiles={revealInFiles} />
-              </div>
-            )}
+          <ShellNavigator mode="document" label="资料库">
+            <DocumentNavigator roots={pagePanel.roots} visible={isSceneVisible} onShowFiles={revealInFiles} />
+          </ShellNavigator>
+          <div className="ink-scope ink-doc-app">
             <div className="ink-column">
             <InkTabStrip active={isSceneVisible} onNewTab={() => { setEditorMode('preview'); openTab('') }} />
             <main className="ink-main" aria-label="文档">

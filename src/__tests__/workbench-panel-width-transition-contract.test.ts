@@ -11,7 +11,7 @@ function readWorkspaceFile(path: string): string {
 test('workbench side/chat shells interpolate width via CSS transition', () => {
   const indexCss = readRendererStyles()
   const workbenchMode = readWorkspaceFile('src/renderer/pages/WorkbenchMode.tsx')
-  const sidePanel = readWorkspaceFile('src/renderer/components/layout/SidePanel.tsx')
+  const sidePanel = readWorkspaceFile('src/renderer/modules/workbench/shell/ShellSidebar.tsx')
   const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
 
   // CSS: transition rule present for both shell data attributes.
@@ -48,9 +48,17 @@ test('workbench panel drag updates live shell width and commits store width only
   assert.match(workbenchMode, /setShellWidth\("\[data-liquid-shell='chat-panel'\]", nextWidth\)/)
   assert.match(workbenchMode, /onResizeStateChange=\{handleSidebarResizeStateChange\}/)
   assert.match(workbenchMode, /onResizeStateChange=\{handleChatResizeStateChange\}/)
-  assert.match(workbenchMode, /setSidePanelWidth\(sidePanelVariant as SidePanelWidthKey, nextWidth\)/)
+  assert.match(workbenchMode, /setSidePanelWidth\(nextWidth\)/)
   assert.match(workbenchMode, /useWorkspace\.setState\(\{ chatPanelWidth: nextWidth \}\)/)
-  assert.doesNotMatch(workbenchMode, /setSidePanelWidth\(sidePanelVariant as 'files' \| 'search' \| 'skills' \| 'backlinks' \| 'graph', current \+ delta\)/)
+  for (const panel of ['Sidebar', 'Chat']) {
+    const drag = workbenchMode.match(new RegExp(`const handle${panel}Resize = useCallback\\([\\s\\S]*?\\n  }, \\[\\]\\)`))?.[0]
+    assert.ok(drag, `${panel} live drag handler must exist`)
+    assert.doesNotMatch(drag, /setSidePanelWidth|useWorkspace\.setState/)
+    const commit = workbenchMode.match(new RegExp(`const handle${panel}ResizeStateChange = useCallback\\([\\s\\S]*?\\n  },`))?.[0]
+    assert.ok(commit, `${panel} drag-end handler must exist`)
+    assert.match(commit, /if \(resizing\) \{[^}]*return\s*\}/)
+    assert.match(commit, /return\s*\}[\s\S]*(?:setSidePanelWidth\(nextWidth\)|useWorkspace\.setState\(\{ chatPanelWidth: nextWidth \}\))/)
+  }
   assert.doesNotMatch(workbenchMode, /chatPanelWidth:\s*Math\.max\(280,\s*Math\.min\(600,\s*state\.chatPanelWidth \+ delta\)\)/)
 })
 

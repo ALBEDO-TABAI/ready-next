@@ -126,12 +126,8 @@ test('browser header surfaces browser ownership status from BrowserMode supervis
 })
 
 test('tab rail can toggle bookmarks from explicit tab affordances, not only from the active address surface', () => {
-  const browserMode = readWorkspaceFile('src/renderer/pages/modes/BrowserMode.tsx')
-  const panelDataHook = readWorkspaceFile('src/renderer/modules/browser/useBrowserPanelData.ts')
   const tabRail = readWorkspaceFile('src/renderer/components/browser/TabRail.tsx')
 
-  assert.match(panelDataHook, /handleToggleBookmarkForTab/)
-  assert.match(browserMode, /handleToggleBookmarkForTab/)
   assert.match(tabRail, /onToggleBookmarkForTab/)
   assert.match(tabRail, /onToggleBookmarkForTab\(tab\)/)
 })

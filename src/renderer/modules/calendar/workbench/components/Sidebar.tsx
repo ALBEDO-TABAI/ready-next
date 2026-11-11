@@ -1,11 +1,12 @@
 import { LayerSwitches } from '../layers/LayerDays';
 import { useState } from 'react';
-import { ChevronUp, ChevronDown, PanelLeft, Search, SquarePen, Eye, EyeOff, MoreHorizontal, Plus, CalendarSearch, Download, HelpCircle } from 'lucide-react';
+import { ChevronUp, ChevronDown, Search, SquarePen, Eye, EyeOff, MoreHorizontal, Plus, CalendarSearch, Download, HelpCircle } from 'lucide-react';
 import { startOfWeek, startOfMonth, addMonths, weekday, ymd, parseIsoDate, DayNum, colorFamily } from '@shared/calendar';
-import { useStore, getState, setState, goToDay, setPrefs, updateCalendar, openMenu, openOverlay, createEvent, importIcsFile, isDark, tz } from '../store';
+import { useStore, getState, setState, goToDay, updateCalendar, openMenu, openOverlay, createEvent, importIcsFile, isDark, tz } from '../store';
 import { miniTitle, wdMini } from '../fmt';
 import { t } from '../i18n';
 import { parseDateInput } from '../dateinput';
+import { ShellSidebarToggle } from '../../../workbench/shell/ShellSidebar';
 
 export function MiniMonth() {
   const s = useStore((x) => ({ anchor: x.anchor, today: x.today, wso: x.prefs.weekStartsOn, view: x.prefs.gridView, days: x.prefs.daysPerPeriod }));
@@ -40,17 +41,17 @@ export function MiniMonth() {
   );
 }
 
-export function Sidebar() {
+export function Sidebar({ actionsHost }: { actionsHost?: (element: HTMLDivElement | null) => void }) {
   const s = useStore((x) => ({ calendars: x.calendars, accounts: x.accounts, dark: isDark(x) }));
   const [q, setQ] = useState('');
   const go = () => { const d = parseDateInput(q, getState().today); if (d !== null) { goToDay(d); setQ(''); } };
   return (
     <aside className="sidebar" data-testid="sidebar">
       <div className="sidebar-top">
-        <button className="ibtn sm" title={t('toggleSidebar')} onClick={() => setPrefs({ sidebar: false })}><PanelLeft size={16} /></button>
-        <div style={{ flex: 1 }} />
+        <span className="sidebar-title">日历</span>
         <button className="ibtn sm" title={t('search')} onClick={() => openOverlay('search')}><Search size={16} /></button>
-        <button className="ibtn sm" title={t('newEvent')} onClick={() => newEventNow()}><SquarePen size={16} /></button>
+        <button className="ibtn sm sidebar-new" title={t('newEvent')} onClick={() => newEventNow()}><SquarePen size={16} /></button>
+        <ShellSidebarToggle className="ibtn sm" />
       </div>
       <div className="sidebar-scroll panel-hover-scrollbar">
         <MiniMonth />
@@ -90,6 +91,7 @@ export function Sidebar() {
         </div>
       </div>
       <div className="sidebar-foot">
+        <div className="sidebar-actions" ref={actionsHost} />
         <button className="ibtn sm" title={t('allShortcuts')} onClick={() => openOverlay('shortcuts')}><HelpCircle size={16} /></button>
       </div>
     </aside>

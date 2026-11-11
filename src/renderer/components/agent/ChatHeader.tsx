@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { AtSign, ChevronDown, ChevronRight, MessageSquare, Minimize2, MoreHorizontal, PanelLeftClose, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react'
+import { AtSign, ChevronDown, ChevronRight, MessageSquare, Minimize2, MoreHorizontal, PanelLeftClose, Pencil, Plus, Puzzle, RotateCcw, Trash2 } from 'lucide-react'
+import { requestShellAction } from '../../modules/workbench/commands/shell-actions'
 import { IconButton } from '../ui'
 import { FloatPanel } from '../ui/float/FloatPanel'
 import Modal from '../ui/Modal'
@@ -574,6 +575,13 @@ export default function ChatHeader({
               }[lifecycleUncertainty]}
             </span>
           )}
+
+          {/* The skills centre belongs to the assistant: it opens as a page beside settings (W2 §2.3). */}
+          <IconButton
+            icon={<Puzzle style={{ width: 14, height: 14 }} strokeWidth={2} />}
+            onClick={() => requestShellAction('open-skills')}
+            title="技能中心"
+          />
 
           <IconButton
             icon={<MoreHorizontal style={{ width: 14, height: 14 }} strokeWidth={2} />}

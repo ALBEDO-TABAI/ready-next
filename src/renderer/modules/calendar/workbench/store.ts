@@ -16,7 +16,7 @@ export interface Prefs {
   layers: Record<CalendarLayer, boolean>;
   gridView: GridView; daysPerPeriod: number; densityZoomLevel: number; weekStartsOn: number;
   showWeekends: boolean; showDeclined: boolean; showWeekNumbers: boolean; format24HourTime: boolean;
-  interfaceTheme: 'system' | 'light' | 'dark'; sidebar: boolean; contextPanel: boolean;
+  interfaceTheme: 'system' | 'light' | 'dark'; contextPanel: boolean;
   primaryTimeZone: string; additionalTimeZones: string[]; locale: Locale; localeChosen?: boolean; defaultEventDuration: number;
   collapseAllDaySection: boolean; todayKey: 'today' | 'alignToday';
   upcomingHours: number; mapsProvider: 'google' | 'apple' | 'osm'; openAtLogin: boolean; showAdditionalTz: boolean;
@@ -26,13 +26,13 @@ export interface Prefs {
 export const defaultPrefs = (): Prefs => ({
   layers: { events: true, documents: true, tasks: true, footprints: true },
   gridView: 'default', daysPerPeriod: 7, densityZoomLevel: 0, weekStartsOn: 0, showWeekends: true, showDeclined: true, showWeekNumbers: false,
-  format24HourTime: false, interfaceTheme: 'system', sidebar: true, contextPanel: true, primaryTimeZone: systemTimeZone(), additionalTimeZones: [],
+  format24HourTime: false, interfaceTheme: 'system', contextPanel: true, primaryTimeZone: systemTimeZone(), additionalTimeZones: [],
   locale: 'zh-CN', defaultEventDuration: 30, collapseAllDaySection: false, todayKey: 'today',
   upcomingHours: 4, mapsProvider: 'google', openAtLogin: false, showAdditionalTz: true,
   notifications: true, defaultReminder: 10, defaultAllDayReminder: -1, notifySound: true, menuBarNext: true, menuBarMaxLen: 32,
   displayName: '', email: '', videoProvider: 'none', videoUrl: '', autoAddVideo: false,
 });
-export type Overlay = null | 'cmdk' | 'settings' | 'shortcuts' | 'search' | 'goto' | 'recurrence';
+export type Overlay = null | 'shortcuts' | 'search' | 'goto' | 'recurrence';
 export interface MenuState { kind: 'view' | 'chip' | 'grid' | 'calendar' | 'repeat' | 'busy' | 'visibility' | 'reminder' | 'calendarPick' | 'time' | 'tz' | 'color' | 'evColor' | 'recurrence'; x: number; y: number; data?: any }
 export interface Toast { id: number; text: string; undo?: () => void }
 export interface ScopeAsk { kind: 'edit' | 'delete'; resolve: (s: 'this' | 'following' | 'all' | null) => void }
@@ -107,7 +107,7 @@ let generation = 0;
 let queue: Promise<unknown> = Promise.resolve();
 let pending = 0;
 function receive(snapshot: CalendarSnapshot) {
-  const prefs = { ...defaultPrefs(), ...snapshot.prefs, ...(state.ready ? { sidebar: state.prefs.sidebar, contextPanel: state.prefs.contextPanel } : {}), interfaceTheme: useTheme.getState().theme, openAtLogin: state.prefs.openAtLogin } as Prefs;
+  const prefs = { ...defaultPrefs(), ...snapshot.prefs, ...(state.ready ? { contextPanel: state.prefs.contextPanel } : {}), interfaceTheme: useTheme.getState().theme, openAtLogin: state.prefs.openAtLogin } as Prefs;
   // The calendar follows Ready's interface language; a locale it detected on its own earlier is not a choice.
   if (prefs.locale !== 'zh-CN' && !prefs.localeChosen) prefs.locale = 'zh-CN'
   setLocale(prefs.locale);
@@ -144,7 +144,7 @@ export function setPrefs(p:Partial<Prefs>) {
     const login=openAtLogin===undefined?state.prefs.openAtLogin:await unwrap(api().setLoginItem(openAtLogin));
     const snapshot=await unwrap(api().putPreferences(prefs as Record<string,unknown>));
     receive(snapshot);
-    setState(s=>({prefs:{...s.prefs,...(p.sidebar===undefined?{}:{sidebar:p.sidebar}),...(p.contextPanel===undefined?{}:{contextPanel:p.contextPanel}),openAtLogin:login}}));
+    setState(s=>({prefs:{...s.prefs,...(p.contextPanel===undefined?{}:{contextPanel:p.contextPanel}),openAtLogin:login}}));
   });
 }
 export function setView(gridView:GridView,days?:number){void setPrefs({gridView,...(days?{daysPerPeriod:days}:{})});setState({menu:null})}
@@ -152,8 +152,9 @@ export function goToday(){setState(s=>({anchor:s.today,cursorDay:s.today}))}
 export function goToDay(d:DayNum){setState({anchor:d,cursorDay:d})}
 export function step(dir:1|-1){const p=state.prefs;setState({anchor:p.gridView==='month'?addMonths(startOfMonth(state.anchor),dir):(p.daysPerPeriod===7?startOfWeek(state.anchor,p.weekStartsOn):state.anchor)+dir*p.daysPerPeriod})}
 export function zoom(d:1|-1|0){void setPrefs({densityZoomLevel:d===0?0:Math.max(state.minDensity,Math.min(20,state.prefs.densityZoomLevel+d))})}
-export function toggleTheme(){void setPrefs({interfaceTheme:isDark()?'light':'dark'})}
 export function openOverlay(overlay:Overlay){setState({overlay,menu:null,prefs:{...state.prefs,contextPanel:overlay==='search'||overlay==='shortcuts'||state.prefs.contextPanel}})}
+// The calendar's preferences are a section of the global settings page (W2 §3.2); `page` picks its sub-page.
+export function openCalendarSettings(page?: string) { if (page) setState({ settingsPage: page }); window.location.hash = '#/settings?section=calendar'; }
 export function openMenu(menu:MenuState|null){const rect=document.querySelector('.ready-calendar')?.getBoundingClientRect();setState({menu:menu&&rect?{...menu,x:menu.x-rect.left,y:menu.y-rect.top}:menu})}
 let toastSeq=0;
 export function toast(text:string,undo?:()=>void){const id=++toastSeq;setState(s=>({toasts:[...s.toasts.slice(-2),{id,text,undo}]}));window.setTimeout(()=>setState(s=>({toasts:s.toasts.filter(x=>x.id!==id)})),5000)}

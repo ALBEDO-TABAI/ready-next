@@ -49,6 +49,11 @@ export function useShellPresentation(input: ShellPresentationInput) {
     assistantWidth: input.chatPanelWidth,
   })
   const sidebarFloating = layout.sidebar === 'floating' || (layout.sidebar === 'hidden' && ifOpen.sidebar === 'floating')
+  // Collapsed on a wide window, the sidebar still slides out while the pointer rests on the window's
+  // left edge (W2 §2.2, after Inkwell); docking it again (⌘B, the pin) ends the peek.
+  const sidebarCollapsed = !sidebarFloating && layout.sidebar === 'hidden'
+  const sidebarSlideOut = sidebarFloating || (sidebarCollapsed && sidebarPeek)
+  useEffect(() => { if (layout.sidebar === 'docked') setSidebarPeek(false) }, [layout.sidebar])
   const assistantFloating = layout.assistant === 'floating' || (layout.assistant === 'hidden' && ifOpen.assistant === 'floating')
   const docked = useRef(input)
   docked.current = input
@@ -66,6 +71,8 @@ export function useShellPresentation(input: ShellPresentationInput) {
   return {
     layout,
     sidebarFloating,
+    sidebarCollapsed,
+    sidebarSlideOut,
     assistantFloating,
     sidebarPeek,
     setSidebarPeek,
@@ -75,7 +82,7 @@ export function useShellPresentation(input: ShellPresentationInput) {
     toggleAssistant,
     toggleSidebar,
     /** Width each panel renders at: a floating panel keeps its size, a hidden one has none. */
-    sidebarPanelWidth: sidebarFloating || layout.sidebar === 'docked' ? input.sidebarWidth : 0,
+    sidebarPanelWidth: sidebarSlideOut || sidebarFloating || layout.sidebar === 'docked' ? input.sidebarWidth : 0,
     assistantPanelWidth: assistantFloating || layout.assistant === 'docked' ? input.chatPanelWidth : 0,
     /** Resize handles only exist between docked columns. */
     sidebarResizable: layout.sidebar === 'docked',

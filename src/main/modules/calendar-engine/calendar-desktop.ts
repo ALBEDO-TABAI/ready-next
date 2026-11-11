@@ -1,3 +1,4 @@
+import { appShortcut } from '../../../shared/app-shortcuts'
 import { app, BrowserWindow, Menu, MenuItem, Tray, nativeImage, globalShortcut, shell, dialog } from 'electron'
 import { consumeCalendarOpens } from '../../calendar-open-intents'
 import { parseCalendarDeepLink, type CalendarNavigation } from '../../../shared/calendar/desktop'
@@ -58,8 +59,8 @@ export function startCalendarDesktop(getWindow:()=>Promise<BrowserWindow|null>):
   }
   const off=onCalendarChanged(()=>{try{refresh()}catch(error){console.error('[calendar tray]',error)}})
   const timer=setInterval(()=>{try{refresh()}catch(error){console.error('[calendar tray]',error)}},30000);refresh()
-  const shortcutBase=process.platform==='darwin'?'Control+Command':'Control+Alt'
-  const shortcuts=[[`${shortcutBase}+K`,()=>tray.popUpContextMenu()],[`${shortcutBase}+J`,()=>perform(join)]] as const
+  const platform=process.platform==='darwin'?'mac':'other'
+  const shortcuts=[[appShortcut(`calendar-tray-${platform}`).keys,()=>tray.popUpContextMenu()],[appShortcut(`calendar-join-${platform}`).keys,()=>perform(join)]] as const
   const registered=shortcuts.filter(([key,fn])=>globalShortcut.register(key,fn)).map(([key])=>key)
   const unlisten=consumeCalendarOpens(intent=>{
     openQueue=openQueue.then(async()=>{

@@ -902,8 +902,7 @@ describe('useWorkspace Store', () => {
             dirChildren: new Map(),
             pinnedFolders: [],
             sidebarVisible: true,
-            sidePanelVariant: 'files',
-            sidePanelWidths: { files: 220, search: 220, skills: 220 },
+            sidePanelWidths: { shared: 220 },
             skillsSplitRatio: 0.5,
             chatPanelVisible: true,
             chatPanelWidth: 380,
@@ -994,13 +993,13 @@ describe('useWorkspace Store', () => {
         assert.strictEqual(useWorkspace.getState().sidebarVisible, true)
     })
 
-    it('should set and clamp side panel width by variant', () => {
+    it('should set and persist the shared sidebar width with clamp', () => {
         const store = useWorkspace.getState()
-        store.setSidePanelWidth('skills', 360)
+        store.setSidePanelWidth(360)
         assert.strictEqual(useWorkspace.getState().sidePanelWidths.shared, 360)
-        store.setSidePanelWidth('search', 100)
+        store.setSidePanelWidth(100)
         assert.strictEqual(useWorkspace.getState().sidePanelWidths.shared, 220)
-        store.setSidePanelWidth('files', 999)
+        store.setSidePanelWidth(999)
         assert.strictEqual(useWorkspace.getState().sidePanelWidths.shared, 420)
 
         const persisted = JSON.parse(storage.get('ready-side-panel-widths-v2') || '{}')
@@ -1410,7 +1409,6 @@ describe('useWorkspace multi-root watchers', () => {
             dirChildren: new Map(),
             pinnedFolders: [],
             sidebarVisible: true,
-            sidePanelVariant: 'files',
             sidePanelWidths: { shared: 220 },
             skillsSplitRatio: 0.5,
             chatPanelVisible: true,

@@ -120,7 +120,7 @@ test('settings shell groups navigation, tracks the current section and applies r
 
     const nav = document.querySelector('nav[aria-label="设置分区"]')!
     const groupLabels = Array.from(nav.querySelectorAll('.sx-nav-group-label')).map((node) => node.textContent)
-    assert.deepEqual(groupLabels, ['通用', '智能', '内容与连接', '隐私与数据', '应用'])
+    assert.deepEqual(groupLabels, ['通用', '助手', '内容', '隐私与数据', '关于'])
 
     const current = () => Array.from(nav.querySelectorAll('[aria-current="page"]')).map((node) => node.textContent)
     assert.deepEqual(current(), ['隐私'])
