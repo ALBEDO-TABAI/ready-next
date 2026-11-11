@@ -72,7 +72,7 @@ export function CanvasCompositionSurface(props: CanvasCompositionSurfaceProps) {
         if (node.ready.kind === 'document') return <><DocumentCard node={node} source={props.documentPreview} />{mark}</>
         if (node.type === 'text' && ['text', 'note'].includes(node.ready.kind)) return <><CardMarkdown text={node.text} />{mark}</>
         if (node.ready.ref?.kind === 'event') return <EventCard reference={node.ready.ref} snapshot={props.calendarSnapshot} />
-        if (node.type === 'link') return <LinkCard node={node} source={props.linkPreview} />
+        if (node.type === 'link') return <LinkCard node={node} source={props.linkPreview} open={props.onOpenNode ? () => props.onOpenNode!(node) : undefined} />
         if (node.ready.kind === 'draft' && node.ready.draftId) return <article data-canvas-ui>
           <strong>{node.type === 'text' ? node.text : '草稿'}</strong>
           <button onClick={() => void props.openDraft(node.ready.draftId!).catch(e => setError(String(e)))}>打开草稿</button>

@@ -77,11 +77,17 @@ test('document card refreshes on object change, ignores an old read and renders 
 test('link failure retains its original address and text cards use the shared editor', async () => {
   const ui = await mount()
   try {
+    const opened: string[] = []
     await ui.render(<><LinkCard node={{ id: 'link', type: 'link', url: 'https://example.com/original', x: 0, y: 0, width: 200, height: 100, ready: { kind: 'link' } }}
-      source={{ read: async () => { throw new Error('离线') } }} /><TextCard node={text('one')} commit={async () => true} /></>)
+      source={{ read: async () => { throw new Error('离线') } }} open={() => opened.push('link')} /><TextCard node={text('one')} commit={async () => true} /></>)
     assert.match(document.body.textContent!, /https:\/\/example.com\/original/)
-    assert.match(document.body.textContent!, /预览失败：离线/)
+    assert.match(document.body.textContent!, /离线/)
+    await ui.click('在浏览器中打开'); assert.deepEqual(opened, ['link'], 'a failed preview still opens the page')
     assert.ok(document.querySelector('[data-ready-block-editor] [contenteditable="true"]'))
+    // Main's private-network refusal reads as a plain reason (W4 §2.2 O16).
+    await ui.render(<LinkCard node={{ id: 'lan', type: 'link', url: 'https://intranet.example/', x: 0, y: 0, width: 200, height: 100, ready: { kind: 'link' } }}
+      source={{ read: async () => { throw new Error('Private network address rejected') } }} />)
+    assert.match(document.body.textContent!, /这个地址是内网地址，没有抓取预览/)
   } finally { await ui.close() }
 })
 
