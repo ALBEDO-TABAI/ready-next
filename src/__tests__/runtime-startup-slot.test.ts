@@ -3,6 +3,8 @@ import test from 'node:test'
 
 import {
   RuntimeStartupSlot,
+  agentRuntimeStartCancelled,
+  isAgentRuntimeStartCancelled,
   startRendererBeforeRuntimeReady,
 } from '../main/modules/claude-bridge/runtime-startup-slot'
 
@@ -83,3 +85,37 @@ test('synchronous Agent setup failure still starts the workbench renderer', asyn
   }), /agent_boot_failed/)
   assert.deepEqual(calls, ['agent:start', 'renderer:start'])
 })
+
+test('a runtime start cancelled by shutdown resolves as cancelled instead of failing the window setup', async () => {
+  const calls: string[] = []
+  const outcome = await startRendererBeforeRuntimeReady({
+    async startRuntime() {
+      calls.push('agent:start')
+      throw agentRuntimeStartCancelled()
+    },
+    startRenderer() { calls.push('renderer:start') },
+  })
+  assert.equal(outcome, 'cancelled')
+  assert.deepEqual(calls, ['agent:start', 'renderer:start'])
+  assert.equal(await startRendererBeforeRuntimeReady({ async startRuntime() {}, startRenderer() {} }), 'ready')
+})
+
+test('other asynchronous runtime failures still reject', async () => {
+  await assert.rejects(startRendererBeforeRuntimeReady({
+    async startRuntime() { throw new Error('agent_boot_failed') },
+    startRenderer() {},
+  }), /agent_boot_failed/)
+  assert.equal(isAgentRuntimeStartCancelled(new Error('agent_boot_failed')), false)
+  assert.equal(isAgentRuntimeStartCancelled('agent_runtime_start_cancelled'), false)
+})
+
+test('a slot cancelled before its start finishes rejects promote with the cancellation error', async () => {
+  const start = deferred<void>()
+  const slot = new RuntimeStartupSlot({ start: () => start.promise, stop: async () => {} })
+  const promoted = slot.promote()
+  const drained = slot.cancelAndDrain()
+  start.resolve()
+  await drained
+  await assert.rejects(promoted, error => isAgentRuntimeStartCancelled(error))
+})
+
