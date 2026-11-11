@@ -752,9 +752,10 @@ export default function BrowserMode({
     openFastCard()
   }, [collapseFastCard, fastCardPanelOpen, fastCardResultPanel, openFastCard])
 
-  const handleFastCardInsertToChat = useCallback(() => {
-    if (fastCardItems.length === 0) return
-    appendToAgentInput(renderFastCardMarkdown(fastCardItems))
+  const handleFastCardInsertToChat = useCallback((itemIds?: string[]) => {
+    const chosen = itemIds?.length ? fastCardItems.filter(item => itemIds.includes(item.id)) : fastCardItems
+    if (chosen.length === 0) return
+    appendToAgentInput(renderFastCardMarkdown(chosen))
   }, [fastCardItems])
 
   useEffect(() => {
@@ -787,7 +788,7 @@ export default function BrowserMode({
         return
       }
       if (command.type === 'insert-chat') {
-        handleFastCardInsertToChat()
+        handleFastCardInsertToChat(command.itemIds)
         return
       }
       if (command.type === 'remove-item') {

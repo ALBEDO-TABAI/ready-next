@@ -16,6 +16,7 @@ import { t } from '../i18n';
 import { MOD } from '../commands';
 import { ShortcutList } from './Shortcuts';
 import { stopAvailability, removeSlot, fillFree, copyAvailability, createHolds, clearSlots } from '../availability';
+import { OPEN_QUICK_SWITCHER_EVENT, requestShellAction } from '../../../workbench/commands/shell-actions';
 
 export function Kbd({ keys }: { keys: string[] }) { return <span className="kbds">{keys.map((k, i) => <kbd key={i} className="kbd">{k}</kbd>)}</span>; }
 
@@ -63,12 +64,19 @@ function AvailabilityPanel() {
   );
 }
 
+// Each row does what its shortcut does (W4 §4: no help item that looks clickable and does nothing).
 function Useful() {
-  const rows: [string, string[]][] = [[t('commandMenu'), [MOD, 'K']], [t('toggleSidebar'), ['\\']], [t('goToDate'), ['.']], [t('sPanel'), shortcutKeycaps(appShortcut('calendar.panel'), isMac)], [t('allShortcuts'), ['?']]];
+  const rows: [string, string[], () => void][] = [
+    [t('commandMenu'), [MOD, 'K'], () => window.dispatchEvent(new CustomEvent(OPEN_QUICK_SWITCHER_EVENT))],
+    [t('toggleSidebar'), ['\\'], () => requestShellAction('toggle-sidebar')],
+    [t('goToDate'), ['.'], () => setState({ overlay: 'goto' })],
+    [t('sPanel'), shortcutKeycaps(appShortcut('calendar.panel'), isMac), () => setPrefs({ contextPanel: !getState().prefs.contextPanel })],
+    [t('allShortcuts'), ['?'], () => setState({ overlay: 'shortcuts' })],
+  ];
   return (
     <div className="ps">
       <div className="ps-title">{t('usefulShortcuts')}</div>
-      <ul className="ps-list">{rows.map(([l, k]) => <li key={l} onClick={() => { if (k[0] === '?') setState({ overlay: 'shortcuts' }); }}><span>{l}</span><Kbd keys={k} /></li>)}</ul>
+      <ul className="ps-list">{rows.map(([l, k, run]) => <li key={l} role="button" tabIndex={0} onClick={run} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); run(); } }}><span>{l}</span><Kbd keys={k} /></li>)}</ul>
     </div>
   );
 }

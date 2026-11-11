@@ -1,6 +1,6 @@
-import { api, unwrap } from './platform';
+import { openReadyRef } from '../../workbench/open-ready-ref';
 // Command registry: shared by the keyboard handler, ⌘K menu, shortcuts panel and native menu.
-import { getState, setState, setView, goToday, step, zoom, openOverlay, setPrefs, deleteOccurrences, duplicateOccurrences, copyOccurrences, paste, undo, redo, select, occurrencesIn, periodDays, monthRange, importIcsFile, exportCalendar, clearSelection, toast , openCalendarSettings } from './store';
+import { getState, setState, setView, goToday, step, zoom, openOverlay, setPrefs, deleteOccurrences, duplicateOccurrences, copyOccurrences, paste, undo, redo, select, occurrencesIn, periodDays, monthRange, importIcsFile, exportCalendar, clearSelection, toast } from './store';
 import { newEventNow } from './components/Sidebar';
 import { toggleAvailability, stopAvailability } from './availability';
 import { Key, translate } from './i18n';
@@ -75,7 +75,8 @@ export function joinNext(): boolean {
   const sel = s.selected.length === 1 ? occurrencesIn(s.today - 400, s.today + 400).find((o) => o.key === s.selected[0]) : undefined;
   const o = sel?.event.conferenceUrl ? sel : occurrencesIn(s.today, s.today + 1).filter((x) => x.event.conferenceUrl && x.end > now).sort((a, b) => a.start - b.start)[0];
   if (!o?.event.conferenceUrl) return false;
-  void unwrap(api().openLink(o.event.conferenceUrl)).catch(error=>toast(String(error))); return true;
+  // In Ready's own browser, not the system one (W4 §4).
+  void openReadyRef({ kind: 'web', url: o.event.conferenceUrl }, 'calendar').catch(error=>toast(String(error))); return true;
 }
 /** Global keyboard handler. Returns true when handled. */
 export function handleKey(e: KeyboardEvent): boolean {
@@ -113,13 +114,12 @@ export function handleKey(e: KeyboardEvent): boolean {
   if (mod && k.toLowerCase() === 'j') { return joinNext(); }
   if (mod && k.toLowerCase() === 'n') { newEventNow(); return true; }
   if (e.altKey && !mod && (k.toLowerCase() === 't' || e.code === 'KeyT')) { goToday(); document.querySelector('[data-testid=timegrid] .scroller')?.dispatchEvent(new CustomEvent('tempo-scroll-now')); return true; }
-  // two-key sequences: g s (settings), g t (today), g . (go to date); e <field> edits a field of the open event
+  // e <field> edits a field of the open event. The old g-chords (g s, g t, g .) are gone: ⌘, opens settings, t and . remain.
   if (!(e.metaKey || e.ctrlKey || e.altKey) && seq && Date.now() - seq.t < 1200) {
     const p = seq.k; seq = null;
-    if (p === 'g') { if (k === 's') { openCalendarSettings(); return true; } if (k === 't') { goToday(); return true; } if (k === '.') { openOverlay('goto'); return true; } return false; }
     if (p === 'e') return editField(k);
   }
-  if (!(e.metaKey || e.ctrlKey || e.altKey) && (k === 'g' || (k === 'e' && (s.editing || s.selected.length === 1)))) { seq = { k, t: Date.now() }; return true; }
+  if (!(e.metaKey || e.ctrlKey || e.altKey) && k === 'e' && (s.editing || s.selected.length === 1)) { seq = { k, t: Date.now() }; return true; }
   if (e.metaKey || e.ctrlKey || e.altKey) return false;
   switch (k) {
     case 'd': case '1': setView('default', 1); return true;

@@ -20,6 +20,15 @@ export const PALETTE: { id: string; name: string; hex: string }[] = [
   { id: 'blush', name: 'Blush', hex: '#CCA6AD' }, { id: 'brown', name: 'Brown', hex: '#AC725F' },
   { id: 'gray', name: 'Gray', hex: '#B8B8B8' },
 ];
+const colorNamesCN: Record<string, string> = {
+  red: '红', coral: '珊瑚', orange: '橙', yellow: '黄', lime: '青柠', grass: '草绿', green: '绿', mint: '薄荷',
+  blue: '蓝', sapphire: '宝石蓝', indigo: '靛蓝', violet: '紫罗兰', purple: '紫', pink: '粉', blush: '藕粉', brown: '棕', gray: '灰',
+};
+const colorNamesEN = new Map(PALETTE.map(color => [color.id, color.name]));
+/** Same locale owner as the calendar dictionary; existing palette consumers keep their name field. */
+export function setCalendarColorLocale(locale: string): void {
+  for (const color of PALETTE) color.name = locale === 'zh-CN' ? colorNamesCN[color.id] : colorNamesEN.get(color.id)!;
+}
 const toCss = (c: { rgb(): { r: number; g: number; b: number } }) => {
   const q = c.rgb(); const cl = (v: number) => Math.max(0, Math.min(255, Math.round(v)));
   return `rgb(${cl(q.r)}, ${cl(q.g)}, ${cl(q.b)})`;

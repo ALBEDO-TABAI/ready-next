@@ -16,7 +16,6 @@ import { useNavigate } from 'react-router-dom'
 import MorphIconRailGroup from '../../../components/motion/MorphIconRailGroup'
 import type { WorkbenchMode } from '../../../stores/useMode'
 import { useFastCard } from '../../../stores/useFastCard'
-import { requestWorkbenchModeOpen } from '../mode-transition'
 import './shell.css'
 import { SHELL_RAIL_WIDTH } from '../../../../shared/workbench-shell-geometry'
 
@@ -40,11 +39,11 @@ export interface ShellRailProps {
   onAssistantOpen: () => void
 }
 
-// 收集 opens the FastCard shelf, which lives with the browser until it becomes a shell-level bar (W4-T5).
+// 收集 opens the FastCard shelf where the person is (W4 §6): a drawer in the document, 资讯 and calendar modes,
+// the overlay window over the native web layer in the browser.
 function toggleCollect() {
   const fastCard = useFastCard.getState()
   if (fastCard.panelOpen) { fastCard.collapse(); return }
-  requestWorkbenchModeOpen('browser')
   void fastCard.open()
 }
 

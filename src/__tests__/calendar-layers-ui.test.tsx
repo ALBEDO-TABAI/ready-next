@@ -31,6 +31,9 @@ test('C8 switches render the same entries, footprints cannot drag, moves wait fo
   let listener: (() => void) | undefined, stale: ((result: LayerReply<LayerEntry[]>) => void) | undefined, delay = false
   const moves: LayerMove[] = []
   const api: CalendarLayersAPI = {
+    listTodos: async () => ({ ok: true, value: [] }),
+    toggleTodo: async () => ({ ok: true, value: { state: 'saved' } }),
+    scheduleTodo: async () => ({ ok: true, value: { state: 'saved' } }),
     query: async () => { if (delay) { delay = false; return new Promise(resolve => { stale = resolve }) } return { ok: true, value: entries } },
     move: async input => { moves.push(input); return { ok: false, message: 'version_conflict' } },
     beginReading: async () => ({ ok: true, value: undefined }), endReading: async () => ({ ok: true, value: undefined }),

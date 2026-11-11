@@ -11,12 +11,14 @@ export function createCalendarLayersResolver(dependencies: {
   /** The shared active-vault database resolver: it waits for recovery and refuses an unconfigured vault. */
   database(): Promise<DocumentDatabaseService>
 }) {
+  let cached: { database: DocumentDatabaseService; writer: DocumentWriteDependencies; layers: CalendarLayersService } | undefined
   return async () => {
     const database = await dependencies.database(), writer = dependencies.writer()
     if (!writer) throw new Error('Document writer unavailable')
     const registry = dependencies.pages.registry
+    if (!cached || cached.database !== database || cached.writer !== writer) cached = { database, writer, layers: new CalendarLayersService(database.root, registry, database, writer, dependencies.pages) }
     return {
-      layers: new CalendarLayersService(database.root, registry, database, writer, dependencies.pages),
+      layers: cached.layers,
       reading: new LibrarySessions(database.root, registry),
     }
   }

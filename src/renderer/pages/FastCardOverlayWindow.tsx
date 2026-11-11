@@ -59,15 +59,15 @@ export default function FastCardOverlayWindow() {
           onTargetLanguageChange={(targetLanguage) => send({ type: 'target-language-change', targetLanguage })}
         />
       ) : (
-        <FastCardPanel
+        <div className="fc-overlay rn-float"><FastCardPanel
           items={snapshot.items}
           syncState={snapshot.syncState}
           onCollapse={() => send({ type: 'collapse' })}
           onClear={() => send({ type: 'clear' })}
           onSaveCanvas={itemIds => send({ type: 'save-canvas', itemIds })}
-          onInsertToChat={() => send({ type: 'insert-chat' })}
+          onInsertToChat={itemIds => send({ type: 'insert-chat', itemIds })}
           onRemoveItem={(id) => send({ type: 'remove-item', id })}
-        />
+        /></div>
       )}
     </div>
   )
