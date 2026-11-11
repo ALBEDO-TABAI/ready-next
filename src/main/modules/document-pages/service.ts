@@ -6,6 +6,7 @@ import { basename, dirname, extname, join, resolve, isAbsolute } from 'node:path
 import { z } from 'zod'
 import { PageOperationSchema, PagePropertiesSchema, type PageOperation, type PageReceipt, type PageChange, type PageRoot, type PageUserState, type PageProperties, type PageOperationRecord, type PageTrashEntry } from '../../../shared/document-pages'
 import { readDocumentSource, setFrontmatterFields } from '../../../shared/document-operations'
+import { readDatabase, writeDatabase } from '../../../shared/document-database/format'
 import { DocumentDraftService } from '../document-drafts/service'
 import { checkedPath, collision, draftError, ensureDirectory, existsIgnoringCase, filename, vaultRoot } from '../document-drafts/files'
 import { commitDocumentOperation, documentVersion, documentWriteError, getDocumentWriteDependencies, publishDocumentContent, saveUserDocument } from '../document-engine/document-write-service'
@@ -16,7 +17,7 @@ import { repairObjectLinks } from '../object-service/link-repair'
 import { readPageTree } from './tree'
 
 interface Dependencies { vaultRoot?(): string | null; canvases?: CanvasService; index(path: string): Promise<void>; afterMove?(index: number): void | Promise<void> }
-type Intent = { kind: 'create'; draftId: string; revision: number } | { kind: 'group'; title: string; group: ObjectMoveGroup; parentObjectId: string | null; originalPath: string; trashId?: string; canvasPathMoves?: ObjectMoveGroup['moves'] }
+type Intent = { kind: 'create'; draftId: string; revision: number; database?: { name: string } } | { kind: 'group'; title: string; group: ObjectMoveGroup; parentObjectId: string | null; originalPath: string; trashId?: string; canvasPathMoves?: ObjectMoveGroup['moves'] }
   | { kind: 'delete'; trashId: string; directory: string; objectIds: string[] }
 type VersionedPageOperation = z.output<typeof PageOperationSchema> & { expectedVersion?: string }
 interface RecordRow { id: string; request_json: string; intent_json: string; state: PageOperationRecord['state']; receipt_json: string | null; error: string | null }
@@ -140,10 +141,25 @@ export class DocumentPageService {
     this.registry.db.prepare('INSERT INTO workspaces(root) VALUES (?) ON CONFLICT(root) DO NOTHING').run(root)
     if (request.type === 'create') {
       const parent = this.parent(root,request)
-      const path = join(parent.path,filename(request.title)+'.md')
+      const stem = filename(request.title)
+      let name = stem
+      if (request.database) {
+        let suffix = 2
+        while (['.md', '', '.canvas', '.assets'].some(ext => existsIgnoringCase(join(parent.path, name + ext)))) name = filename(`${stem} (${suffix++})`)
+      }
+      const path = join(parent.path, name + '.md')
       if (existsIgnoringCase(path)) throw collision(path)
-      const draft = this.drafts.create({ vaultRoot: root, origin: 'new', content: request.content })
-      return { kind: 'create', draftId: draft.draftId, revision: draft.revision }
+      const content = request.database ? writeDatabase(request.content, {
+        version: 1, source: name,
+        fields: {
+          状态: { id: 'status', name: '状态', type: 'select', options: ['未开始', '进行中', '完成'] },
+          日期: { id: 'date', name: '日期', type: 'date' },
+          标签: { id: 'tags', name: '标签', type: 'multi_select', options: [] },
+        },
+        views: [{ id: 'table', name: '表格', type: 'table', visibleFields: ['$title', 'status', 'date', 'tags'] }],
+      }) : request.content
+      const draft = this.drafts.create({ vaultRoot: root, origin: 'new', content })
+      return { kind: 'create', draftId: draft.draftId, revision: draft.revision, ...(request.database ? { database: { name } } : {}) }
     }
     let sourceRoot = root
     if (request.type === 'adopt') {
@@ -207,9 +223,17 @@ export class DocumentPageService {
     }
     const original = page ? readFileSync(path,'utf8') : ''
     if (request.expectedVersion !== undefined && documentVersion(original) !== request.expectedVersion) throw documentWriteError('version_conflict', 'version_conflict: page changed before rename or move')
+    let renamed = original
+    if (request.type === 'rename' && object.kind === 'markdown') {
+      renamed = setFrontmatterFields(original, { set: { title: request.title } })
+      if (readDocumentSource(original).frontmatter.ready_database !== undefined) {
+        const definition = readDatabase(original)
+        if (definition.source === name) renamed = writeDatabase(renamed, { ...definition, source: nextName })
+      }
+    }
     const title = object.kind === 'canvas' ? JSON.parse(original).ready?.title : readDocumentSource(original).frontmatter.title
     return { kind: 'group', title: request.type === 'rename' ? request.title : typeof title === 'string' ? title : name, group: { id: request.operationId, root, ...(request.type === 'adopt' ? { sourceRoot } : {}), moves, objects, status: request.type === 'trash' ? 'trashed' : 'present',
-      ...(request.type === 'rename' && object.kind === 'markdown' ? { patch: { path: targetBase+'.md', original, content: setFrontmatterFields(original,{set:{title:request.title}}) } } : {}) },
+      ...(request.type === 'rename' && object.kind === 'markdown' ? { patch: { path: targetBase+'.md', original, content: renamed } } : {}) },
       parentObjectId: destination.id, originalPath: path }
   }
   operate(input: PageOperation, expectedVersion?: string): Promise<PageReceipt> {
@@ -236,7 +260,8 @@ export class DocumentPageService {
       let objectId: string
       if (intent.kind === 'create') {
         if (request.type !== 'create') throw new Error('Invalid create intent')
-        const result = await this.drafts.finalize(intent.draftId,intent.revision,{ operationId: request.operationId, title: request.title, parentObjectId: request.parentObjectId, parentPath: request.parentPath })
+        const result = await this.drafts.finalize(intent.draftId,intent.revision,{ operationId: request.operationId, title: intent.database?.name ?? request.title, parentObjectId: request.parentObjectId, parentPath: request.parentPath })
+        if (intent.database) ensureDirectory(request.root, join(dirname(result.path), intent.database.name))
         objectId = result.objectId
       } else if (intent.kind === 'delete') {
         if (request.type !== 'delete') throw new Error('Invalid delete intent')
