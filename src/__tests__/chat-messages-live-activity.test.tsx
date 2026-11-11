@@ -1,3 +1,4 @@
+import { memoryNavigationAPI } from './utils/navigation-memory'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createElement, type ComponentProps } from 'react'
@@ -33,6 +34,8 @@ const channel = new Proxy({}, {
 ;(dom.window as unknown as { electronAPI: Record<string, unknown> }).electronAPI = {
   agentInteraction: channel,
   calendar: channel,
+  // Opening a reference records it in the shared navigation history (W6 §4).
+  navigationHistory: memoryNavigationAPI(),
 }
 
 const ChatMessages = (await import('../renderer/components/agent/ChatMessages')).default
@@ -129,6 +132,8 @@ test('R3c history renders mapped and unavailable attachments, and opens the mapp
   const api = {
     getAttachmentDisplayRefs: (ids: string[]) => { queried.push(ids); return pending },
     revealEvent: async (id: string) => { opened.push(id); return { success: true } },
+    // The opened event is titled from the snapshot for the navigation history (W6 §4).
+    snapshot: async () => ({ success: true, data: { events: [], calendars: [] } }),
   }
   Object.defineProperty(dom.window.electronAPI, 'calendar', { value: api, configurable: true })
   t.after(() => Object.defineProperty(dom.window.electronAPI, 'calendar', { value: channel, configurable: true }))

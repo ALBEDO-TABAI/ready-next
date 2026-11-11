@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { WorkbenchMode } from '../../../stores/useMode'
 import { useFastCard } from '../../../stores/useFastCard'
-import { useInkLayout } from '../../document/ink/layout-state'
+import { openToday } from '../../today/open-today'
 import { SHELL_ACTION_EVENT } from '../commands/shell-actions'
-import { requestWorkbenchModeOpen } from '../mode-transition'
 
 /**
  * The shell's one sidebar slot (W2 §2.2): which mode's navigator shows (the current mode, or in split
@@ -45,7 +44,7 @@ export function useShellActions(handlers: {
       switch (event.detail.action) {
         case 'toggle-sidebar': h.toggleSidebar(); break
         case 'toggle-assistant': h.toggleAssistant(); break
-        case 'open-today': requestWorkbenchModeOpen('document'); useInkLayout.getState().setHome(true); break
+        case 'open-today': openToday(); break
         case 'open-skills': h.openSkills(); break
         case 'open-graph': h.openGraph(); break
         case 'open-find-replace': h.openFindReplace(); break

@@ -1,4 +1,4 @@
-import { navigationHistory } from '../navigation-history'
+import { navigationHistory, webPageTitle } from '../navigation-history'
 import { recentOpenedResults } from './recent-opened'
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { Bookmark, CornerDownLeft, Search, type LucideIcon } from 'lucide-react'
@@ -38,12 +38,14 @@ export function QuickSwitcher({ onClose, onPreview }: {
   }, [query, roots])
   const items = useMemo(() => {
     if (query.trim()) return mergeDraftResults(response?.query === query && response.roots === roots ? response.items : [], draftSearchResults(query, tabs), tabs)
-    return recentOpenedResults(history)
+    return recentOpenedResults(history, RECENT_SHOWN, webPageTitle)
   }, [query, roots, response, tabs, history])
   const mode = useMode(state => state.workbenchMode)
   useSyncExternalStore(subscribeCommands, commandRegistryRevision)
   const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean)
+  // Nothing typed: 最近打开 and the common commands (W6 §2.3); typing searches every command.
   const commands = listCommands({ mode }).filter(command => {
+    if (!terms.length) return command.common === true
     const text = [command.title, ...(command.keywords ?? [])].join(' ').toLocaleLowerCase()
     return terms.every(term => text.includes(term))
   })
@@ -88,7 +90,7 @@ export function QuickSwitcher({ onClose, onPreview }: {
         </button>
         <button className="rn-switch-peek" aria-label={`速览 ${item.title}`} onClick={() => void activate(row, 'preview')}>速览</button>
       </li> })}
-      {commands.length > 0 && <li role="presentation" className="rn-switch-label">命令</li>}
+      {commands.length > 0 && <li role="presentation" className="rn-switch-label">{terms.length ? '命令' : '常用命令'}</li>}
       {commands.map((command, i) => <li key={command.id} id={`ready-object-option-${items.length + i}`} role="option" aria-selected={index === items.length + i} className="rn-switch-item" onMouseMove={() => { if (index !== items.length + i) setSelected(items.length + i) }}>
         <button className="rn-switch-open" onClick={() => void activate(items.length + i)}><span className="rn-switch-icon"><CornerDownLeft size={16} strokeWidth={1.6} /></span><span className="rn-switch-name">{command.title}</span>{command.shortcut && <span className="rn-switch-type">{shortcutKeycaps(command.shortcut, /Mac/.test(navigator.platform)).join(' ')}</span>}</button>
       </li>)}
@@ -100,6 +102,7 @@ export function QuickSwitcher({ onClose, onPreview }: {
   </MaskedObjectOverlay>
 }
 
+const RECENT_SHOWN = 8
 const how = (event: { altKey: boolean; metaKey: boolean; ctrlKey: boolean }) => event.altKey ? 'preview' as const : event.metaKey || event.ctrlKey ? 'tab' as const : 'open' as const
 // Each search type shows the icon of the object it opens; 书签 are saved web pages.
 const KIND_OF: Record<SearchResultItem['typeLabel'], RefCapsuleKind | null> = {

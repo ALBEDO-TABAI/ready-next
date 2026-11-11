@@ -1,13 +1,9 @@
 import { userOpenedObject } from '../../workbench/navigation-open-event'
-import { useEffect, useState } from 'react'
 import { create } from 'zustand'
-import { isoDate } from '../../../../shared/calendar/dates'
-import { occurrences } from '../../../../shared/calendar/model'
-import { dayOf } from '../../../../shared/calendar/tz'
 import { useDocTabs } from '../../../stores/useDocTabs'
 
-/** Whether the home view covers the editor, and a page created from the sidebar whose title should take focus.
- *  The sidebar's open state and width belong to the shell's one sidebar (W2 §2.2). */
+/** Whether 今日 (W6 §5, the document mode's system tab) covers the editor, and a page created from the sidebar whose
+ *  title should take focus. The sidebar's open state and width belong to the shell's one sidebar (W2 §2.2). */
 export const useInkLayout = create<{
   home: boolean
   /** A page created from the sidebar whose title should take focus when its header loads. */
@@ -36,10 +32,12 @@ useDocTabs.subscribe((state, previous) => { if (state.activeTabId !== previous.a
 export function openInCurrentTab(path: string, { newTab = false, record = true }: { newTab?: boolean; record?: boolean } = {}) {
   const state = useDocTabs.getState()
   const current = state.tabs.find(tab => tab.id === state.activeTabId)
+  // 今日 is a tab of its own: what opens from it takes a tab rather than replacing the page behind it.
+  const fromToday = useInkLayout.getState().home
   useInkLayout.getState().setHome(false)
   if (current?.path === path) return
   if (record) userOpenedObject({ mode: 'document', path, title: path.split(/[\\/]/).pop()!.replace(/\.(md|canvas)$/i, '') })
-  const replaceable = current && current.kind !== 'library' && !current.isDirty && (current.path ? true : current.content === '')
+  const replaceable = current && current.kind !== 'library' && !current.isDirty && (current.path ? !fromToday : current.content === '')
   if (newTab || !replaceable || state.tabs.some(tab => tab.path === path)) { state.openTab(path); return }
   const history = histories.get(current.id) ?? { back: [], forward: [] }
   if (record && current.path) { history.back.push(current.path); history.forward.length = 0 }
@@ -68,48 +66,3 @@ export function tabHistoryTarget(direction: -1 | 1): string | undefined {
 }
 export const goBack = () => step('back')
 export const goForward = () => step('forward')
-
-export interface UpcomingEvent { key: string; eventId: string; title: string; start: number; allDay: boolean; color: string; day: string }
-
-const zoneOf = (prefs: Record<string, unknown> | null | undefined) =>
-  typeof prefs?.primaryTimeZone === 'string' ? prefs.primaryTimeZone : Intl.DateTimeFormat().resolvedOptions().timeZone
-
-/** The next few occurrences in visible calendars over the coming week, refreshed while the shell is shown. */
-export function useUpcomingEvents(active: boolean, limit = 4): UpcomingEvent[] | null {
-  const [items, setItems] = useState<UpcomingEvent[] | null>(null)
-  useEffect(() => {
-    if (!active || !window.electronAPI?.calendar?.snapshot) return
-    let alive = true
-    const load = async () => {
-      const result = await window.electronAPI.calendar.snapshot()
-      if (!alive || !result.success || !result.data) return
-      const { events, calendars, prefs } = result.data
-      const zone = zoneOf(prefs)
-      const visible = new Map(calendars.filter(calendar => calendar.visible).map(calendar => [calendar.id, calendar]))
-      const now = Date.now(), today = dayOf(now, zone)
-      const list = occurrences(events.filter(event => visible.has(event.calendarId)), today, today + 8, zone)
-        .filter(item => item.allDay ? item.endDay >= today : item.end > now)
-        .sort((a, b) => a.start - b.start)
-        .slice(0, limit)
-        .map(item => ({ key: item.key, eventId: item.event.id, title: item.event.title || '（无标题）', start: item.start, allDay: item.allDay,
-          color: item.event.color || visible.get(item.event.calendarId)?.color || 'var(--studio-accent)',
-          day: isoDate(item.startDay) }))
-      setItems(list)
-    }
-    void load().catch(() => { if (alive) setItems([]) })
-    const timer = window.setInterval(() => { void load().catch(() => {}) }, 60_000)
-    const onFocus = () => { void load().catch(() => {}) }
-    window.addEventListener('focus', onFocus)
-    return () => { alive = false; window.clearInterval(timer); window.removeEventListener('focus', onFocus) }
-  }, [active, limit])
-  return items
-}
-
-export function eventTimeLabel(item: UpcomingEvent, now = new Date()): string {
-  const start = new Date(item.start)
-  const sameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
-  const tomorrow = new Date(now); tomorrow.setDate(now.getDate() + 1)
-  const day = sameDay(start, now) ? '' : sameDay(start, tomorrow) ? '明天 ' : `${start.getMonth() + 1}/${start.getDate()} `
-  if (item.allDay) return day ? day.trim() : '全天'
-  return `${day}${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}`
-}

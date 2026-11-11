@@ -24,10 +24,8 @@ test('document navigation replaces the current tab in place, keeps unsaved work 
     splitTabId: null,
   })
   try {
-    useInkLayout.getState().setHome(true)
     openInCurrentTab('/vault/b.md')
     assert.deepEqual(paths(), ['/vault/left.md', '/vault/b.md', '/vault/right.md'], 'the page replaces the tab in its own slot')
-    assert.equal(useInkLayout.getState().home, false, 'opening a page leaves the home view')
     assert.deepEqual(useInkHistory.getState(), { canBack: true, canForward: false })
 
     openInCurrentTab('/vault/c.md')
@@ -65,6 +63,20 @@ test('document navigation replaces the current tab in place, keeps unsaved work 
     openInCurrentTab('/vault/f.md')
     assert.equal(paths().length, count, 'the blank tab became the page')
     assert.equal(activePath(), '/vault/f.md')
+
+    // 今日 is a tab of its own (W6 §5.1): a page opened from it takes a tab and leaves the page behind 今日 alone…
+    useInkLayout.getState().setHome(true)
+    openInCurrentTab('/vault/g.md')
+    assert.equal(useInkLayout.getState().home, false, 'opening a page leaves 今日')
+    assert.deepEqual(paths().slice(-2), ['/vault/f.md', '/vault/g.md'])
+    assert.equal(activePath(), '/vault/g.md')
+    // …except a blank tab, which the first page takes over as before.
+    useDocTabs.getState().openTab('')
+    useInkLayout.getState().setHome(true)
+    const total = paths().length
+    openInCurrentTab('/vault/h.md')
+    assert.equal(paths().length, total, 'the blank tab became the page')
+    assert.equal(activePath(), '/vault/h.md')
   } finally {
     useDocTabs.setState(before, true)
     for (const [key, descriptor] of saved) {

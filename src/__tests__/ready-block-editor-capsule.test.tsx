@@ -1,3 +1,4 @@
+import { memoryNavigationAPI } from './utils/navigation-memory'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { act } from 'react'
@@ -44,6 +45,8 @@ test('W6 T1 editor capsules act like every capsule: click opens, ⌥ quick-looks
   const f = await editorFixture(t, source)
   const opened: string[] = [], looks: ReadyRef[] = []
   Object.assign(f.dom.window, { electronAPI: {
+    // Opening a reference records it in the shared navigation history (W6 §4).
+    navigationHistory: memoryNavigationAPI(),
     objects: { locate: async (id: string) => ({ objectId: id, path: `/vault/${id}.md`, revision: 1 }), resolvePath: async (path: string) => ({ objectId: path.split('/').pop()!.replace(/\.\w+$/, ''), path, revision: 1 }), onMoved: () => () => {} },
     document: { stat: async (path: string) => ({ success: /选题库\.md$|灵感\.canvas$/.test(path), data: {} }) },
   } })

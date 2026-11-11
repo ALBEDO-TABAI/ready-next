@@ -29,6 +29,13 @@ export class NavigationController {
       this.publish(await this.api().save({ ...this.state, entries: kept, cursor: kept.length - 1 }))
     })
   }
+  /** 今日 sits over the current entry without being one: going back from it returns to that entry, cursor unchanged. */
+  reopen(restore: (entry: NavigationEntry) => Promise<void>): Promise<void> {
+    return this.enqueue(async () => {
+      const entry = this.state.entries[this.state.cursor]
+      if (entry) await restore(entry)
+    })
+  }
   step(direction: -1 | 1, restore: (entry: NavigationEntry) => Promise<void>, current: () => Promise<NavigationEntry | undefined> = async () => undefined,
     tabStep?: () => { matches(entry: NavigationEntry): Promise<boolean>; perform(): void | Promise<void> } | undefined): Promise<void> {
     return this.enqueue(async () => {

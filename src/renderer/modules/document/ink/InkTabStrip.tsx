@@ -1,11 +1,11 @@
 import { userOpenedObject } from '../../workbench/navigation-open-event'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { useDocTabs, type DocTab } from '../../../stores/useDocTabs'
 import { Icon } from './icons'
 import { InkPageIcon } from './InkPageIcon'
 import { useInkLayout } from './layout-state'
 import { tip } from './overlay'
-import { navigateBack as goBack, navigateForward as goForward, useNavigationHistory } from '../../workbench/navigation-history'
+import { openToday } from '../../today/open-today'
 
 const MOD = /Mac|iPhone|iPad/i.test(navigator.platform) ? '⌘' : 'Ctrl+'
 const tabLabel = (tab: DocTab) => tab.kind === 'library' ? '阅读' : tab.title.replace(/\.(md|canvas)$/i, '') || '未命名'
@@ -16,13 +16,13 @@ function TabIcon({ tab }: { tab: DocTab }) {
   return <InkPageIcon size={14} />
 }
 
-/** Inkwell's tab bar along the top edge of the page: history, the open documents and a new tab. */
+/** Inkwell's tab bar along the top edge of the page: 今日 (the mode's system tab, always first), the open documents and a
+ *  new tab. The way back lives at the top-left of the page itself (W6 §4), not in this bar. */
 export function InkTabStrip({ onNewTab }: { active: boolean; onNewTab(): void }) {
   const tabs = useDocTabs(state => state.tabs)
   const activeId = useDocTabs(state => state.activeTabId)
   const home = useInkLayout(state => state.home)
-  const { canBack, canForward, backTitle } = useNavigationHistory()
-  const back = backTitle ? { label: backTitle } : null
+  const bar = useRef<HTMLDivElement>(null)
   const strip = useRef<HTMLDivElement>(null)
   const dragged = useRef<string | null>(null)
   const [dropAt, setDropAt] = useState<string | null>(null)
@@ -35,12 +35,21 @@ export function InkTabStrip({ onNewTab }: { active: boolean; onNewTab(): void })
   }, [activeId, home, tabs.length])
   const activate = (id: string) => { const tab = tabs.find(tab => tab.id === id); if (tab?.path) userOpenedObject({ mode: 'document', path: tab.path, title: tabLabel(tab) }); useInkLayout.getState().setHome(false); useDocTabs.getState().setActiveTab(id) }
   const close = (id: string) => useDocTabs.getState().closeTab(id)
-  return <div className="ink-tabbar" aria-label="打开的文档">
-    <div className="ink-tabbar-nav">
-      <button type="button" className="ink-tbar-icon" aria-label="后退" disabled={!canBack} {...tip('后退', `${MOD}[`)} onClick={() => { void goBack().catch(error => console.error(error)) }}><Icon name="chevronLeft" size={17} /></button>
-      <button type="button" className="ink-tbar-icon" aria-label="前进" disabled={!canForward} {...tip('前进', `${MOD}]`)} onClick={() => { void goForward().catch(error => console.error(error)) }}><Icon name="chevronRight" size={17} /></button>
+  // ← / → move through 今日 and the documents as one row of tabs.
+  const arrow = (event: KeyboardEvent, id: string) => {
+    if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return
+    const ids = ['today', ...tabs.map(tab => tab.id)]
+    const next = ids[(ids.indexOf(id) + (event.key === 'ArrowRight' ? 1 : -1) + ids.length) % ids.length]
+    if (next === 'today') openToday(); else activate(next)
+    bar.current?.querySelector<HTMLElement>(next === 'today' ? '[data-today-tab]' : `[data-tab-id="${next}"]`)?.focus()
+  }
+  return <div className="ink-tabbar" aria-label="打开的文档" ref={bar}>
+    <div className="ink-tablist" role="tablist" aria-label="文档标签">
+    <div role="tab" aria-selected={home} tabIndex={home ? 0 : -1} title="今日" data-today-tab="" className={`ink-tab ink-tab--today${home ? ' is-active' : ''}`}
+      onClick={openToday} onKeyDown={event => arrow(event, 'today')}>
+      <span className="ink-tab-title">今日</span>
     </div>
-    <div className="ink-tabstrip" role="tablist" aria-label="文档标签" ref={strip}
+    <div className="ink-tabstrip" ref={strip}
       onWheel={event => { const element = event.currentTarget; if (element.scrollWidth > element.clientWidth && Math.abs(event.deltaY) > Math.abs(event.deltaX)) element.scrollLeft += event.deltaY }}>
       {tabs.map((tab, index) => {
         const active = !home && tab.id === activeId
@@ -58,12 +67,7 @@ export function InkTabStrip({ onNewTab }: { active: boolean; onNewTab(): void })
           onDragEnd={() => { dragged.current = null; setDropAt(null) }}
           onClick={() => activate(tab.id)}
           onAuxClick={event => { if (event.button === 1) { event.preventDefault(); close(tab.id) } }}
-          onKeyDown={event => {
-            if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
-              const next = tabs[(index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length]
-              if (next) { activate(next.id); (event.currentTarget.parentElement?.querySelector(`[data-tab-id="${next.id}"]`) as HTMLElement | null)?.focus() }
-            }
-          }}>
+          onKeyDown={event => arrow(event, tab.id)}>
           <span className="ink-tab-icon"><TabIcon tab={tab} /></span>
           <span className="ink-tab-title">{label}</span>
           {tab.isDirty && <span className="ink-tab-dirty" aria-label="有未保存的修改" />}
@@ -72,10 +76,7 @@ export function InkTabStrip({ onNewTab }: { active: boolean; onNewTab(): void })
         </div>
       })}
     </div>
+    </div>
     <button type="button" className="ink-tbar-icon ink-tbar-new" aria-label="新建标签页" {...tip('新建标签页', `${MOD}T`)} onClick={onNewTab}><Icon name="plus" size={16} /></button>
-    {/* After following a reference from another place, the way back sits at the end of the bar. */}
-    {back && <button type="button" className="ink-return-chip" aria-label={`返回 ${back.label}`} title={`返回 ${back.label}`} onClick={() => { void goBack().catch(error => console.error(error)) }}>
-      <Icon name="chevronLeft" size={14} stroke={2} /><span>返回 {back.label}</span>
-    </button>}
   </div>
 }

@@ -7,11 +7,11 @@ import { useBrowserTabs } from '../../stores/useBrowserTabs'
 import { useCalendarSession } from '../../stores/useCalendarSession'
 import { useEffect, useSyncExternalStore } from 'react'
 import { NavigationController } from './navigation-controller'
-import { recentNavigation, type NavigationEntry } from '../../../shared/navigation-history'
+import { navigationTitle, recentNavigation, type NavigationEntry } from '../../../shared/navigation-history'
 import { type ReadyRef } from '../../../shared/ready-ref'
 import { useMode } from '../../stores/useMode'
 import { useDocTabs } from '../../stores/useDocTabs'
-import { useInkHistory, goBack as tabBack, goForward as tabForward, tabHistoryTarget } from '../document/ink/layout-state'
+import { useInkHistory, useInkLayout, goBack as tabBack, goForward as tabForward, tabHistoryTarget } from '../document/ink/layout-state'
 import { openReadyRefDestination } from './open-ready-ref'
 
 export const navigationHistory = new NavigationController(() => window.electronAPI.navigationHistory)
@@ -29,9 +29,15 @@ export function captureNavigationPosition(): NavigationEntry | undefined {
   if (!entry) return
   let ref = entry.ref
   for (const capture of positions.values()) { const value = capture(); if (value?.kind === 'book-location' && entry.ref.kind === 'book-location' && value.book === entry.ref.book) ref = value }
-  const anchor = captureNavigationScroll(entry.mode)
+  // Over a document entry, 今日 is what scrolls in the document panel: keep the entry's own position.
+  const anchor = entry.mode === 'document' && todayShowing() ? entry.anchor : captureNavigationScroll(entry.mode)
   return { ...entry, ref, anchor }
 }
+/** 今日 covers the document mode without being an entry of its own (W6 §4, §5). */
+const todayShowing = () => useMode.getState().workbenchMode === 'document' && useInkLayout.getState().home
+const fileTitle = (path: string) => path.split(/[\\/]/).pop()!.replace(/\.[^.]+$/, '')
+/** A page opened by its address is recorded before it has a title; an open tab may know it by now. */
+export const webPageTitle = (url: string) => useBrowserTabs.getState().tabs.find(tab => tab.url === url && tab.title)?.title
 async function restore(entry: NavigationEntry) {
   await withoutOpenRecording(() => openReadyRefDestination(entry.ref, entry.mode, { record: false }))
   requestWorkbenchModeOpen(entry.mode)
@@ -42,8 +48,10 @@ async function restore(entry: NavigationEntry) {
   await restoreNavigationScroll(entry)
 }
 export async function navigateHistory(direction: -1 | 1): Promise<void> {
+  // Back from 今日 returns to where the person was when they opened it, which is the current entry.
+  if (direction === -1 && todayShowing()) return navigationHistory.reopen(restore)
   await navigationHistory.step(direction, restore, () => currentNavigationOrigin(), () => {
-    const path = useMode.getState().workbenchMode === 'document' ? tabHistoryTarget(direction) : undefined
+    const path = useMode.getState().workbenchMode === 'document' && !todayShowing() ? tabHistoryTarget(direction) : undefined
     if (!path) return undefined
     return { matches: async entry => {
       if (!('id' in entry.ref) || !['page', 'file', 'canvas'].includes(entry.ref.kind)) return false
@@ -54,26 +62,31 @@ export async function navigateHistory(direction: -1 | 1): Promise<void> {
 export const navigateBack = () => navigateHistory(-1)
 export const navigateForward = () => navigateHistory(1)
 export function navigationStatus() {
-  const state = navigationHistory.getSnapshot(), local = useInkHistory.getState(), doc = useMode.getState().workbenchMode === 'document'
-  const path = doc ? tabHistoryTarget(-1) : undefined
-  return { canBack: doc && local.canBack || state.cursor > 0,
-    canForward: doc && local.canForward || state.cursor < state.entries.length - 1,
-    backTitle: path ? path.split(/[\\/]/).pop()!.replace(/\.[^.]+$/, '') : state.entries[state.cursor - 1]?.title ?? null }
+  const state = navigationHistory.getSnapshot(), local = useInkHistory.getState(), today = todayShowing()
+  const doc = useMode.getState().workbenchMode === 'document' && !today
+  const path = doc ? tabHistoryTarget(-1) : undefined, ahead = doc ? tabHistoryTarget(1) : undefined
+  const back = state.entries[today ? state.cursor : state.cursor - 1], next = state.entries[state.cursor + 1]
+  return { canBack: doc && local.canBack || !!back,
+    canForward: doc && local.canForward || !!next,
+    backTitle: path ? fileTitle(path) : back ? navigationTitle(back, webPageTitle) : null,
+    forwardTitle: ahead ? fileTitle(ahead) : next ? navigationTitle(next, webPageTitle) : null }
 }
 export function subscribeNavigation(listener: () => void) {
-  const releases = [navigationHistory.subscribe(listener), useInkHistory.subscribe(listener), useMode.subscribe(listener)]
+  const releases = [navigationHistory.subscribe(listener), useInkHistory.subscribe(listener), useMode.subscribe(listener), useInkLayout.subscribe(listener), useBrowserTabs.subscribe(listener)]
   return () => releases.forEach(release => release())
 }
 export function useNavigationHistory() {
   useEffect(() => { void navigationHistory.load().catch(error => console.error('[navigation] history could not be loaded', error)) }, [])
   useSyncExternalStore(navigationHistory.subscribe, navigationHistory.getSnapshot)
-  useInkHistory(); useMode(state => state.workbenchMode)
+  useInkHistory(); useMode(state => state.workbenchMode); useInkLayout(state => state.home); useBrowserTabs(state => state.tabs)
   return { ...navigationStatus(), back: navigateBack, forward: navigateForward }
 }
 export const getRecentOpened = (limit = 20) => recentNavigation(navigationHistory.getSnapshot(), limit)
 
 /** Capture the object actually visible before the first reference jump, not an unrelated persisted cursor. */
 export async function currentNavigationOrigin(mode = useMode.getState().workbenchMode): Promise<NavigationEntry | undefined> {
+  // On 今日 nothing is open: the tab behind it is not where the person is.
+  if (mode === 'document' && useInkLayout.getState().home) return undefined
   const stored = captureNavigationPosition()
   const base = { mode, openedAt: stored?.openedAt ?? Date.now(), anchor: captureNavigationScroll(mode) }
   if (mode === 'document') {

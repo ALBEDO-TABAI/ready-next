@@ -29,6 +29,19 @@ export function navigationObjectKey(ref: ReadyRef): string {
     default: return toReadyUri(ref)
   }
 }
+function readableUrl(url: string): string {
+  try {
+    const parsed = new URL(url), path = decodeURI(parsed.pathname).replace(/\/$/, '')
+    return `${parsed.host}${path}`
+  } catch { /* silent-catch: not a parseable URL; it is shown as recorded. */ return url }
+}
+/** What the back entry and 最近打开 show: a file's name loses its extension; a page opened by its address shows its title
+ *  once a tab knows it (`liveTitle`), else a readable address; every other kind is a title already. */
+export function navigationTitle(entry: Pick<NavigationEntry, 'ref' | 'title'>, liveTitle?: (url: string) => string | undefined): string {
+  if (entry.ref.kind === 'file') return entry.title.replace(/\.[^./\\\s]{1,8}$/, '') || entry.title
+  if (entry.ref.kind === 'web' && entry.title === entry.ref.url) return liveTitle?.(entry.ref.url) || readableUrl(entry.ref.url)
+  return entry.title
+}
 export function recentNavigation(state: NavigationState, limit = 20): NavigationEntry[] {
   const seen = new Set<string>()
   return [...state.entries].reverse().filter(entry => {

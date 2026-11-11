@@ -4,7 +4,7 @@ import DocumentNavigator from '../../modules/document/navigator/DocumentNavigato
 import { revealPathInFiles } from '../../modules/document/navigator/useDocumentNavigator'
 import { ShellNavigator } from '../../modules/workbench/shell/ShellSidebar'
 import { InkTopbar } from '../../modules/document/ink/InkTopbar'
-import { InkHome } from '../../modules/document/ink/InkHome'
+import { TodayPage } from '../../modules/today/TodayPage'
 import { OverlayHost } from '../../modules/document/ink/overlay'
 import { openInCurrentTab, useInkLayout } from '../../modules/document/ink/layout-state'
 import { InkTabStrip } from '../../modules/document/ink/InkTabStrip'
@@ -241,11 +241,10 @@ export default function DocumentMode({
   const inkHome = useInkLayout(state => state.home)
   useHomeOnFirstVisit(isActive)
   const revealInFiles = useCallback((node: PageNode) => revealPathInFiles(node.path), [])
-  // Opening or switching a document leaves the home view. Markdown source is a per-visit escape hatch: another tab or
-  // page opens in the page view again.
+  // Opening or switching a document leaves 今日 (a tab restored in the background does not). Markdown source is a
+  // per-visit escape hatch: another tab or page opens in the page view again.
   useEffect(() => useDocTabs.subscribe((state, previous) => {
-    if (state.activeTabId !== previous.activeTabId || state.tabs.length > previous.tabs.length) useInkLayout.getState().setHome(false)
-    if (state.activeTabId !== previous.activeTabId) setEditorMode('preview')
+    if (state.activeTabId !== previous.activeTabId) { useInkLayout.getState().setHome(false); setEditorMode('preview') }
   }), [])
   useEffect(() => { void initializeDrafts().catch(reportDraftError); return watchDraftVault() }, [])
 
@@ -864,7 +863,7 @@ export default function DocumentMode({
                 {...pageHeaderActions}
               />
               <div className="ink-main-body">
-                {inkHome && <InkHome roots={pagePanel.roots} visible={isSceneVisible} />}
+                {inkHome && <TodayPage visible={isSceneVisible} />}
                 <div
                   className="document-content-frame relative flex flex-col flex-1 min-h-0 overflow-hidden"
                   style={inkHome ? { display: 'none' } : undefined}

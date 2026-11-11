@@ -8,6 +8,7 @@ import { ExternalLink } from 'lucide-react'
 import RSSFeed from '../../components/rss/RSSFeed'
 import RSSNavigation from '../../components/rss/RSSNavigation'
 import { ShellNavigator } from '../../modules/workbench/shell/ShellSidebar'
+import { NavigationBackEntry } from '../../modules/workbench/NavigationBackEntry'
 import { RSSTopbarContext } from '../../components/rss/rss-topbar-context'
 import RSSArticleReader from '../../components/rss/RSSArticleReader'
 import RSSReferenceButton from '../../components/rss/RSSReferenceButton'
@@ -344,6 +345,13 @@ export default function RSSMode({
     setShowAddModal(true)
   }, [activeBrowserPageLabel, activeBrowserTab])
 
+  const addSourceRequested = useRSSSession(state => state.addSourceRequested)
+  useEffect(() => {
+    if (!isActive || isSuspended || !addSourceRequested) return
+    useRSSSession.getState().requestAddSource(false)
+    handleAddSource()
+  }, [addSourceRequested, handleAddSource, isActive, isSuspended])
+
   const handleDeleteSource = useCallback(async (sourceId: string) => {
     if (typeof window === 'undefined' || !window.electronAPI) return
     const result = await window.electronAPI.rss.removeSource(sourceId)
@@ -643,6 +651,7 @@ export default function RSSMode({
               />
             </ShellNavigator>
             <div className="rss-topbar workbench-tabs-surface no-drag">
+              <NavigationBackEntry mode="rss" />
               <div className="rss-topbar__lead" ref={setTopbarLead}>
                 {feedVisible && <span>资讯</span>}
               </div>

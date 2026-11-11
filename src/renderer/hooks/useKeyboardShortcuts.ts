@@ -5,6 +5,7 @@ import { useTheme } from '../stores/useTheme'
 import { OPEN_QUICK_SWITCHER_EVENT, SHELL_ACTION_EVENT, requestShellAction } from '../modules/workbench/commands/shell-actions'
 import { useMode, type WorkbenchMode } from '../stores/useMode'
 import { useDocTabs } from '../stores/useDocTabs'
+import { useInkLayout } from '../modules/document/ink/layout-state'
 import { requestWorkbenchModeChange } from '../modules/workbench/mode-transition'
 import { shouldIgnoreGlobalKeyboardShortcut } from '../modules/keyboard/shortcut-guard'
 import { resolveReadyAppShortcut, type ReadyAppShortcutAction } from '../../shared/app-shortcuts'
@@ -227,6 +228,8 @@ export function useKeyboardShortcuts() {
 
     if (action === 'close-document') {
       preventDefault()
+      // 今日 is the tab in view and is never closed; the document behind it is not the one being looked at.
+      if (useMode.getState().workbenchMode === 'document' && useInkLayout.getState().home) return true
       const { activeTabId, closeTab } = useDocTabs.getState()
       if (activeTabId) {
         closeTab(activeTabId)

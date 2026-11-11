@@ -1,0 +1,184 @@
+/* 今日 (W6 §5): the page is paper, and its blocks are set off by whitespace and hairlines, never by cards inside the
+   paper (W1 DL2). The greeting is the screen's one display moment (DL7); the signal colour marks only what is happening
+   now (DL5). Only --rn-* tokens (W1 DS1). */
+.today {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  font-family: var(--rn-font-ui);
+  color: var(--rn-ink);
+}
+
+.today-column {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+  width: 720px;
+  max-width: calc(100% - 72px);
+  margin: 0 auto;
+  padding: 54px 0 72px;
+}
+
+.today-hello h1 {
+  margin: 0;
+  font: 400 46px/1.1 var(--rn-font-serif);
+  letter-spacing: -.01em;
+  color: var(--rn-ink);
+}
+
+.today-hello p {
+  margin: 8px 0 0;
+  font: 400 var(--rn-fs-md)/1.6 var(--rn-font-ui);
+  color: var(--rn-ink-3);
+}
+
+/* Two blocks side by side; one alone takes the whole width, and a narrow page stacks them. */
+.today-pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 32px 40px;
+}
+
+.today-block { display: flex; flex-direction: column; min-width: 0; }
+
+.today-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 8px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--rn-hair);
+}
+
+.today-label h2 {
+  margin: 0;
+  font: 500 var(--rn-fs-sm)/1 var(--rn-font-ui);
+  color: var(--rn-ink-3);
+}
+
+.today-label__aside {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+  font: 400 var(--rn-fs-sm)/1 var(--rn-font-ui);
+  color: var(--rn-ink-3);
+  white-space: nowrap;
+}
+
+.today-list { margin: 0; padding: 0; list-style: none; }
+.today-list + .today-list { margin-top: 6px; }
+
+/* A row is one reference capsule stretched over the whole line: anywhere on it opens, previews and drags. */
+.today-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: var(--rn-row-h);
+  margin: 0 -8px;
+  padding: 4px 8px;
+  border-radius: var(--rn-r-xs);
+  transition: background-color var(--rn-d-1) var(--rn-ease-out);
+}
+
+.today-row:hover { background: var(--rn-fill); }
+
+.today .today-ref {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  min-width: 0;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  font: 500 var(--rn-fs-md)/1.45 var(--rn-font-ui);
+  color: var(--rn-ink);
+}
+
+.today .today-ref::before { width: 15px; height: 15px; margin-right: 9px; }
+.today .today-ref.is-plain::before { display: none; }
+.today .today-ref::after { content: ''; position: absolute; inset: 0; border-radius: inherit; }
+.today .today-ref:hover { background: none; }
+.today .today-ref:focus-visible { outline: none; }
+.today .today-ref:focus-visible::after { outline: 1.5px solid var(--rn-ink-3); outline-offset: -1px; border-radius: var(--rn-r-xs); }
+
+.today-row__meta {
+  flex: 0 1 auto;
+  max-width: 48%;
+  overflow: hidden;
+  font: 400 var(--rn-fs-sm)/1.45 var(--rn-font-ui);
+  color: var(--rn-ink-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.today-time {
+  flex: none;
+  width: 92px;
+  font: 400 var(--rn-fs-sm)/1.45 var(--rn-font-ui);
+  font-variant-numeric: tabular-nums;
+  color: var(--rn-ink-3);
+  white-space: nowrap;
+}
+
+/* 进行中 and the countdown to the next event are "now": the signal colour as text. */
+.today-time.is-now { font-weight: 600; color: var(--rn-accent-text); }
+
+/* The checkbox sits above the stretched capsule, so ticking never opens the page. */
+.today .today-check { position: relative; z-index: 1; }
+.today-row.is-done .today-ref { color: var(--rn-ink-3); text-decoration: line-through; }
+
+.today .today-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: 500 var(--rn-fs-sm)/1 var(--rn-font-ui);
+  color: var(--rn-ink-2);
+  cursor: pointer;
+}
+
+.today .today-link:hover { color: var(--rn-ink); text-decoration: underline; text-underline-offset: 3px; }
+.today .today-link:focus-visible { outline: 1.5px solid var(--rn-ink-3); outline-offset: 2px; border-radius: 2px; }
+
+/* 筛子校准 joins the block as its first entry: a hairline below it, not a card of its own. */
+.today .rss-calibration {
+  gap: var(--rn-s2);
+  margin: 0 0 6px;
+  padding: 8px 0 14px;
+  border: 0;
+  border-bottom: 1px solid var(--rn-hair);
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+
+.today .rss-calibration h2 { font: 600 var(--rn-fs-md)/1.4 var(--rn-font-ui); }
+
+.today-guide {
+  padding-top: 18px;
+  border-top: 1px solid var(--rn-hair);
+}
+
+.today-guide p {
+  max-width: 560px;
+  margin: 0 0 16px;
+  font: 400 var(--rn-fs-md)/1.75 var(--rn-font-ui);
+  color: var(--rn-ink-2);
+}
+
+.today-guide__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.today-error {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0;
+  font: 400 var(--rn-fs-sm)/1.6 var(--rn-font-ui);
+  color: var(--rn-ink-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .today-row { transition: none; }
+}
