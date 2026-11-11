@@ -43,6 +43,9 @@ function showStartupSplashWindow(splashWindow: BrowserWindow): void {
 }
 
 export async function createStartupSplashWindow(): Promise<void> {
+  // A hidden start (automation, verification scripts) shows nothing on the user's screen:
+  // boot-entry already skips the splash, and the second call in index.ts must not create it.
+  if (process.env.READY_START_HIDDEN === '1') return
   if (startupSplashWindow && !startupSplashWindow.isDestroyed()) return
 
   startupSplashFinishing = false
