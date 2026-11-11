@@ -1337,6 +1337,7 @@ const documentPagesAPI: import('../shared/document-pages').DocumentPagesAPI = {
 }
 
 const canvasAPI: import('../main/modules/board-engine/ipc').CanvasAPI = {
+  exportImage: input => ipcRenderer.invoke('canvas:exportImage', input),
   create: input => ipcRenderer.invoke('canvas:create', input),
   open: id => ipcRenderer.invoke('canvas:open', id),
   read: id => ipcRenderer.invoke('canvas:read', id),

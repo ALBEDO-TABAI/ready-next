@@ -16,6 +16,14 @@ import { drafts } from '../../modules/document/drafts/runtime'
 import { toLocalFileUrl } from '../../utils/dragDrop'
 import './surface/surface.css'
 import { addBoardSelectionToAgentInput } from '../../modules/agent/chat-input-bridge'
+import { BoardNewItems } from './BoardNewItems'
+import { boardAncestors } from './board-ancestors'
+import { READY_REF_MIME } from '../../modules/calendar/linkage/transfer'
+import { ReadyRefSchema } from '../../../shared/ready-ref'
+import { openInCurrentTab } from '../../modules/document/ink/layout-state'
+import { boardMarkdown } from '../../modules/canvas/export'
+import { captureDocumentPreviewHtml } from '../document/document-export-capture'
+import { showToast } from '../ui'
 
 function confirmed<T>(result: { ok: true; value: T } | { ok: false; error: string }): T {
   if (!result.ok) throw new Error(result.error)
@@ -24,7 +32,6 @@ function confirmed<T>(result: { ok: true; value: T } | { ok: false; error: strin
 export default function CanvasDocument({ tab }: { tab: DocTab }) {
   const [opened, setOpened] = useState<CanvasOpen | null>(null), current = useRef<CanvasOpen | null>(null)
   const [root, setRoot] = useState(''), [trees, setTrees] = useState<PageNode[]>([]), [error, setError] = useState('')
-  const [link, setLink] = useState(''), [documentId, setDocumentId] = useState('')
   const pending = useRef(false), generation = useRef(0), importId = useRef(crypto.randomUUID())
   const target = useCanvasNavigation(state => state.target)
   const [calendarSnapshot, setCalendarSnapshot] = useState<CalendarSnapshot>(), [scheduling, setScheduling] = useState<CanvasNode | null>(null)
@@ -106,23 +113,49 @@ export default function CanvasDocument({ tab }: { tab: DocTab }) {
   </section>
   if (!opened || !previews) return <p role={error ? 'alert' : 'status'}>{error || '正在打开画板…'}</p>
   const add = (node: Parameters<typeof write>[0][number]) => run(() => write([node]))
-  // New cards take the first free slot on a grid, so they never land on top of an existing card.
-  const geometry = () => {
-    const width = 300, height = 180, gap = 32, nodes = opened.canvas.nodes
-    for (let slot = 0; ; slot++) {
-      const x = 80 + (slot % 4) * (width + gap), y = 80 + Math.floor(slot / 4) * (height + gap)
-      if (!nodes.some(node => x < node.x + node.width && x + width > node.x && y < node.y + node.height && y + height > node.y)) return { id: crypto.randomUUID(), x, y, width, height }
+  const frame = (at: { x: number; y: number }, height = 120) => ({ id: crypto.randomUUID(), x: Math.round(at.x - 130), y: Math.round(at.y - 40), width: 260, height })
+  // Dropped onto the stage: FastCard items (through Main's transfer) and pages from the sidebar (a document card).
+  const dropData = (data: DataTransfer, at: { x: number; y: number }) => {
+    const fastCard = data.getData('application/x-ready-fastcard')
+    if (fastCard) {
+      const { itemIds, operationId } = JSON.parse(fastCard) as { itemIds: string[]; operationId: string }
+      run(async () => {
+        const result = await api.fastCard.transfer({ operationId, itemIds, target: { kind: 'existing', objectId: opened.objectId }, position: at })
+        if (!result.success) throw new Error(result.error || 'FastCard 没有放到画板上')
+        await refresh()
+      })
+      return true
     }
+    const raw = data.getData(READY_REF_MIME)
+    const ref = raw ? ReadyRefSchema.safeParse(JSON.parse(raw)) : null
+    const pageRef = ref?.success && ref.data.kind === 'page' ? ref.data : null
+    if (pageRef) {
+      const page = pages.find(item => item.objectId === pageRef.id)
+      if (!page) { setError('这一页不在当前资料库里'); return true }
+      add({ type: 'addNode', node: { ...frame(at, 180), type: 'file', file: page.path.slice(root.length + 1), ready: { kind: 'document', ref: { kind: 'page', id: page.objectId } } } })
+      return true
+    }
+    return false
+  }
+  const ancestors = boardAncestors(trees, root, opened.path)
+  // 导出 (W4 §2.2): the chosen cards or the whole board as Markdown (with its assets) or PDF, through the document export.
+  const exportBoard = async (kind: 'md' | 'pdf', ids: string[]) => {
+    const title = opened.canvas.ready.title || opened.path.split('/').pop()!.replace(/\.canvas$/i, '')
+    const sourcePath = `${root}/${opened.path}`, content = boardMarkdown(opened.canvas, opened.path, ids.length ? new Set(ids) : undefined)
+    const result = kind === 'md'
+      ? await api.document.exportMarkdownBundle({ content, sourcePath, suggestedName: title })
+      : await api.document.exportPdf({ html: await captureDocumentPreviewHtml({ content, notePath: sourcePath, title }), suggestedName: title, sourcePath })
+    if (result.success) showToast(kind === 'md' ? '已导出 Markdown' : '已导出 PDF')
+    else if (!result.canceled) throw new Error(result.error || '导出失败')
+  }
+  // PNG: the surface frames the cards and hides its chrome; Main captures that part of this window and asks where to save.
+  const captureBoard = async (rect: { x: number; y: number; width: number; height: number }, title: string) => {
+    const result = await api.canvas.exportImage({ rect, suggestedName: title })
+    if (result.success) showToast('已导出 PNG')
+    else if (!('canceled' in result)) throw new Error(result.error)
   }
   return <div className="flex flex-col flex-1 min-h-0" data-testid="canvas-document">
-    <div className="canvas-addbar" data-canvas-ui aria-label="添加卡片">
-      <button onClick={() => add({ type: 'addNode', node: { ...geometry(), type: 'text', text: '新文字卡', ready: { kind: 'text' } } })}>添加文字卡</button>
-      <input aria-label="链接网址" placeholder="https://" value={link} onChange={event => setLink(event.target.value)} />
-      <button onClick={() => add({ type: 'addNode', node: { ...geometry(), type: 'link', url: link, ready: { kind: 'link' } } })}>添加链接卡</button>
-      <select aria-label="文档卡来源" value={documentId} onChange={event => setDocumentId(event.target.value)}><option value="">选择文档</option>{pages.map(page => <option key={page.objectId} value={page.objectId}>{page.title}</option>)}</select>
-      <button disabled={!documentId} onClick={() => { const page = pages.find(page => page.objectId === documentId)!; add({ type: 'addNode', node: { ...geometry(), type: 'file', file: page.path.slice(root.length + 1), ready: { kind: 'document', ref: { kind: 'page', id: page.objectId } } } }) }}>添加文档卡</button>
-    </div>
-    {error && <p role="alert" className="canvas-addbar-error">{error.replace(/^Error:\s*/, '')}</p>}
+    {error && <p role="alert" className="canvas-document-error">{error.replace(/^Error:\s*/, '')}</p>}
     {scheduling && calendarSnapshot && <ScheduleCardDialog key={scheduling.id} objectId={opened.objectId} nodeId={scheduling.id} version={opened.version}
       title={scheduling.type === 'text' ? scheduling.text.slice(0, 120) : scheduling.ready.preview?.title || '卡片日程'} snapshot={calendarSnapshot}
       close={() => setScheduling(null)} saved={refreshCalendar} />}
@@ -133,7 +166,11 @@ export default function CanvasDocument({ tab }: { tab: DocTab }) {
       prepareGraphic={async draft => `${opened.path.slice(0, -7)}.assets/${sha256(graphicSvg(draft.graphic, draft.width, draft.height))}.svg`}
       resolveAsset={path => toLocalFileUrl(`${root}/${path}`)}
       onOpenNode={node => { if (node.ready.ref) run(() => openReadyRef(node.ready.ref!, 'document')); else if (node.type === 'link') run(() => openReadyRef({ kind: 'web', url: node.url }, 'document')) }}
-      onNavigateSubcanvas={node => { if (node.ready.ref) run(() => openReadyRef(node.ready.ref!, 'document')) }}
+      onNavigateSubcanvas={node => { if (node.type === 'file') openInCurrentTab(`${root}/${node.file}`); else if (node.ready.ref) run(() => openReadyRef(node.ready.ref!, 'document')) }}
+      breadcrumbs={ancestors.map(node => ({ id: node.objectId, title: node.title }))}
+      onNavigateAncestor={id => { const node = ancestors.find(item => item.objectId === id); if (node) openInCurrentTab(node.path) }}
+      extraNewItems={(at, close) => <BoardNewItems at={at} close={close} pages={pages} root={root} boardPath={opened.path} add={node => write([{ type: 'addNode', node }])} report={cause => setError(String(cause))} />}
+      acceptsDrop={types => types.includes('application/x-ready-fastcard')} onDropData={dropData} onExport={exportBoard} captureImage={captureBoard}
       onAskAI={nodeIds => addBoardSelectionToAgentInput({ title: opened.canvas.ready.title || '画板', objectId: opened.objectId }, nodeIds)} />
   </div>
 }

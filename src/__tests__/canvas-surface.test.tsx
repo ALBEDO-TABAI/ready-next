@@ -31,8 +31,16 @@ async function mount(count = 12, extra: Partial<CanvasSurfaceProps> = {}) {
   async function key(key: string, more = {}, target: Element = surface) {
     await act(async () => target.dispatchEvent(new dom.window.KeyboardEvent('keydown', { bubbles: true, cancelable: true, key, ...more })))
   }
+  // Chrome buttons are icons named by their label (W4 MS1); shapes and arrangements sit in the dock's 图形 and the
+  // selection bar's 排版 menus.
   async function click(label: string) {
-    const button = [...surface.querySelectorAll('button')].find(b => b.textContent === label)
+    const find = () => [...surface.querySelectorAll('button')].find(b => b.textContent === label || b.getAttribute('aria-label') === label)
+    let button = find()
+    const menu = ['矩形', '箭头', '连线'].includes(label) ? '图形' : ['画廊排版', '瀑布排版', '散开排版'].includes(label) ? '排版' : null
+    if (!button && menu) {
+      const opener = [...surface.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === menu)
+      assert.ok(opener, menu); await act(async () => opener.click()); button = find()
+    }
     assert.ok(button, label); await act(async () => button.click())
   }
   return { dom, surface, card, pointer, flush, key, click, work, frames, get canvas() { return canvas }, get commits() { return commits },
@@ -81,7 +89,7 @@ test('real surface groups, lays out, redoes exact R positions, recycles and rest
   try {
     ui.surface.focus(); await ui.key('a', { ctrlKey: true }); await ui.click('分组')
     assert.equal(ui.canvas.nodes.filter(n => n.ready.groupId).length, 12)
-    await ui.click('R'); const scattered = structuredClone(ui.canvas)
+    await ui.click('散开排版'); const scattered = structuredClone(ui.canvas)
     await ui.click('撤销'); await ui.click('重做'); assert.deepEqual(ui.canvas, scattered)
     await ui.key('Delete'); assert.equal(ui.canvas.nodes.filter(n => n.ready.trash).length, 12)
     await ui.click('回收站'); await ui.click('全部恢复')
@@ -175,7 +183,7 @@ test('failed batches and failed graphic preparation leave board and undo history
   try {
     await ui.pointer(ui.card(), 'pointerdown', 10, 10); await ui.pointer(ui.surface, 'pointerup', 100, 100)
     assert.equal(attempts, 1); assert.equal(ui.card().style.left, '0px'); assert.match(ui.surface.textContent || '', /接收失败/)
-    const undo = [...ui.surface.querySelectorAll('button')].find(b => b.textContent === '撤销')!
+    const undo = [...ui.surface.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === '撤销')!
     assert.equal(undo.disabled, true)
     await ui.click('矩形'); await ui.pointer(ui.surface, 'pointerdown', 600, 400); await ui.pointer(ui.surface, 'pointerup', 800, 600)
     assert.match(ui.surface.textContent || '', /附件准备失败/); assert.equal(attempts, 1); assert.equal(ui.canvas.nodes.length, 12)
@@ -187,7 +195,7 @@ test('subcanvas navigation and ancestor actions are explicit caller callbacks', 
   const ui = await mount(12, { onNavigateSubcanvas: n => opened.push(n.id), breadcrumbs: [{ id: 'parent', title: '父画板' }], onNavigateAncestor: id => opened.push(id) })
   try {
     await act(async () => ui.card('n6').dispatchEvent(new ui.dom.window.MouseEvent('dblclick', { bubbles: true })))
-    await ui.click('父画板 /'); assert.deepEqual(opened, ['n6', 'parent']); assert.equal(ui.commits, 0)
+    await ui.click('父画板'); assert.deepEqual(opened, ['n6', 'parent']); assert.equal(ui.commits, 0)
   } finally { await ui.close() }
 })
 

@@ -26,7 +26,7 @@ export function TextCard({ node, commit, renderEditor, canvasPath }: {
   }, [buffer, canvasPath, node.id])
   useLayoutEffect(() => buffer.observe(node.text), [buffer, node.text])
   return <div data-canvas-ui className="note-preview-shell" aria-label="文字卡编辑">
-    {renderEditor ? renderEditor({ buffer, canvasPath, linkBase }) : <BufferedBlockEditor buffer={buffer} linkBase={linkBase} renderSource={block => <pre>{block.raw}</pre>} />}
+    {renderEditor ? renderEditor({ buffer, canvasPath, linkBase }) : <BufferedBlockEditor buffer={buffer} linkBase={linkBase} startTyping renderSource={block => <pre>{block.raw}</pre>} />}
     {!canvasPath && <small>尚未提供画板文件路径，无法选择页面链接、新建子页面和复制块引用。</small>}
   </div>
 }

@@ -12,6 +12,21 @@ for (const [address, prefix] of [
   ['192.168.0.0', 16], ['198.18.0.0', 15], ['198.51.100.0', 24], ['203.0.113.0', 24], ['224.0.0.0', 3],
 ] as const) blocked.addSubnet(address, prefix, 'ipv4')
 const globalV6 = new BlockList()
+const fakeIP = new BlockList()
+fakeIP.addSubnet('198.18.0.0', 15, 'ipv4')
+const privateAddressMessage = '这个地址是内网地址，没有抓取预览'
+type Resolver = (host: string) => Promise<Array<{ address: string; family: number }>>
+const systemResolver: Resolver = host => lookup(host, { all: true })
+// Bound network-change staleness to two minutes; injected resolvers have separate caches.
+const controlCache = new WeakMap<Resolver, { expires: number; result: Promise<boolean> }>()
+async function hasFakeIPProxy(resolver: Resolver, now: () => number): Promise<boolean> {
+  const cached = controlCache.get(resolver)
+  if (cached && now() < cached.expires) return cached.result
+  const result = resolver('example.com').then(addresses => addresses.length > 0
+    && addresses.every(({ address }) => isIP(address) === 4 && fakeIP.check(address, 'ipv4')))
+  controlCache.set(resolver, { expires: now() + 120000, result })
+  try { return await result } catch (error) { controlCache.delete(resolver); throw error }
+}
 globalV6.addSubnet('2000::', 3, 'ipv6')
 for (const [address, prefix] of [['2001::', 23], ['2001:db8::', 32], ['2002::', 16], ['3fff::', 20]] as const) blocked.addSubnet(address, prefix, 'ipv6')
 export function publicAddress(address: string): boolean {
@@ -21,15 +36,20 @@ export function publicAddress(address: string): boolean {
 }
 export function publicURL(input: string, base?: string): URL {
   const url = new URL(input, base), host = url.hostname.replace(/^\[|\]$/g, '').toLowerCase().replace(/\.$/, '')
+  if (host === 'localhost' || host.endsWith('.localhost') || (isIP(host) && !publicAddress(host))) throw new Error(privateAddressMessage)
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password
-    || (url.port && !['80', '443'].includes(url.port)) || host === 'localhost' || host.endsWith('.localhost')
-    || (!host.includes('.') && !isIP(host)) || (isIP(host) && !publicAddress(host))) throw new Error('Only public web addresses are allowed')
+    || (url.port && !['80', '443'].includes(url.port))
+    || (!host.includes('.') && !isIP(host))) throw new Error('这个地址不是可抓取预览的公开网页地址')
   url.hash = ''
   return url
 }
-export async function resolvePublicAddresses(host: string, resolver: (host: string) => Promise<Array<{ address: string; family: number }>> = host => lookup(host, { all: true })) {
+export async function resolvePublicAddresses(host: string, resolver: Resolver = systemResolver, now: () => number = Date.now) {
+  if (isIP(host) && !publicAddress(host)) throw new Error(privateAddressMessage)
   const addresses = await resolver(host)
-  if (!addresses.length || addresses.some(address => !publicAddress(address.address))) throw new Error('Private network address rejected')
+  if (!addresses.length) throw new Error('这个地址没有可用的网络地址，没有抓取预览')
+  const nonPublic = addresses.filter(({ address }) => !publicAddress(address))
+  if (nonPublic.length && (isIP(host) || nonPublic.some(({ address }) => isIP(address) !== 4 || !fakeIP.check(address, 'ipv4'))
+    || !await hasFakeIPProxy(resolver, now))) throw new Error(privateAddressMessage)
   return addresses
 }
 export interface PublicResponse { url: string; type: string; body: Buffer }

@@ -70,8 +70,10 @@ export function ReadyBlockEditor({ tabId, content: displayedContent, pageTitle, 
 }
 
 /** Both document tabs and canvas cards render this exact editor. */
-export function BufferedBlockEditor({ buffer, linkBase, content: displayedContent, pageTitle, renderSource }: {
+export function BufferedBlockEditor({ buffer, linkBase, content: displayedContent, pageTitle, renderSource, startTyping }: {
   pageTitle?: string; buffer: EditorBuffer; linkBase?: EditorLinkBase; content?: string; renderSource(block: DocumentBlock): ReactNode
+  /** Opening the editor places the caret: in a new paragraph when it is empty, otherwise at the end (text cards). */
+  startTyping?: boolean
 }) {
   const content = useSyncExternalStore(buffer.subscribe, () => displayedContent ?? buffer.snapshot.content)
   const writeError = useSyncExternalStore(buffer.subscribe, () => buffer.error)
@@ -89,7 +91,8 @@ export function BufferedBlockEditor({ buffer, linkBase, content: displayedConten
   const report = useCallback((cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause)), [])
   const focus = (at: number, empty = false, textOffset?: number) => { setAppendPrefix(''); setEmptyAt(empty ? at : null); setFocusRequest({ at, textOffset }) }
   function travel(direction: 'undo' | 'redo') {
-    try { const selection = buffer.travel(direction); if (selection) focus(selection.focus); setError('') } catch (cause) { console.warn('[ReadyBlockEditor] travel edit history failed:', cause instanceof Error ? cause.message : String(cause)); report(cause) }
+    // Undoing back to an empty text keeps the caret in an empty paragraph instead of leaving nothing to type into.
+    try { const selection = buffer.travel(direction); if (selection) focus(selection.focus, !buffer.snapshot.content.length); setError('') } catch (cause) { console.warn('[ReadyBlockEditor] travel edit history failed:', cause instanceof Error ? cause.message : String(cause)); report(cause) }
   }
   useLayoutEffect(() => {
     // Native Edit-menu commands arrive as beforeinput, without a keydown.
@@ -103,6 +106,14 @@ export function BufferedBlockEditor({ buffer, linkBase, content: displayedConten
     editor.addEventListener('beforeinput', beforeInput)
     return () => editor.removeEventListener('beforeinput', beforeInput)
   })
+  const started = useRef(false)
+  useLayoutEffect(() => {
+    if (!startTyping || started.current) return
+    started.current = true
+    const end = buffer.snapshot.content.length
+    if (end) setFocusRequest({ at: end })
+    else { setAppendPrefix(''); setEmptyAt(0); setFocusRequest({ at: 0 }) }
+  }, [startTyping, buffer])
   useLayoutEffect(() => {
     if (!focusRequest) return
     const elements = [...root.current!.querySelectorAll<HTMLElement>('[data-rich-start]')]
