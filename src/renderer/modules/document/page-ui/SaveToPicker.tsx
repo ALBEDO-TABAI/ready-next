@@ -3,6 +3,7 @@ import type { DraftFinalizeInput } from '../../../../shared/document-drafts'
 import type { PageNode, PageResult } from '../../../../shared/document-pages'
 import { readStorage, writeStorage } from '../../../utils/storage'
 import { errorMessage, flattenPages, joinPagePath, parentDirectory } from './page-state'
+import { Button, Checkbox, Input } from '../../../components/ui'
 
 export interface SaveToSelection extends DraftFinalizeInput { keepDocumentCard?: boolean }
 export interface SaveToPickerProps {
@@ -68,24 +69,25 @@ export function SaveToPicker({ trees, initialTitle, initialParentPath, extension
       else if (result.error !== 'cancelled') setError(result.error || '未返回位置')
     } catch (failure) { setError(errorMessage(failure)) }
   }
-  return <section role="dialog" aria-modal="false" aria-label={label} className="p-3 space-y-3 border rounded" style={{ borderColor: 'var(--border-color)', color: 'var(--text-primary)', background: 'var(--bg-primary)' }}>
-    <strong>{label}</strong>
-    <label className="block">标题<input className="ready-input-slot w-full" aria-label="标题" value={title} disabled={busy || mode !== 'save'} onChange={event => { setTitle(event.target.value); setCandidates([]); setError(null) }} /></label>
-    <input className="ready-input-slot w-full" aria-label="搜索位置" placeholder="搜索页面或文件夹" value={query} onChange={event => setQuery(event.target.value)} />
-    <nav aria-label="当前位置" className="text-xs break-all">{crumbs.map(node => <button key={node.objectId} disabled={busy} onClick={() => setParent(parentDirectory(node))}>{node.title} / </button>)}{!selected && <span>{parent}</span>}</nav>
-    <div role="tree" aria-label="保存位置" className="max-h-60 overflow-auto">
+  // The shared primitives on a quiet frame; inside a float (a dialog) the float is the frame (draft-save-dialog.css).
+  return <section role="dialog" aria-modal="false" aria-label={label} className="ready-save-to">
+    <strong className="ready-save-to__title">{label}</strong>
+    <label className="ready-save-to__field">标题<Input aria-label="标题" value={title} disabled={busy || mode !== 'save'} onChange={event => { setTitle(event.target.value); setCandidates([]); setError(null) }} /></label>
+    <Input aria-label="搜索位置" placeholder="搜索页面或文件夹" value={query} onChange={event => setQuery(event.target.value)} />
+    <nav aria-label="当前位置" className="ready-save-to__crumbs">{crumbs.map(node => <button key={node.objectId} type="button" disabled={busy} onClick={() => setParent(parentDirectory(node))}>{node.title} / </button>)}{!selected && <span>{parent}</span>}</nav>
+    <div role="tree" aria-label="保存位置" className="ready-save-to__tree">
       {nodes.filter(node => !query || `${node.title} ${node.path}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())).map(node => {
         const depth = nodes.filter(ancestor => node.path.startsWith(`${parentDirectory(ancestor)}/`) || node.path.startsWith(`${parentDirectory(ancestor)}\\`)).length
         return <button key={node.objectId} type="button" role="treeitem" aria-selected={parent === parentDirectory(node)} disabled={busy}
-          className="block w-full text-left rounded py-1 hover:bg-[var(--files-panel-state-hover-bg)]" style={{ paddingLeft: 8 + depth * 12 }}
+          className="ready-save-to__node" style={{ paddingLeft: 8 + depth * 12 }}
           onClick={() => { setParent(parentDirectory(node)); setCandidates([]); setError(null) }}>{node.title}</button>
       })}
     </div>
-    <p aria-label="最终路径" className="text-xs break-all">预计路径：{preview || '请选择位置'}（文件名由保存服务确认）</p>
-    {duplicate && <p role="status">此位置已有同名文件，提交后可查看候选名称。</p>}
-    {error && <p role="alert">{error}</p>}
-    {candidates.length > 0 && <div>重名候选：{candidates.map(name => <button key={name} disabled={mode !== 'save'} onClick={() => { setTitle(name); setCandidates([]); setError(null) }}>{name}</button>)}{mode !== 'save' && <p>移动或恢复不改名，请另选位置。</p>}</div>}
-    {sourceCanvas && <label className="block">来源画板：{sourceCanvas.title} <input type="checkbox" checked={keepCard} disabled={busy} onChange={event => setKeepCard(event.target.checked)} />保留文档卡</label>}
-    <div className="flex gap-3">{mode !== 'adopt' && <button disabled={busy} onClick={() => void chooseOther()}>其他位置…</button>}<button disabled={busy} onClick={onCancel}>取消</button><button disabled={busy || !parent} onClick={() => void confirm()}>{busy ? '正在处理…' : '确认'}</button></div>
+    <p aria-label="最终路径" className="ready-save-to__path">预计路径：{preview || '请选择位置'}（文件名由保存服务确认）</p>
+    {duplicate && <p role="status" className="ready-save-to__note">此位置已有同名文件，提交后可查看候选名称。</p>}
+    {error && <p role="alert" className="ready-save-to__error">{error}</p>}
+    {candidates.length > 0 && <div className="ready-save-to__candidates">重名候选：{candidates.map(name => <Button key={name} size="sm" disabled={mode !== 'save'} onClick={() => { setTitle(name); setCandidates([]); setError(null) }}>{name}</Button>)}{mode !== 'save' && <p>移动或恢复不改名，请另选位置。</p>}</div>}
+    {sourceCanvas && <div className="ready-save-to__keep">来源画板：{sourceCanvas.title} <Checkbox checked={keepCard} disabled={busy} onChange={setKeepCard} label="保留文档卡" /></div>}
+    <div className="ready-save-to__actions">{mode !== 'adopt' && <Button variant="ghost" disabled={busy} onClick={() => void chooseOther()}>其他位置…</Button>}<Button disabled={busy} onClick={onCancel}>取消</Button><Button variant="primary" disabled={busy || !parent} onClick={() => void confirm()}>{busy ? '正在处理…' : '确认'}</Button></div>
   </section>
 }

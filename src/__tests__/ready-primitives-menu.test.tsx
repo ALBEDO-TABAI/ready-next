@@ -69,3 +69,21 @@ test('openContextMenu prevents the native menu and positions its float at the po
   assert.equal(frame.style.left, '123px')
   assert.equal(frame.style.top, '240px') // pointer y + the shared 6px float gap
 })
+
+test('A checkable item with an icon keeps the icon in front and shows its state at the end', async t => {
+  const h = await mountPrimitives(t)
+  await h.render(<FloatHost />)
+  await act(async () => {
+    openMenu(anchor, [
+      { id: 'book', label: '书本阅读', icon: <svg data-icon="book" />, checked: true, onSelect: () => {} },
+      { id: 'marks', label: '书签与笔记', icon: <svg data-icon="marks" />, checked: false, onSelect: () => {} },
+    ], { label: '页面操作' })
+  })
+  const [on, off] = [...h.get('[role="menu"]').querySelectorAll('[role="menuitemcheckbox"]')]
+  assert.equal(on.firstElementChild?.getAttribute('data-icon'), 'book', 'the icon leads the row')
+  assert.ok(on.lastElementChild?.matches('.rn-menu__check') && on.lastElementChild.querySelector('svg'), 'a checked item ends with its check')
+  assert.equal(off.firstElementChild?.getAttribute('data-icon'), 'marks')
+  assert.ok(off.lastElementChild?.matches('.rn-menu__check') && !off.lastElementChild.querySelector('svg'), 'an unchecked item keeps the slot empty')
+  assert.equal(on.getAttribute('aria-checked'), 'true')
+  assert.equal(off.getAttribute('aria-checked'), 'false')
+})

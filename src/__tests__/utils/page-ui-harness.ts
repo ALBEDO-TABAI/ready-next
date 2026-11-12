@@ -65,7 +65,7 @@ export async function mountPageUI() {
   const previous = Object.fromEntries(Object.keys(globals).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]))
   for (const [key, value] of Object.entries(globals)) Object.defineProperty(globalThis, key, { value, configurable: true, writable: true })
   const { createRoot } = await import('react-dom/client')
-  const { OverlayHost } = await import('../../renderer/modules/document/ink/overlay')
+  const { FloatHost } = await import('../../renderer/components/ui/float/Float')
   const root = createRoot(dom.window.document.getElementById('root')!)
   const body = dom.window.document.body
   const click = async (name: string, within: ParentNode = body) => {
@@ -82,7 +82,7 @@ export async function mountPageUI() {
       element.dispatchEvent(new dom.window.Event(element.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true }))
     })
   }
-  return { dom, body, click, input, render: async (node: ReactNode) => { await act(async () => root.render(createElement(Fragment, null, node, createElement(OverlayHost)))) },
+  return { dom, body, click, input, render: async (node: ReactNode) => { await act(async () => root.render(createElement(Fragment, null, node, createElement(FloatHost)))) },
     close: async () => { await act(async () => root.unmount()); dom.window.close(); for (const [key, descriptor] of Object.entries(previous)) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key) } },
   }
 }

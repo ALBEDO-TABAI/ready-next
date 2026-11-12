@@ -58,8 +58,8 @@ export function drawInline(root: HTMLElement, spans: readonly InlineSpan[]) {
     }
     if (marks.color || marks.background) {
       const wrapper = document.createElement('span')
-      if (marks.color) { wrapper.dataset.readyColor = marks.color; wrapper.style.color = `var(--color-${marks.color}, var(--text-primary))` }
-      if (marks.background) { wrapper.dataset.readyBackground = marks.background; wrapper.style.backgroundColor = `var(--color-${marks.background}, transparent)` }
+      if (marks.color) { wrapper.dataset.readyColor = marks.color; wrapper.style.color = `var(--doc-${marks.color}-fg, var(--rn-ink))` }
+      if (marks.background) { wrapper.dataset.readyBackground = marks.background; wrapper.style.backgroundColor = `var(--doc-${marks.background}-bg, transparent)` }
       wrapper.append(node); node = wrapper
     }
     if (marks.reference) {

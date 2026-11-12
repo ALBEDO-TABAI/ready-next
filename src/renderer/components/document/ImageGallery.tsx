@@ -233,10 +233,11 @@ export default function ImageGallery({ tab, fileUrl, currentExt }: ImageGalleryP
 
   const checkerboardStyle: React.CSSProperties = isTransparent
     ? {
-        backgroundColor: '#FFFFFF',
+        // The checkerboard that shows transparency, drawn in the paper and fill tokens.
+        backgroundColor: 'var(--rn-sheet)',
         backgroundImage: [
-          'linear-gradient(45deg, #E8E8E8 25%, transparent 25%, transparent 75%, #E8E8E8 75%)',
-          'linear-gradient(45deg, #E8E8E8 25%, transparent 25%, transparent 75%, #E8E8E8 75%)',
+          'linear-gradient(45deg, var(--rn-fill-2) 25%, transparent 25%, transparent 75%, var(--rn-fill-2) 75%)',
+          'linear-gradient(45deg, var(--rn-fill-2) 25%, transparent 25%, transparent 75%, var(--rn-fill-2) 75%)',
         ].join(', '),
         backgroundSize: '20px 20px',
         backgroundPosition: '0 0, 10px 10px',

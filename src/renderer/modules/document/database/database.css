@@ -7,13 +7,17 @@
   .ready-database :where(button):disabled { cursor: default; opacity: .55; }
   .ready-database :where(button, input, select):focus-visible { outline: 1.5px solid var(--rn-ink-3); outline-offset: 1px; }
   .ready-database :where(input, select) { min-width: 0; height: var(--rn-control-h); padding: 0 10px; border: 0; border-radius: var(--rn-r-control); background: var(--rn-fill); box-shadow: inset 0 0 0 1px var(--rn-hair); appearance: none; }
+  /* Checkboxes in the cell editor and view settings: the Checkbox primitive's box, so checked and unchecked differ. */
+  .ready-database :where(input[type='checkbox']) { flex: none; width: 16px; height: 16px; padding: 0; border-radius: 5px; background: var(--rn-sheet); box-shadow: inset 0 0 0 1.5px var(--rn-hair-2); cursor: pointer; }
+  .ready-database :where(input[type='checkbox']:checked) { background: var(--rn-inverse) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.2l2.3 2.3 4.7-5' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 11px no-repeat; box-shadow: none; }
+  [data-theme='dark'] .ready-database :where(input[type='checkbox']:checked) { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.2l2.3 2.3 4.7-5' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
   .ready-database :where(h3) { margin: 0; font-size: 13px; font-weight: 500; }
   .ready-database :where(p) { margin: 8px 0; }
   .ready-database .rdb-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; padding-bottom: 6px; border-bottom: 1px solid var(--rdb-line); }
   .ready-database .rdb-tabs { display: flex; flex: 1 1 auto; min-width: 0; gap: 2px; overflow-x: auto; scrollbar-width: none; }
   .ready-database .rdb-tabs button { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: var(--rn-r-pill); white-space: nowrap; color: var(--rn-ink-2); }
   .ready-database .rdb-tabs [aria-selected='true'] { color: var(--rn-accent-text); background: var(--rn-accent-soft); }
-  .ready-database .rdb-new { height: 30px; padding: 0 14px; margin-left: 4px; border-radius: var(--rn-r-pill); background: var(--rn-sheet); box-shadow: inset 0 0 0 1px var(--rn-hair), var(--rn-card-shadow); font-weight: 500; }
+  .ready-database .rdb-new { margin-left: 4px; }
   .ready-database .rdb-status { display: flex; justify-content: space-between; padding-block: 6px; color: var(--rn-ink-3); font-size: var(--rn-fs-sm); }
   .ready-database [role='alert'] { color: var(--rn-bad); overflow-wrap: anywhere; }
   .ready-database .rdb-scroll { overflow: auto; overscroll-behavior: contain; border-bottom: 1px solid var(--rdb-line); }
@@ -61,13 +65,9 @@
   .ready-database .rdb-rule { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
   .ready-database .rdb-options { display: flex; flex-wrap: wrap; gap: 8px 16px; max-height: 220px; overflow: auto; }
   .ready-database .rdb-actions { display: flex; justify-content: flex-end; gap: 8px; }
-  .ready-database .rdb-actions button:last-child { background: var(--rn-fill-2); }
   /* W3 §4.4, after Inkwell's database: icon tabs and tools, typed cells, a title column that stays while scrolling. */
   .ready-database .rdb-view-icon { width: 15px; height: 15px; stroke-width: 1.8; flex: none; }
   .ready-database .rdb-tools { display: flex; flex: none; align-items: center; gap: 2px; }
-  .ready-database .rdb-icon { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; border-radius: 8px; color: var(--rn-ink-2); }
-  .ready-database .rdb-icon svg { width: 16px; height: 16px; stroke-width: 1.8; }
-  .ready-database .rdb-icon[aria-pressed='true'] { color: var(--rn-accent-text); }
   .ready-database .rdb-search { width: 180px; height: 30px; }
   .ready-database .rdb-head-label { display: flex; align-items: center; gap: 6px; min-width: 0; height: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 500; }
   .ready-database .rdb-head-label > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }

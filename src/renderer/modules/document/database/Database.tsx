@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { UserStateSchema, resolveInlineView, type DatabaseField, type DatabaseView } from '../../../../shared/document-database'
 import { databaseAPI, request, SnapshotSchema, QuerySchema, WriteSchema, CreatedSchema, savePersonal, observeDatabase, publishDatabase, type DatabaseAPI, type Snapshot, type Query, type PersonalState, type ViewRow, type PendingBuffer } from './access'
 import { ArrowUpDown, FileText, ListFilter, Search, Settings2, Sparkles } from 'lucide-react'
+import { Button, IconButton, tooltip } from '../../../components/ui'
 import { CellEditor } from './CellEditor'
 import { cellText } from './cell-text'
 import { CellValue, ViewIcon } from './cells'
@@ -170,15 +171,15 @@ function DatabaseContent({ databaseId, api = databaseAPI, initialViewId, viewNam
         void (async () => { await flushPersonal(); await savePersonal(api, databaseId, { currentViewId: v.id, scroll: { x: 0, y: 0 } }); await load() })().catch(fail)
       }}><ViewIcon type={v.type} />{v.name}</button>)}</div>
       <div className="rdb-tools">
-        <button type="button" className="rdb-icon" aria-label="筛选" title="筛选" aria-pressed={!!view.filters?.length} disabled={disabled} onClick={() => setSettings(current => current === 'filters' ? false : 'filters')}><ListFilter aria-hidden /></button>
-        <button type="button" className="rdb-icon" aria-label="排序" title="排序" aria-pressed={!!view.sorts?.length} disabled={disabled} onClick={() => setSettings(current => current === 'sorts' ? false : 'sorts')}><ArrowUpDown aria-hidden /></button>
-        <button type="button" className="rdb-icon" aria-label="搜索" title="搜索" aria-pressed={search !== null} onClick={() => setSearch(current => current === null ? '' : null)}><Search aria-hidden /></button>
+        <IconButton title="筛选" active={!!view.filters?.length} disabled={disabled} icon={<ListFilter aria-hidden />} onClick={() => setSettings(current => current === 'filters' ? false : 'filters')} />
+        <IconButton title="排序" active={!!view.sorts?.length} disabled={disabled} icon={<ArrowUpDown aria-hidden />} onClick={() => setSettings(current => current === 'sorts' ? false : 'sorts')} />
+        <IconButton title="搜索" active={search !== null} icon={<Search aria-hidden />} onClick={() => setSearch(current => current === null ? '' : null)} />
         {search !== null && <input className="rn-field rdb-search" aria-label="搜索行" placeholder="搜索标题与内容" autoFocus value={search} onChange={event => setSearch(event.target.value)} onKeyDown={event => { if (event.key === 'Escape') setSearch(null) }} />}
-        <button type="button" className="rdb-icon" aria-label="视图设置" title="视图设置" disabled={disabled} onClick={() => setSettings(current => current === 'all' ? false : 'all')}><Settings2 aria-hidden /></button>
-        <button type="button" className="rdb-icon" aria-label="把当前视图发给 AI" title={query.total > ASK_ROWS ? `问 AI：发送前 ${ASK_ROWS} 行` : '问 AI'} disabled={busy || !query.rows.length} onClick={() => {
+        <IconButton title="视图设置" disabled={disabled} icon={<Settings2 aria-hidden />} onClick={() => setSettings(current => current === 'all' ? false : 'all')} />
+        <IconButton title="把当前视图发给 AI" {...tooltip(query.total > ASK_ROWS ? `问 AI：发送前 ${ASK_ROWS} 行` : '问 AI')} disabled={busy || !query.rows.length} icon={<Sparkles aria-hidden />} onClick={() => {
           void addDatabaseRowsToAgentInput({ title: snapshot.definition.source || '数据库', objectId: databaseId }, query.rows.slice(0, ASK_ROWS).map(row => ({ title: row.title, objectId: row.id }))).catch(fail)
-        }}><Sparkles aria-hidden /></button>
-        <button type="button" className="rdb-new" aria-label="新建行" disabled={disabled} onClick={() => setCreating({ operationId: crypto.randomUUID(), title: '', submitted: false })}>新建</button>
+        }} />
+        <Button size="sm" variant="primary" className="rdb-new" aria-label="新建行" disabled={disabled} onClick={() => setCreating({ operationId: crypto.randomUUID(), title: '', submitted: false })}>新建</Button>
       </div>
     </header>
     <div className="rdb-status" role="status">{busy ? '正在保存…' : conflict ? '冲突' : pending.size ? '已合入未保存缓冲' : '已保存'}<span>{query.total} 行</span></div>
@@ -199,6 +200,6 @@ function DatabaseContent({ databaseId, api = databaseAPI, initialViewId, viewNam
         await request(api, { type: 'createRow', databaseId, operationId: creating.operationId, title: creating.title, values: {}, body: '' }, CreatedSchema)
         setCreating(null)
       })
-    }}><strong>新建页面</strong><input aria-label="页面标题" autoFocus required value={creating.title} disabled={creating.submitted} onChange={e => setCreating({ ...creating, title: e.target.value })} /><div className="rdb-actions"><button type="button" disabled={busy} onClick={() => setCreating(null)}>关闭</button><button aria-label="确认新建" disabled={disabled}>{creating.submitted ? '重试同一次新建' : '创建'}</button></div></form>}
+    }}><strong>新建页面</strong><input aria-label="页面标题" autoFocus required value={creating.title} disabled={creating.submitted} onChange={e => setCreating({ ...creating, title: e.target.value })} /><div className="rdb-actions"><Button size="sm" disabled={busy} onClick={() => setCreating(null)}>关闭</Button><Button size="sm" variant="primary" type="submit" aria-label="确认新建" disabled={disabled}>{creating.submitted ? '重试同一次新建' : '创建'}</Button></div></form>}
   </section>
 }

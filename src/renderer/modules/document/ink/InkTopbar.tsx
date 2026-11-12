@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { confirmDialog, showToast } from '../../../components/ui'
+import { IconButton, MenuList, Switch, anchorOf, confirmDialog, openFloat, showToast, tooltip, type MenuEntry } from '../../../components/ui'
 import type { DocumentExportKind } from '../../../components/document/document-export'
 import { saveBeforePageTrash } from '../page-ui/page-panel-state'
 import type { PageNode, PageProperties, PageRoot, PageUserState } from '../../../../shared/document-pages'
@@ -8,7 +8,6 @@ import type { DocTab } from '../../../stores/useDocTabs'
 import { Icon } from './icons'
 import { InkPageIcon } from './InkPageIcon'
 import { openInCurrentTab } from './layout-state'
-import { openPopover, tip } from './overlay'
 import { NavigationBackEntry } from '../../workbench/NavigationBackEntry'
 
 type Crumb = { objectId?: string; path?: string; title: string; icon?: string; kind?: PageNode['kind'] }
@@ -114,27 +113,21 @@ export function InkTopbar({ tab, roots, home, outline, pageMenu, status, sourceM
       </span>)}
     </div>
     <div className="ink-topbar-right">
-      {!home && sourceMode && markdown && <button type="button" className="ink-source-chip" aria-label="返回页面视图" {...tip('返回页面视图')} onClick={() => onSourceMode(false)}>
+      {!home && sourceMode && markdown && <button type="button" className="ink-source-chip" aria-label="返回页面视图" {...tooltip('返回页面视图')} onClick={() => onSourceMode(false)}>
         <Icon name="code" size={13} stroke={2} />源码<Icon name="x" size={12} stroke={2} />
       </button>}
       {/* On 今日 the draft controls keep only the recovery badge: unsaved drafts stay reachable after a crash. */}
       {status}
       {!home && tab?.objectId && favorite !== null && (
-        <button type="button" className={`ink-topbar-icon${favorite ? ' is-fav' : ''}`} aria-label={favorite ? '取消收藏' : '收藏'} aria-pressed={favorite} {...tip(favorite ? '取消收藏' : '收藏')} onClick={toggleFavorite}>
-          <Icon name="star" size={18} stroke={1.6} style={favorite ? { fill: '#F6C050', color: '#F6C050' } : undefined} />
-        </button>
+        <IconButton title={favorite ? '取消收藏' : '收藏'} active={favorite} icon={<Icon name="star" />} {...tooltip(favorite ? '取消收藏' : '收藏')} onClick={toggleFavorite} />
       )}
       {!home && outline && (
-        <button type="button" className={`ink-topbar-icon${outline.open ? ' is-on' : ''}`} aria-label="大纲" aria-pressed={outline.open} {...tip('大纲')} onClick={outline.toggle}>
-          <Icon name="outline" size={18} stroke={1.6} />
-        </button>
+        <IconButton title="大纲" active={outline.open} icon={<Icon name="outline" />} {...tooltip('大纲')} onClick={outline.toggle} />
       )}
-      {!home && markdown && <button type="button" className="ink-topbar-icon" aria-label="页面选项" {...tip('导出、阅读方式、样式与源码')}
-        onClick={event => openPopover({ id: 'ink-page-options', anchor: event.currentTarget.getBoundingClientRect(), placement: 'bottom-end', offset: 6, label: '页面选项',
-          render: close => <PageOptions objectId={favorite !== null ? tab!.objectId! : null} sourceMode={sourceMode} onSourceMode={on => { close(); onSourceMode(on) }}
-            close={close} copyLink={copyLink} actions={pageMenu} onTrash={trash} /> })}>
-        <Icon name="more" size={18} stroke={2} />
-      </button>}
+      {!home && markdown && <IconButton title="页面选项" icon={<Icon name="more" />} {...tooltip('导出、阅读方式、样式与源码')}
+        onClick={event => openFloat({ id: 'ink-page-options', anchor: anchorOf(event.currentTarget), placement: 'bottom-end', offset: 6, role: 'dialog', label: '页面选项', className: 'ink-page-options',
+          render: close => <PageOptions objectId={favorite !== null ? tab!.objectId! : null} sourceMode={sourceMode} onSourceMode={onSourceMode}
+            close={close} copyLink={copyLink} actions={pageMenu} onTrash={trash} /> })} />}
     </div>
   </header>
 }
@@ -166,64 +159,41 @@ function PageOptions({ objectId, sourceMode, onSourceMode, close, copyLink, acti
     } catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)) } finally { setBusy(false) }
   }
   const font = display?.font ?? 'sans'
-  const item = (label: string, icon: Parameters<typeof Icon>[0]['name'], run: () => void, options: { disabled?: boolean; danger?: boolean } = {}) =>
-    <div role="menuitem" aria-label={label} aria-disabled={options.disabled || undefined} tabIndex={options.disabled ? -1 : 0}
-      className={`ink-menu-item${options.disabled ? ' is-disabled' : ''}${options.danger ? ' is-danger' : ''}`}
-      onClick={() => { if (!options.disabled) { close(); run() } }} onKeyDown={event => { if (event.key === 'Enter' && !options.disabled) { close(); run() } }}>
-      <span className="ink-menu-icon"><Icon name={icon} size={18} /></span><span className="ink-menu-text">{label}</span>
-    </div>
-  const toggle = (label: string, icon: Parameters<typeof Icon>[0]['name'], on: boolean, run: () => void, disabled = false) =>
-    <div role="menuitemcheckbox" aria-checked={on} aria-label={label} aria-disabled={disabled || undefined} tabIndex={disabled ? -1 : 0}
-      className={`ink-menu-item${disabled ? ' is-disabled' : ''}`} onClick={() => { if (!disabled) { close(); run() } }} onKeyDown={event => { if (event.key === 'Enter' && !disabled) { close(); run() } }}>
-      <span className="ink-menu-icon"><Icon name={icon} size={18} /></span><span className="ink-menu-text">{label}</span>
-      <span className={`ink-switch${on ? ' is-on' : ''}`} aria-hidden><span className="ink-switch-knob" /></span>
-    </div>
-  const top = (copyLink || actions) ? <>
-    <div className="ink-menu-group">
-      {copyLink && item('复制链接', 'link', copyLink)}
-      {actions && item('导出为 PDF', 'download', () => actions.onExport('pdf'), { disabled: !actions.exportable })}
-      {actions && item('导出 Markdown（含资源）', 'download', () => actions.onExport('md-bundle'), { disabled: !actions.exportable })}
-      {actions && toggle('书本阅读', 'book', actions.bookReading.active, actions.bookReading.toggle, !actions.bookReading.eligible)}
-      {actions && toggle('书签与笔记', 'bookmark', actions.marks.open, actions.marks.toggle)}
-      {actions?.adopt && item('收进资料库…', 'import', actions.adopt)}
-      {actions?.sieve && toggle('不让筛子看到', 'eyeOff', actions.sieve.hidden, actions.sieve.toggle)}
-    </div>
-    <div className="ink-menu-divider" />
-  </> : null
-  const bottom = onTrash ? <>
-    <div className="ink-menu-divider" />
-    <div className="ink-menu-group">{item('移到回收站', 'trash', () => { void onTrash() }, { danger: true })}</div>
-  </> : null
-  const source = <div className="ink-menu-group">
-    <div role="menuitemcheckbox" aria-checked={sourceMode} aria-label="Markdown 源码" tabIndex={0} className="ink-menu-item" onClick={() => onSourceMode(!sourceMode)}
-      onKeyDown={event => { if (event.key === 'Enter') onSourceMode(!sourceMode) }}>
-      <span className="ink-menu-icon"><Icon name="code" size={18} /></span><span className="ink-menu-text">Markdown 源码</span>
-      <span className={`ink-switch${sourceMode ? ' is-on' : ''}`} aria-hidden><span className="ink-switch-knob" /></span>
-    </div>
-  </div>
-  if (!objectId) return <div className="ink-menu" style={{ width: 260 }}>{top}{source}{bottom}</div>
-  return <div className="ink-menu" style={{ width: 286 }}>
-    {top}
-    <div className="ink-menu-group">
-      <div className="ink-menu-label">字体样式</div>
-      <div className="ink-fontcards" role="radiogroup" aria-label="字体样式">
-        {([['sans', '默认'], ['serif', '衬线'], ['mono', '等宽']] as const).map(([id, label]) => <div key={id} role="radio" aria-checked={font === id} aria-label={label} tabIndex={0}
-          className={`ink-fontcard${font === id ? ' is-active' : ''}`} onClick={() => { if (!busy && display) void update({ font: id }) }}>
-          <div className={`ink-fontcard-ag is-${id}`}>Ag</div><div className="ink-fontcard-label">{label}</div>
+  // One shared menu (W1 §5): actions, the reading toggles as checkable items, source and trash; the page style
+  // (font cards, small text, full width) sits above it and stays open while the writer tries the options.
+  const items: MenuEntry[] = [
+    ...(copyLink ? [{ id: 'link', label: '复制链接', icon: <Icon name="link" />, onSelect: copyLink }] : []),
+    ...(actions ? [
+      { id: 'pdf', label: '导出为 PDF', icon: <Icon name="download" />, disabled: !actions.exportable, onSelect: () => actions.onExport('pdf') },
+      { id: 'md', label: '导出 Markdown（含资源）', icon: <Icon name="download" />, disabled: !actions.exportable, onSelect: () => actions.onExport('md-bundle') },
+      { id: 'book', label: '书本阅读', icon: <Icon name="book" />, checked: actions.bookReading.active, disabled: !actions.bookReading.eligible, onSelect: actions.bookReading.toggle },
+      { id: 'marks', label: '书签与笔记', icon: <Icon name="bookmark" />, checked: actions.marks.open, onSelect: actions.marks.toggle },
+      ...(actions.adopt ? [{ id: 'adopt', label: '收进资料库…', icon: <Icon name="import" />, onSelect: actions.adopt }] : []),
+      ...(actions.sieve ? [{ id: 'sieve', label: '不让筛子看到', icon: <Icon name="eyeOff" />, checked: actions.sieve.hidden, onSelect: actions.sieve.toggle }] : []),
+    ] : []),
+    ...(copyLink || actions ? [{ kind: 'separator' as const }] : []),
+    { id: 'source', label: 'Markdown 源码', icon: <Icon name="code" />, checked: sourceMode, onSelect: () => onSourceMode(!sourceMode) },
+    ...(onTrash ? [{ kind: 'separator' as const }, { id: 'trash', label: '移到回收站', icon: <Icon name="trash" />, danger: true, onSelect: () => { void onTrash() } }] : []),
+  ]
+  const ready = !busy && !!display
+  return <>
+    {objectId && <>
+      <div className="ink-page-style" role="group" aria-label="页面样式">
+        <div className="rn-menu__group" role="presentation">字体样式</div>
+        <div className="ink-fontcards" role="radiogroup" aria-label="字体样式">
+          {([['sans', '默认'], ['serif', '衬线'], ['mono', '等宽']] as const).map(([id, label]) => <button key={id} type="button" role="radio" aria-checked={font === id} aria-label={label}
+            className="ink-fontcard" onClick={() => { if (ready) void update({ font: id }) }}>
+            <span className={`ink-fontcard-ag is-${id}`}>Ag</span><span className="ink-fontcard-label">{label}</span>
+          </button>)}
+        </div>
+        {([['small_text', '小字', 'smallText'], ['full_width', '全宽', 'fullWidth']] as const).map(([key, label, icon]) => <div key={key} className="ink-switch-row">
+          <Icon name={icon} /><span>{label}</span>
+          <Switch label={label} checked={!!display?.[key]} onChange={() => { if (ready) void update({ [key]: !display?.[key] }) }} />
         </div>)}
       </div>
-    </div>
-    <div className="ink-menu-divider" />
-    <div className="ink-menu-group">
-      {([['small_text', '小字', 'smallText'], ['full_width', '全宽', 'fullWidth']] as const).map(([key, label, icon]) => <div key={key} role="menuitemcheckbox" aria-checked={!!display?.[key]} aria-label={label} tabIndex={0}
-        className="ink-menu-item" onClick={() => { if (!busy && display) void update({ [key]: !display[key] }) }}>
-        <span className="ink-menu-icon"><Icon name={icon} size={18} /></span><span className="ink-menu-text">{label}</span>
-        <span className={`ink-switch${display?.[key] ? ' is-on' : ''}`} aria-hidden><span className="ink-switch-knob" /></span>
-      </div>)}
-    </div>
-    <div className="ink-menu-divider" />
-    {source}
-    {bottom}
-    {error && <div role="alert" className="ink-menu-footer ink-panel-error">{error}</div>}
-  </div>
+      <div className="rn-menu__sep" role="separator" />
+    </>}
+    <MenuList items={items} label="页面操作" onDone={close} />
+    {error && <p role="alert" className="ink-float-error">{error}</p>}
+  </>
 }

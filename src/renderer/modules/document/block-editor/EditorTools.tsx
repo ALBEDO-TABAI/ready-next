@@ -64,7 +64,7 @@ export function EditorTools({ buffer, linkBase, children, report }: { buffer: Ed
       const element = block && root.current?.querySelector<HTMLElement>(`[data-block-start="${block.start}"]`)
       if (!element) throw new Error('日期提及所在段落尚不可用')
       element.scrollIntoView({ block: 'center' })
-      element.animate([{ backgroundColor: 'rgba(220,145,45,.35)' }, { backgroundColor: 'transparent' }], { duration: 1800 })
+      element.animate([{ backgroundColor: 'var(--rn-accent-soft)' }, { backgroundColor: 'transparent' }], { duration: 1800 })
     } catch (error) { console.warn('[EditorTools] locate date mention failed:', error instanceof Error ? error.message : String(error)); report(error) }
     useMentionNavigation.setState({ target: null })
   }, [mentionTarget, tabId, buffer.snapshot.content, report])

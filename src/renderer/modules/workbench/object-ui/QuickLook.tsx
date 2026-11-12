@@ -27,8 +27,8 @@ export function MaskedObjectOverlay({ children, onClose }: { children: React.Rea
     return () => { disposed = true; window.removeEventListener('keydown', escape, true); if (acquired) void endPersistentBrowserMask() }
   }, [onClose])
   if (error) return createPortal(<div role="alert" className="rn-object-ui"><p>{error}</p><button onClick={onClose}>关闭</button></div>, document.body)
-  return ready ? createPortal(<div className="rn-object-ui ink-scope rn-object-overlay" data-ready-native-overlay="" onClick={onClose}>
-    <section role="dialog" aria-modal="true" className="rn-object-panel" onClick={event => event.stopPropagation()}>
+  return ready ? createPortal(<div className="rn-object-ui rn-object-overlay" data-ready-native-overlay="" onClick={onClose}>
+    <section role="dialog" aria-modal="true" className="rn-object-panel rn-float" onClick={event => event.stopPropagation()}>
       {children}
     </section>
   </div>, document.body) : null

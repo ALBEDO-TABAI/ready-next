@@ -85,7 +85,7 @@ const PdfPageSlot = memo(function PdfPageSlot({
       {shouldRender ? (
         <div
           data-ready-pdf-page-mounted={pageNumber}
-          style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.3)' }}
+          style={{ boxShadow: 'var(--rn-shadow-2)' }}
         >
           <Page
             pageNumber={pageNumber}
@@ -140,7 +140,7 @@ function highlightPdfRange(layer: Element, start: number, end: number): () => vo
     // pdf.js's "highlight appended" keeps the mark in the text flow (text layer spans are absolutely positioned).
     const mark = document.createElement('span'); mark.className = 'highlight appended'; mark.dataset.readyPdfHighlight = 'true'
     // The text layer sits over the rendered page, so the mark has to stay translucent to keep the quote readable.
-    Object.assign(mark.style, { backgroundColor: 'rgba(255, 196, 0, 0.42)', mixBlendMode: 'multiply', borderRadius: '2px', transition: 'background-color 400ms ease' })
+    Object.assign(mark.style, { backgroundColor: 'var(--rn-hl)', mixBlendMode: 'multiply', borderRadius: '2px', transition: 'background-color 400ms ease' })
     range.surroundContents(mark); marks.push(mark)
   }
   return () => { for (const mark of marks) mark.replaceWith(...mark.childNodes) }
@@ -513,7 +513,7 @@ export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
         {/* Separator */}
         <div style={{ width: 1, height: 16, background: 'var(--border-default)', margin: '0 4px' }} />
 
-        {notice && <span role={notice.role} style={{ fontSize: 11, color: notice.role === 'alert' ? 'var(--color-red, #d93025)' : 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 260 }}>{notice.text}</span>}
+        {notice && <span role={notice.role} style={{ fontSize: 11, color: notice.role === 'alert' ? 'var(--rn-bad)' : 'var(--rn-ink-3)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 260 }}>{notice.text}</span>}
 
         {/* File name */}
         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{tab.title}</span>
@@ -539,7 +539,8 @@ export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
         data-ready-document-scroll-key={documentScrollKey}
         className="panel-hover-scrollbar flex-1 overflow-auto"
         style={{
-          background: '#525659',
+          // The pages lie on a sunken stage, like a book on its well (DL3).
+          background: 'var(--rn-stage-2)',
           '--ready-pdf-scale': scale,
         } as React.CSSProperties}
         onWheel={handleWheel}
@@ -551,7 +552,7 @@ export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
           onLoadError={onLoadError}
           loading={
             <div className="flex items-center justify-center py-20">
-              <Loader2 className="w-6 h-6 animate-spin" style={{ color: '#999' }} />
+              <Loader2 className="w-6 h-6 animate-spin" style={{ color: 'var(--rn-ink-3)' }} />
             </div>
           }
         >

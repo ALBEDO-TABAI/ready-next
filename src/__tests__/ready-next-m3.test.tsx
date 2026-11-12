@@ -45,7 +45,7 @@ test('M3: create, header edit, shared block/source history, save, child draft an
   const { useWorkspace } = await import('../renderer/stores/useWorkspace')
   const { PageDocumentEditor } = await import('../renderer/modules/document/page-ui/PageDocumentEditor')
   const { InkSidebar } = await import('../renderer/modules/document/ink/InkSidebar')
-  const { OverlayHost } = await import('../renderer/modules/document/ink/overlay')
+  const { FloatHost } = await import('../renderer/components/ui/float/Float')
   const { DraftControls } = await import('../renderer/modules/document/drafts/DraftControls')
   const { openReadyRef } = await import('../renderer/modules/workbench/open-ready-ref')
   const { runRegisteredDocumentSave } = await import('../renderer/modules/document/documentSaveRegistry')
@@ -92,7 +92,7 @@ test('M3: create, header edit, shared block/source history, save, child draft an
   const roots = [{ path: directory, kind: 'vault' as const }]
   function Surface({ mode = 'preview', book = false }: { mode?: 'edit' | 'preview'; book?: boolean }) {
     const tab = useDocTabs(state => state.tabs.find(item => item.id === state.activeTabId))
-    return <><InkSidebar visible roots={roots} /><OverlayHost />
+    return <><InkSidebar visible roots={roots} /><FloatHost />
       <DraftControls />{tab && <PageDocumentEditor key={tab.id} tab={tab} viewMode={mode} previewEditable isSceneVisible bookReading={book} />}</>
   }
   const render = async (mode: 'edit' | 'preview' = 'preview', book = false) => { await act(async () => f.root.render(<MemoryRouter><Surface mode={mode} book={book} /></MemoryRouter>)) }

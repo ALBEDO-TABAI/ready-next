@@ -943,7 +943,7 @@ export default function MarkdownEditor({
       if (targetBlock) {
         const containerTop = surface.getBoundingClientRect().top
         scrollToTop(targetBlock.getBoundingClientRect().top - containerTop + surface.scrollTop - 8)
-        targetBlock.animate?.([{ backgroundColor: 'var(--ready-reveal-flash, rgba(232, 64, 31, 0.12))' }, { backgroundColor: 'transparent' }], { duration: 1200, easing: 'ease-out' })
+        targetBlock.animate?.([{ backgroundColor: 'var(--rn-accent-soft)' }, { backgroundColor: 'transparent' }], { duration: 1200, easing: 'ease-out' })
         setPendingReveal(null)
         return
       }
