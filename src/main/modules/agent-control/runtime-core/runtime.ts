@@ -1,3 +1,4 @@
+import { webMcpAvailableForEnvelope } from '../../browser-engine/webmcp-service'
 import { app, shell } from 'electron'
 import { EventEmitter } from 'events'
 import { join } from 'path'
@@ -581,6 +582,7 @@ export class AgentControlRuntime extends EventEmitter {
           authorization: input.authorization,
           source,
           frozenToolSurface: input.frozenToolSurface,
+          webMcpAvailable: webMcpAvailableForEnvelope(this.browserController, input.requestEnvelope),
           resolutionInput: {
             message: input.message,
             sessionId: input.sessionId,

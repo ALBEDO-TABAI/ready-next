@@ -583,3 +583,19 @@ test('Codex skill admission never executes mutable skill directories', (t) => {
   }
   assert.equal(isCodexSafeHostSkillPrimitiveDefinition('skill_fixture_run', typedSkill), false)
 })
+
+test('WebMCP pair is absent from the frozen surface when unavailable and cannot extend an existing turn', () => {
+  const definitions = ['web_search', 'browser_page_tools', 'browser_call_page_tool'].map(definition)
+  const input = {
+    surfaceId: 'webmcp-surface', authorizationId: 'webmcp-auth', authorization: buildExplicitNoSkillAuthorization(),
+    source: { listDefaultToolDefinitionsForTurn: () => definitions, listCodexThreadToolDefinitions: () => definitions },
+    resolutionInput: {} as ReadyLiveToolResolutionInput,
+  }
+  const disabled = resolveReadyToolTurnSnapshot({ ...input, webMcpAvailable: false })
+  assert.deepEqual(disabled.readyToolSurface.toolNames, ['web_search'])
+  assert.deepEqual(disabled.readyTurnToolAuthorization.allowedToolNames, ['web_search'])
+  const enabled = resolveReadyToolTurnSnapshot({ ...input, webMcpAvailable: true })
+  assert.deepEqual(enabled.readyToolSurface.toolNames, ['browser_call_page_tool', 'browser_page_tools', 'web_search'])
+  assert.throws(() => resolveReadyToolTurnSnapshot({ ...input, webMcpAvailable: true, frozenToolSurface: disabled.readyToolSurface }), /native_tool_surface_extension_required/)
+  assert.throws(() => resolveReadyToolTurnSnapshot({ ...input, webMcpAvailable: false, frozenToolSurface: enabled.readyToolSurface }), /native_tool_definition_changed/)
+})

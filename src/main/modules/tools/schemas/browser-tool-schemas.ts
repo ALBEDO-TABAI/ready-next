@@ -240,6 +240,8 @@ export const BROWSER_TOOL_SCHEMAS = {
     task_id: z.string().describe('后台浏览器任务 ID'),
   }),
 
+  browser_page_tools: z.object({ tab_id: tabId }),
+  browser_call_page_tool: z.object({ tab_id: tabId, frame_id: z.string().min(1).describe('列出结果中的 CDP frameId'), tool_name: z.string().min(1).describe('列出结果中的工具名称'), input: arbitraryObject.describe('符合该网页工具 inputSchema 的对象输入') }),
   browser_status: z.object({
     needs_user: z.enum(['login', 'captcha']).optional().describe('观察确认需要用户登录或完成验证码时声明；封住本任务写入并请用户处理，不自动继续'),
     tab_id: tabId,

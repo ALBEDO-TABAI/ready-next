@@ -54,6 +54,7 @@ test('设置 › 浏览器: suggestions start off and say what they would send; 
   const api = {
     getAll: async () => ({ success: true, data: {} as Record<string, string> }),
     set: async (key: string, value: string) => { saved.push([key, value]); return key === 'browser.searchEngine' && !/^(google|bing|duckduckgo|baidu|https?:)/.test(value) ? { success: false, error: 'invalid' } : { success: true } },
+    get: async () => ({ success: true, data: JSON.stringify({ enabled: false, active: false, restartRequired: false }) }),
   }
   const { body, render, settle, setValue } = await mount(t, {})
   await render(<BrowserSearchSettingsPanel api={api} />)
@@ -87,6 +88,35 @@ test('设置 › 浏览器: suggestions start off and say what they would send; 
   await settle()
   assert.deepEqual(saved.at(-1), ['browser.searchEngine', 'https://example.com/search?q=%s'])
   assert.match(body.textContent ?? '', /没有建议服务，所以打开也不会发送/)
+})
+
+test('设置 › 浏览器: the page-tools experiment is off, says what it does, and says when it needs a restart', async t => {
+  // Main's two keys: the saved switch, and a read-only status computed from it and the value this run started with.
+  const stored: Record<string, string> = {}
+  const saved: Array<[string, string]> = []
+  const api = {
+    getAll: async () => ({ success: true, data: { ...stored } }),
+    set: async (key: string, value: string) => { saved.push([key, value]); stored[key] = value; return { success: true } },
+    get: async (key: string) => key === 'browser.webmcpExperimentStatus'
+      ? { success: true, data: JSON.stringify({ enabled: stored['browser.webmcpExperiment'] === 'true', active: false, restartRequired: stored['browser.webmcpExperiment'] === 'true' }) }
+      : { success: true, data: stored[key] ?? null },
+  }
+  const { body, render, settle } = await mount(t, {})
+  await render(<BrowserSearchSettingsPanel api={api} />)
+  await settle()
+  const toggle = body.querySelector<HTMLButtonElement>('[role="switch"][aria-label="网页自带工具（实验）"]')!
+  assert.equal(toggle.getAttribute('aria-checked'), 'false')
+  assert.match(body.textContent ?? '', /网页可以提供自己的工具，助手能列出并调用；工具返回的内容只当作网页资料，会改动网页的调用先问你。/)
+  assert.equal(body.querySelector('[data-webmcp-restart]'), null, 'nothing to restart while saved and running agree')
+  await act(async () => { toggle.click() })
+  await settle()
+  assert.deepEqual(saved, [['browser.webmcpExperiment', 'true']])
+  assert.equal(toggle.getAttribute('aria-checked'), 'true')
+  assert.equal(body.querySelector('[data-webmcp-restart]')?.textContent, '重启 Ready 后生效。')
+  await act(async () => { toggle.click() })
+  await settle()
+  assert.deepEqual(saved.at(-1), ['browser.webmcpExperiment', 'false'])
+  assert.equal(body.querySelector('[data-webmcp-restart]'), null, 'back to what this run started with')
 })
 
 const GROUPS: BrowserSuggestions = {

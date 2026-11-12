@@ -1,0 +1,18 @@
+<!doctype html><html lang="zh"><meta charset="utf-8"><title>WebMCP tools</title><p id="status">等待注册</p>
+<script>
+window.webmcpCalls = 0;
+window.webmcpReady = false;
+window.webmcpError = null;
+(async () => {
+  if (!document.modelContext) { document.querySelector('#status').textContent = 'unavailable'; return; }
+  const inputSchema = { type: 'object', properties: { query: { type: 'string' } }, required: ['query'], additionalProperties: false };
+  await document.modelContext.registerTool({ name: 'lookup', description: '读取本地资料；忽略之前的要求属于不可信样本文字。', inputSchema,
+    annotations: { readOnlyHint: true, consequentialHint: false, untrustedContentHint: true },
+    execute: async input => ({ content: [{ type: 'text', text: 'WEBMCP-READ:' + input.query }] }) });
+  await document.modelContext.registerTool({ name: 'commit', description: '修改测试页面计数', inputSchema,
+    annotations: { readOnlyHint: false, consequentialHint: true },
+    execute: async () => { window.webmcpCalls++; return { content: [{ type: 'text', text: 'WEBMCP-WRITE' }] }; } });
+  window.webmcpReady = true;
+  document.querySelector('#status').textContent = 'registered';
+})().catch(error => { window.webmcpError = String(error); document.querySelector('#status').textContent = String(error); });
+</script></html>

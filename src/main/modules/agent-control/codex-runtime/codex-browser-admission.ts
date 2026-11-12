@@ -1,3 +1,4 @@
+import { WEBMCP_TOOL_NAMES } from '../../../../shared/browser-webmcp'
 import {
   BROWSER_CAPABILITY_REGISTRY,
   browserOperationCapability,
@@ -18,6 +19,7 @@ export type BrowserAdmissionAuthoritySnapshot = {
   selectedSkillBrowserToolNames: readonly string[]
   hasExplicitAttachment: boolean
   hasWritableRoot: boolean
+  webMcpAvailable?: boolean
   tagForgeExclusive: boolean
 }
 
@@ -118,6 +120,7 @@ export function buildBrowserAdmissionAuthoritySnapshot(input: {
   selectedSkillToolNames?: readonly string[]
   hasExplicitAttachment?: boolean
   hasWritableRoot?: boolean
+  webMcpAvailable?: boolean
   tagForgeExclusive?: boolean
 }): BrowserAdmissionAuthoritySnapshot {
   const activeWorkbenchMode = input.activeWorkbenchMode || null
@@ -142,6 +145,7 @@ export function buildBrowserAdmissionAuthoritySnapshot(input: {
     hasExplicitAttachment: input.hasExplicitAttachment === true,
     hasWritableRoot: input.hasWritableRoot === true,
     tagForgeExclusive: input.tagForgeExclusive === true,
+    ...(input.webMcpAvailable === true ? { webMcpAvailable: true } : {}),
   }
   return {
     ...snapshot,
@@ -166,18 +170,25 @@ export function composeBrowserAdmissionToolNames(
   } else if (snapshot.explicitBrowserReadRefs.length > 0) {
     for (const name of BROWSER_EXPLICIT_READ_TOOL_NAMES) names.add(name)
   }
+  if (snapshot.webMcpAvailable && (snapshot.currentBrowserRoot || snapshot.explicitBrowserReadRefs.length)) {
+    for (const name of WEBMCP_TOOL_NAMES) names.add(name)
+  }
   return [...names].sort()
 }
 
 export function composeBrowserAdmissionExtraToolNames(
   snapshot: BrowserAdmissionAuthoritySnapshot,
 ): string[] {
-  if (snapshot.tagForgeExclusive || !snapshot.currentBrowserRoot) return []
+  if (snapshot.tagForgeExclusive) return []
+  if (!snapshot.currentBrowserRoot) return snapshot.explicitBrowserReadRefs.length && snapshot.webMcpAvailable ? [...WEBMCP_TOOL_NAMES] : []
   const names = new Set<string>()
   if (snapshot.hasExplicitAttachment) names.add('browser_upload')
   if (snapshot.hasWritableRoot) names.add('browser_archive')
   for (const name of snapshot.selectedSkillBrowserToolNames) {
     if (BROWSER_SKILL_ONLY_TOOL_NAMES.has(name as BrowserPublicToolName)) names.add(name)
+  }
+  if (snapshot.webMcpAvailable && (snapshot.currentBrowserRoot || snapshot.explicitBrowserReadRefs.length)) {
+    for (const name of WEBMCP_TOOL_NAMES) names.add(name)
   }
   return [...names].sort()
 }

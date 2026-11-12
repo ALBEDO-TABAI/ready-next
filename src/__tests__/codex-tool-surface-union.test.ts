@@ -6,6 +6,7 @@ import { TAG_FORGE_EXCLUSIVE_TOOL_NAMES } from '../main/modules/agent-control/co
 import { effectiveCodexFolderOutputToolNames } from '../main/modules/agent-control/codex-runtime/codex-folder-output-activation'
 import { buildExplicitNoSkillAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
 import { workbenchTestSnapshot } from './codex-workbench-surface-test-tools'
+import { WEBMCP_TOOL_NAMES } from '../shared/browser-webmcp'
 
 test('document visible plus RSS request keeps document read and RSS tools, without document writes', () => {
   const composed = composeCodexTurnToolSnapshot({
@@ -229,7 +230,8 @@ test('M7 turns without library resources preserve the pre-M7 frozen surface', as
   const { buildReadyToolSurface, resolveReadyToolTurnSnapshot, selectCodexRootToolDefinitions } = await import('../main/modules/agent-control/codex-runtime/codex-tool-surface')
   const { isLibraryReadTool } = await import('../main/modules/agent-control/codex-runtime/library-read-tools')
   const all = listLiveCodexThreadToolDefinitions()
-  const before = buildReadyToolSurface({ surfaceId: 'pre-m7', toolDefinitions: selectCodexRootToolDefinitions(all.filter(d => !isLibraryReadTool(d.name))) })
+  // This historical default surface never contained the opt-in WebMCP extension.
+  const before = buildReadyToolSurface({ surfaceId: 'pre-m7', toolDefinitions: selectCodexRootToolDefinitions(all.filter(d => !isLibraryReadTool(d.name) && !WEBMCP_TOOL_NAMES.some(name => name === d.name))) })
   const current = all.filter(d => d.groupId === 'document')
   const authorization = buildExplicitNoSkillAuthorization('no_skill_signal')
   const result = resolveReadyToolTurnSnapshot({ surfaceId: 'next', authorizationId: 'turn', authorization,

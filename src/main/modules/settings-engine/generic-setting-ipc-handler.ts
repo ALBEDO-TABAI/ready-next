@@ -1,4 +1,5 @@
 import { validateBrowserSearchSetting } from '../../../shared/search-engines'
+import { WEBMCP_SETTING_KEY, WEBMCP_STATUS_KEY } from '../../../shared/browser-webmcp'
 import { VAULT_ROOT_SETTING_KEY } from '../../../shared/vault'
 
 type GenericSettingRepository = {
@@ -27,6 +28,8 @@ export function createGenericSettingIPCHandler(options: {
 }): (_event: unknown, payload: { key: string; value: string }) => GenericSettingIPCResponse {
   return (_event, { key, value }) => {
     try {
+      if (key === WEBMCP_STATUS_KEY) throw new Error('read_only_setting')
+      if (key === WEBMCP_SETTING_KEY && value !== 'true' && value !== 'false') throw new Error('webmcp_setting_requires_boolean')
       if (key === VAULT_ROOT_SETTING_KEY) throw new Error('vault_setting_requires_dedicated_ipc')
       if (RESERVED_AI_WORKSPACE_SETTING_KEYS.has(key)) {
         throw new Error('ai_workspace_setting_requires_dedicated_ipc')

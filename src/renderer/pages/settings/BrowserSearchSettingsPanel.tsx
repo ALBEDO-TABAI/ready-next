@@ -7,14 +7,13 @@ import {
   SEARCH_SUGGESTIONS_KEY,
   resolveSearchEngine,
 } from '../../../shared/search-engines'
+import { WEBMCP_SETTING_KEY, WEBMCP_STATUS_KEY, type WebMcpExperimentStatus } from '../../../shared/browser-webmcp'
 import { SettingsCard, SettingsRow } from './settings-shared'
 
 type SettingsAPI = Pick<Window['electronAPI']['settings'], 'getAll' | 'get' | 'set'>
 // The WebMCP experiment (W7 T12): Main reads the saved value at start, so a change waits for the next start; its
 // read-only status key says whether it does.
-const WEBMCP_KEY = 'browser.webmcpExperiment'
-const WEBMCP_STATUS_KEY = 'browser.webmcpExperimentStatus'
-type WebMCPStatus = { enabled: boolean; active: boolean; restartRequired: boolean }
+type WebMCPStatus = WebMcpExperimentStatus
 const parseStatus = (raw: unknown): WebMCPStatus | null => {
   try {
     const value = typeof raw === 'string' ? JSON.parse(raw) : raw
@@ -56,7 +55,7 @@ export function BrowserSearchSettingsPanel({ api = window.electronAPI?.settings 
       setChoice(Object.hasOwn(SEARCH_ENGINES, stored) ? stored : CUSTOM)
       if (!Object.hasOwn(SEARCH_ENGINES, stored)) setCustom(stored)
       setSuggestions(result.data?.[SEARCH_SUGGESTIONS_KEY] === 'true')
-      setWebmcp(result.data?.[WEBMCP_KEY] === 'true')
+      setWebmcp(result.data?.[WEBMCP_SETTING_KEY] === 'true')
       setLoaded(true)
     }).catch(reason => { if (!cancelled) setError(`读取失败：${reason instanceof Error ? reason.message : String(reason)}`) })
     void readWebmcpStatus().catch(reason => console.warn('[settings] webmcp status unavailable:', reason instanceof Error ? reason.message : String(reason)))
@@ -88,7 +87,7 @@ export function BrowserSearchSettingsPanel({ api = window.electronAPI?.settings 
 
   const toggleWebmcp = async (next: boolean) => {
     setWebmcp(next)
-    try { await save(WEBMCP_KEY, next ? 'true' : 'false'); await readWebmcpStatus() } catch (reason) {
+    try { await save(WEBMCP_SETTING_KEY, next ? 'true' : 'false'); await readWebmcpStatus() } catch (reason) {
       setWebmcp(!next)
       setError(reason instanceof Error ? reason.message : String(reason))
     }

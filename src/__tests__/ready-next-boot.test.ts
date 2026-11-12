@@ -44,6 +44,10 @@ test('C15 boot rejects overrides before directory creation, locking or database-
         fs: { mkdirSync() { calls.push('mkdir') } },
         './ready-next-data-isolation': isolation,
         './modules/database-path': databasePath,
+        './modules/browser-engine/webmcp-experiment': {
+          readWebMcpStartupSetting() { calls.push('webmcp-read'); return false },
+          configureWebMcpExperiment() { calls.push('webmcp-configure') },
+        },
         './calendar-open-intents': { captureCalendarOpen() { return false } },
         './modules/browser-engine/popup-policy': { toOAuthCompatibleUserAgent: (value: string) => value },
         './startup-splash-window': {}, './boot-timing': {},
@@ -63,7 +67,7 @@ test('C15 boot rejects overrides before directory creation, locking or database-
         assert.deepEqual(calls, env === hiddenRefusal ? ['process.exit:1'] : ['error', 'process.exit:1'])
       } else {
         execute()
-        assert.deepEqual(calls, ['lock', 'startup'])
+        assert.deepEqual(calls, ['lock', 'webmcp-read', 'webmcp-configure', 'startup'])
       }
       assert.equal(name, 'Ready Next')
     }

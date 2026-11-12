@@ -15,7 +15,7 @@
 //   download T4/T8: the task card lists the downloaded file as a capsule with type and size; click opens it; Space
 //            quick-looks it.
 //   settings T8: 设置 › 浏览器 — the engine is chosen there; suggestions are off by default and the switch says what
-//            turning them on sends.
+//            turning them on sends. T12: the page-tools experiment is off; turned on, the row says a restart is needed.
 //   suggest  T8: typing in the address field lists open tabs and history from this computer (no engine suggestions
 //            while off); picking an open tab brings it to the front.
 //   find     T8: ⌘F opens the find bar above the page (the page moves down), counts and steps through matches; Esc closes.
@@ -200,6 +200,20 @@ async function settingsCase({ page }) {
   await waitFor(async () => (await stored('browser.searchSuggestions')) === 'false')
   await panel.getByLabel('搜索引擎').selectOption('google')
   await waitFor(async () => (await stored('browser.searchEngine')) === 'google')
+  // The page-tools experiment (W7 T12): off by default; turning it on saves it, and Main's status says it takes a
+  // restart, which the row then says too. Turned back off, nothing is pending.
+  const experiment = panel.getByRole('switch', { name: '网页自带工具（实验）' })
+  const status = async () => JSON.parse((await stored('browser.webmcpExperimentStatus')) || 'null')
+  ok('T12 settings: the page-tools experiment is off by default and says what it does', (await experiment.getAttribute('aria-checked')) === 'false'
+    && /网页可以提供自己的工具/.test(await panel.textContent()) && !(await panel.locator('[data-webmcp-restart]').count()))
+  await experiment.click()
+  const pending = await waitFor(async () => (await stored('browser.webmcpExperiment')) === 'true' && (await status())?.restartRequired === true)
+  ok('T12 settings: turning it on is saved and Main says it needs a restart; the row says so', pending
+    && await waitFor(() => panel.locator('[data-webmcp-restart]').isVisible()), JSON.stringify(await status()))
+  await shot(page, 'settings-webmcp-light')
+  await experiment.click()
+  ok('T12 settings: turning it back off leaves nothing pending', await waitFor(async () => (await stored('browser.webmcpExperiment')) === 'false'
+    && (await status())?.restartRequired === false && !(await panel.locator('[data-webmcp-restart]').count())), JSON.stringify(await status()))
   await page.evaluate(() => { window.location.hash = '#/workbench' })
   await harness.requestMode(page, 'browser')
 }

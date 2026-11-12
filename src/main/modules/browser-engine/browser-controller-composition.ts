@@ -1,4 +1,6 @@
 import { BrowserPageToolsService } from './page-tools-service'
+import { WebMcpService } from './webmcp-service'
+import { isWebMcpExperimentActive } from './webmcp-experiment'
 import { app, BrowserWindow, shell } from 'electron'
 import { BrowserAppShortcutBridgeService } from './app-shortcut-service'
 import { BrowserAutomationService } from './automation-service'
@@ -97,6 +99,7 @@ export abstract class BrowserControllerComposition extends BrowserControllerCont
   protected readonly bookmarkTransferService: BrowserBookmarkTransferService
   protected readonly hostLayoutService: BrowserHostLayoutService
   protected readonly pageBackgroundService: BrowserPageBackgroundService
+  readonly webMcp: WebMcpService
   protected readonly cdpSessionService: BrowserCdpSessionService
   protected readonly dialogService: BrowserDialogService
   protected readonly fileChooserGuard: BrowserFileChooserGuard
@@ -229,6 +232,7 @@ export abstract class BrowserControllerComposition extends BrowserControllerCont
         }
       },
     })
+    this.webMcp = new WebMcpService(this.cdpSessionService, isWebMcpExperimentActive())
     this.dialogService = new BrowserDialogService(this.cdpSessionService, () => {
       this.performanceRuntime.reconcile()
     })
@@ -372,6 +376,7 @@ export abstract class BrowserControllerComposition extends BrowserControllerCont
       addHistoryEntry: (url, title, metadata) => this.dataService.addHistoryEntry(url, title, metadata),
       updateHistoryEntryTitle: (url, title, favicon) => this.dataService.updateHistoryEntryTitle(url, title, favicon),
       handleLocalMediaDropNavigation: (tabId, url) => this.handleLocalMediaDropNavigation(tabId, url),
+      preparePageTools: tabId => this.webMcp.enableTab(tabId),
       preparePageObservation: tabId => this.cdpSessionService.ensureNetworkTracking(tabId),
       onTabLoadStateMayChange: (tabId, reason) => this.performanceRuntime.onLoadStateMayChange(tabId, reason),
       browserUserAgent: this.browserUserAgent,

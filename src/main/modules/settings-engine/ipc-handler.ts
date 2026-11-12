@@ -1,4 +1,6 @@
 import { SEARCH_ENGINE_KEY, SEARCH_SUGGESTIONS_KEY } from '../../../shared/search-engines'
+import { WEBMCP_SETTING_KEY, WEBMCP_STATUS_KEY } from '../../../shared/browser-webmcp'
+import { webMcpExperimentStatus } from '../browser-engine/webmcp-experiment'
 import { randomBytes } from 'node:crypto'
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'node:path'
@@ -119,7 +121,9 @@ export function setupSettingsIPC(options?: {
   // Get a single setting by key
   ipcMain.handle('settings:get', (_, key: string): SettingsIPCResponse<string | null> => {
     try {
-      const value = repository.getSetting(key)
+      const value = key === WEBMCP_STATUS_KEY
+        ? JSON.stringify(webMcpExperimentStatus(repository.getSetting(WEBMCP_SETTING_KEY)))
+        : repository.getSetting(key)
       return { success: true, data: value ?? null }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }

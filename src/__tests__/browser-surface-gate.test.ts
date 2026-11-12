@@ -1,3 +1,4 @@
+import { webMcpFixture } from './utils/webmcp-fixture'
 import type { BrowserActionOutcome } from '../shared/browser-action-outcome'
 import assert from 'node:assert/strict'
 import test from 'node:test'
@@ -7,6 +8,8 @@ import type { BrowserController } from '../main/modules/browser-engine/ipc-handl
 import { browserSnapshotService } from '../main/modules/browser-engine/browser-snapshot-service'
 import { buildExplicitNoSkillAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+import { createBrowserTurnLease } from '../main/modules/browser-engine/agent-browser-turn-lease'
+import { BrowserTargetClaimService, MemoryBrowserTargetClaimRepository } from '../main/modules/browser-engine/browser-target-claims'
 
 test('browser-surface-gate declares transitive sqlite ABI guard', (t) => {
   skipIfSqliteUnavailable(t, 'browser-surface-gate transitive sqlite load')
@@ -506,4 +509,65 @@ test('model opens a task page with causal journal identity then reads it without
   assert.equal(c.getActiveTab()?.id, 'tab-ref')
   const denied = await executeToolCall('browser_tabs', { action: 'close', tab_id: 'private' }, context)
   assert.equal(denied.data?.errorKind, 'browser_task_tab_not_owned')
+})
+
+for (const [label, annotations, origins, rule] of [
+  ['consequential', { readOnlyHint: true, consequentialHint: true }, ['https://page.test'], 'browser-webmcp-write'],
+  ['undeclared', undefined, ['https://page.test'], 'browser-webmcp-write'],
+  ['foreign-frame', { consequentialHint: true }, ['https://other.test'], 'browser-origin-write'],
+] as const) {
+  test(`WebMCP ${label} is stopped by the real confirmation gate with zero invocations`, async (t) => {
+    if (skipIfSqliteUnavailable(t, 'WebMCP confirmation gate')) return
+    const f = webMcpFixture(); await f.service.enableTab('tab-ref'); f.add(annotations)
+    const c = controller()
+    Object.assign(c, { webMcp: f.service, getTaskPayload: () => ({}), getPhysicalTargetToken: () => 'physical-ref',
+      executeJS: async () => ({ url: 'https://page.test', title: 'Page', timeOrigin: 1, mutationRevision: 0, frameDocumentToken: 'document-token-ref' }) })
+    const context = ctx(c)
+    context.requestEnvelope = { environmentHints: { ...referencedPageEnvelope().environmentHints as object, browserWriteOrigins: origins } }
+    context.browserWorkflowRoute = { browserTaskId: 'webmcp-task', requestAnchorSnapshotDigest: 'webmcp-anchor' }
+    const output = await executeToolCall('browser_call_page_tool', { frame_id: 'frame-1', tool_name: 'lookup', input: { query: 'x' } }, context)
+    assert.equal(output.data?.ruleId, rule)
+    assert.equal(output.data?.errorKind, 'denied_pending_confirmation')
+    assert.equal(f.commands.filter(command => command.method === 'WebMCP.invokeTool').length, 0)
+    f.service.disposeTab('tab-ref')
+  })
+}
+
+test('WebMCP read-only child-frame call returns data and settles the real browser action journal', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'WebMCP journal dispatch')) return
+  const f = webMcpFixture()
+  await f.service.enableTab('tab-ref')
+  f.add({ readOnlyHint: true })
+  t.after(() => f.service.disposeTab('tab-ref'))
+  const outcomes: BrowserActionOutcome[] = []
+  const c = controller()
+  Object.assign(c, {
+    webMcp: f.service,
+    getActiveTab: () => ({ id: 'tab-ref', url: 'https://page.test', title: 'Page', active: true }),
+    getTabList: () => [{ id: 'tab-ref', url: 'https://page.test', title: 'Page', active: true }],
+    getTaskPayload: () => ({}),
+    getPhysicalTargetToken: () => 'physical-ref',
+    bindBrowserWorkflowPhysicalTarget: () => () => undefined,
+    isBrowserWorkflowWriteAdmitted: () => true,
+    executeJS: async () => ({ url: 'https://page.test', title: 'Page', timeOrigin: 1, mutationRevision: 0, frameDocumentToken: 'document-token-ref' }),
+    beginBrowserWorkflowAction: (input: { identity: unknown }) => ({ actionId: 'webmcp-action', actionSeq: 1, identity: input.identity }),
+    settleBrowserWorkflowAction: (_taskId: string, actionId: string, outcome: BrowserActionOutcome) => {
+      outcomes.push(outcome)
+      return { receiptId: `receipt-${actionId}`, outcome }
+    },
+  })
+  const context = ctx(c)
+  context.requestEnvelope = referencedPageEnvelope()
+  context.browserLease = createBrowserTurnLease({ taskId: context.taskId!, runId: context.runId! }, new BrowserTargetClaimService(new MemoryBrowserTargetClaimRepository()))
+  t.after(() => context.browserLease?.release())
+  context.browserWorkflowRoute = { browserTaskId: 'webmcp-task', requestAnchorSnapshotDigest: 'webmcp-anchor' }
+  const result = await executeToolCall('browser_call_page_tool', { frame_id: 'frame-1', tool_name: 'lookup', input: { query: 'x' } }, context)
+  assert.equal(result.data?.ok, true, result.text)
+  assert.equal(result.data?.trust, 'untrusted_web_content')
+  assert.equal(f.commands.filter(command => command.method === 'WebMCP.invokeTool').length, 1)
+  assert.equal(outcomes.length, 1)
+  assert.equal(outcomes[0].identity.frameId, 'frame-1')
+  assert.ok(outcomes[0].identity.frameDocumentToken)
+  assert.equal(outcomes[0].delivery, 'delivered')
+  assert.equal(outcomes[0].effect, 'observed')
 })
