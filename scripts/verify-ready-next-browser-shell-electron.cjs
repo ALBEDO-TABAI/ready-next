@@ -330,7 +330,9 @@ async function readingCase({ app, page, site }) {
     && (await bar.locator('button').allTextContents()).join('|') === '划线|存入 FastCard|引用到文档|问 AI|保存到画板|翻译', picked)
   await shot(page, 'reading-selection-light')
   await bar.locator('[data-selection-action="highlight"]').click()
-  ok('T8 reading: 划线 says it went to the source page', await waitFor(async () => /已划线到来源页|已加入来源页/.test(await page.locator('.rn-toast').last().textContent().catch(() => '')), 15000))
+  const toasts = () => page.locator('.rn-toast').allTextContents().catch(() => [])
+  ok('T8 reading: 划线 says it went to the source page', await waitFor(async () => (await toasts()).some(text => /已划线到来源页|已加入来源页/.test(text)), 15000),
+    JSON.stringify(await toasts()))
   // The web page's source page holds the words, and its link goes back to the live page at them.
   const sources = await waitFor(() => webSourcePages(address).length === 1, 15000) ? webSourcePages(address) : webSourcePages(address)
   const content = sources.length === 1 ? fs.readFileSync(sources[0], 'utf8') : ''
