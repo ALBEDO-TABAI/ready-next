@@ -44,6 +44,8 @@ files:
   - "!node_modules/**/build/node_gyp_bins/**"
   - "!node_modules/**/.npmrc*"
   - "!node_modules/**/docs/**"
+  # Markdown files in dependencies (LICENSE.md included) stay out; every dependency's license text ships in
+  # Resources/licenses/generated/THIRD_PARTY_NOTICES.txt (npm run licenses:generate, checked after packaging).
   - "!node_modules/**/*.md"
   - "!node_modules/**/test/**"
   - "!node_modules/**/tests/**"
@@ -51,6 +53,14 @@ files:
   - "!node_modules/**/src/**/test/**"
   - "!node_modules/**/src/**/tests/**"
 extraResources:
+  - from: licenses
+    to: licenses
+    filter:
+      - "**/*"
+  - from: node_modules/electron/dist/LICENSE
+    to: licenses/electron/LICENSE
+  - from: node_modules/electron/dist/LICENSES.chromium.html
+    to: licenses/electron/LICENSES.chromium.html
   - from: build/runtime-seeds/ai-settings.seed.json
     to: ai-settings.seed.json
   - from: assets/codex-runtime

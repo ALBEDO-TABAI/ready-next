@@ -1,0 +1,9 @@
+lets-go-rss 移植代码与内置技能
+
+来源声明：assets/embedded-skills/lets-go-rss/README.md 的 License 小节原文：
+
+MIT
+
+上游未附全文；本文件只保留声明，不是 MIT 许可证全文。
+移植代码：src/main/modules/rss-engine/scrapers/
+上游版本、仓库地址与原版权人待补。
