@@ -5,14 +5,13 @@ import { JobView } from './find/JobView'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowDownUp, FolderOpen, Import, Search, Shuffle } from 'lucide-react'
 import type { LibraryBook, LibraryState } from '../../../shared/library'
-import { Button, closeFloat, Toolbar, type MenuEntry } from '../../components/ui'
+import { Button, Chip, closeFloat, EmptyState, Input, toggleMenu, Toolbar, type MenuEntry } from '../../components/ui'
 import { getLibraryAPI, confirmed, type LibraryAPI } from './access'
 import { Shelf } from './Shelf'
 import { BookOpen } from './BookOpen'
 import { Reader } from './reader/Reader'
 import { SORTS, sortBooks, TOPICS, type Sort } from './topics'
 import { shelfBook } from './presentation'
-import { toggleMenu } from './menu'
 
 type Route = { kind: 'shelf' } | { kind: 'info'; id: string; origin: HTMLElement } | { kind: 'read'; id: string; target?: BookTarget }
 type Snapshot = { status: 'loading' } | LibraryState
@@ -123,24 +122,24 @@ export function Library({ api: providedAPI, requestedPath, requestedTarget, onOp
     if (e.key.toLowerCase() === 'r') { e.preventDefault(); e.stopPropagation(); draw() }
   }}>
     {route.kind === 'read' && snapshot.status === 'ready' && !current && <p role="alert">书籍不存在或已从书房移除</p>}
-    {error && <div className="library-error" role="alert">{error}<button type="button" onClick={() => { setError(''); setRevision(n => n + 1) }}>重试</button><button type="button" onClick={() => setError('')}>关闭提示</button></div>}
+    {error && <div className="library-error" role="alert"><span>{error}</span><Button variant="ghost" size="sm" onClick={() => { setError(''); setRevision(n => n + 1) }}>重试</Button><Button variant="ghost" size="sm" onClick={() => setError('')}>关闭提示</Button></div>}
     {route.kind === 'read' && current && api ? <Reader key={current.id} record={current} api={api} target={route.target} onBack={() => setRoute({ kind: 'shelf' })} onError={reportError} /> : <>
       <header className="library-toolbar">
-        <div className="rn-float library-pill is-text"><b>书房</b><input ref={search} aria-label="搜索书架" placeholder="在书架上找… /" value={query} onChange={e => setQuery(e.target.value)} /></div>
+        <div className="rn-float library-pill is-text"><b>书房</b><Input ref={search} className="library-search" aria-label="搜索书架" placeholder="在书架上找… /" value={query} onChange={e => setQuery(e.target.value)} /></div>
         {/* With book sources, 导入 is a menu (local files or 找书); without them it imports local files at once. */}
         <div className="rn-float library-pill">{sourceAPI
           ? <Button variant="ghost" icon={<Import />} aria-haspopup="menu" aria-expanded={menu === IMPORT_MENU} data-float-anchor={IMPORT_MENU} onClick={e => importMenu(e.currentTarget)}>导入</Button>
           : <Button variant="ghost" icon={<Import />} disabled={!canImport} onClick={() => void importBooks()}>导入</Button>}</div>
       </header>
-      <div className="library-scroll"><header className="library-hero"><h1>我的<em>藏书</em></h1><div className="library-statistics"><span>{books.length} 本藏书</span><span>{new Set(books.map(b => b.topic)).size} 个分类</span><span>{books.filter(b => b.status === '在读').length} 本在读</span><span>{books.filter(b => b.status === '读完').length} 本读完</span></div></header>
+      <div className="library-scroll"><header className="library-hero"><h1>我的<em>藏书</em></h1><div className="library-statistics">{[[books.length, '本藏书'], [new Set(books.map(b => b.topic)).size, '个分类'], [books.filter(b => b.status === '在读').length, '本在读'], [books.filter(b => b.status === '读完').length, '本读完']].map(([n, unit]) => <span key={unit}><b>{n}</b> {unit}</span>)}</div></header>
         {snapshot.status === 'loading' && !error && <p role="status">正在整理书架…</p>}
-        {snapshot.status === 'no_vault' && <p>请先在文件面板设置资料库。</p>}
+        {snapshot.status === 'no_vault' && <EmptyState title="还没有资料库" body="请先在文件面板设置资料库。" />}
         {snapshot.status === 'ready' && <>
           {snapshot.issues.length > 0 && <div role="alert">{snapshot.issues.map(issue => <p key={issue.notePath}>{issue.notePath}：{issue.reason}</p>)}</div>}
-          {books.length === 0 ? <p>书架还是空的，导入一本本地书开始阅读。</p> : <>
-            <div className="library-filters" aria-label="分类筛选"><button type="button" aria-pressed={!topic} onClick={() => setTopic('')}>全部</button>{TOPICS.filter(t => sorted.some(b => b.topic === t.key)).map(t => <button type="button" key={t.key} aria-pressed={topic === t.key} onClick={() => setTopic(t.key)}>{t.name}</button>)}</div>
+          {books.length === 0 ? <EmptyState title="书架还是空的" body="导入一本本地书开始阅读。" /> : <>
+            <div className="library-filters" role="group" aria-label="分类筛选"><Chip aria-pressed={!topic} onClick={() => setTopic('')}>全部</Chip>{TOPICS.filter(t => sorted.some(b => b.topic === t.key)).map(t => <Chip key={t.key} aria-pressed={topic === t.key} onClick={() => setTopic(t.key)}>{t.name}</Chip>)}</div>
             <Shelf books={sorted} shown={shown} sort={sort} openId={route.kind === 'info' ? route.id : null} fresh={new Set()} onOpen={(book, origin) => setRoute({ kind: 'info', id: book.id, origin })} />
-            {!shown.size && <p>没有找到符合条件的书。</p>}
+            {!shown.size && <EmptyState title="没有找到符合条件的书" />}
             <p className="library-hint">点书脊取书 · ← → 沿书架走 · R 随手抽一本 · / 搜索</p>
           </>}
         </>}

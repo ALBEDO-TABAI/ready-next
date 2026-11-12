@@ -1,5 +1,6 @@
 import type { CanvasEdge, CanvasNode, Graphic } from '../../../../shared/ready-canvas/schema'
 import type { CanvasOperation } from '../../../../shared/ready-canvas/operations'
+import { DEFAULT_GRAPHIC_STROKE } from '../../../../shared/ready-canvas/graphics'
 import type { FrameWork, GraphicDraft, Tool } from '../../../components/canvas/surface/types'
 import { cardFrame, resizedGraphic, visualBounds } from './graphics'
 import { bounds, expand, intersects, rectBetween, screenToWorld, snapRect, zoomAt, type Camera, type Point, type Rect, type SpatialIndex } from './geometry'
@@ -166,7 +167,7 @@ export class CanvasGestures {
       if (to) void this.callbacks.commit([{ type: 'addEdge', edge: { id: crypto.randomUUID(), fromNode: d.from.id, toNode: to.id, toEnd: 'arrow' } }])
     } else if (d.kind === 'rect' || d.kind === 'arrow' || d.kind === 'path') {
       const start = screenToWorld(d.start, d.camera), end = screenToWorld(d.latest, d.camera)
-      const r = rectBetween(start, end), paint = { stroke: '#ff5a1f', strokeWidth: 2 }
+      const r = rectBetween(start, end), paint = { stroke: DEFAULT_GRAPHIC_STROKE, strokeWidth: 2 }
       const frame = d.kind === 'path' ? bounds(d.points.map(p => ({ ...p, width: 1, height: 1 }))) : r
       const x = Math.round(d.kind === 'arrow' ? start.x : frame.x), y = Math.round(d.kind === 'arrow' ? start.y : frame.y)
       const graphic: Graphic = d.kind === 'rect' ? { type: 'rect', ...paint, fill: 'transparent' } : d.kind === 'arrow' ? { type: 'arrow', ...paint, x2: Math.round(end.x) - x, y2: Math.round(end.y) - y } : { type: 'path', ...paint, points: d.points.map(p => ({ x: p.x - x, y: p.y - y })) }

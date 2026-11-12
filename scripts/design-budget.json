@@ -101,7 +101,7 @@
       "fontFace": 0
     },
     "components/canvas/surface": {
-      "color": 2,
+      "color": 0,
       "backdropFilter": 0,
       "fontFace": 0
     },
@@ -261,7 +261,7 @@
       "fontFace": 0
     },
     "modules/canvas/interaction": {
-      "color": 1,
+      "color": 0,
       "backdropFilter": 0,
       "fontFace": 0
     },
@@ -336,17 +336,17 @@
       "fontFace": 0
     },
     "modules/library": {
-      "color": 54,
-      "backdropFilter": 3,
+      "color": 0,
+      "backdropFilter": 0,
       "fontFace": 0
     },
     "modules/library/find": {
-      "color": 1,
+      "color": 0,
       "backdropFilter": 0,
       "fontFace": 0
     },
     "modules/library/reader": {
-      "color": 61,
+      "color": 0,
       "backdropFilter": 0,
       "fontFace": 1
     },
@@ -438,6 +438,10 @@
     {
       "glob": "src/renderer/modules/library/topics.ts",
       "reason": "lookOf 生成书脊布色与配套前景色；布色色板本体在扫描范围外的 src/shared/library-topics.ts。"
+    },
+    {
+      "glob": "src/renderer/modules/library/reader/papers.ts",
+      "reason": "PAPERS 是读者在排版里选的阅读纸色（白纸、米黄、夜间）：书页的纸、页边与墨，印进书页栅格，属于内容数据。"
     },
     {
       "glob": "src/renderer/modules/document/content-palette.css",

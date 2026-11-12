@@ -318,7 +318,7 @@ async function checkHighlights(app, page, book, vaultRoot) {
   await page.getByRole('button', { name: '排版', exact: true }).click()
   await page.getByRole('slider', { name: '字号', exact: true }).fill('24')
   await page.locator('.rn-library .reading-status').waitFor({ state: 'hidden' })
-  await page.getByRole('button', { name: '单页', exact: true }).click()
+  await page.getByRole('radio', { name: '单页', exact: true }).click()
   await page.getByRole('button', { name: '关闭面板', exact: true }).click()
   await page.locator('.rn-library [aria-label="阅读器"]').focus()
   await page.keyboard.press('n')

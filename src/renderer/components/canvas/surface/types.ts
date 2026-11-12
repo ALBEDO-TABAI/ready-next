@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import type { FloatAnchor, MenuEntry } from '../../ui'
 import type { CanvasNode, Graphic, ReadyCanvas } from '../../../../shared/ready-canvas/schema'
 import type { CanvasInverse, CanvasOperation } from '../../../../shared/ready-canvas/operations'
 import type { Camera, Rect } from '../../../modules/canvas/interaction/geometry'
@@ -26,8 +27,9 @@ export interface CanvasSurfaceProps {
   revealNode?: { nodeId?: string; requestId: string }
   initialCamera?: Camera
   onFrameWork?: (work: FrameWork) => void
-  /** More 新建 items on the canvas's right-click menu (链接, 文档卡, 子画板), placed at the clicked world point. */
-  extraNewItems?: (at: { x: number; y: number }, close: () => void) => ReactNode
+  /** More 新建 items on the canvas's right-click menu (链接, 文档卡, 子画板), placed at the clicked world point. A follow-up
+   * form opens as its own float at `place.anchor` (the pointer), kept inside `place.bounds` (the board). */
+  extraNewItems?: (at: { x: number; y: number }, place: { anchor: FloatAnchor; bounds: () => FloatAnchor }) => MenuEntry[]
   /** Drops the host understands (FastCard items, pages from the sidebar): return true when handled. */
   onDropData?: (data: DataTransfer, at: { x: number; y: number }) => boolean
   acceptsDrop?: (types: readonly string[]) => boolean

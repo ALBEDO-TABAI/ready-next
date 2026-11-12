@@ -1,8 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
-import { Copy, PenLine } from 'lucide-react'
+import { Copy, PenLine, X } from 'lucide-react'
 import type { LibraryHighlight, LibraryHighlightColor } from '../../../../shared/library'
 import type { ReadyRef } from '../../../../shared/ready-ref'
-import { RefCapsule } from '../../../components/ui'
+import { Button, Chip, EmptyState, IconButton, RefCapsule, SectionHeader, Textarea } from '../../../components/ui'
 import type { CaptureSelection } from '../../workbench/capture'
 import { receiveToCanvas, receiveToFastCard, reportCaptureError } from '../../workbench/capture-receipt'
 import { SelectionBar } from '../../workbench/selection-bar/SelectionBar'
@@ -31,7 +31,7 @@ export function HighlightPopover({ lens, highlight, busy, capture, sourceRef, so
     const selection = capture()
     if (selection) void receive(selection).then(onClose).catch(reportCaptureError)
   }
-  const writer = writing && <div className="highlight-write"><textarea aria-label="批注内容" value={note} onChange={e => setNote(e.target.value)} rows={4} autoFocus /><button type="button" disabled={busy} onClick={() => void onSave(highlight?.color ?? 'yellow', note)}>保存批注</button></div>
+  const writer = writing && <div className="highlight-write"><Textarea aria-label="批注内容" value={note} onChange={e => setNote(e.target.value)} rows={4} autoFocus /><Button size="sm" disabled={busy} onClick={() => void onSave(highlight?.color ?? 'yellow', note)}>保存批注</Button></div>
   return <div ref={ref} role="dialog" aria-label="划线" className={`rd-highlight-popover rd-ui${highlight ? '' : ' is-selection'}`} style={{ left: at.x, top: at.y }}
     onKeyDown={e => { e.stopPropagation(); if (e.key === 'Escape') onClose() }}>
     {!highlight ? <>
@@ -40,15 +40,20 @@ export function HighlightPopover({ lens, highlight, busy, capture, sourceRef, so
         { id: 'copy', label: '复制', icon: <Copy />, run: () => onCopy(false) },
       ]} />
       {writer && <div className="rn-float highlight-tools">{writer}</div>}
-    </> : <div className="rn-float highlight-tools"><div role="group" aria-label="划线颜色">{MARKERS.map(m => <button type="button" key={m.key} aria-label={m.label} title={m.label} disabled={busy || highlight.location.status === 'malformed'} aria-pressed={highlight.color === m.key} style={{ '--marker': m.color } as React.CSSProperties} onClick={() => void onSave(m.key)}>{m.label}</button>)}</div>
-      <button type="button" disabled={busy || highlight.location.status === 'malformed'} onClick={() => setWriting(v => !v)}>{highlight.note ? '改批注' : '批注'}</button>
-      <button type="button" onClick={() => void onCopy(false)}>复制</button>
-      <button type="button" disabled={busy} onClick={() => void onAsk()}>问 AI</button>
-      <button type="button" onClick={() => void onCopy(true)}>复制引用</button>
-      <button type="button" disabled={highlight.location.status !== 'located'} onClick={take(receiveToFastCard)}>存入 FastCard</button>
-      <button type="button" disabled={highlight.location.status !== 'located'} onClick={take(receiveToCanvas)}>保存到画板</button>
-      <button type="button" disabled={busy} onClick={() => void onRemove()}>删除划线</button>
-      <button type="button" disabled={busy} onClick={onClose}>关闭划线浮层</button>
+    </> : <div className="rn-float highlight-tools">
+      <div className="highlight-head">
+        {/* The marker colours are the reader's data (MARKERS); each choice shows its own swatch. */}
+        <div role="group" aria-label="划线颜色">{MARKERS.map(m => <Chip key={m.key} aria-label={m.label} title={m.label} disabled={busy || highlight.location.status === 'malformed'} aria-pressed={highlight.color === m.key}
+          icon={<span className="highlight-swatch" style={{ background: m.color }} aria-hidden="true" />} onClick={() => void onSave(m.key)}>{m.label}</Chip>)}</div>
+        <IconButton size="sm" icon={<X />} title="关闭划线浮层" disabled={busy} onClick={onClose} />
+      </div>
+      <Button variant="ghost" size="sm" disabled={busy || highlight.location.status === 'malformed'} onClick={() => setWriting(v => !v)}>{highlight.note ? '改批注' : '批注'}</Button>
+      <Button variant="ghost" size="sm" onClick={() => void onCopy(false)}>复制</Button>
+      <Button variant="ghost" size="sm" disabled={busy} onClick={() => void onAsk()}>问 AI</Button>
+      <Button variant="ghost" size="sm" onClick={() => void onCopy(true)}>复制引用</Button>
+      <Button variant="ghost" size="sm" disabled={highlight.location.status !== 'located'} onClick={take(receiveToFastCard)}>存入 FastCard</Button>
+      <Button variant="ghost" size="sm" disabled={highlight.location.status !== 'located'} onClick={take(receiveToCanvas)}>保存到画板</Button>
+      <Button variant="danger" size="sm" disabled={busy} onClick={() => void onRemove()}>删除划线</Button>
       {sourceRef && <p className="highlight-source">来源页 <RefCapsule reference={sourceRef} title={sourceTitle} /></p>}
       {writer}
       {!writing && highlight.note && <p>{highlight.note}</p>}
@@ -66,11 +71,11 @@ export function NotesList({ list, onGo, onOpen }: { list: LibraryHighlight[]; on
     const key = h.location.status === 'located' ? `${h.location.chapter + 1} · ${h.chapterTitle}` : '未定位'
     groups.set(key, [...(groups.get(key) ?? []), h])
   }
-  if (!list.length) return <p>还没有划线。在书页上拖选文字即可添加。</p>
-  return <div className="rd-notes-list">{[...groups].map(([title, items]) => <section key={title}><h3>{title}</h3>{items.map((h, i) => <div key={`${h.id}-${i}`} className="rd-note-item">
+  if (!list.length) return <EmptyState title="还没有划线" body="在书页上拖选文字即可添加。" />
+  return <div className="rd-notes-list">{[...groups].map(([title, items]) => <section key={title}><SectionHeader title={title} />{items.map((h, i) => <div key={`${h.id}-${i}`} className="rd-note-item">
     <button type="button" style={{ borderColor: markerColor(h.color) }} onClick={e => h.location.status === 'located' ? onGo(h) : onOpen(h, e.currentTarget)}>{h.text}</button>
     {h.note && <p>{h.note}</p>}{h.location.status !== 'located' && <small>{h.location.reason}</small>}
-    <button type="button" aria-label={`编辑划线 ${h.text}`} onClick={e => onOpen(h, e.currentTarget)}>编辑</button>
+    <Button variant="ghost" size="sm" aria-label={`编辑划线 ${h.text}`} onClick={e => onOpen(h, e.currentTarget)}>编辑</Button>
   </div>)}</section>)}</div>
 }
 

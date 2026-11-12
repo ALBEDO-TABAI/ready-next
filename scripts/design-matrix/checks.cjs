@@ -123,11 +123,12 @@ function collect(input) {
 
   // ---- UI font (DL7): chrome text uses the first family of --rn-font-ui; the mono family only
   // for numbers, the serif family for at most one display moment per screen. Book spines are
-  // objects with their own cloth typography, not interface text. ----
+  // objects with their own cloth typography, and a printed page (.sheet) is set in the reading face the reader chose:
+  // neither is interface text. ----
   const uiFamily = (token('--rn-font-ui').split(',')[0] || '').replace(/['"]/g, '').trim()
   const monoFamily = (token('--rn-font-mono').split(',')[0] || '').replace(/['"]/g, '').trim()
   const serifFamily = (token('--rn-font-serif').split(',')[0] || '').replace(/['"]/g, '').trim()
-  const contentScopes = '[contenteditable="true"], [data-ready-block-editor], .document-preview-layout, .note-preview-shell, .rss-article-body, .rss-article-content, .rn-reader-page, .rn-library .page, .rn-library .spine, pre, code, kbd, samp, svg, canvas, iframe, webview'
+  const contentScopes = '[contenteditable="true"], [data-ready-block-editor], .document-preview-layout, .note-preview-shell, .rss-article-body, .rss-article-content, .rn-reader-page, .rn-library .sheet, .rn-library .spine, pre, code, kbd, samp, svg, canvas, iframe, webview'
   const textElements = []
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {

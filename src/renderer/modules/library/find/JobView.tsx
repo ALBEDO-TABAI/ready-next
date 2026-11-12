@@ -2,6 +2,7 @@ import { openWebpageInBrowser } from '../../browser/openWebpageInBrowser'
 import { useEffect, useState } from 'react'
 import type { BookSourcesAPI, SourceJob } from '../../../../shared/library-sources'
 import { confirmed } from '../access'
+import { Button, Input } from '../../../components/ui'
 const labels = { queued: '排队中', downloading: '下载中', captcha: '需要验证码', extracting: '解压、上架中', done: '已上架', failed: '下载失败', cancelled: '已取消' }
 function JobLine({ job, api }: { job: SourceJob; api: BookSourcesAPI }) {
   const [answer, setAnswer] = useState(''), [error, setError] = useState(''), [busy, setBusy] = useState(false)
@@ -14,11 +15,11 @@ function JobLine({ job, api }: { job: SourceJob; api: BookSourcesAPI }) {
     <div><strong>{job.ref}</strong><span>{job.message || labels[job.status]}</span><progress aria-label="下载进度" max={100} value={job.status === 'downloading' && job.progress === 0 ? undefined : job.progress} /></div>
     {job.error && <p role="alert">{job.error}</p>}
     {job.captcha && <form onSubmit={e => { e.preventDefault(); const captcha = job.captcha; if (captcha) void run(async () => confirmed(await api.answer({ id: job.id, token: captcha.token, text: answer }))) }}>
-      <img alt="网盘验证码" src={job.captcha.image} /><input aria-label="验证码" value={answer} maxLength={16} onChange={e => setAnswer(e.target.value)} /><button disabled={busy || !answer.trim()}>提交验证码</button>
+      <img alt="网盘验证码" src={job.captcha.image} /><Input aria-label="验证码" value={answer} maxLength={16} onChange={e => setAnswer(e.target.value)} /><Button type="submit" size="sm" disabled={busy || !answer.trim()}>提交验证码</Button>
     </form>}
-    {['queued', 'downloading', 'captcha', 'extracting'].includes(job.status) && <button type="button" disabled={busy} onClick={() => void run(async () => confirmed(await api.cancel(job.id)))}>取消</button>}
-    {['failed', 'cancelled'].includes(job.status) && !job.book_id && <button type="button" disabled={busy} onClick={() => void run(async () => confirmed(await api.retry(job.id)))}>重试下载</button>}
-    {job.status === 'failed' && job.source !== 'zlib' && <button type="button" disabled={busy} onClick={() => void run(async () => { if (!await openWebpageInBrowser(confirmed(await api.manualLink(job.id)))) throw new Error('网页未能在 Ready 浏览器中打开') })}>去网盘手动下载</button>}
+    {['queued', 'downloading', 'captcha', 'extracting'].includes(job.status) && <Button variant="ghost" size="sm" disabled={busy} onClick={() => void run(async () => confirmed(await api.cancel(job.id)))}>取消</Button>}
+    {['failed', 'cancelled'].includes(job.status) && !job.book_id && <Button variant="ghost" size="sm" disabled={busy} onClick={() => void run(async () => confirmed(await api.retry(job.id)))}>重试下载</Button>}
+    {job.status === 'failed' && job.source !== 'zlib' && <Button variant="ghost" size="sm" disabled={busy} onClick={() => void run(async () => { if (!await openWebpageInBrowser(confirmed(await api.manualLink(job.id)))) throw new Error('网页未能在 Ready 浏览器中打开') })}>去网盘手动下载</Button>}
     {error && <p role="alert">{error}</p>}
   </article>
 }
