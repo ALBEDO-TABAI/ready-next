@@ -37,6 +37,8 @@ export interface ShellRailProps {
   onSplitToggle: (mode: WorkbenchMode) => void
   assistantOpen: boolean
   onAssistantOpen: () => void
+  /** The sidebar is on screen (docked or slid out). While it is collapsed the selected glyph loses its tile (DL8). */
+  sidebarShown: boolean
 }
 
 // 收集 opens the FastCard shelf where the person is (W4 §6): a drawer in the document, 资讯 and calendar modes,
@@ -82,7 +84,7 @@ export default function ShellRail(props: ShellRailProps) {
             items={MODE_ITEMS}
             activeId={props.mode}
             secondaryId={props.splitMode}
-            expanded
+            expanded={props.sidebarShown}
             onSelect={handleModeSelect}
             layoutId="shell-rail-modes"
           />

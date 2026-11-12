@@ -154,8 +154,8 @@ export function createFlipbook(o) {
       const a0 = (ang[k - 1] ?? a + (a - (ang[k + 1] ?? a))), a1 = ang[k + 1] ?? a;
       const s0 = (a0 + a) / 2, s1 = (a + a1) / 2;
       const spec = Math.max(0, Math.sin((a1 - a0) * Math.PI / 90)) * 0.10;
-      T.strips[k].fsh.style.background = `linear-gradient(90deg, rgba(20,18,12,${shadeF(s0).toFixed(3)}), rgba(20,18,12,${shadeF(s1).toFixed(3)})), linear-gradient(90deg, transparent 40%, rgba(255,255,255,${spec.toFixed(3)}))`;
-      T.strips[k].bsh.style.background = `linear-gradient(270deg, rgba(20,18,12,${shadeB(s0).toFixed(3)}), rgba(20,18,12,${shadeB(s1).toFixed(3)}))`;
+      T.strips[k].fsh.style.background = `linear-gradient(90deg, rgb(var(--rn-page-shade) / ${shadeF(s0).toFixed(3)}), rgb(var(--rn-page-shade) / ${shadeF(s1).toFixed(3)})), linear-gradient(90deg, transparent 40%, rgb(var(--rn-light) / ${spec.toFixed(3)}))`;
+      T.strips[k].bsh.style.background = `linear-gradient(270deg, rgb(var(--rn-page-shade) / ${shadeB(s0).toFixed(3)}), rgb(var(--rn-page-shade) / ${shadeB(s1).toFixed(3)}))`;
     });
     const cast = book.querySelector('.cast');
     const edge = ang.reduce((acc, a) => acc + (S.pw / K) * Math.cos(a * Math.PI / 180), 0);
@@ -164,10 +164,10 @@ export function createFlipbook(o) {
     cast.style.display = 'block';
     if (edge >= 0) {
       cast.style.left = (spine + edge) + 'px'; cast.style.width = Math.max(0, S.pw - edge) + 'px';
-      cast.style.background = `linear-gradient(90deg, rgba(20,18,12,${strength}), rgba(20,18,12,0) ${Math.min(90, S.pw * 0.18)}px)`;
+      cast.style.background = `linear-gradient(90deg, rgb(var(--rn-page-shade) / ${strength}), rgb(var(--rn-page-shade) / 0) ${Math.min(90, S.pw * 0.18)}px)`;
     } else if (S.spread) {
       cast.style.left = '0px'; cast.style.width = Math.max(0, S.pw + edge) + 'px';
-      cast.style.background = `linear-gradient(270deg, rgba(20,18,12,${strength}), rgba(20,18,12,0) ${Math.min(90, S.pw * 0.18)}px)`;
+      cast.style.background = `linear-gradient(270deg, rgb(var(--rn-page-shade) / ${strength}), rgb(var(--rn-page-shade) / 0) ${Math.min(90, S.pw * 0.18)}px)`;
     } else cast.style.display = 'none';
     if (!S.spread) T.root.style.opacity = theta > 100 ? Math.max(0, 1 - (theta - 100) / 70) : 1;
   }

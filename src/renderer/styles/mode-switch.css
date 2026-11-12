@@ -1,5 +1,7 @@
 /* ═══ mode-switch.css — 分段控件的滑块胶囊（MorphSegmentedControl / MorphTabStrip）与拖拽分隔的悬停态；四模式切换已移到外壳图标栏（W2），旧的拖拽模式开关与 iOS 分段控件样式随组件退役。 ═══ */
 
+/* The sliding pill under the selected tab or segment: the Segmented primitive's selected item (paper and a card
+   shadow, as ink's open tabs); the other pane's tab in a split is a quiet fill. No blur (W1 §4). */
 .morph-pill {
   position: absolute;
   inset: 1.5px;
@@ -8,31 +10,15 @@
 }
 
 .morph-pill-primary {
-  background: var(--color-blue-light);
+  background: var(--rn-sheet);
   border: none;
-  box-shadow: none;
+  box-shadow: var(--rn-card-shadow);
 }
 
 .morph-pill-secondary {
-  background: var(--color-blue-light);
+  background: var(--rn-fill-2);
   border: none;
   box-shadow: none;
-}
-
-html:root .morph-pill-primary,
-html:root .morph-pill-secondary {
-  background:
-    radial-gradient(140% 120% at 14% 0%, color-mix(in srgb, var(--lg-border-strong) 56%, transparent), transparent 46%),
-    radial-gradient(140% 120% at 100% 100%, color-mix(in srgb, var(--lg-lens-violet) 54%, transparent), transparent 54%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.62) 0%, rgba(255, 255, 255, 0.14) 32%, rgba(255, 255, 255, 0.04) 100%),
-    linear-gradient(135deg, color-mix(in srgb, var(--color-blue) 20%, white) 0%, color-mix(in srgb, var(--surface-floating-bg) 90%, white) 100%);
-  border: 1px solid color-mix(in srgb, var(--lg-border-strong) 84%, transparent);
-  box-shadow:
-    0 10px 20px rgba(66, 94, 148, 0.18),
-    inset 0 1px 0 rgba(255, 255, 255, 0.75),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.16);
-  backdrop-filter: blur(calc(var(--lg-blur-soft) * 0.8)) saturate(calc(var(--surface-saturate) + 20%));
-  -webkit-backdrop-filter: blur(calc(var(--lg-blur-soft) * 0.8)) saturate(calc(var(--surface-saturate) + 20%));
 }
 
 html:root .resize-handle:hover,

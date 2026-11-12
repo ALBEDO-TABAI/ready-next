@@ -3,6 +3,7 @@ import { getFastCardQuickNoteAPI } from '../stores/useFastCard'
 import type { FastCardItem, FastCardIPCResult } from '../../shared/fastcard'
 import FastCardPanel from '../components/browser/FastCardPanel'
 import FastCardResultPanel from '../components/browser/FastCardResultPanel'
+import { Button, Textarea } from '../components/ui'
 import type { FastCardOverlayCommand, FastCardOverlaySnapshot } from '../../shared/fastcard'
 
 function send(command: FastCardOverlayCommand): void {
@@ -127,21 +128,21 @@ export function FastCardQuickNoteEditor() {
       media.start(1000); setRecording(true)
     } catch (failure) { setError(String(failure)) }
   }
-  return <section aria-label="全局快记" className="browser-fastcard-surface p-4 space-y-3">
-    <h2>快记</h2>
-    {shortcutError && <p role="alert">{shortcutError}</p>}
-    <textarea aria-label="快记内容" value={text} disabled={busy} onChange={event => setText(event.target.value)} />
-    <div><button disabled={busy || !text.trim()} onClick={() => {
+  return <section aria-label="全局快记" className="fastcard-quick-note rn-ui">
+    <h2 className="fastcard-quick-note__title">快记</h2>
+    {shortcutError && <p role="alert" className="fastcard-quick-note__status">{shortcutError}</p>}
+    <Textarea aria-label="快记内容" className="fastcard-quick-note__text" value={text} disabled={busy} onChange={event => setText(event.target.value)} />
+    <div className="fastcard-quick-note__actions"><Button variant="primary" disabled={busy || !text.trim()} onClick={() => {
       if (textIntent.current?.text !== text) textIntent.current = { text, itemId: crypto.randomUUID() }
       const input = textIntent.current
       void save(() => getFastCardQuickNoteAPI().quickText(input)).then(ok => { if (ok) { setText(''); textIntent.current = null } })
-    }}>收进 FastCard</button>
-    <button disabled={busy || recording} onClick={() => { const itemId = crypto.randomUUID(); void save(() => getFastCardQuickNoteAPI().quickClipboard(itemId)) }}>收进剪贴板内容</button>
-    <button disabled={busy || !!audioRetry.current} onClick={() => { if (recording) recorder.current?.stop(); else void startRecording() }}>{recording ? '停止并保存录音' : '录音'}</button>
-    {audioRetry.current && <button disabled={busy} onClick={() => void saveAudio()}>重试保存录音</button>}</div>
-    {message && <p role="status">{message}</p>}{error && <p role="alert">{error}</p>}
-    <button disabled={busy || recording || !!audioRetry.current} onClick={() => {
+    }}>收进 FastCard</Button>
+    <Button disabled={busy || recording} onClick={() => { const itemId = crypto.randomUUID(); void save(() => getFastCardQuickNoteAPI().quickClipboard(itemId)) }}>收进剪贴板内容</Button>
+    <Button disabled={busy || !!audioRetry.current} onClick={() => { if (recording) recorder.current?.stop(); else void startRecording() }}>{recording ? '停止并保存录音' : '录音'}</Button>
+    {audioRetry.current && <Button disabled={busy} onClick={() => void saveAudio()}>重试保存录音</Button>}</div>
+    {message && <p role="status" className="fastcard-quick-note__status">{message}</p>}{error && <p role="alert" className="fastcard-quick-note__status">{error}</p>}
+    <div className="fastcard-quick-note__footer"><Button variant="ghost" disabled={busy || recording || !!audioRetry.current} onClick={() => {
       void getFastCardQuickNoteAPI().quickClose().then(result => { if (!result.success) throw new Error(result.error || '无法关闭快记') }).catch(failure => setError(String(failure)))
-    }}>关闭</button>
+    }}>关闭</Button></div>
   </section>
 }

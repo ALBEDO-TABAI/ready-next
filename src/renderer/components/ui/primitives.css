@@ -54,6 +54,10 @@
   .rn-select { position: relative; display: inline-flex; }
   .rn-select .rn-field { padding-right: 30px; cursor: pointer; }
   .rn-select > svg { position: absolute; right: 10px; top: 50%; width: 14px; height: 14px; margin-top: -7px; color: var(--rn-ink-3); pointer-events: none; }
+  .rn-range { appearance: none; width: 100%; min-width: 80px; height: 20px; margin: 0; background: transparent; cursor: pointer; }
+  .rn-range::-webkit-slider-runnable-track { height: 4px; border-radius: var(--rn-r-pill); background: linear-gradient(to right, var(--rn-ink-2) var(--rn-range-at, 0%), var(--rn-fill-3) 0); }
+  .rn-range::-webkit-slider-thumb { appearance: none; width: 16px; height: 16px; margin-top: -6px; border-radius: 50%; background: var(--rn-sheet); box-shadow: var(--rn-card-shadow), inset 0 0 0 1px var(--rn-hair-2); }
+  .rn-range:disabled { opacity: .45; cursor: default; }
 
   /* ---- Switch / Checkbox / Segmented ---- */
   .rn-switch {
@@ -250,7 +254,3 @@
 @layer ready-next.primitives {
   .rn-float-panel__content { position: relative; }
 }
-
-/* A field draws its own focus (the sheet and an ink edge, above). Unlayered on purpose: the shell's unlayered
-   :focus-visible ring would otherwise add a second, signal-coloured ring around every focused field. */
-.rn-field:focus-visible { outline: none; }

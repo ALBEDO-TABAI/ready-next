@@ -9,7 +9,7 @@ import type { WorkbenchMode } from '../../stores/useMode'
 import { useDocTabs } from '../../stores/useDocTabs'
 import { draftSearchResults, mergeDraftResults, queryObjectIndex, type SearchResultItem } from '../../modules/workbench/object-ui/query'
 import { GLOBAL_SEARCH_DIMENSIONS, PANEL_TOKENS } from './panelTokens'
-import Modal from '../ui/Modal'
+import { Button, EmptyState, Input, confirmDialog } from '../ui'
 import { isLocalHtmlFilePath, openLocalHtmlFileInBrowser } from '../../modules/browser/localHtmlFileOpen'
 import { requestWorkbenchModeOpen } from '../../modules/workbench/mode-transition'
 
@@ -42,18 +42,16 @@ const MARK_END = ''
 const PREFIX_TOKEN_REGEX = /(^|\s)([#[])/
 
 const PANEL_COLORS = {
-  panelBg: PANEL_TOKENS.panelBg,
   title: PANEL_TOKENS.title,
   mutedStrong: PANEL_TOKENS.mutedStrong,
   muted: PANEL_TOKENS.muted,
   text: PANEL_TOKENS.text,
-  inputBorder: PANEL_TOKENS.inputBorder,
   cardBorder: PANEL_TOKENS.border,
-  cardBg: PANEL_TOKENS.cardBg,
-  replaceInputBg: 'var(--bg-toolbar)',
-  replaceButtonBg: 'var(--bg-editor)',
-  blue: PANEL_TOKENS.blue,
-  blueLight: PANEL_TOKENS.blueLight,
+  // Badges and the status line: ink, not the signal colour (DL5).
+  badge: PANEL_TOKENS.muted,
+  // A search match is a highlight (the reader's and quick look's marks use the same token).
+  match: 'var(--rn-hl)',
+  bad: 'var(--rn-bad)',
 }
 
 function readTextPayload(result: unknown): string | null {
@@ -108,7 +106,7 @@ function renderSnippet(snippet: string): ReactNode {
       <mark
         key={`snip-${key++}`}
         className="px-0.5 rounded-[4px]"
-        style={{ background: PANEL_TOKENS.blueLight, color: PANEL_TOKENS.title }}
+        style={{ background: PANEL_COLORS.match, color: PANEL_COLORS.title }}
       >
         {snippet.slice(cursor, end)}
       </mark>,
@@ -157,7 +155,7 @@ function highlightText(source: string, query: string): ReactNode {
       <mark
         key={`hl-${key++}`}
         className="px-0.5 rounded-[4px]"
-        style={{ background: PANEL_COLORS.blueLight, color: PANEL_COLORS.title }}
+        style={{ background: PANEL_COLORS.match, color: PANEL_COLORS.title }}
       >
         {source.slice(idx, idx + keyword.length)}
       </mark>,
@@ -187,7 +185,6 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
   const [message, setMessage] = useState('')
   const [degraded, setDegraded] = useState(false)
   const searchVersionRef = useRef(0)
-  const [confirmOpen, setConfirmOpen] = useState(false)
 
   const clearAll = useCallback(() => {
     searchVersionRef.current += 1
@@ -206,17 +203,19 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
 
   const handleBuildIndexClick = useCallback(() => {
     if (roots.length === 0) return
-    setConfirmOpen(true)
-  }, [roots])
-
-  const handleConfirmBuildIndex = useCallback(() => {
-    setConfirmOpen(false)
-    void runReindex()
-  }, [runReindex])
-
-  const handleCancelBuildIndex = useCallback(() => {
-    setConfirmOpen(false)
-  }, [])
+    void confirmDialog({
+      title: '构建搜索索引',
+      body: (
+        <div style={{ whiteSpace: 'pre-line' }}>
+          {`此操作会扫描下列工作区中的所有文件以建立全文搜索索引：\n\n${roots.join('\n')}\n\n较大的目录可能需要数分钟，并占用磁盘空间。是否继续？`}
+        </div>
+      ),
+      confirmLabel: '开始构建',
+      cancelLabel: '取消',
+    }).then((confirmed) => {
+      if (confirmed) void runReindex()
+    })
+  }, [roots, runReindex])
 
   const runSearch = useCallback(async (keyword: string) => {
     if (roots.length === 0 || typeof window === 'undefined' || !window.electronAPI?.document?.searchIndex) {
@@ -357,14 +356,9 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
         </span>
         {isSearching && <Loader2 className="h-3.5 w-3.5 animate-spin" style={{ color: PANEL_COLORS.mutedStrong }} />}
       </div>
-      <button
-        type="button"
-        onClick={clearAll}
-        className="text-[11px] font-medium transition-opacity hover:opacity-70"
-        style={{ color: PANEL_COLORS.muted }}
-      >
+      <Button variant="ghost" size="sm" onClick={clearAll}>
         清空
-      </button>
+      </Button>
     </div>
   )
 
@@ -379,65 +373,52 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
         ? 'ready'
         : 'no-index'
 
-  const renderEmptyShell = (children: ReactNode) => (
-    <div className="flex flex-1 min-h-0 flex-col items-center justify-center text-center" style={{ gap: 12, padding: '24px 16px' }}>
-      {children}
+  // Empty, unbuilt and building states are the shared EmptyState, centred in the panel.
+  const renderEmptyShell = (state: ReactNode) => (
+    <div className="flex flex-1 min-h-0 flex-col items-center justify-center">
+      {state}
     </div>
+  )
+  const rootList = (
+    <span className="mt-[4px] block break-all whitespace-pre-line" style={{ color: PANEL_COLORS.muted }}>
+      {roots.join('\n')}
+    </span>
   )
 
   const noWorkspaceBody = renderEmptyShell(
-    <>
-      <Database className="h-6 w-6" style={{ color: PANEL_COLORS.mutedStrong }} />
-      <p className="text-[12px] font-medium" style={{ color: PANEL_COLORS.text }}>
-        请先选择工作区以启用搜索
-      </p>
-      <p className="text-[10px] font-medium leading-[1.45]" style={{ color: PANEL_COLORS.mutedStrong, maxWidth: 240 }}>
-        在文件管理中打开一个工作区后，可在此手动构建索引并开始全局搜索。
-      </p>
-    </>,
+    <EmptyState
+      icon={<Database aria-hidden="true" />}
+      title="请先选择工作区以启用搜索"
+      body="在文件管理中打开一个工作区后，可在此手动构建索引并开始全局搜索。"
+    />,
   )
 
   const noIndexBody = renderEmptyShell(
-    <>
-      <Database className="h-6 w-6" style={{ color: PANEL_COLORS.mutedStrong }} />
-      <p className="text-[12px] font-medium" style={{ color: PANEL_COLORS.text }}>
-        尚未构建索引
-      </p>
-      <p className="text-[10px] font-medium leading-[1.45]" style={{ color: PANEL_COLORS.mutedStrong, maxWidth: 240 }}>
-        点击下方按钮扫描当前工作区，仅扫描你选择的目录，不会触碰其它文件夹。
-      </p>
-      <p className="text-[10px] font-medium break-all whitespace-pre-line" style={{ color: PANEL_COLORS.muted, maxWidth: 280 }}>
-        {roots.join('\n')}
-      </p>
-      <button
-        type="button"
-        onClick={handleBuildIndexClick}
-        className="ready-glass-button text-[12px]"
-      >
-        <Database className="h-3.5 w-3.5" />
-        构建索引
-      </button>
-      {indexError && (
-        <p className="text-[10px] font-medium" style={{ color: 'var(--color-red, #c0392b)' }}>
-          {indexError}
-        </p>
-      )}
-    </>,
+    <EmptyState
+      icon={<Database aria-hidden="true" />}
+      title="尚未构建索引"
+      body={<>点击下方按钮扫描当前工作区，仅扫描你选择的目录，不会触碰其它文件夹。{rootList}</>}
+      action={
+        <>
+          <Button variant="primary" size="sm" icon={<Database aria-hidden="true" />} onClick={handleBuildIndexClick}>
+            构建索引
+          </Button>
+          {indexError && (
+            <p className="text-[10px] font-medium" style={{ color: PANEL_COLORS.bad }}>
+              {indexError}
+            </p>
+          )}
+        </>
+      }
+    />,
   )
 
   const indexingBody = renderEmptyShell(
-    <>
-      <Loader2 className="h-6 w-6 animate-spin" style={{ color: PANEL_COLORS.blue }} />
-      <p className="text-[12px] font-medium" style={{ color: PANEL_COLORS.text }}>
-        正在构建索引…
-      </p>
-      <p className="text-[10px] font-medium leading-[1.45]" style={{ color: PANEL_COLORS.mutedStrong, maxWidth: 240 }}>
-        首次构建可能需要数分钟，请勿关闭工作区。
-      </p>
-      <p className="text-[10px] font-medium break-all whitespace-pre-line" style={{ color: PANEL_COLORS.muted, maxWidth: 280 }}>
-        {roots.join('\n')}
-      </p>
-    </>,
+    <EmptyState
+      icon={<Loader2 className="animate-spin" aria-hidden="true" />}
+      title="正在构建索引…"
+      body={<>首次构建可能需要数分钟，请勿关闭工作区。{rootList}</>}
+    />,
   )
 
   const readyBody = (
@@ -455,64 +436,36 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
         支持 #tag / [[wikilink]] 前缀语法 · 引号可做短语匹配
       </p>
 
-      <label
-        className="ready-input-shell w-full border px-[10px] flex items-center"
-        style={{
-          height: GLOBAL_SEARCH_DIMENSIONS.controlHeight,
-          borderRadius: GLOBAL_SEARCH_DIMENSIONS.controlRadius,
-          background: 'var(--input-slot-bg)',
-          borderColor: 'var(--input-slot-border)',
-        }}
-      >
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="搜索文件名或内容..."
-          className="ready-input-slot-inner h-full w-full bg-transparent border-none outline-none text-[13px] font-medium placeholder:text-[var(--text-placeholder)]"
-          style={{ color: PANEL_COLORS.text }}
-        />
-      </label>
+      <Input
+        type="text"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="搜索文件名或内容..."
+        className="w-full"
+        style={{ height: GLOBAL_SEARCH_DIMENSIONS.controlHeight }}
+      />
 
       <div className="flex items-center gap-[8px]">
-        <label
-          className="ready-input-shell flex-1 border px-[10px] flex items-center"
-          style={{
-            height: GLOBAL_SEARCH_DIMENSIONS.controlHeight,
-            borderRadius: GLOBAL_SEARCH_DIMENSIONS.controlRadius,
-            background: 'var(--input-slot-bg)',
-            borderColor: 'var(--input-slot-border)',
-          }}
-        >
-          <input
-            type="text"
-            value={replaceText}
-            onChange={(e) => setReplaceText(e.target.value)}
-            placeholder="替换为..."
-            className="ready-input-slot-inner h-full w-full bg-transparent border-none outline-none text-[13px] font-medium placeholder:text-[var(--text-light)]"
-            style={{ color: PANEL_COLORS.text }}
-          />
-        </label>
-        <button
-          type="button"
+        <Input
+          type="text"
+          value={replaceText}
+          onChange={(e) => setReplaceText(e.target.value)}
+          placeholder="替换为..."
+          className="flex-1"
+          style={{ height: GLOBAL_SEARCH_DIMENSIONS.controlHeight }}
+        />
+        <Button
+          size="sm"
           onClick={() => void replaceAll()}
           disabled={isReplacing || !canReplaceAll}
           title={!canReplaceAll && query.trim() ? '前缀语法 (#tag / [[wikilink]]) 不支持替换' : undefined}
-          className="content-surface-card border px-[10px] text-[10px] font-medium disabled:opacity-45"
-          style={{
-            borderColor: PANEL_COLORS.inputBorder,
-            color: PANEL_COLORS.muted,
-            background: 'color-mix(in srgb, var(--surface-card-bg) 22%, transparent)',
-            height: GLOBAL_SEARCH_DIMENSIONS.controlHeight,
-            borderRadius: GLOBAL_SEARCH_DIMENSIONS.controlRadius,
-          }}
         >
           {isReplacing ? '替换中' : '全部替换'}
-        </button>
+        </Button>
       </div>
 
       {message && (
-        <p className="text-[10px] font-medium" style={{ color: PANEL_COLORS.blue }}>
+        <p className="text-[10px] font-medium" style={{ color: PANEL_COLORS.badge }}>
           {message}
         </p>
       )}
@@ -532,8 +485,8 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
                   <div key={item.path}>
                   <button
                     onClick={() => openResult(item)}
-                    className="w-full rounded-[8px] border px-[8px] py-[6px] text-left transition-colors hover:bg-[var(--bg-hover)]"
-                    style={{ borderColor: PANEL_COLORS.cardBorder, background: 'transparent' }}
+                    className="w-full rounded-[8px] border bg-transparent px-[8px] py-[6px] text-left transition-colors hover:bg-[var(--rn-fill)]"
+                    style={{ borderColor: PANEL_COLORS.cardBorder }}
                   >
                     <div className="flex items-center gap-[6px] min-w-0">
                       <FileText className="h-[13px] w-[13px] shrink-0" style={{ color: PANEL_COLORS.mutedStrong }} />
@@ -543,7 +496,7 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
                       {item.draft && (
                         <span
                           className="rounded-[4px] border px-[4px] py-[0.5px] text-[9px] font-medium shrink-0"
-                          style={{ borderColor: PANEL_COLORS.cardBorder, color: PANEL_COLORS.blue }}
+                          style={{ borderColor: PANEL_COLORS.cardBorder, color: PANEL_COLORS.badge }}
                         >
                           draft
                         </span>
@@ -571,7 +524,7 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
                           <span
                             key={`t-${tag}`}
                             className="rounded-[4px] border px-[5px] py-[1px] text-[9px] font-medium"
-                            style={{ borderColor: PANEL_COLORS.cardBorder, color: PANEL_COLORS.blue }}
+                            style={{ borderColor: PANEL_COLORS.cardBorder, color: PANEL_COLORS.badge }}
                           >
                             #{tag}
                           </span>
@@ -580,7 +533,7 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
                           <span
                             key={`l-${link}`}
                             className="rounded-[4px] border px-[5px] py-[1px] text-[9px] font-medium"
-                            style={{ borderColor: PANEL_COLORS.cardBorder, color: PANEL_COLORS.blue }}
+                            style={{ borderColor: PANEL_COLORS.cardBorder, color: PANEL_COLORS.badge }}
                           >
                             [[{link}]]
                           </span>
@@ -589,7 +542,7 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
                     )}
                   </button>
                   {item.sourceType === 'rss' && typeof item.sourceMeta?.link === 'string' && (
-                    <button type="button" className="text-[10px] underline" onClick={() => {
+                    <button type="button" className="text-[10px] underline" style={{ color: PANEL_COLORS.muted }} onClick={() => {
                       const url = ReadyRefSchema.safeParse({ kind: 'web', url: item.sourceMeta?.link })
                       if (url.success && url.data.kind === 'web') void openWebpageInBrowser(url.data.url).then(opened => { if (!opened) setMessage('网页未能在 Ready 浏览器中打开') }).catch(error => setMessage(String(error)))
                     }}>打开原文</button>
@@ -613,27 +566,20 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
           <p className="text-[10px] font-medium leading-[1.4]" style={{ color: PANEL_COLORS.mutedStrong }}>
             已索引 {indexStatus.docCount} 项 · {formatIndexedAt(indexStatus.lastIndexedAt)}
           </p>
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={<RotateCw aria-hidden="true" />}
             onClick={() => { window.location.hash = '#/settings?section=library' }}
             title="在 设置 › 资料库 里重建索引"
-            className="border px-[8px] flex items-center gap-[4px] text-[10px] font-medium transition-colors"
-            style={{
-              height: 22,
-              borderRadius: 8,
-              borderColor: PANEL_COLORS.inputBorder,
-              color: PANEL_COLORS.muted,
-              background: 'transparent',
-            }}
           >
-            <RotateCw className="h-3 w-3" />
             管理索引
-          </button>
+          </Button>
         </div>
       )}
 
       {indexError && (
-        <p className="text-[10px] font-medium" style={{ color: 'var(--color-red, #c0392b)' }}>
+        <p className="text-[10px] font-medium" style={{ color: PANEL_COLORS.bad }}>
           {indexError}
         </p>
       )}
@@ -646,16 +592,6 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
       {panelState === 'no-index' && noIndexBody}
       {panelState === 'indexing' && indexingBody}
       {panelState === 'ready' && readyBody}
-      <Modal
-        open={confirmOpen}
-        mode="confirm"
-        title="构建搜索索引"
-        message={`此操作会扫描下列工作区中的所有文件以建立全文搜索索引：\n\n${roots.join('\n')}\n\n较大的目录可能需要数分钟，并占用磁盘空间。是否继续？`}
-        confirmLabel="开始构建"
-        cancelLabel="取消"
-        onConfirm={handleConfirmBuildIndex}
-        onCancel={handleCancelBuildIndex}
-      />
     </>
   )
 

@@ -40,8 +40,7 @@ function place(entry: FloatEntry, element: HTMLElement) {
   const anchor = typeof entry.anchor === 'function' ? entry.anchor() : entry.anchor
   const width = element.offsetWidth
   const height = element.offsetHeight
-  const vw = window.innerWidth
-  const vh = window.innerHeight
+  const box = entry.bounds ? (typeof entry.bounds === 'function' ? entry.bounds() : entry.bounds) : { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight }
   const offset = entry.offset ?? 6
   const margin = 8
   let left = anchor.left
@@ -51,15 +50,15 @@ function place(entry: FloatEntry, element: HTMLElement) {
     case 'bottom': left = (anchor.left + anchor.right - width) / 2; break
     case 'top-start': top = anchor.top - height - offset; break
     case 'top': top = anchor.top - height - offset; left = (anchor.left + anchor.right - width) / 2; break
-    case 'right-start': left = anchor.right + offset; top = anchor.top; if (left + width > vw - margin) left = anchor.left - width - offset; break
+    case 'right-start': left = anchor.right + offset; top = anchor.top; if (left + width > box.right - margin) left = anchor.left - width - offset; break
     case 'left-start': left = anchor.left - width - offset; top = anchor.top; break
-    case 'center': return { left: (vw - width) / 2, top: Math.max(margin, vh * 0.18) }
+    case 'center': return { left: (box.left + box.right - width) / 2, top: Math.max(box.top + margin, box.top + (box.bottom - box.top) * 0.18) }
   }
-  if (top + height > vh - margin) {
+  if (top + height > box.bottom - margin) {
     const above = anchor.top - height - offset
-    top = above >= margin ? above : Math.max(margin, vh - margin - height)
+    top = above >= box.top + margin ? above : Math.max(box.top + margin, box.bottom - margin - height)
   }
-  return { left: Math.max(margin, Math.min(left, vw - margin - width)), top: Math.max(margin, top) }
+  return { left: Math.max(box.left + margin, Math.min(left, box.right - margin - width)), top: Math.max(box.top + margin, top) }
 }
 
 function FloatFrame({ entry, z }: { entry: FloatEntry; z: number }) {

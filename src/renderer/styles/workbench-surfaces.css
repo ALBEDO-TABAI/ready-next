@@ -1,180 +1,54 @@
 /* ═══ workbench-surfaces.css — 工作台共享外壳表面 + 磨砂玻璃滑钮（icon-rail-slider 族）；由 index.css 序保拆分（2026-07-06），在 index.css 中按原段落顺序 @import，勿改导入次序。 ═══ */
-/* Shared workbench shell surfaces */
+/* Shared workbench shell surfaces (W1 DL1–DL4): the window is one glass, so the bands, tab rows and headers on it have
+   no background, blur or shadow of their own; content sits on paper (.rn-sheet); floats use .rn-float. Only --rn-*. */
 
+/* !important: some modes still write the retired module surface inline on their root and frame (资讯). */
 .workbench-mode-root {
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: var(--workbench-mode-bg);
+  background: transparent !important;
 }
 
-html:root .workbench-mode-root {
-  background: transparent;
-}
-
-.workbench-toolbar-row {
-  height: 38px;
-  display: flex;
-  align-items: center;
-  background: var(--bg-toolbar);
-  border-bottom: 1px solid var(--border-default);
-}
-
-.workbench-panel {
-  background: var(--surface-panel-bg);
-  border-color: var(--surface-border);
-}
-
-.workbench-content {
-  background: var(--workbench-mode-bg);
-}
-
-html:root .workbench-content {
-  background: transparent;
-}
-
-.glass-surface-panel,
-.glass-surface-card,
-.glass-surface-floating {
-  position: relative;
-  overflow: hidden;
-  border-color: var(--lg-border-soft) !important;
-  backdrop-filter: blur(var(--lg-blur-medium)) saturate(var(--surface-saturate)) contrast(1.03);
-  -webkit-backdrop-filter: blur(var(--lg-blur-medium)) saturate(var(--surface-saturate)) contrast(1.03);
-  isolation: isolate;
-}
-
+/* Legacy surface classes still carried by other modules' markup (tab rails, the browser header, the /ready header, the
+   library quote card). They are regions on the glass or quiet cards now: tokens only, no blur. */
 .glass-surface-panel {
-  background: color-mix(in srgb, var(--lg-material-panel) 62%, transparent) !important;
-  box-shadow: none !important;
+  position: relative;
+  background: transparent;
+  box-shadow: none;
 }
 
 .glass-surface-card {
-  background: color-mix(in srgb, var(--lg-material-card) 58%, transparent) !important;
-  box-shadow: none !important;
-  backdrop-filter: blur(var(--lg-blur-soft)) saturate(var(--surface-saturate)) contrast(1.02);
-  -webkit-backdrop-filter: blur(var(--lg-blur-soft)) saturate(var(--surface-saturate)) contrast(1.02);
-}
-
-.glass-surface-floating {
-  background: color-mix(in srgb, var(--lg-material-floating) 62%, transparent) !important;
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--lg-border-strong) 34%, transparent);
-  border-color: var(--lg-border-strong) !important;
-  backdrop-filter: blur(var(--lg-blur-strong)) saturate(var(--surface-saturate)) contrast(1.03);
-  -webkit-backdrop-filter: blur(var(--lg-blur-strong)) saturate(var(--surface-saturate)) contrast(1.03);
-}
-
-html:root .glass-surface-panel::before,
-html:root .glass-surface-card::before,
-html:root .glass-surface-floating::before {
-  display: none !important;
-}
-
-html:root .glass-surface-panel::after,
-html:root .glass-surface-card::after,
-html:root .glass-surface-floating::after {
-  display: none !important;
-}
-
-html:root .glass-surface-panel,
-html:root .glass-surface-card {
-  box-shadow: none !important;
-}
-
-/* Frosted "glass slider" action button — the same thumb recipe as
- * .draggable-mode-tabs__thumb, generalized into a standalone CTA. Used for
- * empty-state actions (build index, open folder) so a single visual standard
- * covers the slider thumb and these buttons. */
-.ready-glass-button {
   position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  padding: 9px 8px;
-  border-radius: 12px;
-  font-weight: 600;
-  line-height: 1;
-  isolation: isolate;
-  color: var(--color-blue);
-  cursor: pointer;
-  border: 0.3px solid rgba(255, 255, 255, 0.8);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 1) 0%, rgba(255, 255, 255, 0.5) 5%, transparent 10%),
-    linear-gradient(180deg,
-      rgba(244, 242, 237, 0.76) 0%,
-      rgba(233, 229, 221, 0.72) 100%
-    );
-  box-shadow:
-    inset 0 0.3px 0.5px rgba(255, 255, 255, 1),
-    inset 0 -0.3px 0.5px rgba(0, 0, 0, 0.02),
-    inset 0.3px 0 0.5px rgba(255, 255, 255, 0.6),
-    inset -0.3px 0 0.5px rgba(255, 255, 255, 0.6);
-  transition:
-    transform 200ms ease,
-    box-shadow 140ms ease,
-    background 140ms ease,
-    border-color 120ms ease,
-    opacity 140ms ease;
+  background: var(--rn-fill) !important;
+  border-color: var(--rn-hair) !important;
+  box-shadow: none !important;
 }
 
-.ready-glass-button:hover {
-  transform: translateY(-1px);
+.content-surface-panel {
+  position: relative;
+  border-color: var(--rn-hair) !important;
 }
 
-.ready-glass-button:active {
-  transform: scale(0.98);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.82) 0%, rgba(255, 255, 255, 0.2) 16%, transparent 36%),
-    linear-gradient(180deg,
-      rgba(228, 226, 220, 0.66) 0%,
-      rgba(217, 212, 204, 0.68) 100%
-    );
-  box-shadow:
-    inset 0 1.4px 3px rgba(0, 0, 0, 0.18),
-    inset 0 0.8px 1px rgba(255, 255, 255, 0.42);
-  border-color: rgba(255, 255, 255, 0.54);
-}
-
-.ready-glass-button:disabled {
-  opacity: 0.55;
-  cursor: default;
-  transform: none;
-}
-
-html:root .ready-glass-button {
-  backdrop-filter: blur(calc(var(--lg-blur-soft) * 0.25)) saturate(calc(var(--surface-saturate) - 8%));
-  -webkit-backdrop-filter: blur(calc(var(--lg-blur-soft) * 0.25)) saturate(calc(var(--surface-saturate) - 8%));
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(255, 255, 255, 0.3) 20%, transparent 40%),
-    radial-gradient(ellipse 80% 50% at 50% 25%, rgba(255, 255, 255, 0.5) 0%, transparent 60%),
-    linear-gradient(180deg,
-      rgba(244, 242, 237, 0.76) 0%,
-      rgba(233, 229, 221, 0.72) 100%
-    );
-  box-shadow:
-    inset 0 0.5px 0.5px rgba(255, 255, 255, 1),
-    inset 0 -0.5px 0.5px rgba(0, 0, 0, 0.03),
-    inset 0.5px 0 0.5px rgba(255, 255, 255, 0.6),
-    inset -0.5px 0 0.5px rgba(255, 255, 255, 0.6);
-  border-color: rgba(255, 255, 255, 0.7);
-}
-
-html:root .browser-header-surface,
+/* The top band's rows (tab strips, 资讯's crumb) sit on the glass (DL11a). */
 html:root .workbench-tabs-surface {
+  background: transparent !important;
+}
+
+/* The browser's address bar stays on the old chrome surface for now: its page frame paints matching corner fills
+   around the native web view (BrowserShellLayout), so bar and frame move to the glass together with the browser
+   toolbar's own migration (W1-T5, browser toolbar). */
+html:root .browser-header-surface {
   background: var(--workbench-module-surface-bg) !important;
   backdrop-filter: blur(24px) saturate(0%) !important;
   -webkit-backdrop-filter: blur(24px) saturate(0%) !important;
 }
 
+/* Inside the document's paper (ink's main is the sheet) the frame is only a clip. */
 html:root .document-content-frame {
-  background: var(--workbench-module-surface-bg) !important;
-  backdrop-filter: blur(24px) saturate(0%) !important;
-  -webkit-backdrop-filter: blur(24px) saturate(0%) !important;
-  border-radius: var(--workbench-canvas-radius) !important;
+  background: transparent !important;
+  border-radius: var(--rn-r-sheet) !important;
   overflow: hidden;
-  background-clip: padding-box;
 }
 
 html:root .document-editor-surface,
@@ -183,173 +57,6 @@ html:root .rss-workbench-surface,
 html:root .rss-feed-list,
 html:root .rss-preview-content {
   background: transparent !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-}
-
-html[data-theme='dark']:root .glass-surface-panel {
-  background: var(--lg-material-panel) !important;
-}
-
-html[data-theme='dark']:root .glass-surface-card {
-  background: var(--lg-material-card) !important;
-}
-
-.calendar-mode-shell {
-  --calendar-canvas-bg: rgba(247, 248, 251, 0.96);
-  --calendar-canvas-border: rgba(224, 230, 240, 0.96);
-  --calendar-sidebar-bg: var(--calendar-canvas-bg);
-  --calendar-control-bg: color-mix(in srgb, var(--surface-card-bg) 34%, transparent);
-  --calendar-control-bg-hover: color-mix(in srgb, var(--surface-card-bg) 48%, transparent);
-  --calendar-control-bg-active: color-mix(in srgb, var(--color-blue) 22%, var(--surface-card-bg) 30%);
-  --calendar-control-border: color-mix(in srgb, var(--border-input) 82%, transparent);
-  --calendar-assistant-bg: color-mix(in srgb, var(--workbench-module-surface-bg) 94%, var(--bg-content) 6%);
-  --calendar-assistant-card-bg: color-mix(in srgb, var(--surface-card-bg) 42%, transparent);
-  --calendar-assistant-card-border: color-mix(in srgb, var(--surface-border) 78%, transparent);
-  --calendar-event-chip-bg: color-mix(in srgb, var(--surface-card-bg) 38%, transparent);
-}
-
-html:root .calendar-mode-shell {
-  --calendar-canvas-bg: var(--workbench-module-surface-bg);
-  --calendar-canvas-border: transparent;
-  --calendar-sidebar-bg: var(--calendar-canvas-bg);
-  --calendar-assistant-bg: rgba(241, 244, 249, 0.96);
-  --calendar-assistant-card-bg: rgba(255, 255, 255, 0.34);
-}
-
-html[data-theme='dark']:root .calendar-mode-shell {
-  --calendar-canvas-bg: var(--workbench-module-surface-bg);
-  --calendar-canvas-border: transparent;
-  --calendar-control-bg: color-mix(in srgb, var(--surface-card-bg) 44%, transparent);
-  --calendar-control-bg-hover: color-mix(in srgb, var(--surface-card-bg) 58%, transparent);
-  --calendar-control-bg-active: color-mix(in srgb, var(--color-blue) 24%, var(--surface-card-bg) 26%);
-  --calendar-control-border: color-mix(in srgb, var(--border-input) 62%, transparent);
-  --calendar-assistant-bg: color-mix(in srgb, var(--bg-editor) 92%, transparent);
-  --calendar-assistant-card-bg: color-mix(in srgb, var(--surface-card-bg) 52%, transparent);
-  --calendar-assistant-card-border: color-mix(in srgb, var(--surface-border) 62%, transparent);
-}
-
-/* .ready-app-bg 的不透明度只由 --app-bg-overlay-opacity 级联决定（见 theme-tokens.css），这里不做硬覆盖。 */
-
-.content-surface-panel,
-.content-surface-card {
-  position: relative;
-  border-color: var(--lg-content-border) !important;
-  box-shadow: var(--lg-content-shadow);
-  backdrop-filter: blur(calc(var(--lg-blur-soft) * 0.78)) saturate(calc(var(--surface-saturate) + 10%));
-  -webkit-backdrop-filter: blur(calc(var(--lg-blur-soft) * 0.78)) saturate(calc(var(--surface-saturate) + 10%));
-}
-
-.content-surface-panel {
-  background: color-mix(in srgb, var(--lg-content-bg) 36%, transparent) !important;
-}
-
-.content-surface-card {
-  background: color-mix(in srgb, var(--lg-content-card-bg) 34%, transparent) !important;
-}
-
-html[data-fastcard-overlay-window='true'] {
-  --fastcard-overlay-surface-bg: var(--ready-app-panel-glass-bg, rgba(246, 248, 251, 0.68));
-  --fastcard-overlay-card-bg: var(--ready-app-panel-glass-card-bg, rgba(255, 255, 255, 0.30));
-  --fastcard-overlay-control-bg: var(--ready-app-panel-glass-control-bg, rgba(255, 255, 255, 0.24));
-  --fastcard-overlay-border: var(--ready-app-panel-glass-border, rgba(255, 255, 255, 0.64));
-  --fastcard-overlay-shadow: var(--ready-app-panel-glass-shadow, 0 26px 54px rgba(31, 36, 46, 0.13), 0 8px 18px rgba(31, 36, 46, 0.07), inset 0 1px 0 rgba(255, 255, 255, 0.58));
-}
-
-html[data-theme='dark'][data-fastcard-overlay-window='true'] {
-  --fastcard-overlay-surface-bg: var(--ready-app-panel-glass-bg, rgba(26, 28, 32, 0.70));
-  --fastcard-overlay-card-bg: var(--ready-app-panel-glass-card-bg, rgba(255, 255, 255, 0.075));
-  --fastcard-overlay-control-bg: var(--ready-app-panel-glass-control-bg, rgba(255, 255, 255, 0.07));
-  --fastcard-overlay-border: var(--ready-app-panel-glass-border, rgba(255, 255, 255, 0.16));
-  --fastcard-overlay-shadow: var(--ready-app-panel-glass-shadow, 0 26px 54px rgba(0, 0, 0, 0.28), 0 8px 18px rgba(0, 0, 0, 0.20), inset 0 1px 0 rgba(255, 255, 255, 0.11));
-}
-
-html[data-fastcard-overlay-window='true'] .browser-fastcard-surface.content-surface-panel {
-  background:
-    radial-gradient(circle at 18% 0%, rgba(255, 255, 255, 0.42), transparent 36%),
-    radial-gradient(circle at 86% 16%, rgba(255, 255, 255, 0.24), transparent 42%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 44%),
-    var(--fastcard-overlay-surface-bg) !important;
-  border-color: var(--fastcard-overlay-border) !important;
-  box-shadow: var(--fastcard-overlay-shadow) !important;
-  backdrop-filter: blur(30px) saturate(128%) contrast(0.94) brightness(1.04) !important;
-  -webkit-backdrop-filter: blur(30px) saturate(128%) contrast(0.94) brightness(1.04) !important;
-  background-clip: border-box;
-  isolation: isolate;
-}
-
-html[data-fastcard-overlay-window='true'] .browser-fastcard-header,
-html[data-fastcard-overlay-window='true'] .browser-fastcard-footer {
-  background: var(--fastcard-overlay-surface-bg);
-}
-
-html[data-fastcard-overlay-window='true'] .browser-fastcard-result-body section {
-  background: var(--fastcard-overlay-card-bg);
-  border-color: var(--fastcard-overlay-border);
-}
-
-html[data-fastcard-overlay-window='true'] .browser-fastcard-field select,
-html[data-fastcard-overlay-window='true'] .browser-fastcard-action {
-  background: var(--fastcard-overlay-control-bg);
-  border-color: var(--fastcard-overlay-border);
-}
-
-.ready-floating-menu,
-.chat-header-floating-menu {
-  box-shadow: var(--chat-menu-shadow) !important;
-}
-
-.ready-floating-menu-item,
-.chat-header-floating-menu-item {
-  transition:
-    background 160ms ease,
-    border-color 160ms ease,
-    box-shadow 160ms ease,
-    transform 150ms ease;
-}
-
-.ready-floating-menu-item:hover,
-.chat-header-floating-menu-item:hover {
-  background: var(--chat-menu-hover-bg) !important;
-  box-shadow: var(--chat-menu-hover-shadow);
-}
-
-.ready-floating-menu-item.is-selected,
-.chat-header-floating-menu-item.is-selected {
-  background: var(--chat-menu-selected-bg, rgba(239, 242, 246, 0.66)) !important;
-  border-color: var(--chat-menu-selected-border, rgba(222, 228, 236, 0.42)) !important;
-  box-shadow: var(--chat-menu-selected-shadow) !important;
-}
-
-.chat-header-menu-delete-button:hover {
-  background: var(--chat-menu-hover-bg) !important;
-}
-
-html:root .ready-floating-menu,
-html:root .chat-header-floating-menu {
-  background: var(--chat-menu-frost-bg, rgba(236, 239, 243, 0.92)) !important;
-  border-color: var(--chat-menu-frost-border, rgba(255, 255, 255, 0.42)) !important;
-  box-shadow: var(--chat-menu-shadow) !important;
-  backdrop-filter: blur(calc(var(--lg-blur-strong) * 1.28)) saturate(calc(var(--surface-saturate) - 8%)) contrast(1.01) !important;
-  -webkit-backdrop-filter: blur(calc(var(--lg-blur-strong) * 1.28)) saturate(calc(var(--surface-saturate) - 8%)) contrast(1.01) !important;
-}
-
-html:root .ready-floating-menu-item:hover,
-html:root .chat-header-floating-menu-item:hover {
-  background: var(--chat-menu-hover-bg, rgba(246, 248, 251, 0.72)) !important;
-  box-shadow: var(--chat-menu-hover-shadow);
-}
-
-html:root .ready-floating-menu-item.is-selected,
-html:root .chat-header-floating-menu-item.is-selected {
-  background: var(--chat-menu-selected-bg, rgba(239, 242, 246, 0.66)) !important;
-  border-color: var(--chat-menu-selected-border, rgba(222, 228, 236, 0.42)) !important;
-  box-shadow: var(--chat-menu-selected-shadow) !important;
-}
-
-html:root .chat-header-menu-delete-button:hover {
-  background: var(--chat-menu-hover-bg, rgba(246, 248, 251, 0.72)) !important;
-  box-shadow: var(--chat-menu-hover-shadow);
 }
 
 html.pet-window-root,
@@ -369,7 +76,7 @@ body.pet-window-body {
   position: relative;
   overflow: hidden;
   background: transparent;
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI", sans-serif;
+  font-family: var(--rn-font-ui);
 }
 
 .pet-window-small { --pet-scale: 0.42; --pet-right: 14px; --pet-bottom: 8px; --bubble-width: 210px; }
@@ -399,7 +106,7 @@ body.pet-window-body {
   background-size: 1536px 1872px;
   background-position-y: calc(var(--pet-row) * -208px);
   image-rendering: pixelated;
-  filter: drop-shadow(0 16px 16px rgba(0, 0, 0, 0.24));
+  filter: drop-shadow(var(--rn-pet-shadow));
   animation-duration: 920ms;
   animation-timing-function: step-end;
   animation-iteration-count: infinite;
@@ -462,9 +169,9 @@ body.pet-window-body {
   border-radius: 16px;
   display: grid;
   place-items: center;
-  color: var(--text-muted);
-  background: var(--surface-floating-bg);
-  border: 1px solid var(--surface-border);
+  color: var(--rn-ink-2);
+  background: var(--rn-float);
+  box-shadow: inset 0 0 0 1px var(--rn-hair-2);
 }
 
 .pet-bubble-stack {
@@ -497,7 +204,7 @@ body.pet-window-body {
   border-radius: 16px;
   padding: 9px 32px 9px 11px;
   box-sizing: border-box;
-  color: var(--text-body);
+  color: var(--rn-ink);
   overflow: hidden;
   pointer-events: auto;
   cursor: pointer;
@@ -512,12 +219,12 @@ body.pet-window-body {
   bottom: 10px;
   width: 3px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--color-blue, #5b8cff) 68%, transparent);
+  background: color-mix(in srgb, var(--rn-ink-3) 68%, transparent);
 }
 
-.pet-sticky-success::before { background: color-mix(in srgb, var(--color-green, #22c55e) 72%, transparent); }
-.pet-sticky-warning::before { background: color-mix(in srgb, var(--color-orange, #f59e0b) 78%, transparent); }
-.pet-sticky-danger::before { background: color-mix(in srgb, var(--color-red, #ef4444) 72%, transparent); }
+.pet-sticky-success::before { background: color-mix(in srgb, var(--rn-ok) 72%, transparent); }
+.pet-sticky-warning::before { background: color-mix(in srgb, var(--rn-warn) 78%, transparent); }
+.pet-sticky-danger::before { background: color-mix(in srgb, var(--rn-bad) 72%, transparent); }
 
 .pet-sticky-content {
   display: flex;
@@ -528,7 +235,7 @@ body.pet-window-body {
 }
 
 .pet-sticky-content strong {
-  color: var(--text-title);
+  color: var(--rn-ink);
   font-size: 12px;
   line-height: 1.35;
   overflow: hidden;
@@ -537,7 +244,7 @@ body.pet-window-body {
 }
 
 .pet-sticky-content span {
-  color: var(--text-muted);
+  color: var(--rn-ink-2);
   font-size: 11px;
   line-height: 1.45;
   display: -webkit-box;
@@ -566,9 +273,9 @@ body.pet-window-body {
   width: 21px;
   height: 21px;
   border: 0;
-  border-radius: 999px;
-  color: var(--text-muted);
-  background: var(--chat-menu-hover-bg);
+  border-radius: var(--rn-r-pill);
+  color: var(--rn-ink-2);
+  background: var(--rn-fill-2);
   font-size: 13px;
   line-height: 1;
   opacity: 0;
@@ -583,8 +290,8 @@ body.pet-window-body {
 }
 
 .pet-sticky-close:hover {
-  color: var(--text-title);
-  background: var(--chat-menu-selected-bg);
+  color: var(--rn-ink);
+  background: var(--rn-fill-3);
 }
 
 .pet-bubble {
@@ -594,7 +301,7 @@ body.pet-window-body {
   border-radius: 16px;
   padding: 8px;
   box-sizing: border-box;
-  color: var(--text-body);
+  color: var(--rn-ink);
   overflow: hidden;
   pointer-events: auto;
 }
@@ -613,7 +320,7 @@ body.pet-window-body {
 }
 
 .pet-bubble-main:hover {
-  background: var(--chat-menu-hover-bg);
+  background: var(--rn-fill);
 }
 
 .pet-status-dot {
@@ -622,17 +329,20 @@ body.pet-window-body {
   border-radius: 999px;
   margin-top: 5px;
   flex: 0 0 auto;
-  background: var(--color-blue);
-  box-shadow: 0 0 14px color-mix(in srgb, var(--color-blue) 54%, transparent);
+  /* The assistant at work is the one "now" (DL5). */
+  background: var(--rn-accent);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--rn-accent) 54%, transparent);
 }
 
 .pet-status-failed {
-  background: var(--color-red, #ef4444);
+  background: var(--rn-bad);
+  box-shadow: none;
 }
 
 .pet-status-review,
 .pet-status-waiting {
-  background: var(--color-orange, #f59e0b);
+  background: var(--rn-warn);
+  box-shadow: none;
 }
 
 .pet-bubble-copy {
@@ -643,13 +353,13 @@ body.pet-window-body {
 }
 
 .pet-bubble-copy strong {
-  color: var(--text-title);
+  color: var(--rn-ink);
   font-size: 12px;
   line-height: 1.35;
 }
 
 .pet-bubble-copy span {
-  color: var(--text-muted);
+  color: var(--rn-ink-2);
   font-size: 11px;
   line-height: 1.45;
   display: -webkit-box;
@@ -671,8 +381,8 @@ body.pet-window-body {
 .pet-bubble-event {
   padding: 5px 7px;
   border-radius: 8px;
-  background: color-mix(in srgb, var(--chat-menu-hover-bg) 72%, transparent);
-  color: var(--text-muted);
+  background: var(--rn-fill);
+  color: var(--rn-ink-2);
   font-size: 11px;
   line-height: 1.45;
   display: -webkit-box;
@@ -690,11 +400,7 @@ body.pet-window-body {
   display: flex;
   gap: 6px;
   padding: 6px;
-  border-radius: 999px;
-  background: var(--chat-menu-frost-bg);
-  border: 1px solid var(--chat-menu-frost-border);
-  backdrop-filter: blur(calc(var(--lg-blur-strong) * 1.1)) saturate(var(--surface-saturate));
-  -webkit-backdrop-filter: blur(calc(var(--lg-blur-strong) * 1.1)) saturate(var(--surface-saturate));
+  border-radius: var(--rn-r-pill);
   opacity: 0;
   transform: translateY(4px);
   transition: opacity 160ms ease, transform 160ms ease;
@@ -711,28 +417,21 @@ body.pet-window-body {
   width: 26px;
   height: 26px;
   border: 0;
-  border-radius: 999px;
-  color: var(--text-body);
-  background: var(--chat-menu-hover-bg);
+  border-radius: var(--rn-r-pill);
+  color: var(--rn-ink);
+  background: var(--rn-fill-2);
   font-size: 11px;
   line-height: 1;
 }
 
 .pet-controls button:hover {
-  color: var(--text-title);
-  background: var(--chat-menu-selected-bg);
+  color: var(--rn-ink);
+  background: var(--rn-fill-3);
 }
 
+/* The segmented track of the /ready page header: the Segmented primitive's track. */
 .morph-segmented-track {
-  background: var(--input-slot-bg);
-  border: 1px solid var(--input-slot-border);
-  box-shadow: var(--input-slot-shadow);
-}
-
-html:root .morph-segmented-track {
-  background: var(--input-slot-bg);
-  border: 1px solid var(--input-slot-border);
-  box-shadow: var(--input-slot-shadow);
-  backdrop-filter: blur(var(--lg-blur-soft)) saturate(calc(var(--surface-saturate) + 15%));
-  -webkit-backdrop-filter: blur(var(--lg-blur-soft)) saturate(calc(var(--surface-saturate) + 15%));
+  background: var(--rn-fill-2) !important;
+  border: 0 !important;
+  box-shadow: none !important;
 }

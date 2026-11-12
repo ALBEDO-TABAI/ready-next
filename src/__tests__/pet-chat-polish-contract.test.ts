@@ -102,19 +102,10 @@ test('chat selected text exposes direct copy and sticky-note context actions', (
   assert.match(chatMessages, /onContextMenu/)
   assert.doesNotMatch(contextMenu, /lockBrowserView/)
   assert.doesNotMatch(contextMenu, /BROWSER_OVERLAY_LOCK_EVENT/)
-  assert.match(contextMenu, /createPortal/)
+  // B13: the menu is the shared float (behaviour in shell-context-menu-float.test.tsx); the panel boundary is kept.
   assert.match(contextMenu, /boundary\?: \{ left: number; top: number; right: number; bottom: number \}/)
-  assert.match(contextMenu, /const minX = Math\.max\(8, boundary\?\.left \?\? 8\)/)
-  assert.match(contextMenu, /const maxX = Math\.max\(minX,/)
-  assert.match(contextMenu, /glass-surface-floating ready-floating-menu/)
-  assert.match(contextMenu, /ready-floating-menu-item/)
-  assert.match(contextMenu, /hoveredItemId/)
-  assert.match(contextMenu, /pointerEvents:\s*'auto'/)
-  assert.match(contextMenu, /zIndex:\s*10000/)
-  assert.match(contextMenu, /onPointerDown/)
-  assert.match(contextMenu, /activateItem\(item\)/)
-  assert.match(contextMenu, /onMouseDown=\{\(event\) => event\.stopPropagation\(\)\}/)
-  assert.match(contextMenu, /onContextMenu=\{\(event\) => event\.stopPropagation\(\)\}/)
+  assert.match(contextMenu, /openFloat\(/)
+  assert.match(contextMenu, /<MenuList /)
 })
 
 test('pet sticky notes preserve longer content and can expand inside the floating window', () => {

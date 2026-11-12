@@ -88,3 +88,16 @@ test('scroll restoration waits for the requested article rather than scrolling t
     dom.window.close()
   }
 })
+test('an origin stays valid when the stored history moved for reasons other than navigation (first load, Main’s own updates)', async () => {
+  // The renderer has not read the stored history yet, and the stored history is at a later revision.
+  let saved = { ...emptyNavigation(), entries: [entry('book')], cursor: 0, revision: 7 }
+  const c = new NavigationController(() => ({ read: async () => saved, save: async state => saved = structuredClone({ ...state, revision: state.revision + 1 }) }))
+  // A jump from a draft nobody recorded (B11 書房 quote card → book passage): going back must return to the draft.
+  await c.open(entry('passage'), async () => {}, entry('draft'))
+  assert.deepEqual(c.getSnapshot().entries.map(item => item.title), ['book', 'draft', 'passage'])
+  // Main bumps the revision on its own (e.g. a draft becomes a page); the next jump's origin is still taken as given.
+  saved = { ...saved, revision: saved.revision + 5 }
+  await c.load()
+  await c.open(entry('note'), async () => { saved = { ...saved, revision: saved.revision + 1 } }, entry('page'))
+  assert.deepEqual(c.getSnapshot().entries.map(item => item.title), ['book', 'draft', 'passage', 'page', 'note'])
+})

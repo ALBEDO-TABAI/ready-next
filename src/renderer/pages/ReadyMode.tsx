@@ -71,9 +71,9 @@ export default function ReadyMode() {
         style={{
           height: 40,
           padding: '0 16px 0 72px',
-          background: 'var(--surface-toolbar-bg)',
-          borderBottom: '1px solid var(--border-default)',
-          boxShadow: 'var(--shadow-md)'
+          // A band on the window glass (DL1): no background or shadow of its own, a hairline below.
+          background: 'transparent',
+          borderBottom: '1px solid var(--rn-hair)',
         }}
       >
         {/* Left: Green-themed ModeSlider */}
@@ -101,7 +101,7 @@ export default function ReadyMode() {
       <div className="flex-1 flex overflow-hidden">
         <TaskPanel />
         <MeetingChat onFileDrop={handleFileDrop} />
-        <div className="flex-1 flex flex-col min-w-0" style={{ background: 'var(--bg-content)' }}>
+        <div className="flex-1 flex flex-col min-w-0" style={{ background: 'var(--rn-sheet)' }}>
           <WorkbenchModeOutlet mode={readySubMode} />
         </div>
         <FilePanel onFileDrop={handleFileDrop} onFileOpen={handleFileOpen} />

@@ -32,20 +32,17 @@ html.ready-startup-preview-root body {
   width: min(600px, calc(100vw - 24px));
   aspect-ratio: 3.85 / 1;
   overflow: hidden;
-  border: 1px solid rgba(20, 20, 20, 0.045);
   border-radius: clamp(18px, 2.5vw, 26px);
-  background: #fff;
-  box-shadow:
-    0 14px 30px rgba(30, 28, 24, 0.055),
-    0 3px 10px rgba(30, 28, 24, 0.025),
-    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  /* The brand card is a sheet of paper (W1 DL2), in the theme the window opens in. */
+  background: var(--rn-sheet);
+  box-shadow: var(--rn-sheet-shadow), inset 0 0 0 1px var(--rn-hair);
   transition: opacity 160ms linear;
 }
 
 .startup-preview__matrix {
   position: absolute;
   inset: 3% 7%;
-  color: #dfded9;
+  color: var(--rn-fill-3);
 }
 
 .startup-preview__matrix svg {
@@ -60,7 +57,7 @@ html.ready-startup-preview-root body {
 }
 
 .startup-preview__matrix--logo svg {
-  filter: drop-shadow(0 0 8px var(--ready-startup-logo-glow, rgba(255, 75, 43, 0.18)));
+  filter: drop-shadow(0 0 8px var(--ready-startup-logo-glow, color-mix(in srgb, var(--rn-accent) 18%, transparent)));
 }
 
 @media (max-width: 640px) {

@@ -77,11 +77,6 @@
   min-height: 0;
 }
 
-/* The frame keeps the shell's module surface (shared with Document and Browser) until the shell moves to paper. */
-html:root .rss-mode-shell .rss-workbench-body {
-  background: var(--workbench-module-surface-bg);
-}
-
 .rss-mode-shell .rss-content-frame {
   position: relative;
   flex: 1;
@@ -90,7 +85,7 @@ html:root .rss-mode-shell .rss-workbench-body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border-radius: var(--workbench-canvas-radius);
+  border-radius: var(--rn-r-sheet);
   background-clip: padding-box;
   container-type: inline-size;
 }

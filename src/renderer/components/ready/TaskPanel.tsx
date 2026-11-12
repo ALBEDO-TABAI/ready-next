@@ -28,6 +28,7 @@ import {
 } from '../../modules/agent/scope-read-authority'
 import { useNavigate } from 'react-router-dom'
 import { EmergenceFeedSection } from './EmergenceFeedSection'
+import { Button, IconButton } from '../ui'
 import {
   buildBrowserConfirmationCard,
   readBrowserConfirmationRequest,
@@ -80,15 +81,16 @@ function phaseLabel(phase: ScopeRunState['phase'] | undefined): string {
 function phaseTone(phase: ScopeRunState['phase'] | undefined): { bg: string; color: string } {
   switch (phase) {
     case 'done':
-      return { bg: 'var(--color-green-light)', color: 'var(--color-green)' }
+      return { bg: 'color-mix(in srgb, var(--rn-ok) 12%, transparent)', color: 'var(--rn-ok)' }
     case 'error':
     case 'cancelled':
-      return { bg: 'rgba(224, 69, 72, 0.12)', color: 'var(--color-red)' }
+      return { bg: 'color-mix(in srgb, var(--rn-bad) 10%, transparent)', color: 'var(--rn-bad)' }
     case 'takeover':
     case 'checkpoint':
-      return { bg: 'var(--color-orange-light)', color: 'var(--color-orange)' }
+      return { bg: 'color-mix(in srgb, var(--rn-warn) 12%, transparent)', color: 'var(--rn-warn)' }
     default:
-      return { bg: 'var(--color-blue-light)', color: 'var(--color-blue)' }
+      // In progress is "now" (DL5): the signal colour.
+      return { bg: 'var(--rn-accent-soft)', color: 'var(--rn-accent-text)' }
   }
 }
 
@@ -150,16 +152,17 @@ function projectionStatusTone(
 ): { bg: string; color: string } {
   switch (status) {
     case 'completed':
-      return { bg: 'var(--color-green-light)', color: 'var(--color-green)' }
+      return { bg: 'color-mix(in srgb, var(--rn-ok) 12%, transparent)', color: 'var(--rn-ok)' }
     case 'failed':
     case 'killed':
-      return { bg: 'rgba(224, 69, 72, 0.12)', color: 'var(--color-red)' }
+      return { bg: 'color-mix(in srgb, var(--rn-bad) 10%, transparent)', color: 'var(--rn-bad)' }
     case 'recoverable_paused':
     case 'budget_paused':
     case 'blocked':
-      return { bg: 'var(--color-orange-light)', color: 'var(--color-orange)' }
+      return { bg: 'color-mix(in srgb, var(--rn-warn) 12%, transparent)', color: 'var(--rn-warn)' }
     default:
-      return { bg: 'var(--color-blue-light)', color: 'var(--color-blue)' }
+      // In progress is "now" (DL5): the signal colour.
+      return { bg: 'var(--rn-accent-soft)', color: 'var(--rn-accent-text)' }
   }
 }
 
@@ -438,8 +441,8 @@ export default function TaskPanel() {
       className="flex-shrink-0 flex flex-col"
       style={{
         width: 240,
-        background: 'var(--bg-panel)',
-        borderRight: '1px solid var(--border-default)'
+        // A region on the window glass (DL1): no background of its own, a hairline to its right.
+        borderRight: '1px solid var(--rn-hair)'
       }}
     >
       {/* 梯队三 — emergence feed（空 feed 自动隐藏；出口=打开 scope / 跳设置确认面）。 */}
@@ -450,24 +453,15 @@ export default function TaskPanel() {
 
       <div
         className="flex items-center justify-between"
-        style={{ padding: '12px 14px', borderBottom: '1px solid var(--border-default)' }}
+        style={{ padding: '12px 14px', borderBottom: '1px solid var(--rn-hair)' }}
       >
-        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-title)' }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--rn-ink)' }}>
           {activeRun || activeProjection ? '运行时间线' : '任务'}
         </span>
-        <button
-          className="flex items-center justify-center rounded-lg hover:bg-black/5 transition-colors"
-          style={{ width: 24, height: 24 }}
-        >
-          <Plus
-            style={{ width: 14, height: 14 }}
-            className="text-[var(--text-light)]"
-            strokeWidth={2}
-          />
-        </button>
+        <IconButton size="sm" title="新建任务" icon={<Plus />} />
       </div>
 
-      <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--border-default)' }}>
+      <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--rn-hair)' }}>
         {activeRun || activeProjection ? (
           <div className="flex flex-col" style={{ gap: 8 }}>
             <div className="flex items-center justify-between">
@@ -481,22 +475,22 @@ export default function TaskPanel() {
                 {activeProjection ? projectionRuntimeState?.statusLabel || projectionStatusLabel(activeProjection?.status) : phaseLabel(activeRun?.phase)}
               </span>
               {activeRun ? (
-                <span className="text-[10px]" style={{ color: 'var(--text-light)' }}>
+                <span className="text-[10px]" style={{ color: 'var(--rn-ink-3)' }}>
                   工具 {activeRun.stepMetrics?.toolCalls || 0}/
                   {activeRun.stepMetrics?.toolResults || 0}
                 </span>
               ) : (
-                <span className="text-[10px]" style={{ color: 'var(--text-light)' }}>
+                <span className="text-[10px]" style={{ color: 'var(--rn-ink-3)' }}>
                   步骤 {projectionSteps.length}
                 </span>
               )}
             </div>
             <div className="flex items-center justify-between" style={{ gap: 8 }}>
-              <span className="text-[10px] font-semibold" style={{ color: 'var(--text-light)' }}>
+              <span className="text-[10px] font-semibold" style={{ color: 'var(--rn-ink-3)' }}>
                 模块：{moduleLabel(activeRun?.module || activeProjection?.module)}
               </span>
               {activeRun?.executionKind && (
-                <span className="text-[10px]" style={{ color: 'var(--text-light)' }}>
+                <span className="text-[10px]" style={{ color: 'var(--rn-ink-3)' }}>
                   {activeRun.executionKind}
                 </span>
               )}
@@ -505,19 +499,19 @@ export default function TaskPanel() {
               <div
                 className="rounded-[8px] border px-2.5 py-2"
                 style={{
-                  borderColor: 'var(--border-default)',
-                  background: 'var(--surface-card-bg)'
+                  borderColor: 'var(--rn-hair-2)',
+                  background: 'var(--rn-fill)'
                 }}
               >
                 {activeTaskTitle && (
-                  <div className="text-[11px] font-semibold" style={{ color: 'var(--text-body)' }}>
+                  <div className="text-[11px] font-semibold" style={{ color: 'var(--rn-ink)' }}>
                     {activeTaskTitle}
                   </div>
                 )}
                 {activeTaskSummary && (
                   <div
                     className="mt-1 text-[10px]"
-                    style={{ color: 'var(--text-light)', lineHeight: 1.5 }}
+                    style={{ color: 'var(--rn-ink-3)', lineHeight: 1.5 }}
                   >
                     {activeTaskSummary}
                   </div>
@@ -528,23 +522,23 @@ export default function TaskPanel() {
               <div
                 className="rounded-[8px] border px-2.5 py-2"
                 style={{
-                  borderColor: 'var(--border-default)',
-                  background: 'var(--surface-card-bg)'
+                  borderColor: 'var(--rn-hair-2)',
+                  background: 'var(--rn-fill)'
                 }}
               >
-                <div className="text-[10px] font-semibold" style={{ color: 'var(--text-light)' }}>
+                <div className="text-[10px] font-semibold" style={{ color: 'var(--rn-ink-3)' }}>
                   当前进展
                 </div>
                 <div
                   className="mt-1 text-[11px]"
-                  style={{ color: 'var(--text-body)', lineHeight: 1.5 }}
+                  style={{ color: 'var(--rn-ink)', lineHeight: 1.5 }}
                 >
                   {projectionNowLabel || '正在处理任务'}
                 </div>
                 {currentProjectionStepTitle && currentProjectionStepDetail && currentProjectionStepDetail !== currentProjectionStepTitle && (
                   <div
                     className="mt-1 text-[10px]"
-                    style={{ color: 'var(--text-light)', lineHeight: 1.5 }}
+                    style={{ color: 'var(--rn-ink-3)', lineHeight: 1.5 }}
                   >
                     {currentProjectionStepTitle}
                   </div>
@@ -552,7 +546,7 @@ export default function TaskPanel() {
               </div>
             )}
             {activeRun?.ownerResourceId && (
-              <div className="text-[10px]" style={{ color: 'var(--text-light)' }}>
+              <div className="text-[10px]" style={{ color: 'var(--rn-ink-3)' }}>
                 资源：{String(activeRun.ownerResourceId).slice(0, 48)}
               </div>
             )}
@@ -560,16 +554,16 @@ export default function TaskPanel() {
               <div
                 className="rounded-[8px] border px-2.5 py-2"
                 style={{
-                  borderColor: 'var(--color-orange)',
-                  background: 'var(--color-orange-light)'
+                  borderColor: 'var(--rn-warn)',
+                  background: 'color-mix(in srgb, var(--rn-warn) 12%, transparent)'
                 }}
               >
-                <div className="text-[10px] font-semibold" style={{ color: 'var(--color-orange)' }}>
+                <div className="text-[10px] font-semibold" style={{ color: 'var(--rn-warn)' }}>
                   当前阻塞
                 </div>
                 <div
                   className="mt-1 text-[11px]"
-                  style={{ color: 'var(--text-body)', lineHeight: 1.5 }}
+                  style={{ color: 'var(--rn-ink)', lineHeight: 1.5 }}
                 >
                   {activeProjection ? activeProjection.blockedReason : activeRun?.blockedReason}
                 </div>
@@ -581,15 +575,15 @@ export default function TaskPanel() {
                 data-ready-browser-confirmation-request-id={projectionConfirmationCard.requestId}
                 data-ready-browser-confirmation-target={projectionConfirmationRequest?.target.tabId || ''}
                 className="rounded-[8px] border px-2.5 py-2"
-                style={{ borderColor: 'var(--border-default)', background: 'var(--bg-subtle)' }}
+                style={{ borderColor: 'var(--rn-hair-2)', background: 'var(--rn-fill)' }}
               >
-                <div className="text-[11px] font-semibold" style={{ color: 'var(--text-strong)' }}>
+                <div className="text-[11px] font-semibold" style={{ color: 'var(--rn-ink)' }}>
                   {projectionConfirmationCard.title}
                 </div>
-                <div className="mt-1 text-[10px]" style={{ color: 'var(--text-body)', lineHeight: 1.5 }}>
+                <div className="mt-1 text-[10px]" style={{ color: 'var(--rn-ink)', lineHeight: 1.5 }}>
                   {projectionConfirmationCard.description}
                 </div>
-                <div className="mt-1 text-[10px]" style={{ color: 'var(--text-light)', lineHeight: 1.5 }}>
+                <div className="mt-1 text-[10px]" style={{ color: 'var(--rn-ink-3)', lineHeight: 1.5 }}>
                   {projectionConfirmationCard.detail}
                 </div>
               </div>
@@ -600,20 +594,15 @@ export default function TaskPanel() {
                   activeProjection.continuationRef?.detachedTaskId
                   || activeProjection.continuationRef?.childRunId
                 ) && (
-                  <button
-                    type="button"
-                    onClick={handleCancelProjection}
-                    className="rounded-[8px] border px-2.5 py-1.5 text-[10.5px] transition-colors hover:bg-black/5"
-                    style={{ borderColor: 'var(--border-default)', color: 'var(--text-body)' }}
-                  >
+                  <Button size="sm" variant="secondary" onClick={handleCancelProjection}>
                     取消任务
-                  </button>
+                  </Button>
                 )}
               </div>
             )}
             {projectionRecoveryHistory.length > 0 && (
               <div className="flex flex-col" style={{ gap: 6 }}>
-                <div className="text-[10px] font-semibold" style={{ color: 'var(--text-light)' }}>
+                <div className="text-[10px] font-semibold" style={{ color: 'var(--rn-ink-3)' }}>
                   自动恢复
                 </div>
                 {projectionRecoveryHistory.map((entry) => (
@@ -621,8 +610,8 @@ export default function TaskPanel() {
                     key={`${entry.timestamp}-${entry.kind}-${entry.attempt}`}
                     className="rounded-[8px] border px-2.5 py-2"
                     style={{
-                      borderColor: 'var(--border-default)',
-                      background: 'var(--surface-card-bg)'
+                      borderColor: 'var(--rn-hair-2)',
+                      background: 'var(--rn-fill)'
                     }}
                   >
                     <div
@@ -631,15 +620,15 @@ export default function TaskPanel() {
                     >
                       <div
                         className="text-[10px] font-semibold"
-                        style={{ color: 'var(--text-body)' }}
+                        style={{ color: 'var(--rn-ink)' }}
                       >
                         {recoveryKindLabel(entry.kind)}
                       </div>
-                      <div className="text-[9px]" style={{ color: 'var(--text-light)' }}>
+                      <div className="text-[9px]" style={{ color: 'var(--rn-ink-3)' }}>
                         第 {entry.attempt} 次
                       </div>
                     </div>
-                    <div className="text-[10px]" style={{ color: 'var(--text-light)', lineHeight: 1.5 }}>
+                    <div className="text-[10px]" style={{ color: 'var(--rn-ink-3)', lineHeight: 1.5 }}>
                       {entry.message}
                       {entry.recovered ? ' · 已恢复' : ' · 未恢复'}
                     </div>
@@ -649,7 +638,7 @@ export default function TaskPanel() {
             )}
             {artifactItems.length > 0 && (
               <div className="flex flex-col" style={{ gap: 6 }}>
-                <div className="text-[10px] font-semibold" style={{ color: 'var(--text-light)' }}>
+                <div className="text-[10px] font-semibold" style={{ color: 'var(--rn-ink-3)' }}>
                   Artifacts
                 </div>
                 <div className="flex flex-col" style={{ gap: 6 }}>
@@ -659,16 +648,16 @@ export default function TaskPanel() {
                       onClick={() => {
                         void revealArtifact(artifact)
                       }}
-                      className="rounded-[8px] border px-2.5 py-2 text-left hover:bg-black/5 transition-colors"
-                      style={{ borderColor: 'var(--border-default)' }}
+                      className="rounded-[8px] border px-2.5 py-2 text-left hover:bg-[var(--rn-fill)] transition-colors"
+                      style={{ borderColor: 'var(--rn-hair-2)' }}
                     >
                       <div
                         className="text-[11px] font-medium"
-                        style={{ color: 'var(--text-body)' }}
+                        style={{ color: 'var(--rn-ink)' }}
                       >
                         {artifact.label}
                       </div>
-                      <div className="text-[10px]" style={{ color: 'var(--text-light)' }}>
+                      <div className="text-[10px]" style={{ color: 'var(--rn-ink-3)' }}>
                         {artifact.kind}
                       </div>
                     </button>
@@ -679,7 +668,7 @@ export default function TaskPanel() {
             {documentPipelineDiagnostics && (
               <div
                 className="text-[10px]"
-                style={{ color: 'var(--text-light)', lineHeight: 1.5 }}
+                style={{ color: 'var(--rn-ink-3)', lineHeight: 1.5 }}
               >
                 文档深读
                 {documentPipelineDiagnostics.phase ? ` · ${documentPipelineDiagnostics.phase}` : ''}
@@ -697,14 +686,14 @@ export default function TaskPanel() {
             {activeRun?.latestText && !activeRun?.blockedReason && (
               <div
                 className="text-[11px]"
-                style={{ color: 'var(--text-secondary)', lineHeight: 1.5 }}
+                style={{ color: 'var(--rn-ink-2)', lineHeight: 1.5 }}
               >
                 {activeRun.latestText.slice(0, 120)}
               </div>
             )}
           </div>
         ) : (
-          <span style={{ fontSize: 11, color: '#8A8A8A' }}>{fallbackTasks.length} 个任务</span>
+          <span style={{ fontSize: 11, color: 'var(--rn-ink-2)' }}>{fallbackTasks.length} 个任务</span>
         )}
       </div>
 
@@ -713,9 +702,9 @@ export default function TaskPanel() {
           timelineItems.length === 0 ? (
             <div
               className="rounded-[12px] border px-3 py-3"
-              style={{ borderColor: 'var(--border-default)' }}
+              style={{ borderColor: 'var(--rn-hair-2)' }}
             >
-              <div className="text-[11px]" style={{ color: 'var(--text-light)' }}>
+              <div className="text-[11px]" style={{ color: 'var(--rn-ink-3)' }}>
                 当前还没有工具轨迹，等待运行事件。
               </div>
             </div>
@@ -726,10 +715,9 @@ export default function TaskPanel() {
                   key={item.id}
                   className="rounded-[12px] border px-3 py-2.5"
                   style={{
-                    borderColor:
-                      item.kind === 'call' ? 'rgba(57, 128, 255, 0.18)' : 'var(--border-default)',
+                    borderColor: 'var(--rn-hair-2)',
                     background:
-                      item.kind === 'call' ? 'rgba(57, 128, 255, 0.06)' : 'var(--surface-card-bg)'
+                      item.kind === 'call' ? 'var(--rn-fill-2)' : 'var(--rn-fill)'
                   }}
                 >
                   <div className="mb-1 flex items-center justify-between">
@@ -738,14 +726,14 @@ export default function TaskPanel() {
                       style={{
                         background:
                           item.kind === 'call'
-                            ? 'var(--color-blue-light)'
-                            : 'rgba(16, 185, 129, 0.12)',
-                        color: item.kind === 'call' ? 'var(--color-blue)' : 'var(--color-green)'
+                            ? 'var(--rn-fill-2)'
+                            : 'color-mix(in srgb, var(--rn-ok) 12%, transparent)',
+                        color: item.kind === 'call' ? 'var(--rn-ink-2)' : 'var(--rn-ok)'
                       }}
                     >
                       {item.kind === 'call' ? 'Tool' : 'Result'}
                     </span>
-                    <span className="text-[9px]" style={{ color: 'var(--text-light)' }}>
+                    <span className="text-[9px]" style={{ color: 'var(--rn-ink-3)' }}>
                       {item.timestamp.toLocaleTimeString('zh-CN', {
                         hour: '2-digit',
                         minute: '2-digit',
@@ -755,7 +743,7 @@ export default function TaskPanel() {
                   </div>
                   <div
                     className="text-[11px]"
-                    style={{ color: 'var(--text-body)', lineHeight: 1.5 }}
+                    style={{ color: 'var(--rn-ink)', lineHeight: 1.5 }}
                   >
                     {item.summary}
                   </div>
@@ -767,9 +755,9 @@ export default function TaskPanel() {
           projectionSteps.length === 0 ? (
             <div
               className="rounded-[12px] border px-3 py-3"
-              style={{ borderColor: 'var(--border-default)' }}
+              style={{ borderColor: 'var(--rn-hair-2)' }}
             >
-              <div className="text-[11px]" style={{ color: 'var(--text-light)' }}>
+              <div className="text-[11px]" style={{ color: 'var(--rn-ink-3)' }}>
                 当前任务已经写入看板，等待新的步骤或恢复记录。
               </div>
             </div>
@@ -779,7 +767,7 @@ export default function TaskPanel() {
                 <div
                   key={step.id}
                   className="rounded-[12px] border px-3 py-2.5"
-                  style={{ borderColor: 'var(--border-default)', background: 'var(--surface-card-bg)' }}
+                  style={{ borderColor: 'var(--rn-hair-2)', background: 'var(--rn-fill)' }}
                 >
                   <div className="mb-1 flex items-center justify-between" style={{ gap: 8 }}>
                     <span
@@ -787,22 +775,22 @@ export default function TaskPanel() {
                       style={{
                         background:
                           step.status === 'done'
-                            ? 'rgba(16, 185, 129, 0.12)'
+                            ? 'color-mix(in srgb, var(--rn-ok) 12%, transparent)'
                             : step.status === 'running'
-                              ? 'var(--color-blue-light)'
-                              : 'rgba(120, 120, 120, 0.12)',
+                              ? 'var(--rn-accent-soft)'
+                              : 'var(--rn-fill-2)',
                         color:
                           step.status === 'done'
-                            ? 'var(--color-green)'
+                            ? 'var(--rn-ok)'
                             : step.status === 'running'
-                              ? 'var(--color-blue)'
-                              : 'var(--text-light)'
+                              ? 'var(--rn-accent-text)'
+                              : 'var(--rn-ink-3)'
                       }}
                     >
                       {taskStepStatusToUserLabel(step.status)}
                     </span>
                     {step.updatedAt && (
-                      <span className="text-[9px]" style={{ color: 'var(--text-light)' }}>
+                      <span className="text-[9px]" style={{ color: 'var(--rn-ink-3)' }}>
                         {new Date(step.updatedAt).toLocaleTimeString('zh-CN', {
                           hour: '2-digit',
                           minute: '2-digit'
@@ -810,14 +798,14 @@ export default function TaskPanel() {
                       </span>
                     )}
                   </div>
-                  <div className="text-[11px]" style={{ color: 'var(--text-body)', lineHeight: 1.5 }}>
+                  <div className="text-[11px]" style={{ color: 'var(--rn-ink)', lineHeight: 1.5 }}>
                     {formatTaskStepDisplayTitle(
                       step.title || step.description,
                       activeProjection.progress as ScopeRunState['progress'] | null | undefined,
                     )}
                   </div>
                   {step.detail && (
-                    <div className="mt-1 text-[10px]" style={{ color: 'var(--text-light)', lineHeight: 1.5 }}>
+                    <div className="mt-1 text-[10px]" style={{ color: 'var(--rn-ink-3)', lineHeight: 1.5 }}>
                       {formatTaskUserFacingText(step.detail)}
                     </div>
                   )}
@@ -830,22 +818,22 @@ export default function TaskPanel() {
             {fallbackTasks.map((task) => (
               <div
                 key={task.id}
-                className="flex items-center rounded-lg transition-colors hover:bg-black/5"
+                className="flex items-center rounded-lg transition-colors hover:bg-[var(--rn-fill)]"
                 style={{ padding: '8px 10px', gap: 8 }}
               >
                 <span
                   className={`
                     w-2 h-2 rounded-full flex-shrink-0
-                    ${task.status === 'completed' ? 'bg-[var(--color-green)]' : ''}
-                    ${task.status === 'running' ? 'bg-[var(--color-blue)] animate-pulse' : ''}
-                    ${task.status === 'pending' ? 'bg-[var(--text-light)]' : ''}
+                    ${task.status === 'completed' ? 'bg-[var(--rn-ok)]' : ''}
+                    ${task.status === 'running' ? 'bg-[var(--rn-accent)] animate-pulse' : ''}
+                    ${task.status === 'pending' ? 'bg-[var(--rn-ink-3)]' : ''}
                   `}
                 />
                 <span
                   className={task.status === 'completed' ? 'line-through' : ''}
                   style={{
                     fontSize: 12,
-                    color: task.status === 'completed' ? '#8A8A8A' : 'var(--text-body)'
+                    color: task.status === 'completed' ? 'var(--rn-ink-3)' : 'var(--rn-ink)'
                   }}
                 >
                   {task.title}

@@ -2,15 +2,16 @@ import { pageOf, resolveBookLocation } from './location'
 import { type BookTarget } from './navigation-state'
 import { registerNavigationPosition } from '../../workbench/navigation-history'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ALargeSmall, ArrowLeft, Bookmark, BookmarkPlus, BookMarked, ChevronLeft, ChevronRight, NotebookPen, TableOfContents } from 'lucide-react'
+import { ALargeSmall, ArrowLeft, Bookmark, BookmarkPlus, BookMarked, ChevronLeft, ChevronRight, NotebookPen, TableOfContents, X } from 'lucide-react'
 import type { LibraryBook, LibraryBookmark, LibraryReadingPosition } from '../../../../shared/library'
-import { Button, IconButton, Toolbar } from '../../../components/ui'
+import { Button, EmptyState, IconButton, ListRow, SectionHeader, Segmented, Slider, Toolbar } from '../../../components/ui'
 import { toLocalFileUrl } from '../../../utils/dragDrop'
 import { confirmed, savePosition, type LibraryAPI } from '../access'
 import { loadBook, type LoadedBook } from './book'
-import { paginate, PAPERS, fontStack, type Layout, type Typo } from './paginate'
+import { paginate, fontStack, type Layout, type Typo } from './paginate'
+import { PAPERS } from './papers'
 import { createFlipbook, type FlipView } from './flipbook.js'
-import { renderSheet } from './renderSheet'
+import { blankSheet, renderSheet } from './renderSheet'
 import { pageStyles } from './pageStyles'
 import { paintMarks } from './marks'
 import { useHighlights } from './useHighlights'
@@ -19,6 +20,10 @@ import { HighlightPopover, MarginNotes, NotesList } from './Notes'
 type Loaded = { css: string; book: LoadedBook; position: LibraryReadingPosition | null; bookmarks: LibraryBookmark[] }
 type Load = { status: 'loading' } | { status: 'ready'; data: Loaded } | { status: 'error'; error: string }
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error)
+const PANELS = { toc: '目录', marks: '书签', notes: '笔记', type: '排版' } as const
+const FONTS: { value: Typo['font']; label: string }[] = [{ value: 'song', label: '宋体' }, { value: 'hei', label: '黑体' }, { value: 'kai', label: '楷体' }]
+const PAPER_CHOICES: { value: Typo['paper']; label: string }[] = [{ value: 'white', label: '白纸' }, { value: 'cream', label: '米黄' }, { value: 'night', label: '夜间' }]
+const SPREADS: { value: 'spread' | 'single'; label: string }[] = [{ value: 'spread', label: '双页' }, { value: 'single', label: '单页' }]
 /** A count on an icon button; nothing at zero. The button keeps its plain name. */
 function CountBadge({ count }: { count: number }) {
   return count > 0 ? <span className="library-badge" aria-hidden="true">{count > 99 ? '99+' : count}</span> : null
@@ -88,7 +93,7 @@ function ReadyReader({ record, api, loaded, target, onBack, onError }: { record:
       void current.began.then(async () => {
         const result = await layers.endReading({ id: current.id, endedAt })
         if (!result.ok) throw new Error(result.message)
-      }).catch(error => fail.current(errorText(error)))
+      }).catch(error => console.error('[library] reading session failed', error))
     }
     const begin = () => {
       if (session || document.hidden) return
@@ -96,7 +101,7 @@ function ReadyReader({ record, api, loaded, target, onBack, onError }: { record:
       const began = layers.beginReading({ id, objectId: record.id, bookId: record.id,
         loc: `c${at?.chapter ?? 0}:${at?.offset ?? 0}+1`, startedAt: Date.now() }).then(result => { if (!result.ok) throw new Error(result.message) })
       session = { id, began }
-      void began.catch(error => fail.current(errorText(error)))
+      void began.catch(error => console.error('[library] reading session failed', error))
     }
     const visibility = () => { if (document.hidden) finish(); else begin() }
     begin(); document.addEventListener('visibilitychange', visibility); window.addEventListener('pagehide', finish)
@@ -149,7 +154,7 @@ function ReadyReader({ record, api, loaded, target, onBack, onError }: { record:
         }
         return sheet
       },
-      blank: () => { const d = document.createElement('div'); d.className = 'sheet'; return d },
+      blank: () => blankSheet(record, typo),
       look: { css: loaded.css, root: `font-family:${fontStack(typo.font, latin)}`, paper: [1, 3, 5].map(i => parseInt(paper.pp.slice(i, i + 2), 16) / 255) },
       startPage: position.current ? pageOf(layout, position.current) : layout.firstText + 1,
       selectable: true, onSelect, onMark,
@@ -224,16 +229,18 @@ function ReadyReader({ record, api, loaded, target, onBack, onError }: { record:
       <span className="rd-folio">{view?.a ?? 0}{view?.spread ? `–${view.b}` : ''} / {view?.count ?? 0}</span>
       <IconButton size="lg" icon={<ChevronRight />} title="下一页（→）" aria-label="下一页" disabled={!view || view.atEnd} onClick={() => { void flip.current?.next().catch(error => fail.current(errorText(error))) }} />
     </Toolbar></div>
-    {panel && <aside className="rd-panel" aria-label={panel === 'toc' ? '目录' : panel === 'marks' ? '书签' : panel === 'notes' ? '笔记' : '排版'}><div className="rn-float panel-body">
-      <button type="button" onClick={() => setPanel(null)}>关闭面板</button>
-      {panel === 'toc' && <div className="rd-toc">{toc.map((t, i) => <button type="button" key={i} onClick={() => { if (layout) go((('anchor' in t && t.anchor ? layout.idPage.get(`${t.chapter}#${t.anchor}`) : undefined) ?? layout.chapterPage[t.chapter]) + 1) }}>{t.label}</button>)}</div>}
-      {panel === 'marks' && <div className="rd-toc">{marks.length ? marks.map(m => <button type="button" key={m.id} onClick={() => { if (layout) go(pageOf(layout, m)) }}>{m.label}</button>) : <p>还没有书签，按 B 夹一张。</p>}</div>}
-      {panel === 'notes' && <><button type="button" disabled={annotations.busy && annotations.state?.persistence !== 'pending_save'} onClick={() => void annotations.refresh()}>刷新标注</button><NotesList list={annotations.state?.highlights ?? []} onGo={h => { if (layout && h.location.status === 'located') { closeHighlight(); go(pageOf(layout, { chapter: h.location.chapter, offset: h.location.from })) } }} onOpen={(h, el) => onMark(h.id, el)} /></>}
-      {panel === 'type' && <div className="rd-set"><label>字号 <input aria-label="字号" type="range" min="13" max="30" value={typo.size} onChange={e => setTypo(t => ({ ...t, size: Number(e.target.value) }))} /></label>
-        <label>行距 <input aria-label="行距" type="range" min="1.4" max="2.2" step="0.1" value={typo.lead} onChange={e => setTypo(t => ({ ...t, lead: Number(e.target.value) }))} /></label>
-        <div>{(['song', 'hei', 'kai'] as const).map((font, i) => <button type="button" key={font} aria-pressed={typo.font === font} onClick={() => setTypo(t => ({ ...t, font }))}>{['宋体', '黑体', '楷体'][i]}</button>)}</div>
-        <div>{(['white', 'cream', 'night'] as const).map((p, i) => <button type="button" key={p} aria-pressed={typo.paper === p} onClick={() => setTypo(t => ({ ...t, paper: p }))}>{['白纸', '米黄', '夜间'][i]}</button>)}</div>
-        <button type="button" aria-pressed={!single} onClick={() => setSingle(false)}>双页</button><button type="button" aria-pressed={single} onClick={() => setSingle(true)}>单页</button><p>{engine} · 窄区自动单页</p></div>}
+    {panel && <aside className="rd-panel" aria-label={PANELS[panel]}><div className="rn-float panel-body">
+      <SectionHeader title={PANELS[panel]} actions={<IconButton size="sm" icon={<X />} title="关闭面板" onClick={() => setPanel(null)} />} />
+      {panel === 'toc' && <div className="rd-toc">{toc.map((t, i) => <ListRow key={i} label={t.label} title={t.label} onClick={() => { if (layout) go((('anchor' in t && t.anchor ? layout.idPage.get(`${t.chapter}#${t.anchor}`) : undefined) ?? layout.chapterPage[t.chapter]) + 1) }} />)}</div>}
+      {panel === 'marks' && <div className="rd-toc">{marks.length ? marks.map(m => <ListRow key={m.id} label={m.label} title={m.label} onClick={() => { if (layout) go(pageOf(layout, m)) }} />) : <EmptyState title="还没有书签" body="按 B 夹一张。" />}</div>}
+      {panel === 'notes' && <div className="rd-toc"><Button variant="ghost" size="sm" disabled={annotations.busy && annotations.state?.persistence !== 'pending_save'} onClick={() => void annotations.refresh()}>刷新标注</Button><NotesList list={annotations.state?.highlights ?? []} onGo={h => { if (layout && h.location.status === 'located') { closeHighlight(); go(pageOf(layout, { chapter: h.location.chapter, offset: h.location.from })) } }} onOpen={(h, el) => onMark(h.id, el)} /></div>}
+      {panel === 'type' && <div className="rd-set">
+        <label className="rd-set-row"><span>字号</span><Slider aria-label="字号" min="13" max="30" value={typo.size} onChange={e => setTypo(t => ({ ...t, size: Number(e.target.value) }))} /></label>
+        <label className="rd-set-row"><span>行距</span><Slider aria-label="行距" min="1.4" max="2.2" step="0.1" value={typo.lead} onChange={e => setTypo(t => ({ ...t, lead: Number(e.target.value) }))} /></label>
+        <div className="rd-set-row"><span>字体</span><Segmented label="字体" options={FONTS} value={typo.font} onChange={font => setTypo(t => ({ ...t, font }))} /></div>
+        <div className="rd-set-row"><span>纸色</span><Segmented label="纸色" options={PAPER_CHOICES} value={typo.paper} onChange={paper => setTypo(t => ({ ...t, paper }))} /></div>
+        <div className="rd-set-row"><span>版式</span><Segmented label="版式" options={SPREADS} value={single ? 'single' : 'spread'} onChange={value => setSingle(value === 'single')} /></div>
+        <p className="rd-set-note">{engine} · 窄区自动单页</p></div>}
     </div></aside>}
     {annotations.state?.warning && <p role="status" className="rd-highlight-warning">{annotations.state.warning}</p>}
     <MarginNotes root={root} book={bookEl} view={view} list={annotations.state?.highlights ?? []} hidden={turning || !!panel || !!annotations.lens} onOpen={(h, el) => onMark(h.id, el)} />

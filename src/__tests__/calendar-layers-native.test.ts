@@ -82,6 +82,15 @@ test('C8 reading sessions are durable, idempotent, read-only and split at local 
   reader.begin(request); reader.begin(request)
   reader.end({ id: request.id, endedAt: end }); reader.end({ id: request.id, endedAt: end })
   assert.throws(() => reader.begin({ ...request, bookId: 'other' }), /conflict/)
+  const pending = f.registry.reserve(join(f.root, 'pending.md'))
+  const duplicate = f.add('duplicate.md', `---\nready_id: ${object.id}\n---\n`)
+  assert.equal(duplicate.identity_state, 'conflict')
+  for (const objectId of ['unknown-book', pending.id, duplicate.id]) {
+    assert.throws(() => reader.begin({ ...request, id: `rejected-${objectId}`, objectId }), /Reading object unavailable/)
+  }
+  const otherRoot = join(f.root, 'other-vault'); mkdirSync(otherRoot)
+  assert.throws(() => new LibrarySessions(otherRoot, f.registry).begin({ ...request, id: 'outside-vault' }), /Reading object unavailable/)
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS count FROM library_reading_sessions').get<{ count: number }>()!.count, 1)
   new FileReadingSessionRepository(f.db).recordSession({ path: object.current_path!, workspaceRoot: f.root, source: 'document_mode', startedAt: start, endedAt: end, activeMs: end - start })
   const entries = f.service.query(range)
   assert.equal(entries.length, 4)

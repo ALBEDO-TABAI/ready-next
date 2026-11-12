@@ -141,7 +141,8 @@ test('generated image preview keeps the chat visible and exposes only three icon
   }))
 
   assert.match(html, /class="attachment-preview-overlay"/)
-  assert.match(html, /class="attachment-preview-panel ready-app-liquid-panel"/)
+  // B13: the preview panel is a float (the .rn-float material carries its blur, W1 DL4).
+  assert.match(html, /class="attachment-preview-panel ready-app-liquid-panel rn-float"/)
   assert.equal((html.match(/class="attachment-preview-action"/g) || []).length, 3)
   assert.doesNotMatch(html, />ready-image\.png</)
   assert.doesNotMatch(html, />在 Finder 中显示</)
@@ -156,7 +157,7 @@ test('generated image card uses a quiet green dot for the current image', () => 
   }))
 
   assert.match(html, /aria-label="当前图片"/)
-  assert.match(html, /background:var\(--color-green\)/)
+  assert.match(html, /background:var\(--rn-ok\)/)
   assert.doesNotMatch(html, /已激活/)
 })
 

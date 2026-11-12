@@ -53,8 +53,9 @@ test('resolveSessionDotStatus: streaming overrides phase to working', () => {
 test('SESSION_DOT_COLOR maps every status to a distinct color', () => {
   const colors = Object.values(SESSION_DOT_COLOR)
   assert.equal(new Set(colors).size, colors.length)
-  assert.equal(SESSION_DOT_COLOR.active, '#22c55e')
-  assert.equal(SESSION_DOT_COLOR.working, '#f97316')
-  assert.equal(SESSION_DOT_COLOR.error, '#ef4444')
-  assert.equal(SESSION_DOT_COLOR.off, '#d1d5db')
+  // W1 tokens: ok / the signal colour for running (DL5) / bad / a quiet ink for history.
+  assert.equal(SESSION_DOT_COLOR.active, 'var(--rn-ok)')
+  assert.equal(SESSION_DOT_COLOR.working, 'var(--rn-accent)')
+  assert.equal(SESSION_DOT_COLOR.error, 'var(--rn-bad)')
+  assert.equal(SESSION_DOT_COLOR.off, 'var(--rn-ink-4)')
 })

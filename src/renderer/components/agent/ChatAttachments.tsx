@@ -79,7 +79,7 @@ export default function ChatAttachments({
                 <span
                   style={{
                     fontSize: 10,
-                    color: 'var(--text-body)',
+                    color: 'var(--rn-ink)',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
@@ -96,8 +96,8 @@ export default function ChatAttachments({
                       lineHeight: 1.1,
                       padding: '2px 6px',
                       borderRadius: 999,
-                      background: 'rgba(0,0,0,0.05)',
-                      color: 'var(--text-light)',
+                      background: 'var(--rn-fill)',
+                      color: 'var(--rn-ink-3)',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap',
@@ -110,15 +110,17 @@ export default function ChatAttachments({
               </span>
             </button>
             <button
+              type="button"
               onClick={(e) => {
                 e.stopPropagation()
                 onRemove(att.id)
               }}
-              className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full flex items-center justify-center hover:bg-black/10"
-              style={{ background: 'color-mix(in srgb, var(--bg-panel) 24%, transparent)', border: '1px solid var(--border-default)' }}
+              className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full flex items-center justify-center"
+              style={{ background: 'color-mix(in srgb, var(--rn-stage) 24%, transparent)', border: '1px solid var(--rn-hair-2)' }}
               title="移除"
+              aria-label="移除"
             >
-              <X style={{ width: 8, height: 8 }} className="text-[var(--text-gray)]" strokeWidth={3} />
+              <X style={{ width: 8, height: 8 }} className="text-[var(--rn-ink-3)]" strokeWidth={3} />
             </button>
           </div>
         )

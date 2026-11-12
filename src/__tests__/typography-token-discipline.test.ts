@@ -58,8 +58,9 @@ test('typography roles are global utilities with a mono label signature', async 
   // visible role). It was previously sans, which erased the signature.
   const labelBlock = css.match(/\.t-label\s*\{[^}]*\}/)
   assert.ok(labelBlock, '.t-label rule must exist')
-  assert.match(labelBlock[0], /var\(--font-mono\)/)
-  assert.match(labelBlock[0], /var\(--tracking-label\)/)
+  // B13: the shell's roles read the --rn-* font tokens directly (W1 DL7).
+  assert.match(labelBlock[0], /var\(--rn-font-mono\)/)
+  assert.match(labelBlock[0], /letter-spacing:\s*0\.08em/)
   assert.match(labelBlock[0], /text-transform:\s*uppercase/)
 
   // Data / numeral roles are tabular numeric so counters and timestamps don't jitter.

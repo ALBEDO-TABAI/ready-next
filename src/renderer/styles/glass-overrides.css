@@ -1,17 +1,10 @@
 /* ═══ glass-overrides.css — 组件级玻璃覆写 + 实心玻璃变体（solid-green/solid-blue 背板）；由 index.css 序保拆分（2026-07-06），在 index.css 中按原段落顺序 @import，勿改导入次序。 ═══ */
-/* Specific component overrides */
-.browser-address-bar,
-.design-toolbar,
+/* Toolbars and tab bars on the glass have no rule under them (W1 DL1). */
 .editor-toolbar,
-.playback-controls {
-  border-bottom-color: var(--border-horizontal) !important;
-}
-
-/* Tab bars - remove bottom border */
 [class*="tab-bar"],
 [class*="tabs-bar"],
 [style*="borderBottom"] {
-  border-bottom-color: var(--border-horizontal) !important;
+  border-bottom-color: transparent !important;
 }
 
 .workbench-mode-root [style*="border-bottom"],

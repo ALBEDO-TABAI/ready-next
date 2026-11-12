@@ -8,6 +8,7 @@ import type { CanvasSurfaceProps } from '../../../components/canvas/surface/type
 import { DocumentCard, LinkCard, TextCard, type CardEditorHost, type DocumentPreviewSource, type LinkPreviewSource } from '../../../components/canvas/cards'
 import { CardMarkdown } from '../../../components/canvas/cards/CardMarkdown'
 import { SaveToPicker } from '../../document/page-ui/SaveToPicker'
+import { Button } from '../../../components/ui'
 
 export interface CanvasCompositionSurfaceProps extends Omit<CanvasSurfaceProps, 'renderCard' | 'renderTextEditor' | 'onAddToDocument'> {
   calendarSnapshot?: CalendarSnapshot
@@ -75,16 +76,16 @@ export function CanvasCompositionSurface(props: CanvasCompositionSurfaceProps) {
         if (node.type === 'link') return <LinkCard node={node} source={props.linkPreview} />
         if (node.ready.kind === 'draft' && node.ready.draftId) return <article data-canvas-ui>
           <strong>{node.type === 'text' ? node.text : '草稿'}</strong>
-          <button onClick={() => void props.openDraft(node.ready.draftId!).catch(e => setError(String(e)))}>打开草稿</button>
-          <button onClick={() => void showSave(node.ready.draftId!).catch(e => setError(String(e)))}>保存到…</button>
+          <Button size="sm" variant="ghost" onClick={() => void props.openDraft(node.ready.draftId!).catch(e => setError(String(e)))}>打开草稿</Button>
+          <Button size="sm" onClick={() => void showSave(node.ready.draftId!).catch(e => setError(String(e)))}>保存到…</Button>
         </article>
         return undefined
       }} />
     {error && <p role="alert">{error}</p>}
     {saving && (saving.finalize ? <section aria-label="继续保存" data-canvas-ui>
       <p>{saving.finalize.publishedReceipt ? '文档已保存，画板待完成' : '保存尚未完成'}</p>
-      <button onClick={() => void finish(saving, saving.finalize!.request).then(result => { if (result.ok) setSaving(null) }).catch(e => setError(String(e)))}>重试</button>
-      <button onClick={() => setSaving(null)}>关闭</button>
+      <Button size="sm" onClick={() => void finish(saving, saving.finalize!.request).then(result => { if (result.ok) setSaving(null) }).catch(e => setError(String(e)))}>重试</Button>
+      <Button size="sm" variant="ghost" onClick={() => setSaving(null)}>关闭</Button>
     </section> : <SaveToPicker trees={props.trees} initialTitle={saving.title}
       sourceCanvas={{ title: props.canvas.ready.title || '画板', path: props.path }} onCancel={() => setSaving(null)}
       onConfirm={selection => {

@@ -1,16 +1,21 @@
 @layer ready-next.library {
-  .rn-library .source-find { position: absolute; inset: 24px; z-index: 40; padding: 24px; overflow: auto; border-radius: 18px; color: var(--rn-ink); background: var(--rn-stage); box-shadow: 0 12px 64px #0003; }
+  /* 找书 is a float on the shelf (W1 DL4): the float material from .rn-float, W1 fields and buttons inside. */
+  .rn-library .source-find { position: absolute; inset: 24px; z-index: 40; padding: 20px 24px 24px; overflow: auto; color: var(--rn-ink); }
   .rn-library .source-find header, .rn-library .source-find form, .rn-library .source-lane article, .rn-library .source-job > div { display: flex; align-items: center; gap: 12px; justify-content: space-between; }
-  .rn-library .source-find input { flex: 1; min-width: 0; }
+  .rn-library .source-find header { margin-bottom: 12px; }
+  .rn-library .source-find h2 { font: 600 var(--rn-fs-lg)/1.3 var(--rn-font-ui); }
+  .rn-library .source-find form > .rn-field { flex: 1; min-width: 0; }
   .rn-library .source-lanes { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 24px; margin-top: 24px; }
+  .rn-library .source-lane h3 { font: 500 var(--rn-fs-sm)/1.3 var(--rn-font-ui); color: var(--rn-ink-2); }
   .rn-library .source-lane article { padding: 12px 0; border-bottom: 1px solid var(--rn-hair); }
-  .rn-library .source-lane p { margin: 4px 0; font-size: 12px; }
+  .rn-library .source-lane p { margin: 4px 0; font-size: var(--rn-fs-sm); color: var(--rn-ink-2); }
+  .rn-library .source-category { display: inline-flex; align-items: center; gap: 8px; }
   .rn-library .source-jobs { position: absolute; bottom: 70px; left: 24px; right: 24px; z-index: 41; max-height: 180px; overflow: auto; flex-shrink: 0; background: var(--rn-stage); }
   .rn-library .source-jobs:empty { display: none; }
   .rn-library:has(.source-job) .source-find { bottom: 260px; }
-  .rn-library .source-job { padding: 8px 20px; border-top: 1px solid var(--rn-hair); font-size: 12px; }
+  .rn-library .source-job { padding: 8px 20px; border-top: 1px solid var(--rn-hair); font-size: var(--rn-fs-sm); }
   .rn-library .source-job strong { overflow: hidden; text-overflow: ellipsis; max-width: 40%; white-space: nowrap; }
   .rn-library .source-job img { max-width: 160px; max-height: 70px; vertical-align: middle; }
-  .rn-library .source-job button, .rn-library .source-find button { border: 1px solid var(--rn-hair); border-radius: 7px; padding: 6px 10px; margin: 4px; cursor: pointer; }
-  .rn-library .source-job input, .rn-library .source-find input, .rn-library .source-find select { border: 1px solid var(--rn-hair); border-radius: 6px; padding: 6px 8px; background: transparent; color: inherit; }
+  .rn-library .source-job form { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+  .rn-library .source-job > .rn-btn { margin: 4px 4px 0 0; }
 }

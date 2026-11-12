@@ -23,6 +23,7 @@ import {
 } from '../helpers/badges'
 import type { TaskCardRun } from '../../task-card-from-projection'
 import { AgentStatusDot } from '../../../ui/dot-matrix/AgentStatusDot'
+import { IconButton } from '../../../ui'
 import { TaskCardFooter } from './TaskCardFooter'
 import {
   buildBrowserConfirmationCard,
@@ -39,12 +40,12 @@ import {
 export const TASK_ACTION_BUTTON_STYLE: React.CSSProperties = {
   padding: '3px 8px',
   borderRadius: 8,
-  border: '1px solid var(--border-default)',
+  border: '1px solid var(--rn-hair-2)',
   background: 'transparent',
-  fontSize: 'var(--text-xs)',
-  lineHeight: 'var(--leading-snug)',
-  fontWeight: 'var(--fw-medium)',
-  color: 'var(--text-body)',
+  fontSize: 'var(--rn-fs-2xs)',
+  lineHeight: 1.3,
+  fontWeight: 500,
+  color: 'var(--rn-ink)',
   cursor: 'pointer'
 }
 
@@ -62,7 +63,7 @@ export function DynamicDeliveryTaskSummary({ run }: { run: TaskCardRun }) {
     <div
       data-ready-dynamic-delivery-summary="true"
       className="ready-task-content-line t-meta"
-      style={{ paddingBottom: 7, color: 'var(--text-light)' }}
+      style={{ paddingBottom: 7, color: 'var(--rn-ink-3)' }}
     >
       {run.deliveryState.packages.length > 0
         ? `协作者 ${run.deliveryState.packages.map((item) => item.binding.effectiveAgentId).join('、')}`
@@ -323,7 +324,7 @@ export function TaskCard({
           if (suppressHeaderClickRef.current) return
           onToggleExpanded?.()
         }}
-        className="w-full max-w-full min-w-0 box-border overflow-hidden hover:bg-[color-mix(in_srgb,var(--surface-card-bg)_44%,transparent)] transition-colors duration-160"
+        className="w-full max-w-full min-w-0 box-border overflow-hidden hover:bg-[var(--rn-fill)] transition-colors duration-160"
         style={{ ...TASK_CARD_HEADER_STYLE, paddingRight: dismissible ? 26 : 0 }}
       >
         <span style={{ flexShrink: 0, display: 'flex', alignItems: 'center' }}>
@@ -333,8 +334,8 @@ export function TaskCard({
           className="t-ui"
           data-typography-role="ui"
           style={{
-            color: 'var(--text-body)',
-            fontWeight: 'var(--fw-medium)',
+            color: 'var(--rn-ink)',
+            fontWeight: 500,
             whiteSpace: 'nowrap',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
@@ -349,7 +350,7 @@ export function TaskCard({
             className="t-data"
             data-ready-task-terminal-duration="true"
             data-typography-role="data"
-            style={{ color: 'var(--text-body)', flexShrink: 0 }}
+            style={{ color: 'var(--rn-ink)', flexShrink: 0 }}
           >
             用时 {terminalDuration}
           </span>
@@ -359,7 +360,7 @@ export function TaskCard({
             className="t-meta"
             data-typography-role="meta"
             style={{
-              color: 'var(--text-gray)',
+              color: 'var(--rn-ink-3)',
               minWidth: 0,
               flex: 1,
               overflow: 'hidden',
@@ -372,11 +373,11 @@ export function TaskCard({
         ) : (
           <span style={{ flex: 1 }} />
         )}
-        <span className="t-meta" data-typography-role="meta" style={{ color: 'var(--text-light)', flexShrink: 0 }}>
+        <span className="t-meta" data-typography-role="meta" style={{ color: 'var(--rn-ink-3)', flexShrink: 0 }}>
           {vm.statusLabel}
         </span>
         {toolCount > 0 ? (
-          <span className="t-data" data-typography-role="data" style={{ color: 'var(--text-light)', flexShrink: 0 }}>
+          <span className="t-data" data-typography-role="data" style={{ color: 'var(--rn-ink-3)', flexShrink: 0 }}>
             {toolCount} 个工具
           </span>
         ) : null}
@@ -384,8 +385,9 @@ export function TaskCard({
       </button>
 
       {dismissible ? (
-        <button
-          type="button"
+        <IconButton
+          size="sm"
+          icon={<X />}
           data-ready-task-dismiss="true"
           aria-label="清除任务卡"
           title="清除任务卡（不会停止任务）"
@@ -393,24 +395,8 @@ export function TaskCard({
             event.stopPropagation()
             onDismiss?.()
           }}
-          style={{
-            position: 'absolute',
-            top: 6,
-            right: 7,
-            width: 24,
-            height: 24,
-            padding: 0,
-            border: 'none',
-            borderRadius: 8,
-            background: 'transparent',
-            color: 'var(--text-light)',
-            cursor: 'pointer',
-            display: 'grid',
-            placeItems: 'center', zIndex: 2,
-          }}
-        >
-          <X size={13} strokeWidth={2} />
-        </button>
+          style={{ position: 'absolute', top: 6, right: 7, zIndex: 2 }}
+        />
       ) : null}
 
       <DynamicDeliveryTaskSummary run={run} />
@@ -437,7 +423,7 @@ export function TaskCard({
               className="t-meta"
               data-typography-role="meta"
               style={{
-                color: 'var(--text-light)',
+                color: 'var(--rn-ink-3)',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
@@ -447,7 +433,7 @@ export function TaskCard({
               {progressLabel}
             </span>
             {progressValue != null && !progressLabelAlreadyHasPercent && (
-              <span className="t-data" data-typography-role="data" style={{ color: 'var(--text-light)', flexShrink: 0 }}>
+              <span className="t-data" data-typography-role="data" style={{ color: 'var(--rn-ink-3)', flexShrink: 0 }}>
                 {progressValue}%
               </span>
             )}
@@ -459,7 +445,7 @@ export function TaskCard({
                 borderRadius: 999,
                 marginTop: 4,
                 overflow: 'hidden',
-                background: 'color-mix(in srgb, var(--text-light) 14%, transparent)',
+                background: 'var(--rn-fill-2)',
               }}
             >
               <div
@@ -467,13 +453,14 @@ export function TaskCard({
                   width: `${progressValue}%`,
                   height: '100%',
                   borderRadius: 999,
-                  background: 'var(--color-ready-orange)',
+                  // DL5: the signal colour marks work that is running; a finished bar is ink.
+                  background: hasTerminalTaskStatus ? 'var(--rn-ink-3)' : 'var(--rn-accent)',
                 }}
               />
             </div>
           )}
           {progressLastError && expanded && (
-            <div className="t-meta" data-typography-role="meta" style={{ color: 'var(--text-light)', marginTop: 4 }}>
+            <div className="t-meta" data-typography-role="meta" style={{ color: 'var(--rn-ink-3)', marginTop: 4 }}>
               当前状态：{progressLastError}
             </div>
           )}
@@ -489,7 +476,7 @@ export function TaskCard({
             title={compactPrimaryArtifact.path || compactPrimaryArtifact.label}
             style={{
               ...TASK_ACTION_BUTTON_STYLE,
-              color: 'var(--text-gray)',
+              color: 'var(--rn-ink-3)',
             }}
           >
             {compactPrimaryArtifact.kind === 'collection_output' ? '打开采集结果' : compactPrimaryArtifact.label}
@@ -503,7 +490,7 @@ export function TaskCard({
           style={{
             gap: 10,
             padding: '8px 0 10px',
-            borderTop: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
+            borderTop: '1px solid var(--rn-hair)',
             maxHeight: '60vh',
             overflowY: 'auto',
           }}
@@ -516,13 +503,13 @@ export function TaskCard({
                   style={{
                     padding: '2px 7px',
                     borderRadius: 999,
-                    border: '1px solid var(--border-default)',
-                    fontSize: 'var(--text-xs)',
-                    lineHeight: 'var(--leading-tight)',
-                    fontWeight: 'var(--fw-medium)',
-                    letterSpacing: 'var(--tracking-label)',
-                    color: 'var(--text-light)',
-                    background: 'color-mix(in srgb, var(--surface-card-bg) 22%, transparent)',
+                    border: '1px solid var(--rn-hair-2)',
+                    fontSize: 'var(--rn-fs-2xs)',
+                    lineHeight: 1.2,
+                    fontWeight: 500,
+                    letterSpacing: '0.08em',
+                    color: 'var(--rn-ink-3)',
+                    background: 'transparent',
                     fontVariantNumeric: 'tabular-nums',
                   }}
                 >
@@ -543,7 +530,7 @@ export function TaskCard({
           ) : null}
 
           {expanded && vm.currentStep && !hasTerminalTaskStatus ? (
-            <div className="ready-task-content-line t-meta" data-typography-role="meta" style={{ color: 'var(--text-light)' }}>
+            <div className="ready-task-content-line t-meta" data-typography-role="meta" style={{ color: 'var(--rn-ink-3)' }}>
               当前步骤：{vm.currentStep.title}
             </div>
           ) : null}
@@ -564,7 +551,7 @@ export function TaskCard({
                   >
                     {formatTaskStepDisplayTitle(step.title, run.progress)}
                     {step.detail ? (
-                      <span style={{ color: 'var(--text-light)' }}>
+                      <span style={{ color: 'var(--rn-ink-3)' }}>
                         {' · '}
                         {formatTaskUserFacingText(step.detail)}
                       </span>
@@ -581,12 +568,12 @@ export function TaskCard({
                     marginLeft: 20,
                     padding: '2px 8px',
                     borderRadius: 999,
-                    border: '1px dashed var(--border-default)',
+                    border: '1px dashed var(--rn-hair-2)',
                     background: 'transparent',
-                    fontSize: 'var(--text-xs)',
-                    lineHeight: 'var(--leading-snug)',
-                    fontWeight: 'var(--fw-medium)',
-                    color: 'var(--text-light)',
+                    fontSize: 'var(--rn-fs-2xs)',
+                    lineHeight: 1.3,
+                    fontWeight: 500,
+                    color: 'var(--rn-ink-3)',
                     cursor: 'pointer',
                   }}
                 >
@@ -602,12 +589,12 @@ export function TaskCard({
                     marginLeft: 20,
                     padding: '2px 8px',
                     borderRadius: 999,
-                    border: '1px dashed var(--border-default)',
+                    border: '1px dashed var(--rn-hair-2)',
                     background: 'transparent',
-                    fontSize: 'var(--text-xs)',
-                    lineHeight: 'var(--leading-snug)',
-                    fontWeight: 'var(--fw-medium)',
-                    color: 'var(--text-light)',
+                    fontSize: 'var(--rn-fs-2xs)',
+                    lineHeight: 1.3,
+                    fontWeight: 500,
+                    color: 'var(--rn-ink-3)',
                     cursor: 'pointer',
                   }}
                 >
@@ -629,12 +616,12 @@ export function TaskCard({
                   style={{
                     padding: '3px 7px',
                     borderRadius: 8,
-                    border: '1px solid var(--border-default)',
+                    border: '1px solid var(--rn-hair-2)',
                     background: 'transparent',
-                    fontSize: 'var(--text-xs)',
-                    lineHeight: 'var(--leading-snug)',
-                    fontWeight: 'var(--fw-medium)',
-                    color: 'var(--text-gray)',
+                    fontSize: 'var(--rn-fs-2xs)',
+                    lineHeight: 1.3,
+                    fontWeight: 500,
+                    color: 'var(--rn-ink-3)',
                     cursor: artifact.path ? 'pointer' : 'default'
                   }}
                   title={artifact.path || artifact.label}
@@ -654,15 +641,15 @@ export function TaskCard({
           data-ready-browser-confirmation-card={confirmationCard.kind}
           data-ready-browser-confirmation-request-id={confirmationCard.requestId}
           className="mx-2.5 mb-2 rounded-[10px] border p-2.5"
-          style={{ borderColor: 'var(--border-default)', background: 'var(--bg-subtle)' }}
+          style={{ borderColor: 'var(--rn-hair)', background: 'transparent' }}
         >
-          <div className="text-[12px] font-semibold" style={{ color: 'var(--text-strong)' }}>
+          <div className="text-[12px] font-semibold" style={{ color: 'var(--rn-ink)' }}>
             {confirmationCard.title}
           </div>
-          <div className="mt-1 text-[11px]" style={{ color: 'var(--text-body)' }}>
+          <div className="mt-1 text-[11px]" style={{ color: 'var(--rn-ink)' }}>
             {confirmationCard.description}
           </div>
-          <div className="mt-1 text-[10.5px]" style={{ color: 'var(--text-light)' }}>
+          <div className="mt-1 text-[10.5px]" style={{ color: 'var(--rn-ink-3)' }}>
             {confirmationCard.detail}
           </div>
         </div>
@@ -735,11 +722,11 @@ export function ToolTraceCard({
       <button
         type="button"
         onClick={onToggleExpanded}
-        className="hover:bg-[color-mix(in_srgb,var(--surface-card-bg)_44%,transparent)] transition-colors duration-160"
+        className="hover:bg-[var(--rn-fill)] transition-colors duration-160"
         style={CAPSULE_HEADER_STYLE}
       >
         <Wrench
-          style={{ width: 12, height: 12, color: 'var(--text-light)', flexShrink: 0 }}
+          style={{ width: 12, height: 12, color: 'var(--rn-ink-3)', flexShrink: 0 }}
           strokeWidth={2}
         />
         {!pending && terminalDuration ? (
@@ -747,7 +734,7 @@ export function ToolTraceCard({
             <span
               className="t-ui"
               data-typography-role="ui"
-              style={{ color: 'var(--text-body)', whiteSpace: 'nowrap', minWidth: 0 }}
+              style={{ color: 'var(--rn-ink)', whiteSpace: 'nowrap', minWidth: 0 }}
             >
               本轮用时
             </span>
@@ -755,7 +742,7 @@ export function ToolTraceCard({
               className="t-data"
               data-ready-tool-terminal-duration="true"
               data-typography-role="data"
-              style={{ color: 'var(--text-body)', flex: 1, minWidth: 0 }}
+              style={{ color: 'var(--rn-ink)', flex: 1, minWidth: 0 }}
             >
               {terminalDuration}
             </span>
@@ -765,7 +752,7 @@ export function ToolTraceCard({
             className="t-meta"
             data-typography-role="meta"
             style={{
-              color: 'var(--text-gray)',
+              color: 'var(--rn-ink-3)',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
@@ -779,12 +766,12 @@ export function ToolTraceCard({
           <span
             className="t-ui"
             data-typography-role="ui"
-            style={{ color: 'var(--text-body)', whiteSpace: 'nowrap', minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}
+            style={{ color: 'var(--rn-ink)', whiteSpace: 'nowrap', minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}
           >
             {pending ? '正在执行' : '执行过程'}
           </span>
         )}
-        <span className="t-data" data-typography-role="data" style={{ color: 'var(--text-light)', flexShrink: 0 }}>
+        <span className="t-data" data-typography-role="data" style={{ color: 'var(--rn-ink-3)', flexShrink: 0 }}>
           {items.length} 个工具
         </span>
         <CapsuleChevron expanded={Boolean(expanded)} />
@@ -805,7 +792,7 @@ export function ToolTraceCard({
         <div
           style={{
             padding: '8px 0 10px',
-            borderTop: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
+            borderTop: '1px solid var(--rn-hair)',
           }}
         >
           <ToolTimeline items={items} />

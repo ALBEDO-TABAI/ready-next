@@ -6,7 +6,7 @@ import { useWorkspace } from '../../stores/useWorkspace'
 import { parseWorkspaceDragPayloads } from '../layout/fileTreeDragPayload'
 import { getChatMenuHorizontalFrame, subscribeChatMenuLayout } from './chatMenuLayout'
 import { FloatPanel } from '../ui/float/FloatPanel'
-import { chatMenuItemStyle, chatMenuSurfaceStyle } from './chatMenuStyles'
+import { CHAT_MENU_ITEM_CLASS, chatMenuItemStyle, chatMenuSurfaceStyle } from './chatMenuStyles'
 
 const folderName = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() || path
 
@@ -125,19 +125,20 @@ export function ProjectSelector() {
     }} contentStyle={{ padding: 8, maxHeight: frame.maxHeight, overflowY: 'auto', overflowX: 'hidden' }}>
       <label className="ready-chat-project-search"><Search size={15} /><input autoFocus aria-label="搜索项目"
         placeholder="搜索项目" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
-      {paths.map((candidate) => <button key={candidate} disabled={busy} title={candidate}
-        className="ready-floating-menu-item" style={{ ...chatMenuItemStyle, display: 'flex', alignItems: 'center', width: '100%', gap: 8, textAlign: 'left' }} onClick={() => void perform(() => save(candidate))}>
+      {paths.map((candidate) => <button key={candidate} type="button" disabled={busy} title={candidate}
+        className={CHAT_MENU_ITEM_CLASS}
+        style={{ ...chatMenuItemStyle, display: 'flex', alignItems: 'center', width: '100%', gap: 8, textAlign: 'left' }} onClick={() => void perform(() => save(candidate))}>
         <Folder size={16} style={{ flexShrink: 0 }} /><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, flex: 1, textAlign: 'left' }}>{folderName(candidate)}</span>
         {path === candidate && <Check size={16} style={{ flexShrink: 0 }} />}
       </button>)}
-      {paths.length === 0 && <div style={{ padding: 10, color: 'var(--text-gray)', fontSize: 12 }}>没有匹配的项目文件夹</div>}
-      <div style={{ borderTop: '1px solid var(--border-default)', marginTop: 6, paddingTop: 6 }}>
-        <button disabled={busy} className="ready-floating-menu-item" style={{ ...chatMenuItemStyle, display: 'flex', alignItems: 'center', width: '100%', gap: 8, textAlign: 'left' }} onClick={() => void perform(async () => {
+      {paths.length === 0 && <div style={{ padding: 10, color: 'var(--rn-ink-3)', fontSize: 12 }}>没有匹配的项目文件夹</div>}
+      <div style={{ borderTop: '1px solid var(--rn-hair)', marginTop: 6, paddingTop: 6 }}>
+        <button type="button" disabled={busy} className={CHAT_MENU_ITEM_CLASS} style={{ ...chatMenuItemStyle, display: 'flex', alignItems: 'center', width: '100%', gap: 8, textAlign: 'left' }} onClick={() => void perform(async () => {
           const result = await window.electronAPI.document.openFolder({ title: '选择项目文件夹' })
           if (result.success && result.path) await save(result.path)
           else if (result.error && result.error !== 'cancelled') throw new Error(result.error)
         })}><FolderOpen size={16} />选择其他文件夹…</button>
-        {path && <button disabled={busy} className="ready-floating-menu-item" style={{ ...chatMenuItemStyle, display: 'flex', alignItems: 'center', width: '100%', gap: 8, textAlign: 'left' }} onClick={() => void perform(() => save(null))}><X size={16} />不在项目中工作</button>}
+        {path && <button type="button" disabled={busy} className={CHAT_MENU_ITEM_CLASS} style={{ ...chatMenuItemStyle, display: 'flex', alignItems: 'center', width: '100%', gap: 8, textAlign: 'left' }} onClick={() => void perform(() => save(null))}><X size={16} />不在项目中工作</button>}
       </div>
     </FloatPanel>, document.body)}
   </div>

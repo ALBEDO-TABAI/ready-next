@@ -1,18 +1,18 @@
 {
   "directories": {
     ".": {
-      "color": 67,
+      "color": 48,
       "backdropFilter": 0,
       "fontFace": 0
     },
     "components/agent": {
-      "color": 16,
-      "backdropFilter": 2,
+      "color": 0,
+      "backdropFilter": 0,
       "fontFace": 0
     },
     "components/agent/chat-panel": {
-      "color": 2,
-      "backdropFilter": 2,
+      "color": 0,
+      "backdropFilter": 0,
       "fontFace": 0
     },
     "components/agent/chat-panel/attachments-helpers": {
@@ -31,7 +31,7 @@
       "fontFace": 0
     },
     "components/agent/chat-panel/helpers": {
-      "color": 4,
+      "color": 0,
       "backdropFilter": 0,
       "fontFace": 0
     },
@@ -61,12 +61,12 @@
       "fontFace": 0
     },
     "components/agent/chat-panel/session-tabs": {
-      "color": 8,
+      "color": 0,
       "backdropFilter": 0,
       "fontFace": 0
     },
     "components/agent/chat-panel/task": {
-      "color": 1,
+      "color": 0,
       "backdropFilter": 0,
       "fontFace": 0
     },
@@ -101,7 +101,7 @@
       "fontFace": 0
     },
     "components/canvas/surface": {
-      "color": 2,
+      "color": 0,
       "backdropFilter": 0,
       "fontFace": 0
     },
@@ -126,12 +126,12 @@
       "fontFace": 0
     },
     "components/layout": {
-      "color": 24,
-      "backdropFilter": 2,
+      "color": 4,
+      "backdropFilter": 0,
       "fontFace": 0
     },
     "components/layout/file-tree": {
-      "color": 33,
+      "color": 0,
       "backdropFilter": 0,
       "fontFace": 0
     },
@@ -146,7 +146,7 @@
       "fontFace": 0
     },
     "components/ready": {
-      "color": 19,
+      "color": 0,
       "backdropFilter": 0,
       "fontFace": 0
     },
@@ -166,12 +166,12 @@
       "fontFace": 0
     },
     "components/startup": {
-      "color": 2,
+      "color": 0,
       "backdropFilter": 0,
       "fontFace": 0
     },
     "components/tabs": {
-      "color": 6,
+      "color": 0,
       "backdropFilter": 0,
       "fontFace": 0
     },
@@ -181,7 +181,7 @@
       "fontFace": 0
     },
     "components/ui": {
-      "color": 11,
+      "color": 0,
       "backdropFilter": 0,
       "fontFace": 0
     },
@@ -261,7 +261,7 @@
       "fontFace": 0
     },
     "modules/canvas/interaction": {
-      "color": 1,
+      "color": 0,
       "backdropFilter": 0,
       "fontFace": 0
     },
@@ -336,17 +336,17 @@
       "fontFace": 0
     },
     "modules/library": {
-      "color": 54,
-      "backdropFilter": 3,
+      "color": 0,
+      "backdropFilter": 0,
       "fontFace": 0
     },
     "modules/library/find": {
-      "color": 1,
+      "color": 0,
       "backdropFilter": 0,
       "fontFace": 0
     },
     "modules/library/reader": {
-      "color": 61,
+      "color": 0,
       "backdropFilter": 0,
       "fontFace": 1
     },
@@ -371,7 +371,7 @@
       "fontFace": 0
     },
     "pages": {
-      "color": 16,
+      "color": 0,
       "backdropFilter": 0,
       "fontFace": 0
     },
@@ -396,13 +396,13 @@
       "fontFace": 0
     },
     "stores": {
-      "color": 7,
+      "color": 0,
       "backdropFilter": 0,
       "fontFace": 0
     },
     "styles": {
-      "color": 440,
-      "backdropFilter": 29,
+      "color": 295,
+      "backdropFilter": 4,
       "fontFace": 0
     },
     "utils": {
@@ -438,6 +438,10 @@
     {
       "glob": "src/renderer/modules/library/topics.ts",
       "reason": "lookOf 生成书脊布色与配套前景色；布色色板本体在扫描范围外的 src/shared/library-topics.ts。"
+    },
+    {
+      "glob": "src/renderer/modules/library/reader/papers.ts",
+      "reason": "PAPERS 是读者在排版里选的阅读纸色（白纸、米黄、夜间）：书页的纸、页边与墨，印进书页栅格，属于内容数据。"
     },
     {
       "glob": "src/renderer/modules/document/content-palette.css",

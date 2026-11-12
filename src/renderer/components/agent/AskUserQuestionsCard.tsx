@@ -9,15 +9,15 @@
  * Submitted / cancelled / timeout: collapsed summary line; click to expand
  * the full Q/A list. The summary stays in chat history permanently.
  *
- * Tone matches Ready's existing capsule styling (mirrors SkillAskUserPrompt
- * tokens) but adapted for inline placement — no fixed positioning, no z-index
- * boost.
+ * Built from the shared primitives on Ready's design tokens, adapted for inline
+ * placement — no fixed positioning, no z-index boost.
  */
 
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react'
 import { ChevronLeft, ChevronRight, Check, AlertCircle } from 'lucide-react'
 
 import type { AskUserQuestionsCardState } from '../../modules/agent/types'
+import { Button, Chip, IconButton, Textarea } from '../ui'
 import { renderInline } from './chat-panel/markdown'
 
 interface AskUserQuestionsCardProps {
@@ -191,7 +191,7 @@ export function AskUserQuestionsCard({ card, onSubmit, onCancel }: AskUserQuesti
           width: '100%',
           minWidth: 0,
           boxSizing: 'border-box',
-          color: 'var(--text-body)',
+          color: 'var(--rn-ink)',
         }}
         role="group"
         aria-label={`反问卡片 ${card.cardId}`}
@@ -216,10 +216,10 @@ export function AskUserQuestionsCard({ card, onSubmit, onCancel }: AskUserQuesti
           }}
         >
           {card.status === 'submitted'
-            ? <Check size={14} color="var(--color-green, #16a34a)" />
-            : <AlertCircle size={14} color="var(--text-light)" />}
+            ? <Check size={14} color="var(--rn-ok)" />
+            : <AlertCircle size={14} color="var(--rn-ink-3)" />}
           <span style={{ minWidth: 0 }}>{headlineByStatus[card.status]}</span>
-          <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-light)', flexShrink: 0 }}>
+          <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--rn-ink-3)', flexShrink: 0 }}>
             {expandSummary ? '收起' : '展开'}
           </span>
         </button>
@@ -247,8 +247,8 @@ export function AskUserQuestionsCard({ card, onSubmit, onCancel }: AskUserQuesti
                 : '(未作答)'
               return (
                 <li key={q.id} style={{ minWidth: 0, fontSize: 12, lineHeight: 1.5, overflowWrap: 'anywhere' }}>
-                  <div style={{ color: 'var(--text-body)' }}>{renderInline(q.question)}</div>
-                  <div style={{ color: 'var(--text-gray)', fontStyle: answer ? 'normal' : 'italic' }}>→ {rendered}</div>
+                  <div style={{ color: 'var(--rn-ink)' }}>{renderInline(q.question)}</div>
+                  <div style={{ color: 'var(--rn-ink-3)', fontStyle: answer ? 'normal' : 'italic' }}>→ {rendered}</div>
                 </li>
               )
             })}
@@ -263,17 +263,9 @@ export function AskUserQuestionsCard({ card, onSubmit, onCancel }: AskUserQuesti
   const selectedSingle = typeof answers[currentQ.id] === 'string' ? (answers[currentQ.id] as string) : ''
   const freeTextValue = typeof answers[currentQ.id] === 'string' ? (answers[currentQ.id] as string) : ''
 
-  // Shared token palette aligned with task-card / info-card styling
-  // (see ChatPanel.tsx:847-895). The card lives inline in the chat stream so
-  // it adopts the same translucent panel surface and `--border-default`
-  // outline; option chips re-use the same recipe at a lower mix percentage.
-  const surfaceBg = 'color-mix(in srgb, var(--surface-card-bg) 26%, transparent)'
-  const chipBgIdle = 'color-mix(in srgb, var(--surface-card-bg) 22%, transparent)'
-  const chipBgHover = 'color-mix(in srgb, var(--surface-card-bg) 32%, transparent)'
-  const chipBorderIdle = '1px solid var(--border-default)'
-  const chipBgSelected = 'color-mix(in srgb, var(--color-blue) 12%, transparent)'
-  const chipBorderSelected = '1px solid color-mix(in srgb, var(--color-blue) 32%, transparent)'
-
+  // A quiet card on the assistant's glass (W1 DL1/DL2): a fill and a hairline, no paper. Options are the shared
+  // Chip (a chosen option is pressed, in ink), the free answer is the shared Textarea, the pager is IconButton and
+  // the one primary action is the ink Button (DL5: the signal colour is not a button colour).
   return (
     <div
       data-ready-ask-user-card="pending"
@@ -281,18 +273,18 @@ export function AskUserQuestionsCard({ card, onSubmit, onCancel }: AskUserQuesti
         width: '100%',
         minWidth: 0,
         boxSizing: 'border-box',
-        borderRadius: 12,
+        borderRadius: 'var(--rn-r-md)',
         padding: 14,
-        border: '1px solid var(--border-default)',
-        background: surfaceBg,
-        color: 'var(--text-body)',
+        border: '1px solid var(--rn-hair)',
+        background: 'var(--rn-fill)',
+        color: 'var(--rn-ink)',
       }}
       role="dialog"
       aria-live="polite"
       aria-label="Agent 反问卡片"
     >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-        <span style={{ fontSize: 11.5, color: 'var(--text-light)', fontWeight: 500 }}>
+        <span style={{ fontSize: 11.5, color: 'var(--rn-ink-3)', fontWeight: 500 }}>
           Agent 反问 · {safeIndex + 1}/{totalQuestions}
         </span>
         <button
@@ -301,7 +293,7 @@ export function AskUserQuestionsCard({ card, onSubmit, onCancel }: AskUserQuesti
           disabled={isCancelling || isSubmitting}
           style={{
             background: 'transparent',
-            color: 'var(--text-light)',
+            color: 'var(--rn-ink-3)',
             border: 'none',
             fontSize: 11,
             cursor: isCancelling || isSubmitting ? 'not-allowed' : 'pointer',
@@ -311,41 +303,25 @@ export function AskUserQuestionsCard({ card, onSubmit, onCancel }: AskUserQuesti
         </button>
       </div>
 
-      <div style={{ fontSize: 13.5, lineHeight: 1.55, marginBottom: 12, whiteSpace: 'pre-wrap', color: 'var(--text-body)' }}>
+      <div style={{ fontSize: 13.5, lineHeight: 1.55, marginBottom: 12, whiteSpace: 'pre-wrap', color: 'var(--rn-ink)' }}>
         {renderInline(currentQ.question)}
         {currentQ.required === false && (
-          <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--text-light)' }}>（可选）</span>
+          <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--rn-ink-3)' }}>（可选）</span>
         )}
       </div>
 
       {currentQ.kind === 'single_choice' && currentQ.options && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
-          {currentQ.options.map((option) => {
-            const isSelected = selectedSingle === option
-            return (
-              <button
-                key={option}
-                type="button"
-                disabled={isSubmitting}
-                onClick={() => handleSelectOption(currentQ, option)}
-                onMouseEnter={(e) => { if (!isSelected && !isSubmitting) (e.currentTarget.style.background = chipBgHover) }}
-                onMouseLeave={(e) => { if (!isSelected && !isSubmitting) (e.currentTarget.style.background = chipBgIdle) }}
-                style={{
-                  padding: '6px 12px',
-                  borderRadius: 999,
-                  border: isSelected ? chipBorderSelected : chipBorderIdle,
-                  background: isSelected ? chipBgSelected : chipBgIdle,
-                  color: isSelected ? 'var(--color-blue)' : 'var(--text-body)',
-                  fontSize: 12.5,
-                  fontWeight: isSelected ? 600 : 500,
-                  cursor: isSubmitting ? 'not-allowed' : 'pointer',
-                  transition: 'background-color 120ms ease, border-color 120ms ease',
-                }}
-              >
-                {option}
-              </button>
-            )
-          })}
+          {currentQ.options.map((option) => (
+            <Chip
+              key={option}
+              aria-pressed={selectedSingle === option}
+              disabled={isSubmitting}
+              onClick={() => handleSelectOption(currentQ, option)}
+            >
+              {option}
+            </Chip>
+          ))}
         </div>
       )}
 
@@ -354,143 +330,67 @@ export function AskUserQuestionsCard({ card, onSubmit, onCancel }: AskUserQuesti
           {currentQ.options.map((option) => {
             const isSelected = selectedMulti.includes(option)
             return (
-              <button
+              <Chip
                 key={option}
-                type="button"
+                icon={isSelected ? <Check /> : undefined}
+                aria-pressed={isSelected}
                 disabled={isSubmitting}
                 onClick={() => handleSelectOption(currentQ, option)}
-                onMouseEnter={(e) => { if (!isSelected && !isSubmitting) (e.currentTarget.style.background = chipBgHover) }}
-                onMouseLeave={(e) => { if (!isSelected && !isSubmitting) (e.currentTarget.style.background = chipBgIdle) }}
-                style={{
-                  padding: '6px 12px',
-                  borderRadius: 999,
-                  border: isSelected ? chipBorderSelected : chipBorderIdle,
-                  background: isSelected ? chipBgSelected : chipBgIdle,
-                  color: isSelected ? 'var(--color-blue)' : 'var(--text-body)',
-                  fontSize: 12.5,
-                  fontWeight: isSelected ? 600 : 500,
-                  cursor: isSubmitting ? 'not-allowed' : 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  transition: 'background-color 120ms ease, border-color 120ms ease',
-                }}
               >
-                {isSelected && <Check size={12} />}
                 {option}
-              </button>
+              </Chip>
             )
           })}
         </div>
       )}
 
       {currentQ.kind === 'free_text' && (
-        <textarea
+        <Textarea
           value={freeTextValue}
           onChange={(e) => handleFreeTextChange(currentQ, e.target.value)}
           placeholder={currentQ.placeholder || '请输入你的回答'}
           rows={3}
           disabled={isSubmitting}
-          style={{
-            width: '100%',
-            boxSizing: 'border-box',
-            resize: 'vertical',
-            padding: '8px 10px',
-            borderRadius: 8,
-            border: '1px solid var(--input-slot-border)',
-            background: 'var(--input-slot-bg)',
-            color: 'var(--text-body)',
-            fontSize: 13,
-            lineHeight: 1.5,
-            marginBottom: 12,
-            outline: 'none',
-            boxShadow: 'var(--input-slot-shadow)',
-          }}
+          style={{ display: 'block', width: '100%', boxSizing: 'border-box', marginBottom: 12 }}
         />
       )}
 
       {error && (
-        <div style={{ color: 'var(--color-red, #ef4444)', fontSize: 12, marginBottom: 8 }}>{error}</div>
+        <div style={{ color: 'var(--rn-bad)', fontSize: 12, marginBottom: 8 }}>{error}</div>
       )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <button
-          type="button"
+        <IconButton
+          icon={<ChevronLeft />}
+          title="上一题"
           disabled={!canGoBack || isSubmitting}
           onClick={() => setCurrentIndex(safeIndex - 1)}
-          aria-label="上一题"
-          title="上一题"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: 30,
-            height: 30,
-            borderRadius: 8,
-            border: '1px solid var(--border-default)',
-            background: canGoBack && !isSubmitting ? chipBgIdle : 'transparent',
-            color: 'var(--text-body)',
-            opacity: canGoBack && !isSubmitting ? 1 : 0.35,
-            cursor: canGoBack && !isSubmitting ? 'pointer' : 'not-allowed',
-          }}
-        >
-          <ChevronLeft size={16} />
-        </button>
-        <button
-          type="button"
+        />
+        <IconButton
+          icon={<ChevronRight />}
+          title="下一题"
           disabled={!canGoForward || isSubmitting}
           onClick={() => setCurrentIndex(safeIndex + 1)}
-          aria-label="下一题"
-          title="下一题"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: 30,
-            height: 30,
-            borderRadius: 8,
-            border: '1px solid var(--border-default)',
-            background: canGoForward && !isSubmitting ? chipBgIdle : 'transparent',
-            color: 'var(--text-body)',
-            opacity: canGoForward && !isSubmitting ? 1 : 0.35,
-            cursor: canGoForward && !isSubmitting ? 'pointer' : 'not-allowed',
-          }}
-        >
-          <ChevronRight size={16} />
-        </button>
+        />
 
-        <span style={{ fontSize: 11.5, color: 'var(--text-light)', marginLeft: 2 }}>
+        <span style={{ fontSize: 11.5, color: 'var(--rn-ink-3)', marginLeft: 2 }}>
           已答 {answeredCount}/{totalQuestions}
         </span>
 
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
           {localDisabled && (
-            <span style={{ fontSize: 11.5, color: 'var(--text-light)', fontStyle: 'italic' }}>
+            <span style={{ fontSize: 11.5, color: 'var(--rn-ink-3)', fontStyle: 'italic' }}>
               取消处理中…
             </span>
           )}
-          <button
-            type="button"
+          <Button
+            variant="primary"
+            size="sm"
             disabled={!canSubmit || isSubmitting}
             onClick={handleSubmit}
-            style={{
-              padding: '6px 14px',
-              borderRadius: 8,
-              border: canSubmit && !isSubmitting
-                ? '1px solid var(--color-blue)'
-                : '1px solid var(--border-default)',
-              background: canSubmit && !isSubmitting
-                ? 'var(--color-blue)'
-                : chipBgIdle,
-              color: canSubmit && !isSubmitting ? '#fff' : 'var(--text-light)',
-              fontSize: 12.5,
-              fontWeight: 600,
-              cursor: canSubmit && !isSubmitting ? 'pointer' : 'not-allowed',
-              transition: 'background-color 120ms ease, border-color 120ms ease',
-            }}
           >
             {isSubmitting ? '提交中…' : localDisabled ? '已禁用' : '提交回答'}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

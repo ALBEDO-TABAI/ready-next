@@ -1,4 +1,6 @@
 import { Suspense, useEffect, useRef, useState } from 'react'
+import { X } from 'lucide-react'
+import { Button, IconButton, Input, Select } from '../../../components/ui'
 import type { BookSourcesAPI, SourceSettings } from '../../../../shared/library-sources'
 import { confirmed } from '../access'
 import { ExtraSourceSearch } from './build-feature'
@@ -14,15 +16,15 @@ export function FindSheet({ api, onClose }: { api: BookSourcesAPI; onClose(): vo
     api.settings().then(confirmed).then(data => { if (live) { setSettings(data.settings); setExtra(data.extraSources) } }).catch(error => { if (live) setError(String(error)) })
     return () => { live = false }
   }, [api])
-  return <div className="source-find" role="dialog" aria-modal="false" aria-label="找书" onKeyDown={e => {
+  return <div className="source-find rn-float" role="dialog" aria-modal="false" aria-label="找书" onKeyDown={e => {
     e.stopPropagation(); if (e.key === 'Escape') { e.preventDefault(); onClose() }
 
   }}>
-    <header><h2>找书</h2><button type="button" onClick={onClose}>关闭找书</button></header>
+    <header><h2>找书</h2><IconButton icon={<X />} title="关闭找书" onClick={onClose} /></header>
     <form onSubmit={e => { e.preventDefault(); setSubmitted(query.trim()); setRevision(value => value + 1) }}>
-      <input ref={input} aria-label="搜索书源" placeholder="书名、作者或网盘链接" value={query} onChange={e => setQuery(e.target.value)} />
-      {settings && <select aria-label="搜索格式" value={settings.format} onChange={e => { const format = sourceFormats.find(format => format === e.target.value); if (format) setSettings({ ...settings, format }) }}>{sourceFormats.map(format => <option key={format}>{format}</option>)}</select>}
-      <button type="submit" disabled={!settings}>搜索</button>
+      <Input ref={input} aria-label="搜索书源" placeholder="书名、作者或网盘链接" value={query} onChange={e => setQuery(e.target.value)} />
+      {settings && <Select aria-label="搜索格式" value={settings.format} options={sourceFormats.map(format => ({ value: format, label: format }))} onChange={e => { const format = sourceFormats.find(format => format === e.target.value); if (format) setSettings({ ...settings, format }) }} />}
+      <Button type="submit" variant="primary" disabled={!settings}>搜索</Button>
     </form>
     {error && <p role="alert">{error}</p>}
     {settings && <div className="source-lanes"><SearchLane api={api} source="zlib" title="Z-Library" query={submitted} revision={revision} format={settings.format} />

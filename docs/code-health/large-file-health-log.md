@@ -22,6 +22,7 @@
 | 评估日期 | 任务 | 文件 | 总行数 | 本次新增 | 结论 | 判断与后续动作 | 状态 |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
 | 2026-11-12 | W1 T5 设置、浏览器工具条、关系图谱与技能面板迁移（B13） | `src/renderer/pages/modes/BrowserMode.tsx` | 1541 | 净 +1 | 一般 | 只换样式：颜色改用 `--rn-*`、启动遮罩去掉自己的模糊、暂存回执改为浮层材质与共用按钮；网页层显隐、分栏与其余接线不变。复查同 B12 第三批行。 | 已排期：2026-11-30 |
+| 2026-11-12 | W1-T5 外壳与助手迁移（B13） | `src/renderer/components/layout/FileTree.tsx` | 1795 | +59 / -153（净 -94） | 一般 | 只换外观与基元：删除与自定图标的两个旧 `Modal` 改为共享 `confirmDialog` / `openDialog`（对话框放到新的 `file-tree/dialogs.tsx`），空状态是 `EmptyState`，按钮是 `Button` / `IconButton`，颜色只用 `--rn-*`；树 / 网格、拖放、剪藏占位与涌现状态仍聚在一处，复查同 B7 行。 | 复查：2026-12-15 |
 | 2026-11-12 | W7 分叉元数据跟进 | `src/__tests__/codex-model-gateway-adversarial.test.ts` | 3726 | 净 +57 | 一般 | 复用既有请求与绑定夹具，补 ordinal 分叉的校验正反例及三类请求的 HTTP 边界；生产改动仍局限于元数据解析。复查请求准入与流处理测试是否适合分组。 | 已排期：2026-11-30 |
 | 2026-11-12 | W7 下载准入修复 | `src/__tests__/codex-tool-bridge.test.ts` | 1949 | 净 +108 | 一般 | 复用既有桥接夹具，增加冻结工具面、网关、授权派发与下载回执的一条正反回归；复查网关与真实工具组合用例是否适合独立成组。 | 已排期：2026-11-30 |
 | 2026-11-12 | W7 T7/T8 浏览器壳界面（B12 第三批） | `src/renderer/pages/modes/BrowserMode.tsx` | 1540（合入 B11 第二步后） | 净 +35 | 一般 | 只接线：任务标签组、提示条、⌘F 查找条、页面能力与阅读视图都在独立模块（`useBrowserTaskShell`、`BrowserTaskBand`、`useBrowserFind`、`usePageCapabilities`、`BrowserReadingView`），页面只把它们放进侧栏、网页上方和网页位置的槽位；阅读视图显示时原生网页与锁定提示让位。复查：把网页层显隐与锁定浮窗的两段副作用移出页面。 | 已排期：2026-11-30 |

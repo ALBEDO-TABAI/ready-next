@@ -1,5 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { createPortal } from 'react-dom'
+import { useEffect, useRef, type ReactNode } from 'react'
+import { closeFloat, openFloat } from '../ui/float/float-store'
+import { MenuList, type MenuEntry } from '../ui/float/Menu'
 
 export interface ContextMenuItem {
   id: string
@@ -17,178 +18,53 @@ interface ContextMenuProps {
   x: number
   y: number
   onClose: () => void
+  /** Kept for callers; the shared float host always renders above the page. */
   portal?: boolean
+  /** Keep the menu inside this rectangle (e.g. the assistant panel) when it fits. */
   boundary?: { left: number; top: number; right: number; bottom: number }
 }
 
-export default function ContextMenu({ items, x, y, onClose, portal = true, boundary }: ContextMenuProps) {
-  const menuRef = useRef<HTMLDivElement>(null)
-  const [adjustedPos, setAdjustedPos] = useState({ x, y })
-  const [hoveredItemId, setHoveredItemId] = useState<string | null>(null)
+const MENU_WIDTH = 200
+const EDGE = 8
 
-  const activateItem = (item: ContextMenuItem) => {
-    if (item.disabled) return
-    item.onClick?.()
-    onClose()
-  }
-
-  useLayoutEffect(() => {
-    if (!menuRef.current) return
-    const rect = menuRef.current.getBoundingClientRect()
-    const vw = window.innerWidth
-    const vh = window.innerHeight
-    const minX = Math.max(8, boundary?.left ?? 8)
-    const maxX = Math.max(minX, Math.min(vw - rect.width - 8, (boundary?.right ?? vw) - rect.width - 8))
-    const minY = Math.max(8, boundary?.top ?? 8)
-    const maxY = Math.max(minY, Math.min(vh - rect.height - 8, (boundary?.bottom ?? vh) - rect.height - 8))
-    const nextX = Math.min(Math.max(x, minX), maxX)
-    const nextY = Math.min(Math.max(y, minY), maxY)
-    setAdjustedPos({ x: nextX, y: nextY })
-  }, [boundary, items, x, y])
+/**
+ * The declarative context menu of the shell and its callers (file tree fallback, the assistant's selection, the
+ * document editor, skills), drawn by the shared float (W1 §5, DS3/DS4): one menu implementation app-wide, with the
+ * float's material, keyboard (↑/↓, Enter, Esc, type-ahead) and native web layer hand-off. The menu opens when the
+ * component mounts at (x, y) and its items are read when they are chosen, so a caller that re-renders while the menu
+ * is open neither reopens nor loses it. Esc, a click outside or a choice closes it and calls onClose.
+ */
+export default function ContextMenu({ items, x, y, onClose, boundary }: ContextMenuProps) {
+  const latest = useRef({ items, onClose })
+  latest.current = { items, onClose }
+  const boundaryKey = boundary ? `${boundary.left},${boundary.top},${boundary.right},${boundary.bottom}` : ''
 
   useEffect(() => {
-    const handleClick = (event: MouseEvent) => {
-      if (menuRef.current && menuRef.current.contains(event.target as Node)) return
-      onClose()
-    }
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-    }
-    const timer = window.setTimeout(() => {
-      window.addEventListener('click', handleClick)
-      window.addEventListener('contextmenu', handleClick)
-    }, 50)
-    window.addEventListener('keydown', handleKey)
-    return () => {
-      window.clearTimeout(timer)
-      window.removeEventListener('click', handleClick)
-      window.removeEventListener('contextmenu', handleClick)
-      window.removeEventListener('keydown', handleKey)
-    }
-  }, [onClose])
+    const area = boundary ?? { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight }
+    const left = Math.min(Math.max(x, area.left + EDGE), Math.max(area.left + EDGE, area.right - MENU_WIDTH - EDGE))
+    const top = Math.max(y, area.top + EDGE)
+    const entries: MenuEntry[] = latest.current.items.map(item => item.separator
+      ? { kind: 'separator' as const }
+      : {
+          id: item.id,
+          label: item.label,
+          icon: item.icon,
+          hint: item.shortcut,
+          danger: item.danger,
+          disabled: item.disabled,
+          onSelect: () => latest.current.items.find(candidate => candidate.id === item.id)?.onClick?.(),
+        })
+    let unmounting = false
+    const id = openFloat({
+      anchor: { left, top, right: left, bottom: top },
+      placement: 'bottom-start',
+      render: close => <MenuList items={entries} onDone={close} />,
+      onClose: () => { if (!unmounting) latest.current.onClose() },
+    })
+    return () => { unmounting = true; closeFloat(id) }
+    // A new position (or area) is a new menu; items are read from `latest` when chosen.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [x, y, boundaryKey])
 
-  const menu = (
-    <div
-      ref={menuRef}
-      data-ready-native-overlay=""
-      className="glass-surface-floating ready-floating-menu"
-      onMouseDown={(event) => event.stopPropagation()}
-      onPointerDown={(event) => event.stopPropagation()}
-      onClick={(event) => event.stopPropagation()}
-      onContextMenu={(event) => event.stopPropagation()}
-      style={{
-        position: 'fixed',
-        left: adjustedPos.x,
-        top: adjustedPos.y,
-        width: 200,
-        maxWidth: 'calc(100vw - 16px)',
-        background: 'var(--chat-menu-frost-bg, var(--surface-floating-bg))',
-        borderRadius: 12,
-        border: '1px solid var(--chat-menu-frost-border, var(--surface-border))',
-        boxShadow: 'var(--chat-menu-shadow, var(--surface-shadow))',
-        padding: '6px 0',
-        zIndex: 10000,
-        display: 'flex',
-        flexDirection: 'column',
-        pointerEvents: 'auto',
-      }}
-    >
-      {items.map((item) => {
-        if (item.separator) {
-          return <div key={item.id} style={{ height: 0, borderTop: '1px solid var(--border-default)' }} />
-        }
-
-        const color = item.danger ? 'var(--color-red)' : 'var(--text-body)'
-        const isHovered = hoveredItemId === item.id
-
-        return (
-          <button
-            key={item.id}
-            className="ready-floating-menu-item"
-            onPointerEnter={() => setHoveredItemId(item.id)}
-            onPointerLeave={() => setHoveredItemId((current) => (current === item.id ? null : current))}
-            onPointerDown={(event) => {
-              if (event.button !== 0 || item.disabled) return
-              event.preventDefault()
-              event.stopPropagation()
-              activateItem(item)
-            }}
-            onClick={(event) => {
-              event.preventDefault()
-              event.stopPropagation()
-            }}
-            onMouseDown={(event) => {
-              event.preventDefault()
-              event.stopPropagation()
-            }}
-            onKeyDown={(event) => {
-              if (event.key !== 'Enter' && event.key !== ' ') return
-              event.preventDefault()
-              event.stopPropagation()
-              activateItem(item)
-            }}
-            disabled={item.disabled}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              height: 36,
-              padding: '8px 14px',
-              border: 'none',
-              background: isHovered ? 'var(--chat-menu-hover-bg)' : 'transparent',
-              borderRadius: 8,
-              cursor: item.disabled ? 'not-allowed' : 'pointer',
-              width: 'calc(100% - 12px)',
-              margin: '0 6px',
-              transition: 'background 0.15s ease, opacity 0.15s ease',
-              opacity: item.disabled ? 0.45 : 1,
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-              {item.icon ? (
-                <span style={{ width: 16, height: 16, color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                  {item.icon}
-                </span>
-              ) : (
-                <span style={{ width: 16, height: 16, flexShrink: 0 }} />
-              )}
-              <span
-                style={{
-                  fontFamily: 'Inter, sans-serif',
-                  fontSize: 14,
-                  fontWeight: 500,
-                  color,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {item.label}
-              </span>
-            </div>
-            {item.shortcut ? (
-              <span
-                style={{
-                  fontFamily: 'Inter, sans-serif',
-                  fontSize: 12,
-                  fontWeight: 500,
-                  color: 'var(--text-light)',
-                  marginLeft: 12,
-                  flexShrink: 0,
-                }}
-              >
-                {item.shortcut}
-              </span>
-            ) : null}
-          </button>
-        )
-      })}
-    </div>
-  )
-
-  if (portal && typeof document !== 'undefined') {
-    return createPortal(menu, document.body)
-  }
-
-  return menu
+  return null
 }

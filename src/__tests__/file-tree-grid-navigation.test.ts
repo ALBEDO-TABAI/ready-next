@@ -36,5 +36,6 @@ test('side panel search slot reserves its left edge for grid history buttons and
   assert.match(filesPanel, /title="前进"/)
   assert.match(filesPanel, /viewMode === 'grid'/)
   assert.match(filesPanel, /Search className="h-\[13px\] w-\[13px\][^"]*"/)
-  assert.match(filesPanel, /<input[\s\S]*?\/>\s*<Search/)
+  // B13: the search field is the shared Input primitive; the icon still follows it on the right.
+  assert.match(filesPanel, /<Input[\s\S]*?\/>\s*<Search/)
 })

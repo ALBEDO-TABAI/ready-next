@@ -42,7 +42,8 @@ test('C11 search/download, pushed task states, captcha, cancel/retry/manual, set
     manualLink: async () => { calls.push('manual'); return { success: true, data: 'https://example.com/book' } },
     onChanged: listener => { push = listener; return () => {} },
   }
-  const click = async (text: string) => { const button = [...dom.window.document.querySelectorAll('button')].find(b => b.textContent === text); assert.ok(button, text); await act(async () => button.click()) }
+  // A button by its text, or an icon button by its name (关闭找书 is the sheet's close icon).
+  const click = async (text: string) => { const button = [...dom.window.document.querySelectorAll('button')].find(b => b.textContent === text || b.getAttribute('aria-label') === text); assert.ok(button, text); await act(async () => button.click()) }
   await act(async () => root.render(<><FindSheet api={api} onClose={() => calls.push('close')} /><JobView api={api} /></>))
   await act(async () => dom.window.document.querySelector('form')!.dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true })))
   assert.ok(calls.includes('search:epub')); assert.match(dom.window.document.body.textContent || '', /山海/)

@@ -8,7 +8,7 @@ import { useTheme } from '../../stores/useTheme'
 import type { ChatAttachment } from '../../stores/useAgent'
 import type { ReadySkillReference } from '../../modules/agent/chat-input-bridge'
 import type { ContextUsageSnapshot } from '../../../shared/context-usage-types'
-import { chatMenuItemStyle, chatMenuSurfaceStyle } from './chatMenuStyles'
+import { CHAT_MENU_ITEM_CLASS, chatMenuItemStyle, chatMenuSurfaceStyle } from './chatMenuStyles'
 import { getChatMenuHorizontalFrame, subscribeChatMenuLayout } from './chatMenuLayout'
 import { ContextUsageMeter } from './chat-panel/ContextUsageMeter'
 import { usePastedImages } from './chat-panel/use-pasted-images'
@@ -480,14 +480,15 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
       }}
       contentClassName="rn-float-panel__content panel-hover-scrollbar"
     >
-      <div style={{ fontSize: 10, color: 'var(--text-light)', padding: '2px 8px', marginBottom: 2 }}>
+      <div style={{ fontSize: 10, color: 'var(--rn-ink-3)', padding: '2px 8px', marginBottom: 2 }}>
         引用文件 / 文件夹
       </div>
       {filteredFilePool.map((file) => (
         <button
           key={file.id}
+          type="button"
           onClick={() => insertAtReference(file)}
-          className="ready-floating-menu-item w-full flex items-center gap-2 active:scale-[0.98] transition-[background-color,transform] duration-150"
+          className={`${CHAT_MENU_ITEM_CLASS} flex items-center gap-2`}
           style={{
             ...chatMenuItemStyle,
             textAlign: 'left',
@@ -499,7 +500,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
               style={{
                 fontSize: 12,
                 fontWeight: 500,
-                color: 'var(--text-body)',
+                color: 'var(--rn-ink)',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
@@ -510,7 +511,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
             <div
               style={{
                 fontSize: 10,
-                color: 'var(--text-light)',
+                color: 'var(--rn-ink-3)',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
@@ -521,7 +522,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
               {file.path}
             </div>
           </div>
-          <span style={{ fontSize: 10, color: 'var(--text-light)', marginLeft: 'auto', flexShrink: 0 }}>
+          <span style={{ fontSize: 10, color: 'var(--rn-ink-3)', marginLeft: 'auto', flexShrink: 0 }}>
             {file.isDirectory
               ? '文件夹'
               : file.source === 'rss-reference' ? 'RSS 引用'
@@ -555,7 +556,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
       }}
       contentClassName="rn-float-panel__content panel-hover-scrollbar"
     >
-      <div style={{ fontSize: 10, color: 'var(--text-light)', padding: '2px 8px', marginBottom: 2 }}>
+      <div style={{ fontSize: 10, color: 'var(--rn-ink-3)', padding: '2px 8px', marginBottom: 2 }}>
         命令与 Skill
       </div>
       {showImageCommand ? (
@@ -567,15 +568,16 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
             insertImageCommand()
           }}
           onPointerEnter={() => setSlashSelectedIndex(0)}
-          className={`ready-floating-menu-item w-full flex items-center gap-2 active:scale-[0.98] transition-[background-color,transform] duration-150 ${slashSelectedIndex === 0 ? 'is-selected' : ''}`}
+          className={`${CHAT_MENU_ITEM_CLASS} flex items-center gap-2`}
+          data-highlighted={slashSelectedIndex === 0 || undefined}
           style={{ ...chatMenuItemStyle, textAlign: 'left' }}
         >
-          <ImagePlus style={{ width: 15, height: 15, flexShrink: 0, color: 'var(--color-ready-orange)' }} strokeWidth={2} />
+          <ImagePlus style={{ width: 15, height: 15, flexShrink: 0, color: 'var(--rn-ink-2)' }} strokeWidth={2} />
           <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-body)' }}>/imag</div>
-            <div style={{ fontSize: 10, color: 'var(--text-light)', marginTop: 2 }}>生成图片，可搭配已添加的参考图</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--rn-ink)' }}>/imag</div>
+            <div style={{ fontSize: 10, color: 'var(--rn-ink-3)', marginTop: 2 }}>生成图片，可搭配已添加的参考图</div>
           </div>
-          <span style={{ fontSize: 10, color: 'var(--text-light)', marginLeft: 'auto', flexShrink: 0 }}>命令</span>
+          <span style={{ fontSize: 10, color: 'var(--rn-ink-3)', marginLeft: 'auto', flexShrink: 0 }}>命令</span>
         </button>
       ) : null}
       {filteredSkills.length > 0 ? filteredSkills.map((skill, index) => {
@@ -583,24 +585,26 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
         return (
         <button
           key={skill.id}
+          type="button"
           onMouseDown={(event) => {
             event.preventDefault()
             insertSlashSkillReference(skill)
           }}
           onPointerEnter={() => setSlashSelectedIndex(menuIndex)}
-          className={`ready-floating-menu-item w-full flex items-center gap-2 active:scale-[0.98] transition-[background-color,transform] duration-150 ${menuIndex === slashSelectedIndex ? 'is-selected' : ''}`}
+          className={`${CHAT_MENU_ITEM_CLASS} flex items-center gap-2`}
+          data-highlighted={menuIndex === slashSelectedIndex || undefined}
           style={{
             ...chatMenuItemStyle,
             textAlign: 'left',
           }}
         >
-          <Puzzle style={{ width: 15, height: 15, flexShrink: 0, color: 'var(--text-gray)' }} strokeWidth={2} />
+          <Puzzle style={{ width: 15, height: 15, flexShrink: 0, color: 'var(--rn-ink-3)' }} strokeWidth={2} />
           <div style={{ minWidth: 0, flex: 1 }}>
             <div
               style={{
                 fontSize: 12,
                 fontWeight: 600,
-                color: 'var(--text-body)',
+                color: 'var(--rn-ink)',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
@@ -611,7 +615,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
             <div
               style={{
                 fontSize: 10,
-                color: 'var(--text-light)',
+                color: 'var(--rn-ink-3)',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
@@ -622,13 +626,13 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
               {skill.description || skill.id}
             </div>
           </div>
-          <span style={{ fontSize: 10, color: 'var(--text-light)', marginLeft: 'auto', flexShrink: 0 }}>
+          <span style={{ fontSize: 10, color: 'var(--rn-ink-3)', marginLeft: 'auto', flexShrink: 0 }}>
             {skill.installed ? '已就绪' : '未安装'}
           </span>
         </button>
         )
       }) : !showImageCommand ? (
-        <div style={{ padding: '8px 10px', fontSize: 12, color: 'var(--text-light)' }}>
+        <div style={{ padding: '8px 10px', fontSize: 12, color: 'var(--rn-ink-3)' }}>
           没有匹配的 skill
         </div>
       ) : null}
@@ -655,7 +659,8 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
           key={option.mode}
           type="button"
           data-ready-action-authorization-option={option.mode}
-          className={`ready-floating-menu-item w-full active:scale-[0.98] transition-[background-color,transform] duration-150 ${option.mode === actionAuthorizationMode ? 'is-selected' : ''}`}
+          className={CHAT_MENU_ITEM_CLASS}
+          data-highlighted={option.mode === actionAuthorizationMode || undefined}
           style={{ ...chatMenuItemStyle, display: 'block', textAlign: 'left' }}
           onClick={async () => {
             if (option.mode === actionAuthorizationMode) {
@@ -674,8 +679,8 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
             }
           }}
         >
-          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-body)' }}>{option.label}</div>
-          <div style={{ marginTop: 2, fontSize: 10, lineHeight: 1.35, color: 'var(--text-light)' }}>{option.description}</div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--rn-ink)' }}>{option.label}</div>
+          <div style={{ marginTop: 2, fontSize: 10, lineHeight: 1.35, color: 'var(--rn-ink-3)' }}>{option.description}</div>
         </button>
       ))}
     </FloatPanel>
@@ -690,8 +695,6 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
         flexDirection: 'column',
         gap: 8,
         background: 'transparent',
-        backdropFilter: 'none',
-        WebkitBackdropFilter: 'none',
         boxShadow: 'none',
       }}
     >
@@ -728,7 +731,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
           <div
             className="ready-liquid-composer__content flex flex-col"
             style={{
-              borderRadius: 'var(--workbench-canvas-radius)',
+              borderRadius: 'var(--rn-liquid-r)',
               background: 'transparent',
               padding: isDragOver ? '13px 15px 10px' : '14px 16px 11px',
               position: 'relative',
@@ -756,7 +759,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
             style={{
               fontSize: 13,
               fontWeight: 500,
-              color: 'var(--text-body)',
+              color: 'var(--rn-liquid-ink)',
               lineHeight: '1.5',
               width: '100%',
               minHeight: 44,
@@ -767,7 +770,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
           />
 
           {(isPasting || pasteError) && (
-            <div role={pasteError ? 'alert' : 'status'} style={{ fontSize: 11, color: pasteError ? 'var(--color-red)' : 'var(--text-muted)' }}>
+            <div role={pasteError ? 'alert' : 'status'} style={{ fontSize: 11, color: pasteError ? 'var(--rn-bad)' : 'var(--rn-ink-2)' }}>
               {isPasting ? '正在添加图片…' : pasteError}
             </div>
           )}
@@ -776,7 +779,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
               role="alert"
               data-ready-agent-stop-error="true"
               style={{
-                color: 'var(--color-red)',
+                color: 'var(--rn-bad)',
                 fontSize: 11,
                 lineHeight: 1.35,
               }}
@@ -788,12 +791,13 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
           <div className="flex items-center justify-between" style={{ gap: 8, minHeight: 32 }}>
             <div className="flex items-center" style={{ gap: 6, minWidth: 0, flex: '1 1 auto' }}>
               <button
+                type="button"
                 onClick={onPickFiles}
                 title="添加文件"
-                className="flex items-center justify-center hover:bg-black/5 active:scale-[0.98] transition-[background-color,transform] duration-200 ease-out"
+                className="flex items-center justify-center active:scale-[0.98] transition-[background-color,transform] duration-200 ease-out"
                 style={{ width: 26, height: 26, borderRadius: 8, border: '1px solid transparent', background: 'transparent', flexShrink: 0 }}
               >
-                <Plus style={{ width: 14, height: 14 }} className="text-[var(--text-gray)]" strokeWidth={2} />
+                <Plus style={{ width: 14, height: 14 }} className="text-[var(--rn-liquid-ink-2)]" strokeWidth={2} />
               </button>
 
               <div style={{ minWidth: 0 }}>
@@ -821,8 +825,8 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
                       opacity: authorizationModeUpdating ? 0.55 : 1,
                     }}
                   >
-                    <ShieldCheck style={{ width: 12, height: 12 }} className="text-[var(--text-gray)]" strokeWidth={1.8} />
-                    <span style={{ fontSize: 11, color: 'var(--text-gray)' }}>{currentAuthorizationMode.label}</span>
+                    <ShieldCheck style={{ width: 12, height: 12 }} className="text-[var(--rn-liquid-ink-2)]" strokeWidth={1.8} />
+                    <span style={{ fontSize: 11, color: 'var(--rn-liquid-ink-2)' }}>{currentAuthorizationMode.label}</span>
                     <ChevronDown
                       style={{
                         width: 10,
@@ -830,7 +834,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
                         transform: showAuthorizationModeSelect ? 'rotate(180deg)' : 'rotate(0deg)',
                         transition: 'transform 200ms ease',
                       }}
-                      className="text-[var(--text-light)]"
+                      className="text-[var(--rn-liquid-ink-3)]"
                     />
                   </button>
 
@@ -843,18 +847,20 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
 
               {stopAvailable ? (
                 <button
+                  type="button"
                   onClick={onStop}
                   data-ready-agent-stop="true"
                   disabled={stopPending}
                   aria-busy={stopPending}
                   aria-label={stopPending ? '正在停止' : '停止生成'}
                   title={stopPending ? '正在停止' : '停止生成'}
-                  className="flex items-center justify-center text-white hover:brightness-95 active:scale-[0.98] transition-[filter,transform] duration-200 ease-out"
+                  className="flex items-center justify-center hover:brightness-95 active:scale-[0.98] transition-[filter,transform] duration-200 ease-out"
                   style={{
                     width: 30,
                     height: 30,
                     borderRadius: 16,
-                    background: 'var(--color-red)',
+                    background: 'var(--rn-bad)',
+                    color: 'var(--rn-accent-ink)',
                     cursor: stopPending ? 'wait' : 'pointer',
                     opacity: stopPending ? 0.62 : 1,
                   }}
@@ -865,6 +871,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
                 </button>
               ) : (
                 <button
+                  type="button"
                   onClick={onSend}
                   data-ready-agent-send="true"
                   data-ready-agent-send-blocked={sendUnavailable ? sendBlockedReason : undefined}
@@ -876,9 +883,9 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
                     width: 30,
                     height: 30,
                     borderRadius: 16,
-                    border: '1px solid rgba(255, 255, 255, 0.08)',
-                    background: '#0f0f0f',
-                    color: '#fff',
+                    border: '1px solid color-mix(in srgb, var(--rn-on-inverse) 8%, transparent)',
+                    background: 'var(--rn-inverse)',
+                    color: 'var(--rn-on-inverse)',
                     boxShadow: 'none',
                     opacity: sendUnavailable ? 0.38 : 1,
                   }}

@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { Bold, Copy, FileText, Inbox, Italic, Link2, MoreHorizontal, Plus, Search, Trash2 } from 'lucide-react'
 import {
   Button, Checkbox, Chip, confirmDialog, EmptyState, IconButton, Input, Kbd, ListRow, MenuList, openMenu, ResizeHandle,
-  ScrollArea, SectionHeader, Segmented, Select, showToast, Skeleton, Switch, Tabs, Textarea, Toolbar, ToolbarSeparator, tooltip,
+  ScrollArea, SectionHeader, Segmented, Select, showToast, Skeleton, Slider, Switch, Tabs, Textarea, Toolbar, ToolbarSeparator, tooltip,
   anchorOf, RefCapsule, type MenuEntry,
 } from '../components/ui'
 import './design-system.css'
@@ -78,6 +78,8 @@ function Column({ theme }: { theme: 'light' | 'dark' }) {
           <Input placeholder="不可用" disabled aria-label="不可用的输入" />
           <Select aria-label="排序" options={[{ value: 'recent', label: '最近编辑' }, { value: 'title', label: '标题' }]} defaultValue="recent" />
           <Textarea placeholder="写点什么…" aria-label="备注" />
+          <Slider aria-label="字号" min="13" max="30" defaultValue="18" />
+          <Slider aria-label="不可用的滑块" min="0" max="10" defaultValue="7" disabled />
         </div>
       </Specimen>
 

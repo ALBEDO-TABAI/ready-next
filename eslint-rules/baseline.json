@@ -472,8 +472,8 @@
     {
       "file": "src/__tests__/floating-submenu-style-contract.test.ts",
       "rule": "ready/no-source-grep-test",
-      "snippetHash": "80e8b9d299cc4bae",
-      "line": 10,
+      "snippetHash": "bbf5f184620da57c",
+      "line": 9,
       "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
       "area": "ui-history"
     },

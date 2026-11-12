@@ -16,15 +16,9 @@ import {
   selectFolderPreviewItems,
 } from './folderPreviewModel'
 
-function previewTileTone(kind: FolderPreviewKind): { background: string; color: string } {
-  if (kind === 'folder') return { background: 'rgba(221, 171, 78, 0.14)', color: 'var(--color-gold)' }
-  if (kind === 'image') return { background: 'rgba(76, 175, 80, 0.12)', color: 'var(--color-green)' }
-  if (kind === 'video') return { background: 'rgba(255, 152, 0, 0.12)', color: 'var(--color-orange)' }
-  if (kind === 'audio') return { background: 'rgba(59, 130, 246, 0.12)', color: 'var(--color-blue)' }
-  if (kind === 'spreadsheet') return { background: 'rgba(59, 130, 246, 0.12)', color: 'var(--color-blue)' }
-  if (kind === 'design') return { background: 'rgba(123, 97, 255, 0.12)', color: 'var(--color-blue)' }
-  return { background: 'rgba(0, 0, 0, 0.035)', color: 'var(--text-muted)' }
-}
+// A folder's preview tiles are quiet areas on the thumbnail: the kind shows in the icon, not in a colour of its
+// own (W1 DL5/DL6 — no decorative hues).
+const PREVIEW_TILE_TONE = { background: 'var(--rn-fill)', color: 'var(--rn-ink-3)' } as const
 
 function previewIcon(kind: FolderPreviewKind) {
   if (kind === 'folder') return Folder
@@ -66,7 +60,7 @@ export function FolderPreview({
           <div
             key={index}
             className="rounded-[6px]"
-            style={{ background: 'rgba(0, 0, 0, 0.03)' }}
+            style={{ background: 'var(--rn-fill)' }}
           />
         ))}
       </div>
@@ -78,11 +72,11 @@ export function FolderPreview({
       <div
         data-folder-preview="true"
         data-folder-preview-empty="true"
-        className="h-full w-full rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-content)] flex flex-col items-center justify-center gap-[4px]"
+        className="h-full w-full flex flex-col items-center justify-center gap-[4px]"
         style={{ height: previewHeight }}
       >
-        <Folder className="h-[16px] w-[16px]" style={{ color: 'var(--color-gold)' }} />
-        <span className="text-[9px]" style={{ color: 'var(--text-light)' }}>空文件夹</span>
+        <Folder className="h-[16px] w-[16px]" style={{ color: 'var(--rn-ink-3)' }} />
+        <span className="text-[9px]" style={{ color: 'var(--rn-ink-3)' }}>空文件夹</span>
       </div>
     )
   }
@@ -105,7 +99,7 @@ export function FolderPreview({
         }}
       >
         {entries.map((entry) => {
-          const tone = previewTileTone(entry.kind)
+          const tone = PREVIEW_TILE_TONE
           return (
             <div
               key={entry.path}
@@ -114,7 +108,7 @@ export function FolderPreview({
               className="flex items-center justify-center rounded-[8px] px-[8px] py-[6px] text-[9px] font-medium text-center"
               style={{
                 background: tone.background,
-                color: entry.kind === 'folder' ? 'color-mix(in srgb, var(--color-gold) 80%, #6b7280 20%)' : 'var(--text-muted)',
+                color: 'var(--rn-ink-2)',
                 lineHeight: 1.15,
               }}
             >
@@ -140,7 +134,7 @@ export function FolderPreview({
     >
       {entries.map((entry) => {
         const Icon = previewIcon(entry.kind)
-        const tone = previewTileTone(entry.kind)
+        const tone = PREVIEW_TILE_TONE
         const showLabel = entry.kind !== 'image'
         return (
           <div
@@ -149,7 +143,7 @@ export function FolderPreview({
             title={entry.name}
             className="relative overflow-hidden rounded-[6px]"
             style={{
-              background: entry.kind === 'image' ? 'var(--bg-content)' : tone.background,
+              background: tone.background,
             }}
           >
             {entry.kind === 'image' ? (
@@ -166,7 +160,7 @@ export function FolderPreview({
             {showLabel && (
               <div
                 className="pointer-events-none absolute inset-x-[4px] bottom-[3px] truncate text-[8px]"
-                style={{ color: 'var(--text-muted)' }}
+                style={{ color: 'var(--rn-ink-2)' }}
               >
                 {getFolderPreviewLabel(entry)}
               </div>

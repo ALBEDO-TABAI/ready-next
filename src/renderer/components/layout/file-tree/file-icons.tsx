@@ -15,6 +15,9 @@ import {
 } from '../../../stores/fileAppearance'
 import { isEbookExtension } from '../../../../shared/ebook'
 import { getFileExt, getFileKind } from './file-kinds'
+// The colours people give their files are content colours (stores/fileAppearance.ts); load their palette
+// wherever the tree draws them, independent of whether the document module has been opened.
+import '../../../modules/document/content-palette.css'
 
 export function FileAppearanceColorDot({
   appearance,
@@ -36,8 +39,7 @@ export function FileAppearanceColorDot({
         height: size,
         borderRadius: '50%',
         background: color,
-        border: '1px solid rgba(255,255,255,0.82)',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.18)',
+        border: '1px solid var(--rn-sheet)',
         ...style,
       }}
     />
@@ -56,7 +58,7 @@ export function CustomFileIcon({ icon, size }: { icon: string; size: number }) {
         justifyContent: 'center',
         fontSize: Math.max(11, Math.round(size * 0.9)),
         lineHeight: 1,
-        color: 'var(--text-title)',
+        color: 'inherit',
       }}
     >
       {icon}
@@ -70,8 +72,9 @@ export function fileIcon(item: FileItem, _expanded = false, appearance?: FileApp
 
   // 文件夹始终用 Folder。展开/折叠状态已由 chevron 表达，避免 Folder ↔ FolderOpen
   // 在小尺寸（14px）下因笔触差异让顶层与子层视觉不一致。
-  const iconStyle = { color: 'var(--text-muted)', width: iconSize, height: iconSize }
-  const iconStroke = 1.75
+  // The icon takes its row's colour, like ListRow: ink-2 at rest, the accent text on the current row (W1 DL8).
+  const iconStyle = { color: 'currentColor', width: iconSize, height: iconSize }
+  const iconStroke = 1.5
   if (item.isDirectory) {
     return <Folder style={iconStyle} strokeWidth={iconStroke} />
   }

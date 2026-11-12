@@ -619,9 +619,9 @@
   text-decoration-color: currentColor;
 }
 
+/* The ring itself is the shell's ink focus (base-chrome.css, W1 DL5); links only sit it a little further out. */
 .ready-agent-link:focus-visible,
 .ready-code-block-copy:focus-visible {
-  outline: 1.5px solid var(--color-ready-orange);
   outline-offset: 2px;
 }
 
@@ -776,9 +776,10 @@
 .ready-code-block {
   overflow: hidden;
   margin: 6px 0;
-  border: 0.5px solid color-mix(in srgb, var(--border-default) 88%, transparent);
-  border-radius: var(--radius-lg);
-  background: color-mix(in srgb, var(--surface-card-bg) 82%, var(--bg-content) 18%);
+  border: 0.5px solid var(--rn-hair-2);
+  border-radius: var(--rn-r-md);
+  /* On the assistant's glass a code block is a quiet area, not paper on glass (W1 DL1). */
+  background: var(--rn-fill);
 }
 
 .ready-code-block-header {
@@ -881,9 +882,9 @@
   max-width: 100%;
   overflow-x: auto;
   margin: 6px 0;
-  border: 1px solid color-mix(in srgb, var(--border-default) 74%, transparent);
+  border: 1px solid var(--rn-hair-2);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--surface-card-bg) 88%, var(--bg-canvas) 12%);
+  background: var(--rn-fill);
   scrollbar-width: thin;
 }
 

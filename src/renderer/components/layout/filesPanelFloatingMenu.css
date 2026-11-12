@@ -1,67 +1,25 @@
-.ready-floating-menu {
-  box-shadow: var(--chat-menu-shadow) !important;
-}
-
-.ready-floating-menu-item {
-  transition:
-    background 160ms ease,
-    border-color 160ms ease,
-    box-shadow 160ms ease,
-    transform 150ms ease;
-}
-
-.ready-floating-menu-item:hover {
-  background: var(--chat-menu-hover-bg) !important;
-  box-shadow: var(--chat-menu-hover-shadow);
-}
-
-.ready-floating-menu-item.is-selected {
-  background: var(--chat-menu-selected-bg) !important;
-  border-color: var(--chat-menu-selected-border) !important;
-  box-shadow: var(--chat-menu-selected-shadow) !important;
-}
-
-html:root .ready-floating-menu {
-  background: var(--chat-menu-frost-bg) !important;
-  border-color: var(--chat-menu-frost-border) !important;
-  box-shadow: var(--chat-menu-shadow) !important;
-  backdrop-filter: blur(calc(var(--lg-blur-strong) * 1.28)) saturate(calc(var(--surface-saturate) - 8%)) contrast(1.01) !important;
-  -webkit-backdrop-filter: blur(calc(var(--lg-blur-strong) * 1.28)) saturate(calc(var(--surface-saturate) - 8%)) contrast(1.01) !important;
-}
-
-html:root .ready-floating-menu-item:hover {
-  background: var(--chat-menu-hover-bg) !important;
-  box-shadow: var(--chat-menu-hover-shadow);
-}
-
-html:root .ready-floating-menu-item.is-selected {
-  background: var(--chat-menu-selected-bg) !important;
-  border-color: var(--chat-menu-selected-border) !important;
-  box-shadow: var(--chat-menu-selected-shadow) !important;
-}
-
 /*
+ * The file panel's menus are the shared float (components/ui/float, W1 §5); only the tree's own row states
+ * live here, and only with --rn-* tokens.
+ *
  * Transient confirmation glow applied to the FileTree row that was the drop
  * target of a successful background obsidian-web-clip. The row is NOT
  * selected/activated during the drop; this animation only fires once on
  * completion, runs for ~1.5s, and the row returns to its inactive state.
+ * It wears the drop target's look (the signal colour's soft fill and ring): "it landed here, just now".
  */
 .file-tree-item-flash-complete {
-  animation: file-tree-flash-glow 1500ms ease-out 1;
+  animation: file-tree-flash-glow 1500ms var(--rn-ease-out) 1;
   z-index: 3;
 }
 @keyframes file-tree-flash-glow {
   0% {
-    background: var(--color-blue-light);
-    box-shadow:
-      0 0 0 2px var(--color-blue),
-      0 0 18px rgba(59, 130, 246, 0.55);
+    background: var(--rn-accent-soft);
+    box-shadow: inset 0 0 0 1.5px var(--rn-accent);
   }
   60% {
-    background: color-mix(in srgb, var(--color-blue-light) 60%, transparent);
-    box-shadow:
-      0 0 0 1.5px color-mix(in srgb, var(--color-blue) 70%, transparent),
-      0 0 12px rgba(59, 130, 246, 0.32);
+    background: color-mix(in srgb, var(--rn-accent-soft) 60%, transparent);
+    box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--rn-accent) 50%, transparent);
   }
   100% {
     background: transparent;

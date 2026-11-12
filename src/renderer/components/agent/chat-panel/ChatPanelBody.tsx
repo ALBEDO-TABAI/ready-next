@@ -20,6 +20,7 @@ import ChatInput, { type ChatInputHandle } from '../ChatInput'
 import { SoftFailureCapsule } from '../SoftFailureCapsule'
 import ChatAttachments from '../ChatAttachments'
 import ContextMenu from '../../layout/ContextMenu'
+import { Button, IconButton } from '../../ui'
 import { MarkdownContent } from './markdown'
 import ModelSelector from './model-selector/ModelSelector'
 import {
@@ -197,10 +198,11 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
     : null
 
   // 外壳保持透明：玻璃材质（折射/模糊/纱层）全部由 ChatInput 里的 LiquidLens 承担。
+  // A file held over the composer draws the drop ring in ink (the project pill's drop ring is the same).
   const composerShellStyle = {
-    borderRadius: 'var(--workbench-canvas-radius)',
+    borderRadius: 'var(--rn-liquid-r)',
     background: 'transparent',
-    border: isDragOver ? '2px solid var(--color-blue)' : '1px solid transparent',
+    border: isDragOver ? '2px solid var(--rn-ink-3)' : '1px solid transparent',
     boxShadow: 'none',
   } as CSSProperties
 
@@ -345,8 +347,6 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
               flexDirection: 'column',
               gap: 8,
               background: 'transparent',
-              backdropFilter: 'none',
-              WebkitBackdropFilter: 'none',
               boxShadow: 'none',
               pointerEvents: 'none',
             }}
@@ -387,13 +387,12 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
             {beginNewContextAvailable && (
               <div data-ready-begin-new-context="true" role="status" style={{
                 pointerEvents: 'auto', padding: '10px 12px', borderRadius: 12,
-                background: 'var(--bg-primary)', color: 'var(--text-primary)', fontSize: 12, lineHeight: 1.6,
+                background: 'var(--rn-sheet)', color: 'var(--rn-ink)', fontSize: 12, lineHeight: 1.6,
               }}>
                 <p>当前会话暂时无法继续。已有消息会保留，重新开始后不会自动带入此前对话。</p>
-                <button type="button" onClick={onBeginNewContext}
-                  className="mt-2 w-full rounded-lg px-3 py-2 text-xs font-medium"
-                  style={{ background: 'var(--bg-content)', color: 'var(--text-primary)' }}
-                >保留记录，开始新上下文</button>
+                <Button variant="secondary" onClick={onBeginNewContext} className="mt-2 w-full" style={{ fontSize: 12 }}>
+                  保留记录，开始新上下文
+                </Button>
               </div>
             )}
             {sendConsequence && (
@@ -434,7 +433,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                     <Puzzle
-                      style={{ width: 15, height: 15, color: 'var(--accent-primary)' }}
+                      style={{ width: 15, height: 15, color: 'var(--rn-ink-2)' }}
                       strokeWidth={2}
                     />
                     <div style={{ minWidth: 0 }}>
@@ -442,7 +441,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
                         style={{
                           fontSize: 11,
                           fontWeight: 600,
-                          color: 'var(--text-light)',
+                          color: 'var(--rn-ink-3)',
                           letterSpacing: '0.08em',
                           textTransform: 'uppercase'
                         }}
@@ -453,7 +452,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
                         style={{
                           fontSize: 12.5,
                           fontWeight: 600,
-                          color: 'var(--text-body)',
+                          color: 'var(--rn-ink)',
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
                           whiteSpace: 'nowrap'
@@ -467,7 +466,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
                     style={{
                       flexShrink: 0,
                       fontSize: 11,
-                      color: 'var(--text-muted)'
+                      color: 'var(--rn-ink-2)'
                     }}
                   >
                     上下文已启用
@@ -478,12 +477,11 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
 
             {attachedSessionRecallCapsules.length > 0 && (
               <div
-                className="glass-surface-card"
                 data-session-recall-attachments="true"
                 style={{
                   borderRadius: 12,
-                  border: '1px solid var(--border-default)',
-                  background: 'color-mix(in srgb, var(--surface-panel-bg) 46%, transparent)',
+                  border: '1px solid var(--rn-hair)',
+                  background: 'var(--rn-fill)',
                   padding: 10,
                   display: 'flex',
                   flexDirection: 'column',
@@ -494,7 +492,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
                   style={{
                     fontSize: 11,
                     fontWeight: 600,
-                    color: 'var(--text-light)',
+                    color: 'var(--rn-ink-3)',
                     letterSpacing: '0.08em',
                     textTransform: 'uppercase'
                   }}
@@ -507,7 +505,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
                       key={capsule.conversationId}
                       className="rounded-[8px] border"
                       style={{
-                        borderColor: 'var(--border-default)',
+                        borderColor: 'var(--rn-hair)',
                         padding: '8px 10px',
                         display: 'flex',
                         alignItems: 'flex-start',
@@ -516,16 +514,16 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
                       }}
                     >
                       <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-body)' }}>
+                        <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--rn-ink)' }}>
                           {capsule.title}
                         </div>
-                        <div style={{ fontSize: 11, color: 'var(--text-light)', marginTop: 2 }}>
+                        <div style={{ fontSize: 11, color: 'var(--rn-ink-3)', marginTop: 2 }}>
                           {capsule.sourceKind}:{capsule.sourceId} · {formatTime(capsule.updatedAt)}
                         </div>
                         <div
                           style={{
                             fontSize: 11.5,
-                            color: 'var(--text-muted)',
+                            color: 'var(--rn-ink-2)',
                             marginTop: 4,
                             whiteSpace: 'pre-wrap'
                           }}
@@ -533,29 +531,13 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
                           {capsule.summary}
                         </div>
                       </div>
-                      <button
-                        type="button"
+                      <IconButton
+                        icon={<X style={{ width: 12, height: 12 }} strokeWidth={2} />}
                         onClick={() => {
                           void onDetachSessionRecall(capsule.conversationId)
                         }}
-                        className="rounded-[8px] border transition-[background-color,border-color]"
-                        style={{
-                          flexShrink: 0,
-                          width: 28,
-                          height: 28,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          borderColor: 'var(--border-default)',
-                          background: 'transparent'
-                        }}
                         title="移除旧会话引用"
-                      >
-                        <X
-                          style={{ width: 12, height: 12, color: 'var(--text-light)' }}
-                          strokeWidth={2}
-                        />
-                      </button>
+                      />
                     </div>
                   ))}
                 </div>

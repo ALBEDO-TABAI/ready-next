@@ -139,7 +139,7 @@ export function Shelf({ books, shown, sort, openId, fresh, onOpen, onLabel }: {
         </div>
       ))}
       <svg width="0" height="0" style={{ position: 'absolute' }} aria-hidden>
-        <defs><linearGradient id="be-shade" x1="0" x2="1"><stop offset="0" stopColor="#fff" stopOpacity=".25" /><stop offset=".5" stopColor="#fff" stopOpacity="0" /><stop offset="1" stopColor="#000" stopOpacity=".2" /></linearGradient></defs>
+        <defs><linearGradient id="be-shade" x1="0" x2="1"><stop offset="0" style={{ stopColor: 'rgb(var(--rn-light))' }} stopOpacity=".25" /><stop offset=".5" style={{ stopColor: 'rgb(var(--rn-light))' }} stopOpacity="0" /><stop offset="1" style={{ stopColor: 'rgb(var(--rn-shade))' }} stopOpacity=".2" /></linearGradient></defs>
       </svg>
       {width > 0 && placed.map(({ b, at, out, jump }) => {
         const i = order.get(b.id) ?? 0;

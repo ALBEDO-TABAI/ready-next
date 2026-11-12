@@ -76,14 +76,16 @@ async function main() {
     await stage.getByRole('button', { name: '文字卡', exact: true }).click()
     await stage.getByRole('button', { name: '完成编辑', exact: true }).click()
     await stage.click({ button: 'right', position: { x: 160, y: 520 } })
-    await stage.getByRole('menuitem', { name: '文档卡…', exact: true }).click()
-    await stage.getByRole('menuitem', { name: '来源文档', exact: true }).click()
-    // The card is written before the menu closes, and the board ignores right-clicks while a write is in flight.
-    await stage.locator('.canvas-context').waitFor({ state: 'detached', timeout: 15000 })
+    // The board's menus are the shared W1 menus (in the app's float host, not inside the board): 文档卡… continues
+    // in a picker float at the same point.
+    await page.getByRole('menuitem', { name: '文档卡…', exact: true }).click()
+    await page.getByRole('menuitem', { name: '来源文档', exact: true }).click()
+    // The card is written before the picker closes, and the board ignores right-clicks while a write is in flight.
+    await page.locator('[data-float-id="canvas-new-document"]').waitFor({ state: 'detached', timeout: 15000 })
     await stage.click({ button: 'right', position: { x: 520, y: 520 } })
-    await stage.getByRole('menuitem', { name: '链接…', exact: true }).click()
-    await stage.getByLabel('链接网址').fill('https://example.com')
-    await stage.getByRole('button', { name: '添加链接卡', exact: true }).click()
+    await page.getByRole('menuitem', { name: '链接…', exact: true }).click()
+    await page.getByLabel('链接网址').fill('https://example.com')
+    await page.getByRole('button', { name: '添加链接卡', exact: true }).click()
     const readCanvas = () => JSON.parse(fs.readFileSync(path.join(vault, 'X.canvas'), 'utf8'))
     await poll(() => readCanvas().nodes.length === 3, 'Three card types not persisted')
     await snapshot('01-three-card-types')
@@ -136,7 +138,7 @@ async function main() {
     // A context menu opened near the board's corner stays inside the board (it flips up and left).
     const stageBox = await stage.boundingBox()
     await stage.click({ button: 'right', position: { x: Math.round(stageBox.width - 24), y: Math.round(stageBox.height - 24) } })
-    const items = stage.getByRole('menuitem')
+    const items = page.locator('[data-float-id="canvas-context-menu"]').getByRole('menuitem')
     await items.first().waitFor()
     for (const box of await items.evaluateAll(nodes => nodes.map(node => { const r = node.getBoundingClientRect(); return { x: r.x, y: r.y, right: r.right, bottom: r.bottom } }))) {
       assert.ok(box.x >= stageBox.x && box.y >= stageBox.y && box.right <= stageBox.x + stageBox.width && box.bottom <= stageBox.y + stageBox.height, `menu item outside the board: ${JSON.stringify(box)}`)
@@ -145,7 +147,7 @@ async function main() {
     // MS3: a sub-board from 新建, entered by double-click, left by the breadcrumb.
     // An empty spot above the cards, relative to the board (the assistant panel may narrow the board).
     await stage.click({ button: 'right', position: { x: Math.round(stageBox.width * 0.4), y: Math.round(stageBox.height * 0.2) } })
-    await stage.getByRole('menuitem', { name: '子画板', exact: true }).click()
+    await page.getByRole('menuitem', { name: '子画板', exact: true }).click()
     await poll(() => fs.existsSync(path.join(vault, 'X', '子画板.canvas')) && readCanvas().nodes.some(node => node.ready.kind === 'subcanvas'), 'Sub-board missing')
     await stage.locator('.canvas-card[data-kind="subcanvas"]').first().dblclick()
     const sub = page.locator('[data-workbench-mode-panel="document"] .rn-canvas[aria-label="子画板"]').first()
@@ -156,14 +158,14 @@ async function main() {
     const exportPath = path.join(temporary, 'X 导出.zip')
     await app.evaluate(({ dialog }, file) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: file }) }, exportPath)
     await stage.getByRole('button', { name: '更多', exact: true }).click()
-    await stage.getByRole('menuitem', { name: '导出为 Markdown', exact: true }).click()
+    await page.getByRole('menuitem', { name: '导出为 Markdown', exact: true }).click()
     await poll(() => fs.existsSync(exportPath) && fs.statSync(exportPath).size > 0, 'Markdown export missing')
     await snapshot('03b-markdown-search-subboard-export')
     // MS3: 导出 PNG — Main captures this window's stage and writes a real PNG.
     const pngPath = path.join(temporary, 'X 导出.png')
     await app.evaluate(({ dialog }, file) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: file }) }, pngPath)
     await stage.getByRole('button', { name: '更多', exact: true }).click()
-    await stage.getByRole('menuitem', { name: '导出为 PNG', exact: true }).click()
+    await page.getByRole('menuitem', { name: '导出为 PNG', exact: true }).click()
     const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
     await poll(() => fs.existsSync(pngPath) && fs.statSync(pngPath).size > 1000 && fs.readFileSync(pngPath).subarray(0, 8).equals(PNG_SIGNATURE), 'PNG export missing')
     // MS3: 永久删除 takes a recycled card out of the file; 清空 asks once more in place, then empties the bin.

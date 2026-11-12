@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { createPortal } from 'react-dom'
 import {
   IconAdjustmentsHorizontal as SlidersHorizontal,
+  IconChevronLeft as ChevronLeft,
+  IconChevronRight as ChevronRight,
   IconFilePlus as FilePlus,
   IconFolderPlus as FolderPlus,
   IconLayoutGrid as LayoutGrid,
@@ -12,18 +14,13 @@ import {
 import { useWorkspace } from '../../stores/useWorkspace'
 import FileTree, { DEFAULT_FILE_FILTERS, type FileFilterMap, type FileViewMode } from './FileTree'
 import { FloatPanel } from '../ui/float/FloatPanel'
+import { IconButton, Input, MenuList, type MenuEntry } from '../ui'
 import { computeNextGridHistory, type GridNavigationEntry } from './gridNavigation'
 import { FILES_PANEL_DIMENSIONS, PANEL_TOKENS } from './panelTokens'
 import { WORKBENCH_HEADER_EDGE_X } from '../../modules/workbench/chrome'
-import {
-  buildFloatingMenuCheckStyle,
-  buildFloatingMenuItemStyle,
-  buildFloatingMenuSurfaceStyle,
-} from '../ui/floatingMenuStyles'
 import { subscribeWorkbenchWindowResize } from '../../modules/workbench/windowResize'
 import { subscribeDocumentDirectoryChanges } from '../../modules/document/directoryChangeBridge'
 import { releaseDirectoryWatch, watchDirectoriesFor } from '../../modules/document/directoryWatchRegistry'
-import './filesPanelFloatingMenu.css'
 
 interface FilesPanelProps {
   isVisible: boolean
@@ -35,13 +32,13 @@ export interface SidePanelSlots {
   body: ReactNode
 }
 
+/** The shared menu list's width (rn-menu's min-width), used to keep the filter menu inside the panel. */
+const FILTER_MENU_WIDTH = 200
+
 interface FloatingMenuPosition {
   left: number
   top: number
 }
-
-const ICON_BTN =
-  'flex items-center justify-center rounded transition-[background-color,box-shadow] duration-100 hover:bg-[var(--files-panel-state-hover-bg)] hover:shadow-[var(--files-panel-state-hover-shadow)]'
 
 export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
   const [query, setQuery] = useState('')
@@ -113,11 +110,13 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
     { key: 'other', label: '其他' },
   ]
 
-  const filterMenuStyle = buildFloatingMenuSurfaceStyle(168, {
-    maxHeight: 360,
-    padding: 6,
-    zIndex: 250,
-  })
+  // The shared menu list, kept open while filters are toggled (each row is a checkable item).
+  const filterMenuItems: MenuEntry[] = filterLabels.map(({ key, label }) => ({
+    id: key,
+    label,
+    checked: filters[key],
+    onSelect: () => toggleFilter(key),
+  }))
   const portalRoot = typeof document !== 'undefined' ? document.body : null
 
   const computeMenuPosition = useCallback((trigger: HTMLButtonElement | null, menuWidth: number): FloatingMenuPosition | null => {
@@ -140,7 +139,7 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
   const toggleFilterMenu = useCallback(() => {
     setShowFilterMenu((prev) => {
       const next = !prev
-      setFilterMenuPosition(next ? computeMenuPosition(filterTriggerRef.current, 168) : null)
+      setFilterMenuPosition(next ? computeMenuPosition(filterTriggerRef.current, FILTER_MENU_WIDTH) : null)
       return next
     })
   }, [computeMenuPosition])
@@ -150,7 +149,7 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
 
     const syncMenuPositions = () => {
       if (showFilterMenu) {
-        setFilterMenuPosition(computeMenuPosition(filterTriggerRef.current, 168))
+        setFilterMenuPosition(computeMenuPosition(filterTriggerRef.current, FILTER_MENU_WIDTH))
       }
     }
 
@@ -314,72 +313,38 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          <button
-            className={ICON_BTN}
-            style={{
-              width: 24,
-              height: 24,
-              color: viewMode === 'tree' ? PANEL_TOKENS.title : PANEL_TOKENS.mutedStrong,
-              background: viewMode === 'tree' ? 'var(--files-panel-state-active-bg)' : 'transparent',
-              boxShadow: viewMode === 'tree' ? 'var(--files-panel-state-active-shadow)' : 'none',
-            }}
-            onClick={() => setViewMode('tree')}
+          <IconButton
+            size="sm"
             title="列表视图"
-          >
-            <LayoutList style={{ width: 14, height: 14 }} />
-          </button>
-          <button
-            className={ICON_BTN}
-            style={{
-              width: 24,
-              height: 24,
-              color: viewMode === 'grid' ? PANEL_TOKENS.title : PANEL_TOKENS.mutedStrong,
-              background: viewMode === 'grid' ? 'var(--files-panel-state-active-bg)' : 'transparent',
-              boxShadow: viewMode === 'grid' ? 'var(--files-panel-state-active-shadow)' : 'none',
-            }}
-            onClick={() => setViewMode('grid')}
+            icon={<LayoutList />}
+            active={viewMode === 'tree'}
+            onClick={() => setViewMode('tree')}
+          />
+          <IconButton
+            size="sm"
             title="缩略图视图"
-          >
-            <LayoutGrid style={{ width: 14, height: 14 }} />
-          </button>
+            icon={<LayoutGrid />}
+            active={viewMode === 'grid'}
+            onClick={() => setViewMode('grid')}
+          />
 
           <div className="relative">
-            <button
+            <IconButton
               ref={filterTriggerRef}
-              className={ICON_BTN}
-              style={{
-                width: 24,
-                height: 24,
-                color: PANEL_TOKENS.mutedStrong,
-                background: showFilterMenu ? 'var(--files-panel-state-active-bg)' : 'transparent',
-                boxShadow: showFilterMenu ? 'var(--files-panel-state-active-shadow)' : 'none',
-              }}
-              onClick={toggleFilterMenu}
+              size="sm"
               title="筛选"
-            >
-              <SlidersHorizontal style={{ width: 14, height: 14 }} />
-            </button>
+              icon={<SlidersHorizontal />}
+              active={showFilterMenu}
+              aria-haspopup="menu"
+              aria-expanded={showFilterMenu}
+              onClick={toggleFilterMenu}
+            />
           </div>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          <button
-            className={ICON_BTN}
-            style={{ width: 24, height: 24, color: PANEL_TOKENS.mutedStrong }}
-            onClick={() => startCreating('file')}
-            title="新建文档"
-          >
-            <FilePlus style={{ width: 14, height: 14 }} />
-          </button>
-          <button
-            className={ICON_BTN}
-            style={{ width: 24, height: 24, color: PANEL_TOKENS.mutedStrong }}
-            onClick={() => startCreating('folder')}
-            title="新建文件夹"
-          >
-            <FolderPlus style={{ width: 14, height: 14 }} />
-          </button>
-
+          <IconButton size="sm" title="新建文档" icon={<FilePlus />} onClick={() => startCreating('file')} />
+          <IconButton size="sm" title="新建文件夹" icon={<FolderPlus />} onClick={() => startCreating('folder')} />
         </div>
       </div>
 
@@ -392,66 +357,26 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
         <div className="flex items-center gap-[6px]">
           {viewMode === 'grid' && (
             <div className="flex items-center gap-[4px] shrink-0">
-              <button
-                type="button"
-                onClick={handleGridNavigateBack}
-                disabled={!canGridNavigateBack}
-                title="后退"
-                aria-label="后退"
-                className="flex items-center justify-center rounded-[8px] border text-[12px] font-semibold transition-colors duration-100"
-                style={{
-                  width: 24,
-                  height: 24,
-                  borderColor: 'var(--input-slot-border)',
-                  background: canGridNavigateBack ? 'var(--input-slot-bg)' : 'var(--files-panel-state-hover-bg)',
-                  color: canGridNavigateBack ? PANEL_TOKENS.text : PANEL_TOKENS.mutedStrong,
-                  opacity: canGridNavigateBack ? 1 : 0.45,
-                  cursor: canGridNavigateBack ? 'pointer' : 'default',
-                }}
-              >
-                {'<'}
-              </button>
-              <button
-                type="button"
-                onClick={handleGridNavigateForward}
-                disabled={!canGridNavigateForward}
-                title="前进"
-                aria-label="前进"
-                className="flex items-center justify-center rounded-[8px] border text-[12px] font-semibold transition-colors duration-100"
-                style={{
-                  width: 24,
-                  height: 24,
-                  borderColor: 'var(--input-slot-border)',
-                  background: canGridNavigateForward ? 'var(--input-slot-bg)' : 'var(--files-panel-state-hover-bg)',
-                  color: canGridNavigateForward ? PANEL_TOKENS.text : PANEL_TOKENS.mutedStrong,
-                  opacity: canGridNavigateForward ? 1 : 0.45,
-                  cursor: canGridNavigateForward ? 'pointer' : 'default',
-                }}
-              >
-                {'>'}
-              </button>
+              <IconButton size="sm" title="后退" icon={<ChevronLeft />} onClick={handleGridNavigateBack} disabled={!canGridNavigateBack} />
+              <IconButton size="sm" title="前进" icon={<ChevronRight />} onClick={handleGridNavigateForward} disabled={!canGridNavigateForward} />
             </div>
           )}
-          <label
-            className="ready-input-shell flex items-center gap-[6px] border min-w-0 flex-1"
-            style={{
-              height: FILES_PANEL_DIMENSIONS.searchHeight,
-              borderRadius: FILES_PANEL_DIMENSIONS.searchRadius,
-              padding: '6px 10px',
-              background: 'var(--input-slot-bg)',
-              borderColor: 'var(--input-slot-border)',
-            }}
-          >
-            <input
+          <div className="relative flex min-w-0 flex-1 items-center">
+            <Input
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="搜索文件..."
-              className="ready-input-slot-inner h-full w-full bg-transparent border-none outline-none text-[13px] font-medium placeholder:text-[var(--text-placeholder)]"
-              style={{ color: PANEL_TOKENS.text }}
+              aria-label="搜索文件"
+              style={{
+                width: '100%',
+                height: FILES_PANEL_DIMENSIONS.searchHeight,
+                paddingLeft: 10,
+                paddingRight: 28,
+              }}
             />
-            <Search className="h-[13px] w-[13px] shrink-0" style={{ color: PANEL_TOKENS.sectionTitle }} />
-          </label>
+            <Search className="h-[13px] w-[13px] pointer-events-none absolute" aria-hidden="true" style={{ right: 10, color: PANEL_TOKENS.sectionTitle }} />
+          </div>
         </div>
       </div>
 
@@ -467,34 +392,16 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
       {portalRoot && showFilterMenu && filterMenuPosition && createPortal(
         <FloatPanel
           ref={filterMenuRef}
+          className="rn-ui"
           style={{
-            ...filterMenuStyle,
             position: 'fixed',
             left: filterMenuPosition.left,
             top: filterMenuPosition.top,
-            minWidth: 168,
+            zIndex: 250,
+            maxHeight: 360,
           }}
         >
-          {filterLabels.map(({ key, label }) => (
-            <button
-              key={key}
-              onClick={() => toggleFilter(key)}
-              className="ready-floating-menu-item w-full text-left flex items-center gap-2"
-              style={{
-                ...buildFloatingMenuItemStyle({ compact: true }),
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10,
-                fontSize: 12,
-                color: PANEL_TOKENS.text,
-              }}
-            >
-              <span style={buildFloatingMenuCheckStyle(filters[key])}>
-                {filters[key] ? '✓' : ''}
-              </span>
-              {label}
-            </button>
-          ))}
+          <MenuList items={filterMenuItems} label="筛选" onDone={() => {}} />
         </FloatPanel>,
         document.body,
       )}

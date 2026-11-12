@@ -77,7 +77,7 @@ export function RunFeedbackStars({ taskId }: { taskId: string }) {
       style={{ paddingTop: 2 }}
       onMouseLeave={() => setHovered(null)}
     >
-      <span className="t-meta" data-typography-role="meta" style={{ color: 'var(--text-light)' }}>
+      <span className="t-meta" data-typography-role="meta" style={{ color: 'var(--rn-ink-3)' }}>
         {failed ? '评分未保存，点击重试' : rating ? '已评分' : '评价本次运行'}
       </span>
       <div className="flex items-center" style={{ gap: 2 }}>
@@ -109,7 +109,8 @@ export function RunFeedbackStars({ taskId }: { taskId: string }) {
                 style={{
                   width: STAR_SIZE,
                   height: STAR_SIZE,
-                  color: filled ? 'var(--color-amber, #e8a33d)' : 'var(--text-light)',
+                  // A given rating is ink (DL6); the signal colour is not a rating colour (DL5).
+                  color: filled ? 'var(--rn-ink)' : 'var(--rn-ink-3)',
                 }}
               />
             </button>

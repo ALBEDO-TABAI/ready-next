@@ -29,7 +29,13 @@ export function SoftFailureCapsule({ softError, onDismiss }: Props) {
     <div
       role="status"
       aria-live="polite"
-      className="mx-4 my-2 flex items-center gap-2 rounded-lg border border-amber-200/60 bg-amber-50/80 px-3 py-2 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200"
+      className="mx-4 my-2 flex items-center gap-2 rounded-lg px-3 py-2 text-xs"
+      // A recoverable failure is a warning tint on the glass (--rn-warn), ink text (W1 DL6).
+      style={{
+        border: '1px solid color-mix(in srgb, var(--rn-warn) 30%, transparent)',
+        background: 'color-mix(in srgb, var(--rn-warn) 10%, transparent)',
+        color: 'var(--rn-ink)',
+      }}
     >
       <span className="font-medium">任务暂时失败</span>
       <span className="flex-1 truncate opacity-80">

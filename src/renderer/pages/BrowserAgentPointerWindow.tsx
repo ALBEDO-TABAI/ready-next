@@ -28,34 +28,11 @@ export default function BrowserAgentPointerWindow() {
       <div
         key={`${snapshot.revision}-ripple`}
         data-browser-agent-pointer-ring=""
-        style={{
-          position: 'absolute',
-          left: snapshot.x,
-          top: snapshot.y,
-          width: pressed ? 34 : 22,
-          height: pressed ? 34 : 22,
-          borderRadius: '50%',
-          border: `2px solid ${pressed ? 'rgba(52,120,246,.9)' : 'rgba(52,120,246,.55)'}`,
-          background: pressed ? 'rgba(52,120,246,.14)' : 'rgba(52,120,246,.06)',
-          boxShadow: '0 0 0 5px rgba(52,120,246,.08), 0 5px 18px rgba(18,62,140,.24)',
-          transform: 'translate(-50%, -50%)',
-          transition: 'left 90ms linear, top 90ms linear, width 90ms ease, height 90ms ease',
-        }}
+        data-pressed={pressed}
+        className="browser-agent-pointer__ring"
+        style={{ left: snapshot.x, top: snapshot.y }}
       />
-      <div
-        style={{
-          position: 'absolute',
-          left: snapshot.x + 11,
-          top: snapshot.y + 11,
-          padding: '3px 7px',
-          borderRadius: 999,
-          background: 'rgba(25, 35, 55, .78)',
-          color: 'white',
-          font: '600 10px -apple-system, BlinkMacSystemFont, sans-serif',
-          boxShadow: '0 4px 14px rgba(0,0,0,.2)',
-          whiteSpace: 'nowrap',
-        }}
-      >
+      <div className="browser-agent-pointer__label" style={{ left: snapshot.x + 11, top: snapshot.y + 11 }}>
         Agent
       </div>
     </div>
