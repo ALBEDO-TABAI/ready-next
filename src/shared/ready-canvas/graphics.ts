@@ -1,5 +1,9 @@
 import { GraphicSchema, type Graphic } from './schema'
 
+/** The ink a new drawing (rectangle, arrow, freehand) is saved with: it is written into the board file, so it is
+ *  the drawing's own colour (content data), not an interface token. */
+export const DEFAULT_GRAPHIC_STROKE = '#ff5a1f'
+
 /** Old arrows are vectors from (0,0); their visible frame includes negative endpoints. */
 export function graphicFrame(graphic: Graphic, width: number, height: number) {
   if (graphic.type !== 'arrow') return { x: 0, y: 0, width, height }

@@ -2,19 +2,37 @@ import type { LibraryBook } from '../../../../shared/library'
 import { toLocalFileUrl } from '../../../utils/dragDrop'
 import { hash, lookOf } from '../topics'
 import { shelfBook } from '../presentation'
-import { fontStack, PAPERS, type Layout, type Page, type Typo } from './paginate'
+import { fontStack, type Layout, type Page, type Typo } from './paginate'
+import { PAPERS } from './papers'
+import { markerColor } from './marks'
 import type { LoadedBook, TocItem } from './book'
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+/**
+ * A printed page stands alone: it is also drawn into the WebGL page rasters, where no outside variable reaches. So the
+ * sheet carries every colour it prints with — the paper the reader chose, the book's cloth and the highlight colours
+ * (data), and the few Ready tokens a page shares (the signal dot, the bookplate's ink, light and shade), read now.
+ */
+function sheetColours(rec: LibraryBook, typo: Typo): string {
+  const paper = PAPERS[typo.paper], look = lookOf(shelfBook(rec))
+  const tokens = getComputedStyle(document.documentElement), token = (name: string) => tokens.getPropertyValue(name).trim()
+  return `--pp:${paper.pp};--pp2:${paper.pp2};--pi:${paper.pi};--cc:${look.color};--cf:${look.fg};--sig:${token('--rn-accent')};`
+    + `--plate:${PAPERS.white.pp};--plate-ink:${token('--rn-paper-ink')};--plate-ink3:${token('--rn-paper-ink-3')};--light:${token('--rn-light')};--shade:${token('--rn-shade')};`
+    + `--mk-yellow:${markerColor('yellow')};--mk-green:${markerColor('green')};--mk-blue:${markerColor('blue')};--mk-pink:${markerColor('pink')};--mk-pen:${markerColor('pen')}`
+}
+/** A sheet with nothing printed on it (the back of the last leaf), on the same paper. */
+export function blankSheet(rec: LibraryBook, typo: Typo): HTMLElement {
+  const d = document.createElement('div')
+  d.className = 'sheet'
+  d.style.cssText = sheetColours(rec, typo)
+  return d
+}
 export function renderSheet(i: number, L: Layout, book: LoadedBook, rec: LibraryBook, typo: Typo, latin: boolean, toc: TocItem[]): HTMLElement {
   const p: Page = L.pages[i];
-  const look = lookOf(shelfBook(rec));
-  const cloth = look.color, clothFg = look.fg;
-  const paper = PAPERS[typo.paper];
   const d = document.createElement('div');
   const recto = i % 2 === 0;
   d.className = `sheet ${recto ? 'recto' : 'verso'} ${latin ? 'latin' : ''}`;
   d.dataset.pi = String(i);
-  d.style.cssText = `--fs:${typo.size}px;--lh:${typo.lead};--pf:${fontStack(typo.font, latin)};--pp:${paper.pp};--pp2:${paper.pp2};--pi:${paper.pi};--cc:${cloth};--cf:${clothFg}`;
+  d.style.cssText = `--fs:${typo.size}px;--lh:${typo.lead};--pf:${fontStack(typo.font, latin)};${sheetColours(rec, typo)}`;
   const no = String((hash(rec.id) % 900) + 100);
   const cover = rec.coverPath ? toLocalFileUrl(rec.coverPath) : undefined;
   const folio = (n: number) => `<div class="pg-foot"><span>${String(n).padStart(3, '0')}</span><span class="dotx"></span></div>`;

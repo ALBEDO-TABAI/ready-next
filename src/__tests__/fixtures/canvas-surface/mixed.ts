@@ -17,3 +17,6 @@ export function mixedCanvas(count = 12): ReadyCanvas {
   })
   return { ready: { id: 'canvas-lab', schemaVersion: 1, title: '交互实验画板' }, nodes, edges: count > 1 ? [{ id: 'edge0', fromNode: 'n0', toNode: 'n1', toEnd: 'arrow' }] : [] }
 }
+
+/** The synthetic picture behind Lab.assets/image.svg: a disc on a dark plate (the lab resolves it without any file). */
+export const MIXED_IMAGE_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="160"><rect width="200" height="160" fill="#252525"/><circle cx="100" cy="80" r="45" fill="#ff5a1f"/></svg>'

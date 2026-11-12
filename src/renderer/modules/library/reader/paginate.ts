@@ -26,11 +26,6 @@ const LATIN: Record<Typo['font'], string> = {
 /** System faces only (a page raster can't load web fonts). A Chinese book keeps its CJK face first, so quotes and
  *  punctuation stay full-width; a Latin book puts a Latin face first and lets CJK fall through. */
 export const fontStack = (f: Typo['font'], latin: boolean) => `${latin ? `${LATIN[f]}, ${CJK[f]}` : `${CJK[f]}, ${LATIN[f]}`}, ${f === 'hei' ? 'sans-serif' : 'serif'}`;
-export const PAPERS: Record<Typo['paper'], { pp: string; pp2: string; pi: string }> = {
-  white: { pp: '#fbfaf7', pp2: '#f0eee9', pi: '#18181a' },
-  cream: { pp: '#f5efe2', pp2: '#ebe2cf', pi: '#2b241b' },
-  night: { pp: '#202022', pp2: '#2a2a2d', pi: '#c9c4ba' },
-};
 
 const BLOCKY = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'UL', 'OL', 'TABLE', 'FIGURE', 'PRE', 'HR', 'BLOCKQUOTE', 'DL', 'CENTER', 'ADDRESS', 'DIV', 'SECTION', 'ARTICLE', 'ASIDE', 'HEADER', 'FOOTER', 'MAIN', 'NAV', 'FIGCAPTION']);
 const CONTAINER = new Set(['DIV', 'SECTION', 'ARTICLE', 'ASIDE', 'HEADER', 'FOOTER', 'MAIN', 'NAV', 'CENTER', 'BLOCKQUOTE', 'FIGURE']);

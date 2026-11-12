@@ -3,13 +3,16 @@ import test from 'node:test'
 import React, { act } from 'react'
 import { JSDOM } from 'jsdom'
 import { CanvasSurface } from '../renderer/components/canvas/surface/CanvasSurface'
+import { closeAllFloats, FloatHost } from '../renderer/components/ui'
 import type { CanvasSurfaceProps, FrameWork } from '../renderer/components/canvas/surface/types'
 import { mixedCanvas } from './fixtures/canvas-surface/mixed'
 import { applyCanvasOperations } from '../shared/ready-canvas/operations'
 
 async function mount(count = 12, extra: Partial<CanvasSurfaceProps> = {}) {
   const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost' })
-  const globals = { window: dom.window, document: dom.window.document, HTMLElement: dom.window.HTMLElement, Element: dom.window.Element, IS_REACT_ACT_ENVIRONMENT: true }
+  const globals = { window: dom.window, document: dom.window.document, HTMLElement: dom.window.HTMLElement, Element: dom.window.Element, IS_REACT_ACT_ENVIRONMENT: true,
+    // The float host measures its frames; jsdom has no layout observer (the board itself checks for one).
+    ResizeObserver: class { observe() {} disconnect() {} } }
   const saved = Object.fromEntries(Object.keys(globals).map(k => [k, Object.getOwnPropertyDescriptor(globalThis, k)]))
   for (const [key, value] of Object.entries(globals)) Object.defineProperty(globalThis, key, { value, configurable: true, writable: true })
   let seq = 0
@@ -21,7 +24,8 @@ async function mount(count = 12, extra: Partial<CanvasSurfaceProps> = {}) {
   let canvas = mixedCanvas(count), commits = 0
   const work: FrameWork[] = []
   const props: CanvasSurfaceProps = { canvas, onOperations: (ops) => { commits++; canvas = applyCanvasOperations(canvas, ops).canvas }, onFrameWork: value => work.push(value), ...extra }
-  await act(async () => root.render(<CanvasSurface {...props} />))
+  // The board's menus are the shared W1 menus, rendered by the app's one float host (as in the app).
+  await act(async () => root.render(<><CanvasSurface {...props} /><FloatHost /></>))
   const surface = dom.window.document.querySelector<HTMLElement>('[data-canvas-surface]')!
   const card = (id = 'n0') => surface.querySelector<HTMLElement>(`[data-node-id="${id}"]`)!
   async function pointer(target: Element, type: string, x: number, y: number, more = {}) {
@@ -32,9 +36,10 @@ async function mount(count = 12, extra: Partial<CanvasSurfaceProps> = {}) {
     await act(async () => target.dispatchEvent(new dom.window.KeyboardEvent('keydown', { bubbles: true, cancelable: true, key, ...more })))
   }
   // Chrome buttons are icons named by their label (W4 MS1); shapes and arrangements sit in the dock's 图形 and the
-  // selection bar's 排版 menus.
+  // selection bar's 排版 menus, which (like the right-click menu) are shared W1 menus in the float host.
   async function click(label: string) {
-    const find = () => [...surface.querySelectorAll('button')].find(b => b.textContent === label || b.getAttribute('aria-label') === label)
+    const menuItem = () => [...dom.window.document.querySelectorAll<HTMLElement>('[role^="menuitem"]')].find(item => item.querySelector('.rn-menu__label')?.textContent === label)
+    const find = () => [...surface.querySelectorAll('button')].find(b => b.textContent === label || b.getAttribute('aria-label') === label) ?? menuItem()
     let button = find()
     const menu = ['矩形', '箭头', '连线'].includes(label) ? '图形' : ['画廊排版', '瀑布排版', '散开排版'].includes(label) ? '排版' : null
     if (!button && menu) {
@@ -44,23 +49,33 @@ async function mount(count = 12, extra: Partial<CanvasSurfaceProps> = {}) {
     assert.ok(button, label); await act(async () => button.click())
   }
   return { dom, surface, card, pointer, flush, key, click, work, frames, get canvas() { return canvas }, get commits() { return commits },
-    async replace(next: typeof canvas) { canvas = next; await act(async () => root.render(<CanvasSurface {...props} canvas={next} />)) },
-    async close() { await act(async () => root.unmount()); dom.window.close(); for (const [key, descriptor] of Object.entries(saved)) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key) } } }
+    async replace(next: typeof canvas) { canvas = next; await act(async () => root.render(<><CanvasSurface {...props} canvas={next} /><FloatHost /></>)) },
+    menu: () => dom.window.document.querySelector('[role="menu"]'),
+    async close() { await act(async () => { closeAllFloats(); root.unmount() }); dom.window.close(); for (const [key, descriptor] of Object.entries(saved)) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key) } } }
 }
 
-test('selection context menu adds the actual selected nodes and keeps failed work retryable', async () => {
+test('selection context menu adds the actual selected nodes, closes after a pick and keeps failed work retryable', async () => {
   const attempts: string[][] = []
   const ui = await mount(3, { onAddToDocument: async ids => {
     attempts.push(ids); if (attempts.length === 1) throw new Error('请重试')
   } })
+  const rightClick = () => act(async () => ui.card().dispatchEvent(new ui.dom.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 20 })))
+  // jsdom has no layout: give the board a box, so the menu is placed against it (it stays inside the board).
+  ui.surface.getBoundingClientRect = () => ({ left: 0, top: 0, right: 1000, bottom: 700, width: 1000, height: 700, x: 0, y: 0, toJSON() {} })
   try {
     ui.surface.focus(); await ui.key('a', { ctrlKey: true })
-    await act(async () => ui.card().dispatchEvent(new ui.dom.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 20 })))
+    await rightClick()
+    // The menu opens at the pointer in the float host and is named for the selection.
+    assert.equal(ui.menu()?.getAttribute('aria-label'), '选区菜单')
+    assert.equal(ui.dom.window.document.querySelector<HTMLElement>('[data-float-id="canvas-context-menu"]')?.style.left, '10px')
     await ui.click('添加到文档')
-    assert.match(ui.surface.textContent!, /请重试/)
+    assert.equal(ui.menu(), null, 'a pick closes the menu')
+    assert.match(ui.surface.querySelector('[role="alert"]')?.textContent ?? '', /请重试/)
+    await rightClick()
+    assert.equal(ui.surface.querySelector('[role="alert"]'), null, 'reopening the menu clears the old failure')
     await ui.click('添加到文档')
     assert.deepEqual(attempts, [['n0', 'n1', 'n2'], ['n0', 'n1', 'n2']])
-    assert.equal(ui.surface.querySelector('[role="menu"]'), null)
+    assert.equal(ui.menu(), null)
     assert.equal(ui.commits, 0)
   } finally { await ui.close() }
 })

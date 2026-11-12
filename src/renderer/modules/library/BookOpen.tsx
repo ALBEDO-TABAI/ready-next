@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import type { LibraryBook } from '../../../shared/library'
+import { Button } from '../../components/ui'
 import { Cover } from './Book'
 import { type ShelfBook, TOPIC } from './topics'
 
@@ -20,13 +21,13 @@ export function BookOpen({ book, record, origin, onRead, onClose }: {
     return () => { animation?.cancel(); if (origin.isConnected) origin.closest('button')?.focus({ preventScroll: true }) }
   }, [origin])
   return <div className="book-dialog" role="dialog" aria-label={`《${book.title}》信息`} onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); onClose() } }}>
-    <button type="button" className="dialog-close" onClick={onClose}>放回书架</button>
+    <Button variant="ghost" className="dialog-close" onClick={onClose}>放回书架</Button>
     <div ref={ref} className="open-book" tabIndex={-1} data-open={open}>
       <div className="book-information">
         <p>{TOPIC[book.topic].name} · {record.format.toUpperCase()}</p>
         <h2>{record.title}</h2><p>{record.author}</p>
         <dl><dt>出版社</dt><dd>{record.publisher || '未提供'}</dd><dt>年份</dt><dd>{record.year || '未提供'}</dd><dt>语言</dt><dd>{record.language || '未提供'}</dd><dt>状态</dt><dd>{record.status}</dd><dt>字数</dt><dd>{record.words?.toLocaleString() || '未统计'}</dd></dl>
-        <button type="button" onClick={onRead}>开始阅读</button>
+        <Button variant="primary" onClick={onRead}>开始阅读</Button>
       </div>
       <button type="button" className="open-cover" aria-label={open ? '合上封面' : '翻看封面'} onClick={() => setOpen(!open)}><Cover book={book} /></button>
     </div>

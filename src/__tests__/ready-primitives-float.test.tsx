@@ -3,7 +3,7 @@ import test from 'node:test'
 import React, { act } from 'react'
 import { mountPrimitives, ui } from './utils/primitives-ui-harness'
 
-const { FloatHost, openFloat, closeFloat, isFloatOpen, openMenu } = ui
+const { FloatHost, openFloat, closeFloat, isFloatOpen, openMenu, toggleMenu } = ui
 const anchor = { left: 40, top: 40, right: 80, bottom: 60 }
 const content = { anchor, render: () => <span>浮层内容</span> }
 
@@ -82,4 +82,33 @@ test('Float chooses data-autofocus; noFocus leaves the external control focused'
   assert.equal(h.dom.window.document.activeElement, trigger)
   await act(async () => { openFloat({ ...content, render: () => <input data-autofocus aria-label="姓名" /> }) })
   assert.equal(h.dom.window.document.activeElement, h.get('input[aria-label="姓名"]'))
+})
+
+test('A float given bounds stays inside them instead of the window', async t => {
+  const h = await mountPrimitives(t)
+  await h.render(<FloatHost />)
+  // jsdom measures the float as 0×0, so the anchor itself is what has to come inside the bounds.
+  await act(async () => { openFloat({ ...content, anchor: { left: 20, top: 10, right: 20, bottom: 10 }, bounds: () => ({ left: 100, top: 50, right: 400, bottom: 300 }) }) })
+  const frame = h.get('[data-float-id]')
+  assert.equal(frame.style.left, '108px')
+  assert.equal(frame.style.top, '58px')
+})
+
+test('toggleMenu opens a named menu from its button, a second press closes it, and focus returns to the button', async t => {
+  const h = await mountPrimitives(t)
+  const states: boolean[] = []
+  let picked = 0
+  const toggle = (button: HTMLElement) => toggleMenu(button, { id: 'tool-menu', label: '图形', placement: 'bottom', onOpenChange: open => states.push(open),
+    items: [{ id: 'rect', label: '矩形', onSelect: () => picked++ }] })
+  await h.render(<><button type="button" data-float-anchor="tool-menu" onClick={event => toggle(event.currentTarget)}>图形</button><FloatHost /></>)
+  const button = h.get<HTMLButtonElement>('button')
+  await h.pointer(button); await h.click(button)
+  assert.equal(h.get('[role="menu"]').getAttribute('aria-label'), '图形')
+  await h.pointer(button); await h.click(button)
+  assert.equal(h.body.querySelector('[role="menu"]'), null)
+  assert.equal(h.dom.window.document.activeElement, button)
+  await h.click(button)
+  await h.click(h.get('[role="menuitem"]'))
+  assert.equal(picked, 1); assert.equal(h.body.querySelector('[role="menu"]'), null)
+  assert.deepEqual(states, [true, false, true, false])
 })

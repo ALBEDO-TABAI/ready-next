@@ -3,7 +3,7 @@ import test from 'node:test'
 import React, { act, useState } from 'react'
 import { mountPrimitives, ui } from './utils/primitives-ui-harness'
 
-const { Button, IconButton, Input, Textarea, Select, Switch, Checkbox, Segmented, Tabs, ListRow, ResizeHandle,
+const { Button, IconButton, Input, Textarea, Select, Slider, Switch, Checkbox, Segmented, Tabs, ListRow, ResizeHandle,
   Chip, Kbd, SectionHeader, EmptyState, Skeleton, Toolbar, ToolbarSeparator, ScrollArea } = ui
 
 test('Button and IconButton expose names, pressed state, focus and disabled clicks', async t => {
@@ -229,4 +229,25 @@ test('Tabs close a closable tab with Delete, and leave a fixed tab open', async 
   fixed.focus()
   await h.key(fixed, 'Delete')
   assert.deepEqual({ closed, changed }, { closed: ['b'], changed: [] })
+})
+
+test('Slider is a named range that reports its value and draws the part up to the knob', async t => {
+  const h = await mountPrimitives(t)
+  const values: number[] = []
+  function Example({ disabled = false }) {
+    const [size, setSize] = useState(18)
+    return <Slider aria-label="字号" min="13" max="33" value={size} disabled={disabled} onChange={event => { values.push(Number(event.target.value)); setSize(Number(event.target.value)) }} />
+  }
+  await h.render(<Example />)
+  const slider = h.get<HTMLInputElement>('input[aria-label="字号"]')
+  assert.equal(slider.type, 'range')
+  assert.equal(slider.style.getPropertyValue('--rn-range-at'), '25%')
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(h.dom.window.HTMLInputElement.prototype, 'value')!.set!.call(slider, '23')
+    slider.dispatchEvent(new h.dom.window.Event('input', { bubbles: true }))
+  })
+  assert.deepEqual(values, [23])
+  assert.equal(slider.style.getPropertyValue('--rn-range-at'), '50%')
+  await h.render(<Example disabled />)
+  assert.equal(h.get<HTMLInputElement>('input[aria-label="字号"]').disabled, true)
 })

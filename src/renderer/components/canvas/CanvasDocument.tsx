@@ -16,7 +16,7 @@ import { drafts } from '../../modules/document/drafts/runtime'
 import { toLocalFileUrl } from '../../utils/dragDrop'
 import './surface/surface.css'
 import { addBoardSelectionToAgentInput } from '../../modules/agent/chat-input-bridge'
-import { BoardNewItems } from './BoardNewItems'
+import { BOARD_NEW_DOCUMENT, BOARD_NEW_LINK, boardNewItems } from './BoardNewItems'
 import { boardAncestors } from './board-ancestors'
 import { READY_REF_MIME } from '../../modules/calendar/linkage/transfer'
 import { readReadyRefTransfer } from '../../../shared/ready-ref'
@@ -24,7 +24,7 @@ import { dropCanvasReference } from '../../modules/canvas/drop-reference'
 import { openInCurrentTab } from '../../modules/document/ink/layout-state'
 import { boardMarkdown } from '../../modules/canvas/export'
 import { captureDocumentPreviewHtml } from '../document/document-export-capture'
-import { showToast } from '../ui'
+import { Button, closeFloat, showToast } from '../ui'
 
 function confirmed<T>(result: { ok: true; value: T } | { ok: false; error: string }): T {
   if (!result.ok) throw new Error(result.error)
@@ -48,6 +48,8 @@ export default function CanvasDocument({ tab }: { tab: DocTab }) {
     const off = api.calendar.onChanged(() => { void reload() }); void reload()
     return () => { disposed = true; off() }
   }, [api])
+  // A 新建 form (链接…, 文档卡…) belongs to this board: it closes when the board does.
+  useEffect(() => () => { closeFloat(BOARD_NEW_LINK); closeFloat(BOARD_NEW_DOCUMENT) }, [tab.objectId])
   const refresh = useCallback(async () => {
     const before = current.current, epoch = generation.current
     if (!before) return
@@ -103,14 +105,14 @@ export default function CanvasDocument({ tab }: { tab: DocTab }) {
   const pages = trees.flatMap(function flatten(node): PageNode[] { return [node, ...node.children.flatMap(flatten)] }).filter(node => node.kind === 'page')
   if (isReadyBoardFile(tab.path)) return <section className="p-4" aria-label="旧画板转换">
     <p>这是旧画板。转换为新画板后继续编辑，原文件保持不变。</p>
-    <button disabled={!root} onClick={() => run(async () => {
+    <Button disabled={!root} onClick={() => run(async () => {
       const sourcePath = tab.path!
       if (!sourcePath.startsWith(root + '/')) throw new Error('请先将导入源放入当前资料库')
       const result = confirmed(await api.canvas.import({ operationId: importId.current, kind: 'readyboard', sourcePath,
         targetPath: sourcePath.slice(root.length + 1).replace(/\.readyboard$/i, '.canvas') }))
       if (result.status !== 'complete') throw new Error(`转换缺少素材：${result.incomplete.map(item => item.reason).join('；')}`)
       await openReadyRef({ kind: 'canvas', id: result.objectId }, 'document')
-    })}>转换为 .canvas</button>{error && <p role="alert">{error}</p>}
+    })}>转换为 .canvas</Button>{error && <p role="alert">{error}</p>}
   </section>
   if (!opened || !previews) return <p role={error ? 'alert' : 'status'}>{error || '正在打开画板…'}</p>
   const dropData = (data: DataTransfer, at: { x: number; y: number }) => {
@@ -150,7 +152,7 @@ export default function CanvasDocument({ tab }: { tab: DocTab }) {
       onNavigateSubcanvas={node => { if (node.type === 'file') openInCurrentTab(`${root}/${node.file}`); else if (node.ready.ref) run(() => openReadyRef(node.ready.ref!, 'document')) }}
       breadcrumbs={ancestors.map(node => ({ id: node.objectId, title: node.title }))}
       onNavigateAncestor={id => { const node = ancestors.find(item => item.objectId === id); if (node) openInCurrentTab(node.path) }}
-      extraNewItems={(at, close) => <BoardNewItems at={at} close={close} pages={pages} root={root} boardPath={opened.path} add={node => write([{ type: 'addNode', node }])} report={cause => setError(String(cause))} />}
+      extraNewItems={(at, place) => boardNewItems({ at, place, pages, root, boardPath: opened.path, add: node => write([{ type: 'addNode', node }]), report: cause => setError(String(cause)) })}
       acceptsDrop={types => types.includes(READY_REF_MIME)} onDropData={dropData} onExport={exportBoard} captureImage={captureBoard}
       onAskAI={nodeIds => addBoardSelectionToAgentInput({ title: opened.canvas.ready.title || '画板', objectId: opened.objectId }, nodeIds)} />
   </div>

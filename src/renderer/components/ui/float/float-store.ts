@@ -12,6 +12,8 @@ export interface FloatSpec {
   anchor: FloatAnchor | (() => FloatAnchor)
   placement?: FloatPlacement
   offset?: number
+  /** The area the float stays inside (default: the window), e.g. a board whose menus must not cover the panel beside it. */
+  bounds?: FloatAnchor | (() => FloatAnchor)
   render: (close: () => void) => ReactNode
   onClose?: () => void
   /** Dims the page behind it (dialogs). */

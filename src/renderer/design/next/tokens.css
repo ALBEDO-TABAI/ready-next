@@ -115,6 +115,22 @@
   --rn-shelf-edge: rgb(11 11 14 / .10);
   --rn-shelf-cast: rgb(20 20 40 / .16);
   --rn-bracket: #c9c9cf;
+  --rn-shelf-gloss: rgb(255 255 255 / .9);       /* the pane's top edge catching the light */
+  --rn-shelf-face-gloss: rgb(255 255 255 / .5);
+  --rn-shelf-wall: rgb(20 20 40 / .07);          /* the shade the books cast on the wall above a pane */
+
+  /* ---- books and cards as objects (B13): light and shade on cloth and paper, as channels for rgb(var(--…) / alpha) ---- */
+  --rn-light: 255 255 255;
+  --rn-shade: 0 0 0;
+  --rn-cast: 20 20 40;                           /* a cast shadow's tint (the open book, the page gutter) */
+  --rn-page-shade: 20 18 12;                     /* a turning leaf's own shade */
+  /* a spine's paper label and its foil stamping */
+  --rn-cloth-label: #f4ecda;
+  --rn-cloth-label-ink: #2a2520;
+  --rn-cloth-foil: #ecd391;
+  --rn-cloth-foil-deep: #5a3f12;
+  /* the board's sticky note (便签) */
+  --rn-note: rgb(249 243 220);
 
   /* adaptive: written by JS from the cover in view */
   --rn-amb: 200 190 180;
@@ -175,6 +191,10 @@
   --rn-shelf-edge: rgb(255 255 255 / .1);
   --rn-shelf-cast: rgb(0 0 0 / .5);
   --rn-bracket: #3a3a40;
+  --rn-shelf-gloss: rgb(255 255 255 / .22);
+  --rn-shelf-face-gloss: rgb(255 255 255 / .08);
+  --rn-shelf-wall: rgb(0 0 0 / .3);
+  --rn-note: rgb(80 68 37);
   --rn-amb-alpha: .14;
   color-scheme: dark;
 }
