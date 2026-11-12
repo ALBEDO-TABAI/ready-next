@@ -8,6 +8,8 @@ import BrowserDiagnosticsDock from '../../components/browser/BrowserDiagnosticsD
 import { AgentBrowserSupervisionPanel } from '../../components/browser/AgentBrowserSupervisionPanel'
 import BrowserTopBar from '../../components/browser/BrowserTopBar'
 import BrowserTabList from '../../components/browser/BrowserTabList'
+import { BrowserTaskBandForTab } from '../../components/browser/BrowserTaskBand'
+import { useBrowserTaskShell } from '../../modules/browser/useBrowserTaskShell'
 import { ShellNavigator } from '../../modules/workbench/shell/ShellSidebar'
 import BrowserShellLayout from '../../components/browser/BrowserShellLayout'
 import { nextIntentId } from '../../../shared/browser-view-intent'
@@ -537,6 +539,13 @@ export default function BrowserMode({
     }
   }, [activeTabId, handleSwitchTab, sendBoundsImmediate, setSplitTabId, splitTabId])
 
+  // The assistant's work tabs in the sidebar, the band above a page that needs the person, 打开页面 from a card (W7).
+  const browserTaskShell = useBrowserTaskShell({
+    tabs,
+    visibleTabIds: [activeTabId, visibleSplitTab?.id],
+    activateTab: (tabId) => { void handleHeaderTabClick(tabId, { shiftKey: false }) },
+  })
+
   const handleSplitResize = useCallback((delta: number) => {
     if (!splitContainerRef.current) return
     const containerWidth = splitContainerRef.current.offsetWidth
@@ -882,7 +891,8 @@ export default function BrowserMode({
   useEffect(() => {
     if (!isElectron) return
     const lockKind = browserOwnershipStatus.kind
-    const overlayKind = lockKind === 'user-view' ? null : lockKind
+    // A page whose task waits on the person shows the band instead of the pill (W7 T7).
+    const overlayKind = lockKind === 'user-view' || browserTaskShell.bandShown ? null : lockKind
     if (!isActive || !shouldPresentBrowserHost || shouldHideAllBrowserHosts || !overlayKind) {
       void window.electronAPI?.browser?.hideBrowserLockOverlay?.()
       return
@@ -932,7 +942,7 @@ export default function BrowserMode({
       observer.disconnect()
       window.removeEventListener('resize', scheduleSnapshot)
     }
-  }, [browserLockOverlayIdentity, browserOwnershipStatus, isActive, isElectron, shouldHideAllBrowserHosts, shouldPresentBrowserHost])
+  }, [browserLockOverlayIdentity, browserOwnershipStatus, browserTaskShell.bandShown, isActive, isElectron, shouldHideAllBrowserHosts, shouldPresentBrowserHost])
 
   const {
     browserRuntimeReady,
@@ -1263,6 +1273,8 @@ export default function BrowserMode({
                 onDisbandGroup={disbandTabGroup}
                 onDeleteGroup={handleDeleteGroup}
                 onNewTabInGroup={handleNewTabInGroup}
+                taskGroups={browserTaskShell.taskGroups}
+                onCloseTaskTabs={browserTaskShell.closeTaskTabs}
               />
             </ShellNavigator>
 
@@ -1292,6 +1304,7 @@ export default function BrowserMode({
                     onRetry={() => void handleRetry(activeTab.id)}
                     mediaDropActive={generatedImageDragActive}
                     mediaUploadStatus={localMediaUploadStatus}
+                    band={<BrowserTaskBandForTab tabId={activeTab.id} />}
                   />
                 </div>
                 {!agentPaneCollapsedVisible && (
@@ -1366,6 +1379,7 @@ export default function BrowserMode({
                       mediaDropActive={generatedImageDragActive}
                       mediaUploadStatus={localMediaUploadStatus}
                       fillBottomLeftCorner={false}
+                      band={<BrowserTaskBandForTab tabId={visibleSplitTab.id} />}
                     />
                     {isAgentSplitVisible && (
                       <div
@@ -1391,6 +1405,7 @@ export default function BrowserMode({
                 onRetry={() => void handleRetry()}
                 mediaDropActive={generatedImageDragActive}
                 mediaUploadStatus={localMediaUploadStatus}
+                band={<BrowserTaskBandForTab tabId={activeTab?.id} />}
               />
             )}
               <BrowserDiagnosticsDock

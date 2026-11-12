@@ -9,6 +9,7 @@
 @import '../components/ui/primitives.css';
 @import '../modules/workbench/object-ui/object-ui.css';
 @import '../components/browser/fastcard-shelf.css';
+@import '../components/browser/browser-task.css';
 @import './theme-tokens.css';
 @import './base-chrome.css';
 @import './liquid-composer.css';

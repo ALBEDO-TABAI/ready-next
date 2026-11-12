@@ -10,6 +10,7 @@ import { resolveTabDropIntent, tabGroupColorSoft, type TabDropIntent } from '../
 import TabGroupHeaderRow from '../tabs/TabGroupHeaderRow'
 import TabGroupEditMenu from '../tabs/TabGroupEditMenu'
 import { ShellSidebarToggle } from '../../modules/workbench/shell/ShellSidebar'
+import BrowserTaskTabGroups, { type BrowserTaskTabGroup } from './BrowserTaskTabGroups'
 import './browser-tab-list.css'
 
 // The browser's navigator in the shell sidebar (W2-T3): tabs with titles, groups, drag to reorder,
@@ -34,7 +35,12 @@ export interface BrowserTabListProps {
   onDisbandGroup: (groupId: string) => void
   onDeleteGroup: (groupId: string) => void
   onNewTabInGroup: (groupId: string) => void
+  /** The assistant's work tabs, one group per task (W7 §4.10); they are listed there instead of among the person's. */
+  taskGroups?: BrowserTaskTabGroup[]
+  onCloseTaskTabs?: (browserTaskId: string) => void | Promise<void>
 }
+
+const NO_TASK_GROUPS: BrowserTaskTabGroup[] = []
 
 type Row =
   | { kind: 'group-header'; group: TabGroup }
@@ -63,6 +69,8 @@ export default function BrowserTabList({
   onDisbandGroup,
   onDeleteGroup,
   onNewTabInGroup,
+  taskGroups = NO_TASK_GROUPS,
+  onCloseTaskTabs,
 }: BrowserTabListProps) {
   const draggingIdRef = useRef<string | null>(null)
   const [dropTarget, setDropTarget] = useState<{ id: string; intent: TabDropIntent } | null>(null)
@@ -71,18 +79,24 @@ export default function BrowserTabList({
 
   const groupOf = useMemo(() => Object.fromEntries(tabs.map(tab => [tab.id, tab.groupId ?? null])), [tabs])
   const groupById = useMemo(() => new Map(tabGroups.map(group => [group.id, group])), [tabGroups])
+  const taskTabIds = useMemo(() => new Set(taskGroups.flatMap(group => group.tabs.map(tab => tab.id))), [taskGroups])
   const { rows, flatOrder } = useMemo(() => {
     const byId = new Map(tabs.map(tab => [tab.id, tab]))
+    // Ranks stay those of every tab (the store reorders the full list); the task tabs are only not shown here.
     const built = buildTabRailRows(tabs.map(tab => tab.id), groupOf, tabGroups, activeTabId, splitTabId)
     const out: Row[] = []
     for (const row of built.rows) {
-      if (row.kind === 'group-header') { out.push({ kind: 'group-header', group: row.group }); continue }
+      if (row.kind === 'group-header') {
+        if (row.memberIds.every(id => taskTabIds.has(id))) continue
+        out.push({ kind: 'group-header', group: row.group })
+        continue
+      }
       const tab = byId.get(row.id)
-      if (!tab) continue
+      if (!tab || taskTabIds.has(tab.id)) continue
       out.push({ kind: 'tab', tab, groupId: row.groupId, collapsed: row.groupId ? Boolean(groupById.get(row.groupId)?.collapsed) : false })
     }
     return { rows: out, flatOrder: built.flatOrder }
-  }, [activeTabId, groupById, groupOf, splitTabId, tabGroups, tabs])
+  }, [activeTabId, groupById, groupOf, splitTabId, tabGroups, tabs, taskTabIds])
   // Drops resolve against the visual order (the split tab is hoisted next to the active one).
   const visualTabIds = useMemo(() => rows.flatMap(row => (row.kind === 'tab' ? [row.tab.id] : [])), [rows])
 
@@ -202,10 +216,9 @@ export default function BrowserTabList({
       <div
         ref={listRef}
         className="browser-tab-list__scroll"
-        role="list"
-        aria-label="打开的标签页"
         onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTarget(null) }}
       >
+        <div className="browser-tab-list__rows" role="list" aria-label="打开的标签页">
         {rows.map(row => {
           if (row.kind === 'group-header') {
             const group = row.group
@@ -271,10 +284,19 @@ export default function BrowserTabList({
             </div>
           )
         })}
+        </div>
         <button type="button" className="browser-tab-list__row browser-tab-list__new" onClick={() => void onNewTab()}>
           <span className="browser-tab-list__glyph"><Plus className="browser-tab-list__icon" strokeWidth={1.8} aria-hidden="true" /></span>
           <span className="browser-tab-list__label">新标签页</span>
         </button>
+        <BrowserTaskTabGroups
+          groups={taskGroups}
+          activeTabId={activeTabId}
+          splitTabId={splitTabId}
+          onTabClick={onTabClick}
+          onTabClose={onTabClose}
+          onCloseAll={browserTaskId => onCloseTaskTabs?.(browserTaskId)}
+        />
         {editing && editingGroup && (
           <div className="browser-tab-list__editor rn-float" style={{ top: editing.top }}>
             <TabGroupEditMenu
