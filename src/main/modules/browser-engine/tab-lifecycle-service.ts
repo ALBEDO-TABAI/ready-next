@@ -99,6 +99,7 @@ interface BrowserTabLifecycleHost {
   }): void
   updateHistoryEntryTitle(url: string, title: string, favicon?: string | null): void
   handleLocalMediaDropNavigation(tabId: string, url: string): boolean
+  preparePageTools?(tabId: string): Promise<void>
   preparePageObservation?(tabId: string): Promise<void>
   onTabLoadStateMayChange?(tabId: string, reason: string): void
   browserUserAgent: string
@@ -525,6 +526,12 @@ export class BrowserTabLifecycleService {
           console.warn('[browser] network tracking not started; waits retry it', tabId, error instanceof Error ? error.message : String(error))
         })
       }
+      // Page tools (WebMCP experiment) are enabled alongside the first load for the same reason, and early: a frame
+      // that registers tools before WebMCP.enable is not replayed by it (measured with an iframe), so dom-ready is
+      // too late. dom-ready still calls it again; a second call returns the first one's result.
+      void this.host.preparePageTools?.(tabId).catch(error => {
+        this.host.logBrowserDiag(`[webmcp] enable failed tab=${tabId}: ${String(error)}`)
+      })
     } catch (error) {
       this.host.detachHost(view)
       view.webContents.close?.()
@@ -548,6 +555,9 @@ export class BrowserTabLifecycleService {
 
   private bindTabEvents(tabId: string, tab: BrowserLifecycleTabRecord, view: BrowserHostView): void {
     view.webContents.on('dom-ready', () => {
+      void this.host.preparePageTools?.(tabId).catch(error => {
+        this.host.logBrowserDiag(`[webmcp] enable failed tab=${tabId}: ${String(error)}`)
+      })
       applyRoundedViewport(view)
       this.host.syncPageBackground(view)
       void view.webContents.executeJavaScript(buildLocalMediaDropBridgeScript(), true).catch((error) => {

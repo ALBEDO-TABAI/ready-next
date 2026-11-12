@@ -37,6 +37,8 @@ const EXPECTED_PUBLIC_NAMES = [
   'browser_download',
   'browser_archive',
   'browser_task',
+  'browser_page_tools',
+  'browser_call_page_tool',
   'browser_status',
   'browser_console',
   'browser_network',
@@ -99,7 +101,7 @@ const LEGACY_PUBLIC_NAMES = [
   'browser_confirm_collection_consent',
 ] as const
 
-test('browser catalog has one canonical 31-tool semantic surface', () => {
+test('browser catalog has one canonical 33-tool semantic surface', () => {
   assert.deepEqual(BROWSER_PUBLIC_TOOL_NAMES, EXPECTED_PUBLIC_NAMES)
   assert.deepEqual(BROWSER_TOOLS.map((tool) => tool.name), EXPECTED_PUBLIC_NAMES)
   assert.equal(BROWSER_TOOL_SURFACE_MANIFEST.length, EXPECTED_PUBLIC_NAMES.length)

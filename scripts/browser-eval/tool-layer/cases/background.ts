@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { app, type ProcessMetric } from 'electron'
 import type { BrowserActionOutcome } from '../../../../src/shared/browser-action-outcome'
 import { fail, pass, unavailable, type CaseGroup } from '../harness'
 
@@ -43,7 +43,7 @@ export const backgroundGroup: CaseGroup = {
         && after.width === 1280 && after.height === 800 ? pass('完整视口持续渲染', after) : fail(scroll.text, after)
     })
     await ctx.check('resources-focus', '资源采样与不抢焦点', [], async () => {
-      const samples = []
+      const samples: Pick<ProcessMetric, 'pid' | 'type' | 'cpu' | 'memory'>[][] = []
       for (let i = 0; i < 5; i++) {
         await new Promise(resolve => setTimeout(resolve, 1000))
         samples.push(app.getAppMetrics().map(({ pid, type, cpu, memory }) => ({ pid, type, cpu, memory })))

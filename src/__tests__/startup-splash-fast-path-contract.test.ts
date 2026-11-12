@@ -74,6 +74,8 @@ test('boot entry static import graph stays tiny so the splash is not delayed', (
     // C15: the data-isolation guard must run before userData is touched; both depend only on fs/path.
     './ready-next-data-isolation',
     './modules/database-path',
+    // Blink flags must read the one persisted setting before app ready (read-only, no migrations).
+    './modules/browser-engine/webmcp-experiment',
   ])
   const staticImports = [...bootEntry.matchAll(/^import[^'"]+from ['"]([^'"]+)['"]/gm)].map((m) => m[1])
 

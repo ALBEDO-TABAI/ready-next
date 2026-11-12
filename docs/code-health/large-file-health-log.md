@@ -21,6 +21,9 @@
 
 | 评估日期 | 任务 | 文件 | 总行数 | 本次新增 | 结论 | 判断与后续动作 | 状态 |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
+| 2026-11-12 | W7 T12 WebMCP Main | `src/main/modules/agent-control/codex-runtime/composition/ingress-prepare.ts` | 1022 | 净 +2 | 一般 | 只读取统一的网页工具可用性，不在准入装配中复制判断；保留现行函数边界与检查。 | 复查：2026-11-30 |
+| 2026-11-12 | W7 T12 WebMCP Main | `src/main/modules/agent-control/runtime-core/runtime.ts` | 1966 | 净 +2 | 一般 | 只将网页工具可用性送入现有冻结入口；未增加宿主业务判断。复查服务装配与准入委派边界。 | 复查：2026-11-30 |
+| 2026-11-12 | W7 T12 WebMCP Main | `src/main/modules/tools/tool-executor.ts` | 1583 | 净 +30 | 一般 | 只增加网页登记/身份预检与原确认规则的收紧，调用仍经原派发和任务日志；复查按域组织预检的边界。 | 复查：2026-11-30 |
 | 2026-11-12 | W7 B12 Main | `src/__tests__/browser-engine-services.test.ts` | 1391 | 净 +1 | 健康 | 声明或行为测试聚合；类型、IPC 与对应行为检查覆盖。 | 记录结论 |
 | 2026-11-12 | W7 B12 Main | `src/main/modules/agent-control/codex-runtime/composition/ingress-prepare.ts` | 1020 | 净 +1 | 一般 | 本次只接入浏览器任务边界；复查按浏览器授权、观察与任务记录的现有职责划分。 | 复查：2026-11-30 |
 | 2026-11-12 | W7 B12 Main | `src/main/modules/tools/browser-observe-tools.ts` | 1261 | 净 +20 | 一般 | 本次只接入浏览器任务边界；复查按浏览器授权、观察与任务记录的现有职责划分。 | 复查：2026-11-30 |

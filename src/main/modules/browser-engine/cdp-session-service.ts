@@ -20,6 +20,7 @@ export interface BrowserCdpEvent {
 }
 
 export interface BrowserCdpCommandOptions {
+  beforeSend?: () => void
   timeoutMs?: number
   signal?: AbortSignal
 }
@@ -99,6 +100,7 @@ export class BrowserCdpSessionService {
     this.inFlightCommandsByTab.set(resolvedTabId, (this.inFlightCommandsByTab.get(resolvedTabId) ?? 0) + 1)
     try {
       inputGuard?.()
+      options?.beforeSend?.()
       operation = view.webContents.debugger.sendCommand(method, params)
       return await Promise.race([
         operation,

@@ -1,3 +1,4 @@
+import { WEBMCP_TOOL_NAMES } from '../shared/browser-webmcp'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
@@ -8,6 +9,7 @@ import { getBrowserAnthropicTools, getBrowserOpenAITools } from '../main/modules
 import { billProviderRequestSections } from '../shared/context-budget-types'
 
 const MINIMAL_FIXTURES: Partial<Record<(typeof BROWSER_PUBLIC_TOOL_NAMES)[number], Record<string, unknown>>> = {
+  browser_call_page_tool: { frame_id: 'frame-1', tool_name: 'lookup', input: {} },
   browser_navigate: { action: 'open', url: 'https://example.com/fixture' },
   browser_search: { query: 'fixture' },
   browser_type: { text: 'fixture' },
@@ -23,9 +25,9 @@ const MINIMAL_FIXTURES: Partial<Record<(typeof BROWSER_PUBLIC_TOOL_NAMES)[number
   browser_permission: { action: 'status', site_request_id: 'site-request-fixture' },
 }
 
-test('the canonical schema map exactly matches the 31 public browser tools', () => {
+test('the canonical schema map exactly matches the 33 public browser tools', () => {
   assert.deepEqual(Object.keys(BROWSER_TOOL_SCHEMAS), BROWSER_PUBLIC_TOOL_NAMES)
-  assert.equal(new Set(BROWSER_PUBLIC_TOOL_NAMES).size, 31)
+  assert.equal(new Set(BROWSER_PUBLIC_TOOL_NAMES).size, 33)
 })
 
 test('every public browser schema derives a model parameter list', () => {
@@ -86,9 +88,15 @@ test('OpenAI and Anthropic wire schemas preserve research, download and task con
   }
 })
 
-test('complete provider browser surface stays within its compact schema budget', () => {
+test('default browser surface and opt-in WebMCP extension stay within their compact schema budgets', () => {
   const functions = getBrowserOpenAITools().map((tool) => tool.function as Record<string, unknown>)
-  const bill = billProviderRequestSections([], { toolSchemas: functions })
+  // The disabled experiment contributes zero schemas to the frozen default surface (covered by codex-tool-surface).
+  const experimental = functions.filter(fn => (WEBMCP_TOOL_NAMES as readonly string[]).includes(String(fn.name)))
+  const baseline = functions.filter(fn => !(WEBMCP_TOOL_NAMES as readonly string[]).includes(String(fn.name)))
+  assert.equal(baseline.length, 31)
+  assert.equal(experimental.length, 2)
+  assert.ok(billProviderRequestSections([], { toolSchemas: experimental }).sections.tool_schema <= 300)
+  const bill = billProviderRequestSections([], { toolSchemas: baseline })
   assert.ok(
     bill.sections.tool_schema <= 6_000,
     `browser schema bill ${bill.sections.tool_schema} exceeds 6000 tokens`,

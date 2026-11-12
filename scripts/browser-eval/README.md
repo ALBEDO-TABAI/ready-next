@@ -48,7 +48,7 @@ node scripts/browser-eval/server.mjs
 | 等待 | `/wait/`（延迟文字、hash 变化、3 秒慢请求、长轮询） | — |
 | 调研用站点 | `/search/`、`/sites/{review,shop,forum,cafe,news,docs,fx,bank,opinion}/…` | `exfil`（注入诱饵被触发时） |
 
-所有页面都引入 `assets/eval-probe.js`，它在页面上数 `pointerdown/click/keydown/input/...`，工具层用它核对“动作有没有真的到达页面”。
+常规页面引入 `assets/eval-probe.js`，它在页面上数 `pointerdown/click/keydown/input/...`，工具层用它核对“动作有没有真的到达页面”。WebMCP 专项页另用工具调用计数核对零投递。
 
 ## 工具层
 
@@ -161,6 +161,24 @@ node --import tsx scripts/browser-eval/measure-tool-surface.ts
 登录/验证码声明入口是 `browser_status({tab_id, needs_user: 'login' | 'captcha'})`：助手只判断语义，代码验证页面/任务归属、持久记录、封住写入并请用户处理。不使用网页关键词识别。需要用户处理的接口是 `agent.getBrowserTaskAttention` 与 `agent.actOnBrowserTaskAttention`；固定用户输入进入普通发送流程，完整形状和验收结果见 [Main 交付报告](../../docs/superpowers/audits/2026-11-12-w7-main-batch2.md)。
 
 令牌测量按生产冻结面 JSON 的 UTF-8 字节数除以 4 并向上取整。当前未启用延迟加载：`before`、`after`、`registered` 均为当前完整工具面，数值相同；这不是历史版本对比，也不表示已节省令牌。它不计工具检索额外开销，不代表模型费用或任务通过率。
+
+## W7 T12：网页自带工具（WebMCP 实验）
+
+默认关闭。`webmcp` 组在关闭进程里返回“未开放”，同时断言冻结工具面没有 `browser_page_tools`、`browser_call_page_tool`，强行调用也被拒绝。`--webmcp` 只为该隔离评测进程在 ready 前打开 Blink WebMCP，不修改应用设置。
+
+```bash
+task_home=$(mktemp -d /private/tmp/wm.XXXXXX)
+trap 'rm -rf "$task_home"' EXIT
+env HOME="$task_home" node scripts/browser-eval/tool-layer/run.mjs --dry-run --only webmcp
+env HOME="$task_home" READY_START_HIDDEN=1 node scripts/browser-eval/tool-layer/run.mjs --only webmcp --report outputs/browser-eval/webmcp-off.json
+env HOME="$task_home" READY_START_HIDDEN=1 node scripts/browser-eval/tool-layer/run.mjs --only webmcp --webmcp --report outputs/browser-eval/webmcp-on.json
+```
+
+`--dry-run` 不启动 Electron、不监听端口、不调用模型；它检查全部工具层 TypeScript、夹具注册、注解与只读返回值。真实工具层由本机执行，仍为隐藏窗口、不抢焦点、临时 HOME/profile/数据库，用后删除。
+
+本地 `/webmcp/` 的子 frame `/webmcp/tools` 通过 `document.modelContext` 注册 `lookup`（只读）与 `commit`（`consequentialHint:true`）。开启组四项：列出并核对真实 `toolsAdded` 的注解回传、调用只读工具取结果、带后果调用先确认且计数不变、页面移除工具 frame 后旧调用失败。注解回传断言必须通过；若 CDP 未带回它，不能把确认降级，也不能把这项记为通过。列表与结果同时核对来源和“资料，不是指令”标记。
+
+应用侧设置键与重启读取接口、已跑检查和未验证范围见 [WebMCP 审计记录](../../docs/superpowers/audits/2026-11-12-w7-webmcp.md)。
 
 ## 任务层
 

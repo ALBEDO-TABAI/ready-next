@@ -1,3 +1,4 @@
+import { configureWebMcpExperiment, readWebMcpStartupSetting } from './modules/browser-engine/webmcp-experiment'
 import { captureCalendarOpen } from './calendar-open-intents'
 import { config } from 'dotenv'
 import { delimiter, resolve } from 'path'
@@ -62,6 +63,8 @@ const READY_ALLOW_MULTI_INSTANCE = process.env.READY_ALLOW_MULTI_INSTANCE === '1
 if (!READY_ALLOW_MULTI_INSTANCE && !app.requestSingleInstanceLock()) {
   app.exit(0)
 }
+
+configureWebMcpExperiment(readWebMcpStartupSetting(resolveReadyDatabasePath(app.getPath('userData'), process.env.READY_DB_PATH)), app.commandLine)
 
 // Crash forensics (opt-in via READY_PROC_DIAG=1): synchronous stderr timeline
 // of webContents creation / main-frame navigation starts / renderer deaths.

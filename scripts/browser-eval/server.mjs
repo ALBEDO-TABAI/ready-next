@@ -74,6 +74,8 @@ export async function startEvalSites(options = {}) {
         req.resume()
         return json({ received: true })
       }
+      if (path === '/webmcp/' || path === '/webmcp/tools')
+        return html(await readFile(new URL(path.endsWith('/tools') ? './sites/webmcp-tools.html' : './sites/webmcp.html', import.meta.url), 'utf8'))
       if (path === '/')
         return html(await readFile(new URL('./sites/index.html', import.meta.url), 'utf8'))
       if (path === '/__eval/records' && req.method === 'GET') return json(records())

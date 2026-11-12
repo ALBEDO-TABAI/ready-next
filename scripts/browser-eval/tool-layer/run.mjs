@@ -16,6 +16,10 @@ const option = (name) => {
   const index = args.indexOf(name)
   return index >= 0 ? args[index + 1] : null
 }
+if (args.includes('--dry-run')) {
+  await import('./webmcp-dry-run.mjs')
+  process.exit(0)
+}
 const only = option('--only') || ''
 const reportPath = resolve(root, option('--report') || 'outputs/browser-eval/tool-layer-report.json')
 const timeoutMs = Number(option('--timeout-ms') || 8 * 60_000)
@@ -28,6 +32,7 @@ const evalRoot = mkdtempSync(join(process.platform === 'darwin' ? '/private/tmp'
 for (const dir of ['tmp', 'home', 'profile']) mkdirSync(join(evalRoot, dir), { recursive: true })
 const env = {
   ...process.env,
+  READY_BROWSER_EVAL_WEBMCP: args.includes('--webmcp') ? '1' : '0',
   READY_START_HIDDEN: '1',
   READY_BROWSER_EVAL_REPORT: reportPath,
   READY_BROWSER_EVAL_ONLY: only,
