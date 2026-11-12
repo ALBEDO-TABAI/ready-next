@@ -66,6 +66,14 @@
       "evidenceFiles": [
         "evidence/0.160.1-e2ae5b1c-target.json"
       ]
+    },
+    {
+      "manifestDigest": "10dbe332f05e6c73234f895df9d3c7db8d970f82b0fb1542a32b9129d583de0c",
+      "classification": "observed_active_source",
+      "manifestFile": "manifests/0.160.1-10dbe332.json",
+      "evidenceFiles": [
+        "evidence/0.160.1-10dbe332-target.json"
+      ]
     }
   ]
 }

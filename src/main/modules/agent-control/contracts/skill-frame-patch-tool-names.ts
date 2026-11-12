@@ -16,10 +16,6 @@ export const FRAME_PATCH_EMITTING_TOOL_NAMES: readonly string[] = [
   'skill_inspect_detached',
 ] as const
 
-export const CONTEXT_MODIFIER_EMITTING_TOOL_NAMES: readonly string[] = [
-  'browser_download',
-] as const
-
 /**
  * Predicate matching any tool name that emits a frame-patch `runContract`
  * update — both the static primitives in `FRAME_PATCH_EMITTING_TOOL_NAMES`
@@ -54,6 +50,5 @@ export function isFramePatchEmittingToolName(toolName: string): boolean {
 }
 
 export function isToolStatePatchEmittingToolName(toolName: string): boolean {
-  return CONTEXT_MODIFIER_EMITTING_TOOL_NAMES.includes(toolName)
-    || isFramePatchEmittingToolName(toolName)
+  return isFramePatchEmittingToolName(toolName)
 }

@@ -75,6 +75,29 @@ export function webSource(raw: unknown, snapshot: string): SourceSelection {
   }
 }
 
+/**
+ * A selection in the browser's reading view (W7 §4.10): the reader shows the page's article with the 资讯 reading runs,
+ * so the range is a reading range. It lands in the same web source page as a selection on the live page, and its link
+ * goes back to the live page at those words. The context is only the selected paragraphs: they are contiguous on the
+ * live page too, while the article around them (title, other blocks) may not be, and the link's words around the
+ * selection must sit right next to it there.
+ */
+export function webReadingSource(page: { url: string; title: string; revision: string; markdown: string }, range: RSSReadingRange): SourceSelection {
+  const exact = readingExcerpt(page.markdown, range) // validates the range, including surrogate pairs
+  const runs = readingRuns(page.markdown)
+  const first = runs.find(run => run.id === range.start.run)!.block, last = runs.find(run => run.id === range.end.run)!.block
+  let text = '', start = -1, end = -1, previous: number | null = null
+  for (const run of runs) {
+    if (run.block < first || run.block > last) continue
+    if (previous !== null && run.block !== previous) text += '\n\n'
+    if (run.id === range.start.run) start = text.length + range.start.offset
+    if (run.id === range.end.run) end = text.length + range.end.offset
+    text += run.text
+    previous = run.block
+  }
+  return webSource({ url: page.url, title: page.title, text, start, end, exact }, page.revision)
+}
+
 /** A fixed first-page reference keeps the source identity independent of the selected page. */
 export function pdfSource(input: { id: string; title: string; hash: string }): SourceDocument {
   return { kind: 'pdf', ref: { kind: 'file', id: input.id, anchor: pdfAnchor({ page: 1 }) }, title: input.title, author: '', url: '', snapshot: input.hash }

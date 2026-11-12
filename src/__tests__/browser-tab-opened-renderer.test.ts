@@ -141,7 +141,9 @@ test('direct main creates reach the mounted tab store across document and browse
     Object.defineProperty(handle.dom.window, 'electronAPI', {
       configurable: true,
       value: {
+      settings: { getAll: async () => ({ success: true, data: {} }) },
       browser: {
+        onSearchSettingsChanged: () => () => undefined,
         getTabs: async () => metadata.getTabList(),
         createTab: lifecycle.createTab.bind(lifecycle),
         switchTab: async () => ({ success: true }),

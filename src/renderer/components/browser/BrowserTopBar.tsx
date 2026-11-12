@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, Bot, Globe, Loader2, Lock, RefreshCw, ShieldAlert, Star, UserRound } from 'lucide-react'
+import { ArrowLeft, ArrowRight, BookOpenText, Bot, Globe, Loader2, Lock, RefreshCw, ShieldAlert, Star, UserRound } from 'lucide-react'
 import HeaderUtilityActions from './HeaderUtilityActions'
 import { NavigationBackEntry } from '../../modules/workbench/NavigationBackEntry'
 import {
@@ -9,6 +9,9 @@ import {
 import type { BrowserTab } from '../../stores/useBrowserTabs'
 import type { BrowserUtilityMenuKind } from '../../../shared/browser-utility-menu'
 import type { BrowserOwnershipStatus } from '../../modules/browser/browserOwnershipStatus'
+import type { BrowserPageCapabilities } from '../../../shared/browser-shell'
+import { ADDRESS_SUGGESTIONS_FLOAT, useAddressSuggestions, type AddressSuggestion } from '../../modules/browser/useAddressSuggestions'
+import BrowserSubscribeButton from './BrowserSubscribeButton'
 
 interface BrowserTopBarProps {
   isActive: boolean
@@ -33,6 +36,12 @@ interface BrowserTopBarProps {
   fastCardItemCount: number
   onToggleFastCard: () => void
   ownershipStatus?: BrowserOwnershipStatus
+  /** An open tab picked from the address suggestions. */
+  onSwitchTab?: (tabId: string) => void
+  /** Feeds the page declares: 订阅 appears in the address field. */
+  feeds?: BrowserPageCapabilities['feeds']
+  /** 阅读视图: offered when the page reads as an article; pressed while it is shown. */
+  reading?: { available: boolean; shown: boolean; onToggle: () => void }
 }
 
 function BrowserOwnershipChip({ status }: { status: BrowserOwnershipStatus }) {
@@ -77,11 +86,25 @@ export default function BrowserTopBar({
   fastCardItemCount,
   onToggleFastCard,
   ownershipStatus,
+  onSwitchTab,
+  feeds,
+  reading,
 }: BrowserTopBarProps) {
   const inputRef = useRef<HTMLInputElement>(null)
+  const addressRef = useRef<HTMLDivElement>(null)
   const [isComposing, setIsComposing] = useState(false)
   const [focused, setFocused] = useState(false)
   const isHttps = (activeTab?.url || '').startsWith('https://')
+  const suggestions = useAddressSuggestions({
+    anchorRef: addressRef,
+    query: urlInput,
+    editing: focused,
+    onPick: (item: AddressSuggestion) => {
+      if (item.kind === 'tab') onSwitchTab?.(item.tabId)
+      else onNavigate(item.kind === 'search' ? item.title : item.url)
+      inputRef.current?.blur()
+    },
+  })
 
   useEffect(() => {
     if (isActive) return
@@ -146,6 +169,8 @@ export default function BrowserTopBar({
 
         {/* Address bar */}
         <div
+          ref={addressRef}
+          data-float-anchor={ADDRESS_SUGGESTIONS_FLOAT}
           className="flex min-w-0 flex-1 items-center rounded-[14px] border"
           style={{
             height: 32,
@@ -169,7 +194,13 @@ export default function BrowserTopBar({
             value={urlInput}
             placeholder="搜索或输入网址"
             spellCheck={false}
-            onChange={(event) => onUrlChange(event.target.value)}
+            aria-label="地址"
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded={suggestions.expanded}
+            aria-controls={suggestions.expanded ? 'browser-address-suggestions' : undefined}
+            aria-activedescendant={suggestions.activeDescendant}
+            onChange={(event) => { suggestions.onTyped(); onUrlChange(event.target.value) }}
             onFocus={(event) => {
               setFocused(true)
               onFocus()
@@ -184,6 +215,7 @@ export default function BrowserTopBar({
             onCompositionStart={() => setIsComposing(true)}
             onCompositionEnd={() => setIsComposing(false)}
             onKeyDown={(event) => {
+              if (!isComposing && !event.nativeEvent.isComposing && suggestions.onKeyDown(event)) return
               if (event.key === 'Enter' && !isComposing && !event.nativeEvent.isComposing) {
                 event.preventDefault()
                 onNavigate()
@@ -195,6 +227,13 @@ export default function BrowserTopBar({
             }}
             className="ready-input-slot-inner h-full min-w-0 flex-1 bg-transparent text-[12px] text-[var(--text-body)] outline-none"
           />
+          {reading && (reading.available || reading.shown) && (
+            <button type="button" className="rn-reading-toggle" aria-pressed={reading.shown} data-browser-reading-toggle=""
+              title={reading.shown ? '回到网页' : '阅读视图'} aria-label="阅读视图" onClick={reading.onToggle}>
+              <BookOpenText aria-hidden="true" />
+            </button>
+          )}
+          {feeds && feeds.length > 0 && <BrowserSubscribeButton feeds={feeds} pageTitle={activeTab?.title || ''} />}
           <button
             type="button"
             onClick={onToggleBookmark}

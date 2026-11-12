@@ -88,6 +88,7 @@ interface BrowserTabLifecycleHost {
   emitTabMeta(tabId: string): void
   logBrowserDiag(message: string): void
   bindPopup(webContents: WebContents): void
+  bindPageTools?(tabId: string, webContents: WebContents): void
   bindAppShortcutBridge(webContents: WebContents): void
   installContextMenu(webContents: WebContents): void
   handleWindowOpen(details: BrowserWindowOpenDetails, source: 'tab', sourceContentsId: number): BrowserWindowOpenResult
@@ -535,6 +536,7 @@ export class BrowserTabLifecycleService {
   }
 
   private bindTabEvents(tabId: string, tab: BrowserLifecycleTabRecord, view: BrowserHostView): void {
+    this.host.bindPageTools?.(tabId, view.webContents)
     view.webContents.on('dom-ready', () => {
       void this.host.preparePageTools?.(tabId).catch(error => {
         this.host.logBrowserDiag(`[webmcp] enable failed tab=${tabId}: ${String(error)}`)

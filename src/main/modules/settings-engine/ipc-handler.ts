@@ -1,7 +1,8 @@
+import { SEARCH_ENGINE_KEY, SEARCH_SUGGESTIONS_KEY } from '../../../shared/search-engines'
 import { WEBMCP_SETTING_KEY, WEBMCP_STATUS_KEY } from '../../../shared/browser-webmcp'
 import { webMcpExperimentStatus } from '../browser-engine/webmcp-experiment'
 import { randomBytes } from 'node:crypto'
-import { app, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'node:path'
 import {
   AIModelConfig,
@@ -132,7 +133,14 @@ export function setupSettingsIPC(options?: {
   // Set a setting
   ipcMain.handle('settings:set', createGenericSettingIPCHandler({
     repository,
-    onSettingChanged: options?.onSettingChanged,
+    onSettingChanged: (key, value) => {
+      options?.onSettingChanged?.(key, value)
+      if (key === SEARCH_ENGINE_KEY || key === SEARCH_SUGGESTIONS_KEY) {
+        for (const window of BrowserWindow.getAllWindows()) {
+          if (!window.isDestroyed()) window.webContents.send('browser:searchSettingsChanged', { key, value })
+        }
+      }
+    },
   }))
 
   // Get all settings

@@ -83,12 +83,12 @@ test('root Codex surface digest ignores control tools and stays deterministic', 
       domain: 'browser' as const,
     },
   ]
-  assert.deepEqual(selectCodexRootToolDefinitions(root).map((entry) => entry.name), ['tool_a'])
+  assert.deepEqual(selectCodexRootToolDefinitions(root).map((entry) => entry.name), ['tool_a', 'browser_download'])
   assert.equal(
     digestCodexRootToolSurface(root),
     buildReadyToolSurface({
       surfaceId: 'codex-root-surface',
-      toolDefinitions: [definition('tool_a')],
+      toolDefinitions: [root[0], root[2]],
     }).toolSurfaceDigest,
   )
 })
@@ -406,6 +406,7 @@ test('first Codex thread registers a safe root universe but authorizes only this
   })
 
   assert.deepEqual(resolved.readyToolSurface.toolNames, [
+    'browser_download',
     'skill_read_artifact',
     'tool_a',
     'tool_b',
@@ -485,7 +486,7 @@ test('Codex turn keeps research and folder tools when a selected skill also auth
   ])
 })
 
-test('Codex turn keeps supported browser tools while omitting browser_download state patches', () => {
+test('Codex turn freezes and authorizes browser_download with the other current-page tools', () => {
   const resolved = resolveReadyToolTurnSnapshot({
     surfaceId: 'surface-browser-compatible',
     authorizationId: 'authorization-browser-compatible',
@@ -500,10 +501,10 @@ test('Codex turn keeps supported browser tools while omitting browser_download s
     resolutionInput: {} as ReadyLiveToolResolutionInput,
   })
 
-  assert.deepEqual(resolved.readyToolSurface.toolNames, ['browser_click', 'browser_snapshot'])
+  assert.deepEqual(resolved.readyToolSurface.toolNames, ['browser_click', 'browser_download', 'browser_snapshot'])
   assert.deepEqual(
     resolved.readyTurnToolAuthorization.allowedToolNames,
-    ['browser_click', 'browser_snapshot'],
+    ['browser_click', 'browser_download', 'browser_snapshot'],
   )
 })
 

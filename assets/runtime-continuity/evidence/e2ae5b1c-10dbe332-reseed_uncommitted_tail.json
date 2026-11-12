@@ -1,0 +1,15 @@
+{
+  "contract": "ready_runtime_transition_proof_v1",
+  "sourceManifestDigest": "e2ae5b1c9807e039b9516dc58dda8e9675f3c08e71dc1da362cd354216410558",
+  "targetManifestDigest": "10dbe332f05e6c73234f895df9d3c7db8d970f82b0fb1542a32b9129d583de0c",
+  "operation": "reseed_uncommitted_tail",
+  "result": "compatible",
+  "instructionContract": {
+    "sourceDigest": "fd4614754f7b45e7d505436eacb9305747a1d7191d904b341e14209801a56c35",
+    "targetDigest": "fd4614754f7b45e7d505436eacb9305747a1d7191d904b341e14209801a56c35"
+  },
+  "derivation": {
+    "evidenceKind": "additive_host_gateway_lineage_contract",
+    "priorTargetManifestDigest": "e2ae5b1c9807e039b9516dc58dda8e9675f3c08e71dc1da362cd354216410558"
+  }
+}

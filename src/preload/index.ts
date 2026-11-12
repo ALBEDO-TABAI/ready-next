@@ -323,6 +323,11 @@ const agentAPI = {
     invokeAgentRuntime('agent:clearRemoteAttachmentCache', { channelId }),
   getRemoteAttachmentCacheStats: (channelId?: string) =>
     invokeAgentRuntime('agent:getRemoteAttachmentCacheStats', { channelId }),
+  onBrowserTaskAttentionChanged: (callback: (data: import('../shared/browser-user-attention').BrowserTaskAttentionChanged) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: import('../shared/browser-user-attention').BrowserTaskAttentionChanged) => callback(data)
+    ipcRenderer.on('agent:browserTaskAttentionChanged', handler)
+    return () => ipcRenderer.removeListener('agent:browserTaskAttentionChanged', handler)
+  },
   getBrowserTaskAttention: (request: { scopeId: string; browserTaskId: string }) => invokeAgentRuntime('agent:getBrowserTaskAttention', request),
   actOnBrowserTaskAttention: (request: import('../shared/browser-user-attention').BrowserAttentionActionRequest) => invokeAgentRuntime('agent:actOnBrowserTaskAttention', request).then(parseSendScopedResponse),
   sendScoped: (payload: SendScopedRequest) => invokeAgentRuntime(
@@ -502,6 +507,26 @@ const browserAPI = {
     ipcRenderer.invoke('browser:registerDormantTabs', request),
   openForCaptureTarget: (url: string) => ipcRenderer.invoke('browser:openForCaptureTarget', url),
   getTaskDownloadReceipts: (request: { browserTaskId: string }) => ipcRenderer.invoke('browser:getTaskDownloadReceipts', request),
+  suggest: (request: { query: string; limit?: number }) => ipcRenderer.invoke('browser:suggest', request),
+  findInPage: (request: import('../shared/browser-shell').BrowserFindRequest) => ipcRenderer.invoke('browser:findInPage', request),
+  stopFindInPage: (request: import('../shared/browser-shell').BrowserStopFindRequest) => ipcRenderer.invoke('browser:stopFindInPage', request),
+  getPageCapabilities: (request: { tabId: string }) => ipcRenderer.invoke('browser:getPageCapabilities', request),
+  readTab: (request: { tabId: string }) => ipcRenderer.invoke('browser:readTab', request),
+  onFoundInPage: (callback: (data: import('../shared/browser-shell').BrowserFoundInPage) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: import('../shared/browser-shell').BrowserFoundInPage) => callback(data)
+    ipcRenderer.on('browser:foundInPage', handler)
+    return () => ipcRenderer.removeListener('browser:foundInPage', handler)
+  },
+  onPageCapabilitiesChanged: (callback: (data: import('../shared/browser-shell').BrowserPageCapabilitiesChanged) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: import('../shared/browser-shell').BrowserPageCapabilitiesChanged) => callback(data)
+    ipcRenderer.on('browser:pageCapabilitiesChanged', handler)
+    return () => ipcRenderer.removeListener('browser:pageCapabilitiesChanged', handler)
+  },
+  onSearchSettingsChanged: (callback: (data: { key: string; value: string }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: { key: string; value: string }) => callback(data)
+    ipcRenderer.on('browser:searchSettingsChanged', handler)
+    return () => ipcRenderer.removeListener('browser:searchSettingsChanged', handler)
+  },
   closeTaskTabs: (request: { browserTaskId: string }) => ipcRenderer.invoke('browser:closeTaskTabs', request),
   closeTab: (tabId: string) => ipcRenderer.invoke('browser:closeTab', tabId),
   switchTab: (tabId: string) => ipcRenderer.invoke('browser:switchTab', tabId),
@@ -1326,6 +1351,7 @@ const sourceAnnotationsAPI: import('../main/modules/library-engine/source-docume
   pdf: input => ipcRenderer.invoke('sourceAnnotations:pdf', input),
   rss: input => ipcRenderer.invoke('sourceAnnotations:rss', input),
   web: input => ipcRenderer.invoke('sourceAnnotations:web', input),
+  webReading: input => ipcRenderer.invoke('sourceAnnotations:webReading', input),
 }
 
 const documentAnnotationsAPI: import('../shared/document-comments').DocumentAnnotationsAPI = {

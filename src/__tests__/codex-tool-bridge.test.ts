@@ -1,4 +1,8 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test, { after, before } from 'node:test'
 import { z } from 'zod'
 
@@ -12,7 +16,11 @@ import {
   rememberLastReferenceSkill,
 } from '../main/modules/agent-control/skills/skill-reference-hints'
 import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
-import { createToolExecutionOutput, type ToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
+import { createToolExecutionOutput, normalizeToolExecutionOutput, type ToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
+import { executeBrowserTool } from '../main/modules/tools/browser-tools'
+import { getDefaultConfig } from '../shared/ai-providers'
+import { createBrowserDownloadFixture } from './utils/browser-download-fixture'
+import { attachBrowserWorkflowFixture } from './utils/browser-workflow-fixture'
 import type { ToolContext } from '../main/modules/tools/tool-executor'
 import type {
   CodexToolBridgeExecutionBinding,
@@ -33,7 +41,9 @@ import type {
   ReadyToolActionReceiptPort,
   ReadyToolActionReceiptRead,
 } from '../main/modules/agent-control/codex-runtime/codex-tool-action-journal'
-import { digestCanonicalJson } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
+import { createCodexUpstreamProfileSnapshot, digestCanonicalJson, instructionTranscriptDigest, responsesToolArgumentValidators } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
+import { streamChatAsResponses } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-chat-stream'
+import { validateBinding } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-request'
 import {
   buildCodexToolResponseDeliveryAttemptId,
   type CodexToolResponseDeliveryAttemptIdentity,
@@ -49,6 +59,7 @@ import {
   buildReadyToolSurface,
   buildReadyBoundTurnToolAuthorization,
   buildReadyTurnToolAuthorization,
+  resolveReadyToolTurnSnapshot,
   type ReadyToolSurfaceEntry,
   type ReadyTurnToolAuthorization,
 } from '../main/modules/agent-control/codex-runtime/codex-tool-surface'
@@ -547,6 +558,103 @@ test('authorized call binds, executes once through Ready, receipts, and responds
   assert.equal(f.receipts.records.size, 1)
   assert.equal(f.persistence.deliveryCount, 1)
   assert.match(f.persistence.call?.readyActionId || '', /^codex-action-[a-f0-9]{64}$/)
+})
+
+test('browser_download passes the frozen Codex surface, gateway and dispatch authorization and returns its receipt', async () => {
+  const downloadDefinition = defaultToolRegistry.getToolDefinitionForExecution('browser_download')
+  assert.ok(downloadDefinition)
+  const authorization = buildExplicitNoSkillAuthorization('no_skill_signal')
+  const frozen = resolveReadyToolTurnSnapshot({
+    surfaceId: 'download-gateway', authorizationId: 'download-gateway', authorization,
+    source: { listDefaultToolDefinitionsForTurn: () => [downloadDefinition] },
+    resolutionInput: { message: '下载当前页面的文件', config: getDefaultConfig(),
+      browserHostAvailable: true, feishuConnected: false, authorization },
+  })
+  const directory = mkdtempSync(join(tmpdir(), 'ready-download-gateway-'))
+  const bytes = Buffer.from('one,two\n1,2\n')
+  const sha256 = createHash('sha256').update(bytes).digest('hex')
+  const download = createBrowserDownloadFixture()
+  const browser = attachBrowserWorkflowFixture({
+    ...download.methods,
+    getActiveTab: () => ({ id: 'tab-1' }),
+    executeJS: async () => 'https://example.test/',
+    downloadUrlToDirectory: async (payload: { targetDir: string }) => {
+      const path = join(payload.targetDir, 'report.csv')
+      writeFileSync(path, bytes)
+      return { success: true, savePath: path, filename: 'report.csv', size: bytes.length, sha256 }
+    },
+  } as never, { ownerRunId: 'run-1', parentTaskId: 'task-1', browserTaskId: 'browser-download-task' })
+  const baseBinding = binding(undefined, undefined, downloadDefinition)
+  const executionBinding: CodexToolBridgeExecutionBinding = { ...baseBinding, toolSurface: frozen.readyToolSurface,
+    authorization: buildReadyBoundTurnToolAuthorization({ ...baseBinding.authorization,
+      authorization: frozen.readyTurnToolAuthorization }),
+  }
+  const args = { mode: 'urls', urls: ['https://example.test/report.csv'], directory }
+  const f = fixture({ executionBinding,
+    validate: (toolName, toolArgs, frozenEntry) => validateCodexFrozenToolExecution({ binding: executionBinding, toolName, args: toolArgs, frozenEntry }),
+    execute: async () => normalizeToolExecutionOutput(await executeBrowserTool('browser_download', args,
+      browser.controller, undefined, undefined, undefined, undefined, undefined,
+      { ...browser.context, workspaceRoots: [directory] })),
+  })
+  const snapshot = createCodexUpstreamProfileSnapshot({ profileId: 'local-download-stand-in', config: {
+    provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:1/v1',
+    apiKey: 'fixture-key', model: 'fixture-model', agentProtocol: 'openai', wireApi: 'chat/completions', toolUseMode: 'on',
+  }, maxRetries: 0 }).snapshot
+  const admit = async (allowedToolNames: ReadonlySet<string>) => {
+    const chunks: string[] = []
+    const calls: string[] = []
+    const body = { model: 'ready-e0-model', instructions: 'fixed instructions',
+      input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: '下载当前页面的文件' }] }],
+      tools: frozen.readyToolSurface.responsesTools, reasoning: { summary: 'auto' } }
+    const { allowedTools } = validateBinding({ body,
+      metadata: { requestKind: 'turn', threadId: 'thread-1', turnId: 'turn-1', readyRunId: 'run-1',
+        toolSurfaceDigest: frozen.readyToolSurface.toolSurfaceDigest, turnContractDigest: 'turn-contract-1',
+        upstreamProfileSnapshotDigest: digestCanonicalJson(snapshot), raw: { request_kind: 'turn', model: body.model } },
+      binding: { kind: 'product', codexModel: body.model, snapshot, snapshotDigest: digestCanonicalJson(snapshot),
+        toolSurfaceDigest: frozen.readyToolSurface.toolSurfaceDigest, requestToolsDigest: digestCanonicalJson(body.tools),
+        turnContractDigest: 'turn-contract-1', instructionContractDigest: instructionTranscriptDigest(body.instructions, body.input),
+        additionalContextDigest: digestCanonicalJson([]), deliveredUserTail: [], forceToolFreeFinalization: false,
+        allowedToolNames: [...allowedToolNames].sort() },
+    })
+    const response = new Response([
+      { id: 'local-response', model: 'fixture-model', choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{
+        index: 0, id: 'call-1', type: 'function', function: { name: 'browser_download', arguments: JSON.stringify(args) },
+      }] } }] },
+      { id: 'local-response', model: 'fixture-model', choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }],
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } },
+    ].map(event => `data: ${JSON.stringify(event)}\n\n`).join('') + 'data: [DONE]\n\n')
+    assert.ok(response.body)
+    await streamChatAsResponses({ body: response.body, write: chunk => { chunks.push(chunk) }, allowedToolNames: allowedTools,
+      toolArgumentValidators: responsesToolArgumentValidators(frozen.readyToolSurface.responsesTools), snapshot,
+      credential: 'fixture-key', abort: () => {}, admitToolResponse: async admitted => { calls.push(...admitted.map(call => call.toolName)) },
+    })
+    return { chunks: chunks.join(''), calls }
+  }
+  try {
+    const accepted = await admit(new Set(frozen.readyTurnToolAuthorization.allowedToolNames))
+    assert.deepEqual(accepted.calls, ['browser_download'], accepted.chunks)
+    assert.match(accepted.chunks, /response.completed/)
+    const result = await f.bridge.execute(request({ tool: 'browser_download', arguments: args }))
+    assert.equal(result.success, true, JSON.stringify(result))
+    assert.equal(f.executions(), 1)
+    assert.equal(download.receipts.length, 1)
+    assert.equal(download.receipts[0].sha256, sha256)
+    assert.equal(download.receipts[0].ownerRunId, executionBinding.readyRunId)
+    assert.deepEqual(readFileSync(download.receipts[0].path), bytes)
+    assert.ok(JSON.stringify(result).includes(download.receipts[0].readyUri))
+    const output = [...f.receipts.records.values()][0].output
+    assert.deepEqual(output.data?.downloadReceipts, download.receipts)
+    assert.equal(output.contextModifier, null)
+    assert.equal(output.framePatch, null)
+    const refused = await admit(new Set())
+    assert.deepEqual(refused.calls, [])
+    assert.match(refused.chunks, /gateway_response_tool_not_authorized/)
+    const denied = fixture({ executionBinding: binding([], undefined, downloadDefinition) })
+    await assert.rejects(denied.bridge.execute(request({ tool: 'browser_download', arguments: args })), /authorization_denied/)
+    assert.equal(denied.executions(), 0)
+    assert.equal(denied.receipts.records.size, 0)
+    assert.equal(download.receipts.length, 1, 'refused calls do not download again')
+  } finally { rmSync(directory, { recursive: true, force: true }) }
 })
 
 test('production bridge executes the real completion declaration from the live failed-turn shape', async () => {

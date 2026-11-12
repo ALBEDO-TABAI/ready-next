@@ -4,7 +4,6 @@ import test from 'node:test'
 import {
   DEFAULT_BROWSER_URL,
   READY_BROWSER_BLANK_URL,
-  SEARCH_URL,
   extractBrowserDomain,
   isReadyBrowserBlankUrl,
   isLocalHtmlBrowserUrl,
@@ -36,7 +35,7 @@ test('normalizeBrowserUrlInput preserves urls, maps paths, and falls back to sea
   assert.equal(normalizeBrowserUrlInput('https://openai.com', toFileUrl), 'https://openai.com')
   assert.equal(normalizeBrowserUrlInput('/tmp/demo.txt', toFileUrl), 'file:///tmp/demo.txt')
   assert.equal(normalizeBrowserUrlInput('example.com', toFileUrl), 'https://example.com')
-  assert.equal(normalizeBrowserUrlInput('hello world', toFileUrl), `${SEARCH_URL}hello%20world`)
+  assert.equal(normalizeBrowserUrlInput('hello world', toFileUrl), 'https://www.google.com/search?q=hello%20world')
 })
 
 test('isSupportedBrowserNavigationUrl allows web urls, local HTML files, and the Ready blank page only', () => {

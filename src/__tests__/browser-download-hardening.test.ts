@@ -173,6 +173,7 @@ class FakeDownloadItem extends EventEmitter {
   getURL() { return this.url }
   getSavePath() { return this.savePath }
   getFilename() { return 'fixture.bin' }
+  getContentDisposition() { return '' }
   getMimeType() { return 'application/octet-stream' }
   getTotalBytes() { return this.totalBytes }
   getReceivedBytes() { return this.received }

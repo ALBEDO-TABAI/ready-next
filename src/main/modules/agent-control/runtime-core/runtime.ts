@@ -355,6 +355,7 @@ export class AgentControlRuntime extends EventEmitter {
     this.agentManager = agentManager
     this.browserController = browserController || null
     this.codexRuntime = codexRuntime
+    this.browserController?.setAttentionScopeResolver(parentTaskId => this.getTaskProjection(parentTaskId)?.scopeId || null)
     this.agentSessionCheckpoints = new AgentSessionCheckpointRepository(
       this.db,
       codexRuntime.canonicalCloseoutTransactionParticipant,
@@ -1553,6 +1554,14 @@ export class AgentControlRuntime extends EventEmitter {
       readScope: id => this.db.chat.getConversationScope(id) || null,
       messageExists: id => Boolean(db.prepare('SELECT 1 FROM chat_messages WHERE id = ?').get(id)),
       send: input => this.sendScoped(input),
+      changed: browserTaskId => this.browserController?.publishTaskAttentionChanged(browserTaskId),
+      watchPersisted: (scopeId, messageId, changed) => {
+        const handler = (event: import('../../../../shared/ipc-contracts/agent-runtime').IngressAdmittedEvent) => {
+          if (event.scopeId === scopeId && event.originUserMessageId === messageId) changed()
+        }
+        this.on('ingressAdmitted', handler)
+        return () => { this.off('ingressAdmitted', handler) }
+      },
     })
   }
 

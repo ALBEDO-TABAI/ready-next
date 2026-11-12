@@ -1,4 +1,6 @@
-import { BrowserWindow, session } from 'electron'
+import { setupBrowserShellDataIPC } from './ipc-shell-data'
+import { BrowserSuggestionService } from './suggestion-service'
+import { BrowserWindow, ipcMain, session } from 'electron'
 import { join } from 'node:path'
 import { BrowserDataService } from './data-service'
 import { setupBrowserClipIPC } from './ipc-clip'
@@ -27,6 +29,12 @@ export function setupBrowserIPC(
   const controller = new BrowserController(mainWindow, useMock)
   const browserDataService = new BrowserDataService()
   setupBrowserShellIPC(controller)
+  setupBrowserShellDataIPC(ipcMain, controller.pageTools, new BrowserSuggestionService({
+    data: browserDataService,
+    tabs: () => controller.getTabList().map(tab => ({ tabId: tab.id, title: tab.title, url: tab.url, favicon: tab.favicon,
+      ...('browserTaskId' in tab ? { browserTaskId: tab.browserTaskId } : {}) })),
+    fetch: (input, init) => fetch(input, init),
+  }))
   setupBrowserSupervisionIPC(controller)
   setupBrowserDataIPC(controller, browserDataService)
   setupBrowserPrivacyIPC(new BrowserPrivacyService({

@@ -20,7 +20,7 @@ import { disabledReadyMemorySnapshot } from './utils/ready-memory-fixture'
 
 test('continuation-safe seam is pinned to the machine-readable runtime probe receipt', () => {
   const receipt = JSON.parse(readFileSync(
-    'assets/codex-runtime/evidence/continuation-safe-probe-receipt-v6.json',
+    'assets/codex-runtime/evidence/continuation-safe-probe-receipt-v7.json',
     'utf8',
   )) as Record<string, unknown>
   const { receiptDigest, ...unsigned } = receipt
@@ -34,6 +34,16 @@ test('continuation-safe seam is pinned to the machine-readable runtime probe rec
   assert.equal(receipt.binarySha256, manifest.binarySha256)
   assert.equal(receipt.runtimeManifestDigest, digestCanonicalJson(manifest))
   assert.equal(receipt.stableV2SchemaDigest, digestCanonicalJson(schema))
+  const prior = JSON.parse(readFileSync('assets/codex-runtime/evidence/continuation-safe-probe-receipt-v6.json', 'utf8'))
+  const { receiptDigest: priorDigest, ...priorUnsigned } = prior
+  assert.equal(digestCanonicalJson(priorUnsigned), priorDigest)
+  assert.deepEqual(receipt.derivation, {
+    evidenceKind: 'additive_host_gateway_lineage_contract',
+    priorTargetManifestDigest: prior.runtimeManifestDigest,
+    priorReceiptDigest: priorDigest,
+  })
+  const behavior = (value: Record<string, unknown>) => Object.fromEntries(Object.entries(value).filter(([key]) => !['contract', 'runtimeManifestDigest', 'derivation'].includes(key)))
+  assert.deepEqual(behavior(unsigned), behavior(priorUnsigned), 'all native failure-seam evidence is retained unchanged')
 })
 
 const currentInput = textUserInput('再详细一点')

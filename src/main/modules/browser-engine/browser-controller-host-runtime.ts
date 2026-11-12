@@ -36,6 +36,7 @@ export abstract class BrowserControllerHostRuntime extends BrowserControllerComp
   }
 
   protected disposeTabRuntimeResources(tabId: string): void {
+    this.pageTools.disposeTab(tabId)
     this.dialogService.clear(tabId)
     this.fileChooserGuard.disposeTab(tabId)
     this.sessionPolicyService.expireSitePermissionRequestsForTab(tabId)

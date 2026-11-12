@@ -492,7 +492,7 @@ export async function executeBrowserCollectionTool(
         return await downloadUrlsToDirectory(controller, {
           urls: rawUrls.map((item) => String(item || '')),
           directory: resolvedDirectory.directory,
-          filenamePrefix: String(args.filename_prefix || 'download'),
+          filenamePrefix: String(args.filename_prefix || ''),
           overwrite: args.overwrite === true,
           tabId: (args.tab_id as string) || null,
           maxTotalBytes: typeof args.max_total_bytes === 'number' ? args.max_total_bytes : undefined,

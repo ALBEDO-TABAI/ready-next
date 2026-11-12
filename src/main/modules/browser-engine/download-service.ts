@@ -19,6 +19,7 @@ export interface BrowserDownloadUrlToDirectoryPayload {
   tabId?: string | null
   sourcePageUrl?: string | null
   suggestedName?: string | null
+  fallbackName?: string | null
   downloadHeaders?: Record<string, string> | null
   maxBytes?: number | null
   signal?: AbortSignal
@@ -39,6 +40,7 @@ interface PendingTargetedDownload {
   requestedUrl: string
   targetDir: string
   suggestedName?: string | null
+  fallbackName?: string | null
   maxBytes?: number | null
   budgetError?: string | null
   signal?: AbortSignal
@@ -66,11 +68,12 @@ const DOWNLOAD_HEADER_NAME_MAP = new Map<string, keyof typeof DOWNLOAD_HEADER_MA
   ['accept', 'Accept'],
 ])
 
-// C0 control-character range (U+0000-U+001F) plus the cross-platform reserved
+// C0/C1 control characters plus the cross-platform reserved
 // filename chars. Built via String.fromCharCode so the regex source contains
 // no literal control bytes (satisfies eslint `no-control-regex`).
 const FILENAME_UNSAFE_PATTERN = new RegExp(
-  '[\\\\/:*?"<>|' + String.fromCharCode(0x00) + '-' + String.fromCharCode(0x1f) + ']',
+  '[\\\\/:*?"<>|' + String.fromCharCode(0x00) + '-' + String.fromCharCode(0x1f)
+    + String.fromCharCode(0x7f) + '-' + String.fromCharCode(0x9f) + ']',
   'g',
 )
 
@@ -81,19 +84,41 @@ function sanitizeFilename(input: string, fallback = 'download'): string {
     .replace(/\s+/g, ' ')
     .replace(/^\.+$/, '')
     .replace(/^\.+/, '')
-    .slice(0, 180)
     .trim()
-  return safe || fallback
+  const ext = extname(safe)
+  const suffix = Buffer.byteLength(ext) < 180 ? ext : ''
+  let stem = ''
+  for (const char of suffix ? safe.slice(0, -suffix.length) : safe) {
+    if (Buffer.byteLength(stem + char + suffix) > 180) break
+    stem += char
+  }
+  return (stem + suffix).trim() || fallback
 }
 
 function filenameFromUrl(url: string): string {
+  const name = new URL(url).pathname.split('/').pop() || ''
   try {
-    const parsed = new URL(url)
-    const name = decodeURIComponent(parsed.pathname.split('/').filter(Boolean).pop() || '')
-    return sanitizeFilename(name || 'download')
+    return decodeURIComponent(name)
   } catch {
-    return 'download'
+    // silent-catch: malformed percent encoding keeps the literal last path segment for sanitization.
+    return name
   }
+}
+
+function filenameFromDisposition(header: string): string {
+  const parameters = new Map([...header.matchAll(/(?:^|;)\s*(filename\*?)\s*=\s*("(?:\\.|[^"\\])*"|[^;]*)/gi)]
+    .map((match) => [match[1].toLowerCase(), match[2].trim().replace(/^"(.*)"$/, '$1').replace(/\\(.)/g, '$1')]))
+  const extended = parameters.get('filename*')?.match(/^([^']+)'[^']*'(.*)$/)
+  if (extended && !/%(?![a-f0-9]{2})/i.test(extended[2])) {
+    try {
+      const bytes = extended[2].replace(/%([a-f0-9]{2})/gi, (_match, hex: string) => String.fromCharCode(parseInt(hex, 16)))
+      const decoded = new TextDecoder(extended[1], { fatal: true }).decode(Buffer.from(bytes, 'latin1'))
+      if (decoded.trim()) return decoded
+    } catch {
+      // silent-catch: invalid extended filenames fall back to filename, then the URL.
+    }
+  }
+  return parameters.get('filename')?.trim() || ''
 }
 
 function safeHeaderValue(value: unknown, maxLength: number): string | null {
@@ -219,11 +244,11 @@ function withInferredExtension(requestedName: string, fallbackName: string, mime
 }
 
 function uniquePathForDownload(targetDir: string, requestedName: string): string {
-  const safeName = sanitizeFilename(basename(requestedName), 'download')
+  const safeName = sanitizeFilename(requestedName, 'download')
   const ext = extname(safeName)
   const base = ext ? safeName.slice(0, -ext.length) : safeName
   let candidate = join(targetDir, safeName)
-  let index = 1
+  let index = 2
   while (existsSync(candidate)) {
     candidate = join(targetDir, `${base || 'download'} (${index})${ext}`)
     index += 1
@@ -288,6 +313,7 @@ export class BrowserDownloadService {
         requestedUrl: url,
         targetDir,
         suggestedName: payload.suggestedName,
+        fallbackName: payload.fallbackName,
         maxBytes: Number.isFinite(payload.maxBytes) && Number(payload.maxBytes) > 0 ? Number(payload.maxBytes) : null,
         budgetError: null,
         signal: payload.signal,
@@ -429,7 +455,10 @@ export class BrowserDownloadService {
           finalPath = reserveUniquePathForDownload(
             pendingTarget.targetDir,
             withInferredExtension(
-              pendingTarget.suggestedName || filename || filenameFromUrl(pendingTarget.requestedUrl),
+              pendingTarget.suggestedName
+                || filenameFromDisposition(item.getContentDisposition())
+                || filenameFromUrl(pendingTarget.requestedUrl)
+                || pendingTarget.fallbackName || 'download',
               filename || filenameFromUrl(pendingTarget.requestedUrl),
               mimeType,
             ),

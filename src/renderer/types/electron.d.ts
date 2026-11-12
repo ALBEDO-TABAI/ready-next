@@ -884,6 +884,7 @@ interface ElectronAgentAPI {
     channelId?: string
   ) => Promise<IPCResponse<RemoteAttachmentCacheStatsData>>
   sendScoped: (payload: SendScopedRequest) => Promise<SendScopedResponse>
+  onBrowserTaskAttentionChanged: (handler: (data: import('../../shared/browser-user-attention').BrowserTaskAttentionChanged) => void) => () => void
   getBrowserTaskAttention: (request: { scopeId: string; browserTaskId: string }) => Promise<import('../../shared/browser-user-attention').BrowserUserAttention | null>
   actOnBrowserTaskAttention: (request: import('../../shared/browser-user-attention').BrowserAttentionActionRequest) => Promise<SendScopedResponse>
   onIngressAdmitted: (callback: (event: IngressAdmittedEvent) => void) => () => void
@@ -1176,6 +1177,14 @@ interface ElectronBrowserAPI {
     url: string
   ) => Promise<{ success: boolean; tabId?: string; reused?: boolean; error?: string }>
   getTaskDownloadReceipts: (request: { browserTaskId: string }) => Promise<{ success: boolean; downloadReceipts: import('../../shared/browser-download-receipt').BrowserDownloadReceipt[]; error?: string }>
+  suggest: (request: { query: string; limit?: number }) => Promise<import('../../shared/browser-shell').BrowserSuggestions>
+  findInPage: (request: import('../../shared/browser-shell').BrowserFindRequest) => Promise<{ success: true; requestId: number } | { success: false; error: 'tab_missing' }>
+  stopFindInPage: (request: import('../../shared/browser-shell').BrowserStopFindRequest) => Promise<{ success: boolean; error?: string }>
+  getPageCapabilities: (request: { tabId: string }) => Promise<import('../../shared/browser-shell').BrowserPageCapabilities>
+  readTab: (request: { tabId: string }) => Promise<import('../../shared/browser-shell').BrowserReadResult>
+  onFoundInPage: (handler: (data: import('../../shared/browser-shell').BrowserFoundInPage) => void) => () => void
+  onPageCapabilitiesChanged: (handler: (data: import('../../shared/browser-shell').BrowserPageCapabilitiesChanged) => void) => () => void
+  onSearchSettingsChanged: (handler: (data: { key: string; value: string }) => void) => () => void
   closeTaskTabs: (request: { browserTaskId: string }) => Promise<{ success: boolean; closedTabIds: string[]; error?: string }>
   closeTab: (tabId: string) => Promise<{ success: boolean; error?: string }>
   switchTab: (tabId: string) => Promise<{
