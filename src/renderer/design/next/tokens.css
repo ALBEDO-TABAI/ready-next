@@ -80,9 +80,6 @@
   --rn-row-h: 30px; --rn-control-h: 28px; --rn-control-h-lg: 32px;
   --rn-icon: 16px; --rn-icon-stroke: 1.5;
   --rn-prose-size: 16px; --rn-prose-lh: 1.75;
-  /* The selected glyph (rail, current list row): glowing white in both themes; a faint edge keeps it legible on light tiles. */
-  --rn-glyph-on: #ffffff;
-  --rn-glyph-glow: drop-shadow(0 0 .8px rgb(255 255 255 / .9)) drop-shadow(0 0 2.5px rgb(255 255 255 / .42)) drop-shadow(0 0 6px rgb(255 90 31 / .18)) drop-shadow(0 .5px .8px rgb(24 26 28 / .22));
 
   /* ---- paper: the page, a bookplate, a ribbon ---- */
   --rn-paper: #f7f4ee;
@@ -154,7 +151,6 @@
   --rn-liquid-rim-edge: inset 0 1px 0 rgba(255, 255, 255, 0.18), inset 0 -1px 0 rgba(255, 255, 255, 0.05);
   --rn-liquid-ring: linear-gradient(132deg, rgba(255, 255, 255, 0.01) 0%, rgba(232, 232, 232, 0.18) 30%, rgba(255, 255, 255, 0.01) 56%, rgba(232, 232, 232, 0.12) 78%, rgba(255, 255, 255, 0.01) 100%);
   --rn-liquid-ring-drag: var(--rn-liquid-ring);
-  --rn-glyph-glow: drop-shadow(0 0 1px rgb(255 255 255 / .9)) drop-shadow(0 0 4px rgb(255 255 255 / .42));
   --rn-paper: #202022;
   --rn-paper-2: #2a2a2d;
   --rn-hl: rgb(255 200 60 / .42);
