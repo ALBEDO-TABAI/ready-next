@@ -5,6 +5,7 @@ import { BookSourceService } from './source-service'
 import { registerBookSourceIPC } from './source-ipc'
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import { getDatabase } from '../database'
+import { ObjectRegistry } from '../object-service/registry'
 import { AppSettingsRepository } from '../repositories/app-settings-repository'
 import { VaultService } from '../settings-engine/vault-service'
 import { getSearchEngine } from '../search-engine/ipc-handler'
@@ -32,6 +33,7 @@ export function setupLibraryIPC() {
   })
   const engine = new LibraryEngine({
     vault: () => vault.get(),
+    registry: new ObjectRegistry(db),
     write: async (input) => {
       const state = vault.get()
       if (state.status !== 'ready') throw Object.assign(new Error('请先配置可用的资料库'), { code: 'no_vault' })

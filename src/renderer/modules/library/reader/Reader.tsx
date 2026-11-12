@@ -93,7 +93,7 @@ function ReadyReader({ record, api, loaded, target, onBack, onError }: { record:
       void current.began.then(async () => {
         const result = await layers.endReading({ id: current.id, endedAt })
         if (!result.ok) throw new Error(result.message)
-      }).catch(error => fail.current(errorText(error)))
+      }).catch(error => console.error('[library] reading session failed', error))
     }
     const begin = () => {
       if (session || document.hidden) return
@@ -101,7 +101,7 @@ function ReadyReader({ record, api, loaded, target, onBack, onError }: { record:
       const began = layers.beginReading({ id, objectId: record.id, bookId: record.id,
         loc: `c${at?.chapter ?? 0}:${at?.offset ?? 0}+1`, startedAt: Date.now() }).then(result => { if (!result.ok) throw new Error(result.message) })
       session = { id, began }
-      void began.catch(error => fail.current(errorText(error)))
+      void began.catch(error => console.error('[library] reading session failed', error))
     }
     const visibility = () => { if (document.hidden) finish(); else begin() }
     begin(); document.addEventListener('visibilitychange', visibility); window.addEventListener('pagehide', finish)
