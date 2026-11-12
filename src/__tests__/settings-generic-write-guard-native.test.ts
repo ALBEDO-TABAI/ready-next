@@ -119,3 +119,24 @@ test('generic settings IPC still persists ordinary settings and emits change not
     assert.deepEqual(changed, [['cache_quota_bytes', '1073741824']])
   })
 })
+
+test('browser search preferences persist through generic settings IPC and invalid replacements preserve saved values', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'browser search preferences persistence')) return
+  await withSettingsDatabase(t, (_db, repository) => {
+    const changes: string[] = []
+    const handler = createGenericSettingIPCHandler({ repository, onSettingChanged: key => { changes.push(key) } })
+    assert.equal(repository.getSetting('browser.searchEngine'), undefined)
+    assert.deepEqual(handler(null, { key: 'browser.searchEngine', value: 'https://search.test/?q=%s' }), { success: true })
+    assert.deepEqual(handler(null, { key: 'browser.searchSuggestions', value: 'true' }), { success: true })
+    const coldRead = new AppSettingsRepository(() => ({ settings: {
+      getSetting: key => repository.getSetting(key), setSetting: (key, value) => repository.setSetting(key, value),
+    }, getRawDb: () => _db }))
+    assert.equal(coldRead.getSetting('browser.searchEngine'), 'https://search.test/?q=%s')
+    assert.equal(coldRead.getSetting('browser.searchSuggestions'), 'true')
+    assert.equal(handler(null, { key: 'browser.searchEngine', value: 'javascript:%s' }).success, false)
+    assert.equal(handler(null, { key: 'browser.searchSuggestions', value: 'yes' }).success, false)
+    assert.equal(coldRead.getSetting('browser.searchEngine'), 'https://search.test/?q=%s')
+    assert.equal(coldRead.getSetting('browser.searchSuggestions'), 'true')
+    assert.deepEqual(changes, ['browser.searchEngine', 'browser.searchSuggestions'])
+  })
+})

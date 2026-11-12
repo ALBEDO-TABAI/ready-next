@@ -1,3 +1,4 @@
+import { validateBrowserSearchSetting } from '../../../shared/search-engines'
 import { VAULT_ROOT_SETTING_KEY } from '../../../shared/vault'
 
 type GenericSettingRepository = {
@@ -33,6 +34,7 @@ export function createGenericSettingIPCHandler(options: {
       if (RETIRED_AGENT_CONTROL_SETTING_KEYS.has(key)) {
         throw new Error('retired_agent_control_setting')
       }
+      validateBrowserSearchSetting(key, value)
       options.repository.setSetting(key, value)
       options.onSettingChanged?.(key, value)
       return { success: true }

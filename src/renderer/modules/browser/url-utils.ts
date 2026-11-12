@@ -1,8 +1,8 @@
+import { resolveSearchEngine, searchTemplateUrl } from '../../../shared/search-engines'
+import { getBrowserSearchSettings } from './search-settings'
 import { DEFAULT_BROWSER_URL, isReadyBrowserBlankUrl } from '../../../shared/browser-defaults'
 
 export { DEFAULT_BROWSER_URL, READY_BROWSER_BLANK_URL, isReadyBrowserBlankUrl } from '../../../shared/browser-defaults'
-
-export const SEARCH_URL = 'https://www.google.com/search?q='
 
 export const LOGIN_DOMAINS = [
   'google.com', 'youtube.com', 'github.com', 'twitter.com', 'x.com',
@@ -34,6 +34,7 @@ export function isLikelyAbsolutePath(value: string): boolean {
 export function normalizeBrowserUrlInput(
   input: string,
   toFileUrl: (path: string) => string,
+  searchEngine = getBrowserSearchSettings().searchEngine,
 ): string {
   const trimmed = input.trim()
   if (!trimmed) return DEFAULT_BROWSER_URL
@@ -45,7 +46,7 @@ export function normalizeBrowserUrlInput(
   if (isLikelyAbsolutePath(trimmed)) return toFileUrl(trimmed)
   if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed
   if (trimmed.includes('.') && !trimmed.includes(' ')) return `https://${trimmed}`
-  return `${SEARCH_URL}${encodeURIComponent(trimmed)}`
+  return searchTemplateUrl(resolveSearchEngine(searchEngine).search, trimmed)
 }
 
 export function isLocalHtmlBrowserUrl(url: string): boolean {

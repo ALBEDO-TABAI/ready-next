@@ -8,6 +8,8 @@ export async function sendBrowserAttentionInput(request: BrowserAttentionActionR
   readScope(scopeId: string): { source_kind: string; message_visibility_epoch?: number } | null
   messageExists(id: string): boolean
   readPhysicalTarget(tabId: string): string | null
+  changed?(browserTaskId: string): void
+  watchPersisted?(scopeId: string, messageId: string, handler: () => void): () => void
   send(request: SendScopedRequest): Promise<SendScopedResponse>
 }): Promise<SendScopedResponse> {
   const attention = deps.readAttention(request.browserTaskId)
@@ -29,5 +31,12 @@ export async function sendBrowserAttentionInput(request: BrowserAttentionActionR
     actionAdmissionRef: request.actionAdmissionRef,
   }))
   if (deps.messageExists(input.userMessage.id)) throw new Error('browser_attention_already_sent')
-  return deps.send(input)
+  const unwatch = deps.watchPersisted?.(input.scopeId, input.userMessage.id, () => deps.changed?.(attention.browserTaskId))
+  try {
+    return await deps.send(input)
+  } finally {
+    unwatch?.()
+    // A persisted user message consumes attention even if the subsequent run fails.
+    if (deps.messageExists(input.userMessage.id)) deps.changed?.(attention.browserTaskId)
+  }
 }

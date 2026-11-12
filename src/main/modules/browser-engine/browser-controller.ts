@@ -55,6 +55,18 @@ export type { BrowserTabActivity, BrowserTabOwner } from './browser-controller-c
 export { isAllowedBrowserURL } from './popup-policy'
 
 export class BrowserController extends BrowserControllerCaptureRuntime {
+  private attentionScopeResolver: (parentTaskId: string) => string | null = () => null
+
+  setAttentionScopeResolver(resolve: (parentTaskId: string) => string | null): void {
+    this.attentionScopeResolver = resolve
+  }
+
+  publishTaskAttentionChanged(browserTaskId: string): void {
+    const task = this.taskPersistenceService.getTask(browserTaskId)
+    const scopeId = task?.parentTaskId && this.attentionScopeResolver(task.parentTaskId)
+    if (scopeId) this.sendToRenderer('agent:browserTaskAttentionChanged', { scopeId, browserTaskId })
+  }
+
   private attentionNotificationPort: (body: string) => void = body => {
     if (Notification.isSupported()) new Notification({ title: 'Ready Next', body }).show()
   }
@@ -78,6 +90,7 @@ export class BrowserController extends BrowserControllerCaptureRuntime {
     if (!this.taskPersistenceService.patchTaskPayload(target.browserTaskId, { userAttention: {
       id: randomUUID(), reason, tabId: target.tabId, physicalTargetToken: target.physicalTargetToken,
     } })) throw new Error('browser_attention_write_failed')
+    this.notifyTaskAttention(target.browserTaskId)
     if (reason === 'login' || reason === 'captcha') {
       if (this.getPhysicalTargetToken(target.tabId) !== target.physicalTargetToken) throw new Error('browser_attention_target_changed')
       const result = this.switchTab(target.tabId)
@@ -85,10 +98,10 @@ export class BrowserController extends BrowserControllerCaptureRuntime {
       const tab = this.getTabList().find(item => item.id === target.tabId)
       if (tab) this.sendToRenderer('browser:tabOpened', { ...tab, activate: true })
     }
-    this.notifyTaskAttention(target.browserTaskId)
   }
 
   notifyTaskAttention(browserTaskId: string): void {
+    this.publishTaskAttentionChanged(browserTaskId)
     const attention = this.getTaskAttention(browserTaskId)
     if (!attention || this.mainWindow.isDestroyed() || this.mainWindow.isFocused()) return
     try { this.attentionNotificationPort(BROWSER_ATTENTION_COPY[attention.reason].notification) } catch (error) {

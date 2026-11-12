@@ -55,3 +55,5 @@ export const BROWSER_ATTENTION_COPY: Record<BrowserAttentionReason, { label: str
   takeover: { label: '让助手接着做', sentence: '请重新检查页面后接着处理原任务。', notification: '你已接管，助手已停止操作' },
   review_rejected: { label: '重新尝试', sentence: '请根据复核未通过的原因重新处理原任务。', notification: '任务复核未通过，需要你处理' },
 }
+
+export interface BrowserTaskAttentionChanged { scopeId: string; browserTaskId: string }
