@@ -88,6 +88,7 @@ interface BrowserTabLifecycleHost {
   emitTabMeta(tabId: string): void
   logBrowserDiag(message: string): void
   bindPopup(webContents: WebContents): void
+  bindPageTools?(tabId: string, webContents: WebContents): void
   bindAppShortcutBridge(webContents: WebContents): void
   installContextMenu(webContents: WebContents): void
   handleWindowOpen(details: BrowserWindowOpenDetails, source: 'tab', sourceContentsId: number): BrowserWindowOpenResult
@@ -547,6 +548,7 @@ export class BrowserTabLifecycleService {
   }
 
   private bindTabEvents(tabId: string, tab: BrowserLifecycleTabRecord, view: BrowserHostView): void {
+    this.host.bindPageTools?.(tabId, view.webContents)
     view.webContents.on('dom-ready', () => {
       applyRoundedViewport(view)
       this.host.syncPageBackground(view)

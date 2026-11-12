@@ -1,4 +1,7 @@
 export type ReadyAppShortcutAction =
+  | 'browser-find'
+  | 'browser-find-next'
+  | 'browser-find-previous'
   | 'capture-window'
   | 'open-ready'
   | 'open-settings'
@@ -32,13 +35,16 @@ export interface ReadyShortcutGuideItem {
 export interface AppShortcut {
   readonly id: string
   readonly keys: string
-  readonly scope: 'global' | 'calendar' | 'document' | 'canvas' | 'skills' | 'assistant'
+  readonly scope: 'global' | 'browser' | 'calendar' | 'document' | 'canvas' | 'skills' | 'assistant'
   readonly description: string
   readonly action?: ReadyAppShortcutAction
   /** Listed in 设置 › 快捷键 (the everyday keys, not the operating system's editing keys). */
   readonly guide?: true
 }
 export const APP_SHORTCUTS: readonly AppShortcut[] = [
+  { id: 'browser-find', keys: 'CommandOrControl+F', scope: 'browser', description: '在网页中查找', action: 'browser-find', guide: true },
+  { id: 'browser-find-next', keys: 'CommandOrControl+G', scope: 'browser', description: '查找下一项', action: 'browser-find-next', guide: true },
+  { id: 'browser-find-previous', keys: 'CommandOrControl+Shift+G', scope: 'browser', description: '查找上一项', action: 'browser-find-previous', guide: true },
   { id: 'switch-browser', keys: 'CommandOrControl+1', scope: 'global', description: '切换到浏览器', action: 'switch-browser', guide: true },
   { id: 'switch-browser-function', keys: 'F1', scope: 'global', description: '切换到浏览器', action: 'switch-browser' },
   { id: 'switch-document', keys: 'CommandOrControl+2', scope: 'global', description: '切换到文档', action: 'switch-document', guide: true },
@@ -159,8 +165,8 @@ export function matchesAppShortcut(shortcut: AppShortcut, input: ReadyShortcutIn
   return input.key.toLowerCase() === (key === 'Space' ? ' ' : key === 'Plus' ? '+' : key.toLowerCase())
 }
 
-export function resolveReadyAppShortcut(input: ReadyShortcutInput): ReadyAppShortcutAction | null {
-  return APP_SHORTCUTS.find(shortcut => shortcut.action && matchesAppShortcut(shortcut, input))?.action ?? null
+export function resolveReadyAppShortcut(input: ReadyShortcutInput, scope: AppShortcut['scope'] = 'global'): ReadyAppShortcutAction | null {
+  return APP_SHORTCUTS.find(shortcut => shortcut.action && (shortcut.scope === 'global' || shortcut.scope === scope) && matchesAppShortcut(shortcut, input))?.action ?? null
 }
 
 export const READY_SHORTCUT_GUIDE: ReadyShortcutGuideItem[] = APP_SHORTCUTS.filter(item => item.guide).map(item => ({

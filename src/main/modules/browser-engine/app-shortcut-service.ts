@@ -17,7 +17,7 @@ export class BrowserAppShortcutBridgeService {
       ctrlKey: Boolean(input.control),
       shiftKey: Boolean(input.shift),
       altKey: Boolean(input.alt),
-    }) !== null
+    }, 'browser') !== null
   }
 
   dispatchAppShortcut(input: Electron.Input): void {

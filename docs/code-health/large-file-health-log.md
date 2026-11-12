@@ -21,6 +21,9 @@
 
 | 评估日期 | 任务 | 文件 | 总行数 | 本次新增 | 结论 | 判断与后续动作 | 状态 |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
+| 2026-11-12 | W7 T8/T7 壳数据 | `src/main/modules/agent-control/runtime-core/runtime.ts` | 1973 | 净 +9 | 一般 | 只接入原任务会话归属解析与已消费状态的刷新通知；不增加执行链。 | 复查：2026-11-30，按既有运行时装配边界复查 |
+| 2026-11-12 | W7 T8/T7 壳数据 | `src/preload/index.ts` | 1798 | 净 +25 | 一般 | 五个浏览器调用与四个可退订事件透传；IPC 对应检查和真实预加载行为检查覆盖。 | 复查：2026-11-30，按域拆分透传声明 |
+| 2026-11-12 | W7 T8/T7 壳数据 | `src/renderer/types/electron.d.ts` | 3459 | 净 +9 | 健康 | 只增加共享类型引用和预加载接口声明，类型与 IPC 对应检查覆盖。 | 记录结论 |
 | 2026-11-12 | W7 B12 Main | `src/__tests__/browser-engine-services.test.ts` | 1391 | 净 +1 | 健康 | 声明或行为测试聚合；类型、IPC 与对应行为检查覆盖。 | 记录结论 |
 | 2026-11-12 | W7 B12 Main | `src/main/modules/agent-control/codex-runtime/composition/ingress-prepare.ts` | 1020 | 净 +1 | 一般 | 本次只接入浏览器任务边界；复查按浏览器授权、观察与任务记录的现有职责划分。 | 复查：2026-11-30 |
 | 2026-11-12 | W7 B12 Main | `src/main/modules/tools/browser-observe-tools.ts` | 1261 | 净 +20 | 一般 | 本次只接入浏览器任务边界；复查按浏览器授权、观察与任务记录的现有职责划分。 | 复查：2026-11-30 |
