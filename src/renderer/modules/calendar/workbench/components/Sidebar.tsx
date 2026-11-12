@@ -3,8 +3,12 @@ import { TodoSection } from '../layers/TodoSection';
 import { useState } from 'react';
 import { ChevronUp, ChevronDown, Search, SquarePen, Eye, EyeOff, MoreHorizontal, Plus, CalendarSearch, HelpCircle } from 'lucide-react';
 import { startOfWeek, startOfMonth, addMonths, weekday, ymd, parseIsoDate, DayNum, colorFamily } from '@shared/calendar';
-import { useStore, getState, setState, goToDay, updateCalendar, openMenu, openOverlay, createEvent, importIcsFile, isDark, tz, openCalendarAction } from '../store';
+import { useStore, getState, setState, goToDay, updateCalendar, openOverlay, createEvent, importIcsFile, isDark, tz, openCalendarAction } from '../store';
 import { openMenu as openFloatMenu } from '../../../../components/ui/float/open-menu';
+import { IconButton } from '../../../../components/ui/Button';
+import { Input } from '../../../../components/ui/Field';
+import { SectionHeader } from '../../../../components/ui/Display';
+import { openCalendarMenu } from './Menus';
 import { miniTitle, wdMini } from '../fmt';
 import { t } from '../i18n';
 import { parseDateInput } from '../dateinput';
@@ -22,8 +26,8 @@ export function MiniMonth() {
     <div className="mini" data-testid="minimonth">
       <div className="mini-head">
         <div className="mini-title" style={{ opacity: page === null ? 0 : 1 }}>{miniTitle(month)}</div>
-        <button className="ibtn sm" onClick={() => setPage(addMonths(month, -1))}><ChevronUp size={16} /></button>
-        <button className="ibtn sm" style={{ marginLeft: 8 }} onClick={() => setPage(addMonths(month, 1))}><ChevronDown size={16} /></button>
+        <IconButton size="sm" icon={<ChevronUp />} title="上个月" onClick={() => setPage(addMonths(month, -1))} />
+        <IconButton size="sm" icon={<ChevronDown />} title="下个月" onClick={() => setPage(addMonths(month, 1))} />
       </div>
       <div className="mini-grid">
         {Array.from({ length: 7 }, (_, i) => <div key={i} className="mini-wd">{wdMini((i + s.wso) % 7)}</div>)}
@@ -33,8 +37,8 @@ export function MiniMonth() {
             {r.map((d) => {
               const dm = ymd(d).m; const wd = weekday(d);
               const sel = s.view !== 'month' && s.days < 7 && d >= visFirst && d <= visLast;
-              return <button key={d} className={`mini-day tnum${dm !== m ? ' out' : ''}${d === s.today ? ' today' : ''}${wd === 0 || wd === 6 ? '' : ''}`}
-                style={sel ? { background: 'var(--c-week-row)' } : undefined} onClick={() => { goToDay(d); setPage(null); }}><span>{ymd(d).d}</span></button>;
+              return <button key={d} className={`mini-day tnum${dm !== m ? ' out' : ''}${d === s.today ? ' today' : ''}${wd === 0 || wd === 6 ? ' wknd' : ''}${sel ? ' sel' : ''}`}
+                onClick={() => { goToDay(d); setPage(null); }}><span>{ymd(d).d}</span></button>;
             })}
           </div>;
         })}
@@ -51,55 +55,53 @@ export function Sidebar() {
     <aside className="sidebar" data-testid="sidebar">
       <div className="sidebar-top">
         <span className="sidebar-title">日历</span>
-        <button className="ibtn sm" title={t('search')} onClick={() => openOverlay('search')}><Search size={16} /></button>
-        <button className="ibtn sm sidebar-new" title="新建日程（可以直接写时间，比如“明天下午三点开会”）" aria-label={t('newEvent')} onClick={() => openCalendarAction('quick')}><SquarePen size={16} /></button>
-        <ShellSidebarToggle className="ibtn sm" />
+        <IconButton icon={<Search />} title={t('search')} onClick={() => openOverlay('search')} />
+        <IconButton className="sidebar-new" icon={<SquarePen />} title={t('newEvent')} onClick={() => openCalendarAction('quick')} />
+        <ShellSidebarToggle className="rn-icon-btn" />
       </div>
       <div className="sidebar-scroll panel-hover-scrollbar">
         <MiniMonth />
         <LayerSwitches />
         <TodoSection />
-        <div style={{ padding: '0 0 0' }}>
-          <div style={{ position: 'relative' }}>
-            <CalendarSearch size={16} style={{ position: 'absolute', left: 18, top: 15, color: 'var(--c-text3)' }} />
-            <input className="side-input" placeholder={t('goToDate')} value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') go(); if (e.key === 'Escape') (e.target as HTMLInputElement).blur(); e.stopPropagation(); }} />
-          </div>
+        <div className="side-goto">
+          <CalendarSearch aria-hidden />
+          <Input aria-label={t('goToDate')} placeholder={t('goToDate')} value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') go(); if (e.key === 'Escape') (e.target as HTMLInputElement).blur(); e.stopPropagation(); }} />
         </div>
         <div className="sidebar-sep" />
         {s.accounts.map((a) => (
           <div key={a.id} className="side-sec">
-            <div className="side-head"><span style={{ flex: 1 }}>{a.kind === 'local' ? t('local') : a.name}</span></div>
+            <SectionHeader title={a.kind === 'local' ? t('local') : a.name} />
             {s.calendars.filter((c) => c.accountId === a.id).map((c) => {
               const fam = colorFamily(c.color, s.dark);
               return (
                 <div key={c.id} className={`side-row${c.visible ? '' : ' hidden'}`} data-cal={c.id}
                   onClick={() => updateCalendar(c.id, { visible: !c.visible })}
-                  onContextMenu={(e) => { e.preventDefault(); openMenu({ kind: 'calendar', x: e.clientX, y: e.clientY, data: { id: c.id } }); }}>
+                  onContextMenu={(e) => { e.preventDefault(); openCalendarMenu('calendar', { x: e.clientX, y: e.clientY }, { id: c.id }); }}>
                   <span className={`swatch${c.visible ? '' : ' off'}`} style={{ ['--sw' as any]: fam.backgroundPrimary }} />
                   <span className="lbl">{c.name}</span>
                   {c.primary && <span className="tag">{t('defaultTag')}</span>}
                   <span className="tools">
-                    <button className="ibtn xs" onClick={(e) => { e.stopPropagation(); updateCalendar(c.id, { visible: !c.visible }); }}>{c.visible ? <Eye size={14} /> : <EyeOff size={14} />}</button>
-                    <button className="ibtn xs" onClick={(e) => { e.stopPropagation(); const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); openMenu({ kind: 'calendar', x: r.left, y: r.bottom + 4, data: { id: c.id } }); }}><MoreHorizontal size={14} /></button>
+                    <IconButton size="sm" icon={c.visible ? <Eye /> : <EyeOff />} title={c.visible ? t('hideCal') : t('showCal')} onClick={(e) => { e.stopPropagation(); updateCalendar(c.id, { visible: !c.visible }); }} />
+                    <IconButton size="sm" icon={<MoreHorizontal />} title={c.name} aria-haspopup="menu" onClick={(e) => { e.stopPropagation(); openCalendarMenu('calendar', e.currentTarget.getBoundingClientRect(), { id: c.id }); }} />
                   </span>
                 </div>
               );
             })}
-            <div className="side-row" role="button" tabIndex={0} style={{ color: 'var(--c-text2)' }}
+            <div className="side-row side-add" role="button" tabIndex={0}
               onClick={(e) => {
                 const r = e.currentTarget.getBoundingClientRect();
                 // 新建日历 (W4 §4): a local calendar, a subscription, or a file — one menu instead of three entries.
                 openFloatMenu(r, [
-                  { id: 'local', label: t('newLocalCalendar'), onSelect: () => openMenu({ kind: 'calendar', x: r.left, y: r.bottom, data: { create: true } }) },
+                  { id: 'local', label: t('newLocalCalendar'), onSelect: () => openCalendarMenu('calendar', r, { create: true }) },
                   { id: 'subscribe', label: t('subscribeUrl'), onSelect: () => openCalendarAction('subscribe') },
                   { id: 'import', label: t('importIcs'), onSelect: () => importIcsFile() },
                 ], { placement: 'bottom-start', label: t('addCalendar') });
-              }}><Plus size={14} /><span className="lbl">{t('addCalendar')}</span></div>
+              }}><Plus aria-hidden /><span className="lbl">{t('addCalendar')}</span></div>
           </div>
         ))}
       </div>
       <div className="sidebar-foot">
-        <button className="ibtn sm" title={t('allShortcuts')} onClick={() => openOverlay('shortcuts')}><HelpCircle size={16} /></button>
+        <IconButton icon={<HelpCircle />} title={t('allShortcuts')} onClick={() => openOverlay('shortcuts')} />
       </div>
     </aside>
   );

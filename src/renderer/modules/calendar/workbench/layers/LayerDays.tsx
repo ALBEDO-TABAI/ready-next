@@ -4,15 +4,17 @@ import { useState } from 'react'
 import { calendarLayers, type CalendarLayer, type LayerEntry } from '../../../../../shared/calendar-layers'
 import { openReadyRef } from '../../../workbench/open-ready-ref'
 import { useStore, setPrefs, toast } from '../store'
+import { Checkbox } from '../../../../components/ui/Toggle'
 import { readDraggedTodo, scheduleTodo, todoFromLayer, toggleTodo, writeTodoTransfer, endTodoTransfer } from './todo-actions'
 
 let draggedLayer: { id: string; uri: string } | null = null
 
 export function LayerSwitches() {
   const enabled = useStore(s => s.prefs.layers)
-  return <div className="side-sec" aria-label="日历图层">{calendarLayers.map(layer => <label key={layer.id} className="side-row" style={{ color: layer.color }}>
-    <input type="checkbox" aria-label={layer.label} checked={enabled[layer.id]} onChange={() => setPrefs({ layers: { ...enabled, [layer.id]: !enabled[layer.id] } })} />{layer.label}
-  </label>)}</div>
+  // Each layer's name keeps its colour (layer data); the box is the shared checkbox (W1 §5).
+  return <div className="side-sec layer-switches" role="group" aria-label="日历图层">{calendarLayers.map(layer => <div key={layer.id} className="layer-switch" style={{ color: layer.color }}>
+    <Checkbox label={layer.label} checked={enabled[layer.id]} onChange={() => setPrefs({ layers: { ...enabled, [layer.id]: !enabled[layer.id] } })} />
+  </div>)}</div>
 }
 
 export function LayerDay({ date, entries, enabled, move }: {

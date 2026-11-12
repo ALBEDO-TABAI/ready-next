@@ -35,7 +35,7 @@ const en = {
   sShortcuts: 'Keyboard shortcuts', sSidebar: 'Toggle sidebar', sPanel: 'Toggle side panel', or: 'or', drag: 'drag',
   nextEvent: 'Next: {t}', cardJoin: 'Join', cardOpen: 'Open', cardDismiss: 'Dismiss', startsNow: 'Starting now', startsIn: 'In {n} min', noUpcoming: 'No upcoming events',
   newCalendar: 'New calendar', rename: 'Rename', hideCal: 'Hide', showCal: 'Show', onlyThis: 'Show only this calendar', deleteCalendar: 'Delete calendar',
-  jumpTo: 'Jump to', enterDate: 'Type a date, e.g. 2026-11-03', durationMin: '{n} min', durationH: '{n} h', durationHM: '{h} h {m} min', declined: 'Declined',
+  jumpTo: 'Jump to', enterDate: 'Type a date, e.g. 2026-11-03', durationMin: '{n} min', durationH: '{n} h', durationHM: '{h} h {m} min', declined: 'Declined', endOnDate: 'On a date', endAfterCount: 'After a number of times', calendarList: 'Calendars',
 } as const;
 type Dict = { [K in keyof typeof en]: string };
 const zhTW: Dict = {
@@ -72,7 +72,7 @@ const zhTW: Dict = {
   sShortcuts: '鍵盤快速鍵', sSidebar: '切換側邊欄', sPanel: '切換側面板', or: '或', drag: '拖曳',
   nextEvent: '下一個:{t}', cardJoin: '加入', cardOpen: '開啟', cardDismiss: '關閉', startsNow: '即將開始', startsIn: '{n} 分鐘後', noUpcoming: '沒有即將到來的活動',
   newCalendar: '新日曆', rename: '重新命名', hideCal: '隱藏', showCal: '顯示', onlyThis: '只顯示此日曆', deleteCalendar: '刪除日曆',
-  jumpTo: '跳至', enterDate: '輸入日期,例如 2026-11-03', durationMin: '{n}分鐘', durationH: '{n}小時', durationHM: '{h}小時{m}分鐘', declined: '已拒絕',
+  jumpTo: '跳至', enterDate: '輸入日期,例如 2026-11-03', durationMin: '{n}分鐘', durationH: '{n}小時', durationHM: '{h}小時{m}分鐘', declined: '已拒絕', endOnDate: '於指定日期', endAfterCount: '重複次數', calendarList: '日曆列表',
 };
 export const zhCN: Dict = {
   today: '今天', day: '天', week: '周', month: '月', days: '天数', nDays: '{n} 天', viewSettings: '视图设置',
@@ -108,7 +108,7 @@ export const zhCN: Dict = {
   sShortcuts: '键盘快捷键', sSidebar: '切换侧边栏', sPanel: '切换侧面板', or: '或', drag: '拖动',
   nextEvent: '下一个：{t}', cardJoin: '加入', cardOpen: '打开', cardDismiss: '关闭', startsNow: '即将开始', startsIn: '{n} 分钟后', noUpcoming: '没有即将开始的日程',
   newCalendar: '新建日历', rename: '重命名', hideCal: '隐藏', showCal: '显示', onlyThis: '只显示此日历', deleteCalendar: '删除日历',
-  jumpTo: '跳转到', enterDate: '输入日期，例如 2026-11-03', durationMin: '{n} 分钟', durationH: '{n} 小时', durationHM: '{h} 小时 {m} 分钟', declined: '已拒绝',
+  jumpTo: '跳转到', enterDate: '输入日期，例如 2026-11-03', durationMin: '{n} 分钟', durationH: '{n} 小时', durationHM: '{h} 小时 {m} 分钟', declined: '已拒绝', endOnDate: '指定日期', endAfterCount: '重复次数', calendarList: '日历列表',
 };
 export type Key = keyof typeof en;
 const DICTS: Record<Locale, Dict> = { en, 'zh-TW': zhTW, 'zh-CN': zhCN };

@@ -1,6 +1,8 @@
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, PanelRight } from 'lucide-react';
 import { ymd } from '@shared/calendar';
-import { useStore, goToday, step, openMenu, setPrefs, periodDays, getState } from '../store';
+import { useStore, goToday, step, setPrefs, periodDays, getState } from '../store';
+import { Button, IconButton } from '../../../../components/ui/Button';
+import { openCalendarMenu } from './Menus';
 import { monthName } from '../fmt';
 import { t } from '../i18n';
 import { NavigationBackEntry } from '../../../workbench/NavigationBackEntry';
@@ -16,13 +18,13 @@ export function TopBar() {
       <div className="topbar-row">
         <NavigationBackEntry mode="calendar" />
         <div className="topbar-spacer" />
-        <button className="btn" data-testid="viewbtn" onClick={(e) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); openMenu({ kind: 'view', x: r.left, y: r.bottom + 8 }); }}>
-          <span>{label}</span><ChevronDown size={14} />
-        </button>
-        <button className="btn" onClick={() => goToday()}>{t('today')}</button>
-        <button className="ibtn" style={{ marginLeft: 6 }} onClick={() => step(-1)}><Prev size={18} /></button>
-        <button className="ibtn" style={{ marginLeft: -5 }} onClick={() => step(1)}><Next size={18} /></button>
-        {!s.panel && <button className="ibtn" onClick={() => setPrefs({ contextPanel: true })}><PanelRight size={18} /></button>}
+        <Button size="sm" data-testid="viewbtn" aria-haspopup="menu" onClick={(e) => openCalendarMenu('view', e.currentTarget.getBoundingClientRect())}>
+          <span>{label}</span><ChevronDown aria-hidden />
+        </Button>
+        <Button size="sm" onClick={() => goToday()}>{t('today')}</Button>
+        <IconButton icon={<Prev />} title={t('prevPeriod')} onClick={() => step(-1)} />
+        <IconButton icon={<Next />} title={t('nextPeriod')} onClick={() => step(1)} />
+        {!s.panel && <IconButton icon={<PanelRight />} title={t('sPanel')} onClick={() => setPrefs({ contextPanel: true })} />}
       </div>
       <div className="topbar-title" data-testid="title">{monthName(m)} <span className="yr tnum">{y}</span></div>
     </div>

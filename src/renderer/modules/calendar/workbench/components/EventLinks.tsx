@@ -10,6 +10,7 @@ import { openReadyRef } from '../../../workbench/open-ready-ref'
 import { reload } from '../store'
 import { Link2, NotebookPen, Plus, X } from 'lucide-react'
 import { LinkPicker } from './LinkPicker'
+import { Button, IconButton } from '../../../../components/ui/Button'
 import { openFloat } from '../../../../components/ui/float/float-store'
 import { RefCapsule } from '../../../../components/ui/RefCapsule'
 import { REF_CAPSULE_KINDS, refCapsuleKind } from '../../../../components/ui/ref-capsule-kinds'
@@ -104,7 +105,7 @@ export function EventLinks({occKey,title,readOnly}:{occKey:string;title:string;r
   // One 关联 row like the panel's other rows (W4 §4, O9): references as chips, "+" opens the same search as @.
   return <section className="ev-sec ev-links" aria-label="日程关联" onKeyDown={event=>event.stopPropagation()}>
     <div className="ev-r"><div className="ev-f ev-link-row">
-      <Link2 size={18} />
+      <Link2 size={16} />
       <div className="ev-chips">
         {related.map(link=><span key={link.id} className="ev-chip">
           {capsule(link.target)}
@@ -112,17 +113,17 @@ export function EventLinks({occKey,title,readOnly}:{occKey:string;title:string;r
         </span>)}
         {!related.length && <span className="dim">关联</span>}
       </div>
-      {!readOnly && <button type="button" className="ibtn sm" aria-label="添加关联" title="添加关联" disabled={busy || !snapshot}
-        onClick={event=>openLinkPicker(event.currentTarget.getBoundingClientRect(),ref=>void add(ref))}><Plus size={16} /></button>}
+      {!readOnly && <IconButton size="sm" icon={<Plus />} title="添加关联" disabled={busy || !snapshot}
+        onClick={event=>openLinkPicker(event.currentTarget.getBoundingClientRect(),ref=>void add(ref))} />}
     </div></div>
-    <div className="ev-r">{note ? <div className="ev-f ev-link-row"><NotebookPen size={18} /><div className="ev-chips">{capsule(note.target)}</div></div>
-      : <button type="button" className="ev-f" aria-label="会议笔记" disabled={busy || !snapshot || readOnly} onClick={()=>setPicker(true)}><NotebookPen size={18} /><span className="dim">会议笔记</span></button>}</div>
-    {pendingNote && !readOnly && <div className="ev-r ind"><button type="button" className="btn sm" disabled={busy} onClick={()=>void run(async()=>{const result=await createNote(pendingNote);if(!result.ok)throw new Error(result.message)})}>继续保存会议笔记</button></div>}
+    <div className="ev-r">{note ? <div className="ev-f ev-link-row"><NotebookPen size={16} /><div className="ev-chips">{capsule(note.target)}</div></div>
+      : <button type="button" className="ev-f" aria-label="会议笔记" disabled={busy || !snapshot || readOnly} onClick={()=>setPicker(true)}><NotebookPen size={16} /><span className="dim">会议笔记</span></button>}</div>
+    {pendingNote && !readOnly && <div className="ev-r ind"><Button size="sm" disabled={busy} onClick={()=>void run(async()=>{const result=await createNote(pendingNote);if(!result.ok)throw new Error(result.message)})}>继续保存会议笔记</Button></div>}
     {picker && !pendingNote && !readOnly && <SaveToPicker trees={trees} initialTitle={`${title || '日程'} 会议笔记`} onConfirm={createNote} onCancel={()=>setPicker(false)}/>}
-    {undo && !readOnly && <div className="ev-r ind"><button type="button" className="btn sm" disabled={busy} onClick={()=>void run(async()=>{
+    {undo && !readOnly && <div className="ev-r ind"><Button size="sm" variant="ghost" disabled={busy} onClick={()=>void run(async()=>{
       const restored = await value(window.electronAPI.calendar.restore(undo.undo,undo.versions))
       setUndo(null);setSnapshot(restored.snapshot);await reload();await refresh()
-    })}>撤销上次关联修改</button></div>}
+    })}>撤销上次关联修改</Button></div>}
     <details className="ev-backlinks"><summary>反链 {backlinks.length}{backlinks.length===1000?'+':''}</summary>
       {backlinks.map(link=>{ const id = 'ref' in link.source ? null : link.source.objectId, kind = id ? nodes.find(node=>node.objectId===id)?.kind : null
         return capsule('ref' in link.source ? link.source.ref : {kind:kind==='page' ? 'page' : kind==='canvas' ? 'canvas' : 'file', id:id!}, link.id) })}

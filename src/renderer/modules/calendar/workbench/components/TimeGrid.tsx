@@ -1,4 +1,4 @@
-// Week / day / N-day time grid. Geometry follows the measured reference.
+// Week / day / N-day time grid. Its metrics come from Ready's design system (geometry.ts).
 import { LayerDay } from '../layers/LayerDays';
 import { useLayerEntries } from '../layers/use-layer-entries';
 import { openReadyRef } from '../../../workbench/open-ready-ref';
@@ -6,7 +6,9 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronUp, Plus, X } from 'lucide-react';
 import { addSlot, removeSlot } from '../availability';
 import { layoutDay, packSpans, fromWall, toWall, dayOf, startOfDayMs, minutesOfDay, weekday, ymd, Occurrence, isoDate, DayNum } from '@shared/calendar';
-import { useStore, getState, setState, periodDays, occurrencesIn, select, clearSelection, createEvent, updateOccurrence, openMenu, setPrefs, calendarOf, primaryCalendar, openCalendarSettings } from '../store';
+import { useStore, getState, setState, periodDays, occurrencesIn, select, clearSelection, createEvent, updateOccurrence, setPrefs, calendarOf, primaryCalendar, openCalendarSettings } from '../store';
+import { IconButton } from '../../../../components/ui/Button';
+import { openCalendarMenu } from './Menus';
 import { useSize } from '../hooks';
 import { G, gutterWidth, colWidth, hourHeight, minDensityLevel, allDayHeight } from '../geometry';
 import { hourLabel, timeOfFull, wdShort, gmtLabel, panelTime } from '../fmt';
@@ -31,7 +33,7 @@ export function TimeGrid({active=true}:{active?:boolean}) {
   const days = useMemo(() => periodDays(getState()), [s.prefs, s.anchor]); // eslint-disable-line
   const n = days.length;
   const layers = useLayerEntries(days[0] ?? s.anchor, (days[n - 1] ?? s.anchor) + 1, tz, active);
-  // one overscan day each side (clipped), so bars and lines continue past the visible edge like the reference
+  // one overscan day each side (clipped), so bars and lines run on past the visible edge instead of stopping at it
   const cols = useMemo(() => (n ? [days[0] - 1, ...days, days[n - 1] + 1] : []), [days, n]);
   const xOf = (d: DayNum) => gutter + (cols.indexOf(d) - 1) * cw;
   const gutter = gutterWidth(1 + (s.prefs.showAdditionalTz ? s.prefs.additionalTimeZones.length : 0), size.w);
@@ -135,9 +137,9 @@ export function TimeGrid({active=true}:{active?:boolean}) {
         if (d?.kind === 'move') { const st = toMs(d.day, d.start); if (duplicate) { const {id,uid,rrule,exdates,rdates,recurringEventId,originalStart,revision,...copy}=occ.event; void createEvent({...copy,calendarId:readOnly?primaryCalendar()?.id:copy.calendarId,start:st,end:st+d.dur*60000}); } else if (st !== occ.start) updateOccurrence(occ.key, { start: st, end: st + d.dur * 60000 }, { label: t('moved'), expectedRevision:occ.event.revision }); }
       }, { x: e.clientX, y: e.clientY });
   };
-  const onChipContext = (e: React.MouseEvent, occ: Occurrence) => { if (!getState().selected.includes(occ.key)) select([occ.key]); openMenu({ kind: 'chip', x: e.clientX, y: e.clientY, data: { key: occ.key } }); };
+  const onChipContext = (e: React.MouseEvent, occ: Occurrence) => { if (!getState().selected.includes(occ.key)) select([occ.key]); openCalendarMenu('chip', { x: e.clientX, y: e.clientY }, { key: occ.key }); };
   const onChipDbl = (_occ: Occurrence) => setState((x) => ({ focusTitle: x.focusTitle + 1 }));
-  const onGridContext = (e: React.MouseEvent) => { e.preventDefault(); const p = point(e); setState({ cursorDay: p.day }); openMenu({ kind: 'grid', x: e.clientX, y: e.clientY, data: { day: p.day, min: snapF(p.min), allDay: false } }); };
+  const onGridContext = (e: React.MouseEvent) => { e.preventDefault(); const p = point(e); setState({ cursorDay: p.day }); openCalendarMenu('grid', { x: e.clientX, y: e.clientY }, { day: p.day, min: snapF(p.min), allDay: false }); };
 
   // ---------- all-day ----------
   const onAdDown = (e: React.PointerEvent) => {
@@ -194,7 +196,7 @@ export function TimeGrid({active=true}:{active?:boolean}) {
         })}
         {s.avail.active && s.avail.slots.map((x, i) => { const sod = startOfDayMs(d, tz); if (x.end <= sod || x.start >= startOfDayMs(d+1,tz)) return null;
           const a=x.start<=sod?0:minutesOfDay(x.start,tz), b=x.end>=startOfDayMs(d+1,tz)?1440:Math.max(a+1,minutesOfDay(x.end,tz));
-          return <div key={'av' + i} className="avslot" data-testid="avslot" style={{ top: (a / 60) * hourH, height: Math.max(10, ((b - a) / 60) * hourH - 2) }} onPointerDown={(e) => e.stopPropagation()}>
+          return <div key={'av' + i} className="avslot" data-testid="avslot" style={{ top: (a / 60) * hourH, height: Math.max(G.chipMinHeight, ((b - a) / 60) * hourH - G.chipMarginBottom) }} onPointerDown={(e) => e.stopPropagation()}>
             <span className="tnum">{panelTime(x.start, tz, h24)} – {panelTime(x.end, tz, h24)}</span><button onClick={() => removeSlot(i)}><X size={12} /></button></div>; })}
         {d !== s.today && <div className="nowfaint" style={{ top: nowY, left: 0, right: 0 }} />}
       </div>
@@ -235,8 +237,8 @@ export function TimeGrid({active=true}:{active?:boolean}) {
   return (
     <div className="gridwrap" ref={wrap} data-testid="timegrid" data-colw={cw} data-hourh={hourH} data-gutter={gutter}>
       <div className="colheads" style={{ height: G.colHeader }}>
-        <div className="gutterhead" style={{ width: gutter, justifyContent: 'space-between', paddingLeft: 6 }}>
-          <button className="ibtn xs" style={{ width: 16, height: 16, padding: 0 }} title={t('addTz')} onClick={() => openCalendarSettings('general')}><Plus size={10} /></button>
+        <div className="gutterhead" style={{ width: gutter }}>
+          <IconButton size="sm" className="gutter-add" icon={<Plus />} title={t('addTz')} onClick={() => openCalendarSettings('general')} />
           {tzs.slice().reverse().map((z) => <span key={z}>{gmtLabel(z, s.now)}</span>)}
         </div>
         {days.map((d) => {
@@ -247,14 +249,14 @@ export function TimeGrid({active=true}:{active?:boolean}) {
         })}
       </div>
       {layers.error && <div role="alert">{layers.error}</div>}
-      <div style={{ display: 'flex', paddingLeft: gutter, minHeight: 48 }}>
+      <div className="layer-strip" style={{ paddingLeft: gutter, minHeight: G.layerArea }}>
         {days.map(day => <div key={day} style={{ width: cw, minWidth: 0 }}><LayerDay date={isoDate(day)} entries={layers.entries} enabled={s.prefs.layers} move={layers.move} /></div>)}
       </div>
-      <div className="allday" style={{ height: adH }} onPointerDown={onAdDown} onContextMenu={(e) => { e.preventDefault(); openMenu({ kind: 'grid', x: e.clientX, y: e.clientY, data: { day: adPoint(e), allDay: true } }); }}>
+      <div className="allday" style={{ height: adH }} onPointerDown={onAdDown} onContextMenu={(e) => { e.preventDefault(); openCalendarMenu('grid', { x: e.clientX, y: e.clientY }, { day: adPoint(e), allDay: true }); }}>
         <div className="allday-gutter" style={{ width: gutter }} onPointerDown={(e) => e.stopPropagation()}>
-          {rows > 1 ? <button className="ibtn xs" style={{ position: 'absolute', right: 8, top: 2 }} onClick={() => setPrefs({ collapseAllDaySection: !s.prefs.collapseAllDaySection })}>{collapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}</button>
+          {rows > 1 ? <IconButton size="sm" className="allday-toggle" icon={collapsed ? <ChevronDown /> : <ChevronUp />} title={t('toggleAllDay')} onClick={() => setPrefs({ collapseAllDaySection: !s.prefs.collapseAllDaySection })} />
             : <span>{t('allDay')}</span>}
-          {collapsed && <div style={{ position: 'absolute', right: 6, top: 22, fontSize: 10 }}>+{placedSpans.filter((p) => p.row > 0).length}</div>}
+          {collapsed && <div className="allday-more tnum">+{placedSpans.filter((p) => p.row > 0).length}</div>}
         </div>
         {cols.map((d) => { const wd = weekday(d); return <div key={d} className={`allday-col${wd === 0 || wd === 6 ? ' wknd' : ''}`} style={{ position: 'absolute', top: 0, left: xOf(d), width: cw }} />; })}
         <div className="allday-chips" style={{ left: 0, right: 0 }}>{adChips}{adPreview}</div>
@@ -269,7 +271,7 @@ export function TimeGrid({active=true}:{active?:boolean}) {
             <div className="nowpill tnum" style={{ top: nowY }}>{timeOfFull(s.now, tz, h24)}</div>
           </div>
           {dayCols}
-          {todayIdx >= 0 && <div className="nowbar" style={{ top: nowY, left: gutter + todayIdx * cw + 3, width: cw - 5 }} />}
+          {todayIdx >= 0 && <div className="nowbar" style={{ top: nowY, left: gutter + todayIdx * cw, width: cw - 1 }} />}
           {preview}
         </div>
       </div>
