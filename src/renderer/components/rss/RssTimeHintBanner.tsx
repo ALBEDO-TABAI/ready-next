@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CalendarPlus, X } from 'lucide-react'
+import { Button, IconButton } from '../ui/Button'
+import { Input, Select } from '../ui/Field'
+import { Chip } from '../ui/Display'
+import { closeFloat, openFloat } from '../ui/float/float-store'
 import { stripHtml } from '../../utils/strip-html'
 import { dayOf, isoDate, newId, systemTimeZone, type Calendar } from '../../../shared/calendar'
 
 /**
- * L5-B — banner chip + modal that surfaces the time expressions
+ * L5-B — banner chip + dialog (a float of the shared host, W1 §5) that surfaces the time expressions
  * detected in the currently-selected RSS item and lets the user create
  * a calendar event from one of them. Renderer-only; the chrono-node
  * detector lives in main and is reached via
@@ -96,27 +100,22 @@ export default function RssTimeHintBanner({
   author,
 }: RssTimeHintBannerProps) {
   const [expressions, setExpressions] = useState<DetectedExpression[]>([])
-  const [open, setOpen] = useState(false)
-  const [selectedIndex, setSelectedIndex] = useState(0)
-  const [eventTitle, setEventTitle] = useState(title)
-  const [sources, setSources] = useState<Calendar[]>([])
-  const [selectedSourceId, setSelectedSourceId] = useState<string>('')
-  const [submitting, setSubmitting] = useState(false)
-  const [submitError, setSubmitError] = useState<string | null>(null)
-  const [submitSuccess, setSubmitSuccess] = useState(false)
+  const dialogRef = useRef<string | null>(null)
 
   // Cancellation guard for the async detection request — we don't want
   // a stale reply for a previous article to clobber the current state
   // when the user clicks through rapidly.
   const detectionGenRef = useRef(0)
 
+  const closeDialog = useCallback(() => {
+    if (dialogRef.current) closeFloat(dialogRef.current, true)
+    dialogRef.current = null
+  }, [])
+
   useEffect(() => {
     const myGen = ++detectionGenRef.current
     setExpressions([])
-    setOpen(false)
-    setSelectedIndex(0)
-    setSubmitError(null)
-    setSubmitSuccess(false)
+    closeDialog()
     const api = window.electronAPI?.calendar
     if (!api || typeof api.detectTimeExpressions !== 'function') return
     const combined = [title, stripHtml(summary), author].filter((v): v is string => typeof v === 'string' && v.length > 0).join('\n')
@@ -125,9 +124,7 @@ export default function RssTimeHintBanner({
       (res) => {
         if (detectionGenRef.current !== myGen) return
         if (!res || !res.success || res.mock || !Array.isArray(res.data)) return
-        const filtered = res.data.filter((e) => e.confidence !== 'low')
-        setSelectedIndex(0)
-        setExpressions(filtered)
+        setExpressions(res.data.filter((e) => e.confidence !== 'low'))
       },
       (err) => {
         if (detectionGenRef.current !== myGen) return
@@ -135,68 +132,80 @@ export default function RssTimeHintBanner({
         console.warn('[RssTimeHintBanner] detectTimeExpressions failed:', err)
       },
     )
-  }, [itemId, title, summary, author])
+  }, [itemId, title, summary, author, closeDialog])
 
-  // Keep the editable event title in sync when the user changes
-  // article (it pre-fills with the headline, but they can still edit
-  // it in the modal).
-  useEffect(() => {
-    setEventTitle(title)
-  }, [title])
-
-  // Load calendar sources lazily — only when the modal first opens —
-  // so we don't pay the IPC round-trip for every article preview.
-  useEffect(() => {
-    if (!open) return
-    if (sources.length > 0) return
-    const api = window.electronAPI?.calendar
-    if (!api) return
-    void api.snapshot().then(
-      (res) => {
-        if (!res.success || !res.data) return
-        const writable = res.data.calendars.filter(source => !source.readOnly)
-        setSources(writable)
-        if (writable.length > 0 && selectedSourceId === '') {
-          setSelectedSourceId((writable.find(source => source.primary) || writable[0]).id)
-        }
-      },
-      (err) => {
-        console.warn('[RssTimeHintBanner] snapshot failed:', err)
-      },
-    )
-  }, [open, sources.length, selectedSourceId])
+  useEffect(() => closeDialog, [closeDialog])
 
   const previewTexts = useMemo(() => expressions.slice(0, 3).map((e) => `“${e.text}”`).join(' · '), [
     expressions,
   ])
 
+  const handleOpen = useCallback(() => {
+    dialogRef.current = openFloat({
+      anchor: { left: 0, top: 0, right: 0, bottom: 0 },
+      placement: 'center',
+      modal: true,
+      role: 'dialog',
+      label: '创建日程',
+      className: 'rn-dialog rss-time-hint-modal',
+      onClose: () => { dialogRef.current = null },
+      render: (close) => <TimeHintDialog expressions={expressions} articleTitle={title} close={close} />,
+    })
+  }, [expressions, title])
+
+  if (expressions.length === 0) return null
+
+  return (
+    <Chip
+      icon={<CalendarPlus />}
+      onClick={handleOpen}
+      className="rss-time-hint-chip"
+      title={`识别到 ${expressions.length} 个时间表达式 — 点击创建日程`}
+    >
+      <span className="rss-time-hint-chip__text">
+        识别到 {expressions.length} 个时间 · {previewTexts || '点击创建日程'}
+      </span>
+    </Chip>
+  )
+}
+
+function TimeHintDialog({ expressions, articleTitle, close }: { expressions: DetectedExpression[]; articleTitle: string; close: () => void }) {
+  const [selectedIndex, setSelectedIndex] = useState(0)
+  const [eventTitle, setEventTitle] = useState(articleTitle)
+  const [sources, setSources] = useState<Calendar[]>([])
+  const [selectedSourceId, setSelectedSourceId] = useState<string>('')
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const [submitSuccess, setSubmitSuccess] = useState(false)
   const selected = expressions[selectedIndex] ?? null
   const [editedStartSeconds, setEditedStartSeconds] = useState<number | null>(null)
   const [editedEndSeconds, setEditedEndSeconds] = useState<number | null>(null)
 
+  // Load calendar sources once the dialog opens, so we don't pay the IPC round-trip for every article preview.
   useEffect(() => {
-    if (!selected) {
-      setEditedStartSeconds(null)
-      setEditedEndSeconds(null)
-      return
-    }
-    setEditedStartSeconds(selected.startTime)
-    setEditedEndSeconds(selected.endTime)
+    const api = window.electronAPI?.calendar
+    if (!api) return
+    let live = true
+    void api.snapshot().then(
+      (res) => {
+        if (!live || !res.success || !res.data) return
+        const writable = res.data.calendars.filter(source => !source.readOnly)
+        setSources(writable)
+        if (writable.length > 0) setSelectedSourceId((current) => current || (writable.find(source => source.primary) || writable[0]).id)
+      },
+      (err) => {
+        console.warn('[RssTimeHintBanner] snapshot failed:', err)
+      },
+    )
+    return () => { live = false }
+  }, [])
+
+  useEffect(() => {
+    setEditedStartSeconds(selected ? selected.startTime : null)
+    setEditedEndSeconds(selected ? selected.endTime : null)
   }, [selected])
 
-  const handleOpen = useCallback(() => {
-    setOpen(true)
-    setSelectedIndex(0)
-    setSubmitError(null)
-    setSubmitSuccess(false)
-  }, [])
-
-  const handleClose = useCallback(() => {
-    setOpen(false)
-    setSubmitError(null)
-  }, [])
-
-  const handleSubmit = useCallback(async () => {
+  const handleSubmit = async () => {
     const api = window.electronAPI?.calendar
     if (!api) return
     if (!selected) return
@@ -222,210 +231,90 @@ export default function RssTimeHintBanner({
         start: allDay ? isoDate(dayOf(startSeconds * 1000, timeZone)) : startSeconds * 1000,
         end: allDay ? isoDate(dayOf((endSeconds - 1) * 1000, timeZone) + 1) : endSeconds * 1000,
         allDay, status: 'confirmed', transparency: allDay ? 'transparent' : 'opaque',
-        description: `From RSS · 来自文章：${title}`,
+        description: `From RSS · 来自文章：${articleTitle}`,
       }}, {})
       if (!res || !res.success) {
         setSubmitError(res?.error ?? '创建失败')
         return
       }
       setSubmitSuccess(true)
-      window.setTimeout(() => {
-        setOpen(false)
-      }, 1200)
+      window.setTimeout(close, 1200)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       setSubmitError(message)
     } finally {
       setSubmitting(false)
     }
-  }, [
-    selected,
-    selectedSourceId,
-    eventTitle,
-    editedStartSeconds,
-    editedEndSeconds,
-    title,
-  ])
-
-  if (expressions.length === 0) return null
+  }
 
   return (
-    <>
-      <button
-        type="button"
-        onClick={handleOpen}
-        className="rss-time-hint-chip flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] transition-colors hover:bg-black/5"
-        style={{
-          background: 'color-mix(in srgb, var(--color-blue) 12%, transparent)',
-          color: 'var(--color-blue)',
-          border: '1px solid color-mix(in srgb, var(--color-blue) 28%, transparent)',
-        }}
-        title={`识别到 ${expressions.length} 个时间表达式 — 点击创建日程`}
-      >
-        <CalendarPlus className="w-3.5 h-3.5" strokeWidth={2} />
-        <span className="truncate max-w-[260px]">
-          识别到 {expressions.length} 个时间 · {previewTexts || '点击创建日程'}
-        </span>
-      </button>
+    <div className="rss-time-hint">
+      <div className="rss-add-source__header">
+        <h2 className="rn-dialog__title">创建日程</h2>
+        <IconButton size="sm" icon={<X />} title="关闭" onClick={close} />
+      </div>
 
-      {open && (
-        <div
-          data-ready-native-overlay=""
-          className="rss-time-hint-modal-backdrop fixed inset-0 z-50 flex items-center justify-center"
-          style={{ background: 'rgba(0,0,0,0.36)' }}
-          onClick={handleClose}
-        >
-          <div
-            className="rss-time-hint-modal glass-surface-panel rounded-xl p-5 max-w-[560px] w-[92%]"
-            style={{
-              background: 'var(--surface-card-bg)',
-              border: '1px solid var(--border-default)',
-              boxShadow: 'var(--shadow-lg)',
+      <label className="rss-add-source__field">
+        <span>识别到的时间</span>
+        <Select
+          value={String(selectedIndex)}
+          onChange={(e) => setSelectedIndex(Number(e.target.value))}
+          options={expressions.map((expr, i) => ({
+            value: String(i),
+            label: `“${expr.text}” → ${formatStart(expr.startTime, expr.hasTime)}${expr.confidence === 'high' ? '' : ' (待确认)'}`,
+          }))}
+        />
+      </label>
+
+      <label className="rss-add-source__field">
+        <span>事件标题</span>
+        <Input type="text" value={eventTitle} onChange={(e) => setEventTitle(e.target.value)} data-autofocus />
+      </label>
+
+      <div className="rss-time-hint__times">
+        <label className="rss-add-source__field">
+          <span>开始时间</span>
+          <Input
+            type="datetime-local"
+            value={editedStartSeconds !== null ? toLocalDatetimeInputValue(editedStartSeconds) : ''}
+            onChange={(e) => {
+              const next = fromLocalDatetimeInputValue(e.target.value)
+              if (next !== null) setEditedStartSeconds(next)
             }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-[15px] font-semibold text-[var(--text-title)]">
-                创建日程
-              </h3>
-              <button
-                onClick={handleClose}
-                className="p-1 rounded hover:bg-black/5"
-                aria-label="关闭"
-              >
-                <X className="w-4 h-4 text-[var(--text-muted)]" />
-              </button>
-            </div>
+          />
+        </label>
+        <label className="rss-add-source__field">
+          <span>结束时间</span>
+          <Input
+            type="datetime-local"
+            value={editedEndSeconds !== null ? toLocalDatetimeInputValue(editedEndSeconds) : ''}
+            onChange={(e) => {
+              const next = fromLocalDatetimeInputValue(e.target.value)
+              if (next !== null) setEditedEndSeconds(next)
+            }}
+          />
+        </label>
+      </div>
 
-            <label className="block mb-3">
-              <span className="block text-[11px] text-[var(--text-muted)] mb-1">识别到的时间</span>
-              <select
-                value={selectedIndex}
-                onChange={(e) => setSelectedIndex(Number(e.target.value))}
-                className="w-full px-2.5 py-1.5 rounded-md text-[13px]"
-                style={{
-                  background: 'var(--bg-content)',
-                  border: '1px solid var(--border-default)',
-                  color: 'var(--text-body)',
-                }}
-              >
-                {expressions.map((expr, i) => (
-                  <option key={`${expr.startIndex}:${expr.text}`} value={i}>
-                    “{expr.text}” → {formatStart(expr.startTime, expr.hasTime)}
-                    {expr.confidence === 'high' ? '' : ' (待确认)'}
-                  </option>
-                ))}
-              </select>
-            </label>
+      <label className="rss-add-source__field">
+        <span>日历</span>
+        <Select
+          value={selectedSourceId}
+          onChange={(e) => setSelectedSourceId(e.target.value)}
+          disabled={sources.length === 0}
+          options={sources.length === 0 ? [{ value: '', label: '(加载中…)' }] : sources.map((s) => ({ value: s.id, label: s.name }))}
+        />
+      </label>
 
-            <label className="block mb-3">
-              <span className="block text-[11px] text-[var(--text-muted)] mb-1">事件标题</span>
-              <input
-                type="text"
-                value={eventTitle}
-                onChange={(e) => setEventTitle(e.target.value)}
-                className="w-full px-2.5 py-1.5 rounded-md text-[13px]"
-                style={{
-                  background: 'var(--bg-content)',
-                  border: '1px solid var(--border-default)',
-                  color: 'var(--text-body)',
-                }}
-              />
-            </label>
+      {submitError && <p className="rss-time-hint__status" data-tone="bad" role="alert">{submitError}</p>}
+      {submitSuccess && <p className="rss-time-hint__status" role="status">已创建</p>}
 
-            <div className="flex gap-2 mb-3">
-              <label className="block flex-1">
-                <span className="block text-[11px] text-[var(--text-muted)] mb-1">开始时间</span>
-                <input
-                  type="datetime-local"
-                  value={editedStartSeconds !== null ? toLocalDatetimeInputValue(editedStartSeconds) : ''}
-                  onChange={(e) => {
-                    const next = fromLocalDatetimeInputValue(e.target.value)
-                    if (next !== null) setEditedStartSeconds(next)
-                  }}
-                  className="w-full px-2 py-1.5 rounded-md text-[12px]"
-                  style={{
-                    background: 'var(--bg-content)',
-                    border: '1px solid var(--border-default)',
-                    color: 'var(--text-body)',
-                  }}
-                />
-              </label>
-              <label className="block flex-1">
-                <span className="block text-[11px] text-[var(--text-muted)] mb-1">结束时间</span>
-                <input
-                  type="datetime-local"
-                  value={editedEndSeconds !== null ? toLocalDatetimeInputValue(editedEndSeconds) : ''}
-                  onChange={(e) => {
-                    const next = fromLocalDatetimeInputValue(e.target.value)
-                    if (next !== null) setEditedEndSeconds(next)
-                  }}
-                  className="w-full px-2 py-1.5 rounded-md text-[12px]"
-                  style={{
-                    background: 'var(--bg-content)',
-                    border: '1px solid var(--border-default)',
-                    color: 'var(--text-body)',
-                  }}
-                />
-              </label>
-            </div>
-
-            <label className="block mb-4">
-              <span className="block text-[11px] text-[var(--text-muted)] mb-1">日历</span>
-              <select
-                value={selectedSourceId}
-                onChange={(e) => setSelectedSourceId(e.target.value)}
-                className="w-full px-2.5 py-1.5 rounded-md text-[13px]"
-                style={{
-                  background: 'var(--bg-content)',
-                  border: '1px solid var(--border-default)',
-                  color: 'var(--text-body)',
-                }}
-                disabled={sources.length === 0}
-              >
-                {sources.length === 0 ? (
-                  <option value="">(加载中…)</option>
-                ) : (
-                  sources.map((s) => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))
-                )}
-              </select>
-            </label>
-
-            {submitError && (
-              <div className="mb-3 text-[12px] text-[var(--color-red, #dc2626)]">{submitError}</div>
-            )}
-            {submitSuccess && (
-              <div className="mb-3 text-[12px]" style={{ color: 'var(--color-green, #10b981)' }}>已创建</div>
-            )}
-
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={handleClose}
-                className="px-3 py-1.5 rounded-md text-[12px] hover:bg-black/5"
-                style={{ color: 'var(--text-muted)' }}
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                onClick={handleSubmit}
-                disabled={submitting || submitSuccess || sources.length === 0}
-                className="px-3 py-1.5 rounded-md text-[12px] text-white"
-                style={{
-                  background: 'var(--color-blue)',
-                  opacity: submitting || submitSuccess || sources.length === 0 ? 0.6 : 1,
-                  cursor: submitting || submitSuccess || sources.length === 0 ? 'not-allowed' : 'pointer',
-                }}
-              >
-                {submitting ? '创建中…' : '创建日程'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
+      <div className="rn-dialog__actions">
+        <Button variant="ghost" onClick={close}>取消</Button>
+        <Button variant="primary" onClick={() => void handleSubmit()} disabled={submitting || submitSuccess || sources.length === 0}>
+          {submitting ? '创建中…' : '创建日程'}
+        </Button>
+      </div>
+    </div>
   )
 }

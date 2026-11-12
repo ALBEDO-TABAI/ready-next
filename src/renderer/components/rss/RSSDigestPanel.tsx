@@ -10,6 +10,9 @@ import { ChevronRight, Download, Plus, RefreshCw, Settings2 } from 'lucide-react
 import RSSBriefComposer from './RSSBriefComposer'
 import RSSCoverImage from './RSSCoverImage'
 import RSSTopbarTools from './RSSTopbarTools'
+import { Button, IconButton } from '../ui/Button'
+import { Input } from '../ui/Field'
+import { Segmented, Switch } from '../ui/Toggle'
 
 const time = (value: number, timezone: string) => new Date(value).toLocaleString(undefined, { timeZone: timezone })
 const editionDate = (value: number, timezone: string, withTime: boolean) => new Date(value).toLocaleString('zh-CN', {
@@ -41,14 +44,14 @@ function Sources({ reportId, groupKey, criteria = false }: { reportId: string; g
     finally { if (alive.current) setBusy(false) }
   }
   return <div className="rss-digest-sources">
-    <button type="button" onClick={() => { setOpen(!open); if (!open && !busy && rows.length === 0 && next !== null) void read() }} aria-expanded={open}>{groupKey ? '查看全部报道依据' : criteria ? '查看本刊采用的标准版本' : '查看订阅覆盖与采集情况'}</button>
+    <Button variant="ghost" size="sm" onClick={() => { setOpen(!open); if (!open && !busy && rows.length === 0 && next !== null) void read() }} aria-expanded={open}>{groupKey ? '查看全部报道依据' : criteria ? '查看本刊采用的标准版本' : '查看订阅覆盖与采集情况'}</Button>
     {open && <>
       {rows.map((row) => 'itemId' in row ? <div key={`${row.itemId}:${row.articleRevision}`}>
         <SourceLine row={row} /><blockquote>{row.quote}</blockquote>
         <p>{row.quoteKind === 'source_summary' ? '来源摘要' : row.quoteKind === 'title' ? '仅有标题' : '原文摘句'}{row.quoteTruncated ? ' · 节选' : ''} · {row.bodyStatus === 'ready' ? '已保存正文' : '正文不完整或尚未获取'}</p>
         {row.curation && <p>{row.curation.origin === 'manual' ? '手工精选' : '模型精选理由'}：{row.curation.reason}</p>}
       </div> : 'ruleRevision' in row ? <div key={row.id}><strong>{row.name} · 标准第 {row.ruleRevision} 版</strong><p>{row.description}</p></div> : <div key={row.id}><strong>{row.name}</strong><p>{row.enabled ? '已启用' : '已停用'} · {row.fetch ? `${row.fetch.attemptedAt} · ${row.fetch.success ? '最近采集成功' : '最近采集失败'}` : '缺少最近采集结果'}{row.fetch?.error ? ` · ${row.fetch.error}` : ''}{row.fetch?.warning ? ` · ${row.fetch.warning}` : ''}</p></div>)}
-      {next !== null && <button type="button" disabled={busy} onClick={() => void read()}>{busy ? '读取中…' : '继续读取依据'}</button>}
+      {next !== null && <Button variant="ghost" size="sm" disabled={busy} onClick={() => void read()}>{busy ? '读取中…' : '继续读取依据'}</Button>}
       {error && <p className="rss-note rss-note--danger" role="alert">{error}</p>}
     </>}
   </div>
@@ -200,12 +203,10 @@ export default function RSSDigestPanel({ active, view, definitions = [], feedSou
     <RSSTopbarTools slot="lead" show={active}><span>日报与简报</span></RSSTopbarTools>
     <aside className="rss-digest-side">
       <div className="rss-digest-side__actions">
-        <div className="sx-seg" role="tablist" aria-label="刊物类型">
-          {(['daily', 'range'] as const).map((kind) => <button type="button" role="tab" key={kind} className="sx-seg__item" aria-selected={tab === kind} onClick={() => setTab(kind)}>{kind === 'daily' ? '日报' : '简报'}</button>)}
-        </div>
-        <button type="button" className="rss-btn rss-btn--icon" aria-label="日报设置" title="日报时间与收录范围" aria-pressed={settingsOpen} onClick={() => setSettingsOpen((open) => !open)}><Settings2 size={15} strokeWidth={1.8} /></button>
+        <Segmented label="刊物类型" value={tab} onChange={setTab} options={[{ value: 'daily', label: '日报' }, { value: 'range', label: '简报' }]} />
+        <IconButton icon={<Settings2 />} title="日报设置" active={settingsOpen} onClick={() => setSettingsOpen((open) => !open)} />
       </div>
-      <button type="button" className="sx-btn sx-btn--sm rss-digest-generate" aria-pressed={composing} disabled={busy} onClick={() => { setError(''); setComposing((open) => !open) }}><Plus size={14} strokeWidth={1.9} />新建简报</button>
+      <Button size="sm" className="rss-digest-generate" icon={<Plus />} aria-pressed={composing} disabled={busy} onClick={() => { setError(''); setComposing((open) => !open) }}>新建简报</Button>
       <p>往期</p>
       <nav className="rss-digest-editions" aria-label="已保存刊物">
         {months.map((month) => {
@@ -227,28 +228,28 @@ export default function RSSDigestPanel({ active, view, definitions = [], feedSou
           </div>
         })}
         {!shelf.length && <p>{tab === 'daily' ? `还没有日报。每天会按“${curated?.name || '精选'}”的标准，把新入选的资讯整理成一期。` : '还没有简报。可以选一个栏目、分类、来源或时间范围生成一份。'}</p>}
-        {editionNext !== null && <button type="button" className="rss-digest-older" onClick={() => void action(() => list(true))}>更早刊物</button>}
+        {editionNext !== null && <Button variant="ghost" size="sm" className="rss-digest-older" onClick={() => void action(() => list(true))}>更早刊物</Button>}
       </nav>
     </aside>
     <div className="rss-digest-main" ref={mainRef}>
       {settingsOpen && <div className="rss-digest-settings">
         <div className="rss-processing-panel__row">
           <div><strong>自动生成日报</strong><small>按本机时区每天生成；关闭或休眠后补最近一期。不会发送到外部，也不会再次调用模型扩写新闻。</small></div>
-          {settings && <button type="button" role="switch" aria-checked={settings.enabled} aria-label="自动生成日报" className="sx-switch" data-checked={settings.enabled ? 'true' : 'false'} disabled={busy}
-            onClick={() => void action(async () => {
-              const result = await window.electronAPI.rss.configureDigests({ enabled: !settings.enabled, localTime: settings.localTime }); if (!result.success || !result.data) throw new Error(result.error); setSettings(result.data)
+          {settings && <Switch label="自动生成日报" checked={settings.enabled} disabled={busy}
+            onChange={(enabled) => void action(async () => {
+              const result = await window.electronAPI.rss.configureDigests({ enabled, localTime: settings.localTime }); if (!result.success || !result.data) throw new Error(result.error); setSettings(result.data)
             })} />}
         </div>
         {settings && <div className="rss-processing-panel__row">
           <div><strong>当地时间</strong><small>{settings.timezone} · 下次：{settings.enabled && settings.nextRunAt ? new Date(settings.nextRunAt).toLocaleString() : '已关闭'}</small></div>
           <div className="rss-processing-panel__limit">
-            <input className="sx-input" type="time" aria-label="日报当地时间" value={draftTime} onChange={(e) => { dirtyTime.current = true; setDraftTime(e.target.value) }} />
-            <button type="button" className="sx-btn sx-btn--sm" disabled={busy || !draftTime} onClick={() => void action(async () => { const result = await window.electronAPI.rss.configureDigests({ enabled: settings.enabled, localTime: draftTime }); if (!result.success || !result.data) throw new Error(result.error); setSettings(result.data); dirtyTime.current = false })}>保存日报时间</button>
+            <Input type="time" aria-label="日报当地时间" value={draftTime} onChange={(e) => { dirtyTime.current = true; setDraftTime(e.target.value) }} />
+            <Button size="sm" disabled={busy || !draftTime} onClick={() => void action(async () => { const result = await window.electronAPI.rss.configureDigests({ enabled: settings.enabled, localTime: draftTime }); if (!result.success || !result.data) throw new Error(result.error); setSettings(result.data); dirtyTime.current = false })}>保存日报时间</Button>
           </div>
         </div>}
         <div className="rss-processing-panel__row">
           <div><strong>收录范围</strong><small>每天收录“{curated?.name || '精选'}”栏目里新入选的资讯，已出刊的不再重复。{curated?.description ? `标准：${curated.description}` : ''}</small></div>
-          {curated && onEditDefinition && <button type="button" className="sx-btn sx-btn--sm" onClick={() => onEditDefinition(curated.id)}>编辑{curated.name}标准</button>}
+          {curated && onEditDefinition && <Button size="sm" onClick={() => onEditDefinition(curated.id)}>编辑{curated.name}标准</Button>}
         </div>
         {settings?.error && <p className="rss-note rss-note--danger" role="alert">上次生成未完成：{settings.error}。会在下次启动、恢复或定时触发时重试。</p>}
       </div>}
@@ -296,7 +297,7 @@ export default function RSSDigestPanel({ active, view, definitions = [], feedSou
                 {sources(entry)}
               </div>)}
             </section>)}
-            {next !== null && <button type="button" className="rss-load-more" disabled={busy} onClick={() => void action(() => read(report.id, true))}>更多条目</button>}
+            {next !== null && <Button variant="ghost" size="sm" className="rss-load-more" disabled={busy} onClick={() => void action(() => read(report.id, true))}>更多条目</Button>}
           </div>
           {(highlights.length > 0 || sections.length > 0) && <nav className="rss-paper-guide" aria-label="本期导读">
             {highlights.length > 0 && <section>
@@ -319,8 +320,8 @@ export default function RSSDigestPanel({ active, view, definitions = [], feedSou
               <p className="rss-digest-meta">{report.total} 项 · {report.referenceCount} 条报道依据；未得明确精选判断 {report.coverage.unresolvedArticles} 篇，其中有失败或未知任务 {report.coverage.failedArticles} 篇；等待整理 {report.coverage.pendingArticles} 篇。正文不完整或缺失 {report.coverage.missingBodies} 篇，补收 {report.coverage.carriedOverArticles} 篇。</p>
               <div className="rss-digest-actions">
                 <RSSReferenceButton name={`${report.kind === 'daily' ? '日报' : '范围简报'} 第 ${report.version} 版`} label="引用本刊" reference={{ kind: 'digest', read: { reportId: report.id, offset: 0, limit: 20 } }} />
-                <button type="button" className="rss-btn" disabled={busy} onClick={() => void action(() => generate({ kind: 'regenerate' }))}><RefreshCw size={14} strokeWidth={1.8} />重新生成新版本</button>
-                <button type="button" className="rss-btn" disabled={busy} onClick={() => void action(async () => { const ticket = actionTicket.current; const result = await window.electronAPI.rss.exportDigest({ reportId: report.id }); if (!result.success || !result.data) throw new Error(result.error); if (ticket === actionTicket.current) setNotice(result.data.canceled ? '已取消导出' : `已导出：${result.data.path}`) })}><Download size={14} strokeWidth={1.8} />导出本刊</button>
+                <Button variant="ghost" size="sm" icon={<RefreshCw />} disabled={busy} onClick={() => void action(() => generate({ kind: 'regenerate' }))}>重新生成新版本</Button>
+                <Button variant="ghost" size="sm" icon={<Download />} disabled={busy} onClick={() => void action(async () => { const ticket = actionTicket.current; const result = await window.electronAPI.rss.exportDigest({ reportId: report.id }); if (!result.success || !result.data) throw new Error(result.error); if (ticket === actionTicket.current) setNotice(result.data.canceled ? '已取消导出' : `已导出：${result.data.path}`) })}>导出本刊</Button>
               </div>
               <Sources key={`${report.id}:criteria`} reportId={report.id} criteria />
               <Sources key={`${report.id}:coverage`} reportId={report.id} />
@@ -331,7 +332,7 @@ export default function RSSDigestPanel({ active, view, definitions = [], feedSou
         <h1>日报与简报</h1>
         <p>{editions.length ? '从左侧选择一期查看。日报只汇总已入选的资讯与原文摘句，不再调用模型扩写。' : '这里会保存每天的资讯日报，以及你按栏目、分类、来源或时间生成的简报。'}</p>
       </div>}
-      {notice && <p className="rss-note" role="status" style={{ marginTop: 16 }}>{notice}</p>}{error && !composing && <p className="rss-note rss-note--danger" role="alert" style={{ marginTop: 16 }}>{error}</p>}
+      {notice && <p className="rss-note rss-digest-note" role="status">{notice}</p>}{error && !composing && <p className="rss-note rss-note--danger rss-digest-note" role="alert">{error}</p>}
     </div>
   </section>
 }

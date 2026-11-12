@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, ChevronDown, Languages, Loader2 } from 'lucide-react'
+import { ChevronDown, Languages, Loader2 } from 'lucide-react'
 import { MarkdownContent } from '../document/MarkdownContent'
 import { FloatPanel } from '../ui/float/FloatPanel'
-import { chatMenuSurfaceStyle } from '../agent/chatMenuStyles'
+import { MenuList, type MenuEntry } from '../ui/float/Menu'
+import { Button, IconButton } from '../ui/Button'
 import { RSS_TRANSLATION_LANGUAGES, rssTranslatedSegments, type RSSArticleTranslation } from '../../../shared/rss-translation'
 import type { RSSArticleTranslationState } from '../../modules/rss/article-translation'
 
@@ -33,40 +34,27 @@ export function RSSTranslationControl({ state, disabled }: { state: RSSArticleTr
         : untranslated > 0 ? `已翻译 ${translated}/${translation.total} 段，${untranslated} 段保留原文`
           : `已翻译全部 ${translation.total} 段`
 
+  // The options follow the running translation live, so they stay in a panel placed under the button (the shared
+  // FloatPanel) and list their choices with the shared MenuList.
+  const entries: MenuEntry[] = [
+    { kind: 'group', label: '翻译为' },
+    ...RSS_TRANSLATION_LANGUAGES.map((language): MenuEntry => ({ id: `lang:${language.code}`, label: language.label, checked: language.code === targetLang,
+      onSelect: () => { void state.translate(language.code) } })),
+    ...(translated > 0 ? [{ kind: 'group', label: '显示' } as MenuEntry, ...([['source', '原文'], ['translated', '译文'], ['bilingual', '对照']] as const)
+      .map(([value, text]): MenuEntry => ({ id: `view:${value}`, label: text, checked: view === value, onSelect: () => state.setView(value) }))] : []),
+    ...(running ? [{ kind: 'separator' } as MenuEntry, { id: 'cancel', label: '停止翻译', onSelect: state.cancel }] : []),
+    ...(!running && translation && translated < translation.total ? [{ kind: 'separator' } as MenuEntry, { id: 'retry', label: '重试未译段落', onSelect: () => { void state.translate(targetLang, true) } }] : []),
+  ]
+  const failure = state.error || (!running && translation?.error && translation.error !== 'interrupted' ? translation.error : null)
   return <div ref={ref} className="rss-translate">
-    <button type="button" className="rss-btn" disabled={disabled || !state.available} onClick={primary}
-      title={translated > 0 ? '在原文与译文之间切换' : '用已配置的模型翻译整篇正文'}>
-      {running ? <Loader2 size={14} className="animate-spin" /> : <Languages size={15} strokeWidth={1.8} />}{label}
-    </button>
-    <button type="button" className="rss-btn rss-btn--icon" aria-label="翻译选项" aria-haspopup="menu" aria-expanded={open}
-      disabled={disabled || !state.available} onMouseDown={(event) => event.preventDefault()} onClick={() => setOpen((value) => !value)}>
-      <ChevronDown size={12} strokeWidth={2} />
-    </button>
-    {open && <FloatPanel className="rss-reference-menu-panel overflow-hidden rounded-[14px]" role="menu" radius={14}
-      style={{ ...chatMenuSurfaceStyle, position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 30, width: 220 }}>
-      <div className="rss-menu">
-        <p className="rss-menu-label">翻译为</p>
-        {RSS_TRANSLATION_LANGUAGES.map((language) => <button type="button" key={language.code} role="menuitemradio"
-          aria-checked={language.code === targetLang} className="rss-menu-item ready-floating-menu-item"
-          onClick={() => { void state.translate(language.code); setOpen(false) }}>
-          <span>{language.label}</span>{language.code === targetLang && <Check size={13} strokeWidth={2} />}
-        </button>)}
-        {translated > 0 && <>
-          <p className="rss-menu-label">显示</p>
-          {([['source', '原文'], ['translated', '译文'], ['bilingual', '对照']] as const).map(([value, text]) => (
-            <button type="button" key={value} role="menuitemradio" aria-checked={view === value}
-              className="rss-menu-item ready-floating-menu-item" onClick={() => { state.setView(value); setOpen(false) }}>
-              <span>{text}</span>{view === value && <Check size={13} strokeWidth={2} />}
-            </button>
-          ))}
-        </>}
-        {status && <p className="rss-menu-note" role="status">{status}</p>}
-        {running && <button type="button" className="rss-menu-item ready-floating-menu-item" onClick={state.cancel}>停止翻译</button>}
-        {!running && translation && translated < translation.total && <button type="button" className="rss-menu-item ready-floating-menu-item"
-          onClick={() => { void state.translate(targetLang, true); setOpen(false) }}>重试未译段落</button>}
-        {(state.error || (!running && translation?.error && translation.error !== 'interrupted' ? translation.error : null)) &&
-          <p className="rss-menu-note" role="alert">{state.error || translation?.error}</p>}
-      </div>
+    <Button variant="ghost" size="sm" icon={running ? <Loader2 className="animate-spin" /> : <Languages />} disabled={disabled || !state.available} onClick={primary}
+      title={translated > 0 ? '在原文与译文之间切换' : '用已配置的模型翻译整篇正文'}>{label}</Button>
+    <IconButton size="sm" icon={<ChevronDown />} title="翻译选项" aria-haspopup="menu" aria-expanded={open} active={open}
+      disabled={disabled || !state.available} onMouseDown={(event) => event.preventDefault()} onClick={() => setOpen((value) => !value)} />
+    {open && <FloatPanel className="rss-translate__panel" style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 30, width: 220 }}>
+      <MenuList label="翻译选项" items={entries} onDone={() => setOpen(false)} />
+      {status && <p className="rss-menu-note" role="status">{status}</p>}
+      {failure && <p className="rss-menu-note" role="alert">{failure}</p>}
     </FloatPanel>}
   </div>
 }

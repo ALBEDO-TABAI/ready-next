@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { RSSCalibration } from '../../../shared/rss-sieve'
 import { Button } from '../ui/Button'
+import { Textarea } from '../ui/Field'
 import { unwrapRSS } from '../../modules/rss/unwrap'
 
 // 筛子校准 (W5 §2.4, V3): once a week the model proposes a new wording for 我的关注 from what was read and skipped.
@@ -37,7 +38,7 @@ export function RSSCalibrationCard({ active, onSettled }: { active: boolean; /**
       ? <p className="rss-calibration__note">你在这之后改过“我的关注”，这条建议不再适用。</p>
       : draft === null
         ? <blockquote className="rss-calibration__text">{proposal.text}</blockquote>
-        : <textarea className="rss-calibration__draft" aria-label="改写我的关注" value={draft} rows={5} onChange={event => setDraft(event.target.value)} />}
+        : <Textarea className="rss-calibration__draft" aria-label="改写我的关注" value={draft} rows={5} onChange={event => setDraft(event.target.value)} />}
     {error && <p role="alert" className="rss-calibration__note">{error}</p>}
     <div className="rss-calibration__actions">
       <span className="rss-calibration__meta">不经你确认，“我的关注”不会变。</span>

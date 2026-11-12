@@ -1,6 +1,6 @@
 /*
  * RSS 资讯流：内容框内的页头、分类胶囊、时间轴条目与“当前热点”。
- * 与 rss-workspace.css 同一套 sx 纪律；--rss-* 变量由 .rss-mode-shell 提供。
+ * 只用 --rn-* 令牌（W1 DS1）；胶囊、按钮、空状态与骨架是共享基元，这里只管排版。--rss-* 由 .rss-mode-shell 提供。
  */
 
 /* ── 资讯流页头（内容框内） ───────────────────────────────────────────── */
@@ -30,7 +30,7 @@
   line-height: 1.25;
   font-weight: 650;
   letter-spacing: -0.015em;
-  color: var(--text-title);
+  color: var(--rn-ink);
 }
 
 .rss-heading-desc {
@@ -38,9 +38,9 @@
   max-width: 640px;
   margin-top: 6px;
   overflow: hidden;
-  font-size: 13px;
+  font-size: var(--rn-fs-md);
   line-height: 1.6;
-  color: var(--text-muted);
+  color: var(--rn-ink-2);
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
@@ -51,8 +51,8 @@
   align-items: center;
   gap: 12px;
   padding-bottom: 3px;
-  font-size: 12px;
-  color: var(--text-light);
+  font-size: var(--rn-fs-sm);
+  color: var(--rn-ink-3);
   white-space: nowrap;
 }
 
@@ -67,6 +67,7 @@
   margin-top: 20px;
 }
 
+/* Filter chips scroll sideways and fade at the right edge (the mask only reads alpha). */
 .rss-category-filters {
   display: flex;
   flex: 1;
@@ -75,8 +76,8 @@
   gap: 4px;
   overflow-x: auto;
   scrollbar-width: none;
-  -webkit-mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 28px), transparent 100%);
-  mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 28px), transparent 100%);
+  -webkit-mask-image: linear-gradient(90deg, var(--rn-ink) 0, var(--rn-ink) calc(100% - 28px), transparent 100%);
+  mask-image: linear-gradient(90deg, var(--rn-ink) 0, var(--rn-ink) calc(100% - 28px), transparent 100%);
   padding: 4px 28px 4px 2px;
   margin: -4px 0 -4px -2px;
 }
@@ -85,80 +86,72 @@
   display: none;
 }
 
-.rss-category-filters button {
+.rss-category-filters .rn-chip {
   flex-shrink: 0;
-  height: 28px;
-  padding: 0 12px;
-  border-radius: 999px;
-  font-size: 12.5px;
-  color: var(--text-secondary);
-  white-space: nowrap;
-  transition: background-color var(--sx-dur, 160ms) var(--rss-ease), box-shadow var(--sx-dur, 160ms) var(--rss-ease), color var(--sx-dur, 160ms) var(--rss-ease);
-}
-
-.rss-category-filters button:hover:not([aria-pressed='true']) {
-  background: var(--sx-raised-hover);
-  color: var(--text-title);
-}
-
-.rss-category-filters button[aria-pressed='true'] {
-  background: var(--sx-raised-bg);
-  box-shadow: var(--sx-raised-shadow);
-  color: var(--text-title);
-  font-weight: 500;
 }
 
 .rss-heading-aside {
   display: flex;
   flex-shrink: 0;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
   margin-left: auto;
 }
 
-.rss-quiet-select {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+.rss-source-select {
   max-width: 180px;
-  height: 28px;
-  padding: 0 10px;
-  border-radius: 999px;
-  font-size: 12.5px;
-  color: var(--text-muted);
-  white-space: nowrap;
-  transition: background-color var(--sx-dur, 160ms) var(--rss-ease), color var(--sx-dur, 160ms) var(--rss-ease);
 }
 
-/* A switch among the quiet controls (包含已移出的): on reads as a raised chip, like the selected navigator row. */
-.rss-quiet-select[aria-pressed='true'] {
-  background: var(--sx-raised-bg);
-  box-shadow: var(--sx-raised-shadow);
-  color: var(--text-title);
-}
-
-.rss-quiet-select > span {
+.rss-source-select > span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.rss-quiet-select svg {
-  flex-shrink: 0;
+.rss-source-select > svg {
+  width: 13px;
+  height: 13px;
+  color: var(--rn-ink-3);
 }
 
-.rss-quiet-select:hover,
-.rss-quiet-select[aria-expanded='true'] {
-  background: var(--sx-hover);
-  color: var(--text-title);
+/* The source filter's list in the shared float: menu rows, each with its own delete. */
+.rss-source-menu {
+  width: 280px;
+  max-width: calc(100vw - 32px);
 }
 
-.rss-category-filters button:focus-visible,
-.rss-quiet-select:focus-visible,
-.rss-search__scope:focus-visible {
+.rss-source-menu__list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1px;
+  max-height: 320px;
+  overscroll-behavior: contain;
+}
+
+.rss-source-menu__row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.rss-source-menu__row > .rn-menu__item {
+  flex: 1;
+  min-width: 0;
+}
+
+.rss-source-menu__delete {
+  color: var(--rn-ink-3);
+}
+
+.rss-source-menu__delete:hover {
+  color: var(--rn-bad);
+}
+
+.rss-source-menu .rn-menu__item:hover,
+.rss-source-menu .rn-menu__item:focus-visible {
+  background: var(--rn-fill-2);
   outline: none;
-  box-shadow: var(--sx-focus-ring);
 }
 
 @container (max-width: 640px) {
@@ -202,10 +195,10 @@
   align-items: baseline;
   gap: 10px;
   padding: 30px 16px 10px 4px;
-  font-size: 17px;
+  font-size: var(--rn-fs-xl);
   font-weight: 650;
   letter-spacing: -0.01em;
-  color: var(--text-title);
+  color: var(--rn-ink);
 }
 
 .rss-feed-row[data-first='true'] .rss-date-heading {
@@ -213,13 +206,13 @@
 }
 
 .rss-date-heading small {
-  font-size: 12px;
+  font-size: var(--rn-fs-sm);
   font-weight: 400;
   letter-spacing: 0;
-  color: var(--text-light);
+  color: var(--rn-ink-3);
 }
 
-/* 时间轴：左侧时间、一条极淡的竖线与圆点，右侧条目。未读的点用强调色，已读退成中性。 */
+/* 时间轴：左侧时间、一条极淡的竖线与圆点，右侧条目。未读的点用信号色，已读退成中性。 */
 .rss-tl {
   --rss-tl-time: 46px;
   --rss-tl-gap: 26px;
@@ -236,16 +229,16 @@
   bottom: -2px;
   left: calc(var(--rss-tl-time) + var(--rss-tl-gap) / 2);
   width: 1px;
-  background: var(--sx-divider);
+  background: var(--rn-hair);
 }
 
 .rss-tl__time {
   padding-top: 18px;
-  font-size: 12px;
+  font-size: var(--rn-fs-sm);
   line-height: 22px;
   font-variant-numeric: tabular-nums;
   text-align: right;
-  color: var(--text-light);
+  color: var(--rn-ink-3);
   white-space: nowrap;
 }
 
@@ -255,36 +248,37 @@
   left: calc(var(--rss-tl-time) + var(--rss-tl-gap) / 2 - 3px);
   width: 7px;
   height: 7px;
-  border-radius: 999px;
-  background: var(--sx-track-bg);
+  border-radius: var(--rn-r-pill);
+  background: var(--rn-fill-3);
   box-shadow: 0 0 0 3px var(--workbench-module-surface-bg);
 }
 
 .rss-tl.is-unread .rss-tl__dot {
-  background: var(--color-blue);
+  background: var(--rn-accent);
 }
 
 .rss-news-card {
   position: relative;
   min-width: 0;
   padding: 15px 16px 16px;
-  border-radius: 14px;
+  border-radius: var(--rn-r-lg);
   cursor: pointer;
-  transition: background-color var(--sx-dur, 160ms) var(--rss-ease), box-shadow var(--sx-dur, 160ms) var(--rss-ease);
+  transition: background-color var(--rn-d-1) var(--rss-ease), box-shadow var(--rn-d-1) var(--rss-ease);
 }
 
 .rss-news-card:hover {
-  background: var(--sx-raised-hover);
+  background: var(--rn-fill);
 }
 
+/* Selection is a raised sheet, the selected item of a segmented control (W1 §5), never an outline. */
 .rss-news-card.is-selected {
-  background: var(--sx-raised-bg);
-  box-shadow: var(--sx-raised-shadow);
+  background: var(--rn-sheet);
+  box-shadow: var(--rn-card-shadow);
 }
 
 .rss-news-card:focus-visible {
-  outline: none;
-  box-shadow: var(--sx-focus-ring);
+  outline: 1.5px solid var(--rn-ink-3);
+  outline-offset: 1px;
 }
 
 .rss-card-meta {
@@ -293,8 +287,8 @@
   gap: 7px;
   min-width: 0;
   height: 22px;
-  font-size: 12px;
-  color: var(--text-light);
+  font-size: var(--rn-fs-sm);
+  color: var(--rn-ink-3);
   white-space: nowrap;
 }
 
@@ -311,16 +305,16 @@
   justify-content: center;
   width: 18px;
   height: 18px;
-  border-radius: 999px;
-  background: var(--sx-inset-bg);
+  border-radius: var(--rn-r-pill);
+  background: var(--rn-fill-2);
   font-size: 10.5px;
   font-weight: 600;
-  color: var(--text-secondary);
+  color: var(--rn-ink-2);
 }
 
 .rss-card-source {
   flex-shrink: 1;
-  color: var(--text-secondary);
+  color: var(--rn-ink-2);
   font-weight: 500;
 }
 
@@ -331,10 +325,10 @@
   gap: 5px;
   height: 20px;
   padding: 0 8px 0 7px;
-  border-radius: 999px;
-  background: var(--sx-accent-wash);
-  color: var(--sx-accent-text);
-  font-size: 11px;
+  border-radius: var(--rn-r-pill);
+  background: var(--rn-accent-soft);
+  color: var(--rn-accent-text);
+  font-size: var(--rn-fs-xs);
   font-weight: 500;
 }
 
@@ -342,7 +336,7 @@
   content: '';
   width: 4px;
   height: 4px;
-  border-radius: 999px;
+  border-radius: var(--rn-r-pill);
   background: currentColor;
 }
 
@@ -354,14 +348,14 @@
   line-height: 1.5;
   font-weight: 600;
   letter-spacing: -0.005em;
-  color: var(--text-title);
+  color: var(--rn-ink);
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
 
 .rss-news-card.is-read .rss-card-title {
   font-weight: 500;
-  color: var(--text-secondary);
+  color: var(--rn-ink-2);
 }
 
 .rss-card-summary {
@@ -370,7 +364,7 @@
   overflow: hidden;
   font-size: 13.5px;
   line-height: 1.7;
-  color: var(--text-muted);
+  color: var(--rn-ink-2);
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
 }
@@ -390,11 +384,9 @@
   width: 38px;
   height: 38px;
   padding-left: 2px;
-  border-radius: 999px;
-  color: #fff;
-  background: rgba(12, 14, 18, 0.48);
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
+  border-radius: var(--rn-r-pill);
+  color: var(--rn-on-inverse);
+  background: color-mix(in srgb, var(--rn-inverse) 58%, transparent);
   transform: translate(-50%, -50%);
   pointer-events: none;
 }
@@ -422,7 +414,7 @@
   margin: 8px 0 0;
   overflow: hidden;
   border-radius: 10px;
-  background: var(--sx-inset-bg);
+  background: var(--rn-fill);
 }
 
 .rss-card-thumb img {
@@ -449,7 +441,7 @@
   margin: 12px 0 2px;
   overflow: hidden;
   border-radius: 10px;
-  background: var(--sx-inset-bg);
+  background: var(--rn-fill);
 }
 
 .rss-card-preview img {
@@ -467,8 +459,8 @@
 }
 
 .rss-classification-labels span {
-  font-size: 12px;
-  color: var(--text-muted);
+  font-size: var(--rn-fs-sm);
+  color: var(--rn-ink-2);
 }
 
 .rss-tag {
@@ -476,10 +468,10 @@
   align-items: center;
   height: 22px;
   padding: 0 9px;
-  border-radius: 999px;
-  background: var(--sx-inset-bg);
+  border-radius: var(--rn-r-pill);
+  background: var(--rn-fill-2);
   font-size: 11.5px;
-  color: var(--text-secondary);
+  color: var(--rn-ink-2);
 }
 
 .rss-card-reason {
@@ -488,7 +480,7 @@
   overflow: hidden;
   font-size: 12.5px;
   line-height: 1.65;
-  color: var(--text-muted);
+  color: var(--rn-ink-2);
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
@@ -504,13 +496,12 @@
   }
 }
 
-/* 当前热点：精选页顶部的一块安静的排行，不另造热度分。 */
+/* 当前热点：精选页顶部的一块安静的排行，不另造热度分。纸上不放纸（DL2），用一层浅填充分组。 */
 .rss-hot {
   margin: 4px 0 6px;
   padding: 16px 20px 12px;
-  border-radius: 16px;
-  background: var(--sx-card-bg);
-  box-shadow: var(--sx-card-shadow);
+  border-radius: var(--rn-r-lg);
+  background: var(--rn-fill);
 }
 
 .rss-hot > header {
@@ -518,15 +509,15 @@
   align-items: baseline;
   gap: 10px;
   margin-bottom: 6px;
-  font-size: 13px;
+  font-size: var(--rn-fs-md);
   font-weight: 600;
-  color: var(--text-title);
+  color: var(--rn-ink);
 }
 
 .rss-hot > header small {
   font-size: 11.5px;
   font-weight: 400;
-  color: var(--text-light);
+  color: var(--rn-ink-3);
 }
 
 .rss-hot__mark {
@@ -534,8 +525,8 @@
   width: 6px;
   height: 6px;
   margin-right: -2px;
-  border-radius: 999px;
-  background: var(--color-blue);
+  border-radius: var(--rn-r-pill);
+  background: var(--rn-accent);
 }
 
 .rss-hot ol {
@@ -554,23 +545,23 @@
   min-height: 38px;
   padding: 0 8px;
   border-radius: 10px;
-  transition: background-color var(--sx-dur, 160ms) var(--rss-ease);
+  transition: background-color var(--rn-d-1) var(--rss-ease);
 }
 
 .rss-hot li:hover {
-  background: var(--sx-raised-hover);
+  background: var(--rn-fill);
 }
 
 .rss-hot__rank {
-  font-size: 13px;
+  font-size: var(--rn-fs-md);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   text-align: center;
-  color: var(--text-light);
+  color: var(--rn-ink-3);
 }
 
 .rss-hot__rank.is-top {
-  color: var(--text-title);
+  color: var(--rn-ink);
 }
 
 .rss-hot li > button {
@@ -581,30 +572,38 @@
   text-align: left;
   font-size: 13.5px;
   font-weight: 500;
-  color: var(--text-body);
-}
-
-.rss-hot li > button:hover {
-  color: var(--text-title);
+  color: var(--rn-ink);
 }
 
 .rss-hot__meta {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--rn-fs-sm);
   font-variant-numeric: tabular-nums;
-  color: var(--text-light);
+  color: var(--rn-ink-3);
   white-space: nowrap;
 }
 
 .rss-hot__new {
   width: 5px;
   height: 5px;
-  border-radius: 999px;
-  background: var(--color-blue);
+  border-radius: var(--rn-r-pill);
+  background: var(--rn-accent);
 }
 
+/* The analysis ring keeps its own sizes inside an IconButton: the ring 16px, the status glyph at its centre smaller. */
+.rss-ring > svg:not(.absolute) {
+  width: 16px;
+  height: 16px;
+}
+
+.rss-ring > svg.absolute {
+  width: 9px;
+  height: 9px;
+}
+
+/* Row actions: shared small IconButtons that show on hover; the bookmark and an analysis ring stay. */
 .rss-item-actions {
   display: flex;
   flex-shrink: 0;
@@ -614,62 +613,51 @@
   padding-left: 12px;
 }
 
-.rss-item-actions > button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 8px;
-  color: var(--text-light);
-  transition: opacity var(--sx-dur, 160ms) var(--rss-ease), background-color var(--sx-dur, 160ms) var(--rss-ease), color var(--sx-dur, 160ms) var(--rss-ease);
+.rss-item-actions > .rn-icon-btn {
+  color: var(--rn-ink-3);
+  transition: opacity var(--rn-d-1) var(--rss-ease), background-color var(--rn-d-1) var(--rss-ease), color var(--rn-d-1) var(--rss-ease);
 }
 
-.rss-item-actions > button:not(.is-persistent) {
+.rss-item-actions > .rn-icon-btn:hover,
+.rss-item-actions > .rn-icon-btn[aria-pressed='true'] {
+  color: var(--rn-ink);
+}
+
+.rss-item-actions > .rn-icon-btn[aria-pressed='true'] {
+  background: transparent;
+}
+
+.rss-item-actions > .rn-icon-btn:not(.is-persistent) {
   opacity: 0;
 }
 
-.rss-news-card:hover .rss-item-actions > button,
-.rss-news-card:focus-within .rss-item-actions > button,
-.rss-news-card.is-selected .rss-item-actions > button {
+.rss-news-card:hover .rss-item-actions > .rn-icon-btn,
+.rss-news-card:focus-within .rss-item-actions > .rn-icon-btn,
+.rss-news-card.is-selected .rss-item-actions > .rn-icon-btn,
+.rss-item-actions > .rn-icon-btn:focus-visible {
   opacity: 1;
-}
-
-.rss-item-actions > button:hover {
-  background: var(--sx-hover);
-  color: var(--text-title);
-}
-
-.rss-item-actions > button.is-on {
-  color: var(--text-title);
-}
-
-.rss-item-actions > button:focus-visible {
-  opacity: 1;
-  outline: none;
-  box-shadow: var(--sx-focus-ring);
 }
 
 .rss-grouped-reports {
-  font-size: 12px;
+  font-size: var(--rn-fs-sm);
 }
 
-.rss-grouped-reports > button {
+.rss-grouped-reports > button:not(.rn-btn) {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   height: 24px;
   padding: 0 8px 0 0;
-  color: var(--text-muted);
-  transition: color var(--sx-dur, 160ms) var(--rss-ease);
+  color: var(--rn-ink-2);
+  transition: color var(--rn-d-1) var(--rss-ease);
 }
 
-.rss-grouped-reports > button:hover {
-  color: var(--text-title);
+.rss-grouped-reports > button:not(.rn-btn):hover {
+  color: var(--rn-ink);
 }
 
-.rss-grouped-reports > button svg {
-  transition: transform 200ms var(--rss-ease);
+.rss-grouped-reports > button:not(.rn-btn) svg {
+  transition: transform var(--rn-d-2) var(--rss-ease);
 }
 
 .rss-grouped-reports > button[aria-expanded='true'] svg {
@@ -681,23 +669,23 @@
   align-items: center;
   gap: 6px;
   margin-left: 2px;
-  font-size: 12px;
+  font-size: var(--rn-fs-sm);
   font-weight: 500;
-  color: var(--sx-accent-text);
+  color: var(--rn-accent-text);
 }
 
 .rss-grouped-reports > strong::before {
   content: '';
   width: 5px;
   height: 5px;
-  border-radius: 999px;
-  background: var(--color-blue);
+  border-radius: var(--rn-r-pill);
+  background: var(--rn-accent);
 }
 
 .rss-grouped-reports > small {
   display: block;
   margin-top: 2px;
-  color: var(--text-light);
+  color: var(--rn-ink-3);
 }
 
 .rss-grouped-reports ul {
@@ -705,18 +693,18 @@
   gap: 2px;
   margin: 8px 0 0;
   padding: 6px;
-  border-radius: 12px;
-  background: var(--sx-inset-bg);
+  border-radius: var(--rn-r-md);
+  background: var(--rn-fill);
   list-style: none;
 }
 
 .rss-grouped-reports li {
   padding: 7px 10px;
-  border-radius: 9px;
+  border-radius: var(--rn-r-sm);
 }
 
 .rss-grouped-reports li:hover {
-  background: var(--sx-raised-hover);
+  background: var(--rn-fill);
 }
 
 .rss-grouped-reports li button {
@@ -724,52 +712,34 @@
   max-width: 100%;
   overflow-wrap: anywhere;
   text-align: left;
-  font-size: 13px;
-  color: var(--text-body);
+  font-size: var(--rn-fs-md);
+  color: var(--rn-ink);
 }
 
 .rss-grouped-reports li small,
 .rss-grouped-reports > p {
   display: block;
   margin-top: 2px;
-  color: var(--text-light);
+  color: var(--rn-ink-3);
   font-size: 11.5px;
 }
 
-.rss-grouped-reports > button:not([aria-expanded]) {
+.rss-grouped-reports > .rn-btn {
   margin-top: 6px;
 }
 
 .rss-load-more {
   align-self: center;
   margin: 12px auto 28px;
-  padding: 7px 18px;
-  border-radius: 999px;
-  font-size: 12.5px;
-  color: var(--text-muted);
-  transition: background-color var(--sx-dur, 160ms) var(--rss-ease), color var(--sx-dur, 160ms) var(--rss-ease);
 }
 
-.rss-load-more:hover:not(:disabled) {
-  background: var(--sx-raised-hover);
-  color: var(--text-title);
-}
-
-.rss-load-more:disabled {
-  opacity: 0.5;
-}
-
-.rss-empty {
-  display: flex;
+.rss-feed-list > .rn-empty {
   flex: 1;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
   padding: 64px var(--rss-gutter);
-  color: var(--text-light);
-  font-size: 13px;
-  text-align: center;
+}
+
+.rss-skeleton-list {
+  padding: 0 var(--rss-row-x);
 }
 
 .rss-skeleton {
@@ -778,28 +748,123 @@
   padding: 18px 16px;
 }
 
-.rss-skeleton span {
-  display: block;
-  height: 10px;
-  border-radius: 999px;
-  background: var(--sx-inset-bg);
-}
-
 .rss-query-error {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   margin: 0 var(--rss-gutter) 8px;
-  padding: 10px 14px;
-  border-radius: 12px;
-  background: var(--sx-danger-wash);
-  color: var(--sx-danger-text);
+  padding: 6px 6px 6px 14px;
+  border-radius: var(--rn-r-md);
+  background: color-mix(in srgb, var(--rn-bad) 9%, transparent);
+  color: var(--rn-bad);
   font-size: 12.5px;
 }
 
-.rss-query-error button {
+.rss-query-error .rn-btn {
   flex-shrink: 0;
-  font-weight: 500;
   color: inherit;
+}
+
+/* ── 分析任务面板（顶栏里的共享 FloatPanel，跟随进度实时更新） ─────────────── */
+
+.rss-task-menu__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 14px 8px 20px;
+}
+
+.rss-task-menu__title {
+  font-size: var(--rn-fs-md);
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--rn-ink);
+}
+
+.rss-task-menu__meta {
+  margin-top: 3px;
+  font-size: 11.5px;
+  line-height: 1.3;
+  color: var(--rn-ink-3);
+}
+
+.rss-task-menu__list {
+  display: grid;
+  gap: 2px;
+  max-height: 360px;
+  overscroll-behavior: contain;
+  padding: 4px 8px 12px;
+}
+
+.rss-task-menu-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) 60px;
+  align-items: center;
+  column-gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--rn-r-md);
+  transition: background-color var(--rn-d-1) var(--rss-ease);
+}
+
+.rss-task-menu-row:hover {
+  background: var(--rn-fill);
+}
+
+.rss-task-menu-row__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--rn-ink);
+}
+
+.rss-task-menu-row__meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 11.5px;
+  color: var(--rn-ink-3);
+  white-space: nowrap;
+}
+
+.rss-task-menu-row__detail {
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--rn-ink-3);
+}
+
+.rss-task-menu-row__detail[data-error='true'] {
+  color: var(--rn-bad);
+}
+
+.rss-task-menu-row__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  opacity: 0.7;
+  transition: opacity var(--rn-d-1) var(--rss-ease);
+}
+
+.rss-task-menu-row:hover .rss-task-menu-row__actions {
+  opacity: 1;
+}
+
+.rss-task-menu-row__delete:hover {
+  color: var(--rn-bad);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rss-news-card,
+  .rss-item-actions > .rn-icon-btn {
+    transition: none;
+  }
 }

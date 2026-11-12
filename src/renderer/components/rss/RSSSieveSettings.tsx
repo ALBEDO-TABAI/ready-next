@@ -5,6 +5,7 @@ import type { RSSNotificationSettings, RSSSieveMetrics, RSSWorkContextSnapshot, 
 import type { RSSProcessingStatus } from '../../../shared/rss-processing'
 import { Button, IconButton } from '../ui/Button'
 import { Switch } from '../ui/Toggle'
+import { Input, Textarea } from '../ui/Field'
 import { unwrapRSS } from '../../modules/rss/unwrap'
 import RSSTopbarTools from './RSSTopbarTools'
 import { RSSCalibrationCard } from './RSSCalibrationCard'
@@ -72,9 +73,9 @@ export function RSSSieveSettings({ definitions, active, onEditTopic }: { definit
         <div className="rss-sieve-settings__row">
           <span>静默时段</span>
           <span className="rss-sieve-settings__times">
-            <input type="time" aria-label="静默开始" value={quiet.quietStart} onChange={event => { const next = { ...quiet, quietStart: event.target.value }; if (event.target.value) void run(() => unwrapRSS(api.sieveSaveNotificationSettings(next))) }} />
+            <Input type="time" aria-label="静默开始" value={quiet.quietStart} onChange={event => { const next = { ...quiet, quietStart: event.target.value }; if (event.target.value) void run(() => unwrapRSS(api.sieveSaveNotificationSettings(next))) }} />
             <span aria-hidden>–</span>
-            <input type="time" aria-label="静默结束" value={quiet.quietEnd} onChange={event => { const next = { ...quiet, quietEnd: event.target.value }; if (event.target.value) void run(() => unwrapRSS(api.sieveSaveNotificationSettings(next))) }} />
+            <Input type="time" aria-label="静默结束" value={quiet.quietEnd} onChange={event => { const next = { ...quiet, quietEnd: event.target.value }; if (event.target.value) void run(() => unwrapRSS(api.sieveSaveNotificationSettings(next))) }} />
           </span>
         </div>
       </Section>}
@@ -145,7 +146,7 @@ function FocusEditor({ onError }: { onError(message: string): void }) {
     catch (cause) { onError(message(cause)); await load() }
   }
   return <>
-    <textarea className="rss-calibration__draft" aria-label="我的关注" rows={5} value={draft} placeholder="例如：独立出版的发行与定价；AI 视频制作的新工具；不想看融资新闻。"
+    <Textarea className="rss-calibration__draft" aria-label="我的关注" rows={5} value={draft} placeholder="例如：独立出版的发行与定价；AI 视频制作的新工具；不想看融资新闻。"
       onChange={event => { setDraft(event.target.value); setSaved(false) }} />
     <div className="rss-sieve-settings__actions">
       {saved && <span className="rss-sieve__meta" role="status">已保存</span>}
@@ -157,7 +158,7 @@ function FocusEditor({ onError }: { onError(message: string): void }) {
 function StandardEditor({ definition, onSave }: { definition: RSSDefinition; onSave(description: string): Promise<void> }) {
   const [draft, setDraft] = useState(definition.description)
   return <>
-    <textarea className="rss-calibration__draft" aria-label="基础标准" rows={4} value={draft} onChange={event => setDraft(event.target.value)} />
+    <Textarea className="rss-calibration__draft" aria-label="基础标准" rows={4} value={draft} onChange={event => setDraft(event.target.value)} />
     <div className="rss-sieve-settings__actions">
       <span className="rss-sieve__meta">改了标准，已判断过的文章会按新标准重判。</span>
       <Button size="sm" variant="secondary" disabled={!draft.trim() || draft === definition.description} onClick={() => void onSave(draft.trim())}>保存</Button>
@@ -171,7 +172,7 @@ function LimitEditor({ status, onSave }: { status: RSSProcessingStatus; onSave(l
   return <div className="rss-sieve-settings__row">
     <span>每天最多判断<small>今天已用 {status.callsToday} 次{status.pending ? `，排队 ${status.pending} 篇` : ''}</small></span>
     <span className="rss-sieve-settings__times">
-      <input type="number" min={1} max={10000} aria-label="每天最多判断的次数" value={draft} onChange={event => setDraft(event.target.value)}
+      <Input type="number" min={1} max={10000} aria-label="每天最多判断的次数" value={draft} onChange={event => setDraft(event.target.value)}
         onBlur={() => { if (valid && value !== status.settings.dailyLimit) void onSave(value) }}
         onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur() }} />
       <span>次</span>

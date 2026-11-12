@@ -29,7 +29,7 @@ test('liquid glass skin defines shell-level fresnel, noise, and atmosphere contr
   assert.match(styles, /--lg-noise-opacity:/)
   assert.match(styles, /--lg-lens-violet:/)
   assert.match(styles, /--workbench-liquid-chrome-bg:/)
-  assert.match(styles, /html:root \.browser-header-surface,[\s\S]*\.rss-preview-surface \{/)
+  assert.match(styles, /html:root \.browser-header-surface,\s*html:root \.workbench-tabs-surface \{/)
   assert.match(styles, /\.rss-mode-shell \.rss-feed-sheet \{[\s\S]*background:\s*var\(--workbench-module-surface-bg\) !important;/)
   assert.match(styles, /ready-app-bg/)
 })

@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Bookmark, BookmarkCheck, ChevronDown, Layers, ThumbsDown, ThumbsUp } from 'lucide-react'
 import type { RSSBehaviorInput, RSSSieveItem, RSSSieveResult, RSSWorkContextSnapshot, RSSWorkPrivacy } from '../../../shared/rss-sieve'
 import type { FastCardItem } from '../../../shared/fastcard'
 import { toReadyUri } from '../../../shared/ready-ref'
 import { Button, IconButton } from '../ui/Button'
-import { openFloat } from '../ui/float/float-store'
+import { anchorOf } from '../ui/float/float-store'
+import { openMenu } from '../ui/float/open-menu'
+import type { MenuEntry } from '../ui/float/Menu'
 import { useFastCard } from '../../stores/useFastCard'
 import { recordRSSBehavior } from '../../modules/rss/record-behavior'
 import { unwrapRSS } from '../../modules/rss/unwrap'
@@ -84,7 +86,7 @@ export function RSSSieveView({ shown, onOpen }: { shown: boolean; onOpen(item: R
       <header className="rss-sieve__head">
         <h1>为你筛过的</h1>
         <p>最近 48 小时，按和你的关系排序{ranked.length ? ` · ${ranked.length} 篇` : ''}</p>
-        {updates && <button type="button" className="rss-sieve__updates" onClick={() => void load()}>有新结果，刷新</button>}
+        {updates && <Button size="sm" variant="ghost" className="rss-sieve__updates" onClick={() => void load()}>有新结果，刷新</Button>}
       </header>
       {privacy?.answer === 'unanswered' && <WorkConsent work={work} onAnswer={enabled => void answer(enabled)} />}
       <RSSCalibrationCard active={shown} />
@@ -96,9 +98,8 @@ export function RSSSieveView({ shown, onOpen }: { shown: boolean; onOpen(item: R
         </li>)}
       </ol>
       {!!result?.remainingCount && <div className="rss-sieve__rest">
-        <button type="button" className="rss-sieve__rest-toggle" aria-expanded={restOpen} onClick={() => setRestOpen(value => !value)}>
-          <ChevronDown size={14} strokeWidth={1.9} className="rss-sieve__chevron" />其余 {result.remainingCount} 条
-        </button>
+        <Button size="sm" variant="ghost" className="rss-sieve__rest-toggle" aria-expanded={restOpen} icon={<ChevronDown className="rss-sieve__chevron" />}
+          onClick={() => setRestOpen(value => !value)}>其余 {result.remainingCount} 条</Button>
         {restOpen && <ul className="rss-sieve__rest-list">{result.remaining.map(item => <li key={item.id}>
           <button type="button" data-opened={opened.has(item.id) || item.read || undefined} onClick={() => open(item)}>
             <span className="rss-sieve__rest-title">{item.title}</span>
@@ -131,11 +132,9 @@ function SieveCard({ item, opened, onOpen, onFeedback, onError }: {
   const [starred, setStarred] = useState(item.starred)
   useEffect(() => setStarred(item.starred), [item.starred])
   const topics = item.classifications.filter(entry => entry.kind === 'topic' && entry.included === true)
-  const ask = (action: 'more' | 'less', anchor: HTMLElement) => openFloat({
-    anchor: anchor.getBoundingClientRect(), placement: 'bottom-end', offset: 6, role: 'menu', label: action === 'more' ? '多看这类' : '少看这类',
-    render: close => <FeedbackReasons action={action} source={item.source} topics={topics}
-      choose={(reason, topicId) => { close(); void onFeedback({ itemId: item.id, action, reason, ...(topicId ? { topicId } : {}) }) }} />,
-  })
+  const ask = (action: 'more' | 'less', anchor: HTMLElement) => openMenu(anchorOf(anchor),
+    feedbackReasons(action, item.source, topics, (reason, topicId) => { void onFeedback({ itemId: item.id, action, reason, ...(topicId ? { topicId } : {}) }) }),
+    { placement: 'bottom-end', label: action === 'more' ? '多看这类，因为' : '少看这类，因为' })
   const star = async () => {
     try {
       const result = await window.electronAPI.rss.toggleStarred(item.id)
@@ -168,17 +167,14 @@ function SieveCard({ item, opened, onOpen, onFeedback, onError }: {
   </article>
 }
 
-function FeedbackReasons({ action, source, topics, choose }: {
-  action: 'more' | 'less'; source: string; topics: { definitionId: string; name: string }[]
-  choose(reason: 'source' | 'topic' | 'shallow' | 'known', topicId?: string): void
-}): ReactNode {
-  const item = (key: string, label: string, run: () => void) =>
-    <button type="button" role="menuitem" key={key} className="rn-menu__item" onClick={run}><span className="rn-menu__label">{label}</span></button>
-  return <div className="rn-menu" role="menu" aria-label={action === 'more' ? '多看这类，因为' : '少看这类，因为'}>
-    <div className="rn-menu__group">{action === 'more' ? '多看这类，因为' : '少看这类，因为'}</div>
-    {item('source', `这个来源：${source}`, () => choose('source'))}
-    {topics.map(topic => item(topic.definitionId, `这个话题：${topic.name}`, () => choose('topic', topic.definitionId)))}
-    {action === 'less' && item('shallow', '太浅', () => choose('shallow'))}
-    {action === 'less' && topics[0] && item('known', '已经知道了', () => choose('known', topics[0].definitionId))}
-  </div>
+// 多看 / 少看 ask why first (W5 §2.4); the reasons are entries of the shared menu.
+function feedbackReasons(action: 'more' | 'less', source: string, topics: { definitionId: string; name: string }[],
+  choose: (reason: 'source' | 'topic' | 'shallow' | 'known', topicId?: string) => void): MenuEntry[] {
+  return [
+    { kind: 'group', label: action === 'more' ? '多看这类，因为' : '少看这类，因为' },
+    { id: 'source', label: `这个来源：${source}`, onSelect: () => choose('source') },
+    ...topics.map((topic): MenuEntry => ({ id: `topic:${topic.definitionId}`, label: `这个话题：${topic.name}`, onSelect: () => choose('topic', topic.definitionId) })),
+    ...(action === 'less' ? [{ id: 'shallow', label: '太浅', onSelect: () => choose('shallow') }] : []),
+    ...(action === 'less' && topics[0] ? [{ id: 'known', label: '已经知道了', onSelect: () => choose('known', topics[0].definitionId) }] : []),
+  ]
 }
