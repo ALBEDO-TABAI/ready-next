@@ -2876,6 +2876,7 @@ interface ElectronAppAPI {
   onBeforeQuitFlushCancelled: (callback: (requestId: string) => void) => () => void
   ackBeforeQuitFlushed: (requestId: string, outcome: RendererStateFlushOutcome) => void
   // D1: cache stats + cleanup
+  getThirdPartyNotices: () => Promise<import('../../shared/ipc-contracts/third-party-notices').ThirdPartyNoticesResult>
   getCacheStats: () => Promise<{
     success: boolean
     error?: string

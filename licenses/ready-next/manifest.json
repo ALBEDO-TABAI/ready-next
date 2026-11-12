@@ -1,0 +1,192 @@
+[
+  {
+    "name": "Electron",
+    "version": "45.3.0",
+    "license": "MIT",
+    "repository": "https://github.com/electron/electron",
+    "textFiles": [
+      "node_modules/electron/dist/LICENSE"
+    ],
+    "notes": [
+      "随包位置：licenses/electron/LICENSE"
+    ],
+    "textMissing": false
+  },
+  {
+    "name": "Chromium",
+    "version": null,
+    "license": "SEE LICENSES.chromium.html",
+    "repository": "https://chromium.googlesource.com/chromium/src",
+    "textFiles": [
+      "node_modules/electron/dist/LICENSES.chromium.html"
+    ],
+    "notes": [
+      "Electron 45.3.0 随附组件声明；随包位置：licenses/electron/LICENSES.chromium.html；版本未单独核实。"
+    ],
+    "textMissing": false
+  },
+  {
+    "name": "Inter",
+    "version": null,
+    "license": "OFL-1.1",
+    "repository": "https://github.com/rsms/inter",
+    "textFiles": [
+      "licenses/ready-next/OFL-Inter.txt"
+    ],
+    "notes": [
+      "字体：src/renderer/design/next/fonts/Inter.woff2；版本未单独核实。"
+    ],
+    "textMissing": false
+  },
+  {
+    "name": "Inter Tight",
+    "version": null,
+    "license": "OFL-1.1",
+    "repository": "https://github.com/rsms/inter-tight",
+    "textFiles": [
+      "licenses/ready-next/OFL-InterTight.txt"
+    ],
+    "notes": [
+      "字体：src/renderer/design/next/fonts/InterTight.woff2；版本未单独核实。"
+    ],
+    "textMissing": false
+  },
+  {
+    "name": "Instrument Serif",
+    "version": null,
+    "license": "OFL-1.1",
+    "repository": "https://github.com/Instrument/instrument-serif",
+    "textFiles": [
+      "licenses/ready-next/OFL-InstrumentSerif.txt"
+    ],
+    "notes": [
+      "字体：src/renderer/design/next/fonts/InstrumentSerif.woff2；版本未单独核实。"
+    ],
+    "textMissing": false
+  },
+  {
+    "name": "Instrument Serif Italic",
+    "version": null,
+    "license": "OFL-1.1",
+    "repository": "https://github.com/Instrument/instrument-serif",
+    "textFiles": [
+      "licenses/ready-next/OFL-InstrumentSerif.txt"
+    ],
+    "notes": [
+      "字体：src/renderer/design/next/fonts/InstrumentSerifItalic.woff2；版本未单独核实。"
+    ],
+    "textMissing": false
+  },
+  {
+    "name": "Geist Mono",
+    "version": null,
+    "license": "OFL-1.1",
+    "repository": "https://github.com/vercel/geist-font",
+    "textFiles": [
+      "licenses/ready-next/OFL-GeistMono.txt"
+    ],
+    "notes": [
+      "字体：src/renderer/design/next/fonts/GeistMono.woff2；版本未单独核实。"
+    ],
+    "textMissing": false
+  },
+  {
+    "name": "Paper Flipbook",
+    "version": null,
+    "license": "MIT",
+    "repository": "https://github.com/JohnnyWang8802/paper-flipbook",
+    "textFiles": [
+      "licenses/ready-next/paper-flipbook-LICENSE.txt"
+    ],
+    "notes": [
+      "移植：src/renderer/modules/library/reader/{flipbook,glturn}.js；上游版本未记录。"
+    ],
+    "textMissing": false
+  },
+  {
+    "name": "lets-go-rss (ported scrapers)",
+    "version": null,
+    "license": "MIT",
+    "repository": null,
+    "textFiles": [
+      "licenses/ready-next/lets-go-rss-NOTICE.txt"
+    ],
+    "notes": [
+      "上游未附全文。README 原文：MIT；移植位置：src/main/modules/rss-engine/scrapers/；上游版本、仓库地址与原版权人待补。"
+    ],
+    "textMissing": true
+  },
+  {
+    "name": "dot-glyphs / vibe-nothing-ui-design",
+    "version": null,
+    "license": "MIT",
+    "repository": null,
+    "textFiles": [],
+    "notes": [
+      "来源待补。src/renderer/components/ui/dot-matrix/dot-glyphs.ts 声称借用 MIT-licensed vibe-nothing-ui-design dictionary；原版权人、仓库、版本与 MIT 全文未提供。"
+    ],
+    "textMissing": true
+  },
+  {
+    "name": "OpenAI Codex runtime",
+    "version": "0.160.1",
+    "license": "Apache-2.0",
+    "repository": "https://github.com/openai/codex",
+    "textFiles": [
+      "assets/codex-runtime/LICENSE",
+      "assets/codex-runtime/NOTICE"
+    ],
+    "notes": [
+      "版本依据 assets/codex-runtime/runtime-manifest.json；NOTICE 含 Ratatui 声明，不代表二进制所有第三方组成已核对。"
+    ],
+    "textMissing": false
+  },
+  {
+    "name": "Embedded skill: lets-go-rss",
+    "version": null,
+    "license": "MIT",
+    "repository": null,
+    "textFiles": [
+      "licenses/ready-next/lets-go-rss-NOTICE.txt"
+    ],
+    "notes": [
+      "assets/embedded-skills/lets-go-rss/README.md 原文：MIT；上游未附全文。"
+    ],
+    "textMissing": true
+  },
+  {
+    "name": "Embedded skill: video-copy-analyzer",
+    "version": null,
+    "license": "MIT",
+    "repository": "https://github.com/ALBEDO-TABAI/video-copy-analyzer",
+    "textFiles": [],
+    "notes": [
+      "assets/embedded-skills/video-copy-analyzer/README.md 及 README.zh-CN.md 原文：MIT License；徽章指向 LICENSE，但上游未附全文。"
+    ],
+    "textMissing": true
+  },
+  {
+    "name": "Embedded skill: video-expert-analyzer",
+    "version": null,
+    "license": "MIT",
+    "repository": null,
+    "textFiles": [],
+    "notes": [
+      "assets/embedded-skills/video-expert-analyzer/README.md 原文：MIT License — 自由使用和修改 / Free to use and modify；PROJECT.md 原文：MIT License；上游未附全文。"
+    ],
+    "textMissing": true
+  },
+  {
+    "name": "Liquid Glass (historical Glass HQ notice)",
+    "version": null,
+    "license": "MIT",
+    "repository": null,
+    "textFiles": [
+      "licenses/ready-next/LICENSE-liquid-glass.txt"
+    ],
+    "notes": [
+      "历史 glass.ts 已删除。现用 LiquidLens.tsx 与 refraction-map.ts 更早引入，但现有离线证据不足以排除共同上游关系，保守保留原声明；不代表已确认当前实现源自 Glass HQ。"
+    ],
+    "textMissing": false
+  }
+]

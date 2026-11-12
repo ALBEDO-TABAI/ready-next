@@ -1255,6 +1255,7 @@ const appAPI = {
     ipcRenderer.send('app:beforeQuitFlushed', requestId, outcome)
   ),
   // D1: cache stats + cleanup
+  getThirdPartyNotices: (): Promise<import('../shared/ipc-contracts/third-party-notices').ThirdPartyNoticesResult> => ipcRenderer.invoke('app:getThirdPartyNotices'),
   getCacheStats: () => ipcRenderer.invoke('app:getCacheStats'),
   clearCache: (opts?: { includePuppeteer?: boolean }) =>
     ipcRenderer.invoke('app:clearCache', opts ?? {}),

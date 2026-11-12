@@ -7,6 +7,8 @@
 
 ## 1. 应用壳、CSS 与原生窗口
 
+- 第三方声明由 `npm run licenses:generate` 离线生成。`app:getThirdPartyNotices` / `electronAPI.app.getThirdPartyNotices()` 只读打包资源根（开发为 `app.getAppPath()`）下的 `licenses/generated/third-party-notices.json`，返回 `{ ok: true, notices }`；缺文件返回 `{ ok: false, reason: 'not_generated' }`，格式损坏与其他读取错误仍报错。共享合同为 `src/shared/ipc-contracts/third-party-notices.ts`，不接触 userData，不授予写权限。
+
 - `src/renderer/main.tsx` 保留 bootstrap 级错误兜底；`src/renderer/App.tsx` 保留 `/workbench` 与 `* -> /workbench` fallback。
 - Renderer 的通用 `*` reset 必须位于明确的 `@layer base`。禁止在层外重置通用 `margin` / `padding`；回归入口是 `scripts/check-css-cascade-layer-reset.cjs`。
 - 代码文件只要净增行数，收尾前就检查总行数。超过 1000 行按“危险 / 一般 / 健康”更新 `docs/code-health/large-file-health-log.md`：健康无需动作，一般写复查日期，危险在最终回复提醒。生成物、锁文件和 vendored 第三方文件不计，但生成器源码仍计。

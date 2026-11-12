@@ -70,3 +70,6 @@ index-*.html
 # reports). Evidence stays on disk; final summaries and digests belong in
 # docs/superpowers/audits/. Existing tracked evidence remains tracked.
 build/browser-live-proof/
+
+# Generated offline before packaging
+/licenses/generated/
