@@ -120,7 +120,8 @@ test('browser_download registers downloaded images as recent artifacts', async (
     const artifacts = output.projectionPatch?.recentArtifacts as Array<{ path?: string; kind?: string }> | undefined
     assert.equal(artifacts?.length, 4, JSON.stringify(output))
     assert.deepEqual(artifacts?.map((artifact) => artifact.kind), ['image', 'image', 'image', 'image'])
-    assert.equal(output.contextModifier?.activeFrame?.discoveredHandles?.length, 4)
+    assert.equal(output.contextModifier, null, 'download receipts must not depend on the retired frame consumer')
+    assert.equal(output.framePatch, null)
     for (const artifact of artifacts || []) {
       assert.equal(typeof artifact.path, 'string')
       assert.equal(existsSync(artifact.path || ''), true)

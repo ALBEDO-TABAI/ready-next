@@ -10,7 +10,7 @@ import type { BrowserDataService } from '../main/modules/browser-engine/data-ser
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 test('browser-download-service declares transitive sqlite coverage', (t) => {
-  skipIfSqliteUnavailable(t, 'browser-download-service transitive sqlite guard')
+  if (skipIfSqliteUnavailable(t, 'browser-download-service transitive sqlite guard')) return
 })
 
 class FakeDownloadItem extends EventEmitter {
@@ -22,12 +22,17 @@ class FakeDownloadItem extends EventEmitter {
     private readonly url: string,
     private readonly filename: string,
     private readonly mimeType = 'image/jpeg',
+    private readonly contentDisposition = '',
   ) {
     super()
   }
 
   getFilename(): string {
     return this.filename
+  }
+
+  getContentDisposition(): string {
+    return this.contentDisposition
   }
 
   getTotalBytes(): number {
@@ -119,11 +124,43 @@ test('downloadUrlToDirectory sets a unique save path inside the target directory
 
     const result = await promise
     assert.equal(result.success, true)
-    assert.equal(result.savePath, join(dir, 'photo (1).jpg'))
-    assert.equal(result.filename, 'photo (1).jpg')
+    assert.equal(result.savePath, join(dir, 'photo (2).jpg'))
+    assert.equal(result.filename, 'photo (2).jpg')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('targeted downloads preserve disposition and decoded URL names, sanitize them and number collisions', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ready-download-names-'))
+  try {
+    const service = createDownloadService()
+    const session = new FakeSession()
+    const cases = [
+      { path: '/url.csv', header: 'attachment; filename="fallback.csv"; filename*=UTF-8\'zh\'%E6%8A%A5%E5%91%8A.csv', expected: '报告.csv' },
+      { path: '/url.csv', header: 'attachment; filename="report;2026.csv"', expected: 'report;2026.csv' },
+      { path: '/url.csv', header: 'attachment; filename*=UTF-8\'\'%ZZ; filename="fallback.csv"', expected: 'fallback.csv' },
+      { path: '/downloads/files/report-2026-q3.csv', header: '', expected: 'report-2026-q3.csv' },
+      { path: '/%E6%8A%A5%E5%91%8A%20Q3.csv', header: '', expected: '报告 Q3.csv' },
+      { path: '/folder%2Fpart%5Cname%00%7F%C2%80.csv', header: '', expected: 'folder-part-name---.csv' },
+      { path: '/url.csv', header: `attachment; filename="${'报'.repeat(100)}.csv"`, expected: `${'报'.repeat(58)}.csv` },
+      { path: '/', header: '', expected: 'download-8.csv' },
+      { path: '/url.csv', header: 'attachment; filename="fallback.csv"', expected: 'fallback (2).csv' },
+    ]
+    for (const [index, entry] of cases.entries()) {
+      const url = `http://127.0.0.1${entry.path}`
+      const promise = service.downloadUrlToDirectory(session as never, {
+        url, targetDir: dir, fallbackName: `download-${index + 1}`,
+      })
+      const item = new FakeDownloadItem(url, 'download.csv', 'text/csv', entry.header)
+      session.emit('will-download', {}, item)
+      item.finish('completed')
+      const result = await promise
+      assert.equal(result.success, true, result.error)
+      assert.equal(result.filename, entry.expected)
+      assert.equal(result.savePath, join(dir, entry.expected))
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }) }
 })
 
 test('downloadUrlToDirectory appends an inferred extension to extensionless suggested names', async () => {

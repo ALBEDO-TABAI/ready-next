@@ -1,0 +1,115 @@
+{
+  "contract": "codex_0_160_failed_turn_continuity_probe_v7",
+  "runtimeVersion": "0.160.1",
+  "binarySha256": "09fa44fdc37a5fc70dc1ace31235f90468a2e193d0e85f7552eab068ea2582be",
+  "runtimeManifestDigest": "10dbe332f05e6c73234f895df9d3c7db8d970f82b0fb1542a32b9129d583de0c",
+  "stableV2SchemaDigest": "f4f1cdde028f2bba3bab32ca69af1c0d584cb642f2f9a043ac612e41b0c79989",
+  "seams": {
+    "failed_user_only_no_suffix_v1": {
+      "seam": "one_user_item_no_assistant_tool_or_compaction_suffix",
+      "failedUserRetention": "prior_user_exact_once",
+      "wires": [
+        "semantic_400",
+        "usage_limit_429",
+        "transient"
+      ]
+    },
+    "failed_after_completed_rounds_v1": {
+      "seam": "user_item_then_completed_commentary_and_tool_rounds_then_transient_failure",
+      "failedTurnRetention": "user_commentary_and_tool_rounds_exact_once",
+      "nativeReadbackOmitsDynamicToolCalls": false,
+      "wires": [
+        "transient"
+      ]
+    },
+    "failed_mid_stream_v1": {
+      "seam": "completed_rounds_and_items_then_failure_after_response_began",
+      "failedTurnRetention": "completed_items_exact_once_partial_items_dropped",
+      "wires": [
+        "mid_stream"
+      ]
+    },
+    "interrupted_after_completed_items_v1": {
+      "seam": "completed_rounds_and_items_then_user_interrupt",
+      "failedTurnRetention": "completed_items_exact_once_partial_items_dropped_open_call_closed_as_aborted",
+      "runtimeAddsTurnAbortedNotice": true,
+      "wires": [
+        "between_requests",
+        "mid_stream",
+        "tool_in_flight"
+      ]
+    }
+  },
+  "probeTransport": "isolated_local_responses_fixture",
+  "probeTest": "src/__tests__/codex-failed-turn-continuity.e2e.ts",
+  "wire": {
+    "failureClass": "provider",
+    "failureStage": "headers",
+    "causeCode": "gateway_upstream_http_400",
+    "responseIdentitySeen": false,
+    "partialAssistantItemSeen": false,
+    "toolCallItemSeen": false,
+    "eventCount": 0,
+    "wireByteCount": 0
+  },
+  "usageLimitWire": {
+    "failureClass": "provider",
+    "failureStage": "headers",
+    "causeCode": "gateway_upstream_http_429",
+    "responseIdentitySeen": false,
+    "partialAssistantItemSeen": false,
+    "toolCallItemSeen": false,
+    "eventCount": 0,
+    "wireByteCount": 0
+  },
+  "usageLimitErrorInfo": "usageLimitExceeded",
+  "transientWire": {
+    "failureStages": [
+      "connect",
+      "headers"
+    ],
+    "httpStatuses": [
+      408,
+      425,
+      429,
+      500,
+      502,
+      503,
+      504,
+      520,
+      521,
+      522,
+      523,
+      524
+    ],
+    "gatewayCauseCodes": [
+      "gateway_upstream_headers_deadline",
+      "gateway_upstream_retry_exhausted",
+      "gateway_upstream_transport_failed"
+    ],
+    "responseIdentitySeen": false,
+    "partialAssistantItemSeen": false,
+    "toolCallItemSeen": false,
+    "eventCount": 0,
+    "wireByteCount": 0
+  },
+  "midStreamWire": {
+    "failureStages": [
+      "stream-before-item",
+      "stream-after-item",
+      "terminal-validation"
+    ],
+    "downstreamWires": [
+      "gateway_response_failed",
+      "runtime_stream_idle_timeout"
+    ],
+    "heldToolCallsDelivered": false
+  },
+  "continuationAfterRestart": true,
+  "derivation": {
+    "evidenceKind": "additive_host_gateway_lineage_contract",
+    "priorTargetManifestDigest": "e2ae5b1c9807e039b9516dc58dda8e9675f3c08e71dc1da362cd354216410558",
+    "priorReceiptDigest": "c263fdabac10d3feda843d47811314e9bea60fed3bb221eda3d529080c464cfd"
+  },
+  "receiptDigest": "dd70b3b3e60b07bf30d557dae5b1c3b5c14be9908fbefd63f492a34c66c95aa3"
+}

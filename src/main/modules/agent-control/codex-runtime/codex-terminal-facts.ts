@@ -248,10 +248,10 @@ const midStreamFailureWire = {
 } as const
 
 export const CODEX_CONTINUATION_SAFE_PROBE_RECEIPT_DIGEST = digestCanonicalJson({
-  contract: 'codex_0_160_failed_turn_continuity_probe_v6',
+  contract: 'codex_0_160_failed_turn_continuity_probe_v7',
   runtimeVersion: '0.160.1',
   binarySha256: '09fa44fdc37a5fc70dc1ace31235f90468a2e193d0e85f7552eab068ea2582be',
-  runtimeManifestDigest: 'e2ae5b1c9807e039b9516dc58dda8e9675f3c08e71dc1da362cd354216410558',
+  runtimeManifestDigest: '10dbe332f05e6c73234f895df9d3c7db8d970f82b0fb1542a32b9129d583de0c',
   stableV2SchemaDigest: 'f4f1cdde028f2bba3bab32ca69af1c0d584cb642f2f9a043ac612e41b0c79989',
   seams: {
     failed_user_only_no_suffix_v1: {
@@ -285,6 +285,11 @@ export const CODEX_CONTINUATION_SAFE_PROBE_RECEIPT_DIGEST = digestCanonicalJson(
   transientWire: transientFailureWire,
   midStreamWire: midStreamFailureWire,
   continuationAfterRestart: true,
+  derivation: {
+    evidenceKind: 'additive_host_gateway_lineage_contract',
+    priorTargetManifestDigest: 'e2ae5b1c9807e039b9516dc58dda8e9675f3c08e71dc1da362cd354216410558',
+    priorReceiptDigest: 'c263fdabac10d3feda843d47811314e9bea60fed3bb221eda3d529080c464cfd',
+  },
 })
 
 function isTransientFailureBeforeOutput(failure: CodexModelGatewayFailureEvidence | null): boolean {

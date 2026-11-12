@@ -818,7 +818,7 @@ export async function executeBrowserPowerTool(
         const output = await downloadUrlsToDirectory(controller, {
           urls,
           directory,
-          filenamePrefix: String(args.filename_prefix || 'media'),
+          filenamePrefix: String(args.filename_prefix || ''),
           overwrite: args.overwrite === true,
           tabId,
           referer: pageUrl || null,

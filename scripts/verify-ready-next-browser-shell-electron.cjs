@@ -547,6 +547,8 @@ async function downloadCase({ page, model }) {
   const size = await page.locator(`${CHAT} [data-browser-download-receipt] .rn-task-card__size`).first().textContent()
   ok('T4 download: with type and size', /^CSV · \d/.test(size || ''), size)
   await shot(page, 'download-card-light')
+  // Space belongs to whatever has the keyboard: right after sending, that is the composer, where it types. Move off it first.
+  await page.evaluate(() => { if (document.activeElement instanceof HTMLElement) document.activeElement.blur() })
   await capsule.hover()
   await harness.sleep(300)
   await page.keyboard.press('Space')
