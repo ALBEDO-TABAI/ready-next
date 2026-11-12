@@ -6,6 +6,7 @@ import { registerHooks } from 'node:module'
 import { editorFixture } from './helpers/ready-block-editor-fixture'
 import { writeEventTransfer } from '../renderer/modules/calendar/linkage/transfer'
 import type { DaySummary } from '../shared/calendar-linkage'
+import { memoryNavigationAPI } from './utils/navigation-memory'
 
 test('M6-D C4 drop an occurrence into the real editor, render its capsule and undo once', async t => {
   const f = await editorFixture(t, '之前\n\n之后')
@@ -42,7 +43,7 @@ test('M6-D ThisDay opens every category through ReadyRef, rejects stale day resp
   let resolveOld: ((s: DaySummary) => void) | undefined, delay = false, changed: (() => void) | undefined
   // Day entries are reference capsules (W6 K1): a click opens through the one ReadyRef entry, which locates the object.
   const located: string[] = []
-  Object.assign(dom.window, { electronAPI: { objects: { locate: async (id: string) => { located.push(id); return { objectId: id, path: `/fixture/${id}.md`, revision: 1 } }, onMoved: () => () => {},
+  Object.assign(dom.window, { electronAPI: { navigationHistory: memoryNavigationAPI(), objects: { locate: async (id: string) => { located.push(id); return { objectId: id, path: `/fixture/${id}.md`, revision: 1 } }, onMoved: () => () => {},
     prepareMigration: async () => ({ resolved: [] }), completeMigration: async () => ({ state: 'completed' }), resolvePath: async (path: string) => ({ objectId: path, path, revision: 1 }) },
     calendarLinkage: { day: async () => delay ? new Promise(resolve => { resolveOld = resolve; delay = false }) : summary },
     canvas: { onChanged: () => () => {} }, calendar: { onChanged: (cb: () => void) => { changed = cb; return () => {} } }, calendarLayers: { onChanged: () => () => {} }, dateMentions: { onChanged: () => () => {} }, vault: { get: async () => ({ status: 'ready', root: '/fixture' }), onChanged: () => () => {} } } })
