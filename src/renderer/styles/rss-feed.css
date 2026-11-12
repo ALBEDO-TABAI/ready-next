@@ -250,7 +250,7 @@
   height: 7px;
   border-radius: var(--rn-r-pill);
   background: var(--rn-fill-3);
-  box-shadow: 0 0 0 3px var(--workbench-module-surface-bg);
+  box-shadow: 0 0 0 3px var(--rn-sheet);
 }
 
 .rss-tl.is-unread .rss-tl__dot {

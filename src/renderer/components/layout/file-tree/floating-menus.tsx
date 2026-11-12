@@ -1,23 +1,22 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  IconBook2 as BookOpen,
-  IconArtboard,
-  IconAt as AtSign,
-  IconCopy as Copy,
-  IconFilePlus as FilePlus2,
-  IconFileText as FileText,
-  IconFolderOpen as FolderOpen,
-  IconFolderPlus as FolderPlus,
-  IconListDetails as ListMinus,
-  IconMinus as Minus,
-  IconPencil as Pen,
-  IconPhoto as Image,
-  IconRefresh as RefreshCw,
-  IconTrash as Trash2,
-  IconWorld as Globe,
-  IconX as X,
-} from '@tabler/icons-react'
+  BookOpen,
+  Shapes,
+  AtSign,
+  Copy,
+  FilePlus2,
+  FileText,
+  FolderOpen,
+  FolderPlus,
+  ListMinus,
+  Pencil as Pen,
+  Image,
+  RefreshCw,
+  Trash2,
+  Globe,
+  X,
+} from 'lucide-react'
 import { useWorkspace, type FileItem } from '../../../stores/useWorkspace'
 import {
   FILE_APPEARANCE_COLORS,
@@ -333,7 +332,7 @@ export function ContextMenuBridge({
         {
           id: 'newBoard',
           label: '新建画板',
-          icon: <IconArtboard style={{ width: 16, height: 16 }} />,
+          icon: <Shapes style={{ width: 16, height: 16 }} />,
           onClick: () => onCreateBoard(null)
         },
         { id: 'sep1', label: '', separator: true },
@@ -455,7 +454,7 @@ export function ContextMenuBridge({
       {
         id: 'newBoard',
         label: '新建画板',
-        icon: <IconArtboard style={{ width: 16, height: 16 }} />,
+        icon: <Shapes style={{ width: 16, height: 16 }} />,
         onClick: () => onCreateBoard(item.isDirectory ? item.path : getParentDir(item.path))
       },
       { id: 'sep3', label: '', separator: true },

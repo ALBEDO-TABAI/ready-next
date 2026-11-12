@@ -28,7 +28,7 @@
   background: var(--book-ui-surface);
   border: 1px solid var(--book-ui-rule);
   box-shadow: 0 3px 8px rgba(0, 0, 0, 0.14);
-  font-family: var(--font-ui);
+  font-family: var(--rn-font-ui);
 }
 .document-book-controls__chevron {
   display: flex;

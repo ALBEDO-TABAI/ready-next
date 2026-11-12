@@ -422,10 +422,10 @@ export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
 
   if (error) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center text-[var(--text-muted)] gap-2">
+      <div className="flex-1 flex flex-col items-center justify-center text-[var(--rn-ink-2)] gap-2">
         <p className="text-[13px]">PDF 加载失败</p>
-        <p className="text-[11px] text-[var(--text-light)]">{error}</p>
-        <p className="text-[10px] text-[var(--text-light)] mt-2">文件: {tab.path}</p>
+        <p className="text-[11px] text-[var(--rn-ink-3)]">{error}</p>
+        <p className="text-[10px] text-[var(--rn-ink-3)] mt-2">文件: {tab.path}</p>
       </div>
     )
   }
@@ -433,7 +433,7 @@ export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
   if (!fileOption) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <Loader2 className="w-6 h-6 animate-spin" style={{ color: 'var(--text-muted)' }} />
+        <Loader2 className="w-6 h-6 animate-spin" style={{ color: 'var(--rn-ink-2)' }} />
       </div>
     )
   }
@@ -442,51 +442,51 @@ export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
     <div className="flex flex-col h-full" data-ready-pdf-mounted-page-count={mountedPageCount}>
       {/* Toolbar */}
       <div
-        className="flex items-center gap-1 px-3 border-b border-[var(--border-default)]"
-        style={{ height: 34, background: 'var(--bg-toolbar)', flexShrink: 0 }}
+        className="flex items-center gap-1 px-3 border-b border-[var(--rn-hair-2)]"
+        style={{ height: 34, background: 'var(--rn-stage)', flexShrink: 0 }}
       >
         {/* Navigation */}
         <button
           onClick={prevPage}
           disabled={currentPage <= 1}
-          className="bg-transparent hover:bg-[var(--bg-hover)] disabled:opacity-30"
+          className="bg-transparent hover:bg-[var(--rn-fill-2)] disabled:opacity-30"
           style={{ width: 28, height: 28, borderRadius: 4, border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: currentPage <= 1 ? 'not-allowed' : 'pointer' }}
           title="上一页"
         >
-          <ChevronUp size={14} color="var(--text-muted)" />
+          <ChevronUp size={14} color="var(--rn-ink-2)" />
         </button>
 
-        <span style={{ fontSize: 11, color: 'var(--text-muted)', minWidth: 48, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>
+        <span style={{ fontSize: 11, color: 'var(--rn-ink-2)', minWidth: 48, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>
           {numPages > 0 ? `${currentPage} / ${numPages}` : '...'}
         </span>
 
         <button
           onClick={nextPage}
           disabled={currentPage >= numPages}
-          className="bg-transparent hover:bg-[var(--bg-hover)] disabled:opacity-30"
+          className="bg-transparent hover:bg-[var(--rn-fill-2)] disabled:opacity-30"
           style={{ width: 28, height: 28, borderRadius: 4, border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: currentPage >= numPages ? 'not-allowed' : 'pointer' }}
           title="下一页"
         >
-          <ChevronDown size={14} color="var(--text-muted)" />
+          <ChevronDown size={14} color="var(--rn-ink-2)" />
         </button>
 
         {/* Separator */}
-        <div style={{ width: 1, height: 16, background: 'var(--border-default)', margin: '0 4px' }} />
+        <div style={{ width: 1, height: 16, background: 'var(--rn-hair-2)', margin: '0 4px' }} />
 
         {/* Zoom */}
         <button
           onClick={zoomOut}
-          className="bg-transparent hover:bg-[var(--bg-hover)]"
+          className="bg-transparent hover:bg-[var(--rn-fill-2)]"
           style={{ width: 28, height: 28, borderRadius: 4, border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
           title="缩小"
         >
-          <ZoomOut size={14} color="var(--text-muted)" />
+          <ZoomOut size={14} color="var(--rn-ink-2)" />
         </button>
 
         <button
           onClick={() => setZoom(100)}
-          className="bg-transparent hover:bg-[var(--bg-hover)]"
-          style={{ height: 28, borderRadius: 4, border: 'none', padding: '0 4px', fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'inherit' }}
+          className="bg-transparent hover:bg-[var(--rn-fill-2)]"
+          style={{ height: 28, borderRadius: 4, border: 'none', padding: '0 4px', fontSize: 11, color: 'var(--rn-ink-2)', cursor: 'pointer', fontFamily: 'inherit' }}
           title="重置缩放"
         >
           {zoom}%
@@ -494,34 +494,34 @@ export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
 
         <button
           onClick={zoomIn}
-          className="bg-transparent hover:bg-[var(--bg-hover)]"
+          className="bg-transparent hover:bg-[var(--rn-fill-2)]"
           style={{ width: 28, height: 28, borderRadius: 4, border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
           title="放大"
         >
-          <ZoomIn size={14} color="var(--text-muted)" />
+          <ZoomIn size={14} color="var(--rn-ink-2)" />
         </button>
 
         <button
           onClick={fitToWidth}
-          className="bg-transparent hover:bg-[var(--bg-hover)]"
+          className="bg-transparent hover:bg-[var(--rn-fill-2)]"
           style={{ width: 28, height: 28, borderRadius: 4, border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
           title="适应宽度"
         >
-          <Maximize2 size={14} color="var(--text-muted)" />
+          <Maximize2 size={14} color="var(--rn-ink-2)" />
         </button>
 
         {/* Separator */}
-        <div style={{ width: 1, height: 16, background: 'var(--border-default)', margin: '0 4px' }} />
+        <div style={{ width: 1, height: 16, background: 'var(--rn-hair-2)', margin: '0 4px' }} />
 
         {notice && <span role={notice.role} style={{ fontSize: 11, color: notice.role === 'alert' ? 'var(--rn-bad)' : 'var(--rn-ink-3)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 260 }}>{notice.text}</span>}
 
         {/* File name */}
-        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{tab.title}</span>
+        <span style={{ fontSize: 11, color: 'var(--rn-ink-2)' }}>{tab.title}</span>
         <span
           style={{
             fontSize: 9,
-            color: 'var(--text-light)',
-            background: 'var(--bg-hover)',
+            color: 'var(--rn-ink-3)',
+            background: 'var(--rn-fill-2)',
             borderRadius: 4,
             padding: '1px 5px',
             marginLeft: 6,

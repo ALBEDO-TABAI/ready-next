@@ -54,7 +54,7 @@ test('ritual overlay infrastructure: store, withRitual hook, mask, component, cs
   // choreography — sun + moon glyphs
   assert.match(choreography, /data-glyph="sun"/)
   assert.match(choreography, /data-glyph="moon"/)
-  assert.match(choreography, /stroke="var\(--color-blue\)"/)
+  assert.match(choreography, /stroke="var\(--rn-accent\)"/)
   assert.match(choreography, /strokeWidth="2"/)
   assert.match(choreography, /fill="none"/)
 

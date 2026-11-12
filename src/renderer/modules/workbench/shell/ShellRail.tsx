@@ -1,19 +1,8 @@
-import {
-  IconCalendar,
-  IconCalendarFilled,
-  IconFileText,
-  IconFileTextFilled,
-  IconLayoutSidebarRight,
-  IconRss,
-  IconSearch,
-  IconSettings,
-  IconStack2,
-  IconWorld,
-  IconWorldFilled,
-} from '@tabler/icons-react'
-import type { CSSProperties, MouseEvent, ReactNode } from 'react'
+import { Calendar, FileText, Globe, Layers, PanelRight, Rss, Search, Settings } from 'lucide-react'
+import type { CSSProperties, ElementType, MouseEvent, ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import MorphIconRailGroup from '../../../components/motion/MorphIconRailGroup'
+import { CalendarFilled, FileTextFilled, GlobeFilled } from '../../../design/next/icons'
 import type { WorkbenchMode } from '../../../stores/useMode'
 import { useFastCard } from '../../../stores/useFastCard'
 import './shell.css'
@@ -22,11 +11,11 @@ import { SHELL_RAIL_WIDTH } from '../../../../shared/workbench-shell-geometry'
 // The icon rail of the Ready Next shell (W2 §2.1): mode switching on top, global actions at the
 // bottom. Selected glyphs follow the user's rule (white glow; closed shapes fill, open strokes thicken).
 
-const MODE_ITEMS: { id: WorkbenchMode; label: string; hint: string; icon: typeof IconWorld; activeIcon?: typeof IconWorld }[] = [
-  { id: 'browser', label: '浏览器', hint: '⌘1', icon: IconWorld, activeIcon: IconWorldFilled },
-  { id: 'document', label: '文档', hint: '⌘2', icon: IconFileText, activeIcon: IconFileTextFilled },
-  { id: 'rss', label: '资讯', hint: '⌘3', icon: IconRss },
-  { id: 'calendar', label: '日历', hint: '⌘4', icon: IconCalendar, activeIcon: IconCalendarFilled },
+const MODE_ITEMS: { id: WorkbenchMode; label: string; hint: string; icon: ElementType; activeIcon?: ElementType }[] = [
+  { id: 'browser', label: '浏览器', hint: '⌘1', icon: Globe, activeIcon: GlobeFilled },
+  { id: 'document', label: '文档', hint: '⌘2', icon: FileText, activeIcon: FileTextFilled },
+  { id: 'rss', label: '资讯', hint: '⌘3', icon: Rss },
+  { id: 'calendar', label: '日历', hint: '⌘4', icon: Calendar, activeIcon: CalendarFilled },
 ]
 
 export interface ShellRailProps {
@@ -91,12 +80,12 @@ export default function ShellRail(props: ShellRailProps) {
         </div>
       </div>
       <div className="shell-rail__group" role="group" aria-label="全局">
-        <RailButton label="搜索 ⌘K" onClick={() => window.dispatchEvent(new CustomEvent('ready:open-quick-switcher'))}><IconSearch className="shell-rail__glyph" strokeWidth={1.8} /></RailButton>
-        <RailButton label="收集" onClick={toggleCollect} badge={stagedCount}><IconStack2 className="shell-rail__glyph" strokeWidth={1.8} /></RailButton>
+        <RailButton label="搜索 ⌘K" onClick={() => window.dispatchEvent(new CustomEvent('ready:open-quick-switcher'))}><Search className="shell-rail__glyph" strokeWidth={1.8} /></RailButton>
+        <RailButton label="收集" onClick={toggleCollect} badge={stagedCount}><Layers className="shell-rail__glyph" strokeWidth={1.8} /></RailButton>
         {!props.assistantOpen && (
-          <RailButton label="助手 Tab" onClick={props.onAssistantOpen}><IconLayoutSidebarRight className="shell-rail__glyph" strokeWidth={1.8} /></RailButton>
+          <RailButton label="助手 Tab" onClick={props.onAssistantOpen}><PanelRight className="shell-rail__glyph" strokeWidth={1.8} /></RailButton>
         )}
-        <RailButton label="设置 ⌘," onClick={() => navigate('/settings')}><IconSettings className="shell-rail__glyph" strokeWidth={1.8} /></RailButton>
+        <RailButton label="设置 ⌘," onClick={() => navigate('/settings')}><Settings className="shell-rail__glyph" strokeWidth={1.8} /></RailButton>
       </div>
     </nav>
   )

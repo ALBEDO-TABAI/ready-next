@@ -12,18 +12,18 @@
  * ═══ */
 
 .note-preview-shell {
-  --rd-ink: var(--text-title);
-  --rd-body: var(--text-body);
-  --rd-2: var(--text-muted);
-  --rd-3: var(--text-light);
-  --rd-accent: var(--color-ready-orange);
-  --rd-hair: color-mix(in srgb, var(--text-title) 9%, transparent);
-  --rd-hair-strong: color-mix(in srgb, var(--text-title) 20%, transparent);
-  --rd-wash: color-mix(in srgb, var(--text-title) 2.5%, transparent);
-  --rd-well: color-mix(in srgb, var(--text-title) 3%, transparent);
+  --rd-ink: var(--rn-ink);
+  --rd-body: var(--rn-ink);
+  --rd-2: var(--rn-ink-2);
+  --rd-3: var(--rn-ink-3);
+  --rd-accent: var(--rn-accent);
+  --rd-hair: color-mix(in srgb, var(--rn-ink) 9%, transparent);
+  --rd-hair-strong: color-mix(in srgb, var(--rn-ink) 20%, transparent);
+  --rd-wash: color-mix(in srgb, var(--rn-ink) 2.5%, transparent);
+  --rd-well: color-mix(in srgb, var(--rn-ink) 3%, transparent);
   --rd-object: #FFFFFF;
   --rd-object-line: #E8E5DE;
-  --rd-mono: var(--font-mono);
+  --rd-mono: var(--rn-font-mono);
   --rd-ease: cubic-bezier(0.2, 0, 0, 1);
 
   gap: 22px;
@@ -34,10 +34,10 @@
 }
 
 html[data-theme='dark'] .note-preview-shell {
-  --rd-hair: color-mix(in srgb, var(--text-title) 11%, transparent);
-  --rd-hair-strong: color-mix(in srgb, var(--text-title) 24%, transparent);
-  --rd-wash: color-mix(in srgb, var(--text-title) 3.5%, transparent);
-  --rd-well: color-mix(in srgb, var(--text-title) 4.5%, transparent);
+  --rd-hair: color-mix(in srgb, var(--rn-ink) 11%, transparent);
+  --rd-hair-strong: color-mix(in srgb, var(--rn-ink) 24%, transparent);
+  --rd-wash: color-mix(in srgb, var(--rn-ink) 3.5%, transparent);
+  --rd-well: color-mix(in srgb, var(--rn-ink) 4.5%, transparent);
   --rd-object: #202124;
   --rd-object-line: #333538;
 }
@@ -438,7 +438,7 @@ html[data-theme='dark'] .note-preview-shell {
   top: 0.8px;
   width: 4px;
   height: 7.5px;
-  border: solid var(--bg-primary);
+  border: solid var(--rn-sheet);
   border-width: 0 1.6px 1.6px 0;
   transform: rotate(42deg);
 }

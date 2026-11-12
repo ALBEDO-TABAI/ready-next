@@ -1,0 +1,27 @@
+/* ═══ tailwind-theme.css — Tailwind 的 @theme：字体族与字号、行高、字距刻度（供 font-ui、text-xs 等工具类）。颜色、圆角、阴影、动效只来自 design/next/tokens.css 的 --rn-*（W1 DS1）；外壳的旧别名层 theme-tokens.css 已在 W1 T6 删除。 ═══ */
+@theme {
+  /* DL7: the interface font is the design system's (Inter + PingFang, Geist Mono). */
+  --font-ui: var(--rn-font-ui);
+  --font-head: var(--font-ui);
+  --font-mono: var(--rn-font-mono);
+  --font-numeric: var(--font-mono);
+  --text-2xs: 9px;
+  --text-xs: 10px;
+  --text-sm: 11px;
+  --text-base: 12px;
+  --text-md: 13px;
+  --text-lg: 15px;
+  --text-xl: 18px;
+  --text-2xl: 22px;
+  --text-3xl: 28px;
+  --text-4xl: 40px;
+  --text-5xl: 64px;
+  --leading-none: 1;
+  --leading-tight: 1.2;
+  --leading-snug: 1.3;
+  --leading-normal: 1.5;
+  --leading-dense: 1.4;
+  --tracking-label: 0.08em;
+  --tracking-tight: -0.01em;
+  --tracking-normal: 0;
+}

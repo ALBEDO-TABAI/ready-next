@@ -14,10 +14,8 @@ test('liquid workbench surfaces remove prominent borders and heavy highlights', 
   const statusBar = readWorkspaceFile('src/renderer/components/layout/StatusBar.tsx')
   const calendarShell = readWorkspaceFile('src/renderer/pages/modes/CalendarMode.tsx')
 
-  assert.match(styles, /--lg-border-soft: rgba\(244, 249, 255, 0\.18\);/)
-  assert.match(styles, /--lg-border-strong: rgba\(252, 254, 255, 0\.28\);/)
-  assert.match(styles, /--lg-shadow-ambient: 0 8px 18px rgba\(42, 60, 102, 0\.08\);/)
-  assert.match(styles, /--lg-shadow-contact: 0 4px 12px rgba\(64, 86, 136, 0\.06\);/)
+  // W1 T6: the liquid-skin borders and shadows (--lg-*) went with the shell alias layer; hairlines and shadows are --rn-*.
+  assert.doesNotMatch(styles, /--lg-(?:border|shadow)-[a-z]+\s*:/)
   // B13 (W1 DL1, DL2, DL11a): the tab rows and the browser's address bar sit on the glass with no fill or blur; 资讯's
   // content is paper, and so is the browser's page (its frame paints no corner patches).
   assert.match(styles, /html:root \.workbench-tabs-surface \{\s*background:\s*transparent !important;\s*\}/)

@@ -836,7 +836,7 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
         <div className="pointer-events-none absolute left-[8px] right-[8px] bottom-[8px]">
           <div
             className="glass-surface-floating rounded-[8px] px-[8px] py-[4px] text-[10px] font-medium"
-            style={{ background: PANEL_COLORS.blueLight, color: PANEL_COLORS.blue, boxShadow: 'var(--shadow-sm)' }}
+            style={{ background: PANEL_COLORS.blueLight, color: PANEL_COLORS.blue, boxShadow: 'var(--rn-shadow-1)' }}
           >
             {message}
           </div>

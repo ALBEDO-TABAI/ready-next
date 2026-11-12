@@ -104,7 +104,7 @@ export default function MorphSegmentedControl({
                     alignItems: 'center',
                     justifyContent: 'center',
                     height: '100%',
-                    color: isActive ? 'var(--color-blue)' : 'var(--text-gray)',
+                    color: isActive ? 'var(--rn-accent)' : 'var(--rn-ink-3)',
                     fontWeight: isActive ? 600 : 500,
                   }}
                 >

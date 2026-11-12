@@ -17,7 +17,7 @@ function checkPackagedLicenses(input) {
   const required = [
     'licenses/generated/third-party-notices.json', 'licenses/generated/THIRD_PARTY_NOTICES.txt',
     'licenses/electron/LICENSE', 'licenses/electron/LICENSES.chromium.html',
-    ...['Inter', 'InterTight', 'InstrumentSerif', 'GeistMono'].map(name => `licenses/ready-next/OFL-${name}.txt`),
+    ...['Inter', 'InstrumentSerif', 'GeistMono'].map(name => `licenses/ready-next/OFL-${name}.txt`),
     'licenses/ready-next/paper-flipbook-LICENSE.txt', 'licenses/ready-next/lets-go-rss-NOTICE.txt',
     'app.asar.unpacked/node_modules/rsshub/LICENSE',
   ]

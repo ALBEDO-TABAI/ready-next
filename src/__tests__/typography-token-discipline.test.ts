@@ -39,7 +39,8 @@ test('typography tokens are a single deduplicated source in @theme', async () =>
   // generate utilities) — the old shorthand duplicates must be gone.
   assert.match(css, /--leading-dense:\s*1\.4;/)
   assert.match(css, /--tracking-label:\s*0\.08em;/)
-  assert.match(css, /--fw-semibold:\s*600;/)
+  // W1 T6: the --fw-* weights went with the shell alias layer; weights are plain numbers.
+  assert.doesNotMatch(css, /--fw-(?:regular|medium|semibold)\s*:/)
   assert.doesNotMatch(css, /--lh-(none|tight|snug|normal|dense)\b/)
   assert.doesNotMatch(css, /--track-(label|tight|normal)\b/)
 })

@@ -26,9 +26,9 @@ test('workbench shell exposes dedicated liquid glass hooks on primary chrome sur
 test('liquid glass skin defines shell-level fresnel, noise, and atmosphere contract', () => {
   const styles = readRendererStyles()
 
-  assert.match(styles, /--lg-noise-opacity:/)
-  assert.match(styles, /--lg-lens-violet:/)
-  assert.match(styles, /--workbench-liquid-chrome-bg:/)
+  // W1 T6: the old liquid-skin tokens (--lg-*, --workbench-liquid-chrome-bg) went with the shell alias layer.
+  assert.doesNotMatch(styles, /--lg-[a-z-]+\s*:/)
+  assert.doesNotMatch(styles, /--workbench-liquid-chrome-bg/)
   assert.match(styles, /html:root \.workbench-tabs-surface \{/)
   // B13: the browser's address bar sits on the glass with the other top-band rows; no surface rule of its own.
   assert.doesNotMatch(styles, /\.browser-header-surface \{/)

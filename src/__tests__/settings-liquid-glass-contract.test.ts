@@ -90,11 +90,8 @@ test('workbench side and chat panels stay transparent while slots use the shared
   const sidePanel = readWorkspaceFile('src/renderer/modules/workbench/shell/ShellSidebar.tsx')
   const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
 
-  // html:root now includes the FastCard window without a separate selector.
-  assert.match(styles, /html:root\s*\{[\s\S]*?--workbench-side-panel-bg:\s*transparent;/)
-  assert.match(styles, /html:root\s*\{[\s\S]*?--workbench-rail-slot-bg:\s*rgba\(222,\s*222,\s*220,\s*0\.64\);/)
-  // c17b8883 Polish liquid glass workbench controls — 槽位内阴影收敛 0.11 → 0.10
-  assert.match(styles, /html:root\s*\{[\s\S]*?--workbench-rail-slot-shadow:\s*[\s\S]*?inset 0 1\.5px 3px rgba\(24,\s*39,\s*77,\s*0\.10\)/)
+  // W1 T6: the shell's side-panel and rail-slot tokens are retired with the alias layer; the panels sit on the glass.
+  assert.doesNotMatch(styles, /--workbench-(?:side-panel|rail-slot)-[a-z]+\s*:/)
   assert.match(sidePanel, /className=\{`shell-sidebar workbench-panel-frame/)
   const shellStyles = readWorkspaceFile('src/renderer/modules/workbench/shell/shell.css')
   assert.match(shellStyles, /\.shell-sidebar:not\(\.shell-float-drawer\)\s*\{\s*background:\s*transparent;\s*box-shadow:\s*none;/)

@@ -176,7 +176,7 @@ const DocumentEditor = memo(function DocumentEditor({
 
   if (isReadyBoardFile(tab.path) || ext === 'canvas') {
     return (
-      <Suspense fallback={<div className="flex-1 flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin text-[var(--text-muted)]" /></div>}>
+      <Suspense fallback={<div className="flex-1 flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin text-[var(--rn-ink-2)]" /></div>}>
         <CanvasDocument tab={tab} />
       </Suspense>
     )
@@ -188,7 +188,7 @@ const DocumentEditor = memo(function DocumentEditor({
 
   if (isXlsx) {
     return (
-      <Suspense fallback={<div className="flex-1 flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin text-[var(--text-muted)]" /></div>}>
+      <Suspense fallback={<div className="flex-1 flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin text-[var(--rn-ink-2)]" /></div>}>
         <UniverSheet tab={tab} />
       </Suspense>
     )
@@ -951,7 +951,7 @@ export default function DocumentMode({
                     />
                   </div>
                 ) : (
-                  <div className="h-full flex items-center justify-center text-[var(--text-muted)]">
+                  <div className="h-full flex items-center justify-center text-[var(--rn-ink-2)]">
                     <div className="text-center">
                       <FileText className="w-12 h-12 mx-auto mb-3 opacity-30" />
                       <p className="text-[13px]">点击左侧文件打开文档</p>

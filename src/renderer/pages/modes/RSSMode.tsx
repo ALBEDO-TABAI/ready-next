@@ -46,7 +46,6 @@ import type { AddSourceSuccessInfo } from '../../components/rss/AddSourceModal'
 import type { RSSBrowserOpenActionData } from '../../modules/rss/types'
 
 const RSS_MODE_SHELL_STYLE = {
-  background: 'var(--workbench-module-surface-bg)',
   '--workbench-support-panel-width': `${WORKBENCH_SUPPORT_PANEL_WIDTH}px`,
 } as CSSProperties & { '--workbench-support-panel-width': string }
 
@@ -635,7 +634,6 @@ export default function RSSMode({
         {/* Same frame as Document and Browser: top bar + left rail on the canvas, content in a rounded frame. */}
         <div
           className="workbench-canvas-shell rss-workbench-canvas relative flex h-full min-h-0 overflow-hidden"
-          style={{ background: 'var(--workbench-module-surface-bg)' }}
         >
           <RSSTopbarContext.Provider value={topbarSlots}>
             {/* 栏目导航在外壳唯一的侧栏里（W2-T4）。 */}

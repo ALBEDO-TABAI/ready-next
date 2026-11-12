@@ -1,10 +1,10 @@
 import type React from 'react'
 import {
-  IconAlertTriangle as AlertTriangle,
-  IconCheck as Check,
-  IconListDetails as ListMinus,
-  IconLoader2 as Loader2,
-} from '@tabler/icons-react'
+  TriangleAlert as AlertTriangle,
+  Check,
+  ListMinus,
+  LoaderCircle as Loader2,
+} from 'lucide-react'
 import { isAnalysisPlaceholderKind, clampProgress, pendingPlaceholderLabel, type PendingPlaceholderKind, type PendingPlaceholderStatus } from './pending-placeholder-model'
 
 export function PendingClipRow({

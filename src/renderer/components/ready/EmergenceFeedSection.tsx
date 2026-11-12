@@ -7,7 +7,7 @@
  * 任何直接采纳写入）。空 feed / API 缺失时整段隐藏（零噪声）。
  */
 import { useCallback, useEffect, useState } from 'react'
-import { IconRefresh, IconSparkles } from '@tabler/icons-react'
+import { RefreshCw, Sparkles } from 'lucide-react'
 import type { EmergenceFeedEntryData } from '../../types/electron'
 import { executeFileEmergenceAction } from '../../modules/file-emergence/emergenceAction'
 import { Button, IconButton } from '../ui'
@@ -86,7 +86,7 @@ export function EmergenceFeedSection({
     >
       <div className="flex items-center justify-between" style={{ marginBottom: 6 }}>
         <div className="flex items-center gap-1.5">
-          <IconSparkles style={{ width: 12, height: 12, color: 'var(--rn-ink-3)' }} />
+          <Sparkles style={{ width: 12, height: 12, color: 'var(--rn-ink-3)' }} />
           <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--rn-ink)' }}>涌现</span>
         </div>
         <IconButton
@@ -95,7 +95,7 @@ export function EmergenceFeedSection({
           onClick={() => void refresh()}
           style={{ width: 20, height: 20 }}
           icon={
-            <IconRefresh
+            <RefreshCw
               style={{
                 width: 11,
                 height: 11,

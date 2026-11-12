@@ -46,25 +46,32 @@
 }
 
 /* Cross-fade the app's own glass background between light and dark. The app itself remains
-   the glass surface; this tint layer only adds the subtle color drift during the ritual. */
+   the glass surface; this tint layer only adds the subtle color drift during the ritual.
+   The ritual needs both themes' stage colours whatever data-theme says mid-flip, so it carries the two
+   --rn-stage values (design/next/tokens.css) itself instead of reading the theme-dependent token. */
+:root {
+  --ritual-stage-light: #ebebee;
+  --ritual-stage-dark: #0e0e11;
+}
+
 html[data-theme-ritual-phase='entering'][data-theme-ritual-direction='to-dark'] .ready-theme-ritual-tint {
   opacity: 1;
-  background-color: color-mix(in srgb, var(--workbench-mode-bg-light) 18%, transparent);
+  background-color: color-mix(in srgb, var(--ritual-stage-light) 18%, transparent);
 }
 
 html[data-theme-ritual-phase='holding'][data-theme-ritual-direction='to-dark'] .ready-theme-ritual-tint {
   opacity: 1;
-  background-color: color-mix(in srgb, var(--workbench-mode-bg-dark) 28%, transparent);
+  background-color: color-mix(in srgb, var(--ritual-stage-dark) 28%, transparent);
 }
 
 html[data-theme-ritual-phase='entering'][data-theme-ritual-direction='to-light'] .ready-theme-ritual-tint {
   opacity: 1;
-  background-color: color-mix(in srgb, var(--workbench-mode-bg-dark) 18%, transparent);
+  background-color: color-mix(in srgb, var(--ritual-stage-dark) 18%, transparent);
 }
 
 html[data-theme-ritual-phase='holding'][data-theme-ritual-direction='to-light'] .ready-theme-ritual-tint {
   opacity: 1;
-  background-color: color-mix(in srgb, var(--workbench-mode-bg-light) 32%, transparent);
+  background-color: color-mix(in srgb, var(--ritual-stage-light) 32%, transparent);
 }
 
 /* Fade the tint in lockstep with the overlay's own opacity during leaving. The softer easing
@@ -165,9 +172,9 @@ html[data-theme-ritual-direction='to-light'][data-theme-ritual-phase='leaving'] 
 }
 
 @keyframes ritual-reduce-flash {
-  0% { background-color: var(--ritual-overlay-bg); }
-  50% { background-color: var(--bg-panel); }
-  100% { background-color: var(--ritual-overlay-bg); }
+  0% { background-color: var(--rn-stage); }
+  50% { background-color: var(--rn-stage-2); }
+  100% { background-color: var(--rn-stage); }
 }
 
 .ritual-theme-choreography {

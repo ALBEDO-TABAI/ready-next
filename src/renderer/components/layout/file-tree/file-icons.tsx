@@ -1,13 +1,13 @@
 import {
-  IconBook2 as BookOpen,
-  IconFileSpreadsheet as FileSpreadsheet,
-  IconFileText as FileText,
-  IconFolder as Folder,
-  IconMovie as Film,
-  IconMusic as Music2,
-  IconPencil as Pen,
-  IconPhoto as Image,
-} from '@tabler/icons-react'
+  BookOpen,
+  FileSpreadsheet,
+  FileText,
+  Folder,
+  Film,
+  Music2,
+  Pencil as Pen,
+  Image,
+} from 'lucide-react'
 import type { FileItem } from '../../../stores/useWorkspace'
 import {
   getFileAppearanceColorValue,

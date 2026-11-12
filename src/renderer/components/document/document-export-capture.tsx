@@ -22,8 +22,11 @@ import {
 // stylesheet access ever fails (e.g. packaged file:// origin quirks), these
 // keep the core reading surface styled. Order stays index.css-faithful
 // (tokens before markdown), and both precede collected CSS so live rules win.
-import themeTokensCssRaw from '../../styles/theme-tokens.css?raw'
+import designTokensCssRawWithFonts from '../../design/next/tokens.css?raw'
 import markdownCssRaw from '../../styles/markdown.css?raw'
+
+// The token file's @font-face rules point at files next to it; an exported page cannot reach them.
+const designTokensCssRaw = designTokensCssRawWithFonts.replace(/@font-face\s*\{[^}]*\}/g, '')
 
 /** ≈ A4 usable width at 96dpi with ~14mm side margins. */
 const EXPORT_CONTENT_WIDTH_PX = 680
@@ -112,7 +115,7 @@ export async function captureDocumentPreviewHtml(options: DocumentExportCaptureO
     return buildExportHtmlDocument({
       title: options.title,
       bodyHtml: serializePreviewForExport(clone),
-      baseCss: `${themeTokensCssRaw}\n${markdownCssRaw}`,
+      baseCss: `${designTokensCssRaw}\n${markdownCssRaw}`,
       collectedCss: collectLiveStyleSheetText(document),
       darkTheme: document.documentElement.dataset.theme === 'dark',
     })

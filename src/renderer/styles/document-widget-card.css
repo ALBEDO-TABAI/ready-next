@@ -7,8 +7,8 @@
 
 .ready-doc-widget-card-index {
   flex: none;
-  color: var(--text-light);
-  font-family: var(--font-mono);
+  color: var(--rn-ink-3);
+  font-family: var(--rn-font-mono);
   font-size: 10px;
   font-weight: 500;
   letter-spacing: 0.1em;
@@ -24,8 +24,8 @@
   padding: 3px 0;
   border: 0;
   background: transparent;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
+  color: var(--rn-ink-2);
+  font-family: var(--rn-font-mono);
   font-size: 10.5px;
   font-weight: 500;
   letter-spacing: 0.04em;
@@ -39,23 +39,23 @@
   width: 1px;
   height: 10px;
   margin-right: 4px;
-  background: color-mix(in srgb, var(--text-title) 16%, transparent);
+  background: color-mix(in srgb, var(--rn-ink) 16%, transparent);
 }
 
 .ready-doc-widget-card-activate-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--color-ready-orange);
-  box-shadow: 0 0 0 3px var(--color-ready-orange-light);
+  background: var(--rn-accent);
+  box-shadow: 0 0 0 3px var(--rn-accent-soft);
 }
 
 .ready-doc-widget-card-activate:hover {
-  color: var(--text-title);
+  color: var(--rn-ink);
 }
 
 .ready-doc-widget-card-activate:focus-visible {
-  outline: 1.5px solid var(--color-ready-orange);
+  outline: 1.5px solid var(--rn-accent);
   outline-offset: 3px;
   border-radius: 4px;
 }
@@ -173,12 +173,12 @@ html[data-theme='dark'] .ready-doc-widget-card > .ready-doc-widget-card-preview:
 
 .ready-doc-widget-card-preview .document-widget-error {
   padding: 0 2px;
-  color: var(--text-muted);
+  color: var(--rn-ink-2);
   font-size: 11.5px;
 }
 
 .ready-doc-widget-card-preview .document-widget-error svg {
-  color: var(--color-ready-orange);
+  color: var(--rn-accent);
 }
 
 /* 非受控休眠态（编辑面卡片）的启用行 */
@@ -196,8 +196,8 @@ html[data-theme='dark'] .ready-doc-widget-card > .ready-doc-widget-card-preview:
   padding: 0;
   border: 0;
   background: transparent;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
+  color: var(--rn-ink-2);
+  font-family: var(--rn-font-mono);
   font-size: 10.5px;
   font-weight: 500;
   letter-spacing: 0.04em;
@@ -205,14 +205,14 @@ html[data-theme='dark'] .ready-doc-widget-card > .ready-doc-widget-card-preview:
 }
 
 .document-widget-activate-button:hover {
-  color: var(--text-title);
+  color: var(--rn-ink);
 }
 
 .document-widget-activate-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--color-ready-orange);
+  background: var(--rn-accent);
 }
 
 @media (prefers-reduced-motion: reduce) {

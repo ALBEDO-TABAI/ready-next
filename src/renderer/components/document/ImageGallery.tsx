@@ -248,27 +248,27 @@ export default function ImageGallery({ tab, fileUrl, currentExt }: ImageGalleryP
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex-1 flex flex-col overflow-hidden" style={{ background: 'var(--bg-content)' }}>
+      <div className="flex-1 flex flex-col overflow-hidden" style={{ background: 'var(--rn-sheet)' }}>
         {/* Toolbar */}
         <div
-          className="flex items-center gap-1 px-3 border-b border-[var(--border-default)]"
-          style={{ height: 34, background: 'var(--bg-toolbar)', flexShrink: 0 }}
+          className="flex items-center gap-1 px-3 border-b border-[var(--rn-hair-2)]"
+          style={{ height: 34, background: 'var(--rn-stage)', flexShrink: 0 }}
         >
           {/* Zoom out */}
           <button
             onClick={() => setZoom((z) => Math.max(10, z - 10))}
             style={tbBtnBase}
-            className="bg-transparent hover:bg-[var(--bg-hover)]"
+            className="bg-transparent hover:bg-[var(--rn-fill-2)]"
             title="缩小"
           >
-            <ZoomOut size={14} color="var(--text-muted)" />
+            <ZoomOut size={14} color="var(--rn-ink-2)" />
           </button>
 
           {/* Zoom percentage */}
           <button
             onClick={() => setZoom(100)}
-            style={{ ...tbBtnBase, width: 'auto', padding: '0 4px', fontSize: 11, color: 'var(--text-muted)', fontFamily: 'inherit' }}
-            className="bg-transparent hover:bg-[var(--bg-hover)]"
+            style={{ ...tbBtnBase, width: 'auto', padding: '0 4px', fontSize: 11, color: 'var(--rn-ink-2)', fontFamily: 'inherit' }}
+            className="bg-transparent hover:bg-[var(--rn-fill-2)]"
             title="重置 100%"
           >
             {zoom}%
@@ -278,72 +278,72 @@ export default function ImageGallery({ tab, fileUrl, currentExt }: ImageGalleryP
           <button
             onClick={() => setZoom((z) => Math.min(800, z + 10))}
             style={tbBtnBase}
-            className="bg-transparent hover:bg-[var(--bg-hover)]"
+            className="bg-transparent hover:bg-[var(--rn-fill-2)]"
             title="放大"
           >
-            <ZoomIn size={14} color="var(--text-muted)" />
+            <ZoomIn size={14} color="var(--rn-ink-2)" />
           </button>
 
-          <div style={{ width: 1, height: 16, background: 'var(--border-default)', margin: '0 4px' }} />
+          <div style={{ width: 1, height: 16, background: 'var(--rn-hair-2)', margin: '0 4px' }} />
 
           {/* Fit to width */}
-          <button onClick={fitToWidth} style={tbBtnBase} className="bg-transparent hover:bg-[var(--bg-hover)]" title="适应宽度">
-            <Maximize2 size={14} color="var(--text-muted)" />
+          <button onClick={fitToWidth} style={tbBtnBase} className="bg-transparent hover:bg-[var(--rn-fill-2)]" title="适应宽度">
+            <Maximize2 size={14} color="var(--rn-ink-2)" />
           </button>
 
           {/* Fit to screen */}
-          <button onClick={fitToScreen} style={tbBtnBase} className="bg-transparent hover:bg-[var(--bg-hover)]" title="适应屏幕">
-            <Shrink size={14} color="var(--text-muted)" />
+          <button onClick={fitToScreen} style={tbBtnBase} className="bg-transparent hover:bg-[var(--rn-fill-2)]" title="适应屏幕">
+            <Shrink size={14} color="var(--rn-ink-2)" />
           </button>
 
           {/* 1:1 */}
           <button
             onClick={() => setZoom(100)}
-            style={{ ...tbBtnBase, width: 'auto', padding: '0 6px', fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, fontFamily: 'inherit' }}
-            className="bg-transparent hover:bg-[var(--bg-hover)]"
+            style={{ ...tbBtnBase, width: 'auto', padding: '0 6px', fontSize: 11, color: 'var(--rn-ink-2)', fontWeight: 600, fontFamily: 'inherit' }}
+            className="bg-transparent hover:bg-[var(--rn-fill-2)]"
             title="原始尺寸"
           >
             1:1
           </button>
 
-          <div style={{ width: 1, height: 16, background: 'var(--border-default)', margin: '0 4px' }} />
+          <div style={{ width: 1, height: 16, background: 'var(--rn-hair-2)', margin: '0 4px' }} />
 
           {/* Rotate */}
-          <button onClick={() => setRotation((r) => r - 90)} style={tbBtnBase} className="bg-transparent hover:bg-[var(--bg-hover)]" title="左旋转">
-            <RotateCcw size={14} color="var(--text-muted)" />
+          <button onClick={() => setRotation((r) => r - 90)} style={tbBtnBase} className="bg-transparent hover:bg-[var(--rn-fill-2)]" title="左旋转">
+            <RotateCcw size={14} color="var(--rn-ink-2)" />
           </button>
-          <button onClick={() => setRotation((r) => r + 90)} style={tbBtnBase} className="bg-transparent hover:bg-[var(--bg-hover)]" title="右旋转">
-            <RotateCw size={14} color="var(--text-muted)" />
+          <button onClick={() => setRotation((r) => r + 90)} style={tbBtnBase} className="bg-transparent hover:bg-[var(--rn-fill-2)]" title="右旋转">
+            <RotateCw size={14} color="var(--rn-ink-2)" />
           </button>
 
-          <div style={{ width: 1, height: 16, background: 'var(--border-default)', margin: '0 4px' }} />
+          <div style={{ width: 1, height: 16, background: 'var(--rn-hair-2)', margin: '0 4px' }} />
 
           {/* Gallery button */}
           <button
             onClick={openGallery}
             disabled={siblings.length === 0}
-            style={{ ...tbBtnBase, width: 'auto', padding: '0 8px', gap: 4, display: 'flex', alignItems: 'center', fontSize: 11, color: 'var(--text-muted)', fontFamily: 'inherit' }}
-            className="bg-transparent hover:bg-[var(--bg-hover)] disabled:opacity-30"
+            style={{ ...tbBtnBase, width: 'auto', padding: '0 8px', gap: 4, display: 'flex', alignItems: 'center', fontSize: 11, color: 'var(--rn-ink-2)', fontFamily: 'inherit' }}
+            className="bg-transparent hover:bg-[var(--rn-fill-2)] disabled:opacity-30"
             title="浏览同目录图片"
           >
-            <Images size={14} color="var(--text-muted)" />
+            <Images size={14} color="var(--rn-ink-2)" />
             {siblings.length > 0 && <span>{siblings.length}</span>}
           </button>
 
-          <div style={{ width: 1, height: 16, background: 'var(--border-default)', margin: '0 4px' }} />
+          <div style={{ width: 1, height: 16, background: 'var(--rn-hair-2)', margin: '0 4px' }} />
 
           {/* File info */}
-          <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 2 }}>{tab.title}</span>
+          <span style={{ fontSize: 11, color: 'var(--rn-ink-2)', marginLeft: 2 }}>{tab.title}</span>
           {imageDims && (
-            <span style={{ fontSize: 10, color: 'var(--text-light)', marginLeft: 6 }}>
+            <span style={{ fontSize: 10, color: 'var(--rn-ink-3)', marginLeft: 6 }}>
               {imageDims.w} &times; {imageDims.h}
             </span>
           )}
           <span
             style={{
               fontSize: 9,
-              color: 'var(--text-light)',
-              background: 'var(--bg-hover)',
+              color: 'var(--rn-ink-3)',
+              background: 'var(--rn-fill-2)',
               borderRadius: 4,
               padding: '1px 5px',
               marginLeft: 6,
@@ -377,7 +377,7 @@ export default function ImageGallery({ tab, fileUrl, currentExt }: ImageGalleryP
             style={{
               ...checkerboardStyle,
               borderRadius: 4,
-              border: '1px solid var(--border-default)',
+              border: '1px solid var(--rn-hair-2)',
               lineHeight: 0,
             }}
           >

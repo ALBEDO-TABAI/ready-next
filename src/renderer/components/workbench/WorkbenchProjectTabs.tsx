@@ -49,11 +49,11 @@ export default function WorkbenchProjectTabs({
   const inlineNewTabButton = onNewTab ? (
     <button
       onClick={() => void onNewTab()}
-      className="flex items-center justify-center hover:bg-[var(--bg-hover)] transition-colors flex-shrink-0"
+      className="flex items-center justify-center hover:bg-[var(--rn-fill-2)] transition-colors flex-shrink-0"
       style={{ width: 26, height: 26, borderRadius: 6, alignSelf: 'center', marginLeft: 4 }}
       title="新建"
     >
-      <Plus style={{ width: 14, height: 14 }} className="text-[var(--text-muted)]" strokeWidth={2} />
+      <Plus style={{ width: 14, height: 14 }} className="text-[var(--rn-ink-2)]" strokeWidth={2} />
     </button>
   ) : null
 
@@ -98,15 +98,15 @@ export default function WorkbenchProjectTabs({
                   gap: 6,
                   height: isActive ? activeTabHeight : inactiveTabHeight,
                   background: isActive
-                    ? 'color-mix(in srgb, var(--surface-card-bg) 18%, transparent)'
+                    ? 'color-mix(in srgb, var(--rn-sheet) 18%, transparent)'
                     : isSecondaryActive
-                      ? 'color-mix(in srgb, var(--surface-card-bg) 12%, transparent)'
+                      ? 'color-mix(in srgb, var(--rn-sheet) 12%, transparent)'
                       : 'transparent',
-                  color: isActive || isSecondaryActive ? 'var(--text-secondary)' : 'var(--text-gray)',
+                  color: isActive || isSecondaryActive ? 'var(--rn-ink-2)' : 'var(--rn-ink-3)',
                   borderBottom: isActive
                     ? '1px solid transparent'
                     : isSecondaryActive
-                      ? '2px solid var(--color-blue)'
+                      ? '2px solid var(--rn-accent)'
                       : '1px solid transparent',
                   borderTop: isActive ? '1px solid rgba(255,255,255,0.08)' : '1px solid transparent',
                   alignSelf: 'flex-end',
@@ -121,9 +121,9 @@ export default function WorkbenchProjectTabs({
                       style={{ width: 8, height: 8, background: tab.dotColor }}
                     />
                   ) : null}
-                  <span className="truncate flex-1 min-w-0" style={{ lineHeight: '28px', color: isActive ? 'var(--text-secondary)' : isSecondaryActive ? 'var(--text-body)' : 'var(--text-gray)' }}>
+                  <span className="truncate flex-1 min-w-0" style={{ lineHeight: '28px', color: isActive ? 'var(--rn-ink-2)' : isSecondaryActive ? 'var(--rn-ink)' : 'var(--rn-ink-3)' }}>
                     {tab.label}
-                    {tab.dirty ? <span className="ml-0.5" style={{ color: 'var(--text-light)' }}>●</span> : null}
+                    {tab.dirty ? <span className="ml-0.5" style={{ color: 'var(--rn-ink-3)' }}>●</span> : null}
                   </span>
                   {onTabClose ? (
                     <span
@@ -132,7 +132,7 @@ export default function WorkbenchProjectTabs({
                         event.stopPropagation()
                         onTabClose(tab.id, event)
                       }}
-                      className="rounded opacity-70 group-hover:opacity-100 hover:bg-[var(--bg-hover)] transition-[background-color,opacity] duration-200 cursor-pointer flex-shrink-0 flex items-center justify-center"
+                      className="rounded opacity-70 group-hover:opacity-100 hover:bg-[var(--rn-fill-2)] transition-[background-color,opacity] duration-200 cursor-pointer flex-shrink-0 flex items-center justify-center"
                       style={{ width: 18, height: 18 }}
                       title="Close"
                     >

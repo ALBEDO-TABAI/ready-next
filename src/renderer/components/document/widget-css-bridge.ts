@@ -18,25 +18,27 @@ export interface ResolveWidgetThemeOptions {
   backgroundMode?: WidgetBackgroundMode
 }
 
-const THEME_VAR_NAMES = [
-  '--bg-content',
-  '--bg-canvas',
-  '--bg-panel',
-  '--bg-hover',
-  '--border-default',
-  '--text-title',
-  '--text-body',
-  '--text-muted',
-  '--text-light',
-  '--color-blue',
-  '--color-blue-light',
-  '--color-green',
-  '--color-orange',
-  '--color-red',
-  '--color-ready-orange',
-  '--color-ready-orange-light',
-  '--font-mono',
-] as const
+// Freeform widget code inside the iframe keeps its long-standing variable names; the host has no such
+// aliases any more (W1 T6), so each name is filled from the design token it used to alias.
+const THEME_VAR_SOURCES = {
+  '--bg-content': '--rn-sheet',
+  '--bg-canvas': '--rn-stage',
+  '--bg-panel': '--rn-stage',
+  '--bg-hover': '--rn-fill-2',
+  '--border-default': '--rn-hair-2',
+  '--text-title': '--rn-ink',
+  '--text-body': '--rn-ink',
+  '--text-muted': '--rn-ink-2',
+  '--text-light': '--rn-ink-3',
+  '--color-blue': '--rn-accent',
+  '--color-blue-light': '--rn-accent-soft',
+  '--color-green': '--rn-ok',
+  '--color-orange': '--rn-warn',
+  '--color-red': '--rn-bad',
+  '--color-ready-orange': '--rn-accent',
+  '--color-ready-orange-light': '--rn-accent-soft',
+  '--font-mono': '--rn-font-mono',
+} as const
 
 function pick(live: string | undefined, fallback: string): string {
   return live && live.trim().length > 0 ? live : fallback
@@ -52,8 +54,8 @@ export function resolveWidgetThemePayload(options?: ResolveWidgetThemeOptions): 
   const tokens: WidgetThemeTokenSet = isDark ? WIDGET_THEME_DARK : WIDGET_THEME_LIGHT
 
   const vars: Record<string, string> = {}
-  for (const name of THEME_VAR_NAMES) {
-    vars[name] = styles.getPropertyValue(name).trim()
+  for (const [name, source] of Object.entries(THEME_VAR_SOURCES)) {
+    vars[name] = styles.getPropertyValue(source).trim()
   }
 
   // Widget 视觉以 Ready 令牌层为唯一来源。工作台 live 变量仍透传给 legacy/freeform

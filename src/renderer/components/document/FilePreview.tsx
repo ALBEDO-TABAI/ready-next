@@ -15,9 +15,9 @@ const getFileExt = (path: string | null): string => {
   return getFileExtension(path)
 }
 
-const LoadingFallback = ({ bg = 'var(--bg-content)' }: { bg?: string }) => (
+const LoadingFallback = ({ bg = 'var(--rn-sheet)' }: { bg?: string }) => (
   <div className="flex-1 flex items-center justify-center" style={{ background: bg }}>
-    <Loader2 className="w-6 h-6 animate-spin" style={{ color: 'var(--text-light)' }} />
+    <Loader2 className="w-6 h-6 animate-spin" style={{ color: 'var(--rn-ink-3)' }} />
   </div>
 )
 
@@ -44,7 +44,7 @@ export default function FilePreview({ tab }: FilePreviewProps) {
 
   if (isVideo && tab.path) {
     return (
-      <Suspense fallback={<LoadingFallback bg="var(--bg-canvas)" />}>
+      <Suspense fallback={<LoadingFallback bg="var(--rn-stage)" />}>
         <ArtVideoPlayer tab={tab} fileUrl={fileUrl} currentExt={currentExt} />
       </Suspense>
     )
@@ -52,7 +52,7 @@ export default function FilePreview({ tab }: FilePreviewProps) {
 
   if (isPdf && tab.path) {
     return (
-      <Suspense fallback={<LoadingFallback bg="var(--bg-editor)" />}>
+      <Suspense fallback={<LoadingFallback bg="var(--rn-sheet)" />}>
         <PdfViewer tab={tab} fileUrl={fileUrl} />
       </Suspense>
     )
@@ -60,7 +60,7 @@ export default function FilePreview({ tab }: FilePreviewProps) {
 
   if (isEbook && tab.path) {
     return (
-      <Suspense fallback={<LoadingFallback bg="var(--bg-editor)" />}>
+      <Suspense fallback={<LoadingFallback bg="var(--rn-sheet)" />}>
         <EbookViewer tab={tab} fileUrl={fileUrl} currentExt={currentExt} />
       </Suspense>
     )
@@ -68,7 +68,7 @@ export default function FilePreview({ tab }: FilePreviewProps) {
 
   // Fallback: unsupported
   return (
-    <div className="flex-1 flex items-center justify-center text-[var(--text-muted)]">
+    <div className="flex-1 flex items-center justify-center text-[var(--rn-ink-2)]">
       <p className="text-[13px]">暂不支持预览该格式</p>
     </div>
   )

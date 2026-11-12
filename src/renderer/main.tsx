@@ -46,7 +46,7 @@ async function reconcileStartupTheme(): Promise<StartupThemeSnapshot | null> {
   removeRetiredThemeStorage()
 
   // 同步 <html> attr：data-theme、data-transparency、data-native-fullscreen 共同决定窗口底
-  // （theme-tokens.css 的 --app-bg-overlay-opacity 规则）。
+  // （base-chrome.css 的 --app-bg-overlay-opacity 规则）。
   if (root.getAttribute('data-theme') !== resolved) {
     root.setAttribute('data-theme', resolved)
   }

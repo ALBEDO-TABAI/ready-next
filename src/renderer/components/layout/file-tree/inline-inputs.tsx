@@ -1,8 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import {
-  IconFileText as FileText,
-  IconFolder as Folder,
-} from '@tabler/icons-react'
+import { FileText, Folder } from 'lucide-react'
 import { Input } from '../../ui'
 
 export function InlineInput({

@@ -1,6 +1,6 @@
 import { useContext, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { IconLayoutSidebarLeftCollapse, IconPin } from '@tabler/icons-react'
+import { PanelLeftClose, Pin } from 'lucide-react'
 import type { WorkbenchMode } from '../../../stores/useMode'
 import { ShellSidebarSlotContext } from './sidebar-slot'
 
@@ -87,7 +87,7 @@ export function ShellSidebarToggle({ className = 'shell-sidebar-toggle' }: { cla
   const label = pinnable ? '固定侧栏' : '收起侧栏'
   return (
     <button type="button" className={className} title={label} aria-label={label} onClick={toggle}>
-      {pinnable ? <IconPin size={16} strokeWidth={1.7} aria-hidden="true" /> : <IconLayoutSidebarLeftCollapse size={17} strokeWidth={1.7} aria-hidden="true" />}
+      {pinnable ? <Pin size={16} strokeWidth={1.7} aria-hidden="true" /> : <PanelLeftClose size={17} strokeWidth={1.7} aria-hidden="true" />}
     </button>
   )
 }

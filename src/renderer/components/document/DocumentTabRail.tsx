@@ -124,9 +124,9 @@ export default function DocumentTabRail({
             <button
               type="button"
               onClick={() => scrollRef.current?.scrollBy({ left: -160, behavior: 'smooth' })}
-              className="flex h-[24px] w-[24px] flex-shrink-0 items-center justify-center rounded transition-colors hover:bg-[var(--bg-hover)]"
+              className="flex h-[24px] w-[24px] flex-shrink-0 items-center justify-center rounded transition-colors hover:bg-[var(--rn-fill-2)]"
             >
-              <ChevronLeft style={{ width: 12, height: 12 }} className="text-[var(--text-gray)]" strokeWidth={2} />
+              <ChevronLeft style={{ width: 12, height: 12 }} className="text-[var(--rn-ink-3)]" strokeWidth={2} />
             </button>
           )}
 
@@ -172,20 +172,20 @@ export default function DocumentTabRail({
                         gap: 6,
                         height: Math.max(30, WORKBENCH_TAB_ROW_HEIGHT - 4),
                         background: isActive
-                          ? 'color-mix(in srgb, var(--surface-card-bg) 18%, transparent)'
+                          ? 'color-mix(in srgb, var(--rn-sheet) 18%, transparent)'
                           : isSecondaryActive
-                            ? 'color-mix(in srgb, var(--surface-card-bg) 12%, transparent)'
+                            ? 'color-mix(in srgb, var(--rn-sheet) 12%, transparent)'
                             : isHovered
-                              ? 'color-mix(in srgb, var(--surface-card-bg) 20%, transparent)'
+                              ? 'color-mix(in srgb, var(--rn-sheet) 20%, transparent)'
                               : 'transparent',
-                        color: isActive || isSecondaryActive ? 'var(--text-body)' : 'var(--text-gray)',
+                        color: isActive || isSecondaryActive ? 'var(--rn-ink)' : 'var(--rn-ink-3)',
                         borderColor: isDragOver
-                          ? 'var(--color-blue)'
+                          ? 'var(--rn-accent)'
                           : isHovered
-                            ? 'color-mix(in srgb, var(--color-blue) 28%, transparent)'
+                            ? 'color-mix(in srgb, var(--rn-accent) 28%, transparent)'
                             : 'transparent',
                         boxShadow: isHovered
-                          ? '0 0 0 1px color-mix(in srgb, var(--color-blue) 18%, transparent)'
+                          ? '0 0 0 1px color-mix(in srgb, var(--rn-accent) 18%, transparent)'
                           : 'none',
                       }}
                       contentClassName="relative z-[1] flex min-w-0 flex-1 items-center justify-center"
@@ -202,10 +202,10 @@ export default function DocumentTabRail({
                         >
                           <span
                             className="truncate flex-1 min-w-0"
-                            style={{ lineHeight: '28px', color: isActive ? 'var(--text-title)' : isSecondaryActive ? 'var(--text-body)' : 'var(--text-gray)' }}
+                            style={{ lineHeight: '28px', color: isActive ? 'var(--rn-ink)' : isSecondaryActive ? 'var(--rn-ink)' : 'var(--rn-ink-3)' }}
                           >
                             {tab.label}
-                            {tab.dirty ? <span className="ml-0.5" style={{ color: 'var(--text-light)' }}>●</span> : null}
+                            {tab.dirty ? <span className="ml-0.5" style={{ color: 'var(--rn-ink-3)' }}>●</span> : null}
                           </span>
                         </span>
 
@@ -216,7 +216,7 @@ export default function DocumentTabRail({
                               event.stopPropagation()
                               onTabClose(tab.id, event)
                             }}
-                            className="absolute right-[8px] top-1/2 flex items-center justify-center rounded opacity-70 group-hover:opacity-100 hover:bg-[var(--bg-hover)] transition-[opacity,background-color] cursor-pointer"
+                            className="absolute right-[8px] top-1/2 flex items-center justify-center rounded opacity-70 group-hover:opacity-100 hover:bg-[var(--rn-fill-2)] transition-[opacity,background-color] cursor-pointer"
                             style={{ width: 18, height: 18, transform: 'translateY(-50%)' }}
                             title="Close"
                           >
@@ -243,10 +243,10 @@ export default function DocumentTabRail({
               <button
                 type="button"
                 onClick={() => void onNewTab()}
-                className="ml-[6px] flex h-[28px] w-[28px] flex-shrink-0 items-center justify-center rounded-[8px] transition-colors hover:bg-[var(--bg-hover)]"
+                className="ml-[6px] flex h-[28px] w-[28px] flex-shrink-0 items-center justify-center rounded-[8px] transition-colors hover:bg-[var(--rn-fill-2)]"
                 title="新建"
               >
-                <Plus style={{ width: 14, height: 14 }} className="text-[var(--text-light)]" strokeWidth={2} />
+                <Plus style={{ width: 14, height: 14 }} className="text-[var(--rn-ink-3)]" strokeWidth={2} />
               </button>
             </MorphTabStrip>
           </div>
@@ -255,9 +255,9 @@ export default function DocumentTabRail({
             <button
               type="button"
               onClick={() => scrollRef.current?.scrollBy({ left: 160, behavior: 'smooth' })}
-              className="flex h-[24px] w-[24px] flex-shrink-0 items-center justify-center rounded transition-colors hover:bg-[var(--bg-hover)]"
+              className="flex h-[24px] w-[24px] flex-shrink-0 items-center justify-center rounded transition-colors hover:bg-[var(--rn-fill-2)]"
             >
-              <ChevronRight style={{ width: 12, height: 12 }} className="text-[var(--text-gray)]" strokeWidth={2} />
+              <ChevronRight style={{ width: 12, height: 12 }} className="text-[var(--rn-ink-3)]" strokeWidth={2} />
             </button>
           )}
         </div>

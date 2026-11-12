@@ -972,7 +972,7 @@ export default function MarkdownEditor({
     if (blockingLoadError && loadError) {
       return (
         <div className="flex items-center justify-center py-10">
-          <div className="max-w-[520px] rounded-[12px] border border-[var(--color-orange)] px-4 py-3 text-[13px] text-[var(--text-secondary)]">
+          <div className="max-w-[520px] rounded-[12px] border border-[var(--rn-warn)] px-4 py-3 text-[13px] text-[var(--rn-ink-2)]">
             {loadError}
           </div>
         </div>
@@ -981,7 +981,7 @@ export default function MarkdownEditor({
 
     return (
       <div className="flex items-center justify-center py-10">
-        <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>加载中...</span>
+        <span style={{ color: 'var(--rn-ink-2)', fontSize: 13 }}>加载中...</span>
       </div>
     )
   }
@@ -993,9 +993,9 @@ export default function MarkdownEditor({
           role="alert"
           className="mx-10 mt-3 rounded-[8px] border px-3 py-2 text-[13px]"
           style={{
-            borderColor: 'var(--color-orange)',
-            color: 'var(--text-secondary)',
-            background: 'var(--workbench-module-surface-bg)',
+            borderColor: 'var(--rn-warn)',
+            color: 'var(--rn-ink-2)',
+            background: 'var(--rn-sheet)',
           }}
         >
           {saveError}
@@ -1043,7 +1043,7 @@ export default function MarkdownEditor({
                         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace',
                         fontSize: 14,
                         lineHeight: 1.7,
-                        color: 'var(--text-primary)',
+                        color: 'var(--rn-ink)',
                         whiteSpace: 'pre-wrap',
                         overflowWrap: 'anywhere',
                         wordBreak: 'break-word',

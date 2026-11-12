@@ -237,6 +237,33 @@ html[data-theme-ritual-phase] .ready-app-content *::after {
   transition: none !important;
 }
 
+/*
+ * 窗口底（.ready-app-bg）的不透明度。macOS 上窗口永远是透明背景 + under-window 毛玻璃，
+ * 所有“不透明底”都由 DOM 层 .ready-app-bg 承担（验证 2 架构，2026-05-16：不再切换 CALayer，
+ * 否则 NSVisualEffectView 会被静默 quiesce，退出全屏后黑屏）。
+ *
+ *   - 默认（减少透明，data-transparency='reduced'）：1，底色由下面的规则换成 --rn-stage；
+ *   - 普通透明度：浅色叠一层 0.53 的中性提亮，深色不叠；
+ *   - 原生全屏：底必须立刻不透明（否则全屏期间桌面壁纸会被采样进窗口）。
+ *
+ * W1 T6 从已删除的外壳别名层 theme-tokens.css 原样搬来，选择器与优先级不变。
+ */
+html:root {
+  --app-bg-overlay-opacity: 1;
+}
+
+html[data-transparency='normal']:root {
+  --app-bg-overlay-opacity: 0.53;
+}
+
+html[data-theme='dark'][data-transparency='normal']:root {
+  --app-bg-overlay-opacity: 0;
+}
+
+html[data-native-fullscreen='true'][data-transparency='normal']:root {
+  --app-bg-overlay-opacity: 1;
+}
+
 .ready-app-bg {
   position: absolute;
   inset: 0;
@@ -418,11 +445,11 @@ html[data-transparency='reduced'] *::after {
     box-shadow var(--rn-d-1) var(--rn-ease-out);
 }
 
-/* Inputs not yet on the Field primitive look like it (W1 §5: --rn-fill, a hairline, an ink edge on focus). 设置页的
-   sx-input / sx-select / sx-textarea（settings-surfaces.css）与共用基元的 rn-field（components/ui/primitives.css）自带槽位材质，不吃这条全局兜底。 */
-.ready-app-shell input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']):not([type='hidden']):not([type='submit']):not([type='button']):not([type='reset']):not([type='image']):not(.ready-input-slot-inner):not(.sx-input):not(.rn-field),
-.ready-app-shell textarea:not(.ready-input-slot-inner):not(.sx-textarea):not(.rn-field),
-.ready-app-shell select:not(.ready-input-slot-inner):not(.sx-select):not(.rn-field) {
+/* Inputs not yet on the Field primitive look like it (W1 §5: --rn-fill, a hairline, an ink edge on focus). 共用基元的
+   rn-field（components/ui/primitives.css）自带槽位材质，不吃这条全局兜底。 */
+.ready-app-shell input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']):not([type='hidden']):not([type='submit']):not([type='button']):not([type='reset']):not([type='image']):not(.ready-input-slot-inner):not(.rn-field),
+.ready-app-shell textarea:not(.ready-input-slot-inner):not(.rn-field),
+.ready-app-shell select:not(.ready-input-slot-inner):not(.rn-field) {
   background: var(--rn-fill) !important;
   border-color: var(--rn-hair-2) !important;
   box-shadow: none !important;
@@ -438,9 +465,9 @@ html[data-transparency='reduced'] *::after {
   outline: none !important;
 }
 
-.ready-app-shell input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']):not([type='hidden']):not([type='submit']):not([type='button']):not([type='reset']):not([type='image']):not(.ready-input-slot-inner):not(.sx-input):not(.rn-field):focus,
-.ready-app-shell textarea:not(.ready-input-slot-inner):not(.sx-textarea):not(.rn-field):focus,
-.ready-app-shell select:not(.ready-input-slot-inner):not(.sx-select):not(.rn-field):focus {
+.ready-app-shell input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']):not([type='hidden']):not([type='submit']):not([type='button']):not([type='reset']):not([type='image']):not(.ready-input-slot-inner):not(.rn-field):focus,
+.ready-app-shell textarea:not(.ready-input-slot-inner):not(.rn-field):focus,
+.ready-app-shell select:not(.ready-input-slot-inner):not(.rn-field):focus {
   border-color: var(--rn-ink-3) !important;
   box-shadow: none !important;
   outline: none !important;

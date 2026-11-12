@@ -27,7 +27,7 @@ test('one shell sidebar hosts mode navigators and the UI guide points to their c
 
   // allow-source-grep: documentation links must identify the actual sidebar and global-view owners.
   const guide = readFileSync(guidePath, 'utf8')
-  for (const file of ['ShellSidebar.tsx', 'DocumentNavigator.tsx', 'FilesPanel.tsx', 'FindReplaceWorkspace.tsx', 'SkillsCenter.tsx', 'GraphWorkspace.tsx', 'CalendarWorkbenchShell.tsx', 'workbench-sliders.css']) {
+  for (const file of ['ShellSidebar.tsx', 'DocumentNavigator.tsx', 'FilesPanel.tsx', 'FindReplaceWorkspace.tsx', 'SkillsCenter.tsx', 'GraphWorkspace.tsx', 'modules/calendar/workbench/App.tsx', 'workbench-sliders.css']) {
     assert.ok(guide.includes(file), `guide must point to ${file}`)
   }
   assert.doesNotMatch(guide, /components\/layout\/SidePanel\.tsx/)

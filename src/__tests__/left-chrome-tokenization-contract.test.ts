@@ -8,16 +8,11 @@ function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-test('left chrome tokens centralize side panel shell and rail track colors', () => {
+test('left chrome colours come from --rn-*; the side-panel and rail-slot shell tokens are retired (W1 T6)', () => {
   const styles = readRendererStyles()
 
-  assert.match(styles, /--workbench-side-panel-bg:/)
-  assert.match(styles, /--workbench-side-panel-border:/)
-  assert.match(styles, /--workbench-side-panel-shadow:/)
-  assert.match(styles, /--workbench-rail-slot-bg:/)
-  assert.match(styles, /--workbench-rail-slot-border:/)
-  assert.match(styles, /--workbench-rail-slot-shadow:/)
-  assert.match(styles, /--workbench-rail-slot-overlay:/)
+  assert.doesNotMatch(styles, /--workbench-(?:side-panel|rail-slot)-[a-z]+\s*:/)
+  assert.doesNotMatch(styles, /var\(--workbench-(?:side-panel|rail-slot)-/)
 })
 
 test('the shell sidebar sits on the window glass in both themes, with no dark-only patch rules', () => {

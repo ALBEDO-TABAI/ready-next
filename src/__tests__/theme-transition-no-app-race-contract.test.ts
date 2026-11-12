@@ -78,23 +78,23 @@ test('App.tsx does not race the theme ritual and the glass-state content fade is
   assert.match(styles, /\.ready-theme-ritual-tint\s*\{[\s\S]*?transition:\s*opacity 60ms cubic-bezier\(0\.4,\s*0,\s*0\.6,\s*1\)/)
   assert.match(
     overlayCss,
-    /html\[data-theme-ritual-phase='entering'\]\[data-theme-ritual-direction='to-dark'\]\s+\.ready-theme-ritual-tint\s*\{[\s\S]*?opacity:\s*1[\s\S]*?background-color:\s*color-mix\([^)]*var\(--workbench-mode-bg-light\)[^)]*transparent\)/,
+    /html\[data-theme-ritual-phase='entering'\]\[data-theme-ritual-direction='to-dark'\]\s+\.ready-theme-ritual-tint\s*\{[\s\S]*?opacity:\s*1[\s\S]*?background-color:\s*color-mix\([^)]*var\(--ritual-stage-light\)[^)]*transparent\)/,
   )
   assert.match(
     overlayCss,
-    /html\[data-theme-ritual-phase='holding'\]\[data-theme-ritual-direction='to-dark'\]\s+\.ready-theme-ritual-tint\s*\{[\s\S]*?background-color:\s*color-mix\([^)]*var\(--workbench-mode-bg-dark\)[^)]*transparent\)/,
+    /html\[data-theme-ritual-phase='holding'\]\[data-theme-ritual-direction='to-dark'\]\s+\.ready-theme-ritual-tint\s*\{[\s\S]*?background-color:\s*color-mix\([^)]*var\(--ritual-stage-dark\)[^)]*transparent\)/,
   )
   assert.match(
     overlayCss,
-    /html\[data-theme-ritual-phase='entering'\]\[data-theme-ritual-direction='to-light'\]\s+\.ready-theme-ritual-tint\s*\{[\s\S]*?background-color:\s*color-mix\([^)]*var\(--workbench-mode-bg-dark\)[^)]*transparent\)/,
+    /html\[data-theme-ritual-phase='entering'\]\[data-theme-ritual-direction='to-light'\]\s+\.ready-theme-ritual-tint\s*\{[\s\S]*?background-color:\s*color-mix\([^)]*var\(--ritual-stage-dark\)[^)]*transparent\)/,
   )
   assert.match(
     overlayCss,
-    /html\[data-theme-ritual-phase='holding'\]\[data-theme-ritual-direction='to-light'\]\s+\.ready-theme-ritual-tint\s*\{[\s\S]*?background-color:\s*color-mix\([^)]*var\(--workbench-mode-bg-light\)[^)]*transparent\)/,
+    /html\[data-theme-ritual-phase='holding'\]\[data-theme-ritual-direction='to-light'\]\s+\.ready-theme-ritual-tint\s*\{[\s\S]*?background-color:\s*color-mix\([^)]*var\(--ritual-stage-light\)[^)]*transparent\)/,
   )
   assert.match(
     overlayCss,
-    /html\[data-theme-ritual-phase='holding'\]\[data-theme-ritual-direction='to-light'\]\s+\.ready-theme-ritual-tint\s*\{[\s\S]*?background-color:\s*color-mix\(in srgb,\s*var\(--workbench-mode-bg-light\)\s*32%,\s*transparent\)/,
+    /html\[data-theme-ritual-phase='holding'\]\[data-theme-ritual-direction='to-light'\]\s+\.ready-theme-ritual-tint\s*\{[\s\S]*?background-color:\s*color-mix\(in srgb,\s*var\(--ritual-stage-light\)\s*32%,\s*transparent\)/,
   )
   // During leaving, the tint fades in lockstep with the overlay (opacity 1 → 0 over the full
   // leave duration) so the destination brightness is reached at exactly the moment the icon
