@@ -15,7 +15,6 @@ interface BrowserShellLayoutProps {
   onRetry: () => void | Promise<void>
   mediaDropActive?: boolean
   mediaUploadStatus?: { kind: 'uploading' | 'success' | 'error'; message: string } | null
-  fillBottomLeftCorner?: boolean
   /** A band above the page (a task waiting on the person): it takes its own height, so the native page moves down. */
   band?: ReactNode
   /** DOM in place of the native page (阅读视图); the page itself is hidden meanwhile. */
@@ -32,12 +31,12 @@ export default function BrowserShellLayout({
   onRetry,
   mediaDropActive = false,
   mediaUploadStatus = null,
-  fillBottomLeftCorner = true,
   band = null,
   cover = null,
 }: BrowserShellLayoutProps) {
   const showReadyBlankPage = activeTab ? isReadyBrowserBlankUrl(activeTab.url) && !activeTab.error : false
-  const showBrowserViewCornerFill = isElectron && Boolean(activeTab) && !showReadyBlankPage && !activeTab?.error && !cover
+  // The native page is showing in this frame (not the blank page, an error or the reading view over it).
+  const showNativePage = isElectron && Boolean(activeTab) && !showReadyBlankPage && !activeTab?.error && !cover
 
   return (
     <div className="flex min-h-0 h-full flex-1">
@@ -59,67 +58,18 @@ export default function BrowserShellLayout({
           <div
             ref={contentRef}
             data-browser-local-media-drop-surface=""
-            data-ready-native-surface={showBrowserViewCornerFill ? 'browser' : undefined}
+            data-ready-native-surface={showNativePage ? 'browser' : undefined}
             className="relative min-h-0 min-w-0 flex-1 overflow-hidden"
             onDragOver={onDragOver}
             onDrop={onDrop}
             style={{
-              // Bottom-left is square: the vertical rail sits to the left so that corner is
-              // interior. The native BrowserView rounds all four corners (setBorderRadius), so
-              // we mask its interior bottom-left rounding with a chrome fill below.
-              borderRadius: '0 0 var(--workbench-canvas-radius) 0',
+              // The page is the browser's paper (W1 DL2): the native view rounds all four corners with the paper radius
+              // (HOST_BORDER_RADIUS in Main), and the DOM in its place (blank page, error, reading view) clips the same.
+              // The address bar above sits on the glass, so nothing is painted around the corners.
+              borderRadius: 'var(--rn-r-sheet)',
               isolation: 'isolate',
             }}
           >
-            {showBrowserViewCornerFill && (
-              <>
-                <div
-                  className="browser-shell-corner-fill-left"
-                  style={{
-                    position: 'absolute',
-                    left: 0,
-                    top: 0,
-                    width: 'var(--workbench-canvas-radius)',
-                    height: 'var(--workbench-canvas-radius)',
-                    borderBottomRightRadius: 'var(--workbench-canvas-radius)',
-                    background: 'var(--workbench-liquid-chrome-bg, var(--rn-sheet))',
-                    pointerEvents: 'none',
-                    zIndex: 2,
-                  }}
-                />
-                <div
-                  className="browser-shell-corner-fill-right"
-                  style={{
-                    position: 'absolute',
-                    right: 0,
-                    top: 0,
-                    width: 'var(--workbench-canvas-radius)',
-                    height: 'var(--workbench-canvas-radius)',
-                    borderBottomLeftRadius: 'var(--workbench-canvas-radius)',
-                    background: 'var(--workbench-liquid-chrome-bg, var(--rn-sheet))',
-                    pointerEvents: 'none',
-                    zIndex: 2,
-                  }}
-                />
-                {fillBottomLeftCorner && (
-                  <div
-                    className="browser-shell-corner-fill-bottom-left"
-                    style={{
-                      position: 'absolute',
-                      left: 0,
-                      bottom: 0,
-                      width: 'var(--workbench-canvas-radius)',
-                      height: 'var(--workbench-canvas-radius)',
-                      borderTopRightRadius: 'var(--workbench-canvas-radius)',
-                      background: 'var(--workbench-liquid-chrome-bg, var(--rn-sheet))',
-                      pointerEvents: 'none',
-                      zIndex: 2,
-                    }}
-                  />
-                )}
-              </>
-            )}
-
             {!isElectron && (
               <div className="absolute inset-0 flex items-center justify-center text-[var(--rn-ink-3)]">
                 <div className="text-center">
@@ -135,8 +85,8 @@ export default function BrowserShellLayout({
               <div
                 className="browser-ready-blank-page absolute inset-0 flex items-center justify-center"
                 style={{
-                  // No blur of its own (W1 §4): the window's glass is the only frosting behind the page area.
-                  background: 'var(--workbench-module-surface-bg)',
+                  // The empty page is paper (W1 DL2), no blur of its own (W1 §4).
+                  background: 'var(--rn-sheet)',
                   zIndex: 1,
                   pointerEvents: 'none',
                 }}

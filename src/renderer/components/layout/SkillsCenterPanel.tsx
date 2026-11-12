@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom'
 import { Boxes, Folder, FolderInput, FolderOpen, Loader2, Pen, Settings2, Trash2 } from 'lucide-react'
 import { MODELS_RUNTIME_SETTINGS_SECTION } from '../../../shared/model-pack-types'
 import ContextMenu, { type ContextMenuItem } from './ContextMenu'
+import { Button } from '../ui'
 import { useWorkspace } from '../../stores/useWorkspace'
 import { readStorage, removeStorage, writeStorage } from '../../utils/storage'
 import { PANEL_TOKENS, SKILLS_PANEL_DIMENSIONS } from './panelTokens'
@@ -578,12 +579,12 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
                     return (
                       <div
                         key={skill.id}
-                        className="cursor-pointer rounded-[8px] border transition-colors duration-150 hover:bg-[var(--bg-hover)]"
+                        className="cursor-pointer rounded-[8px] border transition-colors duration-150 hover:bg-[var(--rn-fill)]"
                         style={{
                           borderRadius: 8,
                           border: '1px solid transparent',
                           padding: '10px 12px',
-                          background: selected ? 'var(--bg-hover)' : 'transparent',
+                          background: selected ? 'var(--rn-fill)' : 'transparent',
                         }}
                         onClick={() => setSelectedCardId(cardId)}
                         onDoubleClick={() => void handleOpenPath(skillPath)}
@@ -630,7 +631,7 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
         </section>
 
         <div
-          className="shrink-0 cursor-row-resize hover:bg-[var(--bg-hover)]"
+          className="shrink-0 cursor-row-resize hover:bg-[var(--rn-fill)]"
           style={{ background: 'transparent', height: 4 }}
           onMouseDown={handleSplitterMouseDown}
           title="拖拽调整上下分区高度"
@@ -644,7 +645,7 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
               </p>
 
               <div
-                className="shrink-0 flex cursor-pointer flex-col items-center justify-center rounded-[8px] border transition-colors hover:bg-[var(--bg-hover)]"
+                className="shrink-0 flex cursor-pointer flex-col items-center justify-center rounded-[8px] border transition-colors hover:bg-[var(--rn-fill)]"
                 style={{
                   borderRadius: 8,
                   border: importDropActive ? `1px solid ${PANEL_COLORS.blue}` : '1px solid transparent',
@@ -676,12 +677,12 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
                     return (
                       <div
                         key={skill.id}
-                        className="cursor-pointer rounded-[8px] border transition-colors duration-150 hover:bg-[var(--bg-hover)]"
+                        className="cursor-pointer rounded-[8px] border transition-colors duration-150 hover:bg-[var(--rn-fill)]"
                         style={{
                           borderRadius: 8,
                           border: '1px solid transparent',
                           padding: '10px 12px',
-                          background: selected ? 'var(--bg-hover)' : 'transparent',
+                          background: selected ? 'var(--rn-fill)' : 'transparent',
                         }}
                         onClick={() => setSelectedCardId(cardId)}
                         onDoubleClick={() => void handleOpenPath(skillPath)}
@@ -779,7 +780,7 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
                   {externalCandidates.map((candidate) => (
                     <div
                       key={candidate.path}
-                      className="rounded-[8px] border transition-colors duration-150 hover:bg-[var(--bg-hover)]"
+                      className="rounded-[8px] border transition-colors duration-150 hover:bg-[var(--rn-fill)]"
                       style={{ borderRadius: 8, border: '1px solid transparent', padding: '10px 12px' }}
                     >
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -952,20 +953,17 @@ function DescriptionEditorDialog({
       }}
     >
       <div
+        className="rn-float"
         style={{
           width: 460,
           maxWidth: '100%',
-          background: 'var(--bg-primary)',
-          border: '1px solid var(--border-default)',
-          borderRadius: 12,
-          boxShadow: '0 12px 36px rgba(0, 0, 0, 0.16)',
           padding: 20,
         }}
       >
-        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: 'var(--text-title)' }}>
+        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: 'var(--rn-ink)' }}>
           编辑技能
         </h3>
-        <label style={{ display: 'block', margin: '14px 0 6px', fontSize: 12, fontWeight: 500, color: 'var(--text-secondary)' }}>
+        <label style={{ display: 'block', margin: '14px 0 6px', fontSize: 12, fontWeight: 500, color: 'var(--rn-ink-2)' }}>
           技能名称
         </label>
         <input
@@ -978,15 +976,15 @@ function DescriptionEditorDialog({
             padding: '8px 12px',
             fontSize: 13,
             lineHeight: 1.5,
-            color: 'var(--text-body)',
-            background: 'var(--bg-editor)',
-            border: '1px solid var(--border-input)',
+            color: 'var(--rn-ink)',
+            background: 'var(--rn-fill)',
+            border: '1px solid var(--rn-hair-2)',
             borderRadius: 8,
             outline: 'none',
             boxSizing: 'border-box',
           }}
         />
-        <label style={{ display: 'block', margin: '14px 0 6px', fontSize: 12, fontWeight: 500, color: 'var(--text-secondary)' }}>
+        <label style={{ display: 'block', margin: '14px 0 6px', fontSize: 12, fontWeight: 500, color: 'var(--rn-ink-2)' }}>
           技能说明
         </label>
         <textarea
@@ -1001,50 +999,23 @@ function DescriptionEditorDialog({
             padding: '10px 12px',
             fontSize: 13,
             lineHeight: 1.6,
-            color: 'var(--text-body)',
-            background: 'var(--bg-editor)',
-            border: '1px solid var(--border-input)',
+            color: 'var(--rn-ink)',
+            background: 'var(--rn-fill)',
+            border: '1px solid var(--rn-hair-2)',
             borderRadius: 8,
             outline: 'none',
             boxSizing: 'border-box',
           }}
         />
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, gap: 12 }}>
-          <span style={{ fontSize: 11, color: 'var(--text-light)' }}>⌘/Ctrl + Enter 保存</span>
+          <span style={{ fontSize: 11, color: 'var(--rn-ink-3)' }}>⌘/Ctrl + Enter 保存</span>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button
-              onClick={onClose}
-              disabled={saving}
-              style={{
-                padding: '6px 14px',
-                fontSize: 13,
-                fontWeight: 500,
-                color: 'var(--text-muted)',
-                background: 'transparent',
-                border: '1px solid var(--border-default)',
-                borderRadius: 8,
-                cursor: saving ? 'not-allowed' : 'pointer',
-              }}
-            >
+            <Button variant="ghost" onClick={onClose} disabled={saving}>
               取消
-            </button>
-            <button
-              onClick={onSave}
-              disabled={saving}
-              style={{
-                padding: '6px 14px',
-                fontSize: 13,
-                fontWeight: 500,
-                color: '#FFFFFF',
-                background: 'var(--color-blue)',
-                border: '1px solid transparent',
-                borderRadius: 8,
-                cursor: saving ? 'not-allowed' : 'pointer',
-                opacity: saving ? 0.7 : 1,
-              }}
-            >
+            </Button>
+            <Button variant="primary" onClick={onSave} disabled={saving}>
               {saving ? '保存中...' : '保存'}
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -1180,35 +1151,32 @@ function SkillConfigurationDialog({
       }}
     >
       <div
+        className="rn-float"
         style={{
           width: 520,
           maxWidth: 'calc(100vw - 40px)',
           maxHeight: 'calc(100vh - 80px)',
           overflow: 'auto',
-          background: 'var(--bg-primary)',
-          border: '1px solid var(--border-default)',
-          borderRadius: 12,
-          boxShadow: '0 16px 46px rgba(0, 0, 0, 0.18)',
           padding: 20,
         }}
       >
-        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: 'var(--text-title)' }}>
+        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: 'var(--rn-ink)' }}>
           配置 Skill
         </h3>
-        <p style={{ margin: '8px 0 0', fontSize: 12, lineHeight: 1.6, color: 'var(--text-secondary)' }}>
+        <p style={{ margin: '8px 0 0', fontSize: 12, lineHeight: 1.6, color: 'var(--rn-ink-2)' }}>
           {skill.name}
         </p>
 
         <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
           {loading && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-muted)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--rn-ink-2)' }}>
               <Loader2 size={14} className="animate-spin" />
               加载配置...
             </div>
           )}
 
           {!loading && !hasConfig && (
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+            <div style={{ fontSize: 12, color: 'var(--rn-ink-2)', lineHeight: 1.6 }}>
               这个 Skill 当前没有需要单独配置的项目。
             </div>
           )}
@@ -1216,8 +1184,8 @@ function SkillConfigurationDialog({
           {!loading && definition?.serviceBindings.map((binding) => {
             const options = services.filter((service) => binding.allowedKinds.includes(service.kind))
             return (
-              <label key={binding.id} style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12, color: 'var(--text-muted)' }}>
-                <span style={{ fontWeight: 600, color: 'var(--text-body)' }}>{binding.label}</span>
+              <label key={binding.id} style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12, color: 'var(--rn-ink-2)' }}>
+                <span style={{ fontWeight: 600, color: 'var(--rn-ink)' }}>{binding.label}</span>
                 {binding.description && <span style={{ fontSize: 11, lineHeight: 1.5 }}>{binding.description}</span>}
                 <select
                   value={view?.values.serviceBindings[binding.id] || binding.defaultServiceId || ''}
@@ -1226,9 +1194,9 @@ function SkillConfigurationDialog({
                     width: '100%',
                     padding: '9px 10px',
                     fontSize: 12,
-                    color: 'var(--text-body)',
-                    background: 'var(--bg-editor)',
-                    border: '1px solid var(--border-input)',
+                    color: 'var(--rn-ink)',
+                    background: 'var(--rn-fill)',
+                    border: '1px solid var(--rn-hair-2)',
                     borderRadius: 8,
                     outline: 'none',
                   }}
@@ -1247,8 +1215,8 @@ function SkillConfigurationDialog({
           {!loading && definition?.fields.map((field) => {
             const value = view?.values.fields[field.id] ?? field.defaultValue ?? ''
             return (
-              <label key={field.id} style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12, color: 'var(--text-muted)' }}>
-                <span style={{ fontWeight: 600, color: 'var(--text-body)' }}>{field.label}</span>
+              <label key={field.id} style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12, color: 'var(--rn-ink-2)' }}>
+                <span style={{ fontWeight: 600, color: 'var(--rn-ink)' }}>{field.label}</span>
                 {field.description && <span style={{ fontSize: 11, lineHeight: 1.5 }}>{field.description}</span>}
                 {field.type === 'boolean' ? (
                   <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1267,9 +1235,9 @@ function SkillConfigurationDialog({
                       width: '100%',
                       padding: '9px 10px',
                       fontSize: 12,
-                      color: 'var(--text-body)',
-                      background: 'var(--bg-editor)',
-                      border: '1px solid var(--border-input)',
+                      color: 'var(--rn-ink)',
+                      background: 'var(--rn-fill)',
+                      border: '1px solid var(--rn-hair-2)',
                       borderRadius: 8,
                       outline: 'none',
                     }}
@@ -1287,9 +1255,9 @@ function SkillConfigurationDialog({
                       width: '100%',
                       padding: '9px 10px',
                       fontSize: 12,
-                      color: 'var(--text-body)',
-                      background: 'var(--bg-editor)',
-                      border: '1px solid var(--border-input)',
+                      color: 'var(--rn-ink)',
+                      background: 'var(--rn-fill)',
+                      border: '1px solid var(--rn-hair-2)',
                       borderRadius: 8,
                       outline: 'none',
                       boxSizing: 'border-box',
@@ -1308,10 +1276,10 @@ function SkillConfigurationDialog({
                 justifyContent: 'space-between',
                 gap: 10,
                 padding: 12,
-                border: '1px solid var(--border-default)',
+                border: '1px solid var(--rn-hair-2)',
                 borderRadius: 8,
-                background: 'var(--bg-editor)',
-                color: 'var(--text-muted)',
+                background: 'var(--rn-fill)',
+                color: 'var(--rn-ink-2)',
                 fontSize: 12,
                 lineHeight: 1.5,
               }}
@@ -1322,70 +1290,26 @@ function SkillConfigurationDialog({
                   字幕识别依赖按需下载的语音模型，可在「设置 › 模型与运行时」中下载或更新。
                 </span>
               </div>
-              <button
-                type="button"
-                onClick={openModelsRuntimeSettings}
-                style={{
-                  height: 30,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  padding: '0 10px',
-                  flexShrink: 0,
-                  border: '1px solid var(--border-input)',
-                  borderRadius: 8,
-                  background: 'var(--bg-primary)',
-                  color: 'var(--text-body)',
-                  cursor: 'pointer',
-                }}
-              >
-                <Settings2 size={14} />
+              <Button size="sm" icon={<Settings2 />} onClick={openModelsRuntimeSettings} style={{ flexShrink: 0 }}>
                 前往设置
-              </button>
+              </Button>
             </div>
           )}
         </div>
 
         {error && (
-          <div style={{ marginTop: 12, fontSize: 12, color: 'var(--color-red)', lineHeight: 1.5 }}>
+          <div style={{ marginTop: 12, fontSize: 12, color: 'var(--rn-bad)', lineHeight: 1.5 }}>
             {error}
           </div>
         )}
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: 16, gap: 8 }}>
-          <button
-            onClick={onClose}
-            disabled={saving}
-            style={{
-              padding: '7px 14px',
-              fontSize: 13,
-              fontWeight: 500,
-              color: 'var(--text-muted)',
-              background: 'transparent',
-              border: '1px solid var(--border-default)',
-              borderRadius: 8,
-              cursor: saving ? 'not-allowed' : 'pointer',
-            }}
-          >
+          <Button variant="ghost" onClick={onClose} disabled={saving}>
             取消
-          </button>
-          <button
-            onClick={() => { void save() }}
-            disabled={saving || loading || !hasConfig}
-            style={{
-              padding: '7px 14px',
-              fontSize: 13,
-              fontWeight: 500,
-              color: '#FFFFFF',
-              background: 'var(--color-blue)',
-              border: '1px solid transparent',
-              borderRadius: 8,
-              cursor: saving || loading || !hasConfig ? 'not-allowed' : 'pointer',
-              opacity: saving || loading || !hasConfig ? 0.7 : 1,
-            }}
-          >
+          </Button>
+          <Button variant="primary" onClick={() => { void save() }} disabled={saving || loading || !hasConfig}>
             {saving ? '保存中...' : '保存'}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

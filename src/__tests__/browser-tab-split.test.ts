@@ -104,13 +104,11 @@ test('browser split divider fades within the rounded browser canvas and does not
   assert.match(browserMode, /className="browser-split-resize-handle__grip"/)
   assert.match(browserMode, /style=\{\{ gap: 0 \}\}/)
 
-  assert.match(styles, /\.browser-split-resize-handle\s*\{[\s\S]*width:\s*3px;/)
-  assert.match(styles, /\.browser-split-resize-handle\s*\{[\s\S]*flex:\s*0 0 3px;/)
+  // B13 (W1 DL2, DL11): two panes are two papers 8px apart on the glass; nothing is painted in the gap.
+  assert.match(styles, /\.browser-split-resize-handle\s*\{[\s\S]*width:\s*var\(--rn-s2\);/)
+  assert.match(styles, /\.browser-split-resize-handle\s*\{[\s\S]*flex:\s*0 0 var\(--rn-s2\);/)
   assert.match(styles, /\.browser-split-resize-handle\s*\{[\s\S]*background:\s*transparent;/)
-  assert.match(styles, /\.browser-split-resize-handle::before\s*\{[\s\S]*background:\s*linear-gradient\(/)
-  assert.match(styles, /\.browser-split-resize-handle::before\s*\{[\s\S]*var\(--workbench-liquid-chrome-bg, var\(--surface-panel-bg\)\) var\(--workbench-canvas-radius\)/)
-  assert.match(styles, /\.browser-split-resize-handle::before\s*\{[\s\S]*color-mix\(in srgb, var\(--workbench-liquid-chrome-bg, var\(--surface-panel-bg\)\) 74%, transparent\) 42%/)
-  assert.match(styles, /\.browser-split-resize-handle::before\s*\{[\s\S]*transparent calc\(100% - var\(--workbench-canvas-radius\)\)/)
+  assert.doesNotMatch(styles, /\.browser-split-resize-handle::before/)
   assert.match(styles, /\.browser-split-resize-handle__grip\s*\{[\s\S]*display:\s*none;/)
   assert.match(styles, /body\.resizing \.browser-split-resize-handle__grip\s*\{[\s\S]*opacity:\s*0;/)
 })

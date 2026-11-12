@@ -106,7 +106,7 @@ test('skills center and global search inherit the file manager side panel surfac
   assert.doesNotMatch(globalSearch, /className="content-surface-panel flex h-full min-h-0 flex-col"/)
   assert.doesNotMatch(skillsPanel, /backdropFilter: 'blur\(18px\) saturate\(138%\)'/)
   assert.doesNotMatch(globalSearch, /backdropFilter: 'blur\(18px\) saturate\(138%\)'/)
-  assert.match(skillsPanel, /background: selected \? 'var\(--bg-hover\)' : 'transparent'/)
+  assert.match(skillsPanel, /background: selected \? 'var\(--rn-fill\)' : 'transparent'/)
   assert.match(skillsPanel, /background: importDropActive \? PANEL_COLORS\.blueLight : 'transparent'/)
   assert.match(globalSearch, /background: 'transparent'/)
   assert.doesNotMatch(globalSearch, /className="content-surface-card w-full rounded-\[8px\] border px-\[8px\] py-\[6px\] text-left transition-colors hover:bg-\[var\(--bg-hover\)\]"/)

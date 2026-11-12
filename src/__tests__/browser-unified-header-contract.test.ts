@@ -158,12 +158,16 @@ test('inactive tabs get the same hover hint affordance without entering the acti
   assert.match(tabRail, /background: isHovered\s*\?\s*'var\(--rn-fill\)'/)
 })
 
-test('browser shell layout adds corner fillers so the header chrome visually meets the page surface', () => {
+test('browser page is paper: rounded on all corners with the paper radius, no corner patches around the native view', () => {
   const browserShellLayout = readWorkspaceFile('src/renderer/components/browser/BrowserShellLayout.tsx')
+  const hostLayout = readWorkspaceFile('src/main/modules/browser-engine/host-layout-service.ts')
 
-  assert.match(browserShellLayout, /const showBrowserViewCornerFill = isElectron && Boolean\(activeTab\) && !showReadyBlankPage && !activeTab\?\.error/)
-  assert.match(browserShellLayout, /browser-shell-corner-fill-left/)
-  assert.match(browserShellLayout, /browser-shell-corner-fill-right/)
+  // B13 (W1 DL1, DL2): the address bar sits on the glass, so the native page's corners show the glass, not a patch.
+  assert.match(browserShellLayout, /const showNativePage = isElectron && Boolean\(activeTab\) && !showReadyBlankPage && !activeTab\?\.error/)
+  assert.match(browserShellLayout, /data-ready-native-surface=\{showNativePage \? 'browser' : undefined\}/)
+  assert.match(browserShellLayout, /borderRadius: 'var\(--rn-r-sheet\)'/)
+  assert.doesNotMatch(browserShellLayout, /browser-shell-corner-fill|--workbench-/)
+  assert.match(hostLayout, /const HOST_BORDER_RADIUS = 20\n/)
   assert.doesNotMatch(browserShellLayout, /marginRight:\s*WORKBENCH_HEADER_EDGE_X/)
 })
 

@@ -67,10 +67,10 @@ test('browser rss and calendar shells align their left edge with the shared work
   assert.match(styles, /html:root \.workbench-tabs-surface \{/)
   // 资讯's original-page preview carries no blur of its own (W1-T5, B13): backdrop-filter comes only from material classes.
   assert.doesNotMatch(styles, /\.rss-preview-surface/)
-  // B13: the tab rows sit on the window glass (W1 DL1, DL11a); the browser's address bar keeps its chrome surface (and
-  // the blur that matches its page frame's corner fills) until the browser toolbar migrates.
+  // B13: the tab rows and the browser's address bar sit on the window glass (W1 DL1, DL11a); the browser's page frame
+  // paints no corner patches, so the bar has no surface or blur of its own.
   assert.match(styles, /html:root \.workbench-tabs-surface \{\s*background:\s*transparent !important;\s*\}/)
-  assert.match(styles, /html:root \.browser-header-surface \{[\s\S]*backdrop-filter:\s*blur\(24px\) saturate\(0%\) !important;/)
+  assert.doesNotMatch(styles, /\.browser-header-surface \{/)
   // Inside the document's paper the frame is only a clip; 资讯's content is paper itself (W1 DL2).
   assert.match(styles, /html:root \.document-content-frame \{[\s\S]*?background:\s*transparent !important;/)
   assert.match(styles, /html:root \.document-editor-surface,[\s\S]*\.document-preview-surface,[\s\S]*\.rss-feed-list,\s*html:root \.rss-preview-content \{[\s\S]*background:\s*transparent !important;/)

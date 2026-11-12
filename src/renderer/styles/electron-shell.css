@@ -162,31 +162,15 @@ body.resizing .workbench-split-resize-handle__grip {
   opacity: 1;
 }
 
+/* The gap between two browser panes: two papers on the glass, 8px apart (W1 DL2, DL11); nothing painted in it. */
 .browser-split-resize-handle {
-  width: 3px;
-  flex: 0 0 3px;
+  width: var(--rn-s2);
+  flex: 0 0 var(--rn-s2);
   cursor: col-resize;
   position: relative;
   align-self: stretch;
   z-index: 12;
   background: transparent;
-}
-
-/* Fills the gap between two browser panes at the height of their address bars (see the browser header note in
-   workbench-surfaces.css); goes with that bar when the browser toolbar moves to the glass. */
-.browser-split-resize-handle::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: linear-gradient(
-    180deg,
-    var(--workbench-liquid-chrome-bg, var(--surface-panel-bg)) 0,
-    var(--workbench-liquid-chrome-bg, var(--surface-panel-bg)) var(--workbench-canvas-radius),
-    color-mix(in srgb, var(--workbench-liquid-chrome-bg, var(--surface-panel-bg)) 74%, transparent) 42%,
-    transparent calc(100% - var(--workbench-canvas-radius)),
-    transparent 100%
-  );
 }
 
 .browser-split-resize-handle__grip {

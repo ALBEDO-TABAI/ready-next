@@ -1365,7 +1365,7 @@ export default function BrowserMode({
                       aria-hidden
                       className="pointer-events-none absolute inset-0"
                       style={{
-                        borderRadius: '0 0 var(--workbench-canvas-radius) 0',
+                        borderRadius: 'var(--rn-r-sheet)',
                         boxShadow: 'inset 0 0 18px color-mix(in srgb, var(--rn-accent) 12%, transparent)',
                       }}
                     />
@@ -1407,7 +1407,6 @@ export default function BrowserMode({
                       onRetry={() => void handleRetry(visibleSplitTab.id)}
                       mediaDropActive={generatedImageDragActive}
                       mediaUploadStatus={localMediaUploadStatus}
-                      fillBottomLeftCorner={false}
                       band={<BrowserTaskBandForTab tabId={visibleSplitTab.id} />}
                     />
                     {isAgentSplitVisible && (
@@ -1415,7 +1414,7 @@ export default function BrowserMode({
                         aria-hidden
                         className="pointer-events-none absolute inset-0"
                         style={{
-                          borderRadius: '0 0 var(--workbench-canvas-radius) 0',
+                          borderRadius: 'var(--rn-r-sheet)',
                           boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--rn-accent) 42%, transparent), inset 0 0 24px color-mix(in srgb, var(--rn-accent) 18%, transparent)',
                         }}
                       />
@@ -1462,8 +1461,8 @@ export default function BrowserMode({
                 bottom: 0,
                 zIndex: 45,
                 pointerEvents: 'none',
-                borderRadius: '0 0 var(--workbench-canvas-radius) var(--workbench-canvas-radius)',
-                background: 'var(--workbench-liquid-chrome-bg, var(--rn-sheet))',
+                borderRadius: 'var(--rn-r-sheet)',
+                background: 'var(--rn-sheet)',
                 overflow: 'hidden',
               }}
             >
@@ -1483,7 +1482,7 @@ export default function BrowserMode({
                   </div>
                 )}
                 {/* 内容区域占位 */}
-                <div className="flex-1" style={{ background: 'var(--workbench-liquid-chrome-bg, var(--rn-sheet))' }} />
+                <div className="flex-1" style={{ background: 'var(--rn-sheet)' }} />
               </div>
             </div>
           )}
@@ -1515,8 +1514,8 @@ export default function BrowserMode({
                 bottom: 0,
                 zIndex: 50,
                 pointerEvents: 'none',
-                borderRadius: '0 0 var(--workbench-canvas-radius) var(--workbench-canvas-radius)',
-                background: 'var(--workbench-liquid-chrome-bg, var(--rn-sheet))',
+                borderRadius: 'var(--rn-r-sheet)',
+                background: 'var(--rn-sheet)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',

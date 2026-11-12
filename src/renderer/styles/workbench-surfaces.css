@@ -35,15 +35,6 @@ html:root .workbench-tabs-surface {
   background: transparent !important;
 }
 
-/* The browser's address bar stays on the old chrome surface for now: its page frame paints matching corner fills
-   around the native web view (BrowserShellLayout), so bar and frame move to the glass together with the browser
-   toolbar's own migration (W1-T5, browser toolbar). */
-html:root .browser-header-surface {
-  background: var(--workbench-module-surface-bg) !important;
-  backdrop-filter: blur(24px) saturate(0%) !important;
-  -webkit-backdrop-filter: blur(24px) saturate(0%) !important;
-}
-
 /* Inside the document's paper (ink's main is the sheet) the frame is only a clip. */
 html:root .document-content-frame {
   background: transparent !important;

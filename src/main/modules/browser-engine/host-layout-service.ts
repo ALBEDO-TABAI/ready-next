@@ -3,7 +3,9 @@ import { BrowserWindow, WebContentsView } from 'electron'
 import { parkedBrowserHostBounds, type BrowserHostView, type BrowserRect } from './host-types'
 import { withHtmlInCanvasWebPreferences } from '../app-control/html-in-canvas-feature'
 
-const HOST_BORDER_RADIUS = 18
+// The page is the browser's paper: the paper radius of the design system (--rn-r-sheet, W1 DL9), so the native view and
+// the DOM that stands in for it (blank page, error, reading view) have the same corners.
+const HOST_BORDER_RADIUS = 20
 export type BrowserHostPresentationState = 'visible' | 'parked' | 'hidden' | 'detached' | 'background-work'
 
 export class BrowserHostLayoutService {

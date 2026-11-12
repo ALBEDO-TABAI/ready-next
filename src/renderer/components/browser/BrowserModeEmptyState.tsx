@@ -85,7 +85,7 @@ export default function BrowserModeEmptyState({
           <div
             ref={contentRef}
             className="relative flex-1 min-h-0"
-            style={{ borderRadius: '0 0 var(--workbench-canvas-radius) var(--workbench-canvas-radius)' }}
+            style={{ borderRadius: 'var(--rn-r-sheet)' }}
           >
             <div className="absolute inset-0 flex items-center justify-center text-[var(--rn-ink-3)]">
               <div className="text-center">

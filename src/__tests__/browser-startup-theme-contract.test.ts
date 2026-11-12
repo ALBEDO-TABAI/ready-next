@@ -35,7 +35,8 @@ test('browser startup gates chrome until host restoration completes and main pro
   assert.match(browserMode, /right:\s*0/)
   assert.match(browserMode, /bottom:\s*0/)
   assert.match(browserMode, /zIndex:\s*50/)
-  assert.match(browserMode, /borderRadius:\s*'0 0 var\(--workbench-canvas-radius\) var\(--workbench-canvas-radius\)'/)
+  // B13: the masks stand in for the page, which is paper rounded on all corners (W1 DL2, DL9).
+  assert.match(browserMode, /borderRadius:\s*'var\(--rn-r-sheet\)'/)
   assert.match(browserMode, /pointerEvents:\s*'none'/)
   assert.match(browserMode, /className="browser-transition-mask"[\s\S]*top:\s*WORKBENCH_TAB_ROW_HEIGHT/)
   assert.match(browserMode, /className="browser-surface-startup-mask"[\s\S]*top:\s*WORKBENCH_TAB_ROW_HEIGHT/)

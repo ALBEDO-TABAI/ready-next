@@ -31,7 +31,7 @@ test('liquid glass chrome removes prominent shell edges so panels read as one fu
   assert.match(shellStyles, /\.shell-sidebar:not\(\.shell-float-drawer\)\s*\{\s*background:\s*transparent;\s*box-shadow:\s*none;/)
   assert.doesNotMatch(skillsPanel, /selected \? PANEL_COLORS\.blue : PANEL_COLORS\.border/)
   assert.doesNotMatch(skillsPanel, /importDropActive \? PANEL_COLORS\.blue : PANEL_COLORS\.dropBorder/)
-  assert.match(skillsPanel, /background: selected \? 'var\(--bg-hover\)' : 'transparent'/)
+  assert.match(skillsPanel, /background: selected \? 'var\(--rn-fill\)' : 'transparent'/)
   assert.match(skillsPanel, /border: '1px solid transparent'/)
   assert.doesNotMatch(statusBar, /glass-surface-panel/)
   assert.match(statusBar, /background:\s*'transparent'/)

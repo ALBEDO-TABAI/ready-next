@@ -30,7 +30,8 @@ test('liquid glass skin defines shell-level fresnel, noise, and atmosphere contr
   assert.match(styles, /--lg-lens-violet:/)
   assert.match(styles, /--workbench-liquid-chrome-bg:/)
   assert.match(styles, /html:root \.workbench-tabs-surface \{/)
-  assert.match(styles, /html:root \.browser-header-surface \{/)
+  // B13: the browser's address bar sits on the glass with the other top-band rows; no surface rule of its own.
+  assert.doesNotMatch(styles, /\.browser-header-surface \{/)
   assert.match(styles, /\.rss-mode-shell \.rss-feed-sheet \{[\s\S]*?background:\s*var\(--rn-sheet\) !important;/)
   assert.match(styles, /ready-app-bg/)
 })
