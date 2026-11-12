@@ -275,7 +275,6 @@
     "@puppeteer/browsers": "^3.0.2",
     "@remotion/media": "^4.0.431",
     "@remotion/player": "^4.0.431",
-    "@tabler/icons-react": "^3.44.0",
     "@tiptap/extension-color": "^3.20.0",
     "@tiptap/extension-highlight": "^3.20.0",
     "@tiptap/extension-link": "^3.20.0",
