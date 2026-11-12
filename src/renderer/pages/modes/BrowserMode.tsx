@@ -10,6 +10,11 @@ import BrowserDiagnosticsDock from '../../components/browser/BrowserDiagnosticsD
 import { AgentBrowserSupervisionPanel } from '../../components/browser/AgentBrowserSupervisionPanel'
 import BrowserTopBar from '../../components/browser/BrowserTopBar'
 import BrowserTabList from '../../components/browser/BrowserTabList'
+import { BrowserTaskBandForTab } from '../../components/browser/BrowserTaskBand'
+import { useBrowserFind } from '../../modules/browser/useBrowserFind'
+import { useBrowserTaskShell } from '../../modules/browser/useBrowserTaskShell'
+import { usePageCapabilities } from '../../modules/browser/usePageCapabilities'
+import BrowserReadingView from '../../components/browser/BrowserReadingView'
 import { ShellNavigator } from '../../modules/workbench/shell/ShellSidebar'
 import BrowserShellLayout from '../../components/browser/BrowserShellLayout'
 import { nextIntentId } from '../../../shared/browser-view-intent'
@@ -251,8 +256,12 @@ export default function BrowserMode({
   const currentDomain = activeTab?.domain || extractBrowserDomain(activeTab?.url || '')
   const hasError = !!activeTab?.error
   const isReadyBlankTab = activeTab ? isReadyBrowserBlankUrl(activeTab.url) : false
+  // 阅读视图 (W7 §4.10) stands in for the page it was opened on; another tab, another address or a split ends it.
+  const [readingView, setReadingView] = useState<{ tabId: string; url: string } | null>(null)
+  const readingShown = Boolean(readingView && activeTab && !shouldRenderSplitLayout && readingView.tabId === activeTab.id && readingView.url === activeTab.url)
+  useEffect(() => { if (readingView && !readingShown) setReadingView(null) }, [readingShown, readingView])
   const splitTabHasNativeSurface = visibleSplitTab ? !visibleSplitTab.error && !isReadyBrowserBlankUrl(visibleSplitTab.url) : false
-  const shouldHideAllBrowserHosts = (hasError || isReadyBlankTab) && !splitTabHasNativeSurface
+  const shouldHideAllBrowserHosts = (hasError || isReadyBlankTab || readingShown) && !splitTabHasNativeSurface
   const fastCardItems = useFastCard(s => s.items)
   const fastCardRevealTarget = useFastCard(s => s.revealTarget)
   const fastCardSyncState = useFastCard(s => s.syncState)
@@ -538,6 +547,16 @@ export default function BrowserMode({
       })
     }
   }, [activeTabId, handleSwitchTab, sendBoundsImmediate, setSplitTabId, splitTabId])
+
+  // The assistant's work tabs in the sidebar, the band above a page that needs the person, 打开页面 from a card (W7).
+  const browserTaskShell = useBrowserTaskShell({
+    tabs,
+    visibleTabIds: [activeTabId, visibleSplitTab?.id],
+    activateTab: (tabId) => { void handleHeaderTabClick(tabId, { shiftKey: false }) },
+  })
+  // The shell's own tools for the visible page (W7 §4.10): ⌘F, and what the page offers (订阅).
+  const browserFind = useBrowserFind({ isActive: isActive && !readingShown, tabId: activeTabId })
+  const pageCapabilities = usePageCapabilities(activeTabId, activeTab?.url)
 
   const handleSplitResize = useCallback((delta: number) => {
     if (!splitContainerRef.current) return
@@ -895,7 +914,8 @@ export default function BrowserMode({
   useEffect(() => {
     if (!isElectron) return
     const lockKind = browserOwnershipStatus.kind
-    const overlayKind = lockKind === 'user-view' ? null : lockKind
+    // A page whose task waits on the person shows the band instead of the pill (W7 T7).
+    const overlayKind = lockKind === 'user-view' || browserTaskShell.bandShown ? null : lockKind
     if (!isActive || !shouldPresentBrowserHost || shouldHideAllBrowserHosts || !overlayKind) {
       void window.electronAPI?.browser?.hideBrowserLockOverlay?.()
       return
@@ -945,7 +965,7 @@ export default function BrowserMode({
       observer.disconnect()
       window.removeEventListener('resize', scheduleSnapshot)
     }
-  }, [browserLockOverlayIdentity, browserOwnershipStatus, isActive, isElectron, shouldHideAllBrowserHosts, shouldPresentBrowserHost])
+  }, [browserLockOverlayIdentity, browserOwnershipStatus, browserTaskShell.bandShown, isActive, isElectron, shouldHideAllBrowserHosts, shouldPresentBrowserHost])
 
   const {
     browserRuntimeReady,
@@ -1252,6 +1272,13 @@ export default function BrowserMode({
             fastCardItemCount={fastCardItems.length}
             onToggleFastCard={handleToggleFastCard}
             ownershipStatus={browserOwnershipStatus}
+            onSwitchTab={(tabId) => { void handleHeaderTabClick(tabId, { shiftKey: false }) }}
+            feeds={pageCapabilities?.feeds}
+            reading={{
+              available: Boolean(pageCapabilities?.readable) && !shouldRenderSplitLayout,
+              shown: readingShown,
+              onToggle: () => setReadingView(readingShown || !activeTab ? null : { tabId: activeTab.id, url: activeTab.url }),
+            }}
           />
 
           <div className="flex min-h-0 flex-1">
@@ -1274,6 +1301,8 @@ export default function BrowserMode({
                 onDisbandGroup={disbandTabGroup}
                 onDeleteGroup={handleDeleteGroup}
                 onNewTabInGroup={handleNewTabInGroup}
+                taskGroups={browserTaskShell.taskGroups}
+                onCloseTaskTabs={browserTaskShell.closeTaskTabs}
               />
             </ShellNavigator>
 
@@ -1303,6 +1332,7 @@ export default function BrowserMode({
                     onRetry={() => void handleRetry(activeTab.id)}
                     mediaDropActive={generatedImageDragActive}
                     mediaUploadStatus={localMediaUploadStatus}
+                    band={<>{browserFind.bar}<BrowserTaskBandForTab tabId={activeTab.id} /></>}
                   />
                 </div>
                 {!agentPaneCollapsedVisible && (
@@ -1377,6 +1407,7 @@ export default function BrowserMode({
                       mediaDropActive={generatedImageDragActive}
                       mediaUploadStatus={localMediaUploadStatus}
                       fillBottomLeftCorner={false}
+                      band={<BrowserTaskBandForTab tabId={visibleSplitTab.id} />}
                     />
                     {isAgentSplitVisible && (
                       <div
@@ -1402,6 +1433,10 @@ export default function BrowserMode({
                 onRetry={() => void handleRetry()}
                 mediaDropActive={generatedImageDragActive}
                 mediaUploadStatus={localMediaUploadStatus}
+                band={<>{browserFind.bar}<BrowserTaskBandForTab tabId={activeTab?.id} /></>}
+                cover={readingShown && activeTab ? <BrowserReadingView tabId={activeTab.id} url={activeTab.url} onClose={() => setReadingView(null)}
+                  onTranslate={selection => { void runFastCardTranslation({ kind: 'text', text: selection.text, pageUrl: selection.url, pageTitle: selection.title,
+                    domain: extractBrowserDomain(selection.url), tabId: activeTab.id, capturedAt: Date.now() }, detectFastCardTargetLanguage(selection.text)) }} /> : null}
               />
             )}
               <BrowserDiagnosticsDock

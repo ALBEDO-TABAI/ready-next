@@ -1,3 +1,4 @@
+import { BrowserPageToolsService } from './page-tools-service'
 import { WebMcpService } from './webmcp-service'
 import { isWebMcpExperimentActive } from './webmcp-experiment'
 import { app, BrowserWindow, shell } from 'electron'
@@ -71,6 +72,11 @@ import {
 } from './browser-controller-contract-base'
 
 export abstract class BrowserControllerComposition extends BrowserControllerContractBase {
+  readonly pageTools = new BrowserPageToolsService({
+    found: data => this.sendToRenderer('browser:foundInPage', data),
+    changed: data => this.sendToRenderer('browser:pageCapabilitiesChanged', data),
+    log: error => this.logBrowserDiag(`[page-tools] ${String(error)}`),
+  })
   tabs = new Map<string, Tab>()
   activeTabId: string | null = null
   splitTabId: string | null = null
@@ -127,6 +133,11 @@ export abstract class BrowserControllerComposition extends BrowserControllerCont
   }>>()
   protected readonly pendingPhysicalTakeovers = new Set<string>()
   protected p7cLiveProofClaimIdentity: BrowserTargetClaimIdentity | null = null
+
+  protected setActiveBrowserTab(tabId: string | null): void {
+    if (this.activeTabId && this.activeTabId !== tabId) this.pageTools.clearFind(this.activeTabId)
+    this.activeTabId = tabId
+  }
 
   publishAgentBrowserAction(event: { phase: 'start' | 'finish' | 'abort' }): void {
     publishBrowserAgentActionLifecycle(event.phase)
@@ -322,9 +333,7 @@ export abstract class BrowserControllerComposition extends BrowserControllerCont
     this.tabLifecycleService = new BrowserTabLifecycleService({
       tabs: this.tabs,
       getActiveTabId: () => this.activeTabId,
-      setActiveTabId: (tabId) => {
-        this.activeTabId = tabId
-      },
+      setActiveTabId: (tabId) => this.setActiveBrowserTab(tabId),
       setSplitTabId: (tabId) => {
         this.splitTabId = tabId
       },
@@ -359,6 +368,7 @@ export abstract class BrowserControllerComposition extends BrowserControllerCont
           profile: sourceTabId ? this.tabs.get(sourceTabId)?.profile ?? null : null,
         })
       },
+      bindPageTools: (tabId, webContents) => this.pageTools.bind(tabId, webContents),
       bindAppShortcutBridge: (webContents) => this.bindAppShortcutBridge(webContents),
       installContextMenu: (webContents) => this.contextMenuService.install(webContents),
       handleWindowOpen: (details, source, sourceContentsId) => this.handleWindowOpen(details, source, sourceContentsId),
@@ -375,9 +385,7 @@ export abstract class BrowserControllerComposition extends BrowserControllerCont
     this.tabShellService = new BrowserTabShellService({
       tabs: this.tabs,
       getActiveTabId: () => this.activeTabId,
-      setActiveTabId: (tabId) => {
-        this.activeTabId = tabId
-      },
+      setActiveTabId: (tabId) => this.setActiveBrowserTab(tabId),
       getSplitTabId: () => this.splitTabId,
       setSplitTabId: (tabId) => {
         this.splitTabId = tabId

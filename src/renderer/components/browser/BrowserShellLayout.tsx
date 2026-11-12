@@ -1,4 +1,4 @@
-import type { DragEvent, RefObject } from 'react'
+import type { DragEvent, ReactNode, RefObject } from 'react'
 import { AlertTriangle, CheckCircle, Globe, RefreshCw, UploadCloud } from 'lucide-react'
 import readyWordmark from '../../assets/ready-wordmark.svg'
 import { isReadyBrowserBlankUrl } from '../../modules/browser/url-utils'
@@ -15,6 +15,10 @@ interface BrowserShellLayoutProps {
   mediaDropActive?: boolean
   mediaUploadStatus?: { kind: 'uploading' | 'success' | 'error'; message: string } | null
   fillBottomLeftCorner?: boolean
+  /** A band above the page (a task waiting on the person): it takes its own height, so the native page moves down. */
+  band?: ReactNode
+  /** DOM in place of the native page (阅读视图); the page itself is hidden meanwhile. */
+  cover?: ReactNode
 }
 
 export default function BrowserShellLayout({
@@ -28,13 +32,16 @@ export default function BrowserShellLayout({
   mediaDropActive = false,
   mediaUploadStatus = null,
   fillBottomLeftCorner = true,
+  band = null,
+  cover = null,
 }: BrowserShellLayoutProps) {
   const showReadyBlankPage = activeTab ? isReadyBrowserBlankUrl(activeTab.url) && !activeTab.error : false
-  const showBrowserViewCornerFill = isElectron && Boolean(activeTab) && !showReadyBlankPage && !activeTab?.error
+  const showBrowserViewCornerFill = isElectron && Boolean(activeTab) && !showReadyBlankPage && !activeTab?.error && !cover
 
   return (
     <div className="flex min-h-0 h-full flex-1">
       <div className="relative min-w-0 flex flex-1 flex-col">
+        {band}
         {activeTab?.loading && (
           <div className="relative h-0.5 flex-shrink-0 overflow-hidden" style={{ background: 'var(--border-default)' }}>
             <div
@@ -120,6 +127,8 @@ export default function BrowserShellLayout({
                 </div>
               </div>
             )}
+
+            {cover}
 
             {showReadyBlankPage && (
               <div

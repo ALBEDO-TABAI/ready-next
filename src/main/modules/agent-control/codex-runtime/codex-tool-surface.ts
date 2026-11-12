@@ -129,7 +129,7 @@ export class CodexToolSurfaceError extends Error {
   }
 }
 
-const CODEX_ROOT_EXCLUDED_CONTROL_TOOLS = new Set(['use_browser', 'use_skill', 'browser_download'])
+const CODEX_ROOT_EXCLUDED_CONTROL_TOOLS = new Set(['use_browser', 'use_skill'])
 
 export function selectCodexRootToolDefinitions(
   definitions: readonly ToolDefinition[],

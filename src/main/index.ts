@@ -865,6 +865,7 @@ function setupGlobalIPC(): void {
     },
     rss: () => getDatabase().rss.content,
     browser: () => browserController,
+    readTab: async tabId => browserController ? browserController.pageTools.read(tabId) : { success: false, error: 'tab_missing' },
   })
   const migratedHighlightRoots = new Set<string>()
   registerDocumentAnnotationsIPC(ipcMain, { pages: documentPages.service, ready: documentPages.ready,

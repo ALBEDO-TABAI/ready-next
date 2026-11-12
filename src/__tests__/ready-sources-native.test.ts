@@ -139,7 +139,7 @@ test('PDF selections merge only within a page and retain file identity through m
   const handlers = new Map<string, Parameters<import('electron').IpcMain['handle']>[1]>()
   // These source handlers do not inspect the Electron event; substitute only that process envelope.
   const event = {} as import('electron').IpcMainInvokeEvent
-  registerSourceAnnotationsIPC({ handle: (channel, handler) => { handlers.set(channel, handler) } }, { service: async () => f.service, rss: () => f.rss.content, browser: () => null })
+  registerSourceAnnotationsIPC({ handle: (channel, handler) => { handlers.set(channel, handler) } }, { service: async () => f.service, rss: () => f.rss.content, browser: () => null, readTab: async () => ({ success: false, error: 'tab_missing' }) })
   const reply = await handlers.get('sourceAnnotations:pdf')!(event, input)
   assert.ok(reply.success)
   const first = reply.data
@@ -186,4 +186,50 @@ test('PDF selections merge only within a page and retain file identity through m
   const invalid = await handlers.get('sourceAnnotations:pdf')!(event, { ...input, end: 99 })
   assert.equal(invalid.success, false)
   if (!invalid.success) assert.match(invalid.error, /选区/)
+})
+
+test('a reading-view selection lands in the web page’s source page and links back to the live page at those words', async t => {
+  if (skipIfSqliteUnavailable(t, 'W7 reading view highlight')) return
+  const f = await fixture(t)
+  const { readingRuns } = await import('../shared/rss-reading')
+  const { registerSourceAnnotationsIPC } = await import('../main/modules/library-engine/source-document-ipc')
+  const url = 'http://127.0.0.1:4321/blog/sieve', markdown = '# 筛子与阅读\n\n第一段有一个**重点**词。\n\n第二段说筛子怎样留下好文章。'
+  // What the browser reads from the rendered tab: only the fields Main uses are meaningful here.
+  let page: { revision: string; error?: 'page_changed' } = { revision: 'rev-1' }
+  const reads: string[] = []
+  const readTab = async (tabId: string): Promise<import('../shared/browser-shell').BrowserReadResult> => {
+    reads.push(tabId)
+    if (page.error) return { success: false, error: page.error }
+    return { success: true, data: { url, title: '筛子与阅读', byline: null, siteName: '127.0.0.1', publishedAt: null, lang: 'zh',
+      article: { revision: page.revision } as import('../shared/browser-shell').BrowserReadArticle['article'],
+      body: {} as import('../shared/browser-shell').BrowserReadArticle['body'],
+      text: markdown, textKind: 'body', offset: 0, totalLength: markdown.length, nextOffset: null } }
+  }
+  const handlers = new Map<string, Parameters<import('electron').IpcMain['handle']>[1]>()
+  const event = {} as import('electron').IpcMainInvokeEvent
+  registerSourceAnnotationsIPC({ handle: (channel, handler) => { handlers.set(channel, handler) } }, { service: async () => f.service, rss: () => f.rss.content, browser: () => null, readTab })
+  const run = readingRuns(markdown).find(entry => entry.text.includes('筛子怎样'))!
+  const at = run.text.indexOf('筛子')
+  const range = { start: { run: run.id, offset: at }, end: { run: run.id, offset: at + 2 } }
+
+  const reply = await handlers.get('sourceAnnotations:webReading')!(event, { tabId: 'tab-7', revision: 'rev-1', range })
+  assert.ok(reply.success, reply.success ? '' : reply.error)
+  assert.deepEqual(reads, ['tab-7'], 'Main reads the tab again instead of trusting the words sent')
+  assert.deepEqual(reply.data.highlights.map((h: { text: string }) => h.text), ['筛子'])
+  // The same source page as a selection on the live page of that address.
+  const live = await f.service.annotate(webSource({ url, title: '筛子与阅读', text: '第二段说筛子怎样留下好文章。', start: 0, end: 3, exact: '第二段' }, 'live'))
+  assert.equal(live.sourcePath, reply.data.sourcePath)
+  // Its link goes back to the live page at those words (a text fragment with the words around them).
+  const content = await readFile(reply.data.sourcePath, 'utf8')
+  const links = [...content.matchAll(/\[原文\]\((ready:\/\/\S+)\) <!--/g)].map(m => parseReadyUri(m[1]))
+  // Its words around the selection come from its own paragraph, which sits the same way on the live page.
+  const back = links.map(parsed => parsed.ok && parsed.ref.kind === 'web' ? parsed.ref.url : '').find(link => link.includes(`-,${encodeURIComponent('筛子')},-`))
+  assert.equal(back, `${url}#:~:text=${encodeURIComponent('第二段说')}-,${encodeURIComponent('筛子')},-${encodeURIComponent('怎样留下好文章。')}`)
+
+  page = { revision: 'rev-2' }
+  const stale = await handlers.get('sourceAnnotations:webReading')!(event, { tabId: 'tab-7', revision: 'rev-1', range })
+  assert.deepEqual(stale, { success: false, error: '网页内容已变化，请重新选择' })
+  page = { revision: 'rev-1', error: 'page_changed' }
+  const moved = await handlers.get('sourceAnnotations:webReading')!(event, { tabId: 'tab-7', revision: 'rev-1', range })
+  assert.deepEqual(moved, { success: false, error: '网页已切换，请重新选择' })
 })

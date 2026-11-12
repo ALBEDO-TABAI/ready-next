@@ -32,3 +32,33 @@ test('provider extension preserves native history contracts and verifiable prior
     } else assert.equal(edge.sourceManifestDigest, proof.derivation.priorTargetManifestDigest)
   }
 })
+
+test('gateway lineage metadata extends the host contract without changing native history contracts or prior evidence', () => {
+  const root = 'assets/runtime-continuity/'
+  const current = read('assets/codex-runtime/runtime-manifest.json')
+  const target = digestCanonicalJson(current)
+  const transitions = read(root + 'runtime-continuity-transitions.json')
+  loadRuntimeContinuityAssets({ assetRoot: resolve(root), targetManifestDigest: target })
+  const prior = read(root + 'manifests/0.160.1-e2ae5b1c.json')
+  const native = (manifest: Record<string, unknown>) => Object.fromEntries(Object.entries(manifest).filter(([key]) => key !== 'modelGatewayContractDigest'))
+  assert.deepEqual(native(current), native(prior))
+  assert.notEqual(current.modelGatewayContractDigest, prior.modelGatewayContractDigest)
+  for (const edge of transitions.transitions) {
+    const proof = read(root + edge.evidenceFile)
+    assert.equal(digestCanonicalJson(proof), edge.proofDigest)
+    assert.equal(proof.derivation.evidenceKind, 'additive_host_gateway_lineage_contract')
+    assert.equal(proof.derivation.priorTargetManifestDigest, digestCanonicalJson(prior))
+    assert.equal(proof.targetManifestDigest, target)
+    const previous = proof.derivation.priorNativeProof
+    if (previous) {
+      const priorProof = read(root + previous.evidenceFile)
+      assert.equal(digestCanonicalJson(priorProof), previous.proofDigest)
+      const evidence = (value: Record<string, unknown>) => Object.fromEntries(Object.entries(value).filter(([key]) => !['targetManifestDigest', 'derivation'].includes(key)))
+      assert.deepEqual(evidence(proof), evidence(priorProof))
+      assert.equal(priorProof.targetManifestDigest, digestCanonicalJson(prior))
+    } else {
+      assert.equal(edge.sourceManifestDigest, digestCanonicalJson(prior))
+      assert.equal(proof.instructionContract.sourceDigest, proof.instructionContract.targetDigest)
+    }
+  }
+})

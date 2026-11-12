@@ -66,6 +66,13 @@
   overflow-y: auto;
 }
 
+.browser-tab-list__rows {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 1px;
+}
+
 .browser-tab-list__row {
   position: relative;
   display: flex;

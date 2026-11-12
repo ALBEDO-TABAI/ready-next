@@ -65,3 +65,74 @@ test('cold read derives review rejection from committed task result and rejects 
   assert.throws(() => parseBrowserAttentionAction({ ...request, actionAdmissionRef: undefined }))
   assert.throws(() => parseBrowserAttentionAction({ ...request, message: 'injected' }))
 })
+
+test('persisted attention input invalidates the original task only; rejected input emits nothing', async () => {
+  const changed: string[] = []
+  let persisted = false
+  const deps = {
+    readAttention: () => attention('login'),
+    readPhysicalTarget: () => 'physical-1',
+    readParent: () => ({ scopeId: 'scope-1', runId: 'run-1', messageVisibilityEpoch: 0 }),
+    readScope: () => ({ source_kind: 'local', message_visibility_epoch: 0 }),
+    messageExists: () => persisted,
+    changed: (id: string) => { changed.push(id) },
+    send: async () => { throw new Error('rejected_before_persistence') },
+  }
+  await assert.rejects(sendBrowserAttentionInput(request, deps), /rejected_before_persistence/)
+  assert.deepEqual(changed, [])
+  await assert.rejects(sendBrowserAttentionInput(request, { ...deps, send: async () => {
+    persisted = true
+    throw new Error('run_failed_after_user_message_saved')
+  } }), /run_failed_after_user_message_saved/)
+  assert.deepEqual(changed, ['browser-1'])
+  await assert.rejects(sendBrowserAttentionInput(request, deps), /already_sent/)
+  assert.deepEqual(changed, ['browser-1'])
+})
+
+test('successful attention action emits one invalidation after the ordinary send result', async () => {
+  let saved = false
+  const events: string[] = []
+  const result = await sendBrowserAttentionInput(request, {
+    readAttention: () => attention('takeover'), readPhysicalTarget: () => 'physical-1',
+    readParent: () => ({ scopeId: 'scope-1', runId: 'run-1', messageVisibilityEpoch: 0 }),
+    readScope: () => ({ source_kind: 'local', message_visibility_epoch: 0 }),
+    messageExists: () => saved, changed: id => { events.push(`changed:${id}`) },
+    send: async input => {
+      saved = true
+      events.push(`sent:${input.scopeId}`)
+      return { success: true, disposition: 'terminal_success', ownerRunId: 'new-run', aliasGeneration: 1, retryableByUser: false,
+        persistence: { scope: 'pre-existing', message: 'persisted', attachments: 'none', inputAttachments: 'none' },
+        responseText: 'done', canonicalMessage: { id: 'answer', conversationId: 'scope-1', role: 'assistant', content: 'done', timestamp: '2026-11-12T00:00:00Z', meta: {} }, canonicalMessageDigest: 'digest' }
+    },
+  })
+  assert.equal(result.success, true)
+  assert.deepEqual(events, ['sent:scope-1', 'changed:browser-1'])
+})
+
+test('attention consumption publishes at ingress persistence without waiting for the new run, and unsubscribes on failure', async () => {
+  let admitted: (() => void) | undefined, finish!: () => void, saved = false
+  const changed: string[] = []
+  const pending = sendBrowserAttentionInput(request, {
+    readAttention: () => attention('login'), readPhysicalTarget: () => 'physical-1',
+    readParent: () => ({ scopeId: 'scope-1', runId: 'run-1', messageVisibilityEpoch: 0 }),
+    readScope: () => ({ source_kind: 'local', message_visibility_epoch: 0 }),
+    messageExists: () => saved, changed: id => { changed.push(id) },
+    watchPersisted: (scopeId, messageId, handler) => {
+      assert.equal(scopeId, 'scope-1')
+      assert.equal(messageId, 'browser-help:browser-1:attention-1')
+      admitted = handler
+      return () => { admitted = undefined }
+    },
+    send: async () => {
+      saved = true
+      admitted!()
+      await new Promise<void>(resolve => { finish = resolve })
+      throw new Error('new run finished')
+    },
+  })
+  assert.deepEqual(changed, ['browser-1'], 'the old attention is cleared while the new run is still pending')
+  finish()
+  await assert.rejects(pending, /new run finished/)
+  assert.deepEqual(changed, ['browser-1', 'browser-1'])
+  assert.equal(admitted, undefined)
+})

@@ -1,0 +1,259 @@
+/* The assistant's browser tasks in the shell (W7 §4.7, §4.10): the band above a page that needs the person, the
+   task tabs in the browser sidebar, and the task card under the assistant's reply. Only --rn-* tokens; the accent
+   marks the one thing waiting for the person. */
+
+/* ---- The band above the page. It takes its own height so the native page moves down; nothing covers the page. ---- */
+.rn-task-band {
+  display: flex;
+  align-items: center;
+  gap: var(--rn-s3);
+  flex: none;
+  min-height: 48px;
+  margin: 0 0 var(--rn-s2);
+  padding: var(--rn-s2) var(--rn-s2) var(--rn-s2) var(--rn-s4);
+  border-radius: var(--rn-r-md);
+  background: var(--rn-sheet);
+  box-shadow: var(--rn-card-shadow);
+  color: var(--rn-ink);
+  font: 400 var(--rn-fs-md)/1.35 var(--rn-font-ui);
+}
+
+.rn-task-band__dot,
+.rn-task-card__dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--rn-accent);
+  box-shadow: 0 0 0 4px var(--rn-accent-soft);
+}
+
+.rn-task-band__text {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: baseline;
+  gap: var(--rn-s3);
+}
+
+.rn-task-band__title {
+  flex: none;
+  font-weight: 600;
+}
+
+.rn-task-band__hint,
+.rn-task-band__refusal {
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--rn-fs-sm);
+  color: var(--rn-ink-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rn-task-band__refusal,
+.rn-task-card__refusal {
+  color: var(--rn-bad);
+}
+
+/* ---- The task tabs in the browser sidebar, after the person's own tabs ---- */
+.browser-task-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: var(--rn-s3);
+}
+
+.browser-task-groups__label {
+  padding: var(--rn-s2) var(--rn-s2) var(--rn-s1);
+  font: 500 var(--rn-fs-xs)/1 var(--rn-font-ui);
+  color: var(--rn-ink-3);
+}
+
+.browser-task-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.browser-task-group + .browser-task-group {
+  margin-top: var(--rn-s2);
+}
+
+.browser-task-group__head {
+  display: flex;
+  align-items: center;
+  gap: var(--rn-s2);
+  min-height: 28px;
+  padding: 0 4px 0 var(--rn-s2);
+}
+
+.browser-task-group__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font: 500 var(--rn-fs-sm)/1.2 var(--rn-font-ui);
+  color: var(--rn-ink-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browser-task-group__state {
+  flex: none;
+  font: 400 var(--rn-fs-xs)/1 var(--rn-font-ui);
+  color: var(--rn-ink-3);
+  transition: opacity var(--rn-d-1) var(--rn-ease-out);
+}
+
+.browser-task-group[data-state='needs_user'] .browser-task-group__state {
+  color: var(--rn-accent-text);
+  font-weight: 500;
+}
+
+.browser-task-group__state[data-state='running']::before {
+  content: '';
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin: 0 5px 1px 0;
+  border-radius: 50%;
+  background: currentColor;
+  vertical-align: middle;
+  animation: rn-task-running 1.6s var(--rn-ease-in-out) infinite;
+}
+
+@keyframes rn-task-running {
+  50% { opacity: .25; }
+}
+
+/* 全部关闭 takes the state's place while the pointer is on the group, or when it has the keyboard. */
+.browser-task-group__close {
+  position: absolute;
+  right: 4px;
+  height: 22px;
+  padding: 0 var(--rn-s2);
+  border: 0;
+  border-radius: var(--rn-r-xs);
+  background: transparent;
+  font: 500 var(--rn-fs-xs)/1 var(--rn-font-ui);
+  color: var(--rn-ink-2);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--rn-d-1) var(--rn-ease-out), background-color var(--rn-d-1) var(--rn-ease-out);
+}
+
+.browser-task-group__head {
+  position: relative;
+}
+
+.browser-task-group:hover .browser-task-group__close,
+.browser-task-group__close:focus-visible {
+  opacity: 1;
+}
+
+.browser-task-group:hover .browser-task-group__state,
+.browser-task-group:has(.browser-task-group__close:focus-visible) .browser-task-group__state {
+  opacity: 0;
+}
+
+.browser-task-group__close:hover {
+  background: var(--rn-fill-2);
+  color: var(--rn-ink);
+}
+
+.browser-task-group .browser-tab-list__row {
+  padding-left: 18px;
+}
+
+.browser-task-group__waiting {
+  font-size: var(--rn-fs-2xs);
+  font-weight: 500;
+  color: var(--rn-accent-text);
+}
+
+/* ---- The task card under the assistant's reply ---- */
+.rn-task-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rn-s3);
+  font: 400 var(--rn-fs-md)/1.45 var(--rn-font-ui);
+  color: var(--rn-ink);
+}
+
+.rn-task-card__need {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rn-s2);
+  padding: var(--rn-s3) var(--rn-s3) var(--rn-s3) var(--rn-s4);
+  border-radius: var(--rn-r-md);
+  background: var(--rn-fill);
+}
+
+.rn-task-card__head {
+  display: flex;
+  align-items: center;
+  gap: var(--rn-s2);
+  min-width: 0;
+}
+
+.rn-task-card__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rn-task-card__state {
+  flex: none;
+  font: 500 var(--rn-fs-xs)/1 var(--rn-font-ui);
+  color: var(--rn-accent-text);
+}
+
+.rn-task-card__hint,
+.rn-task-card__refusal {
+  margin: 0;
+  font-size: var(--rn-fs-sm);
+  color: var(--rn-ink-2);
+}
+
+.rn-task-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--rn-s2);
+}
+
+.rn-task-card__files {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rn-task-card__files-label {
+  font: 500 var(--rn-fs-xs)/1 var(--rn-font-ui);
+  color: var(--rn-ink-3);
+}
+
+.rn-task-card__file {
+  display: flex;
+  align-items: baseline;
+  gap: var(--rn-s2);
+  min-width: 0;
+}
+
+.rn-task-card__file .rn-ref {
+  min-width: 0;
+}
+
+.rn-task-card__size {
+  flex: none;
+  font: 400 var(--rn-fs-xs)/1 var(--rn-font-mono);
+  color: var(--rn-ink-3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .browser-task-group__state[data-state='running']::before { animation: none; }
+  .browser-task-group__close, .browser-task-group__state { transition: none; }
+}

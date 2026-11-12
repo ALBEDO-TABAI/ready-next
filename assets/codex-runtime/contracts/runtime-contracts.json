@@ -595,7 +595,8 @@
         "window_number"
       ],
       "metadataOptionalNativeLineageKeys": [
-        "forked_from_thread_id"
+        "forked_from_thread_id",
+        "forked_from_ordinal_exclusive"
       ],
       "productNativeMetadataKeys": [
         "model"
@@ -606,7 +607,7 @@
         "turnContractDigest",
         "upstreamProfileSnapshotDigest"
       ],
-      "metadataShapePolicy": "product_is_base_plus_model_plus_ready_fields_automatic_compaction_is_base_plus_compaction_plus_ready_fields_manual_compaction_is_base_plus_compaction_without_model_or_ready_fields_root_turn_id_required_in_both_outer_and_inner_for_all_three_all_three_allow_only_optional_nonempty_forked_from_thread_id_in_inner",
+      "metadataShapePolicy": "product_is_base_plus_model_plus_ready_fields_automatic_compaction_is_base_plus_compaction_plus_ready_fields_manual_compaction_is_base_plus_compaction_without_model_or_ready_fields_root_turn_id_required_in_both_outer_and_inner_for_all_three_all_three_allow_optional_nonempty_forked_from_thread_id_and_nonnegative_safe_integer_forked_from_ordinal_exclusive_only_with_forked_from_thread_id_in_inner",
       "metadataIdentityPolicy": "outer_inner_ids_exact_session_equals_thread_window_id_equals_thread_colon_window_number_nonnegative_integer_context_window_id_nonempty_analytics_disabled_prompt_cache_key_equals_thread_root_turn_id_equals_turn_id_product_model_equals_bound_codex_model_forked_from_thread_id_or_absence_exact_matches_bound_thread_codex_forked_from_id_before_claim_and_receipt",
       "toolDigestAlgorithm": "sha256_canonical_json",
       "instructionDigestAlgorithm": "sha256_canonical_native_base_and_ordered_semantic_developer_messages",

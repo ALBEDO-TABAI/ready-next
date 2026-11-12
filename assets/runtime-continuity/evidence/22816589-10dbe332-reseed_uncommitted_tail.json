@@ -1,0 +1,33 @@
+{
+  "contract": "ready_runtime_transition_proof_v1",
+  "sourceManifestDigest": "22816589f287db132fdc4e3a57b674878795fb75891d765d598b3c94e381bc79",
+  "targetManifestDigest": "10dbe332f05e6c73234f895df9d3c7db8d970f82b0fb1542a32b9129d583de0c",
+  "operation": "reseed_uncommitted_tail",
+  "result": "compatible",
+  "instructionContract": {
+    "sourceDigest": "eb75d36abc160394f83bae5772bc5267f149f3b42a87f6ff5bf9037ca4b67046",
+    "targetDigest": "fd4614754f7b45e7d505436eacb9305747a1d7191d904b341e14209801a56c35"
+  },
+  "probe": {
+    "targetBinarySha256": "09fa44fdc37a5fc70dc1ace31235f90468a2e193d0e85f7552eab068ea2582be",
+    "targetRuntimeVersion": "codex-cli 0.160.1",
+    "isolatedCopy": true,
+    "providerKind": "local_fixture",
+    "reseedAccepted": true,
+    "inputCardinality": 1,
+    "tailProviderCardinality": 1,
+    "currentInputProviderCardinality": 1,
+    "restartPassed": true,
+    "tailAfterRestartCardinality": 1,
+    "firstInputAfterRestartCardinality": 1,
+    "secondInputCardinality": 1
+  },
+  "derivation": {
+    "evidenceKind": "additive_host_gateway_lineage_contract",
+    "priorTargetManifestDigest": "e2ae5b1c9807e039b9516dc58dda8e9675f3c08e71dc1da362cd354216410558",
+    "priorNativeProof": {
+      "evidenceFile": "evidence/22816589-e2ae5b1c-reseed_uncommitted_tail.json",
+      "proofDigest": "02efd568c659ec825c8996d4683ef9e876cf4362f8d74518d1ec364e1330bcc8"
+    }
+  }
+}

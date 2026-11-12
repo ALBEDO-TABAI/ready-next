@@ -19,6 +19,7 @@ import { useMode } from '../../stores/useMode'
 import { productTurnActionProjectionMatchesContext } from '../../modules/agent/productTurnReceipt'
 import { filterUserVisibleToolTraceEvents } from '../../modules/agent/toolTraceVisibility'
 import { ToolTraceCard } from './chat-panel/task/TaskCard'
+import { BrowserTaskRunCards } from './chat-panel/task/BrowserTaskCard'
 import { AskUserQuestionsCard } from './AskUserQuestionsCard'
 import { GeneratedImageGallery } from './GeneratedImageGallery'
 import { ThinkingIndicator } from './chat-panel/ThinkingIndicator'
@@ -188,6 +189,15 @@ export default function ChatMessages({
     node.scrollIntoView({ block: 'start' })
     useConversationReveal.setState({ target: null })
   }, [revealTarget, conversationId, visibleMessages])
+
+  // A run's reply can stream in several segments; its browser task cards go under the last one.
+  const lastReplyIdByRun = useMemo(() => {
+    const last = new Map<string, string>()
+    for (const msg of visibleMessages) {
+      if (msg.type === 'agent' && typeof msg.meta?.runId === 'string') last.set(msg.meta.runId, msg.id)
+    }
+    return last
+  }, [visibleMessages])
 
   const visibleGlobalToolTrace = useMemo(() => filterUserVisibleToolTraceEvents(toolTrace), [toolTrace])
   const shouldRenderGlobalToolTraceCapsule = showToolTraceCapsule
@@ -534,6 +544,9 @@ export default function ChatMessages({
                 </div>
               )}
             </div>
+
+            {/* The run's browser tasks: what they need from the person, the files they downloaded (W7). */}
+            {messageRunId && lastReplyIdByRun.get(messageRunId) === msg.id ? <BrowserTaskRunCards runId={messageRunId} /> : null}
 
             {boundaryMarkers}
           </div>

@@ -152,7 +152,7 @@ test('request tools are checked against the derived wire while metadata keeps th
 test('fork metadata preserves the exact direct parent for product and both compaction shapes', async (t) => {
   const contract = JSON.parse(readFileSync('assets/codex-runtime/contracts/runtime-contracts.json', 'utf8'))
     .modelGatewayContract.request
-  assert.deepEqual(contract.metadataOptionalNativeLineageKeys, ['forked_from_thread_id'])
+  assert.deepEqual(contract.metadataOptionalNativeLineageKeys, ['forked_from_thread_id', 'forked_from_ordinal_exclusive'])
   for (const kind of ['product', 'automatic_compaction', 'manual_compaction'] as const) {
     await t.test(kind, async () => {
       const seen: JsonObject[] = []
@@ -202,6 +202,15 @@ test('fork metadata preserves the exact direct parent for product and both compa
         assert.equal(accepted.status, 409)
         assert.match(accepted.text, /fork_metadata_reached_authority/)
         assert.equal(seen[0].forked_from_thread_id, 'direct-parent-not-root')
+        const ordinalFork = { ...raw, forked_from_ordinal_exclusive: 12 }
+        assert.match((await send(ordinalFork)).text, /fork_metadata_reached_authority/)
+        assert.equal(seen[1].forked_from_ordinal_exclusive, 12)
+        for (const invalid of [null, -1, 1.5, '12', true, {}, [], Number.MAX_SAFE_INTEGER + 1]) {
+          assert.equal((await send({ ...ordinalFork, forked_from_ordinal_exclusive: invalid })).status, 400)
+        }
+        const orphanOrdinal = { ...ordinalFork } as JsonObject
+        delete orphanOrdinal.forked_from_thread_id
+        assert.equal((await send(orphanOrdinal)).status, 400)
         for (const invalid of [null, '', '   ', 5, {}]) {
           const rejected = await send({ ...raw, forked_from_thread_id: invalid })
           assert.equal(rejected.status, 400)
@@ -209,11 +218,59 @@ test('fork metadata preserves the exact direct parent for product and both compa
         assert.equal((await send({ ...raw, unknown_lineage: 'forged' })).status, 400)
         delete outer.root_turn_id
         assert.equal((await send(raw)).status, 400, 'every request kind requires the captured outer root turn identity')
-        assert.equal(seen.length, 1, 'invalid or unknown fields must not reach authority')
+        assert.equal(seen.length, 2, 'invalid or unknown fields must not reach authority')
       } finally {
         await gateway.stop()
       }
     })
+  }
+})
+
+test('ordinal-fork product requests pass the gateway metadata and frozen binding validation', () => {
+  const request = requestBody()
+  const binding = bindRequest(request, createCodexUpstreamProfileSnapshot({
+    profileId: 'ordinal-fork', maxRetries: 0,
+    config: {
+      provider: 'openai-compatible', baseUrl: 'https://provider.example/v1', apiKey: 'fixture',
+      model: 'qwen-model', agentProtocol: 'openai', wireApi: 'chat/completions', toolUseMode: 'on',
+    },
+  }).snapshot)
+  const outer = request.client_metadata as Record<string, string>
+  const raw = JSON.parse(outer['x-codex-turn-metadata']) as JsonObject
+  for (const ordinal of [0, 12, Number.MAX_SAFE_INTEGER]) {
+    outer['x-codex-turn-metadata'] = JSON.stringify({
+      ...raw, forked_from_thread_id: 'direct-parent', forked_from_ordinal_exclusive: ordinal,
+    })
+    const metadata = parseMetadata(request)
+    assert.equal(metadata.threadId, 'thread-1')
+    assert.equal(metadata.raw.forked_from_ordinal_exclusive, ordinal)
+    assert.doesNotThrow(() => validateBinding({ body: request, metadata, binding }))
+  }
+  for (const kind of ['product', 'automatic_compaction', 'manual_compaction']) {
+    const metadata = { ...raw }
+    if (kind !== 'product') {
+      delete metadata.model
+      metadata.request_kind = 'compaction'
+      metadata.compaction = {
+        trigger: kind === 'manual_compaction' ? 'manual' : 'auto',
+        reason: kind === 'manual_compaction' ? 'user_requested' : 'context_limit',
+        implementation: 'responses', phase: kind === 'manual_compaction' ? 'standalone_turn' : 'pre_turn', strategy: 'memento',
+      }
+    }
+    if (kind === 'manual_compaction') {
+      for (const key of ['readyRunId', 'toolSurfaceDigest', 'turnContractDigest', 'upstreamProfileSnapshotDigest']) delete metadata[key]
+    }
+    const parse = (lineage: JsonObject) => {
+      outer['x-codex-turn-metadata'] = JSON.stringify({ ...metadata, ...lineage })
+      return parseMetadata(request)
+    }
+    assert.equal(parse({ forked_from_thread_id: 'direct-parent', forked_from_ordinal_exclusive: 0 }).raw.forked_from_ordinal_exclusive, 0)
+    assert.throws(() => parse({ forked_from_ordinal_exclusive: 0 }), /gateway_forked_from_ordinal_exclusive_invalid/)
+    for (const invalid of [null, -1, 1.5, '12', true, {}, [], Number.MAX_SAFE_INTEGER + 1]) {
+      assert.throws(() => parse({ forked_from_thread_id: 'direct-parent', forked_from_ordinal_exclusive: invalid }),
+        /gateway_forked_from_ordinal_exclusive_invalid/)
+    }
+    assert.throws(() => parse({ forked_from_thread_id: 'direct-parent', unknown_lineage: 0 }), /gateway_turn_metadata_shape_invalid/)
   }
 })
 

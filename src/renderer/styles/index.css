@@ -13,6 +13,8 @@
 @import '../modules/workbench/navigation-back.css';
 @import '../modules/today/today.css';
 @import '../components/browser/fastcard-shelf.css';
+@import '../components/browser/browser-task.css';
+@import '../components/browser/browser-shell.css';
 @import './theme-tokens.css';
 @import './base-chrome.css';
 @import './liquid-composer.css';

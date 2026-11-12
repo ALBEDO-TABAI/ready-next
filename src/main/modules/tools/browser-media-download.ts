@@ -245,7 +245,7 @@ async function reservePageDownloadPath(directory: string, requestedName: string)
   const ext = extname(safeName)
   const stem = ext ? safeName.slice(0, -ext.length) : safeName
   for (let index = 0; index < 200; index += 1) {
-    const filename = index === 0 ? safeName : `${stem || 'download'} (${index})${ext}`
+    const filename = index === 0 ? safeName : `${stem || 'download'} (${index + 1})${ext}`
     const finalPath = join(directory, filename)
     try {
       const reservation = await open(finalPath, 'wx')
@@ -417,7 +417,7 @@ export async function downloadUrlsToDirectory(
   return await params.mutationBoundary.invokeTransport(async () => {
   const tabId = params.tabId || null
   const directory = expandHomePath(params.directory || '~/Documents')
-  const filenamePrefix = sanitizeFilename(String(params.filenamePrefix || '').trim(), 'download')
+  const filenamePrefix = sanitizeFilename(String(params.filenamePrefix || '').trim(), '')
 
   await mkdir(directory, { recursive: true })
   try {
@@ -480,7 +480,7 @@ export async function downloadUrlsToDirectory(
       const pageResult = await downloadPageScopedUrlToDirectory(controller, {
         url,
         directory,
-        suggestedName: `${filenamePrefix}-${index + 1}`,
+        suggestedName: `${filenamePrefix || 'download'}-${index + 1}`,
         tabId,
         maxBytes: remainingBudget,
         signal: params.abortSignal,
@@ -512,6 +512,7 @@ export async function downloadUrlsToDirectory(
         tabId,
         sourcePageUrl: referer || null,
         suggestedName: filenamePrefix ? `${filenamePrefix}-${index + 1}` : null,
+        fallbackName: `download-${index + 1}`,
         downloadHeaders: downloadHeadersForTarget(url),
         maxBytes: remainingBudget,
         signal: params.abortSignal,
@@ -573,14 +574,6 @@ export async function downloadUrlsToDirectory(
     shape: 'json',
     data: body,
     projectionPatch: { recentArtifacts: artifacts },
-    contextModifier: {
-      activeFrame: {
-        discoveredHandles: artifacts.map((artifact) => ({
-          ...artifact,
-          type: 'recent_artifact',
-        })),
-      },
-    },
   })
   })
 }

@@ -139,7 +139,9 @@ test('renderer removes closed tabs from visible and persisted browser state', as
     Object.defineProperty(handle.dom.window, 'electronAPI', {
       configurable: true,
       value: {
+        settings: { getAll: async () => ({ success: true, data: {} }) },
         browser: {
+          onSearchSettingsChanged: () => () => undefined,
           getTabs: async () => [tabA, tabB],
           createTab: async () => ({ success: false, error: 'renderer should restore existing tabs' }),
           switchTab: async () => ({ success: true }),

@@ -1,3 +1,4 @@
+import { validateBrowserSearchSetting } from '../../../shared/search-engines'
 import { WEBMCP_SETTING_KEY, WEBMCP_STATUS_KEY } from '../../../shared/browser-webmcp'
 import { VAULT_ROOT_SETTING_KEY } from '../../../shared/vault'
 
@@ -36,6 +37,7 @@ export function createGenericSettingIPCHandler(options: {
       if (RETIRED_AGENT_CONTROL_SETTING_KEYS.has(key)) {
         throw new Error('retired_agent_control_setting')
       }
+      validateBrowserSearchSetting(key, value)
       options.repository.setSetting(key, value)
       options.onSettingChanged?.(key, value)
       return { success: true }

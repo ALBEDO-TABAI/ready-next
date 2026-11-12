@@ -65,6 +65,12 @@ export function parseMetadata(body: JsonObject): CodexModelGatewayMetadata {
   if (hasForkedFromThreadId) {
     nonEmptyString(parsed.forked_from_thread_id, 'gateway_forked_from_thread_id_invalid')
   }
+  const hasForkedFromOrdinal = 'forked_from_ordinal_exclusive' in parsed
+  if (hasForkedFromOrdinal && (!hasForkedFromThreadId
+    || !Number.isSafeInteger(parsed.forked_from_ordinal_exclusive)
+    || Number(parsed.forked_from_ordinal_exclusive) < 0)) {
+    throw new CodexModelGatewayError('gateway_forked_from_ordinal_exclusive_invalid')
+  }
   const baseInnerKeys = [
     'installation_id',
     'session_id',
@@ -84,6 +90,7 @@ export function parseMetadata(body: JsonObject): CodexModelGatewayMetadata {
     'sandbox_mode',
     'turn_started_at_unix_ms',
     ...(hasForkedFromThreadId ? ['forked_from_thread_id'] : []),
+    ...(hasForkedFromOrdinal ? ['forked_from_ordinal_exclusive'] : []),
   ]
   let metadataKind: CodexModelGatewayRequestKind
   try {

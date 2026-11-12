@@ -1,10 +1,11 @@
 import { ReadingSettingsPanel } from './settings/ReadingSettingsPanel'
+import { BrowserSearchSettingsPanel } from './settings/BrowserSearchSettingsPanel'
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
 import {
   ChevronLeft, Shield, Database, CalendarDays, FolderOpen, Puzzle, Newspaper,
   Palette, Keyboard, Info, Moon, Sun, Bot, Monitor,
   ExternalLink, HardDrive, MessageSquare, Cat,
-  Plug2, Boxes, Cookie, Tags, Brain, Check, Loader2, RefreshCw, Sunrise,
+  Plug2, Boxes, Cookie, Tags, Brain, Check, Loader2, RefreshCw, Sunrise, Globe,
 } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useTheme, type ThemeOption } from '../stores/useTheme'
@@ -151,6 +152,7 @@ const settingsData: SettingSection[] = [
     description: '日历视图、提醒、菜单栏与日历列表',
     settings: []
   },
+  { id: 'browser', group: 'content', title: '浏览器', icon: Globe, description: '搜索引擎与地址栏建议', settings: [] },
   {
     id: 'browser-privacy',
     group: 'content',
@@ -503,7 +505,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
   }
 
   const isDynamicSection = currentSection
-    ? ['startup', 'ai', 'memory', 'skills', 'remote-im', 'external-services', 'mcp', 'tag-forge', 'pet', 'library', 'reading', 'rss-storage', 'calendar', MODELS_RUNTIME_SETTINGS_SECTION, 'storage', 'browser-privacy'].includes(currentSection.id)
+    ? ['startup', 'ai', 'memory', 'skills', 'remote-im', 'external-services', 'mcp', 'tag-forge', 'pet', 'library', 'reading', 'rss-storage', 'calendar', MODELS_RUNTIME_SETTINGS_SECTION, 'storage', 'browser', 'browser-privacy'].includes(currentSection.id)
     : false
 
   const renderSettingControl = (sectionId: string, setting: SettingItem) => {
@@ -689,6 +691,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                 {currentSection.id === 'rss-storage' && <RSSDraftStoreSettingsPanel />}
                 {currentSection.id === MODELS_RUNTIME_SETTINGS_SECTION && <ModelsRuntimeSettingsPanel />}
                 {currentSection.id === 'storage' && <StorageSettingsPanel />}
+                {currentSection.id === 'browser' && <BrowserSearchSettingsPanel />}
                 {currentSection.id === 'browser-privacy' && <BrowserPrivacySettingsPanel />}
                 {currentSection.id === 'remote-im' && <RemoteIMSettingsPanel />}
                 {currentSection.id === 'external-services' && <ExternalServicesSettingsPanel />}

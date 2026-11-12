@@ -16,6 +16,7 @@ import { invalidateGraphWorkspace } from '../components/graph/graph-session'
 import StatusBar from '../components/layout/StatusBar'
 import { useShellActions, useShellSidebarSlot } from '../modules/workbench/shell/useShellWiring'
 import { useRSSNotificationOpen } from '../modules/rss/notification-open'
+import { useBrowserTaskWorkSync } from '../modules/browser/browser-task-work'
 import { clampAssistantWidth as clampWorkbenchChatPanelWidth, clampSidebarWidth as clampWorkbenchSidePanelWidth, SHELL_RAIL_WIDTH } from '../../shared/workbench-shell-geometry'
 import {
   READY_WORKBENCH_MODE_CHANGE_EVENT,
@@ -392,6 +393,8 @@ export default function WorkbenchMode() {
   })
   const { toggleSidebar: toggleShellSidebar, toggleAssistant: toggleShellAssistant } = shell
   useRSSNotificationOpen()
+  // The assistant's browser tasks: one installation of their re-read triggers for the band, the sidebar and the cards.
+  useBrowserTaskWorkSync()
   useShellActions({ toggleSidebar: toggleShellSidebar, toggleAssistant: toggleShellAssistant, openSkills: () => navigate('/skills'), openGraph: () => setGraphWorkspaceRequest({}), openFindReplace: () => setFindReplaceOpen(true) })
   const sidebarSlot = useShellSidebarSlot({ workbenchMode, splitMode, collapsed: shell.sidebarCollapsed, slideOut: shell.sidebarSlideOut, toggle: toggleShellSidebar })
 
