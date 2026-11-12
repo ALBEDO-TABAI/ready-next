@@ -269,15 +269,11 @@ function requireExactIdentityParams(value: unknown, keys: readonly string[]): Js
 
 function validateDynamicTool(value: unknown): value is CodexDynamicToolSpec {
   if (!isRecord(value)) return false
-  const keys = value.deferLoading === undefined
-    ? ['type', 'name', 'description', 'inputSchema']
-    : ['type', 'name', 'description', 'inputSchema', 'deferLoading']
-  return hasExactKeys(value, keys)
+  return hasExactKeys(value, ['type', 'name', 'description', 'inputSchema'])
     && value.type === 'function'
     && nonEmptyString(value.name)
     && typeof value.description === 'string'
     && isRecord(value.inputSchema)
-    && (value.deferLoading === undefined || typeof value.deferLoading === 'boolean')
 }
 
 function validateAdditionalContext(value: unknown): value is Record<string, CodexAdditionalContextEntry> {

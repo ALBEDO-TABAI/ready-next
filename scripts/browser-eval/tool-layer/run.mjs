@@ -24,7 +24,7 @@ rmSync(reportPath, { force: true })
 
 // Everything the eval process writes stays under one throwaway root: profile, database, logs
 // (os.tmpdir()) and home-relative files.
-const evalRoot = mkdtempSync(join(tmpdir(), 'ready-browser-eval-tools-'))
+const evalRoot = mkdtempSync(join(process.platform === 'darwin' ? '/private/tmp' : tmpdir(), 'rbe-'))
 for (const dir of ['tmp', 'home', 'profile']) mkdirSync(join(evalRoot, dir), { recursive: true })
 const env = {
   ...process.env,

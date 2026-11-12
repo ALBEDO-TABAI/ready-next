@@ -58,9 +58,7 @@ export abstract class BrowserControllerTabRuntime extends BrowserControllerInter
       }
       return { success: true, tabId: current }
     }
-    const created = await this.createTab(url, { background: true, owner: 'agent' })
-    if (created.success && created.tabId) this.agentWorkTabs.set(browserTaskId, created.tabId)
-    return created
+    return this.createAgentWorkTab(browserTaskId, url, null)
   }
 
   getTaskWorkTabIds(browserTaskId: string): string[] {
@@ -71,7 +69,7 @@ export abstract class BrowserControllerTabRuntime extends BrowserControllerInter
     ).map(([tabId]) => tabId)
   }
 
-  async createAgentWorkTab(browserTaskId: string, url: string, openerTabId: string) {
+  async createAgentWorkTab(browserTaskId: string, url: string, openerTabId: string | null) {
     const created = await this.createTab(url, { background: true, owner: 'agent', openerTabId })
     if (!created.success || !created.tabId) return created
     const physicalTargetToken = this.getPhysicalTargetToken(created.tabId)
@@ -81,6 +79,8 @@ export abstract class BrowserControllerTabRuntime extends BrowserControllerInter
     }
     this.taskWorkTabs.set(created.tabId, { browserTaskId, openerTabId, physicalTargetToken })
     this.agentWorkTabs.set(browserTaskId, created.tabId)
+    const view = this.tabs.get(created.tabId)?.view
+    if (view) this.hostLayoutService.mountBackgroundWorkHost(view)
     return created
   }
 

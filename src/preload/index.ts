@@ -322,6 +322,8 @@ const agentAPI = {
     invokeAgentRuntime('agent:clearRemoteAttachmentCache', { channelId }),
   getRemoteAttachmentCacheStats: (channelId?: string) =>
     invokeAgentRuntime('agent:getRemoteAttachmentCacheStats', { channelId }),
+  getBrowserTaskAttention: (request: { scopeId: string; browserTaskId: string }) => invokeAgentRuntime('agent:getBrowserTaskAttention', request),
+  actOnBrowserTaskAttention: (request: import('../shared/browser-user-attention').BrowserAttentionActionRequest) => invokeAgentRuntime('agent:actOnBrowserTaskAttention', request).then(parseSendScopedResponse),
   sendScoped: (payload: SendScopedRequest) => invokeAgentRuntime(
     'agent:sendScoped',
     parseSendScopedRequest(payload),

@@ -1462,6 +1462,11 @@ test('compacted verifier failures atomically block history without forking and a
         .get<{ count: number }>()?.count, 1)
       rollbackAfterHistoryWrite = false
       await close()
+      const browserResult = value.db.prepare('SELECT result_json FROM browser_tasks WHERE id = ?')
+        .get<{ result_json: string }>(value.bundle.browserTaskId)
+      assert.ok(browserResult)
+      assert.equal(JSON.parse(browserResult.result_json).userAttentionReason,
+        outcome === 'block' ? 'review_rejected' : undefined)
       const facts = value.repository.readTerminalCloseoutEvidence(value.runId)?.terminalFacts
       assert.equal(facts?.product.terminal, 'error')
       assert.equal(facts?.product.terminalReason, terminalReason)

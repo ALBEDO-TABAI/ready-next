@@ -426,6 +426,7 @@ export async function createEnvironment(server: EvalServer, profile: string): Pr
   })
   await window.loadURL('about:blank')
   const controller = new BrowserController(window)
+  controller.setAttentionNotificationPort(() => undefined)
   // Same ports AgentControlRuntime wires in production.
   controller.setBrowserTargetCheckpointResolver((parentTaskId) => (
     projections.get(parentTaskId)?.checkpointRefs?.cleanBaseCheckpointId || null

@@ -25,6 +25,8 @@ function createMockDeps(): AgentLifecycleGroupDeps {
     throw new Error(`mock dep ${label} should not be called from registration test`)
   }
   return {
+    getBrowserTaskAttention: () => null,
+    actOnBrowserTaskAttention: fail('actOnBrowserTaskAttention'),
     sendScoped: fail('sendScoped') as AgentLifecycleGroupDeps['sendScoped'],
     createSession: fail('createSession') as AgentLifecycleGroupDeps['createSession'],
     resetSession: fail('resetSession') as AgentLifecycleGroupDeps['resetSession'],
@@ -35,17 +37,19 @@ function createMockDeps(): AgentLifecycleGroupDeps {
   }
 }
 
-test('lifecycle group registers only the seven exact Codex-facing async channels', () => {
+test('lifecycle group registers the exact Codex-facing channels including user attention', () => {
   const { ipc, handleCalls } = createMockIpc()
   agentLifecycleGroup.register(ipc, createMockDeps())
 
   const registered = handleCalls.map((entry) => entry.channel).sort()
   assert.deepEqual(registered, [..._agentLifecycleGroupChannelsForTest].sort())
   assert.deepEqual(registered, [
+    'agent:actOnBrowserTaskAttention',
     'agent:beginNewContext',
     'agent:closeSession',
     'agent:compactSession',
     'agent:createSession',
+    'agent:getBrowserTaskAttention',
     'agent:kill',
     'agent:resetSession',
     'agent:sendScoped',

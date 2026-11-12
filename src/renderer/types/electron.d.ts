@@ -883,6 +883,8 @@ interface ElectronAgentAPI {
     channelId?: string
   ) => Promise<IPCResponse<RemoteAttachmentCacheStatsData>>
   sendScoped: (payload: SendScopedRequest) => Promise<SendScopedResponse>
+  getBrowserTaskAttention: (request: { scopeId: string; browserTaskId: string }) => Promise<import('../../shared/browser-user-attention').BrowserUserAttention | null>
+  actOnBrowserTaskAttention: (request: import('../../shared/browser-user-attention').BrowserAttentionActionRequest) => Promise<SendScopedResponse>
   onIngressAdmitted: (callback: (event: IngressAdmittedEvent) => void) => () => void
   emitRendererMetric: (
     name: RendererAgentMetricName,

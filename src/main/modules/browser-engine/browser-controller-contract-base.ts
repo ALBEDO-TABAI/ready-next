@@ -211,7 +211,11 @@ export abstract class BrowserControllerContractBase {
       mainWindowForeground: boolean;
       hostPresentation: BrowserHostPresentationState;
       tabActive: boolean;
+      backgroundWorkSurfaceAdmitted?: boolean;
   };
+  abstract getTaskAttention(browserTaskId: string): import('../../../shared/browser-user-attention').BrowserUserAttention | null;
+  abstract recordTaskAttention(target: import('../../../shared/browser-user-attention').BrowserAttentionTarget, reason: import('../../../shared/browser-user-attention').BrowserAttentionReason): void;
+  abstract notifyTaskAttention(browserTaskId: string): void;
   abstract waitForCondition(tabId: string | null, options: BrowserWaitForConditionOptions, signal?: AbortSignal): Promise<{
       matched: boolean;
       elapsedMs: number;
@@ -450,7 +454,7 @@ export abstract class BrowserControllerContractBase {
       error?: string;
   }>;
   abstract getAgentWorkTab(browserTaskId: string): string | null;
-  abstract createAgentWorkTab(browserTaskId: string, url: string, openerTabId: string): Promise<{ success: boolean; tabId?: string; error?: string }>;
+  abstract createAgentWorkTab(browserTaskId: string, url: string, openerTabId: string | null): Promise<{ success: boolean; tabId?: string; error?: string }>;
   abstract getTaskWorkTabIds(browserTaskId: string): string[];
   abstract selectTaskWorkTab(browserTaskId: string, tabId: string): { success: boolean; tabId?: string; presented?: boolean; error?: string };
   abstract closeTaskTabs(request: { browserTaskId: string }): { success: boolean; closedTabIds: string[]; error?: string };

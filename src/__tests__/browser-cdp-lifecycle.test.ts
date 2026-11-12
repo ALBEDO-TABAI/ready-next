@@ -7,6 +7,7 @@ import { BrowserNetworkObserverService } from '../main/modules/browser-engine/ne
 function createHarness(
   initiallyAttached = false,
   executeCommand: (method: string) => Promise<unknown> = async () => ({}),
+  captureInputGuard?: (tabId: string | null, method: string) => (() => void) | undefined,
 ) {
   let attached = initiallyAttached
   const listeners = new Set<(...args: unknown[]) => void>()
@@ -38,6 +39,7 @@ function createHarness(
   const service = new BrowserCdpSessionService({
     resolveTabView: () => ({ tabId: 'tab-1', tab: { id: 'tab-1', view }, view }),
     createBrowserError: (_code, message) => new Error(message),
+    captureInputGuard,
   } as ConstructorParameters<typeof BrowserCdpSessionService>[0])
   return {
     commands,
@@ -47,6 +49,22 @@ function createHarness(
     get detachCalls() { return detachCalls },
   }
 }
+
+test('CDP rechecks the captured writer after attachment and before every physical event', async () => {
+  for (const reason of ['stopped', 'taken_over']) {
+    let admitted = true
+    const harness = createHarness(false, async () => ({}), (_tab, method) => {
+      if (!method.startsWith('Input.')) return undefined
+      return () => { if (!admitted) throw new Error(reason) }
+    })
+    await harness.service.sendCommand('tab-1', 'Input.dispatchMouseEvent', { type: 'mousePressed' })
+    const pending = harness.service.sendCommand('tab-1', 'Input.dispatchMouseEvent', { type: 'mouseMoved' })
+    admitted = false
+    await assert.rejects(pending, new RegExp(reason))
+    await assert.rejects(harness.service.sendCommand('tab-1', 'Input.dispatchMouseEvent', { type: 'mouseReleased' }), new RegExp(reason))
+    assert.deepEqual(harness.commands, ['Input.dispatchMouseEvent'])
+  }
+})
 
 function deferred<T = void>() {
   let resolve!: (value: T) => void

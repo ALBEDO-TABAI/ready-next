@@ -241,6 +241,7 @@ export const BROWSER_TOOL_SCHEMAS = {
   }),
 
   browser_status: z.object({
+    needs_user: z.enum(['login', 'captcha']).optional().describe('观察确认需要用户登录或完成验证码时声明；封住本任务写入并请用户处理，不自动继续'),
     tab_id: tabId,
     include_candidates: z.boolean().optional().describe('是否包含当前动作候选'),
     prompt: z.string().optional().describe('可选的输入内容核验'),

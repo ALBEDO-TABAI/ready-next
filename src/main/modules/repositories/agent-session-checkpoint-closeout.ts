@@ -654,6 +654,9 @@ export class AgentSessionCheckpointCloseoutRepository {
               terminalReason: input.terminalReason,
               canonicalMessageId: canonicalMessage.id,
               canonicalMessageDigest,
+              ...(input.initiator === 'codex_browser_verifier' && input.terminalReason === 'proof_gap'
+                ? { userAttentionReason: 'review_rejected' }
+                : {}),
               ...(input.completionVerifierReceipt
                 ? { completionVerifierReceipt: input.completionVerifierReceipt }
                 : {}),

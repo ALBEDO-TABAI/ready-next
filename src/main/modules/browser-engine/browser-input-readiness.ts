@@ -26,6 +26,7 @@ interface BrowserInputEnvironment {
   mainWindowForeground: boolean
   hostPresentation: BrowserHostPresentationState
   tabActive: boolean
+  backgroundWorkSurfaceAdmitted?: boolean
 }
 
 export interface BrowserInputDocumentState {
@@ -53,7 +54,7 @@ const TRANSPORT_REQUIREMENTS: Readonly<Record<BrowserInputTransport, {
 }
 
 export function browserInputEnvironmentReadiness(
-  controller: BrowserController,
+  controller: Pick<BrowserController, 'getBrowserInputEnvironment' | 'getPhysicalTargetToken'>,
   tabId: string | null,
   transport: BrowserInputTransport,
 ): BrowserInputReadiness {
@@ -90,6 +91,7 @@ export function browserInputEnvironmentReadiness(
   }
   if (!base.physicalTargetToken) return { ...base, ready: false, reason: 'physical_target_unavailable' }
   const requiresPresentedForeground = transport === 'trusted_pointer'
+    && !(environment.hostPresentation === 'background-work' && environment.backgroundWorkSurfaceAdmitted === true)
   if (requiresPresentedForeground && environment.hostPresentation !== 'visible') {
     return { ...base, ready: false, reason: 'host_not_presented' }
   }

@@ -15,7 +15,7 @@ import {
 } from '../agent-control/tools-runtime/tool-result-types'
 import { createRotatingLogger } from '../../utils/rotating-logger'
 import { getBrowserAnthropicTools, getBrowserOpenAITools } from './browser-tool-catalog'
-import { BrowserActionExecutor, type BrowserActionExecutorEvent } from './browser-action-executor'
+import { BrowserActionExecutor, interactionSignalFromResult, type BrowserActionExecutorEvent } from './browser-action-executor'
 import { browserMutationController } from './browser-mutation-controller'
 import { resolveBrowserToolInvocation, type BrowserToolInputSource } from './browser-tool-invocation'
 import { browserOperationCapability, isBrowserPublicToolName } from '../../../shared/browser-capability-registry'
@@ -369,6 +369,8 @@ export async function executeBrowserTool(
     }
     const origin = browserActionOrigin(args, controller)
     const initialTabId = resolveBrowserInitialTabId(args.tab_id, controller.getActiveTab?.()?.id)
+    const attentionPhysicalTarget = initialTabId && operationCapability?.requiresDocument
+      ? controller.getPhysicalTargetToken(initialTabId) : null
     const requiresPageLease = operationCapability?.requiresPageLease === true
     const tabList = controller.getTabList?.() || []
     const initialTarget = initialTabId
@@ -661,6 +663,16 @@ export async function executeBrowserTool(
         }
       },
       })
+    const interaction = interactionSignalFromResult(result)
+    const declaredAttention = toolName === 'browser_status' && typeof result !== 'string' && result.data?.ok !== false
+      && (args.needs_user === 'login' || args.needs_user === 'captcha')
+      ? args.needs_user : null
+    const attentionReason = declaredAttention || (interaction.challenge ? 'captcha' : interaction.loginWall ? 'login' : null)
+    if (attentionReason && initialTabId && attentionPhysicalTarget && browserTaskId && parentTaskId && ownerRunId) {
+      if (controller.getPhysicalTargetToken(initialTabId) !== attentionPhysicalTarget) throw new Error('browser_attention_target_changed')
+      controller.recordTaskAttention({ browserTaskId, parentTaskId, ownerRunId, tabId: initialTabId, physicalTargetToken: attentionPhysicalTarget }, attentionReason)
+      await controller.requestAgentInterruption(initialTabId)
+    }
     if (toolName === 'browser_download' && invocation.ok && invocation.operation !== 'download_resolve') {
       const data = typeof result === 'string' ? JSON.parse(result) : result.data
       if (data && Array.isArray(data.results)) {

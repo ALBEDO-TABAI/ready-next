@@ -53,6 +53,26 @@ function definition(name: string): ToolDefinition {
   }
 }
 
+test('browser definitions remain eager, frozen and independently authorized', () => {
+  const surface = buildReadyToolSurface({ surfaceId: 'eager', toolDefinitions: [definition('browser_cdp'), definition('browser_click'), definition('browser_archive')] })
+  assertReadyToolSurface(surface)
+  assert.deepEqual(surface.toolNames, ['browser_archive', 'browser_cdp', 'browser_click'])
+  for (const tool of surface.dynamicTools) assert.equal('deferLoading' in tool, false)
+  for (const tool of surface.responsesTools) assert.equal('defer_loading' in tool, false)
+  assert.equal(codexRequestToolsDigest(surface), surface.toolSurfaceDigest)
+  const authorization = buildReadyTurnToolAuthorization({ authorizationId: 'allowed-click',
+    authorization: buildExplicitNoSkillAuthorization(), toolSurface: surface, allowedToolNames: ['browser_click'] })
+  assert.deepEqual(authorization.allowedToolNames, ['browser_click'])
+  const tampered = structuredClone(surface)
+  Object.assign(tampered.dynamicTools[0], { deferLoading: true })
+  assert.throws(() => assertReadyToolSurface(tampered), /tool_surface_digest_mismatch/)
+  Object.assign(tampered.responsesTools[0], { defer_loading: true })
+  tampered.toolSurfaceDigest = digestCanonicalJson(tampered.responsesTools)
+  tampered.surfaceSnapshotDigest = digestCanonicalJson({ entries: tampered.entries,
+    dynamicTools: tampered.dynamicTools, responsesTools: tampered.responsesTools })
+  assert.throws(() => assertReadyToolSurface(tampered), /tool_surface_digest_mismatch/)
+})
+
 test('root Codex surface digest ignores control tools and stays deterministic', () => {
   const root = [
     definition('tool_a'),

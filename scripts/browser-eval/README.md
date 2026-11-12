@@ -139,6 +139,29 @@ node scripts/browser-eval/tool-layer/run.mjs --only form,spa   # 只跑几组
 
 边界：工作标签分组由 Main 返回 `browserTaskId`，关闭动作通过 `browser.closeTaskTabs({ browserTaskId })`，下载记录通过 `browser.getTaskDownloadReceipts({ browserTaskId })` 读取；截图标注不插入网页 DOM。差分基线按任务和标签隔离，任务清理时丢弃；较大的差分退回完整快照。网络统计在首次加载前安装，默认网络等待上限 15 秒；WebSocket/EventSource/event-stream 排除，重复 Fetch/XHR 及超过 10 秒的 Fetch/XHR 按轮询排除。
 
+## W7 第二批 Main：后台承载面与需要用户处理
+
+`READY_BROWSER_BACKGROUND_SURFACE=1` 打开实验后台承载面；未设置时仍要求前台指针。只挂载任务自己创建的工作标签，每页一个 1280×800 隐藏窗口；用户展示时迁回主窗口，运行清理时销毁承载窗口、保留标签。隐藏的真实窗口里已验收（见下），默认仍关闭：打开前还要在可见窗口里确认不抢焦点、切走工作页不停止后台，或跑任务层 D 类。
+
+所有命令应使用工作区外的短临时 HOME，并保持隐藏启动；不需要模型或远程调试端口：
+
+```bash
+task_home=$(mktemp -d /private/tmp/w7.XXXXXX)
+trap 'rm -rf "$task_home"' EXIT
+env HOME="$task_home" READY_START_HIDDEN=1 READY_BROWSER_BACKGROUND_SURFACE=1 node scripts/browser-eval/tool-layer/run.mjs --only background,attention
+env HOME="$task_home" READY_START_HIDDEN=1 npm run verify:browser-surface
+env HOME="$task_home" READY_START_HIDDEN=1 npm run verify:browser-eval-tools
+node --import tsx scripts/browser-eval/measure-tool-surface.ts
+```
+
+验收记录是工具层 `background` 组：经生产工具入口在后台承载面上点击与拖拽（命中）、滚动 1800 像素（`scrollY` 变化、懒加载触发、rAF 持续、`visibilityState` 为 visible、视口 1280×800）、5 次一秒间隔的 `app.getAppMetrics()` 采样且用户前台标签与窗口焦点不变、接管后零投递、释放后旧任务失去投递资格；`attention` 组声明登录/验证码、冷读需要用户处理状态、选择该标签并确认旧任务不能写入，通知使用替代端口。用 `--report <file>` 保存原始采样。
+
+原先的独立 probe（在从未显示的窗口里直接新建沙箱视图）已删除：那种做法下点击与拖拽能到达，滚轮却不滚动（CDP 滚轮一直不回应答，`sendInputEvent` 与 `Input.synthesizeScrollGesture` 也不滚动），而生产路径——标签先在主窗口里建立，再移入隐藏承载窗口——滚动正常。所以承载面只接收已建立的工作标签，不在隐藏窗口里直接新建标签。
+
+登录/验证码声明入口是 `browser_status({tab_id, needs_user: 'login' | 'captcha'})`：助手只判断语义，代码验证页面/任务归属、持久记录、封住写入并请用户处理。不使用网页关键词识别。需要用户处理的接口是 `agent.getBrowserTaskAttention` 与 `agent.actOnBrowserTaskAttention`；固定用户输入进入普通发送流程，完整形状和验收结果见 [Main 交付报告](../../docs/superpowers/audits/2026-11-12-w7-main-batch2.md)。
+
+令牌测量按生产冻结面 JSON 的 UTF-8 字节数除以 4 并向上取整。当前未启用延迟加载：`before`、`after`、`registered` 均为当前完整工具面，数值相同；这不是历史版本对比，也不表示已节省令牌。它不计工具检索额外开销，不代表模型费用或任务通过率。
+
 ## 任务层
 
 24 个任务，四类各 6 个。每个任务都有机器可判的终点：服务端记下的操作、资料库里的文件或文档内容。判定只看终点状态，不看助手的自述。D 类另外要求人工介入为 0。

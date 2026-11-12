@@ -191,6 +191,7 @@ export abstract class BrowserHumanTakeoverRuntime extends BrowserControllerHostR
       if (takeoverTabId === this.agentTabId) this.agentTabId = null
     }
     this.pendingPhysicalTakeovers.delete(takeoverTabId)
+    this.recordTaskAttention(binding, 'takeover')
     this.notifyBrowserLeaseChanged()
     this.notifyAgentControlChanged(null)
 
