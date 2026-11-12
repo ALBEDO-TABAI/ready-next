@@ -15,6 +15,7 @@ import AgentRuntimeListenerRoot from './modules/agent/AgentRuntimeListenerRoot'
 import { handleWorkspaceWatcherFailure } from './stores/useWorkspace'
 import { useAgent } from './stores/useAgent'
 import { FloatHost, ToastHost } from './components/ui'
+import { DraftSaveDialogHost } from './modules/document/drafts/DraftSaveDialog'
 
 const CanvasLab = lazy(() => import('./components/canvas/surface/CanvasLab'))
 const LiquidTest = lazy(() => import('./LiquidTest'))
@@ -155,6 +156,7 @@ function MainAppShell() {
       <RitualOverlay />
       <FloatHost />
       <ToastHost />
+      <DraftSaveDialogHost />
       <SkillInlinedToast />
       {captureFeedback && (
         <div

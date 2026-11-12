@@ -265,9 +265,8 @@ test('M6-D event drop commits one reference card; context schedule selects the a
   try {
     const values = new Map<string, string>()
     writeEventTransfer({ setData: (key, value) => { values.set(key, value) } }, { kind: 'event', id: 'series', occurrence: '2026-11-01' }, '全天日程', true)
-    const intake = JSON.parse(values.get('application/x-ready-drag')!)
-    assert.equal(intake.type, 'calendar-event'); assert.equal(intake.allDay, true)
-    assert.equal(intake.eventId, `series#${Date.parse('2026-11-01') / 1000}`)
+    assert.deepEqual(JSON.parse(values.get('application/x-ready-ref')!), { kind: 'event', id: 'series', occurrence: '2026-11-01' })
+    assert.equal(values.has('application/x-ready-drag'), false)
     const drop = new ui.dom.window.MouseEvent('drop', { bubbles: true, cancelable: true, clientX: 400, clientY: 300 })
     Object.defineProperty(drop, 'dataTransfer', { value: { getData: (key: string) => values.get(key) || '', types: [...values.keys()] } })
     await act(async () => ui.surface.dispatchEvent(drop))

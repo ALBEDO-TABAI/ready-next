@@ -1,3 +1,5 @@
+import { dropPageTreeReference } from '../../workbench/drop-page-tree'
+import { readReadyRefTransfer, writeReadyRefTransfer } from '../../../../shared/ready-ref'
 import { useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import { useStore } from 'zustand'
 import type { DocumentPagesAPI, PageNode, PageOperation, PageResult, PageRoot, PageTrashEntry } from '../../../../shared/document-pages'
@@ -165,9 +167,15 @@ export function InkSidebar({ roots, api = window.electronAPI.documentPages, onOp
     await saveBeforePageTrash(node)
     checked(await operate({ type: 'trash', objectId: node.objectId, root: root.path, operationId: crypto.randomUUID() }))
   })
-  const drop = (target: PageNode, parent: PageNode, root: string, before: boolean) => run(async () => {
+  const drop = (target: PageNode, parent: PageNode, root: string, before: boolean, data: DataTransfer) => run(async () => {
     const source = dragged.current; dragged.current = null; setDropTarget(null)
-    if (!source || source.node.objectId === target.objectId) return
+    const dropped = readReadyRefTransfer(data)
+    if (!dropped || !['page', 'file'].includes(dropped.ref.kind)) return
+    if (!source) {
+      if (!before && canHoldPages(target)) await dropPageTreeReference(data, { root, parentObjectId: target.objectId })
+      return
+    }
+    if (source.node.objectId === target.objectId) return
     if (source.root !== root) throw new Error('页面只能在同一个资料库内移动。')
     if (before) {
       if (source.parent.objectId !== parent.objectId) throw new Error('排序只支持同级页面；移入另一页请拖到页面标题上。')
@@ -257,14 +265,14 @@ export function InkSidebar({ roots, api = window.electronAPI.documentPages, onOp
       {sortable && <div aria-label={`排在 ${node.title} 之前`} className={`ink-sb-drop-gap${dropTarget === `before:${id}` ? ' is-active' : ''}`}
         onDragOver={event => { if (dragged.current) { event.preventDefault(); setDropTarget(`before:${id}`) } }}
         onDragLeave={() => setDropTarget(current => current === `before:${id}` ? null : current)}
-        onDrop={event => { event.preventDefault(); event.stopPropagation(); void drop(node, parent!, root, true) }} />}
+        onDrop={event => { event.preventDefault(); event.stopPropagation(); void drop(node, parent!, root, true, event.dataTransfer) }} />}
       <div className={`ink-sb-row ink-sb-tree${selected ? ' is-selected' : ''}${dropTarget === `into:${id}` ? ' is-drop-into' : ''}`}
-        draggable={sortable && !busy && node.kind === 'page' && !node.ambiguity}
-        onDragStart={(event: DragEvent) => { event.stopPropagation(); dragged.current = { node, parent: parent!, root }; event.dataTransfer.setData('text/plain', node.objectId); if (node.kind === 'page') event.dataTransfer.setData(READY_REF_MIME, JSON.stringify({ kind: 'page', id: node.objectId })); event.dataTransfer.effectAllowed = 'move' }}
+        draggable={sortable && !busy && !node.ambiguity}
+        onDragStart={(event: DragEvent) => { event.stopPropagation(); dragged.current = { node, parent: parent!, root }; writeReadyRefTransfer(event.dataTransfer, { kind: node.kind === 'canvas' ? 'canvas' : node.kind === 'page' ? 'page' : 'file', id: node.objectId }, node.title); event.dataTransfer.effectAllowed = 'move' }}
         onDragEnd={() => { dragged.current = null; setDropTarget(null) }}
-        onDragOver={event => { if (dragged.current && sortable && expandable) { event.preventDefault(); setDropTarget(`into:${id}`) } }}
+        onDragOver={event => { if (event.dataTransfer.types.includes(READY_REF_MIME) && expandable) { event.preventDefault(); setDropTarget(`into:${id}`) } }}
         onDragLeave={() => setDropTarget(current => current === `into:${id}` ? null : current)}
-        onDrop={event => { event.preventDefault(); event.stopPropagation(); if (parent) void drop(node, parent, root, false) }}
+        onDrop={event => { event.preventDefault(); event.stopPropagation(); if (parent) void drop(node, parent, root, false, event.dataTransfer) }}
         onClick={event => activate(event)}
         onContextMenu={event => { event.preventDefault(); openRowMenu(event.currentTarget, node, { x: event.clientX, y: event.clientY }) }}>
         <span className="ink-sb-indent" style={{ width: level * 8 }} />

@@ -9,9 +9,11 @@ import {
   ChevronDown,
   Maximize2,
   Loader2,
-  Highlighter,
 } from 'lucide-react'
-import { PdfSelectionSchema, locatePdfQuote, type PdfSelection } from '../../../shared/pdf-source-anchor'
+import { PdfSelectionSchema, locatePdfQuote, pdfAnchor, pdfQuote, type PdfSelection } from '../../../shared/pdf-source-anchor'
+import type { CaptureSelection } from '../../modules/workbench/capture'
+import { announceHighlight } from '../../modules/workbench/capture-receipt'
+import { useSelectionBar } from '../../modules/workbench/selection-bar/open-selection-bar'
 import { usePdfReference } from '../../modules/workbench/open-ready-ref'
 import { type DocTab } from '../../stores/useDocTabs'
 import {
@@ -118,6 +120,13 @@ function readPdfSelection(container: HTMLElement, id: string, expectedHash: stri
   return parsed.success ? parsed.data : null
 }
 
+/** The selection as a capture: the PDF by identity, the quote anchored on its page (W6 §3.2). */
+function pdfSelectionCapture(selected: PdfSelection | null, title: string): CaptureSelection | null {
+  if (!selected) return null
+  return { ref: { kind: 'file', id: selected.id, anchor: pdfAnchor(pdfQuote(selected.text, selected.page, selected.start, selected.end)) },
+    title: `${title.replace(/\.pdf$/i, '')} · 第 ${selected.page} 页`, text: selected.exact }
+}
+
 function highlightPdfRange(layer: Element, start: number, end: number): () => void {
   const walker = document.createTreeWalker(layer, NodeFilter.SHOW_TEXT), marks: HTMLElement[] = []
   const nodes: Text[] = []
@@ -139,8 +148,6 @@ function highlightPdfRange(layer: Element, start: number, end: number): () => vo
 
 export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
   const [pdfHash, setPdfHash] = useState('')
-  const [selection, setSelection] = useState<PdfSelection | null>(null)
-  const [saving, setSaving] = useState(false)
   const [notice, setNotice] = useState<{ role: 'status' | 'alert'; text: string } | null>(null)
   const target = usePdfReference(s => s.target)
   const generation = useRef(0)
@@ -160,7 +167,7 @@ export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
 
   useEffect(() => {
     const current = ++generation.current
-    setPdfHash(''); setSelection(null); setNotice(null); setSaving(false)
+    setPdfHash(''); setNotice(null)
     setNumPages(0)
     setCurrentPage(1)
     setPageHeights(new Map())
@@ -301,29 +308,16 @@ export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
     if (element) element.dataset.pdfTextState = state
   }, [])
 
-  useEffect(() => {
-    const update = () => setSelection(containerRef.current && tab.objectId && pdfHash
-      ? readPdfSelection(containerRef.current, tab.objectId, pdfHash) : null)
-    document.addEventListener('selectionchange', update)
-    update()
-    return () => document.removeEventListener('selectionchange', update)
-  }, [tab.objectId, pdfHash])
-
-  const saveSelection = async () => {
-    const current = generation.current
-    const selected = containerRef.current && tab.objectId && pdfHash ? readPdfSelection(containerRef.current, tab.objectId, pdfHash) : null
-    if (!selected || saving) return
-    setSaving(true); setNotice(null)
-    try {
+  // Selections share the reading scenes' bar (W6 §3.2). Offsets are only meaningful once the PDF's version is known.
+  const readSelected = () => containerRef.current && tab.objectId && pdfHash ? readPdfSelection(containerRef.current, tab.objectId, pdfHash) : null
+  useSelectionBar(containerRef, { enabled: Boolean(tab.objectId && pdfHash), read: () => pdfSelectionCapture(readSelected(), tab.title),
+    highlight: async () => {
+      const selected = readSelected()
+      if (!selected) throw new Error('选区已经变了，请重新选择文字')
       const result = await window.electronAPI.sourceAnnotations.pdf(selected)
-      if (generation.current !== current) return
       if (!result.success) throw new Error(result.error)
-      setNotice({ role: 'status', text: result.data.warning || (result.data.persistence === 'saved' ? '已划线到来源页' : '已合并到来源页，请保存') })
-    } catch (error) {
-      console.error('[PdfViewer] save PDF highlight failed:', error instanceof Error ? error.message : String(error))
-      if (generation.current === current) setNotice({ role: 'alert', text: error instanceof Error ? error.message : String(error) })
-    } finally { if (generation.current === current) setSaving(false) }
-  }
+      announceHighlight(result.data, selected.exact)
+    } })
 
   useEffect(() => {
     if (!target || !numPages || target.path !== tab.path || target.id !== tab.objectId) return
@@ -519,17 +513,6 @@ export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
         {/* Separator */}
         <div style={{ width: 1, height: 16, background: 'var(--border-default)', margin: '0 4px' }} />
 
-        <button
-          onMouseDown={event => event.preventDefault()}
-          onClick={saveSelection}
-          disabled={!selection || saving}
-          className="bg-transparent hover:bg-[var(--bg-hover)] disabled:opacity-30"
-          style={{ width: 28, height: 28, borderRadius: 4, border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: !selection || saving ? 'not-allowed' : 'pointer' }}
-          title="划线到来源页"
-          aria-label="划线到来源页"
-        >
-          <Highlighter size={14} color="var(--text-muted)" />
-        </button>
         {notice && <span role={notice.role} style={{ fontSize: 11, color: notice.role === 'alert' ? 'var(--color-red, #d93025)' : 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 260 }}>{notice.text}</span>}
 
         {/* File name */}

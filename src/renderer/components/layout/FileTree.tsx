@@ -1,3 +1,5 @@
+import { READY_REF_MIME } from '../../../shared/ready-ref'
+import { dropPageTreeReference } from '../../modules/workbench/drop-page-tree'
 import { useMemo, useState, useRef, useEffect, useCallback, useLayoutEffect } from 'react'
 import {
   IconAlertTriangle as AlertTriangle,
@@ -15,18 +17,13 @@ import { isImagePreviewPath, useDocTabs } from '../../stores/useDocTabs'
 import type { WorkbenchMode } from '../../stores/useMode'
 import {
   dispatchFileTreeExternalDropAction,
-  getActiveRssItemDragPayload,
   getActiveUntitledDocTabDragPayload,
-  parseBrowserTabDragPayload,
-  parseRssItemDragPayload,
-  parseUntitledDocTabDragPayload,
   parseWebDownloadDragPayload,
   resolveFileTreeDropTarget,
   resolveInternalMoveDir,
   getTargetDirFromDropTarget,
   canMoveAllToDirectory,
   shouldKeepFileTreeDropHintOnLeave,
-  UNTITLED_DOC_TAB_DRAG_MIME,
   type FileTreeDropTarget,
   type FileTreeExternalDropAction,
   type FileTreeExternalDropPayload,
@@ -34,7 +31,6 @@ import {
   type WebDownloadDragPayload,
 } from './fileTreeExternalDrop'
 import { saveUntitledDocTabToDirectory } from '../../modules/document/untitledDocSave'
-import { getActiveBrowserTabDragPayload } from '../../modules/browser/browserTabDragSession'
 import { isReadyBoardFile } from '../../../shared/ready-board'
 import { isLocalHtmlFilePath, openLocalHtmlFileInBrowser } from '../../modules/browser/localHtmlFileOpen'
 import { requestWorkbenchModeOpen } from '../../modules/workbench/mode-transition'
@@ -789,16 +785,11 @@ export default function FileTree({
 
   const getExternalDropPayload = useCallback(
     (dataTransfer: DataTransfer): FileTreeExternalDropPayload | null => {
+      if (dataTransfer.types.includes(READY_REF_MIME)) return null
       const generatedImage = getGeneratedImageDragPayload(dataTransfer)
       if (generatedImage) return generatedImage
-      const untitledDocTab = parseUntitledDocTabDragPayload(dataTransfer.getData(UNTITLED_DOC_TAB_DRAG_MIME))
-        ?? getActiveUntitledDocTabDragPayload()
+      const untitledDocTab = getActiveUntitledDocTabDragPayload()
       if (untitledDocTab) return untitledDocTab
-      const raw = dataTransfer.getData('application/x-ready-drag')
-      const browserTab = parseBrowserTabDragPayload(raw) ?? getActiveBrowserTabDragPayload()
-      if (browserTab) return browserTab
-      const rssItem = parseRssItemDragPayload(raw) ?? getActiveRssItemDragPayload()
-      if (rssItem) return rssItem
       return parseWebDownloadDragPayload(dataTransfer)
     },
     [],
@@ -943,6 +934,7 @@ export default function FileTree({
   }, [handleGeneratedImageDrop, handleUntitledDocTabDrop, handleWebDownloadDrop])
 
   const handleItemDragOver = useCallback((e: React.DragEvent, item: FileItem, containerPath: string) => {
+    if (e.dataTransfer.types.includes(READY_REF_MIME)) e.preventDefault()
     const workspacePayloads = readWorkspaceDragPayloads(e.dataTransfer)
     if (workspacePayloads.length > 0) {
       // Internal move: reuse the same precise drop indicator as external drops so the
@@ -1018,6 +1010,11 @@ export default function FileTree({
   }, [fileTreeDropTarget, moveDropTargetDir, shouldPreserveDropHint])
 
   const handleItemDrop = useCallback((e: React.DragEvent, item: FileItem, containerPath: string) => {
+    if (e.dataTransfer.types.includes(READY_REF_MIME) && !readWorkspaceDragPayloads(e.dataTransfer).length) {
+      e.preventDefault(); e.stopPropagation()
+      void dropPageTreeReference(e.dataTransfer, { parentPath: item.isDirectory ? item.path : containerPath }).catch(error => showMoveNotice(String(error)))
+      return
+    }
     const externalPayload = getExternalDropPayload(e.dataTransfer)
     if (externalPayload) {
       e.preventDefault()
@@ -1058,7 +1055,7 @@ export default function FileTree({
         void moveWorkspaceItems(workspacePayloads, destDir)
       }
     }
-  }, [getExternalDropPayload, handleResolvedExternalDrop, moveWorkspaceItems])
+  }, [getExternalDropPayload, handleResolvedExternalDrop, moveWorkspaceItems, showMoveNotice])
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -1110,6 +1107,10 @@ export default function FileTree({
     const lastDropTarget = fileTreeDropTarget
     const payloads = readWorkspaceDragPayloads(e.dataTransfer)
     clearFileTreeDragState()
+    if (!payloads.length && e.dataTransfer.types.includes(READY_REF_MIME)) {
+      try { await dropPageTreeReference(e.dataTransfer, { parentPath: currentPath }) } catch (error) { /* silent-catch: the reason is shown in the tree's move notice */ showMoveNotice(String(error)) }
+      return
+    }
     if (canMoveAllToDirectory(payloads, currentPath)) {
       await moveWorkspaceItems(payloads, currentPath)
       return
@@ -1140,7 +1141,7 @@ export default function FileTree({
         if (p) addPinnedFolder(p)
       }
     }
-  }, [addPinnedFolder, clearFileTreeDragState, fileTreeDropTarget, currentPath, getExternalDropPayload, handleResolvedExternalDrop, moveWorkspaceItems])
+  }, [addPinnedFolder, clearFileTreeDragState, fileTreeDropTarget, currentPath, getExternalDropPayload, handleResolvedExternalDrop, moveWorkspaceItems, showMoveNotice])
 
   const handleExternalDropAction = useCallback(
     (action: FileTreeExternalDropAction) => {

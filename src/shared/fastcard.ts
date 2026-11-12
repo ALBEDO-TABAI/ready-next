@@ -1,6 +1,9 @@
+import { toReadyUri, type ReadyRef } from './ready-ref'
+
 export type FastCardItemKind = 'text' | 'image' | 'video' | 'translation' | 'image-description' | 'audio'
 
 export interface FastCardSource {
+  ref?: ReadyRef
   pageUrl?: string
   pageTitle?: string
   domain?: string
@@ -80,6 +83,14 @@ export type BrowserFastCardContextAction =
 export interface BrowserFastCardContextActionEvent {
   action: BrowserFastCardContextAction
   target: BrowserFastCardTarget
+}
+
+/** A browser tab's selected words (W6 §3.2), sent when a pointer or keyboard selection ends; empty text clears it. */
+export interface BrowserSelectionEvent {
+  tabId: string
+  text: string
+  url: string
+  title: string
 }
 
 export interface FastCardTranslateRequest {
@@ -164,6 +175,7 @@ export type FastCardOverlayCommand =
   | { type: 'save-canvas'; itemIds: string[] }
   | { type: 'insert-chat'; itemIds?: string[] }
   | { type: 'remove-item'; id: string }
+  | { type: 'insert-document'; id: string }
   | { type: 'target-language-change'; targetLanguage: string }
 
 export interface FastCardIPCResult<T> {
@@ -230,6 +242,7 @@ function mdEscape(value: string | undefined): string {
 
 function sourceLine(source: FastCardSource | undefined): string {
   const label = source?.pageTitle || source?.domain || source?.pageUrl || ''
+  if (source?.ref) return `来源：[${label || '出处'}](${toReadyUri(source.ref)})`
   if (!source?.pageUrl) return label ? `来源：${label}` : ''
   return `来源：[${label || source.pageUrl}](${source.pageUrl})`
 }
@@ -322,6 +335,7 @@ export interface FastCardTransferReceipt {
   state: 'completed'; operationId: string; objectId: string; title: string; nodeIds: string[]
 }
 export interface FastCardTransferAPI {
+  documentImage(input: { itemId: string; pageId: string }): Promise<FastCardIPCResult<string>>
   transfer(input: FastCardTransferRequest): Promise<FastCardIPCResult<FastCardTransferReceipt>>
   undo(operationId: string): Promise<FastCardIPCResult<{ state: 'undone' }>>
   targets(): Promise<FastCardIPCResult<Array<{ objectId: string; title: string }>>>

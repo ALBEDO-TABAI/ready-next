@@ -4,41 +4,48 @@ import { createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { JSDOM } from 'jsdom'
-import type { RSSArticleExcerpt } from '../shared/rss-workspace'
 import { WEB_SOURCE_SELECTION_SCRIPT } from '../main/modules/library-engine/source-document-ipc'
+import { importWithoutStyles } from './utils/import-without-styles'
 
-// Real selection ranges and components; only the process boundary is substituted.
-test('RSS selection and FastCard source actions send scoped requests and display save failures', async t => {
+// Real selection ranges, the shared selection bar and its toast; only the process boundary is substituted.
+test('划线 in the shared bar: 资讯 sends the scoped reading range, the web page sends its tab, failures are reported', async t => {
   const dom = new JSDOM('<div id="root"></div><div id="body"><span data-ready-reading-run="0" data-ready-reading-block="0">甲乙丙丁</span></div>', { url: 'http://127.0.0.1', runScripts: 'outside-only' })
   const globals = new Map<string, PropertyDescriptor | undefined>()
-  for (const [key, value] of Object.entries({ window: dom.window, document: dom.window.document, localStorage: dom.window.localStorage, CustomEvent: dom.window.CustomEvent })) {
+  for (const [key, value] of Object.entries({ window: dom.window, document: dom.window.document, localStorage: dom.window.localStorage, CustomEvent: dom.window.CustomEvent,
+    HTMLElement: dom.window.HTMLElement, Element: dom.window.Element, Node: dom.window.Node, ResizeObserver: class { observe() {} disconnect() {} } })) {
     globals.set(key, Object.getOwnPropertyDescriptor(globalThis, key)); Object.defineProperty(globalThis, key, { configurable: true, value })
   }
   const root = createRoot(dom.window.document.getElementById('root')!)
   t.after(async () => { flushSync(() => root.unmount()); await new Promise(resolve => setImmediate(resolve)); dom.window.close(); for (const [key, descriptor] of globals) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key) } })
   const calls: unknown[] = []
+  const saved = { persistence: 'saved', version: 'v1', sourcePath: '/vault/文章/文章.md', highlights: [], anchors: 'synced' }
   Object.defineProperty(dom.window, 'electronAPI', { value: { sourceAnnotations: {
-    rss: async (input: unknown) => { calls.push(input); return { success: true, data: { persistence: 'saved' } } },
+    rss: async (input: unknown) => { calls.push(input); return { success: true, data: saved } },
     web: async (input: unknown) => { calls.push(input); return { success: false, error: '网页已切换，请重新选择' } },
   } } })
-  const { default: RSSSelectionReferences } = await import('../renderer/components/rss/RSSSelectionReferences')
-  const { BrowserSourceHighlight } = await import('../renderer/pages/modes/BrowserSourceHighlight')
+  const { SelectionBar } = await importWithoutStyles(() => import('../renderer/modules/workbench/selection-bar/SelectionBar'))
+  const { ToastHost } = await importWithoutStyles(() => import('../renderer/components/ui'))
+  const { highlightReadingSelection, readingSelectionCapture } = await import('../renderer/modules/rss/reading-selection')
+  const { highlightWebSelection, webSelectionCapture } = await import('../renderer/modules/browser/web-selection-bar')
   const body = dom.window.document.getElementById('body') as HTMLDivElement
   const selected = dom.window.document.createRange(); selected.setStart(body.firstChild!.firstChild!, 1); selected.setEnd(body.firstChild!.firstChild!, 3)
   dom.window.getSelection()!.addRange(selected)
-  const article = { id: 'article', title: '文章', revision: 'version' } as RSSArticleExcerpt['article']
-  flushSync(() => root.render(createElement(RSSSelectionReferences, { bodyRef: { current: body }, article, active: true })))
-  await new Promise(resolve => setImmediate(resolve))
-  flushSync(() => {})
-  const button = () => Array.from(dom.window.document.querySelectorAll('button')).find(node => node.textContent === '划线到来源页')!
-  assert.equal(button().disabled, false)
-  button().click(); await new Promise(resolve => setTimeout(resolve, 20))
+  const article = { id: 'article', title: '文章', revision: 'version' }
+  const read = () => readingSelectionCapture(body, article, dom.window.getSelection())
+  const settle = () => new Promise(resolve => setTimeout(resolve, 20))
+  const click = (label: string) => Array.from(dom.window.document.querySelectorAll<HTMLButtonElement>('[data-ready-selection-bar] button')).find(node => node.textContent === label)!.click()
+  const toast = () => Array.from(dom.window.document.querySelectorAll('.rn-toast')).at(-1)
+  flushSync(() => root.render(createElement('div', null, createElement(SelectionBar, { read, highlight: () => highlightReadingSelection(read()) }), createElement(ToastHost))))
+  click('划线'); await settle(); flushSync(() => {})
   assert.partialDeepStrictEqual(calls[0], { itemId: 'article', expectedRevision: 'version', range: { start: { run: 0, offset: 1 }, end: { run: 0, offset: 3 } } })
-  assert.equal(dom.window.document.querySelector('[role=status]')!.textContent, '已划线到来源页')
-  flushSync(() => root.render(createElement(BrowserSourceHighlight, { tabId: 'tab' })))
-  button().click(); await new Promise(resolve => setTimeout(resolve, 20))
+  assert.match(toast()!.textContent!, /^已划线到来源页/)
+  const web = { tabId: 'tab', text: '网页文字', url: 'http://127.0.0.1/page', title: '本地网页' }
+  assert.equal(webSelectionCapture({ ...web, url: 'file:///private/page.html' }), null, 'only http and https pages are web references')
+  flushSync(() => root.render(createElement('div', null, createElement(SelectionBar, { read: () => webSelectionCapture(web), highlight: () => highlightWebSelection(web) }), createElement(ToastHost))))
+  click('划线'); await settle(); flushSync(() => {})
   assert.deepEqual(calls[1], { tabId: 'tab' })
-  assert.equal(dom.window.document.querySelector('[role=status]')!.textContent, '网页已切换，请重新选择')
+  assert.equal(toast()!.getAttribute('data-tone'), 'bad')
+  assert.match(toast()!.textContent!, /网页已切换，请重新选择/)
 })
 
 test('web capture binds an actual DOM selection to exact text and surrounding context', () => {

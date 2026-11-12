@@ -120,7 +120,12 @@
 }
 
 @layer ready-next.library {
-.rn-library .rd-highlight-popover { position: absolute; z-index: 60; max-width: min(460px, calc(100% - 16px)); }
+/* Wide enough for a saved highlight's tools (with 存入 FastCard and 保存到画板) to stay on one line. */
+.rn-library .rd-highlight-popover { position: absolute; z-index: 60; max-width: min(520px, calc(100% - 16px)); }
+/* Selected words: the reading scenes' shared bar, as wide as its buttons (it wraps only in a narrow reader). */
+.rn-library .rd-highlight-popover.is-selection { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; width: max-content; max-width: calc(100% - 16px); }
+.rn-library .rd-highlight-popover.is-selection .rn-selection-bar { max-width: 100%; }
+.rn-library .highlight-source { display: flex; align-items: center; gap: 6px; }
 .rn-library .highlight-tools { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px; }
 .rn-library .highlight-tools [role="group"] { display: flex; gap: 6px; width: 100%; }
 .rn-library .highlight-tools [role="group"] button { border-bottom: 4px solid var(--marker); padding: 5px 8px; }

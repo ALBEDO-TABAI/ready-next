@@ -3,7 +3,9 @@ import type { DocTab } from '../../../stores/useDocTabs'
 import { DraftController, type DraftPort } from './controller'
 import { migrateLegacyDrafts } from './migration'
 
-export const useDraftUI = create<{ epoch: number; boot: 'loading' | 'ready' | 'failed' | 'no_vault'; error: string; saveTabId: string | null; saveParentPath?: string; saveRequestId?: string }>(() => ({
+/** Where the Save To picker of a request shows: the document topbar, or a dialog over whatever mode the person is in. */
+export type DraftSaveHost = 'document' | 'dialog'
+export const useDraftUI = create<{ epoch: number; boot: 'loading' | 'ready' | 'failed' | 'no_vault'; error: string; saveTabId: string | null; saveParentPath?: string; saveRequestId?: string; saveHost?: DraftSaveHost }>(() => ({
   epoch: 0, boot: 'loading', error: '', saveTabId: null,
 }))
 export let drafts: DraftController
@@ -46,13 +48,13 @@ export function completeDraftSave(path: string | null, requestId = useDraftUI.ge
   if (requestId !== useDraftUI.getState().saveRequestId) return
   const complete = saveCompletion
   saveCompletion = undefined
-  useDraftUI.setState({ saveTabId: null, saveParentPath: undefined, saveRequestId: undefined })
+  useDraftUI.setState({ saveTabId: null, saveParentPath: undefined, saveRequestId: undefined, saveHost: undefined })
   complete?.(path)
 }
-export function requestDraftSave(id: string, parentPath?: string): Promise<string | null> {
+export function requestDraftSave(id: string, parentPath?: string, host: DraftSaveHost = 'document'): Promise<string | null> {
   completeDraftSave(null)
   return new Promise(resolve => {
     saveCompletion = resolve
-    useDraftUI.setState({ saveTabId: id, saveParentPath: parentPath, saveRequestId: crypto.randomUUID() })
+    useDraftUI.setState({ saveTabId: id, saveParentPath: parentPath, saveRequestId: crypto.randomUUID(), saveHost: host })
   })
 }

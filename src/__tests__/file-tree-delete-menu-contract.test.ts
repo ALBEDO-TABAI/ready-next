@@ -72,7 +72,7 @@ test('file tree internal native drags can drop without a system Files dataTransf
   // da4c25cc fix(files): make in-tree move indicators actually appear during drag — 直接 parse 改为 readWorkspaceDragPayloads（dragover protected drag store 用 dragstart 会话兜底），移动前置守卫收敛进 moveWorkspaceItems(targetDir)
   assert.match(
     source,
-    /function readWorkspaceDragPayloads\(dataTransfer: DataTransfer\): WorkspaceDragPayload\[\] \{\s+const parsed = parseWorkspaceDragPayloads\(dataTransfer\)\s+return parsed\.length > 0 \? parsed : getActiveWorkspaceDragPayloads\(\)/,
+    /function readWorkspaceDragPayloads\(dataTransfer: DataTransfer\): WorkspaceDragPayload\[\] \{\s+const parsed = parseWorkspaceDragPayloads\(dataTransfer\)\s+return dataTransfer\.getData\(READY_REF_MIME\) \? parsed : getActiveWorkspaceDragPayloads\(\)/,
   )
   assert.match(
     source,
@@ -80,7 +80,7 @@ test('file tree internal native drags can drop without a system Files dataTransf
   )
   assert.match(
     source,
-    /const payloads = readWorkspaceDragPayloads\(e\.dataTransfer\)\s+clearFileTreeDragState\(\)\s+if \(canMoveAllToDirectory\(payloads, currentPath\)\) \{\s+await moveWorkspaceItems\(payloads, currentPath\)/,
+    /const payloads = readWorkspaceDragPayloads\(e\.dataTransfer\)\s+clearFileTreeDragState\(\)\s+if \(!payloads\.length && e\.dataTransfer\.types\.includes\(READY_REF_MIME\)\) \{[\s\S]*?return\s+\}\s+if \(canMoveAllToDirectory\(payloads, currentPath\)\) \{\s+await moveWorkspaceItems\(payloads, currentPath\)/,
   )
   assert.doesNotMatch(source, /nativePayload && hasNativeFileDrop\(e\.dataTransfer\) && canMoveToDirectory\(nativePayload, dirPath\)/)
   assert.doesNotMatch(source, /nativePayload && hasNativeFileDrop\(e\.dataTransfer\) && canMoveToDirectory\(nativePayload, currentPath\)/)

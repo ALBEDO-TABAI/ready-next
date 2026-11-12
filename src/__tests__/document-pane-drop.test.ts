@@ -1,3 +1,4 @@
+import { prepareFileDragRef } from '../renderer/modules/workbench/file-drag-ref'
 import { createDraftFixture } from './helpers/ready-drafts-fixture'
 import { configureDrafts, drafts } from '../renderer/modules/document/drafts/runtime'
 import assert from 'node:assert/strict'
@@ -200,81 +201,32 @@ test('pane focus accepts only one of the two visible documents', () => {
   assert.equal(useDocTabs.getState().focusedPaneTabId, 'left')
 })
 
-test('document pane drop accepts document tabs and workspace files but rejects folders and unsupported paths', () => {
-  const docTabDrop = fakeDataTransfer({
-    'application/x-ready-document-tab': JSON.stringify({
-      type: 'doc-tab',
-      path: '/tmp/brief.md',
-      name: 'brief.md',
-      ext: '.md',
-    }),
-  })
-  assert.equal(getDocumentPaneDropPath(docTabDrop), '/tmp/brief.md')
-  assert.equal(canAcceptDocumentPaneDrop(docTabDrop), true)
-
-  const fileDrop = fakeDataTransfer({
-    'application/x-ready-workspace-item': JSON.stringify({
-      type: 'file',
-      path: '/tmp/sheet.csv',
-      name: 'sheet.csv',
-      ext: 'csv',
-      isDirectory: false,
-    }),
-  })
-  assert.equal(getDocumentPaneDropPath(fileDrop), '/tmp/sheet.csv')
-
-  const folderDrop = fakeDataTransfer({
-    'application/x-ready-drag': JSON.stringify({
-      type: 'folder',
-      path: '/tmp/folder.md',
-      name: 'folder.md',
-      ext: 'md',
-      isDirectory: true,
-    }),
-    'text/plain': '/tmp/folder.md',
-  })
-  assert.equal(getDocumentPaneDropPath(folderDrop), null)
-
-  const unsupportedDrop = fakeDataTransfer({
-    'text/plain': '/tmp/archive.zip',
-  })
-  assert.equal(getDocumentPaneDropPath(unsupportedDrop), null)
-  assert.equal(canAcceptDocumentPaneDrop(unsupportedDrop), false)
+test('document pane drop accepts Ready page/file identities, rejects folders and foreign references', async () => {
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { electronAPI: { objects: { resolvePath: async (path: string) => ({ objectId: path, path }) } } } })
+  for (const [path, directory] of [['/tmp/brief.md', false], ['/tmp/sheet.csv', false], ['/tmp/folder.md', true]] as const) {
+    const ref = await prepareFileDragRef(path, directory)
+    const data = fakeDataTransfer({ 'application/x-ready-ref': JSON.stringify(ref) })
+    assert.equal(getDocumentPaneDropPath(data), directory ? null : path)
+    assert.equal(canAcceptDocumentPaneDrop(data), !directory)
+  }
+  const foreign = fakeDataTransfer({ 'application/x-ready-ref': JSON.stringify({ kind: 'web', url: 'https://example.com' }) })
+  assert.equal(getDocumentPaneDropPath(foreign), null)
+  assert.equal(canAcceptDocumentPaneDrop(foreign), false)
+  assert.equal(getDocumentPaneDropPath(fakeDataTransfer({ 'text/plain': '/tmp/archive.zip' })), null)
 })
 
-test('document pane dragover accepts Ready custom drags by type before payload data is readable', () => {
-  const protectedDocTabDrag = fakeDataTransfer({
-    'application/x-ready-document-tab': '',
-  })
-  const protectedWorkspaceDrag = fakeDataTransfer({
-    'application/x-ready-workspace-item': '',
-  })
-
-  assert.equal(canAcceptDocumentPaneDrop(protectedDocTabDrag), true)
-  assert.equal(canAcceptDocumentPaneDrop(protectedWorkspaceDrag), true)
-  assert.equal(getDocumentPaneDropPath(protectedDocTabDrag), null)
+test('protected Ready drag is accepted until its reference can be checked at drop', () => {
+  const data = fakeDataTransfer({ 'application/x-ready-ref': '' })
+  assert.equal(canAcceptDocumentPaneDrop(data), true)
+  assert.equal(getDocumentPaneDropPath(data), null)
 })
 
-test('document pane dragover does not claim generic Ready drags that are not document files', () => {
-  const browserTabDrag = fakeDataTransfer({
-    'application/x-ready-drag': JSON.stringify({
-      type: 'browser-tab',
-      name: 'Example',
-      url: 'https://example.com',
-    }),
-  })
-  const skillDrag = fakeDataTransfer({
-    'application/x-ready-drag': JSON.stringify({
-      type: 'skill-folder',
-      path: '/tmp/my-skill',
-      name: 'my-skill',
-    }),
-    'application/x-ready-skill': '{}',
-    'text/plain': '@[my-skill]',
-  })
-
-  assert.equal(canAcceptDocumentPaneDrop(browserTabDrag), false)
-  assert.equal(canAcceptDocumentPaneDrop(skillDrag), false)
+test('retired internal drag payloads have no receiving path', () => {
+  for (const type of ['application/x-ready-drag', 'application/x-ready-document-tab', 'application/x-ready-workspace-item']) {
+    const data = fakeDataTransfer({ [type]: JSON.stringify({ type: 'file', path: '/tmp/file.md' }) })
+    assert.equal(getDocumentPaneDropPath(data), null)
+    assert.equal(canAcceptDocumentPaneDrop(data), false)
+  }
 })
 
 test('document pane drop resolves native file drops through Electron file paths', () => {

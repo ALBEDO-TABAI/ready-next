@@ -1,0 +1,8 @@
+/* The selection bar (W6 §3.2): one float-material strip of ghost buttons, the same in the four reading scenes.
+   --rn-* tokens only (DS1). */
+@layer ready-next.primitives {
+  .rn-selection-bar { display: inline-flex; padding: 4px; max-width: calc(100vw - 16px); }
+  .rn-selection-bar .rn-toolbar { gap: 2px; min-height: 0; flex-wrap: wrap; }
+  .rn-selection-bar .rn-btn { padding: 0 9px; gap: 6px; }
+  .rn-selection-bar .rn-btn svg { width: 15px; height: 15px; }
+}

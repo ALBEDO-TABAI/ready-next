@@ -1,3 +1,6 @@
+import { READY_REF_MIME } from '../../../shared/ready-ref'
+import { dropDocumentReference } from '../../modules/workbench/capture'
+import { getTabBuffer } from '../../modules/document/block-editor/tab-buffer'
 import { librarySelectionRangeFromDOM } from '../../modules/agent/libraryResourceSelection'
 import { textAreaContent, textAreaOffset } from '../../modules/document/block-editor/text-edit'
 import { useSourceHistory } from '../../modules/document/block-editor/use-source-history'
@@ -599,8 +602,7 @@ export default function MarkdownEditor({
     const types = new Set(Array.from(e.dataTransfer.types || []))
     const canAccept =
       types.has('Files') ||
-      types.has('application/x-ready-drag') ||
-      types.has('application/x-ready-file') ||
+      types.has(READY_REF_MIME) ||
       types.has('text/plain')
     if (!canAccept) return
     e.preventDefault()
@@ -669,6 +671,14 @@ export default function MarkdownEditor({
       })
       return
     }
+    if (e.dataTransfer.types.includes(READY_REF_MIME)) {
+      e.preventDefault(); e.stopPropagation()
+      const at = viewMode === 'edit' && rawEditorRef.current ? textAreaOffset(tabContentRef.current, rawEditorRef.current.selectionStart) : undefined
+      void dropDocumentReference(e.dataTransfer, getTabBuffer(tab.id), at).catch(error => {
+        setSaveState('error'); setSaveError(error instanceof Error ? error.message : String(error))
+      })
+      return
+    }
     const droppedFiles = getDroppedFilesFromDataTransfer(e.dataTransfer)
     const droppedText = e.dataTransfer.getData('text/plain')?.trim()
     if (droppedFiles.length === 0 && !droppedText) return
@@ -704,7 +714,7 @@ export default function MarkdownEditor({
       replaceEditorContent(`${currentContent}${prefix}${snippet}\n`)
     }
     setSaveState('idle')
-  }, [currentExt, replaceEditorContent, tab.path, viewMode])
+  }, [currentExt, replaceEditorContent, tab.id, tab.path, viewMode])
 
   const closeContextMenu = useCallback(() => {
     setContextMenu((prev) => ({ ...prev, visible: false }))

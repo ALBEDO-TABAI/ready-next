@@ -1,3 +1,4 @@
+import { READY_REF_MIME } from '../../../shared/ready-ref'
 import { userOpenedObject } from '../workbench/navigation-open-event'
 import { useCallback, useMemo } from 'react'
 
@@ -264,8 +265,7 @@ export function useBrowserTabActions({
     const types = new Set(Array.from(event.dataTransfer.types || []))
     const canAccept =
       types.has('Files') ||
-      types.has('application/x-ready-drag') ||
-      types.has('application/x-ready-file') ||
+      types.has(READY_REF_MIME) ||
       types.has('text/plain')
     if (!canAccept) return
     event.preventDefault()

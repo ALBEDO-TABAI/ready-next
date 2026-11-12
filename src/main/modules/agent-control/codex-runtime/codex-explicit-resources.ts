@@ -185,6 +185,7 @@ export async function resolveCodexExplicitResources(input: {
     selection: Extract<SendScopedResourceSelection, { kind: 'mcp_resource' }>,
   ) => Promise<CodexResolvedInlineResource | null>
   resolveLocalObject?: (path: string) => ObjectLocation
+  resolveReadyReference?: (selection: Extract<SendScopedResourceSelection, { kind: 'ready_reference' }>) => CodexResolvedInlineResource | Promise<CodexResolvedInlineResource>
   resolveLibrary?: (selection: unknown) => Promise<LibraryGrant>
   selectedSkill?: CodexResolvedSkillInput | null
 }): Promise<ResolvedCodexExplicitResources> {
@@ -230,6 +231,18 @@ export async function resolveCodexExplicitResources(input: {
   }
 
   for (const selection of input.selections) {
+    if (selection.kind === 'ready_reference') {
+      const resolved = await input.resolveReadyReference?.(selection)
+      if (!resolved) throw new Error('codex_explicit_reference_unavailable')
+      const logicalResourceId = `ready:${sha256(JSON.stringify(selection.ref))}`
+      if (seen.has(logicalResourceId)) continue
+      seen.add(logicalResourceId)
+      nativeInput.push({ type: 'text', text: resolved.text, text_elements: [] })
+      resourceRefs.push(versionReference(logicalResourceId, resolved.digest))
+      requestResources.push(bodyFreeRequestResource({ logicalResourceId, kind: 'document_quote', source: 'explicit_reference',
+        name: resolved.name, path: resolved.path, order: requestResources.length, canRead: true }))
+      continue
+    }
     if (selection.kind === 'skill') {
       let skill: CodexResolvedSkillInput | null
       try {

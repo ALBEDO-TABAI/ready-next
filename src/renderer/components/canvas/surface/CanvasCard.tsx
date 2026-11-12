@@ -31,7 +31,7 @@ export const CanvasCard = memo(function CanvasCard({ node, visible, selected, ma
     transform: a?.rotation ? `rotate(${a.rotation}deg)` : undefined, borderRadius: a?.radius,
     background: a?.background, color: a?.color, fontSize: a?.fontScale ? `${a.fontScale * 24}px` : undefined,
     textAlign: a?.align, fontWeight: a?.weight ? ({ light: 300, regular: 400, medium: 500, bold: 700 })[a.weight] : undefined }
-  return <div ref={el => element(node.id, el)} data-node-id={node.id} data-selected={selected} data-matched={matched || undefined} data-kind={node.ready.kind} data-color={node.color}
+  return <div draggable={!editor} ref={el => element(node.id, el)} data-node-id={node.id} data-selected={selected} data-matched={matched || undefined} data-kind={node.ready.kind} data-color={node.color}
     data-lightweight={!visible && !editor} className="canvas-card" style={style}>
     {(visible || editor) && <div data-node-detail className="canvas-card-content">{editor ?? content ?? <Preview node={node} resolveAsset={resolveAsset} />}</div>}
     {selected && visible && <button type="button" data-resize aria-label="调整卡片尺寸" className="canvas-resize" />}

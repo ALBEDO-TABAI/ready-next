@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { ReadyRefSchema } from '../../../shared/ready-ref'
 import type { FastCardItem } from '../../../shared/fastcard'
 import type { DatabaseConnection } from '../database/connection'
 
@@ -21,6 +22,7 @@ export const fastCardItemSchema = z.strictObject({
   ]).optional(),
   tags: z.array(z.string()).optional(),
   source: z.strictObject({
+    ref: ReadyRefSchema.optional(),
     pageUrl: optionalText, pageTitle: optionalText, domain: optionalText,
     tabId: z.string().nullable().optional(), capturedAt: z.number().finite().optional(),
   }).optional(),

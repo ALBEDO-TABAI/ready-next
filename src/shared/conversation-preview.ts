@@ -10,5 +10,5 @@ export function conversationTurn(messages: ConversationPreviewMessage[], run?: s
   if (run && question.meta?.runId && question.meta.runId !== run) throw new Error('这一轮的问题不可见')
   const next = messages.findIndex((message, index) => index > at && message.role === 'user')
   const answers = messages.slice(at + 1, next < 0 ? undefined : next).filter(message => message.role === 'assistant' && (!run || message.meta?.runId === run))
-  return { messageId: question.id, question: question.content, answer: answers.map(message => message.content).join('\n\n').slice(0, 1200) }
+  return { messageId: question.id, question: question.content, answer: answers.map(message => message.content).join('\n\n') }
 }

@@ -12,10 +12,12 @@ interface FastCardState {
   transferReceipt: FastCardTransferReceipt | null
   saveToCanvas: (itemIds: string[], target?: FastCardCanvasTarget) => Promise<boolean>
   retryTransfer: (request: FastCardTransferRequest) => Promise<boolean>
-  undoTransfer: () => Promise<boolean>
+  /** Undoes the shown receipt, or the given one (a capture's toast keeps its own). */
+  undoTransfer: (saved?: FastCardTransferReceipt) => Promise<boolean>
   dismissReceipt: () => void
   load: () => Promise<boolean>
-  addItem: (item: FastCardItem) => Promise<boolean>
+  /** A capture from a reader leaves the shelf closed (`open: false`); its toast offers 打开 instead. */
+  addItem: (item: FastCardItem, options?: { open?: boolean }) => Promise<boolean>
   removeItem: (id: string) => Promise<boolean>
   clear: () => Promise<boolean>
   open: () => Promise<boolean>
@@ -72,13 +74,12 @@ export function createFastCardStore(getAPI: () => FastCardStorageAPI, getTransfe
         return transfer(intent.request)
       },
       retryTransfer: request => transfer(request),
-      undoTransfer: () => run('saving', async () => {
-        const saved = get().transferReceipt
+      undoTransfer: (saved = get().transferReceipt ?? undefined) => run('saving', async () => {
         if (!saved) throw new Error('没有可撤销的保存')
         receipt(await getTransferAPI().undo(saved.operationId))
         const items = receipt(await getAPI().listFastCardItems())
         if (!items) throw new Error('未收到暂存恢复回执')
-        set({ items, transferReceipt: null })
+        set(state => ({ items, transferReceipt: state.transferReceipt?.operationId === saved.operationId ? null : state.transferReceipt }))
       }),
       revealTarget: null,
       reveal: id => run('loading', async () => {
@@ -92,11 +93,11 @@ export function createFastCardStore(getAPI: () => FastCardStorageAPI, getTransfe
         if (!items) throw new Error('FastCard 未收到列表回执')
         set({ items })
       }),
-      addItem: (item) => run('saving', async () => {
+      addItem: (item, { open = true } = {}) => run('saving', async () => {
         const saved = receipt(await getAPI().addFastCardItem(item))
         if (!saved) throw new Error('FastCard 未收到保存回执')
         set(state => ({ items: [saved, ...state.items.filter(value => value.id !== saved.id)],
-          panelOpen: true, collapsed: false }))
+          ...(open ? { panelOpen: true, collapsed: false } : {}) }))
       }),
       removeItem: (id) => run('saving', async () => {
         receipt(await getAPI().removeFastCardItem(id))

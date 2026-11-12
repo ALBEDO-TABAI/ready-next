@@ -71,7 +71,8 @@ test('a to-do dropped on a day is scheduled there; a task on its day ticks off a
   const enabled = { events: true, documents: true, tasks: true, footprints: true }
   await act(async () => root.render(<LayerDay date="2026-11-13" entries={[task]} enabled={enabled} move={async () => {}} />))
   const day = document.querySelector<HTMLElement>('[data-layer-day="2026-11-13"]')!
-  const data = new Map<string, string>([[actions.TODO_MIME, JSON.stringify({ id: 'c', version: 'v-c', title: '读完第三章', obsidian: false })]])
+  const data = new Map<string, string>()
+  actions.writeTodoTransfer({ setData: (key, value) => { data.set(key, value) } }, { id: 'c', version: 'v-c', title: '读完第三章', obsidian: false }, { kind: 'page', id: 'c' })
   const drop = new dom.window.Event('drop', { bubbles: true, cancelable: true })
   Object.defineProperty(drop, 'dataTransfer', { value: { types: [...data.keys()], getData: (type: string) => data.get(type) ?? '' } })
   await act(async () => { day.dispatchEvent(drop) }); await settle()

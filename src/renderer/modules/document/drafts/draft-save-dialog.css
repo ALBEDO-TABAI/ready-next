@@ -1,0 +1,17 @@
+/* 存为页面's Save To dialog (DraftSaveDialog.tsx): the float is the frame, so the picker inside drops its own box and
+   takes the primitives' field and button look. --rn-* tokens only (DS1); the picker sets its box inline, hence !important. */
+@layer ready-next.primitives {
+  .rn-save-dialog { width: min(480px, calc(100vw - 32px)); }
+  .rn-save-dialog > section { padding: 0 !important; border: 0 !important; border-radius: 0 !important; background: transparent !important; color: var(--rn-ink) !important; }
+  .rn-save-dialog > section > strong { display: block; font: 600 var(--rn-fs-lg)/1.3 var(--rn-font-ui); }
+  .rn-save-dialog label { display: block; font-size: var(--rn-fs-sm); color: var(--rn-ink-2); }
+  .rn-save-dialog input { display: block; width: 100%; height: var(--rn-control-h-lg); margin-top: 4px; padding: 0 10px; border: 0; border-radius: var(--rn-r-control); background: var(--rn-fill-2); color: var(--rn-ink); font: 400 var(--rn-fs-md)/1 var(--rn-font-ui); }
+  .rn-save-dialog nav { color: var(--rn-ink-3); }
+  .rn-save-dialog [role='treeitem'] { min-height: var(--rn-row-h); padding-right: 8px; border-radius: var(--rn-r-control); color: var(--rn-ink); }
+  .rn-save-dialog [role='treeitem'][aria-selected='true'] { background: var(--rn-fill-2); }
+  .rn-save-dialog [aria-label='最终路径'] { color: var(--rn-ink-3); }
+  .rn-save-dialog section > div:last-child { display: flex; justify-content: flex-end; gap: 8px; }
+  .rn-save-dialog section > div:last-child > button { height: var(--rn-control-h-lg); padding: 0 14px; border-radius: var(--rn-r-control); background: var(--rn-fill-2); color: var(--rn-ink); font: 500 var(--rn-fs-md)/1 var(--rn-font-ui); }
+  .rn-save-dialog section > div:last-child > button:last-child { background: var(--rn-inverse); color: var(--rn-on-inverse); }
+  .rn-save-dialog section > div:last-child > button:disabled { opacity: .45; }
+}

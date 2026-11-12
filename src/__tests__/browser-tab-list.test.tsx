@@ -88,9 +88,9 @@ test('a row carries the browser-tab resource payload when dragged (to the assist
   const event = new dom.window.Event('dragstart', { bubbles: true }) as unknown as DragEvent
   Object.defineProperty(event, 'dataTransfer', { value: { setData: (type: string, value: string) => data.set(type, value), effectAllowed: '' } })
   await act(async () => { body.querySelector('.browser-tab-list__row[role="listitem"]')!.dispatchEvent(event) })
-  const payload = JSON.parse(data.get('application/x-ready-drag') ?? '{}')
-  assert.equal(payload.type, 'browser-tab')
-  assert.equal(payload.tabId, 'a')
+  const payload = JSON.parse(data.get('application/x-ready-ref') ?? '{}')
+  assert.equal(payload.kind, 'web')
+  assert.equal('tabId' in payload, false)
   assert.equal(payload.url, 'https://a.example.com/')
-  assert.equal(data.get('text/plain'), 'https://a.example.com/')
+  assert.equal(data.get('text/plain'), 'Alpha')
 })

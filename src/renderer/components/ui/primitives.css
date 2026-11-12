@@ -120,7 +120,8 @@
   .rn-dialog__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 
   /* ---- Toast ---- */
-  .rn-toast-stack { position: fixed; left: 50%; bottom: calc(var(--rn-band-h) + 8px); z-index: 6000; display: flex; flex-direction: column; align-items: center; gap: 6px; transform: translateX(-50%); pointer-events: none; }
+  /* In the bottom band (DL11a: the quiet band shows one line of status when needed), so it never covers the paper or the native web page. */
+  .rn-toast-stack { position: fixed; left: 50%; bottom: calc((var(--rn-band-h) - 36px) / 2); z-index: 6000; display: flex; flex-direction: column; align-items: center; gap: 6px; transform: translateX(-50%); pointer-events: none; }
   .rn-toast { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 0 8px 0 14px; font: 500 var(--rn-fs-md)/1.3 var(--rn-font-ui); color: var(--rn-ink); pointer-events: auto; animation: rn-toast-in var(--rn-d-2) var(--rn-ease-out); }
   .rn-toast[data-tone='bad'] { color: var(--rn-bad); }
   @keyframes rn-toast-in { from { opacity: 0; transform: translateY(6px); } }

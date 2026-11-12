@@ -3,6 +3,9 @@ import test from 'node:test'
 import { createElement, act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { JSDOM } from 'jsdom'
+import { prepareFileDragRef } from '../renderer/modules/workbench/file-drag-ref'
+import { buildWorkspaceDragPayload, writeWorkspaceDragData } from '../renderer/components/layout/fileTreeDragPayload'
+import { beginWorkspaceDragSession, endWorkspaceDragSession } from '../renderer/components/layout/workspaceDragSession'
 
 test('project selector selects, clears, rejects files and ignores a picker returning after chat switch', async () => {
   const dom = new JSDOM('<div data-chat-panel-root="true"><div id="root"></div></div>', { url: 'http://localhost' })
@@ -28,6 +31,7 @@ test('project selector selects, clears, rejects files and ignores a picker retur
   let pick: () => Promise<unknown> = async () => ({ success: false, error: 'cancelled' })
   Object.defineProperty(dom.window, 'electronAPI', { value: {
     document: { openFolder: () => pick() },
+    objects: { resolvePath: async (path: string) => ({ objectId: path, path }) },
     agent: { setProjectDirectory: async (id: string, path: string | null, epoch: number) => {
       if (path === '/file.txt') return { success: false, error: '请选择文件夹' }
       saves.push([id, path])
@@ -43,16 +47,22 @@ test('project selector selects, clears, rejects files and ignores a picker retur
     assert.equal(useAgent.getState().currentScope?.meta.projectDirectory, '/project/first')
     await click('button[aria-label="取消项目选择"]')
     assert.equal(useAgent.getState().currentScope?.meta.projectDirectory, null)
-    const drop = async (items: unknown[]) => {
+    const drop = async (path: string, isDirectory: boolean) => {
+      await prepareFileDragRef(path, isDirectory)
+      const payload = buildWorkspaceDragPayload({ path, name: path.split('/').pop()!, isDirectory, size: 0, modified: new Date() }, true)
+      const data = new Map<string, string>()
+      const dataTransfer = { files: [], effectAllowed: 'uninitialized' as DataTransfer['effectAllowed'],
+        setData: (format: string, value: string) => { data.set(format, value) }, getData: (format: string) => data.get(format) || '' }
+      beginWorkspaceDragSession([payload])
+      writeWorkspaceDragData(dataTransfer, payload)
       const event = new dom.window.Event('drop', { bubbles: true, cancelable: true })
-      Object.defineProperty(event, 'dataTransfer', { value: {
-        files: [], getData: () => JSON.stringify(items[0]),
-      } })
-      await act(async () => dom.window.document.querySelector('[data-chat-project-selector]')!.dispatchEvent(event))
+      Object.defineProperty(event, 'dataTransfer', { value: dataTransfer })
+      try { await act(async () => dom.window.document.querySelector('[data-chat-project-selector]')!.dispatchEvent(event)) }
+      finally { endWorkspaceDragSession() }
     }
-    await drop([{ type: 'folder', path: '/project/dropped', name: 'dropped', isDirectory: true }])
+    await drop('/project/dropped', true)
     assert.equal(useAgent.getState().currentScope?.meta.projectDirectory, '/project/dropped')
-    await drop([{ type: 'file', path: '/file.txt', name: 'file', isDirectory: false }])
+    await drop('/file.txt', false)
     assert.match(dom.window.document.querySelector('[role="alert"]')!.textContent!, /文件夹/)
     assert.equal(useAgent.getState().currentScope?.meta.projectDirectory, '/project/dropped')
     let resolvePicker!: (value: unknown) => void

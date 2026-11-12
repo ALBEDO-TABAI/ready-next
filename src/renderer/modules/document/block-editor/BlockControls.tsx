@@ -9,13 +9,14 @@ import { CommandMenu, type MenuAnchor, type MenuItem } from './CommandMenu'
 import { inlineMarkdown, newline } from './editing'
 import type { EditorBuffer } from './editor-buffer'
 import type { EditorLinkBase } from './references'
-import { toReadyUri } from '../../../../shared/ready-ref'
+import { toReadyUri, writeReadyRefTransfer } from '../../../../shared/ready-ref'
+import { receiveToCanvas } from '../../workbench/capture-receipt'
 
 interface Drag { block: DocumentBlock; snapshot: DocumentBuffer; target: DocumentBlock; placement: 'before' | 'after' }
 interface Controls {
   menu(block: DocumentBlock, anchor: MenuAnchor): void
   drag: Drag | null
-  start(block: DocumentBlock): void
+  start(block: DocumentBlock, data?: DataTransfer): void
   over(block: DocumentBlock, placement: 'before' | 'after'): void
   drop(): void
   cancel(): void
@@ -118,6 +119,14 @@ export function BlockControls({ buffer, linkBase, editorId, report, children }: 
         if (!existing) replace(markBlock(snapshot.content, block, id))
         await navigator.clipboard.writeText(`[[${page}#^${id}]]`)
       })] : []),
+      // 发送到画板 (W6 §3.2): the block's text as a card; its source is the block when it has an id, else the page.
+      ...(owner.kind === 'document' ? [action('canvas', '发送到画板', async () => {
+        const tab = useDocTabs.getState().tabs.find(item => item.id === owner.tabId)
+        if (!tab?.objectId) throw new Error('请先把页面保存到资料库，再发送到画板')
+        const id = explicitBlockId(snapshot.content, block)
+        await receiveToCanvas({ ref: { kind: 'page', id: tab.objectId, ...(id ? { anchor: `^${id}` } : {}) },
+          title: tab.title.replace(/\.md$/i, ''), text: block.raw.replace(/[ \t]+\^[\w-]+\s*$/, '').trim() })
+      })] : []),
       ...Object.entries(DOCUMENT_PALETTE).map(([color, label]) => action(`color-${color}`, `文字颜色：${label}`, () => {
         if (!isDocumentColor(color)) throw new Error('无效颜色')
         const blocks = parseDocumentBlocks(snapshot.content).blocks.filter(part => part.start >= block.start && part.end <= block.end
@@ -134,7 +143,17 @@ export function BlockControls({ buffer, linkBase, editorId, report, children }: 
   }
   return <Context.Provider value={{ drag, cancel: () => changeDrag(null), drop,
     menu: (block, anchor) => { try { buffer.flush(); setMenu({ block, snapshot: buffer.snapshot, anchor }) } catch (error) { console.warn('[BlockControls] open block menu failed:', error instanceof Error ? error.message : String(error)); report(error) } },
-    start: block => { try { buffer.flush(); changeDrag({ block, snapshot: buffer.snapshot, target: block, placement: 'before' }) } catch (error) { console.warn('[BlockControls] start block drag failed:', error instanceof Error ? error.message : String(error)); report(error) } },
+    start: (block, data) => { try {
+      buffer.flush()
+      if (data && owner.kind === 'document') {
+        const tab = useDocTabs.getState().tabs.find(tab => tab.id === owner.tabId)
+        if (tab?.objectId) {
+          const id = explicitBlockId(buffer.snapshot.content, block)
+          writeReadyRefTransfer(data, { kind: 'page', id: tab.objectId, ...(id ? { anchor: '^' + id } : {}) }, block.raw.slice(0, 120).replace(/[\r\n]/g, ' '))
+        }
+      }
+      changeDrag({ block, snapshot: buffer.snapshot, target: block, placement: 'before' })
+    } catch (error) { console.warn('[BlockControls] start block drag failed:', error instanceof Error ? error.message : String(error)); report(error) } },
     over: (target, placement) => { if (dragRef.current) changeDrag({ ...dragRef.current, target, placement }) },
     step: direction => {
       const current = dragRef.current; if (!current) return
@@ -161,7 +180,7 @@ export function BlockShell({ block, line, actionable, children }: { block: Docum
       controls.over(block, event.clientY < rect.top + rect.height / 2 ? 'before' : 'after')
     }} onDrop={event => { if (actionable) { event.preventDefault(); event.stopPropagation(); controls.drop() } }}>
     {actionable && <button type="button" className="ready-block-handle" aria-label="块菜单" title="块菜单；空格开始移动" draggable
-      onDragStart={event => { event.stopPropagation(); event.dataTransfer.setData('text/plain', block.raw); controls.start(block) }}
+      onDragStart={event => { event.stopPropagation(); controls.start(block, event.dataTransfer) }}
       onDragEnd={() => controls.cancel()} onClick={event => controls.menu(block, event.currentTarget.getBoundingClientRect())}
       onKeyDown={event => {
         if (![' ', 'Enter', 'Escape', 'ArrowUp', 'ArrowDown'].includes(event.key)) return

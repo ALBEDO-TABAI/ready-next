@@ -204,7 +204,7 @@ export class FastCardTransferService {
   private node(item: FastCardItem, job: Job, relativePath: string, index: number): CanvasNode {
     const base = { id: `fc-${digest(`${job.request.operationId}:${item.id}`).slice(0, 32)}`,
       x: (job.request.position?.x ?? 0) + index % 3 * 360, y: (job.request.position?.y ?? 0) + Math.floor(index / 3) * 280, width: 320, height: 240 }
-    const sources = [{ uri: item.source?.pageUrl || toReadyUri({ kind: 'fastcard', id: item.id }), ...(item.source?.pageTitle ? { title: item.source.pageTitle } : {}),
+    const sources = [{ uri: item.source?.ref ? toReadyUri(item.source.ref) : item.source?.pageUrl || toReadyUri({ kind: 'fastcard', id: item.id }), ...(item.source?.pageTitle ? { title: item.source.pageTitle } : {}),
       capturedAt: new Date(item.source?.capturedAt ?? item.createdAt).toISOString(), method: 'fastcard', fastCardId: item.id }]
     // A's frozen fastCard enum has no audio yet; audio identity is retained in sources, not falsified as text.
     const fastCard = item.kind === 'audio' ? undefined : { id: item.id, kind: item.kind, createdAt: new Date(item.createdAt).toISOString(), ...(item.originalText !== undefined ? { originalText: item.originalText } : {}), ...(item.targetLanguage ? { targetLanguage: item.targetLanguage } : {}) }

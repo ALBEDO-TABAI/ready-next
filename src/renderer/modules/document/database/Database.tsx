@@ -162,7 +162,7 @@ function DatabaseContent({ databaseId, api = databaseAPI, initialViewId, viewNam
     await request(api, { type: 'setDefinition', databaseId, expectedVersion: snapshot.version, definition: { ...snapshot.definition, views: snapshot.definition.views.map(v => v.id === next.id ? next : v) } }, WriteSchema)
   })
   const editingCell = editing?.row.cells[editing.field.id]
-  return <section className={`ready-database ${inline ? 'is-inline' : 'is-page'}`} data-database-id={databaseId} data-view-type={view.type} aria-label={inline ? `内联数据库 ${view.name}` : '数据库'}>
+  return <section className={`ready-database ${inline ? 'is-inline' : 'is-page'}`} data-own-drops data-database-id={databaseId} data-view-type={view.type} aria-label={inline ? `内联数据库 ${view.name}` : '数据库'}>
     <header className="rdb-toolbar">
       <div className="rdb-tabs" role="tablist" aria-label="数据库视图">{(viewName !== undefined ? [view] : snapshot.definition.views).map(v => <button role="tab" aria-selected={v.id === view.id} data-view-id={v.id} key={v.id} className="rdb-tab" disabled={busy} onClick={() => {
         if (v.id === view.id) return

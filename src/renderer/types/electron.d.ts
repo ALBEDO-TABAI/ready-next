@@ -102,6 +102,7 @@ import type { BrowserAgentPointerSnapshot } from '../../shared/browser-agent-poi
 import type {
   FastCardStorageAPI,
   BrowserFastCardContextActionEvent,
+  BrowserSelectionEvent,
   FastCardOverlayCommand,
   FastCardOverlaySnapshot,
   FastCardDescribeImageRequest,
@@ -1310,6 +1311,8 @@ interface ElectronBrowserAPI {
   onTabOpened: (callback: (data: BrowserTabOpenedEvent) => void) => () => void
   onAdblockUpdate: (callback: (data: BrowserAdblockStateData) => void) => () => void
   onFastCardContextAction: (callback: (data: BrowserFastCardContextActionEvent) => void) => () => void
+  /** The active page's selected words, after a selection ends (W6 §3.2: the selection bar in the band under the page). */
+  onSelectionChanged: (callback: (data: BrowserSelectionEvent) => void) => () => void
   listFastCardItems: FastCardStorageAPI['listFastCardItems']
   addFastCardItem: FastCardStorageAPI['addFastCardItem']
   removeFastCardItem: FastCardStorageAPI['removeFastCardItem']

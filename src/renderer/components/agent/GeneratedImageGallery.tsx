@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState } from 'react'
+import { prepareFileDragRef } from '../../modules/workbench/file-drag-ref'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Copy, ImagePlus } from 'lucide-react'
 import type { AgentArtifact, ChatAttachment } from '../../modules/agent/types'
 import {
@@ -31,6 +32,8 @@ export function GeneratedImageGallery({ images, onPreview, onReferenceSelect }: 
     image,
     attachment: generatedImageArtifactToAttachment(image),
   })), [images])
+
+  useEffect(() => { for (const { attachment } of cards) void prepareFileDragRef(attachment.path).catch(error => setFeedback(String(error))) }, [cards])
 
   const copyImage = async (attachment: ChatAttachment) => {
     const result = await window.electronAPI.imageGeneration.copyToClipboard({ sourcePath: attachment.path })

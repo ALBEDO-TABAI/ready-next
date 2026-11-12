@@ -1,5 +1,6 @@
 import { RSSReferenceSchema, type RSSReference } from '../rss-reference'
 import { z } from 'zod'
+import { ReadyRefSchema, type ReadyRef } from '../ready-ref'
 
 import type { CanonicalAssistantMessage } from './canonical-message'
 import type { ContextUsageSnapshot } from '../context-usage-types'
@@ -323,6 +324,7 @@ export type AgentIngressMessageBlock =
   | { type: 'video'; base64: string; mimeType: string }
 
 export type SendScopedResourceSelection =
+  | { kind: 'ready_reference'; id: string; name: string; ref: ReadyRef }
   // origin 'workbench' marks the view the user is looking at; Main may rebind or drop it, never block on it.
   | { kind: 'rss_reference'; id: string; name: string; reference: RSSReference; origin?: 'workbench' }
   | {
@@ -852,6 +854,7 @@ export const sendScopedRequestSchema: z.ZodType<SendScopedRequest> = z.object({
       eventId: nonEmptyString,
     }).strict(),
     ...libraryResourceSelectionSchema.options,
+    z.object({ kind: z.literal('ready_reference'), id: z.string().uuid(), name: nonEmptyString, ref: ReadyRefSchema }).strict(),
     z.object({ kind: z.literal('rss_reference'), id: z.string().uuid(), name: nonEmptyString, reference: RSSReferenceSchema, origin: z.literal('workbench').optional() }).strict(),
     z.object({
       kind: z.literal('rss_item'),

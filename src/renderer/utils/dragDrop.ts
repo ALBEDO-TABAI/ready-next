@@ -1,3 +1,4 @@
+import { knownDraggedPaths } from '../modules/workbench/file-drag-ref'
 import { EBOOK_EXTENSIONS } from '../../shared/ebook'
 
 export interface DroppedFile {
@@ -57,48 +58,10 @@ function fileUrlToPath(value: string): string | null {
   }
 }
 
-function parseReadyDrag(data: string): DroppedFile[] {
-  try {
-    const parsed = JSON.parse(data) as {
-      type?: string
-      path?: string
-      name?: string
-      ext?: string
-      size?: number
-      items?: Array<{
-        type?: string
-        path?: string
-        name?: string
-        ext?: string
-        size?: number
-        isDirectory?: boolean
-      }>
-    }
-    if (parsed.type === 'batch' && Array.isArray(parsed.items)) {
-      return parsed.items
-        .filter((item) => item.type !== 'folder' && !item.isDirectory && item.path && isLikelyAbsolutePath(item.path))
-        .map((item) => toDroppedFile(item.path || '', item.name, item.ext, item.size ?? 0))
-    }
-    if (!parsed.path || !isLikelyAbsolutePath(parsed.path)) return []
-    if (parsed.type === 'browser-tab') return []
-    return [toDroppedFile(parsed.path, parsed.name, parsed.ext, parsed.size ?? 0)]
-  } catch {
-    return []
-  }
-}
-
 export function getDroppedFilesFromDataTransfer(dataTransfer: DataTransfer): DroppedFile[] {
   const files: DroppedFile[] = []
 
-  const readyDragRaw = dataTransfer.getData('application/x-ready-drag')
-  if (readyDragRaw) {
-    files.push(...parseReadyDrag(readyDragRaw))
-  }
-
-  const readyFileRaw = dataTransfer.getData('application/x-ready-file')
-  if (readyFileRaw) {
-    files.push(...parseReadyDrag(readyFileRaw))
-  }
+  files.push(...knownDraggedPaths(dataTransfer).map(path => toDroppedFile(path)))
 
   const uriList = dataTransfer.getData('text/uri-list') || ''
   for (const line of uriList.split(/\r?\n/)) {

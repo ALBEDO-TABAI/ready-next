@@ -80,6 +80,7 @@ import type { BrowserAgentPointerSnapshot } from '../shared/browser-agent-pointe
 import type {
   FastCardItem,
   BrowserFastCardContextActionEvent,
+  BrowserSelectionEvent,
   FastCardOverlayCommand,
   FastCardOverlaySnapshot,
   FastCardDescribeImageRequest,
@@ -608,6 +609,11 @@ const browserAPI = {
     const handler = (_: unknown, data: BrowserFastCardContextActionEvent): void => callback(data)
     ipcRenderer.on('browser:fastCardContextAction', handler)
     return () => ipcRenderer.removeListener('browser:fastCardContextAction', handler)
+  },
+  onSelectionChanged: (callback: (data: BrowserSelectionEvent) => void) => {
+    const handler = (_: unknown, data: BrowserSelectionEvent): void => callback(data)
+    ipcRenderer.on('browser:selectionChanged', handler)
+    return () => ipcRenderer.removeListener('browser:selectionChanged', handler)
   },
   listFastCardItems: () => ipcRenderer.invoke('browser:fastCardList'),
   addFastCardItem: (item: FastCardItem) => ipcRenderer.invoke('browser:fastCardAdd', item),
@@ -1379,6 +1385,7 @@ const canvasCompositionAPI: import('../shared/document-drafts').CanvasCompositio
   preview: input => ipcRenderer.invoke('canvasComposition:preview', input),
 }
 const fastCardAPI: import('../shared/fastcard').FastCardTransferAPI & import('../shared/fastcard').FastCardQuickNoteAPI = {
+  documentImage: input => ipcRenderer.invoke('fastcard:documentImage', input),
   transfer: input => ipcRenderer.invoke('fastcard:transfer', input),
   undo: id => ipcRenderer.invoke('fastcard:undo', id),
   targets: () => ipcRenderer.invoke('fastcard:targets'),

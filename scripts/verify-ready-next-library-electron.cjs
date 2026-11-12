@@ -284,7 +284,8 @@ async function checkHighlights(app, page, book, vaultRoot) {
   await page.getByRole('dialog', { name: '划线', exact: true }).waitFor()
   const selected = await page.evaluate(() => getSelection().toString().replace(/\s+/g, ' ').trim())
   ok('drag selects text without turning pages', selected.length >= 3 && await page.locator('.rn-library .rd-dock').textContent() === folioBefore, selected)
-  await page.getByRole('button', { name: '黄', exact: true }).click()
+  // Selected words show the reading scenes' shared bar; its 划线 is the book's highlight in the first marker (yellow).
+  await page.getByRole('dialog', { name: '划线', exact: true }).locator('[data-ready-selection-bar]').getByRole('button', { name: '划线', exact: true }).click()
   await page.getByRole('dialog', { name: '划线', exact: true }).waitFor({ state: 'hidden' })
   const source = fs.readFileSync(book.notePath, 'utf8')
   const id = source.match(/^\^(hl-[\w-]+)$/m)?.[1]

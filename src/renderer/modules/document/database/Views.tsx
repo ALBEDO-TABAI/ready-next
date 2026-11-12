@@ -1,3 +1,4 @@
+import { readReadyRefTransfer, writeReadyRefTransfer } from '../../../../shared/ready-ref'
 import { useLayoutEffect, useRef, useState, type ReactNode, type DragEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import type { DatabaseDefinition, DatabaseView } from '../../../../shared/document-database'
 import type { PersonalState, Query, ViewRow } from './access'
@@ -47,26 +48,29 @@ export function TableView(props: ViewProps) {
       </div>
       })}</div>
       <div style={{ height: items.length * rowHeight, position: 'relative' }}>
-        {items.slice(start, end).map((item, i) => <div className="rdb-table-row" role="row" aria-rowindex={start + i + 2} data-row-id={item.kind === 'row' ? item.row.id : undefined} key={item.key} style={{ position: 'absolute', top: (start + i) * rowHeight, height: rowHeight, gridTemplateColumns: columns, width: '100%' }}>{item.kind === 'group' ? <div role="cell" style={{ gridColumn: '1 / -1' }}>{item.label}</div> : fields.map(id => <div role="cell" key={id} data-col={id === '$title' ? 'title' : undefined}>{cell(item.row, id)}</div>)}</div>)}
+        {items.slice(start, end).map((item, i) => <div className="rdb-table-row" role="row" aria-rowindex={start + i + 2} draggable={item.kind === 'row' && !props.disabled} onDragStart={e => { if (item.kind === 'row') dragStart(e, item.row, null) }} onDragEnd={() => { draggedRow = null }} data-row-id={item.kind === 'row' ? item.row.id : undefined} key={item.key} style={{ position: 'absolute', top: (start + i) * rowHeight, height: rowHeight, gridTemplateColumns: columns, width: '100%' }}>{item.kind === 'group' ? <div role="cell" style={{ gridColumn: '1 / -1' }}>{item.label}</div> : fields.map(id => <div role="cell" key={id} data-col={id === '$title' ? 'title' : undefined}>{cell(item.row, id)}</div>)}</div>)}
       </div>
     </div>
   </div>
 }
-const dragType = 'application/x-ready-database-row'
-function dragStart(e: DragEvent, row: ViewRow, from: unknown) { e.dataTransfer.setData(dragType, JSON.stringify({ id: row.id, from })); e.dataTransfer.effectAllowed = 'move' }
+// Group position belongs to this gesture, not to the cross-module reference.
+let draggedRow: { id: string; from: unknown } | null = null
+function dragStart(e: DragEvent, row: ViewRow, from: unknown) {
+  draggedRow = { id: row.id, from }
+  writeReadyRefTransfer(e.dataTransfer, { kind: 'page', id: row.id }, row.title)
+  e.dataTransfer.effectAllowed = 'copyMove'
+}
 function dropped(e: DragEvent, rows: ViewRow[]): { row: ViewRow; from: unknown } | null {
   e.preventDefault()
-  const raw = e.dataTransfer.getData(dragType)
-  if (!raw) return null
-  let data: unknown
-  try { data = JSON.parse(raw) } catch { /* silent-catch: Malformed foreign drag data is not a database operation; leave rows unchanged. */ return null }
-  if (!data || typeof data !== 'object' || !('id' in data) || typeof data.id !== 'string' || !('from' in data)) return null
-  const row = rows.find(row => row.id === data.id)
-  return row ? { row, from: data.from } : null
+  const dropped = readReadyRefTransfer(e.dataTransfer)
+  if (dropped?.ref.kind !== 'page' || draggedRow?.id !== dropped.ref.id) return null
+  const id = dropped.ref.id
+  const row = rows.find(row => row.id === id)
+  return row ? { row, from: draggedRow.from } : null
 }
-function Card({ row, ctx, from = null, draggable = false }: { row: ViewRow; ctx: ViewProps; from?: unknown; draggable?: boolean }) {
+function Card({ row, ctx, from = null }: { row: ViewRow; ctx: ViewProps; from?: unknown; draggable?: boolean }) {
   const fields = ctx.view.cardFields ?? Object.values(ctx.definition.fields).filter(f => !['formula', 'rollup'].includes(f.type)).slice(0, 3).map(f => f.id)
-  return <article className="rdb-card" data-row-id={row.id} draggable={draggable && !ctx.disabled} onDragStart={e => dragStart(e, row, from)}>
+  return <article className="rdb-card" data-row-id={row.id} draggable={!ctx.disabled} onDragStart={e => dragStart(e, row, from)} onDragEnd={() => { draggedRow = null }}>
     <button className="rdb-title" onClick={() => ctx.open(row)}>{row.title}</button>
     {fields.map(id => <div className="rdb-card-field" key={id}>{ctx.cell(row, id)}</div>)}
   </article>

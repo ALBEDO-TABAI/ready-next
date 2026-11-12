@@ -18,7 +18,7 @@ const MENU: MenuEntry[] = [
   { id: 'fav', label: '收藏', checked: true, onSelect: () => showToast('已取消收藏') },
   { kind: 'separator' },
   { id: 'dup', label: '创建副本', icon: <Copy />, disabled: true, onSelect: () => {} },
-  { id: 'del', label: '移到回收站', icon: <Trash2 />, danger: true, onSelect: () => showToast('已移到回收站', { action: { label: '撤销', onClick: () => showToast('已恢复') } }) },
+  { id: 'del', label: '移到回收站', icon: <Trash2 />, danger: true, onSelect: () => showToast('已移到回收站', { actions: [{ label: '撤销', onClick: () => showToast('已恢复') }] }) },
 ]
 
 function Specimen({ title, children }: { title: string; children: ReactNode }) {

@@ -10,7 +10,9 @@ export function ToastHost() {
       {items.map(toast => (
         <div key={toast.id} className="rn-float rn-toast" data-tone={toast.tone ?? 'normal'} data-ready-native-overlay="toast">
           <span>{toast.message}</span>
-          {toast.action && <Button size="sm" variant="ghost" onClick={() => { toast.action!.onClick(); dismissToast(toast.id) }}>{toast.action.label}</Button>}
+          {toast.actions?.map(action => (
+            <Button key={action.label} size="sm" variant="ghost" onClick={() => { dismissToast(toast.id); action.onClick() }}>{action.label}</Button>
+          ))}
         </div>
       ))}
     </div>

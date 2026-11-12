@@ -73,17 +73,18 @@ test('C7 registered IPC add/list/remove/clear return receipts and expose failure
     assert.ok(handler, `registered channel: ${action}`)
     return await handler({}, payload)
   }
+  const capturedItem = { ...item, source: { ...item.source, ref: { kind: 'web', url: 'https://example.com' } } }
   try {
-    assert.deepEqual(await invoke('Add', item), { success: true, data: item })
-    assert.deepEqual(await invoke('List'), { success: true, data: [item] })
+    assert.deepEqual(await invoke('Add', item), { success: true, data: capturedItem })
+    assert.deepEqual(await invoke('List'), { success: true, data: [capturedItem] })
     assert.partialDeepStrictEqual(await invoke('Add', { ...item, kind: 'unknown' }), { success: false })
     assert.partialDeepStrictEqual(await invoke('Add', { ...item, video: { parseStatus: 'bad' } }), { success: false })
     assert.partialDeepStrictEqual(await invoke('Remove', 123), { success: false })
-    assert.deepEqual(await invoke('List'), { success: true, data: [item] })
+    assert.deepEqual(await invoke('List'), { success: true, data: [capturedItem] })
     db.exec('PRAGMA query_only = ON')
     for (const [action, payload] of [['Add', { ...item, id: 'denied' }], ['Remove', item.id], ['Clear', undefined]]) {
       assert.partialDeepStrictEqual(await invoke(String(action), payload), { success: false })
-      assert.deepEqual(await invoke('List'), { success: true, data: [item] })
+      assert.deepEqual(await invoke('List'), { success: true, data: [capturedItem] })
     }
     db.exec('PRAGMA query_only = OFF')
     assert.deepEqual(await invoke('Remove', item.id), { success: true })
