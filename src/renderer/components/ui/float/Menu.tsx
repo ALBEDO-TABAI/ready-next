@@ -64,9 +64,11 @@ export function MenuList({ items, label, onDone }: { items: MenuEntry[]; label?:
             onMouseEnter={() => !entry.disabled && setActive(index)}
             onClick={() => choose(index)}
           >
-            {checkable ? <span className="rn-menu__check">{entry.checked ? <Check size={14} /> : null}</span> : entry.icon}
+            {checkable && !entry.icon ? <span className="rn-menu__check">{entry.checked ? <Check size={14} /> : null}</span> : entry.icon}
             <span className="rn-menu__label">{entry.label}</span>
             {entry.hint && <span className="rn-menu__hint">{entry.hint}</span>}
+            {/* A checkable item with an icon keeps its icon in front and shows its state at the end. */}
+            {checkable && entry.icon && <span className="rn-menu__check">{entry.checked ? <Check size={14} /> : null}</span>}
           </button>
         )
       })}

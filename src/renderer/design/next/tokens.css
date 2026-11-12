@@ -129,8 +129,6 @@
   --rn-cloth-label-ink: #2a2520;
   --rn-cloth-foil: #ecd391;
   --rn-cloth-foil-deep: #5a3f12;
-  /* the board's sticky note (便签) */
-  --rn-note: rgb(249 243 220);
 
   /* adaptive: written by JS from the cover in view */
   --rn-amb: 200 190 180;
@@ -194,7 +192,6 @@
   --rn-shelf-gloss: rgb(255 255 255 / .22);
   --rn-shelf-face-gloss: rgb(255 255 255 / .08);
   --rn-shelf-wall: rgb(0 0 0 / .3);
-  --rn-note: rgb(80 68 37);
   --rn-amb-alpha: .14;
   color-scheme: dark;
 }

@@ -106,12 +106,12 @@
       "fontFace": 0
     },
     "components/document": {
-      "color": 69,
-      "backdropFilter": 2,
+      "color": 5,
+      "backdropFilter": 0,
       "fontFace": 0
     },
     "components/document/book": {
-      "color": 8,
+      "color": 4,
       "backdropFilter": 0,
       "fontFace": 0
     },
@@ -276,7 +276,7 @@
       "fontFace": 0
     },
     "modules/document/block-editor": {
-      "color": 9,
+      "color": 0,
       "backdropFilter": 0,
       "fontFace": 0
     },
@@ -286,7 +286,7 @@
       "fontFace": 0
     },
     "modules/document": {
-      "color": 81,
+      "color": 56,
       "backdropFilter": 0,
       "fontFace": 0
     },
@@ -306,9 +306,9 @@
       "fontFace": 0
     },
     "modules/document/ink": {
-      "color": 207,
-      "backdropFilter": 15,
-      "fontFace": 1
+      "color": 0,
+      "backdropFilter": 0,
+      "fontFace": 0
     },
     "modules/document/page-ui": {
       "color": 0,
@@ -442,6 +442,10 @@
     {
       "glob": "src/renderer/modules/library/reader/papers.ts",
       "reason": "PAPERS 是读者在排版里选的阅读纸色（白纸、米黄、夜间）：书页的纸、页边与墨，印进书页栅格，属于内容数据。"
+    },
+    {
+      "glob": "src/renderer/modules/document/content-palette.css",
+      "reason": "写作者给自己内容选的颜色：文字颜色与背景、标注块（> [!tip|yellow]）颜色、数据库选项标签色，属于用户内容颜色。"
     }
   ],
   "goals": {

@@ -20,6 +20,7 @@ import {
   type DocumentOutlineSnapshot,
 } from '../../../shared/document-side-panels'
 import './documentFloatingPanels.css'
+import { IconButton } from '../ui'
 import { useVault } from '../../stores/useVault'
 import { useDocTabs } from '../../stores/useDocTabs'
 import { duplicatePageHeading, pageHeaderTitle } from '../../modules/document/page-ui/page-title'
@@ -402,7 +403,7 @@ export default function DocumentFloatingPanels({
 
       {outlinePanelRendered && (
         <aside
-          className={`document-floating-panel document-floating-panel--left ready-app-liquid-panel${outlinePanelClosing ? ' is-closing' : ''}`}
+          className={`document-floating-panel document-floating-panel--left rn-float${outlinePanelClosing ? ' is-closing' : ''}`}
           aria-label="内容速览"
         >
           <header className="document-floating-panel__header">
@@ -413,15 +414,7 @@ export default function DocumentFloatingPanels({
               </div>
             </div>
             <div className="document-floating-panel__header-actions">
-              <button
-                type="button"
-                className="document-floating-icon-button"
-                onClick={onToggleOutline}
-                title="收回内容速览"
-                aria-label="收回内容速览"
-              >
-                <X className="h-[14px] w-[14px]" strokeWidth={1.8} />
-              </button>
+              <IconButton size="sm" title="收回内容速览" icon={<X />} onClick={onToggleOutline} />
             </div>
           </header>
           <div className="document-floating-panel__body">
@@ -446,7 +439,7 @@ export default function DocumentFloatingPanels({
 
       {marksPanelRendered && (
         <aside
-          className={`document-floating-panel document-floating-panel--right ready-app-liquid-panel${marksPanelClosing ? ' is-closing' : ''}`}
+          className={`document-floating-panel document-floating-panel--right rn-float${marksPanelClosing ? ' is-closing' : ''}`}
           aria-label="书签和笔记"
         >
           <header className="document-floating-panel__header">
@@ -457,15 +450,7 @@ export default function DocumentFloatingPanels({
               </div>
             </div>
             <div className="document-floating-panel__header-actions">
-              <button
-                type="button"
-                className="document-floating-icon-button"
-                onClick={onToggleMarks}
-                title="收回书签和笔记"
-                aria-label="收回书签和笔记"
-              >
-                <X className="h-[14px] w-[14px]" strokeWidth={1.8} />
-              </button>
+              <IconButton size="sm" title="收回书签和笔记" icon={<X />} onClick={onToggleMarks} />
             </div>
           </header>
 

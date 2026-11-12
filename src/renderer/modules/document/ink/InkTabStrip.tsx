@@ -4,7 +4,7 @@ import { useDocTabs, type DocTab } from '../../../stores/useDocTabs'
 import { Icon } from './icons'
 import { InkPageIcon } from './InkPageIcon'
 import { useInkLayout } from './layout-state'
-import { tip } from './overlay'
+import { IconButton, tooltip } from '../../../components/ui'
 import { openToday } from '../../today/open-today'
 
 const MOD = /Mac|iPhone|iPad/i.test(navigator.platform) ? '⌘' : 'Ctrl+'
@@ -77,6 +77,6 @@ export function InkTabStrip({ onNewTab }: { active: boolean; onNewTab(): void })
       })}
     </div>
     </div>
-    <button type="button" className="ink-tbar-icon ink-tbar-new" aria-label="新建标签页" {...tip('新建标签页', `${MOD}T`)} onClick={onNewTab}><Icon name="plus" size={16} /></button>
+    <IconButton className="ink-tbar-new" title="新建标签页" icon={<Icon name="plus" />} {...tooltip('新建标签页', `${MOD}T`)} onClick={onNewTab} />
   </div>
 }

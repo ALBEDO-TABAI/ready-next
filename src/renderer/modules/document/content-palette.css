@@ -1,0 +1,25 @@
+/* The colours a writer gives their own content (W1 §6 whitelists user content colours): text and highlight colours
+   (the block editor's 文字颜色 / 背景), callout colours ("> [!tip|yellow]") and database option tags. They are data the
+   writer chose, so they keep their hue in both themes; the interface itself uses --rn-* only. */
+:root {
+  --doc-gray-fg: rgb(125 122 117); --doc-gray-bg: rgb(240 239 237); --doc-gray-rule: #9b9a97;
+  --doc-brown-fg: rgb(159 118 90); --doc-brown-bg: rgb(245 237 233); --doc-brown-rule: #9f765a;
+  --doc-orange-fg: rgb(210 123 45); --doc-orange-bg: rgb(251 235 222); --doc-orange-rule: #e08a3c;
+  --doc-yellow-fg: rgb(203 148 52); --doc-yellow-bg: rgb(249 243 220); --doc-yellow-rule: #e6b92f;
+  --doc-green-fg: rgb(80 148 110); --doc-green-bg: rgb(232 241 236); --doc-green-rule: #5aa07a;
+  --doc-blue-fg: rgb(56 125 201); --doc-blue-bg: rgb(229 242 252); --doc-blue-rule: #4c8fd6;
+  --doc-purple-fg: rgb(154 107 180); --doc-purple-bg: rgb(243 235 249); --doc-purple-rule: #9a72c8;
+  --doc-pink-fg: rgb(193 76 138); --doc-pink-bg: rgb(250 233 241); --doc-pink-rule: #d2709f;
+  --doc-red-fg: rgb(207 81 72); --doc-red-bg: rgb(252 233 231); --doc-red-rule: #d95f5f;
+}
+[data-theme='dark'] {
+  --doc-gray-bg: rgb(56 56 54);
+  --doc-brown-bg: rgb(69 54 45);
+  --doc-orange-bg: rgb(83 54 31);
+  --doc-yellow-bg: rgb(80 68 37);
+  --doc-green-bg: rgb(38 61 48);
+  --doc-blue-bg: rgb(35 56 80);
+  --doc-purple-bg: rgb(60 45 71);
+  --doc-pink-bg: rgb(78 43 60);
+  --doc-red-bg: rgb(80 44 41);
+}

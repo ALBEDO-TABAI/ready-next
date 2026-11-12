@@ -18,8 +18,7 @@ import { SaveToPicker, type SaveToSelection } from '../page-ui/SaveToPicker'
 import { Icon, type IconName } from './icons'
 import { InkPageIcon } from './InkPageIcon'
 import { openInCurrentTab, useInkLayout } from './layout-state'
-import { openMenu } from './menu'
-import { openPopover, tip } from './overlay'
+import { Button, IconButton, Input, ListRow, MenuList, anchorOf, openFloat, openMenu, tooltip, type FloatAnchor, type MenuEntry } from '../../../components/ui'
 import { requestShellAction } from '../../workbench/commands/shell-actions'
 
 // Inkwell's page tree, the document navigator in the shell's one sidebar (W2-T5). Pages come from Ready's page
@@ -141,9 +140,9 @@ export function InkSidebar({ roots, api = window.electronAPI.documentPages, onOp
     await onOpen({ objectId: result.value.objectId, revision: 0, path, name: `${name}.canvas`, kind: 'canvas', title: name, children: [], hasChildren: false, position: 0 })
   })
   /** A folder has no page operations (rename, move), so it is named before it exists. */
-  const openNewFolder = (anchor: HTMLElement, tree: PageNode) => {
+  const openNewFolder = (anchor: FloatAnchor, tree: PageNode) => {
     const name = uniqueName(tree, '未命名文件夹')
-    openPopover({ id: 'ink-new-folder', anchor: anchor.getBoundingClientRect(), placement: 'bottom-start', offset: 4, label: '新建文件夹',
+    openFloat({ id: 'ink-new-folder', anchor, placement: 'bottom-start', offset: 4, role: 'dialog', label: '新建文件夹',
       render: close => <RenamePanel label="文件夹名称" node={{ ...tree, title: name, kind: 'folder', icon: undefined }} onCancel={close} onConfirm={async title => {
         const clean = title.trim()
         if (/[\\/:]/.test(clean) || clean.startsWith('.')) return { ok: false, code: 'invalid_name', message: '名称不能包含 / \\ : ，也不能以 . 开头。' }
@@ -155,12 +154,14 @@ export function InkSidebar({ roots, api = window.electronAPI.documentPages, onOp
       }} /> })
   }
   const openNewMenu = (anchor: HTMLElement, tree: PageNode) => {
-    openMenu(anchor.getBoundingClientRect(), { width: 180, label: '新建', groups: [[
-      { id: 'page', label: '页面', icon: 'newPage', onSelect: () => { void createIn(tree, tree.path) } },
-      { id: 'database', label: '数据库', icon: 'table', onSelect: () => { void createDatabaseIn(tree, tree.path) } },
-      ...(tree.kind === 'vault' ? [{ id: 'board', label: '画板', icon: 'shapes' as IconName, onSelect: () => { void createBoard(tree) } }] : []),
-      { id: 'folder', label: '文件夹', icon: 'folder', onSelect: () => openNewFolder(anchor, tree) },
-    ]] }, { anchorEl: anchor, placement: 'bottom-start' })
+    // Measured now: the "+" hides again once the pointer moves into the menu.
+    const at = anchorOf(anchor)
+    openMenu(at, [
+      { id: 'page', label: '页面', icon: <Icon name="newPage" />, onSelect: () => { void createIn(tree, tree.path) } },
+      { id: 'database', label: '数据库', icon: <Icon name="table" />, onSelect: () => { void createDatabaseIn(tree, tree.path) } },
+      ...(tree.kind === 'vault' ? [{ id: 'board', label: '画板', icon: <Icon name="shapes" />, onSelect: () => { void createBoard(tree) } }] : []),
+      { id: 'folder', label: '文件夹', icon: <Icon name="folder" />, onSelect: () => openNewFolder(at, tree) },
+    ], { label: '新建' })
   }
   const trash = (node: PageNode) => run(async () => {
     const root = rootOf(node); if (!root) throw new Error('找不到页面所在的资料库')
@@ -192,7 +193,7 @@ export function InkSidebar({ roots, api = window.electronAPI.documentPages, onOp
 
   const openRename = (anchor: HTMLElement, node: PageNode) => {
     const root = rootOf(node); if (!root) return
-    openPopover({ id: 'ink-rename', anchor: anchor.getBoundingClientRect(), placement: 'bottom-start', offset: 4, label: '改名',
+    openFloat({ id: 'ink-rename', anchor: anchorOf(anchor), placement: 'bottom-start', offset: 4, role: 'dialog', label: '改名',
       render: close => <RenamePanel node={node} onCancel={close} onConfirm={async (title, operationId) => {
         const result = await operate({ type: 'rename', root: root.path, objectId: node.objectId, title, operationId })
         if (result.ok) close()
@@ -201,8 +202,8 @@ export function InkSidebar({ roots, api = window.electronAPI.documentPages, onOp
   }
   const openLocation = (kind: 'move' | 'restore', root: string, subject: { objectId: string; title: string; parentPath?: string }) => {
     // The picker is itself the labelled dialog; the frame stays unnamed so there is one dialog, not two.
-    openPopover({ id: 'ink-location', anchor: { left: 0, top: 0, right: 0, bottom: 0 }, placement: 'center', modal: true,
-      render: close => <div className="ink-menu" style={{ width: 440, padding: 8 }}>
+    openFloat({ id: 'ink-location', anchor: { left: 0, top: 0, right: 0, bottom: 0 }, placement: 'center', modal: true, className: 'rn-dialog rn-save-dialog',
+      render: close =>
         <SaveToPicker trees={trees.filter(tree => tree.path === root)} mode={kind} initialTitle={subject.title}
           excludeObjectId={kind === 'move' ? subject.objectId : undefined}
           onCancel={close}
@@ -211,39 +212,40 @@ export function InkSidebar({ roots, api = window.electronAPI.documentPages, onOp
             const result = await operate({ type: kind, root, operationId: selection.operationId, objectId: subject.objectId, ...target })
             if (result.ok) close()
             return result
-          }} />
-      </div> })
+          }} /> })
   }
   const openRowMenu = (anchor: HTMLElement, node: PageNode, point?: { x: number; y: number }) => {
     const root = rootOf(node)
     const page = node.kind === 'page' && !node.ambiguity
-    openMenu(point ? { left: point.x, right: point.x, top: point.y, bottom: point.y } : anchor.getBoundingClientRect(), { width: 240, label: `${node.title} 操作`, groups: [
-      [
-        { id: 'favorite', label: isFavorite(node) ? '取消收藏' : '收藏', icon: 'star', onSelect: () => { void toggleFavorite(node) } },
-        { id: 'link', label: '复制链接', icon: 'link', disabled: node.kind !== 'page', onSelect: () => { void navigator.clipboard?.writeText(toReadyUri({ kind: 'page', id: node.objectId })) } },
-      ],
-      [
-        { id: 'child', label: '新建子页面', icon: 'newPage', disabled: !page || !root, onSelect: () => { if (root) void createIn(node, root.path) } },
-        { id: 'rename', label: '改名', icon: 'rename', disabled: !page, onSelect: () => openRename(anchor, node) },
-        { id: 'move', label: '移动到…', icon: 'move', disabled: !page || !root, onSelect: () => { if (root) openLocation('move', root.path, { objectId: node.objectId, title: node.name.replace(/\.md$/i, '') }) } },
-        ...(onShowFiles ? [{ id: 'files', label: '在文件中显示', icon: 'folderOpen' as IconName, onSelect: () => { void run(async () => { await onShowFiles(node) }) } }] : []),
-      ],
-      [{ id: 'trash', label: '移到回收站', icon: 'trash', danger: true, disabled: !page || !root, onSelect: () => { void trash(node) } }],
-    ], footer: node.ambiguity ? node.ambiguity : undefined }, { anchorEl: anchor, placement: point ? 'bottom-start' : 'bottom-start' })
+    const items: MenuEntry[] = [
+      { id: 'favorite', label: isFavorite(node) ? '取消收藏' : '收藏', icon: <Icon name="star" />, onSelect: () => { void toggleFavorite(node) } },
+      { id: 'link', label: '复制链接', icon: <Icon name="link" />, disabled: node.kind !== 'page', onSelect: () => { void navigator.clipboard?.writeText(toReadyUri({ kind: 'page', id: node.objectId })) } },
+      { kind: 'separator' },
+      { id: 'child', label: '新建子页面', icon: <Icon name="newPage" />, disabled: !page || !root, onSelect: () => { if (root) void createIn(node, root.path) } },
+      { id: 'rename', label: '改名', icon: <Icon name="rename" />, disabled: !page, onSelect: () => openRename(anchor, node) },
+      { id: 'move', label: '移动到…', icon: <Icon name="move" />, disabled: !page || !root, onSelect: () => { if (root) openLocation('move', root.path, { objectId: node.objectId, title: node.name.replace(/\.md$/i, '') }) } },
+      ...(onShowFiles ? [{ id: 'files', label: '在文件中显示', icon: <Icon name="folderOpen" />, onSelect: () => { void run(async () => { await onShowFiles(node) }) } }] : []),
+      { kind: 'separator' },
+      { id: 'trash', label: '移到回收站', icon: <Icon name="trash" />, danger: true, disabled: !page || !root, onSelect: () => { void trash(node) } },
+    ]
+    const at: FloatAnchor = point ? { left: point.x, right: point.x, top: point.y, bottom: point.y } : anchorOf(anchor)
+    // An ambiguous page explains itself under the menu (the shared menu has no footer of its own).
+    openFloat({ anchor: at, placement: 'bottom-start',
+      render: close => <><MenuList items={items} label={`${node.title} 操作`} onDone={close} />{node.ambiguity && <p className="ink-menu-note">{node.ambiguity}</p>}</> })
   }
   const openTrash = (anchor: HTMLElement) => {
-    openPopover({ id: 'ink-trash', anchor: anchor.getBoundingClientRect(), placement: 'right-start', offset: 8, label: '回收站',
+    openFloat({ id: 'ink-trash', anchor: anchorOf(anchor), placement: 'right-start', offset: 8, role: 'dialog', label: '回收站',
       render: close => <TrashPanel api={api} roots={rootsRef.current} onChanged={refresh}
         onRestoreElsewhere={(item, root) => { close(); openLocation('restore', root, { objectId: item.objectId, title: item.originalPath.split(/[\\/]/).pop()!.replace(/\.md$/i, '') }) }} /> })
   }
   const openTemplates = () => {
     const path = useDocTabs.getState().tabs.find(tab => tab.id === useDocTabs.getState().activeTabId)?.path ?? null
-    openPopover({ id: 'ink-templates', anchor: { left: 0, top: 0, right: 0, bottom: 0 }, placement: 'center', modal: true, label: '模板',
-      render: close => <div className="ink-menu ink-panel ink-template-panel" style={{ width: 460 }}><TemplatePicker path={path && /\.md$/i.test(path) ? path : null} title="新页面" insert={null} close={close} /></div> })
+    openFloat({ id: 'ink-templates', anchor: { left: 0, top: 0, right: 0, bottom: 0 }, placement: 'center', modal: true, role: 'dialog', label: '模板', className: 'rn-dialog ink-template-panel',
+      render: close => <TemplatePicker path={path && /\.md$/i.test(path) ? path : null} title="新页面" insert={null} close={close} /> })
   }
   const openImport = () => {
-    openPopover({ id: 'ink-import', anchor: { left: 0, top: 0, right: 0, bottom: 0 }, placement: 'center', modal: true, label: '导入',
-      render: close => <div className="ink-menu" style={{ width: 560, padding: 12 }}><ImportWizard onClose={() => { close(); void refresh() }} /></div> })
+    openFloat({ id: 'ink-import', anchor: { left: 0, top: 0, right: 0, bottom: 0 }, placement: 'center', modal: true, role: 'dialog', label: '导入', className: 'rn-dialog ink-import-panel',
+      render: close => <ImportWizard onClose={() => { close(); void refresh() }} /> })
   }
 
   const renderChildren = (parent: PageNode, root: string, level: number): ReactNode => {
@@ -285,10 +287,10 @@ export function InkSidebar({ roots, api = window.electronAPI.documentPages, onOp
         </span>
         <button type="button" className="ink-sb-label ink-sb-label-btn" title={node.path} onClick={event => { event.stopPropagation(); activate(event) }}>{node.title}</button>
         <span className="ink-sb-row-actions">
-          {node.kind === 'page' && !node.ambiguity && <button type="button" className="ink-sb-action" aria-label={`在 ${node.title} 中新建页面`} {...tip('在其中添加页面')}
-            onClick={event => { event.stopPropagation(); void createIn(node, root) }}><Icon name="plus" size={16} stroke={1.8} /></button>}
-          <button type="button" className="ink-sb-action" aria-label={`${node.title} 操作`} {...tip('删除、复制等')}
-            onClick={event => { event.stopPropagation(); openRowMenu(event.currentTarget.closest('.ink-sb-row') as HTMLElement, node) }}><Icon name="more" size={16} stroke={2} /></button>
+          {node.kind === 'page' && !node.ambiguity && <IconButton size="sm" title={`在 ${node.title} 中新建页面`} icon={<Icon name="plus" />} {...tooltip('在其中添加页面')}
+            onClick={event => { event.stopPropagation(); void createIn(node, root) }} />}
+          <IconButton size="sm" title={`${node.title} 操作`} icon={<Icon name="more" />} {...tooltip('删除、复制等')}
+            onClick={event => { event.stopPropagation(); openRowMenu(event.currentTarget.closest('.ink-sb-row') as HTMLElement, node) }} />
         </span>
       </div>
       {node.ambiguity && <div role="note" className="ink-sb-note" style={{ paddingLeft: 8 + (level + 1) * 8 + 22 }}>{node.ambiguity}
@@ -317,24 +319,21 @@ export function InkSidebar({ roots, api = window.electronAPI.documentPages, onOp
       </div>
       <div className="ink-sb-bottom">
         <div className="ink-sb-divider" />
-        <NavRow icon="library" label="阅读" muted selected={libraryActive && !home} dataAttr={{ 'data-library-entry': 'true' }}
+        <NavRow icon="library" label="阅读" selected={libraryActive && !home} dataAttr={{ 'data-library-entry': 'true' }}
           onClick={() => { useInkLayout.getState().setHome(false); useDocTabs.getState().openLibraryTab(); requestWorkbenchModeOpen('document') }} />
-        <NavRow icon="graph" label="关系图谱" muted onClick={() => requestShellAction('open-graph')} />
-        <NavRow icon="search" label="查找与替换" ariaLabel="在资料库中查找与替换" muted onClick={() => requestShellAction('open-find-replace')} />
-        <NavRow icon="template" label="模板" ariaLabel="从模板新建页面" muted onClick={openTemplates} />
-        <NavRow icon="import" label="导入" muted onClick={openImport} />
-        <NavRow icon="trash" label="回收站" muted onClick={event => openTrash(event.currentTarget)} />
+        <NavRow icon="graph" label="关系图谱" onClick={() => requestShellAction('open-graph')} />
+        <NavRow icon="search" label="查找与替换" ariaLabel="在资料库中查找与替换" onClick={() => requestShellAction('open-find-replace')} />
+        <NavRow icon="template" label="模板" ariaLabel="从模板新建页面" onClick={openTemplates} />
+        <NavRow icon="import" label="导入" onClick={openImport} />
+        <NavRow icon="trash" label="回收站" onClick={openTrash} />
       </div>
     </div>
   </nav>
 }
 
-function NavRow({ icon, iconNode, label, ariaLabel, muted, selected, onClick, weight, dataAttr }: { icon?: IconName; iconNode?: ReactNode; label: string; ariaLabel?: string; muted?: boolean; selected?: boolean; onClick?: (event: ReactMouseEvent<HTMLElement>) => void; weight?: number; dataAttr?: Record<string, string> }) {
-  return <div className={`ink-sb-row ink-sb-nav${muted ? ' is-muted' : ''}${selected ? ' is-selected' : ''}`} role="button" tabIndex={0} aria-label={ariaLabel ?? label} {...dataAttr}
-    onClick={onClick} onKeyDown={event => { if (event.key === 'Enter') (event.currentTarget as HTMLElement).click() }}>
-    <span className="ink-sb-icon">{iconNode || (icon && <Icon name={icon} size={18} stroke={1.5} />)}</span>
-    <span className="ink-sb-label" style={weight ? { fontWeight: weight } : undefined}>{label}</span>
-  </div>
+/** The navigator's own entries (阅读, 关系图谱, …): the shared ListRow. */
+function NavRow({ icon, label, ariaLabel, selected, onClick, dataAttr }: { icon: IconName; label: string; ariaLabel?: string; selected?: boolean; onClick: (anchor: HTMLElement) => void; dataAttr?: Record<string, string> }) {
+  return <ListRow icon={<Icon name={icon} />} label={label} current={selected} aria-label={ariaLabel ?? label} {...dataAttr} onClick={event => onClick(event.currentTarget)} />
 }
 
 function Section({ id, title, children, onAdd, addLabel, addTip }: { id: string; title: string; children: ReactNode; onAdd?: (anchor: HTMLElement) => void; addLabel?: string; addTip?: string }) {
@@ -348,7 +347,7 @@ function Section({ id, title, children, onAdd, addLabel, addTip }: { id: string;
     <div className="ink-sb-section-head" role="button" tabIndex={0} aria-expanded={open} onClick={toggle} onKeyDown={event => { if (event.key === 'Enter') toggle() }}>
       <span className="ink-sb-section-title">{title}</span>
       {onAdd && <span className="ink-sb-row-actions">
-        <button type="button" className="ink-sb-action" aria-label={addLabel || '新建页面'} {...tip(addTip || '添加页面')} onClick={event => { event.stopPropagation(); onAdd(event.currentTarget) }}><Icon name="plus" size={16} stroke={1.8} /></button>
+        <IconButton size="sm" title={addLabel || '新建页面'} icon={<Icon name="plus" />} {...tooltip(addTip || '添加页面')} onClick={event => { event.stopPropagation(); onAdd(event.currentTarget) }} />
       </span>}
     </div>
     {open && children}
@@ -361,8 +360,10 @@ function RootNotice() {
   const missing = view.data?.status === 'missing'
   return <div className="ink-sb-banner" aria-label="页面位置">
     <div>{missing ? `找不到资料库：${view.data?.root}` : '还没有设置资料库。页面会保存在资料库文件夹中。'}</div>
-    <button type="button" className="ink-btn ink-btn-primary" onClick={() => void (missing ? chooseFolder() : createDefault())}>{missing ? '重新选择资料库…' : '设置资料库'}</button>
-    <button type="button" className="ink-btn" onClick={() => { void useWorkspace.getState().pickWorkspaceRoot().then(result => { if (!result.ok && result.message !== '已取消选择。') setError(result.message || '无法打开文件夹') }) }}>打开文件夹…</button>
+    <div className="ink-sb-banner-actions">
+      <Button size="sm" variant="primary" onClick={() => void (missing ? chooseFolder() : createDefault())}>{missing ? '重新选择资料库…' : '设置资料库'}</Button>
+      <Button size="sm" onClick={() => { void useWorkspace.getState().pickWorkspaceRoot().then(result => { if (!result.ok && result.message !== '已取消选择。') setError(result.message || '无法打开文件夹') }) }}>打开文件夹…</Button>
+    </div>
     {(error || view.phase === 'error') && <div role="alert">{error || (view.phase === 'error' ? view.message : '')}</div>}
   </div>
 }
@@ -373,7 +374,7 @@ function RenamePanel({ node, label = '页面名称', onConfirm, onCancel }: { no
   const [busy, setBusy] = useState(false)
   const intent = useRef({ title, id: crypto.randomUUID() })
   const lock = useRef(false)
-  return <form className="ink-menu ink-panel" style={{ width: 300 }} onSubmit={event => {
+  return <form className="ink-panel" style={{ width: 300 }} onSubmit={event => {
     event.preventDefault()
     if (lock.current) return
     lock.current = true; setBusy(true)
@@ -383,12 +384,12 @@ function RenamePanel({ node, label = '页面名称', onConfirm, onCancel }: { no
   }}>
     <div className="ink-panel-row">
       <InkPageIcon value={node.icon} kind={node.kind} size={20} />
-      <input className="ink-input" aria-label={label} data-autofocus value={title} disabled={busy} onChange={event => setTitle(event.target.value)} />
+      <Input aria-label={label} data-autofocus value={title} disabled={busy} onChange={event => setTitle(event.target.value)} />
     </div>
     {error && <div role="alert" className="ink-panel-error">{error}</div>}
     <div className="ink-panel-actions">
-      <button type="button" className="ink-btn" disabled={busy} onClick={onCancel}>取消</button>
-      <button type="submit" className="ink-btn ink-btn-primary" disabled={busy || !title.trim()}>确定</button>
+      <Button size="sm" disabled={busy} onClick={onCancel}>取消</Button>
+      <Button size="sm" type="submit" variant="primary" disabled={busy || !title.trim()}>确定</Button>
     </div>
   </form>
 }
@@ -414,25 +415,24 @@ function TrashPanel({ api, roots, onChanged, onRestoreElsewhere }: { api: Docume
     checked(result)
   })
   const shown = (items ?? []).filter(({ item }) => !query.trim() || item.title.toLowerCase().includes(query.trim().toLowerCase()))
-  return <div className="ink-menu" style={{ width: 320 }} aria-label="回收站内容">
-    <div className="ink-menu-search-wrap"><input className="ink-menu-search" data-autofocus aria-label="搜索回收站" placeholder="在回收站中搜索页面" value={query} onChange={event => setQuery(event.target.value)} /></div>
-    <div className="ink-menu-group ink-trash-list">
-      {items === null && !error && <div className="ink-menu-empty">正在读取…</div>}
-      {items !== null && shown.length === 0 && <div className="ink-menu-empty">{items.length ? '没有匹配的页面' : '回收站为空'}</div>}
+  return <div className="ink-trash" aria-label="回收站内容">
+    <div className="ink-trash-search"><Input data-autofocus aria-label="搜索回收站" placeholder="在回收站中搜索页面" value={query} onChange={event => setQuery(event.target.value)} /></div>
+    <div className="ink-trash-list">
+      {items === null && !error && <div className="ink-trash-empty">正在读取…</div>}
+      {items !== null && shown.length === 0 && <div className="ink-trash-empty">{items.length ? '没有匹配的页面' : '回收站为空'}</div>}
       {shown.map(({ root, item }) => <div key={item.objectId} className="ink-trash-item" data-trash-id={item.objectId}>
-        <span className="ink-menu-icon"><InkPageIcon size={18} /></span>
-        <span className="ink-menu-text" title={item.originalPath}>{item.title}</span>
+        <span className="ink-trash-icon"><InkPageIcon size={18} /></span>
+        <span className="ink-trash-title" title={item.originalPath}>{item.title}</span>
         {confirming === item.objectId ? <>
-          <button type="button" className="ink-btn is-danger" disabled={busy} onClick={() => void act(async () => { checked(await api.operate({ type: 'delete', root, objectId: item.objectId, operationId: crypto.randomUUID() })); setConfirming(null) })}>确认永久删除</button>
-          <button type="button" className="ink-sb-action" aria-label="取消" disabled={busy} onClick={() => setConfirming(null)}><Icon name="x" size={16} /></button>
+          <Button size="sm" variant="danger" disabled={busy} onClick={() => void act(async () => { checked(await api.operate({ type: 'delete', root, objectId: item.objectId, operationId: crypto.randomUUID() })); setConfirming(null) })}>确认永久删除</Button>
+          <IconButton size="sm" title="取消" icon={<Icon name="x" />} disabled={busy} onClick={() => setConfirming(null)} />
         </> : <>
-          <button type="button" className="ink-sb-action" aria-label={`恢复 ${item.title}`} {...tip('恢复')} disabled={busy} onClick={() => void restore(item, root)}><Icon name="restore" size={16} /></button>
-          <button type="button" className="ink-sb-action" aria-label={`永久删除 ${item.title}`} {...tip('永久删除')} disabled={busy} onClick={() => setConfirming(item.objectId)}><Icon name="trash" size={16} /></button>
+          <IconButton size="sm" title={`恢复 ${item.title}`} icon={<Icon name="restore" />} {...tooltip('恢复')} disabled={busy} onClick={() => void restore(item, root)} />
+          <IconButton size="sm" title={`永久删除 ${item.title}`} icon={<Icon name="trash" />} {...tooltip('永久删除')} disabled={busy} onClick={() => setConfirming(item.objectId)} />
         </>}
       </div>)}
     </div>
-    {error && <div role="alert" className="ink-menu-footer ink-panel-error">{error}</div>}
-    <div className="ink-menu-divider" />
-    <div className="ink-menu-footer">移到回收站的页面保留在资料库的回收站文件夹里，可以随时恢复。</div>
+    {error && <div role="alert" className="ink-float-error">{error}</div>}
+    <p className="ink-trash-foot">移到回收站的页面保留在资料库的回收站文件夹里，可以随时恢复。</p>
   </div>
 }

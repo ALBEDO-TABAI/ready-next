@@ -228,8 +228,10 @@ export default function EbookViewer({ tab, fileUrl, currentExt }: EbookViewerPro
       if (!doc) continue
       doc.documentElement.style.fontSize = `${fontSizeRef.current}px`
       doc.documentElement.style.lineHeight = '1.62'
-      doc.documentElement.style.background = 'var(--bg-editor, #ffffff)'
-      doc.documentElement.style.color = 'var(--text-primary, #1f2933)'
+      // The book's own document cannot see the app's tokens: hand it their current values (paper and ink).
+      const tokens = getComputedStyle(document.documentElement)
+      doc.documentElement.style.background = tokens.getPropertyValue('--rn-sheet').trim()
+      doc.documentElement.style.color = tokens.getPropertyValue('--rn-ink').trim()
     }
   }, [])
 
@@ -443,7 +445,7 @@ export default function EbookViewer({ tab, fileUrl, currentExt }: EbookViewerPro
           className="border-b px-3 py-1.5 text-[11px] font-medium"
           style={{
             borderColor: 'var(--border-default)',
-            color: importState.kind === 'error' ? 'var(--color-red, #c0392b)' : 'var(--text-muted)',
+            color: importState.kind === 'error' ? 'var(--rn-bad)' : 'var(--rn-ink-3)',
             background: 'var(--bg-content)',
           }}
         >

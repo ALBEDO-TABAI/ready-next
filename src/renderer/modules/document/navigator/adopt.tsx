@@ -1,6 +1,5 @@
-import { showToast } from '../../../components/ui'
+import { openFloat, showToast } from '../../../components/ui'
 import { useWorkspace } from '../../../stores/useWorkspace'
-import { openPopover } from '../ink/overlay'
 import { SaveToPicker } from '../page-ui/SaveToPicker'
 
 /**
@@ -15,8 +14,9 @@ export async function adoptIntoLibrary(source: string): Promise<void> {
   const tree = await api.tree({ path: vault.root, kind: 'vault' })
   if (!tree.ok) { showToast(tree.message); return }
   const name = source.split(/[\\/]/).filter(Boolean).pop() ?? ''
-  openPopover({ id: 'ink-adopt', anchor: { left: 0, top: 0, right: 0, bottom: 0 }, placement: 'center', modal: true,
-    render: close => <div className="ink-menu" style={{ width: 440, padding: 8 }}>
+  // The picker is the labelled dialog; the float only places it over a dimmed page.
+  openFloat({ id: 'ink-adopt', anchor: { left: 0, top: 0, right: 0, bottom: 0 }, placement: 'center', modal: true, className: 'rn-dialog rn-save-dialog',
+    render: close =>
       <SaveToPicker trees={[tree.value]} mode="adopt" initialTitle={name.replace(/\.(md|canvas)$/i, '')} onCancel={close}
         onConfirm={async selection => {
           const target = selection.parentObjectId ? { parentObjectId: selection.parentObjectId } : { parentPath: selection.parentPath! }
@@ -27,6 +27,5 @@ export async function adoptIntoLibrary(source: string): Promise<void> {
             showToast(`已收进资料库：${name}`)
           }
           return result
-        }} />
-    </div> })
+        }} /> })
 }

@@ -1,17 +1,28 @@
-/* 存为页面's Save To dialog (DraftSaveDialog.tsx): the float is the frame, so the picker inside drops its own box and
-   takes the primitives' field and button look. --rn-* tokens only (DS1); the picker sets its box inline, hence !important. */
+/* Save To (SaveToPicker.tsx): the shared field, checkbox and buttons on a quiet frame. Inline (calendar, FastCard,
+   board) the frame is a hairline; in a float (存为页面's dialog, move and restore, 收进资料库) the float is the frame.
+   --rn-* tokens only (DS1). */
 @layer ready-next.primitives {
+  .ready-save-to { display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: var(--rn-r-md); box-shadow: inset 0 0 0 1px var(--rn-hair); color: var(--rn-ink); font: 400 var(--rn-fs-md)/1.45 var(--rn-font-ui); }
+  .ready-save-to__title { display: block; font: 600 var(--rn-fs-lg)/1.3 var(--rn-font-ui); }
+  .ready-save-to__field { display: flex; flex-direction: column; gap: 4px; font-size: var(--rn-fs-sm); color: var(--rn-ink-2); }
+  .ready-save-to .rn-field { width: 100%; }
+  .ready-save-to__crumbs { font-size: var(--rn-fs-sm); color: var(--rn-ink-3); overflow-wrap: anywhere; }
+  .ready-save-to__crumbs button { padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+  .ready-save-to__crumbs button:hover { color: var(--rn-ink); }
+  .ready-save-to__tree { max-height: 240px; overflow: auto; }
+  .ready-save-to__node { display: block; width: 100%; min-height: var(--rn-row-h); padding-right: 8px; border: 0; border-radius: 8px; background: transparent; color: var(--rn-ink); font: inherit; text-align: left; cursor: pointer; }
+  .ready-save-to__node:hover { background: var(--rn-fill); }
+  .ready-save-to__node[aria-selected='true'] { background: var(--rn-fill-2); font-weight: 500; }
+  .ready-save-to__node:disabled { opacity: .45; cursor: default; }
+  .ready-save-to__path, .ready-save-to__note { margin: 0; font-size: var(--rn-fs-sm); color: var(--rn-ink-3); overflow-wrap: anywhere; }
+  .ready-save-to__error { margin: 0; color: var(--rn-bad); }
+  .ready-save-to__candidates { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--rn-ink-2); }
+  .ready-save-to__candidates p { margin: 0; flex-basis: 100%; }
+  .ready-save-to__keep { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--rn-ink-2); }
+  .ready-save-to__actions { display: flex; justify-content: flex-end; gap: 8px; }
+  .ready-save-to__actions > .rn-btn[data-variant='ghost'] { margin-right: auto; }
+
+  /* In a float the float is the frame. */
+  .rn-float > .ready-save-to, .ink-draft-panel > .ready-save-to { padding: 0; box-shadow: none; }
   .rn-save-dialog { width: min(480px, calc(100vw - 32px)); }
-  .rn-save-dialog > section { padding: 0 !important; border: 0 !important; border-radius: 0 !important; background: transparent !important; color: var(--rn-ink) !important; }
-  .rn-save-dialog > section > strong { display: block; font: 600 var(--rn-fs-lg)/1.3 var(--rn-font-ui); }
-  .rn-save-dialog label { display: block; font-size: var(--rn-fs-sm); color: var(--rn-ink-2); }
-  .rn-save-dialog input { display: block; width: 100%; height: var(--rn-control-h-lg); margin-top: 4px; padding: 0 10px; border: 0; border-radius: var(--rn-r-control); background: var(--rn-fill-2); color: var(--rn-ink); font: 400 var(--rn-fs-md)/1 var(--rn-font-ui); }
-  .rn-save-dialog nav { color: var(--rn-ink-3); }
-  .rn-save-dialog [role='treeitem'] { min-height: var(--rn-row-h); padding-right: 8px; border-radius: var(--rn-r-control); color: var(--rn-ink); }
-  .rn-save-dialog [role='treeitem'][aria-selected='true'] { background: var(--rn-fill-2); }
-  .rn-save-dialog [aria-label='最终路径'] { color: var(--rn-ink-3); }
-  .rn-save-dialog section > div:last-child { display: flex; justify-content: flex-end; gap: 8px; }
-  .rn-save-dialog section > div:last-child > button { height: var(--rn-control-h-lg); padding: 0 14px; border-radius: var(--rn-r-control); background: var(--rn-fill-2); color: var(--rn-ink); font: 500 var(--rn-fs-md)/1 var(--rn-font-ui); }
-  .rn-save-dialog section > div:last-child > button:last-child { background: var(--rn-inverse); color: var(--rn-on-inverse); }
-  .rn-save-dialog section > div:last-child > button:disabled { opacity: .45; }
 }

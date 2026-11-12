@@ -1,3 +1,5 @@
+/* The writer's content colours (sticky notes use its yellow); the document mode loads it too, importing twice is harmless. */
+@import '../../../modules/document/content-palette.css';
 @layer components {
   .rn-canvas {
     --canvas-stage: var(--rn-stage-2);
@@ -36,7 +38,8 @@
   /* While a PNG is captured only the cards show. */
   .rn-canvas[data-capturing] :where(.canvas-message, [role='alert'], .canvas-resize) { display: none; }
   .rn-canvas .canvas-card[data-matched='true'] { box-shadow: 0 0 0 3px var(--rn-accent-soft), var(--rn-shadow-1); }
-  .rn-canvas .canvas-card[data-kind='note'] { background: var(--rn-note); }
+  /* A sticky note is the content colour yellow (JSON Canvas colour 3), from the writer's content palette. */
+  .rn-canvas .canvas-card[data-kind='note'] { background: var(--doc-yellow-bg, var(--canvas-card)); }
   .rn-canvas .canvas-world { position: absolute; inset: 0; transform-origin: 0 0; }
   .rn-canvas .canvas-card { position: absolute; box-sizing: border-box; background: var(--canvas-card); border-radius: var(--rn-r-lg); box-shadow: var(--rn-shadow-1); }
   .rn-canvas .canvas-card[data-selected='true'] { outline: 2px solid var(--canvas-accent); }

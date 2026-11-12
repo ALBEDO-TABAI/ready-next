@@ -41,28 +41,28 @@ export function CommandMenu({ label, anchor, items, close, query: controlled, on
 
 export function BlockEditorStyles() {
   return <style>{`@layer components {
-    .ready-block-shell { position:relative; --color-gray:var(--text-muted); --color-brown:#95745b; --color-yellow:#b49b36; --color-pink:#c26b98; }
+    .ready-block-shell { position:relative; }
     /* Render blocks use content-visibility (paint containment), which clips anything outside their box.
        A block with a handle keeps its gutter inside its own box; containers without one stop clipping their children's gutters. */
     .ready-block-shell[data-actionable] { padding-inline-start:28px; margin-inline-start:-28px; }
     .ready-block-shell:not([data-actionable]) { content-visibility:visible; contain-intrinsic-size:none; }
-    .ready-block-handle { position:absolute; left:2px; top:2px; width:23px; opacity:0; cursor:grab; color:var(--text-secondary); border:0; background:transparent; }
+    .ready-block-handle { position:absolute; left:2px; top:2px; width:23px; opacity:0; cursor:grab; color:var(--rn-ink-3); border:0; background:transparent; }
     .ready-block-shell:hover > .ready-block-handle, .ready-block-shell:focus-within > .ready-block-handle { opacity:1; }
     .ready-block-container { min-width:0; }
     .ready-block-container.is-indented { padding-left:24px; }
-    .ready-block-container.is-quote { border-left:2px solid var(--border-color); }
+    .ready-block-container.is-quote { border-left:2px solid var(--rn-hair-2); }
     .ready-block-marker { float:left; width:24px; margin-left:-24px; text-align:center; user-select:none; }
     .ready-block-marker.is-task { box-sizing:border-box; width:14px; height:14px; margin:.42em 0 0 -20px; border:1.5px solid currentColor; border-radius:3px; opacity:.75; }
-    .ready-block-marker.is-task[data-checked=true] { opacity:1; border-color:var(--accent-color, #e8401f); background:var(--accent-color, #e8401f) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.2l2.3 2.3 4.7-5' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 10px no-repeat; }
-    .ready-block-container[data-checked=true] > .ready-block-shell .note-preview-markdown-p { color:var(--text-muted); text-decoration:line-through; }
+    .ready-block-marker.is-task[data-checked=true] { opacity:1; border-color:var(--rn-accent); background:var(--rn-accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.2l2.3 2.3 4.7-5' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 10px no-repeat; }
+    .ready-block-container[data-checked=true] > .ready-block-shell .note-preview-markdown-p { color:var(--rn-ink-3); text-decoration:line-through; }
     .ready-block-tail { display:block; width:100%; min-height:32px; margin:4px 0 0; padding:4px 2px; border:0; background:transparent; font:inherit; text-align:left; color:transparent; cursor:text; }
-    .ready-block-tail:hover, .ready-block-tail:focus-visible { color:var(--text-muted); outline:none; }
+    .ready-block-tail:hover, .ready-block-tail:focus-visible { color:var(--rn-ink-3); outline:none; }
     .ready-block-source { position:relative; }
     /* Source editing is a quiet corner control revealed on hover or keyboard focus, not a line of its own. */
-    .ready-block-source-edit { position:absolute; top:6px; right:6px; z-index:1; padding:2px 8px; border:1px solid var(--border-color); border-radius:6px; font-size:12px; line-height:18px; color:var(--text-secondary); background:var(--bg-primary, #fff); opacity:0; transition:opacity .12s ease; }
+    .ready-block-source-edit { position:absolute; top:6px; right:6px; z-index:1; padding:2px 8px; border:1px solid var(--rn-hair); border-radius:6px; font-size:12px; line-height:18px; color:var(--rn-ink-2); background:var(--rn-sheet); opacity:0; transition:opacity .12s ease; }
     .ready-block-shell:hover .ready-block-source-edit, .ready-block-source-edit:focus-visible { opacity:1; }
-    .ready-block-shell[data-drop=before] { box-shadow:0 -2px var(--accent-color, #e8401f); }
-    .ready-block-shell[data-drop=after] { box-shadow:0 2px var(--accent-color, #e8401f); }
+    .ready-block-shell[data-drop=before] { box-shadow:0 -2px var(--rn-accent); }
+    .ready-block-shell[data-drop=after] { box-shadow:0 2px var(--rn-accent); }
     .ready-block-popover { position:fixed; z-index:1000; width:320px; max-width:calc(100vw - 16px); padding:8px; color:var(--rn-ink); }
     .ready-block-popover [role=listbox] { max-height:270px; overflow:auto; }
     .ready-block-popover button { border:0; color:inherit; background:transparent; border-radius:6px; padding:6px 10px; text-align:left; }

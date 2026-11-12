@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Button } from '../../../components/ui'
 import { fieldValue, type DatabaseField } from '../../../../shared/document-database'
 import { dateRange } from './moves'
 import type { DatabaseAPI, PageChoice } from './access'
@@ -46,6 +47,6 @@ export function CellEditor({ field, value, api, busy, onSave, onClose }: {
         </> : field.type === 'date' ? <><label>开始<input aria-label="开始日期" value={start} onChange={e => setStart(e.target.value)} placeholder="YYYY-MM-DD 或含时区时间" /></label><label>结束<input aria-label="结束日期" value={end} onChange={e => setEnd(e.target.value)} placeholder="可留空" /></label></>
           : <input autoFocus aria-label="字段值" type={field.type === 'number' ? 'number' : field.type === 'url' ? 'url' : 'text'} step="any" value={text} onChange={e => setText(e.target.value)} />}
     {error && <p role="alert">{error}</p>}
-    <div className="rdb-actions"><button type="button" disabled={busy} onClick={onClose}>取消</button><button aria-label="保存单元格" disabled={busy} type="submit">保存</button></div>
+    <div className="rdb-actions"><Button size="sm" disabled={busy} onClick={onClose}>取消</Button><Button size="sm" variant="primary" aria-label="保存单元格" disabled={busy} type="submit">保存</Button></div>
   </form>
 }

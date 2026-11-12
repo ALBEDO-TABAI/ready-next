@@ -87,7 +87,7 @@ export function CanvasDock({ tool, lastShape, disabled, graphics, canUndo, canRe
     <ChromeTool label="文字卡" icon={Type} shortcut="T" disabled={disabled || busy} onClick={() => onCard('text')} />
     <ChromeTool label="便签" icon={StickyNote} shortcut="N" disabled={disabled || busy} onClick={() => onCard('note')} />
     <ChromeTool label="图形" icon={shapeActive ? shape.icon : Shapes} pressed={shapeActive} menu={{ id: SHAPES_MENU, open: shapesMenu.open }} disabled={disabled || !graphics}
-      onClick={button => shapesMenu.toggle(button, '图形', SHAPE_TOOLS.map(item => ({ id: item.id, label: item.label, icon: <item.icon />, hint: item.key, onSelect: () => onTool(item.id) })), 'top')} />
+      onClick={button => shapesMenu.toggle(button, '图形', SHAPE_TOOLS.map(item => ({ id: item.id, label: item.label, icon: <item.icon />, hint: item.key, checked: tool === item.id, onSelect: () => onTool(item.id) })), 'top')} />
     <ChromeTool label={DRAW_TOOL.label} icon={DRAW_TOOL.icon} shortcut={DRAW_TOOL.key} pressed={tool === DRAW_TOOL.id} disabled={disabled || !graphics} onClick={() => onTool(DRAW_TOOL.id)} />
     <span className="canvas-dock-sep" aria-hidden />
     <ChromeTool label="撤销" icon={Undo2} shortcut="⌘Z" disabled={busy || !canUndo} onClick={onUndo} />

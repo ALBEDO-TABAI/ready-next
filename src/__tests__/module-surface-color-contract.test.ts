@@ -23,7 +23,8 @@ test('Inkwell pages sit on paper panels straight on the workspace while RSS reta
     assert.equal(computed('html').getPropertyValue('--workbench-module-surface-bg'), 'var(--lg-material-panel)')
     // Like the calendar, the document workspace has no stage layer of its own: the panels touch the workspace edges.
     assert.equal(computed('.ink-doc-app').backgroundColor, 'rgba(0, 0, 0, 0)')
-    assert.equal(computed('.ink-main').background, 'var(--studio-paper)')
+    // The page is the paper material (.rn-sheet in materials.css, a cascade layer JSDOM skips): ink.css paints no surface of its own.
+    assert.equal(computed('.ink-main').backgroundColor, 'rgba(0, 0, 0, 0)')
     assert.equal(computed('.ink-doc-app').display, 'flex')
     assert.equal(computed('.ink-main').display, 'flex')
     assert.equal(computed('.document-content-frame').backgroundColor, 'rgba(0, 0, 0, 0)')

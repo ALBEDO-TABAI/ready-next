@@ -251,3 +251,14 @@ test('Slider is a named range that reports its value and draws the part up to th
   await h.render(<Example disabled />)
   assert.equal(h.get<HTMLInputElement>('input[aria-label="字号"]').disabled, true)
 })
+
+test('IconButton with a spread tooltip keeps its accessible name and drops the native title', async t => {
+  const h = await mountPrimitives(t)
+  await h.render(<>
+    <IconButton title="页面选项" icon={null} {...ui.tooltip('导出、阅读方式、样式与源码')} />
+    <IconButton title="更多" icon={null} />
+  </>)
+  const hinted = h.get<HTMLButtonElement>('[aria-label="页面选项"]')
+  assert.equal(hinted.hasAttribute('title'), false, 'the tooltip is the only hover hint')
+  assert.equal(h.get<HTMLButtonElement>('[aria-label="更多"]').title, '更多', 'without a tooltip the native title stays')
+})
