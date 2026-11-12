@@ -37,6 +37,7 @@ import {
   type TaskToolSnapshotProps,
 } from './task-snapshot/TaskToolSnapshot'
 import { buildRunDurationMeterModel, RunDurationMeter } from './RunDurationMeter'
+import { browserHelpDisplayText } from '../../../modules/browser/browser-task-copy'
 
 interface AgentSelectionMenuState {
   x: number
@@ -264,8 +265,9 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
           <ChatMessages
             messages={messages.map(message => {
               const display = message.meta?.readyRefDisplay
-              return display && typeof display === 'object' && 'content' in display && typeof display.content === 'string'
-                ? { ...message, content: display.content } : message
+              if (display && typeof display === 'object' && 'content' in display && typeof display.content === 'string') return { ...message, content: display.content }
+              const help = message.type === 'user' ? browserHelpDisplayText(message.content, message.meta) : null
+              return help ? { ...message, content: help } : message
             })}
             contextBoundaries={contextBoundaries}
             messageTaskSnapshots={messageTaskSnapshots}

@@ -9,7 +9,9 @@ import { AgentBrowserSupervisionPanel } from '../../components/browser/AgentBrow
 import BrowserTopBar from '../../components/browser/BrowserTopBar'
 import BrowserTabList from '../../components/browser/BrowserTabList'
 import { BrowserTaskBandForTab } from '../../components/browser/BrowserTaskBand'
+import { useBrowserFind } from '../../modules/browser/useBrowserFind'
 import { useBrowserTaskShell } from '../../modules/browser/useBrowserTaskShell'
+import { usePageCapabilities } from '../../modules/browser/usePageCapabilities'
 import { ShellNavigator } from '../../modules/workbench/shell/ShellSidebar'
 import BrowserShellLayout from '../../components/browser/BrowserShellLayout'
 import { nextIntentId } from '../../../shared/browser-view-intent'
@@ -545,6 +547,9 @@ export default function BrowserMode({
     visibleTabIds: [activeTabId, visibleSplitTab?.id],
     activateTab: (tabId) => { void handleHeaderTabClick(tabId, { shiftKey: false }) },
   })
+  // The shell's own tools for the visible page (W7 §4.10): ⌘F, and what the page offers (订阅).
+  const browserFind = useBrowserFind({ isActive, tabId: activeTabId })
+  const pageCapabilities = usePageCapabilities(activeTabId, activeTab?.url)
 
   const handleSplitResize = useCallback((delta: number) => {
     if (!splitContainerRef.current) return
@@ -1249,6 +1254,8 @@ export default function BrowserMode({
             fastCardItemCount={fastCardItems.length}
             onToggleFastCard={handleToggleFastCard}
             ownershipStatus={browserOwnershipStatus}
+            onSwitchTab={(tabId) => { void handleHeaderTabClick(tabId, { shiftKey: false }) }}
+            feeds={pageCapabilities?.feeds}
           />
 
           {fastCardPanelOpen && activeTabId && <BrowserSourceHighlight key={activeTabId} tabId={activeTabId} />}
@@ -1304,7 +1311,7 @@ export default function BrowserMode({
                     onRetry={() => void handleRetry(activeTab.id)}
                     mediaDropActive={generatedImageDragActive}
                     mediaUploadStatus={localMediaUploadStatus}
-                    band={<BrowserTaskBandForTab tabId={activeTab.id} />}
+                    band={<>{browserFind.bar}<BrowserTaskBandForTab tabId={activeTab.id} /></>}
                   />
                 </div>
                 {!agentPaneCollapsedVisible && (
@@ -1405,7 +1412,7 @@ export default function BrowserMode({
                 onRetry={() => void handleRetry()}
                 mediaDropActive={generatedImageDragActive}
                 mediaUploadStatus={localMediaUploadStatus}
-                band={<BrowserTaskBandForTab tabId={activeTab?.id} />}
+                band={<>{browserFind.bar}<BrowserTaskBandForTab tabId={activeTab?.id} /></>}
               />
             )}
               <BrowserDiagnosticsDock

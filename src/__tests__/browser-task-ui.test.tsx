@@ -200,3 +200,19 @@ test('the task card: the need with 打开页面 and the button; downloaded files
   await render(<BrowserTaskCardView task={task()} onContinue={() => {}} />)
   assert.equal(body.querySelector('[data-browser-task-card]'), null)
 })
+
+test('the conversation shows a one-click help message as its sentence; the task ids stay in the message for the assistant', async () => {
+  const { readBrowserUserAttention, browserAttentionUserInput } = await import('../main/modules/browser-engine/browser-user-attention')
+  const { browserHelpDisplayText } = await importWithoutStyles(() => import('../renderer/modules/browser/browser-task-copy'))
+  const found = readBrowserUserAttention({ taskId: 'browser-task-1', parentTaskId: 'codex-task-1', createdByRunId: 'run-1',
+    kind: 'browser_workflow', status: 'failed', progress: { total: 1, completed: 0, failed: 1, currentLabel: null } },
+  { userAttention: { id: 'attention-1', reason: 'login', tabId: 'tab-1', physicalTargetToken: 'physical-1' } })!
+  const { userMessage } = browserAttentionUserInput(found, { scopeId: 'scope-1', expectedMessageVisibilityEpoch: 0, actionAdmissionRef: {
+    headProjectionDigest: 'a'.repeat(64), actionProjectionVersion: { scopeEpoch: 0, headGeneration: 1, actionProjectionSequence: 1 },
+    actionHeadIdentity: { aliasId: 'scope-1', aliasGeneration: 1, threadBindingId: 'thread-1', headRevision: 1 } } })
+  assert.ok(userMessage && userMessage.content.includes('browser-task-1'), 'Main keeps the reference for the assistant')
+  const shown = browserHelpDisplayText(userMessage.content, userMessage.meta)
+  assert.equal(shown, userMessage.content.split('\n')[0])
+  assert.ok(shown && !shown.includes('browser-task-1') && !shown.includes('codex-task-1'))
+  assert.equal(browserHelpDisplayText('原任务：别的\n第二行', {}), null, 'an ordinary message is shown as written')
+})

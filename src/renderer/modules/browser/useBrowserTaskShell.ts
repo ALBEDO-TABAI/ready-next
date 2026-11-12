@@ -72,6 +72,7 @@ export function useBrowserTaskShell({ tabs, visibleTabIds, activateTab }: {
       const result = await window.electronAPI.browser.closeTaskTabs({ browserTaskId })
       if (!result?.success) showToast(`没能关闭这些标签：${result?.error || '未知原因'}`, { tone: 'bad' })
     } catch (error) {
+      /* silent-catch: the failure is shown to the person as a toast; the tabs are re-read either way. */
       showToast(`没能关闭这些标签：${error instanceof Error ? error.message : String(error)}`, { tone: 'bad' })
     } finally {
       void requestBrowserTaskReread('tabs')

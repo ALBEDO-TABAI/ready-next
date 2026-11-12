@@ -21,6 +21,8 @@
 
 | 评估日期 | 任务 | 文件 | 总行数 | 本次新增 | 结论 | 判断与后续动作 | 状态 |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
+| 2026-11-12 | W7 T7/T8 浏览器壳界面（B12 第三批） | `src/renderer/pages/modes/BrowserMode.tsx` | 1516 | 净 +22 | 一般 | 只接线：任务标签组、提示条、⌘F 查找条和页面能力都在独立模块（`useBrowserTaskShell`、`BrowserTaskBand`、`useBrowserFind`、`usePageCapabilities`），页面只把它们放进侧栏与网页上方的槽位；锁定提示在出现提示条时让位。复查：把网页层显隐与锁定浮窗的两段副作用移出页面。 | 已排期：2026-11-30 |
+| 2026-11-12 | W7 T7 一键继续的准入修复 | `src/main/modules/agent-control/codex-runtime/codex-product-run-preparer.ts` | 1014 | 净 +2 | 一般 | 只给页面引用的严格结构补上 B12 加入的 origin 字段（否则浏览器模式带当前网页的每一轮都被拒）。复查：页面引用结构应与 `TrustedRequestEnvironment` 共用一个定义，避免两处再漂移。 | 已排期：2026-11-30 |
 | 2026-11-12 | W7 T8/T7 壳数据 | `src/main/modules/agent-control/runtime-core/runtime.ts` | 1973 | 净 +9 | 一般 | 只接入原任务会话归属解析与已消费状态的刷新通知；不增加执行链。 | 复查：2026-11-30，按既有运行时装配边界复查 |
 | 2026-11-12 | W7 T8/T7 壳数据 | `src/preload/index.ts` | 1798 | 净 +25 | 一般 | 五个浏览器调用与四个可退订事件透传；IPC 对应检查和真实预加载行为检查覆盖。 | 复查：2026-11-30，按域拆分透传声明 |
 | 2026-11-12 | W7 T8/T7 壳数据 | `src/renderer/types/electron.d.ts` | 3459 | 净 +9 | 健康 | 只增加共享类型引用和预加载接口声明，类型与 IPC 对应检查覆盖。 | 记录结论 |

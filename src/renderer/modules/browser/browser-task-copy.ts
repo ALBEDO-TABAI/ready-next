@@ -34,3 +34,13 @@ export function formatFileSize(bytes: number): string {
 
 /** A downloaded file's name, from its path. */
 export const fileNameOf = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() || path
+
+/**
+ * A one-click help message (Main writes it, W7 §4.7) carries the original task's ids after its fixed sentence: the
+ * assistant needs them, the person does not. The conversation shows the sentence; the stored message is unchanged.
+ */
+export function browserHelpDisplayText(content: string, meta: unknown): string | null {
+  const ref = meta && typeof meta === 'object' ? (meta as { browserTaskRef?: unknown }).browserTaskRef : undefined
+  if (!ref || typeof ref !== 'object') return null
+  return content.split('\n')[0]?.trim() || null
+}

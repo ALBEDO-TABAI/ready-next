@@ -73,6 +73,7 @@ export async function sendBrowserTaskHelp(browserTaskId: string): Promise<void> 
     // Main sends the help input as a browser-mode message, so the head is read for the browser.
     surface = await agent.readCodexActionSurface({ aliasId: scopeId, aliasGeneration, workbenchMode: 'browser' })
   } catch (error) {
+    /* silent-catch: the refusal is shown on the band and the card in plain words. */
     refuse(browserTaskHelpRefusal(error))
     return
   }
@@ -118,6 +119,7 @@ export async function sendBrowserTaskHelp(browserTaskId: string): Promise<void> 
       if (admitted || result.success) void useAgent.getState().loadScope(scopeId)
     }
   } catch (error) {
+    /* silent-catch: Main's refusal is shown on the band and the card in plain words. */
     refuse(browserTaskHelpRefusal(error))
   } finally {
     stopWatching?.()
