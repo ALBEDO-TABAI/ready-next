@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Button, Input, Select, Switch } from '../../components/ui'
 import {
   DEFAULT_SEARCH_SETTINGS,
@@ -9,7 +9,18 @@ import {
 } from '../../../shared/search-engines'
 import { SettingsCard, SettingsRow } from './settings-shared'
 
-type SettingsAPI = Pick<Window['electronAPI']['settings'], 'getAll' | 'set'>
+type SettingsAPI = Pick<Window['electronAPI']['settings'], 'getAll' | 'get' | 'set'>
+// The WebMCP experiment (W7 T12): Main reads the saved value at start, so a change waits for the next start; its
+// read-only status key says whether it does.
+const WEBMCP_KEY = 'browser.webmcpExperiment'
+const WEBMCP_STATUS_KEY = 'browser.webmcpExperimentStatus'
+type WebMCPStatus = { enabled: boolean; active: boolean; restartRequired: boolean }
+const parseStatus = (raw: unknown): WebMCPStatus | null => {
+  try {
+    const value = typeof raw === 'string' ? JSON.parse(raw) : raw
+    return value && typeof value === 'object' && typeof value.restartRequired === 'boolean' ? value as WebMCPStatus : null
+  } catch { /* silent-catch: an unreadable status shows no restart note; the switch still shows the saved value. */ return null }
+}
 const CUSTOM = 'custom'
 const BUILT_IN = Object.entries(SEARCH_ENGINES).map(([value, engine]) => ({ value, label: engine.name }))
 
@@ -19,7 +30,8 @@ const validTemplate = (value: string) => {
 
 /**
  * 设置 › 浏览器 (W7 §4.10): the engine the address bar searches with, and whether typing there asks that engine for
- * suggestions. Suggestions are off until turned on, and the switch says what turning it on sends.
+ * suggestions. Suggestions are off until turned on, and the switch says what turning it on sends. Below, the
+ * page-provided tools experiment (W7 §4.11), off by default, with a note when it needs a restart.
  */
 export function BrowserSearchSettingsPanel({ api = window.electronAPI?.settings }: { api?: SettingsAPI }) {
   const [engine, setEngine] = useState<string>(DEFAULT_SEARCH_SETTINGS.searchEngine)
@@ -28,6 +40,12 @@ export function BrowserSearchSettingsPanel({ api = window.electronAPI?.settings 
   const [choice, setChoice] = useState<string>(DEFAULT_SEARCH_SETTINGS.searchEngine)
   const [error, setError] = useState('')
   const [loaded, setLoaded] = useState(false)
+  const [webmcp, setWebmcp] = useState(false)
+  const [webmcpStatus, setWebmcpStatus] = useState<WebMCPStatus | null>(null)
+  const readWebmcpStatus = useCallback(async () => {
+    const result = await api?.get(WEBMCP_STATUS_KEY)
+    setWebmcpStatus(result?.success ? parseStatus(result.data) : null)
+  }, [api])
 
   useEffect(() => {
     let cancelled = false
@@ -38,10 +56,12 @@ export function BrowserSearchSettingsPanel({ api = window.electronAPI?.settings 
       setChoice(Object.hasOwn(SEARCH_ENGINES, stored) ? stored : CUSTOM)
       if (!Object.hasOwn(SEARCH_ENGINES, stored)) setCustom(stored)
       setSuggestions(result.data?.[SEARCH_SUGGESTIONS_KEY] === 'true')
+      setWebmcp(result.data?.[WEBMCP_KEY] === 'true')
       setLoaded(true)
     }).catch(reason => { if (!cancelled) setError(`读取失败：${reason instanceof Error ? reason.message : String(reason)}`) })
+    void readWebmcpStatus().catch(reason => console.warn('[settings] webmcp status unavailable:', reason instanceof Error ? reason.message : String(reason)))
     return () => { cancelled = true }
-  }, [api])
+  }, [api, readWebmcpStatus])
 
   const save = async (key: string, value: string) => {
     const result = await api?.set(key, value)
@@ -62,6 +82,14 @@ export function BrowserSearchSettingsPanel({ api = window.electronAPI?.settings 
     setSuggestions(next)
     try { await save(SEARCH_SUGGESTIONS_KEY, next ? 'true' : 'false') } catch (reason) {
       setSuggestions(!next)
+      setError(reason instanceof Error ? reason.message : String(reason))
+    }
+  }
+
+  const toggleWebmcp = async (next: boolean) => {
+    setWebmcp(next)
+    try { await save(WEBMCP_KEY, next ? 'true' : 'false'); await readWebmcpStatus() } catch (reason) {
+      setWebmcp(!next)
       setError(reason instanceof Error ? reason.message : String(reason))
     }
   }
@@ -104,6 +132,17 @@ export function BrowserSearchSettingsPanel({ api = window.electronAPI?.settings 
           <Switch label="搜索建议" checked={suggestions} disabled={!loaded} onChange={next => { void toggleSuggestions(next) }} />
         </SettingsRow>
         {error && <p role="alert" className="px-4 pb-3" style={{ color: 'var(--rn-bad)', fontSize: 'var(--rn-fs-sm)' }}>{error}</p>}
+      </SettingsCard>
+      <SettingsCard title="实验">
+        <SettingsRow
+          label="网页自带工具（实验）"
+          description={<>
+            网页可以提供自己的工具，助手能列出并调用；工具返回的内容只当作网页资料，会改动网页的调用先问你。
+            {webmcpStatus?.restartRequired && <span data-webmcp-restart="" style={{ display: 'block', marginTop: 4, color: 'var(--rn-accent-text)' }}>重启 Ready 后生效。</span>}
+          </>}
+        >
+          <Switch label="网页自带工具（实验）" checked={webmcp} disabled={!loaded} onChange={next => { void toggleWebmcp(next) }} />
+        </SettingsRow>
       </SettingsCard>
     </div>
   )
