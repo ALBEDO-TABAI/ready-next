@@ -484,15 +484,10 @@ html[data-theme='dark']:root .calendar-mode-shell .workbench-canvas-shell {
   }
 }
 
+/* 资讯's content frame keeps the shell's module surface; its blur and private drawer palette left with W1-T5 (B13). */
 .rss-mode-shell .rss-feed-sheet {
-  --rss-settings-bg: color-mix(in srgb, var(--workbench-module-surface-bg) 94%, var(--bg-content) 6%);
-  --rss-settings-card-bg: color-mix(in srgb, var(--surface-card-bg) 42%, transparent);
-  --rss-settings-card-border: color-mix(in srgb, var(--surface-border) 78%, transparent);
-  --rss-settings-chip-bg: color-mix(in srgb, var(--surface-card-bg) 34%, transparent);
   background: var(--workbench-module-surface-bg) !important;
   box-shadow: none !important;
-  backdrop-filter: blur(24px) saturate(0%) !important;
-  -webkit-backdrop-filter: blur(24px) saturate(0%) !important;
 }
 
 .rss-mode-shell .rss-feed-surface,
@@ -501,475 +496,6 @@ html[data-theme='dark']:root .calendar-mode-shell .workbench-canvas-shell {
   box-shadow: none !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
-}
-
-.rss-settings-drawer {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 34;
-  width: min(382px, calc(100% - 72px));
-  min-width: min(320px, calc(100% - 72px));
-  display: flex;
-  flex-direction: column;
-  opacity: 0;
-  transform: translateX(12px);
-  pointer-events: none;
-  transition:
-    opacity 240ms cubic-bezier(0.22, 0.61, 0.36, 1),
-    transform 240ms cubic-bezier(0.22, 0.61, 0.36, 1);
-  will-change: opacity, transform;
-  -webkit-app-region: no-drag;
-}
-
-.rss-settings-drawer.is-entered {
-  opacity: 1;
-  transform: translateX(0);
-  pointer-events: auto;
-}
-
-.rss-settings-surface {
-  background: var(--rss-settings-bg) !important;
-  border-left: 1px solid var(--rss-settings-card-border) !important;
-  border-radius: var(--workbench-canvas-radius) 0 0 var(--workbench-canvas-radius);
-  box-shadow: -18px 0 44px -18px rgba(8, 12, 22, 0.28) !important;
-  overflow: hidden;
-}
-
-.rss-add-source-modal {
-  overflow: hidden;
-  background: color-mix(in srgb, var(--bg-primary) 97%, white 3%);
-  border: 1px solid color-mix(in srgb, var(--border-default) 70%, rgba(255, 255, 255, 0.58));
-  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.12), 0 6px 14px rgba(15, 23, 42, 0.06);
-}
-
-html:root .rss-add-source-modal {
-  background: transparent;
-}
-
-html:root .rss-add-source-modal__header {
-  background: var(--ready-app-panel-glass-band-bg);
-}
-
-html:root .rss-add-source-modal__preset {
-  box-shadow: var(--ready-app-panel-glass-card-shadow);
-}
-
-.rss-settings-header {
-  height: 42px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 0 12px 0 16px;
-  border-bottom: 1px solid var(--rss-settings-card-border);
-}
-
-.rss-settings-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--text-title);
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.rss-settings-scroll {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  padding: 12px;
-}
-
-.rss-settings-card {
-  border: 1px solid var(--rss-settings-card-border);
-  border-radius: 8px;
-  background: var(--rss-settings-card-bg);
-  padding: 12px;
-  margin-bottom: 10px;
-}
-
-.rss-settings-section-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 10px;
-  color: var(--text-title);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.rss-settings-section-note {
-  color: var(--text-muted);
-  font-size: 11px;
-  line-height: 1.55;
-}
-
-.rss-settings-choice-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.rss-settings-choice {
-  min-width: 0;
-  min-height: 50px;
-  border: 1px solid var(--rss-settings-card-border);
-  border-radius: 8px;
-  background: var(--rss-settings-chip-bg);
-  color: var(--text-body);
-  cursor: pointer;
-  text-align: left;
-  padding: 8px 9px;
-  transition:
-    background 160ms ease,
-    border-color 160ms ease,
-    color 160ms ease;
-}
-
-.rss-settings-choice:hover {
-  background: color-mix(in srgb, var(--surface-card-bg) 48%, transparent);
-  color: var(--text-title);
-}
-
-.rss-settings-choice.is-active {
-  border-color: color-mix(in srgb, var(--color-blue) 42%, var(--rss-settings-card-border));
-  background: color-mix(in srgb, var(--color-blue) 12%, var(--rss-settings-chip-bg));
-  color: var(--color-blue);
-}
-
-.rss-settings-choice span {
-  display: block;
-  overflow: hidden;
-  color: inherit;
-  font-size: 12px;
-  font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.rss-settings-choice small {
-  display: block;
-  margin-top: 4px;
-  overflow: hidden;
-  color: var(--text-muted);
-  font-size: 10px;
-  line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.rss-settings-warning {
-  display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
-  gap: 8px;
-  margin-top: 10px;
-  padding: 9px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--surface-card-bg) 30%, transparent);
-  color: var(--text-muted);
-}
-
-.rss-settings-warning.is-danger {
-  background: color-mix(in srgb, var(--color-red) 11%, transparent);
-  color: var(--color-red);
-}
-
-.rss-settings-warning.is-warning {
-  background: color-mix(in srgb, var(--color-orange) 12%, transparent);
-  color: var(--color-orange);
-}
-
-.rss-settings-warning.is-notice {
-  background: color-mix(in srgb, var(--color-blue) 10%, transparent);
-  color: var(--color-blue);
-}
-
-.rss-settings-warning strong,
-.rss-settings-warning span {
-  display: block;
-  font-size: 11px;
-  line-height: 1.5;
-}
-
-.rss-settings-warning strong {
-  color: currentColor;
-  font-weight: 700;
-}
-
-.rss-settings-warning span {
-  color: var(--text-muted);
-}
-
-.rss-settings-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 10px;
-}
-
-.rss-settings-button,
-.rss-settings-icon-button {
-  border: 1px solid var(--rss-settings-card-border);
-  background: var(--rss-settings-chip-bg);
-  color: var(--text-body);
-  cursor: pointer;
-  transition:
-    background 160ms ease,
-    color 160ms ease,
-    opacity 160ms ease,
-    transform 160ms ease;
-}
-
-.rss-settings-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-height: 30px;
-  border-radius: 8px;
-  padding: 0 10px;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.rss-settings-icon-button {
-  display: inline-flex;
-  width: 28px;
-  height: 28px;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border-radius: 8px;
-}
-
-.rss-settings-button:hover:not(:disabled),
-.rss-settings-icon-button:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--surface-card-bg) 54%, transparent);
-  color: var(--text-title);
-  transform: translateY(-1px);
-}
-
-.rss-settings-button:disabled,
-.rss-settings-icon-button:disabled {
-  cursor: default;
-  opacity: 0.5;
-}
-
-.rss-settings-button.is-primary {
-  border-color: color-mix(in srgb, var(--color-blue) 40%, transparent);
-  background: color-mix(in srgb, var(--color-blue) 78%, var(--surface-card-bg) 22%);
-  color: #fff;
-}
-
-.rss-settings-icon-button.is-danger {
-  color: var(--color-red);
-}
-
-.rss-settings-runtime-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.rss-settings-runtime-grid div {
-  min-width: 0;
-  padding: 8px;
-  border-radius: 8px;
-  background: var(--rss-settings-chip-bg);
-}
-
-.rss-settings-runtime-grid span,
-.rss-settings-runtime-grid strong {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.rss-settings-runtime-grid span {
-  color: var(--text-muted);
-  font-size: 10px;
-}
-
-.rss-settings-runtime-grid strong {
-  margin-top: 4px;
-  color: var(--text-title);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.rss-settings-status-line {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 8px;
-  margin-top: 9px;
-  color: var(--text-muted);
-  font-size: 11px;
-  line-height: 1.45;
-}
-
-.rss-settings-status-line > span:last-child {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.rss-settings-status-pill {
-  display: inline-flex;
-  max-width: 96px;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999px;
-  padding: 2px 7px;
-  background: color-mix(in srgb, var(--text-muted) 10%, transparent);
-  color: var(--text-muted);
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1.35;
-  white-space: nowrap;
-}
-
-.rss-settings-status-pill.is-success {
-  background: color-mix(in srgb, var(--color-green) 12%, transparent);
-  color: var(--color-green);
-}
-
-.rss-settings-status-pill.is-info {
-  background: color-mix(in srgb, var(--color-blue) 12%, transparent);
-  color: var(--color-blue);
-}
-
-.rss-settings-status-pill.is-warning {
-  background: color-mix(in srgb, var(--color-orange) 12%, transparent);
-  color: var(--color-orange);
-}
-
-.rss-settings-status-pill.is-danger {
-  background: color-mix(in srgb, var(--color-red) 12%, transparent);
-  color: var(--color-red);
-}
-
-.rss-settings-source-list {
-  display: grid;
-  gap: 8px;
-  margin-top: 10px;
-}
-
-.rss-settings-source-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 112px;
-  gap: 10px;
-  align-items: start;
-  padding: 9px;
-  border-radius: 8px;
-  background: var(--rss-settings-chip-bg);
-}
-
-.rss-settings-source-main {
-  min-width: 0;
-}
-
-.rss-settings-source-title,
-.rss-settings-source-meta,
-.rss-settings-source-error,
-.rss-settings-source-counts {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.rss-settings-source-title {
-  color: var(--text-title);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.rss-settings-source-meta,
-.rss-settings-source-counts {
-  margin-top: 4px;
-  color: var(--text-muted);
-  font-size: 10px;
-}
-
-.rss-settings-source-error {
-  margin-top: 5px;
-  color: var(--color-red);
-  font-size: 10px;
-}
-
-.rss-settings-source-side {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
-}
-
-.rss-settings-source-actions {
-  display: flex;
-  gap: 5px;
-}
-
-.rss-settings-empty {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 44px;
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
-.rss-settings-notice {
-  flex-shrink: 0;
-  display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
-  gap: 8px;
-  align-items: start;
-  padding: 10px 12px 12px;
-  border-top: 1px solid var(--rss-settings-card-border);
-  color: var(--text-muted);
-  font-size: 11px;
-  line-height: 1.45;
-}
-
-.rss-settings-notice span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.rss-settings-notice.is-success {
-  color: var(--color-green);
-}
-
-.rss-settings-notice.is-error {
-  color: var(--color-red);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .rss-settings-drawer {
-    transition-duration: 80ms;
-  }
-}
-
-@media (max-width: 720px) {
-  .rss-settings-drawer {
-    width: min(360px, calc(100% - 44px));
-    min-width: min(300px, calc(100% - 44px));
-  }
-
-  .rss-settings-choice-grid,
-  .rss-settings-runtime-grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 html:root,
@@ -998,7 +524,7 @@ html[data-theme='dark'][data-fastcard-overlay-window='true'] {
   --ready-app-panel-glass-card-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
 }
 
-/* Floating panels (RSS settings drawer, add-source dialog, FastCard) carry the float material
+/* Floating panels (FastCard) carry the float material
    (W1 §4, DL4); they no longer sit on a refraction lens — liquid glass is the composer's alone. */
 html:root .ready-app-liquid-panel,
 html[data-fastcard-overlay-window='true'] .ready-app-liquid-panel {
@@ -1014,11 +540,8 @@ html:root .browser-fastcard-header,
 html[data-fastcard-overlay-window='true'] .browser-fastcard-header,
 html:root .browser-fastcard-footer,
 html[data-fastcard-overlay-window='true'] .browser-fastcard-footer,
-html:root .rss-settings-header,
-html:root .rss-settings-notice,
 html:root .calendar-assistant-header,
-html:root .calendar-assistant-composer,
-html:root .rss-task-menu-panel .rn-float-panel__content > div:first-child {
+html:root .calendar-assistant-composer {
   background: var(--ready-app-panel-glass-band-bg) !important;
   border-color: transparent !important;
 }
@@ -1029,18 +552,10 @@ html:root .browser-fastcard-field select,
 html[data-fastcard-overlay-window='true'] .browser-fastcard-field select,
 html:root .browser-fastcard-action,
 html[data-fastcard-overlay-window='true'] .browser-fastcard-action,
-html:root .rss-settings-card,
-html:root .rss-settings-choice,
-html:root .rss-settings-warning,
-html:root .rss-settings-button,
-html:root .rss-settings-icon-button,
-html:root .rss-settings-runtime-grid div,
-html:root .rss-settings-source-row,
 html:root .calendar-assistant-card,
 html:root .calendar-assistant-event,
 html:root .calendar-assistant-chip,
 html:root .calendar-assistant-composer input,
-html:root .rss-task-menu-row,
 html:root .calendar-timezone-menu input {
   background: var(--ready-app-panel-glass-card-bg) !important;
   border-color: var(--ready-app-panel-glass-inner-border) !important;
@@ -1051,19 +566,13 @@ html:root .calendar-timezone-menu input {
 
 html:root .ready-app-liquid-panel .browser-fastcard-result-body section,
 html[data-fastcard-overlay-window='true'] .ready-app-liquid-panel .browser-fastcard-result-body section,
-html:root .ready-app-liquid-panel .rss-settings-card,
 html:root .ready-app-liquid-panel .calendar-assistant-card,
-html:root .ready-app-liquid-panel .calendar-assistant-event,
-html:root .ready-app-liquid-panel .rss-settings-source-row {
+html:root .ready-app-liquid-panel .calendar-assistant-event {
   background: transparent !important;
   border-color: transparent !important;
   box-shadow: none !important;
 }
 
-html:root .ready-app-liquid-panel .rss-settings-choice,
-html:root .ready-app-liquid-panel .rss-settings-button,
-html:root .ready-app-liquid-panel .rss-settings-icon-button,
-html:root .ready-app-liquid-panel .rss-settings-runtime-grid div,
 html:root .ready-app-liquid-panel .calendar-assistant-chip,
 html:root .ready-app-liquid-panel .calendar-assistant-composer input,
 html:root .ready-app-liquid-panel .browser-fastcard-field select,
@@ -1074,16 +583,9 @@ html[data-fastcard-overlay-window='true'] .ready-app-liquid-panel .browser-fastc
   box-shadow: var(--ready-app-panel-glass-card-shadow) !important;
 }
 
-html:root .rss-settings-choice:hover,
-html:root .rss-settings-button:hover:not(:disabled),
-html:root .rss-settings-icon-button:hover:not(:disabled),
 html:root .calendar-assistant-chip:hover,
 html:root .browser-fastcard-action:hover:not(:disabled),
-html[data-fastcard-overlay-window='true'] .browser-fastcard-action:hover:not(:disabled),
-html:root .rss-task-menu-row:hover {
+html[data-fastcard-overlay-window='true'] .browser-fastcard-action:hover:not(:disabled) {
   background: var(--ready-app-panel-glass-hover-bg) !important;
 }
 
-html:root .rss-settings-choice.is-active {
-  background: color-mix(in srgb, var(--color-blue) 12%, var(--ready-app-panel-glass-card-bg)) !important;
-}

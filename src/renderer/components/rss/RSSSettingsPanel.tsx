@@ -27,6 +27,7 @@ import {
   RSS_REFRESH_INTERVAL_OPTIONS,
 } from '../../modules/rss/settings'
 import type { RSSSource } from './RSSFeed'
+import { Button, IconButton } from '../ui/Button'
 
 interface RSSDraftStoreSourceRow {
   sourceId: string
@@ -387,20 +388,17 @@ export default function RSSSettingsPanel({
   if (!open) return null
 
   return (
-    <aside
-      className="rss-settings-drawer rss-settings-surface content-surface-panel ready-app-liquid-panel is-entered"
-    >
+    // A drawer over the content frame in the float material (W1 §4); the native web view steps aside while it is open.
+    <aside className="rss-settings-drawer rn-float" aria-label="RSS 设置" data-ready-native-overlay="">
       <div className="rss-settings-header">
         <div className="rss-settings-title">
-          <Settings className="h-[15px] w-[15px]" strokeWidth={2} />
+          <Settings />
           RSS 设置
         </div>
-        <button type="button" className="rss-settings-icon-button" onClick={onClose} title="关闭">
-          <X className="h-[15px] w-[15px]" strokeWidth={2} />
-        </button>
+        <IconButton size="sm" icon={<X />} title="关闭" onClick={onClose} />
       </div>
 
-      <div className="rss-settings-scroll panel-hover-scrollbar">
+      <div className="rss-settings-scroll rn-scroll">
         {isInitialLoading ? (
           <div className="rss-settings-empty">
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -410,17 +408,17 @@ export default function RSSSettingsPanel({
 
         <section className="rss-settings-card">
           <div className="rss-settings-section-title">
-            <RefreshCw className="h-[14px] w-[14px]" />
+            <RefreshCw />
             自动刷新
           </div>
-          <div className="rss-settings-choice-grid">
+          <div className="rss-settings-choice-grid" role="radiogroup" aria-label="自动刷新频率">
             {RSS_REFRESH_INTERVAL_OPTIONS.map((option) => (
               <button
                 key={option.value}
                 type="button"
-                className={`rss-settings-choice ${
-                  draftIntervalMs === option.value ? 'is-active' : ''
-                }`}
+                role="radio"
+                aria-checked={draftIntervalMs === option.value}
+                className="rss-settings-choice"
                 onClick={() => setDraftIntervalMs(option.value)}
               >
                 <span>{option.label}</span>
@@ -430,9 +428,9 @@ export default function RSSSettingsPanel({
           </div>
           <div className={`rss-settings-warning is-${refreshRisk.level}`}>
             {refreshRisk.level === 'danger' || refreshRisk.level === 'warning' ? (
-              <TriangleAlert className="h-[14px] w-[14px]" />
+              <TriangleAlert />
             ) : (
-              <CheckCircle2 className="h-[14px] w-[14px]" />
+              <CheckCircle2 />
             )}
             <div>
               <strong>{refreshRisk.title}</strong>
@@ -440,21 +438,21 @@ export default function RSSSettingsPanel({
             </div>
           </div>
           <div className="rss-settings-actions">
-            <button
-              type="button"
-              className="rss-settings-button is-primary"
+            <Button
+              variant="primary"
+              size="sm"
               disabled={!intervalChanged || isSavingInterval}
+              icon={isSavingInterval ? <Loader2 className="animate-spin" /> : undefined}
               onClick={() => void saveRefreshInterval()}
             >
-              {isSavingInterval ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
               保存频率
-            </button>
+            </Button>
           </div>
         </section>
 
         <section className="rss-settings-card">
           <div className="rss-settings-section-title">
-            <Activity className="h-[14px] w-[14px]" />
+            <Activity />
             订阅规则与运行时
           </div>
           <div className="rss-settings-runtime-grid">
@@ -492,43 +490,39 @@ export default function RSSSettingsPanel({
             </div>
           ) : null}
           <div className="rss-settings-actions">
-            <button
-              type="button"
-              className="rss-settings-button"
+            <Button
+              size="sm"
               disabled={busyKey === 'refresh-status'}
+              icon={busyKey === 'refresh-status' ? <Loader2 className="animate-spin" /> : <RefreshCw />}
               onClick={() => void refreshRuntimeState()}
             >
-              {busyKey === 'refresh-status' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
               刷新状态
-            </button>
-            <button
-              type="button"
-              className="rss-settings-button"
+            </Button>
+            <Button
+              size="sm"
               disabled={busyKey === 'benchmark'}
+              icon={busyKey === 'benchmark' ? <Loader2 className="animate-spin" /> : <Activity />}
               onClick={() => void runBenchmark()}
             >
-              {busyKey === 'benchmark' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Activity className="h-3.5 w-3.5" />}
               测试订阅源
-            </button>
-            <button
-              type="button"
-              className="rss-settings-button"
+            </Button>
+            <Button
+              size="sm"
               disabled={busyKey === 'repair-runtime'}
+              icon={busyKey === 'repair-runtime' ? <Loader2 className="animate-spin" /> : <Wrench />}
               onClick={() => void repairRuntime()}
             >
-              {busyKey === 'repair-runtime' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wrench className="h-3.5 w-3.5" />}
               修复运行时
-            </button>
-            <button type="button" className="rss-settings-button" onClick={onOpenExternalServices}>
-              <ExternalLink className="h-3.5 w-3.5" />
+            </Button>
+            <Button size="sm" icon={<ExternalLink />} onClick={onOpenExternalServices}>
               外部服务
-            </button>
+            </Button>
           </div>
         </section>
 
         <section className="rss-settings-card">
           <div className="rss-settings-section-title">
-            <Database className="h-[14px] w-[14px]" />
+            <Database />
             源状态与底稿
           </div>
           <div className="rss-settings-section-note">
@@ -564,24 +558,21 @@ export default function RSSSettingsPanel({
                         {draft?.storedCount ?? 0} 底稿 · {draft?.inboxCount ?? '—'} 收件箱
                       </div>
                       <div className="rss-settings-source-actions">
-                        <button
-                          type="button"
-                          className="rss-settings-icon-button"
+                        <IconButton
+                          size="sm"
                           disabled={refreshBusy || clearBusy}
                           onClick={() => void refreshSource(source)}
                           title="刷新此源"
-                        >
-                          {refreshBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                        </button>
-                        <button
-                          type="button"
-                          className="rss-settings-icon-button is-danger"
+                          icon={refreshBusy ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+                        />
+                        <IconButton
+                          size="sm"
+                          className="rss-settings-danger"
                           disabled={refreshBusy || clearBusy}
                           onClick={() => void clearDraftStore(source)}
                           title="重置此源底稿"
-                        >
-                          {clearBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-                        </button>
+                          icon={clearBusy ? <Loader2 className="animate-spin" /> : <Trash2 />}
+                        />
                       </div>
                     </div>
                   </div>
@@ -593,42 +584,39 @@ export default function RSSSettingsPanel({
 
         <section className="rss-settings-card">
           <div className="rss-settings-section-title">
-            <Download className="h-[14px] w-[14px]" />
+            <Download />
             导入导出
           </div>
           <div className="rss-settings-section-note">
             导入 OPML 会把文件里的订阅源加进来，已有的不变；导出会写入 Ready 的 RSS 产物目录，不改变当前订阅源。
           </div>
           <div className="rss-settings-actions">
-            <button
-              type="button"
-              className="rss-settings-button"
+            <Button
+              size="sm"
               disabled={busyKey === 'import-opml'}
+              icon={busyKey === 'import-opml' ? <Loader2 className="animate-spin" /> : <Upload />}
               onClick={() => opmlInput.current?.click()}
             >
-              {busyKey === 'import-opml' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
               导入 OPML
-            </button>
+            </Button>
             <input ref={opmlInput} type="file" accept=".opml,.xml,text/xml,application/xml" hidden aria-label="选择 OPML 文件"
               onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void importOpml(file) }} />
-            <button
-              type="button"
-              className="rss-settings-button"
+            <Button
+              size="sm"
               disabled={busyKey === 'export-opml'}
+              icon={busyKey === 'export-opml' ? <Loader2 className="animate-spin" /> : <Download />}
               onClick={() => void exportOpml()}
             >
-              {busyKey === 'export-opml' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
               导出 OPML
-            </button>
-            <button
-              type="button"
-              className="rss-settings-button"
+            </Button>
+            <Button
+              size="sm"
               disabled={busyKey === 'export-feed'}
+              icon={busyKey === 'export-feed' ? <Loader2 className="animate-spin" /> : <Download />}
               onClick={() => void exportCurrentFeed()}
             >
-              {busyKey === 'export-feed' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
               导出订阅合集
-            </button>
+            </Button>
           </div>
         </section>
 
@@ -646,9 +634,9 @@ export default function RSSSettingsPanel({
       {notice ? (
         <div className={`rss-settings-notice is-${notice.kind}`}>
           {notice.kind === 'error' ? (
-            <TriangleAlert className="h-3.5 w-3.5" />
+            <TriangleAlert />
           ) : (
-            <CheckCircle2 className="h-3.5 w-3.5" />
+            <CheckCircle2 />
           )}
           <span>{notice.message}</span>
         </div>

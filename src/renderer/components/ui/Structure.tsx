@@ -1,10 +1,10 @@
 import { useRef, useState, type HTMLAttributes, type PointerEvent, type ReactNode } from 'react'
 
 // ListRow, Toolbar, ScrollArea, ResizeHandle (W1 §5). A current row carries the signal colour (DL5):
-// it is "where you are".
-export function ListRow({ icon, label, meta, current, onClick, ...rest }: { icon?: ReactNode; label: ReactNode; meta?: ReactNode; current?: boolean; onClick?: () => void } & Omit<HTMLAttributes<HTMLButtonElement>, 'onClick'>) {
+// it is "where you are", and its icon takes the row's accent text colour (the rail's white glyph is the rail's alone).
+export function ListRow({ icon, label, meta, current, onClick, className = '', ...rest }: { icon?: ReactNode; label: ReactNode; meta?: ReactNode; current?: boolean; onClick?: () => void; disabled?: boolean } & Omit<HTMLAttributes<HTMLButtonElement>, 'onClick'>) {
   return (
-    <button type="button" className="rn-row" aria-current={current ? 'page' : undefined} onClick={onClick} {...rest}>
+    <button type="button" className={`rn-row ${className}`.trim()} aria-current={current ? 'page' : undefined} onClick={onClick} {...rest}>
       {icon}
       <span className="rn-row__label">{label}</span>
       {meta !== undefined && <span className="rn-row__meta">{meta}</span>}

@@ -8,6 +8,8 @@ import { BROWSER_OVERLAY_LOCK_EVENT } from '../../modules/overlay/browserViewMas
 import { openRSSItemInBrowserTab } from '../../modules/rss/open-rss-item-in-browser'
 import type { RSSItem } from './RSSFeed'
 import RssTimeHintBanner from './RssTimeHintBanner'
+import { Button, IconButton } from '../ui/Button'
+import { EmptyState } from '../ui/Display'
 
 interface PreviewBrowserProps {
   item: RSSItem
@@ -151,7 +153,7 @@ export default function PreviewBrowser({ item, onClose, isActive = true }: Previ
 
   return (
     <div
-      className={`rss-preview-floating content-surface-panel rss-preview-surface flex flex-col ${floatingStateClass}`}
+      className={`rss-preview-floating content-surface-panel flex flex-col ${floatingStateClass}`}
       role="region"
       aria-label="原文预览"
       style={{
@@ -165,23 +167,15 @@ export default function PreviewBrowser({ item, onClose, isActive = true }: Previ
         borderRadius: 'var(--workbench-canvas-radius) 0 0 var(--workbench-canvas-radius)',
         overflow: 'hidden',
         isolation: 'isolate',
-        boxShadow: '-18px 0 44px -16px rgba(8,12,22,0.32)',
+        boxShadow: 'var(--rn-shadow-3)',
         zIndex: 30,
       }}
     >
       <div className="rss-preview-toolbar">
-        <button type="button" className="rss-btn rss-btn--icon" onClick={handleClose} title="关闭预览" aria-label="关闭预览">
-          <X size={15} strokeWidth={1.9} />
-        </button>
-        <button type="button" className="rss-btn rss-btn--icon" onClick={() => void window.electronAPI?.browser?.previewGoBack()} disabled={!previewState.canGoBack} title="后退" aria-label="后退">
-          <ChevronLeft size={16} strokeWidth={1.9} />
-        </button>
-        <button type="button" className="rss-btn rss-btn--icon" onClick={() => void window.electronAPI?.browser?.previewGoForward()} disabled={!previewState.canGoForward} title="前进" aria-label="前进">
-          <ChevronRight size={16} strokeWidth={1.9} />
-        </button>
-        <button type="button" className="rss-btn rss-btn--icon" onClick={() => void window.electronAPI?.browser?.previewReload()} title="刷新" aria-label="刷新">
-          <RefreshCw size={14} strokeWidth={1.9} className={previewState.loading ? 'animate-spin' : ''} />
-        </button>
+        <IconButton icon={<X />} title="关闭预览" onClick={handleClose} />
+        <IconButton icon={<ChevronLeft />} title="后退" disabled={!previewState.canGoBack} onClick={() => void window.electronAPI?.browser?.previewGoBack()} />
+        <IconButton icon={<ChevronRight />} title="前进" disabled={!previewState.canGoForward} onClick={() => void window.electronAPI?.browser?.previewGoForward()} />
+        <IconButton icon={<RefreshCw className={previewState.loading ? 'animate-spin' : ''} />} title="刷新" onClick={() => void window.electronAPI?.browser?.previewReload()} />
         <span className="rss-preview-url" title={previewState.url || item.link}>{previewState.url || item.link}</span>
         {/* L5-B — RSS → calendar event hint: renders nothing unless the article mentions a time. */}
         <RssTimeHintBanner
@@ -191,9 +185,7 @@ export default function PreviewBrowser({ item, onClose, isActive = true }: Previ
           author={item.author}
           publishedAt={item.publishedAt}
         />
-        <button type="button" className="rss-btn" onClick={() => void handleOpenBrowserMode()} title="在浏览器模块打开当前页面">
-          <ExternalLink size={14} strokeWidth={1.9} />浏览器模式
-        </button>
+        <Button variant="ghost" size="sm" icon={<ExternalLink />} onClick={() => void handleOpenBrowserMode()} title="在浏览器模块打开当前页面">浏览器模式</Button>
       </div>
 
       <div ref={contentRef} data-ready-native-surface="browser" className="rss-preview-content flex-1 relative overflow-hidden" style={{ background: 'transparent' }}>
@@ -230,23 +222,14 @@ export default function PreviewBrowser({ item, onClose, isActive = true }: Previ
             className="absolute inset-0 z-10 flex items-center justify-center"
             style={{ background: 'color-mix(in srgb, var(--workbench-module-surface-bg) 90%, transparent)' }}
           >
-            <div className="flex flex-col items-center gap-3">
-              <Loader2 className="w-6 h-6 text-[var(--text-light)] animate-spin" />
-              <span className="text-[12px] text-[var(--text-muted)]">正在打开原文…</span>
-            </div>
+            <EmptyState icon={<Loader2 className="animate-spin" />} title="正在打开原文…" />
           </div>
         )}
 
         {previewState.error && (
           <div className="h-full overflow-auto p-8">
-            <div className="max-w-[680px] mx-auto">
-              <h1 className="text-[20px] font-semibold text-[var(--text-title)] mb-3">{item.title}</h1>
-              <p className="mb-6 text-[12px] text-[var(--text-muted)]">原文暂时无法在预览中打开：{previewState.error}</p>
-              <button type="button" className="sx-btn sx-btn--primary sx-btn--sm" onClick={() => void handleOpenBrowserMode()}>
-                <ExternalLink size={14} strokeWidth={1.9} />
-                在浏览器模块中打开
-              </button>
-            </div>
+            <EmptyState title={item.title} body={`原文暂时无法在预览中打开：${previewState.error}`}
+              action={<Button variant="primary" size="sm" icon={<ExternalLink />} onClick={() => void handleOpenBrowserMode()}>在浏览器模块中打开</Button>} />
           </div>
         )}
       </div>

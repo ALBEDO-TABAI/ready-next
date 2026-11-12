@@ -220,7 +220,8 @@ async function main() {
     await openSettings('library')
     check('S6 设置 › 资料库 shows where the library lives', await waitFor(session.page, root => document.querySelector('.settings-page-shell')?.textContent?.includes(root), path.join(temp, '测试资料库'), 10000))
     await openSettings('calendar')
-    check('S6 设置 › 日历 holds the calendar\'s own preference pages', await waitFor(session.page, () => Boolean(document.querySelector('[data-testid="calendar-settings"] [data-testid="set-nav-general"]')), undefined, 15000))
+    // B13: the calendar's preference pages are a tab row inside the settings card, not a secondary sidebar.
+    check('S6 设置 › 日历 holds the calendar\'s own preference pages', await waitFor(session.page, () => Boolean(document.querySelector('[data-testid="calendar-settings"] [role="tablist"][aria-label="日历设置"] [role="tab"]')), undefined, 15000))
     await openSettings('privacy')
     const readToggles = () => session.page.evaluate(() => [...document.querySelectorAll('.settings-page-shell [role="switch"]')].map(node => node.getAttribute('aria-checked')))
     const toggleCount = (await readToggles()).length

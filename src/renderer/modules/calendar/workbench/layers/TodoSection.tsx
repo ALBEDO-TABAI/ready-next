@@ -3,6 +3,7 @@ import type { TodoEntry } from '../../../../../shared/calendar-layers'
 import { isoDate } from '../../../../../shared/calendar/dates'
 import { openReadyRef } from '../../../workbench/open-ready-ref'
 import { toast, useStore } from '../store'
+import { SectionHeader } from '../../../../components/ui/Display'
 import { writeTodoTransfer, endTodoTransfer, todoFromList, toggleTodo } from './todo-actions'
 
 // The calendar sidebar's 待办 (W4 §5): every open checkbox in the library, in three groups. Ticking writes the
@@ -35,7 +36,7 @@ export function TodoSection() {
   ]
   const visible = groups.filter(group => group.items.length)
   return <div className="side-sec todo-sec" aria-label="待办">
-    <div className="side-head"><span style={{ flex: 1 }}>待办</span></div>
+    <SectionHeader title="待办" />
     {error && <p role="alert" className="todo-note">{error}</p>}
     {todos && !visible.length && !error && <p className="todo-note">今天没有要做的，也没有过期或未安排的待办。</p>}
     {visible.map(group => {

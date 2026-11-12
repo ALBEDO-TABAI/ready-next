@@ -1,9 +1,9 @@
 /*
- * RSS 栏目管理、订阅设置抽屉（在 RSS 内收敛颜色）与聊天里的引用预览。
- * 与 rss-workspace.css 同一套 sx 纪律；--rss-* 变量由 .rss-mode-shell 提供。
+ * RSS 主题编辑、订阅与刷新设置抽屉（“来源”）与添加订阅源对话框。
+ * 只用 --rn-* 令牌（W1 DS1）；行、按钮、开关、输入框、胶囊是共享基元；抽屉与对话框是浮层材质（.rn-float / 浮层宿主）。
  */
 
-/* ── 栏目管理 ─────────────────────────────────────────────────────────── */
+/* ── 主题编辑 ─────────────────────────────────────────────────────────── */
 
 .rss-definition-editor {
   display: grid;
@@ -24,60 +24,25 @@
 }
 
 .rss-definition-list > p {
-  padding: 0 12px 10px;
-  font-size: 11px;
-  font-weight: 500;
+  padding: 0 10px 10px;
+  font: 500 var(--rn-fs-xs)/1.2 var(--rn-font-ui);
   letter-spacing: 0.04em;
-  color: var(--text-light);
+  color: var(--rn-ink-3);
 }
 
-.rss-definition-list > button {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  min-height: 34px;
-  padding: 0 12px;
-  border-radius: 10px;
-  font-size: 13px;
-  color: var(--text-secondary);
-  text-align: left;
-  transition: background-color var(--sx-dur, 160ms) var(--rss-ease), box-shadow var(--sx-dur, 160ms) var(--rss-ease);
-}
-
-.rss-definition-list > button svg {
+.rss-definition-list > .rn-row {
   flex-shrink: 0;
-  color: var(--text-muted);
-}
-
-.rss-definition-list > button span {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.rss-definition-list > button small {
-  font-size: 11px;
-  color: var(--text-light);
-}
-
-.rss-definition-list > button:hover:not([aria-current='true']) {
-  background: var(--sx-raised-hover);
-  color: var(--text-title);
-}
-
-.rss-definition-list > button[aria-current='true'] {
-  background: var(--sx-raised-bg);
-  box-shadow: var(--sx-raised-shadow);
-  color: var(--text-title);
-  font-weight: 500;
 }
 
 .rss-definition-list > .rss-definition-new {
   margin-bottom: 10px;
-  color: var(--text-muted);
+}
+
+.rss-definition-hidden {
+  margin-left: 8px;
+  font-size: var(--rn-fs-xs);
+  font-weight: 400;
+  color: var(--rn-ink-3);
 }
 
 .rss-definition-main {
@@ -94,17 +59,17 @@
 }
 
 .rss-definition-form > header h1 {
-  font-size: 22px;
+  font-size: var(--rn-fs-2xl);
   line-height: 1.3;
   font-weight: 650;
-  color: var(--text-title);
+  color: var(--rn-ink);
 }
 
 .rss-definition-form > header p {
   margin-top: 6px;
   font-size: 12.5px;
   line-height: 1.65;
-  color: var(--text-muted);
+  color: var(--rn-ink-2);
 }
 
 .rss-definition-field {
@@ -113,22 +78,25 @@
 }
 
 .rss-definition-field > span,
-.rss-definition-field > legend {
+.rss-definition-field > legend,
+.rss-definition-field--inline > div > span {
   padding: 0;
   font-size: 12.5px;
   font-weight: 500;
-  color: var(--text-body);
+  color: var(--rn-ink);
 }
 
-.rss-definition-field > small {
-  font-size: 12px;
+.rss-definition-field > small,
+.rss-definition-field--inline > div > small {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--rn-fs-sm);
   line-height: 1.6;
-  color: var(--text-muted);
+  color: var(--rn-ink-2);
 }
 
-.rss-definition-field .sx-textarea {
+.rss-definition-field textarea.rn-field {
   min-height: 112px;
-  resize: vertical;
 }
 
 .rss-definition-field--inline {
@@ -138,7 +106,7 @@
   gap: 16px;
 }
 
-.rss-definition-field--inline .sx-input {
+.rss-definition-field--inline .rn-field {
   width: 96px;
 }
 
@@ -148,58 +116,15 @@
   gap: 6px;
 }
 
-.rss-definition-icons button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 38px;
-  height: 38px;
-  border-radius: 11px;
-  color: var(--text-muted);
-  transition: background-color var(--sx-dur, 160ms) var(--rss-ease), box-shadow var(--sx-dur, 160ms) var(--rss-ease), color var(--sx-dur, 160ms) var(--rss-ease);
-}
-
-.rss-definition-icons button:hover:not([aria-checked='true']) {
-  background: var(--sx-raised-hover);
-  color: var(--text-title);
-}
-
-.rss-definition-icons button[aria-checked='true'] {
-  background: var(--sx-raised-bg);
-  box-shadow: var(--sx-raised-shadow);
-  color: var(--text-title);
-}
-
 .rss-definition-filters {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
-.rss-definition-filters button {
-  height: 30px;
-  padding: 0 12px;
-  border-radius: 999px;
-  background: var(--sx-inset-bg);
-  font-size: 12.5px;
-  color: var(--text-secondary);
-  transition: background-color var(--sx-dur, 160ms) var(--rss-ease), box-shadow var(--sx-dur, 160ms) var(--rss-ease), color var(--sx-dur, 160ms) var(--rss-ease);
-}
-
-.rss-definition-filters button:hover:not([aria-pressed='true']) {
-  color: var(--text-title);
-}
-
-.rss-definition-filters button[aria-pressed='true'] {
-  background: var(--sx-raised-bg);
-  box-shadow: var(--sx-raised-shadow);
-  color: var(--text-title);
-  font-weight: 500;
-}
-
 .rss-definition-filters > p {
-  font-size: 12px;
-  color: var(--text-light);
+  font-size: var(--rn-fs-sm);
+  color: var(--rn-ink-3);
 }
 
 .rss-definition-actions {
@@ -213,14 +138,7 @@
 .rss-definition-actions > p {
   flex-basis: 100%;
   font-size: 12.5px;
-  color: var(--text-muted);
-}
-
-.rss-definition-icons button:focus-visible,
-.rss-definition-filters button:focus-visible,
-.rss-definition-list > button:focus-visible {
-  outline: none;
-  box-shadow: var(--sx-focus-ring);
+  color: var(--rn-ink-2);
 }
 
 @container (max-width: 720px) {
@@ -240,74 +158,551 @@
     display: none;
   }
 
-  .rss-definition-list > button {
-    flex-shrink: 0;
+  .rss-definition-list > .rn-row {
     width: auto;
   }
 }
 
-/* ── 订阅设置抽屉（0.8 共享侧栏玻璃，RSS 内收敛颜色） ─────────────────────── */
+/* ── 订阅与刷新设置（“来源”）：内容框右侧的抽屉，浮层材质（.rn-float） ───────── */
 
-html .rss-mode-shell .rss-settings-surface {
-  background: var(--rss-popover-bg) !important;
-  border-left-color: transparent !important;
-  box-shadow: -28px 0 56px -28px rgba(15, 23, 42, 0.24) !important;
-  backdrop-filter: blur(28px) saturate(150%) !important;
-  -webkit-backdrop-filter: blur(28px) saturate(150%) !important;
+.rss-settings-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 34;
+  width: min(382px, calc(100% - 72px));
+  min-width: min(320px, calc(100% - 72px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: var(--rn-r-float) 0 0 var(--rn-r-float);
+  -webkit-app-region: no-drag;
+  animation: rss-drawer-in var(--rn-d-2) var(--rn-ease-out);
 }
 
-html .rss-mode-shell .rss-settings-choice.is-active {
-  border-color: transparent !important;
-  background: var(--sx-raised-bg) !important;
-  box-shadow: var(--sx-raised-shadow) !important;
-  color: var(--text-title) !important;
+@keyframes rss-drawer-in {
+  from { opacity: 0; transform: translateX(12px); }
 }
 
-html .rss-mode-shell .rss-settings-status-pill.is-success,
-html .rss-mode-shell .rss-settings-status-pill.is-info {
-  background: var(--sx-inset-bg);
-  color: var(--text-muted);
+.rss-settings-header {
+  height: 46px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 10px 0 16px;
+  box-shadow: inset 0 -1px 0 var(--rn-hair);
 }
 
-html .rss-mode-shell .rss-settings-status-pill.is-warning {
-  background: var(--sx-warning-wash);
-  color: var(--sx-warning);
+.rss-settings-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--rn-ink);
+  font-size: var(--rn-fs-md);
+  font-weight: 600;
 }
 
-html .rss-mode-shell .rss-settings-status-pill.is-danger {
-  background: var(--sx-danger-wash);
-  color: var(--sx-danger-text);
+.rss-settings-title svg {
+  width: 15px;
+  height: 15px;
+  color: var(--rn-ink-2);
 }
 
-html .rss-mode-shell .rss-settings-icon-button.is-danger {
-  color: var(--text-light);
+.rss-settings-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 16px 16px;
 }
 
-html .rss-mode-shell .rss-settings-icon-button.is-danger:hover:not(:disabled) {
-  color: var(--sx-danger-text);
+/* Sections sit straight on the float, separated by a hairline: no card on the float (DL2). */
+.rss-settings-card {
+  padding: 14px 0;
 }
 
-html .rss-mode-shell .rss-settings-button,
-html .rss-mode-shell .rss-settings-icon-button {
-  transform: none !important;
+.rss-settings-card + .rss-settings-card {
+  box-shadow: inset 0 1px 0 var(--rn-hair);
 }
 
-html .rss-mode-shell .rss-settings-button.is-primary {
-  border-color: transparent !important;
-  background: var(--sx-ink) !important;
-  color: var(--sx-on-ink) !important;
+.rss-settings-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  color: var(--rn-ink);
+  font-size: var(--rn-fs-sm);
+  font-weight: 600;
 }
 
-html .rss-mode-shell .rss-settings-warning.is-notice {
-  background: var(--sx-inset-bg) !important;
-  color: var(--text-secondary);
+.rss-settings-section-title svg {
+  width: 14px;
+  height: 14px;
+  color: var(--rn-ink-2);
+}
+
+.rss-settings-section-note {
+  color: var(--rn-ink-2);
+  font-size: var(--rn-fs-xs);
+  line-height: 1.55;
+}
+
+/* The refresh interval: a radio group of two-line choices; the chosen one is raised like a segmented item. */
+.rss-settings-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.rss-settings-choice {
+  min-width: 0;
+  min-height: 50px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--rn-r-control);
+  background: var(--rn-fill);
+  color: var(--rn-ink);
+  cursor: pointer;
+  text-align: left;
+  transition: background-color var(--rn-d-1) var(--rn-ease-out), box-shadow var(--rn-d-1) var(--rn-ease-out);
+}
+
+.rss-settings-choice:hover {
+  background: var(--rn-fill-2);
+}
+
+.rss-settings-choice[aria-checked='true'] {
+  background: var(--rn-sheet);
+  box-shadow: var(--rn-card-shadow);
+}
+
+.rss-settings-choice:focus-visible {
+  outline: 1.5px solid var(--rn-ink-3);
+  outline-offset: 1px;
+}
+
+.rss-settings-choice span {
+  display: block;
+  overflow: hidden;
+  color: inherit;
+  font-size: var(--rn-fs-sm);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rss-settings-choice small {
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--rn-ink-3);
+  font-size: var(--rn-fs-2xs);
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rss-settings-warning {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 8px;
+  margin-top: 10px;
+  padding: 9px 10px;
+  border-radius: var(--rn-r-control);
+  background: var(--rn-fill);
+  color: var(--rn-ink-2);
+}
+
+.rss-settings-warning > svg {
+  width: 14px;
+  height: 14px;
+  margin-top: 1px;
+}
+
+.rss-settings-warning.is-danger {
+  background: color-mix(in srgb, var(--rn-bad) 9%, transparent);
+  color: var(--rn-bad);
+}
+
+.rss-settings-warning.is-warning {
+  background: color-mix(in srgb, var(--rn-warn) 11%, transparent);
+  color: var(--rn-warn);
+}
+
+.rss-settings-warning strong,
+.rss-settings-warning span {
+  display: block;
+  font-size: var(--rn-fs-xs);
+  line-height: 1.5;
+}
+
+.rss-settings-warning strong {
+  color: currentColor;
+  font-weight: 600;
+}
+
+.rss-settings-warning span {
+  color: var(--rn-ink-2);
+}
+
+.rss-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.rss-settings-runtime-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.rss-settings-runtime-grid div {
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: var(--rn-r-control);
+  background: var(--rn-fill);
+}
+
+.rss-settings-runtime-grid span,
+.rss-settings-runtime-grid strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rss-settings-runtime-grid span {
+  color: var(--rn-ink-3);
+  font-size: var(--rn-fs-2xs);
+}
+
+.rss-settings-runtime-grid strong {
+  margin-top: 4px;
+  color: var(--rn-ink);
+  font-size: var(--rn-fs-sm);
+  font-weight: 600;
+}
+
+.rss-settings-status-line {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  margin-top: 9px;
+  color: var(--rn-ink-2);
+  font-size: var(--rn-fs-xs);
+  line-height: 1.45;
+}
+
+.rss-settings-status-line > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Status reads as text on a quiet fill; only trouble is tinted (warning, failure). */
+.rss-settings-status-pill {
+  display: inline-flex;
+  max-width: 96px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 7px;
+  border-radius: var(--rn-r-pill);
+  background: var(--rn-fill-2);
+  color: var(--rn-ink-2);
+  font-size: var(--rn-fs-2xs);
+  font-weight: 600;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.rss-settings-status-pill.is-warning {
+  background: color-mix(in srgb, var(--rn-warn) 11%, transparent);
+  color: var(--rn-warn);
+}
+
+.rss-settings-status-pill.is-danger {
+  background: color-mix(in srgb, var(--rn-bad) 9%, transparent);
+  color: var(--rn-bad);
+}
+
+.rss-settings-source-list {
+  display: grid;
+  gap: 2px;
+  margin-top: 10px;
+}
+
+.rss-settings-source-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 112px;
+  gap: 10px;
+  align-items: start;
+  padding: 9px 10px;
+  border-radius: var(--rn-r-control);
+}
+
+.rss-settings-source-row:hover {
+  background: var(--rn-fill);
+}
+
+.rss-settings-source-main {
+  min-width: 0;
+}
+
+.rss-settings-source-title,
+.rss-settings-source-meta,
+.rss-settings-source-error,
+.rss-settings-source-counts {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rss-settings-source-title {
+  color: var(--rn-ink);
+  font-size: var(--rn-fs-sm);
+  font-weight: 600;
+}
+
+.rss-settings-source-meta,
+.rss-settings-source-counts {
+  margin-top: 4px;
+  color: var(--rn-ink-2);
+  font-size: var(--rn-fs-2xs);
+}
+
+.rss-settings-source-error {
+  margin-top: 5px;
+  color: var(--rn-bad);
+  font-size: var(--rn-fs-2xs);
+}
+
+.rss-settings-source-side {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.rss-settings-source-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.rss-settings-danger {
+  color: var(--rn-ink-3);
+}
+
+.rss-settings-danger:hover:not(:disabled) {
+  color: var(--rn-bad);
+}
+
+.rss-settings-empty {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  color: var(--rn-ink-2);
+  font-size: var(--rn-fs-sm);
+}
+
+.rss-settings-empty > svg {
+  width: 16px;
+  height: 16px;
+}
+
+.rss-settings-notice {
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 10px 16px 12px;
+  box-shadow: inset 0 1px 0 var(--rn-hair);
+  color: var(--rn-ink-2);
+  font-size: var(--rn-fs-xs);
+  line-height: 1.45;
+}
+
+.rss-settings-notice > svg {
+  width: 14px;
+  height: 14px;
+}
+
+.rss-settings-notice span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rss-settings-notice.is-error {
+  color: var(--rn-bad);
+}
+
+@media (max-width: 720px) {
+  .rss-settings-drawer {
+    width: min(360px, calc(100% - 44px));
+    min-width: min(300px, calc(100% - 44px));
+  }
+
+  .rss-settings-choice-grid,
+  .rss-settings-runtime-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── 添加订阅源（共享对话框里的表单） ────────────────────────────────── */
+
+.rss-add-source-modal {
+  width: min(420px, calc(100vw - 32px));
+}
+
+.rss-add-source {
+  display: grid;
+  gap: 14px;
+}
+
+.rss-add-source__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-right: -6px;
+}
+
+.rss-add-source__header .rn-dialog__title {
+  margin: 0;
+}
+
+.rss-add-source__preset {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--rn-r-md);
+  background: var(--rn-fill);
+  color: var(--rn-ink);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--rn-d-1) var(--rn-ease-out), box-shadow var(--rn-d-1) var(--rn-ease-out);
+}
+
+.rss-add-source__preset:hover:not(:disabled) {
+  background: var(--rn-fill-2);
+}
+
+.rss-add-source__preset[aria-pressed='true'] {
+  background: var(--rn-sheet);
+  box-shadow: var(--rn-card-shadow);
+}
+
+.rss-add-source__preset:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.rss-add-source__preset:focus-visible {
+  outline: 1.5px solid var(--rn-ink-3);
+  outline-offset: 1px;
+}
+
+.rss-add-source__preset-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  margin-top: 1px;
+  border-radius: var(--rn-r-pill);
+  background: var(--rn-fill-2);
+  color: var(--rn-ink-3);
+}
+
+.rss-add-source__preset-icon[data-ready] {
+  color: var(--rn-ink);
+}
+
+.rss-add-source__preset-icon svg {
+  width: 13px;
+  height: 13px;
+}
+
+.rss-add-source__preset-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.rss-add-source__preset-text strong {
+  font-size: var(--rn-fs-sm);
+  font-weight: 600;
+}
+
+.rss-add-source__preset-text small {
+  font-size: var(--rn-fs-xs);
+  line-height: 1.6;
+  color: var(--rn-ink-3);
+}
+
+.rss-add-source__preset-text em {
+  font-style: normal;
+  font-size: var(--rn-fs-xs);
+  color: var(--rn-ink-2);
+}
+
+.rss-add-source__fields {
+  display: grid;
+  gap: 12px;
+}
+
+.rss-add-source__label {
+  font-size: var(--rn-fs-sm);
+  font-weight: 600;
+  color: var(--rn-ink);
+}
+
+.rss-add-source__field {
+  display: grid;
+  gap: 6px;
+  font-size: var(--rn-fs-sm);
+  color: var(--rn-ink-2);
+}
+
+.rss-add-source__field .rn-field,
+.rss-add-source__field .rn-select {
+  width: 100%;
+}
+
+.rss-add-source__hint {
+  font-size: var(--rn-fs-xs);
+  color: var(--rn-ink-2);
+}
+
+.rss-add-source__error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+}
+
+.rss-add-source__error svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .rss-nav,
-  .rss-search,
-  .rss-news-card,
-  .rss-item-actions > button {
-    transition: none;
+  .rss-settings-drawer {
+    animation: none;
   }
 }

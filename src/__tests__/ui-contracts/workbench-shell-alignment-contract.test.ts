@@ -64,7 +64,9 @@ test('browser rss and calendar shells align their left edge with the shared work
   assert.match(calendarMode, /workbench-canvas-shell/)
   assert.match(calendarMode, /background:'transparent',boxShadow:'none'/)
   assert.match(styles, /--workbench-liquid-chrome-bg:\s*rgba\(249,\s*252,\s*255,\s*0\.56\);/)
-  assert.match(styles, /html:root \.browser-header-surface,[\s\S]*\.workbench-tabs-surface,[\s\S]*\.rss-preview-surface \{/)
+  assert.match(styles, /html:root \.browser-header-surface,\s*html:root \.workbench-tabs-surface \{/)
+  // 资讯's original-page preview carries no blur of its own (W1-T5, B13): backdrop-filter comes only from material classes.
+  assert.doesNotMatch(styles, /\.rss-preview-surface/)
   assert.match(styles, /html:root \.browser-header-surface,[\s\S]*backdrop-filter:\s*blur\(24px\) saturate\(0%\) !important;/)
   assert.match(styles, /html:root \.document-content-frame \{[\s\S]*background:\s*var\(--workbench-module-surface-bg\) !important;/)
   assert.match(styles, /html:root \.document-editor-surface,[\s\S]*\.document-preview-surface,[\s\S]*\.rss-feed-list,\s*html:root \.rss-preview-content \{[\s\S]*background:\s*transparent !important;/)

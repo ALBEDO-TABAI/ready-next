@@ -3,6 +3,7 @@ import { ChevronRight } from 'lucide-react'
 import type { RSSArticleSummary, RSSQueryInput, RSSQueryResult } from '../../../shared/rss-workspace'
 import { toRSSItem } from '../../modules/rss/workspace-query'
 import type { RSSItem } from './RSSFeed'
+import { Button } from '../ui/Button'
 
 export default function RSSGroupedReports({ group, query, revision, active, onSelect }: {
   group: NonNullable<RSSArticleSummary['eventGroup']>; query: RSSQueryInput; revision: number; active: boolean; onSelect(item: RSSItem): void
@@ -41,8 +42,8 @@ export default function RSSGroupedReports({ group, query, revision, active, onSe
       <button type="button" onClick={() => onSelect(toRSSItem(item))}>{item.title}</button>
       <small>{item.source} · {item.read ? '已读' : '未读'}{item.event?.relation === 'progress' ? ' · 后续进展' : ''}{item.event?.relation === 'duplicate' ? ' · 同事实报道' : ''}</small>
     </li>)}</ul>}
-    {open && error && <p role="alert">{error} <button type="button" className="rss-link" onClick={() => void load()}>重试</button></p>}
+    {open && error && <p role="alert">{error} <Button variant="ghost" size="sm" onClick={() => void load()}>重试</Button></p>}
     {open && loading && <small>正在读取…</small>}
-    {open && result?.nextCursor && <button type="button" disabled={loading} onClick={() => void load(true)}>更多关联报道</button>}
+    {open && result?.nextCursor && <Button variant="ghost" size="sm" disabled={loading} onClick={() => void load(true)}>更多关联报道</Button>}
   </div>
 }

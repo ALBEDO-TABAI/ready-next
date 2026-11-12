@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { RSSDefinition } from '../../../shared/rss-organization'
 import type { RSSQueryInput } from '../../../shared/rss-workspace'
+import { Button } from '../ui/Button'
+import { Input, Select } from '../ui/Field'
+import { Chip } from '../ui/Display'
+import { Segmented } from '../ui/Toggle'
 
 const DAY = 86_400_000
 const WINDOWS = [
@@ -54,37 +58,32 @@ export default function RSSBriefComposer({ definitions, sources, initial, busy, 
     </header>
     <div className="rss-brief__row">
       <label htmlFor="rss-brief-column">栏目</label>
-      <select id="rss-brief-column" className="sx-select" value={collectionId} onChange={(event) => setCollectionId(event.target.value)}>
-        {columns.map((definition) => <option key={definition.id} value={definition.id}>{definition.name}</option>)}
-      </select>
+      <Select id="rss-brief-column" value={collectionId} onChange={(event) => setCollectionId(event.target.value)}
+        options={columns.map((definition) => ({ value: definition.id, label: definition.name }))} />
     </div>
     {topics.length > 0 && <div className="rss-brief__row">
       <span id="rss-brief-topic">分类</span>
       <div className="rss-brief__chips" role="radiogroup" aria-labelledby="rss-brief-topic">
-        {[{ id: '', name: '不限' }, ...topics].map((topic) => <button type="button" role="radio" key={topic.id || 'any'} aria-checked={categoryId === topic.id} onClick={() => setCategoryId(topic.id)}>{topic.name}</button>)}
+        {[{ id: '', name: '不限' }, ...topics].map((topic) => <Chip role="radio" key={topic.id || 'any'} aria-checked={categoryId === topic.id} onClick={() => setCategoryId(topic.id)}>{topic.name}</Chip>)}
       </div>
     </div>}
     <div className="rss-brief__row">
       <label htmlFor="rss-brief-source">来源</label>
-      <select id="rss-brief-source" className="sx-select" value={sourceId} onChange={(event) => setSourceId(event.target.value)}>
-        <option value="">全部来源</option>
-        {sources.map((source) => <option key={source.id} value={source.id}>{source.name}</option>)}
-      </select>
+      <Select id="rss-brief-source" value={sourceId} onChange={(event) => setSourceId(event.target.value)}
+        options={[{ value: '', label: '全部来源' }, ...sources.map((source) => ({ value: source.id, label: source.name }))]} />
     </div>
     <div className="rss-brief__row">
       <span id="rss-brief-window">时间</span>
-      <div className="sx-seg" role="radiogroup" aria-labelledby="rss-brief-window">
-        {WINDOWS.map((entry) => <button type="button" role="radio" key={entry.id} className="sx-seg__item" aria-checked={period === entry.id} onClick={() => setPeriod(entry.id)}>{entry.label}</button>)}
-      </div>
+      <Segmented label="时间" value={period} onChange={setPeriod} options={WINDOWS.map((entry) => ({ value: entry.id, label: entry.label }))} />
     </div>
     <div className="rss-brief__row">
       <label htmlFor="rss-brief-search">关键词</label>
-      <input id="rss-brief-search" className="sx-input" value={search} maxLength={200} placeholder={searchIn === 'body' ? '标题、摘要与已保存正文' : '标题与摘要'} onChange={(event) => setSearch(event.target.value)} />
+      <Input id="rss-brief-search" value={search} maxLength={200} placeholder={searchIn === 'body' ? '标题、摘要与已保存正文' : '标题与摘要'} onChange={(event) => setSearch(event.target.value)} />
     </div>
     <footer>
       <p role="status">{count === null ? '正在统计…' : 'error' in count ? count.error : count.total ? `共 ${count.total} 篇资讯，按栏目分节汇总` : '这个范围里还没有资讯'}</p>
-      <button type="button" className="sx-btn sx-btn--ghost sx-btn--sm" disabled={busy} onClick={onCancel}>取消</button>
-      <button type="submit" className="sx-btn sx-btn--primary sx-btn--sm" disabled={busy || count === null || 'error' in count || empty}>生成简报</button>
+      <Button variant="ghost" size="sm" disabled={busy} onClick={onCancel}>取消</Button>
+      <Button type="submit" variant="primary" size="sm" disabled={busy || count === null || 'error' in count || empty}>生成简报</Button>
     </footer>
     {error && <p className="rss-note rss-note--danger" role="alert">{error}</p>}
   </form>

@@ -1,12 +1,13 @@
-// Month view: 6 week rows, chips 19px at 21px pitch below the date number.
+// Month view: 6 week rows; under each date number, bars one --rn-s5 line apart by --rn-s1 (geometry.ts).
 import { LayerDay } from '../layers/LayerDays';
 import { useLayerEntries } from '../layers/use-layer-entries';
 import { openReadyRef } from '../../../workbench/open-ready-ref';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { packSpans, fromWall, toWall, dayOf, weekday, ymd, isoDate, Occurrence, DayNum, isoWeek } from '@shared/calendar';
-import { useStore, getState, setState, monthRange, occurrencesIn, select, clearSelection, createEvent, updateOccurrence, openMenu, setPrefs, calendarOf } from '../store';
+import { useStore, getState, setState, monthRange, occurrencesIn, select, clearSelection, createEvent, updateOccurrence, setPrefs, calendarOf } from '../store';
+import { openCalendarMenu } from './Menus';
 import { useSize } from '../hooks';
-import { G } from '../geometry';
+import { G, monthBarsTop, monthRowsFit } from '../geometry';
 import { wdShort, monthName } from '../fmt';
 import { t } from '../i18n';
 import { Chip } from './Chip';
@@ -18,12 +19,16 @@ export function MonthGrid({active=true}:{active?:boolean}) {
   const s = useStore((x) => ({ prefs: x.prefs, anchor: x.anchor, events: x.events, calendars: x.calendars, today: x.today, selected: x.selected, now: x.now, systemDark: x.systemDark }));
   const { first, month } = monthRange(getState()); const weeks = 6;
   const layers = useLayerEntries(first, first + 42, s.prefs.primaryTimeZone, active);
-  const gutter = s.prefs.showWeekNumbers ? 24 : 0;
+  const gutter = s.prefs.showWeekNumbers ? G.weekNumberGutter : 0;
   const cols = s.prefs.showWeekends ? 7 : 5;
   const colDays = (w: number) => Array.from({ length: 7 }, (_, i) => first + w * 7 + i).filter((d) => s.prefs.showWeekends || (weekday(d) !== 0 && weekday(d) !== 6));
   const cw = (size.w - gutter) / cols; const rh = size.h / weeks;
   const occs = useMemo(() => occurrencesIn(first, first + weeks * 7), [first, s.events, s.calendars, s.prefs.showDeclined, s.prefs.layers.events, s.prefs.primaryTimeZone]); // eslint-disable-line
-  const perRow = Math.max(0, Math.floor((rh - 1 - G.monthPadTop - 2 - 16 - 48) / (G.allDayChip + G.allDaySpacing)));
+  const perRow = monthRowsFit(rh);
+  const pitch = G.allDayChip + G.allDaySpacing;
+  // A bar spans its days, less the inset at the left and the free strip at the right of the last day.
+  const barX = (from: number) => gutter + from * cw + G.monthBarInsetLeft;
+  const barW = (days: number) => days * cw - G.monthBarInsetLeft - G.monthBarInsetRight;
   const [drag, setDrag] = useState<{ key?: string; a: DayNum; b: DayNum; delta?: number } | null>(null);
   const dragRef = useRef(drag); dragRef.current = drag;
   const sel = new Set(s.selected);
@@ -81,7 +86,7 @@ export function MonthGrid({active=true}:{active?:boolean}) {
         <div className={`mnum tnum${isToday ? ' today' : ''}`} style={dd === 1 && !isToday ? { fontWeight: 600 } : undefined}
           onPointerDown={(e) => e.stopPropagation()} onClick={() => { void openReadyRef({ kind: 'day', date: isoDate(d) }, 'calendar').then(() => setPrefs({ gridView: 'default', daysPerPeriod: 1 })).catch(error => setState({ error: String(error) })); }}>
           {dd === 1 ? <><strong>{monthName(m)}</strong>{dd}</> : dd}</div>
-        <div style={{ position: 'absolute', left: 2, right: 2, bottom: 0, height: 46 }}><LayerDay date={isoDate(d)} entries={layers.entries} enabled={s.prefs.layers} move={layers.move} /></div>
+        <div className="mcell-layers" style={{ height: G.layerArea }}><LayerDay date={isoDate(d)} entries={layers.entries} enabled={s.prefs.layers} move={layers.move} /></div>
       </div>);
     });
     for (const p of placed) {
@@ -93,30 +98,30 @@ export function MonthGrid({active=true}:{active?:boolean}) {
       if (hidden) { for (let c = fi; c <= ti; c++) if (p.row >= cap(c)) hiddenPerDay.set(c, (hiddenPerDay.get(c) ?? 0) + 1); continue; }
       const timedOne = !o.allDay && !o.isMultiDay;
       const moving = drag?.key === o.key;
-      rowsOut.push(<Chip key={`${o.key}w${w}`} occ={o} kind={timedOne ? 'dot' : 'allday'} x={gutter + fi * cw + 2} y={top + 1 + G.monthPadTop + 2 + p.row * (G.allDayChip + G.allDaySpacing)} w={(ti - fi + 1) * cw - 15} h={G.allDayChip}
+      rowsOut.push(<Chip key={`${o.key}w${w}`} occ={o} kind={timedOne ? 'dot' : 'allday'} x={barX(fi)} y={monthBarsTop(top) + p.row * pitch} w={barW(ti - fi + 1)} h={G.allDayChip}
         selected={sel.has(o.key)} ghost={moving} clipL={p.clippedStart} clipR={p.clippedEnd} onDown={(e, oc) => onChipDown(e, oc)}
-        onContext={(e, oc) => { if (!getState().selected.includes(oc.key)) select([oc.key]); openMenu({ kind: 'chip', x: e.clientX, y: e.clientY, data: { key: oc.key } }); }} onDbl={() => setState((x) => ({ focusTitle: x.focusTitle + 1 }))} />);
+        onContext={(e, oc) => { if (!getState().selected.includes(oc.key)) select([oc.key]); openCalendarMenu('chip', { x: e.clientX, y: e.clientY }, { key: oc.key }); }} onDbl={() => setState((x) => ({ focusTitle: x.focusTitle + 1 }))} />);
     }
-    for (const [c, k] of hiddenPerDay) rowsOut.push(<button key={`m${w}${c}`} className="mmore" style={{ left: gutter + c * cw + 8, top: top + 1 + G.monthPadTop + 2 + (perRow - 1) * 21 + 1 }}
+    for (const [c, k] of hiddenPerDay) rowsOut.push(<button key={`m${w}${c}`} className="mmore" style={{ left: barX(c), top: monthBarsTop(top) + Math.max(0, perRow - 1) * pitch, height: G.allDayChip }}
       onPointerDown={(e) => e.stopPropagation()} onClick={() => { setState({ anchor: ds[c] }); setPrefs({ gridView: 'default', daysPerPeriod: 1 }); }}>{t("more", { n: k })}</button>);
     if (gutter) rowsOut.push(<div key={`wn${w}`} className="weekno" style={{ top, height: rh }}>{isoWeek(ds[0] + 1)}</div>);
     if (drag && !drag.key) {
       const lo = Math.min(drag.a, drag.b), hi = Math.max(drag.a, drag.b);
       const fi = ds.findIndex((d) => d >= lo), ti = ds.length - 1 - [...ds].reverse().findIndex((d) => d <= hi);
-      if (fi >= 0 && ti >= fi && ds[fi] <= hi && ds[ti] >= lo) rowsOut.push(<div key={`pv${w}`} className="preview" style={{ left: gutter + fi * cw + 2, top: top + 1 + G.monthPadTop + 2, width: (ti - fi + 1) * cw - 15, height: 19, background: 'var(--c-blue)', opacity: .25 }} />);
+      if (fi >= 0 && ti >= fi && ds[fi] <= hi && ds[ti] >= lo) rowsOut.push(<div key={`pv${w}`} className="preview month-preview" style={{ left: barX(fi), top: monthBarsTop(top), width: barW(ti - fi + 1), height: G.allDayChip }} />);
     } else if (drag?.key) {
       const o = occs.find((x) => x.key === drag.key);
       const fi = ds.findIndex((d) => d >= drag.a && d <= drag.b); const lastIdx = ds.length - 1 - [...ds].reverse().findIndex((d) => d >= drag.a && d <= drag.b);
-      if (o && fi >= 0) rowsOut.push(<Chip key={`mv${w}`} occ={o} kind="allday" x={gutter + fi * cw + 2} y={top + 1 + G.monthPadTop + 2} w={(lastIdx - fi + 1) * cw - 15} h={19} layer={100} moving />);
+      if (o && fi >= 0) rowsOut.push(<Chip key={`mv${w}`} occ={o} kind="allday" x={barX(fi)} y={monthBarsTop(top)} w={barW(lastIdx - fi + 1)} h={G.allDayChip} layer={100} moving />);
     }
   }
   return (
     <div className="month" data-testid="month" data-colw={cw} data-rowh={rh}>
       {layers.error && <div role="alert">{layers.error}</div>}
       <div className="month-heads" style={{ paddingLeft: gutter }}>
-        {colDays(0).map((d) => <div key={d} className={`colhead${weekday(d) === weekday(s.today) && s.today >= first && s.today < first + 42 ? ' today' : ''}`} style={{ width: cw, height: 29 }}>{wdShort(weekday(d))}</div>)}
+        {colDays(0).map((d) => <div key={d} className={`colhead${weekday(d) === weekday(s.today) && s.today >= first && s.today < first + 42 ? ' today' : ''}`} style={{ width: cw, height: G.monthColHeader }}>{wdShort(weekday(d))}</div>)}
       </div>
-      <div className="month-body" ref={wrap} onPointerDown={onDown} onContextMenu={(e) => { e.preventDefault(); openMenu({ kind: 'grid', x: e.clientX, y: e.clientY, data: { day: dayAt(e), allDay: true } }); }}>
+      <div className="month-body" ref={wrap} onPointerDown={onDown} onContextMenu={(e) => { e.preventDefault(); openCalendarMenu('grid', { x: e.clientX, y: e.clientY }, { day: dayAt(e), allDay: true }); }}>
         {size.w > 0 && rowsOut}
       </div>
     </div>

@@ -10,6 +10,10 @@ import { api, unwrap } from './platform';
 import { findCalendarOccurrence, splitOccurrenceKey, rebaseCalendarHistory, type CalendarCommand, type CalendarSnapshot, type CalendarMutationReceipt, type CalendarDelta } from '@shared/calendar/commands';
 import { useTheme } from '../../../stores/useTheme';
 import { Locale, setLocale, t } from './i18n';
+import { maxDensityLevel } from './geometry';
+import { showToast } from '../../../components/ui/toast-store';
+import { openDialog } from '../../../components/ui/float/Dialog';
+import { refocusCalendar } from './floats';
 
 import type { CalendarLayer } from '../../../../shared/calendar-layers';
 
@@ -36,22 +40,20 @@ export const defaultPrefs = (): Prefs => ({
   notifications: true, defaultReminder: 10, defaultAllDayReminder: -1, notifySound: true, menuBarNext: true, menuBarMaxLen: 32,
   displayName: '', email: '', videoProvider: 'none', videoUrl: '', autoAddVideo: false,
 });
-export type Overlay = null | 'shortcuts' | 'search' | 'goto' | 'recurrence';
-export interface MenuState { kind: 'view' | 'chip' | 'grid' | 'calendar' | 'repeat' | 'busy' | 'visibility' | 'reminder' | 'calendarPick' | 'time' | 'tz' | 'color' | 'evColor' | 'recurrence'; x: number; y: number; data?: any }
-export interface Toast { id: number; text: string; undo?: () => void }
-export interface ScopeAsk { kind: 'edit' | 'delete'; resolve: (s: 'this' | 'following' | 'all' | null) => void }
+/** What the side panel shows instead of the event (the go-to box, menus and dialogs are floats: components/ui/float). */
+export type Overlay = null | 'shortcuts' | 'search';
 export interface State {
   ready: boolean; busy: boolean; error: string | null; prefs: Prefs; accounts: Account[]; calendars: Calendar[]; events: Record<string, CalEvent>;
   anchor: DayNum; today: DayNum; now: number; systemDark: boolean;
   selected: string[]; editing: string | null; draftId: string | null; focusTitle: number;
-  overlay: Overlay; menu: MenuState | null; toasts: Toast[]; scopeAsk: ScopeAsk | null; settingsPage: string; actionPanel: 'quick' | 'subscribe' | null; recKey: string | null; avail: { active: boolean; slots: { start: number; end: number }[]; duration: number };
+  overlay: Overlay; settingsPage: string; actionPanel: 'quick' | 'subscribe' | null; avail: { active: boolean; slots: { start: number; end: number }[]; duration: number };
   minDensity: number; cursorDay: DayNum; clipboard: CalEvent[]; searchQuery: string;
 }
 const tzNow = () => dayOf(Date.now(), systemTimeZone());
 let state: State = {
   ready: false, busy: false, error: null, prefs: defaultPrefs(), accounts: [], calendars: [], events: {}, anchor: tzNow(), today: tzNow(), now: Date.now(),
   systemDark: typeof matchMedia !== 'undefined' && matchMedia('(prefers-color-scheme: dark)').matches,
-  selected: [], editing: null, draftId: null, focusTitle: 0, overlay: null, menu: null, toasts: [], scopeAsk: null, settingsPage: 'general', actionPanel: null, recKey: null, avail: { active: false, slots: [], duration: 30 },
+  selected: [], editing: null, draftId: null, focusTitle: 0, overlay: null, settingsPage: 'general', actionPanel: null, avail: { active: false, slots: [], duration: 30 },
   minDensity: -4, cursorDay: tzNow(), clipboard: [], searchQuery: '',
 };
 const subs = new Set<() => void>();
@@ -151,19 +153,18 @@ export function setPrefs(p:Partial<Prefs>) {
     setState(s=>({prefs:{...s.prefs,...(p.contextPanel===undefined?{}:{contextPanel:p.contextPanel}),openAtLogin:login}}));
   });
 }
-export function setView(gridView:GridView,days?:number){void setPrefs({gridView,...(days?{daysPerPeriod:days}:{})});setState({menu:null})}
+export function setView(gridView:GridView,days?:number){void setPrefs({gridView,...(days?{daysPerPeriod:days}:{})})}
 export function goToday(){setState(s=>({anchor:s.today,cursorDay:s.today}))}
 export function goToDay(d:DayNum){setState({anchor:d,cursorDay:d})}
 export function step(dir:1|-1){const p=state.prefs;setState({anchor:p.gridView==='month'?addMonths(startOfMonth(state.anchor),dir):(p.daysPerPeriod===7?startOfWeek(state.anchor,p.weekStartsOn):state.anchor)+dir*p.daysPerPeriod})}
-export function zoom(d:1|-1|0){void setPrefs({densityZoomLevel:d===0?0:Math.max(state.minDensity,Math.min(20,state.prefs.densityZoomLevel+d))})}
-export function openOverlay(overlay:Overlay){setState({overlay,menu:null,prefs:{...state.prefs,contextPanel:overlay==='search'||overlay==='shortcuts'||state.prefs.contextPanel}})}
+export function zoom(d:1|-1|0){void setPrefs({densityZoomLevel:d===0?0:Math.max(state.minDensity,Math.min(maxDensityLevel,state.prefs.densityZoomLevel+d))})}
+export function openOverlay(overlay:Overlay){setState({overlay,prefs:{...state.prefs,contextPanel:overlay==='search'||overlay==='shortcuts'||state.prefs.contextPanel}})}
 // The calendar's preferences are a section of the global settings page (W2 §3.2); `page` picks its sub-page.
 /** Opens the quick-create sentence box or the subscription form (both live in ReadyCalendarActions). */
 export function openCalendarAction(kind: 'quick' | 'subscribe') { setState({ actionPanel: kind }); }
 export function openCalendarSettings(page?: string) { if (page) setState({ settingsPage: page }); window.location.hash = '#/settings?section=calendar'; }
-export function openMenu(menu:MenuState|null){const rect=document.querySelector('.ready-calendar')?.getBoundingClientRect();setState({menu:menu&&rect?{...menu,x:menu.x-rect.left,y:menu.y-rect.top}:menu})}
-let toastSeq=0;
-export function toast(text:string,undo?:()=>void){const id=++toastSeq;setState(s=>({toasts:[...s.toasts.slice(-2),{id,text,undo}]}));window.setTimeout(()=>setState(s=>({toasts:s.toasts.filter(x=>x.id!==id)})),5000)}
+/** One quiet line in the bottom band (the shared toast); an undo offers itself as the toast's action. */
+export function toast(text:string,undo?:()=>void){showToast(text,{actions:undo?[{label:t('undo'),onClick:undo}]:undefined,durationMs:5000})}
 export function primaryCalendar(){return state.calendars.find(c=>c.primary&&!c.readOnly)||state.calendars.find(c=>!c.readOnly)}
 function makeEvent(p:Partial<CalEvent>&{start:number|string;end:number|string;allDay:boolean}):CalEvent{
   const id=newId('event'),now=Date.now(),minutes=p.allDay?state.prefs.defaultAllDayReminder:state.prefs.defaultReminder;
@@ -173,14 +174,21 @@ function makeEvent(p:Partial<CalEvent>&{start:number|string;end:number|string;al
 export async function createEvent(p:Partial<CalEvent>&{start:number|string;end:number|string;allDay:boolean},opts:{select?:boolean;draft?:boolean}={}){
   let event:CalEvent;try{event=makeEvent(p)}catch(error){ console.warn('[CalendarStore] prepare event failed:', error instanceof Error ? error.message : String(error));toast(String(error));return undefined}
   const result=await mutate({type:'create',event});if(!result)return undefined;
-  if(opts.select!==false)setState(s=>({selected:[event.id],editing:event.id,draftId:opts.draft?event.id:null,focusTitle:s.focusTitle+1,overlay:null,menu:null,prefs:{...s.prefs,contextPanel:true}}));
+  if(opts.select!==false)setState(s=>({selected:[event.id],editing:event.id,draftId:opts.draft?event.id:null,focusTitle:s.focusTitle+1,overlay:null,prefs:{...s.prefs,contextPanel:true}}));
   return event.id;
 }
 export async function createEvents(items:Array<Partial<CalEvent>&{start:number|string;end:number|string;allDay:boolean}>){return applyBatch({put:items.map(makeEvent),remove:[]})}
 export function settleDraft(next:string|null){const id=state.draftId;if(!id||id===next)return;setState({draftId:null});void execute(async()=>{const e=state.events[id];if(e&&!e.title.trim()){const result=await unwrap(api().mutate({type:'delete',keys:[id],scope:'all'},versions()));receive(result.snapshot);const i=undoStack.findIndex(r=>r.undo.remove.includes(id));if(i>=0)undoStack.splice(i,1)}})}
-export function select(keys:string[],opts:{additive?:boolean;edit?:boolean;record?:boolean}={}){if(opts.record!==false&&keys.length===1&&state.selected[0]!==keys[0]){const o=findOccurrence(keys[0]);if(o)userOpenedObject({mode:'calendar',title:o.event.title,ref:calendarOccurrenceReadyRef(o)})};const selected=opts.additive?[...new Set([...state.selected,...keys])]:keys;settleDraft(selected[0]||null);setState({selected,editing:opts.edit===false?state.editing:selected.length===1?selected[0]:selected.length?state.editing:null,menu:null,prefs:{...state.prefs,contextPanel:(opts.edit!==false&&selected.length===1)||state.prefs.contextPanel}})}
-export function clearSelection(){settleDraft(null);setState({selected:[],editing:null,menu:null})}
-async function askScope(kind:'edit'|'delete'):Promise<'this'|'following'|'all'|null>{return new Promise(resolve=>setState({scopeAsk:{kind,resolve:value=>{setState({scopeAsk:null});resolve(value)}}}))}
+export function select(keys:string[],opts:{additive?:boolean;edit?:boolean;record?:boolean}={}){if(opts.record!==false&&keys.length===1&&state.selected[0]!==keys[0]){const o=findOccurrence(keys[0]);if(o)userOpenedObject({mode:'calendar',title:o.event.title,ref:calendarOccurrenceReadyRef(o)})};const selected=opts.additive?[...new Set([...state.selected,...keys])]:keys;settleDraft(selected[0]||null);setState({selected,editing:opts.edit===false?state.editing:selected.length===1?selected[0]:selected.length?state.editing:null,prefs:{...state.prefs,contextPanel:(opts.edit!==false&&selected.length===1)||state.prefs.contextPanel}})}
+export function clearSelection(){settleDraft(null);setState({selected:[],editing:null})}
+/** A change to a recurring event asks which occurrences it covers (the shared dialog; Esc or a click outside cancels). */
+async function askScope(kind:'edit'|'delete'):Promise<'this'|'following'|'all'|null>{
+  return new Promise(resolve=>{
+    let decided=false;const pick=(value:'this'|'following'|'all')=>()=>{decided=true;resolve(value)}
+    openDialog({title:kind==='delete'?t('deleteRecurring'):t('editRecurring'),onClose:()=>{if(!decided)resolve(null);refocusCalendar()},actions:[
+      {label:t('thisEvent'),autoFocus:true,onClick:pick('this')},{label:t('thisAndFollowing'),onClick:pick('following')},{label:t('allEvents'),onClick:pick('all')}]})
+  })
+}
 export async function updateOccurrence(key:string,patch:Partial<CalEvent>,opts:{scope?:'this'|'following'|'all';label?:string;expectedRevision?:number}={}){
   const o=findOccurrence(key);if(!o){toast('日程已变化，请重新选择');return;}const expected=versions();expected[o.seriesId||o.event.id]=opts.expectedRevision??o.event.revision??1;const scope=(o.seriesId||isRecurring(o.event))?opts.scope||await askScope('edit'):undefined;if((o.seriesId||isRecurring(o.event))&&!scope)return;
   const result=await mutate({type:'update',key,patch,scope:scope||undefined},expected);if(result){let nextKey=key;if(scope==='following'){nextKey=result.undo.remove.find(id=>result.snapshot.events.some(e=>e.id===id&&!e.recurringEventId))||key}else if(scope==='all'&&patch.start!==undefined){const parent=o.seriesId||o.event.id;const original=patch.start;nextKey=`${parent}|${original}`}const target=findOccurrence(nextKey);if(target&&(state.editing===key||state.selected.includes(key)))select([target.key]);return ()=>{void undo()}}return undefined;

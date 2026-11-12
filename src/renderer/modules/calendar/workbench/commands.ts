@@ -2,6 +2,7 @@ import { openReadyRef } from '../../workbench/open-ready-ref';
 // Command registry: shared by the keyboard handler, ⌘K menu, shortcuts panel and native menu.
 import { getState, setState, setView, goToday, step, zoom, openOverlay, setPrefs, deleteOccurrences, duplicateOccurrences, copyOccurrences, paste, undo, redo, select, occurrencesIn, periodDays, monthRange, importIcsFile, exportCalendar, clearSelection, toast } from './store';
 import { newEventNow } from './components/Sidebar';
+import { openGoto } from './components/Overlays';
 import { toggleAvailability, stopAvailability } from './availability';
 import { Key, translate } from './i18n';
 import { appShortcut, shortcutKeycaps, matchesAppShortcut } from '../../../../shared/app-shortcuts';
@@ -17,7 +18,7 @@ export const COMMANDS: Command[] = ([
   { id: 'import', label: 'importIcs', section: 'secCalendar', run: () => importIcsFile() },
   { id: 'export', label: 'exportIcs', section: 'secCalendar', run: () => exportCalendar() },
   { id: 'availability', label: 'shareAvail', section: 'secCalendar', run: () => toggleAvailability() },
-  { id: 'goto', label: 'goToDate', section: 'secNavigation', run: () => openOverlay('goto') },
+  { id: 'goto', label: 'goToDate', section: 'secNavigation', run: () => openGoto() },
   { id: 'today', label: 'goToday', section: 'secNavigation', run: () => goToday() },
   { id: 'next', label: 'nextPeriod', section: 'secNavigation', run: () => step(1) },
   { id: 'prev', label: 'prevPeriod', section: 'secNavigation', run: () => step(-1) },
@@ -81,9 +82,7 @@ export function joinNext(): boolean {
 /** Global keyboard handler. Returns true when handled. */
 export function handleKey(e: KeyboardEvent): boolean {
   const s = getState(); const mod = isMac ? e.metaKey : e.ctrlKey; const k = e.key;
-  if(s.scopeAsk){if(k==='Escape'){s.scopeAsk.resolve(null);return true}return false}
   if (k === 'Escape') {
-    if (s.menu) { setState({ menu: null }); return true; }
     if (s.overlay) { setState({ overlay: null }); return true; }
     if (editable(e.target)) { (e.target as HTMLElement).blur(); return true; }
     if (s.selected.length) { clearSelection(); return true; }
@@ -134,7 +133,7 @@ export function handleKey(e: KeyboardEvent): boolean {
     case '\\': case '`': return runCommand('sidebar');
     case '?': openOverlay('shortcuts'); return true;
     case '/': openOverlay('search'); return true;
-    case '.': openOverlay('goto'); return true;
+    case '.': openGoto(); return true;
     case 'Enter': if (s.selected.length === 1) { setState((x) => ({ editing: x.selected[0], focusTitle: x.focusTitle + 1 })); return true; } return false;
   }
   if (/^[2-9]$/.test(k)) { setView('default', +k); return true; }

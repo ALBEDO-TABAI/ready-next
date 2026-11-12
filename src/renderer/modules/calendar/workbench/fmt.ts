@@ -80,3 +80,7 @@ export function ruleLabel(r: import('../../../../shared/calendar').RRule): strin
   else if (r.until !== undefined) s += t('ruleUntil', { d: r.untilIsDate ? longDate(r.until) : longDate(dayOf(r.until, Intl.DateTimeFormat().resolvedOptions().timeZone)) });
   return s;
 }
+
+/** Reminder offsets offered in the event panel and in settings, in minutes before the start. */
+export const REMINDER_OPTS = [0, 5, 10, 15, 30, 60, 120, 1440];
+export const reminderLabel = (m: number) => (m === 0 ? t('atStart') : m % 1440 === 0 ? t('daysBefore', { n: m / 1440 }) : m % 60 === 0 ? t('hoursBefore', { n: m / 60 }) : t('minutesBefore', { n: m }));

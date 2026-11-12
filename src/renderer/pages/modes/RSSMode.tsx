@@ -4,22 +4,22 @@ import RSSDefinitionEditor from '../../components/rss/RSSDefinitionEditor'
 import PreviewBrowser from '../../components/rss/PreviewBrowser'
 import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ExternalLink } from 'lucide-react'
+import { Download, ExternalLink, MessageSquareQuote } from 'lucide-react'
 import RSSFeed from '../../components/rss/RSSFeed'
 import RSSNavigation from '../../components/rss/RSSNavigation'
 import { ShellNavigator } from '../../modules/workbench/shell/ShellSidebar'
 import { NavigationBackEntry } from '../../modules/workbench/NavigationBackEntry'
 import { RSSTopbarContext } from '../../components/rss/rss-topbar-context'
 import RSSArticleReader from '../../components/rss/RSSArticleReader'
-import RSSReferenceButton from '../../components/rss/RSSReferenceButton'
-import RSSExportButton from '../../components/rss/RSSExportButton'
+import { addRSSReferenceToAgentInput } from '../../modules/agent/chat-input-bridge'
+import { exportRSSQuery } from '../../modules/rss/export-query'
 import AddSourceModal from '../../components/rss/AddSourceModal'
 import RSSSettingsPanel from '../../components/rss/RSSSettingsPanel'
 import { RSSSieveView } from '../../components/rss/RSSSieveView'
 import { RSSSieveSettings } from '../../components/rss/RSSSieveSettings'
 import { noteRSSBehavior } from '../../modules/rss/record-behavior'
-import Modal from '../../components/ui/Modal'
-import { useModal } from '../../components/ui/useModal'
+import { Button } from '../../components/ui/Button'
+import { confirmDialog } from '../../components/ui/float/Dialog'
 import { useRSSSelectionCommandBridge } from '../../modules/rss/useRSSSelectionCommandBridge'
 import { useRSSWorkspace } from '../../modules/rss/useRSSWorkspace'
 import { toRSSItem } from '../../modules/rss/workspace-query'
@@ -154,7 +154,7 @@ export default function RSSMode({
   suspendedRef.current = isSuspended
   const shouldPoll = isActive && !isSuspended && hasHydrated
   const backgroundWarning = autoRefreshWarning || analysisBackgroundWarning
-  const { modalProps, showConfirm } = useModal()
+  const exporting = useRef(false)
   const activeBrowserTab = useMemo(
     () => browserTabs.find((tab) => tab.id === activeBrowserTabId) ?? null,
     [activeBrowserTabId, browserTabs],
@@ -326,11 +326,11 @@ export default function RSSMode({
         ? '这个账号当前需要先在 Ready 浏览器里登录后才能继续刷新。现在要打开对应主页吗？'
         : '这个账号当前需要先在 Ready 浏览器里打开目标主页，并按页面提示完成扫码验证。现在要跳转过去吗？'
 
-    void showConfirm(message, title).then((confirmed) => {
+    void confirmDialog({ title, body: message }).then((confirmed) => {
       if (!confirmed) return
       void window.electronAPI?.browser?.openForCaptureTarget(statusAction.url)
     })
-  }, [showConfirm, statusAction])
+  }, [statusAction])
 
   const handleSourceChange = useCallback((sourceId: string | null) => {
     setQuery({ sourceId: sourceId || undefined })
@@ -692,27 +692,19 @@ export default function RSSMode({
                     onPauseAnalysisJob={handlePauseAnalysisJob}
                     onResumeAnalysisJob={handleResumeAnalysisJob}
                     onDeleteAnalysisJob={handleDeleteAnalysisJob}
-                    renderMoreActions={(close) => <>
-                      <RSSReferenceButton
-                        className="rss-menu-item ready-floating-menu-item"
-                        name="RSS 筛选结果"
-                        label="引用当前结果"
-                        disabled={loading}
-                        reference={view ? { kind: 'query', query: { ...view.query, expectedRevision: view.revision } } : null}
-                        onDone={close}
-                      />
-                      <RSSExportButton
-                        className="rss-menu-item ready-floating-menu-item"
-                        view={view}
-                        disabled={loading}
-                        onExported={(receipt) => {
-                          close()
-                          setNotice({ message: `已导出发起时的 ${receipt.total} 条结果`, action: { label: '显示文件', run: () => { void window.electronAPI.document.showInFolder(receipt.path) } } })
-                        }}
-                        onError={(message) => { close(); setNotice({ message }) }}
-                        onCanceled={close}
-                      />
-                    </>}
+                    moreMenuEntries={() => [
+                      { id: 'reference', label: '引用当前结果', icon: <MessageSquareQuote />, disabled: loading || !view,
+                        onSelect: () => { if (view) addRSSReferenceToAgentInput('RSS 筛选结果', { kind: 'query', query: { ...view.query, expectedRevision: view.revision } }) } },
+                      { id: 'export', label: '导出当前结果', hint: 'JSON', icon: <Download />, disabled: loading || !view,
+                        onSelect: () => {
+                          if (!view || exporting.current) return
+                          exporting.current = true
+                          void exportRSSQuery(view).then((receipt) => {
+                            if (receipt) setNotice({ message: `已导出发起时的 ${receipt.total} 条结果`, action: { label: '显示文件', run: () => { void window.electronAPI.document.showInFolder(receipt.path) } } })
+                          }, (cause: unknown) => setNotice({ message: cause instanceof Error ? cause.message : String(cause) }))
+                            .finally(() => { exporting.current = false })
+                        } },
+                    ]}
                     settingsOpen={settingsOpen}
                     nextPage={Boolean(view?.nextCursor)}
                     loadingMore={loadingMore}
@@ -757,16 +749,13 @@ export default function RSSMode({
                 )}
 
                 {(toastText || statusAction || notice?.action) && (
-                  <div className="rss-toast" role="status">
+                  <div className="rss-toast rn-float" role="status">
                     {toastText ? <div>{toastText}</div> : null}
                     {notice?.action && !statusMessage ? (
-                      <button type="button" onClick={() => { notice.action!.run(); setNotice(null) }}>{notice.action.label}</button>
+                      <Button variant="ghost" size="sm" onClick={() => { notice.action!.run(); setNotice(null) }}>{notice.action.label}</Button>
                     ) : null}
                     {statusAction ? (
-                      <button type="button" onClick={() => void handleStatusAction()}>
-                        <ExternalLink className="h-3.5 w-3.5" />
-                        {statusAction.label}
-                      </button>
+                      <Button variant="ghost" size="sm" icon={<ExternalLink />} onClick={() => void handleStatusAction()}>{statusAction.label}</Button>
                     ) : null}
                   </div>
                 )}
@@ -795,7 +784,6 @@ export default function RSSMode({
         browserPresetName={addSourceDraft.browserPresetName}
         browserPresetLabel={addSourceDraft.browserPresetLabel}
       />
-      <Modal {...modalProps} />
     </div>
   )
 }

@@ -2,7 +2,7 @@ import RSSVirtualList from './RSSVirtualList'
 import type { RSSDefinition, RSSMembership } from '../../../shared/rss-organization'
 import type { RSSArticleSummary, RSSQueryInput, RSSQueryResult } from '../../../shared/rss-workspace'
 import RSSGroupedReports from './RSSGroupedReports'
-import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Archive,
   Bookmark,
@@ -27,10 +27,13 @@ import { endRssItemDragSession, setRssItemDragPayload } from '../layout/fileTree
 import { compactAnalysisDetail } from '../../modules/rss/analysisLabels'
 import { isRSSFeedItemContentEqual } from '../../modules/rss/rssFeedItemEquality'
 import { rssQueryKey } from '../../modules/rss/workspace-query'
-import Modal from '../ui/Modal'
-import { useModal } from '../ui/useModal'
-import { chatMenuSurfaceStyle } from '../agent/chatMenuStyles'
 import { FloatPanel } from '../ui/float/FloatPanel'
+import { Button, IconButton } from '../ui/Button'
+import { EmptyState, Skeleton } from '../ui/Display'
+import { anchorOf, openFloat } from '../ui/float/float-store'
+import { openMenu } from '../ui/float/open-menu'
+import { confirmDialog } from '../ui/float/Dialog'
+import type { MenuEntry } from '../ui/float/Menu'
 import RSSCoverImage from './RSSCoverImage'
 import RSSTopbarTools from './RSSTopbarTools'
 import RSSSearchField from './RSSSearchField'
@@ -143,7 +146,7 @@ interface RSSFeedProps {
   onResumeAnalysisJob: (jobId: string) => void
   onDeleteAnalysisJob: (jobId: string) => void
   // Reference / export entries for the "more" menu; supplied by RSSMode so the list stays free of chat dependencies.
-  renderMoreActions?: (close: () => void) => ReactNode
+  moreMenuEntries?: () => MenuEntry[]
   settingsOpen: boolean
   nextPage?: boolean
   loadingMore?: boolean
@@ -154,11 +157,11 @@ interface RSSFeedProps {
 }
 
 function progressStroke(status: AnalysisStatus | undefined): string {
-  if (status === 'failed') return 'var(--color-red)'
+  if (status === 'failed') return 'var(--rn-bad)'
   if (status === 'running_script' || status === 'running_subagent' || status === 'queued') {
-    return 'var(--color-blue)'
+    return 'var(--rn-accent)'
   }
-  return 'var(--text-light)'
+  return 'var(--rn-ink-3)'
 }
 
 function progressLabel(entry: ItemAnalysisProgress | undefined): string {
@@ -198,9 +201,8 @@ function taskStageLabel(status: AnalysisStatus): string {
 
 // Status reads as text weight, not colored chips: only failure is tinted.
 function taskStageTone(status: AnalysisStatus): string {
-  if (status === 'failed') return 'var(--sx-danger-text)'
-  if (status === 'success') return 'var(--text-secondary)'
-  return 'var(--text-muted)'
+  if (status === 'failed') return 'var(--rn-bad)'
+  return 'var(--rn-ink-2)'
 }
 
 function taskDetailText(job: AnalysisJobItem): string {
@@ -228,15 +230,15 @@ function AnalysisProgressRing({
   const running =
     status === 'queued' || status === 'running_script' || status === 'running_subagent'
 
-  if (entry?.sourceWarning) return <TriangleAlert className="h-[13px] w-[13px]" style={{ color: 'var(--sx-warning)' }} />
+  if (entry?.sourceWarning) return <TriangleAlert className="h-[13px] w-[13px]" style={{ color: 'var(--rn-warn)' }} />
   if (status === 'success') {
-    return <Check className="h-[13px] w-[13px]" style={{ color: 'var(--text-secondary)' }} strokeWidth={2.4} />
+    return <Check className="h-[13px] w-[13px]" style={{ color: 'var(--rn-ink-2)' }} strokeWidth={2.4} />
   }
 
   return (
-    <span className="relative flex h-[16px] w-[16px] items-center justify-center">
+    <span className="rss-ring relative flex h-[16px] w-[16px] items-center justify-center">
       <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden>
-        <circle cx="8" cy="8" r={radius} fill="none" stroke="var(--sx-track-bg)" strokeWidth="1.8" />
+        <circle cx="8" cy="8" r={radius} fill="none" stroke="var(--rn-fill-3)" strokeWidth="1.8" />
         <circle
           cx="8"
           cy="8"
@@ -251,9 +253,9 @@ function AnalysisProgressRing({
           style={{ transition: 'stroke-dashoffset 240ms ease' }}
         />
       </svg>
-      {running && <Loader2 className="absolute h-[8px] w-[8px] animate-spin" style={{ color: 'var(--color-blue)' }} />}
-      {status === 'failed' && <TriangleAlert className="absolute h-[9px] w-[9px]" style={{ color: 'var(--color-red)' }} />}
-      {status === 'paused' && <CircleDashed className="absolute h-[9px] w-[9px]" style={{ color: 'var(--text-muted)' }} />}
+      {running && <Loader2 className="absolute h-[8px] w-[8px] animate-spin" style={{ color: 'var(--rn-accent)' }} />}
+      {status === 'failed' && <TriangleAlert className="absolute h-[9px] w-[9px]" style={{ color: 'var(--rn-bad)' }} />}
+      {status === 'paused' && <CircleDashed className="absolute h-[9px] w-[9px]" style={{ color: 'var(--rn-ink-2)' }} />}
     </span>
   )
 }
@@ -376,38 +378,28 @@ const RSSFeedItemRow = memo(function RSSFeedItemRow({
             {curation && <span className="rss-card-curated" title={curation.reason}>精选</span>}
             <div className="rss-item-actions" onClick={(event) => event.stopPropagation()}>
               {analysis && (
-                <button
-                  type="button"
+                <IconButton
+                  size="sm"
                   className="is-persistent"
+                  icon={<AnalysisProgressRing entry={analysis} />}
                   onClick={() => onOpenAnalysisOutput(item.id)}
                   title={analysis.sourceWarning || progressLabel(analysis)}
                   data-rss-analysis-job-id={analysis.jobId}
-                >
-                  <AnalysisProgressRing entry={analysis} />
-                </button>
+                />
               )}
-              {!item.read && (
-                <button type="button" onClick={() => onMarkItemRead(item.id)} title="标记为已读">
-                  <Check className="h-[15px] w-[15px]" strokeWidth={2} />
-                </button>
-              )}
+              {!item.read && <IconButton size="sm" icon={<Check strokeWidth={2} />} onClick={() => onMarkItemRead(item.id)} title="标记为已读" />}
               {item.inboxVisible !== false && (
-                <button
-                  type="button"
-                  onClick={() => onDeleteItem(item.id)}
-                  title={item.starred ? '移出收件箱（收藏会继续显示）' : '移出收件箱'}
-                >
-                  <Archive className="h-[15px] w-[15px]" strokeWidth={1.9} />
-                </button>
+                <IconButton size="sm" icon={<Archive />} onClick={() => onDeleteItem(item.id)}
+                  title={item.starred ? '移出收件箱（收藏会继续显示）' : '移出收件箱'} />
               )}
-              <button
-                type="button"
-                className={`is-persistent${item.starred ? ' is-on' : ''}`}
+              <IconButton
+                size="sm"
+                className="is-persistent"
+                active={item.starred}
+                icon={<Bookmark fill={item.starred ? 'currentColor' : 'none'} />}
                 onClick={() => onToggleStar(item.id)}
                 title={item.starred ? '取消收藏' : '收藏'}
-              >
-                <Bookmark className="h-[15px] w-[15px]" strokeWidth={1.9} fill={item.starred ? 'currentColor' : 'none'} />
-              </button>
+              />
             </div>
           </div>
           <div className="rss-card-main">
@@ -456,39 +448,30 @@ export default function RSSFeed({
   onPauseAnalysisJob,
   onResumeAnalysisJob,
   onDeleteAnalysisJob,
-  renderMoreActions,
+  moreMenuEntries,
   settingsOpen, nextPage, loadingMore, queryError, inbox = true, onLoadMore, onReloadQuery, query, queryRevision,
 }: RSSFeedProps) {
+  // The analysis task list follows live job progress, so it stays a panel placed in the top bar (the shared FloatPanel);
+  // the more and source menus are floats of the one float host (W1 §5).
   const [taskMenuOpen, setTaskMenuOpen] = useState(false)
-  const [sourceMenuOpen, setSourceMenuOpen] = useState(false)
-  const [moreMenuOpen, setMoreMenuOpen] = useState(false)
-  // A destructive source delete routes through a modal confirm (danger styled)
-  // so an accidental click on the row's X can't drop a feed and its articles.
-  const { modalProps, showConfirm } = useModal()
-  const sourceMenuRef = useRef<HTMLDivElement>(null)
   const toolsRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (!active || !toolsVisible) { setTaskMenuOpen(false); setSourceMenuOpen(false); setMoreMenuOpen(false) }
+    if (!active || !toolsVisible) setTaskMenuOpen(false)
   }, [active, toolsVisible])
 
   useEffect(() => {
-    if (!sourceMenuOpen && !moreMenuOpen && !taskMenuOpen) return
-    const handler = (event: MouseEvent) => {
-      const target = event.target as Node
-      if (sourceMenuOpen && !sourceMenuRef.current?.contains(target)) setSourceMenuOpen(false)
-      if ((moreMenuOpen || taskMenuOpen) && !toolsRef.current?.contains(target)) { setMoreMenuOpen(false); setTaskMenuOpen(false) }
-    }
+    if (!taskMenuOpen) return
+    const handler = (event: MouseEvent) => { if (!toolsRef.current?.contains(event.target as Node)) setTaskMenuOpen(false) }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
-  }, [sourceMenuOpen, moreMenuOpen, taskMenuOpen])
+  }, [taskMenuOpen])
 
   const isRefreshing = loading || refreshing
   const selectedSourceEntry = useMemo(
     () => sources.find((source) => source.id === selectedSource) ?? null,
     [selectedSource, sources]
   )
-  const refreshLabel = isRefreshing ? '刷新中' : '刷新'
   const activeJobsCount = useMemo(
     () =>
       analysisJobs.filter(
@@ -505,48 +488,49 @@ export default function RSSFeed({
   const onCuratedCollection = definitions.find((entry) => entry.id === query?.collectionId)?.kind === 'curated'
   const listHeader = onCuratedCollection && toolsVisible ? <RSSHotEvents active={active} onSelect={onItemClick} /> : null
   const shouldShowBootstrapSkeleton = loading && items.length === 0
-  const closeMenus = () => { setMoreMenuOpen(false); setTaskMenuOpen(false) }
+  const openMoreMenu = (anchor: HTMLElement) => {
+    setTaskMenuOpen(false)
+    openMenu(anchorOf(anchor), [
+      ...(moreMenuEntries?.() ?? []),
+      { kind: 'separator' },
+      { id: 'clear', label: '清空当前范围', icon: <Archive />, disabled: !inbox, onSelect: onClearRead },
+      { id: 'settings', label: '订阅与刷新设置', icon: <Settings />, onSelect: onOpenSettings },
+    ], { placement: 'bottom-end', label: '更多操作' })
+  }
+  // A destructive source delete asks first (danger styled), so a stray click on a row's ✕ cannot drop a feed and its articles.
+  const deleteSource = async (source: RSSSource) => {
+    const confirmed = await confirmDialog({ title: '删除订阅源', body: `删除订阅源「${source.name}」后，其下文章会一并移除，且无法恢复。确定删除吗？`, confirmLabel: '删除', danger: true })
+    if (confirmed) onDeleteSource(source.id)
+  }
+  const openSourceMenu = (anchor: HTMLElement) => openFloat({
+    anchor: anchorOf(anchor), placement: 'bottom-end', offset: 8, role: 'listbox', label: '订阅源', className: 'rss-source-menu-panel',
+    render: close => <SourcePicker sources={sources} selected={selectedSource}
+      onChoose={(id) => { close(); onSourceChange(id) }} onDelete={(source) => { close(); void deleteSource(source) }} />,
+  })
 
   const taskMenuPanel = taskMenuOpen ? (
     <FloatPanel
-      className="rss-task-menu-panel overflow-hidden rounded-[18px]"
-      radius={18}
+      className="rss-task-menu-panel"
       style={{
-        ...chatMenuSurfaceStyle,
         position: 'absolute',
         top: 'calc(100% + 6px)',
         right: WORKBENCH_HEADER_EDGE_X,
         zIndex: 30,
         width: 384,
         maxWidth: `calc(100% - ${WORKBENCH_HEADER_EDGE_X * 2}px)`,
-        padding: 0,
       }}
     >
-      <div className="flex items-center justify-between" style={{ padding: '16px 14px 8px 20px' }}>
+      <div className="rss-task-menu__head">
         <div className="min-w-0">
-          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-title)', lineHeight: 1.3 }}>分析任务</div>
-          <div style={{ marginTop: 3, fontSize: 11.5, color: 'var(--text-light)', lineHeight: 1.3 }}>
-            {analysisJobs.length} 条记录 · {activeJobsCount} 个进行中
-          </div>
+          <div className="rss-task-menu__title">分析任务</div>
+          <div className="rss-task-menu__meta">{analysisJobs.length} 条记录 · {activeJobsCount} 个进行中</div>
         </div>
-        <button
-          type="button"
-          onClick={() => setTaskMenuOpen(false)}
-          className="rss-btn rss-btn--icon"
-          title="关闭"
-        >
-          <X style={{ width: 14, height: 14 }} />
-        </button>
+        <IconButton size="sm" icon={<X />} title="关闭" onClick={() => setTaskMenuOpen(false)} />
       </div>
       {analysisJobs.length === 0 ? (
-        <div className="px-4 pb-10 pt-6 text-center text-[12px]" style={{ color: 'var(--text-light)' }}>
-          暂无任务记录
-        </div>
+        <EmptyState title="暂无任务记录" />
       ) : (
-        <div
-          className="rss-feed-scroll"
-          style={{ display: 'grid', gap: 2, maxHeight: 360, overflowY: 'auto', overscrollBehavior: 'contain', padding: '4px 8px 12px' }}
-        >
+        <div className="rss-task-menu__list rn-scroll">
           {analysisJobs.map((job) => {
             const isQueued = job.status === 'queued'
             const isPaused = job.status === 'paused'
@@ -556,101 +540,50 @@ export default function RSSFeed({
             const detailText = taskDetailText(job)
             const roundedProgress = Math.max(0, Math.min(100, Math.round(job.progress || 0)))
             return (
-              <div key={job.id} className="rss-task-menu-row group rounded-[12px] transition-colors hover:bg-[var(--sx-raised-hover)]" style={{ padding: '10px 12px' }}>
-                <div className="grid items-center" style={{ columnGap: 12, gridTemplateColumns: '18px minmax(0, 1fr) 60px' }}>
-                  <div className="flex h-6 items-center justify-center">
-                    <AnalysisProgressRing entry={{ progress: roundedProgress, status: job.status, sourceWarning: job.sourceWarning }} />
+              <div key={job.id} className="rss-task-menu-row">
+                <div className="flex h-6 items-center justify-center">
+                  <AnalysisProgressRing entry={{ progress: roundedProgress, status: job.status, sourceWarning: job.sourceWarning }} />
+                </div>
+                <div className="min-w-0">
+                  <div className="rss-task-menu-row__title" title={job.title}>{job.title}</div>
+                  <div className="rss-task-menu-row__meta">
+                    <span>{taskTypeLabel(job.action)}</span>
+                    <span>·</span>
+                    <span>{roundedProgress}%</span>
+                    <span>·</span>
+                    <span style={{ color: taskStageTone(job.status) }}>
+                      {job.sourceWarning ? '完成 · 有范围提示' : taskStageLabel(job.status)}
+                    </span>
                   </div>
-                  <div className="min-w-0">
-                    <div className="truncate text-[12.5px] font-medium" style={{ color: 'var(--text-title)', lineHeight: 1.4 }} title={job.title}>
-                      {job.title}
-                    </div>
-                    <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[11.5px]" style={{ color: 'var(--text-light)' }}>
-                      <span className="shrink-0">{taskTypeLabel(job.action)}</span>
-                      <span className="shrink-0">·</span>
-                      <span className="shrink-0">{roundedProgress}%</span>
-                      <span className="shrink-0">·</span>
-                      <span className="shrink-0" style={{ color: taskStageTone(job.status) }}>
-                        {job.sourceWarning ? '完成 · 有范围提示' : taskStageLabel(job.status)}
-                      </span>
-                    </div>
-                    {detailText ? (
-                      <div className="mt-1 truncate text-[11.5px]" style={{ color: job.error ? 'var(--sx-danger-text)' : 'var(--text-light)' }} title={detailText}>
-                        {detailText}
-                      </div>
-                    ) : null}
-                  </div>
-                  <div className="flex items-center justify-end gap-1 opacity-70 transition-opacity group-hover:opacity-100">
-                    <button
-                      type="button"
-                      disabled={!canToggle}
-                      onClick={() => {
-                        if (isPaused) onResumeAnalysisJob(job.id)
-                        else if (isQueued) onPauseAnalysisJob(job.id)
-                      }}
-                      className="flex h-6 w-6 items-center justify-center rounded-[8px] hover:bg-[var(--sx-hover)] disabled:opacity-35"
-                      style={{ color: canToggle ? 'var(--text-secondary)' : 'var(--text-light)' }}
-                      title={isPaused ? '继续任务' : isQueued ? '暂停任务' : '当前阶段不可切换'}
-                    >
-                      {isPaused ? <Play className="h-[13px] w-[13px]" /> : <Pause className="h-[13px] w-[13px]" />}
-                    </button>
-                    <button
-                      type="button"
-                      disabled={!canDelete}
-                      onClick={() => onDeleteAnalysisJob(job.id)}
-                      className="flex h-6 w-6 items-center justify-center rounded-[8px] hover:bg-[var(--sx-hover)] hover:text-[var(--sx-danger-text)] disabled:opacity-35"
-                      style={{ color: 'var(--text-light)' }}
-                      title={canDelete ? '删除任务' : '运行中任务暂不可删除'}
-                    >
-                      <Trash2 className="h-[13px] w-[13px]" />
-                    </button>
-                  </div>
+                  {detailText ? (
+                    <div className="rss-task-menu-row__detail" data-error={job.error ? 'true' : undefined} title={detailText}>{detailText}</div>
+                  ) : null}
+                </div>
+                <div className="rss-task-menu-row__actions">
+                  <IconButton
+                    size="sm"
+                    disabled={!canToggle}
+                    icon={isPaused ? <Play /> : <Pause />}
+                    onClick={() => {
+                      if (isPaused) onResumeAnalysisJob(job.id)
+                      else if (isQueued) onPauseAnalysisJob(job.id)
+                    }}
+                    title={isPaused ? '继续任务' : isQueued ? '暂停任务' : '当前阶段不可切换'}
+                  />
+                  <IconButton
+                    size="sm"
+                    className="rss-task-menu-row__delete"
+                    disabled={!canDelete}
+                    icon={<Trash2 />}
+                    onClick={() => onDeleteAnalysisJob(job.id)}
+                    title={canDelete ? '删除任务' : '运行中任务暂不可删除'}
+                  />
                 </div>
               </div>
             )
           })}
         </div>
       )}
-    </FloatPanel>
-  ) : null
-
-  const moreMenuPanel = moreMenuOpen ? (
-    <FloatPanel
-      className="rss-more-menu-panel overflow-hidden rounded-[14px]"
-      role="menu"
-      radius={14}
-      style={{
-        ...chatMenuSurfaceStyle,
-        position: 'absolute',
-        top: 'calc(100% + 6px)',
-        right: WORKBENCH_HEADER_EDGE_X,
-        zIndex: 30,
-        width: 232,
-        maxWidth: `calc(100% - ${WORKBENCH_HEADER_EDGE_X * 2}px)`,
-      }}
-    >
-      <div className="rss-menu">
-        {renderMoreActions?.(closeMenus)}
-        <div className="rss-menu-gap" />
-        <button
-          type="button"
-          className="rss-menu-item ready-floating-menu-item"
-          disabled={!inbox}
-          aria-label="清空当前筛选范围中的全部内容"
-          title="把当前筛选范围移出收件箱；收藏与历史底稿保留"
-          onClick={() => { closeMenus(); onClearRead() }}
-        >
-          <Archive size={15} strokeWidth={1.8} />清空当前范围
-        </button>
-        <button
-          type="button"
-          className="rss-menu-item ready-floating-menu-item"
-          aria-label="打开 RSS 设置"
-          onClick={() => { closeMenus(); onOpenSettings() }}
-        >
-          <Settings size={15} strokeWidth={1.8} />订阅与刷新设置
-        </button>
-      </div>
     </FloatPanel>
   ) : null
 
@@ -662,51 +595,32 @@ export default function RSSFeed({
       <RSSTopbarTools show={toolsVisible}>
         <div ref={toolsRef} className="rss-toolbar-actions flex items-center" style={{ gap: 2 }}>
           <RSSSearchField />
-          <button
-            type="button"
+          <IconButton
             onClick={onRefresh}
             disabled={refreshing}
-            className="rss-toolbar-icon-button"
-            data-tooltip={refreshLabel}
-            aria-label={selectedSource ? `刷新当前源：${selectedSourceEntry?.name || '所选订阅源'}` : '刷新全部订阅源'}
-          >
-            <RefreshCw className={`h-[15px] w-[15px] ${refreshing ? 'animate-spin' : ''}`} strokeWidth={1.9} />
-          </button>
-          <button
-            type="button"
-            onClick={onAddSource}
-            className="rss-toolbar-icon-button"
-            data-tooltip="添加源"
-            aria-label="添加 RSS 源"
-          >
-            <Plus className="h-[16px] w-[16px]" strokeWidth={1.9} />
-          </button>
+            icon={<RefreshCw className={refreshing ? 'animate-spin' : ''} />}
+            title={selectedSource ? `刷新当前源：${selectedSourceEntry?.name || '所选订阅源'}` : '刷新全部订阅源'}
+            aria-busy={isRefreshing || undefined}
+          />
+          <IconButton onClick={onAddSource} icon={<Plus />} title="添加 RSS 源" />
           {analysisJobs.length > 0 && (
-            <button
-              type="button"
-              onClick={() => { setMoreMenuOpen(false); setTaskMenuOpen((open) => !open) }}
-              className="rss-toolbar-icon-button"
-              data-tooltip={taskMenuOpen ? undefined : '任务'}
+            <IconButton
+              className="rss-toolbar-task"
+              onClick={() => setTaskMenuOpen((open) => !open)}
+              active={taskMenuOpen}
               aria-expanded={taskMenuOpen}
-              aria-label={activeJobsCount > 0 ? `查看分析任务，${activeJobsCount} 个进行中` : '查看分析任务'}
-            >
-              <ListTodo className="h-[15px] w-[15px]" strokeWidth={1.9} />
-              {activeJobsCount > 0 ? <span className="rss-toolbar-active-dot" /> : null}
-            </button>
+              icon={<><ListTodo />{activeJobsCount > 0 ? <span className="rss-toolbar-active-dot" /> : null}</>}
+              title={activeJobsCount > 0 ? `查看分析任务，${activeJobsCount} 个进行中` : '查看分析任务'}
+            />
           )}
-          <button
-            type="button"
-            onClick={() => { setTaskMenuOpen(false); setMoreMenuOpen((open) => !open) }}
-            className={`rss-toolbar-icon-button ${settingsOpen ? 'is-active' : ''}`}
-            data-tooltip={moreMenuOpen ? undefined : '更多'}
+          <IconButton
+            onClick={(event) => openMoreMenu(event.currentTarget)}
+            className={settingsOpen ? 'rss-toolbar-on' : undefined}
             aria-haspopup="menu"
-            aria-expanded={moreMenuOpen}
-            aria-label="更多操作"
-          >
-            <MoreHorizontal className="h-[16px] w-[16px]" strokeWidth={1.9} />
-          </button>
+            icon={<MoreHorizontal />}
+            title="更多操作"
+          />
           {taskMenuPanel}
-          {moreMenuPanel}
         </div>
       </RSSTopbarTools>
 
@@ -716,104 +630,34 @@ export default function RSSFeed({
         definitions={definitions}
         status={toolsVisible ? <RSSProcessingPanel active={active} /> : null}
         filtersAside={(
-          <div ref={sourceMenuRef} className="relative">
-            <button
-              type="button"
-              onClick={() => setSourceMenuOpen((open) => !open)}
-              className="rss-quiet-select"
-              title={sourceLabel}
-              aria-haspopup="listbox"
-              aria-expanded={sourceMenuOpen}
-            >
-              <span>{sourceLabel}</span>
-              <ChevronDown className="h-[13px] w-[13px]" strokeWidth={2} />
-            </button>
-            {sourceMenuOpen && (
-              <FloatPanel
-                className="rss-source-menu-panel overflow-hidden rounded-[12px]"
-                role="listbox"
-                radius={14}
-                style={{ ...chatMenuSurfaceStyle, position: 'absolute', top: 'calc(100% + 8px)', right: 0, zIndex: 30, width: 280, maxWidth: 'calc(100cqw - 32px)' }}
-              >
-                <div className="rss-feed-scroll" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 1, maxHeight: 320, overflowY: 'auto', overscrollBehavior: 'contain' }}>
-                  <button
-                    type="button"
-                    role="option"
-                    aria-selected={!selectedSource}
-                    onClick={() => { onSourceChange(null); setSourceMenuOpen(false) }}
-                    className={`ready-floating-menu-item rss-menu-item ${!selectedSource ? 'is-selected' : ''}`}
-                  >
-                    <Check className="h-[13px] w-[13px] shrink-0" style={{ color: 'var(--color-blue)', opacity: selectedSource ? 0 : 1 }} strokeWidth={2.5} />
-                    <span style={{ flex: 1, minWidth: 0 }}>全部源</span>
-                  </button>
-                  {sources.map((source) => {
-                    const isSelected = source.id === selectedSource
-                    return (
-                      <div
-                        key={source.id}
-                        className={`ready-floating-menu-item flex min-w-0 items-center gap-1 rounded-[9px] ${isSelected ? 'is-selected' : ''}`}
-                        style={{ padding: '0 4px 0 10px' }}
-                      >
-                        <button
-                          type="button"
-                          role="option"
-                          aria-selected={isSelected}
-                          onClick={() => { onSourceChange(source.id); setSourceMenuOpen(false) }}
-                          className="flex min-w-0 flex-1 items-center gap-2.5"
-                          style={{ padding: '8px 0', textAlign: 'left' }}
-                          title={source.name}
-                        >
-                          <Check className="h-[13px] w-[13px] shrink-0" style={{ color: 'var(--color-blue)', opacity: isSelected ? 1 : 0 }} strokeWidth={2.5} />
-                          <span className="min-w-0 flex-1 truncate" style={{ fontSize: 12.5, color: 'var(--text-body)' }}>{source.name}</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={async (event) => {
-                            event.stopPropagation()
-                            setSourceMenuOpen(false)
-                            const confirmed = await showConfirm(
-                              `删除订阅源「${source.name}」后，其下文章会一并移除，且无法恢复。确定删除吗？`,
-                              '删除订阅源',
-                            )
-                            if (confirmed) onDeleteSource(source.id)
-                          }}
-                          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[8px] transition-colors hover:bg-[var(--sx-hover)] hover:text-[var(--sx-danger-text)]"
-                          style={{ color: 'var(--text-light)' }}
-                          title="删除该源"
-                          aria-label={`删除 ${source.name}`}
-                        >
-                          <X className="h-[12px] w-[12px]" strokeWidth={2.4} />
-                        </button>
-                      </div>
-                    )
-                  })}
-                  {sources.length === 0 && (
-                    <div className="px-3 py-6 text-center text-[12px]" style={{ color: 'var(--text-light)' }}>暂无订阅源</div>
-                  )}
-                </div>
-              </FloatPanel>
-            )}
-          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="rss-source-select"
+            onClick={(event) => openSourceMenu(event.currentTarget)}
+            title={sourceLabel}
+            aria-haspopup="listbox"
+          >
+            <span>{sourceLabel}</span>
+            <ChevronDown />
+          </Button>
         )}
       />
 
       <div className="rss-feed-list" data-rss-loaded-count={items.length}>
-        {queryError && <div className="rss-query-error" role="alert">{queryError}<button type="button" onClick={onReloadQuery}>重新读取</button></div>}
+        {queryError && <div className="rss-query-error" role="alert">{queryError}<Button variant="ghost" size="sm" onClick={onReloadQuery}>重新读取</Button></div>}
         {shouldShowBootstrapSkeleton ? (
-          <div style={{ padding: '0 var(--rss-row-x)' }}>
+          <div className="rss-skeleton-list" aria-hidden>
             {Array.from({ length: 6 }).map((_, index) => (
-              <div key={`rss-skeleton-${index}`} className="rss-skeleton" aria-hidden>
-                <span style={{ width: `${64 + (index % 3) * 10}px` }} />
-                <span style={{ width: `${54 + (index % 2) * 16}%`, height: 14 }} />
-                <span style={{ width: `${78 + (index % 2) * 10}%` }} />
+              <div key={`rss-skeleton-${index}`} className="rss-skeleton">
+                <Skeleton width={64 + (index % 3) * 10} height={10} />
+                <Skeleton width={`${54 + (index % 2) * 16}%`} height={14} />
+                <Skeleton width={`${78 + (index % 2) * 10}%`} height={10} />
               </div>
             ))}
           </div>
         ) : items.length === 0 ? (
-          <div className="rss-empty">
-            <Inbox size={26} strokeWidth={1.5} />
-            <p>{queryError ? '当前范围暂时无法读取' : '这里还没有资讯'}</p>
-          </div>
+          <EmptyState icon={<Inbox />} title={queryError ? '当前范围暂时无法读取' : '这里还没有资讯'} />
         ) : (
           <RSSVirtualList key={query ? rssQueryKey(query) : 'rss-feed'} items={items} selectedItemId={selectedItemId} header={listHeader}>{(item, index) => {
             const date = dayKey(itemTimestamp(item))
@@ -838,9 +682,35 @@ export default function RSSFeed({
             )
           }}</RSSVirtualList>
         )}
-        {nextPage && <button type="button" className="rss-load-more" disabled={loading || loadingMore} onClick={onLoadMore}>{loadingMore ? '正在读取…' : '加载更多'}</button>}
+        {nextPage && <Button variant="ghost" size="sm" className="rss-load-more" disabled={loading || loadingMore} onClick={onLoadMore}>{loadingMore ? '正在读取…' : '加载更多'}</Button>}
       </div>
-      <Modal {...modalProps} danger confirmLabel="删除" />
     </div>
   )
+}
+
+// The source filter's list: a float of the shared host drawn with the menu rows; each source carries its own delete.
+function SourcePicker({ sources, selected, onChoose, onDelete }: {
+  sources: RSSSource[]; selected: string | null; onChoose(id: string | null): void; onDelete(source: RSSSource): void
+}) {
+  return <div className="rn-menu rss-source-menu" role="presentation">
+    <div className="rss-source-menu__list rn-scroll">
+      <button type="button" role="option" aria-selected={!selected} className="rn-menu__item" onClick={() => onChoose(null)}>
+        <span className="rn-menu__check">{!selected ? <Check size={14} /> : null}</span>
+        <span className="rn-menu__label">全部源</span>
+      </button>
+      {sources.map((source) => {
+        const isSelected = source.id === selected
+        return (
+          <div key={source.id} className="rss-source-menu__row">
+            <button type="button" role="option" aria-selected={isSelected} className="rn-menu__item" title={source.name} onClick={() => onChoose(source.id)}>
+              <span className="rn-menu__check">{isSelected ? <Check size={14} /> : null}</span>
+              <span className="rn-menu__label">{source.name}</span>
+            </button>
+            <IconButton size="sm" className="rss-source-menu__delete" icon={<X />} title={`删除 ${source.name}`} onClick={() => onDelete(source)} />
+          </div>
+        )
+      })}
+      {sources.length === 0 && <EmptyState title="暂无订阅源" />}
+    </div>
+  </div>
 }
