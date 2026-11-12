@@ -1351,6 +1351,7 @@ const sourceAnnotationsAPI: import('../main/modules/library-engine/source-docume
   pdf: input => ipcRenderer.invoke('sourceAnnotations:pdf', input),
   rss: input => ipcRenderer.invoke('sourceAnnotations:rss', input),
   web: input => ipcRenderer.invoke('sourceAnnotations:web', input),
+  webReading: input => ipcRenderer.invoke('sourceAnnotations:webReading', input),
 }
 
 const documentAnnotationsAPI: import('../shared/document-comments').DocumentAnnotationsAPI = {

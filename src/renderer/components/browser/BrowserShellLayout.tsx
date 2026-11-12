@@ -17,6 +17,8 @@ interface BrowserShellLayoutProps {
   fillBottomLeftCorner?: boolean
   /** A band above the page (a task waiting on the person): it takes its own height, so the native page moves down. */
   band?: ReactNode
+  /** DOM in place of the native page (阅读视图); the page itself is hidden meanwhile. */
+  cover?: ReactNode
 }
 
 export default function BrowserShellLayout({
@@ -31,9 +33,10 @@ export default function BrowserShellLayout({
   mediaUploadStatus = null,
   fillBottomLeftCorner = true,
   band = null,
+  cover = null,
 }: BrowserShellLayoutProps) {
   const showReadyBlankPage = activeTab ? isReadyBrowserBlankUrl(activeTab.url) && !activeTab.error : false
-  const showBrowserViewCornerFill = isElectron && Boolean(activeTab) && !showReadyBlankPage && !activeTab?.error
+  const showBrowserViewCornerFill = isElectron && Boolean(activeTab) && !showReadyBlankPage && !activeTab?.error && !cover
 
   return (
     <div className="flex min-h-0 h-full flex-1">
@@ -124,6 +127,8 @@ export default function BrowserShellLayout({
                 </div>
               </div>
             )}
+
+            {cover}
 
             {showReadyBlankPage && (
               <div

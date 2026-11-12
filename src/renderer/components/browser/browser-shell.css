@@ -82,3 +82,53 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ---- 阅读视图: 资讯's reader on the page's own sheet, in place of the native page ---- */
+.rn-reading-view {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  background: var(--rn-sheet);
+  outline: none;
+}
+
+.rn-reading-view__status {
+  display: flex;
+  align-items: center;
+  gap: var(--rn-s2);
+  margin: 0;
+  font: 400 var(--rn-fs-md)/1.5 var(--rn-font-ui);
+  color: var(--rn-ink-2);
+}
+
+.rn-reading-view__status svg { width: 14px; height: 14px; }
+
+/* The address field's 阅读视图 switch: a plain glyph; pressed, a glowing white glyph on a light tile, as the rail's
+   selected icons are. */
+.rn-reading-toggle {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: var(--rn-r-xs);
+  background: transparent;
+  color: var(--rn-ink-2);
+  cursor: pointer;
+  transition: background-color var(--rn-d-1) var(--rn-ease-out), color var(--rn-d-1) var(--rn-ease-out);
+}
+
+.rn-reading-toggle svg { width: 14px; height: 14px; }
+.rn-reading-toggle:hover { background: var(--bg-hover); }
+.rn-reading-toggle {
+  --rn-reading-tile: rgba(150, 152, 148, .24);
+  --rn-reading-glow: drop-shadow(0 0 .8px rgba(255, 255, 255, .9)) drop-shadow(0 0 2.5px rgba(255, 255, 255, .42)) drop-shadow(0 .5px .8px rgba(24, 26, 28, .22));
+}
+html[data-theme='dark'] .rn-reading-toggle {
+  --rn-reading-tile: rgba(235, 235, 230, .12);
+  --rn-reading-glow: drop-shadow(0 0 1px rgba(255, 255, 255, .9)) drop-shadow(0 0 4px rgba(255, 255, 255, .42));
+}
+.rn-reading-toggle[aria-pressed='true'] { background: var(--rn-reading-tile); color: rgba(255, 255, 255, .98); }
+.rn-reading-toggle[aria-pressed='true'] svg { filter: var(--rn-reading-glow); }

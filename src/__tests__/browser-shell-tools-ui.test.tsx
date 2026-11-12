@@ -211,3 +211,57 @@ test('订阅: shown for a declared feed, one click adds it through 资讯, then 
   await render(<BrowserSubscribeButton feeds={[]} pageTitle="x" />)
   assert.equal(body.querySelector('[data-browser-subscribe]'), null)
 })
+
+test('阅读视图: the page’s article in 资讯’s reader; 划线 sends only the reading range, Main reads the words itself', async t => {
+  const { default: BrowserReadingView } = await importWithoutAssets(() => import('../renderer/components/browser/BrowserReadingView'))
+  const { readingRuns } = await import('../shared/rss-reading')
+  const markdown = '第一段有一个**重点**词。\n\n第二段说筛子怎样留下好文章。'
+  const url = 'https://example.com/blog/sieve'
+  const article = { url, title: '筛子与阅读', byline: '白', siteName: 'example.com', publishedAt: Date.UTC(2026, 10, 1), lang: 'zh',
+    article: { revision: 'rev-1' }, body: {}, text: markdown, textKind: 'body', offset: 0, totalLength: markdown.length, nextOffset: null }
+  let answer: unknown = { success: true, data: article }
+  const reads: string[] = [], highlights: unknown[] = []
+  const { dom, body, render, settle } = await mount(t, {
+    browser: { readTab: async ({ tabId }: { tabId: string }) => { reads.push(tabId); return answer } },
+    sourceAnnotations: { webReading: async (input: unknown) => { highlights.push(input); return { success: true, data: { bookId: 'source', sourcePath: '/vault/文章/筛子与阅读.md', version: 'v', highlights: [{ id: 'hl', text: '筛子' }] } } } },
+  })
+  const closed: string[] = []
+  await render(<BrowserReadingView tabId="tab-7" url={url} onClose={() => closed.push('close')} onTranslate={() => {}} />)
+  await settle(10)
+  const view = body.querySelector<HTMLElement>('[aria-label="阅读视图"]')!
+  assert.deepEqual(reads, ['tab-7'])
+  assert.equal(view.dataset.browserReadingView, 'ready')
+  assert.equal(view.querySelector('.rss-reader-title')?.textContent, '筛子与阅读')
+  assert.match(view.querySelector('.rss-reader-source')?.textContent || '', /example\.com· 白· 2026年11月1日/)
+  assert.ok(view.querySelector('.rss-reader-body [data-ready-reading-run]'), 'the article is laid out in reading runs, as in 资讯')
+
+  // Select “筛子” in the second paragraph, as a pointer would, and let the shared bar appear over it.
+  const run = readingRuns(markdown).find(entry => entry.text.includes('筛子'))!
+  const element = view.querySelector<HTMLElement>(`[data-ready-reading-run="${run.id}"]`)!
+  const textNode = dom.window.document.createTreeWalker(element, 4).nextNode()!
+  const at = textNode.textContent!.indexOf('筛子')
+  const range = dom.window.document.createRange(); range.setStart(textNode, at); range.setEnd(textNode, at + 2)
+  const rect = { left: 40, top: 200, right: 80, bottom: 220, width: 40, height: 20, x: 40, y: 200, toJSON() {} }
+  Object.assign(dom.window.Range.prototype, { getBoundingClientRect: () => rect })
+  const bounds = view.querySelector<HTMLElement>('.rss-reader-body')!
+  bounds.getBoundingClientRect = () => ({ left: 0, top: 0, right: 800, bottom: 900, width: 800, height: 900, x: 0, y: 0, toJSON() {} })
+  dom.window.getSelection()!.removeAllRanges(); dom.window.getSelection()!.addRange(range)
+  await act(async () => { bounds.dispatchEvent(new dom.window.MouseEvent('mouseup', { bubbles: true })) })
+  await settle(10)
+  const buttons = [...body.querySelectorAll<HTMLButtonElement>('[data-ready-selection-bar] button')]
+  assert.deepEqual(buttons.map(button => button.textContent), ['划线', '存入 FastCard', '引用到文档', '问 AI', '保存到画板', '翻译'])
+  await act(async () => buttons[0].click())
+  await settle(10)
+  assert.deepEqual(highlights, [{ tabId: 'tab-7', revision: 'rev-1', range: { start: { run: run.id, offset: at }, end: { run: run.id, offset: at + 2 } } }])
+
+  // Esc goes back to the page; a page that does not read as an article says so, with the way back.
+  await act(async () => { view.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })) })
+  assert.deepEqual(closed, ['close'])
+  answer = { success: false, error: 'not_readable' }
+  await render(<BrowserReadingView tabId="tab-8" url={url} onClose={() => closed.push('back')} onTranslate={() => {}} />)
+  await settle(10)
+  const failed = body.querySelector<HTMLElement>('[aria-label="阅读视图"]')!
+  assert.equal(failed.querySelector('[role="alert"] span')?.textContent, '这个网页读不出正文。')
+  await act(async () => failed.querySelector<HTMLButtonElement>('[role="alert"] button')!.click())
+  assert.deepEqual(closed, ['close', 'back'])
+})

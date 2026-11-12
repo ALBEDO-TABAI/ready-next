@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, Bot, Globe, Loader2, Lock, RefreshCw, ShieldAlert, Star, UserRound } from 'lucide-react'
+import { ArrowLeft, ArrowRight, BookOpenText, Bot, Globe, Loader2, Lock, RefreshCw, ShieldAlert, Star, UserRound } from 'lucide-react'
 import HeaderUtilityActions from './HeaderUtilityActions'
 import { NavigationBackEntry } from '../../modules/workbench/NavigationBackEntry'
 import {
@@ -40,6 +40,8 @@ interface BrowserTopBarProps {
   onSwitchTab?: (tabId: string) => void
   /** Feeds the page declares: 订阅 appears in the address field. */
   feeds?: BrowserPageCapabilities['feeds']
+  /** 阅读视图: offered when the page reads as an article; pressed while it is shown. */
+  reading?: { available: boolean; shown: boolean; onToggle: () => void }
 }
 
 function BrowserOwnershipChip({ status }: { status: BrowserOwnershipStatus }) {
@@ -86,6 +88,7 @@ export default function BrowserTopBar({
   ownershipStatus,
   onSwitchTab,
   feeds,
+  reading,
 }: BrowserTopBarProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const addressRef = useRef<HTMLDivElement>(null)
@@ -224,6 +227,12 @@ export default function BrowserTopBar({
             }}
             className="ready-input-slot-inner h-full min-w-0 flex-1 bg-transparent text-[12px] text-[var(--text-body)] outline-none"
           />
+          {reading && (reading.available || reading.shown) && (
+            <button type="button" className="rn-reading-toggle" aria-pressed={reading.shown} data-browser-reading-toggle=""
+              title={reading.shown ? '回到网页' : '阅读视图'} aria-label="阅读视图" onClick={reading.onToggle}>
+              <BookOpenText aria-hidden="true" />
+            </button>
+          )}
           {feeds && feeds.length > 0 && <BrowserSubscribeButton feeds={feeds} pageTitle={activeTab?.title || ''} />}
           <button
             type="button"

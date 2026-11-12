@@ -14,6 +14,7 @@ import { BrowserTaskBandForTab } from '../../components/browser/BrowserTaskBand'
 import { useBrowserFind } from '../../modules/browser/useBrowserFind'
 import { useBrowserTaskShell } from '../../modules/browser/useBrowserTaskShell'
 import { usePageCapabilities } from '../../modules/browser/usePageCapabilities'
+import BrowserReadingView from '../../components/browser/BrowserReadingView'
 import { ShellNavigator } from '../../modules/workbench/shell/ShellSidebar'
 import BrowserShellLayout from '../../components/browser/BrowserShellLayout'
 import { nextIntentId } from '../../../shared/browser-view-intent'
@@ -255,8 +256,12 @@ export default function BrowserMode({
   const currentDomain = activeTab?.domain || extractBrowserDomain(activeTab?.url || '')
   const hasError = !!activeTab?.error
   const isReadyBlankTab = activeTab ? isReadyBrowserBlankUrl(activeTab.url) : false
+  // 阅读视图 (W7 §4.10) stands in for the page it was opened on; another tab, another address or a split ends it.
+  const [readingView, setReadingView] = useState<{ tabId: string; url: string } | null>(null)
+  const readingShown = Boolean(readingView && activeTab && !shouldRenderSplitLayout && readingView.tabId === activeTab.id && readingView.url === activeTab.url)
+  useEffect(() => { if (readingView && !readingShown) setReadingView(null) }, [readingShown, readingView])
   const splitTabHasNativeSurface = visibleSplitTab ? !visibleSplitTab.error && !isReadyBrowserBlankUrl(visibleSplitTab.url) : false
-  const shouldHideAllBrowserHosts = (hasError || isReadyBlankTab) && !splitTabHasNativeSurface
+  const shouldHideAllBrowserHosts = (hasError || isReadyBlankTab || readingShown) && !splitTabHasNativeSurface
   const fastCardItems = useFastCard(s => s.items)
   const fastCardRevealTarget = useFastCard(s => s.revealTarget)
   const fastCardSyncState = useFastCard(s => s.syncState)
@@ -550,7 +555,7 @@ export default function BrowserMode({
     activateTab: (tabId) => { void handleHeaderTabClick(tabId, { shiftKey: false }) },
   })
   // The shell's own tools for the visible page (W7 §4.10): ⌘F, and what the page offers (订阅).
-  const browserFind = useBrowserFind({ isActive, tabId: activeTabId })
+  const browserFind = useBrowserFind({ isActive: isActive && !readingShown, tabId: activeTabId })
   const pageCapabilities = usePageCapabilities(activeTabId, activeTab?.url)
 
   const handleSplitResize = useCallback((delta: number) => {
@@ -1269,6 +1274,11 @@ export default function BrowserMode({
             ownershipStatus={browserOwnershipStatus}
             onSwitchTab={(tabId) => { void handleHeaderTabClick(tabId, { shiftKey: false }) }}
             feeds={pageCapabilities?.feeds}
+            reading={{
+              available: Boolean(pageCapabilities?.readable) && !shouldRenderSplitLayout,
+              shown: readingShown,
+              onToggle: () => setReadingView(readingShown || !activeTab ? null : { tabId: activeTab.id, url: activeTab.url }),
+            }}
           />
 
           <div className="flex min-h-0 flex-1">
@@ -1424,6 +1434,9 @@ export default function BrowserMode({
                 mediaDropActive={generatedImageDragActive}
                 mediaUploadStatus={localMediaUploadStatus}
                 band={<>{browserFind.bar}<BrowserTaskBandForTab tabId={activeTab?.id} /></>}
+                cover={readingShown && activeTab ? <BrowserReadingView tabId={activeTab.id} url={activeTab.url} onClose={() => setReadingView(null)}
+                  onTranslate={selection => { void runFastCardTranslation({ kind: 'text', text: selection.text, pageUrl: selection.url, pageTitle: selection.title,
+                    domain: extractBrowserDomain(selection.url), tabId: activeTab.id, capturedAt: Date.now() }, detectFastCardTargetLanguage(selection.text)) }} /> : null}
               />
             )}
               <BrowserDiagnosticsDock

@@ -20,6 +20,8 @@
 //            while off); picking an open tab brings it to the front.
 //   find     T8: ⌘F opens the find bar above the page (the page moves down), counts and steps through matches; Esc closes.
 //   subscribe T8: a page that declares a feed shows 订阅; one click adds it to 资讯.
+//   reading   T8: 阅读视图 shows the article in 资讯's reader in place of the page; 划线 goes to the web page's source
+//             page with a link back to the live page at those words.
 // Light and dark (reduced transparency) screenshots go to --shots <dir>. --only login,tabs runs a subset.
 // Build first: npx electron-vite build. Usage: node scripts/verify-ready-next-browser-shell-electron.cjs [--shots <dir>]
 const fs = require('node:fs')
@@ -144,7 +146,8 @@ async function bandAndPage(app, page) {
 const mod = process.platform === 'darwin' ? 'Meta' : 'Control'
 // The conversation itself: the composer's liquid glass keeps an inert copy of it for refraction, which has no scroll-root mark.
 const CHAT = '[data-liquid-scroll-root="chat-messages"]'
-const PARAGRAPH = n => `第 ${n} 段：一个好的筛子，先理解你在做什么，再决定把什么放到你面前。`
+// Long enough to read as an article (Readability's readerable check wants a few paragraphs of substance).
+const PARAGRAPH = n => `第 ${n} 段：一个好的筛子，先理解你在做什么，再决定把什么放到你面前。读的时候先看它是不是回答了你的问题，再看它有没有新的东西，最后才看写得好不好；这样留下来的文章，过一段时间再翻，还是值得读的。`
 
 /** A small local site for the shell's own tools: an article that declares its feed (the word 筛子 three times), the feed. */
 async function startShellSite() {
@@ -259,10 +262,81 @@ async function subscribeCase({ page, site }) {
   ok('T8 subscribe: the button then says 已订阅', await waitFor(async () => (await button.textContent()) === '已订阅'))
 }
 
+/** Native page views that are showing now (visible and laid out), in window coordinates. */
+const shownNativeViews = app => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().flatMap(win => (win.contentView.children || [])
+  .filter(view => view.webContents && (typeof view.getVisible !== 'function' || view.getVisible()))
+  .map(view => view.getBounds()).filter(bounds => bounds.x >= 0 && bounds.y >= 0 && bounds.width > 1 && bounds.height > 1)))
+
+/** Source pages in the test vault that belong to a web address. */
+function webSourcePages(address) {
+  const found = [], wanted = `来源引用: ready://web?url=${encodeURIComponent(address)}`
+  const walk = dir => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name.startsWith('.')) continue
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) walk(full)
+      else if (entry.name.endsWith('.md') && fs.readFileSync(full, 'utf8').includes(wanted)) found.push(full)
+    }
+  }
+  walk(vault)
+  return found
+}
+
+async function readingCase({ app, page, site }) {
+  const address = site.url('/blog/sieve')
+  const toggle = page.locator('[data-browser-reading-toggle]')
+  ok('T8 reading: an article page offers 阅读视图 in the address field', await waitFor(() => toggle.isVisible(), 15000))
+  await toggle.click()
+  const view = page.locator('[data-browser-reading-view]')
+  const ready = await waitFor(async () => (await view.getAttribute('data-browser-reading-view').catch(() => null)) === 'ready', 20000)
+  ok('T8 reading: the article opens in 资讯’s reader in place of the page, its title once', ready
+    && (await view.getByRole('heading', { name: '筛子与阅读' }).count()) === 1 && (await view.locator('[data-ready-reading-run]').count()) > 0,
+    ready ? '' : await view.textContent().catch(() => 'no view'))
+  ok('T8 reading: the native page steps aside while it is shown', await waitFor(async () => (await shownNativeViews(app)).length === 0, 10000),
+    JSON.stringify(await shownNativeViews(app)))
+  await shot(page, 'reading-view-light')
+  // Select “筛子” in the second paragraph as a pointer would; the shared selection bar comes up over it.
+  const picked = await page.evaluate(() => {
+    const run = [...document.querySelectorAll('[data-browser-reading-view] [data-ready-reading-run]')].find(node => node.textContent.includes('第 2 段'))
+    if (!run) return null
+    const walker = document.createTreeWalker(run, NodeFilter.SHOW_TEXT)
+    let node
+    while ((node = walker.nextNode())) {
+      const at = node.textContent.indexOf('筛子')
+      if (at < 0) continue
+      const range = document.createRange(); range.setStart(node, at); range.setEnd(node, at + 2)
+      const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range)
+      run.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+      return selection.toString()
+    }
+    return null
+  })
+  const bar = page.locator('[data-ready-selection-bar]')
+  ok('T8 reading: selecting words brings up the shared selection bar', picked === '筛子' && await waitFor(() => bar.isVisible(), 10000)
+    && (await bar.locator('button').allTextContents()).join('|') === '划线|存入 FastCard|引用到文档|问 AI|保存到画板|翻译', picked)
+  await shot(page, 'reading-selection-light')
+  await bar.locator('[data-selection-action="highlight"]').click()
+  ok('T8 reading: 划线 says it went to the source page', await waitFor(async () => /已划线到来源页|已加入来源页/.test(await page.locator('.rn-toast').last().textContent().catch(() => '')), 15000))
+  // The web page's source page holds the words, and its link goes back to the live page at them.
+  const sources = await waitFor(() => webSourcePages(address).length === 1, 15000) ? webSourcePages(address) : webSourcePages(address)
+  const content = sources.length === 1 ? fs.readFileSync(sources[0], 'utf8') : ''
+  const back = [...content.matchAll(/\[原文\]\((ready:\/\/\S+)\) <!--/g)].map(match => new URL(match[1]).searchParams.get('url') || '')
+    .find(link => decodeURIComponent(link).includes('-,筛子,-')) || ''
+  ok('T8 reading: the highlight lands in the web page’s own source page', sources.length === 1 && /> 筛子\n/.test(content), JSON.stringify(sources))
+  const fragment = back.startsWith(`${address}#:~:text=`) ? back.slice(`${address}#:~:text=`.length).split(/-,|,-/).map(part => decodeURIComponent(part)) : []
+  const live = await app.evaluate(({ webContents }, target) => {
+    const contents = webContents.getAllWebContents().find(item => item.getURL() === target)
+    return contents ? contents.executeJavaScript('document.body.innerText') : ''
+  }, address)
+  ok('T8 reading: its link goes back to the live page, at words that sit together there', fragment.length === 3
+    && live.replace(/\s+/g, ' ').includes(fragment.join('')), JSON.stringify({ back, fragment }))
+  await toggle.click()
+  ok('T8 reading: the switch again goes back to the page', await waitFor(async () => !(await view.count()) && (await shownNativeViews(app)).length > 0, 10000))
+}
+
 /** Dark (reduced transparency, so a hidden capture shows the real colours): the same places again, for screenshots. */
 async function darkTour({ session, model, site }) {
-  const next = await harness.ensureAppearance(profile, session, { theme: 'dark', transparency: 'reduced' })
-  const { page } = next
+  const { page } = session
   await harness.requestMode(page, 'browser')
   await openTab(page, site.url('/blog/sieve'))
   await newConversation(page)
@@ -277,6 +351,10 @@ async function darkTour({ session, model, site }) {
   await harness.sleep(600)
   await shot(page, 'find-bar-dark')
   await page.locator('[data-browser-find-bar] input').press('Escape')
+  await page.locator('[data-browser-reading-toggle]').click()
+  await page.locator('[data-browser-reading-view="ready"]').waitFor({ timeout: 20000 })
+  await shot(page, 'reading-view-dark')
+  await page.locator('[data-browser-reading-toggle]').click()
   const input = page.getByRole('combobox', { name: '地址' })
   await input.click()
   await input.press(`${mod}+a`)
@@ -288,8 +366,7 @@ async function darkTour({ session, model, site }) {
   await page.locator('nav[aria-label="设置分区"] .sx-nav-item', { has: page.locator('.sx-nav-item__label', { hasText: /^浏览器$/ }) }).click()
   await page.locator('[data-browser-search-settings]').waitFor({ timeout: 15000 })
   await shot(page, 'settings-browser-dark')
-  ok('dark: the band, card, sidebar, find bar, suggestions and settings render (screenshots)', true)
-  return next
+  ok('dark: the band, card, sidebar, find bar, reading view, suggestions and settings render (screenshots)', true)
 }
 
 async function main() {
@@ -366,7 +443,12 @@ async function main() {
     await run('suggest', () => suggestCase({ page }))
     await run('find', () => findCase({ app, page, site }))
     await run('subscribe', () => subscribeCase({ page, site }))
-    if (shots && runs('dark')) session = await darkTour({ session, model, site })
+    await run('reading', () => readingCase({ app, page, site }))
+    if (shots && runs('dark')) {
+      // The relaunched app is the session from here on, so it is closed below whatever the tour does.
+      session = await harness.ensureAppearance(profile, session, { theme: 'dark', transparency: 'reduced' })
+      await darkTour({ session, model, site })
+    }
   } catch (error) {
     failed++
     console.log(`FAIL ${error instanceof Error ? error.stack : String(error)}`)
@@ -522,7 +604,7 @@ async function takeoverCase({ app, page, model, holds }) {
     const ended = written.find(message => message.role === 'assistant' && /browser-help:/.test(message.id))
     const asked = model.requests.some(entry => entry.scenario === 'takeover-help')
     if (sent && ended && !asked) {
-      throw new Error(`blocked by Main: the help input was written, but its run ended at once (“${ended.content}”) without asking the model; at the click the person still held the page (${JSON.stringify(control)})`)
+      throw new Error(`blocked by Main: the help input was written, but its run ended at once (“${ended.content}”) without asking the model; browser control at the click: ${JSON.stringify(control)}`)
     }
     throw error
   })

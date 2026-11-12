@@ -21,7 +21,9 @@
 
 | 评估日期 | 任务 | 文件 | 总行数 | 本次新增 | 结论 | 判断与后续动作 | 状态 |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
-| 2026-11-12 | W7 T7/T8 浏览器壳界面（B12 第三批） | `src/renderer/pages/modes/BrowserMode.tsx` | 1527（合入 B11 第二步后） | 净 +22 | 一般 | 只接线：任务标签组、提示条、⌘F 查找条和页面能力都在独立模块（`useBrowserTaskShell`、`BrowserTaskBand`、`useBrowserFind`、`usePageCapabilities`），页面只把它们放进侧栏与网页上方的槽位；锁定提示在出现提示条时让位。复查：把网页层显隐与锁定浮窗的两段副作用移出页面。 | 已排期：2026-11-30 |
+| 2026-11-12 | W7 T7/T8 浏览器壳界面（B12 第三批） | `src/renderer/pages/modes/BrowserMode.tsx` | 1540（合入 B11 第二步后） | 净 +35 | 一般 | 只接线：任务标签组、提示条、⌘F 查找条、页面能力与阅读视图都在独立模块（`useBrowserTaskShell`、`BrowserTaskBand`、`useBrowserFind`、`usePageCapabilities`、`BrowserReadingView`），页面只把它们放进侧栏、网页上方和网页位置的槽位；阅读视图显示时原生网页与锁定提示让位。复查：把网页层显隐与锁定浮窗的两段副作用移出页面。 | 已排期：2026-11-30 |
+| 2026-11-12 | W7 T8 阅读视图划线（B12 第三批） | `src/main/index.ts` | 1375 | 净 +1 | 一般 | 只把浏览器读正文交给来源页划线入口（`readTab`）；划线逻辑在 `source-document-ipc.ts` 与 `source-adapters.ts`。复查同 B3 行。 | 已排期：2026-11-30 |
+| 2026-11-12 | W7 T8 阅读视图划线（B12 第三批） | `src/preload/index.ts` | 1809 | 净 +1 | 一般 | 只透传 `sourceAnnotations.webReading`，`verify:ipc-contract` 核对。复查同 W5 行：预加载按域拆文件。 | 已排期：2026-11-30 |
 | 2026-11-12 | W7 T7 一键继续的准入修复 | `src/main/modules/agent-control/codex-runtime/codex-product-run-preparer.ts` | 1014 | 净 +2 | 一般 | 只给页面引用的严格结构补上 B12 加入的 origin 字段（否则浏览器模式带当前网页的每一轮都被拒）。复查：页面引用结构应与 `TrustedRequestEnvironment` 共用一个定义，避免两处再漂移。 | 已排期：2026-11-30 |
 | 2026-11-12 | W7 T8/T7 壳数据 | `src/main/modules/agent-control/runtime-core/runtime.ts` | 1973 | 净 +9 | 一般 | 只接入原任务会话归属解析与已消费状态的刷新通知；不增加执行链。 | 复查：2026-11-30，按既有运行时装配边界复查 |
 | 2026-11-12 | W7 T8/T7 壳数据 | `src/preload/index.ts` | 1798 | 净 +25 | 一般 | 五个浏览器调用与四个可退订事件透传；IPC 对应检查和真实预加载行为检查覆盖。 | 复查：2026-11-30，按域拆分透传声明 |

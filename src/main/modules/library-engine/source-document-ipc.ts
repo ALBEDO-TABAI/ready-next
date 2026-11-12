@@ -7,7 +7,9 @@ import type { RSSReadExcerptInput } from '../../../shared/rss-excerpt'
 import type { LibraryHighlightState } from '../../../shared/library'
 import type { RSSContentStore } from '../database/rss-content-store'
 import type { BrowserController } from '../browser-engine/browser-controller'
-import { rssSource, webSource } from './source-adapters'
+import { rssSource, webReadingSource, webSource } from './source-adapters'
+import { RSSReadingRangeSchema, type RSSReadingRange } from '../../../shared/rss-reading'
+import type { BrowserReadResult } from '../../../shared/browser-shell'
 import type { SourceDocumentService } from './source-documents'
 
 export type SourceReply = { success: true; data: LibraryHighlightState } | { success: false; error: string }
@@ -15,6 +17,13 @@ export interface SourceAnnotationsAPI {
   pdf(input: PdfSelection): Promise<SourceReply>
   rss(input: RSSReadExcerptInput): Promise<SourceReply>
   web(input: { tabId: string }): Promise<SourceReply>
+  /** A selection in the browser's reading view: the article as the reader showed it (its revision) and the range. */
+  webReading(input: { tabId: string; revision: string; range: RSSReadingRange }): Promise<SourceReply>
+}
+
+const READ_REFUSAL: Record<Exclude<BrowserReadResult, { success: true }>['error'], string> = {
+  tab_missing: '网页已关闭，请重新选择', page_changed: '网页已切换，请重新选择', unsupported_protocol: '这个网页不能划线',
+  not_readable: '这个网页读不出正文', too_large: '这个网页的正文太长', extraction_failed: '这个网页读不出正文',
 }
 
 // Runs only in the selected BrowserView. A DOM Range gives exact text and context without a network fetch.
@@ -32,6 +41,8 @@ export function registerSourceAnnotationsIPC(ipcMain: Pick<IpcMain, 'handle'>, d
   service(): Promise<SourceDocumentService>
   rss(): Pick<RSSContentStore, 'getArticle' | 'readExcerpt'>
   browser(): BrowserController | null
+  /** The browser's reading of a tab's rendered article (the reading view's own source). */
+  readTab(tabId: string): Promise<BrowserReadResult>
 }) {
   const reply = async (work: () => Promise<LibraryHighlightState>): Promise<SourceReply> => {
     try { return { success: true, data: await work() } }
@@ -63,5 +74,13 @@ export function registerSourceAnnotationsIPC(ipcMain: Pick<IpcMain, 'handle'>, d
     const source = webSource(selection, hash)
     if (source.source.url !== url.split(':~:text=')[0].replace(/#$/, '')) throw new Error('网页身份不一致')
     return (await dependencies.service()).annotate(source)
+  }))
+  ipcMain.handle('sourceAnnotations:webReading', (_event, raw: unknown) => reply(async () => {
+    const { tabId, revision, range } = z.object({ tabId: z.string().min(1), revision: z.string().min(1), range: RSSReadingRangeSchema }).strict().parse(raw)
+    // Read the page again rather than trust the words sent: the highlight is made from the article Main reads now.
+    const read = await dependencies.readTab(tabId)
+    if (!read.success) throw new Error(READ_REFUSAL[read.error])
+    if (read.data.article.revision !== revision) throw new Error('网页内容已变化，请重新选择')
+    return (await dependencies.service()).annotate(webReadingSource({ url: read.data.url, title: read.data.title, revision, markdown: read.data.text }, range))
   }))
 }
