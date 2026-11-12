@@ -101,7 +101,7 @@ test('an admission refusal (no usable model) stays on the card in plain words', 
   const action = useBrowserTaskWork.getState().actions['bt-1']
   assert.equal(action?.phase, 'refused')
   assert.match(action?.message ?? '', /模型配置无法使用/)
-  await requestBrowserTaskReread('poll')
+  await requestBrowserTaskReread('claims')
   assert.equal(useBrowserTaskWork.getState().actions['bt-1']?.phase, 'refused', 'the refusal stays while the need stands')
   assert.equal(s.acts.length, 1)
 })

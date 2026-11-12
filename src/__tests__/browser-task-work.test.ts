@@ -46,6 +46,7 @@ function stand(t: TestContext) {
     receipts: new Map<string, BrowserDownloadReceipt[]>(),
     attentionReads: [] as Array<{ scopeId: string; browserTaskId: string }>,
     lease: [] as Array<(snapshot: { claims?: Claim[] }) => void>,
+    scope: 'scope-a',
   }
   const listeners: Record<string, Array<(...args: unknown[]) => void>> = {}
   const on = (name: string) => (callback: (...args: unknown[]) => void) => {
@@ -60,12 +61,12 @@ function stand(t: TestContext) {
       onTabOpened: on('tabOpened'),
       onTabUpdate: on('tabUpdate'),
       onLeaseChanged: on('lease'),
-      onAgentControlChanged: on('control'),
     },
     agent: {
+      onBrowserTaskAttentionChanged: on('attention'),
       getBrowserTaskAttention: async (request: { scopeId: string; browserTaskId: string }) => {
         main.attentionReads.push(request)
-        return request.scopeId === 'scope-a' ? main.attention.get(request.browserTaskId) ?? null : null
+        return request.scopeId === main.scope ? main.attention.get(request.browserTaskId) ?? null : null
       },
       getTaskProjection: async () => ({ success: false }),
     },
@@ -156,10 +157,10 @@ test('a refusal stays while its need stands and goes when the need changes', asy
   main.attention.set('bt-1', attention('takeover'))
   await requestBrowserTaskReread('mount')
   setBrowserTaskAction('bt-1', { attentionId: 'att-1', phase: 'refused', message: '当前模型配置无法使用' })
-  await requestBrowserTaskReread('poll')
+  await requestBrowserTaskReread('claims')
   assert.equal(useBrowserTaskWork.getState().actions['bt-1']?.phase, 'refused')
   main.attention.set('bt-1', attention('takeover', 'tab-2', 'att-2'))
-  await requestBrowserTaskReread('poll')
+  await requestBrowserTaskReread('claims')
   assert.equal(useBrowserTaskWork.getState().actions['bt-1'], undefined)
 })
 
@@ -203,4 +204,26 @@ test('the task name is what the person asked, skipping the help inputs that only
   assert.equal(requestTextForRun(messages, 'run-x'), null)
   assert.equal(shortTaskTitle('  帮我调研三家印厂的报价\n要含运费'), '帮我调研三家印厂的报价')
   assert.equal(shortTaskTitle('一'.repeat(40)).length, 24)
+})
+
+test("Main's push names the task and its conversation: the need is read there, even for a task on no tab", async t => {
+  const { main, emit } = stand(t)
+  const uninstall = installBrowserTaskRereadTriggers()
+  t.after(uninstall)
+  await requestBrowserTaskReread('mount')
+  assert.deepEqual(Object.keys(useBrowserTaskWork.getState().tasks), [])
+  // A review rejected in another conversation, after the task's tabs were closed.
+  main.scope = 'scope-b'
+  main.attention.set('bt-7', { ...attention('review_rejected', null), browserTaskId: 'bt-7' })
+  emit('attention', { scopeId: 'scope-b', browserTaskId: 'bt-7' })
+  await requestBrowserTaskReread('attention', ['bt-7'])
+  const task = useBrowserTaskWork.getState().tasks['bt-7']
+  assert.equal(task?.attention?.reason, 'review_rejected')
+  assert.equal(task?.scopeId, 'scope-b')
+  assert.deepEqual(main.attentionReads.at(-1), { scopeId: 'scope-b', browserTaskId: 'bt-7' })
+  // Answered: the next push clears it and the task, having nothing left to show, is forgotten.
+  main.attention.set('bt-7', null)
+  emit('attention', { scopeId: 'scope-b', browserTaskId: 'bt-7' })
+  await requestBrowserTaskReread('attention', ['bt-7'])
+  assert.equal(useBrowserTaskWork.getState().tasks['bt-7'], undefined)
 })

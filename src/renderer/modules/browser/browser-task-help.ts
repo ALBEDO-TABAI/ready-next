@@ -100,8 +100,8 @@ export async function sendBrowserTaskHelp(browserTaskId: string): Promise<void> 
     if (event.originUserMessageId !== messageId) return
     admitted = true
     setBrowserTaskAction(browserTaskId, { attentionId: attention.id, phase: 'sent' })
+    // The need clears through Main's attention push; the conversation re-reads to show the new message.
     void useAgent.getState().loadScope(scopeId)
-    void requestBrowserTaskReread('acted', [browserTaskId])
   })
   try {
     const result = await agent.actOnBrowserTaskAttention({

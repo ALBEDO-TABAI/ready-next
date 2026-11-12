@@ -13,21 +13,19 @@ import { requestWorkbenchModeOpen } from '../workbench/mode-transition'
  * Main owns every fact; this store only mirrors what Main returns and never guesses a state Main did not report.
  *
  * When to re-read is decided in one place: every trigger calls requestBrowserTaskReread(reason). The triggers:
+ *   attention    Main's push agent:browserTaskAttentionChanged: a need was recorded or answered (the need itself)
  *   mount        the workbench opened
  *   tabs         a tab opened or closed (task tabs come and go)
- *   claims       the lease push shows a task holding or releasing a page (a run acts, or its run ended)
- *   run-ended    a run in the assistant finished
- *   takeover     the person took over a page
+ *   claims       the lease push shows a task holding or releasing a page (running, or its run ended)
+ *   run-ended    a run in the assistant finished (files it downloaded)
  *   card         a task card mounted
  *   tab-visible  a task's tab became the visible page
- *   acted        the help button's input was admitted, refused or finished
- *   poll         fallback while a task runs or a help input is in flight
- * When Main pushes agent:browserTaskAttentionChanged, subscribe to it in installBrowserTaskRereadTriggers below; it
- * replaces 'poll' and most of 'claims' / 'run-ended'.
+ *   acted        the help button's input was refused or finished
+ * Needs are never polled: the push names the task and its conversation, and the need is read from Main then.
  */
 
 export type BrowserTaskRereadReason =
-  | 'mount' | 'tabs' | 'claims' | 'run-ended' | 'takeover' | 'card' | 'tab-visible' | 'acted' | 'poll'
+  | 'attention' | 'mount' | 'tabs' | 'claims' | 'run-ended' | 'card' | 'tab-visible' | 'acted'
 
 export type BrowserTaskState = 'running' | 'needs_user' | 'done'
 export const BROWSER_TASK_STATE_LABEL: Record<BrowserTaskState, string> = {
@@ -140,6 +138,8 @@ type ClaimInfo = NonNullable<Awaited<ReturnType<BrowserApi['getAgentSupervisionS
 type RereadTarget = { all: boolean; ids: Set<string> }
 let draining: Promise<void> | null = null
 let queued: RereadTarget | null = null
+/** The conversation Main named for a task in its push: the need is read against it, even for a task on no tab. */
+const pushedScopes = new Map<string, string>()
 
 function mergeTargets(left: RereadTarget, right: RereadTarget): RereadTarget {
   if (left.all || right.all) return { all: true, ids: new Set() }
@@ -174,6 +174,7 @@ export function requestBrowserTaskReread(_reason: BrowserTaskRereadReason, ids?:
 export function resetBrowserTaskWorkForTest(): void {
   queued = null
   draining = null
+  pushedScopes.clear()
   useBrowserTaskWork.setState({ tasks: {}, actions: {}, activeRunIds: [] }, false)
 }
 
@@ -264,6 +265,7 @@ async function rereadOnce(target: RereadTarget): Promise<void> {
   for (const [id, prior] of Object.entries(previous)) {
     if (!next[id] && (prior.attention || prior.receipts.length > 0)) next[id] = { ...prior, tabIds: [], heldTabIds: [] }
   }
+  for (const [id, scopeId] of pushedScopes) touch(id).scopeId = scopeId
 
   const currentScopeId = useAgent.getState().currentScopeId
   const toRead = Object.keys(next).filter(id => target.all || target.ids.has(id) || !previous[id])
@@ -298,7 +300,7 @@ async function rereadOnce(target: RereadTarget): Promise<void> {
 
   for (const [id, task] of Object.entries(next)) {
     const keep = task.tabIds.length > 0 || task.heldTabIds.length > 0 || task.attention || task.receipts.length > 0
-    if (!keep) { delete next[id]; continue }
+    if (!keep) { delete next[id]; pushedScopes.delete(id); continue }
     if (!task.title) task.title = titleFromAgentStore(task)
   }
   const untitled = Object.values(next).filter(task => !task.title && task.parentTaskId)
@@ -345,8 +347,6 @@ function busyRunIds(): string[] {
   return [...ids].sort()
 }
 
-const POLL_MS = 4000
-
 /** Installs every re-read trigger; returns the cleanup. The workbench installs it once. */
 export function installBrowserTaskRereadTriggers(): () => void {
   const host = typeof window === 'undefined' ? null : window
@@ -376,8 +376,12 @@ export function installBrowserTaskRereadTriggers(): () => void {
     if (changed.length > 0) void requestBrowserTaskReread('claims')
   })
   if (offLease) cleanups.push(offLease)
-  const offControl = browser.onAgentControlChanged?.(() => { void requestBrowserTaskReread('takeover') })
-  if (offControl) cleanups.push(offControl)
+  // Main's push: a need was recorded (login, captcha, takeover, a rejected review) or answered.
+  const offAttention = host.electronAPI.agent?.onBrowserTaskAttentionChanged?.(({ scopeId, browserTaskId }) => {
+    pushedScopes.set(browserTaskId, scopeId)
+    void requestBrowserTaskReread('attention', [browserTaskId])
+  })
+  if (offAttention) cleanups.push(offAttention)
 
   // The assistant's runs: a finished run may have left a need or files behind.
   let runs = busyRunIds()
@@ -390,14 +394,6 @@ export function installBrowserTaskRereadTriggers(): () => void {
     useBrowserTaskWork.setState({ activeRunIds: current })
     if (ended.length > 0) void requestBrowserTaskReread('run-ended')
   }))
-
-  const poll = host.setInterval(() => {
-    const { tasks, actions, activeRunIds } = useBrowserTaskWork.getState()
-    const busy = Object.values(actions).some(action => action.phase !== 'refused')
-      || Object.values(tasks).some(task => browserTaskState(task, activeRunIds) === 'running')
-    if (busy) void requestBrowserTaskReread('poll')
-  }, POLL_MS)
-  cleanups.push(() => host.clearInterval(poll))
 
   return () => { for (const cleanup of cleanups.splice(0)) cleanup() }
 }
