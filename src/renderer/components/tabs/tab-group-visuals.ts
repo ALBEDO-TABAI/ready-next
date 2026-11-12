@@ -1,19 +1,32 @@
 import type { TabGroupColor } from '../../../shared/tab-groups'
 
-// Map the closed group-color set to existing --color-* CSS variables. Shared by the
-// document rail (P2) and the browser overlay (P3) so both surfaces read identically.
-// cyan/yellow/pink have no theme token yet — the hex fallbacks keep the nine swatches
-// DISTINCT (they used to alias blue/orange/red, collapsing the picker to six colors).
+// A tab group's colour is a colour the person gave their own content, so it comes from the user-content
+// palette (modules/document/content-palette.css, `--doc-<colour>-fg/-bg`, W1 §6), not from the interface
+// tokens. The palette has no cyan; it is the blue–green midpoint so the nine swatches stay distinct.
+// Shared by the browser's tab list and the group edit menu; TabGroupHeaderRow loads the palette.
 export const TAB_GROUP_COLOR_VAR: Record<TabGroupColor, string> = {
-  blue: 'var(--color-blue)',
-  cyan: 'var(--color-cyan, #23B8CE)',
-  green: 'var(--color-green)',
-  yellow: 'var(--color-yellow, #F0B429)',
-  orange: 'var(--color-orange)',
-  red: 'var(--color-red)',
-  pink: 'var(--color-pink, #EC6BA4)',
-  purple: 'var(--color-purple)',
-  gray: 'var(--text-gray)',
+  blue: 'var(--doc-blue-fg)',
+  cyan: 'color-mix(in srgb, var(--doc-blue-fg), var(--doc-green-fg))',
+  green: 'var(--doc-green-fg)',
+  yellow: 'var(--doc-yellow-fg)',
+  orange: 'var(--doc-orange-fg)',
+  red: 'var(--doc-red-fg)',
+  pink: 'var(--doc-pink-fg)',
+  purple: 'var(--doc-purple-fg)',
+  gray: 'var(--doc-gray-fg)',
+}
+
+// The quiet fill of each colour (the palette's tag background, light and dark).
+const TAB_GROUP_COLOR_BG: Record<TabGroupColor, string> = {
+  blue: 'var(--doc-blue-bg)',
+  cyan: 'color-mix(in srgb, var(--doc-blue-bg), var(--doc-green-bg))',
+  green: 'var(--doc-green-bg)',
+  yellow: 'var(--doc-yellow-bg)',
+  orange: 'var(--doc-orange-bg)',
+  red: 'var(--doc-red-bg)',
+  pink: 'var(--doc-pink-bg)',
+  purple: 'var(--doc-purple-bg)',
+  gray: 'var(--doc-gray-bg)',
 }
 
 export function tabGroupColorVar(color: TabGroupColor): string {
@@ -25,9 +38,14 @@ export function tabGroupColorSoft(color: TabGroupColor, percent = 12): string {
   return `color-mix(in srgb, ${tabGroupColorVar(color)} ${percent}%, transparent)`
 }
 
-// Text color that keeps contrast on a SOLID pill of the group color (Edge-style header).
+// The group header is a tag in its colour, the way the palette draws a database option: the colour's
+// quiet fill with the colour as text (readable in both themes, no white-on-yellow).
+export function tabGroupPillBackground(color: TabGroupColor): string {
+  return TAB_GROUP_COLOR_BG[color] ?? TAB_GROUP_COLOR_BG.blue
+}
+
 export function tabGroupPillTextColor(color: TabGroupColor): string {
-  return color === 'yellow' ? 'rgba(66, 47, 0, 0.92)' : '#FFFFFF'
+  return tabGroupColorVar(color)
 }
 
 // The two drop intents the file-tree-style drag resolves to.

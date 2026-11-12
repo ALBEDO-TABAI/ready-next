@@ -18,9 +18,11 @@ test('liquid workbench surfaces remove prominent borders and heavy highlights', 
   assert.match(styles, /--lg-border-strong: rgba\(252, 254, 255, 0\.28\);/)
   assert.match(styles, /--lg-shadow-ambient: 0 8px 18px rgba\(42, 60, 102, 0\.08\);/)
   assert.match(styles, /--lg-shadow-contact: 0 4px 12px rgba\(64, 86, 136, 0\.06\);/)
-  assert.match(styles, /html:root \.browser-header-surface,\s*html:root \.workbench-tabs-surface \{/)
-  assert.match(styles, /\.rss-mode-shell \.rss-feed-sheet \{[\s\S]*background:\s*var\(--workbench-module-surface-bg\) !important;/)
-  assert.match(styles, /backdrop-filter: blur\(24px\) saturate\(0%\) !important;/)
+  // B13 (W1 DL1, DL2, DL11a): the tab rows sit on the glass with no fill or blur; 资讯's content is paper. The browser's
+  // address bar keeps its chrome surface until the browser toolbar moves with its page frame.
+  assert.match(styles, /html:root \.workbench-tabs-surface \{\s*background:\s*transparent !important;\s*\}/)
+  assert.match(styles, /\.rss-mode-shell \.rss-feed-sheet \{[\s\S]*?background:\s*var\(--rn-sheet\) !important;/)
+  assert.match(styles, /html:root \.browser-header-surface \{[\s\S]*?backdrop-filter: blur\(24px\) saturate\(0%\) !important;/)
   assert.match(styles, /box-shadow: none !important;/)
 
   assert.match(topBar, /borderBottom: '1px solid transparent'/)

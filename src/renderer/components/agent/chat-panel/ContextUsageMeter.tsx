@@ -77,11 +77,12 @@ export function buildContextUsageMeterModel(
   }
 }
 
+// The meter sits in the composer, so its greys are the composer's inks (--rn-liquid-*); the tooltip is a float.
 function strokeForTone(tone: ContextUsageMeterModel['tone']): string {
-  if (tone === 'hard') return 'var(--color-red)'
-  if (tone === 'soft') return '#b98222'
-  if (tone === 'ok') return 'var(--text-gray)'
-  return 'color-mix(in srgb, var(--text-light) 72%, transparent)'
+  if (tone === 'hard') return 'var(--rn-bad)'
+  if (tone === 'soft') return 'var(--rn-warn)'
+  if (tone === 'ok') return 'var(--rn-liquid-ink-2)'
+  return 'color-mix(in srgb, var(--rn-liquid-ink-3) 72%, transparent)'
 }
 
 export function ContextUsageMeter({
@@ -118,6 +119,7 @@ export function ContextUsageMeter({
         data-ready-native-overlay=""
         data-agent-context-usage-tooltip="true"
         role="tooltip"
+        className="rn-float"
         style={{
           position: 'fixed',
           left: tooltipPosition.left,
@@ -128,12 +130,7 @@ export function ContextUsageMeter({
           maxWidth: 280,
           padding: '9px 12px 10px',
           borderRadius: 8,
-          border: '1px solid color-mix(in srgb, var(--border-default) 70%, transparent)',
-          background: 'color-mix(in srgb, var(--surface-card-bg) 92%, transparent)',
-          color: 'var(--text-body)',
-          boxShadow: '0 12px 32px color-mix(in srgb, #000 18%, transparent)',
-          backdropFilter: 'blur(16px) saturate(130%)',
-          WebkitBackdropFilter: 'blur(16px) saturate(130%)',
+          color: 'var(--rn-ink)',
           pointerEvents: 'none',
           whiteSpace: 'normal',
         }}
@@ -144,7 +141,7 @@ export function ContextUsageMeter({
             className={index === 1 ? 't-data' : 't-meta'}
             data-typography-role={index === 1 ? 'data' : 'meta'}
             style={{
-              color: index === 0 ? 'var(--text-body)' : index === 1 ? 'var(--text-body)' : 'var(--text-light)',
+              color: index === 0 ? 'var(--rn-ink)' : index === 1 ? 'var(--rn-ink)' : 'var(--rn-ink-3)',
               fontSize: index === 1 ? 14 : 11,
               fontWeight: index === 0 ? 650 : index === 1 ? 650 : 500,
               lineHeight: index === 1 ? 1.25 : 1.3,
@@ -196,7 +193,7 @@ export function ContextUsageMeter({
             cy="9"
             r={radius}
             fill="none"
-            stroke="color-mix(in srgb, var(--border-default) 66%, transparent)"
+            stroke="color-mix(in srgb, var(--rn-hair-2) 66%, transparent)"
             strokeWidth="2.4"
           />
           <circle

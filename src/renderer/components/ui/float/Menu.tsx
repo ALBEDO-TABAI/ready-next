@@ -42,7 +42,7 @@ export function MenuList({ items, label, onDone }: { items: MenuEntry[]; label?:
     }
   }
   // The list takes focus only to steer its items (the active item shows where the keys are), so it draws no ring of
-  // its own; inline like the float's, because the shell's unlayered :focus-visible ring would otherwise win.
+  // its own.
   return (
     <div ref={listRef} className="rn-menu" role="menu" aria-label={label} tabIndex={-1} data-autofocus onKeyDown={onKeyDown} style={{ outline: 'none' }}>
       {items.map((entry, index) => {

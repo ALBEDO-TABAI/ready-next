@@ -17,8 +17,10 @@ test('file tree offers a browser-style placeholder action menu for dropped brows
   assert.match(source, /label:\s*'内容学习'/)
   assert.match(source, /label:\s*'文案分析'/)
   assert.match(source, /label:\s*'视觉分析'/)
-  assert.match(source, /glass-surface-floating ready-floating-menu/)
-  assert.match(source, /ready-floating-menu-item/)
+  // B13: the drop menu is the shared menu list on the shared float material (W1 §5), not a private frosted menu.
+  assert.match(source, /<FloatPanel ref=\{ref\}/)
+  assert.match(source, /<MenuList items=\{entries\}/)
+  assert.doesNotMatch(source, /ready-floating-menu|floatingMenuStyles/)
 })
 
 test('browser tab drop menu clamps to the file panel boundary without resetting back to raw pointer coordinates', () => {
@@ -50,11 +52,10 @@ test('selected file rows use a brighter active surface instead of the generic ho
   const source = readWorkspaceFile('src/renderer/components/layout/file-tree/FileTreeItem.tsx')
 
   assert.doesNotMatch(source, /isActive \? \{ background: 'var\(--bg-hover\)' \} : \{\}/)
-  // 8ab48cd7 style(ui): checkpoint liquid glass polish — 行内 rgba(255,255,255,0.36) 收敛为共享 files-panel active 状态 token（含配套 shadow）
-  assert.match(
-    source,
-    /background: 'var\(--files-panel-state-active-bg\)',\s+boxShadow: 'var\(--files-panel-state-active-shadow\)',/,
-  )
+  // B13 (W1 §5, DL5): the selected row wears ListRow's current look — the signal colour's soft fill, its text in the accent.
+  assert.match(source, /\.\.\.\(isActive\s+\? \{\s+background: 'var\(--rn-accent-soft\)',/)
+  assert.match(source, /color: isActive \? 'var\(--rn-accent-text\)'/)
+  assert.match(source, /height: 'var\(--rn-row-h\)'/)
 })
 
 test('hovering unselected rows uses the intermediate bright state instead of the old dark hover wash', () => {
@@ -63,11 +64,8 @@ test('hovering unselected rows uses the intermediate bright state instead of the
 
   assert.doesNotMatch(source, /hover:bg-black\/5/)
   assert.match(source, /const \[isHovered,\s*setIsHovered\] = useState\(false\)/)
-  // 8ab48cd7 style(ui): checkpoint liquid glass polish — hover 亮面 rgba(255,255,255,0.28) 收敛为 files-panel hover 状态 token（含配套 shadow）
-  assert.match(
-    source,
-    /background: 'var\(--files-panel-state-hover-bg\)',\s+boxShadow: 'var\(--files-panel-state-hover-shadow\)',/,
-  )
+  // B13 (W1 §5): hover is ListRow's quiet fill.
+  assert.match(source, /!isActive && !isDropTarget && !isBrowserDropAccent && isHovered\s+\? \{\s+background: 'var\(--rn-fill\)',/)
 })
 
 test('browser tab drag affordances brighten the target row and render a thicker glowing insertion marker', () => {
@@ -75,8 +73,9 @@ test('browser tab drag affordances brighten the target row and render a thicker 
   const source = readWorkspaceFile('src/renderer/components/layout/file-tree/FileTreeItem.tsx')
 
   assert.match(source, /const isBrowserDropAccent = isBrowserDropInside \|\| Boolean\(browserDropLine\)/)
-  assert.match(source, /background: 'color-mix\(in srgb, rgba\(255,\s*255,\s*255,\s*0\.28\) 62%, var\(--color-blue-light\) 38%\)'/)
+  // B13: a drop target is "here" (DL5) — the signal colour's soft fill with an accent ring, as in the document tree.
+  assert.match(source, /isDropTarget \|\| isBrowserDropAccent\s+\? \{\s+background: 'var\(--rn-accent-soft\)',\s+boxShadow: 'inset 0 0 0 1\.5px var\(--rn-accent\)',/)
   assert.match(source, /height: 3,/)
   assert.match(source, /width: 8,/)
-  assert.match(source, /boxShadow: '0 0 0 2px rgba\(255,\s*255,\s*255,\s*0\.76\), 0 4px 12px rgba\(59,\s*130,\s*246,\s*0\.24\)'/)
+  assert.match(source, /boxShadow: '0 0 0 2px var\(--rn-sheet\)'/)
 })

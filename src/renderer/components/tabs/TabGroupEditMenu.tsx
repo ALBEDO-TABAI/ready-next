@@ -1,18 +1,21 @@
-import { useEffect, useRef, useState, type ComponentType, type CSSProperties } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { CircleX, Plus, Ungroup } from 'lucide-react'
 import type { TabGroup, TabGroupColor } from '../../../shared/tab-groups'
 import { TAB_GROUP_COLORS } from '../../../shared/tab-groups'
-import { tabGroupColorSoft, tabGroupColorVar } from './tab-group-visuals'
+import { tabGroupColorVar } from './tab-group-visuals'
+import { Input } from '../ui'
+// The swatches are user-content colours (see tab-group-visuals.ts).
+import '../../modules/document/content-palette.css'
 
 export const TAB_GROUP_EDIT_MENU_WIDTH = 220
-// Projected outer height (name + swatches + two dividers + three actions). Used by hosts
-// to reserve space (overlay window height floor / doc-rail flip-up estimate); a slight
-// overshoot is fine, an undershoot clips the menu.
-export const TAB_GROUP_EDIT_MENU_EST_HEIGHT = 192
+// Projected outer height (name + swatches + a divider + the menu's three actions with its own
+// separator). Used by hosts to reserve space; a slight overshoot is fine, an undershoot clips the menu.
+export const TAB_GROUP_EDIT_MENU_EST_HEIGHT = 200
 
-// Edge-style group edit menu CONTENT (name input, nine-color swatches, icon actions).
-// Hosts own the floating surface + positioning: the document rail portals it to <body>,
-// the browser overlay window absolutely positions it inside the child window.
+// Edge-style group edit menu CONTENT (name input, nine-color swatches, icon actions), drawn with
+// the shared primitives: the name is an Input, the actions are menu items (the menu primitive's
+// look), the swatches are the group's user-content colours. Hosts own the float surface
+// (`.rn-float`) and positioning.
 //
 // Rename commit semantics (P2/P3 review lineage): commit on Enter / blur, and once more
 // on UNMOUNT — on macOS clicking a <button> does not blur the input, so an action that
@@ -37,7 +40,6 @@ export default function TabGroupEditMenu({
   onRequestClose: () => void
 }) {
   const [name, setName] = useState(group.name)
-  const [nameFocused, setNameFocused] = useState(false)
   const lastCommittedRef = useRef(group.name)
   const nameRef = useRef(name)
   nameRef.current = name
@@ -55,28 +57,19 @@ export default function TabGroupEditMenu({
   return (
     <div className="flex flex-col" onClick={(event) => event.stopPropagation()}>
       <div className="flex flex-col gap-[8px]" style={{ padding: '10px 10px 9px' }}>
-        <input
+        <Input
           value={name}
           autoFocus
           spellCheck={false}
           placeholder="群组名称"
           onChange={(event) => setName(event.target.value)}
-          onFocus={() => setNameFocused(true)}
-          onBlur={() => { setNameFocused(false); commitName() }}
+          onBlur={commitName}
           onKeyDown={(event) => {
             if (event.key === 'Enter') { commitName(); onRequestClose() }
             if (event.key === 'Escape') onRequestClose()
           }}
-          className="w-full text-[12px] outline-none"
-          style={{
-            height: 30,
-            borderRadius: 8,
-            padding: '0 9px',
-            background: 'var(--bg-content)',
-            color: 'var(--text-title)',
-            border: `1px solid ${nameFocused ? tabGroupColorVar(group.color) : 'color-mix(in srgb, var(--text-title) 12%, transparent)'}`,
-            boxShadow: nameFocused ? `0 0 0 2.5px ${tabGroupColorSoft(group.color, 22)}` : 'none',
-          }}
+          className="w-full"
+          style={{ height: 30, padding: '0 9px', fontSize: 'var(--rn-fs-sm)' }}
         />
         <div className="flex items-center justify-between">
           {TAB_GROUP_COLORS.map((color) => {
@@ -103,44 +96,34 @@ export default function TabGroupEditMenu({
           })}
         </div>
       </div>
-      <MenuDivider />
-      <div className="flex flex-col" style={{ padding: 5 }}>
-        <MenuAction icon={Plus} label="群组中新建标签页" onClick={onNewTab} />
-        <MenuAction icon={Ungroup} label="取消群组" onClick={onDisband} />
-      </div>
-      <MenuDivider />
-      <div className="flex flex-col" style={{ padding: 5 }}>
-        <MenuAction icon={CircleX} label="关闭群组标签页" onClick={onDelete} danger />
+      <div aria-hidden className="rn-menu__sep" style={{ margin: 0 }} />
+      <div className="rn-menu" style={{ minWidth: 0 }}>
+        <MenuAction icon={<Plus aria-hidden="true" />} label="群组中新建标签页" onClick={onNewTab} />
+        <MenuAction icon={<Ungroup aria-hidden="true" />} label="取消群组" onClick={onDisband} />
+        <div aria-hidden className="rn-menu__sep" />
+        <MenuAction icon={<CircleX aria-hidden="true" />} label="关闭群组标签页" onClick={onDelete} danger />
       </div>
     </div>
   )
 }
 
-function MenuDivider() {
-  return <div aria-hidden style={{ height: 1, flexShrink: 0, background: 'color-mix(in srgb, var(--text-title) 8%, transparent)' }} />
-}
-
-function MenuAction({
-  icon: Icon,
-  label,
-  onClick,
-  danger,
-}: {
-  icon: ComponentType<{ style?: CSSProperties; strokeWidth?: number }>
-  label: string
-  onClick: () => void
-  danger?: boolean
-}) {
+// A menu item with the menu primitive's look (.rn-menu__item, highlighted under the pointer); mouse-down
+// keeps focus (and the IME caret) in the name input, so the pending name commits on unmount as before.
+function MenuAction({ icon, label, onClick, danger }: { icon: ReactNode; label: string; onClick: () => void; danger?: boolean }) {
+  const [hovered, setHovered] = useState(false)
   return (
     <button
       type="button"
       onMouseDown={(event) => event.preventDefault()}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       onClick={onClick}
-      className="flex items-center gap-[8px] rounded-[6px] text-left text-[12px] transition-colors hover:bg-[var(--bg-hover)]"
-      style={{ height: 28, padding: '0 7px', color: danger ? 'var(--color-red)' : 'var(--text-body)' }}
+      data-danger={danger || undefined}
+      data-highlighted={hovered || undefined}
+      className="rn-menu__item"
     >
-      <Icon style={{ width: 14, height: 14, flexShrink: 0, opacity: danger ? 1 : 0.72 }} strokeWidth={2} />
-      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {icon}
+      <span className="rn-menu__label">{label}</span>
     </button>
   )
 }

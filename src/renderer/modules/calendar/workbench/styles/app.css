@@ -15,7 +15,6 @@
    resets below every class rule of the calendar. */
 .ready-calendar :where(button:not([class*='rn-'])) { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: default; }
 .ready-calendar :where(input:not(.rn-field), textarea:not(.rn-field)) { font: inherit; color: inherit; }
-.ready-calendar :where(button:not([class*='rn-'])):focus-visible { outline: 1.5px solid var(--rn-ink-3); outline-offset: 1px; }
 .ready-calendar .tnum { font-variant-numeric: tabular-nums; }
 
 /* ---------- shell: the grid and the event panel are two sheets, --rn-s2 apart (DL2, DL11) ---------- */
@@ -281,9 +280,6 @@
 .ready-calendar .ready-calendar-agenda { display: block; width: 100%; padding: var(--rn-s1) 0; font-size: var(--rn-fs-md); text-align: left; }
 .ready-calendar .ready-calendar-agenda small { color: var(--rn-ink-3); font-size: var(--rn-fs-xs); }
 
-/* A field shows its own focus (the shared field's inked edge, or its row's fill); the shell's global accent outline
-   (base-chrome.css :focus-visible) is not drawn on top of it. */
-.ready-calendar .rn-field:focus-visible, .calendar-settings .rn-field:focus-visible, [class*='cal-'] .rn-field:focus-visible { outline: none; }
 
 /* ---------- floats (app float layer, outside .ready-calendar) ---------- */
 .cal-menu { min-width: 200px; }

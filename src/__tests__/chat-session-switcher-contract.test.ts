@@ -15,8 +15,9 @@ test('chat header opens one source/history switcher from the title and source bu
   assert.match(chatHeader, /data-chat-session-switcher="true"/)
   assert.match(chatHeader, /data-chat-session-menu="true"/)
   assert.match(chatHeader, /data-chat-session-title="true"/)
-  assert.match(chatHeader, /data-chat-session-title="true"[\s\S]*color: 'var\(--text-body\)'/)
-  assert.match(chatHeader, /data-chat-session-title="true"[\s\S]*width:\s*'100%'[\s\S]*WebkitMaskImage: 'linear-gradient\(to right, #000 calc\(100% - 28px\), transparent 100%\)'/)
+  // W1-T5 (B13): the title is ink (--rn-ink); the fade mask is alpha only (black → transparent).
+  assert.match(chatHeader, /data-chat-session-title="true"[\s\S]*color: 'var\(--rn-ink\)'/)
+  assert.match(chatHeader, /data-chat-session-title="true"[\s\S]*width:\s*'100%'[\s\S]*WebkitMaskImage: 'linear-gradient\(to right, black calc\(100% - 28px\), transparent 100%\)'/)
   assert.match(chatHeader, /title="会话来源"/)
   assert.match(chatHeader, /MessageSquare/)
   assert.match(chatHeader, /ChevronRight/)
@@ -48,7 +49,7 @@ test('chat header opens one source/history switcher from the title and source bu
   // right (mask gradient) rather than wrapping/clamping to two lines.
   assert.doesNotMatch(chatHeader, /WebkitLineClamp/)
   assert.doesNotMatch(chatHeader, /WebkitBoxOrient/)
-  assert.match(chatHeader, /maskImage: 'linear-gradient\(to right, #000 calc\(100% - 24px\), transparent 100%\)'/)
+  assert.match(chatHeader, /maskImage: 'linear-gradient\(to right, black calc\(100% - 24px\), transparent 100%\)'/)
   // Each row carries a status dot (color-keyed) left of the title and a
   // "更多" menu (rename/delete) replacing the bare delete button.
   assert.match(chatHeader, /SESSION_DOT_COLOR\[dotStatus\]/)

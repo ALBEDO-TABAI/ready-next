@@ -92,8 +92,8 @@ export default function MeetingChat({ onFileDrop }: MeetingChatProps) {
       className="flex-shrink-0 flex flex-col"
       style={{
         width: 420,
-        background: 'var(--bg-content)',
-        borderRight: '1px solid var(--border-default)',
+        // The conversation is a region on the window glass (DL1): no background of its own, a hairline to its right.
+        borderRight: '1px solid var(--rn-hair)',
         position: 'relative'
       }}
       onDragOver={handleDragOver}
@@ -105,8 +105,9 @@ export default function MeetingChat({ onFileDrop }: MeetingChatProps) {
         <div
           style={{
             position: 'absolute', inset: 0, zIndex: 20,
-            background: 'rgba(52,211,153,0.08)',
-            border: '2px dashed var(--color-green)',
+            // The drop target is "here" (DL5): the signal colour, as the document tree marks its drop targets.
+            background: 'color-mix(in srgb, var(--rn-accent) 8%, transparent)',
+            border: '2px dashed var(--rn-accent)',
             borderRadius: 8,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             pointerEvents: 'none'
@@ -114,9 +115,9 @@ export default function MeetingChat({ onFileDrop }: MeetingChatProps) {
         >
           <div style={{
             padding: '12px 24px', borderRadius: 12,
-            background: 'var(--bg-primary)',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-            fontSize: 13, fontWeight: 500, color: 'var(--color-green)'
+            background: 'var(--rn-sheet)',
+            boxShadow: 'var(--rn-shadow-2)',
+            fontSize: 13, fontWeight: 500, color: 'var(--rn-accent-text)'
           }}>
             拖放文件到此处添加附件
           </div>
@@ -128,10 +129,10 @@ export default function MeetingChat({ onFileDrop }: MeetingChatProps) {
         className="flex items-center justify-between flex-shrink-0"
         style={{
           padding: '10px 16px',
-          borderBottom: '1px solid var(--border-default)'
+          borderBottom: '1px solid var(--rn-hair)'
         }}
       >
-        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-title)' }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--rn-ink)' }}>
           Ready 对话
         </span>
       </div>
@@ -144,10 +145,10 @@ export default function MeetingChat({ onFileDrop }: MeetingChatProps) {
       >
         {/* Welcome */}
         <div className="text-center" style={{ padding: '32px 16px' }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-title)', marginBottom: 8 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--rn-ink)', marginBottom: 8 }}>
             Ready 已准备就绪
           </div>
-          <div style={{ fontSize: 12, color: '#8A8A8A', lineHeight: '1.6' }}>
+          <div style={{ fontSize: 12, color: 'var(--rn-ink-2)', lineHeight: '1.6' }}>
             任务进展与产物会显示在这里。
             <br />
             你也可以拖入文件作为当前任务的附件。
@@ -163,8 +164,8 @@ export default function MeetingChat({ onFileDrop }: MeetingChatProps) {
                 <span
                   style={{
                     fontSize: 11,
-                    color: 'var(--text-light)',
-                    background: 'var(--bg-panel)',
+                    color: 'var(--rn-ink-3)',
+                    background: 'var(--rn-fill)',
                     padding: '4px 12px',
                     borderRadius: 8,
                     maxWidth: '80%',
@@ -183,17 +184,17 @@ export default function MeetingChat({ onFileDrop }: MeetingChatProps) {
               <div key={msg.id} className="flex justify-end">
                 <div style={{ maxWidth: '75%' }}>
                   <div className="flex items-center justify-end" style={{ gap: 8, marginBottom: 4 }}>
-                    <span style={{ fontSize: 10, color: '#999999' }}>
+                    <span style={{ fontSize: 10, color: 'var(--rn-ink-3)' }}>
                       {msg.timestamp.toLocaleTimeString()}
                     </span>
-                    <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-title)' }}>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--rn-ink)' }}>
                       我
                     </span>
                   </div>
                   <div
                     style={{
-                      fontSize: 12, color: 'var(--color-blue)', lineHeight: '1.5',
-                      background: 'var(--color-blue-light)',
+                      fontSize: 12, color: 'var(--rn-ink)', lineHeight: '1.5',
+                      background: 'var(--rn-fill-2)',
                       borderRadius: '12px 4px 12px 12px',
                       padding: '8px 12px',
                       wordBreak: 'break-word'
@@ -214,7 +215,7 @@ export default function MeetingChat({ onFileDrop }: MeetingChatProps) {
                 style={{
                   width: 28, height: 28,
                   borderRadius: 8,
-                  background: '#E8E8E8',
+                  background: 'var(--rn-fill-2)',
                   marginTop: 2
                 }}
               >
@@ -224,18 +225,18 @@ export default function MeetingChat({ onFileDrop }: MeetingChatProps) {
               </div>
               <div className="flex-1 min-w-0" style={{ maxWidth: '75%' }}>
                 <div className="flex items-center" style={{ gap: 8, marginBottom: 4 }}>
-                  <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-title)' }}>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--rn-ink)' }}>
                     Ready
                   </span>
-                  <span style={{ fontSize: 10, color: '#999999' }}>
+                  <span style={{ fontSize: 10, color: 'var(--rn-ink-3)' }}>
                     {msg.timestamp.toLocaleTimeString()}
                   </span>
                 </div>
                 <div
                   style={{
-                    fontSize: 12, color: 'var(--text-body)', lineHeight: '1.5',
-                    background: 'var(--bg-primary)',
-                    border: '1px solid var(--border-default)',
+                    fontSize: 12, color: 'var(--rn-ink)', lineHeight: '1.5',
+                    background: 'var(--rn-sheet)',
+                    border: '1px solid var(--rn-hair-2)',
                     borderRadius: '4px 12px 12px 12px',
                     padding: '8px 12px',
                     wordBreak: 'break-word',
@@ -257,7 +258,7 @@ export default function MeetingChat({ onFileDrop }: MeetingChatProps) {
               style={{
                 width: 28, height: 28,
                 borderRadius: 8,
-                background: '#E8E8E8'
+                background: 'var(--rn-fill-2)'
               }}
             >
               <span style={{ fontSize: 12 }}>{'\u{1F916}'}</span>
@@ -266,23 +267,23 @@ export default function MeetingChat({ onFileDrop }: MeetingChatProps) {
               className="flex items-center"
               style={{
                 gap: 4,
-                background: 'var(--bg-primary)',
-                border: '1px solid var(--border-default)',
+                background: 'var(--rn-sheet)',
+                border: '1px solid var(--rn-hair-2)',
                 borderRadius: 12,
                 padding: '8px 14px'
               }}
             >
               <span
                 className="animate-pulse"
-                style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--text-light)', display: 'inline-block' }}
+                style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--rn-ink-3)', display: 'inline-block' }}
               />
               <span
                 className="animate-pulse"
-                style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--text-light)', display: 'inline-block', animationDelay: '0.15s' }}
+                style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--rn-ink-3)', display: 'inline-block', animationDelay: '0.15s' }}
               />
               <span
                 className="animate-pulse"
-                style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--text-light)', display: 'inline-block', animationDelay: '0.3s' }}
+                style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--rn-ink-3)', display: 'inline-block', animationDelay: '0.3s' }}
               />
             </div>
           </div>

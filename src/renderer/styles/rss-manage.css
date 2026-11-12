@@ -278,11 +278,6 @@
   box-shadow: var(--rn-card-shadow);
 }
 
-.rss-settings-choice:focus-visible {
-  outline: 1.5px solid var(--rn-ink-3);
-  outline-offset: 1px;
-}
-
 .rss-settings-choice span {
   display: block;
   overflow: hidden;
@@ -611,10 +606,6 @@
   opacity: 0.55;
 }
 
-.rss-add-source__preset:focus-visible {
-  outline: 1.5px solid var(--rn-ink-3);
-  outline-offset: 1px;
-}
 
 .rss-add-source__preset-icon {
   display: grid;

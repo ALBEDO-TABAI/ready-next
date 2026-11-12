@@ -10,7 +10,7 @@ const CHAT_BOTTOM_SAFETY_MARGIN_PX = 12
 // view back down. 96px ≈ one short message of slack so小幅 overshoot still counts.
 const CHAT_STICK_TO_BOTTOM_THRESHOLD_PX = 96
 import { Copy, Check, FilePlus2, MoreHorizontal, RotateCcw, Shapes } from 'lucide-react'
-import { anchorOf, openMenu } from '../ui'
+import { anchorOf, IconButton, openMenu } from '../ui'
 import { answerCapture } from '../../modules/agent/answer-capture'
 import { receiveAnswerAsPage, receiveToCanvas, reportCaptureError } from '../../modules/workbench/capture-receipt'
 import type { AgentMessage, AgentArtifact, ChatAttachment, ToolTraceEvent } from '../../stores/useAgent'
@@ -55,6 +55,9 @@ function openAnswerMenu(element: HTMLElement, message: AgentMessage) {
 // parks the first message below that chrome without using mask-image, which is
 // unstable with transparent vibrancy windows on Chromium 148.
 const CHAT_SCROLL_TOP_FADE = 38
+// The reply's hover actions keep their 18px footprint (the reply reserves room for them on its right).
+const MESSAGE_ACTION_SIZE: React.CSSProperties = { width: 18, height: 18 }
+const MESSAGE_ACTION_ICON: React.CSSProperties = { width: 12, height: 12 }
 interface ChatMessagesProps {
   messages: AgentMessage[]
   contextBoundaries: CodexConversationContextBoundary[]
@@ -319,7 +322,7 @@ export default function ChatMessages({
                   className="ready-chat-user-message max-w-[85%] t-body"
                   data-typography-role="body"
                   style={{
-                    color: 'var(--text-body)',
+                    color: 'var(--rn-ink)',
                     display: 'flex',
                     flexDirection: 'column',
                     alignItems: 'flex-end',
@@ -365,8 +368,8 @@ export default function ChatMessages({
                           style={{
                             padding: '5px 8px',
                             border: '1px solid transparent',
-                            fontSize: 'var(--text-sm)',
-                            color: 'var(--text-body)',
+                            fontSize: 'var(--rn-fs-xs)',
+                            color: 'var(--rn-ink)',
                             maxWidth: att.source === 'document-quote' ? 220 : 180,
                             cursor: !displayState || unlocatable || displayError ? 'default' : 'pointer',
                           }}
@@ -381,7 +384,7 @@ export default function ChatMessages({
                                 height: 24,
                                 objectFit: 'cover',
                                 borderRadius: 6,
-                                border: '1px solid var(--border-default)',
+                                border: '1px solid var(--rn-hair-2)',
                                 flexShrink: 0,
                               }}
                             />
@@ -402,12 +405,12 @@ export default function ChatMessages({
                             {metaSummary ? (
                               <span
                                 style={{
-                                  fontSize: 'var(--text-xs)',
-                                  lineHeight: 'var(--leading-tight)',
+                                  fontSize: 'var(--rn-fs-2xs)',
+                                  lineHeight: 1.2,
                                   padding: '2px 6px',
                                   borderRadius: 999,
-                                  background: 'rgba(0,0,0,0.05)',
-                                  color: 'var(--text-light)',
+                                  background: 'var(--rn-fill)',
+                                  color: 'var(--rn-ink-3)',
                                   maxWidth: '100%',
                                   overflow: 'hidden',
                                   textOverflow: 'ellipsis',
@@ -443,8 +446,8 @@ export default function ChatMessages({
                   style={{
                     padding: '6px 10px',
                     borderRadius: 8,
-                    background: 'color-mix(in srgb, var(--color-red) 10%, transparent)',
-                    color: 'var(--color-red)',
+                    background: 'color-mix(in srgb, var(--rn-bad) 10%, transparent)',
+                    color: 'var(--rn-bad)',
                   }}
                 >
                   {msg.content}
@@ -453,7 +456,7 @@ export default function ChatMessages({
                 <div
                   className="group/agentmsg relative max-w-[90%] t-body"
                   data-typography-role="body"
-                  style={{ color: 'var(--text-body)', /* room for the hover row: 复制回复 and 收下这段回答 */ paddingRight: msg.content?.trim() && !isStreamingMessage ? 40 : 18 }}
+                  style={{ color: 'var(--rn-ink)', /* room for the hover row: 复制回复 and 收下这段回答 */ paddingRight: msg.content?.trim() && !isStreamingMessage ? 40 : 18 }}
                   onContextMenu={(event) => {
                     const selectedText = window.getSelection()?.toString()?.trim() || ''
                     if (!selectedText) return
@@ -462,7 +465,7 @@ export default function ChatMessages({
                     onAgentSelectionContextMenu?.(event, selectedText)
                   }}
                 >
-                  <div className="t-body" data-typography-role="body" style={{ color: 'var(--text-body)' }}>
+                  <div className="t-body" data-typography-role="body" style={{ color: 'var(--rn-ink)' }}>
                     {renderMarkdown(msg.content, isStreamingMessage)}
                   </div>
                   {generatedImages.length > 0 ? (
@@ -485,59 +488,37 @@ export default function ChatMessages({
                       }}
                     >
                       {retryRunId && onRetryProductTurn ? (
-                        <button
-                          type="button"
+                        <IconButton
+                          size="sm"
+                          icon={<RotateCcw style={MESSAGE_ACTION_ICON} />}
                           onClick={() => { void onRetryProductTurn(retryRunId) }}
-                          className="flex items-center justify-center"
-                          style={{
-                            width: 18, height: 18, borderRadius: 8,
-                            border: '1px solid var(--border-default)',
-                            color: 'var(--text-light)', background: 'var(--surface-card-bg)',
-                          }}
+                          style={MESSAGE_ACTION_SIZE}
                           title="从已保留的结果继续重试"
                           aria-label="再试一次"
-                        >
-                          <RotateCcw style={{ width: 12, height: 12 }} strokeWidth={2} />
-                        </button>
+                        />
                       ) : null}
                       {msg.content?.trim() ? (
-                        <button
-                          type="button"
+                        <IconButton
+                          size="sm"
+                          icon={copiedMessageId === msg.id
+                            ? <Check style={MESSAGE_ACTION_ICON} />
+                            : <Copy style={MESSAGE_ACTION_ICON} />}
                           onClick={() => { void onCopyMessage(msg.id, msg.content) }}
-                          className="flex items-center justify-center"
-                          style={{
-                            width: 18, height: 18, borderRadius: 8,
-                            border: '1px solid var(--border-default)',
-                            color: copiedMessageId === msg.id ? 'var(--color-green)' : 'var(--text-light)',
-                            background: copiedMessageId === msg.id
-                              ? 'color-mix(in srgb, var(--color-green) 10%, transparent)'
-                              : 'var(--surface-card-bg)',
-                          }}
+                          style={copiedMessageId === msg.id
+                            ? { ...MESSAGE_ACTION_SIZE, color: 'var(--rn-ok)', background: 'color-mix(in srgb, var(--rn-ok) 12%, transparent)' }
+                            : MESSAGE_ACTION_SIZE}
                           title={copiedMessageId === msg.id ? '已复制' : '复制回复'}
-                        >
-                          {copiedMessageId === msg.id ? (
-                            <Check style={{ width: 12, height: 12 }} strokeWidth={2} />
-                          ) : (
-                            <Copy style={{ width: 12, height: 12 }} strokeWidth={2} />
-                          )}
-                        </button>
+                        />
                       ) : null}
                       {msg.content?.trim() && !isStreamingMessage ? (
-                        <button
-                          type="button"
+                        <IconButton
+                          size="sm"
+                          icon={<MoreHorizontal style={MESSAGE_ACTION_ICON} />}
                           onClick={(event) => openAnswerMenu(event.currentTarget, msg)}
-                          className="flex items-center justify-center"
-                          style={{
-                            width: 18, height: 18, borderRadius: 8,
-                            border: '1px solid var(--border-default)',
-                            color: 'var(--text-light)', background: 'var(--surface-card-bg)',
-                          }}
+                          style={MESSAGE_ACTION_SIZE}
                           title="收下这段回答"
-                          aria-label="收下这段回答"
                           aria-haspopup="menu"
-                        >
-                          <MoreHorizontal style={{ width: 12, height: 12 }} strokeWidth={2} />
-                        </button>
+                        />
                       ) : null}
                     </div>
                   )}

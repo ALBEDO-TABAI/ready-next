@@ -36,7 +36,7 @@ export default function FastCardResultPanel({
     : state.description || (state.status === 'loading' ? '生成中…' : state.error || '')
 
   return (
-    <aside className="browser-fastcard-drawer browser-fastcard-surface content-surface-panel ready-app-liquid-panel is-entered" aria-label={title}>
+    <aside className="browser-fastcard-drawer browser-fastcard-surface content-surface-panel ready-app-liquid-panel rn-float is-entered" aria-label={title}>
       <header className="browser-fastcard-header">
         <div className="browser-fastcard-title-row">
           {icon}

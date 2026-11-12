@@ -249,7 +249,3 @@
 @layer ready-next.primitives {
   .rn-float-panel__content { position: relative; }
 }
-
-/* A field draws its own focus (the sheet and an ink edge, above). Unlayered on purpose: the shell's unlayered
-   :focus-visible ring would otherwise add a second, signal-coloured ring around every focused field. */
-.rn-field:focus-visible { outline: none; }

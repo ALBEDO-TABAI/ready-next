@@ -32,19 +32,22 @@ export const GLOBAL_SEARCH_DIMENSIONS = {
   bodyPaddingYBottom: 10,
 } as const
 
+// Shell side-panel colours on Ready's design system (W1 §3, DL1/DL5/DL6): panels are regions on the window
+// glass (no background of their own), text uses the four ink levels, and the old blue accent is ink — the
+// signal colour is reserved for "here / now" and is chosen where it is used, not here.
 export const PANEL_TOKENS = {
-  panelBg: 'var(--lg-content-bg, var(--surface-panel-bg))',
-  border: 'var(--lg-content-border, var(--surface-border))',
-  title: 'var(--text-title)',
-  sectionTitle: 'var(--text-secondary)',
-  text: 'var(--text-body)',
-  muted: 'var(--text-muted)',
-  mutedStrong: 'var(--text-light)',
-  placeholder: 'var(--text-placeholder)',
-  cardBg: 'var(--lg-content-card-bg, var(--surface-card-bg))',
-  inputBorder: 'var(--border-input)',
-  dropBorder: 'var(--lg-content-border, var(--surface-border))',
-  iconAccent: 'var(--text-muted)',
-  blue: 'var(--color-blue)',
-  blueLight: 'var(--color-blue-light)',
+  panelBg: 'transparent',
+  border: 'var(--rn-hair-2)',
+  title: 'var(--rn-ink)',
+  sectionTitle: 'var(--rn-ink-2)',
+  text: 'var(--rn-ink)',
+  muted: 'var(--rn-ink-2)',
+  mutedStrong: 'var(--rn-ink-3)',
+  placeholder: 'var(--rn-ink-3)',
+  cardBg: 'var(--rn-fill)',
+  inputBorder: 'var(--rn-hair-2)',
+  dropBorder: 'var(--rn-hair-2)',
+  iconAccent: 'var(--rn-ink-2)',
+  blue: 'var(--rn-ink-2)',
+  blueLight: 'var(--rn-fill-2)',
 } as const

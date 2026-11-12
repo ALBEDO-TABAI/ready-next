@@ -26,12 +26,9 @@
   left: 50%;
   transform: translateX(-50%);
   width: 3px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--text-gray) 28%, transparent);
-  box-shadow:
-    inset 1px 0 0 color-mix(in srgb, rgba(255, 255, 255, 0.28) 65%, transparent),
-    inset -1px 0 0 color-mix(in srgb, rgba(15, 23, 42, 0.18) 65%, transparent);
-  transition: background 0.15s, opacity 0.15s;
+  border-radius: var(--rn-r-pill);
+  background: var(--rn-hair-2);
+  transition: background var(--rn-d-1), opacity var(--rn-d-1);
   opacity: 0;
 }
 
@@ -46,7 +43,7 @@
 
 .resize-handle:hover::before,
 .resize-handle.active::before {
-  background: color-mix(in srgb, var(--text-gray) 38%, transparent);
+  background: var(--rn-ink-4);
   opacity: 0.94;
 }
 
@@ -85,8 +82,8 @@
 .workbench-split-resize-handle__grip span {
   width: 2px;
   height: 2px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--text-gray) 46%, transparent);
+  border-radius: var(--rn-r-pill);
+  background: color-mix(in srgb, var(--rn-ink-3) 46%, transparent);
 }
 
 .workbench-split-resize-handle:hover .workbench-split-resize-handle__grip,
@@ -114,7 +111,7 @@ body.resizing .workbench-split-resize-handle__grip {
   left: 50%;
   width: 1px;
   transform: translateX(-50%);
-  background: color-mix(in srgb, var(--text-gray) 22%, transparent);
+  background: color-mix(in srgb, var(--rn-ink-3) 22%, transparent);
   opacity: 0.62;
   transition: background 0.15s, opacity 0.15s;
 }
@@ -127,7 +124,7 @@ body.resizing .workbench-split-resize-handle__grip {
   height: 18px;
   transform: translate(-50%, -50%);
   opacity: 0;
-  background-image: radial-gradient(circle, color-mix(in srgb, var(--text-gray) 34%, transparent) 0 1px, transparent 1.2px);
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--rn-ink-3) 34%, transparent) 0 1px, transparent 1.2px);
   background-repeat: repeat-y;
   background-position: center;
   background-size: 2px 7px;
@@ -135,7 +132,7 @@ body.resizing .workbench-split-resize-handle__grip {
 }
 
 .document-split-resize-handle:hover::before {
-  background: color-mix(in srgb, var(--text-gray) 30%, transparent);
+  background: color-mix(in srgb, var(--rn-ink-3) 30%, transparent);
   opacity: 0.78;
 }
 
@@ -153,12 +150,10 @@ body.resizing .workbench-split-resize-handle__grip {
   inset: 8px;
   z-index: 9;
   pointer-events: none;
-  border: 1px solid color-mix(in srgb, var(--color-blue) 72%, rgba(255,255,255,0.38));
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--color-blue-light) 38%, transparent);
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, rgba(255,255,255,0.72) 58%, transparent),
-    0 10px 28px rgba(59,130,246,0.12);
+  /* Where the drop will land, while dragging: the signal colour's "here" (DL5). */
+  border: 1.5px solid color-mix(in srgb, var(--rn-accent) 72%, transparent);
+  border-radius: var(--rn-r-md);
+  background: color-mix(in srgb, var(--rn-accent-soft) 38%, transparent);
   opacity: 0;
   transition: opacity 0.12s ease-out;
 }
@@ -177,6 +172,8 @@ body.resizing .workbench-split-resize-handle__grip {
   background: transparent;
 }
 
+/* Fills the gap between two browser panes at the height of their address bars (see the browser header note in
+   workbench-surfaces.css); goes with that bar when the browser toolbar moves to the glass. */
 .browser-split-resize-handle::before {
   content: '';
   position: absolute;
@@ -200,9 +197,9 @@ body.resizing .workbench-split-resize-handle__grip {
   height: 22px;
   transform: translate(-50%, -50%);
   opacity: 0;
-  background: color-mix(in srgb, var(--text-gray) 56%, transparent);
-  border-radius: 999px;
-  transition: opacity 0.15s;
+  background: color-mix(in srgb, var(--rn-ink-3) 56%, transparent);
+  border-radius: var(--rn-r-pill);
+  transition: opacity var(--rn-d-1);
   display: none;
 }
 
@@ -240,10 +237,10 @@ body.resizing .browser-split-resize-handle__grip {
 }
 
 .browser-fastcard-surface {
-  background: var(--bg-content) !important;
-  border-left: 1px solid color-mix(in srgb, var(--text-gray) 16%, transparent) !important;
-  border-radius: var(--workbench-canvas-radius) 0 0 var(--workbench-canvas-radius);
-  box-shadow: -18px 0 44px -20px rgba(8, 12, 22, 0.24) !important;
+  background: var(--rn-sheet) !important;
+  border-left: 1px solid var(--rn-hair-2) !important;
+  border-radius: var(--rn-r-float) 0 0 var(--rn-r-float);
+  box-shadow: var(--rn-shadow-3) !important;
   overflow: hidden;
 }
 
@@ -254,12 +251,12 @@ body.resizing .browser-split-resize-handle__grip {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  border-bottom: 1px solid color-mix(in srgb, var(--text-gray) 12%, transparent);
+  border-bottom: 1px solid var(--rn-hair);
 }
 
 .browser-fastcard-header h2 {
   margin: 0;
-  color: var(--text-primary);
+  color: var(--rn-ink);
   font-size: 14px;
   line-height: 1.25;
   font-weight: 600;
@@ -275,18 +272,18 @@ body.resizing .browser-split-resize-handle__grip {
   width: 28px;
   height: 28px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--rn-r-control);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--text-gray);
+  color: var(--rn-ink-2);
   background: transparent;
-  transition: background 150ms ease, color 150ms ease;
+  transition: background-color var(--rn-d-1), color var(--rn-d-1);
 }
 
 .browser-fastcard-icon-button:hover {
-  color: var(--text-primary);
-  background: color-mix(in srgb, var(--text-gray) 10%, transparent);
+  color: var(--rn-ink);
+  background: var(--rn-fill-2);
 }
 
 .browser-fastcard-result-body {
@@ -301,13 +298,13 @@ body.resizing .browser-split-resize-handle__grip {
 }
 
 .browser-fastcard-result-body::-webkit-scrollbar-thumb {
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--text-gray) 18%, transparent);
+  border-radius: var(--rn-r-pill);
+  background: var(--rn-fill-3);
 }
 
 .browser-fastcard-result-body p {
   margin: 8px 0 0;
-  color: var(--text-secondary);
+  color: var(--rn-ink-2);
   font-size: 12px;
   line-height: 1.55;
   overflow-wrap: anywhere;
@@ -315,10 +312,9 @@ body.resizing .browser-split-resize-handle__grip {
 }
 
 .browser-fastcard-result-body section {
-  border: 1px solid color-mix(in srgb, var(--text-gray) 12%, transparent);
-  border-radius: 8px;
+  border: 1px solid var(--rn-hair);
+  border-radius: var(--rn-r-control);
   padding: 10px;
-  background: color-mix(in srgb, var(--bg-secondary) 72%, transparent);
 }
 
 .browser-fastcard-result-body section + section,
@@ -327,12 +323,12 @@ body.resizing .browser-split-resize-handle__grip {
 }
 
 .browser-fastcard-result-body section.is-error p {
-  color: var(--color-red);
+  color: var(--rn-bad);
 }
 
 .browser-fastcard-result-body h3 {
   margin: 0;
-  color: var(--text-light);
+  color: var(--rn-ink-3);
   font-size: 11px;
   font-weight: 600;
 }
@@ -340,17 +336,16 @@ body.resizing .browser-split-resize-handle__grip {
 .browser-fastcard-field {
   display: grid;
   gap: 6px;
-  color: var(--text-light);
+  color: var(--rn-ink-3);
   font-size: 11px;
 }
 
 .browser-fastcard-field select {
   height: 30px;
-  border: 1px solid color-mix(in srgb, var(--text-gray) 14%, transparent);
-  border-radius: 8px;
+  border: 1px solid var(--rn-hair-2);
+  border-radius: var(--rn-r-control);
   padding: 0 8px;
-  color: var(--text-primary);
-  background: var(--bg-secondary);
+  color: var(--rn-ink);
   outline: none;
 }
 
@@ -359,30 +354,24 @@ body.resizing .browser-split-resize-handle__grip {
   flex-wrap: wrap;
   gap: 8px;
   padding: 12px;
-  border-top: 1px solid color-mix(in srgb, var(--text-gray) 12%, transparent);
+  border-top: 1px solid var(--rn-hair);
 }
 
 .browser-fastcard-action {
   min-height: 30px;
-  border: 1px solid color-mix(in srgb, var(--text-gray) 14%, transparent);
-  border-radius: 8px;
+  border: 1px solid var(--rn-hair-2);
+  border-radius: var(--rn-r-control);
   padding: 0 10px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: var(--text-primary);
-  background: color-mix(in srgb, var(--bg-secondary) 86%, transparent);
+  color: var(--rn-ink);
   font-size: 12px;
-  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
-}
-
-.browser-fastcard-action:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--text-gray) 22%, transparent);
-  background: color-mix(in srgb, var(--bg-secondary) 100%, transparent);
+  transition: background-color var(--rn-d-1), border-color var(--rn-d-1), color var(--rn-d-1);
 }
 
 .browser-fastcard-action.subtle {
-  color: var(--text-gray);
+  color: var(--rn-ink-3);
 }
 
 .browser-fastcard-action:disabled {
@@ -420,8 +409,148 @@ html[data-browser-agent-pointer-window='true'] #root {
 }
 
 .browser-fastcard-overlay-root .browser-fastcard-surface {
-  border-radius: var(--workbench-canvas-radius);
-  border: 1px solid color-mix(in srgb, var(--text-gray) 14%, transparent) !important;
+  border-radius: var(--rn-r-float);
+  border: 0 !important;
+}
+
+/* 快记 (the global quick note, its own opaque frameless window): one sheet that fills the window; the title row
+   drags the window. */
+.fastcard-quick-note {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rn-s3);
+  height: 100vh;
+  padding: var(--rn-s4);
+  background: var(--rn-sheet);
+  color: var(--rn-ink);
+  font: 400 var(--rn-fs-md)/var(--rn-lh) var(--rn-font-ui);
+}
+
+.fastcard-quick-note__title {
+  margin: 0;
+  padding-bottom: var(--rn-s1);
+  font: 600 var(--rn-fs-lg)/1.3 var(--rn-font-ui);
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+.fastcard-quick-note__text {
+  flex: 1;
+  min-height: 96px;
+  resize: none;
+}
+
+.fastcard-quick-note__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rn-s2);
+}
+
+.fastcard-quick-note__footer {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.fastcard-quick-note__status {
+  margin: 0;
+  color: var(--rn-ink-2);
+  font-size: var(--rn-fs-sm);
+}
+
+.fastcard-quick-note__status[role='alert'] {
+  color: var(--rn-bad);
+}
+
+/* The browser lock band (its own transparent window over the native page, W7): a float-coloured strip; the agent at
+   work is the one "now" (DL5), a page waiting on the person is a warning. */
+.browser-lock-overlay {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 12px;
+  border-radius: var(--rn-r-lg);
+  background: var(--rn-float);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--browser-lock-tone) 42%, transparent);
+  color: var(--rn-ink);
+  font-family: var(--rn-font-ui);
+  overflow: hidden;
+  --browser-lock-tone: var(--rn-accent);
+}
+
+.browser-lock-overlay[data-tone='warning'] {
+  --browser-lock-tone: var(--rn-warn);
+}
+
+.browser-lock-overlay__icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--rn-r-control);
+  background: color-mix(in srgb, var(--browser-lock-tone) 13%, transparent);
+  color: var(--browser-lock-tone);
+}
+
+.browser-lock-overlay__icon svg {
+  width: 17px;
+  height: 17px;
+}
+
+.browser-lock-overlay__label,
+.browser-lock-overlay__detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browser-lock-overlay__label {
+  font: 600 var(--rn-fs-sm)/1.15 var(--rn-font-ui);
+}
+
+.browser-lock-overlay__detail {
+  margin-top: 3px;
+  font: 400 var(--rn-fs-xs)/1.2 var(--rn-font-ui);
+  color: var(--rn-ink-2);
+}
+
+/* The agent's pointer over the native page (W7): the assistant at work, so the signal colour. */
+.browser-agent-pointer__ring {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  border: 2px solid color-mix(in srgb, var(--rn-accent) 55%, transparent);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--rn-accent) 6%, transparent);
+  box-shadow: 0 0 0 5px color-mix(in srgb, var(--rn-accent) 8%, transparent), var(--rn-shadow-2);
+  transform: translate(-50%, -50%);
+  transition: left 90ms linear, top 90ms linear, width 90ms ease, height 90ms ease;
+}
+
+.browser-agent-pointer__ring[data-pressed='true'] {
+  width: 34px;
+  height: 34px;
+  border-color: color-mix(in srgb, var(--rn-accent) 90%, transparent);
+  background: color-mix(in srgb, var(--rn-accent) 14%, transparent);
+}
+
+.browser-agent-pointer__label {
+  position: absolute;
+  padding: 3px 7px;
+  border-radius: var(--rn-r-pill);
+  background: var(--rn-inverse);
+  color: var(--rn-on-inverse);
+  font: 600 var(--rn-fs-2xs)/1.2 var(--rn-font-ui);
+  box-shadow: var(--rn-shadow-2);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .browser-agent-pointer__ring {
+    transition: none;
+  }
 }
 
 /* Disable layout-related transitions during panel resize drag.

@@ -105,7 +105,7 @@ function MainAppShell() {
   return (
     <ErrorBoundary>
       <AgentRuntimeListenerRoot />
-      <div className="ready-app-shell h-screen w-screen flex flex-col bg-[var(--bg-primary)] overflow-hidden">
+      <div className="ready-app-shell h-screen w-screen flex flex-col overflow-hidden">
         <div className="ready-app-bg" aria-hidden="true" />
         <div className="ready-theme-ritual-tint" aria-hidden="true" />
         <div className="ready-app-content h-full min-h-0 flex flex-col">
@@ -162,7 +162,7 @@ function MainAppShell() {
         <div
           role="status"
           aria-live="polite"
-          className="glass-surface-floating"
+          className="rn-float"
           style={{
             position: 'fixed',
             top: 12,
@@ -170,9 +170,9 @@ function MainAppShell() {
             zIndex: 100000,
             maxWidth: 'min(560px, calc(100vw - 180px))',
             transform: 'translateX(-50%)',
-            borderRadius: 10,
+            borderRadius: 'var(--rn-r-md)',
             padding: '8px 14px',
-            color: captureFeedback.kind === 'success' ? 'var(--success, #218358)' : 'var(--danger, #c0392b)',
+            color: captureFeedback.kind === 'success' ? 'var(--rn-ok)' : 'var(--rn-bad)',
             fontSize: 12,
             fontWeight: 600,
             lineHeight: 1.4,

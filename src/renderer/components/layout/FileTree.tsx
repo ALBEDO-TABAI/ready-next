@@ -10,7 +10,7 @@ import {
   IconPhoto as Image,
   IconPlus as Plus,
 } from '@tabler/icons-react'
-import Modal from '../ui/Modal'
+import { Button, EmptyState, IconButton } from '../ui'
 import { computeDesiredRoots, useWorkspace, type FileItem } from '../../stores/useWorkspace'
 import { normalizeFileAppearanceIcon } from '../../stores/fileAppearance'
 import { isImagePreviewPath, useDocTabs } from '../../stores/useDocTabs'
@@ -86,6 +86,7 @@ import { GridItemCard } from './file-tree/GridItemCard'
 import { FileTreeRecursive } from './file-tree/FileTreeRecursive'
 import { mapAnalysisJobToPlaceholderPatch, isActiveAnalysisStatus, isTrackedAnalysisPlaceholder, analysisPlaceholderTerminalDelay, buildAnalysisJobKey, type PendingClipPlaceholder } from './file-tree/pending-placeholder-model'
 import { FileColorPalette, FileTreeExternalDropMenu, ContextMenuBridge, type FileAppearanceColorMenuState, type FileTreeExternalDropMenuState } from './file-tree/floating-menus'
+import { confirmFileTreeRemoval, promptFileIcon, type FileTreeRemovalRequest } from './file-tree/dialogs'
 import { isActiveReadyBoardTab } from './file-tree/ready-board-tab'
 import {
   endGeneratedImageDrag,
@@ -149,12 +150,6 @@ export default function FileTree({
 
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: FileItem | null } | null>(null)
   const [colorMenu, setColorMenu] = useState<FileAppearanceColorMenuState | null>(null)
-  const [iconPromptItem, setIconPromptItem] = useState<FileItem | null>(null)
-  const [pendingDelete, setPendingDelete] = useState<
-    | { kind: 'fs'; targets: FileTreeDeleteTarget[] }
-    | { kind: 'unpin'; path: string; name: string }
-    | null
-  >(null)
   const [externalDropMenu, setExternalDropMenu] = useState<FileTreeExternalDropMenuState | null>(null)
   const [flashingTargetPath, setFlashingTargetPath] = useState<string | null>(null)
   const flashClearTimerRef = useRef<number | null>(null)
@@ -1232,10 +1227,7 @@ export default function FileTree({
         return (
           <>
             {emergenceNode}
-            <div className="flex flex-col items-center justify-center py-12 px-4 text-[var(--text-light)]">
-              <FileText style={{ width: 28, height: 28 }} className="mb-2 opacity-40" strokeWidth={1.5} />
-              <span className="text-[12px] text-[var(--text-muted)]">没有匹配当前筛选的文件</span>
-            </div>
+            <EmptyState icon={<FileText />} title="没有匹配当前筛选的文件" />
           </>
         )
       }
@@ -1347,18 +1339,12 @@ export default function FileTree({
       return (
         <>
           {emergenceNode}
-          <div className="flex flex-col items-center justify-center py-12 px-4 text-[var(--text-light)]">
-            <FolderOpen style={{ width: 32, height: 32 }} className="mb-3 opacity-40" strokeWidth={1.5} />
-            <span style={{ fontSize: 15, fontWeight: 600 }} className="text-[var(--text-muted)] mb-1">还没有打开的文件夹</span>
-            <span style={{ fontSize: 13 }} className="text-[var(--text-light)] mb-4 text-center">拖入文件夹或点击下方按钮打开</span>
-            <button
-              onClick={openFolderDialog}
-              className="ready-glass-button text-[13px]"
-            >
-              <FolderOpen style={{ width: 14, height: 14 }} strokeWidth={2} />
-              打开文件夹
-            </button>
-          </div>
+          <EmptyState
+            icon={<FolderOpen />}
+            title="还没有打开的文件夹"
+            body="拖入文件夹或点击下方按钮打开"
+            action={<Button icon={<FolderOpen />} onClick={openFolderDialog}>打开文件夹</Button>}
+          />
         </>
       )
     }
@@ -1554,10 +1540,7 @@ export default function FileTree({
   const renderGridContent = () => {
     if (gridItems.length === 0 && !creatingType) {
       return (
-        <div className="flex flex-col items-center justify-center py-10 px-4 text-[var(--text-light)]">
-          <Image style={{ width: 30, height: 30 }} className="mb-2 opacity-40" strokeWidth={1.5} />
-          <span className="text-[12px] text-[var(--text-muted)]">当前目录没有匹配文件</span>
-        </div>
+        <EmptyState icon={<Image />} title="当前目录没有匹配文件" />
       )
     }
 
@@ -1566,7 +1549,7 @@ export default function FileTree({
         {/* Grid navigation bar */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, minHeight: 24 }}>
           {gridDisplayPath && (
-            <span style={{ fontSize: 11, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={effectiveGridPath || ''}>
+            <span style={{ fontSize: 11, color: 'var(--rn-ink-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={effectiveGridPath || ''}>
               {gridDisplayPath}
             </span>
           )}
@@ -1574,24 +1557,11 @@ export default function FileTree({
           {/* Thumbnail size controls */}
           {onThumbnailSizeChange && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-              <button
-                onClick={() => onThumbnailSizeChange(Math.max(80, thumbnailSize - 20))}
-                title="缩小缩略图"
-                style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  width: 18, height: 18, borderRadius: 4,
-                  color: 'var(--text-placeholder)', cursor: 'pointer',
-                  background: 'transparent',
-                  border: 'none',
-                }}
-              >
-                <Minus style={{ width: 11, height: 11 }} />
-              </button>
+              <IconButton size="sm" title="缩小缩略图" icon={<Minus />} onClick={() => onThumbnailSizeChange(Math.max(80, thumbnailSize - 20))} />
               <div
                 style={{
                   position: 'relative', width: 56, height: 6, borderRadius: 4,
-                  background: 'var(--files-panel-state-hover-bg)',
-                  boxShadow: 'var(--files-panel-state-hover-shadow)',
+                  background: 'var(--rn-fill-2)',
                   cursor: 'pointer',
                 }}
                 onMouseDown={(e) => {
@@ -1616,7 +1586,7 @@ export default function FileTree({
                   style={{
                     position: 'absolute', left: 0, top: 0, height: '100%', borderRadius: 4,
                     width: `${((thumbnailSize - 80) / 140) * 100}%`,
-                    background: 'var(--text-light)',
+                    background: 'var(--rn-ink-3)',
                   }}
                 />
                 <div
@@ -1625,25 +1595,12 @@ export default function FileTree({
                     left: `${((thumbnailSize - 80) / 140) * 100}%`,
                     transform: 'translate(-50%, -50%)',
                     width: 10, height: 10, borderRadius: '50%',
-                    background: 'var(--bg-primary)',
-                    boxShadow: 'var(--shadow-sm)',
-                    border: '1px solid var(--border-default)',
+                    background: 'var(--rn-sheet)',
+                    boxShadow: 'var(--rn-shadow-1), inset 0 0 0 1px var(--rn-hair-2)',
                   }}
                 />
               </div>
-              <button
-                onClick={() => onThumbnailSizeChange(Math.min(220, thumbnailSize + 20))}
-                title="放大缩略图"
-                style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  width: 18, height: 18, borderRadius: 4,
-                  color: 'var(--text-placeholder)', cursor: 'pointer',
-                  background: 'transparent',
-                  border: 'none',
-                }}
-              >
-                <Plus style={{ width: 11, height: 11 }} />
-              </button>
+              <IconButton size="sm" title="放大缩略图" icon={<Plus />} onClick={() => onThumbnailSizeChange(Math.min(220, thumbnailSize + 20))} />
             </div>
           )}
         </div>
@@ -1654,21 +1611,16 @@ export default function FileTree({
         >
           {creatingType && creatingPath === gridContainerPath && (
             <div
-              className="content-surface-card rounded-[8px] border"
-              style={{
-                padding: '8px 8px 10px',
-                borderColor: 'var(--files-panel-state-active-border)',
-                background: 'var(--files-panel-state-active-bg)',
-                boxShadow: 'var(--files-panel-state-active-shadow)',
-              }}
+              className="rounded-[8px] border border-transparent"
+              style={{ padding: '8px 8px 10px', background: 'var(--rn-fill)' }}
             >
               <div
-                className="rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-content)] flex items-center justify-center"
-                style={{ height: Math.max(52, Math.round(thumbnailSize * 0.62)) }}
+                className="rounded-[8px] flex items-center justify-center"
+                style={{ height: Math.max(52, Math.round(thumbnailSize * 0.62)), background: 'var(--rn-sheet)', boxShadow: 'var(--rn-card-shadow)' }}
               >
                 {creatingType === 'folder'
-                  ? <Folder className="w-[16px] h-[16px]" style={{ color: 'var(--text-muted)' }} />
-                  : <FileText className="w-[16px] h-[16px]" style={{ color: 'var(--text-muted)' }} />}
+                  ? <Folder className="w-[16px] h-[16px]" style={{ color: 'var(--rn-ink-3)' }} strokeWidth={1.5} />
+                  : <FileText className="w-[16px] h-[16px]" style={{ color: 'var(--rn-ink-3)' }} strokeWidth={1.5} />}
               </div>
               <div className="mt-2 px-1">
                 <InlineInput
@@ -1736,6 +1688,33 @@ export default function FileTree({
     )
   }
 
+  // Removing asks first on the shared dialog; the store is read again after the answer.
+  const requestRemoval = async (pendingDelete: FileTreeRemovalRequest) => {
+    if (!(await confirmFileTreeRemoval(pendingDelete))) return
+    if (pendingDelete.kind === 'fs') {
+      const targets = pendingDelete.targets
+      for (const target of targets) {
+        await deleteItem(target.path)
+      }
+      setSelectedPaths(new Set())
+      selectionAnchorPathRef.current = null
+      selectFile(null)
+      return
+    }
+    const { pinnedFolders, workspaceRoot } = useWorkspace.getState()
+    const nextPinnedFolders = pinnedFolders.filter((folderPath) => folderPath !== pendingDelete.path)
+    if (pendingDelete.path === workspaceRoot) {
+      if (nextPinnedFolders.length > 0) loadSavedWorkspace(nextPinnedFolders)
+      else clearWorkspace()
+    } else {
+      removePinnedFolder(pendingDelete.path)
+    }
+  }
+  const requestFileIcon = async (item: FileItem) => {
+    const value = await promptFileIcon(fileAppearances[item.path]?.icon ?? '')
+    if (value !== null) setFileIcon(item.path, normalizeFileAppearanceIcon(value) ?? null)
+  }
+
   return (
     <div
       ref={treeRootRef}
@@ -1750,10 +1729,10 @@ export default function FileTree({
       onMouseLeave={scheduleFileTreeSurfaceRefresh}
     >
       {isDragOver && (
-        <div className="absolute inset-0 z-10 flex items-center justify-center bg-[var(--color-blue-light)] border-2 border-dashed border-[var(--color-blue)] rounded-lg m-1 pointer-events-none">
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-[var(--rn-accent-soft)] border-2 border-dashed border-[var(--rn-accent)] rounded-lg m-1 pointer-events-none">
           <div className="flex flex-col items-center gap-1">
-            <FolderOpen className="w-6 h-6 text-[var(--color-blue)]" />
-            <span className="text-[12px] font-medium text-[var(--color-blue)]">拖放文件到这里</span>
+            <FolderOpen className="w-6 h-6 text-[var(--rn-accent-text)]" strokeWidth={1.5} />
+            <span className="text-[12px] font-medium text-[var(--rn-accent-text)]">拖放文件到这里</span>
           </div>
         </div>
       )}
@@ -1762,16 +1741,11 @@ export default function FileTree({
 
       {moveNotice && (
         <div
-          className="pointer-events-none absolute inset-x-3 bottom-3 z-20 flex items-center gap-2 rounded-[10px] px-3 py-2"
-          style={{
-            background: 'color-mix(in srgb, var(--bg-primary) 88%, rgba(0,0,0,0.06))',
-            border: '1px solid color-mix(in srgb, var(--color-amber, #E9A23B) 42%, transparent)',
-            boxShadow: '0 6px 20px rgba(0,0,0,0.14)',
-            color: 'var(--text-title)',
-          }}
+          className="rn-float pointer-events-none absolute inset-x-3 bottom-3 z-20 flex items-center gap-2 px-3 py-2"
+          style={{ color: 'var(--rn-ink)' }}
           role="status"
         >
-          <AlertTriangle className="w-[14px] h-[14px] flex-shrink-0" style={{ color: 'var(--color-amber, #E9A23B)' }} />
+          <AlertTriangle className="w-[14px] h-[14px] flex-shrink-0" style={{ color: 'var(--rn-warn)' }} />
           <span className="text-[12px] leading-snug">{moveNotice}</span>
         </div>
       )}
@@ -1785,11 +1759,11 @@ export default function FileTree({
           onCreateBoard={handleCreateBoard}
           selectedDeleteTargets={selectedDeleteTargets}
           selectedMoveItems={selectedMoveItems}
-          onRequestDelete={(targets) => setPendingDelete({ kind: 'fs', targets })}
-          onRequestUnpin={({ path, name }) => setPendingDelete({ kind: 'unpin', path, name })}
+          onRequestDelete={(targets) => { void requestRemoval({ kind: 'fs', targets }) }}
+          onRequestUnpin={({ path, name }) => { void requestRemoval({ kind: 'unpin', path, name }) }}
           workspaceRoot={workspaceRoot}
           onOpenColorMenu={(item, x, y) => setColorMenu({ item, x, y })}
-          onOpenIconPrompt={(item) => setIconPromptItem(item)}
+          onOpenIconPrompt={(item) => { void requestFileIcon(item) }}
           extraItems={contextExtras}
         />
       )}
@@ -1806,74 +1780,6 @@ export default function FileTree({
           onClose={() => setColorMenu(null)}
         />
       )}
-
-      <Modal
-        open={pendingDelete !== null}
-        mode="confirm"
-        danger
-        dimBackdrop={false}
-        title={pendingDelete?.kind === 'unpin'
-          ? '从列表中移除'
-          : pendingDelete && pendingDelete.targets.length > 1
-            ? `删除 ${pendingDelete.targets.length} 项`
-            : '删除文件'}
-        message={
-          pendingDelete?.kind === 'unpin'
-            ? `确定从文件管理列表里移除 "${pendingDelete.name}" 吗？不会删除磁盘上的实际文件夹。`
-            : pendingDelete
-              ? pendingDelete.targets.length > 1
-                ? `确定删除选中的 ${pendingDelete.targets.length} 项吗？此操作不可恢复。`
-                : `确定删除 "${pendingDelete.targets[0]?.name || '所选项目'}" 吗？此操作不可恢复。`
-              : ''
-        }
-        confirmLabel={pendingDelete?.kind === 'unpin'
-          ? '移除'
-          : '删除'}
-        cancelLabel="取消"
-        onConfirm={() => {
-          if (!pendingDelete) return
-          if (pendingDelete.kind === 'fs') {
-            const targets = pendingDelete.targets
-            void (async () => {
-              for (const target of targets) {
-                await deleteItem(target.path)
-              }
-              setSelectedPaths(new Set())
-              selectionAnchorPathRef.current = null
-              selectFile(null)
-            })()
-          } else {
-            const nextPinnedFolders = pinnedFolders.filter((folderPath) => folderPath !== pendingDelete.path)
-            if (pendingDelete.path === workspaceRoot) {
-              if (nextPinnedFolders.length > 0) loadSavedWorkspace(nextPinnedFolders)
-              else clearWorkspace()
-            } else {
-              removePinnedFolder(pendingDelete.path)
-            }
-          }
-          setPendingDelete(null)
-        }}
-        onCancel={() => setPendingDelete(null)}
-      />
-
-      <Modal
-        open={iconPromptItem !== null}
-        mode="prompt"
-        dimBackdrop={false}
-        title="自定图标"
-        message="输入一个表情符号或短文字。"
-        defaultValue={iconPromptItem ? fileAppearances[iconPromptItem.path]?.icon ?? '' : ''}
-        placeholder="📁"
-        confirmLabel="应用"
-        cancelLabel="取消"
-        onConfirm={(value) => {
-          if (iconPromptItem) {
-            setFileIcon(iconPromptItem.path, normalizeFileAppearanceIcon(value) ?? null)
-          }
-          setIconPromptItem(null)
-        }}
-        onCancel={() => setIconPromptItem(null)}
-      />
 
       {externalDropMenu && (
         <FileTreeExternalDropMenu

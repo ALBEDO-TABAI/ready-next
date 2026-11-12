@@ -10,15 +10,14 @@ function readWorkspaceFile(path: string): string {
 
 test('dark liquid chrome removes the old top-edge glow from shared panel surfaces', () => {
   const styles = readRendererStyles()
-  const panelBlock = styles.match(/html\[data-theme='dark'\]:root \.glass-surface-panel\s*\{([\s\S]*?)\n\}/)
-  const cardBlock = styles.match(/html\[data-theme='dark'\]:root \.glass-surface-card\s*\{([\s\S]*?)\n\}/)
-
-  assert.match(styles, /html\[data-theme='dark'\]:root \.glass-surface-panel\s*\{/)
+  // B13: the legacy panel/card surfaces are token-only regions on the glass; no theme needs its own patch rule.
+  const panelBlock = styles.match(/\n\.glass-surface-panel\s*\{([\s\S]*?)\n\}/)
+  const cardBlock = styles.match(/\n\.glass-surface-card\s*\{([\s\S]*?)\n\}/)
   assert.ok(panelBlock)
   assert.ok(cardBlock)
-  assert.doesNotMatch(panelBlock[1], /radial-gradient\(/)
-  assert.doesNotMatch(panelBlock[1], /linear-gradient\(180deg,\s*color-mix\(in srgb,\s*var\(--lg-specular-top\)/)
-  assert.doesNotMatch(cardBlock[1], /radial-gradient\(/)
+  assert.doesNotMatch(styles, /html\[data-theme='dark'\]:root \.glass-surface-(?:panel|card)\s*\{/)
+  assert.doesNotMatch(panelBlock[1], /gradient\(|backdrop-filter/)
+  assert.doesNotMatch(cardBlock[1], /gradient\(|backdrop-filter/)
 })
 
 test('the shared sidebar identifies its mode and stays transparent on the window glass', () => {

@@ -1,89 +1,48 @@
-/* ═══ flat-chrome.css — 扁平化 chrome 带（隐藏横向边框/统一表面 token/非液态皮肤对齐）；由 index.css 序保拆分（2026-07-06），在 index.css 中按原段落顺序 @import，勿改导入次序。 ═══ */
-/* ============================================
-   UI OPTIMIZATION: Clean Visual Hierarchy
-   ============================================ */
+/* ═══ flat-chrome.css — 扁平 chrome：模块外框（纸）、侧栏与助手的宽度过渡、浮动面板（FastCard 结果、附件预览、关系图谱）；由 index.css 序保拆分（2026-07-06），在 index.css 中按原段落顺序 @import，勿改导入次序。只用 --rn-*（W1 DS1）。 ═══ */
 
-/* Hide all horizontal borders (border-bottom) */
+/* Regions on the glass are divided by space, not lines (W1 DL1): inline horizontal and vertical borders that older
+   markup still writes stay invisible. */
 [style*="border-bottom"],
 [class*="border-bottom"],
-.workbench-toolbar-row,
 .glass-surface-panel,
-.workbench-panel,
 .drag-region {
-  border-bottom-color: var(--border-horizontal) !important;
+  border-bottom-color: transparent !important;
 }
 
-/* Make vertical borders subtle (border-right, border-left) */
 [style*="border-right"],
 [style*="border-left"],
 [class*="border-right"],
 [class*="border-left"] {
-  border-right-color: var(--border-vertical) !important;
-  border-left-color: var(--border-vertical) !important;
-}
-
-.resize-handle::before {
-  background: var(--border-vertical) !important;
-}
-
-/* Override surface tokens for unified look */
-
-/* Keep main content areas aligned with the shared light-beige module surface for non-liquid skins */
-
-.workbench-canvas-shell {
-  min-height: 0;
-  border-radius: var(--workbench-canvas-radius);
-  overflow: hidden;
-  background: var(--surface-panel-bg);
-  border: 1px solid var(--workbench-canvas-border);
-  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.03);
-}
-
-html:root .workbench-canvas-shell,
-html:root .workbench-content,
-html:root .workbench-mode-root {
-  background: transparent !important;
-}
-
-html:root .workbench-canvas-shell {
-  border-color: transparent !important;
-  box-shadow: none !important;
-}
-
-html:root .rss-mode-shell .workbench-canvas-shell {
-  border-color: transparent !important;
-  box-shadow: none !important;
-}
-
-html:root [style*="border-right"],
-html:root [style*="border-left"],
-html:root [class*="border-right"],
-html:root [class*="border-left"] {
   border-right-color: transparent !important;
   border-left-color: transparent !important;
+}
+
+/* A mode's outer frame: a clip with the paper's radius; the paper itself is the module's own surface. */
+.workbench-canvas-shell {
+  min-height: 0;
+  border-radius: var(--rn-r-sheet);
+  overflow: hidden;
+  background: transparent !important;
+  border: 1px solid transparent;
+  box-shadow: none;
 }
 
 .workbench-canvas-shell > * {
   min-height: 0;
 }
 
-[data-workbench-transition-role='entering'] .workbench-canvas-shell,
-[data-workbench-transition-role='leaving'] .workbench-canvas-shell {
-  box-shadow: none !important;
-  border-color: transparent !important;
-}
-
 .workbench-panel-frame {
-  border-radius: var(--workbench-canvas-radius);
+  border-radius: var(--rn-r-sheet);
   overflow: hidden;
   border: 1px solid transparent;
 }
 
+/* 180ms is WORKBENCH_PANEL_MOTION_DURATION_MS (modules/workbench/panel-motion.ts): the web view's bounds follow it. */
 [data-liquid-shell='side-panel'],
 [data-liquid-shell='chat-panel'] {
   transition:
-    width 180ms cubic-bezier(0.22, 1, 0.36, 1),
-    min-width 180ms cubic-bezier(0.22, 1, 0.36, 1);
+    width 180ms var(--rn-ease-out),
+    min-width 180ms var(--rn-ease-out);
 }
 
 [data-panel-width-transition='instant'] [data-liquid-shell='side-panel'],
@@ -103,489 +62,49 @@ body.resizing [data-liquid-shell='chat-panel'] {
   }
 }
 
-html:root .calendar-mode-shell .workbench-canvas-shell {
-  background: var(--calendar-canvas-bg) !important;
-  border: 1px solid var(--calendar-canvas-border) !important;
-  box-shadow: none !important;
-}
-
-html[data-theme='dark']:root .calendar-mode-shell .workbench-canvas-shell {
-  background: var(--calendar-canvas-bg) !important;
-  border-color: var(--calendar-canvas-border) !important;
-  box-shadow: none !important;
-}
-
-.calendar-timezone-dock {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  margin-top: 14px;
-  padding-top: 12px;
-  border-top: 1px solid color-mix(in srgb, var(--surface-border) 54%, transparent);
-  color: var(--text-muted);
-  font-size: 11px;
-  font-weight: 500;
-}
-
-.calendar-toolbar-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  -webkit-app-region: no-drag;
-}
-
-.calendar-create-button,
-.calendar-toolbar-button,
-.calendar-icon-button {
-  height: 28px;
-  border: 0;
-  background: transparent;
-  color: var(--text-body);
-  cursor: pointer;
-  transition:
-    background 160ms ease,
-    color 160ms ease,
-    opacity 160ms ease,
-    transform 160ms ease;
-  -webkit-app-region: no-drag;
-}
-
-.calendar-create-button:hover,
-.calendar-toolbar-button:hover,
-.calendar-icon-button:hover {
-  background: var(--calendar-control-bg-hover);
-  color: var(--text-title);
-  transform: translateY(-1px);
-}
-
-.calendar-create-button:active,
-.calendar-toolbar-button:active,
-.calendar-icon-button:active {
-  transform: translateY(0);
-}
-
-.calendar-create-button:focus-visible,
-.calendar-toolbar-button:focus-visible,
-.calendar-icon-button:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-blue) 18%, transparent);
-}
-
-.calendar-create-button {
-  width: 28px;
-  padding: 0;
-  border-radius: 8px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.calendar-toolbar-button {
-  padding: 0 12px;
-  border-radius: 8px;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.calendar-icon-button {
-  width: 28px;
-  padding: 0;
-  border-radius: 8px;
-  color: var(--text-light);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.calendar-assistant-toggle.is-active,
-.calendar-view-segment button.is-active {
-  background: var(--calendar-control-bg-active);
-  color: var(--color-blue);
-}
-
-.calendar-view-segment {
-  display: inline-flex;
-  align-items: center;
-  height: 28px;
-  padding: 2px;
-  border-radius: 8px;
-  border: 0;
-  background: color-mix(in srgb, var(--calendar-control-bg) 76%, transparent);
-  -webkit-app-region: no-drag;
-}
-
-.calendar-view-segment button {
-  width: 30px;
-  height: 22px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition:
-    background 160ms ease,
-    color 160ms ease;
-  -webkit-app-region: no-drag;
-}
-
-.calendar-view-segment button:hover {
-  background: var(--calendar-control-bg-hover);
-  color: var(--text-title);
-}
-
-.calendar-timezone-dock > .calendar-timezone-selector > button {
-  width: 100%;
-  justify-content: flex-start;
-  background: var(--calendar-control-bg) !important;
-  border-color: var(--calendar-control-border) !important;
-  border-radius: 8px !important;
-  max-width: none !important;
-  -webkit-app-region: no-drag;
-}
-
-.calendar-assistant-drawer {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 34;
-  width: min(360px, calc(100% - 96px));
-  min-width: 320px;
-  display: flex;
-  flex-direction: column;
-  opacity: 0;
-  transform: translateX(12px);
-  pointer-events: none;
-  transition:
-    opacity 240ms cubic-bezier(0.22, 0.61, 0.36, 1),
-    transform 240ms cubic-bezier(0.22, 0.61, 0.36, 1);
-  will-change: opacity, transform;
-  -webkit-app-region: no-drag;
-}
-
-.calendar-assistant-drawer.is-entered {
-  opacity: 1;
-  transform: translateX(0);
-  pointer-events: auto;
-}
-
-.calendar-assistant-surface {
-  background: var(--calendar-assistant-bg) !important;
-  border-left: 1px solid var(--calendar-assistant-card-border) !important;
-  border-radius: var(--workbench-canvas-radius) 0 0 var(--workbench-canvas-radius);
-  box-shadow: -18px 0 44px -18px rgba(8, 12, 22, 0.28) !important;
-  overflow: hidden;
-}
-
-.calendar-assistant-header {
-  height: 40px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 0 12px 0 16px;
-  border-bottom: 1px solid var(--calendar-assistant-card-border);
-}
-
-.calendar-assistant-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--text-title);
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.calendar-assistant-scroll {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  padding: 12px;
-}
-
-.calendar-assistant-card {
-  border: 1px solid var(--calendar-assistant-card-border);
-  border-radius: 8px;
-  background: var(--calendar-assistant-card-bg);
-  padding: 12px;
-  margin-bottom: 10px;
-}
-
-.calendar-assistant-section-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 10px;
-  color: var(--text-title);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.calendar-assistant-event-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.calendar-assistant-event {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 42px;
-  padding: 8px;
-  border-radius: 8px;
-  background: var(--calendar-event-chip-bg);
-}
-
-.calendar-assistant-event-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  flex-shrink: 0;
-}
-
-.calendar-assistant-event-main {
-  min-width: 0;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.calendar-assistant-event-title,
-.calendar-assistant-next-title {
-  color: var(--text-title);
-  font-size: 12px;
-  font-weight: 700;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.calendar-assistant-event-time,
-.calendar-assistant-next-time,
-.calendar-assistant-empty {
-  color: var(--text-muted);
-  font-size: 11px;
-  line-height: 1.45;
-}
-
-.calendar-assistant-event-source {
-  max-width: 74px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--color-blue);
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.calendar-assistant-next {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.calendar-assistant-metrics {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-}
-
-.calendar-assistant-metrics div {
-  min-width: 0;
-  text-align: center;
-  padding: 4px 0;
-}
-
-.calendar-assistant-metrics strong {
-  display: block;
-  color: var(--text-title);
-  font-size: 16px;
-  line-height: 1.2;
-}
-
-.calendar-assistant-metrics span {
-  display: block;
-  margin-top: 3px;
-  color: var(--text-muted);
-  font-size: 10px;
-}
-
-.calendar-assistant-suggestions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.calendar-assistant-chip {
-  height: 28px;
-  padding: 0 10px;
-  border-radius: 8px;
-  border: 1px solid var(--calendar-assistant-card-border);
-  background: var(--calendar-event-chip-bg);
-  color: var(--text-body);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition:
-    background 160ms ease,
-    color 160ms ease;
-}
-
-.calendar-assistant-chip:hover {
-  background: var(--calendar-control-bg-hover);
-  color: var(--text-title);
-}
-
-.calendar-assistant-composer {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px 12px;
-  border-top: 1px solid var(--calendar-assistant-card-border);
-}
-
-.calendar-assistant-composer input {
-  flex: 1;
-  min-width: 0;
-  height: 36px;
-  border-radius: 8px;
-  border: 1px solid var(--input-slot-border);
-  background: var(--input-slot-bg);
-  color: var(--text-body);
-  outline: none;
-  padding: 0 11px;
-  font-size: 12px;
-}
-
-.calendar-assistant-send {
-  width: 34px;
-  height: 34px;
-  border-radius: 8px;
-  border: 1px solid color-mix(in srgb, var(--color-blue) 38%, transparent);
-  background: color-mix(in srgb, var(--color-blue) 82%, var(--surface-card-bg) 18%);
-  color: #fff;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .calendar-assistant-drawer {
-    transition-duration: 80ms;
-  }
-}
-
-/* 资讯's content frame keeps the shell's module surface; its blur and private drawer palette left with W1-T5 (B13). */
+/* 资讯's content is paper (W1 DL2); its crumb row above sits on the glass (workbench-surfaces.css). */
 .rss-mode-shell .rss-feed-sheet {
-  background: var(--workbench-module-surface-bg) !important;
-  box-shadow: none !important;
+  background: var(--rn-sheet) !important;
+  border-radius: var(--rn-r-sheet);
+  box-shadow: var(--rn-sheet-shadow) !important;
 }
 
 .rss-mode-shell .rss-feed-surface,
 .rss-mode-shell .rss-feed-scroll {
   background: transparent !important;
   box-shadow: none !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
 }
 
-html:root,
-html[data-fastcard-overlay-window='true'] {
-  --ready-app-panel-glass-bg: var(--chat-menu-frost-bg);
-  --ready-app-panel-glass-band-bg: transparent;
-  --ready-app-panel-glass-card-bg: rgba(255, 255, 255, 0.07);
-  --ready-app-panel-glass-control-bg: rgba(255, 255, 255, 0.10);
-  --ready-app-panel-glass-hover-bg: rgba(255, 255, 255, 0.22);
-  --ready-app-panel-glass-border: rgba(255, 255, 255, 0.66);
-  --ready-app-panel-glass-inner-border: rgba(255, 255, 255, 0.28);
-  --ready-app-panel-glass-shadow: var(--chat-menu-shadow);
-  --ready-app-panel-glass-card-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.20);
-}
-
-html[data-theme='dark']:root,
-html[data-theme='dark'][data-fastcard-overlay-window='true'] {
-  --ready-app-panel-glass-bg: var(--chat-menu-frost-bg);
-  --ready-app-panel-glass-band-bg: transparent;
-  --ready-app-panel-glass-card-bg: rgba(255, 255, 255, 0.045);
-  --ready-app-panel-glass-control-bg: rgba(255, 255, 255, 0.065);
-  --ready-app-panel-glass-hover-bg: rgba(255, 255, 255, 0.11);
-  --ready-app-panel-glass-border: rgba(255, 255, 255, 0.18);
-  --ready-app-panel-glass-inner-border: rgba(255, 255, 255, 0.10);
-  --ready-app-panel-glass-shadow: var(--chat-menu-shadow);
-  --ready-app-panel-glass-card-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
-}
-
-/* Floating panels (FastCard) carry the float material
-   (W1 §4, DL4); they no longer sit on a refraction lens — liquid glass is the composer's alone. */
-html:root .ready-app-liquid-panel,
-html[data-fastcard-overlay-window='true'] .ready-app-liquid-panel {
+/* Floating panels (the FastCard result, the attachment preview, the knowledge graph's panel) are floats (W1 §4, DL4):
+   the float colour, radius and shadow. The blur comes with the .rn-float material class on the element. */
+.ready-app-liquid-panel {
   isolation: isolate;
   overflow: hidden;
   background: var(--rn-float) !important;
   border: 0 !important;
+  border-radius: var(--rn-r-float);
   box-shadow: var(--rn-shadow-3), inset 0 0 0 1px var(--rn-hair) !important;
-  backdrop-filter: blur(var(--rn-glass-blur)) saturate(var(--rn-glass-sat)) !important;
 }
 
-html:root .browser-fastcard-header,
-html[data-fastcard-overlay-window='true'] .browser-fastcard-header,
-html:root .browser-fastcard-footer,
-html[data-fastcard-overlay-window='true'] .browser-fastcard-footer,
-html:root .calendar-assistant-header,
-html:root .calendar-assistant-composer {
-  background: var(--ready-app-panel-glass-band-bg) !important;
+.browser-fastcard-header,
+.browser-fastcard-footer {
+  background: transparent !important;
   border-color: transparent !important;
 }
 
-html:root .browser-fastcard-result-body section,
-html[data-fastcard-overlay-window='true'] .browser-fastcard-result-body section,
-html:root .browser-fastcard-field select,
-html[data-fastcard-overlay-window='true'] .browser-fastcard-field select,
-html:root .browser-fastcard-action,
-html[data-fastcard-overlay-window='true'] .browser-fastcard-action,
-html:root .calendar-assistant-card,
-html:root .calendar-assistant-event,
-html:root .calendar-assistant-chip,
-html:root .calendar-assistant-composer input,
-html:root .calendar-timezone-menu input {
-  background: var(--ready-app-panel-glass-card-bg) !important;
-  border-color: var(--ready-app-panel-glass-inner-border) !important;
-  box-shadow: var(--ready-app-panel-glass-card-shadow);
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
+.browser-fastcard-result-body section {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none;
 }
 
-html:root .ready-app-liquid-panel .browser-fastcard-result-body section,
-html[data-fastcard-overlay-window='true'] .ready-app-liquid-panel .browser-fastcard-result-body section,
-html:root .ready-app-liquid-panel .calendar-assistant-card,
-html:root .ready-app-liquid-panel .calendar-assistant-event {
-  background: transparent !important;
+.browser-fastcard-field select,
+.browser-fastcard-action {
+  background: var(--rn-fill-2) !important;
   border-color: transparent !important;
   box-shadow: none !important;
 }
 
-html:root .ready-app-liquid-panel .calendar-assistant-chip,
-html:root .ready-app-liquid-panel .calendar-assistant-composer input,
-html:root .ready-app-liquid-panel .browser-fastcard-field select,
-html[data-fastcard-overlay-window='true'] .ready-app-liquid-panel .browser-fastcard-field select,
-html:root .ready-app-liquid-panel .browser-fastcard-action,
-html[data-fastcard-overlay-window='true'] .ready-app-liquid-panel .browser-fastcard-action {
-  background: var(--ready-app-panel-glass-control-bg) !important;
-  box-shadow: var(--ready-app-panel-glass-card-shadow) !important;
+.browser-fastcard-action:hover:not(:disabled) {
+  background: var(--rn-fill-3) !important;
 }
-
-html:root .calendar-assistant-chip:hover,
-html:root .browser-fastcard-action:hover:not(:disabled),
-html[data-fastcard-overlay-window='true'] .browser-fastcard-action:hover:not(:disabled) {
-  background: var(--ready-app-panel-glass-hover-bg) !important;
-}
-

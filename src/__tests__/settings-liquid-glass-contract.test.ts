@@ -41,7 +41,7 @@ test('settings page keeps the main workbench transparent shell structure', () =>
   assert.match(styles, /\.settings-page-shell\s*\{[\s\S]*?isolation:\s*isolate;[\s\S]*?background:\s*transparent;/)
   assert.doesNotMatch(styles, /--settings-page-clear-bg\s*:/)
   assert.doesNotMatch(styles, /html:root \[data-liquid-shell='settings-content'\]\s*\{[\s\S]*?background:/)
-  assert.match(styles, /html:root \.workbench-mode-root\s*\{[^}]*background:\s*transparent/)
+  assert.match(styles, /\.workbench-mode-root\s*\{[^}]*background:\s*transparent/)
   assert.match(styles, /html:root \[data-liquid-shell='settings-sidebar'\],[\s\S]*?html:root \[data-liquid-shell='settings-content'\],[\s\S]*?html:root \[data-liquid-scroll-root\]\s*\{[\s\S]*?contain:\s*paint;[\s\S]*?isolation:\s*isolate;[\s\S]*?transform:\s*translateZ\(0\);[\s\S]*?backface-visibility:\s*hidden;/)
 
   const main = readWorkspaceFile('src/main/index.ts')
@@ -133,12 +133,18 @@ test('shared settings theme maps every inline constant onto the sx glass tokens'
   assert.doesNotMatch(surfaces, /--color-green/)
 })
 
-test('shared liquid glass surfaces remain real backdrop blur instead of flat paint', () => {
+test('floats blur through the float material; the legacy shell surfaces carry no blur of their own (W1 §4)', () => {
   const styles = readRendererStyles()
 
-  assert.match(styles, /\.glass-surface-panel,[\s\S]*?\.glass-surface-card,[\s\S]*?\.glass-surface-floating\s*\{[\s\S]*?backdrop-filter:\s*blur\(var\(--lg-blur-medium\)\) saturate\(var\(--surface-saturate\)\)/)
-  assert.match(styles, /\.glass-surface-card\s*\{[\s\S]*?background:\s*color-mix\(in srgb, var\(--lg-material-card\) 58%, transparent\)[\s\S]*?backdrop-filter:\s*blur\(var\(--lg-blur-soft\)\) saturate\(var\(--surface-saturate\)\)/)
-  assert.match(styles, /\.glass-surface-floating\s*\{[\s\S]*?background:\s*color-mix\(in srgb, var\(--lg-material-floating\) 62%, transparent\)[\s\S]*?backdrop-filter:\s*blur\(var\(--lg-blur-strong\)\) saturate\(var\(--surface-saturate\)\)/)
+  // B13: backdrop-filter lives in the material classes (and the composer's lens) only.
+  const materials = readWorkspaceFile('src/renderer/design/next/materials.css')
+  assert.match(materials, /\.rn-float\s*\{[\s\S]*?backdrop-filter:\s*blur\(var\(--rn-glass-blur\)\) saturate\(var\(--rn-glass-sat\)\)/)
+  for (const selector of ['glass-surface-panel', 'glass-surface-card', 'content-surface-panel', 'ready-app-liquid-panel', 'ready-floating-menu']) {
+    for (const block of styles.matchAll(new RegExp(`\\.${selector}[^{,]*\\{([^}]*)\\}`, 'g'))) {
+      assert.doesNotMatch(block[1], /backdrop-filter:\s*blur/, `${selector} must not blur on its own`)
+    }
+  }
+  assert.doesNotMatch(styles, /\.glass-surface-floating\s*\{/)
 })
 
 test('compact utility settings opt into short control slots so labels do not collapse into vertical stacks', () => {

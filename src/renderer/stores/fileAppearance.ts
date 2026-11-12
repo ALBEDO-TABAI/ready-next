@@ -1,11 +1,14 @@
+// The colours a person gives their own files and folders are user content colours: they point at the
+// writer's content palette (modules/document/content-palette.css, loaded by the file tree's icons), not at
+// the interface tokens, and keep their hue in both themes.
 export const FILE_APPEARANCE_COLORS = [
-  { key: 'red', label: '红色', value: '#ff453a' },
-  { key: 'orange', label: '橙色', value: '#ff9f0a' },
-  { key: 'yellow', label: '黄色', value: '#ffd60a' },
-  { key: 'green', label: '绿色', value: '#30d158' },
-  { key: 'blue', label: '蓝色', value: '#0a84ff' },
-  { key: 'purple', label: '紫色', value: '#bf5af2' },
-  { key: 'gray', label: '灰色', value: '#8e8e93' },
+  { key: 'red', label: '红色', value: 'var(--doc-red-fg)' },
+  { key: 'orange', label: '橙色', value: 'var(--doc-orange-fg)' },
+  { key: 'yellow', label: '黄色', value: 'var(--doc-yellow-fg)' },
+  { key: 'green', label: '绿色', value: 'var(--doc-green-fg)' },
+  { key: 'blue', label: '蓝色', value: 'var(--doc-blue-fg)' },
+  { key: 'purple', label: '紫色', value: 'var(--doc-purple-fg)' },
+  { key: 'gray', label: '灰色', value: 'var(--doc-gray-fg)' },
 ] as const
 
 export type FileAppearanceColor = typeof FILE_APPEARANCE_COLORS[number]['key']

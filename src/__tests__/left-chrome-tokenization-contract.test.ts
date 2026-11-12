@@ -35,9 +35,10 @@ test('the shell sidebar sits on the window glass in both themes, with no dark-on
 test('icon rail stays transparent with shared glyph tokens', () => {
   const styles = readWorkspaceFile('src/renderer/styles/workbench-sliders.css')
 
-  // 2026-10-30 icon rail 改为贴边图标列：无槽底、无 track，配色只走自身 --icon-rail-* 令牌。
+  // 2026-10-30 icon rail 改为贴边图标列：无槽底、无 track。B13：选中字形与底块只走 --rn-rail-*（tokens.css）。
   assert.match(styles, /\.icon-rail-slider\s*\{[\s\S]*?background:\s*transparent/)
-  assert.match(styles, /\.icon-rail-slider\s*\{[\s\S]*?--icon-rail-ink:\s*var\(--text-muted\)/)
+  assert.match(styles, /\.icon-rail-slider__button\.is-active,[\s\S]*?color:\s*var\(--rn-rail-glyph\);\s*background:\s*var\(--rn-rail-tile\)/)
+  assert.match(styles, /\.icon-rail-slider__button\.is-remembered,[\s\S]*?color:\s*var\(--rn-rail-glyph\);\s*background:\s*transparent/)
   assert.doesNotMatch(styles, /\.icon-rail-slider__track/)
 
 })

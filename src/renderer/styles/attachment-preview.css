@@ -27,12 +27,10 @@
   display: flex;
   gap: 4px;
   padding: 4px;
-  border: 0.5px solid var(--ready-app-panel-glass-border);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--ready-app-panel-glass-bg) 74%, transparent);
-  box-shadow: var(--ready-app-panel-glass-card-shadow), 0 8px 24px rgba(24, 39, 77, 0.14);
-  backdrop-filter: blur(18px) saturate(150%);
-  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  border-radius: var(--rn-r-md);
+  /* A small float of its own over the media: the float colour (opaque under 减少透明), no second blur. */
+  background: var(--rn-float);
+  box-shadow: var(--rn-shadow-2), inset 0 0 0 1px var(--rn-hair);
 }
 
 .attachment-preview-action {
@@ -41,30 +39,25 @@
   height: 36px;
   place-items: center;
   border: 0;
-  border-radius: 8px;
-  color: var(--text-body);
+  border-radius: var(--rn-r-control);
+  color: var(--rn-ink-2);
   background: transparent;
-  transition: background-color 180ms ease-out, color 180ms ease-out, transform 180ms ease-out;
+  transition: background-color var(--rn-d-1) var(--rn-ease-out), color var(--rn-d-1) var(--rn-ease-out), transform var(--rn-d-1) var(--rn-ease-out);
 }
 
 .attachment-preview-action:hover {
-  color: var(--text-title);
-  background: var(--ready-app-panel-glass-hover-bg);
+  color: var(--rn-ink);
+  background: var(--rn-fill-2);
 }
 
 .attachment-preview-action:active {
   transform: scale(0.94);
 }
 
-.attachment-preview-action:focus-visible {
-  outline: 2px solid var(--accent-color, var(--color-primary));
-  outline-offset: 1px;
-}
-
 .attachment-preview-action svg {
   width: 17px;
   height: 17px;
-  stroke-width: 1.8;
+  stroke-width: var(--rn-icon-stroke);
 }
 
 .attachment-preview-content {
@@ -83,12 +76,17 @@
   height: auto;
   max-height: calc(100vh - 100px);
   object-fit: contain;
-  border-radius: 10px;
-  box-shadow: 0 8px 28px rgba(20, 30, 54, 0.14);
+  border-radius: var(--rn-r-control);
+  box-shadow: var(--rn-shadow-2);
 }
 
+/* Letterbox behind a video: the dark of the stage, in both themes. */
 .attachment-preview-video {
-  background: #000;
+  background: var(--rn-inverse);
+}
+
+html[data-theme='dark'] .attachment-preview-video {
+  background: var(--rn-stage);
 }
 
 @media (max-width: 520px), (max-height: 620px) {

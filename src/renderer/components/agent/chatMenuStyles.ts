@@ -1,20 +1,19 @@
 import type { CSSProperties } from 'react'
 
+// The assistant's in-place menus (the @ and slash lists that follow typing, the authorization, model and project
+// pickers) sit in a FloatPanel, which brings the float material (W1 DL4); they add no surface styling of their own.
+// Rows look like the shared menu's items: --rn-fill-2 on hover and when highlighted (`data-highlighted="true"`: the
+// keyboard choice or the current option). The look lives in classes, not inline backgrounds, so hover still applies.
 export const chatMenuSurfaceStyle: CSSProperties = {
-  background: 'var(--chat-menu-frost-bg, color-mix(in srgb, var(--bg-primary) 90%, transparent))',
-  border: '1px solid var(--chat-menu-frost-border, var(--border-default))',
-  borderRadius: 12,
-  boxShadow: 'var(--chat-menu-shadow, 0 18px 36px rgba(0,0,0,0.24))',
   padding: 6,
-  backgroundClip: 'padding-box',
-  backdropFilter: 'blur(calc(var(--lg-blur-strong, 24px) * 1.12)) saturate(calc(var(--surface-saturate, 132%) + 8%)) contrast(1.02)',
-  WebkitBackdropFilter: 'blur(calc(var(--lg-blur-strong, 24px) * 1.12)) saturate(calc(var(--surface-saturate, 132%) + 8%)) contrast(1.02)',
 }
 
 export const chatMenuItemStyle: CSSProperties = {
   padding: '7px 10px',
-  borderRadius: 6,
+  borderRadius: 8,
   border: '1px solid transparent',
-  background: 'transparent',
   cursor: 'pointer',
 }
+
+export const CHAT_MENU_ITEM_CLASS =
+  'w-full bg-transparent text-left text-[var(--rn-ink)] transition-colors hover:bg-[var(--rn-fill-2)] data-[highlighted=true]:bg-[var(--rn-fill-2)] disabled:cursor-default disabled:opacity-45'

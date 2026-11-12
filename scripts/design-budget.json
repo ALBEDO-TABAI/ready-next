@@ -1,18 +1,18 @@
 {
   "directories": {
     ".": {
-      "color": 67,
+      "color": 48,
       "backdropFilter": 0,
       "fontFace": 0
     },
     "components/agent": {
-      "color": 16,
-      "backdropFilter": 2,
+      "color": 0,
+      "backdropFilter": 0,
       "fontFace": 0
     },
     "components/agent/chat-panel": {
-      "color": 2,
-      "backdropFilter": 2,
+      "color": 0,
+      "backdropFilter": 0,
       "fontFace": 0
     },
     "components/agent/chat-panel/attachments-helpers": {
@@ -31,7 +31,7 @@
       "fontFace": 0
     },
     "components/agent/chat-panel/helpers": {
-      "color": 4,
+      "color": 0,
       "backdropFilter": 0,
       "fontFace": 0
     },
@@ -61,12 +61,12 @@
       "fontFace": 0
     },
     "components/agent/chat-panel/session-tabs": {
-      "color": 8,
+      "color": 0,
       "backdropFilter": 0,
       "fontFace": 0
     },
     "components/agent/chat-panel/task": {
-      "color": 1,
+      "color": 0,
       "backdropFilter": 0,
       "fontFace": 0
     },
@@ -126,12 +126,12 @@
       "fontFace": 0
     },
     "components/layout": {
-      "color": 24,
-      "backdropFilter": 2,
+      "color": 4,
+      "backdropFilter": 0,
       "fontFace": 0
     },
     "components/layout/file-tree": {
-      "color": 33,
+      "color": 0,
       "backdropFilter": 0,
       "fontFace": 0
     },
@@ -146,7 +146,7 @@
       "fontFace": 0
     },
     "components/ready": {
-      "color": 19,
+      "color": 0,
       "backdropFilter": 0,
       "fontFace": 0
     },
@@ -166,12 +166,12 @@
       "fontFace": 0
     },
     "components/startup": {
-      "color": 2,
+      "color": 0,
       "backdropFilter": 0,
       "fontFace": 0
     },
     "components/tabs": {
-      "color": 6,
+      "color": 0,
       "backdropFilter": 0,
       "fontFace": 0
     },
@@ -181,7 +181,7 @@
       "fontFace": 0
     },
     "components/ui": {
-      "color": 11,
+      "color": 0,
       "backdropFilter": 0,
       "fontFace": 0
     },
@@ -371,7 +371,7 @@
       "fontFace": 0
     },
     "pages": {
-      "color": 33,
+      "color": 17,
       "backdropFilter": 0,
       "fontFace": 0
     },
@@ -396,13 +396,13 @@
       "fontFace": 0
     },
     "stores": {
-      "color": 7,
+      "color": 0,
       "backdropFilter": 0,
       "fontFace": 0
     },
     "styles": {
-      "color": 563,
-      "backdropFilter": 39,
+      "color": 418,
+      "backdropFilter": 14,
       "fontFace": 0
     },
     "utils": {

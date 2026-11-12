@@ -604,7 +604,7 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
                 style={{
                   fontSize: 10.5,
                   fontWeight: 600,
-                  color: 'var(--text-light)',
+                  color: 'var(--rn-ink-3)',
                   padding: '0 2px',
                 }}
               >
@@ -626,7 +626,7 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
                 style={{
                   padding: '6px 8px',
                   fontSize: 11.5,
-                  color: 'var(--text-light)',
+                  color: 'var(--rn-ink-3)',
                 }}
               >
                 还有 {hiddenCount} 个后台任务，可在任务面板查看

@@ -22,12 +22,16 @@ test('shared inset slot tokens drive input shells across the workbench', () => {
   assert.match(styles, /\.ready-input-slot-control\s*\{/)
   assert.match(styles, /\.ready-input-slot-inner\s*\{/)
   assert.match(styles, /\.morph-segmented-track\s*\{/)
-  assert.match(styles, /box-shadow:\s*var\(--input-slot-shadow\)/)
+  // B13: inputs not yet on the Field primitive take its look from --rn-* (fill, a hairline, an ink edge on focus).
+  assert.match(styles, /\.ready-input-slot-control\s*\{\s*background:\s*var\(--rn-fill\) !important;\s*border-color:\s*var\(--rn-hair-2\) !important;/)
+  assert.match(styles, /\.ready-input-shell:focus-within\s*\{\s*border-color:\s*var\(--rn-ink-3\);/)
 
-  assert.match(filesPanel, /ready-input-shell/)
-  assert.match(filesPanel, /ready-input-slot-inner/)
-  assert.match(globalSearch, /ready-input-shell/)
-  assert.match(globalSearch, /ready-input-slot-inner/)
+  // B13: the files panel's search is the shared Input primitive (rn-field), not the shell's slot.
+  assert.match(filesPanel, /<Input\b/)
+  assert.doesNotMatch(filesPanel, /ready-input-shell|ready-input-slot-inner/)
+  // B13: the global search's query and replace inputs are the shared Input primitive (rn-field), not the shell's slot.
+  assert.match(globalSearch, /<Input\b/)
+  assert.doesNotMatch(globalSearch, /ready-input-shell|ready-input-slot-inner/)
   assert.match(browserSurface, /ready-input-slot-inner/)
 })
 
@@ -46,7 +50,8 @@ test('chat composer delegates its material to the liquid lens instead of the ins
   const chatInput = readWorkspaceFile('src/renderer/components/agent/ChatInput.tsx')
 
   assert.match(chatPanelBody, /background: 'transparent'/)
-  assert.match(chatPanelBody, /border: isDragOver \? '2px solid var\(--color-blue\)' : '1px solid transparent'/)
+  // B13: the drop ring is ink (--rn-ink-3), like the project pill's; blue was the retired accent (W1 DL5).
+  assert.match(chatPanelBody, /border: isDragOver \? '2px solid var\(--rn-ink-3\)' : '1px solid transparent'/)
   assert.match(chatPanelBody, /boxShadow: 'none'/)
   assert.match(chatInput, /<LiquidLens/)
   assert.match(chatInput, /className="ready-liquid-composer__surface"/)
@@ -65,13 +70,18 @@ test('chat composer delegates its material to the liquid lens instead of the ins
 
 test('dark liquid composer dims only the material while preserving semantic controls', () => {
   const styles = readRendererStyles()
-  const darkComposerBlock = styles.match(/html\[data-theme='dark'\]:root \.ready-liquid-composer \{([\s\S]*?)\n\}/)
-  assert.ok(darkComposerBlock, 'dark liquid composer block should exist')
-
-  assert.match(
-    styles,
-    /html\[data-theme='dark'\]:root \.ready-liquid-composer \{[\s\S]*--text-body:\s*rgba\(232, 232, 232, 0\.86\);[\s\S]*--text-placeholder:\s*rgba\(176, 176, 176, 0\.62\);/,
-  )
+  const tokens = readWorkspaceFile('src/renderer/design/next/tokens.css')
+  const chatInput = readWorkspaceFile('src/renderer/components/agent/ChatInput.tsx')
+  // B13: the composer's own inks are --rn-liquid-* tokens (the dark composer keeps its softer greys); the shell's
+  // dark --text-* override block on .ready-liquid-composer is gone, and the composer's inline colours use these inks.
+  const darkTokens = tokens.match(/\[data-theme='dark'\] \{([\s\S]*?)\n\}/)
+  assert.ok(darkTokens, 'dark token block should exist')
+  assert.match(darkTokens[1], /--rn-liquid-ink:\s*rgba\(232, 232, 232, \.86\);/)
+  assert.match(darkTokens[1], /--rn-liquid-placeholder:\s*rgba\(176, 176, 176, \.62\);/)
+  assert.doesNotMatch(styles, /html\[data-theme='dark'\]:root \.ready-liquid-composer \{[^}]*--text-/)
+  assert.match(styles, /\.ready-liquid-composer \.ready-input-slot-inner::placeholder \{[\s\S]*?color:\s*var\(--rn-liquid-placeholder\);/)
+  assert.match(chatInput, /color: 'var\(--rn-liquid-ink\)'/)
+  assert.doesNotMatch(chatInput, /var\(--text-/)
   // The composer keeps its pre-B4 material (user, 2026-11-11); light and dark values are --rn-liquid-* tokens.
   assert.match(
     readWorkspaceFile('src/renderer/styles/liquid-composer.css'),
@@ -87,15 +97,12 @@ test('dark liquid composer dims only the material while preserving semantic cont
   )
   assert.match(
     styles,
-    /html\[data-theme='dark'\]:root \.ready-liquid-composer \[data-ready-agent-send='true'\] \{[\s\S]*?background:\s*rgba\(255, 255, 255, 0\.96\) !important;/,
+    /html\[data-theme='dark'\]:root \.ready-liquid-composer \[data-ready-agent-send='true'\] \{[\s\S]*?background:\s*var\(--rn-inverse\) !important;/,
   )
   assert.match(
     styles,
     /\.ready-liquid-composer \[data-ready-agent-send='true'\]:disabled \{[\s\S]*?opacity:\s*1;/,
   )
-  assert.doesNotMatch(darkComposerBlock[1], /--color-blue:/)
-  assert.doesNotMatch(darkComposerBlock[1], /--color-green:/)
-  assert.doesNotMatch(darkComposerBlock[1], /--color-red:/)
   assert.doesNotMatch(styles, /ready-liquid-composer[\s\S]*#9ab8ff/)
   assert.doesNotMatch(styles, /ready-liquid-composer[\s\S]*220, 232, 255/)
 })

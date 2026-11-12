@@ -32,11 +32,11 @@ function kindLabel(kind: ToastKind): string {
 function kindAccent(kind: ToastKind): string {
   switch (kind) {
     case 'done':
-      return '#22c55e'
+      return 'var(--rn-ok)'
     case 'error':
-      return '#ef4444'
+      return 'var(--rn-bad)'
     case 'cancelled':
-      return '#9ca3af'
+      return 'var(--rn-ink-3)'
   }
 }
 
@@ -139,9 +139,11 @@ export default function SessionCompleteToast() {
       }}
     >
       {toasts.map((toast) => (
+        // Each toast floats over the messages on the float material (W1 DL4).
         <button
           key={toast.id}
           type="button"
+          className="rn-float"
           data-testid="session-complete-toast"
           data-session-toast-id={toast.sessionId}
           data-session-toast-kind={toast.kind}
@@ -155,14 +157,12 @@ export default function SessionCompleteToast() {
             alignItems: 'center',
             gap: 10,
             width: '100%',
-            border: '1px solid var(--border-default, rgba(148,163,184,0.35))',
+            border: '1px solid transparent',
             borderRadius: 8,
-            background: 'color-mix(in srgb, var(--surface-panel-bg, #ffffff) 92%, transparent)',
-            boxShadow: '0 12px 28px rgba(15,23,42,0.14)',
             padding: '9px 11px',
             textAlign: 'left',
             cursor: 'pointer',
-            color: 'var(--text-body, #1f2937)',
+            color: 'var(--rn-ink)',
           }}
         >
           <span
@@ -179,7 +179,7 @@ export default function SessionCompleteToast() {
             <span style={{ fontSize: 12.5, fontWeight: 650, lineHeight: 1.25 }}>
               {toast.sessionLabel} {kindLabel(toast.kind)}
             </span>
-            <span style={{ fontSize: 11.5, color: 'var(--text-muted, #6b7280)', lineHeight: 1.25 }}>
+            <span style={{ fontSize: 11.5, color: 'var(--rn-ink-2)', lineHeight: 1.25 }}>
               点击切回查看
             </span>
           </span>

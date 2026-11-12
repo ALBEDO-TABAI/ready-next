@@ -118,7 +118,7 @@ export function RunDurationMeter({
           gap: 7,
           minHeight: 24,
           padding: '5px 0',
-          color: 'var(--text-light)',
+          color: 'var(--rn-ink-3)',
         }}
       >
         <DotGlyph
@@ -127,14 +127,14 @@ export function RunDurationMeter({
           pulse={model.pulse}
           size={13}
           title={model.label}
-          style={{ color: model.tone === 'signal' ? undefined : 'var(--text-gray)' }}
+          style={{ color: model.tone === 'signal' ? undefined : 'var(--rn-ink-3)' }}
         />
         <span style={{ whiteSpace: 'nowrap' }}>{model.label}</span>
         <span
           className="t-data"
           data-typography-role="data"
           style={{
-            color: 'var(--text-body)',
+            color: 'var(--rn-ink)',
             fontVariantNumeric: 'tabular-nums',
             whiteSpace: 'nowrap',
           }}
