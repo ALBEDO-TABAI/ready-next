@@ -1,3 +1,6 @@
+import { readReadyRefTransfer, writeReadyRefTransfer } from '../../../shared/ready-ref'
+import { fileDragRef, prepareFileDragRef } from '../../modules/workbench/file-drag-ref'
+import { beginSkillDrag, endSkillDrag } from '../../modules/workbench/skill-drag'
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Boxes, Folder, FolderInput, FolderOpen, Loader2, Pen, Settings2, Trash2 } from 'lucide-react'
@@ -137,18 +140,9 @@ function putSkillDragData(
     source: 'system' | 'imported'
   },
 ): void {
-  const data = JSON.stringify({
-    type: 'skill-folder',
-    name: payload.name,
-    path: payload.path,
-    skillId: payload.skillId,
-    source: payload.source,
-    defaultCommand: payload.defaultCommand,
-  })
-  e.dataTransfer.setData('application/x-ready-drag', data)
-  e.dataTransfer.setData('application/x-ready-skill', data)
-  // Keep the external drag fallback identical to ChatPanel's in-app drop text.
-  e.dataTransfer.setData('text/plain', `@[${payload.name}]`)
+  const ref = fileDragRef(payload.path)
+  beginSkillDrag(ref, { type: 'skill-folder', name: payload.name, path: payload.path, skillId: payload.skillId })
+  writeReadyRefTransfer(e.dataTransfer, ref, payload.name)
   e.dataTransfer.effectAllowed = 'copy'
 }
 
@@ -311,19 +305,12 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
     malformedPayloadCount: number
     unreadablePaths: string[]
   }> => {
-    const readyRaw = e.dataTransfer.getData('application/x-ready-drag')
+    const dropped = readReadyRefTransfer(e.dataTransfer)
     const result = new Set<string>()
-    let malformedPayloadCount = 0
-
-    if (readyRaw) {
-      try {
-        const parsed = JSON.parse(readyRaw) as { type?: string; path?: string }
-        if ((parsed.type === 'folder' || parsed.type === 'skill-folder') && parsed.path) {
-          result.add(parsed.path)
-        }
-      } catch {
-        malformedPayloadCount += 1
-      }
+    const malformedPayloadCount = 0
+    if (dropped?.ref.kind === 'file') {
+      const location = await window.electronAPI.objects.locate(dropped.ref.id)
+      if (location) result.add(location.path)
     }
 
     const nativeFiles = Array.from(e.dataTransfer.files)
@@ -477,6 +464,8 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
     return skill.managedPath || skill.sourcePath || ''
   }, [runtimeInfo?.skillsRoot])
 
+  useEffect(() => { for (const skill of skills) { const path = getSkillPath(skill); if (path) void prepareFileDragRef(path, true).catch(error => console.warn('[SkillsCenter] drag identity', error)) } }, [skills, getSkillPath])
+
   const systemSkills = useMemo(
     () => skills.filter((skill) => skill.source === 'embedded').sort((a, b) => Number(b.installed) - Number(a.installed) || a.name.localeCompare(b.name)),
     [skills],
@@ -600,6 +589,7 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
                         onDoubleClick={() => void handleOpenPath(skillPath)}
                         onContextMenu={(e) => openContextMenu(e, skill)}
                         draggable
+                        onDragEnd={endSkillDrag}
                         onDragStart={(e) => putSkillDragData(e, {
                           name: skill.name,
                           path: skillPath,
@@ -697,6 +687,7 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
                         onDoubleClick={() => void handleOpenPath(skillPath)}
                         onContextMenu={(e) => openContextMenu(e, skill)}
                         draggable
+                        onDragEnd={endSkillDrag}
                         onDragStart={(e) => putSkillDragData(e, {
                           name: skill.name,
                           path: skillPath,

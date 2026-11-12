@@ -230,7 +230,7 @@ function buildMoreMenu(state: BrowserUtilityMenuState): BrowserUtilityMenuModel 
       },
       {
         type: 'action',
-        label: '剪藏到 Obsidian 笔记',
+        label: '剪藏到资料库',
         enabled: Boolean(currentUrl),
         action: 'clip-current-tab',
         payload: { url: currentUrl },

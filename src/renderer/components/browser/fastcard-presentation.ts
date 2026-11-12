@@ -23,6 +23,15 @@ export function itemPreview(item: FastCardItem): string {
 /** Where a card came from (W4 §6): 网页 with its site, 资讯, 书, PDF, or 快记 for what was jotted down directly. */
 export function sourceLabel(item: FastCardItem): string {
   const url = item.source?.pageUrl || item.video?.pageUrl || ''
+  // A capture from a reader carries its source as a reference (W6 §3.2); a web page keeps its address too.
+  const ref = item.source?.ref
+  if (!url && ref) {
+    if (ref.kind === 'rss-item') return '资讯'
+    if (ref.kind === 'book-location' || (ref.kind === 'page' && ref.anchor?.startsWith('^hl-'))) return '书'
+    if (ref.kind === 'file' && ref.anchor?.startsWith('pdf:')) return 'PDF'
+    if (ref.kind === 'conversation') return '对话'
+    if (ref.kind === 'page') return '页面'
+  }
   if (!url) return '快记'
   const ready = parseReadyUri(url)
   if (ready.ok && ready.ref.kind === 'rss-item') return '资讯'

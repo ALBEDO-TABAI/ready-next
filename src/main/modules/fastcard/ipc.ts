@@ -8,6 +8,7 @@ import { getLinkPreview } from '../link-preview'
 export function registerFastCardServicesIPC(ipcMain: Pick<IpcMain, 'handle'>, services: {
   transfer: () => Promise<FastCardTransferService>
   quickNote: FastCardQuickNoteService
+  documentImage: (input: unknown) => Promise<string>
 }): void {
   const receipt = <T>(action: (input: unknown) => T | Promise<T>) => async (_event: unknown, input: unknown) => {
     try { return { success: true, data: await action(input) } }
@@ -17,6 +18,7 @@ export function registerFastCardServicesIPC(ipcMain: Pick<IpcMain, 'handle'>, se
   ipcMain.handle('fastcard:undo', receipt(async input => (await services.transfer()).undo(z.string().parse(input))))
   ipcMain.handle('fastcard:targets', receipt(async () => (await services.transfer()).targets()))
   ipcMain.handle('fastcard:pending', receipt(async () => (await services.transfer()).pending()))
+  ipcMain.handle('fastcard:documentImage', receipt(input => services.documentImage(input)))
   ipcMain.handle('fastcard:quickClose', receipt(() => services.quickNote.close()))
   ipcMain.handle('fastcard:quickStatus', receipt(() => services.quickNote.getStatus()))
   ipcMain.handle('fastcard:quickText', receipt(input => {

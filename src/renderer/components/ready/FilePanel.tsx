@@ -1,3 +1,5 @@
+import { writeReadyRefTransfer } from '../../../shared/ready-ref'
+import { fileDragRef, prepareFileDragRef } from '../../modules/workbench/file-drag-ref'
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Search, Plus, Folder, FileText, Image, Film, Music, File, FileSpreadsheet, Pen } from 'lucide-react'
 import { useWorkspace, type FileItem } from '../../stores/useWorkspace'
@@ -36,6 +38,7 @@ export default function FilePanel({ onFileDrop, onFileOpen }: FilePanelProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [highlightedFile, setHighlightedFile] = useState<string | null>(null)
   const prevFilesCountRef = useRef(files.length)
+  useEffect(() => { for (const file of files) void prepareFileDragRef(file.path, file.isDirectory).catch(error => console.warn('[FilePanel] drag identity', error)) }, [files])
 
   // Load files on mount
   useEffect(() => {
@@ -83,18 +86,7 @@ export default function FilePanel({ onFileDrop, onFileOpen }: FilePanelProps) {
 
   // Handle drag start for drag-to-chat
   const handleDragStart = useCallback((e: React.DragEvent, file: FileItem) => {
-    const ext = file.name.split('.').pop()?.toLowerCase() || ''
-    const payload = JSON.stringify({
-      type: 'file' as const,
-      path: file.path,
-      name: file.name,
-      ext,
-      size: file.size,
-    })
-    e.dataTransfer.setData('application/x-ready-file', payload)
-    e.dataTransfer.setData('application/x-ready-drag', payload)
-    e.dataTransfer.setData('text/plain', file.path)
-    e.dataTransfer.setData('text/uri-list', `file://${encodeURI(file.path)}`)
+    writeReadyRefTransfer(e.dataTransfer, fileDragRef(file.path), file.name)
     e.dataTransfer.effectAllowed = 'copy'
   }, [])
 

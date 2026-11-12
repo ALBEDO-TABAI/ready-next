@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import type { LibraryBook, LibraryHighlightColor, LibraryHighlightState } from '../../../../shared/library'
-import { useDocTabs } from '../../../stores/useDocTabs'
+import type { ReadyRef } from '../../../../shared/ready-ref'
 import { confirmed, type LibraryAPI } from '../access'
 import type { LoadedBook } from './book'
 import type { Layout } from './paginate'
 import type { createFlipbook } from './flipbook.js'
-import { anchorOf } from './marks'
+import { anchorOf, MARKERS } from './marks'
 import { addBookLocationToAgentInput } from '../../agent/chat-input-bridge'
+import type { CaptureSelection } from '../../workbench/capture'
+import { announceHighlight } from '../../workbench/capture-receipt'
 
+const MARKER_DEFAULT = MARKERS[0].key
 export type HighlightLens = { x: number; y: number } & ({ id: string; draft?: never } | { id?: never; draft: NonNullable<ReturnType<typeof anchorOf>> })
 export function useHighlights({ record, api, book, layout, flip, onError }: {
   record: LibraryBook; api: LibraryAPI; book: LoadedBook; layout: Layout | null;
@@ -18,6 +21,8 @@ export function useHighlights({ record, api, book, layout, flip, onError }: {
     return { title: c.title, text: template.content.textContent ?? '' }
   }) }), [record.id, book])
   const [state, setState] = useState<LibraryHighlightState | null>(null)
+  // The toast's 撤销 runs after later renders; it must see the latest version, not the one of its own render.
+  const stateRef = useRef(state); stateRef.current = state
   const [lens, setLens] = useState<HighlightLens | null>(null)
   const [busy, setBusy] = useState(false)
   const pendingDiskVersion = useRef<string | null>(null)
@@ -55,13 +60,15 @@ export function useHighlights({ record, api, book, layout, flip, onError }: {
     flip.current?.selecting(true)
     setLens({ id, x: box.left, y: box.bottom })
   }, [flip])
-  const mutate = async (work: (version: string) => ReturnType<LibraryAPI['createHighlight']>) => {
-    if (!state || pending.current || state.persistence === 'pending_save') return
+  const mutate = async (work: (version: string) => ReturnType<LibraryAPI['createHighlight']>): Promise<LibraryHighlightState | undefined> => {
+    const current = stateRef.current
+    if (!current || pending.current || current.persistence === 'pending_save') return
     pending.current = true; setBusy(true); request.current++
     try {
-      const result = confirmed(await work(state.version))
-      if (live.current) { pendingDiskVersion.current = result.persistence === 'pending_save' ? state.version : null; setState(result); close() }
-    } catch (error) { console.warn('[useHighlights] save highlight change failed:', error instanceof Error ? error.message : String(error)); if (live.current) fail.current(String(error)) }
+      const result = confirmed(await work(current.version))
+      if (live.current) { pendingDiskVersion.current = result.persistence === 'pending_save' ? current.version : null; setState(result); close() }
+      return result
+    } catch (error) { console.warn('[useHighlights] save highlight change failed:', error instanceof Error ? error.message : String(error)); if (live.current) fail.current(String(error)); return undefined }
     finally { pending.current = false; if (live.current) setBusy(false) }
   }
   const save = (color: LibraryHighlightColor, note?: string) => mutate(version => {
@@ -75,6 +82,26 @@ export function useHighlights({ record, api, book, layout, flip, onError }: {
     return api.removeHighlight({ ...context, expectedVersion: version, id: lens.id })
   })
   const selected = state?.highlights.find(h => h.id === lens?.id)
+  // The shared selection bar's 划线: the first marker, then the reading scenes' toast; a book highlight can be removed.
+  const mark = async () => {
+    const before = new Set(stateRef.current?.highlights.map(h => h.id))
+    const result = await save(MARKER_DEFAULT)
+    const created = result?.highlights.find(h => !before.has(h.id))
+    if (!result || !created) return
+    announceHighlight(result, created.text, async () => {
+      if (!await mutate(version => api.removeHighlight({ ...context, expectedVersion: version, id: created.id }))) throw new Error('划线没有删除')
+    })
+  }
+  /** The passage (a selection or a highlight) as a capture: the book location, as 书 and 划线 are referred to. */
+  const capture = (): CaptureSelection | null => {
+    const at = selected?.location.status === 'located' ? selected.location : lens?.draft
+    const text = selected?.text ?? lens?.draft?.text
+    if (!at || !text) return null
+    const chapter = selected?.chapterTitle || book.chapters[at.chapter]?.title
+    return { ref: { kind: 'book-location', book: record.id, loc: `c${at.chapter}:${at.from}+${at.to - at.from}` }, title: chapter ? `${record.title} · ${chapter}` : record.title, text }
+  }
+  /** A highlight in its source page (the book's note), as ⌘K refers to it. */
+  const sourceRef: ReadyRef | null = selected ? { kind: 'page', id: record.id, anchor: `^${selected.id}` } : null
   const copy = async (reference: boolean) => {
     try {
       const name = (state?.sourcePath ?? record.notePath).split(/[\\/]/).pop()!.replace(/\.md$/i, '')
@@ -94,19 +121,5 @@ export function useHighlights({ record, api, book, layout, flip, onError }: {
       if (live.current) close()
     } catch (error) { console.warn('[useHighlights] attach book location failed:', error instanceof Error ? error.message : String(error)); fail.current(error instanceof Error ? error.message : String(error)) }
   }
-  const openSource = async () => {
-    if (!selected) return
-    try {
-      // Re-read the source to get its current name and line after external edits.
-      const latest = confirmed(await api.listHighlights(context))
-      const h = latest.highlights.find(h => h.id === selected.id)
-      if (!h) throw new Error('这条划线已从来源页删除')
-      if (!live.current) return
-      const tabs = useDocTabs.getState()
-      tabs.openTab(latest.sourcePath)
-      tabs.setPendingReveal({ path: latest.sourcePath, lineStart: h.sourceLine, selection: h.text, requestedAt: Date.now() })
-      close()
-    } catch (error) { console.warn('[useHighlights] open highlight source failed:', error instanceof Error ? error.message : String(error)); fail.current(String(error)) }
-  }
-  return { state, listRef, lens, selected, busy: busy || !state || state.persistence === 'pending_save', onSelect, onMark, close, save, remove, copy, ask, openSource, refresh }
+  return { state, listRef, lens, selected, busy: busy || !state || state.persistence === 'pending_save', onSelect, onMark, close, save, remove, copy, ask, mark, capture, sourceRef, refresh }
 }

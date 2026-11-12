@@ -12,7 +12,7 @@ const hook = require('../write-release-receipt.cjs').default
 
 test('release build and artifact owners are wired into the production commands', () => {
   const root = path.resolve(__dirname, '../..')
-  assert.match(JSON.parse(fs.readFileSync(path.join(root, 'package.json'))).scripts['build:dist'], /node scripts\/build-with-source-identity\.cjs && electron-builder/)
+  assert.match(JSON.parse(fs.readFileSync(path.join(root, 'package.json'))).scripts['build:dist'], /node scripts\/build-with-source-identity\.cjs && npm run licenses:generate && electron-builder/)
   assert.match(fs.readFileSync(path.join(root, 'electron-builder.yml'), 'utf8'), /^afterAllArtifactBuild: scripts\/write-release-receipt\.cjs$/m)
 })
 

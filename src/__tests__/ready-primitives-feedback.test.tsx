@@ -89,16 +89,29 @@ test('Toast announces in a status region and expires at the configured time', as
   await act(async () => t.mock.timers.tick(1)); assert.equal(status.textContent, '')
 })
 
-test('Toast action executes once and dismisses the notification', async t => {
+test('Toast is one line: a newer toast takes the place of the one showing', async t => {
   const h = await mountPrimitives(t)
   t.mock.timers.enable({ apis: ['setTimeout'] })
   await h.render(<ToastHost />)
-  let calls = 0, id = 0
+  let first = 0, second = 0
+  t.after(() => { dismissToast(first); dismissToast(second) })
+  await act(async () => { first = showToast('已存入 FastCard', { durationMs: 6000 }) })
+  await act(async () => { second = showToast('已引用到《收下目标》', { durationMs: 6000 }) })
+  assert.deepEqual([...h.body.querySelectorAll('.rn-toast')].map(toast => toast.textContent), ['已引用到《收下目标》'])
+  await act(async () => t.mock.timers.tick(6000)); assert.equal(h.get('[role="status"]').textContent, '')
+})
+
+test('Toast actions: each executes once and dismisses the notification', async t => {
+  const h = await mountPrimitives(t)
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  await h.render(<ToastHost />)
+  const calls: string[] = []
+  let id = 0
   t.after(() => dismissToast(id))
-  await act(async () => { id = showToast('已删除', { action: { label: '撤销', onClick: () => calls++ } }) })
-  const action = h.get<HTMLButtonElement>('[role="status"] button')
-  assert.equal(action.textContent, '撤销')
-  await h.activateButton(action, 'Enter')
-  assert.equal(calls, 1); assert.equal(h.get('[role="status"]').textContent, '')
-  await act(async () => t.mock.timers.tick(4000)); assert.equal(calls, 1)
+  await act(async () => { id = showToast('已存入 FastCard', { actions: [{ label: '撤销', onClick: () => calls.push('撤销') }, { label: '打开', onClick: () => calls.push('打开') }] }) })
+  const actions = [...h.body.querySelectorAll<HTMLButtonElement>('[role="status"] button')]
+  assert.deepEqual(actions.map(button => button.textContent), ['撤销', '打开'])
+  await h.activateButton(actions[1], 'Enter')
+  assert.deepEqual(calls, ['打开']); assert.equal(h.get('[role="status"]').textContent, '')
+  await act(async () => t.mock.timers.tick(4000)); assert.deepEqual(calls, ['打开'])
 })

@@ -19,7 +19,8 @@ import { addBoardSelectionToAgentInput } from '../../modules/agent/chat-input-br
 import { BoardNewItems } from './BoardNewItems'
 import { boardAncestors } from './board-ancestors'
 import { READY_REF_MIME } from '../../modules/calendar/linkage/transfer'
-import { ReadyRefSchema } from '../../../shared/ready-ref'
+import { readReadyRefTransfer } from '../../../shared/ready-ref'
+import { dropCanvasReference } from '../../modules/canvas/drop-reference'
 import { openInCurrentTab } from '../../modules/document/ink/layout-state'
 import { boardMarkdown } from '../../modules/canvas/export'
 import { captureDocumentPreviewHtml } from '../document/document-export-capture'
@@ -112,30 +113,10 @@ export default function CanvasDocument({ tab }: { tab: DocTab }) {
     })}>转换为 .canvas</button>{error && <p role="alert">{error}</p>}
   </section>
   if (!opened || !previews) return <p role={error ? 'alert' : 'status'}>{error || '正在打开画板…'}</p>
-  const add = (node: Parameters<typeof write>[0][number]) => run(() => write([node]))
-  const frame = (at: { x: number; y: number }, height = 120) => ({ id: crypto.randomUUID(), x: Math.round(at.x - 130), y: Math.round(at.y - 40), width: 260, height })
-  // Dropped onto the stage: FastCard items (through Main's transfer) and pages from the sidebar (a document card).
   const dropData = (data: DataTransfer, at: { x: number; y: number }) => {
-    const fastCard = data.getData('application/x-ready-fastcard')
-    if (fastCard) {
-      const { itemIds, operationId } = JSON.parse(fastCard) as { itemIds: string[]; operationId: string }
-      run(async () => {
-        const result = await api.fastCard.transfer({ operationId, itemIds, target: { kind: 'existing', objectId: opened.objectId }, position: at })
-        if (!result.success) throw new Error(result.error || 'FastCard 没有放到画板上')
-        await refresh()
-      })
-      return true
-    }
-    const raw = data.getData(READY_REF_MIME)
-    const ref = raw ? ReadyRefSchema.safeParse(JSON.parse(raw)) : null
-    const pageRef = ref?.success && ref.data.kind === 'page' ? ref.data : null
-    if (pageRef) {
-      const page = pages.find(item => item.objectId === pageRef.id)
-      if (!page) { setError('这一页不在当前资料库里'); return true }
-      add({ type: 'addNode', node: { ...frame(at, 180), type: 'file', file: page.path.slice(root.length + 1), ready: { kind: 'document', ref: { kind: 'page', id: page.objectId } } } })
-      return true
-    }
-    return false
+    if (!readReadyRefTransfer(data)) return false
+    run(async () => { await dropCanvasReference(data, at, { objectId: opened.objectId, root, write, refresh }) })
+    return true
   }
   const ancestors = boardAncestors(trees, root, opened.path)
   // 导出 (W4 §2.2): the chosen cards or the whole board as Markdown (with its assets) or PDF, through the document export.
@@ -170,7 +151,7 @@ export default function CanvasDocument({ tab }: { tab: DocTab }) {
       breadcrumbs={ancestors.map(node => ({ id: node.objectId, title: node.title }))}
       onNavigateAncestor={id => { const node = ancestors.find(item => item.objectId === id); if (node) openInCurrentTab(node.path) }}
       extraNewItems={(at, close) => <BoardNewItems at={at} close={close} pages={pages} root={root} boardPath={opened.path} add={node => write([{ type: 'addNode', node }])} report={cause => setError(String(cause))} />}
-      acceptsDrop={types => types.includes('application/x-ready-fastcard')} onDropData={dropData} onExport={exportBoard} captureImage={captureBoard}
+      acceptsDrop={types => types.includes(READY_REF_MIME)} onDropData={dropData} onExport={exportBoard} captureImage={captureBoard}
       onAskAI={nodeIds => addBoardSelectionToAgentInput({ title: opened.canvas.ready.title || '画板', objectId: opened.objectId }, nodeIds)} />
   </div>
 }

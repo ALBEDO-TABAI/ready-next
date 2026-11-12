@@ -40,6 +40,7 @@ import { TagForgeSettingsPanel } from './settings/TagForgeSettingsPanel'
 import { ReadyMemorySettingsPanel } from './settings/ReadyMemorySettingsPanel'
 import { LibrarySettingsPanel } from './settings/LibrarySettingsPanel'
 import { StartupSettingsPanel } from './settings/StartupSettingsPanel'
+import { ThirdPartyNoticesPanel } from './settings/ThirdPartyNoticesPanel'
 import { READY_SHORTCUT_GUIDE } from '../../shared/app-shortcuts'
 
 // 面板拆分后的导出保口（2026-07-05）：行为测试从 pages/Settings 导入这两个面板，import 面保持零变化。
@@ -779,6 +780,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
 
                 {/* Settings Items (skip for dynamic sections) */}
                 {!isDynamicSection && currentSection.id !== 'appearance' && renderSettingRows(currentSection)}
+                {currentSection.id === 'about' && <ThirdPartyNoticesPanel />}
               </>
             )}
           </div>

@@ -1,4 +1,7 @@
 import type { RSSReadingRange } from '../../../shared/rss-reading'
+import type { RSSArticleExcerpt } from '../../../shared/rss-workspace'
+import type { CaptureSelection } from '../workbench/capture'
+import { announceHighlight } from '../workbench/capture-receipt'
 
 const SELECTOR = '[data-ready-reading-run]'
 const runId = (element: HTMLElement) => Number(element.dataset.readyReadingRun)
@@ -52,4 +55,19 @@ export function revealReadingRange(body: HTMLElement, range: RSSReadingRange): v
   const selection = body.ownerDocument.defaultView?.getSelection()
   selection?.removeAllRanges(); selection?.addRange(selected)
   start.scrollIntoView({ block: 'center' })
+}
+
+type ReadingArticle = Pick<RSSArticleExcerpt['article'], 'id' | 'revision' | 'title'>
+/** The reader's selection as a capture: the article at its revision and the exact reading range (W6 §3.2). */
+export function readingSelectionCapture(body: HTMLElement, article: ReadingArticle, selection: Selection | null): CaptureSelection | null {
+  const range = selectedReadingRange(body, selection).selection, text = selection?.toString().trim()
+  if (!range || !text) return null
+  return { ref: { kind: 'rss-item', id: article.id, excerpt: { format: 'reading-v1', expectedRevision: article.revision, range, offset: 0, length: 12000 } }, title: article.title, text }
+}
+/** 划线 in 资讯: the selected words go to the article's source page, as before the shared bar. */
+export async function highlightReadingSelection(capture: CaptureSelection | null): Promise<void> {
+  if (capture?.ref.kind !== 'rss-item' || !capture.ref.excerpt) throw new Error('选区已经变了，请重新选择文字')
+  const result = await window.electronAPI.sourceAnnotations.rss({ ...capture.ref.excerpt, itemId: capture.ref.id, offset: 0, length: 24000 })
+  if (!result.success) throw new Error(result.error)
+  announceHighlight(result.data, capture.text)
 }

@@ -103,7 +103,8 @@ async function main() {
     await shot('03-card-schedule')
     await mode('calendar'); await page.evaluate(date => window.electronAPI.calendar.revealDay(date), seeded.date)
     await page.getByRole('region', { name: '这一天', exact: true }).waitFor()
-    await page.locator('[data-day-item="activity"]').filter({ hasText: '联动画板.canvas' }).waitFor()
+    // Each entry of 这一天 is a reference capsule, titled without the file extension (W6 K1).
+    await page.locator('[data-day-item="activity"] a[data-ready-ref-capsule]').filter({ hasText: /^联动画板$/ }).waitFor()
     await shot('04-this-day')
     const before = fs.readFileSync(path.join(vault, '联动画板.canvas')), docBefore = fs.readFileSync(path.join(vault, '联动文档.md'))
     const exit = once(app.process(), 'exit'); app.process().kill('SIGKILL'); await exit; app = undefined

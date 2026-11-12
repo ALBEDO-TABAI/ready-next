@@ -1,13 +1,24 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
+import { Copy, PenLine } from 'lucide-react'
 import type { LibraryHighlight, LibraryHighlightColor } from '../../../../shared/library'
+import type { ReadyRef } from '../../../../shared/ready-ref'
+import { RefCapsule } from '../../../components/ui'
+import type { CaptureSelection } from '../../workbench/capture'
+import { receiveToCanvas, receiveToFastCard, reportCaptureError } from '../../workbench/capture-receipt'
+import { SelectionBar } from '../../workbench/selection-bar/SelectionBar'
 import { MARKERS, markerColor } from './marks'
 import type { HighlightLens } from './useHighlights'
 import type { FlipView } from './flipbook.js'
 
-export function HighlightPopover({ lens, highlight, busy, onSave, onRemove, onCopy, onSource, onAsk, onClose }: {
-  lens: HighlightLens; highlight?: LibraryHighlight; busy: boolean;
-  onSave: (color: LibraryHighlightColor, note?: string) => Promise<void>; onRemove: () => Promise<void>;
-  onCopy: (reference: boolean) => Promise<void>; onSource: () => Promise<void>; onAsk: () => Promise<void>; onClose: () => void
+/**
+ * Selected words show the reading scenes' shared bar (W6 §3.2) with 书房's own 批注 and 复制; a highlight that is
+ * already there shows its own tools: colours, note, copies, 收下 into FastCard or a board, its source page, delete.
+ */
+export function HighlightPopover({ lens, highlight, busy, capture, sourceRef, sourceTitle, onMark, onSave, onRemove, onCopy, onAsk, onClose }: {
+  lens: HighlightLens; highlight?: LibraryHighlight; busy: boolean; capture: () => CaptureSelection | null;
+  sourceRef: ReadyRef | null; sourceTitle: string; onMark: () => Promise<void>;
+  onSave: (color: LibraryHighlightColor, note?: string) => Promise<unknown>; onRemove: () => Promise<unknown>;
+  onCopy: (reference: boolean) => Promise<void>; onAsk: () => Promise<void>; onClose: () => void
 }) {
   const [writing, setWriting] = useState(false), [note, setNote] = useState(highlight?.note ?? '')
   const ref = useRef<HTMLDivElement>(null)
@@ -16,18 +27,33 @@ export function HighlightPopover({ lens, highlight, busy, onSave, onRemove, onCo
     const el = ref.current!, root = el.closest('.reader')!.getBoundingClientRect()
     setAt({ x: Math.max(8, Math.min(root.width - el.offsetWidth - 8, lens.x - root.left)), y: Math.max(60, Math.min(root.height - el.offsetHeight - 12, lens.y - root.top + 12)) })
   }, [lens.x, lens.y, writing])
-  return <div ref={ref} role="dialog" aria-label="划线" className="rd-highlight-popover rd-ui" style={{ left: at.x, top: at.y }}
+  const take = (receive: (selection: CaptureSelection) => Promise<unknown>) => () => {
+    const selection = capture()
+    if (selection) void receive(selection).then(onClose).catch(reportCaptureError)
+  }
+  const writer = writing && <div className="highlight-write"><textarea aria-label="批注内容" value={note} onChange={e => setNote(e.target.value)} rows={4} autoFocus /><button type="button" disabled={busy} onClick={() => void onSave(highlight?.color ?? 'yellow', note)}>保存批注</button></div>
+  return <div ref={ref} role="dialog" aria-label="划线" className={`rd-highlight-popover rd-ui${highlight ? '' : ' is-selection'}`} style={{ left: at.x, top: at.y }}
     onKeyDown={e => { e.stopPropagation(); if (e.key === 'Escape') onClose() }}>
-    <div className="rn-float highlight-tools"><div role="group" aria-label="划线颜色">{MARKERS.map(m => <button type="button" key={m.key} aria-label={m.label} title={m.label} disabled={busy || highlight?.location.status === 'malformed'} aria-pressed={highlight?.color === m.key} style={{ '--marker': m.color } as React.CSSProperties} onClick={() => void onSave(m.key)}>{m.label}</button>)}</div>
-      <button type="button" disabled={busy || highlight?.location.status === 'malformed'} onClick={() => setWriting(v => !v)}>{highlight?.note ? '改批注' : '批注'}</button>
+    {!highlight ? <>
+      <SelectionBar read={capture} highlight={onMark} ask={onAsk} onDone={onClose} extras={[
+        { id: 'note', label: '批注', icon: <PenLine />, keepsOpen: true, run: () => setWriting(value => !value) },
+        { id: 'copy', label: '复制', icon: <Copy />, run: () => onCopy(false) },
+      ]} />
+      {writer && <div className="rn-float highlight-tools">{writer}</div>}
+    </> : <div className="rn-float highlight-tools"><div role="group" aria-label="划线颜色">{MARKERS.map(m => <button type="button" key={m.key} aria-label={m.label} title={m.label} disabled={busy || highlight.location.status === 'malformed'} aria-pressed={highlight.color === m.key} style={{ '--marker': m.color } as React.CSSProperties} onClick={() => void onSave(m.key)}>{m.label}</button>)}</div>
+      <button type="button" disabled={busy || highlight.location.status === 'malformed'} onClick={() => setWriting(v => !v)}>{highlight.note ? '改批注' : '批注'}</button>
       <button type="button" onClick={() => void onCopy(false)}>复制</button>
       <button type="button" disabled={busy} onClick={() => void onAsk()}>问 AI</button>
-      {highlight && <><button type="button" onClick={() => void onCopy(true)}>复制引用</button><button type="button" onClick={() => void onSource()}>在来源页中打开</button><button type="button" disabled={busy} onClick={() => void onRemove()}>删除划线</button></>}
+      <button type="button" onClick={() => void onCopy(true)}>复制引用</button>
+      <button type="button" disabled={highlight.location.status !== 'located'} onClick={take(receiveToFastCard)}>存入 FastCard</button>
+      <button type="button" disabled={highlight.location.status !== 'located'} onClick={take(receiveToCanvas)}>保存到画板</button>
+      <button type="button" disabled={busy} onClick={() => void onRemove()}>删除划线</button>
       <button type="button" disabled={busy} onClick={onClose}>关闭划线浮层</button>
-      {writing && <div className="highlight-write"><textarea aria-label="批注内容" value={note} onChange={e => setNote(e.target.value)} rows={4} autoFocus /><button type="button" disabled={busy} onClick={() => void onSave(highlight?.color ?? 'yellow', note)}>保存批注</button></div>}
-      {!writing && highlight?.note && <p>{highlight.note}</p>}
-      {highlight && highlight.location.status !== 'located' && <p role="status">{highlight.location.reason}</p>}
-    </div>
+      {sourceRef && <p className="highlight-source">来源页 <RefCapsule reference={sourceRef} title={sourceTitle} /></p>}
+      {writer}
+      {!writing && highlight.note && <p>{highlight.note}</p>}
+      {highlight.location.status !== 'located' && <p role="status">{highlight.location.reason}</p>}
+    </div>}
   </div>
 }
 

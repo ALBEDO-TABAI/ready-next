@@ -1,3 +1,4 @@
+import { writeReadyRefTransfer } from '../../../shared/ready-ref'
 import type React from 'react'
 import { canAttemptVisualAnalysis } from '../../../shared/browser-tab-resource-classifier'
 import type { WorkspaceDragPayload } from './fileTreeDragPayload'
@@ -96,24 +97,6 @@ interface ShouldKeepFileTreeDropHintOnLeaveInput {
   relatedTargetInside: boolean
 }
 
-export function parseBrowserTabDragPayload(raw: string | null | undefined): BrowserTabDragPayload | null {
-  if (!raw) return null
-  try {
-    const parsed = JSON.parse(raw) as Partial<BrowserTabDragPayload>
-    if (parsed.type !== 'browser-tab') return null
-    if (!parsed.tabId || !parsed.url || !parsed.title || !parsed.name) return null
-    return {
-      type: 'browser-tab',
-      tabId: parsed.tabId,
-      title: parsed.title,
-      name: parsed.name,
-      url: parsed.url,
-    }
-  } catch {
-    return null
-  }
-}
-
 export function buildBrowserTabAnalysisItemId(url: string): string {
   let hash = 2166136261
   const input = url.trim()
@@ -122,27 +105,6 @@ export function buildBrowserTabAnalysisItemId(url: string): string {
     hash = Math.imul(hash, 16777619)
   }
   return `${(hash >>> 0).toString(16).padStart(8, '0')}-btab`
-}
-
-export function parseRssItemDragPayload(raw: string | null | undefined): RSSItemDragPayload | null {
-  if (!raw) return null
-  try {
-    const parsed = JSON.parse(raw) as Partial<RSSItemDragPayload>
-    if (parsed.type !== 'rss-item') return null
-    if (!parsed.id || !parsed.name || !parsed.link) return null
-    return {
-      type: 'rss-item',
-      id: parsed.id,
-      name: parsed.name,
-      title: parsed.title,
-      link: parsed.link,
-      summary: parsed.summary,
-      source: parsed.source,
-      publishedAt: parsed.publishedAt,
-    }
-  } catch {
-    return null
-  }
 }
 
 const WEB_DOWNLOAD_EXTS = new Set([
@@ -317,24 +279,6 @@ export function __rssDragSessionAgeMs(): number | null {
   return activeRssItemDragRecord ? Date.now() - activeRssItemDragRecord.createdAt : null
 }
 
-export const UNTITLED_DOC_TAB_DRAG_MIME = 'application/x-ready-untitled-doc-tab'
-
-export function parseUntitledDocTabDragPayload(raw: string | null | undefined): UntitledDocTabDragPayload | null {
-  if (!raw) return null
-  try {
-    const parsed = JSON.parse(raw) as Partial<UntitledDocTabDragPayload>
-    if (parsed.type !== 'untitled-doc-tab') return null
-    if (!parsed.tabId || typeof parsed.tabId !== 'string') return null
-    return {
-      type: 'untitled-doc-tab',
-      tabId: parsed.tabId,
-      title: typeof parsed.title === 'string' ? parsed.title : '',
-    }
-  } catch {
-    // silent-catch: malformed drag payload simply does not qualify as an untitled-doc drop.
-    return null
-  }
-}
 
 // Same defensive-TTL session pattern as the RSS drag above: `dragover` cannot
 // read dataTransfer contents (protected drag store), so the payload is stashed
@@ -358,21 +302,6 @@ export function endUntitledDocTabDragSession(): void {
   activeUntitledDocTabDragRecord = null
 }
 
-export function setUntitledDocTabDragPayload(
-  event: React.DragEvent,
-  item: { tabId: string; title: string },
-): void {
-  const payload: UntitledDocTabDragPayload = {
-    type: 'untitled-doc-tab',
-    tabId: item.tabId,
-    title: item.title,
-  }
-  beginUntitledDocTabDragSession(payload)
-  // Dedicated MIME only: no text/plain or x-ready-drag, so the payload never
-  // masquerades as a URL/file drop for other drop surfaces.
-  event.dataTransfer.setData(UNTITLED_DOC_TAB_DRAG_MIME, JSON.stringify(payload))
-}
-
 export function setRssItemDragPayload(event: React.DragEvent, item: SetRssItemDragInput): void {
   const payload: RSSItemDragPayload = {
     type: 'rss-item',
@@ -385,11 +314,7 @@ export function setRssItemDragPayload(event: React.DragEvent, item: SetRssItemDr
     publishedAt: item.publishedAt,
   }
   beginRssItemDragSession(payload)
-  const json = JSON.stringify(payload)
-  event.dataTransfer.setData('application/x-ready-drag', json)
-  event.dataTransfer.setData('application/x-ready-rss-item', json)
-  event.dataTransfer.setData('text/plain', `${item.title}\n${item.link}`)
-  event.dataTransfer.setData('text/uri-list', item.link)
+  writeReadyRefTransfer(event.dataTransfer, { kind: 'rss-item', id: item.id }, item.title)
   event.dataTransfer.effectAllowed = 'copy'
 }
 

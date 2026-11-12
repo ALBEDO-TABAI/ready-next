@@ -78,6 +78,8 @@ async function main() {
     await stage.click({ button: 'right', position: { x: 160, y: 520 } })
     await stage.getByRole('menuitem', { name: '文档卡…', exact: true }).click()
     await stage.getByRole('menuitem', { name: '来源文档', exact: true }).click()
+    // The card is written before the menu closes, and the board ignores right-clicks while a write is in flight.
+    await stage.locator('.canvas-context').waitFor({ state: 'detached', timeout: 15000 })
     await stage.click({ button: 'right', position: { x: 520, y: 520 } })
     await stage.getByRole('menuitem', { name: '链接…', exact: true }).click()
     await stage.getByLabel('链接网址').fill('https://example.com')

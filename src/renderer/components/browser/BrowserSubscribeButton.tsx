@@ -35,7 +35,7 @@ export default function BrowserSubscribeButton({ feeds, pageTitle }: { feeds: Fe
       const result = await window.electronAPI.rss.addSource({ name, url: feed.url })
       if (!result?.success) throw new Error(result?.error || '订阅失败')
       setSubscribed(current => [...current, feed.url])
-      showToast(`已订阅「${result.data?.name || name}」`, { action: { label: '去资讯', onClick: () => requestWorkbenchModeOpen('rss') } })
+      showToast(`已订阅「${result.data?.name || name}」`, { actions: [{ label: '去资讯', onClick: () => requestWorkbenchModeOpen('rss') }] })
     } catch (error) {
       /* silent-catch: the failure is shown to the person as a toast; nothing else depends on it. */
       showToast(`没能订阅：${error instanceof Error ? error.message : String(error)}`, { tone: 'bad' })

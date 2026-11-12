@@ -21,6 +21,7 @@ import { FastCardTransferService } from '../fastcard/transfer-service'
 import { FastCardQuickNoteService } from '../fastcard/quick-note-service'
 import { FastCardQuickNoteWindow } from '../fastcard/quick-note-window'
 import { registerFastCardServicesIPC } from '../fastcard/ipc'
+import { copyFastCardImage } from '../fastcard/document-image'
 
 export function setupCanvasRuntime(ready: Promise<void>, paths: { preloadPath: string; rendererFile: string; rendererUrl?: string }) {
   const db = getDatabase().getRawDb()
@@ -65,7 +66,8 @@ export function setupCanvasRuntime(ready: Promise<void>, paths: { preloadPath: s
     getFallbackExportDir: homedir,
   })
   registerCanvasCompositionIPC(ipcMain, async event => { const services = await resolve(); authorize(event, services.canvas.root); return services.composition })
-  registerFastCardServicesIPC(ipcMain, { transfer: async () => (await resolve()).transfer, quickNote })
+  registerFastCardServicesIPC(ipcMain, { transfer: async () => (await resolve()).transfer, quickNote,
+    documentImage: async input => copyFastCardImage(input, (await resolve()).canvas.root, registry, repository, cache) })
   // First-run setup may have no library. Requests resolve the newly configured library lazily.
   void ready.then(async () => { if (vault.get().status === 'ready') await resolve(); quickNote.start() }).catch(error => console.error('[canvas] startup recovery failed', error))
   return { drafts, repository, stop() { quickNote.stop(); quickWindow.destroy() } }

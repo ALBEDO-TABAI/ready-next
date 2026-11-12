@@ -1,4 +1,6 @@
-import { readEventTransfer, READY_REF_MIME } from '../../calendar/linkage/transfer'
+import { readReadyRefTransfer, READY_REF_MIME } from '../../../../shared/ready-ref'
+import { dropDocumentReference } from '../../workbench/capture'
+import { getGeneratedImageDragPayload } from '../../image-generation/generatedImageDrag'
 import { blockWithMarker } from '../../../../shared/document-anchors'
 import { AnnotationWorkspace } from '../annotations/AnnotationWorkspace'
 import { useCallback, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, useId, type ReactNode } from 'react'
@@ -58,6 +60,10 @@ function SourceBlock({ block, buffer, children, report }: { block: DocumentBlock
   </div>
 }
 
+// An embedded view that handles drops inside itself (a database board, calendar or timeline moving its own rows)
+// marks its root with data-own-drops; the page leaves those drops alone instead of inserting a reference.
+const ownsDrops = (target: EventTarget | null) => target instanceof Element && !!target.closest('[data-own-drops]')
+
 export function ReadyBlockEditor({ tabId, content: displayedContent, pageTitle, renderSource }: { tabId: string; content?: string; pageTitle?: string; renderSource(block: DocumentBlock): ReactNode }) {
   // A retained hidden DocumentMode supplies its frozen snapshot. Do not bypass it.
   const content = useDocTabs(state => displayedContent ?? state.tabs.find(tab => tab.id === tabId)?.content ?? '')
@@ -88,6 +94,7 @@ export function BufferedBlockEditor({ buffer, linkBase, content: displayedConten
   const [appendPrefix, setAppendPrefix] = useState('')
   const [focusRequest, setFocusRequest] = useState<{ at: number; textOffset?: number } | null>(null)
   const root = useRef<HTMLDivElement>(null)
+  const movingOwnBlock = useRef(false)
   const report = useCallback((cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause)), [])
   const focus = (at: number, empty = false, textOffset?: number) => { setAppendPrefix(''); setEmptyAt(empty ? at : null); setFocusRequest({ at, textOffset }) }
   function travel(direction: 'undo' | 'redo') {
@@ -197,19 +204,20 @@ export function BufferedBlockEditor({ buffer, linkBase, content: displayedConten
     ? null : emptyBlock(emptyAt, containing?.id ?? null)
   if (extra && !extra.parentId) { segments.push(extra); segments.sort((a, b) => a.start - b.start) }
   return <AnnotationWorkspace buffer={buffer}><div ref={root} className="note-preview-body" data-ready-block-editor={editorId}
-    onDragOverCapture={event => { if (event.dataTransfer?.types.includes(READY_REF_MIME)) { event.preventDefault(); event.stopPropagation() } }}
+    onDragStartCapture={event => { movingOwnBlock.current = event.target instanceof Element && !!event.target.closest('.ready-block-handle') }}
+    onDragEndCapture={() => { movingOwnBlock.current = false }}
+    onDragOverCapture={event => { if (!movingOwnBlock.current && !ownsDrops(event.target) && event.dataTransfer?.types.includes(READY_REF_MIME)) { event.preventDefault(); event.stopPropagation() } }}
     onDropCapture={event => {
       try {
-        const dropped = event.dataTransfer ? readEventTransfer(event.dataTransfer) : null
+        if (movingOwnBlock.current) { movingOwnBlock.current = false; return }
+        if (ownsDrops(event.target)) return
+        if (getGeneratedImageDragPayload(event.dataTransfer)) return
+        const dropped = event.dataTransfer ? readReadyRefTransfer(event.dataTransfer) : null
         if (!dropped) return
-        event.preventDefault(); event.stopPropagation(); buffer.flush()
-        const snapshot = buffer.snapshot
+        event.preventDefault(); event.stopPropagation()
         const target = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-block-start]') : null
-        const at = target ? Number(target.dataset.blockStart) : snapshot.content.length
-        const title = inlineMarkdown(plainModel(), [{ text: dropped.title.replace(/[\r\n]/g, ' '), marks: { reference: { kind: 'ready', ref: dropped.ref } } }])
-        const eol = newline(snapshot.content)
-        const text = `${at && !snapshot.content.slice(0, at).endsWith('\n') ? eol + eol : ''}${title}${eol}${eol}`
-        buffer.apply(createRangeEdit(snapshot, [{ start: at, end: at, expectedText: '', replacement: text }], { anchor: at, focus: at }, { anchor: at, focus: at + text.length }))
+        const at = target ? Number(target.dataset.blockStart) : buffer.snapshot.content.length
+        void dropDocumentReference(event.dataTransfer, buffer, at).catch(report)
       } catch (cause) { console.warn('[ReadyBlockEditor] insert dropped reference failed:', cause instanceof Error ? cause.message : String(cause)); event.preventDefault(); event.stopPropagation(); report(cause) }
     }}
     onKeyDownCapture={event => {

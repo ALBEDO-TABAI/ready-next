@@ -1,3 +1,5 @@
+import { beginGeneratedImageDrag } from '../renderer/modules/image-generation/generatedImageDrag'
+import { writeReadyRefTransfer } from '../shared/ready-ref'
 import assert from 'node:assert/strict'
 import { registerHooks } from 'node:module'
 import { editorFixture } from './helpers/ready-block-editor-fixture'
@@ -16,7 +18,7 @@ import {
   generatedImagesFromMessage,
 } from '../renderer/modules/image-generation/generatedImageArtifacts'
 import {
-  parseGeneratedImageDragPayload, READY_GENERATED_IMAGE_MIME,
+  getGeneratedImageDragPayload, endGeneratedImageDrag,
 } from '../renderer/modules/image-generation/generatedImageDrag'
 import { isImageGenerationReferencePath } from '../shared/image-generation'
 import { buildCanonicalCoreCloseoutMessage } from '../main/modules/repositories/canonical-core-closeout-message'
@@ -79,26 +81,16 @@ test('live task artifacts restore the preview before canonical message metadata 
   assert.equal(generatedImagesFromArtifacts([artifact, artifact])[0]?.path, artifact.path)
 })
 
-test('generated image drag payload requires a local absolute path and preserves image identity', () => {
-  const raw = JSON.stringify({
-    type: 'generated-image',
-    id: artifact.id,
-    path: artifact.path,
-    name: artifact.label,
-    ext: 'png',
-    size: 0,
-    mimeType: 'image/png',
-  })
-  assert.deepEqual(parseGeneratedImageDragPayload(raw), {
-    type: 'generated-image',
-    id: artifact.id,
-    path: artifact.path,
-    name: artifact.label,
-    ext: 'png',
-    size: 0,
-    mimeType: 'image/png',
-  })
-  assert.equal(parseGeneratedImageDragPayload(raw.replace(artifact.path, 'relative/image.png')), null)
+test('generated image drag preserves the selected object identity and rejects a stale gesture', () => {
+  const payload = { type: 'generated-image' as const, id: artifact.id, path: artifact.path, name: artifact.label, ext: 'png', size: 0, mimeType: 'image/png' }
+  beginGeneratedImageDrag(payload, 'image-object')
+  const values = new Map<string, string>()
+  const data = { getData: (key: string) => values.get(key) || '', setData: (key: string, value: string) => { values.set(key, value) } }
+  writeReadyRefTransfer(data, { kind: 'file', id: 'image-object' }, artifact.label)
+  assert.deepEqual(getGeneratedImageDragPayload(data), payload)
+  writeReadyRefTransfer(data, { kind: 'file', id: 'different-object' }, '其他图片')
+  assert.equal(getGeneratedImageDragPayload(data), null)
+  endGeneratedImageDrag()
 })
 
 test('/imag command replacement keeps surrounding input and leaves the cursor after the command', () => {
@@ -184,8 +176,10 @@ test('generated images can drop into both document editing surfaces', async t =>
     function Surface() { const tab = f.useDocTabs(state => state.tabs[0]); return createElement(MarkdownEditor, { tab, viewMode: mode, previewEditable: true, previewClassName: 'ink-page' }) }
     await act(async () => f.root.render(createElement(MemoryRouter, null, createElement(Surface))))
     const surface = document.querySelector(`.document-${mode === 'edit' ? 'editor' : 'preview'}-surface`); assert.ok(surface)
-    const raw = JSON.stringify({ type: 'generated-image', id: artifact.id, path: artifact.path, name: artifact.label, ext: 'png', size: 0, mimeType: 'image/png' })
-    const dataTransfer = { types: [READY_GENERATED_IMAGE_MIME, 'application/x-ready-drag'], getData: (type: string) => type === READY_GENERATED_IMAGE_MIME ? raw : '', dropEffect: '' }
+    beginGeneratedImageDrag({ type: 'generated-image', id: artifact.id, path: artifact.path, name: artifact.label, ext: 'png', size: 0, mimeType: 'image/png' }, artifact.id)
+    const values = new Map<string, string>()
+    writeReadyRefTransfer({ setData: (key, value) => { values.set(key, value) } }, { kind: 'file', id: artifact.id }, artifact.label)
+    const dataTransfer = { types: [...values.keys()], getData: (type: string) => values.get(type) || '', dropEffect: '' }
     for (const type of ['dragover', 'drop']) {
       const event = new f.dom.window.Event(type, { bubbles: true, cancelable: true })
       Object.defineProperty(event, 'dataTransfer', { value: dataTransfer })

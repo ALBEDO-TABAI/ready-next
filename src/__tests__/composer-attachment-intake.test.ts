@@ -1,3 +1,4 @@
+import { calendarEventReadyRef } from '../shared/calendar-event-identity'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createElement } from 'react'
@@ -78,9 +79,10 @@ function makeDropEvent(input: {
     stopPropagation: () => undefined,
     dataTransfer: {
       files: input.files || [],
-      getData: (format: string) => format === 'application/x-ready-drag' && input.readyPayload
+      types: input.readyPayload ? ['application/x-ready-ref'] : ['Files'],
+      getData: (format: string) => format === 'application/x-ready-ref' && input.readyPayload
         ? JSON.stringify(input.readyPayload)
-        : '',
+        : format === 'text/plain' ? String(input.readyPayload?.name || 'A tab') : '',
     },
   } as unknown as ReactDragEvent
 }
@@ -118,7 +120,7 @@ test('browser-tab drag rejects a presentation-only payload without an exact tab 
   setComposerSession('a')
 
   await withMountedIntake({
-    browser: { getTabContext: () => { throw new Error('renderer snapshot must not be called') } },
+    browser: { getTabs: async () => [], getTabContext: () => { throw new Error('renderer snapshot must not be called') } },
   }, async (handle, focusCount) => {
     await handle.handleDrop(makeDropEvent({
       readyPayload: {
@@ -140,51 +142,30 @@ test('browser-tab drag stores only the exact tab identity and never trusts a ren
   setComposerSession('a')
 
   await withMountedIntake({
-    browser: { getTabContext: () => { rendererSnapshotCalls += 1 } },
+    browser: { getTabs: async () => [{ id: 'tab-a', url: 'https://a.example' }], getTabContext: () => { rendererSnapshotCalls += 1 } },
   }, async (handle, focusCount) => {
     await handle.handleDrop(makeDropEvent({
-      readyPayload: {
-        type: 'browser-tab',
-        name: 'A tab',
-        title: 'A tab',
-        url: 'https://a.example',
-        tabId: 'tab-a',
-      },
+      readyPayload: { kind: 'web', url: 'https://a.example' },
     }))
 
     assert.equal(useAgent.getState().attachments.length, 1)
-    assert.equal(useAgent.getState().attachments[0]?.title, 'A tab')
+    assert.equal(useAgent.getState().attachments[0]?.name, 'A tab')
     assert.equal(useAgent.getState().attachments[0]?.browserTabId, 'tab-a')
     assert.equal(rendererSnapshotCalls, 0)
     assert.equal(focusCount(), 1)
   })
 })
 
-test('calendar and unsaved document drags remain structured resources instead of composer text', async () => {
+test('calendar and saved document drags remain structured resources instead of composer text', async () => {
   setComposerSession('a')
-  await withMountedIntake({}, async (handle, focusCount) => {
-    await handle.handleDrop(makeDropEvent({
-      readyPayload: {
-        type: 'calendar-event',
-        name: '评审会',
-        eventId: 'event-1',
-      },
-    }))
-    await handle.handleDrop(makeDropEvent({
-      readyPayload: {
-        type: 'doc-tab',
-        name: '未命名草稿',
-        tabId: 'doc-draft',
-        selection: '尚未落盘的准确正文',
-        dirty: true,
-      },
-    }))
-
+  await withMountedIntake({ objects: { locate: async () => ({ path: '/fixture/page.md' }) }, document: { stat: async () => ({ success: true, data: { isDirectory: false } }) } }, async (handle, focusCount) => {
+    await handle.handleDrop(makeDropEvent({ readyPayload: { kind: 'event', id: 'event-1' } }))
+    await handle.handleDrop(makeDropEvent({ readyPayload: { kind: 'page', id: 'page' } }))
     const state = useAgent.getState()
     assert.equal(state.inputValue, '')
-    assert.deepEqual(state.attachments.map((item) => item.source), ['calendar-event', 'document-tab'])
+    assert.deepEqual(state.attachments.map(item => item.source), ['calendar-event', 'file'])
     assert.equal(state.attachments[0]?.eventId, 'event-1')
-    assert.equal(state.attachments[1]?.selection, '尚未落盘的准确正文')
+    assert.equal(state.attachments[1]?.path, '/fixture/page.md')
     assert.equal(focusCount(), 2)
   })
 })
@@ -273,10 +254,10 @@ test('calendar drag uses the same ReadyRef identity as right-click including all
   ] as const) {
     setComposerSession('a')
     await withMountedIntake({}, async handle => {
-      await handle.handleDrop(makeDropEvent({ readyPayload: { type: 'calendar-event', name: 'Meeting', eventId, allDay } }))
+      await handle.handleDrop(makeDropEvent({ readyPayload: calendarEventReadyRef(eventId, allDay) || { kind: 'event' } }))
+      if (!eventId) { assert.deepEqual(useAgent.getState().attachments, []); return }
       assert.equal(useAgent.getState().attachments[0]?.path, path)
       assert.equal(useAgent.getState().attachments[0]?.eventId, eventId)
-      if (!eventId) assert.match(useAgent.getState().attachments[0].name, /无法定位/)
     })
   }
 })

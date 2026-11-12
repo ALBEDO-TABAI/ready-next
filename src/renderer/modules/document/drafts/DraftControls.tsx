@@ -44,7 +44,7 @@ export function DraftBootNotice() {
 }
 
 export function DraftControls() {
-  const { error, saveTabId, saveParentPath, saveRequestId } = useDraftUI()
+  const { error, saveTabId, saveParentPath, saveRequestId, saveHost } = useDraftUI()
   const tabs = useDocTabs(state => state.tabs)
   const activeId = useDocTabs(state => state.focusedPaneTabId || state.activeTabId)
   // On 今日 there is no page: only the recovery badge and its panel show (the active tab's status does not).
@@ -111,7 +111,7 @@ export function DraftControls() {
       }) }}>另存为新文档</button>
       <button className="ink-btn" onClick={() => setConflict(null)}>关闭比较</button>
     </section>}
-    {saveTabId && <div className="ink-draft-panel"><ConnectedSaveToPicker key={saveRequestId} initialTitle={tabs.find(tab => tab.id === saveTabId)?.title.replace(/\.md$/i, '') || '新文档'}
+    {saveTabId && saveHost === 'document' && <div className="ink-draft-panel"><ConnectedSaveToPicker key={saveRequestId} initialTitle={tabs.find(tab => tab.id === saveTabId)?.title.replace(/\.md$/i, '') || '新文档'}
       initialParentPath={saveParentPath} onCancel={() => completeDraftSave(null, saveRequestId)} onConfirm={async selection => {
         const saved = await finalizeDraftTab(saveTabId, selection)
         completeDraftSave(saved.path, saveRequestId)

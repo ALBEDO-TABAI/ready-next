@@ -3,7 +3,7 @@ import type { TodoEntry } from '../../../../../shared/calendar-layers'
 import { isoDate } from '../../../../../shared/calendar/dates'
 import { openReadyRef } from '../../../workbench/open-ready-ref'
 import { toast, useStore } from '../store'
-import { TODO_MIME, todoFromList, toggleTodo } from './todo-actions'
+import { writeTodoTransfer, endTodoTransfer, todoFromList, toggleTodo } from './todo-actions'
 
 // The calendar sidebar's 待办 (W4 §5): every open checkbox in the library, in three groups. Ticking writes the
 // one line through Main; dragging a row onto a day gives it that date (LayerDay accepts the drop).
@@ -54,7 +54,7 @@ function TodoRow({ todo, overdue, onError }: { todo: TodoEntry; overdue: boolean
   const handle = todoFromList(todo)
   const where = [todo.page.title, todo.heading].filter(Boolean).join(' › ')
   return <div className="side-row todo-row" data-todo-id={todo.id} draggable
-    onDragStart={event => { event.dataTransfer.setData(TODO_MIME, JSON.stringify(handle)); event.dataTransfer.effectAllowed = 'move' }}>
+    onDragStart={event => { writeTodoTransfer(event.dataTransfer, handle, todo.page.ref); event.dataTransfer.effectAllowed = 'move' }} onDragEnd={endTodoTransfer}>
     <button type="button" role="checkbox" aria-checked={false} className="todo-check" aria-label={`勾掉：${todo.title}`}
       onClick={() => { void toggleTodo(handle, true).then(state => { if (state === 'unsaved') toast('已在打开的页面里勾掉，保存那一页后生效') }, onError) }} />
     <button type="button" className="todo-title" title={where} onClick={() => { void openReadyRef(todo.page.ref, 'calendar').catch(onError) }}>

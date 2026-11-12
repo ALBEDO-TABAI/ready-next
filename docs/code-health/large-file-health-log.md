@@ -21,11 +21,14 @@
 
 | 评估日期 | 任务 | 文件 | 总行数 | 本次新增 | 结论 | 判断与后续动作 | 状态 |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
-| 2026-11-12 | W7 T7/T8 浏览器壳界面（B12 第三批） | `src/renderer/pages/modes/BrowserMode.tsx` | 1516 | 净 +22 | 一般 | 只接线：任务标签组、提示条、⌘F 查找条和页面能力都在独立模块（`useBrowserTaskShell`、`BrowserTaskBand`、`useBrowserFind`、`usePageCapabilities`），页面只把它们放进侧栏与网页上方的槽位；锁定提示在出现提示条时让位。复查：把网页层显隐与锁定浮窗的两段副作用移出页面。 | 已排期：2026-11-30 |
+| 2026-11-12 | W7 T7/T8 浏览器壳界面（B12 第三批） | `src/renderer/pages/modes/BrowserMode.tsx` | 1527（合入 B11 第二步后） | 净 +22 | 一般 | 只接线：任务标签组、提示条、⌘F 查找条和页面能力都在独立模块（`useBrowserTaskShell`、`BrowserTaskBand`、`useBrowserFind`、`usePageCapabilities`），页面只把它们放进侧栏与网页上方的槽位；锁定提示在出现提示条时让位。复查：把网页层显隐与锁定浮窗的两段副作用移出页面。 | 已排期：2026-11-30 |
 | 2026-11-12 | W7 T7 一键继续的准入修复 | `src/main/modules/agent-control/codex-runtime/codex-product-run-preparer.ts` | 1014 | 净 +2 | 一般 | 只给页面引用的严格结构补上 B12 加入的 origin 字段（否则浏览器模式带当前网页的每一轮都被拒）。复查：页面引用结构应与 `TrustedRequestEnvironment` 共用一个定义，避免两处再漂移。 | 已排期：2026-11-30 |
 | 2026-11-12 | W7 T8/T7 壳数据 | `src/main/modules/agent-control/runtime-core/runtime.ts` | 1973 | 净 +9 | 一般 | 只接入原任务会话归属解析与已消费状态的刷新通知；不增加执行链。 | 复查：2026-11-30，按既有运行时装配边界复查 |
 | 2026-11-12 | W7 T8/T7 壳数据 | `src/preload/index.ts` | 1798 | 净 +25 | 一般 | 五个浏览器调用与四个可退订事件透传；IPC 对应检查和真实预加载行为检查覆盖。 | 复查：2026-11-30，按域拆分透传声明 |
 | 2026-11-12 | W7 T8/T7 壳数据 | `src/renderer/types/electron.d.ts` | 3459 | 净 +9 | 健康 | 只增加共享类型引用和预加载接口声明，类型与 IPC 对应检查覆盖。 | 记录结论 |
+| 2026-11-12 | W6-T5/T6 收下界面半（B11 第二步） | `src/renderer/pages/modes/BrowserMode.tsx` | 1505 | 净 +11 | 一般 | 只接网页选区条（逻辑在 `modules/browser/web-selection-bar.tsx`）和暂存栏浮窗的“插入到文档”命令，并删掉旧的“划线到来源页”按钮；网页层显隐与其余接线不变。复查同 M4-D 行。 | 已排期：2026-11-30 |
+| 2026-11-12 | W6-T5/T6 收下界面半（B11 第二步） | `src/preload/index.ts` | 1776 | 净 +6 | 一般 | 只加 `browser.onSelectionChanged` 推送订阅，`verify:ipc-contract` 核对。复查同 W5 行：预加载按域拆文件。 | 已排期：2026-11-30 |
+| 2026-11-12 | W6-T5/T6 收下界面半（B11 第二步） | `src/renderer/types/electron.d.ts` | 3447 | 净 +3 | 健康 | 引用共享的 `BrowserSelectionEvent`，声明聚合由 IPC 检查覆盖。 | 记录结论 |
 | 2026-11-12 | W7 B12 Main | `src/__tests__/browser-engine-services.test.ts` | 1391 | 净 +1 | 健康 | 声明或行为测试聚合；类型、IPC 与对应行为检查覆盖。 | 记录结论 |
 | 2026-11-12 | W7 B12 Main | `src/main/modules/agent-control/codex-runtime/composition/ingress-prepare.ts` | 1020 | 净 +1 | 一般 | 本次只接入浏览器任务边界；复查按浏览器授权、观察与任务记录的现有职责划分。 | 复查：2026-11-30 |
 | 2026-11-12 | W7 B12 Main | `src/main/modules/tools/browser-observe-tools.ts` | 1261 | 净 +20 | 一般 | 本次只接入浏览器任务边界；复查按浏览器授权、观察与任务记录的现有职责划分。 | 复查：2026-11-30 |
@@ -897,6 +900,18 @@
 | 2026-11-12 | `src/preload/index.ts` | 1755 | +2 | 一般 | 增加对象、数据库速览与资讯理由透传，书源改为返回网址，退役日历外开；2026-12-12 复查按域接线边界。 |
 | 2026-11-12 | `src/renderer/pages/modes/BrowserMode.tsx` | 1494 | +3 | 一般 | 只转发 FastCard 定位目标到现有浮窗；2026-12-12 复查模式页的功能接线边界。 |
 | 2026-11-12 | `src/renderer/types/electron.d.ts` | 3444 | +2 | 健康 | 补速览与搜索展示字段，移除未使用的日历外开声明；类型和 IPC 检查覆盖。 |
+
+
+## 2026-11-12 W6 统一拖拽与收下接线
+
+| 日期 | 文件 | 总行数 | 本轮净增 | 评级 | 说明与复查 |
+|---|---|---:|---:|---|---|
+| 2026-11-12 | `src/main/modules/agent-control/codex-runtime/composition/ingress-prepare.ts` | 1039 | +20 | 一般 | 只装配 Main 读取收集、可见对话与已保存网页摘录的入口；不增加工具或写授权。2026-12-12 复查装配边界。 |
+| 2026-11-12 | `src/preload/index.ts` | 1756 | +1 | 一般 | 只增加图片复制到页面附件目录的接口透传；2026-12-12 复查按域分组。 |
+| 2026-11-12 | `src/renderer/components/document/MarkdownEditor.tsx` | 1133 | +10 | 一般 | 源码视图拖入引用转交共享插入函数；保留原正文与撤销。2026-12-12 复查保存与拖入接线。 |
+| 2026-11-12 | `src/renderer/components/layout/FileTree.tsx` | 1889 | +1 | 一般 | 替换内部接收路径，页面与文件分别调用所属移动入口；不扩展外部剪藏。2026-12-12 复查接收边界。 |
+| 2026-11-12 | `src/renderer/modules/agent/messageComposer.ts` | 1109 | +8 | 一般 | 透传并校验当前选入的收集、对话与网页引用，历史显示不提供额外授权；2026-12-12 复查资源接线。 |
+| 2026-11-12 | `src/shared/ipc-contracts/agent-runtime.ts` | 1418 | +3 | 健康 | 增加结构化只读引用形状，实际准入在 Main 读取原服务；由类型、IPC 和行为测试覆盖。 |
 ## 2026-11-12 B10 相关度排序与换换口味
 
 | 日期 | 文件 | 总行数 | 本轮净增 | 评级 | 说明与复查 |
@@ -931,3 +946,10 @@
 | 2026-11-12 | `src/preload/index.ts` | 1771 | +2 | 一般 | 新增两组类型化接口转发；2026-12-12 复查接口分组边界。 |
 | 2026-11-12 | `src/renderer/types/electron.d.ts` | 3446 | +2 | 健康 | 引用共享 API 类型，无重复业务规则。 |
 | 2026-11-12 | `src/__tests__/browser-engine-services.test.ts` | 1392 | +2 | 健康 | 在已有原生快捷键桥用例里补前进、后退识别断言，不新增测试框架。 |
+
+## 2026-11-12 M8 第三方声明数据接口
+
+| 日期 | 文件 | 总行数 | 本轮净增 | 评级 | 说明与复查 |
+|---|---|---:|---:|---|---|
+| 2026-11-12 | `src/preload/index.ts` | 1774 | +1 | 一般 | 仅转发第三方声明读取，共享返回类型与 Main 校验；2026-12-12 复查按域接口分组。 |
+| 2026-11-12 | `src/renderer/types/electron.d.ts` | 3451 | +1 | 健康 | 只引用共享声明类型，无新增业务逻辑。 |

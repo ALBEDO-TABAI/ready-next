@@ -129,26 +129,24 @@ async function main() {
       return { x1: first.left + 1, y1: first.top + first.height / 2, x2: last.right - 1, y2: last.top + last.height / 2 }
     })
     await page.mouse.move(drag.x1, drag.y1); await page.mouse.down(); await page.mouse.move(drag.x2, drag.y2, { steps: 12 }); await page.mouse.up()
-    await page.getByRole('dialog', { name: '划线', exact: true }).getByRole('button', { name: '黄', exact: true }).click()
+    // Selected words show the reading scenes' shared bar; its 划线 is the book's highlight (first marker).
+    await page.getByRole('dialog', { name: '划线', exact: true }).locator('[data-ready-selection-bar]').getByRole('button', { name: '划线', exact: true }).click()
     await poll(() => Boolean(markFile('阅读')), 'Book mark not saved')
 
     const feed = await page.evaluate(url => window.electronAPI.rss.addSource({ name: '本地验收', url }), `http://127.0.0.1:${port}/feed`)
     assert.equal(feed.success, true, JSON.stringify(feed))
     await mode('rss')
-    // 资讯 opens on 为你筛过的 (W5); the article is listed under 全部.
-    await page.locator('nav[aria-label="资讯导航"] [aria-label="全部"]').click()
+    // 资讯 opens on 为你筛过的 (W5); the article list is under 全部.
+    await page.locator('nav[aria-label="资讯导航"] [aria-label="全部"]').click({ timeout: 20000 })
     await page.getByText('来源验收文章', { exact: true }).first().click()
     await poll(() => page.locator('.rss-reader-body [data-ready-reading-run]').count().then(n => n > 0), 'RSS body missing')
-    // The reader can re-render right after opening (read state); select again until the menu sees the selection.
-    const rssHighlight = page.getByRole('button', { name: '划线到来源页', exact: true })
+    // The reader can re-render right after opening (read state); select again until the shared bar shows for it.
+    const rssHighlight = page.locator('[data-ready-selection-bar]').getByRole('button', { name: '划线', exact: true })
     for (let attempt = 0; ; attempt++) {
       // The reader shows the article fetched from its link; the quote is its second paragraph.
       await select(page, '.rss-reader-body [data-ready-reading-run]', '乙丙丁戊己')
-      if (!await rssHighlight.isVisible()) await page.getByRole('button', { name: '引用', exact: true }).click()
-      const deadline = Date.now() + 3000
-      while (Date.now() < deadline && !await rssHighlight.isEnabled().catch(() => false)) await page.waitForTimeout(100)
-      if (await rssHighlight.isEnabled().catch(() => false)) { await rssHighlight.click(); break }
-      assert.ok(attempt < 4, 'RSS selection never reached the highlight menu')
+      if (await rssHighlight.waitFor({ timeout: 3000 }).then(() => true, () => false)) { await rssHighlight.click(); break }
+      assert.ok(attempt < 4, 'RSS selection never reached the selection bar')
       await page.waitForTimeout(500)
     }
     await poll(() => Boolean(markFile('文章')), 'RSS mark not saved')
@@ -162,9 +160,14 @@ async function main() {
     await poll(() => { web = app.context().pages().find(p => p.url() === webURL); return !!web }, 'Native browser page missing')
     // The first visit to the browser in this session sets the view up: wait until the new tab is the one in view.
     await poll(() => page.getByPlaceholder('搜索或输入网址').inputValue().then(value => value === webURL).catch(() => false), 'New tab never became the active one')
-    await page.getByRole('button', { name: 'FastCard', exact: true }).click()
     await select(web, '#quote')
-    await page.getByRole('button', { name: '划线到来源页', exact: true }).click()
+    // A selection ends with an input event (here the keyboard's Shift is let go); Main then reports it, and the
+    // shared bar shows in the band under the page.
+    await app.evaluate(({ webContents }, url) => {
+      const contents = webContents.getAllWebContents().find(candidate => candidate.getURL() === url)
+      contents.sendInputEvent({ type: 'keyDown', keyCode: 'Shift' }); contents.sendInputEvent({ type: 'keyUp', keyCode: 'Shift' })
+    }, webURL)
+    await page.locator('[data-ready-selection-bar]').getByRole('button', { name: '划线', exact: true }).click()
     await poll(() => Boolean(markFile('网页')), 'Web mark not saved')
 
     const files = ['阅读', '文章', '网页'].map(markFile)
@@ -182,7 +185,7 @@ async function main() {
     await poll(() => page.locator('[data-pdf-text-state="ready"] .react-pdf__Page__textContent').count().then(n => n > 0), 'PDF text layer missing')
     await page.getByRole('button', { name: '下一页', exact: true }).click()
     await select(page, '[data-page="2"] .react-pdf__Page__textContent')
-    await page.getByRole('button', { name: '划线到来源页', exact: true }).click()
+    await page.locator('[data-ready-selection-bar]').getByRole('button', { name: '划线', exact: true }).click()
     let pdfSource
     await poll(() => {
       pdfSource = fs.readdirSync(path.join(vault, '文章')).filter(name => name.endsWith('.md')).map(name => path.join(vault, '文章', name))

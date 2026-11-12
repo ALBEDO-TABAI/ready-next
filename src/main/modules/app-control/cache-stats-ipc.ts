@@ -6,6 +6,7 @@
  * directory removal; this wrapper just supplies real Electron + Node deps.
  */
 import { tmpdir } from 'node:os'
+import { setupThirdPartyNoticesIPC } from './third-party-notices'
 import { ipcMain, app, session, shell } from 'electron'
 
 import {
@@ -31,6 +32,8 @@ interface ClearCachePayload {
 export function setupAppCacheIPC(options: {
   readCodexRuntimeDiagnostics: () => Promise<CodexRuntimeDiagnosticSnapshot> | null
 }): void {
+  setupThirdPartyNoticesIPC(ipcMain, app, process.resourcesPath)
+
   ipcMain.handle('app:getCacheStats', async (): Promise<IPCResponse<CacheStats>> => {
     try {
       const userData = app.getPath('userData')

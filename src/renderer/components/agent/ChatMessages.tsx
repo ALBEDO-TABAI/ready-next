@@ -9,7 +9,10 @@ const CHAT_BOTTOM_SAFETY_MARGIN_PX = 12
 // overflows the viewport), composer-resize-driven re-renders must NOT yank the
 // view back down. 96px ≈ one short message of slack so小幅 overshoot still counts.
 const CHAT_STICK_TO_BOTTOM_THRESHOLD_PX = 96
-import { Copy, Check, RotateCcw } from 'lucide-react'
+import { Copy, Check, FilePlus2, MoreHorizontal, RotateCcw, Shapes } from 'lucide-react'
+import { anchorOf, openMenu } from '../ui'
+import { answerCapture } from '../../modules/agent/answer-capture'
+import { receiveAnswerAsPage, receiveToCanvas, reportCaptureError } from '../../modules/workbench/capture-receipt'
 import type { AgentMessage, AgentArtifact, ChatAttachment, ToolTraceEvent } from '../../stores/useAgent'
 import { useAgent } from '../../stores/useAgent'
 import { useMode } from '../../stores/useMode'
@@ -35,6 +38,17 @@ import type {
   CodexConversationContextBoundary,
   CodexProductTurnActionProjection,
 } from '../../../shared/ipc-contracts/agent-runtime'
+
+// 收下 an answer (W6 §3.2): a card on a board, or a page through the draft and the Save To dialog.
+function openAnswerMenu(element: HTMLElement, message: AgentMessage) {
+  const take = (receive: (selection: ReturnType<typeof answerCapture>) => Promise<unknown>) => () => {
+    void Promise.resolve().then(() => receive(answerCapture(message))).catch(reportCaptureError)
+  }
+  openMenu(anchorOf(element), [
+    { id: 'card', label: '存为卡片', icon: <Shapes />, onSelect: take(receiveToCanvas) },
+    { id: 'page', label: '存为页面', icon: <FilePlus2 />, onSelect: take(receiveAnswerAsPage) },
+  ], { placement: 'bottom-end', label: '收下这段回答' })
+}
 
 // The session-tab strip + chat header overflow ~24px into the top of this
 // scroll region (MotionLayer's header row is a fixed 44px). The top padding
@@ -439,7 +453,7 @@ export default function ChatMessages({
                 <div
                   className="group/agentmsg relative max-w-[90%] t-body"
                   data-typography-role="body"
-                  style={{ color: 'var(--text-body)', paddingRight: 18 }}
+                  style={{ color: 'var(--text-body)', /* room for the hover row: 复制回复 and 收下这段回答 */ paddingRight: msg.content?.trim() && !isStreamingMessage ? 40 : 18 }}
                   onContextMenu={(event) => {
                     const selectedText = window.getSelection()?.toString()?.trim() || ''
                     if (!selectedText) return
@@ -506,6 +520,23 @@ export default function ChatMessages({
                           ) : (
                             <Copy style={{ width: 12, height: 12 }} strokeWidth={2} />
                           )}
+                        </button>
+                      ) : null}
+                      {msg.content?.trim() && !isStreamingMessage ? (
+                        <button
+                          type="button"
+                          onClick={(event) => openAnswerMenu(event.currentTarget, msg)}
+                          className="flex items-center justify-center"
+                          style={{
+                            width: 18, height: 18, borderRadius: 8,
+                            border: '1px solid var(--border-default)',
+                            color: 'var(--text-light)', background: 'var(--surface-card-bg)',
+                          }}
+                          title="收下这段回答"
+                          aria-label="收下这段回答"
+                          aria-haspopup="menu"
+                        >
+                          <MoreHorizontal style={{ width: 12, height: 12 }} strokeWidth={2} />
                         </button>
                       ) : null}
                     </div>

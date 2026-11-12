@@ -1,3 +1,4 @@
+import { ReadyRefSchema, writeReadyRefTransfer } from '../../../shared/ready-ref'
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent } from 'react'
 import { Globe, Loader2, Lock, Plus, X } from 'lucide-react'
 import { beginBrowserTabDragSession, endBrowserTabDragSession } from '../../modules/browser/browserTabDragSession'
@@ -130,8 +131,8 @@ export default function BrowserTabList({
       draggedAt: Date.now(),
     }
     beginBrowserTabDragSession(payload)
-    event.dataTransfer.setData('application/x-ready-drag', JSON.stringify(payload))
-    event.dataTransfer.setData('text/plain', tab.url || tab.title || '')
+    const ref = ReadyRefSchema.safeParse({ kind: 'web', url: tab.url })
+    if (ref.success) writeReadyRefTransfer(event.dataTransfer, ref.data, tab.title || tab.url)
   }, [])
 
   const handleRowDragOver = useCallback((event: DragEvent, targetId: string) => {

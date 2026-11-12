@@ -1,3 +1,4 @@
+import { readReadyRefTransfer, writeReadyRefTransfer, toReadyUri, type ReadyRef } from '../../../../../shared/ready-ref'
 import type { LayerEntry, LayerReply, TodoEntry, TodoWriteReceipt } from '../../../../../shared/calendar-layers'
 import { openDialog } from '../../../../components/ui'
 import { getState, setPrefs } from '../store'
@@ -6,7 +7,12 @@ import { getState, setPrefs } from '../store'
 // service, which changes only the checkbox or the date in that one line.
 
 /** A to-do dragged from the sidebar list or the tasks layer onto a day. */
-export const TODO_MIME = 'application/x-ready-calendar-todo'
+let draggedTodo: { handle: TodoHandle; uri: string } | null = null
+export function writeTodoTransfer(data: Pick<DataTransfer, 'setData'>, handle: TodoHandle, ref: ReadyRef) {
+  draggedTodo = { handle, uri: toReadyUri(ref) }
+  writeReadyRefTransfer(data, ref, handle.title)
+}
+export function endTodoTransfer() { draggedTodo = null }
 
 export interface TodoHandle { id: string; version: string; title: string; obsidian: boolean }
 
@@ -20,16 +26,8 @@ export function todoFromLayer(entry: LayerEntry): TodoHandle | null {
 }
 
 export function readDraggedTodo(data: DataTransfer): TodoHandle | null {
-  const raw = data.getData(TODO_MIME)
-  if (!raw) return null
-  try {
-    const value = JSON.parse(raw) as Partial<TodoHandle>
-    return typeof value.id === 'string' && typeof value.version === 'string'
-      ? { id: value.id, version: value.version, title: String(value.title ?? ''), obsidian: value.obsidian === true } : null
-  } catch (error) {
-    console.warn('[calendar] unreadable dragged to-do', error)
-    return null
-  }
+  const dropped = readReadyRefTransfer(data)
+  return dropped && draggedTodo?.uri === toReadyUri(dropped.ref) ? draggedTodo.handle : null
 }
 
 function failure(reply: Extract<LayerReply<unknown>, { ok: false }>): Error {

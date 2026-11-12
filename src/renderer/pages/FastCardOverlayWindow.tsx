@@ -67,6 +67,7 @@ export default function FastCardOverlayWindow() {
           onClear={() => send({ type: 'clear' })}
           onSaveCanvas={itemIds => send({ type: 'save-canvas', itemIds })}
           onInsertToChat={itemIds => send({ type: 'insert-chat', itemIds })}
+          onInsertToDocument={id => send({ type: 'insert-document', id })}
           onRemoveItem={(id) => send({ type: 'remove-item', id })}
         /></div>
       )}

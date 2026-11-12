@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { DayInput, DaySummary } from '../../../../shared/calendar-linkage'
-import { openReadyRef } from '../../workbench/open-ready-ref'
+import { RefCapsule } from '../../../components/ui'
 import { attachDay } from './attachments'
 /** What each kind of entry on a day is called (这一天, its quick look). */
 export const DAY_ITEM_LABELS = { events: '日程', documents: '文档日期', tasks: '待办', reminders: '提醒', footprints: '阅读足迹', activity: '页面与画板' } as const
@@ -24,9 +24,9 @@ export function ThisDay({ date, timeZone }: DayInput) {
     {error && <p role="alert">{error}</p>}
     {!summary && !error && <p role="status">正在读取…</p>}
     {summary?.items.length === 0 && <p>这一天还没有记录</p>}
-    {summary?.items.map(item => <button key={item.id} className="ready-calendar-agenda" data-day-item={item.kind}
-      onClick={() => void openReadyRef(item.ref, 'calendar').catch(cause => setError(String(cause)))}>
-      <small>{DAY_ITEM_LABELS[item.kind]} · </small>{item.title}{item.detail && ` · ${item.detail}`}
-    </button>)}
+    {/* Each entry is a reference capsule (W6 §2.1): click opens, ⌥-click or hover then Space quick-looks. */}
+    {summary?.items.map(item => <div key={item.id} className="ready-calendar-agenda" data-day-item={item.kind}>
+      <small>{DAY_ITEM_LABELS[item.kind]} · </small><RefCapsule reference={item.ref} title={item.title.replace(/\.(md|canvas)$/i, '')} />{item.detail && <small> · {item.detail}</small>}
+    </div>)}
   </section>
 }

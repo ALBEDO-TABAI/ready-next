@@ -1,3 +1,4 @@
+import { READY_REF_MIME } from '../../../../shared/ready-ref'
 import type React from 'react'
 import type { FileItem } from '../../../stores/useWorkspace'
 import { startBrowserLocalMediaNativeFileDrag } from '../../../modules/browser/localMediaDragBridge'
@@ -37,7 +38,7 @@ export function putDragData(e: React.DragEvent, item: FileItem, movable = true, 
  */
 export function readWorkspaceDragPayloads(dataTransfer: DataTransfer): WorkspaceDragPayload[] {
   const parsed = parseWorkspaceDragPayloads(dataTransfer)
-  return parsed.length > 0 ? parsed : getActiveWorkspaceDragPayloads()
+  return dataTransfer.getData(READY_REF_MIME) ? parsed : getActiveWorkspaceDragPayloads()
 }
 
 export function joinPath(dir: string, name: string): string {

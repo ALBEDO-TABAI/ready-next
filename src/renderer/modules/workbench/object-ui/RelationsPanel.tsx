@@ -1,15 +1,11 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ObjectRelations, RelationItem } from '../../../../main/modules/object-relations/contract'
-import type { ReadyRef } from '../../../../shared/ready-ref'
-import { openReadyRef } from '../open-ready-ref'
-import { QuickLook } from './QuickLook'
+import { RefCapsule } from '../../../components/ui'
 
 const labels: Record<string, string> = { page: '页面', file: '文件', canvas: '画板', event: '日程', day: '日期', web: '网页', 'rss-item': 'RSS 文章', 'rss-digest': 'RSS 摘要', 'book-location': '书', conversation: '会话', fastcard: '卡片', unresolved: '未解析' }
 export function RelationsPanel({ objectId }: { objectId: string }) {
   const [result, setResult] = useState<{ id: string; data: ObjectRelations } | null>(null)
   const [error, setError] = useState('')
-  const [preview, setPreview] = useState<ReadyRef | null>(null)
-  const closePreview = useCallback(() => setPreview(null), [])
   useEffect(() => {
     let active = true, version = 0
     const read = () => {
@@ -24,12 +20,12 @@ export function RelationsPanel({ objectId }: { objectId: string }) {
     const off = window.electronAPI.documentPages.onChanged(read)
     return () => { active = false; off() }
   }, [objectId])
-  const open = async (ref: ReadyRef) => { try { await openReadyRef(ref) } catch (error) { setError(String(error)) } }
   const groups = (items: RelationItem[]) => {
     const grouped = new Map<string, RelationItem[]>()
     for (const item of items) { const key = item.ref ? item.sourceType : 'unresolved'; grouped.set(key, [...(grouped.get(key) || []), item]) }
     return [...grouped].map(([type, rows]) => <section key={type}><h4>{labels[type] || type}</h4><ul>{rows.map(row => <li key={row.id} className="py-1">
-      {row.ref ? <><button onClick={event => event.altKey ? setPreview(row.ref) : void open(row.ref!)}>{row.title}</button> <button aria-label={`速览 ${row.title}`} onClick={() => setPreview(row.ref)}>速览</button></> : <span>{row.title}</span>}
+      {/* A reference behaves as everywhere (W6 §2.1): click opens, ⌥-click or hover then Space quick-looks. */}
+      {row.ref ? <RefCapsule reference={row.ref} title={row.title.replace(/\.(md|canvas)$/i, '')} /> : <span>{row.title}</span>}
       <small className="block">{row.reason || row.relation}</small>
     </li>)}</ul></section>)
   }
@@ -39,6 +35,5 @@ export function RelationsPanel({ objectId }: { objectId: string }) {
       {data && <><h3>出链</h3>{groups(data.outgoing)}<h3>反链</h3>{groups(data.incoming)}{data.truncated && <p>关联超过显示上限，列表不完整</p>}</>}
       {error && <p role="alert">{error}</p>}
     </details>
-    {preview && <QuickLook reference={preview} onClose={closePreview} />}
   </aside>
 }

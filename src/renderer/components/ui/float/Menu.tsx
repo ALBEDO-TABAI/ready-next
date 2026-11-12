@@ -41,8 +41,10 @@ export function MenuList({ items, label, onDone }: { items: MenuEntry[]; label?:
       if (next !== undefined) move(next)
     }
   }
+  // The list takes focus only to steer its items (the active item shows where the keys are), so it draws no ring of
+  // its own; inline like the float's, because the shell's unlayered :focus-visible ring would otherwise win.
   return (
-    <div ref={listRef} className="rn-menu" role="menu" aria-label={label} tabIndex={-1} data-autofocus onKeyDown={onKeyDown}>
+    <div ref={listRef} className="rn-menu" role="menu" aria-label={label} tabIndex={-1} data-autofocus onKeyDown={onKeyDown} style={{ outline: 'none' }}>
       {items.map((entry, index) => {
         if (entry.kind === 'separator') return <div key={`sep-${index}`} className="rn-menu__sep" role="separator" />
         if (entry.kind === 'group') return <div key={`group-${index}`} className="rn-menu__group" role="presentation">{entry.label}</div>

@@ -3,7 +3,7 @@ import test from 'node:test'
 import { saveUntitledDocTabToDirectory } from '../renderer/modules/document/untitledDocSave'
 import { completeDraftSave, requestDraftSave, useDraftUI } from '../renderer/modules/document/drafts/runtime'
 import { useDocTabs } from '../renderer/stores/useDocTabs'
-import { parseUntitledDocTabDragPayload } from '../renderer/components/layout/fileTreeExternalDrop'
+import { readReadyRefTransfer } from '../shared/ready-ref'
 
 test('tab drop waits for the shared picker receipt; cancellation leaves the draft intact', async () => {
   const tab = { id: 'drop', path: null, title: '新文档', content: '未保存正文', isDirty: true }
@@ -25,10 +25,9 @@ test('tab drop waits for the shared picker receipt; cancellation leaves the draf
   assert.equal(useDraftUI.getState().saveTabId, null)
 })
 
-test('untitled tab payload rejects other drag types', () => {
-  assert.deepEqual(parseUntitledDocTabDragPayload(JSON.stringify({ type: 'untitled-doc-tab', tabId: 'doc-9', title: '新文档' })),
-    { type: 'untitled-doc-tab', tabId: 'doc-9', title: '新文档' })
-  for (const value of ['not json', '', JSON.stringify({ type: 'doc-tab', tabId: 'doc-9' })]) assert.equal(parseUntitledDocTabDragPayload(value), null)
+test('a draft tab is not falsely represented as a saved page reference', () => {
+  const payload = JSON.stringify({ type: 'untitled-doc-tab', tabId: 'doc-9', title: '新文档' })
+  assert.equal(readReadyRefTransfer({ getData: type => type === 'application/x-ready-ref' ? payload : '' }), null)
 })
 
 
