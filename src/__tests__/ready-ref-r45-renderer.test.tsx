@@ -1,3 +1,4 @@
+import { memoryNavigationAPI } from './utils/navigation-memory'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createElement } from 'react'
@@ -19,7 +20,7 @@ test('R45 generators, persistence, drop and click share ReadyRef while resource 
   dom.window.localStorage.setItem('ready-object-presentation-migration-v1', JSON.stringify({ migrationId: 'test', applied: true, report: { state: 'completed', resolved: [], unresolved: [] } }))
   const calls: unknown[] = []
   let stale = false
-  Object.defineProperty(dom.window, 'electronAPI', { value: {
+  Object.defineProperty(dom.window, 'electronAPI', { value: { navigationHistory: memoryNavigationAPI(),
     objects: { onMoved: () => () => {}, resolvePath: async (path: string) => ({ objectId: 'doc', path, revision: 1 }), locate: async () => ({ objectId: 'doc', path: '/fixture/renamed.md', revision: 2 }) },
     browser: { createTab: async (url: string) => { calls.push(['web', url]); return { success: true, tabId: 'opened', title: 'Page' } } },
     rss: {

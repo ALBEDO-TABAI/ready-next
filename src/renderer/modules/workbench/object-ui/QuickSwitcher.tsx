@@ -1,4 +1,5 @@
-import { searchPresentation } from '../../../../shared/search-presentation'
+import { navigationHistory, webPageTitle } from '../navigation-history'
+import { recentOpenedResults } from './recent-opened'
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { Bookmark, CornerDownLeft, Search, type LucideIcon } from 'lucide-react'
 import { REF_CAPSULE_KINDS, type RefCapsuleKind } from '../../../components/ui/ref-capsule-kinds'
@@ -20,19 +21,12 @@ export function QuickSwitcher({ onClose, onPreview }: {
   const roots = useMemo(() => computeDesiredRoots({ workspaceRoot, pinnedFolders }), [workspaceRoot, pinnedFolders])
   const [query, setQuery] = useState(''), [selected, setSelected] = useState(0), [error, setError] = useState('')
   const [response, setResponse] = useState<{ query: string; roots: string[]; items: SearchResultItem[]; warning: string } | null>(null)
-  const [recent, setRecent] = useState<SearchResultItem[]>([])
+  const history = useSyncExternalStore(navigationHistory.subscribe, navigationHistory.getSnapshot)
   const running = useRef(false), mounted = useRef(true), selectionVersion = useRef(0)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   useEffect(() => {
     let active = true
-    void window.electronAPI.documentPages.states().then(async result => {
-      if (!result.ok) throw new Error(result.message)
-      const rows = await Promise.all(result.value.filter(row => row.lastVisitedAt).sort((a, b) => b.lastVisitedAt! - a.lastVisitedAt!).slice(0, 20).map(async row => {
-        const location = await window.electronAPI.objects.locate(row.objectId)
-        return location ? { ...searchPresentation({ path: location.path, name: location.path.split(/[\\/]/).pop()!, sourceType: 'document' }), path: location.path, name: location.path.split(/[\\/]/).pop()!, nameMatch: false, snippet: '', tagsHit: [], linksHit: [], sourceType: 'document' } : null
-      }))
-      if (active) setRecent(rows.filter(row => row !== null))
-    }).catch(error => { if (active) setError(String(error)) })
+    void navigationHistory.load().catch(error => { if (active) setError(String(error)) })
     return () => { active = false }
   }, [])
   useEffect(() => {
@@ -44,14 +38,14 @@ export function QuickSwitcher({ onClose, onPreview }: {
   }, [query, roots])
   const items = useMemo(() => {
     if (query.trim()) return mergeDraftResults(response?.query === query && response.roots === roots ? response.items : [], draftSearchResults(query, tabs), tabs)
-    const open = [...tabs].filter(tab => tab.kind !== 'library').sort((a, b) => (b.lastActivatedAt ?? 0) - (a.lastActivatedAt ?? 0)).map(tab => ({ ...searchPresentation({ path: tab.path ?? '', name: tab.title, sourceType: 'document' }), path: tab.path ?? `draft://${tab.id}`, name: tab.title, nameMatch: false, snippet: '', tagsHit: [], linksHit: [], sourceType: 'document', draft: { tabId: tab.id } }))
-    const paths = new Set(open.map(item => item.path))
-    return [...open, ...recent.filter(item => !paths.has(item.path))]
-  }, [query, roots, response, tabs, recent])
+    return recentOpenedResults(history, RECENT_SHOWN, webPageTitle)
+  }, [query, roots, response, tabs, history])
   const mode = useMode(state => state.workbenchMode)
   useSyncExternalStore(subscribeCommands, commandRegistryRevision)
   const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean)
+  // Nothing typed: 最近打开 and the common commands (W6 §2.3); typing searches every command.
   const commands = listCommands({ mode }).filter(command => {
+    if (!terms.length) return command.common === true
     const text = [command.title, ...(command.keywords ?? [])].join(' ').toLocaleLowerCase()
     return terms.every(term => text.includes(term))
   })
@@ -96,7 +90,7 @@ export function QuickSwitcher({ onClose, onPreview }: {
         </button>
         <button className="rn-switch-peek" aria-label={`速览 ${item.title}`} onClick={() => void activate(row, 'preview')}>速览</button>
       </li> })}
-      {commands.length > 0 && <li role="presentation" className="rn-switch-label">命令</li>}
+      {commands.length > 0 && <li role="presentation" className="rn-switch-label">{terms.length ? '命令' : '常用命令'}</li>}
       {commands.map((command, i) => <li key={command.id} id={`ready-object-option-${items.length + i}`} role="option" aria-selected={index === items.length + i} className="rn-switch-item" onMouseMove={() => { if (index !== items.length + i) setSelected(items.length + i) }}>
         <button className="rn-switch-open" onClick={() => void activate(items.length + i)}><span className="rn-switch-icon"><CornerDownLeft size={16} strokeWidth={1.6} /></span><span className="rn-switch-name">{command.title}</span>{command.shortcut && <span className="rn-switch-type">{shortcutKeycaps(command.shortcut, /Mac/.test(navigator.platform)).join(' ')}</span>}</button>
       </li>)}
@@ -108,6 +102,7 @@ export function QuickSwitcher({ onClose, onPreview }: {
   </MaskedObjectOverlay>
 }
 
+const RECENT_SHOWN = 8
 const how = (event: { altKey: boolean; metaKey: boolean; ctrlKey: boolean }) => event.altKey ? 'preview' as const : event.metaKey || event.ctrlKey ? 'tab' as const : 'open' as const
 // Each search type shows the icon of the object it opens; 书签 are saved web pages.
 const KIND_OF: Record<SearchResultItem['typeLabel'], RefCapsuleKind | null> = {

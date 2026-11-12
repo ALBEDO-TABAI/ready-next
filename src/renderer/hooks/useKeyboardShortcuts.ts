@@ -1,9 +1,11 @@
+import { navigateHistory } from '../modules/workbench/navigation-history'
 import { useEffect, useCallback, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useTheme } from '../stores/useTheme'
 import { OPEN_QUICK_SWITCHER_EVENT, SHELL_ACTION_EVENT, requestShellAction } from '../modules/workbench/commands/shell-actions'
 import { useMode, type WorkbenchMode } from '../stores/useMode'
 import { useDocTabs } from '../stores/useDocTabs'
+import { useInkLayout } from '../modules/document/ink/layout-state'
 import { requestWorkbenchModeChange } from '../modules/workbench/mode-transition'
 import { shouldIgnoreGlobalKeyboardShortcut } from '../modules/keyboard/shortcut-guard'
 import { resolveReadyAppShortcut, type ReadyAppShortcutAction } from '../../shared/app-shortcuts'
@@ -168,6 +170,12 @@ export function useKeyboardShortcuts() {
       return true
     }
 
+    if (action === 'navigate-back' || action === 'navigate-forward') {
+      preventDefault()
+      void navigateHistory(action === 'navigate-back' ? -1 : 1).catch(error => console.error('[navigation] shortcut failed', error))
+      return true
+    }
+
     if (action !== 'open-settings' && action !== 'toggle-theme' && action !== 'open-search' && shouldIgnoreGlobalKeyboardShortcut({
       target: e.target,
       activeElement: typeof document !== 'undefined' ? document.activeElement : null,
@@ -220,6 +228,8 @@ export function useKeyboardShortcuts() {
 
     if (action === 'close-document') {
       preventDefault()
+      // 今日 is the tab in view and is never closed; the document behind it is not the one being looked at.
+      if (useMode.getState().workbenchMode === 'document' && useInkLayout.getState().home) return true
       const { activeTabId, closeTab } = useDocTabs.getState()
       if (activeTabId) {
         closeTab(activeTabId)

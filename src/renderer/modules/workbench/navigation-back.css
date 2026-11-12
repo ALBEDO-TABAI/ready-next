@@ -1,0 +1,44 @@
+/* The way back (W6 §4): one quiet entry at the top-left of every mode's content area, set off from the breadcrumb or
+   toolbar after it by a hairline. Ink tones only; it names a place, it is not a signal (W1 DL5, DL6). The doubled class
+   outranks module resets such as `.ready-calendar button`. Only --rn-* tokens (W1 DS1). */
+.rn-back {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: min(40%, 280px);
+  height: 28px;
+  margin-right: 6px;
+  padding-right: 6px;
+  border-right: 1px solid var(--rn-hair);
+}
+
+.rn-back .rn-back__button {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  height: 26px;
+  padding: 0 9px 0 7px;
+  border: 0;
+  border-radius: var(--rn-r-xs);
+  background: transparent;
+  color: var(--rn-ink-3);
+  font: 500 var(--rn-fs-sm)/1 var(--rn-font-ui);
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  transition: background-color var(--rn-d-1) var(--rn-ease-out), color var(--rn-d-1) var(--rn-ease-out);
+}
+
+.rn-back .rn-back__button svg { flex: none; }
+.rn-back .rn-back__button:hover { background: var(--rn-fill); color: var(--rn-ink-2); }
+.rn-back .rn-back__button:focus-visible { outline: 1.5px solid var(--rn-ink-3); outline-offset: 1px; }
+.rn-back .rn-back__forward { flex: none; width: 26px; padding: 0; justify-content: center; }
+.rn-back__title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+@media (prefers-reduced-motion: reduce) {
+  .rn-back .rn-back__button { transition: none; }
+}

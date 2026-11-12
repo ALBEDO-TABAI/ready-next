@@ -4,16 +4,11 @@ import {
   WORKBENCH_TOPBAR_PADDING_LEFT,
   WORKBENCH_TOPBAR_PADDING_RIGHT,
 } from '../../modules/workbench/chrome'
-import { requestWorkbenchModeOpen } from '../../modules/workbench/mode-transition'
-import { useInkLayout } from '../../modules/document/ink/layout-state'
+import { openToday } from '../../modules/today/open-today'
 
 // The top band of the shell (W2 §2, W1 DL11a): a window drag region as tall as the bottom band.
 // The brand dot stays in the top-right corner (user, 2026-11-11) and opens 今日, the document
-// mode's home page.
-function openToday() {
-  requestWorkbenchModeOpen('document')
-  useInkLayout.getState().setHome(true)
-}
+// mode's system tab (W6 §5).
 
 export default function TopBar() {
   return (

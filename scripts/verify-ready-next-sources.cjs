@@ -45,7 +45,8 @@ async function main() {
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve) })
   port = server.address().port
   const webURL = `http://127.0.0.1:${port}/page`
-  const env = { ...process.env, READY_USER_DATA_DIR: profile }
+  // Verification never puts a window in front of the person (READY_START_HIDDEN keeps it unshown).
+  const env = { ...process.env, READY_USER_DATA_DIR: profile, READY_START_HIDDEN: '1' }
   delete env.ELECTRON_RUN_AS_NODE
   let app, page
   const poll = async (check, message) => {
@@ -67,8 +68,15 @@ async function main() {
       await page.keyboard.press(process.platform === 'darwin' ? 'Meta+k' : 'Control+k')
       await search.waitFor({ timeout: 1500 }).catch(() => {})
     }
-    await search.fill(path.basename(file, '.md'))
-    await page.getByRole('listbox').getByRole('button').filter({ hasText: path.basename(file) }).first().click()
+    // ⌘K finds the page by its file name but shows its title (frontmatter title, else the name without the
+    // extension), typed 页面 (W6 §2.3); a book or the PDF it annotates can share the title.
+    const stem = path.basename(file, '.md')
+    const frontmatter = /^---\n([\s\S]*?)\n---/.exec(fs.readFileSync(file, 'utf8'))?.[1] ?? ''
+    const title = /^title:\s*(.+)$/m.exec(frontmatter)?.[1].trim().replace(/^(["'])(.*)\1$/, '$2') || stem
+    await search.fill(stem)
+    await page.getByRole('listbox').getByRole('button')
+      .filter({ has: page.locator('.rn-switch-name', { hasText: new RegExp(`^${title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`) }) })
+      .filter({ has: page.locator('.rn-switch-type', { hasText: /^页面/ }) }).first().click()
     // Pages always open in the page view.
     await poll(() => page.locator('.note-preview-body:visible').count().then(n => n > 0), 'Source preview missing')
   }
@@ -127,6 +135,8 @@ async function main() {
     const feed = await page.evaluate(url => window.electronAPI.rss.addSource({ name: '本地验收', url }), `http://127.0.0.1:${port}/feed`)
     assert.equal(feed.success, true, JSON.stringify(feed))
     await mode('rss')
+    // 资讯 opens on 为你筛过的 (W5); the article is listed under 全部.
+    await page.locator('nav[aria-label="资讯导航"] [aria-label="全部"]').click()
     await page.getByText('来源验收文章', { exact: true }).first().click()
     await poll(() => page.locator('.rss-reader-body [data-ready-reading-run]').count().then(n => n > 0), 'RSS body missing')
     // The reader can re-render right after opening (read state); select again until the menu sees the selection.
@@ -144,9 +154,14 @@ async function main() {
     await poll(() => Boolean(markFile('文章')), 'RSS mark not saved')
 
     await mode('browser')
+    // Ready opens on 今日, so this is the browser's first visit: it starts with a blank tab of its own. Open the page
+    // through the API only after that, or the blank tab lands on top of it.
+    await poll(() => page.evaluate(async () => { const tabs = await window.electronAPI.browser.getTabs(); return Array.isArray(tabs) && tabs.length > 0 }), 'Browser never started')
     const opened = await page.evaluate(url => window.electronAPI.browser.createTab(url), webURL); assert.equal(opened.success, true)
     let web
     await poll(() => { web = app.context().pages().find(p => p.url() === webURL); return !!web }, 'Native browser page missing')
+    // The first visit to the browser in this session sets the view up: wait until the new tab is the one in view.
+    await poll(() => page.getByPlaceholder('搜索或输入网址').inputValue().then(value => value === webURL).catch(() => false), 'New tab never became the active one')
     await page.getByRole('button', { name: 'FastCard', exact: true }).click()
     await select(web, '#quote')
     await page.getByRole('button', { name: '划线到来源页', exact: true }).click()
@@ -181,7 +196,8 @@ async function main() {
       // The page body loads after the tab switches; wait for this page's quote.
       await poll(() => page.locator('[data-ready-block-editor]:visible').first().textContent().then(text => text.includes(i === 3 ? 'DF so' : '乙丙丁戊己')), `Source page ${i} body missing`)
       await page.screenshot({ path: path.join(evidence, `source-${i}.png`) })
-      await page.locator('[data-ready-block-editor]:visible').first().getByRole('link', { name: '原文', exact: true }).first().click()
+      // The source link is a reference capsule (W6 §2.1): its name is its type and its title, “书 原文”.
+      await page.locator('[data-ready-block-editor]:visible').first().getByRole('link', { name: /(^| )原文$/ }).first().click()
       if (i === 0) await poll(() => page.locator('[data-book-location]').count().then(n => n > 0), 'Book return highlight missing')
       if (i === 1) await poll(() => page.evaluate(() => window.getSelection()?.toString().includes('乙丙丁戊己')), 'RSS return highlight missing')
       // Electron does not apply text fragments to loadURL navigations; Ready highlights the quote itself.
@@ -209,7 +225,7 @@ async function main() {
       assert.equal(fs.readFileSync(files[i], 'utf8'), saved[i]); await openFile(files[i])
       await poll(() => page.locator('[data-ready-block-editor]:visible').first().textContent().then(text => text.includes(i === 3 ? 'DF so' : '乙丙丁戊己')), `Source page ${i} body missing after restart`)
     }
-    await page.locator('[data-ready-block-editor]:visible').first().getByRole('link', { name: '原文', exact: true }).first().click()
+    await page.locator('[data-ready-block-editor]:visible').first().getByRole('link', { name: /(^| )原文$/ }).first().click()
     await poll(() => page.locator('[data-page="2"] [data-ready-pdf-highlight]').allTextContents().then(parts => parts.join('') === 'DF so'), 'PDF return highlight missing after restart')
     fs.writeFileSync(path.join(evidence, 'sources.json'), JSON.stringify({ files, saved }, null, 2))
     console.log(`PASS book/RSS/web/PDF selections, source pages, return highlights and restart readback. Evidence: ${evidence}`)

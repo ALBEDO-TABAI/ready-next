@@ -25,7 +25,8 @@ async function main() {
   })
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
   const webPage = `http://127.0.0.1:${server.address().port}/`
-  const env = { ...process.env, READY_USER_DATA_DIR: profile }
+  // Verification never puts a window in front of the person (READY_START_HIDDEN keeps it unshown).
+  const env = { ...process.env, READY_USER_DATA_DIR: profile, READY_START_HIDDEN: '1' }
   delete env.ELECTRON_RUN_AS_NODE
   // The first window can be a transient one; wait for the workbench renderer, and relaunch instead of reloading.
   let app, page
@@ -143,7 +144,8 @@ async function main() {
     await page.getByRole('dialog').getByText('引用已失效', { exact: true }).waitFor()
     await page.keyboard.press('Escape')
     console.log('PASS 4: 速览引用，回收后立即显示失效')
-    const shot = await app.evaluate(async ({ BrowserWindow }) => (await BrowserWindow.getAllWindows().find(win => win.isVisible()).capturePage()).toPNG().toString('base64'))
+    // The window is hidden: find the workbench by its renderer URL, as the launch does.
+    const shot = await app.evaluate(async ({ BrowserWindow }) => (await BrowserWindow.getAllWindows().find(win => win.webContents.getURL().includes('/renderer/index.html')).capturePage()).toPNG().toString('base64'))
     fs.writeFileSync(path.join(temporary, 'window.png'), Buffer.from(shot, 'base64'))
     console.log(`PASS M5-C real-window acceptance: ${temporary}`)
   } finally { if (app) await app.close(); server.close() }

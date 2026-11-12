@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, Bot, Globe, Loader2, Lock, RefreshCw, ShieldAlert, Star, UserRound } from 'lucide-react'
 import HeaderUtilityActions from './HeaderUtilityActions'
+import { NavigationBackEntry } from '../../modules/workbench/NavigationBackEntry'
 import {
   WORKBENCH_HEADER_EDGE_X,
   WORKBENCH_TAB_ROW_HEIGHT,
@@ -106,6 +107,7 @@ export default function BrowserTopBar({
           zIndex: 2,
         }}
       >
+        <NavigationBackEntry mode="browser" />
         {ownershipStatus && <BrowserOwnershipChip status={ownershipStatus} />}
 
         {/* Navigation cluster */}

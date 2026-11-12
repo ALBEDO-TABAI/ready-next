@@ -159,11 +159,8 @@ test('reader drag creates a durable mark; popover edits/copies/removes; N groups
     assert.ok(flashed().includes('走过山海'), flashed())
     assert.equal(savedPositions.at(-1)?.chapter, 1)
     assert.equal(savedPositions.at(-1)?.offset, 5)
-    const { captureReferenceOrigin } = await import('../renderer/modules/workbench/reference-return')
-    const { useLibraryRequest } = await import('../renderer/modules/library/reader/navigation-state')
-    const origin = captureReferenceOrigin('document')
-    origin.restore()
-    assert.deepEqual(useLibraryRequest.getState().target, { book: record.id, location: { chapter: 1, from: 5, to: 6 } })
+    const { captureRegisteredNavigationRef } = await import('../renderer/modules/workbench/navigation-history')
+    assert.deepEqual(captureRegisteredNavigationRef(), { kind: 'book-location', book: record.id, loc: 'c1:5+1' })
     await click('排版'); await click('单页')
     const targetSize = d.querySelector<HTMLInputElement>('input[aria-label="字号"]')!
     await act(async () => {

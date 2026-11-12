@@ -38,14 +38,14 @@ export function QuickLook({ reference, onClose }: { reference: PreviewTarget; on
   const tabs = useDocTabs(state => state.tabs)
   const [value, setValue] = useState<{ key: string; preview: ObjectPreview } | null>(null)
   const [error, setError] = useState('')
-  const key = reference.kind === 'draft' ? `draft:${reference.tabId}` : toReadyUri(reference)
+  const key = reference.kind === 'draft' && 'tabId' in reference ? `draft:${reference.tabId}` : toReadyUri(reference)
   useEffect(() => {
     let active = true
     let revision = 0
     const read = () => {
       const current = ++revision
-      const tab = reference.kind === 'draft' ? useDocTabs.getState().tabs.find(tab => tab.id === reference.tabId) : undefined
-      const result: Promise<ObjectPreview> = reference.kind !== 'draft' ? loadObjectPreview(reference) : Promise.resolve(tab
+      const tab = reference.kind === 'draft' && 'tabId' in reference ? useDocTabs.getState().tabs.find(tab => tab.id === reference.tabId) : undefined
+      const result: Promise<ObjectPreview> = reference.kind !== 'draft' || 'id' in reference ? loadObjectPreview(reference) : Promise.resolve(tab
         ? { state: 'ready', title: tab.title, body: tab.content, markdown: true, unsaved: !tab.path || tab.isDirty }
         : { state: 'invalid', title: '草稿已失效', message: '草稿已关闭' })
       void result.then(preview => { if (active && current === revision) setValue({ key, preview }) }, error => { if (active && current === revision) setValue({ key, preview: { state: 'unavailable', title: '无法速览', message: String(error) } }) })
@@ -56,7 +56,7 @@ export function QuickLook({ reference, onClose }: { reference: PreviewTarget; on
   }, [reference, key, tabs])
   const preview = value?.key === key ? value.preview : null
   const open = async (newTab = false) => { try { await openObjectTarget(reference, { newTab }); onClose() } catch (error) { setError(String(error)) } }
-  const kind = reference.kind === 'draft' ? 'page' : refCapsuleKind(reference, preview?.state === 'ready' && preview.data?.kind === 'database' ? '数据库' : undefined)
+  const kind = reference.kind === 'draft' && 'tabId' in reference ? 'page' : refCapsuleKind(reference, preview?.state === 'ready' && preview.data?.kind === 'database' ? '数据库' : undefined)
   const Icon = REF_CAPSULE_KINDS[kind].icon
   // A capsule inside the quick look opens its object, so the look steps aside; ⌥-click looks at it here instead.
   return <MaskedObjectOverlay onClose={onClose}>

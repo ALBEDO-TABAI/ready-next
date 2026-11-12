@@ -1,3 +1,4 @@
+import { memoryNavigationAPI } from './utils/navigation-memory'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { JSDOM } from 'jsdom'
@@ -11,8 +12,8 @@ test('page anchors open the page and reveal the heading or block lines; a missin
   }
   try {
     const body = '# 标题\n\n第一段\n第二行 ^inline\n\n## 第二节\n\n独立块\n\n^standalone\n'
-    Object.defineProperty(dom.window, 'electronAPI', { value: {
-      objects: { locate: async () => ({ objectId: 'page', path: '/vault/页.md', revision: 1 }), onMoved: () => () => undefined, prepareMigration: async () => ({ migrationId: 'm', state: 'completed', resolved: [], unresolved: [] }) },
+    Object.defineProperty(dom.window, 'electronAPI', { value: { navigationHistory: memoryNavigationAPI(),
+      objects: { resolvePath: async (path: string) => ({ objectId: 'page', path, revision: 1 }), locate: async () => ({ objectId: 'page', path: '/vault/页.md', revision: 1 }), onMoved: () => () => undefined, prepareMigration: async () => ({ migrationId: 'm', state: 'completed', resolved: [], unresolved: [] }) },
       document: { readFile: async () => ({ success: true, content: body }) },
     } })
     const { openReadyRef, anchorLines } = await import('../renderer/modules/workbench/open-ready-ref')

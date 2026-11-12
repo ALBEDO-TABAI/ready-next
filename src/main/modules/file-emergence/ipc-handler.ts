@@ -612,3 +612,5 @@ async function resolvePathInsideRoots(
   }
   return { ok: false, error: 'path is outside workspaceRoots' }
 }
+
+export function peekFileEmergenceSnapshot(roots: string[]) { return fileEmergenceService?.peekSnapshot(roots) ?? null }
