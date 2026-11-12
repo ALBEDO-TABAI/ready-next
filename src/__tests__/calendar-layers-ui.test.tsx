@@ -61,9 +61,19 @@ test('C8 switches render the same entries, footprints cannot drag, moves wait fo
   assert.ok(doc.querySelector('[data-layer="documents"]'))
   await act(async () => doc.querySelector<HTMLButtonElement>('[data-layer="footprints"]')!.click())
   const { opened } = await import(navigation); assert.deepEqual(opened, [{ kind: 'file', id: 'a' }])
-  const drop = new dom.window.Event('drop', { bubbles: true, cancelable: true })
-  Object.defineProperty(drop, 'dataTransfer', { value: { getData: () => 'diary:a' } })
-  await act(async () => doc.querySelector('[data-layer-day="2026-11-01"]')!.dispatchEvent(drop))
+  const dragToNextDay = async () => {
+    const data = new Map<string, string>()
+    const dataTransfer = { setData: (format: string, value: string) => { data.set(format, value) }, getData: (format: string) => data.get(format) || '' }
+    const source = doc.querySelector('[data-layer="documents"]')!
+    const start = new dom.window.Event('dragstart', { bubbles: true })
+    Object.defineProperty(start, 'dataTransfer', { value: dataTransfer })
+    await act(async () => source.dispatchEvent(start))
+    const drop = new dom.window.Event('drop', { bubbles: true, cancelable: true })
+    Object.defineProperty(drop, 'dataTransfer', { value: dataTransfer })
+    await act(async () => doc.querySelector('[data-layer-day="2026-11-01"]')!.dispatchEvent(drop))
+    await act(async () => source.dispatchEvent(new dom.window.Event('dragend', { bubbles: true })))
+  }
+  await dragToNextDay()
   assert.equal(moves[0].date, '2026-11-01'); assert.equal(moves[0].expectedVersion, 'version-1')
   assert.ok(doc.querySelector('[data-layer-day="2026-10-31"] [data-layer="documents"]'))
   assert.match(doc.querySelector('[role=alert]')!.textContent!, /version_conflict/)
@@ -81,9 +91,7 @@ test('C8 switches render the same entries, footprints cannot drag, moves wait fo
   await act(async () => stale!({ ok: true, value: entries }))
   assert.ok(doc.body.textContent?.includes('新资料库日记'))
   api.move = async input => { moves.push(input); entries = entries.map(e => ({ ...e, date: input.date, lastDate: input.date })); return { ok: true, value: { state: 'saved' } } }
-  const diaryDrop = new dom.window.Event('drop', { bubbles: true, cancelable: true })
-  Object.defineProperty(diaryDrop, 'dataTransfer', { value: { getData: () => 'diary:b' } })
-  await act(async () => doc.querySelector('[data-layer-day="2026-11-01"]')!.dispatchEvent(diaryDrop))
+  await dragToNextDay()
   assert.equal(doc.querySelector('[data-layer-day="2026-10-31"] [data-layer=documents]'), null)
   assert.ok(doc.querySelector('[data-layer-day="2026-11-01"] [data-layer=documents]'))
 })

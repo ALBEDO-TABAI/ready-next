@@ -6,15 +6,13 @@ import { FastCardRepository } from '../../../repositories/fastcard-repository'
 import { libraryTools } from '../library-read-resources'
 import { ObjectPresentationService } from '../../../object-service/presentation'
 import { ObjectRegistry } from '../../../object-service/registry'
-import { createHash } from 'node:crypto'
 import { mkdirSync, realpathSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { readActionAuthorizationModeFromEnvelope } from '../../../../../shared/action-authorization-mode'
 import { isBrowserPublicToolName } from '../../../../../shared/browser-capability-registry'
 import { persistableCalendarEventId } from '../../../../../shared/calendar-event-identity'
 import type { SendScopedRequest, ProductTurnReceipt } from '../../../../../shared/ipc-contracts/agent-runtime'
-import { getMcpClient } from '../../../mcp/client'
-import { getMcpServerRegistration, getMcpCatalogSnapshot } from '../../../mcp/registry'
+import { getMcpCatalogSnapshot } from '../../../mcp/registry'
 import { classifyIntent } from '../../intent-classifier'
 import { isMapSemanticIntentActive, classifyMapSemanticIntentFallback } from '../../map-semantic-intent'
 import { resolveTrustedBrowserReference } from '../../runtime-core/trusted-browser-environment'
@@ -45,13 +43,14 @@ import { digestCodexUserInput, type CodexUserInput } from '../codex-user-input'
 import type { CodexCompositionBase } from './base'
 import type { BeginNewContextIssuer } from './begin-new-context'
 import type { HeadContinuation } from './head-continuation'
+import type { resolveIngressMcpResource } from './ingress-mcp-resource'
 import type { CodexCompositionLive } from './live-state'
 import { activeProfile, isoNow } from './support'
 
 export type IngressPrepareDeps = Pick<CodexCompositionBase, 'detailPrepared' | 'gate' | 'input' | 'nativeRuntime' | 'preparedDetails' | 'preparer' | 'rawDb' | 'readyMemoryRepository' | 'repository' | 'verified'>
   & Pick<BeginNewContextIssuer, 'issueBeginNewContextAction'>
   & Pick<HeadContinuation, 'resolveHeadContinuation'>
-  & { readonly live: CodexCompositionLive }
+  & { readonly live: CodexCompositionLive; readonly resolveIngressMcpResource: typeof resolveIngressMcpResource }
 
 /** Preparing product ingress: resources, tools, continuation and the exact request, before anything is persisted. */
 export function createIngressPrepare(deps: IngressPrepareDeps) {
@@ -334,29 +333,7 @@ export function createIngressPrepare(deps: IngressPrepareDeps) {
           const source = input.database.rss.getRSSSources().find((candidate) => candidate.id === selection.sourceId)
           return source ? trustedRssSourceInput(source) : null
         },
-        resolveMcpResource: async (selection) => {
-          const registration = getMcpServerRegistration(selection.serverId)
-          if (!registration
-            || registration.catalogGeneration !== selection.catalogGeneration
-            || registration.catalogDigest !== selection.catalogDigest
-            || !registration.resources?.some((resource) => resource.uri === selection.uri)) return null
-          const client = getMcpClient(selection.serverId)
-          if (!client) return null
-          const content = await client.readResource(selection.uri)
-          const serialized = JSON.stringify(content)
-          const digest = createHash('sha256').update(serialized).digest('hex')
-          if (digest !== selection.contentDigest) return null
-          const resource = registration.resources.find((candidate) => candidate.uri === selection.uri)
-          return {
-            name: resource?.name || selection.name,
-            path: selection.uri,
-            text: [
-              `用户明确选中的 MCP 只读资源（server: ${selection.serverId}，uri: ${selection.uri}）：`,
-              serialized.slice(0, 30_000),
-            ].join('\n\n'),
-            digest,
-          }
-        },
+        resolveMcpResource: deps.resolveIngressMcpResource,
       })
       const turnResources = explicitResources
       assertWidgetTargetsMatchAnchor(request.resources ?? [], request.currentDocumentAnchor ?? null)

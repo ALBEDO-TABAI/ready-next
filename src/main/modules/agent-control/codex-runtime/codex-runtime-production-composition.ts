@@ -12,6 +12,7 @@ import { createEngineTerminal } from './composition/engine-terminal'
 import { createHeadContinuation } from './composition/head-continuation'
 import { createIngressPort } from './composition/ingress-port'
 import { createIngressPrepare } from './composition/ingress-prepare'
+import { resolveIngressMcpResource } from './composition/ingress-mcp-resource'
 import { createLifecycleWiring } from './composition/lifecycle'
 import { createCodexCompositionLive } from './composition/live-state'
 import { createRuntimeStart } from './composition/runtime-start'
@@ -68,7 +69,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
   const withBeginNewContext = { ...withHeadContinuation, ...createBeginNewContextIssuer(withHeadContinuation) }
   const withActionSurface = { ...withBeginNewContext, ...createActionSurfaceReader(withBeginNewContext) }
   const withAliasPorts = { ...withActionSurface, ...createAliasPorts(withActionSurface) }
-  const withIngressPrepare = { ...withAliasPorts, ...createIngressPrepare(withAliasPorts) }
+  const withIngressPrepare = { ...withAliasPorts, ...createIngressPrepare({ ...withAliasPorts, resolveIngressMcpResource }) }
   const withIngressPort = { ...withIngressPrepare, ...createIngressPort(withIngressPrepare) }
   const withRuntimeStart = { ...withIngressPort, ...createRuntimeStart(withIngressPort) }
   const {

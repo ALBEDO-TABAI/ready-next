@@ -54,9 +54,13 @@ test('page drag sorts siblings and moves into a page; failed pre-trash save does
   const drag = async (source: string, target: string) => {
     await act(async () => {
       const start = new ui.dom.window.Event('dragstart', { bubbles: true })
-      Object.defineProperty(start, 'dataTransfer', { value: { setData() {} } })
+      const data = new Map<string, string>()
+      const dataTransfer = { setData: (format: string, value: string) => { data.set(format, value) }, getData: (format: string) => data.get(format) || '' }
+      Object.defineProperty(start, 'dataTransfer', { value: dataTransfer })
       ui.body.querySelector(`[data-page-id="${source}"] [draggable="true"]`)!.dispatchEvent(start)
-      ui.body.querySelector(target)!.dispatchEvent(new ui.dom.window.Event('drop', { bubbles: true, cancelable: true }))
+      const drop = new ui.dom.window.Event('drop', { bubbles: true, cancelable: true })
+      Object.defineProperty(drop, 'dataTransfer', { value: dataTransfer })
+      ui.body.querySelector(target)!.dispatchEvent(drop)
     })
   }
   try {

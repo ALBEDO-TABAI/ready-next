@@ -24,7 +24,7 @@ export interface AttachmentIntakeHandle {
 }
 
 export function useAttachmentIntake(params: UseAttachmentIntakeParams): AttachmentIntakeHandle {
-  const { addAttachments, setIsDragOver, focusInputWithResize } = params
+  const { addAttachments, setInputValue, setIsDragOver, focusInputWithResize } = params
 
   const handleDrop = useCallback(
     async (e: DragEvent) => {
@@ -35,7 +35,11 @@ export function useAttachmentIntake(params: UseAttachmentIntakeParams): Attachme
 
       if (e.dataTransfer.types.includes(READY_REF_MIME)) {
         try {
-          if (await dropAgentReference(e.dataTransfer, addAttachments)) focusInputWithResize()
+          if (await dropAgentReference(e.dataTransfer, attachments => {
+            addAttachments(attachments)
+            const mentions = attachments.filter(item => item.source === 'skill-folder').map(item => `@[${item.name}]`)
+            if (mentions.length) setInputValue([useAgent.getState().inputValue.trimEnd(), ...mentions].filter(Boolean).join(' ') + ' ')
+          })) focusInputWithResize()
         } catch (error) { /* silent-catch: the reason is shown to the person as a toast */ showToast(error instanceof Error ? error.message : String(error), { tone: 'bad' }) }
         return
       }
@@ -70,7 +74,7 @@ export function useAttachmentIntake(params: UseAttachmentIntakeParams): Attachme
       addAttachments(newAttachments.filter(Boolean) as ChatAttachment[])
       focusInputWithResize()
     },
-    [addAttachments, focusInputWithResize, setIsDragOver]
+    [addAttachments, focusInputWithResize, setInputValue, setIsDragOver]
   )
 
   const handleDragOver = useCallback((e: DragEvent) => {
