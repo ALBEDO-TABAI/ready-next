@@ -1,128 +1,174 @@
-// Contrast popover menus: view switcher, chip & grid context menus, panel pickers, calendar menu.
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Check, ChevronRight, Scissors, Copy, CopyPlus, Trash2, ClipboardPaste, Plus } from 'lucide-react';
-import { PALETTE, colorFamily, parseRRule, stringifyRRule, weekday, ymd, startOfDayMs, toWall, fromWall, isoDate, dayOf } from '@shared/calendar';
-import { useStore, getState, setState, setView, setPrefs, openMenu, findOccurrence, updateOccurrence, deleteOccurrences, duplicateOccurrences, copyOccurrences, paste, createEvent, calendarOf, updateCalendar, removeCalendar, addCalendar, exportCalendar, syncCalendar, showOnlyCalendar, isDark, MenuState } from '../store';
+// The calendar's menus: view switcher, chip and grid context menus, the event panel's pickers and the calendar
+// menu. All of them are the shared menu (MenuList) in the app's float layer; the colour row is the only part that
+// is the calendar's own (event colours are calendar data).
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { Check, Scissors, Copy, CopyPlus, Trash2, ClipboardPaste, Plus } from 'lucide-react';
+import { PALETTE, colorFamily, parseRRule, stringifyRRule, weekday, ymd, fromWall, isoDate, dayOf, toWall } from '@shared/calendar';
+import { MenuList, type MenuEntry } from '../../../../components/ui/float/Menu';
+import { Input } from '../../../../components/ui/Field';
+import { confirmDialog } from '../../../../components/ui/float/Dialog';
+import type { FloatAnchor } from '../../../../components/ui/float/float-store';
+import { getState, setState, setView, setPrefs, findOccurrence, updateOccurrence, deleteOccurrences, duplicateOccurrences, copyOccurrences, paste, createEvent, calendarOf, updateCalendar, removeCalendar, addCalendar, exportCalendar, syncCalendar, showOnlyCalendar, isDark } from '../store';
 import { t } from '../i18n';
 import { MOD } from '../commands';
-import { wdShort, monthName, panelTime, ruleLabel } from '../fmt';
-import { REMINDER_OPTS, reminderLabel } from './Panel';
+import { wdShort, monthName, panelTime, ruleLabel, REMINDER_OPTS, reminderLabel } from '../fmt';
+import { anchorAt, openCalendarFloat, type At } from '../floats';
+import { openRecurrenceDialog } from './Overlays';
 
-function Item({ label, hint, checked, onClick, danger, disabled, sub, icon }: { label: string; hint?: string; checked?: boolean; onClick?: () => void; danger?: boolean; disabled?: boolean; sub?: boolean; icon?: React.ReactNode }) {
-  return <div className={`mi${danger ? ' danger' : ''}${disabled ? ' disabled' : ''}`} onClick={() => { if (!disabled) onClick?.(); }}>
-    {checked !== undefined && <span className="chk">{checked && <Check size={14} />}</span>}{icon}<span className="lbl">{label}</span>{hint && <span className="hint">{hint}</span>}{sub && <ChevronRight size={14} style={{ color: 'var(--m-text2)' }} />}
+export type MenuKind = 'view' | 'chip' | 'grid' | 'calendar' | 'calendarPick' | 'busy' | 'visibility' | 'reminder' | 'repeat' | 'evColor' | 'time' | 'tz';
+
+/** Opens one of the calendar's menus at a point or under a control. `data.key` names the occurrence. */
+export interface MenuData { key?: string; id?: string; create?: boolean; day?: number; min?: number; allDay?: boolean; edge?: 'start' | 'end' }
+export function openCalendarMenu(kind: MenuKind, at: At, data: MenuData = {}): void {
+  const anchor = anchorAt(at);
+  const occ = data.key ? findOccurrence(data.key) : undefined;
+  const revision = { expectedRevision: occ?.event.revision };
+  switch (kind) {
+    case 'view': return viewMenu(anchor);
+    case 'chip': return void (data.key && chipMenu(anchor, data.key));
+    case 'grid': {
+      const { day = getState().cursorDay, min = 0, allDay } = data; const p = getState().prefs;
+      return menu(anchor, [
+        { id: 'new', label: t('newEvent'), icon: <Plus />, hint: 'C', onSelect: () => {
+          if (allDay) void createEvent({ allDay: true, start: isoDate(day), end: isoDate(day + 1) }, { draft: true });
+          else { const st = fromWall({ ...ymd(day), h: Math.floor(min / 60), mi: min % 60 }, p.primaryTimeZone); void createEvent({ allDay: false, start: st, end: st + p.defaultEventDuration * 60000 }, { draft: true }); }
+        } },
+        { id: 'paste', label: t('paste'), icon: <ClipboardPaste />, hint: `${MOD} V`, disabled: !getState().clipboard.length, onSelect: () => { setState({ cursorDay: day }); paste(); } },
+      ], t('newEvent'));
+    }
+    case 'calendar': return data.create ? openNameField(anchor) : void (data.id && calendarMenu(anchor, data.id));
+    case 'calendarPick':
+      if (!occ) return;
+      return menu(anchor, getState().calendars.filter((c) => !c.readOnly).map((c) => ({
+        id: c.id, label: c.name, checked: occ.event.calendarId === c.id, onSelect: () => void updateOccurrence(occ.key, { calendarId: c.id }, revision),
+      })));
+    case 'busy':
+      if (!occ) return;
+      return menu(anchor, [
+        { id: 'busy', label: t('busy'), checked: occ.event.transparency !== 'transparent', onSelect: () => void updateOccurrence(occ.key, { transparency: 'opaque' }, revision) },
+        { id: 'free', label: t('free'), checked: occ.event.transparency === 'transparent', onSelect: () => void updateOccurrence(occ.key, { transparency: 'transparent' }, revision) },
+      ]);
+    case 'visibility': {
+      if (!occ) return; const v = occ.event.visibility ?? 'default';
+      return menu(anchor, (['default', 'public', 'private'] as const).map((k) => ({
+        id: k, label: k === 'default' ? t('defaultVisibility') : k === 'public' ? t('publicV') : t('privateV'), checked: v === k,
+        onSelect: () => void updateOccurrence(occ.key, { visibility: k }, revision),
+      })));
+    }
+    case 'reminder':
+      if (!occ) return;
+      return menu(anchor, REMINDER_OPTS.map((r) => ({
+        id: String(r), label: reminderLabel(r), onSelect: () => {
+          const cur = occ.event.reminders ?? [];
+          if (!cur.some((x) => x.minutes === r)) void updateOccurrence(occ.key, { reminders: [...cur, { minutes: r, method: 'notification' as const }].sort((a, b) => a.minutes - b.minutes) }, revision);
+        },
+      })), t('reminders'));
+    case 'repeat': return void (data.key && repeatMenu(anchor, data.key));
+    case 'evColor': {
+      if (!occ) return; const current = occ.event.color?.toUpperCase();
+      openCalendarFloat({ anchor, placement: 'bottom-start', render: (close) => <div className="cal-menu">
+        <Colors current={current} onPick={(hex) => { close(); void updateOccurrence(occ.key, { color: hex }, revision); }} />
+        <MenuList label={t('eventColor')} onDone={close} items={[{ id: 'calendar', label: t('calendarColor'), checked: !occ.event.color, onSelect: () => void updateOccurrence(occ.key, { color: undefined }, revision) }]} />
+      </div> });
+      return;
+    }
+    case 'time': return void (data.key && timeMenu(anchor, data.key, data.edge === 'end'));
+    case 'tz': return void (data.key && tzMenu(anchor, data.key));
+  }
+}
+
+function menu(anchor: FloatAnchor, items: MenuEntry[], label?: string) {
+  openCalendarFloat({ anchor, placement: 'bottom-start', render: (close) => <MenuList items={items} label={label} onDone={close} /> });
+}
+
+/** The event colours as a grid of swatches; the current one carries a check. */
+function Colors({ current, onPick }: { current?: string; onPick: (hex: string) => void }) {
+  const dark = isDark();
+  return <div className="cal-colors" role="group" aria-label={t('eventColor')}>
+    {PALETTE.map((c) => <button key={c.id} type="button" title={c.name} aria-label={c.name} aria-pressed={current === c.hex}
+      style={{ background: colorFamily(c.hex, dark).backgroundPrimary }} onClick={() => onPick(c.hex)}>{current === c.hex ? <Check aria-hidden /> : null}</button>)}
   </div>;
 }
-const close = () => openMenu(null);
 
-export function Menus() {
-  const m = useStore((x) => x.menu);
-  const ref = useRef<HTMLDivElement>(null); const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
-  useLayoutEffect(() => {
-    if (!m || !ref.current) { setPos(null); return; }
-    const r = ref.current.getBoundingClientRect(), bounds = ref.current.closest('.ready-calendar')!.getBoundingClientRect();
-    setPos({ x: Math.max(8, Math.min(m.x, bounds.width - r.width - 8)), y: m.y + r.height > bounds.height - 8 ? Math.max(8, m.y - r.height) : m.y });
-  }, [m]);
-  useEffect(() => {
-    if (!m) return; const f = (e: PointerEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) close(); };
-    const id = setTimeout(() => window.addEventListener('pointerdown', f, true)); return () => { clearTimeout(id); window.removeEventListener('pointerdown', f, true); };
-  }, [m]);
-  if (!m) return null;
-  return <div ref={ref} className="pop" data-testid={`menu-${m.kind}`} style={{ left: pos?.x ?? m.x, top: pos?.y ?? m.y, visibility: pos ? 'visible' : 'hidden', minWidth: m.kind === 'view' ? 200 : m.kind === 'chip' ? 238 : 200 }}><MenuBody m={m} /></div>;
+function viewMenu(anchor: FloatAnchor) {
+  const p = getState().prefs;
+  const cur = p.gridView === 'month' ? 'm' : p.daysPerPeriod === 1 ? 'd' : p.daysPerPeriod === 7 ? 'w' : 'n';
+  const days = () => menu(anchor, [2, 3, 4, 5, 6, 7, 8, 9].map((n) => ({
+    id: `days-${n}`, label: t('nDays', { n }), hint: String(n), checked: p.gridView === 'default' && p.daysPerPeriod === n, onSelect: () => setView('default', n),
+  })), t('days'));
+  const settings = () => menu(anchor, [
+    { id: 'weekends', label: t('showWeekends'), checked: p.showWeekends, onSelect: () => void setPrefs({ showWeekends: !p.showWeekends }) },
+    { id: 'declined', label: t('showDeclined'), checked: p.showDeclined, onSelect: () => void setPrefs({ showDeclined: !p.showDeclined }) },
+    { id: 'weeknumbers', label: t('showWeekNumbers'), checked: p.showWeekNumbers, onSelect: () => void setPrefs({ showWeekNumbers: !p.showWeekNumbers }) },
+  ], t('viewSettings'));
+  menu(anchor, [
+    { id: 'day', label: t('day'), hint: `1 ${t('or')} D`, checked: cur === 'd', onSelect: () => setView('default', 1) },
+    { id: 'week', label: t('week'), hint: `0 ${t('or')} W`, checked: cur === 'w', onSelect: () => setView('default', 7) },
+    { id: 'month', label: t('month'), hint: 'M', checked: cur === 'm', onSelect: () => setView('month') },
+    { kind: 'separator' },
+    { id: 'days', label: `${t('days')}…`, checked: cur === 'n', onSelect: days },
+    { id: 'settings', label: `${t('viewSettings')}…`, checked: false, onSelect: settings },
+  ], t('viewSettings'));
 }
 
-function MenuBody({ m }: { m: MenuState }) {
-  const p = useStore((x) => x.prefs); const [sub, setSub] = useState<string | null>(null);
-  switch (m.kind) {
-    case 'view': {
-      const cur = p.gridView === 'month' ? 'm' : p.daysPerPeriod === 1 ? 'd' : p.daysPerPeriod === 7 ? 'w' : 'n';
-      if (sub === 'days') return <div className="pop-sec">{[2, 3, 4, 5, 6, 7, 8, 9].map((n) => <Item key={n} label={t('nDays', { n })} hint={String(n)} checked={p.gridView === 'default' && p.daysPerPeriod === n} onClick={() => setView('default', n)} />)}</div>;
-      if (sub === 'settings') return <div className="pop-sec">
-        <Item label={t('showWeekends')} checked={p.showWeekends} onClick={() => setPrefs({ showWeekends: !p.showWeekends })} />
-        <Item label={t('showDeclined')} checked={p.showDeclined} onClick={() => setPrefs({ showDeclined: !p.showDeclined })} />
-        <Item label={t('showWeekNumbers')} checked={p.showWeekNumbers} onClick={() => setPrefs({ showWeekNumbers: !p.showWeekNumbers })} /></div>;
-      return <>
-        <div className="pop-sec">
-          <Item label={t('day')} hint={`1 ${t('or')} D`} checked={cur === 'd'} onClick={() => setView('default', 1)} />
-          <Item label={t('week')} hint={`0 ${t('or')} W`} checked={cur === 'w'} onClick={() => setView('default', 7)} />
-          <Item label={t('month')} hint="M" checked={cur === 'm'} onClick={() => setView('month')} />
-        </div>
-        <div className="pop-sec"><Item label={t('days')} checked={cur === 'n' ? true : false} sub onClick={() => setSub('days')} /></div>
-        <div className="pop-sec"><Item label={t('viewSettings')} checked={false} sub onClick={() => setSub('settings')} /></div>
-      </>;
-    }
-    case 'chip': {
-      const occ = findOccurrence(m.data.key); if (!occ) return null; const ro = !!calendarOf(occ.event.calendarId)?.readOnly;
-      const keys = getState().selected.includes(m.data.key) ? getState().selected : [m.data.key];
-      const dark = isDark();
-      return <>
-        {!ro && <div className="colors">{PALETTE.map((c) => <button key={c.id} title={c.name} style={{ background: colorFamily(c.hex, dark).backgroundPrimary }} onClick={() => { updateOccurrence(m.data.key, { color: c.hex }, { expectedRevision: occ?.event.revision }); close(); }}>{(occ.event.color ?? calendarOf(occ.event.calendarId)?.color)?.toUpperCase() === c.hex ? <Check size={10} /> : null}</button>)}</div>}
-        <div className="pop-sec">
-          <Item icon={<Scissors size={14} />} label={t('cut')} hint={`${MOD} X`} disabled={ro} onClick={() => { copyOccurrences(keys, true); close(); }} />
-          <Item icon={<Copy size={14} />} label={t('copy')} hint={`${MOD} C`} onClick={() => { copyOccurrences(keys); close(); }} />
-          <Item icon={<CopyPlus size={14} />} label={t('duplicate')} hint={`${MOD} D`} onClick={() => { duplicateOccurrences(keys); close(); }} />
-        </div>
-        <div className="pop-sec"><Item icon={<Trash2 size={14} />} label={t('del')} hint={t('deleteKey')} danger disabled={ro} onClick={() => { close(); deleteOccurrences(keys); }} /></div>
-      </>;
-    }
-    case 'grid': {
-      const { day, min, allDay } = m.data;
-      return <div className="pop-sec">
-        <Item icon={<Plus size={14} />} label={t('newEvent')} hint="C" onClick={() => { close(); if (allDay) createEvent({ allDay: true, start: isoDate(day), end: isoDate(day + 1) }, { draft: true }); else { const st = fromWall({...ymd(day),h:Math.floor(min/60),mi:min%60},p.primaryTimeZone); createEvent({ allDay: false, start: st, end: st + p.defaultEventDuration * 60000 }, { draft: true }); } }} />
-        <Item icon={<ClipboardPaste size={14} />} label={t('paste')} hint={`${MOD} V`} disabled={!getState().clipboard.length} onClick={() => { setState({ cursorDay: day }); paste(); close(); }} />
-      </div>;
-    }
-    case 'calendar': return <CalendarMenu key={m.data?.id||'new'} m={m} />;
-    case 'calendarPick': {
-      const occ = findOccurrence(m.data.key); const cals = getState().calendars.filter((c) => !c.readOnly);
-      return <div className="pop-sec">{cals.map((c) => <Item key={c.id} label={c.name} checked={occ?.event.calendarId === c.id} icon={<span className="swatch" style={{ ['--sw' as any]: colorFamily(c.color, isDark()).backgroundPrimary }} />} onClick={() => { updateOccurrence(m.data.key, { calendarId: c.id }, { expectedRevision: occ?.event.revision }); close(); }} />)}</div>;
-    }
-    case 'busy': { const occ = findOccurrence(m.data.key); return <div className="pop-sec">
-      <Item label={t('busy')} checked={occ?.event.transparency !== 'transparent'} onClick={() => { updateOccurrence(m.data.key, { transparency: 'opaque' }, { expectedRevision: occ?.event.revision }); close(); }} />
-      <Item label={t('free')} checked={occ?.event.transparency === 'transparent'} onClick={() => { updateOccurrence(m.data.key, { transparency: 'transparent' }, { expectedRevision: occ?.event.revision }); close(); }} /></div>; }
-    case 'visibility': { const occ = findOccurrence(m.data.key); const v = occ?.event.visibility ?? 'default'; return <div className="pop-sec">
-      {(['default', 'public', 'private'] as const).map((k) => <Item key={k} label={k === 'default' ? t('defaultVisibility') : k === 'public' ? t('publicV') : t('privateV')} checked={v === k} onClick={() => { updateOccurrence(m.data.key, { visibility: k }, { expectedRevision: occ?.event.revision }); close(); }} />)}</div>; }
-    case 'reminder': { const occ = findOccurrence(m.data.key); return <div className="pop-sec">
-      {REMINDER_OPTS.map((r) => <Item key={r} label={reminderLabel(r)} onClick={() => { const cur = occ?.event.reminders ?? []; if (!cur.some((x) => x.minutes === r)) updateOccurrence(m.data.key, { reminders: [...cur, { minutes: r, method: 'notification' as const }].sort((a, b) => a.minutes - b.minutes) }, { expectedRevision: occ?.event.revision }); close(); }} />)}</div>; }
-    case 'repeat': return <RepeatMenu m={m} />;
-    case 'evColor': { const occ = findOccurrence(m.data.key); if (!occ) return null; const dk = isDark(); const calc = calendarOf(occ.event.calendarId)?.color;
-      return <div className="pop-sec" style={{ width: 200 }}>
-        <Item label={t('calendarColor')} checked={!occ.event.color} icon={<span className="swatch" style={{ ['--sw' as any]: colorFamily(calc || '#999', dk).backgroundPrimary }} />} onClick={() => { updateOccurrence(m.data.key, { color: undefined }, { expectedRevision: occ?.event.revision }); close(); }} />
-        {PALETTE.map((c) => <Item key={c.id} label={c.name} checked={occ.event.color?.toUpperCase() === c.hex} icon={<span className="swatch" style={{ ['--sw' as any]: colorFamily(c.hex, dk).backgroundPrimary }} />} onClick={() => { updateOccurrence(m.data.key, { color: c.hex }, { expectedRevision: occ?.event.revision }); close(); }} />)}</div>; }
-    case 'time': return <TimeMenu m={m} />;
-    case 'tz': { const zones = ['UTC', 'America/Los_Angeles', 'America/New_York', 'Europe/London', 'Europe/Berlin', 'Asia/Shanghai', 'Asia/Tokyo', 'Australia/Sydney'];
-      const occ = findOccurrence(m.data.key);if(!occ)return null;
-      return <div className="pop-sec" style={{ maxHeight: 320, overflowY: 'auto' }}>{Array.from(new Set([p.primaryTimeZone, ...zones])).map((z) => <Item key={z} label={z.replace(/_/g, ' ')} checked={(occ?.event.timeZone ?? p.primaryTimeZone) === z} onClick={() => { const oldZone=occ.event.timeZone||p.primaryTimeZone;const separateEnd=occ.event.endTimeZone&&occ.event.endTimeZone!==oldZone;const patch=occ.allDay?{timeZone:z}:{timeZone:z,endTimeZone:separateEnd?occ.event.endTimeZone:z,start:fromWall(toWall(occ.start,oldZone),z),end:separateEnd?occ.end:fromWall(toWall(occ.end,oldZone),z)};updateOccurrence(m.data.key, patch, { expectedRevision: occ?.event.revision }); close(); }} />)}</div>; }
-    default: return null;
-  }
+function chipMenu(anchor: FloatAnchor, key: string) {
+  const occ = findOccurrence(key); if (!occ) return;
+  const ro = !!calendarOf(occ.event.calendarId)?.readOnly;
+  const keys = getState().selected.includes(key) ? getState().selected : [key];
+  const current = (occ.event.color ?? calendarOf(occ.event.calendarId)?.color)?.toUpperCase();
+  const items: MenuEntry[] = [
+    { id: 'cut', label: t('cut'), icon: <Scissors />, hint: `${MOD} X`, disabled: ro, onSelect: () => copyOccurrences(keys, true) },
+    { id: 'copy', label: t('copy'), icon: <Copy />, hint: `${MOD} C`, onSelect: () => copyOccurrences(keys) },
+    { id: 'duplicate', label: t('duplicate'), icon: <CopyPlus />, hint: `${MOD} D`, onSelect: () => duplicateOccurrences(keys) },
+    { kind: 'separator' },
+    { id: 'delete', label: t('del'), icon: <Trash2 />, hint: t('deleteKey'), danger: true, disabled: ro, onSelect: () => void deleteOccurrences(keys) },
+  ];
+  openCalendarFloat({ anchor, placement: 'bottom-start', render: (close) => <div className="cal-menu">
+    {!ro && <Colors current={current} onPick={(hex) => { close(); void updateOccurrence(key, { color: hex }, { expectedRevision: occ.event.revision }); }} />}
+    <MenuList items={items} label={occ.event.title || t('noTitle')} onDone={close} />
+  </div> });
 }
 
-function CalendarMenu({ m }: { m: MenuState }) {
-  const [name, setName] = useState(calendarOf(m.data?.id)?.name||''); const [renaming,setRenaming]=useState(false); const dark = isDark();
-  if (m.data?.create || renaming) {
-    return <div className="pop-sec" style={{ padding: 8, width: 240 }}>
-      <input autoFocus placeholder={t('newCalendar')} value={name} onChange={(e) => setName(e.target.value)} onKeyDown={async(e) => { e.stopPropagation(); if (e.key === 'Enter' && name.trim()) { const saved=renaming?await updateCalendar(m.data.id,{name:name.trim()}):await addCalendar(name.trim(), PALETTE[(getState().calendars.length * 5) % PALETTE.length].hex); if(saved)close(); } if (e.key === 'Escape') close(); }}
-        style={{ width: '100%', height: 28, borderRadius: 6, border: 0, outline: 0, padding: '0 8px', background: 'rgba(255,255,255,.06)', color: 'var(--m-text)', fontSize: 13 }} />
-    </div>;
-  }
-  const c = calendarOf(m.data.id); if (!c) return null;
-  return <>
-    <div className="colors">{PALETTE.map((p) => <button key={p.id} title={p.name} style={{ background: colorFamily(p.hex, dark).backgroundPrimary }} onClick={() => { updateCalendar(c.id, { color: p.hex }); close(); }}>{c.color.toUpperCase() === p.hex ? <Check size={10} /> : null}</button>)}</div>
-    <div className="pop-sec">
-      <Item label={c.visible ? t('hideCal') : t('showCal')} onClick={() => { updateCalendar(c.id, { visible: !c.visible }); close(); }} />
-      <Item label={t('onlyThis')} onClick={() => { void showOnlyCalendar(c.id); close(); }} />
-      {!c.readOnly && <Item label={t('rename')} onClick={() => { setName(c.name);setRenaming(true); }} />}
-      {!c.readOnly&&!c.primary&&<Item label="设为默认日历" onClick={()=>{void updateCalendar(c.id,{primary:true});close()}}/>}
-      {c.syncUrl&&<Item label="立即同步" onClick={()=>{void syncCalendar(c.id);close()}}/>}
-      {c.syncError&&<div className="pop-sec" role="status" style={{maxWidth:260,fontSize:12}}>上次同步未完成：{c.syncError}</div>}
-      <Item label={t('exportIcs')} onClick={() => { exportCalendar(c.id); close(); }} />
-    </div>
-    {!c.primary && <div className="pop-sec"><Item label={t('deleteCalendar')} danger onClick={() => { close(); if (confirm(`${t('deleteCalendar')}: ${c.name}?`)) removeCalendar(c.id); }} /></div>}
-  </>;
+function calendarMenu(anchor: FloatAnchor, id: string) {
+  const c = calendarOf(id); if (!c) return;
+  const items: MenuEntry[] = [
+    { id: 'visible', label: c.visible ? t('hideCal') : t('showCal'), onSelect: () => void updateCalendar(c.id, { visible: !c.visible }) },
+    { id: 'only', label: t('onlyThis'), onSelect: () => void showOnlyCalendar(c.id) },
+  ];
+  if (!c.readOnly) items.push({ id: 'rename', label: t('rename'), onSelect: () => openNameField(anchor, c.id) });
+  if (!c.readOnly && !c.primary) items.push({ id: 'primary', label: '设为默认日历', onSelect: () => void updateCalendar(c.id, { primary: true }) });
+  if (c.syncUrl) items.push({ id: 'sync', label: '立即同步', onSelect: () => void syncCalendar(c.id) });
+  if (c.syncError) items.push({ kind: 'group', label: `上次同步未完成：${c.syncError}` });
+  items.push({ id: 'export', label: t('exportIcs'), onSelect: () => void exportCalendar(c.id) });
+  if (!c.primary) items.push({ kind: 'separator' }, {
+    id: 'delete', label: t('deleteCalendar'), danger: true,
+    onSelect: () => void confirmDialog({ title: `${t('deleteCalendar')}：${c.name}`, confirmLabel: t('del'), danger: true }).then((ok) => { if (ok) void removeCalendar(c.id); }),
+  });
+  openCalendarFloat({ anchor, placement: 'bottom-start', render: (close) => <div className="cal-menu">
+    <Colors current={c.color.toUpperCase()} onPick={(hex) => { close(); void updateCalendar(c.id, { color: hex }); }} />
+    <MenuList items={items} label={c.name} onDone={close} />
+  </div> });
 }
 
-function RepeatMenu({ m }: { m: MenuState }) {
-  const occ = findOccurrence(m.data.key); if (!occ) return null;
+/** Names a new local calendar, or renames one. */
+function openNameField(anchor: FloatAnchor, id?: string) {
+  openCalendarFloat({ anchor, placement: 'bottom-start', role: 'dialog', label: id ? t('rename') : t('newCalendar'), render: (close) => <NameField id={id} close={close} /> });
+}
+function NameField({ id, close }: { id?: string; close: () => void }) {
+  const [name, setName] = useState(id ? calendarOf(id)?.name || '' : '');
+  const save = async () => {
+    if (!name.trim()) return;
+    const saved = id ? await updateCalendar(id, { name: name.trim() }) : await addCalendar(name.trim(), PALETTE[(getState().calendars.length * 5) % PALETTE.length].hex);
+    if (saved) close();
+  };
+  return <div className="cal-name-field">
+    <Input data-autofocus aria-label={id ? t('rename') : t('newCalendar')} placeholder={t('newCalendar')} value={name} onChange={(e) => setName(e.target.value)}
+      onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); void save(); } }} />
+  </div>;
+}
+
+function repeatMenu(anchor: FloatAnchor, key: string) {
+  const occ = findOccurrence(key); if (!occ) return;
   const day = occ.startDay; const wd = weekday(day); const { m: mo, d } = ymd(day);
   const WD = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
   const opts: [string, string | undefined][] = [
@@ -130,30 +176,57 @@ function RepeatMenu({ m }: { m: MenuState }) {
     [t('weekdays'), 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR'], [t('monthly', { n: d }), `FREQ=MONTHLY;BYMONTHDAY=${d}`], [t('yearly', { d: `${monthName(mo)} ${d}` }), `FREQ=YEARLY;BYMONTH=${mo};BYMONTHDAY=${d}`],
   ];
   const series = occ.seriesId ? getState().events[occ.seriesId] : occ.event.rrule ? occ.event : undefined;
-  const cur = series?.rrule ? stringifyRRule(parseRRule(series.rrule)) : undefined;
-  const known = opts.some(([, r]) => (r ? stringifyRRule(parseRRule(r)) : undefined) === cur);
-  return <div className="pop-sec">{opts.map(([l, r]) => <Item key={l} label={l} checked={(cur ?? undefined) === (r ? stringifyRRule(parseRRule(r)) : undefined)} onClick={() => {
-    close();
-    if (series) updateOccurrence(m.data.key, { rrule: r }, { scope: 'all' });
-    else updateOccurrence(m.data.key, { rrule: r });
-  }} />)}
-    {!known && cur && <Item label={ruleLabel(parseRRule(cur))} checked onClick={close} />}
-    <div className="pop-div" />
-    <Item label={t('custom')} onClick={() => { close(); setState({ overlay: 'recurrence', recKey: m.data.key }); }} /></div>;
+  const norm = (rule: string | undefined) => (rule ? stringifyRRule(parseRRule(rule)) : undefined);
+  const cur = norm(series?.rrule);
+  const items: MenuEntry[] = opts.map(([label, rule], i) => ({
+    id: `rule-${i}`, label, checked: cur === norm(rule),
+    onSelect: () => void updateOccurrence(key, { rrule: rule }, series ? { scope: 'all' } : {}),
+  }));
+  if (cur && !opts.some(([, rule]) => norm(rule) === cur)) items.push({ id: 'current', label: ruleLabel(parseRRule(cur)), checked: true, onSelect: () => {} });
+  items.push({ kind: 'separator' }, { id: 'custom', label: t('custom'), onSelect: () => openRecurrenceDialog(key) });
+  menu(anchor, items, t('repeat'));
 }
 
-function TimeMenu({ m }: { m: MenuState }) {
-  const occ = findOccurrence(m.data.key); const p = getState().prefs; const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => { ref.current?.querySelector('.act')?.scrollIntoView({ block: 'center' }); }, []);
-  if (!occ) return null; const tz = m.data.edge==='end'?(occ.event.endTimeZone||occ.event.timeZone||p.primaryTimeZone):(occ.event.timeZone||p.primaryTimeZone); const day = dayOf(occ.start,tz); const sod = startOfDayMs(day, tz);
-  const isEnd = m.data.edge === 'end'; const base = isEnd ? occ.start : sod;
-  const slots = [...new Set(Array.from({ length: 96 }, (_, i) => isEnd?base+(i+1)*900000:fromWall({...ymd(day),h:Math.floor(i/4),mi:i%4*15},tz)))].filter(x=>!isEnd||x-occ.start<=24*3600000);
+function timeMenu(anchor: FloatAnchor, key: string, isEnd: boolean) {
+  const occ = findOccurrence(key); if (!occ) return;
+  const p = getState().prefs;
+  const tz = isEnd ? (occ.event.endTimeZone || occ.event.timeZone || p.primaryTimeZone) : (occ.event.timeZone || p.primaryTimeZone);
+  const day = dayOf(occ.start, tz);
+  const slots = [...new Set(Array.from({ length: 96 }, (_, i) => isEnd ? occ.start + (i + 1) * 900000 : fromWall({ ...ymd(day), h: Math.floor(i / 4), mi: i % 4 * 15 }, tz)))]
+    .filter((x) => !isEnd || x - occ.start <= 24 * 3600000);
   const cur = isEnd ? occ.end : occ.start;
-  return <div ref={ref} className="pop-sec" style={{ maxHeight: 280, overflowY: 'auto', width: 190 }}>{slots.map((x) => {
+  const items: MenuEntry[] = slots.map((x) => {
     const mins = Math.round((x - occ.start) / 60000);
-    return <div key={x} className={`mi tnum${x === cur ? ' act' : ''}`} onClick={() => {
-      close(); if (isEnd) updateOccurrence(m.data.key, { end: x }); else updateOccurrence(m.data.key, { start: x, end: x + (occ.end - occ.start) });
-    }}><span className="lbl">{panelTime(x, tz, p.format24HourTime)}</span>{isEnd && <span className="hint">{mins < 60 ? `${mins}m` : `${(mins / 60).toFixed(mins % 60 ? 1 : 0)}h`}</span>}</div>;
-  })}</div>;
+    return {
+      id: String(x), label: panelTime(x, tz, p.format24HourTime), checked: x === cur,
+      hint: isEnd ? (mins < 60 ? `${mins}m` : `${(mins / 60).toFixed(mins % 60 ? 1 : 0)}h`) : undefined,
+      onSelect: () => void (isEnd ? updateOccurrence(key, { end: x }) : updateOccurrence(key, { start: x, end: x + (occ.end - occ.start) })),
+    };
+  });
+  openCalendarFloat({ anchor, placement: 'bottom-start', render: (close) => <Scrolled><MenuList items={items} label={isEnd ? '结束时间' : '开始时间'} onDone={close} /></Scrolled> });
 }
-void toWall; void fromWall; void dayOf;
+
+/** A long list in a scrolling frame, opened with its checked item in the middle. */
+function Scrolled({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const frame = ref.current, item = frame?.querySelector<HTMLElement>('[aria-checked="true"]');
+    if (frame && item) frame.scrollTop = item.offsetTop - frame.clientHeight / 2 + item.offsetHeight / 2;
+  }, []);
+  return <div ref={ref} className="cal-scroll-menu">{children}</div>;
+}
+
+function tzMenu(anchor: FloatAnchor, key: string) {
+  const occ = findOccurrence(key); if (!occ) return;
+  const p = getState().prefs;
+  const zones = ['UTC', 'America/Los_Angeles', 'America/New_York', 'Europe/London', 'Europe/Berlin', 'Asia/Shanghai', 'Asia/Tokyo', 'Australia/Sydney'];
+  menu(anchor, Array.from(new Set([p.primaryTimeZone, ...zones])).map((z) => ({
+    id: z, label: z.replace(/_/g, ' '), checked: (occ.event.timeZone ?? p.primaryTimeZone) === z,
+    onSelect: () => {
+      const oldZone = occ.event.timeZone || p.primaryTimeZone;
+      const separateEnd = occ.event.endTimeZone && occ.event.endTimeZone !== oldZone;
+      const patch = occ.allDay ? { timeZone: z } : { timeZone: z, endTimeZone: separateEnd ? occ.event.endTimeZone : z, start: fromWall(toWall(occ.start, oldZone), z), end: separateEnd ? occ.end : fromWall(toWall(occ.end, oldZone), z) };
+      void updateOccurrence(key, patch, { expectedRevision: occ.event.revision });
+    },
+  })), t('timeZone'));
+}

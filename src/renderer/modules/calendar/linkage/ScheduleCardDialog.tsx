@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { CalendarSnapshot } from '../../../../shared/calendar/commands'
 import type { ScheduleCard } from '../../../../shared/calendar-linkage'
 import { fromWall } from '../../../../shared/calendar/tz'
+import { Button, Input, Select } from '../../../components/ui'
 export function ScheduleCardDialog({ objectId, nodeId, version, title: initialTitle, snapshot, close, saved }: {
   objectId: string; nodeId: string; version: string; title: string; snapshot: CalendarSnapshot; close(): void; saved(): Promise<void>
 }) {
@@ -23,11 +24,11 @@ export function ScheduleCardDialog({ objectId, nodeId, version, title: initialTi
     })().catch(cause => { if (mounted.current) setError(String(cause)) }).finally(() => { lock.current = false; if (mounted.current) setBusy(false) })
   }}>
     <strong>安排日程 · {zone}</strong>
-    <label>标题<input required value={title} disabled={!!intent.current} onChange={e => setTitle(e.target.value)} /></label>
-    <label>日历<select value={calendarId} disabled={!!intent.current} onChange={e => setCalendar(e.target.value)}>{calendars.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
-    <label>开始<input aria-label="日程开始" required type="datetime-local" value={start} disabled={!!intent.current} onChange={e => setStart(e.target.value)} /></label>
-    <label>结束<input aria-label="日程结束" required type="datetime-local" value={end} disabled={!!intent.current} onChange={e => setEnd(e.target.value)} /></label>
+    <label>标题<Input required value={title} disabled={!!intent.current} onChange={e => setTitle(e.target.value)} /></label>
+    <label>日历<Select value={calendarId} disabled={!!intent.current} onChange={e => setCalendar(e.target.value)} options={calendars.map(c => ({ value: c.id, label: c.name }))} /></label>
+    <label>开始<Input aria-label="日程开始" required type="datetime-local" value={start} disabled={!!intent.current} onChange={e => setStart(e.target.value)} /></label>
+    <label>结束<Input aria-label="日程结束" required type="datetime-local" value={end} disabled={!!intent.current} onChange={e => setEnd(e.target.value)} /></label>
     {error && <p role="alert">{error}</p>}
-    <button type="submit" disabled={busy || !calendarId}>{intent.current ? '重试同一日程' : '创建日程'}</button><button type="button" disabled={busy} onClick={close}>关闭</button>
+    <div className="flex justify-end gap-2"><Button variant="ghost" disabled={busy} onClick={close}>关闭</Button><Button type="submit" variant="primary" disabled={busy || !calendarId}>{intent.current ? '重试同一日程' : '创建日程'}</Button></div>
   </form>
 }

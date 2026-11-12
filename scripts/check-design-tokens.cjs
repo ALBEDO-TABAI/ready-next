@@ -19,8 +19,6 @@ function initialBudget() {
     directories: {}, retired: {}, retiredAllowFiles: [],
     whitelist: [
       { glob: 'src/renderer/design/next/**', reason: 'W1 §3.1 的共享设计令牌来源。' },
-      { glob: 'src/renderer/modules/calendar/workbench/styles/tokens.css', reason: 'W1 §3.2 指定保留的日历明暗色板；文件同时含界面颜色，后续迁移仍需移走这些值。' },
-      { glob: 'src/renderer/modules/calendar/workbench/geometry-tokens.ts', reason: '日历生成的明暗颜色数据，与 tokens.css 同源；也混有界面颜色和几何数据。' },
       { glob: 'src/renderer/modules/library/reader/marks.ts', reason: 'MARKERS / markerColor 定义用户阅读划线颜色。' },
       { glob: 'src/renderer/modules/library/topics.ts', reason: 'lookOf 生成书脊布色与配套前景色；布色色板本体在扫描范围外的 src/shared/library-topics.ts。' },
     ],

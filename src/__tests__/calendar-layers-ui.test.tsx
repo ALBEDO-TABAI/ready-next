@@ -52,12 +52,16 @@ test('C8 switches render the same entries, footprints cannot drag, moves wait fo
   }
   await act(async () => root.render(<Harness />))
   const doc = dom.window.document
-  assert.equal(doc.querySelectorAll('input[type=checkbox]').length, 4)
+  // The layer switches are the shared checkbox (W1 §5), each named by its layer.
+  const layerBox = (name: string) => [...doc.querySelectorAll<HTMLButtonElement>('[role=checkbox]')].find(box => box.closest('label')?.textContent === name)!
+  assert.equal(doc.querySelectorAll('[role=group][aria-label="日历图层"] [role=checkbox]').length, 4)
+  assert.equal(layerBox('文档日期').getAttribute('aria-checked'), 'true')
   assert.equal(doc.querySelector('[data-layer="documents"]')?.getAttribute('draggable'), 'true')
   assert.equal(doc.querySelector('[data-layer="footprints"]')?.getAttribute('draggable'), 'false')
-  await act(async () => doc.querySelector<HTMLInputElement>('[aria-label="文档日期"]')!.click())
+  await act(async () => layerBox('文档日期').click())
   assert.equal(doc.querySelector('[data-layer="documents"]'), null)
-  await act(async () => doc.querySelector<HTMLInputElement>('[aria-label="文档日期"]')!.click())
+  assert.equal(layerBox('文档日期').getAttribute('aria-checked'), 'false')
+  await act(async () => layerBox('文档日期').click())
   assert.ok(doc.querySelector('[data-layer="documents"]'))
   await act(async () => doc.querySelector<HTMLButtonElement>('[data-layer="footprints"]')!.click())
   const { opened } = await import(navigation); assert.deepEqual(opened, [{ kind: 'file', id: 'a' }])

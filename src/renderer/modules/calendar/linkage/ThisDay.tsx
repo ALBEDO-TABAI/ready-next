@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { DayInput, DaySummary } from '../../../../shared/calendar-linkage'
-import { RefCapsule } from '../../../components/ui'
+import { Button, RefCapsule } from '../../../components/ui'
 import { attachDay } from './attachments'
 /** What each kind of entry on a day is called (这一天, its quick look). */
 export const DAY_ITEM_LABELS = { events: '日程', documents: '文档日期', tasks: '待办', reminders: '提醒', footprints: '阅读足迹', activity: '页面与画板' } as const
@@ -19,8 +19,8 @@ export function ThisDay({ date, timeZone }: DayInput) {
     void refresh()
     return () => { disposed = true; off.forEach(stop => stop()) }
   }, [date, timeZone])
-  return <section aria-label="这一天" style={{ padding: 12, maxHeight: '35%', overflow: 'auto', flexShrink: 0 }}>
-    <header><strong>这一天 · {date}</strong> <button className="btn sm" disabled={!summary} onClick={async () => { try { await attachDay(summary!); setError('') } catch (cause) { setError(String(cause)) } }}>加入对话</button></header>
+  return <section aria-label="这一天" className="this-day">
+    <header><strong>这一天 · {date}</strong><Button size="sm" variant="ghost" disabled={!summary} onClick={async () => { try { await attachDay(summary!); setError('') } catch (cause) { setError(String(cause)) } }}>加入对话</Button></header>
     {error && <p role="alert">{error}</p>}
     {!summary && !error && <p role="status">正在读取…</p>}
     {summary?.items.length === 0 && <p>这一天还没有记录</p>}

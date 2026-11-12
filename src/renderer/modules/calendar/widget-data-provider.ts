@@ -29,6 +29,7 @@ import { format } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 import { Temporal } from '@js-temporal/polyfill'
 import { isBusyEvent, type CalEvent } from '../../../shared/calendar/model'
+import { DEFAULT_CALENDAR_COLOR, NEUTRAL_EVENT_COLOR } from '../../../shared/calendar/color'
 
 import type {
   DayScheduleSnapshot,
@@ -275,7 +276,7 @@ export function createCalendarWidgetFetcher(deps: CreateFetcherDeps): CalendarWi
       events: filtered.sort(compareStartAsc).map((event) => ({
         title: String(event.title || '未命名事件'),
         timeLabel: buildTimeLabel(event, tz),
-        accent: event.color || sourceColors.get(String(event.calendarId || '')) || '#5B8DEF',
+        accent: event.color || sourceColors.get(String(event.calendarId || '')) || DEFAULT_CALENDAR_COLOR,
         meta: sourceNames.get(String(event.calendarId || '')) || undefined,
       })),
     }
@@ -333,7 +334,7 @@ export function createCalendarWidgetFetcher(deps: CreateFetcherDeps): CalendarWi
       const bucket = buckets.get(calendarId) ?? {
         label: sourceNames.get(calendarId) || '其他',
         value: 0,
-        accent: event.color || sourceColors.get(calendarId) || '#5B8DEF',
+        accent: event.color || sourceColors.get(calendarId) || DEFAULT_CALENDAR_COLOR,
       }
       bucket.value = Number((bucket.value + hours).toFixed(2))
       buckets.set(calendarId, bucket)
@@ -342,7 +343,7 @@ export function createCalendarWidgetFetcher(deps: CreateFetcherDeps): CalendarWi
     if (buckets.size === 0) {
       return {
         periodLabel: '本周时间分配',
-        segments: [{ label: '暂无可统计的事件', value: 0, accent: '#94a3b8' }],
+        segments: [{ label: '暂无可统计的事件', value: 0, accent: NEUTRAL_EVENT_COLOR }],
       }
     }
 

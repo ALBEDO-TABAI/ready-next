@@ -20,6 +20,10 @@ export const PALETTE: { id: string; name: string; hex: string }[] = [
   { id: 'blush', name: 'Blush', hex: '#CCA6AD' }, { id: 'brown', name: 'Brown', hex: '#AC725F' },
   { id: 'gray', name: 'Gray', hex: '#B8B8B8' },
 ];
+/** An event whose calendar carries no colour shows in the calendars table's default colour (migrations.ts). */
+export const DEFAULT_CALENDAR_COLOR = '#5B8DEF';
+/** A neutral swatch for data with no colour of its own (an empty chart segment): the palette's gray. */
+export const NEUTRAL_EVENT_COLOR = '#B8B8B8';
 const colorNamesCN: Record<string, string> = {
   red: '红', coral: '珊瑚', orange: '橙', yellow: '黄', lime: '青柠', grass: '草绿', green: '绿', mint: '薄荷',
   blue: '蓝', sapphire: '宝石蓝', indigo: '靛蓝', violet: '紫罗兰', purple: '紫', pink: '粉', blush: '藕粉', brown: '棕', gray: '灰',

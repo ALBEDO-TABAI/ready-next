@@ -9,12 +9,10 @@ import { TopBar } from './components/TopBar'
 import { TimeGrid } from './components/TimeGrid'
 import { MonthGrid } from './components/MonthGrid'
 import { Panel } from './components/Panel'
-import { Menus } from './components/Menus'
-import { Toasts, ScopeDialog, GotoDialog, RecurrenceDialog } from './components/Overlays'
 import { useTheme } from '../../../stores/useTheme'
 import { dayOf } from '@shared/calendar'
 import { ReadyCalendarActions } from './ReadyCalendarActions'
-import './styles/tokens.css'
+import { Button } from '../../../components/ui/Button'
 import { ShellNavigator } from '../../workbench/shell/ShellSidebar'
 import './styles/app.css'
 
@@ -61,16 +59,15 @@ export function App({active=true}:{active?:boolean}) {
     if(handleKey(event.nativeEvent)){event.preventDefault();event.stopPropagation();if(document.activeElement===document.body)root.current?.focus({preventScroll:true})}
   }
   return <div ref={root} className={`ready-calendar${s.dark?' dark':''}`} data-testid="ready-calendar" tabIndex={-1} onPointerDownCapture={event=>{if(!(event.target as HTMLElement).closest('input,textarea,button,select,[contenteditable=true]'))root.current?.focus({preventScroll:true})}} onKeyDownCapture={onKeyDown}>
-    {!s.ready ? <div className="calendar-load-state">{s.error||'正在读取日程…'}{s.error&&<button className="btn" onClick={()=>void init()}>重新读取</button>}</div> : <>
+    {!s.ready ? <div className="calendar-load-state">{s.error||'正在读取日程…'}{s.error&&<Button size="sm" onClick={()=>void init()}>重新读取</Button>}</div> : <>
       <div className="app" data-view={s.view}>
         <ShellNavigator mode="calendar" label="日历" scopeClassName={`ready-calendar${s.dark?' dark':''}`}><Sidebar/></ShellNavigator>
-        <main className="main" data-liquid-scroll-root="calendar-workbench-main"><TopBar/>{s.view==='month'?<MonthGrid active={active}/>:<TimeGrid active={active}/>}{active&&s.view!=='month'&&s.days===1&&<ThisDay date={isoDate(s.anchor)} timeZone={s.zone}/>}</main>
+        <main className="main rn-sheet" data-liquid-scroll-root="calendar-workbench-main"><TopBar/>{s.view==='month'?<MonthGrid active={active}/>:<TimeGrid active={active}/>}{active&&s.view!=='month'&&s.days===1&&<ThisDay date={isoDate(s.anchor)} timeZone={s.zone}/>}</main>
         {s.panel&&<Panel/>}
-        <Menus/>{s.overlay==='goto'&&<GotoDialog/>}{s.overlay==='recurrence'&&<RecurrenceDialog/>}<ScopeDialog/><Toasts/>
         <ReadyCalendarActions active={active}/>
       </div>
-      {s.error&&<div role="alert" className="calendar-save-status error">未保存：{s.error}</div>}
-      {s.busy&&<div role="status" className="calendar-save-status">正在保存…</div>}
+      {s.error&&<div role="alert" className="calendar-save-status rn-float error">未保存：{s.error}</div>}
+      {s.busy&&<div role="status" className="calendar-save-status rn-float">正在保存…</div>}
     </>}
   </div>
 }
