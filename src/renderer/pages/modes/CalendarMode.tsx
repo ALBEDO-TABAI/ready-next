@@ -1,9 +1,9 @@
 import { App } from '../../modules/calendar/workbench/App'
-import { WORKBENCH_CANVAS_OUTER_PADDING_X, WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM } from '../../modules/workbench/chrome'
+import { WORKBENCH_CANVAS_OUTER_PADDING_TOP, WORKBENCH_CANVAS_OUTER_PADDING_X, WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM } from '../../modules/workbench/chrome'
 
-// The calendar has no tab row above its paper, so its paper sits between the two bands with equal gaps (W1 DL11a):
-// the bottom canvas padding on both sides.
-const CALENDAR_CANVAS_PADDING = `${WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM}px ${WORKBENCH_CANVAS_OUTER_PADDING_X}px`
+// The paper keeps the same box in every mode (one shell): the calendar alone must not even out its bands while the
+// other modes still carry a tab row above theirs. Equal bands (W1 DL11a) come for all modes together with the W2 layout.
+const CALENDAR_CANVAS_PADDING = `${WORKBENCH_CANVAS_OUTER_PADDING_TOP}px ${WORKBENCH_CANVAS_OUTER_PADDING_X}px ${WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM}px`
 
 interface CalendarModeProps { isActive?: boolean; isMotionSettled?: boolean }
 export default function CalendarMode({isActive=true,isMotionSettled=true}:CalendarModeProps) {

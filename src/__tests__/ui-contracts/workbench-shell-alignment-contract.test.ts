@@ -58,9 +58,10 @@ test('browser rss and calendar shells align their left edge with the shared work
   assert.match(styles, /--rss-row-x: calc\(var\(--rss-gutter\) - 16px\);/)
   assert.match(styles, /\.rss-workspace-heading \{[\s\S]*?padding: 30px var\(--rss-gutter\) 0;/)
 
-  // W1 DL11a (T6): no tab row above the calendar's paper, so it takes the bottom padding on both sides (equal bands).
-  assert.match(calendarMode, /CALENDAR_CANVAS_PADDING = `\$\{WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM\}px \$\{WORKBENCH_CANVAS_OUTER_PADDING_X\}px`/)
-  assert.doesNotMatch(calendarMode, /WORKBENCH_CANVAS_OUTER_PADDING_TOP/)
+  // The paper keeps the same box in every mode: the calendar uses the shared top, side and bottom paddings.
+  assert.match(calendarMode, /WORKBENCH_CANVAS_OUTER_PADDING_TOP/)
+  assert.match(calendarMode, /WORKBENCH_CANVAS_OUTER_PADDING_X/)
+  assert.match(calendarMode, /WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM/)
   assert.match(calendarMode, /workbench-canvas-shell/)
   assert.match(calendarMode, /background:'transparent',boxShadow:'none'/)
   // W1 T6: the module surface tint (--workbench-liquid-chrome-bg) is retired; modes sit on the one root glass.
