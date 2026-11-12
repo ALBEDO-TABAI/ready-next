@@ -3,7 +3,6 @@ import type { RSSReadingRange } from '../../../shared/rss-reading'
 import type { RSSDefinition } from '../../../shared/rss-organization'
 import RSSMembershipEditor from './RSSMembershipEditor'
 import RSSEventPanel from './RSSEventPanel'
-import RSSReferenceButton from './RSSReferenceButton'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowUpRight, Check, ChevronDown, Copy, Inbox, Loader2, MessageSquareQuote, RefreshCw, Shapes, Star, TextQuote } from 'lucide-react'
 import { MarkdownContent, copyTextToClipboard } from '../document/MarkdownContent'
@@ -18,11 +17,12 @@ import RSSCoverImage from './RSSCoverImage'
 import RSSTopbarTools from './RSSTopbarTools'
 import { RSSTranslatedBody, RSSTranslationControl } from './RSSTranslationControl'
 import { rssReaderHeadings, useRSSArticleTranslation } from '../../modules/rss/article-translation'
-import { FloatPanel } from '../ui/float/FloatPanel'
 import { RefCapsule } from '../ui/RefCapsule'
 import { ReadyRefSchema } from '../../../shared/ready-ref'
-import { chatMenuSurfaceStyle } from '../agent/chatMenuStyles'
-import { anchorOf, openMenu } from '../ui'
+import { anchorOf } from '../ui/float/float-store'
+import { openMenu } from '../ui/float/open-menu'
+import { Button, IconButton } from '../ui/Button'
+import { addRSSReferenceToAgentInput } from '../../modules/agent/chat-input-bridge'
 import { useSelectionBar } from '../../modules/workbench/selection-bar/open-selection-bar'
 import type { CaptureSelection } from '../../modules/workbench/capture'
 import { askAboutSelection, receiveToCanvas, receiveToDocument, receiveToFastCard, reportCaptureError } from '../../modules/workbench/capture-receipt'
@@ -64,12 +64,9 @@ export default function RSSArticleReader({ item, expectedRevision, reveal, onClo
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [reload, setReload] = useState(0)
-  const [referenceMenuOpen, setReferenceMenuOpen] = useState(false)
-  const [paragraph, setParagraph] = useState<RSSReadingRange | null>(null)
   const forceReload = useRef(false)
   const [headings, setHeadings] = useState<Array<{ title: string; level: number }>>([])
   const bodyRef = useRef<HTMLDivElement>(null)
-  const referenceMenuRef = useRef<HTMLDivElement>(null)
   const mediaKind = describeRSSMedia(item.link, item.coverImage).kind
   const video = mediaKind === 'video', image = mediaKind === 'image'
   const embed = rssVideoEmbed(item.link, item.summary)
@@ -136,15 +133,6 @@ export default function RSSArticleReader({ item, expectedRevision, reveal, onClo
     return () => clearTimeout(timer)
   }, [copied])
 
-  useEffect(() => {
-    if (!referenceMenuOpen) return
-    const close = (event: MouseEvent) => { if (!referenceMenuRef.current?.contains(event.target as Node)) setReferenceMenuOpen(false) }
-    document.addEventListener('mousedown', close)
-    return () => document.removeEventListener('mousedown', close)
-  }, [referenceMenuOpen])
-
-  useEffect(() => { if (!active) setReferenceMenuOpen(false) }, [active])
-
   const openLink = useCallback((href: string) => { void openWebpageInBrowser(href) }, [])
   const article = content?.article
   const title = article?.title || item.title
@@ -155,7 +143,6 @@ export default function RSSArticleReader({ item, expectedRevision, reveal, onClo
   const originalLink = article?.link || item.link
   const originalRef = originalLink ? ReadyRefSchema.safeParse({ kind: 'web', url: originalLink }).data ?? null : null
   const included = (article?.classifications || item.classifications || []).filter((entry) => entry.included)
-  const closeReferenceMenu = () => setReferenceMenuOpen(false)
   // Selections in the source text share the reading scenes' bar (W6 §3.2); a translation has no reading ranges.
   const readSelection = () => bodyRef.current && article ? readingSelectionCapture(bodyRef.current, article, window.getSelection()) : null
   useSelectionBar(bodyRef, { enabled: active && !busy && !!article && translation.view === 'source', read: readSelection,
@@ -176,48 +163,40 @@ export default function RSSArticleReader({ item, expectedRevision, reveal, onClo
     { id: 'canvas', label: '保存到画板', icon: <Shapes />, onSelect: () => { void receiveToCanvas(articleCapture()).catch(reportCaptureError) } },
     { id: 'document', label: '引用到文档', icon: <TextQuote />, onSelect: () => { void receiveToDocument(articleCapture()).catch(reportCaptureError) } },
   ], { placement: 'bottom-end', label: '收下这篇文章' })
+  // 引用: the article, or the paragraph the selection sits in (read before the menu takes focus).
+  const openReferenceMenu = (element: HTMLElement) => {
+    const paragraph: RSSReadingRange | null = bodyRef.current && translation.view === 'source' ? selectedReadingRange(bodyRef.current, window.getSelection()).paragraph : null
+    openMenu(anchorOf(element), [
+      { id: 'article', label: '引用文章', icon: <MessageSquareQuote />, disabled: busy || !article,
+        onSelect: () => { if (article) addRSSReferenceToAgentInput(title, { kind: 'article', read: { itemId: article.id, expectedRevision: article.revision, offset: 0, length: 12000 } }) } },
+      ...(article ? [{ id: 'paragraph', label: '引用本段', icon: <MessageSquareQuote />, disabled: !paragraph,
+        onSelect: () => { if (paragraph) addRSSReferenceToAgentInput(`${article.title} · 段落`, { kind: 'excerpt', read: { format: 'reading-v1', itemId: article.id, expectedRevision: article.revision, range: paragraph, offset: 0, length: 12000 } }) } }] : []),
+    ], { placement: 'bottom-end', label: '把这篇文章或当前段落交给助手' })
+  }
 
   return <section className="rss-article-reader" aria-label="资讯阅读" data-rss-article-id={item.id} data-navigation-loaded={!!content && !busy}>
     <RSSTopbarTools slot="lead" show={active}>
       {/* A breadcrumb, not a second back arrow: the way back across modes is the entry before it (W6 §4). */}
-      <button type="button" className="rss-topbar__back" aria-label="回到资讯列表" title="回到列表" onClick={onClose}>资讯</button>
+      <Button variant="ghost" size="sm" className="rss-topbar__back" aria-label="回到资讯列表" title="回到列表" onClick={onClose}>资讯</Button>
       <span className="rss-topbar__sep" aria-hidden>/</span>
       <span title={source}>{source}</span>
     </RSSTopbarTools>
     <RSSTopbarTools show={active}>
-      <div ref={referenceMenuRef} className="relative">
-        <button type="button" className="rss-btn" aria-haspopup="menu" aria-expanded={referenceMenuOpen} disabled={busy && !content}
-          onMouseDown={(event) => event.preventDefault()} onClick={() => {
-            setParagraph(bodyRef.current && translation.view === 'source' ? selectedReadingRange(bodyRef.current, window.getSelection()).paragraph : null)
-            setReferenceMenuOpen((open) => !open)
-          }} title="把这篇文章或当前段落交给助手">
-          <MessageSquareQuote size={15} strokeWidth={1.8} />引用<ChevronDown size={12} strokeWidth={2} />
-        </button>
-        {referenceMenuOpen && <FloatPanel className="rss-reference-menu-panel overflow-hidden rounded-[14px]" role="menu" radius={14}
-          style={{ ...chatMenuSurfaceStyle, position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 30, width: 200 }}>
-          <div className="rss-menu">
-            <RSSReferenceButton className="rss-menu-item ready-floating-menu-item" name={title} label="引用文章" disabled={busy} onDone={closeReferenceMenu}
-              reference={article ? { kind: 'article', read: { itemId: article.id, expectedRevision: article.revision, offset: 0, length: 12000 } } : null} />
-            {article && <RSSReferenceButton preserveSelection className="rss-menu-item ready-floating-menu-item" onDone={closeReferenceMenu} name={`${article.title} · 段落`} label="引用本段"
-              reference={paragraph ? { kind: 'excerpt', read: { format: 'reading-v1', itemId: article.id, expectedRevision: article.revision, range: paragraph, offset: 0, length: 12000 } } : null} />}
-          </div>
-        </FloatPanel>}
-      </div>
-      <button type="button" className="rss-btn" aria-haspopup="menu" disabled={!content} onMouseDown={(event) => event.preventDefault()}
+      <Button variant="ghost" size="sm" icon={<MessageSquareQuote />} aria-haspopup="menu" disabled={busy && !content}
+        onMouseDown={(event) => event.preventDefault()} onClick={(event) => openReferenceMenu(event.currentTarget)} title="把这篇文章或当前段落交给助手">
+        引用<ChevronDown className="rss-btn-caret" />
+      </Button>
+      <Button variant="ghost" size="sm" icon={<Inbox />} aria-haspopup="menu" disabled={!content} onMouseDown={(event) => event.preventDefault()}
         onClick={(event) => openCaptureMenu(event.currentTarget)} title="把这篇文章存入 FastCard、画板或当前文档">
-        <Inbox size={15} strokeWidth={1.8} />收下<ChevronDown size={12} strokeWidth={2} />
-      </button>
+        收下<ChevronDown className="rss-btn-caret" />
+      </Button>
       <RSSTranslationControl state={translation} disabled={busy} />
-      <button type="button" className="rss-btn rss-btn--icon" title={item.starred ? '取消收藏' : '收藏文章'} aria-label={item.starred ? '取消收藏' : '收藏文章'} aria-pressed={item.starred} onClick={() => onToggleStar(item.id)}>
-        <Star size={16} strokeWidth={1.8} fill={item.starred ? 'currentColor' : 'none'} />
-      </button>
-      <button type="button" className="rss-btn rss-btn--icon" disabled={!content} aria-label={copied ? '已复制' : '复制内容'} title={copied ? '已复制' : '复制标题、来源与正文'}
-        onClick={() => { if (content) void copyTextToClipboard(`${title}\n来源：${article?.link || item.link}\n\n${content.text}`).then(setCopied) }}>
-        {copied ? <Check size={16} strokeWidth={2} /> : <Copy size={15} strokeWidth={1.8} />}
-      </button>
+      <IconButton icon={<Star fill={item.starred ? 'currentColor' : 'none'} />} title={item.starred ? '取消收藏' : '收藏文章'} active={item.starred} onClick={() => onToggleStar(item.id)} />
+      <IconButton disabled={!content} icon={copied ? <Check strokeWidth={2} /> : <Copy />} title={copied ? '已复制' : '复制标题、来源与正文'} aria-label={copied ? '已复制' : '复制内容'}
+        onClick={() => { if (content) void copyTextToClipboard(`${title}\n来源：${article?.link || item.link}\n\n${content.text}`).then(setCopied) }} />
       <RSSSaveNoteButton article={content?.article || null} disabled={busy} active={active} onError={setError} />
       <span className="rss-tool-gap" />
-      {onOpenOriginal && item.link && <button type="button" className="rss-btn" onClick={() => onOpenOriginal(item)}>打开原文<ArrowUpRight size={14} strokeWidth={1.9} /></button>}
+      {onOpenOriginal && item.link && <Button variant="ghost" size="sm" onClick={() => onOpenOriginal(item)}>打开原文<ArrowUpRight /></Button>}
     </RSSTopbarTools>
     <div className="rss-reader-layout">
       {headings.length > 0 && <nav className="rss-reader-toc" aria-label="本文目录">
@@ -237,8 +216,8 @@ export default function RSSArticleReader({ item, expectedRevision, reveal, onClo
             {busy && <Loader2 size={13} className="animate-spin" />}
             {content ? `${content.textKind === 'source_summary' ? '来源摘要 · ' : ''}${BODY_LABELS[content.body.status]}` : busy ? '正在读取文章' : '文章读取失败'}
           </span>
-          {!video && !image && <button type="button" disabled={busy || !!expectedRevision} title={expectedRevision ? '刊物引用保留对应版本；可返回资讯列表获取新正文。' : undefined}
-            onClick={() => { forceReload.current = true; setReload((value) => value + 1) }}><RefreshCw size={12} strokeWidth={2} />重新获取正文</button>}
+          {!video && !image && <Button variant="ghost" size="sm" icon={<RefreshCw />} disabled={busy || !!expectedRevision} title={expectedRevision ? '刊物引用保留对应版本；可返回资讯列表获取新正文。' : undefined}
+            onClick={() => { forceReload.current = true; setReload((value) => value + 1) }}>重新获取正文</Button>}
         </div>
         {embed ? <figure className="rss-reader-video">
           <iframe src={embed.embedUrl} title={`${title}（视频）`} loading="lazy" referrerPolicy="strict-origin-when-cross-origin"

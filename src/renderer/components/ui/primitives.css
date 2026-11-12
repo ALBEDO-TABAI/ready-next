@@ -33,7 +33,7 @@
   .rn-icon-btn[data-size='sm'] { width: 24px; height: 24px; border-radius: var(--rn-r-xs); }
   .rn-icon-btn[data-size='lg'] { width: var(--rn-control-h-lg); height: var(--rn-control-h-lg); }
   .rn-icon-btn:hover { background: var(--rn-fill-2); color: var(--rn-ink); }
-  .rn-icon-btn[aria-pressed='true'] { background: var(--rn-fill-2); color: var(--rn-ink); }
+  .rn-icon-btn[aria-pressed='true'], .rn-icon-btn[aria-checked='true'] { background: var(--rn-fill-2); color: var(--rn-ink); }
   .rn-icon-btn:disabled { opacity: .45; cursor: default; pointer-events: none; }
   .rn-icon-btn svg { width: var(--rn-icon); height: var(--rn-icon); stroke-width: var(--rn-icon-stroke); }
   .rn-icon-btn[data-size='sm'] svg { width: 14px; height: 14px; }
@@ -149,7 +149,10 @@
   }
   .rn-row:hover { background: var(--rn-fill); color: var(--rn-ink); }
   .rn-row[aria-current]:not([aria-current='false']) { background: var(--rn-accent-soft); color: var(--rn-accent-text); font-weight: 500; }
+  .rn-row:disabled { opacity: .45; cursor: default; }
   .rn-row svg { width: var(--rn-icon); height: var(--rn-icon); stroke-width: var(--rn-icon-stroke); flex: none; }
+  /* A current row's icon is the rail's selected glyph: glowing white, never dark ink (user rule, 2026-10-30). */
+  .rn-row[aria-current]:not([aria-current='false']) svg { color: var(--rn-glyph-on); filter: var(--rn-glyph-glow); }
   .rn-row__label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .rn-row__meta { font: 400 var(--rn-fs-xs)/1 var(--rn-font-mono); color: var(--rn-ink-3); }
   .rn-section { display: flex; align-items: center; justify-content: space-between; gap: 8px; height: 28px; padding: 0 10px; font: 500 var(--rn-fs-xs)/1 var(--rn-font-ui); color: var(--rn-ink-3); }
@@ -163,6 +166,9 @@
   }
   button.rn-chip { cursor: pointer; }
   button.rn-chip:hover { background: var(--rn-fill); color: var(--rn-ink); }
+  /* A filter chip that is on: the fill of a selected tab, no ring. */
+  button.rn-chip:is([aria-pressed='true'], [aria-checked='true']) { background: var(--rn-fill-2); box-shadow: none; color: var(--rn-ink); font-weight: 500; }
+  button.rn-chip:disabled { opacity: .45; cursor: default; }
   .rn-chip svg { width: 14px; height: 14px; }
   .rn-kbd { display: inline-block; padding: 4px 6px; border-radius: 5px; background: var(--rn-fill-2); color: var(--rn-ink-2); font: 500 var(--rn-fs-xs)/1 var(--rn-font-mono); }
 
@@ -245,3 +251,7 @@
 @layer ready-next.primitives {
   .rn-float-panel__content { position: relative; }
 }
+
+/* A field draws its own focus (the sheet and an ink edge, above). Unlayered on purpose: the shell's unlayered
+   :focus-visible ring would otherwise add a second, signal-coloured ring around every focused field. */
+.rn-field:focus-visible { outline: none; }

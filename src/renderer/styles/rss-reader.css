@@ -1,5 +1,5 @@
 /*
- * RSS 阅读视图：与 rss-workspace.css 同一套 sx 纪律（填充而非描边、墨色主操作、强调色只做点缀）。
+ * RSS 阅读视图：只用 --rn-* 令牌（填充而非描边、墨色主操作、信号色只做点缀）；控件是共享基元。
  * 正文排版复用文档模式的 note-preview-body；这里只负责阅读栏的外围层次与“整理与关联”折叠块。
  */
 
@@ -11,8 +11,16 @@
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  color: var(--text-body);
+  color: var(--rn-ink);
   container-type: inline-size;
+}
+
+/* The menu caret after 引用 / 收下 sits smaller than the button's icon. */
+.rn-btn > .rss-btn-caret {
+  width: 12px;
+  height: 12px;
+  margin-left: -3px;
+  color: var(--rn-ink-3);
 }
 
 .rss-reader-layout {
@@ -39,12 +47,12 @@
   gap: 4px 8px;
   margin-bottom: 14px;
   font-size: 12.5px;
-  color: var(--text-muted);
+  color: var(--rn-ink-2);
 }
 
 .rss-reader-source strong {
   font-weight: 500;
-  color: var(--text-secondary);
+  color: var(--rn-ink-2);
 }
 
 .rss-reader-title {
@@ -53,7 +61,7 @@
   line-height: 1.32;
   font-weight: 650;
   letter-spacing: -0.02em;
-  color: var(--text-title);
+  color: var(--rn-ink);
 }
 
 .rss-reader-tags {
@@ -69,8 +77,8 @@
   align-items: center;
   gap: 6px 12px;
   margin-bottom: 30px;
-  font-size: 12px;
-  color: var(--text-light);
+  font-size: var(--rn-fs-sm);
+  color: var(--rn-ink-3);
 }
 
 .rss-reader-status > span {
@@ -79,35 +87,33 @@
   gap: 6px;
 }
 
-.rss-reader-status button {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-weight: 500;
-  color: var(--text-muted);
+.rss-reader-status > .rn-btn {
+  margin-left: -6px;
+  padding: 0 6px;
+  font-size: var(--rn-fs-sm);
 }
 
-.rss-reader-status button:hover:not(:disabled) {
-  color: var(--text-title);
+.rss-reader-status > .rn-btn svg {
+  width: 13px;
+  height: 13px;
 }
 
-.rss-reader-status button:disabled {
-  opacity: 0.5;
-  cursor: default;
+.rss-reader-status > .rss-time-hint-chip {
+  margin-left: 2px;
 }
 
 .rss-reader-notice {
   margin-bottom: 16px;
   padding: 11px 15px;
-  border-radius: 12px;
-  background: var(--sx-inset-bg);
-  color: var(--text-secondary);
-  font-size: 13px;
+  border-radius: var(--rn-r-md);
+  background: var(--rn-fill);
+  color: var(--rn-ink-2);
+  font-size: var(--rn-fs-md);
   line-height: 1.7;
 }
 
 .rss-reader-notice[role='alert'] {
-  background: var(--sx-warning-wash);
+  background: color-mix(in srgb, var(--rn-warn) 11%, transparent);
 }
 
 .rss-article-reader .rss-cover-image {
@@ -115,7 +121,7 @@
 }
 
 .rss-article-reader .rss-cover-image img {
-  border-radius: 14px !important;
+  border-radius: var(--rn-r-lg) !important;
 }
 
 .rss-reader-body {
@@ -127,7 +133,7 @@
 }
 
 .rss-reader-body ::selection {
-  background: color-mix(in srgb, var(--color-blue) 24%, transparent);
+  background: color-mix(in srgb, var(--rn-accent) 24%, transparent);
 }
 
 .rss-reader-toc {
@@ -144,10 +150,10 @@
 
 .rss-reader-toc p {
   margin-bottom: 10px;
-  font-size: 11px;
+  font-size: var(--rn-fs-xs);
   font-weight: 500;
   letter-spacing: 0.04em;
-  color: var(--text-light);
+  color: var(--rn-ink-3);
 }
 
 .rss-reader-toc button {
@@ -156,18 +162,18 @@
   padding: 5px 0;
   text-align: left;
   line-height: 1.55;
-  color: var(--text-muted);
-  transition: color var(--sx-dur, 160ms) var(--rss-ease);
+  color: var(--rn-ink-2);
+  transition: color var(--rn-d-1) var(--rss-ease);
 }
 
 .rss-reader-toc button:hover {
-  color: var(--text-title);
+  color: var(--rn-ink);
 }
 
 .rss-reader-toc button:focus-visible {
-  outline: none;
-  border-radius: 6px;
-  box-shadow: var(--sx-focus-ring);
+  outline: 1.5px solid var(--rn-ink-3);
+  outline-offset: 1px;
+  border-radius: var(--rn-r-xs);
 }
 
 @container (max-width: 960px) {
@@ -190,19 +196,19 @@
 
 .rss-reader-extras > p {
   margin-bottom: 4px;
-  font-size: 11px;
+  font-size: var(--rn-fs-xs);
   font-weight: 500;
   letter-spacing: 0.04em;
-  color: var(--text-light);
+  color: var(--rn-ink-3);
 }
 
 /* 分类与精选、事件与进展：安静的折叠块，展开后才出现控件。 */
 .rss-membership-editor,
 .rss-event-panel {
-  border-radius: 14px;
-  background: var(--sx-inset-bg);
-  font-size: 13px;
-  color: var(--text-body);
+  border-radius: var(--rn-r-lg);
+  background: var(--rn-fill);
+  font-size: var(--rn-fs-md);
+  color: var(--rn-ink);
 }
 
 .rss-membership-editor > summary,
@@ -216,8 +222,8 @@
   list-style: none;
   cursor: pointer;
   text-align: left;
-  font-size: 13px;
-  color: var(--text-secondary);
+  font-size: var(--rn-fs-md);
+  color: var(--rn-ink-2);
 }
 
 .rss-membership-editor > summary::-webkit-details-marker {
@@ -226,20 +232,20 @@
 
 .rss-membership-editor > summary small,
 .rss-event-panel > button:first-child small {
-  font-size: 12px;
-  color: var(--text-light);
+  font-size: var(--rn-fs-sm);
+  color: var(--rn-ink-3);
 }
 
 .rss-membership-editor > summary:hover,
 .rss-event-panel > button:first-child:hover {
-  color: var(--text-title);
+  color: var(--rn-ink);
 }
 
 .rss-membership-editor > summary svg,
 .rss-event-panel > button:first-child svg {
   flex-shrink: 0;
-  color: var(--text-light);
-  transition: transform 200ms var(--rss-ease);
+  color: var(--rn-ink-3);
+  transition: transform var(--rn-d-2) var(--rss-ease);
 }
 
 .rss-membership-editor[open] > summary svg,
@@ -249,9 +255,9 @@
 
 .rss-membership-editor > summary:focus-visible,
 .rss-event-panel > button:first-child:focus-visible {
-  outline: none;
-  border-radius: 14px;
-  box-shadow: var(--sx-focus-ring);
+  outline: 1.5px solid var(--rn-ink-3);
+  outline-offset: 1px;
+  border-radius: var(--rn-r-lg);
 }
 
 .rss-membership-editor__body,
@@ -270,24 +276,21 @@
 }
 
 .rss-membership-row strong {
-  font-size: 13px;
+  font-size: var(--rn-fs-md);
   font-weight: 500;
-  color: var(--text-title);
+  color: var(--rn-ink);
 }
 
 .rss-membership-row small {
   grid-column: 1 / -1;
-  font-size: 12px;
+  font-size: var(--rn-fs-sm);
   line-height: 1.55;
-  color: var(--text-muted);
+  color: var(--rn-ink-2);
 }
 
-.rss-membership-row .sx-select {
-  width: auto;
-  min-width: 120px;
-  height: 30px;
-  padding-top: 0;
-  padding-bottom: 0;
+.rss-membership-row .rn-field {
+  min-width: 140px;
+  height: var(--rn-control-h);
 }
 
 .rss-membership-editor .rss-processing-panel {
@@ -298,14 +301,14 @@
 .rss-event-panel__body > p {
   font-size: 12.5px;
   line-height: 1.65;
-  color: var(--text-muted);
+  color: var(--rn-ink-2);
 }
 
 .rss-event-panel h4 {
   margin: 14px 0 4px;
-  font-size: 12px;
+  font-size: var(--rn-fs-sm);
   font-weight: 600;
-  color: var(--text-secondary);
+  color: var(--rn-ink-2);
 }
 
 .rss-event-panel ul {
@@ -326,51 +329,44 @@
 
 .rss-event-panel li blockquote {
   margin: 0 0 4px;
-  font-size: 13px;
+  font-size: var(--rn-fs-md);
   line-height: 1.65;
-  color: var(--text-body);
+  color: var(--rn-ink);
 }
 
 .rss-event-panel li small {
   display: block;
   font-size: 11.5px;
-  color: var(--text-light);
+  color: var(--rn-ink-3);
 }
 
 .rss-event-panel li button {
   margin-top: 2px;
-  font-size: 12px;
+  font-size: var(--rn-fs-sm);
   font-weight: 500;
-  color: var(--text-muted);
+  color: var(--rn-ink-2);
   text-align: left;
 }
 
 .rss-event-panel li > button:first-child {
   margin-top: 0;
-  font-size: 13px;
+  font-size: var(--rn-fs-md);
   font-weight: 400;
-  color: var(--text-body);
+  color: var(--rn-ink);
 }
 
 .rss-event-panel li button:hover:not(:disabled) {
-  color: var(--text-title);
+  color: var(--rn-ink);
 }
 
-.rss-event-panel button:disabled {
+.rss-event-panel li button:disabled {
   opacity: 0.45;
   cursor: default;
 }
 
 .rss-event-panel__more {
   justify-self: start;
-  margin-top: 4px;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-muted);
-}
-
-.rss-event-panel__more:hover {
-  color: var(--text-title);
+  margin: 4px 0 0 -10px;
 }
 
 .rss-event-actions {
@@ -381,21 +377,20 @@
 }
 
 .rss-event-actions__title {
-  font-size: 12px;
+  font-size: var(--rn-fs-sm);
   font-weight: 600;
-  color: var(--text-secondary);
+  color: var(--rn-ink-2);
 }
 
 .rss-event-actions label {
   display: grid;
   gap: 6px;
-  font-size: 12px;
-  color: var(--text-muted);
+  font-size: var(--rn-fs-sm);
+  color: var(--rn-ink-2);
 }
 
-.rss-event-actions .sx-textarea {
+.rss-event-actions textarea.rn-field {
   min-height: 64px;
-  resize: vertical;
 }
 
 .rss-event-actions__line {
@@ -405,18 +400,41 @@
   gap: 8px;
 }
 
-.rss-event-actions__line .sx-input,
-.rss-event-actions__line .sx-select {
+.rss-event-actions__line > .rn-field,
+.rss-event-actions__line > .rn-select {
   flex: 1 1 200px;
   min-width: 0;
-  height: 32px;
+}
+
+.rss-event-actions__line > .rn-select .rn-field {
+  width: 100%;
 }
 
 .rss-event-panel > p[role='alert'] {
   margin: 0 18px 14px;
 }
 
-/* ── 原文预览：阅读页右侧的临时浏览器（原生视图），工具栏同 RSS 安静控件 ───────── */
+/* ── 原文预览：阅读页右侧的临时浏览器（原生视图），工具栏是共享的图标按钮 ───────── */
+
+.rss-preview-floating {
+  opacity: 0;
+  transform: translateX(12px);
+  transition:
+    opacity var(--rn-d-2) var(--rn-ease-out),
+    transform var(--rn-d-2) var(--rn-ease-out);
+  will-change: opacity, transform;
+}
+
+.rss-preview-floating.is-entered {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.rss-preview-floating.is-exiting {
+  opacity: 0;
+  transform: translateX(12px);
+  pointer-events: none;
+}
 
 .rss-preview-toolbar {
   display: flex;
@@ -434,28 +452,28 @@
   margin: 0 8px 0 6px;
   padding: 0 14px;
   overflow: hidden;
-  border-radius: 999px;
-  background: var(--sx-inset-bg);
-  font-size: 12px;
+  border-radius: var(--rn-r-pill);
+  background: var(--rn-fill);
+  font-size: var(--rn-fs-sm);
   line-height: 30px;
-  color: var(--text-muted);
+  color: var(--rn-ink-2);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 /* 原生页面平时盖住内容区；挂上之前或被浮层、主题过场暂时收起时，露出的是一块干净底色，而不是下面的阅读页。 */
 .rss-mode-shell .rss-preview-floating .rss-preview-content {
-  background: var(--bg-content) !important;
+  background: var(--rn-sheet) !important;
 }
 
-/* 阅读页里的视频播放器（B 站、YouTube）：16:9，圆角，跟正文同宽。 */
+/* 阅读页里的视频播放器（B 站、YouTube）：16:9，圆角，跟正文同宽；播放器载入前是一块中性底。 */
 .rss-reader-video {
   position: relative;
   aspect-ratio: 16 / 9;
   margin: 22px 0 6px;
   overflow: hidden;
-  border-radius: 14px;
-  background: #0b0c0e;
+  border-radius: var(--rn-r-lg);
+  background: var(--rn-fill-2);
 }
 
 .rss-reader-video iframe {
@@ -472,31 +490,62 @@
   align-items: center;
 }
 
-.rss-translate > .rss-btn--icon {
+.rss-translate > .rn-icon-btn {
   margin-left: -4px;
-}
-
-.rss-menu-label {
-  padding: 6px 10px 2px;
-  font-size: 11px;
-  color: var(--text-light);
-}
-
-.rss-menu-item[aria-checked] > svg {
-  margin-left: auto;
-}
-
-.rss-menu-note {
-  padding: 4px 10px 6px;
-  font-size: 11.5px;
-  line-height: 1.5;
-  color: var(--text-muted);
-  white-space: normal;
 }
 
 .rss-translation-text {
   margin: 2px 0 14px;
   padding-left: 12px;
-  border-left: 2px solid color-mix(in srgb, var(--color-ready-orange) 45%, transparent);
-  color: var(--text-muted);
+  border-left: 2px solid color-mix(in srgb, var(--rn-accent) 45%, transparent);
+  color: var(--rn-ink-2);
+}
+
+/* 时间提示：阅读状态行旁的一枚胶囊；点开是共享的对话框。 */
+.rss-time-hint-chip {
+  max-width: 320px;
+}
+
+.rss-time-hint-chip__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rss-time-hint-modal {
+  width: min(520px, calc(100vw - 32px));
+}
+
+.rss-time-hint {
+  display: grid;
+  gap: 12px;
+}
+
+.rss-time-hint__times {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.rss-time-hint__status {
+  font-size: var(--rn-fs-sm);
+  color: var(--rn-ink-2);
+}
+
+.rss-time-hint__status[data-tone='bad'] {
+  color: var(--rn-bad);
+}
+
+.rss-time-hint .rn-dialog__actions {
+  margin-top: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rss-preview-floating {
+    transition-duration: 80ms;
+  }
+}
+
+.rss-reader-content > .rss-time-hint-chip {
+  margin: 0 0 16px;
 }

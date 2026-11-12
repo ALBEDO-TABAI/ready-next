@@ -4,6 +4,7 @@ import { useDocTabs } from '../../stores/useDocTabs'
 import { useWorkspace } from '../../stores/useWorkspace'
 import { requestWorkbenchModeOpen } from '../../modules/workbench/mode-transition'
 import type { RSSArticleExcerpt } from '../../../shared/rss-workspace'
+import { IconButton } from '../ui/Button'
 
 export default function RSSSaveNoteButton({ article, disabled, active, onError }: {
   article: RSSArticleExcerpt['article'] | null
@@ -32,8 +33,6 @@ export default function RSSSaveNoteButton({ article, disabled, active, onError }
       if (live.current && current.current.itemId === article.id) onError(error instanceof Error ? error.message : String(error))
     } finally { if (live.current) setSaving(false) }
   }
-  return <button type="button" className="rss-btn rss-btn--icon" disabled={disabled || saving || !article} onClick={() => void save()}
-    aria-label="保存为笔记" title={saving ? '正在保存为笔记' : '保存为笔记（独立副本，可编辑）'}>
-    {saving ? <Loader2 size={16} className="animate-spin" /> : <FilePlus2 size={16} strokeWidth={1.8} />}
-  </button>
+  return <IconButton disabled={disabled || saving || !article} onClick={() => void save()} aria-label="保存为笔记"
+    title={saving ? '正在保存为笔记' : '保存为笔记（独立副本，可编辑）'} icon={saving ? <Loader2 className="animate-spin" /> : <FilePlus2 />} />
 }

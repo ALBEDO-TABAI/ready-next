@@ -1,23 +1,21 @@
 /*
  * RSS 资讯工作区。
  *
- * 框架与文档 / 浏览器模块同构：画布上方一条工具栏、左侧一列导航，两者在同一层材质上连成 L 形；
- * 右下是四角圆角的内容框（与 document-content-frame 同材质叠层），资讯流、阅读、日报、栏目管理都在框内。
+ * 框架与文档 / 浏览器模块同构：画布上方一条工具栏，导航在外壳唯一的侧栏里（W2-T4）；
+ * 右下是四角圆角的内容框，资讯流、阅读、日报、筛子设置都在框内。
  *
- * 视觉纪律沿用设置页的 sx 体系：
- * - 选中、悬停用“被托起的白玻璃”填充，不画外框与分隔线；层次靠留白与字重。
- * - 强调色只用于未读点、当前图标、焦点；主操作用墨色；危险操作平时安静、悬停才转红。
+ * W1 设计语言（T5 迁移）：颜色、圆角、阴影、动效只取 --rn-* 令牌；按钮、菜单、浮层、开关、输入框、
+ * 空状态与骨架都用 components/ui 的共享基元；模糊只来自材质类（.rn-float）。
+ * 当前所在的行用信号色（ListRow），选中的胶囊用填充，强调色只用于未读点与“正在进行”。
  */
 
 .rss-mode-shell {
   --rss-gutter: clamp(24px, 4.2cqw, 48px);
   --rss-row-x: calc(var(--rss-gutter) - 16px);
-  --rss-ease: var(--sx-ease, cubic-bezier(0.22, 0.61, 0.36, 1));
-  --rss-popover-bg: var(--chat-menu-frost-bg, color-mix(in srgb, var(--bg-primary) 92%, transparent));
-  --rss-popover-shadow: var(--chat-menu-shadow, 0 18px 40px rgba(15, 23, 42, 0.16));
+  --rss-ease: var(--rn-ease-out);
 }
 
-/* ── 框架：L 形工具栏 + 导航，圆角内容框 ─────────────────────────────── */
+/* ── 框架：顶栏 + 圆角内容框 ─────────────────────────────────────────── */
 
 .rss-workbench-canvas {
   display: flex;
@@ -45,7 +43,7 @@
   gap: 8px;
   overflow: hidden;
   font-size: 12px;
-  color: var(--text-light);
+  color: var(--rn-ink-3);
   white-space: nowrap;
 }
 
@@ -55,18 +53,9 @@
   text-overflow: ellipsis;
 }
 
-.rss-topbar__back {
-  display: inline-flex;
+.rss-topbar__lead > .rss-topbar__back {
   flex-shrink: 0;
-  align-items: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 10px 0 8px;
-  border-radius: 9px;
-  font-size: 12.5px;
-  font-weight: 500;
-  color: var(--text-secondary);
-  transition: background-color var(--sx-dur, 160ms) var(--rss-ease), color var(--sx-dur, 160ms) var(--rss-ease);
+  padding: 0 8px;
 }
 
 .rss-topbar__sep {
@@ -82,22 +71,15 @@
   gap: 2px;
 }
 
-.rss-topbar__back:hover {
-  background: var(--sx-hover);
-  color: var(--text-title);
-}
-
 .rss-workbench-body {
   display: flex;
   flex: 1;
   min-height: 0;
 }
 
-/* 顶栏与导航列连成一片，内容框再叠一层而显得更亮。 */
+/* The frame keeps the shell's module surface (shared with Document and Browser) until the shell moves to paper. */
 html:root .rss-mode-shell .rss-workbench-body {
   background: var(--workbench-module-surface-bg);
-  backdrop-filter: blur(24px) saturate(0%);
-  -webkit-backdrop-filter: blur(24px) saturate(0%);
 }
 
 .rss-mode-shell .rss-content-frame {
@@ -113,10 +95,9 @@ html:root .rss-mode-shell .rss-workbench-body {
   container-type: inline-size;
 }
 
-/* ── 导航器（在外壳侧栏里，W2-T4）──────────────────────────────────────── */
+/* ── 导航器（在外壳侧栏里，W2-T4）：每一行是共享的 ListRow ───────────────── */
 
 .rss-nav {
-  --rss-ease: var(--sx-ease, cubic-bezier(0.22, 0.61, 0.36, 1));
   flex: 1;
   min-height: 0;
   display: flex;
@@ -145,10 +126,9 @@ html:root .rss-mode-shell .rss-workbench-body {
 
 .rss-nav__label {
   padding: 18px 10px 6px;
-  font-size: 11px;
-  font-weight: 500;
+  font: 500 var(--rn-fs-xs)/1.2 var(--rn-font-ui);
   letter-spacing: 0.04em;
-  color: var(--text-light);
+  color: var(--rn-ink-3);
   white-space: nowrap;
 }
 
@@ -162,132 +142,36 @@ html:root .rss-mode-shell .rss-workbench-body {
   gap: 2px;
 }
 
-.rss-nav__foot {
-  margin-top: auto;
-  padding-top: 14px;
-}
-
 .rss-nav__item {
+  flex-shrink: 0;
+}
+
+.rss-nav__foot {
   display: flex;
-  flex-shrink: 0;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  min-width: 0;
-  height: 34px;
-  padding: 0 10px;
-  border-radius: 10px;
-  font-size: 13px;
-  color: var(--text-secondary);
-  text-align: left;
-  transition: background-color var(--sx-dur, 160ms) var(--rss-ease), box-shadow var(--sx-dur, 160ms) var(--rss-ease), color var(--sx-dur, 160ms) var(--rss-ease);
+  flex-direction: column;
+  gap: 2px;
 }
 
-.rss-nav__item svg {
-  flex-shrink: 0;
-  color: var(--text-muted);
-  transition: color var(--sx-dur, 160ms) var(--rss-ease);
-}
+/* ── 顶栏工具：共享的 IconButton；分析任务进行中时一个信号色小点 ─────────── */
 
-.rss-nav__item span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.rss-nav__item:hover:not([aria-current='page']) {
-  background: var(--sx-raised-hover);
-  color: var(--text-title);
-}
-
-.rss-nav__item[aria-current='page'] {
-  background: var(--sx-raised-bg);
-  box-shadow: var(--sx-raised-shadow);
-  color: var(--text-title);
-  font-weight: 500;
-}
-
-.rss-nav__item[aria-current='page'] svg {
-  color: var(--color-blue);
-}
-
-.rss-nav__item:focus-visible,
-.rss-topbar__back:focus-visible {
-  outline: none;
-  box-shadow: var(--sx-focus-ring);
-}
-
-/* ── 工具栏按钮与搜索 ──────────────────────────────────────────────────── */
-
-.rss-toolbar-icon-button {
+.rss-toolbar-task {
   position: relative;
-  display: inline-flex;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  padding: 0;
-  border-radius: 9px;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: background-color var(--sx-dur, 160ms) var(--rss-ease), color var(--sx-dur, 160ms) var(--rss-ease);
 }
 
-.rss-toolbar-icon-button:hover:not(:disabled),
-.rss-toolbar-icon-button.is-active,
-.rss-toolbar-icon-button[aria-expanded='true'] {
-  background: var(--sx-hover);
-  color: var(--text-title);
-}
-
-.rss-toolbar-icon-button:disabled {
-  cursor: default;
-  opacity: 0.4;
-}
-
-.rss-toolbar-icon-button:focus-visible {
-  outline: none;
-  box-shadow: var(--sx-focus-ring);
-}
-
-.rss-toolbar-icon-button[data-tooltip]::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 50%;
-  z-index: 40;
-  padding: 5px 9px;
-  border-radius: 8px;
-  background: var(--rss-popover-bg);
-  color: var(--text-secondary);
-  box-shadow: 0 6px 18px -6px rgba(15, 23, 42, 0.22);
-  font-size: 11.5px;
-  line-height: 1.2;
-  white-space: nowrap;
-  opacity: 0;
-  pointer-events: none;
-  transform: translateX(-50%) translateY(-2px);
-  transition: opacity 120ms ease, transform 120ms ease;
-  backdrop-filter: blur(18px) saturate(140%);
-  -webkit-backdrop-filter: blur(18px) saturate(140%);
-}
-
-.rss-toolbar-icon-button[data-tooltip]:hover::after,
-.rss-toolbar-icon-button[data-tooltip]:focus-visible::after {
-  opacity: 1;
-  transform: translateX(-50%) translateY(0);
+/* The more menu's button stays filled while the sources drawer it opened is showing. */
+.rss-toolbar-on {
+  background: var(--rn-fill-2);
+  color: var(--rn-ink);
 }
 
 .rss-toolbar-active-dot {
   position: absolute;
-  top: 6px;
-  right: 6px;
+  top: 5px;
+  right: 5px;
   width: 6px;
   height: 6px;
-  border-radius: 999px;
-  background: var(--color-blue);
+  border-radius: var(--rn-r-pill);
+  background: var(--rn-accent);
 }
 
 .rss-tool-gap {
@@ -295,124 +179,67 @@ html:root .rss-mode-shell .rss-workbench-body {
   flex-shrink: 0;
 }
 
+/* 搜索：共享输入框，放大镜在前，清除与“正文”开关在尾部。 */
 .rss-search {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 2px;
   width: clamp(168px, 22vw, 272px);
-  height: 30px;
   margin-right: 6px;
-  padding: 0 4px 0 2px;
-  border-radius: 10px;
-  background: var(--sx-slot-bg);
-  box-shadow: var(--sx-slot-inset);
-  transition: background-color var(--sx-dur, 160ms) var(--rss-ease), box-shadow var(--sx-dur, 160ms) var(--rss-ease), width 220ms var(--rss-ease);
-}
-
-.rss-search:hover:not(:focus-within) {
-  background: var(--sx-slot-bg-hover);
+  transition: width var(--rn-d-2) var(--rn-ease-out);
 }
 
 .rss-search:focus-within {
   width: clamp(200px, 28vw, 320px);
-  background: var(--sx-slot-bg-focus);
-  box-shadow: var(--sx-slot-focus-shadow);
 }
 
-.rss-search input {
-  flex: 1;
-  min-width: 0;
-  height: 100%;
-  border: 0 !important;
-  outline: none !important;
-  box-shadow: none !important;
-  background: transparent !important;
-  padding: 0 !important;
-  font-size: 12.5px;
-  color: var(--text-body);
+.rss-search .rss-search__input {
+  width: 100%;
+  height: var(--rn-control-h);
+  padding: 0 84px 0 30px;
+  font-size: var(--rn-fs-sm);
 }
 
-.rss-search input::placeholder {
-  color: var(--text-light);
+.rss-search__submit {
+  position: absolute;
+  left: 3px;
+  top: 50%;
+  transform: translateY(-50%);
 }
 
-.rss-search__submit,
-.rss-search__clear {
-  display: inline-flex;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 8px;
-  color: var(--text-muted);
-}
-
-.rss-search__submit:hover,
-.rss-search__clear:hover {
-  color: var(--text-title);
-}
-
-.rss-search__scope {
-  flex-shrink: 0;
-  height: 22px;
-  padding: 0 8px;
-  border-radius: 7px;
-  font-size: 11px;
-  color: var(--text-light);
-  transition: background-color var(--sx-dur, 160ms) var(--rss-ease), color var(--sx-dur, 160ms) var(--rss-ease);
-}
-
-.rss-search__scope:hover {
-  color: var(--text-secondary);
-}
-
-.rss-search__scope[aria-pressed='true'] {
-  background: var(--sx-raised-bg);
-  box-shadow: var(--sx-raised-shadow);
-  color: var(--text-title);
-}
-
-/* ── 浮层菜单（与聊天菜单同一玻璃面板） ───────────────────────────────── */
-
-.rss-menu {
-  display: grid;
-  gap: 1px;
-  padding: 2px;
-}
-
-.rss-menu-item {
+.rss-search__end {
+  position: absolute;
+  right: 3px;
+  top: 50%;
   display: flex;
   align-items: center;
-  gap: 10px;
-  width: 100%;
-  min-height: 34px;
-  padding: 7px 10px;
-  border: 1px solid transparent;
-  border-radius: 9px;
-  font-size: 12.5px;
-  color: var(--text-body);
-  text-align: left;
-  white-space: nowrap;
+  gap: 2px;
+  transform: translateY(-50%);
 }
 
-.rss-menu-item svg {
-  flex-shrink: 0;
-  color: var(--text-muted);
+.rss-search__end .rn-chip {
+  height: 22px;
+  padding: 0 8px;
+  box-shadow: none;
+  font-size: var(--rn-fs-xs);
 }
 
-.rss-menu-item small {
-  margin-left: auto;
-  padding-left: 16px;
-  font-size: 11.5px;
-  color: var(--text-light);
+/* ── 浮层菜单里的说明行（翻译选项） ─────────────────────────────────── */
+
+.rss-menu-note {
+  padding: 2px 16px 10px;
+  font-size: var(--rn-fs-xs);
+  line-height: 1.5;
+  color: var(--rn-ink-2);
+  white-space: normal;
 }
 
-.rss-menu-item:disabled {
-  opacity: 0.45;
-  cursor: default;
+.rss-menu-note[role='alert'] {
+  color: var(--rn-bad);
 }
 
-.rss-menu-gap {
-  height: 6px;
+@media (prefers-reduced-motion: reduce) {
+  .rss-search {
+    transition: none;
+  }
 }

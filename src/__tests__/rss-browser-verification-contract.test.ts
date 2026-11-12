@@ -11,10 +11,10 @@ function readWorkspaceFile(path: string): string {
 test('rss mode escalates login or verification failures into a modal handoff prompt', () => {
   const rssMode = readWorkspaceFile('src/renderer/pages/modes/RSSMode.tsx')
 
-  assert.match(rssMode, /import Modal from '\.\.\/\.\.\/components\/ui\/Modal'/)
-  assert.match(rssMode, /import \{ useModal \} from '\.\.\/\.\.\/components\/ui\/useModal'/)
-  assert.match(rssMode, /const \{ modalProps, showConfirm \} = useModal\(\)/)
-  assert.match(rssMode, /showConfirm\(/)
+  // W1-T5 (B13): the prompt is the shared modal dialog of the one float host, not the retired ui/Modal.
+  assert.match(rssMode, /import \{ confirmDialog \} from '\.\.\/\.\.\/components\/ui\/float\/Dialog'/)
+  assert.match(rssMode, /confirmDialog\(\{ title, body: message \}\)/)
   assert.match(rssMode, /statusAction\.reason === 'login' \|\| statusAction\.reason === 'verify'/)
-  assert.match(rssMode, /<Modal \{\.\.\.modalProps\} \/>/)
+  assert.match(rssMode, /openForCaptureTarget\(statusAction\.url\)/)
+  assert.doesNotMatch(rssMode, /components\/ui\/Modal|useModal/)
 })

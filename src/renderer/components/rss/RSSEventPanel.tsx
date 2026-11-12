@@ -4,8 +4,9 @@ import type { RSSArticleSummary } from '../../../shared/rss-workspace'
 import type { RSSReadEventsResult, RSSEventMembership, RSSEventSummary } from '../../../shared/rss-events'
 import { toRSSItem } from '../../modules/rss/workspace-query'
 import type { RSSItem } from './RSSFeed'
-import Modal from '../ui/Modal'
-import { useModal } from '../ui/useModal'
+import { Button } from '../ui/Button'
+import { Input, Select, Textarea } from '../ui/Field'
+import { confirmDialog } from '../ui/float/Dialog'
 
 export default function RSSEventPanel({ article, active, onSelect }: { article: RSSArticleSummary; active: boolean; onSelect?(item: RSSItem): void }) {
   const [open, setOpen] = useState(false), [membership, setMembership] = useState<RSSEventMembership | undefined>(article.event)
@@ -19,7 +20,6 @@ export default function RSSEventPanel({ article, active, onSelect }: { article: 
   const identity = useRef(''), generation = useRef(0), targetGeneration = useRef(0), navigationGeneration = useRef(0)
   const acknowledged = useRef(new Set<string>())
   identity.current = `${article.id}:${article.revision}:${active}:${open}`
-  const { modalProps, showConfirm } = useModal()
   const refresh = async () => {
     const key = identity.current, ticket = ++generation.current
     const result = await window.electronAPI.rss.readArticle({ itemId: article.id, expectedRevision: article.revision, length: 1 })
@@ -111,7 +111,7 @@ export default function RSSEventPanel({ article, active, onSelect }: { article: 
   const merge = async () => {
     const from = members?.summary, into = target, key = identity.current
     if (!from || !into || from.id === into.id) return
-    if (!await showConfirm(`将当前事件的 ${from.memberCount} 篇报道、${from.factCount} 个事实并入“${into.title}”。保留不同事实和原文，不批量标记已读。`, '合并整个事件') || key !== identity.current) return
+    if (!await confirmDialog({ title: '合并整个事件', body: `将当前事件的 ${from.memberCount} 篇报道、${from.factCount} 个事实并入“${into.title}”。保留不同事实和原文，不批量标记已读。` }) || key !== identity.current) return
     await action(() => window.electronAPI.rss.mergeEvents({ fromEventId: from.id, expectedFromRevision: from.revision, intoEventId: into.id, expectedIntoRevision: into.revision }))
   }
   const more = async (view: 'members' | 'facts') => {
@@ -148,37 +148,36 @@ export default function RSSEventPanel({ article, active, onSelect }: { article: 
       {facts && <><h4>事实与进展（{facts.total}）</h4><ul>{facts.facts.map((fact) => <li key={fact.id}>
         <blockquote>{fact.quote}</blockquote><small>{fact.source} · {fact.historical ? '历史版本摘句；全文已更新' : '当前版本依据'}{fact.sourceRole === 'direct' ? ' · 发布方（模型判断）' : ''}</small>
         {!fact.historical && onSelect && <button type="button" onClick={() => read(() => showArticle(fact.itemId, fact.articleRevision))}>读取依据文章</button>}
-      </li>)}</ul>{facts.nextOffset !== null && <button type="button" className="rss-event-panel__more" onClick={() => read(() => more('facts'))}>更多事实与进展</button>}</>}
+      </li>)}</ul>{facts.nextOffset !== null && <Button variant="ghost" size="sm" className="rss-event-panel__more" onClick={() => read(() => more('facts'))}>更多事实与进展</Button>}</>}
       {members && <><h4>全部关联报道（{members.total}，包含待更新关联）</h4><ul>{members.members.map((member) => <li key={member.itemId}>
         <button type="button" disabled={!onSelect} onClick={() => read(() => showArticle(member.itemId))}>{member.title}</button><small>{member.read ? '已读' : '未读'}{member.stale ? ' · 关联依据需更新' : ''}</small>
-      </li>)}</ul>{members.nextOffset !== null && <button type="button" className="rss-event-panel__more" onClick={() => read(() => more('members'))}>更多报道</button>}</>}
+      </li>)}</ul>{members.nextOffset !== null && <Button variant="ghost" size="sm" className="rss-event-panel__more" onClick={() => read(() => more('members'))}>更多报道</Button>}</>}
       <div className="rss-event-actions">
         <span className="rss-event-actions__title">调整归组</span>
-        <label>归组依据摘句<textarea className="sx-textarea" aria-label="归组依据摘句" maxLength={600} value={quote} onChange={(event) => { quoteDirty.current = true; setQuote(event.target.value) }} /></label>
+        <label>归组依据摘句<Textarea aria-label="归组依据摘句" maxLength={600} value={quote} onChange={(event) => { quoteDirty.current = true; setQuote(event.target.value) }} /></label>
         <div className="rss-event-actions__line">
-          <button type="button" className="sx-btn sx-btn--sm" disabled={busy || !fresh || !quote.trim()} onClick={() => void move(null)}>拆为独立事件</button>
+          <Button size="sm" disabled={busy || !fresh || !quote.trim()} onClick={() => void move(null)}>拆为独立事件</Button>
         </div>
         <div className="rss-event-actions__line">
-          <input className="sx-input" aria-label="搜索目标事件" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="按标题或事实关键词查找事件" />
-          <button type="button" className="sx-btn sx-btn--sm" disabled={busy} onClick={() => read(() => findTargets())}>搜索事件</button>
+          <Input aria-label="搜索目标事件" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="按标题或事实关键词查找事件" />
+          <Button size="sm" disabled={busy} onClick={() => read(() => findTargets())}>搜索事件</Button>
         </div>
         {targets && <div className="rss-event-actions__line">
-          <select className="sx-select" aria-label="目标事件" value={target?.id || ''} onChange={(event) => { const id = event.target.value; read(() => selectTarget(targets.events.find((entry) => entry.id === id) || null)) }}>
-            <option value="">选择目标事件</option>{targets.events.map((entry) => <option key={entry.id} value={entry.id}>{entry.title}（{entry.memberCount}篇 / {entry.factCount}事实）</option>)}
-          </select>
-          {targets.nextOffset != null && <button type="button" className="sx-btn sx-btn--ghost sx-btn--sm" onClick={() => read(() => findTargets(true))}>更多目标事件</button>}
+          <Select aria-label="目标事件" value={target?.id || ''} onChange={(event) => { const id = event.target.value; read(() => selectTarget(targets.events.find((entry) => entry.id === id) || null)) }}
+            options={[{ value: '', label: '选择目标事件' }, ...targets.events.map((entry) => ({ value: entry.id, label: `${entry.title}（${entry.memberCount}篇 / ${entry.factCount}事实）` }))]} />
+          {targets.nextOffset != null && <Button size="sm" variant="ghost" onClick={() => read(() => findTargets(true))}>更多目标事件</Button>}
         </div>}
         {targetFacts && <div className="rss-event-actions__line">
-          <select className="sx-select" aria-label="并入事实方式" value={targetFactId} onChange={(event) => setTargetFactId(event.target.value)}><option value="">保留为独立事实</option>{targetFacts.facts.map((fact) => <option key={fact.id} value={fact.id}>同一事实：{fact.quote}</option>)}</select>
-          {targetFacts.nextOffset != null && <button type="button" className="sx-btn sx-btn--ghost sx-btn--sm" onClick={() => read(moreTargetFacts)}>更多目标事实</button>}
+          <Select aria-label="并入事实方式" value={targetFactId} onChange={(event) => setTargetFactId(event.target.value)}
+            options={[{ value: '', label: '保留为独立事实' }, ...targetFacts.facts.map((fact) => ({ value: fact.id, label: `同一事实：${fact.quote}` }))]} />
+          {targetFacts.nextOffset != null && <Button size="sm" variant="ghost" onClick={() => read(moreTargetFacts)}>更多目标事实</Button>}
         </div>}
         <div className="rss-event-actions__line">
-          <button type="button" className="sx-btn sx-btn--primary sx-btn--sm" disabled={busy || !fresh || !quote.trim() || !target || !targetFacts} onClick={() => void move(target)}>并入所选事件</button>
-          <button type="button" className="sx-btn sx-btn--sm" disabled={busy || !fresh || !target || !members || target.id === members.summary.id} onClick={() => read(merge)}>合并当前整个事件</button>
+          <Button size="sm" variant="primary" disabled={busy || !fresh || !quote.trim() || !target || !targetFacts} onClick={() => void move(target)}>并入所选事件</Button>
+          <Button size="sm" disabled={busy || !fresh || !target || !members || target.id === members.summary.id} onClick={() => read(merge)}>合并当前整个事件</Button>
         </div>
       </div>
     </div>}
-    {error && <p className="rss-note rss-note--danger" role="alert">{error} <button type="button" className="rss-link" onClick={() => read(refresh)}>重新读取事件</button></p>}
-    <Modal {...modalProps} />
+    {error && <p className="rss-note rss-note--danger" role="alert">{error} <Button variant="ghost" size="sm" onClick={() => read(refresh)}>重新读取事件</Button></p>}
   </section>
 }

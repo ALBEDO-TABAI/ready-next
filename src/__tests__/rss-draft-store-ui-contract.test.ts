@@ -43,8 +43,10 @@ test('rss add-source flow exposes a glass submenu and can prefill from the activ
   assert.match(addSourceModal, /或者手动填写/)
   assert.match(addSourceModal, /interface AddSourceSuccessInfo/)
   assert.match(addSourceModal, /onSuccess\(result\?\.data as AddSourceSuccessInfo/)
-  assert.match(addSourceModal, /paddingLeft:\s*CONTENT_INSET,\s*paddingRight:\s*10/)
-  assert.match(addSourceModal, /padding:\s*'8px 10px'/)
+  // W1-T5 (B13): the dialog is a modal float of the shared host with the shared fields and buttons, no private styles.
+  assert.match(addSourceModal, /openFloat\(\{[\s\S]*modal: true,[\s\S]*role: 'dialog'/)
+  assert.match(addSourceModal, /<Input/)
+  assert.doesNotMatch(addSourceModal, /SETTINGS_[A-Z_]+_STYLE|style=\{\{/)
   assert.doesNotMatch(addSourceModal, /手动输入链接/)
   assert.doesNotMatch(addSourceModal, /选择填入方式/)
   assert.match(addSourceModal, /当前页面信息已带入/)

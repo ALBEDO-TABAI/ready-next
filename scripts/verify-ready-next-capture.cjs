@@ -211,7 +211,7 @@ async function main() {
     await page.locator('[data-rss-item-id="capture-article"] .rss-card-title button').first().click({ timeout: 20000 })
     await page.locator('.rss-reader-body [data-ready-reading-run]').first().waitFor({ timeout: 20000 })
     const rssMenu = async item => {
-      await page.locator('.rss-btn', { hasText: '收下' }).first().click()
+      await page.locator('.rss-topbar__tools .rn-btn', { hasText: '收下' }).first().click()
       await page.getByRole('menuitem', { name: item, exact: true }).click()
     }
     await rssMenu('存入 FastCard')
@@ -220,7 +220,7 @@ async function main() {
     const undone = (await cards(page)).find(card => card.text === ARTICLE_SUMMARY)
     await toastAction(page, /已存入 FastCard/, '撤销')
     check(await waitFor(async () => !(await cards(page)).some(card => card.id === undone?.id)), '资讯文章 → FastCard: 撤销 removes the card from FastCard')
-    await page.locator('.rss-btn', { hasText: '收下' }).first().click()
+    await page.locator('.rss-topbar__tools .rn-btn', { hasText: '收下' }).first().click()
     await shot(page, 'rss-capture-menu')
     await page.getByRole('menuitem', { name: '存入 FastCard', exact: true }).click()
     await toast(page, /已存入 FastCard/)

@@ -1,10 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { X, Loader2, AlertCircle, Compass } from 'lucide-react'
-import {
-  SETTINGS_INPUT_STYLE,
-  SETTINGS_PRIMARY_BUTTON_STYLE,
-  SETTINGS_SECONDARY_BUTTON_STYLE,
-} from '../settings/settings-theme'
+import { Button, IconButton } from '../ui/Button'
+import { Input } from '../ui/Field'
+import { closeFloat, openFloat } from '../ui/float/float-store'
 
 interface AddSourceModalProps {
   open: boolean
@@ -38,6 +36,7 @@ function detectPlatformHint(url: string): string | null {
   return null
 }
 
+// 添加 RSS 源：共享浮层宿主里的一个对话框（W1 §5 Dialog）。Esc、点击外面或“取消”都会关闭；open 由 RSSMode 掌握。
 export default function AddSourceModal({
   open,
   onClose,
@@ -46,7 +45,33 @@ export default function AddSourceModal({
   browserPresetName = '',
   browserPresetLabel = null,
 }: AddSourceModalProps) {
-  const CONTENT_INSET = 18
+  const latest = useRef({ onClose, onSuccess })
+  latest.current = { onClose, onSuccess }
+  useEffect(() => {
+    if (!open) return
+    const id = openFloat({
+      anchor: { left: 0, top: 0, right: 0, bottom: 0 },
+      placement: 'center',
+      modal: true,
+      role: 'dialog',
+      label: '添加 RSS 源',
+      className: 'rn-dialog rss-add-source-modal',
+      onClose: () => latest.current.onClose(),
+      render: (close) => <AddSourceForm close={close} onSuccess={(source) => latest.current.onSuccess(source)}
+        browserPresetUrl={browserPresetUrl} browserPresetName={browserPresetName} browserPresetLabel={browserPresetLabel} />,
+    })
+    return () => closeFloat(id, true)
+  }, [open, browserPresetUrl, browserPresetName, browserPresetLabel])
+  return null
+}
+
+function AddSourceForm({ close, onSuccess, browserPresetUrl, browserPresetName, browserPresetLabel }: {
+  close: () => void
+  onSuccess: (source?: AddSourceSuccessInfo) => void
+  browserPresetUrl: string
+  browserPresetName: string
+  browserPresetLabel: string | null
+}) {
   const [url, setUrl] = useState('')
   const [name, setName] = useState('')
   const [loading, setLoading] = useState(false)
@@ -54,15 +79,7 @@ export default function AddSourceModal({
 
   const platformHint = useMemo(() => detectPlatformHint(url), [url])
   const hasBrowserPreset = Boolean(browserPresetUrl)
-
-  useEffect(() => {
-    if (!open) return
-    setUrl('')
-    setName('')
-    setError(null)
-  }, [open])
-
-  if (!open) return null
+  const presetApplied = hasBrowserPreset && url === browserPresetUrl
 
   const handleSubmit = async () => {
     const trimmedUrl = url.trim()
@@ -82,11 +99,8 @@ export default function AddSourceModal({
       if (result?.success === false) {
         setError(result.error || '无法解析该 RSS 地址')
       } else {
-        setUrl('')
-        setName('')
-        setError(null)
         onSuccess(result?.data as AddSourceSuccessInfo | undefined)
-        onClose()
+        close()
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : '无法解析该 RSS 地址')
@@ -96,12 +110,7 @@ export default function AddSourceModal({
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !loading) handleSubmit()
-    if (e.key === 'Escape') onClose()
-  }
-
-  const handleBackdropClick = (e: React.MouseEvent) => {
-    if (e.target === e.currentTarget) onClose()
+    if (e.key === 'Enter' && !loading) void handleSubmit()
   }
 
   const handleUseBrowserPreset = () => {
@@ -112,205 +121,75 @@ export default function AddSourceModal({
   }
 
   return (
-    <div
-      data-ready-native-overlay=""
-      className="fixed inset-0 z-50 flex items-center justify-center animate-fadeIn"
-      style={{ background: 'transparent' }}
-      onClick={handleBackdropClick}
-    >
-      <div
-        className="rss-add-source-modal ready-app-liquid-panel w-[408px] rounded-2xl"
+    <div className="rss-add-source">
+      <div className="rss-add-source__header">
+        <h2 className="rn-dialog__title">添加 RSS 源</h2>
+        <IconButton size="sm" icon={<X />} title="关闭" onClick={close} />
+      </div>
+
+      <button
+        type="button"
+        onClick={handleUseBrowserPreset}
+        disabled={!hasBrowserPreset}
+        className="rss-add-source__preset"
+        aria-pressed={presetApplied}
       >
-        <div
-          className="rss-add-source-modal__header flex items-center justify-between"
-          style={{
-            padding: '14px 16px 10px',
-            borderBottom: '1px solid var(--ready-app-panel-glass-inner-border)',
-          }}
-        >
-          <h3
-            className="text-[14px] font-semibold text-[var(--text-title)]"
-            style={{ paddingLeft: CONTENT_INSET }}
-          >
-            添加 RSS 源
-          </h3>
-          <button
-            onClick={onClose}
-            className="rounded-lg p-1.5 transition-colors hover:bg-[var(--bg-hover)]"
-            title="关闭"
-          >
-            <X className="h-4 w-4 text-[var(--text-muted)]" strokeWidth={2} />
-          </button>
-        </div>
+        <span className="rss-add-source__preset-icon" data-ready={hasBrowserPreset || undefined}><Compass /></span>
+        <span className="rss-add-source__preset-text">
+          <strong>从当前页面带入</strong>
+          <small>
+            {hasBrowserPreset
+              ? browserPresetLabel || '直接把当前浏览页面的地址和标题带进来。'
+              : '先去浏览模式打开目标主页，这里就能直接带入当前页面。'}
+          </small>
+          {presetApplied ? <em>当前页面信息已带入</em> : null}
+        </span>
+      </button>
 
-        <div style={{ padding: '12px 16px 14px' }}>
-          <div style={{ paddingLeft: CONTENT_INSET, paddingRight: 10 }}>
-            <button
-              type="button"
-              onClick={handleUseBrowserPreset}
-              disabled={!hasBrowserPreset}
-              className="rss-add-source-modal__preset w-full rounded-xl text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-              style={{
-                marginBottom: 10,
-                padding: '8px 10px',
-                border: hasBrowserPreset && url === browserPresetUrl
-                  ? '1px solid color-mix(in srgb, var(--color-blue) 24%, var(--border-default) 76%)'
-                  : '1px solid color-mix(in srgb, var(--border-default) 72%, rgba(255,255,255,0.6))',
-                background: hasBrowserPreset && url === browserPresetUrl
-                  ? 'color-mix(in srgb, var(--ready-app-panel-glass-card-bg) 88%, rgba(255,255,255,0.22))'
-                  : 'var(--ready-app-panel-glass-card-bg)',
-              }}
-            >
-              <div className="flex items-start gap-3">
-                <span
-                  className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full"
-                  style={{
-                    border: '1px solid color-mix(in srgb, var(--border-default) 74%, rgba(255,255,255,0.65))',
-                    background: 'rgba(255,255,255,0.36)',
-                  }}
-                >
-                  <Compass
-                    className="h-3 w-3"
-                    style={{ color: hasBrowserPreset ? 'var(--color-blue)' : 'var(--text-light)' }}
-                  />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="text-[12px] font-semibold" style={{ color: 'var(--text-title)' }}>
-                    从当前页面带入
-                  </div>
-                  <div className="mt-0.5 text-[11px] leading-5" style={{ color: 'var(--text-light)' }}>
-                    {hasBrowserPreset
-                      ? browserPresetLabel || '直接把当前浏览页面的地址和标题带进来。'
-                      : '先去浏览模式打开目标主页，这里就能直接带入当前页面。'}
-                  </div>
-                  {hasBrowserPreset && url === browserPresetUrl ? (
-                    <div className="mt-1 text-[11px]" style={{ color: 'var(--color-blue)' }}>
-                      当前页面信息已带入
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-            </button>
-          </div>
+      <div className="rss-add-source__fields">
+        <div className="rss-add-source__label">或者手动填写</div>
+        <label className="rss-add-source__field">
+          <span>RSS / Atom 订阅地址 或 平台主页链接</span>
+          <Input
+            type="url"
+            value={url}
+            onChange={(e) => {
+              setUrl(e.target.value)
+              if (error) setError(null)
+            }}
+            onKeyDown={handleKeyDown}
+            placeholder="https://example.com/feed.xml"
+            data-autofocus
+            disabled={loading}
+            aria-invalid={error ? true : undefined}
+          />
+          {platformHint && <small className="rss-add-source__hint">检测到平台：{platformHint}</small>}
+        </label>
+        <label className="rss-add-source__field">
+          <span>名称（可选，留空自动获取）</span>
+          <Input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="例如：阮一峰的博客"
+            disabled={loading}
+          />
+        </label>
+        {error && (
+          <p className="rss-note rss-note--danger rss-add-source__error" role="alert">
+            <AlertCircle />
+            <span>{error}</span>
+          </p>
+        )}
+      </div>
 
-          <div
-            className="space-y-2.5"
-            style={{ paddingTop: 2, paddingLeft: CONTENT_INSET, paddingRight: 10 }}
-          >
-            <div
-              className="text-[12px] font-semibold"
-              style={{ color: 'var(--text-title)' }}
-            >
-              或者手动填写
-            </div>
-
-            <div>
-              <label className="mb-1.5 block text-[12px] text-[var(--text-muted)]">
-                RSS / Atom 订阅地址 或 平台主页链接
-              </label>
-              <input
-                type="url"
-                value={url}
-                onChange={(e) => {
-                  setUrl(e.target.value)
-                  if (error) setError(null)
-                }}
-                onKeyDown={handleKeyDown}
-                placeholder="https://example.com/feed.xml"
-                autoFocus
-                disabled={loading}
-                className="w-full rounded-xl border text-[13px] transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)] focus:border-transparent"
-                style={{
-                  ...SETTINGS_INPUT_STYLE,
-                  padding: '9px 12px',
-                  background: 'var(--ready-app-panel-glass-control-bg)',
-                  borderColor: error ? 'var(--color-red)' : 'var(--input-slot-border)',
-                  backdropFilter: 'none',
-                  WebkitBackdropFilter: 'none',
-                }}
-              />
-              {platformHint && (
-                <p className="mt-1 text-[11px] text-[var(--color-blue)]">
-                  检测到平台：{platformHint}
-                </p>
-              )}
-            </div>
-
-            <div>
-              <label className="mb-1.5 block text-[12px] text-[var(--text-muted)]">
-                名称（可选，留空自动获取）
-              </label>
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="例如：阮一峰的博客"
-                disabled={loading}
-                className="w-full rounded-xl border text-[13px] transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)] focus:border-transparent"
-                style={{
-                  ...SETTINGS_INPUT_STYLE,
-                  padding: '9px 12px',
-                  background: 'var(--ready-app-panel-glass-control-bg)',
-                  borderColor: 'var(--input-slot-border)',
-                  backdropFilter: 'none',
-                  WebkitBackdropFilter: 'none',
-                }}
-              />
-            </div>
-
-            {error && (
-              <div
-                className="flex items-center gap-2 rounded-[12px] px-3 py-2"
-                style={{ background: 'color-mix(in srgb, var(--color-red) 12%, white)' }}
-              >
-                <AlertCircle className="h-3.5 w-3.5 flex-shrink-0 text-[var(--color-red)]" />
-                <span className="text-[12px] text-[var(--color-red)]">{error}</span>
-              </div>
-            )}
-          </div>
-
-          <div
-            className="flex items-center justify-end gap-2"
-            style={{ paddingTop: 10, paddingRight: 10 }}
-          >
-            <button
-              onClick={onClose}
-              disabled={loading}
-              className="text-[12px] transition-colors hover:bg-[var(--bg-hover)]"
-              style={{
-                ...SETTINGS_SECONDARY_BUTTON_STYLE,
-                minWidth: 70,
-                padding: '8px 12px',
-                fontSize: 12,
-                lineHeight: 1.2,
-              }}
-            >
-              取消
-            </button>
-            <button
-              onClick={handleSubmit}
-              disabled={loading || !url.trim()}
-              className="flex items-center justify-center gap-1.5 text-[12px] text-white transition-[background-color,opacity] duration-200 disabled:opacity-50"
-              style={{
-                ...SETTINGS_PRIMARY_BUTTON_STYLE,
-                minWidth: 96,
-                padding: '8px 14px',
-                fontSize: 12,
-                lineHeight: 1.2,
-              }}
-            >
-              {loading ? (
-                <>
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  验证中
-                </>
-              ) : (
-                '验证并添加'
-              )}
-            </button>
-          </div>
-        </div>
+      <div className="rn-dialog__actions">
+        <Button variant="ghost" onClick={close} disabled={loading}>取消</Button>
+        <Button variant="primary" onClick={() => void handleSubmit()} disabled={loading || !url.trim()}
+          icon={loading ? <Loader2 className="animate-spin" /> : undefined}>
+          {loading ? '验证中' : '验证并添加'}
+        </Button>
       </div>
     </div>
   )

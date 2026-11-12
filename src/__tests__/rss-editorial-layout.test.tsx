@@ -119,7 +119,7 @@ test('the digest view opens the latest daily issue as an edition led by its most
   assert.deepEqual(texts(dom, '.rss-digest-month__head span'), ['2026 年 10 月', '2026 年 9 月'])
   assert.deepEqual(texts(dom, '.rss-digest-issue__title').map((title) => title?.trim()), ['Big story', 'Yesterday story', '3 项入选'])
   assert.equal(dom.window.document.querySelectorAll('.rss-paper-calendar__grid button').length, 2, 'only October days with a daily issue are links')
-  await act(async () => [...dom.window.document.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((tab) => tab.textContent === '简报')!.click())
+  await act(async () => [...dom.window.document.querySelectorAll<HTMLButtonElement>('[aria-label="刊物类型"] [role="radio"]')].find((tab) => tab.textContent === '简报')!.click())
   assert.deepEqual(texts(dom, '.rss-digest-issue__title').map((title) => title?.trim()), ['Range story'])
 }))
 

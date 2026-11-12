@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ChevronRight } from 'lucide-react'
 import RSSProcessingPanel from './RSSProcessingPanel'
+import { Select } from '../ui/Field'
 import type { RSSArticleExcerpt } from '../../../shared/rss-workspace'
 import type { RSSDefinition, RSSMembership } from '../../../shared/rss-organization'
 
@@ -50,9 +51,8 @@ export default function RSSMembershipEditor({ article, definitions, active }: { 
         const decision = memberships.find((entry) => entry.definitionId === definition.id)
         return <div className="rss-membership-row" key={definition.id} title={definition.description}>
           <strong>{definition.name}</strong>
-          <select className="sx-select" aria-label={`${definition.name}归属`} disabled={busy} value={decision?.origin === 'manual' ? decision.included ? 'yes' : 'no' : ''} onChange={(event) => void set(definition, event.target.value)}>
-            <option value="">使用自动结果</option><option value="yes">属于</option><option value="no">不属于</option>
-          </select>
+          <Select aria-label={`${definition.name}归属`} disabled={busy} value={decision?.origin === 'manual' ? decision.included ? 'yes' : 'no' : ''} onChange={(event) => void set(definition, event.target.value)}
+            options={[{ value: '', label: '使用自动结果' }, { value: 'yes', label: '属于' }, { value: 'no', label: '不属于' }]} />
           <small>{decision ? `${decision.included === null ? '证据不足' : decision.included ? '已归入' : '未归入'} · ${decision.reason}${decision.stale ? ' · 标准或内容已变化，需要更新' : ''}` : '尚未归类'}</small>
         </div>
       })}

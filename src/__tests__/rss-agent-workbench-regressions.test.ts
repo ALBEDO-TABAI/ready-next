@@ -19,16 +19,20 @@ test('rss feed keeps compact toolbar controls in the top bar while article rows 
   assert.match(rssMode, /toolsVisible=\{surfaceActive && feedVisible\}/)
   assert.match(rssFeed, /className="rss-feed-surface content-surface-panel/)
   assert.match(rssFeed, /className="rss-toolbar-actions flex items-center"/)
-  assert.match(rssFeed, /className="rss-toolbar-icon-button"/)
+  // W1-T5 (B13): the toolbar buttons are the shared IconButton, not a private class with CSS tooltips.
+  assert.match(rssFeed, /import \{ Button, IconButton \} from '\.\.\/ui\/Button'/)
+  assert.doesNotMatch(rssFeed, /rss-toolbar-icon-button|data-tooltip/)
+  assert.doesNotMatch(styles, /\.rss-toolbar-icon-button/)
   assert.match(rssFeed, /<RefreshCw/)
   assert.match(rssFeed, /rss-toolbar-active-dot/)
-  assert.match(rssFeed, /aria-label="更多操作"/)
-  // The source filter is a quiet menu, not a native select, so each row can host its delete control.
-  assert.match(rssFeed, /className="rss-quiet-select"/)
-  assert.match(rssFeed, /className="rss-source-menu-panel overflow-hidden rounded-\[12px\]"/)
-  assert.match(rssFeed, /ready-floating-menu-item/)
-  assert.match(styles, /\.rss-toolbar-icon-button \{/)
-  assert.match(styles, /\.rss-toolbar-icon-button\[data-tooltip\]::after \{/)
+  assert.match(rssFeed, /title="更多操作"/)
+  // The more and source menus are floats of the one float host; the source list is not a native select, so each row
+  // can host its delete control, and a delete asks first through the shared dialog.
+  assert.match(rssFeed, /openMenu\(anchorOf\(anchor\)/)
+  assert.match(rssFeed, /openFloat\(\{[\s\S]*role: 'listbox'[\s\S]*className: 'rss-source-menu-panel'/)
+  assert.match(rssFeed, /function SourcePicker\(/)
+  assert.match(rssFeed, /confirmDialog\(\{ title: '删除订阅源'/)
+  assert.doesNotMatch(rssFeed, /chatMenuSurfaceStyle|ready-floating-menu-item|ui\/Modal/)
   assert.match(rssFeed, /background: 'transparent'/)
   assert.match(rssMode, /className=\{`rss-feed-sheet content-surface-panel/)
   assert.match(styles, /\.rss-mode-shell \.rss-feed-sheet \{/)
@@ -37,7 +41,7 @@ test('rss feed keeps compact toolbar controls in the top bar while article rows 
   assert.doesNotMatch(rssFeed, /bg-\[var\(--bg-primary\)\]/)
   // The list itself never pulls in the chat composer; reference/export entries come from RSSMode.
   assert.doesNotMatch(rssFeed, /chat-input-bridge|RSSReferenceButton/)
-  assert.match(rssMode, /renderMoreActions=/)
+  assert.match(rssMode, /moreMenuEntries=/)
 })
 
 test('chat composer keeps a visible shell and a primary send button after liquid glass restyle', () => {
@@ -65,16 +69,18 @@ test('rss analysis task menu uses a solid floating surface with relaxed status r
   const rssFeed = readWorkspaceFile('src/renderer/components/rss/RSSFeed.tsx')
 
   assert.match(rssFeed, /className="rss-feed-surface content-surface-panel rss-workbench-surface relative/)
-  assert.match(rssFeed, /className="rss-task-menu-panel overflow-hidden rounded-\[18px\]"/)
+  // The task list follows live progress, so it stays a panel placed in the top bar: the shared FloatPanel (float
+  // material, native web view steps aside), without a private surface style.
+  assert.match(rssFeed, /className="rss-task-menu-panel"/)
   assert.match(rssFeed, /position: 'absolute'/)
   assert.match(rssFeed, /top: 'calc\(100% \+ 6px\)'/)
   // Pane-relative placement and clipping are exercised by run-rss-layout-acceptance.cjs.
   assert.match(rssFeed, /zIndex: 30/)
   assert.match(rssFeed, /width: 384/)
-  assert.match(rssFeed, /data-tooltip=\{taskMenuOpen \? undefined : '任务'\}/)
   assert.match(rssFeed, /\{taskMenuPanel\}/)
   assert.match(rssFeed, /<FloatPanel/)
   assert.match(rssFeed, /import \{ FloatPanel \} from '\.\.\/ui\/float\/FloatPanel'/)
+  assert.doesNotMatch(rssFeed, /chatMenuSurfaceStyle/)
   assert.match(rssFeed, /function taskStageTone/)
   assert.match(rssFeed, /function taskDetailText/)
   assert.match(rssFeed, /if \(!message \|\| job\.status === 'success'\) return ''/)

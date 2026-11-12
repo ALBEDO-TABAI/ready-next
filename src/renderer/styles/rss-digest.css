@@ -1,6 +1,6 @@
 /*
  * RSS 日报与简报：左侧往期档案，右侧报纸式版面（刊头、统计、头条、今日看点、本期版面）。
- * 与 rss-workspace.css 同一套 sx 纪律；--rss-* 变量由 .rss-mode-shell 提供。
+ * 只用 --rn-* 令牌；分段、按钮、开关、输入框是共享基元。--rss-* 由 .rss-mode-shell 提供。
  */
 
 /* ── 日报与简报：左侧往期档案，右侧报纸式版面 ──────────────────────────── */
@@ -29,11 +29,12 @@
   padding: 0 2px;
 }
 
-.rss-digest-side__actions .sx-seg {
+.rss-digest-side__actions .rn-seg {
   flex: 1;
+  flex-wrap: nowrap;
 }
 
-.rss-digest-side__actions .sx-seg__item {
+.rss-digest-side__actions .rn-seg__item {
   flex: 1;
 }
 
@@ -41,12 +42,16 @@
   margin: 12px 2px 0;
 }
 
+.rss-digest-generate[aria-pressed='true'] {
+  background: var(--rn-fill-3);
+}
+
 .rss-digest-side > p {
   padding: 24px 12px 8px;
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.04em;
-  color: var(--text-light);
+  color: var(--rn-ink-3);
 }
 
 .rss-digest-editions {
@@ -58,7 +63,7 @@
   padding: 8px 12px;
   font-size: 12.5px;
   line-height: 1.65;
-  color: var(--text-light);
+  color: var(--rn-ink-3);
 }
 
 .rss-digest-month {
@@ -79,12 +84,12 @@
   border-radius: 9px;
   font-size: 12.5px;
   font-weight: 600;
-  color: var(--text-secondary);
+  color: var(--rn-ink-2);
 }
 
 .rss-digest-month__head svg {
-  color: var(--text-light);
-  transition: transform 200ms var(--rss-ease);
+  color: var(--rn-ink-3);
+  transition: transform var(--rn-d-2) var(--rss-ease);
 }
 
 .rss-digest-month__head[aria-expanded='true'] svg {
@@ -95,11 +100,11 @@
   margin-left: auto;
   font-size: 11.5px;
   font-weight: 400;
-  color: var(--text-light);
+  color: var(--rn-ink-3);
 }
 
 .rss-digest-month__head:hover {
-  color: var(--text-title);
+  color: var(--rn-ink);
 }
 
 .rss-digest-issue {
@@ -111,21 +116,21 @@
   padding: 10px 12px;
   border-radius: 12px;
   text-align: left;
-  transition: background-color var(--sx-dur, 160ms) var(--rss-ease), box-shadow var(--sx-dur, 160ms) var(--rss-ease);
+  transition: background-color var(--rn-d-1) var(--rss-ease), box-shadow var(--rn-d-1) var(--rss-ease);
 }
 
 .rss-digest-issue:hover:not([aria-current='page']) {
-  background: var(--sx-raised-hover);
+  background: var(--rn-fill);
 }
 
+/* The open issue is where you are: the shared current-row look (signal tint, signal text). */
 .rss-digest-issue[aria-current='page'] {
-  background: var(--sx-raised-bg);
-  box-shadow: var(--sx-raised-shadow);
+  background: var(--rn-accent-soft);
 }
 
 .rss-digest-issue:focus-visible {
-  outline: none;
-  box-shadow: var(--sx-focus-ring);
+  outline: 1.5px solid var(--rn-ink-3);
+  outline-offset: 1px;
 }
 
 .rss-digest-issue__day {
@@ -139,13 +144,13 @@
   font-weight: 650;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.02em;
-  color: var(--text-title);
+  color: var(--rn-ink);
 }
 
 .rss-digest-issue__day small {
   margin-top: 5px;
   font-size: 10.5px;
-  color: var(--text-light);
+  color: var(--rn-ink-3);
 }
 
 .rss-digest-issue__title {
@@ -153,30 +158,25 @@
   overflow: hidden;
   font-size: 12.5px;
   line-height: 1.55;
-  color: var(--text-secondary);
+  color: var(--rn-ink-2);
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
 
-.rss-digest-issue[aria-current='page'] .rss-digest-issue__title {
-  color: var(--text-title);
+.rss-digest-issue[aria-current='page'] .rss-digest-issue__title,
+.rss-digest-issue[aria-current='page'] .rss-digest-issue__day strong {
+  color: var(--rn-accent-text);
 }
 
 .rss-digest-issue__title small {
   display: block;
   font-size: 11px;
-  color: var(--text-light);
+  color: var(--rn-ink-3);
 }
 
 .rss-digest-older {
   justify-self: start;
-  margin: 6px 12px 0;
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.rss-digest-older:hover {
-  color: var(--text-title);
+  margin: 6px 2px 0;
 }
 
 .rss-digest-main {
@@ -199,7 +199,7 @@
   gap: 20px;
   padding-bottom: 18px;
   font-size: 12px;
-  color: var(--text-muted);
+  color: var(--rn-ink-2);
   font-variant-numeric: tabular-nums;
 }
 
@@ -233,7 +233,7 @@
   line-height: 1.05;
   font-weight: 700;
   letter-spacing: -0.03em;
-  color: var(--text-title);
+  color: var(--rn-ink);
   overflow-wrap: anywhere;
 }
 
@@ -242,14 +242,14 @@
   font-size: 14px;
   font-weight: 500;
   letter-spacing: 0;
-  color: var(--text-light);
+  color: var(--rn-ink-3);
 }
 
 .rss-paper-kicker {
   margin-top: 12px;
   font-size: 11px;
   letter-spacing: 0.32em;
-  color: var(--text-light);
+  color: var(--rn-ink-3);
 }
 
 .rss-paper-date {
@@ -257,9 +257,8 @@
   flex-shrink: 0;
   gap: 4px;
   padding: 6px;
-  border-radius: 18px;
-  background: var(--sx-card-bg);
-  box-shadow: var(--sx-card-shadow);
+  border-radius: var(--rn-r-xl);
+  background: var(--rn-fill);
 }
 
 .rss-paper-date__tile {
@@ -270,7 +269,7 @@
   min-width: 104px;
   padding: 10px 14px;
   font-size: 11.5px;
-  color: var(--text-muted);
+  color: var(--rn-ink-2);
 }
 
 .rss-paper-date__tile strong {
@@ -279,14 +278,14 @@
   font-weight: 700;
   letter-spacing: -0.04em;
   font-variant-numeric: tabular-nums;
-  color: var(--text-title);
+  color: var(--rn-ink);
 }
 
 .rss-paper-calendar {
   min-width: 176px;
   padding: 10px 12px;
-  border-radius: 13px;
-  background: var(--sx-inset-bg);
+  border-radius: var(--rn-r-md);
+  background: var(--rn-sheet);
 }
 
 .rss-paper-calendar__head {
@@ -295,12 +294,12 @@
   margin-bottom: 8px;
   font-size: 11.5px;
   font-weight: 600;
-  color: var(--text-secondary);
+  color: var(--rn-ink-2);
 }
 
 .rss-paper-calendar__head small {
   font-weight: 400;
-  color: var(--text-light);
+  color: var(--rn-ink-3);
 }
 
 .rss-paper-calendar__grid {
@@ -318,7 +317,7 @@
 .rss-paper-calendar__grid .is-label {
   font-size: 10px;
   text-align: center;
-  color: var(--text-light);
+  color: var(--rn-ink-3);
 }
 
 .rss-paper-calendar__grid .is-day,
@@ -337,21 +336,21 @@
   width: 4px;
   height: 4px;
   border-radius: 999px;
-  background: var(--sx-track-bg);
+  background: var(--rn-fill-3);
   transform: translate(-50%, -50%);
 }
 
 .rss-paper-calendar__grid .is-issue::after {
   width: 6px;
   height: 6px;
-  background: var(--text-secondary);
+  background: var(--rn-ink-2);
 }
 
 .rss-paper-calendar__grid .is-current::after {
   width: 8px;
   height: 8px;
-  background: var(--color-blue);
-  box-shadow: 0 0 0 3px var(--sx-accent-wash);
+  background: var(--rn-accent);
+  box-shadow: 0 0 0 3px var(--rn-accent-soft);
 }
 
 .rss-paper-stats {
@@ -361,7 +360,7 @@
   gap: 8px 32px;
   padding: 18px 0;
   font-size: 12.5px;
-  color: var(--text-muted);
+  color: var(--rn-ink-2);
 }
 
 .rss-paper-stats b {
@@ -370,12 +369,12 @@
   font-weight: 650;
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
-  color: var(--text-title);
+  color: var(--rn-ink);
 }
 
 .rss-paper-stats__end {
   margin-left: auto;
-  color: var(--text-light);
+  color: var(--rn-ink-3);
 }
 
 .rss-paper-grid {
@@ -417,7 +416,7 @@
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.18em;
-  color: var(--sx-accent-text);
+  color: var(--rn-accent-text);
 }
 
 .rss-paper-label::before {
@@ -433,7 +432,7 @@
   line-height: 1.3;
   font-weight: 700;
   letter-spacing: -0.02em;
-  color: var(--text-title);
+  color: var(--rn-ink);
   overflow-wrap: anywhere;
 }
 
@@ -449,7 +448,7 @@
   margin: 0;
   font-size: 15px;
   line-height: 1.85;
-  color: var(--text-body);
+  color: var(--rn-ink);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -479,14 +478,14 @@
   font-size: 17px;
   line-height: 1.5;
   font-weight: 600;
-  color: var(--text-title);
+  color: var(--rn-ink);
   overflow-wrap: anywhere;
 }
 
 .rss-digest-entry blockquote,
 .rss-digest-sources blockquote {
   margin: 10px 0;
-  color: var(--text-body);
+  color: var(--rn-ink);
   font-size: 13.5px;
   line-height: 1.8;
   white-space: pre-wrap;
@@ -497,14 +496,14 @@
   margin-top: 8px;
   font-size: 12px;
   line-height: 1.6;
-  color: var(--text-light);
+  color: var(--rn-ink-3);
 }
 
 .rss-paper-reason {
   margin-top: 6px;
   font-size: 12.5px;
   line-height: 1.65;
-  color: var(--text-muted);
+  color: var(--rn-ink-2);
 }
 
 .rss-paper-highlights,
@@ -529,7 +528,7 @@
   line-height: 1;
   font-weight: 650;
   font-variant-numeric: tabular-nums;
-  color: var(--text-title);
+  color: var(--rn-ink);
 }
 
 .rss-paper-highlights button,
@@ -540,7 +539,7 @@
   padding: 8px 10px;
   border-radius: 10px;
   text-align: left;
-  transition: background-color var(--sx-dur, 160ms) var(--rss-ease);
+  transition: background-color var(--rn-d-1) var(--rss-ease);
 }
 
 .rss-paper-highlights button {
@@ -549,19 +548,19 @@
 
 .rss-paper-highlights button:hover,
 .rss-paper-index button:hover {
-  background: var(--sx-raised-hover);
+  background: var(--rn-fill);
 }
 
 .rss-paper-highlights strong {
   font-size: 13.5px;
   line-height: 1.5;
   font-weight: 600;
-  color: var(--text-title);
+  color: var(--rn-ink);
 }
 
 .rss-paper-highlights small {
   font-size: 11.5px;
-  color: var(--text-light);
+  color: var(--rn-ink-3);
 }
 
 .rss-paper-index button {
@@ -573,29 +572,29 @@
 .rss-paper-index span {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
-  color: var(--text-light);
+  color: var(--rn-ink-3);
 }
 
 .rss-paper-index strong {
   font-size: 13px;
   font-weight: 500;
-  color: var(--text-body);
+  color: var(--rn-ink);
 }
 
 .rss-paper-index small {
   font-size: 11.5px;
-  color: var(--text-light);
+  color: var(--rn-ink-3);
 }
 
 .rss-paper-info .rss-digest-actions {
-  margin: 12px 0 8px -11px;
+  margin: 12px 0 8px -10px;
 }
 
 .rss-digest-meta {
   margin-top: 6px;
   font-size: 12px;
   line-height: 1.7;
-  color: var(--text-muted);
+  color: var(--rn-ink-2);
 }
 
 .rss-digest-actions {
@@ -609,34 +608,29 @@
   margin-top: 6px;
 }
 
-.rss-digest-sources > button {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-muted);
-}
-
-.rss-digest-sources > button:hover:not(:disabled) {
-  color: var(--text-title);
+.rss-digest-sources > .rn-btn {
+  margin-left: -10px;
+  font-size: var(--rn-fs-sm);
 }
 
 .rss-digest-sources > div {
   margin-top: 10px;
   padding: 12px 16px;
   border-radius: 12px;
-  background: var(--sx-inset-bg);
+  background: var(--rn-fill);
 }
 
 .rss-digest-sources > div strong {
   font-size: 13px;
   font-weight: 500;
-  color: var(--text-title);
+  color: var(--rn-ink);
 }
 
 .rss-digest-sources p {
   margin: 4px 0;
   font-size: 12px;
   line-height: 1.7;
-  color: var(--text-muted);
+  color: var(--rn-ink-2);
   overflow-wrap: anywhere;
 }
 
@@ -655,12 +649,16 @@
   margin-bottom: 28px;
   padding: 6px 18px 12px;
   border-radius: 14px;
-  background: var(--sx-inset-bg);
+  background: var(--rn-fill);
 }
 
-.rss-digest-settings .sx-input {
+.rss-digest-settings .rn-field {
   width: 120px;
-  height: 30px;
+  height: var(--rn-control-h);
+}
+
+.rss-digest-note {
+  margin-top: 16px;
 }
 
 .rss-digest-empty {
@@ -672,13 +670,13 @@
   padding-top: 8px;
   font-size: 13px;
   line-height: 1.7;
-  color: var(--text-muted);
+  color: var(--rn-ink-2);
 }
 
 .rss-digest-empty h1 {
   font-size: 22px;
   font-weight: 650;
-  color: var(--text-title);
+  color: var(--rn-ink);
 }
 
 /* 新建简报：与资讯流同一套安静控件，标签列 + 控件列，不加卡片框。 */
@@ -699,14 +697,14 @@
   line-height: 1.2;
   font-weight: 700;
   letter-spacing: -0.02em;
-  color: var(--text-title);
+  color: var(--rn-ink);
 }
 
 .rss-brief header p {
   margin-top: 8px;
   font-size: 13px;
   line-height: 1.7;
-  color: var(--text-muted);
+  color: var(--rn-ink-2);
 }
 
 .rss-brief__row {
@@ -719,17 +717,20 @@
 .rss-brief__row > label,
 .rss-brief__row > span {
   font-size: 13px;
-  color: var(--text-muted);
+  color: var(--rn-ink-2);
 }
 
-.rss-brief__row .sx-select,
-.rss-brief__row .sx-input {
+.rss-brief__row > .rn-select,
+.rss-brief__row > .rn-field {
   width: 100%;
   max-width: 340px;
-  height: 34px;
 }
 
-.rss-brief__row .sx-seg {
+.rss-brief__row > .rn-select .rn-field {
+  width: 100%;
+}
+
+.rss-brief__row > .rn-seg {
   justify-self: start;
   max-width: 100%;
 }
@@ -741,26 +742,6 @@
   margin-left: -2px;
 }
 
-.rss-brief__chips button {
-  height: 30px;
-  padding: 0 12px;
-  border-radius: 999px;
-  font-size: 13px;
-  color: var(--text-secondary);
-  transition: background-color var(--sx-dur, 160ms) var(--rss-ease), box-shadow var(--sx-dur, 160ms) var(--rss-ease), color var(--sx-dur, 160ms) var(--rss-ease);
-}
-
-.rss-brief__chips button:hover:not([aria-checked='true']) {
-  background: var(--sx-raised-hover);
-  color: var(--text-title);
-}
-
-.rss-brief__chips button[aria-checked='true'] {
-  background: var(--sx-raised-bg);
-  box-shadow: var(--sx-raised-shadow);
-  color: var(--text-title);
-  font-weight: 500;
-}
 
 .rss-brief footer {
   display: flex;
@@ -773,13 +754,10 @@
 .rss-brief footer p {
   margin-right: auto;
   font-size: 13px;
-  color: var(--text-muted);
+  color: var(--rn-ink-2);
   font-variant-numeric: tabular-nums;
 }
 
-.rss-digest-generate svg {
-  margin-right: 2px;
-}
 
 @container (max-width: 980px) {
   .rss-paper-grid {

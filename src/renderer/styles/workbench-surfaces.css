@@ -162,8 +162,7 @@ html:root .ready-glass-button {
 }
 
 html:root .browser-header-surface,
-html:root .workbench-tabs-surface,
-html:root .rss-preview-surface {
+html:root .workbench-tabs-surface {
   background: var(--workbench-module-surface-bg) !important;
   backdrop-filter: blur(24px) saturate(0%) !important;
   -webkit-backdrop-filter: blur(24px) saturate(0%) !important;
