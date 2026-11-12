@@ -44,6 +44,21 @@ test('rapid opens serialize, stale origin cannot erase an open, branching drops 
   for (let i = 0; i < 55; i++) await c.open(entry(String(i)), async () => {})
   assert.equal(c.getSnapshot().entries.length, 50); assert.equal(c.getSnapshot().entries[0].title, '5')
 })
+test('a jump from a place no open recorded (a new tab, a draft) records that place first, so back returns there', async () => {
+  const { controller: c } = setup()
+  await c.open(entry('book-a'), async () => {})
+  const draft: NavigationEntry = { ...entry('draft'), ref: { kind: 'draft', id: 'draft' } }
+  await c.open(entry('book-b'), async () => {}, draft)
+  assert.deepEqual(c.getSnapshot().entries.map(e => e.title), ['book-a', 'draft', 'book-b'])
+  const seen: string[] = []
+  await c.step(-1, async target => { seen.push(target.title) })
+  assert.deepEqual(seen, ['draft'])
+  // The same place as the entry it replaces only refreshes that entry.
+  await c.open(entry('book-c'), async () => {}, { ...draft, anchor: [{ selector: ':scope', top: 40, left: 0 }] })
+  assert.deepEqual(c.getSnapshot().entries.map(e => e.title), ['book-a', 'draft', 'book-c'])
+  assert.deepEqual(c.getSnapshot().entries[1].anchor, [{ selector: ':scope', top: 40, left: 0 }])
+})
+
 test('recent objects deduplicate across anchors and modes, most recently opened first', async () => {
   const { controller: c } = setup()
   for (const item of [entry('a'), entry('b', 'rss'), entry('c', 'calendar'), entry('d', 'browser'), { ...entry('a'), ref: { kind: 'page' as const, id: 'a', anchor: 'section' } }]) await c.open(item, async () => {})

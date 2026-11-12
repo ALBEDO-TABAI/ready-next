@@ -17,12 +17,17 @@ export class NavigationController {
   }
   load = () => this.enqueue(async () => this.state)
   open(entry: NavigationEntry, perform: () => Promise<void>, origin?: NavigationEntry): Promise<void> {
+    // The history as it stood when the origin was taken: anything recorded after that makes the origin stale.
+    const basis = this.state.revision
     return this.enqueue(async () => {
       await perform()
       const entries = this.state.entries.slice(0, this.state.cursor + 1)
       if (origin) {
-        if (!entries.length && navigationObjectKey(origin.ref) !== navigationObjectKey(entry.ref)) entries.push(origin)
-        else if (entries.length && navigationObjectKey(entries[entries.length - 1].ref) === navigationObjectKey(origin.ref)) entries[entries.length - 1] = origin
+        const last = entries[entries.length - 1], key = navigationObjectKey(origin.ref)
+        if (last && navigationObjectKey(last.ref) === key) entries[entries.length - 1] = origin
+        // The person reached the place they jump from without an open being recorded (a new tab, a draft being
+        // written): it becomes an entry of its own, so going back returns there rather than to the entry before it.
+        else if (key !== navigationObjectKey(entry.ref) && (!last || this.state.revision === basis)) entries.push(origin)
       }
       entries.push(entry)
       const kept = entries.slice(-50)
