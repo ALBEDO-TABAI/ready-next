@@ -1,3 +1,4 @@
+import { migrateNavigationHistory } from './navigation-history/repository'
 import { RSS_SIEVE_LEARNING_MIGRATION, migrateRSSSieveLearning } from './rss-engine/sieve-learning-schema'
 import { RSS_SIEVE_MIGRATION, migrateRSSSieve } from './rss-engine/sieve-schema'
 import { migrateDateMentions } from './calendar-engine/date-mentions/schema'
@@ -4550,6 +4551,7 @@ const migrations: Migration[] = [
   } },
   { name: RSS_SIEVE_MIGRATION, up: migrateRSSSieve },
   { name: RSS_SIEVE_LEARNING_MIGRATION, up: migrateRSSSieveLearning },
+  { name: '157_navigation_history', up: migrateNavigationHistory },
 ]
 
 /**

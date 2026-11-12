@@ -1,3 +1,4 @@
+import { memoryNavigationAPI } from './utils/navigation-memory'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import React, { act } from 'react'
@@ -57,7 +58,8 @@ test('document card refreshes on object change, ignores an old read and renders 
   const ui = await mount()
   let refresh: () => void = () => {}, resolveOld: (value: Awaited<ReturnType<DocumentPreviewSource['read']>>) => void = () => {}
   let reads = 0
-  Object.assign(ui.dom.window, { electronAPI: { objects: { locate: async (id: string) => ({ objectId: id, path: `/fixture/${id}.md`, revision: 1 }) } } })
+  // Opening a reference records it in the shared navigation history (W6 §4).
+  Object.assign(ui.dom.window, { electronAPI: { navigationHistory: memoryNavigationAPI(), objects: { locate: async (id: string) => ({ objectId: id, path: `/fixture/${id}.md`, revision: 1 }) } } })
   const source: DocumentPreviewSource = {
     subscribe(listener) { refresh = listener; return () => { refresh = () => {} } },
     read: async () => ++reads === 1 ? new Promise(resolve => { resolveOld = resolve })

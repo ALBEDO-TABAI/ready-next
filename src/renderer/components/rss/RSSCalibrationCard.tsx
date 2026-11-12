@@ -6,7 +6,7 @@ import { unwrapRSS } from '../../modules/rss/unwrap'
 // 筛子校准 (W5 §2.4, V3): once a week the model proposes a new wording for 我的关注 from what was read and skipped.
 // Nothing changes until the person accepts it, rewrites it, or dismisses it for the week. A proposal written against
 // an older 我的关注 cannot be accepted: Main checks the version, and the card says so instead of offering it.
-export function RSSCalibrationCard({ active }: { active: boolean }) {
+export function RSSCalibrationCard({ active, onSettled }: { active: boolean; /** After 采用、改写或本周不改 has been saved. */ onSettled?: () => void }) {
   const [proposal, setProposal] = useState<RSSCalibration | null>(null)
   const [draft, setDraft] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -23,7 +23,7 @@ export function RSSCalibrationCard({ active }: { active: boolean }) {
   if (!proposal || proposal.status !== 'pending' || !proposal.text) return null
   const act = async (work: () => Promise<unknown>) => {
     setBusy(true); setError('')
-    try { await work(); setDraft(null); await load() }
+    try { await work(); setDraft(null); await load(); onSettled?.() }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
     finally { setBusy(false) }
   }

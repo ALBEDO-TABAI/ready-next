@@ -3,6 +3,7 @@ import { ymd } from '@shared/calendar';
 import { useStore, goToday, step, openMenu, setPrefs, periodDays, getState } from '../store';
 import { monthName } from '../fmt';
 import { t } from '../i18n';
+import { NavigationBackEntry } from '../../../workbench/NavigationBackEntry';
 
 export function TopBar() {
   const s = useStore((x) => ({ view: x.prefs.gridView, days: x.prefs.daysPerPeriod, anchor: x.anchor, panel: x.prefs.contextPanel, locale: x.prefs.locale }));
@@ -13,6 +14,7 @@ export function TopBar() {
   return (
     <div className="topbar" data-testid="topbar">
       <div className="topbar-row">
+        <NavigationBackEntry mode="calendar" />
         <div className="topbar-spacer" />
         <button className="btn" data-testid="viewbtn" onClick={(e) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); openMenu({ kind: 'view', x: r.left, y: r.bottom + 8 }); }}>
           <span>{label}</span><ChevronDown size={14} />

@@ -4,7 +4,7 @@ import {
   ChevronLeft, Shield, Database, CalendarDays, FolderOpen, Puzzle, Newspaper,
   Palette, Keyboard, Info, Moon, Sun, Bot, Monitor,
   ExternalLink, HardDrive, MessageSquare, Cat,
-  Plug2, Boxes, Cookie, Tags, Brain, Check, Loader2, RefreshCw,
+  Plug2, Boxes, Cookie, Tags, Brain, Check, Loader2, RefreshCw, Sunrise,
 } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useTheme, type ThemeOption } from '../stores/useTheme'
@@ -38,6 +38,7 @@ import { McpSettingsPanel } from './settings/McpSettingsPanel'
 import { TagForgeSettingsPanel } from './settings/TagForgeSettingsPanel'
 import { ReadyMemorySettingsPanel } from './settings/ReadyMemorySettingsPanel'
 import { LibrarySettingsPanel } from './settings/LibrarySettingsPanel'
+import { StartupSettingsPanel } from './settings/StartupSettingsPanel'
 import { READY_SHORTCUT_GUIDE } from '../../shared/app-shortcuts'
 
 // 面板拆分后的导出保口（2026-07-05）：行为测试从 pages/Settings 导入这两个面板，import 面保持零变化。
@@ -59,6 +60,7 @@ const settingsData: SettingSection[] = [
     description: '主题与透明度',
     settings: []
   },
+  { id: 'startup', group: 'general', title: '启动', icon: Sunrise, description: '打开 Ready 时先看到哪里', settings: [] },
   {
     id: 'shortcuts',
     group: 'general',
@@ -500,7 +502,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
   }
 
   const isDynamicSection = currentSection
-    ? ['ai', 'memory', 'skills', 'remote-im', 'external-services', 'mcp', 'tag-forge', 'pet', 'library', 'reading', 'rss-storage', 'calendar', MODELS_RUNTIME_SETTINGS_SECTION, 'storage', 'browser-privacy'].includes(currentSection.id)
+    ? ['startup', 'ai', 'memory', 'skills', 'remote-im', 'external-services', 'mcp', 'tag-forge', 'pet', 'library', 'reading', 'rss-storage', 'calendar', MODELS_RUNTIME_SETTINGS_SECTION, 'storage', 'browser-privacy'].includes(currentSection.id)
     : false
 
   const renderSettingControl = (sectionId: string, setting: SettingItem) => {
@@ -679,6 +681,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                     </div>
 
                 {/* AI Settings Panel — dynamic, wired to backend */}
+                {currentSection.id === 'startup' && <StartupSettingsPanel />}
                 {currentSection.id === 'ai' && <AISettingsPanel />}
                 {currentSection.id === 'memory' && <ReadyMemorySettingsPanel />}
                 {currentSection.id === 'reading' && <ReadingSettingsPanel />}

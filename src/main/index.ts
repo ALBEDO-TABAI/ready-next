@@ -1,3 +1,9 @@
+import { browserNavigationPosition } from './modules/navigation-history/browser-position'
+import { TodayService } from './modules/today/service'
+import { registerTodayIPC } from './modules/today/ipc'
+import { peekFileEmergenceSnapshot } from './modules/file-emergence/ipc-handler'
+import { registerNavigationHistoryIPC } from './modules/navigation-history/ipc'
+import { NavigationHistoryRepository } from './modules/navigation-history/repository'
 import { registerDocumentImportIPC } from './modules/document-import/ipc'
 import { migrateHighlightCaches } from './modules/library-engine/highlight-cache-migration'
 import { registerSourceAnnotationsIPC } from './modules/library-engine/source-document-ipc'
@@ -722,7 +728,7 @@ function setupGlobalIPC(): void {
     if (!db) throw new Error('关系索引尚未就绪')
     return new ObjectRelationsService(db)
   })
-  setupLibraryIPC()
+  const libraryRuntime = setupLibraryIPC()
   const documentPages = setupDocumentPagesIPC()
   canvasRuntime = setupCanvasRuntime(documentPages.ready, { preloadPath: join(__dirname, '../preload/index.mjs'), rendererFile: join(__dirname, '../renderer/index.html'), rendererUrl: process.env.ELECTRON_RENDERER_URL })
   setupFileEmergenceIPC()
@@ -873,6 +879,19 @@ function setupGlobalIPC(): void {
   })
   const calendarLayers = createCalendarLayersResolver({ pages: documentPages.service, writer: getDocumentWriteDependencies, database: documentDatabase })
   registerCalendarLayersIPC(ipcMain, calendarLayers)
+  registerNavigationHistoryIPC(ipcMain, new NavigationHistoryRepository(documentPages.service.registry.db), browserNavigationPosition(() => browserController?.getActiveTab()))
+  const todayCanvas = canvasRuntime
+  registerTodayIPC(ipcMain, new TodayService({
+    calendar: () => getDatabase().calendar.snapshot(),
+    todos: async () => sourceVault.get().status === 'ready' ? (await calendarLayers()).layers.listTodos() : [],
+    pages: () => { const state = sourceVault.get(); return documentPages.service.recentEdited(state.status === 'ready' ? state.root : null) },
+    books: async () => { const state = await libraryRuntime.engine.readOnly(); return state.status === 'ready' ? state.books.map(book => ({ book, position: libraryRuntime.reading.getPosition(book.id) })) : [] },
+    drafts: () => { const state = sourceVault.get(); return state.status === 'ready' ? todayCanvas.drafts.list(state.root) : [] },
+    cards: () => todayCanvas.repository.list(),
+    emergence: () => { const state = sourceVault.get(); return state.status === 'ready' ? peekFileEmergenceSnapshot([state.root]) : null },
+    sieveToday: () => getDatabase().rss.sieve.today(Date.now(), false),
+    calibration: () => getDatabase().rss.learning.calibration(),
+  }))
   registerCalendarLinkageIPC(ipcMain, calendarLayers, () => getDatabase().calendar)
   chatGptOAuthService = setupSettingsIPC({
     onModelChanged: wakeRSSProcessing,

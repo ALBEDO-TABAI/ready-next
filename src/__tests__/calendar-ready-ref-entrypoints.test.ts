@@ -1,3 +1,4 @@
+import { memoryNavigationAPI } from './utils/navigation-memory'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createElement, type ReactElement } from 'react'
@@ -37,7 +38,11 @@ test('workbench, attachment click and rendered message links retain the selected
   const oldMode = useMode.getState(), oldCalendar = useCalendarSession.getState()
   const calls: string[] = [], errors: unknown[] = []
   let available = true
-  Object.defineProperty(dom.window, 'electronAPI', { value: { calendar: { revealEvent: async (id: string) => { calls.push(id); return available ? { success: true } : { success: false, error: '日程已不存在' } } } } })
+  // Opening a reference records it in the shared navigation history (W6 §4), titled from the calendar snapshot.
+  Object.defineProperty(dom.window, 'electronAPI', { value: { navigationHistory: memoryNavigationAPI(), calendar: {
+    revealEvent: async (id: string) => { calls.push(id); return available ? { success: true } : { success: false, error: '日程已不存在' } },
+    snapshot: async () => ({ success: true, data: { events: [], calendars: [] } }),
+  } } })
   let preview: ReturnType<typeof useAttachmentPreview> | undefined
   function Harness() {
     preview = useAttachmentPreview({ setActiveAttachmentPreview: value => errors.push(value), setAttachmentPreviewLoading: () => {} })

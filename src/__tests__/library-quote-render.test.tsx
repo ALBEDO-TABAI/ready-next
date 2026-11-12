@@ -1,3 +1,4 @@
+import { memoryNavigationAPI } from './utils/navigation-memory'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import React, { act } from 'react'
@@ -14,7 +15,7 @@ test('preview shows a live quote card, follows source changes/deletion and opens
   let deleted = false
   const changes = new Set<() => void>()
   const subscribe = (cb: () => void) => { changes.add(cb); return () => changes.delete(cb) }
-  Object.defineProperty(dom.window, 'electronAPI', { value: {
+  Object.defineProperty(dom.window, 'electronAPI', { value: { navigationHistory: memoryNavigationAPI(),
     library: { get: async () => ({ success: true, data: { status: 'ready', books: deleted ? [] : [{ id: 'bk-one', title: '山海', format: 'txt', notePath: '/vault/阅读/山海.md' }] } }), onChanged: subscribe },
     document: { readFile: async () => ({ success: !deleted, content }), onDirectoryChange: subscribe, onIndexChanged: subscribe },
   } })
@@ -22,7 +23,6 @@ test('preview shows a live quote card, follows source changes/deletion and opens
   const { default: NotePreview } = await import('../renderer/components/document/NotePreview')
   const { useDocTabs } = await import('../renderer/stores/useDocTabs')
   const { useLibraryRequest } = await import('../renderer/modules/library/reader/navigation-state')
-  const { clearReferenceReturn } = await import('../renderer/modules/workbench/reference-return')
   const { useWorkspace } = await import('../renderer/stores/useWorkspace')
   const beforeWorkspace = useWorkspace.getState(), beforeRequest = useLibraryRequest.getState()
   const before = useDocTabs.getState()
@@ -55,7 +55,7 @@ test('preview shows a live quote card, follows source changes/deletion and opens
     assert.ok(dom.window.document.body.textContent!.includes(raw))
     assert.equal(dom.window.document.querySelector('[data-library-quote] button, [data-library-quote] [data-ready-ref-capsule]'), null)
   } finally {
-    await act(async () => root.unmount()); clearReferenceReturn(); useDocTabs.setState(before, true); useWorkspace.setState(beforeWorkspace, true); useLibraryRequest.setState(beforeRequest, true)
+    await act(async () => root.unmount()); useDocTabs.setState(before, true); useWorkspace.setState(beforeWorkspace, true); useLibraryRequest.setState(beforeRequest, true)
     for (const [key, value] of saved) { if (value) Object.defineProperty(globalThis, key, value); else Reflect.deleteProperty(globalThis, key) }
     dom.window.close()
   }

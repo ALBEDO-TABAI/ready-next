@@ -1,3 +1,6 @@
+import type { Occurrence } from './calendar/model'
+import { isoDate } from './calendar/dates'
+import { calendarLinkSource } from './calendar/event-links'
 import { originalFromSeconds, originalToSeconds } from '../main/modules/calendar-engine/calendar-row-codec'
 import { ReadyRefSchema, type ReadyRef } from './ready-ref'
 
@@ -38,4 +41,10 @@ export interface CalendarAttachmentDisplayRef {
   attachmentIndex: number
   target: { status: 'resolved'; ref: Extract<ReadyRef, { kind: 'event' }> }
     | { status: 'unlocatable'; reason: string }
+}
+
+/** Normal events use their own id; only expanded instances carry a series position. */
+export function calendarOccurrenceReadyRef(item: Occurrence): Extract<ReadyRef, { kind: 'event' }> {
+  return calendarLinkSource({ eventId: item.seriesId ?? item.event.id,
+    ...(item.seriesId ? { originalStart: item.event.originalStart ?? (item.allDay ? isoDate(item.startDay) : item.start) } : {}) })
 }

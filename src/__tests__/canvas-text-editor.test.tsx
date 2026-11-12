@@ -1,3 +1,5 @@
+import { memoryNavigationAPI } from './utils/navigation-memory'
+const testNavigationAPI = memoryNavigationAPI()
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { posix } from 'node:path'
@@ -217,6 +219,7 @@ async function linkAPI(t: test.TestContext) {
   const requests: Array<{ operationId: string; parentPath: string; title: string }> = []
   const resolved: string[] = [], copied: string[] = []
   const api = {
+    navigationHistory: testNavigationAPI,
     document: {
       searchIndex: async () => ({ success: true, data: { items: [{ path: '/vault/资料/某页.md', name: '某页', sourceType: 'document' }] } }),
       readFile: async () => ({ success: true, data: { content: '正文' } }),

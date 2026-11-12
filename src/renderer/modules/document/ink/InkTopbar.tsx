@@ -9,6 +9,7 @@ import { Icon } from './icons'
 import { InkPageIcon } from './InkPageIcon'
 import { openInCurrentTab } from './layout-state'
 import { openPopover, tip } from './overlay'
+import { NavigationBackEntry } from '../../workbench/NavigationBackEntry'
 
 type Crumb = { objectId?: string; path?: string; title: string; icon?: string; kind?: PageNode['kind'] }
 
@@ -96,17 +97,18 @@ export function InkTopbar({ tab, roots, home, outline, pageMenu, status, sourceM
       }
     }
     : undefined
-  const fallback: Crumb[] = home ? [{ title: '主页' }]
+  const fallback: Crumb[] = home ? [{ title: '今日' }]
     : !tab ? []
       : tab.kind === 'library' ? [{ title: '阅读' }]
         : crumbs.length ? crumbs : [{ title: tab.title.replace(/\.(md|canvas)$/i, '') || '未命名', path: tab.path ?? undefined, kind: /\.canvas$/i.test(tab.path ?? '') ? 'canvas' : 'page' }]
   return <header className="ink-topbar" aria-label="文档顶栏">
     <div className="ink-topbar-left">
+      <NavigationBackEntry mode="document" />
       {fallback.map((crumb, index) => <span key={`${crumb.objectId ?? crumb.title}:${index}`} className="ink-crumb-wrap">
         {index > 0 && <span className="ink-crumb-sep">/</span>}
         <button type="button" className={`ink-crumb${index < fallback.length - 1 ? ' is-muted' : ''}`} title={crumb.path}
           onClick={() => { if (crumb.path && index < fallback.length - 1) openInCurrentTab(crumb.path) }}>
-          {(crumb.icon || index === fallback.length - 1) && <span className="ink-crumb-icon">{home ? <Icon name="home" size={14} stroke={2} /> : tab?.kind === 'library' ? <Icon name="library" size={14} /> : <InkPageIcon value={crumb.icon} kind={crumb.kind} size={16} emojiSize={14} />}</span>}
+          {(crumb.icon || index === fallback.length - 1) && <span className="ink-crumb-icon">{home ? <span className="ink-crumb-today" aria-hidden /> : tab?.kind === 'library' ? <Icon name="library" size={14} /> : <InkPageIcon value={crumb.icon} kind={crumb.kind} size={16} emojiSize={14} />}</span>}
           <span className="ink-crumb-text">{crumb.title}</span>
         </button>
       </span>)}
