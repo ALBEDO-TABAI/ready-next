@@ -1,6 +1,6 @@
 import { pageOf, resolveBookLocation } from './location'
-import { requestBookLocation, type BookTarget } from './navigation-state'
-import { registerReturnPosition } from '../../workbench/reference-return'
+import { type BookTarget } from './navigation-state'
+import { registerNavigationPosition } from '../../workbench/navigation-history'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ALargeSmall, ArrowLeft, Bookmark, BookmarkPlus, BookMarked, ChevronLeft, ChevronRight, NotebookPen, TableOfContents } from 'lucide-react'
 import type { LibraryBook, LibraryBookmark, LibraryReadingPosition } from '../../../../shared/library'
@@ -103,9 +103,9 @@ function ReadyReader({ record, api, loaded, target, onBack, onError }: { record:
     return () => { document.removeEventListener('visibilitychange', visibility); window.removeEventListener('pagehide', finish); finish() }
   }, [record.id, readingReady])
 
-  useEffect(() => registerReturnPosition('library-reader', () => {
+  useEffect(() => registerNavigationPosition('library-reader', () => {
     const at = position.current
-    return () => { if (at) requestBookLocation({ book: record.id, location: { chapter: at.chapter, from: at.offset, to: at.offset + 1 } }) }
+    return at ? { kind: 'book-location', book: record.id, loc: `c${at.chapter}:${at.offset}+1` } : undefined
   }), [record.id])
 
   useEffect(() => {

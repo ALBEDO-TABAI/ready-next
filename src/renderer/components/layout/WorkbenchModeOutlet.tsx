@@ -1,4 +1,3 @@
-import { ReferenceReturnCapsule } from '../../modules/workbench/ReferenceReturnCapsule'
 import { lazy, memo, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { WorkbenchMode } from '../../stores/useMode'
 import type { BrowserHostLayoutPhase } from '../../../shared/browser-view-layout'
@@ -226,7 +225,6 @@ export default function WorkbenchModeOutlet({
         background: 'transparent',
       }}
     >
-      {!suspended && <ReferenceReturnCapsule mode={mode} />}
       {mountedModes.map((modeKey) => {
         const visualState = resolveVisualState(modeKey, runtime)
         return (

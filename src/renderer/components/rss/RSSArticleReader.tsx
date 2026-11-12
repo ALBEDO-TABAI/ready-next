@@ -5,7 +5,7 @@ import RSSMembershipEditor from './RSSMembershipEditor'
 import RSSEventPanel from './RSSEventPanel'
 import RSSReferenceButton from './RSSReferenceButton'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowLeft, ArrowUpRight, Check, ChevronDown, Copy, Inbox, Loader2, MessageSquareQuote, RefreshCw, Shapes, Star, TextQuote } from 'lucide-react'
+import { ArrowUpRight, Check, ChevronDown, Copy, Inbox, Loader2, MessageSquareQuote, RefreshCw, Shapes, Star, TextQuote } from 'lucide-react'
 import { MarkdownContent, copyTextToClipboard } from '../document/MarkdownContent'
 import { readSavedRSSArticle, isOutdatedRSSExtraction } from '../../modules/rss/read-article'
 import { openWebpageInBrowser } from '../../modules/browser/openWebpageInBrowser'
@@ -177,9 +177,11 @@ export default function RSSArticleReader({ item, expectedRevision, reveal, onClo
     { id: 'document', label: '引用到文档', icon: <TextQuote />, onSelect: () => { void receiveToDocument(articleCapture()).catch(reportCaptureError) } },
   ], { placement: 'bottom-end', label: '收下这篇文章' })
 
-  return <section className="rss-article-reader" aria-label="资讯阅读" data-rss-article-id={item.id}>
+  return <section className="rss-article-reader" aria-label="资讯阅读" data-rss-article-id={item.id} data-navigation-loaded={!!content && !busy}>
     <RSSTopbarTools slot="lead" show={active}>
-      <button type="button" className="rss-topbar__back" onClick={onClose}><ArrowLeft size={14} strokeWidth={2} />返回列表</button>
+      {/* A breadcrumb, not a second back arrow: the way back across modes is the entry before it (W6 §4). */}
+      <button type="button" className="rss-topbar__back" aria-label="回到资讯列表" title="回到列表" onClick={onClose}>资讯</button>
+      <span className="rss-topbar__sep" aria-hidden>/</span>
       <span title={source}>{source}</span>
     </RSSTopbarTools>
     <RSSTopbarTools show={active}>

@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import React, { act } from 'react'
 import { InkSidebar } from '../renderer/modules/document/ink/InkSidebar'
-import { InkHome } from '../renderer/modules/document/ink/InkHome'
 import { InkTopbar } from '../renderer/modules/document/ink/InkTopbar'
 import { useDocTabs } from '../renderer/stores/useDocTabs'
 import { registerDocumentSaveHandler } from '../renderer/modules/document/documentSaveRegistry'
@@ -178,9 +177,6 @@ test('favorite and recent updates do not rescan the page tree', async () => {
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 100)) })
     assert.equal(f.treeCalls, initialReads)
     assert.match(ui.body.querySelector('[aria-label="收藏"]')!.textContent!, /A/)
-    Object.defineProperty(ui.dom.window, 'electronAPI', { value: { documentPages: f.api } })
-    await ui.render(<InkHome roots={[{ path: '/vault', kind: 'vault' }]} visible />)
-    assert.match(ui.body.querySelector('[aria-label="最近访问"]')!.textContent!, /A/)
   } finally { await ui.close() }
 })
 

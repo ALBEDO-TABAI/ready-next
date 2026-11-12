@@ -10,7 +10,8 @@ import {
 test('research tab actions use the task-owned background tab without presenting it', async () => {
   const calls: string[] = []
   const controller = {
-    ensureAgentWorkTab: async (browserTaskId: string, url: string) => {
+    waitForCondition: async () => ({ matched: true, elapsedMs: 0 }),
+    createAgentWorkTab: async (browserTaskId: string, url: string) => {
       calls.push(`ensure:${browserTaskId}:${url}`)
       return { success: true, tabId: 'agent-work-tab' }
     },
@@ -19,6 +20,7 @@ test('research tab actions use the task-owned background tab without presenting 
       return { success: true, tabId: 'user-tab' }
     },
     getAgentWorkTab: (browserTaskId: string) => browserTaskId === 'browser-task-1' ? 'agent-work-tab' : null,
+    selectTaskWorkTab: (_taskId: string, tabId: string) => ({ success: true, tabId, presented: false }),
     switchTab: (tabId: string) => {
       calls.push(`present:${tabId}`)
       return { success: true, tabId }

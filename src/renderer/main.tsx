@@ -100,9 +100,18 @@ async function bootstrap() {
     installSettingsPreviewMocks()
   }
 
+  // Where the window opens (设置 › 启动) is read alongside the theme, so the workbench renders there directly.
+  const startup = import('./modules/today/startup').then(async module => {
+    const view = await module.readStartupView().catch((error: unknown) => {
+      console.warn('[startup] 启动设置读取失败，打开今日', error)
+      return 'today' as const
+    })
+    return () => module.applyStartupPlace(view)
+  })
   await reconcileStartupTheme()
 
   const { default: App } = await import('./App')
+  ;(await startup)()
   renderApp(App)
 }
 

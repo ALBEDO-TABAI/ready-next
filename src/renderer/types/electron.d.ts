@@ -1049,6 +1049,8 @@ export type TaskProjectionChangeEventData = TaskProjectionChangeEventWire
 
 /** Tab info returned by browser:getTabs */
 interface BrowserTabInfo {
+  browserTaskId?: string
+  openerTabId?: string
   id: string
   url: string
   title: string
@@ -1171,6 +1173,8 @@ interface ElectronBrowserAPI {
   openForCaptureTarget: (
     url: string
   ) => Promise<{ success: boolean; tabId?: string; reused?: boolean; error?: string }>
+  getTaskDownloadReceipts: (request: { browserTaskId: string }) => Promise<{ success: boolean; downloadReceipts: import('../../shared/browser-download-receipt').BrowserDownloadReceipt[]; error?: string }>
+  closeTaskTabs: (request: { browserTaskId: string }) => Promise<{ success: boolean; closedTabIds: string[]; error?: string }>
   closeTab: (tabId: string) => Promise<{ success: boolean; error?: string }>
   switchTab: (tabId: string) => Promise<{
     success: boolean
@@ -3325,6 +3329,8 @@ interface ElectronAPI {
   theme: ElectronThemeAPI
   settings: ElectronSettingsAPI
   vault: import('../../shared/vault').VaultAPI
+  today: import('../../shared/today').TodayAPI
+  navigationHistory: import('../../shared/navigation-history').NavigationHistoryAPI
   documentDrafts: import('../../shared/document-drafts').DocumentDraftAPI
   documentPages: import('../../shared/document-pages').DocumentPagesAPI
   documentAnnotations: import('../../shared/document-comments').DocumentAnnotationsAPI

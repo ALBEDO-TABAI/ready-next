@@ -1,4 +1,5 @@
 import { READY_REF_MIME } from '../../../shared/ready-ref'
+import { userOpenedObject } from '../workbench/navigation-open-event'
 import { useCallback, useMemo } from 'react'
 
 import type { BrowserTab } from '../../stores/useBrowserTabs'
@@ -199,6 +200,8 @@ export function useBrowserTabActions({
     if (!isElectron) return
     await executeTabSwitch(id)
     await syncTabsFromBackend()
+    const tab = useBrowserTabs.getState().tabs.find(tab => tab.id === id)
+    if (tab && /^https?:\/\//.test(tab.url)) userOpenedObject({ mode: 'browser', title: tab.title || tab.url, ref: { kind: 'web', url: tab.url } })
   }, [executeTabSwitch, isElectron, syncTabsFromBackend])
 
   const handleNavigate = useCallback(async (url?: string, options?: { tabId?: string | null }) => {
@@ -221,6 +224,7 @@ export function useBrowserTabActions({
       await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)))
       const created = await window.electronAPI?.browser?.createTab(targetUrl) as { success: boolean; tabId?: string } | undefined
       if (created?.success && created.tabId) {
+        if (/^https?:\/\//.test(targetUrl)) userOpenedObject({ mode: 'browser', title: targetUrl, ref: { kind: 'web', url: targetUrl } })
         const newTab: BrowserTab = {
           id: created.tabId,
           url: targetUrl,
@@ -248,6 +252,7 @@ export function useBrowserTabActions({
       setUrlInput(targetUrl)
     }
     const result = await window.electronAPI?.browser?.navigate(targetTabId, targetUrl)
+    if (result?.success && /^https?:\/\//.test(targetUrl)) userOpenedObject({ mode: 'browser', title: targetUrl, ref: { kind: 'web', url: targetUrl } })
     if (!result?.success) {
       updateTab(targetTabId, {
         loading: false,

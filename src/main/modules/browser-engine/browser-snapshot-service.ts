@@ -12,6 +12,7 @@ export interface BrowserDocumentIdentity {
 }
 
 export interface BrowserSnapshotTarget {
+  box?: { x: number; y: number; width: number; height: number }
   targetId: string
   role: string
   name: string

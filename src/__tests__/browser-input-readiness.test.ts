@@ -150,6 +150,7 @@ test('Browser workbench keeps its trusted page identity while an overlay detache
       physicalTargetToken: 'physical-overlay',
       mainFrameId: '0',
       mainFrameDocumentToken: 'document-overlay',
+      origin: 'https://example.test',
       profileId: 'default',
     },
   })

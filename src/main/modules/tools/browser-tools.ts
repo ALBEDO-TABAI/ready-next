@@ -301,6 +301,7 @@ export async function executeBrowserTool(
     inputSource?: BrowserToolInputSource
     browserTurnLease?: BrowserTurnLease | null
     messageVisibilityEpoch?: number
+    visibleTabIds?: string[]
     trustedPageRef?: {
       tabId: string
       physicalTargetToken: string
@@ -355,6 +356,16 @@ export async function executeBrowserTool(
         })
       }
       args = { ...args, tab_id: workTab.tabId }
+    }
+    if (toolName === 'browser_download' && invocation.ok && invocation.operation !== 'download_resolve') {
+      try {
+        args = { ...args, directory: controller.resolveTaskDownloadDirectory(args.directory, taskExecutionContext?.workspaceRoots || []) }
+      } catch (error) {
+        if (error instanceof Error && error.message === 'download_directory_not_authorized') {
+          return createBrowserStructuredOutput({ ok: false, errorKind: error.message, delivery: 'not_delivered' })
+        }
+        throw error
+      }
     }
     const origin = browserActionOrigin(args, controller)
     const initialTabId = resolveBrowserInitialTabId(args.tab_id, controller.getActiveTab?.()?.id)
@@ -611,6 +622,9 @@ export async function executeBrowserTool(
             })
           case 'observe':
             return executeBrowserObserveTool(invocation.operation, invocation.args, {
+              visibleTabIds: taskExecutionContext?.visibleTabIds,
+              snapshotTaskId: browserTaskId || undefined,
+              registerRunCleanup: taskExecutionContext?.registerRunCleanup,
               controller: actionController,
               abortSignal: signal,
               sessionId,
@@ -622,14 +636,14 @@ export async function executeBrowserTool(
               abortSignal: signal,
               sessionId,
               mutationBoundary,
-              taskExecutionContext,
+              taskExecutionContext: toolName === 'browser_download' ? { ...taskExecutionContext, workspaceRoots: [String(args.directory)] } : taskExecutionContext,
             })
           case 'power':
             return executeBrowserPowerTool(invocation.operation, invocation.args, {
               controller: actionController,
               abortSignal: signal,
               sessionId,
-              trustedRoots: taskExecutionContext?.workspaceRoots,
+              trustedRoots: toolName === 'browser_download' ? [String(args.directory)] : taskExecutionContext?.workspaceRoots,
               taskEnvelope: taskExecutionContext?.taskEnvelope || null,
               confirmedBrowserPowerRequest: taskExecutionContext?.confirmedBrowserPowerRequest || null,
               mutationBoundary,
@@ -639,7 +653,7 @@ export async function executeBrowserTool(
             return executeBrowserSystemTool(invocation.operation, invocation.args, {
               controller: actionController,
               abortSignal: signal,
-              trustedRoots: taskExecutionContext?.workspaceRoots,
+              trustedRoots: toolName === 'browser_download' ? [String(args.directory)] : taskExecutionContext?.workspaceRoots,
               taskEnvelope: taskExecutionContext?.taskEnvelope || null,
               confirmedBrowserPermissionRequest: taskExecutionContext?.confirmedBrowserPermissionRequest || null,
               registerRunCleanup: taskExecutionContext?.registerRunCleanup,
@@ -647,6 +661,25 @@ export async function executeBrowserTool(
         }
       },
       })
+    if (toolName === 'browser_download' && invocation.ok && invocation.operation !== 'download_resolve') {
+      const data = typeof result === 'string' ? JSON.parse(result) : result.data
+      if (data && Array.isArray(data.results)) {
+        const downloadReceipts: import('../../../shared/browser-download-receipt').BrowserDownloadReceipt[] = []
+        for (const file of data.results) {
+          if (file && typeof file === 'object' && file.success === true) {
+            try {
+              downloadReceipts.push(controller.consumeTaskDownload(file, String(args.directory), browserTaskId, ownerRunId))
+            } catch (error) {
+              // silent-catch: returned to the model as download_receipt_failed; the files stay published.
+              return createBrowserStructuredOutput({ ...data, ok: false, errorKind: 'download_receipt_failed',
+                message: error instanceof Error ? error.message : String(error), filesPublished: true, replayAllowed: false, downloadReceipts })
+            }
+          }
+        }
+        const body = { ...data, downloadReceipts }
+        return createToolExecutionOutput(JSON.stringify(body), { ...(typeof result === 'string' ? {} : result), shape: 'json', data: body })
+      }
+    }
     return result
   } catch (error) {
     if (isBrowserAbortError(error)) throw error

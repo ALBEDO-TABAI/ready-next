@@ -1,3 +1,4 @@
+import { memoryNavigationAPI } from './utils/navigation-memory'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { act } from 'react'
@@ -13,7 +14,7 @@ test('C9 openReadyRef reveals and briefly highlights the correct repeated mentio
   Object.defineProperty(globalThis, 'CustomEvent', { value: f.dom.window.CustomEvent, configurable: true })
   t.after(() => { useMentionNavigation.setState({ target: null }); if (customEvent) Object.defineProperty(globalThis, 'CustomEvent', customEvent); else Reflect.deleteProperty(globalThis, 'CustomEvent') })
   await act(() => f.useDocTabs.setState(state => ({ activeTabId: t.name, tabs: state.tabs.map(tab => ({ ...tab, path, objectBinding: { status: 'resolved' as const } })) })))
-  Object.assign(f.dom.window, { electronAPI: {
+  Object.assign(f.dom.window, { electronAPI: { navigationHistory: memoryNavigationAPI(),
     objects: { locate: async () => ({ path }) },
     dateMentions: { locate: async () => ({ path, content: original, start, end: start + link.length }) },
   } })

@@ -9,6 +9,7 @@ import type { ConversationScope, ScopeRunSummary } from '../main/modules/agent-c
 import { RunProjection } from '../main/modules/agent-control/task-projection/run-projection'
 import { executeBrowserTool } from '../main/modules/tools/browser-tools'
 import { executeSendImFileTool } from '../main/modules/tools/send-im-skill-tool'
+import { createBrowserDownloadFixture } from './utils/browser-download-fixture'
 
 function createScope(): ConversationScope {
   return {
@@ -31,6 +32,7 @@ function createDownloadController() {
   let actionSequence = 0
   let observationSequence = 0
   return {
+    ...createBrowserDownloadFixture().methods,
     executeJS: async () => 'https://example.test/page',
     getActiveTab: () => ({ id: 'tab-1' }),
     beginBrowserWorkflowAction: (input: Record<string, unknown>) => ({
@@ -113,6 +115,8 @@ test('browser_download registers downloaded images as recent artifacts', async (
 
     assert.equal(typeof output, 'object')
     if (typeof output === 'string') return
+    assert.equal(output.data?.errorKind, undefined, JSON.stringify(output))
+    assert.equal(output.data?.downloadReceipts?.length, 4)
     const artifacts = output.projectionPatch?.recentArtifacts as Array<{ path?: string; kind?: string }> | undefined
     assert.equal(artifacts?.length, 4, JSON.stringify(output))
     assert.deepEqual(artifacts?.map((artifact) => artifact.kind), ['image', 'image', 'image', 'image'])
@@ -161,6 +165,8 @@ test('downloaded media flows through projection recentArtifacts into send-im att
     )
     assert.equal(typeof downloadOutput, 'object')
     if (typeof downloadOutput === 'string') return
+    assert.equal(downloadOutput.data?.errorKind, undefined, JSON.stringify(downloadOutput))
+    assert.equal(downloadOutput.data?.downloadReceipts?.length, 4)
 
     const store = new Map<string, ScopeRunSummary>()
     const projection = new RunProjection({

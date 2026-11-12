@@ -201,7 +201,7 @@ await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.
     const failedSave = await page.evaluate(() => window.electronAPI.rss.readArticle({ itemId: 'reader-35', length: 1 }))
     assert.equal(failedSave.data.article.read, false)
     await page.screenshot({ path: path.join(evidence, 'reader-light.png') })
-    await page.getByRole('button', { name: '返回列表', exact: true }).click()
+    await page.getByRole('button', { name: '回到资讯列表', exact: true }).click()
     await revealTitle(page, '可读资讯 10')
     // Cards wrap to the frame width, so returning restores the same row at the same place rather than a raw scrollTop.
     const firstVisibleRow = () => page.locator('.rss-feed-list [data-liquid-scroll-root="rss-feed-list"]').evaluate((holder) => {
@@ -279,7 +279,7 @@ await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.
       return box && box.top >= 0 && box.bottom < window.innerHeight
     })
     await page.screenshot({ path: path.join(evidence, 'reader-outline.png') })
-    await page.getByRole('button', { name: '返回列表', exact: true }).click()
+    await page.getByRole('button', { name: '回到资讯列表', exact: true }).click()
     await page.waitForFunction(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true)))))
     const afterReturn = await firstVisibleRow()
     assert.equal(afterReturn?.key, beforeReturn?.key)
@@ -322,7 +322,7 @@ await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.webContents.getURL().includes('/renderer/index.html'))?.setSize(1050, 800))
     await page.screenshot({ path: path.join(evidence, 'reader-narrow.png') })
     assert.equal(await page.locator('.rss-article-reader').evaluate((element) => element.scrollWidth > element.clientWidth), false)
-    await page.getByRole('button', { name: '返回列表', exact: true }).click()
+    await page.getByRole('button', { name: '回到资讯列表', exact: true }).click()
     await page.evaluate(() => window.electronAPI.rss.toggleStarred('reader-120'))
     await page.getByRole('textbox', { name: '搜索资讯', exact: true }).fill('可读资讯 12')
     await page.getByRole('button', { name: '执行搜索', exact: true }).click()
@@ -368,7 +368,7 @@ await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.
     await page.getByLabel('制作方法归属', { exact: true }).selectOption('yes')
     await waitForIPC(page, (id) => window.electronAPI.rss.readArticle({ itemId: 'reader-10', length: 1 }).then((response) => response.data.article.classifications.some((entry) => entry.definitionId === id && entry.included === true)), topic.id)
     await page.getByLabel('精选归属', { exact: true }).selectOption('yes')
-    await page.getByRole('button', { name: '返回列表', exact: true }).click()
+    await page.getByRole('button', { name: '回到资讯列表', exact: true }).click()
     await page.locator('.rss-category-filters').getByRole('button', { name: '制作方法', exact: true }).click()
     await page.waitForFunction(() => Number(document.querySelector('[data-rss-loaded-count]')?.dataset.rssLoadedCount) === 1)
     await navigation.getByRole('button', { name: '制作方法', exact: true }).click()
@@ -483,7 +483,7 @@ await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.
     await eventPanel().getByRole('button', { name: '拆为独立事件', exact: true }).click()
     await waitForIPC(page, () => window.electronAPI.rss.readArticle({ itemId: 'reader-10', length: 1 }).then((response) => response.data?.article.event?.manual))
     const firstEvent = await page.evaluate(() => window.electronAPI.rss.readArticle({ itemId: 'reader-10', length: 1 }).then((response) => response.data.article.event))
-    await page.getByRole('button', { name: '返回列表', exact: true }).click()
+    await page.getByRole('button', { name: '回到资讯列表', exact: true }).click()
     await page.getByRole('textbox', { name: '搜索资讯', exact: true }).fill('可读资讯 11')
     await page.getByRole('button', { name: '执行搜索', exact: true }).click()
     await page.locator('[data-rss-item-id="reader-11"]').click()
@@ -495,7 +495,7 @@ await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.
     await eventPanel().getByRole('button', { name: '并入所选事件', exact: true }).click()
     await waitForIPC(page, (id) => window.electronAPI.rss.readEvents({ view: 'members', eventId: id }).then((response) => response.data?.total === 2), firstEvent.eventId)
     await page.screenshot({ path: path.join(evidence, 'event-duplicate.png') })
-    await page.getByRole('button', { name: '返回列表', exact: true }).click()
+    await page.getByRole('button', { name: '回到资讯列表', exact: true }).click()
     await page.getByRole('textbox', { name: '搜索资讯', exact: true }).fill('可读资讯 10')
     await page.getByRole('button', { name: '执行搜索', exact: true }).click()
     const grouped = page.locator('[data-rss-item-id="reader-10"] .rss-grouped-reports')
@@ -527,7 +527,7 @@ await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.
     eventFeedVersion = 2
     await page.evaluate((id) => window.electronAPI.rss.refreshSource(id), automaticEvents.data.id)
     await waitForIPC(page, () => window.electronAPI.rss.queryCards({ scope: 'library', search: 'Project Delta' }).then((response) => response.data?.total === 2 && response.data.cardTotal === 1))
-    await page.getByRole('button', { name: '返回列表', exact: true }).click()
+    await page.getByRole('button', { name: '回到资讯列表', exact: true }).click()
     await page.getByRole('textbox', { name: '搜索资讯', exact: true }).fill('Project Delta')
     await page.getByRole('button', { name: '执行搜索', exact: true }).click()
     await page.waitForFunction(() => Number(document.querySelector('[data-rss-loaded-count]')?.dataset.rssLoadedCount) === 1)
@@ -544,7 +544,7 @@ await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.
     eventFeedVersion = 3
     await page.evaluate((id) => window.electronAPI.rss.refreshSource(id), automaticEvents.data.id)
     await waitForIPC(page, (id) => window.electronAPI.rss.readEvents({ view: 'facts', eventId: id }).then((response) => response.data?.total === 2 && response.data.summary.unseenFactCount === 1), deltaEventId)
-    await page.getByRole('button', { name: '返回列表', exact: true }).click()
+    await page.getByRole('button', { name: '回到资讯列表', exact: true }).click()
     await page.locator('.rss-grouped-reports').getByText('有 1 个新整理的事实或进展待查看', { exact: true }).waitFor()
     await page.screenshot({ path: path.join(evidence, 'event-new-progress.png') })
 
@@ -688,7 +688,7 @@ await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.
       await page.getByText(notice, { exact: false }).waitFor()
       await page.waitForFunction(() => document.querySelector('.rss-article-reader .rss-cover-image img')?.naturalWidth > 0)
       await page.screenshot({ path: path.join(evidence, `${id}-media.png`) })
-      await page.getByRole('button', { name: '返回列表', exact: true }).click()
+      await page.getByRole('button', { name: '回到资讯列表', exact: true }).click()
     }
     assert.equal(videoFetches, 0, 'reading a saved video reference must not silently download it')
 

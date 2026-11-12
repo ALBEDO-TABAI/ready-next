@@ -53,6 +53,9 @@ export async function referenceAttachment(ref: ReadyRef, name: string): Promise<
         : ref.kind === 'rss-item' ? { ...base, source: 'rss-item', rssItemId: ref.id } : base
     }
     case 'fastcard': case 'conversation': return { ...base, readyRef: ref }
+    // Rows on 今日 can be dragged anywhere; these two have no structured resource for the assistant to read.
+    case 'draft': throw new Error('草稿还没保存，先保存成页面再交给助手')
+    case 'rss-calibration': throw new Error('筛子校准不能交给助手')
   }
 }
 export async function dropAgentReference(data: Pick<DataTransfer, 'getData'>, add: (attachments: ChatAttachment[]) => void): Promise<boolean> {

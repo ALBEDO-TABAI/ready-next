@@ -10,6 +10,8 @@
 @import '../modules/workbench/object-ui/object-ui.css';
 @import '../modules/workbench/selection-bar/selection-bar.css';
 @import '../modules/document/drafts/draft-save-dialog.css';
+@import '../modules/workbench/navigation-back.css';
+@import '../modules/today/today.css';
 @import '../components/browser/fastcard-shelf.css';
 @import './theme-tokens.css';
 @import './base-chrome.css';

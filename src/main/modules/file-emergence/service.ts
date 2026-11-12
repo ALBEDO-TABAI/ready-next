@@ -94,6 +94,15 @@ export class FileEmergenceService {
     this.now = deps.now ?? (() => Date.now())
   }
 
+  /** Today consumes only a valid existing snapshot; it never generates or persists predictions. */
+  peekSnapshot(workspaceRoots: string[]): FileEmergenceSnapshot | null {
+    if (!isFileEmergenceEnabled(this.deps.settings)) return null
+    const roots = normalizeRoots(workspaceRoots), now = this.now()
+    const entry = [...this.cache.values()].find(entry => !entry.stale && isSameLocalDay(entry.snapshot.generatedAt, now)
+      && JSON.stringify(entry.workspaceRoots) === JSON.stringify(roots))
+    return entry?.snapshot ?? null
+  }
+
   markStale(workspaceRoots: readonly string[]): void {
     const changedRoots = new Set(normalizeRoots(workspaceRoots))
     for (const root of changedRoots) {

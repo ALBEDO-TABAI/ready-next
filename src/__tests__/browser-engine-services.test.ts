@@ -69,6 +69,7 @@ function createMockView(options?: {
       setWindowOpenHandler: () => undefined,
       setUserAgent: () => undefined,
       close: () => undefined,
+      isDestroyed: () => false,
       executeJavaScript: async (code: string) => options?.executeJavaScript?.(code),
       capturePage: async () => ({
         toPNG: () => Buffer.from('mock-image'),
@@ -1301,6 +1302,8 @@ describe('BrowserAppShortcutBridgeService', () => {
     } as Electron.Input
 
     assert.strictEqual(service.isAppShortcutInput(input), true)
+    assert.strictEqual(service.isAppShortcutInput({ ...input, key: '[' }), true)
+    assert.strictEqual(service.isAppShortcutInput({ ...input, key: ']' }), true)
     service.dispatchAppShortcut(input)
 
     assert.deepStrictEqual(emitted, [

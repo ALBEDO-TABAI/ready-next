@@ -7,6 +7,8 @@ export interface ReadyCommand {
   keywords?: readonly string[]
   shortcut?: AppShortcut
   when?: { mode?: WorkbenchMode }
+  /** Offered with 最近打开 when ⌘K opens with nothing typed (W6 §2.3). */
+  common?: boolean
   run: () => void | Promise<void>
 }
 

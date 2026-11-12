@@ -1,3 +1,5 @@
+import { memoryNavigationAPI } from './utils/navigation-memory'
+const testNavigationAPI = memoryNavigationAPI()
 import assert from 'node:assert/strict'
 import test, { type TestContext } from 'node:test'
 import React, { act } from 'react'
@@ -15,6 +17,7 @@ async function setup(t: TestContext) {
   dom.window.addEventListener('ready:browser-overlay-lock', event => locks.push((event as CustomEvent).detail.locked))
   let deleted = false
   const api = {
+    navigationHistory: testNavigationAPI,
     browser: { onIntentAck: (cb: (ack: { intentId: number }) => void) => { listeners.add(cb); return () => listeners.delete(cb) }, sendIntent: (intent: { intentId: number }) => { intents.push(intent.intentId); if (autoAck) queueMicrotask(() => listeners.forEach(cb => cb({ intentId: intent.intentId }))) }, listFastCardItems: async () => ({ success: true, data: [{ id: 'card', title: '卡片标题', text: '卡片内容' }] }) },
     objects: { preview: async (ref: ReadyRef) => ref.kind === 'canvas' ? { kind: 'canvas', title: '画板', nodes: [{ title: '卡片正文' }] }
       : ref.kind === 'book-location' ? { kind: 'book', book: { title: '书名', author: '作者' }, passage: null }
@@ -159,11 +162,12 @@ test('W2 switcher lists registered commands by mode, searches keywords, and exec
   await ui.render(<ObjectUIHost onSettings={() => { settings++ }} />)
   const open = async () => act(async () => { ui.dom.window.dispatchEvent(new ui.dom.window.CustomEvent('ready:open-quick-switcher')) })
   await open()
-  assert.match(ui.text(), /切换主题/)
+  // Nothing typed: the common commands only (W6 §2.3); a mode's commands appear when searched in that mode.
+  assert.match(ui.text(), /常用命令/); assert.match(ui.text(), /切换主题/)
+  assert.doesNotMatch(ui.text(), /日历测试命令|关系图谱/)
+  await ui.input('calendar-fixture')
   assert.doesNotMatch(ui.text(), /日历测试命令/)
   await act(async () => useMode.setState({ workbenchMode: 'calendar' }))
-  assert.match(ui.text(), /日历测试命令/)
-  await ui.input('calendar-fixture')
   assert.match(ui.text(), /日历测试命令/)
   assert.match(ui.text(), /T/)
   await ui.key('Enter')

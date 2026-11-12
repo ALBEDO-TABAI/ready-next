@@ -1,3 +1,4 @@
+import { userOpenedObject } from '../../modules/workbench/navigation-open-event'
 import RSSDigestPanel from '../../components/rss/RSSDigestPanel'
 import RSSDefinitionEditor from '../../components/rss/RSSDefinitionEditor'
 import PreviewBrowser from '../../components/rss/PreviewBrowser'
@@ -7,6 +8,7 @@ import { ExternalLink } from 'lucide-react'
 import RSSFeed from '../../components/rss/RSSFeed'
 import RSSNavigation from '../../components/rss/RSSNavigation'
 import { ShellNavigator } from '../../modules/workbench/shell/ShellSidebar'
+import { NavigationBackEntry } from '../../modules/workbench/NavigationBackEntry'
 import { RSSTopbarContext } from '../../components/rss/rss-topbar-context'
 import RSSArticleReader from '../../components/rss/RSSArticleReader'
 import RSSReferenceButton from '../../components/rss/RSSReferenceButton'
@@ -343,6 +345,13 @@ export default function RSSMode({
     setShowAddModal(true)
   }, [activeBrowserPageLabel, activeBrowserTab])
 
+  const addSourceRequested = useRSSSession(state => state.addSourceRequested)
+  useEffect(() => {
+    if (!isActive || isSuspended || !addSourceRequested) return
+    useRSSSession.getState().requestAddSource(false)
+    handleAddSource()
+  }, [addSourceRequested, handleAddSource, isActive, isSuspended])
+
   const handleDeleteSource = useCallback(async (sourceId: string) => {
     if (typeof window === 'undefined' || !window.electronAPI) return
     const result = await window.electronAPI.rss.removeSource(sourceId)
@@ -355,7 +364,16 @@ export default function RSSMode({
     await loadRSSData()
   }, [loadRSSData, selectedSourceId, setQuery])
 
-  const handleItemClick = useCallback((item: RSSItem) => {
+  const requestedCalibration = useRSSSession(state => state.requestedCalibration)
+  useEffect(() => {
+    if (!isActive || isSuspended || !requestedCalibration) return
+    useRSSSession.getState().cancelReveal()
+    setSelectedItem(null); setDigestView(false); setShowOrganization(false); setSieveView(true)
+    useRSSSession.getState().requestCalibration(null)
+  }, [requestedCalibration, isActive, isSuspended, setDigestView, setSieveView])
+
+  const handleItemClick = useCallback((item: RSSItem, record = true) => {
+    if (record) userOpenedObject({ mode: 'rss', ref: { kind: 'rss-item', id: item.id }, title: item.title })
     useRSSSession.getState().cancelReveal()
     setItemStateError(null)
     setSelectedItem(item)
@@ -409,7 +427,7 @@ export default function RSSMode({
           if (!current()) return
           setDigestView(false); setShowOrganization(false)
           handleItemClick({ ...toRSSItem(result.data.article), pinnedRevision: reference.read.expectedRevision,
-            ...(reference.kind === 'excerpt' ? { reveal: { id: request.id, range: reference.read.range } } : {}) })
+            ...(reference.kind === 'excerpt' ? { reveal: { id: request.id, range: reference.read.range } } : {}) }, false)
         }
       } catch (cause) {
         // silent-catch: a failed reveal is reported in the RSS status area.
@@ -633,6 +651,7 @@ export default function RSSMode({
               />
             </ShellNavigator>
             <div className="rss-topbar workbench-tabs-surface no-drag">
+              <NavigationBackEntry mode="rss" />
               <div className="rss-topbar__lead" ref={setTopbarLead}>
                 {feedVisible && <span>资讯</span>}
               </div>

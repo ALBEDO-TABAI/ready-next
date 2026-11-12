@@ -25,7 +25,8 @@ async function main() {
   })
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
   const webPage = `http://127.0.0.1:${server.address().port}/`
-  const env = { ...process.env, READY_USER_DATA_DIR: profile }
+  // Verification never puts a window in front of the person (READY_START_HIDDEN keeps it unshown).
+  const env = { ...process.env, READY_USER_DATA_DIR: profile, READY_START_HIDDEN: '1' }
   delete env.ELECTRON_RUN_AS_NODE
   // The first window can be a transient one; wait for the workbench renderer, and relaunch instead of reloading.
   let app, page

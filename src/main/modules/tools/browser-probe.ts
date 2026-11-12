@@ -127,6 +127,7 @@ function buildBrowserDomTargetLibraryJs(): string {
       'select',
       '[role]',
       'summary',
+      'canvas',
       '[contenteditable="true"]',
       '[contenteditable=""]',
       'h1',
@@ -173,6 +174,7 @@ function buildBrowserDomTargetLibraryJs(): string {
       const explicit = readyCleanText(el.getAttribute('role'));
       if (explicit) return explicit;
       const tag = el.tagName.toLowerCase();
+      if (tag === 'canvas') return 'canvas';
       if (tag === 'a') return 'link';
       if (tag === 'button' || tag === 'summary') return 'button';
       if (tag === 'textarea') return 'textbox';

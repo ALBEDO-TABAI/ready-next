@@ -70,5 +70,5 @@ export function setupCanvasRuntime(ready: Promise<void>, paths: { preloadPath: s
     documentImage: async input => copyFastCardImage(input, (await resolve()).canvas.root, registry, repository, cache) })
   // First-run setup may have no library. Requests resolve the newly configured library lazily.
   void ready.then(async () => { if (vault.get().status === 'ready') await resolve(); quickNote.start() }).catch(error => console.error('[canvas] startup recovery failed', error))
-  return { stop() { quickNote.stop(); quickWindow.destroy() } }
+  return { drafts, repository, stop() { quickNote.stop(); quickWindow.destroy() } }
 }

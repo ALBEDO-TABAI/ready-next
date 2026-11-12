@@ -6,6 +6,9 @@ import {
 } from '../shared/app-shortcuts'
 
 test('global shortcut resolver matches the shortcuts shown in Settings', () => {
+  assert.equal(resolveReadyAppShortcut({ key: '[', metaKey: true }), 'navigate-back')
+  assert.equal(resolveReadyAppShortcut({ key: ']', metaKey: true }), 'navigate-forward')
+  assert.equal(resolveReadyAppShortcut({ key: '[', ctrlKey: true }), 'navigate-back')
   assert.equal(resolveReadyAppShortcut({ key: 's', metaKey: true, shiftKey: true }), 'capture-window')
   assert.equal(resolveReadyAppShortcut({ key: 'k', metaKey: true }), 'open-search')
   assert.equal(resolveReadyAppShortcut({ key: ',', metaKey: true }), 'open-settings')

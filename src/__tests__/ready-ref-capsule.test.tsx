@@ -1,3 +1,4 @@
+import { memoryNavigationAPI } from './utils/navigation-memory'
 import assert from 'node:assert/strict'
 import test, { type TestContext } from 'node:test'
 import React, { act } from 'react'
@@ -31,7 +32,10 @@ async function mount(t: TestContext) {
   dom.window.addEventListener('ready:open-quick-look', event => looks.push((event as CustomEvent<{ ref: ReadyRef }>).detail.ref))
   dom.window.addEventListener('ready:workbench-mode-change-request', event => { const mode = (event as CustomEvent).detail.mode; modes.push(mode); useMode.setState({ workbenchMode: mode }) })
   Object.assign(dom.window, { electronAPI: {
-    objects: { locate: async (id: string) => id === 'gone' ? null : ({ objectId: id, path: `/vault/${id}.md`, revision: 1 }), onMoved: () => () => {} },
+    // Opening a reference records it in the shared navigation history (W6 §4).
+    navigationHistory: memoryNavigationAPI(),
+    objects: { locate: async (id: string) => id === 'gone' ? null : ({ objectId: id, path: `/vault/${id}.md`, revision: 1 }), onMoved: () => () => {},
+      resolvePath: async (path: string) => ({ objectId: path.split('/').pop()!.replace(/\.\w+$/, ''), path, revision: 1 }) },
     document: { readFile: async () => ({ success: true, content: '# 新书发布\n\n这是项目主页，周五前给出定稿。' }) },
     documentPages: { onChanged: () => () => {} },
   } })

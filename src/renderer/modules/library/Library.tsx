@@ -1,3 +1,4 @@
+import { userOpenedObject } from '../workbench/navigation-open-event'
 import type { BookTarget } from './reader/navigation-state'
 import { FindSheet } from './find/FindSheet'
 import { JobView } from './find/JobView'
@@ -80,7 +81,7 @@ export function Library({ api: providedAPI, requestedPath, requestedTarget, onOp
   const shown = useMemo(() => new Set(sorted.filter(b => (!topic || b.topic === topic) && `${b.title} ${b.author}`.toLowerCase().includes(query.trim().toLowerCase())).map(b => b.id)), [sorted, query, topic])
   const current = route.kind === 'shelf' ? null : books.find(b => b.id === route.id)
   const read = (record: LibraryBook) => {
-    if (['epub', 'txt', 'md'].includes(record.format)) setRoute({ kind: 'read', id: record.id })
+    if (['epub', 'txt', 'md'].includes(record.format)) { userOpenedObject({ mode: 'document', title: record.title, ref: { kind: 'book-location', book: record.id, loc: 'c0:0+1' } }); setRoute({ kind: 'read', id: record.id }) }
     else if (onOpenOther) onOpenOther(record.filePath)
     else setError('请从文件面板打开此格式的书籍。')
   }
