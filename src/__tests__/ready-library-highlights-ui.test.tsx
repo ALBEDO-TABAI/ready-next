@@ -31,10 +31,14 @@ test('reader drag creates a durable mark; popover edits/copies/removes; N groups
   const service = new LibraryHighlightService(engine, { write: input => applyDocumentOperation(input, { index: async () => {} }) })
   const registry = new ObjectRegistry(db); registry.register(record.notePath)
   const reading = new LibrarySessions(await realpath(vault), registry)
+  const ended: ReadingEnd[] = []
   const dom = new JSDOM('<div class="rn-library"><div id="root"></div></div>', { url: 'http://localhost', pretendToBeVisual: true })
   Object.assign(dom.window, { electronAPI: { navigationHistory: memoryNavigationAPI(), calendarLayers: {
-    beginReading: async (input: ReadingBegin) => { reading.begin(input); return { ok: true, value: undefined } },
-    endReading: async (input: ReadingEnd) => { reading.end(input); return { ok: true, value: undefined } },
+    beginReading: async (input: ReadingBegin) => {
+      try { reading.begin(input); return { ok: true, value: undefined } }
+      catch (error) { return { ok: false, message: String(error) } }
+    },
+    endReading: async (input: ReadingEnd) => { ended.push(input); reading.end(input); return { ok: true, value: undefined } },
   },
   // The highlight's source page is a reference capsule (W6 K1): it opens through the one ReadyRef entry, by identity.
   objects: { locate: async (id: string) => id === record.id ? { objectId: id, path: record.notePath, revision: 1 } : null, onMoved: () => () => {},
@@ -190,6 +194,21 @@ test('reader drag creates a durable mark; popover edits/copies/removes; N groups
     await act(async () => root.render(<Reader record={record} api={api} target={{ book: record.id, location: { chapter: 99, from: 0, to: 1 } }} onBack={() => {}} onError={e => errors.push(e)} />)); await flush()
     assert.match(errors.at(-1) ?? '', /位置不存在/)
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM library_reading_sessions').get<{ count: number }>()!.count, sessionsBeforeInvalid, 'failed navigation is not a reading session')
+
+    await act(async () => root.render(<p>尚未登记的书</p>))
+    const unavailable = (await engine.importFiles([file])).imported[0]
+    assert.equal(registry.get(unavailable.id), null)
+    const errorsBefore = errors.length, endedBefore = ended.length
+    const log = t.mock.method(console, 'error')
+    await act(async () => root.render(<Reader record={unavailable} api={api} onBack={() => {}} onError={e => errors.push(e)} />)); await flush()
+    assert.match(d.querySelector('[aria-label="阅读器"]')?.textContent ?? '', /一段真正的书籍内容/)
+    assert.equal(d.querySelector('[role="alert"]'), null)
+    assert.equal(errors.length, errorsBefore, 'a failed footprint must not reach the reader error banner')
+    assert.ok(log.mock.calls.some(call => call.arguments[0] === '[library] reading session failed' && String(call.arguments[1]).includes('Reading object unavailable')))
+    await click('下一页')
+    await act(async () => root.render(<p>离开阅读器</p>)); await flush()
+    assert.equal(ended.length, endedBefore, 'a failed begin must not send an end for an unrecorded session')
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM library_reading_sessions').get<{ count: number }>()!.count, sessionsBeforeInvalid)
 
   } finally {
     await act(async () => root.unmount())

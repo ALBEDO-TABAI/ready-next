@@ -12,6 +12,7 @@ import { publishFileAtomically } from '../document-engine/atomic-file-publish'
 import { decodeBookText, epubMetadata, nameMetadata, type BookMetadata } from './book-metadata'
 import { exists, insideVault, isMissing, readBook, sourceNoteContent } from './source-note'
 import { bookIdSchema, formats, importSchema, updateSchema } from './validation'
+import type { ObjectRegistry } from '../object-service/registry'
 
 import { readingDatabasePage as databasePage, readingSourceText, upgradeReadingDatabase } from './database-upgrade'
 
@@ -33,6 +34,7 @@ export class LibraryEngine {
     vault(): VaultState
     write?: typeof applyDocumentOperation
     publish?: typeof publishFileAtomically
+    registry?: ObjectRegistry
   }) {}
 
   /** One owner serializes scans/imports/updates so readers never see an incomplete import. */
@@ -104,6 +106,12 @@ export class LibraryEngine {
 
   findBook(id: string): Promise<LibraryBook> { return this.serial(() => this.locate(id)) }
 
+  private confirmBook(book: LibraryBook): LibraryBook {
+    const object = this.dependencies.registry?.register(book.notePath)
+    if (object && (object.id !== book.id || object.identity_state === 'conflict')) throw new Error('书籍对象身份冲突')
+    return book
+  }
+
   importFiles(input: unknown): Promise<LibraryImportResult> {
     return this.serial(async () => {
       const paths = importSchema.parse(input)
@@ -127,7 +135,7 @@ export class LibraryEngine {
       if (root !== expectedRoot) throw new Error('下载期间资料库已切换')
       const state = await this.scan()
       const existing = state.status === 'ready' ? state.books.find(book => book.id === id) : undefined
-      if (existing) return existing
+      if (existing) return this.confirmBook(existing)
       const folder = join(root, LIBRARY_FOLDER)
       await mkdir(folder, { recursive: true })
       await insideVault(root, folder)
@@ -146,12 +154,12 @@ export class LibraryEngine {
       let book = state.books.find(b => b.source.kind === 'import' && b.source.ref === input.ref)
       if (book) {
         const { frontmatter } = readDocumentSource(await readFile(book.notePath, 'utf8'))
-        if (frontmatter['藏书阁导入完成'] === true) return { book, skipped: true }
+        if (frontmatter['藏书阁导入完成'] === true) return { book: this.confirmBook(book), skipped: true }
         if (createHash('sha256').update(await readFile(book.filePath)).digest('hex') !== fileHash) throw new Error('未完成导入的原书内容已改变，请先核对文件')
       } else {
         for (const existing of state.books) {
           const hash = createHash('sha256').update(await readFile(existing.filePath)).digest('hex')
-          if (hash === fileHash) return { book: existing, skipped: true }
+          if (hash === fileHash) return { book: this.confirmBook(existing), skipped: true }
         }
         const folder = join(input.root, LIBRARY_FOLDER)
         await mkdir(folder, { recursive: true }); await insideVault(input.root, folder)
@@ -162,7 +170,7 @@ export class LibraryEngine {
         })
       }
       await this.writeArchiveFields(book, input.root, { ...input.fields, '藏书阁文件哈希': fileHash, '藏书阁导入完成': false })
-      return { book: await this.locate(book.id), skipped: false }
+      return { book: this.confirmBook(await this.locate(book.id)), skipped: false }
     })
   }
 
@@ -223,7 +231,7 @@ export class LibraryEngine {
       await publish(notePath, sourceNoteContent({ ...fields, 来源引用: toReadyUri({ kind: 'book-location', book: fields[F.id], loc: 'c0:0+1' }), 链接: fields[F.source].url ?? '' }))
       const book = await readBook(root, notePath)
       if (!book) throw new Error('来源页写入后无法读取')
-      return book
+      return this.confirmBook(book)
     } catch (error) {
       if (ownsNote) await rm(notePath, { force: true })
       if (ownsDatabasePage) await rm(page, { force: true })

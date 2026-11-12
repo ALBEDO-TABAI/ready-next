@@ -10,10 +10,50 @@ import { LibraryReadingRepository } from '../main/modules/library-engine/reading
 import { LibraryEngine } from '../main/modules/library-engine/library-engine'
 import { registerLibraryIPC } from '../main/modules/library-engine/ipc-handler'
 import { applyDocumentOperation } from '../main/modules/document-engine/document-write-service'
+import { LibrarySessions } from '../main/modules/calendar-layers/reading'
+import { fixture } from './utils/ready-object-fixture'
 import type { LibraryState } from '../shared/library'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 const Database = createRequire(import.meta.url)('better-sqlite3') as new (path: string) => DatabaseConnection
+
+test('C2 imported books can begin reading immediately without a file watcher', async t => {
+  if (skipIfSqliteUnavailable(t, 'Library import identity')) return
+  const f = fixture(); t.after(f.close)
+  const source = join(f.root, 'incoming.txt')
+  const engine = new LibraryEngine({
+    vault: () => ({ status: 'ready', root: f.root, defaultSuggestion: f.root }), registry: f.registry,
+    write: input => applyDocumentOperation(input, { index: async path => { assert.ok((await f.engine.indexDocument(f.root, path)).ok) } }),
+  })
+  const reading = new LibrarySessions(f.root, f.registry)
+  const open = (book: import('../shared/library').LibraryBook) => {
+    reading.begin({ id: book.id, objectId: book.id, bookId: book.id, loc: 'c0:0+1', startedAt: 100 })
+    reading.end({ id: book.id, endedAt: 200 })
+    assert.deepEqual(f.db.prepare('SELECT object_id,ended_at FROM library_reading_sessions WHERE id=?').get(book.id), { object_id: book.id, ended_at: 200 })
+  }
+  await writeFile(source, 'local book')
+  const local = await engine.importFiles([source])
+  assert.deepEqual(local.failed, []); assert.equal(local.imported.length, 1)
+  open(local.imported[0])
+  await writeFile(source, 'downloaded book')
+  const download = await engine.importDownload(source, 'download-book', { kind: 'zlib', ref: 'download' }, f.root)
+  open(download)
+  f.db.prepare("UPDATE objects SET current_path=NULL,path_key=NULL,status='unverified' WHERE id=?").run(download.id)
+  open(await engine.importDownload(source, download.id, { kind: 'zlib', ref: 'download' }, f.root))
+  await writeFile(source, 'archived book')
+  const archive = await engine.importArchive({ path: source, title: 'archive', ref: 'archive:book', bytes: await readFile(source), root: f.root, fields: {} })
+  assert.equal(archive.skipped, false); open(archive.book)
+  await engine.completeArchive(archive.book.id, f.root)
+  f.db.prepare("UPDATE objects SET current_path=NULL,path_key=NULL,status='unverified' WHERE id=?").run(archive.book.id)
+  const repeated = await engine.importArchive({ path: source, title: 'archive', ref: 'archive:book', bytes: await readFile(source), root: f.root, fields: {} })
+  assert.equal(repeated.skipped, true); open(repeated.book)
+  f.db.exec('PRAGMA query_only = ON')
+  const failed = await engine.importFiles([source])
+  assert.deepEqual(failed.imported, []); assert.equal(failed.failed.length, 1)
+  assert.match(failed.failed[0].reason, /readonly/i)
+  const state = await engine.readOnly()
+  assert.ok(state.status === 'ready'); assert.equal(state.books.length, 3)
+})
 
 // Host Node skips with an [ABI-SKIP] token; verify:native runs this file under Electron.
 test('C6 positions/bookmarks survive restart and note moves; writes do not touch the note', async (t) => {
