@@ -10,7 +10,7 @@ import { NavigationController } from './navigation-controller'
 import { navigationTitle, recentNavigation, type NavigationEntry } from '../../../shared/navigation-history'
 import { type ReadyRef } from '../../../shared/ready-ref'
 import { useMode } from '../../stores/useMode'
-import { useDocTabs } from '../../stores/useDocTabs'
+import { useDocTabs, flushPendingDocTabDrafts } from '../../stores/useDocTabs'
 import { useInkHistory, useInkLayout, goBack as tabBack, goForward as tabForward, tabHistoryTarget } from '../document/ink/layout-state'
 import { openReadyRefDestination } from './open-ready-ref'
 
@@ -90,7 +90,14 @@ export async function currentNavigationOrigin(mode = useMode.getState().workbenc
   const stored = captureNavigationPosition()
   const base = { mode, openedAt: stored?.openedAt ?? Date.now(), anchor: captureNavigationScroll(mode) }
   if (mode === 'document') {
-    const state = useDocTabs.getState(), tab = state.tabs.find(tab => tab.id === state.activeTabId)
+    let state = useDocTabs.getState(), tab = state.tabs.find(tab => tab.id === state.activeTabId)
+    // A new tab being written gets its draft on a debounce. The person is on it now, so save it before naming the place;
+    // otherwise a jump made before the debounce fires leaves no way back to what they were writing.
+    if (tab && tab.kind !== 'library' && !tab.draftId && !tab.path) {
+      const tabId = tab.id
+      await flushPendingDocTabDrafts()
+      state = useDocTabs.getState(); tab = state.tabs.find(item => item.id === tabId)
+    }
     if (tab?.kind === 'library') { const ref = captureRegisteredNavigationRef(); return ref ? { ...base, title: stored?.title || '书籍', ref } : stored?.mode === mode ? stored : undefined }
     if (tab?.draftId) return { ...base, title: tab.title, ref: { kind: 'draft', id: tab.draftId } }
     if (tab?.path) {
