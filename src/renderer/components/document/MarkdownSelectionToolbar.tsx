@@ -335,7 +335,7 @@ function wrapAsLink(
 
 const TOOLBAR_HEIGHT = 36
 const TOOLBAR_VERTICAL_GAP = 8
-const ICON_COLOR = 'var(--text-body, #333)'
+const ICON_COLOR = 'var(--rn-ink)'
 
 // Approximate toolbar width — used to nudge `left` so the bar's center sits
 // near the anchor instead of starting from it. Keep in rough sync with the
@@ -493,14 +493,12 @@ export default function MarkdownSelectionToolbar({
       }}
     >
       <div
+        className="rn-float"
         style={{
           display: 'flex',
           alignItems: 'center',
           gap: 2,
-          background: 'color-mix(in srgb, var(--bg-primary, #FFFFFF) 90%, transparent)',
-          border: '1px solid var(--surface-border, #E0E0E0)',
-          borderRadius: 8,
-          boxShadow: 'var(--surface-shadow, 0 2px 10px rgba(0,0,0,0.094))',
+          borderRadius: 'var(--rn-r-control)',
           padding: '4px 6px',
           height: TOOLBAR_HEIGHT,
           boxSizing: 'border-box',
@@ -514,7 +512,7 @@ export default function MarkdownSelectionToolbar({
           <Type size={14} color={ICON_COLOR} />
           <ChevronDown
             size={10}
-            color="var(--text-light, #999)"
+            color="var(--rn-ink-3)"
             style={{ marginLeft: 1 }}
           />
         </TbButton>
@@ -559,11 +557,9 @@ export default function MarkdownSelectionToolbar({
 
       {showHeadingMenu && (
         <div
+          className="rn-float"
           style={{
-            background: 'color-mix(in srgb, var(--bg-primary, #FFFFFF) 90%, transparent)',
-            border: '1px solid var(--surface-border, #E0E0E0)',
-            borderRadius: 8,
-            boxShadow: 'var(--surface-shadow, 0 2px 10px rgba(0,0,0,0.094))',
+            borderRadius: 'var(--rn-r-control)',
             padding: '4px 0',
             minWidth: 140,
           }}
@@ -592,11 +588,9 @@ export default function MarkdownSelectionToolbar({
 
       {linkInputVisible && (
         <div
+          className="rn-float"
           style={{
-            background: 'color-mix(in srgb, var(--bg-primary, #FFFFFF) 90%, transparent)',
-            border: '1px solid var(--surface-border, #E0E0E0)',
-            borderRadius: 8,
-            boxShadow: 'var(--surface-shadow, 0 2px 10px rgba(0,0,0,0.094))',
+            borderRadius: 'var(--rn-r-control)',
             padding: 6,
             display: 'flex',
             alignItems: 'center',
@@ -619,16 +613,8 @@ export default function MarkdownSelectionToolbar({
                 setLinkUrl('')
               }
             }}
-            style={{
-              border: '1px solid var(--border-default, #E0E0E0)',
-              borderRadius: 6,
-              padding: '4px 8px',
-              fontSize: 13,
-              width: 240,
-              outline: 'none',
-              background: 'var(--input-bg, #FFFFFF)',
-              color: 'var(--text-body, #333)',
-            }}
+            className="rn-field"
+            style={{ height: 'var(--rn-control-h)', width: 240 }}
           />
         </div>
       )}
@@ -667,9 +653,9 @@ function TbButton({ onClick, active, title, children }: TbButtonProps): ReactNod
         border: 'none',
         borderRadius: 4,
         background: active
-          ? 'var(--bg-hover-strong, rgba(0,0,0,0.08))'
+          ? 'var(--rn-fill-3)'
           : hover
-            ? 'var(--bg-hover, rgba(0,0,0,0.04))'
+            ? 'var(--rn-fill-2)'
             : 'transparent',
         cursor: 'pointer',
         boxSizing: 'border-box',
@@ -686,7 +672,7 @@ function Separator(): ReactNode {
       style={{
         width: 1,
         height: 18,
-        background: 'var(--border-default, #E0E0E0)',
+        background: 'var(--rn-hair-2)',
         flexShrink: 0,
         margin: '0 2px',
       }}
@@ -723,10 +709,10 @@ function HeadingMenuItem({
         height: 30,
         padding: '0 12px',
         border: 'none',
-        background: hover ? 'var(--bg-hover, rgba(0,0,0,0.04))' : 'transparent',
+        background: hover ? 'var(--rn-fill-2)' : 'transparent',
         cursor: 'pointer',
         fontSize: 13,
-        color: 'var(--text-body, #333)',
+        color: 'var(--rn-ink)',
         textAlign: 'left',
       }}
     >
@@ -736,7 +722,7 @@ function HeadingMenuItem({
           style={{
             fontWeight: 600,
             fontSize: sampleSize,
-            color: 'var(--text-secondary, #666)',
+            color: 'var(--rn-ink-2)',
           }}
         >
           {sample}

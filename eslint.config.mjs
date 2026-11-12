@@ -8,12 +8,6 @@ import readyPlugin from './eslint-rules/index.mjs'
 
 const privateDesignImports = [
   {
-    // The document module (its page UI and its mode page) owns ink's menu and overlay.
-    owner: ['src/renderer/modules/document/**/*.{js,jsx,ts,tsx}', 'src/renderer/pages/modes/DocumentMode.tsx'],
-    regex: '(?:^|/)ink/(?:menu|overlay)(?:\\.[jt]sx?)?$',
-    message: 'ink 的私有菜单、弹层只能在文档模块内使用；跨模块请使用公共基元。',
-  },
-  {
     owner: 'src/renderer/modules/calendar/workbench/**/*.{js,jsx,ts,tsx}',
     regex: '(?:^|/)workbench/components/(?:Menus|Overlays)(?:\\.[jt]sx?)?$',
     message: '日历的私有菜单、弹层只能在 modules/calendar/workbench 内使用；跨模块请使用公共基元。',

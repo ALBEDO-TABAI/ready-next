@@ -113,8 +113,8 @@ html, body {
   overflow: visible !important;
 }
 body.ready-document-export-body {
-  background: var(--bg-primary, #ffffff);
-  color: var(--text-normal, #1f2937);
+  background: var(--rn-sheet);
+  color: var(--rn-ink);
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
@@ -168,9 +168,9 @@ iframe.document-widget-frame { max-height: 900px; }
   align-items: center;
   gap: 8px;
   padding: 14px 16px;
-  border: 1px dashed var(--border-light, rgba(0, 0, 0, 0.16));
+  border: 1px dashed var(--rn-hair-2);
   border-radius: 12px;
-  color: var(--text-muted, #6b7280);
+  color: var(--rn-ink-3);
   font-size: 13px;
 }
 .ready-export-embed-link {
@@ -181,7 +181,8 @@ iframe.document-widget-frame { max-height: 900px; }
   height: 100%;
   min-height: 120px;
   padding: 16px;
-  color: var(--color-blue, #2563eb);
+  color: var(--rn-ink-2);
+  text-decoration: underline;
   font-size: 13px;
   word-break: break-all;
 }

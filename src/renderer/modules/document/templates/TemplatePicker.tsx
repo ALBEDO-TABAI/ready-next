@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { SaveToPicker } from '../page-ui/SaveToPicker'
+import { Button, Input, Select } from '../../../components/ui'
 import { flattenPages, parentDirectory } from '../page-ui/page-state'
 import type { PageNode } from '../../../../shared/document-pages'
 export function TemplatePicker({ path, title: initialTitle, insert, close }: {
@@ -49,11 +50,11 @@ export function TemplatePicker({ path, title: initialTitle, insert, close }: {
       await openReadyRef({ kind: 'page', id: result.value.receipt.objectId }, 'document')
       close(); return result
     }} />
-  return <form role="dialog" aria-label={insert ? '插入模板' : '从模板新建页面'} onSubmit={event => { event.preventDefault(); void submit() }}>
-    <label>模板<select aria-label="模板" disabled={locked} value={selected} onChange={event => setSelected(event.target.value)}>{templates.map(name => <option key={name}>{name}</option>)}</select></label>
-    <label>标题<input aria-label="模板标题" disabled={locked} value={title} onChange={event => setTitle(event.target.value)} /></label>
-    {error && <p role="alert">{error}</p>}
-    {!templates.length && <p>请在资料库的“模板”文件夹放入 Markdown 模板。</p>}
-    <button disabled={busy || !selected}>{error ? '重试' : insert ? '插入模板内容' : '创建页面'}</button><button type="button" disabled={busy} onClick={close}>关闭</button>
+  return <form role="dialog" aria-label={insert ? '插入模板' : '从模板新建页面'} className="ink-template-form" onSubmit={event => { event.preventDefault(); void submit() }}>
+    <label>模板<Select aria-label="模板" disabled={locked} value={selected} onChange={event => setSelected(event.target.value)} options={templates.map(name => ({ value: name, label: name }))} /></label>
+    <label>标题<Input aria-label="模板标题" disabled={locked} value={title} onChange={event => setTitle(event.target.value)} /></label>
+    {error && <p role="alert" className="ink-panel-error">{error}</p>}
+    {!templates.length && <p className="ink-template-note">请在资料库的“模板”文件夹放入 Markdown 模板。</p>}
+    <div className="ink-template-actions"><Button disabled={busy} onClick={close}>关闭</Button><Button type="submit" variant="primary" disabled={busy || !selected}>{error ? '重试' : insert ? '插入模板内容' : '创建页面'}</Button></div>
   </form>
 }

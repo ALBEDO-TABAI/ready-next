@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Button } from '../../../components/ui'
 import { DatabaseDefinitionSchema, fieldValue, type DatabaseDefinition, type DatabaseView, type Calculation } from '../../../../shared/document-database'
 
 const viewTypes: { type: DatabaseView['type']; label: string }[] = [{ type: 'table', label: '表格' }, { type: 'board', label: '看板' }, { type: 'calendar', label: '日历' }, { type: 'timeline', label: '时间线' }, { type: 'gallery', label: '画廊' }, { type: 'list', label: '列表' }, { type: 'bookshelf', label: '书架' }]
@@ -68,6 +69,6 @@ export function ViewSettings({ definition, view, busy, section, onSave, onClose 
     </div>)}<button type="button" aria-label="添加列计算" onClick={() => setDraft({ ...draft, calculations: [...draft.calculations ?? [], { field: first, operation: 'count' }] })}>＋ 列计算</button></fieldset>
     {(['visibleFields', 'cardFields'] as const).map(key => <fieldset key={key}><legend>{key === 'visibleFields' ? '可见列' : '卡片字段'}</legend><div className="rdb-options">{fields.map(f => <label key={f.id}><input type="checkbox" checked={(draft[key] ?? (key === 'visibleFields' ? fields.map(field => field.id) : [])).includes(f.id)} onChange={() => toggleField(key, f.id)} />{f.name}</label>)}</div></fieldset>)}
     {error && <p role="alert">{error}</p>}
-    <div className="rdb-actions"><button type="button" onClick={onClose}>取消</button><button aria-label="保存视图设置" disabled={busy}>保存设置</button></div>
+    <div className="rdb-actions"><Button size="sm" onClick={onClose}>取消</Button><Button size="sm" variant="primary" type="submit" aria-label="保存视图设置" disabled={busy}>保存设置</Button></div>
   </form>
 }

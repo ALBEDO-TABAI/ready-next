@@ -119,7 +119,8 @@ test('canvas save uses the real SaveToPicker, maps the not-yet-created X folder 
         } } } }} />)
     await ui.click('保存到…')
     assert.match(document.querySelector('[aria-label="最终路径"]')!.textContent!, /\/vault\/X\/成文.md/)
-    await act(async () => document.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click())
+    // 保留文档卡 is the shared Checkbox (a button with role checkbox) since B13.
+    await act(async () => document.querySelector<HTMLButtonElement>('[role="checkbox"]')!.click())
     await ui.click('确认')
     assert.equal(requests.length, 1)
     assert.equal(requests[0].parentObjectId, 'board'); assert.equal(requests[0].parentPath, undefined)

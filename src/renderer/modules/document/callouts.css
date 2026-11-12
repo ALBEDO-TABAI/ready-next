@@ -1,6 +1,8 @@
-/* Callouts in the document preview and page view, in Inkwell's callout style. Colours fall back outside the page shell. */
+/* Callouts in the document preview and page view, in Inkwell's callout style. --rn-* tokens only; the colours a writer
+   picks with [!type|color] are content, kept as data in content-palette.css (W1 §6 whitelist). */
+@import './content-palette.css';
 .ready-callout {
-  --callout-bg: var(--ink-background-secondary, rgba(11, 11, 14, .04));
+  --callout-bg: var(--rn-fill-2);
   --callout-ink: inherit;
   display: block; margin: 0; padding: 12px 16px 12px 14px; border-radius: 12px;
   background: var(--callout-bg); color: var(--callout-ink);
@@ -9,7 +11,7 @@
 .ready-callout-title::before { content: '💡'; flex: none; width: 22px; text-align: center; font-weight: 400; font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif; }
 summary.ready-callout-title { cursor: pointer; list-style: none; }
 summary.ready-callout-title::-webkit-details-marker { display: none; }
-summary.ready-callout-title::after { content: '›'; margin-left: 2px; color: var(--ink-text-tertiary, rgba(11, 11, 14, .45)); transition: transform .2s ease-out; }
+summary.ready-callout-title::after { content: '›'; margin-left: 2px; color: var(--rn-ink-3); transition: transform var(--rn-d-2) var(--rn-ease-out); }
 details.ready-callout[open] > summary.ready-callout-title::after { transform: rotate(90deg); }
 .ready-callout-body { margin: 4px 0 0 32px; }
 .ready-callout-body > :first-child { margin-top: 0; }
@@ -28,15 +30,16 @@ details.ready-callout[open] > summary.ready-callout-title::after { transform: ro
 .ready-callout[data-callout='example'] .ready-callout-title::before { content: '📋'; }
 .ready-callout:is([data-callout='abstract'], [data-callout='summary']) .ready-callout-title::before { content: '📄'; }
 /* Quotes (reading highlights) read as a passage: a quiet label above the excerpt and a coloured rule. */
-.ready-callout:is([data-callout='quote'], [data-callout='cite']) { padding: 10px 16px 12px 16px; box-shadow: inset 3px 0 0 var(--callout-rule, var(--ink-border-strong, rgba(11, 11, 14, .25))); border-radius: 4px 12px 12px 4px; }
-.ready-callout:is([data-callout='quote'], [data-callout='cite']) .ready-callout-title { font-size: 12px; font-weight: 500; color: var(--ink-text-secondary, rgba(11, 11, 14, .6)); gap: 0; }
+.ready-callout:is([data-callout='quote'], [data-callout='cite']) { padding: 10px 16px 12px 16px; box-shadow: inset 3px 0 0 var(--callout-rule, var(--rn-ink-4)); border-radius: 4px 12px 12px 4px; }
+.ready-callout:is([data-callout='quote'], [data-callout='cite']) .ready-callout-title { font-size: 12px; font-weight: 500; color: var(--rn-ink-2); gap: 0; }
 .ready-callout:is([data-callout='quote'], [data-callout='cite']) .ready-callout-title::before { content: none; }
 .ready-callout:is([data-callout='quote'], [data-callout='cite']) .ready-callout-body { margin: 4px 0 0; }
-.ready-callout[data-callout-color='yellow'] { --callout-bg: var(--ink-yellow-background-secondary, rgba(251, 243, 219, 1)); --callout-rule: #e6b92f; }
-.ready-callout[data-callout-color='green'] { --callout-bg: var(--ink-green-background-secondary, rgba(237, 243, 236, 1)); --callout-rule: #5aa07a; }
-.ready-callout[data-callout-color='blue'] { --callout-bg: var(--ink-blue-background-secondary, rgba(231, 243, 248, 1)); --callout-rule: #4c8fd6; }
-.ready-callout[data-callout-color='pink'] { --callout-bg: var(--ink-pink-background-secondary, rgba(250, 241, 245, 1)); --callout-rule: #d2709f; }
-.ready-callout[data-callout-color='purple'] { --callout-bg: var(--ink-purple-background-secondary, rgba(244, 240, 247, 1)); --callout-rule: #9a72c8; }
-.ready-callout[data-callout-color='red'] { --callout-bg: var(--ink-red-background-secondary, rgba(253, 235, 236, 1)); --callout-rule: #d95f5f; }
-.ready-callout[data-callout-color='orange'] { --callout-bg: var(--ink-orange-background-secondary, rgba(251, 236, 221, 1)); --callout-rule: #e08a3c; }
-.ready-callout[data-callout-color='gray'] { --callout-bg: var(--ink-gray-background-secondary, rgba(241, 241, 239, 1)); --callout-rule: #9b9a97; }
+.ready-callout[data-callout-color='yellow'] { --callout-bg: var(--doc-yellow-bg); --callout-rule: var(--doc-yellow-rule); }
+.ready-callout[data-callout-color='green'] { --callout-bg: var(--doc-green-bg); --callout-rule: var(--doc-green-rule); }
+.ready-callout[data-callout-color='blue'] { --callout-bg: var(--doc-blue-bg); --callout-rule: var(--doc-blue-rule); }
+.ready-callout[data-callout-color='pink'] { --callout-bg: var(--doc-pink-bg); --callout-rule: var(--doc-pink-rule); }
+.ready-callout[data-callout-color='purple'] { --callout-bg: var(--doc-purple-bg); --callout-rule: var(--doc-purple-rule); }
+.ready-callout[data-callout-color='red'] { --callout-bg: var(--doc-red-bg); --callout-rule: var(--doc-red-rule); }
+.ready-callout[data-callout-color='orange'] { --callout-bg: var(--doc-orange-bg); --callout-rule: var(--doc-orange-rule); }
+.ready-callout[data-callout-color='gray'] { --callout-bg: var(--doc-gray-bg); --callout-rule: var(--doc-gray-rule); }
+.ready-callout[data-callout-color='brown'] { --callout-bg: var(--doc-brown-bg); --callout-rule: var(--doc-brown-rule); }

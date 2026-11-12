@@ -36,7 +36,8 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
       className={`rn-icon-btn ${className}`.trim()}
       data-size={size}
       aria-label={title}
-      title={title}
+      // A spread tooltip() brings its own hover hint; the native title would show a second one.
+      title={rest.onMouseEnter ? undefined : title}
       aria-pressed={active === undefined ? undefined : active}
       {...rest}
     >

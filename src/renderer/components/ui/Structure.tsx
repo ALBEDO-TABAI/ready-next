@@ -1,8 +1,8 @@
-import { useRef, useState, type HTMLAttributes, type PointerEvent, type ReactNode } from 'react'
+import { useRef, useState, type HTMLAttributes, type MouseEvent, type PointerEvent, type ReactNode } from 'react'
 
 // ListRow, Toolbar, ScrollArea, ResizeHandle (W1 §5). A current row carries the signal colour (DL5):
 // it is "where you are", and its icon takes the row's accent text colour (the rail's white glyph is the rail's alone).
-export function ListRow({ icon, label, meta, current, onClick, className = '', ...rest }: { icon?: ReactNode; label: ReactNode; meta?: ReactNode; current?: boolean; onClick?: () => void; disabled?: boolean } & Omit<HTMLAttributes<HTMLButtonElement>, 'onClick'>) {
+export function ListRow({ icon, label, meta, current, onClick, className = '', ...rest }: { icon?: ReactNode; label: ReactNode; meta?: ReactNode; current?: boolean; onClick?: (event: MouseEvent<HTMLButtonElement>) => void; disabled?: boolean } & Omit<HTMLAttributes<HTMLButtonElement>, 'onClick'>) {
   return (
     <button type="button" className={`rn-row ${className}`.trim()} aria-current={current ? 'page' : undefined} onClick={onClick} {...rest}>
       {icon}

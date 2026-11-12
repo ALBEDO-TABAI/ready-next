@@ -3,7 +3,7 @@ import type { DocumentPagesAPI, PageProperties } from '../../../../shared/docume
 import { errorMessage, joinPagePath } from './page-state'
 import { Icon } from '../ink/icons'
 import { InkPageIcon, PAGE_ICON_CHOICES } from '../ink/InkPageIcon'
-import { closePopover, openPopover } from '../ink/overlay'
+import { Button, Input, closeFloat, openFloat, type FloatAnchor } from '../../../components/ui'
 import { useInkLayout } from '../ink/layout-state'
 
 export interface PageHeaderProps {
@@ -86,9 +86,9 @@ export function PageHeader({ objectId, root, title, beforeSave, tabId, api = win
       await refresh()
     })
   }
-  const pickIcon = (anchor: DOMRect, current?: string) => openPopover({ id: 'ink-icon-picker', anchor, placement: 'bottom-start', offset: 6, label: '选择图标',
+  const pickIcon = (anchor: FloatAnchor, current?: string) => openFloat({ id: 'ink-icon-picker', anchor, placement: 'bottom-start', offset: 6, role: 'dialog', label: '选择图标',
     render: close => <IconPicker value={current} onPick={value => { close(); void (value ? patch({ icon: value }) : patch({}, ['icon'])) }} /> })
-  const pickCover = (anchor: DOMRect) => openPopover({ id: 'ink-cover-picker', anchor, placement: 'bottom-end', offset: 6, label: '更换封面',
+  const pickCover = (anchor: FloatAnchor) => openFloat({ id: 'ink-cover-picker', anchor, placement: 'bottom-end', offset: 6, role: 'dialog', label: '更换封面',
     render: close => <CoverPicker value={properties?.cover} onPick={value => { close(); void (value ? patch({ cover: value }) : patch({}, ['cover'])) }} /> })
   const dragCover = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (reposition === null) return
@@ -109,11 +109,11 @@ export function PageHeader({ objectId, root, title, beforeSave, tabId, api = win
       {reposition !== null && <div className="ink-cover-hint">拖动图片调整位置</div>}
       <div className="ink-cover-actions">
         {reposition === null ? <>
-          <button type="button" disabled={busy} onClick={event => pickCover(event.currentTarget.getBoundingClientRect())}>更换封面</button>
-          <button type="button" disabled={busy} onClick={() => setReposition(properties?.ready_page?.cover_y ?? 0.5)}>调整位置</button>
+          <Button size="sm" variant="ghost" disabled={busy} onClick={event => pickCover(event.currentTarget.getBoundingClientRect())}>更换封面</Button>
+          <Button size="sm" variant="ghost" disabled={busy} onClick={() => setReposition(properties?.ready_page?.cover_y ?? 0.5)}>调整位置</Button>
         </> : <>
-          <button type="button" disabled={busy} onClick={() => { const value = reposition; setReposition(null); void patch({ ready_page: { cover_y: Math.round(value * 100) / 100 } }) }}>保存位置</button>
-          <button type="button" onClick={() => setReposition(null)}>取消</button>
+          <Button size="sm" variant="ghost" disabled={busy} onClick={() => { const value = reposition; setReposition(null); void patch({ ready_page: { cover_y: Math.round(value * 100) / 100 } }) }}>保存位置</Button>
+          <Button size="sm" variant="ghost" onClick={() => setReposition(null)}>取消</Button>
         </>}
       </div>
     </div> : <div className="ink-page-top-pad" />}
@@ -123,12 +123,9 @@ export function PageHeader({ objectId, root, title, beforeSave, tabId, api = win
         <InkPageIcon value={icon} size={78} emojiSize={70} />
       </button>}
       <div className="ink-page-controls">
-        {!icon && <button type="button" className="ink-page-ctl" disabled={busy || !properties} onClick={event => pickIcon(event.currentTarget.getBoundingClientRect())}>
-          <Icon name="smile" size={16} stroke={1.6} />添加图标</button>}
-        {!coverUrl && <button type="button" className="ink-page-ctl" disabled={busy || !properties} onClick={event => pickCover(event.currentTarget.getBoundingClientRect())}>
-          <Icon name="image" size={16} stroke={1.6} />添加封面</button>}
-        {tabId && <button type="button" className="ink-page-ctl" onClick={() => window.dispatchEvent(new CustomEvent('ready:page-comments', { detail: { tabId } }))}>
-          <Icon name="comment" size={16} stroke={1.6} />评论</button>}
+        {!icon && <Button size="sm" variant="ghost" icon={<Icon name="smile" />} disabled={busy || !properties} onClick={event => pickIcon(event.currentTarget.getBoundingClientRect())}>添加图标</Button>}
+        {!coverUrl && <Button size="sm" variant="ghost" icon={<Icon name="image" />} disabled={busy || !properties} onClick={event => pickCover(event.currentTarget.getBoundingClientRect())}>添加封面</Button>}
+        {tabId && <Button size="sm" variant="ghost" icon={<Icon name="comment" />} onClick={() => window.dispatchEvent(new CustomEvent('ready:page-comments', { detail: { tabId } }))}>评论</Button>}
       </div>
       <div className="ink-page-title">
         <textarea ref={titleRef} className="ink-title-editable ready-input-slot-inner" aria-label="页面标题" rows={1} placeholder="无标题" spellCheck={false}
@@ -140,18 +137,18 @@ export function PageHeader({ objectId, root, title, beforeSave, tabId, api = win
           }}
           onBlur={rename} />
       </div>
-      {error && <p role="alert" className="ink-page-error">{error}<button type="button" className="ink-btn" disabled={busy} onClick={() => setReload(value => value + 1)}>重新读取页面属性</button></p>}
-      {!properties && !error && <p role="status" className="ink-page-error" style={{ color: 'var(--ink-text-tertiary)' }}>正在读取页面属性…</p>}
+      {error && <p role="alert" className="ink-page-error">{error}<Button size="sm" disabled={busy} onClick={() => setReload(value => value + 1)}>重新读取页面属性</Button></p>}
+      {!properties && !error && <p role="status" className="ink-page-error is-loading">正在读取页面属性…</p>}
     </div>
   </header>
 }
 
 function IconPicker({ value, onPick }: { value?: string; onPick(value: string | null): void }) {
   const [custom, setCustom] = useState('')
-  return <div className="ink-menu ink-panel" style={{ width: 300 }}>
+  return <div className="ink-panel" style={{ width: 300 }}>
     <div className="ink-panel-row" style={{ justifyContent: 'space-between' }}>
       <span className="ink-panel-title">图标</span>
-      {value && <button type="button" className="ink-btn" onClick={() => onPick(null)}>移除</button>}
+      {value && <Button size="sm" variant="ghost" onClick={() => onPick(null)}>移除</Button>}
     </div>
     <div className="ink-icon-grid" role="listbox" aria-label="图标">
       {PAGE_ICON_CHOICES.map(choice => <button key={choice} type="button" role="option" aria-selected={choice === value} aria-label={choice} className="ink-icon-cell" onClick={() => onPick(choice)}>
@@ -159,21 +156,21 @@ function IconPicker({ value, onPick }: { value?: string; onPick(value: string | 
       </button>)}
     </div>
     <form className="ink-panel-row" onSubmit={event => { event.preventDefault(); if (custom.trim()) onPick(custom.trim()) }}>
-      <input className="ink-input" aria-label="自定义图标" placeholder="其他 Emoji，或 lucide:名称" value={custom} onChange={event => setCustom(event.target.value)} />
-      <button type="submit" className="ink-btn" disabled={!custom.trim()}>使用</button>
+      <Input aria-label="自定义图标" placeholder="其他 Emoji，或 lucide:名称" value={custom} onChange={event => setCustom(event.target.value)} />
+      <Button size="sm" type="submit" disabled={!custom.trim()}>使用</Button>
     </form>
   </div>
 }
 
 function CoverPicker({ value, onPick }: { value?: string; onPick(value: string | null): void }) {
   const [draft, setDraft] = useState(value ?? '')
-  return <form className="ink-menu ink-panel" style={{ width: 340 }} onSubmit={event => { event.preventDefault(); if (draft.trim()) onPick(draft.trim()) }}>
+  return <form className="ink-panel" style={{ width: 340 }} onSubmit={event => { event.preventDefault(); if (draft.trim()) onPick(draft.trim()) }}>
     <span className="ink-panel-title">封面</span>
-    <input className="ink-input" data-autofocus aria-label="封面" placeholder="资料库内的图片路径，或 https 链接" value={draft} onChange={event => setDraft(event.target.value)} />
+    <Input data-autofocus aria-label="封面" placeholder="资料库内的图片路径，或 https 链接" value={draft} onChange={event => setDraft(event.target.value)} />
     <div className="ink-panel-actions">
-      {value && <button type="button" className="ink-btn is-danger" onClick={() => onPick(null)}>移除封面</button>}
-      <button type="button" className="ink-btn" onClick={() => closePopover('ink-cover-picker')}>取消</button>
-      <button type="submit" className="ink-btn ink-btn-primary" disabled={!draft.trim()}>使用</button>
+      {value && <Button size="sm" variant="danger" style={{ marginRight: 'auto' }} onClick={() => onPick(null)}>移除封面</Button>}
+      <Button size="sm" onClick={() => closeFloat('ink-cover-picker')}>取消</Button>
+      <Button size="sm" type="submit" variant="primary" disabled={!draft.trim()}>使用</Button>
     </div>
   </form>
 }

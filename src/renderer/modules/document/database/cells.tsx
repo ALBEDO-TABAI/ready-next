@@ -10,7 +10,8 @@ import { isStatusField, optionColor, type Color } from './cell-colors'
 // status, numbers to the right, a checkbox, links and relation chips. Text never breaks inside a glyph; it ends
 // in an ellipsis.
 
-const tone = (color: Color) => ({ background: `var(--ink-${color}-background-secondary)`, color: `var(--ink-${color}-text-secondary)` })
+// Option colours are the writer's content colours (content-palette.css).
+const tone = (color: Color) => ({ background: `var(--doc-${color}-bg)`, color: `var(--doc-${color}-fg)` })
 
 export function Tag({ label, color }: { label: string; color: Color }) {
   return <span className="rdb-tag" style={tone(color)}>{label}</span>

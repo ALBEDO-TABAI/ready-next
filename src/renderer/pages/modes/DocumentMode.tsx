@@ -5,7 +5,7 @@ import { revealPathInFiles } from '../../modules/document/navigator/useDocumentN
 import { ShellNavigator } from '../../modules/workbench/shell/ShellSidebar'
 import { InkTopbar } from '../../modules/document/ink/InkTopbar'
 import { TodayPage } from '../../modules/today/TodayPage'
-import { OverlayHost } from '../../modules/document/ink/overlay'
+import { closeAllFloats } from '../../components/ui'
 import { openInCurrentTab, useInkLayout } from '../../modules/document/ink/layout-state'
 import { InkTabStrip } from '../../modules/document/ink/InkTabStrip'
 import { usePagePanel } from '../../modules/document/page-ui/page-panel-state'
@@ -247,6 +247,8 @@ export default function DocumentMode({
     if (state.activeTabId !== previous.activeTabId) { useInkLayout.getState().setHome(false); setEditorMode('preview') }
   }), [])
   useEffect(() => { void initializeDrafts().catch(reportDraftError); return watchDraftVault() }, [])
+  // The document's menus and popovers are the app's floats now; leaving the mode closes what it left open.
+  useEffect(() => { if (!isSceneVisible) closeAllFloats() }, [isSceneVisible])
 
   const documentRootRef = useRef<HTMLDivElement>(null)
   // Scroll restoration depends on the root being mounted; after a restart it can mount after the first restore ran.
@@ -852,7 +854,7 @@ export default function DocumentMode({
           <div className="ink-scope ink-doc-app">
             <div className="ink-column">
             <InkTabStrip active={isSceneVisible} onNewTab={() => { setEditorMode('preview'); openTab('') }} />
-            <main className="ink-main" aria-label="文档">
+            <main className="ink-main rn-sheet" aria-label="文档">
               <InkTopbar
                 tab={panelTargetTab}
                 roots={pagePanel.libraryRoots}
@@ -991,7 +993,6 @@ export default function DocumentMode({
             </main>
             </div>
           </div>
-          {isSceneVisible && <OverlayHost />}
         </div>
       </div>
     </div>
