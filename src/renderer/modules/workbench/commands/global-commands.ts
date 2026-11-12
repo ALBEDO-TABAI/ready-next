@@ -13,8 +13,11 @@ export function registerGlobalCommands(): () => void {
     ['new-page', '新建页面'], ['new-database', '新建数据库'],
     ['open-fastcard', '打开 FastCard'], ['open-settings', '打开设置', 'open-settings'],
   ]
+  // What ⌘K offers before anything is typed, after 最近打开.
+  const common: ShellAction[] = ['open-today', 'new-page', 'open-fastcard', 'open-find-replace', 'toggle-theme', 'open-settings']
   const commands: ReadyCommand[] = actions.map(([action, title, shortcut]) => ({
     id: `shell.${action}`, title, shortcut: shortcut ? appShortcut(shortcut) : undefined,
+    ...(common.includes(action) ? { common: true } : {}),
     run: () => requestShellAction(action),
   }))
   for (const [mode, title] of [['browser', '浏览器'], ['document', '文档'], ['rss', '资讯'], ['calendar', '日历']] as const) {

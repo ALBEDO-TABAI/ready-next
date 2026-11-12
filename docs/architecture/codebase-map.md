@@ -131,6 +131,7 @@ claude-bridge IPC
 ## 6. Renderer 入口
 
 - 工作台壳：`src/renderer/pages/WorkbenchMode.tsx`；外壳部件（图标栏、唯一侧栏与导航器槽位、窄窗口让位、外壳动作）在 `src/renderer/modules/workbench/shell/`，⌘K 命令注册表在 `src/renderer/modules/workbench/commands/`
+- 跨模式返回与今日（W6 §4–§5）：四个模式共用的返回入口 `modules/workbench/NavigationBackEntry.tsx`，历史在 `modules/workbench/navigation-history.ts`；今日页 `src/renderer/modules/today/`（页面 `TodayPage.tsx`、数据 `data.ts`、打开 `open-today.ts`、“设置 › 启动”的读取与套用 `startup.ts`）
 - Agent：`src/renderer/components/agent/ChatPanel.tsx`、`src/renderer/stores/useAgent.ts`
 - 文件管理与全局面板组件：`src/renderer/components/layout/`；各模式导航器：浏览器 `components/browser/BrowserTabList.tsx`、文档 `modules/document/navigator/`、资讯 `components/rss/RSSNavigation.tsx`、日历 `modules/calendar/workbench/components/Sidebar.tsx`
 - 资料库的页面与文件（W3）：资料库内外判断 `modules/document/page-ui/library-membership.ts`，挂载文件夹 `modules/document/mountFolder.ts`、收进资料库 `modules/document/navigator/adopt.tsx`；窗口目录监听的合并登记 `modules/document/directoryWatchRegistry.ts`；斜杠菜单目录与菜单 `modules/document/block-editor/slash-items.ts`、`SlashMenu.tsx`；数据库单元格与图标 `modules/document/database/cells.tsx`、`cell-colors.ts`

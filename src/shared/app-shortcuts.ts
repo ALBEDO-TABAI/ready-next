@@ -2,6 +2,8 @@ export type ReadyAppShortcutAction =
   | 'browser-find'
   | 'browser-find-next'
   | 'browser-find-previous'
+  | 'navigate-back'
+  | 'navigate-forward'
   | 'capture-window'
   | 'open-ready'
   | 'open-settings'
@@ -141,8 +143,8 @@ export const APP_SHORTCUTS: readonly AppShortcut[] = [
   { id: 'document.underline', keys: 'CommandOrControl+U', scope: 'document', description: '下划线' },
   { id: 'document.code', keys: 'CommandOrControl+E', scope: 'document', description: '行内代码' },
   { id: 'document.strike', keys: 'CommandOrControl+Shift+X', scope: 'document', description: '删除线' },
-  { id: 'document.back', keys: 'CommandOrControl+[', scope: 'document', description: '文档后退' },
-  { id: 'document.forward', keys: 'CommandOrControl+]', scope: 'document', description: '文档前进' },
+  { id: 'navigate-back', keys: 'CommandOrControl+[', scope: 'global', description: '后退', action: 'navigate-back', guide: true },
+  { id: 'navigate-forward', keys: 'CommandOrControl+]', scope: 'global', description: '前进', action: 'navigate-forward', guide: true },
 ]
 
 export function appShortcut(id: string): AppShortcut {

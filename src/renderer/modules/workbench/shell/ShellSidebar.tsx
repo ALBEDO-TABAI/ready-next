@@ -1,7 +1,8 @@
-import { createContext, useContext, type ReactNode } from 'react'
+import { useContext, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { IconLayoutSidebarLeftCollapse, IconPin } from '@tabler/icons-react'
 import type { WorkbenchMode } from '../../../stores/useMode'
+import { ShellSidebarSlotContext } from './sidebar-slot'
 
 // The shell's one sidebar (W2 §2.2). The shell owns the column — width, collapse, the narrow-window
 // slide-out — and each mode renders its own navigator into it through <ShellNavigator>. A portal
@@ -9,17 +10,6 @@ import type { WorkbenchMode } from '../../../stores/useMode'
 // as before) while the DOM sits in the shell column. Navigators of modes that are not showing stay
 // mounted but hidden, so their scroll position and expanded state survive a mode switch.
 
-interface ShellSidebarSlot {
-  element: HTMLElement | null
-  /** The mode whose navigator is shown: the current mode, or in split view the pane last used. */
-  mode: WorkbenchMode
-  /** A collapsed sidebar is peeking on a wide window: the header button pins it instead of collapsing. */
-  pinnable: boolean
-  /** The shell's one sidebar switch (the same as ⌘B). */
-  toggle: () => void
-}
-
-const ShellSidebarSlotContext = createContext<ShellSidebarSlot>({ element: null, mode: 'document', pinnable: false, toggle: () => {} })
 export const ShellSidebarSlotProvider = ShellSidebarSlotContext.Provider
 
 export function ShellNavigator({ mode, label, scopeClassName, children }: {

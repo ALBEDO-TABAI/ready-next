@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { useRSSSession } from '../renderer/stores/useRSSSession'
+import { memoryNavigationAPI } from './utils/navigation-memory'
 
 test('search panel clicks open four exact targets and show unavailable conversations without switching', async () => {
   const { JSDOM } = await import('jsdom')
@@ -32,6 +33,8 @@ test('search panel clicks open four exact targets and show unavailable conversat
     { sourceType: 'bookmark', path: 'ready://web?url=https%3A%2F%2Fexample.com', name: 'Bookmark target' },
   ].map(item => ({ ...item, snippet: '', tagsHit: [], linksHit: [], nameMatch: false }))
   Object.defineProperty(dom.window, 'electronAPI', { value: {
+    // Opening a result records it in the shared navigation history (W6 §4).
+    navigationHistory: memoryNavigationAPI(),
     document: { searchIndex: async () => ({ success: true, data: { items: results, stats: { returned: results.length, elapsedMs: 1 } } }) },
     rss: { readArticle: async ({ itemId }: {itemId:string}) => { calls.push(`rss:${itemId}`); return { success: true, data: { article: { revision: 'r1' } } } } },
     calendar: { revealEvent: async (id: string) => { calls.push(`calendar:${id}`); return { success: true } } },

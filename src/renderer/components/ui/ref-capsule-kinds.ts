@@ -20,7 +20,7 @@ export function refCapsuleKind(ref: Pick<ReadyRef, 'kind'> & { anchor?: string }
     case 'file': return hint === '画板' || /\.canvas$/i.test(hint ?? '') ? 'canvas' : 'file'
     case 'canvas': return 'canvas'
     case 'book-location': return 'book'
-    case 'rss-item': case 'rss-digest': case 'rss-query': return 'rss'
+    case 'rss-calibration': case 'rss-item': case 'rss-digest': case 'rss-query': return 'rss'
     case 'event': return 'event'
     case 'day': return 'day'
     case 'web': return 'web'

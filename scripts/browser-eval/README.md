@@ -141,23 +141,22 @@ node scripts/browser-eval/tool-layer/run.mjs --only form,spa   # 只跑几组
 
 ## W7 第二批 Main：后台承载面与需要用户处理
 
-`READY_BROWSER_BACKGROUND_SURFACE=1` 打开实验后台承载面；未设置时仍要求前台指针。只挂载任务自己创建的工作标签，每页一个 1280×800 隐藏窗口；用户展示时迁回主窗口，运行清理时销毁承载窗口、保留标签。此开关尚待真实窗口验收，不能默认打开。
+`READY_BROWSER_BACKGROUND_SURFACE=1` 打开实验后台承载面；未设置时仍要求前台指针。只挂载任务自己创建的工作标签，每页一个 1280×800 隐藏窗口；用户展示时迁回主窗口，运行清理时销毁承载窗口、保留标签。隐藏的真实窗口里已验收（见下），默认仍关闭：打开前还要在可见窗口里确认不抢焦点、切走工作页不停止后台，或跑任务层 D 类。
 
 所有命令应使用工作区外的短临时 HOME，并保持隐藏启动；不需要模型或远程调试端口：
 
 ```bash
 task_home=$(mktemp -d /private/tmp/w7.XXXXXX)
 trap 'rm -rf "$task_home"' EXIT
-env HOME="$task_home" READY_START_HIDDEN=1 node_modules/.bin/electron scripts/browser-eval/background-surface-probe.mjs
 env HOME="$task_home" READY_START_HIDDEN=1 READY_BROWSER_BACKGROUND_SURFACE=1 node scripts/browser-eval/tool-layer/run.mjs --only background,attention
 env HOME="$task_home" READY_START_HIDDEN=1 npm run verify:browser-surface
 env HOME="$task_home" READY_START_HIDDEN=1 npm run verify:browser-eval-tools
 node --import tsx scripts/browser-eval/measure-tool-surface.ts
 ```
 
-独立 probe 在等待 Electron 就绪前启动 120 秒内部超时，逐阶段输出 JSON；完成退出 0，出错退出 1，超时输出已取得的数据并退出 2，均使用 `app.exit(code)`。入口不在最外层等待就绪，也不等待窗口显示或焦点事件。probe 不开本地站点端口，检查真实 CDP 点击、滚轮、拖拽、持续 rAF、IntersectionObserver 懒加载、visible 文档状态与 focus emulation 并存；禁止窗口显示/聚焦。工具层 `background` 组再通过生产工具入口核对命中、任务身份、接管后零投递和释放；`attention` 组声明登录/验证码、冷读需要用户处理状态、选择该标签并确认旧任务不能写入，通知使用替代端口。
+验收记录是工具层 `background` 组：经生产工具入口在后台承载面上点击与拖拽（命中）、滚动 1800 像素（`scrollY` 变化、懒加载触发、rAF 持续、`visibilityState` 为 visible、视口 1280×800）、5 次一秒间隔的 `app.getAppMetrics()` 采样且用户前台标签与窗口焦点不变、接管后零投递、释放后旧任务失去投递资格；`attention` 组声明登录/验证码、冷读需要用户处理状态、选择该标签并确认旧任务不能写入，通知使用替代端口。用 `--report <file>` 保存原始采样。
 
-资源测量：probe 输出承载面建立前的 `app.getAppMetrics()` 和建立后 5 次、每次间隔 1 秒的进程采样（CPU 百分比、内存 KiB、PID）。对同机同页重复三次，比较总 workingSetSize 的前后差值及 5 次 CPU 均值；工具层也输出运行期间的 5 次采样。原始数字随报告保留，不设置未经确认的资源阈值。当前沙箱 Electron 在启动阶段 SIGABRT，尚无有效 CPU/内存实测值。
+原先的独立 probe（在从未显示的窗口里直接新建沙箱视图）已删除：那种做法下点击与拖拽能到达，滚轮却不滚动（CDP 滚轮一直不回应答，`sendInputEvent` 与 `Input.synthesizeScrollGesture` 也不滚动），而生产路径——标签先在主窗口里建立，再移入隐藏承载窗口——滚动正常。所以承载面只接收已建立的工作标签，不在隐藏窗口里直接新建标签。
 
 登录/验证码声明入口是 `browser_status({tab_id, needs_user: 'login' | 'captcha'})`：助手只判断语义，代码验证页面/任务归属、持久记录、封住写入并请用户处理。不使用网页关键词识别。需要用户处理的接口是 `agent.getBrowserTaskAttention` 与 `agent.actOnBrowserTaskAttention`；固定用户输入进入普通发送流程，完整形状和验收结果见 [Main 交付报告](../../docs/superpowers/audits/2026-11-12-w7-main-batch2.md)。
 

@@ -208,9 +208,9 @@ export class RSSSieveStore {
     return { items, remaining, remainingCount: remaining.length }
   }
 
-  today(now = Date.now()): RSSSieveItem[] {
+  today(now = Date.now(), recordExposure = true): RSSSieveItem[] {
     const items = this.query({}, now, false, false).items.slice(0, 5)
-    for (const item of items) this.db.prepare('INSERT OR IGNORE INTO rss_sieve_exposures VALUES(?,?)').run(item.id, now)
+    if (recordExposure) for (const item of items) this.db.prepare('INSERT OR IGNORE INTO rss_sieve_exposures VALUES(?,?)').run(item.id, now)
     return items
   }
 }

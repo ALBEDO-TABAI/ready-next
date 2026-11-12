@@ -17,6 +17,8 @@ const webUrl = text.refine(value => {
 }, 'Expected an absolute HTTP(S) URL')
 
 export const ReadyRefSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('draft'), id: text }),
+  z.strictObject({ kind: z.literal('rss-calibration'), id: date }),
   z.strictObject({ kind: z.literal('page'), id: text, anchor: text.optional() }),
   z.strictObject({ kind: z.literal('file'), id: text, anchor: text.optional() }),
   z.strictObject({ kind: z.literal('canvas'), id: text, node: text.optional() }),
@@ -46,6 +48,8 @@ export type ReadyUriParseResult =
 
 // [path, kind, identity field, fragment field, fragment prefix]
 const routes = [
+  ['rss/calibration', 'rss-calibration', 'id', undefined, ''],
+  ['doc/draft', 'draft', 'id', undefined, ''],
   ['doc/page', 'page', 'id', 'anchor', ''],
   ['doc/file', 'file', 'id', 'anchor', ''],
   ['canvas', 'canvas', 'id', 'node', 'node='],
