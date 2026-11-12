@@ -1,3 +1,4 @@
+import { WEBMCP_TOOL_NAMES } from '../../../../shared/browser-webmcp'
 import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
 import type { AgentSdkToolExecutor } from '../runtime-core/agent-sdk-tool-executor'
 import type { ToolDefinition } from '../tools-runtime/tool-definition'
@@ -534,6 +535,8 @@ export function compareReadyToolSurfaceCompatibility(input: {
     }
   }
   const frozenOnlyToolNames = input.frozen.toolNames.filter((name) => !currentByName.has(name))
+  // Unavailable page tools must also disappear from the native model-visible contract.
+  modelContractChangedToolNames.push(...frozenOnlyToolNames.filter(name => (WEBMCP_TOOL_NAMES as readonly string[]).includes(name)))
   const kind: ReadyToolSurfaceCompatibility['kind'] = addedToCurrentSubset.length > 0
     ? 'native_tool_surface_extension_required'
     : modelContractChangedToolNames.length > 0
@@ -576,6 +579,7 @@ export function resolveReadyToolTurnSnapshot(input: {
   source: ReadyLiveToolDefinitionSource
   resolutionInput: ReadyLiveToolResolutionInput
   frozenToolSurface?: ReadyToolSurface
+  webMcpAvailable?: boolean
 }): ReadyToolTurnSnapshot {
   const envelope = input.resolutionInput.requestEnvelope
   const hasLibraryResource = isRecord(envelope) && Array.isArray(envelope.resources)
@@ -583,7 +587,8 @@ export function resolveReadyToolTurnSnapshot(input: {
       isRecord(resource) && resource.kind === 'library_resource' && resource.canRead === true
     ))
   const includeForTurn = (definition: ToolDefinition) => (
-    !isLibraryReadTool(definition.name) || hasLibraryResource
+    (!isLibraryReadTool(definition.name) || hasLibraryResource)
+    && (!(WEBMCP_TOOL_NAMES as readonly string[]).includes(definition.name) || input.webMcpAvailable === true)
   )
   const listed = input.source.listDefaultToolDefinitionsForTurn(input.resolutionInput)
   const toolDefinitions = listed.filter((definition) => (

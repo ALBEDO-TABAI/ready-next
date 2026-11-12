@@ -1,3 +1,5 @@
+import { executeWebMcpTool } from './browser-webmcp-tools'
+import type { PreparedWebMcpTool } from '../browser-engine/webmcp-service'
 import type { BrowserController } from '../browser-engine/ipc-handler'
 import { createHash } from 'node:crypto'
 import type { BrowserTargetClaimGate } from '../browser-engine/agent-browser-lease-gate'
@@ -280,6 +282,7 @@ export async function executeBrowserTool(
   _legacyUserText?: string,
   runtime?: AgentControlRuntime | null,
   taskExecutionContext?: {
+    preparedPageTool?: PreparedWebMcpTool
     ownerAgentId?: string | null
     ownerRunId?: string | null
     browserTaskId?: string | null
@@ -367,7 +370,7 @@ export async function executeBrowserTool(
         throw error
       }
     }
-    const origin = browserActionOrigin(args, controller)
+    const origin = taskExecutionContext?.preparedPageTool?.origin || browserActionOrigin(args, controller)
     const initialTabId = resolveBrowserInitialTabId(args.tab_id, controller.getActiveTab?.()?.id)
     const attentionPhysicalTarget = initialTabId && operationCapability?.requiresDocument
       ? controller.getPhysicalTargetToken(initialTabId) : null
@@ -491,6 +494,16 @@ export async function executeBrowserTool(
         return handlePendingDialogBeforeAction(toolName, invocation.args, controller)
       },
       resolveTargetIdentity: (phase, hint) => {
+        const pageTool = taskExecutionContext?.preparedPageTool
+        if (pageTool && initialTabId) {
+          const identity = (frameDocumentToken: string): BrowserActionTargetIdentity => ({
+            documentState: 'document', tabId: initialTabId,
+            physicalTargetToken: controller.getPhysicalTargetToken(initialTabId),
+            frameId: pageTool.tool.frameId, frameDocumentToken, targetRef: null,
+          })
+          return phase === 'predecessor' ? identity(pageTool.frameDocumentToken)
+            : controller.webMcp.frameIdentity(initialTabId, pageTool.tool).then(current => identity(current.frameDocumentToken))
+        }
         const targetRef = typeof args.target_id === 'string'
           ? args.target_id
           : typeof args.input_target_id === 'string'
@@ -610,6 +623,8 @@ export async function executeBrowserTool(
         ) => attachBrowserToolOutput(result, { ...params, toolName, workflowTarget: workflowWriteTarget })
 
         switch (invocation.group) {
+          case 'webmcp':
+            return executeWebMcpTool(invocation.operation, invocation.args, controller.webMcp, signal, mutationBoundary, taskExecutionContext?.preparedPageTool)
           case 'act':
             return executeBrowserActTool(invocation.operation, invocation.args, {
               controller: actionController,

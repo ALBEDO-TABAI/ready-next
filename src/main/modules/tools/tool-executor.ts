@@ -1,3 +1,4 @@
+import { webMcpToolWrites, type PreparedWebMcpTool } from '../browser-engine/webmcp-service'
 import { httpOrigin, isBrowserOriginWrite, requiresBrowserOriginApproval } from '../browser-engine/browser-origin-write-scope'
 import { isLibraryReadTool, LIBRARY_READ_ACTIONS } from '../agent-control/codex-runtime/library-read-tools'
 import { rssReferencesFromEnvelope } from '../../../shared/rss-reference'
@@ -402,6 +403,9 @@ export async function executeToolCall(
  * can fabricate it from outside this module.
  */
 interface FrozenCallReleaseGrant {
+  webMcpRegistration?: number
+  webMcpOrigin?: string
+  webMcpDocumentToken?: string
   frozenCallId: string
 }
 
@@ -616,6 +620,24 @@ async function executeToolCallInner(
     args = { ...args, tab_id: trustedBrowserPageRef.tabId }
   }
 
+  let preparedPageTool: PreparedWebMcpTool | undefined
+  if (toolName === 'browser_call_page_tool') {
+    const service = context.browserController?.webMcp
+    if (!service || !trustedBrowserPageRef) return browserFailureOutput({ ok: false, errorKind: 'webmcp_unavailable' })
+    try {
+      const stale = await assertTrustedBrowserPageIdentity(context.browserController!, trustedBrowserPageRef)
+      if (stale) return stale
+      const tool = service.requireTool(trustedBrowserPageRef.tabId, String(args.frame_id), String(args.tool_name), releaseGrant?.webMcpRegistration)
+      service.validateInput(tool, args.input)
+      const identity = await service.frameIdentity(trustedBrowserPageRef.tabId, tool)
+      if (releaseGrant && (releaseGrant.webMcpOrigin !== identity.origin || releaseGrant.webMcpDocumentToken !== identity.frameDocumentToken)) throw new Error('webmcp_document_changed')
+      preparedPageTool = { tool, ...identity }
+    } catch (error) {
+      // silent-catch: return the registration/schema/origin failure before any page invocation.
+      return browserFailureOutput({ ok: false, errorKind: 'webmcp_preflight_failed', message: String(error), delivery: 'not_delivered' })
+    }
+  }
+
   // EP1-I3-1/I3-2 — action-confirmation gate (05 §3.1/§3.2). Sits AFTER
   // registration / authorization / internal-visibility / allowlist admission
   // and input validation, immediately before dispatch: admission signals must
@@ -686,9 +708,13 @@ async function executeToolCallInner(
       actionAuthorizationMode: readActionAuthorizationModeFromEnvelope(context.requestEnvelope),
       larkCliExecutableVersion: context.larkCliExecutableAuthority?.version || null,
     })
+    if (preparedPageTool && webMcpToolWrites(preparedPageTool.tool) && confirmation.action !== 'manual_only') {
+      confirmation = { mode: 'M2', action: 'confirm', ruleId: 'browser-webmcp-write', designRef: 'W7-T12',
+        reason: `允许调用 ${preparedPageTool.origin} 的网页工具；该工具可能修改页面或产生外部后果。` }
+    }
     let originsToApprove: string[] = []
     if (definition.domain === 'browser' && trustedBrowserPageRef && context.browserController
-      && isBrowserOriginWrite(toolName, args)) {
+      && (preparedPageTool ? webMcpToolWrites(preparedPageTool.tool) : isBrowserOriginWrite(toolName, args))) {
       const controller = context.browserController
       const stale = await assertTrustedBrowserPageIdentity(controller, trustedBrowserPageRef)
       if (stale) return stale
@@ -697,7 +723,7 @@ async function executeToolCallInner(
         ...(Array.isArray(args.fields) ? args.fields.map(field => field && typeof field === 'object' ? field.target_id : null) : [])]
       const frameIds = [...new Set(['0', ...targetIds.filter((value): value is string => typeof value === 'string')
         .map(value => parseBrowserSnapshotRef(value)?.frameId || '0')])]
-      const targetOrigins = await Promise.all(frameIds.map(async frameId => String(frameId !== '0'
+      const targetOrigins = preparedPageTool ? [preparedPageTool.origin] : await Promise.all(frameIds.map(async frameId => String(frameId !== '0'
         ? await controller.executeJSInFrame(originTabId, frameId, 'location.origin')
         : await controller.executeJS(originTabId, 'location.origin'))))
       if (targetOrigins.some(origin => httpOrigin(origin) !== origin)) {
@@ -794,6 +820,9 @@ async function executeToolCallInner(
           // admission checks rerun; only this gate is skipped.
           return executeToolCallInner(toolName, outcome.params, context, {
             frozenCallId: outcome.frozenCallId,
+            webMcpRegistration: preparedPageTool?.tool.registration,
+            webMcpOrigin: preparedPageTool?.origin,
+            webMcpDocumentToken: preparedPageTool?.frameDocumentToken,
           })
         case 'denied_by_user':
           return deniedOutput(
@@ -928,6 +957,7 @@ async function executeToolCallInner(
               browserTurnLease: turnLease,
               messageVisibilityEpoch: context.messageVisibilityEpoch,
               trustedPageRef: trustedBrowserPageRef,
+              preparedPageTool,
               visibleTabIds: [...new Set([...admittedBrowserRoots.map((pin) => pin.tabId), ...taskTabIds])],
             },
           )

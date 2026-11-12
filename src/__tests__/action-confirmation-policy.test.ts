@@ -933,20 +933,25 @@ test('source pin: confirmation gate sits AFTER authorization and reads only the 
   assert.ok(authIdx > 0, 'authorization check must exist')
   assert.ok(gateIdx > 0, 'confirmation gate must exist and read the frozen request mode — no model-authored approval input')
   assert.ok(authIdx < gateIdx, 'confirmation gate must run AFTER skill tool authorization')
-  const gate = source.slice(gateIdx, source.indexOf('    let originsToApprove:', gateIdx)).trim()
+  const gate = source.slice(gateIdx, source.indexOf('    if (preparedPageTool', gateIdx)).trim()
   assert.equal(gate, `let confirmation = resolveConfirmationGate(toolName, args, {
       scopeId: context.scopeId || context.scope?.id || context.sessionId || null,
       messageVisibilityEpoch: context.messageVisibilityEpoch,
       actionAuthorizationMode: readActionAuthorizationModeFromEnvelope(context.requestEnvelope),
       larkCliExecutableVersion: context.larkCliExecutableAuthority?.version || null,
     })`, 'authority options must come only from the frozen request and host context, never args')
+  const webMcpPromotion = source.slice(source.indexOf('    if (preparedPageTool', gateIdx), source.indexOf('    let originsToApprove:', gateIdx)).trim()
+  assert.equal(webMcpPromotion, `if (preparedPageTool && webMcpToolWrites(preparedPageTool.tool) && confirmation.action !== 'manual_only') {
+      confirmation = { mode: 'M2', action: 'confirm', ruleId: 'browser-webmcp-write', designRef: 'W7-T12',
+        reason: \`允许调用 \${preparedPageTool.origin} 的网页工具；该工具可能修改页面或产生外部后果。\` }
+    }`, 'page annotations may only promote to confirmation; manual-only remains protected')
   const promotion = source.slice(source.indexOf('      if (originsToApprove.length', gateIdx), source.indexOf('    const deniedOutput =', gateIdx)).trim()
   assert.equal(promotion, `if (originsToApprove.length && confirmation.action !== 'manual_only') {
         confirmation = { mode: 'M2', action: 'confirm', ruleId: 'browser-origin-write', designRef: 'W7-BA7',
           reason: \`允许当前任务在 \${originsToApprove.join('、')} 修改网页或提交内容。\${confirmation.action === 'confirm' ? confirmation.reason : ''}\` }
       }
     }`, 'origin scope may only promote to confirmation; manual-only and existing confirmation remain protected')
-  assert.equal([...source.matchAll(/\bconfirmation\s*=(?!=)/g)].length, 2, 'no other assignment may relax the decision')
+  assert.equal([...source.matchAll(/\bconfirmation\s*=(?!=)/g)].length, 3, 'no other assignment may relax the decision')
 })
 
 test('dispatch ignores model-authored approval and authorization mode arguments', async () => {

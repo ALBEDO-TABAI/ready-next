@@ -3,6 +3,7 @@ import type { BrowserPowerEffect } from './browser-power'
 export type BrowserOperationMode = 'control' | 'observe' | 'mutate'
 
 export const BROWSER_OPERATION_IDS = [
+  'page_tools', 'call_page_tool',
   'tabs_list', 'tabs_open', 'tabs_switch', 'tabs_close',
   'navigate_open', 'navigate_back', 'navigate_forward', 'navigate_reload',
   'search', 'snapshot', 'find', 'read', 'screenshot', 'screenshot_analyze',
@@ -35,7 +36,7 @@ export interface BrowserOperationCapability {
   requiresOwnerCleanup: boolean
 }
 
-export type BrowserOperationHandlerGroup = 'act' | 'observe' | 'collection' | 'power' | 'system'
+export type BrowserOperationHandlerGroup = 'webmcp' | 'act' | 'observe' | 'collection' | 'power' | 'system'
 
 export interface BrowserCapabilityRegistryEntry {
   operations: readonly BrowserOperationId[]
@@ -119,6 +120,8 @@ export const BROWSER_CAPABILITY_REGISTRY = {
   browser_archive: { operations: ['archive'], resolveOperationId: () => 'archive' },
   browser_task: { operations: ['task_get', 'task_result'], resolveOperationId: (args) => ({ get: 'task_get', result: 'task_result' } as const)[action(args, 'get') as 'get' | 'result'] || null },
 
+  browser_page_tools: { operations: ['page_tools'], resolveOperationId: () => 'page_tools' },
+  browser_call_page_tool: { operations: ['call_page_tool'], resolveOperationId: () => 'call_page_tool' },
   browser_status: { operations: ['status', 'request_user'], resolveOperationId: (args) => args.needs_user ? 'request_user' : 'status' },
   browser_console: { operations: ['console_list', 'console_clear'], resolveOperationId: (args) => ({ list: 'console_list', clear: 'console_clear' } as const)[action(args, 'list') as 'list' | 'clear'] || null },
   browser_network: { operations: ['network_start', 'network_stop', 'network_list', 'network_details'], resolveOperationId: (args) => ({ start: 'network_start', stop: 'network_stop', list: 'network_list', details: 'network_details' } as const)[action(args, 'list') as 'start' | 'stop' | 'list' | 'details'] || null },
@@ -161,6 +164,8 @@ const operation = (
 ): BrowserOperationRecord => ({ handlerGroup, mode, effects, ...BROWSER_BOUNDARY_PROFILES[boundaries] })
 
 const OPERATION_CAPABILITIES: Readonly<Record<BrowserOperationId, BrowserOperationRecord>> = {
+  page_tools: operation('webmcp', 'observe', ['observe'], 'page_observe'),
+  call_page_tool: operation('webmcp', 'mutate', ['page_mutation'], 'page_mutate'),
   tabs_list: operation('observe', 'observe', ['observe'], 'management'), tabs_open: operation('act', 'mutate', ['navigate'], 'workflow_transport'), tabs_switch: operation('act', 'mutate', ['navigate'], 'workflow_transport'), tabs_close: operation('act', 'mutate', ['page_mutation'], 'workflow_transport'),
   navigate_open: operation('act', 'mutate', ['navigate'], 'page_mutate'), navigate_back: operation('act', 'mutate', ['navigate'], 'page_mutate'), navigate_forward: operation('act', 'mutate', ['navigate'], 'page_mutate'), navigate_reload: operation('act', 'mutate', ['navigate'], 'page_mutate'),
   search: operation('act', 'mutate', ['page_mutation', 'external_submit'], 'page_mutate'), snapshot: operation('observe', 'observe', ['observe'], 'page_observe'), find: operation('observe', 'observe', ['observe'], 'page_observe'), read: operation('observe', 'observe', ['observe'], 'page_observe'), screenshot: operation('observe', 'observe', ['observe'], 'page_observe'), screenshot_analyze: operation('observe', 'observe', ['observe'], 'page_observe'), wait_ready: operation('observe', 'observe', ['observe'], 'page_observe'), wait_condition: operation('observe', 'observe', ['observe'], 'page_observe'),

@@ -5,6 +5,10 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app, BrowserWindow, shell } from 'electron'
 import 'tsx/esm'
+// Static imports resolve before tsx/esm registers, so TypeScript sources load dynamically from here on.
+const { configureWebMcpExperiment } = await import('../../../src/main/modules/browser-engine/webmcp-experiment.ts')
+
+configureWebMcpExperiment(process.env.READY_BROWSER_EVAL_WEBMCP === '1', app.commandLine)
 
 // Deterministic public-name redirect fixture; DNS never leaves loopback.
 app.commandLine.appendSwitch('host-resolver-rules', 'MAP public.browser-eval.test 127.0.0.1')

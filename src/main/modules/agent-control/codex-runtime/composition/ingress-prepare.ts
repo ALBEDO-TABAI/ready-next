@@ -3,6 +3,7 @@ import { readCapturedReference } from '../captured-reference'
 import { readStoredObjectPreview } from '../../../object-service/preview'
 import { toReadyUri } from '../../../../../shared/ready-ref'
 import { FastCardRepository } from '../../../repositories/fastcard-repository'
+import { webMcpAvailableForEnvelope } from '../../../browser-engine/webmcp-service'
 import { libraryTools } from '../library-read-resources'
 import { ObjectPresentationService } from '../../../object-service/presentation'
 import { ObjectRegistry } from '../../../object-service/registry'
@@ -433,6 +434,7 @@ export function createIngressPrepare(deps: IngressPrepareDeps) {
           resource.kind === 'folder_reference' && resource.canWrite
         )),
         tagForgeExclusive: exclusiveAllowSet !== null,
+        webMcpAvailable: webMcpAvailableForEnvelope(boundHost.browserController, requestEnvelope),
       })
       const composeCurrentToolSnapshot = (
         resolved: typeof resolvedToolSnapshot,

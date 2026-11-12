@@ -42,6 +42,7 @@ export abstract class BrowserControllerHostRuntime extends BrowserControllerComp
     this.pendingFileChooserNotices.delete(tabId)
     browserSnapshotService.disposeTab(this as never, tabId)
     disposeBrowserPageMapAmbiguity(tabId)
+    this.webMcp.disposeTab(tabId)
     this.cdpSessionService.disposeTab(tabId)
     this.networkObserverService.disposeTab(tabId)
   }

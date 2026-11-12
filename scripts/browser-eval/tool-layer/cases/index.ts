@@ -1,3 +1,4 @@
+import { webMcpGroup } from './webmcp'
 import { w7Group } from './w7'
 import { backgroundGroup } from './background'
 import { attentionGroup } from './attention'
@@ -9,6 +10,7 @@ import { framesGroup, pagingGroup, shadowGroup, spaGroup, waitGroup } from './pa
 import { canvasGroup, dialogsGroup, downloadsGroup, editorGroup, popupGroup, takeoverGroup, uploadGroup } from './interactions'
 
 export const CASE_GROUPS: CaseGroup[] = [
+  webMcpGroup,
   surfaceGroup,
   formGroup,
   keyboardGroup,

@@ -248,6 +248,7 @@ export class AgentRun {
       currentBrowserPageRef: environment.browserPageRef,
       hasExplicitAttachment: (this.options.attachments || []).length > 0,
       hasWritableRoot: false,
+      webMcpAvailable: this.controller.webMcp.hasTools(this.tabId),
     })
     this.allowedToolNames = composeBrowserAdmissionToolNames(snapshot)
   }
