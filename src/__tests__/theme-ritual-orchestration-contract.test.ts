@@ -88,7 +88,7 @@ test('theme transitions route through the ritual overlay and the per-selector tr
   assert.match(styles, /\.ready-theme-ritual-tint\s*\{[\s\S]*background-color calc\(var\(--ritual-hold-duration,\s*320ms\)\s*-\s*80ms\)/)
   assert.match(ritualCss, /html\[data-theme-ritual-phase='holding'\]\[data-theme-ritual-direction='to-dark'\]\s+\.ready-theme-ritual-tint\s*\{[\s\S]*opacity:\s*1/)
   assert.match(ritualCss, /html\[data-theme-ritual-phase='holding'\]\[data-theme-ritual-direction='to-light'\]\s+\.ready-theme-ritual-tint\s*\{[\s\S]*opacity:\s*1/)
-  assert.match(ritualCss, /html\[data-theme-ritual-phase='holding'\]\[data-theme-ritual-direction='to-light'\]\s+\.ready-theme-ritual-tint\s*\{[\s\S]*background-color:\s*color-mix\(in srgb,\s*var\(--workbench-mode-bg-light\)\s*32%,\s*transparent\)/)
+  assert.match(ritualCss, /html\[data-theme-ritual-phase='holding'\]\[data-theme-ritual-direction='to-light'\]\s+\.ready-theme-ritual-tint\s*\{[\s\S]*background-color:\s*color-mix\(in srgb,\s*var\(--ritual-stage-light\)\s*32%,\s*transparent\)/)
   // Leaving fades the tint out in lockstep with the overlay's own opacity (900ms), instead of
   // keeping it at opacity:1 and relying on a separate background-color drain. Unifies the
   // leave-phase brightness transition so destination lands exactly when the icon disappears.
@@ -110,19 +110,22 @@ test('theme transitions route through the ritual overlay and the per-selector tr
 
   // Constant colors live in :root so there's one source of truth for the light/dark canvas
   // colors. light/dark root selectors alias these via var() to prevent drift.
-  assert.match(styles, /:root\s*\{[\s\S]*--workbench-mode-bg-light:\s*#F6F1E7/)
-  assert.match(styles, /:root\s*\{[\s\S]*--workbench-mode-bg-dark:\s*#192131/)
-  assert.match(styles, /:root\s*\{[\s\S]*--ritual-overlay-bg:\s*var\(--workbench-mode-bg\)/)
-  // [^{]* 容忍选择器列表（fastcard overlay 窗口与主窗共享此规则块）
-  assert.match(styles, /html:root[^{]*\{[\s\S]*?--workbench-mode-bg:\s*var\(--workbench-mode-bg-light\)/)
-  assert.match(styles, /html\[data-theme='dark'\]:root\s*\{[\s\S]*--workbench-mode-bg:\s*var\(--workbench-mode-bg-dark\)/)
-  // color-scheme hint is present so native form controls/scrollbars render in the right scheme from the first frame.
-  assert.match(styles, /:root\s*\{[\s\S]*color-scheme:\s*light dark/)
-  assert.match(styles, /html\[data-theme='dark'\]\s*\{[\s\S]*color-scheme:\s*dark/)
+  // W1 T6: the ritual carries both themes' stage colours itself (the two --rn-stage values), since it needs the
+  // colour of the theme it is leaving or entering whatever data-theme says mid-flip.
+  const tokens = readWorkspaceFile('src/renderer/design/next/tokens.css')
+  const stageLight = tokens.match(/:root, \[data-theme="light"\]\s*\{[\s\S]*?--rn-stage:\s*(#[0-9a-f]{6});/i)?.[1]
+  const stageDark = tokens.match(/\[data-theme='dark'\]\s*\{[\s\S]*?--rn-stage:\s*(#[0-9a-f]{6});/i)?.[1]
+  assert.ok(stageLight && stageDark)
+  assert.match(ritualCss, new RegExp(`--ritual-stage-light:\\s*${stageLight};`, 'i'))
+  assert.match(ritualCss, new RegExp(`--ritual-stage-dark:\\s*${stageDark};`, 'i'))
+  assert.doesNotMatch(styles, /--workbench-mode-bg|--ritual-overlay-bg/)
+  // color-scheme follows the app's theme so native form controls/scrollbars render in the right scheme from the first frame.
+  assert.match(tokens, /:root, \[data-theme="light"\]\s*\{[\s\S]*?color-scheme:\s*light;/)
+  assert.match(tokens, /\[data-theme='dark'\]\s*\{[\s\S]*?color-scheme:\s*dark;/)
 
   // Theme glyph uses lucide-matching outline style.
   assert.match(themeChoreography, /viewBox="0 0 48 48"/)
-  assert.match(themeChoreography, /stroke="var\(--color-blue\)"/)
+  assert.match(themeChoreography, /stroke="var\(--rn-accent\)"/)
   assert.match(themeChoreography, /strokeWidth="2"/)
   assert.match(themeChoreography, /fill="none"/)
   assert.match(themeChoreography, /data-glyph="sun"/)
@@ -178,12 +181,12 @@ test('Stage 3 — ritual visual parameters unchanged (spec §3.4 red lines)', ()
   // .ready-theme-ritual-tint 的 entering 18% / holding 28% alpha 不变
   assert.match(
     ritualCss,
-    /html\[data-theme-ritual-phase='entering'\]\[data-theme-ritual-direction='to-dark'\]\s+\.ready-theme-ritual-tint\s*\{[\s\S]*?color-mix\(in srgb,\s*var\(--workbench-mode-bg-light\)\s*18%,\s*transparent\)/,
+    /html\[data-theme-ritual-phase='entering'\]\[data-theme-ritual-direction='to-dark'\]\s+\.ready-theme-ritual-tint\s*\{[\s\S]*?color-mix\(in srgb,\s*var\(--ritual-stage-light\)\s*18%,\s*transparent\)/,
     'entering tint (to-dark) must stay at 18% alpha source theme color',
   )
   assert.match(
     ritualCss,
-    /html\[data-theme-ritual-phase='holding'\]\[data-theme-ritual-direction='to-dark'\]\s+\.ready-theme-ritual-tint\s*\{[\s\S]*?color-mix\(in srgb,\s*var\(--workbench-mode-bg-dark\)\s*28%,\s*transparent\)/,
+    /html\[data-theme-ritual-phase='holding'\]\[data-theme-ritual-direction='to-dark'\]\s+\.ready-theme-ritual-tint\s*\{[\s\S]*?color-mix\(in srgb,\s*var\(--ritual-stage-dark\)\s*28%,\s*transparent\)/,
     'holding tint (to-dark) must stay at 28% alpha target theme color',
   )
 })

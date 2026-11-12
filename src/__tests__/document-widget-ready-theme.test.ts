@@ -63,15 +63,19 @@ describe('document widget ready design language', () => {
     Object.defineProperty(globalThis, 'document', { value: dom.window.document, configurable: true })
     Object.defineProperty(globalThis, 'getComputedStyle', { value: dom.window.getComputedStyle.bind(dom.window), configurable: true })
     const root = dom.window.document.documentElement
-    root.style.setProperty('--bg-content', '#F1F5FB')
-    root.style.setProperty('--bg-canvas', '#EEF3FA')
-    root.style.setProperty('--border-default', 'rgba(150,169,205,.34)')
+    root.style.setProperty('--rn-sheet', '#F1F5FB')
+    root.style.setProperty('--rn-stage', '#EEF3FA')
+    root.style.setProperty('--rn-hair-2', 'rgba(150,169,205,.34)')
 
     try {
       const payload = resolveWidgetThemePayload()
       assert.equal(payload.vars['--widget-bg-primary'], WIDGET_THEME_LIGHT.card)
       assert.equal(payload.vars['--widget-bg-secondary'], WIDGET_THEME_LIGHT.canvas)
       assert.equal(payload.vars['--widget-border'], WIDGET_THEME_LIGHT.hair)
+      // Freeform widget code keeps its old variable names; the values come from the design tokens (W1 T6).
+      assert.equal(payload.vars['--bg-content'], '#F1F5FB')
+      assert.equal(payload.vars['--bg-canvas'], '#EEF3FA')
+      assert.equal(payload.vars['--border-default'], 'rgba(150,169,205,.34)')
     } finally {
       if (previousDocument === undefined) delete (globalThis as { document?: Document }).document
       else Object.defineProperty(globalThis, 'document', { value: previousDocument, configurable: true })
@@ -196,7 +200,7 @@ describe('document widget ready design language', () => {
     const actionBlock = css.match(/\.ready-doc-widget-primary-action\s*\{[\s\S]*?html\[data-theme='dark'\] \.ready-doc-widget-primary-action:hover[\s\S]*?\}/)?.[0] || ''
     assert.ok(actionBlock, '应能读取 widget 操作栏样式块')
     assert.doesNotMatch(actionBlock, /--color-blue(?:-light)?/)
-    assert.match(actionBlock, /--color-ready-orange/)
+    assert.match(actionBlock, /--rn-accent/)
   })
 
   it('openui compiles reference widget vars instead of legacy pastel hexes', () => {

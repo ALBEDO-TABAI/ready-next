@@ -1,17 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  IconChevronDown as ChevronDown,
-  IconChevronRight as ChevronRight,
-  IconFileText as FileText,
-  IconFolder as Folder,
-  IconLoader2 as Loader2,
-  IconPencil as Pencil,
-  IconRefresh as RefreshCw,
-  IconSparkles as Sparkles,
-  IconSwitchHorizontal as SwitchHorizontal,
-  IconCheck as Check,
-  IconX as X,
-} from '@tabler/icons-react'
+  ChevronDown,
+  ChevronRight,
+  FileText,
+  Folder,
+  LoaderCircle as Loader2,
+  Pencil,
+  RefreshCw,
+  Sparkles,
+  ArrowLeftRight as SwitchHorizontal,
+  Check,
+  X,
+} from 'lucide-react'
 
 import type {
   FileEmergenceBucket,

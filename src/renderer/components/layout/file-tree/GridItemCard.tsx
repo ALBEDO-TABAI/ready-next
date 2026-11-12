@@ -1,6 +1,5 @@
 import { useFileDragRef } from '../../../modules/workbench/file-drag-ref'
 import type React from 'react'
-import { IconFolder as Folder } from '@tabler/icons-react'
 import type { FileItem } from '../../../stores/useWorkspace'
 import { getFileAppearanceColorValue, type FileAppearance } from '../../../stores/fileAppearance'
 import { toLocalFileUrl } from '../../../utils/dragDrop'

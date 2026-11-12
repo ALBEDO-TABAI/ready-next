@@ -163,8 +163,8 @@ export default function PreviewBrowser({ item, onClose, isActive = true }: Previ
         bottom: 0,
         width: `calc(100% - ${WORKBENCH_SUPPORT_PANEL_WIDTH}px)`,
         minWidth: 480,
-        background: 'var(--workbench-module-surface-bg)',
-        borderRadius: 'var(--workbench-canvas-radius) 0 0 var(--workbench-canvas-radius)',
+        background: 'var(--rn-sheet)',
+        borderRadius: 'var(--rn-r-sheet) 0 0 var(--rn-r-sheet)',
         overflow: 'hidden',
         isolation: 'isolate',
         boxShadow: 'var(--rn-shadow-3)',
@@ -195,10 +195,10 @@ export default function PreviewBrowser({ item, onClose, isActive = true }: Previ
             position: 'absolute',
             left: 0,
             top: 0,
-            width: 'var(--workbench-canvas-radius)',
-            height: 'var(--workbench-canvas-radius)',
-            borderBottomRightRadius: 'var(--workbench-canvas-radius)',
-            background: 'var(--workbench-module-surface-bg)',
+            width: 'var(--rn-r-sheet)',
+            height: 'var(--rn-r-sheet)',
+            borderBottomRightRadius: 'var(--rn-r-sheet)',
+            background: 'var(--rn-sheet)',
             pointerEvents: 'none',
             zIndex: 2,
           }}
@@ -209,10 +209,10 @@ export default function PreviewBrowser({ item, onClose, isActive = true }: Previ
             position: 'absolute',
             left: 0,
             bottom: 0,
-            width: 'var(--workbench-canvas-radius)',
-            height: 'var(--workbench-canvas-radius)',
-            borderTopRightRadius: 'var(--workbench-canvas-radius)',
-            background: 'var(--workbench-module-surface-bg)',
+            width: 'var(--rn-r-sheet)',
+            height: 'var(--rn-r-sheet)',
+            borderTopRightRadius: 'var(--rn-r-sheet)',
+            background: 'var(--rn-sheet)',
             pointerEvents: 'none',
             zIndex: 2,
           }}
@@ -220,7 +220,7 @@ export default function PreviewBrowser({ item, onClose, isActive = true }: Previ
         {previewState.loading && !previewState.error && (
           <div
             className="absolute inset-0 z-10 flex items-center justify-center"
-            style={{ background: 'color-mix(in srgb, var(--workbench-module-surface-bg) 90%, transparent)' }}
+            style={{ background: 'color-mix(in srgb, var(--rn-sheet) 90%, transparent)' }}
           >
             <EmptyState icon={<Loader2 className="animate-spin" />} title="正在打开原文…" />
           </div>

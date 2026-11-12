@@ -2,13 +2,14 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { IconFolder, IconFolderFilled, IconLink } from '@tabler/icons-react'
+import { Folder, Link } from 'lucide-react'
 
 import MorphIconRailGroup from '../renderer/components/motion/MorphIconRailGroup'
+import { FolderFilled } from '../renderer/design/next/icons'
 
 const items = [
-  { id: 'folder', label: '文件', icon: IconFolder, activeIcon: IconFolderFilled },
-  { id: 'backlinks', label: '反向链接', icon: IconLink },
+  { id: 'folder', label: '文件', icon: Folder, activeIcon: FolderFilled },
+  { id: 'backlinks', label: '反向链接', icon: Link },
 ]
 
 function renderRail(activeId: string, expanded: boolean): string {

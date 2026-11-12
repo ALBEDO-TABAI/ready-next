@@ -14,9 +14,6 @@ test('shared inset slot tokens drive input shells across the workbench', () => {
   const globalSearch = readWorkspaceFile('src/renderer/components/layout/GlobalSearchPanel.tsx')
   const browserSurface = readWorkspaceFile('src/renderer/components/browser/ActiveTabSurface.tsx')
 
-  assert.match(styles, /--input-slot-bg:/)
-  assert.match(styles, /--input-slot-shadow:/)
-  assert.match(styles, /--input-slot-shadow-focus:/)
   assert.match(styles, /\.ready-input-shell\s*\{/)
   assert.match(styles, /\.ready-input-shell:focus-within\s*\{/)
   assert.match(styles, /\.ready-input-slot-control\s*\{/)
@@ -35,12 +32,12 @@ test('shared inset slot tokens drive input shells across the workbench', () => {
   assert.match(browserSurface, /ready-input-slot-inner/)
 })
 
-test('inactive input slots blend into their panel surface and rely on a faint outline', () => {
+test('inactive input slots take the Field look from --rn-* and the retired --input-slot-* tokens stay gone (W1 T6)', () => {
   const styles = readRendererStyles()
 
-  assert.match(styles, /--input-slot-bg:\s*var\(--surface-panel-bg\);/)
-  assert.match(styles, /--input-slot-shadow:\s*inset 0 0 0 0\.5px/)
-  assert.doesNotMatch(styles, /--input-slot-shadow:[\s\S]*inset 0 2px 8px -2px/)
+  assert.doesNotMatch(styles, /--input-slot-[a-z-]+\s*:/)
+  assert.doesNotMatch(styles, /var\(--input-slot-/)
+  assert.doesNotMatch(styles, /inset 0 2px 8px -2px/)
 })
 
 test('chat composer delegates its material to the liquid lens instead of the inset slot treatment', () => {

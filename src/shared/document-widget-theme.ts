@@ -2,7 +2,7 @@
  * 文档 widget 的 Ready 设计令牌单一来源。
  *
  * 值域与纪律来自 Ready 点阵理性风格规格（assets/embedded-skills/ready-human-touch-card/
- * references/style-ready.md 与 dot-charts.md），与 App 主题 theme-tokens.css 同源：
+ * references/style-ready.md 与 dot-charts.md），与 App 的设计令牌 design/next/tokens.css 同源：
  * - 单一品牌橘红 accent，无第二 accent；正文永不穿彩。
  * - 标签/数字走 mono（大写 + 0.08em 字距 / tabular-nums）。
  * - 图表数据 mark 亮暗两面恒用 #FF4B2B（#FF6345 只作暗底文字/发光，不作数据色）。

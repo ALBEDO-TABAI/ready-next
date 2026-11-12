@@ -14,6 +14,11 @@ const privateDesignImports = [
   },
 ]
 
+// W1 §6 / DS6: one icon library. Lucide plus the filled variants in src/renderer/design/next/icons/.
+const retiredDesignPackages = [
+  { name: '@tabler/icons-react', message: '图标只用 lucide-react 与 src/renderer/design/next/icons/ 的实心变体（W1 DS6）。' },
+]
+
 export default [
   {
     ignores: ['out/**', 'dist/**', 'exports/**', 'outputs/**', 'Packer/.staging/**', 'node_modules/**', '.claude/codex-audit/**', '.claude/worktrees/**', '.worktrees/**', 'build/release-skill-runtime/**']
@@ -88,6 +93,7 @@ export default [
     files: owner ? [owner.owner].flat() : ['src/renderer/**/*.{js,jsx,ts,tsx}'],
     rules: {
       'no-restricted-imports': ['error', {
+        paths: retiredDesignPackages,
         patterns: privateDesignImports.filter(entry => entry !== owner).map(({ regex, message }) => ({ regex, message })),
       }],
     },

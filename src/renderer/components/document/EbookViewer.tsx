@@ -372,10 +372,10 @@ export default function EbookViewer({ tab, fileUrl, currentExt }: EbookViewerPro
   }, [])
 
   return (
-    <div className="flex h-full min-h-0 flex-col" style={{ background: 'var(--bg-editor)' }}>
+    <div className="flex h-full min-h-0 flex-col" style={{ background: 'var(--rn-sheet)' }}>
       <div
         className="flex items-center gap-1 border-b px-3"
-        style={{ height: 42, borderColor: 'var(--border-default)', background: 'var(--bg-content)' }}
+        style={{ height: 42, borderColor: 'var(--rn-hair-2)', background: 'var(--rn-sheet)' }}
       >
         <button
           type="button"
@@ -385,7 +385,7 @@ export default function EbookViewer({ tab, fileUrl, currentExt }: EbookViewerPro
           style={{ border: 'none', borderRadius: 4, cursor: status === 'ready' ? 'pointer' : 'default' }}
           title="上一页"
         >
-          <ChevronLeft size={15} color="var(--text-muted)" />
+          <ChevronLeft size={15} color="var(--rn-ink-2)" />
         </button>
         <button
           type="button"
@@ -395,9 +395,9 @@ export default function EbookViewer({ tab, fileUrl, currentExt }: EbookViewerPro
           style={{ border: 'none', borderRadius: 4, cursor: status === 'ready' ? 'pointer' : 'default' }}
           title="下一页"
         >
-          <ChevronRight size={15} color="var(--text-muted)" />
+          <ChevronRight size={15} color="var(--rn-ink-2)" />
         </button>
-        <div style={{ width: 1, height: 16, background: 'var(--border-default)', margin: '0 6px' }} />
+        <div style={{ width: 1, height: 16, background: 'var(--rn-hair-2)', margin: '0 6px' }} />
         <button
           type="button"
           onClick={() => stepFont(-1)}
@@ -405,9 +405,9 @@ export default function EbookViewer({ tab, fileUrl, currentExt }: EbookViewerPro
           style={{ border: 'none', borderRadius: 4, cursor: 'pointer' }}
           title="减小字号"
         >
-          <Minus size={14} color="var(--text-muted)" />
+          <Minus size={14} color="var(--rn-ink-2)" />
         </button>
-        <span className="text-[11px] font-medium" style={{ color: 'var(--text-muted)', minWidth: 36, textAlign: 'center' }}>
+        <span className="text-[11px] font-medium" style={{ color: 'var(--rn-ink-2)', minWidth: 36, textAlign: 'center' }}>
           {fontSize}px
         </span>
         <button
@@ -417,24 +417,24 @@ export default function EbookViewer({ tab, fileUrl, currentExt }: EbookViewerPro
           style={{ border: 'none', borderRadius: 4, cursor: 'pointer' }}
           title="增大字号"
         >
-          <Plus size={14} color="var(--text-muted)" />
+          <Plus size={14} color="var(--rn-ink-2)" />
         </button>
-        <div style={{ width: 1, height: 16, background: 'var(--border-default)', margin: '0 6px' }} />
+        <div style={{ width: 1, height: 16, background: 'var(--rn-hair-2)', margin: '0 6px' }} />
         <button
           type="button"
           onClick={() => void handleImport()}
           disabled={!canImport || importState.kind === 'running'}
           className="flex h-7 items-center gap-1.5 bg-transparent px-2 text-[11px] font-medium disabled:opacity-45"
-          style={{ border: 'none', borderRadius: 4, color: 'var(--text-muted)', cursor: canImport ? 'pointer' : 'default' }}
+          style={{ border: 'none', borderRadius: 4, color: 'var(--rn-ink-2)', cursor: canImport ? 'pointer' : 'default' }}
           title={canImport ? '导入为 Markdown' : '当前只支持 EPUB 导入'}
         >
           {importState.kind === 'running' ? <Loader2 size={13} className="animate-spin" /> : <FileInput size={13} />}
           导入
         </button>
         <div className="min-w-0 flex flex-1 items-center justify-end gap-2">
-          <span className="truncate text-[11px]" style={{ color: 'var(--text-muted)' }}>{title}</span>
-          <span className="text-[10px] font-semibold uppercase" style={{ color: 'var(--text-light)' }}>{currentExt}</span>
-          <span className="text-[11px] font-medium" style={{ color: 'var(--text-muted)', minWidth: 38, textAlign: 'right' }}>
+          <span className="truncate text-[11px]" style={{ color: 'var(--rn-ink-2)' }}>{title}</span>
+          <span className="text-[10px] font-semibold uppercase" style={{ color: 'var(--rn-ink-3)' }}>{currentExt}</span>
+          <span className="text-[11px] font-medium" style={{ color: 'var(--rn-ink-2)', minWidth: 38, textAlign: 'right' }}>
             {formatProgress(progress)}
           </span>
         </div>
@@ -444,9 +444,9 @@ export default function EbookViewer({ tab, fileUrl, currentExt }: EbookViewerPro
         <div
           className="border-b px-3 py-1.5 text-[11px] font-medium"
           style={{
-            borderColor: 'var(--border-default)',
+            borderColor: 'var(--rn-hair-2)',
             color: importState.kind === 'error' ? 'var(--rn-bad)' : 'var(--rn-ink-3)',
-            background: 'var(--bg-content)',
+            background: 'var(--rn-sheet)',
           }}
         >
           {importState.message}
@@ -455,16 +455,16 @@ export default function EbookViewer({ tab, fileUrl, currentExt }: EbookViewerPro
 
       <div className="relative min-h-0 flex-1">
         {status === 'loading' && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center gap-2" style={{ color: 'var(--text-muted)' }}>
+          <div className="absolute inset-0 z-10 flex items-center justify-center gap-2" style={{ color: 'var(--rn-ink-2)' }}>
             <Loader2 className="h-5 w-5 animate-spin" />
             <span className="text-[13px] font-medium">正在打开电子书</span>
           </div>
         )}
         {status === 'error' && (
-          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 px-8 text-center" style={{ color: 'var(--text-muted)' }}>
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 px-8 text-center" style={{ color: 'var(--rn-ink-2)' }}>
             <BookOpen className="h-8 w-8" />
             <div>
-              <p className="text-[13px] font-semibold" style={{ color: 'var(--text-primary)' }}>电子书加载失败</p>
+              <p className="text-[13px] font-semibold" style={{ color: 'var(--rn-ink)' }}>电子书加载失败</p>
               <p className="mt-1 text-[12px] leading-5">{error || '该文件可能受 DRM 保护，或格式暂不支持。'}</p>
             </div>
           </div>

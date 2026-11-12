@@ -1,7 +1,7 @@
 {
   "directories": {
     ".": {
-      "color": 48,
+      "color": 0,
       "backdropFilter": 0,
       "fontFace": 0
     },
@@ -401,7 +401,7 @@
       "fontFace": 0
     },
     "styles": {
-      "color": 295,
+      "color": 113,
       "backdropFilter": 2,
       "fontFace": 0
     },
@@ -442,6 +442,10 @@
     {
       "glob": "src/renderer/modules/library/reader/papers.ts",
       "reason": "PAPERS 是读者在排版里选的阅读纸色（白纸、米黄、夜间）：书页的纸、页边与墨，印进书页栅格，属于内容数据。"
+    },
+    {
+      "glob": "src/renderer/LiquidTest.tsx",
+      "reason": "#/liquid-test 透镜调参台：颜色是给折射看的测试背景，跟着调参台自己的明暗开关，不是应用界面。"
     },
     {
       "glob": "src/renderer/modules/document/content-palette.css",

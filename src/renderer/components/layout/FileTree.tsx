@@ -2,14 +2,14 @@ import { READY_REF_MIME } from '../../../shared/ready-ref'
 import { dropPageTreeReference } from '../../modules/workbench/drop-page-tree'
 import { useMemo, useState, useRef, useEffect, useCallback, useLayoutEffect } from 'react'
 import {
-  IconAlertTriangle as AlertTriangle,
-  IconFileText as FileText,
-  IconFolder as Folder,
-  IconFolderOpen as FolderOpen,
-  IconMinus as Minus,
-  IconPhoto as Image,
-  IconPlus as Plus,
-} from '@tabler/icons-react'
+  TriangleAlert as AlertTriangle,
+  FileText,
+  Folder,
+  FolderOpen,
+  Minus,
+  Image,
+  Plus,
+} from 'lucide-react'
 import { Button, EmptyState, IconButton } from '../ui'
 import { computeDesiredRoots, useWorkspace, type FileItem } from '../../stores/useWorkspace'
 import { normalizeFileAppearanceIcon } from '../../stores/fileAppearance'

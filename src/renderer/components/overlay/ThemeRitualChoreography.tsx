@@ -2,7 +2,7 @@ export function ThemeRitualChoreography() {
   return (
     <div className="ritual-theme-choreography" aria-hidden="true">
       <svg viewBox="0 0 48 48" width="96" height="96"
-           stroke="var(--color-blue)" strokeWidth="2" fill="none"
+           stroke="var(--rn-accent)" strokeWidth="2" fill="none"
            strokeLinecap="round" strokeLinejoin="round">
         <g data-glyph="sun">
           <circle cx="24" cy="24" r="6" />

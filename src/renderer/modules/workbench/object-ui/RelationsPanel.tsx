@@ -30,7 +30,7 @@ export function RelationsPanel({ objectId }: { objectId: string }) {
     </li>)}</ul></section>)
   }
   const data = result?.id === objectId ? result.data : null
-  return <aside className="rn-object-ui shrink-0 max-h-64 overflow-auto border-t border-[var(--border-color)] p-3 text-sm" aria-label="关联面板">
+  return <aside className="rn-object-ui shrink-0 max-h-64 overflow-auto border-t border-[var(--rn-hair-2)] p-3 text-sm" aria-label="关联面板">
     <details><summary>关联{data ? ` · 反链 ${data.backlinkCount}` : ''}</summary>
       {data && <><h3>出链</h3>{groups(data.outgoing)}<h3>反链</h3>{groups(data.incoming)}{data.truncated && <p>关联超过显示上限，列表不完整</p>}</>}
       {error && <p role="alert">{error}</p>}

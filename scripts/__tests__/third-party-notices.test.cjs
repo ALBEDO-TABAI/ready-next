@@ -100,7 +100,7 @@ test('packaged checker accepts app and unpacked roots, rejects missing required 
   const resources = path.join(app, 'Contents/Resources')
   for (const file of [
     'licenses/generated/THIRD_PARTY_NOTICES.txt', 'licenses/electron/LICENSE', 'licenses/electron/LICENSES.chromium.html',
-    ...['Inter', 'InterTight', 'InstrumentSerif', 'GeistMono'].map(n => `licenses/ready-next/OFL-${n}.txt`),
+    ...['Inter', 'InstrumentSerif', 'GeistMono'].map(n => `licenses/ready-next/OFL-${n}.txt`),
     'licenses/ready-next/paper-flipbook-LICENSE.txt', 'licenses/ready-next/lets-go-rss-NOTICE.txt',
     'app.asar.unpacked/node_modules/rsshub/LICENSE',
   ]) write(resources, file, 'fixture text')

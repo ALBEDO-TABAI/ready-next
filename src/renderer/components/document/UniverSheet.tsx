@@ -113,7 +113,7 @@ export default function UniverSheet({ tab }: { tab: DocTab }) {
 
   if (error) {
     return (
-      <div className="flex-1 flex items-center justify-center text-[var(--text-muted)]">
+      <div className="flex-1 flex items-center justify-center text-[var(--rn-ink-2)]">
         <p className="text-[13px]">表格加载失败: {error}</p>
       </div>
     )
@@ -122,8 +122,8 @@ export default function UniverSheet({ tab }: { tab: DocTab }) {
   return (
     <div className="flex-1 relative" style={{ overflow: 'hidden' }}>
       {loading && (
-        <div className="absolute inset-0 flex items-center justify-center z-10" style={{ background: 'var(--bg-content)' }}>
-          <Loader2 className="w-6 h-6 animate-spin text-[var(--text-muted)]" />
+        <div className="absolute inset-0 flex items-center justify-center z-10" style={{ background: 'var(--rn-sheet)' }}>
+          <Loader2 className="w-6 h-6 animate-spin text-[var(--rn-ink-2)]" />
         </div>
       )}
       <div ref={containerRef} style={{ width: '100%', height: '100%' }} />

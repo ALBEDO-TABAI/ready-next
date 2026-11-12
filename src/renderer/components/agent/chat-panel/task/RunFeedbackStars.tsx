@@ -6,7 +6,8 @@
  * 按 taskId 回读最近一条反馈以恢复已评分状态。
  */
 import { useEffect, useRef, useState } from 'react'
-import { IconStar, IconStarFilled } from '@tabler/icons-react'
+import { Star } from 'lucide-react'
+import { StarFilled } from '../../../../design/next/icons'
 
 const STAR_SIZE = 13
 
@@ -83,7 +84,7 @@ export function RunFeedbackStars({ taskId }: { taskId: string }) {
       <div className="flex items-center" style={{ gap: 2 }}>
         {([1, 2, 3, 4, 5] as const).map((value) => {
           const filled = value <= activeUpTo
-          const StarIcon = filled ? IconStarFilled : IconStar
+          const StarIcon = filled ? StarFilled : Star
           return (
             <button
               key={value}

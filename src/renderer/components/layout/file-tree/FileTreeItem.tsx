@@ -1,9 +1,6 @@
 import { useFileDragRef } from '../../../modules/workbench/file-drag-ref'
 import { useState } from 'react'
-import {
-  IconChevronDown as ChevronDown,
-  IconChevronRight as ChevronRight,
-} from '@tabler/icons-react'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 import type { FileItem } from '../../../stores/useWorkspace'
 import type { FileAppearance } from '../../../stores/fileAppearance'
 import { FileAppearanceColorDot, fileIcon } from './file-icons'

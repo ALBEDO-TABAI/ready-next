@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  IconAdjustmentsHorizontal as SlidersHorizontal,
-  IconChevronLeft as ChevronLeft,
-  IconChevronRight as ChevronRight,
-  IconFilePlus as FilePlus,
-  IconFolderPlus as FolderPlus,
-  IconLayoutGrid as LayoutGrid,
-  IconLayoutList as LayoutList,
-  IconSearch as Search,
-} from '@tabler/icons-react'
+  SlidersHorizontal,
+  ChevronLeft,
+  ChevronRight,
+  FilePlus,
+  FolderPlus,
+  LayoutGrid,
+  LayoutList,
+  Search,
+} from 'lucide-react'
 
 import { useWorkspace } from '../../stores/useWorkspace'
 import FileTree, { DEFAULT_FILE_FILTERS, type FileFilterMap, type FileViewMode } from './FileTree'

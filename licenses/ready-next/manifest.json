@@ -39,19 +39,6 @@
     "textMissing": false
   },
   {
-    "name": "Inter Tight",
-    "version": null,
-    "license": "OFL-1.1",
-    "repository": "https://github.com/rsms/inter-tight",
-    "textFiles": [
-      "licenses/ready-next/OFL-InterTight.txt"
-    ],
-    "notes": [
-      "字体：src/renderer/design/next/fonts/InterTight.woff2；版本未单独核实。"
-    ],
-    "textMissing": false
-  },
-  {
     "name": "Instrument Serif",
     "version": null,
     "license": "OFL-1.1",

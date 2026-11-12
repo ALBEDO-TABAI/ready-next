@@ -16,7 +16,7 @@
 @import '../components/browser/browser-task.css';
 @import '../components/browser/browser-shell.css';
 @import '../components/skill/skill-ask-user.css';
-@import './theme-tokens.css';
+@import './tailwind-theme.css';
 @import './base-chrome.css';
 @import './liquid-composer.css';
 @import './chat-utilities.css';
