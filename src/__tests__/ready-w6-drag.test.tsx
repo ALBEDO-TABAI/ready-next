@@ -68,6 +68,24 @@ test('K3 real drop handlers: every source × document/canvas/composer/calendar/t
   }
   Object.assign(f.dom.window, { electronAPI: api })
   f.useDocTabs.setState(state => ({ tabs: state.tabs.map(tab => ({ ...tab, objectId: 'page' })) }))
+  await t.test('a drop inside an embedded view that owns its drops (database board) leaves the page text alone', async () => {
+    const owner = document.createElement('section'); owner.setAttribute('data-own-drops', '')
+    const column = document.createElement('div'); owner.append(column)
+    document.querySelector('[data-ready-block-editor]')!.append(owner)
+    const before = f.buffer.snapshot.content
+    const data = new Transfer(); writeReadyRefTransfer(data, { kind: 'page', id: 'row' }, '数据库行')
+    const over = new f.dom.window.Event('dragover', { bubbles: true, cancelable: true })
+    Object.defineProperty(over, 'dataTransfer', { value: data })
+    const drop = new f.dom.window.Event('drop', { bubbles: true, cancelable: true })
+    Object.defineProperty(drop, 'dataTransfer', { value: data })
+    let reached = false
+    column.addEventListener('drop', () => { reached = true })
+    await act(async () => { column.dispatchEvent(over); column.dispatchEvent(drop) })
+    assert.equal(over.defaultPrevented, false, 'the page does not claim the drag')
+    assert.equal(reached, true, 'the embedded view receives its own drop')
+    assert.equal(f.buffer.snapshot.content, before)
+    owner.remove()
+  })
   for (const [title, ref] of refs) {
     const data = new Transfer(); writeReadyRefTransfer(data, ref, title)
     await t.test(`${title} → 文档`, async () => {

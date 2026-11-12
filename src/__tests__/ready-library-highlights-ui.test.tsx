@@ -15,6 +15,7 @@ import { LibraryEngine } from '../main/modules/library-engine/library-engine'
 import { LibraryHighlightService } from '../main/modules/library-engine/highlight-service'
 import { applyDocumentOperation } from '../main/modules/document-engine/document-write-service'
 import type { LibraryAPI } from '../renderer/modules/library/access'
+import { memoryNavigationAPI } from './utils/navigation-memory'
 
 // Only geometry/GPU are supplied: real React, selection Range, flipbook, IPC-shaped API and disk writer run.
 test('reader drag creates a durable mark; popover edits/copies/removes; N groups notes and source opens at its block', async t => {
@@ -31,7 +32,7 @@ test('reader drag creates a durable mark; popover edits/copies/removes; N groups
   const registry = new ObjectRegistry(db); registry.register(record.notePath)
   const reading = new LibrarySessions(await realpath(vault), registry)
   const dom = new JSDOM('<div class="rn-library"><div id="root"></div></div>', { url: 'http://localhost', pretendToBeVisual: true })
-  Object.assign(dom.window, { electronAPI: { calendarLayers: {
+  Object.assign(dom.window, { electronAPI: { navigationHistory: memoryNavigationAPI(), calendarLayers: {
     beginReading: async (input: ReadingBegin) => { reading.begin(input); return { ok: true, value: undefined } },
     endReading: async (input: ReadingEnd) => { reading.end(input); return { ok: true, value: undefined } },
   },

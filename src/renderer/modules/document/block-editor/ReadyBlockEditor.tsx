@@ -60,6 +60,10 @@ function SourceBlock({ block, buffer, children, report }: { block: DocumentBlock
   </div>
 }
 
+// An embedded view that handles drops inside itself (a database board, calendar or timeline moving its own rows)
+// marks its root with data-own-drops; the page leaves those drops alone instead of inserting a reference.
+const ownsDrops = (target: EventTarget | null) => target instanceof Element && !!target.closest('[data-own-drops]')
+
 export function ReadyBlockEditor({ tabId, content: displayedContent, pageTitle, renderSource }: { tabId: string; content?: string; pageTitle?: string; renderSource(block: DocumentBlock): ReactNode }) {
   // A retained hidden DocumentMode supplies its frozen snapshot. Do not bypass it.
   const content = useDocTabs(state => displayedContent ?? state.tabs.find(tab => tab.id === tabId)?.content ?? '')
@@ -202,10 +206,11 @@ export function BufferedBlockEditor({ buffer, linkBase, content: displayedConten
   return <AnnotationWorkspace buffer={buffer}><div ref={root} className="note-preview-body" data-ready-block-editor={editorId}
     onDragStartCapture={event => { movingOwnBlock.current = event.target instanceof Element && !!event.target.closest('.ready-block-handle') }}
     onDragEndCapture={() => { movingOwnBlock.current = false }}
-    onDragOverCapture={event => { if (!movingOwnBlock.current && event.dataTransfer?.types.includes(READY_REF_MIME)) { event.preventDefault(); event.stopPropagation() } }}
+    onDragOverCapture={event => { if (!movingOwnBlock.current && !ownsDrops(event.target) && event.dataTransfer?.types.includes(READY_REF_MIME)) { event.preventDefault(); event.stopPropagation() } }}
     onDropCapture={event => {
       try {
         if (movingOwnBlock.current) { movingOwnBlock.current = false; return }
+        if (ownsDrops(event.target)) return
         if (getGeneratedImageDragPayload(event.dataTransfer)) return
         const dropped = event.dataTransfer ? readReadyRefTransfer(event.dataTransfer) : null
         if (!dropped) return
