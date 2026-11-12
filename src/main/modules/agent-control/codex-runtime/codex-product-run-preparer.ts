@@ -310,6 +310,8 @@ const browserPageRefSchema = z.object({
   physicalTargetToken: nonEmptyString,
   mainFrameId: nonEmptyString,
   mainFrameDocumentToken: nonEmptyString,
+  // The page's http(s) origin (W7 T10): the trusted environment carries it so writes stay on the origins the turn involves.
+  origin: z.string().nullable().optional(),
   profileId: z.string().nullable().optional(),
 }).strict()
 const userIngressPreparationSchema = z.object({

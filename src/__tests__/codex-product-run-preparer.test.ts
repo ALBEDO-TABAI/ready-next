@@ -339,6 +339,25 @@ test('product run preparer persists the exact browser page identity in the resou
   }), false)
 })
 
+// B12 (W7 T10) gave the trusted page reference its origin; a browser-mode turn whose page carries it must be admitted,
+// not rejected as invalid_product_ingress (every browser turn on a web page was refused before this).
+test('product run preparer accepts the trusted browser page reference with its origin', () => {
+  const browserPageRef = {
+    tabId: 'tab-referenced',
+    physicalTargetToken: 'physical-target-1',
+    mainFrameId: '0',
+    mainFrameDocumentToken: 'document-token-1',
+    origin: 'https://example.com',
+    profileId: null,
+  }
+  const result = preparer.prepare({ ...base, browserPageRef })
+  assert.equal(result.ok, true, JSON.stringify(result))
+  if (!result.ok) return
+  assert.deepEqual(result.prepared.browserPageRef, browserPageRef)
+  assert.equal(isPreparedCodexProductRun(result.prepared), true)
+  assert.equal(isPreparedCodexProductRun({ ...result.prepared, browserPageRef: { ...browserPageRef, origin: 42 } }), false)
+})
+
 test('product run preparer persists exact resource authority with matching refs and an authorized consumer', () => {
   const resourceDigest = 'd'.repeat(64)
   const reference = {
