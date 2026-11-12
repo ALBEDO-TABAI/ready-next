@@ -2,6 +2,7 @@ import type { RefObject } from 'react'
 import { Globe, Plus } from 'lucide-react'
 import type { BrowserUtilityMenuKind } from '../../../shared/browser-utility-menu'
 import BrowserHeader from './BrowserHeader'
+import { Button } from '../ui'
 
 import {
   WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM,
@@ -86,26 +87,16 @@ export default function BrowserModeEmptyState({
             className="relative flex-1 min-h-0"
             style={{ borderRadius: '0 0 var(--workbench-canvas-radius) var(--workbench-canvas-radius)' }}
           >
-            <div className="absolute inset-0 flex items-center justify-center text-[var(--text-light)]">
+            <div className="absolute inset-0 flex items-center justify-center text-[var(--rn-ink-3)]">
               <div className="text-center">
                 <Globe className="w-16 h-16 mx-auto mb-4 opacity-20" strokeWidth={1.5} />
-                <p className="text-[14px] font-medium mb-2" style={{ color: 'var(--text-muted)' }}>
+                <p className="text-[14px] font-medium mb-2" style={{ color: 'var(--rn-ink-2)' }}>
                   {loading ? '浏览器启动中…' : '当前没有打开的标签页'}
                 </p>
                 {!loading && (
-                  <button
-                    onClick={() => void onNewTab()}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg transition-colors hover:bg-[var(--color-blue-light)]"
-                    style={{
-                      color: 'var(--color-blue)',
-                      fontSize: 13,
-                      border: '1px solid var(--color-blue)',
-                      background: 'transparent',
-                    }}
-                  >
-                    <Plus style={{ width: 14, height: 14 }} strokeWidth={2} />
+                  <Button icon={<Plus />} onClick={() => void onNewTab()}>
                     点击 + 新建标签页
-                  </button>
+                  </Button>
                 )}
               </div>
             </div>

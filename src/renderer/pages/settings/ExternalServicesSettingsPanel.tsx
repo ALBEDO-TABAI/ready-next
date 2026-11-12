@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { ArrowUpRight, Check, Info, Loader2, XCircle } from 'lucide-react'
 import type { ExternalServiceOptionValue, ExternalServiceUpdateInput, PublicExternalServiceProfile } from '../../../shared/external-services'
-import { SettingsCard, SettingsNotice, SettingsSwitch, settingsButtonClass } from './settings-shared'
+import { Button, Checkbox, Input, Select, Switch } from '../../components/ui'
+import { SettingsCard, SettingsNotice, SettingsSwitchLabel } from './settings-shared'
 
 const EXTERNAL_SERVICE_SECRET_LABELS: Record<string, string> = {
   apiKey: 'API Key',
@@ -174,6 +175,18 @@ function externalServiceMissingRequirements(
   }
   return missing
 }
+
+const IMAGE_PROTOCOL_OPTIONS = [
+  { value: 'openai-images', label: 'GPT Image' },
+  { value: 'gemini-generate-content', label: 'Gemini Image' },
+]
+const ASPECT_RATIO_OPTIONS = ['1:1', '16:9', '9:16', '4:3', '3:4'].map(value => ({ value, label: value }))
+const IMAGE_SIZE_OPTIONS = ['1K', '2K', '4K'].map(value => ({ value, label: value }))
+const VISION_API_KIND_OPTIONS = [
+  { value: 'openai-completions', label: 'OpenAI Chat' },
+  { value: 'openai-responses', label: 'OpenAI Responses' },
+  { value: 'anthropic-messages', label: 'Anthropic Messages' },
+]
 
 // Y1.1 §11.1: exported so the relabel behavior test can mount this panel in
 // jsdom without instantiating the full Settings shell (mirrors Y0.8
@@ -361,7 +374,7 @@ export function ExternalServicesSettingsPanel() {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 px-1 text-[12px]" style={{ color: 'var(--sx-muted)' }}>
+      <div className="flex items-center gap-2 px-1 text-[12px]" style={{ color: 'var(--rn-ink-2)' }}>
         <Loader2 className="h-3.5 w-3.5 animate-spin" />
         加载外部服务配置...
       </div>
@@ -409,11 +422,11 @@ export function ExternalServicesSettingsPanel() {
 
   return (
     <div className="grid items-start gap-8 lg:grid-cols-[256px_minmax(0,1fr)]">
-      {/* 服务列表：列表直接落在画布上，选中项升起为一片玻璃卡；已启用的服务带一个强调色圆点。 */}
+      {/* 服务列表：列表直接落在玻璃上，选中项的样子与分段控件的选中项相同（纸色加卡片影）；已启用的服务带一个墨色圆点。 */}
       <nav className="flex flex-col" aria-label="外部服务列表">
         {navigationSections.map((section, sectionIndex) => section.profiles.length > 0 ? (
           <div key={section.label} className={sectionIndex > 0 ? 'mt-7' : ''}>
-            <div className="px-3.5 pb-2.5 text-[11px] font-semibold tracking-[0.04em]" style={{ color: 'var(--sx-subtle)' }}>
+            <div className="px-3.5 pb-2.5 text-[11px] font-semibold tracking-[0.04em]" style={{ color: 'var(--rn-ink-3)' }}>
               {section.label}
             </div>
             <div className="flex flex-col gap-1.5">
@@ -426,14 +439,14 @@ export function ExternalServicesSettingsPanel() {
                     onClick={() => setSelectedId(profile.id)}
                     aria-current={active ? 'true' : undefined}
                     className={`flex w-full items-center gap-3 rounded-[12px] px-3.5 py-3 text-left transition-[background-color,box-shadow] duration-150 ${active
-                      ? 'bg-[var(--sx-raised-bg)] shadow-[var(--sx-raised-shadow)]'
-                      : 'hover:bg-[var(--sx-raised-hover)]'}`}
+                      ? 'bg-[var(--rn-sheet)] shadow-[var(--rn-card-shadow)]'
+                      : 'hover:bg-[var(--rn-fill)]'}`}
                   >
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[13px] font-medium" style={{ color: 'var(--sx-title)' }}>
+                      <span className="block truncate text-[13px] font-medium" style={{ color: 'var(--rn-ink)' }}>
                         {profile.name}
                       </span>
-                      <span className="mt-1 block truncate text-[11.5px]" style={{ color: 'var(--sx-muted)' }}>
+                      <span className="mt-1 block truncate text-[11.5px]" style={{ color: 'var(--rn-ink-2)' }}>
                         {externalServiceDescription(profile)}
                       </span>
                     </span>
@@ -452,12 +465,13 @@ export function ExternalServicesSettingsPanel() {
           title={selectedProfile.name}
           description={externalServiceDescription(selectedProfile)}
           actions={(
-            <SettingsSwitch
-              checked={selectedProfile.enabled}
-              label={selectedProfile.enabled ? '已启用' : '未启用'}
-              ariaLabel={`启用 ${selectedProfile.name}`}
-              onChange={() => toggleProfileEnabled(selectedProfile)}
-            />
+            <SettingsSwitchLabel text={selectedProfile.enabled ? '已启用' : '未启用'}>
+              <Switch
+                checked={selectedProfile.enabled}
+                label={`启用 ${selectedProfile.name}`}
+                onChange={() => toggleProfileEnabled(selectedProfile)}
+              />
+            </SettingsSwitchLabel>
           )}
         >
           <div className="sx-card__body flex flex-col gap-4">
@@ -468,10 +482,10 @@ export function ExternalServicesSettingsPanel() {
 
             {selectedGuide && (
               <div data-external-service-guide={selectedProfile.kind} className="sx-notice sx-notice--plain">
-                <Info strokeWidth={1.9} />
+                <Info strokeWidth={1.75} />
                 <div className="min-w-0 flex-1">
-                  <p style={{ color: 'var(--sx-body)' }}>{selectedGuide.summary}</p>
-                  <p className="mt-0.5" style={{ color: 'var(--sx-muted)' }}>{selectedGuide.note}</p>
+                  <p style={{ color: 'var(--rn-ink)' }}>{selectedGuide.summary}</p>
+                  <p className="mt-0.5" style={{ color: 'var(--rn-ink-2)' }}>{selectedGuide.note}</p>
                   <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1">
                     {selectedGuide.links.map((link) => (
                       <a key={link.href} href={link.href} target="_blank" rel="noreferrer" className="sx-link">
@@ -487,10 +501,10 @@ export function ExternalServicesSettingsPanel() {
             {serviceNeedsBaseUrl(selectedProfile) && (
               <label className="sx-field">
                 <span className="sx-field__label">服务地址</span>
-                <input
+                <Input
                   value={selectedProfile.baseUrl || ''}
                   onChange={(event) => patchProfile(selectedProfile.id, { baseUrl: event.target.value })}
-                  className="sx-input sx-input--mono"
+                  className="sx-mono"
                   placeholder={selectedProfile.kind === 'vision-model' || selectedProfile.kind === 'image-generation' ? 'https://api.example.com' : 'https://...'}
                 />
               </label>
@@ -500,31 +514,29 @@ export function ExternalServicesSettingsPanel() {
               <div className="grid gap-3 md:grid-cols-2">
                 <label className="sx-field">
                   <span className="sx-field__label">生图类型</span>
-                  <select
+                  <Select
+                    className="w-full"
                     value={String(selectedProfile.options.protocol || '')}
                     onChange={(event) => patchOptions(selectedProfile.id, { protocol: event.target.value })}
-                    className="sx-select w-full"
-                  >
-                    <option value="openai-images">GPT Image</option>
-                    <option value="gemini-generate-content">Gemini Image</option>
-                  </select>
+                    options={IMAGE_PROTOCOL_OPTIONS}
+                  />
                 </label>
                 <label className="sx-field">
                   <span className="sx-field__label">模型名</span>
-                  <input
+                  <Input
                     value={String(selectedProfile.options.model || '')}
                     onChange={(event) => patchOptions(selectedProfile.id, { model: event.target.value })}
-                    className="sx-input sx-input--mono"
+                    className="sx-mono"
                     placeholder={selectedProfile.options.protocol === 'gemini-generate-content' ? 'gemini-3.1-flash-image' : 'gpt-image-2'}
                   />
                 </label>
                 {selectedProfile.options.protocol === 'openai-images' ? (
                   <label className="sx-field">
                     <span className="sx-field__label">默认尺寸</span>
-                    <input
+                    <Input
                       value={String(selectedProfile.options.size || '')}
                       onChange={(event) => patchOptions(selectedProfile.id, { size: event.target.value })}
-                      className="sx-input sx-input--mono"
+                      className="sx-mono"
                       placeholder="1024x1024"
                     />
                   </label>
@@ -532,29 +544,21 @@ export function ExternalServicesSettingsPanel() {
                   <>
                     <label className="sx-field">
                       <span className="sx-field__label">默认比例</span>
-                      <select
+                      <Select
+                        className="w-full"
                         value={String(selectedProfile.options.aspectRatio || '1:1')}
                         onChange={(event) => patchOptions(selectedProfile.id, { aspectRatio: event.target.value })}
-                        className="sx-select w-full"
-                      >
-                        <option value="1:1">1:1</option>
-                        <option value="16:9">16:9</option>
-                        <option value="9:16">9:16</option>
-                        <option value="4:3">4:3</option>
-                        <option value="3:4">3:4</option>
-                      </select>
+                        options={ASPECT_RATIO_OPTIONS}
+                      />
                     </label>
                     <label className="sx-field">
                       <span className="sx-field__label">默认清晰度</span>
-                      <select
+                      <Select
+                        className="w-full"
                         value={String(selectedProfile.options.imageSize || '1K')}
                         onChange={(event) => patchOptions(selectedProfile.id, { imageSize: event.target.value })}
-                        className="sx-select w-full"
-                      >
-                        <option value="1K">1K</option>
-                        <option value="2K">2K</option>
-                        <option value="4K">4K</option>
-                      </select>
+                        options={IMAGE_SIZE_OPTIONS}
+                      />
                     </label>
                   </>
                 )}
@@ -565,52 +569,46 @@ export function ExternalServicesSettingsPanel() {
               <div className="grid gap-3 md:grid-cols-2">
                 <label className="sx-field">
                   <span className="sx-field__label">Provider</span>
-                  <input
+                  <Input
                     value={String(selectedProfile.options.provider || '')}
                     onChange={(event) => patchOptions(selectedProfile.id, { provider: event.target.value })}
-                    className="sx-input"
                   />
                 </label>
                 <label className="sx-field">
                   <span className="sx-field__label">Model</span>
-                  <input
+                  <Input
                     value={String(selectedProfile.options.model || '')}
                     onChange={(event) => patchOptions(selectedProfile.id, { model: event.target.value })}
-                    className="sx-input sx-input--mono"
+                    className="sx-mono"
                     placeholder="gpt-4o / qwen-vl..."
                   />
                 </label>
                 <label className="sx-field">
                   <span className="sx-field__label">API 格式</span>
-                  <select
+                  <Select
+                    className="w-full"
                     value={String(selectedProfile.options.apiKind || 'openai-completions')}
                     onChange={(event) => patchOptions(selectedProfile.id, { apiKind: event.target.value })}
-                    className="sx-select w-full"
-                  >
-                    <option value="openai-completions">OpenAI Chat</option>
-                    <option value="openai-responses">OpenAI Responses</option>
-                    <option value="anthropic-messages">Anthropic Messages</option>
-                  </select>
-                </label>
-                <label className="flex h-[34px] items-center gap-2 self-end text-[12.5px]" style={{ color: 'var(--sx-body)' }}>
-                  <input
-                    type="checkbox"
-                    className="sx-check"
-                    checked={Array.isArray(selectedProfile.options.inputModes) && selectedProfile.options.inputModes.includes('image')}
-                    onChange={(event) => patchOptions(selectedProfile.id, { inputModes: event.target.checked ? ['text', 'image'] : ['text'] })}
+                    options={VISION_API_KIND_OPTIONS}
                   />
-                  支持图片输入
                 </label>
+                <div className="flex h-[32px] items-center self-end text-[12.5px]">
+                  <Checkbox
+                    label="支持图片输入"
+                    checked={Array.isArray(selectedProfile.options.inputModes) && selectedProfile.options.inputModes.includes('image')}
+                    onChange={(checked) => patchOptions(selectedProfile.id, { inputModes: checked ? ['text', 'image'] : ['text'] })}
+                  />
+                </div>
               </div>
             )}
 
             {selectedProfile.kind === 'bilibili' && (
               <label className="sx-field">
                 <span className="sx-field__label">Cookie 文件路径（可选）</span>
-                <input
+                <Input
                   value={String(normalizeServiceOptionValue(selectedProfile.options.cookieFile))}
                   onChange={(event) => patchOptions(selectedProfile.id, { cookieFile: event.target.value })}
-                  className="sx-input sx-input--mono"
+                  className="sx-mono"
                   placeholder="/path/to/cookies.txt"
                 />
               </label>
@@ -623,11 +621,11 @@ export function ExternalServicesSettingsPanel() {
                 <label key={key} className="sx-field">
                   <span className="sx-field__label">{EXTERNAL_SERVICE_SECRET_LABELS[key] || key}</span>
                   <div className="flex gap-2">
-                    <input
+                    <Input
                       type="password"
                       value={secretDrafts[selectedProfile.id]?.[key] || ''}
                       onChange={(event) => updateSecretDraft(selectedProfile.id, key, event.target.value)}
-                      className="sx-input flex-1"
+                      className="flex-1"
                       placeholder={markedForClear
                         ? '保存后清除；输入新值可替换'
                         : status?.state === 'recovery_required'
@@ -639,16 +637,14 @@ export function ExternalServicesSettingsPanel() {
                               : '未配置'}
                     />
                     {status?.configured ? (
-                      <button
-                        type="button"
+                      <Button
+                        variant={markedForClear ? 'secondary' : 'danger'}
                         data-external-secret-clear={`${selectedProfile.id}:${key}`}
                         onClick={() => markedForClear ? unmarkSecretForClear(selectedProfile.id, key) : markSecretForClear(selectedProfile.id, key)}
-                        className={settingsButtonClass(markedForClear ? 'secondary' : 'danger-ghost')}
-                        style={{ height: 34 }}
                         disabled={actionsLocked}
                       >
                         {markedForClear ? '保留' : '清除'}
-                      </button>
+                      </Button>
                     ) : null}
                   </div>
                 </label>
@@ -656,14 +652,14 @@ export function ExternalServicesSettingsPanel() {
             })}
 
             {isSelectedVisionModel && (
-              <div data-vea-test-help className="text-[12px] leading-5" style={{ color: 'var(--sx-muted)' }}>
+              <div data-vea-test-help className="text-[12px] leading-5" style={{ color: 'var(--rn-ink-2)' }}>
                 仅校验字段，不发起真实请求 / Validates fields only; no live request issued.
                 {visionMissingRequirements.length > 0 ? `（缺少：${visionMissingRequirements.join('、')}）` : ''}
               </div>
             )}
 
             {isSelectedImageGeneration && (
-              <div data-image-generation-test-help className="text-[12px] leading-5" style={{ color: 'var(--sx-muted)' }}>
+              <div data-image-generation-test-help className="text-[12px] leading-5" style={{ color: 'var(--rn-ink-2)' }}>
                 “试生成”会真实调用当前服务并产生一次费用；测试图不会保存。
                 同时启用两个服务时，聊天默认使用列表中第一个；也可以在需求里明确指定 GPT Image 或 Gemini Image。
                 {imageTestBlockers.length > 0 ? `（${imageTestBlockers.join('；')}）` : ''}
@@ -676,7 +672,7 @@ export function ExternalServicesSettingsPanel() {
               {selectedFeedback ? (
                 <span
                   className={`inline-flex items-start gap-1.5 ${selectedFeedback.kind === 'error' ? 'sx-text-danger' : ''}`}
-                  style={selectedFeedback.kind === 'error' ? undefined : { color: selectedFeedback.kind === 'success' ? 'var(--sx-body)' : 'var(--sx-muted)' }}
+                  style={selectedFeedback.kind === 'error' ? undefined : { color: selectedFeedback.kind === 'success' ? 'var(--rn-ink)' : 'var(--rn-ink-2)' }}
                 >
                   {selectedFeedback.kind === 'success'
                     ? <Check className="mt-[3px] h-3.5 w-3.5 shrink-0" strokeWidth={2.4} />
@@ -686,21 +682,19 @@ export function ExternalServicesSettingsPanel() {
                   {selectedFeedback.text}
                 </span>
               ) : (
-                <span style={{ color: 'var(--sx-subtle)' }}>测试不会保存配置；保存后 Agent 才会使用。</span>
+                <span style={{ color: 'var(--rn-ink-3)' }}>测试不会保存配置；保存后 Agent 才会使用。</span>
               )}
             </div>
             <div className="flex shrink-0 items-center gap-2">
-              <button
-                type="button"
+              <Button
+                variant="ghost"
                 onClick={() => { void resetProfile(selectedProfile) }}
                 disabled={actionsLocked}
-                className={settingsButtonClass('ghost')}
+                icon={isSelectedBusy ? <Loader2 className="animate-spin" /> : undefined}
               >
-                {isSelectedBusy ? <Loader2 className="animate-spin" /> : null}
                 {isSelectedBusy ? '重置中' : '重置'}
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
                 data-vea-test-button={isSelectedVisionModel ? 'fields-only' : 'probe'}
                 onClick={() => { void testProfile(selectedProfile) }}
                 disabled={isSelectedTesting || isSelectedBusy || isVisionTestDisabled || isImageTestDisabled}
@@ -708,26 +702,24 @@ export function ExternalServicesSettingsPanel() {
                 title={isSelectedVisionModel
                   ? '仅校验字段，不发起真实请求 / Validates fields only; no live request issued.'
                   : undefined}
-                className={settingsButtonClass('secondary')}
+                icon={isSelectedTesting ? <Loader2 className="animate-spin" /> : undefined}
               >
-                {isSelectedTesting ? <Loader2 className="animate-spin" /> : null}
                 {isSelectedVisionModel
                   ? (isSelectedTesting ? '校验中' : '仅校验字段')
                   : isSelectedImageGeneration
                     ? (isSelectedTesting ? '生成中' : '试生成')
                     : (isSelectedTesting ? '测试中' : '测试')}
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                variant="primary"
                 onClick={() => { void saveProfile(selectedProfile) }}
                 disabled={actionsLocked}
                 aria-busy={isSelectedBusy ? true : undefined}
-                className={settingsButtonClass('primary')}
                 style={{ minWidth: 72 }}
+                icon={isSelectedBusy ? <Loader2 className="animate-spin" /> : undefined}
               >
-                {isSelectedBusy ? <Loader2 className="animate-spin" /> : null}
                 {isSelectedBusy ? '保存中' : '保存'}
-              </button>
+              </Button>
             </div>
           </div>
         </SettingsCard>

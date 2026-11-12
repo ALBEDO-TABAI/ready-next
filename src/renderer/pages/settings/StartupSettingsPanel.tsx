@@ -28,10 +28,10 @@ export function StartupSettingsPanel() {
         return <button key={option.value} type="button" role="radio" aria-checked={checked} aria-label={option.label} disabled={view === null}
           className="sx-option flex-col" style={{ gap: 6 }} onClick={() => { void choose(option.value) }}>
           <span className="flex items-center gap-2">
-            <Icon className="h-[15px] w-[15px]" strokeWidth={1.75} style={{ color: checked ? 'var(--sx-accent)' : 'var(--sx-muted)' }} />
-            <span className="text-[13px]" style={{ color: 'var(--sx-title)', fontWeight: checked ? 600 : 500 }}>{option.label}</span>
+            <Icon className="h-[15px] w-[15px]" strokeWidth={1.75} style={{ color: checked ? 'var(--rn-ink)' : 'var(--rn-ink-2)' }} />
+            <span className="text-[13px]" style={{ color: 'var(--rn-ink)', fontWeight: checked ? 600 : 500 }}>{option.label}</span>
           </span>
-          <span className="text-[12px] leading-5" style={{ color: 'var(--sx-muted)' }}>{option.description}</span>
+          <span className="text-[12px] leading-5" style={{ color: 'var(--rn-ink-2)' }}>{option.description}</span>
           <span className="sx-option__tick" aria-hidden><Check /></span>
         </button>
       })}

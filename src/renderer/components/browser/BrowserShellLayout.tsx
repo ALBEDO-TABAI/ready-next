@@ -3,6 +3,7 @@ import { AlertTriangle, CheckCircle, Globe, RefreshCw, UploadCloud } from 'lucid
 import readyWordmark from '../../assets/ready-wordmark.svg'
 import { isReadyBrowserBlankUrl } from '../../modules/browser/url-utils'
 import type { BrowserTab } from '../../stores/useBrowserTabs'
+import { Button } from '../ui'
 
 interface BrowserShellLayoutProps {
   isElectron: boolean
@@ -43,11 +44,11 @@ export default function BrowserShellLayout({
       <div className="relative min-w-0 flex flex-1 flex-col">
         {band}
         {activeTab?.loading && (
-          <div className="relative h-0.5 flex-shrink-0 overflow-hidden" style={{ background: 'var(--border-default)' }}>
+          <div className="relative h-0.5 flex-shrink-0 overflow-hidden" style={{ background: 'var(--rn-fill-2)' }}>
             <div
               className="absolute left-0 top-0 h-full rounded-r"
               style={{
-                background: 'var(--color-blue)',
+                background: 'var(--rn-accent)',
                 animation: 'browserContentProgress 1.5s ease-in-out infinite',
               }}
             />
@@ -81,7 +82,7 @@ export default function BrowserShellLayout({
                     width: 'var(--workbench-canvas-radius)',
                     height: 'var(--workbench-canvas-radius)',
                     borderBottomRightRadius: 'var(--workbench-canvas-radius)',
-                    background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))',
+                    background: 'var(--workbench-liquid-chrome-bg, var(--rn-sheet))',
                     pointerEvents: 'none',
                     zIndex: 2,
                   }}
@@ -95,7 +96,7 @@ export default function BrowserShellLayout({
                     width: 'var(--workbench-canvas-radius)',
                     height: 'var(--workbench-canvas-radius)',
                     borderBottomLeftRadius: 'var(--workbench-canvas-radius)',
-                    background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))',
+                    background: 'var(--workbench-liquid-chrome-bg, var(--rn-sheet))',
                     pointerEvents: 'none',
                     zIndex: 2,
                   }}
@@ -110,7 +111,7 @@ export default function BrowserShellLayout({
                       width: 'var(--workbench-canvas-radius)',
                       height: 'var(--workbench-canvas-radius)',
                       borderTopRightRadius: 'var(--workbench-canvas-radius)',
-                      background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))',
+                      background: 'var(--workbench-liquid-chrome-bg, var(--rn-sheet))',
                       pointerEvents: 'none',
                       zIndex: 2,
                     }}
@@ -120,7 +121,7 @@ export default function BrowserShellLayout({
             )}
 
             {!isElectron && (
-              <div className="absolute inset-0 flex items-center justify-center text-[var(--text-light)]">
+              <div className="absolute inset-0 flex items-center justify-center text-[var(--rn-ink-3)]">
                 <div className="text-center">
                   <Globe className="mx-auto mb-3 h-12 w-12 opacity-30" />
                   <p className="text-[13px]">Browser requires Electron environment</p>
@@ -134,9 +135,8 @@ export default function BrowserShellLayout({
               <div
                 className="browser-ready-blank-page absolute inset-0 flex items-center justify-center"
                 style={{
+                  // No blur of its own (W1 §4): the window's glass is the only frosting behind the page area.
                   background: 'var(--workbench-module-surface-bg)',
-                  backdropFilter: 'blur(20px) saturate(0%)',
-                  WebkitBackdropFilter: 'blur(20px) saturate(0%)',
                   zIndex: 1,
                   pointerEvents: 'none',
                 }}
@@ -159,48 +159,38 @@ export default function BrowserShellLayout({
             {activeTab?.error && (
               <div
                 className="absolute inset-0 flex items-center justify-center"
-                style={{ background: 'color-mix(in srgb, var(--bg-content) 22%, transparent)', backdropFilter: 'blur(18px) saturate(136%)', WebkitBackdropFilter: 'blur(18px) saturate(136%)' }}
+                // The page area is paper while the page cannot show (opaque, no blur of its own).
+                style={{ background: 'var(--rn-sheet)' }}
               >
                 <div className="text-center" style={{ maxWidth: 360 }}>
                   <AlertTriangle
                     className="mx-auto mb-4"
-                    style={{ width: 48, height: 48, color: 'var(--color-orange)' }}
+                    style={{ width: 48, height: 48, color: 'var(--rn-warn)' }}
                     strokeWidth={1.5}
                   />
-                  <p className="mb-2 text-[15px] font-medium" style={{ color: 'var(--text-title)' }}>
+                  <p className="mb-2 text-[15px] font-medium" style={{ color: 'var(--rn-ink)' }}>
                     Page failed to load
                   </p>
-                  <p className="mb-4 text-[12px]" style={{ color: 'var(--text-gray)', lineHeight: 1.6 }}>
+                  <p className="mb-4 text-[12px]" style={{ color: 'var(--rn-ink-2)', lineHeight: 1.6 }}>
                     {activeTab.error}
                   </p>
-                  <button
-                    onClick={() => void onRetry()}
-                    className="inline-flex items-center gap-2 rounded-lg px-4 py-2 transition-colors hover:bg-[var(--color-blue-light)]"
-                    style={{
-                      color: 'var(--color-blue)',
-                      fontSize: 13,
-                      border: '1px solid var(--color-blue)',
-                      background: 'transparent',
-                    }}
-                  >
-                    <RefreshCw style={{ width: 14, height: 14 }} strokeWidth={2} />
+                  <Button icon={<RefreshCw />} onClick={() => void onRetry()}>
                     Retry
-                  </button>
+                  </Button>
                 </div>
               </div>
             )}
 
             {toastVisible && (
               <div
+                className="rn-float"
                 style={{
                   position: 'absolute',
                   bottom: 16,
                   left: '50%',
                   transform: 'translateX(-50%)',
-                  background: 'var(--surface-floating-bg)',
-                  color: 'var(--text-body)',
+                  color: 'var(--rn-ink)',
                   padding: '8px 16px',
-                  borderRadius: 8,
                   fontSize: 13,
                   display: 'flex',
                   alignItems: 'center',
@@ -209,13 +199,10 @@ export default function BrowserShellLayout({
                   animation: 'cookieToastFade 3s ease-in-out forwards',
                   pointerEvents: 'none',
                   whiteSpace: 'nowrap',
-                  border: '1px solid var(--surface-border)',
-                  backdropFilter: 'blur(var(--surface-blur)) saturate(var(--surface-saturate))',
-                  WebkitBackdropFilter: 'blur(var(--surface-blur)) saturate(var(--surface-saturate))',
                 }}
               >
                 <CheckCircle
-                  style={{ width: 16, height: 16, color: 'var(--color-green)', flexShrink: 0 }}
+                  style={{ width: 16, height: 16, color: 'var(--rn-ok)', flexShrink: 0 }}
                   strokeWidth={2}
                 />
                 已保存登录状态
@@ -235,22 +222,15 @@ export default function BrowserShellLayout({
               >
                 {(mediaUploadStatus || mediaDropActive) && (
                   <div
-                    className="flex items-center gap-2 rounded-full border px-3 py-2"
-                    style={{
-                      borderColor: mediaUploadStatus?.kind === 'error' ? 'var(--color-red)' : 'color-mix(in srgb, var(--color-blue) 34%, transparent)',
-                      background: 'color-mix(in srgb, var(--surface-floating-bg) 86%, transparent)',
-                      color: 'var(--text-body)',
-                      boxShadow: '0 8px 24px rgba(15, 23, 42, 0.12)',
-                      backdropFilter: 'blur(14px) saturate(132%)',
-                      WebkitBackdropFilter: 'blur(14px) saturate(132%)',
-                    }}
+                    className="rn-float flex items-center gap-2 px-3 py-2"
+                    style={{ borderRadius: 'var(--rn-r-pill)', color: 'var(--rn-ink)' }}
                   >
                     {mediaUploadStatus?.kind === 'success' ? (
-                      <CheckCircle style={{ width: 15, height: 15, color: 'var(--color-green)' }} strokeWidth={2} />
+                      <CheckCircle style={{ width: 15, height: 15, color: 'var(--rn-ok)' }} strokeWidth={2} />
                     ) : mediaUploadStatus?.kind === 'error' ? (
-                      <AlertTriangle style={{ width: 15, height: 15, color: 'var(--color-red)' }} strokeWidth={2} />
+                      <AlertTriangle style={{ width: 15, height: 15, color: 'var(--rn-bad)' }} strokeWidth={2} />
                     ) : (
-                      <UploadCloud style={{ width: 15, height: 15, color: 'var(--color-blue)' }} strokeWidth={2} />
+                      <UploadCloud style={{ width: 15, height: 15, color: 'var(--rn-accent)' }} strokeWidth={2} />
                     )}
                     <span className="text-[12px] font-medium">
                       {mediaUploadStatus?.message || '松开即可上传到当前网页'}

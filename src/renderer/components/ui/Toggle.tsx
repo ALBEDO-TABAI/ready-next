@@ -18,7 +18,7 @@ export function Checkbox({ checked, onChange, label, disabled }: { checked: bool
 }
 
 /** A radio group drawn as a pill track; ←/→ move the choice. */
-export function Segmented<T extends string>({ options, value, onChange, label }: { options: { value: T; label: string }[]; value: T; onChange: (value: T) => void; label: string }) {
+export function Segmented<T extends string>({ options, value, onChange, label }: { options: { value: T; label: string; count?: ReactNode }[]; value: T; onChange: (value: T) => void; label: string }) {
   const ref = useRef<HTMLDivElement>(null)
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0
@@ -33,6 +33,7 @@ export function Segmented<T extends string>({ options, value, onChange, label }:
       {options.map(option => (
         <button key={option.value} type="button" role="radio" className="rn-seg__item" aria-checked={option.value === value} tabIndex={option.value === value ? 0 : -1} onClick={() => onChange(option.value)}>
           {option.label}
+          {option.count !== undefined && <span className="rn-seg__count">{option.count}</span>}
         </button>
       ))}
     </div>

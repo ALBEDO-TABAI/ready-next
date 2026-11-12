@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useVault } from '../../stores/useVault'
 import { useWorkspace } from '../../stores/useWorkspace'
-import { confirmDialog } from '../../components/ui'
+import { Button, confirmDialog } from '../../components/ui'
 import { formatIndexedAt, useLibraryIndex } from '../../modules/search/useLibraryIndex'
 import { mountFolder } from '../../modules/document/mountFolder'
-import { SettingsCard, SettingsRow, settingsButtonClass } from './settings-shared'
+import { SettingsCard, SettingsRow } from './settings-shared'
 
 // 设置 › 资料库 (W2 §3.2): where the library lives, the folders mounted beside it, and the full-text index.
 // The index is built only when asked: scanning a large folder can take minutes and a lot of disk.
@@ -38,21 +38,21 @@ export function LibrarySettingsPanel() {
     <div className="flex flex-col gap-4">
       <SettingsCard title="位置" description="页面、画板和数据库都保存在资料库文件夹里。">
         <SettingsRow label="资料库" description={vaultRoot ?? (view.data?.status === 'missing' ? `找不到资料库：${view.data.root}` : '还没有设置资料库')}>
-          <button type="button" className={settingsButtonClass('secondary', { size: 'sm' })} disabled={view.phase === 'saving'} onClick={() => void chooseFolder()}>
+          <Button size="sm" disabled={view.phase === 'saving'} onClick={() => void chooseFolder()}>
             {vaultRoot ? '更换…' : '选择文件夹…'}
-          </button>
+          </Button>
         </SettingsRow>
       </SettingsCard>
 
       <SettingsCard
         title="挂载的文件夹"
         description="资料库之外的文件夹，在文档侧栏的“文件”视角里一起浏览，也一起建立索引。"
-        actions={<button type="button" className={settingsButtonClass('secondary', { size: 'sm' })} onClick={() => void mount()}>挂载文件夹…</button>}
+        actions={<Button size="sm" onClick={() => void mount()}>挂载文件夹…</Button>}
       >
         {mounted.length === 0 && <SettingsRow label="没有挂载的文件夹" />}
         {mounted.map(folder => (
           <SettingsRow key={folder} label={folder.split(/[\\/]/).filter(Boolean).pop() ?? folder} description={folder}>
-            <button type="button" className={settingsButtonClass('ghost', { size: 'sm' })} onClick={() => removePinnedFolder(folder)}>移除</button>
+            <Button variant="ghost" size="sm" onClick={() => removePinnedFolder(folder)}>移除</Button>
           </SettingsRow>
         ))}
         {folderError && <SettingsRow label="没有挂载" description={folderError} />}
@@ -63,9 +63,9 @@ export function LibrarySettingsPanel() {
           label={index.indexing ? '正在建立索引…' : index.status ? `已索引 ${index.status.docCount} 项` : '尚未建立索引'}
           description={index.error ?? (index.status ? `上次：${formatIndexedAt(index.status.lastIndexedAt)}` : index.roots.length === 0 ? '先设置资料库' : `${index.roots.length} 个位置`)}
         >
-          <button type="button" className={settingsButtonClass('secondary', { size: 'sm' })} disabled={index.indexing || index.roots.length === 0} onClick={() => void buildIndex()}>
+          <Button size="sm" disabled={index.indexing || index.roots.length === 0} onClick={() => void buildIndex()}>
             {index.status ? '重建索引' : '建立索引'}
-          </button>
+          </Button>
         </SettingsRow>
       </SettingsCard>
     </div>

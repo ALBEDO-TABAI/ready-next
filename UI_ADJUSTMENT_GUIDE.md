@@ -106,16 +106,16 @@ B 站、YouTube 资讯在阅读页标题下直接嵌入播放器（`rssVideoEmbe
 
 ## 5. Settings
 
-- 页面与分区路由：`src/renderer/pages/Settings.tsx`（导航按 通用 / 智能 / 内容与连接 / 隐私与数据 / 应用 分组）
-- 设计系统：`src/renderer/styles/settings-surfaces.css`（`--sx-*` token 与 `sx-*` 组件类）
-- 共用组件：`src/renderer/pages/settings/settings-shared.tsx`（SettingsCard / SettingsRow / SettingsSegmented / SettingsSwitch / SettingsNotice / SettingsStatus / `settingsButtonClass`）与 `src/renderer/components/settings/`
-- inline 兼容 token：`src/renderer/components/settings/settings-theme.ts`（取值全部指向 `--sx-*`）
+- 页面与分区路由：`src/renderer/pages/Settings.tsx`（导航按 通用 / 助手 / 内容 / 隐私与数据 / 关于 分组）
+- 版式：`src/renderer/pages/settings/settings.css`（`sx-*` 只是设置页自己的版式类：分组、卡片、行、表格、状态；只用 `--rn-*`，没有私有调色板）
+- 共用版式件：`src/renderer/pages/settings/settings-shared.tsx`（SettingsCard / SettingsRow / SettingsGroup / SettingsNotice / SettingsStatus / SettingsSwitchLabel）与 `src/renderer/components/settings/`
+- 控件：一律用 `src/renderer/components/ui` 的共用基元（Button、IconButton、Input、Textarea、Select、Switch、Checkbox、Segmented、Tabs、Kbd、confirmDialog），设置页不再有私有按钮、开关或对话框
 - Tag Forge：`src/renderer/pages/settings/TagForgeSettingsPanel.tsx`
 - 长期记忆：`src/renderer/pages/settings/ReadyMemorySettingsPanel.tsx`（自动整理当前禁用）
 - 微信/飞书：`src/renderer/components/settings/RemoteIMSettingsPanel.tsx`
 - 状态：`src/renderer/stores/useSettings.ts`
 
-设置页追求极简与安静：内容直接落在窗口玻璃底上，不额外铺整块画布；需要成组的设置项才放进分组玻璃卡（`sx-card`：半透明白 + 柔和投影，无外框，行间只留内缩发丝线）。选中、聚焦、悬停一律用「填充 + 轻投影」表达（选中 = 被托起的白玻璃，与导航选中同配方），不用线框圈选；输入是无边框的凹陷槽，按钮是带白色高光边的浮起玻璃片。按钮、输入、分段、开关只用 `sx-*` 类，hover / active / focus 由类统一，不再写 inline 颜色或零散 `hover:` 工具类。色彩纪律：关键行动与「开」状态用墨色（与发送键同源），每个视图最多一个主按钮；强调色只做点缀（当前导航图标、选中点、焦点环、状态圆点、文字链接）；设置页不用成功绿；危险操作是红字 + 极淡水洗，不铺红块。强调色只有一个 `--rn-accent`（橘红，W1 收束后不再有强调色与皮肤选项，外观页只有明暗与“减少透明”），行为合同见 `src/__tests__/settings-design-system.test.tsx`。新增持久设置必须同时核对 Main、Preload、Renderer 类型和 native DB 验证。
+设置页追求极简与安静：导航与内容落在窗口这块玻璃上，不额外铺整块画布；需要成组的设置项才放进一张纸（`sx-card`：`--rn-sheet`、纸的圆角与贴地影，无外框，行间只留内缩发丝线）。当前分区是共用 `ListRow`（信号色淡底与文字，与外壳侧栏的导航器一致）；选中的单选卡与分段控件的选中项同一个样子（纸色加卡片影），勾是墨色；不用线框圈选。色彩纪律：关键行动与「开」状态用墨色，每个视图最多一个主按钮；信号色 `--rn-accent` 只表示“此刻”（当前分区、已连接、进行中）；正文链接是墨色加下划线；设置页不用成功绿；危险操作是红字，不铺红块。外观页只有明暗与“减少透明”。行为合同见 `src/__tests__/settings-design-system.test.tsx` 与 `settings-liquid-glass-contract.test.ts`。新增持久设置必须同时核对 Main、Preload、Renderer 类型和 native DB 验证。
 
 ## 6. 样式与验证
 

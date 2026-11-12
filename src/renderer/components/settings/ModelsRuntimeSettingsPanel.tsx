@@ -9,9 +9,8 @@ import {
   SettingsGroup,
   SettingsNotice,
   SettingsRow,
-  SettingsSegmented,
-  settingsButtonClass,
 } from '../../pages/settings/settings-shared'
+import { Button, IconButton, Input, Segmented } from '../ui'
 
 const SOURCE_LABELS: Record<ModelSource, string> = {
   auto: '自动',
@@ -34,14 +33,14 @@ function packState(pack: ModelPackStatus): 'ready' | 'downloading' | 'error' | '
 
 function StatusRow({ label, ready, detail }: { label: string; ready: boolean; detail?: string }) {
   return (
-    <div className="flex items-center justify-between gap-3 border-t px-3.5 py-2 first:border-t-0" style={{ borderColor: 'var(--sx-divider)' }}>
+    <div className="flex items-center justify-between gap-3 border-t px-3.5 py-2 first:border-t-0" style={{ borderColor: 'var(--rn-hair)' }}>
       <div className="flex items-center gap-2.5">
         {ready
-          ? <Check size={14} strokeWidth={2.4} style={{ color: 'var(--sx-title)' }} />
-          : <CircleDashed size={14} strokeWidth={1.9} style={{ color: 'var(--sx-subtle)' }} />}
-        <span className="text-[13px]" style={{ color: 'var(--sx-body)' }}>{label}</span>
+          ? <Check size={14} strokeWidth={2.4} style={{ color: 'var(--rn-ink)' }} />
+          : <CircleDashed size={14} strokeWidth={1.9} style={{ color: 'var(--rn-ink-3)' }} />}
+        <span className="text-[13px]" style={{ color: 'var(--rn-ink)' }}>{label}</span>
       </div>
-      <span className="text-[12px]" style={{ color: ready ? 'var(--sx-muted)' : 'var(--sx-subtle)' }}>
+      <span className="text-[12px]" style={{ color: ready ? 'var(--rn-ink-2)' : 'var(--rn-ink-3)' }}>
         {ready ? (detail || '已就绪') : (detail || '未配置')}
       </span>
     </div>
@@ -51,9 +50,9 @@ function StatusRow({ label, ready, detail }: { label: string; ready: boolean; de
 // 自检探针一行：不可达属于真实故障，用危险色；可达只用墨色对勾。
 function ProbeLine({ ok, children }: { ok: boolean; children: React.ReactNode }) {
   return (
-    <div className="flex items-start gap-2 text-[12px]" style={{ color: ok ? 'var(--sx-body)' : 'var(--sx-danger-text)' }}>
+    <div className="flex items-start gap-2 text-[12px]" style={{ color: ok ? 'var(--rn-ink)' : 'var(--rn-bad)' }}>
       {ok
-        ? <Check size={13} strokeWidth={2.4} className="mt-[3px] shrink-0" style={{ color: 'var(--sx-title)' }} />
+        ? <Check size={13} strokeWidth={2.4} className="mt-[3px] shrink-0" style={{ color: 'var(--rn-ink)' }} />
         : <X size={13} strokeWidth={2.4} className="mt-[3px] shrink-0" />}
       <span className="min-w-0" style={{ overflowWrap: 'anywhere' }}>{children}</span>
     </div>
@@ -208,28 +207,25 @@ export function RuntimeEnvironmentCard() {
       )}
       actions={(
         <>
-          <button
-            type="button"
+          <Button
+            variant={ready ? 'secondary' : 'primary'}
             onClick={() => void provision(ready)}
             disabled={busy || unsupported}
             aria-busy={busy || undefined}
-            className={settingsButtonClass(ready ? 'secondary' : 'primary')}
+            icon={busy ? <Loader2 className="animate-spin" /> : <Download />}
           >
-            {busy ? <Loader2 className="animate-spin" /> : <Download />}
             {busy ? '配置中…' : ready ? '重新配置' : '一键下载并配置'}
-          </button>
+          </Button>
           {taskRunning && (
-            <button
-              type="button"
+            <Button
               onClick={() => void cancelProvision()}
               disabled={provisionTask?.state === 'cancelling'}
-              className={settingsButtonClass('secondary')}
-            >
-              {provisionTask?.state === 'cancelling'
+              icon={provisionTask?.state === 'cancelling'
                 ? <Loader2 className="animate-spin" />
                 : <XCircle />}
+            >
               {provisionTask?.state === 'cancelling' ? '正在停止…' : '停止'}
-            </button>
+            </Button>
           )}
         </>
       )}
@@ -248,7 +244,7 @@ export function RuntimeEnvironmentCard() {
 
         {busy && (
           <div>
-            <div className="mb-1.5 flex items-center justify-between text-[12px]" style={{ color: 'var(--sx-muted)' }}>
+            <div className="mb-1.5 flex items-center justify-between text-[12px]" style={{ color: 'var(--rn-ink-2)' }}>
               <span>
                 正在{RUNTIME_PHASE_LABELS[phase || ''] || '配置'}{progressAsset ? ` ${progressAsset}` : ''}…
               </span>
@@ -266,16 +262,16 @@ export function RuntimeEnvironmentCard() {
 
         {!unsupported && (
           <div>
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => setShowMirror((v) => !v)}
               aria-expanded={showMirror}
-              className={settingsButtonClass('ghost', { size: 'sm' })}
               style={{ marginLeft: -8 }}
+              icon={<ChevronDown style={{ transform: showMirror ? 'rotate(180deg)' : undefined, transition: 'transform var(--rn-d-1) var(--rn-ease-out)' }} />}
             >
-              <ChevronDown style={{ transform: showMirror ? 'rotate(180deg)' : undefined, transition: 'transform 160ms ease' }} />
               {showMirror ? '收起自定义镜像' : '自定义下载镜像（高级）'}
-            </button>
+            </Button>
           </div>
         )}
 
@@ -286,7 +282,7 @@ export function RuntimeEnvironmentCard() {
               Python 默认先走中科大镜像；ffmpeg/ffprobe 默认走上游。填写自定义镜像后会优先尝试该地址。
             </div>
             <div className="mt-1.5 flex gap-2">
-              <input
+              <Input
                 value={mirror}
                 onChange={(e) => {
                   setMirror(e.target.value)
@@ -295,23 +291,21 @@ export function RuntimeEnvironmentCard() {
                 }}
                 placeholder="https://your-cdn/ready-runtime"
                 aria-label="自定义下载镜像"
-                className="sx-input sx-input--mono flex-1"
+                className="sx-mono flex-1"
               />
-              <button
-                type="button"
+              <Button
                 onClick={() => void saveMirror()}
                 disabled={busy || mirrorSaving}
-                className={settingsButtonClass('secondary')}
               >
                 {mirrorSaving ? '保存中…' : '保存'}
-              </button>
+              </Button>
             </div>
             <div className="sx-meta" style={{ overflowWrap: 'anywhere' }}>
               镜像路径：&lt;base&gt;/&lt;platform&gt;/&lt;filename&gt;
             </div>
             {mirrorNotice && (
-              <div className={`text-[12px] ${mirrorNoticeKind === 'error' ? 'sx-text-danger' : ''}`} style={mirrorNoticeKind === 'error' ? undefined : { color: 'var(--sx-muted)' }}>
-                {mirrorNoticeKind === 'success' && <Check size={12} strokeWidth={2.4} className="mr-1 inline-block align-[-1px]" style={{ color: 'var(--sx-title)' }} />}
+              <div className={`text-[12px] ${mirrorNoticeKind === 'error' ? 'sx-text-danger' : ''}`} style={mirrorNoticeKind === 'error' ? undefined : { color: 'var(--rn-ink-2)' }}>
+                {mirrorNoticeKind === 'success' && <Check size={12} strokeWidth={2.4} className="mr-1 inline-block align-[-1px]" style={{ color: 'var(--rn-ink)' }} />}
                 {mirrorNotice}
               </div>
             )}
@@ -323,9 +317,9 @@ export function RuntimeEnvironmentCard() {
         {errorKind === 'all_sources_unreachable' && (
           <div className="flex items-center justify-between gap-3">
             <div className="sx-row__desc" style={{ marginTop: 0 }}>所有源都连不上。请在上方填写自定义镜像，或确认网络后重试。</div>
-            <button type="button" onClick={() => void saveMirrorAndRetry()} disabled={busy || mirrorSaving} className={settingsButtonClass('secondary', { size: 'sm' })}>
+            <Button size="sm" onClick={() => void saveMirrorAndRetry()} disabled={busy || mirrorSaving}>
               保存并重试
-            </button>
+            </Button>
           </div>
         )}
 
@@ -466,22 +460,19 @@ export default function ModelsRuntimeSettingsPanel() {
       <SettingsGroup label="语音模型">
         <SettingsCard>
           <SettingsRow label="下载来源" description={SOURCE_HINTS[source]}>
-            <SettingsSegmented
-              ariaLabel="下载来源"
+            <Segmented
+              label="下载来源"
               value={source}
               onChange={setSource}
               options={MODEL_SOURCES.map((value) => ({ value, label: SOURCE_LABELS[value] }))}
             />
-            <button
-              type="button"
+            <IconButton
+              size="sm"
               onClick={() => void refresh()}
               disabled={loading}
-              className={settingsButtonClass('ghost', { size: 'sm', icon: true })}
               title="刷新状态"
-              aria-label="刷新状态"
-            >
-              <RefreshCw className={loading ? 'animate-spin' : undefined} />
-            </button>
+              icon={<RefreshCw className={loading ? 'animate-spin' : undefined} />}
+            />
           </SettingsRow>
 
           {packs.map((pack) => {
@@ -494,17 +485,17 @@ export default function ModelsRuntimeSettingsPanel() {
                 <div className="flex min-w-0 flex-1 items-start gap-3">
                   <span
                     className="grid h-8 w-8 shrink-0 place-items-center rounded-[9px]"
-                    style={{ background: 'var(--sx-inset-bg)' }}
+                    style={{ background: 'var(--rn-fill)' }}
                     aria-hidden
                   >
                     {state === 'ready' ? (
-                      <Check size={15} strokeWidth={2.4} style={{ color: 'var(--sx-title)' }} />
+                      <Check size={15} strokeWidth={2.4} style={{ color: 'var(--rn-ink)' }} />
                     ) : running ? (
-                      <Loader2 size={15} className="animate-spin" style={{ color: 'var(--sx-accent)' }} />
+                      <Loader2 size={15} className="animate-spin" style={{ color: 'var(--rn-accent)' }} />
                     ) : state === 'error' ? (
-                      <AlertCircle size={15} style={{ color: 'var(--sx-danger)' }} />
+                      <AlertCircle size={15} style={{ color: 'var(--rn-bad)' }} />
                     ) : (
-                      <HardDrive size={15} style={{ color: 'var(--sx-muted)' }} />
+                      <HardDrive size={15} style={{ color: 'var(--rn-ink-2)' }} />
                     )}
                   </span>
                   <div className="min-w-0 flex-1">
@@ -537,24 +528,23 @@ export default function ModelsRuntimeSettingsPanel() {
                 </div>
                 <div className="sx-row__control">
                   {running ? (
-                    <button
-                      type="button"
+                    <Button
+                      size="sm"
                       onClick={() => void cancelDownload(pack.id)}
                       disabled={busy}
-                      className={settingsButtonClass('secondary', { size: 'sm' })}
                     >
                       取消
-                    </button>
+                    </Button>
                   ) : (
-                    <button
-                      type="button"
+                    <Button
+                      variant={state === 'ready' ? 'ghost' : 'secondary'}
+                      size="sm"
                       onClick={() => void startDownload(pack.id)}
                       disabled={busy}
-                      className={settingsButtonClass(state === 'ready' ? 'ghost' : 'secondary', { size: 'sm' })}
+                      icon={busy ? <Loader2 className="animate-spin" /> : <Download />}
                     >
-                      {busy ? <Loader2 className="animate-spin" /> : <Download />}
                       {state === 'ready' ? '重新下载' : '下载'}
-                    </button>
+                    </Button>
                   )}
                 </div>
               </div>
@@ -573,26 +563,25 @@ export default function ModelsRuntimeSettingsPanel() {
           title="下载自检"
           description="校验每个模型包的国内 / 国外节点可达性与下载链路，并验证断点续传与原子安装路径，不会真正下载权重。"
           actions={(
-            <button
-              type="button"
+            <Button
+              size="sm"
               onClick={() => void runSelfTest()}
               disabled={selfTesting}
-              className={settingsButtonClass('secondary', { size: 'sm' })}
+              icon={selfTesting ? <Loader2 className="animate-spin" /> : <Activity />}
             >
-              {selfTesting ? <Loader2 className="animate-spin" /> : <Activity />}
               运行自检
-            </button>
+            </Button>
           )}
         >
           {selfTest && (
             <div className="sx-card__body flex flex-col gap-2.5">
               {selfTest.entries.map((entry) => (
                 <div key={entry.id} className="sx-inset flex flex-col gap-1.5" style={{ padding: '10px 14px' }}>
-                  <div className="text-[12.5px] font-semibold" style={{ color: 'var(--sx-title)' }}>{entry.displayName}</div>
+                  <div className="text-[12.5px] font-semibold" style={{ color: 'var(--rn-ink)' }}>{entry.displayName}</div>
                   {entry.probes.map((probe) => (
                     <ProbeLine key={probe.source} ok={probe.reachable}>
-                      <span className="inline-block" style={{ minWidth: 52, color: 'var(--sx-body)' }}>{SOURCE_LABELS[probe.source]}</span>
-                      <span style={{ color: probe.reachable ? 'var(--sx-muted)' : undefined }}>
+                      <span className="inline-block" style={{ minWidth: 52, color: 'var(--rn-ink)' }}>{SOURCE_LABELS[probe.source]}</span>
+                      <span style={{ color: probe.reachable ? 'var(--rn-ink-2)' : undefined }}>
                         {probe.endpoint}
                         {probe.reachable && probe.latencyMs !== null ? ` · ${probe.latencyMs}ms` : ' · 不可达'}
                         {probe.coordinatesOk ? '' : ' · 坐标解析失败'}
@@ -613,15 +602,14 @@ export default function ModelsRuntimeSettingsPanel() {
           title="技能来源自检"
           description="校验从链接安装技能的国内 / 国外下载节点可达性、GitHub 提交溯源解析与暂存目录读写，不会真正下载技能。"
           actions={(
-            <button
-              type="button"
+            <Button
+              size="sm"
               onClick={() => void runSkillSourceSelfTest()}
               disabled={skillSourceTesting}
-              className={settingsButtonClass('secondary', { size: 'sm' })}
+              icon={skillSourceTesting ? <Loader2 className="animate-spin" /> : <Activity />}
             >
-              {skillSourceTesting ? <Loader2 className="animate-spin" /> : <Activity />}
               运行自检
-            </button>
+            </Button>
           )}
         >
           {skillSourceTest && (
@@ -629,8 +617,8 @@ export default function ModelsRuntimeSettingsPanel() {
               <div className="sx-inset flex flex-col gap-1.5" style={{ padding: '10px 14px' }}>
                 {skillSourceTest.probes.map((probe) => (
                   <ProbeLine key={probe.source} ok={probe.reachable}>
-                    <span className="inline-block" style={{ minWidth: 52, color: 'var(--sx-body)' }}>{SOURCE_LABELS[probe.source]}</span>
-                    <span style={{ color: probe.reachable ? 'var(--sx-muted)' : undefined }}>
+                    <span className="inline-block" style={{ minWidth: 52, color: 'var(--rn-ink)' }}>{SOURCE_LABELS[probe.source]}</span>
+                    <span style={{ color: probe.reachable ? 'var(--rn-ink-2)' : undefined }}>
                       {probe.endpoint}
                       {probe.reachable && probe.latencyMs !== null ? ` · ${probe.latencyMs}ms` : ' · 不可达'}
                     </span>

@@ -3,7 +3,8 @@ import type { BookSourcesAPI, SourceSettings, SourceStatus } from '../../../shar
 import { confirmed } from '../../modules/library/access'
 import { ExtraSourceSettings } from '../../modules/library/find/build-feature'
 import { sourceFormats } from '../../modules/library/find/source-ui'
-import { SettingsCard, SettingsNotice, SettingsRow, SettingsStatus, settingsButtonClass, type SettingsTone } from './settings-shared'
+import { Button, Input, Select } from '../../components/ui'
+import { SettingsCard, SettingsNotice, SettingsRow, SettingsStatus, type SettingsTone } from './settings-shared'
 
 const STATUS: Record<SourceStatus['state'], { text: string; tone: SettingsTone }> = {
   missing: { text: '未安装', tone: 'muted' },
@@ -35,16 +36,15 @@ export function BookSourceSettingsPanel({ api = window.electronAPI.bookSources }
     {status?.error && <SettingsNotice tone="warning">{status.error}</SettingsNotice>}
     {value && <>
       <SettingsRow label="可执行文件路径" description="留空则在 PATH 中查找 zlib">
-        <input className="sx-input sx-input--mono" aria-label="zlib 路径" placeholder="zlib" value={value.executable} onChange={e => setValue({ ...value, executable: e.target.value })} />
+        <Input className="sx-mono" aria-label="zlib 路径" placeholder="zlib" value={value.executable} onChange={e => setValue({ ...value, executable: e.target.value })} />
       </SettingsRow>
       <SettingsRow label="默认格式">
-        <select className="sx-select" aria-label="默认格式" value={value.format} onChange={e => { const format = sourceFormats.find(format => format === e.target.value); if (format) setValue({ ...value, format }) }}>
-          {sourceFormats.map(format => <option key={format}>{format}</option>)}
-        </select>
+        <Select aria-label="默认格式" value={value.format} options={sourceFormats.map(format => ({ value: format, label: format }))}
+          onChange={e => { const format = sourceFormats.find(format => format === e.target.value); if (format) setValue({ ...value, format }) }} />
       </SettingsRow>
       {extra && ExtraSourceSettings && <Suspense fallback={<SettingsStatus tone="muted">加载中…</SettingsStatus>}><ExtraSourceSettings value={value} onChange={setValue} /></Suspense>}
       <div className="sx-card__footer">
-        <button type="button" className={settingsButtonClass('primary')} disabled={busy} onClick={() => void save()}>{busy ? '保存并检查中…' : '保存并检查连接'}</button>
+        <Button variant="primary" disabled={busy} onClick={() => void save()}>{busy ? '保存并检查中…' : '保存并检查连接'}</Button>
       </div>
     </>}
     {error && <SettingsNotice tone="danger">{error}</SettingsNotice>}

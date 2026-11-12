@@ -2,7 +2,7 @@ import { X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { beginPersistentBrowserMask, endPersistentBrowserMask } from '../../modules/overlay/browserViewMask'
 import GraphView from './GraphView'
-import { Segmented } from '../ui'
+import { IconButton, Segmented } from '../ui'
 import { useDocTabs } from '../../stores/useDocTabs'
 
 export interface GraphWorkspaceRequest {
@@ -61,7 +61,7 @@ export default function GraphWorkspace({ request, workspaceRoot, onClose }: Grap
   return (
     <div className="knowledge-graph-workspace" data-knowledge-graph-workspace="true">
       <section
-        className="knowledge-graph-workspace__panel ready-app-liquid-panel"
+        className="knowledge-graph-workspace__panel rn-float"
         role="dialog"
         aria-modal="true"
         aria-label="全局浏览关系图谱"
@@ -73,9 +73,7 @@ export default function GraphWorkspace({ request, workspaceRoot, onClose }: Grap
           </div>
           <div className="knowledge-graph-workspace__header-actions">
             <Segmented label="图谱范围" value={focus} onChange={setFocus} options={focusOptions} />
-            <button type="button" onClick={onClose} aria-label="关闭全局浏览">
-              <X size={18} />
-            </button>
+            <IconButton icon={<X />} title="关闭全局浏览" size="lg" onClick={onClose} />
           </div>
         </header>
 

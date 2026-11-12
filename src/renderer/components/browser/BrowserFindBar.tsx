@@ -19,9 +19,10 @@ export function BrowserFindBar({ text, result, inputRef, onText, onStep, onClose
   return (
     <div className="rn-find-bar rn-ui" role="search" aria-label="在网页中查找" data-browser-find-bar="">
       <Search className="rn-find-bar__icon" aria-hidden="true" />
+      {/* The bar is the field; ready-input-slot-inner keeps the shell's global input slot off this inner input. */}
       <input
         ref={inputRef}
-        className="rn-find-bar__input"
+        className="rn-find-bar__input ready-input-slot-inner"
         value={text}
         placeholder="在网页中查找"
         aria-label="在网页中查找"

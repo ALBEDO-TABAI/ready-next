@@ -7,6 +7,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { AskUserQuestionsCard } from '../renderer/components/agent/AskUserQuestionsCard'
 import SkillAskUserPrompt from '../renderer/components/skill/SkillAskUserPrompt'
 import SkillInlinedToast from '../renderer/components/skill/SkillInlinedToast'
+import { ToastHost } from '../renderer/components/ui'
 
 type TestGlobal = typeof globalThis & Record<string, unknown>
 
@@ -235,7 +236,8 @@ test('SkillAskUserPrompt keeps long option lists scrollable and gives clicked op
     })
 
     assert.equal(option.getAttribute('aria-pressed'), 'true')
-    assert.match(option.style.border, /var\(--accent/)
+    // The selected look is the option row's pressed state in skill-ask-user.css (tokens only), not an inline colour.
+    assert.ok(option.classList.contains('skill-ask-user__option'))
 
     await act(async () => {
       releaseSubmit?.()
@@ -280,7 +282,8 @@ test('SkillInlinedToast subscribes to skill inline events from electronAPI.skill
 
     root = createRoot(handle.rootElement)
     await act(async () => {
-      root?.render(createElement(SkillInlinedToast))
+      // The note is one line of the shared toast (W1 §5): the host renders it.
+      root?.render(createElement('div', null, createElement(SkillInlinedToast), createElement(ToastHost)))
     })
     await act(async () => {
       push?.({

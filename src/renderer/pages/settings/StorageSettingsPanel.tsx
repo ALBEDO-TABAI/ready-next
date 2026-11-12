@@ -1,12 +1,11 @@
 import { useState, useEffect, useCallback } from 'react'
-import { createPortal } from 'react-dom'
 import { Check, FileArchive, Loader2, Trash2 } from 'lucide-react'
+import { Button, Select, confirmDialog } from '../../components/ui'
 import {
   SETTINGS_ROW_CONTROL_MIN_WIDTH,
   SettingsCard,
   SettingsNotice,
   SettingsRow,
-  settingsButtonClass,
 } from './settings-shared'
 
 // Storage / cache panel — wired to app:getCacheStats + app:clearCache.
@@ -65,7 +64,6 @@ export function StorageSettingsPanel() {
   const [statsLoading, setStatsLoading] = useState<boolean>(true)
   const [statsError, setStatsError] = useState<string | null>(null)
   const [clearing, setClearing] = useState<'none' | 'standard' | 'puppeteer'>('none')
-  const [confirmKind, setConfirmKind] = useState<'standard' | 'puppeteer' | null>(null)
   const [lastResult, setLastResult] = useState<{ kind: 'standard' | 'puppeteer'; clearedBytes: number; errors: string[] } | null>(null)
   const [diagnosticExporting, setDiagnosticExporting] = useState<boolean>(false)
   const [diagnosticResult, setDiagnosticResult] = useState<{ path?: string; bytes?: number; error?: string } | null>(null)
@@ -124,7 +122,6 @@ export function StorageSettingsPanel() {
   const performClear = useCallback(async (includePuppeteer: boolean) => {
     if (typeof window === 'undefined' || !window.electronAPI?.app?.clearCache) return
     setClearing(includePuppeteer ? 'puppeteer' : 'standard')
-    setConfirmKind(null)
     try {
       const result = await window.electronAPI.app.clearCache({ includePuppeteer })
       if (result.success && result.data) {
@@ -151,6 +148,18 @@ export function StorageSettingsPanel() {
       setClearing('none')
     }
   }, [refreshStats])
+
+  const confirmClear = useCallback(async (includePuppeteer: boolean) => {
+    const ok = await confirmDialog({
+      title: '确认清除缓存',
+      body: includePuppeteer
+        ? '此操作会删除所有缓存，包括 puppeteer-cache。下次启动浏览器自动化时会重新下载 Chrome（数百 MB），耗时较长。是否继续？'
+        : '此操作会删除 Code Cache、HTTP Cache 与 Shared Dictionary。下次启动应用时会重新生成。是否继续？',
+      confirmLabel: '确认清除',
+      danger: true,
+    })
+    if (ok) await performClear(includePuppeteer)
+  }, [performClear])
 
   const exportDiagnosticPack = useCallback(async () => {
     if (typeof window === 'undefined' || !window.electronAPI?.app?.exportDiagnosticPack) {
@@ -212,7 +221,7 @@ export function StorageSettingsPanel() {
           )}
           <div
             className="flex h-[6px] w-full overflow-hidden rounded-full"
-            style={{ background: 'var(--sx-track-bg)' }}
+            style={{ background: 'var(--rn-fill-2)' }}
             aria-hidden
           >
             {totalBytes > 0 && breakdownRows.map((row, index) => (
@@ -223,8 +232,8 @@ export function StorageSettingsPanel() {
                   style={{
                     width: `${(row.bytes / totalBytes) * 100}%`,
                     minWidth: 3,
-                    background: `color-mix(in srgb, var(--sx-ink) ${BREAKDOWN_SHADES[index]}%, transparent)`,
-                    borderRight: '1.5px solid var(--sx-card-bg)',
+                    background: `color-mix(in srgb, var(--rn-ink) ${BREAKDOWN_SHADES[index]}%, transparent)`,
+                    borderRight: '1.5px solid var(--rn-sheet)',
                   }}
                 />
               )
@@ -236,11 +245,11 @@ export function StorageSettingsPanel() {
                 <div className="flex min-w-0 items-start gap-2.5">
                   <span
                     className="mt-[5px] h-2 w-2 shrink-0 rounded-[3px]"
-                    style={{ background: `color-mix(in srgb, var(--sx-ink) ${BREAKDOWN_SHADES[index]}%, transparent)` }}
+                    style={{ background: `color-mix(in srgb, var(--rn-ink) ${BREAKDOWN_SHADES[index]}%, transparent)` }}
                     aria-hidden
                   />
                   <div className="min-w-0">
-                    <div className="text-[12.5px] font-medium" style={{ color: 'var(--sx-body)' }}>
+                    <div className="text-[12.5px] font-medium" style={{ color: 'var(--rn-ink)' }}>
                       {row.label}
                     </div>
                     <div className="sx-meta mt-0.5 truncate">
@@ -248,7 +257,7 @@ export function StorageSettingsPanel() {
                     </div>
                   </div>
                 </div>
-                <div className="sx-mono shrink-0 text-[12px]" style={{ color: 'var(--sx-muted)' }}>
+                <div className="sx-mono shrink-0 text-[12px]" style={{ color: 'var(--rn-ink-2)' }}>
                   {statsLoading ? '…' : formatBytes(row.bytes)}
                 </div>
               </div>
@@ -266,7 +275,7 @@ export function StorageSettingsPanel() {
               {diagnosticResult && (
                 <span
                   className={`mt-1 block break-all text-[11.5px] ${diagnosticResult.error ? 'sx-text-danger' : ''}`}
-                  style={diagnosticResult.error ? undefined : { color: 'var(--sx-body)' }}
+                  style={diagnosticResult.error ? undefined : { color: 'var(--rn-ink)' }}
                 >
                   {diagnosticResult.error
                     ? diagnosticResult.error
@@ -276,19 +285,15 @@ export function StorageSettingsPanel() {
             </>
           )}
         >
-          <button
-            type="button"
+          <Button
             onClick={() => { void exportDiagnosticPack() }}
             disabled={diagnosticExporting}
             aria-busy={diagnosticExporting || undefined}
-            className={settingsButtonClass('secondary')}
             style={{ minWidth: SETTINGS_ROW_CONTROL_MIN_WIDTH }}
+            icon={diagnosticExporting ? <Loader2 className="animate-spin" /> : <FileArchive />}
           >
-            {diagnosticExporting
-              ? <Loader2 className="animate-spin" />
-              : <FileArchive />}
             {diagnosticExporting ? '导出中…' : '导出'}
-          </button>
+          </Button>
         </SettingsRow>
 
         {/* Quota selector — relabel-only per Stage Y0.8 plan §11.0a path-(b).
@@ -301,17 +306,13 @@ export function StorageSettingsPanel() {
           label="缓存大小上限"
           description="仅记录配置，未强制执行 — 需要手动清理（使用下方的「清除缓存」按钮）"
         >
-          <select
+          <Select
             value={quota}
             aria-label="缓存大小上限"
             onChange={(e) => { void handleQuotaChange(e.target.value as CacheQuotaOption) }}
-            className="sx-select"
             style={{ minWidth: SETTINGS_ROW_CONTROL_MIN_WIDTH }}
-          >
-            {CACHE_QUOTA_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
+            options={CACHE_QUOTA_OPTIONS}
+          />
         </SettingsRow>
 
         {/* Standard clear */}
@@ -319,19 +320,16 @@ export function StorageSettingsPanel() {
           label="清除缓存"
           description="清除 Code Cache / HTTP Cache / Shared Dictionary 与会话级 Chromium 缓存"
         >
-          <button
-            type="button"
-            onClick={() => setConfirmKind('standard')}
+          <Button
+            variant="danger"
+            onClick={() => { void confirmClear(false) }}
             disabled={clearBusy}
             aria-busy={clearing === 'standard' || undefined}
-            className={settingsButtonClass('danger')}
             style={{ minWidth: SETTINGS_ROW_CONTROL_MIN_WIDTH }}
+            icon={clearing === 'standard' ? <Loader2 className="animate-spin" /> : <Trash2 />}
           >
-            {clearing === 'standard'
-              ? <Loader2 className="animate-spin" />
-              : <Trash2 />}
             {clearing === 'standard' ? '清除中…' : '清除'}
-          </button>
+          </Button>
         </SettingsRow>
 
         {/* Puppeteer clear (gated separately) */}
@@ -339,19 +337,16 @@ export function StorageSettingsPanel() {
           label="包括浏览器缓存"
           description="额外清除 puppeteer-cache（会重新下载 Chrome，约数百 MB）"
         >
-          <button
-            type="button"
-            onClick={() => setConfirmKind('puppeteer')}
+          <Button
+            variant="danger"
+            onClick={() => { void confirmClear(true) }}
             disabled={clearBusy}
             aria-busy={clearing === 'puppeteer' || undefined}
-            className={settingsButtonClass('danger')}
             style={{ minWidth: SETTINGS_ROW_CONTROL_MIN_WIDTH }}
+            icon={clearing === 'puppeteer' ? <Loader2 className="animate-spin" /> : <Trash2 />}
           >
-            {clearing === 'puppeteer'
-              ? <Loader2 className="animate-spin" />
-              : <Trash2 />}
             {clearing === 'puppeteer' ? '清除中…' : '清除全部'}
-          </button>
+          </Button>
         </SettingsRow>
       </SettingsCard>
 
@@ -372,49 +367,6 @@ export function StorageSettingsPanel() {
             </ul>
           )}
         </SettingsNotice>
-      )}
-
-      {/* Confirmation modal */}
-      {confirmKind && createPortal(
-        <div
-          data-ready-native-overlay=""
-          className="sx-scrim"
-          onClick={() => setConfirmKind(null)}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="storage-clear-confirm-title"
-            className="sx-dialog"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div id="storage-clear-confirm-title" className="sx-card-title">
-              确认清除缓存
-            </div>
-            <div className="mt-2 text-[12.5px] leading-[1.65]" style={{ color: 'var(--sx-muted)' }}>
-              {confirmKind === 'puppeteer'
-                ? '此操作会删除所有缓存，包括 puppeteer-cache。下次启动浏览器自动化时会重新下载 Chrome（数百 MB），耗时较长。是否继续？'
-                : '此操作会删除 Code Cache、HTTP Cache 与 Shared Dictionary。下次启动应用时会重新生成。是否继续？'}
-            </div>
-            <div className="sx-dialog__actions">
-              <button
-                type="button"
-                onClick={() => setConfirmKind(null)}
-                className={settingsButtonClass('secondary')}
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                onClick={() => { void performClear(confirmKind === 'puppeteer') }}
-                className={settingsButtonClass('danger')}
-              >
-                确认清除
-              </button>
-            </div>
-          </div>
-        </div>,
-        document.body,
       )}
     </div>
   )

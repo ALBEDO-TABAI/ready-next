@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Check, Plus, RefreshCw, Trash2, XCircle } from 'lucide-react'
-import { SettingsCard, SettingsStatus, SettingsSwitch, settingsButtonClass } from './settings-shared'
+import { Button, Input, Select, Switch, Textarea } from '../../components/ui'
+import { SettingsCard, SettingsStatus, SettingsSwitchLabel } from './settings-shared'
 import type { ElectronMcpServerConfig, ElectronMcpStatus } from '../../types/electron'
 import { useAgent } from '../../stores/useAgent'
 
@@ -20,6 +21,12 @@ const EMPTY_SERVER: ElectronMcpServerConfig = {
   approvalMode: 'writes',
   envEntries: [],
 }
+
+const APPROVAL_MODE_OPTIONS: { value: ElectronMcpServerConfig['approvalMode']; label: string }[] = [
+  { value: 'always', label: '每次确认' },
+  { value: 'writes', label: '写入时确认' },
+  { value: 'never', label: '始终允许' },
+]
 
 export function McpSettingsPanel() {
   const [status, setStatus] = useState<ElectronMcpStatus | null>(null)
@@ -141,19 +148,18 @@ export function McpSettingsPanel() {
         title={<span id="mcp-servers-heading">MCP server（stdio）</span>}
         description="仅连接本地 stdio server。工具会以 mcp_ 前缀进入 Agent 工具面，是否执行前确认由每个 server 的策略决定。"
         actions={(
-          <button
-            type="button"
+          <Button
+            size="sm"
+            icon={<RefreshCw />}
             data-mcp-control="refresh-status"
             onClick={() => { void refreshStatus() }}
-            className={settingsButtonClass('secondary', { size: 'sm' })}
           >
-            <RefreshCw strokeWidth={2} />
             刷新
-          </button>
+          </Button>
         )}
       >
         {servers.length === 0 && (
-          <div className="sx-card__body text-[12px] leading-5" style={{ color: 'var(--sx-muted)' }}>
+          <div className="sx-card__body text-[12px] leading-5" style={{ color: 'var(--rn-ink-2)' }}>
             尚未配置 MCP server——在下方添加配置并「保存并重连」。
           </div>
         )}
@@ -164,12 +170,12 @@ export function McpSettingsPanel() {
               key={server.serverId}
               data-mcp-server={server.serverId}
               className="flex flex-col gap-1.5 px-6 py-4"
-              style={{ borderTop: serverIndex > 0 ? '1px solid var(--sx-divider)' : undefined }}
+              style={{ borderTop: serverIndex > 0 ? '1px solid var(--rn-hair)' : undefined }}
             >
               <div className="flex items-center gap-3">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline gap-2">
-                    <span className="truncate text-[13px] font-medium" style={{ color: 'var(--sx-title)' }}>
+                    <span className="truncate text-[13px] font-medium" style={{ color: 'var(--rn-ink)' }}>
                       {server.serverId}
                     </span>
                     <span className="sx-meta shrink-0">
@@ -182,7 +188,7 @@ export function McpSettingsPanel() {
                 </SettingsStatus>
               </div>
               {server.toolNames.length > 0 && (
-                <p className="sx-mono m-0 text-[11.5px] leading-5" style={{ color: 'var(--sx-muted)' }}>
+                <p className="sx-mono m-0 text-[11.5px] leading-5" style={{ color: 'var(--rn-ink-2)' }}>
                   {server.toolNames.join('、')}{server.toolCount > server.toolNames.length ? ' …' : ''}
                 </p>
               )}
@@ -192,35 +198,35 @@ export function McpSettingsPanel() {
                 </p>
               )}
               {server.stderrTail && (
-                <pre className="sx-inset sx-mono m-0 whitespace-pre-wrap px-3 py-2 text-[11px] leading-5" style={{ color: 'var(--sx-muted)' }}>
+                <pre className="sx-inset sx-mono m-0 whitespace-pre-wrap px-3 py-2 text-[11px] leading-5" style={{ color: 'var(--rn-ink-2)' }}>
                   {server.stderrTail}
                 </pre>
               )}
               {server.clientConnected && server.resourceCount > 0 && (
                 <div>
-                  <button
-                    type="button"
-                    className={settingsButtonClass('ghost', { size: 'sm' })}
-                    style={{ marginLeft: -11 }}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    style={{ marginLeft: -10 }}
                     onClick={() => { void loadResources(server.serverId) }}
                   >
                     查看可选资源
-                  </button>
+                  </Button>
                 </div>
               )}
               {(resourceCatalogs[server.serverId]?.resources.length || 0) > 0 && (
                 <div className="sx-inset flex flex-col py-1">
                   {resourceCatalogs[server.serverId]?.resources.map((resource) => (
                     <div key={resource.uri} className="flex items-center justify-between gap-3 py-0.5 pl-3 pr-1 text-[12px]">
-                      <span className="min-w-0 truncate" style={{ color: 'var(--sx-body)' }}>{resource.name || resource.uri}</span>
-                      <button
-                        type="button"
-                        className={settingsButtonClass('ghost', { size: 'sm' })}
+                      <span className="min-w-0 truncate" style={{ color: 'var(--rn-ink)' }}>{resource.name || resource.uri}</span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        icon={<Plus />}
                         onClick={() => { void attachResource(server.serverId, resource) }}
                       >
-                        <Plus strokeWidth={2} />
                         加到下一条消息
-                      </button>
+                      </Button>
                     </div>
                   ))}
                 </div>
@@ -231,8 +237,8 @@ export function McpSettingsPanel() {
                 </p>
               )}
               {(server.serverInfo || server.instructions) && (
-                <details className="text-[12px]" style={{ color: 'var(--sx-muted)' }}>
-                  <summary className="cursor-pointer select-none" style={{ color: 'var(--sx-body)' }}>Server 信息</summary>
+                <details className="text-[12px]" style={{ color: 'var(--rn-ink-2)' }}>
+                  <summary className="cursor-pointer select-none" style={{ color: 'var(--rn-ink)' }}>Server 信息</summary>
                   {server.serverInfo && (
                     <pre className="sx-inset sx-mono mt-2 whitespace-pre-wrap px-3 py-2 text-[11px] leading-5">{JSON.stringify(server.serverInfo, null, 2)}</pre>
                   )}
@@ -255,80 +261,76 @@ export function McpSettingsPanel() {
               <div className="grid grid-cols-2 gap-3">
                 <label className="sx-field">
                   <span className="sx-field__label">Server ID</span>
-                  <input value={server.id} placeholder="server id" onChange={(event) => updateServer(index, { id: event.target.value })} className="sx-input sx-input--mono" />
+                  <Input value={server.id} placeholder="server id" onChange={(event) => updateServer(index, { id: event.target.value })} className="sx-mono" />
                 </label>
                 <label className="sx-field">
                   <span className="sx-field__label">显示名称</span>
-                  <input value={server.displayName} placeholder="显示名称" onChange={(event) => updateServer(index, { displayName: event.target.value })} className="sx-input" />
+                  <Input value={server.displayName} placeholder="显示名称" onChange={(event) => updateServer(index, { displayName: event.target.value })} />
                 </label>
               </div>
               <label className="sx-field">
                 <span className="sx-field__label">命令</span>
-                <input value={server.command} placeholder="本地命令路径" onChange={(event) => updateServer(index, { command: event.target.value })} className="sx-input sx-input--mono" />
+                <Input value={server.command} placeholder="本地命令路径" onChange={(event) => updateServer(index, { command: event.target.value })} className="sx-mono" />
               </label>
               <label className="sx-field">
                 <span className="sx-field__label">参数</span>
-                <textarea value={server.args.join('\n')} placeholder="每行一个参数" onChange={(event) => updateServer(index, { args: event.target.value.split('\n').filter(Boolean) })} rows={3} className="sx-textarea sx-input--mono" style={{ minHeight: 72 }} />
+                <Textarea value={server.args.join('\n')} placeholder="每行一个参数" onChange={(event) => updateServer(index, { args: event.target.value.split('\n').filter(Boolean) })} rows={3} className="sx-mono" style={{ minHeight: 72 }} />
               </label>
               {server.envEntries.length > 0 && (
                 <div className="sx-field">
                   <span className="sx-field__label">环境变量</span>
                   {server.envEntries.map((entry, envIndex) => (
                     <div key={`${entry.key}-${envIndex}`} className="grid grid-cols-2 gap-3">
-                      <input value={entry.key} placeholder="ENV_KEY" onChange={(event) => updateServer(index, { envEntries: server.envEntries.map((item, itemIndex) => itemIndex === envIndex ? { ...item, key: event.target.value } : item) })} className="sx-input sx-input--mono" />
-                      <input type="password" value={entry.value} placeholder={entry.hasStoredValue ? '已配置（留空保持）' : '值'} onChange={(event) => updateServer(index, { envEntries: server.envEntries.map((item, itemIndex) => itemIndex === envIndex ? { ...item, value: event.target.value } : item) })} className="sx-input" />
+                      <Input value={entry.key} placeholder="ENV_KEY" onChange={(event) => updateServer(index, { envEntries: server.envEntries.map((item, itemIndex) => itemIndex === envIndex ? { ...item, key: event.target.value } : item) })} className="sx-mono" />
+                      <Input type="password" value={entry.value} placeholder={entry.hasStoredValue ? '已配置（留空保持）' : '值'} onChange={(event) => updateServer(index, { envEntries: server.envEntries.map((item, itemIndex) => itemIndex === envIndex ? { ...item, value: event.target.value } : item) })} />
                     </div>
                   ))}
                 </div>
               )}
               <div className="flex flex-wrap items-center gap-3">
-                <SettingsSwitch
-                  checked={server.enabled}
-                  label="启用"
-                  ariaLabel={`启用 ${server.displayName || server.id || 'server'}`}
-                  onChange={(checked) => updateServer(index, { enabled: checked })}
-                />
-                <select
+                <SettingsSwitchLabel text="启用">
+                  <Switch
+                    checked={server.enabled}
+                    label={`启用 ${server.displayName || server.id || 'server'}`}
+                    onChange={(checked) => updateServer(index, { enabled: checked })}
+                  />
+                </SettingsSwitchLabel>
+                <Select
                   value={server.approvalMode}
                   aria-label="执行前确认策略"
                   onChange={(event) => updateServer(index, { approvalMode: event.target.value as ElectronMcpServerConfig['approvalMode'] })}
-                  className="sx-select"
-                >
-                  <option value="always">每次确认</option>
-                  <option value="writes">写入时确认</option>
-                  <option value="never">始终允许</option>
-                </select>
-                <button
-                  type="button"
-                  className={settingsButtonClass('ghost', { size: 'sm' })}
+                  options={APPROVAL_MODE_OPTIONS}
+                />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon={<Plus />}
                   onClick={() => updateServer(index, { envEntries: [...server.envEntries, { key: '', value: '' }] })}
                 >
-                  <Plus strokeWidth={2} />
                   环境变量
-                </button>
-                <button
-                  type="button"
-                  className={settingsButtonClass('danger-quiet', { size: 'sm', className: 'ml-auto' })}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon={<Trash2 />}
+                  className="ml-auto"
                   onClick={() => { setDraftTouched(true); setConfigs((current) => current.filter((_, itemIndex) => itemIndex !== index)) }}
                 >
-                  <Trash2 strokeWidth={2} />
                   删除
-                </button>
+                </Button>
               </div>
             </div>
           ))}
           <div>
-            <button
-              type="button"
+            <Button
+              icon={<Plus />}
               onClick={() => { setDraftTouched(true); setConfigs((current) => [...current, { ...EMPTY_SERVER, envEntries: [] }]) }}
-              className={settingsButtonClass('secondary')}
             >
-              <Plus strokeWidth={2} />
               添加 server
-            </button>
+            </Button>
           </div>
-          <details className="text-[12px]" style={{ color: 'var(--sx-muted)' }}>
-            <summary className="cursor-pointer select-none" style={{ color: 'var(--sx-body)' }}>查看规范化配置</summary>
+          <details className="text-[12px]" style={{ color: 'var(--rn-ink-2)' }}>
+            <summary className="cursor-pointer select-none" style={{ color: 'var(--rn-ink)' }}>查看规范化配置</summary>
             <pre className="sx-inset sx-mono mt-2 overflow-auto px-3 py-2 text-[11px] leading-5">{JSON.stringify(configs.map((server) => ({ ...server, envEntries: server.envEntries.map((entry) => ({ key: entry.key, value: entry.value ? '••••••' : entry.hasStoredValue ? '••••••' : '' })) })), null, 2)}</pre>
           </details>
         </div>
@@ -337,7 +339,7 @@ export function McpSettingsPanel() {
             {feedback && (
               <span
                 className={`inline-flex items-start gap-1.5 ${feedback.tone === 'ok' ? '' : 'sx-text-danger'}`}
-                style={feedback.tone === 'ok' ? { color: 'var(--sx-body)' } : undefined}
+                style={feedback.tone === 'ok' ? { color: 'var(--rn-ink)' } : undefined}
               >
                 {feedback.tone === 'ok'
                   ? <Check className="mt-[3px] h-3.5 w-3.5 shrink-0" strokeWidth={2.4} />
@@ -347,25 +349,22 @@ export function McpSettingsPanel() {
             )}
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <button
-              type="button"
+            <Button
               data-mcp-control="save-config"
               disabled={busy || !hasApi}
               onClick={() => { void handleSave(false) }}
-              className={settingsButtonClass('secondary')}
             >
               保存
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="primary"
               data-mcp-control="save-and-reload"
               disabled={busy || !hasApi}
               aria-busy={busy ? true : undefined}
               onClick={() => { void handleSave(true) }}
-              className={settingsButtonClass('primary')}
             >
               保存并重连
-            </button>
+            </Button>
           </div>
         </div>
       </SettingsCard>

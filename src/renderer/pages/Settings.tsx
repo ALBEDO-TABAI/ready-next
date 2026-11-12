@@ -7,6 +7,7 @@ import {
   ExternalLink, HardDrive, MessageSquare, Cat,
   Plug2, Boxes, Cookie, Tags, Brain, Check, Loader2, RefreshCw, Sunrise, Globe,
 } from 'lucide-react'
+import { Button, Kbd, ListRow, SectionHeader, Switch } from '../components/ui'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useTheme, type ThemeOption } from '../stores/useTheme'
 import { ELECTRON_MAJOR_VERSION, READY_VERSION_LABEL } from '../../shared/app-version'
@@ -17,15 +18,12 @@ import PetSettingsPanel from '../components/settings/PetSettingsPanel'
 import ModelsRuntimeSettingsPanel from '../components/settings/ModelsRuntimeSettingsPanel'
 import { MODELS_RUNTIME_SETTINGS_SECTION } from '../../shared/model-pack-types'
 import { FILE_EMERGENCE_SETTING_KEY } from '../../shared/file-emergence'
-import { settingsListItemStyle } from '../components/settings/settings-theme'
 import { ReadyDotRMark } from '../components/agent/WelcomePanel'
 import {
   SETTINGS_NAV_GROUP_LABELS,
   SettingsCard,
   SettingsGroup,
   SettingsRow,
-  SettingsSwitch,
-  settingsButtonClass,
   type SettingItem,
   type SettingSection,
   type SettingsNavGroup,
@@ -230,8 +228,6 @@ const themeOptions: { value: ThemeOption; label: string; icon: React.ElementType
   { value: 'system', label: '跟随系统', icon: Monitor, description: '自动跟随系统设置' }
 ]
 
-const SETTINGS_PREVIEW_SHADOW = '0 1px 2px rgba(24, 39, 77, 0.08), 0 6px 16px -8px rgba(24, 39, 77, 0.22)'
-
 function OptionTick() {
   return (
     <span className="sx-option__tick" aria-hidden>
@@ -240,39 +236,25 @@ function OptionTick() {
   )
 }
 
+// A small window in each theme: the pane takes that theme's own --rn-* values through data-theme.
 function ThemeModePreview({ mode }: { mode: ThemeOption }) {
-  const pane = (dark: boolean) => (
-    <div
-      className="absolute inset-0 flex gap-[6px] p-[8px]"
-      style={{ background: dark ? 'linear-gradient(150deg, #263042 0%, #161C28 100%)' : 'linear-gradient(150deg, #FBFAF6 0%, #EFEBE2 100%)' }}
-    >
-      <div className="flex w-[22%] flex-col gap-[4px] pt-[2px]">
-        {[0.9, 0.6, 0.75].map((w, index) => (
-          <span key={index} className="h-[3px] rounded-full" style={{ width: `${w * 100}%`, background: dark ? 'rgba(255,255,255,0.22)' : 'rgba(24,39,77,0.14)' }} />
-        ))}
+  const pane = (theme: 'light' | 'dark', split = false) => (
+    <div data-theme={theme} className={`sx-theme-preview__pane ${split ? 'sx-theme-preview__pane--split' : ''}`.trim()}>
+      <div className="sx-theme-preview__nav">
+        {[0.9, 0.6, 0.75].map((w, index) => <span key={index} style={{ width: `${w * 100}%` }} />)}
       </div>
-      <div
-        className="flex-1 rounded-[6px] p-[6px]"
-        style={{
-          background: dark ? 'rgba(255,255,255,0.07)' : 'rgba(255,255,255,0.78)',
-          boxShadow: dark ? 'none' : '0 4px 10px -4px rgba(24,39,77,0.18)',
-        }}
-      >
-        <span className="block h-[4px] w-[46%] rounded-full" style={{ background: dark ? 'rgba(255,255,255,0.5)' : 'rgba(24,39,77,0.42)' }} />
-        <span className="mt-[5px] block h-[3px] w-[80%] rounded-full" style={{ background: dark ? 'rgba(255,255,255,0.16)' : 'rgba(24,39,77,0.12)' }} />
-        <span className="mt-[3px] block h-[3px] w-[64%] rounded-full" style={{ background: dark ? 'rgba(255,255,255,0.16)' : 'rgba(24,39,77,0.12)' }} />
-        <span className="mt-[7px] block h-[5px] w-[5px] rounded-full" style={{ background: 'var(--sx-accent)' }} />
+      <div className="sx-theme-preview__sheet">
+        <span style={{ width: '46%' }} />
+        <span style={{ width: '80%' }} />
+        <span style={{ width: '64%' }} />
+        <i />
       </div>
     </div>
   )
   return (
-    <div className="relative h-[84px] w-full overflow-hidden rounded-[10px]" style={{ boxShadow: SETTINGS_PREVIEW_SHADOW }} aria-hidden>
-      {mode === 'dark' ? pane(true) : pane(false)}
-      {mode === 'system' && (
-        <div className="absolute inset-0" style={{ clipPath: 'polygon(58% 0, 100% 0, 100% 100%, 42% 100%)' }}>
-          {pane(true)}
-        </div>
-      )}
+    <div className="sx-theme-preview" aria-hidden>
+      {pane(mode === 'dark' ? 'dark' : 'light')}
+      {mode === 'system' && pane('dark', true)}
     </div>
   )
 }
@@ -285,7 +267,7 @@ function ShortcutKeys({ value }: { value: string }) {
         <span key={alternative} className="inline-flex items-center gap-2">
           {altIndex > 0 && <span className="sx-meta">或</span>}
           <span className="sx-kbd">
-            {alternative.split(' + ').map((key) => <kbd key={key}>{key}</kbd>)}
+            {alternative.split(' + ').map((key) => <Kbd key={key}>{key}</Kbd>)}
           </span>
         </span>
       ))}
@@ -513,9 +495,9 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
     switch (setting.type) {
       case 'toggle':
         return (
-          <SettingsSwitch
+          <Switch
             checked={Boolean(setting.value)}
-            ariaLabel={setting.label}
+            label={setting.label}
             onChange={() => { void handleToggleSetting(sectionId, setting) }}
           />
         )
@@ -525,21 +507,20 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
           : <span className="sx-value">{setting.value}</span>
       case 'button':
         return (
-          <button
-            type="button"
+          <Button
             onClick={() => {
               if (isUpdateButton) void handleUpdateButtonClick()
             }}
             disabled={isUpdateButton && updateBusy}
             aria-busy={isUpdateButton && updateBusy ? true : undefined}
-            className={settingsButtonClass(setting.buttonVariant === 'primary' ? 'primary' : setting.buttonVariant === 'danger' ? 'danger' : 'secondary')}
+            variant={setting.buttonVariant === 'primary' ? 'primary' : setting.buttonVariant === 'danger' ? 'danger' : 'secondary'}
             style={{ minWidth: 104 }}
-          >
-            {isUpdateButton && updateBusy
+            icon={isUpdateButton && updateBusy
               ? <Loader2 className="animate-spin" />
-              : isUpdateButton && updateStatus !== 'downloaded' ? <RefreshCw /> : null}
+              : isUpdateButton && updateStatus !== 'downloaded' ? <RefreshCw /> : undefined}
+          >
             {isUpdateButton ? updateButtonLabel : setting.buttonLabel || '执行'}
-          </button>
+          </Button>
         )
       default:
         return null
@@ -572,85 +553,51 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
   )
 
   return (
-    <div className="settings-page-shell flex h-full flex-col overflow-hidden">
-      {/* Header — macOS traffic light clearance with paddingLeft: 72 */}
-      <div
-        data-liquid-shell="settings-header"
-        className="mx-3 mt-3 flex h-[46px] items-center gap-2 rounded-[16px] drag-region"
-        style={{
-          background: 'transparent',
-          paddingLeft: 72,
-          paddingRight: 18,
-          borderBottom: '1px solid transparent',
-          boxShadow: 'none',
-        }}
-      >
-        <button
-          type="button"
-          onClick={() => navigate('/')}
-          className={settingsButtonClass('ghost', { size: 'sm', className: 'no-drag' })}
-          style={{ paddingLeft: 6 }}
-        >
-          <ChevronLeft strokeWidth={2} />
+    <div className="settings-page-shell rn-ui flex h-full flex-col overflow-hidden">
+      {/* 顶部一条带（--rn-band-h），左侧为 macOS 红绿灯留 72px；与技能中心同一外框 */}
+      <header data-liquid-shell="settings-header" className="settings-page__header drag-region">
+        <Button className="no-drag" variant="ghost" size="sm" icon={<ChevronLeft strokeWidth={2} />} onClick={() => navigate('/')}>
           返回
-        </button>
-        <span className="text-[13px] font-semibold" style={{ color: 'var(--sx-title)' }}>
-          设置
-        </span>
-      </div>
+        </Button>
+        <h1 className="settings-page__title">设置</h1>
+      </header>
 
-      {/* Content */}
-      <div className="flex flex-1 gap-3 overflow-hidden px-3 pb-3 pt-1.5">
-        {/* Sidebar Navigation */}
+      <div className="settings-page__body">
+        {/* 导航落在窗口玻璃上：分组标题是 SectionHeader，分区是 ListRow（W1 §5） */}
         <nav
           aria-label="设置分区"
           data-liquid-shell="settings-sidebar"
-          className="panel-hover-scrollbar flex-shrink-0 overflow-auto"
-          style={{
-            width: 220,
-            background: 'transparent',
-            padding: '4px 6px 12px 4px',
-            scrollbarGutter: 'stable',
-          }}
+          className="settings-page__nav panel-hover-scrollbar"
           onMouseMove={handleSettingsSurfaceMotion}
           onScroll={handleSettingsSurfaceScroll}
           onMouseLeave={scheduleSettingsSurfaceRefresh}
         >
           {SETTINGS_NAV_GROUP_ORDER.map((group) => (
-            <div key={group} className="sx-nav-group flex flex-col gap-0.5">
-              <div className="sx-nav-group-label">{SETTINGS_NAV_GROUP_LABELS[group]}</div>
+            <div key={group} className="sx-nav-group">
+              <SectionHeader className="sx-nav-group-label" title={SETTINGS_NAV_GROUP_LABELS[group]} />
               {settings.filter((section) => section.group === group).map((section) => {
-                const isActive = activeSection === section.id
                 const Icon = section.icon
                 return (
-                  <button
+                  <ListRow
                     key={section.id}
-                    type="button"
-                    onClick={() => setActiveSection(section.id)}
-                    aria-current={isActive ? 'page' : undefined}
-                    title={section.description}
                     className="sx-nav-item"
-                    style={settingsListItemStyle(isActive)}
-                  >
-                    <Icon
-                      className="h-[15px] w-[15px] flex-shrink-0"
-                      strokeWidth={1.9}
-                      style={{ color: isActive ? 'var(--color-blue)' : 'var(--text-muted)' }}
-                    />
-                    <span className="sx-nav-item__label">{section.title}</span>
-                  </button>
+                    icon={<Icon />}
+                    label={section.title}
+                    current={activeSection === section.id}
+                    title={section.description}
+                    onClick={() => setActiveSection(section.id)}
+                  />
                 )
               })}
             </div>
           ))}
 
-          {/* Footer info */}
           <div className="sx-meta mt-4 px-3">
             {READY_VERSION_LABEL} · Electron {ELECTRON_MAJOR_VERSION}
           </div>
         </nav>
 
-        {/* Settings Content Panel — 内容直接落在窗口玻璃底上，不额外铺画布 */}
+        {/* 内容直接落在窗口玻璃上；每组设置是一张纸 */}
         <div className="flex-1 min-w-0 overflow-hidden">
           <div
             key={currentSection?.id || 'unknown'}
@@ -667,20 +614,9 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
           >
                 {currentSection && (
                   <>
-                    {/* Section Header */}
                     <div style={{ padding: '0 4px', marginBottom: 24 }}>
-                      <h2
-                        className="text-[20px] font-semibold leading-7 tracking-[-0.01em]"
-                        style={{ color: 'var(--sx-title)', margin: 0 }}
-                      >
-                        {currentSection.title}
-                      </h2>
-                      <p
-                        className="text-[13px] leading-6"
-                        style={{ color: 'var(--sx-muted)', maxWidth: 720, margin: '4px 0 0 0' }}
-                      >
-                        {currentSection.description}
-                      </p>
+                      <h2 className="settings-page__section-title">{currentSection.title}</h2>
+                      <p className="settings-page__section-desc">{currentSection.description}</p>
                     </div>
 
                 {/* AI Settings Panel — dynamic, wired to backend */}
@@ -703,7 +639,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                 {currentSection.id === 'skills' && (
                   <SettingsCard title="技能中心" description="技能属于助手：导入、启用、授权本地执行，都在技能中心整页里做。">
                     <SettingsRow label="打开技能中心" description="也可以从助手面板顶部或 ⌘K 进入">
-                      <button type="button" className={settingsButtonClass('secondary', { size: 'sm' })} onClick={() => navigate('/skills')}>打开</button>
+                      <Button size="sm" onClick={() => navigate('/skills')}>打开</Button>
                     </SettingsRow>
                   </SettingsCard>
                 )}
@@ -728,8 +664,8 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                             >
                               <ThemeModePreview mode={opt.value} />
                               <div className="flex items-center gap-2 px-1 pb-0.5" title={opt.description}>
-                                <OptIcon className="h-[14px] w-[14px]" strokeWidth={1.9} style={{ color: isActive ? 'var(--sx-accent)' : 'var(--sx-muted)' }} />
-                                <span className="text-[13px]" style={{ color: 'var(--sx-title)', fontWeight: isActive ? 600 : 500 }}>{opt.label}</span>
+                                <OptIcon className="h-[14px] w-[14px]" strokeWidth={1.75} style={{ color: isActive ? 'var(--rn-ink)' : 'var(--rn-ink-2)' }} />
+                                <span className="text-[13px]" style={{ color: 'var(--rn-ink)', fontWeight: isActive ? 600 : 500 }}>{opt.label}</span>
                               </div>
                               <OptionTick />
                             </button>
@@ -746,7 +682,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                             ? '系统已开启“减少透明度”，窗口现在不透明。'
                             : '玻璃改为不透明的底色，菜单与弹层不再模糊。系统开启“减少透明度”时也会这样。'}
                         >
-                          <SettingsSwitch checked={reduceTransparency} ariaLabel="减少透明" onChange={setReduceTransparency} />
+                          <Switch checked={reduceTransparency} label="减少透明" onChange={setReduceTransparency} />
                         </SettingsRow>
                       </SettingsCard>
                     </SettingsGroup>
@@ -758,13 +694,13 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                   <div className="mb-6 flex items-center gap-5 px-1">
                     <div
                       className="grid h-[64px] w-[64px] shrink-0 place-items-center rounded-[18px]"
-                      style={{ background: 'var(--sx-raised-bg)', boxShadow: 'var(--sx-raised-shadow)' }}
+                      style={{ background: 'var(--rn-sheet)', boxShadow: 'var(--rn-card-shadow)' }}
                     >
                       <ReadyDotRMark />
                     </div>
                     <div className="min-w-0">
-                      <div className="text-[18px] font-semibold tracking-[-0.01em]" style={{ color: 'var(--sx-title)' }}>Ready</div>
-                      <p className="mt-0.5 text-[12.5px] leading-6" style={{ color: 'var(--sx-muted)' }}>
+                      <div className="text-[18px] font-semibold tracking-[-0.01em]" style={{ color: 'var(--rn-ink)' }}>Ready</div>
+                      <p className="mt-0.5 text-[12.5px] leading-6" style={{ color: 'var(--rn-ink-2)' }}>
                         Ready 是由@上班摸鱼 开发的，面向知识工作者和创作者的通用桌面工作台
                       </p>
                       <div className="mt-1 flex items-center gap-4">

@@ -86,8 +86,8 @@
       "fontFace": 0
     },
     "components/browser": {
-      "color": 3,
-      "backdropFilter": 13,
+      "color": 0,
+      "backdropFilter": 0,
       "fontFace": 0
     },
     "components/canvas": {
@@ -121,7 +121,7 @@
       "fontFace": 0
     },
     "components/graph": {
-      "color": 18,
+      "color": 0,
       "backdropFilter": 0,
       "fontFace": 0
     },
@@ -156,12 +156,12 @@
       "fontFace": 0
     },
     "components/settings": {
-      "color": 2,
+      "color": 0,
       "backdropFilter": 0,
       "fontFace": 0
     },
     "components/skill": {
-      "color": 13,
+      "color": 0,
       "backdropFilter": 0,
       "fontFace": 0
     },
@@ -371,13 +371,13 @@
       "fontFace": 0
     },
     "pages": {
-      "color": 33,
+      "color": 16,
       "backdropFilter": 0,
       "fontFace": 0
     },
     "pages/modes": {
       "color": 0,
-      "backdropFilter": 2,
+      "backdropFilter": 0,
       "fontFace": 0
     },
     "pages/settings": {
@@ -401,8 +401,8 @@
       "fontFace": 0
     },
     "styles": {
-      "color": 563,
-      "backdropFilter": 39,
+      "color": 440,
+      "backdropFilter": 29,
       "fontFace": 0
     },
     "utils": {

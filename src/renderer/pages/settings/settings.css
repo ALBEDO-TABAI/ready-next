@@ -1,0 +1,752 @@
+/* 设置页的版式（W2 §3.2，W1 B13）：导航与内容落在窗口这块玻璃上，一组设置是一张纸（.sx-card，DL2）。
+   只用 --rn-*（DS1）。sx- 只是设置页自己的版式类前缀，没有私有调色板；按钮、输入、下拉、开关、分段、
+   标签、复选框、键帽、对话框都是 components/ui 的共用基元（W1 §5）。版式规则在 components 层，
+   与 Tailwind 工具类的先后关系同迁移前一致；文末几条只调整基元在设置页里的宽度与等宽字体。 */
+
+/* 设置页内的原生控件（下拉弹层、滚动条、日期框）跟随应用主题，而不是跟随系统外观。 */
+.settings-page-shell {
+  color-scheme: light;
+}
+
+html[data-theme='dark'] .settings-page-shell {
+  color-scheme: dark;
+}
+
+@layer components {
+  /* ── 外框：顶部一条带（与技能中心同一外框），左侧导航，右侧内容 ───────── */
+  .settings-page__header {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: var(--rn-s2);
+    height: var(--rn-band-h);
+    padding: 0 18px 0 72px;
+  }
+
+  .settings-page__title {
+    margin: 0;
+    font: 600 var(--rn-fs-md)/1 var(--rn-font-ui);
+    color: var(--rn-ink);
+  }
+
+  .settings-page__body {
+    display: flex;
+    flex: 1;
+    gap: var(--rn-s3);
+    min-height: 0;
+    overflow: hidden;
+    padding: 0 var(--rn-s3) var(--rn-s3);
+  }
+
+  .settings-page__nav {
+    flex: none;
+    width: 220px;
+    overflow: auto;
+    padding: var(--rn-s1) 6px var(--rn-s3) var(--rn-s1);
+    scrollbar-gutter: stable;
+  }
+
+  .settings-page__section-title {
+    margin: 0;
+    font: 600 20px/28px var(--rn-font-ui);
+    letter-spacing: -0.01em;
+    color: var(--rn-ink);
+  }
+
+  .settings-page__section-desc {
+    max-width: 720px;
+    margin: var(--rn-s1) 0 0;
+    font: 400 var(--rn-fs-md)/24px var(--rn-font-ui);
+    color: var(--rn-ink-2);
+  }
+
+  /* 导航：分组小标题是 SectionHeader，分区是 ListRow（当前分区用信号色，与外壳侧栏的导航器一致） */
+  .sx-nav-group {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .sx-nav-group + .sx-nav-group {
+    margin-top: var(--rn-s1);
+  }
+
+  .sx-nav-group-label.rn-section {
+    padding: 0 10px;
+  }
+
+  /* ── 分组 ───────────────────────────────────────────────── */
+  .sx-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 36px;
+  }
+
+  .sx-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--rn-s3);
+  }
+
+  .sx-group-label {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 0 var(--rn-s1);
+    font: 600 var(--rn-fs-sm)/1.45 var(--rn-font-ui);
+    letter-spacing: 0.02em;
+    color: var(--rn-ink-2);
+  }
+
+  .sx-group-label > small {
+    font-size: var(--rn-fs-xs);
+    font-weight: 400;
+    letter-spacing: 0;
+    color: var(--rn-ink-3);
+  }
+
+  /* 一组设置是一张纸：不透明、大圆角、贴地的柔和阴影（DL2、DL9）。纸上不再放纸。 */
+  .sx-card {
+    position: relative;
+    border-radius: var(--rn-r-sheet);
+    background: var(--rn-sheet);
+    box-shadow: var(--rn-sheet-shadow);
+  }
+
+  .sx-card--pad {
+    padding: 22px var(--rn-s6);
+  }
+
+  .sx-card__header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--rn-s4);
+    padding: var(--rn-s5) var(--rn-s6) 14px;
+  }
+
+  .sx-card--pad > .sx-card__header {
+    padding: 0 0 14px;
+  }
+
+  /* 卡头与内容之间只用留白分隔，不画横线 */
+  .sx-card__header + .sx-card__body {
+    padding-top: 2px;
+  }
+
+  .sx-card__body {
+    padding: 18px var(--rn-s6) 22px;
+  }
+
+  .sx-card__footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--rn-s2);
+    padding: var(--rn-s1) var(--rn-s6) var(--rn-s5);
+  }
+
+  .sx-card-title {
+    margin: 0;
+    font: 600 14px/1.45 var(--rn-font-ui);
+    color: var(--rn-ink);
+  }
+
+  .sx-card-desc {
+    max-width: 720px;
+    margin: 3px 0 0;
+    font-size: var(--rn-fs-sm);
+    line-height: 1.6;
+    color: var(--rn-ink-2);
+  }
+
+  /* 纸里的一块填充区（列表、代码、预览）：排版上分区，不是又一张纸 */
+  .sx-inset {
+    border-radius: var(--rn-r-md);
+    background: var(--rn-fill);
+  }
+
+  /* ── 设置行 ─────────────────────────────────────────────── */
+  .sx-row {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 28px;
+    min-height: 64px;
+    padding: 15px var(--rn-s6);
+  }
+
+  /* 卡头与第一行之间靠留白衔接 */
+  .sx-card__header:has(+ .sx-row) {
+    padding-bottom: var(--rn-s1);
+  }
+
+  /* 行间只留一条两端内缩的发丝线，承担列表的阅读节奏 */
+  .sx-row + .sx-row::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: var(--rn-s6);
+    right: var(--rn-s6);
+    height: 1px;
+    background: var(--rn-hair);
+  }
+
+  .sx-row--stack {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--rn-s3);
+  }
+
+  .sx-row__text {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .sx-row__label {
+    font: 500 var(--rn-fs-md)/1.45 var(--rn-font-ui);
+    color: var(--rn-ink);
+  }
+
+  .sx-row__desc {
+    max-width: 720px;
+    margin-top: 3px;
+    font-size: var(--rn-fs-sm);
+    line-height: 1.6;
+    color: var(--rn-ink-2);
+  }
+
+  .sx-row__control {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--rn-s2);
+  }
+
+  .sx-meta {
+    font-size: var(--rn-fs-xs);
+    line-height: 1.5;
+    color: var(--rn-ink-3);
+  }
+
+  .sx-mono {
+    font-family: var(--rn-font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* 正文里的链接：墨色加下划线，不另起颜色（DL6） */
+  .sx-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 0;
+    border: none;
+    background: none;
+    font: 500 var(--rn-fs-sm)/1.45 var(--rn-font-ui);
+    color: var(--rn-ink);
+    text-decoration: underline;
+    text-decoration-color: var(--rn-ink-4);
+    text-underline-offset: 3px;
+    cursor: pointer;
+    transition: text-decoration-color var(--rn-d-1) var(--rn-ease-out), opacity var(--rn-d-1) var(--rn-ease-out);
+  }
+
+  .sx-link:hover:not(:disabled) {
+    text-decoration-color: currentColor;
+  }
+
+  .sx-link:focus-visible {
+    border-radius: var(--rn-r-xs);
+    outline: 1.5px solid var(--rn-ink-3);
+    outline-offset: 1px;
+  }
+
+  .sx-link:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .sx-link svg {
+    width: 13px;
+    height: 13px;
+  }
+
+  /* ── 字段：标题、控件、说明竖排 ─────────────────────────── */
+  .sx-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .sx-field__label {
+    font: 500 var(--rn-fs-sm)/1.45 var(--rn-font-ui);
+    color: var(--rn-ink);
+  }
+
+  .sx-field__hint {
+    font-size: 11.5px;
+    line-height: 1.55;
+    color: var(--rn-ink-2);
+  }
+
+  /* 只读值（版本号、路径） */
+  .sx-value {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    height: var(--rn-control-h);
+    padding: 0 10px;
+    border-radius: var(--rn-r-sm);
+    background: var(--rn-fill);
+    font: 400 var(--rn-fs-sm)/1 var(--rn-font-mono);
+    color: var(--rn-ink);
+    white-space: nowrap;
+  }
+
+  .sx-kbd {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--rn-s1);
+  }
+
+  /* 带一段可见文字的开关 */
+  .sx-switch-label {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--rn-s2);
+    font: 500 var(--rn-fs-sm)/1 var(--rn-font-ui);
+    color: var(--rn-ink-2);
+  }
+
+  /* ── 可选卡片（外观、启动页、宠物等单选卡） ───────────────
+   * 平时透明，只露出内容本身；选中的样子与分段控件的选中项相同（纸色加卡片影）；
+   * 右上角的勾是墨色（与复选框的勾一致），信号色不用来表示“选中”。 */
+  .sx-option {
+    position: relative;
+    display: flex;
+    gap: var(--rn-s3);
+    min-width: 0;
+    padding: 14px var(--rn-s4);
+    border: none;
+    border-radius: 14px;
+    background: transparent;
+    box-shadow: none;
+    color: var(--rn-ink);
+    text-align: left;
+    cursor: pointer;
+    transition:
+      background-color var(--rn-d-1) var(--rn-ease-out),
+      box-shadow var(--rn-d-1) var(--rn-ease-out),
+      transform var(--rn-d-1) var(--rn-ease-out);
+  }
+
+  .sx-option:hover:not(:disabled):not([aria-checked='true']):not([aria-pressed='true']):not(.is-active) {
+    background: var(--rn-fill);
+  }
+
+  .sx-option:active:not(:disabled) {
+    transform: scale(0.99);
+  }
+
+  .sx-option:is([aria-checked='true'], [aria-pressed='true'], .is-active) {
+    background: var(--rn-sheet);
+    box-shadow: var(--rn-card-shadow);
+  }
+
+  .sx-option:focus-visible {
+    outline: 1.5px solid var(--rn-ink-3);
+    outline-offset: 1px;
+  }
+
+  .sx-option:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .sx-option__tick {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    display: grid;
+    place-items: center;
+    width: 16px;
+    height: 16px;
+    border-radius: var(--rn-r-pill);
+    background: var(--rn-inverse);
+    color: var(--rn-on-inverse);
+    opacity: 0;
+    transform: scale(0.6);
+    transition: opacity var(--rn-d-1) var(--rn-ease-out), transform var(--rn-d-2) var(--rn-ease-out);
+  }
+
+  .sx-option__tick svg {
+    width: 10px;
+    height: 10px;
+    stroke-width: 3.2;
+  }
+
+  .sx-option:is([aria-checked='true'], [aria-pressed='true'], .is-active) .sx-option__tick {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  /* 主题预览：两块缩小的窗口，用 data-theme 取各自主题的令牌 */
+  .sx-theme-preview {
+    position: relative;
+    width: 100%;
+    height: 84px;
+    overflow: hidden;
+    border-radius: 10px;
+    box-shadow: var(--rn-card-shadow);
+  }
+
+  .sx-theme-preview__pane {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    gap: 6px;
+    padding: var(--rn-s2);
+    background: var(--rn-stage);
+  }
+
+  .sx-theme-preview__pane--split {
+    clip-path: polygon(58% 0, 100% 0, 100% 100%, 42% 100%);
+  }
+
+  .sx-theme-preview__nav {
+    display: flex;
+    flex-direction: column;
+    gap: var(--rn-s1);
+    width: 22%;
+    padding-top: 2px;
+  }
+
+  .sx-theme-preview__nav > span {
+    height: 3px;
+    border-radius: var(--rn-r-pill);
+    background: var(--rn-ink-4);
+  }
+
+  .sx-theme-preview__sheet {
+    flex: 1;
+    padding: 6px;
+    border-radius: 6px;
+    background: var(--rn-sheet);
+    box-shadow: var(--rn-card-shadow);
+  }
+
+  .sx-theme-preview__sheet > span {
+    display: block;
+    height: 3px;
+    margin-top: 3px;
+    border-radius: var(--rn-r-pill);
+    background: var(--rn-fill-3);
+  }
+
+  .sx-theme-preview__sheet > span:first-child {
+    height: 4px;
+    margin-top: 0;
+    background: var(--rn-ink-3);
+  }
+
+  .sx-theme-preview__sheet > span:nth-child(2) {
+    margin-top: 5px;
+  }
+
+  .sx-theme-preview__sheet > i {
+    display: block;
+    width: 5px;
+    height: 5px;
+    margin-top: 7px;
+    border-radius: var(--rn-r-pill);
+    background: var(--rn-accent);
+  }
+
+  /* ── 状态：圆点 / 徽标 / 提示条 ─────────────────────────── */
+  .sx-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: var(--rn-fs-sm);
+    color: var(--rn-ink);
+  }
+
+  .sx-dot {
+    display: inline-block;
+    flex-shrink: 0;
+    width: 6px;
+    height: 6px;
+    border-radius: var(--rn-r-pill);
+    background: var(--rn-ink-3);
+  }
+
+  .sx-dot--accent {
+    background: var(--rn-accent);
+    box-shadow: 0 0 0 3px var(--rn-accent-soft);
+  }
+
+  .sx-dot--ink {
+    background: var(--rn-ink);
+  }
+
+  /* 异常态用空心环、强调态用实心点 + 光晕：橘红与红色色相相近时，形状仍能区分（状态不只靠颜色）。 */
+  .sx-dot--danger {
+    width: 7px;
+    height: 7px;
+    background: transparent;
+    box-shadow: inset 0 0 0 1.6px var(--rn-bad);
+  }
+
+  .sx-dot--warning {
+    width: 7px;
+    height: 7px;
+    background: transparent;
+    box-shadow: inset 0 0 0 1.6px var(--rn-warn);
+  }
+
+  .sx-dot--muted {
+    background: var(--rn-ink-4);
+  }
+
+  .sx-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 22px;
+    padding: 0 9px;
+    border-radius: var(--rn-r-pill);
+    background: var(--rn-fill);
+    font: 500 var(--rn-fs-xs)/1 var(--rn-font-ui);
+    color: var(--rn-ink-2);
+    white-space: nowrap;
+  }
+
+  .sx-badge svg {
+    width: 12px;
+    height: 12px;
+  }
+
+  .sx-badge--accent {
+    background: var(--rn-accent-soft);
+    color: var(--rn-accent-text);
+  }
+
+  .sx-badge--ink {
+    color: var(--rn-ink);
+  }
+
+  .sx-badge--danger {
+    background: color-mix(in srgb, var(--rn-bad) 10%, transparent);
+    color: var(--rn-bad);
+  }
+
+  .sx-badge--warning {
+    background: color-mix(in srgb, var(--rn-warn) 14%, transparent);
+    color: color-mix(in oklab, var(--rn-warn) 62%, var(--rn-ink));
+  }
+
+  /* 提示条是一层安静的填充，不是又一张卡片 */
+  .sx-notice {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 11px 14px;
+    border-radius: var(--rn-r-md);
+    background: var(--rn-fill);
+    font-size: var(--rn-fs-sm);
+    line-height: 1.6;
+    color: var(--rn-ink);
+  }
+
+  .sx-notice > svg {
+    flex-shrink: 0;
+    width: 15px;
+    height: 15px;
+    margin-top: 2px;
+    color: var(--rn-ink-2);
+  }
+
+  .sx-notice__title {
+    font-weight: 600;
+    color: var(--rn-ink);
+  }
+
+  .sx-notice__body {
+    color: var(--rn-ink-2);
+  }
+
+  .sx-notice__body--solo {
+    color: var(--rn-ink);
+  }
+
+  .sx-notice--danger {
+    background: color-mix(in srgb, var(--rn-bad) 9%, transparent);
+  }
+
+  .sx-notice--danger > svg,
+  .sx-notice--danger .sx-notice__title {
+    color: var(--rn-bad);
+  }
+
+  .sx-notice--warning {
+    background: color-mix(in srgb, var(--rn-warn) 12%, transparent);
+  }
+
+  .sx-notice--warning > svg {
+    color: color-mix(in oklab, var(--rn-warn) 62%, var(--rn-ink));
+  }
+
+  .sx-notice--accent > svg {
+    color: var(--rn-accent);
+  }
+
+  /* 行内状态文字 */
+  .sx-text-danger {
+    color: var(--rn-bad);
+  }
+
+  .sx-text-warning {
+    color: color-mix(in oklab, var(--rn-warn) 62%, var(--rn-ink));
+  }
+
+  /* 细进度条：正在进行，用信号色（DL5） */
+  .sx-progress {
+    position: relative;
+    height: 4px;
+    overflow: hidden;
+    border-radius: var(--rn-r-pill);
+    background: var(--rn-fill-2);
+  }
+
+  .sx-progress > span {
+    position: absolute;
+    inset: 0 auto 0 0;
+    border-radius: inherit;
+    background: var(--rn-accent);
+    transition: width var(--rn-d-2) var(--rn-ease-out);
+  }
+
+  /* ── 表格式列表（模型、资讯来源、Cookie 等） ───────────── */
+  .sx-table {
+    width: 100%;
+  }
+
+  .sx-table__head,
+  .sx-table__row {
+    display: grid;
+    align-items: center;
+    column-gap: var(--rn-s5);
+    padding: 0 var(--rn-s6);
+  }
+
+  .sx-table__head {
+    min-height: 40px;
+    font: 500 var(--rn-fs-xs)/1.45 var(--rn-font-ui);
+    letter-spacing: 0.02em;
+    color: var(--rn-ink-3);
+  }
+
+  .sx-table__row {
+    position: relative;
+    min-height: 64px;
+    border-radius: var(--rn-r-md);
+    transition: background-color var(--rn-d-1) var(--rn-ease-out);
+  }
+
+  .sx-table__head + .sx-table__row::before,
+  .sx-table__row + .sx-table__row::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: var(--rn-s6);
+    right: var(--rn-s6);
+    height: 1px;
+    background: var(--rn-hair);
+  }
+
+  .sx-table__row:hover,
+  .sx-table__row[data-interactive='true']:hover {
+    background: var(--rn-fill);
+  }
+
+  .sx-table__row[data-interactive='true'] {
+    cursor: pointer;
+  }
+
+  /* 行内操作：默认只是安静的文字，hover 到行时才显出可点 */
+  .sx-table__action {
+    opacity: 0.82;
+  }
+
+  .sx-table__row:hover .sx-table__action {
+    opacity: 1;
+  }
+
+  /* ── 统计数字 ──────────────────────────────────────────── */
+  .sx-stat {
+    display: flex;
+    flex-direction: column;
+    gap: var(--rn-s1);
+    min-width: 0;
+  }
+
+  .sx-stat__value {
+    font: 600 var(--rn-fs-2xl)/1.15 var(--rn-font-ui);
+    letter-spacing: -0.01em;
+    color: var(--rn-ink);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .sx-stat__label {
+    font-size: 11.5px;
+    color: var(--rn-ink-2);
+  }
+
+  /* 行内代码（键名、命令） */
+  .sx-code {
+    padding: 1px 4px;
+    border-radius: 5px;
+    background: var(--rn-fill-2);
+    font: 400 0.92em/1.4 var(--rn-font-mono);
+    color: var(--rn-ink);
+  }
+}
+
+/* 基元在设置页里的宽度：输入与多行默认铺满所在的列；下拉至少与行右侧的控件列同宽
+   （SETTINGS_ROW_CONTROL_MIN_WIDTH），内层 select 带 w-full 时整个下拉铺满。放在 components 层、特异性为 0：
+   基元本身不设宽度，Tailwind 工具类与各分区自己的宽度（如日历设置的 .cal-set-*）都能盖过它。 */
+@layer components {
+  :where(.settings-page-shell) :where(input.rn-field, textarea.rn-field) {
+    width: 100%;
+  }
+
+  :where(.settings-page-shell) :where(.rn-select) {
+    min-width: 136px;
+  }
+
+  :where(.settings-page-shell) :where(.rn-select > .rn-field) {
+    width: 100%;
+  }
+
+  :where(.settings-page-shell) :where(.rn-select:has(> .w-full)) {
+    width: 100%;
+  }
+}
+
+/* 等宽的字段：基元的 font 简写在 ready-next.primitives 层，这条未分层才能改字体。 */
+.settings-page-shell .rn-field.sx-mono {
+  font-family: var(--rn-font-mono);
+  font-size: var(--rn-fs-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-page-shell *,
+  .settings-page-shell *::before,
+  .settings-page-shell *::after {
+    transition-duration: 1ms !important;
+  }
+}

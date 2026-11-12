@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FastCardSaveDialog } from '../../components/browser/FastCardPanel'
+import { Button } from '../../components/ui'
 import { createModeSwitchAckWaiter } from '../../modules/browser/modeSwitchAckWaiter'
 import { openReadyRef } from '../../modules/workbench/open-ready-ref'
 import { receiveFastCardToDocument, reportCaptureError } from '../../modules/workbench/capture-receipt'
@@ -1345,8 +1346,8 @@ export default function BrowserMode({
                   <div
                     className="relative flex h-full w-[164px] flex-shrink-0 items-start justify-center overflow-hidden px-2 pt-3"
                     style={{
-                      background: 'color-mix(in srgb, var(--surface-card-bg) 90%, transparent)',
-                      boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--color-blue) 26%, transparent)',
+                      background: 'color-mix(in srgb, var(--rn-sheet) 90%, transparent)',
+                      boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--rn-accent) 26%, transparent)',
                     }}
                   >
                     <AgentBrowserSupervisionPanel
@@ -1365,7 +1366,7 @@ export default function BrowserMode({
                       className="pointer-events-none absolute inset-0"
                       style={{
                         borderRadius: '0 0 var(--workbench-canvas-radius) 0',
-                        boxShadow: 'inset 0 0 18px color-mix(in srgb, var(--color-blue) 12%, transparent)',
+                        boxShadow: 'inset 0 0 18px color-mix(in srgb, var(--rn-accent) 12%, transparent)',
                       }}
                     />
                   </div>
@@ -1374,8 +1375,8 @@ export default function BrowserMode({
                     className="relative flex min-w-0 flex-1 flex-col overflow-hidden"
                     style={isAgentSplitVisible
                       ? {
-                          background: 'color-mix(in srgb, var(--surface-card-bg) 88%, transparent)',
-                          boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--color-blue) 36%, transparent), inset 0 0 18px color-mix(in srgb, var(--color-blue) 16%, transparent)',
+                          background: 'color-mix(in srgb, var(--rn-sheet) 88%, transparent)',
+                          boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--rn-accent) 36%, transparent), inset 0 0 18px color-mix(in srgb, var(--rn-accent) 16%, transparent)',
                         }
                       : undefined}
                   >
@@ -1415,7 +1416,7 @@ export default function BrowserMode({
                         className="pointer-events-none absolute inset-0"
                         style={{
                           borderRadius: '0 0 var(--workbench-canvas-radius) 0',
-                          boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--color-blue) 42%, transparent), inset 0 0 24px color-mix(in srgb, var(--color-blue) 18%, transparent)',
+                          boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--rn-accent) 42%, transparent), inset 0 0 24px color-mix(in srgb, var(--rn-accent) 18%, transparent)',
                         }}
                       />
                     )}
@@ -1462,7 +1463,7 @@ export default function BrowserMode({
                 zIndex: 45,
                 pointerEvents: 'none',
                 borderRadius: '0 0 var(--workbench-canvas-radius) var(--workbench-canvas-radius)',
-                background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))',
+                background: 'var(--workbench-liquid-chrome-bg, var(--rn-sheet))',
                 overflow: 'hidden',
               }}
             >
@@ -1470,11 +1471,11 @@ export default function BrowserMode({
               <div className="flex h-full flex-col">
                 {/* 进度条占位（如果加载中） */}
                 {activeTab?.loading && (
-                  <div className="h-0.5 w-full" style={{ background: 'var(--border-default)' }}>
+                  <div className="h-0.5 w-full" style={{ background: 'var(--rn-fill-2)' }}>
                     <div
                       className="h-full rounded-r"
                       style={{
-                        background: 'var(--color-blue)',
+                        background: 'var(--rn-accent)',
                         width: '60%',
                         animation: 'browserSkeletonProgress 1.5s ease-in-out infinite',
                       }}
@@ -1482,7 +1483,7 @@ export default function BrowserMode({
                   </div>
                 )}
                 {/* 内容区域占位 */}
-                <div className="flex-1" style={{ background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))' }} />
+                <div className="flex-1" style={{ background: 'var(--workbench-liquid-chrome-bg, var(--rn-sheet))' }} />
               </div>
             </div>
           )}
@@ -1492,11 +1493,13 @@ export default function BrowserMode({
               onSave={target => useFastCard.getState().saveToCanvas(fastCardSaveItems, target)}
               onRetry={request => useFastCard.getState().retryTransfer(request)}
               onCancel={() => setFastCardSaveItems(null)} />}
-            {fastCardTransferReceipt && <div role="status" className="p-3 rounded" style={{ background: 'var(--bg-primary)', color: 'var(--text-primary)' }}>
-              已存到《{fastCardTransferReceipt.title}》 · <button onClick={() => {
+            {fastCardTransferReceipt && <div role="status" className="rn-float flex flex-wrap items-center gap-2 p-3" style={{ color: 'var(--rn-ink)' }}>
+              <span className="min-w-0 flex-1">已存到《{fastCardTransferReceipt.title}》</span>
+              <Button size="sm" variant="ghost" onClick={() => {
                 void openReadyRef({ kind: 'canvas', id: fastCardTransferReceipt.objectId }, 'browser').then(() => useFastCard.getState().dismissReceipt()).catch(error => useFastCard.setState({ syncState: { kind: 'error', message: String(error) } }))
-              }}>打开</button> · <button disabled={fastCardSyncState.kind === 'saving'} onClick={() => { void useFastCard.getState().undoTransfer() }}>撤销</button>
-              <button onClick={() => useFastCard.getState().dismissReceipt()}>关闭</button>
+              }}>打开</Button>
+              <Button size="sm" variant="ghost" disabled={fastCardSyncState.kind === 'saving'} onClick={() => { void useFastCard.getState().undoTransfer() }}>撤销</Button>
+              <Button size="sm" variant="ghost" onClick={() => useFastCard.getState().dismissReceipt()}>关闭</Button>
             </div>}
             {fastCardSyncState.kind === 'error' && <p role="alert">{fastCardSyncState.message}</p>}
           </div>}
@@ -1513,9 +1516,7 @@ export default function BrowserMode({
                 zIndex: 50,
                 pointerEvents: 'none',
                 borderRadius: '0 0 var(--workbench-canvas-radius) var(--workbench-canvas-radius)',
-                background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))',
-                backdropFilter: 'blur(var(--surface-blur)) saturate(var(--surface-saturate))',
-                WebkitBackdropFilter: 'blur(var(--surface-blur)) saturate(var(--surface-saturate))',
+                background: 'var(--workbench-liquid-chrome-bg, var(--rn-sheet))',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -1526,8 +1527,8 @@ export default function BrowserMode({
                   width: 24,
                   height: 24,
                   borderRadius: '50%',
-                  border: '2px solid var(--border-default)',
-                  borderTopColor: 'var(--color-blue)',
+                  border: '2px solid var(--rn-hair-2)',
+                  borderTopColor: 'var(--rn-accent)',
                   animation: 'browserStartupSpinner 0.8s linear infinite',
                 }}
               />

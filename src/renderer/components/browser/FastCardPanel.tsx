@@ -6,6 +6,7 @@ import type { FastCardCanvasTarget, FastCardTransferRequest } from '../../../sha
 import { getFastCardTransferAPI, getFastCardQuickNoteAPI } from '../../stores/useFastCard'
 import { FileText, Image as ImageIcon, Languages, Mic, PanelRightClose, Save, Send, Sparkles, TextQuote, Trash2, Video, X } from 'lucide-react'
 import { Button, IconButton } from '../ui/Button'
+import { Select } from '../ui/Field'
 import { itemPreview, itemTitle, sourceLabel, timeLabel } from './fastcard-presentation'
 import type { FastCardItem, FastCardSyncState } from '../../../shared/fastcard'
 
@@ -138,19 +139,17 @@ export function FastCardSaveDialog({ onSave, onRetry, onCancel }: {
   }
   if (creating) return <SaveToPicker trees={trees} initialTitle="新画板" extension=".canvas" onCancel={() => setCreating(false)} onConfirm={selection => save({ kind: 'new', title: selection.title,
     ...(selection.parentObjectId ? { parentObjectId: selection.parentObjectId } : {}), ...(selection.parentPath ? { parentPath: selection.parentPath } : {}) })} />
-  return <section role="dialog" aria-label="保存到画板" className="p-4 rounded space-y-3" style={{ background: 'var(--bg-primary)', color: 'var(--text-primary)' }}>
-    <h2>保存到画板</h2>
-    <select aria-label="目标画板" value={targetId} disabled={busy} onChange={event => setTargetId(event.target.value)}>
-      <option value="">上次的画板；首次保存到《灵感》</option>
-      {targets.map(target => <option key={target.objectId} value={target.objectId}>{target.title}</option>)}
-    </select>
-    <button disabled={busy || !trees.length} onClick={() => setCreating(true)}>新建画板…</button>
-    {error && <p role="alert">{error}</p>}
-    {pending.map(request => <button key={request.operationId} disabled={busy} onClick={() => {
+  return <section role="dialog" aria-label="保存到画板" className="rn-float flex flex-col gap-3 p-4" style={{ color: 'var(--rn-ink)' }}>
+    <h2 className="m-0 text-[15px] font-semibold">保存到画板</h2>
+    <Select aria-label="目标画板" value={targetId} disabled={busy} onChange={event => setTargetId(event.target.value)}
+      options={[{ value: '', label: '上次的画板；首次保存到《灵感》' }, ...targets.map(target => ({ value: target.objectId, label: target.title }))]} />
+    <Button size="sm" variant="ghost" className="self-start" disabled={busy || !trees.length} onClick={() => setCreating(true)}>新建画板…</Button>
+    {error && <p role="alert" className="m-0 text-[12px]" style={{ color: 'var(--rn-bad)' }}>{error}</p>}
+    {pending.map(request => <Button key={request.operationId} size="sm" className="self-start" disabled={busy} onClick={() => {
       setBusy(true); void onRetry(request).then(ok => { if (ok) onCancel() }).catch(failure => setError(String(failure))).finally(() => setBusy(false))
-    }}>恢复未完成的保存（{request.itemIds.length} 项）</button>)}
-    <div><button disabled={busy} onClick={onCancel}>取消</button><button disabled={busy} onClick={() => {
+    }}>恢复未完成的保存（{request.itemIds.length} 项）</Button>)}
+    <div className="flex justify-end gap-2"><Button variant="ghost" disabled={busy} onClick={onCancel}>取消</Button><Button variant="primary" disabled={busy} onClick={() => {
       void save(targetId ? { kind: 'existing', objectId: targetId } : undefined).then(result => { if (!result.ok) setError(result.message) })
-    }}>{busy ? '正在保存…' : '保存'}</button></div>
+    }}>{busy ? '正在保存…' : '保存'}</Button></div>
   </section>
 }

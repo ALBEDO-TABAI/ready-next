@@ -180,7 +180,7 @@ const visibleNativeTop = async app => Math.min(...(await app.evaluate(({ Browser
 
 async function settingsCase({ page }) {
   await page.getByRole('button', { name: '设置 ⌘,' }).click()
-  const nav = page.locator('nav[aria-label="设置分区"] .sx-nav-item', { has: page.locator('.sx-nav-item__label', { hasText: /^浏览器$/ }) })
+  const nav = page.locator('nav[aria-label="设置分区"] .sx-nav-item', { has: page.locator('.rn-row__label', { hasText: /^浏览器$/ }) })
   await nav.click({ timeout: 20000 })
   const panel = page.locator('[data-browser-search-settings]')
   await panel.waitFor({ timeout: 15000 })
@@ -379,7 +379,7 @@ async function darkTour({ session, model, site }) {
   await shot(page, 'suggestions-dark')
   await input.press('Escape')
   await page.getByRole('button', { name: '设置 ⌘,' }).click()
-  await page.locator('nav[aria-label="设置分区"] .sx-nav-item', { has: page.locator('.sx-nav-item__label', { hasText: /^浏览器$/ }) }).click()
+  await page.locator('nav[aria-label="设置分区"] .sx-nav-item', { has: page.locator('.rn-row__label', { hasText: /^浏览器$/ }) }).click()
   await page.locator('[data-browser-search-settings]').waitFor({ timeout: 15000 })
   await shot(page, 'settings-browser-dark')
   ok('dark: the band, card, sidebar, find bar, reading view, suggestions and settings render (screenshots)', true)

@@ -7,10 +7,8 @@ import {
   SettingsGroup,
   SettingsNotice,
   SettingsRow,
-  SettingsSegmented,
-  SettingsSwitch,
-  settingsButtonClass,
 } from '../../pages/settings/settings-shared'
+import { Button, Input, Segmented, Switch, Textarea } from '../ui'
 
 const PET_SIZE_OPTIONS: { value: PetSize; label: string }[] = [
   { value: 'small', label: '小' },
@@ -61,8 +59,8 @@ function EditableText({
       },
     }
     return multiline
-      ? <textarea {...sharedProps} rows={2} className="sx-textarea" style={{ minHeight: 0, fontSize: 12 }} />
-      : <input {...sharedProps} className="sx-input" style={{ height: 30 }} />
+      ? <Textarea {...sharedProps} rows={2} style={{ minHeight: 0, fontSize: 12 }} />
+      : <Input {...sharedProps} style={{ height: 30 }} />
   }
 
   return (
@@ -72,8 +70,8 @@ function EditableText({
         event.stopPropagation()
         setEditing(true)
       }}
-      className={`block w-full rounded-[7px] text-left transition-colors hover:bg-[var(--sx-hover)] ${multiline ? 'text-[12px] leading-[1.55]' : 'text-[13px] font-semibold'}`}
-      style={{ padding: '2px 6px', margin: '0 -6px', width: 'calc(100% + 12px)', color: multiline ? 'var(--sx-muted)' : 'var(--sx-title)' }}
+      className={`block w-full rounded-[7px] text-left transition-colors hover:bg-[var(--rn-fill)] ${multiline ? 'text-[12px] leading-[1.55]' : 'text-[13px] font-semibold'}`}
+      style={{ padding: '2px 6px', margin: '0 -6px', width: 'calc(100% + 12px)', color: multiline ? 'var(--rn-ink-2)' : 'var(--rn-ink)' }}
       title="点击编辑"
     >
       {value || placeholder}
@@ -82,11 +80,11 @@ function EditableText({
 }
 
 function PetThumb({ pet }: { pet: PetDefinition }) {
-  const frame = { background: 'var(--sx-inset-bg)' }
+  const frame = { background: 'var(--rn-fill)' }
   if (!pet.available || !pet.spritesheetUrl) {
     return (
       <div className="grid h-[52px] w-12 shrink-0 place-items-center rounded-[10px]" style={frame}>
-        <Cat size={20} strokeWidth={1.6} style={{ color: pet.available ? 'var(--sx-muted)' : 'var(--sx-subtle)' }} />
+        <Cat size={20} strokeWidth={1.6} style={{ color: pet.available ? 'var(--rn-ink-2)' : 'var(--rn-ink-3)' }} />
       </div>
     )
   }
@@ -168,25 +166,25 @@ export default function PetSettingsPanel() {
       <SettingsGroup label="显示">
         <SettingsCard>
           <SettingsRow label="启用桌面宠物" description="默认关闭，打开后显示系统级悬浮猫">
-            <SettingsSwitch ariaLabel="启用桌面宠物" checked={settings.enabled} onChange={(checked) => { void updateSettings({ enabled: checked }) }} />
+            <Switch label="启用桌面宠物" checked={settings.enabled} onChange={(checked) => { void updateSettings({ enabled: checked }) }} />
           </SettingsRow>
           <SettingsRow label="工作气泡" description="Agent 工作时显示平衡摘要">
-            <SettingsSwitch ariaLabel="工作气泡" checked={settings.bubbleEnabled} onChange={(checked) => { void updateSettings({ bubbleEnabled: checked }) }} />
+            <Switch label="工作气泡" checked={settings.bubbleEnabled} onChange={(checked) => { void updateSettings({ bubbleEnabled: checked }) }} />
           </SettingsRow>
           <SettingsRow label="置顶显示" description="Ready 后台时也留在最前">
-            <SettingsSwitch ariaLabel="置顶显示" checked={settings.alwaysOnTop} onChange={(checked) => { void updateSettings({ alwaysOnTop: checked }) }} />
+            <Switch label="置顶显示" checked={settings.alwaysOnTop} onChange={(checked) => { void updateSettings({ alwaysOnTop: checked }) }} />
           </SettingsRow>
           <SettingsRow label="显示尺寸" description="尺寸改变后会同步调整悬浮窗大小">
-            <button
-              type="button"
-              className={settingsButtonClass('ghost', { size: 'sm' })}
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<RotateCcw />}
               onClick={() => { void window.electronAPI.pet.resetPosition().then((result) => result.success && result.data && setSettings(result.data)) }}
             >
-              <RotateCcw />
               重置位置
-            </button>
-            <SettingsSegmented
-              ariaLabel="显示尺寸"
+            </Button>
+            <Segmented
+              label="显示尺寸"
               value={settings.size}
               options={PET_SIZE_OPTIONS}
               onChange={(size) => { void updateSettings({ size }) }}
@@ -199,14 +197,13 @@ export default function PetSettingsPanel() {
         title="选择猫猫"
         description={`已找到 ${availablePets.length} 只可用宠物，名称和描述可点击编辑`}
         actions={(
-          <button
-            type="button"
-            className={settingsButtonClass('secondary', { size: 'sm' })}
+          <Button
+            size="sm"
+            icon={settings.enabled ? <EyeOff /> : <Eye />}
             onClick={() => { void (settings.enabled ? window.electronAPI.pet.hide() : window.electronAPI.pet.show()) }}
           >
-            {settings.enabled ? <EyeOff /> : <Eye />}
             {settings.enabled ? '临时隐藏' : '显示一次'}
-          </button>
+          </Button>
         )}
       >
         {pets.length > 0 && (
@@ -240,9 +237,9 @@ export default function PetSettingsPanel() {
                       {active ? (
                         <span className="sx-badge sx-badge--ink">已选择</span>
                       ) : (
-                        <button
-                          type="button"
-                          className={settingsButtonClass('ghost', { size: 'sm' })}
+                        <Button
+                          variant="ghost"
+                          size="sm"
                           disabled={!pet.available}
                           aria-pressed={false}
                           onClick={(event) => {
@@ -251,7 +248,7 @@ export default function PetSettingsPanel() {
                           }}
                         >
                           选择
-                        </button>
+                        </Button>
                       )}
                     </div>
                   </div>

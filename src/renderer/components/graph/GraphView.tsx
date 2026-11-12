@@ -15,11 +15,11 @@ import {
   type GraphViewport,
 } from './graph-interactions'
 import {
-  DARK_GRAPH_PALETTE,
-  LIGHT_GRAPH_PALETTE,
   drawGraphCanvas,
   findGraphNodeAtPoint,
   fitGraphViewport,
+  readGraphPalette,
+  type GraphCanvasPalette,
 } from './graph-canvas-renderer'
 import { graphSessionRegistry, type GraphDataFetcher } from './graph-session'
 import { createLatestFrameScheduler, type LatestFrameScheduler } from './graph-frame-scheduler'
@@ -166,10 +166,14 @@ export default function GraphView({
     return related
   }, [hoveredNodeId, snapshot.graph.edges])
 
+  // The tokens resolve where the canvas sits; read them once per theme, not on every frame of a pan.
+  const paletteRef = useRef<{ dark: boolean; palette: GraphCanvasPalette } | null>(null)
+
   useEffect(() => {
     const canvas = canvasRef.current
     const context = canvas?.getContext('2d')
     if (!canvas || !context) return
+    if (paletteRef.current?.dark !== darkTheme) paletteRef.current = { dark: darkTheme, palette: readGraphPalette(canvas) }
     drawGraphCanvas(context, snapshot.graph, snapshot.positions, {
       width,
       height,
@@ -177,7 +181,7 @@ export default function GraphView({
       viewport,
       hoveredNodeId,
       relatedNodeIds,
-      palette: darkTheme ? DARK_GRAPH_PALETTE : LIGHT_GRAPH_PALETTE,
+      palette: paletteRef.current.palette,
       indexById,
       degrees: nodeDegrees,
     })
@@ -429,7 +433,7 @@ export default function GraphView({
       />
       {hoveredPreview && (
         <div
-          className="knowledge-graph-preview"
+          className="knowledge-graph-preview rn-float"
           data-graph-document-preview="true"
           role="tooltip"
           style={{ left: hoveredPreview.left, top: hoveredPreview.top, width: hoveredPreview.width }}

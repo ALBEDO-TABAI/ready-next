@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createElement, useState } from 'react'
+import { createElement } from 'react'
 import { act } from 'react'
 import { JSDOM } from 'jsdom'
 
 // 设置页设计系统的行为合同：
-// 1) 共享控件（分段、开关、按钮类名）对外的可访问语义与交互；
+// 1) 设置页自己的版式件（卡、行、提示、状态）在共用基元上的结构与语义（B13：私有控件已删除）；
 // 2) 设置页外壳：分组导航、aria-current、外观页的减少透明开关写到根节点。
 
 function installDom(): () => void {
@@ -44,59 +44,34 @@ function installDom(): () => void {
   }
 }
 
-test('settings button class helper maps variants onto the shared sx-btn system', async () => {
-  const { settingsButtonClass } = await import('../renderer/pages/settings/settings-shared')
-  assert.equal(settingsButtonClass(), 'sx-btn')
-  assert.equal(settingsButtonClass('primary'), 'sx-btn sx-btn--primary')
-  assert.equal(settingsButtonClass('danger-ghost', { size: 'sm' }), 'sx-btn sx-btn--danger sx-btn--ghost sx-btn--sm')
-  assert.equal(settingsButtonClass('ghost', { icon: true, className: 'no-drag' }), 'sx-btn sx-btn--ghost sx-btn--icon no-drag')
-})
-
-test('segmented control and switch expose accessible state and report changes', async () => {
+test('settings rows and notices keep their structure and roles on the shared primitives', async () => {
   const restore = installDom()
   try {
     const { createRoot } = await import('react-dom/client')
-    const { SettingsSegmented, SettingsSwitch } = await import('../renderer/pages/settings/settings-shared')
+    const { SettingsCard, SettingsRow, SettingsNotice, SettingsStatus, SettingsSwitchLabel } = await import('../renderer/pages/settings/settings-shared')
+    const { Switch } = await import('../renderer/components/ui')
     const switchChanges: boolean[] = []
 
-    function Harness() {
-      const [size, setSize] = useState<'small' | 'medium' | 'large'>('medium')
-      return createElement('div', null,
-        createElement(SettingsSegmented<'small' | 'medium' | 'large'>, {
-          ariaLabel: '显示尺寸',
-          value: size,
-          onChange: setSize,
-          options: [
-            { value: 'small', label: '小' },
-            { value: 'medium', label: '中' },
-            { value: 'large', label: '大' },
-          ],
-        }),
-        createElement(SettingsSegmented<'a' | 'b'>, {
-          ariaLabel: '平台',
-          kind: 'tabs',
-          value: 'a',
-          onChange: () => undefined,
-          options: [{ value: 'a', label: 'A' }, { value: 'b', label: 'B' }],
-        }),
-        createElement(SettingsSwitch, { checked: false, ariaLabel: '推送通知', onChange: (next: boolean) => switchChanges.push(next) }),
-      )
-    }
-
     const root = createRoot(document.getElementById('root')!)
-    await act(async () => { root.render(createElement(Harness)) })
+    await act(async () => {
+      root.render(createElement(SettingsCard, { title: '卡片' },
+        createElement(SettingsRow, { label: '推送通知', description: '说明' },
+          createElement(SettingsSwitchLabel, { text: '启用' },
+            createElement(Switch, { checked: false, label: '推送通知', onChange: (next: boolean) => switchChanges.push(next) }))),
+        createElement(SettingsNotice, { tone: 'danger', title: '出错了' }, '原因'),
+        createElement(SettingsStatus, { tone: 'accent' }, '已连接'),
+      ))
+    })
 
-    const radiogroup = document.querySelector('[role="radiogroup"][aria-label="显示尺寸"]')!
-    const radios = Array.from(radiogroup.querySelectorAll('[role="radio"]'))
-    assert.deepEqual(radios.map((radio) => radio.getAttribute('aria-checked')), ['false', 'true', 'false'])
-    await act(async () => { (radios[2] as HTMLButtonElement).click() })
-    assert.deepEqual(radios.map((radio) => radio.getAttribute('aria-checked')), ['false', 'false', 'true'])
-
-    const tabs = Array.from(document.querySelectorAll('[role="tablist"][aria-label="平台"] [role="tab"]'))
-    assert.deepEqual(tabs.map((tab) => tab.getAttribute('aria-selected')), ['true', 'false'])
-
-    const toggle = document.querySelector('button[role="switch"][aria-label="推送通知"]') as HTMLButtonElement
+    assert.ok(document.querySelector('section.sx-card .sx-card-title'))
+    assert.equal(document.querySelector('.sx-row .sx-row__label')?.textContent, '推送通知')
+    assert.equal(document.querySelector('.sx-row .sx-row__desc')?.textContent, '说明')
+    assert.equal(document.querySelector('[role="alert"].sx-notice--danger .sx-notice__title')?.textContent, '出错了')
+    assert.ok(document.querySelector('.sx-status .sx-dot--accent'))
+    // The switch is the shared primitive: role, name and state; the visible text is only a caption.
+    const toggle = document.querySelector('button[role="switch"].rn-switch[aria-label="推送通知"]') as HTMLButtonElement
     assert.equal(toggle.getAttribute('aria-checked'), 'false')
+    assert.equal(document.querySelector('.sx-switch-label > span[aria-hidden]')?.textContent, '启用')
     await act(async () => { toggle.click() })
     assert.deepEqual(switchChanges, [true])
 

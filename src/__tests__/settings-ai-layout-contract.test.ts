@@ -26,8 +26,8 @@ test('ai settings panel separates the model list from the second-level editor', 
   assert.match(settingsPage, /返回模型列表/)
   assert.match(settingsPage, /配置/)
   assert.match(settingsPage, /编辑 \{selectedProfile\.name\}/)
-  assert.match(settingsPage, /role="tablist"/)
-  assert.match(settingsPage, /aria-label="模型配置分区"/)
+  // B13: the editor's sections are the shared Tabs primitive (role="tablist" with this label, W1 §5).
+  assert.match(settingsPage, /<Tabs\s+label="模型配置分区"/)
   assert.match(settingsPage, /showInChatSwitcher/)
   assert.match(settingsPage, /在切换面板显示/)
   assert.match(settingsPage, /模型列表/)

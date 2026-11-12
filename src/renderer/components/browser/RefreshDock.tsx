@@ -1,5 +1,6 @@
 import { ArrowLeft, ArrowRight, Loader2, RefreshCw } from 'lucide-react'
 import type { RefreshDockMode } from '../../modules/browser/useBrowserHeaderInteraction'
+import { IconButton } from '../ui'
 
 interface RefreshDockProps {
   loading: boolean
@@ -40,40 +41,27 @@ export default function RefreshDock({
         overflow: 'hidden',
       }}
     >
-      <button
-        type="button"
+      <IconButton
+        icon={loading ? <Loader2 className="animate-spin" style={{ color: 'var(--rn-accent)' }} /> : <RefreshCw />}
         onClick={onRefresh}
-        className="flex h-[28px] w-[28px] flex-shrink-0 items-center justify-center rounded-full transition-colors hover:bg-[var(--bg-hover)]"
         title="刷新"
-      >
-        {loading ? (
-          <Loader2 style={{ width: 14, height: 14 }} className="animate-spin text-[var(--color-blue)]" strokeWidth={2} />
-        ) : (
-          <RefreshCw style={{ width: 14, height: 14 }} className="text-[var(--text-light)]" strokeWidth={2} />
-        )}
-      </button>
+      />
 
-      <button
-        type="button"
+      <IconButton
+        icon={<ArrowLeft />}
         onClick={onGoBack}
         disabled={!canGoBack}
-        className="flex h-[28px] w-[28px] flex-shrink-0 items-center justify-center rounded-full transition-[background-color,opacity] duration-150 hover:bg-[var(--bg-hover)] disabled:opacity-30"
-        style={{ opacity: refreshDockMode === 'revealed' ? 1 : 0.001 }}
+        style={refreshDockMode === 'revealed' ? undefined : { opacity: 0.001 }}
         title="后退"
-      >
-        <ArrowLeft style={{ width: 14, height: 14 }} className="text-[var(--text-light)]" strokeWidth={2} />
-      </button>
+      />
 
-      <button
-        type="button"
+      <IconButton
+        icon={<ArrowRight />}
         onClick={onGoForward}
         disabled={!canGoForward}
-        className="flex h-[28px] w-[28px] flex-shrink-0 items-center justify-center rounded-full transition-[background-color,opacity] duration-150 hover:bg-[var(--bg-hover)] disabled:opacity-30"
-        style={{ opacity: refreshDockMode === 'revealed' ? 1 : 0.001 }}
+        style={refreshDockMode === 'revealed' ? undefined : { opacity: 0.001 }}
         title="前进"
-      >
-        <ArrowRight style={{ width: 14, height: 14 }} className="text-[var(--text-light)]" strokeWidth={2} />
-      </button>
+      />
     </div>
   )
 }

@@ -1,11 +1,10 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { createPortal } from 'react-dom'
 import { Check, ChevronRight, Loader2, RefreshCw, Search, Trash2 } from 'lucide-react'
+import { Button, Checkbox, IconButton, Input, Select, confirmDialog } from '../../components/ui'
 import {
   SETTINGS_ROW_CONTROL_MIN_WIDTH,
   SettingsCard,
   SettingsNotice,
-  settingsButtonClass,
 } from './settings-shared'
 import type {
   BrowserCookieDomainGroup,
@@ -109,7 +108,11 @@ export function BrowserPrivacySettingsPanel() {
   const [busyCookieKey, setBusyCookieKey] = useState<string | null>(null)
   const [clearingAllCookies, setClearingAllCookies] = useState(false)
 
-  const [confirm, setConfirm] = useState<ConfirmState | null>(null)
+  // Every destructive action asks first through the shared dialog (W1 §5); it runs only when confirmed.
+  const confirmThen = useCallback(async (spec: ConfirmState) => {
+    const ok = await confirmDialog({ title: spec.title, body: spec.message, confirmLabel: spec.confirmLabel, danger: true })
+    if (ok) await spec.action()
+  }, [])
 
   const refreshSummary = useCallback(async () => {
     if (typeof window === 'undefined' || !window.electronAPI?.browser?.getPrivacySummary) {
@@ -218,13 +221,13 @@ export function BrowserPrivacySettingsPanel() {
             ? `全部时间的${selectedItems.filter((item) => !item.timeRanged).map((item) => item.label).join('、')}`
             : null,
         ].filter((part): part is string => Boolean(part))
-    setConfirm({
+    void confirmThen({
       title: '确认清除浏览数据',
       message: `将清除${scopeParts.join('，并清除')}。此操作不可撤销，是否继续？`,
       confirmLabel: '确认清除',
       action: performClear,
     })
-  }, [selectedItems, timeRange, rangeSeconds, performClear])
+  }, [selectedItems, timeRange, rangeSeconds, performClear, confirmThen])
 
   const removeDomainCookies = useCallback(async (domain: string) => {
     if (typeof window === 'undefined' || !window.electronAPI?.browser?.removeCookiesForDomain) return
@@ -303,17 +306,13 @@ export function BrowserPrivacySettingsPanel() {
         title="清除浏览数据"
         description="清除浏览历史、下载记录、Cookie 和缓存"
         actions={(
-          <select
+          <Select
             value={timeRange}
             aria-label="时间范围"
             onChange={(e) => setTimeRange(e.target.value as TimeRangeValue)}
-            className="sx-select"
             style={{ minWidth: SETTINGS_ROW_CONTROL_MIN_WIDTH }}
-          >
-            {TIME_RANGE_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
+            options={TIME_RANGE_OPTIONS.map(({ value, label }) => ({ value, label }))}
+          />
         )}
       >
         {summaryError && (
@@ -323,30 +322,33 @@ export function BrowserPrivacySettingsPanel() {
         )}
 
         <div>
-          {CLEAR_ITEMS.map((item) => (
-            <label
-              key={item.id}
-              className="sx-row cursor-pointer select-none transition-colors hover:bg-[var(--sx-hover)]"
-              style={{ justifyContent: 'flex-start', gap: 14, minHeight: 58 }}
-            >
-              <input
-                type="checkbox"
-                checked={checkedItems[item.id]}
-                onChange={(e) =>
-                  setCheckedItems((prev) => ({ ...prev, [item.id]: e.target.checked }))
-                }
-                className="sx-check"
-              />
-              <span className="sx-row__text">
-                <span className="sx-row__label block">
-                  {item.label}
-                </span>
-                <span className="sx-row__desc block">
-                  {summaryLoading ? '…' : itemDescriptions[item.id]}
-                </span>
-              </span>
-            </label>
-          ))}
+          {CLEAR_ITEMS.map((item) => {
+            const toggle = (checked: boolean) => setCheckedItems((prev) => ({ ...prev, [item.id]: checked }))
+            return (
+              // The whole row toggles: the label inside the shared Checkbox, and the row's own padding around it.
+              <div
+                key={item.id}
+                className="sx-row cursor-pointer select-none transition-colors hover:bg-[var(--rn-fill)]"
+                style={{ justifyContent: 'flex-start', gap: 14, minHeight: 58 }}
+                onClick={(event) => { if (!(event.target as HTMLElement).closest('.rn-check')) toggle(!checkedItems[item.id]) }}
+              >
+                <Checkbox
+                  checked={checkedItems[item.id]}
+                  onChange={toggle}
+                  label={(
+                    <span className="sx-row__text">
+                      <span className="sx-row__label block">
+                        {item.label}
+                      </span>
+                      <span className="sx-row__desc block">
+                        {summaryLoading ? '…' : itemDescriptions[item.id]}
+                      </span>
+                    </span>
+                  )}
+                />
+              </div>
+            )
+          })}
         </div>
 
         <div className="sx-card__footer">
@@ -355,17 +357,16 @@ export function BrowserPrivacySettingsPanel() {
               Cookie、站点数据与缓存不支持按时间范围清除，勾选后将全部清除。
             </div>
           )}
-          <button
-            type="button"
+          <Button
+            variant="danger"
             onClick={requestClear}
             disabled={clearing || selectedItems.length === 0}
             aria-busy={clearing || undefined}
-            className={settingsButtonClass('danger')}
             style={{ minWidth: SETTINGS_ROW_CONTROL_MIN_WIDTH }}
+            icon={clearing ? <Loader2 className="animate-spin" /> : <Trash2 />}
           >
-            {clearing ? <Loader2 className="animate-spin" /> : <Trash2 />}
             {clearing ? '清除中…' : '清除所选数据'}
-          </button>
+          </Button>
         </div>
       </SettingsCard>
 
@@ -397,19 +398,17 @@ export function BrowserPrivacySettingsPanel() {
           : '查看并删除各站点存储在本地的 Cookie'}
         actions={(
           <>
-            <button
-              type="button"
+            <Button
               onClick={() => { void refreshCookies(); void refreshSummary() }}
               disabled={cookiesLoading}
-              className={settingsButtonClass('secondary')}
+              icon={<RefreshCw className={cookiesLoading ? 'animate-spin' : ''} />}
             >
-              <RefreshCw className={cookiesLoading ? 'animate-spin' : ''} />
               刷新
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="danger"
               onClick={() =>
-                setConfirm({
+                void confirmThen({
                   title: '确认清除全部 Cookie',
                   message: `将删除全部 ${summary?.cookieDomainCount ?? ''} 个站点的 ${totalCookies} 个 Cookie，多数网站需要重新登录。是否继续？`,
                   confirmLabel: '全部删除',
@@ -418,11 +417,10 @@ export function BrowserPrivacySettingsPanel() {
               }
               disabled={clearingAllCookies || totalCookies === 0}
               aria-busy={clearingAllCookies || undefined}
-              className={settingsButtonClass('danger')}
+              icon={clearingAllCookies ? <Loader2 className="animate-spin" /> : <Trash2 />}
             >
-              {clearingAllCookies ? <Loader2 className="animate-spin" /> : <Trash2 />}
               全部删除
-            </button>
+            </Button>
           </>
         )}
       >
@@ -431,14 +429,13 @@ export function BrowserPrivacySettingsPanel() {
             <Search
               className="pointer-events-none absolute left-3 top-1/2 h-[14px] w-[14px] -translate-y-1/2"
               strokeWidth={1.9}
-              style={{ color: 'var(--sx-subtle)' }}
+              style={{ color: 'var(--rn-ink-3)' }}
             />
-            <input
+            <Input
               value={cookieSearch}
               onChange={(e) => setCookieSearch(e.target.value)}
               placeholder="按域名搜索"
               aria-label="按域名搜索"
-              className="sx-input"
               style={{ paddingLeft: 32 }}
             />
           </div>
@@ -449,11 +446,11 @@ export function BrowserPrivacySettingsPanel() {
           )}
         </div>
 
-        <div className="max-h-[440px] overflow-y-auto rounded-b-[15px]">
+        <div className="max-h-[440px] overflow-y-auto rounded-b-[calc(var(--rn-r-sheet)-1px)]">
           {cookiesLoading && (
             <div
               className="flex items-center justify-center gap-2 text-[12px]"
-              style={{ padding: '28px 16px', color: 'var(--sx-muted)' }}
+              style={{ padding: '28px 16px', color: 'var(--rn-ink-2)' }}
             >
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
               正在读取 Cookie…
@@ -462,7 +459,7 @@ export function BrowserPrivacySettingsPanel() {
           {!cookiesLoading && filteredGroups.length === 0 && (
             <div
               className="text-center text-[12px]"
-              style={{ padding: '28px 16px', color: 'var(--sx-muted)' }}
+              style={{ padding: '28px 16px', color: 'var(--rn-ink-2)' }}
             >
               {cookieSearch.trim() ? '没有匹配的站点' : '暂无 Cookie'}
             </div>
@@ -478,7 +475,7 @@ export function BrowserPrivacySettingsPanel() {
                     minHeight: 46,
                     borderRadius: 0,
                     paddingRight: 12,
-                    ...(expanded ? { background: 'var(--sx-hover)' } : null),
+                    ...(expanded ? { background: 'var(--rn-fill)' } : null),
                   }}
                 >
                   <button
@@ -490,25 +487,25 @@ export function BrowserPrivacySettingsPanel() {
                     <ChevronRight
                       className={`h-3.5 w-3.5 flex-shrink-0 transition-transform duration-150 ${expanded ? 'rotate-90' : ''}`}
                       strokeWidth={2}
-                      style={{ color: 'var(--sx-subtle)' }}
+                      style={{ color: 'var(--rn-ink-3)' }}
                     />
                     <span
                       className={`sx-mono truncate text-[12.5px] ${expanded ? 'font-medium' : ''}`}
-                      style={{ color: expanded ? 'var(--sx-title)' : 'var(--sx-body)' }}
+                      style={{ color: 'var(--rn-ink)' }}
                     >
                       {group.domain}
                     </span>
                     <span
                       className="flex-shrink-0 text-[11.5px] tabular-nums"
-                      style={{ marginLeft: 'auto', paddingLeft: 16, color: 'var(--sx-subtle)' }}
+                      style={{ marginLeft: 'auto', paddingLeft: 16, color: 'var(--rn-ink-3)' }}
                     >
                       {group.cookies.length} 个
                     </span>
                   </button>
-                  <button
-                    type="button"
+                  <IconButton
+                    icon={busyDomain === group.domain ? <Loader2 className="animate-spin" /> : <Trash2 />}
                     onClick={() =>
-                      setConfirm({
+                      void confirmThen({
                         title: '确认删除站点 Cookie',
                         message: `将删除 ${group.domain} 的 ${group.cookies.length} 个 Cookie，该站点可能需要重新登录。是否继续？`,
                         confirmLabel: '删除',
@@ -518,14 +515,10 @@ export function BrowserPrivacySettingsPanel() {
                     disabled={busyDomain === group.domain}
                     title="删除该站点全部 Cookie"
                     aria-label={`删除 ${group.domain} 的全部 Cookie`}
-                    className={`${settingsButtonClass('danger-quiet', { size: 'sm', icon: true })} ml-1 transition-opacity ${
+                    className={`ml-1 transition-opacity ${
                       expanded || busyDomain === group.domain ? 'opacity-100' : 'opacity-0 focus-visible:opacity-100 group-hover:opacity-100'
                     }`}
-                  >
-                    {busyDomain === group.domain
-                      ? <Loader2 className="animate-spin" />
-                      : <Trash2 />}
-                  </button>
+                  />
                 </div>
                 {expanded && (
                   // 左缘 44px = 行内衬 20 + chevron 14 + 间距 10，与域名文字起点严格对齐。
@@ -538,11 +531,11 @@ export function BrowserPrivacySettingsPanel() {
                           className="group/cookie"
                           style={{
                             padding: '10px 10px 10px 14px',
-                            borderTop: cookieIndex === 0 ? undefined : '1px solid var(--sx-divider)',
+                            borderTop: cookieIndex === 0 ? undefined : '1px solid var(--rn-hair)',
                           }}
                         >
                           <div className="flex items-center gap-2.5">
-                            <span className="sx-mono min-w-0 truncate text-[12px] font-medium" style={{ color: 'var(--sx-body)' }}>
+                            <span className="sx-mono min-w-0 truncate text-[12px] font-medium" style={{ color: 'var(--rn-ink)' }}>
                               {cookie.name}
                             </span>
                             <span
@@ -551,25 +544,21 @@ export function BrowserPrivacySettingsPanel() {
                             >
                               {cookieMetaLine(cookie)}
                             </span>
-                            <button
-                              type="button"
+                            <IconButton
+                              size="sm"
+                              icon={busyCookieKey === key ? <Loader2 className="animate-spin" /> : <Trash2 />}
                               onClick={() => { void removeSingleCookie(cookie, key) }}
                               disabled={busyCookieKey === key}
                               title="删除此 Cookie"
                               aria-label={`删除 Cookie ${cookie.name}`}
-                              className={`${settingsButtonClass('danger-quiet', { size: 'sm', icon: true })} transition-opacity ${
+                              className={`transition-opacity ${
                                 busyCookieKey === key ? 'opacity-100' : 'opacity-0 focus-visible:opacity-100 group-hover/cookie:opacity-100'
                               }`}
-                              style={{ width: 24, height: 24 }}
-                            >
-                              {busyCookieKey === key
-                                ? <Loader2 className="animate-spin" />
-                                : <Trash2 />}
-                            </button>
+                            />
                           </div>
                           <div
                             className="sx-mono overflow-hidden text-ellipsis whitespace-nowrap text-[11px] leading-4"
-                            style={{ marginTop: 4, paddingRight: 34, color: 'var(--sx-muted)' }}
+                            style={{ marginTop: 4, paddingRight: 34, color: 'var(--rn-ink-2)' }}
                           >
                             {cookie.value || '（空值）'}
                           </div>
@@ -583,51 +572,6 @@ export function BrowserPrivacySettingsPanel() {
           })}
         </div>
       </SettingsCard>
-
-      {/* Confirmation modal — same pattern as StorageSettingsPanel */}
-      {confirm && createPortal(
-        <div
-          data-ready-native-overlay=""
-          className="sx-scrim"
-          onClick={() => setConfirm(null)}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="browser-privacy-confirm-title"
-            className="sx-dialog"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div id="browser-privacy-confirm-title" className="sx-card-title">
-              {confirm.title}
-            </div>
-            <div className="mt-2 text-[12.5px] leading-[1.65]" style={{ color: 'var(--sx-muted)' }}>
-              {confirm.message}
-            </div>
-            <div className="sx-dialog__actions">
-              <button
-                type="button"
-                onClick={() => setConfirm(null)}
-                className={settingsButtonClass('secondary')}
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const action = confirm.action
-                  setConfirm(null)
-                  void action()
-                }}
-                className={settingsButtonClass('danger')}
-              >
-                {confirm.confirmLabel}
-              </button>
-            </div>
-          </div>
-        </div>,
-        document.body,
-      )}
     </div>
   )
 }

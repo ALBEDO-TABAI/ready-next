@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type RefObject } from 'react'
 import { Globe, Loader2, Lock, Star, X } from 'lucide-react'
 import type { ActiveTabMode } from '../../modules/browser/useBrowserHeaderInteraction'
 import type { BrowserTab } from '../../stores/useBrowserTabs'
+import { IconButton } from '../ui'
 
 interface ActiveTabSurfaceProps {
   tab: BrowserTab
@@ -65,7 +66,7 @@ export default function ActiveTabSurface({
   const tabIcon = tab.loading ? (
     <Loader2
       style={{ width: 14, height: 14 }}
-      className="animate-spin flex-shrink-0 text-[var(--color-blue)]"
+      className="animate-spin flex-shrink-0 text-[var(--rn-accent)]"
       strokeWidth={2}
     />
   ) : tab.favicon ? (
@@ -76,7 +77,7 @@ export default function ActiveTabSurface({
       className="h-[14px] w-[14px] flex-shrink-0 rounded-[4px] object-cover"
     />
   ) : (
-    <Globe style={{ width: 14, height: 14 }} className="flex-shrink-0 text-[var(--text-body)]" strokeWidth={2} />
+    <Globe style={{ width: 14, height: 14 }} className="flex-shrink-0 text-[var(--rn-ink-2)]" strokeWidth={2} />
   )
 
   return (
@@ -97,8 +98,9 @@ export default function ActiveTabSurface({
         if (target?.closest('input')) return
         onContextMenu?.(event)
       }}
-      className="group relative flex min-w-0 items-center rounded-[12px] border"
+      className="group relative flex min-w-0 items-center"
       style={{
+        borderRadius: 'var(--rn-r-md)',
         height: 34,
         width,
         minWidth,
@@ -106,16 +108,14 @@ export default function ActiveTabSurface({
         paddingLeft: 12,
         paddingRight: 10,
         gap: 8,
+        // Editing, the tab becomes the shared field (W1 §5): paper with an ink edge, never the signal colour.
         background: mode === 'primed' || mode === 'expanded' || mode === 'editing'
-          ? 'var(--input-slot-bg)'
-          : 'transparent',
-        borderColor: mode === 'primed' || mode === 'expanded' || mode === 'editing'
-          ? 'var(--input-slot-focus-border)'
+          ? 'var(--rn-sheet)'
           : 'transparent',
         boxShadow: mode === 'primed' || mode === 'expanded' || mode === 'editing'
-          ? 'var(--input-slot-shadow-focus)'
+          ? 'inset 0 0 0 1.5px var(--rn-ink-3)'
           : 'none',
-        transition: 'background-color 200ms ease, border-color 200ms ease, box-shadow 200ms ease',
+        transition: 'background-color var(--rn-d-1) var(--rn-ease-out), box-shadow var(--rn-d-1) var(--rn-ease-out)',
       }}
     >
       {tabIcon}
@@ -128,9 +128,9 @@ export default function ActiveTabSurface({
           onMouseLeave={onHotspotLeave}
         >
           {isHttps ? (
-            <Lock style={{ width: 12, height: 12 }} className="flex-shrink-0 text-[var(--color-green)]" strokeWidth={2} />
+            <Lock style={{ width: 12, height: 12 }} className="flex-shrink-0 text-[var(--rn-ok)]" strokeWidth={2} />
           ) : (
-            <Globe style={{ width: 12, height: 12 }} className="flex-shrink-0 text-[var(--text-gray)]" strokeWidth={2} />
+            <Globe style={{ width: 12, height: 12 }} className="flex-shrink-0 text-[var(--rn-ink-3)]" strokeWidth={2} />
           )}
           <input
             ref={inputRef}
@@ -147,7 +147,7 @@ export default function ActiveTabSurface({
                 onCommitNavigation()
               }
             }}
-            className="ready-input-slot-inner h-full min-w-0 flex-1 bg-transparent text-[12px] text-[var(--text-body)] outline-none"
+            className="ready-input-slot-inner h-full min-w-0 flex-1 bg-transparent text-[12px] text-[var(--rn-ink)] outline-none"
           />
         </div>
       ) : (
@@ -159,36 +159,22 @@ export default function ActiveTabSurface({
           onMouseLeave={onHotspotLeave}
           className="flex min-w-0 flex-1 items-center bg-transparent text-left"
         >
-          <span className="truncate text-[12px] font-medium text-[var(--text-title)]">
+          <span className="truncate text-[12px] font-medium text-[var(--rn-ink)]">
             {tab.title || 'New Tab'}
           </span>
         </button>
       )}
 
-      <button
-        type="button"
+      <IconButton
+        size="sm"
         data-browser-active-action
         onClick={onToggleBookmark}
-        className="flex h-[20px] w-[20px] flex-shrink-0 items-center justify-center rounded transition-colors hover:bg-[var(--bg-hover)]"
+        icon={<Star fill={isBookmarked ? 'currentColor' : 'none'} />}
+        style={isBookmarked ? { color: 'var(--rn-ink)' } : undefined}
         title={isBookmarked ? '取消收藏' : '收藏此页面'}
-      >
-        <Star
-          style={{ width: 12, height: 12 }}
-          className={isBookmarked ? 'text-[var(--color-orange)]' : 'text-[var(--text-gray)]'}
-          strokeWidth={2}
-          fill={isBookmarked ? 'var(--color-orange)' : 'none'}
-        />
-      </button>
+      />
 
-      <button
-        type="button"
-        data-browser-active-action
-        onClick={onClose}
-        className="flex h-[20px] w-[20px] flex-shrink-0 items-center justify-center rounded transition-colors hover:bg-[var(--bg-hover)]"
-        title="关闭标签"
-      >
-        <X style={{ width: 12, height: 12 }} strokeWidth={2} className="text-[var(--text-gray)]" />
-      </button>
+      <IconButton size="sm" data-browser-active-action onClick={onClose} icon={<X />} title="关闭标签" />
     </div>
   )
 }

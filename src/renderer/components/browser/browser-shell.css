@@ -102,29 +102,3 @@
 }
 
 .rn-reading-view__status svg { width: 14px; height: 14px; }
-
-/* The address field's 阅读视图 switch: a plain glyph; pressed, a glowing white glyph on a light tile, as the rail's
-   selected icons are. */
-.rn-reading-toggle {
-  display: flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border: 0;
-  border-radius: var(--rn-r-xs);
-  background: transparent;
-  color: var(--rn-ink-2);
-  cursor: pointer;
-  transition: background-color var(--rn-d-1) var(--rn-ease-out), color var(--rn-d-1) var(--rn-ease-out);
-}
-
-.rn-reading-toggle svg { width: 14px; height: 14px; }
-.rn-reading-toggle:hover { background: var(--bg-hover); }
-.rn-reading-toggle { --rn-reading-glyph: var(--rn-on-inverse); }
-html[data-theme='dark'] .rn-reading-toggle { --rn-reading-glyph: var(--rn-ink); }
-.rn-reading-toggle[aria-pressed='true'] { background: var(--rn-fill-3); color: var(--rn-reading-glyph); }
-.rn-reading-toggle[aria-pressed='true'] svg {
-  filter: drop-shadow(0 0 1px var(--rn-reading-glyph)) drop-shadow(0 0 3px var(--rn-reading-glyph)) drop-shadow(0 .5px .8px var(--rn-ink-3));
-}

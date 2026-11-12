@@ -2,7 +2,16 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Loader2, ShieldCheck } from 'lucide-react'
 import type { ChatGptOAuthStatus } from '../../../shared/chatgpt-oauth'
 import type { AIReasoningEffort } from '../../../shared/ai-providers'
-import { AISettingsFieldCard, SettingsNotice, settingsButtonClass } from './settings-shared'
+import { Button, Select } from '../../components/ui'
+import { AISettingsFieldCard, SettingsNotice } from './settings-shared'
+
+const REASONING_EFFORT_OPTIONS: { value: AIReasoningEffort; label: string }[] = [
+  { value: 'none', label: '不额外推理' },
+  { value: 'low', label: '快速' },
+  { value: 'medium', label: '标准' },
+  { value: 'high', label: '较强' },
+  { value: 'xhigh', label: '最强' },
+]
 
 export function ChatGptOAuthSettingsCard({
   active,
@@ -125,34 +134,27 @@ export function ChatGptOAuthSettingsCard({
                 <div className="sx-row__label">推理强度</div>
                 <div className="sx-row__desc">强度越高，通常思考更充分，但响应也会更慢。</div>
               </div>
-              <select
+              <Select
                 value={reasoningEffort}
                 aria-label="推理强度"
                 onChange={(event) => onReasoningEffortChange(event.target.value as AIReasoningEffort)}
-                className="sx-select"
-              >
-                <option value="none">不额外推理</option>
-                <option value="low">快速</option>
-                <option value="medium">标准</option>
-                <option value="high">较强</option>
-                <option value="xhigh">最强</option>
-              </select>
+                options={REASONING_EFFORT_OPTIONS}
+              />
             </div>
           )}
           <div className="flex flex-wrap items-center gap-2">
             {!ready && !pending && status && (
-              <button type="button" onClick={() => void runAction(connected ? 'resume' : 'authorize')}
-                className={settingsButtonClass('primary')}>
+              <Button variant="primary" onClick={() => void runAction(connected ? 'resume' : 'authorize')}>
                 {connected ? '恢复连接并使用' : '使用 ChatGPT 登录'}
-              </button>
+              </Button>
             )}
             {connected && !pending && (
-              <button type="button" onClick={() => void runAction('authorize')} className={settingsButtonClass('ghost', { size: 'sm' })}>重新授权</button>
+              <Button variant="ghost" size="sm" onClick={() => void runAction('authorize')}>重新授权</Button>
             )}
             {active && connected && !pending && (
-              <button type="button" onClick={() => void runAction('disconnect')} className={settingsButtonClass('danger-ghost', { size: 'sm' })}>断开并删除凭证</button>
+              <Button variant="danger" size="sm" onClick={() => void runAction('disconnect')}>断开并删除凭证</Button>
             )}
-            <span role="status" aria-live="polite" className="inline-flex items-center gap-2 px-1 text-[12px] font-medium" style={{ color: ready ? 'var(--sx-body)' : 'var(--sx-muted)' }}>
+            <span role="status" aria-live="polite" className="inline-flex items-center gap-2 px-1 text-[12px] font-medium" style={{ color: ready ? 'var(--rn-ink)' : 'var(--rn-ink-2)' }}>
               {pending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
               {ready && <span className="sx-dot sx-dot--accent" aria-hidden />}
               {statusText}{operation?.phase === 'waiting_browser' ? `（已等待 ${Math.floor((Date.now() - operation.startedAt) / 1000)} 秒）` : ''}
@@ -161,7 +163,7 @@ export function ChatGptOAuthSettingsCard({
               <button type="button" onClick={() => void controlLogin('reopen')} className="sx-link">重新打开授权页面</button>
             )}
             {operation && !['saving_profile', 'cancelling'].includes(operation.phase) && (
-              <button type="button" onClick={() => void controlLogin('cancel')} className={settingsButtonClass('ghost', { size: 'sm' })}>取消登录</button>
+              <Button variant="ghost" size="sm" onClick={() => void controlLogin('cancel')}>取消登录</Button>
             )}
             {!status && error && <button type="button" onClick={() => void refresh()} className="sx-link">重试读取状态</button>}
           </div>

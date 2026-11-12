@@ -1,6 +1,7 @@
 import { useEffect,useState } from 'react'
 import { TAG_FORGE_AUTO_SETTING_KEY } from '../../../shared/tag-forge'
-import { SettingsCard, SettingsNotice, SettingsRow, SettingsSwitch } from './settings-shared'
+import { Switch } from '../../components/ui'
+import { SettingsCard, SettingsNotice, SettingsRow } from './settings-shared'
 
 export function TagForgeSettingsPanel(){
   const [enabled,setEnabled]=useState(true);const[error,setError]=useState('')
@@ -9,7 +10,7 @@ export function TagForgeSettingsPanel(){
   return <div className="flex flex-col gap-3">
     <SettingsCard>
       <SettingsRow label="新文档自动建立标签" description="只处理 Agent 本轮真实新建并最终保存的 Markdown；普通编辑不会重新打标。">
-        <SettingsSwitch ariaLabel="新文档自动建立标签" checked={enabled} onChange={()=>{void toggle()}} />
+        <Switch label="新文档自动建立标签" checked={enabled} onChange={()=>{void toggle()}} />
       </SettingsRow>
     </SettingsCard>
     {error&&<SettingsNotice tone="danger" title={error} />}

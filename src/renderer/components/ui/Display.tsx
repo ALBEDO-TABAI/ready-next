@@ -10,8 +10,8 @@ export function Kbd({ children }: { children: ReactNode }) {
   return <kbd className="rn-kbd">{children}</kbd>
 }
 
-export function SectionHeader({ title, actions }: { title: ReactNode; actions?: ReactNode }) {
-  return <div className="rn-section" role="heading" aria-level={3}><span>{title}</span>{actions}</div>
+export function SectionHeader({ title, actions, className = '' }: { title: ReactNode; actions?: ReactNode; className?: string }) {
+  return <div className={`rn-section ${className}`.trim()} role="heading" aria-level={3}><span>{title}</span>{actions}</div>
 }
 
 export function EmptyState({ icon, title, body, action }: { icon?: ReactNode; title: string; body?: ReactNode; action?: ReactNode }) {

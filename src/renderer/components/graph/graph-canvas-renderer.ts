@@ -3,7 +3,6 @@ import type { GraphData, GraphNode } from './graph-types'
 import { buildGraphTopology } from './graph-topology'
 
 export interface GraphCanvasPalette {
-  background: string
   document: string
   tag: string
   label: string
@@ -11,6 +10,8 @@ export interface GraphCanvasPalette {
   tagEdge: string
   linkEdge: string
   highlight: string
+  /** Canvas font for the labels; the UI face of the tokens when read from the page. */
+  font?: string
 }
 
 export interface GraphCanvasRenderOptions {
@@ -48,28 +49,23 @@ export function graphNodeRadius({
   return isHovered ? Math.max(5.2, radius + 1.8) : radius
 }
 
-// Connection roles: quiet gray isolates, orange satellites and larger ink hubs.
-// The same relationship uses the same visual language for documents and tags.
-export const LIGHT_GRAPH_PALETTE: GraphCanvasPalette = {
-  background: 'rgba(255,255,255,0)',
-  document: '#6E6A61',
-  tag: '#FF4B2B',
-  label: '#3D3A34',
-  edge: 'rgba(110, 106, 97, 0.26)',
-  tagEdge: 'rgba(255, 75, 43, 0.24)',
-  linkEdge: 'rgba(90, 86, 78, 0.32)',
-  highlight: '#FF4B2B',
-}
-
-export const DARK_GRAPH_PALETTE: GraphCanvasPalette = {
-  background: 'rgba(0,0,0,0)',
-  document: '#9C988E',
-  tag: '#FF6345',
-  label: '#DDDACF',
-  edge: 'rgba(196, 192, 182, 0.17)',
-  tagEdge: 'rgba(255, 99, 69, 0.27)',
-  linkEdge: 'rgba(196, 192, 182, 0.24)',
-  highlight: '#FF6345',
+// Connection roles: quiet isolates, secondary-ink satellites and larger full-ink hubs, all from the four ink levels
+// (DL6); the signal colour marks only the node under the pointer and its links (DL5: "here, now"). The same
+// relationship uses the same visual language for documents and tags. Values are the --rn-* tokens where the canvas
+// sits, so they follow the theme without a palette of their own (DS1).
+export function readGraphPalette(element: Element): GraphCanvasPalette {
+  const style = (element.ownerDocument.defaultView ?? window).getComputedStyle(element)
+  const token = (name: string) => style.getPropertyValue(name).trim()
+  return {
+    document: token('--rn-ink-3'),
+    tag: token('--rn-ink-2'),
+    label: token('--rn-ink'),
+    edge: token('--rn-ink-4'),
+    tagEdge: token('--rn-ink-4'),
+    linkEdge: token('--rn-ink-3'),
+    highlight: token('--rn-accent'),
+    font: `11px ${token('--rn-font-ui') || 'system-ui, sans-serif'}`,
+  }
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -233,10 +229,6 @@ export function drawGraphCanvas(
   if (context.canvas.height !== requiredHeight) context.canvas.height = requiredHeight
   context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0)
   context.clearRect(0, 0, width, height)
-  if (palette.background !== 'rgba(255,255,255,0)' && palette.background !== 'rgba(0,0,0,0)') {
-    context.fillStyle = palette.background
-    context.fillRect(0, 0, width, height)
-  }
 
   const topology = options.indexById && options.degrees ? null : buildGraphTopology(graph.nodes, graph.edges)
   const indexById = options.indexById ?? topology!.indexById
@@ -268,7 +260,7 @@ export function drawGraphCanvas(
   }
 
   context.textBaseline = 'middle'
-  context.font = '11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
+  context.font = palette.font ?? '11px system-ui, sans-serif'
   const labelCandidates: GraphLabelCandidate[] = []
   for (let index = 0; index < graph.nodes.length; index += 1) {
     const offset = index * 2

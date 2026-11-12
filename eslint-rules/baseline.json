@@ -552,7 +552,7 @@
     {
       "file": "src/__tests__/settings-shell-visual-contract.test.ts",
       "rule": "ready/no-source-grep-test",
-      "snippetHash": "04bfc5a172fa4405",
+      "snippetHash": "f6a4778576e19dba",
       "line": 7,
       "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
       "area": "ui-history"

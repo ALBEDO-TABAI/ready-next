@@ -142,7 +142,7 @@ test('Y0.8 — StorageSettingsPanel renders the honest "not enforced; manual cle
 
   // Dynamic import AFTER DOM globals install so renderer modules see
   // a real window/document at evaluation time.
-  const { StorageSettingsPanel } = await import('../renderer/pages/Settings')
+  const { StorageSettingsPanel } = await import('../renderer/pages/settings/StorageSettingsPanel')
 
   const root = createRoot(handle.dom.window.document.getElementById('root') as HTMLElement)
   try {
@@ -188,7 +188,7 @@ test('StorageSettingsPanel exposes one-click diagnostic pack export', async () =
   const handle = installDomGlobals()
   const stub = installElectronAPIStub(handle.dom)
 
-  const { StorageSettingsPanel } = await import('../renderer/pages/Settings')
+  const { StorageSettingsPanel } = await import('../renderer/pages/settings/StorageSettingsPanel')
 
   const root = createRoot(handle.dom.window.document.getElementById('root') as HTMLElement)
   try {
@@ -220,7 +220,7 @@ test('Y0.8 — quota <select> still renders with all four CACHE_QUOTA_OPTIONS so
   const handle = installDomGlobals()
   installElectronAPIStub(handle.dom)
 
-  const { StorageSettingsPanel } = await import('../renderer/pages/Settings')
+  const { StorageSettingsPanel } = await import('../renderer/pages/settings/StorageSettingsPanel')
 
   const root = createRoot(handle.dom.window.document.getElementById('root') as HTMLElement)
   try {

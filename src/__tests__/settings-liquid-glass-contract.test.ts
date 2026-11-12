@@ -19,7 +19,7 @@ test('settings page keeps the main workbench transparent shell structure', () =>
   assert.match(settingsPage, /data-liquid-shell="settings-header"/)
   assert.match(settingsPage, /data-liquid-shell="settings-sidebar"/)
   assert.match(settingsPage, /data-liquid-shell="settings-content"/)
-  assert.match(settingsPage, /className="settings-page-shell flex h-full flex-col overflow-hidden"/)
+  assert.match(settingsPage, /className="settings-page-shell rn-ui flex h-full flex-col overflow-hidden"/)
   assert.match(settingsPage, /key=\{currentSection\?\.id \|\| 'unknown'\}[\s\S]*data-liquid-shell="settings-content"/)
   assert.match(settingsPage, /refreshTransparentSurface/)
   assert.match(settingsPage, /requestAnimationFrame\(\(\) => \{[\s\S]*requestSettingsSurfaceRefresh\(\)/)
@@ -28,9 +28,9 @@ test('settings page keeps the main workbench transparent shell structure', () =>
   assert.match(settingsPage, /onMouseLeave=\{scheduleSettingsSurfaceRefresh\}/)
   assert.match(settingsPage, /sendIntent\(\{[\s\S]*kind: 'hide-all'[\s\S]*reason: 'overlay-open'/)
   assert.doesNotMatch(settingsPage, /data-liquid-shell="settings-header"[\s\S]*glass-surface-panel/)
-  assert.match(settingsPage, /panel-hover-scrollbar flex-shrink-0 overflow-auto/)
+  assert.match(settingsPage, /className="settings-page__nav panel-hover-scrollbar"/)
   // 2026-10-02 设置页视觉重整：内容直接落在窗口玻璃底上（与工作台同源），不再额外铺整块画布；
-  // 卡片与控件统一走 settings-surfaces.css 的 sx-* 体系，不再逐个挂 glass-surface-card。
+  // B13：版式在 pages/settings/settings.css（只用 --rn-*），控件是共用基元，不再逐个挂 glass-surface-card。
   assert.match(settingsPage, /<div className="flex-1 min-w-0 overflow-hidden">\s*<div\s+key=\{currentSection\?\.id \|\| 'unknown'\}\s+data-liquid-shell="settings-content"/)
   assert.doesNotMatch(settingsPage, /sx-canvas/)
   assert.match(settingsPage, /className="settings-ai-panel/)
@@ -56,19 +56,17 @@ test('settings page keeps the main workbench transparent shell structure', () =>
   assert.match(rendererTypes, /refreshTransparentSurface:\s*\(\) => Promise<void>/)
 })
 
-test('settings navigation items keep the transparent backdrop and leave hover / current state to shared classes', () => {
-  const settingsTheme = readWorkspaceFile('src/renderer/components/settings/settings-theme.ts')
+test('settings navigation is the shared ListRow: current section in the signal colour, no inline paint', () => {
   const settingsPage = readWorkspaceFile('src/renderer/pages/Settings.tsx')
-  const surfaces = readWorkspaceFile('src/renderer/styles/settings-surfaces.css')
+  const primitives = readWorkspaceFile('src/renderer/components/ui/primitives.css')
 
-  // 导航项 inline 只留透明度，不写 background / border：hover 与当前态由 sx-nav-item 类统一驱动（inline 会盖掉 :hover）。
-  const listItemStyle = settingsTheme.match(/export function settingsListItemStyle\(active: boolean\): CSSProperties \{[\s\S]*?\n\}/)?.[0] ?? ''
-  assert.ok(listItemStyle, 'settingsListItemStyle stays exported')
-  assert.doesNotMatch(listItemStyle, /\b(?:background|border|boxShadow)\s*:/)
-  assert.doesNotMatch(settingsTheme, /--settings-list-item-bg/)
-  assert.match(settingsPage, /aria-current=\{isActive \? 'page' : undefined\}[\s\S]*?className="sx-nav-item"/)
-  assert.match(surfaces, /\.sx-nav-item:hover:not\(\[aria-current='page'\]\)\s*\{[\s\S]*?background:\s*var\(--sx-raised-hover\)/)
-  assert.match(surfaces, /\.sx-nav-item\[aria-current='page'\]\s*\{[\s\S]*?background:\s*var\(--sx-raised-bg\);[\s\S]*?box-shadow:\s*var\(--sx-raised-shadow\)/)
+  // B13（W1 §5）：分区是 ListRow，分组标题是 SectionHeader；当前分区与外壳侧栏的导航器同一个样子（DL5），
+  // inline 不写 background / border / color，悬停与当前态全由基元的类驱动。
+  const nav = settingsPage.match(/<nav[\s\S]*?<\/nav>/)?.[0] ?? ''
+  assert.match(nav, /<SectionHeader className="sx-nav-group-label"/)
+  assert.match(nav, /<ListRow[\s\S]*?className="sx-nav-item"[\s\S]*?current=\{activeSection === section\.id\}/)
+  assert.doesNotMatch(nav, /style=\{\{[^}]*(?:background|border|color)/)
+  assert.match(primitives, /\.rn-row\[aria-current\]:not\(\[aria-current='false'\]\)\s*\{[^}]*background:\s*var\(--rn-accent-soft\);[^}]*color:\s*var\(--rn-accent-text\)/)
 })
 
 test('file tree scroll root opts into the Chromium 148 liquid glass repaint guard', () => {
@@ -105,32 +103,30 @@ test('workbench side and chat panels stay transparent while slots use the shared
   assert.doesNotMatch(styles, /html:root \[data-liquid-shell='chat-panel'\],[\s\S]*?\[data-liquid-shell='side-panel'\]:not\(\[data-side-panel-variant='hidden'\]\)\s*\{[\s\S]*?backdrop-filter:/)
 })
 
-test('shared settings theme maps every inline constant onto the sx glass tokens', () => {
-  const settingsTheme = readWorkspaceFile('src/renderer/components/settings/settings-theme.ts')
-  const surfaces = readWorkspaceFile('src/renderer/styles/settings-surfaces.css')
+test('settings layout is on the --rn-* tokens: no private palette, cards are paper, controls are the shared primitives', () => {
+  const settingsCss = readWorkspaceFile('src/renderer/pages/settings/settings.css')
+  const settingsShared = readWorkspaceFile('src/renderer/pages/settings/settings-shared.tsx')
   const index = readWorkspaceFile('src/renderer/styles/index.css')
 
-  assert.match(index, /@import '\.\/settings-surfaces\.css';/)
-  assert.match(settingsTheme, /SETTINGS_CARD_STYLE: CSSProperties = \{[\s\S]*?background: 'var\(--sx-card-bg\)'/)
-  assert.match(settingsTheme, /SETTINGS_INPUT_STYLE: CSSProperties = \{[\s\S]*?background: 'var\(--sx-slot-bg\)'/)
-  assert.match(settingsTheme, /SETTINGS_PRIMARY_BUTTON_STYLE: CSSProperties = \{[\s\S]*?background: 'var\(--sx-ink\)'/)
-  // 极简层次：分组卡只是一层半透明白玻璃 + 柔和投影，不画外框；整页不再铺额外画布。
-  const cardBlock = surfaces.match(/\n {2}\.sx-card \{[\s\S]*?\n {2}\}/)?.[0] ?? ''
-  assert.match(cardBlock, /background:\s*var\(--sx-card-bg\)/)
+  // W1 §3.2：设置的 --sx-* 映射到 --rn-* 后删除；旧样式文件与 inline 兼容层一起退役。
+  assert.match(index, /@import '\.\.\/pages\/settings\/settings\.css';/)
+  assert.doesNotMatch(index, /settings-surfaces/)
+  assert.throws(() => readWorkspaceFile('src/renderer/styles/settings-surfaces.css'))
+  assert.throws(() => readWorkspaceFile('src/renderer/components/settings/settings-theme.ts'))
+  assert.doesNotMatch(readRendererStyles(), /--sx-[a-z]/)
+  // 一组设置是一张纸（DL2）：不透明纸色、纸的圆角与贴地影，不画外框。
+  const cardBlock = settingsCss.match(/\n {2}\.sx-card \{[\s\S]*?\n {2}\}/)?.[0] ?? ''
+  assert.match(cardBlock, /background:\s*var\(--rn-sheet\)/)
+  assert.match(cardBlock, /box-shadow:\s*var\(--rn-sheet-shadow\)/)
   assert.doesNotMatch(cardBlock, /\bborder\s*:/)
-  assert.doesNotMatch(surfaces, /\.sx-canvas|--sx-canvas/)
-  // 选中只用「被托起的白玻璃」填充表达（与导航选中同配方），不用线框圈选。
-  const selectedOption = surfaces.match(/\.sx-option:is\(\[aria-checked='true'\], \[aria-pressed='true'\], \.is-active\) \{[\s\S]*?\}/)?.[0] ?? ''
-  assert.match(selectedOption, /background:\s*var\(--sx-raised-bg\);[\s\S]*?box-shadow:\s*var\(--sx-raised-shadow\)/)
-  assert.doesNotMatch(selectedOption, /border|0 0 0 \d/)
-  // 输入是无边框的凹陷槽，聚焦时被托起，不画强调色线框。
-  const inputFocus = surfaces.match(/\.sx-input:focus,\s*\.sx-select:focus,\s*\.sx-textarea:focus \{[\s\S]*?\}/)?.[0] ?? ''
-  assert.match(inputFocus, /background:\s*var\(--sx-slot-bg-focus\)/)
-  assert.doesNotMatch(inputFocus, /border|--sx-focus-ring/)
-  // 强调色纪律：主按钮与「开」状态走墨色，设置页设计系统里不出现成功绿。
-  assert.match(surfaces, /\.sx-btn--primary\s*\{[\s\S]*?background:\s*var\(--sx-ink\)/)
-  assert.match(surfaces, /\.sx-switch\[data-checked='true'\]\s*\{[\s\S]*?background:\s*var\(--sx-ink\)/)
-  assert.doesNotMatch(surfaces, /--color-green/)
+  // 选中的单选卡与分段控件的选中项同一个样子，不用线框圈选，也不用信号色。
+  const selectedOption = settingsCss.match(/\.sx-option:is\(\[aria-checked='true'\], \[aria-pressed='true'\], \.is-active\) \{[\s\S]*?\}/)?.[0] ?? ''
+  assert.match(selectedOption, /background:\s*var\(--rn-sheet\);[\s\S]*?box-shadow:\s*var\(--rn-card-shadow\)/)
+  assert.doesNotMatch(selectedOption, /border|accent/)
+  // 私有按钮、开关、分段、输入都不在了：设置页的控件就是 components/ui 的基元（W1 §5）。
+  assert.doesNotMatch(settingsShared, /settingsButtonClass|SettingsSwitch\b|SettingsSegmented|sx-btn|sx-switch(?!-label)|sx-seg|sx-input/)
+  assert.doesNotMatch(settingsCss, /\.sx-(?:btn|switch|seg|input|select|textarea|check|dialog|scrim)(?![\w-])/)
+  assert.doesNotMatch(settingsCss, /backdrop-filter|--color-|--text-|--sx-/)
 })
 
 test('shared liquid glass surfaces remain real backdrop blur instead of flat paint', () => {
@@ -154,10 +150,10 @@ test('compact utility settings opt into short control slots so labels do not col
   // 快捷键/版本行走 readonly 渲染分支，检查更新走 button 分支，两者都吃同一 minWidth。
   assert.doesNotMatch(settingsPage, /slotWidth/)
   assert.match(settingsShared, /export const SETTINGS_ROW_CONTROL_MIN_WIDTH = 136/)
-  // 2026-10-02 视觉重整：只读值走 sx-value（快捷键拆成 kbd 键帽），按钮走 settingsButtonClass；
+  // 2026-10-02 视觉重整：只读值走 sx-value（快捷键拆成 Kbd 键帽），按钮是共用的 Button（B13）；
   // 行与行在同一张 sx-card 里用发丝线分隔，控件列靠 sx-row__control 右对齐。
   assert.match(settingsPage, /case 'readonly':[\s\S]*?<ShortcutKeys value=[\s\S]*?className="sx-value"/)
-  assert.match(settingsPage, /case 'button':[\s\S]*?className=\{settingsButtonClass\(/)
+  assert.match(settingsPage, /case 'button':[\s\S]*?<Button\b/)
   assert.match(settingsPage, /settings: READY_SHORTCUT_GUIDE\.map\(\(item\) => \(\{ \.\.\.item, type: 'readonly' as const \}\)\)/)
   assert.match(shortcutCatalog, /id: 'capture-window'/)
   assert.match(shortcutCatalog, /id: 'toggle-sidebar'/)

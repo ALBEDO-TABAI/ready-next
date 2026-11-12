@@ -13,6 +13,10 @@ import {
   isBrowserSupervisionVisibleTaskStatus,
   isBrowserTaskTerminalStatus,
 } from '../../../shared/browser-task-status'
+import { Button, IconButton } from '../ui'
+
+// Warning text derived from the warning token: --rn-warn alone is too light for small text on paper.
+const WARN_TEXT = 'color-mix(in oklab, var(--rn-warn) 62%, var(--rn-ink))'
 
 interface AgentBrowserSupervisionPanelProps {
   controlState: AgentBrowserControlState
@@ -115,50 +119,38 @@ export function AgentBrowserSupervisionPanel({
       <button
         type="button"
         onClick={onExpand}
-        className={`${variant === 'collapsedRail' ? 'flex w-full justify-center' : 'absolute right-3 top-3 z-[60] flex'} items-center gap-2 rounded-[12px] border px-3 py-2 text-[12px] font-semibold shadow-lg`}
-        style={{
-          borderColor: 'color-mix(in srgb, var(--color-blue) 36%, transparent)',
-          background: 'color-mix(in srgb, var(--surface-card-bg) 96%, transparent)',
-          color: 'var(--text-title)',
-          boxShadow: '0 0 0 1px color-mix(in srgb, var(--color-blue) 22%, transparent), 0 8px 24px color-mix(in srgb, var(--color-blue) 18%, transparent)',
-        }}
+        className={`rn-float ${variant === 'collapsedRail' ? 'flex w-full justify-center' : 'absolute right-3 top-3 z-[60] flex'} items-center gap-2 px-3 py-2 text-[12px] font-semibold`}
+        style={{ color: 'var(--rn-ink)' }}
       >
-        <Bot style={{ width: 15, height: 15 }} className="text-[var(--color-blue)]" strokeWidth={2} />
+        <Bot style={{ width: 15, height: 15 }} className="text-[var(--rn-accent)]" strokeWidth={2} />
         <span>{surfaceModeLabel}</span>
-        <span style={{ color: 'var(--text-gray)', fontWeight: 500 }}>{task ? browserTaskStatusLabel(task.status) : statusText}</span>
+        <span style={{ color: 'var(--rn-ink-3)', fontWeight: 500 }}>{task ? browserTaskStatusLabel(task.status) : statusText}</span>
       </button>
     )
   }
 
+  // A float (W1 §4): the material brings the surface, the shadow and the blur.
   const containerClass = variant === 'pane'
-    ? 'relative z-[1] mx-2 mt-2 mb-1 flex min-h-0 flex-col overflow-hidden rounded-[12px] border text-[12px]'
-    : 'absolute bottom-3 right-3 z-[60] w-[280px] overflow-hidden rounded-[16px] border text-[12px] shadow-lg'
+    ? 'rn-float relative z-[1] mx-2 mt-2 mb-1 flex min-h-0 flex-col overflow-hidden text-[12px]'
+    : 'rn-float absolute bottom-3 right-3 z-[60] w-[280px] overflow-hidden text-[12px]'
 
   return (
     <div
       className={containerClass}
-      style={{
-        borderColor: 'color-mix(in srgb, var(--color-blue) 30%, transparent)',
-        background: 'color-mix(in srgb, var(--surface-card-bg) 96%, transparent)',
-        backdropFilter: 'blur(12px)',
-        maxHeight: variant === 'pane' ? '40%' : undefined,
-        boxShadow: variant === 'pane'
-          ? '0 0 0 1px color-mix(in srgb, var(--color-blue) 18%, transparent), 0 0 18px color-mix(in srgb, var(--color-blue) 20%, transparent)'
-          : '0 8px 28px color-mix(in srgb, var(--color-blue) 22%, transparent)',
-      }}
+      style={{ maxHeight: variant === 'pane' ? '40%' : undefined }}
     >
       {/* Header chip */}
       <button
         type="button"
         onClick={() => setPanelOpen((v) => !v)}
         className="flex w-full shrink-0 items-center gap-2 px-3 py-2 text-left"
-        style={{ color: 'var(--text-title)' }}
+        style={{ color: 'var(--rn-ink)' }}
       >
-        <Bot style={{ width: 15, height: 15 }} className="text-[var(--color-blue)]" strokeWidth={2} />
+        <Bot style={{ width: 15, height: 15 }} className="text-[var(--rn-accent)]" strokeWidth={2} />
         <span className="flex-1 font-semibold">{headerTitle}</span>
         <span
           className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
-          style={{ background: 'var(--color-blue-light)', color: 'var(--color-blue)' }}
+          style={{ background: 'var(--rn-accent-soft)', color: 'var(--rn-accent-text)' }}
         >
           {statusText}
         </span>
@@ -167,26 +159,10 @@ export function AgentBrowserSupervisionPanel({
       {(onCollapse || onClose) && (
         <div className="absolute right-2 top-2 flex items-center gap-1">
           {onCollapse && (activeTasks.length > 0 || terminalTasks.length === 0) && (
-            <button
-              type="button"
-              onClick={onCollapse}
-              className="flex h-6 w-6 items-center justify-center rounded-[8px]"
-              style={{ color: 'var(--text-gray)' }}
-              title="折叠 Agent 浏览器监控"
-            >
-              <Minimize2 style={{ width: 13, height: 13 }} strokeWidth={2} />
-            </button>
+            <IconButton size="sm" icon={<Minimize2 />} title="折叠 Agent 浏览器监控" onClick={onCollapse} />
           )}
           {onClose && activeTasks.length === 0 && (terminalTasks.length > 0 || tasks.length === 0) && (
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex h-6 w-6 items-center justify-center rounded-[8px]"
-              style={{ color: 'var(--text-gray)' }}
-              title="关闭 Agent 浏览器面板"
-            >
-              <X style={{ width: 13, height: 13 }} strokeWidth={2} />
-            </button>
+            <IconButton size="sm" icon={<X />} title="关闭 Agent 浏览器面板" onClick={onClose} />
           )}
         </div>
       )}
@@ -198,7 +174,7 @@ export function AgentBrowserSupervisionPanel({
               role="alert"
               data-browser-takeover-error
               className="flex items-start gap-1.5 rounded-[8px] px-2 py-1.5 text-[11px] font-medium"
-              style={{ background: 'color-mix(in srgb, var(--color-red) 12%, transparent)', color: 'var(--color-red)' }}
+              style={{ background: 'color-mix(in srgb, var(--rn-bad) 10%, transparent)', color: 'var(--rn-bad)' }}
             >
               <AlertCircle style={{ width: 13, height: 13, flexShrink: 0 }} strokeWidth={2} />
               <span>{takeoverError}</span>
@@ -210,11 +186,11 @@ export function AgentBrowserSupervisionPanel({
               className="flex items-center gap-1.5 rounded-[8px] px-2 py-1.5 text-[11px] font-medium"
               data-browser-surface-lock={activeWriteSurface || 'takeover'}
               style={{
-                background: 'color-mix(in srgb, var(--color-blue) 10%, transparent)',
-                color: 'var(--text-title)',
+                background: 'var(--rn-accent-soft)',
+                color: 'var(--rn-ink)',
               }}
             >
-              <LockKeyhole style={{ width: 13, height: 13 }} className="text-[var(--color-blue)]" strokeWidth={2} />
+              <LockKeyhole style={{ width: 13, height: 13 }} className="text-[var(--rn-accent-text)]" strokeWidth={2} />
               <span className="min-w-0 truncate">{surfaceLockText}</span>
             </div>
           )}
@@ -233,36 +209,36 @@ export function AgentBrowserSupervisionPanel({
             return (
               <div
                 key={task.taskId}
-                className="rounded-[12px] border"
-                style={{ borderColor: 'color-mix(in srgb, var(--text-gray) 16%, transparent)', background: 'color-mix(in srgb, var(--surface-card-bg) 60%, transparent)' }}
+                className="rounded-[12px]"
+                style={{ background: 'var(--rn-fill)' }}
               >
                 <button
                   type="button"
                   onClick={() => setExpandedTaskId(open ? null : task.taskId)}
                   className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left"
-                  style={{ color: 'var(--text-title)' }}
+                  style={{ color: 'var(--rn-ink)' }}
                 >
                   {task.status === 'running'
-                    ? <Loader2 style={{ width: 13, height: 13 }} className="animate-spin text-[var(--color-blue)]" strokeWidth={2} />
+                    ? <Loader2 style={{ width: 13, height: 13 }} className="animate-spin text-[var(--rn-accent)]" strokeWidth={2} />
                     : task.status === 'completed'
-                      ? <CheckCircle2 style={{ width: 13, height: 13 }} className="text-[var(--color-green)]" strokeWidth={2} />
+                      ? <CheckCircle2 style={{ width: 13, height: 13 }} className="text-[var(--rn-ok)]" strokeWidth={2} />
                       : task.status === 'failed' || task.status === 'cancelled'
-                        ? <AlertCircle style={{ width: 13, height: 13 }} className="text-[var(--color-orange)]" strokeWidth={2} />
-                        : <span className="inline-block h-[7px] w-[7px] rounded-full" style={{ background: 'var(--text-gray)' }} />}
+                        ? <AlertCircle style={{ width: 13, height: 13 }} className="text-[var(--rn-warn)]" strokeWidth={2} />
+                        : <span className="inline-block h-[7px] w-[7px] rounded-full" style={{ background: 'var(--rn-ink-3)' }} />}
                   <span className="min-w-0 flex-1 truncate">{task.progress.currentLabel || '浏览器子任务'}</span>
-                  <span className="text-[10px]" style={{ color: 'var(--text-gray)' }}>
+                  <span className="text-[10px]" style={{ color: 'var(--rn-ink-3)' }}>
                     {taskStatusText}
                   </span>
                 </button>
                 {/* progress bar */}
-                <div className="mx-2.5 mb-1 h-[3px] overflow-hidden rounded-full" style={{ background: 'color-mix(in srgb, var(--text-gray) 18%, transparent)' }}>
-                  <div className="h-full rounded-full transition-[width] duration-300" style={{ width: `${pct}%`, background: 'var(--color-blue)' }} />
+                <div className="mx-2.5 mb-1 h-[3px] overflow-hidden rounded-full" style={{ background: 'var(--rn-fill-2)' }}>
+                  <div className="h-full rounded-full transition-[width] duration-300" style={{ width: `${pct}%`, background: 'var(--rn-accent)' }} />
                 </div>
                 {open && (
-                  <div className="px-2.5 pb-2 pt-0.5 text-[11px]" style={{ color: 'var(--text-gray)' }}>
+                  <div className="px-2.5 pb-2 pt-0.5 text-[11px]" style={{ color: 'var(--rn-ink-3)' }}>
                     <div>当前：{task.progress.currentLabel || '准备中'}</div>
                     <div>已完成 {task.progress.completed} · 失败 {task.progress.failed}</div>
-                    {task.error && <div className="text-[var(--color-orange)]">错误：{task.error}</div>}
+                    {task.error && <div style={{ color: WARN_TEXT }}>错误：{task.error}</div>}
                   </div>
                 )}
               </div>
@@ -272,18 +248,15 @@ export function AgentBrowserSupervisionPanel({
           {userOwnedClaims.map((claim) => (
             <div
               key={claim.claimId}
-              className="rounded-[12px] border p-2.5"
+              className="rounded-[12px] p-2.5"
               data-browser-target-user-owned={claim.tabId}
-              style={{
-                borderColor: 'color-mix(in srgb, var(--color-orange) 34%, transparent)',
-                background: 'color-mix(in srgb, var(--color-orange) 8%, transparent)',
-              }}
+              style={{ background: 'color-mix(in srgb, var(--rn-warn) 12%, transparent)' }}
             >
-              <div className="flex items-center gap-2" style={{ color: 'var(--text-title)' }}>
-                <ShieldAlert style={{ width: 13, height: 13 }} className="text-[var(--color-orange)]" strokeWidth={2} />
+              <div className="flex items-center gap-2" style={{ color: 'var(--rn-ink)' }}>
+                <ShieldAlert style={{ width: 13, height: 13, color: WARN_TEXT }} strokeWidth={2} />
                 <span className="min-w-0 flex-1 truncate">页面 {claim.tabId} 已由你接管</span>
               </div>
-              <div className="mt-1 truncate text-[10px]" style={{ color: 'var(--text-gray)' }}>
+              <div className="mt-1 truncate text-[10px]" style={{ color: 'var(--rn-ink-3)' }}>
                 任务 {claim.parentTaskId}
               </div>
             </div>
@@ -292,18 +265,12 @@ export function AgentBrowserSupervisionPanel({
           {/* Immediate takeover */}
           <div className="mt-0.5 px-0.5">
             {controlState === 'active' && (activeTasks.length > 0 || activeWriteSurface === 'agent-view') && (
-              <button
-                type="button"
-                onClick={() => void requestInterruption()}
-                className="flex w-full items-center justify-center gap-1.5 rounded-[8px] py-1.5 text-[11px] font-medium transition-colors"
-                style={{ background: 'color-mix(in srgb, var(--text-gray) 12%, transparent)', color: 'var(--text-title)' }}
-              >
-                <ShieldAlert style={{ width: 13, height: 13 }} strokeWidth={2} />
+              <Button size="sm" className="w-full" icon={<ShieldAlert />} onClick={() => void requestInterruption()}>
                 立即接管浏览器
-              </button>
+              </Button>
             )}
             {controlState === 'frozen' && (
-              <div className="rounded-[8px] py-1.5 text-center text-[11px] font-medium" style={{ background: 'color-mix(in srgb, var(--color-orange) 14%, transparent)', color: 'var(--color-orange)' }}>
+              <div className="rounded-[8px] py-1.5 text-center text-[11px] font-medium" style={{ background: 'color-mix(in srgb, var(--rn-warn) 14%, transparent)', color: WARN_TEXT }}>
                 已接管的页面已暂停，其他页面不受影响
               </div>
             )}

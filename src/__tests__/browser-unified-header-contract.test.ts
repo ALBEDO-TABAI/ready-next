@@ -109,7 +109,7 @@ test('browser header surfaces browser ownership status from BrowserMode supervis
   assert.match(browserHeader, /data-browser-ownership=\{status\.kind\}/)
   assert.match(browserHeader, /<BrowserOwnershipChip status=\{ownershipStatus\} \/>/)
   assert.match(browserHeader, /aria-label=\{status\.label\}/)
-  assert.match(browserHeader, /const accent = status\.tone === 'agent' \? 'var\(--color-blue\)' : 'var\(--text-gray\)'/)
+  assert.match(browserHeader, /const accent = status\.tone === 'agent' \? 'var\(--rn-accent\)' : 'var\(--rn-ink-3\)'/)
   assert.match(browserHeader, /className="flex h-\[28px\] w-\[14px\] flex-shrink-0 items-center justify-center"/)
   assert.match(browserHeader, /<Icon style=\{\{ width: 14, height: 14 \}\} strokeWidth=\{2\} \/>/)
   assert.doesNotMatch(browserHeader, /<span[^>]*>\{status\.label\}<\/span>/)
@@ -152,10 +152,10 @@ test('inactive tabs get the same hover hint affordance without entering the acti
   assert.match(tabRail, /const isHovered = hoveredTabId === tab\.id/)
   assert.match(tabRail, /onMouseEnter=\{\(\) => setHoveredTabId\(tab\.id\)\}/)
   assert.match(tabRail, /onMouseLeave=\{\(\) => setHoveredTabId\(\(current\) => current === tab\.id \? null : current\)\}/)
-  assert.match(tabRail, /borderColor: isDragOver\s*\? 'var\(--color-blue\)'\s*:\s*isHovered/)
-  // Agent-owned tabs glow (plan §3.6); non-agent tabs keep the hover-hint box shadow.
+  assert.match(tabRail, /borderColor: isDragOver\s*\? 'var\(--rn-accent\)'\s*:\s*isHovered/)
+  // Agent-owned tabs glow in the signal colour (plan §3.6); a hover is only the fill and a hairline (W1 DL5).
   assert.match(tabRail, /boxShadow: tab\.owner === 'agent'/)
-  assert.match(tabRail, /: isHovered\s*\?\s*'0 0 0 1px color-mix\(in srgb, var\(--color-blue\) 18%/)
+  assert.match(tabRail, /background: isHovered\s*\?\s*'var\(--rn-fill\)'/)
 })
 
 test('browser shell layout adds corner fillers so the header chrome visually meets the page surface', () => {

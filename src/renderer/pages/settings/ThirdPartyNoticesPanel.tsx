@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import type { ThirdPartyNotice } from '../../../shared/ipc-contracts/third-party-notices'
-import { SettingsCard, SettingsGroup, SettingsRow, settingsButtonClass } from './settings-shared'
+import { Button, Input } from '../../components/ui'
+import { SettingsCard, SettingsGroup, SettingsRow } from './settings-shared'
 
 type Load =
   | { status: 'idle' | 'loading' }
@@ -55,41 +56,41 @@ export function ThirdPartyNoticesPanel() {
     ? `共 ${notices.length.toLocaleString('zh-CN')} 项：${summarizeLicenses(notices)}`
     : 'Ready 用到的第三方软件、字体和移植代码，以及它们的许可证全文。'
 
-  return <SettingsGroup label="开源许可">
+  return <SettingsGroup label="开源许可" className="mt-9">
     <SettingsCard aria-label="开源许可">
       <SettingsRow label="第三方声明" description={description}>
-        <button type="button" className={settingsButtonClass('secondary')} style={{ minWidth: 104 }} aria-expanded={open} onClick={toggle}>
+        <Button style={{ minWidth: 104 }} aria-expanded={open} onClick={toggle}>
           {open ? '收起' : '查看'}
-        </button>
+        </Button>
       </SettingsRow>
       {open && <div className="sx-card__body" style={{ paddingTop: 0 }}>
         {load.status === 'loading' && <p className="sx-meta m-0">正在读取…</p>}
         {load.status === 'missing' && <p className="sx-meta m-0">这份声明在打包时生成，开发版里还没有生成。</p>}
         {load.status === 'error' && <p role="alert" className="sx-text-danger m-0 text-[12px]">读不出声明：{load.message}</p>}
         {notices && <>
-          <input className="sx-input w-full" type="search" aria-label="搜索开源许可" placeholder="按名称或许可证筛选"
+          <Input className="w-full" type="search" aria-label="搜索开源许可" placeholder="按名称或许可证筛选"
             value={query} onChange={event => { setQuery(event.target.value); setExpanded(null) }} />
           <ul className="sx-inset m-0 mt-3 list-none p-1" aria-label="第三方声明列表">
             {filtered.slice(0, SHOWN).map(notice => {
               const key = keyOf(notice), isOpen = expanded === key
               return <li key={key}>
                 <button type="button" aria-expanded={isOpen} onClick={() => setExpanded(isOpen ? null : key)}
-                  className="flex w-full items-center gap-2 rounded-[8px] px-3 py-[7px] text-left hover:bg-[var(--sx-raised-hover)]">
-                  {isOpen ? <ChevronDown className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--sx-muted)' }} />
-                    : <ChevronRight className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--sx-muted)' }} />}
-                  <span className="min-w-0 truncate text-[12.5px]" style={{ color: 'var(--sx-title)' }}>{notice.name}</span>
-                  {notice.version && <span className="sx-mono shrink-0 text-[11px]" style={{ color: 'var(--sx-muted)' }}>{notice.version}</span>}
-                  <span className="ml-auto shrink-0 text-[11.5px]" style={{ color: 'var(--sx-muted)' }}>
+                  className="flex w-full items-center gap-2 rounded-[8px] px-3 py-[7px] text-left hover:bg-[var(--rn-fill-2)]">
+                  {isOpen ? <ChevronDown className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--rn-ink-2)' }} />
+                    : <ChevronRight className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--rn-ink-2)' }} />}
+                  <span className="min-w-0 truncate text-[12.5px]" style={{ color: 'var(--rn-ink)' }}>{notice.name}</span>
+                  {notice.version && <span className="sx-mono shrink-0 text-[11px]" style={{ color: 'var(--rn-ink-2)' }}>{notice.version}</span>}
+                  <span className="ml-auto shrink-0 text-[11.5px]" style={{ color: 'var(--rn-ink-2)' }}>
                     {notice.license || '未声明'}{notice.textMissing ? ' · 缺全文' : ''}
                   </span>
                 </button>
                 {isOpen && <div className="px-3 pb-3 pt-1">
-                  {notice.repository && <p className="sx-mono m-0 mb-2 break-all text-[11px]" style={{ color: 'var(--sx-muted)' }}>{notice.repository}</p>}
-                  {notice.notes.map(note => <p key={note} className="m-0 mb-2 text-[12px] leading-5" style={{ color: 'var(--sx-muted)' }}>{note}</p>)}
+                  {notice.repository && <p className="sx-mono m-0 mb-2 break-all text-[11px]" style={{ color: 'var(--rn-ink-2)' }}>{notice.repository}</p>}
+                  {notice.notes.map(note => <p key={note} className="m-0 mb-2 text-[12px] leading-5" style={{ color: 'var(--rn-ink-2)' }}>{note}</p>)}
                   {notice.texts.map(text => <pre key={text.path} aria-label={text.path}
                     className="sx-mono m-0 mb-2 max-h-[320px] overflow-auto whitespace-pre-wrap rounded-[8px] px-3 py-2 text-[11px] leading-5"
-                    style={{ color: 'var(--sx-muted)', background: 'var(--sx-raised-hover)' }}>{text.content}</pre>)}
-                  {!notice.texts.length && <p className="m-0 text-[12px]" style={{ color: 'var(--sx-muted)' }}>上游没有附许可证全文。</p>}
+                    style={{ color: 'var(--rn-ink-2)', background: 'var(--rn-fill)' }}>{text.content}</pre>)}
+                  {!notice.texts.length && <p className="m-0 text-[12px]" style={{ color: 'var(--rn-ink-2)' }}>上游没有附许可证全文。</p>}
                 </div>}
               </li>
             })}

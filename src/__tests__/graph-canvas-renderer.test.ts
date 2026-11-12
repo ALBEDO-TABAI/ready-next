@@ -2,8 +2,6 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
-  DARK_GRAPH_PALETTE,
-  LIGHT_GRAPH_PALETTE,
   drawGraphCanvas,
   graphLabelOpacity,
   graphNodeRadius,
@@ -11,6 +9,17 @@ import {
   fitGraphViewport,
   shouldDrawGraphLabel,
 } from '../renderer/components/graph/graph-canvas-renderer'
+
+// The renderer takes the --rn-* token values read where the canvas sits (readGraphPalette); these stand in for the
+// light and dark resolutions: the four ink levels and the signal colour.
+const LIGHT_GRAPH_PALETTE = {
+  document: 'rgba(11, 11, 14, .46)', tag: 'rgba(11, 11, 14, .64)', label: '#0b0b0e',
+  edge: 'rgba(11, 11, 14, .22)', tagEdge: 'rgba(11, 11, 14, .22)', linkEdge: 'rgba(11, 11, 14, .46)', highlight: '#ff5a1f',
+}
+const DARK_GRAPH_PALETTE = {
+  document: 'rgba(244, 244, 246, .46)', tag: 'rgba(244, 244, 246, .68)', label: '#f4f4f6',
+  edge: 'rgba(244, 244, 246, .22)', tagEdge: 'rgba(244, 244, 246, .22)', linkEdge: 'rgba(244, 244, 246, .46)', highlight: '#ff5a1f',
+}
 import type { GraphNode } from '../renderer/components/graph/graph-types'
 
 const nodes: GraphNode[] = [
@@ -176,7 +185,7 @@ test('connection roles distinguish hubs, satellites and isolated nodes in both t
         hoveredNodeId: null, relatedNodeIds: null, palette,
       })
       assert.equal(marks[0].color, palette.label, 'hub uses strong neutral ink')
-      for (const mark of marks.slice(1, 5)) assert.equal(mark.color, palette.tag, 'satellites use the accent regardless of file/tag type')
+      for (const mark of marks.slice(1, 5)) assert.equal(mark.color, palette.tag, 'satellites use the secondary ink regardless of file/tag type')
       assert.equal(marks[5].color, palette.document, 'unlinked points remain neutral')
       assert.ok(marks[0].radius >= marks[1].radius * 1.6, 'hub is visibly larger than its satellites')
     }

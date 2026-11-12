@@ -6,12 +6,10 @@ import {
   SettingsGroup,
   SettingsNotice,
   SettingsRow,
-  SettingsSegmented,
   SettingsStatus,
-  SettingsSwitch,
-  settingsButtonClass,
   type SettingsTone,
 } from '../../pages/settings/settings-shared'
+import { Button, IconButton, Input, Switch, Tabs } from '../ui'
 
 type IMTab = 'imessage' | 'telegram' | 'feishu' | 'wechat'
 
@@ -69,11 +67,11 @@ interface RemoteAttachmentCacheStatsData {
 
 const WECHAT_CHANNEL_ID = 'channel-wechat-openclaw-default'
 
-const IM_TABS: { value: IMTab; label: string }[] = [
-  { value: 'imessage', label: 'iMessage' },
-  { value: 'telegram', label: 'Telegram' },
-  { value: 'feishu', label: '飞书' },
-  { value: 'wechat', label: '微信' },
+const IM_TABS: { id: IMTab; label: string }[] = [
+  { id: 'imessage', label: 'iMessage' },
+  { id: 'telegram', label: 'Telegram' },
+  { id: 'feishu', label: '飞书' },
+  { id: 'wechat', label: '微信' },
 ]
 
 type ChannelHealth = { tone: SettingsTone; label: string }
@@ -81,7 +79,7 @@ type ChannelHealth = { tone: SettingsTone; label: string }
 // 文案里用反引号标出的命令 / 事件名渲染成等宽小片段。
 function withInlineCode(text: string) {
   return text.split(/`([^`]+)`/).map((part, index) => (index % 2 === 1
-    ? <code key={index} className="sx-mono rounded-[5px] px-1 py-px text-[11.5px]" style={{ background: 'var(--sx-inset-bg)', color: 'var(--sx-title)' }}>{part}</code>
+    ? <code key={index} className="sx-code text-[11.5px]">{part}</code>
     : part))
 }
 
@@ -103,25 +101,23 @@ function SecretInput({
 }) {
   return (
     <div className="relative">
-      <input
+      <Input
         id={id}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         type={visible ? 'text' : 'password'}
         autoComplete="off"
-        className="sx-input sx-input--mono"
+        className="sx-mono"
         style={{ paddingRight: 40 }}
       />
-      <button
-        type="button"
-        className={settingsButtonClass('ghost', { size: 'sm', icon: true, className: 'absolute right-[3px] top-1/2 -translate-y-1/2' })}
+      <IconButton
+        size="sm"
+        className="absolute right-[4px] top-1/2 -translate-y-1/2"
         onClick={onToggleVisible}
         title="显示/隐藏"
-        aria-label="显示/隐藏"
-      >
-        {visible ? <EyeOff /> : <Eye />}
-      </button>
+        icon={visible ? <EyeOff /> : <Eye />}
+      />
     </div>
   )
 }
@@ -419,24 +415,21 @@ export default function RemoteIMSettingsPanel() {
 
   const renderConnectedActions = (channel: ChannelData | undefined) => channel && channel.enabled && (
     <>
-      <button
-        type="button"
+      <Button
         disabled={Boolean(busyAction)}
         onClick={() => { void sendProbe(channel.id) }}
-        className={settingsButtonClass('secondary')}
+        icon={isBusy(`probe:${channel.id}`) ? <Loader2 className="animate-spin" /> : <Send />}
       >
-        {isBusy(`probe:${channel.id}`) ? <Loader2 className="animate-spin" /> : <Send />}
         测试
-      </button>
-      <button
-        type="button"
+      </Button>
+      <Button
+        variant="danger"
         disabled={Boolean(busyAction)}
         onClick={() => { void disconnectChannel(channel.id) }}
-        className={settingsButtonClass('danger-ghost')}
+        icon={isBusy(`disconnect:${channel.id}`) ? <Loader2 className="animate-spin" /> : undefined}
       >
-        {isBusy(`disconnect:${channel.id}`) && <Loader2 className="animate-spin" />}
         断开
-      </button>
+      </Button>
     </>
   )
 
@@ -448,28 +441,28 @@ export default function RemoteIMSettingsPanel() {
   return (
     <div className="sx-stack">
       <div className="flex flex-col gap-4">
-        <p className="m-0 px-1 text-[12px] leading-6" style={{ color: 'var(--sx-muted)', maxWidth: 720 }}>
+        <p className="m-0 px-1 text-[12px] leading-6" style={{ color: 'var(--rn-ink-2)', maxWidth: 720 }}>
           微信和飞书绑定本人后，文字任务会交给 Ready 处理并原路回复。单独发送的附件先保存到对应会话；需要处理附件时，请同时说明任务。
         </p>
-        <SettingsSegmented
-          kind="tabs"
-          ariaLabel="远程 IM 平台"
-          options={IM_TABS}
-          value={tab}
-          onChange={setTab}
-          className="self-start"
-        />
+        <div className="self-start">
+          <Tabs
+            label="远程 IM 平台"
+            items={IM_TABS}
+            value={tab}
+            onChange={(id) => setTab(id as IMTab)}
+          />
+        </div>
       </div>
 
       <div className="flex flex-col gap-3">
         {tab === 'imessage' && (
           <SettingsCard>
             <div className="flex flex-col items-center gap-3 px-6 py-10 text-center">
-              <div className="sx-inset grid h-11 w-11 place-items-center" style={{ borderRadius: 14, color: 'var(--sx-muted)' }}>
+              <div className="sx-inset grid h-11 w-11 place-items-center" style={{ borderRadius: 14, color: 'var(--rn-ink-2)' }}>
                 <MessageSquareDashed className="h-5 w-5" strokeWidth={1.8} />
               </div>
               <div className="sx-card-title">iMessage</div>
-              <p className="m-0 text-[12.5px] leading-6" style={{ color: 'var(--sx-muted)' }}>
+              <p className="m-0 text-[12.5px] leading-6" style={{ color: 'var(--rn-ink-2)' }}>
                 iMessage 正在开发中，当前版本先支持 Telegram、飞书与微信。
               </p>
               <span className="sx-badge">即将推出</span>
@@ -506,15 +499,14 @@ export default function RemoteIMSettingsPanel() {
               )}
             </div>
             <div className="sx-card__footer" style={{ justifyContent: 'flex-start' }}>
-              <button
-                type="button"
+              <Button
+                variant="primary"
                 disabled={Boolean(busyAction)}
                 onClick={() => { void connectTelegram() }}
-                className={settingsButtonClass('primary')}
+                icon={isBusy('telegram-connect') ? <Loader2 className="animate-spin" /> : undefined}
               >
-                {isBusy('telegram-connect') && <Loader2 className="animate-spin" />}
                 连接
-              </button>
+              </Button>
               {renderConnectedActions(telegramChannel)}
             </div>
           </SettingsCard>
@@ -530,12 +522,12 @@ export default function RemoteIMSettingsPanel() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="sx-field">
                   <label className="sx-field__label" htmlFor={`${fieldId}-feishu-app-id`}>App ID</label>
-                  <input
+                  <Input
                     id={`${fieldId}-feishu-app-id`}
                     value={feishuAppId}
                     onChange={(e) => setFeishuAppId(e.target.value)}
                     placeholder="App ID"
-                    className="sx-input sx-input--mono"
+                    className="sx-mono"
                   />
                 </div>
                 <div className="sx-field">
@@ -554,31 +546,32 @@ export default function RemoteIMSettingsPanel() {
                   />
                 </div>
               </div>
-              <button
-                type="button"
+              <Button
+                variant="ghost"
+                size="sm"
+                className="self-start"
                 onClick={() => setShowFeishuAdvanced((value) => !value)}
                 aria-expanded={showFeishuAdvanced}
-                className={settingsButtonClass('ghost', { size: 'sm', className: 'self-start' })}
                 style={{ marginLeft: -8 }}
+                icon={showFeishuAdvanced ? <ChevronUp /> : <ChevronDown />}
               >
-                {showFeishuAdvanced ? <ChevronUp /> : <ChevronDown />}
                 高级选项（仅回调模式 / 加密场景）
-              </button>
+              </Button>
               {showFeishuAdvanced && (
                 <div className="grid grid-cols-2 gap-3">
-                  <input
+                  <Input
                     value={feishuVerificationToken}
                     onChange={(e) => setFeishuVerificationToken(e.target.value)}
                     placeholder="Verification Token（可选）"
                     aria-label="Verification Token（可选）"
-                    className="sx-input sx-input--mono"
+                    className="sx-mono"
                   />
-                  <input
+                  <Input
                     value={feishuEncryptKey}
                     onChange={(e) => setFeishuEncryptKey(e.target.value)}
                     placeholder="Encrypt Key（可选）"
                     aria-label="Encrypt Key（可选）"
-                    className="sx-input sx-input--mono"
+                    className="sx-mono"
                   />
                 </div>
               )}
@@ -589,15 +582,14 @@ export default function RemoteIMSettingsPanel() {
               )}
             </div>
             <div className="sx-card__footer" style={{ justifyContent: 'flex-start' }}>
-              <button
-                type="button"
+              <Button
+                variant="primary"
                 disabled={Boolean(busyAction)}
                 onClick={() => { void connectFeishu() }}
-                className={settingsButtonClass('primary')}
+                icon={isBusy('feishu-connect') ? <Loader2 className="animate-spin" /> : undefined}
               >
-                {isBusy('feishu-connect') && <Loader2 className="animate-spin" />}
                 连接
-              </button>
+              </Button>
               {renderConnectedActions(feishuChannel)}
             </div>
           </SettingsCard>
@@ -609,9 +601,7 @@ export default function RemoteIMSettingsPanel() {
               label={feishuChannel.config.allowedSenderId ? '已绑定本人' : '绑定本人'}
               description={feishuChannel.config.allowedSenderId ? '已绑定本人，私聊可直接发送任务；群聊请以 @ready 开头。' : '还需要绑定本人，完成后才能远程发送任务。'}
             >
-              <button
-                type="button"
-                className={settingsButtonClass('secondary')}
+              <Button
                 disabled={Boolean(busyAction)}
                 onClick={() => {
                   void runWithBusy('feishu-pair', async () => {
@@ -620,15 +610,15 @@ export default function RemoteIMSettingsPanel() {
                     setPairingCode(result.data.code)
                   })
                 }}
+                icon={isBusy('feishu-pair') ? <Loader2 className="animate-spin" /> : undefined}
               >
-                {isBusy('feishu-pair') && <Loader2 className="animate-spin" />}
                 {feishuChannel.config.allowedSenderId ? '重新绑定本人' : '生成本人绑定码'}
-              </button>
+              </Button>
             </SettingsRow>
             {pairingCode && (
               <div className="px-6 pb-5">
-                <div className="sx-inset px-4 py-3 text-[12.5px] leading-6" style={{ color: 'var(--sx-body)' }}>
-                  在飞书中私聊你的机器人，发送 <code className="sx-mono rounded-md px-1.5 py-0.5 text-[12px]" style={{ background: 'var(--sx-control-bg)', color: 'var(--sx-title)' }}>/bind {pairingCode}</code>。绑定码 5 分钟内有效，完成后这里会显示已绑定。
+                <div className="sx-inset px-4 py-3 text-[12.5px] leading-6" style={{ color: 'var(--rn-ink)' }}>
+                  在飞书中私聊你的机器人，发送 <code className="sx-code px-1.5 py-0.5 text-[12px]">/bind {pairingCode}</code>。绑定码 5 分钟内有效，完成后这里会显示已绑定。
                 </div>
               </div>
             )}
@@ -653,41 +643,41 @@ export default function RemoteIMSettingsPanel() {
                 }}
                 onChanged={loadChannelConfig}
               />
-              <button
-                type="button"
-                className={settingsButtonClass('ghost', { size: 'sm', className: 'self-start' })}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="self-start"
                 style={{ marginLeft: -8 }}
                 aria-expanded={showWechatAdvanced}
                 onClick={() => setShowWechatAdvanced((value) => !value)}
+                icon={showWechatAdvanced ? <ChevronUp /> : <ChevronDown />}
               >
-                {showWechatAdvanced ? <ChevronUp /> : <ChevronDown />}
                 高级
-              </button>
+              </Button>
               {showWechatAdvanced && (
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                  <input
+                  <Input
                     value={wechatRouteTag}
                     onChange={(e) => setWechatRouteTag(e.target.value)}
                     placeholder="OpenClaw routeTag（可选）"
                     aria-label="OpenClaw routeTag（可选）"
-                    className="sx-input sx-input--mono"
+                    className="sx-mono"
                   />
-                  <input
+                  <Input
                     value={wechatBotAgent}
                     onChange={(e) => setWechatBotAgent(e.target.value)}
                     placeholder="botAgent（可选）"
                     aria-label="botAgent（可选）"
-                    className="sx-input sx-input--mono"
+                    className="sx-mono"
                   />
-                  <button
-                    type="button"
+                  <Button
+                    className="justify-self-start md:col-span-2"
                     disabled={Boolean(busyAction)}
                     onClick={() => { void runWithBusy('wechat-save', () => saveWechatChannel()) }}
-                    className={settingsButtonClass('secondary', { className: 'justify-self-start md:col-span-2' })}
+                    icon={isBusy('wechat-save') ? <Loader2 className="animate-spin" /> : undefined}
                   >
-                    {isBusy('wechat-save') && <Loader2 className="animate-spin" />}
                     保存配置
-                  </button>
+                  </Button>
                 </div>
               )}
             </div>
@@ -708,7 +698,7 @@ export default function RemoteIMSettingsPanel() {
 
       {tab === 'feishu' && (
         <SettingsGroup label="配置指引">
-          <ol className="sx-inset m-0 flex list-none flex-col gap-2.5 px-6 py-5 text-[12px] leading-[1.7]" style={{ color: 'var(--sx-muted)' }}>
+          <ol className="sx-inset m-0 flex list-none flex-col gap-2.5 px-6 py-5 text-[12px] leading-[1.7]" style={{ color: 'var(--rn-ink-2)' }}>
             {[
               '在飞书开放平台创建自建应用并启用机器人能力。',
               '建议选择事件订阅的“长连接”模式；如果使用回调 URL 模式，需要额外暴露可公网访问的 callback 地址。',
@@ -718,7 +708,7 @@ export default function RemoteIMSettingsPanel() {
               <li key={step} className="flex gap-3">
                 <span
                   className="sx-mono mt-[2px] grid h-[18px] w-[18px] shrink-0 place-items-center rounded-full text-[10.5px]"
-                  style={{ background: 'var(--sx-control-bg)', boxShadow: 'var(--sx-control-shadow)', color: 'var(--sx-body)' }}
+                  style={{ background: 'var(--rn-fill-2)', color: 'var(--rn-ink)' }}
                 >
                   {index + 1}
                 </span>
@@ -738,14 +728,14 @@ export default function RemoteIMSettingsPanel() {
               : '远程 IM 的消息收发都经由本地通讯服务'}
           >
             <SettingsStatus tone={sidecarStatus.tone}>{sidecarStatus.label}</SettingsStatus>
-            <button
-              type="button"
-              className={settingsButtonClass('ghost', { size: 'sm' })}
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => { void refresh() }}
+              icon={<RefreshCcw />}
             >
-              <RefreshCcw />
               刷新
-            </button>
+            </Button>
           </SettingsRow>
           {channels.map((channel) => {
             const adapter = currentAdapters.find((item) => item.id === channel.id)
@@ -754,7 +744,7 @@ export default function RemoteIMSettingsPanel() {
             return (
               <div key={channel.id} className="sx-row" style={{ alignItems: 'flex-start' }}>
                 <div className="flex min-w-0 flex-1 gap-3">
-                  <div className="sx-inset grid h-8 w-8 shrink-0 place-items-center" style={{ borderRadius: 10, color: 'var(--sx-muted)' }}>
+                  <div className="sx-inset grid h-8 w-8 shrink-0 place-items-center" style={{ borderRadius: 10, color: 'var(--rn-ink-2)' }}>
                     <Bot className="h-4 w-4" strokeWidth={1.8} />
                   </div>
                   <div className="min-w-0">
@@ -773,31 +763,25 @@ export default function RemoteIMSettingsPanel() {
                   </div>
                 </div>
                 <div className="sx-row__control" style={{ gap: 4 }}>
-                  <button
-                    type="button"
+                  <IconButton
+                    size="sm"
                     title="发送测试消息"
-                    aria-label="发送测试消息"
                     disabled={Boolean(busyAction)}
                     onClick={() => { void sendProbe(channel.id) }}
-                    className={settingsButtonClass('ghost', { size: 'sm', icon: true })}
-                  >
-                    <Send />
-                  </button>
-                  <button
-                    type="button"
+                    icon={<Send />}
+                  />
+                  <IconButton
+                    size="sm"
                     title="删除"
-                    aria-label="删除"
                     disabled={Boolean(busyAction)}
                     onClick={() => { void deleteChannel(channel.id) }}
-                    className={settingsButtonClass('danger-quiet', { size: 'sm', icon: true })}
-                  >
-                    <Trash2 />
-                  </button>
+                    icon={<Trash2 />}
+                  />
                   <span className="ml-2" title={channel.enabled ? '停用' : '启用'}>
-                    <SettingsSwitch
+                    <Switch
                       checked={channel.enabled}
                       disabled={Boolean(busyAction)}
-                      ariaLabel={channel.enabled ? `停用 ${channel.name}` : `启用 ${channel.name}`}
+                      label={channel.enabled ? `停用 ${channel.name}` : `启用 ${channel.name}`}
                       onChange={() => {
                         void runWithBusy(`toggle:${channel.id}`, async () => {
                           const result = await window.electronAPI.agent.setChannelEnabled(channel.id, !channel.enabled)
@@ -813,7 +797,7 @@ export default function RemoteIMSettingsPanel() {
           })}
           {channels.length === 0 && (
             <div className="sx-row">
-              <span className="text-[12px]" style={{ color: 'var(--sx-muted)' }}>暂无远程 IM 通道</span>
+              <span className="text-[12px]" style={{ color: 'var(--rn-ink-2)' }}>暂无远程 IM 通道</span>
             </div>
           )}
         </SettingsCard>
@@ -827,17 +811,16 @@ export default function RemoteIMSettingsPanel() {
               ? `共 ${cacheStats.totalFiles} 个附件 · ${(cacheStats.totalBytes / 1024 / 1024).toFixed(2)} MB`
               : '总附件数与大小需手动统计，点击刷新后查看'}
           >
-            <button
-              type="button"
-              className={settingsButtonClass('ghost', { size: 'sm' })}
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => { void refresh() }}
+              icon={<RefreshCcw />}
             >
-              <RefreshCcw />
               刷新
-            </button>
-            <button
-              type="button"
-              className={settingsButtonClass('danger')}
+            </Button>
+            <Button
+              variant="danger"
               disabled={Boolean(busyAction)}
               onClick={() => {
                 void runWithBusy('clear-cache:all', async () => {
@@ -846,10 +829,10 @@ export default function RemoteIMSettingsPanel() {
                   await refresh()
                 })
               }}
+              icon={isBusy('clear-cache:all') ? <Loader2 className="animate-spin" /> : <Trash2 />}
             >
-              {isBusy('clear-cache:all') ? <Loader2 className="animate-spin" /> : <Trash2 />}
               清空全部
-            </button>
+            </Button>
           </SettingsRow>
           {cacheStats && cacheStats.channels.map((item) => (
             <SettingsRow
@@ -857,9 +840,9 @@ export default function RemoteIMSettingsPanel() {
               label={<span className="sx-mono text-[12px]">{item.channelId}</span>}
               description={`${item.files} 个文件 · ${(item.bytes / 1024 / 1024).toFixed(2)} MB`}
             >
-              <button
-                type="button"
-                className={settingsButtonClass('ghost', { size: 'sm' })}
+              <Button
+                variant="ghost"
+                size="sm"
                 disabled={Boolean(busyAction)}
                 onClick={() => {
                   void runWithBusy(`clear-cache:${item.channelId}`, async () => {
@@ -870,7 +853,7 @@ export default function RemoteIMSettingsPanel() {
                 }}
               >
                 清理
-              </button>
+              </Button>
             </SettingsRow>
           ))}
         </SettingsCard>

@@ -17,12 +17,11 @@ import type {
   ReadyMemoryView,
 } from '../../../shared/ready-memory'
 import { useAgent } from '../../stores/useAgent'
+import { Button, Checkbox, IconButton, Select, Switch, Textarea } from '../../components/ui'
 import {
   SettingsCard,
   SettingsNotice,
   SettingsRow,
-  SettingsSwitch,
-  settingsButtonClass,
 } from './settings-shared'
 
 const CATEGORY_OPTIONS: Array<{ value: ReadyMemoryCategory; label: string }> = [
@@ -225,8 +224,8 @@ export function ReadyMemorySettingsPanel() {
   if (loading) {
     return (
       <div className="flex items-center gap-3 px-1 py-5" role="status">
-        <Loader2 className="h-4 w-4 animate-spin" style={{ color: 'var(--sx-muted)' }} />
-        <span className="text-[12px]" style={{ color: 'var(--sx-muted)' }}>正在读取长期记忆…</span>
+        <Loader2 className="h-4 w-4 animate-spin" style={{ color: 'var(--rn-ink-2)' }} />
+        <span className="text-[12px]" style={{ color: 'var(--rn-ink-2)' }}>正在读取长期记忆…</span>
       </div>
     )
   }
@@ -237,9 +236,9 @@ export function ReadyMemorySettingsPanel() {
         tone="danger"
         title="暂时无法打开长期记忆"
         action={(
-          <button type="button" onClick={() => void load()} className={settingsButtonClass('secondary', { size: 'sm' })}>
+          <Button size="sm" onClick={() => void load()}>
             重试
-          </button>
+          </Button>
         )}
       >
         {error || '请稍后重试'}
@@ -271,8 +270,8 @@ export function ReadyMemorySettingsPanel() {
           label="使用长期记忆"
           description="新对话会带上与当前任务相关的已保存内容。关闭后不会删除已有记忆。"
         >
-          <SettingsSwitch
-            ariaLabel="使用长期记忆"
+          <Switch
+            label="使用长期记忆"
             checked={view.useMemories}
             disabled={operationBusy}
             onChange={(checked) => void changeUsePolicy(checked)}
@@ -289,8 +288,8 @@ export function ReadyMemorySettingsPanel() {
             </>
           )}
         >
-          <SettingsSwitch
-            ariaLabel="自动整理长期记忆"
+          <Switch
+            label="自动整理长期记忆"
             checked={view.generateMemories}
             disabled={operationBusy || !view.automaticGenerationAvailable}
             onChange={(checked) => void changeGeneratePolicy(checked)}
@@ -305,8 +304,8 @@ export function ReadyMemorySettingsPanel() {
             : '先打开一个本地对话，再设置这个对话是否可用于整理。'}
         >
           {currentScopeId && view.contributeToMemories !== null ? (
-            <SettingsSwitch
-              ariaLabel="允许当前对话用于整理"
+            <Switch
+              label="允许当前对话用于整理"
               checked={view.contributeToMemories === true}
               disabled={operationBusy}
               onChange={(checked) => void changeConversationPolicy(checked)}
@@ -330,8 +329,8 @@ export function ReadyMemorySettingsPanel() {
         title={(
           <span id="ready-memory-editor-title" className="inline-flex items-center gap-2">
             {editingEntryId
-              ? <Pencil className="h-3.5 w-3.5" style={{ color: 'var(--sx-muted)' }} />
-              : <Plus className="h-3.5 w-3.5" style={{ color: 'var(--sx-muted)' }} />}
+              ? <Pencil className="h-3.5 w-3.5" style={{ color: 'var(--rn-ink-2)' }} />
+              : <Plus className="h-3.5 w-3.5" style={{ color: 'var(--rn-ink-2)' }} />}
             {editingEntryId ? '修改记忆' : '手动添加'}
           </span>
         )}
@@ -340,20 +339,17 @@ export function ReadyMemorySettingsPanel() {
           <div className="sx-card__body grid gap-3 sm:grid-cols-[160px_minmax(0,1fr)]">
             <label className="sx-field">
               <span className="sx-field__label">类型</span>
-              <select
+              <Select
                 aria-label="记忆类型"
                 value={category}
                 onChange={(event) => setCategory(event.target.value as ReadyMemoryCategory)}
                 disabled={operationBusy}
-                className="sx-select"
-                style={{ width: '100%' }}
-              >
-                {CATEGORY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
+                options={CATEGORY_OPTIONS}
+              />
             </label>
             <label className="sx-field">
               <span className="sx-field__label">内容</span>
-              <textarea
+              <Textarea
                 aria-label="记忆内容"
                 value={content}
                 onChange={(event) => setContent(event.target.value)}
@@ -361,35 +357,32 @@ export function ReadyMemorySettingsPanel() {
                 maxLength={16_000}
                 rows={3}
                 placeholder="例如：我喜欢简洁、直接的中文回答。"
-                className="sx-textarea"
               />
             </label>
           </div>
           <div className="sx-card__footer justify-between">
             {!editingEntryId ? (
-              <label className="inline-flex cursor-pointer items-center gap-2 text-[12px]" style={{ color: 'var(--sx-body)' }}>
-                <input
-                  type="checkbox"
-                  className="sx-check"
+              <span className="text-[12px]">
+                <Checkbox
+                  label="添加后固定"
                   checked={pinNewEntry}
-                  onChange={(event) => setPinNewEntry(event.target.checked)}
+                  onChange={setPinNewEntry}
                   disabled={operationBusy}
                 />
-                添加后固定
-              </label>
+              </span>
             ) : <span />}
             <div className="flex items-center gap-2">
               {editingEntryId && (
-                <button type="button" onClick={resetEditor} disabled={operationBusy} className={settingsButtonClass('secondary')}>取消</button>
+                <Button onClick={resetEditor} disabled={operationBusy}>取消</Button>
               )}
-              <button
+              <Button
                 type="submit"
+                variant="primary"
                 disabled={operationBusy || content.trim().length === 0}
                 aria-busy={busy === 'save-entry' ? true : undefined}
-                className={settingsButtonClass('primary')}
               >
                 {busy === 'save-entry' ? '保存中…' : editingEntryId ? '保存修改' : '添加记忆'}
-              </button>
+              </Button>
             </div>
           </div>
         </form>
@@ -400,24 +393,24 @@ export function ReadyMemorySettingsPanel() {
         title={<span id="ready-memory-list-title">已记住的内容</span>}
         description="固定的内容会优先保留。"
         actions={(
-          <button
-            type="button"
+          <Button
+            variant="danger"
+            size="sm"
             onClick={() => void resetAll()}
             disabled={operationBusy || view.entries.length === 0}
-            className={settingsButtonClass('danger', { size: 'sm' })}
+            icon={<Trash2 />}
           >
-            <Trash2 />
             全部忘记
-          </button>
+          </Button>
         )}
       >
         <div>
           {view.entries.length === 0 ? (
             <div className="flex items-start gap-3 px-6 py-6">
-              <Sparkles className="mt-0.5 h-4 w-4 shrink-0" style={{ color: 'var(--sx-accent)' }} />
+              <Sparkles className="mt-0.5 h-4 w-4 shrink-0" style={{ color: 'var(--rn-ink-2)' }} />
               <div>
-                <div className="text-[13px] font-semibold" style={{ color: 'var(--sx-title)' }}>还没有长期记忆</div>
-                <div className="mt-1 text-[12px] leading-5" style={{ color: 'var(--sx-muted)' }}>
+                <div className="text-[13px] font-semibold" style={{ color: 'var(--rn-ink)' }}>还没有长期记忆</div>
+                <div className="mt-1 text-[12px] leading-5" style={{ color: 'var(--rn-ink-2)' }}>
                   {view.automaticGenerationAvailable
                     ? '你可以手动添加一条，或在确认费用后开启自动整理。'
                     : '你可以先手动添加；自动整理暂未开放。'}
@@ -433,9 +426,9 @@ export function ReadyMemorySettingsPanel() {
               return (
                 <article
                   key={entry.entryId}
-                  className="group/memory flex items-start gap-4 px-6 py-[18px] transition-colors hover:bg-[var(--sx-hover)]"
+                  className="group/memory flex items-start gap-4 px-6 py-[18px] transition-colors hover:bg-[var(--rn-fill)]"
                   style={{
-                    borderTop: index === 0 ? 'none' : '1px solid var(--sx-divider)',
+                    borderTop: index === 0 ? 'none' : '1px solid var(--rn-hair)',
                     opacity: expired ? 0.62 : 1,
                   }}
                 >
@@ -454,7 +447,7 @@ export function ReadyMemorySettingsPanel() {
                         {entry.origin === 'manual' ? '手动添加' : '自动整理'}
                       </span>
                     </div>
-                    <p className="mt-2 whitespace-pre-wrap break-words text-[13px] leading-6" style={{ color: 'var(--sx-body)' }}>
+                    <p className="mt-2 whitespace-pre-wrap break-words text-[13px] leading-6" style={{ color: 'var(--rn-ink)' }}>
                       {entry.content}
                     </p>
                     <div className="sx-meta mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5">
@@ -470,40 +463,31 @@ export function ReadyMemorySettingsPanel() {
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-0.5">
-                    <button
-                      type="button"
+                    <IconButton
+                      icon={entry.pinned ? <PinOff /> : <Pin />}
                       data-memory-action="pin"
-                      aria-label={`${entry.pinned ? '取消固定' : '固定'}：${entry.content}`}
                       title={entry.pinned ? '取消固定' : '固定'}
+                      aria-label={`${entry.pinned ? '取消固定' : '固定'}：${entry.content}`}
                       disabled={operationBusy}
                       onClick={() => void togglePin(entry)}
-                      className={settingsButtonClass('ghost', { size: 'sm', icon: true })}
-                      style={entry.pinned ? { color: 'var(--sx-title)' } : undefined}
-                    >
-                      {entry.pinned ? <PinOff /> : <Pin />}
-                    </button>
-                    <button
-                      type="button"
+                      style={entry.pinned ? { color: 'var(--rn-ink)' } : undefined}
+                    />
+                    <IconButton
+                      icon={<Pencil />}
                       data-memory-action="edit"
-                      aria-label={`编辑：${entry.content}`}
                       title="编辑"
+                      aria-label={`编辑：${entry.content}`}
                       disabled={operationBusy}
                       onClick={() => beginEdit(entry)}
-                      className={settingsButtonClass('ghost', { size: 'sm', icon: true })}
-                    >
-                      <Pencil />
-                    </button>
-                    <button
-                      type="button"
+                    />
+                    <IconButton
+                      icon={<Trash2 />}
                       data-memory-action="delete"
-                      aria-label={`删除：${entry.content}`}
                       title="删除"
+                      aria-label={`删除：${entry.content}`}
                       disabled={operationBusy}
                       onClick={() => void deleteEntry(entry)}
-                      className={settingsButtonClass('danger-quiet', { size: 'sm', icon: true })}
-                    >
-                      <Trash2 />
-                    </button>
+                    />
                   </div>
                 </article>
               )

@@ -86,6 +86,7 @@
     transition: background-color var(--rn-d-2) var(--rn-ease-out), color var(--rn-d-2) var(--rn-ease-out);
   }
   .rn-seg__item[aria-checked='true'] { background: var(--rn-sheet); color: var(--rn-ink); font-weight: 500; box-shadow: var(--rn-card-shadow); }
+  .rn-seg__count { margin-left: 6px; font: 400 var(--rn-fs-xs)/1 var(--rn-font-mono); color: var(--rn-ink-3); }
 
   /* ---- Menu (inside a float) ---- */
   .rn-menu { min-width: 200px; max-width: 320px; padding: 6px; font: 400 var(--rn-fs-md)/1.2 var(--rn-font-ui); color: var(--rn-ink); }

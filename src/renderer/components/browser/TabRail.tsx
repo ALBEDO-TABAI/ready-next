@@ -24,6 +24,7 @@ import {
 } from '../../modules/agent/chat-input-bridge'
 import type { BrowserTab } from '../../stores/useBrowserTabs'
 import ActiveTabSurface from './ActiveTabSurface'
+import { IconButton } from '../ui'
 
 interface TabRailProps {
   isActive: boolean
@@ -330,16 +331,15 @@ export default function TabRail({
           transition: 'width 160ms ease',
         }}
       >
-        <button
-          type="button"
+        <IconButton
+          size="sm"
+          icon={<ChevronLeft />}
+          title="向左滚动标签"
           onClick={() => scrollRef.current?.scrollBy({ left: -160, behavior: 'smooth' })}
-          className="flex h-[24px] w-[24px] flex-shrink-0 items-center justify-center rounded transition-colors hover:bg-[var(--bg-hover)]"
           style={{ opacity: showLeftArrow ? 1 : 0, pointerEvents: showLeftArrow ? 'auto' : 'none' }}
           tabIndex={showLeftArrow ? 0 : -1}
           aria-hidden={!showLeftArrow}
-        >
-          <ChevronLeft style={{ width: 12, height: 12 }} className="text-[var(--text-gray)]" strokeWidth={2} />
-        </button>
+        />
       </div>
 
       <div
@@ -464,24 +464,23 @@ export default function TabRail({
                       maxWidth: WORKBENCH_TAB_MAX_WIDTH,
                       opacity: isDragging ? 0.72 : 1,
                       background: isHovered
-                        ? 'color-mix(in srgb, var(--surface-card-bg) 20%, transparent)'
+                        ? 'var(--rn-fill)'
                         : 'transparent',
-                      color: isHovered ? 'var(--text-title)' : 'var(--text-gray)',
+                      color: isHovered ? 'var(--rn-ink)' : 'var(--rn-ink-2)',
+                      // The drop target is "here" (DL5); a hover is only the fill, not the signal colour.
                       borderColor: isDragOver
-                        ? 'var(--color-blue)'
+                        ? 'var(--rn-accent)'
                         : isHovered
-                          ? 'color-mix(in srgb, var(--color-blue) 28%, transparent)'
+                          ? 'var(--rn-hair)'
                           : 'transparent',
-                      // Agent-owned tabs glow blue so the user can see the agent
-                      // is driving this surface (plan §3.6); brighter when it is
+                      // Agent-owned tabs glow in the signal colour so the user can see the agent
+                      // is driving this surface right now (plan §3.6); brighter when it is
                       // the active tab.
                       boxShadow: tab.owner === 'agent'
                         ? (isActive
-                            ? '0 0 0 1px color-mix(in srgb, var(--color-blue) 55%, transparent), 0 0 12px color-mix(in srgb, var(--color-blue) 45%, transparent)'
-                            : '0 0 0 1px color-mix(in srgb, var(--color-blue) 32%, transparent), 0 0 8px color-mix(in srgb, var(--color-blue) 26%, transparent)')
-                        : isHovered
-                          ? '0 0 0 1px color-mix(in srgb, var(--color-blue) 18%, transparent)'
-                          : 'none',
+                            ? '0 0 0 1px color-mix(in srgb, var(--rn-accent) 55%, transparent), 0 0 12px color-mix(in srgb, var(--rn-accent) 45%, transparent)'
+                            : '0 0 0 1px color-mix(in srgb, var(--rn-accent) 32%, transparent), 0 0 8px color-mix(in srgb, var(--rn-accent) 26%, transparent)')
+                        : 'none',
                     }}
                     contentClassName="relative z-[1] flex min-w-0 flex-1 items-center justify-center"
                   >
@@ -495,7 +494,7 @@ export default function TabRail({
                       {tab.loading ? (
                         <Loader2
                           style={{ width: 14, height: 14 }}
-                          className="animate-spin flex-shrink-0 text-[var(--color-blue)]"
+                          className="animate-spin flex-shrink-0 text-[var(--rn-accent)]"
                           strokeWidth={2}
                         />
                       ) : tab.favicon ? (
@@ -527,8 +526,8 @@ export default function TabRail({
                           <span
                             className="flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em]"
                             style={{
-                              background: 'var(--color-blue-light)',
-                              color: 'var(--color-blue)',
+                              background: 'var(--rn-accent-soft)',
+                              color: 'var(--rn-accent-text)',
                             }}
                           >
                             Agent
@@ -538,7 +537,7 @@ export default function TabRail({
                         {tab.required && (
                           <Lock
                             style={{ width: 10, height: 10 }}
-                            className="flex-shrink-0 text-[var(--text-light)]"
+                            className="flex-shrink-0 text-[var(--rn-ink-3)]"
                             strokeWidth={2}
                           />
                         )}
@@ -548,8 +547,8 @@ export default function TabRail({
                             className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${tab.activity === 'running' ? 'animate-pulse' : ''}`}
                             style={{
                               background: tab.activity === 'attention'
-                                ? 'var(--color-orange)'
-                                : 'var(--color-blue)',
+                                ? 'var(--rn-warn)'
+                                : 'var(--rn-accent)',
                             }}
                           />
                         )}
@@ -571,14 +570,14 @@ export default function TabRail({
                               onToggleBookmarkForTab(tab)
                             }
                           }}
-                          className="flex h-[18px] w-[18px] items-center justify-center rounded opacity-70 transition-colors hover:bg-[var(--bg-hover)] hover:opacity-100"
+                          className="flex h-[18px] w-[18px] items-center justify-center rounded opacity-70 transition-colors hover:bg-[var(--rn-fill-2)] hover:opacity-100"
                           title={tabIsBookmarked ? '取消收藏' : '收藏此页面'}
                         >
                           <Star
                             style={{ width: 10, height: 10 }}
                             strokeWidth={2}
-                            className={tabIsBookmarked ? 'text-[var(--color-orange)]' : 'text-[var(--text-light)]'}
-                            fill={tabIsBookmarked ? 'var(--color-orange)' : 'none'}
+                            className={tabIsBookmarked ? 'text-[var(--rn-ink)]' : 'text-[var(--rn-ink-3)]'}
+                            fill={tabIsBookmarked ? 'currentColor' : 'none'}
                           />
                         </span>
 
@@ -588,7 +587,7 @@ export default function TabRail({
                             event.stopPropagation()
                             void onTabClose(tab.id)
                           }}
-                          className="flex h-[18px] w-[18px] cursor-pointer items-center justify-center rounded opacity-75 transition-[background-color,opacity] hover:bg-[var(--bg-hover)] hover:opacity-100"
+                          className="flex h-[18px] w-[18px] cursor-pointer items-center justify-center rounded opacity-75 transition-[background-color,opacity] hover:bg-[var(--rn-fill-2)] hover:opacity-100"
                           title="Close tab"
                         >
                           <X style={{ width: 10, height: 10 }} strokeWidth={2} />
@@ -600,14 +599,12 @@ export default function TabRail({
               </div>
             )
           })}
-          <button
-            type="button"
+          <IconButton
+            icon={<Plus />}
             onClick={() => void onNewTab()}
-            className="ml-[6px] flex h-[26px] w-[26px] flex-shrink-0 items-center justify-center rounded-[8px] transition-colors hover:bg-[var(--bg-hover)]"
+            className="ml-[6px]"
             title="New tab"
-          >
-            <Plus style={{ width: 14, height: 14 }} className="text-[var(--text-muted)]" strokeWidth={2} />
-          </button>
+          />
         </MorphTabStrip>
       </div>
 
@@ -618,16 +615,15 @@ export default function TabRail({
           transition: 'width 160ms ease',
         }}
       >
-        <button
-          type="button"
+        <IconButton
+          size="sm"
+          icon={<ChevronRight />}
+          title="向右滚动标签"
           onClick={() => scrollRef.current?.scrollBy({ left: 160, behavior: 'smooth' })}
-          className="flex h-[24px] w-[24px] flex-shrink-0 items-center justify-center rounded transition-colors hover:bg-[var(--bg-hover)]"
           style={{ opacity: showRightArrow ? 1 : 0, pointerEvents: showRightArrow ? 'auto' : 'none' }}
           tabIndex={showRightArrow ? 0 : -1}
           aria-hidden={!showRightArrow}
-        >
-          <ChevronRight style={{ width: 12, height: 12 }} className="text-[var(--text-gray)]" strokeWidth={2} />
-        </button>
+        />
       </div>
     </div>
   )

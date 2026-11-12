@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Info, Loader2, RefreshCw, Trash2 } from 'lucide-react'
+import { Button } from '../../components/ui'
 import {
   SettingsCard,
   SettingsNotice,
   SettingsRow,
   SettingsStatus,
-  settingsButtonClass,
 } from './settings-shared'
 
 interface RSSDraftStoreSourceRow {
@@ -107,12 +107,12 @@ export function RSSDraftStoreSettingsPanel() {
               style={{
                 paddingLeft: index === 0 ? 0 : 28,
                 paddingRight: 28,
-                borderLeft: index === 0 ? 'none' : '1px solid var(--sx-divider)',
+                borderLeft: index === 0 ? 'none' : '1px solid var(--rn-hair)',
               }}
             >
               <span className="sx-stat__value">
                 {item.value}
-                <small className="ml-1 text-[12px] font-normal" style={{ color: 'var(--sx-muted)' }}>{item.unit}</small>
+                <small className="ml-1 text-[12px] font-normal" style={{ color: 'var(--rn-ink-2)' }}>{item.unit}</small>
               </span>
               <span className="sx-stat__label">{item.label}</span>
             </div>
@@ -136,8 +136,8 @@ export function RSSDraftStoreSettingsPanel() {
 
       {loading ? (
         <section className="sx-card sx-card--pad flex items-center gap-3">
-          <Loader2 className="h-4 w-4 animate-spin" style={{ color: 'var(--sx-muted)' }} />
-          <span className="text-[12px]" style={{ color: 'var(--sx-muted)' }}>正在读取 RSS 底稿列表…</span>
+          <Loader2 className="h-4 w-4 animate-spin" style={{ color: 'var(--rn-ink-2)' }} />
+          <span className="text-[12px]" style={{ color: 'var(--rn-ink-2)' }}>正在读取 RSS 底稿列表…</span>
         </section>
       ) : sources.length === 0 ? (
         <SettingsCard
@@ -162,30 +162,31 @@ export function RSSDraftStoreSettingsPanel() {
                 style={{ gridTemplateColumns: RSS_DRAFT_GRID_COLUMNS, minHeight: 60 }}
               >
                 <div className="min-w-0 py-2.5">
-                  <div className="truncate text-[13px] font-semibold" style={{ color: 'var(--sx-title)' }} title={source.sourceName}>
+                  <div className="truncate text-[13px] font-semibold" style={{ color: 'var(--rn-ink)' }} title={source.sourceName}>
                     {source.sourceName}
                   </div>
                   <div className="sx-meta mt-0.5 truncate" title={source.sourceUrl}>
                     {source.sourceUrl}
                   </div>
                 </div>
-                <span className="sx-mono text-right text-[13px]" style={{ color: 'var(--sx-title)' }}>{source.storedCount}</span>
-                <span className="sx-mono text-right text-[13px]" style={{ color: 'var(--sx-title)' }}>{source.inboxCount}</span>
-                <span className="sx-mono text-right text-[13px]" style={{ color: 'var(--sx-muted)' }}>{source.starredCount}</span>
+                <span className="sx-mono text-right text-[13px]" style={{ color: 'var(--rn-ink)' }}>{source.storedCount}</span>
+                <span className="sx-mono text-right text-[13px]" style={{ color: 'var(--rn-ink)' }}>{source.inboxCount}</span>
+                <span className="sx-mono text-right text-[13px]" style={{ color: 'var(--rn-ink-2)' }}>{source.starredCount}</span>
                 {/* 常态（增量）只给中性点，例外（首次完整）才着色——避免一整列强调色圆点。 */}
                 <SettingsStatus tone={source.refreshMode === 'incremental' ? 'muted' : 'warning'} className="pl-3">
                   {source.refreshMode === 'incremental' ? '增量刷新' : '首次完整'}
                 </SettingsStatus>
-                <button
-                  type="button"
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={() => void handleClear(source.sourceId, source.sourceName)}
                   disabled={busyKey !== null}
                   aria-busy={busyKey === source.sourceId ? true : undefined}
-                  className={settingsButtonClass('ghost', { size: 'sm', className: 'sx-table__action justify-self-end' })}
+                  className="sx-table__action justify-self-end"
+                  icon={busyKey === source.sourceId ? <Loader2 className="animate-spin" /> : <RefreshCw />}
                 >
-                  {busyKey === source.sourceId ? <Loader2 className="animate-spin" /> : <RefreshCw />}
                   重新完整抓取
-                </button>
+                </Button>
               </div>
             ))}
           </div>
@@ -197,17 +198,16 @@ export function RSSDraftStoreSettingsPanel() {
           label="清空全部底稿"
           description="清空后会移除所有历史底稿数据，下一次刷新将重新完整抓取。"
         >
-          <button
-            type="button"
+          <Button
+            variant="danger"
             aria-label="清空全部底稿"
             onClick={() => void handleClear()}
             disabled={busyKey !== null}
             aria-busy={busyKey === 'all' ? true : undefined}
-            className={settingsButtonClass('danger')}
+            icon={busyKey === 'all' ? <Loader2 className="animate-spin" /> : <Trash2 />}
           >
-            {busyKey === 'all' ? <Loader2 className="animate-spin" /> : <Trash2 />}
             全部清空
-          </button>
+          </Button>
         </SettingsRow>
       </SettingsCard>
     </div>

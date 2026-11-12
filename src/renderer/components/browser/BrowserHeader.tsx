@@ -48,7 +48,7 @@ function BrowserOwnershipChip({ status }: { status: BrowserOwnershipStatus }) {
     : status.tone === 'agent'
       ? Bot
       : UserRound
-  const accent = status.tone === 'agent' ? 'var(--color-blue)' : 'var(--text-gray)'
+  const accent = status.tone === 'agent' ? 'var(--rn-accent)' : 'var(--rn-ink-3)'
   return (
     <div
       className="flex h-[28px] w-[14px] flex-shrink-0 items-center justify-center"

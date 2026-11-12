@@ -1,6 +1,9 @@
 import type { ReactNode } from 'react'
 import { AlertCircle, AlertTriangle, Info } from 'lucide-react'
 
+// 设置页自己的版式（W2 §3.2、W1 §5）：分组、卡片、行、状态与提示。样式在 settings.css，只用 --rn-*；
+// 按钮、输入、开关、分段、标签、复选框、对话框一律用 components/ui 的共用基元，这里不再有私有控件。
+
 export interface SettingSection {
   id: string
   title: string
@@ -35,33 +38,7 @@ export interface SettingItem {
 // 允许小幅宽度浪费换取整洁（2026-06-10 用户标准）。
 export const SETTINGS_ROW_CONTROL_MIN_WIDTH = 136
 
-export type SettingsButtonVariant = 'secondary' | 'primary' | 'ghost' | 'accent' | 'danger' | 'danger-ghost' | 'danger-quiet'
-
-/**
- * 设置页按钮的唯一类名入口（样式见 styles/settings-surfaces.css 的 sx-btn）。
- * primary = 墨色关键行动（每个视图一个）；secondary = 玻璃次要行动；ghost = 行内安静操作；
- * accent = 强调色文字的玻璃按钮；danger / danger-ghost = 破坏性操作（红字，不铺红块）；
- * danger-quiet = 行内删除/解绑：平时与 ghost 相同，hover 才露红。
- */
-export function settingsButtonClass(
-  variant: SettingsButtonVariant = 'secondary',
-  options: { size?: 'md' | 'sm'; icon?: boolean; block?: boolean; className?: string } = {},
-): string {
-  const classes = ['sx-btn']
-  if (variant === 'primary') classes.push('sx-btn--primary')
-  if (variant === 'ghost') classes.push('sx-btn--ghost')
-  if (variant === 'accent') classes.push('sx-btn--accent')
-  if (variant === 'danger') classes.push('sx-btn--danger')
-  if (variant === 'danger-ghost') classes.push('sx-btn--danger', 'sx-btn--ghost')
-  if (variant === 'danger-quiet') classes.push('sx-btn--ghost', 'sx-btn--quiet-danger')
-  if (options.size === 'sm') classes.push('sx-btn--sm')
-  if (options.icon) classes.push('sx-btn--icon')
-  if (options.block) classes.push('sx-btn--block')
-  if (options.className) classes.push(options.className)
-  return classes.join(' ')
-}
-
-/** 一组设置的玻璃卡片。title 存在时渲染卡头，children 通常是若干 SettingsRow。 */
+/** 一组设置的卡片（纸，DL2）。title 存在时渲染卡头，children 通常是若干 SettingsRow。 */
 export function SettingsCard({
   title,
   description,
@@ -147,63 +124,6 @@ export function SettingsGroup({
   )
 }
 
-export interface SettingsSegmentedOption<T extends string> {
-  value: T
-  label: ReactNode
-  icon?: React.ElementType
-  count?: ReactNode
-  disabled?: boolean
-  title?: string
-}
-
-/** 分段控件：凹槽轨道 + 白色玻璃滑块。kind='tabs' 输出 tablist 语义，否则为 radiogroup。 */
-export function SettingsSegmented<T extends string>({
-  options,
-  value,
-  onChange,
-  ariaLabel,
-  kind = 'radio',
-  block = false,
-  className = '',
-}: {
-  options: readonly SettingsSegmentedOption<T>[]
-  value: T
-  onChange: (value: T) => void
-  ariaLabel: string
-  kind?: 'radio' | 'tabs'
-  block?: boolean
-  className?: string
-}) {
-  return (
-    <div
-      role={kind === 'tabs' ? 'tablist' : 'radiogroup'}
-      aria-label={ariaLabel}
-      className={`sx-seg ${block ? 'sx-seg--block' : ''} ${className}`.trim()}
-    >
-      {options.map((option) => {
-        const active = option.value === value
-        const Icon = option.icon
-        return (
-          <button
-            key={option.value}
-            type="button"
-            role={kind === 'tabs' ? 'tab' : 'radio'}
-            {...(kind === 'tabs' ? { 'aria-selected': active } : { 'aria-checked': active })}
-            disabled={option.disabled}
-            title={option.title}
-            className="sx-seg__item"
-            onClick={() => onChange(option.value)}
-          >
-            {Icon && <Icon strokeWidth={1.9} />}
-            {option.label}
-            {option.count !== undefined && <span className="sx-seg__count">{option.count}</span>}
-          </button>
-        )
-      })}
-    </div>
-  )
-}
-
 export function AISettingsFieldCard({
   title,
   description,
@@ -226,49 +146,19 @@ export function AISettingsFieldCard({
   )
 }
 
-/** 开关：button[role=switch] + aria-checked；「开」是墨色轨道（与主按钮同源），不用强调色铺面。 */
-export function SettingsSwitch({
-  checked,
-  onChange,
-  label,
-  stopPropagation = false,
-  disabled = false,
-  ariaLabel,
-}: {
-  checked: boolean
-  onChange: (checked: boolean) => void
-  label?: string
-  stopPropagation?: boolean
-  disabled?: boolean
-  ariaLabel?: string
-}) {
-  const control = (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={ariaLabel ?? label}
-      disabled={disabled}
-      className="sx-switch"
-      data-checked={checked ? 'true' : 'false'}
-      onClick={(event) => {
-        if (stopPropagation) event.stopPropagation()
-        onChange(!checked)
-      }}
-    />
-  )
-  if (!label) return control
+/** 带一段可见文字的开关（“启用”“已启用”）：文字只是说明，开关本身是共用的 Switch。 */
+export function SettingsSwitchLabel({ text, children }: { text: ReactNode; children: ReactNode }) {
   return (
-    <span className="inline-flex items-center gap-2 text-[12px] font-medium" style={{ color: 'var(--sx-muted)' }}>
-      <span aria-hidden>{label}</span>
-      {control}
+    <span className="sx-switch-label">
+      <span aria-hidden>{text}</span>
+      {children}
     </span>
   )
 }
 
 export type SettingsTone = 'neutral' | 'accent' | 'ink' | 'danger' | 'warning' | 'muted'
 
-/** 状态圆点 + 文字。设置页不用绿色表达成功：当前/已连接用强调色点，空闲用中性灰点。 */
+/** 状态圆点 + 文字。设置页不用绿色表达成功：当前/已连接用信号色点，空闲用中性灰点。 */
 export function SettingsStatus({
   tone = 'neutral',
   children,
@@ -279,14 +169,14 @@ export function SettingsStatus({
   className?: string
 }) {
   return (
-    <span className={`inline-flex items-center gap-1.5 text-[12px] ${className}`.trim()} style={{ color: tone === 'danger' ? 'var(--sx-danger-text)' : 'var(--sx-body)' }}>
+    <span className={`sx-status ${tone === 'danger' ? 'sx-text-danger' : ''} ${className}`.trim()}>
       <span className={`sx-dot ${tone === 'neutral' ? '' : `sx-dot--${tone}`}`.trim()} aria-hidden />
       {children}
     </span>
   )
 }
 
-/** 提示条：danger 用红色发丝边 + 图标，不铺粉红色块。 */
+/** 提示条：一层安静的填充，danger 用红色图标与标题，不铺粉红色块。 */
 export function SettingsNotice({
   tone = 'info',
   title,
@@ -305,10 +195,10 @@ export function SettingsNotice({
   const Icon = icon ?? (tone === 'danger' ? AlertCircle : tone === 'warning' ? AlertTriangle : Info)
   return (
     <div role={tone === 'danger' ? 'alert' : 'status'} className={`sx-notice ${tone !== 'info' ? `sx-notice--${tone}` : ''} ${className}`.trim()}>
-      <Icon strokeWidth={1.9} />
+      <Icon strokeWidth={1.75} />
       <div className="min-w-0 flex-1">
         {title && <div className="sx-notice__title">{title}</div>}
-        {children && <div className={title ? 'mt-0.5' : ''} style={{ color: title ? 'var(--sx-muted)' : 'var(--sx-body)' }}>{children}</div>}
+        {children && <div className={title ? 'sx-notice__body mt-0.5' : 'sx-notice__body sx-notice__body--solo'}>{children}</div>}
       </div>
       {action && <div className="shrink-0 self-center">{action}</div>}
     </div>

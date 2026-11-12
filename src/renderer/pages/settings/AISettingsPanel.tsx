@@ -9,14 +9,12 @@ import type { CapabilityRuntimeSnapshot } from '../../../shared/ai-capability-ru
 import { listSettingsCapabilityGroups, type CapabilityGroupId } from '../../../shared/ai-capability-groups'
 import { useSettings, getProviderDef } from '../../stores/useSettings'
 import type { AIProviderCategory } from '../../stores/useSettings'
+import { Button, Input, Segmented, Select, Switch, Tabs } from '../../components/ui'
 import {
   AISettingsFieldCard,
   SettingsCard,
   SettingsNotice,
-  SettingsSegmented,
   SettingsStatus,
-  SettingsSwitch,
-  settingsButtonClass,
   type SettingsTone,
 } from './settings-shared'
 import { resolveToolUseModePresentation } from './tool-use-mode-copy'
@@ -25,6 +23,27 @@ import {
   normalizeChatGptOAuthReasoningEffort,
 } from '../../../shared/chatgpt-oauth'
 import { ChatGptOAuthSettingsCard } from './ChatGptOAuthSettingsCard'
+
+const AGENT_PROTOCOL_OPTIONS = [
+  { value: 'auto', label: '自动' },
+  { value: 'openai', label: 'OpenAI 兼容' },
+  { value: 'anthropic', label: 'Anthropic 兼容' },
+]
+const WIRE_API_OPTIONS = [
+  { value: 'auto', label: '自动' },
+  { value: 'chat/completions', label: 'chat/completions' },
+  { value: 'responses', label: 'responses' },
+]
+const VISION_MODE_OPTIONS = [
+  { value: 'auto', label: '自动' },
+  { value: 'on', label: '强制开启' },
+  { value: 'off', label: '关闭' },
+]
+const CAPABILITY_MODE_OPTIONS = [
+  { value: 'auto', label: '自动' },
+  { value: 'on', label: '开启' },
+  { value: 'off', label: '关闭' },
+]
 
 // ── AI Settings Panel (dynamic, wired to backend) ──────────────────────────
 export function AISettingsPanel() {
@@ -258,8 +277,8 @@ export function AISettingsPanel() {
         <div className="sx-row">
           <div className="sx-row__text">
             <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
-              <span className="text-[12px]" style={{ color: 'var(--sx-muted)' }}>当前默认</span>
-              <span className="truncate text-[14px] font-semibold" style={{ color: 'var(--sx-title)' }}>
+              <span className="text-[12px]" style={{ color: 'var(--rn-ink-2)' }}>当前默认</span>
+              <span className="truncate text-[14px] font-semibold" style={{ color: 'var(--rn-ink)' }}>
                 {activeProfile?.name || '未设置'}
               </span>
             </div>
@@ -275,16 +294,15 @@ export function AISettingsPanel() {
               {typeof testLatency === 'number' && testStatus === 'success' ? ` · ${testLatency}ms` : ''}
             </SettingsStatus>
             {selectedProfile && (
-              <button
-                type="button"
+              <Button
+                size="sm"
                 onClick={() => void testConnection(selectedProfile.id)}
                 disabled={testStatus === 'testing'}
                 aria-busy={testStatus === 'testing' ? true : undefined}
-                className={settingsButtonClass('secondary', { size: 'sm' })}
+                icon={testStatus === 'testing' ? <Loader2 className="animate-spin" /> : <RefreshCw />}
               >
-                {testStatus === 'testing' ? <Loader2 className="animate-spin" /> : <RefreshCw />}
                 测试当前
-              </button>
+              </Button>
             )}
           </div>
         </div>
@@ -295,19 +313,14 @@ export function AISettingsPanel() {
           title="模型入口列表"
           description="管理聊天和 Agent 可使用的模型预设。"
           actions={(
-            <button
-              type="button"
-              onClick={handleCreateProfile}
-              className={settingsButtonClass('secondary', { size: 'sm' })}
-            >
-              <Plus />
+            <Button size="sm" icon={<Plus />} onClick={handleCreateProfile}>
               添加模型
-            </button>
+            </Button>
           )}
         >
           <div style={{ padding: '0 20px 14px' }}>
-            <SettingsSegmented
-              ariaLabel="按供应商筛选模型入口"
+            <Segmented
+              label="按供应商筛选模型入口"
               value={profileFilter}
               onChange={setProfileFilter}
               options={providerFilters.map((filter) => ({
@@ -343,19 +356,20 @@ export function AISettingsPanel() {
                 >
                   <span className="min-w-0 py-3">
                     <span className="flex min-w-0 items-center gap-2">
-                      <span className="truncate text-[13.5px] font-semibold" style={{ color: 'var(--sx-title)' }}>{profile.name}</span>
+                      <span className="truncate text-[13.5px] font-semibold" style={{ color: 'var(--rn-ink)' }}>{profile.name}</span>
                       {current && <span className="sx-dot sx-dot--accent" title="当前默认" aria-label="当前默认" />}
                     </span>
-                    <span className="mt-1 block truncate text-[11.5px]" style={{ color: 'var(--sx-muted)' }}>
+                    <span className="mt-1 block truncate text-[11.5px]" style={{ color: 'var(--rn-ink-2)' }}>
                       <span className="sx-mono">{profile.config.model || '未设置模型'}</span> · {profile.category === 'custom' ? '自定义' : profile.category}
                     </span>
                   </span>
-                  <span className="min-w-0 truncate text-[12.5px]" style={{ color: 'var(--sx-body)' }}>
+                  <span className="min-w-0 truncate text-[12.5px]" style={{ color: 'var(--rn-ink)' }}>
                     {formatInterfaceLabel(profile.config)}
                   </span>
                   <SettingsStatus tone={selected ? selectedTestTone : 'muted'}>{rowTestLabel}</SettingsStatus>
                   <span className="flex justify-end">
-                    <span className={settingsButtonClass('ghost', { size: 'sm', className: 'sx-table__action' })}>
+                    {/* The whole row is the button; this is the ghost button's look on a span (no button inside a button). */}
+                    <span className="rn-btn sx-table__action" data-variant="ghost" data-size="sm">
                       配置
                       <ChevronRight />
                     </span>
@@ -370,18 +384,18 @@ export function AISettingsPanel() {
       {profileDetailOpen && selectedProfile && (
         <section className="flex flex-col gap-3" style={{ maxWidth: 880, width: '100%' }}>
           <div>
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<ChevronLeft />}
               onClick={() => {
                 setProfileDetailOpen(false)
                 setEditorTab('basic')
               }}
-              className={settingsButtonClass('ghost', { size: 'sm' })}
               style={{ paddingLeft: 6 }}
             >
-              <ChevronLeft />
               返回模型列表
-            </button>
+            </Button>
           </div>
 
           <SettingsCard
@@ -396,55 +410,34 @@ export function AISettingsPanel() {
                 {selectedIsActive ? (
                   <SettingsStatus tone="accent" className="mr-1">当前默认</SettingsStatus>
                 ) : (
-                  <button
-                    type="button"
-                    onClick={() => activateProfile(selectedProfile.id)}
-                    className={settingsButtonClass('ghost', { size: 'sm' })}
-                  >
+                  <Button variant="ghost" size="sm" onClick={() => activateProfile(selectedProfile.id)}>
                     设为默认
-                  </button>
+                  </Button>
                 )}
                 {!selectedProfile.builtIn && (
-                  <button
-                    type="button"
-                    onClick={() => removeCustomProfile(selectedProfile.id)}
-                    className={settingsButtonClass('danger-ghost', { size: 'sm' })}
-                  >
+                  <Button variant="danger" size="sm" onClick={() => removeCustomProfile(selectedProfile.id)}>
                     删除
-                  </button>
+                  </Button>
                 )}
-                <button
-                  type="button"
+                <Button
+                  size="sm"
                   onClick={() => void testConnection(selectedProfile.id)}
                   disabled={testStatus === 'testing'}
                   aria-busy={testStatus === 'testing' ? true : undefined}
-                  className={settingsButtonClass('secondary', { size: 'sm' })}
+                  icon={testStatus === 'testing' ? <Loader2 className="animate-spin" /> : undefined}
                 >
-                  {testStatus === 'testing' ? <Loader2 className="animate-spin" /> : null}
                   {testStatus === 'testing' ? '测试中' : '测试'}
-                </button>
+                </Button>
               </>
             )}
           >
             <div className="sx-card__body" style={{ paddingTop: 16, paddingBottom: 22 }}>
-              <div role="tablist" aria-label="模型配置分区" className="sx-seg">
-                {editorTabs.map((tab) => {
-                  const active = editorTab === tab.id
-                  return (
-                    <button
-                      key={tab.id}
-                      type="button"
-                      role="tab"
-                      aria-selected={active}
-                      onClick={() => setEditorTab(tab.id)}
-                      className="sx-seg__item"
-                      style={{ minWidth: 72 }}
-                    >
-                      {tab.label}
-                    </button>
-                  )
-                })}
-              </div>
+              <Tabs
+                label="模型配置分区"
+                value={editorTab}
+                onChange={(id) => setEditorTab(id as typeof editorTab)}
+                items={editorTabs}
+              />
 
               <div className="mt-6">
                 {editorTab === 'basic' && (
@@ -453,12 +446,11 @@ export function AISettingsPanel() {
                       title="预设名称"
                       description="聊天区和设置页里看到的名字。"
                       control={(
-                        <input
+                        <Input
                           type="text"
                           value={selectedProfile.name}
                           onChange={(event) => renameProfile(selectedProfile.id, event.target.value)}
                           placeholder="给这个预设起个容易识别的名字"
-                          className="sx-input"
                         />
                       )}
                     />
@@ -468,15 +460,12 @@ export function AISettingsPanel() {
                           title="API 格式"
                           description={`当前解析为 ${resolvedAgentInterfaceLabel}。`}
                           control={(
-                            <select
+                            <Select
+                              className="w-full"
                               value={selectedConfig.agentProtocol || 'auto'}
                               onChange={(event) => updateField('agentProtocol', (event.target.value === 'auto' ? undefined : event.target.value) as typeof selectedConfig.agentProtocol)}
-                              className="sx-select w-full"
-                            >
-                              <option value="auto">自动</option>
-                              <option value="openai">OpenAI 兼容</option>
-                              <option value="anthropic">Anthropic 兼容</option>
-                            </select>
+                              options={AGENT_PROTOCOL_OPTIONS}
+                            />
                           )}
                         />
                         <AISettingsFieldCard
@@ -488,12 +477,12 @@ export function AISettingsPanel() {
                             </>
                           ) : '自定义供应商地址；OpenAI 兼容服务只填域名或 IP 时会自动使用 /v1'}
                           control={(
-                            <input
+                            <Input
                               type="text"
                               value={selectedConfig.baseUrl}
                               onChange={(event) => updateField('baseUrl', event.target.value)}
                               placeholder={currentProvider?.baseUrl || 'https://...'}
-                              className="sx-input sx-input--mono"
+                              className="sx-mono"
                             />
                           )}
                         />
@@ -503,20 +492,16 @@ export function AISettingsPanel() {
                           description={currentProvider?.apiKeyPlaceholder || 'sk-...'}
                           control={(
                             <div className="flex items-center gap-2">
-                              <input
+                              <Input
                                 type={showKey ? 'text' : 'password'}
                                 value={selectedConfig.apiKey}
                                 onChange={(event) => updateField('apiKey', event.target.value)}
                                 placeholder={currentProvider?.apiKeyPlaceholder || 'sk-...'}
-                                className="sx-input sx-input--mono min-w-0 flex-1"
+                                className="sx-mono min-w-0 flex-1"
                               />
-                              <button
-                                type="button"
-                                onClick={() => setShowKey((value) => !value)}
-                                className={settingsButtonClass('ghost', { size: 'sm' })}
-                              >
+                              <Button variant="ghost" size="sm" onClick={() => setShowKey((value) => !value)}>
                                 {showKey ? '隐藏' : '显示'}
-                              </button>
+                              </Button>
                             </div>
                           )}
                         />
@@ -543,9 +528,9 @@ export function AISettingsPanel() {
                         <div className="sx-row__label">在切换面板显示</div>
                         <div className="sx-row__desc">关闭后这个预设不会出现在聊天区的模型切换菜单里。</div>
                       </div>
-                      <SettingsSwitch
+                      <Switch
                         checked={selectedProfile.showInChatSwitcher}
-                        ariaLabel="在切换面板显示"
+                        label="在切换面板显示"
                         onChange={(checked) => setProfileVisibility(selectedProfile.id, checked)}
                       />
                     </div>
@@ -558,20 +543,15 @@ export function AISettingsPanel() {
                       title="默认模型"
                       description="从下面维护的模型 ID 里选择这个预设默认调用的模型。"
                       control={(
-                        <select
+                        <Select
                           value={selectedConfig.model}
                           onChange={(event) => updateField('model', event.target.value)}
                           disabled={defaultModelOptions.length === 0}
-                          className="sx-select sx-input--mono w-full"
-                        >
-                          {defaultModelOptions.length > 0 ? defaultModelOptions.map((modelId) => (
-                            <option key={modelId} value={modelId}>
-                              {modelId}
-                            </option>
-                          )) : (
-                            <option value="">先添加模型 ID</option>
-                          )}
-                        </select>
+                          className="sx-mono w-full"
+                          options={defaultModelOptions.length > 0
+                            ? defaultModelOptions.map((modelId) => ({ value: modelId, label: modelId }))
+                            : [{ value: '', label: '先添加模型 ID' }]}
+                        />
                       )}
                     />
                     <AISettingsFieldCard
@@ -587,18 +567,18 @@ export function AISettingsPanel() {
                                   <div
                                     key={modelId}
                                     className="flex items-center gap-3 px-3"
-                                    style={{ minHeight: 40, borderTop: index > 0 ? '1px solid var(--sx-divider)' : undefined }}
+                                    style={{ minHeight: 40, borderTop: index > 0 ? '1px solid var(--rn-hair)' : undefined }}
                                   >
-                                    <span className="sx-mono min-w-0 flex-1 truncate text-[12px]" style={{ color: 'var(--sx-body)' }}>{modelId}</span>
+                                    <span className="sx-mono min-w-0 flex-1 truncate text-[12px]" style={{ color: 'var(--rn-ink)' }}>{modelId}</span>
                                     {isDefaultModel ? (
                                       <span className="sx-badge">
                                         <span className="sx-dot sx-dot--accent" aria-hidden />
                                         默认
                                       </span>
                                     ) : (
-                                      <button type="button" onClick={() => updateField('model', modelId)} className={settingsButtonClass('ghost', { size: 'sm' })}>设默认</button>
+                                      <Button variant="ghost" size="sm" onClick={() => updateField('model', modelId)}>设默认</Button>
                                     )}
-                                    <button type="button" onClick={() => removeModelId(modelId)} className={settingsButtonClass('danger-quiet', { size: 'sm' })}>删除</button>
+                                    <Button variant="ghost" size="sm" onClick={() => removeModelId(modelId)}>删除</Button>
                                   </div>
                                 )
                               })}
@@ -607,25 +587,23 @@ export function AISettingsPanel() {
                             <span className="sx-meta">还没有添加模型 ID。</span>
                           )}
                           <div className="flex items-center gap-2">
-                            <input
+                            <Input
                               type="text"
                               value={pendingModelId}
                               onChange={(event) => setPendingModelId(event.target.value)}
                               placeholder="添加模型 ID，例如 k2.6-code-preview"
-                              className="sx-input sx-input--mono min-w-0 flex-1"
+                              className="sx-mono min-w-0 flex-1"
                             />
-                            <button
-                              type="button"
+                            <Button
+                              icon={<Plus />}
                               onClick={() => {
                                 addModelId(pendingModelId)
                                 setPendingModelId('')
                               }}
                               disabled={!pendingModelId.trim()}
-                              className={settingsButtonClass('secondary')}
                             >
-                              <Plus />
                               添加模型 ID
-                            </button>
+                            </Button>
                           </div>
                         </div>
                       )}
@@ -636,7 +614,7 @@ export function AISettingsPanel() {
                         description="覆盖这个模型的上下文 token 上限；留空则使用模型默认值。"
                         control={(
                           <div className="flex flex-col gap-2">
-                            <input
+                            <Input
                               type="number"
                               min={1}
                               max={2_000_000}
@@ -644,10 +622,10 @@ export function AISettingsPanel() {
                               value={selectedConfig.contextWindowOverride ?? ''}
                               onChange={(event) => updateContextWindowOverride(event.target.value)}
                               placeholder={contextWindowPlaceholder}
-                              className="sx-input sx-input--mono"
+                              className="sx-mono"
                             />
                             {showCustomContextWindowWarning && (
-                              <span className="flex items-start gap-1.5 text-[11.5px] leading-5" style={{ color: 'var(--sx-warning)' }}>
+                              <span className="sx-text-warning flex items-start gap-1.5 text-[11.5px] leading-5">
                                 <AlertTriangle className="mt-[3px] h-3 w-3 shrink-0" />
                                 自定义服务缺少明确上下文窗口，Ready 会先按保守值估算；建议填写服务文档里的 token 上限。
                               </span>
@@ -659,7 +637,7 @@ export function AISettingsPanel() {
                         title="单次最大输出 token"
                         description="覆盖单次回复允许生成的 token 上限；留空则使用模型默认值。"
                         control={(
-                          <input
+                          <Input
                             type="number"
                             min={1}
                             max={1_000_000}
@@ -667,7 +645,7 @@ export function AISettingsPanel() {
                             value={selectedConfig.maxOutputTokensOverride ?? ''}
                             onChange={(event) => updateMaxOutputTokensOverride(event.target.value)}
                             placeholder="自动"
-                            className="sx-input sx-input--mono"
+                            className="sx-mono"
                           />
                         )}
                       />
@@ -677,15 +655,15 @@ export function AISettingsPanel() {
                         <div className="sx-field__label">服务端可用模型</div>
                         <div className="flex flex-wrap gap-2">
                           {remoteModels.map((modelId) => (
-                            <button
+                            <Button
                               key={modelId}
-                              type="button"
+                              size="sm"
+                              className="sx-mono"
                               onClick={() => addModelId(modelId)}
                               disabled={managedModelIdSet.has(modelId)}
-                              className={settingsButtonClass('secondary', { size: 'sm', className: 'sx-mono' })}
                             >
                               {managedModelIdSet.has(modelId) ? `${modelId} 已加入` : `${modelId} 加入预设`}
-                            </button>
+                            </Button>
                           ))}
                         </div>
                       </div>
@@ -701,15 +679,12 @@ export function AISettingsPanel() {
                           title="OpenAI API 形式"
                           description="在 chat/completions 和 responses 之间切换。"
                           control={(
-                            <select
+                            <Select
+                              className="w-full"
                               value={selectedConfig.wireApi || 'auto'}
                               onChange={(event) => updateField('wireApi', (event.target.value === 'auto' ? undefined : event.target.value) as typeof selectedConfig.wireApi)}
-                              className="sx-select w-full"
-                            >
-                              <option value="auto">自动</option>
-                              <option value="chat/completions">chat/completions</option>
-                              <option value="responses">responses</option>
-                            </select>
+                              options={WIRE_API_OPTIONS}
+                            />
                           )}
                         />
                       )}
@@ -717,30 +692,28 @@ export function AISettingsPanel() {
                         title="工具调用"
                         description={toolUsePresentation.description}
                         control={(
-                          <select
+                          <Select
+                            className="w-full"
                             value={selectedConfig.toolUseMode || 'auto'}
                             onChange={(event) => updateField('toolUseMode', (event.target.value === 'auto' ? undefined : event.target.value) as typeof selectedConfig.toolUseMode)}
-                            className="sx-select w-full"
-                          >
-                            <option value="auto">{toolUsePresentation.autoOptionLabel}</option>
-                            <option value="on">强制开启</option>
-                            <option value="off">关闭</option>
-                          </select>
+                            options={[
+                              { value: 'auto', label: toolUsePresentation.autoOptionLabel },
+                              { value: 'on', label: '强制开启' },
+                              { value: 'off', label: '关闭' },
+                            ]}
+                          />
                         )}
                       />
                       <AISettingsFieldCard
                         title="网页视觉"
                         description={`浏览器自动化视觉分析当前为 ${capabilities?.supportsVision ? '开启' : '关闭'}。`}
                         control={(
-                          <select
+                          <Select
+                            className="w-full"
                             value={selectedConfig.visionMode || 'auto'}
                             onChange={(event) => updateField('visionMode', (event.target.value === 'auto' ? undefined : event.target.value) as typeof selectedConfig.visionMode)}
-                            className="sx-select w-full"
-                          >
-                            <option value="auto">自动</option>
-                            <option value="on">强制开启</option>
-                            <option value="off">关闭</option>
-                          </select>
+                            options={VISION_MODE_OPTIONS}
+                          />
                         )}
                       />
                       {showReasoningEffort && (
@@ -748,15 +721,12 @@ export function AISettingsPanel() {
                           title="思考强度"
                           description={isKimiK3 ? 'K3 支持 low / high / max，默认 high。' : '只在 responses 风格接口下显示。'}
                           control={(
-                            <select
+                            <Select
+                              className="w-full"
                               value={selectedConfig.reasoningEffort || 'high'}
                               onChange={(event) => updateField('reasoningEffort', event.target.value as typeof selectedConfig.reasoningEffort)}
-                              className="sx-select w-full"
-                            >
-                              {reasoningEffortOptions.map((effort) => (
-                                <option key={effort} value={effort}>{effort}</option>
-                              ))}
-                            </select>
+                              options={reasoningEffortOptions.map((effort) => ({ value: effort, label: effort }))}
+                            />
                           )}
                         />
                       )}
@@ -768,16 +738,15 @@ export function AISettingsPanel() {
                           <div className="sx-row__label">能力分组</div>
                           <div className="sx-row__desc">需要诊断当前状态时再手动刷新。</div>
                         </div>
-                        <button
-                          type="button"
+                        <Button
+                          size="sm"
                           onClick={() => void refreshCapabilityRuntimeSnapshot()}
                           disabled={capabilityRuntimeLoading}
                           aria-busy={capabilityRuntimeLoading ? true : undefined}
-                          className={settingsButtonClass('secondary', { size: 'sm' })}
+                          icon={<RefreshCw className={capabilityRuntimeLoading ? 'animate-spin' : ''} />}
                         >
-                          <RefreshCw className={capabilityRuntimeLoading ? 'animate-spin' : ''} />
                           {capabilityRuntimeLoading ? '刷新中' : '刷新状态'}
-                        </button>
+                        </Button>
                       </div>
                       <div className="sx-inset">
                         {capabilityGroups.map((group, index) => {
@@ -785,24 +754,19 @@ export function AISettingsPanel() {
                           return (
                             <div
                               key={group.id}
-                              className="grid items-center gap-3 px-3.5 py-2.5 sm:grid-cols-[minmax(0,1fr)_104px_112px]"
-                              style={{ borderTop: index > 0 ? '1px solid var(--sx-divider)' : undefined }}
+                              className="grid items-center gap-3 px-3.5 py-2.5 sm:grid-cols-[minmax(0,1fr)_136px_112px]"
+                              style={{ borderTop: index > 0 ? '1px solid var(--rn-hair)' : undefined }}
                             >
                               <div className="min-w-0">
-                                <div className="truncate text-[12.5px] font-medium" style={{ color: 'var(--sx-title)' }}>{group.label}</div>
-                                <div className="mt-0.5 truncate text-[11.5px]" style={{ color: 'var(--sx-muted)' }}>{group.description}</div>
+                                <div className="truncate text-[12.5px] font-medium" style={{ color: 'var(--rn-ink)' }}>{group.label}</div>
+                                <div className="mt-0.5 truncate text-[11.5px]" style={{ color: 'var(--rn-ink-2)' }}>{group.description}</div>
                               </div>
-                              <select
+                              <Select
                                 value={getCapabilityModeValue(group.id)}
                                 onChange={(event) => updateCapabilityMode(group.id, event.target.value as 'auto' | 'on' | 'off')}
                                 aria-label={`${group.label}模式`}
-                                className="sx-select"
-                                style={{ minWidth: 0, width: 104, height: 30, fontSize: 12 }}
-                              >
-                                <option value="auto">自动</option>
-                                <option value="on">开启</option>
-                                <option value="off">关闭</option>
-                              </select>
+                                options={CAPABILITY_MODE_OPTIONS}
+                              />
                               <span className="flex justify-end">
                                 <SettingsStatus tone={runtimeDisplay.tone}>
                                   <span className="text-[11.5px]">{runtimeDisplay.label}</span>
@@ -820,9 +784,9 @@ export function AISettingsPanel() {
           </SettingsCard>
 
           {currentProvider && (
-            <div className="px-1 text-[11.5px] leading-relaxed" style={{ color: 'var(--sx-muted)' }}>
+            <div className="px-1 text-[11.5px] leading-relaxed" style={{ color: 'var(--rn-ink-2)' }}>
               {selectedConfig.provider === 'anthropic' && (
-                <>Anthropic API 使用 <code className="sx-mono rounded-[5px] px-1 py-px text-[11px]" style={{ background: 'var(--sx-inset-bg)' }}>x-api-key</code> 认证头，系统会自动处理。</>
+                <>Anthropic API 使用 <code className="sx-code">x-api-key</code> 认证头，系统会自动处理。</>
               )}
               {selectedConfig.provider === 'gemini' && (
                 <>Gemini API 使用 OpenAI 兼容层，API Key 在 <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="sx-link">Google AI Studio</a> 获取。</>

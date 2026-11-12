@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import QRCode from 'qrcode'
 import { Check, Loader2, QrCode } from 'lucide-react'
-import { settingsButtonClass } from '../../pages/settings/settings-shared'
+import { Button, Input } from '../ui'
 
 type LoginState = { sessionKey?: string; status?: string; message?: string; qrcodeUrl?: string }
 const pendingStates = new Set(['preparing', 'waiting', 'scanned', 'needs_verify_code', 'activating'])
@@ -128,29 +128,27 @@ export function WechatLoginControl({ channelId, enabled, disabled, beforeStart, 
   return (
     <div className="flex w-full flex-col" style={{ gap: 12 }}>
       <div className="flex flex-wrap items-center" style={{ gap: 8 }}>
-        <button type="button" disabled={disabled || pending || busy !== null || login === null} onClick={() => void start()}
-          className={settingsButtonClass('primary')}>
-          {spinning ? <Loader2 className="animate-spin" /> : <QrCode />}
+        <Button variant="primary" disabled={disabled || pending || busy !== null || login === null} onClick={() => void start()}
+          icon={spinning ? <Loader2 className="animate-spin" /> : <QrCode />}>
           {pending ? '绑定进行中' : enabled ? '重新绑定' : '生成绑定二维码'}
-        </button>
-        {pending && <button type="button" disabled={busy === 'cancel' || login?.status === 'activating'} onClick={() => void cancel()}
-          className={settingsButtonClass('secondary')}>取消绑定</button>}
-        {!login && error && <button type="button" className={settingsButtonClass('ghost')} onClick={() => void refresh()}>重新读取状态</button>}
+        </Button>
+        {pending && <Button disabled={busy === 'cancel' || login?.status === 'activating'} onClick={() => void cancel()}>取消绑定</Button>}
+        {!login && error && <Button variant="ghost" onClick={() => void refresh()}>重新读取状态</Button>}
       </div>
-      {/* 二维码底永远是白色（深色主题下也要能被手机扫到）。 */}
-      {qrImage && <div className="self-start"
-        style={{ padding: 14, borderRadius: 16, background: '#FFFFFF', boxShadow: 'var(--sx-card-shadow)' }}>
+      {/* 二维码底永远是浅色的纸（data-theme="light" 取浅色令牌），深色主题下也要能被手机扫到。 */}
+      {qrImage && <div className="self-start" data-theme="light"
+        style={{ padding: 14, borderRadius: 16, background: 'var(--rn-sheet)', boxShadow: 'var(--rn-card-shadow)' }}>
         <img src={qrImage} alt="微信绑定二维码" width={208} height={208} style={{ display: 'block', imageRendering: 'pixelated' }} />
       </div>}
       {message && <div role="status" aria-live="polite" className="inline-flex items-center gap-1.5 text-[12px] leading-6"
-        style={{ color: login?.status === 'connected' ? 'var(--sx-title)' : 'var(--sx-muted)' }}>
+        style={{ color: login?.status === 'connected' ? 'var(--rn-ink)' : 'var(--rn-ink-2)' }}>
         {login?.status === 'connected' && <Check className="h-3.5 w-3.5 shrink-0" strokeWidth={2.4} />}
         {message}
       </div>}
       {login?.status === 'needs_verify_code' && <div className="flex items-center gap-2">
-        <input value={code} onChange={event => setCode(event.target.value)} inputMode="numeric" placeholder="输入手机微信显示的数字"
-          aria-label="微信验证码" className="sx-input sx-input--mono" style={{ width: 240 }} />
-        <button type="button" disabled={busy !== null || !code.trim()} onClick={() => void verify()} className={settingsButtonClass('secondary')}>提交</button>
+        <Input value={code} onChange={event => setCode(event.target.value)} inputMode="numeric" placeholder="输入手机微信显示的数字"
+          aria-label="微信验证码" className="sx-mono" style={{ width: 240 }} />
+        <Button disabled={busy !== null || !code.trim()} onClick={() => void verify()}>提交</Button>
       </div>}
       {error && <div role="alert" className="sx-text-danger text-[12px] leading-6">{error}</div>}
     </div>

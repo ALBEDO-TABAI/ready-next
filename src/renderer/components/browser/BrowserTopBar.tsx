@@ -12,6 +12,7 @@ import type { BrowserOwnershipStatus } from '../../modules/browser/browserOwners
 import type { BrowserPageCapabilities } from '../../../shared/browser-shell'
 import { ADDRESS_SUGGESTIONS_FLOAT, useAddressSuggestions, type AddressSuggestion } from '../../modules/browser/useAddressSuggestions'
 import BrowserSubscribeButton from './BrowserSubscribeButton'
+import { IconButton } from '../ui'
 
 interface BrowserTopBarProps {
   isActive: boolean
@@ -46,7 +47,7 @@ interface BrowserTopBarProps {
 
 function BrowserOwnershipChip({ status }: { status: BrowserOwnershipStatus }) {
   const Icon = status.tone === 'warning' ? ShieldAlert : status.tone === 'agent' ? Bot : UserRound
-  const accent = status.tone === 'agent' ? 'var(--color-blue)' : 'var(--text-gray)'
+  const accent = status.tone === 'agent' ? 'var(--rn-accent)' : 'var(--rn-ink-3)'
   return (
     <div
       className="flex h-[28px] w-[20px] flex-shrink-0 items-center justify-center"
@@ -59,9 +60,6 @@ function BrowserOwnershipChip({ status }: { status: BrowserOwnershipStatus }) {
     </div>
   )
 }
-
-const navBtn =
-  'flex h-[28px] w-[28px] flex-shrink-0 items-center justify-center rounded-lg transition-[background-color,opacity] duration-150 hover:bg-[var(--bg-hover)] disabled:opacity-30 disabled:hover:bg-transparent'
 
 export default function BrowserTopBar({
   isActive,
@@ -135,58 +133,36 @@ export default function BrowserTopBar({
 
         {/* Navigation cluster */}
         <div className="flex flex-shrink-0 items-center" style={{ gap: 2 }}>
-          <button
-            type="button"
-            onClick={onGoBack}
-            disabled={!canGoBack}
-            className={navBtn}
-            title="后退"
-          >
-            <ArrowLeft style={{ width: 15, height: 15 }} className="text-[var(--text-light)]" strokeWidth={2} />
-          </button>
-          <button
-            type="button"
-            onClick={onGoForward}
-            disabled={!canGoForward}
-            className={navBtn}
-            title="前进"
-          >
-            <ArrowRight style={{ width: 15, height: 15 }} className="text-[var(--text-light)]" strokeWidth={2} />
-          </button>
-          <button
-            type="button"
-            onClick={onRefresh}
-            className={navBtn}
+          <IconButton icon={<ArrowLeft />} title="后退" onClick={onGoBack} disabled={!canGoBack} />
+          <IconButton icon={<ArrowRight />} title="前进" onClick={onGoForward} disabled={!canGoForward} />
+          <IconButton
+            icon={loading ? <Loader2 className="animate-spin" style={{ color: 'var(--rn-accent)' }} /> : <RefreshCw />}
             title="刷新"
-          >
-            {loading ? (
-              <Loader2 style={{ width: 15, height: 15 }} className="animate-spin text-[var(--color-blue)]" strokeWidth={2} />
-            ) : (
-              <RefreshCw style={{ width: 15, height: 15 }} className="text-[var(--text-light)]" strokeWidth={2} />
-            )}
-          </button>
+            onClick={onRefresh}
+          />
         </div>
 
-        {/* Address bar */}
+        {/* Address bar: drawn as the shared field (W1 §5) — a recessed slot with a hairline; focus brings the
+            paper up and deepens the edge in ink, never the signal colour. */}
         <div
           ref={addressRef}
           data-float-anchor={ADDRESS_SUGGESTIONS_FLOAT}
-          className="flex min-w-0 flex-1 items-center rounded-[14px] border"
+          className="flex min-w-0 flex-1 items-center"
           style={{
             height: 32,
             paddingLeft: 12,
-            paddingRight: 8,
-            gap: 8,
-            background: focused ? 'var(--input-slot-bg)' : 'color-mix(in srgb, var(--input-slot-bg) 55%, transparent)',
-            borderColor: focused ? 'var(--input-slot-focus-border)' : 'transparent',
-            boxShadow: focused ? 'var(--input-slot-shadow-focus)' : 'none',
-            transition: 'background-color 200ms ease, border-color 200ms ease, box-shadow 200ms ease',
+            paddingRight: 6,
+            gap: 6,
+            borderRadius: 'var(--rn-r-md)',
+            background: focused ? 'var(--rn-sheet)' : 'var(--rn-fill)',
+            boxShadow: focused ? 'inset 0 0 0 1.5px var(--rn-ink-3)' : 'inset 0 0 0 1px var(--rn-hair)',
+            transition: 'background-color var(--rn-d-1) var(--rn-ease-out), box-shadow var(--rn-d-1) var(--rn-ease-out)',
           }}
         >
           {isHttps ? (
-            <Lock style={{ width: 12, height: 12 }} className="flex-shrink-0 text-[var(--color-green)]" strokeWidth={2} />
+            <Lock style={{ width: 12, height: 12 }} className="flex-shrink-0 text-[var(--rn-ok)]" strokeWidth={2} />
           ) : (
-            <Globe style={{ width: 12, height: 12 }} className="flex-shrink-0 text-[var(--text-gray)]" strokeWidth={2} />
+            <Globe style={{ width: 12, height: 12 }} className="flex-shrink-0 text-[var(--rn-ink-3)]" strokeWidth={2} />
           )}
           <input
             ref={inputRef}
@@ -225,29 +201,23 @@ export default function BrowserTopBar({
                 inputRef.current?.blur()
               }
             }}
-            className="ready-input-slot-inner h-full min-w-0 flex-1 bg-transparent text-[12px] text-[var(--text-body)] outline-none"
+            className="ready-input-slot-inner h-full min-w-0 flex-1 bg-transparent text-[12px] text-[var(--rn-ink)] outline-none"
           />
+          {/* 阅读视图: the shared icon button; pressed while the reader is shown (the rail's glowing glyph is the rail's alone). */}
           {reading && (reading.available || reading.shown) && (
-            <button type="button" className="rn-reading-toggle" aria-pressed={reading.shown} data-browser-reading-toggle=""
-              title={reading.shown ? '回到网页' : '阅读视图'} aria-label="阅读视图" onClick={reading.onToggle}>
-              <BookOpenText aria-hidden="true" />
-            </button>
+            <IconButton size="sm" icon={<BookOpenText aria-hidden="true" />} active={reading.shown} data-browser-reading-toggle=""
+              title={reading.shown ? '回到网页' : '阅读视图'} aria-label="阅读视图" onClick={reading.onToggle} />
           )}
           {feeds && feeds.length > 0 && <BrowserSubscribeButton feeds={feeds} pageTitle={activeTab?.title || ''} />}
-          <button
-            type="button"
+          {/* A saved page's star is solid ink (DL6), as the document's 收藏 is. */}
+          <IconButton
+            size="sm"
+            icon={<Star fill={isBookmarked ? 'currentColor' : 'none'} />}
+            title={isBookmarked ? '取消收藏' : '收藏此页面'}
             onClick={onToggleBookmark}
             disabled={!activeTab}
-            className="flex h-[22px] w-[22px] flex-shrink-0 items-center justify-center rounded transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-40"
-            title={isBookmarked ? '取消收藏' : '收藏此页面'}
-          >
-            <Star
-              style={{ width: 13, height: 13 }}
-              className={isBookmarked ? 'text-[var(--color-orange)]' : 'text-[var(--text-gray)]'}
-              strokeWidth={2}
-              fill={isBookmarked ? 'var(--color-orange)' : 'none'}
-            />
-          </button>
+            style={isBookmarked ? { color: 'var(--rn-ink)' } : undefined}
+          />
         </div>
 
         <HeaderUtilityActions
