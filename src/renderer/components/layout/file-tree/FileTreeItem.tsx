@@ -96,32 +96,32 @@ export function FileTreeItem({
       }
       className={`
         flex items-center gap-[6px] rounded-[8px] text-[13px] cursor-pointer
-        transition-[background-color,box-shadow,outline-color] duration-200 ease-out group
+        transition-[background-color,box-shadow,color] duration-200 ease-out group
         ${isFlashing ? 'file-tree-item-flash-complete' : ''}
       `}
+      // ListRow's look (W1 §5, DL5/DL11): a 30px row in ink-2, hover fill, and the selected row in the signal
+      // colour's soft fill with its text and icon in the accent; a drop target is the same soft fill with a ring.
       style={{
         position: 'relative',
-        padding: '6px 8px',
+        height: 'var(--rn-row-h)',
+        padding: '0 8px',
         paddingLeft: `${8 + depth * 22}px`,
+        color: isActive ? 'var(--rn-accent-text)' : isHovered ? 'var(--rn-ink)' : 'var(--rn-ink-2)',
+        fontWeight: isActive ? 500 : 400,
         ...(isActive
           ? {
-              background: 'var(--files-panel-state-active-bg)',
-              boxShadow: 'var(--files-panel-state-active-shadow)',
+              background: 'var(--rn-accent-soft)',
             }
           : {}),
         ...(!isActive && !isDropTarget && !isBrowserDropAccent && isHovered
           ? {
-              background: 'var(--files-panel-state-hover-bg)',
-              boxShadow: 'var(--files-panel-state-hover-shadow)',
+              background: 'var(--rn-fill)',
             }
           : {}),
-        ...(isDropTarget
-          ? { outline: '1px dashed var(--color-blue)', background: 'var(--color-blue-light)' }
-          : {}),
-        ...(isBrowserDropAccent
+        ...(isDropTarget || isBrowserDropAccent
           ? {
-              background: 'color-mix(in srgb, rgba(255, 255, 255, 0.28) 62%, var(--color-blue-light) 38%)',
-              boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--color-blue) 48%, rgba(255,255,255,0.62)), 0 4px 14px rgba(59,130,246,0.09)',
+              background: 'var(--rn-accent-soft)',
+              boxShadow: 'inset 0 0 0 1.5px var(--rn-accent)',
               zIndex: 2,
             }
           : {}),
@@ -137,8 +137,8 @@ export function FileTreeItem({
               width: 8,
               height: 8,
               borderRadius: '50%',
-              background: 'var(--color-blue)',
-              boxShadow: '0 0 0 2px rgba(255,255,255,0.76), 0 4px 12px rgba(59,130,246,0.24)',
+              background: 'var(--rn-accent)',
+              boxShadow: '0 0 0 2px var(--rn-sheet)',
               zIndex: 3,
               top: browserDropLine === 'before' ? -2 : undefined,
               bottom: browserDropLine === 'after' ? -2 : undefined,
@@ -152,8 +152,7 @@ export function FileTreeItem({
               right: 8,
               height: 3,
               borderRadius: 999,
-              background: 'color-mix(in srgb, var(--color-blue) 88%, rgba(255,255,255,0.24))',
-              boxShadow: '0 0 0 1px rgba(255,255,255,0.28), 0 4px 12px rgba(59,130,246,0.18)',
+              background: 'var(--rn-accent)',
               zIndex: 3,
               top: browserDropLine === 'before' ? 0 : undefined,
               bottom: browserDropLine === 'after' ? 0 : undefined,
@@ -170,11 +169,11 @@ export function FileTreeItem({
             void onToggleDir()
           }}
           className="w-3 h-3 flex-shrink-0 flex items-center justify-center"
-          style={{ color: 'var(--text-light)' }}
+          style={{ color: 'var(--rn-ink-3)' }}
         >
           {isExpanded
-            ? <ChevronDown className="w-3 h-3" style={{ color: 'var(--text-light)' }} />
-            : <ChevronRight className="w-3 h-3" style={{ color: 'var(--text-light)' }} />}
+            ? <ChevronDown className="w-3 h-3" />
+            : <ChevronRight className="w-3 h-3" />}
         </button>
       ) : (
         <span className="w-3 flex-shrink-0" />
@@ -205,10 +204,7 @@ export function FileTreeItem({
             onCancel={onRenameCancel}
           />
         ) : (
-          <span
-            className="truncate block font-medium"
-            style={{ color: isActive ? 'var(--text-title)' : item.isDirectory ? 'var(--text-body)' : 'var(--text-muted)' }}
-          >
+          <span className="truncate block">
             {item.name}
           </span>
         )}

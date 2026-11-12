@@ -81,11 +81,6 @@
   background: var(--rn-fill-2);
 }
 
-.shell-rail__button:focus-visible {
-  outline: 1.5px solid var(--rn-ink-3);
-  outline-offset: 1px;
-}
-
 .shell-rail__glyph {
   width: 18px;
   height: 18px;

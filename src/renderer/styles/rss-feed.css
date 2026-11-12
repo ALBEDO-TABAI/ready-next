@@ -276,11 +276,6 @@
   box-shadow: var(--rn-card-shadow);
 }
 
-.rss-news-card:focus-visible {
-  outline: 1.5px solid var(--rn-ink-3);
-  outline-offset: 1px;
-}
-
 .rss-card-meta {
   display: flex;
   align-items: center;

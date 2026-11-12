@@ -98,7 +98,7 @@ export function GeneratedImageGallery({ images, onPreview, onReferenceSelect }: 
                 width: cards.length === 1 ? 'min(100%, 420px)' : 'min(48%, 260px)',
                 minWidth: 168,
                 borderRadius: 14,
-                background: 'var(--surface-card-bg)',
+                background: 'var(--rn-sheet)',
                 boxShadow: 'none',
                 cursor: 'grab',
               }}
@@ -112,7 +112,7 @@ export function GeneratedImageGallery({ images, onPreview, onReferenceSelect }: 
               />
               <span
                 className="flex items-center justify-between gap-2 px-2.5 py-2 text-[10px]"
-                style={{ color: 'var(--text-light)' }}
+                style={{ color: 'var(--rn-ink-3)' }}
               >
                 <span className="truncate">{String(image.meta?.model || 'AI 生成图片')}</span>
                 {active ? (
@@ -123,7 +123,7 @@ export function GeneratedImageGallery({ images, onPreview, onReferenceSelect }: 
                       width: 7,
                       height: 7,
                       borderRadius: '50%',
-                      background: 'var(--color-green)',
+                      background: 'var(--rn-ok)',
                       flexShrink: 0,
                     }}
                   />
@@ -135,7 +135,7 @@ export function GeneratedImageGallery({ images, onPreview, onReferenceSelect }: 
           )
         })}
       </div>
-      {feedback ? <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{feedback}</div> : null}
+      {feedback ? <div className="text-[11px]" style={{ color: 'var(--rn-ink-2)' }}>{feedback}</div> : null}
       {menu ? (
         <ContextMenu
           x={menu.x}

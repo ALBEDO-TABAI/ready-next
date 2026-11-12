@@ -37,7 +37,7 @@ export function CapsuleChevron({ expanded }: { expanded: boolean }) {
       style={{
         width: 12,
         height: 12,
-        color: 'var(--text-light)',
+        color: 'var(--rn-ink-3)',
         transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
         transition: 'transform 160ms ease',
         flexShrink: 0,
@@ -139,7 +139,7 @@ export function ToolTimelineRow({
               width: 1,
               flex: 1,
               marginTop: 3,
-              background: 'color-mix(in srgb, var(--border-default) 80%, transparent)',
+              background: 'color-mix(in srgb, var(--rn-hair-2) 80%, transparent)',
             }}
           />
         )}
@@ -175,7 +175,7 @@ export function ToolTimelineRow({
               className="t-data"
               data-typography-role="data"
               data-ready-tool-trace-duration="true"
-              style={{ color: 'var(--text-light)', flexShrink: 0 }}
+              style={{ color: 'var(--rn-ink-3)', flexShrink: 0 }}
             >
               {item.durationLabel}
             </span>
@@ -199,7 +199,7 @@ export function ToolTimelineRow({
                 className="t-data"
                 data-typography-role="data"
                 data-ready-tool-timeline-tool-name="true"
-                style={{ color: 'var(--text-gray)' }}
+                style={{ color: 'var(--rn-ink-3)' }}
               >
                 {item.toolName}
               </div>
@@ -214,7 +214,7 @@ export function ToolTimelineRow({
             {resultDetailText ? (
               <DetailCodeBlock label="输出" text={resultDetailText} language="输出" />
             ) : (
-              <div className="t-meta" data-typography-role="meta" style={{ color: 'var(--text-light)' }}>
+              <div className="t-meta" data-typography-role="meta" style={{ color: 'var(--rn-ink-3)' }}>
                 执行中，尚无输出。
               </div>
             )}

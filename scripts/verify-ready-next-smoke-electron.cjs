@@ -470,7 +470,7 @@ async function checkCalendarHistoryAfterRestart(page, reference, history) {
   ok('C1 saved chat attachment is read from persisted history after restart', saved.success && saved.data.some(row => row.id === history.messageId), JSON.stringify(saved))
   await page.getByRole('button', { name: /当前会话：.*点击查看历史对话/ }).click()
   // The title appears in the header and in the history list; either opens the conversation.
-  const row = page.locator('.chat-header-floating-menu').getByText(history.title, { exact: true }).first()
+  const row = page.locator('[data-chat-header-menu="history"]').getByText(history.title, { exact: true }).first()
   if (!await row.isVisible()) await page.getByRole('button', { name: '展开历史会话', exact: true }).first().click()
   await row.click()
   // The saved history repeats the reference; any enabled copy must open the same occurrence.
@@ -520,7 +520,7 @@ async function checkR45References(app, page, history, createDrafts) {
   const saved = await readChatMessages(page, history.scopeId)
   ok('R45 history contains a webpage and an exact RSS reference', saved.success && JSON.parse(saved.data.find(row => row.id === history.messageId)?.meta_json || '{}').attachments?.length === 2, JSON.stringify(saved))
   await page.getByRole('button', { name: /当前会话：.*点击查看历史对话/ }).click()
-  const row = page.locator('.chat-header-floating-menu').getByText(history.title, { exact: true }).first()
+  const row = page.locator('[data-chat-header-menu="history"]').getByText(history.title, { exact: true }).first()
   if (!await row.isVisible()) await page.getByRole('button', { name: '展开历史会话', exact: true }).first().click()
   await row.click()
   if (createDrafts) {

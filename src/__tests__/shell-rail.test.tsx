@@ -40,7 +40,7 @@ test('ShellRail dispatches mode, split and global actions and renders current st
   dom.window.addEventListener('ready:open-quick-switcher', () => { searches += 1 })
   const props: ShellRailProps = { mode: 'document', splitMode: 'rss',
     onModeChange: mode => modes.push(mode), onSplitToggle: mode => splits.push(mode),
-    assistantOpen: true, onAssistantOpen: () => { assistantOpens += 1 } }
+    assistantOpen: true, onAssistantOpen: () => { assistantOpens += 1 }, sidebarShown: true }
   function Location() { return <output>{useLocation().pathname}</output> }
   const render = (patch: Partial<ShellRailProps> = {}) => act(async () => root.render(
     <MemoryRouter><ShellRail {...props} {...patch} /><Location /></MemoryRouter>,
@@ -75,6 +75,12 @@ test('ShellRail dispatches mode, split and global actions and renders current st
   assert.equal(button('资讯').querySelector('.is-filled'), null)
   assert.equal(button('文档').getAttribute('aria-pressed'), 'false')
   assert.equal(dom.window.document.querySelector('[data-split="true"]'), null)
+  // The user's rail rule (W1 DL8): while the sidebar is collapsed the selected glyph stays, its tile goes away.
+  await render({ mode: 'rss', splitMode: null, sidebarShown: false })
+  assert.ok(button('资讯').classList.contains('is-remembered'))
+  assert.equal(button('资讯').classList.contains('is-active'), false)
+  await render({ mode: 'rss', splitMode: null })
+  assert.ok(button('资讯').classList.contains('is-active'))
   for (const label of ['文件', '查找与替换', '技能中心', '反向链接', '关系图谱']) {
     assert.equal(dom.window.document.querySelector(`button[aria-label="${label}"]`), null)
   }

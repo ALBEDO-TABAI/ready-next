@@ -48,13 +48,13 @@ export function PendingClipRow({
     pointerEvents: canDismiss ? 'auto' : 'none',
     userSelect: 'none',
     cursor: canDismiss ? 'pointer' : 'default',
-    background: isFailure ? 'color-mix(in srgb, var(--color-rose-light, #fee2e2) 36%, transparent)' : 'transparent',
+    background: isFailure ? 'color-mix(in srgb, var(--rn-bad) 10%, transparent)' : 'transparent',
     boxShadow:
       isComplete
-        ? 'inset 0 0 0 1px color-mix(in srgb, var(--color-green, #10b981) 38%, transparent)'
+        ? 'inset 0 0 0 1px color-mix(in srgb, var(--rn-ok) 38%, transparent)'
         : isFailure
-          ? 'inset 0 0 0 1px color-mix(in srgb, var(--color-rose, #f43f5e) 32%, transparent)'
-          : 'inset 0 0 0 1px rgba(148, 163, 184, 0.22)',
+          ? 'inset 0 0 0 1px color-mix(in srgb, var(--rn-bad) 32%, transparent)'
+          : 'inset 0 0 0 1px var(--rn-hair-2)',
   }
   const label = pendingPlaceholderLabel(kind, status)
   const dismiss = () => {
@@ -89,11 +89,11 @@ export function PendingClipRow({
           {isActive ? (
             <Loader2 className="animate-spin" style={{ width: 14, height: 14 }} strokeWidth={2} />
           ) : isComplete ? (
-            <Check style={{ width: 14, height: 14, color: 'var(--color-green, #10b981)' }} strokeWidth={2.5} />
+            <Check style={{ width: 14, height: 14, color: 'var(--rn-ok)' }} strokeWidth={2.5} />
           ) : status === 'paused' ? (
-            <ListMinus style={{ width: 14, height: 14, color: 'var(--color-orange, #f59e0b)' }} strokeWidth={2.4} />
+            <ListMinus style={{ width: 14, height: 14, color: 'var(--rn-warn)' }} strokeWidth={2.4} />
           ) : (
-            <AlertTriangle style={{ width: 14, height: 14, color: 'var(--color-rose, #f43f5e)' }} strokeWidth={2.4} />
+            <AlertTriangle style={{ width: 14, height: 14, color: 'var(--rn-bad)' }} strokeWidth={2.4} />
           )}
         </span>
 
@@ -104,7 +104,7 @@ export function PendingClipRow({
               alignItems: 'center',
               gap: 6,
               minWidth: 0,
-              color: 'var(--text-muted)',
+              color: 'var(--rn-ink-2)',
               fontStyle: 'italic',
             }}
           >
@@ -112,7 +112,7 @@ export function PendingClipRow({
               {label}
             </span>
             {isAnalysis && progressValue !== null && (
-              <span style={{ flexShrink: 0, fontSize: 11, fontStyle: 'normal', color: 'var(--text-light)' }}>
+              <span style={{ flexShrink: 0, fontSize: 11, fontStyle: 'normal', color: 'var(--rn-ink-3)' }}>
                 {progressValue}%
               </span>
             )}
@@ -129,7 +129,7 @@ export function PendingClipRow({
                 height: 3,
                 borderRadius: 999,
                 overflow: 'hidden',
-                background: 'rgba(148, 163, 184, 0.18)',
+                background: 'var(--rn-fill-2)',
               }}
             >
               <div
@@ -138,10 +138,10 @@ export function PendingClipRow({
                   height: '100%',
                   borderRadius: 999,
                   background: isFailure
-                    ? 'var(--color-rose, #f43f5e)'
+                    ? 'var(--rn-bad)'
                     : isComplete
-                      ? 'var(--color-green, #10b981)'
-                      : 'var(--color-ready-orange, #ff4b2b)',
+                      ? 'var(--rn-ok)'
+                      : 'var(--rn-accent)',
                   transition: 'width 240ms ease',
                 }}
               />
@@ -154,7 +154,7 @@ export function PendingClipRow({
               style={{
                 marginTop: 2,
                 fontSize: 11,
-                color: 'var(--text-light)',
+                color: 'var(--rn-ink-3)',
                 whiteSpace: 'nowrap',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
@@ -170,7 +170,7 @@ export function PendingClipRow({
             title={errorMessage}
             style={{
               fontSize: 11,
-              color: 'var(--color-rose, #f43f5e)',
+              color: 'var(--rn-bad)',
               maxWidth: 140,
               whiteSpace: 'nowrap',
               overflow: 'hidden',

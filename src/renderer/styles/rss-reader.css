@@ -171,8 +171,6 @@
 }
 
 .rss-reader-toc button:focus-visible {
-  outline: 1.5px solid var(--rn-ink-3);
-  outline-offset: 1px;
   border-radius: var(--rn-r-xs);
 }
 
@@ -255,8 +253,6 @@
 
 .rss-membership-editor > summary:focus-visible,
 .rss-event-panel > button:first-child:focus-visible {
-  outline: 1.5px solid var(--rn-ink-3);
-  outline-offset: 1px;
   border-radius: var(--rn-r-lg);
 }
 

@@ -3,6 +3,7 @@ import {
   IconFileText as FileText,
   IconFolder as Folder,
 } from '@tabler/icons-react'
+import { Input } from '../../ui'
 
 export function InlineInput({
   defaultValue,
@@ -22,8 +23,9 @@ export function InlineInput({
     inputRef.current?.setSelectionRange(0, dotIdx > 0 ? dotIdx : defaultValue.length)
   }, [defaultValue])
 
+  // The shared field (W1 §5), sized to sit inside a 30px tree row.
   return (
-    <input
+    <Input
       ref={inputRef}
       value={value}
       onChange={(e) => setValue(e.target.value)}
@@ -36,7 +38,8 @@ export function InlineInput({
         if (e.key === 'Escape') onCancel()
         e.stopPropagation()
       }}
-      className="w-full px-1 py-0.5 text-[12px] border border-[var(--color-blue)] rounded bg-[var(--bg-primary)] outline-none"
+      aria-label="名称"
+      style={{ width: '100%', height: 22, padding: '0 4px', fontSize: 12, borderRadius: 'var(--rn-r-xs)' }}
     />
   )
 }
@@ -56,17 +59,17 @@ export function InlineCreateRow({
     <div
       className="flex items-center gap-[6px] rounded-[8px]"
       style={{
-        padding: '6px 8px',
+        height: 'var(--rn-row-h)',
+        padding: '0 8px',
         paddingLeft: `${8 + depth * 22}px`,
-        background: 'var(--files-panel-state-active-bg)',
-        boxShadow: 'var(--files-panel-state-active-shadow)',
+        background: 'var(--rn-fill)',
       }}
     >
       <span className="w-3 flex-shrink-0" />
       <span className="flex-shrink-0">
         {type === 'folder'
-          ? <Folder className="w-[14px] h-[14px]" style={{ color: 'var(--text-muted)' }} />
-          : <FileText className="w-[14px] h-[14px]" style={{ color: 'var(--text-muted)' }} />}
+          ? <Folder className="w-[14px] h-[14px]" style={{ color: 'var(--rn-ink-2)' }} strokeWidth={1.5} />
+          : <FileText className="w-[14px] h-[14px]" style={{ color: 'var(--rn-ink-2)' }} strokeWidth={1.5} />}
       </span>
       <div className="flex-1 min-w-0">
         <InlineInput

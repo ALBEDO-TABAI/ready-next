@@ -32,11 +32,13 @@ const RESTART_PAUSE_MS = 850
 const EXIT_TOTAL_MS = LOGO_COMPLETE_MS + FINAL_LOGO_HOLD_MS + CARD_EXIT_MS
 const DEMO_LOOP_MS = SIMULATED_READY_MS + EXIT_TOTAL_MS + RESTART_PAUSE_MS
 
-// The brand mark in the one signal colour (--rn-accent). Inline because the splash paints before
-// the stylesheets load.
+// The brand mark in the one signal colour (--rn-accent). This React splash (the preview page and the
+// splash window's route) mounts after main.tsx has loaded styles/index.css, so the tokens are there;
+// the boot-time inline splash (src/main/startup-splash-html.ts) paints before any stylesheet and keeps
+// its own colours.
 const SPLASH_COLORS = {
-  logo: '#ff5a1f',
-  glow: 'rgba(255, 90, 31, 0.18)'
+  logo: 'var(--rn-accent)',
+  glow: 'color-mix(in srgb, var(--rn-accent) 18%, transparent)'
 }
 
 function clamp01(value: number): number {
@@ -188,14 +190,14 @@ export default function ReadyStartupSplash({
           className="startup-preview__matrix startup-preview__matrix--logo"
           aria-hidden="true"
         >
-          <svg viewBox={`0 0 ${MATRIX_WIDTH} ${MATRIX_HEIGHT}`} preserveAspectRatio="xMidYMid meet">
+          <svg viewBox={`0 0 ${MATRIX_WIDTH} ${MATRIX_HEIGHT}`} preserveAspectRatio="xMidYMid meet" style={{ color: colors.logo }}>
             {READY_LOGO_PATTERN.dots.map((dot, index) => (
               <circle
                 key={`${dot.x}-${dot.y}-${index}`}
                 cx={dot.x}
                 cy={dot.y}
                 r={dot.r}
-                fill={colors.logo}
+                fill="currentColor"
                 opacity={resolveLogoDotOpacity(dot.columnIndex, loopElapsedMs, finishElapsedMs)}
               />
             ))}

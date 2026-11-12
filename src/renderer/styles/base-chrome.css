@@ -14,12 +14,12 @@ body,
 }
 
 body {
-  font-family: var(--font-ui);
-  font-size: var(--text-md);
-  line-height: var(--leading-normal);
-  letter-spacing: var(--tracking-normal);
-  color: var(--text-body);
-  background: var(--bg-primary);
+  font-family: var(--rn-font-ui);
+  font-size: var(--rn-fs-md);
+  line-height: 1.5;
+  letter-spacing: 0;
+  color: var(--rn-ink);
+  background: var(--rn-sheet);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -31,68 +31,61 @@ body {
   transition: background-color 140ms ease, color 140ms ease;
 }
 
+/* Type roles (W1 DL7): Inter + PingFang at the --rn-fs-* scale; Geist Mono for labels and numbers. */
 .t-display {
-  font-family: var(--font-head);
-  font-size: var(--text-5xl);
-  line-height: var(--leading-none);
-  font-weight: var(--fw-semibold);
-  letter-spacing: var(--tracking-tight);
-}
-
-.t-title-lg {
-  font-family: var(--font-head);
-  font-size: var(--text-2xl);
-  line-height: var(--leading-tight);
-  font-weight: var(--fw-semibold);
-  letter-spacing: var(--tracking-tight);
+  font-family: var(--rn-font-display);
+  font-size: 64px;
+  line-height: 1;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .t-title {
-  font-family: var(--font-head);
-  font-size: var(--text-xl);
-  line-height: var(--leading-snug);
-  font-weight: var(--fw-semibold);
-  letter-spacing: var(--tracking-tight);
+  font-family: var(--rn-font-display);
+  font-size: 18px;
+  line-height: 1.3;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .t-subtitle {
-  font-family: var(--font-ui);
-  font-size: var(--text-lg);
-  line-height: var(--leading-snug);
-  font-weight: var(--fw-semibold);
-  letter-spacing: var(--tracking-normal);
+  font-family: var(--rn-font-ui);
+  font-size: var(--rn-fs-lg);
+  line-height: 1.3;
+  font-weight: 600;
+  letter-spacing: 0;
 }
 
 .t-body {
-  font-family: var(--font-ui);
-  font-size: var(--text-md);
-  line-height: var(--leading-normal);
-  font-weight: var(--fw-regular);
-  letter-spacing: var(--tracking-normal);
+  font-family: var(--rn-font-ui);
+  font-size: var(--rn-fs-md);
+  line-height: 1.5;
+  font-weight: 400;
+  letter-spacing: 0;
 }
 
 .t-body-sm {
-  font-family: var(--font-ui);
-  font-size: var(--text-base);
-  line-height: var(--leading-normal);
-  font-weight: var(--fw-regular);
-  letter-spacing: var(--tracking-normal);
+  font-family: var(--rn-font-ui);
+  font-size: var(--rn-fs-sm);
+  line-height: 1.5;
+  font-weight: 400;
+  letter-spacing: 0;
 }
 
 .t-ui {
-  font-family: var(--font-ui);
-  font-size: var(--text-base);
-  line-height: var(--leading-dense);
-  font-weight: var(--fw-medium);
-  letter-spacing: var(--tracking-normal);
+  font-family: var(--rn-font-ui);
+  font-size: var(--rn-fs-sm);
+  line-height: 1.4;
+  font-weight: 500;
+  letter-spacing: 0;
 }
 
 .t-meta {
-  font-family: var(--font-ui);
-  font-size: var(--text-sm);
-  line-height: var(--leading-dense);
-  font-weight: var(--fw-regular);
-  letter-spacing: var(--tracking-normal);
+  font-family: var(--rn-font-ui);
+  font-size: var(--rn-fs-xs);
+  line-height: 1.4;
+  font-weight: 400;
+  letter-spacing: 0;
 }
 
 /* Labels: mono + uppercase + wide tracking is the signature. The mono stack carries
@@ -100,38 +93,29 @@ body {
    Latin/numeric labels get the full instrument-panel treatment (uppercase is a no-op
    on CJK by design). */
 .t-label {
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  line-height: var(--leading-tight);
-  font-weight: var(--fw-medium);
-  letter-spacing: var(--tracking-label);
-  text-transform: uppercase;
-}
-
-.t-label-sm {
-  font-family: var(--font-mono);
-  font-size: var(--text-2xs);
-  line-height: var(--leading-tight);
-  font-weight: var(--fw-medium);
-  letter-spacing: var(--tracking-label);
+  font-family: var(--rn-font-mono);
+  font-size: var(--rn-fs-2xs);
+  line-height: 1.2;
+  font-weight: 500;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .t-data {
-  font-family: var(--font-numeric);
-  font-size: var(--text-sm);
-  line-height: var(--leading-tight);
-  font-weight: var(--fw-medium);
-  letter-spacing: var(--tracking-normal);
+  font-family: var(--rn-font-mono);
+  font-size: var(--rn-fs-xs);
+  line-height: 1.2;
+  font-weight: 500;
+  letter-spacing: 0;
   font-variant-numeric: tabular-nums;
 }
 
 .t-numeral {
-  font-family: var(--font-numeric);
-  font-size: var(--text-xl);
-  line-height: var(--leading-none);
-  font-weight: var(--fw-semibold);
-  letter-spacing: var(--tracking-tight);
+  font-family: var(--rn-font-mono);
+  font-size: 18px;
+  line-height: 1;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   font-variant-numeric: tabular-nums;
 }
 
@@ -161,7 +145,7 @@ body {
 }
 
 .dot-glyph[data-dot-glyph-tone='signal'] {
-  color: var(--color-red);
+  color: var(--rn-bad);
 }
 
 .dot-glyph--pulse i.on {
@@ -228,10 +212,6 @@ html:root [data-liquid-scroll-root] {
   backface-visibility: hidden;
 }
 
-.settings-ai-provider-tab {
-  border-top-color: transparent !important;
-}
-
 .ready-theme-ritual-tint {
   position: absolute;
   inset: 0;
@@ -274,21 +254,15 @@ html[data-theme-ritual-phase] .ready-app-content *::after {
   transition: opacity calc(var(--ritual-hold-duration, 320ms) - 40ms) cubic-bezier(0.4, 0, 0.6, 1);
 }
 
+/* The window's one glass (W1 §4): over the system's under-window material the DOM paints only the glass tint (light)
+   or the stage (dark, and the opaque backing in fullscreen); how much shows is --app-bg-overlay-opacity. */
 .ready-app-bg::before {
-  background:
-    radial-gradient(1240px 700px at 8% 6%, rgba(238, 236, 230, 0.14), transparent 66%),
-    radial-gradient(920px 540px at 82% 10%, rgba(241, 239, 234, 0.12), transparent 66%),
-    radial-gradient(760px 480px at 52% 90%, rgba(246, 242, 235, 0.09), transparent 72%),
-    linear-gradient(142deg, #fafaf8 0%, #fcfbf8 52%, #fafaf8 100%);
+  background: rgb(var(--rn-glass-tint));
   opacity: 1;
 }
 
 .ready-app-bg::after {
-  background:
-    radial-gradient(1080px 640px at 10% 6%, rgba(72, 100, 164, 0.24), transparent 66%),
-    radial-gradient(860px 520px at 84% 10%, rgba(52, 96, 132, 0.18), transparent 68%),
-    radial-gradient(700px 500px at 52% 90%, rgba(66, 74, 112, 0.16), transparent 72%),
-    linear-gradient(145deg, #101724 0%, #111a27 52%, #121b2a 100%);
+  background: var(--rn-stage);
   opacity: 0;
 }
 
@@ -324,12 +298,12 @@ html[data-transparency='reduced'] *::after {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--border-default);
-  border-radius: 4px;
+  background: var(--rn-fill-3);
+  border-radius: var(--rn-r-pill);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--border-input);
+  background: var(--rn-ink-4);
 }
 
 /* RSS feed immersive scrollbar: hidden by default, visible on hover */
@@ -344,7 +318,7 @@ html[data-transparency='reduced'] *::after {
 }
 
 .panel-hover-scrollbar:hover {
-  scrollbar-color: color-mix(in srgb, var(--text-muted) 22%, transparent) transparent;
+  scrollbar-color: var(--rn-fill-3) transparent;
 }
 
 .panel-hover-scrollbar::-webkit-scrollbar {
@@ -362,11 +336,11 @@ html[data-transparency='reduced'] *::after {
 }
 
 .panel-hover-scrollbar:hover::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--text-muted) 22%, transparent);
+  background: var(--rn-fill-3);
 }
 
 .panel-hover-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in srgb, var(--text-muted) 36%, transparent);
+  background: var(--rn-ink-4);
 }
 
 .document-tab-rail-scroll {
@@ -396,85 +370,79 @@ html[data-transparency='reduced'] *::after {
 }
 
 .rss-feed-scroll:hover::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--text-muted) 22%, transparent);
+  background: var(--rn-fill-3);
 }
 
 .rss-feed-scroll::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in srgb, var(--text-muted) 36%, transparent);
+  background: var(--rn-ink-4);
 }
 
 /* Selection */
 ::selection {
-  background: var(--color-blue-light);
-  color: var(--color-blue);
+  background: var(--rn-accent-soft);
+  color: var(--rn-accent);
 }
 
-/* Focus styles */
-:focus-visible {
-  outline: 2px solid var(--color-blue);
-  outline-offset: 2px;
-}
-
-.browser-address-shell:focus-within {
-  outline: none;
-  box-shadow: none;
-}
-
-.browser-address-shell .browser-address-input:focus,
-.browser-address-shell .browser-address-input:focus-visible {
-  outline: none !important;
-  box-shadow: none !important;
+/* Focus (W1 DL5, the primitives' ring): an ink outline, never the signal colour. In @layer base so that any
+   component that draws its own focus — a field's inked edge, a menu's highlighted row, the rail's tile — wins
+   without a local patch; the ring is the fallback for everything else. */
+@layer base {
+  :focus-visible {
+    outline: 1.5px solid var(--rn-ink-3);
+    outline-offset: 1px;
+  }
 }
 
 .ready-input-shell {
-  background: var(--input-slot-bg);
-  border: 1px solid var(--input-slot-border);
-  box-shadow: var(--input-slot-shadow);
+  background: var(--rn-fill);
+  border: 1px solid var(--rn-hair-2);
+  box-shadow: none;
   transition:
-    background 160ms ease,
-    border-color 160ms ease,
-    box-shadow 160ms ease;
+    background-color var(--rn-d-1) var(--rn-ease-out),
+    border-color var(--rn-d-1) var(--rn-ease-out),
+    box-shadow var(--rn-d-1) var(--rn-ease-out);
 }
 
 .ready-input-shell:focus-within {
-  border-color: var(--input-slot-focus-border);
-  box-shadow: var(--input-slot-shadow-focus);
+  border-color: var(--rn-ink-3);
+  box-shadow: none;
 }
 
 .ready-input-slot-control {
-  background: var(--input-slot-bg) !important;
-  border-color: var(--input-slot-border) !important;
-  box-shadow: var(--input-slot-shadow) !important;
+  background: var(--rn-fill) !important;
+  border-color: var(--rn-hair-2) !important;
+  box-shadow: none !important;
   transition:
-    background 160ms ease,
-    border-color 160ms ease,
-    box-shadow 160ms ease;
+    background-color var(--rn-d-1) var(--rn-ease-out),
+    border-color var(--rn-d-1) var(--rn-ease-out),
+    box-shadow var(--rn-d-1) var(--rn-ease-out);
 }
 
-/* 设置页的 sx-input / sx-select / sx-textarea（settings-surfaces.css）与共用基元的 rn-field（components/ui/primitives.css）自带槽位材质，不吃这条全局兜底。 */
+/* Inputs not yet on the Field primitive look like it (W1 §5: --rn-fill, a hairline, an ink edge on focus). 设置页的
+   sx-input / sx-select / sx-textarea（settings-surfaces.css）与共用基元的 rn-field（components/ui/primitives.css）自带槽位材质，不吃这条全局兜底。 */
 .ready-app-shell input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']):not([type='hidden']):not([type='submit']):not([type='button']):not([type='reset']):not([type='image']):not(.ready-input-slot-inner):not(.sx-input):not(.rn-field),
 .ready-app-shell textarea:not(.ready-input-slot-inner):not(.sx-textarea):not(.rn-field),
 .ready-app-shell select:not(.ready-input-slot-inner):not(.sx-select):not(.rn-field) {
-  background: var(--input-slot-bg) !important;
-  border-color: var(--input-slot-border) !important;
-  box-shadow: var(--input-slot-shadow) !important;
+  background: var(--rn-fill) !important;
+  border-color: var(--rn-hair-2) !important;
+  box-shadow: none !important;
   transition:
-    background 160ms ease,
-    border-color 160ms ease,
-    box-shadow 160ms ease;
+    background-color var(--rn-d-1) var(--rn-ease-out),
+    border-color var(--rn-d-1) var(--rn-ease-out),
+    box-shadow var(--rn-d-1) var(--rn-ease-out);
 }
 
 .ready-input-slot-control:focus {
-  border-color: var(--input-slot-focus-border) !important;
-  box-shadow: var(--input-slot-shadow-focus) !important;
+  border-color: var(--rn-ink-3) !important;
+  box-shadow: none !important;
   outline: none !important;
 }
 
 .ready-app-shell input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']):not([type='hidden']):not([type='submit']):not([type='button']):not([type='reset']):not([type='image']):not(.ready-input-slot-inner):not(.sx-input):not(.rn-field):focus,
 .ready-app-shell textarea:not(.ready-input-slot-inner):not(.sx-textarea):not(.rn-field):focus,
 .ready-app-shell select:not(.ready-input-slot-inner):not(.sx-select):not(.rn-field):focus {
-  border-color: var(--input-slot-focus-border) !important;
-  box-shadow: var(--input-slot-shadow-focus) !important;
+  border-color: var(--rn-ink-3) !important;
+  box-shadow: none !important;
   outline: none !important;
 }
 
@@ -491,7 +459,7 @@ html[data-transparency='reduced'] *::after {
 }
 
 .ready-input-slot-inner::placeholder {
-  color: var(--text-placeholder);
+  color: var(--rn-ink-3);
 }
 
 .ready-liquid-composer {

@@ -1,9 +1,8 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
 
-import { buildFloatingMenuCheckStyle } from '../renderer/components/ui/floatingMenuStyles'
 import { readRendererStyles } from './utils/read-renderer-styles'
 
 function readWorkspaceFile(path: string): string {
@@ -21,7 +20,10 @@ test('button-triggered dropdown menus opt into the shared frosted submenu treatm
     floatingPanel,
     /className=\{\['rn-float', 'rn-float-panel', className\]/,
   )
-  assert.match(filesPanel, /ready-floating-menu-item/)
+  // B13: the filter rows are the shared menu list (checkable items), kept open while filters are toggled.
+  assert.match(filesPanel, /<MenuList items=\{filterMenuItems\} label="筛选" onDone=\{\(\) => \{\}\} \/>/)
+  assert.match(filesPanel, /checked: filters\[key\]/)
+  assert.doesNotMatch(filesPanel, /ready-floating-menu-item|floatingMenuStyles/)
   assert.match(filesPanel, /position:\s*'fixed'/)
 })
 
@@ -34,7 +36,7 @@ test('files panel dropdown menus stay within the sidebar and do not hide browser
   assert.match(filesPanel, /createPortal\(/)
   assert.match(filesPanel, /document\.body/)
   assert.match(filesPanel, /position:\s*'fixed'/)
-  assert.match(filesPanel, /const filterMenuStyle = buildFloatingMenuSurfaceStyle\(168/)
+  assert.match(filesPanel, /computeMenuPosition\(filterTriggerRef\.current, FILTER_MENU_WIDTH\)/)
 })
 
 test('file tree context menus use a native popup above BrowserView without hiding browser content', () => {
@@ -51,8 +53,8 @@ test('file tree context menus use a native popup above BrowserView without hidin
   const nativeMenuIpc = readWorkspaceFile('src/main/modules/app-control/native-context-menu-ipc.ts')
   const preload = readWorkspaceFile('src/preload/index.ts')
 
-  assert.match(contextMenu, /portal = true/)
-  assert.match(contextMenu, /createPortal\(menu, document\.body\)/)
+  // B13: drawn by the shared float host (above the page, native web layer hand-off), not a private portal.
+  assert.match(contextMenu, /openFloat\(/)
   assert.doesNotMatch(contextMenu, /BROWSER_OVERLAY_LOCK_EVENT/)
   assert.doesNotMatch(contextMenu, /browser\?\.hideAll/)
   assert.doesNotMatch(contextMenu, /browser\?\.showActive/)
@@ -72,29 +74,16 @@ test('file tree context menus use a native popup above BrowserView without hidin
   assert.match(preload, /showNativeContextMenu/)
 })
 
-test('shared submenu styles use the denser browser-like frosted background and hover treatment', () => {
+test('the files panel stylesheet keeps only the tree row flash, on tokens, and the hand-rolled menu helpers are gone', () => {
   const styles = readWorkspaceFile('src/renderer/components/layout/filesPanelFloatingMenu.css')
-  const themeStyles = readRendererStyles()
-  const menuHelpers = readWorkspaceFile('src/renderer/components/ui/floatingMenuStyles.ts')
+  const shell = readRendererStyles()
 
-  assert.match(styles, /\.ready-floating-menu\s*\{/)
-  assert.match(styles, /background:\s*var\(--chat-menu-frost-bg\) !important/)
-  assert.match(styles, /background:\s*var\(--chat-menu-hover-bg\) !important/)
-  assert.match(styles, /html:root \.ready-floating-menu\s*\{/)
-  assert.match(styles, /backdrop-filter:\s*blur\(calc\(var\(--lg-blur-strong\) \* 1\.28\)\)/)
-  assert.match(styles, /\.ready-floating-menu-item:hover\s*\{/)
-  assert.match(themeStyles, /html\[data-theme='dark'\]\s*\{[\s\S]*--chat-menu-frost-bg:\s*color-mix\(in srgb,\s*var\(--surface-floating-bg\) 88%,\s*rgba\(255,\s*255,\s*255,\s*0\.02\)\);/)
-  assert.match(menuHelpers, /background:\s*'var\(--chat-menu-frost-bg,/)
-  assert.doesNotMatch(styles, /rgba\(236,\s*239,\s*243,\s*0\.92\) !important/)
-})
-
-test('floating submenu check indicators stay neutral instead of blue', () => {
-  const checkedStyle = buildFloatingMenuCheckStyle(true)
-  const uncheckedStyle = buildFloatingMenuCheckStyle(false)
-
-  assert.doesNotMatch(String(checkedStyle.border), /color-blue/)
-  assert.doesNotMatch(String(checkedStyle.background), /color-blue/)
-  assert.doesNotMatch(String(checkedStyle.background), /linear-gradient/)
-  assert.doesNotMatch(String(checkedStyle.background), /255,255,255,0\.82/)
-  assert.doesNotMatch(String(uncheckedStyle.border), /color-blue/)
+  // B13: the file panel's menus moved to the shared float (FloatPanel + MenuList); its stylesheet keeps only the
+  // tree's row flash, on --rn-* tokens, and no blur of its own (W1 §4). The private menu helpers
+  // (ui/floatingMenuStyles.ts) and their .ready-floating-menu classes are deleted (W1 DS4: one menu implementation).
+  assert.doesNotMatch(styles, /\.ready-floating-menu/)
+  assert.doesNotMatch(styles, /backdrop-filter/)
+  assert.match(styles, /@keyframes file-tree-flash-glow[\s\S]*var\(--rn-accent-soft\)/)
+  assert.doesNotMatch(shell, /\.ready-floating-menu|\.chat-header-floating-menu/)
+  assert.equal(existsSync(resolve(process.cwd(), 'src/renderer/components/ui/floatingMenuStyles.ts')), false)
 })

@@ -21,7 +21,7 @@ import { toLocalFileUrl } from '../../../../utils/dragDrop'
 
 export function AttachmentIcon({ attachment, size = 16 }: { attachment: ChatAttachment; size?: number }) {
   const style = { width: size, height: size }
-  const cls = 'text-[var(--text-gray)]'
+  const cls = 'text-[var(--rn-ink-3)]'
   if (attachment.isDirectory) {
     return <Folder style={style} className={cls} strokeWidth={2} />
   }
@@ -91,7 +91,7 @@ export function AttachmentPreviewModal({
       role="presentation"
     >
       <div
-        className="attachment-preview-panel ready-app-liquid-panel"
+        className="attachment-preview-panel ready-app-liquid-panel rn-float"
         onClick={(event) => event.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -134,7 +134,7 @@ export function AttachmentPreviewModal({
         <div className="attachment-preview-content">
           {preview.attachment.source === 'rss-reference' ? <RSSReferencePreview reference={preview.attachment.rssReference} onReveal={onClose} /> : <>
           {loading && (
-            <div style={{ fontSize: 12, color: 'var(--text-gray)' }}>正在读取附件内容…</div>
+            <div style={{ fontSize: 12, color: 'var(--rn-ink-3)' }}>正在读取附件内容…</div>
           )}
 
           {!loading && preview.mode === 'image' && (
@@ -161,9 +161,8 @@ export function AttachmentPreviewModal({
                 wordBreak: 'break-word',
                 fontSize: 12,
                 lineHeight: 1.6,
-                color: 'var(--text-body)',
-                background: 'var(--bg-secondary)',
-                border: '1px solid var(--border-default)',
+                color: 'var(--rn-ink)',
+                border: '1px solid var(--rn-hair-2)',
                 borderRadius: 12,
                 padding: 14
               }}
@@ -176,19 +175,18 @@ export function AttachmentPreviewModal({
             <div
               style={{
                 borderRadius: 12,
-                border: '1px solid var(--border-default)',
-                background: 'var(--bg-secondary)',
+                border: '1px solid var(--rn-hair-2)',
                 padding: 14,
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 8
               }}
             >
-              <div style={{ fontSize: 12, color: 'var(--text-body)' }}>
+              <div style={{ fontSize: 12, color: 'var(--rn-ink)' }}>
                 该附件暂不支持内嵌预览。
               </div>
               {preview.error && (
-                <div style={{ fontSize: 12, color: 'var(--color-red)' }}>{preview.error}</div>
+                <div style={{ fontSize: 12, color: 'var(--rn-bad)' }}>{preview.error}</div>
               )}
             </div>
           )}

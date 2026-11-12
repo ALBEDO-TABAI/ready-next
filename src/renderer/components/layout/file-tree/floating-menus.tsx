@@ -16,6 +16,7 @@ import {
   IconRefresh as RefreshCw,
   IconTrash as Trash2,
   IconWorld as Globe,
+  IconX as X,
 } from '@tabler/icons-react'
 import { useWorkspace, type FileItem } from '../../../stores/useWorkspace'
 import {
@@ -27,10 +28,8 @@ import {
 import { addReadyContextReferenceToAgentInput } from '../../../modules/agent/chat-input-bridge'
 import ContextMenu, { type ContextMenuItem } from '../ContextMenu'
 import type { NativeContextMenuItem } from '../../../../shared/native-context-menu'
-import {
-  buildFloatingMenuItemStyle,
-  buildFloatingMenuSurfaceStyle,
-} from '../../ui/floatingMenuStyles'
+import { IconButton, MenuList, type MenuEntry } from '../../ui'
+import { FloatPanel } from '../../ui/float/FloatPanel'
 import {
   clampDropMenuPositionToBoundary,
   isLikelyVideoDropPayload,
@@ -59,75 +58,36 @@ export interface FileAppearanceColorMenuState {
   item: FileItem
 }
 
-export function FileTreeExternalDropMenu({
-  menu,
-  boundaryRect,
-  onAction,
-  onClose,
-}: {
-  menu: FileTreeExternalDropMenuState
-  boundaryRect: DOMRect | null
-  onAction: (action: FileTreeExternalDropAction) => void
-  onClose: () => void
-}) {
-  const menuRef = useRef<HTMLDivElement>(null)
-  const [adjustedPos, setAdjustedPos] = useState({ x: menu.x, y: menu.y })
-  const portalRoot = typeof document !== 'undefined' ? document.body : null
-  const surfaceStyle = useMemo(
-    () => buildFloatingMenuSurfaceStyle(208, {
-      padding: 6,
-      zIndex: 260,
-    }),
-    [],
-  )
-  const actionItems = useMemo(() => {
-    const items: Array<{
-      id: FileTreeExternalDropAction
-      label: string
-      icon: React.ReactNode
-    }> = [
-      {
-        id: 'web-clip',
-        label: '网页剪藏',
-        icon: <Globe style={{ width: 15, height: 15 }} />,
-      },
-      {
-        id: 'content-study',
-        label: '内容学习',
-        icon: <BookOpen style={{ width: 15, height: 15 }} />,
-      },
-      {
-        id: 'copy-analysis',
-        label: '文案分析',
-        icon: <FileText style={{ width: 15, height: 15 }} />,
-      },
-    ]
-    if (isLikelyVideoDropPayload(menu.payload)) {
-      items.push({
-        id: 'visual-analysis',
-        label: '视觉分析',
-        icon: <Image style={{ width: 15, height: 15 }} />,
-      })
-    }
-    return items
-  }, [menu.payload])
+/**
+ * Places a float the tree opened at a pointer inside the file panel (clamped to the panel when known, else to the
+ * window) and closes it on an outside click, a right click elsewhere or Esc. The float itself is the shared
+ * FloatPanel material (W1 §4–§5), which also makes the native web view step aside beneath it.
+ */
+function useTreeFloatPlacement(
+  point: { x: number; y: number },
+  boundaryRect: DOMRect | null,
+  onClose: () => void,
+  layoutKey: unknown,
+) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [adjustedPos, setAdjustedPos] = useState({ x: point.x, y: point.y })
 
   useLayoutEffect(() => {
-    if (!menuRef.current) return
-    const rect = menuRef.current.getBoundingClientRect()
+    if (!ref.current) return
+    const rect = ref.current.getBoundingClientRect()
     if (!boundaryRect) {
       const maxX = Math.max(8, window.innerWidth - rect.width - 8)
       const maxY = Math.max(8, window.innerHeight - rect.height - 8)
       setAdjustedPos({
-        x: Math.max(8, Math.min(menu.x, maxX)),
-        y: Math.max(8, Math.min(menu.y, maxY)),
+        x: Math.max(8, Math.min(point.x, maxX)),
+        y: Math.max(8, Math.min(point.y, maxY)),
       })
       return
     }
     setAdjustedPos(
       clampDropMenuPositionToBoundary({
-        x: menu.x,
-        y: menu.y,
+        x: point.x,
+        y: point.y,
         menuWidth: rect.width,
         menuHeight: rect.height,
         boundaryLeft: boundaryRect.left,
@@ -138,11 +98,11 @@ export function FileTreeExternalDropMenu({
         viewportHeight: window.innerHeight,
       }),
     )
-  }, [actionItems.length, boundaryRect, menu.x, menu.y])
+  }, [boundaryRect, layoutKey, point.x, point.y])
 
   useEffect(() => {
     const handleClick = (event: MouseEvent) => {
-      if (menuRef.current?.contains(event.target as Node)) return
+      if (ref.current?.contains(event.target as Node)) return
       onClose()
     }
     const handleKey = (event: KeyboardEvent) => {
@@ -163,58 +123,47 @@ export function FileTreeExternalDropMenu({
     }
   }, [onClose])
 
+  const style: React.CSSProperties = { position: 'fixed', left: adjustedPos.x, top: adjustedPos.y }
+  return { ref, style }
+}
+
+export function FileTreeExternalDropMenu({
+  menu,
+  boundaryRect,
+  onAction,
+  onClose,
+}: {
+  menu: FileTreeExternalDropMenuState
+  boundaryRect: DOMRect | null
+  onAction: (action: FileTreeExternalDropAction) => void
+  onClose: () => void
+}) {
+  const portalRoot = typeof document !== 'undefined' ? document.body : null
+  const actionItems = useMemo(() => {
+    const items: Array<{ id: FileTreeExternalDropAction; label: string; icon: React.ReactNode }> = [
+      { id: 'web-clip', label: '网页剪藏', icon: <Globe /> },
+      { id: 'content-study', label: '内容学习', icon: <BookOpen /> },
+      { id: 'copy-analysis', label: '文案分析', icon: <FileText /> },
+    ]
+    if (isLikelyVideoDropPayload(menu.payload)) {
+      items.push({ id: 'visual-analysis', label: '视觉分析', icon: <Image /> })
+    }
+    return items
+  }, [menu.payload])
+  // The shared menu list (keyboard: ↑/↓, Enter); choosing an action hands it to the tree, which closes the menu.
+  const entries = useMemo<MenuEntry[]>(
+    () => actionItems.map((item) => ({ id: item.id, label: item.label, icon: item.icon, onSelect: () => onAction(item.id) })),
+    [actionItems, onAction],
+  )
+  const { ref, style } = useTreeFloatPlacement(menu, boundaryRect, onClose, actionItems.length)
+  useEffect(() => {
+    ref.current?.querySelector<HTMLElement>('[data-autofocus]')?.focus({ preventScroll: true })
+  }, [ref])
+
   const content = (
-    <div
-      data-ready-native-overlay=""
-      ref={menuRef}
-      className="glass-surface-floating ready-floating-menu"
-      style={{
-        ...surfaceStyle,
-        position: 'fixed',
-        left: adjustedPos.x,
-        top: adjustedPos.y,
-      }}
-    >
-      {actionItems.map((item) => (
-        <button
-          key={item.id}
-          type="button"
-          className="ready-floating-menu-item"
-          style={{
-            ...buildFloatingMenuItemStyle({ compact: true }),
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            minHeight: 38,
-          }}
-          onClick={() => onAction(item.id)}
-        >
-          <span
-            style={{
-              width: 16,
-              height: 16,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: 'var(--text-body)',
-              flexShrink: 0,
-            }}
-          >
-            {item.icon}
-          </span>
-          <span
-            style={{
-              fontSize: 13,
-              fontWeight: 600,
-              color: 'var(--text-title)',
-              lineHeight: 1.2,
-            }}
-          >
-            {item.label}
-          </span>
-        </button>
-      ))}
-    </div>
+    <FloatPanel ref={ref} className="rn-ui" style={{ ...style, zIndex: 260 }}>
+      <MenuList items={entries} label="拖入的网页" onDone={() => {}} />
+    </FloatPanel>
   )
 
   return portalRoot ? createPortal(content, portalRoot) : content
@@ -233,78 +182,18 @@ export function FileColorPalette({
   onSetColor: (color: FileAppearanceColor | null) => void
   onClose: () => void
 }) {
-  const menuRef = useRef<HTMLDivElement>(null)
-  const [adjustedPos, setAdjustedPos] = useState({ x: menu.x, y: menu.y })
   const portalRoot = typeof document !== 'undefined' ? document.body : null
+  const { ref, style } = useTreeFloatPlacement(menu, boundaryRect, onClose, null)
 
-  useLayoutEffect(() => {
-    if (!menuRef.current) return
-    const rect = menuRef.current.getBoundingClientRect()
-    if (!boundaryRect) {
-      const maxX = Math.max(8, window.innerWidth - rect.width - 8)
-      const maxY = Math.max(8, window.innerHeight - rect.height - 8)
-      setAdjustedPos({
-        x: Math.max(8, Math.min(menu.x, maxX)),
-        y: Math.max(8, Math.min(menu.y, maxY)),
-      })
-      return
-    }
-    setAdjustedPos(
-      clampDropMenuPositionToBoundary({
-        x: menu.x,
-        y: menu.y,
-        menuWidth: rect.width,
-        menuHeight: rect.height,
-        boundaryLeft: boundaryRect.left,
-        boundaryTop: boundaryRect.top,
-        boundaryRight: boundaryRect.right,
-        boundaryBottom: boundaryRect.bottom,
-        viewportWidth: window.innerWidth,
-        viewportHeight: window.innerHeight,
-      }),
-    )
-  }, [boundaryRect, menu.x, menu.y])
-
-  useEffect(() => {
-    const handleClick = (event: MouseEvent) => {
-      if (menuRef.current?.contains(event.target as Node)) return
-      onClose()
-    }
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-    }
-
-    const timer = window.setTimeout(() => {
-      window.addEventListener('mousedown', handleClick)
-      window.addEventListener('contextmenu', handleClick)
-    }, 0)
-    window.addEventListener('keydown', handleKey)
-
-    return () => {
-      window.clearTimeout(timer)
-      window.removeEventListener('mousedown', handleClick)
-      window.removeEventListener('contextmenu', handleClick)
-      window.removeEventListener('keydown', handleKey)
-    }
-  }, [onClose])
-
+  // A small float of swatches: the colours are the person's own (content palette); the chosen one carries an ink ring.
   const content = (
-    <div
-      data-ready-native-overlay=""
-      ref={menuRef}
-      className="glass-surface-floating ready-floating-menu"
-      style={{
-        ...buildFloatingMenuSurfaceStyle(252, {
-          padding: 8,
-          zIndex: 280,
-        }),
-        position: 'fixed',
-        left: adjustedPos.x,
-        top: adjustedPos.y,
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-      }}
+    <FloatPanel
+      ref={ref}
+      role="group"
+      aria-label="设置颜色"
+      className="rn-ui"
+      style={{ ...style, zIndex: 280 }}
+      contentStyle={{ display: 'flex', alignItems: 'center', gap: 8, padding: 8 }}
       onMouseDown={(event) => event.stopPropagation()}
       onContextMenu={(event) => event.stopPropagation()}
     >
@@ -313,48 +202,32 @@ export function FileColorPalette({
           key={color.key}
           type="button"
           aria-label={color.label}
+          aria-pressed={selectedColor === color.key}
           title={color.label}
           onClick={() => onSetColor(color.key)}
           style={{
             width: 24,
             height: 24,
+            padding: 0,
+            border: 0,
             borderRadius: '50%',
-            border: selectedColor === color.key
-              ? '2px solid var(--text-title)'
-              : '1px solid rgba(255,255,255,0.76)',
             background: color.value,
             boxShadow: selectedColor === color.key
-              ? '0 0 0 2px rgba(255,255,255,0.72), 0 4px 10px rgba(0,0,0,0.18)'
-              : '0 2px 6px rgba(0,0,0,0.16)',
+              ? '0 0 0 2px var(--rn-sheet), 0 0 0 3.5px var(--rn-ink)'
+              : 'inset 0 0 0 1px var(--rn-hair)',
             cursor: 'pointer',
             flexShrink: 0,
           }}
         />
       ))}
-      <button
-        type="button"
-        aria-label="清除颜色"
+      <IconButton
+        size="sm"
         title="清除颜色"
+        icon={<X />}
         onClick={() => onSetColor(null)}
-        style={{
-          width: 24,
-          height: 24,
-          borderRadius: '50%',
-          border: '1px solid var(--border-default)',
-          background: 'var(--files-panel-state-hover-bg)',
-          color: 'var(--text-light)',
-          fontSize: 18,
-          lineHeight: '20px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          cursor: 'pointer',
-          flexShrink: 0,
-        }}
-      >
-        ×
-      </button>
-    </div>
+        style={{ borderRadius: '50%', boxShadow: 'inset 0 0 0 1px var(--rn-hair-2)' }}
+      />
+    </FloatPanel>
   )
 
   return portalRoot ? createPortal(content, portalRoot) : content
@@ -536,8 +409,7 @@ export function ContextMenuBridge({
               height: 13,
               borderRadius: '50%',
               background: appearanceColor ?? 'transparent',
-              border: appearanceColor ? '1px solid rgba(255,255,255,0.78)' : '1px solid var(--text-light)',
-              boxShadow: appearanceColor ? '0 1px 3px rgba(0,0,0,0.16)' : 'none',
+              boxShadow: appearanceColor ? 'none' : 'inset 0 0 0 1px var(--rn-ink-3)',
             }}
           />
         ),

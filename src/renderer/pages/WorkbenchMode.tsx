@@ -7,6 +7,7 @@ import { FastCardShelf } from '../modules/fastcard/FastCardShelf'
 import { useDocTabs } from '../stores/useDocTabs'
 import TopBar from '../components/layout/TopBar'
 import ShellRail from '../modules/workbench/shell/ShellRail'
+import { Button } from '../components/ui'
 import { useShellPresentation } from '../modules/workbench/shell/useShellPresentation'
 import ShellSidebar, { ShellSidebarSlotProvider } from '../modules/workbench/shell/ShellSidebar'
 import WorkbenchModeOutlet from '../components/layout/WorkbenchModeOutlet'
@@ -779,25 +780,11 @@ export default function WorkbenchMode() {
         <div className="relative z-10 flex h-full flex-col">
           {workspaceError && (
             <div
-              className="glass-surface-floating mx-3 mt-2 flex items-center justify-between rounded-[12px] px-3 py-2 text-[12px]"
-              style={{
-                border: '1px solid var(--color-orange)',
-                color: 'var(--text-secondary)',
-                background: 'color-mix(in srgb, var(--surface-floating-bg) 34%, transparent)',
-              }}
+              className="rn-float mx-3 mt-2 flex items-center justify-between px-3 py-2 text-[12px]"
+              style={{ color: 'var(--rn-ink-2)', boxShadow: 'var(--rn-shadow-2), inset 0 0 0 1px color-mix(in srgb, var(--rn-warn) 60%, transparent)' }}
             >
               <span>{workspaceError}</span>
-              <button
-                type="button"
-                onClick={() => void initializeWorkspace()}
-                className="rounded-[8px] px-2 py-1 text-[11px] transition-colors hover:bg-[var(--bg-hover)]"
-                style={{
-                  border: '1px solid transparent',
-                  color: 'var(--text-body)',
-                }}
-              >
-                重试
-              </button>
+              <Button size="sm" variant="ghost" onClick={() => void initializeWorkspace()}>重试</Button>
             </div>
           )}
 
@@ -818,6 +805,7 @@ export default function WorkbenchMode() {
               onSplitToggle={handleWorkbenchSplitToggle}
               assistantOpen={shell.assistantVisible}
               onAssistantOpen={shell.toggleAssistant}
+              sidebarShown={shell.layout.sidebar === 'docked' || shell.sidebarPeek}
             />
             <ShellSidebar
               mode={sidebarSlot.mode}

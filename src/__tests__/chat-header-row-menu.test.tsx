@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createElement } from 'react'
+import { Fragment, createElement } from 'react'
 import { flushSync } from 'react-dom'
 import { createRoot, type Root } from 'react-dom/client'
 import { JSDOM } from 'jsdom'
@@ -84,6 +84,8 @@ process.on('exit', () => {
 
 const ChatHeaderModule = await import('../renderer/components/agent/ChatHeader')
 const ChatHeader = ChatHeaderModule.default
+// The operation menu (openMenu) and the rename / delete dialogs render in the app's one float host.
+const { FloatHost } = await import('../renderer/components/ui')
 
 const localChannel = {
   key: 'local:app',
@@ -123,7 +125,7 @@ function mountChatHeader(
   host.appendChild(container)
   const root = createRoot(container)
   flushSync(() => {
-    root.render(createElement(ChatHeader, {
+    root.render(createElement(Fragment, null, createElement(FloatHost), createElement(ChatHeader, {
       currentChannel: localChannel,
       channelOptions: [localChannel],
       // Empty query → the expanded list renders this channel's live sessions.
@@ -145,7 +147,7 @@ function mountChatHeader(
       sessionTitle: '当前会话',
       formatTime: () => '刚刚',
       ...overrides,
-    }))
+    })))
   })
   return {
     root,
@@ -190,7 +192,7 @@ test('both history entry points and row actions stay inside the chat pane after 
   try {
     for (const trigger of [scope, title]) {
       click(trigger)
-      const history = document.querySelector('input')!.closest<HTMLElement>('.chat-header-floating-menu')!
+      const history = document.querySelector('input')!.closest<HTMLElement>('[data-chat-header-menu]')!
       assert.ok(history)
       assertContained(history)
       paneLeft = 784
@@ -199,9 +201,9 @@ test('both history entry points and row actions stay inside the chat pane after 
       const rowTrigger = document.querySelector<HTMLButtonElement>('[aria-label="更多操作"]')!
       rowTrigger.getBoundingClientRect = () => rect(830, 180, 20, 20)
       click(rowTrigger)
-      assertContained(findButtonByText('重命名')!.closest<HTMLElement>('.chat-header-floating-menu')!)
+      assertContained(findButtonByText('重命名')!.closest<HTMLElement>('[data-chat-header-menu]')!)
       click(trigger)
-      assert.equal(document.querySelector('.chat-header-floating-menu'), null)
+      assert.equal(document.querySelector('[data-chat-header-menu]'), null)
       paneLeft = 704
     }
   } finally { unmount() }
@@ -232,6 +234,90 @@ test('chat header row menu stays open when the history panel scrolls and can ope
     click(renameButton)
 
     assert.match(document.body.textContent ?? '', /为这个会话取一个新名称/)
+  } finally {
+    unmount()
+  }
+})
+
+test('row rename and delete go through the shared dialog and reach the callbacks', async () => {
+  const renamed: Array<[string, string]> = []
+  const deleted: string[] = []
+  const { unmount } = mountChatHeader({
+    onRenameConversation: (id, title) => { renamed.push([id, title]) },
+    onDeleteConversation: (id) => { deleted.push(id) },
+  })
+  const openRowMenu = () => {
+    click(document.querySelector('button[title="会话来源"]')!)
+    click(document.querySelector('button[aria-label="更多操作"]')!)
+  }
+  try {
+    openRowMenu()
+    click(findButtonByText('重命名')!)
+    const input = document.querySelector<HTMLInputElement>('[role="dialog"] input[aria-label="会话名称"]')
+    assert.ok(input, 'the rename dialog carries a name field')
+    assert.equal(input.value, '测试会话')
+    flushSync(() => {
+      const setValue = Object.getOwnPropertyDescriptor(domHandle.dom.window.HTMLInputElement.prototype, 'value')!.set!
+      setValue.call(input, '  新名字  ')
+      input.dispatchEvent(new domHandle.dom.window.Event('input', { bubbles: true }))
+      // react-dom loads before this file installs the DOM, so it reads text edits through its keyup fallback.
+      input.dispatchEvent(new domHandle.dom.window.KeyboardEvent('keyup', { key: 'a', bubbles: true }))
+    })
+    click(findButtonByText('保存')!)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    assert.deepEqual(renamed, [['conv-1', '新名字']])
+    assert.equal(document.querySelector('[role="dialog"]'), null)
+
+    openRowMenu()
+    click(findButtonByText('删除')!)
+    assert.match(document.querySelector('[role="dialog"]')?.textContent ?? '', /确定删除会话 "测试会话" 吗？此操作不可撤销。/)
+    click(findButtonByText('删除')!)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    assert.deepEqual(deleted, ['conv-1'])
+  } finally {
+    unmount()
+  }
+})
+
+test('chat header menus and dialogs are the shared float primitives (W1 DL4)', async () => {
+  const { unmount } = mountChatHeader({
+    currentConversationAvailable: true,
+    lifecyclePendingAction: null,
+    lifecycleUncertainty: null,
+    lifecycleActions: {
+      stop: { availability: 'not_applicable', blockers: ['no_active_operation'], requestRef: null },
+      reset: { availability: 'ready', blockers: [], requestRef: null },
+      close: { availability: 'ready', blockers: [], requestRef: null },
+      manual_compact: { availability: 'ready', blockers: [], requestRef: null },
+    },
+  })
+  try {
+    // The operation menu is openMenu in the one float host; a second click on its trigger closes it.
+    const operations = document.querySelector<HTMLButtonElement>('button[title="当前对话操作"]')!
+    click(operations)
+    const operationMenu = document.querySelector('[data-float-id="chat-header-operations"]')
+    assert.ok(operationMenu?.classList.contains('rn-float'))
+    assert.ok(operationMenu?.querySelector('[role="menu"].rn-menu'))
+    click(operations)
+    assert.equal(document.querySelector('[data-float-id="chat-header-operations"]'), null)
+
+    // The history menu sits on the float material; its row menu is the shared MenuList.
+    click(document.querySelector('button[title="会话来源"]')!)
+    assert.ok(document.querySelector('[data-chat-header-menu="history"]')?.classList.contains('rn-float'))
+    click(document.querySelector('button[aria-label="更多操作"]')!)
+    const rowMenu = document.querySelector('[data-chat-header-menu="row"]')
+    assert.ok(rowMenu?.classList.contains('rn-float'))
+    assert.deepEqual([...rowMenu!.querySelectorAll('[role="menuitem"]')].map((item) => item.textContent), ['重命名', '删除'])
+    assert.equal(rowMenu!.querySelector('[role="menuitem"]:last-child')?.getAttribute('data-danger'), 'true')
+
+    // Delete asks through the shared confirm dialog.
+    click(findButtonByText('删除')!)
+    const dialog = document.querySelector('[role="dialog"]')
+    assert.ok(dialog?.classList.contains('rn-dialog'))
+    assert.equal(dialog?.getAttribute('aria-modal'), 'true')
+    click(findButtonByText('取消')!)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    assert.equal(document.querySelector('[role="dialog"]'), null)
   } finally {
     unmount()
   }
@@ -282,11 +368,14 @@ test('compaction uncertainty keeps reset available while disabling another compa
     assert.equal((operationButton as HTMLButtonElement).disabled, false)
     click(operationButton)
 
+    // The shared menu marks an unavailable item aria-disabled and ignores it.
     const resetButton = findButtonByText('重置当前对话')
     const compactButton = findButtonByText('压缩上下文')
     assert.ok(resetButton)
     assert.ok(compactButton)
-    assert.equal(compactButton.disabled, true)
+    assert.equal(compactButton.getAttribute('aria-disabled'), 'true')
+    click(compactButton)
+    assert.equal(compactCalls, 0)
     click(resetButton)
     assert.equal(resetCalls, 1)
     assert.equal(compactCalls, 0)

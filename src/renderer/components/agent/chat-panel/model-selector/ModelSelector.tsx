@@ -7,7 +7,7 @@ import {
   listChatSwitcherProfiles,
   getProviderDef,
 } from '../../../../stores/useSettings'
-import { chatMenuItemStyle, chatMenuSurfaceStyle } from '../../chatMenuStyles'
+import { CHAT_MENU_ITEM_CLASS, chatMenuItemStyle, chatMenuSurfaceStyle } from '../../chatMenuStyles'
 import { FloatPanel } from '../../../ui/float/FloatPanel'
 
 interface ModelMenuFrame {
@@ -153,7 +153,7 @@ export default function ModelSelector() {
       <div
         style={{
           fontSize: 10,
-          color: 'var(--text-light)',
+          color: 'var(--rn-ink-3)',
           padding: '2px 8px',
           marginBottom: 4
         }}
@@ -161,17 +161,18 @@ export default function ModelSelector() {
         当前模型
       </div>
       <div
-        className="ready-floating-menu-item is-selected"
+        className={CHAT_MENU_ITEM_CLASS}
+        data-highlighted="true"
         style={{
           ...chatMenuItemStyle,
           cursor: 'default',
           textAlign: 'left',
         }}
       >
-        <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-body)' }}>
+        <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--rn-ink)' }}>
           {getShortModelLabel()}
         </div>
-        <div style={{ fontSize: 10, color: 'var(--text-light)', marginTop: 2 }}>
+        <div style={{ fontSize: 10, color: 'var(--rn-ink-3)', marginTop: 2 }}>
           {resolveHost(config.baseUrl)}
         </div>
       </div>
@@ -181,7 +182,7 @@ export default function ModelSelector() {
           <div
             style={{
               fontSize: 10,
-              color: 'var(--text-light)',
+              color: 'var(--rn-ink-3)',
               padding: '2px 8px',
               marginBottom: 4,
             }}
@@ -189,20 +190,22 @@ export default function ModelSelector() {
             当前使用中
           </div>
           <button
+            type="button"
             onClick={() => {
               activateProfile(currentHiddenProfile.id)
               setOpen(false)
             }}
-            className="ready-floating-menu-item is-selected w-full text-left transition-colors"
+            className={CHAT_MENU_ITEM_CLASS}
+            data-highlighted="true"
             style={{
               ...chatMenuItemStyle,
               textAlign: 'left',
             }}
           >
-            <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-body)' }}>
+            <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--rn-ink)' }}>
               {currentHiddenProfile.name}
             </div>
-            <div style={{ fontSize: 10, color: 'var(--text-light)', marginTop: 2 }}>
+            <div style={{ fontSize: 10, color: 'var(--rn-ink-3)', marginTop: 2 }}>
               {getShortModelLabel(currentHiddenProfile.id)}
             </div>
           </button>
@@ -214,7 +217,7 @@ export default function ModelSelector() {
           <div
             style={{
               fontSize: 10,
-              color: 'var(--text-light)',
+              color: 'var(--rn-ink-3)',
               padding: '2px 8px',
               marginBottom: 4,
             }}
@@ -231,21 +234,23 @@ export default function ModelSelector() {
               return (
                 <div key={profile.id} className="flex flex-col gap-1">
                   <button
+                    type="button"
                     onClick={() => {
                       activateProfile(profile.id)
                       setOpen(false)
                     }}
-                    className={`ready-floating-menu-item w-full text-left transition-colors ${isActiveProfile ? 'is-selected' : ''}`}
+                    className={CHAT_MENU_ITEM_CLASS}
+                    data-highlighted={isActiveProfile || undefined}
                     style={{
                       ...chatMenuItemStyle,
                       textAlign: 'left',
                     }}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-body)' }}>{profile.name}</span>
+                      <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--rn-ink)' }}>{profile.name}</span>
                       <div className="flex items-center gap-2">
                         {isActiveProfile && (
-                          <span style={{ fontSize: 10, color: 'var(--color-blue)' }}>当前</span>
+                          <span style={{ fontSize: 10, color: 'var(--rn-ink-2)' }}>当前</span>
                         )}
                         {hasMulti && (
                           <span
@@ -260,14 +265,13 @@ export default function ModelSelector() {
                                 return next
                               })
                             }}
-                            className="ready-floating-menu-item"
+                            className="bg-transparent transition-colors hover:bg-[var(--rn-fill-3)]"
                             style={{
                               display: 'inline-flex',
                               alignItems: 'center',
                               padding: 2,
                               borderRadius: 4,
                               border: '1px solid transparent',
-                              background: 'transparent',
                               cursor: 'pointer',
                             }}
                           >
@@ -278,13 +282,13 @@ export default function ModelSelector() {
                                 transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
                                 transition: 'transform 180ms ease',
                               }}
-                              className="text-[var(--text-light)]"
+                              className="text-[var(--rn-ink-3)]"
                             />
                           </span>
                         )}
                       </div>
                     </div>
-                    <div style={{ fontSize: 10, color: 'var(--text-light)', marginTop: 2 }}>
+                    <div style={{ fontSize: 10, color: 'var(--rn-ink-3)', marginTop: 2 }}>
                       {getShortModelLabel(profile.id)}
                     </div>
                   </button>
@@ -295,7 +299,7 @@ export default function ModelSelector() {
                       style={{
                         marginLeft: 12,
                         paddingLeft: 8,
-                        borderLeft: '1px solid var(--border-default)',
+                        borderLeft: '1px solid var(--rn-hair-2)',
                         gap: 2,
                       }}
                     >
@@ -305,10 +309,12 @@ export default function ModelSelector() {
                         return (
                           <button
                             key={modelId}
+                            type="button"
                             onClick={() => {
                               activateProfileWithModel(profile.id, modelId)
                             }}
-                            className={`ready-floating-menu-item w-full text-left transition-colors ${isActiveModel ? 'is-selected' : ''}`}
+                            className={CHAT_MENU_ITEM_CLASS}
+                            data-highlighted={isActiveModel || undefined}
                             style={{
                               ...chatMenuItemStyle,
                               padding: '6px 10px',
@@ -320,13 +326,13 @@ export default function ModelSelector() {
                                 style={{
                                   fontSize: 11,
                                   fontWeight: isActiveModel ? 500 : 400,
-                                  color: isActiveModel ? 'var(--color-blue)' : 'var(--text-body)',
+                                  color: 'var(--rn-ink)',
                                 }}
                               >
                                 {modelLabel}
                               </span>
                               {isActiveModel && (
-                                <span style={{ fontSize: 10, color: 'var(--color-blue)' }}>当前</span>
+                                <span style={{ fontSize: 10, color: 'var(--rn-ink-2)' }}>当前</span>
                               )}
                             </div>
                           </button>
@@ -343,23 +349,24 @@ export default function ModelSelector() {
 
       {!hasKey && (
         <div
-          style={{ fontSize: 10, color: 'var(--color-red)', padding: '4px 8px', marginTop: 4 }}
+          style={{ fontSize: 10, color: 'var(--rn-bad)', padding: '4px 8px', marginTop: 4 }}
         >
           未配置 API Key，请前往设置页配置
         </div>
       )}
 
       <button
+        type="button"
         onClick={() => {
           navigate('/settings?section=ai')
           setOpen(false)
         }}
-        className="ready-floating-menu-item w-full flex items-center justify-center gap-2 transition-colors"
+        className={`${CHAT_MENU_ITEM_CLASS} flex items-center justify-center gap-2`}
         style={{
           ...chatMenuItemStyle,
           marginTop: 8,
           fontSize: 11,
-          color: 'var(--text-muted)',
+          color: 'var(--rn-ink-2)',
         }}
       >
         <Wrench style={{ width: 12, height: 12 }} strokeWidth={2} />
@@ -371,6 +378,7 @@ export default function ModelSelector() {
   return (
     <div className="relative" ref={ref}>
       <button
+        type="button"
         onClick={() => {
           if (open) {
             setOpen(false)
@@ -390,9 +398,9 @@ export default function ModelSelector() {
       >
         <span
           className="w-1.5 h-1.5 rounded-full"
-          style={{ background: hasKey ? 'var(--color-green)' : 'var(--color-red)' }}
+          style={{ background: hasKey ? 'var(--rn-ok)' : 'var(--rn-bad)' }}
         />
-        <span style={{ fontSize: 11, color: 'var(--text-gray)' }}>{label}</span>
+        <span style={{ fontSize: 11, color: 'var(--rn-liquid-ink-2)' }}>{label}</span>
         <ChevronDown
           style={{
             width: 10,
@@ -400,7 +408,7 @@ export default function ModelSelector() {
             transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
             transition: 'transform 200ms ease'
           }}
-          className="text-[var(--text-light)]"
+          className="text-[var(--rn-liquid-ink-3)]"
         />
       </button>
 

@@ -450,11 +450,11 @@ export function renderInline(
         <code
           key={`ic-${key++}`}
           style={{
-            background: 'var(--bg-code)',
+            background: 'var(--rn-fill)',
             padding: '1px 5px',
             borderRadius: 4,
             fontSize: '0.9em',
-            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace'
+            fontFamily: 'var(--rn-font-mono)'
           }}
         >
           {match[2]}
@@ -609,7 +609,7 @@ export function MarkdownContent({
                   gap: 6,
                 }}
               >
-                <span style={{ flexShrink: 0, color: 'var(--text-gray)' }}>&bull;</span>
+                <span style={{ flexShrink: 0, color: 'var(--rn-ink-3)' }}>&bull;</span>
                 <span>
                   {renderInline(node.content, mentions)}
                   <StreamCaret visible={showCaret} />

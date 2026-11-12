@@ -18,6 +18,7 @@ import type {
   FileEmergenceProject,
 } from '../../../shared/file-emergence'
 import type { FileEmergenceBucketView, FileEmergenceViewModel } from './fileEmergenceViewModel'
+import { Button, IconButton, Input, Select } from '../ui'
 
 interface FileEmergenceSectionProps {
   viewModel: FileEmergenceViewModel
@@ -28,6 +29,15 @@ interface FileEmergenceSectionProps {
 }
 
 const EMERGENCE_UI_STATE_STORAGE_KEY = 'ready:file-emergence:ui-state:v1'
+
+// Rows read like the navigator's ListRow (W1 §5): hover is a quiet fill; the selected row is the current place
+// (DL5), so it takes the signal colour's soft fill and its text and icon take the accent text colour. An
+// unselected row sets no inline background, so the hover class can show.
+const ROW_HOVER = 'hover:bg-[var(--rn-fill)]'
+const rowStyle = (selected: boolean) => (selected ? { background: 'var(--rn-accent-soft)' } : undefined)
+const rowInk = (selected: boolean, ink: string) => (selected ? 'var(--rn-accent-text)' : ink)
+// Keys on a control inside a row stay with the control; the row's own Enter/Space must not fire as well.
+const keepKeys = (event: { stopPropagation: () => void }) => event.stopPropagation()
 
 const EMPTY_STATE_LABELS: Record<NonNullable<FileEmergenceViewModel['emptyState']>, string> = {
   no_trusted_candidates: '暂时没有足够可信的项目',
@@ -225,7 +235,7 @@ export default function FileEmergenceSection({
         aria-hidden="true"
         className="pointer-events-none absolute bottom-0 left-[10%] h-px w-[80%]"
         style={{
-          background: 'color-mix(in srgb, var(--text-muted) 22%, transparent)',
+          background: 'var(--rn-hair-2)',
           transform: 'scaleY(0.55)',
           transformOrigin: 'center bottom',
         }}
@@ -235,47 +245,39 @@ export default function FileEmergenceSection({
       >
         <div className="col-span-3 flex min-w-0 items-center gap-1.5">
           <span className="relative flex h-[18px] w-[18px] shrink-0 items-center justify-start">
-            <Folder className="h-[16px] w-[16px]" style={{ color: 'var(--text-title)' }} strokeWidth={1.75} />
-            <Sparkles className="absolute left-[1px] -bottom-[1px] h-[9px] w-[9px]" style={{ color: 'var(--text-title)' }} strokeWidth={1.9} />
+            <Folder className="h-[16px] w-[16px]" style={{ color: 'var(--rn-ink)' }} strokeWidth={1.75} />
+            <Sparkles className="absolute left-[1px] -bottom-[1px] h-[9px] w-[9px]" style={{ color: 'var(--rn-ink)' }} strokeWidth={1.9} />
           </span>
-          <span className="text-[13px] font-semibold leading-none" style={{ color: 'var(--text-title)' }}>
+          <span className="text-[13px] font-semibold leading-none" style={{ color: 'var(--rn-ink)' }}>
             涌现
           </span>
           <span
             className="inline-flex h-[22px] min-w-[18px] items-center justify-center px-1 text-[12px]"
             style={{
-              color: 'var(--text-muted)',
+              color: 'var(--rn-ink-2)',
             }}
           >
             {viewModel.totalProjects}
           </span>
         </div>
-        <button
-          type="button"
+        <IconButton
           onClick={onRefresh}
           disabled={isRefreshing}
-          aria-label="重新涌现"
+          active={isRefreshing}
+          aria-busy={isRefreshing || undefined}
           title="重新涌现"
-          className="flex h-7 w-7 justify-self-center items-center justify-center rounded-[8px] transition-[background-color,box-shadow] hover:bg-[var(--files-panel-state-hover-bg)] hover:shadow-[var(--files-panel-state-hover-shadow)]"
-          style={{
-            color: 'var(--text-muted)',
-            background: isRefreshing ? 'var(--files-panel-state-active-bg)' : 'transparent',
-            boxShadow: isRefreshing ? 'var(--files-panel-state-active-shadow)' : 'none',
-            cursor: isRefreshing ? 'default' : 'pointer',
-            opacity: isRefreshing ? 1 : 0.72,
-          }}
-        >
-          {isRefreshing
-            ? <Loader2 className="h-[14px] w-[14px] animate-spin" />
-            : <RefreshCw className="h-[14px] w-[14px]" />}
-        </button>
+          className="justify-self-center"
+          icon={isRefreshing
+            ? <Loader2 className="animate-spin" aria-hidden="true" />
+            : <RefreshCw aria-hidden="true" />}
+        />
       </div>
 
       {/* 分桶行不再叠 wrapper inset：行自身 px-2 提供 8px 内容缩进，
           与 FileTreeItem（padding 6px 8px）同缘，hover 药丸同样通到左缘。 */}
       <div className="mt-1 space-y-1">
         {identityError ? (
-          <div className="mx-2 px-2 py-1 text-[11px]" data-file-emergence-identity-error style={{ color: 'var(--color-danger, #c94b40)' }}>
+          <div className="mx-2 px-2 py-1 text-[11px]" data-file-emergence-identity-error style={{ color: 'var(--rn-bad)' }}>
             {identityError}
           </div>
         ) : null}
@@ -283,7 +285,7 @@ export default function FileEmergenceSection({
           <div
             className="mx-2 rounded-[8px] px-2 py-2 text-[12px]"
             data-file-emergence-empty-state={viewModel.emptyState}
-            style={{ color: 'var(--text-light)' }}
+            style={{ color: 'var(--rn-ink-3)' }}
           >
             {EMPTY_STATE_LABELS[viewModel.emptyState]}
             {viewModel.emptyState === 'all_suppressed' && suppressedProjects.length > 0 ? (
@@ -291,7 +293,7 @@ export default function FileEmergenceSection({
                 {suppressedProjects.map((project) => (
                   <div key={project.projectKey} className="flex items-center justify-between gap-2">
                     <span className="min-w-0 truncate">{project.displayName}</span>
-                    <button type="button" className="shrink-0 underline" onClick={() => { void restoreProject(project.projectKey) }} aria-label={`恢复项目 ${project.displayName}`}>恢复</button>
+                    <Button variant="ghost" size="sm" className="shrink-0" onClick={() => { void restoreProject(project.projectKey) }} aria-label={`恢复项目 ${project.displayName}`}>恢复</Button>
                   </div>
                 ))}
               </div>
@@ -308,35 +310,28 @@ export default function FileEmergenceSection({
               <button
                 type="button"
                 onClick={() => toggleBucket(bucket.bucket)}
-                className="grid min-h-[30px] w-full grid-cols-[22px_82px_minmax(0,1fr)_24px] items-center gap-1.5 rounded-[8px] px-2 py-1 text-left transition-[background-color,box-shadow] hover:bg-[var(--files-panel-state-hover-bg)] hover:shadow-[var(--files-panel-state-hover-shadow)]"
+                className={`grid min-h-[30px] w-full grid-cols-[22px_82px_minmax(0,1fr)_24px] items-center gap-1.5 rounded-[8px] px-2 py-1 text-left transition-[background-color] ${ROW_HOVER}`}
                 aria-expanded={isBucketOpen}
                 data-file-emergence-bucket={bucket.bucket}
                 data-selected={isBucketSelected ? 'true' : undefined}
-                style={{
-                  background: isBucketSelected
-                    ? 'var(--files-panel-state-active-bg)'
-                    : 'transparent',
-                  boxShadow: isBucketSelected
-                    ? 'var(--files-panel-state-active-shadow)'
-                    : 'none',
-                }}
+                style={rowStyle(isBucketSelected)}
               >
                 {isBucketOpen
-                  ? <ChevronDown className="h-[14px] w-[14px] shrink-0" style={{ color: 'var(--text-title)' }} strokeWidth={1.9} />
-                  : <ChevronRight className="h-[14px] w-[14px] shrink-0" style={{ color: 'var(--text-muted)' }} strokeWidth={1.8} />}
+                  ? <ChevronDown className="h-[14px] w-[14px] shrink-0" style={{ color: rowInk(isBucketSelected, 'var(--rn-ink)') }} strokeWidth={1.9} />
+                  : <ChevronRight className="h-[14px] w-[14px] shrink-0" style={{ color: rowInk(isBucketSelected, 'var(--rn-ink-2)') }} strokeWidth={1.8} />}
                 <span
                   className="text-[13px] font-medium leading-none"
-                  style={{ color: 'var(--text-title)' }}
+                  style={{ color: rowInk(isBucketSelected, 'var(--rn-ink)') }}
                 >
                   {bucket.label}
                 </span>
-                <span className="min-w-0 truncate text-[12px]" style={{ color: 'var(--text-light)' }}>
+                <span className="min-w-0 truncate text-[12px]" style={{ color: 'var(--rn-ink-3)' }}>
                   {bucketSummary}
                 </span>
                 <span
                   className="inline-flex h-[24px] min-w-[18px] justify-self-end items-center justify-center px-1 text-[12px]"
                   style={{
-                    color: 'var(--text-muted)',
+                    color: 'var(--rn-ink-2)',
                   }}
                 >
                   {bucket.projects.length}
@@ -345,7 +340,7 @@ export default function FileEmergenceSection({
               {isBucketOpen && (
                 <div className="mt-1 space-y-1">
                   {bucket.projects.length === 0 ? (
-                    <div className="ml-[118px] rounded-[8px] px-1.5 py-1 text-[12px]" style={{ color: 'var(--text-light)' }}>
+                    <div className="ml-[118px] rounded-[8px] px-1.5 py-1 text-[12px]" style={{ color: 'var(--rn-ink-3)' }}>
                       暂无项目
                     </div>
                   ) : bucket.projects.map((project) => {
@@ -362,21 +357,18 @@ export default function FileEmergenceSection({
                           onKeyDown={(event) => {
                             if (event.key === 'Enter' || event.key === ' ') toggleProject(project.id)
                           }}
-                          className="grid min-h-[28px] w-full grid-cols-[22px_14px_minmax(0,1fr)_auto_20px] items-center gap-1.5 rounded-[8px] px-2 py-0.5 text-left transition-[background-color,box-shadow] hover:bg-[var(--files-panel-state-hover-bg)] hover:shadow-[var(--files-panel-state-hover-shadow)]"
+                          className={`grid min-h-[28px] w-full grid-cols-[22px_14px_minmax(0,1fr)_auto_20px] items-center gap-1.5 rounded-[8px] px-2 py-0.5 text-left transition-[background-color] ${ROW_HOVER}`}
                           title={project.evidence.map((item) => item.label).slice(0, 3).join(' · ')}
                           aria-expanded={isProjectOpen}
                           data-file-emergence-project={project.id}
                           data-selected={isProjectSelected ? 'true' : undefined}
-                          style={{
-                            background: isProjectSelected ? 'var(--files-panel-state-active-bg)' : 'transparent',
-                            boxShadow: isProjectSelected ? 'var(--files-panel-state-active-shadow)' : 'none',
-                          }}
+                          style={rowStyle(isProjectSelected)}
                         >
                           <span aria-hidden="true" />
-                          <Folder className="h-[14px] w-[14px] shrink-0" style={{ color: 'var(--text-muted)' }} strokeWidth={1.9} />
+                          <Folder className="h-[14px] w-[14px] shrink-0" style={{ color: rowInk(isProjectSelected, 'var(--rn-ink-2)') }} strokeWidth={1.9} />
                           {editingProjectKey && editingProjectKey === project.projectKey ? (
-                            <span className="flex min-w-0 items-center gap-1" onClick={(event) => event.stopPropagation()}>
-                              <input
+                            <span className="flex min-w-0 items-center gap-1" onClick={(event) => event.stopPropagation()} onKeyDown={keepKeys}>
+                              <Input
                                 defaultValue={project.title}
                                 ref={projectNameInputRef}
                                 onKeyDown={(event) => {
@@ -384,30 +376,31 @@ export default function FileEmergenceSection({
                                   if (event.key === 'Escape') setEditingProjectKey(null)
                                 }}
                                 aria-label="项目名称"
-                                className="min-w-0 flex-1 rounded px-1 py-0.5 text-[12px]"
+                                className="min-w-0 flex-1"
+                                style={{ height: 24, padding: '0 6px', fontSize: 'var(--rn-fs-sm)' }}
                               />
-                              <button type="button" aria-label="确认项目名称" onClick={() => { void submitProjectRename() }}><Check className="h-3 w-3" /></button>
-                              <button type="button" aria-label="取消项目重命名" onClick={() => setEditingProjectKey(null)}><X className="h-3 w-3" /></button>
+                              <IconButton size="sm" title="确认项目名称" icon={<Check aria-hidden="true" />} onClick={() => { void submitProjectRename() }} />
+                              <IconButton size="sm" title="取消项目重命名" icon={<X aria-hidden="true" />} onClick={() => setEditingProjectKey(null)} />
                             </span>
                           ) : (
                             <span className="flex min-w-0 items-center gap-1">
-                              <span className="min-w-0 flex-1 truncate text-[12px] font-medium" style={{ color: 'var(--text-title)' }}>
+                              <span className="min-w-0 flex-1 truncate text-[12px] font-medium" style={{ color: rowInk(isProjectSelected, 'var(--rn-ink)') }}>
                                 {project.title}
                               </span>
                               {project.projectKey ? (
-                                <button
-                                  type="button"
-                                  aria-label={`重命名项目 ${project.title}`}
+                                <IconButton
+                                  size="sm"
+                                  title={`重命名项目 ${project.title}`}
+                                  icon={<Pencil aria-hidden="true" />}
                                   onClick={(event) => { event.stopPropagation(); beginRenameProject(project) }}
-                                  className="shrink-0 opacity-55 hover:opacity-100"
-                                >
-                                  <Pencil className="h-3 w-3" />
-                                </button>
+                                  onKeyDown={keepKeys}
+                                  className="shrink-0"
+                                />
                               ) : null}
                             </span>
                           )}
                           {statusMeta ? (
-                            <span className="flex shrink-0 items-center gap-1 text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                            <span className="flex shrink-0 items-center gap-1 text-[11px]" style={{ color: 'var(--rn-ink-2)' }}>
                               <span
                                 className="h-[6px] w-[6px] rounded-full"
                                 style={{ background: statusMeta.color }}
@@ -418,7 +411,7 @@ export default function FileEmergenceSection({
                           <span
                             className="inline-flex h-[22px] min-w-[16px] shrink-0 items-center justify-center px-1 text-[11px]"
                             style={{
-                              color: 'var(--text-muted)',
+                              color: 'var(--rn-ink-2)',
                             }}
                           >
                             {project.files.length}
@@ -427,13 +420,15 @@ export default function FileEmergenceSection({
                         {isProjectOpen && project.files.length > 0 && (
                           <div className="mt-0.5 space-y-0.5">
                             {project.projectKey ? (
-                              <div className="ml-[56px] flex flex-wrap gap-2 py-1 text-[11px]" data-file-emergence-feedback={project.projectKey}>
-                                <button type="button" onClick={() => { void submitProjectFeedback(project, 'not_related') }}>不相关</button>
-                                <button type="button" onClick={() => { void submitProjectFeedback(project, 'snooze') }}>七天后提醒</button>
-                                <button type="button" onClick={() => { void submitProjectFeedback(project, 'hide') }}>不再出现</button>
+                              <div className="ml-[56px] flex flex-wrap gap-1 py-1" data-file-emergence-feedback={project.projectKey}>
+                                <Button variant="ghost" size="sm" onClick={() => { void submitProjectFeedback(project, 'not_related') }}>不相关</Button>
+                                <Button variant="ghost" size="sm" onClick={() => { void submitProjectFeedback(project, 'snooze') }}>七天后提醒</Button>
+                                <Button variant="ghost" size="sm" onClick={() => { void submitProjectFeedback(project, 'hide') }}>不再出现</Button>
                               </div>
                             ) : null}
-                            {project.files.map((file) => (
+                            {project.files.map((file) => {
+                              const isFileSelected = uiState.selectedItemKey === getFileSelectionKey(file.path)
+                              return (
                               <div
                                 key={file.path}
                                 role="button"
@@ -442,53 +437,49 @@ export default function FileEmergenceSection({
                                 onKeyDown={(event) => {
                                   if (event.key === 'Enter' || event.key === ' ') openEmergenceFile(file.path, project)
                                 }}
-                                className="grid min-h-[24px] w-full grid-cols-[42px_12px_minmax(0,1fr)_18px] items-center gap-1.5 rounded-[8px] px-2 py-0.5 text-left transition-[background-color,box-shadow] hover:bg-[var(--files-panel-state-hover-bg)] hover:shadow-[var(--files-panel-state-hover-shadow)]"
+                                className={`grid min-h-[24px] w-full grid-cols-[42px_12px_minmax(0,1fr)_24px] items-center gap-1.5 rounded-[8px] px-2 py-0.5 text-left transition-[background-color] ${ROW_HOVER}`}
                                 title={file.path}
                                 data-file-emergence-file={file.path}
-                                data-selected={uiState.selectedItemKey === getFileSelectionKey(file.path) ? 'true' : undefined}
-                                style={{
-                                  background: uiState.selectedItemKey === getFileSelectionKey(file.path) ? 'var(--files-panel-state-active-bg)' : 'transparent',
-                                  boxShadow: uiState.selectedItemKey === getFileSelectionKey(file.path) ? 'var(--files-panel-state-active-shadow)' : 'none',
-                                }}
+                                data-selected={isFileSelected ? 'true' : undefined}
+                                style={rowStyle(isFileSelected)}
                               >
                                 <span aria-hidden="true" />
-                                <FileText className="h-[12px] w-[12px] shrink-0" style={{ color: file.isCurrent ? 'var(--color-ready-orange)' : 'var(--text-muted)' }} strokeWidth={1.65} />
-                                <span className="min-w-0 flex-1 truncate text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                                {/* The file open right now carries the signal colour (DL5). */}
+                                <FileText className="h-[12px] w-[12px] shrink-0" style={{ color: file.isCurrent ? 'var(--rn-accent)' : rowInk(isFileSelected, 'var(--rn-ink-2)') }} strokeWidth={1.65} />
+                                <span className="min-w-0 flex-1 truncate text-[12px]" style={{ color: rowInk(isFileSelected, 'var(--rn-ink-2)') }}>
                                   {file.name}{file.isCurrent ? ' · 当前' : ''}
                                 </span>
                                 {file.fileKey && allProjects.length > 1 ? (
-                                  <span
-                                    role="button"
-                                    tabIndex={0}
-                                    aria-label={`调整 ${file.name} 的项目归属`}
+                                  <IconButton
+                                    size="sm"
+                                    title={`调整 ${file.name} 的项目归属`}
+                                    icon={<SwitchHorizontal aria-hidden="true" />}
                                     onClick={(event) => { event.stopPropagation(); setAssigningPath(file.path) }}
-                                    onKeyDown={(event) => {
-                                      if (event.key === 'Enter' || event.key === ' ') setAssigningPath(file.path)
-                                    }}
-                                  >
-                                    <SwitchHorizontal className="h-3 w-3" />
-                                  </span>
+                                    onKeyDown={keepKeys}
+                                  />
                                 ) : <span aria-hidden="true" />}
                               </div>
-                            ))}
+                              )
+                            })}
                             {assigningPath && project.files.some((file) => file.path === assigningPath) ? (
-                              <select
-                                aria-label="选择目标项目"
-                                value={project.projectKey || ''}
-                                onChange={(event) => { void assignFileToProject(assigningPath, event.target.value) }}
-                                className="ml-[56px] max-w-[calc(100%-64px)] rounded px-1 py-0.5 text-[11px]"
-                              >
-                                {allProjects.map((candidate) => (
-                                  <option key={candidate.projectKey} value={candidate.projectKey}>{candidate.title}</option>
-                                ))}
-                                <option value="__new__">新建项目…</option>
-                              </select>
+                              <div className="ml-[56px] max-w-[calc(100%-64px)]">
+                                <Select
+                                  aria-label="选择目标项目"
+                                  value={project.projectKey || ''}
+                                  onChange={(event) => { void assignFileToProject(assigningPath, event.target.value) }}
+                                  options={[
+                                    ...allProjects.map((candidate) => ({ value: candidate.projectKey || '', label: candidate.title })),
+                                    { value: '__new__', label: '新建项目…' },
+                                  ]}
+                                  style={{ height: 26, fontSize: 'var(--rn-fs-xs)' }}
+                                />
+                              </div>
                             ) : null}
                             {creatingProjectForPath && project.files.some((file) => file.path === creatingProjectForPath) ? (
                               <span className="ml-[56px] flex items-center gap-1">
-                                <input ref={newProjectNameInputRef} aria-label="新项目名称" className="min-w-0 flex-1 rounded px-1 py-0.5 text-[11px]" />
-                                <button type="button" aria-label="确认新建项目" onClick={() => { void createProjectForFile(creatingProjectForPath) }}><Check className="h-3 w-3" /></button>
-                                <button type="button" aria-label="取消新建项目" onClick={() => setCreatingProjectForPath(null)}><X className="h-3 w-3" /></button>
+                                <Input ref={newProjectNameInputRef} aria-label="新项目名称" className="min-w-0 flex-1" style={{ height: 24, padding: '0 6px', fontSize: 'var(--rn-fs-xs)' }} />
+                                <IconButton size="sm" title="确认新建项目" icon={<Check aria-hidden="true" />} onClick={() => { void createProjectForFile(creatingProjectForPath) }} />
+                                <IconButton size="sm" title="取消新建项目" icon={<X aria-hidden="true" />} onClick={() => setCreatingProjectForPath(null)} />
                               </span>
                             ) : null}
                           </div>
@@ -506,12 +497,14 @@ export default function FileEmergenceSection({
   )
 }
 
+// Only a project in progress is "now" and takes the signal colour (DL5); the other states are ink,
+// the ones that want attention a step darker than the dormant one.
 const PROJECT_STATUS_META: Record<NonNullable<FileEmergenceProject['status']>, { label: string; color: string }> = {
-  upcoming: { label: '待准备', color: 'var(--color-ready-orange)' },
-  active: { label: '进行中', color: 'var(--color-ready-orange)' },
-  continuation: { label: '可能继续', color: 'var(--color-ready-orange)' },
-  recently_finished: { label: '待整理', color: 'var(--color-ready-orange)' },
-  dormant_important: { label: '可回看', color: '#868E96' },
+  upcoming: { label: '待准备', color: 'var(--rn-ink-2)' },
+  active: { label: '进行中', color: 'var(--rn-accent)' },
+  continuation: { label: '可能继续', color: 'var(--rn-ink-2)' },
+  recently_finished: { label: '待整理', color: 'var(--rn-ink-2)' },
+  dormant_important: { label: '可回看', color: 'var(--rn-ink-3)' },
 }
 
 function getBucketSummary(bucket: FileEmergenceBucketView, isOpen: boolean): string {

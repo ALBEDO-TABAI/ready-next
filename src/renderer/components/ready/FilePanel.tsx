@@ -3,6 +3,7 @@ import { fileDragRef, prepareFileDragRef } from '../../modules/workbench/file-dr
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Search, Plus, Folder, FileText, Image, Film, Music, File, FileSpreadsheet, Pen } from 'lucide-react'
 import { useWorkspace, type FileItem } from '../../stores/useWorkspace'
+import { EmptyState, IconButton, ListRow } from '../ui'
 
 /** Map file extension to Lucide icon */
 function getFileIcon(name: string, isDirectory: boolean) {
@@ -100,8 +101,8 @@ export default function FilePanel({ onFileDrop, onFileOpen }: FilePanelProps) {
       className="flex-shrink-0 flex flex-col"
       style={{
         width: 180,
-        background: 'var(--bg-panel)',
-        borderLeft: '1px solid var(--border-default)',
+        // A region on the window glass (DL1): no background of its own, a hairline to its left.
+        borderLeft: '1px solid var(--rn-hair)',
         padding: '12px 10px',
         gap: 8
       }}
@@ -109,23 +110,22 @@ export default function FilePanel({ onFileDrop, onFileOpen }: FilePanelProps) {
       {/* Title + file count + add button */}
       <div className="flex items-center justify-between">
         <div className="flex items-center" style={{ gap: 6 }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-title)' }}>文件管理</span>
+          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--rn-ink)' }}>文件管理</span>
           <span style={{
-            fontSize: 10, color: 'var(--text-light)',
-            background: 'var(--bg-content)',
+            fontSize: 10, color: 'var(--rn-ink-3)',
+            background: 'var(--rn-fill)',
             padding: '1px 6px', borderRadius: 8
           }}>
             {filteredFiles.length}
           </span>
         </div>
-        <button
+        <IconButton
+          size="sm"
           onClick={handleAddFolder}
-          className="flex items-center justify-center rounded hover:bg-black/5 transition-colors"
           style={{ width: 20, height: 20 }}
           title="打开文件夹"
-        >
-          <Plus style={{ width: 12, height: 12 }} className="text-[#999999]" strokeWidth={2} />
-        </button>
+          icon={<Plus style={{ width: 12, height: 12 }} />}
+        />
       </div>
 
       {/* Search */}
@@ -136,73 +136,48 @@ export default function FilePanel({ onFileDrop, onFileOpen }: FilePanelProps) {
           padding: '0 8px', gap: 4
         }}
       >
-        <Search style={{ width: 11, height: 11 }} className="text-[#999999]" strokeWidth={2} />
+        <Search style={{ width: 11, height: 11, color: 'var(--rn-ink-3)' }} strokeWidth={2} />
         <input
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="搜索..."
           className="ready-input-slot-inner flex-1 bg-transparent border-none outline-none"
-          style={{ fontSize: 11, color: 'var(--text-body)' }}
+          style={{ fontSize: 11, color: 'var(--rn-ink)' }}
         />
       </div>
 
       {/* File List */}
       <div className="flex-1 overflow-auto flex flex-col" style={{ gap: 2 }}>
         {filteredFiles.length === 0 && (
-          <div className="flex items-center justify-center" style={{ padding: '24px 8px' }}>
-            <span style={{ fontSize: 11, color: 'var(--text-light)' }}>
-              {searchQuery ? '无匹配文件' : '暂无文件'}
-            </span>
-          </div>
+          <EmptyState title={searchQuery ? '无匹配文件' : '暂无文件'} />
         )}
         {filteredFiles.map((file) => {
           const Icon = getFileIcon(file.name, file.isDirectory)
           const isSelected = selectedFile === file.path
           const isHighlighted = highlightedFile === file.path
           return (
-            <button
+            // A navigator row (ListRow): the open file is "where you are" (DL5); a file the assistant just
+            // created is marked for 3s in the success tone.
+            <ListRow
               key={file.path}
               onClick={() => handleFileClick(file)}
               draggable={!file.isDirectory}
               onDragStart={(e) => handleDragStart(e, file)}
-              className="flex items-center w-full rounded-lg transition-colors text-left"
+              current={isSelected}
+              icon={<Icon style={{ width: 14, height: 14 }} />}
+              label={file.name}
               style={{
-                padding: '6px 8px', gap: 6,
-                background: isHighlighted
-                  ? 'var(--color-green-light)'
-                  : isSelected
-                    ? 'var(--color-blue-light)'
-                    : 'transparent',
                 cursor: file.isDirectory ? 'pointer' : 'grab',
-                border: isHighlighted ? '1px solid var(--color-green)' : '1px solid transparent',
-                animation: isHighlighted ? 'pulse 1s ease-in-out 3' : 'none'
+                ...(isHighlighted
+                  ? {
+                      background: 'color-mix(in srgb, var(--rn-ok) 12%, transparent)',
+                      boxShadow: 'inset 0 0 0 1px var(--rn-ok)',
+                      animation: 'pulse 1s ease-in-out 3',
+                    }
+                  : {}),
               }}
-              onMouseEnter={(e) => {
-                if (!isSelected && !isHighlighted) {
-                  (e.currentTarget as HTMLElement).style.background = 'rgba(0,0,0,0.03)'
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (!isSelected && !isHighlighted) {
-                  (e.currentTarget as HTMLElement).style.background = 'transparent'
-                }
-              }}
-            >
-              <Icon
-                style={{
-                  width: 14, height: 14, flexShrink: 0,
-                  color: 'var(--text-muted)'
-                }}
-                strokeWidth={2}
-              />
-              <span className="truncate" style={{
-                fontSize: 11,
-                color: isSelected ? 'var(--color-blue)' : 'var(--text-body)'
-              }}>
-                {file.name}
-              </span>
-            </button>
+            />
           )
         })}
       </div>

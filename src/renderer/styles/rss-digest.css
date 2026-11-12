@@ -128,11 +128,6 @@
   background: var(--rn-accent-soft);
 }
 
-.rss-digest-issue:focus-visible {
-  outline: 1.5px solid var(--rn-ink-3);
-  outline-offset: 1px;
-}
-
 .rss-digest-issue__day {
   display: grid;
   justify-items: center;

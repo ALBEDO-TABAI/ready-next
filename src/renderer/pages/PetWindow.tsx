@@ -185,7 +185,7 @@ export default function PetWindow() {
                 return (
                 <article
                   key={note.id}
-                  className={`pet-sticky ready-floating-menu pet-sticky-${note.tone} ${stickyExpanded ? 'is-expanded' : ''}`}
+                  className={`pet-sticky rn-float pet-sticky-${note.tone} ${stickyExpanded ? 'is-expanded' : ''}`}
                   tabIndex={0}
                   aria-expanded={stickyExpanded}
                   onClick={() => toggleStickyNote(note.id)}
@@ -219,7 +219,7 @@ export default function PetWindow() {
           )}
 
           {visibleActivity && (
-            <section className={`pet-bubble ready-floating-menu ${expanded ? 'is-expanded' : ''}`}>
+            <section className={`pet-bubble rn-float ${expanded ? 'is-expanded' : ''}`}>
               <button
                 type="button"
                 className="pet-bubble-main"
@@ -261,7 +261,7 @@ export default function PetWindow() {
         </div>
       )}
 
-      <div className="pet-controls">
+      <div className="pet-controls rn-float">
         <button
           type="button"
           title={settings.bubbleEnabled ? '关闭气泡' : '开启气泡'}

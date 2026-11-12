@@ -70,7 +70,7 @@ function prefersReducedMotion(): boolean {
 function ModeFallback() {
   return (
     <div className="flex h-full items-center justify-center" style={{ background: 'transparent' }}>
-      <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>
+      <span style={{ color: 'var(--rn-ink-2)', fontSize: 13 }}>
         加载中...
       </span>
     </div>

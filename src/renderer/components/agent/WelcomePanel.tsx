@@ -74,7 +74,7 @@ export function WelcomePanelView({
       <span
         className="t-subtitle"
         data-typography-role="subtitle"
-        style={{ color: 'var(--text-secondary)', textAlign: 'center' }}
+        style={{ color: 'var(--rn-ink-2)', textAlign: 'center' }}
       >
         Ready for work , Ready for life.
       </span>
@@ -93,12 +93,12 @@ export function WelcomePanelView({
             onClick={() => onSetInputSuggestion(suggestion.prompt)}
             aria-label={`将建议填入输入框：${suggestion.label}`}
             title={`${suggestion.label}：${suggestion.description}`}
-            className="group min-w-0 text-left transition-[background-color,border-color,transform] duration-150 ease-out hover:-translate-y-px hover:bg-[var(--bg-hover)] active:translate-y-0 active:scale-[0.99]"
+            className="group min-w-0 text-left transition-[background-color,border-color,transform] duration-150 ease-out hover:-translate-y-px hover:bg-[var(--rn-fill-2)] active:translate-y-0 active:scale-[0.99]"
             style={{
               minHeight: 68,
               padding: 12,
-              borderRadius: 10,
-              border: '1px solid var(--border-default)',
+              borderRadius: 'var(--rn-r-md)',
+              border: '1px solid var(--rn-hair-2)',
               background: 'transparent',
               display: 'flex',
               alignItems: 'flex-start',
@@ -113,7 +113,8 @@ export function WelcomePanelView({
                 marginTop: 5,
                 borderRadius: '50%',
                 flex: '0 0 auto',
-                background: 'var(--rn-accent)',
+                // A bullet, not a signal (DL5): the signal colour stays with the brand mark above.
+                background: 'var(--rn-ink-3)',
               }}
             />
             <span className="flex min-w-0 flex-1 flex-col" style={{ gap: 5 }}>
@@ -121,7 +122,7 @@ export function WelcomePanelView({
                 className="t-ui"
                 data-typography-role="ui"
                 style={{
-                  color: 'var(--text-title)',
+                  color: 'var(--rn-ink)',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
@@ -133,7 +134,7 @@ export function WelcomePanelView({
                 className="t-meta"
                 data-typography-role="meta"
                 style={{
-                  color: 'var(--text-gray)',
+                  color: 'var(--rn-ink-3)',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',

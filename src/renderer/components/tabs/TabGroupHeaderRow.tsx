@@ -1,7 +1,10 @@
 import { useRef, type DragEvent } from 'react'
 import { ChevronDown, ChevronRight, Pencil, Plus } from 'lucide-react'
 import type { TabGroup } from '../../../shared/tab-groups'
-import { tabGroupColorSoft, tabGroupColorVar, tabGroupPillTextColor } from './tab-group-visuals'
+import { tabGroupColorSoft, tabGroupPillBackground, tabGroupPillTextColor } from './tab-group-visuals'
+import { IconButton } from '../ui'
+// Group colours are user-content colours; the palette is otherwise loaded only with the document mode.
+import '../../modules/document/content-palette.css'
 
 // Shared group header row: a solid color pill (caret + name) that toggles collapse on click
 // and opens the edit menu on right-click, plus hover-revealed new-tab / edit actions at
@@ -51,11 +54,12 @@ export default function TabGroupHeaderRow({
           height: 20,
           borderRadius: 6,
           padding: '0 8px 0 5px',
-          background: tabGroupColorVar(group.color),
+          background: tabGroupPillBackground(group.color),
           color: tabGroupPillTextColor(group.color),
+          // A tag on the glass has no shadow of its own (DL1); a drop target rings in its colour.
           boxShadow: isDropTarget
             ? `0 0 0 2.5px ${tabGroupColorSoft(group.color, 45)}`
-            : '0 1px 2px rgba(0, 0, 0, 0.10)',
+            : 'none',
         }}
       >
         <Caret style={{ width: 11, height: 11 }} className="flex-shrink-0" strokeWidth={2.75} />
@@ -67,24 +71,20 @@ export default function TabGroupHeaderRow({
       {/* Always visible while the flyout is up (the flyout itself is hover-summoned, so a
           second hover gate here just reads as "the buttons are missing" — and Edge keeps
           them visible during pane interaction). */}
-      <button
-        type="button"
+      <IconButton
+        size="sm"
         title="群组中新建标签页"
         onMouseDown={(event) => event.preventDefault()}
         onClick={onNewTabInGroup}
-        className="flex h-[20px] w-[20px] flex-shrink-0 items-center justify-center rounded-[6px] transition-colors hover:bg-[var(--bg-hover)]"
-      >
-        <Plus style={{ width: 13, height: 13 }} strokeWidth={2.25} className="text-[var(--text-gray)]" />
-      </button>
-      <button
-        type="button"
+        icon={<Plus aria-hidden="true" />}
+      />
+      <IconButton
+        size="sm"
         title="群组选项"
         onMouseDown={(event) => event.preventDefault()}
         onClick={openEditor}
-        className="flex h-[20px] w-[20px] flex-shrink-0 items-center justify-center rounded-[6px] transition-colors hover:bg-[var(--bg-hover)]"
-      >
-        <Pencil style={{ width: 12, height: 12 }} strokeWidth={2.25} className="text-[var(--text-gray)]" />
-      </button>
+        icon={<Pencil aria-hidden="true" />}
+      />
     </div>
   )
 }
