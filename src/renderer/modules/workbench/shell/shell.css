@@ -404,3 +404,90 @@
     animation: none;
   }
 }
+
+/* ==== V31 (experiment, 2026-11-13): the assistant's glass sheet. To revert, delete this block and the two classes on
+   MotionLayer's grid (assistant-sheet, assistant-sheet--inset); the --assistant-inset-* fallbacks are the old values. ====
+   Docked and open, the assistant stands on one sheet of the composer's liquid glass, without a live lens: top and
+   bottom on the central panel's (y 60 to H − 60), its left edge 8px after the central panel (the content column's
+   margin), its right edge the frame gap from the window, radius 20. The sheet is the panel's motion layer content, so
+   it leaves and enters with the panel; the narrow-window card paints nothing extra. The lenses on top (composer, chip,
+   mode slot) share its backdrop root, so they refract it. (A lens of its own with a stronger directional rim was
+   tried the same day and taken back at the user's request.) */
+[data-shell-region='assistant']:not(.shell-float-drawer) .assistant-sheet {
+  position: absolute;
+  inset: var(--rn-frame-gap) var(--rn-frame-gap) var(--rn-frame-gap) 0;
+  height: auto;
+  border-radius: var(--rn-r-sheet);
+  background: var(--rn-liquid-veil);
+  box-shadow: var(--rn-liquid-veil-edge);
+}
+
+/* Its soft outer shadow, the other panels' (V22), crossing the 8px gap but stopping at the central panel's edge so it
+   never shows through that glass; a pseudo-element, so this clip is no backdrop root for the lenses inside. */
+[data-shell-region='assistant']:not(.shell-float-drawer) .assistant-sheet::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  box-shadow: var(--rn-panel-shadow);
+  clip-path: inset(calc(-1 * var(--rn-panel-shadow-reach)) calc(-1 * var(--rn-panel-shadow-reach)) calc(-1 * var(--rn-panel-shadow-reach)) calc(-1 * var(--rn-frame-gap)));
+  pointer-events: none;
+}
+
+/* The composer's thin specular ring: the gradient shows only in a 1px band. */
+[data-shell-region='assistant']:not(.shell-float-drawer) .assistant-sheet::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  padding: 1px;
+  border-radius: inherit;
+  background: var(--rn-liquid-ring);
+  -webkit-mask: linear-gradient(black 0 0) content-box, linear-gradient(black 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(black 0 0) content-box, linear-gradient(black 0 0);
+  mask-composite: exclude;
+  opacity: .38;
+  pointer-events: none;
+}
+
+/* 减少透明: the opaque sheet, without the ring. */
+[data-transparency='reduced'] [data-shell-region='assistant']:not(.shell-float-drawer) .assistant-sheet::after {
+  display: none;
+}
+
+/* Inside the sheet everything keeps 12px from its left, right and bottom edges: the header row (on the sheet's top, the
+   head line), the welcome cards, the messages and the composer with the row above it. The messages scroll inside the
+   sheet and are clipped by its rounded bottom corners. */
+[data-shell-region='assistant']:not(.shell-float-drawer) .assistant-sheet--inset {
+  --assistant-inset-x: 12px;
+  --assistant-inset-bottom: 12px;
+  --assistant-welcome-inset-x: 0px;
+}
+
+[data-shell-region='assistant']:not(.shell-float-drawer) .assistant-sheet--inset .chat-header-row {
+  margin-top: 0;
+  /* the shell's buttons lie over the row's right end; the sheet ends the frame gap before the window does */
+  padding-right: calc(var(--rn-rail-w) / 2 + 4 * var(--shell-tool-pitch) + var(--rn-control-h-lg) / 2 + var(--rn-s2) - var(--rn-frame-gap));
+}
+
+[data-shell-region='assistant']:not(.shell-float-drawer) .assistant-sheet--inset > :last-child {
+  border-radius: 0 0 var(--rn-r-sheet) var(--rn-r-sheet);
+}
+
+/* The sheet's shadow needs room past the column (the panel column and its motion layer would cut it). */
+[data-shell-region='assistant']:not(.shell-float-drawer):has(.assistant-sheet),
+[data-shell-region='assistant']:not(.shell-float-drawer) .chat-panel-motion-layer {
+  overflow: visible;
+}
+
+/* And the central panel's shadow stops at the sheet's edge, across the 8px gap, as it does at a docked sidebar's. */
+[data-shell-assistant-dock='docked'] > [data-shell-region='content'] {
+  clip-path: inset(calc(-1 * var(--rn-panel-shadow-reach)) calc(-1 * var(--rn-frame-gap)) calc(-1 * var(--rn-panel-shadow-reach)) calc(-1 * var(--rn-panel-shadow-reach)));
+}
+
+[data-shell-sidebar-dock='docked'][data-shell-assistant-dock='docked'] > [data-shell-region='content'] {
+  clip-path: inset(calc(-1 * var(--rn-panel-shadow-reach)) calc(-1 * var(--rn-frame-gap)));
+}
+/* ==== end V31 ==== */

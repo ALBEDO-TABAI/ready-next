@@ -67,7 +67,8 @@ export function WelcomePanelView({
     <div
       data-ready-welcome="true"
       className="flex w-full flex-col items-center"
-      style={{ padding: '12px 16px' }}
+      // V31: in the assistant's glass sheet the message list's inset is the cards' too, so they line up with the composer.
+      style={{ padding: '12px var(--assistant-welcome-inset-x, 16px)' }}
     >
       {/* The wordmark face (V12) stands alone: the dot mark above it was removed (user, 2026-11-13). Instrument Serif
           has a smaller x-height than the UI face, so it is set 1.1× the title size; 24 above the cards. */}

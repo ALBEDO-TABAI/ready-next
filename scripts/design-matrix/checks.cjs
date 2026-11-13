@@ -100,16 +100,21 @@ function collect(input) {
       const wide = W >= 1300
       const pass = wide ? ratio >= (assistantOpen ? 0.5 : 0.68) : width >= 560
       if (!pass) add('contentWidth', `${mode}:${wide ? 'wide' : 'narrow'}`)
-      // DL11a, V15: equal margins above and below the panel (band + frame gap); the composer's bottom edge sits on the panel's.
+      // DL11a, V15: equal margins above and below the panel (band + frame gap). V31: a docked assistant stands on a glass
+      // sheet whose top and bottom are the panel's, with the composer's bottom edge 12px inside it; without the sheet (the
+      // narrow-window card) the composer's bottom edge sits on the panel's.
       const r = sheet.el.getBoundingClientRect()
       const top = Math.round(r.top)
       const bottom = Math.round(H - r.bottom)
       result.measures.bands = { top, bottom }
       if (Math.abs(top - bottom) > 2) add('bandSymmetry', `${mode}:${top}/${bottom}`)
       if (composer && assistantOpen) {
-        const delta = Math.round(composer.el.getBoundingClientRect().bottom - r.bottom)
+        const glass = [...document.querySelectorAll('[data-shell-region="assistant"] .assistant-sheet')].find(el => getComputedStyle(el).position === 'absolute')
+        const g = glass?.getBoundingClientRect()
+        const delta = Math.round(composer.el.getBoundingClientRect().bottom - (g ? g.bottom - 12 : r.bottom))
         result.measures.composerDelta = delta
-        if (Math.abs(delta) > 2) add('composerAlign', `${mode}`)
+        if (g) result.measures.assistantSheet = { top: Math.round(g.top - r.top), bottom: Math.round(g.bottom - r.bottom) }
+        if (Math.abs(delta) > 2 || (g && (Math.abs(g.top - r.top) > 2 || Math.abs(g.bottom - r.bottom) > 2))) add('composerAlign', `${mode}`)
       }
     }
   }

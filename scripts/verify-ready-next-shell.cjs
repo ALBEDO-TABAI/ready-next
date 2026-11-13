@@ -164,9 +164,34 @@ async function main() {
     // the corner button stays exactly where it was, and the same four buttons stand below it in a column on the rail's pitch.
     const pitch = 36
     const docked = await assistantTools(page, true)
+    // V31 (experiment): docked and open, the assistant stands on one glass sheet: top and bottom on the central panel's,
+    // 8px after it, the frame gap from the window's right edge; inside it the header row starts on its top, and the
+    // composer keeps 12px from its left, right and bottom edges.
+    // The last slot click may still be sliding its scene in: measure once the current panel has come to rest.
+    await waitFor(page, () => {
+      const panel = [...document.querySelectorAll('[data-shell-region="content"] .rn-panel')].find(el => el.getBoundingClientRect().width > 0 && getComputedStyle(el).visibility !== 'hidden')
+      const column = document.querySelector('[data-shell-region="content"]')
+      return Boolean(panel && column) && Math.abs(panel.getBoundingClientRect().right - column.getBoundingClientRect().right) < 1
+    })
+    const glass = await page.evaluate(() => {
+      const rect = el => { if (!el) return null; const r = el.getBoundingClientRect(); return { left: Math.round(r.left), right: Math.round(r.right), top: Math.round(r.top), bottom: Math.round(r.bottom) } }
+      // The current mode's panel: other modes stay mounted but hidden, with their own stale boxes.
+      const panel = [...document.querySelectorAll('[data-shell-region="content"] .rn-panel')].find(el => el.getBoundingClientRect().width > 0 && getComputedStyle(el).visibility !== 'hidden')
+      const sheet = document.querySelector('[data-shell-region="assistant"] .assistant-sheet')
+      return {
+        W: window.innerWidth, sheet: rect(sheet), panel: rect(panel), radius: sheet ? getComputedStyle(sheet).borderTopLeftRadius : null,
+        composer: rect(document.querySelector('[data-chat-composer-shell="true"]')), row: rect(document.querySelector('[data-shell-region="assistant"] .chat-header-row')),
+      }
+    })
+    const g = glass.sheet, p = glass.panel, c = glass.composer
+    check('V31 the docked assistant\'s glass sheet: the central panel\'s top and bottom, 8px after it, 8px from the window\'s right edge, radius 20',
+      Boolean(g && p) && g.top === p.top && g.bottom === p.bottom && Math.abs(g.left - p.right - 8) <= 1 && g.right === glass.W - 8 && glass.radius === '20px', JSON.stringify(glass))
+    check('V31 inside the sheet the header row starts on its top and the composer keeps 12px from its left, right and bottom',
+      Boolean(g && c && glass.row) && glass.row.top === g.top && c.bottom === g.bottom - 12 && c.left === g.left + 12 && c.right === g.right - 12, JSON.stringify(glass))
     await page.keyboard.press('Tab')
     const collapsed = await waitFor(page, () => (document.querySelector('[data-chat-panel-root]')?.getBoundingClientRect().width ?? 0) < 1)
     check('Tab collapses the assistant to zero width', collapsed)
+    check('V31 collapsed, the glass sheet has left with the panel', await waitFor(page, () => !document.querySelector('[data-shell-region="assistant"] .assistant-sheet')))
     await harness.sleep(600)
     const strip = await assistantTools(page)
     const inRow = docked.beads.every((bead, i) => bead && bead.y === 82 && bead.x === docked.W - 26 - pitch * (i + 1) && bead.w === 32)
@@ -347,10 +372,13 @@ async function main() {
       const card = document.querySelector('[data-chat-panel-root]')?.getBoundingClientRect()
       const strip = document.querySelector('[data-shell-region="assistant-strip"]')?.getBoundingClientRect()
       const corner = document.querySelector('[data-shell-assistant-tools] [data-assistant-toggle]')?.getBoundingClientRect()
-      return card && strip && corner ? { cardRight: Math.round(card.right), cardTop: Math.round(card.top), stripLeft: Math.round(strip.left), stripWidth: Math.round(strip.width), corner: Math.round(corner.x + corner.width / 2), W: window.innerWidth } : null
+      // V31: the card is the glass here; the sheet inside it paints nothing.
+      const sheet = document.querySelector('[data-shell-region="assistant"] .assistant-sheet')
+      const sheetPainted = Boolean(sheet) && (getComputedStyle(sheet).position === 'absolute' || getComputedStyle(sheet).backgroundColor !== 'rgba(0, 0, 0, 0)')
+      return card && strip && corner ? { cardRight: Math.round(card.right), cardTop: Math.round(card.top), stripLeft: Math.round(strip.left), stripWidth: Math.round(strip.width), corner: Math.round(corner.x + corner.width / 2), W: window.innerWidth, sheetPainted } : null
     })
-    check('V17 the narrow-window assistant card opens beside the strip (8px from it) and the corner button stays in the strip',
-      drawerSide && drawerSide.stripWidth === 52 && drawerSide.cardRight === drawerSide.stripLeft - 8 && drawerSide.cardTop === 60 && drawerSide.corner === drawerSide.W - 26, JSON.stringify(drawerSide))
+    check('V17 the narrow-window assistant card opens beside the strip (8px from it) and the corner button stays in the strip; no second sheet inside (V31)',
+      drawerSide && drawerSide.stripWidth === 52 && drawerSide.cardRight === drawerSide.stripLeft - 8 && drawerSide.cardTop === 60 && drawerSide.corner === drawerSide.W - 26 && !drawerSide.sheetPainted, JSON.stringify(drawerSide))
     // A click on the content closes the drawer (W2 §2.5); Tab inside the composer keeps moving focus.
     const content = await page.locator('[data-shell-region="content"]').boundingBox()
     await page.mouse.click(content.x + 40, content.y + 20)
