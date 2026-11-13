@@ -5,7 +5,7 @@
   "description": "Ready 是由@上班摸鱼 开发的，面向知识工作者和创作者的通用桌面工作台",
   "main": "./out/main/index.js",
   "author": "@上班摸鱼",
-  "license": "MIT",
+  "license": "AGPL-3.0-or-later",
   "private": true,
   "type": "module",
   "scripts": {
