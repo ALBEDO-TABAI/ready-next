@@ -158,6 +158,10 @@ function collect(input) {
   const currentSelector = '[aria-current]:not([aria-current="false"]), [aria-selected="true"], [data-active="true"], [data-state="active"]'
   // Rail glyphs, today and live status indicators keep their own signal treatment.
   const currentExempt = '[data-liquid-shell="icon-rail"], [data-shell-region="rail"], [aria-current="date"], [data-today-tab], .today, .is-today, [data-state="running"], [data-status="running"], [data-state="needs_user"], [role="status"], [role="progressbar"]'
+  // The mode switch slot above the composer (V20, V21) marks its selected tab with the glass lens over it and the rail's
+  // white glyph, not with a fill on the tab: its own tabs skip the fill / ink / 500 rule but are still checked for the
+  // signal colour.
+  const lensSelection = '.draggable-mode-tabs [role="tab"]'
   const isAccent = value => {
     const colour = norm(value)
     return colour && !colour.endsWith(',0') && accents.has(rgbOnly(colour))
@@ -188,7 +192,7 @@ function collect(input) {
     // A treeitem wraps both its own painted row and its expanded child group.
     const row = el.getAttribute('role') === 'treeitem' ? el.querySelector(':scope > .ink-sb-row.is-selected') ?? el : el
     const cs = getComputedStyle(row)
-    if (carriesAccent(row) || norm(cs.backgroundColor) !== currentFill || norm(cs.color) !== currentInk || Number(cs.fontWeight) !== 500) {
+    if (carriesAccent(row) || (!row.matches(lensSelection) && (norm(cs.backgroundColor) !== currentFill || norm(cs.color) !== currentInk || Number(cs.fontWeight) !== 500))) {
       add('currentAccent', signature(el))
     }
   }

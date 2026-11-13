@@ -1,9 +1,11 @@
 /* ═══ liquid-composer.css — 聊天输入框液态玻璃（白纱/边缘高光/投影层雾化；现行合同 current-runtime-contracts.md §1；调参与实测 2026-09-15-liquid-glass-scroll-implementation.md）；由 index.css 序保拆分（2026-07-06），在 index.css 中按原段落顺序 @import，勿改导入次序。 ═══ */
-/* The assistant composer is the one liquid glass of Ready Next (W1 DL4a). The refraction is a
-   LiquidLens (canvas displacement map → feDisplacementMap → backdrop-filter: url()); CSS only adds
-   the material: a veil, a hairline rim and an edge ring. This is the composer's pre-B4 look, kept
-   at the user's request (2026-11-11); light, dark and reduce-transparency values live in the
-   --rn-liquid-* tokens. Reduce transparency (DL12) also turns the lens off (ChatInput). */
+/* The assistant composer and the row above it, the project chip and the mode switch slot, are the liquid glass of
+   Ready Next (W1 DL4a, widened by V21): one material. The refraction is a LiquidLens (canvas displacement map →
+   feDisplacementMap → backdrop-filter: url()); CSS only adds the material: a veil, a hairline rim and an edge ring.
+   This is the composer's pre-B4 look, kept at the user's request (2026-11-11); light, dark and reduce-transparency
+   values live in the --rn-liquid-* tokens. Reduce transparency (DL12) also turns the lenses off. */
+.ready-chat-project-surface,
+.draggable-mode-tabs__surface,
 .ready-liquid-composer__surface {
   position: relative;
   z-index: 0;
@@ -11,9 +13,14 @@
   border-radius: var(--rn-liquid-r);
   transform: translateZ(0);
   background: var(--rn-liquid-veil);
-  box-shadow: var(--rn-liquid-veil-edge);
+  /* the edge light and the low contact shadow that lifts the glass off the ground */
+  box-shadow: var(--rn-liquid-veil-edge), var(--rn-liquid-shadow);
 }
 
+.ready-chat-project-surface::before,
+.ready-chat-project-surface::after,
+.draggable-mode-tabs__surface::before,
+.draggable-mode-tabs__surface::after,
 .ready-liquid-composer__surface::before,
 .ready-liquid-composer__surface::after {
   content: '';
@@ -22,6 +29,8 @@
   pointer-events: none;
 }
 
+.ready-chat-project-surface::before,
+.draggable-mode-tabs__surface::before,
 .ready-liquid-composer__surface::before {
   inset: 0;
   z-index: 4;
@@ -30,6 +39,8 @@
 }
 
 /* Edge ring: the gradient shows only in the 1px padding band (mask), like a lit bevel. */
+.ready-chat-project-surface::after,
+.draggable-mode-tabs__surface::after,
 .ready-liquid-composer__surface::after {
   inset: 0;
   z-index: 5;
@@ -47,6 +58,8 @@
   z-index: 3;
 }
 
+.ready-chat-project-projection,
+.draggable-mode-tabs__projection,
 .ready-liquid-composer__projection {
   position: absolute;
   inset: 0;
@@ -59,6 +72,8 @@
   transform: translateZ(0);
 }
 
+.ready-chat-project-projection::after,
+.draggable-mode-tabs__projection::after,
 .ready-liquid-composer__projection::after {
   content: '';
   position: absolute;
@@ -81,19 +96,27 @@
   opacity: 1;
 }
 
+html[data-theme='dark']:root .ready-chat-project-surface::before,
+html[data-theme='dark']:root .draggable-mode-tabs__surface::before,
 html[data-theme='dark']:root .ready-liquid-composer__surface::before {
   opacity: 0.84;
 }
 
+html[data-theme='dark']:root .ready-chat-project-surface::after,
+html[data-theme='dark']:root .draggable-mode-tabs__surface::after,
 html[data-theme='dark']:root .ready-liquid-composer__surface::after {
   opacity: 0.18;
 }
 
 /* 减少透明（DL12）：纸色、发丝边、卡片投影（tokens.css），没有高光环。 */
+[data-transparency='reduced'] .ready-chat-project-surface::after,
+[data-transparency='reduced'] .draggable-mode-tabs__surface::after,
 [data-transparency='reduced'] .ready-liquid-composer__surface::after {
   display: none;
 }
 
+html[data-theme='dark']:root .ready-chat-project-projection,
+html[data-theme='dark']:root .draggable-mode-tabs__projection,
 html[data-theme='dark']:root .ready-liquid-composer__projection {
   opacity: 0.52;
   filter: blur(3.5px) saturate(0) contrast(0.78) brightness(0.78);
@@ -175,12 +198,14 @@ html:root .ready-chat-project-pill svg {
   padding: 0 8px;
   margin-bottom: -12px;
 }
-.ready-chat-project { position: relative; flex: 0 1 auto; min-width: 0; max-width: calc(100% - 152px); border-radius: 19px; }
+/* The project chip, then the mode switch slot (mode-switch.css, V20/V21): two liquid-glass pills of one height (40),
+   left to right, 8px apart. The slot keeps its four cells; the chip's label gives way first. */
+.ready-chat-project { position: relative; flex: 0 1 auto; min-width: 0; border-radius: var(--rn-r-pill); }
 .ready-chat-project.is-drag-over { outline: 1.5px solid var(--rn-ink-3); outline-offset: 1px; background: var(--rn-fill-2); }
-.ready-chat-project-pill { position: relative; isolation: isolate; display: flex; align-items: center; min-width: 0; height: 38px; border-radius: 19px; }
+.ready-chat-project-pill { position: relative; isolation: isolate; display: flex; align-items: center; min-width: 0; height: var(--rn-control-h-xl); border-radius: var(--rn-r-pill); }
 .ready-chat-project-trigger, .ready-chat-project-clear {
   display: flex; align-items: center; justify-content: center; gap: 7px;
-  position: relative; z-index: 1; border: 0; background: transparent; color: var(--rn-ink-3); height: 38px; cursor: pointer;
+  position: relative; z-index: 1; border: 0; background: transparent; color: var(--rn-ink-3); height: var(--rn-control-h-xl); cursor: pointer;
 }
 .ready-chat-project-trigger { min-width: 0; padding: 0 2px 0 10px; font-size: 12px; }
 .ready-chat-project-pill svg { width: 15px; height: 15px; flex-shrink: 0; }

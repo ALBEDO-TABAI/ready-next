@@ -1,4 +1,4 @@
-import { Calendar, FileText, Globe, Layers, PanelRight, Rss, Search, Settings } from 'lucide-react'
+import { Calendar, FileText, Globe, Layers, Rss, Search, Settings } from 'lucide-react'
 import type { CSSProperties, ElementType, MouseEvent, ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import MorphIconRailGroup from '../../../components/motion/MorphIconRailGroup'
@@ -10,6 +10,7 @@ import { SHELL_RAIL_WIDTH } from '../../../../shared/workbench-shell-geometry'
 
 // The icon rail of the Ready Next shell (W2 §2.1): mode switching on top, global actions at the
 // bottom. Selected glyphs follow the user's rule (white glow; closed shapes fill, open strokes thicken).
+// The assistant's button is not here: it is the top button of the right strip (V17).
 
 const MODE_ITEMS: { id: WorkbenchMode; label: string; hint: string; icon: ElementType; activeIcon?: ElementType }[] = [
   { id: 'browser', label: '浏览器', hint: '⌘1', icon: Globe, activeIcon: GlobeFilled },
@@ -24,10 +25,8 @@ export interface ShellRailProps {
   onModeChange: (mode: WorkbenchMode) => void
   /** ⌥-click (or ⇧-click) opens the mode beside the current one. */
   onSplitToggle: (mode: WorkbenchMode) => void
-  /** A plain click on the current mode's icon is the sidebar's switch (V13, as in VS Code). */
+  /** A plain click on the current mode's icon opens or closes the sidebar (V13, V23, as in VS Code); so does ⌘B. */
   onSidebarToggle: () => void
-  assistantOpen: boolean
-  onAssistantOpen: () => void
   /** The sidebar is on screen (docked, or its card open). While it is collapsed the selected glyph loses its tile (DL8). */
   sidebarShown: boolean
 }
@@ -58,7 +57,7 @@ export default function ShellRail(props: ShellRailProps) {
       props.onSplitToggle(mode)
       return
     }
-    // The current mode's icon is the sidebar's switch (V13); another mode, the split side included, only switches.
+    // The current mode's icon opens or closes the sidebar (V13, V23); another mode, the split side included, only switches.
     if (mode === props.mode && !event.metaKey && !event.ctrlKey) {
       props.onSidebarToggle()
       return
@@ -90,9 +89,6 @@ export default function ShellRail(props: ShellRailProps) {
       <div className="shell-rail__group" role="group" aria-label="全局">
         <RailButton label="搜索 ⌘K" onClick={() => window.dispatchEvent(new CustomEvent('ready:open-quick-switcher'))}><Search className="shell-rail__glyph" strokeWidth={1.8} /></RailButton>
         <RailButton label="收集" onClick={toggleCollect} badge={stagedCount}><Layers className="shell-rail__glyph" strokeWidth={1.8} /></RailButton>
-        {!props.assistantOpen && (
-          <RailButton label="助手 Tab" onClick={props.onAssistantOpen}><PanelRight className="shell-rail__glyph" strokeWidth={1.8} /></RailButton>
-        )}
         <RailButton label="设置 ⌘," onClick={() => navigate('/settings')}><Settings className="shell-rail__glyph" strokeWidth={1.8} /></RailButton>
       </div>
     </nav>

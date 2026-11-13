@@ -17,13 +17,11 @@
   border-left-color: transparent !important;
 }
 
-/* The box every mode's panel fills (V15): the mode root pads it with the shell's frame constants. It clips at the
-   panel's radius in every mode, so the panel's outer shadow is cut the same way everywhere (the 资讯 canvas and the
-   calendar root clip for their own reasons; one mode with a shadow in the gap and another without would not match). */
+/* The box every mode's panel fills (V15): the mode root pads it with the shell's frame constants. Only a box: no
+   edge, paint or clip of its own. The panel inside (.rn-panel) paints the glass and clips itself, and its soft shadow
+   reaches past the box in every mode (V22); the content column's clip leaves it room (shell.css). */
 .workbench-canvas-shell {
   min-height: 0;
-  border-radius: var(--rn-r-sheet);
-  overflow: hidden;
   background: transparent !important;
   border: 0;
   box-shadow: none;
@@ -33,24 +31,62 @@
   min-height: 0;
 }
 
+/* The mode scenes' container lets a panel's shadow out (V22); only while a scene slides in or out does it clip at its
+   own box, so a moving panel never shows over the sidebar or the strip beside it. */
+.workbench-mode-outlet {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.workbench-mode-outlet[data-mode-transition='true'] {
+  overflow: clip;
+}
+
+/* In a split the two panes' panels sit 8px apart (the split handle's width); each pane's shadow crosses the gap and
+   stops at the other panel's edge, so it never shows through the neighbouring glass. */
+.workbench-split-pane:first-child {
+  clip-path: inset(calc(-1 * var(--rn-panel-shadow-reach)) calc(-1 * var(--rn-frame-gap)) calc(-1 * var(--rn-panel-shadow-reach)) calc(-1 * var(--rn-panel-shadow-reach)));
+}
+
+.workbench-split-pane:last-child {
+  clip-path: inset(calc(-1 * var(--rn-panel-shadow-reach)) calc(-1 * var(--rn-panel-shadow-reach)) calc(-1 * var(--rn-panel-shadow-reach)) calc(-1 * var(--rn-frame-gap)));
+}
+
 .workbench-panel-frame {
   border-radius: var(--rn-r-sheet);
   overflow: hidden;
 }
 
-/* 180ms is WORKBENCH_PANEL_MOTION_DURATION_MS (modules/workbench/panel-motion.ts): the web view's bounds follow it. */
+/* 180ms is WORKBENCH_PANEL_MOTION_DURATION_MS (modules/workbench/panel-motion.ts): the web view's bounds follow it. The
+   content column's gap beside a docked panel closes with it (V18, V25), and the assistant's strip opens as the
+   assistant closes (V17). */
+.shell-assistant-strip,
+[data-shell-region='content'],
 [data-liquid-shell='side-panel'],
 [data-liquid-shell='chat-panel'] {
   transition:
     width 180ms var(--rn-ease-out),
-    min-width 180ms var(--rn-ease-out);
+    min-width 180ms var(--rn-ease-out),
+    margin 180ms var(--rn-ease-out);
 }
 
+/* A collapsed sidebar's panel goes out of reach once its column has closed (its shadow would stay as a sliver). */
+[data-liquid-shell='side-panel'][data-collapsed='true'] > .shell-sidebar__slot {
+  visibility: hidden;
+  transition: visibility 0s linear 180ms;
+}
+
+[data-panel-width-transition='instant'] .shell-assistant-strip,
+[data-panel-width-transition='instant'] [data-shell-region='content'],
 [data-panel-width-transition='instant'] [data-liquid-shell='side-panel'],
+[data-panel-width-transition='instant'] [data-liquid-shell='side-panel'] > .shell-sidebar__slot,
 [data-panel-width-transition='instant'] [data-liquid-shell='chat-panel'] {
   transition: none;
 }
 
+body.resizing .shell-assistant-strip,
+body.resizing [data-shell-region='content'],
 body.resizing [data-liquid-shell='side-panel'],
 body.resizing [data-liquid-shell='chat-panel'] {
   transition: none;
@@ -58,8 +94,14 @@ body.resizing [data-liquid-shell='chat-panel'] {
 
 @media (prefers-reduced-motion: reduce) {
   [data-liquid-shell='side-panel'],
-  [data-liquid-shell='chat-panel'] {
+  [data-liquid-shell='chat-panel'],
+  .shell-assistant-strip,
+  [data-shell-region='content'] {
     transition-duration: 80ms;
+  }
+
+  [data-liquid-shell='side-panel'][data-collapsed='true'] > .shell-sidebar__slot {
+    transition-delay: 80ms;
   }
 }
 

@@ -34,7 +34,6 @@ export default function DocumentNavigator({ roots, visible, onShowFiles }: {
   const setView = useDocumentNavigator(state => state.setView)
   const vault = useVault(state => state.view.data)
   const vaultRoot = vault?.status === 'ready' ? vault.root : null
-  const title = vaultRoot?.split(/[\\/]/).filter(Boolean).pop() || '资料库'
   const hasMounted = useWorkspace(state => state.pinnedFolders.some(folder => folder !== vaultRoot))
   const isMounted = useCallback((root: string) => root !== vaultRoot, [vaultRoot])
   // A mounted folder's entries can be brought into the library (M4).
@@ -50,7 +49,8 @@ export default function DocumentNavigator({ roots, visible, onShowFiles }: {
   return (
     <div className="document-navigator" data-document-navigator-view={view}>
       <div className="shell-navigator__head document-navigator__head">
-        <span className="shell-navigator__title" title={vaultRoot ?? undefined}>{title}</span>
+        {/* A fixed name for what the navigator holds (V24); the library's folder stays in the tooltip. */}
+        <span className="shell-navigator__title" title={vaultRoot ?? undefined}>内容管理</span>
         <Segmented label="资料库视角" value={view} onChange={setView} options={VIEW_OPTIONS} />
       </div>
       <div className="document-navigator__view ink-scope" hidden={view !== 'pages'}>

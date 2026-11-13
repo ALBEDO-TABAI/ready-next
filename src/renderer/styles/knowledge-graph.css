@@ -1,72 +1,43 @@
-/* 关系图谱（W2-T6）：一个模态浮层（DL4，.rn-float 的材质）铺在内容区上，图本身画在台面上的点阵里；
-   悬浮预览是第二层浮层。只用 --rn-*（DS1）；模糊只来自 .rn-float（W1 §4）。画布上的点与线的颜色
-   由 graph-canvas-renderer.ts 从同一组令牌读取。 */
+/* 关系图谱（W2-T6，V19）：打开时它就是中央那块面板——占用模式面板的同一个框（内缩取 WORKBENCH_CANVAS_OUTER_PADDING_*，
+   写在 GraphWorkspace 的根上），用面板材质（.rn-panel）：44px 头行放标题、范围切换和关闭，正文是画布，底部一条安静的
+   提示行。没有浮层材质、额外投影或模糊；下面的模式被挂起（visibility: hidden），不是玻璃叠玻璃。悬浮预览仍是浮层。
+   只用 --rn-*（DS1）；画布上点与线的颜色由 graph-canvas-renderer.ts 从同一组令牌读取。 */
 .knowledge-graph-workspace {
   position: absolute;
   z-index: 100;
-  inset: 12px;
   display: flex;
   min-width: 0;
   min-height: 0;
 }
 
 .knowledge-graph-workspace__panel {
-  position: relative;
-  display: flex;
-  width: 100%;
-  height: 100%;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-  flex-direction: column;
-  border-radius: var(--rn-r-dialog);
+  flex: 1;
   color: var(--rn-ink);
   font-family: var(--rn-font-ui);
 }
 
 .knowledge-graph-workspace__header {
-  position: relative;
-  z-index: 2;
-  display: flex;
-  align-items: center;
   justify-content: space-between;
   gap: var(--rn-s4);
-  padding: 22px 26px 15px;
-  border-bottom: .5px solid var(--rn-hair);
-}
-
-.knowledge-graph-workspace__header > div:first-child {
-  display: grid;
-  min-width: 0;
-  gap: 2px;
-}
-
-.knowledge-graph-workspace__header span {
-  color: var(--rn-ink-3);
-  font-size: var(--rn-fs-xs);
-  letter-spacing: 0.02em;
 }
 
 .knowledge-graph-workspace__header h2 {
+  min-width: 0;
   margin: 0;
-  font-size: var(--rn-t-page);
-  font-weight: 500;
-  line-height: var(--rn-lh-page);
-  letter-spacing: var(--rn-tracking-tight);
+  overflow: hidden;
+  font: 500 var(--rn-t-lead)/var(--rn-lh-lead) var(--rn-font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .knowledge-graph-workspace__header-actions {
   display: flex;
   flex: none;
   align-items: center;
-  gap: 9px;
+  gap: var(--rn-s2);
 }
 
 .knowledge-graph-workspace__canvas {
-  position: relative;
-  z-index: 1;
-  min-height: 0;
-  flex: 1;
   overflow: hidden;
   background: radial-gradient(circle, var(--rn-fill-3) 0.65px, transparent 0.8px);
   background-size: 22px 22px;
@@ -81,18 +52,17 @@
 }
 
 .knowledge-graph-workspace__footer {
-  position: relative;
-  z-index: 2;
   display: flex;
+  flex: none;
   align-items: center;
   justify-content: center;
   flex-wrap: wrap;
-  gap: 7px 18px;
-  min-height: 38px;
-  padding: 0 22px;
+  gap: 0 var(--rn-s4);
+  min-height: 32px;
+  padding: 0 var(--rn-s3);
   color: var(--rn-ink-3);
-  font-size: var(--rn-fs-2xs);
-  border-top: .5px solid var(--rn-hair);
+  font: 400 var(--rn-t-micro)/var(--rn-lh-micro) var(--rn-font-ui);
+  box-shadow: inset 0 .5px 0 var(--rn-hair);
 }
 
 .knowledge-graph-workspace__footer span::before {
@@ -100,8 +70,8 @@
   display: inline-block;
   width: 4px;
   height: 4px;
-  margin-right: 6px;
-  vertical-align: 1px;
+  margin-right: var(--rn-s2);
+  vertical-align: 2px;
   background: var(--rn-ink-4);
   border-radius: 50%;
 }
@@ -180,12 +150,6 @@
 @keyframes knowledge-graph-preview-in {
   from { opacity: 0; transform: translateY(3px) scale(0.985); }
   to { opacity: 1; transform: translateY(0) scale(1); }
-}
-
-@media (max-width: 540px) {
-  .knowledge-graph-workspace { inset: 8px; }
-  .knowledge-graph-workspace__header { padding: 18px 18px 13px; }
-  .knowledge-graph-workspace__header h2 { font-size: 23px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

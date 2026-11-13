@@ -7,8 +7,8 @@ import { ShellSidebarSlotContext } from './sidebar-slot'
 // card — and each mode renders its own navigator into it through <ShellNavigator>. A portal
 // keeps the navigator inside its module's React tree (stores, providers, keyboard handlers bubble
 // as before) while the DOM sits in the shell column. Navigators of modes that are not showing stay
-// mounted but hidden, so their scroll position and expanded state survive a mode switch.
-// The sidebar has one switch (V13): the top band's, the current mode's rail icon and ⌘B all toggle it.
+// mounted but hidden, so their scroll position and expanded state survive a mode switch; a switch moves them
+// vertically, in the rail's direction (V23). The current mode's rail icon and ⌘B open and close the sidebar (V13, V23).
 
 export const ShellSidebarSlotProvider = ShellSidebarSlotContext.Provider
 
@@ -22,12 +22,18 @@ export function ShellNavigator({ mode, label, scopeClassName, children }: {
   const slot = useContext(ShellSidebarSlotContext)
   if (!slot.element) return null
   const shown = slot.mode === mode
+  // While the shown navigator changes (V23) the old one stays on screen until it has left, inert; then it is hidden.
+  const leaving = !shown && slot.motion?.from === mode
+  const motion = leaving ? 'leave' : shown && slot.motion ? 'enter' : undefined
   return createPortal(
     <section
       className={`shell-navigator${scopeClassName ? ` ${scopeClassName}` : ''}`}
       data-shell-navigator={mode}
+      data-nav-motion={motion}
+      data-nav-direction={motion ? slot.motion?.direction : undefined}
       aria-label={label}
-      hidden={!shown}
+      hidden={!shown && !leaving}
+      inert={leaving || undefined}
     >
       {children}
     </section>,
@@ -46,7 +52,7 @@ export interface ShellSidebarProps {
   slotRef: (element: HTMLElement | null) => void
 }
 
-/** Where a pointer-down does not close the card: the sidebar's own switches and floats opened from the card. */
+/** Where a pointer-down does not close the card: the rail's mode icons (they toggle it themselves) and floats opened from it. */
 const CARD_KEEPERS = '[data-shell-sidebar-control], [data-float-id]'
 
 export default function ShellSidebar({ mode, panelWidth, presentation, floatingOpen, onFloatingClose, slotRef }: ShellSidebarProps): ReactNode {
@@ -81,11 +87,13 @@ export default function ShellSidebar({ mode, panelWidth, presentation, floatingO
       data-open={floating ? String(floatingOpen) : undefined}
       // The card over the browser makes the native web view step aside while it is open (W1 DL4).
       data-ready-native-overlay={cardOpen ? 'shell-sidebar' : undefined}
+      data-collapsed={!floating && panelWidth === 0 ? 'true' : undefined}
       className={`shell-sidebar workbench-panel-frame${floating ? ' shell-float-drawer rn-float' : ''}`}
       style={{ width: panelWidth, minWidth: panelWidth }}
       aria-label="侧栏"
     >
-      <div ref={slotRef} className="shell-sidebar__slot" />
+      {/* Docked, the navigator sits in a panel like the content's (V18); the card is a float of its own. */}
+      <div ref={slotRef} className={`shell-sidebar__slot${floating ? '' : ' rn-panel'}`} />
     </aside>
   )
 }

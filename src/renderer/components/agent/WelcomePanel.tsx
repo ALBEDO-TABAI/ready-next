@@ -69,14 +69,11 @@ export function WelcomePanelView({
       className="flex w-full flex-col items-center"
       style={{ padding: '12px 16px' }}
     >
-      <ReadyDotRMark />
-
-      {/* The wordmark face (V12). Instrument Serif has a smaller x-height than the UI face, so it is set 1.1× the title
-          size, as vvf sets its inline wordmark. 16 below the mark, 24 above the cards. */}
+      {/* The wordmark face (V12) stands alone: the dot mark above it was removed (user, 2026-11-13). Instrument Serif
+          has a smaller x-height than the UI face, so it is set 1.1× the title size; 24 above the cards. */}
       <span
         data-typography-role="wordmark"
         style={{
-          marginTop: 16,
           fontFamily: 'var(--rn-font-wordmark)',
           fontWeight: 400,
           fontSize: 'calc(var(--rn-t-title) * 1.1)',

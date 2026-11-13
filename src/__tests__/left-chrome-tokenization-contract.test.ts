@@ -15,11 +15,14 @@ test('left chrome colours come from --rn-*; the side-panel and rail-slot shell t
   assert.doesNotMatch(styles, /var\(--workbench-(?:side-panel|rail-slot)-/)
 })
 
-test('the shell sidebar sits on the window glass in both themes, with no dark-only patch rules', () => {
+test('the shell sidebar is one panel in both themes, with no dark-only patch rules', () => {
   const styles = readRendererStyles()
   const shell = readWorkspaceFile('src/renderer/modules/workbench/shell/shell.css')
+  const sidebar = readWorkspaceFile('src/renderer/modules/workbench/shell/ShellSidebar.tsx')
 
-  // W2 §2.2: one sidebar column, no frame of its own; the navigator inside draws on the glass.
+  // W2 §2.2, V18: one sidebar column that paints nothing itself; docked, the navigator sits in its slot, the shared
+  // panel glass (.rn-panel), the same in both themes.
+  assert.match(sidebar, /className=\{`shell-sidebar__slot\$\{floating \? '' : ' rn-panel'\}`\}/)
   assert.match(shell, /\.shell-sidebar:not\(\.shell-float-drawer\)\s*\{[\s\S]*?background:\s*transparent/)
   assert.match(shell, /\.shell-sidebar:not\(\.shell-float-drawer\)\s*\{[\s\S]*?box-shadow:\s*none/)
   // The old per-variant frame is gone, and nothing patches the sidebar for dark mode alone.

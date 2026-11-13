@@ -2,8 +2,11 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   resolveShellLayout,
+  SHELL_ASSISTANT_STRIP_WIDTH,
   SHELL_ASSISTANT_WIDTH,
   SHELL_CONTENT_MIN_WIDTH,
+  SHELL_FRAME_GAP,
+  SHELL_RAIL_WIDTH,
   SHELL_SIDEBAR_WIDTH,
   SHELL_WINDOW_MIN_WIDTH,
 } from '../shared/workbench-shell-geometry'
@@ -20,7 +23,8 @@ test('wide windows dock everything and keep at least half the window for content
   const layout = open(1440)
   assert.equal(layout.sidebar, 'docked')
   assert.equal(layout.assistant, 'docked')
-  assert.equal(layout.contentWidth, 1440 - 52 - 248 - 380)
+  // V18, V25: docked panels sit 8px from the content panel; the sidebar's panel starts right at the rail.
+  assert.equal(layout.contentWidth, 1440 - 52 - (248 + 8) - (8 + 380))
   assert.ok(layout.contentWidth / 1440 >= 0.5)
 })
 
@@ -35,11 +39,18 @@ test('the assistant gives way first, then the sidebar; content never drops below
   assert.deepEqual([open(800).sidebar, open(800).assistant], ['floating', 'floating'])
 })
 
-test('collapsed columns stay hidden and give their width to the content', () => {
+test('collapsed columns stay hidden; the assistant leaves a strip as wide as the rail, so both sides mirror', () => {
   const layout = resolveShellLayout({ windowWidth: 1440, sidebarOpen: false, sidebarWidth: 248, assistantOpen: false, assistantWidth: 380 })
   assert.equal(layout.sidebar, 'hidden')
   assert.equal(layout.assistant, 'hidden')
-  assert.equal(layout.contentWidth, 1440 - 52)
+  // V17: the right strip holds the assistant's buttons while it is not docked.
+  assert.equal(SHELL_ASSISTANT_STRIP_WIDTH, SHELL_RAIL_WIDTH)
+  assert.equal(SHELL_FRAME_GAP, 8)
+  assert.equal(layout.contentWidth, 1440 - 52 - 52)
+  // A floating assistant keeps the strip too.
+  assert.equal(open(1100).contentWidth, 1100 - 52 - (248 + 8) - 52)
+  // The smallest window still leaves the minimum content between the rail and the strip.
+  assert.equal(SHELL_WINDOW_MIN_WIDTH, 52 + SHELL_CONTENT_MIN_WIDTH + 52)
   assert.ok(layout.contentWidth / 1440 >= 0.68)
 })
 

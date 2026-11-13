@@ -3,9 +3,12 @@ import { createPortal } from 'react-dom'
 import { Check, Folder, FolderOpen, Search, X } from 'lucide-react'
 import { useAgent } from '../../stores/useAgent'
 import { useWorkspace } from '../../stores/useWorkspace'
+import { useTheme } from '../../stores/useTheme'
 import { parseWorkspaceDragPayloads } from '../layout/fileTreeDragPayload'
 import { getChatMenuHorizontalFrame, subscribeChatMenuLayout } from './chatMenuLayout'
 import { FloatPanel } from '../ui/float/FloatPanel'
+import { LiquidLens } from '../ui/liquid-glass/LiquidLens'
+import { LiquidBackdropProjection } from '../ui/liquid-glass/LiquidBackdropProjection'
 import { CHAT_MENU_ITEM_CLASS, chatMenuItemStyle, chatMenuSurfaceStyle } from './chatMenuStyles'
 
 const folderName = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() || path
@@ -15,6 +18,7 @@ export function ProjectSelector() {
   const scopes = useAgent((state) => state.scopes)
   const workspaceRoot = useWorkspace((state) => state.workspaceRoot)
   const pinnedFolders = useWorkspace((state) => state.pinnedFolders)
+  const reducedTransparency = useTheme((state) => state.transparency === 'reduced')
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [busy, setBusy] = useState(false)
@@ -108,9 +112,14 @@ export function ProjectSelector() {
     onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragOver(false) }}
     onDrop={drop}>
     <div className="ready-chat-project-pill">
-      {/* The pill floats over the message list on the float material; liquid glass is the composer's alone (W1 DL4a). */}
-      <span className="ready-chat-project-surface rn-float" aria-hidden="true"
-        style={{ position: 'absolute', inset: 0, pointerEvents: 'none', borderRadius: 'inherit', boxShadow: 'inset 0 0 0 .5px var(--rn-hair)' }} />
+      {/* The composer's liquid glass, shared with the mode switch slot beside it (V21); 减少透明 turns the lens off. */}
+      <LiquidLens className="ready-chat-project-surface"
+        style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
+        radius={20} bevel={8} depth={18.5} ior={1.34} dome={0.65} profile="squircle"
+        strength={2.4} blur={3.5} frost={0} blurBeforeRefraction saturation={1.18}
+        brightness={1.05} contrast={0.84} aberration={0} engine={reducedTransparency ? 'off' : 'backdrop'}
+        backdropContent={<LiquidBackdropProjection className="ready-chat-project-projection" sourceMaskRadius={20} />}
+      />
       {path && <button className="ready-chat-project-clear" aria-label="取消项目选择" title="不在项目中工作"
         disabled={busy} onClick={() => void perform(() => save(null))}><Folder className="project-folder-icon" size={16} /><X className="project-clear-icon" size={16} /></button>}
       <button data-project-trigger="true" className="ready-chat-project-trigger" disabled={busy}

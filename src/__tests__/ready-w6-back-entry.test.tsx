@@ -67,7 +67,7 @@ const click = (element: Element) => act(async () => { (element as HTMLElement).c
 const entry = (mode: NavigationEntry['mode'], ref: NavigationEntry['ref'], title: string): NavigationEntry => ({ mode, ref, title, openedAt: Date.now(), anchor: [] })
 const MODES = ['browser', 'document', 'rss', 'calendar'] as const
 function Panes({ focused = 'rss' }: { focused?: typeof MODES[number] }) {
-  return <ShellSidebarSlotProvider value={{ element: null, mode: focused }}>
+  return <ShellSidebarSlotProvider value={{ element: null, mode: focused, motion: null }}>
     {MODES.map(mode => <section key={mode} data-pane={mode}><NavigationBackEntry mode={mode} /></section>)}
   </ShellSidebarSlotProvider>
 }

@@ -70,7 +70,7 @@ await db.getRawDb().backup(${JSON.stringify(path.join(root, 'ready.db'))});db.cl
       else await panel.getByTitle('关闭', { exact: true }).click()
     }
     for (const target of [480, 768, 1200]) {
-      if (target === 1200) await page.getByTitle('收起/展开聊天面板', { exact: true }).click()
+      if (target === 1200) await page.locator('[data-shell-assistant-tools] [data-assistant-toggle]').click()
       await settle(page)
       for (let attempt = 0; attempt < 4; attempt++) {
         const width = (await canvas.boundingBox()).width
@@ -107,7 +107,7 @@ await db.getRawDb().backup(${JSON.stringify(path.join(root, 'ready.db'))});db.cl
     })
     assert.equal(visibleBrowser, true, 'the split must contain a genuinely visible native browser')
     await checkMenu('source', 'native-split'); await checkMenu('tasks', 'native-split')
-    await page.getByTitle('收起/展开聊天面板', { exact: true }).click(); await settle(page)
+    await page.locator('[data-shell-assistant-tools] [data-assistant-toggle]').click(); await settle(page)
     await checkMenu('source', 'native-split-chat-collapsed'); await checkMenu('tasks', 'native-split-chat-collapsed')
     fs.writeFileSync(path.join(evidence, 'result.json'), JSON.stringify({ ok: errors.length === 0, results, errors }, null, 2))
     console.log(JSON.stringify({ ok: errors.length === 0, cases: results.length, errors, evidence }))

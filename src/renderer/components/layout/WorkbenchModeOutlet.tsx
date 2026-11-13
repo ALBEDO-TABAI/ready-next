@@ -3,6 +3,7 @@ import type { WorkbenchMode } from '../../stores/useMode'
 import type { BrowserHostLayoutPhase } from '../../../shared/browser-view-layout'
 import {
   shouldAnimateWorkbenchModeTransition,
+  WORKBENCH_MODE_SCENE_TRANSITION_MS,
   type WorkbenchModeChangePresentation,
 } from '../../modules/workbench/mode-transition'
 import { useNativeSurfaceAwareOverlay } from '../../modules/overlay/useNativeSurfaceAwareOverlay'
@@ -48,7 +49,7 @@ const MODE_COMPONENTS: Record<WorkbenchMode, React.ComponentType<ModeComponentPr
 
 const ALL_WORKBENCH_MODES: WorkbenchMode[] = ['browser', 'document', 'rss', 'calendar']
 const ALL_MODE_LOADERS = [loadBrowserMode, loadDocumentMode, loadRSSMode, loadCalendarMode]
-const MODE_SCENE_TRANSITION_MS = 280
+const MODE_SCENE_TRANSITION_MS = WORKBENCH_MODE_SCENE_TRANSITION_MS
 let hasPreloadedWorkbenchModes = false
 
 type IdleCallbackHandle = ReturnType<Window['setTimeout']>
@@ -218,9 +219,12 @@ export default function WorkbenchModeOutlet({
     }
   }, [mode, transitionPresentation])
 
+  // The scenes' container clips only while a scene slides in or out (V22, flat-chrome.css): otherwise the panel's
+  // shadow reaches past it.
   return (
     <div
-      className="relative h-full w-full overflow-hidden"
+      className="workbench-mode-outlet"
+      data-mode-transition={runtime.previous ? 'true' : undefined}
       style={{
         background: 'transparent',
       }}

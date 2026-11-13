@@ -26,7 +26,7 @@ export interface ShellPresentationInput {
  * How the sidebar and the assistant are presented at the current window width (W2 §2.5, V14). On narrow
  * windows the assistant becomes a drawer and the sidebar a floating card; both start closed and are
  * transient, so the remembered docked state is untouched and returns when the window widens. On a wide
- * window a collapsed sidebar is simply collapsed. Tab, ⌘B, the top band's switch and the rail all go
+ * window a collapsed sidebar is simply collapsed. Tab, ⌘B, the rail and the assistant's corner button all go
  * through the toggles here, so each column stays one switch.
  */
 export function useShellPresentation(input: ShellPresentationInput) {

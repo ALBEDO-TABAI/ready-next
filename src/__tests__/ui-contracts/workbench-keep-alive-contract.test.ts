@@ -36,7 +36,8 @@ test('workbench outlet keeps all modes mounted and routes mode switching through
   assert.match(outlet, /isActive=\{modeKey === runtime\.current && !suspended\}/)
   assert.match(outlet, /isSuspended=\{suspended\}/)
   assert.match(outlet, /isMotionSettled=\{isActive \? isMotionSettled : false\}/)
-  assert.match(outlet, /const MODE_SCENE_TRANSITION_MS = 280/)
+  assert.match(outlet, /const MODE_SCENE_TRANSITION_MS = WORKBENCH_MODE_SCENE_TRANSITION_MS/)
+  assert.match(modeTransition, /export const WORKBENCH_MODE_SCENE_TRANSITION_MS = 280/)
   assert.doesNotMatch(outlet, /MODE_LEAVING_OFFSET_PERCENT/)
   assert.doesNotMatch(outlet, /MODE_LEAVING_FADE_OPACITY/)
   assert.doesNotMatch(outlet, /resolveModeDirection/)
@@ -46,9 +47,12 @@ test('workbench outlet keeps all modes mounted and routes mode switching through
   assert.doesNotMatch(outlet, /contentVisibility:/)
 
   assert.doesNotMatch(topBar, /onWorkbenchModeChange/)
-  assert.doesNotMatch(chatPanel, /onWorkbenchModeChange|DraggableModeTabs/)
+  // V20: two places switch modes, one state. The rail and the slot above the composer both call the shell's handlers;
+  // the assistant only places the slot it is given and owns no mode state or handler of its own.
+  assert.doesNotMatch(chatPanel, /onWorkbenchModeChange|DraggableModeTabs|setWorkbenchMode/)
   assert.match(workbenchMode, /<ChatPanel[\s\S]*workbenchMode=\{workbenchMode\}/)
-  assert.match(workbenchMode, /<ShellRail[\s\S]*onModeChange=\{\(mode\) => \{ void handleWorkbenchModeChange\(mode\) \}\}/)
+  assert.match(workbenchMode, /<ShellRail[\s\S]*onModeChange=\{\(mode\) => \{ void handleWorkbenchModeChange\(mode\) \}\}[\s\S]*onSplitToggle=\{handleWorkbenchSplitToggle\}/)
+  assert.match(workbenchMode, /modeSwitcher=\{\(\s*<DraggableModeTabs\s+activeMode=\{workbenchMode\}\s+splitMode=\{splitMode\}\s+onChange=\{\(mode\) => \{ void handleWorkbenchModeChange\(mode\) \}\}\s+onSplitToggle=\{handleWorkbenchSplitToggle\}/)
 
   assert.match(workbenchMode, /import \{[^}]*withRitual[^}]*\} from '\.\.\/modules\/overlay\/useRitualOverlay'/)
   assert.match(workbenchMode, /resolveModeTransitionStrategy\(workbenchMode, nextMode\)/)
@@ -70,7 +74,8 @@ test('workbench outlet keeps all modes mounted and routes mode switching through
   assert.match(workbenchMode, /detail\.placement === 'open'/)
   assert.match(workbenchMode, /window\.addEventListener\(READY_WORKBENCH_MODE_CHANGE_EVENT, handleExternalWorkbenchModeChange as EventListener\)/)
   assert.match(workbenchMode, /<WorkbenchModeOutlet[\s\S]*mode=\{workbenchMode\}[\s\S]*transitionPresentation=\{modeScenePresentation\}[\s\S]*isMotionSettled=\{isMotionSettled\}[\s\S]*browserLayoutPhase=\{browserLayoutPhase\}[\s\S]*\/>/)
-  assert.match(workbenchMode, /suspended=\{graphWorkspaceRequest !== null\}/)
+  // V19: the graph and find-and-replace both take the mode panel's box, so either suspends the mode underneath.
+  assert.match(workbenchMode, /suspended=\{graphWorkspaceRequest !== null \|\| findReplaceOpen\}/)
   assert.match(workbenchMode, /const pendingRoots = new Set<string>\(\)/)
   assert.match(workbenchMode, /window\.setTimeout\(\(\) => \{[\s\S]*Promise\.all\(roots\.map\(\(root\) => invalidateGraphWorkspace\(root\)\)\)[\s\S]*\}, 50\)/)
   assert.match(modeTransition, /export const READY_WORKBENCH_MODE_CHANGE_EVENT = 'ready:workbench-mode-change-request'/)

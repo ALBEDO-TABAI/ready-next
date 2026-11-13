@@ -36,12 +36,12 @@ test('ShellRail dispatches mode, split and global actions and renders current st
     }
   })
   const modes: string[] = [], splits: string[] = []
-  let assistantOpens = 0, searches = 0, sidebarToggles = 0
+  let searches = 0, sidebarToggles = 0
   dom.window.addEventListener('ready:open-quick-switcher', () => { searches += 1 })
   const props: ShellRailProps = { mode: 'document', splitMode: 'rss',
     onModeChange: mode => modes.push(mode), onSplitToggle: mode => splits.push(mode),
     onSidebarToggle: () => { sidebarToggles += 1 },
-    assistantOpen: true, onAssistantOpen: () => { assistantOpens += 1 }, sidebarShown: true }
+    sidebarShown: true }
   function Location() { return <output>{useLocation().pathname}</output> }
   const render = (patch: Partial<ShellRailProps> = {}) => act(async () => root.render(
     <MemoryRouter><ShellRail {...props} {...patch} /><Location /></MemoryRouter>,
@@ -96,10 +96,8 @@ test('ShellRail dispatches mode, split and global actions and renders current st
   for (const label of ['文件', '查找与替换', '技能中心', '反向链接', '关系图谱']) {
     assert.equal(dom.window.document.querySelector(`button[aria-label="${label}"]`), null)
   }
-  assert.equal(dom.window.document.querySelector('[aria-label="助手 Tab"]'), null)
-  await render({ assistantOpen: false })
-  await act(async () => button('助手 Tab').click())
-  assert.equal(assistantOpens, 1)
+  // V17: the assistant's button is the top of the right strip, not a rail button.
+  assert.equal(dom.window.document.querySelector('[aria-label^="助手"]'), null)
   assert.equal(button('收集').querySelector('.shell-rail__badge'), null)
   await act(async () => useFastCard.setState({ items: [{ id: 'note', kind: 'text', text: '暂存', createdAt: 1 }] }))
   assert.equal(button('收集').querySelector('.shell-rail__badge')?.textContent, '1')

@@ -17,7 +17,8 @@ test('electron packaging includes project-owned app icon assets instead of falli
   assert.ok(existsSync(resolve(process.cwd(), 'build/icon.svg')))
   assert.ok(existsSync(resolve(process.cwd(), 'src/renderer/assets/ready-wordmark.svg')))
   const iconSvg = readWorkspaceFile('build/icon.svg')
-  assert.match(iconSvg, /#FF4B2B/)
+  // The icon is the wordmark "Ready" in Instrument Serif, ink on the white tile (scripts/make-app-icon.cjs).
+  assert.match(iconSvg, /#0B0B0E/)
   assert.match(iconSvg, /#FFFFFF/)
 
   const backgroundMatch = iconSvg.match(/<rect x="([0-9.]+)" y="([0-9.]+)" width="([0-9.]+)" height="([0-9.]+)" rx="([0-9.]+)" fill="#FFFFFF" \/>/)
@@ -30,17 +31,14 @@ test('electron packaging includes project-owned app icon assets instead of falli
   assert.ok(Number(backgroundMatch[2]) + Number(backgroundMatch[4]) <= 1024 - 96)
 
   const safeInset = 1024 * 0.2
-  const dots = [...iconSvg.matchAll(/<circle cx="([0-9.]+)" cy="([0-9.]+)" r="([0-9.]+)" \/>/g)]
-    .map((match) => ({
-      cx: Number(match[1]),
-      cy: Number(match[2]),
-      r: Number(match[3]),
-    }))
-  assert.ok(dots.length > 0)
-  assert.ok(dots.every((dot) => dot.cx - dot.r >= safeInset))
-  assert.ok(dots.every((dot) => dot.cy - dot.r >= safeInset))
-  assert.ok(dots.every((dot) => dot.cx + dot.r <= 1024 - safeInset))
-  assert.ok(dots.every((dot) => dot.cy + dot.r <= 1024 - safeInset))
+  const word = iconSvg.match(/<text [^>]*font-family="'Ready Icon Serif'"[^>]*fill="#0B0B0E"[^>]*data-ink-box="([0-9.]+) ([0-9.]+) ([0-9.]+) ([0-9.]+)"[^>]*>Ready<\/text>/)
+  assert.ok(word, 'the wordmark is a text element that records its ink box')
+  const [inkX, inkY, inkWidth, inkHeight] = word.slice(1).map(Number)
+  // Air on every side: the word's ink stays inside the safe area and is centred on the tile.
+  assert.ok(inkX >= safeInset && inkY >= safeInset)
+  assert.ok(inkX + inkWidth <= 1024 - safeInset && inkY + inkHeight <= 1024 - safeInset)
+  assert.ok(Math.abs(inkX + inkWidth / 2 - 512) <= 1)
+  assert.match(iconSvg, /@font-face \{ font-family: 'Ready Icon Serif'; src: url\(data:font\/woff2;base64,/)
 })
 
 test('main process applies the project-owned icon during development instead of default electron branding', () => {

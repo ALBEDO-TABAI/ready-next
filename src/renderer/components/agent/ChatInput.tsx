@@ -718,7 +718,8 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
           dome={2}
           // squircle=折弯集中最外缘（规格 §6.1）；观感不合意改回 'circular' 一行回退
           profile="squircle"
-          strength={3.2}
+          // 3.2 → 3.6 (2026-11-13): the outer edge bends what is behind a little more; the bevel and the clear centre stay.
+          strength={3.6}
           blur={3.5}
           frost={0}
           blurBeforeRefraction

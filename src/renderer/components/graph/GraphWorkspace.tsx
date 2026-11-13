@@ -4,6 +4,14 @@ import { beginPersistentBrowserMask, endPersistentBrowserMask } from '../../modu
 import GraphView from './GraphView'
 import { IconButton, Segmented } from '../ui'
 import { useDocTabs } from '../../stores/useDocTabs'
+import {
+  WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM,
+  WORKBENCH_CANVAS_OUTER_PADDING_TOP,
+  WORKBENCH_CANVAS_OUTER_PADDING_X,
+} from '../../modules/workbench/chrome'
+
+// The box of the mode panel it stands in for (V19): the same inset a mode root gives its canvas shell.
+const PANEL_INSET = `${WORKBENCH_CANVAS_OUTER_PADDING_TOP}px ${WORKBENCH_CANVAS_OUTER_PADDING_X}px ${WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM}px`
 
 export interface GraphWorkspaceRequest {
   centerPath?: string
@@ -18,6 +26,8 @@ interface GraphWorkspaceProps {
 
 // The one place the relationship graph opens (W2-T6): from the document navigator and ⌘K. It switches
 // between the whole library and the document in front, which the old sidebar graph panel offered.
+// It is the mode's panel while it is open (V19): the same box and the panel material, no float or drop shadow; the
+// shell suspends the mode underneath (visibility: hidden), so there is no glass over glass.
 export default function GraphWorkspace({ request, workspaceRoot, onClose }: GraphWorkspaceProps) {
   const canvasRef = useRef<HTMLDivElement | null>(null)
   const [size, setSize] = useState({ width: 900, height: 600 })
@@ -59,25 +69,22 @@ export default function GraphWorkspace({ request, workspaceRoot, onClose }: Grap
   }, [])
 
   return (
-    <div className="knowledge-graph-workspace" data-knowledge-graph-workspace="true">
+    <div className="knowledge-graph-workspace" data-knowledge-graph-workspace="true" style={{ inset: PANEL_INSET }}>
       <section
-        className="knowledge-graph-workspace__panel rn-float"
+        className="knowledge-graph-workspace__panel rn-panel"
         role="dialog"
         aria-modal="true"
         aria-label="全局浏览关系图谱"
       >
-        <header className="knowledge-graph-workspace__header">
-          <div>
-            <span>全局浏览</span>
-            <h2>关系图谱</h2>
-          </div>
+        <header className="knowledge-graph-workspace__header rn-panel__head">
+          <h2>关系图谱</h2>
           <div className="knowledge-graph-workspace__header-actions">
             <Segmented label="图谱范围" value={focus} onChange={setFocus} options={focusOptions} />
-            <IconButton icon={<X />} title="关闭全局浏览" size="lg" onClick={onClose} />
+            <IconButton icon={<X />} title="关闭全局浏览" onClick={onClose} />
           </div>
         </header>
 
-        <div ref={canvasRef} className="knowledge-graph-workspace__canvas">
+        <div ref={canvasRef} className="knowledge-graph-workspace__canvas rn-panel__body">
           {workspaceRoot ? (
             <GraphView
               workspaceRoot={workspaceRoot}

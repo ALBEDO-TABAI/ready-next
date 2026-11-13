@@ -93,9 +93,11 @@ test('workbench side and chat panels stay transparent while slots use the shared
   const sidePanel = readWorkspaceFile('src/renderer/modules/workbench/shell/ShellSidebar.tsx')
   const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
 
-  // W1 T6: the shell's side-panel and rail-slot tokens are retired with the alias layer; the panels sit on the glass.
+  // W1 T6: the shell's side-panel and rail-slot tokens are retired with the alias layer. The sidebar's column paints
+  // nothing; docked, its slot is the shared panel glass (.rn-panel, V18), the one source of that paint.
   assert.doesNotMatch(styles, /--workbench-(?:side-panel|rail-slot)-[a-z]+\s*:/)
   assert.match(sidePanel, /className=\{`shell-sidebar workbench-panel-frame/)
+  assert.match(sidePanel, /className=\{`shell-sidebar__slot\$\{floating \? '' : ' rn-panel'\}`\}/)
   const shellStyles = readWorkspaceFile('src/renderer/modules/workbench/shell/shell.css')
   assert.match(shellStyles, /\.shell-sidebar:not\(\.shell-float-drawer\)\s*\{\s*background:\s*transparent;\s*box-shadow:\s*none;/)
   assert.match(chatPanel, /background:\s*'transparent'/)

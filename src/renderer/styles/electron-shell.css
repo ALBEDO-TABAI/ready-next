@@ -8,14 +8,14 @@
   -webkit-app-region: no-drag;
 }
 
-/* Panel resize handle */
+/* Panel resize handles take no width of their own (V18): each stands in the frame gap beside it — after the sidebar's
+   panel (start), before the assistant (end) — and that gap is its hit area and holds its grip. */
 .resize-handle {
-  width: 6px;
+  width: 0;
   cursor: col-resize;
   position: relative;
-  flex-shrink: 0;
+  flex: none;
   z-index: 10;
-  transition: opacity 0.15s;
 }
 
 .resize-handle::before {
@@ -23,7 +23,7 @@
   position: absolute;
   top: 24%;
   bottom: 24%;
-  left: 50%;
+  left: calc(var(--rn-frame-gap) / 2);
   transform: translateX(-50%);
   width: 3px;
   border-radius: var(--rn-r-pill);
@@ -37,8 +37,19 @@
   position: absolute;
   top: 0;
   bottom: 0;
-  left: -3px;
-  right: -3px;
+  left: 0;
+  width: var(--rn-frame-gap);
+}
+
+.resize-handle[data-edge='end']::before {
+  left: auto;
+  right: calc(var(--rn-frame-gap) / 2);
+  transform: translateX(50%);
+}
+
+.resize-handle[data-edge='end']::after {
+  left: auto;
+  right: 0;
 }
 
 .resize-handle:hover::before,
@@ -47,10 +58,11 @@
   opacity: 0.94;
 }
 
-/* Between the two panes of a split: with each pane's 6px frame inset, the panels sit 16px apart (4px grid). */
+/* Between the two panes of a split: the panes' panels fill them sideways, so the handle is the 8px gap between the two
+   panels (V18), and its hit area reaches a little past it. */
 .workbench-split-resize-handle {
-  width: 4px;
-  flex: 0 0 4px;
+  width: var(--rn-frame-gap);
+  flex: none;
   cursor: col-resize;
   position: relative;
   align-self: stretch;

@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { AtSign, ChevronDown, ChevronRight, MessageSquare, Minimize2, MoreHorizontal, PanelLeftClose, Pencil, Plus, Puzzle, RotateCcw, Trash2 } from 'lucide-react'
+import { AtSign, ChevronDown, ChevronRight, MessageSquare, Minimize2, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Puzzle, RotateCcw, Trash2 } from 'lucide-react'
 import { requestShellAction } from '../../modules/workbench/commands/shell-actions'
+import { useShellAssistantTools } from '../../modules/workbench/shell/assistant-tools-slot'
 import { Button, IconButton, Input, MenuList, anchorOf, closeFloat, confirmDialog, isFloatOpen, openDialog, openMenu, type MenuEntry } from '../ui'
 import { FloatPanel } from '../ui/float/FloatPanel'
 import type { SessionRecallHit } from '../../../shared/session-recall'
@@ -53,6 +54,10 @@ interface ChatHeaderProps {
   onSessionRecallSearch: () => void
   onAttachSessionRecall: (conversationId: string) => void
   onTogglePanel?: () => void
+  /** The assistant is open (docked or as a card): the corner button reads 收起助手, otherwise 展开助手. */
+  panelOpen: boolean
+  /** The panel's header cell, while the panel is open: the title row renders into it. */
+  rowSlot: HTMLElement | null
   onHistoryOpen?: () => void
   sessionTitle?: string
   formatAgentName?: (agentId: string) => string
@@ -97,11 +102,14 @@ export default function ChatHeader({
   onSessionRecallSearch,
   onAttachSessionRecall,
   onTogglePanel,
+  panelOpen,
+  rowSlot,
   onHistoryOpen,
   sessionTitle,
   formatAgentName,
   formatTime,
 }: ChatHeaderProps) {
+  const toolsSlot = useShellAssistantTools()
   const [showHistory, setShowHistory] = useState(false)
   const [historyMenuPosition, setHistoryMenuPosition] = useState<FloatingMenuPosition | null>(null)
   const [historyMenuAnchor, setHistoryMenuAnchor] = useState<'title' | 'scope'>('title')
@@ -547,20 +555,92 @@ export default function ChatHeader({
     )
   }
 
+  // The header's buttons (V17) render into the shell's corner: a row on this head line while the assistant is docked,
+  // a column in the right strip while it is collapsed or a card; the same buttons in both, so focus and tooltips stay.
+  // The collapse / expand button holds the corner; the other four are beads on one path round it (data-bead counts
+  // from the corner, see .shell-assistant-tools in the shell's shell.css). The order is the row's reading order.
+  const operationsTitle = lifecyclePendingAction
+    ? '会话操作进行中'
+    : lifecycleUncertainty === 'stop'
+      ? '当前会话停止状态待确认'
+      : lifecycleUncertainty === 'close'
+        ? '关闭状态待确认，可在会话列表重试关闭'
+        : lifecycleUncertainty === 'reset'
+          ? '重置状态待确认，可重试重置'
+      : lifecycleUncertainty === 'compaction'
+        ? '压缩状态待确认，可重置当前对话'
+      : '当前对话操作'
+  const tools = (
+    <>
+      <IconButton
+        className="shell-assistant-tool"
+        data-bead="4"
+        data-chat-session-switcher="true"
+        icon={<MessageSquare />}
+        onClick={handleScopeButtonClick}
+        title="会话来源"
+        active={showHistory}
+        ref={scopeTriggerRef}
+        size="lg"
+      />
+      <IconButton
+        className="shell-assistant-tool"
+        data-bead="3"
+        icon={<Plus />}
+        onClick={() => { void onNewSession() }}
+        title="新建对话"
+        size="lg"
+      />
+      {/* The skills centre belongs to the assistant: it opens as a page beside settings (W2 §2.3). */}
+      <IconButton
+        className="shell-assistant-tool"
+        data-bead="2"
+        icon={<Puzzle />}
+        onClick={() => requestShellAction('open-skills')}
+        title="技能中心"
+        size="lg"
+      />
+      <IconButton
+        className="shell-assistant-tool"
+        data-bead="1"
+        icon={<MoreHorizontal />}
+        onClick={toggleOperationMenu}
+        data-float-anchor={OPERATION_MENU_ID}
+        aria-haspopup="menu"
+        disabled={operationsDisabled}
+        title={operationsTitle}
+        ref={operationMenuTriggerRef}
+        size="lg"
+      />
+      <IconButton
+        className="shell-assistant-corner"
+        data-assistant-toggle=""
+        icon={panelOpen ? <PanelLeftClose /> : <PanelLeftOpen />}
+        onClick={onTogglePanel}
+        title={panelOpen ? '收起助手 Tab' : '展开助手 Tab'}
+        aria-expanded={panelOpen}
+        size="lg"
+      />
+    </>
+  )
+
   return (
     <>
-      {/* The header row: on the head line, a panel head tall (V15; .chat-header-row in the shell's shell.css). */}
+      {/* The header row, while the panel is open: on the head line, a panel head tall (V15; .chat-header-row in the
+          shell's shell.css), its right end left to the buttons above. */}
+      {rowSlot && createPortal(
       <div
         ref={headerRef}
-        className="chat-header-row flex items-center justify-between"
+        className="chat-header-row flex items-center"
         style={{
-          padding: '0 14px',
+          paddingLeft: 14,
           borderBottom: '1px solid transparent',
           background: 'transparent',
           position: 'relative',
           overflow: 'visible',
           zIndex: 20,
           boxShadow: 'none',
+          gap: 8,
         }}
       >
         <div className="min-w-0 flex-1" data-chat-session-title="true">
@@ -618,85 +698,35 @@ export default function ChatHeader({
           ) : null}
         </div>
 
-        <div className="flex items-center" style={{ gap: 4, marginRight: -5 }} data-chat-session-menu="true">
-          <div className="relative" data-chat-session-switcher="true">
-            <IconButton
-              icon={<MessageSquare />}
-              onClick={handleScopeButtonClick}
-              title="会话来源"
-              active={showHistory}
-              ref={scopeTriggerRef}
-            />
-          </div>
+        {lifecyclePendingAction && (
+          <span style={{ fontSize: 11, color: 'var(--rn-ink-3)', whiteSpace: 'nowrap' }}>
+            {{
+              creating: '正在创建…',
+              resetting: '正在重置…',
+              stopping: '正在停止…',
+              closing: '正在关闭…',
+              compacting: '正在压缩…',
+            }[lifecyclePendingAction]}
+          </span>
+        )}
 
-          <IconButton
-            icon={<Plus />}
-            onClick={() => { void onNewSession() }}
-            title="新建对话"
-          />
-
-          {lifecyclePendingAction && (
-            <span style={{ fontSize: 11, color: 'var(--rn-ink-3)', whiteSpace: 'nowrap' }}>
-              {{
-                creating: '正在创建…',
-                resetting: '正在重置…',
-                stopping: '正在停止…',
-                closing: '正在关闭…',
-                compacting: '正在压缩…',
-              }[lifecyclePendingAction]}
-            </span>
-          )}
-
-          {!lifecyclePendingAction && lifecycleUncertainty && (
-            <span
-              data-codex-lifecycle-uncertain={lifecycleUncertainty}
-              style={{ fontSize: 11, color: 'var(--rn-warn)', whiteSpace: 'nowrap' }}
-            >
-              {{
-                stop: '停止状态待确认',
-                close: '关闭状态待确认',
-                reset: '重置状态待确认',
-                compaction: '压缩状态待确认',
-              }[lifecycleUncertainty]}
-            </span>
-          )}
-
-          {/* The skills centre belongs to the assistant: it opens as a page beside settings (W2 §2.3). */}
-          <IconButton
-            icon={<Puzzle />}
-            onClick={() => requestShellAction('open-skills')}
-            title="技能中心"
-          />
-
-          <IconButton
-            icon={<MoreHorizontal />}
-            onClick={toggleOperationMenu}
-            data-float-anchor={OPERATION_MENU_ID}
-            aria-haspopup="menu"
-            disabled={operationsDisabled}
-            title={lifecyclePendingAction
-              ? '会话操作进行中'
-              : lifecycleUncertainty === 'stop'
-                ? '当前会话停止状态待确认'
-                : lifecycleUncertainty === 'close'
-                  ? '关闭状态待确认，可在会话列表重试关闭'
-                  : lifecycleUncertainty === 'reset'
-                    ? '重置状态待确认，可重试重置'
-                : lifecycleUncertainty === 'compaction'
-                  ? '压缩状态待确认，可重置当前对话'
-                : '当前对话操作'}
-            ref={operationMenuTriggerRef}
-          />
-
-          {onTogglePanel && (
-            <IconButton
-              icon={<PanelLeftClose />}
-              onClick={onTogglePanel}
-              title="收起/展开聊天面板"
-            />
-          )}
-        </div>
-      </div>
+        {!lifecyclePendingAction && lifecycleUncertainty && (
+          <span
+            data-codex-lifecycle-uncertain={lifecycleUncertainty}
+            style={{ fontSize: 11, color: 'var(--rn-warn)', whiteSpace: 'nowrap' }}
+          >
+            {{
+              stop: '停止状态待确认',
+              close: '关闭状态待确认',
+              reset: '重置状态待确认',
+              compaction: '压缩状态待确认',
+            }[lifecycleUncertainty]}
+          </span>
+        )}
+      </div>,
+      rowSlot,
+      )}
+      {toolsSlot && createPortal(tools, toolsSlot)}
 
       {portalRoot && showHistory && historyMenuPosition && createPortal(
         <FloatPanel

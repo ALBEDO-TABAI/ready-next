@@ -10,15 +10,17 @@ import ShellRail from '../modules/workbench/shell/ShellRail'
 import { Button } from '../components/ui'
 import { useShellPresentation } from '../modules/workbench/shell/useShellPresentation'
 import ShellSidebar, { ShellSidebarSlotProvider } from '../modules/workbench/shell/ShellSidebar'
+import { ShellAssistantToolsContext } from '../modules/workbench/shell/assistant-tools-slot'
 import WorkbenchModeOutlet from '../components/layout/WorkbenchModeOutlet'
 import ChatPanel from '../components/agent/ChatPanel'
+import DraggableModeTabs from '../components/layout/DraggableModeTabs'
 import GraphWorkspace, { type GraphWorkspaceRequest } from '../components/graph/GraphWorkspace'
 import { invalidateGraphWorkspace } from '../components/graph/graph-session'
 import StatusBar from '../components/layout/StatusBar'
 import { useShellActions, useShellSidebarSlot } from '../modules/workbench/shell/useShellWiring'
 import { useRSSNotificationOpen } from '../modules/rss/notification-open'
 import { useBrowserTaskWorkSync } from '../modules/browser/browser-task-work'
-import { clampAssistantWidth as clampWorkbenchChatPanelWidth, clampSidebarWidth as clampWorkbenchSidePanelWidth } from '../../shared/workbench-shell-geometry'
+import { clampAssistantWidth as clampWorkbenchChatPanelWidth, clampSidebarWidth as clampWorkbenchSidePanelWidth, SHELL_ASSISTANT_STRIP_WIDTH } from '../../shared/workbench-shell-geometry'
 import {
   READY_WORKBENCH_MODE_CHANGE_EVENT,
   resolveBrowserVisibilityTransition,
@@ -84,9 +86,11 @@ function ResizeHandle({
     dispatchPanelResizeEvent: true,
   })
 
+  // The handle takes no width: it sits in the frame gap after the sidebar or before the assistant (V18).
   return (
     <div
       className="resize-handle"
+      data-edge={direction === 'right' ? 'start' : 'end'}
       onMouseDown={handleMouseDown}
     />
   )
@@ -159,6 +163,7 @@ export default function WorkbenchMode() {
   const [browserLayoutMotionPhase, setBrowserLayoutMotionPhase] = useState<BrowserHostLayoutPhase>('idle')
   const [graphWorkspaceRequest, setGraphWorkspaceRequest] = useState<GraphWorkspaceRequest | null>(null)
   const [findReplaceOpen, setFindReplaceOpen] = useState(false)
+  const [assistantTools, setAssistantTools] = useState<HTMLElement | null>(null)
   const workspaceError = workspaceInitError ?? formatWorkspaceWatcherFailure(watcherFailure)
   const workbenchSurfaceRefreshTimersRef = useRef<number[]>([])
   const browserLayoutPhase = isPanelResizing ? 'dragging' : browserLayoutMotionPhase
@@ -397,7 +402,8 @@ export default function WorkbenchMode() {
   // The assistant's browser tasks: one installation of their re-read triggers for the band, the sidebar and the cards.
   useBrowserTaskWorkSync()
   useShellActions({ toggleSidebar: toggleShellSidebar, toggleAssistant: toggleShellAssistant, openSkills: () => navigate('/skills'), openGraph: () => setGraphWorkspaceRequest({}), openFindReplace: () => setFindReplaceOpen(true) })
-  const sidebarSlot = useShellSidebarSlot({ workbenchMode, splitMode })
+  // The navigators change vertically with the content's horizontal slide (V23), when that slides and the sidebar shows.
+  const sidebarSlot = useShellSidebarSlot({ workbenchMode, splitMode, animate: modeScenePresentation === 'animated' && shell.sidebarShown })
 
 
   useEffect(() => () => {
@@ -788,9 +794,10 @@ export default function WorkbenchMode() {
             </div>
           )}
 
-          <TopBar sidebarShown={shell.sidebarShown} onSidebarToggle={toggleShellSidebar} />
+          <TopBar />
 
           <ShellSidebarSlotProvider value={sidebarSlot.value}>
+          <ShellAssistantToolsContext.Provider value={assistantTools}>
           <div
             className="relative flex flex-1 overflow-hidden"
             data-workbench-shell="true"
@@ -804,8 +811,6 @@ export default function WorkbenchMode() {
               onModeChange={(mode) => { void handleWorkbenchModeChange(mode) }}
               onSplitToggle={handleWorkbenchSplitToggle}
               onSidebarToggle={toggleShellSidebar}
-              assistantOpen={shell.assistantVisible}
-              onAssistantOpen={shell.toggleAssistant}
               sidebarShown={shell.sidebarShown}
             />
             <ShellSidebar
@@ -852,7 +857,7 @@ export default function WorkbenchMode() {
                       transitionPresentation={modeScenePresentation}
                       isMotionSettled={isMotionSettled}
                       browserLayoutPhase={browserLayoutPhase}
-                      suspended={graphWorkspaceRequest !== null}
+                      suspended={graphWorkspaceRequest !== null || findReplaceOpen}
                     />
                   </div>
                   <WorkbenchSplitResizeHandle
@@ -871,18 +876,18 @@ export default function WorkbenchMode() {
                       transitionPresentation={modeScenePresentation}
                       isMotionSettled={isMotionSettled}
                       browserLayoutPhase={browserLayoutPhase}
-                      suspended={graphWorkspaceRequest !== null}
+                      suspended={graphWorkspaceRequest !== null || findReplaceOpen}
                     />
                   </div>
                 </div>
               ) : (
-                <div className="relative flex flex-1 flex-col min-w-0 overflow-hidden" data-workbench-content-backdrop="true">
+                <div className="relative flex flex-1 flex-col min-w-0" data-workbench-content-backdrop="true">
                   <WorkbenchModeOutlet
                     mode={workbenchMode}
                     transitionPresentation={modeScenePresentation}
                     isMotionSettled={isMotionSettled}
                     browserLayoutPhase={browserLayoutPhase}
-                    suspended={graphWorkspaceRequest !== null}
+                    suspended={graphWorkspaceRequest !== null || findReplaceOpen}
                   />
                 </div>
               )}
@@ -902,14 +907,33 @@ export default function WorkbenchMode() {
               <ResizeHandle onResize={handleChatResize} direction="left" onResizeStateChange={handleChatResizeStateChange} />
             )}
 
+            {/* V17: while the assistant is not docked, a strip as wide as the rail keeps the right side, mirroring the left.
+                Its header buttons stand there in a column, or in a row on the docked panel's head line: the same buttons,
+                which ChatHeader portals into the corner element. Both come before the panel, so Tab reaches them after the
+                content and before the assistant's body. */}
+            <div className="shell-assistant-strip" data-shell-region="assistant-strip" aria-hidden="true"
+              style={{ width: shell.layout.assistant === 'docked' ? 0 : SHELL_ASSISTANT_STRIP_WIDTH }} />
+            <div ref={setAssistantTools} className="shell-assistant-tools" data-shell-assistant-tools=""
+              data-layout={shell.layout.assistant === 'docked' ? 'row' : 'column'} role="group" aria-label="助手" />
+
             <ChatPanel
               shellWidth={shell.assistantPanelWidth}
               panelState={shell.chatPanelState}
               presentation={shell.assistantFloating ? 'drawer' : 'docked'}
               workbenchMode={workbenchMode}
               onTogglePanel={shell.toggleAssistant}
+              // V20: the slot above the composer switches through the rail's own handlers, so both show one state.
+              modeSwitcher={(
+                <DraggableModeTabs
+                  activeMode={workbenchMode}
+                  splitMode={splitMode}
+                  onChange={(mode) => { void handleWorkbenchModeChange(mode) }}
+                  onSplitToggle={handleWorkbenchSplitToggle}
+                />
+              )}
             />
           </div>
+          </ShellAssistantToolsContext.Provider>
           </ShellSidebarSlotProvider>
 
           <StatusBar />

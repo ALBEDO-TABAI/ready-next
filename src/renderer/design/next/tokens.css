@@ -1,7 +1,7 @@
 /* The one token source of Ready Next (W1 §3; materials, type and controls follow vvf-2-1, 2026-11-13 V1–V10).
    Materials: the ground (the window), panel glass (--rn-sheet) for content, inlay (--rn-inlay) inside a panel,
    well (--rn-well) for inputs and spatial content, float (--rn-float) for menus and dialogs;
-   the liquid glass (--rn-liquid-*) is only the assistant composer.
+   the liquid glass (--rn-liquid-*) is the assistant composer and the row above it (project chip, mode switch slot; V21).
    --rn-paper is the colour of a book page in the reader, not the app's paper.
    Module-specific cloth and shelf tokens stay namespaced. */
 @font-face { font-family: 'RN Inter'; src: url('./fonts/Inter.woff2') format('woff2'); font-weight: 100 900; font-display: swap; }
@@ -74,7 +74,11 @@
 
   /* ---- materials (V1, V2): panel glass, inlay, well, float ---- */
   --rn-sheet: rgb(var(--rn-glass-tint) / var(--rn-glass-alpha-strong));
-  --rn-sheet-shadow: inset 0 1px 0 var(--rn-glass-inner-hi), inset 0 -1px 0 var(--rn-glass-inner-lo), inset 0 0 0 .5px var(--rn-glass-edge), var(--rn-shadow-2);
+  /* A panel's outer shadow (V22): very soft and spread evenly to all sides, so it is never a ledge under the panel and
+     is still whole inside the 8px frame gaps; the shell's clip regions leave --rn-panel-shadow-reach of room for it. */
+  --rn-panel-shadow: 0 1px 3px rgb(10 10 20 / .035), 0 0 28px rgb(10 10 30 / .055);
+  --rn-panel-shadow-reach: 32px;
+  --rn-sheet-shadow: inset 0 1px 0 var(--rn-glass-inner-hi), inset 0 -1px 0 var(--rn-glass-inner-lo), inset 0 0 0 .5px var(--rn-glass-edge), var(--rn-panel-shadow);
   --rn-inlay: rgb(var(--rn-glass-tint) / .5);
   --rn-inlay-hover: rgb(var(--rn-glass-tint) / .85);
   --rn-well: rgb(11 11 14 / .045);
@@ -92,12 +96,26 @@
   --rn-capsule-on-shadow: var(--rn-btn-ink-shadow);
   --rn-capsule-on-ink: var(--rn-on-inverse);
   --rn-card-shadow: 0 1px 2px rgb(10 10 20 / .06), 0 6px 16px -8px rgb(10 10 30 / .18);
-  /* The assistant composer keeps its pre-B4 liquid glass (user, 2026-11-11): veil, hairline rim, edge ring. */
+  /* The assistant composer keeps its pre-B4 liquid glass (user, 2026-11-11): veil, hairline rim, edge ring; the row above
+     it shares it (V21). A little more depth (2026-11-13): a brighter top edge with a soft light pooled under it, a thin
+     darker line along the bottom (thickness) and a low contact shadow (--rn-liquid-shadow; it stays inside the 8px
+     below the composer, where the assistant body clips). */
   --rn-liquid-veil: rgba(248, 250, 252, 0.32);
-  --rn-liquid-veil-edge: inset 0 1px 0 rgba(255, 255, 255, 0.42), inset 0 -1px 0 rgba(255, 255, 255, 0.14);
-  --rn-liquid-rim: rgba(255, 255, 255, 0.24);
-  --rn-liquid-rim-edge: inset 0 0 0 1px rgba(255, 255, 255, 0.07), inset 0 1px 0 rgba(255, 255, 255, 0.24);
-  --rn-liquid-ring: linear-gradient(132deg, rgba(255, 255, 255, 0.02) 0%, rgba(255, 255, 255, 0.42) 30%, rgba(255, 255, 255, 0.02) 56%, rgba(255, 255, 255, 0.28) 78%, rgba(255, 255, 255, 0.02) 100%);
+  --rn-liquid-veil-edge: inset 0 1px 0 rgba(255, 255, 255, 0.62), inset 0 8px 12px -10px rgba(255, 255, 255, 0.55), inset 0 -1px 0 rgba(11, 11, 14, 0.05);
+  --rn-liquid-rim: rgba(255, 255, 255, 0.34);
+  --rn-liquid-rim-edge: inset 0 0 0 1px rgba(255, 255, 255, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.36);
+  --rn-liquid-ring: linear-gradient(132deg, rgba(255, 255, 255, 0.02) 0%, rgba(255, 255, 255, 0.56) 30%, rgba(255, 255, 255, 0.02) 56%, rgba(255, 255, 255, 0.36) 78%, rgba(255, 255, 255, 0.02) 100%);
+  --rn-liquid-shadow: 0 1px 1px rgba(10, 10, 20, 0.06), 0 3px 10px -4px rgba(10, 10, 30, 0.16);
+  /* The slot's thumb (V26): a clear lens lying on the icons, flush with the track's edge. Its glass is told by light:
+     a bright ring, a top specular line, a catch-light at the bottom, a soft glow just inside the edge and a faint
+     sheen across the body. --rn-liquid-lens-smoke (a layer on the track under the glyphs) is a very soft dimming of
+     the middle only, fading to nothing before the edge: it sets off the rim's refraction and highlights, and is
+     neither a dark disc nor absent (user, 2026-11-13). */
+  --rn-liquid-lens-rim: inset 0 0 0 .5px rgba(255, 255, 255, .75), inset 0 1.5px 0 rgba(255, 255, 255, .95), inset 0 -1px 0 rgba(255, 255, 255, .5), inset 0 0 0 2px rgba(255, 255, 255, .22), inset 0 0 5px 1.5px rgba(255, 255, 255, .5);
+  --rn-liquid-lens-sheen: linear-gradient(168deg, rgba(255, 255, 255, .28) 0%, rgba(255, 255, 255, 0) 42%, rgba(255, 255, 255, .1) 100%);
+  --rn-liquid-lens-smoke: radial-gradient(ellipse 62% 70% at 50% 54%, rgba(11, 11, 14, .05) 0%, rgba(11, 11, 14, .03) 46%, rgba(11, 11, 14, 0) 100%);
+  /* The slot's lit glyph: white, with a hair of ink at its edge and a soft white halo. */
+  --rn-liquid-glyph-lit: drop-shadow(0 0 .6px rgba(11, 11, 14, .55)) drop-shadow(0 1px 1.5px rgba(11, 11, 14, .26)) drop-shadow(0 0 4px rgba(255, 255, 255, .9));
   --rn-liquid-ring-drag: linear-gradient(132deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.86) 32%, rgba(255, 255, 255, 0.18) 55%, rgba(255, 255, 255, 0.48) 82%, rgba(255, 255, 255, 0.06) 100%);
   --rn-liquid-projection-veil: linear-gradient(160deg, rgba(255, 255, 255, 0.20), rgba(248, 250, 252, 0.06) 52%, rgba(255, 255, 255, 0.12));
   /* The composer's radius (18) and its own text inks: the dark composer keeps the softer greys it always had. */
@@ -202,7 +220,8 @@
   --rn-inverse: #f4f4f6; --rn-on-inverse: #0b0b0e;
   --rn-logo-ink: #0b0b0e;
   --rn-sheet: rgb(var(--rn-glass-tint) / var(--rn-glass-alpha-strong));
-  --rn-sheet-shadow: inset 0 1px 0 var(--rn-glass-inner-hi), inset 0 -1px 0 var(--rn-glass-inner-lo), inset 0 0 0 .5px var(--rn-glass-edge), var(--rn-shadow-2);
+  --rn-panel-shadow: 0 1px 3px rgb(0 0 0 / .28), 0 0 28px rgb(0 0 0 / .26);
+  --rn-sheet-shadow: inset 0 1px 0 var(--rn-glass-inner-hi), inset 0 -1px 0 var(--rn-glass-inner-lo), inset 0 0 0 .5px var(--rn-glass-edge), var(--rn-panel-shadow);
   --rn-inlay: rgb(var(--rn-glass-tint) / .5);
   --rn-inlay-hover: rgb(var(--rn-glass-tint) / .85);
   --rn-well: rgb(0 0 0 / .26);
@@ -219,10 +238,15 @@
   --rn-capsule-on-ink: var(--rn-ink);
   --rn-card-shadow: 0 1px 2px rgb(0 0 0 / .4), 0 6px 16px -8px rgb(0 0 0 / .6);
   --rn-liquid-veil: rgba(26, 26, 26, 0.62);
-  --rn-liquid-veil-edge: inset 0 1px 0 rgba(232, 232, 232, 0.14), inset 0 -1px 0 rgba(0, 0, 0, 0.16);
-  --rn-liquid-rim: rgba(232, 232, 232, 0.14);
-  --rn-liquid-rim-edge: inset 0 1px 0 rgba(255, 255, 255, 0.18), inset 0 -1px 0 rgba(255, 255, 255, 0.05);
-  --rn-liquid-ring: linear-gradient(132deg, rgba(255, 255, 255, 0.01) 0%, rgba(232, 232, 232, 0.18) 30%, rgba(255, 255, 255, 0.01) 56%, rgba(232, 232, 232, 0.12) 78%, rgba(255, 255, 255, 0.01) 100%);
+  --rn-liquid-veil-edge: inset 0 1px 0 rgba(232, 232, 232, 0.22), inset 0 8px 12px -10px rgba(255, 255, 255, 0.06), inset 0 -1px 0 rgba(0, 0, 0, 0.32);
+  --rn-liquid-rim: rgba(232, 232, 232, 0.18);
+  --rn-liquid-rim-edge: inset 0 1px 0 rgba(255, 255, 255, 0.26), inset 0 -1px 0 rgba(0, 0, 0, 0.22);
+  --rn-liquid-ring: linear-gradient(132deg, rgba(255, 255, 255, 0.01) 0%, rgba(232, 232, 232, 0.24) 30%, rgba(255, 255, 255, 0.01) 56%, rgba(232, 232, 232, 0.16) 78%, rgba(255, 255, 255, 0.01) 100%);
+  --rn-liquid-shadow: 0 1px 1px rgba(0, 0, 0, 0.34), 0 3px 10px -4px rgba(0, 0, 0, 0.5);
+  --rn-liquid-lens-rim: inset 0 0 0 .5px rgba(255, 255, 255, .32), inset 0 1.5px 0 rgba(255, 255, 255, .5), inset 0 -1px 0 rgba(255, 255, 255, .16), inset 0 0 0 2px rgba(255, 255, 255, .07), inset 0 0 5px 1.5px rgba(255, 255, 255, .16);
+  --rn-liquid-lens-sheen: linear-gradient(168deg, rgba(255, 255, 255, .12) 0%, rgba(255, 255, 255, 0) 42%, rgba(255, 255, 255, .05) 100%);
+  --rn-liquid-lens-smoke: radial-gradient(ellipse 62% 70% at 50% 54%, rgba(0, 0, 0, .13) 0%, rgba(0, 0, 0, .07) 46%, rgba(0, 0, 0, 0) 100%);
+  --rn-liquid-glyph-lit: drop-shadow(0 0 1px rgba(255, 255, 255, .86)) drop-shadow(0 0 3px rgba(255, 255, 255, .32));
   --rn-liquid-ring-drag: var(--rn-liquid-ring);
   --rn-liquid-projection-veil: radial-gradient(circle at 20% 18%, rgba(232, 232, 232, .09), transparent 28%), radial-gradient(circle at 76% 62%, rgba(232, 232, 232, .06), transparent 36%), linear-gradient(180deg, rgba(46, 46, 46, .26), rgba(18, 18, 18, .44));
   --rn-liquid-ink: rgba(232, 232, 232, .86);
@@ -271,7 +295,7 @@
   --rn-glass-alpha: 1; --rn-glass-alpha-strong: 1; --rn-glass-alpha-clear: 1;
   --rn-sheet: rgb(var(--rn-glass-tint));
   --rn-liquid-veil: var(--rn-sheet); --rn-liquid-veil-edge: var(--rn-card-shadow);
-  --rn-liquid-rim: var(--rn-hair-2); --rn-liquid-rim-edge: none;
+  --rn-liquid-rim: var(--rn-hair-2); --rn-liquid-rim-edge: none; --rn-liquid-shadow: 0 0 transparent;
 }
 
 [data-theme='dark'][data-transparency='reduced'] {

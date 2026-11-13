@@ -3,20 +3,25 @@ import type { WorkbenchMode } from '../../../stores/useMode'
 import { useFastCard } from '../../../stores/useFastCard'
 import { openToday } from '../../today/open-today'
 import { SHELL_ACTION_EVENT } from '../commands/shell-actions'
+import { useNavigatorMotion } from './navigator-motion'
 
 /**
  * The shell's one sidebar slot (W2 §2.2): which mode's navigator shows (the current mode, or in split
- * view the pane last used), and the value the navigators read (the slot element and that mode).
+ * view the pane last used), and the value the navigators read (the slot element, that mode, and while it changes the
+ * vertical motion between the two navigators, V23).
  */
-export function useShellSidebarSlot({ workbenchMode, splitMode }: {
+export function useShellSidebarSlot({ workbenchMode, splitMode, animate }: {
   workbenchMode: WorkbenchMode
   splitMode: WorkbenchMode | null
+  /** The change moves (an animated mode change with the sidebar on screen); otherwise the navigators swap at once. */
+  animate: boolean
 }) {
   const [element, setElement] = useState<HTMLElement | null>(null)
   const [focusedPane, setFocusedPane] = useState<'primary' | 'split'>('primary')
   useEffect(() => { if (!splitMode) setFocusedPane('primary') }, [splitMode])
   const mode = splitMode && focusedPane === 'split' ? splitMode : workbenchMode
-  const value = useMemo(() => ({ element, mode }), [element, mode])
+  const motion = useNavigatorMotion(mode, animate)
+  const value = useMemo(() => ({ element, mode, motion }), [element, mode, motion])
   return { value, mode, setElement, focusPrimary: () => setFocusedPane('primary'), focusSplit: () => setFocusedPane('split') }
 }
 

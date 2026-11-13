@@ -8,6 +8,8 @@ enforce: true
 # Ready Next W2 外壳统一：图标栏、一个侧栏、内容、助手
 
 > 2026-11-13 注：[vvf 设计语言计划](2026-11-13-ready-next-vvf-design-language-implementation.md) §1.1 的 V13–V15 取代本文三条规则：收起后在窗口左缘悬停滑出（§2.2、§2.5 第 2 条）改为顶部留白左侧的唯一开关、图标栏当前模式图标与 `⌘B`，窄窗口下侧栏是一张浮层卡片；各导航器头部的收起 / 固定按钮删除；各模式的标签条与地址栏不移入上留白（§8“未做”），改为各功能区面板自己的头行。下文保留原样作为历史。
+>
+> 2026-11-13 注：按 vvf 计划 §1.2 的 V20，助手输入框上方、“选择项目”右边的模式切换槽（`DraggableModeTabs`）补回，取代 §2.4 第 1 条与 S2 的“助手面板里没有模式切换控件”；图标栏的模式图标保留，两处走同一组切换处理、显示同一个状态，S5 的模式切换入口按“图标栏 + 切换槽”计。
 
 属于 [收束路线图](2026-11-11-ready-next-coherence-roadmap.md) 的 W2，落实 E1、E4、E5、E6、E11。证据：[b-shell](../audits/2026-11-11-ready-next-coherence-audit/b-shell.md)、[e-calendar](../audits/2026-11-11-ready-next-coherence-audit/e-calendar.md) 与实机观察 O1、O2、O4、O5、O10、O12、O15。外观遵循 [W1](2026-11-11-ready-next-w1-design-system-implementation.md)。
 

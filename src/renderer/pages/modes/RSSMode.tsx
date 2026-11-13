@@ -634,7 +634,7 @@ export default function RSSMode({
         {/* One block (V11): the panel's head row holds the way back, where you are and the view's tools; every RSS view
             is its body. Nothing of 资讯 sits on the ground above it. */}
         <div
-          className="workbench-canvas-shell rss-workbench-canvas relative flex h-full min-h-0 overflow-hidden"
+          className="workbench-canvas-shell rss-workbench-canvas relative flex h-full min-h-0"
         >
           <RSSTopbarContext.Provider value={topbarSlots}>
             {/* 栏目导航在外壳唯一的侧栏里（W2-T4）。 */}

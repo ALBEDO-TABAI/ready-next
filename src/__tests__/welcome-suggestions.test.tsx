@@ -209,7 +209,8 @@ test('welcome panel loads the active workspace snapshot and fills the clicked pr
       })
 
       assert.deepEqual(requestedRoots, [['/Users/test/Documents/project']])
-      assert.equal(container.querySelectorAll('[data-ready-dot-r] circle').length, 22)
+      // The welcome shows the tagline alone; the dot mark above it is gone (it stays in 设置 › 关于).
+      assert.equal(container.querySelectorAll('[data-ready-dot-r]').length, 0)
       assert.match(container.textContent || '', /Ready for work , Ready for life\./)
       assert.match(container.textContent || '', /继续 · 夏季发布/)
 

@@ -55,7 +55,8 @@ test('chat composer delegates its material to the liquid lens instead of the ins
   assert.match(chatInput, /bevel=\{22\}/)
   assert.match(chatInput, /ior=\{1\.34\}/)
   assert.match(chatInput, /dome=\{2\}/)
-  assert.match(chatInput, /strength=\{3\.2\}/)
+  // 2026-11-13: a little more edge refraction for the composer row's depth (3.2 → 3.6); the bevel and clear centre stay.
+  assert.match(chatInput, /strength=\{3\.6\}/)
   assert.match(chatInput, /blur=\{3\.5\}/)
   assert.match(chatInput, /frost=\{0\}/)
   assert.match(chatInput, /blurBeforeRefraction/)

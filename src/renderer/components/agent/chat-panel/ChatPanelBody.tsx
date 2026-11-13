@@ -84,6 +84,8 @@ interface ChatPanelBodyProps extends Omit<TaskToolSnapshotProps, 'children' | 'c
   }>
   onDetachSessionRecall: (conversationId: string) => void | Promise<void>
   dismissSoftError: (scopeId: string) => void
+  /** The mode switch slot (V20), right of the project chip; the shell owns its state and handlers. */
+  modeSwitcher?: ReactNode
   attachments: ChatAttachment[]
   removeAttachment: (id: string) => void
   inputValue: string
@@ -162,6 +164,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
     attachedSessionRecallCapsules,
     onDetachSessionRecall,
     dismissSoftError,
+    modeSwitcher,
     attachments,
     removeAttachment,
     inputValue,
@@ -562,6 +565,9 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
 
             <div className="ready-chat-composer-context-row">
               <ProjectSelector />
+              {modeSwitcher && (
+                <div className="ready-chat-mode-tabs-dock" data-chat-mode-tabs-dock="true">{modeSwitcher}</div>
+              )}
             </div>
 
             <ChatInput

@@ -1,27 +1,30 @@
 /* Ready Next shell (W2): the rail and the bands live on the window glass (W1 DL1), so nothing here
    paints a panel background, border or shadow. Only --rn-* tokens (W1 DS1). */
 
-/* The top band's left cluster (V12, V13): the sidebar's switch, then the wordmark. */
+/* The top band's left end (V12, V24): the wordmark, 12px after the traffic lights. */
 .shell-band-lead {
   display: flex;
   align-items: center;
-  gap: var(--rn-s3);
   min-width: 0;
 }
 
-/* The wordmark, as in vvf's top bar: Instrument Serif, the one serif of the interface. It is a label, so the band
-   still drags the window through it. Instrument Serif sits low in its line box (ascent .99, descent .31, x-height .51
-   of the em): raising it by .085em puts its x-height centre on the band's centre line, level with the switch's icon. */
+/* The wordmark, as in vvf's top bar: Instrument Serif, the one serif of the interface, at 22px (a logo, outside the
+   type scale). It is a label, so the band still drags the window through it. Its visual centre sits on the band's
+   centre line, which is the traffic lights' (Main places them centred in the band). Measured from the font (CoreText,
+   em units from the baseline): R −.009….720, e and a −.009….516, d −.009….740, y −.205….510; the width-weighted middle
+   of those glyph boxes is .281em above the baseline (the cap-height middle, .36, pulled down by the y's descender).
+   With line-height 1 the baseline lies .84em below the box's top (ascent .99, descent .31), so that middle is .059em
+   below the box's centre (1.3px at 22px): raised by as much. */
 .shell-wordmark {
   font-family: var(--rn-font-wordmark);
   font-weight: 400;
-  font-size: var(--rn-t-title);
+  font-size: 22px;
   line-height: 1;
   letter-spacing: -.01em;
   color: var(--rn-ink);
   white-space: nowrap;
   user-select: none;
-  transform: translateY(-.085em);
+  transform: translateY(-.059em);
 }
 
 .shell-rail {
@@ -125,8 +128,11 @@
   pointer-events: none;
 }
 
-/* The one sidebar (W2 §2.2): glass, no frame of its own; the mode's navigator fills the slot. Docked, it keeps the
-   frame gap above and below like the panels (V15), so its header row starts on the head line. */
+/* The one sidebar (W2 §2.2): the mode's navigator fills its slot. Docked (V18), the slot is a panel like the content's
+   (.rn-panel on it), as wide as the stored sidebar width and right at the rail's edge (V25); the frame gap above and
+   below gives it the content panel's top, bottom and head line, and the 8px gap after it belongs to the content column
+   (its margin, below). The column paints nothing and lets the panel's shadow out (V22), except across that gap: the
+   shadow stops at the content panel's edge, so it never shows through the neighbouring glass. The panel clips. */
 .shell-sidebar {
   flex-shrink: 0;
   display: flex;
@@ -140,6 +146,8 @@
   background: transparent;
   box-shadow: none;
   padding-block: var(--rn-frame-gap);
+  overflow: visible;
+  clip-path: inset(calc(-1 * var(--rn-panel-shadow-reach)) calc(-1 * var(--rn-frame-gap)) calc(-1 * var(--rn-panel-shadow-reach)) calc(-1 * var(--rn-panel-shadow-reach)));
 }
 
 .shell-sidebar__slot,
@@ -154,6 +162,49 @@
 
 .shell-navigator[hidden] {
   display: none;
+}
+
+/* V23: a mode change moves the navigators vertically, in the rail's direction, in step with the content's horizontal
+   slide (280ms on its curve, the mode scene's animation in ritual-overlay.css): going down the rail the new navigator
+   rises from below and the old one leaves upward; going up, the reverse. The leaving one lies over the other until it
+   has gone, inert; the panel stays put and clips them. */
+.shell-navigator[data-nav-motion='leave'] {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  animation: shell-navigator-leave-up 280ms cubic-bezier(0.24, 1, 0.36, 1) forwards;
+}
+
+.shell-navigator[data-nav-motion='leave'][data-nav-direction='up'] {
+  animation-name: shell-navigator-leave-down;
+}
+
+.shell-navigator[data-nav-motion='enter'] {
+  animation: shell-navigator-enter-from-below 280ms cubic-bezier(0.24, 1, 0.36, 1) both;
+}
+
+.shell-navigator[data-nav-motion='enter'][data-nav-direction='up'] {
+  animation-name: shell-navigator-enter-from-above;
+}
+
+@keyframes shell-navigator-enter-from-below {
+  from { transform: translateY(var(--rn-s5)); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+@keyframes shell-navigator-enter-from-above {
+  from { transform: translateY(calc(-1 * var(--rn-s5))); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+@keyframes shell-navigator-leave-up {
+  from { transform: none; opacity: 1; }
+  to { transform: translateY(calc(-1 * var(--rn-s5))); opacity: 0; }
+}
+
+@keyframes shell-navigator-leave-down {
+  from { transform: none; opacity: 1; }
+  to { transform: translateY(var(--rn-s5)); opacity: 0; }
 }
 
 /* One head line (V15): a navigator's header row is as tall as a panel's head row and starts at the same y, the title
@@ -178,14 +229,92 @@
 }
 
 /* The assistant's header row is on the same line: docked, the column starts at the band, so the row keeps the frame
-   gap above it; in the narrow-window drawer the card itself starts on the line. */
+   gap above it; in the narrow-window drawer the card itself starts on the line. Docked, the row leaves its right end to
+   the assistant's buttons (.shell-assistant-tools in their row), which lie over it; the card's row is all title, its
+   buttons stand in the strip beside it. */
+[data-workbench-shell] {
+  /* The pitch of the rail and of the assistant's buttons: a 32px button and the 4px gap. */
+  --shell-tool-pitch: calc(var(--rn-control-h-lg) + var(--rn-s1));
+}
+
 .chat-header-row {
   height: var(--rn-panel-head-h);
   margin-top: var(--rn-frame-gap);
+  padding-right: calc(var(--rn-rail-w) / 2 + 4 * var(--shell-tool-pitch) + var(--rn-control-h-lg) / 2 + var(--rn-s2));
 }
 
 .shell-float-drawer .chat-header-row {
   margin-top: 0;
+  padding-right: 14px;
+}
+
+/* V17: the right strip (as wide as the rail) that the shell keeps while the assistant is not docked; window glass. */
+.shell-assistant-strip {
+  flex: none;
+  min-width: 0;
+}
+
+/* The assistant's header buttons, over the top-right corner of the shell row. The collapse / expand button holds the
+   corner: centred in the strip and on the head line in both states, so it never moves. The other four ride one
+   L-shaped path round a bend under it: docked, a row on the head line to its left (the button nearest the corner
+   first); otherwise a column down the strip, on the rail's pitch so the two columns mirror each other.
+   Path coordinates (px, in this box): its width is the strip plus four pitches (52 + 4 × 36 = 196); the corner centre is
+   (196 − 26, 8 + 44 / 2) = (170, 30); the row runs along y 30 to x 134, a quarter circle of one pitch (r 36) cuts inside
+   the corner, and the column runs down x 170. */
+.shell-assistant-tools {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 30;
+  width: calc(var(--rn-rail-w) + 4 * var(--shell-tool-pitch));
+  height: calc(var(--rn-frame-gap) + var(--rn-panel-head-h) / 2 + 4 * var(--shell-tool-pitch) + var(--rn-control-h-lg) / 2);
+  pointer-events: none;
+}
+
+.shell-assistant-tools > * {
+  pointer-events: auto;
+}
+
+.shell-assistant-tools .shell-assistant-corner {
+  position: absolute;
+  /* above the beads: a bead rounding the bend passes under the corner button, not over it */
+  z-index: 1;
+  top: calc(var(--rn-frame-gap) + (var(--rn-panel-head-h) - var(--rn-control-h-lg)) / 2);
+  right: calc((var(--rn-rail-w) - var(--rn-control-h-lg)) / 2);
+}
+
+/* Each bead's place on the path in the row and in the column. They move as one train, like beads on a string: every
+   bead travels the same distance (three pitches plus the bend) in the same time, so they keep their order and spacing
+   round the corner and never pass one another; the row read left to right is the column read top to bottom. The
+   travel is a little longer than the panel's width change (180ms, modules/workbench/panel-motion.ts) so the bend is
+   seen; a bead only ever moves towards the strip while the panel closes. */
+.shell-assistant-tools .shell-assistant-tool {
+  position: absolute;
+  top: 0;
+  left: 0;
+  offset-path: path('M 26 30 H 134 A 36 36 0 0 1 170 66 V 174');
+  offset-anchor: 50% 50%;
+  offset-rotate: 0deg;
+  offset-distance: var(--bead-row);
+  /* The icon button's own feedback (primitives.css) stays alongside the travel. */
+  transition:
+    offset-distance var(--rn-d-3) var(--rn-ease-std),
+    transform 520ms var(--rn-ease-spring),
+    background-color var(--rn-d-1) var(--rn-ease-std),
+    color var(--rn-d-1) var(--rn-ease-std);
+}
+
+.shell-assistant-tools[data-layout='column'] .shell-assistant-tool {
+  offset-distance: var(--bead-column);
+}
+
+.shell-assistant-tool[data-bead='1'] { --bead-row: 108px; --bead-column: 272.55px; }
+.shell-assistant-tool[data-bead='2'] { --bead-row: 72px; --bead-column: 236.55px; }
+.shell-assistant-tool[data-bead='3'] { --bead-row: 36px; --bead-column: 200.55px; }
+.shell-assistant-tool[data-bead='4'] { --bead-row: 0px; --bead-column: 164.55px; }
+
+[data-panel-width-transition='instant'] .shell-assistant-tool {
+  transition: none;
 }
 
 /* Narrow windows (V14): the sidebar is a card over the content, the assistant a drawer on the right. Both are float
@@ -202,7 +331,8 @@
 }
 
 .shell-float-drawer[data-side='right'] {
-  right: var(--rn-frame-gap);
+  /* Beside the strip, never over it (V17). */
+  right: calc(var(--rn-rail-w) + var(--rn-frame-gap));
 }
 
 .shell-float-drawer[data-side='left'] {
@@ -227,10 +357,33 @@
 }
 
 /* Focus moving into a drawer must not scroll the shell sideways: a scrolled shell row would shift
-   the content and leave the native web view placed against the shifted rectangle. */
+   the content and leave the native web view placed against the shifted rectangle. The clip leaves room for shadows
+   (V22): the shell row as far as the bands reach, so a floating card's larger shadow is only cut by the window; the
+   content column a panel shadow's reach, except next to a docked sidebar, where the central panel's shadow stops at
+   the sidebar panel's edge, across the 8px gap and not over the neighbouring glass. */
 [data-workbench-shell],
 [data-shell-region='content'] {
   overflow: clip;
+}
+
+[data-workbench-shell] {
+  overflow-clip-margin: var(--rn-band-h);
+}
+
+[data-shell-region='content'] {
+  overflow-clip-margin: var(--rn-panel-shadow-reach);
+  clip-path: inset(calc(-1 * var(--rn-panel-shadow-reach)));
+}
+
+/* The gaps between panels (V18, V25) are the content column's margins: after a docked sidebar, before a docked
+   assistant. Next to the rail or the strip the panel starts right at their edge. The resize handles stand in them. */
+[data-shell-sidebar-dock='docked'] > [data-shell-region='content'] {
+  margin-left: var(--rn-frame-gap);
+  clip-path: inset(calc(-1 * var(--rn-panel-shadow-reach)) calc(-1 * var(--rn-panel-shadow-reach)) calc(-1 * var(--rn-panel-shadow-reach)) calc(-1 * var(--rn-frame-gap)));
+}
+
+[data-shell-assistant-dock='docked'] > [data-shell-region='content'] {
+  margin-right: var(--rn-frame-gap);
 }
 
 /* overflow: clip is not a scroll container, so as a flex item the shell row would keep its content's
@@ -242,7 +395,12 @@
 
 @media (prefers-reduced-motion: reduce) {
   .shell-float-drawer,
-  .shell-float-drawer[data-open='false'] {
+  .shell-float-drawer[data-open='false'],
+  .shell-assistant-tools .shell-assistant-tool {
     transition: none;
+  }
+
+  .shell-navigator[data-nav-motion] {
+    animation: none;
   }
 }

@@ -58,11 +58,10 @@ export interface LiquidLensProps {
   /** Backdrop contrast, 1 = neutral. */
   contrast?: number
   /**
-   * Chromatic aberration: per-channel displacement spread in px.
-   * Only use over OPAQUE backdrops. The per-channel recombination cannot
-   * preserve premultiplied alpha, so on translucent surfaces (native
-   * vibrancy windows) any value > 0 collapses the backdrop to ~1/3
-   * brightness. Default 0.
+   * Chromatic aberration: per-channel displacement spread in px. The three
+   * channel images are recombined opaque and take their coverage back from
+   * the centre (green) channel, so translucent backdrops (native vibrancy
+   * windows, glass panels) keep their brightness. Default 0.
    */
   aberration?: number
   /**
@@ -258,7 +257,7 @@ export function LiquidLens({
                   <feColorMatrix
                     in="dispR"
                     type="matrix"
-                    values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0"
+                    values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0 1"
                     result="chanR"
                   />
                   <feDisplacementMap
@@ -272,7 +271,7 @@ export function LiquidLens({
                   <feColorMatrix
                     in="dispG"
                     type="matrix"
-                    values="0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0"
+                    values="0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 0 1"
                     result="chanG"
                   />
                   <feDisplacementMap
@@ -286,11 +285,13 @@ export function LiquidLens({
                   <feColorMatrix
                     in="dispB"
                     type="matrix"
-                    values="0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0"
+                    values="0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 0 1"
                     result="chanB"
                   />
                   <feBlend in="chanR" in2="chanG" mode="screen" result="chanRG" />
-                  <feBlend in="chanRG" in2="chanB" mode="screen" result="lensOut" />
+                  <feBlend in="chanRG" in2="chanB" mode="screen" result="chanRGB" />
+                  {/* Opaque channels screen into one colour; the centre channel's alpha restores the coverage. */}
+                  <feComposite in="chanRGB" in2="dispG" operator="in" result="lensOut" />
                 </>
               ) : (
                 <feDisplacementMap

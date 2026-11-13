@@ -4,6 +4,10 @@ export const READY_WORKBENCH_MODE_CHANGE_EVENT = 'ready:workbench-mode-change-re
 
 export type WorkbenchModeChangePresentation = 'animated' | 'immediate'
 
+/** How long a mode change moves the content's scenes (and, in step, the sidebar's navigators, V23). The CSS animations
+ *  that carry it (ritual-overlay.css, shell.css) use the same 280ms on cubic-bezier(0.24, 1, 0.36, 1). */
+export const WORKBENCH_MODE_SCENE_TRANSITION_MS = 280
+
 export function shouldAnimateWorkbenchModeTransition(
   presentation: WorkbenchModeChangePresentation,
   reducedMotion: boolean,

@@ -20,7 +20,7 @@ test('dark liquid chrome removes the old top-edge glow from shared panel surface
   assert.doesNotMatch(cardBlock[1], /gradient\(|backdrop-filter/)
 })
 
-test('the shared sidebar identifies its mode and stays transparent on the window glass', () => {
+test('the shared sidebar identifies its mode; its column paints nothing and, docked, its slot is the panel glass (V18)', () => {
   const sidebar = readWorkspaceFile('src/renderer/modules/workbench/shell/ShellSidebar.tsx')
   const styles = readWorkspaceFile('src/renderer/modules/workbench/shell/shell.css')
 
@@ -28,4 +28,5 @@ test('the shared sidebar identifies its mode and stays transparent on the window
   assert.match(sidebar, /data-shell-sidebar-mode=\{mode\}/)
   assert.match(sidebar, /className=\{`shell-sidebar workbench-panel-frame/)
   assert.match(styles, /\.shell-sidebar:not\(\.shell-float-drawer\)\s*\{\s*background:\s*transparent;\s*box-shadow:\s*none;/)
+  assert.match(sidebar, /className=\{`shell-sidebar__slot\$\{floating \? '' : ' rn-panel'\}`\}/)
 })

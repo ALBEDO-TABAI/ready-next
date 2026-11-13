@@ -15,8 +15,8 @@ import {
 // ---------------------------------------------------------------------------
 // Stage V V1.3 — ChatPanel layout primitives extracted from ChatPanel.tsx.
 // `ChatPanelMotionLayer` is the framer-motion wrapper that hosts the
-// expanded/collapsing panel content (a collapsed assistant takes no width; the shell rail shows
-// its button, W2 §2.4). It is a pure React component
+// expanded/collapsing panel content (collapsed, the shell keeps a strip with the header's buttons,
+// V17; the header cell only hosts ChatHeader's title row). It is a pure React component
 // with zero `useAgent` / store / IPC dependencies — the only hooks are
 // framer-motion's `useIsPresent` / `useReducedMotion`. Signatures are
 // preserved byte-for-byte; the V6 fixture (`chat-panel-baseline.test.ts`)

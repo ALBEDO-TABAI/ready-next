@@ -13,7 +13,8 @@ test('chat header opens one source/history switcher from the title and source bu
 
   assert.match(chatHeader, /import \{ createPortal \} from 'react-dom'/)
   assert.match(chatHeader, /data-chat-session-switcher="true"/)
-  assert.match(chatHeader, /data-chat-session-menu="true"/)
+  // V17: the header's buttons are one persistent set in the shell's corner (row when docked, strip column otherwise).
+  assert.match(chatHeader, /useShellAssistantTools\(\)/)
   assert.match(chatHeader, /data-chat-session-title="true"/)
   // W1-T5 (B13): the title is ink (--rn-ink); the fade mask is alpha only (black → transparent).
   assert.match(chatHeader, /data-chat-session-title="true"[\s\S]*color: 'var\(--rn-ink\)'/)

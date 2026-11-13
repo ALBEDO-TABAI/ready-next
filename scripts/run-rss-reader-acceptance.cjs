@@ -270,7 +270,7 @@ await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.
     assert.deepEqual(sourceAfterNote.data, sourceBeforeNote.data, 'editing a note must not rewrite the RSS article')
     await page.getByTitle('rss', { exact: true }).click()
     await page.locator('.rss-article-reader').getByText('ARTICLE-END-10', { exact: true }).waitFor()
-    await page.getByTitle('收起/展开聊天面板', { exact: true }).click()
+    await page.locator('[data-shell-assistant-tools] [data-assistant-toggle]').click()
     await page.getByRole('navigation', { name: '本文目录' }).waitFor()
     await page.getByRole('navigation', { name: '本文目录' }).getByRole('button', { name: '最后一节', exact: true }).click()
     await page.waitForFunction(() => {
@@ -314,7 +314,7 @@ await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.
     await page.getByTitle('展开聊天面板', { exact: true }).click()
     await page.getByTitle('rss', { exact: true }).click()
     await page.locator('.rss-article-reader').getByText('AUTHENTICATED-ARTICLE-END', { exact: true }).waitFor()
-    await page.getByTitle('收起/展开聊天面板', { exact: true }).click()
+    await page.locator('[data-shell-assistant-tools] [data-assistant-toggle]').click()
     assert.equal(await originalPreview.count(), 0)
     assert.equal(await page.locator('.rss-article-reader').count(), 1, 'the preview and the reader keep separate identities')
     await page.evaluate(() => document.documentElement.dataset.theme = 'dark')

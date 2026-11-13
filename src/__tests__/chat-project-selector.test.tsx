@@ -9,6 +9,8 @@ import { beginWorkspaceDragSession, endWorkspaceDragSession } from '../renderer/
 
 test('project selector selects, clears, rejects files and ignores a picker returning after chat switch', async () => {
   const dom = new JSDOM('<div data-chat-panel-root="true"><div id="root"></div></div>', { url: 'http://localhost' })
+  // The chip's liquid glass reads 减少透明 from the theme store, which watches the system colour scheme.
+  Object.assign(dom.window, { matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }) })
   const old = new Map<string, PropertyDescriptor | undefined>()
   for (const [key, value] of Object.entries({ window: dom.window, document: dom.window.document,
     Node: dom.window.Node, HTMLElement: dom.window.HTMLElement, localStorage: dom.window.localStorage,

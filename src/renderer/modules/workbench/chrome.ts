@@ -13,16 +13,19 @@ export const WORKBENCH_TOPBAR_HEIGHT = SHELL_BAND_HEIGHT
 export const WORKBENCH_STATUSBAR_HEIGHT = SHELL_BAND_HEIGHT
 export const WORKBENCH_ROW_PADDING_X = 12
 // The frame (V15): every mode's root pads its .workbench-canvas-shell by these, so the panel box is the same in all
-// four modes — --rn-frame-gap (8px) below the top band and above the bottom band (y 60 to height − 60), 6px from the
-// columns beside it. The assistant's composer sits on the panel's bottom edge through the same bottom value.
-export const WORKBENCH_CANVAS_OUTER_PADDING_X = 6
+// four modes — --rn-frame-gap (8px) below the top band and above the bottom band (y 60 to height − 60). Sideways the
+// panel fills the content column: the shell sets the 8px gaps between panels outside it (shell.css), and next to the
+// rail or the assistant's strip the panel starts right at their edge (V25). The assistant's composer sits on the
+// panel's bottom edge through the same bottom value.
+export const WORKBENCH_CANVAS_OUTER_PADDING_X = 0
 export const WORKBENCH_CANVAS_OUTER_PADDING_TOP = 8
 export const WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM = 8
 // Keep mode headers aligned with the files panel header rail ("Connected" badge edge).
 export const WORKBENCH_HEADER_EDGE_X = 14
-// The main window is titleBarStyle 'hiddenInset' with the default light position: the traffic lights sit at x ≈ 20–72,
-// centred in the 52px band. The band's sidebar switch starts 12px after them.
-export const WORKBENCH_TOPBAR_PADDING_LEFT = 84
+// The main window's traffic lights are centred in the 52px band, starting at x 20 (Main); on this macOS they end near
+// x 79. The wordmark stands as far from the green light as the red light stands from the window's edge (user,
+// 2026-11-13), so it starts 21px after them.
+export const WORKBENCH_TOPBAR_PADDING_LEFT = 100
 export const WORKBENCH_TOPBAR_PADDING_RIGHT = 14
 export const WORKBENCH_TAB_MAX_WIDTH = 220
 export const WORKBENCH_SUPPORT_PANEL_WIDTH = 300

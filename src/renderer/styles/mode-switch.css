@@ -1,4 +1,4 @@
-/* ═══ mode-switch.css — 分段控件的滑块胶囊（MorphSegmentedControl / MorphTabStrip）与拖拽分隔的悬停态；四模式切换已移到外壳图标栏（W2），旧的拖拽模式开关与 iOS 分段控件样式随组件退役。 ═══ */
+/* ═══ mode-switch.css — 分段控件的滑块胶囊（MorphSegmentedControl / MorphTabStrip）、拖拽分隔的悬停态，以及助手输入框上方的四模式切换槽 DraggableModeTabs（V20/V21，液态玻璃，与外壳图标栏同一状态）。 ═══ */
 
 /* The sliding pill under the selected tab or segment: the selected fill (V5, fill-2; the label is ink 500); the other
    pane's tab in a split is a quieter fill. No blur (W1 §4). */
@@ -24,4 +24,180 @@
 html:root .resize-handle:hover,
 html:root .resize-handle.active {
   box-shadow: none;
+}
+
+/* The mode switch slot above the assistant composer (V20, V21), right after the project chip: a 40px liquid-glass pill
+   (its glass is the composer's, liquid-composer.css) holding four 44px cells edge to edge. The thumb is a clear glass
+   lens lying on top of the icons, flush with the pill: its full height and one cell wide (both cells of a split), so at
+   either end it is concentric with the pill; it touches the pill's edge but never crosses it. It paints no tint of its
+   own, only light (V26), clipped to its own outline; the lens bends what is under its rim (LiquidLens in
+   DraggableModeTabs). DraggableModeTabs writes the thumb's place, clamped to the pill, and its span, both animated
+   together, as --dmt-thumb-pos / --dmt-thumb-span. The current mode's glyph follows the rail's rule (DL8): white with a
+   soft white glow, in its filled twin. */
+.ready-chat-mode-tabs-dock {
+  flex: none;
+  display: flex;
+  align-items: center;
+}
+
+.draggable-mode-tabs {
+  --dmt-cell: 44px;
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  align-items: center;
+  flex: none;
+  width: calc(4 * var(--dmt-cell));
+  height: var(--rn-control-h-xl);
+  border-radius: var(--rn-r-pill);
+  user-select: none;
+  touch-action: pan-y;
+}
+
+.draggable-mode-tabs[data-dragging='true'] {
+  cursor: grabbing;
+}
+
+.draggable-mode-tabs__thumb {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  width: calc(var(--dmt-cell) * var(--dmt-thumb-span, 1));
+  height: 100%;
+  /* The lens's light stays on the lens: an outer shadow in its rim would spill past the pill. */
+  overflow: hidden;
+  border-radius: var(--rn-r-pill);
+  transform: translateX(calc(var(--dmt-thumb-pos, 0) * var(--dmt-cell)));
+  will-change: transform;
+  pointer-events: none;
+}
+
+/* Under the lens, below the glyphs: a very soft dimming of the middle of the track where the lens lies, gone before
+   the edge, so the rim's refraction and highlights stand out. It follows the thumb's place and span. */
+.draggable-mode-tabs::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  width: calc(var(--dmt-cell) * var(--dmt-thumb-span, 1));
+  height: 100%;
+  border-radius: var(--rn-r-pill);
+  background: var(--rn-liquid-lens-smoke);
+  transform: translateX(calc(var(--dmt-thumb-pos, 0) * var(--dmt-cell)));
+  pointer-events: none;
+}
+
+/* The lens's glass, told by light alone (V26): ring, top specular, bottom catch-light, inner edge glow, a faint sheen. */
+.draggable-mode-tabs__thumb::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border-radius: inherit;
+  background: var(--rn-liquid-lens-sheen);
+  box-shadow: var(--rn-liquid-lens-rim);
+  pointer-events: none;
+}
+
+.draggable-mode-tabs__icon {
+  --dmt-thumb-end: calc(var(--dmt-thumb-pos, 0) + var(--dmt-thumb-span, 1) - 1);
+  --dmt-icon-range-distance: max(
+    0,
+    calc(var(--dmt-thumb-pos, 0) - var(--dmt-icon-index, 0)),
+    calc(var(--dmt-icon-index, 0) - var(--dmt-thumb-end))
+  );
+  --dmt-icon-proximity: max(0, calc(1 - var(--dmt-icon-range-distance) * 0.8));
+  /* How lit the icon is, from the lens alone: 1 with the lens over the whole cell, 0 once the lens's edge has left the
+     glyph (0.625 of a cell away). The active class plays no part, so the look never waits for the mode to commit. */
+  --dmt-icon-lit-amount: clamp(0, calc((var(--dmt-icon-proximity) - 0.5) * 2), 1);
+  --dmt-icon-rest: var(--rn-ink-3);
+  --dmt-icon-lit: var(--rn-rail-glyph);
+  position: relative;
+  z-index: 2;
+  flex: 1;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: var(--rn-r-pill);
+  background: transparent;
+  cursor: pointer;
+  color: var(--dmt-icon-rest);
+  transform: translateX(calc(var(--dmt-icon-shift, 0) * 100%));
+  transition: transform 420ms cubic-bezier(0.2, 1.24, 0.28, 1);
+  will-change: transform;
+}
+
+/* A press on an icon under the thumb grabs the thumb. */
+.draggable-mode-tabs__icon[aria-selected='true'] {
+  cursor: grab;
+}
+
+.draggable-mode-tabs:not([data-dragging='true']) .draggable-mode-tabs__icon:hover {
+  --dmt-icon-rest: var(--rn-ink);
+}
+
+.draggable-mode-tabs__icon:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--rn-ink) 55%, transparent);
+  outline-offset: 2px;
+}
+
+/* Two twins per icon, crossfaded by the lens (--dmt-icon-lit-amount): the resting outline in the quiet ink, and the lit
+   glyph (the filled shape; 资讯's outline at a heavier stroke) white with a soft glow, growing in as it lights. No
+   transition: the amount already moves with every frame of the glide and the drag, a transition would trail the lens. */
+.draggable-mode-tabs__glyphs {
+  display: grid;
+  place-items: center;
+  width: var(--rn-icon);
+  height: var(--rn-icon);
+}
+
+.draggable-mode-tabs__icon[data-mode='calendar'] .draggable-mode-tabs__glyphs {
+  transform: translateX(-0.5px);
+}
+
+.draggable-mode-tabs__glyph {
+  grid-area: 1 / 1;
+  width: var(--rn-icon);
+  height: var(--rn-icon);
+}
+
+.draggable-mode-tabs__glyph.is-rest {
+  opacity: calc(1 - var(--dmt-icon-lit-amount));
+}
+
+.draggable-mode-tabs__glyph.is-lit {
+  color: var(--dmt-icon-lit);
+  filter: var(--rn-liquid-glyph-lit);
+  opacity: var(--dmt-icon-lit-amount);
+  transform: scale(calc(0.84 + 0.16 * var(--dmt-icon-lit-amount)));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .draggable-mode-tabs__icon {
+    transition: none;
+  }
+}
+
+/* 减少透明（DL12）: the lens is off, so the current cell carries the selected fill instead, its glyph in ink (white would
+   vanish on the fill) and without the glow. */
+[data-transparency='reduced'] .draggable-mode-tabs__thumb,
+[data-transparency='reduced'] .draggable-mode-tabs::after {
+  display: none;
+}
+
+[data-transparency='reduced'] .draggable-mode-tabs__icon {
+  --dmt-icon-lit: var(--rn-ink);
+}
+
+[data-transparency='reduced'] .draggable-mode-tabs__icon[aria-selected='true'] {
+  background: var(--rn-fill-2);
+}
+
+[data-transparency='reduced'] .draggable-mode-tabs__glyph.is-lit {
+  filter: none;
 }

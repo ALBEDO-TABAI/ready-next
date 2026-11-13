@@ -1,29 +1,21 @@
-/* Find and replace over the content area (W2-T6). A float (W1 DL4) on top of the content. Only --rn-*. */
+/* Find and replace (W2-T6, V19): while open it is the mode's panel — the same box (the inset is set on the root from
+   WORKBENCH_CANVAS_OUTER_PADDING_*) and the panel material (.rn-panel), its search header and close on the 44px head
+   row. No float material, extra shadow or blur. Only --rn-*. */
 .find-replace-workspace {
   position: absolute;
   z-index: 100;
-  inset: 12px;
   display: flex;
-  justify-content: center;
   min-width: 0;
   min-height: 0;
 }
 
 .find-replace-workspace__panel {
-  display: flex;
-  width: min(820px, 100%);
-  min-height: 0;
-  flex-direction: column;
-  overflow: hidden;
-  border-radius: var(--rn-r-dialog);
+  flex: 1;
 }
 
+/* The search header brings its own 14px inset, so the row adds none on that side. */
 .find-replace-workspace__head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding-right: 10px;
-  flex: none;
+  padding-left: 0;
 }
 
 .find-replace-workspace__head-slot {
@@ -31,28 +23,8 @@
   min-width: 0;
 }
 
-.find-replace-workspace__close {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: 0;
-  border-radius: var(--rn-r-pill);
-  background: transparent;
-  color: var(--rn-ink-3);
-  cursor: pointer;
-}
-
-.find-replace-workspace__close:hover {
-  background: var(--rn-fill-2);
-  color: var(--rn-ink);
-}
-
 .find-replace-workspace__body {
   display: flex;
-  flex: 1;
-  min-height: 0;
   flex-direction: column;
   overflow: hidden;
 }

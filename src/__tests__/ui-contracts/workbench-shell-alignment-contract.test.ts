@@ -39,7 +39,8 @@ test('browser rss and calendar shells align their left edge with the shared work
   // and every RSS view as its body; nothing sits on the ground above it. The body paints no sheet of its own (no panel
   // on a panel). Its navigation lives in the shell's one sidebar (W2-T4), not in the body.
   const rssMode = readWorkspaceFile('src/renderer/pages/modes/RSSMode.tsx')
-  assert.match(rssMode, /className="workbench-canvas-shell rss-workbench-canvas relative flex h-full min-h-0 overflow-hidden"/)
+  // V22: the canvas does not clip; the panel inside clips itself and its shadow reaches past the box.
+  assert.match(rssMode, /className="workbench-canvas-shell rss-workbench-canvas relative flex h-full min-h-0"/)
   assert.match(rssMode, /<div className="rss-feed-sheet rn-panel">\s*<div className="rss-topbar rn-panel__head no-drag">/)
   assert.match(rssMode, /<ShellNavigator mode="rss" label="资讯">\s*<RSSNavigation/)
   assert.doesNotMatch(rssMode, /rss-workbench-body|workbench-tabs-surface/)
@@ -103,4 +104,14 @@ test('browser visibility handoff cancels stale re-show work and rss shell stays 
   // B13, V15: every mode's outer frame is a borderless, shadowless box (W1 DL1); the panel inside paints and clips.
   assert.match(styles, /\.workbench-canvas-shell \{[^}]*border: 0;[^}]*box-shadow: none;/)
   assert.doesNotMatch(styles, /html:root \.rss-mode-shell \.workbench-canvas-shell \{/)
+  // V22: nothing between a panel and the window cuts its soft shadow. The box does not clip; the content column and the
+  // mode scene clip with the shadow's reach as margin; the calendar's root contains layout, not paint (which clips).
+  const canvasRule = styles.match(/\.workbench-canvas-shell \{[^}]*\}/)?.[0] ?? ''
+  assert.doesNotMatch(canvasRule, /overflow|border-radius/)
+  const shell = readWorkspaceFile('src/renderer/modules/workbench/shell/shell.css')
+  assert.match(shell, /\[data-shell-region='content'\] \{\s*overflow-clip-margin: var\(--rn-panel-shadow-reach\);/)
+  assert.match(readWorkspaceFile('src/renderer/styles/ritual-overlay.css'), /\.workbench-mode-scene \{[^}]*overflow: clip;\s*overflow-clip-margin: var\(--rn-panel-shadow-reach\);/)
+  const calendarRoot = readWorkspaceFile('src/renderer/modules/calendar/workbench/styles/app.css').match(/\n\.ready-calendar \{[^}]*\}/)?.[0] ?? ''
+  assert.match(calendarRoot, /overflow: clip; overflow-clip-margin: var\(--rn-panel-shadow-reach\); contain: layout;/)
+  assert.doesNotMatch(calendarRoot, /contain: layout paint|overflow: hidden/)
 })

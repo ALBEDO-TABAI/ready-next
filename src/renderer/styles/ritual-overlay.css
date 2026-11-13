@@ -245,10 +245,13 @@ html[data-theme-ritual-direction='to-light'][data-theme-ritual-phase='leaving'] 
   to { opacity: 1; transform: translate3d(0, 0, 0) rotate(0deg); }
 }
 
+/* A scene keeps a clip for stray overflow but leaves its panel's soft shadow room (V22); the scenes' container clips
+   hard while one slides (flat-chrome.css). */
 .workbench-mode-scene {
   position: absolute;
   inset: 0;
-  overflow: hidden;
+  overflow: clip;
+  overflow-clip-margin: var(--rn-panel-shadow-reach);
   transform: translate3d(0, 0, 0);
   opacity: 1;
   will-change: transform, opacity;

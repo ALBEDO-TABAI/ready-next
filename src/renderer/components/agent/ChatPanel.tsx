@@ -155,8 +155,10 @@ interface ChatPanelProps {
   panelState: ChatPanelState
   /** docked: the shell's right column; drawer: floats over the content on narrow windows (W2 §2.5). */
   presentation?: 'docked' | 'drawer'
-  /** The current work surface, read for the assistant's context; switching modes is the rail's job (W2 §2.4). */
+  /** The current work surface, read for the assistant's context. */
   workbenchMode?: WorkbenchMode
+  /** The mode switch slot above the composer (V20), built by the shell with the rail's state and handlers. */
+  modeSwitcher?: React.ReactNode
   onTogglePanel?: () => void
 }
 
@@ -172,6 +174,7 @@ export default function ChatPanel({
   panelState,
   presentation = 'docked',
   workbenchMode,
+  modeSwitcher,
   onTogglePanel,
 }: ChatPanelProps) {
   const {
@@ -223,6 +226,8 @@ export default function ChatPanel({
 
   const [toolTraceExpanded, setToolTraceExpanded] = useState(false)
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
+  // The open panel's header cell (MotionLayer), where ChatHeader renders its title row.
+  const [headerCell, setHeaderCell] = useState<HTMLElement | null>(null)
   const [stopRequestError, setStopRequestError] = useState<string | null>(null)
   const stopRequestTargetRef = useRef<{
     sessionId: string
@@ -1196,8 +1201,12 @@ export default function ChatPanel({
     currentScope?.meta.actionAuthorizationMode,
   )
 
-  const expandedPanelHeader = (
+  // The header stays mounted in both states (V17): its buttons live in the shell's corner, in the docked panel's head
+  // row or the right strip, and its title row renders into the open panel's header cell.
+  const chatHeader = (
     <ChatHeader
+      panelOpen={panelState !== 'collapsed'}
+      rowSlot={headerCell}
       currentChannel={currentChannel}
       channelOptions={channelOptions}
       sessionsByChannelKey={sessionsByChannelKey}
@@ -1284,6 +1293,7 @@ export default function ChatPanel({
       attachedSessionRecallCapsules={attachedSessionRecallCapsules}
       onDetachSessionRecall={handleDetachSessionRecall}
       dismissSoftError={dismissSoftError}
+      modeSwitcher={modeSwitcher}
       attachments={attachments}
       removeAttachment={removeAttachment}
       inputValue={inputValue}
@@ -1351,12 +1361,13 @@ export default function ChatPanel({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
     >
-      {/* Collapsed takes no width at all; the rail shows the assistant button instead (W2 §2.4). */}
+      {chatHeader}
+      {/* Collapsed takes no width of its own; the shell keeps a strip with the header's buttons (V17). */}
       <AnimatePresence initial={false} mode="wait">
         {showExpandedPanel ? (
           <ChatPanelMotionLayer
             key="expanded-chat-panel"
-            header={expandedPanelHeader}
+            header={<div ref={setHeaderCell} />}
             body={expandedPanelBody}
           />
         ) : null}

@@ -2,14 +2,20 @@
 // with equal top and bottom bands. Shared so Main can size the window and Renderer can lay it out.
 
 export const SHELL_RAIL_WIDTH = 52
+/** The gap between panels (--rn-frame-gap): after a docked sidebar's panel and before a docked assistant (V18). The
+ *  panel next to the rail or the assistant's strip starts right at its edge, so an icon there has equal room on both
+ *  sides (V25). */
+export const SHELL_FRAME_GAP = 8
+/** While the assistant is not docked its header buttons stand in a right strip as wide as the rail (V17). */
+export const SHELL_ASSISTANT_STRIP_WIDTH = SHELL_RAIL_WIDTH
 /** Top and bottom bands are equally tall (DL11a) and as tall as the rail is wide. */
 export const SHELL_BAND_HEIGHT = 52
 export const SHELL_SIDEBAR_WIDTH = { default: 248, min: 200, max: 420 } as const
 export const SHELL_ASSISTANT_WIDTH = { default: 380, min: 320, max: 560 } as const
 /** The content column never gets narrower than this (G1, W2 §2.5). */
 export const SHELL_CONTENT_MIN_WIDTH = 560
-/** The window stops shrinking here: rail plus the minimum content column. */
-export const SHELL_WINDOW_MIN_WIDTH = SHELL_RAIL_WIDTH + SHELL_CONTENT_MIN_WIDTH
+/** The window stops shrinking here: rail, the minimum content column and the assistant's strip. */
+export const SHELL_WINDOW_MIN_WIDTH = SHELL_RAIL_WIDTH + SHELL_CONTENT_MIN_WIDTH + SHELL_ASSISTANT_STRIP_WIDTH
 
 /**
  * docked   — takes its own column beside the content;
@@ -31,7 +37,7 @@ export interface ShellLayout {
   assistant: ShellDock
   sidebarWidth: number
   assistantWidth: number
-  /** Width left for the content column (rail and docked columns removed). */
+  /** Width left for the content column: the rail, a docked sidebar or assistant with the gap beside it, or the strip, removed. */
   contentWidth: number
 }
 
@@ -49,8 +55,8 @@ export function resolveShellLayout(input: ShellLayoutInput): ShellLayout {
   let assistant: ShellDock = input.assistantOpen ? 'docked' : 'hidden'
   const contentWidth = () => input.windowWidth
     - SHELL_RAIL_WIDTH
-    - (sidebar === 'docked' ? sidebarWidth : 0)
-    - (assistant === 'docked' ? assistantWidth : 0)
+    - (sidebar === 'docked' ? SHELL_FRAME_GAP + sidebarWidth : 0)
+    - (assistant === 'docked' ? assistantWidth + SHELL_FRAME_GAP : SHELL_ASSISTANT_STRIP_WIDTH)
   if (contentWidth() < SHELL_CONTENT_MIN_WIDTH && assistant === 'docked') assistant = 'floating'
   if (contentWidth() < SHELL_CONTENT_MIN_WIDTH && sidebar === 'docked') sidebar = 'floating'
   return { sidebar, assistant, sidebarWidth, assistantWidth, contentWidth: contentWidth() }

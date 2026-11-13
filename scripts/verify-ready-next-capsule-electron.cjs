@@ -146,7 +146,8 @@ async function tour(page, theme, vault, ids, checks) {
   // 2 · Assistant message: Ready references in an answer are capsules.
   const chat = page.locator('[data-chat-panel-root]').first()
   const box = await chat.boundingBox().catch(() => null)
-  if (!box || box.width < 200) await page.locator('[data-shell-region="rail"] button[aria-label^="助手"]').first().click().catch(() => {})
+  // V17: the assistant opens from its corner button, at the top of the right strip.
+  if (!box || box.width < 200) await page.locator('[data-shell-assistant-tools] [data-assistant-toggle]').first().click().catch(() => {})
   // The fixture message lives only in the panel's memory (never persisted); the store may reload the conversation, so it
   // is shown again before each use. The composer's liquid glass projects a copy of the messages: the real ones come first.
   const answer = async () => {

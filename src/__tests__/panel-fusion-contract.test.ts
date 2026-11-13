@@ -29,6 +29,8 @@ test('liquid glass chrome removes prominent shell edges so panels read as one fu
   assert.match(sidePanel, /className=\{`shell-sidebar workbench-panel-frame/)
   const shellStyles = readWorkspaceFile('src/renderer/modules/workbench/shell/shell.css')
   assert.match(shellStyles, /\.shell-sidebar:not\(\.shell-float-drawer\)\s*\{\s*background:\s*transparent;\s*box-shadow:\s*none;/)
+  // V18: the docked sidebar is one panel: its slot carries the shared panel glass, the column around it paints nothing.
+  assert.match(sidePanel, /className=\{`shell-sidebar__slot\$\{floating \? '' : ' rn-panel'\}`\}/)
   assert.doesNotMatch(skillsPanel, /selected \? PANEL_COLORS\.blue : PANEL_COLORS\.border/)
   assert.doesNotMatch(skillsPanel, /importDropActive \? PANEL_COLORS\.blue : PANEL_COLORS\.dropBorder/)
   assert.match(skillsPanel, /background: selected \? 'var\(--rn-fill-2\)' : 'transparent'/)

@@ -86,6 +86,8 @@ const ChatHeaderModule = await import('../renderer/components/agent/ChatHeader')
 const ChatHeader = ChatHeaderModule.default
 // The operation menu (openMenu) and the rename / delete dialogs render in the app's one float host.
 const { FloatHost } = await import('../renderer/components/ui')
+// V17: the header's buttons render into the shell's corner element and its title row into the panel's header cell.
+const { ShellAssistantToolsContext } = await import('../renderer/modules/workbench/shell/assistant-tools-slot')
 
 const localChannel = {
   key: 'local:app',
@@ -123,9 +125,15 @@ function mountChatHeader(
   host.innerHTML = ''
   const container = document.createElement('div')
   host.appendChild(container)
-  const root = createRoot(container)
+  const reactHost = document.createElement('div')
+  const rowSlot = document.createElement('div')
+  const toolsSlot = document.createElement('div')
+  container.append(reactHost, rowSlot, toolsSlot)
+  const root = createRoot(reactHost)
   flushSync(() => {
-    root.render(createElement(Fragment, null, createElement(FloatHost), createElement(ChatHeader, {
+    root.render(createElement(Fragment, null, createElement(FloatHost), createElement(ShellAssistantToolsContext.Provider, { value: toolsSlot }, createElement(ChatHeader, {
+      panelOpen: true,
+      rowSlot,
       currentChannel: localChannel,
       channelOptions: [localChannel],
       // Empty query → the expanded list renders this channel's live sessions.
@@ -147,7 +155,7 @@ function mountChatHeader(
       sessionTitle: '当前会话',
       formatTime: () => '刚刚',
       ...overrides,
-    })))
+    }))))
   })
   return {
     root,
