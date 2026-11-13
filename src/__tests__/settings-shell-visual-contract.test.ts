@@ -28,6 +28,7 @@ test('settings content header drops the english eyebrow and icon, keeps the head
   // 设置页节奏调整：区块头下间距 20 → 24（与面板拆分同波设计更新）
   assert.match(settingsPage, /marginBottom:\s*24/)
   const settingsCss = readWorkspaceFile('src/renderer/pages/settings/settings.css')
-  assert.match(settingsCss, /\.settings-page__section-title \{[^}]*font:\s*600 20px\/28px var\(--rn-font-ui\);[^}]*letter-spacing:\s*-0\.01em/)
+  // V7：标题级 20/28，字重 500。
+  assert.match(settingsCss, /\.settings-page__section-title \{[^}]*font:\s*500 var\(--rn-t-title\)\/var\(--rn-lh-title\) var\(--rn-font-ui\);[^}]*letter-spacing:\s*-0\.01em/)
   assert.match(settingsCss, /\.settings-page__section-desc \{[^}]*margin:\s*var\(--rn-s1\) 0 0/)
 })

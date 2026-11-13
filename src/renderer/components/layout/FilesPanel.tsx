@@ -292,7 +292,7 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
         background: 'transparent',
       }}
     >
-      <span className="text-[13px] font-semibold" style={{ color: PANEL_TOKENS.title }}>
+      <span className="text-[13px] font-medium" style={{ color: PANEL_TOKENS.title }}>
         文件管理
       </span>
       <span aria-hidden="true" />

@@ -10,7 +10,7 @@ import { buildTabRailRows, resolveReorderDrop } from '../tabs/tab-rail-display-m
 import { resolveTabDropIntent, tabGroupColorSoft, type TabDropIntent } from '../tabs/tab-group-visuals'
 import TabGroupHeaderRow from '../tabs/TabGroupHeaderRow'
 import TabGroupEditMenu from '../tabs/TabGroupEditMenu'
-import { ShellSidebarToggle } from '../../modules/workbench/shell/ShellSidebar'
+import { IconButton } from '../ui/Button'
 import BrowserTaskTabGroups, { type BrowserTaskTabGroup } from './BrowserTaskTabGroups'
 import './browser-tab-list.css'
 
@@ -205,14 +205,9 @@ export default function BrowserTabList({
 
   return (
     <div className="browser-tab-list" data-browser-tab-list="">
-      <div className="browser-tab-list__head">
-        <span className="browser-tab-list__title">标签页</span>
-        <span className="browser-tab-list__head-tools">
-          <button type="button" className="browser-tab-list__head-button" title="新标签页 ⌘T" aria-label="新标签页" onClick={() => void onNewTab()}>
-            <Plus strokeWidth={1.8} aria-hidden="true" />
-          </button>
-          <ShellSidebarToggle />
-        </span>
+      <div className="shell-navigator__head">
+        <span className="shell-navigator__title">标签页</span>
+        <IconButton icon={<Plus aria-hidden="true" />} title="新标签页 ⌘T" aria-label="新标签页" onClick={() => void onNewTab()} />
       </div>
       <div
         ref={listRef}

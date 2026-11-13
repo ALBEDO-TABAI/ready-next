@@ -16,12 +16,6 @@
    Browser Transition Mask Animations
    ======================================== */
 
-@keyframes browserSkeletonProgress {
-  0% { transform: translateX(-100%); }
-  50% { transform: translateX(0%); }
-  100% { transform: translateX(100%); }
-}
-
 @keyframes browserStartupSpinner {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }

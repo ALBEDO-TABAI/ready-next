@@ -1,6 +1,7 @@
-/* The one token source of Ready Next (W1 §3). Values follow docs/design/ready-next-design-reference.html.
-   Materials: one glass (the window), paper (--rn-sheet) for content, well (--rn-well) for spatial content,
-   float (--rn-float) for menus and dialogs; the liquid glass (--rn-liquid-*) is only the assistant composer.
+/* The one token source of Ready Next (W1 §3; materials, type and controls follow vvf-2-1, 2026-11-13 V1–V10).
+   Materials: the ground (the window), panel glass (--rn-sheet) for content, inlay (--rn-inlay) inside a panel,
+   well (--rn-well) for inputs and spatial content, float (--rn-float) for menus and dialogs;
+   the liquid glass (--rn-liquid-*) is only the assistant composer.
    --rn-paper is the colour of a book page in the reader, not the app's paper.
    Module-specific cloth and shelf tokens stay namespaced. */
 @font-face { font-family: 'RN Inter'; src: url('./fonts/Inter.woff2') format('woff2'); font-weight: 100 900; font-display: swap; }
@@ -20,10 +21,21 @@
   --rn-font-display: 'RN Inter', 'PingFang SC', system-ui, sans-serif;
   --rn-font-mono: 'RN Mono', ui-monospace, 'PingFang SC', monospace;
   --rn-font-serif: 'RN Serif', 'Songti SC', Georgia, serif;
+  /* the wordmark (V12): Instrument Serif, Latin only; the one serif in the interface */
+  --rn-font-wordmark: 'RN Serif', Georgia, serif;
   /* titles on cloth: a book face for CJK, Instrument Serif for Latin */
   --rn-font-cloth: 'RN Serif', 'Songti SC', 'STSong', serif;
   --rn-fs-2xs: 10px; --rn-fs-xs: 11px; --rn-fs-sm: 12px; --rn-fs-md: 13px; --rn-fs-lg: 15px; --rn-fs-xl: 17px; --rn-fs-2xl: 22px; --rn-fs-3xl: 28px; --rn-fs-4xl: 40px;
   --rn-lh-tight: 1.15; --rn-lh: 1.45;
+  /* seven levels on a 4px baseline (V7): micro / meta / body / lead / title / page / display */
+  --rn-t-micro: 11px; --rn-lh-micro: 16px;
+  --rn-t-meta: 12px; --rn-lh-meta: 16px;
+  --rn-t-body: 13px; --rn-lh-body: 20px;
+  --rn-t-lead: 15px; --rn-lh-lead: 24px;
+  --rn-t-title: 20px; --rn-lh-title: 28px;
+  --rn-t-page: 28px; --rn-lh-page: 36px;
+  --rn-t-display: 40px; --rn-lh-display: 48px;
+  --rn-tracking-tight: -0.02em; --rn-tracking-caps: 0.06em;
 
   /* ---- space (4pt) ---- */
   --rn-s1: 4px; --rn-s2: 8px; --rn-s3: 12px; --rn-s4: 16px; --rn-s5: 20px; --rn-s6: 24px; --rn-s8: 32px; --rn-s10: 40px; --rn-s14: 56px;
@@ -34,6 +46,7 @@
   /* ---- motion ---- */
   --rn-ease-out: cubic-bezier(.22, 1, .36, 1);
   --rn-ease-in-out: cubic-bezier(.65, 0, .35, 1);
+  --rn-ease-std: cubic-bezier(.2, .8, .2, 1);
   --rn-ease-spring: cubic-bezier(.34, 1.56, .64, 1);
   --rn-ease-liquid: cubic-bezier(.3, .7, .2, 1);
   --rn-ease-shelf: cubic-bezier(.77, 0, .175, 1);
@@ -44,7 +57,7 @@
   --rn-stage-2: #e3e3e8;
   --rn-ink: #0b0b0e;
   --rn-ink-2: rgba(11, 11, 14, .64);
-  --rn-ink-3: rgba(11, 11, 14, .46);
+  --rn-ink-3: rgba(11, 11, 14, .58);   /* .56 in vvf; .58 keeps hint text at 4.5:1 on the panel glass and the ground */
   --rn-ink-4: rgba(11, 11, 14, .22);
   --rn-hair: rgba(11, 11, 14, .08);
   --rn-hair-2: rgba(11, 11, 14, .14);
@@ -59,11 +72,25 @@
   --rn-inverse: #0b0b0e; --rn-on-inverse: #fafafa;
   --rn-logo-ink: #ebebee;
 
-  /* ---- materials (W1 §3.1, DL1–DL4a) ---- */
-  --rn-sheet: #fdfdfc;
-  --rn-sheet-shadow: 0 1px 2px rgb(10 10 20 / .05), 0 8px 24px -12px rgb(10 10 30 / .14);
+  /* ---- materials (V1, V2): panel glass, inlay, well, float ---- */
+  --rn-sheet: rgb(var(--rn-glass-tint) / var(--rn-glass-alpha-strong));
+  --rn-sheet-shadow: inset 0 1px 0 var(--rn-glass-inner-hi), inset 0 -1px 0 var(--rn-glass-inner-lo), inset 0 0 0 .5px var(--rn-glass-edge), var(--rn-shadow-2);
+  --rn-inlay: rgb(var(--rn-glass-tint) / .5);
+  --rn-inlay-hover: rgb(var(--rn-glass-tint) / .85);
   --rn-well: rgb(11 11 14 / .045);
+  --rn-well-shade: rgb(11 11 14 / .06);
   --rn-float: rgb(252 252 253 / .82);
+  --rn-float-caustic: rgb(255 255 255 / .16);
+  --rn-stage-glow: rgb(255 255 255 / .55);
+  /* the opaque knob of a switch or a slider */
+  --rn-solid: #fdfdfc;
+  /* ink glass (V4): the primary button and a selected capsule */
+  --rn-btn-ink-bg: linear-gradient(180deg, color-mix(in srgb, var(--rn-inverse) 78%, var(--rn-on-inverse)) 0%, var(--rn-inverse) 55%);
+  --rn-btn-ink-shadow: inset 0 1px 0 rgb(255 255 255 / .2), inset 0 0 0 .5px rgb(0 0 0 / .5), 0 6px 14px -8px rgb(10 10 30 / .55);
+  --rn-btn-ink-hover: brightness(1.12);
+  --rn-capsule-on-bg: var(--rn-btn-ink-bg);
+  --rn-capsule-on-shadow: var(--rn-btn-ink-shadow);
+  --rn-capsule-on-ink: var(--rn-on-inverse);
   --rn-card-shadow: 0 1px 2px rgb(10 10 20 / .06), 0 6px 16px -8px rgb(10 10 30 / .18);
   /* The assistant composer keeps its pre-B4 liquid glass (user, 2026-11-11): veil, hairline rim, edge ring. */
   --rn-liquid-veil: rgba(248, 250, 252, 0.32);
@@ -81,10 +108,10 @@
   --rn-liquid-placeholder: var(--rn-ink-3);
   --rn-liquid-hair: var(--rn-hair-2);
   --rn-liquid-hover: var(--rn-fill-2);
-  --rn-r-sheet: 20px; --rn-r-float: 16px; --rn-r-control: 9px;
+  --rn-r-card: 12px; --rn-r-sheet: 20px; --rn-r-dialog: 24px; --rn-r-float: 12px; --rn-r-control: var(--rn-r-pill);
 
   /* The icon rail's selected glyph (DL8, the user's rule): a white glyph with a narrow glow on a light tile; the tile
-     goes away while the sidebar is collapsed. The rail alone uses these; navigator rows keep the accent icon. */
+     goes away while the sidebar is collapsed. The rail alone uses these; a navigator row's icon follows the row's ink (V5). */
   --rn-rail-glyph: rgba(255, 255, 255, .98);
   --rn-rail-tile: rgba(150, 152, 148, .24);
   --rn-rail-glow: drop-shadow(0 0 .8px rgba(255, 255, 255, .9)) drop-shadow(0 0 2.5px rgba(255, 255, 255, .42)) drop-shadow(0 0 6px rgb(255 90 31 / .18)) drop-shadow(0 .5px .8px rgba(24, 26, 28, .22));
@@ -92,7 +119,10 @@
 
   /* ---- shell and density (DL11, DL11a) ---- */
   --rn-rail-w: 52px; --rn-sidebar-w: 248px; --rn-assistant-w: 380px; --rn-band-h: 52px;
-  --rn-row-h: 30px; --rn-control-h: 28px; --rn-control-h-lg: 32px;
+  /* The work block (V11): every function area is one panel whose tools are its own head row. The head line is shared
+     by the sidebar and the assistant; a framed body (the web page) sits inside the panel by the frame pad, its radius concentric. */
+  --rn-frame-gap: 8px; --rn-panel-head-h: 44px; --rn-panel-pad: 6px; --rn-r-panel-inset: 14px;
+  --rn-row-h: 30px; --rn-control-h-tag: 20px; --rn-control-h: 28px; --rn-control-h-lg: 32px; --rn-control-h-xl: 40px;
   --rn-icon: 16px; --rn-icon-stroke: 1.5;
   --rn-prose-size: 16px; --rn-prose-lh: 1.75;
 
@@ -149,32 +179,44 @@
 
   /* adaptive: written by JS from the cover in view */
   --rn-amb: 200 190 180;
-  --rn-amb-alpha: .10;
+  --rn-amb-alpha: 0;
   --rn-la: 135deg;
   color-scheme: light;
 }
 
 [data-theme='dark'] {
-  --rn-stage: #0e0e11;
+  --rn-stage: #0b0b0d;
   --rn-stage-2: #111114;
   --rn-ink: #f4f4f6;
-  --rn-ink-2: rgba(244, 244, 246, .68);
-  --rn-ink-3: rgba(244, 244, 246, .46);
-  --rn-ink-4: rgba(244, 244, 246, .22);
+  --rn-ink-2: rgba(244, 244, 246, .66);
+  --rn-ink-3: rgba(244, 244, 246, .52);
+  --rn-ink-4: rgba(244, 244, 246, .2);
   --rn-hair: rgba(255, 255, 255, .08);
   --rn-hair-2: rgba(255, 255, 255, .14);
   --rn-fill: rgba(255, 255, 255, .05);
   --rn-fill-2: rgba(255, 255, 255, .09);
   --rn-fill-3: rgba(255, 255, 255, .13);
-  --rn-accent: #ff5a1f;
+  --rn-accent: #ff6a2c;
   --rn-accent-text: #ff8a5c;
   --rn-accent-soft: rgba(255, 106, 44, .18);
   --rn-inverse: #f4f4f6; --rn-on-inverse: #0b0b0e;
   --rn-logo-ink: #0b0b0e;
-  --rn-sheet: #1c1c1f;
-  --rn-sheet-shadow: 0 1px 2px rgb(0 0 0 / .4), 0 8px 24px -12px rgb(0 0 0 / .6);
+  --rn-sheet: rgb(var(--rn-glass-tint) / var(--rn-glass-alpha-strong));
+  --rn-sheet-shadow: inset 0 1px 0 var(--rn-glass-inner-hi), inset 0 -1px 0 var(--rn-glass-inner-lo), inset 0 0 0 .5px var(--rn-glass-edge), var(--rn-shadow-2);
+  --rn-inlay: rgb(var(--rn-glass-tint) / .5);
+  --rn-inlay-hover: rgb(var(--rn-glass-tint) / .85);
   --rn-well: rgb(0 0 0 / .26);
+  --rn-well-shade: rgb(0 0 0 / .35);
   --rn-float: rgb(28 28 32 / .86);
+  --rn-float-caustic: rgb(255 255 255 / .06);
+  --rn-stage-glow: rgb(255 255 255 / .035);
+  --rn-solid: #1c1c1f;
+  --rn-btn-ink-bg: linear-gradient(180deg, #ffffff 0%, #e4e4e8 100%);
+  --rn-btn-ink-shadow: inset 0 1px 0 #ffffff, inset 0 -1px 0 rgb(0 0 0 / .14), 0 6px 14px -8px rgb(0 0 0 / .7);
+  --rn-btn-ink-hover: brightness(.96);
+  --rn-capsule-on-bg: rgb(255 255 255 / .16);
+  --rn-capsule-on-shadow: inset 0 1px 0 rgb(255 255 255 / .22), inset 0 0 0 .5px rgb(255 255 255 / .18), 0 4px 12px -6px rgb(0 0 0 / .6);
+  --rn-capsule-on-ink: var(--rn-ink);
   --rn-card-shadow: 0 1px 2px rgb(0 0 0 / .4), 0 6px 16px -8px rgb(0 0 0 / .6);
   --rn-liquid-veil: rgba(26, 26, 26, 0.62);
   --rn-liquid-veil-edge: inset 0 1px 0 rgba(232, 232, 232, 0.14), inset 0 -1px 0 rgba(0, 0, 0, 0.16);
@@ -218,20 +260,28 @@
   --rn-shelf-gloss: rgb(255 255 255 / .22);
   --rn-shelf-face-gloss: rgb(255 255 255 / .08);
   --rn-shelf-wall: rgb(0 0 0 / .3);
-  --rn-amb-alpha: .14;
+  --rn-amb-alpha: 0;
   color-scheme: dark;
 }
 
-/* 减少透明（DL12）：玻璃变成不透明的底色，浮层不再透出与模糊，液态玻璃退回纸色（DL4a）。 */
+/* 减少透明（DL12）：玻璃变成不透明的底色，面板玻璃不透明，浮层不再透出与模糊，液态玻璃退回面板色（DL4a）。 */
 [data-transparency='reduced'] {
   --rn-float: rgb(252 252 253);
+  --rn-float-caustic: transparent;
   --rn-glass-alpha: 1; --rn-glass-alpha-strong: 1; --rn-glass-alpha-clear: 1;
+  --rn-sheet: rgb(var(--rn-glass-tint));
   --rn-liquid-veil: var(--rn-sheet); --rn-liquid-veil-edge: var(--rn-card-shadow);
   --rn-liquid-rim: var(--rn-hair-2); --rn-liquid-rim-edge: none;
 }
 
 [data-theme='dark'][data-transparency='reduced'] {
   --rn-float: rgb(28 28 32);
+  --rn-sheet: rgb(var(--rn-glass-tint));
+}
+
+/* the spring of a press release (V9), where linear() exists */
+@supports (transition-timing-function: linear(0, 1)) {
+  :root { --rn-ease-spring: linear(0, .009, .035 2.1%, .141 4.4%, .723 12.9%, .938 16.7%, 1.017 19.4%, 1.067, 1.099 24.3%, 1.103 25.9%, 1.096, 1.077 30.4%, 1.002 39%, .979 43.5%, .975 47.6%, .998 59.6%, 1.002 66.6%, 1); }
 }
 
 }

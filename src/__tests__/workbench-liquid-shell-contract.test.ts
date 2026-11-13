@@ -32,7 +32,10 @@ test('liquid glass skin defines shell-level fresnel, noise, and atmosphere contr
   assert.match(styles, /html:root \.workbench-tabs-surface \{/)
   // B13: the browser's address bar sits on the glass with the other top-band rows; no surface rule of its own.
   assert.doesNotMatch(styles, /\.browser-header-surface \{/)
-  assert.match(styles, /\.rss-mode-shell \.rss-feed-sheet \{[\s\S]*?background:\s*var\(--rn-sheet\) !important;/)
+  // V11: 资讯's panel glass has one source, .rn-panel (materials.css); no module rule repaints the sheet.
+  assert.match(readWorkspaceFile('src/renderer/pages/modes/RSSMode.tsx'), /className="rss-feed-sheet rn-panel"/)
+  assert.match(readWorkspaceFile('src/renderer/design/next/materials.css'), /\.rn-panel \{[^}]*background: var\(--rn-sheet\);/)
+  assert.doesNotMatch(styles, /\.rss-feed-sheet \{[^}]*(?:background|box-shadow)/)
   assert.match(styles, /ready-app-bg/)
 })
 

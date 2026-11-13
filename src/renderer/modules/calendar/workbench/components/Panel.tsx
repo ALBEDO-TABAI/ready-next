@@ -33,7 +33,7 @@ export function Panel() {
   const searching = s.overlay === 'search' || s.overlay === 'shortcuts';
   useEffect(() => { if (searching) inp.current?.focus(); }, [searching]);
   return (
-    <aside className="panel rn-sheet" data-testid="panel">
+    <aside className="panel" data-testid="panel">
       <div className="panel-head">
         <div className={`search${searching ? ' active' : ''}`}>
           <Search aria-hidden />

@@ -21,7 +21,8 @@ export default function HeaderUtilityActions({
   onToggleFastCard,
 }: HeaderUtilityActionsProps) {
   return (
-    <div className="flex items-center flex-shrink-0" style={{ gap: 2 }}>
+    // The page's tools at the end of the browser's head row (browser-shell.css).
+    <div className="browser-head__group browser-head__tools">
       <IconButton
         icon={<Bookmark />}
         onClick={(event) => onShowUtilityMenu('bookmarks', event.currentTarget.getBoundingClientRect())}
@@ -32,11 +33,7 @@ export default function HeaderUtilityActions({
         icon={<>
           <StickyNote />
           {fastCardItemCount > 0 && (
-            <span
-              aria-hidden="true"
-              className="pointer-events-none absolute right-[-3px] top-[-3px] flex h-[14px] min-w-[14px] items-center justify-center rounded-full px-[3px] text-[9px] font-semibold leading-none"
-              style={{ color: 'var(--rn-on-inverse)', background: 'var(--rn-inverse)', fontFamily: 'var(--rn-font-mono)' }}
-            >
+            <span aria-hidden="true" className="browser-head__count">
               {fastCardItemCount > 9 ? '9+' : fastCardItemCount}
             </span>
           )}

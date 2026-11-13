@@ -167,26 +167,19 @@ export default function DocumentTabRail({
                       onContextMenu={onTabContextMenu ? (event) => onTabContextMenu(event, tab.id) : undefined}
                       onMouseEnter={() => setHoveredTabId(tab.id)}
                       onMouseLeave={() => setHoveredTabId((current) => current === tab.id ? null : current)}
-                      className="group relative flex min-w-0 w-full cursor-pointer items-center rounded-[12px] border px-[10px] text-[12px] transition-[background-color,border-color,box-shadow,color] duration-150"
+                      className="group relative flex min-w-0 w-full cursor-pointer items-center rounded-[9px] border px-[10px] text-[12px] transition-[background-color,border-color,box-shadow,color] duration-150"
                       style={{
                         gap: 6,
                         height: Math.max(30, WORKBENCH_TAB_ROW_HEIGHT - 4),
                         background: isActive
-                          ? 'color-mix(in srgb, var(--rn-sheet) 18%, transparent)'
-                          : isSecondaryActive
-                            ? 'color-mix(in srgb, var(--rn-sheet) 12%, transparent)'
-                            : isHovered
-                              ? 'color-mix(in srgb, var(--rn-sheet) 20%, transparent)'
-                              : 'transparent',
-                        color: isActive || isSecondaryActive ? 'var(--rn-ink)' : 'var(--rn-ink-3)',
-                        borderColor: isDragOver
-                          ? 'var(--rn-accent)'
-                          : isHovered
-                            ? 'color-mix(in srgb, var(--rn-accent) 28%, transparent)'
+                          ? 'var(--rn-fill-2)'
+                          : isSecondaryActive || isHovered
+                            ? 'var(--rn-fill)'
                             : 'transparent',
-                        boxShadow: isHovered
-                          ? '0 0 0 1px color-mix(in srgb, var(--rn-accent) 18%, transparent)'
-                          : 'none',
+                        color: isActive || isSecondaryActive ? 'var(--rn-ink)' : 'var(--rn-ink-3)',
+                        fontWeight: isActive ? 500 : undefined,
+                        borderColor: isDragOver ? 'var(--rn-accent)' : 'transparent',
+                        boxShadow: 'none',
                       }}
                       contentClassName="relative z-[1] flex min-w-0 flex-1 items-center justify-center"
                       title={tab.title}
@@ -243,7 +236,7 @@ export default function DocumentTabRail({
               <button
                 type="button"
                 onClick={() => void onNewTab()}
-                className="ml-[6px] flex h-[28px] w-[28px] flex-shrink-0 items-center justify-center rounded-[8px] transition-colors hover:bg-[var(--rn-fill-2)]"
+                className="ml-[6px] flex h-[28px] w-[28px] flex-shrink-0 items-center justify-center rounded-full transition-colors hover:bg-[var(--rn-fill-2)]"
                 title="新建"
               >
                 <Plus style={{ width: 14, height: 14 }} className="text-[var(--rn-ink-3)]" strokeWidth={2} />

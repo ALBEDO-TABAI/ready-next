@@ -39,166 +39,145 @@ export default function BrowserShellLayout({
   const showNativePage = isElectron && Boolean(activeTab) && !showReadyBlankPage && !activeTab?.error && !cover
 
   return (
-    <div className="flex min-h-0 h-full flex-1">
-      <div className="relative min-w-0 flex flex-1 flex-col">
-        {band}
-        {activeTab?.loading && (
-          <div className="relative h-0.5 flex-shrink-0 overflow-hidden" style={{ background: 'var(--rn-fill-2)' }}>
+    // One pane of the browser panel's framed body (V11): the bands for this page, then the page, inset by the frame pad.
+    <div className="browser-pane">
+      {band}
+      <div className="browser-pane__page">
+        {/* Loading: a quiet ink line in the frame gap above the page; it takes no room, so the page never shifts. */}
+        {activeTab?.loading && <div className="browser-pane__progress" aria-hidden="true"><span /></div>}
+        <div
+          ref={contentRef}
+          data-browser-local-media-drop-surface=""
+          data-ready-native-surface={showNativePage ? 'browser' : undefined}
+          // The page's box (browser-shell.css): the native view rounds its corners with the same radius (HOST_BORDER_RADIUS
+          // in Main), and the DOM in its place (blank page, error, reading view) clips to it, so the outline never changes.
+          className="browser-page"
+          onDragOver={onDragOver}
+          onDrop={onDrop}
+        >
+          {!isElectron && (
+            <div className="absolute inset-0 flex items-center justify-center text-[var(--rn-ink-3)]">
+              <div className="text-center">
+                <Globe className="mx-auto mb-3 h-12 w-12 opacity-30" />
+                <p className="text-[13px]">Browser requires Electron environment</p>
+              </div>
+            </div>
+          )}
+
+          {cover}
+
+          {showReadyBlankPage && (
             <div
-              className="absolute left-0 top-0 h-full rounded-r"
+              className="browser-ready-blank-page absolute inset-0 flex items-center justify-center"
               style={{
-                background: 'var(--rn-accent)',
-                animation: 'browserContentProgress 1.5s ease-in-out infinite',
+                // The empty page stands where the opaque native page shows, so it is opaque too (no flash between them).
+                background: 'var(--rn-solid)',
+                zIndex: 1,
+                pointerEvents: 'none',
               }}
-            />
-          </div>
-        )}
-
-        <div className="flex min-h-0 min-w-0 flex-1 bg-transparent">
-          <div
-            ref={contentRef}
-            data-browser-local-media-drop-surface=""
-            data-ready-native-surface={showNativePage ? 'browser' : undefined}
-            className="relative min-h-0 min-w-0 flex-1 overflow-hidden"
-            onDragOver={onDragOver}
-            onDrop={onDrop}
-            style={{
-              // The page is the browser's paper (W1 DL2): the native view rounds all four corners with the paper radius
-              // (HOST_BORDER_RADIUS in Main), and the DOM in its place (blank page, error, reading view) clips the same.
-              // The address bar above sits on the glass, so nothing is painted around the corners.
-              borderRadius: 'var(--rn-r-sheet)',
-              isolation: 'isolate',
-            }}
-          >
-            {!isElectron && (
-              <div className="absolute inset-0 flex items-center justify-center text-[var(--rn-ink-3)]">
-                <div className="text-center">
-                  <Globe className="mx-auto mb-3 h-12 w-12 opacity-30" />
-                  <p className="text-[13px]">Browser requires Electron environment</p>
-                </div>
-              </div>
-            )}
-
-            {cover}
-
-            {showReadyBlankPage && (
+            >
               <div
-                className="browser-ready-blank-page absolute inset-0 flex items-center justify-center"
+                role="img"
+                aria-label="Ready"
                 style={{
-                  // The empty page is paper (W1 DL2), no blur of its own (W1 §4).
-                  background: 'var(--rn-sheet)',
-                  zIndex: 1,
-                  pointerEvents: 'none',
+                  display: 'block',
+                  width: 'min(210px, calc(100vw - 96px))',
+                  aspectRatio: '4048 / 845',
+                  background: 'var(--rn-accent)',
+                  WebkitMask: `url(${readyWordmark}) center / contain no-repeat`,
+                  mask: `url(${readyWordmark}) center / contain no-repeat`,
                 }}
-              >
+              />
+            </div>
+          )}
+
+          {activeTab?.error && (
+            <div
+              className="absolute inset-0 flex items-center justify-center"
+              // The page area stays opaque while the page cannot show (no blur of its own).
+              style={{ background: 'var(--rn-solid)' }}
+            >
+              <div className="text-center" style={{ maxWidth: 360 }}>
+                <AlertTriangle
+                  className="mx-auto mb-4"
+                  style={{ width: 48, height: 48, color: 'var(--rn-warn)' }}
+                  strokeWidth={1.5}
+                />
+                <p className="mb-2 text-[15px] leading-[24px] font-medium" style={{ color: 'var(--rn-ink)' }}>
+                  Page failed to load
+                </p>
+                <p className="mb-4 text-[12px]" style={{ color: 'var(--rn-ink-2)', lineHeight: '16px' }}>
+                  {activeTab.error}
+                </p>
+                <Button icon={<RefreshCw />} onClick={() => void onRetry()}>
+                  Retry
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {toastVisible && (
+            <div
+              className="rn-float"
+              style={{
+                position: 'absolute',
+                bottom: 16,
+                left: '50%',
+                transform: 'translateX(-50%)',
+                color: 'var(--rn-ink)',
+                padding: '8px 16px',
+                fontSize: 13,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                zIndex: 30,
+                animation: 'cookieToastFade 3s ease-in-out forwards',
+                pointerEvents: 'none',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              <CheckCircle
+                style={{ width: 16, height: 16, color: 'var(--rn-ok)', flexShrink: 0 }}
+                strokeWidth={1.5}
+              />
+              已保存登录状态
+            </div>
+          )}
+
+          {(mediaDropActive || mediaUploadStatus) && (
+            <div
+              className="absolute inset-0 flex items-end justify-center"
+              style={{
+                zIndex: 35,
+                pointerEvents: mediaDropActive ? 'auto' : 'none',
+                paddingBottom: 16,
+                background: 'transparent',
+                cursor: mediaDropActive ? 'copy' : undefined,
+              }}
+            >
+              {(mediaUploadStatus || mediaDropActive) && (
                 <div
-                  role="img"
-                  aria-label="Ready"
-                  style={{
-                    display: 'block',
-                    width: 'min(210px, calc(100vw - 96px))',
-                    aspectRatio: '4048 / 845',
-                    background: 'var(--rn-accent)',
-                    WebkitMask: `url(${readyWordmark}) center / contain no-repeat`,
-                    mask: `url(${readyWordmark}) center / contain no-repeat`,
-                  }}
-                />
-              </div>
-            )}
-
-            {activeTab?.error && (
-              <div
-                className="absolute inset-0 flex items-center justify-center"
-                // The page area is paper while the page cannot show (opaque, no blur of its own).
-                style={{ background: 'var(--rn-sheet)' }}
-              >
-                <div className="text-center" style={{ maxWidth: 360 }}>
-                  <AlertTriangle
-                    className="mx-auto mb-4"
-                    style={{ width: 48, height: 48, color: 'var(--rn-warn)' }}
-                    strokeWidth={1.5}
-                  />
-                  <p className="mb-2 text-[15px] font-medium" style={{ color: 'var(--rn-ink)' }}>
-                    Page failed to load
-                  </p>
-                  <p className="mb-4 text-[12px]" style={{ color: 'var(--rn-ink-2)', lineHeight: 1.6 }}>
-                    {activeTab.error}
-                  </p>
-                  <Button icon={<RefreshCw />} onClick={() => void onRetry()}>
-                    Retry
-                  </Button>
+                  className="rn-float flex items-center gap-2 px-3 py-2"
+                  style={{ borderRadius: 'var(--rn-r-pill)', color: 'var(--rn-ink)' }}
+                >
+                  {mediaUploadStatus?.kind === 'success' ? (
+                    <CheckCircle style={{ width: 16, height: 16, color: 'var(--rn-ok)' }} strokeWidth={1.5} />
+                  ) : mediaUploadStatus?.kind === 'error' ? (
+                    <AlertTriangle style={{ width: 16, height: 16, color: 'var(--rn-bad)' }} strokeWidth={1.5} />
+                  ) : (
+                    <UploadCloud style={{ width: 16, height: 16, color: 'var(--rn-accent)' }} strokeWidth={1.5} />
+                  )}
+                  <span className="text-[12px] font-medium">
+                    {mediaUploadStatus?.message || '松开即可上传到当前网页'}
+                  </span>
                 </div>
-              </div>
-            )}
-
-            {toastVisible && (
-              <div
-                className="rn-float"
-                style={{
-                  position: 'absolute',
-                  bottom: 16,
-                  left: '50%',
-                  transform: 'translateX(-50%)',
-                  color: 'var(--rn-ink)',
-                  padding: '8px 16px',
-                  fontSize: 13,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  zIndex: 30,
-                  animation: 'cookieToastFade 3s ease-in-out forwards',
-                  pointerEvents: 'none',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                <CheckCircle
-                  style={{ width: 16, height: 16, color: 'var(--rn-ok)', flexShrink: 0 }}
-                  strokeWidth={2}
-                />
-                已保存登录状态
-              </div>
-            )}
-
-            {(mediaDropActive || mediaUploadStatus) && (
-              <div
-                className="absolute inset-0 flex items-end justify-center"
-                style={{
-                  zIndex: 35,
-                  pointerEvents: mediaDropActive ? 'auto' : 'none',
-                  paddingBottom: 18,
-                  background: 'transparent',
-                  cursor: mediaDropActive ? 'copy' : undefined,
-                }}
-              >
-                {(mediaUploadStatus || mediaDropActive) && (
-                  <div
-                    className="rn-float flex items-center gap-2 px-3 py-2"
-                    style={{ borderRadius: 'var(--rn-r-pill)', color: 'var(--rn-ink)' }}
-                  >
-                    {mediaUploadStatus?.kind === 'success' ? (
-                      <CheckCircle style={{ width: 15, height: 15, color: 'var(--rn-ok)' }} strokeWidth={2} />
-                    ) : mediaUploadStatus?.kind === 'error' ? (
-                      <AlertTriangle style={{ width: 15, height: 15, color: 'var(--rn-bad)' }} strokeWidth={2} />
-                    ) : (
-                      <UploadCloud style={{ width: 15, height: 15, color: 'var(--rn-accent)' }} strokeWidth={2} />
-                    )}
-                    <span className="text-[12px] font-medium">
-                      {mediaUploadStatus?.message || '松开即可上传到当前网页'}
-                    </span>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
       <style>{`
-        @keyframes browserContentProgress {
-          0% { width: 5%; }
-          50% { width: 65%; }
-          100% { width: 95%; }
-        }
         @keyframes cookieToastFade {
           0% { opacity: 0; transform: translateX(-50%) translateY(8px); }
           10% { opacity: 1; transform: translateX(-50%) translateY(0); }

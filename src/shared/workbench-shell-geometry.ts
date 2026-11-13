@@ -13,7 +13,7 @@ export const SHELL_WINDOW_MIN_WIDTH = SHELL_RAIL_WIDTH + SHELL_CONTENT_MIN_WIDTH
 
 /**
  * docked   — takes its own column beside the content;
- * floating — the assistant becomes a drawer over the content, the sidebar slides out on hover;
+ * floating — the column becomes a card over the content (V14), opened and closed by its switch;
  * hidden   — collapsed by the user.
  */
 export type ShellDock = 'docked' | 'floating' | 'hidden'
@@ -39,7 +39,7 @@ const clamp = (value: number, range: { min: number; max: number }) => Math.min(r
 
 /**
  * When the window is too narrow, space is given up in a fixed order (W2 §2.5): first the assistant
- * turns into a drawer over the content, then the sidebar turns into a slide-out; the content column
+ * turns into a drawer over the content, then the sidebar turns into a floating card; the content column
  * itself never shrinks below SHELL_CONTENT_MIN_WIDTH while either can still give way.
  */
 export function resolveShellLayout(input: ShellLayoutInput): ShellLayout {

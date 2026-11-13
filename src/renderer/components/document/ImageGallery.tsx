@@ -25,7 +25,7 @@ const TRANSPARENT_EXTS = ['png', 'webp', 'svg', 'gif']
 const tbBtnBase: React.CSSProperties = {
   width: 28,
   height: 28,
-  borderRadius: 4,
+  borderRadius: 'var(--rn-r-pill)',
   border: 'none',
   display: 'flex',
   alignItems: 'center',
@@ -233,8 +233,8 @@ export default function ImageGallery({ tab, fileUrl, currentExt }: ImageGalleryP
 
   const checkerboardStyle: React.CSSProperties = isTransparent
     ? {
-        // The checkerboard that shows transparency, drawn in the paper and fill tokens.
-        backgroundColor: 'var(--rn-sheet)',
+        // The checkerboard that shows transparency: an opaque backing and the fill token.
+        backgroundColor: 'var(--rn-solid)',
         backgroundImage: [
           'linear-gradient(45deg, var(--rn-fill-2) 25%, transparent 25%, transparent 75%, var(--rn-fill-2) 75%)',
           'linear-gradient(45deg, var(--rn-fill-2) 25%, transparent 25%, transparent 75%, var(--rn-fill-2) 75%)',
@@ -248,11 +248,11 @@ export default function ImageGallery({ tab, fileUrl, currentExt }: ImageGalleryP
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex-1 flex flex-col overflow-hidden" style={{ background: 'var(--rn-sheet)' }}>
+      <div className="flex-1 flex flex-col overflow-hidden" style={{ background: 'transparent' }}>
         {/* Toolbar */}
         <div
           className="flex items-center gap-1 px-3 border-b border-[var(--rn-hair-2)]"
-          style={{ height: 34, background: 'var(--rn-stage)', flexShrink: 0 }}
+          style={{ height: 34, background: 'transparent', borderBottomWidth: '.5px', flexShrink: 0 }}
         >
           {/* Zoom out */}
           <button
@@ -284,7 +284,7 @@ export default function ImageGallery({ tab, fileUrl, currentExt }: ImageGalleryP
             <ZoomIn size={14} color="var(--rn-ink-2)" />
           </button>
 
-          <div style={{ width: 1, height: 16, background: 'var(--rn-hair-2)', margin: '0 4px' }} />
+          <div style={{ width: .5, height: 16, background: 'var(--rn-hair-2)', margin: '0 4px' }} />
 
           {/* Fit to width */}
           <button onClick={fitToWidth} style={tbBtnBase} className="bg-transparent hover:bg-[var(--rn-fill-2)]" title="适应宽度">
@@ -299,14 +299,14 @@ export default function ImageGallery({ tab, fileUrl, currentExt }: ImageGalleryP
           {/* 1:1 */}
           <button
             onClick={() => setZoom(100)}
-            style={{ ...tbBtnBase, width: 'auto', padding: '0 6px', fontSize: 11, color: 'var(--rn-ink-2)', fontWeight: 600, fontFamily: 'inherit' }}
+            style={{ ...tbBtnBase, width: 'auto', padding: '0 6px', fontSize: 11, color: 'var(--rn-ink-2)', fontWeight: 500, fontFamily: 'var(--rn-font-mono)' }}
             className="bg-transparent hover:bg-[var(--rn-fill-2)]"
             title="原始尺寸"
           >
             1:1
           </button>
 
-          <div style={{ width: 1, height: 16, background: 'var(--rn-hair-2)', margin: '0 4px' }} />
+          <div style={{ width: .5, height: 16, background: 'var(--rn-hair-2)', margin: '0 4px' }} />
 
           {/* Rotate */}
           <button onClick={() => setRotation((r) => r - 90)} style={tbBtnBase} className="bg-transparent hover:bg-[var(--rn-fill-2)]" title="左旋转">
@@ -316,7 +316,7 @@ export default function ImageGallery({ tab, fileUrl, currentExt }: ImageGalleryP
             <RotateCw size={14} color="var(--rn-ink-2)" />
           </button>
 
-          <div style={{ width: 1, height: 16, background: 'var(--rn-hair-2)', margin: '0 4px' }} />
+          <div style={{ width: .5, height: 16, background: 'var(--rn-hair-2)', margin: '0 4px' }} />
 
           {/* Gallery button */}
           <button
@@ -327,15 +327,15 @@ export default function ImageGallery({ tab, fileUrl, currentExt }: ImageGalleryP
             title="浏览同目录图片"
           >
             <Images size={14} color="var(--rn-ink-2)" />
-            {siblings.length > 0 && <span>{siblings.length}</span>}
+            {siblings.length > 0 && <span style={{ fontFamily: 'var(--rn-font-mono)', fontVariantNumeric: 'tabular-nums' }}>{siblings.length}</span>}
           </button>
 
-          <div style={{ width: 1, height: 16, background: 'var(--rn-hair-2)', margin: '0 4px' }} />
+          <div style={{ width: .5, height: 16, background: 'var(--rn-hair-2)', margin: '0 4px' }} />
 
           {/* File info */}
           <span style={{ fontSize: 11, color: 'var(--rn-ink-2)', marginLeft: 2 }}>{tab.title}</span>
           {imageDims && (
-            <span style={{ fontSize: 10, color: 'var(--rn-ink-3)', marginLeft: 6 }}>
+            <span style={{ fontSize: 11, color: 'var(--rn-ink-3)', marginLeft: 6, fontFamily: 'var(--rn-font-mono)', fontVariantNumeric: 'tabular-nums' }}>
               {imageDims.w} &times; {imageDims.h}
             </span>
           )}
@@ -376,8 +376,8 @@ export default function ImageGallery({ tab, fileUrl, currentExt }: ImageGalleryP
           <div
             style={{
               ...checkerboardStyle,
-              borderRadius: 4,
-              border: '1px solid var(--rn-hair-2)',
+              borderRadius: 'var(--rn-r-xs)',
+              border: '.5px solid var(--rn-hair-2)',
               lineHeight: 0,
             }}
           >

@@ -15,7 +15,7 @@ export default function ModeSlider() {
           height: 14,
           borderRadius: 999,
           background: 'var(--rn-accent)',
-          boxShadow: '0 0 0 0.5px color-mix(in srgb, var(--rn-accent) 58%, color-mix(in srgb, var(--rn-sheet) 52%, transparent))',
+          boxShadow: '0 0 0 0.5px color-mix(in srgb, var(--rn-accent) 58%, color-mix(in srgb, var(--rn-solid) 52%, transparent))',
         }}
       />
     </div>

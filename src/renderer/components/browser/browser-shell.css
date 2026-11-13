@@ -1,70 +1,241 @@
-/* The browser shell's own tools (W7 §4.10): the find bar in the band above the page, 订阅 in the address field and
-   the address suggestions list. Only --rn-* tokens. */
+/* The browser shell (V11, W7 §4.10): one panel whose head row is the address row and whose body frames the page; the
+   find bar in the frame above the page, 订阅 in the address field and the address suggestions list. Only --rn-* tokens. */
 
-/* ---- Find bar: in the page column, so the native page moves down and its highlights stay visible ---- */
-.rn-find-bar {
-  display: flex;
-  align-items: center;
-  gap: var(--rn-s2);
-  flex: none;
-  min-height: 44px;
-  margin: 0 0 var(--rn-s2);
-  padding: var(--rn-s1) var(--rn-s2) var(--rn-s1) var(--rn-s3);
-  border-radius: var(--rn-r-md);
-  background: var(--rn-sheet);
-  box-shadow: var(--rn-card-shadow);
-  color: var(--rn-ink);
+/* ---- The panel: it fills the box the shell gives the mode ---- */
+.browser-panel {
+  position: relative;
+  flex: 1;
 }
 
-.rn-find-bar__icon {
+/* No hairline under the head row: the framed page right under it is the edge, a line above it would frame it twice. */
+.browser-panel > .browser-head {
+  box-shadow: none;
+}
+
+/* The page is framed on all four sides: the head row above, the frame pad of glass on the other three. */
+.browser-panel__body {
+  padding-top: var(--rn-panel-pad);
+}
+
+/* ---- Head row: 28px round buttons, 16px glyphs at 1.5, groups 4px inside and 8px apart (the head's gap) ---- */
+.browser-head__group {
+  display: flex;
   flex: none;
-  width: 15px;
-  height: 15px;
+  align-items: center;
+  gap: var(--rn-s1);
+}
+
+/* The page's tools sit at the end of the row, however wide the address field grows. */
+.browser-head__tools {
+  margin-left: auto;
+}
+
+/* Who holds the page: a glyph in a button's box, so it stands on the buttons' line. */
+.browser-head__status {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: var(--rn-control-h);
+  height: var(--rn-control-h);
   color: var(--rn-ink-3);
 }
 
+.browser-head__status[data-tone='agent'] { color: var(--rn-accent); }
+.browser-head__status svg { width: var(--rn-icon); height: var(--rn-icon); stroke-width: var(--rn-icon-stroke); }
+
+/* FastCard's count: centred on the glyph's top-right corner. */
+.browser-head__count {
+  position: absolute;
+  top: calc((var(--rn-control-h) - var(--rn-icon)) / 2 - var(--rn-s2));
+  right: calc((var(--rn-control-h) - var(--rn-icon)) / 2 - var(--rn-s2));
+  display: grid;
+  place-items: center;
+  min-width: var(--rn-s4);
+  height: var(--rn-s4);
+  padding: 0 var(--rn-s1);
+  border-radius: var(--rn-r-pill);
+  background: var(--rn-inverse);
+  color: var(--rn-on-inverse);
+  font: 600 var(--rn-t-micro)/1 var(--rn-font-mono);
+  pointer-events: none;
+}
+
+/* ---- The address field and the find field: the shared pill well (V2, V4); focus deepens the edge in ink ---- */
+.browser-address,
+.rn-find-bar__field {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  height: var(--rn-control-h);
+  /* the leading glyph sits in the pill's round end */
+  padding-left: calc((var(--rn-control-h) - var(--rn-icon)) / 2);
+  border-radius: var(--rn-r-control);
+  background: var(--rn-well);
+  box-shadow: inset 0 1px 2px var(--rn-well-shade), inset 0 0 0 .5px var(--rn-hair);
+  transition: box-shadow var(--rn-d-1) var(--rn-ease-std);
+}
+
+.browser-address:hover,
+.rn-find-bar__field:hover {
+  box-shadow: inset 0 1px 2px var(--rn-well-shade), inset 0 0 0 .5px var(--rn-hair-2);
+}
+
+.browser-address:has(input:focus),
+.rn-find-bar__field:has(input:focus) {
+  box-shadow: inset 0 1px 2px var(--rn-well-shade), inset 0 0 0 1px var(--rn-ink-3);
+}
+
+/* It takes the room left after the way back and the buttons, flowing from the left; a cap keeps it readable. */
+.browser-address {
+  flex: 1 1 auto;
+  max-width: 720px;
+}
+
+.browser-address__glyph,
+.rn-find-bar__icon {
+  flex: none;
+  width: var(--rn-icon);
+  height: var(--rn-icon);
+  stroke-width: var(--rn-icon-stroke);
+  color: var(--rn-ink-3);
+}
+
+.browser-address__glyph[data-secure] { color: var(--rn-ok); }
+
+.browser-address__input,
 .rn-find-bar__input {
   flex: 1;
   min-width: 0;
-  height: 30px;
-  padding: 0;
+  height: 100%;
+  padding: 0 var(--rn-s2);
   border: 0;
   outline: none;
   background: transparent;
-  font: 400 var(--rn-fs-md)/1.3 var(--rn-font-ui);
+  font: 400 var(--rn-t-body)/var(--rn-lh-body) var(--rn-font-ui);
   color: var(--rn-ink);
 }
 
+.browser-address__input::placeholder,
 .rn-find-bar__input::placeholder { color: var(--rn-ink-3); }
+
+/* ---- One pane of the framed body: its bands, then its page ---- */
+.browser-pane {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.browser-pane__page {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* The page's box: the native view is placed on it (its bounds are measured from it) and every DOM stand-in for the page
+   (blank page, error, reading view, the empty browser) fills it, opaque, with the inset radius. */
+.browser-page {
+  position: relative;
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: var(--rn-r-panel-inset);
+  isolation: isolate;
+}
+
+.browser-page--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--rn-solid);
+  color: var(--rn-ink-3);
+}
+
+/* Loading: a 2px ink line centred in the frame gap above the page, over its straight edge; ink, not the signal colour. */
+.browser-pane__progress {
+  position: absolute;
+  right: var(--rn-r-panel-inset);
+  bottom: calc(100% + (var(--rn-panel-pad) - 2px) / 2);
+  left: var(--rn-r-panel-inset);
+  height: 2px;
+  overflow: hidden;
+  border-radius: var(--rn-r-pill);
+  background: var(--rn-fill-2);
+  pointer-events: none;
+}
+
+.browser-pane__progress > span {
+  display: block;
+  height: 100%;
+  background: var(--rn-ink-3);
+  transform-origin: left center;
+  animation: browser-page-progress 1.5s var(--rn-ease-in-out) infinite;
+}
+
+@keyframes browser-page-progress {
+  0% { transform: scaleX(.05); }
+  50% { transform: scaleX(.65); }
+  100% { transform: scaleX(.95); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .browser-pane__progress > span { animation: none; transform: scaleX(.6); }
+  .browser-address,
+  .rn-find-bar__field { transition: none; }
+}
+
+/* Inside the panel the gap between two pages is the frame pad too. */
+.browser-panel .browser-split-resize-handle {
+  width: var(--rn-panel-pad);
+  flex-basis: var(--rn-panel-pad);
+}
+
+/* ---- Find bar: a row of the frame, the page's width, a frame pad above the page; the page moves down for it ---- */
+.rn-find-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--rn-s1);
+  height: var(--rn-control-h);
+  margin-bottom: var(--rn-panel-pad);
+  color: var(--rn-ink);
+}
+
+.rn-find-bar__field {
+  flex: 1;
+  padding-right: var(--rn-s3);
+}
 
 .rn-find-bar__count {
   flex: none;
-  min-width: 44px;
-  font: 400 var(--rn-fs-xs)/1 var(--rn-font-mono);
+  min-width: var(--rn-s10);
+  font: 400 var(--rn-t-meta)/var(--rn-lh-meta) var(--rn-font-ui);
+  font-variant-numeric: tabular-nums;
   color: var(--rn-ink-3);
   text-align: right;
 }
 
-.rn-find-bar__count[data-empty] {
-  font-family: var(--rn-font-ui);
-  color: var(--rn-bad);
-}
+/* A count is a number (Geist Mono); 查找中… and 无结果 are words. */
+.rn-find-bar__count[data-numeric] { font-family: var(--rn-font-mono); }
+.rn-find-bar__count[data-empty] { color: var(--rn-bad); }
 
-/* ---- 订阅: a quiet word in the address field, in the accent because it is the one thing the page offers ---- */
+/* ---- 订阅: a quiet text button in the address field; a fill only on hover (V4) ---- */
 .rn-subscribe {
   flex: none;
-  height: 22px;
+  height: var(--rn-control-h-tag);
   padding: 0 var(--rn-s2);
   border: 0;
-  border-radius: var(--rn-r-xs);
+  border-radius: var(--rn-r-control);
   background: transparent;
-  font: 500 var(--rn-fs-sm)/1 var(--rn-font-ui);
-  color: var(--rn-accent-text);
+  font: 500 var(--rn-t-meta)/1 var(--rn-font-ui);
+  color: var(--rn-ink);
   cursor: pointer;
   transition: background-color var(--rn-d-1) var(--rn-ease-out);
 }
 
-.rn-subscribe:hover { background: var(--rn-accent-soft); }
+.rn-subscribe:hover { background: var(--rn-fill-2); }
 .rn-subscribe[aria-disabled='true'] { color: var(--rn-ink-3); cursor: default; }
 .rn-subscribe[aria-disabled='true']:hover { background: transparent; }
 
@@ -83,12 +254,12 @@
   white-space: nowrap;
 }
 
-/* ---- 阅读视图: 资讯's reader on the page's own sheet, in place of the native page ---- */
+/* ---- 阅读视图: 资讯's reader in place of the native page, opaque like the page it stands for (the page's box clips it) ---- */
 .rn-reading-view {
   position: absolute;
   inset: 0;
   z-index: 3;
-  background: var(--rn-sheet);
+  background: var(--rn-solid);
   outline: none;
 }
 

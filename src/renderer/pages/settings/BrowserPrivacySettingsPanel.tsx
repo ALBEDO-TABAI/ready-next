@@ -381,7 +381,7 @@ export function BrowserPrivacySettingsPanel() {
               : '清除失败'}
         >
           {clearResult.errors.length > 0 && (
-            <ul className="mt-1 list-disc pl-4 text-[11.5px]">
+            <ul className="mt-1 list-disc pl-4 text-[12px]">
               {clearResult.errors.slice(0, 5).map((err, idx) => (
                 <li key={idx}>{err}</li>
               ))}
@@ -490,13 +490,13 @@ export function BrowserPrivacySettingsPanel() {
                       style={{ color: 'var(--rn-ink-3)' }}
                     />
                     <span
-                      className={`sx-mono truncate text-[12.5px] ${expanded ? 'font-medium' : ''}`}
+                      className={`sx-mono truncate text-[13px] ${expanded ? 'font-medium' : ''}`}
                       style={{ color: 'var(--rn-ink)' }}
                     >
                       {group.domain}
                     </span>
                     <span
-                      className="flex-shrink-0 text-[11.5px] tabular-nums"
+                      className="flex-shrink-0 text-[12px] tabular-nums"
                       style={{ marginLeft: 'auto', paddingLeft: 16, color: 'var(--rn-ink-3)' }}
                     >
                       {group.cookies.length} 个
@@ -531,7 +531,7 @@ export function BrowserPrivacySettingsPanel() {
                           className="group/cookie"
                           style={{
                             padding: '10px 10px 10px 14px',
-                            borderTop: cookieIndex === 0 ? undefined : '1px solid var(--rn-hair)',
+                            borderTop: cookieIndex === 0 ? undefined : '.5px solid var(--rn-hair)',
                           }}
                         >
                           <div className="flex items-center gap-2.5">

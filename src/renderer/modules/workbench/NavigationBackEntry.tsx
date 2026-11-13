@@ -21,11 +21,11 @@ export function NavigationBackEntry({ mode }: { mode: WorkbenchMode }) {
   return <nav className="rn-back" aria-label="返回" data-navigation-back={mode}>
     {canBack && <button type="button" className="rn-back__button" aria-label={`返回 ${backTitle}`} title={`回到「${backTitle}」 ${keys('navigate-back')}`}
       onClick={() => { void back().catch(report) }}>
-      <ArrowLeft aria-hidden size={14} strokeWidth={1.75} /><span className="rn-back__title">{backTitle}</span>
+      <ArrowLeft aria-hidden size={16} strokeWidth={1.5} /><span className="rn-back__title">{backTitle}</span>
     </button>}
     {canForward && <button type="button" className="rn-back__button rn-back__forward" aria-label={`前进到 ${forwardTitle}`} title={`前进到「${forwardTitle}」 ${keys('navigate-forward')}`}
       onClick={() => { void forward().catch(report) }}>
-      <ArrowRight aria-hidden size={14} strokeWidth={1.75} />
+      <ArrowRight aria-hidden size={16} strokeWidth={1.5} />
     </button>}
   </nav>
 }

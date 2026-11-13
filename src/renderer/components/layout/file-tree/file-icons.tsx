@@ -39,7 +39,7 @@ export function FileAppearanceColorDot({
         height: size,
         borderRadius: '50%',
         background: color,
-        border: '1px solid var(--rn-sheet)',
+        border: '1px solid var(--rn-solid)',
         ...style,
       }}
     />

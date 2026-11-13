@@ -19,6 +19,7 @@
   min-height: 0;
   overflow: hidden;
   flex-direction: column;
+  border-radius: var(--rn-r-dialog);
   color: var(--rn-ink);
   font-family: var(--rn-font-ui);
 }
@@ -31,7 +32,7 @@
   justify-content: space-between;
   gap: var(--rn-s4);
   padding: 22px 26px 15px;
-  border-bottom: 1px solid var(--rn-hair);
+  border-bottom: .5px solid var(--rn-hair);
 }
 
 .knowledge-graph-workspace__header > div:first-child {
@@ -48,9 +49,10 @@
 
 .knowledge-graph-workspace__header h2 {
   margin: 0;
-  font-size: 27px;
-  font-weight: 650;
-  letter-spacing: -0.04em;
+  font-size: var(--rn-t-page);
+  font-weight: 500;
+  line-height: var(--rn-lh-page);
+  letter-spacing: var(--rn-tracking-tight);
 }
 
 .knowledge-graph-workspace__header-actions {
@@ -90,7 +92,7 @@
   padding: 0 22px;
   color: var(--rn-ink-3);
   font-size: var(--rn-fs-2xs);
-  border-top: 1px solid var(--rn-hair);
+  border-top: .5px solid var(--rn-hair);
 }
 
 .knowledge-graph-workspace__footer span::before {
@@ -115,14 +117,14 @@
   padding: 14px 15px 12px;
   pointer-events: none;
   color: var(--rn-ink);
-  border-radius: var(--rn-r-md);
+  border-radius: var(--rn-r-float);
   animation: knowledge-graph-preview-in var(--rn-d-1) var(--rn-ease-out);
 }
 
 .knowledge-graph-preview strong {
   overflow: hidden;
   font-size: var(--rn-fs-md);
-  font-weight: 650;
+  font-weight: 500;
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -154,14 +156,14 @@
   pointer-events: none;
   color: var(--rn-on-inverse);
   background: var(--rn-inverse);
-  border-radius: 7px;
+  border-radius: var(--rn-r-xs);
   font-size: var(--rn-fs-2xs);
   box-shadow: var(--rn-shadow-1);
 }
 
 .knowledge-graph-status--warning {
   color: var(--rn-ink);
-  background: color-mix(in srgb, var(--rn-warn) 18%, var(--rn-sheet));
+  background: color-mix(in srgb, var(--rn-warn) 18%, var(--rn-solid));
 }
 
 .knowledge-graph-empty {

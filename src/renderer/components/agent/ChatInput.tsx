@@ -574,7 +574,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
         >
           <ImagePlus style={{ width: 15, height: 15, flexShrink: 0, color: 'var(--rn-ink-2)' }} strokeWidth={2} />
           <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--rn-ink)' }}>/imag</div>
+            <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--rn-ink)' }}>/imag</div>
             <div style={{ fontSize: 10, color: 'var(--rn-ink-3)', marginTop: 2 }}>生成图片，可搭配已添加的参考图</div>
           </div>
           <span style={{ fontSize: 10, color: 'var(--rn-ink-3)', marginLeft: 'auto', flexShrink: 0 }}>命令</span>
@@ -603,7 +603,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
             <div
               style={{
                 fontSize: 12,
-                fontWeight: 600,
+                fontWeight: 500,
                 color: 'var(--rn-ink)',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
@@ -679,7 +679,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
             }
           }}
         >
-          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--rn-ink)' }}>{option.label}</div>
+          <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--rn-ink)' }}>{option.label}</div>
           <div style={{ marginTop: 2, fontSize: 10, lineHeight: 1.35, color: 'var(--rn-ink-3)' }}>{option.description}</div>
         </button>
       ))}

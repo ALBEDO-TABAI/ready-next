@@ -191,12 +191,15 @@ export default function RSSArticleReader({ item, expectedRevision, reveal, onClo
         收下<ChevronDown className="rss-btn-caret" />
       </Button>
       <RSSTranslationControl state={translation} disabled={busy} />
+      <span className="rss-topbar__divider" aria-hidden />
       <IconButton icon={<Star fill={item.starred ? 'currentColor' : 'none'} />} title={item.starred ? '取消收藏' : '收藏文章'} active={item.starred} onClick={() => onToggleStar(item.id)} />
-      <IconButton disabled={!content} icon={copied ? <Check strokeWidth={2} /> : <Copy />} title={copied ? '已复制' : '复制标题、来源与正文'} aria-label={copied ? '已复制' : '复制内容'}
+      <IconButton disabled={!content} icon={copied ? <Check /> : <Copy />} title={copied ? '已复制' : '复制标题、来源与正文'} aria-label={copied ? '已复制' : '复制内容'}
         onClick={() => { if (content) void copyTextToClipboard(`${title}\n来源：${article?.link || item.link}\n\n${content.text}`).then(setCopied) }} />
       <RSSSaveNoteButton article={content?.article || null} disabled={busy} active={active} onError={setError} />
-      <span className="rss-tool-gap" />
-      {onOpenOriginal && item.link && <Button variant="ghost" size="sm" onClick={() => onOpenOriginal(item)}>打开原文<ArrowUpRight /></Button>}
+      {onOpenOriginal && item.link && <>
+        <span className="rss-topbar__divider" aria-hidden />
+        <Button variant="ghost" size="sm" onClick={() => onOpenOriginal(item)}>打开原文<ArrowUpRight /></Button>
+      </>}
     </RSSTopbarTools>
     <div className="rss-reader-layout">
       {headings.length > 0 && <nav className="rss-reader-toc" aria-label="本文目录">
@@ -213,7 +216,7 @@ export default function RSSArticleReader({ item, expectedRevision, reveal, onClo
         {included.length > 0 && <div className="rss-reader-tags">{included.map((entry) => <span key={entry.definitionId} className="rss-tag" title={entry.reason}>{entry.name}</span>)}</div>}
         <div className="rss-reader-status" role="status">
           <span>
-            {busy && <Loader2 size={13} className="animate-spin" />}
+            {busy && <Loader2 size={14} className="animate-spin" />}
             {content ? `${content.textKind === 'source_summary' ? '来源摘要 · ' : ''}${BODY_LABELS[content.body.status]}` : busy ? '正在读取文章' : '文章读取失败'}
           </span>
           {!video && !image && <Button variant="ghost" size="sm" icon={<RefreshCw />} disabled={busy || !!expectedRevision} title={expectedRevision ? '刊物引用保留对应版本；可返回资讯列表获取新正文。' : undefined}

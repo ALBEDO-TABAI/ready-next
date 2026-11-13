@@ -212,8 +212,8 @@ export function FileColorPalette({
             borderRadius: '50%',
             background: color.value,
             boxShadow: selectedColor === color.key
-              ? '0 0 0 2px var(--rn-sheet), 0 0 0 3.5px var(--rn-ink)'
-              : 'inset 0 0 0 1px var(--rn-hair)',
+              ? '0 0 0 2px var(--rn-solid), 0 0 0 3.5px var(--rn-ink)'
+              : 'inset 0 0 0 .5px var(--rn-hair-2)',
             cursor: 'pointer',
             flexShrink: 0,
           }}
@@ -224,7 +224,7 @@ export function FileColorPalette({
         title="清除颜色"
         icon={<X />}
         onClick={() => onSetColor(null)}
-        style={{ borderRadius: '50%', boxShadow: 'inset 0 0 0 1px var(--rn-hair-2)' }}
+        style={{ borderRadius: '50%', boxShadow: 'inset 0 0 0 .5px var(--rn-hair-2)' }}
       />
     </FloatPanel>
   )

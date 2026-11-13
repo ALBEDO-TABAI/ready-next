@@ -32,6 +32,7 @@
 | --- | --- |
 | Ready Next 四项目整合 | [整合实施计划](superpowers/plans/2026-10-30-ready-next-integration-implementation.md)；ready-next 分支的 D1–D18、待实现 C1–C15 与 M0–M8，不代表当前生产能力 |
 | Ready Next 收束（外壳、设计系统、资料库模型、资讯筛子、串联、浏览器 Agent） | [收束路线图](superpowers/plans/2026-11-11-ready-next-coherence-roadmap.md) 及其 W1–W7 实施计划；[全局盘点](superpowers/audits/2026-11-11-ready-next-coherence-audit/README.md)；[设计基准页](design/ready-next-design-reference.html)。E1–E12 为已定决定，G1–G10 与各计划的合同均待实现 |
+| Ready Next 设计语言 | [V1–V10 设计语言合同](superpowers/plans/2026-11-13-ready-next-vvf-design-language-implementation.md)；取代 W1 的 DL2、DL4、DL5、DL7、DL9、DL10，其余继续有效 |
 | 聊天项目目录 | [项目目录合同](superpowers/plans/2026-09-29-chat-project-selector-implementation.md)；目录隔离、显式覆盖与当前安装记录 |
 | 第三方模型与网关分层 | [模型验收](superpowers/audits/2026-09-26-provider-adapters-validation.md) / [模块拆分](superpowers/plans/2026-09-26-model-gateway-modularization.md)；`verify:codex-runtime-e3` |
 | 工作台性能与长 RSS 列表 | [性能实现与验收](superpowers/plans/2026-09-22-workbench-switch-performance-implementation.md)；`verify:workbench-performance` |

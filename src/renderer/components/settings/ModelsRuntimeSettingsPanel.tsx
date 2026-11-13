@@ -517,7 +517,7 @@ export default function ModelsRuntimeSettingsPanel() {
                       </div>
                     )}
                     {pack.download.error && (
-                      <div className="sx-text-danger mt-1 text-[11.5px] leading-[1.6]" style={{ overflowWrap: 'anywhere' }}>
+                      <div className="sx-text-danger mt-1 text-[12px] leading-[1.6]" style={{ overflowWrap: 'anywhere' }}>
                         {pack.download.error}
                       </div>
                     )}
@@ -577,7 +577,7 @@ export default function ModelsRuntimeSettingsPanel() {
             <div className="sx-card__body flex flex-col gap-2.5">
               {selfTest.entries.map((entry) => (
                 <div key={entry.id} className="sx-inset flex flex-col gap-1.5" style={{ padding: '10px 14px' }}>
-                  <div className="text-[12.5px] font-semibold" style={{ color: 'var(--rn-ink)' }}>{entry.displayName}</div>
+                  <div className="text-[13px] font-medium" style={{ color: 'var(--rn-ink)' }}>{entry.displayName}</div>
                   {entry.probes.map((probe) => (
                     <ProbeLine key={probe.source} ok={probe.reachable}>
                       <span className="inline-block" style={{ minWidth: 52, color: 'var(--rn-ink)' }}>{SOURCE_LABELS[probe.source]}</span>

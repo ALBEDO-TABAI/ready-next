@@ -2,20 +2,19 @@
    task tabs in the browser sidebar, and the task card under the assistant's reply. Only --rn-* tokens; the accent
    marks the one thing waiting for the person. */
 
-/* ---- The band above the page. It takes its own height so the native page moves down; nothing covers the page. ---- */
+/* ---- The band above the page: a row of the browser panel's frame (V11), the page's width, a frame pad above the
+   page. It takes its own height so the native page moves down; nothing covers the page, and it paints no surface of
+   its own (no panel on a panel). ---- */
 .rn-task-band {
   display: flex;
   align-items: center;
   gap: var(--rn-s3);
   flex: none;
-  min-height: 48px;
-  margin: 0 0 var(--rn-s2);
-  padding: var(--rn-s2) var(--rn-s2) var(--rn-s2) var(--rn-s4);
-  border-radius: var(--rn-r-md);
-  background: var(--rn-sheet);
-  box-shadow: var(--rn-card-shadow);
+  min-height: var(--rn-control-h);
+  margin-bottom: var(--rn-panel-pad);
+  padding-left: var(--rn-s2);
   color: var(--rn-ink);
-  font: 400 var(--rn-fs-md)/1.35 var(--rn-font-ui);
+  font: 400 var(--rn-t-body)/var(--rn-lh-body) var(--rn-font-ui);
 }
 
 .rn-task-band__dot,
@@ -38,14 +37,14 @@
 
 .rn-task-band__title {
   flex: none;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .rn-task-band__hint,
 .rn-task-band__refusal {
   min-width: 0;
   overflow: hidden;
-  font-size: var(--rn-fs-sm);
+  font-size: var(--rn-t-meta);
   color: var(--rn-ink-3);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -133,7 +132,7 @@
   height: 22px;
   padding: 0 var(--rn-s2);
   border: 0;
-  border-radius: var(--rn-r-xs);
+  border-radius: var(--rn-r-control);
   background: transparent;
   font: 500 var(--rn-fs-xs)/1 var(--rn-font-ui);
   color: var(--rn-ink-2);
@@ -185,7 +184,7 @@
   flex-direction: column;
   gap: var(--rn-s2);
   padding: var(--rn-s3) var(--rn-s3) var(--rn-s3) var(--rn-s4);
-  border-radius: var(--rn-r-md);
+  border-radius: var(--rn-r-card);
   background: var(--rn-fill);
 }
 
@@ -200,7 +199,7 @@
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  font-weight: 600;
+  font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

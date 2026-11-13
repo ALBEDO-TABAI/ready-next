@@ -113,7 +113,7 @@ html, body {
   overflow: visible !important;
 }
 body.ready-document-export-body {
-  background: var(--rn-sheet);
+  background: var(--rn-solid);
   color: var(--rn-ink);
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
   -webkit-print-color-adjust: exact;

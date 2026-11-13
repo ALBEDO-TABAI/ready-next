@@ -847,14 +847,14 @@ export default function DocumentMode({
       >
         {/* Like the calendar: no shell surface of its own; the sidebar and page panels fill the workspace. */}
         <div className="workbench-canvas-shell flex min-h-0 h-full flex-col" style={{ background: 'transparent', boxShadow: 'none' }}>
-          {/* Inkwell's document interface: tab rail, glass sidebar, then the paper page with its topbar. */}
+          {/* One panel (V11): the tab strip is its head row, the page with its topbar its body; nothing on the ground. */}
           <ShellNavigator mode="document" label="资料库">
             <DocumentNavigator roots={pagePanel.libraryRoots} visible={isSceneVisible} onShowFiles={revealInFiles} />
           </ShellNavigator>
           <div className="ink-scope ink-doc-app">
-            <div className="ink-column">
+            <div className="ink-column rn-panel">
             <InkTabStrip active={isSceneVisible} onNewTab={() => { setEditorMode('preview'); openTab('') }} />
-            <main className="ink-main rn-sheet" aria-label="文档">
+            <main className="ink-main rn-panel__body" aria-label="文档">
               <InkTopbar
                 tab={panelTargetTab}
                 roots={pagePanel.libraryRoots}

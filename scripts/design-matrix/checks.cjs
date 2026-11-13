@@ -7,9 +7,9 @@
 // Paper and well are the W1 materials. Until the W2 shell lands, each mode's legacy content
 // surface stands in for the paper; the list is ordered, first visible match wins.
 const LEGACY_SHEETS = {
-  document: ['.ink-doc-app main.ink-main', '.rn-library', '.ink-doc-app'],
-  rss: ['.rss-article-reader', '.rss-feed-sheet', '.rss-workbench-body'],
-  calendar: ['.ready-calendar main.main', '.ready-calendar'],
+  document: ['.ink-doc-app .ink-column.rn-panel', '.rn-library', '.ink-doc-app'],
+  rss: ['.rss-feed-sheet'],
+  calendar: ['.ready-calendar .app', '.ready-calendar'],
   browser: ['[data-ready-native-surface="browser"]', '[data-browser-content-frame]'],
 }
 
@@ -79,7 +79,8 @@ function collect(input) {
     }
     return null
   }
-  const sheet = pick(['.rn-sheet', '.rn-well', ...(legacySheets ?? [])])
+  // A mode's work block is its panel (V11); a split's left pane comes first. Sheets and wells are the older surfaces.
+  const sheet = pick(['[data-shell-region="content"] .rn-panel', '.rn-sheet', '.rn-well', ...(legacySheets ?? [])])
   const assistant = pick(['[data-shell-region="assistant"]', '[data-chat-panel-root]'])
   const composer = pick(['[data-chat-composer-shell="true"]'])
   if (sheet) result.measures.sheet = { selector: sheet.selector, ...box(sheet.el) }
@@ -99,7 +100,7 @@ function collect(input) {
       const wide = W >= 1300
       const pass = wide ? ratio >= (assistantOpen ? 0.5 : 0.68) : width >= 560
       if (!pass) add('contentWidth', `${mode}:${wide ? 'wide' : 'narrow'}`)
-      // DL11a: equal bands above and below the paper; the composer's bottom edge sits on the paper's.
+      // DL11a, V15: equal margins above and below the panel (band + frame gap); the composer's bottom edge sits on the panel's.
       const r = sheet.el.getBoundingClientRect()
       const top = Math.round(r.top)
       const bottom = Math.round(H - r.bottom)
@@ -122,7 +123,7 @@ function collect(input) {
   }
 
   // ---- UI font (DL7): chrome text uses the first family of --rn-font-ui; the mono family only
-  // for numbers, the serif family for at most one display moment per screen. Book spines are
+  // for numbers, the serif family only as the Latin wordmark face (V12). Book spines are
   // objects with their own cloth typography, and a printed page (.sheet) is set in the reading face the reader chose:
   // neither is interface text. ----
   const uiFamily = (token('--rn-font-ui').split(',')[0] || '').replace(/['"]/g, '').trim()
@@ -140,44 +141,56 @@ function collect(input) {
     textElements.push(el)
   }
   result.measures.uiFamily = uiFamily
-  let displaySerifs = 0
   for (const el of textElements) {
     const first = getComputedStyle(el).fontFamily.split(',')[0].replace(/['"]/g, '').trim()
     if (first === uiFamily) continue
     if (first === monoFamily && /^[\d\s:.,/%+\-–—()#×xX]+$/.test(el.textContent.trim())) continue
-    if (first === serifFamily && displaySerifs === 0) { displaySerifs += 1; continue }
+    // V12: the serif is the wordmark face, Latin only ("Ready", the welcome line, the product name).
+    if (first === serifFamily && /^[\x20-\x7e]+$/.test(el.textContent.trim())) continue
     add('uiFont', `${signature(el)}{${first}}`)
   }
 
-  // ---- current item: carries the signal colour (G4). The rail follows its own white-glyph rule. ----
+  // ---- V5: current rows/tabs use fill-2, ink and weight 500, never the signal colour. ----
   const accents = new Set([token('--rn-accent'), token('--rn-accent-text'), token('--rn-accent-soft')].map(norm).filter(Boolean).map(rgbOnly))
+  const currentFill = norm(token('--rn-fill-2'))
+  const currentInk = norm(token('--rn-ink'))
   result.measures.accent = token('--rn-accent')
   const currentSelector = '[aria-current]:not([aria-current="false"]), [aria-selected="true"], [data-active="true"], [data-state="active"]'
+  // Rail glyphs, today and live status indicators keep their own signal treatment.
+  const currentExempt = '[data-liquid-shell="icon-rail"], [data-shell-region="rail"], [aria-current="date"], [data-today-tab], .today, .is-today, [data-state="running"], [data-status="running"], [data-state="needs_user"], [role="status"], [role="progressbar"]'
+  const isAccent = value => {
+    const colour = norm(value)
+    return colour && !colour.endsWith(',0') && accents.has(rgbOnly(colour))
+  }
   const carriesAccent = el => {
-    const nodes = [el, ...el.querySelectorAll('*')].slice(0, 40)
+    const nodes = [el, ...el.querySelectorAll('*')]
     for (const node of nodes) {
+      if (!visible(node) || node.closest(currentExempt)) continue
       for (const pseudo of [null, '::before', '::after']) {
         if (pseudo && node !== el) continue
         const cs = getComputedStyle(node, pseudo)
-        for (const prop of ['color', 'backgroundColor', 'borderLeftColor', 'borderBottomColor', 'borderTopColor', 'outlineColor', 'fill', 'stroke', 'textDecorationColor']) {
-          const value = rgbOnly(norm(cs[prop]))
-          if (value && accents.has(value)) return true
+        if (pseudo && (cs.content === 'none' || cs.content === 'normal')) continue
+        for (const prop of ['color', 'backgroundColor', 'borderLeftColor', 'borderRightColor', 'borderBottomColor', 'borderTopColor', 'outlineColor', 'fill', 'stroke', 'textDecorationColor']) {
+          if (isAccent(cs[prop])) return true
         }
         const shadow = cs.boxShadow
         if (shadow && shadow !== 'none') {
-          for (const match of shadow.matchAll(/rgba?\([^)]+\)|#[0-9a-f]{3,8}/gi)) if (accents.has(rgbOnly(norm(match[0])))) return true
+          for (const match of shadow.matchAll(/rgba?\([^)]+\)|#[0-9a-f]{3,8}/gi)) if (isAccent(match[0])) return true
         }
       }
     }
     return false
   }
   for (const el of document.querySelectorAll(currentSelector)) {
-    if (!visible(el)) continue
-    if (el.closest('[data-liquid-shell="icon-rail"], [data-shell-region="rail"]')) continue
-    // Menu and listbox options show keyboard selection, not "where you are"; they are not the signal.
-    // A selected tab uses the fill treatment of the design reference (.bar .tab.on), not the signal.
-    if (['option', 'menuitem', 'menuitemradio', 'menuitemcheckbox', 'tab'].includes(el.getAttribute('role'))) continue
-    if (!carriesAccent(el)) add('currentAccent', signature(el))
+    if (!visible(el) || el.closest(currentExempt)) continue
+    // Menu and listbox options show keyboard selection, not "where you are".
+    if (['option', 'menuitem', 'menuitemradio', 'menuitemcheckbox'].includes(el.getAttribute('role'))) continue
+    // A treeitem wraps both its own painted row and its expanded child group.
+    const row = el.getAttribute('role') === 'treeitem' ? el.querySelector(':scope > .ink-sb-row.is-selected') ?? el : el
+    const cs = getComputedStyle(row)
+    if (carriesAccent(row) || norm(cs.backgroundColor) !== currentFill || norm(cs.color) !== currentInk || Number(cs.fontWeight) !== 500) {
+      add('currentAccent', signature(el))
+    }
   }
 
   // ---- native controls: no browser default appearance ----

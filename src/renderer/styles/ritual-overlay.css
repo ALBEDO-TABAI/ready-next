@@ -51,7 +51,7 @@
    --rn-stage values (design/next/tokens.css) itself instead of reading the theme-dependent token. */
 :root {
   --ritual-stage-light: #ebebee;
-  --ritual-stage-dark: #0e0e11;
+  --ritual-stage-dark: #0b0b0d;
 }
 
 html[data-theme-ritual-phase='entering'][data-theme-ritual-direction='to-dark'] .ready-theme-ritual-tint {

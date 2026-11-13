@@ -122,7 +122,7 @@ export default function UniverSheet({ tab }: { tab: DocTab }) {
   return (
     <div className="flex-1 relative" style={{ overflow: 'hidden' }}>
       {loading && (
-        <div className="absolute inset-0 flex items-center justify-center z-10" style={{ background: 'var(--rn-sheet)' }}>
+        <div className="absolute inset-0 flex items-center justify-center z-10" style={{ background: 'var(--rn-solid)' }}>
           <Loader2 className="w-6 h-6 animate-spin text-[var(--rn-ink-2)]" />
         </div>
       )}

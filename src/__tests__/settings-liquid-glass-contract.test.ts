@@ -56,7 +56,7 @@ test('settings page keeps the main workbench transparent shell structure', () =>
   assert.match(rendererTypes, /refreshTransparentSurface:\s*\(\) => Promise<void>/)
 })
 
-test('settings navigation is the shared ListRow: current section in the signal colour, no inline paint', () => {
+test('settings navigation is the shared ListRow: current section in fill and ink (V5), no inline paint', () => {
   const settingsPage = readWorkspaceFile('src/renderer/pages/Settings.tsx')
   const primitives = readWorkspaceFile('src/renderer/components/ui/primitives.css')
 
@@ -66,7 +66,10 @@ test('settings navigation is the shared ListRow: current section in the signal c
   assert.match(nav, /<SectionHeader className="sx-nav-group-label"/)
   assert.match(nav, /<ListRow[\s\S]*?className="sx-nav-item"[\s\S]*?current=\{activeSection === section\.id\}/)
   assert.doesNotMatch(nav, /style=\{\{[^}]*(?:background|border|color)/)
-  assert.match(primitives, /\.rn-row\[aria-current\]:not\(\[aria-current='false'\]\)\s*\{[^}]*background:\s*var\(--rn-accent-soft\);[^}]*color:\s*var\(--rn-accent-text\)/)
+  // V5 (2026-11-13): the current row is --rn-fill-2 + ink + 500, never the signal colour.
+  const currentRow = primitives.match(/\.rn-row\[aria-current\]:not\(\[aria-current='false'\]\)\s*\{([^}]*)\}/)?.[1] ?? ''
+  assert.match(currentRow, /background:\s*var\(--rn-fill-2\);[^}]*color:\s*var\(--rn-ink\);[^}]*font-weight:\s*500/)
+  assert.doesNotMatch(currentRow, /accent/)
 })
 
 test('file tree scroll root opts into the Chromium 148 liquid glass repaint guard', () => {
@@ -111,14 +114,14 @@ test('settings layout is on the --rn-* tokens: no private palette, cards are pap
   assert.throws(() => readWorkspaceFile('src/renderer/styles/settings-surfaces.css'))
   assert.throws(() => readWorkspaceFile('src/renderer/components/settings/settings-theme.ts'))
   assert.doesNotMatch(readRendererStyles(), /--sx-[a-z]/)
-  // 一组设置是一张纸（DL2）：不透明纸色、纸的圆角与贴地影，不画外框。
+  // 一组设置是一块面板玻璃（V1）：面板色、面板圆角与面板玻璃的整组阴影，不画外框。
   const cardBlock = settingsCss.match(/\n {2}\.sx-card \{[\s\S]*?\n {2}\}/)?.[0] ?? ''
   assert.match(cardBlock, /background:\s*var\(--rn-sheet\)/)
   assert.match(cardBlock, /box-shadow:\s*var\(--rn-sheet-shadow\)/)
   assert.doesNotMatch(cardBlock, /\bborder\s*:/)
-  // 选中的单选卡与分段控件的选中项同一个样子，不用线框圈选，也不用信号色。
+  // 选中的单选卡是 fill-2 加 .5px 发丝圈（V5），不用粗线框圈选，也不用信号色。
   const selectedOption = settingsCss.match(/\.sx-option:is\(\[aria-checked='true'\], \[aria-pressed='true'\], \.is-active\) \{[\s\S]*?\}/)?.[0] ?? ''
-  assert.match(selectedOption, /background:\s*var\(--rn-sheet\);[\s\S]*?box-shadow:\s*var\(--rn-card-shadow\)/)
+  assert.match(selectedOption, /background:\s*var\(--rn-fill-2\);[\s\S]*?box-shadow:\s*inset 0 0 0 \.5px var\(--rn-hair-2\)/)
   assert.doesNotMatch(selectedOption, /border|accent/)
   // 私有按钮、开关、分段、输入都不在了：设置页的控件就是 components/ui 的基元（W1 §5）。
   assert.doesNotMatch(settingsShared, /settingsButtonClass|SettingsSwitch\b|SettingsSegmented|sx-btn|sx-switch(?!-label)|sx-seg|sx-input/)

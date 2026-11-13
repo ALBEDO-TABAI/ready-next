@@ -351,7 +351,7 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
       }}
     >
       <div className="min-w-0 flex items-center gap-[6px]">
-        <span className="text-[13px] font-semibold" style={{ color: PANEL_COLORS.title }}>
+        <span className="text-[13px] font-medium" style={{ color: PANEL_COLORS.title }}>
           全局搜索
         </span>
         {isSearching && <Loader2 className="h-3.5 w-3.5 animate-spin" style={{ color: PANEL_COLORS.mutedStrong }} />}
@@ -404,7 +404,7 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
             构建索引
           </Button>
           {indexError && (
-            <p className="text-[10px] font-medium" style={{ color: PANEL_COLORS.bad }}>
+            <p className="text-[11px] font-medium" style={{ color: PANEL_COLORS.bad }}>
               {indexError}
             </p>
           )}
@@ -432,7 +432,7 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
         paddingBottom: GLOBAL_SEARCH_DIMENSIONS.bodyPaddingYBottom,
       }}
     >
-      <p className="text-[10px] font-medium leading-4" style={{ color: PANEL_COLORS.mutedStrong }}>
+      <p className="text-[11px] font-medium leading-4" style={{ color: PANEL_COLORS.mutedStrong }}>
         支持 #tag / [[wikilink]] 前缀语法 · 引号可做短语匹配
       </p>
 
@@ -465,7 +465,7 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
       </div>
 
       {message && (
-        <p className="text-[10px] font-medium" style={{ color: PANEL_COLORS.badge }}>
+        <p className="text-[11px] font-medium" style={{ color: PANEL_COLORS.badge }}>
           {message}
         </p>
       )}
@@ -495,7 +495,7 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
                       </span>
                       {item.draft && (
                         <span
-                          className="rounded-[4px] border px-[4px] py-[0.5px] text-[9px] font-medium shrink-0"
+                          className="rounded-[4px] border px-[4px] py-[0.5px] text-[11px] font-medium shrink-0"
                           style={{ borderColor: PANEL_COLORS.cardBorder, color: PANEL_COLORS.badge }}
                         >
                           draft
@@ -503,14 +503,14 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
                       )}
                       {!item.draft && item.sourceType && item.sourceType !== 'document' && (
                         <span
-                          className="rounded-[4px] border px-[4px] py-[0.5px] text-[9px] font-medium shrink-0"
+                          className="rounded-[4px] border px-[4px] py-[0.5px] text-[11px] font-medium shrink-0"
                           style={{ borderColor: PANEL_COLORS.cardBorder, color: PANEL_COLORS.mutedStrong }}
                         >
                           {SOURCE_BADGE_LABEL[item.sourceType] ?? item.sourceType}
                         </span>
                       )}
                     </div>
-                    <p className="mt-0.5 truncate text-[10px] leading-[1.3]" style={{ color: PANEL_COLORS.mutedStrong }}>
+                    <p className="mt-0.5 truncate text-[11px] leading-[1.3]" style={{ color: PANEL_COLORS.mutedStrong }}>
                       {item.path}
                     </p>
                     {item.snippet && (
@@ -523,7 +523,7 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
                         {item.tagsHit.map((tag) => (
                           <span
                             key={`t-${tag}`}
-                            className="rounded-[4px] border px-[5px] py-[1px] text-[9px] font-medium"
+                            className="rounded-[4px] border px-[5px] py-[1px] text-[11px] font-medium"
                             style={{ borderColor: PANEL_COLORS.cardBorder, color: PANEL_COLORS.badge }}
                           >
                             #{tag}
@@ -532,7 +532,7 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
                         {item.linksHit.map((link) => (
                           <span
                             key={`l-${link}`}
-                            className="rounded-[4px] border px-[5px] py-[1px] text-[9px] font-medium"
+                            className="rounded-[4px] border px-[5px] py-[1px] text-[11px] font-medium"
                             style={{ borderColor: PANEL_COLORS.cardBorder, color: PANEL_COLORS.badge }}
                           >
                             [[{link}]]
@@ -542,7 +542,7 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
                     )}
                   </button>
                   {item.sourceType === 'rss' && typeof item.sourceMeta?.link === 'string' && (
-                    <button type="button" className="text-[10px] underline" style={{ color: PANEL_COLORS.muted }} onClick={() => {
+                    <button type="button" className="text-[11px] underline" style={{ color: PANEL_COLORS.muted }} onClick={() => {
                       const url = ReadyRefSchema.safeParse({ kind: 'web', url: item.sourceMeta?.link })
                       if (url.success && url.data.kind === 'web') void openWebpageInBrowser(url.data.url).then(opened => { if (!opened) setMessage('网页未能在 Ready 浏览器中打开') }).catch(error => setMessage(String(error)))
                     }}>打开原文</button>
@@ -556,14 +556,14 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
       </div>
 
       {query.trim().length > 0 && !isSearching && (
-        <p className="text-[10px] font-medium" style={{ color: PANEL_COLORS.mutedStrong }}>
+        <p className="text-[11px] font-medium" style={{ color: PANEL_COLORS.mutedStrong }}>
           {statsText}
         </p>
       )}
 
       {indexStatus && (
         <div className="flex items-center justify-between gap-[8px] pt-[2px]">
-          <p className="text-[10px] font-medium leading-[1.4]" style={{ color: PANEL_COLORS.mutedStrong }}>
+          <p className="text-[11px] font-medium leading-[1.4]" style={{ color: PANEL_COLORS.mutedStrong }}>
             已索引 {indexStatus.docCount} 项 · {formatIndexedAt(indexStatus.lastIndexedAt)}
           </p>
           <Button
@@ -579,7 +579,7 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
       )}
 
       {indexError && (
-        <p className="text-[10px] font-medium" style={{ color: PANEL_COLORS.bad }}>
+        <p className="text-[11px] font-medium" style={{ color: PANEL_COLORS.bad }}>
           {indexError}
         </p>
       )}

@@ -31,18 +31,18 @@ test('liquid glass chrome removes prominent shell edges so panels read as one fu
   assert.match(shellStyles, /\.shell-sidebar:not\(\.shell-float-drawer\)\s*\{\s*background:\s*transparent;\s*box-shadow:\s*none;/)
   assert.doesNotMatch(skillsPanel, /selected \? PANEL_COLORS\.blue : PANEL_COLORS\.border/)
   assert.doesNotMatch(skillsPanel, /importDropActive \? PANEL_COLORS\.blue : PANEL_COLORS\.dropBorder/)
-  assert.match(skillsPanel, /background: selected \? 'var\(--rn-fill\)' : 'transparent'/)
+  assert.match(skillsPanel, /background: selected \? 'var\(--rn-fill-2\)' : 'transparent'/)
   assert.match(skillsPanel, /border: '1px solid transparent'/)
   assert.doesNotMatch(statusBar, /glass-surface-panel/)
   assert.match(statusBar, /background:\s*'transparent'/)
-  assert.match(browserHeader, /className="browser-header-surface glass-surface-panel flex-shrink-0"/)
-  assert.match(browserHeader, /background:\s*'transparent'/)
-  assert.match(browserHeader, /borderBottom: '1px solid transparent'/)
+  // V11: the browser's header is the head row of its one panel, with no rule under it (the framed page is the edge).
+  assert.match(browserHeader, /className="rn-panel__head browser-head no-drag"/)
+  assert.match(readWorkspaceFile('src/renderer/components/browser/browser-shell.css'), /\.browser-panel > \.browser-head \{\s*box-shadow: none;\s*\}/)
   assert.match(activeTabSurface, /background: mode === 'primed' \|\| mode === 'expanded' \|\| mode === 'editing'/)
-  // Editing, the active tab is drawn as the shared field (W1 §5): paper with an ink edge.
-  assert.match(activeTabSurface, /\? 'var\(--rn-sheet\)'/)
+  // Editing, the active tab is drawn as the shared field: the well (V2) with an ink edge.
+  assert.match(activeTabSurface, /\? 'var\(--rn-well\)'/)
   assert.match(activeTabSurface, /boxShadow: mode === 'primed' \|\| mode === 'expanded' \|\| mode === 'editing'/)
-  assert.match(activeTabSurface, /\? 'inset 0 0 0 1\.5px var\(--rn-ink-3\)'/)
+  assert.match(activeTabSurface, /\? 'inset 0 1px 2px var\(--rn-well-shade\), inset 0 0 0 1px var\(--rn-ink-3\)'/)
   assert.doesNotMatch(tabRail, /background:\s*'var\(--bg-primary\)'/)
   assert.doesNotMatch(chatPanel, /className="content-surface-panel flex-shrink-0 flex flex-col overflow-hidden"/)
   // B13: the drop ring is ink (--rn-ink-3), like the project pill's; blue was the retired accent (W1 DL5).
@@ -58,7 +58,7 @@ test('liquid glass chrome removes prominent shell edges so panels read as one fu
   assert.match(topBar, /background:\s*'transparent'/)
 
   // B13 (W1 DL1): the frames and legacy panel surfaces have no edge, shadow or highlight of their own.
-  assert.match(styles, /\.workbench-canvas-shell \{[^}]*border: 1px solid transparent;[^}]*box-shadow: none;/)
+  assert.match(styles, /\.workbench-canvas-shell \{[^}]*border: 0;[^}]*box-shadow: none;/)
   assert.match(styles, /\[style\*="border-right"\],/)
   assert.match(styles, /border-right-color:\s*transparent !important;/)
   assert.match(styles, /\n\.glass-surface-panel \{[^}]*box-shadow: none;/)

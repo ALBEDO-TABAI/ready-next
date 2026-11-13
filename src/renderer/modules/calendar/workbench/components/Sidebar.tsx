@@ -12,7 +12,6 @@ import { openCalendarMenu } from './Menus';
 import { miniTitle, wdMini } from '../fmt';
 import { t } from '../i18n';
 import { parseDateInput } from '../dateinput';
-import { ShellSidebarToggle } from '../../../workbench/shell/ShellSidebar';
 
 export function MiniMonth() {
   const s = useStore((x) => ({ anchor: x.anchor, today: x.today, wso: x.prefs.weekStartsOn, view: x.prefs.gridView, days: x.prefs.daysPerPeriod }));
@@ -53,11 +52,10 @@ export function Sidebar() {
   const go = () => { const d = parseDateInput(q, getState().today); if (d !== null) { goToDay(d); setQ(''); } };
   return (
     <aside className="sidebar" data-testid="sidebar">
-      <div className="sidebar-top">
-        <span className="sidebar-title">日历</span>
+      <div className="shell-navigator__head">
+        <span className="shell-navigator__title">日历</span>
         <IconButton icon={<Search />} title={t('search')} onClick={() => openOverlay('search')} />
         <IconButton className="sidebar-new" icon={<SquarePen />} title={t('newEvent')} onClick={() => openCalendarAction('quick')} />
-        <ShellSidebarToggle className="rn-icon-btn" />
       </div>
       <div className="sidebar-scroll panel-hover-scrollbar">
         <MiniMonth />

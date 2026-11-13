@@ -384,7 +384,7 @@ export default function ChatMessages({
                                 height: 24,
                                 objectFit: 'cover',
                                 borderRadius: 6,
-                                border: '1px solid var(--rn-hair-2)',
+                                border: '.5px solid var(--rn-hair-2)',
                                 flexShrink: 0,
                               }}
                             />

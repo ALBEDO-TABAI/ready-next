@@ -3,7 +3,6 @@ import type { RSSDefinition } from '../../../shared/rss-organization'
 import { RSS_DEFINITION_ICONS } from './organization-icons'
 import { useRSSSession } from '../../stores/useRSSSession'
 import type { RSSQueryInput } from '../../../shared/rss-workspace'
-import { ShellSidebarToggle } from '../../modules/workbench/shell/ShellSidebar'
 import { ListRow } from '../ui/Structure'
 
 // 资讯的导航器（W5 §4）：在外壳唯一的侧栏里（W2-T4）。默认落在“为你筛过的”；“全部 / 未读 / 收藏”按种类取名，
@@ -34,8 +33,10 @@ export default function RSSNavigation({ definitions, onNavigate, onSieve, onMana
       onClick={() => onNavigate({ collectionId: definition.id, scope: 'inbox',
         filter: definition.kind === 'unread' || definition.kind === 'starred' ? definition.kind : 'all', categoryId: undefined })} />
   }
-  return <nav className="rss-nav" aria-label="资讯导航">
-    <div className="rss-nav__head"><span>资讯</span><ShellSidebarToggle /></div>
+  // The header row is the shell's (V15): it stays put above the scrolling list, as in the other navigators.
+  return <>
+  <div className="shell-navigator__head"><span className="shell-navigator__title">资讯</span></div>
+  <nav className="rss-nav" aria-label="资讯导航">
     <div className="rss-nav__list">
       <ListRow className="rss-nav__item" aria-label="为你筛过的" title="为你筛过的" icon={<Filter size={16} />} label="为你筛过的"
         current={sieveVisible && !digestVisible && !managing} onClick={onSieve} />
@@ -56,4 +57,5 @@ export default function RSSNavigation({ definitions, onNavigate, onSieve, onMana
         current={managing} onClick={() => onManage()} />
     </div>
   </nav>
+  </>
 }

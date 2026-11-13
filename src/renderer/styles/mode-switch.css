@@ -1,7 +1,7 @@
 /* ═══ mode-switch.css — 分段控件的滑块胶囊（MorphSegmentedControl / MorphTabStrip）与拖拽分隔的悬停态；四模式切换已移到外壳图标栏（W2），旧的拖拽模式开关与 iOS 分段控件样式随组件退役。 ═══ */
 
-/* The sliding pill under the selected tab or segment: the Segmented primitive's selected item (paper and a card
-   shadow, as ink's open tabs); the other pane's tab in a split is a quiet fill. No blur (W1 §4). */
+/* The sliding pill under the selected tab or segment: the selected fill (V5, fill-2; the label is ink 500); the other
+   pane's tab in a split is a quieter fill. No blur (W1 §4). */
 .morph-pill {
   position: absolute;
   inset: 1.5px;
@@ -10,13 +10,13 @@
 }
 
 .morph-pill-primary {
-  background: var(--rn-sheet);
+  background: var(--rn-fill-2);
   border: none;
-  box-shadow: var(--rn-card-shadow);
+  box-shadow: none;
 }
 
 .morph-pill-secondary {
-  background: var(--rn-fill-2);
+  background: var(--rn-fill);
   border: none;
   box-shadow: none;
 }

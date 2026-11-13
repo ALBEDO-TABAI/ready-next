@@ -93,22 +93,15 @@ export default function WorkbenchProjectTabs({
                 onDragEnd={onTabDragEnd}
                 onClick={(event) => onTabClick(tab.id, event)}
                 suppressLiquidPill={isActive}
-                className="group relative flex min-w-0 w-full cursor-pointer items-center rounded-t-[8px] px-[10px] text-[12px] transition-[background-color,color,border-color] duration-150"
+                className="group relative flex min-w-0 w-full cursor-pointer items-center rounded-[var(--rn-r-sm)] px-[10px] text-[12px] transition-[background-color,color,border-color] duration-150"
+                // The selected tab is the selected fill, ink, 500 (V5).
                 style={{
                   gap: 6,
                   height: isActive ? activeTabHeight : inactiveTabHeight,
-                  background: isActive
-                    ? 'color-mix(in srgb, var(--rn-sheet) 18%, transparent)'
-                    : isSecondaryActive
-                      ? 'color-mix(in srgb, var(--rn-sheet) 12%, transparent)'
-                      : 'transparent',
-                  color: isActive || isSecondaryActive ? 'var(--rn-ink-2)' : 'var(--rn-ink-3)',
-                  borderBottom: isActive
-                    ? '1px solid transparent'
-                    : isSecondaryActive
-                      ? '2px solid var(--rn-accent)'
-                      : '1px solid transparent',
-                  borderTop: isActive ? '1px solid rgba(255,255,255,0.08)' : '1px solid transparent',
+                  // The split's other tab gets its fill from the morph pill.
+                  background: isActive ? 'var(--rn-fill-2)' : 'transparent',
+                  color: isActive ? 'var(--rn-ink)' : isSecondaryActive ? 'var(--rn-ink-2)' : 'var(--rn-ink-3)',
+                  fontWeight: isActive ? 500 : 400,
                   alignSelf: 'flex-end',
                 }}
                 contentClassName="relative z-[1] flex min-w-0 flex-1 items-center gap-[6px]"

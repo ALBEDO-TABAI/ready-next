@@ -136,7 +136,9 @@ test('browser host visibility is explicitly gated and browser bounds keep Browse
   assert.doesNotMatch(runtimeHook, /browser\?\.showActive\(\)/)
   assert.doesNotMatch(runtimeHook, /browser\?\.hideAll\(\)/)
 
-  assert.match(browserShellLayout, /isolation: 'isolate'/)
+  // V11: the page's box isolates its stacking (browser-shell.css owns the box, BrowserShellLayout uses it).
+  assert.match(browserShellLayout, /className="browser-page"/)
+  assert.match(readWorkspaceFile('src/renderer/components/browser/browser-shell.css'), /\.browser-page \{[^}]*isolation: isolate;/)
   assert.match(browserMode, /zIndex: 1/)
   assert.match(sidePanel, /className=\{`shell-sidebar workbench-panel-frame/)
   assert.match(chatPanel, /className=\{`workbench-panel-frame/)

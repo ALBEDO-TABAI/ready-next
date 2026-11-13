@@ -47,9 +47,10 @@
   opacity: 0.94;
 }
 
+/* Between the two panes of a split: with each pane's 6px frame inset, the panels sit 16px apart (4px grid). */
 .workbench-split-resize-handle {
-  width: 3.5px;
-  flex: 0 0 3.5px;
+  width: 4px;
+  flex: 0 0 4px;
   cursor: col-resize;
   position: relative;
   align-self: stretch;
@@ -162,7 +163,8 @@ body.resizing .workbench-split-resize-handle__grip {
   opacity: 1;
 }
 
-/* The gap between two browser panes: two papers on the glass, 8px apart (W1 DL2, DL11); nothing painted in it. */
+/* The gap between two browser pages: a hit area with nothing painted in it. Inside the browser's panel (browser-shell.css)
+   it narrows to the frame pad, so the pages sit --rn-panel-pad (6px) apart. */
 .browser-split-resize-handle {
   width: var(--rn-s2);
   flex: 0 0 var(--rn-s2);
@@ -222,9 +224,8 @@ body.resizing .browser-split-resize-handle__grip {
 
 .browser-fastcard-surface {
   background: var(--rn-sheet) !important;
-  border-left: 1px solid var(--rn-hair-2) !important;
-  border-radius: var(--rn-r-float) 0 0 var(--rn-r-float);
-  box-shadow: var(--rn-shadow-3) !important;
+  border-radius: var(--rn-r-sheet) 0 0 var(--rn-r-sheet);
+  box-shadow: var(--rn-sheet-shadow) !important;
   overflow: hidden;
 }
 
@@ -235,15 +236,15 @@ body.resizing .browser-split-resize-handle__grip {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  border-bottom: 1px solid var(--rn-hair);
+  box-shadow: inset 0 -.5px 0 var(--rn-hair);
 }
 
 .browser-fastcard-header h2 {
   margin: 0;
   color: var(--rn-ink);
-  font-size: 14px;
-  line-height: 1.25;
-  font-weight: 600;
+  font-size: var(--rn-t-lead);
+  line-height: var(--rn-lh-lead);
+  font-weight: 500;
 }
 
 .browser-fastcard-title-row {
@@ -262,7 +263,7 @@ body.resizing .browser-split-resize-handle__grip {
   justify-content: center;
   color: var(--rn-ink-2);
   background: transparent;
-  transition: background-color var(--rn-d-1), color var(--rn-d-1);
+  transition: background-color var(--rn-d-1) var(--rn-ease-std), color var(--rn-d-1) var(--rn-ease-std);
 }
 
 .browser-fastcard-icon-button:hover {
@@ -289,15 +290,16 @@ body.resizing .browser-split-resize-handle__grip {
 .browser-fastcard-result-body p {
   margin: 8px 0 0;
   color: var(--rn-ink-2);
-  font-size: 12px;
-  line-height: 1.55;
+  font-size: var(--rn-t-meta);
+  line-height: var(--rn-lh-meta);
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 
 .browser-fastcard-result-body section {
-  border: 1px solid var(--rn-hair);
-  border-radius: var(--rn-r-control);
+  background: var(--rn-inlay);
+  box-shadow: inset 0 1px 0 var(--rn-glass-inner-hi), inset 0 0 0 .5px var(--rn-hair-2);
+  border-radius: var(--rn-r-card);
   padding: 10px;
 }
 
@@ -325,10 +327,12 @@ body.resizing .browser-split-resize-handle__grip {
 }
 
 .browser-fastcard-field select {
-  height: 30px;
-  border: 1px solid var(--rn-hair-2);
+  height: var(--rn-control-h);
+  border: 0;
+  background: var(--rn-well);
+  box-shadow: inset 0 1px 2px var(--rn-well-shade), inset 0 0 0 .5px var(--rn-hair);
   border-radius: var(--rn-r-control);
-  padding: 0 8px;
+  padding: 0 10px;
   color: var(--rn-ink);
   outline: none;
 }
@@ -338,20 +342,22 @@ body.resizing .browser-split-resize-handle__grip {
   flex-wrap: wrap;
   gap: 8px;
   padding: 12px;
-  border-top: 1px solid var(--rn-hair);
+  box-shadow: inset 0 .5px 0 var(--rn-hair);
 }
 
 .browser-fastcard-action {
-  min-height: 30px;
-  border: 1px solid var(--rn-hair-2);
+  min-height: var(--rn-control-h);
+  border: 0;
+  background: var(--rn-inlay);
+  box-shadow: inset 0 1px 0 var(--rn-glass-inner-hi), inset 0 0 0 .5px var(--rn-hair-2), var(--rn-shadow-1);
   border-radius: var(--rn-r-control);
-  padding: 0 10px;
+  padding: 0 12px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
   color: var(--rn-ink);
-  font-size: 12px;
-  transition: background-color var(--rn-d-1), border-color var(--rn-d-1), color var(--rn-d-1);
+  font-size: var(--rn-t-meta);
+  transition: background-color var(--rn-d-1) var(--rn-ease-std), color var(--rn-d-1) var(--rn-ease-std);
 }
 
 .browser-fastcard-action.subtle {
@@ -393,8 +399,7 @@ html[data-browser-agent-pointer-window='true'] #root {
 }
 
 .browser-fastcard-overlay-root .browser-fastcard-surface {
-  border-radius: var(--rn-r-float);
-  border: 0 !important;
+  border-radius: var(--rn-r-dialog);
 }
 
 /* 快记 (the global quick note, its own opaque frameless window): one sheet that fills the window; the title row
@@ -405,7 +410,7 @@ html[data-browser-agent-pointer-window='true'] #root {
   gap: var(--rn-s3);
   height: 100vh;
   padding: var(--rn-s4);
-  background: var(--rn-sheet);
+  background: var(--rn-solid);
   color: var(--rn-ink);
   font: 400 var(--rn-fs-md)/var(--rn-lh) var(--rn-font-ui);
 }
@@ -413,7 +418,7 @@ html[data-browser-agent-pointer-window='true'] #root {
 .fastcard-quick-note__title {
   margin: 0;
   padding-bottom: var(--rn-s1);
-  font: 600 var(--rn-fs-lg)/1.3 var(--rn-font-ui);
+  font: 500 var(--rn-t-lead)/var(--rn-lh-lead) var(--rn-font-ui);
   -webkit-app-region: drag;
   user-select: none;
 }
@@ -454,9 +459,9 @@ html[data-browser-agent-pointer-window='true'] #root {
   align-items: center;
   gap: 9px;
   padding: 8px 12px;
-  border-radius: var(--rn-r-lg);
+  border-radius: var(--rn-r-card);
   background: var(--rn-float);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--browser-lock-tone) 42%, transparent);
+  box-shadow: inset 0 0 0 .5px color-mix(in srgb, var(--browser-lock-tone) 42%, transparent);
   color: var(--rn-ink);
   font-family: var(--rn-font-ui);
   overflow: hidden;
@@ -473,7 +478,7 @@ html[data-browser-agent-pointer-window='true'] #root {
   flex-shrink: 0;
   width: 32px;
   height: 32px;
-  border-radius: var(--rn-r-control);
+  border-radius: var(--rn-r-sm);
   background: color-mix(in srgb, var(--browser-lock-tone) 13%, transparent);
   color: var(--browser-lock-tone);
 }
@@ -491,7 +496,7 @@ html[data-browser-agent-pointer-window='true'] #root {
 }
 
 .browser-lock-overlay__label {
-  font: 600 var(--rn-fs-sm)/1.15 var(--rn-font-ui);
+  font: 500 var(--rn-t-meta)/var(--rn-lh-meta) var(--rn-font-ui);
 }
 
 .browser-lock-overlay__detail {
@@ -526,7 +531,7 @@ html[data-browser-agent-pointer-window='true'] #root {
   border-radius: var(--rn-r-pill);
   background: var(--rn-inverse);
   color: var(--rn-on-inverse);
-  font: 600 var(--rn-fs-2xs)/1.2 var(--rn-font-ui);
+  font: 600 var(--rn-t-micro)/1.2 var(--rn-font-ui);
   box-shadow: var(--rn-shadow-2);
   white-space: nowrap;
 }

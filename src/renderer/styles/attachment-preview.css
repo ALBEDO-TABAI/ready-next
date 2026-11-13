@@ -16,7 +16,7 @@
   max-width: min(760px, 100%);
   max-height: calc(100% - 40px);
   overflow: hidden;
-  border-radius: 16px;
+  border-radius: var(--rn-r-sheet);
 }
 
 .attachment-preview-toolbar {
@@ -27,16 +27,16 @@
   display: flex;
   gap: 4px;
   padding: 4px;
-  border-radius: var(--rn-r-md);
+  border-radius: var(--rn-r-pill);
   /* A small float of its own over the media: the float colour (opaque under 减少透明), no second blur. */
   background: var(--rn-float);
-  box-shadow: var(--rn-shadow-2), inset 0 0 0 1px var(--rn-hair);
+  box-shadow: var(--rn-shadow-2), inset 0 0 0 .5px var(--rn-hair);
 }
 
 .attachment-preview-action {
   display: grid;
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   place-items: center;
   border: 0;
   border-radius: var(--rn-r-control);
@@ -76,7 +76,7 @@
   height: auto;
   max-height: calc(100vh - 100px);
   object-fit: contain;
-  border-radius: var(--rn-r-control);
+  border-radius: var(--rn-r-card);
   box-shadow: var(--rn-shadow-2);
 }
 

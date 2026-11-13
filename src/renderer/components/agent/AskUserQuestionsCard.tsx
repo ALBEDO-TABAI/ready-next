@@ -208,8 +208,8 @@ export function AskUserQuestionsCard({ card, onSubmit, onCancel }: AskUserQuesti
             border: 'none',
             cursor: 'pointer',
             padding: 0,
-            fontSize: 12.5,
-            fontWeight: 600,
+            fontSize: 13,
+            fontWeight: 500,
             width: '100%',
             minWidth: 0,
             textAlign: 'left',
@@ -263,7 +263,7 @@ export function AskUserQuestionsCard({ card, onSubmit, onCancel }: AskUserQuesti
   const selectedSingle = typeof answers[currentQ.id] === 'string' ? (answers[currentQ.id] as string) : ''
   const freeTextValue = typeof answers[currentQ.id] === 'string' ? (answers[currentQ.id] as string) : ''
 
-  // A quiet card on the assistant's glass (W1 DL1/DL2): a fill and a hairline, no paper. Options are the shared
+  // An inlay card on the assistant's glass (V2): thin glass and a .5px hairline, no panel. Options are the shared
   // Chip (a chosen option is pressed, in ink), the free answer is the shared Textarea, the pager is IconButton and
   // the one primary action is the ink Button (DL5: the signal colour is not a button colour).
   return (
@@ -273,10 +273,10 @@ export function AskUserQuestionsCard({ card, onSubmit, onCancel }: AskUserQuesti
         width: '100%',
         minWidth: 0,
         boxSizing: 'border-box',
-        borderRadius: 'var(--rn-r-md)',
+        borderRadius: 'var(--rn-r-card)',
         padding: 14,
-        border: '1px solid var(--rn-hair)',
-        background: 'var(--rn-fill)',
+        background: 'var(--rn-inlay)',
+        boxShadow: 'inset 0 1px 0 var(--rn-glass-inner-hi), inset 0 0 0 .5px var(--rn-hair-2)',
         color: 'var(--rn-ink)',
       }}
       role="dialog"
@@ -284,7 +284,7 @@ export function AskUserQuestionsCard({ card, onSubmit, onCancel }: AskUserQuesti
       aria-label="Agent 反问卡片"
     >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-        <span style={{ fontSize: 11.5, color: 'var(--rn-ink-3)', fontWeight: 500 }}>
+        <span style={{ fontSize: 12, color: 'var(--rn-ink-3)', fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>
           Agent 反问 · {safeIndex + 1}/{totalQuestions}
         </span>
         <button
@@ -303,7 +303,7 @@ export function AskUserQuestionsCard({ card, onSubmit, onCancel }: AskUserQuesti
         </button>
       </div>
 
-      <div style={{ fontSize: 13.5, lineHeight: 1.55, marginBottom: 12, whiteSpace: 'pre-wrap', color: 'var(--rn-ink)' }}>
+      <div style={{ fontSize: 13, lineHeight: '20px', marginBottom: 12, whiteSpace: 'pre-wrap', color: 'var(--rn-ink)' }}>
         {renderInline(currentQ.question)}
         {currentQ.required === false && (
           <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--rn-ink-3)' }}>（可选）</span>
@@ -373,13 +373,13 @@ export function AskUserQuestionsCard({ card, onSubmit, onCancel }: AskUserQuesti
           onClick={() => setCurrentIndex(safeIndex + 1)}
         />
 
-        <span style={{ fontSize: 11.5, color: 'var(--rn-ink-3)', marginLeft: 2 }}>
+        <span style={{ fontSize: 12, color: 'var(--rn-ink-3)', marginLeft: 2, fontVariantNumeric: 'tabular-nums' }}>
           已答 {answeredCount}/{totalQuestions}
         </span>
 
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
           {localDisabled && (
-            <span style={{ fontSize: 11.5, color: 'var(--rn-ink-3)', fontStyle: 'italic' }}>
+            <span style={{ fontSize: 12, color: 'var(--rn-ink-3)', fontStyle: 'italic' }}>
               取消处理中…
             </span>
           )}

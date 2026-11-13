@@ -1,6 +1,29 @@
 /* Ready Next shell (W2): the rail and the bands live on the window glass (W1 DL1), so nothing here
    paints a panel background, border or shadow. Only --rn-* tokens (W1 DS1). */
 
+/* The top band's left cluster (V12, V13): the sidebar's switch, then the wordmark. */
+.shell-band-lead {
+  display: flex;
+  align-items: center;
+  gap: var(--rn-s3);
+  min-width: 0;
+}
+
+/* The wordmark, as in vvf's top bar: Instrument Serif, the one serif of the interface. It is a label, so the band
+   still drags the window through it. Instrument Serif sits low in its line box (ascent .99, descent .31, x-height .51
+   of the em): raising it by .085em puts its x-height centre on the band's centre line, level with the switch's icon. */
+.shell-wordmark {
+  font-family: var(--rn-font-wordmark);
+  font-weight: 400;
+  font-size: var(--rn-t-title);
+  line-height: 1;
+  letter-spacing: -.01em;
+  color: var(--rn-ink);
+  white-space: nowrap;
+  user-select: none;
+  transform: translateY(-.085em);
+}
+
 .shell-rail {
   --icon-rail-slot-inset-x: 8px;
   --icon-rail-slot-size: 36px;
@@ -11,8 +34,9 @@
   justify-content: space-between;
   align-items: center;
   height: 100%;
-  /* The rail sits between the top and bottom bands, which are full-width rows of the shell. */
-  padding: 4px 0 8px;
+  /* The rail sits between the bands, which are full-width rows of the shell. Its first icon is centred on the head line
+     (V15: the frame gap, then a head row), its last one ends on the panels' bottom edge. */
+  padding: calc(var(--rn-frame-gap) + (var(--rn-panel-head-h) - var(--rn-control-h-lg)) / 2) 0 var(--rn-frame-gap);
   background: transparent;
 }
 
@@ -69,7 +93,7 @@
   height: var(--rn-control-h-lg);
   padding: 0;
   border: 0;
-  border-radius: var(--rn-r-control);
+  border-radius: var(--rn-r-sm);
   background: transparent;
   color: var(--rn-ink-2);
   cursor: pointer;
@@ -101,7 +125,8 @@
   pointer-events: none;
 }
 
-/* The one sidebar (W2 §2.2): glass, no frame of its own; the mode's navigator fills the slot. */
+/* The one sidebar (W2 §2.2): glass, no frame of its own; the mode's navigator fills the slot. Docked, it keeps the
+   frame gap above and below like the panels (V15), so its header row starts on the head line. */
 .shell-sidebar {
   flex-shrink: 0;
   display: flex;
@@ -114,6 +139,7 @@
 .shell-sidebar:not(.shell-float-drawer) {
   background: transparent;
   box-shadow: none;
+  padding-block: var(--rn-frame-gap);
 }
 
 .shell-sidebar__slot,
@@ -130,63 +156,74 @@
   display: none;
 }
 
-.shell-sidebar-toggle {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
+/* One head line (V15): a navigator's header row is as tall as a panel's head row and starts at the same y, the title
+   on the left and the navigator's few tools after it. */
+.shell-navigator__head {
+  display: flex;
   flex: none;
-  padding: 0;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--rn-ink-3);
-  cursor: pointer;
+  align-items: center;
+  gap: var(--rn-s1);
+  height: var(--rn-panel-head-h);
+  padding: 0 var(--rn-s2) 0 var(--rn-s5);
 }
 
-.shell-sidebar-toggle:hover {
-  background: var(--rn-fill-2);
-  color: var(--rn-ink);
+.shell-navigator__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font: 500 var(--rn-t-body)/var(--rn-lh-body) var(--rn-font-ui);
+  color: var(--rn-ink-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* Narrow windows (W2 §2.5): the assistant becomes a drawer over the content and the sidebar slides
-   out on hover. They are floats (DL4); until the shared Float material lands (W1-T3/T4) they use the
-   opaque paper colour instead of a second blur implementation. */
+/* The assistant's header row is on the same line: docked, the column starts at the band, so the row keeps the frame
+   gap above it; in the narrow-window drawer the card itself starts on the line. */
+.chat-header-row {
+  height: var(--rn-panel-head-h);
+  margin-top: var(--rn-frame-gap);
+}
+
+.shell-float-drawer .chat-header-row {
+  margin-top: 0;
+}
+
+/* Narrow windows (V14): the sidebar is a card over the content, the assistant a drawer on the right. Both are float
+   glass (.rn-float on the element) with the panels' radius on all four corners; their top and bottom are the panels',
+   and they keep the frame gap from the rail and the window edge, so each reads as a panel laid over the content. */
 .shell-float-drawer {
   position: absolute;
-  top: 0;
-  bottom: 0;
+  top: var(--rn-frame-gap);
+  bottom: var(--rn-frame-gap);
   z-index: 40;
   display: flex;
-  background: var(--rn-sheet);
-  box-shadow: var(--rn-shadow-3);
-  transition: transform var(--rn-d-2) var(--rn-ease-out), opacity var(--rn-d-2) var(--rn-ease-out);
+  border-radius: var(--rn-r-sheet);
+  transition: transform var(--rn-d-2) var(--rn-ease-std), opacity var(--rn-d-2) var(--rn-ease-std);
 }
 
 .shell-float-drawer[data-side='right'] {
-  right: 0;
-  border-radius: var(--rn-r-float) 0 0 var(--rn-r-float);
+  right: var(--rn-frame-gap);
 }
 
 .shell-float-drawer[data-side='left'] {
-  left: 0;
-  border-radius: 0 var(--rn-r-float) var(--rn-r-float) 0;
+  left: calc(var(--rn-rail-w) + var(--rn-frame-gap));
 }
 
-/* A closed drawer is out of reach: invisible to focus and clicks (visibility flips after the slide). */
+/* A closed drawer is out of reach: invisible to focus and clicks (visibility flips after the fade, which is quicker
+   than the opening). */
 .shell-float-drawer[data-open='false'] {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  transition: transform var(--rn-d-2) var(--rn-ease-out), opacity var(--rn-d-2) var(--rn-ease-out), visibility 0s linear var(--rn-d-2);
+  transition: transform var(--rn-d-1) var(--rn-ease-std), opacity var(--rn-d-1) var(--rn-ease-std), visibility 0s linear var(--rn-d-1);
 }
 
 .shell-float-drawer[data-open='false'][data-side='right'] {
-  transform: translateX(100%);
+  transform: translateX(var(--rn-s2));
 }
 
 .shell-float-drawer[data-open='false'][data-side='left'] {
-  transform: translateX(-100%);
+  transform: translateX(calc(-1 * var(--rn-s2)));
 }
 
 /* Focus moving into a drawer must not scroll the shell sideways: a scrolled shell row would shift
@@ -203,18 +240,9 @@
   min-height: 0;
 }
 
-/* A thin hover strip at the window's left edge brings the slide-out sidebar back. */
-.shell-edge-reveal {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  z-index: 39;
-  width: 8px;
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .shell-float-drawer {
+  .shell-float-drawer,
+  .shell-float-drawer[data-open='false'] {
     transition: none;
   }
 }

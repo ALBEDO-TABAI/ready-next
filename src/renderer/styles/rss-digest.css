@@ -17,7 +17,7 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  padding: 26px 12px 20px 20px;
+  padding: var(--rn-s6) var(--rn-s3) var(--rn-s5) var(--rn-s5);
   overflow-y: auto;
   scrollbar-width: none;
 }
@@ -25,7 +25,7 @@
 .rss-digest-side__actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--rn-s2);
   padding: 0 2px;
 }
 
@@ -43,14 +43,16 @@
 }
 
 .rss-digest-generate[aria-pressed='true'] {
-  background: var(--rn-fill-3);
+  background: var(--rn-fill-2);
+  color: var(--rn-ink);
+  font-weight: 500;
 }
 
 .rss-digest-side > p {
-  padding: 24px 12px 8px;
-  font-size: 11px;
+  padding: var(--rn-s6) var(--rn-s3) var(--rn-s2);
+  font-size: var(--rn-t-micro);
+  line-height: var(--rn-lh-micro);
   font-weight: 500;
-  letter-spacing: 0.04em;
   color: var(--rn-ink-3);
 }
 
@@ -61,7 +63,7 @@
 
 .rss-digest-editions > p {
   padding: 8px 12px;
-  font-size: 12.5px;
+  font-size: var(--rn-t-meta);
   line-height: 1.65;
   color: var(--rn-ink-3);
 }
@@ -72,18 +74,18 @@
 }
 
 .rss-digest-month + .rss-digest-month {
-  margin-top: 6px;
+  margin-top: var(--rn-s2);
 }
 
 .rss-digest-month__head {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--rn-s2);
   height: 32px;
   padding: 0 10px;
-  border-radius: 9px;
-  font-size: 12.5px;
-  font-weight: 600;
+  border-radius: var(--rn-r-sm);
+  font-size: var(--rn-t-meta);
+  font-weight: 500;
   color: var(--rn-ink-2);
 }
 
@@ -98,8 +100,9 @@
 
 .rss-digest-month__head small {
   margin-left: auto;
-  font-size: 11.5px;
+  font-size: var(--rn-t-meta);
   font-weight: 400;
+  font-variant-numeric: tabular-nums;
   color: var(--rn-ink-3);
 }
 
@@ -114,7 +117,7 @@
   gap: 10px;
   width: 100%;
   padding: 10px 12px;
-  border-radius: 12px;
+  border-radius: var(--rn-r-sm);
   text-align: left;
   transition: background-color var(--rn-d-1) var(--rss-ease), box-shadow var(--rn-d-1) var(--rss-ease);
 }
@@ -123,9 +126,9 @@
   background: var(--rn-fill);
 }
 
-/* The open issue is where you are: the shared current-row look (signal tint, signal text). */
+/* The open issue is where you are: the shared current-row look (fill-2, ink, 500; V5). */
 .rss-digest-issue[aria-current='page'] {
-  background: var(--rn-accent-soft);
+  background: var(--rn-fill-2);
 }
 
 .rss-digest-issue__day {
@@ -135,8 +138,9 @@
 }
 
 .rss-digest-issue__day strong {
-  font-size: 19px;
-  font-weight: 650;
+  font-family: var(--rn-font-mono);
+  font-size: var(--rn-t-title);
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.02em;
   color: var(--rn-ink);
@@ -144,14 +148,14 @@
 
 .rss-digest-issue__day small {
   margin-top: 5px;
-  font-size: 10.5px;
+  font-size: var(--rn-t-micro);
   color: var(--rn-ink-3);
 }
 
 .rss-digest-issue__title {
   display: -webkit-box;
   overflow: hidden;
-  font-size: 12.5px;
+  font-size: var(--rn-t-meta);
   line-height: 1.55;
   color: var(--rn-ink-2);
   -webkit-box-orient: vertical;
@@ -160,7 +164,8 @@
 
 .rss-digest-issue[aria-current='page'] .rss-digest-issue__title,
 .rss-digest-issue[aria-current='page'] .rss-digest-issue__day strong {
-  color: var(--rn-accent-text);
+  color: var(--rn-ink);
+  font-weight: 500;
 }
 
 .rss-digest-issue__title small {
@@ -226,7 +231,7 @@
 .rss-paper-head h1 {
   font-size: clamp(36px, 5.6cqw, 56px);
   line-height: 1.05;
-  font-weight: 700;
+  font-weight: 500;
   letter-spacing: -0.03em;
   color: var(--rn-ink);
   overflow-wrap: anywhere;
@@ -234,7 +239,7 @@
 
 .rss-paper-head h1 small {
   margin-left: 4px;
-  font-size: 14px;
+  font-size: var(--rn-t-body);
   font-weight: 500;
   letter-spacing: 0;
   color: var(--rn-ink-3);
@@ -252,7 +257,7 @@
   flex-shrink: 0;
   gap: 4px;
   padding: 6px;
-  border-radius: var(--rn-r-xl);
+  border-radius: var(--rn-r-card);
   background: var(--rn-fill);
 }
 
@@ -263,15 +268,16 @@
   gap: 2px;
   min-width: 104px;
   padding: 10px 14px;
-  font-size: 11.5px;
+  font-size: var(--rn-t-meta);
   color: var(--rn-ink-2);
 }
 
 .rss-paper-date__tile strong {
-  font-size: 44px;
+  font-family: var(--rn-font-mono);
+  font-size: var(--rn-t-display);
   line-height: 1;
-  font-weight: 700;
-  letter-spacing: -0.04em;
+  font-weight: 500;
+  letter-spacing: var(--rn-tracking-tight);
   font-variant-numeric: tabular-nums;
   color: var(--rn-ink);
 }
@@ -279,15 +285,16 @@
 .rss-paper-calendar {
   min-width: 176px;
   padding: 10px 12px;
-  border-radius: var(--rn-r-md);
-  background: var(--rn-sheet);
+  border-radius: var(--rn-r-xs);
+  background: var(--rn-inlay);
+  box-shadow: inset 0 1px 0 var(--rn-glass-inner-hi), inset 0 0 0 .5px var(--rn-hair-2);
 }
 
 .rss-paper-calendar__head {
   display: flex;
   justify-content: space-between;
   margin-bottom: 8px;
-  font-size: 11.5px;
+  font-size: var(--rn-t-micro);
   font-weight: 600;
   color: var(--rn-ink-2);
 }
@@ -310,7 +317,7 @@
 }
 
 .rss-paper-calendar__grid .is-label {
-  font-size: 10px;
+  font-size: var(--rn-t-micro);
   text-align: center;
   color: var(--rn-ink-3);
 }
@@ -330,7 +337,7 @@
   left: 50%;
   width: 4px;
   height: 4px;
-  border-radius: 999px;
+  border-radius: var(--rn-r-pill);
   background: var(--rn-fill-3);
   transform: translate(-50%, -50%);
 }
@@ -344,8 +351,8 @@
 .rss-paper-calendar__grid .is-current::after {
   width: 8px;
   height: 8px;
-  background: var(--rn-accent);
-  box-shadow: 0 0 0 3px var(--rn-accent-soft);
+  background: var(--rn-ink);
+  box-shadow: 0 0 0 3px var(--rn-fill-2);
 }
 
 .rss-paper-stats {
@@ -354,14 +361,15 @@
   align-items: baseline;
   gap: 8px 32px;
   padding: 18px 0;
-  font-size: 12.5px;
+  font-size: var(--rn-t-meta);
   color: var(--rn-ink-2);
 }
 
 .rss-paper-stats b {
   margin-right: 6px;
-  font-size: 26px;
-  font-weight: 650;
+  font-family: var(--rn-font-mono);
+  font-size: var(--rn-t-page);
+  font-weight: 500;
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
   color: var(--rn-ink);
@@ -408,25 +416,25 @@
   align-items: center;
   gap: 10px;
   margin-bottom: 14px;
-  font-size: 12px;
+  font-size: var(--rn-t-micro);
   font-weight: 600;
   letter-spacing: 0.18em;
-  color: var(--rn-accent-text);
+  color: var(--rn-ink-2);
 }
 
 .rss-paper-label::before {
   content: '';
   width: 18px;
   height: 1.5px;
-  border-radius: 999px;
+  border-radius: var(--rn-r-pill);
   background: currentColor;
 }
 
 .rss-paper-lead h2 {
   font-size: clamp(24px, 3.2cqw, 34px);
   line-height: 1.3;
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  font-weight: 500;
+  letter-spacing: var(--rn-tracking-tight);
   color: var(--rn-ink);
   overflow-wrap: anywhere;
 }
@@ -470,9 +478,9 @@
 }
 
 .rss-digest-entry h2 {
-  font-size: 17px;
+  font-size: var(--rn-t-lead);
   line-height: 1.5;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--rn-ink);
   overflow-wrap: anywhere;
 }
@@ -496,7 +504,7 @@
 
 .rss-paper-reason {
   margin-top: 6px;
-  font-size: 12.5px;
+  font-size: var(--rn-t-meta);
   line-height: 1.65;
   color: var(--rn-ink-2);
 }
@@ -519,9 +527,10 @@
 
 .rss-paper-highlights li > span {
   padding-top: 9px;
-  font-size: 20px;
+  font-family: var(--rn-font-mono);
+  font-size: var(--rn-t-title);
   line-height: 1;
-  font-weight: 650;
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
   color: var(--rn-ink);
 }
@@ -532,7 +541,7 @@
   gap: 4px;
   width: 100%;
   padding: 8px 10px;
-  border-radius: 10px;
+  border-radius: var(--rn-r-sm);
   text-align: left;
   transition: background-color var(--rn-d-1) var(--rss-ease);
 }
@@ -547,14 +556,14 @@
 }
 
 .rss-paper-highlights strong {
-  font-size: 13.5px;
+  font-size: var(--rn-t-body);
   line-height: 1.5;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--rn-ink);
 }
 
 .rss-paper-highlights small {
-  font-size: 11.5px;
+  font-size: var(--rn-t-meta);
   color: var(--rn-ink-3);
 }
 
@@ -565,6 +574,7 @@
 }
 
 .rss-paper-index span {
+  font-family: var(--rn-font-mono);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   color: var(--rn-ink-3);
@@ -577,7 +587,7 @@
 }
 
 .rss-paper-index small {
-  font-size: 11.5px;
+  font-size: var(--rn-t-meta);
   color: var(--rn-ink-3);
 }
 
@@ -611,7 +621,7 @@
 .rss-digest-sources > div {
   margin-top: 10px;
   padding: 12px 16px;
-  border-radius: 12px;
+  border-radius: var(--rn-r-card);
   background: var(--rn-fill);
 }
 
@@ -643,7 +653,7 @@
   max-width: 720px;
   margin-bottom: 28px;
   padding: 6px 18px 12px;
-  border-radius: 14px;
+  border-radius: var(--rn-r-card);
   background: var(--rn-fill);
 }
 
@@ -669,8 +679,9 @@
 }
 
 .rss-digest-empty h1 {
-  font-size: 22px;
-  font-weight: 650;
+  font-size: var(--rn-t-title);
+  line-height: var(--rn-lh-title);
+  font-weight: 500;
   color: var(--rn-ink);
 }
 
@@ -688,10 +699,10 @@
 }
 
 .rss-brief h1 {
-  font-size: 28px;
-  line-height: 1.2;
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  font-size: var(--rn-t-page);
+  line-height: var(--rn-lh-page);
+  font-weight: 500;
+  letter-spacing: var(--rn-tracking-tight);
   color: var(--rn-ink);
 }
 

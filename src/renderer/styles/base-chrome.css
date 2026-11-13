@@ -22,6 +22,7 @@ body {
   background: var(--rn-sheet);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: 'cv11', 'ss01', 'ss03';
 }
 
 /* Theme switching now happens behind the shared ritual overlay (see ritual-overlay.css),
@@ -192,6 +193,22 @@ html:root .ready-app-shell {
   isolation: isolate;
 }
 
+/* The ground's faint 24px dot grid (V2): above the window backing (.ready-app-bg, z 0), under the ritual tint and the
+   content; it never takes the pointer. */
+.ready-app-shell::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background-image: radial-gradient(var(--rn-ink-4) .6px, transparent .8px);
+  background-size: 24px 24px;
+  background-position: 4px 4px;
+  -webkit-mask-image: radial-gradient(ellipse at center, var(--rn-ink) 40%, transparent 85%);
+  mask-image: radial-gradient(ellipse at center, var(--rn-ink) 40%, transparent 85%);
+  opacity: .5;
+}
+
 .ready-app-content {
   position: relative;
   z-index: 2;
@@ -289,7 +306,7 @@ html[data-native-fullscreen='true'][data-transparency='normal']:root {
 }
 
 .ready-app-bg::after {
-  background: var(--rn-stage);
+  background: radial-gradient(1200px 800px at 50% -10%, var(--rn-stage-glow) 0%, transparent 60%), var(--rn-stage);
   opacity: 0;
 }
 
@@ -410,13 +427,13 @@ html[data-transparency='reduced'] *::after {
   color: var(--rn-accent);
 }
 
-/* Focus (W1 DL5, the primitives' ring): an ink outline, never the signal colour. In @layer base so that any
+/* Focus (V10, the primitives' ring): a 2px ink outline at 55%, never the signal colour. In @layer base so that any
    component that draws its own focus — a field's inked edge, a menu's highlighted row, the rail's tile — wins
    without a local patch; the ring is the fallback for everything else. */
 @layer base {
   :focus-visible {
-    outline: 1.5px solid var(--rn-ink-3);
-    outline-offset: 1px;
+    outline: 2px solid color-mix(in srgb, var(--rn-ink) 55%, transparent);
+    outline-offset: 2px;
   }
 }
 

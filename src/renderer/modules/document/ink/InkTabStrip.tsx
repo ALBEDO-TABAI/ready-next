@@ -10,14 +10,14 @@ import { openToday } from '../../today/open-today'
 const MOD = /Mac|iPhone|iPad/i.test(navigator.platform) ? '⌘' : 'Ctrl+'
 const tabLabel = (tab: DocTab) => tab.kind === 'library' ? '阅读' : tab.title.replace(/\.(md|canvas)$/i, '') || '未命名'
 function TabIcon({ tab }: { tab: DocTab }) {
-  if (tab.kind === 'library') return <Icon name="library" size={14} stroke={1.6} />
+  if (tab.kind === 'library') return <Icon name="library" size={14} />
   if (/\.canvas$/i.test(tab.path ?? '')) return <InkPageIcon kind="canvas" size={14} />
-  if (tab.path && !/\.md$/i.test(tab.path)) return <Icon name="file" size={14} stroke={1.6} />
+  if (tab.path && !/\.md$/i.test(tab.path)) return <Icon name="file" size={14} />
   return <InkPageIcon size={14} />
 }
 
-/** Inkwell's tab bar along the top edge of the page: 今日 (the mode's system tab, always first), the open documents and a
- *  new tab. The way back lives at the top-left of the page itself (W6 §4), not in this bar. */
+/** Inkwell's tab bar, the head row of the document panel (V11): 今日 (the mode's system tab, always first), the open
+ *  documents and a new tab. The way back lives at the top-left of the page itself (W6 §4), not in this bar. */
 export function InkTabStrip({ onNewTab }: { active: boolean; onNewTab(): void }) {
   const tabs = useDocTabs(state => state.tabs)
   const activeId = useDocTabs(state => state.activeTabId)
@@ -43,7 +43,7 @@ export function InkTabStrip({ onNewTab }: { active: boolean; onNewTab(): void })
     if (next === 'today') openToday(); else activate(next)
     bar.current?.querySelector<HTMLElement>(next === 'today' ? '[data-today-tab]' : `[data-tab-id="${next}"]`)?.focus()
   }
-  return <div className="ink-tabbar" aria-label="打开的文档" ref={bar}>
+  return <div className="ink-tabbar rn-panel__head" aria-label="打开的文档" ref={bar}>
     <div className="ink-tablist" role="tablist" aria-label="文档标签">
     <div role="tab" aria-selected={home} tabIndex={home ? 0 : -1} title="今日" data-today-tab="" className={`ink-tab ink-tab--today${home ? ' is-active' : ''}`}
       onClick={openToday} onKeyDown={event => arrow(event, 'today')}>
@@ -77,6 +77,6 @@ export function InkTabStrip({ onNewTab }: { active: boolean; onNewTab(): void })
       })}
     </div>
     </div>
-    <IconButton className="ink-tbar-new" title="新建标签页" icon={<Icon name="plus" />} {...tooltip('新建标签页', `${MOD}T`)} onClick={onNewTab} />
+    <IconButton title="新建标签页" icon={<Icon name="plus" />} {...tooltip('新建标签页', `${MOD}T`)} onClick={onNewTab} />
   </div>
 }

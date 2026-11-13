@@ -20,10 +20,11 @@
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   --book-stage-bg: #efeee9;
-  --book-ui-surface: #faf9f6;
-  --book-ui-ink: #45443f;
-  --book-ui-rule: #cecdc7;
-  --book-ui-hover: #e9e8e2;
+  /* The controls around the book are app UI, not the book: they follow the --rn-* tokens. */
+  --book-ui-surface: var(--rn-solid);
+  --book-ui-ink: var(--rn-ink-2);
+  --book-ui-rule: var(--rn-hair-2);
+  --book-ui-hover: var(--rn-fill-2);
   background: var(--book-stage-bg);
 }
 
@@ -863,10 +864,6 @@
 
 [data-theme='dark'] .document-book-reading {
   --book-stage-bg: #272927;
-  --book-ui-surface: #353733;
-  --book-ui-ink: #eeeae0;
-  --book-ui-rule: #62655e;
-  --book-ui-hover: #494c46;
 }
 @media (prefers-reduced-motion: reduce) {
   .document-book-reading__loading-book { animation: none; }

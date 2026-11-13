@@ -17,13 +17,15 @@
   border-left-color: transparent !important;
 }
 
-/* A mode's outer frame: a clip with the paper's radius; the paper itself is the module's own surface. */
+/* The box every mode's panel fills (V15): the mode root pads it with the shell's frame constants. It clips at the
+   panel's radius in every mode, so the panel's outer shadow is cut the same way everywhere (the 资讯 canvas and the
+   calendar root clip for their own reasons; one mode with a shadow in the gap and another without would not match). */
 .workbench-canvas-shell {
   min-height: 0;
   border-radius: var(--rn-r-sheet);
   overflow: hidden;
   background: transparent !important;
-  border: 1px solid transparent;
+  border: 0;
   box-shadow: none;
 }
 
@@ -34,7 +36,6 @@
 .workbench-panel-frame {
   border-radius: var(--rn-r-sheet);
   overflow: hidden;
-  border: 1px solid transparent;
 }
 
 /* 180ms is WORKBENCH_PANEL_MOTION_DURATION_MS (modules/workbench/panel-motion.ts): the web view's bounds follow it. */
@@ -62,13 +63,7 @@ body.resizing [data-liquid-shell='chat-panel'] {
   }
 }
 
-/* 资讯's content is paper (W1 DL2); its crumb row above sits on the glass (workbench-surfaces.css). */
-.rss-mode-shell .rss-feed-sheet {
-  background: var(--rn-sheet) !important;
-  border-radius: var(--rn-r-sheet);
-  box-shadow: var(--rn-sheet-shadow) !important;
-}
-
+/* 资讯's panel (.rss-feed-sheet.rn-panel) is painted by .rn-panel alone (V11); the list inside paints nothing. */
 .rss-mode-shell .rss-feed-surface,
 .rss-mode-shell .rss-feed-scroll {
   background: transparent !important;
@@ -82,8 +77,8 @@ body.resizing [data-liquid-shell='chat-panel'] {
   overflow: hidden;
   background: var(--rn-float) !important;
   border: 0 !important;
-  border-radius: var(--rn-r-float);
-  box-shadow: var(--rn-shadow-3), inset 0 0 0 1px var(--rn-hair) !important;
+  border-radius: var(--rn-r-dialog);
+  box-shadow: var(--rn-shadow-3), inset 0 1px 0 var(--rn-glass-inner-hi), inset 0 0 0 .5px var(--rn-glass-edge) !important;
 }
 
 .browser-fastcard-header,
@@ -92,19 +87,6 @@ body.resizing [data-liquid-shell='chat-panel'] {
   border-color: transparent !important;
 }
 
-.browser-fastcard-result-body section {
-  background: transparent !important;
-  border-color: transparent !important;
-  box-shadow: none;
-}
-
-.browser-fastcard-field select,
-.browser-fastcard-action {
-  background: var(--rn-fill-2) !important;
-  border-color: transparent !important;
-  box-shadow: none !important;
-}
-
 .browser-fastcard-action:hover:not(:disabled) {
-  background: var(--rn-fill-3) !important;
+  background: var(--rn-inlay-hover);
 }

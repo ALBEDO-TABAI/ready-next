@@ -24,7 +24,7 @@ export function TaskCardFooter({
           style={{
             padding: '2px 7px',
             borderRadius: 999,
-            border: '1px solid var(--rn-hair-2)',
+            border: '.5px solid var(--rn-hair-2)',
             fontSize: 'var(--rn-fs-2xs)',
             lineHeight: 1.2,
             fontWeight: 500,

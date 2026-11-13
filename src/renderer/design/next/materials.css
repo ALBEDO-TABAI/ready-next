@@ -1,9 +1,13 @@
-/* The four materials of Ready Next (W1 §4, DL1–DL4). Only --rn-* tokens.
-   glass — the window itself (one pane; regions on it have no background of their own);
-   sheet — paper that content sits on; one per content area, never paper on paper;
-   well  — a slightly sunken area on the glass for spatial content (canvas, shelf, open book);
-   float — menus, popovers, dialogs, ⌘K, tooltips: thicker glass with blur and a shadow.
-   backdrop-filter is allowed here and on the assistant composer only (W1 §4). */
+/* The materials of Ready Next (W1 §4; vvf-2-1 V1–V3). Only --rn-* tokens.
+   glass — the ground: the window itself, with a faint dot grid (base-chrome.css);
+   panel — .rn-panel: one function area as one block, head row plus body, painted as a sheet;
+   sheet — panel glass that content sits on: untinted, inner light and shade, a .5px edge; no blur of its own,
+           the window behind it already is one; one per content area, never a panel on a panel;
+   inlay — thinner glass of the same family inside a panel (cards, light buttons, chips);
+   well  — one step deeper, with an inner shadow: inputs and spatial content (canvas, shelf, open book);
+   float — menus, popovers, dialogs, ⌘K: thicker glass with blur, a light rim and a faint top caustic.
+   The rim and caustic are box-shadows and a background layer, not pseudo-elements, so no float's own
+   ::before / ::after or stacking changes. backdrop-filter is allowed here and on the assistant composer only (W1 §4). */
 @layer ready-next.materials {
   .rn-glass-root {
     background: rgb(var(--rn-glass-tint) / var(--rn-glass-alpha));
@@ -15,20 +19,67 @@
     box-shadow: var(--rn-sheet-shadow);
   }
 
+  /* The work block (V11): the panel of one function area. Its tools (tabs, address bar, toolbar) are the panel's own
+     head row, never a strip on the ground above it. */
+  .rn-panel {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    overflow: clip;
+    background: var(--rn-sheet);
+    border-radius: var(--rn-r-sheet);
+    box-shadow: var(--rn-sheet-shadow);
+  }
+
+  .rn-panel__head {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: var(--rn-s2);
+    min-width: 0;
+    height: var(--rn-panel-head-h);
+    padding: 0 var(--rn-s3);
+    box-shadow: inset 0 -.5px 0 var(--rn-hair);
+  }
+
+  .rn-panel__body {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  /* A body that holds an opaque surface (the web page): the panel frames it. */
+  .rn-panel__body[data-framed='true'] {
+    padding: 0 var(--rn-panel-pad) var(--rn-panel-pad);
+  }
+
+  .rn-inlay {
+    background: var(--rn-inlay);
+    border-radius: var(--rn-r-card);
+    box-shadow: inset 0 1px 0 var(--rn-glass-inner-hi), inset 0 0 0 .5px var(--rn-hair-2);
+  }
+
   .rn-well {
     background: var(--rn-well);
     border-radius: var(--rn-r-sheet);
-    box-shadow: inset 0 0 0 1px var(--rn-hair);
+    box-shadow: inset 0 1px 2px var(--rn-well-shade), inset 0 0 0 .5px var(--rn-hair);
   }
 
   .rn-float {
-    background: var(--rn-float);
+    background: radial-gradient(120% 60% at 50% -18%, var(--rn-float-caustic), transparent 60%), var(--rn-float);
     border-radius: var(--rn-r-float);
-    box-shadow: var(--rn-shadow-3), inset 0 0 0 1px var(--rn-hair);
+    box-shadow:
+      inset 0 1px 0 var(--rn-glass-inner-hi),
+      inset 0 -1px 0 var(--rn-glass-inner-lo),
+      inset 0 0 0 .5px var(--rn-glass-edge),
+      inset 0 0 0 1px var(--rn-glass-rim-lo),
+      var(--rn-shadow-3);
     backdrop-filter: blur(var(--rn-glass-blur)) saturate(var(--rn-glass-sat));
   }
 
-  /* 减少透明 (DL12): the glass becomes the opaque stage; --rn-float is already opaque there. */
+  /* 减少透明 (DL12): the glass becomes the opaque stage; --rn-sheet and --rn-float are already opaque there. */
   [data-transparency='reduced'] .rn-glass-root {
     background: var(--rn-stage);
   }

@@ -442,7 +442,7 @@ export default function TaskPanel() {
       style={{
         width: 240,
         // A region on the window glass (DL1): no background of its own, a hairline to its right.
-        borderRight: '1px solid var(--rn-hair)'
+        borderRight: '.5px solid var(--rn-hair)'
       }}
     >
       {/* 梯队三 — emergence feed（空 feed 自动隐藏；出口=打开 scope / 跳设置确认面）。 */}
@@ -453,15 +453,15 @@ export default function TaskPanel() {
 
       <div
         className="flex items-center justify-between"
-        style={{ padding: '12px 14px', borderBottom: '1px solid var(--rn-hair)' }}
+        style={{ padding: '12px 14px', borderBottom: '.5px solid var(--rn-hair)' }}
       >
-        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--rn-ink)' }}>
+        <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--rn-ink)' }}>
           {activeRun || activeProjection ? '运行时间线' : '任务'}
         </span>
         <IconButton size="sm" title="新建任务" icon={<Plus />} />
       </div>
 
-      <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--rn-hair)' }}>
+      <div style={{ padding: '10px 12px', borderBottom: '.5px solid var(--rn-hair)' }}>
         {activeRun || activeProjection ? (
           <div className="flex flex-col" style={{ gap: 8 }}>
             <div className="flex items-center justify-between">

@@ -17,8 +17,8 @@ test('document and rss first-row typography matches the browser tab baseline', (
 
   assert.match(documentTabRail, /text-\[12px\]/)
 
-  // RSS's first row is its top bar location label, sized like Document's path label.
+  // RSS's first row is its panel head row's location label, sized like the tab labels (12px, --rn-t-meta).
   assert.match(rssFeed, /<RSSTopbarTools/)
-  assert.match(readRendererStyles(), /\.rss-topbar__lead \{[^}]*font-size: 12px;/)
+  assert.match(readRendererStyles(), /\.rss-topbar__lead \{[^}]*font-size: var\(--rn-t-meta\);/)
 
 })

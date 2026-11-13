@@ -14,7 +14,7 @@ test('rss feed keeps compact toolbar controls in the top bar while article rows 
   const rssMode = readWorkspaceFile('src/renderer/pages/modes/RSSMode.tsx')
   const styles = readRendererStyles()
 
-  // Tools live in the canvas top bar (like Document's path bar) only while the list is the visible view.
+  // Tools live in the panel's head row only while the list is the visible view.
   assert.match(rssFeed, /<RSSTopbarTools show=\{toolsVisible\}>/)
   assert.match(rssMode, /toolsVisible=\{surfaceActive && feedVisible\}/)
   assert.match(rssFeed, /className="rss-feed-surface content-surface-panel/)
@@ -34,7 +34,8 @@ test('rss feed keeps compact toolbar controls in the top bar while article rows 
   assert.match(rssFeed, /confirmDialog\(\{ title: '删除订阅源'/)
   assert.doesNotMatch(rssFeed, /chatMenuSurfaceStyle|ready-floating-menu-item|ui\/Modal/)
   assert.match(rssFeed, /background: 'transparent'/)
-  assert.match(rssMode, /className=\{`rss-feed-sheet content-surface-panel/)
+  // V11: the panel (.rn-panel) is the one surface the rows sit on; its head row holds the toolbar.
+  assert.match(rssMode, /className="rss-feed-sheet rn-panel"/)
   assert.match(styles, /\.rss-mode-shell \.rss-feed-sheet \{/)
   assert.match(styles, /\.rss-mode-shell \.rss-feed-surface,/)
   assert.match(styles, /background:\s*transparent !important;/)
@@ -106,7 +107,8 @@ test('skills center and global search inherit the file manager side panel surfac
   assert.doesNotMatch(globalSearch, /className="content-surface-panel flex h-full min-h-0 flex-col"/)
   assert.doesNotMatch(skillsPanel, /backdropFilter: 'blur\(18px\) saturate\(138%\)'/)
   assert.doesNotMatch(globalSearch, /backdropFilter: 'blur\(18px\) saturate\(138%\)'/)
-  assert.match(skillsPanel, /background: selected \? 'var\(--rn-fill\)' : 'transparent'/)
+  // V5: a selected card is the selected fill (--rn-fill-2).
+  assert.match(skillsPanel, /background: selected \? 'var\(--rn-fill-2\)' : 'transparent'/)
   assert.match(skillsPanel, /background: importDropActive \? PANEL_COLORS\.blueLight : 'transparent'/)
   assert.match(globalSearch, /background: 'transparent'/)
   assert.doesNotMatch(globalSearch, /className="content-surface-card w-full rounded-\[8px\] border px-\[8px\] py-\[6px\] text-left transition-colors hover:bg-\[var\(--bg-hover\)\]"/)

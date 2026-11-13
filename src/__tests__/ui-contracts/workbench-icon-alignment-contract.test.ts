@@ -7,27 +7,43 @@ import TopBar from '../../renderer/components/layout/TopBar'
 import StatusBar from '../../renderer/components/layout/StatusBar'
 import { WORKBENCH_EDGE_RAIL_SIZE, WORKBENCH_TOPBAR_HEIGHT, WORKBENCH_STATUSBAR_HEIGHT, WORKBENCH_TOPBAR_PADDING_RIGHT } from '../../renderer/modules/workbench/chrome'
 
-test('top and bottom bands share the 52px rail geometry; today stays at the right and the bottom stays quiet', () => {
+test('top and bottom bands share the 52px rail geometry; the sidebar switch and wordmark sit left, today stays at the right and the bottom stays quiet', () => {
   assert.equal(WORKBENCH_EDGE_RAIL_SIZE, 52)
   assert.equal(WORKBENCH_TOPBAR_HEIGHT, 52)
   assert.equal(WORKBENCH_STATUSBAR_HEIGHT, 52)
-  const dom = new JSDOM(renderToStaticMarkup(createElement('main', null, createElement(TopBar), createElement(StatusBar))))
+  const band = (sidebarShown: boolean) => new JSDOM(renderToStaticMarkup(createElement('main', null,
+    createElement(TopBar, { sidebarShown, onSidebarToggle: () => {} }), createElement(StatusBar))))
+  const dom = band(true)
   try {
     const top = dom.window.document.querySelector<HTMLElement>('[data-shell-band="top"]')!
     const bottom = dom.window.document.querySelector<HTMLElement>('[data-shell-band="bottom"]')!
     assert.equal(top.style.height, '52px')
     assert.equal(bottom.style.height, '52px')
     assert.equal(top.style.paddingRight, `${WORKBENCH_TOPBAR_PADDING_RIGHT}px`)
-    assert.ok(top.classList.contains('justify-end'))
+    assert.ok(top.classList.contains('justify-between'))
     assert.ok(top.classList.contains('drag-region'))
     assert.equal(top.style.background, 'transparent')
     assert.equal(bottom.style.background, 'transparent')
     assert.equal(bottom.style.borderTop, '')
     assert.equal(bottom.textContent, '')
     assert.equal(bottom.querySelector('button'), null)
-    assert.equal(top.querySelectorAll('button').length, 1)
+    assert.equal(top.querySelectorAll('button').length, 2)
+    // V13: the sidebar's one switch is the band's first control, after the traffic lights; V12: then the wordmark.
+    const lead = top.firstElementChild!
+    const toggle = lead.querySelector<HTMLButtonElement>('button.rn-icon-btn.no-drag[data-shell-sidebar-control]')
+    assert.ok(toggle)
+    assert.equal(toggle.getAttribute('aria-label'), '收起侧栏 ⌘B')
+    assert.equal(toggle.getAttribute('aria-expanded'), 'true')
+    assert.equal(lead.querySelector('.shell-wordmark')?.textContent, 'Ready')
+    assert.equal(lead.querySelector('.shell-wordmark')?.previousElementSibling, toggle)
     const dot = top.querySelector<HTMLElement>('button[aria-label="今日"] [role="img"][aria-label="Ready"]')
     assert.ok(dot)
     assert.equal(dot.style.background, 'var(--rn-accent)')
   } finally { dom.window.close() }
+  const collapsed = band(false)
+  try {
+    const toggle = collapsed.window.document.querySelector('[data-shell-band="top"] button[data-shell-sidebar-control]')
+    assert.equal(toggle?.getAttribute('aria-label'), '展开侧栏 ⌘B')
+    assert.equal(toggle?.getAttribute('aria-expanded'), 'false')
+  } finally { collapsed.window.close() }
 })

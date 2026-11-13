@@ -6,7 +6,6 @@ import FileTree from '../../../components/layout/FileTree'
 import { useVault } from '../../../stores/useVault'
 import { useWorkspace } from '../../../stores/useWorkspace'
 import { useDocumentNavigator, type DocumentNavigatorView } from './useDocumentNavigator'
-import { ShellSidebarToggle } from '../../workbench/shell/ShellSidebar'
 import { InkSidebar } from '../ink/InkSidebar'
 import { mountFolder } from '../mountFolder'
 import { adoptIntoLibrary } from './adopt'
@@ -50,10 +49,9 @@ export default function DocumentNavigator({ roots, visible, onShowFiles }: {
 
   return (
     <div className="document-navigator" data-document-navigator-view={view}>
-      <div className="document-navigator__head">
-        <span className="document-navigator__title" title={vaultRoot ?? undefined}>{title}</span>
+      <div className="shell-navigator__head document-navigator__head">
+        <span className="shell-navigator__title" title={vaultRoot ?? undefined}>{title}</span>
         <Segmented label="资料库视角" value={view} onChange={setView} options={VIEW_OPTIONS} />
-        <ShellSidebarToggle />
       </div>
       <div className="document-navigator__view ink-scope" hidden={view !== 'pages'}>
         <InkSidebar

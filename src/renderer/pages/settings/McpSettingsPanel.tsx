@@ -170,7 +170,7 @@ export function McpSettingsPanel() {
               key={server.serverId}
               data-mcp-server={server.serverId}
               className="flex flex-col gap-1.5 px-6 py-4"
-              style={{ borderTop: serverIndex > 0 ? '1px solid var(--rn-hair)' : undefined }}
+              style={{ borderTop: serverIndex > 0 ? '.5px solid var(--rn-hair)' : undefined }}
             >
               <div className="flex items-center gap-3">
                 <div className="min-w-0 flex-1">
@@ -188,7 +188,7 @@ export function McpSettingsPanel() {
                 </SettingsStatus>
               </div>
               {server.toolNames.length > 0 && (
-                <p className="sx-mono m-0 text-[11.5px] leading-5" style={{ color: 'var(--rn-ink-2)' }}>
+                <p className="sx-mono m-0 text-[12px] leading-5" style={{ color: 'var(--rn-ink-2)' }}>
                   {server.toolNames.join('、')}{server.toolCount > server.toolNames.length ? ' …' : ''}
                 </p>
               )}

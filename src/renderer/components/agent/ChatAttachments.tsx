@@ -116,7 +116,7 @@ export default function ChatAttachments({
                 onRemove(att.id)
               }}
               className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full flex items-center justify-center"
-              style={{ background: 'color-mix(in srgb, var(--rn-stage) 24%, transparent)', border: '1px solid var(--rn-hair-2)' }}
+              style={{ background: 'color-mix(in srgb, var(--rn-stage) 24%, transparent)', border: '.5px solid var(--rn-hair-2)' }}
               title="移除"
               aria-label="移除"
             >

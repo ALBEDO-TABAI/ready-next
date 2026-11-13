@@ -30,7 +30,7 @@ for (const [width, initialOpen] of [[700, true], [980, true], [1440, true], [700
         toggleDockedSidebar: () => { sidebarToggles += 1; setSidebar(value => !value) },
       })
       return <><button onClick={shell.toggleAssistant}>assistant</button><button onClick={shell.toggleSidebar}>sidebar</button>
-        <output>{JSON.stringify({ assistant, sidebar, drawer: shell.assistantDrawerOpen, peek: shell.sidebarPeek,
+        <output>{JSON.stringify({ assistant, sidebar, drawer: shell.assistantDrawerOpen, card: shell.sidebarCardOpen, shown: shell.sidebarShown,
           visible: shell.assistantVisible, assistantDock: shell.layout.assistant, sidebarDock: shell.layout.sidebar,
           assistantWidth: shell.assistantPanelWidth })}</output></>
     }
@@ -43,7 +43,8 @@ for (const [width, initialOpen] of [[700, true], [980, true], [1440, true], [700
       assert.equal(state().assistant, false)
       assert.equal(state().sidebar, false)
       assert.equal(state().drawer, true)
-      assert.equal(state().peek, true)
+      assert.equal(state().card, true)
+      assert.equal(state().shown, true, 'an open card counts as the sidebar shown (the switch and the rail read it)')
       await act(async () => { dom.window.innerWidth = 1440; dom.window.dispatchEvent(new dom.window.Event('resize')) })
       assert.equal(state().assistantDock, 'hidden')
       assert.equal(state().sidebarDock, 'hidden')
@@ -63,10 +64,12 @@ for (const [width, initialOpen] of [[700, true], [980, true], [1440, true], [700
     await click(1)
     assert.equal(sidebarToggles, width < 860 ? 0 : 1)
     assert.equal(state().sidebar, width < 860)
-    assert.equal(state().peek, width < 860)
+    assert.equal(state().card, width < 860)
+    assert.equal(state().shown, width < 860, 'on a wide window the switch collapses the docked sidebar; on a narrow one it opens the card')
     await click(1)
     assert.equal(state().sidebar, true)
-    assert.equal(state().peek, false)
+    assert.equal(state().card, false)
+    assert.equal(state().shown, width >= 860)
     await act(async () => { dom.window.innerWidth = 1440; dom.window.dispatchEvent(new dom.window.Event('resize')) })
     assert.equal(state().assistantDock, 'docked')
     assert.equal(state().sidebarDock, 'docked')

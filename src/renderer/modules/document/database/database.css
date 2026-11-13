@@ -1,43 +1,50 @@
 @layer components {
-  .ready-database { --rdb-line: var(--rn-hair); color: var(--rn-ink); font: 14px/1.5 var(--rn-font-ui); position: relative; max-width: 100%; min-width: 0; isolation: isolate; }
+  .ready-database { --rdb-line: var(--rn-hair); --rdb-check-glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E"); color: var(--rn-ink); font: 14px/1.5 var(--rn-font-ui); position: relative; max-width: 100%; min-width: 0; isolation: isolate; }
   .ready-database.is-inline { margin-block: 16px; }
   .ready-database :where(button, input, select) { font: inherit; color: inherit; }
-  .ready-database :where(button) { cursor: pointer; padding: 5px 8px; border: 0; background: transparent; border-radius: 5px; text-align: left; }
+  .ready-database :where(button) { cursor: pointer; padding: 5px 8px; border: 0; background: transparent; border-radius: var(--rn-r-xs); text-align: left; }
   .ready-database :where(button):hover { background: var(--rn-fill-2); }
   .ready-database :where(button):disabled { cursor: default; opacity: .55; }
-  .ready-database :where(button, input, select):focus-visible { outline: 1.5px solid var(--rn-ink-3); outline-offset: 1px; }
-  .ready-database :where(input, select) { min-width: 0; height: var(--rn-control-h); padding: 0 10px; border: 0; border-radius: var(--rn-r-control); background: var(--rn-fill); box-shadow: inset 0 0 0 1px var(--rn-hair); appearance: none; }
-  /* Checkboxes in the cell editor and view settings: the Checkbox primitive's box, so checked and unchecked differ. */
-  .ready-database :where(input[type='checkbox']) { flex: none; width: 16px; height: 16px; padding: 0; border-radius: 5px; background: var(--rn-sheet); box-shadow: inset 0 0 0 1.5px var(--rn-hair-2); cursor: pointer; }
-  .ready-database :where(input[type='checkbox']:checked) { background: var(--rn-inverse) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.2l2.3 2.3 4.7-5' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 11px no-repeat; box-shadow: none; }
-  [data-theme='dark'] .ready-database :where(input[type='checkbox']:checked) { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.2l2.3 2.3 4.7-5' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+  .ready-database :where(button, input, select):focus-visible { outline: 2px solid color-mix(in srgb, var(--rn-ink) 55%, transparent); outline-offset: 2px; }
+  .ready-database :where(input, select) { min-width: 0; height: var(--rn-control-h); padding: 0 10px; border: 0; border-radius: var(--rn-r-control); background: var(--rn-well); box-shadow: inset 0 1px 2px var(--rn-well-shade), inset 0 0 0 .5px var(--rn-hair); appearance: none; }
+  /* Checkboxes in the cell editor and view settings, and a checkbox cell: the document's one checkbox (V16), a clear box
+     with an ink-3 edge; checked, an ink box whose check is a mask painted in --rn-on-inverse, so it reads in both themes. */
+  .ready-database :where(input[type='checkbox']) { position: relative; flex: none; width: 16px; height: 16px; padding: 0; border-radius: 5px; background: transparent; box-shadow: inset 0 0 0 1.5px var(--rn-ink-3); cursor: pointer; }
+  .ready-database :where(input[type='checkbox']:checked) { background: var(--rn-inverse); box-shadow: none; }
+  .ready-database :where(input[type='checkbox']:checked)::after, .ready-database .rdb-check.is-on::after { content: ''; position: absolute; inset: 0; background: var(--rn-on-inverse); mask: var(--rdb-check-glyph) center / 12px no-repeat; }
   .ready-database :where(h3) { margin: 0; font-size: 13px; font-weight: 500; }
   .ready-database :where(p) { margin: 8px 0; }
-  .ready-database .rdb-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; padding-bottom: 6px; border-bottom: 1px solid var(--rdb-line); }
+  .ready-database .rdb-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; padding-bottom: 6px; border-bottom: .5px solid var(--rdb-line); }
   .ready-database .rdb-tabs { display: flex; flex: 1 1 auto; min-width: 0; gap: 2px; overflow-x: auto; scrollbar-width: none; }
-  .ready-database .rdb-tabs button { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: var(--rn-r-pill); white-space: nowrap; color: var(--rn-ink-2); }
-  .ready-database .rdb-tabs [aria-selected='true'] { color: var(--rn-accent-text); background: var(--rn-accent-soft); }
+  .ready-database .rdb-tabs button { display: inline-flex; align-items: center; gap: 8px; height: var(--rn-control-h); padding: 0 12px 0 8px; border-radius: var(--rn-r-sm); white-space: nowrap; color: var(--rn-ink-2); }
+  .ready-database .rdb-tabs [aria-selected='true'] { color: var(--rn-ink); background: var(--rn-fill-2); font-weight: 500; }
   .ready-database .rdb-new { margin-left: 4px; }
   .ready-database .rdb-status { display: flex; justify-content: space-between; padding-block: 6px; color: var(--rn-ink-3); font-size: var(--rn-fs-sm); }
   .ready-database [role='alert'] { color: var(--rn-bad); overflow-wrap: anywhere; }
-  .ready-database .rdb-scroll { overflow: auto; overscroll-behavior: contain; border-bottom: 1px solid var(--rdb-line); }
+  .ready-database .rdb-scroll { overflow: auto; overscroll-behavior: contain; border-bottom: .5px solid var(--rdb-line); }
   .ready-database :where(.rdb-table-head, .rdb-table-row) { display: grid; }
-  .ready-database .rdb-table-head { position: sticky; top: 0; z-index: 2; background: var(--rn-sheet); color: var(--rn-ink-2); height: 38px; }
-  .ready-database :where([role='columnheader'], [role='cell']) { position: relative; min-width: 0; padding: 4px 8px; border-bottom: 1px solid var(--rdb-line); border-right: 1px solid var(--rdb-line); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ready-database .rdb-table-head { position: sticky; top: 0; z-index: 2; color: var(--rn-ink-2); height: 36px; }
+  /* V16: the sticky head row and title column are clear on the panel glass at rest. They take the opaque backing only
+     while content is scrolled under them: a scroll-driven animation on the table's own scroller (.rdb-scroll), the
+     block axis for the head row, the inline axis for the title column; with nothing to scroll the timeline is inactive
+     and they stay clear. This is state, not motion, so it holds under reduced motion too. */
+  @keyframes rdb-backing { from { background-color: transparent; } to { background-color: var(--rn-solid); } }
+  .ready-database .rdb-table-head { animation: rdb-backing linear both; animation-timeline: scroll(nearest block); animation-range: 0 4px; }
+  .ready-database :where([role='columnheader'], [role='cell']) { position: relative; min-width: 0; padding: 4px 8px; border-bottom: .5px solid var(--rdb-line); border-right: .5px solid var(--rdb-line); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ready-database .rdb-resize { position: absolute; right: 0; top: 0; height: 100%; width: 8px; padding: 0; cursor: col-resize; }
-  .ready-database :where(.rdb-title, .rdb-cell) { display: flex; align-items: center; gap: 6px; width: 100%; height: 100%; min-width: 0; overflow: hidden; white-space: nowrap; }
+  .ready-database :where(.rdb-title, .rdb-cell) { display: flex; align-items: center; gap: 8px; width: 100%; height: 100%; min-width: 0; overflow: hidden; white-space: nowrap; }
   .ready-database .rdb-title { font-weight: 500; }
   .ready-database .rdb-cell-number { justify-content: flex-end; font-variant-numeric: tabular-nums; }
   .ready-database .rdb-board { display: flex; gap: 14px; overflow-x: auto; padding-block: 8px 16px; }
-  .ready-database .rdb-column { flex: 0 0 240px; min-height: 180px; background: var(--rn-fill); border-radius: 10px; padding: 8px; }
+  .ready-database .rdb-column { flex: 0 0 240px; min-height: 180px; background: var(--rn-fill); border-radius: var(--rn-r-card); padding: 8px; }
   .ready-database .rdb-column h3 { display: flex; justify-content: space-between; padding: 4px 4px 12px; }
-  .ready-database .rdb-tag { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 6px; font-size: var(--rn-fs-sm); line-height: 22px; white-space: nowrap; flex: none; }
-  .ready-database .rdb-card { background: var(--rn-sheet); box-shadow: inset 0 0 0 1px var(--rn-hair); border-radius: 8px; padding: 8px; margin-bottom: 8px; min-width: 0; }
+  .ready-database .rdb-tag { display: inline-flex; align-items: center; height: var(--rn-control-h-tag); padding: 0 8px; border-radius: var(--rn-r-pill); font-size: var(--rn-fs-sm); line-height: var(--rn-control-h-tag); white-space: nowrap; flex: none; }
+  .ready-database .rdb-card { background: var(--rn-inlay); box-shadow: inset 0 1px 0 var(--rn-glass-inner-hi), inset 0 0 0 .5px var(--rn-hair-2); border-radius: var(--rn-r-card); padding: 8px; margin-bottom: 8px; min-width: 0; }
   .ready-database .rdb-card[draggable='true'] { cursor: grab; }
   .ready-database .rdb-card-field { color: var(--rn-ink-2); min-width: 0; }
   .ready-database .rdb-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 14px; }
-  .ready-database .rdb-gallery .rdb-card { min-height: 160px; padding-top: 40px; background: linear-gradient(var(--rn-fill), var(--rn-sheet) 48px); }
-  .ready-database .rdb-list .rdb-card { display: flex; align-items: center; gap: 16px; border: 0; border-bottom: 1px solid var(--rdb-line); border-radius: 0; padding: 4px; margin: 0; }
+  .ready-database .rdb-gallery .rdb-card { min-height: 160px; padding-top: 40px; background: linear-gradient(var(--rn-fill), transparent 48px), var(--rn-inlay); }
+  .ready-database .rdb-list .rdb-card { display: flex; align-items: center; gap: 16px; border: 0; border-bottom: .5px solid var(--rdb-line); border-radius: 0; padding: 4px; margin: 0; }
   .ready-database .rdb-list .rdb-title { flex: 1; }
   .ready-database .rdb-bookshelf { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 24px; padding: 20px 12px; border-bottom: 10px solid var(--rdb-line); }
   .ready-database .rdb-bookshelf .rdb-card { min-height: 200px; border-left: 5px solid var(--rdb-line); border-radius: 3px 8px 8px 3px; padding: 18px 8px; box-shadow: 3px 5px 10px var(--rdb-line); }
@@ -46,17 +53,17 @@
   .ready-database .rdb-time-toolbar input { margin-left: 8px; }
   .ready-database .rdb-calendar { display: grid; grid-template-columns: repeat(7, minmax(110px, 1fr)); overflow-x: auto; }
   .ready-database .rdb-weekday { padding: 8px; color: var(--rn-ink-2); text-align: center; }
-  .ready-database .rdb-day { min-height: 120px; padding: 6px; border: 1px solid var(--rdb-line); }
+  .ready-database .rdb-day { min-height: 120px; padding: 6px; border: .5px solid var(--rdb-line); }
   .ready-database .rdb-day time { display: block; margin-bottom: 4px; color: var(--rn-ink-2); }
   .ready-database .rdb-day .rdb-card { padding: 2px; }
   .ready-database .rdb-timeline-scroll { overflow-x: auto; }
   .ready-database .rdb-timeline { display: grid; grid-auto-rows: minmax(46px, auto); }
-  .ready-database :where(.rdb-time-head, .rdb-time-track) { border-right: 1px solid var(--rdb-line); border-bottom: 1px solid var(--rdb-line); padding: 8px; }
+  .ready-database :where(.rdb-time-head, .rdb-time-track) { border-right: .5px solid var(--rdb-line); border-bottom: .5px solid var(--rdb-line); padding: 8px; }
   .ready-database .rdb-time-bar { z-index: 1; padding: 4px 0; pointer-events: none; }
   .ready-database .rdb-time-bar .rdb-card { background: var(--rn-fill); margin: 0; pointer-events: auto; }
   .ready-database .rdb-undated { padding-block: 12px; }
   .ready-database .rdb-calculations { display: flex; gap: 20px; padding: 8px; color: var(--rn-ink-2); }
-  .ready-database :where(.rdb-editor, .rdb-settings) { border-radius: var(--rn-r-float); background: var(--rn-sheet); padding: 16px; box-shadow: var(--rn-shadow-3), inset 0 0 0 1px var(--rn-hair); }
+  .ready-database :where(.rdb-editor, .rdb-settings) { border-radius: var(--rn-r-float); background: var(--rn-solid); padding: 16px; box-shadow: var(--rn-shadow-3), inset 0 0 0 .5px var(--rn-hair); }
   .ready-database .rdb-editor { position: sticky; bottom: 12px; z-index: 3; width: min(400px, 100%); display: grid; gap: 12px; }
   .ready-database .rdb-settings { display: grid; gap: 10px; margin-block: 8px; }
   .ready-database :where(.rdb-editor, .rdb-settings) label { display: flex; align-items: center; gap: 8px; }
@@ -66,28 +73,29 @@
   .ready-database .rdb-options { display: flex; flex-wrap: wrap; gap: 8px 16px; max-height: 220px; overflow: auto; }
   .ready-database .rdb-actions { display: flex; justify-content: flex-end; gap: 8px; }
   /* W3 §4.4, after Inkwell's database: icon tabs and tools, typed cells, a title column that stays while scrolling. */
-  .ready-database .rdb-view-icon { width: 15px; height: 15px; stroke-width: 1.8; flex: none; }
+  .ready-database .rdb-view-icon { width: 14px; height: 14px; stroke-width: var(--rn-icon-stroke); flex: none; }
   .ready-database .rdb-tools { display: flex; flex: none; align-items: center; gap: 2px; }
-  .ready-database .rdb-search { width: 180px; height: 30px; }
-  .ready-database .rdb-head-label { display: flex; align-items: center; gap: 6px; min-width: 0; height: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 500; }
+  .ready-database .rdb-search { width: 180px; height: var(--rn-control-h); }
+  .ready-database .rdb-head-label { display: flex; align-items: center; gap: 8px; min-width: 0; height: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 500; }
   .ready-database .rdb-head-label > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  .ready-database .rdb-field-icon { width: 15px; height: 15px; stroke-width: 1.8; flex: none; color: var(--rn-ink-3); }
-  .ready-database .rdb-field-aa { flex: none; color: var(--rn-ink-3); font-size: 11px; font-weight: 600; letter-spacing: -.02em; }
-  .ready-database [data-col='title'] { position: sticky; left: 0; z-index: 1; background: var(--rn-sheet); }
+  .ready-database .rdb-field-icon { width: 14px; height: 14px; stroke-width: var(--rn-icon-stroke); flex: none; color: var(--rn-ink-3); }
+  /* “Aa” takes an icon's 14px slot, so header labels and the title cells' text stand in one column. */
+  .ready-database .rdb-field-aa { display: inline-flex; justify-content: center; width: 14px; flex: none; color: var(--rn-ink-3); font-size: 11px; font-weight: 600; letter-spacing: -.02em; }
+  .ready-database [data-col='title'] { position: sticky; left: 0; z-index: 1; animation: rdb-backing linear both; animation-timeline: scroll(nearest inline); animation-range: 0 4px; }
   .ready-database .rdb-table-head [data-col='title'] { z-index: 3; }
-  .ready-database .rdb-title-icon { width: 16px; height: 16px; stroke-width: 1.7; flex: none; color: var(--rn-ink-2); }
+  .ready-database .rdb-title-icon { width: 14px; height: 14px; stroke-width: var(--rn-icon-stroke); flex: none; color: var(--rn-ink-2); }
   .ready-database :where(.rdb-title-text, .rdb-cell-text, .rdb-cell-link, .rdb-cell-issue) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ready-database .rdb-cell-link { color: var(--rn-ink-2); text-decoration: underline; text-decoration-color: var(--rn-hair-2); text-underline-offset: 3px; }
   .ready-database .rdb-cell-issue { color: var(--rn-bad); }
-  .ready-database .rdb-cell-num { margin-left: auto; font-variant-numeric: tabular-nums; }
+  .ready-database .rdb-cell-num { margin-left: auto; font-family: var(--rn-font-mono); font-variant-numeric: tabular-nums; }
   .ready-database .rdb-tags { display: flex; gap: 4px; min-width: 0; overflow: hidden; }
-  .ready-database .rdb-status-pill { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px 0 7px; border-radius: var(--rn-r-pill); font-size: var(--rn-fs-sm); white-space: nowrap; flex: none; }
-  .ready-database .rdb-status-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
-  .ready-database .rdb-check { width: 15px; height: 15px; border-radius: 4px; box-shadow: inset 0 0 0 1.5px var(--rn-ink-3); flex: none; }
-  .ready-database .rdb-check.is-on { background: var(--rn-accent); box-shadow: none; }
+  .ready-database .rdb-status-pill { display: inline-flex; align-items: center; gap: 4px; height: var(--rn-control-h-tag); padding: 0 8px 0 6px; border-radius: var(--rn-r-pill); font-size: var(--rn-fs-sm); white-space: nowrap; flex: none; }
+  .ready-database .rdb-status-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+  .ready-database .rdb-check { position: relative; width: 16px; height: 16px; border-radius: 5px; box-shadow: inset 0 0 0 1.5px var(--rn-ink-3); flex: none; }
+  .ready-database .rdb-check.is-on { background: var(--rn-inverse); box-shadow: none; }
   .ready-database .rdb-rel-chip { display: inline-flex; align-items: center; gap: 3px; min-width: 0; max-width: 100%; color: var(--rn-ink-2); text-decoration: underline; text-decoration-color: var(--rn-hair-2); text-underline-offset: 3px; white-space: nowrap; }
   .ready-database .rdb-rel-chip svg { width: 13px; height: 13px; flex: none; }
-  .ready-database .rdb-add-row { display: flex; align-items: center; width: 100%; height: 34px; padding: 0 10px; color: var(--rn-ink-3); border-radius: 0; }
+  .ready-database .rdb-add-row { display: flex; align-items: center; width: 100%; height: 36px; padding: 0 8px; color: var(--rn-ink-3); border-radius: 0; }
   .ready-database .rdb-notice { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--rn-ink-2); font-size: var(--rn-fs-sm); }
-  .ready-database .rdb-reread { height: 26px; padding: 0 10px; border-radius: var(--rn-r-pill); background: var(--rn-fill-2); color: var(--rn-ink); }
+  .ready-database .rdb-reread { height: var(--rn-control-h); padding: 0 12px; border-radius: var(--rn-r-pill); background: var(--rn-inlay); box-shadow: inset 0 1px 0 var(--rn-glass-inner-hi), inset 0 0 0 .5px var(--rn-hair-2), var(--rn-shadow-1); color: var(--rn-ink); }
 }

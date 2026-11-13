@@ -158,7 +158,7 @@ export function SettingsSwitchLabel({ text, children }: { text: ReactNode; child
 
 export type SettingsTone = 'neutral' | 'accent' | 'ink' | 'danger' | 'warning' | 'muted'
 
-/** 状态圆点 + 文字。设置页不用绿色表达成功：当前/已连接用信号色点，空闲用中性灰点。 */
+/** 状态圆点 + 文字。当前/已连接/可用用 ok 色点（tone 'accent'，V5：信号色不表示状态），空闲用中性灰点。 */
 export function SettingsStatus({
   tone = 'neutral',
   children,

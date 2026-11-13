@@ -39,6 +39,9 @@ export const G = {
   chipMinHeight: CHIP.minHeight,
   chipMarginBottom: CHIP.gapBelow,
   chipMarginRight: CHIP.gapRight,
+  /** The time grid's 0:00 line sits --rn-s2 below the strip above it, so an hour label centred on the line at the top of
+   *  the view shows whole instead of cut in half. Pointer → time mapping subtracts it (TimeGrid point()). */
+  gridTopInset: S2,
   /** Half an hour is one control (28), so an hour is 56 (--rn-s14) and a quarter hour 14. */
   defaultHour: S14,
   /** One zoom step adds or removes a quarter hour of the default height. */

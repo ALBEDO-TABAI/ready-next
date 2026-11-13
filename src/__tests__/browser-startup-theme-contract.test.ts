@@ -29,17 +29,12 @@ test('browser startup gates chrome until host restoration completes and main pro
   assert.doesNotMatch(browserMode, /shouldShowStartupPlaceholder.*&&.*<BrowserHeader/)
   assert.match(browserMode, /shouldShowStartupPlaceholder\s*&&\s*\(/)
 
-  // Verify startup/transition masks stay below the DOM header so the tab rail is never hidden on first entry.
-  assert.match(browserMode, /position:\s*'absolute'/)
-  assert.match(browserMode, /top:\s*WORKBENCH_TAB_ROW_HEIGHT/)
-  assert.match(browserMode, /right:\s*0/)
-  assert.match(browserMode, /bottom:\s*0/)
-  assert.match(browserMode, /zIndex:\s*50/)
-  // B13: the masks stand in for the page, which is paper rounded on all corners (W1 DL2, DL9).
-  assert.match(browserMode, /borderRadius:\s*'var\(--rn-r-sheet\)'/)
-  assert.match(browserMode, /pointerEvents:\s*'none'/)
-  assert.match(browserMode, /className="browser-transition-mask"[\s\S]*top:\s*WORKBENCH_TAB_ROW_HEIGHT/)
-  assert.match(browserMode, /className="browser-surface-startup-mask"[\s\S]*top:\s*WORKBENCH_TAB_ROW_HEIGHT/)
+  // V11: the startup/transition masks sit in the browser panel's body, under its head row, so the address row is never
+  // hidden on first entry; they stand in for the page with the page's box (the frame pad in) and its inset radius.
+  assert.match(browserMode, /className="rn-panel__body browser-panel__body" data-framed="true"[\s\S]*className="browser-transition-mask"[\s\S]*className="browser-surface-startup-mask"/)
+  assert.match(browserMode, /className="browser-transition-mask"[\s\S]*?position:\s*'absolute',\s*inset:\s*'var\(--rn-panel-pad\)'[\s\S]*?pointerEvents:\s*'none'[\s\S]*?borderRadius:\s*'var\(--rn-r-panel-inset\)'/)
+  assert.match(browserMode, /className="browser-surface-startup-mask"[\s\S]*?position:\s*'absolute',\s*inset:\s*'var\(--rn-panel-pad\)',\s*zIndex:\s*50,\s*pointerEvents:\s*'none',\s*borderRadius:\s*'var\(--rn-r-panel-inset\)'/)
+  assert.doesNotMatch(browserMode, /top:\s*WORKBENCH_TAB_ROW_HEIGHT/)
 
   assert.match(runtimeHook, /const hasHydratedRuntimeRef = useRef\(!isElectron\)/)
   assert.match(runtimeHook, /const \[browserRuntimeReady, setBrowserRuntimeReady\] = useState\(!isElectron\)/)

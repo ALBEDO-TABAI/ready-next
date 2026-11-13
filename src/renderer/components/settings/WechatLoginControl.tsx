@@ -137,7 +137,7 @@ export function WechatLoginControl({ channelId, enabled, disabled, beforeStart, 
       </div>
       {/* 二维码底永远是浅色的纸（data-theme="light" 取浅色令牌），深色主题下也要能被手机扫到。 */}
       {qrImage && <div className="self-start" data-theme="light"
-        style={{ padding: 14, borderRadius: 16, background: 'var(--rn-sheet)', boxShadow: 'var(--rn-card-shadow)' }}>
+        style={{ padding: 14, borderRadius: 'var(--rn-r-card)', background: 'var(--rn-solid)', boxShadow: 'var(--rn-card-shadow)' }}>
         <img src={qrImage} alt="微信绑定二维码" width={208} height={208} style={{ display: 'block', imageRendering: 'pixelated' }} />
       </div>}
       {message && <div role="status" aria-live="polite" className="inline-flex items-center gap-1.5 text-[12px] leading-6"

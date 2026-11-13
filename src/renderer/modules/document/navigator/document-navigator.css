@@ -6,15 +6,7 @@
   flex-direction: column;
 }
 
-.document-navigator__head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 40px;
-  padding: 0 6px 0 14px;
-  flex: none;
-}
-
+/* The header row is the shell's .shell-navigator__head (V15); only the view switch is sized here. */
 .document-navigator__head .rn-seg {
   flex: none;
   padding: 2px;
@@ -23,17 +15,6 @@
 .document-navigator__head .rn-seg__item {
   padding: 3px 9px;
   font-size: 12px;
-}
-
-.document-navigator__title {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  color: var(--rn-ink-2);
-  font-size: 13px;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .document-navigator__view {

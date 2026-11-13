@@ -4,7 +4,6 @@ import { Bot, ShieldAlert, UserRound } from 'lucide-react'
 import HeaderUtilityActions from './HeaderUtilityActions'
 import TabRail from './TabRail'
 import { useBrowserHeaderInteraction } from '../../modules/browser/useBrowserHeaderInteraction'
-import { WORKBENCH_HEADER_EDGE_X, WORKBENCH_TAB_ROW_HEIGHT } from '../../modules/workbench/chrome'
 import type { BrowserTab } from '../../stores/useBrowserTabs'
 import type { BrowserUtilityMenuKind } from '../../../shared/browser-utility-menu'
 import type { BrowserOwnershipStatus } from '../../modules/browser/browserOwnershipStatus'
@@ -126,116 +125,95 @@ export default function BrowserHeader({
     dismissAddressEditing()
   }, [dismissAddressEditing, isActive])
 
+  // The browser panel's head row (V11) while no tab is open yet: the starter tab, its address and the page's tools.
   return (
-    <div
-      ref={headerRootRef}
-      className="browser-header-surface glass-surface-panel flex-shrink-0"
-      style={{
-        overflow: 'visible',
-        zIndex: 8,
-      }}
-    >
-      <div
-        className="flex items-center no-drag"
-        style={{
-          minHeight: WORKBENCH_TAB_ROW_HEIGHT,
-          paddingLeft: WORKBENCH_HEADER_EDGE_X,
-          paddingRight: WORKBENCH_HEADER_EDGE_X,
-          gap: 8,
-          background: 'transparent',
-          borderBottom: '1px solid transparent',
-          alignItems: 'center',
-          position: 'relative',
-          zIndex: 2,
+    <div ref={headerRootRef} className="rn-panel__head browser-head no-drag">
+      {ownershipStatus && <BrowserOwnershipChip status={ownershipStatus} />}
+
+      <TabRail
+        isActive={isActive}
+        tabs={tabs}
+        activeTabId={activeTabId}
+        splitTabId={splitTabId}
+        activeTabMode={activeTabMode}
+        loading={loading}
+        canGoBack={canGoBack}
+        canGoForward={canGoForward}
+        refreshDockMode={refreshDockMode}
+        activeTabSurfaceRef={activeTabSurfaceRef}
+        urlInput={urlInput}
+        isBookmarked={isBookmarked}
+        bookmarkedUrls={bookmarkedUrls}
+        onTabClick={(tabId, event) => {
+          dismissAddressEditing()
+          onTabClick(tabId, event)
         }}
-      >
-        {ownershipStatus && <BrowserOwnershipChip status={ownershipStatus} />}
-
-        <TabRail
-          isActive={isActive}
-          tabs={tabs}
-          activeTabId={activeTabId}
-          splitTabId={splitTabId}
-          activeTabMode={activeTabMode}
-          loading={loading}
-          canGoBack={canGoBack}
-          canGoForward={canGoForward}
-          refreshDockMode={refreshDockMode}
-          activeTabSurfaceRef={activeTabSurfaceRef}
-          urlInput={urlInput}
-          isBookmarked={isBookmarked}
-          bookmarkedUrls={bookmarkedUrls}
-          onTabClick={(tabId, event) => {
+        onTabClose={onTabClose}
+        onNewTab={onNewTab}
+        onReorder={onReorder}
+        onUrlChange={onUrlChange}
+        onExpandRequest={() => {
+          onFocus()
+          expandActiveTab()
+        }}
+        onHotspotEnter={primeActiveTab}
+        onHotspotLeave={resetActiveTabPrime}
+        onInputFocus={() => {
+          committingNavigationRef.current = false
+          onFocus()
+          onEditStart()
+          beginEditing()
+        }}
+        onInputBlur={() => {
+          if (!committingNavigationRef.current) {
             dismissAddressEditing()
-            onTabClick(tabId, event)
-          }}
-          onTabClose={onTabClose}
-          onNewTab={onNewTab}
-          onReorder={onReorder}
-          onUrlChange={onUrlChange}
-          onExpandRequest={() => {
-            onFocus()
-            expandActiveTab()
-          }}
-          onHotspotEnter={primeActiveTab}
-          onHotspotLeave={resetActiveTabPrime}
-          onInputFocus={() => {
-            committingNavigationRef.current = false
-            onFocus()
-            onEditStart()
-            beginEditing()
-          }}
-          onInputBlur={() => {
-            if (!committingNavigationRef.current) {
-              dismissAddressEditing()
-            } else {
-              onEditEnd()
-            }
-            requestAnimationFrame(() => {
-              committingNavigationRef.current = false
-              stopEditing()
-            })
-          }}
-          onRefreshDockEnter={beginRefreshDockHover}
-          onRefreshDockLeave={endRefreshDockHover}
-          onRefresh={() => {
-            dismissAddressEditing()
-            onRefresh()
-          }}
-          onGoBack={() => {
-            dismissAddressEditing()
-            onGoBack()
-          }}
-          onGoForward={() => {
-            dismissAddressEditing()
-            onGoForward()
-          }}
-          onCommitNavigation={() => {
-            committingNavigationRef.current = true
+          } else {
             onEditEnd()
-            onNavigate()
-            collapseActiveTab()
-          }}
-          onToggleBookmark={() => {
-            onToggleBookmark()
-            dismissAddressEditing()
-          }}
-          onToggleBookmarkForTab={onToggleBookmarkForTab}
-        />
+          }
+          requestAnimationFrame(() => {
+            committingNavigationRef.current = false
+            stopEditing()
+          })
+        }}
+        onRefreshDockEnter={beginRefreshDockHover}
+        onRefreshDockLeave={endRefreshDockHover}
+        onRefresh={() => {
+          dismissAddressEditing()
+          onRefresh()
+        }}
+        onGoBack={() => {
+          dismissAddressEditing()
+          onGoBack()
+        }}
+        onGoForward={() => {
+          dismissAddressEditing()
+          onGoForward()
+        }}
+        onCommitNavigation={() => {
+          committingNavigationRef.current = true
+          onEditEnd()
+          onNavigate()
+          collapseActiveTab()
+        }}
+        onToggleBookmark={() => {
+          onToggleBookmark()
+          dismissAddressEditing()
+        }}
+        onToggleBookmarkForTab={onToggleBookmarkForTab}
+      />
 
-        <HeaderUtilityActions
-          onShowUtilityMenu={(kind, anchorRect) => {
-            dismissAddressEditing()
-            onShowUtilityMenu(kind, anchorRect)
-          }}
-          fastCardOpen={fastCardOpen}
-          fastCardItemCount={fastCardItemCount}
-          onToggleFastCard={() => {
-            dismissAddressEditing()
-            onToggleFastCard()
-          }}
-        />
-      </div>
+      <HeaderUtilityActions
+        onShowUtilityMenu={(kind, anchorRect) => {
+          dismissAddressEditing()
+          onShowUtilityMenu(kind, anchorRect)
+        }}
+        fastCardOpen={fastCardOpen}
+        fastCardItemCount={fastCardItemCount}
+        onToggleFastCard={() => {
+          dismissAddressEditing()
+          onToggleFastCard()
+        }}
+      />
     </div>
   )
 }

@@ -45,7 +45,7 @@ export function LibraryQuoteCard({ raw }: { raw: string }) {
     return () => { live = false; sequence++; stops.forEach(stop => stop?.()); window.removeEventListener('focus', update) }
   }, [raw])
   const source = state.status === 'ready' ? parseReadyUri(state.card.uri) : null
-  return <figure className="glass-surface-card" data-library-quote="true" style={{ padding: '20px 24px', margin: '16px 0', borderRadius: 18, border: '1px solid var(--rn-hair)', background: 'var(--rn-sheet)' }}>
+  return <figure className="glass-surface-card" data-library-quote="true" style={{ padding: '20px 24px', margin: '16px 0', borderRadius: 'var(--rn-r-card)', border: 0, background: 'var(--rn-fill)' }}>
     {state.status === 'ready' ? <>
       <figcaption style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span aria-label={`${state.card.color}标记`} style={{ width: 8, height: 24, borderRadius: 4, background: markerColor(state.card.color) }} /><strong>{state.card.title}</strong><span>{state.card.author}</span></figcaption>
       <blockquote className="note-preview-markdown-quote" style={{ whiteSpace: 'pre-wrap' }}>{state.card.text}</blockquote>

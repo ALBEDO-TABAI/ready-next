@@ -3,7 +3,7 @@
   "combos": {
     "light-normal": {
       "contentWidth": 0,
-      "bandSymmetry": 4,
+      "bandSymmetry": 0,
       "composerAlign": 0,
       "overflow": 0,
       "uiFont": 0,
@@ -14,7 +14,7 @@
     },
     "dark-normal": {
       "contentWidth": 0,
-      "bandSymmetry": 4,
+      "bandSymmetry": 0,
       "composerAlign": 0,
       "overflow": 0,
       "uiFont": 0,
@@ -25,7 +25,7 @@
     },
     "light-reduced": {
       "contentWidth": 0,
-      "bandSymmetry": 4,
+      "bandSymmetry": 0,
       "composerAlign": 0,
       "overflow": 0,
       "uiFont": 0,
@@ -36,7 +36,7 @@
     },
     "dark-reduced": {
       "contentWidth": 0,
-      "bandSymmetry": 4,
+      "bandSymmetry": 0,
       "composerAlign": 0,
       "overflow": 0,
       "uiFont": 0,

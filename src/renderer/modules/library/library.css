@@ -11,20 +11,21 @@
   .rn-library .library-pill b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .rn-library .library-sort-value { color: var(--rn-ink); }
   .rn-library .library-count { position: relative; }
-  .rn-library .library-badge { position: absolute; top: -2px; right: -2px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: var(--rn-r-pill); background: var(--rn-ink-2); color: var(--rn-sheet); font: 600 var(--rn-fs-2xs)/15px var(--rn-font-mono); text-align: center; pointer-events: none; }
+  .rn-library .library-badge { position: absolute; top: -2px; right: -2px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: var(--rn-r-pill); background: var(--rn-ink-2); color: var(--rn-solid); font: 600 var(--rn-fs-2xs)/15px var(--rn-font-mono); text-align: center; pointer-events: none; }
   .rn-library .library-marked { color: var(--rn-ribbon); fill: currentColor; }
   .rn-library .library-search { width: min(190px, 32cqw); border-radius: var(--rn-r-pill); }
   .rn-library .library-scroll { position: absolute; inset: 76px 0 76px; padding: 0 24px; overflow: auto; background-image: radial-gradient(var(--rn-hair-2) .7px, transparent .9px); background-size: 16px 16px; }
   .rn-library .library-hero { display: flex; justify-content: space-between; align-items: end; gap: 24px; flex-wrap: wrap; padding: 24px 0; }
-  .rn-library .library-hero h1 { font: 600 clamp(32px, 6cqw, 64px)/1 var(--rn-font-ui); letter-spacing: -.04em; }
-  .rn-library .library-hero em { font-family: var(--rn-font-serif); font-weight: 400; }
+  /* V7: a display moment in the interface face, 500, tight; the second word is told apart by ink, not by a serif. */
+  .rn-library .library-hero h1 { font: 500 clamp(32px, 6cqw, 64px)/1 var(--rn-font-ui); letter-spacing: var(--rn-tracking-tight); }
+  .rn-library .library-hero em { font-style: normal; color: var(--rn-ink-3); }
   /* DL7: the numbers in mono, the words in the interface face. */
   .rn-library .library-statistics { display: flex; gap: 14px; flex-wrap: wrap; font: var(--rn-fs-xs)/1.8 var(--rn-font-ui); color: var(--rn-ink-3); }
   .rn-library .library-statistics b { font-family: var(--rn-font-mono); font-weight: 400; }
   .rn-library .library-filters { display: flex; gap: 8px; flex-wrap: wrap; }
   .rn-library .library-footer { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); white-space: nowrap; }
   .rn-library .library-hint { text-align: center; color: var(--rn-ink-3); font-size: var(--rn-fs-xs); }
-  .rn-library .library-error { position: absolute; top: 70px; left: 12px; right: 12px; z-index: 80; display: flex; align-items: center; gap: 4px; padding: 8px 8px 8px 14px; border-radius: var(--rn-r-md); background: var(--rn-sheet); color: var(--rn-ink); box-shadow: var(--rn-shadow-2); white-space: pre-wrap; }
+  .rn-library .library-error { position: absolute; top: 70px; left: 12px; right: 12px; z-index: 80; display: flex; align-items: center; gap: 4px; padding: 8px 8px 8px 14px; border-radius: var(--rn-r-card); background: var(--rn-solid); color: var(--rn-ink); box-shadow: inset 0 0 0 .5px var(--rn-hair-2), var(--rn-shadow-2); white-space: pre-wrap; }
   .rn-library .library-error > span { flex: 1; min-width: 0; }
   .rn-library .bk[data-open] { visibility: hidden; }
   .rn-library .book-dialog { position: absolute; inset: 0; z-index: 60; display: grid; place-items: center; perspective: 2400px; background: color-mix(in srgb, var(--rn-stage) 92%, transparent); }
@@ -38,7 +39,7 @@
   .rn-library .book-information dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 20px 0; color: var(--rn-ink-2); }
   .rn-library .reader-loading { padding: 32px; }
   .rn-library .rd-panel { left: 12px; max-width: calc(100% - 24px); }
-  .rn-library .panel-body { height: 100%; display: flex; flex-direction: column; gap: 4px; padding: 8px 8px 10px; }
+  .rn-library .panel-body { height: 100%; border-radius: var(--rn-r-sheet); display: flex; flex-direction: column; gap: 4px; padding: 8px 8px 10px; }
   .rn-library .rd-dock { white-space: nowrap; }
   .rn-library .rd-folio { min-width: 76px; padding: 0 6px; text-align: center; font: 500 var(--rn-fs-sm)/1 var(--rn-font-mono); font-variant-numeric: tabular-nums; color: var(--rn-ink-2); }
   .rn-library .reading-status { position: absolute; bottom: 72px; left: 24px; z-index: 10; }

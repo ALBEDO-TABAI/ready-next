@@ -13,7 +13,8 @@ export interface ViewProps {
   setField(row: ViewRow, field: string, value: unknown): void
   savePersonal(patch: PersonalState): void
 }
-const rowHeight = 38
+// One height for the head and every row (database.css, ink.css), on the 4px grid.
+const rowHeight = 36
 const viewportHeight = 456
 export function TableView(props: ViewProps) {
   const { definition, query, view, personal, cell, savePersonal } = props

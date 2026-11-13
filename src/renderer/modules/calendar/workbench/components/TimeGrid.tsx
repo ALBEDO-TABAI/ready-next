@@ -72,7 +72,7 @@ export function TimeGrid({active=true}:{active?:boolean}) {
   const point = (e: { clientX: number; clientY: number }) => {
     const el = scroller.current!; const r = el.getBoundingClientRect();
     const col = Math.max(0, Math.min(n - 1, Math.floor((e.clientX - r.left - gutter) / cw)));
-    const min = Math.max(0, Math.min(1440, ((e.clientY - r.top + el.scrollTop) / hourH) * 60));
+    const min = Math.max(0, Math.min(1440, ((e.clientY - r.top + el.scrollTop - G.gridTopInset) / hourH) * 60));
     return { col, min, day: days[col] };
   };
   const adPoint = (e: { clientX: number }) => { const r = wrap.current!.getBoundingClientRect(); return days[Math.max(0, Math.min(n - 1, Math.floor((e.clientX - r.left - gutter) / cw)))]; };
@@ -235,7 +235,7 @@ export function TimeGrid({active=true}:{active?:boolean}) {
 
   const tzs = [tz, ...(s.prefs.showAdditionalTz ? s.prefs.additionalTimeZones : [])];
   return (
-    <div className="gridwrap" ref={wrap} data-testid="timegrid" data-colw={cw} data-hourh={hourH} data-gutter={gutter}>
+    <div className="gridwrap" ref={wrap} data-testid="timegrid" data-colw={cw} data-hourh={hourH} data-gutter={gutter} data-top-inset={G.gridTopInset}>
       <div className="colheads" style={{ height: G.colHeader }}>
         <div className="gutterhead" style={{ width: gutter }}>
           <IconButton size="sm" className="gutter-add" icon={<Plus />} title={t('addTz')} onClick={() => openCalendarSettings('general')} />
@@ -262,7 +262,11 @@ export function TimeGrid({active=true}:{active?:boolean}) {
         <div className="allday-chips" style={{ left: 0, right: 0 }}>{adChips}{adPreview}</div>
       </div>
       <div className="scroller" ref={scroller} onPointerDown={onGridDown} onContextMenu={onGridContext}>
-        <div style={{ position: 'relative', height: totalH }}>
+        {/* The 0:00 line sits G.gridTopInset down, so the label of the hour at the top of the view shows whole; the
+            column rules and weekend tint run on through that band. Every y below is measured from the 0:00 line. */}
+        <div className="timecol" style={{ width: gutter, height: G.gridTopInset }} onPointerDown={(e) => e.stopPropagation()} />
+        {cols.map((d) => <div key={d} className={`daycol${weekday(d) === 0 || weekday(d) === 6 ? ' wknd' : ''}`} style={{ left: xOf(d), width: cw, height: G.gridTopInset }} />)}
+        <div style={{ position: 'relative', height: totalH, marginTop: G.gridTopInset }}>
           <div className="timecol" style={{ width: gutter, height: totalH }} onPointerDown={(e) => e.stopPropagation()}>
             {Array.from({ length: 23 }, (_, k) => k + 1).map((h) => {
               const y = h * hourH; const hide = Math.abs(y - nowY) < 12;

@@ -233,7 +233,7 @@ export function StorageSettingsPanel() {
                     width: `${(row.bytes / totalBytes) * 100}%`,
                     minWidth: 3,
                     background: `color-mix(in srgb, var(--rn-ink) ${BREAKDOWN_SHADES[index]}%, transparent)`,
-                    borderRight: '1.5px solid var(--rn-sheet)',
+                    borderRight: '1.5px solid var(--rn-solid)',
                   }}
                 />
               )
@@ -249,7 +249,7 @@ export function StorageSettingsPanel() {
                     aria-hidden
                   />
                   <div className="min-w-0">
-                    <div className="text-[12.5px] font-medium" style={{ color: 'var(--rn-ink)' }}>
+                    <div className="text-[13px] font-medium" style={{ color: 'var(--rn-ink)' }}>
                       {row.label}
                     </div>
                     <div className="sx-meta mt-0.5 truncate">
@@ -274,7 +274,7 @@ export function StorageSettingsPanel() {
               导出最近日志、运行状态和脱敏配置，方便定位打包版问题
               {diagnosticResult && (
                 <span
-                  className={`mt-1 block break-all text-[11.5px] ${diagnosticResult.error ? 'sx-text-danger' : ''}`}
+                  className={`mt-1 block break-all text-[12px] ${diagnosticResult.error ? 'sx-text-danger' : ''}`}
                   style={diagnosticResult.error ? undefined : { color: 'var(--rn-ink)' }}
                 >
                   {diagnosticResult.error
@@ -360,7 +360,7 @@ export function StorageSettingsPanel() {
             : `部分失败：清除 ${formatBytes(lastResult.clearedBytes)}，${lastResult.errors.length} 个错误`}
         >
           {lastResult.errors.length > 0 && (
-            <ul className="mt-1 list-disc pl-4 text-[11.5px]">
+            <ul className="mt-1 list-disc pl-4 text-[12px]">
               {lastResult.errors.slice(0, 5).map((err, idx) => (
                 <li key={idx}>{err}</li>
               ))}

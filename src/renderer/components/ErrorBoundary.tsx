@@ -37,10 +37,10 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
             return (
                 <div
                     className="flex flex-col items-center justify-center h-full gap-4 p-8"
-                    style={{ background: 'var(--rn-sheet)', color: 'var(--rn-ink)' }}
+                    style={{ background: 'var(--rn-solid)', color: 'var(--rn-ink)' }}
                 >
                     <div className="text-4xl">😵</div>
-                    <h2 className="text-[16px] font-semibold" style={{ color: 'var(--rn-ink)' }}>
+                    <h2 className="text-[15px] font-medium" style={{ color: 'var(--rn-ink)' }}>
                         出了点问题
                     </h2>
                     <p className="text-[13px] text-center max-w-[400px]" style={{ color: 'var(--rn-ink-2)' }}>
@@ -48,11 +48,11 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
                     </p>
                     {this.state.error && (
                         <pre
-                            className="text-[11px] p-3 rounded-lg max-w-[500px] overflow-auto"
+                            className="text-[11px] p-3 rounded-[var(--rn-r-card)] max-w-[500px] overflow-auto"
                             style={{
                                 background: 'color-mix(in srgb, var(--rn-bad) 12%, transparent)',
                                 color: 'var(--rn-bad)',
-                                border: '1px solid var(--rn-bad)'
+                                boxShadow: 'inset 0 0 0 .5px var(--rn-bad)'
                             }}
                         >
                             {this.state.error.message}
@@ -61,19 +61,21 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
                     <div className="flex gap-2">
                         <button
                             onClick={this.handleReset}
-                            className="px-4 py-2 rounded-lg text-[13px] font-medium transition-colors"
+                            className="h-8 px-4 rounded-full text-[13px] font-medium transition-colors"
                             style={{
-                                background: 'var(--rn-accent)',
-                                color: 'white'
+                                background: 'var(--rn-btn-ink-bg)',
+                                boxShadow: 'var(--rn-btn-ink-shadow)',
+                                color: 'var(--rn-on-inverse)'
                             }}
                         >
                             重试
                         </button>
                         <button
                             onClick={() => window.location.reload()}
-                            className="px-4 py-2 rounded-lg text-[13px] border transition-colors"
+                            className="h-8 px-4 rounded-full text-[13px] transition-colors"
                             style={{
-                                borderColor: 'var(--rn-hair-2)',
+                                background: 'var(--rn-inlay)',
+                                boxShadow: 'inset 0 1px 0 var(--rn-glass-inner-hi), inset 0 0 0 .5px var(--rn-hair-2), var(--rn-shadow-1)',
                                 color: 'var(--rn-ink)'
                             }}
                         >

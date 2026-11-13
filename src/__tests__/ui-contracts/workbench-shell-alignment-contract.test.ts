@@ -25,8 +25,8 @@ test('browser rss and calendar shells align their left edge with the shared work
   const workbenchTabs = readWorkspaceFile('src/renderer/components/workbench/WorkbenchProjectTabs.tsx')
   const styles = readRendererStyles()
 
-  assert.match(browserHeader, /className="browser-header-surface glass-surface-panel flex-shrink-0"/)
-  assert.match(browserHeader, /paddingLeft: WORKBENCH_HEADER_EDGE_X/)
+  // V11: the browser's header row is the shared panel head (.rn-panel__head owns the row's height and edge padding).
+  assert.match(browserHeader, /className="rn-panel__head browser-head no-drag"/)
   assert.match(workbenchTabs, /className="workbench-tabs-surface glass-surface-panel flex-shrink-0"/)
   // Document mode, like the calendar, has no shell surface of its own: Inkwell's sidebar and page panels fill it.
   assert.match(documentMode, /className="workbench-canvas-shell flex min-h-0 h-full flex-col" style=\{\{ background: 'transparent', boxShadow: 'none' \}\}/)
@@ -35,15 +35,17 @@ test('browser rss and calendar shells align their left edge with the shared work
   assert.match(markdownEditor, /className="panel-hover-scrollbar document-editor-surface flex-1 overflow-auto"/)
   assert.match(markdownEditor, /panel-hover-scrollbar document-preview-surface flex-1 overflow-auto/)
 
-  // RSS shares the Document/Browser frame: a top bar on the canvas and every RSS view in a content frame
-  // rounded on all four corners. Its navigation lives in the shell's one sidebar (W2-T4), not in the body.
+  // V11: 资讯 is one block. The panel (.rn-panel) holds its head row (the way back, the breadcrumb, the view's tools)
+  // and every RSS view as its body; nothing sits on the ground above it. The body paints no sheet of its own (no panel
+  // on a panel). Its navigation lives in the shell's one sidebar (W2-T4), not in the body.
   const rssMode = readWorkspaceFile('src/renderer/pages/modes/RSSMode.tsx')
   assert.match(rssMode, /className="workbench-canvas-shell rss-workbench-canvas relative flex h-full min-h-0 overflow-hidden"/)
-  assert.match(rssMode, /className="rss-topbar workbench-tabs-surface no-drag"/)
+  assert.match(rssMode, /<div className="rss-feed-sheet rn-panel">\s*<div className="rss-topbar rn-panel__head no-drag">/)
   assert.match(rssMode, /<ShellNavigator mode="rss" label="资讯">\s*<RSSNavigation/)
-  assert.doesNotMatch(rssMode, /<div className="rss-workbench-body">\s*<RSSNavigation/)
-  assert.match(rssMode, /className=\{`rss-feed-sheet content-surface-panel rss-content-frame`\}/)
-  assert.match(styles, /\.rss-mode-shell \.rss-content-frame \{[\s\S]*?border-radius: var\(--rn-r-sheet\);/)
+  assert.doesNotMatch(rssMode, /rss-workbench-body|workbench-tabs-surface/)
+  assert.match(rssMode, /className="rss-content-frame rn-panel__body"/)
+  const rssFrame = styles.match(/\.rss-mode-shell \.rss-content-frame \{[^}]*\}/)?.[0] || ''
+  assert.ok(rssFrame && !/background|box-shadow|border-radius/.test(rssFrame), 'the body inside the panel paints nothing of its own')
   assert.doesNotMatch(styles, /--rss-rail/)
   assert.match(rssFeed, /className="rss-feed-surface/)
   assert.match(rssFeed, /rss-workbench-surface/)
@@ -56,7 +58,7 @@ test('browser rss and calendar shells align their left edge with the shared work
   assert.match(rssVirtualList, /data-liquid-scroll-root="rss-feed-list" className=\{`\$\{props\.className \|\| ''\} rss-feed-scroll`\}/)
   // Card text lines up with the heading: row inset + card padding = the frame gutter.
   assert.match(styles, /--rss-row-x: calc\(var\(--rss-gutter\) - 16px\);/)
-  assert.match(styles, /\.rss-workspace-heading \{[\s\S]*?padding: 30px var\(--rss-gutter\) 0;/)
+  assert.match(styles, /\.rss-workspace-heading \{[\s\S]*?padding: var\(--rn-s6\) var\(--rss-gutter\) 0;/)
 
   // The paper keeps the same box in every mode: the calendar uses the shared top, side and bottom paddings.
   assert.match(calendarMode, /WORKBENCH_CANVAS_OUTER_PADDING_TOP/)
@@ -77,7 +79,8 @@ test('browser rss and calendar shells align their left edge with the shared work
   assert.match(styles, /html:root \.document-content-frame \{[\s\S]*?background:\s*transparent !important;/)
   assert.match(styles, /html:root \.document-editor-surface,[\s\S]*\.document-preview-surface,[\s\S]*\.rss-feed-list,\s*html:root \.rss-preview-content \{[\s\S]*background:\s*transparent !important;/)
   assert.match(styles, /html:root \.rss-workbench-surface,[\s\S]*\.rss-feed-list,\s*html:root \.rss-preview-content \{/)
-  assert.match(styles, /\.rss-mode-shell \.rss-feed-sheet \{[\s\S]*?background:\s*var\(--rn-sheet\) !important;/)
+  // V11: 资讯's panel (.rss-feed-sheet.rn-panel) takes its glass from .rn-panel alone; no module rule repaints it.
+  assert.doesNotMatch(styles, /\.rss-feed-sheet \{[^}]*(?:background|box-shadow)/)
 })
 
 test('browser visibility handoff cancels stale re-show work and rss shell stays borderless in liquid glass', () => {
@@ -97,7 +100,7 @@ test('browser visibility handoff cancels stale re-show work and rss shell stays 
   assert.match(tabShell, /if \(!this\.host\.shouldPresentHosts\(\)\) \{\s*return \{ success: true \}/)
   assert.match(hostLayout, /showHost\(view: BrowserHostView, bounds: BrowserRect\): void \{[\s\S]*this\.setHostBoundsNow\(view, bounds\)/)
 
-  // B13: every mode's outer frame is a borderless, shadowless clip (W1 DL1); 资讯's content inside is paper.
-  assert.match(styles, /\.workbench-canvas-shell \{[^}]*border: 1px solid transparent;[^}]*box-shadow: none;/)
+  // B13, V15: every mode's outer frame is a borderless, shadowless box (W1 DL1); the panel inside paints and clips.
+  assert.match(styles, /\.workbench-canvas-shell \{[^}]*border: 0;[^}]*box-shadow: none;/)
   assert.doesNotMatch(styles, /html:root \.rss-mode-shell \.workbench-canvas-shell \{/)
 })

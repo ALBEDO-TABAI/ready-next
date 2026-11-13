@@ -15,7 +15,7 @@
   min-height: 0;
   flex-direction: column;
   overflow: hidden;
-  border-radius: var(--rn-r-float);
+  border-radius: var(--rn-r-dialog);
 }
 
 .find-replace-workspace__head {
@@ -34,11 +34,11 @@
 .find-replace-workspace__close {
   display: grid;
   place-items: center;
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--rn-r-pill);
   background: transparent;
   color: var(--rn-ink-3);
   cursor: pointer;

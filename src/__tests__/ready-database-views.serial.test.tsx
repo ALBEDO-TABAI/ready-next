@@ -27,7 +27,7 @@ test('DB-B performance: indexed 1000-file first screen <500ms; bounded DOM and e
   const measurements: number[] = []
   for (const index of [300, 600, 900, 980]) {
     const started = performance.now()
-    await act(async () => { viewport.scrollTop = index * 38; viewport.dispatchEvent(new ui.dom.window.Event('scroll', { bubbles: true })) })
+    await act(async () => { viewport.scrollTop = index * 36; viewport.dispatchEvent(new ui.dom.window.Event('scroll', { bubbles: true })) })
     measurements.push(performance.now() - started)
     const rowIndices = [...ui.host.querySelectorAll('[aria-rowindex]')].map(row => Number(row.getAttribute('aria-rowindex')))
     assert.ok(rowIndices.some(value => value >= index + 2))
@@ -36,7 +36,7 @@ test('DB-B performance: indexed 1000-file first screen <500ms; bounded DOM and e
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 180)) })
   await settle(ui)
   const state = await f.service.request({ type: 'getState', databaseId: f.databaseId })
-  assert.deepEqual(state.scroll, { x: 0, y: 980 * 38 })
+  assert.deepEqual(state.scroll, { x: 0, y: 980 * 36 })
   console.log(`DB-B PERFORMANCE files=1000 first-screen=${firstMs.toFixed(1)}ms first-calls=[${initialCalls.slice(0, 3).join(",")}] hot-read=${readMs.toFixed(1)}ms hot-query=${queryMs.toFixed(1)}ms warm-screen=${warmMs.toFixed(1)}ms scroll-commits=${measurements.map(ms => ms.toFixed(1)).join(',')}ms DOM-rows=${ui.host.querySelectorAll('[data-row-id]').length}; JSDOM excludes layout/paint and Electron IPC`)
   assert.ok(firstMs < 500, `Indexed 1000-row first screen took ${firstMs.toFixed(1)}ms; warm=${warmMs.toFixed(1)}ms, Main read=${readMs.toFixed(1)}ms, query=${queryMs.toFixed(1)}ms`)
 })

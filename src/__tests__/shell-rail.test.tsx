@@ -36,10 +36,11 @@ test('ShellRail dispatches mode, split and global actions and renders current st
     }
   })
   const modes: string[] = [], splits: string[] = []
-  let assistantOpens = 0, searches = 0
+  let assistantOpens = 0, searches = 0, sidebarToggles = 0
   dom.window.addEventListener('ready:open-quick-switcher', () => { searches += 1 })
   const props: ShellRailProps = { mode: 'document', splitMode: 'rss',
     onModeChange: mode => modes.push(mode), onSplitToggle: mode => splits.push(mode),
+    onSidebarToggle: () => { sidebarToggles += 1 },
     assistantOpen: true, onAssistantOpen: () => { assistantOpens += 1 }, sidebarShown: true }
   function Location() { return <output>{useLocation().pathname}</output> }
   const render = (patch: Partial<ShellRailProps> = {}) => act(async () => root.render(
@@ -51,10 +52,18 @@ test('ShellRail dispatches mode, split and global actions and renders current st
     return result
   }
   await render()
+  // V13: a plain click on the current mode's icon is the sidebar's switch; any other mode (the split side included)
+  // switches as before and leaves the sidebar alone.
   for (const [label, mode] of [['浏览器', 'browser'], ['文档', 'document'], ['资讯', 'rss'], ['日历', 'calendar']]) {
     modes.length = 0; splits.length = 0
+    const togglesBefore = sidebarToggles
     await act(async () => button(label).click())
-    assert.deepEqual(modes, [mode]); assert.deepEqual(splits, [])
+    if (mode === 'document') {
+      assert.deepEqual(modes, []); assert.equal(sidebarToggles, togglesBefore + 1)
+    } else {
+      assert.deepEqual(modes, [mode]); assert.equal(sidebarToggles, togglesBefore)
+    }
+    assert.deepEqual(splits, [])
     modes.length = 0
     for (const modifier of ['altKey', 'shiftKey']) {
       splits.length = 0
@@ -62,6 +71,9 @@ test('ShellRail dispatches mode, split and global actions and renders current st
       assert.deepEqual(splits, [mode]); assert.deepEqual(modes, [])
     }
   }
+  assert.equal(sidebarToggles, 1, 'modifier clicks never toggle the sidebar')
+  // The mode icons drive the sidebar, so a press on them does not count as outside its narrow-window card.
+  assert.ok(button('文档').closest('[data-shell-sidebar-control]'))
   assert.equal(button('文档').getAttribute('aria-pressed'), 'true')
   assert.ok(button('文档').classList.contains('is-active'))
   assert.equal(button('文档').getAttribute('data-active-glyph'), 'fill')

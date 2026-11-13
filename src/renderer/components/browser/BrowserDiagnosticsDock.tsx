@@ -43,10 +43,10 @@ export default function BrowserDiagnosticsDock({
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.14em]" style={{ color: 'var(--rn-ink-3)' }}>
+          <div className="text-[11px] font-semibold uppercase tracking-[0.06em]" style={{ color: 'var(--rn-ink-3)' }}>
             浏览器任务与性能诊断
           </div>
-          <div className="mt-1 truncate text-[14px] font-semibold" style={{ color: 'var(--rn-ink)' }}>
+          <div className="mt-1 truncate text-[15px] font-medium" style={{ color: 'var(--rn-ink)' }}>
             {currentTask?.taskTitle || '最近浏览器任务'}
           </div>
           <div className="mt-1 text-[12px]" style={{ color: 'var(--rn-ink)', lineHeight: 1.5 }}>
@@ -62,7 +62,7 @@ export default function BrowserDiagnosticsDock({
           {currentTask.recentEvidence.slice(0, 3).map((item) => (
             <span
               key={item}
-              className="rounded-full px-2 py-1 text-[10px]"
+              className="rounded-full px-2 py-1 text-[11px]"
               style={{ background: 'var(--rn-fill-2)', color: 'var(--rn-ink-3)' }}
             >
               {item}

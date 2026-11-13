@@ -11,7 +11,7 @@
 
 .rss-workspace-heading {
   flex-shrink: 0;
-  padding: 30px var(--rss-gutter) 0;
+  padding: var(--rn-s6) var(--rss-gutter) 0;
 }
 
 .rss-heading-row {
@@ -26,17 +26,17 @@
 }
 
 .rss-heading-title h1 {
-  font-size: 24px;
-  line-height: 1.25;
-  font-weight: 650;
-  letter-spacing: -0.015em;
+  font-size: var(--rn-t-title);
+  line-height: var(--rn-lh-title);
+  font-weight: 500;
+  letter-spacing: var(--rn-tracking-tight);
   color: var(--rn-ink);
 }
 
 .rss-heading-desc {
   display: -webkit-box;
   max-width: 640px;
-  margin-top: 6px;
+  margin-top: var(--rn-s1);
   overflow: hidden;
   font-size: var(--rn-fs-md);
   line-height: 1.6;
@@ -109,8 +109,8 @@
 }
 
 .rss-source-select > svg {
-  width: 13px;
-  height: 13px;
+  width: 14px;
+  height: 14px;
   color: var(--rn-ink-3);
 }
 
@@ -158,7 +158,7 @@
   .rss-heading-row {
     flex-direction: column;
     align-items: flex-start;
-    gap: 6px;
+    gap: var(--rn-s2);
   }
 }
 
@@ -170,7 +170,7 @@
   flex: 1;
   min-height: 0;
   flex-direction: column;
-  margin-top: 14px;
+  margin-top: var(--rn-s4);
 }
 
 .rss-feed-row {
@@ -193,29 +193,28 @@
 .rss-date-heading {
   display: flex;
   align-items: baseline;
-  gap: 10px;
-  padding: 30px 16px 10px 4px;
-  font-size: var(--rn-fs-xl);
-  font-weight: 650;
-  letter-spacing: -0.01em;
+  gap: var(--rn-s2);
+  padding: var(--rn-s8) var(--rn-s4) var(--rn-s2) var(--rn-s1);
+  font-size: var(--rn-t-lead);
+  font-weight: 500;
   color: var(--rn-ink);
 }
 
 .rss-feed-row[data-first='true'] .rss-date-heading {
-  padding-top: 8px;
+  padding-top: var(--rn-s2);
 }
 
 .rss-date-heading small {
-  font-size: var(--rn-fs-sm);
+  font-size: var(--rn-t-meta);
   font-weight: 400;
-  letter-spacing: 0;
   color: var(--rn-ink-3);
 }
 
-/* 时间轴：左侧时间、一条极淡的竖线与圆点，右侧条目。未读的点用信号色，已读退成中性。 */
+/* 时间轴：左侧时间、一条极淡的竖线与圆点，右侧条目。未读的点用信号色，已读退成中性。
+   时间、圆点与条目首行（来源）同在卡片顶部 16px 之下的 24px 行里，居中对齐。 */
 .rss-tl {
-  --rss-tl-time: 46px;
-  --rss-tl-gap: 26px;
+  --rss-tl-time: 48px;
+  --rss-tl-gap: 24px;
   position: relative;
   display: grid;
   grid-template-columns: var(--rss-tl-time) minmax(0, 1fr);
@@ -228,14 +227,15 @@
   top: 0;
   bottom: -2px;
   left: calc(var(--rss-tl-time) + var(--rss-tl-gap) / 2);
-  width: 1px;
+  width: .5px;
   background: var(--rn-hair);
 }
 
 .rss-tl__time {
-  padding-top: 18px;
-  font-size: var(--rn-fs-sm);
-  line-height: 22px;
+  padding-top: var(--rn-s4);
+  font-family: var(--rn-font-mono);
+  font-size: var(--rn-t-meta);
+  line-height: var(--rn-s6);
   font-variant-numeric: tabular-nums;
   text-align: right;
   color: var(--rn-ink-3);
@@ -244,13 +244,13 @@
 
 .rss-tl__dot {
   position: absolute;
-  top: 26px;
-  left: calc(var(--rss-tl-time) + var(--rss-tl-gap) / 2 - 3px);
-  width: 7px;
-  height: 7px;
+  top: var(--rn-s6);
+  left: calc(var(--rss-tl-time) + var(--rss-tl-gap) / 2 - 4px);
+  width: var(--rn-s2);
+  height: var(--rn-s2);
   border-radius: var(--rn-r-pill);
   background: var(--rn-fill-3);
-  box-shadow: 0 0 0 3px var(--rn-sheet);
+  box-shadow: 0 0 0 3px var(--rn-solid);
 }
 
 .rss-tl.is-unread .rss-tl__dot {
@@ -260,8 +260,8 @@
 .rss-news-card {
   position: relative;
   min-width: 0;
-  padding: 15px 16px 16px;
-  border-radius: var(--rn-r-lg);
+  padding: var(--rn-s4);
+  border-radius: var(--rn-r-card);
   cursor: pointer;
   transition: background-color var(--rn-d-1) var(--rss-ease), box-shadow var(--rn-d-1) var(--rss-ease);
 }
@@ -270,19 +270,18 @@
   background: var(--rn-fill);
 }
 
-/* Selection is a raised sheet, the selected item of a segmented control (W1 §5), never an outline. */
+/* Selection is the quiet selection fill (V5), never an outline or the accent. */
 .rss-news-card.is-selected {
-  background: var(--rn-sheet);
-  box-shadow: var(--rn-card-shadow);
+  background: var(--rn-fill-2);
 }
 
 .rss-card-meta {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--rn-s2);
   min-width: 0;
-  height: 22px;
-  font-size: var(--rn-fs-sm);
+  height: var(--rn-s6);
+  font-size: var(--rn-t-meta);
   color: var(--rn-ink-3);
   white-space: nowrap;
 }
@@ -298,11 +297,11 @@
   flex-shrink: 0;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: var(--rn-control-h-tag);
+  height: var(--rn-control-h-tag);
   border-radius: var(--rn-r-pill);
   background: var(--rn-fill-2);
-  font-size: 10.5px;
+  font-size: var(--rn-t-micro);
   font-weight: 600;
   color: var(--rn-ink-2);
 }
@@ -317,12 +316,12 @@
   display: inline-flex;
   flex-shrink: 0 !important;
   align-items: center;
-  gap: 5px;
-  height: 20px;
-  padding: 0 8px 0 7px;
+  gap: var(--rn-s1);
+  height: var(--rn-control-h-tag);
+  padding: 0 var(--rn-s2);
   border-radius: var(--rn-r-pill);
-  background: var(--rn-accent-soft);
-  color: var(--rn-accent-text);
+  background: var(--rn-fill-2);
+  color: var(--rn-ink-2);
   font-size: var(--rn-fs-xs);
   font-weight: 500;
 }
@@ -337,27 +336,26 @@
 
 .rss-card-title {
   display: -webkit-box;
-  margin-top: 6px;
+  margin-top: var(--rn-s1);
   overflow: hidden;
-  font-size: 15.5px;
-  line-height: 1.5;
-  font-weight: 600;
-  letter-spacing: -0.005em;
+  font-size: var(--rn-t-lead);
+  line-height: var(--rn-lh-lead);
+  font-weight: 500;
   color: var(--rn-ink);
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
 
 .rss-news-card.is-read .rss-card-title {
-  font-weight: 500;
+  font-weight: 400;
   color: var(--rn-ink-2);
 }
 
 .rss-card-summary {
   display: -webkit-box;
-  margin-top: 5px;
+  margin-top: var(--rn-s1);
   overflow: hidden;
-  font-size: 13.5px;
+  font-size: var(--rn-t-body);
   line-height: 1.7;
   color: var(--rn-ink-2);
   -webkit-box-orient: vertical;
@@ -376,8 +374,8 @@
   left: 50%;
   display: grid;
   place-items: center;
-  width: 38px;
-  height: 38px;
+  width: var(--rn-control-h-xl);
+  height: var(--rn-control-h-xl);
   padding-left: 2px;
   border-radius: var(--rn-r-pill);
   color: var(--rn-on-inverse);
@@ -394,7 +392,7 @@
 .rss-card-main {
   display: flex;
   align-items: flex-start;
-  gap: 22px;
+  gap: var(--rn-s6);
 }
 
 .rss-card-text {
@@ -408,7 +406,7 @@
   height: 88px;
   margin: 8px 0 0;
   overflow: hidden;
-  border-radius: 10px;
+  border-radius: var(--rn-r-card);
   background: var(--rn-fill);
 }
 
@@ -433,9 +431,9 @@
 .rss-card-preview {
   width: fit-content;
   max-width: min(260px, 100%);
-  margin: 12px 0 2px;
+  margin: var(--rn-s3) 0 0;
   overflow: hidden;
-  border-radius: 10px;
+  border-radius: var(--rn-r-card);
   background: var(--rn-fill);
 }
 
@@ -449,8 +447,8 @@
 .rss-classification-labels {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 12px;
-  margin-top: 10px;
+  gap: var(--rn-s1) var(--rn-s3);
+  margin-top: var(--rn-s2);
 }
 
 .rss-classification-labels span {
@@ -461,19 +459,20 @@
 .rss-tag {
   display: inline-flex;
   align-items: center;
-  height: 22px;
-  padding: 0 9px;
+  height: var(--rn-control-h-tag);
+  padding: 0 var(--rn-s2);
   border-radius: var(--rn-r-pill);
-  background: var(--rn-fill-2);
-  font-size: 11.5px;
+  background: var(--rn-inlay);
+  box-shadow: inset 0 1px 0 var(--rn-glass-inner-hi), inset 0 0 0 .5px var(--rn-hair-2);
+  font-size: var(--rn-t-micro);
   color: var(--rn-ink-2);
 }
 
 .rss-card-reason {
   display: -webkit-box;
-  margin-top: 10px;
+  margin-top: var(--rn-s2);
   overflow: hidden;
-  font-size: 12.5px;
+  font-size: var(--rn-t-meta);
   line-height: 1.65;
   color: var(--rn-ink-2);
   -webkit-box-orient: vertical;
@@ -487,30 +486,30 @@
 @container (max-width: 520px) {
   .rss-tl {
     --rss-tl-time: 36px;
-    --rss-tl-gap: 18px;
+    --rss-tl-gap: 20px;
   }
 }
 
-/* 当前热点：精选页顶部的一块安静的排行，不另造热度分。纸上不放纸（DL2），用一层浅填充分组。 */
+/* 当前热点：精选页顶部的一块安静的排行，不另造热度分。面板上不叠面板（V1），用一层浅填充分组。 */
 .rss-hot {
-  margin: 4px 0 6px;
+  margin: var(--rn-s1) 0 var(--rn-s2);
   padding: 16px 20px 12px;
-  border-radius: var(--rn-r-lg);
+  border-radius: var(--rn-r-card);
   background: var(--rn-fill);
 }
 
 .rss-hot > header {
   display: flex;
   align-items: baseline;
-  gap: 10px;
-  margin-bottom: 6px;
+  gap: var(--rn-s2);
+  margin-bottom: var(--rn-s2);
   font-size: var(--rn-fs-md);
-  font-weight: 600;
+  font-weight: 500;
   color: var(--rn-ink);
 }
 
 .rss-hot > header small {
-  font-size: 11.5px;
+  font-size: var(--rn-t-meta);
   font-weight: 400;
   color: var(--rn-ink-3);
 }
@@ -536,10 +535,10 @@
   display: grid;
   grid-template-columns: 22px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 12px;
-  min-height: 38px;
-  padding: 0 8px;
-  border-radius: 10px;
+  gap: var(--rn-s3);
+  min-height: var(--rn-control-h-xl);
+  padding: 0 var(--rn-s2);
+  border-radius: var(--rn-r-sm);
   transition: background-color var(--rn-d-1) var(--rss-ease);
 }
 
@@ -548,8 +547,9 @@
 }
 
 .rss-hot__rank {
+  font-family: var(--rn-font-mono);
   font-size: var(--rn-fs-md);
-  font-weight: 600;
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
   text-align: center;
   color: var(--rn-ink-3);
@@ -565,7 +565,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   text-align: left;
-  font-size: 13.5px;
+  font-size: var(--rn-t-body);
   font-weight: 500;
   color: var(--rn-ink);
 }
@@ -640,7 +640,7 @@
 .rss-grouped-reports > button:not(.rn-btn) {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--rn-s2);
   height: 24px;
   padding: 0 8px 0 0;
   color: var(--rn-ink-2);
@@ -688,13 +688,13 @@
   gap: 2px;
   margin: 8px 0 0;
   padding: 6px;
-  border-radius: var(--rn-r-md);
+  border-radius: var(--rn-r-card);
   background: var(--rn-fill);
   list-style: none;
 }
 
 .rss-grouped-reports li {
-  padding: 7px 10px;
+  padding: var(--rn-s2) 10px;
   border-radius: var(--rn-r-sm);
 }
 
@@ -716,7 +716,7 @@
   display: block;
   margin-top: 2px;
   color: var(--rn-ink-3);
-  font-size: 11.5px;
+  font-size: var(--rn-t-meta);
 }
 
 .rss-grouped-reports > .rn-btn {
@@ -725,7 +725,7 @@
 
 .rss-load-more {
   align-self: center;
-  margin: 12px auto 28px;
+  margin: var(--rn-s3) auto var(--rn-s8);
 }
 
 .rss-feed-list > .rn-empty {
@@ -739,8 +739,8 @@
 
 .rss-skeleton {
   display: grid;
-  gap: 10px;
-  padding: 18px 16px;
+  gap: var(--rn-s2);
+  padding: var(--rn-s4);
 }
 
 .rss-query-error {
@@ -750,10 +750,10 @@
   gap: 12px;
   margin: 0 var(--rss-gutter) 8px;
   padding: 6px 6px 6px 14px;
-  border-radius: var(--rn-r-md);
+  border-radius: var(--rn-r-card);
   background: color-mix(in srgb, var(--rn-bad) 9%, transparent);
   color: var(--rn-bad);
-  font-size: 12.5px;
+  font-size: var(--rn-t-meta);
 }
 
 .rss-query-error .rn-btn {
@@ -772,14 +772,14 @@
 
 .rss-task-menu__title {
   font-size: var(--rn-fs-md);
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.3;
   color: var(--rn-ink);
 }
 
 .rss-task-menu__meta {
-  margin-top: 3px;
-  font-size: 11.5px;
+  margin-top: var(--rn-s1);
+  font-size: var(--rn-t-meta);
   line-height: 1.3;
   color: var(--rn-ink-3);
 }
@@ -798,7 +798,7 @@
   align-items: center;
   column-gap: 12px;
   padding: 10px 12px;
-  border-radius: var(--rn-r-md);
+  border-radius: var(--rn-r-sm);
   transition: background-color var(--rn-d-1) var(--rss-ease);
 }
 
@@ -810,7 +810,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12.5px;
+  font-size: var(--rn-t-body);
   font-weight: 500;
   line-height: 1.4;
   color: var(--rn-ink);
@@ -822,7 +822,7 @@
   align-items: center;
   gap: 6px;
   margin-top: 4px;
-  font-size: 11.5px;
+  font-size: var(--rn-t-meta);
   color: var(--rn-ink-3);
   white-space: nowrap;
 }
@@ -832,7 +832,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11.5px;
+  font-size: var(--rn-t-meta);
   color: var(--rn-ink-3);
 }
 

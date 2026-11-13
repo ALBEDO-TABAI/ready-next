@@ -1,5 +1,5 @@
 /* The browser navigator in the shell sidebar (W2-T3). Glass underneath, so no surface of its own;
-   rows follow the shared list row (W1 primitives): current row in the accent tint. Only --rn-*. */
+   rows follow the shared list row (W1 primitives): the current row is the selected fill, ink, 500 (V5). Only --rn-*. */
 .browser-tab-list {
   display: flex;
   flex: 1;
@@ -9,27 +9,8 @@
   font-family: var(--rn-font-ui);
 }
 
-.browser-tab-list__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 36px;
-  padding: 0 6px 0 14px;
-  flex: none;
-}
+/* The header row is the shell's .shell-navigator__head (V15). */
 
-.browser-tab-list__head-tools {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
-.browser-tab-list__title {
-  font: 500 var(--rn-fs-xs)/1 var(--rn-font-ui);
-  color: var(--rn-ink-3);
-}
-
-.browser-tab-list__head-button,
 .browser-tab-list__close {
   display: grid;
   place-items: center;
@@ -37,21 +18,15 @@
   height: 24px;
   padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--rn-r-control);
   background: transparent;
   color: var(--rn-ink-3);
   cursor: pointer;
 }
 
-.browser-tab-list__head-button:hover,
 .browser-tab-list__close:hover {
   background: var(--rn-fill-2);
   color: var(--rn-ink);
-}
-
-.browser-tab-list__head-button svg {
-  width: var(--rn-icon);
-  height: var(--rn-icon);
 }
 
 .browser-tab-list__scroll {
@@ -83,7 +58,7 @@
   min-height: 36px;
   padding: 0 4px 0 8px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--rn-r-sm);
   background: transparent;
   color: var(--rn-ink-2);
   font: 400 var(--rn-fs-md)/1.25 var(--rn-font-ui);
@@ -101,8 +76,8 @@
 }
 
 .browser-tab-list__row[data-current] {
-  background: var(--rn-accent-soft);
-  color: var(--rn-accent-text);
+  background: var(--rn-fill-2);
+  color: var(--rn-ink);
 }
 
 .browser-tab-list__row[data-drop='before']::before,
@@ -173,7 +148,7 @@
 }
 
 .browser-tab-list__meta {
-  font-size: var(--rn-fs-2xs);
+  font-size: var(--rn-t-micro);
   color: var(--rn-ink-3);
 }
 
@@ -214,5 +189,5 @@
   z-index: 10;
   max-width: 236px;
   overflow: hidden;
-  border-radius: 12px;
+  border-radius: var(--rn-r-float);
 }

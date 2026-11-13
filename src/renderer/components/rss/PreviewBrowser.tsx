@@ -163,7 +163,7 @@ export default function PreviewBrowser({ item, onClose, isActive = true }: Previ
         bottom: 0,
         width: `calc(100% - ${WORKBENCH_SUPPORT_PANEL_WIDTH}px)`,
         minWidth: 480,
-        background: 'var(--rn-sheet)',
+        background: 'var(--rn-solid)',
         borderRadius: 'var(--rn-r-sheet) 0 0 var(--rn-r-sheet)',
         overflow: 'hidden',
         isolation: 'isolate',
@@ -198,7 +198,7 @@ export default function PreviewBrowser({ item, onClose, isActive = true }: Previ
             width: 'var(--rn-r-sheet)',
             height: 'var(--rn-r-sheet)',
             borderBottomRightRadius: 'var(--rn-r-sheet)',
-            background: 'var(--rn-sheet)',
+            background: 'var(--rn-solid)',
             pointerEvents: 'none',
             zIndex: 2,
           }}
@@ -212,7 +212,7 @@ export default function PreviewBrowser({ item, onClose, isActive = true }: Previ
             width: 'var(--rn-r-sheet)',
             height: 'var(--rn-r-sheet)',
             borderTopRightRadius: 'var(--rn-r-sheet)',
-            background: 'var(--rn-sheet)',
+            background: 'var(--rn-solid)',
             pointerEvents: 'none',
             zIndex: 2,
           }}
@@ -220,7 +220,7 @@ export default function PreviewBrowser({ item, onClose, isActive = true }: Previ
         {previewState.loading && !previewState.error && (
           <div
             className="absolute inset-0 z-10 flex items-center justify-center"
-            style={{ background: 'color-mix(in srgb, var(--rn-sheet) 90%, transparent)' }}
+            style={{ background: 'color-mix(in srgb, var(--rn-solid) 90%, transparent)' }}
           >
             <EmptyState icon={<Loader2 className="animate-spin" />} title="正在打开原文…" />
           </div>

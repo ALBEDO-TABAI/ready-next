@@ -107,14 +107,14 @@ export function InkTopbar({ tab, roots, home, outline, pageMenu, status, sourceM
         {index > 0 && <span className="ink-crumb-sep">/</span>}
         <button type="button" className={`ink-crumb${index < fallback.length - 1 ? ' is-muted' : ''}`} title={crumb.path}
           onClick={() => { if (crumb.path && index < fallback.length - 1) openInCurrentTab(crumb.path) }}>
-          {(crumb.icon || index === fallback.length - 1) && <span className="ink-crumb-icon">{home ? <span className="ink-crumb-today" aria-hidden /> : tab?.kind === 'library' ? <Icon name="library" size={14} /> : <InkPageIcon value={crumb.icon} kind={crumb.kind} size={16} emojiSize={14} />}</span>}
+          {(crumb.icon || index === fallback.length - 1) && <span className="ink-crumb-icon">{home ? <span className="ink-crumb-today" aria-hidden /> : tab?.kind === 'library' ? <Icon name="library" size={16} /> : <InkPageIcon value={crumb.icon} kind={crumb.kind} size={16} emojiSize={14} />}</span>}
           <span className="ink-crumb-text">{crumb.title}</span>
         </button>
       </span>)}
     </div>
     <div className="ink-topbar-right">
       {!home && sourceMode && markdown && <button type="button" className="ink-source-chip" aria-label="返回页面视图" {...tooltip('返回页面视图')} onClick={() => onSourceMode(false)}>
-        <Icon name="code" size={13} stroke={2} />源码<Icon name="x" size={12} stroke={2} />
+        <Icon name="code" size={14} />源码<Icon name="x" size={12} stroke={2} />
       </button>}
       {/* On 今日 the draft controls keep only the recovery badge: unsaved drafts stay reachable after a crash. */}
       {status}

@@ -1,7 +1,7 @@
 import { forwardRef, type ButtonHTMLAttributes, type CSSProperties, type ReactNode } from 'react'
 
-// Button and IconButton (W1 §5, DL5): primary is solid ink — one per screen at most — never the
-// signal colour. Heights 32 (default) or 28 (sm).
+// Button and IconButton (W1 §5; V4): capsules. Primary is ink glass — one per screen at most — never the
+// signal colour; secondary is inlay glass, ghost is quiet text. Heights 32 (default) or 28 (sm).
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: 'primary' | 'secondary' | 'ghost' | 'danger'
   size?: 'sm' | 'md'

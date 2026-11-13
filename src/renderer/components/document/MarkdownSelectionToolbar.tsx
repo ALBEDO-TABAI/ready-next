@@ -498,7 +498,7 @@ export default function MarkdownSelectionToolbar({
           display: 'flex',
           alignItems: 'center',
           gap: 2,
-          borderRadius: 'var(--rn-r-control)',
+          borderRadius: 'var(--rn-r-float)',
           padding: '4px 6px',
           height: TOOLBAR_HEIGHT,
           boxSizing: 'border-box',
@@ -559,7 +559,7 @@ export default function MarkdownSelectionToolbar({
         <div
           className="rn-float"
           style={{
-            borderRadius: 'var(--rn-r-control)',
+            borderRadius: 'var(--rn-r-float)',
             padding: '4px 0',
             minWidth: 140,
           }}
@@ -590,7 +590,7 @@ export default function MarkdownSelectionToolbar({
         <div
           className="rn-float"
           style={{
-            borderRadius: 'var(--rn-r-control)',
+            borderRadius: 'var(--rn-r-float)',
             padding: 6,
             display: 'flex',
             alignItems: 'center',
@@ -651,7 +651,7 @@ function TbButton({ onClick, active, title, children }: TbButtonProps): ReactNod
         minWidth: 26,
         padding: '0 6px',
         border: 'none',
-        borderRadius: 4,
+        borderRadius: 'var(--rn-r-sm)',
         background: active
           ? 'var(--rn-fill-3)'
           : hover
@@ -670,7 +670,7 @@ function Separator(): ReactNode {
   return (
     <div
       style={{
-        width: 1,
+        width: .5,
         height: 18,
         background: 'var(--rn-hair-2)',
         flexShrink: 0,
@@ -720,7 +720,7 @@ function HeadingMenuItem({
       {sample && (
         <span
           style={{
-            fontWeight: 600,
+            fontWeight: 500,
             fontSize: sampleSize,
             color: 'var(--rn-ink-2)',
           }}

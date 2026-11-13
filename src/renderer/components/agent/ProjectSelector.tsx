@@ -110,7 +110,7 @@ export function ProjectSelector() {
     <div className="ready-chat-project-pill">
       {/* The pill floats over the message list on the float material; liquid glass is the composer's alone (W1 DL4a). */}
       <span className="ready-chat-project-surface rn-float" aria-hidden="true"
-        style={{ position: 'absolute', inset: 0, pointerEvents: 'none', borderRadius: 'inherit', boxShadow: 'inset 0 0 0 1px var(--rn-hair)' }} />
+        style={{ position: 'absolute', inset: 0, pointerEvents: 'none', borderRadius: 'inherit', boxShadow: 'inset 0 0 0 .5px var(--rn-hair)' }} />
       {path && <button className="ready-chat-project-clear" aria-label="取消项目选择" title="不在项目中工作"
         disabled={busy} onClick={() => void perform(() => save(null))}><Folder className="project-folder-icon" size={16} /><X className="project-clear-icon" size={16} /></button>}
       <button data-project-trigger="true" className="ready-chat-project-trigger" disabled={busy}
@@ -132,7 +132,7 @@ export function ProjectSelector() {
         {path === candidate && <Check size={16} style={{ flexShrink: 0 }} />}
       </button>)}
       {paths.length === 0 && <div style={{ padding: 10, color: 'var(--rn-ink-3)', fontSize: 12 }}>没有匹配的项目文件夹</div>}
-      <div style={{ borderTop: '1px solid var(--rn-hair)', marginTop: 6, paddingTop: 6 }}>
+      <div style={{ borderTop: '.5px solid var(--rn-hair)', marginTop: 6, paddingTop: 6 }}>
         <button type="button" disabled={busy} className={CHAT_MENU_ITEM_CLASS} style={{ ...chatMenuItemStyle, display: 'flex', alignItems: 'center', width: '100%', gap: 8, textAlign: 'left' }} onClick={() => void perform(async () => {
           const result = await window.electronAPI.document.openFolder({ title: '选择项目文件夹' })
           if (result.success && result.path) await save(result.path)

@@ -124,10 +124,10 @@ function renderFatalBootstrapError(error: unknown) {
   // fallback follows the theme without a palette of its own (W1 DS1).
   root.innerHTML = `
     <div style="height:100vh;width:100vw;display:flex;align-items:center;justify-content:center;background:var(--rn-stage);color:var(--rn-ink);font-family:var(--rn-font-ui);">
-      <div style="max-width:640px;box-shadow:var(--rn-shadow-2),inset 0 0 0 1px var(--rn-hair);border-radius:var(--rn-r-md);background:var(--rn-sheet);padding:20px 22px;">
+      <div style="max-width:640px;box-shadow:var(--rn-shadow-2),inset 0 0 0 .5px var(--rn-hair-2);border-radius:var(--rn-r-dialog);background:var(--rn-solid);padding:20px 22px;">
         <div style="font-size:15px;font-weight:700;margin-bottom:8px;">Renderer bootstrap failed</div>
         <div style="font-size:12px;color:var(--rn-ink-2);margin-bottom:12px;">应用未能完成初始化，请重启应用或检查最近改动。</div>
-        <pre style="margin:0;padding:10px;background:var(--rn-fill);box-shadow:inset 0 0 0 1px var(--rn-hair);border-radius:var(--rn-r-control);font-size:11px;line-height:1.45;white-space:pre-wrap;word-break:break-word;color:var(--rn-bad);">${message}</pre>
+        <pre style="margin:0;padding:10px;background:var(--rn-fill);box-shadow:inset 0 0 0 .5px var(--rn-hair);border-radius:var(--rn-r-card);font-size:11px;line-height:1.45;white-space:pre-wrap;word-break:break-word;color:var(--rn-bad);">${message}</pre>
       </div>
     </div>
   `

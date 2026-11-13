@@ -386,8 +386,9 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
             )}
             {beginNewContextAvailable && (
               <div data-ready-begin-new-context="true" role="status" style={{
-                pointerEvents: 'auto', padding: '10px 12px', borderRadius: 12,
-                background: 'var(--rn-sheet)', color: 'var(--rn-ink)', fontSize: 12, lineHeight: 1.6,
+                pointerEvents: 'auto', padding: '10px 12px', borderRadius: 'var(--rn-r-card)',
+                background: 'var(--rn-inlay-hover)', boxShadow: 'inset 0 1px 0 var(--rn-glass-inner-hi), inset 0 0 0 .5px var(--rn-hair-2), var(--rn-shadow-1)',
+                color: 'var(--rn-ink)', fontSize: 12, lineHeight: 1.6,
               }}>
                 <p>当前会话暂时无法继续。已有消息会保留，重新开始后不会自动带入此前对话。</p>
                 <Button variant="secondary" onClick={onBeginNewContext} className="mt-2 w-full" style={{ fontSize: 12 }}>
@@ -450,8 +451,8 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
                       </div>
                       <div
                         style={{
-                          fontSize: 12.5,
-                          fontWeight: 600,
+                          fontSize: 13,
+                          fontWeight: 500,
                           color: 'var(--rn-ink)',
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
@@ -480,7 +481,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
                 data-session-recall-attachments="true"
                 style={{
                   borderRadius: 12,
-                  border: '1px solid var(--rn-hair)',
+                  border: '.5px solid var(--rn-hair)',
                   background: 'var(--rn-fill)',
                   padding: 10,
                   display: 'flex',
@@ -514,7 +515,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
                       }}
                     >
                       <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--rn-ink)' }}>
+                        <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--rn-ink)' }}>
                           {capsule.title}
                         </div>
                         <div style={{ fontSize: 11, color: 'var(--rn-ink-3)', marginTop: 2 }}>
@@ -522,7 +523,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
                         </div>
                         <div
                           style={{
-                            fontSize: 11.5,
+                            fontSize: 12,
                             color: 'var(--rn-ink-2)',
                             marginTop: 4,
                             whiteSpace: 'pre-wrap'

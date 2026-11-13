@@ -16,7 +16,7 @@
 - 点击侧栏收放与拖动时，Browser 的 ResizeObserver 在当前布局帧提交位置，不再排下一帧；重复尺寸不重发。已显示的原生页原位更新，不重复拆卸重挂；纯主页面位置更新不触发全量标签负载检查。浏览器 store 归一化必须保留未变化的标签与分组引用。回归入口：`verify:workbench-performance`。
 - RSS 列表只挂载视口附近条目，以真实行高维护占位；隐藏工作面保留有效高度和滚动状态，筛选与条目选择按 ID 生效。不能以 contentVisibility 或截断前 N 条代替有界挂载。RSS 数据仍保留在原有存储与快照中，不自动删除历史；回归入口 `verify:workbench-performance`。
 - 文档阅读位置在滚动时采集，停顿后补充章节锚点；失活/监听清理/退出只冲刷已采集值，不在新工作面挂载后读取隐藏文档几何。最后一次滚动未过防抖窗口就离场，也必须保存最新位置。Document 根节点限定滚动容器归属，沿用现有持久键。
-- 聊天输入框是全应用唯一的液态玻璃（W1 DL4a）：引擎只有 `components/ui/liquid-glass/`，外观取 `--rn-liquid-*`、圆角 24；“减少透明”时 `LiquidLens` 走 `engine='off'`（不生成折射图、不挂镜片层与投影克隆），输入框退回纸色。菜单、弹层与面板用浮层材质（`.rn-float` / `FloatPanel`），不折射。液态玻璃只以真实 Electron dev 为验收面；`#/liquid-test` 只用于调参。生产输入框不得加外部暗色阴影或静态截图贴片，消息末尾必须按浮层实测高度留白。
+- 聊天输入框是全应用唯一的液态玻璃（W1 DL4a）：引擎只有 `components/ui/liquid-glass/`，外观取 `--rn-liquid-*`、圆角 18；“减少透明”时 `LiquidLens` 走 `engine='off'`（不生成折射图、不挂镜片层与投影克隆），输入框退回纸色。菜单、弹层与面板用浮层材质（`.rn-float` / `FloatPanel`），不折射。液态玻璃只以真实 Electron dev 为验收面；`#/liquid-test` 只用于调参。生产输入框不得加外部暗色阴影或静态截图贴片，消息末尾必须按浮层实测高度留白。
 - 玻璃投影的滚动与逐字文本更新必须复用既有内容；只有结构或样式变化才重建投影。遮罩写入不属于聊天内容变化，尺寸与浮层高度变化只更新几何；多个玻璃面的孔洞按各自生命周期释放，来源替换时解除旧监听。行为回归：`liquid-backdrop-projection.test.tsx`；实测与材质参数见 [滚动与质感修正](../superpowers/plans/2026-09-15-liquid-glass-scroll-implementation.md)。 聊天模式胶囊与输入框共享磨砂、底色及边缘高光，只按尺寸分别定义折射几何。
 - 历史会话、行内更多操作和授权方式浮层的横向边界以当前聊天面板为准；授权方式从输入框上方展开。浮层保持 portal 呈现以避开输入框裁切，聊天面板或锚点尺寸变化时重新定位；不得侵入工作区而触发 BrowserView 隐藏。回归覆盖 `chat-header-row-menu.test.tsx` 与 `chat-input-authorization-mode.test.tsx`。
 - Agent 回复中同一 delimiter 的连续数字列表必须合并为一个语义 `<ol>/<li>`，只保留 authored start，后续编号交给浏览器；段落、嵌套和 delimiter 变化必须正常断开。运行中只显示一条“本轮用时”并保持实时走时；这两项都是 Renderer 展示，不新增任务或持久状态。

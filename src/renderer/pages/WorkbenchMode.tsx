@@ -18,7 +18,7 @@ import StatusBar from '../components/layout/StatusBar'
 import { useShellActions, useShellSidebarSlot } from '../modules/workbench/shell/useShellWiring'
 import { useRSSNotificationOpen } from '../modules/rss/notification-open'
 import { useBrowserTaskWorkSync } from '../modules/browser/browser-task-work'
-import { clampAssistantWidth as clampWorkbenchChatPanelWidth, clampSidebarWidth as clampWorkbenchSidePanelWidth, SHELL_RAIL_WIDTH } from '../../shared/workbench-shell-geometry'
+import { clampAssistantWidth as clampWorkbenchChatPanelWidth, clampSidebarWidth as clampWorkbenchSidePanelWidth } from '../../shared/workbench-shell-geometry'
 import {
   READY_WORKBENCH_MODE_CHANGE_EVENT,
   resolveBrowserVisibilityTransition,
@@ -397,7 +397,7 @@ export default function WorkbenchMode() {
   // The assistant's browser tasks: one installation of their re-read triggers for the band, the sidebar and the cards.
   useBrowserTaskWorkSync()
   useShellActions({ toggleSidebar: toggleShellSidebar, toggleAssistant: toggleShellAssistant, openSkills: () => navigate('/skills'), openGraph: () => setGraphWorkspaceRequest({}), openFindReplace: () => setFindReplaceOpen(true) })
-  const sidebarSlot = useShellSidebarSlot({ workbenchMode, splitMode, collapsed: shell.sidebarCollapsed, slideOut: shell.sidebarSlideOut, toggle: toggleShellSidebar })
+  const sidebarSlot = useShellSidebarSlot({ workbenchMode, splitMode })
 
 
   useEffect(() => () => {
@@ -788,7 +788,7 @@ export default function WorkbenchMode() {
             </div>
           )}
 
-          <TopBar />
+          <TopBar sidebarShown={shell.sidebarShown} onSidebarToggle={toggleShellSidebar} />
 
           <ShellSidebarSlotProvider value={sidebarSlot.value}>
           <div
@@ -803,18 +803,17 @@ export default function WorkbenchMode() {
               splitMode={splitMode}
               onModeChange={(mode) => { void handleWorkbenchModeChange(mode) }}
               onSplitToggle={handleWorkbenchSplitToggle}
+              onSidebarToggle={toggleShellSidebar}
               assistantOpen={shell.assistantVisible}
               onAssistantOpen={shell.toggleAssistant}
-              sidebarShown={shell.layout.sidebar === 'docked' || shell.sidebarPeek}
+              sidebarShown={shell.sidebarShown}
             />
             <ShellSidebar
               mode={sidebarSlot.mode}
               panelWidth={shell.sidebarPanelWidth}
-              presentation={shell.sidebarSlideOut ? 'floating' : 'docked'}
-              floatingOpen={shell.sidebarPeek}
-              floatingInset={SHELL_RAIL_WIDTH}
-              onFloatingPeek={shell.setSidebarPeek}
-              peekable={shell.sidebarCollapsed}
+              presentation={shell.sidebarFloating ? 'floating' : 'docked'}
+              floatingOpen={shell.sidebarCardOpen}
+              onFloatingClose={shell.closeSidebarCard}
               slotRef={sidebarSlot.setElement}
             />
 

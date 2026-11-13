@@ -299,7 +299,7 @@ export default function ModelSelector() {
                       style={{
                         marginLeft: 12,
                         paddingLeft: 8,
-                        borderLeft: '1px solid var(--rn-hair-2)',
+                        borderLeft: '.5px solid var(--rn-hair-2)',
                         gap: 2,
                       }}
                     >

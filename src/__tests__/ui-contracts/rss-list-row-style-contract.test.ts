@@ -19,8 +19,8 @@ test('rss feed rows no longer rely on divider lines or per-row borders between i
   assert.doesNotMatch(rssFeed, /rounded-\[14px\] border/)
   assert.doesNotMatch(rssFeed, /border: '1px solid var\(--border-default\)'/)
   assert.doesNotMatch(rssFeed, /borderColor:\s*isSelected/)
-  // Selection is a raised sheet (the selected item of a segmented control, W1 §5), never an outline or an inset accent bar.
+  // Selection is the quiet selection fill (V5), never an outline, the accent or an inset accent bar.
   assert.ok(card && !/\bborder\s*:/.test(card), 'rss card has no border')
-  assert.match(styles, /\.rss-news-card\.is-selected \{\s*background: var\(--rn-sheet\);\s*box-shadow: var\(--rn-card-shadow\);/)
+  assert.match(styles, /\.rss-news-card\.is-selected \{\s*background: var\(--rn-fill-2\);\s*\}/)
   assert.doesNotMatch(rssFeed, /inset 2px 0 0 var\(--color-blue\)/)
 })

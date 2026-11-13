@@ -198,4 +198,4 @@ html:root .ready-chat-project-pill svg {
 .ready-chat-project button:disabled { opacity: 0.5; cursor: default; }
 .ready-chat-project-search { display: flex; align-items: center; gap: 8px; padding: 6px 8px 12px; color: var(--rn-ink-3); }
 .ready-chat-project-search input { width: 100%; min-width: 0; border: 0; outline: 0; color: var(--rn-ink); background: transparent; font-size: var(--rn-fs-md); }
-.ready-chat-project-error { position: absolute; bottom: calc(100% + 6px); left: 0; width: 220px; padding: 8px 10px; border-radius: var(--rn-r-control); background: var(--rn-sheet); box-shadow: var(--rn-shadow-2), inset 0 0 0 1px var(--rn-hair); color: var(--rn-bad); font-size: var(--rn-fs-sm); z-index: 2; }
+.ready-chat-project-error { position: absolute; bottom: calc(100% + 6px); left: 0; width: 220px; padding: 8px 10px; border-radius: var(--rn-r-sm); background: var(--rn-solid); box-shadow: var(--rn-shadow-2), inset 0 0 0 1px var(--rn-hair); color: var(--rn-bad); font-size: var(--rn-fs-sm); z-index: 2; }

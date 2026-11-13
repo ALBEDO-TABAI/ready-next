@@ -1,13 +1,13 @@
 /* Layout of the primitives showcase (#/design-system). Only --rn-* tokens. */
 .ds-page { height: 100%; overflow: auto; background: var(--rn-stage); }
 .ds-header { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; padding: 14px 24px; background: var(--rn-stage); box-shadow: 0 1px 0 var(--rn-hair); }
-.ds-header h1 { margin: 0; font: 600 var(--rn-fs-xl)/1.2 var(--rn-font-ui); }
+.ds-header h1 { margin: 0; font: 500 var(--rn-t-title)/var(--rn-lh-title) var(--rn-font-ui); }
 .ds-header__toggle { display: inline-flex; align-items: center; gap: 10px; color: var(--rn-ink-2); }
 .ds-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); }
 .ds-column { display: flex; flex-direction: column; gap: 14px; padding: 20px 24px 40px; background: var(--rn-stage); color: var(--rn-ink); }
-.ds-column__title { margin: 0; font: 500 var(--rn-fs-sm)/1 var(--rn-font-ui); color: var(--rn-ink-3); }
-.ds-specimen { padding: 16px; border-radius: var(--rn-r-sheet); background: var(--rn-sheet); box-shadow: var(--rn-sheet-shadow); }
-.ds-specimen__title { margin: 0 0 12px; font: 500 var(--rn-fs-xs)/1 var(--rn-font-ui); color: var(--rn-ink-3); }
+.ds-column__title { margin: 0; font: 500 var(--rn-t-meta)/var(--rn-lh-meta) var(--rn-font-ui); color: var(--rn-ink-3); }
+.ds-specimen { padding: 20px; border-radius: var(--rn-r-sheet); background: var(--rn-sheet); box-shadow: var(--rn-sheet-shadow); }
+.ds-specimen__title { margin: 0 0 12px; font: 500 var(--rn-t-micro)/var(--rn-lh-micro) var(--rn-font-ui); letter-spacing: .02em; color: var(--rn-ink-3); }
 .ds-specimen__body { display: flex; flex-direction: column; gap: 12px; }
 .ds-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 /* Reference capsules sit in prose (W6 §2.1), at the paper's reading size. */
@@ -15,11 +15,21 @@
 .ds-stack { display: flex; flex-direction: column; gap: 8px; }
 .ds-stack .rn-field { width: 100%; }
 .ds-grow { flex: 1; min-width: 0; }
-.ds-materials { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 14px; border-radius: var(--rn-r-control); background: var(--rn-stage-2); }
-.ds-material { display: grid; place-items: end start; height: 72px; padding: 10px; font-size: var(--rn-fs-sm); color: var(--rn-ink-2); }
-.ds-material.rn-glass-root { border-radius: var(--rn-r-control); }
+.ds-materials { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; padding: 12px; border-radius: var(--rn-r-card); background: var(--rn-stage-2); }
+.ds-material { display: flex; flex-direction: column; justify-content: space-between; gap: 8px; height: 96px; padding: 12px; font-size: var(--rn-t-meta); line-height: var(--rn-lh-meta); color: var(--rn-ink-2); }
+.ds-material.rn-glass-root { border-radius: var(--rn-r-card); }
+.ds-material__inner { padding: 4px 8px; }
+.ds-type { display: flex; flex-direction: column; gap: 4px; }
+.ds-type p { margin: 0; }
+.ds-type__micro { font-size: var(--rn-t-micro); line-height: var(--rn-lh-micro); letter-spacing: .02em; color: var(--rn-ink-3); }
+.ds-type__meta { font-size: var(--rn-t-meta); line-height: var(--rn-lh-meta); color: var(--rn-ink-3); }
+.ds-type__body { font-size: var(--rn-t-body); line-height: var(--rn-lh-body); }
+.ds-type__lead { font-size: var(--rn-t-lead); line-height: var(--rn-lh-lead); }
+.ds-type__title { font-size: var(--rn-t-title); line-height: var(--rn-lh-title); font-weight: 500; }
+.ds-type__page { font-size: var(--rn-t-page); line-height: var(--rn-lh-page); font-weight: 500; letter-spacing: var(--rn-tracking-tight); }
+.ds-type__display { font-size: var(--rn-t-display); line-height: var(--rn-lh-display); font-weight: 500; letter-spacing: var(--rn-tracking-tight); }
 .ds-list { display: flex; flex-direction: column; gap: 1px; max-width: 280px; }
 .ds-menu-frame { width: 260px; }
 .ds-split { display: flex; align-items: stretch; gap: 0; min-height: 200px; }
-.ds-scroll { height: 200px; border-radius: var(--rn-r-control); box-shadow: inset 0 0 0 1px var(--rn-hair); }
-.ds-scroll__line { padding: 6px 10px; color: var(--rn-ink-2); font-size: var(--rn-fs-sm); }
+.ds-scroll { height: 200px; border-radius: var(--rn-r-card); box-shadow: inset 0 0 0 .5px var(--rn-hair-2); }
+.ds-scroll__line { padding: 6px 10px; color: var(--rn-ink-2); font-size: var(--rn-t-meta); }

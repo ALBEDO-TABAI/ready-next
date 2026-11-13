@@ -191,7 +191,7 @@
       "fontFace": 0
     },
     "components/workbench": {
-      "color": 1,
+      "color": 0,
       "backdropFilter": 0,
       "fontFace": 0
     },
@@ -401,7 +401,7 @@
       "fontFace": 0
     },
     "styles": {
-      "color": 113,
+      "color": 91,
       "backdropFilter": 2,
       "fontFace": 0
     },

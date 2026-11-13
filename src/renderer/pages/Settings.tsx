@@ -694,13 +694,14 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                   <div className="mb-6 flex items-center gap-5 px-1">
                     <div
                       className="grid h-[64px] w-[64px] shrink-0 place-items-center rounded-[18px]"
-                      style={{ background: 'var(--rn-sheet)', boxShadow: 'var(--rn-card-shadow)' }}
+                      style={{ background: 'var(--rn-inlay)', boxShadow: 'inset 0 1px 0 var(--rn-glass-inner-hi), inset 0 0 0 .5px var(--rn-hair-2), var(--rn-shadow-1)' }}
                     >
                       <ReadyDotRMark />
                     </div>
                     <div className="min-w-0">
-                      <div className="text-[18px] font-semibold tracking-[-0.01em]" style={{ color: 'var(--rn-ink)' }}>Ready</div>
-                      <p className="mt-0.5 text-[12.5px] leading-6" style={{ color: 'var(--rn-ink-2)' }}>
+                      {/* The product name in the wordmark face (V12): Instrument Serif 400 at the page size. */}
+                      <div style={{ font: '400 var(--rn-t-page)/var(--rn-lh-page) var(--rn-font-wordmark)', letterSpacing: '-0.01em', color: 'var(--rn-ink)' }}>Ready</div>
+                      <p className="mt-0.5 text-[12px] leading-6" style={{ color: 'var(--rn-ink-2)' }}>
                         Ready 是由@上班摸鱼 开发的，面向知识工作者和创作者的通用桌面工作台
                       </p>
                       <div className="mt-1 flex items-center gap-4">

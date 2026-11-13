@@ -52,9 +52,9 @@ test('selected file rows use a brighter active surface instead of the generic ho
   const source = readWorkspaceFile('src/renderer/components/layout/file-tree/FileTreeItem.tsx')
 
   assert.doesNotMatch(source, /isActive \? \{ background: 'var\(--bg-hover\)' \} : \{\}/)
-  // B13 (W1 §5, DL5): the selected row wears ListRow's current look — the signal colour's soft fill, its text in the accent.
-  assert.match(source, /\.\.\.\(isActive\s+\? \{\s+background: 'var\(--rn-accent-soft\)',/)
-  assert.match(source, /color: isActive \? 'var\(--rn-accent-text\)'/)
+  // V5 (2026-11-13 vvf design language): the selected row wears ListRow's current look — the selected fill, ink.
+  assert.match(source, /\.\.\.\(isActive\s+\? \{\s+background: 'var\(--rn-fill-2\)',/)
+  assert.match(source, /color: isActive \? 'var\(--rn-ink\)'/)
   assert.match(source, /height: 'var\(--rn-row-h\)'/)
 })
 
@@ -77,5 +77,6 @@ test('browser tab drag affordances brighten the target row and render a thicker 
   assert.match(source, /isDropTarget \|\| isBrowserDropAccent\s+\? \{\s+background: 'var\(--rn-accent-soft\)',\s+boxShadow: 'inset 0 0 0 1\.5px var\(--rn-accent\)',/)
   assert.match(source, /height: 3,/)
   assert.match(source, /width: 8,/)
-  assert.match(source, /boxShadow: '0 0 0 2px var\(--rn-sheet\)'/)
+  // The knockout ring around the marker dot is opaque (--rn-solid; --rn-sheet is translucent glass since V1).
+  assert.match(source, /boxShadow: '0 0 0 2px var\(--rn-solid\)'/)
 })

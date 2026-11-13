@@ -543,7 +543,7 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
         background: 'transparent',
       }}
     >
-      <span className="text-[13px] font-semibold" style={{ color: PANEL_COLORS.title }}>
+      <span className="text-[13px] font-medium" style={{ color: PANEL_COLORS.title }}>
         技能中心
       </span>
     </div>
@@ -562,7 +562,7 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
         >
           <div className="panel-hover-scrollbar h-full min-h-0 overflow-auto">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '10px 14px' }}>
-              <p className="shrink-0 text-[12px] font-semibold" style={{ color: PANEL_COLORS.sectionTitle }}>
+              <p className="shrink-0 text-[12px] font-medium" style={{ color: PANEL_COLORS.sectionTitle }}>
                 系统级 Skill
               </p>
 
@@ -584,7 +584,7 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
                           borderRadius: 8,
                           border: '1px solid transparent',
                           padding: '10px 12px',
-                          background: selected ? 'var(--rn-fill)' : 'transparent',
+                          background: selected ? 'var(--rn-fill-2)' : 'transparent',
                         }}
                         onClick={() => setSelectedCardId(cardId)}
                         onDoubleClick={() => void handleOpenPath(skillPath)}
@@ -640,7 +640,7 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
         <section className="min-h-0" style={{ height: bottomHeight, minHeight: 156, background: 'transparent' }}>
           <div className="panel-hover-scrollbar h-full min-h-0 overflow-auto">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '10px 14px' }}>
-              <p className="shrink-0 text-[12px] font-semibold" style={{ color: PANEL_COLORS.sectionTitle }}>
+              <p className="shrink-0 text-[12px] font-medium" style={{ color: PANEL_COLORS.sectionTitle }}>
                 用户导入 Skill
               </p>
 
@@ -682,7 +682,7 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
                           borderRadius: 8,
                           border: '1px solid transparent',
                           padding: '10px 12px',
-                          background: selected ? 'var(--rn-fill)' : 'transparent',
+                          background: selected ? 'var(--rn-fill-2)' : 'transparent',
                         }}
                         onClick={() => setSelectedCardId(cardId)}
                         onDoubleClick={() => void handleOpenPath(skillPath)}
@@ -746,7 +746,7 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
                             <button
                               type="button"
                               style={{
-                                fontSize: 10,
+                                fontSize: 11,
                                 fontWeight: 600,
                                 color: shellConsentMap[skill.id]?.consent ? PANEL_COLORS.blue : PANEL_COLORS.mutedStrong,
                               }}
@@ -774,7 +774,7 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
               {/* P3-1 — discovered ~/.agents/skills candidates (suggest-import; only when non-empty). */}
               {externalCandidates.length > 0 && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <p className="shrink-0 text-[12px] font-semibold" style={{ color: PANEL_COLORS.sectionTitle, marginTop: 4 }}>
+                  <p className="shrink-0 text-[12px] font-medium" style={{ color: PANEL_COLORS.sectionTitle, marginTop: 4 }}>
                     发现的技能（~/.agents/skills）
                   </p>
                   {externalCandidates.map((candidate) => (
@@ -793,7 +793,7 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
                         ) : (
                           <button
                             type="button"
-                            style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 600, color: PANEL_COLORS.blue }}
+                            style={{ marginLeft: 'auto', fontSize: 11, fontWeight: 600, color: PANEL_COLORS.blue }}
                             onClick={() => void (async () => {
                               const result = await importFolders([candidate.path])
                               pushMessage(result.imported > 0 ? `已导入 ${candidate.name}` : `导入 ${candidate.name} 失败`)
@@ -960,7 +960,7 @@ function DescriptionEditorDialog({
           padding: 20,
         }}
       >
-        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: 'var(--rn-ink)' }}>
+        <h3 style={{ margin: 0, fontSize: 15, lineHeight: '24px', fontWeight: 500, color: 'var(--rn-ink)' }}>
           编辑技能
         </h3>
         <label style={{ display: 'block', margin: '14px 0 6px', fontSize: 12, fontWeight: 500, color: 'var(--rn-ink-2)' }}>
@@ -977,9 +977,9 @@ function DescriptionEditorDialog({
             fontSize: 13,
             lineHeight: 1.5,
             color: 'var(--rn-ink)',
-            background: 'var(--rn-fill)',
-            border: '1px solid var(--rn-hair-2)',
-            borderRadius: 8,
+            background: 'var(--rn-well)',
+            border: 0, boxShadow: 'inset 0 1px 2px var(--rn-well-shade), inset 0 0 0 .5px var(--rn-hair)',
+            borderRadius: 'var(--rn-r-control)',
             outline: 'none',
             boxSizing: 'border-box',
           }}
@@ -1000,9 +1000,9 @@ function DescriptionEditorDialog({
             fontSize: 13,
             lineHeight: 1.6,
             color: 'var(--rn-ink)',
-            background: 'var(--rn-fill)',
-            border: '1px solid var(--rn-hair-2)',
-            borderRadius: 8,
+            background: 'var(--rn-well)',
+            border: 0, boxShadow: 'inset 0 1px 2px var(--rn-well-shade), inset 0 0 0 .5px var(--rn-hair)',
+            borderRadius: 'var(--rn-r-card)',
             outline: 'none',
             boxSizing: 'border-box',
           }}
@@ -1160,7 +1160,7 @@ function SkillConfigurationDialog({
           padding: 20,
         }}
       >
-        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: 'var(--rn-ink)' }}>
+        <h3 style={{ margin: 0, fontSize: 15, lineHeight: '24px', fontWeight: 500, color: 'var(--rn-ink)' }}>
           配置 Skill
         </h3>
         <p style={{ margin: '8px 0 0', fontSize: 12, lineHeight: 1.6, color: 'var(--rn-ink-2)' }}>
@@ -1185,7 +1185,7 @@ function SkillConfigurationDialog({
             const options = services.filter((service) => binding.allowedKinds.includes(service.kind))
             return (
               <label key={binding.id} style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12, color: 'var(--rn-ink-2)' }}>
-                <span style={{ fontWeight: 600, color: 'var(--rn-ink)' }}>{binding.label}</span>
+                <span style={{ fontWeight: 500, color: 'var(--rn-ink)' }}>{binding.label}</span>
                 {binding.description && <span style={{ fontSize: 11, lineHeight: 1.5 }}>{binding.description}</span>}
                 <select
                   value={view?.values.serviceBindings[binding.id] || binding.defaultServiceId || ''}
@@ -1195,9 +1195,9 @@ function SkillConfigurationDialog({
                     padding: '9px 10px',
                     fontSize: 12,
                     color: 'var(--rn-ink)',
-                    background: 'var(--rn-fill)',
-                    border: '1px solid var(--rn-hair-2)',
-                    borderRadius: 8,
+                    background: 'var(--rn-well)',
+                    border: 0, boxShadow: 'inset 0 1px 2px var(--rn-well-shade), inset 0 0 0 .5px var(--rn-hair)',
+                    borderRadius: 'var(--rn-r-control)',
                     outline: 'none',
                   }}
                 >
@@ -1216,7 +1216,7 @@ function SkillConfigurationDialog({
             const value = view?.values.fields[field.id] ?? field.defaultValue ?? ''
             return (
               <label key={field.id} style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12, color: 'var(--rn-ink-2)' }}>
-                <span style={{ fontWeight: 600, color: 'var(--rn-ink)' }}>{field.label}</span>
+                <span style={{ fontWeight: 500, color: 'var(--rn-ink)' }}>{field.label}</span>
                 {field.description && <span style={{ fontSize: 11, lineHeight: 1.5 }}>{field.description}</span>}
                 {field.type === 'boolean' ? (
                   <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1236,9 +1236,9 @@ function SkillConfigurationDialog({
                       padding: '9px 10px',
                       fontSize: 12,
                       color: 'var(--rn-ink)',
-                      background: 'var(--rn-fill)',
-                      border: '1px solid var(--rn-hair-2)',
-                      borderRadius: 8,
+                      background: 'var(--rn-well)',
+                      border: 0, boxShadow: 'inset 0 1px 2px var(--rn-well-shade), inset 0 0 0 .5px var(--rn-hair)',
+                      borderRadius: 'var(--rn-r-control)',
                       outline: 'none',
                     }}
                   >
@@ -1256,9 +1256,9 @@ function SkillConfigurationDialog({
                       padding: '9px 10px',
                       fontSize: 12,
                       color: 'var(--rn-ink)',
-                      background: 'var(--rn-fill)',
-                      border: '1px solid var(--rn-hair-2)',
-                      borderRadius: 8,
+                      background: 'var(--rn-well)',
+                      border: 0, boxShadow: 'inset 0 1px 2px var(--rn-well-shade), inset 0 0 0 .5px var(--rn-hair)',
+                      borderRadius: 'var(--rn-r-control)',
                       outline: 'none',
                       boxSizing: 'border-box',
                     }}
@@ -1276,9 +1276,9 @@ function SkillConfigurationDialog({
                 justifyContent: 'space-between',
                 gap: 10,
                 padding: 12,
-                border: '1px solid var(--rn-hair-2)',
-                borderRadius: 8,
-                background: 'var(--rn-fill)',
+                border: 0, boxShadow: 'inset 0 1px 0 var(--rn-glass-inner-hi), inset 0 0 0 .5px var(--rn-hair-2)',
+                borderRadius: 'var(--rn-r-card)',
+                background: 'var(--rn-inlay)',
                 color: 'var(--rn-ink-2)',
                 fontSize: 12,
                 lineHeight: 1.5,

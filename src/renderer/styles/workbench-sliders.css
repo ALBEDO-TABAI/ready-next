@@ -31,7 +31,7 @@
   height: 34px;
   padding: 0;
   border: 0;
-  border-radius: var(--rn-r-control);
+  border-radius: var(--rn-r-sm);
   background: transparent;
   color: var(--rn-ink-2);
   box-shadow: none;

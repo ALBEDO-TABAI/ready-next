@@ -158,10 +158,10 @@ function SieveCard({ item, opened, onOpen, onFeedback, onError }: {
     <div className="rss-sieve__foot">
       <span className="rss-sieve__meta">{item.source} · {timeLabel(item)}</span>
       <span className="rss-sieve__actions">
-        <IconButton size="sm" icon={starred ? <BookmarkCheck size={15} /> : <Bookmark size={15} />} title={starred ? '取消收藏' : '收藏'} active={starred} onClick={() => void star()} />
-        <IconButton size="sm" icon={<Layers size={15} />} title="存入 FastCard" onClick={() => void keep()} />
-        <IconButton size="sm" icon={<ThumbsUp size={15} />} title="多看这类" onClick={event => ask('more', event.currentTarget)} />
-        <IconButton size="sm" icon={<ThumbsDown size={15} />} title="少看这类" onClick={event => ask('less', event.currentTarget)} />
+        <IconButton size="sm" icon={starred ? <BookmarkCheck size={14} /> : <Bookmark size={14} />} title={starred ? '取消收藏' : '收藏'} active={starred} onClick={() => void star()} />
+        <IconButton size="sm" icon={<Layers size={14} />} title="存入 FastCard" onClick={() => void keep()} />
+        <IconButton size="sm" icon={<ThumbsUp size={14} />} title="多看这类" onClick={event => ask('more', event.currentTarget)} />
+        <IconButton size="sm" icon={<ThumbsDown size={14} />} title="少看这类" onClick={event => ask('less', event.currentTarget)} />
       </span>
     </div>
   </article>

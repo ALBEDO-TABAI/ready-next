@@ -30,12 +30,11 @@ interface FileEmergenceSectionProps {
 
 const EMERGENCE_UI_STATE_STORAGE_KEY = 'ready:file-emergence:ui-state:v1'
 
-// Rows read like the navigator's ListRow (W1 §5): hover is a quiet fill; the selected row is the current place
-// (DL5), so it takes the signal colour's soft fill and its text and icon take the accent text colour. An
-// unselected row sets no inline background, so the hover class can show.
+// Rows read like the navigator's ListRow (W1 §5): hover is a quiet fill; the selected row takes the selected fill,
+// ink and 500 (V5). An unselected row sets no inline background, so the hover class can show.
 const ROW_HOVER = 'hover:bg-[var(--rn-fill)]'
-const rowStyle = (selected: boolean) => (selected ? { background: 'var(--rn-accent-soft)' } : undefined)
-const rowInk = (selected: boolean, ink: string) => (selected ? 'var(--rn-accent-text)' : ink)
+const rowStyle = (selected: boolean) => (selected ? { background: 'var(--rn-fill-2)', fontWeight: 500 } : undefined)
+const rowInk = (selected: boolean, ink: string) => (selected ? 'var(--rn-ink)' : ink)
 // Keys on a control inside a row stay with the control; the row's own Enter/Space must not fire as well.
 const keepKeys = (event: { stopPropagation: () => void }) => event.stopPropagation()
 
@@ -248,7 +247,7 @@ export default function FileEmergenceSection({
             <Folder className="h-[16px] w-[16px]" style={{ color: 'var(--rn-ink)' }} strokeWidth={1.75} />
             <Sparkles className="absolute left-[1px] -bottom-[1px] h-[9px] w-[9px]" style={{ color: 'var(--rn-ink)' }} strokeWidth={1.9} />
           </span>
-          <span className="text-[13px] font-semibold leading-none" style={{ color: 'var(--rn-ink)' }}>
+          <span className="text-[13px] font-medium leading-none" style={{ color: 'var(--rn-ink)' }}>
             涌现
           </span>
           <span
@@ -445,7 +444,7 @@ export default function FileEmergenceSection({
                               >
                                 <span aria-hidden="true" />
                                 {/* The file open right now carries the signal colour (DL5). */}
-                                <FileText className="h-[12px] w-[12px] shrink-0" style={{ color: file.isCurrent ? 'var(--rn-accent)' : rowInk(isFileSelected, 'var(--rn-ink-2)') }} strokeWidth={1.65} />
+                                <FileText className="h-[12px] w-[12px] shrink-0" style={{ color: file.isCurrent ? 'var(--rn-ink)' : rowInk(isFileSelected, 'var(--rn-ink-2)') }} strokeWidth={1.65} />
                                 <span className="min-w-0 flex-1 truncate text-[12px]" style={{ color: rowInk(isFileSelected, 'var(--rn-ink-2)') }}>
                                   {file.name}{file.isCurrent ? ' · 当前' : ''}
                                 </span>

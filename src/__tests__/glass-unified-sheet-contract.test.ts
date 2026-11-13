@@ -19,11 +19,14 @@ test('liquid workbench surfaces remove prominent borders and heavy highlights', 
   // B13 (W1 DL1, DL2, DL11a): the tab rows and the browser's address bar sit on the glass with no fill or blur; 资讯's
   // content is paper, and so is the browser's page (its frame paints no corner patches).
   assert.match(styles, /html:root \.workbench-tabs-surface \{\s*background:\s*transparent !important;\s*\}/)
-  assert.match(styles, /\.rss-mode-shell \.rss-feed-sheet \{[\s\S]*?background:\s*var\(--rn-sheet\) !important;/)
+  // 资讯's panel is painted by .rn-panel alone (V11, materials.css): no module rule repaints its sheet.
+  assert.match(readWorkspaceFile('src/renderer/design/next/materials.css'), /\.rn-panel \{[^}]*background: var\(--rn-sheet\);[^}]*box-shadow: var\(--rn-sheet-shadow\);/)
+  assert.doesNotMatch(styles, /\.rss-feed-sheet \{[^}]*(?:background|box-shadow)/)
   assert.doesNotMatch(styles, /\.browser-header-surface \{/)
   assert.match(styles, /box-shadow: none !important;/)
 
-  assert.match(topBar, /borderBottom: '1px solid transparent'/)
+  // The top band has no edge at all, so its controls centre on its 52px exactly (V12, V13).
+  assert.doesNotMatch(topBar, /borderBottom:/)
   assert.doesNotMatch(statusBar, /borderTop:/)
   assert.match(calendarShell, /background:'transparent',boxShadow:'none'/)
 })

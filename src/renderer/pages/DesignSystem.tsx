@@ -21,6 +21,8 @@ const MENU: MenuEntry[] = [
   { id: 'del', label: '移到回收站', icon: <Trash2 />, danger: true, onSelect: () => showToast('已移到回收站', { actions: [{ label: '撤销', onClick: () => showToast('已恢复') }] }) },
 ]
 
+const TYPE_LEVELS = [['micro', '眉题 11/16'], ['meta', '次要 12/16'], ['body', '正文 13/20'], ['lead', '小标题 15/24'], ['title', '标题 20/28'], ['page', '页标题 28/36'], ['display', '展示 40/48']] as const
+
 function Specimen({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="ds-specimen">
@@ -42,12 +44,18 @@ function Column({ theme }: { theme: 'light' | 'dark' }) {
     <div className="ds-column rn-ui" data-theme={theme}>
       <h2 className="ds-column__title">{theme === 'light' ? '浅色' : '深色'}</h2>
 
-      <Specimen title="材质：玻璃 · 纸 · 台 · 浮层">
+      <Specimen title="材质：地面 · 面板玻璃 · 嵌片 · 井 · 浮层">
         <div className="ds-materials">
-          <div className="ds-material rn-glass-root"><span>玻璃</span></div>
-          <div className="ds-material rn-sheet"><span>纸</span></div>
-          <div className="ds-material rn-well"><span>台</span></div>
+          <div className="ds-material rn-glass-root"><span>地面</span></div>
+          <div className="ds-material rn-sheet"><span>面板玻璃</span><div className="ds-material__inner rn-inlay">嵌片</div></div>
+          <div className="ds-material rn-well"><span>井</span></div>
           <div className="ds-material rn-float"><span>浮层</span></div>
+        </div>
+      </Specimen>
+
+      <Specimen title="字号：七级">
+        <div className="ds-type">
+          {TYPE_LEVELS.map(([level, name]) => <p key={level} className={`ds-type__${level}`}>{name} · {level}</p>)}
         </div>
       </Specimen>
 
@@ -125,6 +133,7 @@ function Column({ theme }: { theme: 'light' | 'dark' }) {
         <div className="ds-row">
           <Chip icon={<FileText />}>新书发布</Chip>
           <Chip onClick={() => showToast('筛选：AI')}>AI</Chip>
+          <Chip aria-pressed onClick={() => showToast('筛选：设计')}>设计</Chip>
           <Kbd>⌘K</Kbd><Kbd>⌘⇧P</Kbd>
         </div>
       </Specimen>

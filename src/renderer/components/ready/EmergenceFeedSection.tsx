@@ -77,7 +77,7 @@ export function EmergenceFeedSection({
       data-ready-emergence-feed="true"
       style={{
         padding: '10px 12px',
-        borderBottom: '1px solid var(--rn-hair)',
+        borderBottom: '.5px solid var(--rn-hair)',
         // 作为 flex 列兄弟节点时不侵占消息区：自限高 + 内滚。
         flexShrink: 0,
         maxHeight: 220,
@@ -87,7 +87,7 @@ export function EmergenceFeedSection({
       <div className="flex items-center justify-between" style={{ marginBottom: 6 }}>
         <div className="flex items-center gap-1.5">
           <Sparkles style={{ width: 12, height: 12, color: 'var(--rn-ink-3)' }} />
-          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--rn-ink)' }}>涌现</span>
+          <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--rn-ink)' }}>涌现</span>
         </div>
         <IconButton
           size="sm"
@@ -115,7 +115,7 @@ export function EmergenceFeedSection({
               data-ready-emergence-card={entry.card.type}
               style={{
                 borderRadius: 10,
-                border: '1px solid var(--rn-hair-2)',
+                border: '.5px solid var(--rn-hair-2)',
                 padding: '7px 8px',
                 display: 'flex',
                 flexDirection: 'column',

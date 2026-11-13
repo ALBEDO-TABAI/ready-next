@@ -10,8 +10,8 @@ export function DateMentionPicker({ value, anchor, save, close, open, report }: 
 }) {
   const [date, setDate] = useState(value.date), [at, setAt] = useState(value.at ?? '')
   const [remind, setRemind] = useState(value.remind === undefined ? '' : String(value.remind))
-  return createPortal(<form data-block-popup data-ready-native-overlay="" role="dialog" aria-label="日期与提醒"
-    style={{ position: 'fixed', zIndex: 1000, left: anchor.left, top: anchor.bottom, padding: 12, background: 'var(--rn-sheet)', border: '1px solid var(--rn-hair-2)', borderRadius: 12 }}
+  return createPortal(<form data-block-popup data-ready-native-overlay="" role="dialog" aria-label="日期与提醒" className="rn-float"
+    style={{ position: 'fixed', zIndex: 1000, left: anchor.left, top: anchor.bottom, padding: 12 }}
     onKeyDown={event => { event.stopPropagation(); if (event.key === 'Escape') close() }}
     onSubmit={event => {
       event.preventDefault()

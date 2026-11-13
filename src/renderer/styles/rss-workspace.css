@@ -1,21 +1,21 @@
 /*
  * RSS 资讯工作区。
  *
- * 框架与文档 / 浏览器模块同构：画布上方一条工具栏，导航在外壳唯一的侧栏里（W2-T4）；
- * 右下是四角圆角的内容框，资讯流、阅读、日报、筛子设置都在框内。
+ * 一个功能区一块面板（V11）：.rn-panel 的头行放返回、位置与当前视图的工具，资讯流、阅读、日报、筛子设置都是它的内容；
+ * 地面上没有工具条。导航在外壳唯一的侧栏里（W2-T4）。
  *
  * W1 设计语言（T5 迁移）：颜色、圆角、阴影、动效只取 --rn-* 令牌；按钮、菜单、浮层、开关、输入框、
  * 空状态与骨架都用 components/ui 的共享基元；模糊只来自材质类（.rn-float）。
- * 当前所在的行用信号色（ListRow），选中的胶囊用填充，强调色只用于未读点与“正在进行”。
+ * 当前所在的行与选中项用 --rn-fill-2 + 墨色 500（V5），按下的胶囊是墨色胶囊；强调色只用于未读点与“正在进行”。
  */
 
 .rss-mode-shell {
   --rss-gutter: clamp(24px, 4.2cqw, 48px);
   --rss-row-x: calc(var(--rss-gutter) - 16px);
-  --rss-ease: var(--rn-ease-out);
+  --rss-ease: var(--rn-ease-std);
 }
 
-/* ── 框架：顶栏 + 圆角内容框 ─────────────────────────────────────────── */
+/* ── 框架：一块面板（V11）——头行 + 内容 ─────────────────────────────── */
 
 .rss-workbench-canvas {
   display: flex;
@@ -24,25 +24,31 @@
   min-height: 0;
 }
 
+/* The panel fills the box the shell gives the mode; .rn-panel paints it and clips. */
+.rss-mode-shell .rss-feed-sheet {
+  flex: 1;
+}
+
+/* The head row (.rn-panel__head: 44px, padding, hairline): the way back and where you are on the left, the view's
+   tools on the right. It stacks above the body so its menus open over the content. */
 .rss-topbar {
   position: relative;
   z-index: 8;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 38px;
-  padding: 0 14px 0 8px;
+  gap: var(--rn-s1);
 }
 
+/* Breadcrumb: the link back to the list is quiet (ink-3), the place you are is ink 500. The lead reaches into the
+   head's padding so a link's hover fill bleeds out while its text stays on the head's edge. */
 .rss-topbar__lead {
   flex: 1;
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--rn-s2);
+  margin-left: calc(-1 * var(--rn-s2));
+  padding-left: var(--rn-s2);
   overflow: hidden;
-  font-size: 12px;
+  font-size: var(--rn-t-meta);
   color: var(--rn-ink-3);
   white-space: nowrap;
 }
@@ -51,42 +57,53 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-weight: 500;
+  color: var(--rn-ink);
 }
 
 .rss-topbar__lead > .rss-topbar__back {
   flex-shrink: 0;
-  padding: 0 8px;
+  margin: 0 calc(-1 * var(--rn-s2));
+  padding: 0 var(--rn-s2);
+  font-weight: 400;
+  color: var(--rn-ink-3);
 }
 
-.rss-topbar__sep {
+.rss-topbar__lead > .rss-topbar__back:hover {
+  color: var(--rn-ink);
+}
+
+.rss-topbar__lead > .rss-topbar__sep {
   flex-shrink: 0;
-  margin: 0 -2px 0 -8px;
-  color: var(--rn-ink-3);
+  font-weight: 400;
+  color: var(--rn-ink-4);
 }
 
 .rss-topbar__tools {
   display: flex;
   flex-shrink: 0;
   align-items: center;
-  gap: 2px;
+  gap: var(--rn-s1);
 }
 
-.rss-workbench-body {
-  display: flex;
-  flex: 1;
-  min-height: 0;
+/* Actions in the head are quiet text buttons (28px, icon and label in ink-2, a fill on hover) or round icon buttons. */
+.rss-topbar__tools .rn-btn[data-variant='ghost'] {
+  padding: 0 var(--rn-s2);
+}
+
+/* Groups of actions are set apart by a .5px × 16px rule. */
+.rss-topbar__divider {
+  flex: none;
+  width: .5px;
+  height: var(--rn-s4);
+  margin: 0 var(--rn-s1);
+  background: var(--rn-hair-2);
 }
 
 .rss-mode-shell .rss-content-frame {
-  position: relative;
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border-radius: var(--rn-r-sheet);
-  background-clip: padding-box;
   container-type: inline-size;
 }
 
@@ -98,37 +115,22 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 0 8px 14px;
+  padding: 0 var(--rn-s2) var(--rn-s4);
   overflow-x: hidden;
   overflow-y: auto;
   scrollbar-width: none;
-}
-
-.rss-nav__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 40px;
-  padding: 0 0 0 10px;
-  flex: none;
-  font: 500 var(--rn-fs-xs)/1 var(--rn-font-ui);
-  color: var(--rn-ink-3);
 }
 
 .rss-nav::-webkit-scrollbar {
   display: none;
 }
 
+/* A section label sits closer to its own rows than to the rows above: with the nav's 2px gap, 24 above and 8 below. */
 .rss-nav__label {
-  padding: 18px 10px 6px;
-  font: 500 var(--rn-fs-xs)/1.2 var(--rn-font-ui);
-  letter-spacing: 0.04em;
+  padding: 22px 10px 6px;
+  font: 500 var(--rn-t-micro)/var(--rn-lh-micro) var(--rn-font-ui);
   color: var(--rn-ink-3);
   white-space: nowrap;
-}
-
-.rss-nav__head + .rss-nav__label {
-  padding-top: 6px;
 }
 
 .rss-nav__list {
@@ -169,19 +171,14 @@
   background: var(--rn-accent);
 }
 
-.rss-tool-gap {
-  width: 6px;
-  flex-shrink: 0;
-}
-
 /* 搜索：共享输入框，放大镜在前，清除与“正文”开关在尾部。 */
 .rss-search {
   position: relative;
   display: flex;
   align-items: center;
   width: clamp(168px, 22vw, 272px);
-  margin-right: 6px;
-  transition: width var(--rn-d-2) var(--rn-ease-out);
+  margin-right: var(--rn-s1);
+  transition: width var(--rn-d-2) var(--rn-ease-std);
 }
 
 .rss-search:focus-within {
@@ -213,7 +210,7 @@
 }
 
 .rss-search__end .rn-chip {
-  height: 22px;
+  height: var(--rn-control-h-tag);
   padding: 0 8px;
   box-shadow: none;
   font-size: var(--rn-fs-xs);

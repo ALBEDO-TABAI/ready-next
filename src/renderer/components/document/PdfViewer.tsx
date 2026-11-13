@@ -443,20 +443,20 @@ export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
       {/* Toolbar */}
       <div
         className="flex items-center gap-1 px-3 border-b border-[var(--rn-hair-2)]"
-        style={{ height: 34, background: 'var(--rn-stage)', flexShrink: 0 }}
+        style={{ height: 34, background: 'transparent', borderBottomWidth: '.5px', flexShrink: 0 }}
       >
         {/* Navigation */}
         <button
           onClick={prevPage}
           disabled={currentPage <= 1}
           className="bg-transparent hover:bg-[var(--rn-fill-2)] disabled:opacity-30"
-          style={{ width: 28, height: 28, borderRadius: 4, border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: currentPage <= 1 ? 'not-allowed' : 'pointer' }}
+          style={{ width: 28, height: 28, borderRadius: 'var(--rn-r-pill)', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: currentPage <= 1 ? 'not-allowed' : 'pointer' }}
           title="上一页"
         >
           <ChevronUp size={14} color="var(--rn-ink-2)" />
         </button>
 
-        <span style={{ fontSize: 11, color: 'var(--rn-ink-2)', minWidth: 48, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>
+        <span style={{ fontSize: 11, color: 'var(--rn-ink-2)', minWidth: 48, textAlign: 'center', fontFamily: 'var(--rn-font-mono)', fontVariantNumeric: 'tabular-nums' }}>
           {numPages > 0 ? `${currentPage} / ${numPages}` : '...'}
         </span>
 
@@ -464,20 +464,20 @@ export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
           onClick={nextPage}
           disabled={currentPage >= numPages}
           className="bg-transparent hover:bg-[var(--rn-fill-2)] disabled:opacity-30"
-          style={{ width: 28, height: 28, borderRadius: 4, border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: currentPage >= numPages ? 'not-allowed' : 'pointer' }}
+          style={{ width: 28, height: 28, borderRadius: 'var(--rn-r-pill)', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: currentPage >= numPages ? 'not-allowed' : 'pointer' }}
           title="下一页"
         >
           <ChevronDown size={14} color="var(--rn-ink-2)" />
         </button>
 
         {/* Separator */}
-        <div style={{ width: 1, height: 16, background: 'var(--rn-hair-2)', margin: '0 4px' }} />
+        <div style={{ width: .5, height: 16, background: 'var(--rn-hair-2)', margin: '0 4px' }} />
 
         {/* Zoom */}
         <button
           onClick={zoomOut}
           className="bg-transparent hover:bg-[var(--rn-fill-2)]"
-          style={{ width: 28, height: 28, borderRadius: 4, border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+          style={{ width: 28, height: 28, borderRadius: 'var(--rn-r-pill)', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
           title="缩小"
         >
           <ZoomOut size={14} color="var(--rn-ink-2)" />
@@ -486,7 +486,7 @@ export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
         <button
           onClick={() => setZoom(100)}
           className="bg-transparent hover:bg-[var(--rn-fill-2)]"
-          style={{ height: 28, borderRadius: 4, border: 'none', padding: '0 4px', fontSize: 11, color: 'var(--rn-ink-2)', cursor: 'pointer', fontFamily: 'inherit' }}
+          style={{ height: 28, borderRadius: 'var(--rn-r-pill)', border: 'none', padding: '0 8px', fontSize: 11, color: 'var(--rn-ink-2)', cursor: 'pointer', fontFamily: 'var(--rn-font-mono)' }}
           title="重置缩放"
         >
           {zoom}%
@@ -495,7 +495,7 @@ export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
         <button
           onClick={zoomIn}
           className="bg-transparent hover:bg-[var(--rn-fill-2)]"
-          style={{ width: 28, height: 28, borderRadius: 4, border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+          style={{ width: 28, height: 28, borderRadius: 'var(--rn-r-pill)', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
           title="放大"
         >
           <ZoomIn size={14} color="var(--rn-ink-2)" />
@@ -504,14 +504,14 @@ export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
         <button
           onClick={fitToWidth}
           className="bg-transparent hover:bg-[var(--rn-fill-2)]"
-          style={{ width: 28, height: 28, borderRadius: 4, border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+          style={{ width: 28, height: 28, borderRadius: 'var(--rn-r-pill)', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
           title="适应宽度"
         >
           <Maximize2 size={14} color="var(--rn-ink-2)" />
         </button>
 
         {/* Separator */}
-        <div style={{ width: 1, height: 16, background: 'var(--rn-hair-2)', margin: '0 4px' }} />
+        <div style={{ width: .5, height: 16, background: 'var(--rn-hair-2)', margin: '0 4px' }} />
 
         {notice && <span role={notice.role} style={{ fontSize: 11, color: notice.role === 'alert' ? 'var(--rn-bad)' : 'var(--rn-ink-3)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 260 }}>{notice.text}</span>}
 

@@ -1,14 +1,14 @@
-import { useContext, type ReactNode } from 'react'
+import { useContext, useEffect, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { PanelLeftClose, Pin } from 'lucide-react'
 import type { WorkbenchMode } from '../../../stores/useMode'
 import { ShellSidebarSlotContext } from './sidebar-slot'
 
 // The shell's one sidebar (W2 §2.2). The shell owns the column — width, collapse, the narrow-window
-// slide-out — and each mode renders its own navigator into it through <ShellNavigator>. A portal
+// card — and each mode renders its own navigator into it through <ShellNavigator>. A portal
 // keeps the navigator inside its module's React tree (stores, providers, keyboard handlers bubble
 // as before) while the DOM sits in the shell column. Navigators of modes that are not showing stay
 // mounted but hidden, so their scroll position and expanded state survive a mode switch.
+// The sidebar has one switch (V13): the top band's, the current mode's rail icon and ⌘B all toggle it.
 
 export const ShellSidebarSlotProvider = ShellSidebarSlotContext.Provider
 
@@ -38,56 +38,54 @@ export function ShellNavigator({ mode, label, scopeClassName, children }: {
 export interface ShellSidebarProps {
   mode: WorkbenchMode
   panelWidth: number
-  /** docked: a column of the shell row; floating: a slide-out over the content (narrow windows, W2 §2.5). */
+  /** docked: a column of the shell row; floating: a card over the content (narrow windows, V14). */
   presentation: 'docked' | 'floating'
   floatingOpen: boolean
-  /** Left offset of the slide-out (the rail's width). */
-  floatingInset: number
-  /** Opens the slide-out (hovering the window's left edge) and closes it (leaving the panel). */
-  onFloatingPeek: (open: boolean) => void
-  /** Collapsed on a wide window: the left edge still brings the sidebar out while the pointer rests there. */
-  peekable: boolean
+  /** Closes the card: Esc, or a pointer-down outside it (the sidebar's switches toggle it themselves). */
+  onFloatingClose: () => void
   slotRef: (element: HTMLElement | null) => void
 }
 
-export default function ShellSidebar({ mode, panelWidth, presentation, floatingOpen, floatingInset, onFloatingPeek, peekable, slotRef }: ShellSidebarProps): ReactNode {
-  const floating = presentation === 'floating'
-  return (
-    <>
-      {(floating || peekable) && !floatingOpen && (
-        <div className="shell-edge-reveal" style={{ left: floatingInset }} aria-hidden="true" onMouseEnter={() => onFloatingPeek(true)} />
-      )}
-      <aside
-        data-liquid-shell="side-panel"
-        data-shell-sidebar="true"
-        data-shell-sidebar-mode={mode}
-        data-side="left"
-        data-open={floating ? String(floatingOpen) : undefined}
-        // A slide-out over the browser makes the native web view step aside while it is open (W1 DL4).
-        data-ready-native-overlay={floating && floatingOpen ? 'shell-sidebar' : undefined}
-        className={`shell-sidebar workbench-panel-frame${floating ? ' shell-float-drawer' : ''}`}
-        onMouseLeave={floating ? () => onFloatingPeek(false) : undefined}
-        style={{
-          width: panelWidth,
-          minWidth: panelWidth,
-          ...(floating ? { left: floatingInset } : null),
-          ...(panelWidth === 0 ? { borderWidth: 0 } : null),
-        }}
-        aria-label="侧栏"
-      >
-        <div ref={slotRef} className="shell-sidebar__slot" />
-      </aside>
-    </>
-  )
-}
+/** Where a pointer-down does not close the card: the sidebar's own switches and floats opened from the card. */
+const CARD_KEEPERS = '[data-shell-sidebar-control], [data-float-id]'
 
-/** The collapse button in a navigator's header: collapses the docked sidebar, or pins a slide-out. */
-export function ShellSidebarToggle({ className = 'shell-sidebar-toggle' }: { className?: string }) {
-  const { pinnable, toggle } = useContext(ShellSidebarSlotContext)
-  const label = pinnable ? '固定侧栏' : '收起侧栏'
+export default function ShellSidebar({ mode, panelWidth, presentation, floatingOpen, onFloatingClose, slotRef }: ShellSidebarProps): ReactNode {
+  const floating = presentation === 'floating'
+  const cardOpen = floating && floatingOpen
+  const asideRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    if (!cardOpen) return
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Element | null
+      if (!target || asideRef.current?.contains(target) || target.closest?.(CARD_KEEPERS)) return
+      onFloatingClose()
+    }
+    // An open float handles its own Esc first and stops it there.
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !event.defaultPrevented) onFloatingClose()
+    }
+    document.addEventListener('pointerdown', onPointerDown, true)
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true)
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [cardOpen, onFloatingClose])
   return (
-    <button type="button" className={className} title={label} aria-label={label} onClick={toggle}>
-      {pinnable ? <Pin size={16} strokeWidth={1.7} aria-hidden="true" /> : <PanelLeftClose size={17} strokeWidth={1.7} aria-hidden="true" />}
-    </button>
+    <aside
+      ref={asideRef}
+      data-liquid-shell="side-panel"
+      data-shell-sidebar="true"
+      data-shell-sidebar-mode={mode}
+      data-side="left"
+      data-open={floating ? String(floatingOpen) : undefined}
+      // The card over the browser makes the native web view step aside while it is open (W1 DL4).
+      data-ready-native-overlay={cardOpen ? 'shell-sidebar' : undefined}
+      className={`shell-sidebar workbench-panel-frame${floating ? ' shell-float-drawer rn-float' : ''}`}
+      style={{ width: panelWidth, minWidth: panelWidth }}
+      aria-label="侧栏"
+    >
+      <div ref={slotRef} className="shell-sidebar__slot" />
+    </aside>
   )
 }

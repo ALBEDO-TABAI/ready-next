@@ -409,7 +409,7 @@ export function ReadyMemorySettingsPanel() {
             <div className="flex items-start gap-3 px-6 py-6">
               <Sparkles className="mt-0.5 h-4 w-4 shrink-0" style={{ color: 'var(--rn-ink-2)' }} />
               <div>
-                <div className="text-[13px] font-semibold" style={{ color: 'var(--rn-ink)' }}>还没有长期记忆</div>
+                <div className="text-[13px] font-medium" style={{ color: 'var(--rn-ink)' }}>还没有长期记忆</div>
                 <div className="mt-1 text-[12px] leading-5" style={{ color: 'var(--rn-ink-2)' }}>
                   {view.automaticGenerationAvailable
                     ? '你可以手动添加一条，或在确认费用后开启自动整理。'
@@ -428,7 +428,7 @@ export function ReadyMemorySettingsPanel() {
                   key={entry.entryId}
                   className="group/memory flex items-start gap-4 px-6 py-[18px] transition-colors hover:bg-[var(--rn-fill)]"
                   style={{
-                    borderTop: index === 0 ? 'none' : '1px solid var(--rn-hair)',
+                    borderTop: index === 0 ? 'none' : '.5px solid var(--rn-hair)',
                     opacity: expired ? 0.62 : 1,
                   }}
                 >

@@ -6,21 +6,17 @@ import { SHELL_ACTION_EVENT } from '../commands/shell-actions'
 
 /**
  * The shell's one sidebar slot (W2 §2.2): which mode's navigator shows (the current mode, or in split
- * view the pane last used), and the value the navigators read (slot element, pin vs collapse, toggle).
+ * view the pane last used), and the value the navigators read (the slot element and that mode).
  */
-export function useShellSidebarSlot({ workbenchMode, splitMode, collapsed, slideOut, toggle }: {
+export function useShellSidebarSlot({ workbenchMode, splitMode }: {
   workbenchMode: WorkbenchMode
   splitMode: WorkbenchMode | null
-  collapsed: boolean
-  slideOut: boolean
-  toggle: () => void
 }) {
   const [element, setElement] = useState<HTMLElement | null>(null)
   const [focusedPane, setFocusedPane] = useState<'primary' | 'split'>('primary')
   useEffect(() => { if (!splitMode) setFocusedPane('primary') }, [splitMode])
   const mode = splitMode && focusedPane === 'split' ? splitMode : workbenchMode
-  const pinnable = collapsed && slideOut
-  const value = useMemo(() => ({ element, mode, pinnable, toggle }), [element, mode, pinnable, toggle])
+  const value = useMemo(() => ({ element, mode }), [element, mode])
   return { value, mode, setElement, focusPrimary: () => setFocusedPane('primary'), focusSplit: () => setFocusedPane('split') }
 }
 

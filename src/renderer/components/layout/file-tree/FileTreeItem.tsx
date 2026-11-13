@@ -92,22 +92,22 @@ export function FileTreeItem({
           : undefined
       }
       className={`
-        flex items-center gap-[6px] rounded-[8px] text-[13px] cursor-pointer
+        flex items-center gap-[6px] rounded-[var(--rn-r-sm)] text-[13px] cursor-pointer
         transition-[background-color,box-shadow,color] duration-200 ease-out group
         ${isFlashing ? 'file-tree-item-flash-complete' : ''}
       `}
-      // ListRow's look (W1 §5, DL5/DL11): a 30px row in ink-2, hover fill, and the selected row in the signal
-      // colour's soft fill with its text and icon in the accent; a drop target is the same soft fill with a ring.
+      // ListRow's look (W1 §5, V5): a 30px row in ink-2, hover fill, and the selected row in the selected fill with
+      // ink 500; a drop target is "here", the signal colour's soft fill with a ring.
       style={{
         position: 'relative',
         height: 'var(--rn-row-h)',
         padding: '0 8px',
         paddingLeft: `${8 + depth * 22}px`,
-        color: isActive ? 'var(--rn-accent-text)' : isHovered ? 'var(--rn-ink)' : 'var(--rn-ink-2)',
+        color: isActive ? 'var(--rn-ink)' : isHovered ? 'var(--rn-ink)' : 'var(--rn-ink-2)',
         fontWeight: isActive ? 500 : 400,
         ...(isActive
           ? {
-              background: 'var(--rn-accent-soft)',
+              background: 'var(--rn-fill-2)',
             }
           : {}),
         ...(!isActive && !isDropTarget && !isBrowserDropAccent && isHovered
@@ -135,7 +135,7 @@ export function FileTreeItem({
               height: 8,
               borderRadius: '50%',
               background: 'var(--rn-accent)',
-              boxShadow: '0 0 0 2px var(--rn-sheet)',
+              boxShadow: '0 0 0 2px var(--rn-solid)',
               zIndex: 3,
               top: browserDropLine === 'before' ? -2 : undefined,
               bottom: browserDropLine === 'after' ? -2 : undefined,

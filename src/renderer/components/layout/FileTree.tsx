@@ -1595,8 +1595,8 @@ export default function FileTree({
                     left: `${((thumbnailSize - 80) / 140) * 100}%`,
                     transform: 'translate(-50%, -50%)',
                     width: 10, height: 10, borderRadius: '50%',
-                    background: 'var(--rn-sheet)',
-                    boxShadow: 'var(--rn-shadow-1), inset 0 0 0 1px var(--rn-hair-2)',
+                    background: 'var(--rn-solid)',
+                    boxShadow: 'var(--rn-shadow-1), inset 0 0 0 .5px var(--rn-hair-2)',
                   }}
                 />
               </div>
@@ -1611,12 +1611,12 @@ export default function FileTree({
         >
           {creatingType && creatingPath === gridContainerPath && (
             <div
-              className="rounded-[8px] border border-transparent"
+              className="rounded-[var(--rn-r-sm)] border border-transparent"
               style={{ padding: '8px 8px 10px', background: 'var(--rn-fill)' }}
             >
               <div
-                className="rounded-[8px] flex items-center justify-center"
-                style={{ height: Math.max(52, Math.round(thumbnailSize * 0.62)), background: 'var(--rn-sheet)', boxShadow: 'var(--rn-card-shadow)' }}
+                className="rounded-[var(--rn-r-sm)] flex items-center justify-center"
+                style={{ height: Math.max(52, Math.round(thumbnailSize * 0.62)), background: 'var(--rn-inlay)', boxShadow: 'inset 0 1px 0 var(--rn-glass-inner-hi), inset 0 0 0 .5px var(--rn-hair-2)' }}
               >
                 {creatingType === 'folder'
                   ? <Folder className="w-[16px] h-[16px]" style={{ color: 'var(--rn-ink-3)' }} strokeWidth={1.5} />

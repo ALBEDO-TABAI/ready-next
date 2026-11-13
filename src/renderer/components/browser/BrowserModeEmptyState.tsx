@@ -50,54 +50,54 @@ export default function BrowserModeEmptyState({
         }}
       >
         <div className="workbench-canvas-shell flex h-full min-h-0 flex-col">
-          <BrowserHeader
-            isActive
-            tabs={[]}
-            activeTabId={null}
-            splitTabId={null}
-            urlInput={urlInput}
-            bookmarkedUrls={[]}
-            loading={loading}
-            canGoBack={false}
-            canGoForward={false}
-            isBookmarked={false}
-            onTabClick={() => undefined}
-            onTabClose={() => undefined}
-            onNewTab={onNewTab}
-            onReorder={() => undefined}
-            onUrlChange={onUrlChange}
-            onNavigate={onNavigate}
-            onGoBack={() => undefined}
-            onGoForward={() => undefined}
-            onRefresh={() => undefined}
-            onFocus={onFocus}
-            onBlur={onBlur}
-            onEditStart={onEditStart}
-            onEditEnd={onEditEnd}
-            onToggleBookmark={() => undefined}
-            onToggleBookmarkForTab={() => undefined}
-            onShowUtilityMenu={onShowUtilityMenu}
-            fastCardOpen={fastCardOpen}
-            fastCardItemCount={fastCardItemCount}
-            onToggleFastCard={onToggleFastCard}
-          />
+          {/* The browser's one panel (V11), as BrowserMode draws it: the head row, then the page framed by the panel. */}
+          <div className="rn-panel browser-panel">
+            <BrowserHeader
+              isActive
+              tabs={[]}
+              activeTabId={null}
+              splitTabId={null}
+              urlInput={urlInput}
+              bookmarkedUrls={[]}
+              loading={loading}
+              canGoBack={false}
+              canGoForward={false}
+              isBookmarked={false}
+              onTabClick={() => undefined}
+              onTabClose={() => undefined}
+              onNewTab={onNewTab}
+              onReorder={() => undefined}
+              onUrlChange={onUrlChange}
+              onNavigate={onNavigate}
+              onGoBack={() => undefined}
+              onGoForward={() => undefined}
+              onRefresh={() => undefined}
+              onFocus={onFocus}
+              onBlur={onBlur}
+              onEditStart={onEditStart}
+              onEditEnd={onEditEnd}
+              onToggleBookmark={() => undefined}
+              onToggleBookmarkForTab={() => undefined}
+              onShowUtilityMenu={onShowUtilityMenu}
+              fastCardOpen={fastCardOpen}
+              fastCardItemCount={fastCardItemCount}
+              onToggleFastCard={onToggleFastCard}
+            />
 
-          <div
-            ref={contentRef}
-            className="relative flex-1 min-h-0"
-            style={{ borderRadius: 'var(--rn-r-sheet)' }}
-          >
-            <div className="absolute inset-0 flex items-center justify-center text-[var(--rn-ink-3)]">
-              <div className="text-center">
-                <Globe className="w-16 h-16 mx-auto mb-4 opacity-20" strokeWidth={1.5} />
-                <p className="text-[14px] font-medium mb-2" style={{ color: 'var(--rn-ink-2)' }}>
-                  {loading ? '浏览器启动中…' : '当前没有打开的标签页'}
-                </p>
-                {!loading && (
-                  <Button icon={<Plus />} onClick={() => void onNewTab()}>
-                    点击 + 新建标签页
-                  </Button>
-                )}
+            <div className="rn-panel__body browser-panel__body" data-framed="true">
+              {/* Where the page will show: the same box, radius and opaque ground as the page and its stand-ins. */}
+              <div ref={contentRef} className="browser-page browser-page--empty">
+                <div className="text-center">
+                  <Globe className="mx-auto mb-4 h-16 w-16 opacity-20" strokeWidth={1.5} />
+                  <p className="mb-2 text-[15px] leading-[24px] font-medium" style={{ color: 'var(--rn-ink-2)' }}>
+                    {loading ? '浏览器启动中…' : '当前没有打开的标签页'}
+                  </p>
+                  {!loading && (
+                    <Button icon={<Plus />} onClick={() => void onNewTab()}>
+                      点击 + 新建标签页
+                    </Button>
+                  )}
+                </div>
               </div>
             </div>
           </div>

@@ -1,6 +1,6 @@
 /* ═══ workbench-surfaces.css — 工作台共享外壳表面 + 磨砂玻璃滑钮（icon-rail-slider 族）；由 index.css 序保拆分（2026-07-06），在 index.css 中按原段落顺序 @import，勿改导入次序。 ═══ */
 /* Shared workbench shell surfaces (W1 DL1–DL4): the window is one glass, so the bands, tab rows and headers on it have
-   no background, blur or shadow of their own; content sits on paper (.rn-sheet); floats use .rn-float. Only --rn-*. */
+   no background, blur or shadow of their own; each function area is one panel (.rn-panel, V11); floats use .rn-float. Only --rn-*. */
 
 /* !important: some modes still write the retired module surface inline on their root and frame (资讯). */
 .workbench-mode-root {
@@ -30,12 +30,12 @@
   border-color: var(--rn-hair) !important;
 }
 
-/* The top band's rows (tab strips, 资讯's crumb) sit on the glass (DL11a). */
+/* Tab strips and crumbs are a panel's head row now (V11): the panel paints the glass, they paint nothing. */
 html:root .workbench-tabs-surface {
   background: transparent !important;
 }
 
-/* Inside the document's paper (ink's main is the sheet) the frame is only a clip. */
+/* Inside the document's panel (ink's main is the panel's body) the frame is only a clip. */
 html:root .document-content-frame {
   background: transparent !important;
   border-radius: var(--rn-r-sheet) !important;
@@ -157,12 +157,12 @@ body.pet-window-body {
 .pet-sprite-missing {
   width: 84px;
   height: 84px;
-  border-radius: 16px;
+  border-radius: var(--rn-r-card);
   display: grid;
   place-items: center;
   color: var(--rn-ink-2);
   background: var(--rn-float);
-  box-shadow: inset 0 0 0 1px var(--rn-hair-2);
+  box-shadow: inset 0 0 0 .5px var(--rn-hair-2);
 }
 
 .pet-bubble-stack {
@@ -192,14 +192,14 @@ body.pet-window-body {
   width: 100%;
   min-height: 42px;
   max-height: 72px;
-  border-radius: 16px;
+  border-radius: var(--rn-r-card);
   padding: 9px 32px 9px 11px;
   box-sizing: border-box;
   color: var(--rn-ink);
   overflow: hidden;
   pointer-events: auto;
   cursor: pointer;
-  transition: max-height 180ms ease, background 160ms ease, border-color 160ms ease;
+  transition: max-height var(--rn-d-2) var(--rn-ease-std), background var(--rn-d-2) var(--rn-ease-std), border-color var(--rn-d-2) var(--rn-ease-std);
 }
 
 .pet-sticky::before {
@@ -209,7 +209,7 @@ body.pet-window-body {
   top: 10px;
   bottom: 10px;
   width: 3px;
-  border-radius: 999px;
+  border-radius: var(--rn-r-pill);
   background: color-mix(in srgb, var(--rn-ink-3) 68%, transparent);
 }
 
@@ -227,8 +227,9 @@ body.pet-window-body {
 
 .pet-sticky-content strong {
   color: var(--rn-ink);
-  font-size: 12px;
-  line-height: 1.35;
+  font-size: var(--rn-t-meta);
+  line-height: var(--rn-lh-meta);
+  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -236,8 +237,8 @@ body.pet-window-body {
 
 .pet-sticky-content span {
   color: var(--rn-ink-2);
-  font-size: 11px;
-  line-height: 1.45;
+  font-size: var(--rn-t-micro);
+  line-height: var(--rn-lh-micro);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -271,7 +272,7 @@ body.pet-window-body {
   line-height: 1;
   opacity: 0;
   transform: scale(0.92);
-  transition: opacity 140ms ease, transform 140ms ease, color 140ms ease, background 140ms ease;
+  transition: opacity var(--rn-d-1) var(--rn-ease-std), transform var(--rn-d-1) var(--rn-ease-std), color var(--rn-d-1) var(--rn-ease-std), background var(--rn-d-1) var(--rn-ease-std);
 }
 
 .pet-sticky:hover .pet-sticky-close,
@@ -289,7 +290,7 @@ body.pet-window-body {
   position: relative;
   width: 100%;
   max-height: min(168px, calc(100vh - 24px));
-  border-radius: 16px;
+  border-radius: var(--rn-r-card);
   padding: 8px;
   box-sizing: border-box;
   color: var(--rn-ink);
@@ -307,7 +308,7 @@ body.pet-window-body {
   gap: 9px;
   text-align: left;
   padding: 5px 6px;
-  border-radius: 12px;
+  border-radius: var(--rn-r-sm);
 }
 
 .pet-bubble-main:hover {
@@ -317,7 +318,7 @@ body.pet-window-body {
 .pet-status-dot {
   width: 8px;
   height: 8px;
-  border-radius: 999px;
+  border-radius: var(--rn-r-pill);
   margin-top: 5px;
   flex: 0 0 auto;
   /* The assistant at work is the one "now" (DL5). */
@@ -345,14 +346,15 @@ body.pet-window-body {
 
 .pet-bubble-copy strong {
   color: var(--rn-ink);
-  font-size: 12px;
-  line-height: 1.35;
+  font-size: var(--rn-t-meta);
+  line-height: var(--rn-lh-meta);
+  font-weight: 500;
 }
 
 .pet-bubble-copy span {
   color: var(--rn-ink-2);
-  font-size: 11px;
-  line-height: 1.45;
+  font-size: var(--rn-t-micro);
+  line-height: var(--rn-lh-micro);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -371,11 +373,11 @@ body.pet-window-body {
 
 .pet-bubble-event {
   padding: 5px 7px;
-  border-radius: 8px;
+  border-radius: var(--rn-r-xs);
   background: var(--rn-fill);
   color: var(--rn-ink-2);
-  font-size: 11px;
-  line-height: 1.45;
+  font-size: var(--rn-t-micro);
+  line-height: var(--rn-lh-micro);
   display: -webkit-box;
   -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
@@ -394,7 +396,7 @@ body.pet-window-body {
   border-radius: var(--rn-r-pill);
   opacity: 0;
   transform: translateY(4px);
-  transition: opacity 160ms ease, transform 160ms ease;
+  transition: opacity var(--rn-d-2) var(--rn-ease-std), transform var(--rn-d-2) var(--rn-ease-std);
   pointer-events: none;
 }
 
@@ -405,8 +407,8 @@ body.pet-window-body {
 }
 
 .pet-controls button {
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   border: 0;
   border-radius: var(--rn-r-pill);
   color: var(--rn-ink);

@@ -73,7 +73,7 @@ export default function ReadyMode() {
           padding: '0 16px 0 72px',
           // A band on the window glass (DL1): no background or shadow of its own, a hairline below.
           background: 'transparent',
-          borderBottom: '1px solid var(--rn-hair)',
+          borderBottom: '.5px solid var(--rn-hair)',
         }}
       >
         {/* Left: Green-themed ModeSlider */}

@@ -1,6 +1,6 @@
-/* 今日 (W6 §5): the page is paper, and its blocks are set off by whitespace and hairlines, never by cards inside the
-   paper (W1 DL2). The greeting is the screen's one display moment (DL7); the signal colour marks only what is happening
-   now (DL5). Only --rn-* tokens (W1 DS1). */
+/* 今日 (W6 §5): the page sits on one glass panel, and its blocks are set off by whitespace and .5px hairlines, never by
+   cards inside the panel (V1, V3). The greeting is the screen's display moment: UI font 500, tight tracking (V7); the
+   signal colour marks only what is happening now (V5). Only --rn-* tokens (W1 DS1). */
 .today {
   flex: 1;
   min-height: 0;
@@ -21,8 +21,8 @@
 
 .today-hello h1 {
   margin: 0;
-  font: 400 46px/1.1 var(--rn-font-serif);
-  letter-spacing: -.01em;
+  font: 500 var(--rn-t-display)/var(--rn-lh-display) var(--rn-font-ui);
+  letter-spacing: var(--rn-tracking-tight);
   color: var(--rn-ink);
 }
 
@@ -48,7 +48,7 @@
   gap: 12px;
   padding-bottom: 8px;
   margin-bottom: 4px;
-  border-bottom: 1px solid var(--rn-hair);
+  border-bottom: .5px solid var(--rn-hair);
 }
 
 .today-label h2 {
@@ -79,8 +79,8 @@
   min-height: var(--rn-row-h);
   margin: 0 -8px;
   padding: 4px 8px;
-  border-radius: var(--rn-r-xs);
-  transition: background-color var(--rn-d-1) var(--rn-ease-out);
+  border-radius: var(--rn-r-sm);
+  transition: background-color var(--rn-d-1) var(--rn-ease-std);
 }
 
 .today-row:hover { background: var(--rn-fill); }
@@ -102,29 +102,47 @@
 .today .today-ref::after { content: ''; position: absolute; inset: 0; border-radius: inherit; }
 .today .today-ref:hover { background: none; }
 .today .today-ref:focus-visible { outline: none; }
-.today .today-ref:focus-visible::after { outline: 1.5px solid var(--rn-ink-3); outline-offset: -1px; border-radius: var(--rn-r-xs); }
+.today .today-ref:focus-visible::after { outline: 2px solid color-mix(in srgb, var(--rn-ink) 55%, transparent); outline-offset: -1px; border-radius: var(--rn-r-sm); }
 
 .today-row__meta {
   flex: 0 1 auto;
   max-width: 48%;
   overflow: hidden;
   font: 400 var(--rn-fs-sm)/1.45 var(--rn-font-ui);
+  font-variant-numeric: tabular-nums;
+  color: var(--rn-ink-3);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 接下来 lines its rows up in three shared columns across both lists (events, then to-dos): one lead slot as wide as
+   the longest time label (capped), the titles from one x 12px after it, the meta at the right edge. The lists and
+   rows are subgrids, so each row keeps its own box for the hover fill and the stretched capsule. */
+.today-block[data-today-block='upcoming'] {
+  display: grid;
+  grid-template-columns: fit-content(120px) minmax(0, 1fr) fit-content(48%);
+  column-gap: 12px;
+  align-content: start;
+}
+.today-block[data-today-block='upcoming'] > * { grid-column: 1 / -1; }
+.today-block[data-today-block='upcoming'] .today-list { display: grid; grid-template-columns: subgrid; }
+.today-block[data-today-block='upcoming'] .today-row { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; }
+.today-block[data-today-block='upcoming'] .today-row__meta { max-width: none; }
+.today-block[data-today-block='upcoming'] .today-check { justify-self: start; }
+
+.today-time {
+  min-width: 0;
+  overflow: hidden;
+  font: 400 var(--rn-fs-sm)/1.45 var(--rn-font-ui);
+  font-variant-numeric: tabular-nums;
   color: var(--rn-ink-3);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.today-time {
-  flex: none;
-  width: 92px;
-  font: 400 var(--rn-fs-sm)/1.45 var(--rn-font-ui);
-  font-variant-numeric: tabular-nums;
-  color: var(--rn-ink-3);
-  white-space: nowrap;
-}
-
 /* 进行中 and the countdown to the next event are "now": the signal colour as text. */
-.today-time.is-now { font-weight: 600; color: var(--rn-accent-text); }
+.today-time.is-now { font-weight: 500; color: var(--rn-accent-text); }
 
 /* The checkbox sits above the stretched capsule, so ticking never opens the page. */
 .today .today-check { position: relative; z-index: 1; }
@@ -140,7 +158,7 @@
 }
 
 .today .today-link:hover { color: var(--rn-ink); text-decoration: underline; text-underline-offset: 3px; }
-.today .today-link:focus-visible { outline: 1.5px solid var(--rn-ink-3); outline-offset: 2px; border-radius: 2px; }
+.today .today-link:focus-visible { outline: 2px solid color-mix(in srgb, var(--rn-ink) 55%, transparent); outline-offset: 2px; border-radius: 2px; }
 
 /* 筛子校准 joins the block as its first entry: a hairline below it, not a card of its own. */
 .today .rss-calibration {
@@ -148,17 +166,17 @@
   margin: 0 0 6px;
   padding: 8px 0 14px;
   border: 0;
-  border-bottom: 1px solid var(--rn-hair);
+  border-bottom: .5px solid var(--rn-hair);
   border-radius: 0;
   background: none;
   box-shadow: none;
 }
 
-.today .rss-calibration h2 { font: 600 var(--rn-fs-md)/1.4 var(--rn-font-ui); }
+.today .rss-calibration h2 { font: 500 var(--rn-fs-md)/1.4 var(--rn-font-ui); }
 
 .today-guide {
   padding-top: 18px;
-  border-top: 1px solid var(--rn-hair);
+  border-top: .5px solid var(--rn-hair);
 }
 
 .today-guide p {

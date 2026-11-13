@@ -1340,13 +1340,12 @@ export default function ChatPanel({
       data-open={drawer ? String(showExpandedPanel) : undefined}
       // The drawer floats over the content, so the native web view steps aside while it is open (W1 DL4).
       data-ready-native-overlay={drawer && showExpandedPanel ? 'shell-assistant' : undefined}
-      className={`workbench-panel-frame relative flex-shrink-0 flex flex-col overflow-hidden${drawer ? ' shell-float-drawer' : ''}`}
+      // Narrow windows: a float-glass card like the sidebar's (V14).
+      className={`workbench-panel-frame relative flex-shrink-0 flex flex-col overflow-hidden${drawer ? ' shell-float-drawer rn-float' : ''}`}
       style={{
         width: shellWidth,
         minWidth: shellWidth,
         ...(drawer ? {} : { background: 'transparent', boxShadow: 'none' }),
-        // Collapsed means no width at all, frame border included.
-        ...(shellWidth === 0 ? { borderWidth: 0 } : null),
       }}
       onDrop={handleDrop}
       onDragOver={handleDragOver}

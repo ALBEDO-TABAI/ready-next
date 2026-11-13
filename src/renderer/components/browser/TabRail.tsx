@@ -454,7 +454,7 @@ export default function TabRail({
                       void onTabClick(tab.id, event)
                     }}
                     onAuxClick={isStarterTab ? undefined : (event) => handleAuxClick(event, tab.id)}
-                    className="group relative flex min-w-0 w-full cursor-pointer items-center rounded-[12px] border px-[10px] text-[12px] transition-[background-color,color,border-color,box-shadow,opacity] duration-150"
+                    className="group relative flex min-w-0 w-full cursor-pointer items-center rounded-[var(--rn-r-sm)] border px-[10px] text-[12px] transition-[background-color,color,border-color,box-shadow,opacity] duration-150"
                     title={`${tab.title || 'New Tab'}\n按住 Shift 点击可双开`}
                     style={{
                       gap: 6,
@@ -494,7 +494,7 @@ export default function TabRail({
                       {tab.loading ? (
                         <Loader2
                           style={{ width: 14, height: 14 }}
-                          className="animate-spin flex-shrink-0 text-[var(--rn-accent)]"
+                          className="animate-spin flex-shrink-0 text-[var(--rn-ink-3)]"
                           strokeWidth={2}
                         />
                       ) : tab.favicon ? (
@@ -524,7 +524,7 @@ export default function TabRail({
                       >
                         {tab.owner === 'agent' && (
                           <span
-                            className="flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em]"
+                            className="flex items-center rounded-full px-1.5 py-0.5 text-[11px] leading-none font-semibold uppercase tracking-[0.06em]"
                             style={{
                               background: 'var(--rn-accent-soft)',
                               color: 'var(--rn-accent-text)',

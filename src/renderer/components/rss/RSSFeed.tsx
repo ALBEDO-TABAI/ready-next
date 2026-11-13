@@ -387,7 +387,7 @@ const RSSFeedItemRow = memo(function RSSFeedItemRow({
                   data-rss-analysis-job-id={analysis.jobId}
                 />
               )}
-              {!item.read && <IconButton size="sm" icon={<Check strokeWidth={2} />} onClick={() => onMarkItemRead(item.id)} title="标记为已读" />}
+              {!item.read && <IconButton size="sm" icon={<Check />} onClick={() => onMarkItemRead(item.id)} title="标记为已读" />}
               {item.inboxVisible !== false && (
                 <IconButton size="sm" icon={<Archive />} onClick={() => onDeleteItem(item.id)}
                   title={item.starred ? '移出收件箱（收藏会继续显示）' : '移出收件箱'} />
@@ -593,7 +593,7 @@ export default function RSSFeed({
       style={{ padding: 0, background: 'transparent', backdropFilter: 'none', WebkitBackdropFilter: 'none' }}
     >
       <RSSTopbarTools show={toolsVisible}>
-        <div ref={toolsRef} className="rss-toolbar-actions flex items-center" style={{ gap: 2 }}>
+        <div ref={toolsRef} className="rss-toolbar-actions flex items-center" style={{ gap: 4 }}>
           <RSSSearchField />
           <IconButton
             onClick={onRefresh}

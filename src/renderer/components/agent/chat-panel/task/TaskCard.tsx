@@ -39,8 +39,8 @@ import {
 
 export const TASK_ACTION_BUTTON_STYLE: React.CSSProperties = {
   padding: '3px 8px',
-  borderRadius: 8,
-  border: '1px solid var(--rn-hair-2)',
+  borderRadius: 999,
+  border: '.5px solid var(--rn-hair-2)',
   background: 'transparent',
   fontSize: 'var(--rn-fs-2xs)',
   lineHeight: 1.3,
@@ -490,7 +490,7 @@ export function TaskCard({
           style={{
             gap: 10,
             padding: '8px 0 10px',
-            borderTop: '1px solid var(--rn-hair)',
+            borderTop: '.5px solid var(--rn-hair)',
             maxHeight: '60vh',
             overflowY: 'auto',
           }}
@@ -503,7 +503,7 @@ export function TaskCard({
                   style={{
                     padding: '2px 7px',
                     borderRadius: 999,
-                    border: '1px solid var(--rn-hair-2)',
+                    border: '.5px solid var(--rn-hair-2)',
                     fontSize: 'var(--rn-fs-2xs)',
                     lineHeight: 1.2,
                     fontWeight: 500,
@@ -615,8 +615,8 @@ export function TaskCard({
                   onClick={() => artifact.path && onOpenArtifact?.(artifact.path)}
                   style={{
                     padding: '3px 7px',
-                    borderRadius: 8,
-                    border: '1px solid var(--rn-hair-2)',
+                    borderRadius: 999,
+                    border: '.5px solid var(--rn-hair-2)',
                     background: 'transparent',
                     fontSize: 'var(--rn-fs-2xs)',
                     lineHeight: 1.3,
@@ -640,16 +640,16 @@ export function TaskCard({
         <div
           data-ready-browser-confirmation-card={confirmationCard.kind}
           data-ready-browser-confirmation-request-id={confirmationCard.requestId}
-          className="mx-2.5 mb-2 rounded-[10px] border p-2.5"
-          style={{ borderColor: 'var(--rn-hair)', background: 'transparent' }}
+          className="mx-2.5 mb-2 rounded-[12px] p-2.5"
+          style={{ background: 'var(--rn-inlay)', boxShadow: 'inset 0 1px 0 var(--rn-glass-inner-hi), inset 0 0 0 .5px var(--rn-hair-2)' }}
         >
-          <div className="text-[12px] font-semibold" style={{ color: 'var(--rn-ink)' }}>
+          <div className="text-[12px] font-medium" style={{ color: 'var(--rn-ink)' }}>
             {confirmationCard.title}
           </div>
           <div className="mt-1 text-[11px]" style={{ color: 'var(--rn-ink)' }}>
             {confirmationCard.description}
           </div>
-          <div className="mt-1 text-[10.5px]" style={{ color: 'var(--rn-ink-3)' }}>
+          <div className="mt-1 text-[11px]" style={{ color: 'var(--rn-ink-3)' }}>
             {confirmationCard.detail}
           </div>
         </div>
@@ -792,7 +792,7 @@ export function ToolTraceCard({
         <div
           style={{
             padding: '8px 0 10px',
-            borderTop: '1px solid var(--rn-hair)',
+            borderTop: '.5px solid var(--rn-hair)',
           }}
         >
           <ToolTimeline items={items} />

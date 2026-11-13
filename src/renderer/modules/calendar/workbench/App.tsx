@@ -60,9 +60,10 @@ export function App({active=true}:{active?:boolean}) {
   }
   return <div ref={root} className={`ready-calendar${s.dark?' dark':''}`} data-testid="ready-calendar" tabIndex={-1} onPointerDownCapture={event=>{if(!(event.target as HTMLElement).closest('input,textarea,button,select,[contenteditable=true]'))root.current?.focus({preventScroll:true})}} onKeyDownCapture={onKeyDown}>
     {!s.ready ? <div className="calendar-load-state">{s.error||'正在读取日程…'}{s.error&&<Button size="sm" onClick={()=>void init()}>重新读取</Button>}</div> : <>
-      <div className="app" data-view={s.view}>
+      {/* One block (V11): the grid and the event panel share one .rn-panel, a .5px rule between them. */}
+      <div className="app rn-panel" data-view={s.view}>
         <ShellNavigator mode="calendar" label="日历" scopeClassName={`ready-calendar${s.dark?' dark':''}`}><Sidebar/></ShellNavigator>
-        <main className="main rn-sheet" data-liquid-scroll-root="calendar-workbench-main"><TopBar/>{s.view==='month'?<MonthGrid active={active}/>:<TimeGrid active={active}/>}{active&&s.view!=='month'&&s.days===1&&<ThisDay date={isoDate(s.anchor)} timeZone={s.zone}/>}</main>
+        <main className="main" data-liquid-scroll-root="calendar-workbench-main"><TopBar/>{s.view==='month'?<MonthGrid active={active}/>:<TimeGrid active={active}/>}{active&&s.view!=='month'&&s.days===1&&<ThisDay date={isoDate(s.anchor)} timeZone={s.zone}/>}</main>
         {s.panel&&<Panel/>}
         <ReadyCalendarActions active={active}/>
       </div>

@@ -9,6 +9,7 @@
   min-height: 0;
   flex-direction: column;
   overflow: hidden;
+  border-radius: var(--rn-r-sheet);
 }
 
 .document-floating-panel--left {
@@ -25,12 +26,12 @@
 
 .document-floating-panel--left.is-closing {
   pointer-events: none;
-  animation: documentPanelOutLeft 180ms var(--rn-ease-in-out) forwards;
+  animation: documentPanelOutLeft var(--rn-d-1) var(--rn-ease-std) forwards;
 }
 
 .document-floating-panel--right.is-closing {
   pointer-events: none;
-  animation: documentPanelOutRight 180ms var(--rn-ease-in-out) forwards;
+  animation: documentPanelOutRight var(--rn-d-1) var(--rn-ease-std) forwards;
 }
 
 .document-floating-panel__header {
@@ -41,7 +42,7 @@
   justify-content: space-between;
   gap: 10px;
   padding: 10px 12px 8px 14px;
-  box-shadow: inset 0 -1px 0 var(--rn-hair);
+  box-shadow: inset 0 -.5px 0 var(--rn-hair);
 }
 
 .document-floating-panel__header-actions {
@@ -53,7 +54,7 @@
 
 .document-floating-panel__title {
   font-size: var(--rn-fs-md);
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.3;
   color: var(--rn-ink);
 }
@@ -110,13 +111,13 @@
   line-height: 1.6;
 }
 
-/* Rows read like ListRow: a fill on hover; the heading in view is "where you are" (DL5). */
+/* Rows read like ListRow: a fill on hover; the heading in view is "where you are": fill-2, ink, 500 (V5). */
 .document-panel-row {
   position: relative;
   width: 100%;
   min-height: 42px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--rn-r-sm);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -125,7 +126,7 @@
   background: transparent;
   text-align: left;
   cursor: pointer;
-  transition: background-color var(--rn-d-1) var(--rn-ease-out);
+  transition: background-color var(--rn-d-1) var(--rn-ease-std);
 }
 
 .document-panel-row:hover {
@@ -134,12 +135,12 @@
 
 .document-panel-row.is-active,
 .document-panel-row.is-selected {
-  background: var(--rn-accent-soft);
+  background: var(--rn-fill-2);
 }
 
 .document-panel-row.is-active .document-panel-row__title,
 .document-panel-row.is-selected .document-panel-row__title {
-  color: var(--rn-accent-text);
+  color: var(--rn-ink);
 }
 
 .document-panel-row.is-stale {
@@ -160,7 +161,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: var(--rn-fs-md);
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.35;
   color: var(--rn-ink);
 }
@@ -179,6 +180,8 @@
   font-size: var(--rn-fs-2xs);
   line-height: 1;
   color: var(--rn-ink-3);
+  font-family: var(--rn-font-mono);
+  font-variant-numeric: tabular-nums;
 }
 
 .document-panel-row__actions {
@@ -208,8 +211,8 @@
   align-items: center;
   justify-content: center;
   color: var(--rn-ink-2);
-  background: var(--rn-sheet);
-  box-shadow: inset 0 0 0 1px var(--rn-hair);
+  background: var(--rn-inlay);
+  box-shadow: inset 0 1px 0 var(--rn-glass-inner-hi), inset 0 0 0 .5px var(--rn-hair-2);
   cursor: pointer;
 }
 
@@ -246,9 +249,9 @@
 }
 
 .document-mark-tabs button.is-active {
-  color: var(--rn-ink);
-  background: var(--rn-sheet);
-  box-shadow: var(--rn-card-shadow);
+  color: var(--rn-capsule-on-ink);
+  background: var(--rn-capsule-on-bg);
+  box-shadow: var(--rn-capsule-on-shadow);
 }
 
 .document-mark-create {
@@ -263,8 +266,8 @@
   width: 100%;
   border: 0;
   border-radius: var(--rn-r-control);
-  background: var(--rn-fill);
-  box-shadow: inset 0 0 0 1px var(--rn-hair);
+  background: var(--rn-well);
+  box-shadow: inset 0 1px 2px var(--rn-well-shade), inset 0 0 0 .5px var(--rn-hair);
   color: var(--rn-ink);
   outline: none;
   font-size: var(--rn-fs-sm);
@@ -272,19 +275,19 @@
 
 .document-mark-create input:focus,
 .document-mark-create textarea:focus {
-  background: var(--rn-sheet);
-  box-shadow: inset 0 0 0 1.5px var(--rn-ink-3);
+  box-shadow: inset 0 1px 2px var(--rn-well-shade), inset 0 0 0 1px var(--rn-ink-3);
 }
 
 .document-mark-create input {
   height: 28px;
-  padding: 0 9px;
+  padding: 0 12px;
 }
 
 .document-mark-create textarea {
   min-height: 56px;
   max-height: 96px;
   resize: vertical;
+  border-radius: var(--rn-r-card);
   padding: 7px 9px;
   line-height: 1.45;
 }
@@ -298,14 +301,15 @@
   justify-content: center;
   gap: 5px;
   color: var(--rn-ink);
-  background: var(--rn-fill-2);
+  background: var(--rn-inlay);
+  box-shadow: inset 0 1px 0 var(--rn-glass-inner-hi), inset 0 0 0 .5px var(--rn-hair-2), var(--rn-shadow-1);
   font-size: var(--rn-fs-sm);
   font-weight: 500;
   cursor: pointer;
 }
 
 .document-mark-create button:hover {
-  background: var(--rn-fill-3);
+  background: var(--rn-inlay-hover);
 }
 
 .document-mark-create button:disabled {
@@ -334,7 +338,7 @@
   color: var(--rn-ink-2);
   background: transparent;
   font-size: var(--rn-fs-sm);
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
 }
 

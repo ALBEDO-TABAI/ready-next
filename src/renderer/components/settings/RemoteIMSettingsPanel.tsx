@@ -79,7 +79,7 @@ type ChannelHealth = { tone: SettingsTone; label: string }
 // 文案里用反引号标出的命令 / 事件名渲染成等宽小片段。
 function withInlineCode(text: string) {
   return text.split(/`([^`]+)`/).map((part, index) => (index % 2 === 1
-    ? <code key={index} className="sx-code text-[11.5px]">{part}</code>
+    ? <code key={index} className="sx-code text-[12px]">{part}</code>
     : part))
 }
 
@@ -462,7 +462,7 @@ export default function RemoteIMSettingsPanel() {
                 <MessageSquareDashed className="h-5 w-5" strokeWidth={1.8} />
               </div>
               <div className="sx-card-title">iMessage</div>
-              <p className="m-0 text-[12.5px] leading-6" style={{ color: 'var(--rn-ink-2)' }}>
+              <p className="m-0 text-[13px] leading-6" style={{ color: 'var(--rn-ink-2)' }}>
                 iMessage 正在开发中，当前版本先支持 Telegram、飞书与微信。
               </p>
               <span className="sx-badge">即将推出</span>
@@ -617,7 +617,7 @@ export default function RemoteIMSettingsPanel() {
             </SettingsRow>
             {pairingCode && (
               <div className="px-6 pb-5">
-                <div className="sx-inset px-4 py-3 text-[12.5px] leading-6" style={{ color: 'var(--rn-ink)' }}>
+                <div className="sx-inset px-4 py-3 text-[13px] leading-6" style={{ color: 'var(--rn-ink)' }}>
                   在飞书中私聊你的机器人，发送 <code className="sx-code px-1.5 py-0.5 text-[12px]">/bind {pairingCode}</code>。绑定码 5 分钟内有效，完成后这里会显示已绑定。
                 </div>
               </div>
@@ -707,7 +707,7 @@ export default function RemoteIMSettingsPanel() {
             ].map((step, index) => (
               <li key={step} className="flex gap-3">
                 <span
-                  className="sx-mono mt-[2px] grid h-[18px] w-[18px] shrink-0 place-items-center rounded-full text-[10.5px]"
+                  className="sx-mono mt-[2px] grid h-[18px] w-[18px] shrink-0 place-items-center rounded-full text-[11px]"
                   style={{ background: 'var(--rn-fill-2)', color: 'var(--rn-ink)' }}
                 >
                   {index + 1}
@@ -756,7 +756,7 @@ export default function RemoteIMSettingsPanel() {
                       {channel.config.allowedSenderId ? '已绑定本人' : '尚未绑定本人'} · {adapter?.lastBeatAt ? `最近连接检查 ${new Date(adapter.lastBeatAt).toLocaleString()}` : '等待连接检查'}
                     </div>
                     {channelError && (
-                      <div className="sx-text-danger mt-1 text-[11.5px] leading-5">
+                      <div className="sx-text-danger mt-1 text-[12px] leading-5">
                         {channelError}
                       </div>
                     )}

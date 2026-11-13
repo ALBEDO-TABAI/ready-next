@@ -51,10 +51,10 @@ export function PendingClipRow({
     background: isFailure ? 'color-mix(in srgb, var(--rn-bad) 10%, transparent)' : 'transparent',
     boxShadow:
       isComplete
-        ? 'inset 0 0 0 1px color-mix(in srgb, var(--rn-ok) 38%, transparent)'
+        ? 'inset 0 0 0 .5px color-mix(in srgb, var(--rn-ok) 38%, transparent)'
         : isFailure
-          ? 'inset 0 0 0 1px color-mix(in srgb, var(--rn-bad) 32%, transparent)'
-          : 'inset 0 0 0 1px var(--rn-hair-2)',
+          ? 'inset 0 0 0 .5px color-mix(in srgb, var(--rn-bad) 32%, transparent)'
+          : 'inset 0 0 0 .5px var(--rn-hair-2)',
   }
   const label = pendingPlaceholderLabel(kind, status)
   const dismiss = () => {
@@ -141,7 +141,7 @@ export function PendingClipRow({
                     ? 'var(--rn-bad)'
                     : isComplete
                       ? 'var(--rn-ok)'
-                      : 'var(--rn-accent)',
+                      : 'var(--rn-ink-3)',
                   transition: 'width 240ms ease',
                 }}
               />

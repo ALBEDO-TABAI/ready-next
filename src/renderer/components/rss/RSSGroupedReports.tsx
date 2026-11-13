@@ -34,7 +34,7 @@ export default function RSSGroupedReports({ group, query, revision, active, onSe
   const detail = `本范围 ${group.matchingCount} 篇 / 全事件 ${group.memberCount} 篇 · ${group.sourceCount} 个信源 · ${group.factCount} 个事实与进展 · ${group.matchingUnread} 篇未读${group.matchingStarred ? ` · ${group.matchingStarred} 篇收藏` : ''}`
   return <div className="rss-grouped-reports" onClick={(event) => event.stopPropagation()}>
     <button type="button" aria-expanded={open} title={detail} onClick={() => setOpen(!open)}>
-      <ChevronRight size={13} strokeWidth={2} />同一事件 · {reports} · {group.sourceCount} 个信源{group.factCount > 1 ? ` · ${group.factCount} 条事实与进展` : ''}
+      <ChevronRight size={14} strokeWidth={1.5} />同一事件 · {reports} · {group.sourceCount} 个信源{group.factCount > 1 ? ` · ${group.factCount} 条事实与进展` : ''}
     </button>
     {group.unseenFactCount > 0 && <strong>有 {group.unseenFactCount} 个新整理的事实或进展待查看</strong>}
     {group.staleCount > 0 && <small>部分关联依据已变化，详情中会标明。</small>}

@@ -278,12 +278,12 @@ export function AISettingsPanel() {
           <div className="sx-row__text">
             <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
               <span className="text-[12px]" style={{ color: 'var(--rn-ink-2)' }}>当前默认</span>
-              <span className="truncate text-[14px] font-semibold" style={{ color: 'var(--rn-ink)' }}>
+              <span className="truncate text-[15px] font-medium" style={{ color: 'var(--rn-ink)' }}>
                 {activeProfile?.name || '未设置'}
               </span>
             </div>
             <div className="sx-row__desc flex flex-wrap items-center gap-x-2">
-              <span className="sx-mono text-[11.5px]">{activeProfile?.config.model || '未设置模型'}</span>
+              <span className="sx-mono text-[12px]">{activeProfile?.config.model || '未设置模型'}</span>
               <span aria-hidden>·</span>
               <span>{activeProfile ? formatInterfaceLabel(activeProfile.config) : '未设置接口'}</span>
             </div>
@@ -356,14 +356,14 @@ export function AISettingsPanel() {
                 >
                   <span className="min-w-0 py-3">
                     <span className="flex min-w-0 items-center gap-2">
-                      <span className="truncate text-[13.5px] font-semibold" style={{ color: 'var(--rn-ink)' }}>{profile.name}</span>
+                      <span className="truncate text-[13px] font-medium" style={{ color: 'var(--rn-ink)' }}>{profile.name}</span>
                       {current && <span className="sx-dot sx-dot--accent" title="当前默认" aria-label="当前默认" />}
                     </span>
-                    <span className="mt-1 block truncate text-[11.5px]" style={{ color: 'var(--rn-ink-2)' }}>
+                    <span className="mt-1 block truncate text-[12px]" style={{ color: 'var(--rn-ink-2)' }}>
                       <span className="sx-mono">{profile.config.model || '未设置模型'}</span> · {profile.category === 'custom' ? '自定义' : profile.category}
                     </span>
                   </span>
-                  <span className="min-w-0 truncate text-[12.5px]" style={{ color: 'var(--rn-ink)' }}>
+                  <span className="min-w-0 truncate text-[13px]" style={{ color: 'var(--rn-ink)' }}>
                     {formatInterfaceLabel(profile.config)}
                   </span>
                   <SettingsStatus tone={selected ? selectedTestTone : 'muted'}>{rowTestLabel}</SettingsStatus>
@@ -402,7 +402,7 @@ export function AISettingsPanel() {
             title={<>编辑 {selectedProfile.name}</>}
             description={(
               <>
-                <span className="sx-mono text-[11.5px]">{selectedConfig.model || '未设置模型'}</span> · {formatInterfaceLabel(selectedConfig)}
+                <span className="sx-mono text-[12px]">{selectedConfig.model || '未设置模型'}</span> · {formatInterfaceLabel(selectedConfig)}
               </>
             )}
             actions={(
@@ -567,7 +567,7 @@ export function AISettingsPanel() {
                                   <div
                                     key={modelId}
                                     className="flex items-center gap-3 px-3"
-                                    style={{ minHeight: 40, borderTop: index > 0 ? '1px solid var(--rn-hair)' : undefined }}
+                                    style={{ minHeight: 40, borderTop: index > 0 ? '.5px solid var(--rn-hair)' : undefined }}
                                   >
                                     <span className="sx-mono min-w-0 flex-1 truncate text-[12px]" style={{ color: 'var(--rn-ink)' }}>{modelId}</span>
                                     {isDefaultModel ? (
@@ -625,7 +625,7 @@ export function AISettingsPanel() {
                               className="sx-mono"
                             />
                             {showCustomContextWindowWarning && (
-                              <span className="sx-text-warning flex items-start gap-1.5 text-[11.5px] leading-5">
+                              <span className="sx-text-warning flex items-start gap-1.5 text-[12px] leading-5">
                                 <AlertTriangle className="mt-[3px] h-3 w-3 shrink-0" />
                                 自定义服务缺少明确上下文窗口，Ready 会先按保守值估算；建议填写服务文档里的 token 上限。
                               </span>
@@ -755,11 +755,11 @@ export function AISettingsPanel() {
                             <div
                               key={group.id}
                               className="grid items-center gap-3 px-3.5 py-2.5 sm:grid-cols-[minmax(0,1fr)_136px_112px]"
-                              style={{ borderTop: index > 0 ? '1px solid var(--rn-hair)' : undefined }}
+                              style={{ borderTop: index > 0 ? '.5px solid var(--rn-hair)' : undefined }}
                             >
                               <div className="min-w-0">
-                                <div className="truncate text-[12.5px] font-medium" style={{ color: 'var(--rn-ink)' }}>{group.label}</div>
-                                <div className="mt-0.5 truncate text-[11.5px]" style={{ color: 'var(--rn-ink-2)' }}>{group.description}</div>
+                                <div className="truncate text-[13px] font-medium" style={{ color: 'var(--rn-ink)' }}>{group.label}</div>
+                                <div className="mt-0.5 truncate text-[12px]" style={{ color: 'var(--rn-ink-2)' }}>{group.description}</div>
                               </div>
                               <Select
                                 value={getCapabilityModeValue(group.id)}
@@ -769,7 +769,7 @@ export function AISettingsPanel() {
                               />
                               <span className="flex justify-end">
                                 <SettingsStatus tone={runtimeDisplay.tone}>
-                                  <span className="text-[11.5px]">{runtimeDisplay.label}</span>
+                                  <span className="text-[12px]">{runtimeDisplay.label}</span>
                                 </SettingsStatus>
                               </span>
                             </div>
@@ -784,7 +784,7 @@ export function AISettingsPanel() {
           </SettingsCard>
 
           {currentProvider && (
-            <div className="px-1 text-[11.5px] leading-relaxed" style={{ color: 'var(--rn-ink-2)' }}>
+            <div className="px-1 text-[12px] leading-relaxed" style={{ color: 'var(--rn-ink-2)' }}>
               {selectedConfig.provider === 'anthropic' && (
                 <>Anthropic API 使用 <code className="sx-code">x-api-key</code> 认证头，系统会自动处理。</>
               )}

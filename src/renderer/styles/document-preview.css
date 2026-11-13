@@ -17,29 +17,20 @@
   --rd-2: var(--rn-ink-2);
   --rd-3: var(--rn-ink-3);
   --rd-accent: var(--rn-accent);
-  --rd-hair: color-mix(in srgb, var(--rn-ink) 9%, transparent);
-  --rd-hair-strong: color-mix(in srgb, var(--rn-ink) 20%, transparent);
-  --rd-wash: color-mix(in srgb, var(--rn-ink) 2.5%, transparent);
-  --rd-well: color-mix(in srgb, var(--rn-ink) 3%, transparent);
-  --rd-object: #FFFFFF;
-  --rd-object-line: #E8E5DE;
+  --rd-hair: var(--rn-hair);
+  --rd-hair-strong: var(--rn-hair-2);
+  --rd-wash: var(--rn-fill);
+  --rd-well: var(--rn-fill);
+  --rd-object: var(--rn-inlay);
+  --rd-object-line: var(--rn-hair-2);
   --rd-mono: var(--rn-font-mono);
-  --rd-ease: cubic-bezier(0.2, 0, 0, 1);
+  --rd-ease: var(--rn-ease-std);
 
   gap: 22px;
   color: var(--rd-body);
   font-feature-settings: 'kern', 'palt' 0;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
-}
-
-html[data-theme='dark'] .note-preview-shell {
-  --rd-hair: color-mix(in srgb, var(--rn-ink) 11%, transparent);
-  --rd-hair-strong: color-mix(in srgb, var(--rn-ink) 24%, transparent);
-  --rd-wash: color-mix(in srgb, var(--rn-ink) 3.5%, transparent);
-  --rd-well: color-mix(in srgb, var(--rn-ink) 4.5%, transparent);
-  --rd-object: #202124;
-  --rd-object-line: #333538;
 }
 
 .note-preview-shell ::selection {
@@ -111,7 +102,7 @@ html[data-theme='dark'] .note-preview-shell {
 .note-preview-shell .note-preview-body > .note-preview-render-block:first-child > .note-preview-markdown-h1:only-child {
   margin: 0;
   padding-bottom: 32px;
-  border-bottom: 1px solid var(--rd-hair);
+  border-bottom: .5px solid var(--rd-hair);
 }
 
 .note-preview-shell .note-preview-body > .note-preview-render-block:first-child:has(> .note-preview-markdown-h1:only-child) {
@@ -134,7 +125,7 @@ html[data-theme='dark'] .note-preview-shell {
 .note-preview-shell .note-preview-body > .note-preview-render-block:first-child:has(> .note-preview-markdown-h1:only-child) + .note-preview-render-block > .note-preview-markdown-quote:only-child {
   margin: 0;
   padding: 0 0 32px;
-  border-bottom: 1px solid var(--rd-hair);
+  border-bottom: .5px solid var(--rd-hair);
   color: var(--rd-2);
 }
 
@@ -192,7 +183,7 @@ html[data-theme='dark'] .note-preview-shell {
   display: inline;
   color: var(--rd-ink);
   text-decoration-line: underline;
-  text-decoration-color: color-mix(in srgb, var(--rd-accent) 46%, transparent);
+  text-decoration-color: var(--rn-ink-4);
   text-decoration-thickness: 1px;
   text-underline-offset: 0.26em;
   transition: color 160ms var(--rd-ease), text-decoration-color 160ms var(--rd-ease);
@@ -214,18 +205,18 @@ html[data-theme='dark'] .note-preview-shell {
 }
 
 .note-preview-shell .note-preview-markdown-link:hover {
-  color: var(--rd-accent);
-  text-decoration-color: var(--rd-accent);
+  color: var(--rd-ink);
+  text-decoration-color: var(--rd-ink);
   text-decoration-line: underline;
 }
 
 .note-preview-shell .note-preview-markdown-link:hover::after {
-  color: var(--rd-accent);
+  color: var(--rd-ink);
   transform: translate(1px, -0.18em);
 }
 
 .note-preview-shell .note-preview-markdown-link:focus-visible {
-  outline: 1.5px solid var(--rd-accent);
+  outline: 2px solid color-mix(in srgb, var(--rn-ink) 55%, transparent);
   outline-offset: 2px;
   border-radius: 2px;
 }
@@ -270,10 +261,10 @@ html[data-theme='dark'] .note-preview-shell {
 .note-preview-shell .note-preview-code-copy-button {
   top: 10px;
   right: 10px;
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--rn-r-pill);
   background: transparent;
   box-shadow: none;
   color: var(--rd-3);
@@ -295,8 +286,8 @@ html[data-theme='dark'] .note-preview-shell {
 }
 
 .note-preview-shell .note-preview-code-copy-button:focus-visible {
-  outline: 1.5px solid var(--rd-accent);
-  outline-offset: 1px;
+  outline: 2px solid color-mix(in srgb, var(--rn-ink) 55%, transparent);
+  outline-offset: 2px;
 }
 
 .note-preview-shell .note-preview-code-copy-button[data-ready-code-copied='true'] {
@@ -412,35 +403,34 @@ html[data-theme='dark'] .note-preview-shell {
   display: none;
 }
 
+/* The document's one checkbox (V16): clear with an ink-3 edge; checked, an ink box whose check is a mask painted in
+   --rn-on-inverse, so it reads in light and dark. */
 .note-preview-shell .note-preview-markdown-li.task-list-item > input[type='checkbox'] {
   position: relative;
   flex: 0 0 auto;
-  width: 15px;
-  height: 15px;
-  margin: 6.5px 0 0;
-  border: 1.5px solid var(--rd-hair-strong);
-  border-radius: 4.5px;
+  width: 16px;
+  height: 16px;
+  margin: 6px 0 0;
+  border: 0;
+  border-radius: 5px;
   background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--rn-ink-3);
   -webkit-appearance: none;
   appearance: none;
   opacity: 1;
 }
 
 .note-preview-shell .note-preview-markdown-li.task-list-item > input[type='checkbox']:checked {
-  border-color: var(--rd-ink);
-  background-color: var(--rd-ink);
+  background-color: var(--rn-inverse);
+  box-shadow: none;
 }
 
 .note-preview-shell .note-preview-markdown-li.task-list-item > input[type='checkbox']:checked::after {
   content: '';
   position: absolute;
-  left: 3.6px;
-  top: 0.8px;
-  width: 4px;
-  height: 7.5px;
-  border: solid var(--rn-sheet);
-  border-width: 0 1.6px 1.6px 0;
-  transform: rotate(42deg);
+  inset: 0;
+  background: var(--rn-on-inverse);
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E") center / 12px no-repeat;
 }
 
 .note-preview-shell .note-preview-markdown-li.task-list-item:has(> input[type='checkbox']:checked) {
@@ -451,8 +441,8 @@ html[data-theme='dark'] .note-preview-shell {
 .note-preview-shell .note-preview-table-scroll {
   margin: 6px 0 20px;
   border: 0;
-  border-top: 1px solid var(--rd-hair-strong);
-  border-bottom: 1px solid var(--rd-hair-strong);
+  border-top: .5px solid var(--rd-hair-strong);
+  border-bottom: .5px solid var(--rd-hair-strong);
   border-radius: 0;
   background: transparent;
   box-shadow: none;
@@ -471,7 +461,7 @@ html[data-theme='dark'] .note-preview-shell {
 
 .note-preview-shell .note-preview-markdown-th {
   padding: 11px 14px 10px;
-  border-bottom: 1px solid var(--rd-hair-strong);
+  border-bottom: .5px solid var(--rd-hair-strong);
   color: var(--rd-2);
   font-size: 12px;
   font-weight: 600;
@@ -480,7 +470,7 @@ html[data-theme='dark'] .note-preview-shell {
 
 .note-preview-shell .note-preview-markdown-td {
   padding: 11px 14px;
-  border-bottom: 1px solid var(--rd-hair);
+  border-bottom: .5px solid var(--rd-hair);
   color: var(--rd-body);
 }
 
@@ -530,8 +520,8 @@ html[data-theme='dark'] .note-preview-shell {
 .note-preview-shell .note-preview-details {
   margin: 4px 0 18px;
   border: 0;
-  border-top: 1px solid var(--rd-hair);
-  border-bottom: 1px solid var(--rd-hair);
+  border-top: .5px solid var(--rd-hair);
+  border-bottom: .5px solid var(--rd-hair);
   border-radius: 0;
   background: transparent;
   overflow: visible;
@@ -574,7 +564,7 @@ html[data-theme='dark'] .note-preview-shell {
 }
 
 .note-preview-shell .note-preview-details-summary:focus-visible {
-  outline: 1.5px solid var(--rd-accent);
+  outline: 2px solid color-mix(in srgb, var(--rn-ink) 55%, transparent);
   outline-offset: 2px;
   border-radius: 4px;
 }
@@ -601,9 +591,10 @@ html[data-theme='dark'] .note-preview-shell {
 .note-preview-shell .note-preview-mermaid {
   margin: 6px 0 20px;
   padding: 20px;
-  border: 1px solid var(--rd-object-line);
-  border-radius: 16px;
+  border: 0;
+  border-radius: var(--rn-r-card);
   background: var(--rd-object);
+  box-shadow: inset 0 1px 0 var(--rn-glass-inner-hi), inset 0 0 0 .5px var(--rd-object-line);
 }
 
 .note-preview-shell .note-preview-mermaid__svg :is(.node rect, .cluster rect, rect.actor) {
@@ -621,8 +612,8 @@ html[data-theme='dark'] .note-preview-shell {
 /* ─── 图片与媒体 ─── */
 .note-preview-shell .note-preview-image:not(.note-preview-image--inline) {
   border-radius: 14px;
-  outline: 1px solid var(--rd-hair);
-  outline-offset: -1px;
+  outline: .5px solid var(--rd-hair);
+  outline-offset: -.5px;
 }
 
 .note-preview-shell .note-preview-markdown-p > .note-preview-image:not(.note-preview-image--inline) {
@@ -668,7 +659,7 @@ html[data-theme='dark'] .note-preview-shell {
 .note-preview-shell .note-preview-properties {
   gap: 0;
   padding-bottom: 6px;
-  border-bottom: 1px solid var(--rd-hair);
+  border-bottom: .5px solid var(--rd-hair);
 }
 
 .note-preview-shell .note-preview-property-row {
@@ -678,7 +669,7 @@ html[data-theme='dark'] .note-preview-shell {
 }
 
 .note-preview-shell .note-preview-property-row + .note-preview-property-row {
-  border-top: 1px solid var(--rd-hair);
+  border-top: .5px solid var(--rd-hair);
 }
 
 .note-preview-shell .note-preview-property-key {
@@ -700,7 +691,7 @@ html[data-theme='dark'] .note-preview-shell {
 .note-preview-shell .note-preview-link-button {
   color: var(--rd-ink);
   text-decoration: underline;
-  text-decoration-color: color-mix(in srgb, var(--rd-accent) 46%, transparent);
+  text-decoration-color: var(--rn-ink-4);
   text-underline-offset: 0.26em;
 }
 
@@ -712,11 +703,11 @@ html[data-theme='dark'] .note-preview-shell {
 .note-preview-shell .note-preview-chip {
   gap: 5px;
   padding: 5px 10px 5px 11px;
-  border: 1px solid var(--rd-hair-strong);
+  border: .5px solid var(--rd-hair-strong);
   background: transparent;
   color: var(--rd-2);
   font-family: var(--rd-mono);
-  font-size: 11.5px;
+  font-size: var(--rn-t-micro);
   font-weight: 500;
   letter-spacing: 0.02em;
   transition: border-color 160ms var(--rd-ease), color 160ms var(--rd-ease), background-color 160ms var(--rd-ease);
@@ -740,7 +731,7 @@ html[data-theme='dark'] .note-preview-shell {
 }
 
 .note-preview-shell .note-preview-chip[data-copied='true'] > svg {
-  color: var(--rd-accent);
+  color: var(--rd-ink);
 }
 
 /* ─── 预览提示与损坏卡 ─── */
@@ -768,9 +759,10 @@ html[data-theme='dark'] .note-preview-shell {
 .note-preview-shell .note-preview-widget-error {
   margin: 6px 0 20px;
   padding: 20px 22px;
-  border: 1px solid var(--rd-object-line);
-  border-radius: 16px;
+  border: 0;
+  border-radius: var(--rn-r-card);
   background: var(--rd-object);
+  box-shadow: inset 0 1px 0 var(--rn-glass-inner-hi), inset 0 0 0 .5px var(--rd-object-line);
   color: var(--rd-body);
 }
 
@@ -806,11 +798,12 @@ html[data-theme='dark'] .note-preview-shell {
 }
 
 .note-preview-shell .note-preview-repair-button {
-  height: 30px;
+  height: var(--rn-control-h);
   padding: 0 12px;
-  border: 1px solid var(--rd-hair-strong);
-  border-radius: 999px;
-  background: transparent;
+  border: 0;
+  border-radius: var(--rn-r-pill);
+  background: var(--rn-inlay);
+  box-shadow: inset 0 1px 0 var(--rn-glass-inner-hi), inset 0 0 0 .5px var(--rn-hair-2), var(--rn-shadow-1);
   color: var(--rd-ink);
   font-size: 12px;
   font-weight: 500;
@@ -818,8 +811,7 @@ html[data-theme='dark'] .note-preview-shell {
 }
 
 .note-preview-shell .note-preview-repair-button:hover {
-  border-color: color-mix(in srgb, var(--rd-ink) 40%, transparent);
-  background: var(--rd-wash);
+  background: var(--rn-inlay-hover);
 }
 
 /* ─── 电子书模式：更宽松的书页节奏，居中标题 ─── */

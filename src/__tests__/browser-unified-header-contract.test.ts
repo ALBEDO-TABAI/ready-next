@@ -158,16 +158,20 @@ test('inactive tabs get the same hover hint affordance without entering the acti
   assert.match(tabRail, /background: isHovered\s*\?\s*'var\(--rn-fill\)'/)
 })
 
-test('browser page is paper: rounded on all corners with the paper radius, no corner patches around the native view', () => {
+test('browser page is framed in the panel: rounded on all corners with the inset radius, no corner patches around the native view', () => {
   const browserShellLayout = readWorkspaceFile('src/renderer/components/browser/BrowserShellLayout.tsx')
   const hostLayout = readWorkspaceFile('src/main/modules/browser-engine/host-layout-service.ts')
+  const tokens = readWorkspaceFile('src/renderer/design/next/tokens.css')
 
-  // B13 (W1 DL1, DL2): the address bar sits on the glass, so the native page's corners show the glass, not a patch.
+  // V11: the page sits inside the browser panel's framed body; the native page's corners show the panel glass, not a
+  // patch. Main's radius is --rn-r-panel-inset (the panel's radius minus the frame pad), so view and DOM stand-ins match.
   assert.match(browserShellLayout, /const showNativePage = isElectron && Boolean\(activeTab\) && !showReadyBlankPage && !activeTab\?\.error/)
   assert.match(browserShellLayout, /data-ready-native-surface=\{showNativePage \? 'browser' : undefined\}/)
-  assert.match(browserShellLayout, /borderRadius: 'var\(--rn-r-sheet\)'/)
+  assert.match(browserShellLayout, /className="browser-page"/)
+  assert.match(readWorkspaceFile('src/renderer/components/browser/browser-shell.css'), /\.browser-page \{[^}]*border-radius: var\(--rn-r-panel-inset\);/)
   assert.doesNotMatch(browserShellLayout, /browser-shell-corner-fill|--workbench-/)
-  assert.match(hostLayout, /const HOST_BORDER_RADIUS = 20\n/)
+  assert.match(tokens, /--rn-r-panel-inset: 14px;/)
+  assert.match(hostLayout, /const HOST_BORDER_RADIUS = 14\n/)
   assert.doesNotMatch(browserShellLayout, /marginRight:\s*WORKBENCH_HEADER_EDGE_X/)
 })
 

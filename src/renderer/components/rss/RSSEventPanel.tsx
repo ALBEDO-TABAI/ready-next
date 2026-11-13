@@ -141,7 +141,7 @@ export default function RSSEventPanel({ article, active, onSelect }: { article: 
   return <section className="rss-event-panel">
     <button type="button" aria-expanded={open} onClick={() => setOpen(!open)}>
       <span>事件与进展</span>
-      <span className="flex items-center gap-2"><small>{state}</small><ChevronRight size={14} strokeWidth={2} /></span>
+      <span className="flex items-center gap-2"><small>{state}</small><ChevronRight size={14} strokeWidth={1.5} /></span>
     </button>
     {open && <div className="rss-event-panel__body">
       {membership && <p>{membership.reason}{membership.stale ? ' · 原文已变化，旧依据不是当前版本。' : ''}</p>}

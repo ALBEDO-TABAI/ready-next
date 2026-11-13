@@ -24,9 +24,11 @@ export interface ShellRailProps {
   onModeChange: (mode: WorkbenchMode) => void
   /** ⌥-click (or ⇧-click) opens the mode beside the current one. */
   onSplitToggle: (mode: WorkbenchMode) => void
+  /** A plain click on the current mode's icon is the sidebar's switch (V13, as in VS Code). */
+  onSidebarToggle: () => void
   assistantOpen: boolean
   onAssistantOpen: () => void
-  /** The sidebar is on screen (docked or slid out). While it is collapsed the selected glyph loses its tile (DL8). */
+  /** The sidebar is on screen (docked, or its card open). While it is collapsed the selected glyph loses its tile (DL8). */
   sidebarShown: boolean
 }
 
@@ -56,6 +58,11 @@ export default function ShellRail(props: ShellRailProps) {
       props.onSplitToggle(mode)
       return
     }
+    // The current mode's icon is the sidebar's switch (V13); another mode, the split side included, only switches.
+    if (mode === props.mode && !event.metaKey && !event.ctrlKey) {
+      props.onSidebarToggle()
+      return
+    }
     props.onModeChange(mode)
   }
 
@@ -67,7 +74,8 @@ export default function ShellRail(props: ShellRailProps) {
       aria-label="工具栏"
       style={{ width: SHELL_RAIL_WIDTH, minWidth: SHELL_RAIL_WIDTH } as CSSProperties}
     >
-      <div className="shell-rail__group" role="group" aria-label="模式">
+      {/* The mode icons drive the sidebar, so a press on them never counts as outside its narrow-window card. */}
+      <div className="shell-rail__group" role="group" aria-label="模式" data-shell-sidebar-control="">
         <div className="icon-rail-slider-shell">
           <MorphIconRailGroup
             items={MODE_ITEMS}

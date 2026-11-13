@@ -52,29 +52,32 @@ export function BlockEditorStyles() {
     .ready-block-container.is-indented { padding-left:24px; }
     .ready-block-container.is-quote { border-left:2px solid var(--rn-hair-2); }
     .ready-block-marker { float:left; width:24px; margin-left:-24px; text-align:center; user-select:none; }
-    .ready-block-marker.is-task { box-sizing:border-box; width:14px; height:14px; margin:.42em 0 0 -20px; border:1.5px solid currentColor; border-radius:3px; opacity:.75; }
-    .ready-block-marker.is-task[data-checked=true] { opacity:1; border-color:var(--rn-accent); background:var(--rn-accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.2l2.3 2.3 4.7-5' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 10px no-repeat; }
+    /* A task's box is the document's one checkbox (V16): clear with an ink-3 edge; checked, an ink box whose check is a
+       mask painted in --rn-on-inverse, so it reads in light and dark (never a fixed white glyph). */
+    .ready-block-marker.is-task { position:relative; width:16px; height:16px; margin:.38em 0 0 -21px; border-radius:5px; box-shadow:inset 0 0 0 1.5px var(--rn-ink-3); }
+    .ready-block-marker.is-task[data-checked=true] { background:var(--rn-inverse); box-shadow:none; }
+    .ready-block-marker.is-task[data-checked=true]::after { content:''; position:absolute; inset:0; background:var(--rn-on-inverse); mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E") center / 12px no-repeat; }
     .ready-block-container[data-checked=true] > .ready-block-shell .note-preview-markdown-p { color:var(--rn-ink-3); text-decoration:line-through; }
     .ready-block-tail { display:block; width:100%; min-height:32px; margin:4px 0 0; padding:4px 2px; border:0; background:transparent; font:inherit; text-align:left; color:transparent; cursor:text; }
     .ready-block-tail:hover, .ready-block-tail:focus-visible { color:var(--rn-ink-3); outline:none; }
     .ready-block-source { position:relative; }
     /* Source editing is a quiet corner control revealed on hover or keyboard focus, not a line of its own. */
-    .ready-block-source-edit { position:absolute; top:6px; right:6px; z-index:1; padding:2px 8px; border:1px solid var(--rn-hair); border-radius:6px; font-size:12px; line-height:18px; color:var(--rn-ink-2); background:var(--rn-sheet); opacity:0; transition:opacity .12s ease; }
+    .ready-block-source-edit { position:absolute; top:6px; right:6px; z-index:1; padding:2px 10px; border:0; border-radius:var(--rn-r-pill); font-size:12px; line-height:18px; color:var(--rn-ink-2); background:var(--rn-inlay); box-shadow:inset 0 1px 0 var(--rn-glass-inner-hi), inset 0 0 0 .5px var(--rn-hair-2), var(--rn-shadow-1); opacity:0; transition:opacity var(--rn-d-1) var(--rn-ease-std); }
     .ready-block-shell:hover .ready-block-source-edit, .ready-block-source-edit:focus-visible { opacity:1; }
     .ready-block-shell[data-drop=before] { box-shadow:0 -2px var(--rn-accent); }
     .ready-block-shell[data-drop=after] { box-shadow:0 2px var(--rn-accent); }
     .ready-block-popover { position:fixed; z-index:1000; width:320px; max-width:calc(100vw - 16px); padding:8px; color:var(--rn-ink); }
     .ready-block-popover [role=listbox] { max-height:270px; overflow:auto; }
-    .ready-block-popover button { border:0; color:inherit; background:transparent; border-radius:6px; padding:6px 10px; text-align:left; }
+    .ready-block-popover button { border:0; color:inherit; background:transparent; border-radius:var(--rn-r-sm); padding:6px 10px; text-align:left; }
     .ready-block-popover [role=option] { display:flex; flex-direction:column; width:100%; }
     .ready-block-popover button:hover, .ready-block-popover [aria-selected=true] { background:var(--rn-fill-2); }
     .ready-block-popover small { color:var(--rn-ink-3); overflow-wrap:anywhere; }
     /* The slash menu (W3 §4.3): W1's float and menu language, --rn-* tokens only. */
     .ready-slash-menu { position: fixed; z-index: 1000; width: 300px; max-width: calc(100vw - 16px); padding: 6px; }
     .ready-slash-menu__list { max-height: 360px; overflow-y: auto; scrollbar-width: thin; }
-    .ready-slash-menu__item { display: flex; align-items: center; gap: 10px; padding: 5px 8px; border-radius: 8px; cursor: pointer; }
+    .ready-slash-menu__item { display: flex; align-items: center; gap: 10px; padding: 5px 8px; border-radius: var(--rn-r-sm); cursor: pointer; }
     .ready-slash-menu__item[aria-selected='true'] { background: var(--rn-fill-2); }
-    .ready-slash-menu__icon { display: flex; flex: none; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 8px; background: var(--rn-sheet); box-shadow: inset 0 0 0 1px var(--rn-hair); color: var(--rn-ink-2); }
+    .ready-slash-menu__icon { display: flex; flex: none; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: var(--rn-r-sm); background: var(--rn-inlay); box-shadow: inset 0 1px 0 var(--rn-glass-inner-hi), inset 0 0 0 .5px var(--rn-hair-2); color: var(--rn-ink-2); }
     .ready-slash-menu__icon svg { width: 17px; height: 17px; stroke-width: var(--rn-icon-stroke); }
     .ready-slash-menu__text { display: flex; min-width: 0; flex-direction: column; gap: 1px; }
     .ready-slash-menu__label { overflow: hidden; color: var(--rn-ink); font-size: var(--rn-fs-md); line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }

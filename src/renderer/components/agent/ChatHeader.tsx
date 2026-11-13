@@ -441,8 +441,8 @@ export default function ChatHeader({
                 style={{
                   flex: 1,
                   minWidth: 0,
-                  fontSize: 12.5,
-                  fontWeight: 600,
+                  fontSize: 13,
+                  fontWeight: 500,
                   lineHeight: 1.3,
                   color: 'var(--rn-ink)',
                   paddingRight: 4,
@@ -549,11 +549,11 @@ export default function ChatHeader({
 
   return (
     <>
+      {/* The header row: on the head line, a panel head tall (V15; .chat-header-row in the shell's shell.css). */}
       <div
         ref={headerRef}
-        className="flex items-center justify-between"
+        className="chat-header-row flex items-center justify-between"
         style={{
-          height: 38,
           padding: '0 14px',
           borderBottom: '1px solid transparent',
           background: 'transparent',
@@ -601,7 +601,7 @@ export default function ChatHeader({
                   display: 'block',
                   minWidth: 0,
                   flex: 1,
-                  fontSize: 12.5,
+                  fontSize: 13,
                   fontWeight: 500,
                   color: 'var(--rn-ink)',
                   textAlign: 'left',
@@ -621,7 +621,7 @@ export default function ChatHeader({
         <div className="flex items-center" style={{ gap: 4, marginRight: -5 }} data-chat-session-menu="true">
           <div className="relative" data-chat-session-switcher="true">
             <IconButton
-              icon={<MessageSquare style={{ width: 14, height: 14 }} strokeWidth={2} />}
+              icon={<MessageSquare />}
               onClick={handleScopeButtonClick}
               title="会话来源"
               active={showHistory}
@@ -630,7 +630,7 @@ export default function ChatHeader({
           </div>
 
           <IconButton
-            icon={<Plus style={{ width: 14, height: 14 }} strokeWidth={2} />}
+            icon={<Plus />}
             onClick={() => { void onNewSession() }}
             title="新建对话"
           />
@@ -663,13 +663,13 @@ export default function ChatHeader({
 
           {/* The skills centre belongs to the assistant: it opens as a page beside settings (W2 §2.3). */}
           <IconButton
-            icon={<Puzzle style={{ width: 14, height: 14 }} strokeWidth={2} />}
+            icon={<Puzzle />}
             onClick={() => requestShellAction('open-skills')}
             title="技能中心"
           />
 
           <IconButton
-            icon={<MoreHorizontal style={{ width: 14, height: 14 }} strokeWidth={2} />}
+            icon={<MoreHorizontal />}
             onClick={toggleOperationMenu}
             data-float-anchor={OPERATION_MENU_ID}
             aria-haspopup="menu"
@@ -690,7 +690,7 @@ export default function ChatHeader({
 
           {onTogglePanel && (
             <IconButton
-              icon={<PanelLeftClose style={{ width: 14, height: 14 }} strokeWidth={2} />}
+              icon={<PanelLeftClose />}
               onClick={onTogglePanel}
               title="收起/展开聊天面板"
             />
@@ -729,7 +729,7 @@ export default function ChatHeader({
                 minWidth: 0,
                 width: '100%',
                 maxWidth: '100%',
-                fontSize: 12.5
+                fontSize: 13
               }}
             />
             <div
@@ -827,8 +827,8 @@ export default function ChatHeader({
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div
                             style={{
-                              fontSize: 12.5,
-                              fontWeight: 600,
+                              fontSize: 13,
+                              fontWeight: 500,
                               color: 'var(--rn-ink)',
                               overflow: 'hidden',
                               textOverflow: 'ellipsis',

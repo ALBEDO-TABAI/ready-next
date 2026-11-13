@@ -42,7 +42,7 @@ export default function RefreshDock({
       }}
     >
       <IconButton
-        icon={loading ? <Loader2 className="animate-spin" style={{ color: 'var(--rn-accent)' }} /> : <RefreshCw />}
+        icon={loading ? <Loader2 className="animate-spin" style={{ color: 'var(--rn-ink-3)' }} /> : <RefreshCw />}
         onClick={onRefresh}
         title="刷新"
       />

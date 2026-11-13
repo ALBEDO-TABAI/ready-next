@@ -78,9 +78,9 @@ export function ThirdPartyNoticesPanel() {
                   className="flex w-full items-center gap-2 rounded-[8px] px-3 py-[7px] text-left hover:bg-[var(--rn-fill-2)]">
                   {isOpen ? <ChevronDown className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--rn-ink-2)' }} />
                     : <ChevronRight className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--rn-ink-2)' }} />}
-                  <span className="min-w-0 truncate text-[12.5px]" style={{ color: 'var(--rn-ink)' }}>{notice.name}</span>
+                  <span className="min-w-0 truncate text-[13px]" style={{ color: 'var(--rn-ink)' }}>{notice.name}</span>
                   {notice.version && <span className="sx-mono shrink-0 text-[11px]" style={{ color: 'var(--rn-ink-2)' }}>{notice.version}</span>}
-                  <span className="ml-auto shrink-0 text-[11.5px]" style={{ color: 'var(--rn-ink-2)' }}>
+                  <span className="ml-auto shrink-0 text-[12px]" style={{ color: 'var(--rn-ink-2)' }}>
                     {notice.license || '未声明'}{notice.textMissing ? ' · 缺全文' : ''}
                   </span>
                 </button>

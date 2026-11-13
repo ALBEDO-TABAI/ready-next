@@ -70,7 +70,6 @@ import {
   WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM,
   WORKBENCH_CANVAS_OUTER_PADDING_TOP,
   WORKBENCH_CANVAS_OUTER_PADDING_X,
-  WORKBENCH_TAB_ROW_HEIGHT,
 } from '../../modules/workbench/chrome'
 import { useRafResizeDrag } from '../../modules/workbench/useRafResizeDrag'
 
@@ -1249,290 +1248,241 @@ export default function BrowserMode({
           padding: `${WORKBENCH_CANVAS_OUTER_PADDING_TOP}px ${WORKBENCH_CANVAS_OUTER_PADDING_X}px ${WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM}px`,
         }}
       >
-        <div ref={shellRef} className="workbench-canvas-shell relative flex h-full min-h-0 flex-col">
-          <BrowserTopBar
-            isActive={isActive}
-            activeTab={activeTab}
-            urlInput={urlInput}
-            loading={activeTab?.loading || false}
-            canGoBack={activeTab?.canGoBack || false}
-            canGoForward={activeTab?.canGoForward || false}
-            isBookmarked={isBookmarked}
-            onUrlChange={setUrlInput}
-            onNavigate={handleNavigate}
-            onGoBack={handleGoBack}
-            onGoForward={handleGoForward}
-            onRefresh={handleRefresh}
-            onFocus={handleUrlFocus}
-            onBlur={handleUrlBlur}
-            onEditStart={handleBrowserEditStart}
-            onEditEnd={handleBrowserEditEnd}
-            onToggleBookmark={handleToggleBookmark}
-            onShowUtilityMenu={handleShowUtilityMenu}
-            fastCardOpen={fastCardPanelOpen || fastCardResultPanel !== null}
-            fastCardItemCount={fastCardItems.length}
-            onToggleFastCard={handleToggleFastCard}
-            ownershipStatus={browserOwnershipStatus}
-            onSwitchTab={(tabId) => { void handleHeaderTabClick(tabId, { shiftKey: false }) }}
-            feeds={pageCapabilities?.feeds}
-            reading={{
-              available: Boolean(pageCapabilities?.readable) && !shouldRenderSplitLayout,
-              shown: readingShown,
-              onToggle: () => setReadingView(readingShown || !activeTab ? null : { tabId: activeTab.id, url: activeTab.url }),
-            }}
-          />
+        <div className="workbench-canvas-shell relative flex h-full min-h-0 flex-col">
+          {/* The tab list lives in the shell's one sidebar (W2-T3). */}
+          <ShellNavigator mode="browser" label="标签页">
+            <BrowserTabList
+              tabs={tabs}
+              tabGroups={tabGroups}
+              activeTabId={activeTabId}
+              splitTabId={visibleSplitTab?.id || null}
+              onTabClick={handleHeaderTabClick}
+              onTabClose={handleCloseTab}
+              onNewTab={handleNewTab}
+              onReorderToRank={handleReorderToRank}
+              onCreateGroup={handleCreateGroup}
+              onAddToGroup={handleAddToGroup}
+              onRenameGroup={renameTabGroup}
+              onRecolorGroup={recolorTabGroup}
+              onSetGroupCollapsed={setTabGroupCollapsed}
+              onDisbandGroup={disbandTabGroup}
+              onDeleteGroup={handleDeleteGroup}
+              onNewTabInGroup={handleNewTabInGroup}
+              taskGroups={browserTaskShell.taskGroups}
+              onCloseTaskTabs={browserTaskShell.closeTaskTabs}
+            />
+          </ShellNavigator>
 
-          <div className="flex min-h-0 flex-1">
-            {/* The tab list lives in the shell's one sidebar (W2-T3). */}
-            <ShellNavigator mode="browser" label="标签页">
-              <BrowserTabList
-                tabs={tabs}
-                tabGroups={tabGroups}
-                activeTabId={activeTabId}
-                splitTabId={visibleSplitTab?.id || null}
-                onTabClick={handleHeaderTabClick}
-                onTabClose={handleCloseTab}
-                onNewTab={handleNewTab}
-                onReorderToRank={handleReorderToRank}
-                onCreateGroup={handleCreateGroup}
-                onAddToGroup={handleAddToGroup}
-                onRenameGroup={renameTabGroup}
-                onRecolorGroup={recolorTabGroup}
-                onSetGroupCollapsed={setTabGroupCollapsed}
-                onDisbandGroup={disbandTabGroup}
-                onDeleteGroup={handleDeleteGroup}
-                onNewTabInGroup={handleNewTabInGroup}
-                taskGroups={browserTaskShell.taskGroups}
-                onCloseTaskTabs={browserTaskShell.closeTaskTabs}
-              />
-            </ShellNavigator>
-
-            <div
-              ref={browserContentFrameRef}
-              data-browser-content-frame=""
-              style={{
-                position: 'relative',
-                zIndex: 1,
+          {/* The browser's one panel (V11): the address row is its head; the body frames the page(s) by the frame pad, and
+              every band, pane and stand-in for the page stays inside it. */}
+          <div ref={shellRef} className="rn-panel browser-panel">
+            <BrowserTopBar
+              isActive={isActive}
+              activeTab={activeTab}
+              urlInput={urlInput}
+              loading={activeTab?.loading || false}
+              canGoBack={activeTab?.canGoBack || false}
+              canGoForward={activeTab?.canGoForward || false}
+              isBookmarked={isBookmarked}
+              onUrlChange={setUrlInput}
+              onNavigate={handleNavigate}
+              onGoBack={handleGoBack}
+              onGoForward={handleGoForward}
+              onRefresh={handleRefresh}
+              onFocus={handleUrlFocus}
+              onBlur={handleUrlBlur}
+              onEditStart={handleBrowserEditStart}
+              onEditEnd={handleBrowserEditEnd}
+              onToggleBookmark={handleToggleBookmark}
+              onShowUtilityMenu={handleShowUtilityMenu}
+              fastCardOpen={fastCardPanelOpen || fastCardResultPanel !== null}
+              fastCardItemCount={fastCardItems.length}
+              onToggleFastCard={handleToggleFastCard}
+              ownershipStatus={browserOwnershipStatus}
+              onSwitchTab={(tabId) => { void handleHeaderTabClick(tabId, { shiftKey: false }) }}
+              feeds={pageCapabilities?.feeds}
+              reading={{
+                available: Boolean(pageCapabilities?.readable) && !shouldRenderSplitLayout,
+                shown: readingShown,
+                onToggle: () => setReadingView(readingShown || !activeTab ? null : { tabId: activeTab.id, url: activeTab.url }),
               }}
-              className="flex min-h-0 flex-1"
-            >
-            {shouldRenderSplitLayout && activeTab ? (
-              <div className="flex h-full min-w-0 flex-1 overflow-hidden" ref={splitContainerRef} style={{ gap: 0 }}>
-                <div
-                  ref={primarySplitPaneRef}
-                  className="flex min-w-0 flex-col overflow-hidden"
-                  style={{ flexBasis: agentPaneCollapsedVisible ? 'calc(100% - 164px)' : `${browserSplitRatio}%`, flexShrink: 0, flexGrow: 0 }}
-                >
+            />
+
+            <div className="rn-panel__body browser-panel__body" data-framed="true">
+              <div
+                ref={browserContentFrameRef}
+                data-browser-content-frame=""
+                style={{
+                  position: 'relative',
+                  zIndex: 1,
+                }}
+                className="flex h-full min-h-0"
+              >
+                {/* Two pages side by side in the one panel, a frame pad apart. The panes clip sideways only: each page's
+                    loading line sits in the frame gap above it. */}
+                {shouldRenderSplitLayout && activeTab ? (
+                  <div className="flex h-full min-w-0 flex-1 overflow-x-clip" ref={splitContainerRef} style={{ gap: 0 }}>
+                    <div
+                      ref={primarySplitPaneRef}
+                      className="flex min-w-0 flex-col overflow-x-clip"
+                      style={{ flexBasis: agentPaneCollapsedVisible ? 'calc(100% - 164px)' : `${browserSplitRatio}%`, flexShrink: 0, flexGrow: 0 }}
+                    >
+                      <BrowserShellLayout
+                        isElectron={isElectron}
+                        contentRef={contentRef}
+                        activeTab={activeTab}
+                        toastVisible={toastVisible}
+                        onDragOver={handleContentDragOver}
+                        onDrop={(event) => handleContentDrop(event, activeTab.id)}
+                        onRetry={() => void handleRetry(activeTab.id)}
+                        mediaDropActive={generatedImageDragActive}
+                        mediaUploadStatus={localMediaUploadStatus}
+                        band={<>{browserFind.bar}<BrowserTaskBandForTab tabId={activeTab.id} /></>}
+                      />
+                    </div>
+                    {!agentPaneCollapsedVisible && (
+                      <BrowserSplitResizeHandle
+                        onResize={handleSplitResize}
+                        onResizeStateChange={handleSplitResizeStateChange}
+                      />
+                    )}
+                    {agentPaneCollapsedVisible ? (
+                      <div
+                        className="flex h-full w-[164px] flex-shrink-0 items-start justify-center overflow-x-clip"
+                        style={{ paddingLeft: 'var(--rn-panel-pad)' }}
+                      >
+                        <AgentBrowserSupervisionPanel
+                          controlState={agentSupervision.controlState}
+                          tasks={agentSupervision.tasks}
+                          claims={agentSupervision.claims}
+                          requestInterruption={agentSupervision.requestInterruption}
+                          surfaces={agentSupervision.surfaces}
+                          activeWriteSurface={agentSupervision.activeWriteSurface}
+                          takeoverError={agentSupervision.takeoverError}
+                          variant="collapsedRail"
+                          onExpand={() => setAgentPaneCollapsed(false)}
+                        />
+                      </div>
+                    ) : visibleSplitTab ? (
+                      <div className="flex min-w-0 flex-1 flex-col overflow-x-clip">
+                        {isAgentSplitVisible && (
+                          <AgentBrowserSupervisionPanel
+                            controlState={agentSupervision.controlState}
+                            tasks={agentSupervision.tasks}
+                            claims={agentSupervision.claims}
+                            requestInterruption={agentSupervision.requestInterruption}
+                            surfaces={agentSupervision.surfaces}
+                            activeWriteSurface={agentSupervision.activeWriteSurface}
+                            takeoverError={agentSupervision.takeoverError}
+                            variant="pane"
+                            onCollapse={() => setAgentPaneCollapsed(true)}
+                            onClose={() => {
+                              setDismissedAgentTaskId(agentPaneTaskId)
+                              setAgentPaneCollapsed(false)
+                            }}
+                          />
+                        )}
+                        <BrowserShellLayout
+                          isElectron={isElectron}
+                          contentRef={splitContentRef}
+                          activeTab={visibleSplitTab}
+                          toastVisible={false}
+                          onDragOver={handleContentDragOver}
+                          onDrop={(event) => handleContentDrop(event, visibleSplitTab.id)}
+                          onRetry={() => void handleRetry(visibleSplitTab.id)}
+                          mediaDropActive={generatedImageDragActive}
+                          mediaUploadStatus={localMediaUploadStatus}
+                          band={<BrowserTaskBandForTab tabId={visibleSplitTab.id} />}
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+                ) : (
                   <BrowserShellLayout
                     isElectron={isElectron}
                     contentRef={contentRef}
                     activeTab={activeTab}
                     toastVisible={toastVisible}
                     onDragOver={handleContentDragOver}
-                    onDrop={(event) => handleContentDrop(event, activeTab.id)}
-                    onRetry={() => void handleRetry(activeTab.id)}
+                    onDrop={handleContentDrop}
+                    onRetry={() => void handleRetry()}
                     mediaDropActive={generatedImageDragActive}
                     mediaUploadStatus={localMediaUploadStatus}
-                    band={<>{browserFind.bar}<BrowserTaskBandForTab tabId={activeTab.id} /></>}
+                    band={<>{browserFind.bar}<BrowserTaskBandForTab tabId={activeTab?.id} /></>}
+                    cover={readingShown && activeTab ? <BrowserReadingView tabId={activeTab.id} url={activeTab.url} onClose={() => setReadingView(null)}
+                      onTranslate={selection => { void runFastCardTranslation({ kind: 'text', text: selection.text, pageUrl: selection.url, pageTitle: selection.title,
+                        domain: extractBrowserDomain(selection.url), tabId: activeTab.id, capturedAt: Date.now() }, detectFastCardTargetLanguage(selection.text)) }} /> : null}
+                  />
+                )}
+                <BrowserDiagnosticsDock
+                  browserDiagnostics={browserDiagnostics}
+                  onContinue={handleContinueBrowserTask}
+                  onRetry={handleRetryBrowserTask}
+                  onOpenTarget={handleOpenBrowserTarget}
+                  onRefresh={() => void refreshBrowserDiagnostics(true)}
+                />
+              </div>
+
+              {/* 浏览器过渡遮罩 - 动画结束后但浏览器未准备好时显示；它站在网页的位置：同一个框、同一个圆角。 */}
+              {!isBrowserHostFullyVisible && (
+                <div
+                  className="browser-transition-mask"
+                  style={{
+                    position: 'absolute',
+                    inset: 'var(--rn-panel-pad)',
+                    zIndex: 45,
+                    pointerEvents: 'none',
+                    borderRadius: 'var(--rn-r-panel-inset)',
+                    background: 'var(--rn-solid)',
+                  }}
+                />
+              )}
+
+              {shouldShowStartupPlaceholder && (
+                <div
+                  className="browser-surface-startup-mask"
+                  style={{
+                    position: 'absolute',
+                    inset: 'var(--rn-panel-pad)',
+                    zIndex: 50,
+                    pointerEvents: 'none',
+                    borderRadius: 'var(--rn-r-panel-inset)',
+                    background: 'var(--rn-solid)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 24,
+                      height: 24,
+                      borderRadius: '50%',
+                      border: '2px solid var(--rn-hair-2)',
+                      borderTopColor: 'var(--rn-ink-3)',
+                      animation: 'browserStartupSpinner 0.8s linear infinite',
+                    }}
                   />
                 </div>
-                {!agentPaneCollapsedVisible && (
-                  <BrowserSplitResizeHandle
-                    onResize={handleSplitResize}
-                    onResizeStateChange={handleSplitResizeStateChange}
-                  />
-                )}
-                {agentPaneCollapsedVisible ? (
-                  <div
-                    className="relative flex h-full w-[164px] flex-shrink-0 items-start justify-center overflow-hidden px-2 pt-3"
-                    style={{
-                      background: 'color-mix(in srgb, var(--rn-sheet) 90%, transparent)',
-                      boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--rn-accent) 26%, transparent)',
-                    }}
-                  >
-                    <AgentBrowserSupervisionPanel
-                      controlState={agentSupervision.controlState}
-                      tasks={agentSupervision.tasks}
-                      claims={agentSupervision.claims}
-                      requestInterruption={agentSupervision.requestInterruption}
-                      surfaces={agentSupervision.surfaces}
-                      activeWriteSurface={agentSupervision.activeWriteSurface}
-                      takeoverError={agentSupervision.takeoverError}
-                      variant="collapsedRail"
-                      onExpand={() => setAgentPaneCollapsed(false)}
-                    />
-                    <div
-                      aria-hidden
-                      className="pointer-events-none absolute inset-0"
-                      style={{
-                        borderRadius: 'var(--rn-r-sheet)',
-                        boxShadow: 'inset 0 0 18px color-mix(in srgb, var(--rn-accent) 12%, transparent)',
-                      }}
-                    />
-                  </div>
-                ) : visibleSplitTab ? (
-                  <div
-                    className="relative flex min-w-0 flex-1 flex-col overflow-hidden"
-                    style={isAgentSplitVisible
-                      ? {
-                          background: 'color-mix(in srgb, var(--rn-sheet) 88%, transparent)',
-                          boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--rn-accent) 36%, transparent), inset 0 0 18px color-mix(in srgb, var(--rn-accent) 16%, transparent)',
-                        }
-                      : undefined}
-                  >
-                    {isAgentSplitVisible && (
-                      <AgentBrowserSupervisionPanel
-                        controlState={agentSupervision.controlState}
-                        tasks={agentSupervision.tasks}
-                        claims={agentSupervision.claims}
-                        requestInterruption={agentSupervision.requestInterruption}
-                        surfaces={agentSupervision.surfaces}
-                        activeWriteSurface={agentSupervision.activeWriteSurface}
-                        takeoverError={agentSupervision.takeoverError}
-                        variant="pane"
-                        onCollapse={() => setAgentPaneCollapsed(true)}
-                        onClose={() => {
-                          setDismissedAgentTaskId(agentPaneTaskId)
-                          setAgentPaneCollapsed(false)
-                        }}
-                      />
-                    )}
-                    <BrowserShellLayout
-                      isElectron={isElectron}
-                      contentRef={splitContentRef}
-                      activeTab={visibleSplitTab}
-                      toastVisible={false}
-                      onDragOver={handleContentDragOver}
-                      onDrop={(event) => handleContentDrop(event, visibleSplitTab.id)}
-                      onRetry={() => void handleRetry(visibleSplitTab.id)}
-                      mediaDropActive={generatedImageDragActive}
-                      mediaUploadStatus={localMediaUploadStatus}
-                      band={<BrowserTaskBandForTab tabId={visibleSplitTab.id} />}
-                    />
-                    {isAgentSplitVisible && (
-                      <div
-                        aria-hidden
-                        className="pointer-events-none absolute inset-0"
-                        style={{
-                          borderRadius: 'var(--rn-r-sheet)',
-                          boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--rn-accent) 42%, transparent), inset 0 0 24px color-mix(in srgb, var(--rn-accent) 18%, transparent)',
-                        }}
-                      />
-                    )}
-                  </div>
-                ) : null}
-              </div>
-            ) : (
-              <BrowserShellLayout
-                isElectron={isElectron}
-                contentRef={contentRef}
-                activeTab={activeTab}
-                toastVisible={toastVisible}
-                onDragOver={handleContentDragOver}
-                onDrop={handleContentDrop}
-                onRetry={() => void handleRetry()}
-                mediaDropActive={generatedImageDragActive}
-                mediaUploadStatus={localMediaUploadStatus}
-                band={<>{browserFind.bar}<BrowserTaskBandForTab tabId={activeTab?.id} /></>}
-                cover={readingShown && activeTab ? <BrowserReadingView tabId={activeTab.id} url={activeTab.url} onClose={() => setReadingView(null)}
-                  onTranslate={selection => { void runFastCardTranslation({ kind: 'text', text: selection.text, pageUrl: selection.url, pageTitle: selection.title,
-                    domain: extractBrowserDomain(selection.url), tabId: activeTab.id, capturedAt: Date.now() }, detectFastCardTargetLanguage(selection.text)) }} /> : null}
-              />
-            )}
-              <BrowserDiagnosticsDock
-                browserDiagnostics={browserDiagnostics}
-                onContinue={handleContinueBrowserTask}
-                onRetry={handleRetryBrowserTask}
-                onOpenTarget={handleOpenBrowserTarget}
-                onRefresh={() => void refreshBrowserDiagnostics(true)}
-              />
+              )}
             </div>
-          </div>
 
-          {/* 浏览器过渡遮罩 - 动画结束后但浏览器未准备好时显示 */}
-          {!isBrowserHostFullyVisible && (
-            <div
-              className="browser-transition-mask"
-              style={{
-                position: 'absolute',
-                top: WORKBENCH_TAB_ROW_HEIGHT,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                zIndex: 45,
-                pointerEvents: 'none',
-                borderRadius: 'var(--rn-r-sheet)',
-                background: 'var(--rn-sheet)',
-                overflow: 'hidden',
-              }}
-            >
-              {/* 骨架结构 */}
-              <div className="flex h-full flex-col">
-                {/* 进度条占位（如果加载中） */}
-                {activeTab?.loading && (
-                  <div className="h-0.5 w-full" style={{ background: 'var(--rn-fill-2)' }}>
-                    <div
-                      className="h-full rounded-r"
-                      style={{
-                        background: 'var(--rn-accent)',
-                        width: '60%',
-                        animation: 'browserSkeletonProgress 1.5s ease-in-out infinite',
-                      }}
-                    />
-                  </div>
-                )}
-                {/* 内容区域占位 */}
-                <div className="flex-1" style={{ background: 'var(--rn-sheet)' }} />
-              </div>
-            </div>
-          )}
-
-          {fastCardTransferVisible && <div style={{ position: 'absolute', inset: '70px 20px auto auto', width: 440, zIndex: 80 }}>
-            {fastCardSaveItems && <FastCardSaveDialog
-              onSave={target => useFastCard.getState().saveToCanvas(fastCardSaveItems, target)}
-              onRetry={request => useFastCard.getState().retryTransfer(request)}
-              onCancel={() => setFastCardSaveItems(null)} />}
-            {fastCardTransferReceipt && <div role="status" className="rn-float flex flex-wrap items-center gap-2 p-3" style={{ color: 'var(--rn-ink)' }}>
-              <span className="min-w-0 flex-1">已存到《{fastCardTransferReceipt.title}》</span>
-              <Button size="sm" variant="ghost" onClick={() => {
-                void openReadyRef({ kind: 'canvas', id: fastCardTransferReceipt.objectId }, 'browser').then(() => useFastCard.getState().dismissReceipt()).catch(error => useFastCard.setState({ syncState: { kind: 'error', message: String(error) } }))
-              }}>打开</Button>
-              <Button size="sm" variant="ghost" disabled={fastCardSyncState.kind === 'saving'} onClick={() => { void useFastCard.getState().undoTransfer() }}>撤销</Button>
-              <Button size="sm" variant="ghost" onClick={() => useFastCard.getState().dismissReceipt()}>关闭</Button>
+            {fastCardTransferVisible && <div style={{ position: 'absolute', inset: '70px 20px auto auto', width: 440, zIndex: 80 }}>
+              {fastCardSaveItems && <FastCardSaveDialog
+                onSave={target => useFastCard.getState().saveToCanvas(fastCardSaveItems, target)}
+                onRetry={request => useFastCard.getState().retryTransfer(request)}
+                onCancel={() => setFastCardSaveItems(null)} />}
+              {fastCardTransferReceipt && <div role="status" className="rn-float flex flex-wrap items-center gap-2 p-3" style={{ color: 'var(--rn-ink)' }}>
+                <span className="min-w-0 flex-1">已存到《{fastCardTransferReceipt.title}》</span>
+                <Button size="sm" variant="ghost" onClick={() => {
+                  void openReadyRef({ kind: 'canvas', id: fastCardTransferReceipt.objectId }, 'browser').then(() => useFastCard.getState().dismissReceipt()).catch(error => useFastCard.setState({ syncState: { kind: 'error', message: String(error) } }))
+                }}>打开</Button>
+                <Button size="sm" variant="ghost" disabled={fastCardSyncState.kind === 'saving'} onClick={() => { void useFastCard.getState().undoTransfer() }}>撤销</Button>
+                <Button size="sm" variant="ghost" onClick={() => useFastCard.getState().dismissReceipt()}>关闭</Button>
+              </div>}
+              {fastCardSyncState.kind === 'error' && <p role="alert">{fastCardSyncState.message}</p>}
             </div>}
-            {fastCardSyncState.kind === 'error' && <p role="alert">{fastCardSyncState.message}</p>}
-          </div>}
-
-          {shouldShowStartupPlaceholder && (
-            <div
-              className="browser-surface-startup-mask"
-              style={{
-                position: 'absolute',
-                top: WORKBENCH_TAB_ROW_HEIGHT,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                zIndex: 50,
-                pointerEvents: 'none',
-                borderRadius: 'var(--rn-r-sheet)',
-                background: 'var(--rn-sheet)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <div
-                style={{
-                  width: 24,
-                  height: 24,
-                  borderRadius: '50%',
-                  border: '2px solid var(--rn-hair-2)',
-                  borderTopColor: 'var(--rn-accent)',
-                  animation: 'browserStartupSpinner 0.8s linear infinite',
-                }}
-              />
-            </div>
-          )}
+          </div>
         </div>
       </div>
     </div>

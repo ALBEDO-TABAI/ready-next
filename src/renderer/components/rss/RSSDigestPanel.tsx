@@ -214,7 +214,7 @@ export default function RSSDigestPanel({ active, view, definitions = [], feedSou
           return <div className="rss-digest-month" key={month.key}>
             <button type="button" className="rss-digest-month__head" aria-expanded={!folded}
               onClick={() => setFoldedMonths((old) => { const nextSet = new Set(old); if (nextSet.has(month.key)) nextSet.delete(month.key); else nextSet.add(month.key); return nextSet })}>
-              <ChevronRight size={13} strokeWidth={2} /><span>{month.label}</span><small>{month.editions.length}</small>
+              <ChevronRight size={14} strokeWidth={1.5} /><span>{month.label}</span><small>{month.editions.length}</small>
             </button>
             {!folded && month.editions.map((edition) => {
               const parts = dateParts(edition.until, edition.timezone)

@@ -176,10 +176,10 @@ export default function SessionCompleteToast() {
             }}
           />
           <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
-            <span style={{ fontSize: 12.5, fontWeight: 650, lineHeight: 1.25 }}>
+            <span style={{ fontSize: 13, fontWeight: 500, lineHeight: 1.25 }}>
               {toast.sessionLabel} {kindLabel(toast.kind)}
             </span>
-            <span style={{ fontSize: 11.5, color: 'var(--rn-ink-2)', lineHeight: 1.25 }}>
+            <span style={{ fontSize: 12, color: 'var(--rn-ink-2)', lineHeight: 1.25 }}>
               点击切回查看
             </span>
           </span>

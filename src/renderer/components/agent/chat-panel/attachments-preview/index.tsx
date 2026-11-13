@@ -162,7 +162,7 @@ export function AttachmentPreviewModal({
                 fontSize: 12,
                 lineHeight: 1.6,
                 color: 'var(--rn-ink)',
-                border: '1px solid var(--rn-hair-2)',
+                border: '.5px solid var(--rn-hair-2)',
                 borderRadius: 12,
                 padding: 14
               }}
@@ -175,7 +175,7 @@ export function AttachmentPreviewModal({
             <div
               style={{
                 borderRadius: 12,
-                border: '1px solid var(--rn-hair-2)',
+                border: '.5px solid var(--rn-hair-2)',
                 padding: 14,
                 display: 'flex',
                 flexDirection: 'column',

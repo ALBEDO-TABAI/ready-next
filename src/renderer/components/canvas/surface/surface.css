@@ -11,12 +11,12 @@
     touch-action: none; user-select: none; outline: none;
   }
   .rn-canvas.canvas-lab { height: 100dvh; }
-  .rn-canvas:focus-visible { box-shadow: inset 0 0 0 2px var(--canvas-accent); }
+  .rn-canvas:focus-visible { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--rn-ink) 55%, transparent); }
   .rn-canvas button { cursor: pointer; border: 0; border-radius: var(--rn-r-sm); background: transparent; color: inherit; padding: 6px 9px; font: inherit; }
   .rn-canvas button:hover { background: var(--rn-fill-2); }
-  .rn-canvas button:focus-visible { outline: 2px solid var(--canvas-accent); }
+  .rn-canvas button:focus-visible { outline: 2px solid color-mix(in srgb, var(--rn-ink) 55%, transparent); outline-offset: 2px; }
   .rn-canvas button:disabled { opacity: .35; cursor: default; }
-  .rn-canvas button[aria-pressed='true'] { background: var(--canvas-accent); color: var(--rn-accent-ink); }
+  .rn-canvas button[aria-pressed='true'] { background: var(--rn-capsule-on-bg); box-shadow: var(--rn-capsule-on-shadow); color: var(--rn-capsule-on-ink); }
   /* Chrome on the stage (W4 §2.1, MS1): a few bars in the float material (.rn-float, its radius); W1 buttons inside. */
   .rn-canvas :where(.canvas-crumbs, .canvas-corner, .canvas-dock, .canvas-selection-bar) { position: absolute; z-index: 20; display: flex; align-items: center; gap: 2px; padding: 4px; }
   .rn-canvas .canvas-crumbs { left: 16px; top: 14px; max-width: calc(50% - 32px); padding: 4px 14px 4px 6px; overflow: hidden; }
@@ -27,7 +27,7 @@
   .rn-canvas .canvas-dock { left: 50%; bottom: 18px; transform: translateX(-50%); }
   .rn-canvas .canvas-selection-bar { transform: translateX(-50%); z-index: 21; }
   .rn-canvas .canvas-count { position: relative; }
-  .rn-canvas .canvas-icon-badge { position: absolute; top: 1px; right: 0; min-width: 15px; height: 15px; padding: 0 4px; border-radius: var(--rn-r-pill); background: var(--rn-ink-2); color: var(--rn-sheet); font: 500 var(--rn-fs-2xs)/15px var(--rn-font-mono); text-align: center; pointer-events: none; }
+  .rn-canvas .canvas-icon-badge { position: absolute; top: 1px; right: 0; min-width: 15px; height: 15px; padding: 0 4px; border-radius: var(--rn-r-pill); background: var(--rn-ink-2); color: var(--rn-on-inverse); font: 500 var(--rn-fs-2xs)/15px var(--rn-font-mono); text-align: center; pointer-events: none; }
   .rn-canvas .canvas-dock-sep { width: 1px; height: 20px; margin: 0 4px; background: var(--rn-hair); flex: none; }
   .rn-canvas .canvas-zoom { min-width: 56px; font-variant-numeric: tabular-nums; }
   .rn-canvas .canvas-search { display: flex; align-items: center; gap: 2px; padding-left: 10px; color: var(--rn-ink-3); }
@@ -44,7 +44,7 @@
   .rn-canvas .canvas-card { position: absolute; box-sizing: border-box; background: var(--canvas-card); border-radius: var(--rn-r-lg); box-shadow: var(--rn-shadow-1); }
   .rn-canvas .canvas-card[data-selected='true'] { outline: 2px solid var(--canvas-accent); }
   .rn-canvas .canvas-card[data-lightweight='true'] { box-shadow: none; pointer-events: none; }
-  .rn-canvas .canvas-card[data-kind='group'] { background: var(--rn-fill); border: 1px solid var(--rn-hair-2); box-shadow: none; }
+  .rn-canvas .canvas-card[data-kind='group'] { background: var(--rn-fill); border: .5px solid var(--rn-hair-2); box-shadow: none; }
   .rn-canvas .canvas-card[data-kind='graphic'] { background: transparent; box-shadow: none; }
   .rn-canvas .canvas-card[data-kind='audio'], .rn-canvas .canvas-card[data-kind='video'] { background: var(--rn-inverse); color: var(--rn-on-inverse); }
   .rn-canvas .canvas-card-content { width: 100%; height: 100%; box-sizing: border-box; padding: 16px; overflow: hidden; overflow-wrap: anywhere; border-radius: inherit; }
@@ -83,7 +83,7 @@
   .rn-canvas .canvas-markdown .canvas-md-link { text-decoration: underline; text-decoration-color: var(--rn-hair-2); text-underline-offset: 3px; }
   .rn-canvas .canvas-markdown .canvas-md-image { color: var(--rn-ink-3); }
   .rn-canvas .canvas-markdown table { border-collapse: collapse; font-size: 12px; }
-  .rn-canvas .canvas-markdown :where(th, td) { padding: 2px 6px; box-shadow: inset 0 -1px 0 var(--rn-hair); text-align: left; }
+  .rn-canvas .canvas-markdown :where(th, td) { padding: 2px 6px; box-shadow: inset 0 -.5px 0 var(--rn-hair); text-align: left; }
   .rn-canvas .canvas-group-label { position: absolute; top: -24px; left: 12px; font-size: 12px; }
   .rn-canvas .canvas-resize { position: absolute; right: -7px; bottom: -7px; width: 22px; height: 22px; padding: 0; border-right: 3px solid var(--canvas-accent); border-bottom: 3px solid var(--canvas-accent); border-radius: 0 0 16px 0; cursor: nwse-resize; }
   .rn-canvas .canvas-clusters, .rn-canvas .canvas-edges, .rn-canvas .canvas-overlay { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }

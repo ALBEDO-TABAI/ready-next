@@ -1,15 +1,16 @@
-/* 技能追问（W1 B13）：对话里的一块安静的填充（与浏览器任务卡同一种样子，玻璃上不另起纸面），
+/* 技能追问（W1 B13，V2）：对话里的一块嵌片玻璃（不另起面板），
    答案是一组行，回复框与提交按钮是共用基元。只用 --rn-*。 */
 .skill-ask-user {
   padding: var(--rn-s3);
-  border-radius: var(--rn-r-md);
-  background: var(--rn-fill);
+  border-radius: var(--rn-r-card);
+  background: var(--rn-inlay);
+  box-shadow: inset 0 1px 0 var(--rn-glass-inner-hi), inset 0 0 0 .5px var(--rn-hair-2);
   color: var(--rn-ink);
 }
 
 .skill-ask-user__eyebrow {
   margin-bottom: 6px;
-  font: 600 var(--rn-fs-sm)/1.4 var(--rn-font-ui);
+  font: 500 var(--rn-t-meta)/var(--rn-lh-meta) var(--rn-font-ui);
   color: var(--rn-ink-3);
 }
 
@@ -20,7 +21,7 @@
 
 .skill-ask-user__question {
   margin-bottom: var(--rn-s3);
-  font: 400 14px/1.5 var(--rn-font-ui);
+  font: 400 var(--rn-t-body)/var(--rn-lh-body) var(--rn-font-ui);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -32,30 +33,32 @@
   margin-bottom: var(--rn-s3);
 }
 
-/* 一个答案一行：纸色的行加发丝边；选中的是分段控件选中项的样子 */
+/* 一个答案一行：安静的填充行；选中是 fill-2、墨色、500 加 .5px 发丝圈（V5） */
 .skill-ask-user__option {
   width: 100%;
   min-height: 38px;
   padding: var(--rn-s2) var(--rn-s3);
   border: 0;
-  border-radius: var(--rn-r-control);
-  background: var(--rn-sheet);
-  box-shadow: inset 0 0 0 1px var(--rn-hair);
+  border-radius: var(--rn-r-sm);
+  background: var(--rn-fill);
+  box-shadow: none;
   color: inherit;
-  font: 400 var(--rn-fs-md)/1.45 var(--rn-font-ui);
+  font: 400 var(--rn-t-body)/var(--rn-lh-body) var(--rn-font-ui);
   text-align: left;
   white-space: normal;
   overflow-wrap: anywhere;
   cursor: pointer;
-  transition: background-color var(--rn-d-1) var(--rn-ease-out), box-shadow var(--rn-d-1) var(--rn-ease-out);
+  transition: background-color var(--rn-d-1) var(--rn-ease-std), box-shadow var(--rn-d-1) var(--rn-ease-std);
 }
 
 .skill-ask-user__option:hover:not(:disabled) {
-  box-shadow: inset 0 0 0 1px var(--rn-hair-2);
+  background: var(--rn-fill-2);
 }
 
 .skill-ask-user__option[aria-pressed='true'] {
-  box-shadow: inset 0 0 0 1.5px var(--rn-ink-3), var(--rn-card-shadow);
+  background: var(--rn-fill-2);
+  box-shadow: inset 0 0 0 .5px var(--rn-hair-2);
+  color: var(--rn-ink);
   font-weight: 500;
 }
 
@@ -67,12 +70,11 @@
   opacity: 0.62;
 }
 
-/* On the filled block the field is paper like the answer rows (a fill on a fill reads as a grey well). */
+/* The reply is the shared field's well (V2), full width. */
 .skill-ask-user__reply.rn-field {
   width: 100%;
   min-height: 76px;
   resize: none;
-  background: var(--rn-sheet);
 }
 
 .skill-ask-user__error {

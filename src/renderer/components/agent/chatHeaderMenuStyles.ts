@@ -14,7 +14,7 @@ export const CHAT_HEADER_MENU_SECTION_LABEL_STYLE: CSSProperties = {
 }
 
 export const CHAT_HEADER_MENU_META_STYLE: CSSProperties = {
-  fontSize: 10.5,
+  fontSize: 11,
   color: 'var(--rn-ink-3)',
   marginTop: 3,
   lineHeight: 1.35,

@@ -107,7 +107,7 @@ export function RSSDraftStoreSettingsPanel() {
               style={{
                 paddingLeft: index === 0 ? 0 : 28,
                 paddingRight: 28,
-                borderLeft: index === 0 ? 'none' : '1px solid var(--rn-hair)',
+                borderLeft: index === 0 ? 'none' : '.5px solid var(--rn-hair)',
               }}
             >
               <span className="sx-stat__value">
@@ -162,7 +162,7 @@ export function RSSDraftStoreSettingsPanel() {
                 style={{ gridTemplateColumns: RSS_DRAFT_GRID_COLUMNS, minHeight: 60 }}
               >
                 <div className="min-w-0 py-2.5">
-                  <div className="truncate text-[13px] font-semibold" style={{ color: 'var(--rn-ink)' }} title={source.sourceName}>
+                  <div className="truncate text-[13px] font-medium" style={{ color: 'var(--rn-ink)' }} title={source.sourceName}>
                     {source.sourceName}
                   </div>
                   <div className="sx-meta mt-0.5 truncate" title={source.sourceUrl}>

@@ -104,8 +104,8 @@ export default function MorphSegmentedControl({
                     alignItems: 'center',
                     justifyContent: 'center',
                     height: '100%',
-                    color: isActive ? 'var(--rn-accent)' : 'var(--rn-ink-3)',
-                    fontWeight: isActive ? 600 : 500,
+                    color: isActive ? 'var(--rn-ink)' : 'var(--rn-ink-3)',
+                    fontWeight: 500,
                   }}
                 >
                   {Icon && <Icon className="flex-shrink-0" style={{ width: 13, height: 13 }} strokeWidth={2} />}

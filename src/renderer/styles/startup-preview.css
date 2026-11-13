@@ -32,11 +32,11 @@ html.ready-startup-preview-root body {
   width: min(600px, calc(100vw - 24px));
   aspect-ratio: 3.85 / 1;
   overflow: hidden;
-  border-radius: clamp(18px, 2.5vw, 26px);
-  /* The brand card is a sheet of paper (W1 DL2), in the theme the window opens in. */
-  background: var(--rn-sheet);
-  box-shadow: var(--rn-sheet-shadow), inset 0 0 0 1px var(--rn-hair);
-  transition: opacity 160ms linear;
+  border-radius: var(--rn-r-dialog);
+  /* The brand card stands alone over whatever is behind the window (nothing to blur): opaque, with the panel's edges. */
+  background: var(--rn-solid);
+  box-shadow: var(--rn-sheet-shadow);
+  transition: opacity var(--rn-d-2) linear;
 }
 
 .startup-preview__matrix {

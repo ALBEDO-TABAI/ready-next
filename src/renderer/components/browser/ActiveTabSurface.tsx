@@ -66,7 +66,7 @@ export default function ActiveTabSurface({
   const tabIcon = tab.loading ? (
     <Loader2
       style={{ width: 14, height: 14 }}
-      className="animate-spin flex-shrink-0 text-[var(--rn-accent)]"
+      className="animate-spin flex-shrink-0 text-[var(--rn-ink-3)]"
       strokeWidth={2}
     />
   ) : tab.favicon ? (
@@ -100,7 +100,7 @@ export default function ActiveTabSurface({
       }}
       className="group relative flex min-w-0 items-center"
       style={{
-        borderRadius: 'var(--rn-r-md)',
+        borderRadius: 'var(--rn-r-sm)',
         height: 34,
         width,
         minWidth,
@@ -108,12 +108,12 @@ export default function ActiveTabSurface({
         paddingLeft: 12,
         paddingRight: 10,
         gap: 8,
-        // Editing, the tab becomes the shared field (W1 §5): paper with an ink edge, never the signal colour.
+        // Editing, the tab becomes the shared field (V2 well) with an ink edge, never the signal colour.
         background: mode === 'primed' || mode === 'expanded' || mode === 'editing'
-          ? 'var(--rn-sheet)'
-          : 'transparent',
+          ? 'var(--rn-well)'
+          : 'var(--rn-fill-2)',
         boxShadow: mode === 'primed' || mode === 'expanded' || mode === 'editing'
-          ? 'inset 0 0 0 1.5px var(--rn-ink-3)'
+          ? 'inset 0 1px 2px var(--rn-well-shade), inset 0 0 0 1px var(--rn-ink-3)'
           : 'none',
         transition: 'background-color var(--rn-d-1) var(--rn-ease-out), box-shadow var(--rn-d-1) var(--rn-ease-out)',
       }}

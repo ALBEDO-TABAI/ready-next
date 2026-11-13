@@ -5,6 +5,8 @@ status: planned
 enforce: true
 ---
 
+> 自 2026-11-13 起，DL2、DL4、DL5、DL7、DL9、DL10 由 [V1–V16 设计语言合同](2026-11-13-ready-next-vvf-design-language-implementation.md) 取代。DL11a 中“上留白放标签条或地址栏”自 2026-11-13 起由新合同 V11、V15 取代，上下留白相等这一点仍然有效。其余继续有效。下文保留原文和历史记录。
+
 # Ready Next W1 设计系统：一块玻璃，几张纸，一个信号色
 
 属于 [收束路线图](2026-11-11-ready-next-coherence-roadmap.md) 的 W1，落实 E2、E10、E11。证据：[a-design](../audits/2026-11-11-ready-next-coherence-audit/a-design.md) 与实机观察 O6–O11。视觉意图以 [设计基准页](../../design/ready-next-design-reference.html) 为准：本文的条文与基准页不一致时，先停下来对齐两者，再动代码。

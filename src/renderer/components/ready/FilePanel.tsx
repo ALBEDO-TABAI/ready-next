@@ -102,7 +102,7 @@ export default function FilePanel({ onFileDrop, onFileOpen }: FilePanelProps) {
       style={{
         width: 180,
         // A region on the window glass (DL1): no background of its own, a hairline to its left.
-        borderLeft: '1px solid var(--rn-hair)',
+        borderLeft: '.5px solid var(--rn-hair)',
         padding: '12px 10px',
         gap: 8
       }}
@@ -110,7 +110,7 @@ export default function FilePanel({ onFileDrop, onFileOpen }: FilePanelProps) {
       {/* Title + file count + add button */}
       <div className="flex items-center justify-between">
         <div className="flex items-center" style={{ gap: 6 }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--rn-ink)' }}>文件管理</span>
+          <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--rn-ink)' }}>文件管理</span>
           <span style={{
             fontSize: 10, color: 'var(--rn-ink-3)',
             background: 'var(--rn-fill)',

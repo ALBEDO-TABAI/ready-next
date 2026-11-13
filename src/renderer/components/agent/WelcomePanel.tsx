@@ -67,21 +67,31 @@ export function WelcomePanelView({
     <div
       data-ready-welcome="true"
       className="flex w-full flex-col items-center"
-      style={{ gap: 18, padding: '12px 16px' }}
+      style={{ padding: '12px 16px' }}
     >
       <ReadyDotRMark />
 
+      {/* The wordmark face (V12). Instrument Serif has a smaller x-height than the UI face, so it is set 1.1× the title
+          size, as vvf sets its inline wordmark. 16 below the mark, 24 above the cards. */}
       <span
-        className="t-subtitle"
-        data-typography-role="subtitle"
-        style={{ color: 'var(--rn-ink-2)', textAlign: 'center' }}
+        data-typography-role="wordmark"
+        style={{
+          marginTop: 16,
+          fontFamily: 'var(--rn-font-wordmark)',
+          fontWeight: 400,
+          fontSize: 'calc(var(--rn-t-title) * 1.1)',
+          lineHeight: 'var(--rn-lh-title)',
+          letterSpacing: '-0.01em',
+          color: 'var(--rn-ink)',
+          textAlign: 'center',
+        }}
       >
         Ready for work , Ready for life.
       </span>
 
       <div
         className="grid w-full grid-cols-2"
-        style={{ gap: 8 }}
+        style={{ gap: 8, marginTop: 24 }}
         aria-live="polite"
         aria-label="根据文件涌现生成的下一步建议"
       >
@@ -93,13 +103,13 @@ export function WelcomePanelView({
             onClick={() => onSetInputSuggestion(suggestion.prompt)}
             aria-label={`将建议填入输入框：${suggestion.label}`}
             title={`${suggestion.label}：${suggestion.description}`}
-            className="group min-w-0 text-left transition-[background-color,border-color,transform] duration-150 ease-out hover:-translate-y-px hover:bg-[var(--rn-fill-2)] active:translate-y-0 active:scale-[0.99]"
+            className="group min-w-0 text-left transition-[background-color,transform] duration-150 ease-out bg-[var(--rn-inlay)] hover:-translate-y-px hover:bg-[var(--rn-inlay-hover)] active:translate-y-0 active:scale-[0.99]"
             style={{
               minHeight: 68,
               padding: 12,
-              borderRadius: 'var(--rn-r-md)',
-              border: '1px solid var(--rn-hair-2)',
-              background: 'transparent',
+              borderRadius: 'var(--rn-r-card)',
+              border: 0,
+              boxShadow: 'inset 0 1px 0 var(--rn-glass-inner-hi), inset 0 0 0 .5px var(--rn-hair-2)',
               display: 'flex',
               alignItems: 'flex-start',
               gap: 8,

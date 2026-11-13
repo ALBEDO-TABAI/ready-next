@@ -77,7 +77,7 @@
 .rn-library .highlight-write textarea { width: 100%; }
 .rn-library .highlight-tools p, .rn-library .rd-note-item p { width: 100%; padding: 0 4px; white-space: pre-wrap; color: var(--rn-ink-2); }
 .rn-library .rd-notes-list section + section { margin-top: 8px; }
-.rn-library .rd-note-item { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 8px 10px; border-bottom: 1px solid var(--rn-hair); }
+.rn-library .rd-note-item { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 8px 10px; border-bottom: .5px solid var(--rn-hair); }
 .rn-library .rd-note-item small { padding: 0 4px; color: var(--rn-ink-3); }
 /* the quote itself, with its marker colour along the edge: content, not a control */
 .rn-library .rd-note-item > button:first-child { display: block; width: 100%; padding: 2px 0 2px 10px; border: 0; border-left: 3px solid; background: transparent; color: var(--rn-ink); font: inherit; line-height: 1.6; text-align: left; white-space: pre-wrap; }

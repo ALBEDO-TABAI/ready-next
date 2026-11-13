@@ -83,14 +83,14 @@ export function GridItemCard({
       onContextMenu={onContextMenu}
       data-file-grid-card="true"
       data-selected={isActive ? 'true' : undefined}
-      // On the glass the card is only an area (hover fill, the selected one in the signal colour's soft fill);
-      // the thumbnail inside is the object, a small piece of paper (W1 DL1–DL3, DL5).
-      className="rounded-[8px] border text-left transition-[background-color,border-color] hover:bg-[var(--rn-fill)]"
+      // On the glass the card is only an area (hover fill, the selected one in the selected fill, V5; a drop target
+      // in the signal colour's soft fill); the thumbnail inside is the object, a small inlay (V2).
+      className="rounded-[var(--rn-r-sm)] border text-left transition-[background-color,border-color] hover:bg-[var(--rn-fill)]"
       style={{
         position: 'relative',
         padding: '8px 8px 10px',
         borderColor: isDropAccent ? 'var(--rn-accent)' : appearanceColor ?? 'transparent',
-        background: isDropTarget || isActive ? 'var(--rn-accent-soft)' : undefined,
+        background: isDropTarget ? 'var(--rn-accent-soft)' : isActive ? 'var(--rn-fill-2)' : undefined,
       }}
     >
       <FileAppearanceColorDot
@@ -109,7 +109,7 @@ export function GridItemCard({
               height: 8,
               borderRadius: '50%',
               background: 'var(--rn-accent)',
-              boxShadow: '0 0 0 2px var(--rn-sheet)',
+              boxShadow: '0 0 0 2px var(--rn-solid)',
               zIndex: 3,
               top: browserDropLine === 'before' ? -4 : undefined,
               bottom: browserDropLine === 'after' ? -4 : undefined,
@@ -132,8 +132,8 @@ export function GridItemCard({
         </>
       )}
       <div
-        className="rounded-[8px] flex items-center justify-center overflow-hidden"
-        style={{ height: previewHeight, background: 'var(--rn-sheet)', boxShadow: 'var(--rn-card-shadow)', color: 'var(--rn-ink-3)' }}
+        className="rounded-[var(--rn-r-sm)] flex items-center justify-center overflow-hidden"
+        style={{ height: previewHeight, background: 'var(--rn-inlay)', boxShadow: 'inset 0 1px 0 var(--rn-glass-inner-hi), inset 0 0 0 .5px var(--rn-hair-2)', color: 'var(--rn-ink-3)' }}
       >
         {customIcon ? (
           <CustomFileIcon icon={customIcon} size={Math.max(28, Math.min(46, Math.round(previewHeight * 0.5)))} />
@@ -149,8 +149,8 @@ export function GridItemCard({
           fileIcon(item, false, appearance, 18)
         )}
       </div>
-      <p className="mt-2 text-[11px] truncate px-1" style={{ color: isActive ? 'var(--rn-accent-text)' : 'var(--rn-ink)' }} title={item.name}>{item.name}</p>
-      <p className="text-[10px] px-1" style={{ color: 'var(--rn-ink-3)' }}>
+      <p className="mt-2 text-[11px] truncate px-1" style={{ color: 'var(--rn-ink)', fontWeight: isActive ? 500 : 400 }} title={item.name}>{item.name}</p>
+      <p className="text-[11px] px-1" style={{ color: 'var(--rn-ink-3)', fontVariantNumeric: 'tabular-nums' }}>
         {item.isDirectory
           ? describeFolderPreview(folderChildren ?? [], { isLoaded: folderPreviewLoaded })
           : formatSize(item.size) || '-'}

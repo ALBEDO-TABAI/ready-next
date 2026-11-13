@@ -631,7 +631,8 @@ export default function RSSMode({
           padding: `${WORKBENCH_CANVAS_OUTER_PADDING_TOP}px ${WORKBENCH_CANVAS_OUTER_PADDING_X}px ${WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM}px`,
         }}
       >
-        {/* Same frame as Document and Browser: top bar + left rail on the canvas, content in a rounded frame. */}
+        {/* One block (V11): the panel's head row holds the way back, where you are and the view's tools; every RSS view
+            is its body. Nothing of 资讯 sits on the ground above it. */}
         <div
           className="workbench-canvas-shell rss-workbench-canvas relative flex h-full min-h-0 overflow-hidden"
         >
@@ -648,16 +649,16 @@ export default function RSSMode({
                 onNavigate={(patch) => { closeOverlays(); setDigestView(false); setShowOrganization(false); setSieveView(false); setQuery(patch) }}
               />
             </ShellNavigator>
-            <div className="rss-topbar workbench-tabs-surface no-drag">
-              <NavigationBackEntry mode="rss" />
-              <div className="rss-topbar__lead" ref={setTopbarLead}>
-                {feedVisible && <span>资讯</span>}
+            <div className="rss-feed-sheet rn-panel">
+              <div className="rss-topbar rn-panel__head no-drag">
+                <NavigationBackEntry mode="rss" />
+                <div className="rss-topbar__lead" ref={setTopbarLead}>
+                  {feedVisible && <span>资讯</span>}
+                </div>
+                <div className="rss-topbar__tools" ref={setTopbarTools} />
               </div>
-              <div className="rss-topbar__tools" ref={setTopbarTools} />
-            </div>
-            <div className="rss-workbench-body">
               {/* The list stays mounted so returning from reading preserves scroll. */}
-              <div className={`rss-feed-sheet content-surface-panel rss-content-frame`}>
+              <div className="rss-content-frame rn-panel__body">
                 {/* 为你筛过的 stays mounted while an article from it is open, so closing the article returns to the same place. */}
                 {sieveVisible && <RSSSieveView shown={sieveShown && surfaceActive} onOpen={(item) => handleItemClick(toRSSItem(item))} />}
                 <div className="flex min-h-0 flex-1 flex-col" style={{ display: feedVisible ? undefined : 'none' }}>

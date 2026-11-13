@@ -422,7 +422,7 @@ export function ExternalServicesSettingsPanel() {
 
   return (
     <div className="grid items-start gap-8 lg:grid-cols-[256px_minmax(0,1fr)]">
-      {/* 服务列表：列表直接落在玻璃上，选中项的样子与分段控件的选中项相同（纸色加卡片影）；已启用的服务带一个墨色圆点。 */}
+      {/* 服务列表：列表直接落在玻璃上，选中项是 fill-2 加墨色（V5）；已启用的服务带一个墨色圆点。 */}
       <nav className="flex flex-col" aria-label="外部服务列表">
         {navigationSections.map((section, sectionIndex) => section.profiles.length > 0 ? (
           <div key={section.label} className={sectionIndex > 0 ? 'mt-7' : ''}>
@@ -439,14 +439,14 @@ export function ExternalServicesSettingsPanel() {
                     onClick={() => setSelectedId(profile.id)}
                     aria-current={active ? 'true' : undefined}
                     className={`flex w-full items-center gap-3 rounded-[12px] px-3.5 py-3 text-left transition-[background-color,box-shadow] duration-150 ${active
-                      ? 'bg-[var(--rn-sheet)] shadow-[var(--rn-card-shadow)]'
+                      ? 'bg-[var(--rn-fill-2)]'
                       : 'hover:bg-[var(--rn-fill)]'}`}
                   >
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[13px] font-medium" style={{ color: 'var(--rn-ink)' }}>
                         {profile.name}
                       </span>
-                      <span className="mt-1 block truncate text-[11.5px]" style={{ color: 'var(--rn-ink-2)' }}>
+                      <span className="mt-1 block truncate text-[12px]" style={{ color: 'var(--rn-ink-2)' }}>
                         {externalServiceDescription(profile)}
                       </span>
                     </span>
@@ -592,7 +592,7 @@ export function ExternalServicesSettingsPanel() {
                     options={VISION_API_KIND_OPTIONS}
                   />
                 </label>
-                <div className="flex h-[32px] items-center self-end text-[12.5px]">
+                <div className="flex h-[32px] items-center self-end text-[13px]">
                   <Checkbox
                     label="支持图片输入"
                     checked={Array.isArray(selectedProfile.options.inputModes) && selectedProfile.options.inputModes.includes('image')}

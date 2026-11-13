@@ -31,6 +31,7 @@ test('chat header menu rows carry layout and --rn-* inks only; the float materia
   assert.equal(CHAT_HEADER_MENU_SECTION_LABEL_STYLE.fontSize, 'var(--rn-fs-2xs)')
   assert.equal(CHAT_HEADER_MENU_SECTION_LABEL_STYLE.letterSpacing, '0.04em')
   assert.equal(CHAT_HEADER_MENU_SECTION_LABEL_STYLE.color, 'var(--rn-ink-3)')
-  assert.equal(CHAT_HEADER_MENU_META_STYLE.fontSize, 10.5)
+  // V7: off-scale 10.5 moved onto the micro level (11px).
+  assert.equal(CHAT_HEADER_MENU_META_STYLE.fontSize, 11)
   assert.equal(CHAT_HEADER_MENU_META_STYLE.color, 'var(--rn-ink-3)')
 })

@@ -93,7 +93,7 @@ export default function MeetingChat({ onFileDrop }: MeetingChatProps) {
       style={{
         width: 420,
         // The conversation is a region on the window glass (DL1): no background of its own, a hairline to its right.
-        borderRight: '1px solid var(--rn-hair)',
+        borderRight: '.5px solid var(--rn-hair)',
         position: 'relative'
       }}
       onDragOver={handleDragOver}
@@ -115,7 +115,7 @@ export default function MeetingChat({ onFileDrop }: MeetingChatProps) {
         >
           <div style={{
             padding: '12px 24px', borderRadius: 12,
-            background: 'var(--rn-sheet)',
+            background: 'var(--rn-solid)',
             boxShadow: 'var(--rn-shadow-2)',
             fontSize: 13, fontWeight: 500, color: 'var(--rn-accent-text)'
           }}>
@@ -129,10 +129,10 @@ export default function MeetingChat({ onFileDrop }: MeetingChatProps) {
         className="flex items-center justify-between flex-shrink-0"
         style={{
           padding: '10px 16px',
-          borderBottom: '1px solid var(--rn-hair)'
+          borderBottom: '.5px solid var(--rn-hair)'
         }}
       >
-        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--rn-ink)' }}>
+        <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--rn-ink)' }}>
           Ready 对话
         </span>
       </div>
@@ -145,7 +145,7 @@ export default function MeetingChat({ onFileDrop }: MeetingChatProps) {
       >
         {/* Welcome */}
         <div className="text-center" style={{ padding: '32px 16px' }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--rn-ink)', marginBottom: 8 }}>
+          <div style={{ fontSize: 15, fontWeight: 500, color: 'var(--rn-ink)', marginBottom: 8 }}>
             Ready 已准备就绪
           </div>
           <div style={{ fontSize: 12, color: 'var(--rn-ink-2)', lineHeight: '1.6' }}>
@@ -184,7 +184,7 @@ export default function MeetingChat({ onFileDrop }: MeetingChatProps) {
               <div key={msg.id} className="flex justify-end">
                 <div style={{ maxWidth: '75%' }}>
                   <div className="flex items-center justify-end" style={{ gap: 8, marginBottom: 4 }}>
-                    <span style={{ fontSize: 10, color: 'var(--rn-ink-3)' }}>
+                    <span style={{ fontSize: 11, color: 'var(--rn-ink-3)', fontFamily: 'var(--rn-font-mono)', fontVariantNumeric: 'tabular-nums' }}>
                       {msg.timestamp.toLocaleTimeString()}
                     </span>
                     <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--rn-ink)' }}>
@@ -228,15 +228,15 @@ export default function MeetingChat({ onFileDrop }: MeetingChatProps) {
                   <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--rn-ink)' }}>
                     Ready
                   </span>
-                  <span style={{ fontSize: 10, color: 'var(--rn-ink-3)' }}>
+                  <span style={{ fontSize: 11, color: 'var(--rn-ink-3)', fontFamily: 'var(--rn-font-mono)', fontVariantNumeric: 'tabular-nums' }}>
                     {msg.timestamp.toLocaleTimeString()}
                   </span>
                 </div>
                 <div
                   style={{
                     fontSize: 12, color: 'var(--rn-ink)', lineHeight: '1.5',
-                    background: 'var(--rn-sheet)',
-                    border: '1px solid var(--rn-hair-2)',
+                    background: 'var(--rn-inlay)',
+                    border: '.5px solid var(--rn-hair-2)',
                     borderRadius: '4px 12px 12px 12px',
                     padding: '8px 12px',
                     wordBreak: 'break-word',
@@ -267,8 +267,8 @@ export default function MeetingChat({ onFileDrop }: MeetingChatProps) {
               className="flex items-center"
               style={{
                 gap: 4,
-                background: 'var(--rn-sheet)',
-                border: '1px solid var(--rn-hair-2)',
+                background: 'var(--rn-inlay)',
+                border: '.5px solid var(--rn-hair-2)',
                 borderRadius: 12,
                 padding: '8px 14px'
               }}

@@ -3,7 +3,6 @@ import { motion, useIsPresent, useReducedMotion } from 'framer-motion'
 import { PanelLeftClose, History, Plus } from 'lucide-react'
 import {
   WORKBENCH_EDGE_RAIL_SIZE,
-  WORKBENCH_TOPBAR_HEIGHT,
   WORKBENCH_TOPBAR_PADDING_RIGHT
 } from '../../../../modules/workbench/chrome'
 import {
@@ -47,7 +46,8 @@ export function ChatPanelMotionLayer({
         <div
           className="grid h-full min-h-0"
           style={{
-            gridTemplateRows: `${WORKBENCH_TOPBAR_HEIGHT}px minmax(0, 1fr)`,
+            // The header row sizes its own track: it sits on the head line (V15, .chat-header-row).
+            gridTemplateRows: 'auto minmax(0, 1fr)',
             gridTemplateColumns: 'minmax(0, 1fr)'
           }}
         >

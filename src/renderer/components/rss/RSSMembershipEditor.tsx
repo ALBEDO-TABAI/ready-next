@@ -44,7 +44,7 @@ export default function RSSMembershipEditor({ article, definitions, active }: { 
   return <details className="rss-membership-editor">
     <summary>
       <span>分类与精选</span>
-      <span className="flex items-center gap-2"><small>{includedCount ? `已归入 ${includedCount} 项` : '尚未归入'}</small><ChevronRight size={14} strokeWidth={2} /></span>
+      <span className="flex items-center gap-2"><small>{includedCount ? `已归入 ${includedCount} 项` : '尚未归入'}</small><ChevronRight size={14} strokeWidth={1.5} /></span>
     </summary>
     <div className="rss-membership-editor__body">
       {relevant.map((definition) => {

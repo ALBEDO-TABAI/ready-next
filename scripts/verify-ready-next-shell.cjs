@@ -67,6 +67,27 @@ async function waitNative(app, visible, timeout = 15000) {
 async function railClick(page, label, modifiers = []) {
   await page.locator(`[data-shell-region="rail"] button[aria-label^="${label}"]`).first().click({ modifiers })
 }
+// A plain click on the current mode's icon toggles the sidebar (V13), so switching clicks only when the mode is not current.
+const currentScene = mode => `[data-workbench-mode-panel="${mode}"][data-mode-visual-state="current"]`
+async function railSwitch(page, label, mode) {
+  if (await page.evaluate(sel => Boolean(document.querySelector(sel)), currentScene(mode))) return
+  await railClick(page, label)
+}
+
+// V15: the content box is the same in every mode (60px from the top and the bottom of the window), and the sidebar's,
+// the panel's and the assistant's header rows lie on one line: each starts at y 60 and is 44px tall.
+async function headLine(page) {
+  return page.evaluate(() => {
+    const shown = el => Boolean(el) && el.getBoundingClientRect().height > 0 && getComputedStyle(el).visibility !== 'hidden'
+    const rect = el => { const r = el.getBoundingClientRect(); return { top: Math.round(r.top), h: Math.round(r.height), bottom: Math.round(r.bottom) } }
+    const nav = [...document.querySelectorAll('[data-shell-navigator]:not([hidden]) .shell-navigator__head')].find(shown)
+    const chat = [...document.querySelectorAll('[data-shell-region="assistant"] .chat-header-row')].find(shown)
+    const panel = [...document.querySelectorAll('[data-shell-region="content"] .rn-panel')].find(shown)
+    // The calendar keeps its own top bar as the panel's head: its 44px control row is the head line.
+    const head = panel?.querySelector('.rn-panel__head, .topbar-row')
+    return { H: window.innerHeight, nav: nav ? rect(nav) : null, chat: chat ? rect(chat) : null, panel: panel ? rect(panel) : null, head: shown(head) ? rect(head) : null }
+  })
+}
 
 async function main() {
   for (const file of ['out/main/index.js', 'out/renderer/index.html']) {
@@ -85,14 +106,14 @@ async function main() {
     const switcherInAssistant = await page.evaluate(() => document.querySelectorAll('[data-chat-panel-root] [data-chat-mode-tabs-dock], [data-chat-panel-root] .draggable-mode-tabs').length)
     check('S2 the assistant panel has no mode switcher', switcherInAssistant === 0)
     for (const [label, mode] of [['浏览器', 'browser'], ['资讯', 'rss'], ['日历', 'calendar'], ['文档', 'document']]) {
-      await railClick(page, label)
+      await railSwitch(page, label, mode)
       check(`rail switches to ${mode}`, await waitFor(page, sel => Boolean(document.querySelector(sel)), modeScene(mode)))
     }
     await page.keyboard.press('Tab')
     const collapsed = await waitFor(page, () => (document.querySelector('[data-chat-panel-root]')?.getBoundingClientRect().width ?? 0) < 1)
     check('Tab collapses the assistant to zero width', collapsed)
     check('the rail shows the assistant button while it is collapsed', await page.locator('[data-shell-region="rail"] button[aria-label^="助手"]').count() === 1)
-    await railClick(page, '资讯')
+    await railSwitch(page, '资讯', 'rss')
     check('S2 the rail switches modes with the assistant collapsed', await waitFor(page, sel => Boolean(document.querySelector(sel)), modeScene('rss')))
     await railClick(page, '助手')
     check('the rail button brings the assistant back', await waitFor(page, () => (document.querySelector('[data-chat-panel-root]')?.getBoundingClientRect().width ?? 0) > 300))
@@ -115,6 +136,10 @@ async function main() {
       check(`S5 ${mode}: one entry each for search, settings, calendar and mode switching; no backlinks entry`,
         frame.search === 1 && frame.settings === 1 && frame.calendar === 1 && frame.browser === 1 && frame.backlinks === 0 && frame.modeTabs === 0,
         JSON.stringify({ search: frame.search, settings: frame.settings, calendar: frame.calendar, browser: frame.browser, backlinks: frame.backlinks, modeTabs: frame.modeTabs }))
+      const line = await headLine(page)
+      const onLine = r => Boolean(r) && r.top === 60 && r.h === 44
+      check(`V15 ${mode}: the panel box is 60px from both window edges; sidebar, panel and assistant heads share one 44px line at y 60`,
+        line.panel && line.panel.top === 60 && line.H - line.panel.bottom === 60 && onLine(line.nav) && onLine(line.head) && onLine(line.chat), JSON.stringify(line))
     }
 
     // S7: inside the calendar, ⌘, is global settings and ⌘\ is the theme, as everywhere else.
@@ -137,17 +162,44 @@ async function main() {
       await harness.sleep(1500)
     }
 
-    // The collapsed sidebar slides out from the window's left edge, and the header button pins it back.
+    // V13: one switch, in the top band right of the traffic lights and before the wordmark, in the same place in both
+    // states. The navigators carry no collapse button, and the window's left edge no longer slides the sidebar out.
     await page.keyboard.press('Meta+2')
-    await waitFor(page, sel => Boolean(document.querySelector(sel)), modeScene('document'))
-    await page.locator('[data-shell-navigator="document"] button[aria-label="收起侧栏"]').click()
-    // Collapsed on a wide window the sidebar is a zero-width column; only a slide-out carries data-open.
-    const collapsedByButton = await waitFor(page, () => (document.querySelector('[data-shell-sidebar]')?.getBoundingClientRect().width ?? 1) < 1)
+    await waitFor(page, sel => Boolean(document.querySelector(sel)), currentScene('document'))
+    await harness.sleep(400)
+    const sidebarSwitch = page.locator('[data-shell-band="top"] button[data-shell-sidebar-control]')
+    const switchState = () => page.evaluate(() => {
+      const button = document.querySelector('[data-shell-band="top"] button[data-shell-sidebar-control]')
+      if (!button) return null
+      const r = button.getBoundingClientRect()
+      return { label: button.getAttribute('aria-label'), expanded: button.getAttribute('aria-expanded'), x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width) }
+    })
+    const shownSwitch = await switchState()
+    const leftovers = await page.evaluate(() => document.querySelectorAll('[data-shell-navigator] button:is([aria-label^="收起侧栏"], [aria-label="固定侧栏"]), .shell-edge-reveal').length)
+    await sidebarSwitch.click()
+    const collapsedBySwitch = await waitFor(page, () => (document.querySelector('[data-shell-sidebar]')?.getBoundingClientRect().width ?? 1) < 1)
+    const hiddenSwitch = await switchState()
     await page.mouse.move(56, 420)
-    const peeked = await waitFor(page, () => document.querySelector('[data-shell-sidebar]')?.getAttribute('data-open') === 'true')
-    await page.locator('[data-shell-navigator="document"] button[aria-label="固定侧栏"]').click()
-    const pinned = await waitFor(page, () => { const el = document.querySelector('[data-shell-sidebar]'); return !el?.hasAttribute('data-open') && (el?.getBoundingClientRect().width ?? 0) > 100 })
-    check('the header button collapses the sidebar, the left edge peeks it, the pin docks it', collapsedByButton && peeked && pinned, JSON.stringify({ collapsedByButton, peeked, pinned }))
+    await harness.sleep(600)
+    const noEdgePeek = await page.evaluate(() => { const el = document.querySelector('[data-shell-sidebar]'); return !el?.hasAttribute('data-open') && (el?.getBoundingClientRect().width ?? 1) < 1 })
+    await sidebarSwitch.click()
+    const dockedBySwitch = await waitFor(page, () => (document.querySelector('[data-shell-sidebar]')?.getBoundingClientRect().width ?? 0) > 100)
+    const samePlace = Boolean(shownSwitch && hiddenSwitch) && shownSwitch.x === hiddenSwitch.x && shownSwitch.y === hiddenSwitch.y && shownSwitch.x >= 76 && shownSwitch.w === 28
+    check('V13 the top-band switch collapses and docks the sidebar, in the same place, labelled for its state',
+      collapsedBySwitch && dockedBySwitch && samePlace && shownSwitch.label === '收起侧栏 ⌘B' && shownSwitch.expanded === 'true' && hiddenSwitch.label === '展开侧栏 ⌘B' && hiddenSwitch.expanded === 'false',
+      JSON.stringify({ collapsedBySwitch, dockedBySwitch, shownSwitch, hiddenSwitch }))
+    check('V13 no collapse button in the navigators and no slide-out from the left edge', leftovers === 0 && noEdgePeek, JSON.stringify({ leftovers, noEdgePeek }))
+    // The current mode's rail icon is the same switch (as in VS Code); another mode switches and leaves the sidebar shown.
+    await railClick(page, '文档')
+    const collapsedByRail = await waitFor(page, () => (document.querySelector('[data-shell-sidebar]')?.getBoundingClientRect().width ?? 1) < 1)
+    await railClick(page, '文档')
+    const dockedByRail = await waitFor(page, () => (document.querySelector('[data-shell-sidebar]')?.getBoundingClientRect().width ?? 0) > 100)
+    await railClick(page, '日历')
+    const otherModeSwitched = await waitFor(page, sel => Boolean(document.querySelector(sel)), currentScene('calendar'))
+    await harness.sleep(600)
+    const stillShown = (await sidebarWidth()) > 100
+    check('V13 the current mode\'s rail icon toggles the sidebar; another mode switches and keeps it shown',
+      collapsedByRail && dockedByRail && otherModeSwitched && stillShown, JSON.stringify({ collapsedByRail, dockedByRail, otherModeSwitched, stillShown }))
 
     const before = await sidebarWidth()
     await page.keyboard.press('Meta+b')
@@ -158,7 +210,7 @@ async function main() {
     check('⌘B collapses and restores the sidebar', before > 100 && after < 1 && (await sidebarWidth()) > 100, `${before} → ${after}`)
 
     // ⌥-click opens a split; ⌥-click again closes it.
-    await railClick(page, '文档')
+    await railSwitch(page, '文档', 'document')
     await waitFor(page, sel => Boolean(document.querySelector(sel)), modeScene('document'))
     await railClick(page, '日历', ['Alt'])
     check('⌥-click opens the mode beside the current one', await waitFor(page, () => Boolean(document.querySelector('[data-workbench-split-layout="true"]'))))
@@ -166,7 +218,7 @@ async function main() {
     check('⌥-click again closes the split', await waitFor(page, () => !document.querySelector('[data-workbench-split-layout="true"]')))
 
     // G1 / T2: the content column keeps at least 560px at four widths; narrow windows float the assistant first.
-    await railClick(page, '浏览器')
+    await railSwitch(page, '浏览器', 'browser')
     await waitFor(page, sel => Boolean(document.querySelector(sel)), modeScene('browser'))
     await page.evaluate(url => window.electronAPI.browser.createTab(url), `${fixture.url}/a/1`)
     for (const width of [1440, 1280, 1100, 980]) {
@@ -194,12 +246,81 @@ async function main() {
     const aligned = placement && views.some(b => Math.abs(b.x - placement.x) <= 2 && Math.abs(b.y - placement.y) <= 2 && Math.abs(b.width - placement.w) <= 2 && Math.abs(b.height - placement.h) <= 2)
     check('S4 the restored web view lines up with the content area', aligned, `${JSON.stringify(placement)} vs ${JSON.stringify(views)}`)
 
+    // V14: too narrow to dock (under 860px) the sidebar is a float-glass card laid over the content like a panel: top and
+    // bottom on the panel's, the frame gap from the rail, 20px corners. The switch, the current rail icon and ⌘B open it;
+    // Esc, a press outside it and the switch close it; moving the pointer away does not. The web view steps aside meanwhile.
+    await harness.setContentSize(app, page, 820, 860)
+    const card = () => page.evaluate(() => {
+      const el = document.querySelector('[data-shell-sidebar]')
+      const r = el.getBoundingClientRect()
+      const cs = getComputedStyle(el)
+      return {
+        dock: document.querySelector('[data-workbench-shell]')?.getAttribute('data-shell-sidebar-dock'),
+        open: el.getAttribute('data-open'), overlay: el.getAttribute('data-ready-native-overlay'), float: el.classList.contains('rn-float'),
+        visibility: cs.visibility, top: Math.round(r.top), bottom: Math.round(r.bottom), left: Math.round(r.left), H: window.innerHeight,
+        radii: [cs.borderTopLeftRadius, cs.borderTopRightRadius, cs.borderBottomRightRadius, cs.borderBottomLeftRadius],
+      }
+    })
+    const cardIs = open => waitFor(page, value => document.querySelector('[data-shell-sidebar]')?.getAttribute('data-open') === value, String(open))
+    const atStart = await card()
+    await sidebarSwitch.click()
+    const openedBySwitch = await cardIs(true)
+    await harness.sleep(500)
+    const opened = await card()
+    const webAside = await waitNative(app, false)
+    await page.mouse.move(700, 600)
+    await harness.sleep(500)
+    const keptOnLeave = (await card()).open === 'true'
+    await page.keyboard.press('Escape')
+    const closedByEsc = await cardIs(false)
+    await sidebarSwitch.click()
+    await cardIs(true)
+    const contentBox = await page.locator('[data-shell-region="content"]').boundingBox()
+    await page.mouse.click(contentBox.x + contentBox.width - 40, contentBox.y + contentBox.height / 2)
+    const closedByOutside = await cardIs(false)
+    await railClick(page, '浏览器')
+    const openedByRail = await cardIs(true)
+    await sidebarSwitch.click()
+    const closedBySwitch = await cardIs(false)
+    await page.keyboard.press('Meta+b')
+    const openedByKey = await cardIs(true)
+    await page.keyboard.press('Meta+b')
+    const closedByKey = await cardIs(false)
+    const webBack = await waitNative(app, true)
+    check('V14 the narrow-window sidebar is a float card aligned with the panel, inset from the rail, round on all four corners',
+      atStart.dock === 'floating' && atStart.open === 'false' && atStart.visibility === 'hidden' && opened.float && opened.overlay === 'shell-sidebar'
+        && opened.top === 60 && opened.H - opened.bottom === 60 && opened.left === 60 && opened.radii.every(radius => radius === '20px'),
+      JSON.stringify({ atStart, opened }))
+    check('V14 the switch, the current rail icon and ⌘B open the card; Esc, a press outside and the switch close it; leaving it does not',
+      openedBySwitch && keptOnLeave && closedByEsc && closedByOutside && openedByRail && closedBySwitch && openedByKey && closedByKey,
+      JSON.stringify({ openedBySwitch, keptOnLeave, closedByEsc, closedByOutside, openedByRail, closedBySwitch, openedByKey, closedByKey }))
+    check('V14 the web view steps aside while the card is open and comes back after', webAside && webBack, JSON.stringify({ webAside, webBack }))
+
     // The brand dot in the top-right corner opens 今日 (the document mode's system tab, W6 §5).
     await harness.setContentSize(app, page, 1440, 900)
     const dot = await page.locator('[data-shell-band="top"] button[aria-label="今日"]').boundingBox()
     check('the brand dot sits in the top-right corner', dot && dot.x > 1440 - 140 && dot.y < 52, JSON.stringify(dot))
     await page.locator('[data-shell-band="top"] button[aria-label="今日"]').click()
     check('the brand dot opens 今日', await waitFor(page, () => (document.querySelector('section.today')?.getBoundingClientRect().width ?? 0) > 0))
+
+    // V12: the wordmark "Ready" follows the switch in the top band, set in the wordmark font (Instrument Serif) at 20px.
+    const wordmark = await page.evaluate(async () => {
+      const el = document.querySelector('[data-shell-band="top"] .shell-wordmark')
+      const button = document.querySelector('[data-shell-band="top"] button[data-shell-sidebar-control]')
+      if (!el || !button) return null
+      await document.fonts.ready
+      const cs = getComputedStyle(el)
+      const first = value => value.split(',')[0].replace(/['"]/g, '').trim()
+      const family = first(cs.fontFamily)
+      return {
+        text: el.textContent, family, token: first(getComputedStyle(document.documentElement).getPropertyValue('--rn-font-wordmark')),
+        loaded: document.fonts.check(`${cs.fontSize} "${family}"`), size: cs.fontSize, weight: cs.fontWeight,
+        afterSwitch: el.getBoundingClientRect().left > button.getBoundingClientRect().right,
+      }
+    })
+    check('V12 the wordmark "Ready" follows the switch, in the wordmark font at 20px / 400',
+      Boolean(wordmark) && wordmark.text === 'Ready' && wordmark.family === wordmark.token && wordmark.loaded && wordmark.size === '20px' && wordmark.weight === '400' && wordmark.afterSwitch,
+      JSON.stringify(wordmark))
 
     // DL11a: the two bands are equally tall.
     const bands = await page.evaluate(() => ['top', 'bottom'].map(side => Math.round(document.querySelector(`[data-shell-band="${side}"]`)?.getBoundingClientRect().height ?? -1)))

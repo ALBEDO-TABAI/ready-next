@@ -97,9 +97,9 @@ export function GeneratedImageGallery({ images, onPreview, onReferenceSelect }: 
               style={{
                 width: cards.length === 1 ? 'min(100%, 420px)' : 'min(48%, 260px)',
                 minWidth: 168,
-                borderRadius: 14,
-                background: 'var(--rn-sheet)',
-                boxShadow: 'none',
+                borderRadius: 'var(--rn-r-card)',
+                background: 'var(--rn-inlay)',
+                boxShadow: 'inset 0 1px 0 var(--rn-glass-inner-hi), inset 0 0 0 .5px var(--rn-hair-2)',
                 cursor: 'grab',
               }}
               title="点击放大；拖到文档、网页或文件区"

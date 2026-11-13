@@ -15,7 +15,7 @@ const getFileExt = (path: string | null): string => {
   return getFileExtension(path)
 }
 
-const LoadingFallback = ({ bg = 'var(--rn-sheet)' }: { bg?: string }) => (
+const LoadingFallback = ({ bg = 'transparent' }: { bg?: string }) => (
   <div className="flex-1 flex items-center justify-center" style={{ background: bg }}>
     <Loader2 className="w-6 h-6 animate-spin" style={{ color: 'var(--rn-ink-3)' }} />
   </div>
@@ -52,7 +52,7 @@ export default function FilePreview({ tab }: FilePreviewProps) {
 
   if (isPdf && tab.path) {
     return (
-      <Suspense fallback={<LoadingFallback bg="var(--rn-sheet)" />}>
+      <Suspense fallback={<LoadingFallback />}>
         <PdfViewer tab={tab} fileUrl={fileUrl} />
       </Suspense>
     )
@@ -60,7 +60,7 @@ export default function FilePreview({ tab }: FilePreviewProps) {
 
   if (isEbook && tab.path) {
     return (
-      <Suspense fallback={<LoadingFallback bg="var(--rn-sheet)" />}>
+      <Suspense fallback={<LoadingFallback />}>
         <EbookViewer tab={tab} fileUrl={fileUrl} currentExt={currentExt} />
       </Suspense>
     )

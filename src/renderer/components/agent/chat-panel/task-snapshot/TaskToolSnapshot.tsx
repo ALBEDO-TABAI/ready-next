@@ -602,7 +602,7 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
             {(visibleForegroundActive || undismissedBackgroundTaskRuns.length > 1) && (
               <div
                 style={{
-                  fontSize: 10.5,
+                  fontSize: 11,
                   fontWeight: 600,
                   color: 'var(--rn-ink-3)',
                   padding: '0 2px',
@@ -625,7 +625,7 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
               <div
                 style={{
                   padding: '6px 8px',
-                  fontSize: 11.5,
+                  fontSize: 12,
                   color: 'var(--rn-ink-3)',
                 }}
               >

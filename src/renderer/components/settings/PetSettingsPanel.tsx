@@ -70,7 +70,7 @@ function EditableText({
         event.stopPropagation()
         setEditing(true)
       }}
-      className={`block w-full rounded-[7px] text-left transition-colors hover:bg-[var(--rn-fill)] ${multiline ? 'text-[12px] leading-[1.55]' : 'text-[13px] font-semibold'}`}
+      className={`block w-full rounded-[7px] text-left transition-colors hover:bg-[var(--rn-fill)] ${multiline ? 'text-[12px] leading-[1.55]' : 'text-[13px] font-medium'}`}
       style={{ padding: '2px 6px', margin: '0 -6px', width: 'calc(100% + 12px)', color: multiline ? 'var(--rn-ink-2)' : 'var(--rn-ink)' }}
       title="点击编辑"
     >

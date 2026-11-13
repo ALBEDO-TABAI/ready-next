@@ -991,11 +991,12 @@ export default function MarkdownEditor({
       {saveState === 'error' && saveError ? (
         <div
           role="alert"
-          className="mx-10 mt-3 rounded-[8px] border px-3 py-2 text-[13px]"
+          className="mx-10 mt-3 rounded-[12px] border px-3 py-2 text-[13px]"
           style={{
             borderColor: 'var(--rn-warn)',
+            borderWidth: '.5px',
             color: 'var(--rn-ink-2)',
-            background: 'var(--rn-sheet)',
+            background: 'color-mix(in srgb, var(--rn-warn) 8%, transparent)',
           }}
         >
           {saveError}

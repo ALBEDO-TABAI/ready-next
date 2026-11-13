@@ -83,7 +83,7 @@ export function MonthGrid({active=true}:{active?:boolean}) {
     ds.forEach((d, c) => {
       const wk = weekday(d) === 0 || weekday(d) === 6; const { m, d: dd } = ymd(d); const isToday = d === s.today; const out = m !== month;
       rowsOut.push(<div key={`c${d}`} className={`mcell${wk ? ' wknd' : ''}${out ? ' out' : ''}`} style={{ left: gutter + c * cw, top, width: cw, height: rh }}>
-        <div className={`mnum tnum${isToday ? ' today' : ''}`} style={dd === 1 && !isToday ? { fontWeight: 600 } : undefined}
+        <div className={`mnum tnum${isToday ? ' today' : ''}`} style={dd === 1 && !isToday ? { fontWeight: 500 } : undefined}
           onPointerDown={(e) => e.stopPropagation()} onClick={() => { void openReadyRef({ kind: 'day', date: isoDate(d) }, 'calendar').then(() => setPrefs({ gridView: 'default', daysPerPeriod: 1 })).catch(error => setState({ error: String(error) })); }}>
           {dd === 1 ? <><strong>{monthName(m)}</strong>{dd}</> : dd}</div>
         <div className="mcell-layers" style={{ height: G.layerArea }}><LayerDay date={isoDate(d)} entries={layers.entries} enabled={s.prefs.layers} move={layers.move} /></div>
