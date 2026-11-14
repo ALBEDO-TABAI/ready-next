@@ -69,8 +69,14 @@ function classifyToken(raw: string): QueryToken | null {
 const CJK_REGEX = /[㐀-鿿぀-ヿ가-힯]/
 const CJK_SEQUENCE_REGEX = /[㐀-鿿぀-ヿ가-힯]+/g
 
-// v2: letter/number runs glued to Chinese text ("M5验收目标", "Q4计划") are indexed and queried as their own tokens.
-export const SEARCH_INDEX_CONTENT_VERSION = 'fts-cjk-bigram-v2'
+// Titles and default unicode61 word boundaries, retaining the v2 mixed-CJK expansion.
+export const SEARCH_INDEX_CONTENT_VERSION = 'fts-title-word-boundaries-v3'
+
+export function searchIndexTitle(frontmatterJson: string | null): string {
+  const fields: unknown = frontmatterJson ? JSON.parse(frontmatterJson) : null
+  return fields && typeof fields === 'object' && 'title' in fields && typeof fields.title === 'string'
+    ? fields.title : ''
+}
 
 function containsCjk(value: string): boolean {
   return CJK_REGEX.test(value)

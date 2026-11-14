@@ -1,4 +1,5 @@
 import { migrateNavigationHistory } from './navigation-history/repository'
+import { migrateSearchTitlesAndTokenBoundaries } from './search-engine/index-schema'
 import { migrateBrowserWorkTabOwnership } from './browser-engine/work-tab-ownership-store'
 import { RSS_SIEVE_LEARNING_MIGRATION, migrateRSSSieveLearning } from './rss-engine/sieve-learning-schema'
 import { RSS_SIEVE_MIGRATION, migrateRSSSieve } from './rss-engine/sieve-schema'
@@ -4554,6 +4555,7 @@ const migrations: Migration[] = [
   { name: RSS_SIEVE_LEARNING_MIGRATION, up: migrateRSSSieveLearning },
   { name: '157_navigation_history', up: migrateNavigationHistory },
   { name: '158_browser_work_tab_ownership', up: migrateBrowserWorkTabOwnership },
+  { name: '159_search_titles_and_token_boundaries', up: migrateSearchTitlesAndTokenBoundaries },
 ]
 
 /**
