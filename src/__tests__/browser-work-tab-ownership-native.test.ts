@@ -215,9 +215,10 @@ test('BA10: accepted restoration prunes missing, rejected and changed-profile ta
   } finally { db.close() }
 })
 
-test('BA10: task closeout, run replacement and lost sessions clear ownership in the same transaction', async t => {
+test('BA10: a finished turn or task keeps its tabs grouped; a lost session or task clears ownership in the same transaction', async t => {
   if (skipIfSqliteUnavailable(t, 'browser work tab invalidation')) return
-  const invalidations = [
+  // The tab stays with its task when the turn ends, the task finishes or waits for the person, or a later run takes it.
+  const kept = [
     ...['completed', 'failed', 'cancelled'].map(status => (db: Database.Database) => {
       assert.equal(new BrowserStore(() => db).updateBrowserTask('task', { status }), true)
     }),
@@ -226,6 +227,20 @@ test('BA10: task closeout, run replacement and lost sessions clear ownership in 
     }),
     (db: Database.Database) => { db.exec("UPDATE task_projections SET run_id = 'run-2'") },
     (db: Database.Database) => { db.exec("UPDATE browser_tasks SET active_execution_binding_json = '{\"runId\":\"run-2\"}'") },
+  ]
+  for (const change of kept) {
+    const db = new Database(':memory:')
+    try {
+      seed(db)
+      const { runtime, ownership } = controller(db)
+      const opened = await runtime.createAgentWorkTab('task', 'https://work.test/', null)
+      change(db)
+      assert.equal(ownership.list().length, 1)
+      assert.equal(runtime.getTabList()[0].browserTaskId, 'task')
+      assert.deepEqual([...runtime.getTaskWorkTabIds('task')], [opened.tabId])
+    } finally { db.close() }
+  }
+  const invalidations = [
     (db: Database.Database) => { db.exec("UPDATE chat_conversations SET closed_at = 'now'") },
     (db: Database.Database) => { db.exec('UPDATE chat_conversations SET message_visibility_epoch = 1') },
     (db: Database.Database) => {

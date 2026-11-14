@@ -16,12 +16,14 @@ export interface BrowserWorkTabOwnership extends BrowserWorkTabOwner {
   openerTabId: string | null
 }
 
-const sameOwner = `t.browserTaskId = browser_work_tab_ownership.browser_task_id
-  AND t.ownerRunId = browser_work_tab_ownership.owner_run_id
-  AND t.parentTaskId = browser_work_tab_ownership.parent_task_id
+// A tab keeps its task for as long as the task's row and its conversation (same visible epoch) exist: the turn
+// ending, the task finishing or waiting for the person does not ungroup its tabs. Only opening a new work tab
+// needs the task to be running under the capturing run (browser_work_tab_tasks).
+const sameTask = `t.browserTaskId = browser_work_tab_ownership.browser_task_id
   AND t.scopeId = browser_work_tab_ownership.scope_id
   AND t.messageVisibilityEpoch = browser_work_tab_ownership.message_visibility_epoch`
-const staleOwnership = `NOT EXISTS (SELECT 1 FROM browser_work_tab_tasks t WHERE ${sameOwner})`
+const staleOwnership = `NOT EXISTS (SELECT 1 FROM browser_work_tab_grouping t WHERE ${sameTask})`
+const ownershipTriggerTables = ['browser_tasks', 'task_projections', 'chat_conversations']
 
 export function migrateBrowserWorkTabOwnership(db: MigrationDatabase): void {
   db.exec(`
@@ -50,9 +52,38 @@ export function migrateBrowserWorkTabOwnership(db: MigrationDatabase): void {
         AND c.message_visibility_epoch = p.message_visibility_epoch;
   `)
   // Invalidation is part of the owning write, including canonical closeout and session deletion.
-  for (const table of ['browser_tasks', 'task_projections', 'chat_conversations']) {
+  for (const table of ownershipTriggerTables) {
     for (const event of ['UPDATE', 'DELETE']) {
       db.exec(`CREATE TRIGGER browser_work_tabs_${table}_${event.toLowerCase()}
+        AFTER ${event} ON ${table} BEGIN
+          DELETE FROM browser_work_tab_ownership WHERE NOT EXISTS (
+            SELECT 1 FROM browser_work_tab_tasks t
+            WHERE t.browserTaskId = browser_work_tab_ownership.browser_task_id
+              AND t.ownerRunId = browser_work_tab_ownership.owner_run_id
+              AND t.parentTaskId = browser_work_tab_ownership.parent_task_id
+              AND t.scopeId = browser_work_tab_ownership.scope_id
+              AND t.messageVisibilityEpoch = browser_work_tab_ownership.message_visibility_epoch
+          );
+        END`)
+    }
+  }
+}
+
+/** 159: grouping outlives the turn and the task's end; it ends with the task row, the conversation or its epoch. */
+export function migrateBrowserWorkTabGrouping(db: MigrationDatabase): void {
+  db.exec(`
+    CREATE VIEW browser_work_tab_grouping AS
+      SELECT b.id AS browserTaskId, p.scope_id AS scopeId, p.message_visibility_epoch AS messageVisibilityEpoch
+      FROM browser_tasks b
+      JOIN task_projections p ON p.task_id = b.parent_task_id
+      JOIN chat_conversations c ON c.id = p.scope_id
+      WHERE c.closed_at IS NULL AND c.message_visibility_epoch = p.message_visibility_epoch;
+  `)
+  for (const table of ownershipTriggerTables) {
+    for (const event of ['UPDATE', 'DELETE']) {
+      const name = `browser_work_tabs_${table}_${event.toLowerCase()}`
+      db.exec(`DROP TRIGGER ${name}`)
+      db.exec(`CREATE TRIGGER ${name}
         AFTER ${event} ON ${table} BEGIN
           DELETE FROM browser_work_tab_ownership WHERE ${staleOwnership};
         END`)
@@ -93,9 +124,12 @@ export class BrowserWorkTabOwnershipStore {
 
   list(): BrowserWorkTabOwnership[] {
     return this.db.prepare(`
-      SELECT t.*, tab_id AS tabId, profile, opener_tab_id AS openerTabId
-      FROM browser_work_tab_ownership JOIN browser_work_tab_tasks t ON ${sameOwner}
-      ORDER BY browser_work_tab_ownership.rowid
+      SELECT tab_id AS tabId, browser_task_id AS browserTaskId, owner_run_id AS ownerRunId,
+             parent_task_id AS parentTaskId, scope_id AS scopeId,
+             message_visibility_epoch AS messageVisibilityEpoch, profile, opener_tab_id AS openerTabId
+      FROM browser_work_tab_ownership
+      WHERE EXISTS (SELECT 1 FROM browser_work_tab_grouping t WHERE ${sameTask})
+      ORDER BY rowid
     `).all<BrowserWorkTabOwnership>()
   }
 
