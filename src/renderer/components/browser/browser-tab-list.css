@@ -191,3 +191,23 @@
   overflow: hidden;
   border-radius: var(--rn-r-float);
 }
+
+/* A group's colour in the tab menu (添加到分组): a dot the size of a menu icon's ink. */
+.browser-tab-list__group-dot {
+  width: 8px;
+  height: 8px;
+  margin: 0 4px;
+  flex: none;
+  border-radius: 50%;
+}
+
+/* A grouped row carries a thin rail in its group's colour; rails of neighbouring rows join across the 1px gap. */
+.browser-tab-list__group-rail {
+  position: absolute;
+  top: -1px;
+  bottom: 0;
+  left: 8px;
+  width: 1.5px;
+  border-radius: 1px;
+  pointer-events: none;
+}

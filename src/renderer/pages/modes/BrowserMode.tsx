@@ -493,6 +493,8 @@ export default function BrowserMode({
     handleReorderToRank,
     handleCreateGroup,
     handleAddToGroup,
+    handleGroupTab,
+    handleUngroupTab,
     handleDeleteGroup,
     handleNewTabInGroup,
   } = useBrowserTabActions({
@@ -1262,6 +1264,8 @@ export default function BrowserMode({
               onReorderToRank={handleReorderToRank}
               onCreateGroup={handleCreateGroup}
               onAddToGroup={handleAddToGroup}
+              onGroupTab={handleGroupTab}
+              onUngroupTab={handleUngroupTab}
               onRenameGroup={renameTabGroup}
               onRecolorGroup={recolorTabGroup}
               onSetGroupCollapsed={setTabGroupCollapsed}

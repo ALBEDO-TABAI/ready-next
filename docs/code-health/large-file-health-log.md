@@ -21,6 +21,7 @@
 
 | 评估日期 | 任务 | 文件 | 总行数 | 本次新增 | 结论 | 判断与后续动作 | 状态 |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
+| 2026-11-14 | 浏览器标签分组的右键入口 | `src/renderer/pages/modes/BrowserMode.tsx` | 1494 | 净 +4 | 一般 | 只接线：把“添加到新分组 / 移出分组”两个处理函数从 `useBrowserTabActions` 取出并交给侧栏的 `BrowserTabList`；菜单、分组模型与写回顺序都在组件、store 和 hook 里。复查同 B12 第三批行。 | 复查：2026-11-30 |
 | 2026-11-14 | 四项非界面缺口：来源页划线删除 | `src/preload/index.ts` | 1810 | 净 +1 | 一般 | 仅透传删除接口，类型移到共享声明，删除规则留在来源页服务；类型检查与 IPC 对齐检查覆盖。复查按域拆分透传声明，避免此入口继续承载业务规则。 | 复查：2026-11-30 |
 | 2026-11-14 | W7 BA10 工作标签归属持久化 | `src/main/modules/migrations.ts` | 4639 | 净 +2 | 健康 | 仅导入、登记迁移 158；迁移体与归属规则在独立的 `browser-engine/work-tab-ownership-store.ts`，真实数据库重开、失效清理及回滚由 `browser-work-tab-ownership-native.test.ts` 覆盖。 | 记录结论 |
 | 2026-11-13 | V20 助手输入框上方的模式切换槽补回 | `src/renderer/components/agent/ChatPanel.tsx` | 1388（含同批外壳改动） | 本项净 +3 | 一般 | 只透传外壳给的切换槽（`modeSwitcher` 属性）；切换槽组件在 `components/layout/DraggableModeTabs.tsx`，状态与处理函数在 `WorkbenchMode`，面板不持有模式状态。复查同 2026-10-31 行：发送编排是否移出面板组件。 | 复查：2026-11-30 |

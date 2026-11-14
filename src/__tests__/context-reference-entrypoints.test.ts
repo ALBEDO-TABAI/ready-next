@@ -12,7 +12,6 @@ import {
   addDocumentQuoteReference,
   addReadyContextReferenceToAgentInput,
   createSkillReferenceAttachment,
-  showBrowserTabContextMenu,
   showReferenceToInputMenu,
 } from '../renderer/modules/agent/chat-input-bridge'
 import { useAgent } from '../renderer/stores/useAgent'
@@ -86,7 +85,7 @@ function installDom() {
   }
 }
 
-test('reference menus expose the input-reference action and preserve close-tab', async () => {
+test('the reference menu exposes the input-reference action', async () => {
   const { restore } = installDom()
   try {
     let menuRequest: unknown = null
@@ -105,20 +104,6 @@ test('reference menus expose the input-reference action and preserve close-tab',
       y: 34,
       items: [{ id: 'reference-to-input', label: '引用到输入框', iconText: '@' }],
     })
-
-    ;(window as TestWindow).electronAPI = {
-      ui: {
-        showNativeContextMenu: async (options: unknown) => {
-          menuRequest = options
-          return { success: true, selectedId: 'close-tab' }
-        },
-      },
-    }
-    assert.equal(await showBrowserTabContextMenu({ x: 5, y: 6 }), 'close-tab')
-    assert.deepEqual((menuRequest as { items: Array<{ id: string }> }).items.map((item) => item.id), [
-      'reference-to-input',
-      'close-tab',
-    ])
 
     ;(window as TestWindow).electronAPI = {
       ui: {

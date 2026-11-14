@@ -154,26 +154,6 @@ export async function showReferenceToInputMenu(point: { x: number; y: number }):
   return result?.success === true && result.selectedId === 'reference-to-input'
 }
 
-export type BrowserTabContextMenuAction = 'reference-to-input' | 'close-tab'
-
-export async function showBrowserTabContextMenu(
-  point: { x: number; y: number },
-  options?: { canReference?: boolean },
-): Promise<BrowserTabContextMenuAction | null> {
-  const api = typeof window !== 'undefined' ? window.electronAPI?.ui : null
-  if (!api?.showNativeContextMenu) return null
-  const items: Array<{ id: string; label: string; iconText: string }> = []
-  if (options?.canReference !== false) {
-    items.push({ id: 'reference-to-input', label: '引用到输入框', iconText: '@' })
-  }
-  items.push({ id: 'close-tab', label: '关闭标签页', iconText: '✕' })
-  const result = await api.showNativeContextMenu({ x: point.x, y: point.y, items }).catch(() => null)
-  if (!result?.success) return null
-  if (result.selectedId === 'reference-to-input') return 'reference-to-input'
-  if (result.selectedId === 'close-tab') return 'close-tab'
-  return null
-}
-
 export function createSkillReferenceAttachment(skill: ReadySkillReference): ChatAttachment {
   const skillId = String(skill.skillId || '').trim()
   const path = String(skill.path || (skillId ? `skill://${skillId}` : `skill://${encodeURIComponent(skill.name)}`))

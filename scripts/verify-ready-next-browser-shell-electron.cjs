@@ -12,6 +12,10 @@
 //   refusal  T7: with the model removed, the click's refusal is shown on the band in plain words.
 //   tabs     T8: the assistant's tabs are their own sidebar group with the task's name and state; clicking a row brings
 //            the tab to the front; 全部关闭 closes them through Main.
+//   groups   the person's own tab groups: right-click a tab → 添加到新分组 names a new group at once; another tab joins it
+//            from the menu; the group collapses and opens; 移出分组 takes a tab out; the model is in the saved snapshot;
+//            the assistant's task groups stay as they are and are not offered as groups. With --shots, the dark
+//            tour's restart checks that the group came back.
 //   download T4/T8: the task card lists the downloaded file as a capsule with type and size; click opens it; Space
 //            quick-looks it.
 //   settings T8: 设置 › 浏览器 — the engine is chosen there; suggestions are off by default and the switch says what
@@ -354,6 +358,13 @@ async function readingCase({ app, page, site }) {
 async function darkTour({ session, model, site }) {
   const { page } = session
   await harness.requestMode(page, 'browser')
+  if (groupedTab) {
+    // The restart that changed the theme is also the restart the person's groups have to survive.
+    const header = page.locator('[data-tab-group-header]')
+    ok('groups: after a restart the group, its name and its member are back', await waitFor(async () => (await header.allInnerTexts()).map(text => text.trim()).join() === '资料'
+      && await page.locator(`[data-browser-tab="${groupedTab}"]`).getAttribute('data-grouped') === 'true', 15000), JSON.stringify(await header.allInnerTexts()))
+  }
+  await shot(page, 'tab-groups-dark')
   await openTab(page, site.url('/blog/sieve'))
   await newConversation(page)
   await send(page, '登录场景：再打开一次后台')
@@ -453,6 +464,7 @@ async function main() {
     }
     await run('login', () => loginCase({ app, page, model, sites }))
     await run('download', () => downloadCase({ app, page, model }))
+    await run('groups', () => groupsCase({ page, site }))
     await run('tabs', () => tabsCase({ app, page }))
     await run('takeover', () => takeoverCase({ app, page, model, holds }))
     await run('settings', () => settingsCase({ page }))
@@ -559,6 +571,67 @@ async function downloadCase({ page, model }) {
   await capsule.click()
   ok('T4 download: click opens the file', await waitFor(async () => /report-2026-q3/.test((await page.locator('[role="tab"][aria-selected="true"]').first().getAttribute('title').catch(() => '')) || ''), 20000))
   await harness.requestMode(page, 'browser')
+}
+
+/** The tab left in the group 资料 by the groups case; the dark tour's restart reads it back. */
+let groupedTab = null
+
+/** The person's tab groups, through the tab's right-click menu and the group header, as the person uses them. */
+async function groupsCase({ page, site }) {
+  const first = await openTab(page, site.url('/blog/one'))
+  const second = await openTab(page, site.url('/blog/two'))
+  await openTab(page, site.url('/blog/three'))
+  const row = id => page.locator(`[data-browser-tab="${id}"]`)
+  const menu = page.locator('[role="menu"][aria-label="标签页"]')
+  const header = page.locator('[data-tab-group-header]')
+  const taskGroups = await page.locator('[data-browser-task-group]').count()
+  const snapshot = () => page.evaluate(() => JSON.parse(localStorage.getItem('ready-browser-tabs-v1') || '{}'))
+  if (shots) await shot(page, 'tab-groups-before-light')
+
+  await row(first).click({ button: 'right' })
+  await menu.waitFor({ timeout: 10000 })
+  const labels = await menu.locator('.rn-menu__label').allTextContents()
+  ok('groups: the tab menu offers 添加到新分组 beside 引用到输入框 and 关闭标签页', ['引用到输入框', '添加到新分组', '关闭标签页'].every(label => labels.includes(label)) && !labels.includes('移出分组'), JSON.stringify(labels))
+  await shot(page, 'tab-menu-light')
+  await menu.getByRole('menuitem', { name: '添加到新分组' }).click()
+  const name = page.locator('.browser-tab-list__editor input')
+  ok('groups: the new group is in the list with its name field focused', await waitFor(async () => await header.count() === 1 && await name.evaluate(node => node === document.activeElement), 10000)
+    && await row(first).getAttribute('data-grouped') === 'true')
+  await page.keyboard.type('资料')
+  await page.keyboard.press('Enter')
+  ok('groups: typing a name and Enter names the group', await waitFor(async () => (await header.innerText()).trim() === '资料' && !(await name.count()), 10000), await header.innerText())
+
+  await row(second).click({ button: 'right' })
+  await menu.waitFor({ timeout: 10000 })
+  ok('groups: the menu lists the group under 添加到分组', (await menu.locator('.rn-menu__group').allTextContents()).includes('添加到分组'))
+  await menu.getByRole('menuitem', { name: '资料' }).click()
+  ok('groups: the second tab joins the group from the menu', await waitFor(async () => await row(second).getAttribute('data-grouped') === 'true', 10000))
+  await shot(page, 'tab-groups-light')
+
+  const pill = header.locator('button').first()
+  await pill.click()
+  ok('groups: the header collapses the group (its tabs leave the list)', await waitFor(async () => !(await row(first).count()) && !(await row(second).count()), 10000))
+  await shot(page, 'tab-groups-collapsed-light')
+  await pill.click()
+  ok('groups: and opens it again', await waitFor(async () => await row(first).count() === 1 && await row(second).count() === 1, 10000))
+
+  await row(second).click({ button: 'right' })
+  await menu.getByRole('menuitem', { name: '移出分组' }).click()
+  ok('groups: 移出分组 takes the tab out and the group keeps the other', await waitFor(async () => await row(second).getAttribute('data-grouped') === null, 10000)
+    && await row(first).getAttribute('data-grouped') === 'true' && await header.count() === 1)
+
+  // The model that a restart reads back: the saved snapshot holds the group and its member (written when idle).
+  const saved = await waitFor(async () => {
+    const data = await snapshot()
+    const group = (data.tabGroups || []).find(item => item.name === '资料')
+    return Boolean(group) && data.tabs.find(tab => tab.id === first)?.groupId === group.id && !data.tabs.find(tab => tab.id === second)?.groupId
+  }, 10000)
+  ok('groups: the saved tab snapshot holds the group, its name and its member', saved, JSON.stringify((await snapshot()).tabGroups))
+  const mainIds = (await tabsOf(page)).map(tab => tab.id)
+  if (saved) groupedTab = first
+  ok('groups: Main still lists every tab (groups are the list’s own)', [first, second].every(id => mainIds.includes(id)))
+  ok('groups: the assistant’s task groups are untouched and are not user groups', await page.locator('[data-browser-task-group]').count() === taskGroups
+    && await page.locator('[data-browser-task-group] [data-tab-group-header]').count() === 0)
 }
 
 async function tabsCase({ page }) {
