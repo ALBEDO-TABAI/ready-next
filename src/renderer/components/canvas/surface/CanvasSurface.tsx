@@ -2,11 +2,17 @@ import { writeReadyRefTransfer } from '../../../../shared/ready-ref'
 import { readEventTransfer, READY_REF_MIME } from '../../../modules/calendar/linkage/transfer'
 import { eventCard } from '../../../../shared/calendar-linkage'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { KeyboardEvent } from 'react'
-import type { CanvasNode } from '../../../../shared/ready-canvas/schema'
+import type { ClipboardEvent, KeyboardEvent } from 'react'
+import type { Appearance, CanvasNode } from '../../../../shared/ready-canvas/schema'
 import { activeCanvasContent, type CanvasOperation } from '../../../../shared/ready-canvas/operations'
 import { CanvasGestures, edgeEnds, edgePath, type GestureScene } from '../../../modules/canvas/interaction/gestures'
-import { SpatialIndex, clusters, expand, layout, screenToWorld, zoomAt, type Camera } from '../../../modules/canvas/interaction/geometry'
+import { SpatialIndex, bounds, clusters, expand, layout, screenToWorld, zoomAt, type Camera } from '../../../modules/canvas/interaction/geometry'
+import { rememberCamera, rememberedCamera, useBoardView } from '../../../modules/canvas/interaction/preferences'
+import { captureFrames, playSettle } from '../../../modules/canvas/interaction/settle'
+import { CARDS_MIME, cardsPayload, cardsText, parseCards, pasteOperations, type CardsPayload } from '../../../modules/canvas/interaction/clipboard'
+import { neighbour, type Direction } from '../../../modules/canvas/interaction/navigate'
+import { DEFAULT_FONT_SCALE } from '../../../modules/canvas/interaction/adaptive'
+import { HullHandles } from './CanvasHandles'
 import { groupOperations, layerOperations, ungroupOperations } from '../../../modules/canvas/interaction/operations'
 import { visualBounds } from '../../../modules/canvas/interaction/graphics'
 import { silhouettePath } from '../../../modules/canvas/interaction/outline'
@@ -18,10 +24,14 @@ import { CanvasCorner, CanvasCrumbs, CanvasDock, SelectionBar } from './CanvasCh
 import { Button, closeFloat, EmptyState, MenuList, openFloat, type FloatAnchor, type MenuEntry } from '../../ui'
 import { cardFrame } from '../../../modules/canvas/interaction/graphics'
 import { useBoardCommands } from '../../../modules/canvas/board-commands'
-import { CalendarPlus, ClipboardPaste, FileDown, FilePlus2, ImageDown, Sparkles, StickyNote, Trash2, Type } from 'lucide-react'
+import { CalendarPlus, ClipboardPaste, CopyPlus, FileDown, FilePlus2, ImageDown, Sparkles, StickyNote, Trash2, Type } from 'lucide-react'
 
 const TOOL_KEYS: Record<string, Tool> = { v: 'select', h: 'pan', b: 'rect', a: 'arrow', c: 'edge', d: 'path' }
 const CONTEXT_MENU = 'canvas-context-menu'
+const HOME_CAMERA: Camera = { x: 40, y: 80, zoom: 1 }
+const ARROWS: Record<string, Direction> = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' }
+/** The cards last copied here, for the right-click 粘贴 (which can only read the clipboard's text). */
+let copied: CardsPayload | null = null
 
 export function CanvasSurface(props: CanvasSurfaceProps) {
   const buffer = useCanvasBuffer(props), { canvas, busy, commit } = buffer
@@ -32,7 +42,8 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     finishEditor.current = finish
     return () => { if (finishEditor.current === finish) finishEditor.current = null }
   }, [])
-  const [editing, setEditing] = useState<string | null>(null), [camera, setCamera] = useState<Camera>(props.initialCamera ?? { x: 40, y: 80, zoom: 1 })
+  const [editing, setEditing] = useState<string | null>(null), [camera, setCamera] = useState<Camera>(() => props.initialCamera ?? rememberedCamera(props.canvas.ready.id) ?? HOME_CAMERA)
+  const view = useBoardView(), [hover, setHover] = useState<string | null>(null)
   const [size, setSize] = useState({ width: 1000, height: 700 })
   useEffect(() => {
     const node = canvas.nodes.find(node => node.id === props.revealNode?.nodeId && !node.ready.trash)
@@ -48,10 +59,10 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
   const [composing, setComposing] = useState(false), [compositionError, setCompositionError] = useState('')
   const root = useRef<HTMLDivElement>(null), world = useRef<HTMLDivElement>(null), overlay = useRef<SVGSVGElement>(null)
   const elements = useRef(new Map<string, HTMLElement>()), edgeElements = useRef<GestureScene['edgeElements']>(new Map())
-  const latest = useRef({ buffer, props }), scene = useRef<GestureScene | null>(null)
-  latest.current = { buffer, props }
+  const latest = useRef({ buffer, props, camera }), scene = useRef<GestureScene | null>(null)
+  latest.current = { buffer, props, camera }
   const gestures = useMemo(() => new CanvasGestures({ scene: () => scene.current, select: setSelected, camera: setCamera,
-    commit: ops => latest.current.buffer.commit(ops), graphic: (draft, node) => latest.current.buffer.graphic(draft, node), measure: work => latest.current.props.onFrameWork?.(work),
+    commit: ops => latest.current.buffer.commit(ops), transform: build => latest.current.buffer.transform(build), graphic: (draft, node) => latest.current.buffer.graphic(draft, node), measure: work => latest.current.props.onFrameWork?.(work),
     // One connector or shape, then back to the select tool with the new thing picked (Delete removes it); freehand keeps drawing.
     drawn: (kind, id) => { if (kind !== 'path') { setSelected([id]); setTool('select') } } }), [])
   const active = useMemo(() => activeCanvasContent(canvas), [canvas])
@@ -65,8 +76,15 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
   const viewport = useMemo(() => ({ ...screenToWorld({ x: 0, y: 0 }, camera), width: size.width / camera.zoom, height: size.height / camera.zoom }), [camera, size])
   const visible = useMemo(() => index.query(expand(viewport, 80 / camera.zoom)), [index, viewport, camera.zoom])
   const visibleIds = useMemo(() => new Set(visible.map(n => n.id)), [visible])
-  const outlines = useMemo(() => clusters(visible.filter(n => n.type !== 'group')).filter(c => c.length > 1).map(c => ({ id: c[0].id, d: silhouettePath(c) })), [visible])
+  // Stillroom's clusters: cards within 24 of each other; the outline shows only around the hovered card's cluster.
+  const outlines = useMemo(() => clusters(visible.filter(n => n.type !== 'group' && n.ready.kind !== 'graphic')).filter(c => c.length > 1).map(c => ({ ids: new Set(c.map(n => n.id)), d: silhouettePath(c, 24, 40) })), [visible])
   const chosen = selected.flatMap(id => { const n = byId.get(id); return n ? [n] : [] })
+  // What a gesture on the selection carries: the picked cards and the members of picked groups.
+  const carried = useMemo(() => {
+    const ids = new Set(selected.filter(id => byId.has(id))), queue = [...ids]
+    for (let i = 0; i < queue.length; i++) for (const id of children.get(queue[i]) ?? []) if (!ids.has(id)) { ids.add(id); queue.push(id) }
+    return active.nodes.filter(n => ids.has(n.id))
+  }, [selected, byId, children, active])
   // Node and connector ids share one namespace (the format rejects duplicates), so one selection holds both.
   const chosenEdges = active.edges.filter(edge => selected.includes(edge.id))
   const marker = `canvas-arrow-${useId().replace(/:/g, '')}`
@@ -79,11 +97,19 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     else latest.current.props.onOpenNode?.(node)
   }, [])
   useLayoutEffect(() => {
-    if (root.current && world.current && overlay.current) scene.current = { root: root.current, world: world.current, overlay: overlay.current, camera, viewport, index, byId, elements: elements.current, selected, tool, busy: busy || trash || !!editing, children, edgeElements: edgeElements.current }
+    if (root.current && world.current && overlay.current) scene.current = { root: root.current, world: world.current, overlay: overlay.current, camera, viewport, index, byId, elements: elements.current, selected, tool, busy: busy || trash || !!editing, prefs: view, children, edgeElements: edgeElements.current }
   })
+  const boardId = useRef(props.canvas.ready.id)
   useLayoutEffect(() => {
-    gestures.cancel(); setEditing(null); setSelected([])
+    gestures.cancel(); setEditing(null); setSelected([]); setHover(null)
+    // Another board in the same surface opens where it was left (M4 §9.1: the camera is this machine's state).
+    if (boardId.current !== props.canvas.ready.id) { boardId.current = props.canvas.ready.id; setCamera(rememberedCamera(props.canvas.ready.id) ?? HOME_CAMERA) }
   }, [props.canvas.ready.id, gestures])
+  useEffect(() => {
+    if (capturing) return
+    const id = props.canvas.ready.id, timer = setTimeout(() => rememberCamera(id, camera), 300)
+    return () => clearTimeout(timer)
+  }, [camera, capturing, props.canvas.ready.id])
   // Authoritative replacement invalidates an in-flight gesture, even on the same object.
   useLayoutEffect(() => { gestures.cancel() }, [props.canvas, gestures])
   useEffect(() => {
@@ -116,7 +142,65 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     for (const edge of chosenEdges) if (!binned.has(edge.fromNode) || !binned.has(edge.toNode)) operations.push({ type: 'deleteEdge', id: edge.id })
     void commit(operations)
   }
-  function arrange(kind: 'P' | 'L' | 'R') { void commit(layout(chosen, kind, 24, Math.floor(Math.random() * 4294967296))) }
+  /** Cards glide to where an edit puts them (a layout, an undo, a redo); 还原排版 is undo. */
+  function settled(edit: () => Promise<boolean>) {
+    const before = captureFrames(elements.current, visibleIds)
+    void edit().then(ok => { if (ok) root.current?.ownerDocument.defaultView?.requestAnimationFrame(() => playSettle(elements.current, before, latest.current.camera.zoom)) })
+  }
+  function arrange(kind: 'P' | 'L' | 'R') { settled(() => commit(layout(chosen, kind, view.gap, Math.floor(Math.random() * 4294967296)))) }
+  const undo = () => settled(() => buffer.undo()), redo = () => settled(() => buffer.redo())
+  function duplicate() {
+    const payload = cardsPayload(carried, active.edges)
+    if (!payload) return
+    const { operations, ids } = pasteOperations(payload, { offset: { x: 24, y: 24 } })
+    void commit(operations).then(ok => { if (ok) setSelected(ids) })
+  }
+  /** Arrow keys: from the picked card to the nearest one that way (from nothing: the card nearest the middle). */
+  function focusCard(direction: Direction) {
+    const pool = active.nodes.filter(n => n.type !== 'group').map(n => ({ ...n, ...visualBounds(n) })), from = chosen.length === 1 ? pool.find(n => n.id === chosen[0].id) : undefined
+    const middle = screenToWorld({ x: size.width / 2, y: size.height / 2 }, camera)
+    const next = from ? neighbour(pool, from, direction) : [...pool].sort((a, b) => Math.hypot(a.x + a.width / 2 - middle.x, a.y + a.height / 2 - middle.y) - Math.hypot(b.x + b.width / 2 - middle.x, b.y + b.height / 2 - middle.y))[0]
+    if (!next) return
+    setSelected([next.id])
+    // Bring it into view with the smallest pan.
+    const pad = 96, left = next.x * camera.zoom + camera.x, top = next.y * camera.zoom + camera.y, right = left + next.width * camera.zoom, bottom = top + next.height * camera.zoom
+    const dx = left < pad ? pad - left : right > size.width - pad ? Math.min(size.width - pad - right, pad - left) : 0
+    const dy = top < pad ? pad - top : bottom > size.height - pad ? Math.min(size.height - pad - bottom, pad - top) : 0
+    if (dx || dy) setCamera(c => ({ ...c, x: c.x + dx, y: c.y + dy }))
+  }
+  const inField = (target: EventTarget | null) => target instanceof Element && !!target.closest('input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"],[data-canvas-ui]')
+  function copyCards(event: ClipboardEvent<HTMLDivElement>, cut: boolean) {
+    if (inField(event.target) || trash || editing || (cut && busy)) return
+    const payload = cardsPayload(carried, active.edges)
+    if (!payload) return
+    event.preventDefault(); copied = payload
+    event.clipboardData.setData(CARDS_MIME, JSON.stringify(payload)); event.clipboardData.setData('text/plain', cardsText(payload))
+    if (cut) recycle()
+  }
+  const pasteRun = useRef({ key: '', count: 0 })
+  /** Cards copied on this board land a step away from their originals (each further paste one step more); cards
+   *  from another board land in the middle of the view. */
+  function placeCards(payload: CardsPayload, at?: { x: number; y: number }) {
+    const key = payload.nodes.map(n => n.id).join(), here = !at && payload.nodes.some(n => byId.has(n.id))
+    pasteRun.current = { key, count: pasteRun.current.key === key ? pasteRun.current.count + 1 : 1 }
+    const step = 24 * pasteRun.current.count
+    const { operations, ids } = pasteOperations(payload, here ? { offset: { x: step, y: step } } : { centre: at ?? screenToWorld({ x: size.width / 2, y: size.height / 2 }, camera) })
+    return commit(operations).then(ok => { if (ok) setSelected(ids) })
+  }
+  function pasteCards(event: ClipboardEvent<HTMLDivElement>) {
+    // Pictures and files on the clipboard belong to the media layer, not to this handler.
+    if (inField(event.target) || busy || trash || editing || event.clipboardData.files.length) return
+    const cards = parseCards(event.clipboardData.getData(CARDS_MIME)), text = event.clipboardData.getData('text/plain').trim()
+    if (!cards && !text) return
+    event.preventDefault()
+    if (cards) void placeCards(cards)
+    else void commit([{ type: 'addNode', node: textOrLink(text, screenToWorld({ x: size.width / 2, y: size.height / 2 }, camera)) }])
+  }
+  const textual = chosen.length > 0 && chosen.every(n => n.type === 'text' && n.ready.kind !== 'draft')
+  const shared = <T,>(read: (node: CanvasNode) => T): T | undefined => chosen.every(n => read(n) === read(chosen[0])) ? read(chosen[0]) : undefined
+  function textStyle(patch: Partial<Pick<Appearance, 'fontScale' | 'weight' | 'align'>>) {
+    void commit(chosen.map(n => ({ type: 'appearance' as const, id: n.id, appearance: { ...n.ready.appearance, ...patch } })))
+  }
   function shortcut(e: KeyboardEvent<HTMLDivElement>) {
     const target = e.target instanceof Element ? e.target : null
     if (!root.current?.contains(root.current.ownerDocument.activeElement) || target?.closest('input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"],button,[data-canvas-ui]') || e.nativeEvent.isComposing) return
@@ -125,7 +209,11 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     const mod = e.ctrlKey || e.metaKey, key = e.key.toLowerCase()
     if (e.key === ' ') { e.preventDefault(); gestures.space = true }
     else if (mod && key === 'a') { e.preventDefault(); setSelected([...active.nodes.map(n => n.id), ...active.edges.map(edge => edge.id)]) }
-    else if (mod && key === 'z') { e.preventDefault(); void (e.shiftKey ? buffer.redo() : buffer.undo()) }
+    else if (mod && key === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo() }
+    else if (mod && e.altKey && (e.code === 'BracketRight' || e.code === 'BracketLeft')) { e.preventDefault(); if (chosen.length) void commit(layerOperations(canvas, chosen.map(n => n.id), e.code === 'BracketRight' ? 'forward' : 'backward')) }
+    else if (mod && !e.shiftKey && key === 'd') { e.preventDefault(); duplicate() }
+    else if (!mod && !e.altKey && ARROWS[e.key]) { e.preventDefault(); focusCard(ARROWS[e.key]) }
+    else if (!mod && e.key === 'Enter' && chosen.length === 1) { e.preventDefault(); open(chosen[0]) }
     else if (mod && key === 'g') { e.preventDefault(); void commit(e.shiftKey ? ungroupOperations(canvas, selected) : groupOperations(chosen, crypto.randomUUID())) }
     else if (!mod && (e.key === 'Delete' || e.key === 'Backspace')) { e.preventDefault(); recycle() }
     else if (!mod && ['p', 'l', 'r'].includes(key)) { e.preventDefault(); arrange(key.toUpperCase() as 'P' | 'L' | 'R') }
@@ -195,12 +283,19 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     const top = Math.min(...frames.map(f => f.y)) * camera.zoom + camera.y
     return { left: Math.max(180, Math.min(size.width - 180, (left + right) / 2)), top: Math.max(68, top - 52) }
   })() : null
+  // More than one card picked: one outline around them all, with its own four arcs (Stillroom's selection hull).
+  const hull = carried.length > 1 && !editing && !trash && !capturing && tool === 'select'
   const schedulable = props.onScheduleNode && chosen.length === 1 && ['text', 'note', 'document'].includes(chosen[0].ready.kind)
+  function textOrLink(text: string, at: { x: number; y: number }): CanvasNode {
+    const link = /^https?:\/\/\S+$/i.test(text), frame = { id: crypto.randomUUID(), x: Math.round(at.x - 130), y: Math.round(at.y - 40), width: 260, height: link ? 195 : 120 }
+    return link ? { ...frame, type: 'link', url: text, ready: { kind: 'link' } } : { ...frame, type: 'text', text, ready: { kind: 'text' } }
+  }
   async function paste(at: { x: number; y: number }) {
     const text = (await navigator.clipboard?.readText?.())?.trim()
+    // The menu can only read the clipboard's text: when it is the reading of the cards copied here, paste those cards.
+    if (copied && text && text === cardsText(copied).trim()) { await placeCards(copied, at); return }
     if (!text) throw new Error('剪贴板里没有文字或链接')
-    const frame = { id: crypto.randomUUID(), x: Math.round(at.x - 130), y: Math.round(at.y - 40), width: 260, height: /^https?:\/\/\S+$/i.test(text) ? 195 : 120 }
-    await commit([{ type: 'addNode', node: /^https?:\/\/\S+$/i.test(text) ? { ...frame, type: 'link', url: text, ready: { kind: 'link' } } : { ...frame, type: 'text', text, ready: { kind: 'text' } } }])
+    await commit([{ type: 'addNode', node: textOrLink(text, at) }])
   }
   const recycled = canvas.nodes.filter(n => n.ready.trash)
   const fail = (cause: unknown) => setCompositionError(cause instanceof Error ? cause.message : String(cause))
@@ -214,6 +309,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
       ...(props.onAddToDocument ? [{ id: 'add', label: '添加到文档', icon: <FilePlus2 />, disabled: composing || busy, onSelect: () => void addToDocument() }] : []),
       ...(props.onAskAI && chosen.length > 0 ? [{ id: 'ask', label: '问 AI', icon: <Sparkles />, disabled: busy || composing, onSelect: () => { void props.onAskAI!(chosen.map(n => n.id)).catch(fail) } }] : []),
       ...(schedulable ? [{ id: 'schedule', label: '安排日程…', icon: <CalendarPlus />, disabled: busy || composing, onSelect: () => props.onScheduleNode!(chosen[0]) }] : []),
+      { id: 'duplicate', label: '创建副本', icon: <CopyPlus />, hint: '⌘D', disabled: busy || composing, onSelect: duplicate },
       { id: 'delete', label: '删除', icon: <Trash2 />, hint: 'Delete', danger: true, disabled: busy || composing, onSelect: recycle },
     ]
     const anchor: FloatAnchor = { left: menu.client.x, top: menu.client.y, right: menu.client.x, bottom: menu.client.y }
@@ -251,7 +347,8 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     catch (error) { setCompositionError(error instanceof Error ? error.message : String(error)) }
     finally { setComposing(false) }
   }
-  return <div className="rn-canvas" data-canvas-surface data-tool={tool} data-capturing={capturing || undefined} tabIndex={0} ref={root} aria-label={canvas.ready.title || '画板'}
+  return <div className="rn-canvas" data-canvas-surface data-tool={tool} data-square-media={view.roundedMedia ? undefined : true} data-capturing={capturing || undefined}
+    onCopy={event => copyCards(event, false)} onCut={event => copyCards(event, true)} onPaste={pasteCards} tabIndex={0} ref={root} aria-label={canvas.ready.title || '画板'}
     onDragStart={event => {
       const card = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-node-id]') : null
       const node = card?.dataset.nodeId ? byId.get(card.dataset.nodeId) : null
@@ -289,7 +386,13 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     }}
     onKeyDown={shortcut} onKeyUp={e => { if (e.key === ' ') gestures.space = false }}
     onFocus={() => commands.focus()} onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) gestures.cancel() }}
-    onPointerDown={e => { if (!e.altKey) gestures.down(e.nativeEvent) }} onPointerMove={e => gestures.move(e.nativeEvent)} onPointerUp={e => gestures.up(e.nativeEvent)}
+    onPointerDown={e => { if (!e.altKey) gestures.down(e.nativeEvent) }} onPointerUp={e => gestures.up(e.nativeEvent)}
+    onPointerMove={e => {
+      gestures.move(e.nativeEvent)
+      // The hovered card shows its grips and its cluster's outline; a gesture in progress keeps what it started with.
+      if (!gestures.active) { const over = e.target instanceof Element && !e.target.closest('[data-canvas-ui]') ? e.target.closest<HTMLElement>('[data-node-id]')?.dataset.nodeId ?? null : null; if (over !== hover) setHover(over) }
+    }}
+    onPointerLeave={() => { if (!gestures.active) setHover(null) }}
     onPointerCancel={() => gestures.cancel()} onLostPointerCapture={() => gestures.cancel()}
     onDoubleClick={e => {
       // A drag gesture captures the pointer on the root, so the browser retargets the double-click to the root:
@@ -305,13 +408,14 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
       onTrash={() => { gestures.cancel(); setEditing(null); setSearch(null); setTrash(!trash) }} />}
     {!trash && !capturing && <CanvasDock tool={tool} lastShape={lastShape} disabled={busy || !!editing} graphics={!!props.prepareGraphic}
       canUndo={buffer.canUndo} canRedo={buffer.canRedo} busy={busy} onTool={chooseTool} onCard={kind => placeCard(kind)}
-      onUndo={() => void buffer.undo()} onRedo={() => void buffer.redo()} />}
+      onUndo={undo} onRedo={redo} />}
     {selectionBox && <SelectionBar left={selectionBox.left} top={selectionBox.top} count={chosen.length} edges={chosenEdges.length} busy={busy || composing}
+      text={textual ? { size: shared(n => Math.round((n.ready.appearance?.fontScale ?? DEFAULT_FONT_SCALE) * 24)), weight: shared(n => n.ready.appearance?.weight), align: shared(n => n.ready.appearance?.align) } : undefined}
       canGroup={chosen.length > 1} canUngroup={chosen.some(n => n.ready.groupId || n.type === 'group')}
       actions={{
         group: () => void commit(groupOperations(chosen, crypto.randomUUID())), ungroup: () => void commit(ungroupOperations(canvas, selected)),
-        layout: arrange, front: () => void commit(layerOperations(canvas, selected, 'front')), back: () => void commit(layerOperations(canvas, selected, 'back')),
-        remove: recycle,
+        layout: arrange, layer: placement => void commit(layerOperations(canvas, chosen.map(n => n.id), placement)),
+        remove: recycle, textStyle: textual ? textStyle : undefined,
         addToDocument: props.onAddToDocument ? () => void addToDocument() : undefined,
         askAI: props.onAskAI ? () => { void props.onAskAI!(chosen.map(n => n.id)).catch(fail) } : undefined,
         schedule: schedulable ? () => props.onScheduleNode!(chosen[0]) : undefined,
@@ -328,7 +432,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
         <div className="canvas-trash-actions"><Button size="sm" disabled={busy} aria-label={`恢复 ${n.id}`} onClick={() => void commit([{ type: 'restore', ids: [n.id] }])}>恢复</Button>
           <Button size="sm" variant="danger" disabled={busy} aria-label={`永久删除 ${n.id}`} onClick={() => void commit([{ type: 'purge', ids: [n.id] }])}>永久删除</Button></div></article>)}
     </section> : <div className="canvas-world" ref={world} style={{ transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.zoom})` }}>
-      <svg className="canvas-clusters" aria-hidden="true">{outlines.map(o => <path key={o.id} d={o.d} />)}</svg>
+      <svg className="canvas-clusters" aria-hidden="true">{outlines.map(o => <path key={o.d} d={o.d} data-on={(!!hover && o.ids.has(hover) && !(hull && carried.some(n => o.ids.has(n.id)))) || undefined} />)}</svg>
       <svg className="canvas-edges" aria-hidden="true"><defs><marker id={marker} viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="13" markerHeight="13" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 Z" /></marker></defs>
         {active.edges.map(e => { const from = byId.get(e.fromNode)!, to = byId.get(e.toNode)!, d = edgePath(from, to, e); return <g key={e.id} data-edge-id={e.id} data-selected={selected.includes(e.id) || undefined}
           ref={el => { if (el) edgeElements.current.set(e.id, { element: el, from, to, edge: e }); else edgeElements.current.delete(e.id) }}>
@@ -337,13 +441,18 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
           {e.label && <text x={(from.x + to.x) / 2} y={(from.y + to.y) / 2}>{e.label}</text>}
         </g> })}
       </svg>
-      {active.nodes.map(node => <CanvasCard key={node.id} node={node} selected={selected.includes(node.id)} matched={matchIds.has(node.id)} visible={visibleIds.has(node.id)} element={bindElement} resolveAsset={props.resolveAsset}
+      {active.nodes.map(node => <CanvasCard key={node.id} node={node} selected={selected.includes(node.id)} matched={matchIds.has(node.id)}
+        grouped={hull && selected.includes(node.id)} handles={tool === 'select' && !busy && !editing && !capturing && (hull ? false : selected.includes(node.id) || hover === node.id)} visible={visibleIds.has(node.id)} element={bindElement} resolveAsset={props.resolveAsset}
         content={visibleIds.has(node.id) ? props.renderCard?.(node) : undefined}
         editor={editing === node.id ? <CanvasEditorLifecycle.Provider value={registerFinish}><div data-canvas-ui className="canvas-editor">
           <div inert={closing}>{props.renderTextEditor?.({ node, commit, close: () => { void closeEditor() } })}</div>
           {editorError && <p role="alert">{editorError}</p>}
           <Button size="sm" disabled={closing} onClick={() => void closeEditor()}>{closing ? '正在完成…' : '完成编辑'}</Button>
         </div></CanvasEditorLifecycle.Provider> : undefined} />)}
+      {hull && <>
+        <svg className="canvas-hull" aria-hidden="true"><path d={silhouettePath(carried.map(cardFrame), 12, 28)} /></svg>
+        <HullHandles box={expand(bounds(carried), 12)} />
+      </>}
       <svg className="canvas-overlay" ref={overlay} data-arrow-marker={marker} aria-hidden="true" />
     </div>}
   </div>

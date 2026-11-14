@@ -48,7 +48,12 @@ export function useCanvasBuffer(props: CanvasSurfaceProps) {
       : [{ type: 'addNode', node: { id: draft.id, type: 'file', file, x: draft.x, y: draft.y, width: draft.width, height: draft.height, ready: { kind: 'graphic', graphic: draft.graphic } } }]
     return history.current.prepare(before, ops)
   }), [run])
-  return { canvas, busy, error, commit, graphic,
+  /** One edit whose operations are built with the drawing attachment service (a scaled selection holding a drawing). */
+  const transform = useCallback((build: (prepare?: (draft: GraphicDraft) => Promise<string>) => Promise<CanvasOperation[]>) => run(async before => {
+    const ops = await build(owner.current.prepareGraphic)
+    return ops.length ? history.current.prepare(before, ops) : undefined
+  }), [run])
+  return { canvas, busy, error, commit, graphic, transform,
     undo: () => run(before => history.current.prepareUndo(before)), redo: () => run(before => history.current.prepareRedo(before)),
     canUndo: history.current.canUndo, canRedo: history.current.canRedo }
 }

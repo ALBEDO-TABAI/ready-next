@@ -62,8 +62,9 @@ export class SpatialIndex<T extends Rect & { id: string }> {
   }
 }
 
-/** Stillroom gap snap plus Ready centre/edge guides; candidates already spatially restricted. */
-export function snapRect(r: Rect, others: readonly Rect[], gap: number, radius: number): Point & { guides: Guide[] } {
+/** Stillroom's magnetic snap: sit `gap` away from a neighbour's edge, or line up with its edges or centre.
+ *  Candidates are already spatially restricted. `smart` only decides whether an alignment draws its guide. */
+export function snapRect(r: Rect, others: readonly Rect[], gap: number, radius: number, smart = true): Point & { guides: Guide[] } {
   const guides: Guide[] = [], result = { x: r.x, y: r.y }
   for (const axis of ['x', 'y'] as const) {
     const size = axis === 'x' ? 'width' : 'height', cross = axis === 'x' ? 'y' : 'x', crossSize = axis === 'x' ? 'height' : 'width'
@@ -83,13 +84,13 @@ export function snapRect(r: Rect, others: readonly Rect[], gap: number, radius: 
       }
     }
     result[axis] = Math.round(r[axis] + delta)
-    if (guide) guides.push(guide)
+    if (guide && smart) guides.push(guide)
   }
   return { ...result, guides }
 }
 
 /** Visible-region sweep; never called from pointermove. */
-export function clusters<T extends Rect & { id: string }>(items: readonly T[], tolerance = 64): T[][] {
+export function clusters<T extends Rect & { id: string }>(items: readonly T[], tolerance = 24): T[][] {
   const sorted = [...items].sort((a, b) => a.x - b.x), parent = sorted.map((_, i) => i)
   const find = (i: number): number => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i] } return i }
   for (let i = 0; i < sorted.length; i++) {

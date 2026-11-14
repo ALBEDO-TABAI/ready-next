@@ -36,13 +36,17 @@
   .rn-canvas .canvas-search output { min-width: 40px; color: var(--rn-ink-3); font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; }
   .rn-canvas .canvas-selection-count { padding: 0 8px 0 10px; color: var(--rn-ink-3); font-size: 12px; white-space: nowrap; }
   /* While a PNG is captured only the cards show. */
-  .rn-canvas[data-capturing] :where(.canvas-message, [role='alert'], .canvas-resize) { display: none; }
+  .rn-canvas[data-capturing] :where(.canvas-message, [role='alert'], .canvas-arc, .canvas-edge-grip) { display: none; }
   .rn-canvas .canvas-card[data-matched='true'] { box-shadow: 0 0 0 3px var(--rn-accent-soft), var(--rn-shadow-1); }
   /* A sticky note is the content colour yellow (JSON Canvas colour 3), from the writer's content palette. */
   .rn-canvas .canvas-card[data-kind='note'] { background: var(--doc-yellow-bg, var(--canvas-card)); }
   .rn-canvas .canvas-world { position: absolute; inset: 0; transform-origin: 0 0; }
   .rn-canvas .canvas-card { position: absolute; box-sizing: border-box; background: var(--canvas-card); border-radius: var(--rn-r-lg); box-shadow: var(--rn-shadow-1); }
-  .rn-canvas .canvas-card[data-selected='true'] { outline: 2px solid var(--canvas-accent); }
+  /* Picked is ink, never the accent (V5): a thin ink ring, plus the corner arcs. In a multi-selection the hull
+     stands for the group and the cards keep no ring of their own. */
+  .rn-canvas .canvas-card[data-selected='true'] { outline: 1.5px solid var(--rn-ink); }
+  .rn-canvas .canvas-card[data-selected='true'][data-grouped] { outline: none; }
+  .rn-canvas[data-square-media] .canvas-card:is([data-kind='image'], [data-kind='video']) { border-radius: 0; }
   .rn-canvas .canvas-card[data-lightweight='true'] { box-shadow: none; pointer-events: none; }
   .rn-canvas .canvas-card[data-kind='group'] { background: var(--rn-fill); border: .5px solid var(--rn-hair-2); box-shadow: none; }
   .rn-canvas .canvas-card[data-kind='graphic'] { background: transparent; box-shadow: none; }
@@ -59,14 +63,15 @@
   .rn-canvas .canvas-card .canvas-graphic { position: absolute; max-width: none; pointer-events: none; }
   .rn-canvas .canvas-text { white-space: pre-wrap; }
   /* A text card at rest: rendered Markdown (W4 MS2), compact like a card, never selectable mid-gesture. */
-  .rn-canvas .canvas-markdown { font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+  /* Text scales with its card: the card sets --canvas-font (fontScale × 24px); everything inside is relative to it. */
+  .rn-canvas .canvas-markdown { font-size: var(--canvas-font, 13px); line-height: 1.5; overflow-wrap: anywhere; }
   .rn-canvas .canvas-markdown.is-empty { color: var(--rn-ink-3); }
   .rn-canvas .canvas-markdown > :first-child { margin-top: 0; }
   .rn-canvas .canvas-markdown > :last-child { margin-bottom: 0; }
   .rn-canvas .canvas-markdown :where(h1, h2, h3, h4) { margin: 0 0 8px; font-weight: 600; line-height: 1.3; }
-  .rn-canvas .canvas-markdown h1 { font-size: 18px; }
-  .rn-canvas .canvas-markdown h2 { font-size: 16px; }
-  .rn-canvas .canvas-markdown :where(h3, h4) { font-size: 14px; }
+  .rn-canvas .canvas-markdown h1 { font-size: 1.385em; }
+  .rn-canvas .canvas-markdown h2 { font-size: 1.231em; }
+  .rn-canvas .canvas-markdown :where(h3, h4) { font-size: 1.077em; }
   .rn-canvas .canvas-markdown p { margin: 0 0 8px; }
   .rn-canvas .canvas-markdown :where(ul, ol) { margin: 0 0 8px; padding-left: 18px; }
   .rn-canvas .canvas-markdown ul { list-style: disc; }
@@ -77,17 +82,44 @@
   .rn-canvas .canvas-markdown .task-list-item input { margin: 0 6px 0 0; vertical-align: -1px; }
   .rn-canvas .canvas-markdown li { margin: 2px 0; }
   .rn-canvas .canvas-markdown blockquote { margin: 0 0 8px; padding-left: 10px; box-shadow: inset 2px 0 0 var(--rn-hair-2); color: var(--rn-ink-2); }
-  .rn-canvas .canvas-markdown code { padding: 1px 4px; border-radius: 4px; background: var(--rn-fill-2); font: 12px var(--rn-font-mono); }
+  .rn-canvas .canvas-markdown code { padding: 1px 4px; border-radius: 4px; background: var(--rn-fill-2); font: .923em var(--rn-font-mono); }
   .rn-canvas .canvas-markdown pre { margin: 0 0 8px; padding: 8px; border-radius: 8px; background: var(--rn-fill); overflow: hidden; }
   .rn-canvas .canvas-markdown pre code { padding: 0; background: none; }
   .rn-canvas .canvas-markdown .canvas-md-link { text-decoration: underline; text-decoration-color: var(--rn-hair-2); text-underline-offset: 3px; }
   .rn-canvas .canvas-markdown .canvas-md-image { color: var(--rn-ink-3); }
-  .rn-canvas .canvas-markdown table { border-collapse: collapse; font-size: 12px; }
+  .rn-canvas .canvas-markdown table { border-collapse: collapse; font-size: .923em; }
   .rn-canvas .canvas-markdown :where(th, td) { padding: 2px 6px; box-shadow: inset 0 -.5px 0 var(--rn-hair); text-align: left; }
   .rn-canvas .canvas-group-label { position: absolute; top: -24px; left: 12px; font-size: 12px; }
-  .rn-canvas .canvas-resize { position: absolute; right: -7px; bottom: -7px; width: 22px; height: 22px; padding: 0; border-right: 3px solid var(--canvas-accent); border-bottom: 3px solid var(--canvas-accent); border-radius: 0 0 16px 0; cursor: nwse-resize; }
+  /* Resize grips (Stillroom's arcs, in ink): a quarter arc round each corner scales in proportion, an unseen strip
+     along each edge changes one dimension. Faint on the hovered card, full ink on the picked one and on the hull. */
+  .rn-canvas .canvas-arc { position: absolute; width: 24px; height: 24px; z-index: 2; }
+  .rn-canvas .canvas-arc svg { display: block; overflow: visible; pointer-events: none; }
+  .rn-canvas .canvas-arc path { fill: none; stroke: var(--rn-ink-4); stroke-width: 2.5; stroke-linecap: round; transition: stroke 120ms var(--rn-ease-std); }
+  .rn-canvas .canvas-arc:hover path, .rn-canvas .canvas-card[data-selected='true'] .canvas-arc path, .rn-canvas .canvas-hull-handles .canvas-arc path { stroke: var(--rn-ink); }
+  .rn-canvas .canvas-arc[data-corner='nw'] { left: -8px; top: -8px; cursor: nwse-resize; }
+  .rn-canvas .canvas-arc[data-corner='ne'] { right: -8px; top: -8px; cursor: nesw-resize; }
+  .rn-canvas .canvas-arc[data-corner='sw'] { left: -8px; bottom: -8px; cursor: nesw-resize; }
+  .rn-canvas .canvas-arc[data-corner='se'] { right: -8px; bottom: -8px; cursor: nwse-resize; }
+  .rn-canvas .canvas-edge-grip { position: absolute; z-index: 1; }
+  .rn-canvas .canvas-edge-grip:is([data-side='l'], [data-side='r']) { top: 18px; bottom: 18px; width: 12px; cursor: ew-resize; }
+  .rn-canvas .canvas-edge-grip:is([data-side='t'], [data-side='b']) { left: 18px; right: 18px; height: 12px; cursor: ns-resize; }
+  .rn-canvas .canvas-edge-grip[data-side='l'] { left: -6px; }
+  .rn-canvas .canvas-edge-grip[data-side='r'] { right: -6px; }
+  .rn-canvas .canvas-edge-grip[data-side='t'] { top: -6px; }
+  .rn-canvas .canvas-edge-grip[data-side='b'] { bottom: -6px; }
+  /* A multi-selection: one ink outline round all of it, with its own four arcs (they scale the selection as one). */
+  .rn-canvas .canvas-hull { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; z-index: 9; fill: none; stroke: var(--rn-ink-2); stroke-width: 1.5; }
+  .rn-canvas .canvas-hull path, .rn-canvas .canvas-overlay :where(path, rect) { vector-effect: non-scaling-stroke; }
+  .rn-canvas .canvas-hull-handles { position: absolute; z-index: 9; pointer-events: none; }
+  .rn-canvas .canvas-hull-handles .canvas-arc { pointer-events: auto; }
+  /* A gesture in progress owns the stage: the selection bar, the hull and the grips step aside until it lands. */
+  .rn-canvas[data-gesture] :where(.canvas-selection-bar, .canvas-hull, .canvas-hull-handles, .canvas-arc, .canvas-edge-grip) { visibility: hidden; }
   .rn-canvas .canvas-clusters, .rn-canvas .canvas-edges, .rn-canvas .canvas-overlay { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
-  .rn-canvas .canvas-clusters { fill: var(--rn-fill); stroke: var(--rn-ink-4); stroke-width: 1; }
+  /* A cluster's outline appears only round the hovered card's cluster, and fades (Stillroom); none during a gesture. */
+  .rn-canvas .canvas-clusters { fill: var(--rn-fill); stroke: var(--rn-hair-2); stroke-width: .5; }
+  .rn-canvas .canvas-clusters path { opacity: 0; transition: opacity 200ms var(--rn-ease-std); }
+  .rn-canvas .canvas-clusters path[data-on] { opacity: 1; }
+  .rn-canvas[data-gesture] .canvas-clusters path { opacity: 0; }
   .rn-canvas .canvas-edges { fill: none; stroke: var(--rn-ink-2); stroke-width: 2; }
   /* The arrow head takes the colour of its line (a picked connector darkens as one piece). */
   .rn-canvas .canvas-edges marker { fill: context-stroke; stroke: none; }
@@ -100,8 +132,13 @@
   .rn-canvas .canvas-edges text { fill: var(--canvas-ink); stroke: none; }
   .rn-canvas .canvas-overlay { z-index: 10; }
   .rn-canvas .canvas-guide, .rn-canvas .canvas-preview { fill: none; stroke: var(--canvas-accent); stroke-width: 2; }
-  .rn-canvas .canvas-guide { stroke-width: 1; stroke-dasharray: 4 4; }
-  .rn-canvas .canvas-marquee { fill: var(--rn-accent-soft); stroke: var(--canvas-accent); stroke-width: 1; }
+  /* Alignment guides are quiet ink dashes; the dock mark is the signal colour (something is about to happen, V5);
+     the ghost shows where the scaled cards will land. The marquee and the live hull are ink. */
+  .rn-canvas .canvas-guide { stroke: var(--rn-ink-3); stroke-width: 1; stroke-dasharray: 4 4; }
+  .rn-canvas .canvas-dock-mark { fill: none; stroke: var(--canvas-accent); stroke-width: 3; stroke-linecap: round; }
+  .rn-canvas .canvas-dock-ghost { fill: var(--rn-fill); stroke: var(--rn-ink-4); stroke-width: 1; stroke-dasharray: 4 4; }
+  .rn-canvas .canvas-hull-live { fill: none; stroke: var(--rn-ink-2); stroke-width: 1.5; }
+  .rn-canvas .canvas-marquee { fill: var(--rn-fill); stroke: var(--rn-ink-3); stroke-width: 1; }
   .rn-canvas .canvas-editor { height: 100%; user-select: text; overflow: auto; }
   .rn-canvas .canvas-message { position: absolute; top: 100px; left: 20px; z-index: 30; padding: 10px 16px; background: var(--rn-stage); border-radius: var(--rn-r-md); box-shadow: var(--rn-shadow-2); }
   .rn-canvas .canvas-message[role='alert'] { color: var(--rn-bad); }
@@ -129,4 +166,11 @@
   .canvas-new-float .rn-menu { min-width: 0; max-width: none; padding: 0; }
   .canvas-new-float__empty { padding: 6px 10px; color: var(--rn-ink-3); font-size: var(--rn-fs-sm); }
   .canvas-new-float__actions { display: flex; justify-content: flex-end; }
+  /* 视图设置: a few rows of label and switch; the rows under 磁吸 are indented and dim with it. */
+  .canvas-view-settings { display: flex; flex-direction: column; width: 232px; padding: 6px; }
+  .canvas-view-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 32px; padding: 0 8px; font-size: var(--rn-t-body); color: var(--rn-ink); }
+  .canvas-view-row[data-indent] { padding-left: 22px; }
+  .canvas-view-row[data-off] > span { color: var(--rn-ink-3); }
+  .canvas-view-row .rn-range { flex: 1; min-width: 0; }
+  .canvas-view-row output { min-width: 18px; text-align: right; color: var(--rn-ink-3); font: var(--rn-t-meta) var(--rn-font-mono); font-variant-numeric: tabular-nums; }
 }

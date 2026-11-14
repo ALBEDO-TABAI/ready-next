@@ -4,9 +4,14 @@ import type { CanvasNode } from '../../../../shared/ready-canvas/schema'
 import { graphicSvg } from '../../../../shared/ready-canvas/graphics'
 import { cardFrame } from '../../../modules/canvas/interaction/graphics'
 import { CardMarkdown } from '../cards/CardMarkdown'
+import { CardHandles } from './CanvasHandles'
 
 interface Props {
   node: CanvasNode; visible: boolean; selected: boolean; matched?: boolean; editor?: ReactNode; content?: ReactNode
+  /** Part of a multi-selection: the hull stands for the group, the card shows no ring of its own. */
+  grouped?: boolean
+  /** The resize grips: on the hovered card and on the one selected card. */
+  handles?: boolean
   element: (id: string, el: HTMLDivElement | null) => void
   resolveAsset?: (path: string) => string | undefined
 }
@@ -24,16 +29,18 @@ function Preview({ node: n, resolveAsset }: Pick<Props, 'node' | 'resolveAsset'>
   if (src && n.ready.kind === 'audio') return <audio controls preload="none" src={src} />
   return <><small>{({ image: '图片', audio: '音频', video: '视频', document: '文档', subcanvas: '子画板' })[n.ready.kind] || n.ready.kind}</small><strong>{n.ready.preview?.title || n.file}</strong><p>{n.ready.preview?.description}</p></>
 }
-export const CanvasCard = memo(function CanvasCard({ node, visible, selected, matched = false, editor, content, element, resolveAsset }: Props) {
+export const CanvasCard = memo(function CanvasCard({ node, visible, selected, matched = false, grouped = false, handles = false, editor, content, element, resolveAsset }: Props) {
   const a = node.ready.appearance, frame = cardFrame(node)
-  const style: CSSProperties = { left: frame.x, top: frame.y, width: frame.width, height: frame.height,
+  // Text scales with its card: `fontScale` counts in 24px units (M4 §9.1); the Markdown reads it as its base size.
+  const style: CSSProperties & { '--canvas-font'?: string } = { left: frame.x, top: frame.y, width: frame.width, height: frame.height,
+    '--canvas-font': a?.fontScale ? `${a.fontScale * 24}px` : undefined,
     borderStyle: node.ready.kind === 'draft' ? 'dashed' : undefined,
     transform: a?.rotation ? `rotate(${a.rotation}deg)` : undefined, borderRadius: a?.radius,
     background: a?.background, color: a?.color, fontSize: a?.fontScale ? `${a.fontScale * 24}px` : undefined,
     textAlign: a?.align, fontWeight: a?.weight ? ({ light: 300, regular: 400, medium: 500, bold: 700 })[a.weight] : undefined }
-  return <div draggable={!editor} ref={el => element(node.id, el)} data-node-id={node.id} data-selected={selected} data-matched={matched || undefined} data-kind={node.ready.kind} data-color={node.color}
+  return <div draggable={!editor} ref={el => element(node.id, el)} data-node-id={node.id} data-selected={selected} data-grouped={grouped || undefined} data-matched={matched || undefined} data-kind={node.ready.kind} data-color={node.color}
     data-lightweight={!visible && !editor} className="canvas-card" style={style}>
     {(visible || editor) && <div data-node-detail className="canvas-card-content">{editor ?? content ?? <Preview node={node} resolveAsset={resolveAsset} />}</div>}
-    {selected && visible && <button type="button" data-resize aria-label="调整卡片尺寸" className="canvas-resize" />}
+    {handles && visible && !editor && <CardHandles />}
   </div>
 })

@@ -159,6 +159,60 @@ async function main() {
     await poll(() => readCanvas().edges.length === 1, 'Undo after 删除连线 failed')
     await noStop()
     console.log('PASS draw connector → select → Delete → undo → back (keyboard, dock buttons, right-click)')
+    // Alignment and adaptive scaling (M4 §9.2), at 100% zoom so screen distances are world distances.
+    const nodeOf = kind => readCanvas().nodes.find(node => node.ready.kind === kind)
+    const idle = async () => { await poll(async () => await stage.locator('.canvas-message[role="status"]').count() === 0, 'The board stayed busy'); await page.waitForTimeout(150) }
+    const dragCardTo = async (kind, x, y, beforeUp) => {
+      const from = await centre(cardOf(kind)), node = nodeOf(kind)
+      await drag(from, { x: from.x + x - node.x, y: from.y + y - node.y }, { beforeUp })
+    }
+    const undoTo = async (check, message) => { await idle(); await stage.focus(); await page.keyboard.press(`${mod}+z`); await poll(check, message); await idle() }
+    await stage.click({ position: { x: 20, y: board.height - 20 } })
+    const plain = nodeOf('text'), anchor = nodeOf('link')
+    // Left edges 6px apart, far above the link card: the card snaps into line and a guide shows while dragging.
+    await dragCardTo('text', anchor.x + 6, anchor.y - plain.height - 120, async () => {
+      assert.ok(await stage.locator('.canvas-overlay .canvas-guide').count() >= 1, 'No alignment guide while dragging'); await snapshot('01c-snap-guide')
+    })
+    await poll(() => nodeOf('text').x === anchor.x, 'The card did not snap into line')
+    console.log('PASS magnetic snap + smart guide')
+    await undoTo(() => nodeOf('text').x === plain.x && nodeOf('text').y === plain.y, 'Undo did not put the card back')
+    // 20px short of the link card's right edge, overlapping it: the dock mark shows; on release the card sits one
+    // gap (12) away, takes the link card's height and its text scales with it. One undo takes all of it back.
+    await dragCardTo('text', anchor.x + anchor.width + 20, anchor.y + 30, async () => {
+      assert.equal(await stage.locator('.canvas-overlay .canvas-dock-mark').count(), 1, 'No dock mark while dragging'); await snapshot('01d-dock-marker')
+    })
+    await poll(() => { const n = nodeOf('text'); return n.x === anchor.x + anchor.width + 12 && n.y === anchor.y && n.height === anchor.height }, 'The card did not dock and scale')
+    const docked = nodeOf('text'), k = anchor.height / plain.height
+    assert.equal(docked.width, Math.round(plain.width * k)); assert.ok(Math.abs(docked.ready.appearance.fontScale - 13 / 24 * k) < 0.001)
+    for (const value of [docked.x, docked.y, docked.width, docked.height]) assert.ok(Number.isInteger(value))
+    await idle(); await snapshot('01e-dock-landed')
+    console.log('PASS adaptive dock: one gap away, scaled to the neighbour, text scaled')
+    await undoTo(() => { const n = nodeOf('text'); return n.x === plain.x && n.width === plain.width && !n.ready.appearance }, 'Undo did not take the docking back')
+    // A multi-selection: one hull, whose corner arc scales every card in proportion as one undo step.
+    await stage.focus(); await page.keyboard.press(`${mod}+a`)
+    await stage.locator('.canvas-hull path').waitFor(); await snapshot('01f-selection-hull')
+    const sizes = () => readCanvas().nodes.map(node => `${node.width}x${node.height}`).join()
+    const beforeScale = sizes(), arc = await centre(stage.locator('.canvas-hull-handles [data-resize="nw"]'))
+    // The top-left arc is the one in view here (the lower cards run past the stage's edge); pulling it outward grows the selection.
+    await drag(arc, { x: arc.x - 70, y: arc.y - 50 })
+    await poll(() => readCanvas().nodes.every((node, i) => node.width > Number(beforeScale.split(',')[i].split('x')[0])), 'The selection did not scale')
+    console.log('PASS selection hull scales the group')
+    await undoTo(() => sizes() === beforeScale, 'Undo did not take the group scale back')
+    await stage.click({ position: { x: 20, y: board.height - 20 } })
+    // 视图设置: a popover, kept in this profile only; the board file never carries it.
+    await stage.getByRole('button', { name: '视图设置', exact: true }).click()
+    const snapSwitch = page.locator('[data-float-id="canvas-view-settings"] [role="switch"][aria-label="磁吸"]')
+    await snapSwitch.waitFor(); await snapshot('01g-view-settings')
+    await snapSwitch.click()
+    assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('ready-next.canvas.view')).magneticSnap), false)
+    await dragCardTo('text', anchor.x + 6, anchor.y - plain.height - 120)
+    await poll(() => nodeOf('text').x === anchor.x + 6, 'With 磁吸 off the card should stay where it was dropped')
+    await undoTo(() => nodeOf('text').x === plain.x, 'Undo did not put the card back')
+    await stage.getByRole('button', { name: '视图设置', exact: true }).click()
+    await snapSwitch.click(); await page.keyboard.press('Escape')
+    assert.ok(!fs.readFileSync(path.join(vault, 'X.canvas'), 'utf8').includes('magneticSnap'), 'A view preference leaked into the board file')
+    await stage.click({ position: { x: 20, y: board.height - 20 } })
+    console.log('PASS view settings are local and switch snapping off')
     const textId = readCanvas().nodes.find(node => node.type === 'text').id
     await page.locator(`[data-node-id="${textId}"]`).dblclick()
     const rich = page.getByLabel('文字卡编辑').locator('[contenteditable="true"]').first()
