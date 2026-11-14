@@ -28,7 +28,7 @@ export function TableView(props: ViewProps) {
     ? query.groups.flatMap((group, i) => [{ kind: 'group' as const, label: String(group.value ?? '未分组'), key: `group:${i}` }, ...group.rowIds.flatMap(id => { const row = rowById.get(id); return row ? [{ kind: 'row' as const, row, key: `${i}:${id}` }] : [] })])
     : query.rows.map(row => ({ kind: 'row', row, key: row.id }))
   const start = Math.max(0, Math.min(Math.floor(top / rowHeight) - 4, Math.max(0, items.length - 1)))
-  const end = Math.min(items.length, start + Math.ceil(viewportHeight / rowHeight) + 8)
+  const end = Math.min(items.length, start + Math.ceil(viewportHeight / rowHeight) + 7)
   const columns = fields.map(id => `${personal.widths?.[id] ?? (id === '$title' ? 220 : 160)}px`).join(' ')
   const width = fields.reduce((sum, id) => sum + (personal.widths?.[id] ?? (id === '$title' ? 220 : 160)), 0)
   const resize = (event: ReactPointerEvent<HTMLButtonElement>, id: string) => {
