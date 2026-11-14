@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
-  BringToFront, CalendarPlus, ChevronDown, ChevronRight, ChevronUp, Ellipsis, FilePlus2, Group, LayoutGrid, Redo2, Scan, Search, SendToBack, Shapes, Sparkles, StickyNote, Trash2, Type, Undo2, Ungroup, X, type LucideIcon,
+  BringToFront, CalendarPlus, ChevronDown, ChevronRight, ChevronUp, Ellipsis, FilePlus2, FolderInput, FolderOutput, Group, LayoutGrid, Redo2, Scan, Search, SendToBack, Shapes, Sparkles, StickyNote, Trash2, Type, Undo2, Ungroup, X, type LucideIcon,
 } from 'lucide-react'
 import { Button, closeFloat, IconButton, Input, toggleMenu, type MenuEntry } from '../../ui'
 import type { Tool } from './types'
@@ -101,6 +101,7 @@ export function SelectionBar({ left, top, count, canGroup, canUngroup, busy, act
   actions: {
     group(): void; ungroup(): void; layout(kind: 'P' | 'L' | 'R'): void; front(): void; back(): void; remove(): void
     addToDocument?(): void; askAI?(): void; schedule?(): void
+    collect?(): void; moveOut?(): void
   }
 }) {
   const arrangeMenu = useChromeMenu(ARRANGE_MENU)
@@ -108,6 +109,8 @@ export function SelectionBar({ left, top, count, canGroup, canUngroup, busy, act
     <span className="canvas-selection-count" aria-live="polite">{count} 张</span>
     {canGroup && <ChromeTool label="分组" icon={Group} shortcut="⌘G" disabled={busy} onClick={actions.group} />}
     {canUngroup && <ChromeTool label="解组" icon={Ungroup} shortcut="⇧⌘G" disabled={busy} onClick={actions.ungroup} />}
+    {actions.collect && <ChromeTool label="收进子画板" icon={FolderInput} disabled={busy} onClick={actions.collect} />}
+    {actions.moveOut && <ChromeTool label="移出到上一级" icon={FolderOutput} disabled={busy} onClick={actions.moveOut} />}
     {count > 1 && <ChromeTool label="排版" icon={LayoutGrid} menu={{ id: ARRANGE_MENU, open: arrangeMenu.open }} disabled={busy}
       onClick={button => arrangeMenu.toggle(button, '排版', ARRANGEMENTS.map(item => ({ id: item.id, label: item.label, icon: <item.icon />, hint: item.key, onSelect: () => actions.layout(item.id) })), 'bottom')} />}
     <ChromeTool label="置顶" icon={BringToFront} disabled={busy} onClick={actions.front} />

@@ -137,6 +137,8 @@ export const APP_SHORTCUTS: readonly AppShortcut[] = [
   { id: 'canvas.group', keys: 'CommandOrControl+G', scope: 'canvas', description: '组合所选图形' },
   { id: 'canvas.ungroup', keys: 'CommandOrControl+Shift+G', scope: 'canvas', description: '取消图形组合' },
   { id: 'canvas.search', keys: 'CommandOrControl+F', scope: 'canvas', description: '在画板中搜索' },
+  { id: 'canvas.open-sub-board', keys: 'Enter', scope: 'canvas', description: '进入选中的子画板' },
+  { id: 'canvas.parent-board', keys: 'Alt+ArrowUp', scope: 'canvas', description: '回到上一级画板' },
   { id: 'skills.confirm', keys: 'CommandOrControl+Enter', scope: 'skills', description: '确认技能编辑' },
   { id: 'document.confirm', keys: 'CommandOrControl+Enter', scope: 'document', description: '确认当前块编辑' },
   { id: 'document.italic', keys: 'CommandOrControl+I', scope: 'document', description: '斜体' },

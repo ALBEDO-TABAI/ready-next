@@ -25,6 +25,7 @@ import { openInCurrentTab } from '../../modules/document/ink/layout-state'
 import { boardMarkdown } from '../../modules/canvas/export'
 import { captureDocumentPreviewHtml } from '../document/document-export-capture'
 import { Button, closeFloat, showToast } from '../ui'
+import { useSubBoards } from './useSubBoards'
 
 function confirmed<T>(result: { ok: true; value: T } | { ok: false; error: string }): T {
   if (!result.ok) throw new Error(result.error)
@@ -92,6 +93,14 @@ export default function CanvasDocument({ tab }: { tab: DocTab }) {
     } finally { pending.current = false }
   })())
   const run = (work: () => Promise<void>) => { setError(''); void work().catch(cause => setError(String(cause))) }
+  // M4 §9: one Main command on this board (a two-board move, an import) while nothing else writes it; then reload.
+  const exclusive = (work: (board: CanvasOpen) => Promise<void>, reload = true) => trackCanvasWrite((async () => {
+    const before = current.current
+    if (!before || pending.current) throw new Error('画板正在处理另一项修改')
+    pending.current = true; setError('')
+    try { await work(before); if (reload) await refresh() } finally { pending.current = false }
+  })())
+  const subBoards = useSubBoards({ opened, parent: boardAncestors(trees, root, opened?.path ?? '').at(-1), exclusive, report: useCallback((cause: unknown) => setError(String(cause)), []), resolveAsset: path => toLocalFileUrl(`${root}/${path}`) })
   const openDraft = async (id: string) => {
     const result = await api.documentDrafts.read(id)
     if (!result.ok) throw new Error(result.message)
@@ -153,6 +162,7 @@ export default function CanvasDocument({ tab }: { tab: DocTab }) {
       breadcrumbs={ancestors.map(node => ({ id: node.objectId, title: node.title }))}
       onNavigateAncestor={id => { const node = ancestors.find(item => item.objectId === id); if (node) openInCurrentTab(node.path) }}
       extraNewItems={(at, place) => boardNewItems({ at, place, pages, root, boardPath: opened.path, add: node => write([{ type: 'addNode', node }]), report: cause => setError(String(cause)) })}
+      subBoards={subBoards.actions} moreItems={subBoards.moreItems} renderHostCard={subBoards.renderCard}
       acceptsDrop={types => types.includes(READY_REF_MIME)} onDropData={dropData} onExport={exportBoard} captureImage={captureBoard}
       onAskAI={nodeIds => addBoardSelectionToAgentInput({ title: opened.canvas.ready.title || '画板', objectId: opened.objectId }, nodeIds)} />
   </div>

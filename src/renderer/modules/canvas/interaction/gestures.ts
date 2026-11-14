@@ -27,6 +27,9 @@ interface GestureCallbacks {
   commit: (ops: CanvasOperation[]) => Promise<boolean>
   graphic: (draft: GraphicDraft, existing?: CanvasNode) => Promise<boolean>
   measure?: (work: FrameWork) => void
+  /** Sub-board drop (M4 §9): the card under the pointer that would take the dragged cards (null clears), and the drop. */
+  dropTarget?: (scene: GestureScene, moving: readonly CanvasNode[], at: Point | null) => string | null
+  dropInto?: (nodeIds: string[], targetId: string) => void
 }
 export function edgePath(a: Rect, b: Rect, edge?: CanvasEdge): string {
   const dx = b.x + b.width / 2 - a.x - a.width / 2, dy = b.y + b.height / 2 - a.y - a.height / 2
@@ -44,6 +47,7 @@ export class CanvasGestures {
   private wheelCamera: Camera | null = null
   private wheelFrame: number | null = null
   private view: Window | null = null
+  private drop: string | null = null // M4 §9: the sub-board card under a card drag
   space = false
   constructor(private callbacks: GestureCallbacks) {}
   private local(e: { clientX: number; clientY: number }, scene: GestureScene): Point {
@@ -114,6 +118,7 @@ export class CanvasGestures {
         const moved = (n: CanvasNode): Rect => moving.has(n.id) ? { ...n, x: n.x + d.dx, y: n.y + d.dy } : n
         edge.element.setAttribute('d', edgePath(moved(edge.from), moved(edge.to), edge.edge)); domWrites++
       }
+      this.drop = d.moved ? this.callbacks.dropTarget?.(s, d.nodes, p) ?? null : null // M4 §9
       for (const g of snapped.guides) shape('path', { d: g.axis === 'x' ? `M${g.value},${g.start}V${g.end}` : `M${g.start},${g.value}H${g.end}`, class: 'canvas-guide' })
     } else if (d.kind === 'resize') {
       const n = d.nodes[0]
@@ -153,6 +158,8 @@ export class CanvasGestures {
     if (s.root.hasPointerCapture?.(e.pointerId)) s.root.releasePointerCapture(e.pointerId)
     if (!d.moved) return
     if (d.kind === 'move') {
+      const into = this.drop; this.drop = null
+      if (into) { this.callbacks.dropInto?.(d.nodes.map(n => n.id), into); return } // M4 §9: dropped onto a sub-board card
       if (!d.dx && !d.dy) return
       void this.callbacks.commit(d.nodes.map(n => ({ type: 'geometry', id: n.id, geometry: { x: n.x + d.dx, y: n.y + d.dy } })))
     } else if (d.kind === 'resize' && d.geometry) {
@@ -176,6 +183,7 @@ export class CanvasGestures {
   }
   private restoreDOM(s: GestureScene, d: Drag): void {
     s.overlay.replaceChildren()
+    this.callbacks.dropTarget?.(s, [], null) // M4 §9: clear the drop mark
     if (d.kind === 'move' || d.kind === 'resize') {
       for (const n of d.nodes) { const el = s.elements.get(n.id); if (el) { const frame = cardFrame(n); el.style.translate = ''; el.style.left = `${frame.x}px`; el.style.top = `${frame.y}px`; el.style.width = `${frame.width}px`; el.style.height = `${frame.height}px` } }
       for (const edge of d.edges.values()) edge.element.setAttribute('d', edgePath(edge.from, edge.to, edge.edge))
@@ -185,7 +193,7 @@ export class CanvasGestures {
     if (this.frame !== null) this.view?.cancelAnimationFrame(this.frame)
     this.frame = null
     const s = this.callbacks.scene(), d = this.drag
-    this.drag = null
+    this.drag = null; this.drop = null
     if (s && d) {
       this.restoreDOM(s, d)
       this.callbacks.select(d.selection); this.callbacks.camera(d.camera)
