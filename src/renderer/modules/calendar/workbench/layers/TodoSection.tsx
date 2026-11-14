@@ -4,10 +4,11 @@ import { isoDate } from '../../../../../shared/calendar/dates'
 import { openReadyRef } from '../../../workbench/open-ready-ref'
 import { toast, useStore } from '../store'
 import { SectionHeader } from '../../../../components/ui/Display'
-import { writeTodoTransfer, endTodoTransfer, todoFromList, toggleTodo } from './todo-actions'
+import { writeTodoTransfer, endTodoTransfer, todoFromList, writeTodoCheck, type TodoHandle } from './todo-actions'
 
 // The calendar sidebar's 待办 (W4 §5): every open checkbox in the library, in three groups. Ticking writes the
-// one line through Main; dragging a row onto a day gives it that date (LayerDay accepts the drop).
+// one line through Main; dragging a row onto a day gives it that date (LayerDay accepts the drop). A ticked row
+// leaves the list, so the tick answers with a toast whose 撤销 writes the same line back (a slip of the pointer).
 const SHOWN = 6
 
 type Group = { key: 'today' | 'overdue' | 'unscheduled'; label: string; items: TodoEntry[] }
@@ -51,13 +52,21 @@ export function TodoSection() {
   </div>
 }
 
+/** Ticks the row and offers to take it back: the receipt's version is the line's new version, which the undo writes against. */
+async function tick(handle: TodoHandle, onError: (cause: unknown) => void = cause => toast(cause instanceof Error ? cause.message : String(cause))) {
+  const receipt = await writeTodoCheck(handle, true)
+  toast(receipt.state === 'unsaved' ? `已在打开的页面里勾掉“${handle.title}”，保存那一页后生效` : `已勾掉“${handle.title}”`, () => {
+    void writeTodoCheck({ ...handle, version: receipt.version }, false).catch(onError)
+  })
+}
+
 function TodoRow({ todo, overdue, onError }: { todo: TodoEntry; overdue: boolean; onError(cause: unknown): void }) {
   const handle = todoFromList(todo)
   const where = [todo.page.title, todo.heading].filter(Boolean).join(' › ')
   return <div className="side-row todo-row" data-todo-id={todo.id} draggable
     onDragStart={event => { writeTodoTransfer(event.dataTransfer, handle, todo.page.ref); event.dataTransfer.effectAllowed = 'move' }} onDragEnd={endTodoTransfer}>
     <button type="button" role="checkbox" aria-checked={false} className="todo-check" aria-label={`勾掉：${todo.title}`}
-      onClick={() => { void toggleTodo(handle, true).then(state => { if (state === 'unsaved') toast('已在打开的页面里勾掉，保存那一页后生效') }, onError) }} />
+      onClick={() => { void tick(handle, onError).catch(onError) }} />
     <button type="button" className="todo-title" title={where} onClick={() => { void openReadyRef(todo.page.ref, 'calendar').catch(onError) }}>
       <span className="lbl">{todo.title}</span>
       <span className="todo-meta">{overdue && todo.date ? `${Number(todo.date.slice(5, 7))}月${Number(todo.date.slice(8, 10))}日 · ` : ''}{todo.page.title}</span>

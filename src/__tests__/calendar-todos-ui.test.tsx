@@ -25,7 +25,7 @@ const toggles: ToggleTodo[] = [], schedules: ScheduleTodo[] = []
 let todos: TodoEntry[] = [], consentRequired = false, changed: (() => void) | undefined
 const api = {
   listTodos: async () => ({ ok: true as const, value: todos }),
-  toggleTodo: async (input: ToggleTodo) => { toggles.push(input); return { ok: true as const, value: { state: 'saved' as const } } },
+  toggleTodo: async (input: ToggleTodo) => { toggles.push(input); return { ok: true as const, value: { state: 'saved' as const, version: `after-${input.id}` } } },
   scheduleTodo: async (input: ScheduleTodo) => {
     schedules.push(input)
     if (consentRequired && !input.rewriteObsidianDate) return { ok: false as const, message: 'Rewriting an Obsidian date requires consent', code: 'obsidian_date_needs_consent' }
@@ -44,6 +44,7 @@ const { parseIsoDate } = await import('../shared/calendar/dates')
 const { TodoSection } = await import('../renderer/modules/calendar/workbench/layers/TodoSection')
 const { LayerDay } = await import('../renderer/modules/calendar/workbench/layers/LayerDays')
 const actions = await import('../renderer/modules/calendar/workbench/layers/todo-actions')
+const { ToastHost } = await import('../renderer/components/ui')
 
 const page = (id: string, title: string) => ({ objectId: id, title, ref: { kind: 'page' as const, id } })
 const todo = (id: string, title: string, date: string | null, dateSource: TodoEntry['dateSource'] = date ? 'ready' : null): TodoEntry =>
@@ -54,12 +55,17 @@ test('the sidebar groups open to-dos into 今天, 已过期 and 未安排, and t
   store.setState({ today: parseIsoDate('2026-11-12') })
   todos = [todo('a', '交周报', '2026-11-12'), todo('b', '回邮件', '2026-11-09'), todo('c', '读完第三章', null), todo('d', '下周的事', '2026-11-20')]
   const root = createRoot(document.getElementById('root')!)
-  await act(async () => root.render(<TodoSection />)); await settle()
+  await act(async () => root.render(<><TodoSection /><ToastHost /></>)); await settle()
   const groups = [...document.querySelectorAll<HTMLElement>('[data-todo-group]')].map(group => [group.dataset.todoGroup, [...group.querySelectorAll('.todo-title .lbl')].map(item => item.textContent)])
   assert.deepEqual(groups, [['today', ['交周报']], ['overdue', ['回邮件']], ['unscheduled', ['读完第三章']]], 'a future-dated to-do waits on its day, not in the list')
   assert.match(document.querySelector('[data-todo-group="overdue"] .todo-meta')!.textContent!, /^11月9日 · 周计划$/)
   await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="勾掉：回邮件"]')!.click()); await settle()
   assert.deepEqual(toggles.at(-1), { id: 'b', expectedVersion: 'v-b', checked: true })
+  // A slip of the pointer: the toast's 撤销 unticks the same line against the version the tick returned.
+  const toastEl = [...document.querySelectorAll('.rn-toast')].at(-1)!
+  assert.match(toastEl.textContent!, /已勾掉“回邮件”/)
+  await act(async () => [...toastEl.querySelectorAll('button')].find(button => /撤销|Undo/.test(button.textContent!))!.click()); await settle()
+  assert.deepEqual(toggles.at(-1), { id: 'b', expectedVersion: 'after-b', checked: false })
   todos = []; await act(async () => changed?.()); await settle()
   assert.match(document.querySelector('[aria-label="待办"]')!.textContent!, /没有要做的/)
   await act(async () => root.unmount())
