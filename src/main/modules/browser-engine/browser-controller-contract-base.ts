@@ -42,7 +42,7 @@ import {
   type BrowserSitePermissionNotice,
   type BrowserSitePermissionRequestReadback
 } from './browser-permission-policy'
-import { type BrowserTabMetaRecord } from './tab-meta-service'
+import { type BrowserTabMetaPayload, type BrowserTabMetaRecord } from './tab-meta-service'
 import {
   type BrowserResearchAssessment,
   type BrowserResearchEvidenceBindingInput,
@@ -179,7 +179,7 @@ export abstract class BrowserControllerContractBase {
   abstract getAdblockState(): BrowserAdblockState;
   abstract setAdblockEnabled(enabled: boolean, scope?: 'main' | 'preview' | 'all'): BrowserAdblockState;
   abstract toggleAdblockDomain(domain: string): BrowserAdblockState;
-  abstract getTabList(): any;
+  abstract getTabList(): Array<BrowserTabMetaPayload & { browserTaskId?: string }>;
   abstract getDiagnostics(options?: {
       includePerformance?: boolean;
   }): any;

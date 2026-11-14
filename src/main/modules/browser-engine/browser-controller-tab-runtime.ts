@@ -14,12 +14,14 @@ import {
 import type { RegisterDormantBrowserTabsRequest, RegisterDormantBrowserTabsResult } from '../../../shared/browser-tab-session'
 import { type BrowserTabActivity, type BrowserTabOwner } from './browser-controller-contract-base'
 import { BrowserControllerInteractionRuntime } from './browser-controller-interaction-runtime'
+import type { BrowserWorkTabOwnership } from './work-tab-ownership-store'
 
 export abstract class BrowserControllerTabRuntime extends BrowserControllerInteractionRuntime {
   async createTab(
     url: string,
     options?: { background?: boolean; openerTabId?: string | null; profile?: string | null; owner?: BrowserTabOwner },
   ): Promise<{ success: boolean; tabId?: string; error?: string }> {
+    if (this.tabs.size === 0) this.workTabOwnershipStore.reconcile(this.tabs.values())
     if (!options?.background) this.clearSplitTabHost()
     const result = await this.tabLifecycleService.createTab(url, options)
     if (result.success && result.tabId) {
@@ -37,7 +39,7 @@ export abstract class BrowserControllerTabRuntime extends BrowserControllerInter
 
   getAgentWorkTab(browserTaskId: string): string | null {
     const tabId = this.agentWorkTabs.get(browserTaskId) || null
-    if (!tabId || this.tabs.get(tabId)?.owner !== 'agent') {
+    if (!tabId || !this.getTaskWorkTabIds(browserTaskId).includes(tabId)) {
       if (tabId) this.agentWorkTabs.delete(browserTaskId)
       return null
     }
@@ -62,22 +64,31 @@ export abstract class BrowserControllerTabRuntime extends BrowserControllerInter
   }
 
   getTaskWorkTabIds(browserTaskId: string): string[] {
+    const owned = new Map(this.workTabOwnershipStore.list().map(owner => [owner.tabId, owner]))
     return [...this.taskWorkTabs].filter(([tabId, owner]) =>
       owner.browserTaskId === browserTaskId
+      && owned.get(tabId)?.ownerRunId === owner.ownerRunId
       && this.tabs.get(tabId)?.owner === 'agent'
       && this.getPhysicalTargetToken(tabId) === owner.physicalTargetToken,
     ).map(([tabId]) => tabId)
   }
 
   async createAgentWorkTab(browserTaskId: string, url: string, openerTabId: string | null) {
+    const owner = this.workTabOwnershipStore.captureOwner(browserTaskId)
     const created = await this.createTab(url, { background: true, owner: 'agent', openerTabId })
     if (!created.success || !created.tabId) return created
     const physicalTargetToken = this.getPhysicalTargetToken(created.tabId)
-    if (!physicalTargetToken) {
-      this.closeTab(created.tabId)
-      return { success: false, error: 'browser_physical_target_unavailable' }
+    try {
+      const tab = this.tabs.get(created.tabId)
+      if (!tab || !physicalTargetToken) throw new Error('browser_physical_target_unavailable')
+      this.workTabOwnershipStore.add(tab, openerTabId, owner)
+      this.taskWorkTabs.set(created.tabId, { browserTaskId, ownerRunId: owner.ownerRunId, openerTabId, physicalTargetToken })
+    } catch (error) {
+      const closed = this.closeTab(created.tabId)
+      if (closed.success) this.notifyTabClosed(created.tabId)
+      const message = error instanceof Error ? error.message : String(error)
+      return { success: false, error: closed.success ? message : `${message}; ${closed.error}` }
     }
-    this.taskWorkTabs.set(created.tabId, { browserTaskId, openerTabId, physicalTargetToken })
     this.agentWorkTabs.set(browserTaskId, created.tabId)
     const view = this.tabs.get(created.tabId)?.view
     if (view) this.hostLayoutService.mountBackgroundWorkHost(view)
@@ -97,7 +108,7 @@ export abstract class BrowserControllerTabRuntime extends BrowserControllerInter
     if (!request || typeof request.browserTaskId !== 'string' || !request.browserTaskId.trim()) {
       return { success: false, closedTabIds, error: 'browser_task_id_required' }
     }
-    for (const tabId of this.getTaskWorkTabIds(request.browserTaskId)) {
+    for (const { id: tabId } of this.getTabList().filter(tab => tab.browserTaskId === request.browserTaskId)) {
       const result = this.closeTab(tabId)
       if (!result.success) return { ...result, closedTabIds }
       this.notifyTabClosed(tabId)
@@ -107,7 +118,25 @@ export abstract class BrowserControllerTabRuntime extends BrowserControllerInter
   }
 
   registerDormantTabs(request: RegisterDormantBrowserTabsRequest): RegisterDormantBrowserTabsResult {
-    const result = this.tabLifecycleService.registerDormantTabs(request)
+    let restoredOwners: BrowserWorkTabOwnership[] = []
+    const result = this.tabLifecycleService.registerDormantTabs(request, tabs => {
+      this.workTabOwnershipStore.reconcile(tabs)
+      restoredOwners = this.workTabOwnershipStore.list()
+      const owned = new Map(restoredOwners.map(owner => [owner.tabId, owner]))
+      for (const tab of this.tabs.values()) {
+        const owner = owned.get(tab.id)
+        tab.owner = owner ? 'agent' : 'manual'
+        tab.required = false
+        tab.activity = 'idle'
+        tab.openerTabId = owner?.openerTabId ?? null
+      }
+    })
+    if (result.success) {
+      for (const tab of this.tabs.values()) this.emitTabMeta(tab.id)
+      for (const owner of new Map(restoredOwners.map(owner => [owner.browserTaskId, owner])).values()) {
+        this.sendToRenderer('agent:browserTaskAttentionChanged', { scopeId: owner.scopeId, browserTaskId: owner.browserTaskId })
+      }
+    }
     this.performanceRuntime.reconcile()
     return result
   }
@@ -221,8 +250,10 @@ export abstract class BrowserControllerTabRuntime extends BrowserControllerInter
 
   closeTab(tabId: string): { success: boolean; error?: string } {
     const partition = this.partitionForTab(tabId)
-    if (this.tabs.has(tabId)) this.disposeTabRuntimeResources(tabId)
-    const result = this.tabShellService.closeTab(tabId)
+    const result = this.workTabOwnershipStore.close(tabId, () => {
+      if (this.tabs.has(tabId)) this.disposeTabRuntimeResources(tabId)
+      return this.tabShellService.closeTab(tabId)
+    })
     if (result.success) {
       if (partition) getBrowserTargetClaimService().closeTarget({ partition, tabId })
       this.taskWorkTabs.delete(tabId)

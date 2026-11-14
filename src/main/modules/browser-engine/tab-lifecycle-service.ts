@@ -267,7 +267,10 @@ export function buildLocalMediaDropBridgeScript(): string {
 export class BrowserTabLifecycleService {
   constructor(private readonly host: BrowserTabLifecycleHost) {}
 
-  registerDormantTabs(request: RegisterDormantBrowserTabsRequest): RegisterDormantBrowserTabsResult {
+  registerDormantTabs(
+    request: RegisterDormantBrowserTabsRequest,
+    reconcile?: (tabs: Iterable<BrowserLifecycleTabRecord>) => void,
+  ): RegisterDormantBrowserTabsResult {
     if (this.host.tabs.size > 0) {
       return { success: false, error: 'Browser runtime is already initialized.' }
     }
@@ -299,6 +302,13 @@ export class BrowserTabLifecycleService {
         profile: profile || null,
         restoreSnapshot: null,
       })
+    }
+    // Reconcile durable ownership before creating physical pages or publishing restored state.
+    try {
+      reconcile?.(this.host.tabs.values())
+    } catch (error) {
+      this.host.tabs.clear()
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
     }
     if (this.host.tabs.size === 0) return { success: false, error: 'No restorable browser tabs.' }
 
