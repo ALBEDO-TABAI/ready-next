@@ -402,6 +402,18 @@ export function useBrowserTabActions({
     void writeBackFlatOrder()
   }, [writeBackFlatOrder])
 
+  // The tab menu's 添加到新分组 / 移出分组: both can move the tab in the flat order.
+  const handleGroupTab = useCallback((tabId: string): string | null => {
+    const groupId = useBrowserTabs.getState().createTabGroupWithTab(tabId)
+    void writeBackFlatOrder()
+    return groupId
+  }, [writeBackFlatOrder])
+
+  const handleUngroupTab = useCallback((tabId: string) => {
+    useBrowserTabs.getState().removeTabFromGroup(tabId)
+    void writeBackFlatOrder()
+  }, [writeBackFlatOrder])
+
   const handleAddToGroup = useCallback((tabId: string, groupId: string) => {
     useBrowserTabs.getState().addTabToGroup(tabId, groupId)
     void writeBackFlatOrder()
@@ -491,6 +503,8 @@ export function useBrowserTabActions({
     handleReorderToRank,
     handleCreateGroup,
     handleAddToGroup,
+    handleGroupTab,
+    handleUngroupTab,
     handleDeleteGroup,
     handleNewTabInGroup,
     handlePrint,

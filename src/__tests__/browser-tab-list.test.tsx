@@ -17,7 +17,7 @@ const tab = (id: string, title: string, extra: Partial<BrowserTab> = {}): Browse
 
 async function mount(t: TestContext) {
   const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost' })
-  const globals = { window: dom.window, document: dom.window.document, IS_REACT_ACT_ENVIRONMENT: true }
+  const globals = { window: dom.window, document: dom.window.document, IS_REACT_ACT_ENVIRONMENT: true, ResizeObserver: class { observe() {} disconnect() {} } }
   const previous = Object.fromEntries(Object.keys(globals).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]))
   for (const [key, value] of Object.entries(globals)) Object.defineProperty(globalThis, key, { value, configurable: true, writable: true })
   const { createRoot } = await import('react-dom/client')
@@ -41,6 +41,8 @@ function handlers(log: string[]) {
     onReorderToRank: (moved: string, rank: number, group: string | null) => { log.push(`reorder:${moved}:${rank}:${group}`) },
     onCreateGroup: (dragged: string, target: string) => { log.push(`group:${dragged}:${target}`) },
     onAddToGroup: (id: string, group: string) => { log.push(`add:${id}:${group}`) },
+    onGroupTab: (id: string) => { log.push(`group-tab:${id}`); return null },
+    onUngroupTab: (id: string) => { log.push(`ungroup:${id}`) },
     onRenameGroup: () => {}, onRecolorGroup: () => {},
     onSetGroupCollapsed: (id: string, collapsed: boolean) => { log.push(`collapse:${id}:${collapsed}`) },
     onDisbandGroup: () => {}, onDeleteGroup: () => {}, onNewTabInGroup: (id: string) => { log.push(`new-in:${id}`) },
@@ -93,4 +95,99 @@ test('a row carries the browser-tab resource payload when dragged (to the assist
   assert.equal('tabId' in payload, false)
   assert.equal(payload.url, 'https://a.example.com/')
   assert.equal(data.get('text/plain'), 'Alpha')
+})
+
+// The tab's right-click menu is the shared float menu (rendered by the app's one FloatHost).
+const menuLabels = (body: HTMLElement) => [...body.querySelectorAll('[role="menu"] .rn-menu__label, [role="menu"] .rn-menu__group')].map(node => node.textContent)
+async function rightClick(dom: JSDOM, row: Element) {
+  await act(async () => { row.dispatchEvent(new dom.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 20, clientY: 20 })) })
+}
+async function choose(body: HTMLElement, label: string) {
+  const item = [...body.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.querySelector('.rn-menu__label')?.textContent === label)
+  assert.ok(item, `menu item ${label}`)
+  await act(async () => item.click())
+}
+
+test('right-click offers a new group, the other groups, and leaving the group; the choices reach the handlers', async t => {
+  const { root, body, dom } = await mount(t)
+  const { FloatHost, closeAllFloats } = await import('../renderer/components/ui')
+  t.after(() => closeAllFloats())
+  const log: string[] = []
+  const groups: TabGroup[] = [{ id: 'g1', name: '调研', color: 'blue', collapsed: false }, { id: 'g2', name: '', color: 'green', collapsed: false }]
+  const tabs = [tab('a', 'Alpha', { groupId: 'g1' }), tab('b', 'Beta', { groupId: 'g2' }), tab('c', 'Gamma')]
+  await act(async () => root.render(<><BrowserTabList tabs={tabs} tabGroups={groups} activeTabId="c" splitTabId={null} {...handlers(log)} /><FloatHost /></>))
+  const rows = () => [...body.querySelectorAll<HTMLElement>('.browser-tab-list__row[role="listitem"]')]
+
+  // An ungrouped tab: both groups are offered, there is nothing to leave.
+  await rightClick(dom, rows()[2])
+  assert.deepEqual(menuLabels(body), ['引用到输入框', '添加到新分组', '添加到分组', '调研', '未命名分组', '关闭标签页'])
+  await choose(body, '调研')
+  assert.equal(body.querySelector('[role="menu"]'), null, 'the menu closes on a choice')
+
+  // A grouped tab: its own group is not offered again, 移出分组 is.
+  await rightClick(dom, rows()[0])
+  assert.deepEqual(menuLabels(body), ['引用到输入框', '添加到新分组', '添加到分组', '未命名分组', '移出分组', '关闭标签页'])
+  await choose(body, '移出分组')
+  await rightClick(dom, rows()[1])
+  await choose(body, '添加到新分组')
+  await rightClick(dom, rows()[1])
+  await choose(body, '关闭标签页')
+  assert.deepEqual(log, ['add:c:g1', 'ungroup:a', 'group-tab:b', 'close:b'])
+})
+
+test('添加到新分组 on the real store: the group appears with its name field focused; typing names it; 移出分组 dissolves it', async t => {
+  const { root, body, dom } = await mount(t)
+  const { FloatHost, closeAllFloats } = await import('../renderer/components/ui')
+  const { useBrowserTabs } = await import('../renderer/stores/useBrowserTabs')
+  t.after(() => { closeAllFloats(); useBrowserTabs.getState().setTabs([]) })
+  const store = () => useBrowserTabs.getState()
+  store().setTabs([tab('a', 'Alpha'), tab('b', 'Beta')])
+  store().setActiveTabId('a')
+  function Host() {
+    const tabs = useBrowserTabs(state => state.tabs)
+    const tabGroups = useBrowserTabs(state => state.tabGroups)
+    return (
+      <BrowserTabList
+        {...handlers([])}
+        tabs={tabs} tabGroups={tabGroups} activeTabId="a" splitTabId={null}
+        onGroupTab={id => store().createTabGroupWithTab(id)}
+        onUngroupTab={id => store().removeTabFromGroup(id)}
+        onRenameGroup={(id, name) => store().renameTabGroup(id, name)}
+        onSetGroupCollapsed={(id, collapsed) => store().setTabGroupCollapsed(id, collapsed)}
+      />
+    )
+  }
+  await act(async () => root.render(<><Host /><FloatHost /></>))
+  const row = (title: string) => [...body.querySelectorAll<HTMLElement>('.browser-tab-list__row[role="listitem"]')].find(node => node.textContent?.includes(title))!
+
+  await rightClick(dom, row('Beta'))
+  await choose(body, '添加到新分组')
+  const [group] = store().tabGroups
+  assert.ok(group, 'the store has the new group')
+  assert.equal(store().tabs.find(item => item.id === 'b')?.groupId, group.id)
+  assert.ok(body.querySelector(`[data-tab-group-header="${group.id}"]`), 'its header is in the list')
+  const input = body.querySelector<HTMLInputElement>('input[placeholder="分组名称"]')
+  assert.ok(input, 'the name field is open')
+  assert.equal(dom.window.document.activeElement, input, 'and focused')
+
+  // Type a name and press Enter: the group is renamed and the editor closes.
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value')!.set!
+    setter.call(input, '资料')
+    input.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+  })
+  await act(async () => { input.dispatchEvent(new dom.window.KeyboardEvent('keydown', { bubbles: true, key: 'Enter' })) })
+  assert.equal(store().tabGroups[0].name, '资料')
+  assert.equal(body.querySelector('input[placeholder="分组名称"]'), null)
+
+  // Collapse through the header: the member row leaves the list, the group stays.
+  await act(async () => body.querySelector<HTMLButtonElement>(`[data-tab-group-header="${group.id}"] button`)!.click())
+  assert.equal(store().tabGroups[0].collapsed, true)
+  assert.equal(row('Beta'), undefined)
+  await act(async () => body.querySelector<HTMLButtonElement>(`[data-tab-group-header="${group.id}"] button`)!.click())
+
+  await rightClick(dom, row('Beta'))
+  await choose(body, '移出分组')
+  assert.deepEqual(store().tabGroups, [])
+  assert.equal(body.querySelector('[data-tab-group-header]'), null)
 })

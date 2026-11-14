@@ -36,6 +36,7 @@ export default function TabGroupHeaderRow({
   return (
     <div
       ref={rowRef}
+      data-tab-group-header={group.id}
       className="relative flex flex-shrink-0 items-center"
       style={{ height: 28, paddingLeft: 6, paddingRight: 6, gap: 2 }}
       onDragOver={onDragOver}
@@ -48,7 +49,7 @@ export default function TabGroupHeaderRow({
         onMouseDown={(event) => event.preventDefault()}
         onClick={onToggleCollapsed}
         onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); openEditor() }}
-        title={group.collapsed ? '展开群组' : '折叠群组'}
+        title={group.collapsed ? '展开分组' : '折叠分组'}
         className="flex min-w-0 items-center gap-[3px] transition-[box-shadow,filter] hover:brightness-[1.06] active:brightness-[0.97]"
         style={{
           height: 20,
@@ -64,7 +65,7 @@ export default function TabGroupHeaderRow({
       >
         <Caret style={{ width: 11, height: 11 }} className="flex-shrink-0" strokeWidth={2.75} />
         <span className="min-w-0 truncate text-[11px] font-semibold" style={{ lineHeight: '20px', letterSpacing: '0.01em' }}>
-          {group.name || '未命名群组'}
+          {group.name || '未命名分组'}
         </span>
       </button>
       <span className="min-w-0 flex-1" />
@@ -73,14 +74,14 @@ export default function TabGroupHeaderRow({
           them visible during pane interaction). */}
       <IconButton
         size="sm"
-        title="群组中新建标签页"
+        title="分组中新建标签页"
         onMouseDown={(event) => event.preventDefault()}
         onClick={onNewTabInGroup}
         icon={<Plus aria-hidden="true" />}
       />
       <IconButton
         size="sm"
-        title="群组选项"
+        title="分组选项"
         onMouseDown={(event) => event.preventDefault()}
         onClick={openEditor}
         icon={<Pencil aria-hidden="true" />}

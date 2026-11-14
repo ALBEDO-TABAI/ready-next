@@ -97,6 +97,15 @@ export function createGroupFromDrop(
   return normalizeGroupState({ order, groupOf, groups })
 }
 
+// Create a new group holding one tab, where the tab already is (the tab's menu: 添加到新分组). A grouped
+// tab leaves its old group for the new one; normalize drops the old group if that emptied it.
+export function createGroupWithTab(state: GroupModelState, tabId: string, newGroup: TabGroup): GroupModelState {
+  if (!state.order.includes(tabId)) return normalizeGroupState(state)
+  const groups = [...state.groups, newGroup]
+  const groupOf = { ...state.groupOf, [tabId]: newGroup.id }
+  return normalizeGroupState({ order: state.order, groupOf, groups })
+}
+
 // Add a tab to an existing group; it lands at the END of the group's run. The tab
 // is explicitly relocated to just after the group's current last member BEFORE
 // normalizing — otherwise, when the added tab currently sits before the group in

@@ -72,6 +72,18 @@ describe('useBrowserTabs group methods', () => {
     assert.equal(Math.abs(idx.indexOf('b') - idx.indexOf('c')), 1)
   })
 
+  it('createTabGroupWithTab makes a group of one, returns its id, and removing the tab drops the group', () => {
+    seedBrowser(['a', 'b', 'c'])
+    const gid = useBrowserTabs.getState().createTabGroupWithTab('b')
+    assert.ok(gid)
+    assert.deepEqual(useBrowserTabs.getState().tabGroups.map((g) => g.id), [gid])
+    assert.equal(groupIdOf('b'), gid)
+    assert.deepEqual(useBrowserTabs.getState().tabs.map((t) => t.id), ['a', 'b', 'c'])
+    assert.equal(useBrowserTabs.getState().createTabGroupWithTab('missing'), null)
+    useBrowserTabs.getState().removeTabFromGroup('b')
+    assert.equal(useBrowserTabs.getState().tabGroups.length, 0)
+  })
+
   it('addTabToGroup / removeTabFromGroup move membership', () => {
     seedBrowser(['a', 'b', 'c'])
     useBrowserTabs.getState().createTabGroupFromDrop('b', 'a') // group {a,b}

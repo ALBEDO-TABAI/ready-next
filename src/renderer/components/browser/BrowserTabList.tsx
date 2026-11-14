@@ -1,16 +1,18 @@
 import { ReadyRefSchema, writeReadyRefTransfer } from '../../../shared/ready-ref'
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent } from 'react'
-import { Globe, Loader2, Lock, Plus, X } from 'lucide-react'
+import { AtSign, FolderMinus, FolderPlus, Globe, Loader2, Lock, Plus, X } from 'lucide-react'
 import { beginBrowserTabDragSession, endBrowserTabDragSession } from '../../modules/browser/browserTabDragSession'
-import { addReadyContextReferenceToAgentInput, showBrowserTabContextMenu } from '../../modules/agent/chat-input-bridge'
+import { addReadyContextReferenceToAgentInput } from '../../modules/agent/chat-input-bridge'
 import { extractBrowserDomain } from '../../modules/browser/url-utils'
 import type { BrowserTab } from '../../stores/useBrowserTabs'
 import type { TabGroup, TabGroupColor } from '../../../shared/tab-groups'
 import { buildTabRailRows, resolveReorderDrop } from '../tabs/tab-rail-display-model'
-import { resolveTabDropIntent, tabGroupColorSoft, type TabDropIntent } from '../tabs/tab-group-visuals'
+import { resolveTabDropIntent, tabGroupColorSoft, tabGroupColorVar, type TabDropIntent } from '../tabs/tab-group-visuals'
 import TabGroupHeaderRow from '../tabs/TabGroupHeaderRow'
 import TabGroupEditMenu from '../tabs/TabGroupEditMenu'
 import { IconButton } from '../ui/Button'
+import type { MenuEntry } from '../ui/float/Menu'
+import { openContextMenu } from '../ui/float/open-menu'
 import BrowserTaskTabGroups, { type BrowserTaskTabGroup } from './BrowserTaskTabGroups'
 import './browser-tab-list.css'
 
@@ -30,6 +32,9 @@ export interface BrowserTabListProps {
   onReorderToRank: (movedId: string, toRank: number, intoGroupId: string | null) => void
   onCreateGroup: (draggedId: string, targetId: string) => void
   onAddToGroup: (tabId: string, groupId: string) => void
+  /** The tab menu's 添加到新分组: a new group holding this tab; returns its id so the name can be typed at once. */
+  onGroupTab: (tabId: string) => string | null
+  onUngroupTab: (tabId: string) => void
   onRenameGroup: (groupId: string, name: string) => void
   onRecolorGroup: (groupId: string, color: TabGroupColor) => void
   onSetGroupCollapsed: (groupId: string, collapsed: boolean) => void
@@ -64,6 +69,8 @@ export default function BrowserTabList({
   onReorderToRank,
   onCreateGroup,
   onAddToGroup,
+  onGroupTab,
+  onUngroupTab,
   onRenameGroup,
   onRecolorGroup,
   onSetGroupCollapsed,
@@ -76,6 +83,8 @@ export default function BrowserTabList({
   const draggingIdRef = useRef<string | null>(null)
   const [dropTarget, setDropTarget] = useState<{ id: string; intent: TabDropIntent } | null>(null)
   const [editing, setEditing] = useState<{ id: string; top: number } | null>(null)
+  // A group made from the tab menu opens its editor (name focused) once its header is in the list.
+  const [namingGroupId, setNamingGroupId] = useState<string | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
   const groupOf = useMemo(() => Object.fromEntries(tabs.map(tab => [tab.id, tab.groupId ?? null])), [tabs])
@@ -184,22 +193,67 @@ export default function BrowserTabList({
     void onTabClick(tab.id, { shiftKey })
   }, [groupById, onSetGroupCollapsed, onTabClick])
 
+  // The person's groups, in the order their headers show (a group of only assistant work tabs has no header here).
+  const menuGroups = useMemo(() => rows.flatMap(row => (row.kind === 'group-header' ? [row.group] : [])), [rows])
+
   const handleContextMenu = useCallback((event: MouseEvent, tab: BrowserTab) => {
-    event.preventDefault()
     event.stopPropagation()
-    void showBrowserTabContextMenu({ x: event.clientX, y: event.clientY }, { canReference: Boolean(tab.url || tab.title) }).then(action => {
-      if (action === 'close-tab') { void onTabClose(tab.id); return }
-      if (action === 'reference-to-input') {
-        void addReadyContextReferenceToAgentInput({ type: 'browser-tab', name: tab.title || 'New Tab', title: tab.title || 'New Tab', url: tab.url, tabId: tab.id })
-      }
+    const currentGroupId = tab.groupId ?? null
+    const others = menuGroups.filter(group => group.id !== currentGroupId)
+    const items: MenuEntry[] = []
+    if (tab.url || tab.title) {
+      items.push({
+        id: 'reference-to-input',
+        label: '引用到输入框',
+        icon: <AtSign aria-hidden="true" />,
+        onSelect: () => { void addReadyContextReferenceToAgentInput({ type: 'browser-tab', name: tab.title || 'New Tab', title: tab.title || 'New Tab', url: tab.url, tabId: tab.id }) },
+      })
+      items.push({ kind: 'separator' })
+    }
+    items.push({
+      id: 'group-new',
+      label: '添加到新分组',
+      icon: <FolderPlus aria-hidden="true" />,
+      onSelect: () => { const groupId = onGroupTab(tab.id); if (groupId) setNamingGroupId(groupId) },
     })
-  }, [onTabClose])
+    if (others.length) {
+      items.push({ kind: 'group', label: '添加到分组' })
+      for (const group of others) {
+        items.push({
+          id: `group-add-${group.id}`,
+          label: group.name || '未命名分组',
+          icon: <span className="browser-tab-list__group-dot" style={{ background: tabGroupColorVar(group.color) }} aria-hidden="true" />,
+          onSelect: () => onAddToGroup(tab.id, group.id),
+        })
+      }
+    }
+    if (currentGroupId) {
+      if (others.length) items.push({ kind: 'separator' })
+      items.push({ id: 'group-leave', label: '移出分组', icon: <FolderMinus aria-hidden="true" />, onSelect: () => onUngroupTab(tab.id) })
+    }
+    items.push({ kind: 'separator' })
+    items.push({ id: 'close-tab', label: '关闭标签页', icon: <X aria-hidden="true" />, onSelect: () => { void onTabClose(tab.id) } })
+    setEditing(null)
+    openContextMenu(event, items, '标签页')
+  }, [menuGroups, onAddToGroup, onGroupTab, onTabClose, onUngroupTab])
 
   const openEditor = useCallback((group: TabGroup, anchor: DOMRect) => {
     const listTop = listRef.current?.getBoundingClientRect().top ?? 0
     const scrollTop = listRef.current?.scrollTop ?? 0
     setEditing(prev => (prev?.id === group.id ? null : { id: group.id, top: Math.round(anchor.bottom - listTop + scrollTop) + 4 }))
   }, [])
+
+  // 添加到新分组 → the new group's editor opens under its header, the name field focused.
+  useEffect(() => {
+    if (!namingGroupId) return
+    const group = groupById.get(namingGroupId)
+    const header = listRef.current?.querySelector<HTMLElement>(`[data-tab-group-header="${namingGroupId}"]`)
+    if (!group || !header) return
+    setNamingGroupId(null)
+    const listTop = listRef.current?.getBoundingClientRect().top ?? 0
+    const scrollTop = listRef.current?.scrollTop ?? 0
+    setEditing({ id: group.id, top: Math.round(header.getBoundingClientRect().bottom - listTop + scrollTop) + 4 })
+  }, [groupById, namingGroupId])
 
   const editingGroup = editing ? groupById.get(editing.id) : undefined
 
@@ -243,6 +297,7 @@ export default function BrowserTabList({
               key={tab.id}
               role="listitem"
               className="browser-tab-list__row"
+              data-browser-tab={tab.id}
               data-current={current || undefined}
               data-grouped={group ? 'true' : undefined}
               data-drop={drop ?? undefined}
@@ -257,6 +312,7 @@ export default function BrowserTabList({
               onAuxClick={event => { if (event.button === 1) { event.preventDefault(); void onTabClose(tab.id) } }}
               onContextMenu={event => handleContextMenu(event, tab)}
             >
+              {group && <span className="browser-tab-list__group-rail" style={{ background: tabGroupColorSoft(group.color, 45) }} aria-hidden="true" />}
               <span className="browser-tab-list__glyph">
                 {tabIcon(tab)}
                 {tab.owner === 'agent' && <span className="browser-tab-list__badge" data-kind="agent" aria-label="助手在用" />}

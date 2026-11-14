@@ -61,7 +61,7 @@ export default function TabGroupEditMenu({
           value={name}
           autoFocus
           spellCheck={false}
-          placeholder="群组名称"
+          placeholder="分组名称"
           onChange={(event) => setName(event.target.value)}
           onBlur={commitName}
           onKeyDown={(event) => {
@@ -98,10 +98,10 @@ export default function TabGroupEditMenu({
       </div>
       <div aria-hidden className="rn-menu__sep" style={{ margin: 0 }} />
       <div className="rn-menu" style={{ minWidth: 0 }}>
-        <MenuAction icon={<Plus aria-hidden="true" />} label="群组中新建标签页" onClick={onNewTab} />
-        <MenuAction icon={<Ungroup aria-hidden="true" />} label="取消群组" onClick={onDisband} />
+        <MenuAction icon={<Plus aria-hidden="true" />} label="分组中新建标签页" onClick={onNewTab} />
+        <MenuAction icon={<Ungroup aria-hidden="true" />} label="取消分组" onClick={onDisband} />
         <div aria-hidden className="rn-menu__sep" />
-        <MenuAction icon={<CircleX aria-hidden="true" />} label="关闭群组标签页" onClick={onDelete} danger />
+        <MenuAction icon={<CircleX aria-hidden="true" />} label="关闭分组标签页" onClick={onDelete} danger />
       </div>
     </div>
   )

@@ -5,6 +5,7 @@ import type { TabGroup, TabGroupColor } from '../shared/tab-groups'
 import {
   addToGroup,
   createGroupFromDrop,
+  createGroupWithTab,
   disbandGroup,
   type GroupModelState,
   normalizeGroupState,
@@ -137,6 +138,28 @@ describe('createGroupFromDrop', () => {
     assert.equal(n.groupOf.b, 'g1')
     assert.equal(n.groupOf.d, 'g1')
     assert.equal(n.groups.length, 1)
+  })
+})
+
+describe('createGroupWithTab', () => {
+  it('makes a one-tab group where the tab is', () => {
+    const s = normalizeGroupState(st(['a', 'b', 'c'], {}, []))
+    const n = createGroupWithTab(s, 'b', grp('g9', 'green'))
+    assert.deepEqual(n.order, ['a', 'b', 'c'])
+    assert.deepEqual(n.groups.map((g) => g.id), ['g9'])
+    assert.equal(n.groupOf.b, 'g9')
+  })
+
+  it('a grouped tab leaves its old group, which is dropped once empty', () => {
+    const s = normalizeGroupState(st(['a', 'b'], { a: 'g1' }, [G1]))
+    const n = createGroupWithTab(s, 'a', grp('g9', 'green'))
+    assert.deepEqual(n.groups.map((g) => g.id), ['g9'])
+    assert.equal(n.groupOf.a, 'g9')
+  })
+
+  it('an unknown tab changes nothing', () => {
+    const s = normalizeGroupState(st(['a'], {}, []))
+    assert.deepEqual(createGroupWithTab(s, 'zz', grp('g9', 'green')).groups, [])
   })
 })
 

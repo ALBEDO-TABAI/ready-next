@@ -5,6 +5,7 @@ import { isTabGroupColor, pickNextGroupColor, type TabGroup, type TabGroupColor 
 import {
   addToGroup,
   createGroupFromDrop,
+  createGroupWithTab,
   disbandGroup,
   type GroupModelState,
   normalizeGroupState,
@@ -58,6 +59,8 @@ interface BrowserTabsState {
   // through sanitizeSnapshot (which re-normalizes + persists). delete-group /
   // new-tab-in-group are orchestrated at the UI layer (they close/create tabs).
   createTabGroupFromDrop: (draggedId: string, targetId: string) => void
+  /** A new group holding this one tab; returns the group's id (null when the tab is not open). */
+  createTabGroupWithTab: (tabId: string) => string | null
   addTabToGroup: (tabId: string, groupId: string) => void
   removeTabFromGroup: (tabId: string) => void
   reorderTabToRank: (movedId: string, toRank: number, intoGroupId: string | null) => void
@@ -232,7 +235,7 @@ if (typeof window !== 'undefined') {
 
 const initialBrowserTabsSnapshot = readBrowserTabsSnapshot()
 
-export const useBrowserTabs = create<BrowserTabsState>((set) => {
+export const useBrowserTabs = create<BrowserTabsState>((set, get) => {
   // Build the persisted-shape snapshot from a next {tabs, tabGroups} plus the
   // current state's non-tab fields, then sanitize (normalize groups) + persist.
   const commit = (
@@ -378,6 +381,15 @@ export const useBrowserTabs = create<BrowserTabsState>((set) => {
         const group: TabGroup = { id: nextGroupId(), name: '', color, collapsed: false }
         return applyOp(state, createGroupFromDrop(toGroupModel(state.tabs, state.tabGroups), draggedId, targetId, group))
       }),
+
+    createTabGroupWithTab: (tabId) => {
+      const state = get()
+      if (!state.tabs.some((tab) => tab.id === tabId)) return null
+      const color = pickNextGroupColor(state.tabGroups.map((group) => group.color))
+      const group: TabGroup = { id: nextGroupId(), name: '', color, collapsed: false }
+      set((current) => applyOp(current, createGroupWithTab(toGroupModel(current.tabs, current.tabGroups), tabId, group)))
+      return group.id
+    },
 
     addTabToGroup: (tabId, groupId) =>
       set((state) => applyOp(state, addToGroup(toGroupModel(state.tabs, state.tabGroups), tabId, groupId))),
