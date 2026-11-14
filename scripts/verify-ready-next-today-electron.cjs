@@ -226,10 +226,11 @@ async function main() {
     const first = await checkToday(page, ctx)
     console.log(`  blocks: ${first.blocks.join(', ')}; first screen ${first.firstScreen} ms; dot to page ${first.click} ms`)
     ok('T8 with data: 接下来, 为你筛过的, 继续 and 收集 show', ['upcoming', 'sieve', 'continue', 'collection'].every(block => first.blocks.includes(block)), first.blocks.join(','))
-    ok('T8 the greeting is the one display-font moment', await page.evaluate(() => {
+    // V7: the interface carries no serif; the greeting is the interface font like everything else on the page.
+    ok('T8 no serif on the page, the greeting included (V7)', await page.evaluate(() => {
       const fonts = [...document.querySelectorAll('section.today *')].filter(el => el.childElementCount === 0 && el.textContent.trim())
         .map(el => getComputedStyle(el).fontFamily.split(',')[0].replace(/['"]/g, '').trim())
-      return fonts.filter(font => font === 'RN Serif').length === 1 && getComputedStyle(document.querySelector('.today-hello h1')).fontFamily.startsWith('"RN Serif"')
+      return fonts.every(font => !/serif/i.test(font) || /sans-serif/i.test(font))
     }))
     ok('T8 the next event counts down, an event under way reads 进行中', await page.locator('section.today .today-time.is-now').count() >= 1, await page.locator('section.today .today-time').allTextContents().then(list => list.join(' / ')))
     ok('T8 继续 holds pages, the book being read with its progress, and the unsaved draft', await page.locator('[data-today-block="continue"] a[data-ref-kind="book"]').count() === 1
