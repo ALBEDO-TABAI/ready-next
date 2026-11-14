@@ -7,7 +7,7 @@ import { extractCanvasLinks } from './canvas-links'
 import { extractObjectLinks } from './object-link-extract'
 import { parseReadyUri } from '../../../shared/ready-ref'
 import { createHash } from 'node:crypto'
-import { buildFtsSearchText } from './query'
+import { buildFtsSearchText, searchIndexTitle } from './query'
 
 export interface DocumentRow {
   id: number
@@ -105,7 +105,7 @@ export class SearchRepository {
       'SELECT COUNT(*) AS total FROM documents WHERE workspace_id = ?'
     )
     if (ftsAvailable) {
-      this.insertFtsStmt = db.prepare('INSERT INTO documents_fts(rowid, name, body) VALUES (?, ?, ?)')
+      this.insertFtsStmt = db.prepare('INSERT INTO documents_fts(rowid, name, body, title) VALUES (?, ?, ?, ?)')
       this.deleteFtsStmt = db.prepare('DELETE FROM documents_fts WHERE rowid = ?')
     } else {
       this.insertFtsStmt = null
@@ -177,7 +177,7 @@ export class SearchRepository {
         object?.id ?? null,
       ) as { lastInsertRowid: number | bigint }
       const documentId = Number(insertResult.lastInsertRowid)
-      this.writeFtsRow(documentId, input.name, input.body)
+      this.writeFtsRow(documentId, input)
       return { documentId, skipped: false }
     }
 
@@ -194,7 +194,7 @@ export class SearchRepository {
       sourceMetaJson,
       existing.id,
     )
-    this.writeFtsRow(existing.id, input.name, input.body)
+    this.writeFtsRow(existing.id, input)
     return { documentId: existing.id, skipped: false }
   }
 
@@ -283,9 +283,10 @@ export class SearchRepository {
     }
   }
 
-  private writeFtsRow(documentId: number, name: string, body: string): void {
+  private writeFtsRow(documentId: number, input: UpsertDocumentInput): void {
     if (!this.insertFtsStmt || !this.deleteFtsStmt) return
     this.deleteFtsStmt.run(documentId)
-    this.insertFtsStmt.run(documentId, buildFtsSearchText(name), buildFtsSearchText(body))
+    this.insertFtsStmt.run(documentId, buildFtsSearchText(input.name), buildFtsSearchText(input.body),
+      buildFtsSearchText(searchIndexTitle(input.frontmatterJson)))
   }
 }

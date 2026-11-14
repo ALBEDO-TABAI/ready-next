@@ -470,7 +470,7 @@ export class SearchEngine {
     const selectFields = usingFts
       ? `d.id AS id, d.path AS path, d.name AS name,
          d.source_type AS sourceType, d.source_meta_json AS sourceMetaJson, d.frontmatter_json AS frontmatterJson,
-         bm25(documents_fts, 2.0, 1.0) AS rank,
+         bm25(documents_fts, 2.0, 1.0, 2.0) AS rank,
          snippet(documents_fts, 1, char(1), char(2), '…', 12) AS snip`
       : `d.id AS id, d.path AS path, d.name AS name,
          d.source_type AS sourceType, d.source_meta_json AS sourceMetaJson, d.frontmatter_json AS frontmatterJson,
@@ -483,6 +483,16 @@ export class SearchEngine {
     if (usingFts) {
       sql += ' AND documents_fts MATCH ?'
       bindings.push(parsed.ftsMatch as string)
+    }
+    if (!fts5) {
+      // No stored body without FTS5: filter the available name/title fields.
+      const title = "CASE WHEN json_type(d.frontmatter_json, '$.title') = 'text' THEN json_extract(d.frontmatter_json, '$.title') ELSE '' END"
+      const fields = ['d.name', title].map(field => `lower(replace(replace(${field}, '-', ' '), '_', ' '))`)
+      for (const token of parsed.tokens.filter(t => t.kind === 'term' || t.kind === 'phrase')) {
+        const value = token.value.toLowerCase().replace(/[-_]/g, ' ').replace(/[\\%_]/g, '\\$&')
+        sql += ` AND (${fields.map(field => `${field} LIKE ? ESCAPE '\\'`).join(' OR ')})`
+        bindings.push(`%${value}%`, `%${value}%`)
+      }
     }
     if (sources) {
       sql += ` AND d.source_type IN (${sources.map(() => '?').join(',')})`
