@@ -100,21 +100,16 @@ function collect(input) {
       const wide = W >= 1300
       const pass = wide ? ratio >= (assistantOpen ? 0.5 : 0.68) : width >= 560
       if (!pass) add('contentWidth', `${mode}:${wide ? 'wide' : 'narrow'}`)
-      // DL11a, V15: equal margins above and below the panel (band + frame gap). V31: a docked assistant stands on a glass
-      // sheet whose top and bottom are the panel's, with the composer's bottom edge 12px inside it; without the sheet (the
-      // narrow-window card) the composer's bottom edge sits on the panel's.
+      // DL11a, V15: equal margins above and below the panel (band + frame gap); the composer's bottom edge sits on the panel's.
       const r = sheet.el.getBoundingClientRect()
       const top = Math.round(r.top)
       const bottom = Math.round(H - r.bottom)
       result.measures.bands = { top, bottom }
       if (Math.abs(top - bottom) > 2) add('bandSymmetry', `${mode}:${top}/${bottom}`)
       if (composer && assistantOpen) {
-        const glass = [...document.querySelectorAll('[data-shell-region="assistant"] .assistant-sheet')].find(el => getComputedStyle(el).position === 'absolute')
-        const g = glass?.getBoundingClientRect()
-        const delta = Math.round(composer.el.getBoundingClientRect().bottom - (g ? g.bottom - 12 : r.bottom))
+        const delta = Math.round(composer.el.getBoundingClientRect().bottom - r.bottom)
         result.measures.composerDelta = delta
-        if (g) result.measures.assistantSheet = { top: Math.round(g.top - r.top), bottom: Math.round(g.bottom - r.bottom) }
-        if (Math.abs(delta) > 2 || (g && (Math.abs(g.top - r.top) > 2 || Math.abs(g.bottom - r.bottom) > 2))) add('composerAlign', `${mode}`)
+        if (Math.abs(delta) > 2) add('composerAlign', `${mode}`)
       }
     }
   }
@@ -163,10 +158,9 @@ function collect(input) {
   const currentSelector = '[aria-current]:not([aria-current="false"]), [aria-selected="true"], [data-active="true"], [data-state="active"]'
   // Rail glyphs, today and live status indicators keep their own signal treatment.
   const currentExempt = '[data-liquid-shell="icon-rail"], [data-shell-region="rail"], [aria-current="date"], [data-today-tab], .today, .is-today, [data-state="running"], [data-status="running"], [data-state="needs_user"], [role="status"], [role="progressbar"]'
-  // The mode switch slot above the composer (V20, V21) marks its selected tab with the glass lens over it and the rail's
-  // white glyph, not with a fill on the tab: its own tabs skip the fill / ink / 500 rule but are still checked for the
-  // signal colour.
-  const lensSelection = '.draggable-mode-tabs [role="tab"]'
+  // The mode switch slot above the composer (V20, V21, V32) marks its selected tab with the rail's white glowing glyph,
+  // not with a fill on the tab: its own tabs skip the fill / ink / 500 rule but are still checked for the signal colour.
+  const slotSelection = '.draggable-mode-tabs [role="tab"]'
   const isAccent = value => {
     const colour = norm(value)
     return colour && !colour.endsWith(',0') && accents.has(rgbOnly(colour))
@@ -197,7 +191,7 @@ function collect(input) {
     // A treeitem wraps both its own painted row and its expanded child group.
     const row = el.getAttribute('role') === 'treeitem' ? el.querySelector(':scope > .ink-sb-row.is-selected') ?? el : el
     const cs = getComputedStyle(row)
-    if (carriesAccent(row) || (!row.matches(lensSelection) && (norm(cs.backgroundColor) !== currentFill || norm(cs.color) !== currentInk || Number(cs.fontWeight) !== 500))) {
+    if (carriesAccent(row) || (!row.matches(slotSelection) && (norm(cs.backgroundColor) !== currentFill || norm(cs.color) !== currentInk || Number(cs.fontWeight) !== 500))) {
       add('currentAccent', signature(el))
     }
   }

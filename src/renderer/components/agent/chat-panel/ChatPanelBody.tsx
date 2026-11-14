@@ -344,9 +344,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
               right: 0,
               bottom: 0,
               zIndex: 30,
-              // V31: inside the assistant's glass sheet the sheet sets these insets (--assistant-inset-*); otherwise the
-              // composer's bottom edge sits on the central panel's.
-              padding: `10px var(--assistant-inset-x, 16px) var(--assistant-inset-bottom, ${WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM}px)`,
+              padding: `10px 16px ${WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM}px`,
               borderTop: '1px solid transparent',
               display: 'flex',
               flexDirection: 'column',

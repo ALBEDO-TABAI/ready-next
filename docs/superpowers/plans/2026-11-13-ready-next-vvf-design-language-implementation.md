@@ -1,11 +1,11 @@
 ---
-status: implemented (rounds 1–4), awaiting the user's look at a visible window
+status: implemented (rounds 1–9), awaiting the user's look at a visible window
 enforce: true
 date: 2026-11-13
 supersedes: 2026-11-11-ready-next-w1-design-system-implementation.md 的 DL2、DL4、DL5、DL7、DL9、DL10（其余 DL 与 §3 之后的工程合同继续有效）
 ---
 
-# Ready Next 设计语言改为 vvf-2-1 的样子（V1–V31）
+# Ready Next 设计语言改为 vvf-2-1 的样子（V1–V32）
 
 用户 2026-11-13 要求：把 Ready Next 的设计与美术风格改成 `/Users/user/实验田/vvf-2-1/vvf-2-1-main` 的样子。
 
@@ -104,6 +104,15 @@ supersedes: 2026-11-11-ready-next-w1-design-system-implementation.md 的 DL2、D
 | --- | --- | --- |
 | V31 助手区的玻璃底 | 助手一列直接在窗口玻璃上，只有输入框、项目胶囊、切换槽和建议卡各自是玻璃 | 停靠的助手一列下面垫一整块液态玻璃底：上下与中央面板对齐（y 60 到 H − 60），圆角 20，左边离中央面板 8px，右边离窗口右缘 8px。材质是输入框那套液态玻璃的色调、高光边和柔和阴影，不做实时折射。头行按钮、欢迎语、建议卡、消息、项目胶囊、切换槽和输入框都在这块底里，四周留 12px；输入框的底边在底板之内，不再与中央面板的底边同一条线（底板的底边与中央面板对齐）。助手收起时底板随面板一起退出，只留右侧留白；窄窗口的浮层卡不变。减少透明时底板是面板的不透明底色 |
 
+### 1.8 第九轮（2026-11-14）
+
+用户看过第八轮的真实窗口后的原话：“滑块去掉，保留点击之后发光；底层也去掉那一块回归之前的状态”。
+
+| 条 | 第八轮 | 改成 |
+| --- | --- | --- |
+| V32 切换槽没有滑块 | 一枚液态透镜贴着轨道滑动、可拖，当前字形在透镜下白色发光，分屏时透镜跨两格并把分屏的图标挪到旁边 | 去掉透镜和拖拽（V26 及其两次修正作废）。轨道不变：40px 的液态玻璃胶囊，四格各 44px。当前模式的字形白色发光（实心字形，图标栏的规则），图标下面不垫任何底；点击（或键盘聚焦后回车 / 空格）即亮，200ms 交叉淡入，减少动态效果时直接切换。分屏时两个模式都亮，图标位置不动。浅色下白色字形靠自己的光晕读出来（`--rn-liquid-glyph-lit`：字形边缘一丝墨色加一圈贴着字形的柔和暗晕）；深色仍是白色光晕。减少透明时沿用原来的做法：当前格垫 `--rn-fill-2`，字形墨色 |
+| V31 撤回 | 停靠的助手一列下面垫一整块液态玻璃底 | 去掉，回到 V31 之前：助手一列直接在窗口玻璃上，只有输入框、项目胶囊、切换槽和建议卡是玻璃；输入框底边与中央面板底边对齐（V15） |
+
 ## 2. 不变的东西
 
 - 外壳的结构和版式：一个侧栏、图标栏、上下 52px 留白、品牌红点在右上角（W2、DL11、DL11a）。
@@ -181,3 +190,7 @@ supersedes: 2026-11-11-ready-next-w1-design-system-implementation.md 的 DL2、D
 - 2026-11-13（第八轮，V31）：助手区的玻璃底，按用户要求保留不带折射的那一版。
   - 改动：停靠的助手一列下面是一块 `.assistant-sheet`（`shell.css` 末尾的 V31 段，`MotionLayer` 的栅格上两个类名），液态玻璃的色调与细高光边，四周 12px 内距，输入框在底板之内；随面板一起进出；窄窗口的浮层卡不变。
   - 试过又撤回的：给底板加一层自己的透镜（16px 斜边折射、方向性高光环、内缘柔光），连同为它改的透镜引擎（折射图像素上限、延迟重建）一并撤回，用户看过后要求回到上一版。
+- 2026-11-14（第九轮，V32，V31 撤回）：完成。
+  - 改动：`DraggableModeTabs` 只剩轨道和四个按钮（文件名与类名沿用），透镜、拖拽、滑动动画、`mode-tabs-layout.ts` 和 `--rn-liquid-lens-*` 令牌删除，`slider-motion.ts` 只留图标栏用的部分；点亮由 `aria-selected` 决定（`mode-switch.css`）。V31 的 `.assistant-sheet` 样式、`MotionLayer` 上的类名、`--assistant-inset-*` 和两个脚本里的 V31 检查按 `dd72d8034` 原样撤回。
+  - 检查：`typecheck`、`verify:design-tokens`、`check-css-cascade-layer-reset` 通过；受影响的测试 211 项 0 失败（38 项跳过，是宿主 Node 上的原生用例，未覆盖）；`test:ui-contracts` 37/37。隐藏真实窗口：外壳 87/87（V31 的三项换成 V32 的五项），设计矩阵四种组合在预算内（`outputs/design-matrix/2026-11-14-vvf-9/`，输入框底边与面板底边的差为 0）。`eslint` 在改动的文件上只剩 `topbar-chatheader-right-align-contract.test.ts` 的 `ready/no-source-grep-test`（基线哈希过期，改动前就有）。
+  - 没做 / 已知：没有跑 `test:parallel` 全量、smoke、日历和浏览器壳脚本。浅色下的光晕是在隐藏窗口的白底（最不利的情况）和合成壁纸上比过几组值后定的，真实桌面上的观感仍需在可见窗口里确认。

@@ -127,71 +127,48 @@ async function main() {
 
     // S2 (V20): modes switch from the rail and from the slot above the assistant composer, one state; the rail also
     // switches with the assistant collapsed. V21: the project chip, then the slot, two liquid-glass pills of one height
-    // (40) from the left, 8px apart; the slot is four 44px cells (176px) and its clear lens is flush with it: the slot's
-    // full height, touching its end at the first and the last cell, never outside it.
+    // (40) from the left, 8px apart; the slot is four 44px cells (176px). V32: no thumb on the slot; the current mode's
+    // glyph alone is lit, white with a glow, with nothing under it.
     const slotRow = await page.evaluate(() => {
       const box = sel => { const r = document.querySelector(sel)?.getBoundingClientRect(); return r ? { left: r.left, right: r.right, top: Math.round(r.top), bottom: Math.round(r.bottom), w: Math.round(r.width), h: Math.round(r.height) } : null }
       const glass = sel => Boolean(document.querySelector(`[data-chat-panel-root] ${sel}`))
       return { slots: document.querySelectorAll('[data-chat-panel-root] .draggable-mode-tabs').length, row: box('[data-chat-panel-root] .ready-chat-composer-context-row'), chip: box('[data-chat-panel-root] .ready-chat-project-pill'), slot: box('[data-chat-panel-root] .draggable-mode-tabs'),
-        liquid: glass('.draggable-mode-tabs__surface') && glass('.draggable-mode-tabs__thumb-lens') && (!document.querySelector('[data-chat-panel-root] .ready-chat-project-pill') || glass('.ready-chat-project-surface')) }
+        thumbs: document.querySelectorAll('[data-chat-panel-root] .draggable-mode-tabs [class*="thumb"]').length,
+        liquid: glass('.draggable-mode-tabs__surface') && (!document.querySelector('[data-chat-panel-root] .ready-chat-project-pill') || glass('.ready-chat-project-surface')) }
     })
-    check('V21 the composer row is the project chip then the mode switch slot: liquid glass, one 40px line, 8px apart, inside the row; the slot is 176px',
-      slotRow.slots === 1 && slotRow.liquid && slotRow.slot.h === 40 && slotRow.slot.w === 176 && slotRow.slot.right <= slotRow.row.right + 0.5
+    check('V21 the composer row is the project chip then the mode switch slot: liquid glass, one 40px line, 8px apart, inside the row; the slot is 176px, without a thumb (V32)',
+      slotRow.slots === 1 && slotRow.liquid && slotRow.thumbs === 0 && slotRow.slot.h === 40 && slotRow.slot.w === 176 && slotRow.slot.right <= slotRow.row.right + 0.5
         && (!slotRow.chip || (slotRow.chip.h === 40 && slotRow.chip.top === slotRow.slot.top && Math.abs(slotRow.slot.left - slotRow.chip.right - 8) < 0.5)), JSON.stringify(slotRow))
     for (const [label, mode] of [['浏览器', 'browser'], ['资讯', 'rss'], ['日历', 'calendar'], ['文档', 'document']]) {
       await railSwitch(page, label, mode)
       check(`rail switches to ${mode}`, await waitFor(page, sel => Boolean(document.querySelector(sel)), modeScene(mode)))
-      check(`V20 the slot shows ${mode} with the rail`, await waitFor(page, m => document.querySelector('[data-chat-panel-root] .draggable-mode-tabs__icon.is-active')?.getAttribute('data-mode') === m, mode))
+      check(`V20 the slot shows ${mode} with the rail`, await waitFor(page, m => document.querySelector('[data-chat-panel-root] .draggable-mode-tabs__icon[aria-selected="true"]')?.getAttribute('data-mode') === m, mode))
     }
     for (const [label, mode] of [['浏览器', 'browser'], ['日历', 'calendar'], ['资讯', 'rss'], ['文档', 'document']]) {
       await page.locator(`[data-chat-panel-root] .draggable-mode-tabs__icon[data-mode="${mode}"]`).click()
       check(`V20 the slot switches to ${mode} and the rail follows`, await waitFor(page, ([sel, name]) => Boolean(document.querySelector(sel))
         && Boolean(document.querySelector(`[data-shell-region="rail"] button[aria-label="${name}"][aria-pressed="true"]`)), [modeScene(mode), label]))
-      if (mode !== 'browser' && mode !== 'calendar') continue
-      // At the first and the last cell the settled lens is the slot's height, inside it, and flush with that end.
-      await harness.sleep(600)
-      const fit = await page.evaluate(() => {
-        const rect = sel => document.querySelector(`[data-chat-panel-root] ${sel}`)?.getBoundingClientRect()
-        const slot = rect('.draggable-mode-tabs'), lens = rect('.draggable-mode-tabs__thumb')
-        return slot && lens ? [lens.left - slot.left, slot.right - lens.right, lens.top - slot.top, slot.bottom - lens.bottom, lens.height - slot.height].map(n => Math.round(n * 10) / 10) : null
-      })
-      const flushEnd = fit && (mode === 'browser' ? fit[0] : fit[1])
-      check(`V21 the lens on the ${mode} cell is the slot's height, inside it and flush with its end`,
-        Boolean(fit) && fit.slice(0, 4).every(margin => margin >= 0) && Math.abs(fit[4]) <= 0.5 && flushEnd <= 1, JSON.stringify(fit))
+      // V32: once the crossfade has settled, only this mode's glyph is lit: white, glowing, its resting twin gone, and
+      // the cell itself paints nothing under it.
+      await harness.sleep(400)
+      const lit = await page.evaluate(() => [...document.querySelectorAll('[data-chat-panel-root] .draggable-mode-tabs__icon')].map(tab => {
+        const style = sel => getComputedStyle(tab.querySelector(sel))
+        return { mode: tab.dataset.mode, selected: tab.getAttribute('aria-selected'), lit: Number(style('.is-lit').opacity), rest: Number(style('.is-rest').opacity),
+          colour: style('.is-lit').color, glow: style('.is-lit').filter, cell: getComputedStyle(tab).backgroundColor }
+      }))
+      check(`V32 only the ${mode} glyph is lit in the slot: white with a glow, nothing under it`,
+        lit.length === 4 && lit.every(tab => tab.cell === 'rgba(0, 0, 0, 0)' && (tab.mode === mode
+          ? tab.selected === 'true' && tab.lit === 1 && tab.rest === 0 && /^rgba?\(255, 255, 255/.test(tab.colour) && tab.glow.includes('drop-shadow')
+          : tab.selected === 'false' && tab.lit === 0 && tab.rest === 1)), JSON.stringify(lit))
     }
     // V17: the assistant's header buttons. Docked: the corner button is the right end of its head row and the four others
     // stand in that row to its left, on the head line (centre y 82). Collapsed: the shell keeps a strip as wide as the rail,
     // the corner button stays exactly where it was, and the same four buttons stand below it in a column on the rail's pitch.
     const pitch = 36
     const docked = await assistantTools(page, true)
-    // V31 (experiment): docked and open, the assistant stands on one glass sheet: top and bottom on the central panel's,
-    // 8px after it, the frame gap from the window's right edge; inside it the header row starts on its top, and the
-    // composer keeps 12px from its left, right and bottom edges.
-    // The last slot click may still be sliding its scene in: measure once the current panel has come to rest.
-    await waitFor(page, () => {
-      const panel = [...document.querySelectorAll('[data-shell-region="content"] .rn-panel')].find(el => el.getBoundingClientRect().width > 0 && getComputedStyle(el).visibility !== 'hidden')
-      const column = document.querySelector('[data-shell-region="content"]')
-      return Boolean(panel && column) && Math.abs(panel.getBoundingClientRect().right - column.getBoundingClientRect().right) < 1
-    })
-    const glass = await page.evaluate(() => {
-      const rect = el => { if (!el) return null; const r = el.getBoundingClientRect(); return { left: Math.round(r.left), right: Math.round(r.right), top: Math.round(r.top), bottom: Math.round(r.bottom) } }
-      // The current mode's panel: other modes stay mounted but hidden, with their own stale boxes.
-      const panel = [...document.querySelectorAll('[data-shell-region="content"] .rn-panel')].find(el => el.getBoundingClientRect().width > 0 && getComputedStyle(el).visibility !== 'hidden')
-      const sheet = document.querySelector('[data-shell-region="assistant"] .assistant-sheet')
-      return {
-        W: window.innerWidth, sheet: rect(sheet), panel: rect(panel), radius: sheet ? getComputedStyle(sheet).borderTopLeftRadius : null,
-        composer: rect(document.querySelector('[data-chat-composer-shell="true"]')), row: rect(document.querySelector('[data-shell-region="assistant"] .chat-header-row')),
-      }
-    })
-    const g = glass.sheet, p = glass.panel, c = glass.composer
-    check('V31 the docked assistant\'s glass sheet: the central panel\'s top and bottom, 8px after it, 8px from the window\'s right edge, radius 20',
-      Boolean(g && p) && g.top === p.top && g.bottom === p.bottom && Math.abs(g.left - p.right - 8) <= 1 && g.right === glass.W - 8 && glass.radius === '20px', JSON.stringify(glass))
-    check('V31 inside the sheet the header row starts on its top and the composer keeps 12px from its left, right and bottom',
-      Boolean(g && c && glass.row) && glass.row.top === g.top && c.bottom === g.bottom - 12 && c.left === g.left + 12 && c.right === g.right - 12, JSON.stringify(glass))
     await page.keyboard.press('Tab')
     const collapsed = await waitFor(page, () => (document.querySelector('[data-chat-panel-root]')?.getBoundingClientRect().width ?? 0) < 1)
     check('Tab collapses the assistant to zero width', collapsed)
-    check('V31 collapsed, the glass sheet has left with the panel', await waitFor(page, () => !document.querySelector('[data-shell-region="assistant"] .assistant-sheet')))
     await harness.sleep(600)
     const strip = await assistantTools(page)
     const inRow = docked.beads.every((bead, i) => bead && bead.y === 82 && bead.x === docked.W - 26 - pitch * (i + 1) && bead.w === 32)
@@ -344,6 +321,10 @@ async function main() {
     await waitFor(page, sel => Boolean(document.querySelector(sel)), modeScene('document'))
     await railClick(page, '日历', ['Alt'])
     check('⌥-click opens the mode beside the current one', await waitFor(page, () => Boolean(document.querySelector('[data-workbench-split-layout="true"]'))))
+    await harness.sleep(400)
+    const splitLit = await page.evaluate(() => [...document.querySelectorAll('[data-chat-panel-root] .draggable-mode-tabs__icon')]
+      .filter(tab => tab.getAttribute('aria-selected') === 'true' && getComputedStyle(tab.querySelector('.is-lit')).opacity === '1').map(tab => tab.dataset.mode))
+    check('V32 in a split both modes are lit in the slot, each in its own place', splitLit.join() === 'document,calendar', splitLit.join())
     await railClick(page, '日历', ['Alt'])
     check('⌥-click again closes the split', await waitFor(page, () => !document.querySelector('[data-workbench-split-layout="true"]')))
 
@@ -372,13 +353,10 @@ async function main() {
       const card = document.querySelector('[data-chat-panel-root]')?.getBoundingClientRect()
       const strip = document.querySelector('[data-shell-region="assistant-strip"]')?.getBoundingClientRect()
       const corner = document.querySelector('[data-shell-assistant-tools] [data-assistant-toggle]')?.getBoundingClientRect()
-      // V31: the card is the glass here; the sheet inside it paints nothing.
-      const sheet = document.querySelector('[data-shell-region="assistant"] .assistant-sheet')
-      const sheetPainted = Boolean(sheet) && (getComputedStyle(sheet).position === 'absolute' || getComputedStyle(sheet).backgroundColor !== 'rgba(0, 0, 0, 0)')
-      return card && strip && corner ? { cardRight: Math.round(card.right), cardTop: Math.round(card.top), stripLeft: Math.round(strip.left), stripWidth: Math.round(strip.width), corner: Math.round(corner.x + corner.width / 2), W: window.innerWidth, sheetPainted } : null
+      return card && strip && corner ? { cardRight: Math.round(card.right), cardTop: Math.round(card.top), stripLeft: Math.round(strip.left), stripWidth: Math.round(strip.width), corner: Math.round(corner.x + corner.width / 2), W: window.innerWidth } : null
     })
-    check('V17 the narrow-window assistant card opens beside the strip (8px from it) and the corner button stays in the strip; no second sheet inside (V31)',
-      drawerSide && drawerSide.stripWidth === 52 && drawerSide.cardRight === drawerSide.stripLeft - 8 && drawerSide.cardTop === 60 && drawerSide.corner === drawerSide.W - 26 && !drawerSide.sheetPainted, JSON.stringify(drawerSide))
+    check('V17 the narrow-window assistant card opens beside the strip (8px from it) and the corner button stays in the strip',
+      drawerSide && drawerSide.stripWidth === 52 && drawerSide.cardRight === drawerSide.stripLeft - 8 && drawerSide.cardTop === 60 && drawerSide.corner === drawerSide.W - 26, JSON.stringify(drawerSide))
     // A click on the content closes the drawer (W2 §2.5); Tab inside the composer keeps moving focus.
     const content = await page.locator('[data-shell-region="content"]').boundingBox()
     await page.mouse.click(content.x + 40, content.y + 20)
