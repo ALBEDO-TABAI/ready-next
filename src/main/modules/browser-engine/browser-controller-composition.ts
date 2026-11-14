@@ -1,4 +1,6 @@
 import { BrowserPageToolsService } from './page-tools-service'
+import { getDatabase } from '../database'
+import { BrowserWorkTabOwnershipStore } from './work-tab-ownership-store'
 import { WebMcpService } from './webmcp-service'
 import { isWebMcpExperimentActive } from './webmcp-experiment'
 import { app, BrowserWindow, shell } from 'electron'
@@ -114,7 +116,8 @@ export abstract class BrowserControllerComposition extends BrowserControllerCont
   /** Most recently created task-owned work tab, used only for supervision display. */
   protected agentTabId: string | null = null
   protected readonly agentWorkTabs = new Map<string, string>()
-  protected readonly taskWorkTabs = new Map<string, { browserTaskId: string; openerTabId: string | null; physicalTargetToken: string }>()
+  protected readonly workTabOwnershipStore = new BrowserWorkTabOwnershipStore(() => getDatabase().getRawDb())
+  protected readonly taskWorkTabs = new Map<string, { browserTaskId: string; ownerRunId: string; openerTabId: string | null; physicalTargetToken: string }>()
   protected readonly tabLifecycleService: BrowserTabLifecycleService
   protected readonly tabMetaService: BrowserTabMetaService<Tab>
   protected readonly tabShellService: BrowserTabShellService

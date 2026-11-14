@@ -183,9 +183,12 @@ export class BrowserController extends BrowserControllerCaptureRuntime {
   }
 
   getTabList() {
+    const owned = new Map(this.workTabOwnershipStore.list().map(owner => [owner.tabId, owner]))
     return this.tabMetaService.getTabList().map(tab => {
-      const owner = this.taskWorkTabs.get(tab.id)
-      return owner ? { ...tab, browserTaskId: owner.browserTaskId, openerTabId: owner.openerTabId } : tab
+      const owner = owned.get(tab.id)
+      return owner && owner.profile === (tab.profile || '')
+        ? { ...tab, browserTaskId: owner.browserTaskId, openerTabId: owner.openerTabId }
+        : tab
     })
   }
 
