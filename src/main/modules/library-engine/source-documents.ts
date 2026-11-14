@@ -135,7 +135,7 @@ export class SourceDocumentService {
     const context = { bookId: page.id, chapters: [{ title: selection.page ? `${selection.source.title} · 第 ${selection.page} 页` : selection.source.title, text: selection.text }] }
     const before = await highlights.list(context)
     const result = await highlights.create({ ...context, expectedVersion: before.version, chapter: 0, from: selection.from, to: selection.to, color: 'yellow' })
-    return { ...result, highlights: result.highlights.filter(h => !outsideScope.has(h.id)) }
+    return { ...result, ...(selection.source.kind === 'book' ? {} : { sourceId: page.id }), highlights: result.highlights.filter(h => !outsideScope.has(h.id)) }
   }
   /** Book adapter retains the original book identity, files and annotation behavior. */
   static books(engine: LibraryEngine, dependencies: ConstructorParameters<typeof LibraryHighlightService>[1] = {}) {

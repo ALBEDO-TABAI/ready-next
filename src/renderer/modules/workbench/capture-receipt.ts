@@ -28,12 +28,17 @@ function announce(message: string, { undo, open }: { undo?: () => Promise<void>;
 }
 
 /**
- * 划线 stays each scene's own highlight; its toast opens the source page at the new mark. Only a book's highlight has
- * a remove path (`undo`); the source pages of web pages, 资讯 and PDFs have none, so those toasts offer 打开 only.
+ * 划线 stays each scene's own highlight; its toast opens the source page at the new mark. A book passes its own
+ * remove path (`undo`); the source pages of web pages, 资讯 and PDFs remove the new mark by the page's id.
  */
 export function announceHighlight(state: LibraryHighlightState, exact: string, undo?: () => Promise<void>): void {
   const words = (text: string) => text.replace(/\s+/g, '')
   const mark = [...state.highlights].reverse().find(highlight => words(highlight.text) === words(exact))
+  const sourceId = state.sourceId
+  if (!undo && sourceId && mark) undo = async () => {
+    const result = await window.electronAPI.sourceAnnotations.removeHighlight({ sourceId, id: mark.id, expectedVersion: state.version })
+    if (!result.success) throw new Error(result.error)
+  }
   announce(state.warning || (state.persistence === 'saved' ? '已划线到来源页' : '已加入来源页，请保存笔记'), { undo, open: () => {
     const tabs = useDocTabs.getState()
     tabs.openTab(state.sourcePath)

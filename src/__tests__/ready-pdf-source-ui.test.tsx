@@ -47,10 +47,11 @@ test('PdfViewer: a single-page selection gets the shared bar (划线 sends scope
   const hooks = registerHooks({ resolve(specifier, context, next) {
     return specifier === 'react-pdf' ? { url: pdf, shortCircuit: true } : next(specifier, context)
   }, load(url, context, next) { return url.endsWith('.css') ? { format: 'module', source: '', shortCircuit: true } : next(url, context) } })
-  const calls: unknown[] = [], opened: string[] = []
+  const calls: unknown[] = [], removed: unknown[] = [], opened: string[] = []
   let fail = false
   Object.defineProperty(dom.window, 'electronAPI', { value: { navigationHistory: memoryNavigationAPI(),
-    sourceAnnotations: { pdf: async (input: unknown) => { calls.push(input); return fail ? { success: false, error: 'PDF 已变化，请重新打开后划线' } : { success: true, data: { persistence: 'saved', version: 'v1', sourcePath: '/vault/PDF/改名.md', highlights: [], anchors: 'synced' } } } },
+    sourceAnnotations: { pdf: async (input: unknown) => { calls.push(input); return fail ? { success: false, error: 'PDF 已变化，请重新打开后划线' } : { success: true, data: { persistence: 'saved', version: 'v1', sourcePath: '/vault/PDF/改名.md', sourceId: 'source-' + 'a'.repeat(32), highlights: [{ id: 'hl-1', text: '选中文字', sourceLine: 3 }], anchors: 'synced' } } },
+      removeHighlight: async (input: unknown) => { removed.push(input); return { success: true, data: { sourcePath: '/vault/PDF/改名.md', version: 'v2', persistence: 'saved' } } } },
     objects: { onMoved: () => () => {}, prepareMigration: async () => ({ resolved: [] }), completeMigration: async () => ({ state: 'completed' }), locate: async (id: string) => { assert.equal(id, 'pdf-object'); return { path: '/vault/改名.pdf' } } },
     document: { stat: async () => ({ success: true, data: { isDirectory: false } }) },
   } })
@@ -88,7 +89,10 @@ test('PdfViewer: a single-page selection gets the shared bar (划线 sends scope
   assert.deepEqual([...bar()!.querySelectorAll('button')].map(button => button.textContent), ['划线', '存入 FastCard', '引用到文档', '问 AI', '保存到画板'])
   await act(async () => action('划线').click()); await act(tick)
   assert.deepEqual(calls[0], { id: 'pdf-object', expectedHash: createHash('sha256').update('pdf bytes').digest('hex'), page: 1, text, start: 3, end: 7, exact: '选中文字' })
-  assert.match(toast()!.textContent!, /^已划线到来源页打开$/, 'a source page has no remove path: the toast offers 打开 only')
+  assert.match(toast()!.textContent!, /^已划线到来源页撤销打开$/)
+  await act(async () => [...toast()!.querySelectorAll('button')].find(button => button.textContent === '撤销')!.click()); await act(tick)
+  assert.deepEqual(removed, [{ sourceId: 'source-' + 'a'.repeat(32), id: 'hl-1', expectedVersion: 'v1' }], '撤销 removes the new mark from the source page')
+  assert.match(toast()!.textContent!, /已撤销/)
   fail = true
   await select(range())
   await act(async () => action('划线').click()); await act(tick)

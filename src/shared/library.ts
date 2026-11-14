@@ -133,6 +133,8 @@ export interface LibraryHighlight {
 export interface LibraryHighlightState {
   version: string
   sourcePath: string
+  /** The source page's object id, present for web / 资讯 / PDF source pages (what their 撤销 names). */
+  sourceId?: string
   highlights: LibraryHighlight[]
   persistence: 'saved' | 'pending_save'
   anchors: 'synced' | 'repair_needed'
