@@ -16,6 +16,8 @@ export interface CanvasCompositionSurfaceProps extends Omit<CanvasSurfaceProps, 
   composition: CanvasCompositionAPI; drafts: DocumentDraftAPI
   documentPreview: DocumentPreviewSource; linkPreview?: LinkPreviewSource
   renderBlockEditor?: (host: CardEditorHost) => ReactNode
+  /** The host's own cards (media, links), asked first; undefined leaves the card to this surface. */
+  renderExtraCard?: (node: import('../../../../shared/ready-canvas').CanvasNode) => ReactNode | undefined
   refreshCanvas(): Promise<void>
   openDraft(draftId: string): Promise<void>
 }
@@ -69,6 +71,8 @@ export function CanvasCompositionSurface(props: CanvasCompositionSurfaceProps) {
     <CanvasSurface {...props} onAddToDocument={add}
       renderTextEditor={({ node, commit }) => node.type === 'text' ? <TextCard key={node.id} canvasPath={props.path} node={node} commit={commit} renderEditor={props.renderBlockEditor} /> : null}
       renderCard={node => {
+        const extra = props.renderExtraCard?.(node)
+        if (extra !== undefined) return extra
         const mark = <ScheduleMark canvasId={props.canvas.ready.id} nodeId={node.id} snapshot={props.calendarSnapshot} />
         if (node.ready.kind === 'document') return <><DocumentCard node={node} source={props.documentPreview} />{mark}</>
         if (node.type === 'text' && ['text', 'note'].includes(node.ready.kind)) return <><CardMarkdown text={node.text} />{mark}</>

@@ -92,6 +92,13 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     observer?.observe(el)
     return () => { el.removeEventListener('wheel', wheel); view.removeEventListener('blur', cancel); observer?.disconnect(); gestures.dispose(); scene.current = null }
   }, [gestures])
+  // [cv-media] the host's handle on this surface (commit, view centre, selection, element)
+  useEffect(() => {
+    props.surfaceApi?.({ commit: ops => latest.current.buffer.commit(ops), select: setSelected, element: () => root.current,
+      centre: () => { const view = scene.current?.viewport; return view ? { x: view.x + view.width / 2, y: view.y + view.height / 2 } : { x: 0, y: 0 } } })
+    return () => props.surfaceApi?.(null)
+  }, [props.surfaceApi]) // eslint-disable-line react-hooks/exhaustive-deps -- the handle reads the latest scene and buffer through refs
+  // [/cv-media]
   async function closeEditor() {
     if (exiting.current) return
     const boardId = props.canvas.ready.id
@@ -170,7 +177,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     bin: () => { gestures.cancel(); setEditing(null); setSearch(null); setTrash(true) } })
   const needle = search?.trim().toLocaleLowerCase() ?? ''
   const matches = needle ? active.nodes.filter(node => [node.type === 'text' ? node.text : '', node.type === 'link' ? node.url : '', node.type === 'group' ? node.label ?? '' : '',
-    node.type === 'file' ? node.file : '', node.ready.preview?.title ?? '', node.ready.preview?.description ?? ''].some(text => text.toLocaleLowerCase().includes(needle))) : []
+    node.type === 'file' ? node.file : '', node.ready.preview?.title ?? '', node.ready.preview?.description ?? '', node.ready.media?.transcript ?? '' /* [cv-media] */].some(text => text.toLocaleLowerCase().includes(needle))) : []
   const matchIds = new Set(matches.map(node => node.id))
   function step(delta: 1 | -1) {
     if (!matches.length) return
@@ -187,6 +194,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
   })() : null
   const schedulable = props.onScheduleNode && chosen.length === 1 && ['text', 'note', 'document'].includes(chosen[0].ready.kind)
   async function paste(at: { x: number; y: number }) {
+    if (await props.onPasteMedia?.(at, null)) return // [cv-media] clipboard pictures and files first
     const text = (await navigator.clipboard?.readText?.())?.trim()
     if (!text) throw new Error('剪贴板里没有文字或链接')
     const frame = { id: crypto.randomUUID(), x: Math.round(at.x - 130), y: Math.round(at.y - 40), width: 260, height: /^https?:\/\/\S+$/i.test(text) ? 195 : 120 }
@@ -203,6 +211,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
       ...(props.onAddToDocument ? [{ id: 'add', label: '添加到文档', icon: <FilePlus2 />, disabled: composing || busy, onSelect: () => void addToDocument() }] : []),
       ...(props.onAskAI && chosen.length > 0 ? [{ id: 'ask', label: '问 AI', icon: <Sparkles />, disabled: busy || composing, onSelect: () => { void props.onAskAI!(chosen.map(n => n.id)).catch(fail) } }] : []),
       ...(schedulable ? [{ id: 'schedule', label: '安排日程…', icon: <CalendarPlus />, disabled: busy || composing, onSelect: () => props.onScheduleNode!(chosen[0]) }] : []),
+      ...(props.extraCardItems?.(chosen) ?? []), // [cv-media]
       { id: 'delete', label: '删除', icon: <Trash2 />, hint: 'Delete', danger: true, disabled: busy || composing, onSelect: recycle },
     ]
     const anchor: FloatAnchor = { left: menu.client.x, top: menu.client.y, right: menu.client.x, bottom: menu.client.y }
@@ -273,6 +282,12 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
       setCompositionError('')
       setMenu({ kind: card ? 'card' : 'canvas', world: screenToWorld({ x, y }, camera), client: { x: event.clientX, y: event.clientY } })
     }}
+    onPaste={event => { // [cv-media] ⌘V with files or a picture on the clipboard; text and links are not handled here
+      const target = event.target instanceof Element ? event.target : null
+      if (!props.onPasteMedia || !event.clipboardData.files.length || busy || trash || editing || target?.closest('input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"]')) return
+      event.preventDefault()
+      void props.onPasteMedia(screenToWorld({ x: size.width / 2, y: size.height / 2 }, camera), event.clipboardData).catch(fail)
+    }}
     onKeyDown={shortcut} onKeyUp={e => { if (e.key === ' ') gestures.space = false }}
     onFocus={() => commands.focus()} onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) gestures.cancel() }}
     onPointerDown={e => { if (!e.altKey) gestures.down(e.nativeEvent) }} onPointerMove={e => gestures.move(e.nativeEvent)} onPointerUp={e => gestures.up(e.nativeEvent)}
@@ -290,7 +305,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
       onZoomReset={() => setCamera(c => zoomAt(c, { x: size.width / 2, y: size.height / 2 }, 1))}
       onTrash={() => { gestures.cancel(); setEditing(null); setSearch(null); setTrash(!trash) }} />}
     {!trash && !capturing && <CanvasDock tool={tool} lastShape={lastShape} disabled={busy || !!editing} graphics={!!props.prepareGraphic}
-      canUndo={buffer.canUndo} canRedo={buffer.canRedo} busy={busy} onTool={chooseTool} onCard={kind => placeCard(kind)}
+      canUndo={buffer.canUndo} canRedo={buffer.canRedo} busy={busy} extra={props.dockTools /* [cv-media] */} onTool={chooseTool} onCard={kind => placeCard(kind)}
       onUndo={() => void buffer.undo()} onRedo={() => void buffer.redo()} />}
     {selectionBox && <SelectionBar left={selectionBox.left} top={selectionBox.top} count={chosen.length} busy={busy || composing}
       canGroup={chosen.length > 1} canUngroup={chosen.some(n => n.ready.groupId || n.type === 'group')}

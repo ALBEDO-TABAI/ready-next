@@ -46,7 +46,7 @@
   .rn-canvas .canvas-card[data-lightweight='true'] { box-shadow: none; pointer-events: none; }
   .rn-canvas .canvas-card[data-kind='group'] { background: var(--rn-fill); border: .5px solid var(--rn-hair-2); box-shadow: none; }
   .rn-canvas .canvas-card[data-kind='graphic'] { background: transparent; box-shadow: none; }
-  .rn-canvas .canvas-card[data-kind='audio'], .rn-canvas .canvas-card[data-kind='video'] { background: var(--rn-inverse); color: var(--rn-on-inverse); }
+  .rn-canvas .canvas-card[data-kind='video'] { background: var(--rn-inverse); color: var(--rn-on-inverse); }
   .rn-canvas .canvas-card-content { width: 100%; height: 100%; box-sizing: border-box; padding: 16px; overflow: hidden; overflow-wrap: anywhere; border-radius: inherit; }
   .rn-canvas .canvas-card[data-kind='graphic'] .canvas-card-content { padding: 0; overflow: visible; }
   .rn-canvas .canvas-card strong:not(.canvas-editor strong) { display: block; margin-top: 8px; }

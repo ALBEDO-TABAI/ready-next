@@ -6,7 +6,7 @@ import type { Camera, Rect } from '../../../modules/canvas/interaction/geometry'
 
 export interface GraphicDraft extends Rect { id: string; graphic: Graphic }
 export interface FrameWork { kind: string; candidates: number; visited: number; domWrites: number }
-export interface CanvasSurfaceProps {
+export interface CanvasSurfaceProps extends CanvasSurfaceMediaProps {
   canvas: ReadyCanvas
   /** Resolve only when the caller accepts this batch into its authoritative buffer. Reject on failure.
    * This acknowledgement does not claim disk persistence. Main saving belongs to the caller. */
@@ -38,4 +38,18 @@ export interface CanvasSurfaceProps {
   /** Save the given window rectangle as a PNG (Main captures it); the surface hides its chrome and frames the cards first. */
   captureImage?: (rect: { x: number; y: number; width: number; height: number }, title: string) => Promise<void>
 }
+// [cv-media] What the host adds for media (M4 2026-11-14); see components/canvas/board-media.tsx.
+export interface CanvasSurfaceMediaProps {
+  /** More tools in the dock (the record tool), after the drawing tools. */
+  dockTools?: ReactNode
+  /** More items on a card's right-click menu, for the chosen cards (刷新预览). */
+  extraCardItems?: (nodes: CanvasNode[]) => MenuEntry[]
+  /** Paste clipboard files or pictures onto the board at a world point; resolves true when it placed something.
+   * `data` is the paste event's transfer (read synchronously), or null to read the system clipboard. Call it first
+   * from any paste handler; text and links are the caller's when it resolves false. */
+  onPasteMedia?: (at: { x: number; y: number }, data: DataTransfer | null) => Promise<boolean>
+  /** The surface lends its undoable commit, the view centre (world), the selection and its element; null on unmount. */
+  surfaceApi?: (api: { commit(operations: CanvasOperation[]): Promise<boolean>; centre(): { x: number; y: number }; select(ids: string[]): void; element(): HTMLElement | null } | null) => void
+}
+// [/cv-media]
 export type Tool = 'select' | 'pan' | 'rect' | 'arrow' | 'edge' | 'path'
