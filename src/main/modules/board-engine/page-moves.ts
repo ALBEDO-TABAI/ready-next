@@ -26,7 +26,7 @@ export function canvasPageMoveIds(service: CanvasService, group: ObjectMoveGroup
     const objects = service.registry.list().filter(o => o.status === 'present' && o.current_path?.startsWith(group.root + '/'))
     const paths = new Map(objects.map(o => [o.id, movedPath(relative(group.root, o.current_path!), group)]))
     const entries = objects.filter(o => o.kind === 'canvas').map(o => ({ path: paths.get(o.id)!, canvas: ReadyCanvasSchema.parse(JSON.parse(changes.find(c => c.objectId === o.id)?.content ?? readFileSync(o.current_path!, 'utf8'))) }))
-    validateCanvasCollection(entries, paths)
+    validateCanvasCollection(entries, paths, service.recycled())
   }
   return [...new Set([...group.objects.filter(o => o.kind === 'canvas').map(o => o.id), ...changes.map(c => c.objectId)])]
 }

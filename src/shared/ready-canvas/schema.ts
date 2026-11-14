@@ -147,7 +147,7 @@ export function readCanvas(input: unknown): CanvasReadResult {
 }
 
 /** Caller supplies a verified library snapshot; paths are library-relative, not OS paths. */
-export function validateCanvasCollection(entries: Array<{ path: string; canvas: ReadyCanvas }>, objects: ReadonlyMap<string, string> = new Map()): void {
+export function validateCanvasCollection(entries: Array<{ path: string; canvas: ReadyCanvas }>, objects: ReadonlyMap<string, string> = new Map(), recycled: ReadonlySet<string> = new Set()): void {
   const paths = new Map(objects), graph = new Map<string, string[]>(), parents = new Map<string, string>()
   const seen = new Set<string>(), seenPaths = new Set<string>()
   const subpaths: Array<{ path: string; file: string; id: string }> = []
@@ -162,6 +162,9 @@ export function validateCanvasCollection(entries: Array<{ path: string; canvas: 
     const children: string[] = []
     for (const node of canvas.nodes) {
       if (node.type !== 'file' || !node.ready.ref) continue
+      // A sub-board card in the bin: its file is in the library bin with it (M4 §9.3), so there is nothing to resolve.
+      // The same holds for a card whose sub-board was recycled from the library (`recycled`): the card waits for it.
+      if (node.ready.kind === 'subcanvas' && (node.ready.trash || (node.ready.ref.kind === 'canvas' && recycled.has(node.ready.ref.id)))) continue
       const ref = node.ready.ref
       if (!('id' in ref) || paths.get(ref.id) !== node.file) throw new Error(`Unresolved or mismatched ref/file: ${node.id}`)
       if (node.ready.kind !== 'subcanvas') continue

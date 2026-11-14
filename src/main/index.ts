@@ -730,7 +730,7 @@ function setupGlobalIPC(): void {
   })
   const libraryRuntime = setupLibraryIPC()
   const documentPages = setupDocumentPagesIPC()
-  canvasRuntime = setupCanvasRuntime(documentPages.ready, { preloadPath: join(__dirname, '../preload/index.mjs'), rendererFile: join(__dirname, '../renderer/index.html'), rendererUrl: process.env.ELECTRON_RENDERER_URL })
+  canvasRuntime = setupCanvasRuntime(documentPages.ready, { preloadPath: join(__dirname, '../preload/index.mjs'), rendererFile: join(__dirname, '../renderer/index.html'), rendererUrl: process.env.ELECTRON_RENDERER_URL }, documentPages.service)
   setupFileEmergenceIPC()
   setupRendererStateFlushIPC()
   setupTagForgeIPC()
