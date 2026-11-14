@@ -161,7 +161,7 @@ function normalizeStates(
   if (!states) return undefined
   const out: Record<string, boolean | string> = {}
   for (const [key, val] of Object.entries(states)) {
-    if (val === undefined || val === false || val === '') continue
+    if (val === undefined || (val === false && key !== 'checked') || val === '') continue
     out[key] = val
   }
   return Object.keys(out).length > 0 ? out : undefined

@@ -72,6 +72,8 @@ export function normalizeBrowserBlockingChallengeProbe(value: unknown): BrowserB
   }
 }
 
+export const BROWSER_VALUE_INPUT_TYPES: readonly string[] = ['email', 'number', 'date', 'datetime-local', 'month', 'time', 'week']
+
 function buildBrowserDomTargetLibraryJs(): string {
   return `
     const READY_TARGET_STATE_KEY = '__readyBrowserTargetIdentityV3';
@@ -145,14 +147,23 @@ function buildBrowserDomTargetLibraryJs(): string {
       if (aria) return aria;
       const labelledBy = readyCleanText(el.getAttribute('aria-labelledby'));
       if (labelledBy) {
-        const text = labelledBy.split(/\\s+/).map((id) => readyCleanText(document.getElementById(id)?.innerText)).filter(Boolean).join(' ');
+        const root = el.getRootNode();
+        const text = labelledBy.split(/\\s+/).map((id) => readyCleanText((root.getElementById?.(id) || document.getElementById(id))?.textContent)).filter(Boolean).join(' ');
         if (text) return text;
       }
       const id = el.getAttribute('id');
       if (id) {
-        const label = document.querySelector('label[for="' + CSS.escape(id) + '"]');
+        const label = el.getRootNode().querySelector('label[for="' + CSS.escape(id) + '"]');
         const labelText = readyCleanText(label?.innerText || label?.textContent);
         if (labelText) return labelText;
+      }
+      const wrappedLabel = el.closest('label');
+      const wrappedText = readyCleanText(wrappedLabel?.textContent);
+      if (wrappedText) return wrappedText;
+      const root = el.getRootNode();
+      if (root.host && (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement || el.isContentEditable)) {
+        const hostLabel = readyLabelFor(root.host);
+        if (hostLabel) return hostLabel;
       }
       const ownText = readyCleanText(el.innerText || el.textContent);
       if (ownText) return ownText.slice(0, 160);
@@ -186,7 +197,7 @@ function buildBrowserDomTargetLibraryJs(): string {
         if (type === 'radio') return 'radio';
         if (type === 'range') return 'slider';
         if (type === 'search') return 'searchbox';
-        if (type === 'file') return 'button';
+        if (['file', 'button', 'submit', 'reset', 'image'].includes(type)) return 'button';
         return 'textbox';
       }
       if (el.isContentEditable) return 'textbox';
@@ -202,7 +213,7 @@ function buildBrowserDomTargetLibraryJs(): string {
       if (expanded) states.expanded = expanded;
       const checked = el.getAttribute('aria-checked');
       if (checked) states.checked = checked;
-      if (el instanceof HTMLInputElement && (el.type === 'checkbox' || el.type === 'radio') && el.checked) states.checked = true;
+      if (el instanceof HTMLInputElement && (el.type === 'checkbox' || el.type === 'radio')) states.checked = el.checked;
       const selected = el.getAttribute('aria-selected');
       if (selected) states.selected = selected;
       if (el instanceof HTMLInputElement && el.type === 'password') states.password = true;
@@ -250,6 +261,48 @@ function buildBrowserDomTargetLibraryJs(): string {
       const role = String(el.getAttribute('role') || '').toLowerCase();
       return role === 'textbox' || role === 'searchbox';
     }
+    function readyFormFor(el) {
+      if (el.form instanceof HTMLFormElement) return el.form;
+      const form = el.closest('form');
+      if (form) return form;
+      const host = el.getRootNode().host;
+      return host ? readyFormFor(host) : null;
+    }
+    function readyAncestorContext(el) {
+      const context = [];
+      let ancestor = el.parentElement || el.getRootNode().host;
+      while (ancestor && context.length < 4) {
+        const role = readyCleanText(ancestor.getAttribute('role'));
+        const row = ancestor.tagName.toLowerCase() === 'tr' || role === 'row';
+        const name = row
+          ? readyCleanText(ancestor.innerText || ancestor.textContent)
+          : readyCleanText(ancestor.getAttribute('aria-label') || ancestor.getAttribute('title'));
+        if (role || name) context.unshift((row ? 'row' : role) + ':' + name.slice(0, 160));
+        ancestor = ancestor.parentElement || ancestor.getRootNode().host;
+      }
+      return context.join(' > ');
+    }
+    function readySetControlValue(el, value) {
+      if (!(el instanceof HTMLInputElement)) return { ok: false, reason: 'input_type_unsupported', delivery: 'not_delivered' };
+      if (!readyRenderedFor(el) || el.disabled || el.readOnly || el.getAttribute('aria-disabled') === 'true') return { ok: false, reason: 'input_not_writable', delivery: 'not_delivered' };
+      const checking = typeof value === 'boolean';
+      if (checking ? !['checkbox', 'radio'].includes(el.type) : !${JSON.stringify(BROWSER_VALUE_INPUT_TYPES)}.includes(el.type)) return { ok: false, reason: 'input_type_unsupported', delivery: 'not_delivered' };
+      const property = checking ? 'checked' : 'value';
+      if (!checking) {
+        const probe = el.cloneNode();
+        probe.value = value;
+        if (probe.value !== value) return { ok: false, reason: 'input_value_invalid', delivery: 'not_delivered' };
+      }
+      el.focus({ preventScroll: true });
+      if (!el.isConnected || el.getRootNode().activeElement !== el) return { ok: false, reason: 'focus_not_acquired', delivery: 'not_delivered' };
+      if (el[property] !== value) {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, property).set.call(el, value);
+        el.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      const matched = el[property] === value;
+      return { ok: matched, delivery: matched ? 'delivered' : 'unknown', value: el[property] };
+    }
     function readyTargetElements() {
       return Array.from(document.querySelectorAll(READY_AGENT_TARGET_SELECTOR));
     }
@@ -269,15 +322,8 @@ function buildBrowserDomTargetLibraryJs(): string {
         readyStatesFor(el),
         el instanceof HTMLInputElement && el.type === 'file' ? { fileInput: true } : {}
       );
-      const form = el.closest && el.closest('form');
-      const ancestorContext = [];
-      let contextNode = el.parentElement;
-      while (contextNode && ancestorContext.length < 4) {
-        const role = readyRoleFor(contextNode);
-        const name = readyLabelFor(contextNode);
-        if (role || name) ancestorContext.unshift(role + ':' + name.slice(0, 80));
-        contextNode = contextNode.parentElement;
-      }
+      const form = readyFormFor(el);
+      const ancestorContext = readyAncestorContext(el);
       const href = String(
         (String(el.tagName || '').toLowerCase() === 'a' && typeof el.href === 'string' ? el.href : '')
         || (el.getAttribute && el.getAttribute('href'))
@@ -304,7 +350,7 @@ function buildBrowserDomTargetLibraryJs(): string {
         inputType: el instanceof HTMLInputElement ? String(el.type || 'text').toLowerCase() : '',
         autocomplete: String(el.getAttribute && el.getAttribute('autocomplete') || '').toLowerCase(),
         formAction: form ? String(form.getAttribute('action') || form.action || '') : '',
-        ancestorContext: ancestorContext.join(' > ')
+        ancestorContext
       };
     }
   `
@@ -435,9 +481,9 @@ export function buildBrowserTargetFocusJs(nodeId: string, allowPasswordFill: boo
       return { ok: false, reason: 'focus_failed', kind: 'none', tag, label };
     }
     return {
-      ok: document.activeElement === el,
-      reason: document.activeElement === el ? null : 'focus_not_acquired',
-      kind: document.activeElement === el ? 'editable' : 'none',
+      ok: el.getRootNode().activeElement === el,
+      reason: el.getRootNode().activeElement === el ? null : 'focus_not_acquired',
+      kind: el.getRootNode().activeElement === el ? 'editable' : 'none',
       tag,
       label,
     };
@@ -448,12 +494,11 @@ export function buildBrowserTargetFormSubmitJs(nodeId: string, frameDocumentToke
   return `(() => {
     const __READY_AGENT_TARGET_SUBMIT__ = true;
     ${buildBrowserDomTargetLibraryJs()}
+    ${buildTargetSemanticsLibraryJs()}
     const nodeId = ${JSON.stringify(nodeId)};
-    const el = readyResolveTargetToken(nodeId, ${JSON.stringify(frameDocumentToken || '')});
+    const el = nodeId ? readyResolveTargetToken(nodeId, ${JSON.stringify(frameDocumentToken || '')}) : readyActiveElement();
     if (!el) return { ok: false, reason: 'target_not_found', delivery: 'not_delivered' };
-    const form = el instanceof HTMLInputElement || el instanceof HTMLButtonElement
-      ? el.form
-      : el.closest && el.closest('form');
+    const form = readyFormFor(el);
     if (!(form instanceof HTMLFormElement)) return { ok: false, reason: 'form_not_found', delivery: 'not_delivered' };
     if (typeof form.requestSubmit !== 'function') return { ok: false, reason: 'request_submit_unavailable', delivery: 'not_delivered' };
     let submitCount = 0;
@@ -496,6 +541,17 @@ export function buildBrowserTargetFormSubmitJs(nodeId: string, frameDocumentToke
   })()`
 }
 
+export function buildBrowserControlValueJs(options: { nodeId?: string; frameDocumentToken?: string; selector?: string; value: string | boolean }): string {
+  return `(() => {
+    ${buildBrowserDomTargetLibraryJs()}
+    const expected = ${JSON.stringify(options.frameDocumentToken || '')};
+    if (expected && readyFrameDocumentToken() !== expected) return { ok: false, reason: 'stale_document', delivery: 'not_delivered' };
+    const nodes = ${options.selector ? `Array.from(document.querySelectorAll(${JSON.stringify(options.selector)}))` : `[readyResolveTargetToken(${JSON.stringify(options.nodeId || '')}, expected)].filter(Boolean)`};
+    if (nodes.length !== 1) return { ok: false, reason: 'target_not_unique', delivery: 'not_delivered' };
+    return readySetControlValue(nodes[0], ${JSON.stringify(options.value)});
+  })()`
+}
+
 export function buildBrowserTargetReadJs(nodeId: string, frameDocumentToken?: string): string {
   return `(() => {
     const __READY_AGENT_TARGET_READ__ = true;
@@ -520,93 +576,28 @@ export function buildBrowserTargetReadJs(nodeId: string, frameDocumentToken?: st
   })()`
 }
 
-const BROWSER_BACKEND_TARGET_FUNCTION = `function(operation, allowPasswordFill, roleHint) {
+const BROWSER_BACKEND_TARGET_FUNCTION = `function(operation, allowPasswordFill, roleHint, value, expectedDocumentToken) {
   const __READY_AGENT_BACKEND_TARGET__ = true;
   const __READY_AGENT_TARGET_FOCUS__ = operation === 'focus';
   const __READY_AGENT_TARGET_SELECT_ALL__ = operation === 'select_all';
   const __READY_AGENT_TARGET_SUBMIT__ = operation === 'submit';
   const el = this;
   if (!(el instanceof Element) || !el.isConnected) return { matchCount: 0 };
-  const clean = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
-  const label = (() => {
-    const aria = clean(el.getAttribute('aria-label'));
-    if (aria) return aria;
-    const labelledBy = clean(el.getAttribute('aria-labelledby'));
-    if (labelledBy) {
-      const text = labelledBy.split(/\\s+/).map((id) => clean(document.getElementById(id)?.textContent)).filter(Boolean).join(' ');
-      if (text) return text;
-    }
-    const id = clean(el.getAttribute('id'));
-    if (id) {
-      const owner = document.querySelector('label[for="' + CSS.escape(id) + '"]');
-      const text = clean(owner?.textContent);
-      if (text) return text;
-    }
-    return clean(el.innerText || el.textContent || el.getAttribute('title') || el.getAttribute('placeholder') || el.getAttribute('name')).slice(0, 160);
-  })();
-  const tag = String(el.tagName || '').toLowerCase();
-  const explicitRole = clean(el.getAttribute('role')).toLowerCase();
-  const role = explicitRole
-    || (tag === 'a' ? 'link'
-      : tag === 'button' || tag === 'summary' ? 'button'
-        : tag === 'textarea' ? 'textbox'
-          : tag === 'select' ? 'combobox'
-            : /^h[1-6]$/.test(tag) ? 'heading'
-              : tag === 'input'
-                ? (String(el.getAttribute('type') || 'text').toLowerCase() === 'search' ? 'searchbox' : 'textbox')
-                : el.isContentEditable ? 'textbox' : clean(roleHint) || 'generic');
-  const inputType = el instanceof HTMLInputElement ? String(el.type || 'text').toLowerCase() : '';
-  const disabled = Boolean(el.disabled) || el.getAttribute('aria-disabled') === 'true';
+  ${buildBrowserDomTargetLibraryJs()}
+  const clean = readyCleanText;
+  const target = readyTargetRecord(el, -1);
+  if (target.role === 'generic' && roleHint) target.role = clean(roleHint);
+  const { role, name: label, inputType, rendered, states } = target;
+  const disabled = states.disabled === true;
+  const editable = target.editable && !disabled;
   const password = inputType === 'password';
   const fileInput = inputType === 'file';
-  const editable = el instanceof HTMLTextAreaElement
-    ? !el.readOnly && !disabled
-    : el instanceof HTMLInputElement
-      ? !['button', 'submit', 'reset', 'checkbox', 'radio', 'file', 'range', 'color', 'image', 'hidden'].includes(inputType) && !el.readOnly && !disabled
-      : el.isContentEditable === true || role === 'textbox' || role === 'searchbox';
+  const tag = String(el.tagName || '').toLowerCase();
   const rect = el.getBoundingClientRect();
-  const style = getComputedStyle(el);
-  const rendered = rect.width > 0 && rect.height > 0
-    && !el.hidden && el.getAttribute('aria-hidden') !== 'true'
-    && style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || '1') > 0;
-  const visible = rendered
-    && rect.right > 0 && rect.bottom > 0
-    && rect.left < Math.max(1, window.innerWidth || 1)
-    && rect.top < Math.max(1, window.innerHeight || 1);
-  const states = {};
-  if (disabled) states.disabled = true;
-  if (password) states.password = true;
-  if (fileInput) states.fileInput = true;
-  for (const key of ['expanded', 'checked', 'selected']) {
-    const value = el.getAttribute('aria-' + key);
-    if (value !== null) states[key] = value;
+  if (operation === 'set_value') {
+    if (expectedDocumentToken && readyFrameDocumentToken() !== expectedDocumentToken) return { ok: false, reason: 'stale_document', delivery: 'not_delivered' };
+    return readySetControlValue(el, value);
   }
-  const form = el.closest && el.closest('form');
-  const ancestorContext = [];
-  let ancestor = el.parentElement;
-  while (ancestor && ancestorContext.length < 4) {
-    const ancestorRole = clean(ancestor.getAttribute('role'));
-    const ancestorName = clean(ancestor.getAttribute('aria-label') || ancestor.getAttribute('title'));
-    if (ancestorRole || ancestorName) ancestorContext.unshift(ancestorRole + ':' + ancestorName.slice(0, 80));
-    ancestor = ancestor.parentElement;
-  }
-  const target = {
-    role,
-    name: label,
-    value: el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement ? clean(el.value).slice(0, 160) : undefined,
-    states,
-    frameId: '0',
-    box: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) },
-    rendered,
-    visible,
-    enabled: !disabled,
-    editable,
-    href: el instanceof HTMLAnchorElement ? String(el.href || '') : String(el.getAttribute('href') || ''),
-    inputType,
-    autocomplete: String(el.getAttribute('autocomplete') || '').toLowerCase(),
-    formAction: form ? String(form.getAttribute('action') || form.action || '') : '',
-    ancestorContext: ancestorContext.join(' > '),
-  };
   if (operation === 'focus') {
     if (fileInput) return { ok: false, errorKind: 'file_input_requires_upload', liveTargetKind: 'file' };
     if (password && !allowPasswordFill) return { ok: false, errorKind: 'credential_confirmation_required', liveTargetKind: 'password' };
@@ -614,11 +605,11 @@ const BROWSER_BACKEND_TARGET_FUNCTION = `function(operation, allowPasswordFill, 
     if (disabled) return { ok: false, reason: 'target_disabled', kind: 'non_editable', tag, label };
     if (!editable) return { ok: false, reason: 'target_not_editable', kind: 'non_editable', tag, label };
     try { el.focus({ preventScroll: true }); } catch { return { ok: false, reason: 'focus_failed', kind: 'none', tag, label }; }
-    const focused = document.activeElement === el;
+    const focused = el.getRootNode().activeElement === el;
     return { ok: focused, reason: focused ? null : 'focus_not_acquired', kind: focused ? 'editable' : 'none', tag, label };
   }
   if (operation === 'select_all') {
-    if (document.activeElement !== el) return { ok: false, reason: 'focus_not_acquired' };
+    if (el.getRootNode().activeElement !== el) return { ok: false, reason: 'focus_not_acquired' };
     if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
       try {
         el.setSelectionRange(0, String(el.value || '').length);
@@ -648,9 +639,7 @@ const BROWSER_BACKEND_TARGET_FUNCTION = `function(operation, allowPasswordFill, 
     return { matchCount: 1, content: Array.from(new Set(chunks)).join('\\n'), target };
   }
   if (operation === 'submit') {
-    const submitForm = el instanceof HTMLInputElement || el instanceof HTMLButtonElement
-      ? el.form
-      : el.closest && el.closest('form');
+    const submitForm = readyFormFor(el);
     if (!(submitForm instanceof HTMLFormElement)) return { ok: false, reason: 'form_not_found', delivery: 'not_delivered' };
     if (typeof submitForm.requestSubmit !== 'function') return { ok: false, reason: 'request_submit_unavailable', delivery: 'not_delivered' };
     let submitCount = 0;
@@ -710,14 +699,14 @@ export async function callBrowserBackendTarget(
   controller: BrowserController,
   tabId: string | null,
   backendDOMNodeId: number,
-  operation: 'probe' | 'focus' | 'select_all' | 'read' | 'submit',
-  options: { allowPasswordFill?: boolean; roleHint?: string } = {},
+  operation: 'probe' | 'focus' | 'select_all' | 'read' | 'submit' | 'set_value',
+  options: { allowPasswordFill?: boolean; roleHint?: string; value?: string | boolean; frameDocumentToken?: string } = {},
 ): Promise<unknown> {
   return controller.callFunctionOnBackendNode(
     tabId,
     backendDOMNodeId,
     BROWSER_BACKEND_TARGET_FUNCTION,
-    [operation, options.allowPasswordFill === true, options.roleHint || ''],
+    [operation, options.allowPasswordFill === true, options.roleHint || '', options.value, options.frameDocumentToken || ''],
   )
 }
 
@@ -735,6 +724,11 @@ export async function callBrowserBackendTarget(
  */
 export function buildTargetSemanticsLibraryJs(): string {
   return `
+    function readyActiveElement() {
+      let el = document.activeElement;
+      while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement;
+      return el;
+    }
     function readyAriaLabelledbyText(el) {
       try {
         const ref = el && el.getAttribute ? el.getAttribute('aria-labelledby') : null;
@@ -940,7 +934,7 @@ export function buildFocusedEditableProbeJs(): string {
   return `(() => {
     const __READY_FOCUSED_EDITABLE_PROBE__ = true;
     ${buildTargetSemanticsLibraryJs()}
-    const el = document.activeElement;
+    const el = readyActiveElement();
     const documentFocused = document.hasFocus();
     const documentReady = document.readyState === 'interactive' || document.readyState === 'complete';
     if (!el || el === document.body || el === document.documentElement) {
@@ -976,7 +970,7 @@ export function buildTypedIntoProbeJs(expectedText?: string): string {
   return `(() => {
     const __READY_TYPED_INTO_PROBE__ = true;
     ${buildTargetSemanticsLibraryJs()}
-    const el = document.activeElement;
+    const el = readyActiveElement();
     if (!el || el === document.body || el === document.documentElement) return null;
     const tag = String(el.tagName || '').toLowerCase();
     const password = readyIsPasswordField(el);

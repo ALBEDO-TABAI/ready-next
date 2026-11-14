@@ -279,7 +279,12 @@ function resolveLiveTrustedBrowserPageRef(
 async function assertTrustedBrowserPageIdentity(
   controller: NonNullable<ToolContext['browserController']>,
   pageRef: TrustedBrowserPageRef,
+  nativeDialog = false,
 ): Promise<ReturnType<typeof browserFailureOutput> | null> {
+  if (controller.getPhysicalTargetToken(pageRef.tabId) !== pageRef.physicalTargetToken) {
+    return browserFailureOutput({ ok: false, errorKind: 'browser_reference_stale', tabId: pageRef.tabId })
+  }
+  if (nativeDialog && await controller.getBrowserDialog?.(pageRef.tabId)) return null
   const identity = await browserSnapshotService.documentIdentity(controller, pageRef.tabId)
   if (
     identity.physicalTargetToken !== pageRef.physicalTargetToken
@@ -619,6 +624,16 @@ async function executeToolCallInner(
   if (trustedBrowserPageRef && browserToolTargetsReferencedPage(toolName, args)) {
     args = { ...args, tab_id: trustedBrowserPageRef.tabId }
   }
+  if (trustedBrowserPageRef && context.browserController && browserToolTargetsReferencedPage(toolName, args)
+    && context.browserController.getPhysicalTargetToken(trustedBrowserPageRef.tabId) !== trustedBrowserPageRef.physicalTargetToken) {
+    return browserFailureOutput({ ok: false, errorKind: 'browser_reference_stale', tabId: trustedBrowserPageRef.tabId })
+  }
+  const pendingBrowserDialog = definition.domain === 'browser' && context.browserController && trustedBrowserPageRef && browserToolTargetsReferencedPage(toolName, args)
+    ? await context.browserController.getBrowserDialog?.(trustedBrowserPageRef.tabId)
+    : null
+  if (pendingBrowserDialog && toolName !== 'browser_dialog') {
+    return browserFailureOutput({ ok: false, errorKind: 'dialog_open', message: '有原生对话框待处理，请先用 browser_dialog 接受或拒绝。', dialog: pendingBrowserDialog, delivery: 'not_delivered' })
+  }
 
   let preparedPageTool: PreparedWebMcpTool | undefined
   if (toolName === 'browser_call_page_tool') {
@@ -716,14 +731,16 @@ async function executeToolCallInner(
     if (definition.domain === 'browser' && trustedBrowserPageRef && context.browserController
       && (preparedPageTool ? webMcpToolWrites(preparedPageTool.tool) : isBrowserOriginWrite(toolName, args))) {
       const controller = context.browserController
-      const stale = await assertTrustedBrowserPageIdentity(controller, trustedBrowserPageRef)
+      const stale = await assertTrustedBrowserPageIdentity(controller, trustedBrowserPageRef, toolName === 'browser_dialog')
       if (stale) return stale
       const originTabId = trustedBrowserPageRef.tabId
       const targetIds = [args.target_id, args.input_target_id, args.submit_target_id,
         ...(Array.isArray(args.fields) ? args.fields.map(field => field && typeof field === 'object' ? field.target_id : null) : [])]
       const frameIds = [...new Set(['0', ...targetIds.filter((value): value is string => typeof value === 'string')
         .map(value => parseBrowserSnapshotRef(value)?.frameId || '0')])]
-      const targetOrigins = preparedPageTool ? [preparedPageTool.origin] : await Promise.all(frameIds.map(async frameId => String(frameId !== '0'
+      const targetOrigins = preparedPageTool ? [preparedPageTool.origin] : pendingBrowserDialog
+        ? [httpOrigin(pendingBrowserDialog.url || '') || '']
+        : await Promise.all(frameIds.map(async frameId => String(frameId !== '0'
         ? await controller.executeJSInFrame(originTabId, frameId, 'location.origin')
         : await controller.executeJS(originTabId, 'location.origin'))))
       if (targetOrigins.some(origin => httpOrigin(origin) !== origin)) {
@@ -886,6 +903,7 @@ async function executeToolCallInner(
             const stale = await assertTrustedBrowserPageIdentity(
               context.browserController,
               trustedBrowserPageRef,
+              toolName === 'browser_dialog',
             )
             if (stale) return stale
           }
@@ -970,6 +988,7 @@ async function executeToolCallInner(
             const stale = await assertTrustedBrowserPageIdentity(
               context.browserController,
               trustedBrowserPageRef,
+              toolName === 'browser_dialog',
             )
             if (stale) return stale
           }

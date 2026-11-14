@@ -85,6 +85,7 @@ export abstract class BrowserControllerAutomationRuntime extends BrowserControll
    * Execute JavaScript in a tab's webContents. Runs in BrowserView sandbox (isolated from Node).
    */
   async executeJS(tabId: string | null, code: string, options?: BrowserExecutionDeadlineOptions): Promise<unknown> {
+    this.assertNoPendingDialog(tabId)
     return this.automationService.executeJS(tabId, code, options)
   }
 
@@ -95,6 +96,7 @@ export abstract class BrowserControllerAutomationRuntime extends BrowserControll
 
   /** D10 frame 穿透：在指定 frameKey 的帧内执行 JS（'0' 回落主帧路径）。 */
   async executeJSInFrame(tabId: string | null, frameKey: string, code: string, options?: BrowserExecutionDeadlineOptions): Promise<unknown> {
+    this.assertNoPendingDialog(tabId)
     return this.automationService.executeJSInFrame(tabId, frameKey, code, options)
   }
 
@@ -102,6 +104,7 @@ export abstract class BrowserControllerAutomationRuntime extends BrowserControll
    * Get the plain text content of a page (document.body.innerText), truncated to 30K chars.
    */
   async getPageContent(tabId: string | null): Promise<string> {
+    this.assertNoPendingDialog(tabId)
     return this.automationService.getPageContent(tabId)
   }
 
@@ -127,12 +130,14 @@ export abstract class BrowserControllerAutomationRuntime extends BrowserControll
     functionDeclaration: string,
     args: unknown[] = [],
   ): Promise<unknown> {
+    this.assertNoPendingDialog(tabId)
     const resolved = await this.sendCdpCommand(tabId, 'DOM.resolveNode', {
       backendNodeId: backendDOMNodeId,
     }) as { object?: { objectId?: unknown } } | null
     const objectId = String(resolved?.object?.objectId || '')
     if (!objectId) throw Object.assign(new Error('backend_node_not_resolved'), { code: 'BACKEND_NODE_NOT_RESOLVED' })
     try {
+      this.assertNoPendingDialog(tabId)
       const called = await this.sendCdpCommand(tabId, 'Runtime.callFunctionOn', {
         objectId,
         functionDeclaration,
@@ -150,6 +155,12 @@ export abstract class BrowserControllerAutomationRuntime extends BrowserControll
       return called?.result?.value
     } finally {
       await this.sendCdpCommand(tabId, 'Runtime.releaseObject', { objectId }).catch(() => undefined)
+    }
+  }
+
+  private assertNoPendingDialog(tabId: string | null): void {
+    if (this.dialogService.hasPending(this.resolveTabView(tabId).tabId)) {
+      throw Object.assign(new Error('有原生对话框待处理，请先用 browser_dialog 接受或拒绝。'), { code: 'dialog_open' })
     }
   }
 

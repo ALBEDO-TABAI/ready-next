@@ -202,11 +202,7 @@ export async function pointerRefused(
   )
 }
 
-/**
- * Keyboard: the tool must report exactly what reached the page. A key that does not arrive while
- * the page already reports document.hasFocus() is the known background-keyboard defect: focus
- * emulation is skipped and the unfocused native host drops the event.
- */
+/** A hidden target must receive the key and report the same fact in its journal. */
 export async function keyboardOutcome(
   run: AgentRun,
   result: ToolCallResult,
@@ -219,31 +215,29 @@ export async function keyboardOutcome(
     || (typeof result.data.delivery === 'string' ? result.data.delivery : null)
   if (delivery === 'not_delivered' && pageKeys === 0) {
     const focused = await run.pageEval<boolean>('return document.hasFocus()')
-    return gap(
-      `缺陷：隐藏窗口里按键没有送达页面（页面 document.hasFocus()=${String(focused)
-      }，所以发键时没开焦点模拟）；工具如实回报 not_delivered`,
+    return fail(
+      `隐藏窗口里按键没有送达页面（页面 document.hasFocus()=${String(focused)
+      }）；工具如实回报 not_delivered`,
       { delivery, pageKeys }
     )
   }
-  if ((delivery === 'delivered' || delivery === 'unknown') && pageKeys > 0) return onDelivered()
+  const journal = journalAgrees(run, result)
+  if (delivery === 'delivered' && pageKeys > 0 && journal.ok) return onDelivered()
   return fail(
-    `按键回执与页面不一致：delivery=${String(delivery)} pageKeydown=${pageKeys}`,
+    `按键回执与页面不一致：delivery=${String(delivery)} pageKeydown=${pageKeys} journal=${journal.detail}`,
     { text: result.text.slice(0, 500) }
   )
 }
 
-/**
- * fill_form submits by pressing Enter on the last field. Explain a missing submission: the key
- * never reached the page (background keyboard defect) or Enter only added a line in a textarea.
- */
+/** Explain failed field entry or submission without accepting the old behavior as a gap. */
 export function submitFailure(filled: ToolCallResult): string | null {
-  if (filled.data.submitted === true) return null
+  if (filled.data.ok === true && filled.data.submitted === true) return null
   const submit = filled.data.submitResult as { data?: Record<string, unknown> } | undefined
   const delivery = submit?.data?.delivery
   const focus = String(submit?.data?.focus || '')
   if (delivery === 'not_delivered')
-    return `缺陷：fill_form 用回车提交，回车没有送达页面（${focus.trim() || '焦点未知'
-      }），与“隐藏窗口里按键没有送达”同因`
+    return `fill_form 提交没有送达页面（${focus.trim() || '焦点未知'
+      }）`
   if (errorKind(filled) === 'form_field_failed') return `字段填写失败：${summarize(filled, 300)}`
   return null
 }

@@ -312,7 +312,6 @@ test('keyboard aliases dispatch case-insensitively to the exact hidden target wi
   assert.equal(fixture.focusCallCount(), 0)
   assert.equal(fixture.keys.at(-4)?.key, 'Enter')
   assert.equal(fixture.keys.at(-4)?.code, 'Enter')
-  assert.equal(fixture.keys.at(-4)?.emulateFocus, true)
   assert.equal(fixture.keys.at(-3)?.key, 'Enter')
   assert.equal(fixture.keys.at(-2)?.key, ' ')
   assert.equal(fixture.keys.at(-2)?.code, 'Space')

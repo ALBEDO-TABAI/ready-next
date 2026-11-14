@@ -28,14 +28,12 @@ export function domainsLikelyMatch(left?: string | null, right?: string | null):
 }
 
 export function normalizeBrowserActionValue(kind: BrowserActionKind, value: string): string {
-  const normalized = normalizeWhitespace(value).toLowerCase()
+  const normalized = normalizeWhitespace(value)
   if (!normalized) return ''
-  if (kind === 'search') return normalized
+  if (kind === 'search') return normalized.toLowerCase()
   try {
     const parsed = new URL(normalized)
-    const pathname = parsed.pathname.replace(/\/+$/, '') || '/'
-    const search = parsed.search || ''
-    return `${parsed.origin}${pathname}${search}`
+    return parsed.href
   } catch {
     return normalized
   }

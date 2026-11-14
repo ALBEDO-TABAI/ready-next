@@ -188,7 +188,7 @@ export async function executeBrowserSystemTool(
     case 'dialog_accept':
     case 'dialog_dismiss': {
       const dialog = await controller.getBrowserDialog(tabId)
-      if (!dialog) return createBrowserStructuredOutput({ ok: false, errorKind: 'dialog_not_open' })
+      if (!dialog) return createBrowserStructuredOutput({ ok: false, errorKind: typeof args.prompt_text === 'string' ? 'dialog_unsupported' : 'dialog_not_open', message: typeof args.prompt_text === 'string' ? 'window.prompt is unsupported by this host; no prompt dialog is open.' : 'No native dialog is open.' })
       await controller.handleBrowserDialog(tabId, {
         accept: operation === 'dialog_accept',
         ...(typeof args.prompt_text === 'string' ? { promptText: args.prompt_text } : {}),

@@ -39,6 +39,9 @@ import {
   normalizeBrowserBlockingChallengeProbe,
   probeCoordinateTargetOrThrow,
   callBrowserBackendTarget,
+  buildBrowserControlValueJs,
+  buildBrowserTargetFormSubmitJs,
+  BROWSER_VALUE_INPUT_TYPES,
 } from './browser-probe'
 import { browserInputEnvironmentReadiness } from '../browser-engine/browser-input-readiness'
 import {
@@ -85,6 +88,7 @@ export async function runBrowserFillFormSequence(
   fields: unknown[],
   options: { tabId?: unknown; submit: boolean },
   invoke: (operation: string, args: Record<string, unknown>) => Promise<string | ToolExecutionOutput>,
+  submit: () => Promise<string | ToolExecutionOutput>,
 ): Promise<Record<string, unknown>> {
   const results: Array<{ index: number; ok: boolean; result: string | ToolExecutionOutput }> = []
   for (let index = 0; index < fields.length; index += 1) {
@@ -99,6 +103,9 @@ export async function runBrowserFillFormSequence(
       }
     }
     const item = field as Record<string, unknown>
+    if (typeof item.value === 'boolean' && typeof item.target_id !== 'string' && typeof item.selector !== 'string') {
+      return { ok: false, errorKind: 'form_control_target_required', message: 'Observe the page with browser_snapshot and specify a checkbox/radio target_id or an exact selector.', failedIndex: index, fields: results, submitted: false }
+    }
     const operation = typeof item.target_id === 'string'
       ? 'type_target'
       : typeof item.selector === 'string'
@@ -110,6 +117,7 @@ export async function runBrowserFillFormSequence(
       target: item.label,
       tab_id: options.tabId,
       clear_first: true,
+      ...(typeof item.value === 'boolean' ? { checked: item.value } : {}),
     })
     const ok = browserActionResultSucceeded(result)
     results.push({ index, ok, result })
@@ -124,7 +132,7 @@ export async function runBrowserFillFormSequence(
     }
   }
   if (!options.submit) return { ok: true, fields: results, submitted: false }
-  const submitResult = await invoke('press_key', { key: 'Enter', tab_id: options.tabId })
+  const submitResult = await submit()
   const submitted = browserActionResultSucceeded(submitResult)
   return {
     ok: submitted,
@@ -512,6 +520,24 @@ export async function executeBrowserActForm(
           fields,
           { tabId: args.tab_id, submit: args.submit === true },
           (operation, input) => ctx.invokeNested!(operation, input),
+          async () => {
+            const last = fields.at(-1) as Record<string, unknown>
+            const tabId = typeof args.tab_id === 'string' ? args.tab_id : controller.getActiveTab()?.id
+            if (!tabId) return browserStructuredOutput({ ok: false, errorKind: 'browser_tab_missing', delivery: 'not_delivered' })
+            const denied = await trustedInputPageDenied(controller, tabId)
+            if (denied) return denied
+            const raw = typeof last.target_id === 'string'
+              ? await submitResolvedTargetForm(controller, mutationBoundary, tabId, last.target_id)
+              : await mutationBoundary.invokeTransport(() => controller.executeJS(tabId, buildBrowserTargetFormSubmitJs('')))
+            if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('form_submit_result_invalid')
+            const result = raw as Record<string, unknown>
+            if (result.reason === 'form_not_found') {
+              const focus = await controller.executeJS(tabId, buildFocusedEditableProbeJs()) as { kind?: string; singleLine?: boolean } | null
+              if (focus?.kind === 'editable' && focus.singleLine === true) return ctx.invokeNested!('press_key', { key: 'Enter', tab_id: tabId })
+            }
+            mutationBoundary.recordMechanicalFact({ delivery: result.delivery === 'delivered' ? 'delivered' : result.delivery === 'not_delivered' ? 'not_delivered' : 'unknown' })
+            return browserStructuredOutput(result)
+          },
         )
         return browserStructuredOutput(outcome)
       }
@@ -620,6 +646,15 @@ export async function executeBrowserActForm(
             : { inputType: '' }
         })()`).catch(() => null) as { inputType?: unknown } | null
         const liveInputType = String(inputKind?.inputType || '').toLowerCase()
+        if (typeof args.checked === 'boolean' || BROWSER_VALUE_INPUT_TYPES.includes(liveInputType)) {
+          const denied = await trustedInputPageDenied(controller, tabId)
+          if (denied) return denied
+          const raw = await mutationBoundary.invokeTransport(() => controller.executeJS(tabId, buildBrowserControlValueJs({ selector, value: typeof args.checked === 'boolean' ? args.checked : text })))
+          if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('input_value_result_invalid')
+          const result = raw as Record<string, unknown>
+          mutationBoundary.recordMechanicalFact({ delivery: result.delivery === 'delivered' ? 'delivered' : result.delivery === 'unknown' ? 'unknown' : 'not_delivered', ...(result.ok === true ? { effect: 'target_value' } : {}) })
+          return browserStructuredOutput(result)
+        }
         if (liveInputType === 'file') {
           return browserStructuredOutput({ ok: false, errorKind: 'file_input_requires_upload', liveTargetKind: 'file' })
         }

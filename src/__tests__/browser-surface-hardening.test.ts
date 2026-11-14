@@ -82,6 +82,25 @@ function identityFor(token: string) {
   }
 }
 
+test('every keyboard dispatch emulates target focus, including shortcuts after a focused-document probe', async () => {
+  const commands: Array<[string, unknown]> = []
+  const service = new BrowserAutomationService({
+    resolveTabView: () => ({ tabId: 'hidden', tab: { id: 'hidden', url: '', title: '' }, view: {} as never }),
+    createBrowserError: (_code, message) => new Error(message),
+    getViewBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }),
+    cdpSession: { sendCommand: async (_tabId: string, method: string, params: unknown) => {
+      commands.push([method, params])
+      return {}
+    } } as never,
+  })
+  await service.dispatchKey('hidden', { type: 'keyDown', key: 's', code: 'KeyS', modifiers: 4 })
+  assert.deepEqual(commands.map(([method]) => method), [
+    'Emulation.setFocusEmulationEnabled', 'Input.dispatchKeyEvent', 'Emulation.setFocusEmulationEnabled',
+  ])
+  assert.deepEqual(commands[0][1], { enabled: true })
+  assert.deepEqual(commands[2][1], { enabled: false })
+})
+
 function pointerController(options: {
   flipAfter?: 'mouseMoved' | 'mousePressed'
   throwOn?: 'mouseMoved' | 'mousePressed'

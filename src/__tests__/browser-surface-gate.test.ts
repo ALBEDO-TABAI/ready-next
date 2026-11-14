@@ -67,6 +67,55 @@ function textOf(out: unknown): string {
   return typeof out === 'string' ? out : JSON.stringify(out)
 }
 
+test('native dialogs bypass blocked page scripts while ordinary tools fail immediately and physical pins remain enforced', async (t) => {
+  let pending = true
+  let physical = 'physical-ref'
+  let pageCallsWhileOpen = 0
+  const accepted: boolean[] = []
+  const c = controller()
+  Object.assign(c, {
+    getActiveTab: () => ({ id: 'tab-ref', title: 'Dialog', url: 'https://referenced.test/', active: false }),
+    getTabList: () => [{ id: 'tab-ref', title: 'Dialog', url: 'https://referenced.test/', active: false }],
+    getPhysicalTargetToken: () => physical,
+    getBrowserDialog: async () => pending ? { tabId: 'tab-ref', type: 'confirm', message: '继续吗？', url: 'https://referenced.test/' } : null,
+    handleBrowserDialog: async (_tabId: string, input: { accept: boolean }) => { accepted.push(input.accept); pending = false; return { success: true } },
+    executeJS: async () => {
+      if (pending) { pageCallsWhileOpen += 1; throw new Error('page script blocked by modal') }
+      return { url: 'https://referenced.test/', title: 'Dialog', frameDocumentToken: 'document-token-ref', timeOrigin: 1 }
+    },
+    beginBrowserWorkflowAction: (input: { identity: unknown }) => ({ actionId: 'dialog-action', actionSeq: 1, identity: input.identity }),
+    settleBrowserWorkflowAction: (_taskId: string, actionId: string, outcome: unknown) => ({ receiptId: actionId, outcome }),
+    bindBrowserWorkflowPhysicalTarget: () => () => undefined,
+    isBrowserWorkflowWriteAdmitted: () => true,
+    consumeBrowserSiteNotices: () => [],
+    getTaskPayload: () => ({}),
+  })
+  const context = ctx(c)
+  context.requestEnvelope = { environmentHints: { ...(referencedPageEnvelope().environmentHints as Record<string, unknown>), browserWriteOrigins: ['https://referenced.test'] } }
+  context.browserWorkflowRoute = { browserTaskId: 'browser-task-ref', requestAnchorSnapshotDigest: 'anchor-ref' }
+  context.browserLease = createBrowserTurnLease({ taskId: context.taskId!, runId: context.runId! }, new BrowserTargetClaimService(new MemoryBrowserTargetClaimRepository()))
+  t.after(() => context.browserLease?.release())
+  for (const name of ['browser_read', 'browser_snapshot', 'browser_press_key', 'browser_navigate']) {
+    const out = await executeToolCall(name, name === 'browser_press_key' ? { key: 'Enter' } : name === 'browser_navigate' ? { action: 'back' } : {}, context)
+    assert.equal(out.data?.errorKind, 'dialog_open', textOf(out))
+  }
+  const read = await executeToolCall('browser_dialog', { action: 'get' }, context)
+  assert.match(textOf(read), /继续吗/)
+  assert.equal(pageCallsWhileOpen, 0)
+  const dismissed = await executeToolCall('browser_dialog', { action: 'dismiss' }, context)
+  assert.equal(dismissed.data?.ok, true, textOf(dismissed))
+  assert.deepEqual(accepted, [false])
+  pending = true
+  const confirmed = await executeToolCall('browser_dialog', { action: 'accept' }, context)
+  assert.equal(confirmed.data?.ok, true, textOf(confirmed))
+  assert.deepEqual(accepted, [false, true])
+  pending = true
+  physical = 'replacement-target'
+  const stale = await executeToolCall('browser_dialog', { action: 'get' }, context)
+  assert.equal(stale.data?.errorKind, 'browser_reference_stale')
+  assert.equal(pageCallsWhileOpen, 0)
+})
+
 test('tool-executor refuses browser writes without a durable workflow route', async () => {
   const c = controller()
   const out = await executeToolCall('browser_navigate', { action: 'back' }, ctx(c))
@@ -168,6 +217,8 @@ test('model browser_tabs open refuses an unreferenced opener', async () => {
 
 test('model browser read without a trusted page ref does not fall back to the active tab', async () => {
   const c = controller()
+  let dialogReads = 0
+  c.getBrowserDialog = async () => { dialogReads += 1; return null }
   const context = ctx(c)
   context.browserWorkflowRoute = {
     browserTaskId: 'browser-task-active',
@@ -176,6 +227,7 @@ test('model browser read without a trusted page ref does not fall back to the ac
   const output = await executeToolCall('browser_read', {}, context)
   assert.equal(output.data?.errorKind, 'browser_page_ref_required')
   assert.equal(c.readCalls, 0)
+  assert.equal(dialogReads, 0)
 })
 
 test('document-workbench envelope still pins read to the referenced background tab', async () => {

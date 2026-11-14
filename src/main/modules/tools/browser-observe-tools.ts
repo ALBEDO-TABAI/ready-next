@@ -138,7 +138,7 @@ function buildPageMapAmbiguityGroups(targets: PageMap['targets']): Array<{ role:
   for (const target of targets) {
     const name = String(target.name || '').trim()
     if (!name) continue
-    const key = `${target.role}::${name.toLowerCase()}`
+    const key = `${target.role}::${name.toLowerCase()}::${target.fingerprint?.ancestorContext || ''}::${target.fingerprint?.formAction || ''}`
     const group = groups.get(key) || { role: target.role, name, targetIds: [] }
     group.targetIds.push(target.targetId)
     groups.set(key, group)
@@ -857,7 +857,17 @@ export async function executeBrowserObserveTool(
             content: fitReadContent(record.content, maxChars),
           })
         }
-        const content = await controller.getPageContent(tabId)
+        const parts = [await controller.getPageContent(tabId)]
+        const frames = typeof controller.listContentFrames === 'function' ? controller.listContentFrames(tabId).filter(frame => !frame.main) : []
+        for (const frame of frames) {
+          try {
+            const content = await controller.executeJSInFrame(tabId, frame.frameKey, `(document.body?.innerText || "").slice(0, ${maxChars})`)
+            if (typeof content === 'string' && content.trim()) parts.push(`[frame ${frame.frameKey} ${frame.url}]\n${content}`)
+          } catch (error) {
+            return browserStructuredOutput({ ok: false, errorKind: 'frame_read_failed', frameId: frame.frameKey, message: String(error) })
+          }
+        }
+        const content = parts.join('\n\n')
         if (!content || content.trim().length === 0) {
           return browserStructuredOutput({
             ok: false,
@@ -904,7 +914,7 @@ export async function executeBrowserObserveTool(
       case 'find': {
         let tabId = (args.tab_id as string) || null
         const limit = Math.max(1, Math.min(100, Number(args.limit || 20)))
-        const payload = await captureAgentPageMap(controller, tabId, DEFAULT_AGENT_PAGE_MAP_MAX_BYTES)
+        const payload = await captureAgentPageMap(controller, tabId, browserSnapshotService.currentState(controller, tabId)?.maxBytes)
         const found = browserSnapshotService.find(controller, tabId, {
           query: String(args.query || ''),
           role: String(args.role || ''),

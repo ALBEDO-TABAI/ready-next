@@ -6,6 +6,47 @@ import { executeBrowserTool } from '../main/modules/tools/browser-tools'
 import { captureAgentPageMap } from '../main/modules/tools/browser-observe-tools'
 import type { BrowserController } from '../main/modules/browser-engine/ipc-handler'
 
+test('dialog events emitted during Page.enable are captured before any page script can run', async () => {
+  let listener: ((event: { tabId: string; method: string; params: Record<string, unknown> }) => void) | null = null
+  const service = new BrowserDialogService({
+    subscribe: (_tabId, handler) => { listener = handler; return () => { listener = null } },
+    sendCommand: async () => {
+      listener?.({ tabId: 'tab-race', method: 'Page.javascriptDialogOpening', params: { type: 'alert', message: '打开即提示' } })
+      return {}
+    },
+  })
+  await service.ensure('tab-race')
+  assert.equal(service.get('tab-race')?.message, '打开即提示')
+})
+
+test('concurrent dialog consumers await the same event subscription readiness', async () => {
+  let enable: () => void = () => { throw new Error('enable not started') }
+  let commands = 0
+  let subscriptions = 0
+  const service = new BrowserDialogService({
+    subscribe: () => { subscriptions += 1; return () => undefined },
+    sendCommand: async () => { commands += 1; await new Promise<void>(resolve => { enable = resolve }) },
+  })
+  const first = service.ensure('tab-shared')
+  let completed = false
+  const second = service.ensure('tab-shared').then(() => { completed = true })
+  await Promise.resolve()
+  await Promise.resolve()
+  assert.equal(completed, false)
+  assert.equal(commands, 1)
+  assert.equal(subscriptions, 1)
+  enable()
+  await Promise.all([first, second])
+  assert.equal(completed, true)
+  service.clear('tab-shared')
+  const renewed = service.ensure('tab-shared')
+  await Promise.resolve()
+  assert.equal(commands, 2)
+  assert.equal(subscriptions, 2)
+  enable()
+  await renewed
+})
+
 test('dialog service records and deterministically handles javascript dialogs', async () => {
   const commands: Array<{ tabId: string | null; method: string; params?: Record<string, unknown> }> = []
   let listener: ((event: { tabId: string; method: string; params: Record<string, unknown> }) => void) | null = null

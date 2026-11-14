@@ -139,7 +139,7 @@ export async function executeBrowserActNavigation(
           : controller.getActiveTab()
         if (duplicate && activePageLikelyMatchesTarget(activeBefore?.url, url)) {
           const secondsAgo = Math.max(1, Math.round((Date.now() - duplicate.updatedAt) / 1000))
-          return `Skipped duplicate navigation to ${url}. The same navigation already succeeded ${secondsAgo}s ago and the current page still matches it. Read or verify the current page before navigating again.`
+          return browserStructuredOutput({ ok: false, errorKind: 'duplicate_navigation', skipped: true, delivery: 'not_delivered', message: `Skipped duplicate navigation to ${url}. The same navigation already succeeded ${secondsAgo}s ago and the current page still matches it. Read or verify the current page before navigating again.` })
         }
         const result = await controller.navigate(navTabId, url)
         if (!result.success) return `Error: ${result.error}`

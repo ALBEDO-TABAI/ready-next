@@ -38,6 +38,8 @@ import {
   normalizeBrowserBlockingChallengeProbe,
   probeCoordinateTargetOrThrow,
   callBrowserBackendTarget,
+  buildBrowserControlValueJs,
+  BROWSER_VALUE_INPUT_TYPES,
 } from './browser-probe'
 import { browserInputEnvironmentReadiness } from '../browser-engine/browser-input-readiness'
 import {
@@ -90,7 +92,7 @@ export async function executeBrowserActTarget(
       case 'click_target':
       case 'type_target': {
         const targetId = String(args.target_id || args.targetId || '').trim()
-        const action = String(toolName === 'type_target' ? 'fill' : (args.action || 'click')) as AgentBrowserAction
+        const action = String(typeof args.checked === 'boolean' ? 'choose' : toolName === 'type_target' ? 'fill' : (args.action || 'click')) as AgentBrowserAction
         const value = toolName === 'type_target'
           ? String(args.text || '')
           : args.value === undefined ? undefined : String(args.value)
@@ -260,6 +262,18 @@ export async function executeBrowserActTarget(
             `Target ${targetId} is a file input. Use browser_upload for file upload.`,
             { targetId, target: liveProbe.target },
           ))
+        }
+        const controlValue = typeof args.checked === 'boolean' ? args.checked : String(value ?? '')
+        if (typeof controlValue === 'boolean' || (action === 'fill' && BROWSER_VALUE_INPUT_TYPES.includes(String(targetRecord?.inputType)))) {
+          const denied = await trustedInputPageDenied(controller, tabId)
+          if (denied) return denied
+          const raw = await mutationBoundary.invokeTransport(() => targetFrameKey === '0' && backendNodeId
+            ? callBrowserBackendTarget(controller, tabId, Number(backendNodeId), 'set_value', { value: controlValue, frameDocumentToken: resolvedRef.frameDocumentToken })
+            : runInTargetFrame(buildBrowserControlValueJs({ nodeId: parsed.node, frameDocumentToken: resolvedRef.frameDocumentToken, value: controlValue })))
+          if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('input_value_result_invalid')
+          const result = raw as Record<string, unknown>
+          mutationBoundary.recordMechanicalFact({ delivery: result.delivery === 'delivered' ? 'delivered' : result.delivery === 'unknown' ? 'unknown' : 'not_delivered', ...(result.ok === true ? { effect: 'target_value' } : {}) })
+          return browserStructuredOutput(result)
         }
         if (action === 'fill') {
           const usesExactFormSubmit = args.submit === true && Boolean(String(targetRecord?.formAction || '').trim())

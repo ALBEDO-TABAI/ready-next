@@ -325,9 +325,10 @@ export class BrowserSnapshotService {
   currentState(controller: BrowserController, tabId: string | null): {
     documentEpoch: number
     snapshotRevision: number
+    maxBytes: number
   } | null {
     const state = this.stateMap(controller).get(tabKey(controller, tabId))
-    return state ? { documentEpoch: state.documentEpoch, snapshotRevision: state.snapshotRevision } : null
+    return state ? { documentEpoch: state.documentEpoch, snapshotRevision: state.snapshotRevision, maxBytes: state.maxBytes } : null
   }
 
   currentDocumentIdentity(controller: BrowserController, tabId: string | null): {
