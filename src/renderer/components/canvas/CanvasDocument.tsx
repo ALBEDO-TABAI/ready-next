@@ -4,7 +4,7 @@ import { ScheduleCardDialog } from '../../modules/calendar/linkage/ScheduleCardD
 import { flushCanvasWrites, trackCanvasWrite } from '../../modules/canvas/pending-writes'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CanvasOpen } from '../../../main/modules/board-engine/canvas-service'
-import { graphicSvg, sha256, type CanvasOperation } from '../../../shared/ready-canvas'
+import { graphicAssetPath, type CanvasOperation } from '../../../shared/ready-canvas'
 import type { PageNode } from '../../../shared/document-pages'
 import { isReadyBoardFile } from '../../../shared/ready-board'
 import { useDocTabs, type DocTab } from '../../stores/useDocTabs'
@@ -146,7 +146,7 @@ export default function CanvasDocument({ tab }: { tab: DocTab }) {
       trees={trees} composition={api.canvasComposition} drafts={api.documentDrafts} documentPreview={previews} linkPreview={links}
       refreshCanvas={refresh} openDraft={openDraft} onOperations={write}
       revealNode={target?.objectId === opened.objectId ? target : undefined}
-      prepareGraphic={async draft => `${opened.path.slice(0, -7)}.assets/${sha256(graphicSvg(draft.graphic, draft.width, draft.height))}.svg`}
+      prepareGraphic={draft => graphicAssetPath(opened.path, draft.graphic, draft.width, draft.height)}
       resolveAsset={path => toLocalFileUrl(`${root}/${path}`)}
       onOpenNode={node => { if (node.ready.ref) run(() => openReadyRef(node.ready.ref!, 'document')); else if (node.type === 'link') run(() => openReadyRef({ kind: 'web', url: node.url }, 'document')) }}
       onNavigateSubcanvas={node => { if (node.type === 'file') openInCurrentTab(`${root}/${node.file}`); else if (node.ready.ref) run(() => openReadyRef(node.ready.ref!, 'document')) }}

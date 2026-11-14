@@ -7,9 +7,21 @@ export function groupOperations(nodes: CanvasNode[], id: string): CanvasOperatio
   if (!nodes.length) return []
   return [{ type: 'addNode', index: 0, node: { ...expand(bounds(nodes), 24), id, type: 'group', label: '分组', ready: { kind: 'group' } } }, { type: 'group', ids: nodes.map(n => n.id), groupId: id }]
 }
-export function layerOperations(canvas: ReadyCanvas, ids: string[], placement: 'front' | 'back'): CanvasOperation[] {
+export function layerOperations(canvas: ReadyCanvas, ids: string[], placement: 'front' | 'back' | 'forward' | 'backward'): CanvasOperation[] {
   const selected = new Set(ids), moving = canvas.nodes.filter(n => selected.has(n.id))
-  return [...moving.map(n => ({ type: 'deleteNode' as const, id: n.id })), ...moving.map((node, i) => ({ type: 'addNode' as const, node, ...(placement === 'back' ? { index: i } : {}) }))]
+  if (placement === 'front' || placement === 'back') {
+    return [...moving.map(n => ({ type: 'deleteNode' as const, id: n.id })), ...moving.map((node, i) => ({ type: 'addNode' as const, node, ...(placement === 'back' ? { index: i } : {}) }))]
+  }
+  // One step: each selected card trades places with its nearest unselected neighbour on that side.
+  const order = canvas.nodes.map(n => n.id), up = placement === 'forward'
+  for (let i = up ? order.length - 2 : 1; up ? i >= 0 : i < order.length; i += up ? -1 : 1) {
+    const j = up ? i + 1 : i - 1
+    if (selected.has(order[i]) && !selected.has(order[j])) [order[i], order[j]] = [order[j], order[i]]
+  }
+  if (order.every((id, i) => id === canvas.nodes[i].id)) return []
+  // Take the selected cards out, then put each back at its final index (ascending, so every index is valid).
+  const byId = new Map(canvas.nodes.map(n => [n.id, n]))
+  return [...moving.map(n => ({ type: 'deleteNode' as const, id: n.id })), ...order.flatMap((id, index) => selected.has(id) ? [{ type: 'addNode' as const, node: byId.get(id)!, index }] : [])]
 }
 /** Inverses stay guarded by A. Translate the checked result into the same public operation channel. */
 function restoreOperations(before: ReadyCanvas, after: ReadyCanvas): CanvasOperation[] {

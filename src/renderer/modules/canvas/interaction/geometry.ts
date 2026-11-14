@@ -14,6 +14,17 @@ export function bounds(items: readonly Rect[]): Rect {
   for (const r of items) { x = Math.min(x, r.x); y = Math.min(y, r.y); right = Math.max(right, r.x + r.width); bottom = Math.max(bottom, r.y + r.height) }
   return { x, y, width: right - x, height: bottom - y }
 }
+/** Liang–Barsky: does the segment a→b touch the rectangle (a connector crossed by the marquee)? */
+export function segmentHitsRect(a: Point, b: Point, r: Rect): boolean {
+  let t0 = 0, t1 = 1
+  const dx = b.x - a.x, dy = b.y - a.y
+  for (const [p, q] of [[-dx, a.x - r.x], [dx, r.x + r.width - a.x], [-dy, a.y - r.y], [dy, r.y + r.height - a.y]]) {
+    if (p === 0) { if (q < 0) return false; continue }
+    const t = q / p
+    if (p < 0) { if (t > t1) return false; t0 = Math.max(t0, t) } else { if (t < t0) return false; t1 = Math.min(t1, t) }
+  }
+  return true
+}
 export const screenToWorld = (p: Point, c: Camera): Point => ({ x: (p.x - c.x) / c.zoom, y: (p.y - c.y) / c.zoom })
 export function zoomAt(c: Camera, p: Point, zoom: number): Camera {
   const z = Math.max(0.15, Math.min(4, zoom)), world = screenToWorld(p, c)
@@ -51,8 +62,9 @@ export class SpatialIndex<T extends Rect & { id: string }> {
   }
 }
 
-/** Stillroom gap snap plus Ready centre/edge guides; candidates already spatially restricted. */
-export function snapRect(r: Rect, others: readonly Rect[], gap: number, radius: number): Point & { guides: Guide[] } {
+/** Stillroom's magnetic snap: sit `gap` away from a neighbour's edge, or line up with its edges or centre.
+ *  Candidates are already spatially restricted. `smart` only decides whether an alignment draws its guide. */
+export function snapRect(r: Rect, others: readonly Rect[], gap: number, radius: number, smart = true): Point & { guides: Guide[] } {
   const guides: Guide[] = [], result = { x: r.x, y: r.y }
   for (const axis of ['x', 'y'] as const) {
     const size = axis === 'x' ? 'width' : 'height', cross = axis === 'x' ? 'y' : 'x', crossSize = axis === 'x' ? 'height' : 'width'
@@ -72,13 +84,13 @@ export function snapRect(r: Rect, others: readonly Rect[], gap: number, radius: 
       }
     }
     result[axis] = Math.round(r[axis] + delta)
-    if (guide) guides.push(guide)
+    if (guide && smart) guides.push(guide)
   }
   return { ...result, guides }
 }
 
 /** Visible-region sweep; never called from pointermove. */
-export function clusters<T extends Rect & { id: string }>(items: readonly T[], tolerance = 64): T[][] {
+export function clusters<T extends Rect & { id: string }>(items: readonly T[], tolerance = 24): T[][] {
   const sorted = [...items].sort((a, b) => a.x - b.x), parent = sorted.map((_, i) => i)
   const find = (i: number): number => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i] } return i }
   for (let i = 0; i < sorted.length; i++) {

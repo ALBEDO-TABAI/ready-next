@@ -287,3 +287,29 @@ test('M4-E3 node wiki relations resolve from the canvas folder before the vault 
     }
   } finally { f.close() }
 })
+
+test('a drawing saved by Main is exactly the board the renderer predicted, so its undo history survives', async t => {
+  if (skipIfSqliteUnavailable(t, 'canvas graphic path')) return
+  const { applyCanvasOperations, graphicAssetPath, stableJson } = await import('../shared/ready-canvas')
+  const f = canvasFixture()
+  try {
+    let h = await f.service.create({ path: 'Folder/Sketch.canvas', operationId: 'create' })
+    // What the board document does for a new rectangle, then for resizing it: predict the SVG path, emit the operations.
+    const rect = { type: 'rect' as const, fill: 'transparent', stroke: '#ff5a1f', strokeWidth: 2 }
+    const steps = [
+      async () => [{ type: 'addNode' as const, node: { id: 'shape', type: 'file' as const, file: await graphicAssetPath(h.path, rect, 120, 80), x: 10, y: 20, width: 120, height: 80, ready: { kind: 'graphic' as const, graphic: rect } } }],
+      async () => [{ type: 'geometry' as const, id: 'shape', geometry: { x: 10, y: 20, width: 200, height: 90 } }, { type: 'graphic' as const, id: 'shape', graphic: rect, file: await graphicAssetPath(h.path, rect, 200, 90) }],
+    ]
+    for (const [index, step] of steps.entries()) {
+      const commands = await step(), predicted = applyCanvasOperations(h.canvas, commands).canvas
+      const receipt = await f.service.write({ objectId: h.objectId, handleId: h.handleId, expectedVersion: h.version, operationId: `draw-${index}`, commands })
+      assert.equal(receipt.state, 'completed')
+      h = await f.service.read(h.handleId)
+      // The surface keeps its undo history only when the saved board equals its own expectation, byte for byte.
+      assert.equal(stableJson(h.canvas), stableJson(predicted))
+      const saved = h.canvas.nodes[0]
+      assert.ok(saved.type === 'file' && /^Folder\/Sketch\.assets\/[a-f0-9]{64}\.svg$/.test(saved.file), saved.type === 'file' ? saved.file : '')
+      assert.ok(readFileSync(join(f.root, saved.type === 'file' ? saved.file : ''), 'utf8').startsWith('<svg'))
+    }
+  } finally { f.close() }
+})

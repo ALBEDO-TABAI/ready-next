@@ -1,15 +1,17 @@
 import { useEffect, useState } from 'react'
 import {
-  BringToFront, CalendarPlus, ChevronDown, ChevronRight, ChevronUp, Ellipsis, FilePlus2, Group, LayoutGrid, Redo2, Scan, Search, SendToBack, Shapes, Sparkles, StickyNote, Trash2, Type, Undo2, Ungroup, X, type LucideIcon,
+  ALargeSmall, ArrowDown, ArrowUp, BringToFront, CalendarPlus, ChevronDown, ChevronRight, ChevronUp, Ellipsis, FilePlus2, Group, Layers, LayoutGrid, Redo2, Scan, Search, SendToBack, Shapes, SlidersHorizontal, Sparkles, StickyNote, Trash2, Type, Undo2, Ungroup, X, type LucideIcon,
 } from 'lucide-react'
 import { Button, closeFloat, IconButton, Input, toggleMenu, type MenuEntry } from '../../ui'
 import type { Tool } from './types'
 import { ARRANGEMENTS, DOCK_TOOLS, DRAW_TOOL, SHAPE_TOOLS } from './chrome-tools'
+import { toggleViewSettings, VIEW_SETTINGS } from './view-settings-float'
+import type { Appearance } from '../../../../shared/ready-canvas/schema'
 
 // The board's chrome (W4 §2.1, MS1): the content area is one stage; only a few controls float on it, in the
 // float material. Every tool is a W1 icon button with a tooltip naming its key; its menus are the shared W1 menus.
 
-const MORE_MENU = 'canvas-more-menu', SHAPES_MENU = 'canvas-shapes-menu', ARRANGE_MENU = 'canvas-arrange-menu'
+const MORE_MENU = 'canvas-more-menu', SHAPES_MENU = 'canvas-shapes-menu', ARRANGE_MENU = 'canvas-arrange-menu', LAYER_MENU = 'canvas-layer-menu', TEXT_MENU = 'canvas-text-menu'
 
 /** A chrome tool: the W1 icon button named by its label, the tooltip adding its key; a count is a badge. */
 function ChromeTool({ label, icon: Glyph, shortcut, pressed, disabled, danger, badge, menu, onClick }: {
@@ -51,7 +53,8 @@ export function CanvasCorner({ zoom, search, results, hit, recycled, trash, busy
   more?: MenuEntry[]
   onSearch(value: string | null): void; onStep(delta: 1 | -1): void; onZoomReset(): void; onFit(): void; onTrash(): void
 }) {
-  const moreMenu = useChromeMenu(MORE_MENU)
+  const moreMenu = useChromeMenu(MORE_MENU), [viewOpen, setViewOpen] = useState(false)
+  useEffect(() => () => closeFloat(VIEW_SETTINGS), [])
   return <div className="canvas-corner rn-float" role="toolbar" aria-label="视图" data-canvas-ui>
     {search === null ? <ChromeTool label="在画板中搜索" icon={Search} shortcut="⌘F" disabled={trash} onClick={() => onSearch('')} /> : <span className="canvas-search">
       <Search aria-hidden />
@@ -67,6 +70,7 @@ export function CanvasCorner({ zoom, search, results, hit, recycled, trash, busy
     </span>}
     <Button variant="ghost" className="canvas-zoom" aria-label="缩放比例" title="回到 100%" onClick={onZoomReset}>{Math.round(zoom * 100)}%</Button>
     <ChromeTool label="适应内容" icon={Scan} shortcut="⇧1" disabled={trash} onClick={onFit} />
+    <ChromeTool label="视图设置" icon={SlidersHorizontal} menu={{ id: VIEW_SETTINGS, open: viewOpen }} disabled={trash} onClick={button => toggleViewSettings(button, setViewOpen)} />
     <ChromeTool label="回收站" icon={Trash2} pressed={trash} badge={recycled} disabled={busy} onClick={onTrash} />
     {more && <ChromeTool label="更多" icon={Ellipsis} menu={{ id: MORE_MENU, open: moreMenu.open }} disabled={busy || trash}
       onClick={button => moreMenu.toggle(button, '更多', more, 'bottom-end')} />}
@@ -95,28 +99,54 @@ export function CanvasDock({ tool, lastShape, disabled, graphics, canUndo, canRe
   </div>
 }
 
+/** Text card sizes (px; saved as `fontScale` in 24px units), weights and alignment: the data had them, the board now offers them. */
+const TEXT_SIZES = [{ px: 13, label: '正文' }, { px: 18, label: '小标题' }, { px: 26, label: '大标题' }]
+const TEXT_WEIGHTS: Array<{ id: NonNullable<Appearance['weight']>; label: string }> = [{ id: 'light', label: '细' }, { id: 'regular', label: '常规' }, { id: 'medium', label: '中等' }, { id: 'bold', label: '加粗' }]
+const TEXT_ALIGNS: Array<{ id: NonNullable<Appearance['align']>; label: string }> = [{ id: 'left', label: '左对齐' }, { id: 'center', label: '居中' }, { id: 'right', label: '右对齐' }]
+
 /** Above the selection: what you can do with these cards. */
-export function SelectionBar({ left, top, count, canGroup, canUngroup, busy, actions }: {
-  left: number; top: number; count: number; canGroup: boolean; canUngroup: boolean; busy: boolean
+export function SelectionBar({ left, top, count, edges = 0, text, canGroup, canUngroup, busy, actions }: {
+  left: number; top: number; count: number; edges?: number;
+  /** Set when every picked card is a text card or a note: what they share (a value is absent when they differ). */
+  text?: { size?: number; weight?: Appearance['weight']; align?: Appearance['align'] }
+  canGroup: boolean; canUngroup: boolean; busy: boolean
   actions: {
-    group(): void; ungroup(): void; layout(kind: 'P' | 'L' | 'R'): void; front(): void; back(): void; remove(): void
+    group(): void; ungroup(): void; layout(kind: 'P' | 'L' | 'R'): void; layer(placement: 'front' | 'forward' | 'backward' | 'back'): void; remove(): void
+    textStyle?(patch: Partial<Pick<Appearance, 'fontScale' | 'weight' | 'align'>>): void
     addToDocument?(): void; askAI?(): void; schedule?(): void
   }
 }) {
-  const arrangeMenu = useChromeMenu(ARRANGE_MENU)
+  const arrangeMenu = useChromeMenu(ARRANGE_MENU), layerMenu = useChromeMenu(LAYER_MENU), textMenu = useChromeMenu(TEXT_MENU)
   return <div className="canvas-selection-bar rn-float" role="toolbar" aria-label="选区操作" data-canvas-ui style={{ left, top }}>
-    <span className="canvas-selection-count" aria-live="polite">{count} 张</span>
+    <span className="canvas-selection-count" aria-live="polite">{count ? `${count} 张` : `${edges} 条连线`}</span>
+    {!count && <ChromeTool label="删除连线" icon={Trash2} shortcut="Delete" danger disabled={busy} onClick={actions.remove} />}
+    {!!count && <>
     {canGroup && <ChromeTool label="分组" icon={Group} shortcut="⌘G" disabled={busy} onClick={actions.group} />}
     {canUngroup && <ChromeTool label="解组" icon={Ungroup} shortcut="⇧⌘G" disabled={busy} onClick={actions.ungroup} />}
     {count > 1 && <ChromeTool label="排版" icon={LayoutGrid} menu={{ id: ARRANGE_MENU, open: arrangeMenu.open }} disabled={busy}
       onClick={button => arrangeMenu.toggle(button, '排版', ARRANGEMENTS.map(item => ({ id: item.id, label: item.label, icon: <item.icon />, hint: item.key, onSelect: () => actions.layout(item.id) })), 'bottom')} />}
-    <ChromeTool label="置顶" icon={BringToFront} disabled={busy} onClick={actions.front} />
-    <ChromeTool label="置底" icon={SendToBack} disabled={busy} onClick={actions.back} />
+    {text && actions.textStyle && <ChromeTool label="文字" icon={ALargeSmall} menu={{ id: TEXT_MENU, open: textMenu.open }} disabled={busy}
+      onClick={button => textMenu.toggle(button, '文字', [
+        { kind: 'group', label: '字号' },
+        ...TEXT_SIZES.map(item => ({ id: `size-${item.px}`, label: item.label, checked: text.size === item.px, onSelect: () => actions.textStyle!({ fontScale: item.px / 24 }) })),
+        { kind: 'group', label: '粗细' },
+        ...TEXT_WEIGHTS.map(item => ({ id: `weight-${item.id}`, label: item.label, checked: (text.weight ?? 'regular') === item.id, onSelect: () => actions.textStyle!({ weight: item.id }) })),
+        { kind: 'group', label: '对齐' },
+        ...TEXT_ALIGNS.map(item => ({ id: `align-${item.id}`, label: item.label, checked: (text.align ?? 'left') === item.id, onSelect: () => actions.textStyle!({ align: item.id }) })),
+      ], 'bottom')} />}
+    <ChromeTool label="层级" icon={Layers} menu={{ id: LAYER_MENU, open: layerMenu.open }} disabled={busy}
+      onClick={button => layerMenu.toggle(button, '层级', [
+        { id: 'front', label: '置顶', icon: <BringToFront />, onSelect: () => actions.layer('front') },
+        { id: 'forward', label: '上移一层', icon: <ArrowUp />, hint: '⌥⌘]', onSelect: () => actions.layer('forward') },
+        { id: 'backward', label: '下移一层', icon: <ArrowDown />, hint: '⌥⌘[', onSelect: () => actions.layer('backward') },
+        { id: 'back', label: '置底', icon: <SendToBack />, onSelect: () => actions.layer('back') },
+      ], 'bottom')} />
     {(actions.addToDocument || actions.askAI || actions.schedule) && <span className="canvas-dock-sep" aria-hidden />}
     {actions.addToDocument && <ChromeTool label="添加到文档" icon={FilePlus2} disabled={busy} onClick={actions.addToDocument} />}
     {actions.askAI && <ChromeTool label="问 AI" icon={Sparkles} disabled={busy} onClick={actions.askAI} />}
     {actions.schedule && <ChromeTool label="安排日程…" icon={CalendarPlus} disabled={busy} onClick={actions.schedule} />}
     <span className="canvas-dock-sep" aria-hidden />
     <ChromeTool label="删除" icon={Trash2} shortcut="Delete" danger disabled={busy} onClick={actions.remove} />
+    </>}
   </div>
 }
