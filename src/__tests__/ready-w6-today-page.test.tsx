@@ -73,7 +73,7 @@ const toggles: unknown[] = [], revealed: string[] = [], lookups: unknown[] = []
 const todoListeners = new Set<() => void>()
 Object.defineProperty(dom.window, 'electronAPI', { value: {
   today: { firstScreen: () => answer(answers.first, filled), sieve: () => answer(answers.sieve, picked) },
-  calendarLayers: { toggleTodo: async (input: unknown) => { toggles.push(input); queueMicrotask(() => todoListeners.forEach(listener => listener())); return { ok: true, value: { state: 'saved' } } },
+  calendarLayers: { toggleTodo: async (input: unknown) => { toggles.push(input); queueMicrotask(() => todoListeners.forEach(listener => listener())); return { ok: true, value: { state: 'saved', version: 'v-after-tick' } } },
     onChanged: (listener: () => void) => { todoListeners.add(listener); return () => todoListeners.delete(listener) } },
   rss: { sieveCalibration: async () => ({ success: true, data: proposal }), onOrganizationChanged: () => () => {} },
   navigationHistory: memoryNavigationAPI(),
@@ -163,6 +163,16 @@ test('rows open and quick-look as capsules; a to-do ticks in place through the t
   assert.ok(row.classList.contains('is-done'))
   assert.equal(all('[data-today-block="upcoming"] [role="checkbox"]').length, 2, 'the other to-do is still there')
   assert.equal(useMode.getState().workbenchMode, 'calendar', 'ticking never opens the page')
+
+  // A tick made by mistake is taken back from the same box, against the page version the tick returned.
+  const ticked = row.querySelector<HTMLButtonElement>('[role="checkbox"]')!
+  assert.equal(ticked.disabled, false); assert.equal(ticked.getAttribute('aria-label'), '取消勾选：确认印厂排期')
+  answers.first = [filled()]
+  await act(async () => { ticked.click(); await new Promise(resolve => setTimeout(resolve, 30)) })
+  assert.deepEqual(toggles.at(-1), { id: 'task:week:3', expectedVersion: 'v-after-tick', checked: false })
+  const again = body.querySelector('[data-todo-id="task:week:3"]')!
+  assert.equal(again.querySelector('[role="checkbox"]')?.getAttribute('aria-checked'), 'false')
+  assert.ok(!again.classList.contains('is-done'))
 })
 
 test('an empty library shows no block and no shell, only the guide; 资讯 still loading is not empty yet', async () => {

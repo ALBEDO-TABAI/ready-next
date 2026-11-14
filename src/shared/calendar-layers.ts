@@ -73,7 +73,9 @@ export const ToggleTodoSchema = TodoIdentitySchema.extend({ checked: z.boolean()
 export const ScheduleTodoSchema = TodoIdentitySchema.extend({ date: calendarDate, rewriteObsidianDate: z.boolean().optional() }).strict()
 export type ToggleTodo = z.infer<typeof ToggleTodoSchema>
 export type ScheduleTodo = z.infer<typeof ScheduleTodoSchema>
-export type TodoWriteReceipt = { state: 'saved' | 'unsaved' }
+/** `version` is the page's version after the write, so the same line can be written again (a tick taken back)
+ * without listing the to-dos first. An unsaved page keeps its disk version: the change is only in its open buffer. */
+export type TodoWriteReceipt = { state: 'saved' | 'unsaved'; version: string }
 
 /** GFM task items only: frontmatter, code and nested list contents never become parent tasks. */
 export function parseTodos(content: string): ParsedTodo[] {

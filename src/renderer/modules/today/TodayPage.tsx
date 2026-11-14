@@ -9,7 +9,7 @@ import { showToast } from '../../components/ui/toast-store'
 import { useDocTabs } from '../../stores/useDocTabs'
 import { useFastCard } from '../../stores/useFastCard'
 import { useRSSSession } from '../../stores/useRSSSession'
-import { todoFromList, toggleTodo } from '../calendar/workbench/layers/todo-actions'
+import { todoFromList, writeTodoCheck } from '../calendar/workbench/layers/todo-actions'
 import { requestShellAction } from '../workbench/commands/shell-actions'
 import { requestWorkbenchModeOpen } from '../workbench/mode-transition'
 import { queryToday, type TodayFirstScreen, type TodaySieve } from './data'
@@ -68,16 +68,24 @@ export function TodayPage({ visible }: { visible: boolean }) {
     if (!first || !element || element.dataset.firstScreenMs || requestedAt.current === null) return
     element.dataset.firstScreenMs = String(Math.round(performance.now() - requestedAt.current))
   }, [first, requestedAt])
-  // To-dos ticked here stay in the list, ticked, until 今日 is opened again.
-  const [done, setDone] = useState<Todo[]>([])
+  // To-dos ticked here stay in the list, ticked, until 今日 is opened again; a tick made by mistake is taken back by
+  // clicking the box again. `version` is the page's version after the tick (absent while the write is under way).
+  const [done, setDone] = useState<Array<Todo & { version?: string }>>([])
   const check = (todo: Todo) => {
     setDone(current => [...current, todo])
-    void toggleTodo(todoFromList(todo.todo), true).then(state => {
-      if (state === 'unsaved') showToast('已在打开的页面里勾掉，保存那一页后生效')
+    void writeTodoCheck(todoFromList(todo.todo), true).then(receipt => {
+      setDone(current => current.map(item => item.todo.id === todo.todo.id ? { ...item, version: receipt.version } : item))
+      if (receipt.state === 'unsaved') showToast('已在打开的页面里勾掉，保存那一页后生效')
     }, cause => {
       setDone(current => current.filter(item => item.todo.id !== todo.todo.id))
       showToast(message(cause), { tone: 'bad' })
     }).finally(load)
+  }
+  const uncheck = (todo: Todo, version: string) => {
+    void writeTodoCheck({ ...todoFromList(todo.todo), version }, false).then(receipt => {
+      setDone(current => current.filter(item => item.todo.id !== todo.todo.id))
+      if (receipt.state === 'unsaved') showToast('已在打开的页面里取消勾选，保存那一页后生效')
+    }, cause => { showToast(message(cause), { tone: 'bad' }) }).finally(load)
   }
   if (!first) return <section ref={root} className="today" aria-label="今日" data-today-page="loading">
     {error && <div className="today-column"><ErrorLine error={error} retry={load} /></div>}
@@ -90,10 +98,11 @@ export function TodayPage({ visible }: { visible: boolean }) {
       return <Row key={`${toReadyUri(event.ref)}@${event.start}`} item={event} plain lead={<span className={`today-time${time.now ? ' is-now' : ''}`}>{time.text}</span>} />
     })}</ul>}
     {todos.length > 0 && <ul className="today-list">{todos.map(todo => {
-      const ticked = done.some(item => item.todo.id === todo.todo.id), late = overdueText(todo.todo.date, first.greeting.date)
+      const ticked = done.find(item => item.todo.id === todo.todo.id), late = overdueText(todo.todo.date, first.greeting.date)
       return <Row key={todo.todo.id} item={todo} plain className={ticked ? 'is-done' : undefined} data={{ 'data-todo-id': todo.todo.id }}
-        lead={<button type="button" role="checkbox" aria-checked={ticked} disabled={ticked} className="rn-check__box today-check" aria-label={`勾掉：${todo.title}`}
-          onClick={() => check(todo)}><Check aria-hidden /></button>}
+        lead={<button type="button" role="checkbox" aria-checked={!!ticked} disabled={!!ticked && !ticked.version} className="rn-check__box today-check"
+          aria-label={`${ticked ? '取消勾选' : '勾掉'}：${todo.title}`}
+          onClick={() => { if (!ticked) check(todo); else if (ticked.version) uncheck(todo, ticked.version) }}><Check aria-hidden /></button>}
         meta={`${late ? `${late} · ` : ''}${todo.todo.page.title}`} />
     })}</ul>}
   </Block>

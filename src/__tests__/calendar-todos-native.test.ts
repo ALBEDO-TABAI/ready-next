@@ -20,12 +20,14 @@ test('todo toggle changes only the checkbox bytes, unchecks and rejects stale ve
   assert.equal(todo.heading, '分组'); assert.equal(todo.date, null)
   const marker = parseTodos(original)[0].checkbox, expected = Buffer.from(original)
   expected.write('[x]', marker.byteStart, 'utf8')
-  assert.deepEqual(await f.service.toggleTodo({ id: todo.id, expectedVersion: todo.version, checked: true }), { state: 'saved' })
+  const ticked = await f.service.toggleTodo({ id: todo.id, expectedVersion: todo.version, checked: true })
   assert.deepEqual(readFileSync(object.current_path!), expected)
+  // The receipt carries the page's new version, so the tick can be taken back without listing the to-dos again.
+  assert.deepEqual(ticked, { state: 'saved', version: f.registry.get(object.id)!.content_hash! })
   assert.equal(f.service.listTodos().length, 0)
   await assert.rejects(f.service.toggleTodo({ id: todo.id, expectedVersion: todo.version, checked: false }), { code: 'version_conflict' })
   assert.deepEqual(readFileSync(object.current_path!), expected)
-  await f.service.toggleTodo({ id: todo.id, expectedVersion: f.registry.get(object.id)!.content_hash!, checked: false })
+  await f.service.toggleTodo({ id: todo.id, expectedVersion: ticked.version, checked: false })
   assert.deepEqual(readFileSync(object.current_path!), Buffer.from(original))
   assert.equal(f.service.listTodos().length, 1)
 })
@@ -35,7 +37,7 @@ test('todo scheduling appends on first line, reads back in both queries, then us
   const f = todoFixture(); t.after(() => f.close())
   const original = '# 页面\r\n- [ ] 第一项😀\r\n  第二行\r\n- [ ] 后一项'
   const object = f.add('page.md', original), todo = f.service.listTodos()[0]
-  assert.deepEqual(await f.service.scheduleTodo({ id: todo.id, expectedVersion: todo.version, date: '2026-11-12' }), { state: 'saved' })
+  assert.equal((await f.service.scheduleTodo({ id: todo.id, expectedVersion: todo.version, date: '2026-11-12' })).state, 'saved')
   const expected = original.replace('第一项😀', '第一项😀 [2026-11-12](ready://calendar/day/2026-11-12)')
   assert.deepEqual(readFileSync(object.current_path!), Buffer.from(expected))
   const entry = f.service.query(range).find(e => e.id === todo.id)!
@@ -59,7 +61,7 @@ test('rescheduling keeps a custom link label and rewrites only the date in the a
   const original = '- [ ] 写周报 [明天](ready://calendar/day/2026-11-12)\n'
   const object = f.add('page.md', original), todo = f.service.listTodos()[0]
   assert.equal(todo.date, '2026-11-12')
-  assert.deepEqual(await f.service.scheduleTodo({ id: todo.id, expectedVersion: todo.version, date: '2026-11-14' }), { state: 'saved' })
+  assert.equal((await f.service.scheduleTodo({ id: todo.id, expectedVersion: todo.version, date: '2026-11-14' })).state, 'saved')
   assert.equal(readFileSync(object.current_path!, 'utf8'), '- [ ] 写周报 [明天](ready://calendar/day/2026-11-14)\n')
 })
 
@@ -85,11 +87,11 @@ test('todo writes merge dirty buffers without saving; changed target text or shi
   const tabs = createDocumentOperationSync({ tabs: () => [tab], replace: next => { tab = next } })
   const service = new CalendarLayersService(f.root, f.registry, f.database, { ...f.writer, tabs }, f.pages)
   const todo = service.listTodos()[0], request = { id: todo.id, expectedVersion: todo.version }
-  assert.deepEqual(await service.toggleTodo({ ...request, checked: true }), { state: 'unsaved' })
+  assert.deepEqual(await service.toggleTodo({ ...request, checked: true }), { state: 'unsaved', version: todo.version })
   assert.equal(tab.content, original.replace('[ ]', '[x]') + '未保存\n')
   assert.equal(readFileSync(object.current_path!, 'utf8'), original)
   tab.content = original + '未保存\n'
-  assert.deepEqual(await service.scheduleTodo({ ...request, date: '2026-11-12' }), { state: 'unsaved' })
+  assert.deepEqual(await service.scheduleTodo({ ...request, date: '2026-11-12' }), { state: 'unsaved', version: todo.version })
   assert.equal(tab.content, original.replace('aaa', 'aaa [2026-11-12](ready://calendar/day/2026-11-12)') + '未保存\n')
   assert.equal(tab.isDirty, true); assert.equal(readFileSync(object.current_path!, 'utf8'), original)
   for (const changed of ['- [ ] bbb\n- [ ] aaa\n', original.replace('aaa', 'xyz')]) {
@@ -114,12 +116,14 @@ test('registered todo IPC validates requests, returns error codes and notifies o
   const todo = list.value[0], input = { id: todo.id, expectedVersion: todo.version, date: '2026-11-12' }
   const rejected = await handlers.get('calendarLayers:scheduleTodo')!(event, input) as LayerReply<TodoWriteReceipt>
   assert.ok(!rejected.ok); assert.equal(rejected.code, 'obsidian_date_needs_consent'); assert.deepEqual(pushes, [])
-  assert.deepEqual(await handlers.get('calendarLayers:scheduleTodo')!(event, { ...input, rewriteObsidianDate: true }), { ok: true, value: { state: 'saved' } })
+  const scheduled = await handlers.get('calendarLayers:scheduleTodo')!(event, { ...input, rewriteObsidianDate: true }) as LayerReply<TodoWriteReceipt>
+  assert.equal(scheduled.ok && scheduled.value.state, 'saved')
   assert.deepEqual(pushes, ['calendarLayers:changed'])
   const current = f.service.listTodos()[0]
   const invalid = await handlers.get('calendarLayers:toggleTodo')!(event, { id: current.id, expectedVersion: current.version, checked: 'yes' }) as LayerReply<TodoWriteReceipt>
   assert.ok(!invalid.ok); assert.equal(pushes.length, 1)
-  assert.deepEqual(await handlers.get('calendarLayers:toggleTodo')!(event, { id: current.id, expectedVersion: current.version, checked: true }), { ok: true, value: { state: 'saved' } })
+  const toggled = await handlers.get('calendarLayers:toggleTodo')!(event, { id: current.id, expectedVersion: current.version, checked: true }) as LayerReply<TodoWriteReceipt>
+  assert.equal(toggled.ok && toggled.value.state, 'saved')
   assert.equal(pushes.length, 2)
   dispose(); assert.equal(handlers.size, 0)
 })
