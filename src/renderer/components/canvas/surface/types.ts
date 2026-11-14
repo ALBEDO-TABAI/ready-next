@@ -30,6 +30,14 @@ export interface CanvasSurfaceProps {
   /** More 新建 items on the canvas's right-click menu (链接, 文档卡, 子画板), placed at the clicked world point. A follow-up
    * form opens as its own float at `place.anchor` (the pointer), kept inside `place.bounds` (the board). */
   extraNewItems?: (at: { x: number; y: number }, place: { anchor: FloatAnchor; bounds: () => FloatAnchor }) => MenuEntry[]
+  /** Sub-boards (M4 §9): the host moves cards between this board and its sub-boards; what is absent is not offered.
+   * `undo` takes back the last cross-board move and is used when the board's own history is empty. */
+  subBoards?: {
+    collect?(nodeIds: string[]): void; moveOut?(nodeIds: string[]): void; moveInto?(nodeIds: string[], target: CanvasNode): void
+    openParent?(): void; undo?(): void
+  }
+  /** More entries for the corner's 更多 menu, after the exports. */
+  moreItems?: MenuEntry[]
   /** Drops the host understands (FastCard items, pages from the sidebar): return true when handled. */
   onDropData?: (data: DataTransfer, at: { x: number; y: number }) => boolean
   acceptsDrop?: (types: readonly string[]) => boolean

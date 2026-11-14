@@ -141,11 +141,61 @@ M3 编辑器、SaveToPicker 归原负责人；M4 只消费公开接口。其他�
 - `verify:ready-next-canvas` 已提供六步窗口脚本、逐步磁盘/暂存回读与截图、SIGKILL 重启及旧文件字节比较；这里只校验脚本语法和夹具，未启动窗口。浏览器收集步骤目前调用生产 browser FastCard 接口注入文本，原生右键与网页层遮挡/恢复仍须 Claude 实际验收。
 - 未完成边界：`[[` 选择与子页面创建需修改 M3 的 `block-editor/EditorTools.tsx`、`references.ts` 及公开路径传递接口；这些不在 F 可改范围，未改。卡片插槽已提供 canvasPath，未伪装文档标签。旧静态模板的打包条目位于 `electron-builder.yml` 和 `scripts/verify-release-structural-package.cjs`，不在明确许可清单；保留资产以免破坏打包，待负责人将两处条目与 assets/board/board-template.html 一并删除。C10/C13 及 M4 整体尚不能标为最终验收通过。
 
-## 9. 交互层对齐 Stillroom（2026-11-14，合同先于实现）
+## 9. 子画板：收进、移入、移出、删除与 Stillroom 导入（2026-11-14，实施前冻结）
 
-起因：用户在真实窗口里看到画板没有 Stillroom 的对齐与自适应缩放，连线不能删除也不能撤销。只读审计确认后，本节冻结交互层要守的规则；实现与验收记录在 §9.4。范围只有交互层（`modules/canvas/interaction/`、`components/canvas/surface/`），不新增写入通道、IPC、schema 字段。
+来源是 Stillroom 的文件夹交互（`src/canvas/folders.ts`、`selection.ts`、`Canvas.tsx`、`store.ts`）。Ready 的子画板是独立 `.canvas` 文件（§3：单一父画板，文件在父画板同名文件夹内），所以“卡片换画板”是两份文件的一次改动，必须由 Main 一条命令完成。同画板内的 分组（⌘G，JSON Canvas group）保持不变，与子画板是两回事。
 
-### 9.1 数据规则
+### 9.1 跨画板移动命令 `canvas:moveCards`
+
+- 请求：`{ operationId, objectId, handleId, expectedVersion, nodeIds, target }`。`target` 为 `{ kind: 'new', path, title, card }`（收进子画板：新建子文件并在来源画板放一张子画板卡）或 `{ kind: 'existing', objectId }`（目标必须是来源画板的直接子画板——来源上有未回收的子画板卡指向它；或来源画板的父画板——父画板上有未回收的子画板卡指向来源）。其他关系拒绝。
+- 移动集合由 Main 用纯函数 `planCardMove` 计算：选中分组时带上成员（递归）；已回收、子画板卡、草稿卡不移动并在回执 `skipped` 中列出原因（子画板卡换父需要移动文件，草稿卡绑定原画板回写，本期不做）。
+- 连线：两端都在移动集合内的随卡片移动；只有一端在集合内的从来源画板移除并计入 `droppedEdgeIds`（界面在提示里说明，可撤销）。分组归属和 dock 指向集合外节点的引用在两侧清除。
+- 位置：新建子画板时整体平移到原点起排；移入已有子画板时排在已有内容右侧（空画板从原点起）；移出时排在父画板子画板卡右侧，遇到已有卡片向右让开。相对布局与层次顺序保留，移动的节点排在目标 nodes 末尾。
+- 附件跟卡片走：节点的 file、preview.image、media.poster 与正文内本地媒体引用若位于来源画板 `.assets/` 下，复制到目标画板 `.assets/`（同名同内容复用，同名异内容加哈希前缀），路径改写；来源附件保留（§4：不自动删除附件）。图形 SVG 由目标画板下一次写入照常重新派生。
+- 写入顺序复用页面移动的多文件发布（`publishBundle`）：按对象 id 排序串行加锁 → 持久记录计划（两份文件的原文与新内容、附件、移动明细）→ 校验集合 → 先发布附件与**目标**文件，再发布**来源**文件 → 回读 → 两个对象登记与关系索引 → 回执。中断在两次发布之间时磁盘上是“两边都有”而不是“两边都没有”；`recover()` 按记录的计划重放到完成，不产生重复。
+- 冲突：来源 `expectedVersion` 与磁盘不符返回 `version_conflict`；任一画板有未保存的恢复缓冲（与磁盘不同）返回 `version_conflict`，不做合并（移动不允许 `merged_dirty`）；目标文件在计划后被改动返回 `version_conflict`；目标已有同 id 节点返回 `identity_conflict`。冲突时两份文件都不改。
+- 回执在 `CanvasReceipt` 之外带 `move: { targetObjectId, movedNodeIds, movedEdgeIds, droppedEdgeIds, skipped, createdNodeId? }`。同 operationId 同输入返回原回执。
+
+### 9.2 撤销：显式逆命令 `canvas:undoMove`
+
+- 请求 `{ operationId, moveOperationId }`。Main 从已完成的移动记录取出移动明细，在**当前磁盘内容**上按规则做逆移动，而不是恢复旧快照：当时移动且仍在目标画板的节点（保留之后对它们的编辑，回到原坐标、原分组/dock 归属——前提是被引用节点仍在）移回来源；当时随行和被丢弃的连线在两端都存在时恢复；目标画板里连到这些节点的新连线移除。已被永久删除的节点跳过。
+- 若该次移动新建了子画板，逆移动后子画板内没有任何节点且来源画板上那张卡还在，则卡片从来源画板移除，子画板文件经资料库回收站后彻底删除（空文件，不留垃圾）；子画板里还有别的内容则保留卡片与文件。
+- 逆命令走同一发布顺序与冲突规则，有自己的 operationId 与回执；没有节点可移回时返回 `nothing_to_undo`。因此撤销不会留下重复卡片或没有卡片指向的子文件。
+- 界面：移动后的提示带“撤销”；画板自己的撤销栈在权威内容被外部替换时已清空，栈空时 ⌘Z 与撤销按钮落到这条逆命令（先撤销移动之后的本地编辑，再撤销移动本身）。离开这两个画板或做了新的跨画板移动后，这条撤销不再提供。跨画板移动不提供重做。
+
+### 9.3 子画板卡与文件同进同出
+
+- 规则：子画板文件跟着它的卡片。卡片进画板回收站（或被撤销新建等操作从画板移除）时，子画板文件（连同其子文件夹与 `.assets`）经页面服务进资料库回收站；卡片恢复（含撤销删除）时文件先恢复到原位置再写画板；原位置被占用时恢复失败，画板不改。卡片被永久删除后文件留在资料库回收站，可在那里恢复成独立画板或彻底删除。Stillroom“删除文件夹把内容交还上级”的做法不采用：Ready 的回收站是可恢复的，内容跟着走才能原样恢复。
+- 实现：`canvas:write` 由 `SubBoardCoordinator` 包一层。写入前用纯函数 `subBoardEffects(before, after)` 算出需要恢复和需要回收的子画板；先恢复、再写画板、写入完成后回收。回收清单随写入计划持久保存（`plan.subBoards`），页面操作 id 由写入 operationId 派生；启动恢复时补做“画板已写完但文件还没进回收站”的操作。恢复在写入前中断时只是文件已回到原位而卡片仍在回收站，不丢内容。
+- 校验放宽：已回收的子画板卡不参与集合校验的引用/归属检查，也不检查文件存在（文件此时在回收站）。
+- 反方向（实施中发现的既有缺口）：从侧栏把子画板文件回收、而它的卡片还在父画板上时，原先父画板的任何写入都会因“引用无法解析”落入 recovery-required。现在这样的卡片同样不参与上述检查，父画板保持可写，卡片显示“在资料库回收站”，文件恢复后照常可用。卡片不会被自动放进画板回收站。
+
+### 9.4 子画板卡、快捷键与 Stillroom 导入
+
+- 子画板卡显示子画板标题、卡片数和至多四张图片缩略图；数据来自只读查询 `canvas:subBoards(parentObjectId)`（标题、未回收卡片数、图片路径、是否可用），不为每个子画板开句柄。
+- 选中子画板卡按 Enter 进入；⌥↑ 回到上一级。两者登记在 `src/shared/app-shortcuts.ts`（canvas 范围）。
+- 导入 Stillroom 空间：画板“更多”菜单 →“导入 Stillroom 空间…”。Main 的 `canvas:importStillroom` 弹系统文件选择（完整空间 ZIP，或自动保存 JSON——后者按 §2.5 标为不完整），用既有 `stillroom-zip` / `stillroom-json` 导入服务写到当前画板文件夹下，再在当前画板放一张子画板卡；回执沿用导入回执并带卡片 id。导入成功而放卡失败时如实返回已导入的位置。
+
+### 9.5 验收
+
+| 合同 | 入口 |
+| --- | --- |
+| 纯规划：成员展开、连线去留、归属清理、位置、逆移动 | `ready-canvas-card-move.test.ts` |
+| 两文件发布、附件跟随、冲突、重放、撤销、空子画板清理 | `ready-canvas-card-move-native.test.ts` |
+| 卡片与文件同进同出、撤销删除、原位被占、启动补做 | `ready-canvas-subboard-native.test.ts` |
+| 真实窗口：选区→收进子画板→进入→移出→撤销；拖卡到子画板卡；删除子画板卡并恢复；导入 Stillroom | `scripts/verify-ready-next-canvas.cjs` 新增步骤（隐藏窗口） |
+
+### 9.6 交付记录（2026-11-14）
+
+- 已实现 9.1–9.4。Main：`board-engine/card-moves.ts`（移动与逆移动）、`sub-boards.ts`（`SubBoardCoordinator`：写入包装、回收/恢复、启动补做、卡片摘要）、`stillroom-entry.ts`；纯规划在 `shared/ready-canvas/card-move.ts`。IPC：`canvas:moveCards`、`canvas:undoMove`、`canvas:subBoards`、`canvas:importStillroom`，`canvas:write` 改经协调器。界面：`components/canvas/SubBoardCard.tsx`、`useSubBoards.tsx`、`surface/sub-board-actions.tsx`、`modules/canvas/folders.ts`、`drop-into-board.ts`；拖拽管线只加了 `dropTarget` / `dropInto` 两个回调。
+- 检查：`ready-canvas-card-move.test.ts` 6 项；原生 `ready-canvas-card-move-native.test.ts` 3 项、`ready-canvas-subboard-native.test.ts` 4 项（已登记 verify:native），其余画板原生测试与页面服务原生测试保持通过；隐藏窗口 `verify-ready-next-canvas.cjs` 全部步骤通过（新增 07–11）。该脚本现在固定以 `READY_START_HIDDEN=1` 启动。
+- 未做：选区 / 子画板单独下载 ZIP（现有“导出为 Markdown”已经把选区或整块画板连同附件打成 ZIP，没有另做一条）；子画板卡与草稿卡跨画板移动；跨画板移动的重做；子画板在卡片上改名（仍在侧栏改名）；Stillroom 自动保存 JSON 的媒体文件夹选择（只选一个文件，JSON 按不完整导入）。
+
+## 10. 交互层对齐 Stillroom（2026-11-14，合同先于实现）
+
+起因：用户在真实窗口里看到画板没有 Stillroom 的对齐与自适应缩放，连线不能删除也不能撤销。只读审计确认后，本节冻结交互层要守的规则；实现与验收记录在 §10.4。范围只有交互层（`modules/canvas/interaction/`、`components/canvas/surface/`），不新增写入通道、IPC、schema 字段。
+
+### 10.1 数据规则
 
 1. **图形素材路径只有一个来源**：`graphicAssetPath(画板路径, 图形, 宽, 高)`（`shared/ready-canvas/graphics.ts`），内容是 `画板名.assets/<SVG 字节的 SHA-256>.svg`。界面预测的路径必须与 Main 保存后的路径逐字节相同，否则界面会把自己的修改当成外部更新、清空撤销记录。验收：`ready-canvas-write-native.test.ts` 用真实 `CanvasService` 比较“界面预测的画板”与“Main 保存后读回的画板”。
 2. **连线不进回收站**：删除连线发 `deleteEdge`，是一步撤销；卡片仍进回收站。两端卡片同时被回收的连线不删，随卡片隐藏、随卡片恢复（`activeCanvasContent` 的既有推导）。旧数据里已带 `ready.trash` 的连线由“全部恢复”“清空”一并处理。理由：连线没有正文，回收站里列“连线”只是噪音；卡片与连线一起删时，一次撤销两者都回来。
@@ -156,7 +206,7 @@ M3 编辑器、SaveToPicker 归原负责人；M4 只消费公开接口。其他�
 7. **“还原排版”就是撤销**：P / L / R 排版、自适应缩放、成组缩放都是一步撤销，不为“排版前”另存字段（`NodeReadySchema` 是严格模式，旧版本会拒绝新字段）。
 8. **视图偏好与镜头是本机状态**（M4 §2.8）：智能参考线、磁吸、间距、自适应缩放、图片圆角存 `localStorage` 的 `ready-next.canvas.view`；每张画板的镜头存 `ready-next.canvas.camera`（按画板对象 id，最多 200 张，最久未用的先丢）。两者都不进 `.canvas`，随 profile 隔离。
 
-### 9.2 行为规则
+### 10.2 行为规则
 
 | 行为 | 规则 |
 | --- | --- |
@@ -172,7 +222,7 @@ M3 编辑器、SaveToPicker 归原负责人；M4 只消费公开接口。其他�
 | 键盘 | ⌘ 点切换选中；⌘C / ⌘X / ⌘V 复制、剪切、粘贴卡片（剪贴板里没有卡片时 ⌘V 仍粘贴文字或网址）；⌘D 原地偏移复制；方向键在卡片间移动焦点，Enter 打开；⌥⌘] / ⌥⌘[ 上移 / 下移一层（⌘] / ⌘[ 已是全局的前进 / 后退）。⌥ 拖动仍是把卡片的 Ready 引用拖出去，不是复制 |
 | 滚轮 | 捏合与 ⌘ / Ctrl 滚轮缩放；触控板双指平移；带格的鼠标滚轮缩放。判定比 Stillroom 保守：一串滚轮事件按第一个事件定性并保持（间隔超过 180ms 才重新判定），只有 `deltaMode` 为行、或无横向分量且旧式 `wheelDeltaY` 是 120 的整数倍时才算滚轮格；触控板起手只有几个像素，所以快速双指滑动不会中途变成缩放 |
 
-### 9.3 实现时定下的取舍
+### 10.3 实现时定下的取舍
 
 - **连线硬删除**（见 9.1-2）；选中连线时选区条只显示“N 条连线”和“删除连线”。
 - **画完回到选择**：不做“再按一次键锁定工具”，规则只有一条（手绘除外）。
@@ -186,7 +236,7 @@ M3 编辑器、SaveToPicker 归原负责人；M4 只消费公开接口。其他�
 - **文字样式**：`appearance` 里已有的字号、粗细、对齐在选区条的“文字”菜单里可改（只在选中的全是文字卡或便签时出现）；字号三档 13 / 18 / 26px。编辑状态下的块编辑器仍按自己的字号显示，没有跟随 `fontScale`。
 - **层级**：选区条的“置顶 / 置底”两个按钮并成一个“层级”菜单，加“上移一层 / 下移一层”。
 
-### 9.4 交付记录（2026-11-14）
+### 10.4 交付记录（2026-11-14）
 
 - **根因**：`CanvasDocument` 拼图形素材路径时没有等待哈希（`sha256` 是异步的），路径成了 `X.assets/[object Promise].svg`；Main 保存时按真实哈希改写，界面发现保存结果与自己的预期不同，按“外部更新”处理——清空撤销记录并提示“画板已被更新”。所以矩形、箭头、手绘都无法撤销，而且每画一次都会清掉之前的撤销记录（包括刚画的连线）。连线本身没有任何选中与删除入口。
 - **改动**：`interaction/` 新增 `adaptive.ts`（停靠判定、按比例落位、落位操作）、`preferences.ts`（本机偏好与镜头）、`settle.ts`（落位动画）、`clipboard.ts`、`navigate.ts`；`gestures.ts` 重写移动与缩放两种手势并加连线点选、滚轮判定；`surface/` 新增 `CanvasHandles.tsx`、`CanvasViewSettings.tsx`、`view-settings-float.tsx`，`CanvasSurface` / `CanvasCard` / `CanvasChrome` / `useCanvasBuffer` / `surface.css` 相应接线；`shared/ready-canvas/graphics.ts` 新增 `graphicAssetPath`；`app-shortcuts.ts` 登记 ⌘D、⌥⌘]、⌥⌘[、Enter。没有改 Main、preload、IPC 与 schema。

@@ -1,0 +1,29 @@
+/* The sub-board card (M4 §9.4): an inlay-glass tile on the stage, quieter than a paper card — a container, not content. */
+@layer components {
+  .rn-canvas .canvas-card[data-kind='subcanvas'] {
+    /* Inlay glass over the stage's own colour: a tile of the ground, and nothing under it shows through. */
+    background: linear-gradient(var(--rn-inlay), var(--rn-inlay)), var(--canvas-stage);
+    box-shadow: inset 0 1px 0 var(--rn-glass-inner-hi), inset 0 0 0 .5px var(--rn-hair-2), var(--rn-shadow-1);
+    transition: scale var(--rn-d-2) var(--rn-ease-std), background var(--rn-d-2) var(--rn-ease-std);
+  }
+  .rn-canvas .canvas-card[data-kind='subcanvas'] .canvas-card-content { padding: 0; }
+  /* Cards are being dragged over it: it leans in to take them. */
+  .rn-canvas .canvas-card[data-kind='subcanvas'][data-drop-target] { scale: 1.04; background: linear-gradient(var(--rn-fill-3), var(--rn-fill-3)), var(--canvas-stage); outline: 2px solid var(--canvas-accent); outline-offset: 2px; }
+  .rn-canvas .canvas-subboard { position: relative; display: flex; flex-direction: column; gap: 10px; width: 100%; height: 100%; box-sizing: border-box; padding: 12px; border-radius: inherit; overflow: hidden; }
+  .rn-canvas .canvas-subboard::after { content: ''; position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity var(--rn-d-3) var(--rn-ease-std);
+    background: radial-gradient(circle 160px at var(--gx, 50%) var(--gy, 50%), var(--rn-fill-2), transparent 70%); }
+  .rn-canvas .canvas-card:hover .canvas-subboard::after { opacity: 1; }
+  .rn-canvas .canvas-card .canvas-subboard__thumbs { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: minmax(0, 1fr); gap: 4px; }
+  .rn-canvas .canvas-card .canvas-subboard__thumbs[data-count='1'] { grid-template-columns: minmax(0, 1fr); }
+  .rn-canvas .canvas-card .canvas-subboard__thumbs[data-count='3'] img:first-child { grid-row: span 2; }
+  .rn-canvas .canvas-card .canvas-subboard__thumbs img { width: 100%; height: 100%; min-height: 0; object-fit: cover; border-radius: 8px; box-shadow: inset 0 0 0 .5px var(--rn-hair); }
+  .rn-canvas .canvas-subboard__label { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 0 4px 2px; }
+  /* No pictures: the name sits in the middle of the tile. */
+  .rn-canvas .canvas-subboard:not([data-thumbs]) { justify-content: center; }
+  .rn-canvas .canvas-subboard:not([data-thumbs]) .canvas-subboard__label { align-items: center; text-align: center; }
+  .rn-canvas .canvas-subboard__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; font-size: var(--rn-fs-lg); line-height: 24px; font-weight: 500; letter-spacing: -.01em; }
+  .rn-canvas .canvas-subboard__count { display: inline-flex; align-items: center; gap: 5px; color: var(--rn-ink-3); font-size: var(--rn-fs-xs); line-height: 16px; font-variant-numeric: tabular-nums; }
+  .rn-canvas .canvas-subboard__count svg { width: 12px; height: 12px; flex: none; }
+  .rn-canvas .canvas-subboard[data-away] .canvas-subboard__title { color: var(--rn-ink-3); }
+  @media (prefers-reduced-motion: reduce) { .rn-canvas .canvas-card[data-kind='subcanvas'] { transition: none; } }
+}

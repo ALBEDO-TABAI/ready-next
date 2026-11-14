@@ -291,10 +291,118 @@ async function main() {
     await page.getByRole('menuitem', { name: '导出为 PNG', exact: true }).click()
     const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
     await poll(() => fs.existsSync(pngPath) && fs.statSync(pngPath).size > 1000 && fs.readFileSync(pngPath).subarray(0, 8).equals(PNG_SIGNATURE), 'PNG export missing')
+    // M4 §9: sub-boards as folders. Every pointer action goes to a point where the card is really on top.
+    const boardStage = name => page.locator(`[data-workbench-mode-panel="document"] .rn-canvas[aria-label="${name}"]`).first()
+    const readChild = name => JSON.parse(fs.readFileSync(path.join(vault, 'X', `${name}.canvas`), 'utf8'))
+    const fitBoard = async name => { await boardStage(name).getByRole('button', { name: '适应内容', exact: true }).click(); await page.waitForTimeout(250) }
+    const pointOn = async (id, ignore = []) => {
+      let point = null
+      await poll(async () => {
+        point = await page.evaluate(({ id, ignore }) => {
+          const element = document.querySelector(`[data-workbench-mode-panel="document"] [data-node-id="${id}"]`)
+          if (!element) return null
+          const rect = element.getBoundingClientRect()
+          for (let i = 1; i < 10; i++) for (let j = 1; j < 10; j++) {
+            const x = rect.left + rect.width * i / 10, y = rect.top + rect.height * j / 10
+            const top = document.elementsFromPoint(x, y).find(hit => hit.closest('[data-canvas-ui]') || (hit.closest('[data-node-id]') && !ignore.includes(hit.closest('[data-node-id]').dataset.nodeId)))
+            if (top && !top.closest('[data-canvas-ui]') && top.closest('[data-node-id]').dataset.nodeId === id) return { x, y }
+          }
+          return null
+        }, { id, ignore })
+        return Boolean(point)
+      }, `card ${id} cannot be reached`)
+      return point
+    }
+    const documentIds = readCanvas().nodes.filter(node => node.ready.kind === 'document' && !node.ready.trash).map(node => node.id)
+    assert.equal(documentIds.length, 2)
+    // Selection → 收进子画板: one new sub-board card where the two cards were; the cards are in the child file.
+    await fitBoard('X')
+    const first = await pointOn(documentIds[0]); await page.mouse.click(first.x, first.y)
+    const second = await pointOn(documentIds[1]); await page.keyboard.down('Shift'); await page.mouse.click(second.x, second.y); await page.keyboard.up('Shift')
+    await page.mouse.click(second.x, second.y, { button: 'right' })
+    await page.getByRole('menuitem', { name: '收进子画板', exact: true }).click()
+    await poll(() => fs.existsSync(path.join(vault, 'X', '子画板 2.canvas')) && !readCanvas().nodes.some(node => documentIds.includes(node.id)), '收进子画板 did not move the cards')
+    assert.deepEqual(readChild('子画板 2').nodes.map(node => node.id).sort(), [...documentIds].sort())
+    const folderCard = readCanvas().nodes.find(node => node.ready.kind === 'subcanvas' && node.file === 'X/子画板 2.canvas')
+    assert.ok(folderCard, 'The new sub-board has no card on its parent')
+    await boardStage('X').locator(`[data-node-id="${folderCard.id}"] .canvas-subboard__count`, { hasText: '2 张卡片' }).waitFor()
+    await page.getByText(/已把 2 张卡片收进「子画板 2」/).waitFor()
+    await snapshot('07-collected-into-sub-board')
+    // Enter opens the selected sub-board card; 移出到上一级 takes one card back to X and follows it there.
+    await fitBoard('X')
+    const folderPoint = await pointOn(folderCard.id); await page.mouse.click(folderPoint.x, folderPoint.y)
+    await page.keyboard.press('Enter')
+    await boardStage('子画板 2').waitFor()
+    await fitBoard('子画板 2')
+    const inside = await pointOn(documentIds[0]); await page.mouse.click(inside.x, inside.y); await page.mouse.click(inside.x, inside.y, { button: 'right' })
+    await page.getByRole('menuitem', { name: '移出到上一级', exact: true }).click()
+    await poll(() => readCanvas().nodes.some(node => node.id === documentIds[0]) && readChild('子画板 2').nodes.length === 1, '移出到上一级 did not move the card')
+    await boardStage('X').waitFor()
+    await page.getByText(/已把 1 张卡片移出到「X」/).waitFor()
+    await snapshot('08-moved-out-to-parent')
+    // ⌘Z on the parent (its own history is empty after the move): the card goes back into the sub-board, no copy stays.
+    await boardStage('X').focus()
+    await page.keyboard.press(`${mod}+z`)
+    await poll(() => !readCanvas().nodes.some(node => node.id === documentIds[0]) && readChild('子画板 2').nodes.length === 2, 'Undo did not return the card to the sub-board')
+    await snapshot('08b-move-out-undone')
+    // ⌥↑ goes from a sub-board to its parent.
+    await fitBoard('X')
+    const again = await pointOn(folderCard.id); await page.mouse.dblclick(again.x, again.y)
+    await boardStage('子画板 2').waitFor(); await boardStage('子画板 2').focus()
+    await page.keyboard.press('Alt+ArrowUp')
+    await boardStage('X').waitFor()
+    // Drag a card onto the sub-board card: it moves in.
+    await fitBoard('X')
+    const linkId = readCanvas().nodes.find(node => node.type === 'link' && !node.ready.trash).id
+    const from = await pointOn(linkId), to = await pointOn(folderCard.id, [linkId])
+    await page.mouse.move(from.x, from.y); await page.mouse.down()
+    await page.mouse.move((from.x + to.x) / 2, (from.y + to.y) / 2, { steps: 8 }); await page.mouse.move(to.x, to.y, { steps: 8 })
+    await boardStage('X').locator(`[data-node-id="${folderCard.id}"][data-drop-target]`).waitFor()
+    await page.screenshot({ path: path.join(evidence, '09a-drag-over-sub-board.png') })
+    await page.mouse.up()
+    await poll(() => !readCanvas().nodes.some(node => node.id === linkId) && readChild('子画板 2').nodes.some(node => node.id === linkId), 'The dragged card did not move into the sub-board')
+    await boardStage('X').locator(`[data-node-id="${folderCard.id}"] .canvas-subboard__count`, { hasText: '3 张卡片' }).waitFor()
+    await snapshot('09-dragged-into-sub-board')
+    // Delete the sub-board card: its file leaves with it (library bin) and comes back with it, content intact.
+    await fitBoard('X')
+    const doomed = await pointOn(folderCard.id); await page.mouse.click(doomed.x, doomed.y)
+    await page.keyboard.press('Delete')
+    await poll(() => readCanvas().nodes.find(node => node.id === folderCard.id)?.ready.trash && !fs.existsSync(path.join(vault, 'X', '子画板 2.canvas')), 'The sub-board file did not leave with its card')
+    await boardStage('X').getByRole('button', { name: '回收站', exact: true }).click()
+    await page.screenshot({ path: path.join(evidence, '10a-sub-board-in-bin.png') })
+    await boardStage('X').getByRole('button', { name: `恢复 ${folderCard.id}`, exact: true }).click()
+    await poll(() => !readCanvas().nodes.find(node => node.id === folderCard.id)?.ready.trash && fs.existsSync(path.join(vault, 'X', '子画板 2.canvas')), 'The sub-board file did not come back with its card')
+    assert.equal(readChild('子画板 2').nodes.length, 3)
+    await boardStage('X').getByRole('button', { name: '回收站', exact: true }).click()
+    await snapshot('10-sub-board-deleted-and-restored')
+    // 导入 Stillroom 空间 (Main's open dialog answered with a fixed file): the space arrives as a sub-board of X.
+    const JSZip = require('jszip')
+    const note = { id: 'folder', type: 'folder', title: 'Folder', text: '', createdAt: 1, updatedAt: 1, canvasX: 0, canvasY: 0, parentId: null, deletedAt: null, metadata: {} }
+    const space = new JSZip(); space.file('space.json', JSON.stringify({ app: 'stillroom', version: 1, notes: [note, { ...note, id: 'text', type: 'text', text: '<p>来自 Stillroom</p>', parentId: null, canvasX: 400 },
+      ...['one', 'two', 'three'].map((key, index) => ({ ...note, id: key, type: 'image', mediaUrl: `idb:${key}`, canvasX: 800 + index * 300, metadata: { originalFilename: `${key}.png` } }))] }))
+    // Three pictures of different tones, so the sub-board card has thumbnails to show.
+    for (const [index, key] of ['one', 'two', 'three'].entries()) space.file(`media/${key}`, await app.evaluate(({ nativeImage }, tone) => {
+      const size = 96, pixels = Buffer.alloc(size * size * 4)
+      for (let i = 0; i < size * size; i++) { const shade = 70 + tone * 60 + Math.round((i % size) / size * 40); pixels[i * 4] = shade; pixels[i * 4 + 1] = shade; pixels[i * 4 + 2] = shade + 8; pixels[i * 4 + 3] = 255 }
+      return nativeImage.createFromBitmap(pixels, { width: size, height: size }).toPNG().toString('base64')
+    }, index), { base64: true })
+    const spacePath = path.join(temporary, '我的空间.zip'); fs.writeFileSync(spacePath, await space.generateAsync({ type: 'nodebuffer' }))
+    await app.evaluate(({ dialog }, file) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [file] }) }, spacePath)
+    await boardStage('X').getByRole('button', { name: '更多', exact: true }).click()
+    await page.getByRole('menuitem', { name: '导入 Stillroom 空间…', exact: true }).click()
+    await poll(() => fs.existsSync(path.join(vault, 'X', '我的空间.canvas')) && readCanvas().nodes.some(node => node.ready.kind === 'subcanvas' && node.file === 'X/我的空间.canvas'), 'The Stillroom space was not imported as a sub-board')
+    assert.ok(readChild('我的空间').nodes.some(node => node.type === 'text' && node.text.includes('来自 Stillroom')))
+    await page.getByText(/已导入 Stillroom 空间「我的空间」/).waitFor()
+    await poll(async () => await boardStage('X').locator('.canvas-subboard__thumbs img').count() === 3, 'The imported sub-board card shows no thumbnails')
+    await boardStage('X').locator('.canvas-subboard__count', { hasText: '5 张卡片' }).waitFor()
+    await boardStage('X').locator('.canvas-card[data-kind="subcanvas"][data-selected="true"] .canvas-subboard__thumbs').waitFor()
+    await snapshot('11-stillroom-import')
+    await fitBoard('X')
     // MS3: 永久删除 takes a recycled card out of the file; 清空 asks once more in place, then empties the bin.
     const purgeCard = async (kind) => {
       const id = readCanvas().nodes.find(node => node.ready.kind === kind && !node.ready.trash).id
-      await stage.locator(`.canvas-card[data-node-id="${id}"]`).click()
+      // A point where the card is on top: the selection bar of the card chosen before may float over its middle.
+      const spot = await pointOn(id); await page.mouse.click(spot.x, spot.y)
       await page.keyboard.press('Delete')
       await poll(() => readCanvas().nodes.find(node => node.id === id)?.ready.trash, `${kind} card was not recycled`)
       return id

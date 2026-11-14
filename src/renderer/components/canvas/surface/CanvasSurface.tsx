@@ -24,6 +24,8 @@ import { CanvasCorner, CanvasCrumbs, CanvasDock, SelectionBar } from './CanvasCh
 import { Button, closeFloat, EmptyState, MenuList, openFloat, type FloatAnchor, type MenuEntry } from '../../ui'
 import { cardFrame } from '../../../modules/canvas/interaction/graphics'
 import { useBoardCommands } from '../../../modules/canvas/board-commands'
+import { subBoardDrop } from '../../../modules/canvas/drop-into-board'
+import { subBoardBarActions, subBoardItems } from './sub-board-actions'
 import { CalendarPlus, ClipboardPaste, CopyPlus, FileDown, FilePlus2, ImageDown, Sparkles, StickyNote, Trash2, Type } from 'lucide-react'
 
 const TOOL_KEYS: Record<string, Tool> = { v: 'select', h: 'pan', b: 'rect', a: 'arrow', c: 'edge', d: 'path' }
@@ -64,7 +66,8 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
   const gestures = useMemo(() => new CanvasGestures({ scene: () => scene.current, select: setSelected, camera: setCamera,
     commit: ops => latest.current.buffer.commit(ops), transform: build => latest.current.buffer.transform(build), graphic: (draft, node) => latest.current.buffer.graphic(draft, node), measure: work => latest.current.props.onFrameWork?.(work),
     // One connector or shape, then back to the select tool with the new thing picked (Delete removes it); freehand keeps drawing.
-    drawn: (kind, id) => { if (kind !== 'path') { setSelected([id]); setTool('select') } } }), [])
+    drawn: (kind, id) => { if (kind !== 'path') { setSelected([id]); setTool('select') } },
+    ...subBoardDrop((ids, target) => latest.current.props.subBoards?.moveInto?.(ids, target)) }), []) // M4 §9: cards dropped onto a sub-board card
   const active = useMemo(() => activeCanvasContent(canvas), [canvas])
   const byId = useMemo(() => new Map(active.nodes.map(n => [n.id, n])), [active])
   const index = useMemo(() => new SpatialIndex(active.nodes.map(n => ({ ...n, ...visualBounds(n) }))), [active])
@@ -209,6 +212,9 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     const mod = e.ctrlKey || e.metaKey, key = e.key.toLowerCase()
     if (e.key === ' ') { e.preventDefault(); gestures.space = true }
     else if (mod && key === 'a') { e.preventDefault(); setSelected([...active.nodes.map(n => n.id), ...active.edges.map(edge => edge.id)]) }
+    // M4 §9: the last cross-board move when the board's own history is empty; ⌥↑ to the parent board.
+    else if (mod && key === 'z' && !e.shiftKey && !buffer.canUndo && props.subBoards?.undo) { e.preventDefault(); props.subBoards.undo() }
+    else if (!mod && e.altKey && e.key === 'ArrowUp' && props.subBoards?.openParent) { e.preventDefault(); props.subBoards.openParent() }
     else if (mod && key === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo() }
     else if (mod && e.altKey && (e.code === 'BracketRight' || e.code === 'BracketLeft')) { e.preventDefault(); if (chosen.length) void commit(layerOperations(canvas, chosen.map(n => n.id), e.code === 'BracketRight' ? 'forward' : 'backward')) }
     else if (mod && !e.shiftKey && key === 'd') { e.preventDefault(); duplicate() }
@@ -261,6 +267,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     ...(props.captureImage ? [{ id: 'png', label: chosen.length ? '把选中的卡片导出为 PNG' : '导出为 PNG', icon: <ImageDown />, onSelect: () => void exportPng() }] : []),
     ...(props.onExport ? (['md', 'pdf'] as const).map(kind => ({ id: kind, label: `${chosen.length ? '把选中的卡片导出为' : '导出为'} ${kind === 'md' ? 'Markdown' : 'PDF'}`, icon: <FileDown />,
       onSelect: () => { void props.onExport!(kind, selected).catch(cause => setCompositionError(String(cause))) } })) : []),
+    ...(props.moreItems ?? []),
   ] : undefined
   const commands = useBoardCommands({ text: () => placeCard('text'), note: () => placeCard('note'), fit: () => fit(),
     zoom100: () => setCamera(c => zoomAt(c, { x: size.width / 2, y: size.height / 2 }, 1)), search: () => setSearch(current => current ?? ''),
@@ -310,6 +317,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
       ...(props.onAskAI && chosen.length > 0 ? [{ id: 'ask', label: '问 AI', icon: <Sparkles />, disabled: busy || composing, onSelect: () => { void props.onAskAI!(chosen.map(n => n.id)).catch(fail) } }] : []),
       ...(schedulable ? [{ id: 'schedule', label: '安排日程…', icon: <CalendarPlus />, disabled: busy || composing, onSelect: () => props.onScheduleNode!(chosen[0]) }] : []),
       { id: 'duplicate', label: '创建副本', icon: <CopyPlus />, hint: '⌘D', disabled: busy || composing, onSelect: duplicate },
+      ...subBoardItems(props.subBoards, chosen, busy || composing),
       { id: 'delete', label: '删除', icon: <Trash2 />, hint: 'Delete', danger: true, disabled: busy || composing, onSelect: recycle },
     ]
     const anchor: FloatAnchor = { left: menu.client.x, top: menu.client.y, right: menu.client.x, bottom: menu.client.y }
@@ -407,15 +415,15 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
       onZoomReset={() => setCamera(c => zoomAt(c, { x: size.width / 2, y: size.height / 2 }, 1))}
       onTrash={() => { gestures.cancel(); setEditing(null); setSearch(null); setTrash(!trash) }} />}
     {!trash && !capturing && <CanvasDock tool={tool} lastShape={lastShape} disabled={busy || !!editing} graphics={!!props.prepareGraphic}
-      canUndo={buffer.canUndo} canRedo={buffer.canRedo} busy={busy} onTool={chooseTool} onCard={kind => placeCard(kind)}
-      onUndo={undo} onRedo={redo} />}
+      canUndo={buffer.canUndo || !!props.subBoards?.undo} canRedo={buffer.canRedo} busy={busy} onTool={chooseTool} onCard={kind => placeCard(kind)}
+      onUndo={() => { if (buffer.canUndo || !props.subBoards?.undo) undo(); else props.subBoards.undo() }} onRedo={redo} />}
     {selectionBox && <SelectionBar left={selectionBox.left} top={selectionBox.top} count={chosen.length} edges={chosenEdges.length} busy={busy || composing}
       text={textual ? { size: shared(n => Math.round((n.ready.appearance?.fontScale ?? DEFAULT_FONT_SCALE) * 24)), weight: shared(n => n.ready.appearance?.weight), align: shared(n => n.ready.appearance?.align) } : undefined}
       canGroup={chosen.length > 1} canUngroup={chosen.some(n => n.ready.groupId || n.type === 'group')}
       actions={{
         group: () => void commit(groupOperations(chosen, crypto.randomUUID())), ungroup: () => void commit(ungroupOperations(canvas, selected)),
         layout: arrange, layer: placement => void commit(layerOperations(canvas, chosen.map(n => n.id), placement)),
-        remove: recycle, textStyle: textual ? textStyle : undefined,
+        remove: recycle, textStyle: textual ? textStyle : undefined, ...subBoardBarActions(props.subBoards, chosen),
         addToDocument: props.onAddToDocument ? () => void addToDocument() : undefined,
         askAI: props.onAskAI ? () => { void props.onAskAI!(chosen.map(n => n.id)).catch(fail) } : undefined,
         schedule: schedulable ? () => props.onScheduleNode!(chosen[0]) : undefined,

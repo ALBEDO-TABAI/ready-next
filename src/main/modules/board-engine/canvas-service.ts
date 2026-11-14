@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { readFile, unlink } from 'node:fs/promises'
 import { dirname, join, relative } from 'node:path'
 import { z } from 'zod'
-import { applyCanvasOperations, CanvasIdSchema, CanvasPathSchema, graphicSvg, readCanvas, ReadyCanvasSchema, serializeCanvas, stableJson, validateCanvasCollection, type CanvasWriteRequest, type CanvasWriteResult, type CanvasReceipt, type CanvasOperation, type ReadyCanvas, type CanvasBufferConfirmation } from '../../../shared/ready-canvas'
+import { applyCanvasOperations, subBoardEffects, CanvasIdSchema, CanvasPathSchema, graphicSvg, readCanvas, ReadyCanvasSchema, serializeCanvas, stableJson, validateCanvasCollection, type CanvasWriteRequest, type CanvasWriteResult, type CanvasReceipt, type CanvasOperation, type ReadyCanvas, type CanvasBufferConfirmation, type CardMoveDetail, type SubBoardEffects } from '../../../shared/ready-canvas'
 import { checkedPath, ensureDirectory, hashBytes, publishNewFile, stageFile, vaultRoot } from '../document-drafts/files'
 import { publishFileAtomically } from '../document-engine/atomic-file-publish'
 import { withDocumentPathLock } from '../document-engine/document-write-service'
@@ -31,6 +31,8 @@ export interface CanvasFile { original?: string; path: string; content: string; 
 export interface CanvasPlan {
   root: string; path: string; objectId: string; operationId: string; original: string | null; content: string
   expectedBuffer?: CanvasBufferConfirmation; savingBuffer?: boolean; files: CanvasFile[]; affectedNodeIds: string[]; incomplete?: Array<{ sourceId: string; reason: string }>
+  /** M4 §9: a two-board move never merges into an unsaved buffer; sub-board files that follow their cards. */
+  strict?: boolean; move?: CardMoveDetail & { kind: 'move' | 'undo' }; subBoards?: SubBoardEffects & { purge?: boolean }
 }
 interface Row { id: string; object_id: string; state: string; input_hash: string; plan_json: string; result_json: string | null }
 const queues = new Map<string, Promise<unknown>>()
@@ -74,6 +76,8 @@ export class CanvasService {
     const opened = await this.open(objectId); this.release(opened.handleId)
     return { ...opened, handleId }
   }
+  /** The object a live handle was opened for. */
+  holds(handleId: string): string | undefined { return this.handles.get(handleId) }
   release(handleId: string): void { this.handles.delete(CanvasIdSchema.parse(handleId)) }
   buffer(objectId: string): CanvasBuffer | null {
     const row = this.registry.db.prepare('SELECT snapshot_json FROM canvas_buffers WHERE object_id=?').get<{ snapshot_json: string }>(objectId)
@@ -158,7 +162,8 @@ export class CanvasService {
         if (!existsSync(this.location(target))) files.push({ path: target, content: bytes.toString('base64'), sha256: hashBytes(bytes) })
       }
       const affected = new Set([...before.nodes, ...canvas.nodes].filter(node => JSON.stringify(before.nodes.find(n => n.id === node.id)) !== JSON.stringify(canvas.nodes.find(n => n.id === node.id))).map(n => n.id))
-      const plan: CanvasPlan = { root: this.root, path: relative(this.root, path), objectId: request.objectId, operationId: request.operationId, original, content: serializeCanvas(canvas), files, affectedNodeIds: [...affected] }
+      const subBoards = subBoardEffects(before, canvas)
+      const plan: CanvasPlan = { root: this.root, path: relative(this.root, path), objectId: request.objectId, operationId: request.operationId, original, content: serializeCanvas(canvas), files, affectedNodeIds: [...affected], ...(subBoards.restore.length || subBoards.trash.length ? { subBoards } : {}) }
       this.record(plan, fingerprint)
       return this.execute(plan)
     })
@@ -206,6 +211,8 @@ export class CanvasService {
       if (phase === 'commit' && canvas && (!reply.canvas || serializeCanvas(reply.canvas) !== serializeCanvas(canvas))) throw new Error('buffer_confirmation_expired: content readback mismatch')
     } finally { clearTimeout(timer) }
   }
+  /** Objects in the library bin: a sub-board card whose file is there waits for it instead of failing the board. */
+  recycled(): Set<string> { return new Set(this.registry.list().filter(o => o.status === 'trashed').map(o => o.id)) }
   private validate(plan: CanvasPlan): void {
     const entries = this.registry.list().filter(o => o.kind === 'canvas' && o.status === 'present' && o.current_path?.startsWith(this.root + '/') && o.id !== plan.objectId).map(o => ({ path: relative(this.root, checkedPath(this.root, o.current_path!)), canvas: ReadyCanvasSchema.parse(JSON.parse(readFileSync(o.current_path!, 'utf8'))) }))
     const next = { path: plan.path, canvas: ReadyCanvasSchema.parse(JSON.parse(plan.content)) }
@@ -216,7 +223,7 @@ export class CanvasService {
       entries.push(child)
     }
     const objects = new Map(this.registry.list().filter(o => o.status === 'present' && o.current_path).map(o => [o.id, relative(this.root, o.current_path!)]))
-    validateCanvasCollection([...entries, next], objects)
+    validateCanvasCollection([...entries, next], objects, this.recycled())
     if (next.canvas.ready.id !== plan.objectId) throw new Error('identity_conflict')
   }
   private async execute(plan: CanvasPlan, savingBuffer = plan.savingBuffer ?? false): Promise<CanvasWriteResult> {
@@ -246,6 +253,7 @@ export class CanvasService {
         let next = ReadyCanvasSchema.parse(JSON.parse(plan.content))
         if (!savingBuffer && current !== plan.content && buffer && plan.original !== null && serializeCanvas(buffer.canvas) !== serializeCanvas(ReadyCanvasSchema.parse(JSON.parse(plan.original)))) {
           if (buffer.baseVersion !== hashBytes(plan.original)) throw new Error('version_conflict: buffer disk base changed')
+          if (plan.strict) throw new Error('version_conflict: the board has unsaved changes')
           next = mergeCanvas(ReadyCanvasSchema.parse(JSON.parse(plan.original)), buffer.canvas, next)
           const merged = { ...plan, content: serializeCanvas(next) }
           this.validate(merged)
@@ -370,10 +378,10 @@ export class CanvasService {
     await this.verifyResources(plan, true)
   }
   private async verifyResources(plan: CanvasPlan, published: boolean): Promise<void> {
-    const canvases = [plan.content, ...plan.files.filter(f => f.path.endsWith('.canvas')).map(f => Buffer.from(f.content, 'base64').toString('utf8'))]
+    const canvases = [plan.content, ...plan.files.filter(f => f.path.endsWith('.canvas')).map(f => Buffer.from(f.content, 'base64').toString('utf8'))], recycled = this.recycled()
     for (const content of canvases) for (const node of ReadyCanvasSchema.parse(JSON.parse(content)).nodes) {
       const resources = new Map<string, string | undefined>()
-      if (node.type === 'file') resources.set(node.file, node.ready.media?.sha256)
+      if (node.type === 'file' && !(node.ready.kind === 'subcanvas' && (node.ready.trash || (node.ready.ref?.kind === 'canvas' && recycled.has(node.ready.ref.id))))) resources.set(node.file, node.ready.media?.sha256)
       if (node.type === 'group' && node.background) resources.set(node.background, undefined)
       if (node.ready.preview?.image) resources.set(node.ready.preview.image, undefined)
       if (node.ready.media?.poster) resources.set(node.ready.media.poster, undefined)

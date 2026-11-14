@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
-  ALargeSmall, ArrowDown, ArrowUp, BringToFront, CalendarPlus, ChevronDown, ChevronRight, ChevronUp, Ellipsis, FilePlus2, Group, Layers, LayoutGrid, Redo2, Scan, Search, SendToBack, Shapes, SlidersHorizontal, Sparkles, StickyNote, Trash2, Type, Undo2, Ungroup, X, type LucideIcon,
+  ALargeSmall, ArrowDown, ArrowUp, BringToFront, CalendarPlus, ChevronDown, ChevronRight, ChevronUp, Ellipsis, FilePlus2, FolderInput, FolderOutput, Group, Layers, LayoutGrid, Redo2, Scan, Search, SendToBack, Shapes, SlidersHorizontal, Sparkles, StickyNote, Trash2, Type, Undo2, Ungroup, X, type LucideIcon,
 } from 'lucide-react'
 import { Button, closeFloat, IconButton, Input, toggleMenu, type MenuEntry } from '../../ui'
 import type { Tool } from './types'
@@ -114,6 +114,7 @@ export function SelectionBar({ left, top, count, edges = 0, text, canGroup, canU
     group(): void; ungroup(): void; layout(kind: 'P' | 'L' | 'R'): void; layer(placement: 'front' | 'forward' | 'backward' | 'back'): void; remove(): void
     textStyle?(patch: Partial<Pick<Appearance, 'fontScale' | 'weight' | 'align'>>): void
     addToDocument?(): void; askAI?(): void; schedule?(): void
+    collect?(): void; moveOut?(): void
   }
 }) {
   const arrangeMenu = useChromeMenu(ARRANGE_MENU), layerMenu = useChromeMenu(LAYER_MENU), textMenu = useChromeMenu(TEXT_MENU)
@@ -123,6 +124,8 @@ export function SelectionBar({ left, top, count, edges = 0, text, canGroup, canU
     {!!count && <>
     {canGroup && <ChromeTool label="分组" icon={Group} shortcut="⌘G" disabled={busy} onClick={actions.group} />}
     {canUngroup && <ChromeTool label="解组" icon={Ungroup} shortcut="⇧⌘G" disabled={busy} onClick={actions.ungroup} />}
+    {actions.collect && <ChromeTool label="收进子画板" icon={FolderInput} disabled={busy} onClick={actions.collect} />}
+    {actions.moveOut && <ChromeTool label="移出到上一级" icon={FolderOutput} disabled={busy} onClick={actions.moveOut} />}
     {count > 1 && <ChromeTool label="排版" icon={LayoutGrid} menu={{ id: ARRANGE_MENU, open: arrangeMenu.open }} disabled={busy}
       onClick={button => arrangeMenu.toggle(button, '排版', ARRANGEMENTS.map(item => ({ id: item.id, label: item.label, icon: <item.icon />, hint: item.key, onSelect: () => actions.layout(item.id) })), 'bottom')} />}
     {text && actions.textStyle && <ChromeTool label="文字" icon={ALargeSmall} menu={{ id: TEXT_MENU, open: textMenu.open }} disabled={busy}

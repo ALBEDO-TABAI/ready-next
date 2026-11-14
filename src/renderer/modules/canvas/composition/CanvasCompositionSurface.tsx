@@ -3,6 +3,7 @@ import { EventCard, ScheduleMark } from '../../calendar/linkage/EventCard'
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { CanvasComposeInput, CanvasCompositionAPI, DocumentDraftAPI, DocumentDraft } from '../../../../shared/document-drafts'
 import type { PageNode } from '../../../../shared/document-pages'
+import type { CanvasNode } from '../../../../shared/ready-canvas/schema'
 import { CanvasSurface } from '../../../components/canvas/surface/CanvasSurface'
 import type { CanvasSurfaceProps } from '../../../components/canvas/surface/types'
 import { DocumentCard, LinkCard, TextCard, type CardEditorHost, type DocumentPreviewSource, type LinkPreviewSource } from '../../../components/canvas/cards'
@@ -16,6 +17,8 @@ export interface CanvasCompositionSurfaceProps extends Omit<CanvasSurfaceProps, 
   composition: CanvasCompositionAPI; drafts: DocumentDraftAPI
   documentPreview: DocumentPreviewSource; linkPreview?: LinkPreviewSource
   renderBlockEditor?: (host: CardEditorHost) => ReactNode
+  /** A card the host draws itself (the sub-board card); undefined leaves the card to this surface. */
+  renderHostCard?: (node: CanvasNode) => ReactNode | undefined
   refreshCanvas(): Promise<void>
   openDraft(draftId: string): Promise<void>
 }
@@ -69,6 +72,8 @@ export function CanvasCompositionSurface(props: CanvasCompositionSurfaceProps) {
     <CanvasSurface {...props} onAddToDocument={add}
       renderTextEditor={({ node, commit }) => node.type === 'text' ? <TextCard key={node.id} canvasPath={props.path} node={node} commit={commit} renderEditor={props.renderBlockEditor} /> : null}
       renderCard={node => {
+        const own = props.renderHostCard?.(node)
+        if (own !== undefined) return own
         const mark = <ScheduleMark canvasId={props.canvas.ready.id} nodeId={node.id} snapshot={props.calendarSnapshot} />
         if (node.ready.kind === 'document') return <><DocumentCard node={node} source={props.documentPreview} />{mark}</>
         if (node.type === 'text' && ['text', 'note'].includes(node.ready.kind)) return <><CardMarkdown text={node.text} />{mark}</>

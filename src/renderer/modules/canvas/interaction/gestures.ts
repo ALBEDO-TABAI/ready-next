@@ -38,6 +38,9 @@ interface GestureCallbacks {
   measure?: (work: FrameWork) => void
   /** A connector or drawing was accepted: the surface selects it and puts the select tool back. */
   drawn?: (kind: 'edge' | 'rect' | 'arrow' | 'path', id: string) => void
+  /** Sub-board drop (M4 §9): the card under the pointer that would take the dragged cards (null clears), and the drop. */
+  dropTarget?: (scene: GestureScene, moving: readonly CanvasNode[], at: Point | null) => string | null
+  dropInto?: (nodeIds: string[], targetId: string) => void
 }
 export function edgeEnds(a: Rect, b: Rect, edge?: CanvasEdge): [Point, Point] {
   const dx = b.x + b.width / 2 - a.x - a.width / 2, dy = b.y + b.height / 2 - a.y - a.height / 2
@@ -64,6 +67,7 @@ export class CanvasGestures {
   private wheelZoom = false
   private wheelAt = -Infinity
   private view: Window | null = null
+  private drop: string | null = null // M4 §9: the sub-board card under a card drag
   space = false
   constructor(private callbacks: GestureCallbacks) {}
   get active(): boolean { return this.drag !== null }
@@ -224,6 +228,7 @@ export class CanvasGestures {
         const moved = (n: CanvasNode): Rect => moving.has(n.id) ? { ...n, x: n.x + d.dx, y: n.y + d.dy } : n
         setEdge(edge.element, edgePath(moved(edge.from), moved(edge.to), edge.edge)); domWrites++
       }
+      this.drop = d.moved ? this.callbacks.dropTarget?.(s, d.nodes, p) ?? null : null // M4 §9
     } else if (d.kind === 'resize') {
       d.placements = this.resized(d, p.x - start.x, p.y - start.y)
       domWrites += this.place(s, d.nodes, d.placements, d.edges)
@@ -260,6 +265,7 @@ export class CanvasGestures {
   }
   private end(s: GestureScene, pointerId: number): void {
     s.overlay.replaceChildren(); s.root.removeAttribute('data-gesture')
+    this.callbacks.dropTarget?.(s, [], null) // M4 §9: clear the drop mark
     this.drag = null
     if (s.root.hasPointerCapture?.(pointerId)) s.root.releasePointerCapture(pointerId)
   }
@@ -274,6 +280,8 @@ export class CanvasGestures {
     const d = this.drag
     this.end(s, e.pointerId)
     if (d.kind === 'move') {
+      const into = this.drop; this.drop = null
+      if (into && d.moved) { this.reset(s, d.nodes.map(n => n.id)); this.callbacks.dropInto?.(d.nodes.map(n => n.id), into); return } // M4 §9: dropped onto a sub-board card
       if (d.moved && d.adaptive && d.memberBox) this.land(s, d.nodes, scaledPlacements(d.nodes, d.memberBox, d.adaptive, d.adaptive.k), d.edges, true)
       else if (d.moved && (d.dx || d.dy)) this.land(s, d.nodes, new Map(d.nodes.map(n => [n.id, { x: n.x + d.dx, y: n.y + d.dy, width: n.width, height: n.height }])), d.edges, true)
       else {
@@ -304,9 +312,10 @@ export class CanvasGestures {
     if (this.frame !== null) this.view?.cancelAnimationFrame(this.frame)
     this.frame = null
     const s = this.callbacks.scene(), d = this.drag
-    this.drag = null
+    this.drag = null; this.drop = null
     if (s && d) {
       s.overlay.replaceChildren(); s.root.removeAttribute('data-gesture')
+      this.callbacks.dropTarget?.(s, [], null)
       if (d.kind === 'move' || d.kind === 'resize') this.reset(s, d.nodes.map(n => n.id))
       this.callbacks.select(d.selection); this.callbacks.camera(d.camera)
       if (s.root.hasPointerCapture?.(d.pointerId)) s.root.releasePointerCapture(d.pointerId)
