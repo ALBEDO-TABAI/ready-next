@@ -27,6 +27,8 @@ test('DB6 wizard previews before writing, forwards selected parent identity, sho
     resume: async () => ({ ok: true, value: result }), status: async () => ({ ok: true, value: { ...result, state: 'running', done: 1 } }), list: async () => ({ ok: true, value: [] }),
   }
   await ui.render(<ImportWizard api={api} Picker={Picker} onClose={() => {}} open={async id => { opened.push(id) }} />)
+  assert.equal(document.querySelector('[role="dialog"]')!.getAttribute('aria-label'), '导入 Notion')
+  assert.doesNotMatch(ui.host.textContent!, /inkwell/i, 'Notion is the only source offered')
   await click('选择 Notion ZIP'); assert.match(ui.host.textContent!, /2 页，1 个库，1 行，1 个附件/); assert.match(ui.host.textContent!, /缺失图片/)
   assert.deepEqual(calls, ['notion', 'preview'])
   await click('选择导入位置'); await click('确认位置'); assert.match(ui.host.textContent!, /目标：\/vault\/导入/)

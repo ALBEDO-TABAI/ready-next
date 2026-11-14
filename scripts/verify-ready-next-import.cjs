@@ -33,7 +33,7 @@ async function main() {
     await wait(async () => { page = app.windows().find(window => window.url().includes('/renderer/index.html')); return !!page }, 'Ready Next renderer did not open', 45000)
     await wait(() => page.evaluate(() => !!window.electronAPI?.documentImport), 'Import API missing')
   }
-  const wizard = () => page.getByRole('dialog', { name: '导入 Notion / Inkwell', exact: true })
+  const wizard = () => page.getByRole('dialog', { name: '导入 Notion', exact: true })
   const showWizard = async () => {
     await wait(async () => {
       if (await page.locator('.ink-doc-app').isVisible()) return true
