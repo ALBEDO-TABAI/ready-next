@@ -95,10 +95,11 @@ test('every keyboard dispatch emulates target focus, including shortcuts after a
   })
   await service.dispatchKey('hidden', { type: 'keyDown', key: 's', code: 'KeyS', modifiers: 4 })
   assert.deepEqual(commands.map(([method]) => method), [
-    'Emulation.setFocusEmulationEnabled', 'Input.dispatchKeyEvent', 'Emulation.setFocusEmulationEnabled',
+    // The page round trip sits between the emulation and the key: the key must not overtake the focus change.
+    'Emulation.setFocusEmulationEnabled', 'Runtime.evaluate', 'Input.dispatchKeyEvent', 'Emulation.setFocusEmulationEnabled',
   ])
   assert.deepEqual(commands[0][1], { enabled: true })
-  assert.deepEqual(commands[2][1], { enabled: false })
+  assert.deepEqual(commands[3][1], { enabled: false })
 })
 
 function pointerController(options: {

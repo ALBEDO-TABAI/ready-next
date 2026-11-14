@@ -323,6 +323,9 @@ export class BrowserAutomationService {
     ].filter(Boolean))
     try {
       await this.sendCdpCommand(tabId, 'Emulation.setFocusEmulationEnabled', { enabled: true })
+      // The key travels on the input channel, the emulation on the DevTools one: a page round trip on the latter
+      // makes sure the page already counts as focused when the key arrives.
+      await this.sendCdpCommand(tabId, 'Runtime.evaluate', { expression: 'new Promise(resolve => setTimeout(() => resolve(document.hasFocus()), 0))', awaitPromise: true, returnByValue: true })
       await this.sendCdpCommand(tabId, 'Input.dispatchKeyEvent', {
         type: payload.type,
         key: payload.key || '',
