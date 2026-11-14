@@ -72,8 +72,12 @@ export async function scheduleTodo(handle: TodoHandle, date: string, ask: (title
   return reply.value.state
 }
 
-export async function toggleTodo(handle: TodoHandle, checked: boolean): Promise<TodoWriteReceipt['state']> {
+/** Ticks or unticks the one line; the receipt's version lets the same line be written again (a tick taken back). */
+export async function writeTodoCheck(handle: TodoHandle, checked: boolean): Promise<TodoWriteReceipt> {
   const reply = await window.electronAPI.calendarLayers.toggleTodo({ id: handle.id, expectedVersion: handle.version, checked })
   if (!reply.ok) throw failure(reply)
-  return reply.value.state
+  return reply.value
+}
+export async function toggleTodo(handle: TodoHandle, checked: boolean): Promise<TodoWriteReceipt['state']> {
+  return (await writeTodoCheck(handle, checked)).state
 }

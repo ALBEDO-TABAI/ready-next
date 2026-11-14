@@ -51,7 +51,9 @@ export function BlockEditorStyles() {
     .ready-block-container { min-width:0; }
     .ready-block-container.is-indented { padding-left:24px; }
     .ready-block-container.is-quote { border-left:2px solid var(--rn-hair-2); }
-    .ready-block-marker { float:left; width:24px; margin-left:-24px; text-align:center; user-select:none; }
+    /* A list entry's marker is its handle: drag it to move the entry among its siblings. */
+    .ready-block-marker { float:left; width:24px; margin-left:-24px; text-align:center; user-select:none; cursor:grab; }
+    button.ready-block-marker { appearance:none; padding:0; border:0; background:none; font:inherit; color:inherit; cursor:pointer; }
     /* A task's box is the document's one checkbox (V16): clear with an ink-3 edge; checked, an ink box whose check is a
        mask painted in --rn-on-inverse, so it reads in light and dark (never a fixed white glyph). */
     .ready-block-marker.is-task { position:relative; width:16px; height:16px; margin:.38em 0 0 -21px; border-radius:5px; box-shadow:inset 0 0 0 1.5px var(--rn-ink-3); }
@@ -64,8 +66,31 @@ export function BlockEditorStyles() {
     /* Source editing is a quiet corner control revealed on hover or keyboard focus, not a line of its own. */
     .ready-block-source-edit { position:absolute; top:6px; right:6px; z-index:1; padding:2px 10px; border:0; border-radius:var(--rn-r-pill); font-size:12px; line-height:18px; color:var(--rn-ink-2); background:var(--rn-inlay); box-shadow:inset 0 1px 0 var(--rn-glass-inner-hi), inset 0 0 0 .5px var(--rn-hair-2), var(--rn-shadow-1); opacity:0; transition:opacity var(--rn-d-1) var(--rn-ease-std); }
     .ready-block-shell:hover .ready-block-source-edit, .ready-block-source-edit:focus-visible { opacity:1; }
-    .ready-block-shell[data-drop=before] { box-shadow:0 -2px var(--rn-accent); }
-    .ready-block-shell[data-drop=after] { box-shadow:0 2px var(--rn-accent); }
+    /* The page's properties are its frontmatter block: the same corner control opens its source. */
+    .note-preview-properties { position:relative; }
+    .note-preview-properties:hover > .ready-block-source-edit { opacity:1; }
+    /* The line where a moved block, or a reference dragged in from outside, will land. */
+    .ready-block-shell[data-drop=before], .ready-block-shell[data-ref-drop=before] { box-shadow:0 -2px var(--rn-accent); }
+    .ready-block-shell[data-drop=after], .ready-block-shell[data-ref-drop=after] { box-shadow:0 2px var(--rn-accent); }
+    /* A callout edits in place: its title is one editable line; an untitled callout shows its kind there. */
+    .ready-callout-title[data-callout-title] > [data-rich-start] { flex:1; min-width:0; margin:0; font:inherit; color:inherit; cursor:text; }
+    .ready-callout-title[data-callout-title] > [data-rich-start]:empty::after { content:var(--callout-placeholder); }
+    .ready-callout-title[data-callout-title] > [data-rich-start]:empty:focus::after { color:var(--rn-ink-3); }
+    /* Tables (plan §1.8): cells edit in place; the add bars and the row / column handles stay quiet until the pointer
+       comes near. */
+    .ready-table { position:relative; margin:6px 0 0; padding-bottom:24px; }
+    .ready-table [data-table-cell] { min-width:48px; cursor:text; outline:none; }
+    .ready-table [data-table-cell]:focus { box-shadow:inset 0 0 0 1.5px color-mix(in srgb, var(--rn-ink) 55%, transparent); }
+    .ready-table__add { position:absolute; display:flex; align-items:center; justify-content:center; padding:0; border:0; border-radius:var(--rn-r-pill); color:var(--rn-ink-3); background:var(--rn-fill-2); opacity:0; cursor:pointer; transition:opacity var(--rn-d-1) var(--rn-ease-std), color var(--rn-d-1) var(--rn-ease-std), background var(--rn-d-1) var(--rn-ease-std); }
+    .ready-table__add.is-row { left:0; right:0; bottom:0; height:20px; }
+    .ready-table__add.is-column { top:0; bottom:24px; right:-24px; width:20px; }
+    .ready-table[data-near~=row] .ready-table__add.is-row, .ready-table[data-near~=column] .ready-table__add.is-column, .ready-table__add:hover, .ready-table__add:focus-visible { opacity:1; }
+    .ready-table__add:hover { color:var(--rn-ink); background:var(--rn-fill-3); }
+    .ready-table__add svg, .ready-table__handle svg { width:14px; height:14px; stroke-width:var(--rn-icon-stroke); }
+    .ready-table__handle { position:absolute; z-index:2; display:flex; align-items:center; justify-content:center; padding:0; border:0; border-radius:var(--rn-r-pill); color:var(--rn-ink-3); background:var(--rn-solid); box-shadow:inset 0 0 0 .5px var(--rn-hair-2), var(--rn-shadow-1); cursor:pointer; transform:translate(-50%, -50%); }
+    .ready-table__handle:hover, .ready-table__handle:focus-visible { color:var(--rn-ink); }
+    .ready-table__handle.is-column { top:0; width:28px; height:20px; }
+    .ready-table__handle.is-row { left:0; width:20px; height:28px; }
     .ready-block-popover { position:fixed; z-index:1000; width:320px; max-width:calc(100vw - 16px); padding:8px; color:var(--rn-ink); }
     .ready-block-popover [role=listbox] { max-height:270px; overflow:auto; }
     .ready-block-popover button { border:0; color:inherit; background:transparent; border-radius:var(--rn-r-sm); padding:6px 10px; text-align:left; }

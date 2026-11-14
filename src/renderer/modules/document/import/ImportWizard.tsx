@@ -40,11 +40,11 @@ export function ImportWizard({ onClose, api = window.electronAPI.documentImport,
     catch (error) { if (alive.current) setStep({ kind: 'source' }); throw error }
   })
   const issues = step.kind === 'result' ? step.status.issues : 'report' in step ? step.report.issues : []
-  return <section role="dialog" aria-label="导入 Notion / Inkwell" className="ink-import">
-    <div className="ink-import-head"><h2>导入 Notion / Inkwell</h2><Button size="sm" variant="ghost" disabled={busy} onClick={onClose}>关闭</Button></div>
+  return <section role="dialog" aria-label="导入 Notion" className="ink-import">
+    <div className="ink-import-head"><h2>导入 Notion</h2><Button size="sm" variant="ghost" disabled={busy} onClick={onClose}>关闭</Button></div>
     {error && <p role="alert">{error}</p>}
-    {step.kind === 'source' && <><p>选择 Notion 的 Markdown & CSV 导出包，或 Inkwell 工作区 JSON 备份。来源文件只读。</p>
-      <div className="ink-import-actions"><Button disabled={busy} onClick={() => void choose('notion')}>选择 Notion ZIP</Button><Button disabled={busy} onClick={() => void choose('inkwell')}>选择 Inkwell JSON</Button></div>
+    {step.kind === 'source' && <><p>选择 Notion 的 Markdown & CSV 导出包（ZIP）。来源文件只读。</p>
+      <div className="ink-import-actions"><Button disabled={busy} onClick={() => void choose('notion')}>选择 Notion ZIP</Button></div>
       {history.map(item => <div key={item.id} className="ink-import-row"><span>{item.results[0]?.path ?? '待继续的导入'} · {item.done}/{item.total}</span><Button size="sm" disabled={busy} onClick={() => void execute(item.id, true)}>{['completed', 'incomplete'].includes(item.state) ? '核对结果' : '继续导入'}</Button></div>)}
     </>}
     {'report' in step && <><p>{step.report.sourceName}：{step.report.counts.pages} 页，{step.report.counts.databases} 个库，{step.report.counts.rows} 行，{step.report.counts.attachments} 个附件</p>

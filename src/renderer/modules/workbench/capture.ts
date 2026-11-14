@@ -38,7 +38,9 @@ export function referenceMarkdown(ref: ReadyRef, title: string): string {
 }
 
 /** The buffer owns insertion and undo; the async image copy must not overwrite an intervening edit. */
-export async function insertCapturedReference(buffer: EditorBuffer, selection: Omit<CaptureSelection, 'text'> & { text?: string }, at = buffer.snapshot.content.length): Promise<InsertedText> {
+export async function insertCapturedReference(buffer: EditorBuffer, selection: Omit<CaptureSelection, 'text'> & { text?: string }, at = buffer.snapshot.content.length,
+  /** How the reference is written where it lands (a list entry, a paragraph after a block); the default is a paragraph of its own. */
+  wrap?: (markdown: string) => string): Promise<InsertedText> {
   buffer.flush()
   const snapshot = buffer.snapshot, ref = ReadyRefSchema.parse(selection.ref)
   let markdown = referenceMarkdown(ref, selection.title)
@@ -57,7 +59,7 @@ export async function insertCapturedReference(buffer: EditorBuffer, selection: O
   }
   const eol = newline(snapshot.content)
   if (selection.text) markdown = `${selection.text.split(/\r?\n/).map(line => `> ${line}`).join(eol)}${eol}${eol}${markdown}`
-  const text = `${at && !snapshot.content.slice(0, at).endsWith('\n') ? eol + eol : ''}${markdown}${eol}${eol}`
+  const text = wrap ? wrap(markdown) : `${at && !snapshot.content.slice(0, at).endsWith('\n') ? eol + eol : ''}${markdown}${eol}${eol}`
   buffer.apply(createRangeEdit(snapshot, [{ start: at, end: at, expectedText: '', replacement: text }], { anchor: at, focus: at }, { anchor: at, focus: at + text.length }))
   return { start: at, text }
 }
@@ -111,12 +113,12 @@ export async function captureAnswerAsPage(selection: CaptureSelection): Promise<
   return { tabId, path: await requestDraftSave(tabId, undefined, 'dialog') }
 }
 
-export async function dropDocumentReference(data: Pick<DataTransfer, 'getData'>, buffer: EditorBuffer, at = buffer.snapshot.content.length): Promise<boolean> {
+export async function dropDocumentReference(data: Pick<DataTransfer, 'getData'>, buffer: EditorBuffer, at = buffer.snapshot.content.length, wrap?: (markdown: string) => string): Promise<boolean> {
   const dropped = readReadyRefTransfers(data)
   if (!dropped.length) return false
   for (const item of dropped) {
     const before = buffer.snapshot.content.length
-    await insertCapturedReference(buffer, item, at)
+    await insertCapturedReference(buffer, item, at, wrap)
     at += buffer.snapshot.content.length - before
   }
   return true

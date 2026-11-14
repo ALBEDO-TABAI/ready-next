@@ -20,6 +20,12 @@ export function plainModel(): InlineModel {
 }
 export const newline = (content: string) => /\r\n|\n|\r/.exec(content)?.[0] ?? '\n'
 
+// A paragraph inside a quote or a callout that runs over several lines carries the quote marker on every line after
+// its first ("a\n> b"). It is edited as the text without those markers and written back with them.
+export const unquote = (raw: string) => raw.replace(/(\r\n|\n|\r)(?:[ \t]{0,3}>[ \t]?)+/g, '$1')
+export const requote = (markdown: string, quote: string, eol?: string) => quote ? markdown.replace(/\r\n|\n|\r/g, found => (eol ?? found) + quote) : markdown
+export const quoteOf = (raw: string, fallback: string) => /(?:\r\n|\n|\r)((?:[ \t]{0,3}>[ \t]?)+)/.exec(raw)?.[1] ?? fallback
+
 export function inputRule(text: string, eol: string): string | null {
   if (/^#{1,6} $/.test(text) || /^([-*+] |1\. |> )$/.test(text)) return text
   if (/^\[ ?\] $/.test(text)) return '- [ ] '
@@ -30,12 +36,12 @@ export function inputRule(text: string, eol: string): string | null {
 
 /** Split/paste is one history item even when existing inline marks need reserialization. */
 export function spliceRich(buffer: DocumentBuffer, block: DocumentBlock, model: InlineModel, spans: InlineSpan[],
-  start: number, end: number, inserted: InlineSpan[][] | null, continuation: string): { edit: BlockEdit; at: number; empty: boolean } {
-  const left = inlineMarkdown(model, sliceSpans(spans, 0, start))
-  const right = inlineMarkdown(plainModel(), sliceSpans(spans, end))
+  start: number, end: number, inserted: InlineSpan[][] | null, continuation: string, quote = ''): { edit: BlockEdit; at: number; empty: boolean } {
   const eol = newline(buffer.content)
+  const left = requote(inlineMarkdown(model, sliceSpans(spans, 0, start)), quote, eol)
+  const right = requote(inlineMarkdown(plainModel(), sliceSpans(spans, end)), quote, eol)
   const separator = continuation ? eol + continuation : eol + eol
-  const pieces = inserted?.map(part => inlineMarkdown(plainModel(), part))
+  const pieces = inserted?.map(part => requote(inlineMarkdown(plainModel(), part), quote, eol))
   const middle = pieces ? pieces.join(separator) : separator
   // First normalize only the edited block, then use the shared structural command.
   const prepared = createBlockCommand(buffer, { type: 'replace', block, markdown: left + right })

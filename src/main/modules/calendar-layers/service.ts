@@ -84,7 +84,7 @@ export class CalendarLayersService {
       }),
     })
     if (receipt.tab !== 'merged_dirty') this.registry.register(source.path)
-    return { state: receipt.tab === 'merged_dirty' ? 'unsaved' as const : 'saved' as const }
+    return receipt.tab === 'merged_dirty' ? { state: 'unsaved' as const, version: expectedVersion } : { state: 'saved' as const, version: receipt.afterVersion }
   }
   toggleTodo(input: ToggleTodo) {
     const request = ToggleTodoSchema.parse(input)

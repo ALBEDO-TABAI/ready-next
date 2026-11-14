@@ -31,7 +31,7 @@ export const SLASH_META: Record<string, SlashMeta> = {
   page: { group: '嵌入', label: '子页面', description: '在本页下新建一页并链接过去', icon: FilePlus2, keywords: 'page subpage child yemian ym ziyemian zym' },
   database: { group: '嵌入', label: '数据库', description: '在本页下新建数据库，在这里显示它的表格', icon: Database, keywords: 'database db table shujuku sjk biao' },
   board: { group: '嵌入', label: '画板', description: '在本页下新建画板并链接过去', icon: Shapes, keywords: 'board canvas whiteboard huaban hb' },
-  reference: { group: '嵌入', label: '引用对象', description: '链接到资料库里的页面或标题', icon: Link2, keywords: 'link reference mention wiki yinyong yy lianjie lj duixiang dx' },
+  reference: { group: '嵌入', label: '链接页面', description: '搜索资料库里的页面、标题或文件，在这里放一个链接', icon: Link2, keywords: 'link reference mention wiki page file 引用 引用对象 引用页面 引用文件 链接文件 文件 页面 yinyong yy lianjie lj duixiang dx yemian ym wenjian wj' },
   synced: { group: '嵌入', label: '同步块', description: '引用别处的一块，随原文更新', icon: CopyCheck, keywords: 'synced block transclusion embed tongbukuai tbk' },
   template: { group: '嵌入', label: '模板', description: '插入一个模板的内容', icon: LayoutTemplate, keywords: 'template muban mb' },
   widget: { group: '嵌入', label: '信息卡', description: '可交互的 Widget 卡片', icon: Sparkles, keywords: 'widget card xinxika xxk kapian kp' },

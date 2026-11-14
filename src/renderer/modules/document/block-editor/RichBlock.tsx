@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef } from 'react'
 import { createBlockCommand, fragmentHash, parseInlineBlock, type DocumentBlock, type InlineModel, type InlineSpan } from '../../../../shared/document-blocks'
 import { atVerticalEdge, drawInline, getCaret, plainText, readInline, setCaret, sliceSpans } from './dom-inline'
-import { inlineMarkdown, inputRule, newline, spliceRich } from './editing'
+import { inlineMarkdown, inputRule, newline, requote, spliceRich, unquote } from './editing'
 import type { EditorBuffer } from './editor-buffer'
 
 interface Props {
@@ -9,12 +9,14 @@ interface Props {
   model: InlineModel
   buffer: EditorBuffer
   continuation: string
+  /** The marker each further line of this paragraph carries inside a quote or callout ('> '); '' elsewhere. */
+  quote?: string
   focus(at: number, empty?: boolean, textOffset?: number): void
   merge(block: DocumentBlock, model: InlineModel): void
   report(error: unknown): void
   navigate(element: HTMLElement, direction: 'up' | 'down'): void
 }
-export function RichBlock({ block, model, buffer, continuation, focus, merge, report, navigate }: Props) {
+export function RichBlock({ block, model, buffer, continuation, quote = '', focus, merge, report, navigate }: Props) {
   const ref = useRef<HTMLDivElement>(null)
   const composing = useRef(false)
   const typingGroup = useRef(0)
@@ -46,13 +48,15 @@ export function RichBlock({ block, model, buffer, continuation, focus, merge, re
     if (!state.dirty) return
     if (composing.current) throw new Error('请先完成当前输入法组合输入，再保存或撤销')
     const spans = readInline(ref.current!)
-    const markdown = inlineMarkdown(state.model, spans)
+    const inline = inlineMarkdown(state.model, spans)
+    // Unchanged text keeps the block's own bytes; a quoted paragraph gets its line markers back.
+    const markdown = !quote ? inline : inline === state.model.source ? state.block.raw : requote(inline, quote, newline(buffer.snapshot.content))
     if (markdown !== state.block.raw) {
       const edit = createBlockCommand({ content: buffer.snapshot.content, version: state.version }, { type: 'replace', block: state.block, markdown })
       if (previousCaret.current !== null && kind === 'typing') edit.selectionBefore = { anchor: previousCaret.current, focus: previousCaret.current }
       buffer.apply(edit, kind, kind === 'typing' ? `rich:${block.start}:${typingGroup.current}` : undefined)
       previousCaret.current = edit.selectionAfter.focus
-      const nextModel = parseInlineBlock(markdown)
+      const nextModel = parseInlineBlock(quote ? unquote(markdown) : markdown)
       if (nextModel.capability !== 'rich') throw new Error(nextModel.reason)
       state.block = { ...state.block, raw: markdown, end: state.block.start + markdown.length, hash: fragmentHash(markdown) }
       state.model = nextModel; state.version = buffer.snapshot.version
@@ -86,7 +90,7 @@ export function RichBlock({ block, model, buffer, continuation, focus, merge, re
         } else {
           const wasEmpty = session.current.block.id.startsWith('empty:')
           const caret = getCaret(ref.current!)
-          const at = session.current.block.start + session.current.model.prefix.length + caret.end
+          const at = session.current.block.start + requote(session.current.model.prefix, quote).length + caret.end
           commit()
           if (!plainText(spans).length && !session.current.model.prefix) focus(at, true)
           else if (wasEmpty) focus(at, false, caret.end)
@@ -110,7 +114,7 @@ export function RichBlock({ block, model, buffer, continuation, focus, merge, re
             setCaret(el, caret.start + 1); session.current.dirty = true; return
           }
           const state = session.current
-          const result = spliceRich({ ...buffer.snapshot, version: state.version }, state.block, state.model, readInline(el), caret.start, caret.end, null, continuation)
+          const result = spliceRich({ ...buffer.snapshot, version: state.version }, state.block, state.model, readInline(el), caret.start, caret.end, null, continuation, quote)
           buffer.apply(result.edit, 'split'); state.dirty = false; focus(result.at, result.empty, 0)
         })
       } else if (event.key === 'Backspace' && caret.start === 0 && caret.end === 0) {
@@ -135,7 +139,7 @@ export function RichBlock({ block, model, buffer, continuation, focus, merge, re
           for (const match of text.matchAll(/\n\s*\n/g)) { parts.push(sliceSpans(pasted, offset, match.index)); offset = match.index + match[0].length }
           parts.push(sliceSpans(pasted, offset))
           const state = session.current
-          const result = spliceRich({ ...buffer.snapshot, version: state.version }, state.block, state.model, spans, caret.start, caret.end, parts, continuation)
+          const result = spliceRich({ ...buffer.snapshot, version: state.version }, state.block, state.model, spans, caret.start, caret.end, parts, continuation, quote)
           buffer.apply(result.edit, 'paste'); state.dirty = false; focus(result.at, false, plainText(parts.at(-1)!).length)
         } else {
           drawInline(el, [...sliceSpans(spans, 0, caret.start), ...pasted, ...sliceSpans(spans, caret.end)])
