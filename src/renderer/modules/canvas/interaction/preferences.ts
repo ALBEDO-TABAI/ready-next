@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import type { Camera } from './geometry'
 
-// Board view preferences and each board's camera are this machine's state (M4 §2.8, §9.1): kept in the profile's
+// Board view preferences and each board's camera are this machine's state (M4 §2.8, §10.1): kept in the profile's
 // localStorage, never written into a .canvas.
 
 export interface BoardViewPrefs { smartGuides: boolean; magneticSnap: boolean; gap: number; adaptiveScale: boolean; roundedMedia: boolean }

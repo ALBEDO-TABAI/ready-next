@@ -3,7 +3,7 @@ import type { CanvasOperation } from '../../../../shared/ready-canvas/operations
 import { bounds, type Point, type Rect } from './geometry'
 import { resizedGraphic } from './graphics'
 
-// Stillroom's adaptive docking and proportional scaling, on Ready's explicit integer geometry (M4 §9).
+// Stillroom's adaptive docking and proportional scaling, on Ready's explicit integer geometry (M4 §10).
 
 export type Side = 'left' | 'right' | 'top' | 'bottom'
 export interface DockItem extends Rect { id: string }

@@ -2,7 +2,7 @@ import { CanvasEdgeSchema, CanvasNodeSchema, type CanvasEdge, type CanvasNode } 
 import type { CanvasOperation } from '../../../../shared/ready-canvas/operations'
 import { bounds, type Point } from './geometry'
 
-// Copy, cut, paste and duplicate for cards (M4 §9.2). The cards travel as JSON under their own clipboard type, next
+// Copy, cut, paste and duplicate for cards (M4 §10.2). The cards travel as JSON under their own clipboard type, next
 // to a plain-text reading of them for other apps; a paste without that type is ordinary text or a web address.
 
 export const CARDS_MIME = 'application/vnd.ready.canvas-cards+json'

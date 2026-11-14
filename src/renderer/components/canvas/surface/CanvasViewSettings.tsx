@@ -2,7 +2,7 @@ import { Slider, Switch } from '../../ui'
 import { MAX_GAP, setBoardView, useBoardView } from '../../../modules/canvas/interaction/preferences'
 
 // 视图设置 (integration plan: 间距、磁吸、圆角偏好归画板视图设置): a small popover from the corner, never a row on
-// the stage. These are this machine's preferences (M4 §9.1): nothing here is written into the board.
+// the stage. These are this machine's preferences (M4 §10.1): nothing here is written into the board.
 
 function Row({ label, checked, disabled, indent, onChange }: { label: string; checked: boolean; disabled?: boolean; indent?: boolean; onChange(checked: boolean): void }) {
   return <div className="canvas-view-row" data-indent={indent || undefined} data-off={disabled || undefined}>

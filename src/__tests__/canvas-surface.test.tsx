@@ -22,7 +22,7 @@ async function mount(count = 12, extra: Partial<CanvasSurfaceProps> = {}, setup:
   dom.window.cancelAnimationFrame = id => { frames.delete(id) }
   const { createRoot } = await import('react-dom/client')
   const root = createRoot(dom.window.document.getElementById('root')!)
-  // This machine's board preferences and cameras live in the window's localStorage (M4 §9.1).
+  // This machine's board preferences and cameras live in the window's localStorage (M4 §10.1).
   for (const [key, value] of Object.entries(setup.storage ?? {})) dom.window.localStorage.setItem(key, value)
   let canvas = setup.canvas ?? mixedCanvas(count), commits = 0
   const work: FrameWork[] = []

@@ -105,7 +105,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
   const boardId = useRef(props.canvas.ready.id)
   useLayoutEffect(() => {
     gestures.cancel(); setEditing(null); setSelected([]); setHover(null)
-    // Another board in the same surface opens where it was left (M4 §9.1: the camera is this machine's state).
+    // Another board in the same surface opens where it was left (M4 §10.1: the camera is this machine's state).
     if (boardId.current !== props.canvas.ready.id) { boardId.current = props.canvas.ready.id; setCamera(rememberedCamera(props.canvas.ready.id) ?? HOME_CAMERA) }
   }, [props.canvas.ready.id, gestures])
   useEffect(() => {

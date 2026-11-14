@@ -31,7 +31,7 @@ function Preview({ node: n, resolveAsset }: Pick<Props, 'node' | 'resolveAsset'>
 }
 export const CanvasCard = memo(function CanvasCard({ node, visible, selected, matched = false, grouped = false, handles = false, editor, content, element, resolveAsset }: Props) {
   const a = node.ready.appearance, frame = cardFrame(node)
-  // Text scales with its card: `fontScale` counts in 24px units (M4 §9.1); the Markdown reads it as its base size.
+  // Text scales with its card: `fontScale` counts in 24px units (M4 §10.1); the Markdown reads it as its base size.
   const style: CSSProperties & { '--canvas-font'?: string } = { left: frame.x, top: frame.y, width: frame.width, height: frame.height,
     '--canvas-font': a?.fontScale ? `${a.fontScale * 24}px` : undefined,
     borderStyle: node.ready.kind === 'draft' ? 'dashed' : undefined,
