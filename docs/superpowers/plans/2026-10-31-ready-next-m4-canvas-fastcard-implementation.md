@@ -140,3 +140,58 @@ M3 编辑器、SaveToPicker 归原负责人；M4 只消费公开接口。其他�
 - 原生完整批使用已安装 Electron 的 `--import tsx --test --test-concurrency=1` 执行同一清单（不安装或重编依赖）：432 项中 428 通过、4 失败。范围内一项为注册函数签名更新后的旧测试，已修正并包含于 13/13 复测；剩余 3 项范围外分别为 calendar-layers-native、library-engine、ready-object-identity-native 的文件监听 EMFILE/超时，不改其实现或断言。日志 `/tmp/m4f-native.log`、`/tmp/m4f-native-recheck.log`。新增原生测试已全部登记 verify:native。
 - `verify:ready-next-canvas` 已提供六步窗口脚本、逐步磁盘/暂存回读与截图、SIGKILL 重启及旧文件字节比较；这里只校验脚本语法和夹具，未启动窗口。浏览器收集步骤目前调用生产 browser FastCard 接口注入文本，原生右键与网页层遮挡/恢复仍须 Claude 实际验收。
 - 未完成边界：`[[` 选择与子页面创建需修改 M3 的 `block-editor/EditorTools.tsx`、`references.ts` 及公开路径传递接口；这些不在 F 可改范围，未改。卡片插槽已提供 canvasPath，未伪装文档标签。旧静态模板的打包条目位于 `electron-builder.yml` 和 `scripts/verify-release-structural-package.cjs`，不在明确许可清单；保留资产以免破坏打包，待负责人将两处条目与 assets/board/board-template.html 一并删除。C10/C13 及 M4 整体尚不能标为最终验收通过。
+
+### 画板媒体合同与交付（2026-11-14）
+
+对照 Stillroom 补齐画板上的语音、文件与媒体卡。先定 Main 合同，再做界面。
+
+**Main 新增三条命令（`canvasMedia:*`，`board-engine/media-ipc.ts`；preload `electronAPI.canvasMedia`）**
+
+| 命令 | 输入 → 输出 | 约束 |
+| --- | --- | --- |
+| `canvasMedia:stage` | `{ name, mime, bytes: Uint8Array }` → `{ token, kind, mime, sha256, size }` | 只收字节，不收路径：Renderer 只能交出用户拖入、粘贴、选取或录下的内容，Main 不读其他位置。类型由 Main 按文件头判定（PNG/JPEG/GIF/WebP；WAV/MP3/FLAC/Ogg/M4A；MP4/MOV；WebM 与 MP4 容器按声明的 audio/ 或 video/ 归类），声明的 MIME 不作凭据；上限图片 20 MB、音频 50 MB、视频 50 MB；文件名只留字母数字并换成真实扩展名。须已配置资料库。暂存在内存：十分钟过期、合计不超过 256 MB、用一次即清 |
+| `canvasMedia:linkPreview` | `{ objectId, url }` → `ready.preview`（标题、摘要、站点、`image`、`fetchedAt`） | 画板位置由对象身份解析，Renderer 不传路径。抓取走共用 link-preview（防内网、大小与超时限制不变）；封面经 FastCard 媒体缓存校验后写入该画板的 `.assets`；封面取不到时只少封面 |
+| `canvasMedia:transcription` | → `{ available }` | 只有共享能力层声明音频且接了转写实现时为真；现在恒为假 |
+
+写入不另开通道：媒体卡用既有的 `importAttachment`（`canvas:write`），附件落在 `画板名.assets/<sha256>-<文件名>`，节点带 `media.{mime, sha256, originalName, durationMs}`，发布后按哈希回读。链接预览由 Renderer 用普通 `replaceNode` 写到卡片上。格式（§3）没有改动。
+
+**约定**
+
+- 媒体卡的“取得时间”记在 `preview.fetchedAt`：录音是停止的时刻，拖入的文件是文件的修改时间；从 FastCard 转入的录音仍读 `sources[].capturedAt`。没有为此新增字段。
+- 录音不另起一条管线：麦克风的申请方式与快记相同（首次点击时 `getUserMedia`，同样的两种 Opus 容器），停止后就是一个普通音频文件，走上面的暂存与 `importAttachment`。没有绕道 FastCard 暂存栏（那样卡片会先进暂存再被移出，转写状态也带不过来）。快记自己的录音代码未改。
+- 链接卡的预览以卡片上的 `ready.preview` 为缓存：有 `fetchedAt` 就不再抓取；没有时每个地址每次会话只问一次（失败也只问一次），成功后在画板空闲时（没有按下的指针、没有进行中的写入）作为一次可撤销的修改写回卡片，每张卡每次会话至多一次；“刷新预览”重新抓取并覆盖。
+- `.md`、`.txt` 落成文字卡（内容即 Markdown 原文，上限 1 MB），不产生附件。
+
+**界面**
+
+- 工具条多一个“录音”：按下开始，按钮变成计时加停止方块（这里用信号橙，表示进行中），再按一次在视野中央落一张语音卡；保存失败时留着这段录音可重试，离开画板则丢弃。
+- 语音卡：播放 / 暂停、按真实波峰画的波形（已播部分为墨色，不用信号橙；超过 12 MB 的音频不解码，改为一条进度线）、时长、取得时间、转写文字；没有转写时写“未转写”，并在确实没有可用模型时写明原因。整张画板共用一个播放器。
+- 图片卡铺满卡片（cover），按已存的裁切显示（position 与 rect 两种）；双击进入幻灯片：盖住画板区域的浮层（共用浮层宿主），← → 或空格按阅读顺序切换画板上的图片，Esc 或点空白处关闭。
+- 视频卡：标题条加 `preload="metadata"` 的首帧。
+- 链接卡有封面时上图下文；右键菜单有“刷新预览”。
+- 从 Finder 拖入、⌘V 粘贴带图片或文件的剪贴板、右键“新建 › 文件…”（系统选择框）。一次放入多个时按每行四个排开，一次写入。
+- 画板内搜索包含转写文字。
+
+**转写：需要用户决定，未实现**
+
+现状：`quick-note-service` 的 `configuredAudioModel` 要求 `resolveAIConfigCapabilities` 的结果里有 `supportsAudio === true`，而共享能力层（`src/shared/ai-providers*`）没有这个字段，任何接入都不会声明；`AudioTranscriptionProvider` 也没有任何实现，`setupCanvasRuntime` 没有传入。所以不是“少一行声明”：声明了也没有代码去发请求。要接通需要先定：
+
+1. 用哪一类接口：专门的转写接口（OpenAI `/audio/transcriptions` 一类，直接收 WebM/Opus）还是多模态对话模型的音频输入（多数只收 WAV/MP3，录音得先转码）。这决定“支持音频”声明在哪些接入、哪些模型上，以及是否要单独的“转写模型”设置项（对话用的模型通常不是转写模型）。
+2. 费用与触发：录完自动转，还是卡片上点“转写”才转（现有服务的约定是不自动重试，因为会计费）。
+3. 画板上的录音不在 FastCard 暂存里，现有 `fastcard:transcribe` 按暂存条目工作；画板卡的转写要一条按“画板 + 节点”读附件、写回 `media.transcript` 的命令。
+
+在此之前卡片如实显示“未转写 · 还没有接入能转写音频的模型”。
+
+**未做**
+
+- 图片的裁切（⌥ 拖动）与旋转（⇧ 角）手势：等交互层重写合并后再接，现在只按已存数据显示。
+- 图片圆角偏好、视频的独立封面文件与时长角标、富文本粘贴（HTML 转 Markdown）、跨画板搜索。
+- 文字与网址的 ⌘V 由交互层负责：`onPasteMedia(at, data)` 先处理剪贴板里的文件与图片并返回是否已处理。
+- 打包配置里没有 `NSMicrophoneUsageDescription`（快记的录音同样受影响），打包版首次录音前需补上；本次未改发布配置。
+- 画板写入账本（`canvas_operations.plan_json`）会长期保留附件的 base64，这是既有设计；视频上限因此定得保守。
+
+**验收**
+
+- 行为测试：`ready-canvas-media.test.ts`（类型判定、上限、命名、三条命令、放入文件、剪贴板、预览只问一次、波峰、幻灯片顺序、裁切）、`ready-canvas-media-cards.test.tsx`（语音卡、链接卡、图片卡、录音工具、画板表面的接入点、画板文档的拖入 / 粘贴 / 选取 / 幻灯片 / 刷新预览）。
+- 原生（已登记 `verify:native`）：`ready-canvas-media-native.test.ts`（暂存字节经句柄落成资料库里的附件并回读、令牌一次有效与过期、总量上限、伪造哈希被拒、预览封面写入 `.assets` 后随卡片保存）；`ready-fastcard-quick-note.test.ts` 增加“不凭模型名或 OpenAI 兼容判定可转写”。
+- 真实窗口（隐藏启动、临时 HOME / TMPDIR / profile 与测试资料库，录音用 Chromium 的假采集设备并静音播放，不联网）：`verify:ready-next-canvas` 新增“媒体”画板的步骤 `07a-recording`、`07-media-cards`、`07b-slideshow`、`08-media-search`：拖入图片后资料库里的附件与原字节一致；粘贴图片；录音落成带时长的语音卡、附件是 WebM、能播放到结束；幻灯片只盖住画板并可切换、关闭；搜索按转写命中；已存封面不再抓取；“文件…”与“刷新预览”在菜单里。原有链接卡步骤改用内网字面地址（Main 在连接前拒绝），整个脚本不再访问外网。浅色与深色各跑一遍通过。
