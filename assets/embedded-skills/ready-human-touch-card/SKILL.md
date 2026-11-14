@@ -1,6 +1,6 @@
 ---
 name: ready-human-touch-card-skill
-description: 制作 Ready 点阵理性或 Human Touch 温感人文风格的社交信息卡与微信封面；仅用于用户指定这两种风格的图组。
+description: 制作 Ready 点阵理性或 Human Touch 温感人文风格的社交信息卡与微信封面，交付内置图标、支持本地字体回退的 HTML；仅用于用户指定这两种风格的图组。
 ---
 
 # Ready / Human Touch 双风格社交信息卡 Skill
@@ -38,6 +38,8 @@ xhs-02 / 论点 A + 证据截图 / RC05 / 槽位 xhs-02-shot
 然后用 `skill_write_artifact` 写到 `cards/index.html`，图片先放/引用在 `cards/assets/`。如果用户指定本地目录或说"相同目录下"，先写 artifact，再用 `skill_export_artifact` 导出到目标目录下的 `cards/index.html`。
 
 种子已内置：全部 token/组件类、三种画板、微信 pair-preview、点阵图表渲染 JS、空槽铭牌。只在 `<!-- POSTERS_HERE -->` 区增删 `<section class="poster ...">`。颜色品牌锁定，不接受自定义 hex。生成物一律进 `cards/` 或用户指定目录，**禁止**落在 skill 根目录。
+
+图标直接使用配方里的内联 SVG（Lucide 0.475.0，取自仓库已安装版本），不加载外部图标脚本，也不改回 `data-lucide` 占位；保留模板中的 ISC 授权注释。Google Fonts 可保留，但必须保留现有本地字体回退栈（系统中文、无衬线/衬线及等宽字体），断网时仍可阅读。
 
 ### 4. 填卡
 

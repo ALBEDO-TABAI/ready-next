@@ -3328,7 +3328,7 @@ interface ElectronAPI {
   canvasComposition: import('../../shared/document-drafts').CanvasCompositionAPI
   fastCard: import('../../shared/fastcard').FastCardTransferAPI & import('../../shared/fastcard').FastCardQuickNoteAPI
   linkPreview: { get(url: string): Promise<import('../../shared/fastcard').FastCardIPCResult<import('../../main/modules/link-preview').LinkPreview>> }
-  sourceAnnotations: import('../../main/modules/library-engine/source-document-ipc').SourceAnnotationsAPI
+  sourceAnnotations: import('../../shared/source-annotations').SourceAnnotationsAPI
   rss: ElectronRSSAPI
   dateMentions: import('../../shared/calendar/date-mentions').DateMentionsAPI
   calendarLinkage: import('../../shared/calendar-linkage').CalendarLinkageAPI

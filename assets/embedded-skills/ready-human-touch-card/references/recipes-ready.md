@@ -55,22 +55,22 @@
     </div>
     <div class="row-list" style="flex:1">
       <div class="row-item">
-        <div class="row-icon"><i data-lucide="folder" style="width:26px"></i></div>
+        <div class="row-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-folder" style="width:26px"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path></svg></div>
         <div><div class="row-title">[必填] 要点一</div><div class="row-desc">[必填] 一句展开</div></div>
         <div class="row-meta"><span class="status-dot done"></span></div>
       </div>
       <div class="row-item">
-        <div class="row-icon"><i data-lucide="zap" style="width:26px"></i></div>
+        <div class="row-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-zap" style="width:26px"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"></path></svg></div>
         <div><div class="row-title">[必填] 要点二</div><div class="row-desc">[必填] 一句展开</div></div>
         <div class="row-meta"><span class="status-dot now"></span></div>
       </div>
       <div class="row-item">
-        <div class="row-icon"><i data-lucide="layers" style="width:26px"></i></div>
+        <div class="row-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-layers" style="width:26px"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"></path><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"></path><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"></path></svg></div>
         <div><div class="row-title">[必填] 要点三</div><div class="row-desc">[必填] 一句展开</div></div>
         <div class="row-meta">next</div>
       </div>
       <div class="row-item">
-        <div class="row-icon"><i data-lucide="calendar" style="width:26px"></i></div>
+        <div class="row-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-calendar" style="width:26px"><path d="M8 2v4"></path><path d="M16 2v4"></path><rect width="18" height="18" x="3" y="4" rx="2"></rect><path d="M3 10h18"></path></svg></div>
         <div><div class="row-title">[必填] 要点四</div><div class="row-desc">[必填] 一句展开</div></div>
         <div class="row-meta">next</div>
       </div>

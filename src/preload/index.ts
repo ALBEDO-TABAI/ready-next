@@ -1347,11 +1347,12 @@ const documentImportAPI: import('../shared/document-import').DocumentImportAPI =
   list: () => ipcRenderer.invoke('documentImport:list'),
 }
 
-const sourceAnnotationsAPI: import('../main/modules/library-engine/source-document-ipc').SourceAnnotationsAPI = {
+const sourceAnnotationsAPI: import('../shared/source-annotations').SourceAnnotationsAPI = {
   pdf: input => ipcRenderer.invoke('sourceAnnotations:pdf', input),
   rss: input => ipcRenderer.invoke('sourceAnnotations:rss', input),
   web: input => ipcRenderer.invoke('sourceAnnotations:web', input),
   webReading: input => ipcRenderer.invoke('sourceAnnotations:webReading', input),
+  removeHighlight: input => ipcRenderer.invoke('sourceAnnotations:removeHighlight', input),
 }
 
 const documentAnnotationsAPI: import('../shared/document-comments').DocumentAnnotationsAPI = {

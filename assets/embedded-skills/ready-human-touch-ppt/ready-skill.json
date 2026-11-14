@@ -2,7 +2,7 @@
   "id": "ready-human-touch-ppt",
   "name": "ready-human-touch-ppt",
   "displayName": "网页 PPT · 双风格",
-  "description": "制作 Ready 点阵理性或 Human Touch 温感人文风格的单 HTML 演示文稿；用于用户指定这两种风格的网页 PPT。",
+  "description": "制作 Ready 点阵理性或 Human Touch 温感人文风格的单 HTML 演示文稿，交付内置图标、支持本地字体回退的 HTML；用于用户指定这两种风格的网页 PPT。",
   "version": "2026.07.06",
   "runtime": "reference",
   "execution": { "mode": "advisory" },

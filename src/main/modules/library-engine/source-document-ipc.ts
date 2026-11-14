@@ -1,25 +1,14 @@
-import type { PdfSelection } from '../../../shared/pdf-source-anchor'
 import type { IpcMain } from 'electron'
 import { z } from 'zod'
 import { createHash } from 'node:crypto'
 import { RSSReadExcerptSchema } from '../../../shared/rss-excerpt'
-import type { RSSReadExcerptInput } from '../../../shared/rss-excerpt'
-import type { LibraryHighlightState } from '../../../shared/library'
+import type { SourceReply } from '../../../shared/source-annotations'
 import type { RSSContentStore } from '../database/rss-content-store'
 import type { BrowserController } from '../browser-engine/browser-controller'
 import { rssSource, webReadingSource, webSource } from './source-adapters'
-import { RSSReadingRangeSchema, type RSSReadingRange } from '../../../shared/rss-reading'
+import { RSSReadingRangeSchema } from '../../../shared/rss-reading'
 import type { BrowserReadResult } from '../../../shared/browser-shell'
 import type { SourceDocumentService } from './source-documents'
-
-export type SourceReply = { success: true; data: LibraryHighlightState } | { success: false; error: string }
-export interface SourceAnnotationsAPI {
-  pdf(input: PdfSelection): Promise<SourceReply>
-  rss(input: RSSReadExcerptInput): Promise<SourceReply>
-  web(input: { tabId: string }): Promise<SourceReply>
-  /** A selection in the browser's reading view: the article as the reader showed it (its revision) and the range. */
-  webReading(input: { tabId: string; revision: string; range: RSSReadingRange }): Promise<SourceReply>
-}
 
 const READ_REFUSAL: Record<Exclude<BrowserReadResult, { success: true }>['error'], string> = {
   tab_missing: '网页已关闭，请重新选择', page_changed: '网页已切换，请重新选择', unsupported_protocol: '这个网页不能划线',
@@ -44,10 +33,11 @@ export function registerSourceAnnotationsIPC(ipcMain: Pick<IpcMain, 'handle'>, d
   /** The browser's reading of a tab's rendered article (the reading view's own source). */
   readTab(tabId: string): Promise<BrowserReadResult>
 }) {
-  const reply = async (work: () => Promise<LibraryHighlightState>): Promise<SourceReply> => {
+  const reply = async <T>(work: () => Promise<T>): Promise<SourceReply<T>> => {
     try { return { success: true, data: await work() } }
     catch (error) { return { success: false, error: error instanceof Error ? error.message : String(error) } }
   }
+  ipcMain.handle('sourceAnnotations:removeHighlight', (_event, raw: unknown) => reply(async () => (await dependencies.service()).removeHighlight(raw)))
   ipcMain.handle('sourceAnnotations:pdf', (_event, raw: unknown) => reply(async () => (await dependencies.service()).annotatePdf(raw)))
   ipcMain.handle('sourceAnnotations:rss', (_event, raw: unknown) => reply(async () => {
     const input = RSSReadExcerptSchema.parse(raw), store = dependencies.rss()

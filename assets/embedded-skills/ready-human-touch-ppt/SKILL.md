@@ -1,6 +1,6 @@
 ---
 name: ready-human-touch-ppt-skill
-description: 制作 Ready 点阵理性或 Human Touch 温感人文风格的单 HTML 演示文稿；用于用户指定这两种风格的网页 PPT。
+description: 制作 Ready 点阵理性或 Human Touch 温感人文风格的单 HTML 演示文稿，交付内置图标、支持本地字体回退的 HTML；用于用户指定这两种风格的网页 PPT。
 ---
 
 # Ready / Human Touch 双风格网页 PPT Skill
@@ -48,6 +48,8 @@ description: 制作 Ready 点阵理性或 Human Touch 温感人文风格的单 H
 2. 两种风格**不能混用**——类名体系互斥，校验器会拦。
 
 **颜色是品牌锁定的，不提供主题选择**；不要接受自定义 hex（保护品牌一致性，委婉说明）。
+
+图标直接使用配方里的内联 SVG（Lucide 0.475.0，取自仓库已安装版本），不加载外部图标脚本，也不改回 `data-lucide` 占位；保留模板中的 ISC 授权注释。Google Fonts 可保留，但必须保留现有本地字体回退栈（系统中文、无衬线/衬线及等宽字体），断网时仍可阅读。
 
 ### Step 3 · 填充内容
 

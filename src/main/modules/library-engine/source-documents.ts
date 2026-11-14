@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto'
 import { mkdir, readFile } from 'node:fs/promises'
 import { basename, extname, join } from 'node:path'
-import { toReadyUri } from '../../../shared/ready-ref'
+import { z } from 'zod'
+import { toReadyUri, parseReadyUri } from '../../../shared/ready-ref'
+import type { SourceHighlightRemoval } from '../../../shared/source-annotations'
 import { readDocumentSource } from '../../../shared/document-operations'
 import { applyDocumentOperation, saveUserDocument, type DocumentWriteDependencies } from '../document-engine/document-write-service'
 import { filename } from '../document-drafts/files'
@@ -11,11 +13,12 @@ import type { LibraryEngine } from './library-engine'
 import { exists, insideVault, isMissing, sourceNoteContent } from './source-note'
 import { publishFileAtomically } from '../document-engine/atomic-file-publish'
 import { anchorFileSchema, compact, type AnchorFile } from './highlight-anchors'
-import { parseHighlights } from './highlight-markdown'
+import { annotationSection, parseHighlights } from './highlight-markdown'
 import { PdfSelectionSchema } from '../../../shared/pdf-source-anchor'
 import { pdfSelection, sourceHighlightCodec, type SourceDocument, type SourceSelection } from './source-adapters'
 
 export function sourceDocumentId(uri: string): string { return 'source-' + createHash('sha256').update(uri).digest('hex').slice(0, 32) }
+const removeHighlightSchema = z.object({ sourceId: z.string().regex(/^source-[a-f0-9]{32}$/), id: z.string().regex(/^hl-[\w-]+$/), expectedVersion: z.string().min(1) }).strict()
 
 export class SourceDocumentService {
   private tail: Promise<unknown> = Promise.resolve()
@@ -74,6 +77,27 @@ export class SourceDocumentService {
     })
   }
   annotate(selection: SourceSelection) { return this.serial(() => this.annotateSource(selection)) }
+  removeHighlight(raw: unknown): Promise<SourceHighlightRemoval> {
+    const input = removeHighlightSchema.parse(raw)
+    return this.serial(async () => {
+      this.registry.scan(this.root)
+      const page = this.registry.get(input.sourceId)
+      if (!page?.current_path || page.status !== 'present' || page.identity_state === 'conflict') throw new Error('来源页不存在或身份冲突')
+      await insideVault(this.root, page.current_path)
+      const md = await readFile(page.current_path, 'utf8'), uri = readDocumentSource(md).frontmatter.来源引用
+      if (typeof uri !== 'string' || sourceDocumentId(uri) !== page.id) throw new Error('来源页身份与原文不一致')
+      const source = parseReadyUri(uri)
+      if (!source.ok || !['web', 'rss-item', 'file'].includes(source.ref.kind)) throw new Error('来源页引用不是网页、资讯或 PDF')
+      const section = annotationSection(md), targets = parseHighlights(md, page.id).filter(block => block.highlight.id === input.id)
+      if (!section || targets.length !== 1 || targets[0].start < section.start || targets[0].end > section.end) throw new Error('划线不存在或编号不唯一，请在来源页检查')
+      const target = targets[0]
+      const receipt = await applyDocumentOperation({ path: page.current_path, expectedVersion: input.expectedVersion, origin: 'source-highlights',
+        operation: { type: 'replaceRange', start: target.start, end: target.end, expectedText: target.raw, replacement: '' },
+      }, this.writer)
+      if ('code' in receipt) throw Object.assign(new Error(receipt.message), { code: receipt.code })
+      return { sourcePath: page.current_path, version: receipt.afterVersion, persistence: receipt.tab === 'merged_dirty' ? 'pending_save' : 'saved' }
+    })
+  }
   private async annotateSource(selection: SourceSelection) {
     const page = await this.ensureSource(selection.source)
     const outsideScope = new Set<string>(), pdfQuotes = new Map<string, { exact: string; prefix: string; suffix: string }>()

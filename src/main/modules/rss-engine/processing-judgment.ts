@@ -30,7 +30,8 @@ export function buildRSSJudgmentInput(article: RSSArticle, definitions: RSSProce
 export type RSSJudgmentInput = ReturnType<typeof buildRSSJudgmentInput>
 
 export function parseRSSJudgment(text: string, input: RSSJudgmentInput): RSSJudgment {
-  const result = RSSJudgmentSchema.parse(JSON.parse(text))
+  const json = text.trim().replace(/^```(?:json)?[ \t]*\r?\n([\s\S]*?)\r?\n```$/, '$1')
+  const result = RSSJudgmentSchema.parse(JSON.parse(json))
   const ids = result.decisions.map((decision) => decision.definitionId)
   if (new Set(ids).size !== input.definitions.length || ids.length !== input.definitions.length || ids.some((id) => !input.definitions.some((definition) => definition.id === id))) throw new Error('模型没有逐项返回本次分类标准。')
   for (const decision of result.decisions) {
