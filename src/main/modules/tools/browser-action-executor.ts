@@ -390,14 +390,14 @@ export class BrowserActionExecutor {
       const resolved = input.resolveTargetIdentity?.('predecessor')
       if (!resolved) {
         if (!capability.requiresDocument) return noDocumentIdentity()
-        throw new BrowserMutationFenceError('browser_target_identity_incomplete')
+        throw new BrowserMutationFenceError('browser_observation_required', 'Call browser_snapshot to observe the page before acting.')
       }
       if (typeof (resolved as Promise<BrowserActionTargetIdentity>).then === 'function') {
         throw new Error('browser_predecessor_identity_must_be_synchronous')
       }
       const identity = resolved as BrowserActionTargetIdentity
       if (!identityIsComplete(identity) && !(!capability.requiresDocument && identity.documentState === 'no_document')) {
-        throw new BrowserMutationFenceError('browser_target_identity_incomplete')
+        throw new BrowserMutationFenceError('browser_observation_required', 'Call browser_snapshot to observe the page before acting.')
       }
       return identity
     }
@@ -761,6 +761,9 @@ export class BrowserActionExecutor {
         const failureSettlement = await settleActive(null, resolution.error, 'abort', !timedOut) || lastSettlement
         if (timedOut) return deadlineResult(failureSettlement, true, false)
         if (!failureSettlement) event('abort')
+        if (resolution.error instanceof BrowserMutationFenceError && resolution.error.code === 'browser_observation_required') {
+          return attachBrowserMetadata(createBrowserStructuredOutput({ ok: false, errorKind: resolution.error.code, message: resolution.error.message }), failureSettlement)
+        }
         throw resolution.error
       }
 

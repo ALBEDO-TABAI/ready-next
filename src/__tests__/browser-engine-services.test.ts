@@ -537,7 +537,6 @@ describe('BrowserAutomationService', () => {
       code: 'KeyA',
       modifiers: 4,
       commands: ['selectAll'],
-      emulateFocus: true,
     })
 
     assert.deepEqual(mock.state.focusEmulation, [true, false])

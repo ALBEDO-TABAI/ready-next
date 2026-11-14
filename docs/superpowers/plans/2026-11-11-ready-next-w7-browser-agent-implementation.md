@@ -242,3 +242,10 @@ Electron 42（Chromium 148）已于 2026-10-20 停止支持。Ready 内嵌浏览
   - **Main 跟进**：下载已去掉无消费者的旧上下文修改，进入冻结工具面并补齐网关与授权派发到文件回执的回归；收到本机原生错误证据后，补齐 ordinal 分叉的网关元数据合同，并修复自动前缀覆盖下载原名，增加从文件到 ReadyRef 和胶囊标题的隔离回归。下列 ①② 的源码修复及检查见 [Main 跟进记录](../audits/2026-11-12-w7-main-download-followup.md)；隐藏真实窗口检查本轮按用户要求未重跑，③ 不在本次范围。
   - **未修、交给 Main 侧**：① `browser_download` 不在 Codex 回合的工具面上（`CODEX_ROOT_EXCLUDED_CONTROL_TOOLS` 仍排除它，与第一批合同“进入当前页 Codex 工具面”不符；工具层评测直接调 `executeToolCall`，所以没发现），模型一调用整轮就被网关拒绝（`gateway_response_tool_not_authorized`），真实窗口里拿不到下载回执；回执胶囊只有界面测试覆盖。② 接管之后点“让助手接着做”：Main 写下了那句话，但新的一轮立刻结束（“本轮未能完成”，`codex_native_terminal_rejected` / `blocked_external`），没有请求模型；点击时浏览器控制已回到助手、没有用户持有的页面。登录墙路径一次点击后任务继续，正常。③ 重启后任务与标签的归属只在内存里，旧的工作标签会回到用户的标签列表，任务卡也找不回来（没有按会话列出浏览器任务的接口）。
   - **验收**（HOME、TMPDIR 指向临时目录，隐藏窗口，本地替身模型，无网络）：新增隐藏真实窗口检查 `npm run verify:ready-next-browser-shell` 47/49，未过的两项就是上面的 ①②（检查里按原因报出）；整套 `npm run test`：并行 8328 项 0 失败（954 项为只在 Electron ABI 下跑的原生用例）、技能子进程 139 通过 3 跳过、串行性能 40 通过 5 跳过、界面合同 37/37；原生用例在 Electron 的 Node 下 506/506，合入 B14 后受影响的三份 15/15（`rebuild:native` 未跑：临时 HOME 下会下载头文件；ABI 检查通过）；`verify:ready-next-smoke` 44/44、`verify:ready-next-shell` 51/51、`verify:ready-next-capsule` 22/22、`verify:ready-next-today` 34/34；设计矩阵在预算内；typecheck、静默 catch、设计令牌、IPC 对应、快捷键、拖拽格式、CSS 分层检查通过。
+
+
+### 2026-11-14 工具层已知差距修复
+
+11 月 11 日的 gap 数是历史基线。本轮按 `cases/*.ts` 的差距分支修产品：隐藏窗口按键、表单提交、复选/单选、特殊输入类型、原生弹窗、各层 iframe 正文、shadow 输入框、hash 路由、首次导航/按键、表格同名按钮与具名画布，另修带预算快照的容器引用失效。对应旧行为现在必须判 fail，不再用 gap 接受；键盘、表单、弹窗与表格用例同时核对实际结果。
+
+代码与无需窗口的回归已落实；隐藏窗口工具层尚未复跑，不能登记为新的实窗 pass。滚动采集未加载更多的分支保留 gap：本轮不能打开承载窗口，缺少定位真实滚轮/懒加载行为的证据，不能通过改变门禁或放宽用例收掉。逐项状态、检查结果和复跑命令见 [修复结果](../audits/2026-11-14-browser-tool-layer-gaps.md)。任务与工作标签持久化不在本轮范围。

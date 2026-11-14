@@ -205,6 +205,18 @@ afterEach(() => {
 })
 
 describe('browser semantic tool facade', () => {
+  it('navigation and keys do not require a public snapshot before their first action', async () => {
+    let navigated = 0
+    const controller = createControllerMock({ navigate: async () => { navigated += 1; return { success: true } } })
+    const navigation = parseTool(await executeBrowserTool('browser_navigate', { url: 'https://example.test/new' }, controller))
+    assert.equal(navigated, 1, JSON.stringify(navigation))
+    assert.notEqual(navigation.ok, false)
+    const freshController = createControllerMock()
+    const key = parseTool(await executeBrowserTool('browser_press_key', { key: 'Enter' }, freshController))
+    assert.equal(key.ok, true, JSON.stringify(key))
+    assert.equal(key.delivery, 'delivered')
+    assert.ok(freshController.calls.keys.length > 0)
+  })
   it('opens a routed browser workflow in its task-owned background tab', async () => {
     const calls: string[] = []
     const controller = createControllerMock({

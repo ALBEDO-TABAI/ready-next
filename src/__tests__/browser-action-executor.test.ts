@@ -422,6 +422,20 @@ test('a mutate leaf that invokes no real transport fails closed', async () => {
   assert.equal(outputData(result).errorKind, 'browser_mutation_transport_not_invoked')
 })
 
+test('an action missing observation explains how to observe before attempting any write', async () => {
+  let writes = 0
+  const result = await new BrowserActionExecutor().execute({
+    toolName: 'browser_click', args: { x: 1, y: 1 }, journal: journal(),
+    dispatch: async (_invocation, _signal, boundary) => {
+      boundary.invokeTransport(() => { writes += 1 })
+      return '{"ok":true}'
+    },
+  })
+  assert.equal(outputData(result).errorKind, 'browser_observation_required')
+  assert.match(String(outputData(result).message), /browser_snapshot.*observe/)
+  assert.equal(writes, 0)
+})
+
 test('installing an input delivery probe is not a semantic transport', async () => {
   const controller = {
     executeJS: async () => 'probe-token',

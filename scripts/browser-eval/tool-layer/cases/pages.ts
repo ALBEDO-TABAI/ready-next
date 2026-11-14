@@ -65,9 +65,9 @@ export const spaGroup: CaseGroup = {
         const row = rows[0]?.data
         if (row && row.orderId === 'SPA-1007' && row.note === '已核对') return pass('spa.note 已记录', row)
         const reason = submitFailure(filled)
-        if (reason) return gap(reason)
+        if (reason) return fail(reason)
         if (filled.data.submitted === true)
-          return gap(
+          return fail(
             '缺陷：fill_form 用回车提交；'
               + '最后一个字段是多行文本框时回车只换行，表单没有提交'
           )
@@ -82,9 +82,9 @@ export const spaGroup: CaseGroup = {
         const navigated = await run.call('browser_navigate', { url: ctx.url('/spa/#/') })
         await new Promise((resolve) => setTimeout(resolve, 300))
         const url = await run.currentUrl()
-        if (!url.includes('/orders/')) return pass('已导航到列表路由')
+        if (new URL(url).hash === '#/' && navigated.data.ok !== false) return pass('已导航到列表路由')
         if (errorKind(navigated) === 'browser_mutation_transport_not_invoked') {
-          return gap(
+          return fail(
             '缺陷：只差 hash 的 SPA 路由在 45 '
               + '秒内被当成“重复导航”跳过；跳过说明被改写成 '
               + 'browser_mutation_transport_not_invoked，模型看不到原因（要加 '
@@ -158,7 +158,7 @@ export const framesGroup: CaseGroup = {
       const read = await run.call('browser_read', {})
       const text = textOf(read)
       if (text.includes('DEEP-42') && text.includes('MID-7')) return pass('两层文字都读到')
-      return gap(
+      return fail(
         `browser_read 只读到主文档，iframe 文字缺失（MID-7=${text.includes('MID-7')
         } DEEP-42=${text.includes('DEEP-42')
         }）（§4.6 覆盖）`
@@ -191,7 +191,7 @@ export const framesGroup: CaseGroup = {
         if (row && row.data.value === 'DEEP-OK')
           return pass(`frames.submit from ${String((row as { origin?: string }).origin)}`)
         const reason = submitFailure(filled)
-        return reason ? gap(reason) : fail(`record=${JSON.stringify(row ?? null)} ${summarize(filled, 500)}`)
+        return reason ? fail(reason) : fail(`record=${JSON.stringify(row ?? null)} ${summarize(filled, 500)}`)
       })
   },
 }
@@ -230,7 +230,7 @@ export const shadowGroup: CaseGroup = {
       if (delivered(typed) && value === '张三') return pass('组件值“张三”')
       const detail = typed.data.detail as { captured?: { name?: string }; live?: { name?: string } } | undefined
       if (errorKind(typed) === 'stale_page_map' && detail?.captured?.name && !detail?.live?.name && !value) {
-        return gap(
+        return fail(
           '缺陷：open shadow 里由外层 <label> 命名的输入框，'
             + `写入前的身份核对拿不到名字（快照名“${detail.captured.name
           }”，实时名为空），判为 stale_page_map，写不进`
@@ -256,7 +256,7 @@ export const shadowGroup: CaseGroup = {
         const rows = await waitForRecord(run, 'shadow.submit', 1, 3_000)
         const row = rows[0]?.data
         if (row && row.recipient === '张三') return pass('shadow.submit 已记录', row)
-        return gap(
+        return fail(
           `寄件单提交不了：收件人写不进（同上，${String(errorKind(filled) || 'form_field_failed')
           }），提交按钮只能靠指针`,
           { text: summarize(filled, 400) }

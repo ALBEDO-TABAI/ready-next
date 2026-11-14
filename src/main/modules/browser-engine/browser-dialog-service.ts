@@ -5,6 +5,7 @@ export interface BrowserDialogSnapshot {
   type: 'alert' | 'confirm' | 'prompt' | 'beforeunload'
   message: string
   defaultPrompt?: string
+  url?: string
 }
 
 interface BrowserDialogCdpPort {
@@ -15,6 +16,7 @@ interface BrowserDialogCdpPort {
 export class BrowserDialogService {
   private readonly pendingByTab = new Map<string, BrowserDialogSnapshot>()
   private readonly unsubscribeByTab = new Map<string, () => void>()
+  private readonly readyByTab = new Map<string, Promise<void>>()
 
   constructor(
     private readonly cdp: BrowserDialogCdpPort,
@@ -22,10 +24,16 @@ export class BrowserDialogService {
   ) {}
 
   async ensure(tabId: string): Promise<void> {
-    if (this.unsubscribeByTab.has(tabId)) return
-    await this.cdp.sendCommand(tabId, 'Page.enable')
+    const pending = this.readyByTab.get(tabId)
+    if (pending) return pending
     const unsubscribe = this.cdp.subscribe(tabId, (event) => this.onEvent(event))
     this.unsubscribeByTab.set(tabId, unsubscribe)
+    const ready = Promise.resolve().then(() => this.cdp.sendCommand(tabId, 'Page.enable')).then(() => undefined).catch(error => {
+      if (this.unsubscribeByTab.get(tabId) === unsubscribe) this.clear(tabId)
+      throw error
+    })
+    this.readyByTab.set(tabId, ready)
+    return ready
   }
 
   get(tabId: string): BrowserDialogSnapshot | null {
@@ -50,6 +58,7 @@ export class BrowserDialogService {
     const hadPending = this.pendingByTab.delete(tabId)
     this.unsubscribeByTab.get(tabId)?.()
     this.unsubscribeByTab.delete(tabId)
+    this.readyByTab.delete(tabId)
     if (hadPending) this.onPendingChange?.(tabId)
   }
 
@@ -67,6 +76,7 @@ export class BrowserDialogService {
       tabId: event.tabId,
       type,
       message: String(event.params.message || ''),
+      ...(typeof event.params.url === 'string' ? { url: event.params.url } : {}),
       ...(typeof event.params.defaultPrompt === 'string' ? { defaultPrompt: event.params.defaultPrompt } : {}),
     })
     this.onPendingChange?.(event.tabId)

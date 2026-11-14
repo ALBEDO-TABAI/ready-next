@@ -477,6 +477,7 @@ export async function executeBrowserTool(
       }
     }
 
+    let preparedIdentity: Awaited<ReturnType<typeof browserSnapshotService.documentIdentity>> | null = null
     const result = await actionExecutor.execute({
       toolName,
       args,
@@ -491,7 +492,12 @@ export async function executeBrowserTool(
       interactionBudgetKey: browserInteractionBudgetKey(args, controller, sessionId, origin),
       beginInteractionObservation: () => beginAuthoritativeInteractionObservation(toolName, args, controller, origin),
       prepare: async (invocation) => {
-        return handlePendingDialogBeforeAction(toolName, invocation.args, controller)
+        const pending = await handlePendingDialogBeforeAction(toolName, invocation.args, controller)
+        if (pending) return pending
+        if (toolName === 'browser_navigate' || toolName === 'browser_press_key') {
+          preparedIdentity = await browserSnapshotService.documentIdentity(controller, initialTabId)
+        }
+        return null
       },
       resolveTargetIdentity: (phase, hint) => {
         const pageTool = taskExecutionContext?.preparedPageTool
@@ -519,7 +525,10 @@ export async function executeBrowserTool(
           || currentIdentity?.physicalTargetToken
           || (typeof controller.getPhysicalTargetToken === 'function' ? controller.getPhysicalTargetToken(tabId) : null)
         const frameDocumentToken = parsedRef?.frameDocumentToken
-          || (frameId === '0' ? currentIdentity?.frameDocumentToken || null : null)
+          || (frameId === '0' ? preparedIdentity?.frameDocumentToken || currentIdentity?.frameDocumentToken
+            || (taskExecutionContext?.trustedPageRef?.tabId === tabId
+              && taskExecutionContext.trustedPageRef.physicalTargetToken === physicalTargetToken
+              ? taskExecutionContext.trustedPageRef.mainFrameDocumentToken : null) : null)
         const predecessor: BrowserActionTargetIdentity = tabId && physicalTargetToken && frameId && frameDocumentToken
           ? {
               documentState: 'document',

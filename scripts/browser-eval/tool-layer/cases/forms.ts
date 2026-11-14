@@ -11,7 +11,6 @@ import {
   delivered,
   errorKind,
   fail,
-  gap,
   journalAgrees,
   keyboardOutcome,
   missingTargets,
@@ -103,12 +102,6 @@ export const surfaceGroup: CaseGroup = {
         const navigated = await fresh.call('browser_navigate', { url: ctx.url('/wizard/') })
         const url = await fresh.currentUrl()
         if (url.includes('/wizard/') && navigated.data.ok !== false) return pass('导航成功')
-        if (/browser_target_identity_incomplete/.test(navigated.text) && !url.includes('/wizard/')) {
-          return gap(
-            '缺陷：本轮还没做快照时，导航/按键直接失败，'
-              + '只给通用错误 browser_target_identity_incomplete，不提示先观察页面'
-          )
-        }
         return fail(`url=${url} ${summarize(navigated)}`)
       })
   },
@@ -144,8 +137,8 @@ export const formGroup: CaseGroup = {
       const { targets } = await allTargets(run)
       const box = targets.find((item) => item.name === '订阅月报')
       if (!box) return fail(`快照里没有“订阅月报”；看到：${targetSummary(targets)}`)
-      if (box.role === 'checkbox') return pass('role=checkbox')
-      return gap(
+      if (box.role === 'checkbox' && typeof box.states?.checked === 'boolean') return pass(`role=checkbox checked=${box.states.checked}`)
+      return fail(
         `缺陷：复选框被标成 ${box.role
         }（fingerprint.inputType=${String(box.fingerprint?.inputType)
         }），快照不给勾选状态（§4.6 感知）`,
@@ -170,11 +163,6 @@ export const formGroup: CaseGroup = {
       const typed = await run.call('browser_type', { target_id: email.targetId, text: 'bai@example.test' })
       const value = await run.pageEval<string>("return document.querySelector('#email')?.value ?? null")
       if (delivered(typed) && value === 'bai@example.test') return pass('delivered，页面值一致')
-      if (errorKind(typed) === 'selection_unavailable' && !value)
-        return gap(
-          '缺陷：type=email 输入框写不进（selection_unavailable：输入前要设'
-            + '选区，而 email 输入框不支持选区）'
-        )
       return fail(`value=${String(value)} ${summarize(typed)}`)
     })
     await ctx.check('select-option', '下拉选择', ['browser_select'], async () => {
@@ -207,29 +195,25 @@ export const formGroup: CaseGroup = {
         { fields: [{ target_id: page.pick('订阅月报', { inputType: 'checkbox' }).targetId, value: true }] }
       )
       const checked = await run.pageEval<boolean>("return document.querySelector('#subscribe')?.checked ?? null")
-      if (checked === true) return pass('已勾选')
+      if (checked === true && filled.data.ok === true) return pass('已勾选')
       if (filled.data.ok === false && checked === false)
-        return gap(
+        return fail(
           `缺陷：fill_form 勾不上复选框（把 checkbox 当文字框输入，${String(errorKind(filled))}）`
         )
       return fail(`checked=${String(checked)} ${summarize(filled, 400)}`)
     })
     await ctx.check(
       'fill-form-submit',
-      '填表并提交（邮箱由用户先填好，'
-        + '最后一个字段是单行输入框），服务端记下提交内容',
+      '填表并提交（含邮箱、复选框，最后一个字段是多行文本框），服务端记下提交内容',
       ['browser_fill_form', 'browser_read'],
       async () => {
-        // Isolate the submit path from the email and checkbox defects: the email is pre-filled as
-        // the user would, and the last field is a single-line input so Enter means "submit".
-        await run.pageEval<boolean>(
-          "const el = document.querySelector('#email'); el.value = 'bai@example.test'; return true"
-        )
         const page = await observe(run)
         const filled = await run.call('browser_fill_form', {
           fields: [
-            { target_id: page.pick('留言', { purpose: 'input' }).targetId, value: '评测留言 FORM-1' },
             { target_id: page.pick('姓名', { purpose: 'input' }).targetId, value: '白' },
+            { target_id: page.pick('邮箱', { purpose: 'input' }).targetId, value: 'bai@example.test' },
+            { target_id: page.pick('订阅月报', { inputType: 'checkbox' }).targetId, value: true },
+            { target_id: page.pick('留言', { purpose: 'input' }).targetId, value: '评测留言 FORM-1' },
           ],
           submit: true,
         })
@@ -237,11 +221,11 @@ export const formGroup: CaseGroup = {
         const row = rows[0]?.data
         if (!row) {
           const reason = submitFailure(filled)
-          return reason ? gap(reason) : fail(`没有提交记录：${summarize(filled, 600)}`)
+          return reason ? fail(reason) : fail(`没有提交记录：${summarize(filled, 600)}`)
         }
         const read = await run.call('browser_read', {})
         if (!textOf(read).includes('已收到 白 的留言')) return fail(`完成页不可读：${summarize(read)}`)
-        return row.name === '白' && row.message === '评测留言 FORM-1'
+        return filled.data.ok === true && filled.data.submitted === true && row.name === '白' && row.email === 'bai@example.test' && row.subscribe === true && row.message === '评测留言 FORM-1'
           ? pass('form.submit 与填写一致，完成页可读', row)
           : fail(JSON.stringify(row))
       })
@@ -304,7 +288,7 @@ export const wizardGroup: CaseGroup = {
       async () => {
         const filled = await step1('12345')
         const reason = submitFailure(filled)
-        if (reason) return gap(reason)
+        if (reason) return fail(reason)
         await run.call('browser_wait', { condition: 'text', text: '手机号格式不正确', timeout_ms: 6_000 })
         const read = await run.call('browser_read', {})
         return textOf(read).includes('手机号格式不正确') ? pass('错误提示可读') : fail(summarize(read))
@@ -316,7 +300,7 @@ export const wizardGroup: CaseGroup = {
       async () => {
         const first = await step1('13800000001')
         const reason1 = submitFailure(first)
-        if (reason1) return gap(`第 1 步：${reason1}`)
+        if (reason1) return fail(`第 1 步：${reason1}`)
         const step2 = await run.call(
           'browser_wait',
           { condition: 'text', text: '第 2 步：配送', timeout_ms: 6_000 }
@@ -333,7 +317,7 @@ export const wizardGroup: CaseGroup = {
           }
         )
         const reason2 = submitFailure(second)
-        if (reason2) return gap(`第 2 步：${reason2}`)
+        if (reason2) return fail(`第 2 步：${reason2}`)
         const step3 = await run.call(
           'browser_wait',
           { condition: 'text', text: '第 3 步：确认', timeout_ms: 6_000 }
@@ -350,7 +334,7 @@ export const wizardGroup: CaseGroup = {
           }
         )
         const reason3 = submitFailure(third)
-        if (reason3) return gap(`第 3 步：${reason3}`)
+        if (reason3) return fail(`第 3 步：${reason3}`)
         const rows = await waitForRecord(run, 'wizard.order', 1, 3_000)
         const row = rows[0]?.data
         if (row && row.name === '王一' && row.phone === '13800000001'
@@ -358,7 +342,7 @@ export const wizardGroup: CaseGroup = {
           return pass('wizard.order 与三步填写一致', row)
         const read = await run.call('browser_read', {})
         if (textOf(read).includes('请先确认信息'))
-          return gap(
+          return fail(
             '缺陷：第 3 步的确认复选框没被勾上，服务端拒绝（fill_form '
               + '对 checkbox 按文字框处理）'
           )
@@ -435,7 +419,7 @@ export const loginGroup: CaseGroup = {
         if (row && row.title === '评测帖子 POST-1' && row.body === '正文 BODY-1')
           return pass('admin.post.create 与填写一致', row)
         const reason = submitFailure(filled)
-        return reason ? gap(reason) : fail(`record=${JSON.stringify(row ?? null)} ${summarize(filled, 500)}`)
+        return reason ? fail(reason) : fail(`record=${JSON.stringify(row ?? null)} ${summarize(filled, 500)}`)
       })
     const posts = await ctx.run('posts')
     await posts.open(ctx.url('/admin/posts/'))
@@ -450,7 +434,7 @@ export const loginGroup: CaseGroup = {
         const scoped = await posts.call('browser_find', { query: '删除', within_target_id: form.targetId })
         if (findMatches(scoped).length === 1) return pass('within 查找成功')
         if (String(scoped.data.errorCode) === 'within_target_stale') {
-          return gap(
+          return fail(
             '缺陷：用带 max_bytes 的快照里的容器做 within_target_id，'
               + '总被判为“旧快照”（within_target_stale），'
               + '重拍同样预算的快照也一样；默认预算的快照没问题'
@@ -460,16 +444,13 @@ export const loginGroup: CaseGroup = {
       })
     await ctx.check(
       'delete-needs-pointer',
-      '同名“删除”按钮：先在所在表单里消歧，再点击（后台只能靠指针）',
+      '同名“删除”按钮带行上下文；容器内查找后可定位（后台只能靠指针）',
       ['browser_find', 'browser_click'],
       async () => {
         const page = await observe(posts)
-        const ambiguous = await posts.call(
-          'browser_click',
-          { target_id: page.targets.filter((item) => item.role === 'button' && item.name === '删除')[1]?.targetId }
-        )
-        if (errorKind(ambiguous) !== 'ambiguous_target')
-          return fail(`同名按钮直接点击没有被判为歧义：${summarize(ambiguous)}`)
+        const buttons = page.targets.filter(item => item.role === 'button' && item.name === '删除')
+        if (buttons.length < 2 || new Set(buttons.map(item => item.fingerprint?.ancestorContext)).size !== buttons.length)
+          return fail(`同名按钮缺少可区分的行上下文：${JSON.stringify(buttons)}`)
         const form = page.targets.find(
           (item) => item.role === 'form' && String(item.fingerprint?.formAction || '').includes('/admin/posts/2/delete')
         )
@@ -481,7 +462,7 @@ export const loginGroup: CaseGroup = {
         const before = await posts.probe()
         const clicked = await posts.call('browser_click', { target_id: button.targetId })
         if (errorKind(clicked) === 'ambiguous_target') {
-          return gap(
+          return fail(
             '缺陷：同名按钮（每行一个“删除”）即使用 within_target_id '
               + '在所在表单里找到唯一一个，点击仍判为有歧义；'
               + '表格行的标题不进快照，助手难以指明是哪一行'

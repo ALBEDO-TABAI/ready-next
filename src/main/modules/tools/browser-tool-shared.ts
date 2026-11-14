@@ -46,8 +46,7 @@ export function activePageLikelyMatchesTarget(activeUrl: string | undefined, tar
   try {
     const active = new URL(activeUrl)
     const next = new URL(target)
-    if (active.origin === next.origin && active.pathname === next.pathname && active.search === next.search) return true
-    return active.origin === next.origin
+    return active.href === next.href
   } catch {
     return String(activeUrl).trim().toLowerCase() === String(target).trim().toLowerCase()
   }

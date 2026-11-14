@@ -5,6 +5,8 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, test } from 'node:test'
 
 import * as sessionContinuityModule from '../main/modules/agent-control/session/session-continuity'
+import { executeBrowserTool } from '../main/modules/tools/browser-tools'
+import type { BrowserController } from '../main/modules/browser-engine/ipc-handler'
 import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
 import {
   __reloadSessionContinuityFromDiskForTests,
@@ -24,6 +26,33 @@ import {
 } from '../main/modules/agent-control/session/session-continuity'
 
 const TEST_STORAGE_PATH = join(tmpdir(), 'ready-session-continuity-persisted.json')
+
+test('SPA hash routes navigate independently and duplicate skips preserve their real reason', async () => {
+  let current = 'https://example.test/spa/#/'
+  let navigations = 0
+  let sequence = 0
+  const controller = {
+    getActiveTab: () => ({ id: 'tab-spa', title: 'SPA', url: current, active: true }),
+    getTabList: () => [{ id: 'tab-spa', title: 'SPA', url: current, active: true }],
+    getPhysicalTargetToken: () => 'physical-spa',
+    executeJS: async () => ({ url: current, frameDocumentToken: 'document-spa', timeOrigin: 1 }),
+    navigate: async (_tabId: string, url: string) => { current = url; navigations += 1; return { success: true } },
+    beginBrowserWorkflowAction: (input: { identity: unknown }) => ({ actionId: `spa-${++sequence}`, actionSeq: sequence, identity: input.identity }),
+    settleBrowserWorkflowAction: (_taskId: string, actionId: string, outcome: unknown) => ({ receiptId: actionId, outcome }),
+  } as unknown as BrowserController
+  const call = (url: string) => executeBrowserTool('browser_navigate', { tab_id: 'tab-spa', url }, controller,
+    undefined, 'hash-route-test', undefined, undefined, undefined,
+    { ownerRunId: 'run-spa', browserTaskId: 'browser-spa', parentTaskId: 'parent-spa', inputSource: 'trusted_internal' })
+  await call('https://example.test/spa/#/orders/A')
+  await call('https://example.test/spa/#/')
+  await call('https://example.test/spa/#/orders/B')
+  assert.equal(current, 'https://example.test/spa/#/orders/B')
+  assert.equal(navigations, 3)
+  const duplicate = await call(current)
+  assert.equal(typeof duplicate === 'string' ? null : duplicate.data?.errorKind, 'duplicate_navigation')
+  assert.match(typeof duplicate === 'string' ? duplicate : duplicate.text, /Skipped duplicate navigation/)
+  assert.equal(navigations, 3)
+})
 
 beforeEach(() => {
   __setScopeContextEpochDatabaseForTests({ getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never })

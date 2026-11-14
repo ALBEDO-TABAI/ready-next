@@ -11,7 +11,6 @@ import {
   delivered,
   errorKind,
   fail,
-  gap,
   journalAgrees,
   keyboardOutcome,
   missingTargets,
@@ -129,7 +128,7 @@ export const uploadGroup: CaseGroup = {
           return pass('upload 记录 sha256 与附件一致', { filename: row.filename, size: row.size })
         const reason = submitFailure(filled)
         return reason
-          ? gap(reason)
+          ? fail(reason)
           : fail(`record=${JSON.stringify(row ?? null)} expected=${String(expected)} ${summarize(filled, 400)}`)
       })
   },
@@ -162,9 +161,17 @@ export const dialogsGroup: CaseGroup = {
         const got = await confirmRun.call('browser_dialog', { action: 'get' }, 10_000)
         return /确定要继续吗/.test(got.text) ? pass('confirm 文案可读') : fail(summarize(got))
       } catch (error) {
-        if (hung(error)) return gap(DIALOG_HANG)
+        if (hung(error)) return fail(DIALOG_HANG)
         throw error
       }
+    })
+    await ctx.check('dialog-blocks-page-tools', '对话框待处理时，其它页面工具立即明确拒绝', ['browser_read', 'browser_snapshot', 'browser_press_key'], async () => {
+      for (const [name, args] of [['browser_read', {}], ['browser_snapshot', {}], ['browser_press_key', { key: 'Enter' }]] as const) {
+        const started = Date.now()
+        const blocked = await confirmRun.call(name, args, 5_000)
+        if (errorKind(blocked) !== 'dialog_open' || Date.now() - started >= 2_000) return fail(`${name} 没有立即明确拒绝：${summarize(blocked)}`)
+      }
+      return pass('三种页面工具均立即返回 dialog_open')
     })
     await ctx.check(
       'confirm-accept',
@@ -179,18 +186,35 @@ export const dialogsGroup: CaseGroup = {
             ? pass('confirm=true 已记录')
             : fail(`record=${JSON.stringify(row ?? null)} ${summarize(accepted)}`)
         } catch (error) {
-          if (hung(error)) return gap(DIALOG_HANG)
+          if (hung(error)) return fail(DIALOG_HANG)
           throw error
         }
       })
     confirmRun.close()
+    const dismissRun = await openWithDialog('dismiss', 'confirm')
+    await ctx.check('confirm-dismiss', '拒绝 confirm，服务端记录 false', ['browser_dialog'], async () => {
+      const dismissed = await dismissRun.call('browser_dialog', { action: 'dismiss' }, 5_000)
+      const rows = await waitForRecord(dismissRun, 'dialog.result', 2)
+      return dismissed.data.ok === true && rows.some(row => row.data.type === 'confirm' && row.data.value === false)
+        ? pass('confirm=false 已记录') : fail(summarize(dismissed))
+    })
+    dismissRun.close()
+    const alertRun = await openWithDialog('alert', 'alert')
+    await ctx.check('alert-get-accept', '读取 alert 文案并关闭', ['browser_dialog'], async () => {
+      const got = await alertRun.call('browser_dialog', { action: 'get' }, 5_000)
+      const dialog = got.data.dialog as { type?: string; message?: string } | undefined
+      if (dialog?.type !== 'alert' || !dialog.message) return fail(summarize(got))
+      const accepted = await alertRun.call('browser_dialog', { action: 'accept' }, 5_000)
+      return accepted.data.ok === true ? pass('alert 文案可读，已关闭') : fail(summarize(accepted))
+    })
+    alertRun.close()
     const promptRun = await openWithDialog('prompt', 'prompt')
     await ctx.check('prompt-unsupported', 'window.prompt 输入框', ['browser_dialog'], async () => {
       const accepted = await promptRun.call('browser_dialog', { action: 'accept', prompt_text: '白' }, 10_000)
       const rows = await waitForRecord(promptRun, 'dialog.result')
       const row = rows.find((item) => item.data.type === 'prompt')?.data
       if (row && row.value === '白') return pass('prompt=白 已记录')
-      if (errorKind(accepted) === 'dialog_not_open' && (!row || row.value === null)) {
+      if ((errorKind(accepted) === 'dialog_not_open' || errorKind(accepted) === 'dialog_unsupported') && (!row || row.value === null)) {
         const thrown = await promptRun.pageEval<string>(
           "try { window.prompt('probe'); return 'no-error' } catch (error) { return String(error && error.message || error) }"
         )
@@ -312,10 +336,10 @@ export const canvasGroup: CaseGroup = {
         const result = await run.call('browser_snapshot', {})
         const targets = snapshotTargets(result)
         const seats = targets.filter((item) => /^[A-H][1-5]$/.test(item.name))
-        const canvas = targets.some((item) => item.name.includes('选座画布'))
+        const canvas = targets.some((item) => item.role.toLowerCase() === 'canvas' && item.name.includes('选座画布'))
         if (seats.length > 0) return fail(`座位不该出现在结构里：${seats.length}`)
         if (canvas) return pass('画布可见、座位只在像素里（需要截图定位）')
-        return gap(
+        return fail(
           '快照里没有画布元素（tabindex + aria-label 的 canvas 也不收），'
             + `助手只能靠截图坐标；看到：${targetSummary(targets)
           }（§4.6 带编号截图）`

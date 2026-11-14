@@ -20,6 +20,31 @@ function observeContext(controller: BrowserController) {
   return { controller }
 }
 
+test('browser_read includes same-origin and cross-origin nested frames within one text budget and reports a failed frame', async () => {
+  let removed = false
+  const controller = {
+    executeJS: async () => ({ blocked: false }),
+    getPageContent: async () => 'MAIN',
+    listContentFrames: () => [
+      { frameKey: '0', main: true, url: 'https://same.test/' },
+      { frameKey: '1-2', main: false, url: 'https://same.test/middle' },
+      { frameKey: '3-4', main: false, url: 'https://cross.test/deep' },
+    ],
+    executeJSInFrame: async (_tabId: string, frame: string) => {
+      if (removed && frame === '3-4') throw new Error('FRAME_NOT_FOUND')
+      return frame === '1-2' ? 'MID-7' : 'DEEP-42'
+    },
+  } as unknown as BrowserController
+  const read = await executeBrowserObserveTool('read', {}, observeContext(controller)) as ToolExecutionOutput
+  assert.match(String(read.data?.content), /MAIN[\s\S]*MID-7[\s\S]*DEEP-42/)
+  const bounded = await executeBrowserObserveTool('read', { max_chars: 50 }, observeContext(controller)) as ToolExecutionOutput
+  assert.equal(String(bounded.data?.content).length, 50)
+  removed = true
+  const failed = await executeBrowserObserveTool('read', {}, observeContext(controller)) as ToolExecutionOutput
+  assert.equal(failed.data?.errorKind, 'frame_read_failed')
+  assert.equal(failed.data?.content, undefined)
+})
+
 test('browser_fill_form stops at the first failed field and never submits partial data', async () => {
   const calls: string[] = []
   const outcome = await runBrowserFillFormSequence(
@@ -37,6 +62,7 @@ test('browser_fill_form stops at the first failed field and never submits partia
         })
         : createToolExecutionOutput('{"ok":true}', { data: { ok: true } })
     },
+    async () => { assert.fail('partial forms must never be submitted') },
   )
   assert.equal(outcome.ok, false)
   assert.equal(outcome.failedIndex, 1)
@@ -51,13 +77,21 @@ test('browser_fill_form reports a failed submit instead of claiming submitted', 
     { submit: true },
     async (operation) => {
       calls.push(operation)
-      return operation === 'press_key' ? 'Error: key dispatch failed' : '{"ok":true}'
+      return '{"ok":true}'
     },
+    async () => { calls.push('submit'); return 'Error: form submission failed' },
   )
   assert.equal(outcome.ok, false)
   assert.equal(outcome.errorKind, 'form_submit_failed')
   assert.equal(outcome.submitted, false)
-  assert.deepEqual(calls, ['type_selector', 'press_key'])
+  assert.deepEqual(calls, ['type_selector', 'submit'])
+})
+
+test('boolean form fields without an exact control never become text in another input', async () => {
+  const result = await runBrowserFillFormSequence([{ label: '订阅', value: true }], { submit: true },
+    async () => { assert.fail('must not guess a text input') }, async () => { assert.fail('must not submit') })
+  assert.equal(result.errorKind, 'form_control_target_required')
+  assert.match(String(result.message), /browser_snapshot.*checkbox\/radio target_id/)
 })
 
 test('browser_read enforces max_chars and returns structured selector ambiguity', async () => {

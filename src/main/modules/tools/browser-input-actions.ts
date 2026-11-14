@@ -792,17 +792,18 @@ async function runGuardedPostFocusType(
   await requireBrowserInputReadiness(controller, tabId, 'direct_text', inputDocumentState)
   const textProbeToken = String(await runProbe(`(() => {
     const __READY_AGENT_INPUT_DELIVERY_PROBE__ = true;
+    ${buildTargetSemanticsLibraryJs()}
     const token = 'text-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
     const previous = globalThis.__readyTextDeliveryProbe;
     if (previous && typeof previous.cleanup === 'function') previous.cleanup();
-    const target = document.activeElement;
+    const target = readyActiveElement();
     const readValue = () => {
       if (!target) return null;
       if ('value' in target) return String(target.value ?? '');
       return String(target.textContent ?? '');
     };
     const state = { token, count: 0, target, before: readValue() };
-    const onInput = (event) => { if (event && event.target === target) state.count += 1; };
+    const onInput = (event) => { if (event && event.composedPath().includes(target)) state.count += 1; };
     state.cleanup = () => document.removeEventListener('input', onInput, true);
     document.addEventListener('input', onInput, true);
     globalThis.__readyTextDeliveryProbe = state;
@@ -831,7 +832,8 @@ async function runGuardedPostFocusType(
   if (opts.clearBefore) {
     const selection = await runProbe(`(() => {
       const __READY_AGENT_TARGET_SELECT_ALL__ = true;
-      const el = document.activeElement;
+      ${buildTargetSemanticsLibraryJs()}
+      const el = readyActiveElement();
       if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
         try {
           el.setSelectionRange(0, String(el.value || '').length);
@@ -1035,8 +1037,7 @@ export async function sendKeyStroke(
   modifiers?: unknown,
   documentState?: BrowserInputDocumentState,
 ): Promise<'delivered' | 'not_delivered' | 'unknown'> {
-  const keyboardReadiness = await requireBrowserInputReadiness(controller, tabId, 'trusted_keyboard', documentState)
-  const emulateFocus = keyboardReadiness.documentFocused !== true
+  await requireBrowserInputReadiness(controller, tabId, 'trusted_keyboard', documentState)
   const keyLabel = normalizeKeyLabel(key)
   const code = keyToCode(keyLabel)
   const vk = keyToVirtualCode(keyLabel)
@@ -1090,7 +1091,6 @@ export async function sendKeyStroke(
       windowsVirtualKeyCode: modifier.vk,
       nativeVirtualKeyCode: modifier.vk,
       isKeypad: false,
-      emulateFocus,
     })
   }
 
@@ -1104,7 +1104,6 @@ export async function sendKeyStroke(
     modifiers: mask,
     isKeypad: false,
     unmodifiedText: text,
-    emulateFocus,
   })
   await send({
     type: 'keyUp',
@@ -1114,7 +1113,6 @@ export async function sendKeyStroke(
     nativeVirtualKeyCode: vk || undefined,
     modifiers: mask,
     isKeypad: false,
-    emulateFocus,
   })
 
   for (let i = modifierTriples.length - 1; i >= 0; i -= 1) {
@@ -1127,7 +1125,6 @@ export async function sendKeyStroke(
       windowsVirtualKeyCode: modifier.vk,
       nativeVirtualKeyCode: modifier.vk,
       isKeypad: false,
-      emulateFocus,
     })
   }
   } catch (error) {
@@ -1240,6 +1237,7 @@ export async function settleAfterAction(
   tabId: string | null,
   signal?: AbortSignal,
 ): Promise<void> {
+  if (await controller.getBrowserDialog?.(tabId)) return
   await sleepWithAbort(BROWSER_V3_ACTION_SETTLE_MS, signal)
   await waitForLoadingStop(controller, tabId, 8_000, signal)
   await waitForReady(controller, tabId, 6_000, undefined, signal)
