@@ -62,6 +62,11 @@ class FakeElement {
     return this.rect
   }
 
+  /** Light-DOM stand-in: the root has no host and finds no labels, as a document without matching labels does. */
+  getRootNode(): { host?: FakeElement; activeElement: unknown; querySelector(selector: string): null; getElementById(id: string): null } {
+    return { activeElement: this.ownerDocument?.activeElement ?? null, querySelector: () => null, getElementById: () => null }
+  }
+
   closest(selector: string): FakeElement | null {
     if (selector === 'form' && this.tagName === 'FORM') return this
     return this.parentElement?.closest(selector) ?? null
