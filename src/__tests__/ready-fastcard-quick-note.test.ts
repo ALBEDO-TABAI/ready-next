@@ -42,6 +42,14 @@ test('quick note reports shortcut failure; recording is durable and playable wit
       show: async () => undefined, hide: () => undefined, readClipboard: async () => ({ kind: 'text', text: '' }), notify: () => undefined }, collection, repository, cache,
       { configuredModels: () => { throw new Error('model configuration unavailable') }, transcribe: async () => assert.fail('unverified model must not be called') })
     assert.equal(brokenConfig.recording(wav, 'audio/wav', 'config-failure').transcription?.status, 'failed')
+    // Whether a recording can be transcribed at all (the board's voice card asks): never from a model's name or
+    // from OpenAI compatibility, only from an audio declaration in the shared capability layer plus a wired provider.
+    assert.equal(service.transcriptionAvailable(), false); assert.equal(brokenConfig.transcriptionAvailable(), false)
+    const named = new FastCardQuickNoteService({ register: () => false, unregister: () => undefined,
+      show: async () => undefined, hide: () => undefined, readClipboard: async () => ({ kind: 'text', text: '' }), notify: () => undefined }, collection, repository, cache,
+      { configuredModels: () => [{ provider: 'openai', apiKey: 'test-key', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-audio-preview' } as import('../shared/ai-providers').AIModelConfig],
+        transcribe: async () => assert.fail('no model call') })
+    assert.equal(named.transcriptionAvailable(), false)
     assert.deepEqual(Buffer.from(brokenConfig.playback('config-failure').split(',')[1], 'base64'), wav)
     repository.update({ ...saved, transcription: { status: 'running', attemptId: 'interrupted' } })
     service.start()

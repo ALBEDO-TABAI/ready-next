@@ -10,6 +10,7 @@ import { canonicalObjectPath, isInside, ObjectRegistry } from '../object-service
 import { CanvasService } from './canvas-service'
 import { registerCanvasIPC } from './ipc'
 import { SubBoardCoordinator, type SubBoardPages } from './sub-boards'
+import { registerCanvasMediaIPC } from './media-ipc'
 import { createCanvasResolver } from './resolver'
 import { CanvasImportService } from '../canvas-import/service'
 import { CanvasCompositionService } from '../canvas-composition/service'
@@ -61,6 +62,7 @@ export function setupCanvasRuntime(ready: Promise<void>, paths: { preloadPath: s
     const result = window && !window.isDestroyed() ? await dialog.showOpenDialog(window, options) : await dialog.showOpenDialog(options)
     return result.canceled || !result.filePaths[0] ? null : result.filePaths[0]
   })
+  registerCanvasMediaIPC(ipcMain, resolve, authorize, { cache, transcriptionAvailable: () => quickNote.transcriptionAvailable() }) // [cv-media]
   const exportWindow = (sender: Electron.WebContents) => {
     const window = BrowserWindow.fromWebContents(sender)
     if (!window || window.isDestroyed() || window.webContents !== sender) throw new Error('发起导出的窗口已不可用')

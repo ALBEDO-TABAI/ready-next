@@ -1,0 +1,64 @@
+/* Media on the board (M4 2026-11-14): the voice card, picture and video cards, a link's cover, the record tool and
+   the slideshow. Only --rn-* tokens; no blur of its own (the slideshow's bar is the shared .rn-float material). */
+@layer ready-next.canvas {
+  /* Voice card: paper like any card; the player is ink, never the signal colour (V5). */
+  .rn-canvas .canvas-card[data-kind='audio'] .canvas-card-content { padding: 14px 16px; }
+  .cv-audio { display: flex; flex-direction: column; gap: 8px; height: 100%; min-height: 0; color: var(--rn-ink); font: 400 var(--rn-t-body)/var(--rn-lh-body) var(--rn-font-ui); text-align: left; }
+  .cv-audio__head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+  .rn-canvas .canvas-card .cv-audio__title { display: block; flex: 1; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+  .cv-audio__head time, .cv-audio__time { flex: none; color: var(--rn-ink-3); font: 400 var(--rn-t-micro)/var(--rn-lh-micro) var(--rn-font-mono); font-variant-numeric: tabular-nums; }
+  .cv-audio__player { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .rn-canvas .cv-audio__play { flex: none; display: grid; place-items: center; width: var(--rn-control-h-lg); height: var(--rn-control-h-lg); padding: 0; border-radius: var(--rn-r-pill); background: var(--rn-btn-ink-bg); color: var(--rn-on-inverse); box-shadow: var(--rn-btn-ink-shadow); transition: transform 110ms var(--rn-ease-out), filter 120ms var(--rn-ease-std); }
+  .rn-canvas .cv-audio__play:hover { background: var(--rn-btn-ink-bg); filter: var(--rn-btn-ink-hover); }
+  .rn-canvas .cv-audio__play:active:not(:disabled) { transform: scale(.94); }
+  .cv-audio__play svg { width: 13px; height: 13px; fill: currentColor; stroke-width: 0; }
+  .cv-audio__wave { flex: 1; min-width: 0; height: var(--rn-control-h-lg); display: flex; align-items: center; gap: 2px; border-radius: var(--rn-r-xs); cursor: pointer; }
+  .cv-audio__wave:focus-visible { outline: 2px solid color-mix(in srgb, var(--rn-ink) 55%, transparent); outline-offset: 2px; }
+  .cv-audio__wave i { flex: 1 1 0; min-width: 1px; max-width: 3px; border-radius: 1px; background: var(--rn-ink-4); transition: background-color 120ms var(--rn-ease-std); }
+  .cv-audio__wave i[data-played] { background: var(--rn-ink); }
+  .cv-audio__line { flex: 1; height: 2px; border-radius: 1px; background: var(--rn-ink-4); overflow: hidden; }
+  .cv-audio__line > span { display: block; height: 100%; background: var(--rn-ink); }
+  .cv-audio__transcript { flex: 1; min-height: 0; margin: 0; overflow: hidden; color: var(--rn-ink-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .cv-audio__note { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--rn-ink-3); font: 400 var(--rn-t-meta)/var(--rn-lh-meta) var(--rn-font-ui); }
+
+  /* Picture and video cards: the media fills the card to its rounded corners. */
+  .rn-canvas .canvas-card:is([data-kind='image'], [data-kind='video']) .canvas-card-content { padding: 0; }
+  .rn-canvas .canvas-card[data-kind='image'] { background: var(--rn-fill-2); }
+  .cv-image { position: relative; width: 100%; height: 100%; margin: 0; overflow: hidden; border-radius: inherit; }
+  .rn-canvas .canvas-card .cv-image img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  .cv-image.is-missing, .cv-video__missing { display: grid; place-items: center; color: var(--rn-ink-3); font-size: var(--rn-t-meta); }
+  .cv-video { display: flex; flex-direction: column; width: 100%; height: 100%; margin: 0; overflow: hidden; border-radius: inherit; }
+  .cv-video figcaption { flex: none; padding: 6px 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 var(--rn-t-meta)/var(--rn-lh-meta) var(--rn-font-ui); }
+  .rn-canvas .canvas-card .cv-video video, .cv-video__missing { flex: 1; min-height: 0; width: 100%; height: auto; object-fit: cover; }
+
+  /* A link card with the page's cover: the picture on top, the words under it. */
+  .rn-canvas .canvas-card[data-kind='link'] .canvas-card-content:has(> .canvas-link-card[data-cover]) { padding: 0; }
+  .canvas-link-card[data-cover] { display: flex; flex-direction: column; height: 100%; }
+  .rn-canvas .canvas-card .canvas-link-cover { flex: 1 1 0; display: block; width: 100%; height: auto; min-height: 0; object-fit: cover; background: var(--rn-fill-2); }
+  .canvas-link-card[data-cover] .canvas-link-body { flex: none; padding: 10px 14px 12px; box-shadow: inset 0 .5px 0 var(--rn-hair); }
+  .rn-canvas .canvas-card .canvas-link-card[data-cover] strong { margin-top: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+  .canvas-link-card[data-cover] .canvas-link-body > p { display: none; }
+  .rn-canvas .canvas-link-card[data-cover] .canvas-link-ref { margin-top: 6px; }
+
+  /* Record tool: recording is "in progress", the one place on the board that wears the signal colour. */
+  .rn-canvas .cv-record { display: inline-flex; align-items: center; gap: 8px; height: var(--rn-control-h-lg); padding: 0 12px 0 11px; border-radius: var(--rn-r-pill); background: var(--rn-accent-soft); color: var(--rn-accent-text); box-shadow: inset 0 0 0 .5px color-mix(in srgb, var(--rn-accent) 45%, transparent); font: 500 var(--rn-t-meta)/1 var(--rn-font-mono); font-variant-numeric: tabular-nums; }
+  .rn-canvas .cv-record:hover { background: color-mix(in srgb, var(--rn-accent) 22%, transparent); }
+  .cv-record__dot { width: 8px; height: 8px; border-radius: var(--rn-r-pill); background: var(--rn-accent); animation: cv-record-pulse 1.1s var(--rn-ease-in-out) infinite alternate; }
+  .cv-record svg { width: 10px; height: 10px; fill: currentColor; stroke-width: 0; }
+  .rn-canvas .rn-icon-btn.cv-record-retry { color: var(--rn-accent-text); }
+  @keyframes cv-record-pulse { from { opacity: 1; } to { opacity: .3; } }
+
+  /* Slideshow: in the shared float host, sized to the board. */
+  .cv-slideshow { position: fixed; display: grid; place-items: center; overflow: hidden; background: color-mix(in srgb, var(--rn-stage-2) 96%, transparent); animation: cv-slideshow-in 200ms var(--rn-ease-std) both; user-select: none; }
+  .cv-slideshow__picture { max-width: calc(100% - 96px); max-height: calc(100% - 132px); margin-bottom: 36px; object-fit: contain; border-radius: var(--rn-r-md); box-shadow: var(--rn-shadow-3); background: var(--rn-fill-2); }
+  .cv-slideshow__bar { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); display: flex; align-items: center; gap: 2px; padding: 4px; }
+  .cv-slideshow__bar .rn-icon-btn { border-radius: var(--rn-r-pill); }
+  .cv-slideshow__caption { display: flex; align-items: baseline; gap: 10px; max-width: 360px; padding: 0 10px; font: 400 var(--rn-t-meta)/var(--rn-lh-meta) var(--rn-font-ui); }
+  .cv-slideshow__title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--rn-ink); }
+  .cv-slideshow__count { flex: none; color: var(--rn-ink-3); font-family: var(--rn-font-mono); font-variant-numeric: tabular-nums; }
+  @keyframes cv-slideshow-in { from { opacity: 0; } to { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) {
+    .cv-record__dot, .cv-slideshow { animation: none; }
+    .rn-canvas .cv-audio__play:active:not(:disabled) { transform: none; }
+  }
+}

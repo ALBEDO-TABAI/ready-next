@@ -4,7 +4,7 @@ import { ScheduleCardDialog } from '../../modules/calendar/linkage/ScheduleCardD
 import { flushCanvasWrites, trackCanvasWrite } from '../../modules/canvas/pending-writes'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CanvasOpen } from '../../../main/modules/board-engine/canvas-service'
-import { graphicAssetPath, type CanvasOperation } from '../../../shared/ready-canvas'
+import { graphicAssetPath, type CanvasCommand, type CanvasOperation } from '../../../shared/ready-canvas'
 import type { PageNode } from '../../../shared/document-pages'
 import { isReadyBoardFile } from '../../../shared/ready-board'
 import { useDocTabs, type DocTab } from '../../stores/useDocTabs'
@@ -15,6 +15,7 @@ import { openReadyRef } from '../../modules/workbench/open-ready-ref'
 import { drafts } from '../../modules/document/drafts/runtime'
 import { toLocalFileUrl } from '../../utils/dragDrop'
 import './surface/surface.css'
+import './surface/media.css'
 import { addBoardSelectionToAgentInput } from '../../modules/agent/chat-input-bridge'
 import { BOARD_NEW_DOCUMENT, BOARD_NEW_LINK, boardNewItems } from './BoardNewItems'
 import { boardAncestors } from './board-ancestors'
@@ -26,6 +27,7 @@ import { boardMarkdown } from '../../modules/canvas/export'
 import { captureDocumentPreviewHtml } from '../document/document-export-capture'
 import { Button, closeFloat, showToast } from '../ui'
 import { useSubBoards } from './useSubBoards'
+import { useBoardMedia } from './board-media'
 
 function confirmed<T>(result: { ok: true; value: T } | { ok: false; error: string }): T {
   if (!result.ok) throw new Error(result.error)
@@ -81,7 +83,7 @@ export default function CanvasDocument({ tab }: { tab: DocTab }) {
     const stopVault = api.vault.onChanged(() => { generation.current++; current.current = null; setOpened(null); setError('资料库已切换，请重新打开当前画板') })
     return () => { generation.current = epoch + 1; stop(); stopVault(); if (handle) void flushCanvasWrites().then(() => api.canvas.release(handle!)).catch(cause => console.error('[canvas] release', cause)) }
   }, [api, tab.objectId, tab.path, refresh])
-  const write = (operations: CanvasOperation[]) => trackCanvasWrite((async () => {
+  const write = (operations: CanvasCommand[]) => trackCanvasWrite((async () => {
     const before = current.current
     if (!before || pending.current) throw new Error('画板正在处理另一项修改')
     pending.current = true
@@ -110,7 +112,7 @@ export default function CanvasDocument({ tab }: { tab: DocTab }) {
     state.setActiveTab(tabId)
   }
   const previews = useMemo(() => opened ? canvasDocumentPreview(api.canvasComposition, opened.objectId) : null, [api, opened?.objectId]) // eslint-disable-line react-hooks/exhaustive-deps
-  const links = useMemo(() => ({ read: async (url: string) => { const result = await api.linkPreview.get(url); if (!result.success || !result.data) throw new Error(result.error || '预览失败'); return result.data } }), [api])
+  const media = useBoardMedia({ opened, root, write, report: cause => setError(String(cause)) })
   const pages = trees.flatMap(function flatten(node): PageNode[] { return [node, ...node.children.flatMap(flatten)] }).filter(node => node.kind === 'page')
   if (isReadyBoardFile(tab.path)) return <section className="p-4" aria-label="旧画板转换">
     <p>这是旧画板。转换为新画板后继续编辑，原文件保持不变。</p>
@@ -125,6 +127,7 @@ export default function CanvasDocument({ tab }: { tab: DocTab }) {
   </section>
   if (!opened || !previews) return <p role={error ? 'alert' : 'status'}>{error || '正在打开画板…'}</p>
   const dropData = (data: DataTransfer, at: { x: number; y: number }) => {
+    if (media.dropFiles(data, at)) return true
     if (!readReadyRefTransfer(data)) return false
     run(async () => { await dropCanvasReference(data, at, { objectId: opened.objectId, root, write, refresh }) })
     return true
@@ -152,18 +155,18 @@ export default function CanvasDocument({ tab }: { tab: DocTab }) {
       title={scheduling.type === 'text' ? scheduling.text.slice(0, 120) : scheduling.ready.preview?.title || '卡片日程'} snapshot={calendarSnapshot}
       close={() => setScheduling(null)} saved={refreshCalendar} />}
     <CanvasCompositionSurface calendarSnapshot={calendarSnapshot} onScheduleNode={node => { if (!calendarSnapshot) setError('日程尚未加载'); else setScheduling(node) }} canvas={opened.canvas} path={`${root}/${opened.path}`} version={opened.version} tabId={tab.id}
-      trees={trees} composition={api.canvasComposition} drafts={api.documentDrafts} documentPreview={previews} linkPreview={links}
+      trees={trees} composition={api.canvasComposition} drafts={api.documentDrafts} documentPreview={previews} renderExtraCard={media.renderCard} surfaceApi={media.surfaceApi} dockTools={media.dockTools} onPasteMedia={media.pasteMedia} extraCardItems={media.cardItems}
       refreshCanvas={refresh} openDraft={openDraft} onOperations={write}
       revealNode={target?.objectId === opened.objectId ? target : undefined}
       prepareGraphic={draft => graphicAssetPath(opened.path, draft.graphic, draft.width, draft.height)}
       resolveAsset={path => toLocalFileUrl(`${root}/${path}`)}
-      onOpenNode={node => { if (node.ready.ref) run(() => openReadyRef(node.ready.ref!, 'document')); else if (node.type === 'link') run(() => openReadyRef({ kind: 'web', url: node.url }, 'document')) }}
+      onOpenNode={node => { if (media.openNode(node)) return; if (node.ready.ref) run(() => openReadyRef(node.ready.ref!, 'document')); else if (node.type === 'link') run(() => openReadyRef({ kind: 'web', url: node.url }, 'document')) }}
       onNavigateSubcanvas={node => { if (node.type === 'file') openInCurrentTab(`${root}/${node.file}`); else if (node.ready.ref) run(() => openReadyRef(node.ready.ref!, 'document')) }}
       breadcrumbs={ancestors.map(node => ({ id: node.objectId, title: node.title }))}
       onNavigateAncestor={id => { const node = ancestors.find(item => item.objectId === id); if (node) openInCurrentTab(node.path) }}
-      extraNewItems={(at, place) => boardNewItems({ at, place, pages, root, boardPath: opened.path, add: node => write([{ type: 'addNode', node }]), report: cause => setError(String(cause)) })}
+      extraNewItems={(at, place) => [...boardNewItems({ at, place, pages, root, boardPath: opened.path, add: node => write([{ type: 'addNode', node }]), report: cause => setError(String(cause)) }), ...media.newItems(at)]}
       subBoards={subBoards.actions} moreItems={subBoards.moreItems} renderHostCard={subBoards.renderCard}
-      acceptsDrop={types => types.includes(READY_REF_MIME)} onDropData={dropData} onExport={exportBoard} captureImage={captureBoard}
+      acceptsDrop={types => types.includes(READY_REF_MIME) || media.acceptsDrop(types)} onDropData={dropData} onExport={exportBoard} captureImage={captureBoard}
       onAskAI={nodeIds => addBoardSelectionToAgentInput({ title: opened.canvas.ready.title || '画板', objectId: opened.objectId }, nodeIds)} />
   </div>
 }

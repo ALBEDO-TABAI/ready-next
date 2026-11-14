@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import {
   ALargeSmall, ArrowDown, ArrowUp, BringToFront, CalendarPlus, ChevronDown, ChevronRight, ChevronUp, Ellipsis, FilePlus2, FolderInput, FolderOutput, Group, Layers, LayoutGrid, Redo2, Scan, Search, SendToBack, Shapes, SlidersHorizontal, Sparkles, StickyNote, Trash2, Type, Undo2, Ungroup, X, type LucideIcon,
 } from 'lucide-react'
@@ -78,8 +78,9 @@ export function CanvasCorner({ zoom, search, results, hit, recycled, trash, busy
 }
 
 /** Bottom centre: the tools. Shapes share one button; text and note cards are placed where you look. */
-export function CanvasDock({ tool, lastShape, disabled, graphics, canUndo, canRedo, busy, onTool, onCard, onUndo, onRedo }: {
+export function CanvasDock({ tool, lastShape, disabled, graphics, canUndo, canRedo, busy, extra, onTool, onCard, onUndo, onRedo }: {
   tool: Tool; lastShape: Tool; disabled: boolean; graphics: boolean; canUndo: boolean; canRedo: boolean; busy: boolean
+  extra?: ReactNode // [cv-media] the host's tools (录音)
   onTool(tool: Tool): void; onCard(kind: 'text' | 'note'): void; onUndo(): void; onRedo(): void
 }) {
   const shapesMenu = useChromeMenu(SHAPES_MENU)
@@ -93,6 +94,7 @@ export function CanvasDock({ tool, lastShape, disabled, graphics, canUndo, canRe
     <ChromeTool label="图形" icon={shapeActive ? shape.icon : Shapes} pressed={shapeActive} menu={{ id: SHAPES_MENU, open: shapesMenu.open }} disabled={disabled || !graphics}
       onClick={button => shapesMenu.toggle(button, '图形', SHAPE_TOOLS.map(item => ({ id: item.id, label: item.label, icon: <item.icon />, hint: item.key, checked: tool === item.id, onSelect: () => onTool(item.id) })), 'top')} />
     <ChromeTool label={DRAW_TOOL.label} icon={DRAW_TOOL.icon} shortcut={DRAW_TOOL.key} pressed={tool === DRAW_TOOL.id} disabled={disabled || !graphics} onClick={() => onTool(DRAW_TOOL.id)} />
+    {extra /* [cv-media] */}
     <span className="canvas-dock-sep" aria-hidden />
     <ChromeTool label="撤销" icon={Undo2} shortcut="⌘Z" disabled={busy || !canUndo} onClick={onUndo} />
     <ChromeTool label="重做" icon={Redo2} shortcut="⇧⌘Z" disabled={busy || !canRedo} onClick={onRedo} />

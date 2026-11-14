@@ -13,6 +13,7 @@ import { extractCanvasLinks } from '../search-engine/canvas-links'
 import { BufferSchema, CreateSchema, WriteSchema, type CanvasBuffer } from './schema'
 import { rewriteMarkdownMediaRefs } from '../../../shared/markdown-asset-refs'
 import { mergeCanvas } from './merge'
+import { STAGING_TOTAL_BYTES, STAGING_TTL_MS } from './attachment-staging'
 
 export interface CanvasOpen { objectId: string; handleId: string; path: string; version: string; canvas: ReadyCanvas }
 export interface CanvasSyncRequest {
@@ -48,7 +49,7 @@ const confirmation = (buffer: CanvasBuffer): CanvasBufferConfirmation => ({ tabI
 export class CanvasService {
   readonly root: string
   private readonly handles = new Map<string, string>()
-  private readonly assets = new Map<string, { bytes: Buffer; name: string }>()
+  private readonly assets = new Map<string, { bytes: Buffer; name: string; stagedAt?: number }>()
   constructor(readonly registry: ObjectRegistry, root: string, private readonly dependencies: CanvasDependencies = {}) { this.root = vaultRoot(root) }
   private location(path: string): string { CanvasPathSchema.parse(path); return checkedPath(this.root, join(this.root, path)) }
   private row(id: string): Row | undefined { return this.registry.db.prepare('SELECT * FROM canvas_operations WHERE id=?').get<Row>(id) }
@@ -105,6 +106,18 @@ export class CanvasService {
     this.assets.set(token, { bytes, name: path.split(/[\\/]/).pop()!.replace(/[^\p{L}\p{N}._-]/gu, '_') })
     return token
   }
+  // [cv-media] Bytes the person dropped, pasted, picked or recorded; attachment-staging.ts validated them first.
+  // They wait here for their `importAttachment` write, bounded in time and in total size.
+  stageAttachment(bytes: Buffer, name: string): string {
+    const now = Date.now()
+    for (const [key, asset] of this.assets) if (asset.stagedAt !== undefined && now - asset.stagedAt > STAGING_TTL_MS) this.assets.delete(key)
+    let waiting = bytes.length
+    for (const asset of this.assets.values()) if (asset.stagedAt !== undefined) waiting += asset.bytes.length
+    if (waiting > STAGING_TOTAL_BYTES) throw new Error('等待写入画板的文件过多，请稍后再试')
+    const token = randomUUID(); this.assets.set(token, { bytes, name, stagedAt: now })
+    return token
+  }
+  // [/cv-media]
   async create(input: z.input<typeof CreateSchema>): Promise<CanvasOpen> {
     const request = CreateSchema.parse(input), fingerprint = hashBytes(stableJson(request)), prior = this.row(request.operationId)
     if (prior && prior.input_hash !== fingerprint) throw new Error('operation_id_reused')
@@ -143,6 +156,7 @@ export class CanvasService {
           const hash = hashBytes(asset.bytes), target = `${relative(this.root, path).slice(0, -7)}.assets/${hash}-${asset.name}`
           files.push({ path: target, content: asset.bytes.toString('base64'), sha256: hash })
           operations.push({ type: 'addNode', node: { ...command.node, file: target } })
+          if (asset.stagedAt !== undefined) this.assets.delete(command.sourceToken) // [cv-media] staged bytes are used once
         } else if (command.type === 'createSubcanvas') {
           const content = serializeCanvas(command.canvas)
           files.push({ path: command.path, content: Buffer.from(content).toString('base64'), sha256: hashBytes(content) })

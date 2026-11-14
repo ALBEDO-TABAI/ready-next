@@ -125,6 +125,13 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     observer?.observe(el)
     return () => { el.removeEventListener('wheel', wheel); view.removeEventListener('blur', cancel); observer?.disconnect(); gestures.dispose(); scene.current = null }
   }, [gestures])
+  // [cv-media] the host's handle on this surface (commit, view centre, selection, element)
+  useEffect(() => {
+    props.surfaceApi?.({ commit: ops => latest.current.buffer.commit(ops), select: setSelected, element: () => root.current,
+      centre: () => { const view = scene.current?.viewport; return view ? { x: view.x + view.width / 2, y: view.y + view.height / 2 } : { x: 0, y: 0 } } })
+    return () => props.surfaceApi?.(null)
+  }, [props.surfaceApi]) // eslint-disable-line react-hooks/exhaustive-deps -- the handle reads the latest scene and buffer through refs
+  // [/cv-media]
   async function closeEditor() {
     if (exiting.current) return
     const boardId = props.canvas.ready.id
@@ -191,8 +198,13 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     return commit(operations).then(ok => { if (ok) setSelected(ids) })
   }
   function pasteCards(event: ClipboardEvent<HTMLDivElement>) {
-    // Pictures and files on the clipboard belong to the media layer, not to this handler.
-    if (inField(event.target) || busy || trash || editing || event.clipboardData.files.length) return
+    if (inField(event.target) || busy || trash || editing) return
+    if (event.clipboardData.files.length) { // [cv-media] pictures and files on the clipboard go to the media layer
+      if (!props.onPasteMedia) return
+      event.preventDefault()
+      void props.onPasteMedia(screenToWorld({ x: size.width / 2, y: size.height / 2 }, camera), event.clipboardData).catch(fail)
+      return
+    }
     const cards = parseCards(event.clipboardData.getData(CARDS_MIME)), text = event.clipboardData.getData('text/plain').trim()
     if (!cards && !text) return
     event.preventDefault()
@@ -274,7 +286,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     bin: () => { gestures.cancel(); setEditing(null); setSearch(null); setTrash(true) } })
   const needle = search?.trim().toLocaleLowerCase() ?? ''
   const matches = needle ? active.nodes.filter(node => [node.type === 'text' ? node.text : '', node.type === 'link' ? node.url : '', node.type === 'group' ? node.label ?? '' : '',
-    node.type === 'file' ? node.file : '', node.ready.preview?.title ?? '', node.ready.preview?.description ?? ''].some(text => text.toLocaleLowerCase().includes(needle))) : []
+    node.type === 'file' ? node.file : '', node.ready.preview?.title ?? '', node.ready.preview?.description ?? '', node.ready.media?.transcript ?? '' /* [cv-media] */].some(text => text.toLocaleLowerCase().includes(needle))) : []
   const matchIds = new Set(matches.map(node => node.id))
   function step(delta: 1 | -1) {
     if (!matches.length) return
@@ -298,6 +310,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     return link ? { ...frame, type: 'link', url: text, ready: { kind: 'link' } } : { ...frame, type: 'text', text, ready: { kind: 'text' } }
   }
   async function paste(at: { x: number; y: number }) {
+    if (await props.onPasteMedia?.(at, null)) return // [cv-media] clipboard pictures and files first
     const text = (await navigator.clipboard?.readText?.())?.trim()
     // The menu can only read the clipboard's text: when it is the reading of the cards copied here, paste those cards.
     if (copied && text && text === cardsText(copied).trim()) { await placeCards(copied, at); return }
@@ -318,6 +331,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
       ...(schedulable ? [{ id: 'schedule', label: '安排日程…', icon: <CalendarPlus />, disabled: busy || composing, onSelect: () => props.onScheduleNode!(chosen[0]) }] : []),
       { id: 'duplicate', label: '创建副本', icon: <CopyPlus />, hint: '⌘D', disabled: busy || composing, onSelect: duplicate },
       ...subBoardItems(props.subBoards, chosen, busy || composing),
+      ...(props.extraCardItems?.(chosen) ?? []), // [cv-media]
       { id: 'delete', label: '删除', icon: <Trash2 />, hint: 'Delete', danger: true, disabled: busy || composing, onSelect: recycle },
     ]
     const anchor: FloatAnchor = { left: menu.client.x, top: menu.client.y, right: menu.client.x, bottom: menu.client.y }
@@ -415,7 +429,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
       onZoomReset={() => setCamera(c => zoomAt(c, { x: size.width / 2, y: size.height / 2 }, 1))}
       onTrash={() => { gestures.cancel(); setEditing(null); setSearch(null); setTrash(!trash) }} />}
     {!trash && !capturing && <CanvasDock tool={tool} lastShape={lastShape} disabled={busy || !!editing} graphics={!!props.prepareGraphic}
-      canUndo={buffer.canUndo || !!props.subBoards?.undo} canRedo={buffer.canRedo} busy={busy} onTool={chooseTool} onCard={kind => placeCard(kind)}
+      canUndo={buffer.canUndo || !!props.subBoards?.undo} canRedo={buffer.canRedo} busy={busy} extra={props.dockTools /* [cv-media] */} onTool={chooseTool} onCard={kind => placeCard(kind)}
       onUndo={() => { if (buffer.canUndo || !props.subBoards?.undo) undo(); else props.subBoards.undo() }} onRedo={redo} />}
     {selectionBox && <SelectionBar left={selectionBox.left} top={selectionBox.top} count={chosen.length} edges={chosenEdges.length} busy={busy || composing}
       text={textual ? { size: shared(n => Math.round((n.ready.appearance?.fontScale ?? DEFAULT_FONT_SCALE) * 24)), weight: shared(n => n.ready.appearance?.weight), align: shared(n => n.ready.appearance?.align) } : undefined}

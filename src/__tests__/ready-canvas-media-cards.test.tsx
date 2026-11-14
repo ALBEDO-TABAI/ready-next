@@ -1,0 +1,251 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+import React, { act } from 'react'
+import { JSDOM } from 'jsdom'
+import { CanvasSurface } from '../renderer/components/canvas/surface/CanvasSurface'
+import type { CanvasSurfaceProps } from '../renderer/components/canvas/surface/types'
+import { AudioCard } from '../renderer/components/canvas/cards/AudioCard'
+import { ImageCard } from '../renderer/components/canvas/cards/ImageCard'
+import { LinkCard } from '../renderer/components/canvas/cards/LinkCard'
+import { RecordTool } from '../renderer/components/canvas/surface/RecordTool'
+import { useBoardMedia, type CanvasSurfaceApi } from '../renderer/components/canvas/board-media'
+import { closeAllFloats, FloatHost } from '../renderer/components/ui'
+import { applyCanvasOperations, type CanvasCommand, type CanvasNode, type CanvasOperation, type ReadyCanvas } from '../shared/ready-canvas'
+import type { CanvasOpen } from '../main/modules/board-engine/canvas-service'
+import { png } from './utils/media-fixture'
+
+async function mount() {
+  const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost' })
+  const globals = { window: dom.window, document: dom.window.document, HTMLElement: dom.window.HTMLElement, Element: dom.window.Element, Node: dom.window.Node,
+    IS_REACT_ACT_ENVIRONMENT: true, ResizeObserver: class { observe() {} disconnect() {} } }
+  const saved = Object.fromEntries(Object.keys(globals).map(k => [k, Object.getOwnPropertyDescriptor(globalThis, k)]))
+  for (const [key, value] of Object.entries(globals)) Object.defineProperty(globalThis, key, { value, configurable: true, writable: true })
+  dom.window.requestAnimationFrame = () => 1; dom.window.cancelAnimationFrame = () => {}
+  const { createRoot } = await import('react-dom/client')
+  const root = createRoot(document.getElementById('root')!)
+  const button = (label: string) => [...document.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === label || b.textContent === label)
+  return { dom, button,
+    async render(node: React.ReactNode) { await act(async () => root.render(node)) },
+    async click(label: string) { const target = button(label); assert.ok(target, label); await act(async () => target.click()) },
+    async settle() { await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) }) },
+    async close() { await act(async () => { closeAllFloats(); root.unmount() }); dom.window.close(); for (const [key, descriptor] of Object.entries(saved)) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key)
+    } } }
+}
+const sha = 'a'.repeat(64)
+const audio = (id: string, media: object = {}, ready: object = {}): Extract<CanvasNode, { type: 'file' }> => ({ id, type: 'file', file: `X.assets/${id}.webm`, x: 0, y: 0, width: 300, height: 132,
+  ready: { kind: 'audio', media: { mime: 'audio/webm', sha256: sha, ...media }, ...ready } })
+const image = (id: string, x = 0, ready: object = {}): Extract<CanvasNode, { type: 'file' }> => ({ id, type: 'file', file: `X.assets/${id}.png`, x, y: 0, width: 200, height: 150, ready: { kind: 'image', preview: { title: id }, ...ready } })
+const link = (id: string, ready: object = {}): Extract<CanvasNode, { type: 'link' }> => ({ id, type: 'link', url: 'https://example.com/post', x: 0, y: 300, width: 260, height: 195, ready: { kind: 'link', ...ready } })
+
+test('the voice card shows its length, when it was taken, the transcript — or that there is none and why', async () => {
+  const ui = await mount()
+  try {
+    const stamp = '2026-11-14T06:36:00.000Z'
+    await ui.render(<AudioCard node={audio('memo', { durationMs: 42400 }, { preview: { title: '录音', fetchedAt: stamp } })} src="local-file:///v/X.assets/memo.webm" transcriptionAvailable={false} peaks={async () => [0, .5, 1]} />)
+    await ui.settle()
+    const card = document.querySelector('.cv-audio')!
+    assert.equal(card.querySelector('.cv-audio__title')?.textContent, '录音')
+    assert.equal(card.querySelector('.cv-audio__time')?.textContent, '0:42')
+    assert.equal(card.querySelector('time')?.getAttribute('datetime'), stamp)
+    assert.ok(ui.button('播放'), 'a play button')
+    assert.equal(card.querySelectorAll('.cv-audio__wave[data-shape="peaks"] i').length, 3, 'the real peaks are drawn')
+    assert.match(card.querySelector('[data-untranscribed]')?.textContent ?? '', /^未转写 · 还没有接入能转写音频的模型/)
+    // Capability unknown or present: the card only says there is no transcript; it never claims one is coming.
+    await ui.render(<AudioCard node={audio('memo')} transcriptionAvailable peaks={async () => null} />)
+    await ui.settle()
+    assert.equal(document.querySelector('[data-untranscribed]')?.textContent, '未转写')
+    assert.equal(document.querySelector('.cv-audio__time')?.textContent, '--:--')
+    assert.equal(document.querySelector('.cv-audio__wave')?.getAttribute('data-shape'), 'line')
+    assert.equal(ui.button('播放')?.disabled, true, 'no file, nothing to play')
+    await ui.render(<AudioCard node={audio('memo', { durationMs: 61000, transcript: '明天上午把封面第三稿发给印厂。' }, { sources: [{ uri: 'ready://fastcard/fc-1', capturedAt: stamp, method: 'fastcard' }] })} peaks={async () => null} />)
+    assert.equal(document.querySelector('.cv-audio__transcript')?.textContent, '明天上午把封面第三稿发给印厂。')
+    assert.equal(document.querySelector('[data-untranscribed]'), null)
+    assert.equal(document.querySelector('.cv-audio__time')?.textContent, '1:01')
+    assert.equal(document.querySelector('.cv-audio time')?.getAttribute('datetime'), stamp, 'a FastCard recording keeps its capture time')
+  } finally { await ui.close() }
+})
+
+test('a link card with a kept preview fetches nothing and shows its cover; a first read is offered to the host once', async () => {
+  const ui = await mount()
+  try {
+    let reads = 0
+    const source = { read: async () => { reads++; return { title: '新标题', image: 'X.assets/cover.png', fetchedAt: '2026-11-14T06:00:00.000Z' } } }
+    const offered: string[] = []
+    const kept = link('kept', { preview: { title: '存下的标题', description: '摘要', image: 'X.assets/kept.png', fetchedAt: '2026-11-01T00:00:00.000Z' } })
+    await ui.render(<LinkCard node={kept} source={source} resolveAsset={path => `local-file:///v/${path}`} onPreview={node => offered.push(node.id)} />)
+    await ui.settle()
+    assert.equal(reads, 0); assert.deepEqual(offered, [])
+    assert.equal(document.querySelector('.canvas-link-card strong')?.textContent, '存下的标题')
+    assert.equal(document.querySelector<HTMLImageElement>('.canvas-link-cover')?.getAttribute('src'), 'local-file:///v/X.assets/kept.png')
+    // A broken cover file falls back to the plain card.
+    await act(async () => document.querySelector('.canvas-link-cover')!.dispatchEvent(new ui.dom.window.Event('error')))
+    assert.equal(document.querySelector('.canvas-link-cover'), null)
+    assert.equal(document.querySelector('.canvas-link-card')?.hasAttribute('data-cover'), false)
+    await ui.render(<LinkCard node={link('fresh')} source={source} resolveAsset={path => `local-file:///v/${path}`} onPreview={node => offered.push(node.id)} />)
+    await ui.settle()
+    assert.equal(reads, 1); assert.deepEqual(offered, ['fresh'])
+    assert.equal(document.querySelector('.canvas-link-card strong')?.textContent, '新标题')
+    // The same card moved or restyled does not read again.
+    await ui.render(<LinkCard node={{ ...link('fresh'), x: 40 }} source={source} resolveAsset={path => `local-file:///v/${path}`} onPreview={node => offered.push(node.id)} />)
+    await ui.settle()
+    assert.equal(reads, 1)
+  } finally { await ui.close() }
+})
+
+test('the picture card covers its frame and honours a stored crop', async () => {
+  const ui = await mount()
+  try {
+    await ui.render(<ImageCard node={image('pic', 0, { appearance: { crop: { mode: 'position', x: 10, y: 90 } } })} src="local-file:///v/X.assets/pic.png" />)
+    const picture = document.querySelector<HTMLImageElement>('.cv-image img')!
+    assert.equal(picture.getAttribute('src'), 'local-file:///v/X.assets/pic.png'); assert.equal(picture.style.objectPosition, '10% 90%')
+    await ui.render(<ImageCard node={image('pic')} />)
+    assert.ok(document.querySelector('.cv-image.is-missing'))
+  } finally { await ui.close() }
+})
+
+test('the record tool shows a running recording with a stop control, then hands the sound over; a failed save can be retried', async () => {
+  const ui = await mount()
+  try {
+    const saved: Array<{ name: string; durationMs: number }> = [], errors: string[] = []
+    let cancelled = 0, fail = true
+    const start = async () => ({ stop: async () => ({ file: new File(['sound'], '录音.webm', { type: 'audio/webm' }), durationMs: 3200 }), cancel: () => { cancelled++ } })
+    const onRecorded = async (file: File, durationMs: number) => { if (fail) { fail = false; throw new Error('画板正在处理另一项修改') } saved.push({ name: file.name, durationMs }) }
+    await ui.render(<RecordTool start={start} onRecorded={onRecorded} report={cause => errors.push(String(cause))} />)
+    await ui.click('录音')
+    const stop = ui.button('停止录音')!
+    assert.ok(stop.hasAttribute('data-recording')); assert.match(stop.querySelector('[role="timer"]')!.textContent!, /^0:0\d$/)
+    await ui.click('停止录音'); await ui.settle()
+    assert.deepEqual(saved, []); assert.match(errors[0], /另一项修改/)
+    await ui.click('重试保存录音'); await ui.settle()
+    assert.deepEqual(saved, [{ name: '录音.webm', durationMs: 3200 }])
+    assert.ok(ui.button('录音'), 'back to idle')
+    // A denied microphone is reported and leaves the tool idle.
+    await ui.render(<RecordTool key="denied" start={async () => { throw new Error('没有麦克风权限') }} onRecorded={onRecorded} report={cause => errors.push(String(cause))} />)
+    await ui.click('录音'); await ui.settle()
+    assert.match(errors.at(-1)!, /没有麦克风权限/); assert.ok(ui.button('录音'))
+    // Leaving the board mid-recording discards it.
+    await ui.render(<RecordTool key="leave" start={start} onRecorded={onRecorded} report={() => {}} />)
+    await ui.click('录音'); await ui.render(<div />)
+    assert.equal(cancelled, 1)
+  } finally { await ui.close() }
+})
+
+test('the surface hosts media: dock tools, transcript search, card menu items, paste and its handle', async () => {
+  const ui = await mount()
+  try {
+    let canvas: ReadyCanvas = { ready: { schemaVersion: 1, id: 'board' }, edges: [], nodes: [
+      audio('memo', { durationMs: 1000, transcript: '把封面第三稿发给印厂' }), image('pic', 400), link('page') ] }
+    const pasted: Array<{ at: { x: number; y: number }; files: number | null }> = []
+    let handle: Parameters<NonNullable<CanvasSurfaceProps['surfaceApi']>>[0] = null
+    const props: CanvasSurfaceProps = { canvas, onOperations: (ops: CanvasOperation[]) => { canvas = applyCanvasOperations(canvas, ops).canvas },
+      dockTools: <button type="button" aria-label="录音">mic</button>,
+      extraCardItems: nodes => nodes.length === 1 && nodes[0].type === 'link' ? [{ id: 'refresh-preview', label: '刷新预览', onSelect: () => {} }] : [],
+      onPasteMedia: async (at, data) => { pasted.push({ at, files: data ? data.files.length : null }); return true },
+      surfaceApi: api => { handle = api } }
+    await ui.render(<><CanvasSurface {...props} /><FloatHost /></>)
+    const surface = document.querySelector<HTMLElement>('[data-canvas-surface]')!
+    surface.getBoundingClientRect = () => ({ left: 0, top: 0, right: 1000, bottom: 700, width: 1000, height: 700, x: 0, y: 0, toJSON() {} })
+    assert.ok(surface.querySelector('.canvas-dock [aria-label="录音"]'), 'the host tool sits in the dock')
+    // Search reads transcripts.
+    await ui.click('在画板中搜索')
+    const input = surface.querySelector<HTMLInputElement>('input[aria-label="搜索卡片"]')!
+    await act(async () => { Object.getOwnPropertyDescriptor(ui.dom.window.HTMLInputElement.prototype, 'value')!.set!.call(input, '印厂'); input.dispatchEvent(new ui.dom.window.Event('input', { bubbles: true })) })
+    assert.deepEqual([...surface.querySelectorAll('[data-matched="true"]')].map(card => card.getAttribute('data-node-id')), ['memo'])
+    await ui.click('关闭搜索')
+    // The host's items join a card's menu, for the cards it names.
+    const menuFor = async (id: string) => { await act(async () => surface.querySelector(`[data-node-id="${id}"]`)!.dispatchEvent(new ui.dom.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 20 })))
+      return [...document.querySelectorAll('[role="menu"] .rn-menu__label')].map(item => item.textContent) }
+    assert.ok((await menuFor('page')).includes('刷新预览'))
+    assert.equal((await menuFor('pic')).includes('刷新预览'), false)
+    await act(async () => closeAllFloats())
+    // ⌘V with files on the clipboard goes to the host with the view centre; text alone is left to others.
+    const paste = async (files: unknown[]) => { const event = new ui.dom.window.Event('paste', { bubbles: true, cancelable: true })
+      Object.defineProperty(event, 'clipboardData', { value: { files, types: files.length ? ['Files'] : ['text/plain'], getData: () => 'hello' } })
+      await act(async () => surface.dispatchEvent(event)); return event.defaultPrevented }
+    assert.equal(await paste([{}]), true)
+    assert.equal(await paste([]), false)
+    assert.equal(pasted.length, 1); assert.equal(pasted[0].files, 1)
+    assert.deepEqual(pasted[0].at, handle!.centre(), 'placed where the person is looking')
+    // 粘贴 from the right-click menu asks the host first (system clipboard).
+    await act(async () => surface.dispatchEvent(new ui.dom.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 600, clientY: 500 })))
+    const pasteItem = [...document.querySelectorAll<HTMLElement>('[role^="menuitem"]')].find(item => item.querySelector('.rn-menu__label')?.textContent === '粘贴')!
+    await act(async () => pasteItem.click()); await ui.settle()
+    assert.equal(pasted.length, 2); assert.equal(pasted[1].files, null)
+    // The handle commits through the surface's own undoable path and moves the selection.
+    assert.equal(await act(async () => handle!.commit([{ type: 'geometry', id: 'pic', geometry: { x: 420 } }])), true)
+    assert.equal(canvas.nodes.find(node => node.id === 'pic')!.x, 420)
+    await act(async () => handle!.select(['pic']))
+    assert.equal(surface.querySelector('[data-node-id="pic"]')?.getAttribute('data-selected'), 'true')
+    assert.equal(handle!.element(), surface)
+  } finally { await ui.close() }
+})
+
+test('the board document places dropped and pasted files, opens the slideshow and refreshes a link preview', async () => {
+  const ui = await mount()
+  try {
+    const board: ReadyCanvas = { ready: { schemaVersion: 1, id: 'board', title: 'X' }, edges: [], nodes: [image('b', 400), image('a', 0), link('page')] }
+    const opened: CanvasOpen = { objectId: 'board', handleId: 'h', path: 'X.canvas', version: sha, canvas: board }
+    const staged: string[] = [], written: CanvasCommand[][] = [], commits: CanvasOperation[][] = [], selected: string[][] = [], errors: string[] = [], previewRequests: unknown[] = []
+    Object.assign(ui.dom.window, { electronAPI: { canvasMedia: {
+      stage: async (input: { name: string }) => { staged.push(input.name); return input.name.endsWith('.exe') ? { ok: false, error: '不支持的文件类型' } : { ok: true, value: { token: `t${staged.length}`, kind: 'image', mime: 'image/png', sha256: sha, size: 10 } } },
+      linkPreview: async (input: unknown) => { previewRequests.push(input); return { ok: true, value: { title: '新标题', image: 'X.assets/cover.png', fetchedAt: '2026-11-14T06:00:00.000Z' } } },
+      transcription: async () => ({ ok: true, value: { available: false } }),
+    } } })
+    const surfaceElement = document.createElement('div'); document.body.append(surfaceElement)
+    const api: CanvasSurfaceApi = { commit: async ops => { commits.push(ops); return true }, centre: () => ({ x: 500, y: 300 }), select: ids => { selected.push(ids) }, element: () => surfaceElement }
+    let media!: ReturnType<typeof useBoardMedia>
+    function Host() {
+      media = useBoardMedia({ opened, root: '/vault', write: async commands => { written.push(commands) }, report: cause => errors.push(String(cause)), pick: async () => [new File([png() as BlobPart], '选的.png', { type: 'image/png' })] })
+      return <>{media.dockTools}{media.renderCard(audio('memo'))}</>
+    }
+    await ui.render(<><Host /><FloatHost /></>); await ui.settle()
+    media.surfaceApi(api)
+    assert.match(document.querySelector('[data-untranscribed]')?.textContent ?? '', /还没有接入能转写音频的模型/, 'the reason comes from Main')
+    assert.ok(ui.button('录音'))
+    // Drop: only a transfer with files is taken; the cards are written with their attachments and selected.
+    assert.equal(media.acceptsDrop(['Files']), true); assert.equal(media.acceptsDrop(['text/plain']), false)
+    assert.equal(media.dropFiles({ files: [] } as unknown as DataTransfer, { x: 0, y: 0 }), false)
+    assert.equal(media.dropFiles({ files: [new File([png() as BlobPart], '拖的.png', { type: 'image/png' })] } as unknown as DataTransfer, { x: 40, y: 60 }), true)
+    await ui.settle(); await ui.settle()
+    assert.deepEqual(staged, ['拖的.png']); assert.equal(written.length, 1)
+    const dropped = written[0][0]
+    assert.equal(dropped.type === 'importAttachment' && dropped.sourceToken, 't1')
+    assert.deepEqual(dropped.type === 'importAttachment' && [dropped.node.x, dropped.node.y, dropped.node.ready.kind], [40, 60, 'image'])
+    assert.equal(selected.at(-1)?.length, 1)
+    // Paste: the event's files, centred on the view; a clipboard without files is not handled.
+    assert.equal(await media.pasteMedia({ x: 500, y: 300 }, { files: [new File([png() as BlobPart], '贴的.png', { type: 'image/png' })] } as unknown as DataTransfer), true)
+    assert.equal(written.length, 2)
+    assert.equal(await media.pasteMedia({ x: 500, y: 300 }, { files: [] } as unknown as DataTransfer), false)
+    assert.equal(await media.pasteMedia({ x: 500, y: 300 }, null), false)
+    // 文件…: what the picker returned.
+    const item = media.newItems({ x: 200, y: 200 })[0]
+    assert.equal(item.label, '文件…')
+    await act(async () => { item.onSelect?.() }); await ui.settle(); await ui.settle()
+    assert.deepEqual(staged, ['拖的.png', '贴的.png', '选的.png']); assert.equal(written.length, 3)
+    // Main's refusal reaches the person and nothing is written.
+    media.dropFiles({ files: [new File(['MZ'], '坏的.exe', { type: 'image/png' })] } as unknown as DataTransfer, { x: 0, y: 0 })
+    await ui.settle(); await ui.settle()
+    assert.match(errors.at(-1) ?? '', /不支持的文件类型/); assert.equal(written.length, 3)
+    // Double-click on a picture: the slideshow over the board, in reading order; arrows step, Esc closes.
+    assert.equal(media.openNode(link('page')), false)
+    await act(async () => { assert.equal(media.openNode(board.nodes[0]), true) })
+    const show = () => document.querySelector('[data-float-id="canvas-slideshow"]')
+    assert.equal(show()?.getAttribute('role'), 'dialog')
+    assert.equal(show()?.querySelector('.cv-slideshow__picture')?.getAttribute('alt'), 'b'); assert.equal(show()?.querySelector('.cv-slideshow__count')?.textContent, '2 / 2')
+    const press = (key: string) => act(async () => { window.dispatchEvent(new ui.dom.window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })) })
+    await press('ArrowRight')
+    assert.equal(show()?.querySelector('.cv-slideshow__picture')?.getAttribute('alt'), 'a'); assert.equal(show()?.querySelector('.cv-slideshow__count')?.textContent, '1 / 2')
+    await press('ArrowLeft')
+    assert.equal(show()?.querySelector('.cv-slideshow__picture')?.getAttribute('src'), 'local-file:///vault/X.assets/b.png')
+    await press('Escape')
+    assert.equal(show(), null)
+    // 刷新预览 asks Main for this board's link and stores the answer on the card through the surface.
+    assert.deepEqual(media.cardItems([board.nodes[0]]), []); assert.deepEqual(media.cardItems([board.nodes[2], board.nodes[0]]), [])
+    const refresh = media.cardItems([board.nodes[2]])[0]
+    assert.equal(refresh.label, '刷新预览')
+    await act(async () => { refresh.onSelect?.() }); await ui.settle(); await ui.settle()
+    assert.deepEqual(previewRequests, [{ objectId: 'board', url: 'https://example.com/post' }])
+    assert.deepEqual(commits, [[{ type: 'replaceNode', node: { ...board.nodes[2], ready: { kind: 'link', preview: { title: '新标题', image: 'X.assets/cover.png', fetchedAt: '2026-11-14T06:00:00.000Z' } } } }]])
+  } finally { await ui.close() }
+})

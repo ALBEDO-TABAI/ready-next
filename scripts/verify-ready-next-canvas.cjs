@@ -5,6 +5,34 @@ const path = require('node:path')
 const os = require('node:os')
 const { once } = require('node:events')
 const { _electron } = require('playwright')
+const crypto = require('node:crypto')
+const zlib = require('node:zlib')
+
+// Synthetic media for the board's media steps: a real PNG and a real WAV, generated here (no binary fixtures).
+function pngImage(width, height, pixel) {
+  const chunk = (type, data) => {
+    const body = Buffer.concat([Buffer.from(type, 'latin1'), data]), out = Buffer.alloc(body.length + 8)
+    out.writeUInt32BE(data.length, 0); body.copy(out, 4); out.writeUInt32BE(zlib.crc32(body) >>> 0, body.length + 4)
+    return out
+  }
+  const raw = Buffer.alloc((width * 3 + 1) * height)
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) raw.set(pixel(x / width, y / height), y * (width * 3 + 1) + 1 + x * 3)
+  const header = Buffer.alloc(13); header.writeUInt32BE(width, 0); header.writeUInt32BE(height, 4); header.set([8, 2, 0, 0, 0], 8)
+  return Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), chunk('IHDR', header), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))])
+}
+const dusk = (u, v) => [Math.round(235 - 150 * v), Math.round(170 - 90 * v + 40 * u), Math.round(120 + 90 * v)]
+const field = (u, v) => [Math.round(60 + 120 * u), Math.round(150 - 60 * v), Math.round(90 + 40 * v * u)]
+function wavSound(seconds, rate = 16000) {
+  const samples = seconds * rate, bytes = Buffer.alloc(44 + samples * 2)
+  bytes.write('RIFF', 0, 'latin1'); bytes.writeUInt32LE(36 + samples * 2, 4); bytes.write('WAVEfmt ', 8, 'latin1'); bytes.writeUInt32LE(16, 16)
+  bytes.writeUInt16LE(1, 20); bytes.writeUInt16LE(1, 22); bytes.writeUInt32LE(rate, 24); bytes.writeUInt32LE(rate * 2, 28); bytes.writeUInt16LE(2, 32); bytes.writeUInt16LE(16, 34)
+  bytes.write('data', 36, 'latin1'); bytes.writeUInt32LE(samples * 2, 40)
+  // Phrases with pauses, so the card's waveform has a shape.
+  for (let i = 0; i < samples; i++) { const t = i / rate, envelope = Math.max(0, Math.sin(t * 2.4) * Math.sin(t * 9.1)) ** 1.5
+    bytes.writeInt16LE(Math.round(envelope * 20000 * Math.sin(2 * Math.PI * (180 + 60 * Math.sin(t * 3)) * t)), 44 + i * 2) }
+  return bytes
+}
+const sha256 = bytes => crypto.createHash('sha256').update(bytes).digest('hex')
 
 async function main() {
   const temporary = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ready-next-canvas-')))
@@ -24,7 +52,9 @@ async function main() {
     while (!await check()) { assert.ok(Date.now() < deadline, message); await new Promise(resolve => setTimeout(resolve, 100)) }
   }
   const launch = async () => {
-    app = await _electron.launch({ executablePath: require('electron'), args: [process.cwd()], env, timeout: 45000 })
+    // The record step uses Chromium's fake capture device (a generated tone, no microphone, no permission prompt)
+    // and plays it back muted: nothing is heard and nothing of the machine's is recorded.
+    app = await _electron.launch({ executablePath: require('electron'), args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--mute-audio', process.cwd()], env, timeout: 45000 })
     await poll(() => { page = app.windows().find(p => p.url().includes('/renderer/index.html')); return Boolean(page) }, 'Renderer missing')
     await poll(() => page.evaluate(() => Boolean(window.electronAPI?.canvas)), 'Canvas preload missing')
     await page.evaluate(() => window.dispatchEvent(new CustomEvent('ready:workbench-mode-change-request', { detail: { mode: 'document', placement: 'open', presentation: 'immediate' } })))
@@ -61,9 +91,118 @@ async function main() {
     const row = page.getByLabel('页面侧栏', { exact: true }).locator(`[data-page-id="${objectId}"]`)
     await row.locator(':scope > .ink-sb-row > .ink-sb-label-btn').click()
   }
+  // M4 2026-11-14 — media on the board, on its own board so the steps above keep their card counts: a fixture voice
+  // card with a transcript and a link card with a kept preview and cover (no network), then a dropped picture, a
+  // pasted picture, a recording from the fake device, the slideshow and transcript search.
+  const mediaSteps = async () => {
+    const memo = wavSound(6), cover = pngImage(480, 270, dusk), now = new Date().toISOString()
+    fs.mkdirSync(path.join(vault, '媒体.assets'))
+    fs.writeFileSync(path.join(vault, '媒体.assets', `${sha256(memo)}-memo.wav`), memo)
+    fs.writeFileSync(path.join(vault, '媒体.assets', 'cover.png'), cover)
+    const board = await page.evaluate(async ({ memoFile, memoHash, now }) => {
+      const canvas = await window.electronAPI.canvas.create({ path: '媒体.canvas', operationId: crypto.randomUUID(), canvas: { edges: [], ready: { id: crypto.randomUUID(), schemaVersion: 1, title: '媒体' }, nodes: [
+        { id: 'fixture-memo', type: 'file', file: memoFile, x: 0, y: 0, width: 300, height: 176, ready: { kind: 'audio', media: { mime: 'audio/wav', sha256: memoHash, originalName: 'memo.wav', durationMs: 6000, transcript: '明天上午把封面第三稿发给印厂，再确认发行渠道。' }, preview: { title: '选题会录音', fetchedAt: now } } },
+        { id: 'fixture-link', type: 'link', url: 'https://example.com/essay', x: 0, y: 200, width: 260, height: 220, ready: { kind: 'link', preview: { title: '注意力才是稀缺品', description: '一个好的筛子先理解你在做什么。', site: 'Example', image: '媒体.assets/cover.png', fetchedAt: now } } },
+      ] } })
+      if (!canvas.ok) throw new Error(canvas.error)
+      await window.electronAPI.canvas.release(canvas.value.handleId)
+      return canvas.value.objectId
+    }, { memoFile: `媒体.assets/${sha256(memo)}-memo.wav`, memoHash: sha256(memo), now })
+    await reveal(board)
+    const stage = page.locator('[data-workbench-mode-panel="document"] .rn-canvas[aria-label="媒体"]').first()
+    await stage.waitFor()
+    const read = () => JSON.parse(fs.readFileSync(path.join(vault, '媒体.canvas'), 'utf8'))
+    const attachment = node => fs.readFileSync(path.join(vault, node.file))
+    // The fixture cards: the voice card shows length, transcript and real peaks; the link card its kept cover, unfetched.
+    const memoCard = stage.locator('.canvas-card[data-node-id="fixture-memo"]')
+    await memoCard.locator('.cv-audio__wave[data-shape="peaks"]').waitFor({ timeout: 15000 })
+    assert.equal(await memoCard.locator('.cv-audio__time').innerText(), '0:06')
+    assert.match(await memoCard.locator('.cv-audio__transcript').innerText(), /发给印厂/)
+    const coverBox = await stage.locator('.canvas-card[data-node-id="fixture-link"] .canvas-link-cover').evaluate(image => ({ width: image.naturalWidth, complete: image.complete }))
+    assert.deepEqual(coverBox, { width: 480, complete: true }, 'the kept cover is shown from the board attachments')
+    assert.equal(read().nodes.find(node => node.id === 'fixture-link').ready.preview.fetchedAt, now, 'a kept preview is not fetched again')
+    // Drop a picture file (as from Finder): a drop event carrying a File, at a point on the stage.
+    const transfer = async (type, file, point) => stage.evaluate((element, { type, file, point }) => {
+      const data = new DataTransfer()
+      data.items.add(new File([Uint8Array.from(atob(file.base64), char => char.charCodeAt(0))], file.name, { type: file.type }))
+      const rect = element.getBoundingClientRect()
+      const init = { bubbles: true, cancelable: true, clientX: rect.left + (point?.x ?? 0), clientY: rect.top + (point?.y ?? 0) }
+      if (type === 'paste') { element.focus(); return !element.dispatchEvent(new ClipboardEvent('paste', { ...init, clipboardData: data })) }
+      element.dispatchEvent(new DragEvent('dragover', { ...init, dataTransfer: data }))
+      return !element.dispatchEvent(new DragEvent('drop', { ...init, dataTransfer: data }))
+    }, { type, file, point })
+    const photo = pngImage(640, 400, field)
+    assert.equal(await transfer('drop', { base64: photo.toString('base64'), name: '田野 photo.png', type: 'image/png' }, { x: 400, y: 100 }), true, 'the board takes a dropped file')
+    await poll(() => read().nodes.some(node => node.ready.kind === 'image'), 'Dropped picture was not written')
+    const dropped = read().nodes.find(node => node.ready.kind === 'image')
+    assert.match(dropped.file, /^媒体\.assets\/[a-f0-9]{64}-田野_photo\.png$/)
+    assert.deepEqual(attachment(dropped), photo, 'the attachment in the vault is the dropped file')
+    assert.deepEqual({ sha: dropped.ready.media.sha256, mime: dropped.ready.media.mime, width: dropped.width, height: dropped.height }, { sha: sha256(photo), mime: 'image/png', width: 320, height: 200 })
+    await poll(async () => await stage.locator(`.canvas-card[data-node-id="${dropped.id}"] .cv-image img`).evaluate(image => image.complete && image.naturalWidth === 640).catch(() => false), 'Dropped picture is not shown')
+    // Paste a picture (⌘V with image data): a paste event carrying the picture, placed where the person is looking.
+    const pastedBytes = pngImage(300, 300, dusk)
+    assert.equal(await transfer('paste', { base64: pastedBytes.toString('base64'), name: 'image.png', type: 'image/png' }), true, 'the board takes a pasted picture')
+    await poll(() => read().nodes.filter(node => node.ready.kind === 'image').length === 2, 'Pasted picture was not written')
+    const pasted = read().nodes.find(node => node.ready.kind === 'image' && node.id !== dropped.id)
+    assert.deepEqual(attachment(pasted), pastedBytes)
+    // Record: the dock's record tool shows the running time and a stop control, then drops a voice card.
+    await stage.getByRole('button', { name: '录音', exact: true }).click()
+    const stop = stage.getByRole('button', { name: '停止录音', exact: true })
+    await stop.waitFor({ timeout: 15000 })
+    await poll(async () => /^0:0[1-9]$/.test(await stop.locator('[role="timer"]').innerText()), 'Recording time does not run')
+    await page.screenshot({ path: path.join(evidence, '07a-recording.png') })
+    await page.waitForTimeout(1200)
+    await stop.click()
+    await poll(() => read().nodes.some(node => node.ready.kind === 'audio' && node.id !== 'fixture-memo'), 'Voice card was not written')
+    const voice = read().nodes.find(node => node.ready.kind === 'audio' && node.id !== 'fixture-memo')
+    assert.match(voice.file, /^媒体\.assets\/[a-f0-9]{64}-录音_[\d_-]+\.webm$/)
+    assert.ok(voice.ready.media.durationMs >= 1500 && voice.ready.media.durationMs < 30000, `recorded length ${voice.ready.media.durationMs}`)
+    assert.equal(voice.ready.media.mime, 'audio/webm'); assert.equal(voice.ready.preview.title, '录音')
+    const sound = attachment(voice)
+    assert.ok(sound.length > 1000 && sound.subarray(0, 4).equals(Buffer.from('1a45dfa3', 'hex')), 'the recording is a WebM file in the vault')
+    assert.equal(sha256(sound), voice.ready.media.sha256)
+    const voiceCard = stage.locator(`.canvas-card[data-node-id="${voice.id}"]`)
+    assert.match(await voiceCard.locator('[data-untranscribed]').innerText(), /^未转写 · 还没有接入能转写音频的模型/)
+    assert.match(await voiceCard.locator('.cv-audio__time').innerText(), /^0:0[1-9]$/)
+    // It plays: the button turns to 暂停, and back to 播放 when the sound has run to its end.
+    await voiceCard.getByRole('button', { name: '播放', exact: true }).click()
+    await voiceCard.getByRole('button', { name: '暂停', exact: true }).waitFor({ timeout: 10000 })
+    await voiceCard.getByRole('button', { name: '播放', exact: true }).waitFor({ timeout: 20000 })
+    assert.equal(await voiceCard.locator('[role="alert"]').count(), 0, 'playback reported no error')
+    await snapshot('07-media-cards')
+    // Slideshow: double-click a picture; → steps to the next picture of the board, Esc closes.
+    await stage.locator(`.canvas-card[data-node-id="${dropped.id}"]`).dblclick({ position: { x: 20, y: 20 } })
+    const show = page.locator('[data-float-id="canvas-slideshow"]')
+    await show.locator('.cv-slideshow__picture').waitFor()
+    assert.equal(await show.locator('.cv-slideshow__count').innerText(), '1 / 2')
+    const stageBox = await stage.boundingBox(), showBox = await show.locator('.cv-slideshow').boundingBox()
+    assert.ok(Math.abs(showBox.x - stageBox.x) < 1 && Math.abs(showBox.width - stageBox.width) < 1 && Math.abs(showBox.height - stageBox.height) < 1, 'the slideshow covers the board, not the window')
+    await page.waitForTimeout(400) // the fade has finished
+    await page.screenshot({ path: path.join(evidence, '07b-slideshow.png') })
+    await page.keyboard.press('ArrowRight')
+    await poll(async () => await show.locator('.cv-slideshow__count').innerText() === '2 / 2', 'Slideshow did not step')
+    await page.keyboard.press('Escape')
+    await show.waitFor({ state: 'detached' })
+    // Search reads transcripts.
+    await stage.getByRole('button', { name: '在画板中搜索', exact: true }).click()
+    await page.keyboard.type('印厂')
+    await stage.locator('.canvas-card[data-matched="true"]').first().waitFor()
+    assert.deepEqual(await stage.locator('.canvas-card[data-matched="true"]').evaluateAll(cards => cards.map(card => card.dataset.nodeId)), ['fixture-memo'])
+    await page.keyboard.press('Escape')
+    // 新建 has 文件…, and a link card's menu has 刷新预览 (neither is activated here: no system dialog, no network).
+    await stage.click({ button: 'right', position: { x: Math.round(stageBox.width - 60), y: Math.round(stageBox.height - 200) } })
+    await page.getByRole('menuitem', { name: '文件…', exact: true }).waitFor()
+    await page.keyboard.press('Escape')
+    await stage.locator('.canvas-card[data-node-id="fixture-link"]').click({ button: 'right', position: { x: 30, y: 30 } })
+    await page.getByRole('menuitem', { name: '刷新预览', exact: true }).waitFor()
+    await page.keyboard.press('Escape')
+    await snapshot('08-media-search')
+  }
   try {
     await launch()
     await page.evaluate(async root => { const state = await window.electronAPI.vault.set(root); if (state.status !== 'ready') throw new Error('Vault not ready') }, vault)
+    // READY_NEXT_CANVAS_THEME=dark: the theme is read at startup, so it applies from the restart step on (media steps included).
+    if (process.env.READY_NEXT_CANVAS_THEME) await page.evaluate(theme => window.electronAPI.theme.set(theme), process.env.READY_NEXT_CANVAS_THEME)
     const seeded = await page.evaluate(async root => {
       const api = window.electronAPI
       const doc = await api.documentPages.operate({ type: 'create', root, parentPath: root, title: '来源文档', content: '# 来源\n\n真实正文', operationId: crypto.randomUUID() })
@@ -87,7 +226,8 @@ async function main() {
     await page.locator('[data-float-id="canvas-new-document"]').waitFor({ state: 'detached', timeout: 15000 })
     await stage.click({ button: 'right', position: { x: 520, y: 520 } })
     await page.getByRole('menuitem', { name: '链接…', exact: true }).click()
-    await page.getByLabel('链接网址').fill('https://example.com')
+    // A private address: Main refuses it before any connection, so this check needs no network (the card says why).
+    await page.getByLabel('链接网址').fill('http://192.168.0.1/')
     await page.getByRole('button', { name: '添加链接卡', exact: true }).click()
     const readCanvas = () => JSON.parse(fs.readFileSync(path.join(vault, 'X.canvas'), 'utf8'))
     await poll(() => readCanvas().nodes.length === 3, 'Three card types not persisted')
@@ -461,6 +601,7 @@ async function main() {
     const imported = JSON.parse(fs.readFileSync(path.join(vault, '旧画板.canvas'), 'utf8'))
     assert.ok(imported.nodes.some(node => node.text === '旧画板原文'))
     await snapshot('06-import-source-unchanged')
+    await mediaSteps()
     console.log(`PASS M4 window gate: ${evidence}`)
   } finally { if (app) await app.close(); console.log(`Evidence retained: ${temporary}`) }
 }

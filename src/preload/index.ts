@@ -1430,6 +1430,11 @@ const fastCardAPI: import('../shared/fastcard').FastCardTransferAPI & import('..
   playback: id => ipcRenderer.invoke('fastcard:playback', id),
 }
 const linkPreviewAPI = { get: (url: string) => ipcRenderer.invoke('link-preview:get', url) }
+const canvasMediaAPI: import('../main/modules/board-engine/media-ipc').CanvasMediaAPI = {
+  stage: input => ipcRenderer.invoke('canvasMedia:stage', input),
+  linkPreview: input => ipcRenderer.invoke('canvasMedia:linkPreview', input),
+  transcription: () => ipcRenderer.invoke('canvasMedia:transcription'),
+}
 
 const documentDraftsAPI: import('../shared/document-drafts').DocumentDraftAPI = {
   create: (input) => ipcRenderer.invoke('documentDrafts:create', input),
@@ -1697,6 +1702,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   document: documentAPI,
   canvas: canvasAPI,
   canvasComposition: canvasCompositionAPI,
+  canvasMedia: canvasMediaAPI,
   fastCard: fastCardAPI,
   linkPreview: linkPreviewAPI,
   rss: rssAPI,
@@ -1780,6 +1786,7 @@ declare global {
       document: typeof documentAPI
       canvas: typeof canvasAPI
       canvasComposition: typeof canvasCompositionAPI
+      canvasMedia: typeof canvasMediaAPI
       fastCard: typeof fastCardAPI
       linkPreview: typeof linkPreviewAPI
       rss: typeof rssAPI

@@ -52,6 +52,11 @@ export class FastCardQuickNoteService {
     return this.status
   }
   close(): void { this.host.hide() }
+  /** Whether any configured model declares audio in the shared capability layer and a transcription provider is wired. */
+  transcriptionAvailable(): boolean {
+    try { return Boolean(this.transcription && configuredAudioModel(this.transcription.configuredModels())) }
+    catch { /* silent-catch: an unreadable model configuration means no transcription now; recording() reports the failure on the item. */ return false }
+  }
   getStatus(): QuickNoteStatus { return this.status }
   stop(): void { if (this.ownsShortcut) { this.host.unregister(QUICK_NOTE_SHORTCUT); this.ownsShortcut = false } }
   text(text: string, itemId: string = randomUUID()): Promise<FastCardItem> {
