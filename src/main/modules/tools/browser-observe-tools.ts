@@ -864,6 +864,7 @@ export async function executeBrowserObserveTool(
             const content = await controller.executeJSInFrame(tabId, frame.frameKey, `(document.body?.innerText || "").slice(0, ${maxChars})`)
             if (typeof content === 'string' && content.trim()) parts.push(`[frame ${frame.frameKey} ${frame.url}]\n${content}`)
           } catch (error) {
+            console.warn('[browser_read] frame read failed:', frame.frameKey, error instanceof Error ? error.message : String(error))
             return browserStructuredOutput({ ok: false, errorKind: 'frame_read_failed', frameId: frame.frameKey, message: String(error) })
           }
         }
