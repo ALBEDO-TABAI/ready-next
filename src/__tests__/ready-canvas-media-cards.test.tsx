@@ -164,7 +164,8 @@ test('the surface hosts media: dock tools, transcript search, card menu items, p
       Object.defineProperty(event, 'clipboardData', { value: { files, types: files.length ? ['Files'] : ['text/plain'], getData: () => 'hello' } })
       await act(async () => surface.dispatchEvent(event)); return event.defaultPrevented }
     assert.equal(await paste([{}]), true)
-    assert.equal(await paste([]), false)
+    // Plain text on the clipboard is the board's own paste (a text card), not the media layer's: handled, but not passed on.
+    assert.equal(await paste([]), true)
     assert.equal(pasted.length, 1); assert.equal(pasted[0].files, 1)
     assert.deepEqual(pasted[0].at, handle!.centre(), 'placed where the person is looking')
     // 粘贴 from the right-click menu asks the host first (system clipboard).
