@@ -215,7 +215,7 @@ export default function ChatMessages({
       data-liquid-scroll-root="chat-messages"
       className="panel-hover-scrollbar flex-1 overflow-auto"
       style={{
-        padding: `${CHAT_SCROLL_TOP_FADE}px var(--assistant-inset-x, 16px) 24px`,
+        padding: `${CHAT_SCROLL_TOP_FADE}px 16px 24px`,
         display: 'flex',
         flexDirection: 'column',
         gap: 14,

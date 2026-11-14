@@ -454,14 +454,6 @@
       "area": "ui-history"
     },
     {
-      "file": "src/__tests__/draggable-mode-tabs-state-contract.test.ts",
-      "rule": "ready/no-source-grep-test",
-      "snippetHash": "f8b9b3e5e3492f5d",
-      "line": 7,
-      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
-      "area": "ui-history"
-    },
-    {
       "file": "src/__tests__/file-management-locate-index-gap-contract.test.ts",
       "rule": "ready/no-source-grep-test",
       "snippetHash": "dc53e4e7f0c317d6",

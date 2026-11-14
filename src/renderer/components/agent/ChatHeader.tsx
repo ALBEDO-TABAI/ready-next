@@ -633,7 +633,7 @@ export default function ChatHeader({
         ref={headerRef}
         className="chat-header-row flex items-center"
         style={{
-          paddingLeft: 'var(--assistant-inset-x, 14px)',
+          paddingLeft: 14,
           borderBottom: '1px solid transparent',
           background: 'transparent',
           position: 'relative',

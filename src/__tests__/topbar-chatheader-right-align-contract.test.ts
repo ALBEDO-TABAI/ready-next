@@ -17,9 +17,8 @@ test('TopBar right padding is the shared 14px constant; the assistant\'s corner 
   assert.match(topbar, /paddingRight:\s*WORKBENCH_TOPBAR_PADDING_RIGHT,/)
   assert.doesNotMatch(topbar, /--workbench-right-gutter/)
   assert.doesNotMatch(workbench, /--workbench-right-gutter/)
-  // The header row keeps its 14px start (12px inside the assistant's glass sheet, V31); its right end belongs to the
-  // buttons in the shell's corner (V17).
-  assert.match(chatHeader, /paddingLeft:\s*'var\(--assistant-inset-x, 14px\)',/)
+  // The header row keeps its 14px start; its right end belongs to the buttons in the shell's corner (V17).
+  assert.match(chatHeader, /paddingLeft:\s*14,/)
   assert.match(chatHeader, /createPortal\(tools, toolsSlot\)/)
   // The collapse / expand button is centred in the right strip, on the head line, whatever the assistant's state.
   assert.match(shell, /\.shell-assistant-tools \.shell-assistant-corner \{[^}]*top: calc\(var\(--rn-frame-gap\) \+ \(var\(--rn-panel-head-h\) - var\(--rn-control-h-lg\)\) \/ 2\);[^}]*right: calc\(\(var\(--rn-rail-w\) - var\(--rn-control-h-lg\)\) \/ 2\);/)

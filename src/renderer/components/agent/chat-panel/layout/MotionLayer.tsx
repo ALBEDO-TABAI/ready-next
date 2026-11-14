@@ -43,10 +43,8 @@ export function ChatPanelMotionLayer({
   const content = !header || !body
     ? children
     : (
-        // V31 (experiment): docked, this grid is the assistant's glass sheet and sets the 12px insets inside it
-        // (.assistant-sheet / .assistant-sheet--inset in the shell's shell.css); in the narrow-window card it paints nothing.
         <div
-          className="grid h-full min-h-0 assistant-sheet assistant-sheet--inset"
+          className="grid h-full min-h-0"
           style={{
             // The header row sizes its own track: it sits on the head line (V15, .chat-header-row).
             gridTemplateRows: 'auto minmax(0, 1fr)',
@@ -65,7 +63,7 @@ export function ChatPanelMotionLayer({
 
   return (
     <motion.div
-      className="chat-panel-motion-layer absolute inset-0 overflow-hidden"
+      className="absolute inset-0 overflow-hidden"
       style={{
         zIndex: layerZIndex,
         pointerEvents: isPresent ? 'auto' : 'none',
