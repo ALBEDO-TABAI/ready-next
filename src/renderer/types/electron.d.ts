@@ -3326,6 +3326,7 @@ interface ElectronAPI {
   document: ElectronDocumentAPI
   canvas: import('../../main/modules/board-engine/ipc').CanvasAPI
   canvasComposition: import('../../shared/document-drafts').CanvasCompositionAPI
+  canvasMedia: import('../../main/modules/board-engine/media-ipc').CanvasMediaAPI
   fastCard: import('../../shared/fastcard').FastCardTransferAPI & import('../../shared/fastcard').FastCardQuickNoteAPI
   linkPreview: { get(url: string): Promise<import('../../shared/fastcard').FastCardIPCResult<import('../../main/modules/link-preview').LinkPreview>> }
   sourceAnnotations: import('../../shared/source-annotations').SourceAnnotationsAPI
