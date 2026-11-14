@@ -1,7 +1,7 @@
 import { explicitBlockId, markBlock, blockWithMarker } from '../../../../shared/document-anchors'
 import { useAnnotationMenus } from '../annotations/menus'
-import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { createBlockCommand, createRangeEdit, parseDocumentBlocks, parseInlineBlock, DOCUMENT_PALETTE, isDocumentColor, type DocumentBlock, type DocumentBuffer } from '../../../../shared/document-blocks'
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type DragEvent, type ReactNode } from 'react'
+import { createBlockCommand, createRangeEdit, parseDocumentBlocks, parseInlineBlock, replaceRanges, DOCUMENT_PALETTE, isDocumentColor, type DocumentBlock, type DocumentBuffer } from '../../../../shared/document-blocks'
 import { useDocTabs } from '../../../stores/useDocTabs'
 import { useSceneVisible } from './scene'
 import { actionableBlocks, BLOCK_KINDS, convertBlock } from './catalog'
@@ -21,7 +21,10 @@ interface Controls {
   drop(): void
   cancel(): void
   step(direction: number): void
+  /** Whether the block being moved may land beside this one: a list entry among its siblings, any other block among the page's blocks. */
+  accepts(target: DocumentBlock, actionable: boolean): boolean
 }
+const isItem = (block: DocumentBlock) => block.type === 'listItem' || block.type === 'taskItem'
 const Context = createContext<Controls | null>(null)
 
 /** T1 owns validation and writes. Column entry/exit combines its delete and paste
@@ -43,6 +46,24 @@ function moveEdit(snapshot: DocumentBuffer, block: DocumentBlock, target: Docume
   const insert = createBlockCommand(snapshot, { type: 'paste', at, markdown: block.raw, prefix, suffix })
   const cursor = at - (at > block.end ? block.raw.length : 0) + prefix.length
   return createRangeEdit(snapshot, [...remove.operation.ranges, ...insert.operation.ranges], remove.selectionBefore, { anchor: cursor, focus: cursor })
+}
+
+/** A list entry moves among its siblings as whole lines: its own line break goes with it, so the list stays tight. */
+function moveItemEdit(snapshot: DocumentBuffer, block: DocumentBlock, target: DocumentBlock, placement: 'before' | 'after') {
+  const { content } = snapshot, eol = newline(content)
+  const lineStart = (at: number) => { while (at > 0 && content[at - 1] !== '\n' && content[at - 1] !== '\r') at--; return at }
+  const from = lineStart(block.start), to = lineStart(target.start)
+  if (block.parentId !== target.parentId || !/^[ \t>]*$/.test(content.slice(from, block.start) + content.slice(to, target.start))) throw new Error('不能移动到这个位置')
+  const after = /^(?:\r\n|\n|\r)/.exec(content.slice(block.end)), before = /(?:\r\n|\n|\r)$/.exec(content.slice(0, from))
+  const remove = after ? { start: from, end: block.end + after[0].length } : before ? { start: from - before[0].length, end: block.end } : { start: from, end: block.end }
+  const at = placement === 'before' ? to : target.end
+  if (at >= remove.start && at <= remove.end) return null
+  const lead = content.slice(to, target.start)
+  const edit = createRangeEdit(snapshot, [
+    { ...remove, expectedText: content.slice(remove.start, remove.end), replacement: '' },
+    { start: at, end: at, expectedText: '', replacement: placement === 'before' ? lead + block.raw + eol : eol + lead + block.raw },
+  ], { anchor: block.start, focus: block.start }, { anchor: Math.min(at, remove.start), focus: Math.min(at, remove.start) })
+  return replaceRanges(content, edit.operation, snapshot.version) === content ? null : edit
 }
 
 export function BlockControls({ buffer, linkBase, editorId, report, children }: { editorId: string; linkBase?: EditorLinkBase; buffer: EditorBuffer; report(error: unknown): void; children: ReactNode }) {
@@ -83,7 +104,10 @@ export function BlockControls({ buffer, linkBase, editorId, report, children }: 
   const drop = () => {
     const current = dragRef.current; changeDrag(null)
     if (!current || current.block.id === current.target.id) return
-    try { buffer.apply(moveEdit(current.snapshot, current.block, current.target, current.placement), 'drag') } catch (error) { console.warn('[BlockControls] move block failed:', error instanceof Error ? error.message : String(error)); report(error) }
+    try {
+      const edit = isItem(current.block) ? moveItemEdit(current.snapshot, current.block, current.target, current.placement) : moveEdit(current.snapshot, current.block, current.target, current.placement)
+      if (edit) buffer.apply(edit, 'drag')
+    } catch (error) { console.warn('[BlockControls] move block failed:', error instanceof Error ? error.message : String(error)); report(error) }
   }
   let items: MenuItem[] = []
   if (menu) {
@@ -142,6 +166,7 @@ export function BlockControls({ buffer, linkBase, editorId, report, children }: 
       })))
   }
   return <Context.Provider value={{ drag, cancel: () => changeDrag(null), drop,
+    accepts: (target, actionable) => { const moving = dragRef.current?.block; return !!moving && (isItem(moving) ? isItem(target) && target.parentId === moving.parentId : actionable) },
     menu: (block, anchor) => { try { buffer.flush(); setMenu({ block, snapshot: buffer.snapshot, anchor }) } catch (error) { console.warn('[BlockControls] open block menu failed:', error instanceof Error ? error.message : String(error)); report(error) } },
     start: (block, data) => { try {
       buffer.flush()
@@ -169,16 +194,19 @@ export function BlockControls({ buffer, linkBase, editorId, report, children }: 
 }
 
 export function BlockShell({ block, line, actionable, children }: { block: DocumentBlock; line: number; actionable: boolean; children: ReactNode }) {
+  const landing = actionable || isItem(block)
   const controls = useContext(Context)!
   const preview = controls.drag?.target.id === block.id && controls.drag.block.id !== block.id ? controls.drag.placement : undefined
   return <div className="note-preview-render-block ready-block-shell" data-block-start={block.start} data-block-type={block.type}
     data-ready-block-source-line={line} data-drop={preview} data-actionable={actionable || undefined}
+    // A table's handles and its add-column bar sit just outside its box, so this block must not clip its paint.
+    style={block.type === 'table' ? { contentVisibility: 'visible' } : undefined}
     onDragOver={event => {
-      if (!actionable || !controls.drag) return
+      if (!landing || !controls.accepts(block, actionable)) return
       event.preventDefault(); event.stopPropagation()
       const rect = event.currentTarget.getBoundingClientRect()
       controls.over(block, event.clientY < rect.top + rect.height / 2 ? 'before' : 'after')
-    }} onDrop={event => { if (actionable) { event.preventDefault(); event.stopPropagation(); controls.drop() } }}>
+    }} onDrop={event => { if (actionable || controls.accepts(block, actionable)) { event.preventDefault(); event.stopPropagation(); controls.drop() } }}>
     {actionable && <button type="button" className="ready-block-handle" aria-label="块菜单" title="块菜单；空格开始移动" draggable
       onDragStart={event => { event.stopPropagation(); controls.start(block, event.dataTransfer) }}
       onDragEnd={() => controls.cancel()} onClick={event => controls.menu(block, event.currentTarget.getBoundingClientRect())}
@@ -193,4 +221,22 @@ export function BlockShell({ block, line, actionable, children }: { block: Docum
         else if (event.key === 'Enter') controls.menu(block, event.currentTarget.getBoundingClientRect())
       }}>⠿</button>}{children}
   </div>
+}
+
+/**
+ * A list entry's marker. The bullet or number is the entry's handle: dragging it moves the entry among its siblings
+ * (the page's own block handle belongs to the whole list). A task's marker is also its checkbox.
+ */
+export function ItemMarker({ block, kind, text, checked, label, onToggle }: {
+  block: DocumentBlock; kind: 'task' | 'number' | 'bullet'; text: string; checked?: boolean; label?: string; onToggle?(): void
+}) {
+  const controls = useContext(Context)!
+  const drag = {
+    draggable: true,
+    onDragStart: (event: DragEvent<HTMLElement>) => { event.stopPropagation(); event.dataTransfer.effectAllowed = 'move'; controls.start(block, event.dataTransfer) },
+    onDragEnd: () => controls.cancel(),
+  }
+  if (kind === 'task') return <button type="button" role="checkbox" aria-checked={!!checked} aria-label={label} title="点一下勾选或取消；拖动可排序"
+    className="ready-block-marker is-task" data-checked={!!checked} onClick={onToggle} {...drag} />
+  return <span aria-hidden title="拖动可排序" className={`ready-block-marker is-${kind}`} {...drag}>{text}</span>
 }

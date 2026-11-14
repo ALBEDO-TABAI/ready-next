@@ -56,6 +56,11 @@ interface NotePreviewProps {
   widgetStates?: Record<string, DocumentWidgetPersistedState>
 }
 
+/** Opens the page's frontmatter block as source in the block editor that shares this preview shell. */
+function editFrontmatter(from: HTMLElement) {
+  from.closest('.note-preview-shell')?.querySelector<HTMLButtonElement>('.ready-block-source[data-block-type="frontmatter"] > .ready-block-source-edit')?.click()
+}
+
 function Chip({
   chip,
   copied,
@@ -526,7 +531,9 @@ function NotePreview({
       ) : null}
 
       {preview.properties.length > 0 ? (
-        <section className="note-preview-properties">
+        <section className="note-preview-properties" onDoubleClick={editorTabId ? event => { event.preventDefault(); window.getSelection()?.removeAllRanges(); editFrontmatter(event.currentTarget) } : undefined}>
+          {/* Properties are the page's frontmatter: double-click, or this corner control, opens just that block's source below. */}
+          {editorTabId ? <button type="button" className="ready-block-source-edit" title="也可以双击属性" onClick={event => editFrontmatter(event.currentTarget)}>编辑属性</button> : null}
           {preview.properties.map((property) => (
             <PropertyRow
               key={property.key}

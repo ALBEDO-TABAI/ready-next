@@ -9,6 +9,9 @@ const TITLES: Record<string, string> = {
   help: '问题', faq: '问题', failure: '失败', fail: '失败', missing: '缺失', danger: '危险', error: '错误', bug: '缺陷', example: '示例',
 }
 
+/** The label a callout shows when its header has no title of its own. */
+export const calloutLabel = (type: string) => TITLES[type.toLowerCase()] ?? type
+
 export function remarkCallouts() {
   return (tree: Root) => {
     const visit = (parent: Parent) => {

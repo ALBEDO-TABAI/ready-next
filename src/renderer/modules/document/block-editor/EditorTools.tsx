@@ -167,7 +167,7 @@ export function EditorTools({ buffer, linkBase, children, report }: { buffer: Ed
         const now = new Date(), date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
         replaceSelection({ ...current, start: 0 }, [{ text: date, marks: { reference: { kind: 'ready', ref: { kind: 'day', date } } } }])
       })),
-      // 引用对象 hands the typed “/…” over to the [[ picker, which replaces it with the chosen page or heading.
+      // 链接页面 hands the typed “/…” over to the [[ picker, which replaces it with the chosen page or heading.
       item('reference', () => { setQuery(''); setResults([]); setPicker({ ...current, start: 0, kind: 'wiki' }) }),
       ...(linkBase?.parentPath ? [
         item('page', () => { setPicker(null); setPage({ picker: current, title: '', operationId: crypto.randomUUID(), state: 'editing' }) }),

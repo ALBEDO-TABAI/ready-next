@@ -42,20 +42,34 @@ export async function findReferences(query: string, wiki: boolean, filePath?: st
   if (!pageQuery.trim() || !roots.length) return choices
   const result = await window.electronAPI.document.searchIndex({ query: pageQuery, workspaceRoots: roots, limit: 12, ...(wiki ? { sources: ['document'] } : {}) })
   if (!result.success || !result.data) throw new Error(result.error ?? '搜索失败')
+  // A result's detail is its place in the library, not the absolute path on this machine.
+  const place = (path: string) => {
+    const normalized = path.replace(/\\/g, '/')
+    const base = roots.map(root => root.replace(/\\/g, '/').replace(/\/+$/, '')).find(root => normalized.startsWith(`${root}/`))
+    return base ? normalized.slice(base.length + 1) : path
+  }
   for (const item of result.data.items) {
     const ready = parseReadyUri(item.path)
     if (ready.ok) { if (!wiki) addReady(item.name, item.sourceType, ready.ref); continue }
-    if (item.sourceType !== 'document' || !/\.md$/i.test(item.path)) continue
-    if (/[[\]|\r\n]/.test(item.path)) continue
+    if (item.sourceType !== 'document' || /[[\]|\r\n]/.test(item.path)) continue
+    if (!/\.md$/i.test(item.path)) {
+      // Any other file in the library (a PDF, an image, a board) links by its object identity; one outside it has none.
+      try {
+        const location = await window.electronAPI.objects.resolvePath(item.path)
+        addReady(item.name, place(item.path), { kind: /\.canvas$/i.test(item.path) ? 'canvas' : 'file', id: location.objectId })
+      } catch (error) { console.warn('[references] skip a file without an object identity:', error instanceof Error ? error.message : String(error)) }
+      continue
+    }
     if (!wiki) {
       const location = await window.electronAPI.objects.resolvePath(item.path)
-      addReady(item.name, item.path, { kind: 'page', id: location.objectId })
+      addReady(item.name.replace(/\.md$/i, ''), place(item.path), { kind: 'page', id: location.objectId })
       continue
     }
     const path = await wikiTarget(filePath, item.path)
     if (/[[\]|\r\n]/.test(path)) continue
-    const addWiki = (target: string, label: string) => choices.push({ id: target, label, detail: item.path, text: target, reference: { kind: 'wiki', target } })
-    if (anchorQuery === undefined) addWiki(path, item.name)
+    const name = item.name.replace(/\.md$/i, '')
+    const addWiki = (target: string, label: string) => choices.push({ id: target, label, detail: place(item.path), text: target, reference: { kind: 'wiki', target } })
+    if (anchorQuery === undefined) addWiki(path, name)
     const open = useDocTabs.getState().tabs.find(tab => tab.path === item.path)
     let content = open?.content
     if (content === undefined) {
@@ -68,7 +82,7 @@ export async function findReferences(query: string, wiki: boolean, filePath?: st
       if (model.capability !== 'rich') continue
       const heading = plainText(model.spans)
       if (/[[\]|\r\n]/.test(heading) || (anchorQuery !== undefined && !heading.toLowerCase().includes(anchorQuery.toLowerCase()))) continue
-      addWiki(`${path}#${heading}`, `${item.name} › ${heading}`)
+      addWiki(`${path}#${heading}`, `${name} › ${heading}`)
     }
   }
   return choices.filter((choice, index) => choices.findIndex(other => other.id === choice.id) === index)

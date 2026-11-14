@@ -259,8 +259,8 @@ test('wiki picker uses global search, displays duplicate paths and inserts a hea
   const f = await editorFixture(t, '[['); const requests = await referenceAPI(f, t); await trigger(f, '[[')
   const input = await referenceQuery(f, '同名')
   assert.ok(requests.length)
-  assert.match(document.querySelector('[role="listbox"]')!.textContent!, /\/vault\/一\/同名.md/)
-  assert.match(document.querySelector('[role="listbox"]')!.textContent!, /\/vault\/二\/同名.md/)
+  assert.match(document.querySelector('[role="listbox"]')!.textContent!, /一\/同名.md/)
+  assert.match(document.querySelector('[role="listbox"]')!.textContent!, /二\/同名.md/)
   await f.key(input, 'ArrowDown'); await f.key(input, 'Enter'); f.bytes('[[/vault/一/同名#第一节]]')
   await f.key(f.rich('/vault/一/同名#第一节'), 'z', { ctrlKey: true }); f.bytes('[[')
 })
@@ -393,17 +393,6 @@ test('container color changes its text in a single undo entry and retains list m
   f.bytes('- <span style="color: red">甲</span>\r\n- <span style="color: red">乙</span>')
   assert.equal(f.buffer.history.entries.length, 1)
   await f.key(f.rich('甲'), 'z', { ctrlKey: true }); f.bytes('- 甲\r\n- 乙')
-})
-
-test('a callout renders whole through the source renderer, never as a raw [!type] paragraph', async t => {
-  const source = '> [!quote|yellow] 书 · [原文](ready://read/book/b#c0:6+5)\r\n> 摘录'
-  const f = await editorFixture(t, source)
-  const callout = document.querySelector<HTMLElement>('[data-block-start][data-block-type="callout"]')!
-  assert.ok(callout, 'the callout keeps its block shell and menu')
-  assert.equal(callout.querySelectorAll('[data-rich-start]').length, 0, 'no inline child shows the marker line')
-  assert.equal(callout.querySelectorAll('[data-block-type="paragraph"]').length, 0)
-  assert.equal(callout.querySelector('pre')!.textContent, source)
-  f.bytes(source)
 })
 
 test('converting a callout retains its authored title as well as its body', async t => {
