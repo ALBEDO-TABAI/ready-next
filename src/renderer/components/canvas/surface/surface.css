@@ -89,7 +89,14 @@
   .rn-canvas .canvas-clusters, .rn-canvas .canvas-edges, .rn-canvas .canvas-overlay { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
   .rn-canvas .canvas-clusters { fill: var(--rn-fill); stroke: var(--rn-ink-4); stroke-width: 1; }
   .rn-canvas .canvas-edges { fill: none; stroke: var(--rn-ink-2); stroke-width: 2; }
-  .rn-canvas .canvas-edges marker { fill: var(--rn-ink-2); stroke: none; }
+  /* The arrow head takes the colour of its line (a picked connector darkens as one piece). */
+  .rn-canvas .canvas-edges marker { fill: context-stroke; stroke: none; }
+  /* A connector is picked by a wide unseen stroke along it; cards sit above the lines, so it never takes a card drag.
+     Picked is ink (heavier), never the accent. */
+  .rn-canvas .canvas-edges .canvas-edge-hit { stroke: transparent; stroke-width: 14; pointer-events: stroke; }
+  .rn-canvas[data-tool='select'] .canvas-edges .canvas-edge-hit { cursor: pointer; }
+  .rn-canvas[data-tool='select'] .canvas-edges g:hover > .canvas-edge-line { stroke: var(--rn-ink); }
+  .rn-canvas .canvas-edges g[data-selected] > .canvas-edge-line { stroke: var(--rn-ink); stroke-width: 3; }
   .rn-canvas .canvas-edges text { fill: var(--canvas-ink); stroke: none; }
   .rn-canvas .canvas-overlay { z-index: 10; }
   .rn-canvas .canvas-guide, .rn-canvas .canvas-preview { fill: none; stroke: var(--canvas-accent); stroke-width: 2; }

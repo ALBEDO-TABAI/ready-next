@@ -3,13 +3,13 @@ import type { CanvasOperation } from '../../../../shared/ready-canvas/operations
 import { DEFAULT_GRAPHIC_STROKE } from '../../../../shared/ready-canvas/graphics'
 import type { FrameWork, GraphicDraft, Tool } from '../../../components/canvas/surface/types'
 import { cardFrame, resizedGraphic, visualBounds } from './graphics'
-import { bounds, expand, intersects, rectBetween, screenToWorld, snapRect, zoomAt, type Camera, type Point, type Rect, type SpatialIndex } from './geometry'
+import { bounds, expand, intersects, rectBetween, screenToWorld, segmentHitsRect, snapRect, zoomAt, type Camera, type Point, type Rect, type SpatialIndex } from './geometry'
 
 export interface GestureScene {
   root: HTMLElement; world: HTMLElement; overlay: SVGSVGElement
   camera: Camera; viewport: Rect; index: SpatialIndex<CanvasNode>; byId: Map<string, CanvasNode>
   elements: Map<string, HTMLElement>; selected: string[]; tool: Tool; busy: boolean
-  children: Map<string, string[]>; edgeElements: Map<string, { element: SVGPathElement; from: CanvasNode; to: CanvasNode; edge: CanvasEdge }>
+  children: Map<string, string[]>; edgeElements: Map<string, { element: SVGGElement; from: CanvasNode; to: CanvasNode; edge: CanvasEdge }>
 }
 type Drag = {
   pointerId: number; start: Point; latest: Point; camera: Camera; selection: string[]; moved: boolean
@@ -27,15 +27,23 @@ interface GestureCallbacks {
   commit: (ops: CanvasOperation[]) => Promise<boolean>
   graphic: (draft: GraphicDraft, existing?: CanvasNode) => Promise<boolean>
   measure?: (work: FrameWork) => void
+  /** A connector or drawing was accepted: the surface selects it and puts the select tool back. */
+  drawn?: (kind: 'edge' | 'rect' | 'arrow' | 'path', id: string) => void
 }
-export function edgePath(a: Rect, b: Rect, edge?: CanvasEdge): string {
+export function edgeEnds(a: Rect, b: Rect, edge?: CanvasEdge): [Point, Point] {
   const dx = b.x + b.width / 2 - a.x - a.width / 2, dy = b.y + b.height / 2 - a.y - a.height / 2
   const horizontal = Math.abs(dx) >= Math.abs(dy)
   const port = (r: Rect, side: 'left' | 'right' | 'top' | 'bottom'): Point => ({ x: r.x + (side === 'left' ? 0 : side === 'right' ? r.width : r.width / 2), y: r.y + (side === 'top' ? 0 : side === 'bottom' ? r.height : r.height / 2) })
   const start = port(a, edge?.fromSide ?? (horizontal ? (dx >= 0 ? 'right' : 'left') : (dy >= 0 ? 'bottom' : 'top')))
   const end = port(b, edge?.toSide ?? (horizontal ? (dx >= 0 ? 'left' : 'right') : (dy >= 0 ? 'top' : 'bottom')))
+  return [start, end]
+}
+export function edgePath(a: Rect, b: Rect, edge?: CanvasEdge): string {
+  const [start, end] = edgeEnds(a, b, edge)
   return `M${start.x},${start.y} L${end.x},${end.y}`
 }
+/** A connector is a group of two paths (the line and its wide hit area): both follow the cards. */
+function setEdge(group: SVGGElement, d: string): void { for (const path of group.querySelectorAll('path')) path.setAttribute('d', d) }
 
 /** One RAF owns each transient gesture; no board state is changed until pointerup. */
 export class CanvasGestures {
@@ -79,6 +87,11 @@ export class CanvasGestures {
       const nodes = ids.flatMap(key => { const n = s.byId.get(key); return n ? [n] : [] }), moving = new Set(ids)
       const edges = new Map([...s.edgeElements].filter(([, edge]) => moving.has(edge.from.id) || moving.has(edge.to.id)))
       this.drag = { ...common, kind: resizing ? 'resize' : 'move', nodes, box: bounds(nodes.map(visualBounds)), dx: 0, dy: 0, geometry: null, edges }
+    } else if (target?.closest('[data-edge-id]')) {
+      // A connector is picked, never dragged: it follows its cards. ⇧ adds or removes it.
+      const edge = target.closest('[data-edge-id]')!.getAttribute('data-edge-id')!
+      this.callbacks.select(e.shiftKey || e.metaKey || e.ctrlKey ? (s.selected.includes(edge) ? s.selected.filter(i => i !== edge) : [...s.selected, edge]) : [edge])
+      return
     } else {
       this.drag = { ...common, kind: 'marquee', additive: e.shiftKey ? s.selected : [] }
       if (!e.shiftKey) this.callbacks.select([])
@@ -112,7 +125,7 @@ export class CanvasGestures {
       for (const node of d.nodes) { const el = s.elements.get(node.id); if (el) { el.style.translate = `${d.dx}px ${d.dy}px`; domWrites++ } }
       for (const edge of d.edges.values()) {
         const moved = (n: CanvasNode): Rect => moving.has(n.id) ? { ...n, x: n.x + d.dx, y: n.y + d.dy } : n
-        edge.element.setAttribute('d', edgePath(moved(edge.from), moved(edge.to), edge.edge)); domWrites++
+        setEdge(edge.element, edgePath(moved(edge.from), moved(edge.to), edge.edge)); domWrites++
       }
       for (const g of snapped.guides) shape('path', { d: g.axis === 'x' ? `M${g.value},${g.start}V${g.end}` : `M${g.start},${g.value}H${g.end}`, class: 'canvas-guide' })
     } else if (d.kind === 'resize') {
@@ -124,14 +137,16 @@ export class CanvasGestures {
         const frame = cardFrame({ ...n, ...d.geometry, ready: { ...n.ready, ...(graphic ? { graphic } : {}) } })
         el.style.left = `${frame.x}px`; el.style.top = `${frame.y}px`; el.style.width = `${frame.width}px`; el.style.height = `${frame.height}px`; domWrites += 4
       }
-      for (const edge of d.edges.values()) { edge.element.setAttribute('d', edgePath(edge.from.id === n.id ? d.geometry : edge.from, edge.to.id === n.id ? d.geometry : edge.to, edge.edge)); domWrites++ }
+      for (const edge of d.edges.values()) { setEdge(edge.element, edgePath(edge.from.id === n.id ? d.geometry : edge.from, edge.to.id === n.id ? d.geometry : edge.to, edge.edge)); domWrites++ }
     } else if (d.kind === 'pan') {
       this.callbacks.camera({ ...d.camera, x: d.camera.x + d.latest.x - d.start.x, y: d.camera.y + d.latest.y - d.start.y })
     } else if (d.kind === 'marquee') {
       const r = rectBetween(start, p), found = s.index.query(r)
       candidates = found.length; visited = s.index.lastVisited
       shape('rect', { ...r, class: 'canvas-marquee' })
-      this.callbacks.select([...new Set([...d.additive, ...found.map(n => n.id)])])
+      // Connectors the marquee crosses are picked with the cards.
+      const crossed = [...s.edgeElements].filter(([, edge]) => segmentHitsRect(...edgeEnds(edge.from, edge.to, edge.edge), r)).map(([id]) => id)
+      this.callbacks.select([...new Set([...d.additive, ...found.map(n => n.id), ...crossed])])
     } else if (d.kind === 'edge') {
       shape('path', { d: `M${d.from.x + d.from.width / 2},${d.from.y + d.from.height / 2} L${p.x},${p.y}`, class: 'canvas-preview' })
     } else if (d.kind === 'rect') shape('rect', { ...rectBetween(start, p), class: 'canvas-preview' })
@@ -164,21 +179,23 @@ export class CanvasGestures {
       } else void this.callbacks.commit([{ type: 'geometry', id: n.id, geometry: d.geometry }])
     } else if (d.kind === 'edge') {
       const p = screenToWorld(d.latest, d.camera), to = s.index.query({ ...p, width: 0, height: 0 }).filter(n => n.id !== d.from.id).at(-1)
-      if (to) void this.callbacks.commit([{ type: 'addEdge', edge: { id: crypto.randomUUID(), fromNode: d.from.id, toNode: to.id, toEnd: 'arrow' } }])
+      const id = crypto.randomUUID()
+      if (to) void this.callbacks.commit([{ type: 'addEdge', edge: { id, fromNode: d.from.id, toNode: to.id, toEnd: 'arrow' } }]).then(ok => { if (ok) this.callbacks.drawn?.('edge', id) })
     } else if (d.kind === 'rect' || d.kind === 'arrow' || d.kind === 'path') {
       const start = screenToWorld(d.start, d.camera), end = screenToWorld(d.latest, d.camera)
       const r = rectBetween(start, end), paint = { stroke: DEFAULT_GRAPHIC_STROKE, strokeWidth: 2 }
       const frame = d.kind === 'path' ? bounds(d.points.map(p => ({ ...p, width: 1, height: 1 }))) : r
       const x = Math.round(d.kind === 'arrow' ? start.x : frame.x), y = Math.round(d.kind === 'arrow' ? start.y : frame.y)
       const graphic: Graphic = d.kind === 'rect' ? { type: 'rect', ...paint, fill: 'transparent' } : d.kind === 'arrow' ? { type: 'arrow', ...paint, x2: Math.round(end.x) - x, y2: Math.round(end.y) - y } : { type: 'path', ...paint, points: d.points.map(p => ({ x: p.x - x, y: p.y - y })) }
-      void this.callbacks.graphic({ id: crypto.randomUUID(), x, y, width: Math.max(1, Math.round(frame.width)), height: Math.max(1, Math.round(frame.height)), graphic })
+      const id = crypto.randomUUID(), kind = d.kind
+      void this.callbacks.graphic({ id, x, y, width: Math.max(1, Math.round(frame.width)), height: Math.max(1, Math.round(frame.height)), graphic }).then(ok => { if (ok) this.callbacks.drawn?.(kind, id) })
     }
   }
   private restoreDOM(s: GestureScene, d: Drag): void {
     s.overlay.replaceChildren()
     if (d.kind === 'move' || d.kind === 'resize') {
       for (const n of d.nodes) { const el = s.elements.get(n.id); if (el) { const frame = cardFrame(n); el.style.translate = ''; el.style.left = `${frame.x}px`; el.style.top = `${frame.y}px`; el.style.width = `${frame.width}px`; el.style.height = `${frame.height}px` } }
-      for (const edge of d.edges.values()) edge.element.setAttribute('d', edgePath(edge.from, edge.to, edge.edge))
+      for (const edge of d.edges.values()) setEdge(edge.element, edgePath(edge.from, edge.to, edge.edge))
     }
   }
   cancel(): void {

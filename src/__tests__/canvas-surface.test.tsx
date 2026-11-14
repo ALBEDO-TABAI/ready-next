@@ -146,12 +146,13 @@ test('marquee, pan, wheel and resize coalesce; cancelled marquee and pan restore
     await ui.pointer(ui.surface, 'pointerdown', 30, 70)
     for (let i = 0; i < 20; i++) await ui.pointer(ui.surface, 'pointermove', 505, 245)
     assert.equal(ui.frames.size, 1); await ui.flush()
-    assert.equal(ui.surface.querySelectorAll('[data-selected="true"]').length, 2)
+    assert.equal(ui.surface.querySelectorAll('.canvas-card[data-selected="true"]').length, 2)
+    assert.equal(ui.surface.querySelectorAll('[data-edge-id][data-selected]').length, 1, 'the connector the marquee crosses is picked with the cards')
     await ui.pointer(ui.surface, 'pointercancel', 505, 245)
     assert.equal(ui.surface.querySelectorAll('[data-selected="true"]').length, 0)
     await ui.pointer(ui.surface, 'pointerdown', 30, 70)
     await ui.pointer(ui.surface, 'pointerup', 505, 245)
-    assert.equal(ui.surface.querySelectorAll('[data-selected="true"]').length, 2)
+    assert.equal(ui.surface.querySelectorAll('.canvas-card[data-selected="true"]').length, 2)
     const handle = ui.card().querySelector('[data-resize]')!
     await ui.pointer(handle, 'pointerdown', 240, 240)
     for (let i = 0; i < 10; i++) await ui.pointer(ui.surface, 'pointermove', 280, 270)
@@ -189,6 +190,64 @@ test('whiteboard tools prepare graphics, preserve negative arrows, create standa
     await ui.click('选择'); await ui.pointer(ui.card(), 'pointerdown', 100, 120); await ui.pointer(ui.surface, 'pointerup', 100, 120)
     await ui.click('置顶'); assert.equal(ui.canvas.nodes.at(-1)?.id, 'n0')
     await ui.click('置底'); assert.equal(ui.canvas.nodes[0].id, 'n0')
+  } finally { await ui.close() }
+})
+
+test('a connector is picked by click, ⇧-click and right-click; Delete removes it and undo brings it back', async () => {
+  const ui = await mount(3)
+  const pressed = (label: string) => [...ui.surface.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === label)
+  ui.surface.getBoundingClientRect = () => ({ left: 0, top: 0, right: 1000, bottom: 700, width: 1000, height: 700, x: 0, y: 0, toJSON() {} })
+  try {
+    const hit = () => ui.surface.querySelector('[data-edge-id="edge0"] .canvas-edge-hit')!
+    const picked = () => [...ui.surface.querySelectorAll('[data-edge-id][data-selected], .canvas-card[data-selected="true"]')].map(el => el.getAttribute('data-edge-id') ?? el.getAttribute('data-node-id'))
+    await ui.pointer(hit(), 'pointerdown', 270, 160); await ui.pointer(ui.surface, 'pointerup', 270, 160)
+    assert.deepEqual(picked(), ['edge0']); assert.equal(ui.commits, 0)
+    assert.ok(pressed('删除连线'), 'a picked connector shows its own bar')
+    // ⇧-click adds a card to the connector, and takes the connector out again.
+    await ui.pointer(ui.card('n2'), 'pointerdown', 600, 100, { shiftKey: true }); await ui.pointer(ui.surface, 'pointerup', 600, 100, { shiftKey: true })
+    assert.deepEqual(picked().sort(), ['edge0', 'n2'])
+    await ui.pointer(hit(), 'pointerdown', 270, 160, { shiftKey: true }); await ui.pointer(ui.surface, 'pointerup', 270, 160, { shiftKey: true })
+    assert.deepEqual(picked(), ['n2'])
+    // Right-click the connector: it becomes the selection and its menu deletes it.
+    await act(async () => hit().dispatchEvent(new ui.dom.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 270, clientY: 160 })))
+    assert.equal(ui.menu()?.getAttribute('aria-label'), '连线菜单'); assert.deepEqual(picked(), ['edge0'])
+    await ui.click('删除连线')
+    assert.equal(ui.canvas.edges.length, 0); assert.equal(ui.commits, 1); assert.equal(ui.canvas.nodes.filter(n => n.ready.trash).length, 0)
+    await ui.click('撤销'); assert.deepEqual(ui.canvas.edges.map(e => e.id), ['edge0'])
+    await ui.key('z', { ctrlKey: true, shiftKey: true }); assert.equal(ui.canvas.edges.length, 0)
+    await ui.key('z', { ctrlKey: true }); assert.equal(ui.canvas.edges.length, 1)
+    // Delete on the keyboard; a connector between two cards binned together stays in the file and returns with them.
+    await ui.pointer(hit(), 'pointerdown', 270, 160); await ui.pointer(ui.surface, 'pointerup', 270, 160)
+    await ui.key('Delete'); assert.equal(ui.canvas.edges.length, 0)
+    await ui.key('z', { ctrlKey: true })
+    ui.surface.focus(); await ui.key('a', { ctrlKey: true }); await ui.key('Backspace')
+    assert.equal(ui.canvas.nodes.filter(n => n.ready.trash).length, 3); assert.equal(ui.canvas.edges.length, 1)
+    assert.equal(ui.surface.querySelector('[data-edge-id]'), null, 'hidden with its cards')
+    await ui.click('回收站'); await ui.click('全部恢复'); await ui.click('回收站')
+    assert.ok(ui.surface.querySelector('[data-edge-id="edge0"]'))
+  } finally { await ui.close() }
+})
+
+test('one connector or shape, then the select tool with it picked; each is one undo step and earlier steps survive', async () => {
+  const ui = await mount(3, { prepareGraphic: async draft => `Lab.assets/${draft.id}.svg` })
+  const tool = (label: string) => [...ui.surface.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === label)?.getAttribute('aria-pressed')
+  try {
+    await ui.click('连线'); await ui.pointer(ui.card('n1'), 'pointerdown', 350, 150); await ui.pointer(ui.surface, 'pointerup', 620, 150)
+    assert.equal(ui.canvas.edges.length, 2); assert.equal(tool('选择'), 'true')
+    const drawn = ui.canvas.edges[1].id
+    assert.ok(ui.surface.querySelector(`[data-edge-id="${drawn}"][data-selected]`), 'the new connector is picked')
+    await ui.click('矩形'); await ui.pointer(ui.surface, 'pointerdown', 600, 400); await ui.pointer(ui.surface, 'pointermove', 700, 500); await ui.flush(); await ui.pointer(ui.surface, 'pointerup', 800, 600)
+    assert.equal(ui.canvas.nodes.length, 4); assert.equal(tool('选择'), 'true')
+    assert.equal(ui.surface.querySelector('.canvas-card[data-selected="true"]')?.getAttribute('data-kind'), 'graphic')
+    // Freehand keeps the pen: strokes come in runs.
+    await ui.click('手绘')
+    for (const y of [300, 340]) { await ui.pointer(ui.surface, 'pointerdown', 500, y); await ui.pointer(ui.surface, 'pointermove', 560, y + 20); await ui.flush(); await ui.pointer(ui.surface, 'pointerup', 600, y) }
+    assert.equal(ui.canvas.nodes.length, 6); assert.equal(tool('手绘'), 'true')
+    // Undo walks back through every step: two strokes, the rectangle, then the connector drawn before them.
+    for (const expected of [5, 4, 3]) { await ui.click('撤销'); assert.equal(ui.canvas.nodes.length, expected) }
+    assert.equal(ui.canvas.edges.length, 2)
+    await ui.click('撤销'); assert.equal(ui.canvas.edges.length, 1)
+    await ui.click('重做'); assert.deepEqual(ui.canvas.edges.map(e => e.id), ['edge0', drawn])
   } finally { await ui.close() }
 })
 

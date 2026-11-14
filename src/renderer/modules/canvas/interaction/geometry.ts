@@ -14,6 +14,17 @@ export function bounds(items: readonly Rect[]): Rect {
   for (const r of items) { x = Math.min(x, r.x); y = Math.min(y, r.y); right = Math.max(right, r.x + r.width); bottom = Math.max(bottom, r.y + r.height) }
   return { x, y, width: right - x, height: bottom - y }
 }
+/** Liang–Barsky: does the segment a→b touch the rectangle (a connector crossed by the marquee)? */
+export function segmentHitsRect(a: Point, b: Point, r: Rect): boolean {
+  let t0 = 0, t1 = 1
+  const dx = b.x - a.x, dy = b.y - a.y
+  for (const [p, q] of [[-dx, a.x - r.x], [dx, r.x + r.width - a.x], [-dy, a.y - r.y], [dy, r.y + r.height - a.y]]) {
+    if (p === 0) { if (q < 0) return false; continue }
+    const t = q / p
+    if (p < 0) { if (t > t1) return false; t0 = Math.max(t0, t) } else { if (t < t0) return false; t1 = Math.min(t1, t) }
+  }
+  return true
+}
 export const screenToWorld = (p: Point, c: Camera): Point => ({ x: (p.x - c.x) / c.zoom, y: (p.y - c.y) / c.zoom })
 export function zoomAt(c: Camera, p: Point, zoom: number): Camera {
   const z = Math.max(0.15, Math.min(4, zoom)), world = screenToWorld(p, c)

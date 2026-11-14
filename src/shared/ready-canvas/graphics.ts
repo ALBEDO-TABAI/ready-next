@@ -1,4 +1,5 @@
 import { GraphicSchema, type Graphic } from './schema'
+import { sha256 } from './serialization'
 
 /** The ink a new drawing (rectangle, arrow, freehand) is saved with: it is written into the board file, so it is
  *  the drawing's own colour (content data), not an interface token. */
@@ -23,4 +24,10 @@ export function graphicSvg(input: Graphic, width: number, height: number): strin
   else body = `<polyline points="${graphic.points.map(p => `${p.x},${p.y}`).join(' ')}" fill="none" stroke-linecap="round" stroke-linejoin="round" ${style}/>`
   const frame = graphicFrame(graphic, width, height)
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${frame.width}" height="${frame.height}" viewBox="${frame.x} ${frame.y} ${frame.width} ${frame.height}" overflow="visible">${body}</svg>`
+}
+
+/** Where a drawing's SVG lives: beside the board, named by the SHA-256 of its bytes. Main derives the same path from
+ *  the saved node on every write; a caller that predicts a different one sees the saved board differ from its own. */
+export async function graphicAssetPath(canvasPath: string, graphic: Graphic, width: number, height: number): Promise<string> {
+  return `${canvasPath.replace(/\.canvas$/i, '')}.assets/${await sha256(graphicSvg(graphic, width, height))}.svg`
 }

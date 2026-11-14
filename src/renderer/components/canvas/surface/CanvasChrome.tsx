@@ -96,8 +96,8 @@ export function CanvasDock({ tool, lastShape, disabled, graphics, canUndo, canRe
 }
 
 /** Above the selection: what you can do with these cards. */
-export function SelectionBar({ left, top, count, canGroup, canUngroup, busy, actions }: {
-  left: number; top: number; count: number; canGroup: boolean; canUngroup: boolean; busy: boolean
+export function SelectionBar({ left, top, count, edges = 0, canGroup, canUngroup, busy, actions }: {
+  left: number; top: number; count: number; edges?: number; canGroup: boolean; canUngroup: boolean; busy: boolean
   actions: {
     group(): void; ungroup(): void; layout(kind: 'P' | 'L' | 'R'): void; front(): void; back(): void; remove(): void
     addToDocument?(): void; askAI?(): void; schedule?(): void
@@ -105,7 +105,9 @@ export function SelectionBar({ left, top, count, canGroup, canUngroup, busy, act
 }) {
   const arrangeMenu = useChromeMenu(ARRANGE_MENU)
   return <div className="canvas-selection-bar rn-float" role="toolbar" aria-label="选区操作" data-canvas-ui style={{ left, top }}>
-    <span className="canvas-selection-count" aria-live="polite">{count} 张</span>
+    <span className="canvas-selection-count" aria-live="polite">{count ? `${count} 张` : `${edges} 条连线`}</span>
+    {!count && <ChromeTool label="删除连线" icon={Trash2} shortcut="Delete" danger disabled={busy} onClick={actions.remove} />}
+    {!!count && <>
     {canGroup && <ChromeTool label="分组" icon={Group} shortcut="⌘G" disabled={busy} onClick={actions.group} />}
     {canUngroup && <ChromeTool label="解组" icon={Ungroup} shortcut="⇧⌘G" disabled={busy} onClick={actions.ungroup} />}
     {count > 1 && <ChromeTool label="排版" icon={LayoutGrid} menu={{ id: ARRANGE_MENU, open: arrangeMenu.open }} disabled={busy}
@@ -118,5 +120,6 @@ export function SelectionBar({ left, top, count, canGroup, canUngroup, busy, act
     {actions.schedule && <ChromeTool label="安排日程…" icon={CalendarPlus} disabled={busy} onClick={actions.schedule} />}
     <span className="canvas-dock-sep" aria-hidden />
     <ChromeTool label="删除" icon={Trash2} shortcut="Delete" danger disabled={busy} onClick={actions.remove} />
+    </>}
   </div>
 }

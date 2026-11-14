@@ -4,8 +4,8 @@ import { eventCard } from '../../../../shared/calendar-linkage'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import type { CanvasNode } from '../../../../shared/ready-canvas/schema'
-import { activeCanvasContent } from '../../../../shared/ready-canvas/operations'
-import { CanvasGestures, edgePath, type GestureScene } from '../../../modules/canvas/interaction/gestures'
+import { activeCanvasContent, type CanvasOperation } from '../../../../shared/ready-canvas/operations'
+import { CanvasGestures, edgeEnds, edgePath, type GestureScene } from '../../../modules/canvas/interaction/gestures'
 import { SpatialIndex, clusters, expand, layout, screenToWorld, zoomAt, type Camera } from '../../../modules/canvas/interaction/geometry'
 import { groupOperations, layerOperations, ungroupOperations } from '../../../modules/canvas/interaction/operations'
 import { visualBounds } from '../../../modules/canvas/interaction/graphics'
@@ -41,7 +41,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
   }, [props.revealNode?.requestId, size.width, size.height]) // eslint-disable-line react-hooks/exhaustive-deps -- a navigation request runs once; editing must not recenter
 
   // The right-click menu: what was clicked and where (the shared W1 menu opens at the pointer, inside the board).
-  const [menu, setMenu] = useState<{ kind: 'card' | 'canvas'; world: { x: number; y: number }; client: { x: number; y: number } } | null>(null)
+  const [menu, setMenu] = useState<{ kind: 'card' | 'edge' | 'canvas'; world: { x: number; y: number }; client: { x: number; y: number } } | null>(null)
   const [lastShape, setLastShape] = useState<Tool>('rect')
   const [search, setSearch] = useState<string | null>(null), [hit, setHit] = useState(-1)
   const [capturing, setCapturing] = useState(false)
@@ -51,7 +51,9 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
   const latest = useRef({ buffer, props }), scene = useRef<GestureScene | null>(null)
   latest.current = { buffer, props }
   const gestures = useMemo(() => new CanvasGestures({ scene: () => scene.current, select: setSelected, camera: setCamera,
-    commit: ops => latest.current.buffer.commit(ops), graphic: (draft, node) => latest.current.buffer.graphic(draft, node), measure: work => latest.current.props.onFrameWork?.(work) }), [])
+    commit: ops => latest.current.buffer.commit(ops), graphic: (draft, node) => latest.current.buffer.graphic(draft, node), measure: work => latest.current.props.onFrameWork?.(work),
+    // One connector or shape, then back to the select tool with the new thing picked (Delete removes it); freehand keeps drawing.
+    drawn: (kind, id) => { if (kind !== 'path') { setSelected([id]); setTool('select') } } }), [])
   const active = useMemo(() => activeCanvasContent(canvas), [canvas])
   const byId = useMemo(() => new Map(active.nodes.map(n => [n.id, n])), [active])
   const index = useMemo(() => new SpatialIndex(active.nodes.map(n => ({ ...n, ...visualBounds(n) }))), [active])
@@ -65,6 +67,8 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
   const visibleIds = useMemo(() => new Set(visible.map(n => n.id)), [visible])
   const outlines = useMemo(() => clusters(visible.filter(n => n.type !== 'group')).filter(c => c.length > 1).map(c => ({ id: c[0].id, d: silhouettePath(c) })), [visible])
   const chosen = selected.flatMap(id => { const n = byId.get(id); return n ? [n] : [] })
+  // Node and connector ids share one namespace (the format rejects duplicates), so one selection holds both.
+  const chosenEdges = active.edges.filter(edge => selected.includes(edge.id))
   const marker = `canvas-arrow-${useId().replace(/:/g, '')}`
   const bindElement = useCallback((id: string, el: HTMLDivElement | null) => { if (el) elements.current.set(id, el); else elements.current.delete(id) }, [])
   const open = useCallback((node: CanvasNode) => {
@@ -103,9 +107,14 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
       if (latest.current.props.canvas.ready.id === boardId) setEditorError(error instanceof Error ? error.message : String(error))
     } finally { exiting.current = false; setClosing(false) }
   }
+  /** Delete: cards go to the bin; a connector is removed outright (undo brings it back). A connector between two
+   *  cards that are binned together is left alone: it is hidden with them and returns with them. */
   function recycle() {
-    if (!chosen.length) return
-    void commit([{ type: 'trash', ids: chosen.map(n => n.id), trash: { operationId: crypto.randomUUID(), deletedAt: new Date().toISOString() } }])
+    if (!chosen.length && !chosenEdges.length) return
+    const binned = new Set(chosen.map(n => n.id)), operations: CanvasOperation[] = []
+    if (chosen.length) operations.push({ type: 'trash', ids: [...binned], trash: { operationId: crypto.randomUUID(), deletedAt: new Date().toISOString() } })
+    for (const edge of chosenEdges) if (!binned.has(edge.fromNode) || !binned.has(edge.toNode)) operations.push({ type: 'deleteEdge', id: edge.id })
+    void commit(operations)
   }
   function arrange(kind: 'P' | 'L' | 'R') { void commit(layout(chosen, kind, 24, Math.floor(Math.random() * 4294967296))) }
   function shortcut(e: KeyboardEvent<HTMLDivElement>) {
@@ -115,7 +124,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     if (busy || trash || editing) return
     const mod = e.ctrlKey || e.metaKey, key = e.key.toLowerCase()
     if (e.key === ' ') { e.preventDefault(); gestures.space = true }
-    else if (mod && key === 'a') { e.preventDefault(); setSelected(active.nodes.map(n => n.id)) }
+    else if (mod && key === 'a') { e.preventDefault(); setSelected([...active.nodes.map(n => n.id), ...active.edges.map(edge => edge.id)]) }
     else if (mod && key === 'z') { e.preventDefault(); void (e.shiftKey ? buffer.redo() : buffer.undo()) }
     else if (mod && key === 'g') { e.preventDefault(); void commit(e.shiftKey ? ungroupOperations(canvas, selected) : groupOperations(chosen, crypto.randomUUID())) }
     else if (!mod && (e.key === 'Delete' || e.key === 'Backspace')) { e.preventDefault(); recycle() }
@@ -179,8 +188,9 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     setHit(next); setSelected([node.id])
     setCamera(c => ({ ...c, x: size.width / 2 - (frame.x + frame.width / 2) * c.zoom, y: size.height / 2 - (frame.y + frame.height / 2) * c.zoom }))
   }
-  const selectionBox = chosen.length && !editing && !trash && !menu && !capturing ? (() => {
-    const frames = chosen.map(cardFrame)
+  const selectionBox = (chosen.length || chosenEdges.length) && !editing && !trash && !menu && !capturing ? (() => {
+    // Connectors alone: the bar sits over the picked lines (their end points stand in for card frames).
+    const frames = chosen.length ? chosen.map(cardFrame) : chosenEdges.flatMap(edge => edgeEnds(byId.get(edge.fromNode)!, byId.get(edge.toNode)!, edge).map(point => ({ ...point, width: 0, height: 0 })))
     const left = Math.min(...frames.map(f => f.x)) * camera.zoom + camera.x, right = Math.max(...frames.map(f => f.x + f.width)) * camera.zoom + camera.x
     const top = Math.min(...frames.map(f => f.y)) * camera.zoom + camera.y
     return { left: Math.max(180, Math.min(size.width - 180, (left + right) / 2)), top: Math.max(68, top - 52) }
@@ -199,6 +209,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
   const contextItems = useRef<() => MenuEntry[]>(() => [])
   contextItems.current = () => {
     if (!menu) return []
+    if (menu.kind === 'edge') return [{ id: 'delete-edge', label: chosenEdges.length > 1 ? `删除 ${chosenEdges.length} 条连线` : '删除连线', icon: <Trash2 />, hint: 'Delete', danger: true, disabled: busy || composing, onSelect: recycle }]
     if (menu.kind === 'card') return [
       ...(props.onAddToDocument ? [{ id: 'add', label: '添加到文档', icon: <FilePlus2 />, disabled: composing || busy, onSelect: () => void addToDocument() }] : []),
       ...(props.onAskAI && chosen.length > 0 ? [{ id: 'ask', label: '问 AI', icon: <Sparkles />, disabled: busy || composing, onSelect: () => { void props.onAskAI!(chosen.map(n => n.id)).catch(fail) } }] : []),
@@ -221,7 +232,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
       anchor: { left: menu.client.x, top: menu.client.y, right: menu.client.x, bottom: menu.client.y },
       bounds: () => (host ?? document.body).getBoundingClientRect(),
       onClose: () => { setMenu(current => current === menu ? null : current); if (host?.isConnected) host.focus({ preventScroll: true }) },
-      render: close => <MenuList items={contextItems.current()} label={menu.kind === 'card' ? '选区菜单' : '新建'} onDone={close} />,
+      render: close => <MenuList items={contextItems.current()} label={menu.kind === 'card' ? '选区菜单' : menu.kind === 'edge' ? '连线菜单' : '新建'} onDone={close} />,
     })
     return () => closeFloat(CONTEXT_MENU)
   }, [menu])
@@ -240,7 +251,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     catch (error) { setCompositionError(error instanceof Error ? error.message : String(error)) }
     finally { setComposing(false) }
   }
-  return <div className="rn-canvas" data-canvas-surface data-capturing={capturing || undefined} tabIndex={0} ref={root} aria-label={canvas.ready.title || '画板'}
+  return <div className="rn-canvas" data-canvas-surface data-tool={tool} data-capturing={capturing || undefined} tabIndex={0} ref={root} aria-label={canvas.ready.title || '画板'}
     onDragStart={event => {
       const card = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-node-id]') : null
       const node = card?.dataset.nodeId ? byId.get(card.dataset.nodeId) : null
@@ -267,11 +278,14 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
       if (busy || trash || editing || (event.target instanceof Element && event.target.closest('[data-canvas-ui]'))) return
       event.preventDefault(); gestures.cancel()
       const card = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-node-id]') : null
+      const edge = card || !(event.target instanceof Element) ? undefined : event.target.closest('[data-edge-id]')?.getAttribute('data-edge-id') ?? undefined
       if (card?.dataset.nodeId && !selected.includes(card.dataset.nodeId)) setSelected([card.dataset.nodeId])
-      if (!card) setSelected([])
+      // A connector's menu acts on connectors only: keep a pure connector selection that holds it, else pick just it.
+      if (edge && !(selected.includes(edge) && !chosen.length)) setSelected([edge])
+      if (!card && !edge) setSelected([])
       const rect = event.currentTarget.getBoundingClientRect(), x = event.clientX - rect.left, y = event.clientY - rect.top
       setCompositionError('')
-      setMenu({ kind: card ? 'card' : 'canvas', world: screenToWorld({ x, y }, camera), client: { x: event.clientX, y: event.clientY } })
+      setMenu({ kind: card ? 'card' : edge ? 'edge' : 'canvas', world: screenToWorld({ x, y }, camera), client: { x: event.clientX, y: event.clientY } })
     }}
     onKeyDown={shortcut} onKeyUp={e => { if (e.key === ' ') gestures.space = false }}
     onFocus={() => commands.focus()} onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) gestures.cancel() }}
@@ -292,7 +306,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     {!trash && !capturing && <CanvasDock tool={tool} lastShape={lastShape} disabled={busy || !!editing} graphics={!!props.prepareGraphic}
       canUndo={buffer.canUndo} canRedo={buffer.canRedo} busy={busy} onTool={chooseTool} onCard={kind => placeCard(kind)}
       onUndo={() => void buffer.undo()} onRedo={() => void buffer.redo()} />}
-    {selectionBox && <SelectionBar left={selectionBox.left} top={selectionBox.top} count={chosen.length} busy={busy || composing}
+    {selectionBox && <SelectionBar left={selectionBox.left} top={selectionBox.top} count={chosen.length} edges={chosenEdges.length} busy={busy || composing}
       canGroup={chosen.length > 1} canUngroup={chosen.some(n => n.ready.groupId || n.type === 'group')}
       actions={{
         group: () => void commit(groupOperations(chosen, crypto.randomUUID())), ungroup: () => void commit(ungroupOperations(canvas, selected)),
@@ -307,7 +321,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     {busy && <div className="canvas-message" role="status">正在处理…</div>}
     {trash ? <section className="canvas-trash" data-canvas-ui aria-label="回收的卡片">
       <div className="canvas-trash-head"><h2>回收站 · {recycled.length}</h2>
-        <Button size="sm" disabled={busy || !recycled.length} onClick={() => void commit([{ type: 'restore', ids: recycled.map(n => n.id) }])}>全部恢复</Button>
+        <Button size="sm" disabled={busy || !recycled.length} onClick={() => void commit([{ type: 'restore', ids: recycled.map(n => n.id), edgeIds: canvas.edges.filter(e => e.ready?.trash).map(e => e.id) }])}>全部恢复</Button>
         <Button size="sm" variant="danger" disabled={busy || !recycled.length} onClick={emptyBin}>{confirmEmpty ? '确认清空' : '清空'}</Button></div>
       {!recycled.length && <EmptyState title="回收站是空的" />}
       {recycled.map(n => <article key={n.id}>{props.renderCard?.(n) ?? <span>{n.type === 'text' ? n.text : n.type === 'link' ? n.url : n.type === 'group' ? n.label : n.file}</span>}
@@ -315,9 +329,11 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
           <Button size="sm" variant="danger" disabled={busy} aria-label={`永久删除 ${n.id}`} onClick={() => void commit([{ type: 'purge', ids: [n.id] }])}>永久删除</Button></div></article>)}
     </section> : <div className="canvas-world" ref={world} style={{ transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.zoom})` }}>
       <svg className="canvas-clusters" aria-hidden="true">{outlines.map(o => <path key={o.id} d={o.d} />)}</svg>
-      <svg className="canvas-edges" aria-hidden="true"><defs><marker id={marker} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 Z" /></marker></defs>
-        {active.edges.map(e => { const from = byId.get(e.fromNode)!, to = byId.get(e.toNode)!; return <g key={e.id}>
-          <path ref={el => { if (el) edgeElements.current.set(e.id, { element: el, from, to, edge: e }); else edgeElements.current.delete(e.id) }} d={edgePath(from, to, e)} markerStart={e.fromEnd === 'arrow' ? `url(#${marker})` : undefined} markerEnd={e.toEnd !== 'none' ? `url(#${marker})` : undefined} />
+      <svg className="canvas-edges" aria-hidden="true"><defs><marker id={marker} viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="13" markerHeight="13" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 Z" /></marker></defs>
+        {active.edges.map(e => { const from = byId.get(e.fromNode)!, to = byId.get(e.toNode)!, d = edgePath(from, to, e); return <g key={e.id} data-edge-id={e.id} data-selected={selected.includes(e.id) || undefined}
+          ref={el => { if (el) edgeElements.current.set(e.id, { element: el, from, to, edge: e }); else edgeElements.current.delete(e.id) }}>
+          <path className="canvas-edge-line" d={d} markerStart={e.fromEnd === 'arrow' ? `url(#${marker})` : undefined} markerEnd={e.toEnd !== 'none' ? `url(#${marker})` : undefined} />
+          <path className="canvas-edge-hit" d={d} />
           {e.label && <text x={(from.x + to.x) / 2} y={(from.y + to.y) / 2}>{e.label}</text>}
         </g> })}
       </svg>
