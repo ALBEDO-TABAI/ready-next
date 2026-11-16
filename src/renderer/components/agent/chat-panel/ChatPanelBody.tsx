@@ -112,6 +112,8 @@ interface ChatPanelBodyProps extends Omit<TaskToolSnapshotProps, 'children' | 'c
   beginNewContextAvailable?: boolean
   onBeginNewContext?: () => void
   sendConsequence?: CodexActionGate['consequence']
+  /** Sends the last message again as an ordinary message; present when the set-aside turn was one plain message. */
+  onResendLastMessage?: () => void
   headUnavailable?: boolean
   onRefreshActionSurface?: () => void
   onDismissComposerNotice?: () => void
@@ -185,6 +187,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
     beginNewContextAvailable = false,
     onBeginNewContext,
     sendConsequence = null,
+    onResendLastMessage,
     headUnavailable = false,
     onRefreshActionSurface,
     onDismissComposerNotice,
@@ -400,11 +403,21 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
               </div>
             )}
             {sendConsequence && (
-              <div data-ready-send-consequence="true" role="note">
+              <div
+                data-ready-send-consequence="true"
+                role="note"
+                // The strip above the composer lets clicks through to the conversation; a note with a button takes them.
+                style={onResendLastMessage ? { pointerEvents: 'auto' } : undefined}
+              >
                 {sendConsequence.omittedItemCount === 1 ? '上一项' : `前面${sendConsequence.omittedItemCount}项`}
                 不会作为当前任务带入；如仍需要，请完整重述。
                 {sendConsequence.resourceReattachItemCount > 0
                   && `其中${sendConsequence.resourceReattachItemCount}项用到了当时的页面或附件，需要时请重新带上。`}
+                {onResendLastMessage && (
+                  <Button variant="secondary" onClick={onResendLastMessage} className="mt-2 w-full" style={{ fontSize: 12 }}>
+                    重新发送上一条
+                  </Button>
+                )}
               </div>
             )}
 

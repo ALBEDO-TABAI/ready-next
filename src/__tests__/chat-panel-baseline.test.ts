@@ -1251,6 +1251,7 @@ test('composer displays the Main consequence and submits that displayed head ref
     const note = container.querySelector('[data-ready-send-consequence="true"]')
     assert.match(note?.textContent || '', /前面2项不会作为当前任务带入/)
     assert.match(note?.textContent || '', /其中1项用到了当时的页面或附件，需要时请重新带上/)
+    assert.equal(note?.querySelector('button'), null, 'two set-aside items cannot be restated by resending one message')
     container.querySelector<HTMLButtonElement>('[data-ready-agent-send="true"]')!.click()
     await new Promise((resolve) => setTimeout(resolve, 0))
     assert.deepEqual(submitted, codexHeadActionAdmissionRef(head))
@@ -1269,5 +1270,58 @@ test('composer displays the Main consequence and submits that displayed head ref
     unmount()
     agentApi.listConversationScopes = originalList
     useAgent.setState({ sendMessage: originalSend, refreshCodexActionSurface: originalRefresh })
+  }
+})
+
+
+test('a single set-aside plain message can be sent again from the notice, through the ordinary send', async () => {
+  resetStores()
+  seedEmptyAgent()
+  const scopeId = 'scope-resend-ui'
+  const sessionId = 'session-resend-ui'
+  const scope = { id: scopeId, aliasGeneration: 1, messageVisibilityEpoch: 0, agent: 'butler',
+    activeAgentId: 'butler', handoffGeneration: 0, title: '重新发送', sourceKind: 'local' as const,
+    sourceId: 'app', threadKey: scopeId, meta: {}, createdAt: '2026-09-03T00:00:00Z',
+    updatedAt: '2026-09-03T00:00:00Z', lastMessageAt: null }
+  const head = makeScopeHeadActionProjection(scopeId, { uncommittedStructuredTail: [
+    { messageId: 'u1', digest: 'a'.repeat(64), policy: 'resource_restatement_required' as const },
+  ] })
+  const messages = [
+    { id: 'u1', type: 'user' as const, content: '明天广州天气怎么样', timestamp: 1 },
+    { id: 'a1', type: 'agent' as const, content: '本轮未能完成。', timestamp: 2, meta: { runId: 'run-1' } },
+  ]
+  const slice = { ...makeEmptySessionSlice(scopeId), aliasGeneration: 1, messages, scopeHeadActionProjection: head }
+  const agentApi = electronAPIStub.agent as Record<string, unknown>
+  const originalList = agentApi.listConversationScopes
+  agentApi.listConversationScopes = async () => ({ success: false })
+  const originalSend = useAgent.getState().sendMessage
+  const sent: Array<{ text: string; ref: unknown }> = []
+  useAgent.setState({ ...slice, currentScopeId: scopeId, currentScope: scope, scopes: [scope],
+    sessions: { [sessionId]: slice }, activeSessionId: sessionId, sessionId, sessionOrder: [sessionId],
+    sendMessage: async (text, options) => {
+      sent.push({ text, ref: options?.actionAdmissionRef })
+      return { success: true } as never
+    },
+  })
+  const { container, unmount } = mountChatPanel()
+  try {
+    const resend = () => container.querySelector<HTMLButtonElement>('[data-ready-send-consequence="true"] button')
+    assert.match(resend()?.textContent || '', /重新发送上一条/)
+    // A draft is never overwritten or sent in its place.
+    flushSync(() => useAgent.setState((state) => ({ inputValue: '写了一半',
+      sessions: { ...state.sessions, [sessionId]: { ...state.sessions[sessionId], inputValue: '写了一半' } } })))
+    resend()!.click()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    assert.deepEqual(sent, [])
+    assert.equal(useAgent.getState().inputValue, '写了一半')
+    flushSync(() => useAgent.setState((state) => ({ inputValue: '',
+      sessions: { ...state.sessions, [sessionId]: { ...state.sessions[sessionId], inputValue: '' } } })))
+    resend()!.click()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    assert.deepEqual(sent, [{ text: '明天广州天气怎么样', ref: codexHeadActionAdmissionRef(head) }])
+  } finally {
+    unmount()
+    agentApi.listConversationScopes = originalList
+    useAgent.setState({ sendMessage: originalSend })
   }
 })

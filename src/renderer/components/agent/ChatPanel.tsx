@@ -833,11 +833,11 @@ export default function ChatPanel({
     return false
   }, [compactCurrentSession, setComposerNoticeFor])
 
-  const handleSend = useCallback(async () => {
+  const handleSend = useCallback(async (resend?: string) => {
     const sendSessionId = activeSessionId
     if (!sendSessionId) return
     // Sending the context-compact skill on its own is the compaction itself, not an Agent turn that could not compact.
-    if (isStandaloneCompactionRequest(inputValue, attachments)) {
+    if (resend === undefined && isStandaloneCompactionRequest(inputValue, attachments)) {
       if (sendingSessionsRef.current.has(sendSessionId)) return
       sendingSessionsRef.current.add(sendSessionId)
       try {
@@ -864,7 +864,8 @@ export default function ChatPanel({
       return
     }
     if (sendingSessionsRef.current.has(sendSessionId)) return
-    const content = inputValue.trim()
+    // `resend` is the text of the last message when the person asks for it to be sent again; otherwise the draft.
+    const content = resend ?? inputValue.trim()
     if (!content && attachments.length === 0) return
     sendingSessionsRef.current.add(sendSessionId)
     setComposerNoticeFor(sendSessionId, null)
@@ -889,6 +890,26 @@ export default function ChatPanel({
     }
   }, [activeLifecycleSlice?.beginNewContextActionRef, activeSessionId, attachments,
     inputValue, sendMessage, headProjection, setComposerNoticeFor, runCompaction, setInputValue, clearAttachments])
+
+  // A failed turn is set aside and must be restated. When that turn was one plain message, restating is sending
+  // the same words again through the ordinary send; exact Retry stays reserved for turns with no environment.
+  const resendableText = useMemo(() => {
+    if (headProjection?.actions.send_new_message.consequence?.omittedItemCount !== 1) return null
+    const lastUser = [...messages].reverse().find((message) => message.type === 'user')
+    const text = lastUser?.content?.trim()
+    return text && !lastUser?.attachments?.length ? text : null
+  }, [headProjection, messages])
+  const handleResendLastMessage = useCallback(() => {
+    if (!resendableText || !activeSessionId) return
+    if (inputValue.trim() || attachments.length > 0) {
+      setComposerNoticeFor(activeSessionId, {
+        message: '输入框里还有内容。请先发送或清空它，再重新发送上一条。',
+        errorKind: 'explicit_retry_control_invalid',
+      })
+      return
+    }
+    void handleSend(resendableText)
+  }, [activeSessionId, attachments.length, handleSend, inputValue, resendableText, setComposerNoticeFor])
 
   const handleRetryProductTurn = useCallback(async (predecessorRunId: string) => {
     const sendSessionId = activeSessionId
@@ -1330,6 +1351,7 @@ export default function ChatPanel({
           }))
       }}
       sendConsequence={headProjection?.actions.send_new_message.consequence ?? null}
+      onResendLastMessage={resendableText ? handleResendLastMessage : undefined}
       headUnavailable={Boolean(currentScopeId && currentScope && !headProjection)}
       onRefreshActionSurface={() => {
         if (currentScopeId) void useAgent.getState().refreshCodexActionSurface(currentScopeId)

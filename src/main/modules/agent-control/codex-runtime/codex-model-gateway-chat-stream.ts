@@ -8,6 +8,7 @@ import {
   type JsonObject,
   carriesBearerCredential,
   refusedToolCallName,
+  CodexModelGatewayError,
 } from './codex-model-gateway-common'
 import {
   type CodexModelGatewayResponseEvidence,
@@ -533,9 +534,9 @@ export async function streamChatAsResponses(input: {
       })
       if (refusedName) refusedNames.set(state.id, refusedName)
     } catch (error) {
-      // silent-catch: unparseable tool arguments are recorded and sent downstream as response.failed via fail()
+      // silent-catch: unparseable tool arguments, or a call on a turn that offers no tools, are recorded and sent downstream as response.failed via fail()
       return void fail(
-        error instanceof CodexModelGatewayChatError
+        error instanceof CodexModelGatewayChatError || error instanceof CodexModelGatewayError
           ? error.code
           : 'gateway_chat_tool_arguments_json_invalid',
       )
