@@ -3,7 +3,7 @@ import { isZaiResponsesConfig, zaiReasoningEffort } from '../../../../shared/ai-
 import { redactPriorReadyMemoryHistory } from './codex-memory-history-redaction'
 import { responsesRequestToChat } from './codex-model-gateway-chat'
 import { streamChatAsResponses } from './codex-model-gateway-chat-stream'
-import { CodexModelGatewayError, type JsonObject } from './codex-model-gateway-common'
+import { CodexModelGatewayError, isRecord, type JsonObject } from './codex-model-gateway-common'
 import {
   type CodexModelGatewayFailureEvidence,
   type CodexModelGatewayResponseEvidence,
@@ -500,6 +500,7 @@ export class CodexModelGateway {
           })
         : {
             ...providerRequestBody,
+            ...upstreamClientMetadata(providerRequestBody, isChatGptOAuthResponsesSnapshot(binding.snapshot)),
             model: binding.snapshot.model,
             ...(binding.snapshot.maxOutputTokens
               ? { max_output_tokens: binding.snapshot.maxOutputTokens }
@@ -681,6 +682,7 @@ export class CodexModelGateway {
           expectedModel: binding.snapshot.model,
           normalizeChatGptOAuth: isChatGptOAuthResponsesSnapshot(binding.snapshot),
           normalizeZai: binding.snapshot.wireApi === 'responses' && isZaiResponsesConfig({ ...binding.snapshot, wireApi: 'responses' }),
+          normalizeResponsesApi: binding.snapshot.agentProtocol !== 'anthropic' && binding.snapshot.wireApi === 'responses',
           inferMessagePhase: binding.snapshot.agentProtocol === 'anthropic' || (binding.snapshot.wireApi === 'responses' && isZaiResponsesConfig({ ...binding.snapshot, wireApi: 'responses' })),
           credential,
           abort: () => abortController.abort(),
@@ -734,6 +736,25 @@ export class CodexModelGateway {
       response.off('close', abortForResponse)
     }
   }
+}
+
+/**
+ * `client_metadata` is the Codex client's own field for the ChatGPT Codex backend. That backend gets it without
+ * the keys Ready adds for its own checks (run id and contract digests); every other Responses provider gets none
+ * of it — it is not part of the public API and carries the installation and thread ids.
+ */
+export function upstreamClientMetadata(body: JsonObject, codexBackend: boolean): { client_metadata: JsonObject | undefined } {
+  if (!codexBackend || !isRecord(body.client_metadata)) return { client_metadata: undefined }
+  const outer = { ...body.client_metadata }
+  const raw = outer['x-codex-turn-metadata']
+  if (typeof raw === 'string') {
+    const inner = JSON.parse(raw) as JsonObject
+    for (const key of ['readyRunId', 'toolSurfaceDigest', 'turnContractDigest', 'upstreamProfileSnapshotDigest']) {
+      delete inner[key]
+    }
+    outer['x-codex-turn-metadata'] = JSON.stringify(inner)
+  }
+  return { client_metadata: outer }
 }
 
 export type {

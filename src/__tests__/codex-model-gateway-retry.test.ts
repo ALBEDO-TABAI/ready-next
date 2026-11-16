@@ -357,6 +357,42 @@ test('a 429 that reports a spent quota is answered once; a plain rate limit is s
   }
 })
 
+test('client metadata stays on this machine for ordinary Responses providers; the Codex backend gets it without Ready keys', async () => {
+  let forwarded: Record<string, unknown> | null = null
+  const upstream = createServer(async (request, response) => {
+    const chunks: Buffer[] = []
+    for await (const chunk of request) chunks.push(Buffer.from(chunk))
+    forwarded = JSON.parse(Buffer.concat(chunks).toString())
+    response.writeHead(400, { 'content-type': 'application/json' })
+    response.end('{"error":{"code":"stop","type":"invalid_request_error","message":"stop"}}')
+  })
+  let sent: Record<string, unknown> = {}
+  await withGateway({
+    wireApi: 'responses',
+    upstream,
+    async run(url, body) {
+      sent = body
+      await callGateway(url, body)
+    },
+  })
+  assert.ok(forwarded, 'the request reached the provider')
+  assert.equal('client_metadata' in (forwarded as Record<string, unknown>), false)
+  assert.equal((forwarded as Record<string, unknown>).prompt_cache_key, sent.prompt_cache_key)
+
+  const { upstreamClientMetadata } = await import('../main/modules/agent-control/codex-runtime/codex-model-gateway')
+  const kept = upstreamClientMetadata(sent, true).client_metadata as Record<string, string>
+  const original = sent.client_metadata as Record<string, string>
+  assert.deepEqual(Object.keys(kept).sort(), Object.keys(original).sort())
+  const inner = JSON.parse(kept['x-codex-turn-metadata'])
+  const originalInner = JSON.parse(original['x-codex-turn-metadata'])
+  for (const key of ['readyRunId', 'toolSurfaceDigest', 'turnContractDigest', 'upstreamProfileSnapshotDigest']) {
+    assert.ok(key in originalInner, key)
+    assert.equal(key in inner, false, key)
+  }
+  assert.equal(inner.thread_id, originalInner.thread_id)
+  assert.ok('x-codex-turn-metadata' in original && JSON.parse(original['x-codex-turn-metadata']).readyRunId, 'the request itself is untouched')
+})
+
 test('HTTP retryability follows the shared provider status authority', async () => {
   for (const status of [408, 425]) {
     let calls = 0

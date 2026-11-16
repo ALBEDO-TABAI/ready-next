@@ -1460,8 +1460,9 @@ test('Chat streaming rejects missing or mutated tool identity and emits every ar
       usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
     },
   ])
-  assert.match(duplicateUsage, /gateway_chat_usage_duplicate/)
-  assert.doesNotMatch(duplicateUsage, /response\.completed/)
+  // Running usage on every chunk: the last report is the turn's usage.
+  assert.match(duplicateUsage, /response\.completed/)
+  assert.doesNotMatch(duplicateUsage, /gateway_chat_usage/)
   const requestedLogprobs = await convertChat([{
     choices: [{ index: 0, delta: {}, logprobs: { content: [] }, finish_reason: 'stop' }],
   }])
@@ -1494,8 +1495,9 @@ test('Chat streaming rejects missing or mutated tool identity and emits every ar
     credential: 'secret',
     abort() {},
   })
-  assert.match(missingUsage, /gateway_chat_usage_missing/)
-  assert.doesNotMatch(missingUsage, /response\.completed/)
+  // A provider that sends no usage: the answer stands and the count is reported as zero.
+  assert.match(missingUsage, /response\.completed/)
+  assert.match(missingUsage, /"total_tokens":0/)
 
   let safeStreamError = ''
   const encoder = new TextEncoder()
@@ -1797,8 +1799,9 @@ test('Chat streaming maps explicit summaries but rejects raw reasoning fields', 
     { choices: [{ index: 0, delta: { reasoning_content: 'hidden-reasoning' } }] },
     { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] },
   ])
-  assert.match(hidden, /gateway_chat_raw_reasoning_unsupported/)
-  assert.doesNotMatch(hidden, /response\.completed|hidden-reasoning/)
+  // Raw reasoning is dropped: the turn completes and the reasoning text never crosses.
+  assert.match(hidden, /response\.completed/)
+  assert.doesNotMatch(hidden, /hidden-reasoning|reasoning_summary_text/)
 
   const minimax = createCodexUpstreamProfileSnapshot({
     profileId: 'minimax-fixture',
@@ -1813,8 +1816,8 @@ test('Chat streaming maps explicit summaries but rejects raw reasoning fields', 
     { choices: [{ index: 0, delta: { content: 'answer' } }] },
     { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] },
   ], ['ready_read_probe'], { type: 'object' }, minimax)
-  assert.match(patched, /gateway_chat_raw_reasoning_unsupported/)
-  assert.doesNotMatch(patched, /response\.completed|patched-reasoning/)
+  assert.match(patched, /response\.completed/)
+  assert.doesNotMatch(patched, /patched-reasoning/)
 
   const leakedCredential = await convertChat([
     { choices: [{ index: 0, delta: { content: 'secret' } }] },
@@ -2870,9 +2873,10 @@ test('native Responses rejects model/status reroutes, redacts secrets and withho
 
     for (const secretMode of ['created-secret', 'terminal-secret'] as const) {
       mode = secretMode
-      const unknownSecret = await call()
-      assert.match(unknownSecret.body, /gateway_response_shape_invalid/)
-      assert.doesNotMatch(unknownSecret.body, /response\.completed|upstream-secret/)
+      // `metadata` is the request echoed back by the public API: it is dropped, so what it carries never crosses.
+      const echoedSecret = await call()
+      assert.match(echoedSecret.body, /response\.completed/)
+      assert.doesNotMatch(echoedSecret.body, /upstream-secret|leak/)
     }
 
     mode = 'unknown-extension'
@@ -3772,4 +3776,67 @@ test('a long answer whose chunks all carry null usage and finish_reason is not a
   ])
   assert.doesNotMatch(long, /gateway_chat_event_limit_exceeded/)
   assert.match(long, /response\.completed/)
+})
+
+test('chat-completions dialects pass: provider annotations, extra usage counters and raw reasoning are dropped', async () => {
+  const dialect = await convertChat([
+    { provider: 'OpenRouter', x_groq: { id: 'g' }, prompt_filter_results: [{ prompt_index: 0 }], obfuscation: 'pad',
+      choices: [{ index: 0, delta: { role: 'assistant', reasoning: 'raw-thought-1', reasoning_content: 'raw-thought-2' },
+        native_finish_reason: null, content_filter_results: {}, stop_reason: null }] },
+    { choices: [{ index: 0, delta: { content: 'visible answer', additional_kwargs: { reasoning_content: 'raw-thought-3' } } }] },
+    { choices: [{ index: 0, delta: {}, finish_reason: 'stop', native_finish_reason: 'stop', stop_reason: null }] },
+    { choices: [], usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5, prompt_cache_hit_tokens: 1,
+      prompt_cache_miss_tokens: 2, prompt_tokens_details: { cached_tokens: 1, cache_write_tokens: 0 },
+      completion_tokens_details: { reasoning_tokens: 1, image_tokens: 0 } } },
+  ])
+  assert.match(dialect, /response\.completed/)
+  assert.match(dialect, /visible answer/)
+  assert.doesNotMatch(dialect, /raw-thought|OpenRouter|gateway_chat/)
+  // A field that is not a known annotation is still refused.
+  const unknown = await convertChat([
+    { choices: [{ index: 0, delta: { content: 'x' }, run_command: 'must-not-forward' }] },
+    { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] },
+  ])
+  assert.match(unknown, /gateway_chat_choice_field_not_allowed/)
+  assert.doesNotMatch(unknown, /response\.completed|must-not-forward/)
+})
+
+test('a chat stream that closes after its finish reason is complete without [DONE]; one cut before it is not', async () => {
+  const snapshot = createCodexUpstreamProfileSnapshot({
+    profileId: 'no-done-fixture',
+    config: {
+      provider: 'openai-compatible', baseUrl: 'https://provider.example/v1', apiKey: 'secret',
+      model: 'qwen-model', agentProtocol: 'openai', wireApi: 'chat/completions', toolUseMode: 'on',
+    },
+    maxRetries: 0,
+  }).snapshot
+  const run = async (blocks: JsonObject[]): Promise<string> => {
+    let output = ''
+    const encoder = new TextEncoder()
+    await streamChatAsResponses({
+      body: new ReadableStream({
+        start(controller) {
+          for (const block of blocks) controller.enqueue(encoder.encode(`data: ${JSON.stringify({ model: snapshot.model, ...block })}\n\n`))
+          controller.close()
+        },
+      }),
+      write(chunk) { output += chunk },
+      allowedToolNames: new Set(['ready_read_probe']),
+      toolArgumentValidators: toolArgumentValidators(['ready_read_probe'], { type: 'object' }),
+      snapshot,
+      credential: 'secret',
+      abort() {},
+      admitToolResponse: async () => {},
+    })
+    return output
+  }
+  const finished = await run([
+    { choices: [{ index: 0, delta: { role: 'assistant', content: 'whole answer' } }] },
+    { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] },
+  ])
+  assert.match(finished, /response\.completed/)
+  assert.match(finished, /whole answer/)
+  const cut = await run([{ choices: [{ index: 0, delta: { role: 'assistant', content: 'half an ans' } }] }])
+  assert.match(cut, /gateway_chat_done_missing/)
+  assert.doesNotMatch(cut, /response\.completed/)
 })

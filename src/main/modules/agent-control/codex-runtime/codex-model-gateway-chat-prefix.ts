@@ -51,7 +51,56 @@ function patchChatPayload(input: {
     providerDefaultRequestPatcher: defaultPatchers.defaultRequestPatcher,
     providerDefaultResponsePatcher: defaultPatchers.defaultResponsePatcher,
   })
-  return isRecord(patched) ? patched : null
+  return isRecord(patched) ? dropChatDialectFields(patched) : null
+}
+
+const CHAT_USAGE_KEYS = ['prompt_tokens', 'completion_tokens', 'total_tokens', 'prompt_tokens_details', 'completion_tokens_details']
+const CHAT_USAGE_DETAIL_KEYS: Readonly<Record<string, readonly string[]>> = {
+  prompt_tokens_details: ['cached_tokens', 'audio_tokens'],
+  completion_tokens_details: ['reasoning_tokens', 'audio_tokens', 'accepted_prediction_tokens', 'rejected_prediction_tokens'],
+}
+
+function keepKeys(value: JsonObject, keys: readonly string[]): JsonObject {
+  return Object.fromEntries(Object.entries(value).filter(([key]) => keys.includes(key)))
+}
+
+/**
+ * What chat-completions providers add around the answer without it being the answer: routing and moderation
+ * annotations (OpenRouter `provider` / `native_finish_reason`, Azure `*_filter_results`, Groq `x_groq`, vLLM
+ * `stop_reason`, OpenAI `obfuscation` padding), their own usage counters (DeepSeek `prompt_cache_hit_tokens`),
+ * and raw reasoning text. Raw reasoning is dropped, not refused: Ready shows only a reasoning summary and never
+ * returns raw reasoning to a provider, and refusing it failed every turn of a thinking model. Any other field
+ * Ready does not know stays in place for the checks below to refuse.
+ */
+function dropChatDialectFields(payload: JsonObject): JsonObject {
+  const result = { ...payload }
+  for (const key of ['provider', 'x_groq', 'prompt_filter_results', 'obfuscation']) delete result[key]
+  if (isRecord(result.usage)) {
+    const usage = keepKeys(result.usage, CHAT_USAGE_KEYS)
+    for (const [key, allowed] of Object.entries(CHAT_USAGE_DETAIL_KEYS)) {
+      if (isRecord(usage[key])) usage[key] = keepKeys(usage[key] as JsonObject, allowed)
+    }
+    result.usage = usage
+  }
+  if (Array.isArray(result.choices)) {
+    result.choices = result.choices.map((choice) => {
+      if (!isRecord(choice)) return choice
+      const kept = { ...choice }
+      for (const key of ['native_finish_reason', 'content_filter_results', 'stop_reason']) delete kept[key]
+      for (const key of ['delta', 'message'] as const) {
+        const body = kept[key]
+        if (!isRecord(body)) continue
+        const { reasoning: _reasoning, reasoning_content: _content, reasoning_details: _details, ...rest } = body
+        if (isRecord(rest.additional_kwargs)) {
+          const { reasoning_content: _nested, ...additional } = rest.additional_kwargs
+          rest.additional_kwargs = additional
+        }
+        kept[key] = rest
+      }
+      return kept
+    })
+  }
+  return result
 }
 
 export function inspectCodexChatPrefix(input: {

@@ -283,7 +283,7 @@ export async function streamChatAsResponses(input: {
         sawExpectedModel = true
         lastProgressAt = Date.now()
         if (payload.usage !== undefined && payload.usage !== null) {
-          if (usageSeen) return void fail('gateway_chat_usage_duplicate')
+          // Some providers report running usage on every chunk; the last report is the turn's usage.
           if (!isRecord(payload.usage)) return void fail('gateway_chat_usage_invalid')
           if (Object.keys(payload.usage).some((key) => ![
             'prompt_tokens', 'completion_tokens', 'total_tokens',
@@ -491,7 +491,9 @@ export async function streamChatAsResponses(input: {
     return void fail('gateway_chat_sse_utf8_invalid')
   }
   if (buffer.trim()) return void fail('gateway_chat_sse_truncated')
-  if (!sawDone) return void fail('gateway_chat_done_missing')
+  // A stream that closed cleanly after its finish_reason is complete: `[DONE]` is a convention some providers
+  // omit. One that closed before any finish_reason was cut off.
+  if (!sawDone && !finishReason) return void fail('gateway_chat_done_missing')
   if (!finishReason) return void fail('gateway_chat_finish_reason_missing')
   if (!sawExpectedModel) return void fail('gateway_upstream_model_missing')
   if (finishReason === 'tool_calls' && tools.size === 0) {
@@ -546,7 +548,11 @@ export async function streamChatAsResponses(input: {
   let rejectedPredictionTokens = 0
   try {
     if (Object.keys(usage).length === 0) {
-      return void fail('gateway_chat_usage_missing')
+      // Not every provider honours `stream_options.include_usage`. The answer is complete without the count, so
+      // the turn stands and its usage is reported as zero rather than invented.
+      inputTokens = 0
+      outputTokens = 0
+      totalTokens = 0
     } else {
       inputTokens = usageInteger(usage.prompt_tokens, 'gateway_chat_usage_invalid')
       outputTokens = usageInteger(usage.completion_tokens, 'gateway_chat_usage_invalid')

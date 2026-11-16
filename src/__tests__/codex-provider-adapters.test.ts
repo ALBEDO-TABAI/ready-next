@@ -104,6 +104,31 @@ test('Messages signed thinking survives native history and truncated tools never
 })
 
 
+test('an API-key Responses provider may echo the request and pad deltas; an unknown field is still refused', async () => {
+  const f = await providerGatewayFixture()
+  try {
+    // The shape the public Responses API sends: the full `response` object, empty logprobs, obfuscation padding.
+    const echo = { instructions: 'x', metadata: {}, parallel_tool_calls: true, reasoning: { effort: null, summary: null },
+      store: false, temperature: 1, text: { format: { type: 'text' } }, tool_choice: 'auto', tools: [], top_p: 1,
+      truncation: 'disabled', user: null, service_tier: 'auto', background: false, max_output_tokens: null,
+      previous_response_id: null, prompt_cache_key: 'k', safety_identifier: null, top_logprobs: 0 }
+    const official = reasoningEvents().map((event) => ({
+      ...event,
+      ...(event.type === 'response.reasoning_text.delta' ? { obfuscation: 'aB3xY9', logprobs: [] } : {}),
+      ...(event.response ? { response: { ...event.response, ...echo } } : {}),
+    }))
+    const text = await f.call(official)
+    assert.match(text, /event: response.completed/)
+    assert.doesNotMatch(text, /obfuscation|truncation|aB3xY9/)
+    const unknown = structuredClone(official)
+    unknown[0].response = { ...(unknown[0].response as object), execute: 'not metadata' }
+    assert.match(await f.call(unknown), /gateway_response_shape_invalid/)
+    const padded = structuredClone(official)
+    ;(padded[3] as Record<string, unknown>).obfuscation = { not: 'padding' }
+    assert.match(await f.call(padded), /gateway_response_event_shape_invalid/)
+  } finally { await f.close() }
+})
+
 test('Zai normalization removes only known inert fields, preserving unknown actions for rejection', async () => {
   const f = await providerGatewayFixture()
   try {

@@ -211,6 +211,7 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
   let toolExecutions = 0
   let toolResponseDeliveries = 0
   let midTurnProductRequests = 0
+  let validatedRequest: { readyRunId: string | null; requestKind: string } | null = null
   const upstream = createServer(async (request, response) => {
     upstreamSequence += 1
     upstreamPaths.push(request.url || '')
@@ -218,18 +219,14 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
     const upstreamBody = await readBody(request)
     upstreamBodies.push(upstreamBody)
     const upstreamText = JSON.stringify(upstreamBody)
-    const rawMetadata = (upstreamBody.client_metadata as Record<string, unknown> | undefined)
-      ?.['x-codex-turn-metadata']
-    let readyRunId = ''
-    if (typeof rawMetadata === 'string') {
-      const metadata = JSON.parse(rawMetadata) as Record<string, unknown>
-      if (typeof metadata.readyRunId === 'string') readyRunId = metadata.readyRunId
-    }
+    // The provider is never told which run a request belongs to (client metadata stays on this machine), so the
+    // fixture reads it from the gateway's own record of the request it has just validated.
+    assert.equal('client_metadata' in upstreamBody, false, 'client metadata does not reach an API-key provider')
+    const readyRunId = validatedRequest?.readyRunId ?? ''
     response.writeHead(200, { 'content-type': 'text/event-stream' })
     if (request.url === '/v1/responses' && readyRunId === 'run-native-tool-midturn') {
       // Two tool rounds report a nearly full context, so Codex compacts mid-turn before each next sampling.
-      const metadata = JSON.parse(String(rawMetadata)) as Record<string, unknown>
-      const compaction = metadata.request_kind === 'compaction'
+      const compaction = validatedRequest?.requestKind !== 'product'
       if (!compaction) midTurnProductRequests += 1
       const responseId = `midturn-response-${upstreamSequence}`
       const item = compaction
@@ -709,6 +706,7 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
       spawnBound: true,
       authority: new CodexDatabaseModelGatewayAuthority(gatewayRepository),
       credentials: { resolve() { return 'provider-secret-e3' } },
+      onValidatedRequest(capture) { validatedRequest = capture },
     })
     const gatewayAddress = await gateway.start()
     const state = prepareCodexRuntimeState({

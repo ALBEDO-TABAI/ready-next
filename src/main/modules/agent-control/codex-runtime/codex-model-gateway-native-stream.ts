@@ -19,7 +19,7 @@ import type { CodexModelGatewayToolResponseCall } from './codex-model-gateway-ty
 import { ProviderCredentialFilter } from './codex-provider-credential-filter'
 import { createProviderMessagePhaseNormalizer } from './codex-provider-message-phase'
 import { CodexProviderStreamPolicy, CodexProviderStreamPolicyError } from './codex-provider-stream-policy'
-import { normalizeZaiResponseEvent } from './codex-zai-responses'
+import { normalizeResponsesApiEvent, normalizeZaiResponseEvent } from './codex-zai-responses'
 import { randomBytes } from 'node:crypto'
 import type { ServerResponse } from 'node:http'
 
@@ -61,6 +61,8 @@ export async function streamNativeResponses(input: {
   toolArgumentValidators: ReadonlyMap<string, CodexToolArgumentValidator>
   expectedModel: string
   normalizeChatGptOAuth: boolean
+  /** An API-key provider on the Responses wire: drop what the public API echoes and pads (see normalizeResponsesApiEvent). */
+  normalizeResponsesApi?: boolean
   normalizeZai: boolean
   inferMessagePhase: boolean
   credential: string
@@ -196,7 +198,8 @@ export async function streamNativeResponses(input: {
               parsedEvent.payload,
               [...state.items.values()].flatMap((item) => item.doneItem ? [item.doneItem] : []),
             )
-          : input.normalizeZai ? normalizeZaiResponseEvent(parsedEvent.payload) : parsedEvent.payload
+          : input.normalizeZai ? normalizeZaiResponseEvent(parsedEvent.payload)
+            : input.normalizeResponsesApi ? normalizeResponsesApiEvent(parsedEvent.payload) : parsedEvent.payload
         for (const providerPayload of normalizePhase(normalizedPayload)) {
           const eventType = String(providerPayload.type)
           assertNativeProviderIdentitySafe(providerPayload, input.credential)
