@@ -86,9 +86,10 @@ const TRUSTED_ELECTRON_GYP = Object.freeze({
   fileBytes: 1575483,
 })
 
+// Command Line Tools 27.2 git 2.54.0 (Apple Git-157, com.apple.git, Apple Software Signing), re-pinned 2026-11-16.
 const TRUSTED_GIT = Object.freeze({
   path: '/Library/Developer/CommandLineTools/usr/bin/git',
-  sha256: '5cc7d22ef4228b5c5369f80bd16083ca4be50423bdb4c863ad559f7cc1268daf',
+  sha256: '5c5d6527325adcf024e229a9eb540cc0bdd21e1e23ce8f125cf3d8b3704e2659',
 })
 const TRUSTED_GIT_ENV = Object.freeze({
   GIT_CONFIG_GLOBAL: '/dev/null',
