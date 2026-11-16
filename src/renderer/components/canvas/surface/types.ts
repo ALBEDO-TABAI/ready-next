@@ -43,6 +43,8 @@ export interface CanvasSurfaceProps extends CanvasSurfaceMediaProps {
   acceptsDrop?: (types: readonly string[]) => boolean
   /** 导出 Markdown / PDF of the chosen cards, or the whole board when none are chosen. */
   onExport?: (kind: 'md' | 'pdf', nodeIds: string[]) => Promise<void>
+  /** 下载为 ZIP: the files themselves of the chosen cards (a sub-board card: its whole board as a folder), or of the whole board when none are chosen. */
+  onDownload?: (nodeIds: string[]) => Promise<void>
   /** Save the given window rectangle as a PNG (Main captures it); the surface hides its chrome and frames the cards first. */
   captureImage?: (rect: { x: number; y: number; width: number; height: number }, title: string) => Promise<void>
 }

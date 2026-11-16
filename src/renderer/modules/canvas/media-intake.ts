@@ -11,7 +11,7 @@ const MB = 1024 * 1024
 export const INTAKE_LIMITS: Record<IntakeKind, number> = { image: 20 * MB, audio: 50 * MB, video: 50 * MB, text: 1 * MB }
 const KIND_LABEL: Record<IntakeKind, string> = { image: '图片', audio: '音频', video: '视频', text: '文本' }
 const GAP = 24, PER_ROW = 4
-export const AUDIO_CARD = { width: 300, height: 132 }
+export const AUDIO_CARD = { width: 300, height: 96 }
 
 export function intakeKind(file: Pick<File, 'name' | 'type'>): IntakeKind | null {
   const type = file.type.toLowerCase(), name = file.name.toLowerCase()

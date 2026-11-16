@@ -26,6 +26,7 @@ import {
   planMarkdownBundle,
   sanitizeExportFolderName,
 } from '../export/markdown-bundle'
+import { writeZipFile } from '../export/zip-file'
 import type { IpcChannelGroup, IpcDisposeHandle } from './types'
 
 export interface ExportSaveDialogRequest {
@@ -134,12 +135,7 @@ async function handleExportMarkdownBundle(
       }
     }
 
-    const buffer = await zip.generateAsync({
-      type: 'nodebuffer',
-      compression: 'DEFLATE',
-      compressionOptions: { level: 6 },
-    })
-    await writeFile(dialogResult.filePath, buffer)
+    await writeZipFile(zip, dialogResult.filePath)
     return {
       success: true,
       path: dialogResult.filePath,

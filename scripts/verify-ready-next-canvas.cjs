@@ -162,7 +162,10 @@ async function main() {
     assert.ok(sound.length > 1000 && sound.subarray(0, 4).equals(Buffer.from('1a45dfa3', 'hex')), 'the recording is a WebM file in the vault')
     assert.equal(sha256(sound), voice.ready.media.sha256)
     const voiceCard = stage.locator(`.canvas-card[data-node-id="${voice.id}"]`)
-    assert.match(await voiceCard.locator('[data-untranscribed]').innerText(), /^未转写 · 还没有接入能转写音频的模型/)
+    // The board only records (2026-11-14): no transcript, and nothing said about one.
+    assert.doesNotMatch(await voiceCard.innerText(), /转写/)
+    assert.equal(await voiceCard.locator('.cv-audio__transcript, .cv-audio__note').count(), 0)
+    await voiceCard.screenshot({ path: path.join(evidence, '07c-voice-card-recording-only.png') })
     assert.match(await voiceCard.locator('.cv-audio__time').innerText(), /^0:0[1-9]$/)
     // It plays: the button turns to 暂停, and back to 播放 when the sound has run to its end.
     await voiceCard.getByRole('button', { name: '播放', exact: true }).click()
@@ -197,6 +200,148 @@ async function main() {
     await page.getByRole('menuitem', { name: '刷新预览', exact: true }).waitFor()
     await page.keyboard.press('Escape')
     await snapshot('08-media-search')
+
+    // M4 §11 (2026-11-14) — crop a picture, download files as a ZIP. Pointer actions go to a point where the card is on top.
+    const JSZip = require('jszip')
+    const fit = async () => { await stage.getByRole('button', { name: '适应内容', exact: true }).click(); await page.waitForTimeout(300) }
+    const pointOn = async id => {
+      let point = null
+      await poll(async () => {
+        point = await page.evaluate(id => {
+          const element = document.querySelector(`[data-workbench-mode-panel="document"] .rn-canvas[aria-label="媒体"] [data-node-id="${id}"]`)
+          if (!element) return null
+          const rect = element.getBoundingClientRect()
+          for (let i = 2; i < 9; i++) for (let j = 2; j < 9; j++) {
+            const x = rect.left + rect.width * i / 10, y = rect.top + rect.height * j / 10, top = document.elementFromPoint(x, y)
+            if (top && !top.closest('[data-canvas-ui]') && !top.closest('button,[role="slider"],video') && top.closest('[data-node-id]')?.dataset.nodeId === id) return { x, y }
+          }
+          return null
+        }, id)
+        return Boolean(point)
+      }, `card ${id} cannot be reached`)
+      return point
+    }
+    const nodeOf = id => read().nodes.find(node => node.id === id)
+    const dragFrom = async (locator, dx, dy) => {
+      const box = await locator.boundingBox(), x = box.x + box.width / 2, y = box.y + box.height / 2
+      await page.mouse.move(x, y); await page.mouse.down(); await page.mouse.move(x + dx / 2, y + dy / 2, { steps: 4 }); await page.mouse.move(x + dx, y + dy, { steps: 4 }); await page.mouse.up()
+    }
+    await fit()
+    // 12 — 裁剪 from the card's menu: the whole picture dimmed, a frame with grips; Enter applies.
+    const original = nodeOf(dropped.id), ratioOf = crop => (crop.w * 640) / (crop.h * 400)
+    let at = await pointOn(dropped.id)
+    await page.mouse.click(at.x, at.y, { button: 'right' })
+    await page.getByRole('menuitem', { name: '裁剪 K', exact: true }).waitFor()
+    await page.getByRole('menuitem', { name: '下载为 ZIP', exact: true }).waitFor()
+    await page.screenshot({ path: path.join(evidence, '12-card-menu-crop-zip.png') })
+    await page.getByRole('menuitem', { name: '裁剪 K', exact: true }).click()
+    const crop = stage.locator('.cv-crop')
+    await crop.waitFor()
+    assert.match(await stage.getByRole('toolbar', { name: '裁剪', exact: true }).innerText(), /640 × 400/)
+    const frameBox = await crop.locator('.cv-crop__frame').boundingBox()
+    await dragFrom(crop.locator('[data-crop-grip="se"]'), -frameBox.width * .45, -frameBox.height * .2)
+    await dragFrom(crop.locator('[data-crop-grip="l"]'), frameBox.width * .15, 0)
+    await page.waitForTimeout(150)
+    await page.screenshot({ path: path.join(evidence, '12a-crop-mode.png') })
+    assert.deepEqual(nodeOf(dropped.id), original, 'nothing is written while cropping')
+    await page.keyboard.press('Enter')
+    await poll(() => nodeOf(dropped.id).ready.appearance?.crop?.mode === 'rect', 'The crop was not written')
+    const cropped = nodeOf(dropped.id), kept = cropped.ready.appearance.crop
+    assert.ok(kept.x > .1 && kept.x < .2 && kept.y === 0 && kept.w > .35 && kept.w < .45 && kept.h > .75 && kept.h < .85, `crop ${JSON.stringify(kept)}`)
+    // The card took the crop's aspect ratio (integer geometry: within a pixel), the file and its bytes did not change.
+    assert.ok(Math.abs(cropped.width - cropped.height * ratioOf(kept)) <= 1, `card ${cropped.width}×${cropped.height} vs crop ratio ${ratioOf(kept)}`)
+    assert.ok(cropped.width < original.width && cropped.height < original.height)
+    assert.equal(cropped.file, original.file); assert.deepEqual(cropped.ready.media, original.ready.media)
+    assert.deepEqual(attachment(cropped), photo, 'cropping does not alter the attachment')
+    // What is shown: the kept part at one scale on both axes (the picture's own 640:400), filling the card.
+    const shown = async () => stage.locator(`.canvas-card[data-node-id="${dropped.id}"]`).evaluate(card => {
+      const image = card.querySelector('.cv-image__crop img').getBoundingClientRect(), box = card.getBoundingClientRect()
+      return { picture: image.width / image.height, left: (box.left - image.left) / image.width, top: (box.top - image.top) / image.height, right: (image.right - box.right) / image.width, covers: image.left <= box.left + .5 && image.right >= box.right - .5 && image.top <= box.top + .5 && image.bottom >= box.bottom - .5 }
+    })
+    await poll(async () => (await shown().catch(() => null))?.covers, 'The cropped picture does not fill its card')
+    let view = await shown()
+    assert.ok(Math.abs(view.picture - 640 / 400) < .01, `the picture is not stretched (${view.picture})`)
+    assert.ok(Math.abs(view.left - kept.x) < .01 && Math.abs(view.top - kept.y) < .01, `the card shows the kept part (${JSON.stringify(view)})`)
+    await page.mouse.click(8, 8) // away from the board: no hover grips in the picture of the result
+    await page.screenshot({ path: path.join(evidence, '12b-cropped-card.png') })
+    // A corner arc scales in proportion: the crop's aspect ratio is kept, the picture still unstretched.
+    at = await pointOn(dropped.id); await page.mouse.click(at.x, at.y)
+    await dragFrom(stage.locator(`.canvas-card[data-node-id="${dropped.id}"] [data-resize="se"]`), 36, 36)
+    await poll(() => nodeOf(dropped.id).width > cropped.width, 'The cropped card was not resized')
+    const resized = nodeOf(dropped.id)
+    assert.ok(Math.abs(resized.width - resized.height * ratioOf(kept)) <= 1.5, `resized ${resized.width}×${resized.height}`)
+    assert.deepEqual(resized.ready.appearance.crop, kept)
+    view = await shown(); assert.ok(Math.abs(view.picture - 640 / 400) < .01 && view.covers)
+    // Undo the resize, then the crop: one step each; the card is as it was dropped. Redo both for the download below.
+    const undo = stage.getByRole('button', { name: '撤销', exact: true }), redo = stage.getByRole('button', { name: '重做', exact: true })
+    await undo.click(); await poll(() => nodeOf(dropped.id).width === cropped.width, 'Undo did not take the resize back')
+    await undo.click(); await poll(() => !nodeOf(dropped.id).ready.appearance, 'Undo did not take the crop back')
+    assert.deepEqual(nodeOf(dropped.id), original, 'one undo restores the card and removes the crop')
+    await redo.click(); await poll(() => nodeOf(dropped.id).ready.appearance?.crop, 'Redo did not bring the crop back')
+    assert.deepEqual(nodeOf(dropped.id), cropped)
+    // Esc leaves crop mode without writing.
+    at = await pointOn(dropped.id); await page.mouse.click(at.x, at.y); await page.keyboard.press('k')
+    await crop.waitFor(); await dragFrom(crop.locator('[data-crop-grip="t"]'), 0, 20); await page.keyboard.press('Escape')
+    await crop.waitFor({ state: 'detached' })
+    await page.waitForTimeout(300); assert.deepEqual(nodeOf(dropped.id), cropped, 'Esc cancels the crop')
+    console.log('PASS 12-crop: crop mode, aspect ratio, bytes unchanged, proportional resize, undo / redo, Esc')
+
+    // 13 — 下载为 ZIP for the selection (everything picked): Main's save dialog is answered with a path in the throwaway directory.
+    const zipEntries = async file => { const zip = await JSZip.loadAsync(fs.readFileSync(file)); const out = {}
+      for (const [name, entry] of Object.entries(zip.files)) out[name] = entry.dir ? null : await entry.async('nodebuffer')
+      return out }
+    const answerSave = file => app.evaluate(({ dialog }, file) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: file }) }, file)
+    const zipPath = path.join(temporary, '媒体 选区.zip')
+    await answerSave(zipPath)
+    await stage.focus(); await page.keyboard.press('Meta+a')
+    at = await pointOn(dropped.id); await page.mouse.click(at.x, at.y, { button: 'right' })
+    await page.getByRole('menuitem', { name: '下载为 ZIP', exact: true }).click()
+    await poll(() => fs.existsSync(zipPath) && fs.statSync(zipPath).size > 0, 'The selection ZIP is missing')
+    await page.waitForTimeout(300)
+    const selection = await zipEntries(zipPath), recordingName = voice.ready.media.originalName
+    assert.deepEqual(Object.keys(selection).sort(), ['image.png', 'links.md', 'memo.md', 'memo.wav', recordingName, '田野 photo.png'].sort())
+    assert.deepEqual(selection['田野 photo.png'], photo, 'the cropped card still downloads its whole original file')
+    assert.deepEqual(selection['image.png'], pastedBytes); assert.deepEqual(selection['memo.wav'], memo); assert.deepEqual(selection[recordingName], sound)
+    assert.equal(selection['memo.md'].toString('utf8'), '# 选题会录音\n\n明天上午把封面第三稿发给印厂，再确认发行渠道。\n')
+    assert.equal(selection['links.md'].toString('utf8'), '# 链接\n\n- [注意力才是稀缺品](https://example.com/essay)\n')
+    await page.getByText(/已下载 ZIP（6 个文件）/).first().waitFor()
+    // 更多 names the two kinds apart: 导出 composes one document, 下载 hands over the files.
+    await stage.getByRole('button', { name: '更多', exact: true }).click()
+    const moreMenu = page.getByRole('menu', { name: '更多', exact: true })
+    await moreMenu.getByText('导出 · 合成一份', { exact: true }).waitFor(); await moreMenu.getByText('下载 · 各自的原文件', { exact: true }).waitFor()
+    await page.getByRole('menuitem', { name: '把选中的卡片导出为 Markdown', exact: true }).waitFor()
+    await page.getByRole('menuitem', { name: '把选中的卡片下载为 ZIP', exact: true }).waitFor()
+    await page.screenshot({ path: path.join(evidence, '13-more-menu-export-download.png') })
+    await page.keyboard.press('Escape')
+    // A sub-board downloads as a folder: collect the two pictures into one, then 下载为 ZIP on its card.
+    await page.mouse.click(8, 8); at = await pointOn(dropped.id); await page.mouse.click(at.x, at.y)
+    const other = await pointOn(pasted.id); await page.keyboard.down('Shift'); await page.mouse.click(other.x, other.y); await page.keyboard.up('Shift')
+    await page.mouse.click(other.x, other.y, { button: 'right' })
+    await page.getByRole('menuitem', { name: '收进子画板', exact: true }).click()
+    await poll(() => fs.existsSync(path.join(vault, '媒体', '子画板.canvas')) && read().nodes.some(node => node.ready.kind === 'subcanvas'), 'The pictures were not collected into a sub-board')
+    const folderCard = read().nodes.find(node => node.ready.kind === 'subcanvas')
+    await stage.locator(`[data-node-id="${folderCard.id}"] .canvas-subboard__count`, { hasText: '2 张卡片' }).waitFor()
+    const folderZip = path.join(temporary, '子画板.zip')
+    await answerSave(folderZip)
+    await fit(); at = await pointOn(folderCard.id); await page.mouse.click(at.x, at.y, { button: 'right' })
+    await page.getByRole('menuitem', { name: '下载为 ZIP', exact: true }).click()
+    await poll(() => fs.existsSync(folderZip) && fs.statSync(folderZip).size > 0, 'The sub-board ZIP is missing')
+    await page.waitForTimeout(300)
+    const folder = await zipEntries(folderZip)
+    assert.deepEqual(Object.keys(folder).sort(), ['子画板/', '子画板/image.png', '子画板/田野 photo.png'])
+    assert.deepEqual(folder['子画板/田野 photo.png'], photo); assert.deepEqual(folder['子画板/image.png'], pastedBytes)
+    // The whole board from 更多 (nothing picked): the sub-board is a folder beside the board's own files.
+    const boardZip = path.join(temporary, '媒体.zip')
+    await answerSave(boardZip)
+    await page.mouse.click(8, 8); await stage.focus(); await page.keyboard.press('Escape')
+    await stage.click({ position: { x: 12, y: Math.round(stageBox.height / 2) } })
+    await stage.getByRole('button', { name: '更多', exact: true }).click()
+    await page.getByRole('menuitem', { name: '下载为 ZIP', exact: true }).click()
+    await poll(() => fs.existsSync(boardZip) && fs.statSync(boardZip).size > 0, 'The board ZIP is missing')
+    await page.waitForTimeout(300)
+    assert.deepEqual(Object.keys(await zipEntries(boardZip)).sort(), ['links.md', 'memo.md', 'memo.wav', recordingName, '子画板/', '子画板/image.png', '子画板/田野 photo.png'].sort())
+    await snapshot('13a-zip-download')
+    console.log('PASS 13-zip: selection, sub-board folder and whole board; original bytes; nothing outside the throwaway directory')
   }
   try {
     await launch()

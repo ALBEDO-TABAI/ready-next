@@ -38,11 +38,11 @@ const audio = (id: string, media: object = {}, ready: object = {}): Extract<Canv
 const image = (id: string, x = 0, ready: object = {}): Extract<CanvasNode, { type: 'file' }> => ({ id, type: 'file', file: `X.assets/${id}.png`, x, y: 0, width: 200, height: 150, ready: { kind: 'image', preview: { title: id }, ...ready } })
 const link = (id: string, ready: object = {}): Extract<CanvasNode, { type: 'link' }> => ({ id, type: 'link', url: 'https://example.com/post', x: 0, y: 300, width: 260, height: 195, ready: { kind: 'link', ...ready } })
 
-test('the voice card shows its length, when it was taken, the transcript — or that there is none and why', async () => {
+test('the voice card shows its length and when it was taken; a transcript only when the card came with one', async () => {
   const ui = await mount()
   try {
     const stamp = '2026-11-14T06:36:00.000Z'
-    await ui.render(<AudioCard node={audio('memo', { durationMs: 42400 }, { preview: { title: '录音', fetchedAt: stamp } })} src="local-file:///v/X.assets/memo.webm" transcriptionAvailable={false} peaks={async () => [0, .5, 1]} />)
+    await ui.render(<AudioCard node={audio('memo', { durationMs: 42400 }, { preview: { title: '录音', fetchedAt: stamp } })} src="local-file:///v/X.assets/memo.webm" peaks={async () => [0, .5, 1]} />)
     await ui.settle()
     const card = document.querySelector('.cv-audio')!
     assert.equal(card.querySelector('.cv-audio__title')?.textContent, '录音')
@@ -50,17 +50,17 @@ test('the voice card shows its length, when it was taken, the transcript — or 
     assert.equal(card.querySelector('time')?.getAttribute('datetime'), stamp)
     assert.ok(ui.button('播放'), 'a play button')
     assert.equal(card.querySelectorAll('.cv-audio__wave[data-shape="peaks"] i').length, 3, 'the real peaks are drawn')
-    assert.match(card.querySelector('[data-untranscribed]')?.textContent ?? '', /^未转写 · 还没有接入能转写音频的模型/)
-    // Capability unknown or present: the card only says there is no transcript; it never claims one is coming.
-    await ui.render(<AudioCard node={audio('memo')} transcriptionAvailable peaks={async () => null} />)
+    // The board only records (2026-11-14): a recording is whole without a transcript and says nothing about one.
+    assert.doesNotMatch(card.textContent ?? '', /转写/)
+    assert.deepEqual([...card.children].map(child => child.className), ['cv-audio__head', 'cv-audio__player'])
+    await ui.render(<AudioCard node={audio('memo')} peaks={async () => null} />)
     await ui.settle()
-    assert.equal(document.querySelector('[data-untranscribed]')?.textContent, '未转写')
+    assert.doesNotMatch(document.querySelector('.cv-audio')?.textContent ?? '', /转写/)
     assert.equal(document.querySelector('.cv-audio__time')?.textContent, '--:--')
     assert.equal(document.querySelector('.cv-audio__wave')?.getAttribute('data-shape'), 'line')
     assert.equal(ui.button('播放')?.disabled, true, 'no file, nothing to play')
     await ui.render(<AudioCard node={audio('memo', { durationMs: 61000, transcript: '明天上午把封面第三稿发给印厂。' }, { sources: [{ uri: 'ready://fastcard/fc-1', capturedAt: stamp, method: 'fastcard' }] })} peaks={async () => null} />)
     assert.equal(document.querySelector('.cv-audio__transcript')?.textContent, '明天上午把封面第三稿发给印厂。')
-    assert.equal(document.querySelector('[data-untranscribed]'), null)
     assert.equal(document.querySelector('.cv-audio__time')?.textContent, '1:01')
     assert.equal(document.querySelector('.cv-audio time')?.getAttribute('datetime'), stamp, 'a FastCard recording keeps its capture time')
   } finally { await ui.close() }
@@ -101,6 +101,107 @@ test('the picture card covers its frame and honours a stored crop', async () => 
     assert.equal(picture.getAttribute('src'), 'local-file:///v/X.assets/pic.png'); assert.equal(picture.style.objectPosition, '10% 90%')
     await ui.render(<ImageCard node={image('pic')} />)
     assert.ok(document.querySelector('.cv-image.is-missing'))
+    // A rectangle crop: the picture sits in a box with the kept part's own shape (never stretched to the card's).
+    // Before the picture has loaded the card's shape stands in; once its size is known the box takes the part's ratio.
+    const cropped = image('pic', 0, { appearance: { crop: { mode: 'rect', x: .25, y: 0, w: .5, h: 1 } } })
+    await ui.render(<ImageCard node={cropped} src="local-file:///v/X.assets/pic.png" />)
+    const box = () => document.querySelector<HTMLElement>('.cv-image > .cv-image__crop')!
+    assert.equal(Number(box().style.getPropertyValue('--cv-crop-ratio')), 200 / 150)
+    const inner = box().querySelector('img')!
+    assert.deepEqual([inner.style.width, inner.style.height, inner.style.left, inner.style.top], ['200%', '100%', '-50%', '0%'])
+    for (const [key, value] of [['naturalWidth', 800], ['naturalHeight', 600], ['complete', true]] as const) Object.defineProperty(inner, key, { value, configurable: true })
+    await act(async () => inner.dispatchEvent(new ui.dom.window.Event('load')))
+    assert.equal(Number(box().style.getPropertyValue('--cv-crop-ratio')), 400 / 600, 'half the width of a 4:3 picture is 2:3')
+  } finally { await ui.close() }
+})
+
+test('crop mode on a picture card: menu, selection bar and K enter it; Enter or a press outside applies one undoable step; Esc cancels', async () => {
+  const ui = await mount()
+  try {
+    // The card's picture is "loaded": 800 × 600, shown in a 200 × 150 card.
+    for (const [key, value] of [['naturalWidth', 800], ['naturalHeight', 600], ['complete', true]] as const) Object.defineProperty(ui.dom.window.HTMLImageElement.prototype, key, { get: () => value, configurable: true })
+    let canvas: ReadyCanvas = { ready: { schemaVersion: 1, id: 'board' }, edges: [], nodes: [audio('memo'), image('pic', 400, { media: { mime: 'image/png', sha256: sha, originalName: '田野.png' } })] }
+    const batches: CanvasOperation[][] = [], downloads: string[][] = []
+    let handle: Parameters<NonNullable<CanvasSurfaceProps['surfaceApi']>>[0] = null
+    const resolveAsset = (path: string) => `local-file:///v/${path}`
+    const props: CanvasSurfaceProps = { canvas, onOperations: ops => { batches.push(ops); canvas = applyCanvasOperations(canvas, ops).canvas }, resolveAsset,
+      renderCard: node => node.type === 'file' && node.ready.kind === 'image' ? <ImageCard node={node} src={resolveAsset(node.file)} /> : undefined,
+      onDownload: async ids => { downloads.push(ids) }, surfaceApi: api => { handle = api } }
+    await ui.render(<><CanvasSurface {...props} /><FloatHost /></>)
+    const surface = document.querySelector<HTMLElement>('[data-canvas-surface]')!
+    surface.getBoundingClientRect = () => ({ left: 0, top: 0, right: 1000, bottom: 700, width: 1000, height: 700, x: 0, y: 0, toJSON() {} })
+    const pic = () => canvas.nodes.find(node => node.id === 'pic')!
+    const fire = async (target: Element, type: string, x = 0, y = 0) => { await act(async () => target.dispatchEvent(new ui.dom.window.MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0 }))) }
+    const key = async (name: string, more: object = {}) => { await act(async () => surface.dispatchEvent(new ui.dom.window.KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: name, ...more }))); await ui.settle() }
+    const menuFor = async (id: string) => { await fire(surface.querySelector(`[data-node-id="${id}"]`)!, 'contextmenu', 10, 20)
+      return [...document.querySelectorAll<HTMLElement>('[role="menu"] [role^="menuitem"]')] }
+    const labels = (items: HTMLElement[]) => items.map(item => item.querySelector('.rn-menu__label')?.textContent)
+    const drag = async (grip: string, dx: number, dy: number) => {
+      const overlay = surface.querySelector('.cv-crop')!
+      await fire(overlay.querySelector(`[data-crop-grip="${grip}"]`)!, 'pointerdown', 500, 300); await fire(overlay, 'pointermove', 500 + dx, 300 + dy); await fire(overlay, 'pointerup', 500 + dx, 300 + dy)
+    }
+    const frame = () => { const style = surface.querySelector<HTMLElement>('.cv-crop__frame')!.style; return [style.left, style.top, style.width, style.height] }
+
+    // Only a picture card offers 裁剪; every card offers 下载为 ZIP.
+    assert.deepEqual(labels(await menuFor('memo')).filter(label => label === '裁剪' || label === '下载为 ZIP'), ['下载为 ZIP'])
+    await act(async () => closeAllFloats())
+    const items = await menuFor('pic')
+    assert.deepEqual(labels(items).filter(label => label === '裁剪' || label === '下载为 ZIP'), ['裁剪', '下载为 ZIP'])
+    await act(async () => items.find(item => item.querySelector('.rn-menu__label')?.textContent === '裁剪')!.click()); await ui.settle()
+    // Crop mode: the card steps aside for the overlay, the bar shows the kept part in the picture's own pixels.
+    assert.ok(surface.querySelector('.cv-crop'), 'the crop overlay is up')
+    assert.equal(surface.querySelector('[data-node-id="pic"]')?.getAttribute('data-cropping'), 'true')
+    assert.equal(surface.querySelector('[role="toolbar"][aria-label="选区操作"]'), null, 'the selection bar gives way to the crop bar')
+    const bar = () => surface.querySelector('[role="toolbar"][aria-label="裁剪"]')
+    assert.match(bar()?.textContent ?? '', /800 × 600/); assert.equal(ui.button('还原整张图片')?.disabled, true)
+    assert.deepEqual(frame(), ['0px', '0px', '200px', '150px'])
+    await drag('se', -100, -50)
+    assert.deepEqual(frame(), ['0px', '0px', '100px', '100px']); assert.match(bar()?.textContent ?? '', /400 × 400/)
+    assert.equal(batches.length, 0, 'nothing is written while cropping')
+    // Other keys do not reach the board (Delete would bin the card).
+    await key('Delete'); assert.equal(pic().ready.trash, undefined); assert.ok(surface.querySelector('.cv-crop'))
+    await key('Enter')
+    assert.equal(surface.querySelector('.cv-crop'), null)
+    assert.deepEqual(batches, [[
+      { type: 'appearance', id: 'pic', appearance: { crop: { mode: 'rect', x: 0, y: 0, w: .5, h: .666667 } } },
+      { type: 'geometry', id: 'pic', geometry: { x: 400, y: 0, width: 100, height: 100 } },
+    ]], 'one batch: the crop and the card\'s new frame')
+    assert.deepEqual({ file: (pic() as { file: string }).file, media: pic().ready.media }, { file: 'X.assets/pic.png', media: { mime: 'image/png', sha256: sha, originalName: '田野.png' } }, 'the attachment is not touched')
+    assert.ok(Math.abs(Number(surface.querySelector<HTMLElement>('[data-node-id="pic"] .cv-image__crop')!.style.getPropertyValue('--cv-crop-ratio')) - 1) < 1e-3, 'the card shows the square part unstretched')
+    // One undo restores the frame and removes the crop.
+    surface.focus(); await key('z', { metaKey: true })
+    assert.deepEqual({ width: pic().width, height: pic().height, appearance: pic().ready.appearance }, { width: 200, height: 150, appearance: undefined })
+
+    // K on the one picked picture; Esc leaves everything as it was.
+    await act(async () => handle!.select(['pic'])); surface.focus()
+    await key('k'); assert.ok(surface.querySelector('.cv-crop'), 'K enters crop mode')
+    await drag('l', 60, 0); await key('Escape')
+    assert.equal(surface.querySelector('.cv-crop'), null); assert.equal(batches.length, 2, 'only the crop and its undo were written')
+    assert.equal(surface.querySelector('[data-node-id="pic"]')?.getAttribute('data-selected'), 'true', 'the card stays picked')
+    // K does nothing for a card that is not a picture.
+    await act(async () => handle!.select(['memo'])); await key('k'); assert.equal(surface.querySelector('.cv-crop'), null)
+
+    // The selection bar's 裁剪; slide the picture under a smaller frame; a press outside applies.
+    await act(async () => handle!.select(['pic'])); await ui.click('裁剪'); await ui.settle()
+    await drag('r', -100, 0); await drag('image', -40, 0); await drag('image', -999, 0)
+    await fire(surface, 'pointerdown', 900, 600); await ui.settle()
+    assert.equal(surface.querySelector('.cv-crop'), null)
+    assert.deepEqual(pic().ready.appearance, { crop: { mode: 'rect', x: .5, y: 0, w: .5, h: 1 } }, 'the right half: the picture was slid as far as it goes')
+    assert.deepEqual({ x: pic().x, width: pic().width, height: pic().height }, { x: 400, width: 100, height: 150 })
+    // Cropping again shows the whole picture around the frame; 还原整张图片 and 完成裁剪 give the whole picture back.
+    await ui.click('裁剪'); await ui.settle()
+    const ghost = surface.querySelector<HTMLElement>('.cv-crop__ghost')!.style
+    assert.deepEqual([ghost.left, ghost.top, ghost.width, ghost.height], ['-100px', '0px', '200px', '150px'])
+    await ui.click('还原整张图片'); await ui.click('完成裁剪'); await ui.settle()
+    assert.deepEqual({ x: pic().x, width: pic().width, height: pic().height, appearance: pic().ready.appearance }, { x: 300, width: 200, height: 150, appearance: undefined })
+
+    // 更多 keeps the two kinds of export apart, and downloads the chosen cards (or the whole board).
+    await ui.click('更多')
+    assert.deepEqual([...document.querySelectorAll('[role="menu"] > *')].map(item => item.querySelector('.rn-menu__label')?.textContent ?? item.textContent).filter(Boolean), ['下载 · 各自的原文件', '把选中的卡片下载为 ZIP'])
+    await act(async () => [...document.querySelectorAll<HTMLElement>('[role^="menuitem"]')].find(item => item.querySelector('.rn-menu__label')?.textContent === '把选中的卡片下载为 ZIP')!.click()); await ui.settle()
+    await act(async () => handle!.select([])); await ui.click('更多')
+    await act(async () => [...document.querySelectorAll<HTMLElement>('[role^="menuitem"]')].find(item => item.querySelector('.rn-menu__label')?.textContent === '下载为 ZIP')!.click()); await ui.settle()
+    assert.deepEqual(downloads, [['pic'], []])
   } finally { await ui.close() }
 })
 
@@ -191,7 +292,6 @@ test('the board document places dropped and pasted files, opens the slideshow an
     Object.assign(ui.dom.window, { electronAPI: { canvasMedia: {
       stage: async (input: { name: string }) => { staged.push(input.name); return input.name.endsWith('.exe') ? { ok: false, error: '不支持的文件类型' } : { ok: true, value: { token: `t${staged.length}`, kind: 'image', mime: 'image/png', sha256: sha, size: 10 } } },
       linkPreview: async (input: unknown) => { previewRequests.push(input); return { ok: true, value: { title: '新标题', image: 'X.assets/cover.png', fetchedAt: '2026-11-14T06:00:00.000Z' } } },
-      transcription: async () => ({ ok: true, value: { available: false } }),
     } } })
     const surfaceElement = document.createElement('div'); document.body.append(surfaceElement)
     const api: CanvasSurfaceApi = { commit: async ops => { commits.push(ops); return true }, centre: () => ({ x: 500, y: 300 }), select: ids => { selected.push(ids) }, element: () => surfaceElement }
@@ -202,7 +302,7 @@ test('the board document places dropped and pasted files, opens the slideshow an
     }
     await ui.render(<><Host /><FloatHost /></>); await ui.settle()
     media.surfaceApi(api)
-    assert.match(document.querySelector('[data-untranscribed]')?.textContent ?? '', /还没有接入能转写音频的模型/, 'the reason comes from Main')
+    assert.doesNotMatch(document.querySelector('.cv-audio')?.textContent ?? '', /转写/, 'a recording without a transcript says nothing about transcription')
     assert.ok(ui.button('录音'))
     // Drop: only a transfer with files is taken; the cards are written with their attachments and selected.
     assert.equal(media.acceptsDrop(['Files']), true); assert.equal(media.acceptsDrop(['text/plain']), false)

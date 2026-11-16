@@ -1390,6 +1390,7 @@ const documentPagesAPI: import('../shared/document-pages').DocumentPagesAPI = {
 
 const canvasAPI: import('../main/modules/board-engine/ipc').CanvasAPI = {
   exportImage: input => ipcRenderer.invoke('canvas:exportImage', input),
+  downloadZip: input => ipcRenderer.invoke('canvas:downloadZip', input),
   create: input => ipcRenderer.invoke('canvas:create', input),
   open: id => ipcRenderer.invoke('canvas:open', id),
   read: id => ipcRenderer.invoke('canvas:read', id),
@@ -1433,7 +1434,6 @@ const linkPreviewAPI = { get: (url: string) => ipcRenderer.invoke('link-preview:
 const canvasMediaAPI: import('../main/modules/board-engine/media-ipc').CanvasMediaAPI = {
   stage: input => ipcRenderer.invoke('canvasMedia:stage', input),
   linkPreview: input => ipcRenderer.invoke('canvasMedia:linkPreview', input),
-  transcription: () => ipcRenderer.invoke('canvasMedia:transcription'),
 }
 
 const documentDraftsAPI: import('../shared/document-drafts').DocumentDraftAPI = {

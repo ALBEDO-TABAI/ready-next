@@ -143,6 +143,18 @@ export default function CanvasDocument({ tab }: { tab: DocTab }) {
     if (result.success) showToast(kind === 'md' ? '已导出 Markdown' : '已导出 PDF')
     else if (!result.canceled) throw new Error(result.error || '导出失败')
   }
+  // 下载为 ZIP: the files themselves. Pending edits are saved first; Main reads the board from the library by identity.
+  const downloadBoard = async (ids: string[]) => {
+    await flushCanvasWrites()
+    const only = ids.length === 1 ? opened.canvas.nodes.find(node => node.id === ids[0]) : undefined
+    const boardTitle = opened.canvas.ready.title || opened.path.split('/').pop()!.replace(/\.canvas$/i, '')
+    const suggestedName = !ids.length ? boardTitle : only?.ready.kind === 'subcanvas' && only.type === 'file' ? only.file.split('/').pop()!.replace(/\.canvas$/i, '') : `${boardTitle} 选区`
+    const result = await api.canvas.downloadZip({ objectId: opened.objectId, ...(ids.length ? { nodeIds: ids } : {}), suggestedName })
+    if (result.success) {
+      const left = result.skipped + result.missing
+      showToast(left ? `已下载 ZIP（${result.fileCount} 个文件）；有 ${left} 张卡片没有打包：${[result.skipped && '引用别处内容的卡片不含文件', result.missing && '附件文件已不在资料库'].filter(Boolean).join('，')}` : `已下载 ZIP（${result.fileCount} 个文件）`, left ? { durationMs: 8000 } : undefined)
+    } else if (!('canceled' in result)) throw new Error(result.error)
+  }
   // PNG: the surface frames the cards and hides its chrome; Main captures that part of this window and asks where to save.
   const captureBoard = async (rect: { x: number; y: number; width: number; height: number }, title: string) => {
     const result = await api.canvas.exportImage({ rect, suggestedName: title })
@@ -166,7 +178,7 @@ export default function CanvasDocument({ tab }: { tab: DocTab }) {
       onNavigateAncestor={id => { const node = ancestors.find(item => item.objectId === id); if (node) openInCurrentTab(node.path) }}
       extraNewItems={(at, place) => [...boardNewItems({ at, place, pages, root, boardPath: opened.path, add: node => write([{ type: 'addNode', node }]), report: cause => setError(String(cause)) }), ...media.newItems(at)]}
       subBoards={subBoards.actions} moreItems={subBoards.moreItems} renderHostCard={subBoards.renderCard}
-      acceptsDrop={types => types.includes(READY_REF_MIME) || media.acceptsDrop(types)} onDropData={dropData} onExport={exportBoard} captureImage={captureBoard}
+      acceptsDrop={types => types.includes(READY_REF_MIME) || media.acceptsDrop(types)} onDropData={dropData} onExport={exportBoard} onDownload={downloadBoard} captureImage={captureBoard}
       onAskAI={nodeIds => addBoardSelectionToAgentInput({ title: opened.canvas.ready.title || '画板', objectId: opened.objectId }, nodeIds)} />
   </div>
 }

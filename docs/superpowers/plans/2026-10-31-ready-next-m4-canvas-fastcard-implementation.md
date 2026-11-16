@@ -189,7 +189,7 @@ M3 编辑器、SaveToPicker 归原负责人；M4 只消费公开接口。其他�
 
 - 已实现 9.1–9.4。Main：`board-engine/card-moves.ts`（移动与逆移动）、`sub-boards.ts`（`SubBoardCoordinator`：写入包装、回收/恢复、启动补做、卡片摘要）、`stillroom-entry.ts`；纯规划在 `shared/ready-canvas/card-move.ts`。IPC：`canvas:moveCards`、`canvas:undoMove`、`canvas:subBoards`、`canvas:importStillroom`，`canvas:write` 改经协调器。界面：`components/canvas/SubBoardCard.tsx`、`useSubBoards.tsx`、`surface/sub-board-actions.tsx`、`modules/canvas/folders.ts`、`drop-into-board.ts`；拖拽管线只加了 `dropTarget` / `dropInto` 两个回调。
 - 检查：`ready-canvas-card-move.test.ts` 6 项；原生 `ready-canvas-card-move-native.test.ts` 3 项、`ready-canvas-subboard-native.test.ts` 4 项（已登记 verify:native），其余画板原生测试与页面服务原生测试保持通过；隐藏窗口 `verify-ready-next-canvas.cjs` 全部步骤通过（新增 07–11）。该脚本现在固定以 `READY_START_HIDDEN=1` 启动。
-- 未做：选区 / 子画板单独下载 ZIP（现有“导出为 Markdown”已经把选区或整块画板连同附件打成 ZIP，没有另做一条）；子画板卡与草稿卡跨画板移动；跨画板移动的重做；子画板在卡片上改名（仍在侧栏改名）；Stillroom 自动保存 JSON 的媒体文件夹选择（只选一个文件，JSON 按不完整导入）。
+- 未做：~~选区 / 子画板单独下载 ZIP~~（2026-11-14 已做，见 §11.2）；子画板卡与草稿卡跨画板移动；跨画板移动的重做；子画板在卡片上改名（仍在侧栏改名）；Stillroom 自动保存 JSON 的媒体文件夹选择（只选一个文件，JSON 按不完整导入）。
 
 ## 10. 交互层对齐 Stillroom（2026-11-14，合同先于实现）
 
@@ -242,19 +242,18 @@ M3 编辑器、SaveToPicker 归原负责人；M4 只消费公开接口。其他�
 - **改动**：`interaction/` 新增 `adaptive.ts`（停靠判定、按比例落位、落位操作）、`preferences.ts`（本机偏好与镜头）、`settle.ts`（落位动画）、`clipboard.ts`、`navigate.ts`；`gestures.ts` 重写移动与缩放两种手势并加连线点选、滚轮判定；`surface/` 新增 `CanvasHandles.tsx`、`CanvasViewSettings.tsx`、`view-settings-float.tsx`，`CanvasSurface` / `CanvasCard` / `CanvasChrome` / `useCanvasBuffer` / `surface.css` 相应接线；`shared/ready-canvas/graphics.ts` 新增 `graphicAssetPath`；`app-shortcuts.ts` 登记 ⌘D、⌥⌘]、⌥⌘[、Enter。没有改 Main、preload、IPC 与 schema。
 - **测试**：`canvas-surface.test.tsx` 20 项（新增连线点选 / 删除 / 撤销、画完回到选择、停靠缩放与偏好、选区外廓成组缩放与悬停、键盘与剪贴板、镜头记忆与滚轮；按设计改了两处旧断言：框选现在连同被划过的连线一起选中，角手柄按比例缩放）；`canvas-surface-alignment.test.ts` 6 项纯函数；`ready-canvas-write-native.test.ts` 新增“界面预测的画板 = Main 保存的画板”（真实 `CanvasService`）。全部画板测试文件普通 Node 113 过 / 36 因 ABI 跳过，Electron 下原生 33 / 33。
 - **真实窗口**（隐藏窗口，HOME / TMPDIR / profile / 资料库全在临时目录）：`scripts/verify-ready-next-canvas.cjs` 新增并通过——画矩形 → 撤销 → 消失；画连线 → 移动卡片后连线仍在 → 点选 → Delete → 撤销回来（键盘、工具条按钮、右键“删除连线”各一遍）；磁吸对齐并出现参考线；停靠后相隔 12、与邻居等高、`fontScale` 同步、坐标全为整数，一次撤销复原；选区外廓的弧成组缩放并一次撤销；视图设置关掉磁吸后卡片不再吸附，偏好只在 `localStorage`、不在 `.canvas`。原有六步（含中文输入撤销、强退重启、旧格式转换）仍通过。脚本现在自己强制隐藏窗口并隔离 HOME / TMPDIR。
-- **没做 / 没验证**：① 落位动画、聚簇外廓淡入、手柄悬停这些动效只在隐藏窗口里截了静帧，手感要在可见窗口里确认。② 滚轮判定没有用真实触控板和带格鼠标验证，只有合成事件的测试。③ 系统“编辑”菜单与 ⌘Z 的先后只是推断（见 9.3）。④ 不写 `ready.dock`（见 9.1-6）。⑤ 文字卡放大后，进入编辑时块编辑器不跟随字号。⑥ 选区条仍固定在选区上方 52px，卡片贴着上方邻居（现在很常见）时会压住邻居。⑦ 旋转过的卡片按外接矩形参与吸附，不作为停靠对象的特殊处理。⑧ 千节点帧时间没有重测；`1000 mixed nodes` 测试仍通过（每帧只查邻近卡片）。⑨ Stillroom 的“摇一摇调层级”、⌥ 拖动复制、拖进文件夹、裁剪、旋转手柄没有搬（⌥ 拖动在 Ready 里是拖出引用；文件夹归子画板那一路）。
+- **没做 / 没验证**：① 落位动画、聚簇外廓淡入、手柄悬停这些动效只在隐藏窗口里截了静帧，手感要在可见窗口里确认。② 滚轮判定没有用真实触控板和带格鼠标验证，只有合成事件的测试。③ 系统“编辑”菜单与 ⌘Z 的先后只是推断（见 9.3）。④ 不写 `ready.dock`（见 9.1-6）。⑤ 文字卡放大后，进入编辑时块编辑器不跟随字号。⑥ 选区条仍固定在选区上方 52px，卡片贴着上方邻居（现在很常见）时会压住邻居。⑦ 旋转过的卡片按外接矩形参与吸附，不作为停靠对象的特殊处理。⑧ 千节点帧时间没有重测；`1000 mixed nodes` 测试仍通过（每帧只查邻近卡片）。⑨ Stillroom 的“摇一摇调层级”、⌥ 拖动复制、拖进文件夹、旋转手柄没有搬（裁剪已在 §11.1 补上）（⌥ 拖动在 Ready 里是拖出引用；文件夹归子画板那一路）。
 
 ## 11. 画板媒体合同与交付（2026-11-14）
 
 对照 Stillroom 补齐画板上的语音、文件与媒体卡。先定 Main 合同，再做界面。
 
-**Main 新增三条命令（`canvasMedia:*`，`board-engine/media-ipc.ts`；preload `electronAPI.canvasMedia`）**
+**Main 新增两条命令（`canvasMedia:*`，`board-engine/media-ipc.ts`；preload `electronAPI.canvasMedia`）**
 
 | 命令 | 输入 → 输出 | 约束 |
 | --- | --- | --- |
 | `canvasMedia:stage` | `{ name, mime, bytes: Uint8Array }` → `{ token, kind, mime, sha256, size }` | 只收字节，不收路径：Renderer 只能交出用户拖入、粘贴、选取或录下的内容，Main 不读其他位置。类型由 Main 按文件头判定（PNG/JPEG/GIF/WebP；WAV/MP3/FLAC/Ogg/M4A；MP4/MOV；WebM 与 MP4 容器按声明的 audio/ 或 video/ 归类），声明的 MIME 不作凭据；上限图片 20 MB、音频 50 MB、视频 50 MB；文件名只留字母数字并换成真实扩展名。须已配置资料库。暂存在内存：十分钟过期、合计不超过 256 MB、用一次即清 |
 | `canvasMedia:linkPreview` | `{ objectId, url }` → `ready.preview`（标题、摘要、站点、`image`、`fetchedAt`） | 画板位置由对象身份解析，Renderer 不传路径。抓取走共用 link-preview（防内网、大小与超时限制不变）；封面经 FastCard 媒体缓存校验后写入该画板的 `.assets`；封面取不到时只少封面 |
-| `canvasMedia:transcription` | → `{ available }` | 只有共享能力层声明音频且接了转写实现时为真；现在恒为假 |
 
 写入不另开通道：媒体卡用既有的 `importAttachment`（`canvas:write`），附件落在 `画板名.assets/<sha256>-<文件名>`，节点带 `media.{mime, sha256, originalName, durationMs}`，发布后按哈希回读。链接预览由 Renderer 用普通 `replaceNode` 写到卡片上。格式（§3）没有改动。
 
@@ -268,26 +267,20 @@ M3 编辑器、SaveToPicker 归原负责人；M4 只消费公开接口。其他�
 **界面**
 
 - 工具条多一个“录音”：按下开始，按钮变成计时加停止方块（这里用信号橙，表示进行中），再按一次在视野中央落一张语音卡；保存失败时留着这段录音可重试，离开画板则丢弃。
-- 语音卡：播放 / 暂停、按真实波峰画的波形（已播部分为墨色，不用信号橙；超过 12 MB 的音频不解码，改为一条进度线）、时长、取得时间、转写文字；没有转写时写“未转写”，并在确实没有可用模型时写明原因。整张画板共用一个播放器。
-- 图片卡铺满卡片（cover），按已存的裁切显示（position 与 rect 两种）；双击进入幻灯片：盖住画板区域的浮层（共用浮层宿主），← → 或空格按阅读顺序切换画板上的图片，Esc 或点空白处关闭。
+- 语音卡：播放 / 暂停、按真实波峰画的波形（已播部分为墨色，不用信号橙；超过 12 MB 的音频不解码，改为一条进度线）、时长、取得时间。画板只录音、不转写（见下）：没有转写的卡片不出现“未转写”或任何原因；卡片自带转写（从 Stillroom 导入、从快记转入）时照常显示并可搜索。整张画板共用一个播放器。新录音的卡片高 96（原为 132，那一行说明去掉后不再留空）。
+- 图片卡铺满卡片（cover），按已存的裁切显示（position 与 rect 两种，rect 的显示规则见 §11.1）；双击进入幻灯片：盖住画板区域的浮层（共用浮层宿主），← → 或空格按阅读顺序切换画板上的图片，Esc 或点空白处关闭。
 - 视频卡：标题条加 `preload="metadata"` 的首帧。
 - 链接卡有封面时上图下文；右键菜单有“刷新预览”。
 - 从 Finder 拖入、⌘V 粘贴带图片或文件的剪贴板、右键“新建 › 文件…”（系统选择框）。一次放入多个时按每行四个排开，一次写入。
 - 画板内搜索包含转写文字。
 
-**转写：需要用户决定，未实现**
+**转写：画板不提供（用户 2026-11-14 决定：“那就不转写，只录音先”）**
 
-现状：`quick-note-service` 的 `configuredAudioModel` 要求 `resolveAIConfigCapabilities` 的结果里有 `supportsAudio === true`，而共享能力层（`src/shared/ai-providers*`）没有这个字段，任何接入都不会声明；`AudioTranscriptionProvider` 也没有任何实现，`setupCanvasRuntime` 没有传入。所以不是“少一行声明”：声明了也没有代码去发请求。要接通需要先定：
-
-1. 用哪一类接口：专门的转写接口（OpenAI `/audio/transcriptions` 一类，直接收 WebM/Opus）还是多模态对话模型的音频输入（多数只收 WAV/MP3，录音得先转码）。这决定“支持音频”声明在哪些接入、哪些模型上，以及是否要单独的“转写模型”设置项（对话用的模型通常不是转写模型）。
-2. 费用与触发：录完自动转，还是卡片上点“转写”才转（现有服务的约定是不自动重试，因为会计费）。
-3. 画板上的录音不在 FastCard 暂存里，现有 `fastcard:transcribe` 按暂存条目工作；画板卡的转写要一条按“画板 + 节点”读附件、写回 `media.transcript` 的命令。
-
-在此之前卡片如实显示“未转写 · 还没有接入能转写音频的模型”。
+录音在画板上是一项完整的功能：录下、落卡、播放、波形、时长、时间。画板不提供转写入口，也不查询“能否转写”：`canvasMedia:transcription` 这条命令、preload 入口和卡片上的“未转写 · 还没有接入能转写音频的模型”已删除，没有保留开关或旧分支。`ready.media.transcript` 字段不变：带着转写来的卡片照常显示、参与画板内搜索、随 ZIP 下载。快记自己的转写服务（`quick-note-service`、`fastcard:transcribe`）未改；W4 §2.2“录音卡”里“如实显示未转写”说的是快记，不是画板。以后要在画板上接转写，需要重新定合同（接口类型、触发与费用、按“画板 + 节点”写回的命令）。
 
 **未做**
 
-- 图片的裁切（⌥ 拖动）与旋转（⇧ 角）手势：等交互层重写合并后再接，现在只按已存数据显示。
+- 图片的旋转（⇧ 角）手势：未做，只按已存数据显示。裁剪见 §11.1。
 - 图片圆角偏好、视频的独立封面文件与时长角标、富文本粘贴（HTML 转 Markdown）、跨画板搜索。
 - 文字与网址的 ⌘V 由交互层负责：`onPasteMedia(at, data)` 先处理剪贴板里的文件与图片并返回是否已处理。
 - 打包配置里没有 `NSMicrophoneUsageDescription`（快记的录音同样受影响），打包版首次录音前需补上；本次未改发布配置。
@@ -298,3 +291,34 @@ M3 编辑器、SaveToPicker 归原负责人；M4 只消费公开接口。其他�
 - 行为测试：`ready-canvas-media.test.ts`（类型判定、上限、命名、三条命令、放入文件、剪贴板、预览只问一次、波峰、幻灯片顺序、裁切）、`ready-canvas-media-cards.test.tsx`（语音卡、链接卡、图片卡、录音工具、画板表面的接入点、画板文档的拖入 / 粘贴 / 选取 / 幻灯片 / 刷新预览）。
 - 原生（已登记 `verify:native`）：`ready-canvas-media-native.test.ts`（暂存字节经句柄落成资料库里的附件并回读、令牌一次有效与过期、总量上限、伪造哈希被拒、预览封面写入 `.assets` 后随卡片保存）；`ready-fastcard-quick-note.test.ts` 增加“不凭模型名或 OpenAI 兼容判定可转写”。
 - 真实窗口（隐藏启动、临时 HOME / TMPDIR / profile 与测试资料库，录音用 Chromium 的假采集设备并静音播放，不联网）：`verify:ready-next-canvas` 新增“媒体”画板的步骤 `07a-recording`、`07-media-cards`、`07b-slideshow`、`08-media-search`：拖入图片后资料库里的附件与原字节一致；粘贴图片；录音落成带时长的语音卡、附件是 WebM、能播放到结束；幻灯片只盖住画板并可切换、关闭；搜索按转写命中；已存封面不再抓取；“文件…”与“刷新预览”在菜单里。原有链接卡步骤改用内网字面地址（Main 在连接前拒绝），整个脚本不再访问外网。浅色与深色各跑一遍通过。
+
+### 11.1 图片裁剪（2026-11-14，合同先于实现）
+
+Stillroom 是 ⌥ 拖动改 `position`；Ready 里 ⌥ 拖动是把卡片的引用拖出去，所以裁剪是一个明确的模式。
+
+- **数据**：不新增字段、操作或命令。裁剪结果是既有的 `appearance.crop`（`mode: 'rect'`，x / y / w / h 是整张图片的比例，保留 6 位小数）加卡片几何，一次提交 `[appearance, geometry]`，即一步撤销；Main 的校验是既有的 `AppearanceSchema`。附件文件不读不写，`file`、`media` 不变。取景框包含整张图片时不写 `crop`（`appearance` 因此为空时整项删除）。Stillroom 的 `position` 裁切只读：进入裁剪后不动就保持原样，动了就写成 `rect`。
+- **卡片取裁剪的比例**：应用时卡片的宽高取取景框的宽高（取整，位置是取景框所在的位置；旋转过的卡片按自己的轴换算，取景框在画板上不跳动），所以卡片比例 = 裁剪区域比例（整数几何，误差不超过 1px）。图片的显示比例不变：裁剪是“框变小”，不是“图变大”。
+- **显示不拉伸**：`rect` 裁切显示在一个“裁剪区域比例”的盒子里，盒子居中盖满卡片（CSS 容器单位，随实时缩放更新）。四角弧按比例缩放，比例保持；左右 / 上下边只改一个方向时，卡片比例与裁剪不同，盒子多裁掉一点而不是把图片拉变形。图片自身尺寸来自已加载的图片；未加载前用卡片比例代替（刚裁完时两者相同）。
+- **入口**：选中一张图片卡时——右键菜单“裁剪”、选区条“裁剪”、键 `K`（已登记 `canvas.crop`；`C` 是连线工具，`K` 取自“预览”的 ⌘K）。只对单张、附件可用的图片卡提供。
+- **模式内**：整张图片按当前比例铺开并压暗，取景框内是保留的部分；四角与四边的墨色手柄改取景框（不出图片范围，最小 36），在框内拖动是让图片在框下滑动（不露空）。选区条换成裁剪条：保留部分的原图像素尺寸、“还原整张图片”、取消、完成。Enter 或在裁剪范围外按下 = 应用；Esc = 取消；模式内其他按键不到画板，右键菜单不出现，滚轮缩放与平移照常。卡片在模式中被外部更新（几何、裁切、文件变化）、进回收站或画板切换时，模式直接退出、不写入。
+- **没做**：按住 ⇧ 锁定比例、预设比例、旋转；裁剪模式里没有方向键微调。
+
+### 11.2 下载为 ZIP（2026-11-14，合同先于实现）
+
+对照 Stillroom 的 `selectionZip`：交出文件本身，不是一份合成的文档。与“导出为 Markdown”的区别写在菜单里：“更多”菜单分两组——“导出 · 合成一份”（PNG / Markdown / PDF）与“下载 · 各自的原文件”（下载为 ZIP）。
+
+| 命令 | 输入 → 输出 | 约束 |
+| --- | --- | --- |
+| `canvas:downloadZip` | `{ objectId, nodeIds?, suggestedName? }` → `{ success: true, path, fileCount, skipped, missing }` / `{ success: false, canceled: true }` / `{ success: false, error }` | 画板由对象身份解析，Renderer 不传路径；`nodeIds` 缺省是整张画板。Main 从资料库读画板与其子画板（只读，句柄用完即还），只打开**所在画板自己的** `.assets` 里的附件（`AssetPathSchema` + 资料库内 + 不跟随符号链接）。保存位置只来自系统保存框（用户的选择即授权），默认目录是系统“下载”。先算清再问：没有可下载内容、超过 2000 个文件或合计 512 MB 时直接返回说明，不弹保存框、不写任何文件 |
+
+- **内容**（纯函数 `planBoardDownload`，`shared/ready-canvas/download.ts`）：图片 / 音频 / 视频卡 = 附件原文件，文件名取 `media.originalName`（没有则取标题），扩展名取附件真实扩展名，字节原样（ZIP 内不再压缩）；裁剪过的图片仍是整张原图。带转写的音频另附同名 `.md`。文字卡 / 便签 = `.md`，内容是存储的 Markdown 原文，文件名取第一行（去掉标题、列表等前缀，40 字内）。链接卡汇成该层的 `links.md`（标题 + 网址）。子画板卡 = 以子画板标题命名的文件夹，递归到嵌套子画板（至多 16 层，回到已读画板的环不跟随）。选中分组等于选中其成员。连线、图形、分组框、空文字卡不产生文件。同一层重名加“ (2)”。
+- **不打包并计数**：文档卡等引用别处内容的卡片、附件不在本画板 `.assets` 的媒体卡（`skipped`）；读不到的子画板（在回收站、已丢失）；附件文件已不在磁盘（`missing`）。完成提示里写明张数与原因。
+- **入口**：卡片右键菜单“下载为 ZIP”（当前选区；选的是子画板卡就是整块子画板）；“更多”菜单“把选中的卡片下载为 ZIP” / 无选区时“下载为 ZIP”（整张画板）。选区条上没有再加按钮（已经很挤）。
+- **写 ZIP 只有一处**：`document-engine/export/zip-file.ts` 的 `writeZipFile`（JSZip 流式写到所选路径），“导出为 Markdown”的压缩包改用它；没有第二套 ZIP 写入。Renderer 在调用前先等画板的未完成写入落盘。
+
+### 11.3 交付记录（2026-11-14，只录音 / 裁剪 / ZIP）
+
+- **改动**：只录音——`AudioCard`、`board-media`、`media-ipc`、`runtime`、preload 去掉转写可用性。裁剪——`modules/canvas/interaction/crop.ts`（纯函数）、`surface/CanvasCrop.tsx`、`CanvasChrome`（裁剪条）、`CanvasSurface` 接线、`cards/ImageCard.tsx`（不拉伸的显示）、`media.css`、`app-shortcuts.ts`。ZIP——`shared/ready-canvas/download.ts`、`board-engine/download.ts`、`export/zip-file.ts`、`CanvasAPI.downloadZip`（preload）、`CanvasDocument` 与 `CanvasSurface` 的入口。
+- **测试**：`ready-canvas-crop.test.ts` 4 项（铺放、手柄与滑动、一步撤销与比例、未改动 / 清空 / 旋转）；`ready-canvas-download.test.ts` 5 项（计划、选区、真实临时文件上的 `canvas:downloadZip`：字节、上限、取消、缺失与符号链接）；`ready-canvas-media-cards.test.tsx` 改“语音卡”一项、图片卡加 rect 显示、新增“裁剪模式”一项（菜单 / 选区条 / K、Enter / 外部按下 / Esc、撤销、更多菜单与下载）；`ready-canvas-media.test.ts` 断言媒体命令只剩两条。
+- **真实窗口**（隐藏、HOME / TMPDIR / profile / 资料库均在临时目录，保存框被替换为临时目录内的路径）：`verify-ready-next-canvas.cjs` 新增 `12-crop`（菜单进入 → 拖手柄 → Enter；卡片比例 = 裁剪比例、附件字节不变、图片不拉伸；角弧缩放后比例保持；撤销两步复原、重做；K 进入后 Esc 不写入）、`13-zip`（全选下载：条目与字节逐一比对，裁剪过的图片仍是原文件；“更多”菜单两组；收进子画板后下载子画板卡得到文件夹；无选区下载整张画板）、`07c`（没有转写的语音卡不出现“转写”二字）。
+- **没做 / 没验证**：见 §11.1、§11.2 的“没做”；裁剪手柄的手感、压暗程度只看了隐藏窗口的静帧；旋转卡片的裁剪只有纯函数测试，没有在窗口里验证；512 MB 级别的大包没有实测耗时（附件在 Main 里整读进内存后流式写出）；深色主题下的裁剪模式本次未单独截图。

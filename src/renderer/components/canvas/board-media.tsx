@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react'
 import { Paperclip, RefreshCw } from 'lucide-react'
 import type { CanvasOpen } from '../../../main/modules/board-engine/canvas-service'
 import type { CanvasCommand, CanvasNode, CanvasOperation } from '../../../shared/ready-canvas'
@@ -45,12 +45,6 @@ export function useBoardMedia({ opened, root, write, report, pick = pickFiles }:
   const api = window.electronAPI, objectId = opened?.objectId
   const surface = useRef<CanvasSurfaceApi | null>(null), latest = useRef({ opened, write, report })
   latest.current = { opened, write, report }
-  const [transcriptionAvailable, setTranscriptionAvailable] = useState<boolean>()
-  useEffect(() => {
-    let current = true
-    void api.canvasMedia.transcription().then(result => { if (current && result.ok) setTranscriptionAvailable(result.value.available) }, () => undefined)
-    return () => { current = false }
-  }, [api])
   // The board closed or changed: nothing keeps playing, no slideshow of another board stays up.
   useEffect(() => () => { stopAudio(); closeSlideshow() }, [objectId])
   const pointerDown = useRef(false)
@@ -103,7 +97,7 @@ export function useBoardMedia({ opened, root, write, report, pick = pickFiles }:
     if (node.type === 'link') return <LinkCard node={node} source={previews} resolveAsset={resolveAsset} onPreview={onPreview} />
     if (node.type !== 'file') return undefined
     const src = resolveAsset(node.file)
-    if (node.ready.kind === 'audio') return <AudioCard node={node} src={src} transcriptionAvailable={transcriptionAvailable} />
+    if (node.ready.kind === 'audio') return <AudioCard node={node} src={src} />
     if (node.ready.kind === 'image') return <ImageCard node={node} src={src} />
     if (node.ready.kind === 'video') return <VideoCard node={node} src={src} />
     return undefined

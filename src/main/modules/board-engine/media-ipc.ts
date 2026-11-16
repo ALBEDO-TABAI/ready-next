@@ -6,14 +6,13 @@ import { getLinkPreview, persistLinkPreview, type LinkPreview } from '../link-pr
 import { stagedAttachment, type StagedKind } from './attachment-staging'
 import type { CanvasService } from './canvas-service'
 
-// Media on a board (M4 2026-11-14 contract): staging bytes for an attachment, keeping a link's preview with its
-// cover in the board's attachments, and whether a recording can be transcribed at all.
+// Media on a board (M4 2026-11-14 contract): staging bytes for an attachment and keeping a link's preview with its
+// cover in the board's attachments. The board does not transcribe (M4 §11, decided 2026-11-14).
 
 export interface CanvasMediaDependencies {
   cache: FastCardMediaCache
   /** The shared link-preview service (private-network and size protections live there); replaced in tests. */
   preview?: (url: string) => Promise<LinkPreview>
-  transcriptionAvailable(): boolean
 }
 export type CanvasMediaResult<T> = { ok: true; value: T } | { ok: false; error: string }
 export interface StagedAttachmentReceipt { token: string; kind: StagedKind; mime: string; sha256: string; size: number }
@@ -22,7 +21,6 @@ export interface CanvasMediaAPI {
   stage(input: { name: string; mime: string; bytes: Uint8Array }): Promise<CanvasMediaResult<StagedAttachmentReceipt>>
   /** Fetches the page's preview and copies its cover into the board's attachments; the caller writes it to the card. */
   linkPreview(input: { objectId: string; url: string }): Promise<CanvasMediaResult<NonNullable<NodeReady['preview']>>>
-  transcription(): Promise<CanvasMediaResult<{ available: boolean }>>
 }
 
 export function registerCanvasMediaIPC(ipcMain: Pick<IpcMain, 'handle'>, resolve: () => Promise<{ canvas: CanvasService }>,
@@ -48,5 +46,4 @@ export function registerCanvasMediaIPC(ipcMain: Pick<IpcMain, 'handle'>, resolve
       return await persistLinkPreview({ ...preview, imageUrl: undefined }, dependencies.cache, target) ?? {}
     }
   }))
-  ipcMain.handle('canvasMedia:transcription', event => reply(event, () => ({ available: dependencies.transcriptionAvailable() })))
 }

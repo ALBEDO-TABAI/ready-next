@@ -26,10 +26,42 @@
   .rn-canvas .canvas-card[data-kind='image'] { background: var(--rn-fill-2); }
   .cv-image { position: relative; width: 100%; height: 100%; margin: 0; overflow: hidden; border-radius: inherit; }
   .rn-canvas .canvas-card .cv-image img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  /* A rectangle crop: a box with the kept part's own shape, covering the card from its middle; the picture is laid
+     out inside it so exactly that part fills the box. The card is the size container, so this follows a live resize. */
+  .cv-image { container-type: size; }
+  .cv-image__crop { position: absolute; left: 50%; top: 50%; width: max(100cqw, calc(100cqh * var(--cv-crop-ratio, 1))); height: max(100cqh, calc(100cqw / var(--cv-crop-ratio, 1))); transform: translate(-50%, -50%); }
   .cv-image.is-missing, .cv-video__missing { display: grid; place-items: center; color: var(--rn-ink-3); font-size: var(--rn-t-meta); }
   .cv-video { display: flex; flex-direction: column; width: 100%; height: 100%; margin: 0; overflow: hidden; border-radius: inherit; }
   .cv-video figcaption { flex: none; padding: 6px 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 var(--rn-t-meta)/var(--rn-lh-meta) var(--rn-font-ui); }
   .rn-canvas .canvas-card .cv-video video, .cv-video__missing { flex: 1; min-height: 0; width: 100%; height: auto; object-fit: cover; }
+
+  /* Crop mode (M4 §11): the whole picture dimmed on the stage, the kept part at full strength inside an ink frame.
+     Ink, not the signal colour: this is a selection. Sizes are divided by the zoom (--cv-crop-k) to stay the same on screen. */
+  .rn-canvas .canvas-card[data-cropping] { visibility: hidden; }
+  .cv-crop { position: absolute; z-index: 12; --cv-crop-k: 1; touch-action: none; }
+  .cv-crop :where(.cv-crop__ghost, .cv-crop__frame, .cv-crop__grips, .cv-crop__grip) { position: absolute; }
+  .cv-crop__ghost { background: var(--canvas-stage); box-shadow: 0 0 0 calc(.5px * var(--cv-crop-k)) var(--rn-hair-2); }
+  .cv-crop__ghost img { display: block; width: 100%; height: 100%; max-width: none; opacity: .3; }
+  .cv-crop__frame { overflow: hidden; cursor: grab; outline: calc(1.5px * var(--cv-crop-k)) solid var(--rn-ink); }
+  .cv-crop__frame:active { cursor: grabbing; }
+  .cv-crop__frame img { position: absolute; max-width: none; }
+  .cv-crop__grips { pointer-events: none; }
+  .cv-crop__grip { pointer-events: auto; --grip: calc(22px * var(--cv-crop-k)); --out: calc(-5px * var(--cv-crop-k)); --bar: calc(3.5px * var(--cv-crop-k)); }
+  .cv-crop__grip:is([data-crop-grip='nw'], [data-crop-grip='ne'], [data-crop-grip='sw'], [data-crop-grip='se']) { width: var(--grip); height: var(--grip); border: 0 solid var(--rn-ink); }
+  .cv-crop__grip[data-crop-grip='nw'] { left: var(--out); top: var(--out); border-width: var(--bar) 0 0 var(--bar); cursor: nwse-resize; }
+  .cv-crop__grip[data-crop-grip='ne'] { right: var(--out); top: var(--out); border-width: var(--bar) var(--bar) 0 0; cursor: nesw-resize; }
+  .cv-crop__grip[data-crop-grip='sw'] { left: var(--out); bottom: var(--out); border-width: 0 0 var(--bar) var(--bar); cursor: nesw-resize; }
+  .cv-crop__grip[data-crop-grip='se'] { right: var(--out); bottom: var(--out); border-width: 0 var(--bar) var(--bar) 0; cursor: nwse-resize; }
+  .cv-crop__grip:is([data-crop-grip='l'], [data-crop-grip='r']) { top: var(--grip); bottom: var(--grip); width: calc(14px * var(--cv-crop-k)); cursor: ew-resize; }
+  .cv-crop__grip:is([data-crop-grip='t'], [data-crop-grip='b']) { left: var(--grip); right: var(--grip); height: calc(14px * var(--cv-crop-k)); cursor: ns-resize; }
+  .cv-crop__grip[data-crop-grip='l'] { left: calc(-9px * var(--cv-crop-k)); }
+  .cv-crop__grip[data-crop-grip='r'] { right: calc(-9px * var(--cv-crop-k)); }
+  .cv-crop__grip[data-crop-grip='t'] { top: calc(-9px * var(--cv-crop-k)); }
+  .cv-crop__grip[data-crop-grip='b'] { bottom: calc(-9px * var(--cv-crop-k)); }
+  .cv-crop__grip:is([data-crop-grip='l'], [data-crop-grip='r'], [data-crop-grip='t'], [data-crop-grip='b'])::after { content: ''; position: absolute; left: 50%; top: 50%; background: var(--rn-ink); transform: translate(-50%, -50%); }
+  .cv-crop__grip:is([data-crop-grip='l'], [data-crop-grip='r'])::after { width: var(--bar); height: min(var(--grip), 100%); }
+  .cv-crop__grip:is([data-crop-grip='t'], [data-crop-grip='b'])::after { height: var(--bar); width: min(var(--grip), 100%); }
+  .rn-canvas .canvas-crop-size { margin-left: 4px; color: var(--rn-ink-2); font-family: var(--rn-font-mono); font-variant-numeric: tabular-nums; }
 
   /* A link card with the page's cover: the picture on top, the words under it. */
   .rn-canvas .canvas-card[data-kind='link'] .canvas-card-content:has(> .canvas-link-card[data-cover]) { padding: 0; }
