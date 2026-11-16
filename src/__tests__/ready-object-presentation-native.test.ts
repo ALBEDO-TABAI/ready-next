@@ -100,3 +100,41 @@ test('C2 page hides ready_id while source reading and saving retain it', async t
     assert.match(written, /ready_id: portable-note/)
   } finally { configureDocumentWriteService(null); f.close() }
 })
+
+test('resolving a path settles that path alone: a folder does not pull in what is under it, an unchanged file is not read again', async t => {
+  if (skipIfSqliteUnavailable(t, 'Object presentation')) return
+  const f = fixture()
+  try {
+    const folder = join(f.root, 'project'), cache = join(folder, 'target'), deps = join(folder, 'node_modules', 'pkg')
+    mkdirSync(join(folder, 'notes'), { recursive: true }); mkdirSync(cache, { recursive: true }); mkdirSync(deps, { recursive: true })
+    const note = join(folder, 'notes', 'a.md'); writeFileSync(note, '# a')
+    writeFileSync(join(cache, 'CACHEDIR.TAG'), 'Signature: 8a477f597d28d172789f06886806bc55'); writeFileSync(join(cache, 'big.o'), 'x'.repeat(4096))
+    writeFileSync(join(deps, 'index.js'), 'module.exports = 1')
+    const service = new ObjectPresentationService(f.registry)
+    const count = () => f.registry.list().filter(row => row.status === 'present').length
+
+    // Naming the folder identifies the folder; nothing under it is read or registered.
+    const before = count()
+    const located = service.resolve(folder)
+    assert.equal(f.registry.get(located.objectId)?.kind, 'directory')
+    assert.equal(count(), before + 1)
+
+    // An unchanged file answers from what is recorded: same object, same revision, however often it is asked for.
+    const first = service.resolve(note), again = service.resolve(note)
+    assert.deepEqual(again, first)
+    assert.equal(f.registry.get(first.objectId)?.revision, first.revision)
+
+    // A changed file is settled again and keeps its identity.
+    writeFileSync(note, '# a, edited and longer')
+    const edited = service.resolve(note)
+    assert.equal(edited.objectId, first.objectId)
+    assert.ok(edited.revision > first.revision)
+    assert.equal(f.registry.get(first.objectId)?.size, Buffer.byteLength('# a, edited and longer'))
+
+    // A watcher batch that names the folder walks it, but stays out of dependency and cache directories.
+    f.registry.reconcile([folder])
+    const paths = f.registry.list().filter(row => row.status === 'present').map(row => row.current_path!)
+    assert.ok(paths.some(path => path.endsWith('/notes/a.md')))
+    assert.equal(paths.some(path => path.includes('/node_modules') || path.includes('/target')), false)
+  } finally { f.close() }
+})
