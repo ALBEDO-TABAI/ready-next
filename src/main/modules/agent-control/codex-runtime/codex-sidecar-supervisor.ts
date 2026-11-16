@@ -135,7 +135,12 @@ function markerValue(command: string, key: string): string | null {
   return (boundary ? rest.slice(0, boundary.index) : rest).trim() || null
 }
 
-function parsePsLine(line: string): Omit<CodexOwnedProcess, 'executableSha256'> | null {
+/**
+ * One `ps -o pid=,ppid=,pgid=,lstart=,command=` row. `ps` prints the command unquoted, so a path with a space
+ * ("/Applications/Ready Next.app/…") cannot be cut out of it by whitespace: `executable` is that process's `comm`
+ * (the full executable path, from a second `ps` read) and is used when the command really starts with it.
+ */
+export function parsePsLine(line: string, executable?: string): Omit<CodexOwnedProcess, 'executableSha256'> | null {
   const match = line.match(
     /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(.*)$/,
   )
@@ -146,7 +151,9 @@ function parsePsLine(line: string): Omit<CodexOwnedProcess, 'executableSha256'> 
   const startIdentity = `${pid}:${match.slice(4, 9).join(' ')}`
   const command = match[9]
   const executableToken = command.match(/^(?:"((?:[^"\\]|\\.)*)"|'([^']*)'|(\S+))/)
-  const executablePath = executableToken?.[1] || executableToken?.[2] || executableToken?.[3] || ''
+  const executablePath = executable && (command === executable || command.startsWith(`${executable} `))
+    ? executable
+    : executableToken?.[1] || executableToken?.[2] || executableToken?.[3] || ''
   if (![pid, parentPid, processGroupId].every(Number.isSafeInteger)) return null
   if (!executablePath.startsWith('/')) return null
   return {
@@ -167,17 +174,25 @@ function parsePsLine(line: string): Omit<CodexOwnedProcess, 'executableSha256'> 
 export class MacCodexProcessInspector implements CodexProcessInspector {
   async list(): Promise<CodexOwnedProcess[]> {
     let output: string
+    // pid → full executable path, spaces included (see parsePsLine).
+    const executables = new Map<number, string>()
     try {
       output = execFileSync('/bin/ps', [
         'axeww',
         '-o',
         'pid=,ppid=,pgid=,lstart=,command=',
       ], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 })
+      for (const row of execFileSync('/bin/ps', ['axww', '-o', 'pid=,comm='], {
+        encoding: 'utf8', maxBuffer: 32 * 1024 * 1024,
+      }).split('\n')) {
+        const match = row.match(/^\s*(\d+)\s(.+)$/)
+        if (match) executables.set(Number(match[1]), match[2])
+      }
     } catch {
       throw new CodexSidecarSupervisorError('process_enumeration_failed')
     }
     return output.split('\n').flatMap((line) => {
-      const parsed = parsePsLine(line)
+      const parsed = parsePsLine(line, executables.get(Number(line.trim().split(/\s+/, 1)[0])))
       if (!parsed) return []
       let executableSha256: string | null = null
       if (parsed.markers.processLeaseId && parsed.executablePath.startsWith('/')) {

@@ -1,4 +1,6 @@
 export type GracefulExitAction = 'close_window' | 'quit_app'
+/** Where an exit stopped: `flush` — renderer state could not be saved; `cleanup` — it was saved, a background part did not stop. */
+export type GracefulExitFailureStage = 'flush' | 'cleanup'
 
 export interface PreventableExitEvent {
   preventDefault(): void
@@ -13,7 +15,7 @@ interface GracefulWindowCloseCoordinatorDeps {
   cleanupBeforeQuit(startedAt: number): Promise<void>
   requestWindowClose(): void
   requestAppQuit(): void
-  onFailure(error: unknown, action: GracefulExitAction): void
+  onFailure(error: unknown, action: GracefulExitAction, stage: GracefulExitFailureStage): void
   now?(): number
 }
 
@@ -51,6 +53,16 @@ export class GracefulWindowCloseCoordinator {
     this.releaseActiveLease()
   }
 
+  /**
+   * The person chose to quit although a background part did not stop (only offered after a `cleanup` failure, when
+   * renderer state is already saved). The caller finishes what cleanup is left; the next quit event passes.
+   */
+  allowAppQuitAfterFailedCleanup(): void {
+    if (this.state !== 'idle') return
+    this.state = 'allow_app_quit'
+    this.deps.requestAppQuit()
+  }
+
   getStateForTests(): GracefulExitState {
     return this.state
   }
@@ -69,11 +81,13 @@ export class GracefulWindowCloseCoordinator {
 
   private async finish(startedAt: number): Promise<void> {
     let lease: GracefulExitLease | null = null
+    let stage: GracefulExitFailureStage = 'flush'
     try {
       lease = await this.deps.flushRendererState()
       this.activeLease = lease
       const action = this.requestedAction ?? 'close_window'
       if (action === 'quit_app') {
+        stage = 'cleanup'
         await this.deps.cleanupBeforeQuit(startedAt)
         this.state = 'allow_app_quit'
         this.deps.requestAppQuit()
@@ -87,7 +101,7 @@ export class GracefulWindowCloseCoordinator {
       this.releaseLease(lease)
       this.state = 'idle'
       this.requestedAction = null
-      this.deps.onFailure(error, action)
+      this.deps.onFailure(error, action, stage)
     }
   }
 

@@ -104,6 +104,7 @@ import { runBeforeQuitCleanup } from './modules/process-cleanup/before-quit'
 import {
   GracefulWindowCloseCoordinator,
   type GracefulExitAction,
+  type GracefulExitFailureStage,
 } from './modules/process-cleanup/graceful-window-close-coordinator'
 import { requestRendererStateFlush, setupRendererStateFlushIPC } from './modules/process-cleanup/renderer-state-flush'
 import { closeAllBrowsers } from './modules/browser-engine/browser-cleanup'
@@ -1289,7 +1290,7 @@ app.on('window-all-closed', () => {
   }
 })
 
-async function cleanupBeforeAppQuit(startedAt: number): Promise<void> {
+async function cleanupBeforeAppQuit(startedAt: number, options: { agentRuntimeAlreadyAttempted?: boolean } = {}): Promise<void> {
   stopCalendarDesktop?.(); stopCalendarDesktop=null
   try {
     reminderScheduler?.stop()
@@ -1307,7 +1308,8 @@ async function cleanupBeforeAppQuit(startedAt: number): Promise<void> {
   const rssAutoRefreshStopped = Promise.all([stopRSSAutoRefresh(), stopRSSContentService(), stopRSSProcessing()])
   const remainingTimeoutMs = Math.max(0, 5_000 - (Date.now() - startedAt))
   await runBeforeQuitCleanup({
-    cleanupAgentRuntime,
+    // After a failed stop the person chose to quit anyway: the runtime's ingress is already sealed, it is not stopped again.
+    cleanupAgentRuntime: options.agentRuntimeAlreadyAttempted ? () => undefined : cleanupAgentRuntime,
     cleanupAgentManager: () => agentManager.cleanup(),
     cleanupRsshubManager: async () => {
       await rssAutoRefreshStopped
@@ -1329,11 +1331,38 @@ async function cleanupBeforeAppQuit(startedAt: number): Promise<void> {
   }, { timeoutMs: remainingTimeoutMs })
 }
 
-function showGracefulExitFailure(error: unknown, action: GracefulExitAction): void {
+function showGracefulExitFailure(error: unknown, action: GracefulExitAction, stage: GracefulExitFailureStage): void {
   const detail = error instanceof Error ? error.message : String(error)
   console.error(`[before-quit] state flush failed; ${action} cancelled`, error)
   // A hidden (verification) launch has nobody to answer: it never shows the window or a dialog; the log keeps the failure.
   if (READY_START_HIDDEN) return
+  // Unsaved content was already flushed when a background part fails to stop: say what really happened and let the
+  // person leave. What stays behind is settled by the next launch (the process lease of a dead owner is reclaimed).
+  if (stage === 'cleanup' && action === 'quit_app') {
+    const options = {
+      type: 'warning' as const,
+      title: '后台部分没有完全停下',
+      message: 'Ready 的后台助手运行时没有按时停下。',
+      detail: `你的内容已经保存。可以仍然退出，残留的后台进程会在下次启动时清理。\n\n${detail}`,
+      buttons: ['仍然退出', '返回'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+    }
+    const shown = mainWindow && !mainWindow.isDestroyed()
+      ? (mainWindow.show(), dialog.showMessageBox(mainWindow, options))
+      : dialog.showMessageBox(options)
+    void shown.then(async ({ response }) => {
+      if (response !== 0) return
+      try {
+        await cleanupBeforeAppQuit(Date.now(), { agentRuntimeAlreadyAttempted: true })
+      } catch (cleanupError) {
+        console.error('[before-quit] cleanup after a failed runtime stop threw; quitting as chosen', cleanupError)
+      }
+      getGracefulWindowCloseCoordinator().allowAppQuitAfterFailedCleanup()
+    })
+    return
+  }
   const options = {
     type: 'error' as const,
     title: '仍有内容没有保存',

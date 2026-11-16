@@ -11,6 +11,7 @@ import {
   CodexSidecarSupervisor,
   CodexSidecarSupervisorError,
   MacCodexProcessInspector,
+  parsePsLine,
   NodeCodexSidecarSpawnPort,
   type CodexOwnedProcess,
   type CodexProcessInspector,
@@ -38,6 +39,24 @@ test('macOS process evidence preserves the full current executable path', async 
   assert.ok(self)
   assert.equal(realpathSync(self.executablePath), realpathSync(process.execPath))
   assert.match(self.processStartIdentity, new RegExp(`^${process.pid}:`))
+})
+
+test('process evidence keeps an executable path with spaces whole (an app named "Ready Next")', () => {
+  const executable = '/Applications/Ready Next.app/Contents/Resources/codex-runtime/aarch64-apple-darwin/codex'
+  const line = `73273 73238 73273 Mon Nov 16 12:31:29 2026     ${executable} app-server --stdio --strict-config PATH=/usr/bin:/bin `
+    + 'READY_CODEX_PROCESS_LEASE_ID=lease-1 READY_CODEX_SIDECAR_SPAWN_INSTANCE_ID=spawn-1 READY_CODEX_CONNECTION_EPOCH=epoch-1 '
+    + 'READY_CODEX_STATE_DIR=/Users/someone/Library/Application Support/Ready Next/codex-runtime'
+  const row = parsePsLine(line, executable)
+  assert.equal(row?.executablePath, executable)
+  assert.equal(row?.pid, 73273)
+  assert.equal(row?.processGroupId, 73273)
+  assert.deepEqual(row?.markers, {
+    processLeaseId: 'lease-1', sidecarSpawnInstanceId: 'spawn-1', connectionEpoch: 'epoch-1',
+    stateDir: '/Users/someone/Library/Application Support/Ready Next/codex-runtime',
+  })
+  // Without the executable (or with one the command does not start with) the first token is all there is.
+  assert.equal(parsePsLine(line)?.executablePath, '/Applications/Ready')
+  assert.equal(parsePsLine(line, '/somewhere/else')?.executablePath, '/Applications/Ready')
 })
 
 test('node spawn port contains an asynchronous spawn error when no child pid exists', async () => {

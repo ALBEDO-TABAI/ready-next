@@ -21,6 +21,7 @@
 
 | 评估日期 | 任务 | 文件 | 总行数 | 本次新增 | 结论 | 判断与后续动作 | 状态 |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
+| 2026-11-16 | 退出被后台运行时卡住时可以仍然退出 | `src/main/index.ts` | 1404 | 净 +29 | 一般 | 只在退出失败提示里分出“内容已保存、后台助手运行时没停下”这一种：如实说明并提供“仍然退出”，选择后补完剩余清理再退出。阶段判断在 `graceful-window-close-coordinator.ts`，根因（带空格的可执行路径被截断）修在 `codex-sidecar-supervisor.ts`。复查同 B3 行。 | 复查：2026-12-15 |
 | 2026-11-14 | 浏览器标签分组的右键入口 | `src/renderer/pages/modes/BrowserMode.tsx` | 1494 | 净 +4 | 一般 | 只接线：把“添加到新分组 / 移出分组”两个处理函数从 `useBrowserTabActions` 取出并交给侧栏的 `BrowserTabList`；菜单、分组模型与写回顺序都在组件、store 和 hook 里。复查同 B12 第三批行。 | 复查：2026-11-30 |
 | 2026-11-14 | 四项非界面缺口：来源页划线删除 | `src/preload/index.ts` | 1810 | 净 +1 | 一般 | 仅透传删除接口，类型移到共享声明，删除规则留在来源页服务；类型检查与 IPC 对齐检查覆盖。复查按域拆分透传声明，避免此入口继续承载业务规则。 | 复查：2026-11-30 |
 | 2026-11-14 | W7 BA10 工作标签归属持久化 | `src/main/modules/migrations.ts` | 4639 | 净 +2 | 健康 | 仅导入、登记迁移 158；迁移体与归属规则在独立的 `browser-engine/work-tab-ownership-store.ts`，真实数据库重开、失效清理及回滚由 `browser-work-tab-ownership-native.test.ts` 覆盖。 | 记录结论 |

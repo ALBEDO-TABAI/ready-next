@@ -235,10 +235,33 @@ test('draft flush timeout reaches the existing exit warning and never closes the
     cleanupBeforeQuit: async () => { assert.fail('database must stay open') },
     requestWindowClose: () => { assert.fail('window must stay open') },
     requestAppQuit: () => { assert.fail('app must stay open') },
-    onFailure: (error, action) => { assert.equal(action, 'quit_app'); warned(error) },
+    onFailure: (error, action, stage) => { assert.equal(action, 'quit_app'); assert.equal(stage, 'flush'); warned(error) },
   })
   coordinator.handleBeforeQuit({ preventDefault() {} })
   assert.match(String(await warning), /超时/)
   assert.equal(coordinator.getStateForTests(), 'idle')
   assert.equal(tabs[0].content, 'latest')
+})
+
+test('a background part that fails to stop is reported as a cleanup failure, and quitting anyway lets the next quit pass', async () => {
+  const { GracefulWindowCloseCoordinator } = await import('../main/modules/process-cleanup/graceful-window-close-coordinator')
+  const quits: string[] = []
+  let failed!: (stage: string) => void
+  const failure = new Promise<string>(resolve => { failed = resolve })
+  const coordinator = new GracefulWindowCloseCoordinator({
+    flushRendererState: async () => ({ release() { quits.push('lease released') } }),
+    cleanupBeforeQuit: async () => { throw new Error('codex_runtime_stop_unproven') },
+    requestWindowClose: () => { assert.fail('window close was not asked for') },
+    requestAppQuit: () => { quits.push('quit') },
+    onFailure: (error, action, stage) => { assert.equal(action, 'quit_app'); assert.match(String(error), /stop_unproven/); failed(stage) },
+  })
+  let prevented = 0
+  coordinator.handleBeforeQuit({ preventDefault() { prevented += 1 } })
+  assert.equal(await failure, 'cleanup')
+  assert.equal(coordinator.getStateForTests(), 'idle')
+  assert.deepEqual(quits, ['lease released'], 'the app stays open until the person decides')
+  coordinator.allowAppQuitAfterFailedCleanup()
+  assert.deepEqual(quits, ['lease released', 'quit'])
+  coordinator.handleBeforeQuit({ preventDefault() { prevented += 1 } })
+  assert.equal(prevented, 1, 'the quit asked for after the choice is not cancelled again')
 })
