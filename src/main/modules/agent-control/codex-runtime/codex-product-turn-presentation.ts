@@ -49,6 +49,19 @@ function isTransientServiceError(error: CodexTurnError | null | undefined): bool
   )
 }
 
+/** Whether Ready's own gateway refused the request before any provider was contacted. */
+function isGatewayContractRejection(error: CodexTurnError | null | undefined): boolean {
+  if (!error?.message.startsWith('{')) return false
+  try {
+    const parsed = JSON.parse(error.message) as { error?: { code?: unknown; type?: unknown } }
+    const code = parsed.error?.code
+    return parsed.error?.type === 'gateway_error' && typeof code === 'string' && /^gateway_[a-z_]{1,80}$/.test(code)
+  } catch {
+    // silent-catch: an error message that is not JSON is not a gateway rejection
+    return false
+  }
+}
+
 const UNDELIVERED_MESSAGES: Readonly<Record<string, string>> = {
   artifact_staged_receipt_missing: '本轮没有完成：计划保存的文件没有保存成功。',
   artifact_export_receipt_missing: '本轮没有完成：计划保存的文件没有保存成功。',
@@ -82,6 +95,9 @@ export function codexTerminalPublicMessage(
   }
   if (status === 'error' && isTransientServiceError(nativeError)) {
     return options.historySeam ? `模型服务暂时出错，本轮没有完成。${kept}` : '模型服务暂时出错，本轮没有完成。'
+  }
+  if (status === 'error' && isGatewayContractRejection(nativeError)) {
+    return '本轮没有发出去：Ready 自己的请求检查没有放行，模型服务没有被调用。这是应用内部的问题，重试通常不会解决。'
   }
   return status === 'error'
     ? '本轮未能完成。'

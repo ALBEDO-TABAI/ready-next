@@ -271,6 +271,18 @@ test('ordinal-fork product requests pass the gateway metadata and frozen binding
         /gateway_forked_from_ordinal_exclusive_invalid/)
     }
     assert.throws(() => parse({ forked_from_thread_id: 'direct-parent', unknown_lineage: 0 }), /gateway_turn_metadata_shape_invalid/)
+    // A profile inside a git repository: the runtime reports the repository, the gateway accepts and drops it.
+    const inRepository = parse({ workspaces: {
+      '/profile': { latest_git_commit_hash: 'f4c3d4f9', has_changes: true, associated_remote_urls: { origin: 'https://example.invalid/r.git' } },
+      '/bare': {},
+    } })
+    assert.equal('workspaces' in inRepository.raw, false)
+    assert.equal(inRepository.threadId, parse({}).threadId)
+    for (const invalid of [null, 'repo', [], { '/profile': 'x' }, { '/profile': { has_changes: 'no' } },
+      { '/profile': { latest_git_commit_hash: 1 } }, { '/profile': { associated_remote_urls: { origin: 1 } } },
+      { '/profile': { extra: true } }]) {
+      assert.throws(() => parse({ workspaces: invalid }), /gateway_turn_metadata_workspaces_invalid/)
+    }
   }
 })
 

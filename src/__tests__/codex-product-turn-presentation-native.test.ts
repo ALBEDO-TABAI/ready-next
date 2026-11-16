@@ -25,6 +25,16 @@ test('public terminal messages keep internal failure codes in diagnostics only',
   assert.doesNotMatch(message, /codex_|gateway_|protocol_|persistence_/)
 })
 
+test('a request Ready\'s own gateway refused says the app blocked it, without the code', () => {
+  const refused = { message: '{"error":{"code":"gateway_turn_metadata_shape_invalid","message":"gateway_turn_metadata_shape_invalid","type":"gateway_error"}}' }
+  const message = codexTerminalPublicMessage('error', refused)
+  assert.match(message, /Ready 自己的请求检查没有放行.*模型服务没有被调用/)
+  assert.doesNotMatch(message, /gateway_/)
+  const provider = { message: '{"error":{"code":"invalid_api_key","message":"bad key","type":"invalid_request_error"}}' }
+  assert.equal(codexTerminalPublicMessage('error', provider), '本轮未能完成。')
+  assert.equal(codexTerminalPublicMessage('interrupted', refused), codexTerminalPublicMessage('interrupted'))
+})
+
 test('native usage failures explain the account limit without exposing provider text', () => {
   const error = { message: 'private provider diagnostics', codexErrorInfo: 'usageLimitExceeded' as const }
   assert.match(codexTerminalPublicMessage('error', error), /额度.*稍后/)

@@ -37,6 +37,28 @@ const EXACT_REQUEST_KEYS = [
   'tools',
 ]
 
+/**
+ * When a thread's working folder sits inside a git repository the runtime adds `workspaces`: repository root ->
+ * commit, remotes and dirty flag. Whether it appears depends on where the profile lives, not on the request, and
+ * Ready uses none of it, so a well-formed value is dropped here and never reaches evidence or a provider.
+ */
+function dropWorkspaceFacts(metadata: JsonObject): void {
+  if (!('workspaces' in metadata)) return
+  const invalid = new CodexModelGatewayError('gateway_turn_metadata_workspaces_invalid')
+  if (!isRecord(metadata.workspaces)) throw invalid
+  for (const workspace of Object.values(metadata.workspaces)) {
+    if (!isRecord(workspace)) throw invalid
+    for (const [key, value] of Object.entries(workspace)) {
+      if (key === 'latest_git_commit_hash' ? typeof value !== 'string'
+        : key === 'has_changes' ? typeof value !== 'boolean'
+          : key === 'associated_remote_urls'
+            ? !isRecord(value) || Object.values(value).some((url) => typeof url !== 'string')
+            : true) throw invalid
+    }
+  }
+  delete metadata.workspaces
+}
+
 export function parseMetadata(body: JsonObject): CodexModelGatewayMetadata {
   if (!isRecord(body.client_metadata)) throw new CodexModelGatewayError('gateway_client_metadata_invalid')
   // The exact shape the pinned 0.160.1 runtime sends on every request: product turns and both compaction kinds.
@@ -61,6 +83,7 @@ export function parseMetadata(body: JsonObject): CodexModelGatewayMetadata {
     throw new CodexModelGatewayError('gateway_turn_metadata_invalid')
   }
   if (!isRecord(parsed)) throw new CodexModelGatewayError('gateway_turn_metadata_invalid')
+  dropWorkspaceFacts(parsed)
   const hasForkedFromThreadId = 'forked_from_thread_id' in parsed
   if (hasForkedFromThreadId) {
     nonEmptyString(parsed.forked_from_thread_id, 'gateway_forked_from_thread_id_invalid')
