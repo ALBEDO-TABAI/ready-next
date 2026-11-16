@@ -16,7 +16,7 @@ type Reply<T> = { ok: true; value: T } | { ok: false; error: string }
 function mediaIPC(f: ReturnType<typeof canvasFixture>, cache: FastCardMediaCache) {
   const handlers = new Map<string, (event: IpcMainInvokeEvent, input: unknown) => unknown>()
   registerCanvasMediaIPC({ handle: (name, handler) => { handlers.set(name, handler as never) } }, async () => ({ canvas: f.service }), () => undefined, {
-    cache, transcriptionAvailable: () => false,
+    cache,
     preview: async url => ({ url, title: '示例文章', description: '一句摘要', site: 'Example', imageUrl: 'https://example.com/cover.png', fetchedAt: '2026-11-14T06:00:00.000Z' }),
   })
   return <T,>(name: string, input?: unknown) => handlers.get(name)!({} as IpcMainInvokeEvent, input) as Promise<Reply<T>>

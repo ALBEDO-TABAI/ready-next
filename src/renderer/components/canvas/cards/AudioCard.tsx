@@ -5,8 +5,9 @@ import { seekAudio, toggleAudio, useAudioPlayer } from '../../../modules/canvas/
 import { loadPeaks } from '../../../modules/canvas/waveform'
 
 // The voice card (M4 2026-11-14): play or pause, the sound's own shape with the played part in ink, its length,
-// when it was taken, and the transcript — or, honestly, that there is none and why. The signal colour is not used:
-// progress is ink (V5).
+// when it was taken. The board only records (decided 2026-11-14, M4 §11): it offers no transcription, so a card
+// without a transcript says nothing about one; a transcript that came with the card (Stillroom, FastCard) is shown.
+// The signal colour is not used: progress is ink (V5).
 
 const BARS = 44
 export const clock = (ms: number) => { const s = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` }
@@ -18,10 +19,8 @@ export function capturedAt(node: CanvasNode): string | undefined {
   return value && !Number.isNaN(Date.parse(value)) ? value : undefined
 }
 
-export function AudioCard({ node, src, transcriptionAvailable, peaks: loadShape = loadPeaks }: {
+export function AudioCard({ node, src, peaks: loadShape = loadPeaks }: {
   node: Extract<CanvasNode, { type: 'file' }>; src?: string
-  /** Whether Ready can transcribe at all right now; undefined while unknown. */
-  transcriptionAvailable?: boolean
   peaks?: (src: string, bars: number) => Promise<number[] | null>
 }) {
   const media = node.ready.media, player = useAudioPlayer(node.id)
@@ -60,7 +59,6 @@ export function AudioCard({ node, src, transcriptionAvailable, peaks: loadShape 
       <span className="cv-audio__time">{player.id === node.id && (player.playing || player.time > 0) ? `${clock(player.time * 1000)} / ` : ''}{length === undefined ? '--:--' : clock(length)}</span>
     </div>
     {player.error && <p className="cv-audio__note" role="alert">{player.error}</p>}
-    {transcript ? <p className="cv-audio__transcript">{transcript}</p>
-      : <p className="cv-audio__note" data-untranscribed>未转写{transcriptionAvailable === false && <span> · 还没有接入能转写音频的模型</span>}</p>}
+    {transcript && <p className="cv-audio__transcript">{transcript}</p>}
   </article>
 }

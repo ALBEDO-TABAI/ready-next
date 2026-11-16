@@ -1,5 +1,6 @@
 import { homedir } from 'node:os'
 import { registerCanvasImageExportIPC } from './export-image'
+import { registerCanvasDownloadIPC } from './download'
 import { fastCardBoardPort } from './fastcard-board-port'
 import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain } from 'electron'
 import { getDatabase } from '../database'
@@ -62,7 +63,7 @@ export function setupCanvasRuntime(ready: Promise<void>, paths: { preloadPath: s
     const result = window && !window.isDestroyed() ? await dialog.showOpenDialog(window, options) : await dialog.showOpenDialog(options)
     return result.canceled || !result.filePaths[0] ? null : result.filePaths[0]
   })
-  registerCanvasMediaIPC(ipcMain, resolve, authorize, { cache, transcriptionAvailable: () => quickNote.transcriptionAvailable() }) // [cv-media]
+  registerCanvasMediaIPC(ipcMain, resolve, authorize, { cache }) // [cv-media]
   const exportWindow = (sender: Electron.WebContents) => {
     const window = BrowserWindow.fromWebContents(sender)
     if (!window || window.isDestroyed() || window.webContents !== sender) throw new Error('发起导出的窗口已不可用')
@@ -72,6 +73,10 @@ export function setupCanvasRuntime(ready: Promise<void>, paths: { preloadPath: s
     contentSize: sender => { const [width, height] = exportWindow(sender).getContentSize(); return [width, height] },
     showSaveDialog: (sender, request) => dialog.showSaveDialog(exportWindow(sender), request),
     getFallbackExportDir: homedir,
+  })
+  registerCanvasDownloadIPC(ipcMain, resolve, authorize, {
+    showSaveDialog: (sender, request) => dialog.showSaveDialog(exportWindow(sender), request),
+    getDefaultDir: () => app.getPath('downloads'),
   })
   registerCanvasCompositionIPC(ipcMain, async event => { const services = await resolve(); authorize(event, services.canvas.root); return services.composition })
   registerFastCardServicesIPC(ipcMain, { transfer: async () => (await resolve()).transfer, quickNote,

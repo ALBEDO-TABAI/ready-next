@@ -53,9 +53,9 @@ function mediaHarness(overrides: Partial<CanvasMediaDependencies> = {}, ready = 
     release() {} } as unknown as CanvasService
   const cache = { download: async (url: string) => { downloads.push(url); return { status: 'missing' as const, error: '这个地址是内网地址，没有抓取预览' } } } as unknown as CanvasMediaDependencies['cache']
   registerCanvasMediaIPC({ handle: (name, handler) => { handlers.set(name, handler as never) } }, async () => { if (!ready) throw new Error('请先配置资料库'); return { canvas } },
-    () => undefined, { cache, transcriptionAvailable: () => false, ...overrides })
+    () => undefined, { cache, ...overrides })
   const call = (name: string, input?: unknown) => handlers.get(name)!({} as IpcMainInvokeEvent, input)
-  return { call, staged, downloads }
+  return { call, staged, downloads, routes: () => [...handlers.keys()].sort() }
 }
 
 test('canvasMedia:stage hands validated bytes to the board service and refuses everything else', async () => {
@@ -82,7 +82,8 @@ test('canvasMedia:linkPreview resolves the board by identity and keeps the text 
   assert.equal((await h.call('canvasMedia:linkPreview', { objectId: 'board', url: 'https://example.com/a', path: '/tmp/x.canvas' })).ok, false)
   const failing = mediaHarness({ preview: async () => { throw new Error('这个地址是内网地址，没有抓取预览') } })
   assert.match((await failing.call('canvasMedia:linkPreview', { objectId: 'board', url: 'http://192.168.1.1/' })).error!, /内网地址/)
-  assert.deepEqual(await h.call('canvasMedia:transcription'), { ok: true, value: { available: false } })
+  // The board does not transcribe (2026-11-14): there is no availability route left to ask.
+  assert.deepEqual(h.routes(), ['canvasMedia:linkPreview', 'canvasMedia:stage'])
 })
 
 function intakeHost(overrides: Partial<IntakeHost> = {}) {

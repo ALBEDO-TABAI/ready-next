@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import {
-  ALargeSmall, ArrowDown, ArrowUp, BringToFront, CalendarPlus, ChevronDown, ChevronRight, ChevronUp, Ellipsis, FilePlus2, FolderInput, FolderOutput, Group, Layers, LayoutGrid, Redo2, Scan, Search, SendToBack, Shapes, SlidersHorizontal, Sparkles, StickyNote, Trash2, Type, Undo2, Ungroup, X, type LucideIcon,
+  ALargeSmall, ArrowDown, ArrowUp, BringToFront, CalendarPlus, Check, ChevronDown, ChevronRight, ChevronUp, Crop, Ellipsis, Expand, FilePlus2, FolderInput, FolderOutput, Group, Layers, LayoutGrid, Redo2, Scan, Search, SendToBack, Shapes, SlidersHorizontal, Sparkles, StickyNote, Trash2, Type, Undo2, Ungroup, X, type LucideIcon,
 } from 'lucide-react'
 import { Button, closeFloat, IconButton, Input, toggleMenu, type MenuEntry } from '../../ui'
 import type { Tool } from './types'
@@ -117,6 +117,8 @@ export function SelectionBar({ left, top, count, edges = 0, text, canGroup, canU
     textStyle?(patch: Partial<Pick<Appearance, 'fontScale' | 'weight' | 'align'>>): void
     addToDocument?(): void; askAI?(): void; schedule?(): void
     collect?(): void; moveOut?(): void
+    /** One picture card is picked: enter crop mode on it. */
+    crop?(): void
   }
 }) {
   const arrangeMenu = useChromeMenu(ARRANGE_MENU), layerMenu = useChromeMenu(LAYER_MENU), textMenu = useChromeMenu(TEXT_MENU)
@@ -139,6 +141,7 @@ export function SelectionBar({ left, top, count, edges = 0, text, canGroup, canU
         { kind: 'group', label: '对齐' },
         ...TEXT_ALIGNS.map(item => ({ id: `align-${item.id}`, label: item.label, checked: (text.align ?? 'left') === item.id, onSelect: () => actions.textStyle!({ align: item.id }) })),
       ], 'bottom')} />}
+    {actions.crop && <ChromeTool label="裁剪" icon={Crop} shortcut="K" disabled={busy} onClick={actions.crop} />}
     <ChromeTool label="层级" icon={Layers} menu={{ id: LAYER_MENU, open: layerMenu.open }} disabled={busy}
       onClick={button => layerMenu.toggle(button, '层级', [
         { id: 'front', label: '置顶', icon: <BringToFront />, onSelect: () => actions.layer('front') },
@@ -153,5 +156,19 @@ export function SelectionBar({ left, top, count, edges = 0, text, canGroup, canU
     <span className="canvas-dock-sep" aria-hidden />
     <ChromeTool label="删除" icon={Trash2} shortcut="Delete" danger disabled={busy} onClick={actions.remove} />
     </>}
+  </div>
+}
+
+/** Crop mode's bar, where the selection bar was: the size of the kept part in the picture's own pixels, back to the
+ *  whole picture, cancel, done. */
+export function CropBar({ left, top, pixels, whole, onReset, onCancel, onDone }: {
+  left: number; top: number; pixels: { width: number; height: number }; whole: boolean; onReset(): void; onCancel(): void; onDone(): void
+}) {
+  return <div className="canvas-selection-bar rn-float" role="toolbar" aria-label="裁剪" data-canvas-ui data-crop-ui style={{ left, top }}>
+    <span className="canvas-selection-count" aria-live="polite">裁剪 <span className="canvas-crop-size">{pixels.width} × {pixels.height}</span></span>
+    <ChromeTool label="还原整张图片" icon={Expand} disabled={whole} onClick={onReset} />
+    <span className="canvas-dock-sep" aria-hidden />
+    <ChromeTool label="取消" icon={X} shortcut="Esc" onClick={onCancel} />
+    <ChromeTool label="完成裁剪" icon={Check} shortcut="Enter" onClick={onDone} />
   </div>
 }

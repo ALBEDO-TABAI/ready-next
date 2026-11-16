@@ -142,6 +142,7 @@ export const APP_SHORTCUTS: readonly AppShortcut[] = [
   { id: 'canvas.layer-backward', keys: 'CommandOrControl+Alt+[', scope: 'canvas', description: '所选卡片下移一层' },
   { id: 'canvas.open', keys: 'Enter', scope: 'canvas', description: '打开所选卡片' },
   { id: 'canvas.parent-board', keys: 'Alt+ArrowUp', scope: 'canvas', description: '回到上一级画板' },
+  { id: 'canvas.crop', keys: 'K', scope: 'canvas', description: '裁剪所选图片' },
   { id: 'skills.confirm', keys: 'CommandOrControl+Enter', scope: 'skills', description: '确认技能编辑' },
   { id: 'document.confirm', keys: 'CommandOrControl+Enter', scope: 'document', description: '确认当前块编辑' },
   { id: 'document.italic', keys: 'CommandOrControl+I', scope: 'document', description: '斜体' },

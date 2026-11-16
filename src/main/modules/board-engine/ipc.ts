@@ -47,6 +47,8 @@ export function registerCanvasIPC(ipcMain: Pick<IpcMain, 'handle'>, resolve: () 
 export type CanvasResult<T> = { ok: true; value: T } | { ok: false; error: string }
 export interface CanvasAPI {
   exportImage(input: import('../../../shared/ready-canvas/export-image').CanvasExportImageRequest): Promise<import('../../../shared/ready-canvas/export-image').CanvasExportImageResult>
+  /** 下载为 ZIP: the files themselves of the chosen cards (or the whole board), sub-boards as folders; Main asks where to save. */
+  downloadZip(input: import('../../../shared/ready-canvas').CanvasDownloadRequest): Promise<import('../../../shared/ready-canvas').CanvasDownloadResult>
   create(input: z.input<typeof CreateSchema>): Promise<CanvasResult<Awaited<ReturnType<CanvasService['create']>>>>
   open(objectId: string): Promise<CanvasResult<Awaited<ReturnType<CanvasService['open']>>>>
   read(handleId: string): Promise<CanvasResult<Awaited<ReturnType<CanvasService['read']>>>>

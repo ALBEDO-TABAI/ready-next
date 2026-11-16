@@ -20,13 +20,15 @@ import { CanvasCard } from './CanvasCard'
 import { useCanvasBuffer } from './useCanvasBuffer'
 import type { CanvasSurfaceProps, Tool } from './types'
 import { CanvasEditorLifecycle } from './editor-lifecycle'
-import { CanvasCorner, CanvasCrumbs, CanvasDock, SelectionBar } from './CanvasChrome'
+import { CanvasCorner, CanvasCrumbs, CanvasDock, CropBar, SelectionBar } from './CanvasChrome'
+import { cropKey, CropOverlay, pictureSize, type CropState } from './CanvasCrop'
+import { cropOperations, sessionCrop, startCrop, wholePicture } from '../../../modules/canvas/interaction/crop'
 import { Button, closeFloat, EmptyState, MenuList, openFloat, type FloatAnchor, type MenuEntry } from '../../ui'
 import { cardFrame } from '../../../modules/canvas/interaction/graphics'
 import { useBoardCommands } from '../../../modules/canvas/board-commands'
 import { subBoardDrop } from '../../../modules/canvas/drop-into-board'
 import { subBoardBarActions, subBoardItems } from './sub-board-actions'
-import { CalendarPlus, ClipboardPaste, CopyPlus, FileDown, FilePlus2, ImageDown, Sparkles, StickyNote, Trash2, Type } from 'lucide-react'
+import { CalendarPlus, ClipboardPaste, CopyPlus, Crop, FileDown, FilePlus2, FolderArchive, ImageDown, Sparkles, StickyNote, Trash2, Type } from 'lucide-react'
 
 const TOOL_KEYS: Record<string, Tool> = { v: 'select', h: 'pan', b: 'rect', a: 'arrow', c: 'edge', d: 'path' }
 const CONTEXT_MENU = 'canvas-context-menu'
@@ -59,10 +61,12 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
   const [search, setSearch] = useState<string | null>(null), [hit, setHit] = useState(-1)
   const [capturing, setCapturing] = useState(false)
   const [composing, setComposing] = useState(false), [compositionError, setCompositionError] = useState('')
+  // Crop mode on one picture card (M4 §11): the session lives here, the overlay and its bar draw it.
+  const [cropping, setCropping] = useState<CropState | null>(null)
   const root = useRef<HTMLDivElement>(null), world = useRef<HTMLDivElement>(null), overlay = useRef<SVGSVGElement>(null)
   const elements = useRef(new Map<string, HTMLElement>()), edgeElements = useRef<GestureScene['edgeElements']>(new Map())
-  const latest = useRef({ buffer, props, camera }), scene = useRef<GestureScene | null>(null)
-  latest.current = { buffer, props, camera }
+  const latest = useRef({ buffer, props, camera, byId: new Map<string, CanvasNode>() }), scene = useRef<GestureScene | null>(null)
+  latest.current = { ...latest.current, buffer, props, camera }
   const gestures = useMemo(() => new CanvasGestures({ scene: () => scene.current, select: setSelected, camera: setCamera,
     commit: ops => latest.current.buffer.commit(ops), transform: build => latest.current.buffer.transform(build), graphic: (draft, node) => latest.current.buffer.graphic(draft, node), measure: work => latest.current.props.onFrameWork?.(work),
     // One connector or shape, then back to the select tool with the new thing picked (Delete removes it); freehand keeps drawing.
@@ -70,6 +74,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     ...subBoardDrop((ids, target) => latest.current.props.subBoards?.moveInto?.(ids, target)) }), []) // M4 §9: cards dropped onto a sub-board card
   const active = useMemo(() => activeCanvasContent(canvas), [canvas])
   const byId = useMemo(() => new Map(active.nodes.map(n => [n.id, n])), [active])
+  latest.current.byId = byId
   const index = useMemo(() => new SpatialIndex(active.nodes.map(n => ({ ...n, ...visualBounds(n) }))), [active])
   const children = useMemo(() => {
     const result = new Map<string, string[]>()
@@ -100,11 +105,11 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     else latest.current.props.onOpenNode?.(node)
   }, [])
   useLayoutEffect(() => {
-    if (root.current && world.current && overlay.current) scene.current = { root: root.current, world: world.current, overlay: overlay.current, camera, viewport, index, byId, elements: elements.current, selected, tool, busy: busy || trash || !!editing, prefs: view, children, edgeElements: edgeElements.current }
+    if (root.current && world.current && overlay.current) scene.current = { root: root.current, world: world.current, overlay: overlay.current, camera, viewport, index, byId, elements: elements.current, selected, tool, busy: busy || trash || !!editing || !!cropping, prefs: view, children, edgeElements: edgeElements.current }
   })
   const boardId = useRef(props.canvas.ready.id)
   useLayoutEffect(() => {
-    gestures.cancel(); setEditing(null); setSelected([]); setHover(null)
+    gestures.cancel(); setEditing(null); setSelected([]); setHover(null); setCropping(null)
     // Another board in the same surface opens where it was left (M4 §10.1: the camera is this machine's state).
     if (boardId.current !== props.canvas.ready.id) { boardId.current = props.canvas.ready.id; setCamera(rememberedCamera(props.canvas.ready.id) ?? HOME_CAMERA) }
   }, [props.canvas.ready.id, gestures])
@@ -152,6 +157,31 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     for (const edge of chosenEdges) if (!binned.has(edge.fromNode) || !binned.has(edge.toNode)) operations.push({ type: 'deleteEdge', id: edge.id })
     void commit(operations)
   }
+  // 裁剪: one picture card is picked. The picture's own size comes from the card (already shown) or its attachment.
+  const croppable = chosen.length === 1 && chosen[0].type === 'file' && chosen[0].ready.kind === 'image' && !!props.resolveAsset?.(chosen[0].file) ? chosen[0] : undefined
+  async function beginCrop(node: CanvasNode) {
+    const src = node.type === 'file' ? props.resolveAsset?.(node.file) : undefined
+    if (!src || busy || trash || editing || cropping) return
+    gestures.cancel(); setCompositionError(''); root.current?.focus({ preventScroll: true })
+    try {
+      const natural = await pictureSize(elements.current.get(node.id)?.querySelector('img'), src), current = latest.current.byId.get(node.id)
+      if (!current) return
+      const start = startCrop(current, natural)
+      setSelected([current.id]); setCropping({ id: current.id, src, natural, key: cropKey(current), start, session: start })
+    } catch (cause) { /* silent-catch: an unreadable picture is reported on the board; crop mode is not entered */ fail(cause) }
+  }
+  /** Leave crop mode; applying is one undoable step (the crop and the card's new frame together). */
+  function endCrop(apply: boolean) {
+    const state = cropping, node = state ? byId.get(state.id) : undefined
+    setCropping(null)
+    if (!apply || !state || !node) return
+    const operations = cropOperations(node, state.start, state.session)
+    if (operations.length) void commit(operations)
+  }
+  // The card changed or left under the session (an outside update, the bin, an editor): the session is dropped.
+  const cropNode = cropping && !trash && !editing ? byId.get(cropping.id) : undefined
+  const cropStale = !!cropping && (!cropNode || cropKey(cropNode) !== cropping.key)
+  useEffect(() => { if (cropStale) setCropping(null) }, [cropStale])
   /** Cards glide to where an edit puts them (a layout, an undo, a redo); 还原排版 is undo. */
   function settled(edit: () => Promise<boolean>) {
     const before = captureFrames(elements.current, visibleIds)
@@ -180,7 +210,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
   }
   const inField = (target: EventTarget | null) => target instanceof Element && !!target.closest('input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"],[data-canvas-ui]')
   function copyCards(event: ClipboardEvent<HTMLDivElement>, cut: boolean) {
-    if (inField(event.target) || trash || editing || (cut && busy)) return
+    if (inField(event.target) || trash || editing || cropping || (cut && busy)) return
     const payload = cardsPayload(carried, active.edges)
     if (!payload) return
     event.preventDefault(); copied = payload
@@ -198,7 +228,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     return commit(operations).then(ok => { if (ok) setSelected(ids) })
   }
   function pasteCards(event: ClipboardEvent<HTMLDivElement>) {
-    if (inField(event.target) || busy || trash || editing) return
+    if (inField(event.target) || busy || trash || editing || cropping) return
     if (event.clipboardData.files.length) { // [cv-media] pictures and files on the clipboard go to the media layer
       if (!props.onPasteMedia) return
       event.preventDefault()
@@ -218,6 +248,13 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
   }
   function shortcut(e: KeyboardEvent<HTMLDivElement>) {
     const target = e.target instanceof Element ? e.target : null
+    if (cropping) {
+      // Crop mode takes the keyboard: Enter applies, Esc cancels, nothing else reaches the board.
+      if (e.nativeEvent.isComposing) return
+      if (e.key === 'Escape') { e.preventDefault(); endCrop(false) }
+      else if (e.key === 'Enter' && !target?.closest('button')) { e.preventDefault(); endCrop(true) }
+      return
+    }
     if (!root.current?.contains(root.current.ownerDocument.activeElement) || target?.closest('input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"],button,[data-canvas-ui]') || e.nativeEvent.isComposing) return
     if (e.key === 'Escape') { e.preventDefault(); gestures.cancel(); setEditing(null); setTool('select'); return }
     if (busy || trash || editing) return
@@ -237,6 +274,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     else if (!mod && ['p', 'l', 'r'].includes(key)) { e.preventDefault(); arrange(key.toUpperCase() as 'P' | 'L' | 'R') }
     else if (mod && key === 'f') { e.preventDefault(); setSearch(current => current ?? '') }
     else if (!mod && e.shiftKey && e.key === '!') { e.preventDefault(); fit() }
+    else if (!mod && !e.shiftKey && !e.altKey && key === 'k' && croppable) { e.preventDefault(); void beginCrop(croppable) }
     else if (!mod && !e.shiftKey && TOOL_KEYS[key]) { e.preventDefault(); chooseTool(TOOL_KEYS[key]) }
     else if (!mod && !e.shiftKey && (key === 't' || key === 'n')) { e.preventDefault(); placeCard(key === 't' ? 'text' : 'note') }
     else if (!mod && (e.key === '+' || e.key === '=' || e.key === '-')) { e.preventDefault(); setCamera(zoomAt(camera, { x: size.width / 2, y: size.height / 2 }, camera.zoom * (e.key === '-' ? 0.8 : 1.25))) }
@@ -275,11 +313,18 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     } catch (cause) { setCompositionError(cause instanceof Error ? cause.message : String(cause)) }
     finally { setCapturing(false); setCamera(before); setSelected(keep) }
   }
-  const exportItems: MenuEntry[] | undefined = props.onExport || props.captureImage ? [
+  // 更多: two different things, named apart. 导出 composes the cards into one picture or one document; 下载 hands over
+  // the files themselves (each card its own file, sub-boards as folders) in a ZIP.
+  const download = props.onDownload ? () => { void props.onDownload!(chosen.map(n => n.id)).catch(fail) } : undefined
+  const composed: MenuEntry[] = [
     ...(props.captureImage ? [{ id: 'png', label: chosen.length ? '把选中的卡片导出为 PNG' : '导出为 PNG', icon: <ImageDown />, onSelect: () => void exportPng() }] : []),
     ...(props.onExport ? (['md', 'pdf'] as const).map(kind => ({ id: kind, label: `${chosen.length ? '把选中的卡片导出为' : '导出为'} ${kind === 'md' ? 'Markdown' : 'PDF'}`, icon: <FileDown />,
       onSelect: () => { void props.onExport!(kind, selected).catch(cause => setCompositionError(String(cause))) } })) : []),
-    ...(props.moreItems ?? []),
+  ]
+  const exportItems: MenuEntry[] | undefined = composed.length || download ? [
+    ...(composed.length && download ? [{ kind: 'group' as const, label: '导出 · 合成一份' }] : []), ...composed,
+    ...(download ? [{ kind: 'group' as const, label: '下载 · 各自的原文件' }, { id: 'zip', label: chosen.length ? '把选中的卡片下载为 ZIP' : '下载为 ZIP', icon: <FolderArchive />, onSelect: download }] : []),
+    ...(props.moreItems?.length ? [{ kind: 'separator' as const }, ...props.moreItems] : []),
   ] : undefined
   const commands = useBoardCommands({ text: () => placeCard('text'), note: () => placeCard('note'), fit: () => fit(),
     zoom100: () => setCamera(c => zoomAt(c, { x: size.width / 2, y: size.height / 2 }, 1)), search: () => setSearch(current => current ?? ''),
@@ -295,7 +340,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     setHit(next); setSelected([node.id])
     setCamera(c => ({ ...c, x: size.width / 2 - (frame.x + frame.width / 2) * c.zoom, y: size.height / 2 - (frame.y + frame.height / 2) * c.zoom }))
   }
-  const selectionBox = (chosen.length || chosenEdges.length) && !editing && !trash && !menu && !capturing ? (() => {
+  const selectionBox = (chosen.length || chosenEdges.length) && !editing && !trash && !menu && !capturing && !cropping ? (() => {
     // Connectors alone: the bar sits over the picked lines (their end points stand in for card frames).
     const frames = chosen.length ? chosen.map(cardFrame) : chosenEdges.flatMap(edge => edgeEnds(byId.get(edge.fromNode)!, byId.get(edge.toNode)!, edge).map(point => ({ ...point, width: 0, height: 0 })))
     const left = Math.min(...frames.map(f => f.x)) * camera.zoom + camera.x, right = Math.max(...frames.map(f => f.x + f.width)) * camera.zoom + camera.x
@@ -303,7 +348,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     return { left: Math.max(180, Math.min(size.width - 180, (left + right) / 2)), top: Math.max(68, top - 52) }
   })() : null
   // More than one card picked: one outline around them all, with its own four arcs (Stillroom's selection hull).
-  const hull = carried.length > 1 && !editing && !trash && !capturing && tool === 'select'
+  const hull = carried.length > 1 && !editing && !trash && !capturing && !cropping && tool === 'select'
   const schedulable = props.onScheduleNode && chosen.length === 1 && ['text', 'note', 'document'].includes(chosen[0].ready.kind)
   function textOrLink(text: string, at: { x: number; y: number }): CanvasNode {
     const link = /^https?:\/\/\S+$/i.test(text), frame = { id: crypto.randomUUID(), x: Math.round(at.x - 130), y: Math.round(at.y - 40), width: 260, height: link ? 195 : 120 }
@@ -330,8 +375,10 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
       ...(props.onAskAI && chosen.length > 0 ? [{ id: 'ask', label: '问 AI', icon: <Sparkles />, disabled: busy || composing, onSelect: () => { void props.onAskAI!(chosen.map(n => n.id)).catch(fail) } }] : []),
       ...(schedulable ? [{ id: 'schedule', label: '安排日程…', icon: <CalendarPlus />, disabled: busy || composing, onSelect: () => props.onScheduleNode!(chosen[0]) }] : []),
       { id: 'duplicate', label: '创建副本', icon: <CopyPlus />, hint: '⌘D', disabled: busy || composing, onSelect: duplicate },
+      ...(croppable ? [{ id: 'crop', label: '裁剪', icon: <Crop />, hint: 'K', disabled: busy || composing, onSelect: () => void beginCrop(croppable) }] : []),
       ...subBoardItems(props.subBoards, chosen, busy || composing),
       ...(props.extraCardItems?.(chosen) ?? []), // [cv-media]
+      ...(download ? [{ id: 'zip', label: '下载为 ZIP', icon: <FolderArchive />, disabled: busy || composing, onSelect: download }] : []),
       { id: 'delete', label: '删除', icon: <Trash2 />, hint: 'Delete', danger: true, disabled: busy || composing, onSelect: recycle },
     ]
     const anchor: FloatAnchor = { left: menu.client.x, top: menu.client.y, right: menu.client.x, bottom: menu.client.y }
@@ -394,6 +441,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
       } catch (cause) { setCompositionError(String(cause)) }
     }}
     onContextMenu={event => {
+      if (cropping) { event.preventDefault(); return }
       if (busy || trash || editing || (event.target instanceof Element && event.target.closest('[data-canvas-ui]'))) return
       event.preventDefault(); gestures.cancel()
       const card = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-node-id]') : null
@@ -408,7 +456,11 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
     }}
     onKeyDown={shortcut} onKeyUp={e => { if (e.key === ' ') gestures.space = false }}
     onFocus={() => commands.focus()} onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) gestures.cancel() }}
-    onPointerDown={e => { if (!e.altKey) gestures.down(e.nativeEvent) }} onPointerUp={e => gestures.up(e.nativeEvent)}
+    onPointerDown={e => {
+      // Crop mode: a press anywhere outside the crop (the stage, another card, the chrome) applies it.
+      if (cropping) { if (!(e.target instanceof Element && e.target.closest('[data-crop-ui]'))) endCrop(true); return }
+      if (!e.altKey) gestures.down(e.nativeEvent)
+    }} onPointerUp={e => gestures.up(e.nativeEvent)}
     onPointerMove={e => {
       gestures.move(e.nativeEvent)
       // The hovered card shows its grips and its cluster's outline; a gesture in progress keeps what it started with.
@@ -438,10 +490,17 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
         group: () => void commit(groupOperations(chosen, crypto.randomUUID())), ungroup: () => void commit(ungroupOperations(canvas, selected)),
         layout: arrange, layer: placement => void commit(layerOperations(canvas, chosen.map(n => n.id), placement)),
         remove: recycle, textStyle: textual ? textStyle : undefined, ...subBoardBarActions(props.subBoards, chosen),
+        crop: croppable ? () => void beginCrop(croppable) : undefined,
         addToDocument: props.onAddToDocument ? () => void addToDocument() : undefined,
         askAI: props.onAskAI ? () => { void props.onAskAI!(chosen.map(n => n.id)).catch(fail) } : undefined,
         schedule: schedulable ? () => props.onScheduleNode!(chosen[0]) : undefined,
       }} />}
+    {cropping && cropNode && !cropStale && !capturing && (() => {
+      const { image, frame } = cropping.session, middle = (cropNode.x + frame.x + frame.width / 2) * camera.zoom + camera.x, top = (cropNode.y + frame.y) * camera.zoom + camera.y
+      return <CropBar left={Math.max(140, Math.min(size.width - 140, middle))} top={Math.max(68, top - 52)} whole={!sessionCrop(cropping.session)}
+        pixels={{ width: Math.max(1, Math.round(frame.width / image.width * cropping.natural.width)), height: Math.max(1, Math.round(frame.height / image.height * cropping.natural.height)) }}
+        onReset={() => setCropping(current => current && { ...current, session: wholePicture(current.session) })} onCancel={() => endCrop(false)} onDone={() => endCrop(true)} />
+    })()}
     {compositionError && !menu && <p role="alert" data-canvas-ui>{compositionError}</p>}
     {buffer.error && <div className="canvas-message" role="alert" data-canvas-ui>{buffer.error}</div>}
     {busy && <div className="canvas-message" role="status">正在处理…</div>}
@@ -464,7 +523,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
         </g> })}
       </svg>
       {active.nodes.map(node => <CanvasCard key={node.id} node={node} selected={selected.includes(node.id)} matched={matchIds.has(node.id)}
-        grouped={hull && selected.includes(node.id)} handles={tool === 'select' && !busy && !editing && !capturing && (hull ? false : selected.includes(node.id) || hover === node.id)} visible={visibleIds.has(node.id)} element={bindElement} resolveAsset={props.resolveAsset}
+        grouped={hull && selected.includes(node.id)} cropping={cropping?.id === node.id && !cropStale} handles={tool === 'select' && !busy && !editing && !capturing && !cropping && (hull ? false : selected.includes(node.id) || hover === node.id)} visible={visibleIds.has(node.id)} element={bindElement} resolveAsset={props.resolveAsset}
         content={visibleIds.has(node.id) ? props.renderCard?.(node) : undefined}
         editor={editing === node.id ? <CanvasEditorLifecycle.Provider value={registerFinish}><div data-canvas-ui className="canvas-editor">
           <div inert={closing}>{props.renderTextEditor?.({ node, commit, close: () => { void closeEditor() } })}</div>
@@ -475,6 +534,7 @@ export function CanvasSurface(props: CanvasSurfaceProps) {
         <svg className="canvas-hull" aria-hidden="true"><path d={silhouettePath(carried.map(cardFrame), 12, 28)} /></svg>
         <HullHandles box={expand(bounds(carried), 12)} />
       </>}
+      {cropping && cropNode && !cropStale && <CropOverlay node={cropNode} state={cropping} zoom={camera.zoom} onChange={session => setCropping(current => current && { ...current, session })} />}
       <svg className="canvas-overlay" ref={overlay} data-arrow-marker={marker} aria-hidden="true" />
     </div>}
   </div>
