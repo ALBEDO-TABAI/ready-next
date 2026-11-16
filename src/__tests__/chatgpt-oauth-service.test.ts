@@ -339,3 +339,30 @@ test('model discovery failure keeps the newly authorized credential for recovery
   assert.equal((await h.service.ensureReady([], PROXY_API_KEY)).state, 'ready')
   assert.equal(h.counts().loginCount, 1)
 })
+
+test('a login that can no longer be refreshed is answered as 401, not as a server outage', async () => {
+  const { reportRejectedLogin } = await import('../main/modules/settings-engine/chatgpt-oauth-service')
+  const libraryError = (message: string, status = 500) => Response.json({ error: { message, type: 'server_error' } }, { status })
+  for (const message of [
+    'OpenAI OAuth token request failed with HTTP 400. Your refresh token has already been used',
+    'OpenAI OAuth token request failed with HTTP 401.',
+    'OpenAI OAuth session not found.',
+  ]) {
+    const rejected = await reportRejectedLogin(libraryError(message))
+    assert.equal(rejected.status, 401, message)
+    const body = await rejected.json() as { error: { type: string; code: string; message: string } }
+    assert.equal(body.error.type, 'authentication_error')
+    assert.equal(body.error.code, 'chatgpt_oauth_login_rejected')
+    assert.doesNotMatch(body.error.message, /refresh token|HTTP/)
+  }
+  // The token service itself failing, or any other failure, stays what it was.
+  for (const response of [
+    libraryError('OpenAI OAuth token request failed with HTTP 503.'),
+    libraryError('fetch failed'),
+    libraryError('OpenAI OAuth session not found.', 400),
+    new Response('not json', { status: 500 }),
+    new Response('ok', { status: 200 }),
+  ]) {
+    assert.equal(await reportRejectedLogin(response), response)
+  }
+})

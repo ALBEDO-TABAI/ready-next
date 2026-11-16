@@ -413,7 +413,7 @@ export function createChatGptOAuthService(authFilePath: string): ChatGptOAuthSer
             },
           }, { status: 401 })
         }
-        return routing.run(request.headers, () => oauthHandler(request))
+        return routing.run(request.headers, async () => reportRejectedLogin(await oauthHandler(request)))
       })
       try {
         const resolvedModels = await resolveOAuthServerModels(
@@ -466,6 +466,32 @@ async function secureAuthStorage(authFilePath: string): Promise<void> {
   }
 }
 
+/**
+ * The proxy library wraps every failure in a 500 `server_error`, including "the saved login can no longer be
+ * refreshed". To a caller that is an outage: it is retried and reported as temporary, and re-login — the only
+ * thing that helps — is never suggested. A rejected or missing login is answered as 401 instead; a failure of
+ * the token service itself (5xx, network) stays a server error.
+ */
+export async function reportRejectedLogin(response: Response): Promise<Response> {
+  if (response.status !== 500) return response
+  let message = ''
+  try {
+    const payload = await response.clone().json() as { error?: { message?: unknown } }
+    message = typeof payload.error?.message === 'string' ? payload.error.message : ''
+  } catch {
+    // silent-catch: a 500 whose body is not the library's JSON error is passed on unchanged
+    return response
+  }
+  if (!/OpenAI OAuth (token request failed with HTTP 4\d\d|session not found)/.test(message)) return response
+  return Response.json({
+    error: {
+      message: 'ChatGPT 登录已失效，请重新登录。',
+      type: 'authentication_error',
+      code: 'chatgpt_oauth_login_rejected',
+    },
+  }, { status: 401 })
+}
+
 async function startAuthenticatedServer(
   fetchHandler: (request: Request) => Promise<Response>,
 ): Promise<Server> {
@@ -475,7 +501,9 @@ async function startAuthenticatedServer(
       hostname: '127.0.0.1',
       port: 10532,
     }) as Server
-    const onError = (error: Error) => reject(error)
+    const onError = (error: NodeJS.ErrnoException) => reject(error.code === 'EADDRINUSE'
+      ? new Error('本机 10532 端口已被另一个程序占用（可能是另一个正在运行的 Ready），ChatGPT 登录暂时用不了。关掉占用它的程序后再试。')
+      : error)
     server.once('error', onError)
     server.once('listening', () => {
       server.off('error', onError)
