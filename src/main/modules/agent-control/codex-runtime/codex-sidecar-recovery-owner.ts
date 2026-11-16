@@ -83,6 +83,18 @@ export class CodexSidecarRecoveryOwner {
     })
   }
 
+  /**
+   * Ingress was closed by a failure of a running turn (an unclassified closeout error) while this sidecar is
+   * healthy. Nothing short of a boot reopens it, and a relaunch of the app is exactly that boot. So the next
+   * send boots once here: the current sidecar is settled first, and the boot reconciles the failed run. If that
+   * boot fails for the same kind of reason it ends `blocked` and is not repeated — this is not a restart loop.
+   */
+  rebootAfterRuntimeFailure(): Promise<boolean> {
+    if (this.inFlight) return this.inFlight
+    if (this.snapshot.state !== 'ready') return this.ensureReadyForUserIngress()
+    return this.recover({ trigger: 'explicit_user_retry', prerequisite: this.deps.settleFailedAttempt() })
+  }
+
   stop(): void {
     this.stopped = true
     this.publish({

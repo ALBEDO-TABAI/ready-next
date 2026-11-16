@@ -204,3 +204,40 @@ test('a non-sidecar global failure is settled once and never converted into a re
   await assert.rejects(owner.ensureReadyForUserIngress(), /product_recovery_failed/)
   assert.equal(bootCount, 1)
 })
+
+test('a turn-time failure with a healthy sidecar reboots once on the next send, and a failed reboot is not repeated', async () => {
+  const events: string[] = []
+  let bootFails = false
+  const owner = new CodexSidecarRecoveryOwner({
+    maxAttempts: 3,
+    async bootOnce() {
+      events.push('boot')
+      if (bootFails) throw new Error('product_recovery_failed')
+      return true
+    },
+    async settleFailedAttempt() { events.push('settle') },
+    resetAttemptBudget() { events.push('reset-budget') },
+    shouldRetryFailure() { return false },
+  })
+  assert.equal(await owner.recover({ trigger: 'initial_start' }), true)
+  assert.equal(owner.readSnapshot().state, 'ready')
+  // The ordinary path does nothing for a ready sidecar: this is what left a failed runtime closed until relaunch.
+  assert.equal(await owner.ensureReadyForUserIngress(), true)
+  assert.deepEqual(events, ['boot'])
+
+  assert.equal(await owner.rebootAfterRuntimeFailure(), true)
+  assert.deepEqual(events, ['boot', 'settle', 'reset-budget', 'boot'], 'the live sidecar is settled before the new boot')
+  assert.equal(owner.readSnapshot().state, 'ready')
+
+  // Two sends at once share one reboot.
+  const [first, second] = await Promise.all([owner.rebootAfterRuntimeFailure(), owner.rebootAfterRuntimeFailure()])
+  assert.equal(first && second, true)
+  assert.equal(events.filter((event) => event === 'boot').length, 3)
+
+  bootFails = true
+  await assert.rejects(owner.rebootAfterRuntimeFailure(), /product_recovery_failed/)
+  assert.equal(owner.readSnapshot().state, 'blocked')
+  const bootsAfterFailure = events.filter((event) => event === 'boot').length
+  await assert.rejects(owner.rebootAfterRuntimeFailure(), /product_recovery_failed/)
+  assert.equal(events.filter((event) => event === 'boot').length, bootsAfterFailure, 'a blocked boot is not retried')
+})

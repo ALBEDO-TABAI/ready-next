@@ -152,7 +152,9 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
       if (live.lifecycle === 'stopping' || live.lifecycle === 'stopped') {
         throw new Error('codex_runtime_stopped')
       }
-      const committed = await sidecarRecoveryOwner.ensureReadyForUserIngress()
+      const committed = live.lifecycle === 'failed'
+        ? await sidecarRecoveryOwner.rebootAfterRuntimeFailure()
+        : await sidecarRecoveryOwner.ensureReadyForUserIngress()
       if (!committed) throw new Error('codex_runtime_retry_cancelled')
       gate.assertOpen()
     },
