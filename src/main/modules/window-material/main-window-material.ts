@@ -188,8 +188,8 @@ export function createWindowMaterialController(options: WindowMaterialController
   const applyInitial = (): void => {
     applyNonDarwinPlatformExtras(window, platform)
     if (platform === 'darwin') {
-      // Centred in the 52px top band, the first button over the rail's centre line (W2 §2).
-      window.setWindowButtonPosition({ x: 20, y: 20 })
+      // Centred in the 44px top band (rail width minus the frame gap), the first button over the rail's centre line (W2 §2).
+      window.setWindowButtonPosition({ x: 20, y: 16 })
     }
     sync()
   }

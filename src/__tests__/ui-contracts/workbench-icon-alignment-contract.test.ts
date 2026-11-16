@@ -7,16 +7,16 @@ import TopBar from '../../renderer/components/layout/TopBar'
 import StatusBar from '../../renderer/components/layout/StatusBar'
 import { WORKBENCH_EDGE_RAIL_SIZE, WORKBENCH_TOPBAR_HEIGHT, WORKBENCH_STATUSBAR_HEIGHT, WORKBENCH_TOPBAR_PADDING_RIGHT } from '../../renderer/modules/workbench/chrome'
 
-test('top and bottom bands share the 52px rail geometry; the wordmark alone sits left, today stays at the right and the bottom stays quiet', () => {
+test('top and bottom bands plus the frame gap equal the 52px rail; the wordmark alone sits left, today stays at the right and the bottom stays quiet', () => {
   assert.equal(WORKBENCH_EDGE_RAIL_SIZE, 52)
-  assert.equal(WORKBENCH_TOPBAR_HEIGHT, 52)
-  assert.equal(WORKBENCH_STATUSBAR_HEIGHT, 52)
+  assert.equal(WORKBENCH_TOPBAR_HEIGHT, 44)
+  assert.equal(WORKBENCH_STATUSBAR_HEIGHT, 44)
   const dom = new JSDOM(renderToStaticMarkup(createElement('main', null, createElement(TopBar), createElement(StatusBar))))
   try {
     const top = dom.window.document.querySelector<HTMLElement>('[data-shell-band="top"]')!
     const bottom = dom.window.document.querySelector<HTMLElement>('[data-shell-band="bottom"]')!
-    assert.equal(top.style.height, '52px')
-    assert.equal(bottom.style.height, '52px')
+    assert.equal(top.style.height, '44px')
+    assert.equal(bottom.style.height, '44px')
     assert.equal(top.style.paddingRight, `${WORKBENCH_TOPBAR_PADDING_RIGHT}px`)
     assert.ok(top.classList.contains('justify-between'))
     assert.ok(top.classList.contains('drag-region'))

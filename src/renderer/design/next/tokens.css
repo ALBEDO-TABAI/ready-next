@@ -129,7 +129,7 @@
   --rn-rail-glow-rest: drop-shadow(0 0 1px rgba(255, 255, 255, .86)) drop-shadow(0 0 3px rgba(255, 255, 255, .32)) drop-shadow(0 .5px .8px rgba(24, 26, 28, .26));
 
   /* ---- shell and density (DL11, DL11a) ---- */
-  --rn-rail-w: 52px; --rn-sidebar-w: 248px; --rn-assistant-w: 380px; --rn-band-h: 52px;
+  --rn-rail-w: 52px; --rn-sidebar-w: 248px; --rn-assistant-w: 380px; --rn-band-h: 44px;
   /* The work block (V11): every function area is one panel whose tools are its own head row. The head line is shared
      by the sidebar and the assistant; a framed body (the web page) sits inside the panel by the frame pad, its radius concentric. */
   --rn-frame-gap: 8px; --rn-panel-head-h: 44px; --rn-panel-pad: 6px; --rn-r-panel-inset: 14px;

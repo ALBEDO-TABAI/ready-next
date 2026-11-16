@@ -31,7 +31,7 @@ export const G = {
   /** Day names sit in one list row, in the week and in the month. */
   colHeader: ROW_H,
   monthColHeader: ROW_H,
-  /** The all-day strip is one control high with a single row of bars; with two rows it is a band (52, --rn-band-h). */
+  /** The all-day strip is one control high with a single row of bars; with two rows it is 52 high. */
   allDayBase: CONTROL_H,
   allDayPadTop: S1,
   allDayChip: CHIP.barHeight,

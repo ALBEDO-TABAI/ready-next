@@ -106,7 +106,7 @@ test('calendar grid metrics come from Ready design tokens (M8: no measured refer
   assert.equal(G.colHeader, px('--rn-row-h'))
   assert.equal(G.monthColHeader, px('--rn-row-h'))
   assert.equal(G.allDayBase, px('--rn-control-h'))
-  assert.equal(allDayHeight(2), px('--rn-band-h'))
+  assert.equal(allDayHeight(2), 52)
   assert.equal(G.defaultHour, px('--rn-s14'))
   assert.equal(G.defaultHour / 2, px('--rn-control-h'), 'half an hour is one control high')
   assert.equal(G.zoneColumn, px('--rn-s14'))

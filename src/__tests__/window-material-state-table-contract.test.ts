@@ -188,7 +188,7 @@ test('controller preserves constructor-applied darwin material without duplicate
   controller.sync()
   assert.deepEqual(setters.bg, [], 'constructor-applied transparent bg should not be set again')
   assert.deepEqual(setters.vibrancy, [], 'constructor-applied vibrancy should not be set again')
-  assert.deepEqual(setters.buttonPos, [{ x: 20, y: 20 }], 'traffic lights are centered in the 52px top band')
+  assert.deepEqual(setters.buttonPos, [{ x: 20, y: 16 }], 'traffic lights are centered in the 44px top band')
 })
 
 test('验证 2 — controller.sync() on darwin is no-op regardless of theme/skin (no setter calls after applyInitial)', () => {

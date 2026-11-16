@@ -8,8 +8,9 @@ export const SHELL_RAIL_WIDTH = 52
 export const SHELL_FRAME_GAP = 8
 /** While the assistant is not docked its header buttons stand in a right strip as wide as the rail (V17). */
 export const SHELL_ASSISTANT_STRIP_WIDTH = SHELL_RAIL_WIDTH
-/** Top and bottom bands are equally tall (DL11a) and as tall as the rail is wide. */
-export const SHELL_BAND_HEIGHT = 52
+/** Top and bottom bands are equally tall (DL11a). A band and the frame gap under it together are as tall as the rail
+ *  is wide, so the panels stand the same distance from the window's top, bottom and sides. */
+export const SHELL_BAND_HEIGHT = SHELL_RAIL_WIDTH - SHELL_FRAME_GAP
 export const SHELL_SIDEBAR_WIDTH = { default: 248, min: 200, max: 420 } as const
 export const SHELL_ASSISTANT_WIDTH = { default: 380, min: 320, max: 560 } as const
 /** The content column never gets narrower than this (G1, W2 §2.5). */

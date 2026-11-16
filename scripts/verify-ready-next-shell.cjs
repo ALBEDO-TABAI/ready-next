@@ -77,7 +77,7 @@ async function railSwitch(page, label, mode) {
 }
 
 // V15: the content box is the same in every mode (60px from the top and the bottom of the window), and the sidebar's,
-// the panel's and the assistant's header rows lie on one line: each starts at y 60 and is 44px tall.
+// the panel's and the assistant's header rows lie on one line: each starts at y 52 (a 44px band plus the 8px frame gap: the rail's width) and is 44px tall.
 async function headLine(page) {
   return page.evaluate(() => {
     const shown = el => Boolean(el) && el.getBoundingClientRect().height > 0 && getComputedStyle(el).visibility !== 'hidden'
@@ -162,7 +162,7 @@ async function main() {
           : tab.selected === 'false' && tab.lit === 0 && tab.rest === 1)), JSON.stringify(lit))
     }
     // V17: the assistant's header buttons. Docked: the corner button is the right end of its head row and the four others
-    // stand in that row to its left, on the head line (centre y 82). Collapsed: the shell keeps a strip as wide as the rail,
+    // stand in that row to its left, on the head line (centre y 74). Collapsed: the shell keeps a strip as wide as the rail,
     // the corner button stays exactly where it was, and the same four buttons stand below it in a column on the rail's pitch.
     const pitch = 36
     const docked = await assistantTools(page, true)
@@ -171,13 +171,13 @@ async function main() {
     check('Tab collapses the assistant to zero width', collapsed)
     await harness.sleep(600)
     const strip = await assistantTools(page)
-    const inRow = docked.beads.every((bead, i) => bead && bead.y === 82 && bead.x === docked.W - 26 - pitch * (i + 1) && bead.w === 32)
+    const inRow = docked.beads.every((bead, i) => bead && bead.y === 74 && bead.x === docked.W - 26 - pitch * (i + 1) && bead.w === 32)
     // The beads move as one train: the row read left to right is the column read top to bottom (bead 4 first).
-    const inColumn = strip.beads.every((bead, i) => bead && bead.x === strip.W - 26 && bead.y === 82 + pitch * (4 - i) && bead.w === 32)
+    const inColumn = strip.beads.every((bead, i) => bead && bead.x === strip.W - 26 && bead.y === 74 + pitch * (4 - i) && bead.w === 32)
     const cornerStill = Boolean(docked.corner && strip.corner) && docked.corner.x === strip.corner.x && docked.corner.y === strip.corner.y
-      && docked.corner.x === docked.W - 26 && docked.corner.y === 82 && docked.corner.w === 32
+      && docked.corner.x === docked.W - 26 && docked.corner.y === 74 && docked.corner.w === 32
     check('V17 collapsed, the shell keeps a 52px strip on the right and the rail has no assistant button', strip.strip === 52 && strip.railAssistant === 0 && docked.railAssistant === 0, JSON.stringify({ strip: strip.strip, rail: strip.railAssistant }))
-    check('V17 the corner button keeps one place (centre at window − 26, y 82) and flips 收起助手 / 展开助手',
+    check('V17 the corner button keeps one place (centre at window − 26, y 74) and flips 收起助手 / 展开助手',
       cornerStill && docked.corner.label.startsWith('收起助手') && docked.corner.expanded === 'true' && strip.corner.label.startsWith('展开助手') && strip.corner.expanded === 'false',
       JSON.stringify({ docked: docked.corner, collapsed: strip.corner }))
     check('V17 the same four buttons stand in the head row when docked and in a column down the strip when collapsed',
@@ -200,7 +200,7 @@ async function main() {
     check('the corner button brings the assistant back', await waitFor(page, () => (document.querySelector('[data-chat-panel-root]')?.getBoundingClientRect().width ?? 0) > 300))
     await harness.sleep(600)
     const back = await assistantTools(page)
-    check('V17 expanding brings the same buttons back into the head row', back.same && back.beads.every((bead, i) => bead && bead.y === 82 && bead.x === back.W - 26 - pitch * (i + 1)), JSON.stringify(back.beads))
+    check('V17 expanding brings the same buttons back into the head row', back.same && back.beads.every((bead, i) => bead && bead.y === 74 && bead.x === back.W - 26 - pitch * (i + 1)), JSON.stringify(back.beads))
 
     // ⌘1–4 and ⌘B.
     for (const [key, mode] of [['1', 'browser'], ['2', 'document'], ['3', 'rss'], ['4', 'calendar']]) {
@@ -216,14 +216,14 @@ async function main() {
       const frame = await shellFrame(page)
       check(`S1 ${mode}: one sidebar showing the ${mode} navigator`, frame.sidebars === 1 && frame.shown.length === 1 && frame.shown[0] === mode && frame.inside, JSON.stringify({ sidebars: frame.sidebars, shown: frame.shown }))
       check(`S1 ${mode}: no navigator left inside a mode panel`, frame.leftovers === 0, String(frame.leftovers))
-      check(`S8 ${mode}: both bands 52px and the rail starts under the top band`, frame.bands[0] === 52 && frame.bands[1] === 52 && frame.railTop === 52, `${frame.bands.join('/')} rail ${frame.railTop}`)
+      check(`S8 ${mode}: both bands 44px and the rail starts under the top band`, frame.bands[0] === 44 && frame.bands[1] === 44 && frame.railTop === 44, `${frame.bands.join('/')} rail ${frame.railTop}`)
       check(`S5 ${mode}: one entry each for search, settings and calendar; mode switching in the rail plus the composer's slot (V20); no backlinks entry`,
         frame.search === 1 && frame.settings === 1 && frame.calendar === 1 && frame.browser === 1 && frame.backlinks === 0 && frame.modeTabs === (frame.assistantShown ? 1 : 0),
         JSON.stringify({ search: frame.search, settings: frame.settings, calendar: frame.calendar, browser: frame.browser, backlinks: frame.backlinks, modeTabs: frame.modeTabs, assistantShown: frame.assistantShown }))
       const line = await headLine(page)
-      const onLine = r => Boolean(r) && r.top === 60 && r.h === 44
-      check(`V15 ${mode}: the panel box is 60px from both window edges; sidebar, panel and assistant heads share one 44px line at y 60`,
-        line.panel && line.panel.top === 60 && line.H - line.panel.bottom === 60 && onLine(line.nav) && onLine(line.head) && onLine(line.chat), JSON.stringify(line))
+      const onLine = r => Boolean(r) && r.top === 52 && r.h === 44
+      check(`V15 ${mode}: the panel box is 52px (the rail's width) from both window edges; sidebar, panel and assistant heads share one 44px line at y 52`,
+        line.panel && line.panel.top === 52 && line.H - line.panel.bottom === 52 && onLine(line.nav) && onLine(line.head) && onLine(line.chat), JSON.stringify(line))
       // V18, V25: the docked sidebar is a panel of the same glass: the content panel's top and bottom, 20px corners, right
       // at the rail's edge and 8px from the content panel.
       const side = await page.evaluate(() => {
@@ -235,8 +235,8 @@ async function main() {
         return { H: window.innerHeight, panel: slot.classList.contains('rn-panel'), painted: cs.backgroundColor !== 'rgba(0, 0, 0, 0)', top: Math.round(r.top), bottom: Math.round(r.bottom),
           radius: cs.borderTopLeftRadius, fromRail: Math.round(r.left - rail.getBoundingClientRect().right), toContent: Math.round(p.left - r.right) }
       })
-      check(`V18 ${mode}: the docked sidebar is a panel (y 60 to H − 60, radius 20, at the rail's edge, 8px from the content panel)`,
-        side && side.panel && side.painted && side.top === 60 && side.H - side.bottom === 60 && side.radius === '20px' && side.fromRail === 0 && side.toContent === 8, JSON.stringify(side))
+      check(`V18 ${mode}: the docked sidebar is a panel (y 52 to H − 52, radius 20, at the rail's edge, 8px from the content panel)`,
+        side && side.panel && side.painted && side.top === 52 && side.H - side.bottom === 52 && side.radius === '20px' && side.fromRail === 0 && side.toContent === 8, JSON.stringify(side))
       // V22: nothing between a panel and the shell row clips its soft shadow (28px blur): every clipping ancestor of the
       // content panel and of the sidebar's panel is overflow: clip with at least that much margin, none contains paint.
       const clips = await page.evaluate(() => {
@@ -356,7 +356,7 @@ async function main() {
       return card && strip && corner ? { cardRight: Math.round(card.right), cardTop: Math.round(card.top), stripLeft: Math.round(strip.left), stripWidth: Math.round(strip.width), corner: Math.round(corner.x + corner.width / 2), W: window.innerWidth } : null
     })
     check('V17 the narrow-window assistant card opens beside the strip (8px from it) and the corner button stays in the strip',
-      drawerSide && drawerSide.stripWidth === 52 && drawerSide.cardRight === drawerSide.stripLeft - 8 && drawerSide.cardTop === 60 && drawerSide.corner === drawerSide.W - 26, JSON.stringify(drawerSide))
+      drawerSide && drawerSide.stripWidth === 52 && drawerSide.cardRight === drawerSide.stripLeft - 8 && drawerSide.cardTop === 52 && drawerSide.corner === drawerSide.W - 26, JSON.stringify(drawerSide))
     // A click on the content closes the drawer (W2 §2.5); Tab inside the composer keeps moving focus.
     const content = await page.locator('[data-shell-region="content"]').boundingBox()
     await page.mouse.click(content.x + 40, content.y + 20)
@@ -410,7 +410,7 @@ async function main() {
     const webBack = await waitNative(app, true)
     check('V14 the narrow-window sidebar is a float card aligned with the panel, inset from the rail, round on all four corners',
       atStart.dock === 'floating' && atStart.open === 'false' && atStart.visibility === 'hidden' && opened.float && opened.overlay === 'shell-sidebar'
-        && opened.top === 60 && opened.H - opened.bottom === 60 && opened.left === 60 && opened.radii.every(radius => radius === '20px'),
+        && opened.top === 52 && opened.H - opened.bottom === 52 && opened.left === 60 && opened.radii.every(radius => radius === '20px'),
       JSON.stringify({ atStart, opened }))
     check('V14 the current rail icon and ⌘B open the card; Esc, a press outside, the rail icon and ⌘B close it; leaving it does not',
       openedByRail && keptOnLeave && closedByEsc && openedByKey && closedByOutside && closedByRail && closedByKey,
@@ -420,7 +420,7 @@ async function main() {
     // The brand dot in the top-right corner opens 今日 (the document mode's system tab, W6 §5).
     await harness.setContentSize(app, page, 1440, 900)
     const dot = await page.locator('[data-shell-band="top"] button[aria-label="今日"]').boundingBox()
-    check('the brand dot sits in the top-right corner', dot && dot.x > 1440 - 140 && dot.y < 52, JSON.stringify(dot))
+    check('the brand dot sits in the top-right corner', dot && dot.x > 1440 - 140 && dot.y < 44, JSON.stringify(dot))
     await page.locator('[data-shell-band="top"] button[aria-label="今日"]').click()
     check('the brand dot opens 今日', await waitFor(page, () => (document.querySelector('section.today')?.getBoundingClientRect().width ?? 0) > 0))
 
@@ -442,12 +442,12 @@ async function main() {
     })
     check('V12, V24 the wordmark "Ready" leads the top band at x 100, in the wordmark font at 22px / 400, raised 1.3px off the band centre',
       Boolean(wordmark) && wordmark.text === 'Ready' && wordmark.family === wordmark.token && wordmark.loaded && wordmark.size === '22px' && wordmark.weight === '400'
-        && wordmark.first && wordmark.left === 100 && Math.abs(wordmark.centre - (26 - 1.3)) <= 0.2,
+        && wordmark.first && wordmark.left === 100 && Math.abs(wordmark.centre - (22 - 1.3)) <= 0.2,
       JSON.stringify(wordmark))
 
     // DL11a: the two bands are equally tall.
     const bands = await page.evaluate(() => ['top', 'bottom'].map(side => Math.round(document.querySelector(`[data-shell-band="${side}"]`)?.getBoundingClientRect().height ?? -1)))
-    check('the top and bottom bands are equally tall (52px)', bands[0] === 52 && bands[1] === 52, bands.join('/'))
+    check('the top and bottom bands are equally tall (44px: band + gap = the 52px rail)', bands[0] === 44 && bands[1] === 44, bands.join('/'))
 
     // S6: settings are honest — no sample data, the W2 §3.2 groups, the new sections render, and every
     // toggle reads back after a restart.
