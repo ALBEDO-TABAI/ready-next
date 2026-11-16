@@ -879,7 +879,12 @@ export class AgentControlRuntime extends EventEmitter {
     const bindPort = this.parsePortSetting(this.db.settings.getSetting('sidecar_bind_port'))
     this.sidecar.setBindConfig(bindHost, bindPort)
     if (!sidecarEnabled || !autostart) return
-    await this.startSidecar()
+    // Remote channels are not part of answering in the app: on a fresh profile their sidecar builds a Python
+    // environment first, which can take minutes, and the chat handlers register only when start() returns.
+    // The start stays owned: `sidecarStartup` holds it, and stop() aborts and awaits it through the manager.
+    void this.startSidecar().catch((error) => {
+      console.error('[runtime] remote channel sidecar start failed:', error instanceof Error ? error.message : String(error))
+    })
   }
 
   async stop(): Promise<void> {

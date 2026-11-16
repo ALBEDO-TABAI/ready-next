@@ -51,6 +51,19 @@ function fullJitterDelayMs(retryOrdinal: number): number {
   return Math.floor(Math.random() * (ceiling + 1))
 }
 
+/**
+ * A 429 that reports a spent quota or balance is not a rate limit: waiting does not refill it, and retrying it
+ * holds the turn open for the whole retry schedule before the person hears about it.
+ */
+async function saysQuotaIsSpent(response: Response): Promise<boolean> {
+  try {
+    return /insufficient_quota|billing_hard_limit|insufficient[ _]balance/i.test((await response.clone().text()).slice(0, 8192))
+  } catch {
+    // silent-catch: an unreadable error body is treated as an ordinary rate limit and retried as before
+    return false
+  }
+}
+
 export async function waitForControlledGatewayRetry(input: {
   retryOrdinal: number
   response?: Response | null
@@ -117,6 +130,7 @@ export async function fetchCodexUpstreamWithRetry(input: {
         if (timeout) clearTimeout(timeout)
       })
       const retryable = isRetryableProviderHttpStatus(response.status)
+        && !(response.status === 429 && await saysQuotaIsSpent(response))
       if (!retryable || attempt >= input.maxRetries) {
         keepAbortLink = true
         return { response, retriesUsed: attempt }

@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 import test from 'node:test'
 import { createCodexDownstream } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-common'
+import { parseMetadata } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-request'
 
 // Probes for what the gateway relies on in the pinned runtime's model wire: a quiet stream ends at the SSE idle
 // timeout unless a `ready.keepalive` event arrives, and the backend's turn-state token returns within a turn.
@@ -33,7 +34,7 @@ function finishResponse(response: ServerResponse, body: Record<string, unknown>)
   response.end()
 }
 
-async function withPinnedRuntime(fixture: Fixture, run: (runTurn: (text: string) => Promise<TerminalTurn & {
+async function withPinnedRuntime(fixture: Fixture, run: (runTurn: (text: string, turnParams?: Record<string, unknown>) => Promise<TerminalTurn & {
   toolCalls: number
 }>) => Promise<void>): Promise<void> {
   const manifest = JSON.parse(readFileSync('assets/codex-runtime/runtime-manifest.json', 'utf8'))
@@ -115,10 +116,10 @@ supports_websockets = false
         inputSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'],
           additionalProperties: false },
       }] })
-    await run(async (text) => {
+    await run(async (text, turnParams = {}) => {
       const before = toolCalls
       const started = await request<{ turn: { id: string } }>('turn/start', { threadId: thread.thread.id,
-        input: [{ type: 'text', text, text_elements: [] }] })
+        input: [{ type: 'text', text, text_elements: [] }], ...turnParams })
       const turn = terminal.get(started.turn.id)
         ?? await new Promise<TerminalTurn>((resolve) => waiters.set(started.turn.id, resolve))
       return { ...turn, toolCalls: toolCalls - before }
@@ -174,4 +175,35 @@ test('pinned runtime returns the backend turn-state token on the rest of the tur
   })
   // Each turn makes a tool round, then answers; the second request of each turn carries its first token.
   assert.deepEqual(seen, [null, 'STATE_1', null, 'STATE_3'])
+})
+
+test('the metadata the pinned runtime sends for a Ready turn passes the gateway, with and without a reasoning effort', { timeout: 60_000 }, async () => {
+  // The gateway compares this metadata key by key. A key the runtime adds only under some setting (it repeats a
+  // turn's reasoning effort) refuses every such turn, and no fixture-built request can show that.
+  const refused: string[] = []
+  const efforts: Array<string | null> = []
+  await withPinnedRuntime((_request, body, response) => {
+    try {
+      const metadata = parseMetadata(body as Parameters<typeof parseMetadata>[0])
+      efforts.push(typeof metadata.raw.reasoning_effort === 'string' ? metadata.raw.reasoning_effort : null)
+    } catch (error) {
+      refused.push(error instanceof Error ? error.message : String(error))
+    }
+    response.writeHead(200, { 'content-type': 'text/event-stream' })
+    sendEvent(response, { type: 'response.created', response: { id: 'response' } })
+    finishResponse(response, body)
+  }, async (runTurn) => {
+    for (const [index, effort] of [null, 'low', 'high'].entries()) {
+      const turn = await runTurn(`EFFORT_${effort}`, {
+        clientUserMessageId: `message-${index}`,
+        collaborationMode: { mode: 'default', settings: { model: 'ready-e0-model', reasoning_effort: effort, developer_instructions: null } },
+        environments: [],
+        additionalContext: {},
+        responsesapiClientMetadata: { readyRunId: `run-${index}`, toolSurfaceDigest: 'a', turnContractDigest: 'b', upstreamProfileSnapshotDigest: 'c' },
+      })
+      assert.equal(turn.status, 'completed', JSON.stringify(turn.error))
+    }
+  })
+  assert.deepEqual(refused, [])
+  assert.deepEqual(efforts, [null, null, 'low', 'low', 'high', 'high'])
 })

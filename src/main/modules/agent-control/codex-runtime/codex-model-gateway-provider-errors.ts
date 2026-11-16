@@ -1,4 +1,4 @@
-import { CodexModelGatewayError, isRecord, type JsonObject } from './codex-model-gateway-common'
+import { BEARER_CREDENTIAL_SPAN, CodexModelGatewayError, isRecord, type JsonObject } from './codex-model-gateway-common'
 import type { CodexModelGatewayFailureEvidence } from './codex-model-gateway-contract'
 
 export function sanitizedProviderError(text: string, credential: string): {
@@ -35,10 +35,8 @@ export function sanitizedProviderError(text: string, credential: string): {
 
 export function sanitizeProviderText(value: string, credential: string): string {
   const withoutCredential = credential ? value.split(credential).join('[REDACTED]') : value
-  return withoutCredential.replace(
-    /Bearer\s+(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s"']+)/gi,
-    'Bearer [REDACTED]',
-  )
+  // Only what is shaped like a credential: an answer may say "the ring bearer walked in".
+  return withoutCredential.replace(BEARER_CREDENTIAL_SPAN, 'Bearer [REDACTED]')
 }
 
 export function assertNativeProviderIdentitySafe(payload: JsonObject, credential: string): void {

@@ -404,7 +404,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
                 {sendConsequence.omittedItemCount === 1 ? '上一项' : `前面${sendConsequence.omittedItemCount}项`}
                 不会作为当前任务带入；如仍需要，请完整重述。
                 {sendConsequence.resourceReattachItemCount > 0
-                  && `其中${sendConsequence.resourceReattachItemCount}项需重新附加资源。`}
+                  && `其中${sendConsequence.resourceReattachItemCount}项用到了当时的页面或附件，需要时请重新带上。`}
               </div>
             )}
 

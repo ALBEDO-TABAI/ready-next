@@ -43,16 +43,13 @@ export class WorktreePool {
     this.worktreesDir = join(this.basePath, '.worktrees')
     this.agentsDir = join(this.basePath, 'agents')
     this.ensureDirectories()
-  }
 
-  /**
-   * The repository is created when a worktree is first asked for, not at launch: a profile that is a git
-   * repository changes what the Codex runtime sends for every thread working under it.
-   */
-  private ensureGitRepo(): void {
-    if (this.useMock || this.gitAvailable !== null) return
-    this.gitAvailable = this.checkGitAvailability()
-    if (this.gitAvailable) this.initGitRepo()
+    if (!this.useMock) {
+      this.gitAvailable = this.checkGitAvailability()
+      if (this.gitAvailable) {
+        this.initGitRepo()
+      }
+    }
   }
 
   /**
@@ -111,7 +108,6 @@ export class WorktreePool {
     const branch = `agent/${agentName}-${taskId}`
     const path = join(this.worktreesDir, `${agentName}-${taskId}`)
 
-    this.ensureGitRepo()
     // Try git worktree if available
     if (!this.useMock && this.gitAvailable) {
       try {

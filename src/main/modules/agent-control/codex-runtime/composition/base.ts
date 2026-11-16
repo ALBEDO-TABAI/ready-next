@@ -20,7 +20,7 @@ import { CodexThreadArchiveIntentStore, CodexDurableThreadArchiveDispatchPort } 
 import { CodexThreadArchiveCleanupOwner } from '../codex-thread-archive-owner'
 import { CodexToolActionJournal } from '../codex-tool-action-journal'
 import { CodexTurnCollector } from '../codex-turn-collector'
-import { appendCodexUpstreamFailureLog } from '../codex-upstream-failure-log'
+import { appendCodexGatewayRefusalLog, appendCodexUpstreamFailureLog } from '../codex-upstream-failure-log'
 import type { CodexCompositionLive } from './live-state'
 import { readE5ProofSentinels, activeProfile, stableErrorCode, isoNow, type PreparedDetail, type FactoryInput } from './support'
 import type { PendingEngineTerminalFinalization } from './types'
@@ -126,6 +126,7 @@ export function createCodexCompositionBase(input: FactoryInput, live: CodexCompo
     authority: new CodexDatabaseModelGatewayAuthority(gatewayRepository),
     credentials: credentialStore,
     onUpstreamFailure: appendCodexUpstreamFailureLog,
+    onRequestRefused: appendCodexGatewayRefusalLog,
     ...(proofCaptureEnabled ? {
       proofSentinels: readE5ProofSentinels(),
       onValidatedRequest(capture) {

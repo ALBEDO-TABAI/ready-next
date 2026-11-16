@@ -102,6 +102,8 @@ export class CodexModelGateway {
     downstreamKeepaliveMs?: number
     onUpstreamAttempt?: (attempt: number) => void
     onUpstreamFailure?: (diagnostic: CodexModelGatewayUpstreamFailureDiagnostic) => void
+    /** A request Ready's own checks refused. Without it a refusal leaves no trace outside the turn's database row. */
+    onRequestRefused?: (refusal: { code: string; status: number }) => void
     proofSentinel?: string
     proofSentinels?: readonly string[]
     onValidatedRequest?: (capture: CodexModelGatewayValidatedRequestCapture) => void | Promise<void>
@@ -256,6 +258,17 @@ export class CodexModelGateway {
       admitted = true
       await this.forward(request, response, capability)
     } catch (error) {
+      const refusal = error instanceof CodexModelGatewayError ? error : null
+      if (!refusal || refusal.responseError.type === 'gateway_error') {
+        try {
+          this.deps.onRequestRefused?.({
+            code: refusal?.code ?? 'gateway_request_unbound',
+            status: refusal?.status ?? 409,
+          })
+        } catch {
+          // silent-catch: diagnostics never change the request outcome; a throwing onRequestRefused observer is ignored
+        }
+      }
       sendError(response, error)
     } finally {
       if (admitted) this.activeRequests -= 1

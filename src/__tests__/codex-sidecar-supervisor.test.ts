@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { spawn } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import { realpathSync } from 'node:fs'
 import { PassThrough } from 'node:stream'
@@ -39,6 +40,30 @@ test('macOS process evidence preserves the full current executable path', async 
   assert.ok(self)
   assert.equal(realpathSync(self.executablePath), realpathSync(process.execPath))
   assert.match(self.processStartIdentity, new RegExp(`^${process.pid}:`))
+})
+
+test('process evidence does not depend on the locale the app was launched in', async (t) => {
+  // `ps` prints non-ASCII bytes as `M-g…` with no locale and a four-token start time under zh_CN.
+  const stateDir = '/Users/某人/Library/Application Support/Ready Next/codex-runtime'
+  const child = spawn('/bin/sleep', ['30'], { env: { READY_CODEX_PROCESS_LEASE_ID: 'lease-locale', READY_CODEX_STATE_DIR: stateDir } })
+  const saved = { LANG: process.env.LANG, LC_ALL: process.env.LC_ALL }
+  t.after(() => {
+    child.kill('SIGKILL')
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  })
+  for (const locale of [undefined, 'zh_CN.UTF-8', 'C']) {
+    delete process.env.LC_ALL
+    if (locale === undefined) delete process.env.LANG
+    else process.env.LANG = locale
+    const rows = await new MacCodexProcessInspector().list()
+    const owned = rows.find((row) => row.pid === child.pid)
+    assert.equal(owned?.markers.stateDir, stateDir, `state dir marker under LANG=${locale}`)
+    assert.match(owned.processStartIdentity, /^\d+:\w{3} \w{3} +\d+ [\d:]{8} \d{4}$/, `start identity under LANG=${locale}`)
+    assert.ok(owned.executableSha256, 'the owned executable is hashed')
+  }
 })
 
 test('process evidence keeps an executable path with spaces whole (an app named "Ready Next")', () => {

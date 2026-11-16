@@ -271,18 +271,16 @@ test('ordinal-fork product requests pass the gateway metadata and frozen binding
         /gateway_forked_from_ordinal_exclusive_invalid/)
     }
     assert.throws(() => parse({ forked_from_thread_id: 'direct-parent', unknown_lineage: 0 }), /gateway_turn_metadata_shape_invalid/)
-    // A profile inside a git repository: the runtime reports the repository, the gateway accepts and drops it.
-    const inRepository = parse({ workspaces: {
-      '/profile': { latest_git_commit_hash: 'f4c3d4f9', has_changes: true, associated_remote_urls: { origin: 'https://example.invalid/r.git' } },
-      '/bare': {},
-    } })
-    assert.equal('workspaces' in inRepository.raw, false)
-    assert.equal(inRepository.threadId, parse({}).threadId)
-    for (const invalid of [null, 'repo', [], { '/profile': 'x' }, { '/profile': { has_changes: 'no' } },
-      { '/profile': { latest_git_commit_hash: 1 } }, { '/profile': { associated_remote_urls: { origin: 1 } } },
-      { '/profile': { extra: true } }]) {
-      assert.throws(() => parse({ workspaces: invalid }), /gateway_turn_metadata_workspaces_invalid/)
+    // A turn with a reasoning effort: the runtime repeats the effort in its metadata.
+    const reasoningBefore = request.reasoning
+    request.reasoning = { effort: 'high', summary: 'auto' }
+    assert.equal(parse({ reasoning_effort: 'high' }).raw.reasoning_effort, 'high')
+    for (const invalid of ['low', '', null, 3]) {
+      assert.throws(() => parse({ reasoning_effort: invalid }), /gateway_turn_metadata_reasoning_effort_invalid/)
     }
+    request.reasoning = { summary: 'auto' }
+    assert.throws(() => parse({ reasoning_effort: 'high' }), /gateway_turn_metadata_reasoning_effort_invalid/)
+    request.reasoning = reasoningBefore
   }
 })
 
@@ -1051,7 +1049,9 @@ test('malformed signed Chat tool controls fail before upstream contact', async (
     maxRetries: 0,
   })
   let binding: CodexModelGatewayBinding | null = null
+  const refusals: string[] = []
   const gateway = new CodexModelGateway({
+    onRequestRefused: (refusal) => { refusals.push(`${refusal.code}:${refusal.status}`) },
     bearerToken: 'local-token',
     authority: {
       async resolve(input) {
@@ -1119,6 +1119,7 @@ test('malformed signed Chat tool controls fail before upstream contact', async (
       clientMetadata['x-codex-turn-metadata'] = JSON.stringify(inner)
     })
     assert.match(innerExtra.body, /gateway_turn_metadata_shape_invalid/)
+    assert.equal(refusals.at(-1), 'gateway_turn_metadata_shape_invalid:400', 'a refusal is reported with its code')
     assert.doesNotMatch(innerExtra.body, /must-not-cross/)
     const identityMismatch = await call((request) => {
       ;(request.client_metadata as JsonObject).thread_id = 'forged-thread'
@@ -3735,4 +3736,40 @@ test('Gateway forwards exact multi-tail Retry and rejects missing, altered and c
       assert.equal(preparedReceipts, 1)
     }
   } finally { await gateway.stop(); await close(upstream) }
+})
+
+test('the bearer check on tool arguments stops credentials, not the word', async () => {
+  const { carriesBearerCredential } = await import('../main/modules/agent-control/codex-runtime/codex-model-gateway-common')
+  for (const ordinary of ['{"query":"ring bearer gifts"}', '{"query":"Bearer token 是什么"}',
+    '{"query":"bearer authentication explained"}', '{"q":"the standard-bearer"}']) {
+    assert.equal(carriesBearerCredential(ordinary), false, ordinary)
+  }
+  for (const secret of ['{"h":"Bearer sk-live_abc123DEF456"}', "{\"token\":\"Bearer 'other-token'\"}",
+    '{"h":"bearer   eyJhbGciOi.J9"}', '{"h":"Bearer \\"quoted value\\""}']) {
+    assert.equal(carriesBearerCredential(secret), true, secret)
+  }
+})
+
+test('a dated snapshot of the requested model is the requested model; another model is a reroute', async () => {
+  const { isRequestedUpstreamModel } = await import('../main/modules/agent-control/codex-runtime/codex-model-gateway-common')
+  for (const [answered, requested] of [['gpt-4o', 'gpt-4o'], ['gpt-4o-2024-08-06', 'gpt-4o'],
+    ['claude-sonnet-4-5-20250929', 'claude-sonnet-4-5']]) {
+    assert.equal(isRequestedUpstreamModel(answered, requested), true, answered)
+  }
+  for (const [answered, requested] of [['gpt-4o-mini', 'gpt-4o'], ['gpt-4o-mini-2024-07-18', 'gpt-4o'], ['gpt-4', 'gpt-4o'],
+    ['gpt-4o-', 'gpt-4o'], ['other', 'gpt-4o'], [null, 'gpt-4o'], ['gpt-4o', '']]) {
+    assert.equal(isRequestedUpstreamModel(answered, requested as string), false, String(answered))
+  }
+})
+
+test('a long answer whose chunks all carry null usage and finish_reason is not a structural storm', async () => {
+  const text = Array.from({ length: 5000 }, () => ({ choices: [{ index: 0, delta: { content: 'x' }, finish_reason: null }], usage: null }))
+  const long = await convertChat([
+    { choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }], usage: null },
+    ...text,
+    { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: null },
+    { choices: [], usage: { prompt_tokens: 1, completion_tokens: 5000, total_tokens: 5001 } },
+  ])
+  assert.doesNotMatch(long, /gateway_chat_event_limit_exceeded/)
+  assert.match(long, /response\.completed/)
 })

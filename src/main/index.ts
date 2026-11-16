@@ -1263,6 +1263,18 @@ app.whenReady().then(async () => {
     if (outcome === 'cancelled') return
     rssAutoRefreshScheduler?.start()
     return petWindowManager?.restoreIfEnabled()
+  }).catch((error) => {
+    // Without this the rejection reaches the unhandled-rejection handler, which exits with no word to the person.
+    const detail = error instanceof Error ? error.message : String(error)
+    console.error('[boot] window and assistant setup failed:', error)
+    if (!READY_START_HIDDEN) {
+      try {
+        dialog.showErrorBox('Ready 启动失败', `应用的一部分没有启动成功，已停止启动。\n\n${detail}\n\n请重新安装或更新 Ready 后再启动。`)
+      } catch {
+        // silent-catch: showErrorBox can fail in headless checks; the console log above remains.
+      }
+    }
+    app.exit(1)
   })
 
   app.on('activate', function () {
@@ -1334,8 +1346,21 @@ async function cleanupBeforeAppQuit(startedAt: number, options: { agentRuntimeAl
 function showGracefulExitFailure(error: unknown, action: GracefulExitAction, stage: GracefulExitFailureStage): void {
   const detail = error instanceof Error ? error.message : String(error)
   console.error(`[before-quit] state flush failed; ${action} cancelled`, error)
-  // A hidden (verification) launch has nobody to answer: it never shows the window or a dialog; the log keeps the failure.
-  if (READY_START_HIDDEN) return
+  const leaveAfterFailedCleanup = async (): Promise<void> => {
+    try {
+      await cleanupBeforeAppQuit(Date.now(), { agentRuntimeAlreadyAttempted: true })
+    } catch (cleanupError) {
+      console.error('[before-quit] cleanup after a failed runtime stop threw; quitting as chosen', cleanupError)
+    }
+    getGracefulWindowCloseCoordinator().allowAppQuitAfterFailedCleanup()
+  }
+  // A hidden (verification) launch has nobody to answer: it never shows the window or a dialog; the log keeps the
+  // failure. Its content is already saved when only a background part failed to stop, so it leaves as a person
+  // choosing "仍然退出" would; staying would hold this profile's single-instance lock against the next run.
+  if (READY_START_HIDDEN) {
+    if (stage === 'cleanup' && action === 'quit_app') void leaveAfterFailedCleanup()
+    return
+  }
   // Unsaved content was already flushed when a background part fails to stop: say what really happened and let the
   // person leave. What stays behind is settled by the next launch (the process lease of a dead owner is reclaimed).
   if (stage === 'cleanup' && action === 'quit_app') {
@@ -1352,15 +1377,7 @@ function showGracefulExitFailure(error: unknown, action: GracefulExitAction, sta
     const shown = mainWindow && !mainWindow.isDestroyed()
       ? (mainWindow.show(), dialog.showMessageBox(mainWindow, options))
       : dialog.showMessageBox(options)
-    void shown.then(async ({ response }) => {
-      if (response !== 0) return
-      try {
-        await cleanupBeforeAppQuit(Date.now(), { agentRuntimeAlreadyAttempted: true })
-      } catch (cleanupError) {
-        console.error('[before-quit] cleanup after a failed runtime stop threw; quitting as chosen', cleanupError)
-      }
-      getGracefulWindowCloseCoordinator().allowAppQuitAfterFailedCleanup()
-    })
+    void shown.then(({ response }) => (response === 0 ? leaveAfterFailedCleanup() : undefined))
     return
   }
   const options = {

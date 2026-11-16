@@ -33,3 +33,13 @@ export function appendCodexUpstreamFailureLog(diagnostic: CodexModelGatewayUpstr
     /* best-effort */
   }
 }
+
+/** A model request Ready's own gateway refused: the code names the check, and no provider was contacted for it. */
+export function appendCodexGatewayRefusalLog(refusal: { code: string; status: number }): void {
+  try {
+    logger.append(`[${new Date().toISOString()}] [gateway] request_refused code=${field(refusal.code)} status=${refusal.status}\n`)
+  } catch {
+    // silent-catch: the diagnostic log write is best-effort and must not fail the model request path
+    /* best-effort */
+  }
+}

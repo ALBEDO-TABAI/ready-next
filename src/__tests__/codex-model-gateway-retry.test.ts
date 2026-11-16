@@ -335,6 +335,28 @@ test('retryable HTTP exhaustion also stops before an eighth wire request', async
   assert.equal(calls, 7)
 })
 
+test('a 429 that reports a spent quota is answered once; a plain rate limit is still retried', async () => {
+  for (const [body, expectedCalls] of [
+    ['{"error":{"code":"insufficient_quota","type":"insufficient_quota","message":"You exceeded your current quota"}}', 1],
+    ['{"error":{"code":"rate_limit_exceeded","type":"rate_limit_error","message":"slow down"}}', 7],
+  ] as const) {
+    let calls = 0
+    const upstream = createServer((_request, response) => {
+      calls += 1
+      response.writeHead(429, { 'content-type': 'application/json', 'retry-after': '0' })
+      response.end(body)
+    })
+    await withGateway({
+      wireApi: 'responses',
+      upstream,
+      async run(url, requestBody) {
+        assert.equal((await callGateway(url, requestBody)).status, 429)
+      },
+    })
+    assert.equal(calls, expectedCalls, body)
+  }
+})
+
 test('HTTP retryability follows the shared provider status authority', async () => {
   for (const status of [408, 425]) {
     let calls = 0

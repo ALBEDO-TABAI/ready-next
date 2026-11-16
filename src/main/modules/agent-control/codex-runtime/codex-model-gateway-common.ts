@@ -82,3 +82,26 @@ export class CodexModelGatewayAuthorityError extends CodexModelGatewayError {
     this.name = 'CodexModelGatewayAuthorityError'
   }
 }
+
+/**
+ * Whether text carries something shaped like a bearer credential: the word followed by a quoted value or by an
+ * unbroken run that is not a plain word (it has a digit or token punctuation). The bare word must pass — a model
+ * searching for "ring bearer gifts" or asking what a Bearer token is writes ordinary tool arguments.
+ */
+export function carriesBearerCredential(value: string): boolean {
+  return /Bearer\s+(?:\\?["']|(?=[\w.~+/=-]*[0-9._~+/=-])[\w.~+/=-]{8,})/i.test(value)
+}
+
+/** The same shape, as the span to blank out of text shown to the person or returned to the model. */
+export const BEARER_CREDENTIAL_SPAN = /Bearer\s+(?:"[^"\r\n]*"|'[^'\r\n]*'|(?=[\w.~+/=-]*[0-9._~+/=-])[\w.~+/=-]{8,})/gi
+
+/**
+ * Whether a provider answered with the model that was asked for. An alias is answered under its dated snapshot
+ * name ("gpt-4o" -> "gpt-4o-2024-08-06", "claude-sonnet-4-5" -> "claude-sonnet-4-5-20250929"); that is the same
+ * model. Anything else is a reroute and stays refused.
+ */
+export function isRequestedUpstreamModel(answered: unknown, requested: string): boolean {
+  if (typeof answered !== 'string' || !requested) return false
+  if (answered === requested) return true
+  return answered.startsWith(`${requested}-`) && /^(\d{4}-\d{2}-\d{2}|\d{8})$/.test(answered.slice(requested.length + 1))
+}

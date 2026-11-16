@@ -1,6 +1,6 @@
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
 
 import type { CodexJsonLineTransport } from './codex-app-server-client'
 import type {
@@ -171,6 +171,25 @@ export function parsePsLine(line: string, executable?: string): Omit<CodexOwnedP
   }
 }
 
+/**
+ * `ps` follows the caller's locale: with none (an app opened from Finder) it prints non-ASCII path bytes as
+ * `M-g…`, and under e.g. zh_CN its start time has four tokens instead of five. Either way an owned process stops
+ * matching, so the listing always runs in one fixed UTF-8 locale.
+ */
+const PS_OPTIONS = { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, env: { LC_ALL: 'en_US.UTF-8' } } as const
+
+/** The runtime binary is hundreds of megabytes and is listed on every ownership poll; hash it once per version. */
+const executableDigests = new Map<string, { stamp: string; sha256: string }>()
+function executableDigest(path: string): string {
+  const stat = statSync(path)
+  const stamp = `${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`
+  const known = executableDigests.get(path)
+  if (known?.stamp === stamp) return known.sha256
+  const digest = sha256(readFileSync(path))
+  executableDigests.set(path, { stamp, sha256: digest })
+  return digest
+}
+
 export class MacCodexProcessInspector implements CodexProcessInspector {
   async list(): Promise<CodexOwnedProcess[]> {
     let output: string
@@ -181,10 +200,8 @@ export class MacCodexProcessInspector implements CodexProcessInspector {
         'axeww',
         '-o',
         'pid=,ppid=,pgid=,lstart=,command=',
-      ], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 })
-      for (const row of execFileSync('/bin/ps', ['axww', '-o', 'pid=,comm='], {
-        encoding: 'utf8', maxBuffer: 32 * 1024 * 1024,
-      }).split('\n')) {
+      ], PS_OPTIONS)
+      for (const row of execFileSync('/bin/ps', ['axww', '-o', 'pid=,comm='], PS_OPTIONS).split('\n')) {
         const match = row.match(/^\s*(\d+)\s(.+)$/)
         if (match) executables.set(Number(match[1]), match[2])
       }
@@ -197,7 +214,7 @@ export class MacCodexProcessInspector implements CodexProcessInspector {
       let executableSha256: string | null = null
       if (parsed.markers.processLeaseId && parsed.executablePath.startsWith('/')) {
         try {
-          executableSha256 = sha256(readFileSync(parsed.executablePath))
+          executableSha256 = executableDigest(parsed.executablePath)
         } catch {
           // silent-catch: an unreadable executable gets no digest, so the process cannot match a lease binary digest
           executableSha256 = null
@@ -487,6 +504,9 @@ export class CodexSidecarSupervisor {
       const liveLease = this.deps.leaseStore.readLiveProcessLease()
       if (liveLease) {
         try {
+          // A child the listing never showed cannot be found by the settlement below, which would then record
+          // "nothing left" over a live process. This handle is the child this call spawned, so end it here.
+          if (liveLease.pid === null && !childExited && !childError) child.process.kill('SIGKILL')
           if (liveLease.pid === null) await this.settlePreCas(liveLease)
           else await this.settlePostCas(liveLease, 'sidecar_crash')
         } catch (settlementError) {

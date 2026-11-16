@@ -35,6 +35,51 @@ test('a request Ready\'s own gateway refused says the app blocked it, without th
   assert.equal(codexTerminalPublicMessage('interrupted', refused), codexTerminalPublicMessage('interrupted'))
 })
 
+test('what the model service refused is named with the step that resolves it, never its own text', () => {
+  const said = (codexErrorInfo: 'unauthorized' | 'badRequest' | 'contextWindowExceeded' | 'cyberPolicy') => (
+    codexTerminalPublicMessage('error', { message: 'private provider text sk-123', codexErrorInfo })
+  )
+  assert.match(said('unauthorized'), /登录或密钥.*设置/)
+  assert.match(said('badRequest'), /换一个模型/)
+  assert.match(said('contextWindowExceeded'), /新的上下文/)
+  assert.match(said('cyberPolicy'), /使用政策/)
+  for (const kind of ['unauthorized', 'badRequest', 'contextWindowExceeded', 'cyberPolicy'] as const) {
+    assert.doesNotMatch(said(kind), /private|sk-123/)
+  }
+  assert.equal(codexTerminalPublicMessage('interrupted', { message: 'x', codexErrorInfo: 'unauthorized' }),
+    codexTerminalPublicMessage('interrupted'))
+})
+
+test('failure shapes recorded from the pinned runtime get the cause they really have', () => {
+  const http = (status: number, text: string) => ({
+    message: `unexpected status ${status} X: ${text}, url: http://127.0.0.1:1/v1/responses`,
+    codexErrorInfo: { httpConnectionFailed: { httpStatusCode: status } },
+  })
+  const stream = (code: string) => ({ message: `stream disconnected before completion: ${code}`, codexErrorInfo: 'other' as const })
+  const cases: Array<[Parameters<typeof codexTerminalPublicMessage>[1], RegExp]> = [
+    [http(401, 'Incorrect API key provided'), /登录或密钥.*重新登录/],
+    [http(401, 'gateway_upstream_http_401'), /登录或密钥.*重新登录/],
+    [http(403, 'Your account is not active'), /登录或密钥/],
+    [http(404, 'The model m does not exist'), /所选模型.*不可用/],
+    [http(402, 'Insufficient Balance'), /余额或额度不足/],
+    [http(409, 'gateway_credential_route_drift'), /Ready 自己的请求检查没有放行/],
+    [http(413, 'gateway_body_too_large'), /请求太大/],
+    [http(502, 'gateway_upstream_model_mismatch'), /不符合 Ready 的要求/],
+    [http(503, 'gateway_credential_unavailable'), /没有可用的登录或密钥/],
+    [http(504, 'gateway_upstream_headers_deadline'), /暂时出错|中途断开/],
+    [http(503, 'upstream overloaded'), /暂时出错|中途断开/],
+    [stream('gateway_chat_usage_invalid'), /不符合 Ready 的要求/],
+    [{ message: '{"error":{"code":"context_length_exceeded","message":"maximum context length","type":"invalid_request_error"}}', codexErrorInfo: 'other' as const }, /超过了模型一次能读的长度/],
+    [{ message: 'exceeded retry limit, last status: 429 Too Many Requests', codexErrorInfo: { responseTooManyFailedAttempts: { httpStatusCode: 429 } } }, /暂时出错|中途断开/],
+  ]
+  for (const [error, expected] of cases) {
+    const message = codexTerminalPublicMessage('error', error, { historySeam: 'failed_mid_stream_v1' })
+    assert.match(message, expected, error?.message)
+    assert.doesNotMatch(message, /gateway_|127\.0\.0\.1|Incorrect API key/, 'no internal code or provider text')
+    if (!/暂时出错|中途断开/.test(message)) assert.doesNotMatch(message, /继续/, 'a repeating cause never invites 继续')
+  }
+})
+
 test('native usage failures explain the account limit without exposing provider text', () => {
   const error = { message: 'private provider diagnostics', codexErrorInfo: 'usageLimitExceeded' as const }
   assert.match(codexTerminalPublicMessage('error', error), /额度.*稍后/)
@@ -51,7 +96,7 @@ test('transient service failures say so, and invite continuing only when the wor
   assert.match(codexTerminalPublicMessage('error', disconnected, kept), /继续/)
   assert.doesNotMatch(codexTerminalPublicMessage('error', overloaded), /继续/)
   assert.doesNotMatch(codexTerminalPublicMessage('error', overloaded, kept), /high demand/)
-  assert.equal(codexTerminalPublicMessage('error', { message: 'bad', codexErrorInfo: 'badRequest' as const },
+  assert.equal(codexTerminalPublicMessage('error', { message: 'bad', codexErrorInfo: 'sandboxError' as const },
     { historySeam: 'failed_user_only_no_suffix_v1' }), '本轮未能完成。')
   const idle = { message: 'stream disconnected before completion: idle timeout waiting for SSE', codexErrorInfo: 'other' as const }
   assert.match(codexTerminalPublicMessage('error', idle, { historySeam: 'failed_mid_stream_v1' }), /中途断开.*保留.*继续/)

@@ -1250,7 +1250,7 @@ test('composer displays the Main consequence and submits that displayed head ref
   try {
     const note = container.querySelector('[data-ready-send-consequence="true"]')
     assert.match(note?.textContent || '', /前面2项不会作为当前任务带入/)
-    assert.match(note?.textContent || '', /其中1项需重新附加资源/)
+    assert.match(note?.textContent || '', /其中1项用到了当时的页面或附件，需要时请重新带上/)
     container.querySelector<HTMLButtonElement>('[data-ready-agent-send="true"]')!.click()
     await new Promise((resolve) => setTimeout(resolve, 0))
     assert.deepEqual(submitted, codexHeadActionAdmissionRef(head))

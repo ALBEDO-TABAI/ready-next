@@ -98,9 +98,9 @@ export function ContextUsageMeter({
   const radius = 6.5
   const circumference = 2 * Math.PI * radius
   const clampedRatio = model.ratio == null ? null : Math.max(0, Math.min(model.ratio, 1))
-  const dash = clampedRatio == null
-    ? `${circumference * 0.22} ${circumference}`
-    : `${circumference * clampedRatio} ${circumference}`
+  // With no reading yet only the track shows: a partial arc beside the send button reads as a spinner, i.e. as a
+  // turn still running, which is exactly wrong after a turn that failed before the model answered.
+  const dash = `${circumference * (clampedRatio ?? 0)} ${circumference}`
   const stroke = strokeForTone(model.tone)
   const showTooltip = useCallback(() => {
     if (typeof window === 'undefined') return

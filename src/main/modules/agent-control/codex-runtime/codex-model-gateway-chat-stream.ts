@@ -6,6 +6,7 @@ import {
   createCodexDownstream,
   isRecord,
   type JsonObject,
+  carriesBearerCredential,
 } from './codex-model-gateway-common'
 import {
   type CodexModelGatewayResponseEvidence,
@@ -292,9 +293,10 @@ export async function streamChatAsResponses(input: {
           usageSeen = true
         }
         if (!Array.isArray(payload.choices)) return void fail('gateway_chat_choices_invalid')
-        const hasStructuralContent = payload.usage !== undefined
+        // OpenAI-style streams carry `usage: null` and `finish_reason: null` on every text chunk; only a value counts.
+        const hasStructuralContent = (payload.usage !== undefined && payload.usage !== null)
           || payload.choices.some((choice) => isRecord(choice) && (
-            choice.finish_reason !== undefined
+            (choice.finish_reason !== undefined && choice.finish_reason !== null)
             || (isRecord(choice.delta) && (
               choice.delta.role !== undefined
               || (Array.isArray(choice.delta.tool_calls) && choice.delta.tool_calls.some(
@@ -515,7 +517,7 @@ export async function streamChatAsResponses(input: {
     try {
       if (
         (input.credential && state.arguments.includes(input.credential))
-        || /Bearer\s+/i.test(state.arguments)
+        || carriesBearerCredential(state.arguments)
       ) return void fail('gateway_tool_arguments_secret_detected')
       const parsedArguments = assertToolArgumentsObject(
         state.arguments,

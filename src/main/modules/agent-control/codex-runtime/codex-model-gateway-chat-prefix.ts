@@ -1,3 +1,4 @@
+import { isRequestedUpstreamModel } from './codex-model-gateway-common'
 import type { AIModelConfig } from '../../../../shared/ai-providers'
 import {
   applyProviderResponsePatch,
@@ -95,7 +96,7 @@ export function inspectCodexChatPrefix(input: {
     ) return { kind: 'invalid', code: 'gateway_chat_stream_error_mixed' }
     return { kind: 'provider_error', payload, error: payload.error }
   }
-  if (typeof payload.model !== 'string' || payload.model !== input.snapshot.model) {
+  if (!isRequestedUpstreamModel(payload.model, input.snapshot.model)) {
     return { kind: 'invalid', code: 'gateway_upstream_model_mismatch' }
   }
   if (payload.id !== undefined) {

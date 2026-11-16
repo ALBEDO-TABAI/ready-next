@@ -1,3 +1,4 @@
+import { isRequestedUpstreamModel } from './codex-model-gateway-common'
 import type { CodexUpstreamProfileSnapshot } from './codex-model-gateway-contract'
 import { applyKimiK3AnthropicHeaders, applyKimiK3AnthropicRequestContract } from '../../../../shared/ai-providers/kimi-k3'
 import type { AIModelConfig } from '../../../../shared/ai-providers'
@@ -133,7 +134,7 @@ export function messagesAsResponses(body: ReadableStream<Uint8Array>, expectedMo
     if (input.type === 'ping') return []
     if (input.type === 'error') reject('provider_stream_error')
     if (input.type === 'message_start') {
-      if (responseId || !record(input.message) || !input.message.id || input.message.model !== expectedModel || input.message.content?.length) reject('message_start_invalid')
+      if (responseId || !record(input.message) || !input.message.id || !isRequestedUpstreamModel(input.message.model, expectedModel) || input.message.content?.length) reject('message_start_invalid')
       responseId = text(input.message.id); model = input.message.model; usage = input.message.usage || {}
       return [event('response.created', { response: response('in_progress') })]
     }

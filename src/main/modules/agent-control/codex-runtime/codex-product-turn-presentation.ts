@@ -38,28 +38,53 @@ export type ProductTurnActionContext = {
 }
 type ProductTurnActionContextReader = (readyRunId: string) => ProductTurnActionContext | null
 
-// Runtime error kinds that mean the model service failed temporarily.
-function isTransientServiceError(error: CodexTurnError | null | undefined): boolean {
-  const info = error?.codexErrorInfo
-  if (info === 'internalServerError' || info === 'serverOverloaded'
-    || info === 'rateLimitExceeded' || info === 'flexUnavailable') return true
-  return typeof info === 'object' && info !== null && (
-    'httpConnectionFailed' in info || 'responseStreamConnectionFailed' in info
-    || 'responseStreamDisconnected' in info || 'responseTooManyFailedAttempts' in info
-  )
+type TurnFailureCause =
+  | 'transient' | 'ready_refused' | 'provider_incompatible' | 'request_too_large' | 'credential_missing'
+  | 'unauthorized' | 'model_unavailable' | 'balance' | 'badRequest' | 'contextWindowExceeded' | 'policy'
+
+/**
+ * Why a turn failed, read from what the pinned runtime reports. It reports every non-400 HTTP status as a
+ * connection failure, so the status and Ready's own gateway code in the message — not the variant name — say
+ * whether the service was briefly down, the login was refused, or Ready itself declined the request or the reply.
+ */
+function turnFailureCause(error: CodexTurnError | null | undefined): TurnFailureCause | null {
+  if (!error) return null
+  const info = error.codexErrorInfo
+  const details = typeof info === 'object' && info !== null
+    ? Object.values(info)[0] as { httpStatusCode?: number | null } | undefined : undefined
+  const status = details?.httpStatusCode ?? null
+  const gatewayCode = error.message.match(/\bgateway_[a-z0-9_]+\b/)?.[0] ?? null
+  if (status === 413 || gatewayCode === 'gateway_body_too_large') return 'request_too_large'
+  if (gatewayCode === 'gateway_credential_unavailable') return 'credential_missing'
+  if (gatewayCode && !/^gateway_upstream_http_\d+$/.test(gatewayCode)) {
+    if (/_(deadline|idle|timeout)(_|$)/.test(gatewayCode)) return 'transient'
+    return /^gateway_(upstream|chat|response|messages|native|tool)_/.test(gatewayCode)
+      ? 'provider_incompatible' : 'ready_refused'
+  }
+  if (/\bcontext_length_exceeded\b/.test(error.message) || info === 'contextWindowExceeded') return 'contextWindowExceeded'
+  if (info === 'unauthorized' || status === 401 || status === 403) return 'unauthorized'
+  if (status === 404) return 'model_unavailable'
+  if (status === 402) return 'balance'
+  if (info === 'badRequest' || (status !== null && status >= 400 && status < 500 && status !== 408 && status !== 429)) {
+    return 'badRequest'
+  }
+  if (info === 'cyberPolicy' || info === 'misalignmentPolicyViolation') return 'policy'
+  if (info === 'internalServerError' || info === 'serverOverloaded' || info === 'rateLimitExceeded'
+    || info === 'flexUnavailable' || details) return 'transient'
+  return null
 }
 
-/** Whether Ready's own gateway refused the request before any provider was contacted. */
-function isGatewayContractRejection(error: CodexTurnError | null | undefined): boolean {
-  if (!error?.message.startsWith('{')) return false
-  try {
-    const parsed = JSON.parse(error.message) as { error?: { code?: unknown; type?: unknown } }
-    const code = parsed.error?.code
-    return parsed.error?.type === 'gateway_error' && typeof code === 'string' && /^gateway_[a-z_]{1,80}$/.test(code)
-  } catch {
-    // silent-catch: an error message that is not JSON is not a gateway rejection
-    return false
-  }
+const TURN_FAILURE_MESSAGES: Readonly<Record<Exclude<TurnFailureCause, 'transient'>, string>> = {
+  ready_refused: '本轮没有发出去：Ready 自己的请求检查没有放行，模型服务没有被调用。这是应用内部的问题，重试通常不会解决。',
+  provider_incompatible: '模型服务返回的内容不符合 Ready 的要求，本轮没有完成。这个模型服务可能与 Ready 不兼容，可以换一个再试。',
+  request_too_large: '这次请求太大，本轮没有发出去。通常是图片过大或对话太长，请去掉大图或开始新的上下文后再试。',
+  credential_missing: '当前模型服务没有可用的登录或密钥，本轮没有发出去。请在设置里登录或填写密钥。',
+  unauthorized: '模型服务没有接受当前的登录或密钥，本轮没有完成。请在设置里重新登录或检查密钥后再试。',
+  model_unavailable: '所选模型在这个模型服务上不可用，本轮没有完成。请在设置里换一个模型。',
+  balance: '模型服务提示余额或额度不足，本轮没有完成。请充值或切换可用的模型服务。',
+  badRequest: '模型服务不接受这次请求，本轮没有完成。常见原因是所选模型不可用或不支持当前功能，可以换一个模型再试。',
+  contextWindowExceeded: '这段对话超过了模型一次能读的长度，本轮没有完成。请开始新的上下文后再试。',
+  policy: '模型服务按它的使用政策拒绝了这次请求，本轮没有完成。',
 }
 
 const UNDELIVERED_MESSAGES: Readonly<Record<string, string>> = {
@@ -90,14 +115,14 @@ export function codexTerminalPublicMessage(
   if (status === 'error' && nativeError?.codexErrorInfo === 'usageLimitExceeded') {
     return '模型服务的使用额度已达到上限，本轮没有完成。请稍后再试，或切换可用的模型服务。'
   }
+  const cause = status === 'error' ? turnFailureCause(nativeError) : null
+  // A cause that will repeat comes before "send 继续": continuing would fail the same way.
+  if (cause && cause !== 'transient') return TURN_FAILURE_MESSAGES[cause]
   if (status === 'error' && options.historySeam === 'failed_mid_stream_v1') {
     return `模型的回复中途断开，本轮没有完成。${kept}`
   }
-  if (status === 'error' && isTransientServiceError(nativeError)) {
+  if (cause === 'transient') {
     return options.historySeam ? `模型服务暂时出错，本轮没有完成。${kept}` : '模型服务暂时出错，本轮没有完成。'
-  }
-  if (status === 'error' && isGatewayContractRejection(nativeError)) {
-    return '本轮没有发出去：Ready 自己的请求检查没有放行，模型服务没有被调用。这是应用内部的问题，重试通常不会解决。'
   }
   return status === 'error'
     ? '本轮未能完成。'

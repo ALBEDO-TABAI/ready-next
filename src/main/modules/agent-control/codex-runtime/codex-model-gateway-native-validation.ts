@@ -5,6 +5,8 @@ import {
   isRecord,
   type JsonObject,
   nonEmptyString,
+  carriesBearerCredential,
+  isRequestedUpstreamModel,
 } from './codex-model-gateway-common'
 import { type CodexToolArgumentValidator, digestCanonicalJson } from './codex-model-gateway-contract'
 import { CODEX_PROVIDER_RESPONSE_EVENT_TYPES } from './codex-provider-stream-policy'
@@ -338,7 +340,7 @@ function assertNativeToolArgumentsSafe(
   credential: string,
   validators: ReadonlyMap<string, CodexToolArgumentValidator>,
 ): void {
-  if ((credential && value.includes(credential)) || /Bearer\s+/i.test(value)) {
+  if ((credential && value.includes(credential)) || carriesBearerCredential(value)) {
     throw new CodexModelGatewayError('gateway_tool_arguments_secret_detected', 502)
   }
   const parsed = assertNativeToolArgumentsObject(value)
@@ -348,7 +350,7 @@ function assertNativeToolArgumentsSafe(
 }
 
 function assertNativeResponseModel(response: JsonObject, expectedModel: string): void {
-  if (response.model !== expectedModel) {
+  if (!isRequestedUpstreamModel(response.model, expectedModel)) {
     throw new CodexModelGatewayError('gateway_upstream_model_mismatch', 502)
   }
 }
