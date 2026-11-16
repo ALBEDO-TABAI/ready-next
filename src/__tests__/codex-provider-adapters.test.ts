@@ -65,7 +65,11 @@ test('Messages streams pass the same tool admission and preserve tool results in
     assert.deepEqual(f.requests[1].body.messages.at(-1), { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'call-test', content: 'TOKEN' }] })
     const forbidden = structuredClone(events)
     forbidden[1].content_block!.name = 'forbidden'
-    assert.match(await f.call(forbidden), /response.failed/)
+    // A tool that is not offered: passed on as a refused call and not admitted.
+    const refused = await f.call(forbidden)
+    assert.match(refused, /event: response.completed/)
+    assert.match(refused, /"name":"unavailable_tool__forbidden"/)
+    assert.doesNotMatch(refused, /"name":"forbidden"/)
     assert.equal(f.admissions.length, 2)
   } finally { await f.close() }
 })

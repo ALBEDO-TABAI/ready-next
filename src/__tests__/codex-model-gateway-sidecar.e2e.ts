@@ -303,7 +303,12 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
           ].map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(''))
           return
         }
-        const pieces = ['{"query":"', ...Array.from({ length: 4_998 }, () => 'a'), '"}']
+        // The model first calls the tool with arguments its schema rejects. The gateway passes that on as a
+        // refused call, the runtime answers it as unsupported, and the model's next call is in order.
+        const corrected = upstreamText.includes('unsupported call: invalid_arguments__ready_read_probe')
+        const pieces = corrected
+          ? ['{"query":"', ...Array.from({ length: 4_998 }, () => 'a'), '"}']
+          : ['{"wrong":true}']
         const argumentsValue = pieces.join('')
         const item = {
           type: 'function_call', id: `native-long-item-${upstreamSequence}`,
@@ -1334,6 +1339,10 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
         stderr: stderr.join('').slice(-4_000),
         upstreamBody: upstreamBodies.at(-1),
       }),
+    )
+    assert.ok(
+      upstreamBodies.some((body) => JSON.stringify(body).includes('unsupported call: invalid_arguments__ready_read_probe')),
+      'the refused call came back to the model as an unsupported call and the turn went on',
     )
     assert.equal(longToolCandidate.usedToolCalls.length, 1)
     assert.ok((longToolCandidate.contextUsage?.usedInputTokens || 0) > 0)

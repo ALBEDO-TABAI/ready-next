@@ -892,7 +892,8 @@ test('chat conversion streams text and authorized tools while blocking malicious
     const blocked = await call()
     assert.equal(blocked.status, 200)
     const blockedText = await blocked.text()
-    assert.match(blockedText, /gateway_response_tool_not_authorized/)
+    // A tool that is not offered is passed on as a refused call the runtime answers itself; never the real name.
+    assert.match(blockedText, /"name":"unavailable_tool__shell_exec"/)
     assert.doesNotMatch(blockedText, /"name":"shell_exec"/)
 
     toolMode = 'mutated'

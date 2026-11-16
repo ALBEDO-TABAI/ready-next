@@ -105,3 +105,30 @@ export function isRequestedUpstreamModel(answered: unknown, requested: string): 
   if (answered === requested) return true
   return answered.startsWith(`${requested}-`) && /^(\d{4}-\d{2}-\d{2}|\d{8})$/.test(answered.slice(requested.length + 1))
 }
+
+/**
+ * A model sometimes calls a tool that is not offered this turn, or with arguments its schema rejects. Failing the
+ * whole turn for that throws away everything done so far, when the model can correct itself if told. The runtime
+ * answers a call to a name it does not know with "unsupported call: <name>" and keeps the turn going, without
+ * the call ever reaching Ready's execution chain. So a refused call is passed on under a name that says why and
+ * that no tool has; it is never admitted or executed.
+ *
+ * Returns the name to pass on, or null when the call is in order.
+ */
+export function refusedToolCallName(input: {
+  name: string
+  argumentsObject: unknown
+  allowedTools: ReadonlySet<string>
+  validators: ReadonlyMap<string, { safeParse(value: unknown): { success: boolean } }>
+}): string | null {
+  // A turn that offers no tools at all asked for an answer (`tool_choice: none`); a call there is the provider
+  // ignoring the request, not a mistake the model can correct, and it fails as before.
+  if (input.allowedTools.size === 0) throw new CodexModelGatewayError('gateway_response_tool_not_authorized', 502)
+  const reason = !input.allowedTools.has(input.name)
+    ? 'unavailable_tool'
+    : input.validators.get(input.name)?.safeParse(input.argumentsObject).success ? null : 'invalid_arguments'
+  if (!reason) return null
+  const renamed = `${reason}__${input.name.replace(/[^A-Za-z0-9_-]/g, '_')}`.slice(0, 64)
+  if (input.allowedTools.has(renamed)) throw new CodexModelGatewayError('gateway_response_tool_not_authorized', 502)
+  return renamed
+}

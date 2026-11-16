@@ -51,7 +51,6 @@ export function createIngressImagePreparer(
   directory: string,
   loadCodec: () => Promise<IngressImageCodec> = electronCodec,
 ): (path: string) => Promise<string> {
-  let pruned = false
   return async (path) => {
     const extension = extname(path).toLowerCase()
     if (!['.png', '.jpg', '.jpeg'].includes(extension)) return path
@@ -68,13 +67,11 @@ export function createIngressImagePreparer(
     const encoded = codec.encode(path, INGRESS_IMAGE_MAX_EDGE)
     if (!encoded || encoded.bytes.length >= stat.size) return path
     mkdirSync(directory, { recursive: true, mode: 0o700 })
-    if (!pruned) {
-      pruned = true
-      const cutoff = Date.now() - KEEP_PREPARED_MS
-      for (const name of readdirSync(directory)) {
-        const file = join(directory, name)
-        if (statSync(file).mtimeMs < cutoff) unlinkSync(file)
-      }
+    // Copies are made rarely and the folder is small: clearing old ones on each write needs no state of its own.
+    const cutoff = Date.now() - KEEP_PREPARED_MS
+    for (const name of readdirSync(directory)) {
+      const file = join(directory, name)
+      if (statSync(file).mtimeMs < cutoff) unlinkSync(file)
     }
     const prepared = join(directory, `${key}${encoded.extension}`)
     writeFileSync(prepared, encoded.bytes, { mode: 0o600 })

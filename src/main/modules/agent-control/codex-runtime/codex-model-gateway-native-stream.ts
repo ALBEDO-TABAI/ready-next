@@ -1,5 +1,5 @@
 /** Deliver validated Responses events incrementally; admit tool results only after a valid terminal. */
-import { CodexModelGatewayError, createCodexDownstream, isRecord, type JsonObject } from './codex-model-gateway-common'
+import { CodexModelGatewayError, createCodexDownstream, isRecord, refusedToolCallName, type JsonObject } from './codex-model-gateway-common'
 import {
   type CodexModelGatewayFailureEvidence,
   type CodexModelGatewayResponseEvidence,
@@ -338,9 +338,10 @@ export async function streamNativeResponses(input: {
       return
     }
     flushDeltaFilters(() => true)
+    const refusedNames = new Map<string, string>()
     const toolCalls = [...state.items.values()]
       .filter((item) => item.type === 'function_call')
-      .map((item) => {
+      .flatMap((item) => {
         let parsedArguments: unknown
         try {
           parsedArguments = JSON.parse(item.arguments)
@@ -350,24 +351,56 @@ export async function streamNativeResponses(input: {
         if (!item.callId || !item.name) {
           throw new CodexModelGatewayError('gateway_native_tool_identity_invalid', 502)
         }
-        return {
+        const refusedName = refusedToolCallName({
+          name: item.name,
+          argumentsObject: parsedArguments,
+          allowedTools: input.allowedTools,
+          validators: input.toolArgumentValidators,
+        })
+        if (refusedName) {
+          refusedNames.set(item.id, refusedName)
+          return []
+        }
+        return [{
           codexCallId: item.callId,
           toolName: item.name,
           argsDigest: digestCanonicalJson(parsedArguments),
-        }
+        }]
       })
     if (toolCalls.length > 0) await input.admitToolResponse(toolCalls)
     if (!terminalPayload || !isRecord(terminalPayload.response)) {
       throw new CodexModelGatewayError('gateway_native_terminal_missing', 502)
     }
+    if (refusedNames.size > 0) {
+      const renamed = (item: unknown): unknown => (
+        isRecord(item) && item.type === 'function_call' && typeof item.id === 'string' && refusedNames.has(item.id)
+          ? { ...item, name: refusedNames.get(item.id) }
+          : item
+      )
+      for (const held of heldFunctionTail) {
+        if (held.item !== undefined) held.item = renamed(held.item)
+        if (typeof held.item_id === 'string' && typeof held.name === 'string' && refusedNames.has(held.item_id)) {
+          held.name = refusedNames.get(held.item_id)
+        }
+      }
+      const terminalResponse = terminalPayload.response as JsonObject
+      if (Array.isArray(terminalResponse.output)) {
+        terminalPayload = {
+          ...terminalPayload,
+          response: { ...terminalResponse, output: terminalResponse.output.map(renamed) },
+        }
+        terminalEvent = `event: ${String(terminalPayload.type)}\ndata: ${JSON.stringify(terminalPayload)}\n\n`
+      }
+    }
+    const completedResponse = terminalPayload.response as JsonObject
     await input.recordCompleted({
-      responseId: String(terminalPayload.response.id),
+      responseId: String(completedResponse.id),
       terminalDigest: digestCanonicalJson(terminalPayload),
       outputDigest: digestCanonicalJson([...state.items.entries()].map(([index, item]) => ({
         index,
         digest: item.doneItemDigest,
       }))),
-      usageDigest: digestCanonicalJson(terminalPayload.response.usage),
+      usageDigest: digestCanonicalJson(completedResponse.usage),
     })
     for (const safePayload of heldFunctionTail) downstream.write(encodeSafePayload(safePayload))
     heldFunctionTail.length = 0

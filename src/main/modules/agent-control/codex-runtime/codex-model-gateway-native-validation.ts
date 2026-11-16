@@ -164,9 +164,12 @@ function validateNativeItem(item: JsonObject, allowedTools: ReadonlySet<string>)
     if (typeof item.arguments !== 'string') {
       throw new CodexModelGatewayError('gateway_response_tool_arguments_invalid', 502)
     }
-    if (!allowedTools.has(name)) {
+    // A turn that offers no tools fails on any call at once. Otherwise a name that is not offered is passed on as
+    // a refused call when the response is released (see refusedToolCallName).
+    if (allowedTools.size === 0) {
       throw new CodexModelGatewayError('gateway_response_tool_not_authorized', 502)
     }
+    void name
   }
   if (item.type === 'message' && item.content !== undefined) {
     if (!Array.isArray(item.content)) {
@@ -343,10 +346,9 @@ function assertNativeToolArgumentsSafe(
   if ((credential && value.includes(credential)) || carriesBearerCredential(value)) {
     throw new CodexModelGatewayError('gateway_tool_arguments_secret_detected', 502)
   }
-  const parsed = assertNativeToolArgumentsObject(value)
-  if (!validators.get(toolName)?.safeParse(parsed).success) {
-    throw new CodexModelGatewayError('gateway_tool_arguments_schema_invalid', 502)
-  }
+  // Arguments the schema rejects are passed on as a refused call (see refusedToolCallName); only their shape and
+  // the absence of a credential are settled here.
+  assertNativeToolArgumentsObject(value)
 }
 
 function assertNativeResponseModel(response: JsonObject, expectedModel: string): void {

@@ -7,6 +7,7 @@ import {
   isRecord,
   type JsonObject,
   carriesBearerCredential,
+  refusedToolCallName,
 } from './codex-model-gateway-common'
 import {
   type CodexModelGatewayResponseEvidence,
@@ -506,15 +507,12 @@ export async function streamChatAsResponses(input: {
   emitMessageDelta(messageFilter.flush())
   emitReasoningDelta(reasoningFilter.flush())
 
+  const refusedNames = new Map<string, string>()
   for (const state of tools.values()) {
     if (!state.name) return void fail('gateway_response_tool_name_missing')
     if (!state.id) return void fail('gateway_response_tool_call_id_missing')
-    if (!input.allowedToolNames.has(state.name)) {
-      return void fail(
-        state.matchedAuthorizedName
-          ? 'gateway_tool_call_name_changed'
-          : 'gateway_response_tool_not_authorized',
-      )
+    if (!input.allowedToolNames.has(state.name) && state.matchedAuthorizedName) {
+      return void fail('gateway_tool_call_name_changed')
     }
     try {
       if (
@@ -525,9 +523,15 @@ export async function streamChatAsResponses(input: {
         state.arguments,
         'gateway_chat_tool_arguments_json_invalid',
       )
-      if (!input.toolArgumentValidators.get(state.name)?.safeParse(parsedArguments).success) {
-        return void fail('gateway_tool_arguments_schema_invalid')
-      }
+      // A tool not offered this turn, or arguments its schema rejects: passed on as a refused call the model can
+      // correct, never admitted (see refusedToolCallName).
+      const refusedName = refusedToolCallName({
+        name: state.name,
+        argumentsObject: parsedArguments,
+        allowedTools: input.allowedToolNames,
+        validators: input.toolArgumentValidators,
+      })
+      if (refusedName) refusedNames.set(state.id, refusedName)
     } catch (error) {
       // silent-catch: unparseable tool arguments are recorded and sent downstream as response.failed via fail()
       return void fail(
@@ -640,7 +644,8 @@ export async function streamChatAsResponses(input: {
       if (!input.admitToolResponse) {
         throw new Error('gateway_tool_response_admission_unavailable')
       }
-      await input.admitToolResponse([...tools.values()].map((state) => ({
+      const admitted = [...tools.values()].filter((state) => !refusedNames.has(state.id))
+      if (admitted.length > 0) await input.admitToolResponse(admitted.map((state) => ({
         codexCallId: state.id,
         toolName: state.name,
         argsDigest: digestCanonicalJson(JSON.parse(state.arguments)),
@@ -685,7 +690,7 @@ export async function streamChatAsResponses(input: {
     nextOutputIndex += 1
     downstream.write(event('response.output_item.added', {
       output_index: outputIndex,
-      item: { type: 'function_call', id: state.id, call_id: state.id, name: state.name, arguments: '' },
+      item: { type: 'function_call', id: state.id, call_id: state.id, name: refusedNames.get(state.id) ?? state.name, arguments: '' },
     }))
     if (state.arguments) {
       downstream.write(event('response.function_call_arguments.delta', {
@@ -696,7 +701,7 @@ export async function streamChatAsResponses(input: {
       output_index: outputIndex,
       item: {
         type: 'function_call', id: state.id, call_id: state.id,
-        name: state.name, arguments: state.arguments,
+        name: refusedNames.get(state.id) ?? state.name, arguments: state.arguments,
       },
     }))
   }
@@ -728,7 +733,7 @@ export async function streamChatAsResponses(input: {
           reasoning,
           tools: [...tools.values()].map((state) => ({
             id: state.id,
-            name: state.name,
+            name: refusedNames.get(state.id) ?? state.name,
             argumentsDigest: digestCanonicalJson(state.arguments),
           })),
         }),

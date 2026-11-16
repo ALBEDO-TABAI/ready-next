@@ -1650,11 +1650,11 @@ test('Chat streaming rejects missing or mutated tool identity and emits every ar
     }] } }] },
     { choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] },
   ])
-  assert.match(truncatedAllowedPrefix, /gateway_response_tool_not_authorized/)
-  assert.doesNotMatch(
-    truncatedAllowedPrefix,
-    /response\.completed|"id":"call-prefix"[^\n]*response\.output_item\.done/,
-  )
+  // A tool that is not offered this turn is passed on under a name that says so and that no tool has: the
+  // runtime answers it as an unsupported call and the model can correct itself. It is never the real name.
+  assert.match(truncatedAllowedPrefix, /response\.completed/)
+  assert.match(truncatedAllowedPrefix, /"name":"unavailable_tool__ready_read"/)
+  assert.doesNotMatch(truncatedAllowedPrefix, /"name":"ready_read"/)
 
   for (const malformedArguments of ['not-json', '[]']) {
     const output = await convertChat([
@@ -1680,11 +1680,9 @@ test('Chat streaming rejects missing or mutated tool identity and emits every ar
     required: ['query'],
     additionalProperties: false,
   })
-  assert.match(schemaInvalidArguments, /gateway_tool_arguments_schema_invalid/)
-  assert.doesNotMatch(
-    schemaInvalidArguments,
-    /response\.(output_item\.added|function_call_arguments\.(delta|done)|completed)/,
-  )
+  assert.match(schemaInvalidArguments, /response\.completed/)
+  assert.match(schemaInvalidArguments, /"name":"invalid_arguments__ready_read_probe"/)
+  assert.doesNotMatch(schemaInvalidArguments, /"name":"ready_read_probe"/)
 
   const changedId = await convertChat([
     { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call-1', function: { name: 'ready_read_probe', arguments: '' } }] } }] },
@@ -2017,11 +2015,10 @@ test('native Responses rejects changed identities, invalid schemas and incomplet
     )
     mode = 'schema'
     const invalidSchemaText = await (await call()).text()
-    assert.match(invalidSchemaText, /gateway_tool_arguments_schema_invalid/)
-    assert.doesNotMatch(
-      invalidSchemaText,
-      /response\.(output_item\.added|function_call_arguments\.(delta|done))/,
-    )
+    // Arguments the schema rejects: the call is passed on as a refused call, never under the real tool's name.
+    assert.match(invalidSchemaText, /response\.completed/)
+    assert.match(invalidSchemaText, /"name":"invalid_arguments__[A-Za-z0-9_]+"/)
+    assert.doesNotMatch(invalidSchemaText, /gateway_tool_arguments_schema_invalid|"name":"ready_read_probe"/)
     mode = 'incomplete_status'
     const incompleteStatusText = await (await call()).text()
     assert.match(incompleteStatusText, /gateway_response_item_terminal_status_invalid/)
@@ -3839,4 +3836,24 @@ test('a chat stream that closes after its finish reason is complete without [DON
   const cut = await run([{ choices: [{ index: 0, delta: { role: 'assistant', content: 'half an ans' } }] }])
   assert.match(cut, /gateway_chat_done_missing/)
   assert.doesNotMatch(cut, /response\.completed/)
+})
+
+test('a refused tool call is renamed, never admitted, and an in-order call beside it still is', async () => {
+  const admitted: string[] = []
+  const output = await convertChat([
+    { choices: [{ index: 0, delta: { tool_calls: [
+      { index: 0, id: 'call-good', function: { name: 'ready_read_probe', arguments: '{"query":"q"}' } },
+      { index: 1, id: 'call-unknown', function: { name: 'delete_everything', arguments: '{}' } },
+      { index: 2, id: 'call-bad-args', function: { name: 'ready_read_probe', arguments: '{"wrong":1}' } },
+    ] } }] },
+    { choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] },
+  ], ['ready_read_probe'], {
+    type: 'object', properties: { query: { type: 'string' } }, required: ['query'], additionalProperties: false,
+  }, undefined, async (calls) => { admitted.push(...calls.map((call) => `${call.codexCallId}:${call.toolName}`)) })
+  assert.match(output, /response\.completed/)
+  assert.deepEqual(admitted, ['call-good:ready_read_probe'])
+  assert.match(output, /"call_id":"call-unknown","name":"unavailable_tool__delete_everything"/)
+  assert.match(output, /"call_id":"call-bad-args","name":"invalid_arguments__ready_read_probe"/)
+  assert.match(output, /"call_id":"call-good","name":"ready_read_probe"/)
+  assert.doesNotMatch(output, /"name":"delete_everything"/)
 })
