@@ -36,7 +36,8 @@ export function AnnotationWorkspace({ buffer, children }: { buffer: EditorBuffer
   useEffect(() => {
     let live = true
     const token = ++generation.current; setSnapshot(null); setSelected(null); setVisible(false); setError(''); setTemplate(null); setSync(null); setBusy(false); setEditing(null); setReference('')
-    if (!path || !window.electronAPI?.documentAnnotations) return
+    // Comments live with the library; a page in a mounted folder has none to read (its comment entries are hidden too).
+    if (!path || !inLibrary || !window.electronAPI?.documentAnnotations) return
     const read = () => window.electronAPI.documentAnnotations.comments({ type: 'read', path }).then(result => {
       if (!live || generation.current !== token) return
       if (!result.ok) throw new Error(result.message)
@@ -45,7 +46,7 @@ export function AnnotationWorkspace({ buffer, children }: { buffer: EditorBuffer
     void read()
     const unsubscribe = window.electronAPI.documentPages?.onChanged?.(() => { void read() })
     return () => { live = false; unsubscribe?.() }
-  }, [path])
+  }, [path, inLibrary])
   async function mutate(command: AnnotationCommand) {
     if (busy) return false
     const token = generation.current; setBusy(true); setError('')
