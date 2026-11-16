@@ -1,3 +1,4 @@
+import { join } from 'node:path'
 import { createCodexProductBudgetSeed } from './codex-product-task-facts'
 import type { CodexRuntimeComposition } from './codex-runtime-composition'
 import { buildCodexThreadDeveloperInstructions } from './codex-thread-instructions'
@@ -12,6 +13,7 @@ import { createEngineTerminal } from './composition/engine-terminal'
 import { createHeadContinuation } from './composition/head-continuation'
 import { createIngressPort } from './composition/ingress-port'
 import { createIngressPrepare } from './composition/ingress-prepare'
+import { createIngressImagePreparer } from './composition/ingress-image'
 import { resolveIngressMcpResource } from './composition/ingress-mcp-resource'
 import { createLifecycleWiring } from './composition/lifecycle'
 import { createCodexCompositionLive } from './composition/live-state'
@@ -69,7 +71,11 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
   const withBeginNewContext = { ...withHeadContinuation, ...createBeginNewContextIssuer(withHeadContinuation) }
   const withActionSurface = { ...withBeginNewContext, ...createActionSurfaceReader(withBeginNewContext) }
   const withAliasPorts = { ...withActionSurface, ...createAliasPorts(withActionSurface) }
-  const withIngressPrepare = { ...withAliasPorts, ...createIngressPrepare({ ...withAliasPorts, resolveIngressMcpResource }) }
+  const withIngressPrepare = { ...withAliasPorts, ...createIngressPrepare({
+    ...withAliasPorts,
+    resolveIngressMcpResource,
+    prepareIngressImage: createIngressImagePreparer(join(input.userDataPath, 'codex-runtime', 'prepared-images')),
+  }) }
   const withIngressPort = { ...withIngressPrepare, ...createIngressPort(withIngressPrepare) }
   const withRuntimeStart = { ...withIngressPort, ...createRuntimeStart(withIngressPort) }
   const {

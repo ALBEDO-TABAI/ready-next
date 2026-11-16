@@ -114,7 +114,9 @@ export class CodexModelGateway {
     this.activeCapability = deps.spawnBound
       ? null
       : { bearerToken: this.bootstrapBearerToken, sidecarSpawnInstanceId: 'standalone' }
-    this.maxBodyBytes = deps.maxBodyBytes || 4_194_304
+    // A conversation carries its images in every request. 4 MiB was passed by one full-size attachment or a dozen
+    // browser screenshots, after which every turn failed; 32 MiB is what the strictest supported provider accepts.
+    this.maxBodyBytes = deps.maxBodyBytes || 32 * 1024 * 1024
     this.maxConcurrentRequests = deps.maxConcurrentRequests || 8
     this.bodyDeadlineMs = deps.bodyDeadlineMs || DEFAULT_BODY_DEADLINE_MS
     this.nativeMaxBytes = deps.nativeMaxBytes || DEFAULT_NATIVE_MAX_BYTES

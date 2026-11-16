@@ -51,7 +51,7 @@ import { activeProfile, isoNow } from './support'
 export type IngressPrepareDeps = Pick<CodexCompositionBase, 'detailPrepared' | 'gate' | 'input' | 'nativeRuntime' | 'preparedDetails' | 'preparer' | 'rawDb' | 'readyMemoryRepository' | 'repository' | 'verified'>
   & Pick<BeginNewContextIssuer, 'issueBeginNewContextAction'>
   & Pick<HeadContinuation, 'resolveHeadContinuation'>
-  & { readonly live: CodexCompositionLive; readonly resolveIngressMcpResource: typeof resolveIngressMcpResource }
+  & { readonly live: CodexCompositionLive; readonly resolveIngressMcpResource: typeof resolveIngressMcpResource; readonly prepareIngressImage: (path: string) => Promise<string> }
 
 /** Preparing product ingress: resources, tools, continuation and the exact request, before anything is persisted. */
 export function createIngressPrepare(deps: IngressPrepareDeps) {
@@ -336,6 +336,7 @@ export function createIngressPrepare(deps: IngressPrepareDeps) {
           return source ? trustedRssSourceInput(source) : null
         },
         resolveMcpResource: deps.resolveIngressMcpResource,
+        prepareImage: deps.prepareIngressImage,
       })
       const turnResources = explicitResources
       assertWidgetTargetsMatchAnchor(request.resources ?? [], request.currentDocumentAnchor ?? null)

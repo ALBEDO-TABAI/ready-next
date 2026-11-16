@@ -187,6 +187,8 @@ export async function resolveCodexExplicitResources(input: {
   resolveLocalObject?: (path: string) => ObjectLocation
   resolveReadyReference?: (selection: Extract<SendScopedResourceSelection, { kind: 'ready_reference' }>) => CodexResolvedInlineResource | Promise<CodexResolvedInlineResource>
   resolveLibrary?: (selection: unknown) => Promise<LibraryGrant>
+  /** The file to hand the model for an attached image: the image itself, or a fitted copy of a large one. */
+  prepareImage?: (path: string) => Promise<string>
   selectedSkill?: CodexResolvedSkillInput | null
 }): Promise<ResolvedCodexExplicitResources> {
   const nativeInput: CodexUserInput[] = []
@@ -482,7 +484,7 @@ export async function resolveCodexExplicitResources(input: {
 
     const extension = extname(canonicalPath).toLowerCase()
     if (IMAGE_EXTENSIONS.has(extension)) {
-      nativeInput.push({ type: 'localImage', path: canonicalPath, detail: null })
+      nativeInput.push({ type: 'localImage', path: await input.prepareImage?.(canonicalPath) ?? canonicalPath, detail: null })
     } else if (AUDIO_EXTENSIONS.has(extension)) {
       nativeInput.push({ type: 'localAudio', path: canonicalPath })
     } else if (EXTRACTABLE_DOCUMENT_EXTENSIONS.has(extension)) {
