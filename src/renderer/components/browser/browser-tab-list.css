@@ -35,7 +35,7 @@
   flex: 1;
   min-height: 0;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
   padding: 0 8px 8px;
   overflow-x: hidden;
   overflow-y: auto;
@@ -45,7 +45,7 @@
   display: flex;
   flex: none;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
 }
 
 .browser-tab-list__row {
@@ -56,7 +56,8 @@
   flex: none;
   width: 100%;
   min-height: 36px;
-  padding: 0 4px 0 8px;
+  /* a title over its address needs air above and below, or neighbouring rows read as one block */
+  padding: 6px 4px 6px 8px;
   border: 0;
   border-radius: var(--rn-r-sm);
   background: transparent;
@@ -201,13 +202,61 @@
   border-radius: 50%;
 }
 
-/* A grouped row carries a thin rail in its group's colour; rails of neighbouring rows join across the 1px gap. */
+/* A grouped row carries a thin rail in its group's colour; rails of neighbouring rows join across the 2px gap. */
 .browser-tab-list__group-rail {
   position: absolute;
-  top: -1px;
+  top: -2px;
   bottom: 0;
   left: 8px;
   width: 1.5px;
   border-radius: 1px;
   pointer-events: none;
+}
+
+/* A group's header is a row like its tabs — same width, height, radius and insets — filled with the group's
+   quiet colour, so the list keeps one outline down its length. No edge of its own. */
+.browser-tab-list__group-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  width: 100%;
+  min-height: 36px;
+  padding: 0 4px 0 0;
+  border-radius: var(--rn-r-sm);
+}
+
+.browser-tab-list__group-toggle {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  align-self: stretch;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 4px 0 8px;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: inherit;
+  font: 500 var(--rn-fs-md)/1.25 var(--rn-font-ui);
+  text-align: left;
+  cursor: pointer;
+}
+
+.browser-tab-list__group-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The group's name in its edit menu: the address field's well, and no ring when it takes focus — the caret says so. */
+.rn-field.tab-group-edit__name {
+  height: var(--rn-control-h);
+  font-size: var(--rn-fs-md);
+}
+
+.rn-field.tab-group-edit__name:focus {
+  box-shadow: inset 0 1px 2px var(--rn-well-shade), inset 0 0 0 .5px var(--rn-hair-2);
 }

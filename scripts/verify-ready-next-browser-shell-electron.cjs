@@ -598,6 +598,7 @@ async function groupsCase({ page, site }) {
   ok('groups: the new group is in the list with its name field focused', await waitFor(async () => await header.count() === 1 && await name.evaluate(node => node === document.activeElement), 10000)
     && await row(first).getAttribute('data-grouped') === 'true')
   await page.keyboard.type('资料')
+  await shot(page, 'tab-group-editor-light')
   await page.keyboard.press('Enter')
   ok('groups: typing a name and Enter names the group', await waitFor(async () => (await header.innerText()).trim() === '资料' && !(await name.count()), 10000), await header.innerText())
 

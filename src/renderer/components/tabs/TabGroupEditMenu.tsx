@@ -68,8 +68,7 @@ export default function TabGroupEditMenu({
             if (event.key === 'Enter') { commitName(); onRequestClose() }
             if (event.key === 'Escape') onRequestClose()
           }}
-          className="w-full"
-          style={{ height: 30, padding: '0 9px', fontSize: 'var(--rn-fs-sm)' }}
+          className="w-full tab-group-edit__name"
         />
         <div className="flex items-center justify-between">
           {TAB_GROUP_COLORS.map((color) => {
