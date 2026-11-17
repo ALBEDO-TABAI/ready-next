@@ -137,6 +137,8 @@ export type PreparedCodexProductRun = {
   outputContract?: CodexOutputContract
   /** The current document was available without the user pointing at it: no read is owed before answering. */
   currentDocumentAmbient?: true
+  /** This run replaces the person's previous message, which was withdrawn together with its reply. */
+  replacedOriginUserMessageId?: string
   browserPageRef?: NonNullable<TrustedRequestEnvironment['browserPageRef']>
   productSurfaceTargets?: {
     rssItemId?: string | null
@@ -173,6 +175,7 @@ export type CodexProductRunPreparationInput = {
   trustedWorkbenchMode: 'browser' | 'document' | 'rss' | 'calendar'
   currentDocumentAnchor?: CodexCurrentDocumentAnchor | null
   currentDocumentAmbient?: true
+  replacedOriginUserMessageId?: string
   uncommittedUserTail?: UserIngress['uncommittedUserTail']
   actionAdmissionRef?: UserIngress['actionAdmissionRef']
   uncommittedTailAssignments: NonNullable<UserIngress['uncommittedTailAssignments']>
@@ -420,6 +423,7 @@ const preparationInputSchema = z.object({
   trustedWorkbenchMode: z.enum(['browser', 'document', 'rss', 'calendar']),
   currentDocumentAnchor: codexCurrentDocumentAnchorSchema.nullable().optional(),
   currentDocumentAmbient: z.literal(true).optional(),
+  replacedOriginUserMessageId: z.string().min(1).optional(),
   uncommittedUserTail: userIngressPreparationSchema.shape.uncommittedUserTail,
   actionAdmissionRef: userIngressPreparationSchema.shape.actionAdmissionRef,
   uncommittedTailAssignments: userIngressPreparationSchema.shape.uncommittedTailAssignments,
@@ -506,6 +510,7 @@ const preparedRunSchema = z.object({
   resourceAuthorities: z.array(preparedCodexResourceAuthoritySchema).optional(),
   outputContract: outputContractSchema.optional(),
   currentDocumentAmbient: z.literal(true).optional(),
+  replacedOriginUserMessageId: z.string().min(1).optional(),
   browserPageRef: browserPageRefSchema.optional(),
   productSurfaceTargets: z.object({
     rssItemId: z.string().nullable().optional(),
@@ -998,6 +1003,9 @@ export class CodexProductRunPreparer {
         ...(rssReferences.length > 0 ? { rssReferences } : {}),
         ...(outputContract ? { outputContract } : {}),
         ...(currentDocumentAnchor && input.currentDocumentAmbient ? { currentDocumentAmbient: true as const } : {}),
+        ...(input.replacedOriginUserMessageId && !input.explicitRetry
+          ? { replacedOriginUserMessageId: input.replacedOriginUserMessageId }
+          : {}),
         ...(input.browserPageRef ? { browserPageRef: input.browserPageRef } : {}),
         ...(input.productSurfaceTargets ? { productSurfaceTargets: input.productSurfaceTargets } : {}),
         actionObligations,

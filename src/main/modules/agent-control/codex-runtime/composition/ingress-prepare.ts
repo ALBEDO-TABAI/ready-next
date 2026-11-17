@@ -1,4 +1,5 @@
 import { productionLibraryReader } from '../library-read-production'
+import { requireRequestedCodexTurnReplacement } from '../codex-turn-replacement'
 import { readCapturedReference } from '../captured-reference'
 import { readStoredObjectPreview } from '../../../object-service/preview'
 import { toReadyUri } from '../../../../../shared/ready-ref'
@@ -74,6 +75,7 @@ export function createIngressPrepare(deps: IngressPrepareDeps) {
           'codex_message_visibility_epoch_mismatch',
         )
       }
+      const replacementTarget = requireRequestedCodexTurnReplacement(rawDb, scope.id, request)
       const currentInput = toCodexInput(request)
       if (!currentInput) throw new Error('codex_product_ingress_unsupported')
       const profile = activeProfile(input.settings)
@@ -798,6 +800,7 @@ export function createIngressPrepare(deps: IngressPrepareDeps) {
         trustedWorkbenchMode: activeWorkbenchMode,
         currentDocumentAnchor,
         ...(currentDocumentAnchor && !currentDocument.readRequired ? { currentDocumentAmbient: true as const } : {}),
+        ...(replacementTarget ? { replacedOriginUserMessageId: replacementTarget.originUserMessageId } : {}),
         ...(uncommittedUserTail.length > 0 ? { uncommittedUserTail } : {}),
         ...(!request.explicitRetry ? { actionAdmissionRef: request.actionAdmissionRef } : {}),
         uncommittedTailAssignments,

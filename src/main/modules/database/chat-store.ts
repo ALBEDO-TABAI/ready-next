@@ -159,6 +159,7 @@ export class ChatStore {
            SELECT MAX(timestamp) FROM chat_messages m
             WHERE m.conversation_id = c.id
               AND m.message_visibility_epoch = c.message_visibility_epoch
+              AND m.replaced_by_run_id IS NULL
          ) AS last_message_at
          FROM chat_conversations c
          WHERE c.agent = ? AND c.closed_at IS NULL
@@ -168,6 +169,7 @@ export class ChatStore {
            SELECT MAX(timestamp) FROM chat_messages m
             WHERE m.conversation_id = c.id
               AND m.message_visibility_epoch = c.message_visibility_epoch
+              AND m.replaced_by_run_id IS NULL
          ) AS last_message_at
          FROM chat_conversations c
          WHERE c.closed_at IS NULL
@@ -314,6 +316,7 @@ export class ChatStore {
         JOIN chat_conversations scope ON scope.id = message.conversation_id
        WHERE message.conversation_id = ? AND scope.closed_at IS NULL
          AND message.message_visibility_epoch = scope.message_visibility_epoch
+         AND message.replaced_by_run_id IS NULL
        ORDER BY message.timestamp ASC`
     ).all<ChatMessageRecord>(conversationId).map(row => {
       const display = readChatReadyRefDisplay(this.db!, row.id)

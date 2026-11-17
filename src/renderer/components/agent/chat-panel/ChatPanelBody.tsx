@@ -112,7 +112,7 @@ interface ChatPanelBodyProps extends Omit<TaskToolSnapshotProps, 'children' | 'c
   beginNewContextAvailable?: boolean
   onBeginNewContext?: () => void
   /** Sends the last message again as an ordinary message; present when the set-aside turn was one plain message. */
-  onSendEditedMessage?: (text: string) => boolean | Promise<boolean>
+  onSendEditedMessage?: (text: string, messageId: string) => boolean | Promise<boolean>
   headUnavailable?: boolean
   onRefreshActionSurface?: () => void
   onDismissComposerNotice?: () => void

@@ -175,6 +175,7 @@ export interface AgentState {
     codexExternalReadSlice?: Record<string, unknown>
     explicitRetry?: SendScopedRequest['explicitRetry']
     actionAdmissionRef?: SendScopedRequest['actionAdmissionRef']
+    replaceLatestTurn?: SendScopedRequest['replaceLatestTurn']
   }) => Promise<SendMessageResult>
   stopStreaming: () => Promise<LifecycleResult>
   resetCurrentConversation: () => Promise<LifecycleResult>

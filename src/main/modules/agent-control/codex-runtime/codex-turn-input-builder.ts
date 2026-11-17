@@ -1,5 +1,6 @@
 import { z } from 'zod'
 
+import { buildCodexReplacedTurnContext, CODEX_REPLACED_TURN_CONTEXT_KEY } from './codex-turn-replacement'
 import {
   codexCurrentDocumentAnchorSchema,
   type CodexCurrentDocumentAnchor,
@@ -144,6 +145,8 @@ export type CodexTurnBuildContext = {
   readyMemorySnapshot: ReadyMemorySnapshot
   /** Ready's widget catalog, for a turn authorized to insert widgets (`codexDocumentWidgetGuidance`). */
   documentWidgetGuidance?: string | null
+  /** Set when this turn replaces the person's previous message; the model is told that turn is withdrawn. */
+  replacedOriginUserMessageId?: string | null
 }
 
 export type CodexTurnInputBuildResult =
@@ -506,6 +509,17 @@ export class CodexTurnInputBuilder {
                     readyRunId: context.readyRunId,
                     guidance: context.documentWidgetGuidance,
                   }),
+                },
+              }
+            : {}),
+          ...(context.replacedOriginUserMessageId
+            ? {
+                [CODEX_REPLACED_TURN_CONTEXT_KEY]: {
+                  kind: 'application' as const,
+                  value: JSON.stringify(buildCodexReplacedTurnContext({
+                    readyRunId: context.readyRunId,
+                    replacedOriginUserMessageId: context.replacedOriginUserMessageId,
+                  })),
                 },
               }
             : {}),

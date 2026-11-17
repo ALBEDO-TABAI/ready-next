@@ -366,6 +366,17 @@ function nextAvailablePersonalityId(db: MigrationDatabase, baseId: string): stri
   return `${baseId}-${Date.now()}`
 }
 
+/**
+ * A message the person replaced by editing and sending it again stays stored (run records and memory evidence point
+ * at it) but carries the run that replaced it, and is no longer part of the conversation.
+ */
+function migrateChatMessageReplacement(db: MigrationDatabase): void {
+  const columns = db.prepare('PRAGMA table_info(chat_messages)').all<{ name: string }>()
+  if (!columns.some((column) => column.name === 'replaced_by_run_id')) {
+    db.exec('ALTER TABLE chat_messages ADD COLUMN replaced_by_run_id TEXT')
+  }
+}
+
 const migrations: Migration[] = [
   // ------------------------------------------------------------------ 001
   {
@@ -4557,6 +4568,7 @@ const migrations: Migration[] = [
   { name: '158_browser_work_tab_ownership', up: migrateBrowserWorkTabOwnership },
   { name: '159_browser_work_tab_grouping', up: migrateBrowserWorkTabGrouping },
   { name: '160_search_titles_and_token_boundaries', up: migrateSearchTitlesAndTokenBoundaries },
+  { name: '161_chat_message_replacement', up: migrateChatMessageReplacement },
 ]
 
 /**

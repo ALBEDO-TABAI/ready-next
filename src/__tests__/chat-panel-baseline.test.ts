@@ -1272,7 +1272,7 @@ test('composer submits the Main head reference with its consequence; the set-asi
 })
 
 
-test('the latest user message can be copied, or edited in place and sent as an ordinary new message', async () => {
+test('the latest user message can be copied, or edited in place and sent as its replacement', async () => {
   resetStores()
   seedEmptyAgent()
   const scopeId = 'scope-resend-ui'
@@ -1293,11 +1293,11 @@ test('the latest user message can be copied, or edited in place and sent as an o
   const originalList = agentApi.listConversationScopes
   agentApi.listConversationScopes = async () => ({ success: false })
   const originalSend = useAgent.getState().sendMessage
-  const sent: Array<{ text: string; ref: unknown }> = []
+  const sent: Array<{ text: string; ref: unknown; replaces: unknown }> = []
   useAgent.setState({ ...slice, currentScopeId: scopeId, currentScope: scope, scopes: [scope],
     sessions: { [sessionId]: slice }, activeSessionId: sessionId, sessionId, sessionOrder: [sessionId],
     sendMessage: async (text, options) => {
-      sent.push({ text, ref: options?.actionAdmissionRef })
+      sent.push({ text, ref: options?.actionAdmissionRef, replaces: options?.replaceLatestTurn })
       return { success: true } as never
     },
   })
@@ -1336,7 +1336,9 @@ test('the latest user message can be copied, or edited in place and sent as an o
       sessions: { ...state.sessions, [sessionId]: { ...state.sessions[sessionId], inputValue: '' } } })))
     flushSync(() => editorButton('发送').click())
     await tick()
-    assert.deepEqual(sent, [{ text: '后天广州天气怎么样', ref: codexHeadActionAdmissionRef(head) }])
+    assert.deepEqual(sent, [{
+      text: '后天广州天气怎么样', ref: codexHeadActionAdmissionRef(head), replaces: { userMessageId: 'u1' },
+    }])
     assert.equal(editor(), null)
   } finally {
     unmount()

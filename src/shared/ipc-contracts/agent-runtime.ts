@@ -457,6 +457,13 @@ export type SendScopedRequest = {
     predecessorRunId: string
     predecessorPresentationDigest: string
   }
+  /**
+   * The person edited their latest message and sent it again: that message and everything shown after it leave the
+   * conversation in the same transaction that admits this one. Main checks that it still is the latest.
+   */
+  replaceLatestTurn?: {
+    userMessageId: string
+  }
 }
 
 export type PersistedIngress = {
@@ -917,6 +924,9 @@ export const sendScopedRequestSchema: z.ZodType<SendScopedRequest> = z.object({
   explicitRetry: z.object({
     predecessorRunId: nonEmptyString,
     predecessorPresentationDigest: sha256Digest,
+  }).strict().optional(),
+  replaceLatestTurn: z.object({
+    userMessageId: nonEmptyString,
   }).strict().optional(),
 }).strict()
 

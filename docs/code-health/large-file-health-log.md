@@ -21,6 +21,12 @@
 
 | 评估日期 | 任务 | 文件 | 总行数 | 本次新增 | 结论 | 判断与后续动作 | 状态 |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
+| 2026-11-17 | 编辑后重发覆盖上一轮 | `src/main/modules/agent-control/codex-runtime/composition/ingress-prepare.ts` | 1023 | 净 +3 | 一般 | 只调用一次前置校验（被替换的必须仍是最新一条用户消息）并把结果交给 preparer；校验、拒绝与打标记的实现都在独立的 `codex-turn-replacement.ts`，本文件仍在结构测试的 1025 行上限内。 | 复查：2026-11-30 |
+| 2026-11-17 | 编辑后重发覆盖上一轮 | `src/main/modules/agent-control/codex-runtime/codex-product-run-preparer.ts` | 1022 | 净 +8 | 一般 | 只给冻结的 prepared 增加一个可选字段 `replacedOriginUserMessageId`（类型、两处 schema、构造各一行）。 | 复查：2026-11-30 |
+| 2026-11-17 | 编辑后重发覆盖上一轮 | `src/main/modules/migrations.ts` | 4654 | 净 +12 | 健康 | 迁移 161 只给 `chat_messages` 加一列 `replaced_by_run_id`；真实数据库行为由 `codex-turn-replacement.test.ts` 在 Electron 运行时覆盖。 | 记录结论 |
+| 2026-11-17 | 编辑后重发覆盖上一轮 | `src/renderer/stores/useAgent.ts` | 2493 | 净 +5 | 危险 | 只在准入提交时把被替换的消息及其后的内容从列表里去掉；原有多职责问题未变。 | 待独立拆分合同；交付时提醒 |
+| 2026-11-17 | 编辑后重发覆盖上一轮 | `src/renderer/components/agent/ChatPanel.tsx` | 1409 | 净 +3 | 一般 | `handleSend` 多一个可选的“被替换消息 id”参数，原路径不变。 | 复查：2026-12-15 |
+| 2026-11-17 | 编辑后重发覆盖上一轮 | `src/shared/ipc-contracts/agent-runtime.ts` | 1428 | 净 +10 | 健康 | 发送请求加一个可选严格字段 `replaceLatestTurn`，类型与 schema 同处声明。 | 记录结论 |
 | 2026-11-17 | 失败后可重新发送上一条（同日改为气泡上的“编辑 / 复制”，本文件回到 1406，净 −4；编辑框在 `ChatMessages.tsx`） | `src/renderer/components/agent/ChatPanel.tsx` | 1410 | 净 +22 | 一般 | 只加“被搁置的是一条纯文字消息时，从提示里把它按普通消息再发一次”：发送仍走 `handleSend` 的同一条路径（多一个可选文本参数），草稿不被覆盖。按钮在 `ChatPanelBody.tsx`。复查：发送与重试的处理可整体移到 `modules/agent`。 | 复查：2026-12-15 |
 | 2026-11-17 | 助手链路排查：启动失败要说话、隐藏启动可退出 | `src/main/index.ts` | 1421 | 净 +17 | 一般 | 只加两处：窗口与助手装配失败时弹出启动失败提示再退出（原先无声退出）；隐藏启动在后台运行时没停下时按“仍然退出”走。退出收尾抽成一个局部函数供两处共用。复查同 B3 行。 | 复查：2026-12-15 |
 | 2026-11-17 | 助手链路排查：远程通道不再挡住聊天接线 | `src/main/modules/agent-control/runtime-core/runtime.ts` | 1984 | 净 +4 | 一般 | 只把远程通道 sidecar 的启动改成不阻塞 `start()`（仍由 `sidecarStartup` 持有、`stop()` 等待并中止）；没有新增判断。 | 复查：2026-12-15，按既有运行时装配边界复查 |

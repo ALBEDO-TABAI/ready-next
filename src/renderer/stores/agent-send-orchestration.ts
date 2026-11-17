@@ -51,6 +51,8 @@ type PendingIngressSnapshot = {
   originAliasGeneration: number | null
   originMessageVisibilityEpoch: number
   originSessionKey: string
+  /** The person's earlier message this send replaces; it and everything after it leave the list on admission. */
+  replacedUserMessageId?: string
 }
 
 export const pendingIngressSnapshots = new Map<string, PendingIngressSnapshot>()
@@ -102,6 +104,7 @@ export async function sendAgentMessage(input: {
     codexExternalReadSlice?: Record<string, unknown>
     explicitRetry?: SendScopedRequest['explicitRetry']
     actionAdmissionRef?: SendScopedRequest['actionAdmissionRef']
+    replaceLatestTurn?: SendScopedRequest['replaceLatestTurn']
   }
   commitPersistedIngressSnapshot: (event: Pick<
     IngressAdmittedEvent,
@@ -183,7 +186,9 @@ export async function sendAgentMessage(input: {
   if (explicitRetry && retryHasCurrentContext) {
     return rejectedMessageResult('explicit_retry_control_invalid')
   }
-  if (!explicitRetry) {
+  const replaceLatestTurn = explicitRetry ? undefined : options?.replaceLatestTurn
+  // An edited message is sent as written: its words are never read as "try the last one again".
+  if (!explicitRetry && !replaceLatestTurn) {
     const retryRoute = await resolveNaturalExplicitRetry({
       content,
       attachmentCount: attachments.length + referencedPoolAttachments.length,
@@ -292,6 +297,7 @@ export async function sendAgentMessage(input: {
     originMessageVisibilityEpoch: originSlice.messageVisibilityEpoch,
     originSessionKey,
     originDraftRevision: originSlice.draftRevision,
+    ...(replaceLatestTurn ? { replacedUserMessageId: replaceLatestTurn.userMessageId } : {}),
   })
 
   try {
@@ -327,6 +333,7 @@ export async function sendAgentMessage(input: {
         },
       },
       ...(explicitRetry ? { explicitRetry } : {}),
+      ...(replaceLatestTurn ? { replaceLatestTurn } : {}),
     })
 
     if (

@@ -360,7 +360,7 @@ export class ReadyMemoryRuntimeService {
     `).all<TerminalRow>(scope.id, scope.message_visibility_epoch)
     const message = this.dependencies.db.prepare(`
       SELECT id, conversation_id, role, content, timestamp, message_visibility_epoch
-      FROM chat_messages WHERE id = ? LIMIT 1
+      FROM chat_messages WHERE id = ? AND replaced_by_run_id IS NULL LIMIT 1
     `)
     const pairs: Array<[MessageRow, MessageRow]> = []
     const seenMessageIds = new Set<string>()

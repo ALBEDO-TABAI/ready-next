@@ -268,6 +268,29 @@ function readyExplicitRetryContextFromText(text: string): {
   return { recognized: true, context: parsed }
 }
 
+function readyReplacedTurnContextFromText(text: string): {
+  recognized: boolean
+  context: JsonObject | null
+} {
+  const match = text.match(/^<ready-replaced-turn>([\s\S]*)<\/ready-replaced-turn>$/)
+  if (!match) return { recognized: false, context: null }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(match[1])
+  } catch {
+    throw new CodexModelGatewayContractError('gateway_replaced_turn_context_invalid')
+  }
+  if (!isRecord(parsed)
+    || Object.keys(parsed).sort().join(',') !== 'contract,notice,readyRunId,replacedOriginUserMessageId'
+    || parsed.contract !== 'ready_replaced_turn_v1'
+    || typeof parsed.readyRunId !== 'string' || !parsed.readyRunId
+    || typeof parsed.replacedOriginUserMessageId !== 'string' || !parsed.replacedOriginUserMessageId
+    || typeof parsed.notice !== 'string' || !parsed.notice) {
+    throw new CodexModelGatewayContractError('gateway_replaced_turn_context_invalid')
+  }
+  return { recognized: true, context: parsed }
+}
+
 function readyDocumentWidgetGuidanceFromText(text: string): {
   recognized: boolean
   readyRunId: string | null
@@ -334,6 +357,7 @@ export function instructionTranscriptDigest(instructions: unknown, input: unknow
       || readyExplicitRetryContextFromText(developerText).recognized
       || readyMemoryContextFromText(developerText).recognized
       || readyDocumentWidgetGuidanceFromText(developerText).recognized
+      || readyReplacedTurnContextFromText(developerText).recognized
     ) return
     developerMessages.push({ type: 'message', role: 'developer', content: item.content })
   })
@@ -562,6 +586,7 @@ export function currentTurnReadyAdditionalContext(
   explicitRetry: JsonObject | null
   readyMemory: ReadyMemoryPromptPayload | null
   documentWidgetGuidance: string | null
+  replacedTurn: JsonObject | null
   currentUserIndex: number | null
   readyMemoryIndex: number | null
 } {
@@ -577,7 +602,7 @@ export function currentTurnReadyAdditionalContext(
     if (expectedDeliveredUserTail.length > 0) throw new CodexModelGatewayContractError('gateway_uncommitted_user_tail_mismatch')
     return {
       resourceReferences: [], explicitRetry: null, readyMemory: null, documentWidgetGuidance: null,
-      currentUserIndex: null, readyMemoryIndex: null,
+      replacedTurn: null, currentUserIndex: null, readyMemoryIndex: null,
     }
   }
   if (textFromContent(input[lastUser].content).some((text) => text.startsWith('<external_ready-uncommitted-user-tail:'))) {
@@ -589,6 +614,7 @@ export function currentTurnReadyAdditionalContext(
   let readyMemory: ReadyMemoryPromptPayload | null = null
   let readyMemoryIndex: number | null = null
   let documentWidgetGuidance: string | null = null
+  let replacedTurn: JsonObject | null = null
   let nextTailIndex = expectedDeliveredUserTail.length - 1
   for (let index = lastUser - 1; index >= 0; index -= 1) {
     const item = input[index]
@@ -672,6 +698,20 @@ export function currentTurnReadyAdditionalContext(
         documentWidgetGuidance = widgetGuidance.guidance
         continue
       }
+      const replaced = readyReplacedTurnContextFromText(text)
+      if (replaced.recognized && replaced.context) {
+        if (replaced.context.readyRunId !== readyRunId || replacedTurn !== null
+          || item.type !== 'message' || item.role !== 'developer'
+          || Object.keys(item).some((key) => !['type', 'id', 'role', 'content'].includes(key))
+          || (item.id !== undefined && typeof item.id !== 'string')
+          || !Array.isArray(item.content) || item.content.length !== 1
+          || !isRecord(item.content[0]) || item.content[0].type !== 'input_text'
+          || Object.keys(item.content[0]).some((key) => key !== 'type' && key !== 'text')) {
+          throw new CodexModelGatewayContractError('gateway_replaced_turn_context_invalid')
+        }
+        replacedTurn = replaced.context
+        continue
+      }
       recognized = false
       break
     }
@@ -683,6 +723,7 @@ export function currentTurnReadyAdditionalContext(
     explicitRetry,
     readyMemory,
     documentWidgetGuidance,
+    replacedTurn,
     currentUserIndex: lastUser,
     readyMemoryIndex,
   }
@@ -704,6 +745,8 @@ export function hasCurrentTurnReadyContext(input: unknown, readyRunId: string): 
       if (readyMemoryContextFromText(text).recognized) return true
       const guidance = readyDocumentWidgetGuidanceFromText(text)
       if (guidance.recognized) return guidance.readyRunId === readyRunId
+      const replaced = readyReplacedTurnContextFromText(text)
+      if (replaced.recognized) return replaced.context?.readyRunId === readyRunId
       return text.startsWith('<external_ready-uncommitted-user-tail:') && text.includes(JSON.stringify(readyRunId))
     } catch {
       // silent-catch: per the contract above, an unreadable Ready context entry counts as still present
@@ -735,6 +778,7 @@ export function digestReadyAdditionalContext(input: {
   explicitRetry: unknown | null
   readyMemory?: unknown | null
   documentWidgetGuidance?: string | null
+  replacedTurn?: unknown | null
 }): string {
   if (input.explicitRetry !== null && !isRecord(input.explicitRetry)) {
     throw new CodexModelGatewayContractError('gateway_explicit_retry_context_invalid')
@@ -756,6 +800,8 @@ export function digestReadyAdditionalContext(input: {
     ...(input.explicitRetry === null ? [] : [{ kind: 'explicit_retry', value: input.explicitRetry }]),
     ...(memory === null ? [] : [{ kind: 'ready_memory', value: memory }]),
     ...(input.documentWidgetGuidance ? [{ kind: 'document_widget_guidance', value: input.documentWidgetGuidance }] : []),
+    // Absent for every run that replaced nothing, so their digests are unchanged.
+    ...(input.replacedTurn ? [{ kind: 'replaced_turn', value: input.replacedTurn }] : []),
   ])
 }
 

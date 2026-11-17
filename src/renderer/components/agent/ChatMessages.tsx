@@ -134,7 +134,7 @@ interface ChatMessagesProps {
   onCopyMessage: (id: string, content: string) => void | Promise<void>
   onRetryProductTurn?: (readyRunId: string) => void | Promise<void>
   /** Sends the edited words of the latest user message as an ordinary new message; false when it was not sent. */
-  onSendEditedMessage?: (text: string) => boolean | Promise<boolean>
+  onSendEditedMessage?: (text: string, messageId: string) => boolean | Promise<boolean>
   onAgentSelectionContextMenu?: (event: React.MouseEvent, selectedText: string) => void
   onAttachmentPreview: (attachment: ChatAttachment) => void | Promise<void>
   onReferenceSelect: (attachment: ChatAttachment) => void
@@ -387,7 +387,7 @@ export default function ChatMessages({
                   initial={msg.content}
                   onCancel={() => setEditingMessageId(null)}
                   onSend={(text) => {
-                    void Promise.resolve(onSendEditedMessage?.(text)).then((sent) => {
+                    void Promise.resolve(onSendEditedMessage?.(text, msg.id)).then((sent) => {
                       if (sent) setEditingMessageId(null)
                     })
                   }}

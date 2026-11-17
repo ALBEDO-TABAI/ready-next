@@ -201,6 +201,53 @@ test('renderer keeps composer and transcript untouched until durable admission',
   }
 })
 
+test('an edited message replaces its turn only once Main admits it', async () => {
+  seedStore('', 1)
+  const earlier = [
+    { id: 'u0', agent: 'butler', type: 'user' as const, content: '第一问', timestamp: new Date('2026-08-07T00:00:00.000Z') },
+    { id: 'a0', agent: 'butler', type: 'agent' as const, content: '第一答', timestamp: new Date('2026-08-07T00:00:00.500Z') },
+    { id: 'u1', agent: 'butler', type: 'user' as const, content: '明天广州天气怎么样', timestamp: new Date('2026-08-07T00:00:00.600Z') },
+    { id: 'a1', agent: 'butler', type: 'agent' as const, content: '本轮未能完成。', timestamp: new Date('2026-08-07T00:00:00.700Z') },
+  ]
+  useAgent.setState((state) => ({
+    messages: earlier,
+    sessions: { ...state.sessions,
+      'session-codex-renderer': { ...state.sessions['session-codex-renderer'], messages: earlier } },
+  }))
+  let capturedPayload: any = null
+  const electron = installElectronApi(async (payload) => {
+    capturedPayload = payload
+    return new Promise<SendScopedResponse>(() => {})
+  })
+  try {
+    void useAgent.getState().sendMessage('后天广州天气怎么样', { replaceLatestTurn: { userMessageId: 'u1' } })
+    const payload = await waitFor(() => capturedPayload)
+    assert.deepEqual(payload.replaceLatestTurn, { userMessageId: 'u1' })
+    assert.equal(payload.explicitRetry, undefined)
+    // Nothing leaves the conversation before Main has admitted the replacement.
+    assert.deepEqual(useAgent.getState().messages.map((message) => message.id), ['u0', 'a0', 'u1', 'a1'])
+
+    assert.equal(applyIngressAdmitted({
+      type: 'ingress_admitted',
+      requestId: payload.requestId,
+      scopeId: payload.scopeId,
+      originUserMessageId: payload.userMessage.id,
+      aliasGeneration: 1,
+      messageVisibilityEpoch: 0,
+      ingressAdmittedRevision: 1,
+      ingressAdmittedDigest: 'admission-digest',
+      admittedAt: '2026-08-07T00:00:01.000Z',
+    }), true)
+    const after = useAgent.getState().messages
+    assert.deepEqual(after.slice(0, 2).map((message) => message.id), ['u0', 'a0'])
+    assert.deepEqual(after.slice(2).map((message) => message.type), ['user', 'agent'])
+    assert.equal(after[2].content, '后天广州天气怎么样')
+    assert.equal(after.some((message) => message.id === 'u1' || message.id === 'a1'), false)
+  } finally {
+    electron.restore()
+  }
+})
+
 test('admission clears only the submitted draft revision after A to B to A edits', async () => {
   seedStore('A', 1)
   let capturedPayload: any = null

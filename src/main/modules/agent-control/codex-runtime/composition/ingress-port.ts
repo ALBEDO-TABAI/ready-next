@@ -1,4 +1,9 @@
 import { readyMemoryPromptPayload } from '../../ready-memory'
+import {
+  codexReplacedTurnContext,
+  markCodexTurnReplacedInOpenTransaction,
+  resolveCodexTurnReplacementTarget,
+} from '../codex-turn-replacement'
 import { PrePersistenceAdmissionError, IngressPersistenceError, resolveAttachmentConfirmation } from '../../send-scoped-confirmation'
 import { readProjectDirectory, canonicalProjectDirectory } from '../chat-project-directory'
 import { CodexBindingRepositoryError } from '../codex-binding-error'
@@ -158,6 +163,7 @@ export function createIngressPort(deps: IngressPortDeps) {
               : null,
             readyMemory: readyMemoryPromptPayload(prepared.readyMemorySnapshot),
             documentWidgetGuidance: codexDocumentWidgetGuidance(prepared),
+            replacedTurn: codexReplacedTurnContext(prepared),
           }),
           turnContractDigest: detail.turnContractDigest,
           messageVisibilityEpoch,
@@ -173,6 +179,26 @@ export function createIngressPort(deps: IngressPortDeps) {
         const ingressAdmittedDigest = buildCodexIngressAdmittedDigest(admissionWithoutDigest)
         const existing = rawDb.prepare('SELECT 1 AS present FROM chat_messages WHERE id = ? LIMIT 1').get(request.userMessage.id)
         if (existing) throw new Error('codex_origin_message_already_exists')
+        if (prepared.replacedOriginUserMessageId) {
+          const target = request.replaceLatestTurn?.userMessageId === prepared.replacedOriginUserMessageId
+            ? resolveCodexTurnReplacementTarget(rawDb, {
+                scopeId: scope.id,
+                userMessageId: prepared.replacedOriginUserMessageId,
+              })
+            : null
+          if (!target) {
+            throw new PrePersistenceAdmissionError('action_projection_confirmation_required', true,
+              digestCanonicalJson({ runId: prepared.runId, stage: 'replace_latest_turn_target' }),
+              'codex_replace_latest_turn_target_stale')
+          }
+          markCodexTurnReplacedInOpenTransaction(rawDb, {
+            scopeId: scope.id, target, replacingRunId: prepared.runId,
+          })
+        } else if (request.replaceLatestTurn) {
+          throw new PrePersistenceAdmissionError('action_projection_confirmation_required', true,
+            digestCanonicalJson({ runId: prepared.runId, stage: 'replace_latest_turn_unprepared' }),
+            'codex_replace_latest_turn_target_stale')
+        }
         input.database.chat.addChatMessage(
           request.userMessage.id,
           scope.id,

@@ -321,7 +321,7 @@ function droppedTurnContext(
   const lastUser = input.findLastIndex((item) => isRecord(item) && item.role === 'user')
   return {
     resourceReferences: [], explicitRetry: null, readyMemory: null, documentWidgetGuidance: null,
-    currentUserIndex: lastUser < 0 ? null : lastUser, readyMemoryIndex: null,
+    replacedTurn: null, currentUserIndex: lastUser < 0 ? null : lastUser, readyMemoryIndex: null,
   }
 }
 

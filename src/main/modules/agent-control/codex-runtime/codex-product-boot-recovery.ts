@@ -351,6 +351,7 @@ export class CodexProductBootRecovery {
             upstreamProfileSnapshotDigest: product.upstreamProfileSnapshotDigest,
             readyMemorySnapshot: product.prepared.readyMemorySnapshot,
             documentWidgetGuidance: codexDocumentWidgetGuidance(product.prepared),
+            replacedOriginUserMessageId: product.prepared.replacedOriginUserMessageId ?? null,
           })
           if (!turnInput.ok) {
             throw runLocalRecoveryError(`codex_recovered_turn_input_${turnInput.code}`)

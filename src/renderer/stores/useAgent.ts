@@ -671,8 +671,12 @@ function commitPersistedIngressSnapshot(input: Pick<
       timestamp: new Date(input.admittedAt),
       meta: { transient: true, runId: pending.requestId, scopeId: pending.scopeId },
     }
+    // Main hid the replaced message and everything after it in the same transaction that admitted this one.
+    const replacedFrom = pending.replacedUserMessageId
+      ? slice.messages.findIndex((message) => message.id === pending.replacedUserMessageId)
+      : -1
     const messages = [
-      ...slice.messages.filter((message) => (
+      ...(replacedFrom >= 0 ? slice.messages.slice(0, replacedFrom) : slice.messages).filter((message) => (
         message.id !== pending.userMessageId && message.id !== pending.responseMessageId
       )),
       userMessage,
@@ -2098,6 +2102,7 @@ export const useAgent = create<AgentState>((set, get) => ({
     codexExternalReadSlice?: Record<string, unknown>
     explicitRetry?: import('../../shared/ipc-contracts/agent-runtime').SendScopedRequest['explicitRetry']
     actionAdmissionRef?: import('../../shared/ipc-contracts/agent-runtime').SendScopedRequest['actionAdmissionRef']
+    replaceLatestTurn?: import('../../shared/ipc-contracts/agent-runtime').SendScopedRequest['replaceLatestTurn']
   }) => sendAgentMessage({
     get,
     set,

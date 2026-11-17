@@ -777,6 +777,7 @@ test('explicit retry metadata is bound application context rather than developer
     explicitRetry: retry,
     readyMemory: null,
     documentWidgetGuidance: null,
+    replacedTurn: null,
     currentUserIndex: 2,
     readyMemoryIndex: null,
   })
@@ -3662,7 +3663,7 @@ test('current Retry context crosses only its exact frozen delivered user tail', 
   const parsed = currentTurnReadyAdditionalContext([
     nativeRetryMessage, ...deliveredTailFixture.map((_, index) => nativeTailMessage(index)), nativeCurrentUser,
   ], deliveredTailFixture, 'run-1')
-  assert.deepEqual(parsed, { resourceReferences: [], explicitRetry: { predecessorRunId: 'current-predecessor' }, readyMemory: null, documentWidgetGuidance: null, currentUserIndex: 3, readyMemoryIndex: null })
+  assert.deepEqual(parsed, { resourceReferences: [], explicitRetry: { predecessorRunId: 'current-predecessor' }, readyMemory: null, documentWidgetGuidance: null, replacedTurn: null, currentUserIndex: 3, readyMemoryIndex: null })
 })
 
 test('current tail rejects changed content, digest, identity, role, key, order, count and mixed messages', () => {
@@ -3697,7 +3698,7 @@ test('historical tails do not satisfy current expected delivery or resurrect a h
   const history = [nativeRetryMessage, nativeTailMessage(0), nativeCurrentUser,
     { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'old answer' }] }]
   assert.deepEqual(currentTurnReadyAdditionalContext([...history, nativeCurrentUser], [], 'run-1'),
-    { resourceReferences: [], explicitRetry: null, readyMemory: null, documentWidgetGuidance: null, currentUserIndex: 4, readyMemoryIndex: null })
+    { resourceReferences: [], explicitRetry: null, readyMemory: null, documentWidgetGuidance: null, replacedTurn: null, currentUserIndex: 4, readyMemoryIndex: null })
   assert.throws(() => currentTurnReadyAdditionalContext([...history, nativeCurrentUser], [deliveredTailFixture[0]], 'run-1'),
     /gateway_uncommitted_user_tail_mismatch/)
 })

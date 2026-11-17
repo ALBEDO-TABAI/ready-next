@@ -209,6 +209,7 @@ export function createAliasPorts(deps: AliasPortsDeps) {
           upstreamProfileSnapshotDigest: detail.upstream.snapshotDigest,
           readyMemorySnapshot: prepared.readyMemorySnapshot,
           documentWidgetGuidance: codexDocumentWidgetGuidance(prepared),
+          replacedOriginUserMessageId: prepared.replacedOriginUserMessageId ?? null,
         },
         collection: {
           terminalTimeoutMs: null,

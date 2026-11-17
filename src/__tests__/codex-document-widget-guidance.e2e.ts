@@ -17,6 +17,7 @@ import {
   digestReadyAdditionalContext,
   instructionTranscriptDigest,
 } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
+import { buildCodexReplacedTurnContext } from '../main/modules/agent-control/codex-runtime/codex-turn-replacement'
 import { disabledReadyMemorySnapshot } from './utils/ready-memory-fixture'
 
 // 2026-10-06: Codex turns could insert widgets but never saw Ready's component catalog, so the model guessed names.
@@ -146,6 +147,36 @@ supports_websockets = false
     assert.equal(new Set(instructionDigests).size, 1, 'catalog turns leave the thread instruction contract unchanged')
     assert.equal(JSON.stringify(requests.at(-1)!.input).split('<ready-document-widget-guidance>').length - 1, 2,
       'earlier catalogs stay in history; a turn without write tools adds none')
+
+    // 2026-11-17: an edited message replaces the previous turn; the runtime must carry the withdrawn-turn notice
+    // to the model as this run's context, in a form the gateway reads back to the same digest.
+    const replacing = new CodexTurnInputBuilder().build({
+      kind: 'user_ingress', attemptKind: 'user_ingress', originUserMessageId: 'TURN_4',
+      canonicalCurrentInputRef: { messageId: 'TURN_4', input: [{ type: 'text', text: 'TURN_4', text_elements: [] }] },
+      explicitResourceEnvelope: { input: [], resourceRefs: [] }, resourceAdditionalContext: [],
+      actionAdmissionRef: { headProjectionDigest: 'f'.repeat(64),
+        actionProjectionVersion: { scopeEpoch: 0, headGeneration: 1, actionProjectionSequence: 4 },
+        actionHeadIdentity: { aliasId: 'scope', aliasGeneration: 1, threadBindingId: 'binding', headRevision: 1 } },
+      uncommittedTailAssignments: [], supersededUncommittedItems: [],
+    }, {
+      threadId, turnRequestId: 'TURN_4', readyRunId: 'run-4', reasoningEffort: null,
+      toolSurfaceDigest: 'f'.repeat(64), turnContractDigest: 'a'.repeat(64),
+      upstreamProfileSnapshotDigest: 'b'.repeat(64), readyMemorySnapshot: disabledReadyMemorySnapshot(),
+      documentWidgetGuidance: guidance, replacedOriginUserMessageId: 'TURN_3',
+    })
+    if (!replacing.ok) throw new Error(replacing.code)
+    const replacingTurnId = (await request<{ turn: { id: string } }>('turn/start', replacing.params)).turn.id
+    assert.equal((await new Promise<{ status: string }>((resolve) => completed.set(replacingTurnId, resolve))).status, 'completed')
+    const replacingBody = requests.at(-1)!
+    const replacingContext = currentTurnReadyAdditionalContext(replacingBody.input, [], 'run-4')
+    const expectedReplacedTurn = buildCodexReplacedTurnContext({ readyRunId: 'run-4', replacedOriginUserMessageId: 'TURN_3' })
+    assert.deepEqual(replacingContext.replacedTurn, expectedReplacedTurn)
+    assert.equal(replacingContext.documentWidgetGuidance, guidance)
+    assert.equal(digestReadyAdditionalContext(replacingContext), digestReadyAdditionalContext({
+      resourceReferences: [], explicitRetry: null, documentWidgetGuidance: guidance, replacedTurn: expectedReplacedTurn,
+    }))
+    assert.equal(instructionTranscriptDigest(replacingBody.instructions, replacingBody.input), instructionDigests[0],
+      'the notice leaves the thread instruction contract unchanged')
   } finally {
     lines.close()
     child.kill('SIGTERM')

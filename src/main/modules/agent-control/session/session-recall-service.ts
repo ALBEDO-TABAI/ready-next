@@ -378,6 +378,7 @@ export class SessionRecallService {
       WHERE attachment.name LIKE ?
         AND active.closed_at IS NULL
         AND message.message_visibility_epoch = active.message_visibility_epoch
+        AND message.replaced_by_run_id IS NULL
     `).all<{ conversation_id: string }>(likeQuery).map((row) => row.conversation_id)
     const directMatches = db.prepare(`
       SELECT *

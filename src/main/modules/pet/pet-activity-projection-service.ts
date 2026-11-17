@@ -184,6 +184,7 @@ export class PetActivityProjectionService {
          AND message.role = 'assistant'
          AND scope.closed_at IS NULL
          AND message.message_visibility_epoch = scope.message_visibility_epoch
+         AND message.replaced_by_run_id IS NULL
        ORDER BY message.timestamp DESC LIMIT 1
     `).get<{ id: string }>(scopeId)?.id || null
   }

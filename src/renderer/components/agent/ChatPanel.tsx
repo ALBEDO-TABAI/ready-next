@@ -833,7 +833,7 @@ export default function ChatPanel({
     return false
   }, [compactCurrentSession, setComposerNoticeFor])
 
-  const handleSend = useCallback(async (resend?: string) => {
+  const handleSend = useCallback(async (resend?: string, replacedUserMessageId?: string) => {
     const sendSessionId = activeSessionId
     if (!sendSessionId) return
     // Sending the context-compact skill on its own is the compaction itself, not an Agent turn that could not compact.
@@ -864,13 +864,16 @@ export default function ChatPanel({
       return
     }
     if (sendingSessionsRef.current.has(sendSessionId)) return
-    // `resend` is the text of the last message when the person asks for it to be sent again; otherwise the draft.
+    // `resend` is the edited text of the latest message, which this send then replaces; otherwise the draft.
     const content = resend ?? inputValue.trim()
     if (!content && attachments.length === 0) return
     sendingSessionsRef.current.add(sendSessionId)
     setComposerNoticeFor(sendSessionId, null)
     try {
-      const result = await sendMessage(content, { actionAdmissionRef: codexHeadActionAdmissionRef(headProjection) })
+      const result = await sendMessage(content, {
+        actionAdmissionRef: codexHeadActionAdmissionRef(headProjection),
+        ...(replacedUserMessageId ? { replaceLatestTurn: { userMessageId: replacedUserMessageId } } : {}),
+      })
       if (result && result.success === false && result.disposition === 'rejected_before_persistence') {
         const friendly = mapBackendErrorToFriendly({
           errorKind: result.errorKind,
@@ -891,9 +894,9 @@ export default function ChatPanel({
   }, [activeLifecycleSlice?.beginNewContextActionRef, activeSessionId, attachments,
     inputValue, sendMessage, headProjection, setComposerNoticeFor, runCompaction, setInputValue, clearAttachments])
 
-  // Editing the latest message sends the changed words as an ordinary new message; it never rewrites history,
-  // and it never takes or replaces what is waiting in the composer.
-  const handleSendEditedMessage = useCallback((text: string): boolean => {
+  // Editing the latest message replaces that turn: once Main admits the edited text, the old message and its reply
+  // leave the conversation. It never takes or replaces what is waiting in the composer.
+  const handleSendEditedMessage = useCallback((text: string, messageId: string): boolean => {
     const content = text.trim()
     if (!content || !activeSessionId) return false
     if (inputValue.trim() || attachments.length > 0) {
@@ -903,7 +906,7 @@ export default function ChatPanel({
       })
       return false
     }
-    void handleSend(content)
+    void handleSend(content, messageId)
     return true
   }, [activeSessionId, attachments.length, handleSend, inputValue, setComposerNoticeFor])
 
