@@ -86,9 +86,6 @@ function createMockDeps(): FetchGroupDeps {
     isEmbeddedRSSHubRequiredForDiagnostics: fail('isEmbeddedRSSHubRequiredForDiagnostics') as FetchGroupDeps['isEmbeddedRSSHubRequiredForDiagnostics'],
     getArtifactsRootDir: fail('getArtifactsRootDir') as FetchGroupDeps['getArtifactsRootDir'],
     fetchSourceWithCurrentStack: fail('fetchSourceWithCurrentStack') as FetchGroupDeps['fetchSourceWithCurrentStack'],
-    resolveRSSHubBase: fail('resolveRSSHubBase') as FetchGroupDeps['resolveRSSHubBase'],
-    requiresRSSHubWarmup: fail('requiresRSSHubWarmup') as FetchGroupDeps['requiresRSSHubWarmup'],
-    requiresStrictRSSHubAvailability: fail('requiresStrictRSSHubAvailability') as FetchGroupDeps['requiresStrictRSSHubAvailability'],
     recordSourceRouteAttempt: fail('recordSourceRouteAttempt') as FetchGroupDeps['recordSourceRouteAttempt'],
     persistRouteDiagnosticsSnapshot: fail('persistRouteDiagnosticsSnapshot') as FetchGroupDeps['persistRouteDiagnosticsSnapshot'],
     resolveSourceBackend: fail('resolveSourceBackend') as FetchGroupDeps['resolveSourceBackend'],
@@ -172,7 +169,7 @@ test('completed fetchAll records durable completion after passing through RSSUpd
     ...createMockDeps(),
     getRSSSources: () => [],
     filterSelectedSources: (sources) => sources,
-    normalizeFetchOptions: () => ({ digest: false, classification: 'simple' }),
+    normalizeFetchOptions: () => ({ digest: false, trigger: 'manual-all' }),
     persistFetchInvocation: () => undefined,
     recordFetchAllCompletedAt: (value) => completedAt.push(value),
     rssUpdateLock: new RSSUpdateLock(),
@@ -194,7 +191,7 @@ test('failed fetchAll also records completion so cold start does not retry in a 
     getRSSSources: () => {
       throw new Error('database unavailable')
     },
-    normalizeFetchOptions: () => ({ digest: false, classification: 'simple' }),
+    normalizeFetchOptions: () => ({ digest: false, trigger: 'manual-all' }),
     persistFetchInvocation: () => undefined,
     recordFetchAllCompletedAt: (value) => completedAt.push(value),
     rssUpdateLock: new RSSUpdateLock(),
@@ -263,4 +260,159 @@ test('dispose is idempotent — calling twice does not throw and removes nothing
     _fetchGroupChannelsForTest.length,
     'second dispose issues at most one removeHandler per channel',
   )
+})
+
+// ---------------------------------------------------------------------------
+// Session sources whose page was not opened this round (contract S8 of
+// docs/superpowers/plans/2026-11-17-ready-next-rss-session-acquisition-implementation.md)
+// ---------------------------------------------------------------------------
+
+interface AttemptRecord { sourceId: string; success: boolean; itemCount: number; error?: string | null }
+
+function createFetchDeps(overrides: Partial<FetchGroupDeps> & {
+  fetchSourceWithCurrentStack: FetchGroupDeps['fetchSourceWithCurrentStack']
+}) {
+  const attempts: AttemptRecord[] = []
+  const lastFetched: string[] = []
+  const sources = [
+    { id: 'native-1', name: 'Hacker News', url: 'https://news.ycombinator.com/rss', group_name: 'default', icon: null, last_fetched: null, enabled: 1, created_at: 1, platform: 'rss' },
+    { id: 'xhs-1', name: '广州潮会吃', url: 'https://www.xiaohongshu.com/user/profile/5e31b693000000000100bb06', group_name: 'default', icon: null, last_fetched: null, enabled: 1, created_at: 2, platform: 'xiaohongshu' },
+  ]
+  const deps: FetchGroupDeps = {
+    ...createMockDeps(),
+    getRSSSources: () => sources,
+    filterSelectedSources: (all) => all,
+    detectPlatform: (url) => (url.includes('xiaohongshu.com') ? 'xiaohongshu' : 'rss'),
+    normalizeSourcePlatform: (source) => (source.url.includes('xiaohongshu.com') ? 'xiaohongshu' : 'rss'),
+    resolveSourceBackend: (platform) => (platform === 'xiaohongshu' ? 'browser' : 'native'),
+    resolveRSSItemGuid: (item) => item.link,
+    getRSSItemsByIds: () => [],
+    getAllRSSItems: () => [],
+    upsertRSSItems: (items) => items.length,
+    updateRSSSourceLastFetched: (id) => { lastFetched.push(id) },
+    setRSSSourceDraftSeeded: () => undefined,
+    updateRSSSourcePlatform: () => undefined,
+    recordSourceRouteAttempt: (entry) => { attempts.push(entry) },
+    persistRouteDiagnosticsSnapshot: () => undefined,
+    generateRSSArtifacts: async () => ({}),
+    persistFetchInvocation: () => undefined,
+    recordFetchAllCompletedAt: () => undefined,
+    buildBrowserActionFromSource: () => ({ type: 'open_in_browser', label: '去浏览器继续验证', url: sources[1].url, platform: 'xiaohongshu', reason: 'verify' }),
+    limitConcurrency: async (tasks) => Promise.allSettled(tasks.map((task) => task())),
+    yieldToEventLoop: async () => undefined,
+    rssUpdateLock: new RSSUpdateLock(),
+    ...overrides,
+  }
+  return { deps, attempts, lastFetched }
+}
+
+const nativeItem = { itemId: 'rss_1', title: 'A story', description: '', link: 'https://example.com/a', pubDate: '', author: '', coverImage: null, metadata: {} }
+
+test('an automatic fetchAll passes its trigger on and leaves a session source that is not due untouched', async () => {
+  const { ipc } = createMockIpc()
+  const seen: Array<{ platform: string; trigger: string }> = []
+  const { deps, attempts, lastFetched } = createFetchDeps({
+    normalizeFetchOptions: (options) => ({ digest: false, trigger: options?.trigger === 'auto' ? 'auto' : 'manual-all' }),
+    fetchSourceWithCurrentStack: async (_source, platform, options) => {
+      seen.push({ platform, trigger: options.trigger })
+      if (platform === 'xiaohongshu') {
+        return {
+          result: { items: [], feedTitle: '', platform, error: '小红书 的这个订阅还没到刷新时间。' },
+          backendUsed: 'browser',
+          deferred: { reason: 'not_due' },
+        }
+      }
+      return { result: { items: [nativeItem], feedTitle: 'HN', platform }, backendUsed: 'native' }
+    },
+  })
+  const handle = fetchGroup.register(ipc, deps)
+
+  const result = await handle.fetchAll({ trigger: 'auto' })
+
+  assert.deepEqual(seen.sort((a, b) => a.platform.localeCompare(b.platform)), [
+    { platform: 'rss', trigger: 'auto' },
+    { platform: 'xiaohongshu', trigger: 'auto' },
+  ])
+  assert.equal(result.success, true)
+  assert.equal(result.data?.errors, undefined, 'a source waiting for its turn is not an error')
+  assert.equal(result.data?.message, 'Fetched 1 sources, 1 new items, 1 waiting for their next turn')
+  assert.deepEqual(attempts.map((entry) => entry.sourceId), ['native-1'], 'no attempt is recorded for a page that was not opened')
+  assert.deepEqual(lastFetched, ['native-1'])
+})
+
+test('a fetchAll the person asked for is a manual refresh', async () => {
+  const { ipc } = createMockIpc()
+  const triggers: string[] = []
+  const { deps } = createFetchDeps({
+    normalizeFetchOptions: (options) => ({ digest: false, trigger: options?.trigger === 'auto' ? 'auto' : 'manual-all' }),
+    fetchSourceWithCurrentStack: async (_source, platform, options) => {
+      triggers.push(options.trigger)
+      return { result: { items: [nativeItem], feedTitle: 'x', platform }, backendUsed: 'native' }
+    },
+  })
+  const handle = fetchGroup.register(ipc, deps)
+
+  const result = await handle.fetchAll()
+
+  assert.deepEqual(triggers, ['manual-all', 'manual-all'])
+  assert.equal(result.data?.message, 'Fetched 2 sources, 2 new items', 'no waiting note when every source was read')
+})
+
+test('refreshing one paused session source explains the pause, offers the browser, and records nothing', async () => {
+  const { ipc, handleCalls } = createMockIpc()
+  const triggers: string[] = []
+  const { deps, attempts, lastFetched } = createFetchDeps({
+    fetchSourceWithCurrentStack: async (_source, platform, options) => {
+      triggers.push(options.trigger)
+      return {
+        result: { items: [], feedTitle: '', platform, error: '小红书 最近遇到了登录页或验证页，自动刷新已暂停。请先在 Ready 浏览器中打开该主页处理好，再刷新。' },
+        backendUsed: 'browser',
+        deferred: { reason: 'platform_paused' },
+      }
+    },
+  })
+  fetchGroup.register(ipc, deps)
+  const handler = handleCalls.find((entry) => entry.channel === 'rss:refreshSource')?.handler
+  assert.ok(handler)
+
+  const result = await handler({} as IpcMainInvokeEvent, { sourceId: 'xhs-1' }) as {
+    success: boolean
+    error?: string
+    data?: { browserAction?: { label: string }; fetched: number }
+  }
+
+  assert.deepEqual(triggers, ['manual-source'])
+  assert.equal(result.success, false)
+  assert.match(result.error || '', /广州潮会吃.*自动刷新已暂停/)
+  assert.equal(result.data?.browserAction?.label, '去浏览器继续验证')
+  assert.deepEqual(attempts, [])
+  assert.deepEqual(lastFetched, [])
+})
+
+test('ordinary feeds are fetched before sources that take turns in the browser session', async () => {
+  const { ipc } = createMockIpc()
+  const order: string[] = []
+  const { deps } = createFetchDeps({
+    // The session source comes first in the list, as a newly added source does.
+    getRSSSources: () => [
+      { id: 'xhs-1', name: '广州潮会吃', url: 'https://www.xiaohongshu.com/user/profile/5e31b693000000000100bb06', group_name: 'default', icon: null, last_fetched: null, enabled: 1, created_at: 3, platform: 'xiaohongshu' },
+      { id: 'native-1', name: 'Hacker News', url: 'https://news.ycombinator.com/rss', group_name: 'default', icon: null, last_fetched: null, enabled: 1, created_at: 2, platform: 'rss' },
+      { id: 'native-2', name: 'Another feed', url: 'https://example.com/feed.xml', group_name: 'default', icon: null, last_fetched: null, enabled: 1, created_at: 1, platform: 'rss' },
+    ],
+    normalizeFetchOptions: () => ({ digest: false, trigger: 'manual-all' }),
+    limitConcurrency: async (tasks) => {
+      const settled: PromiseSettledResult<Awaited<ReturnType<(typeof tasks)[number]>>>[] = []
+      for (const task of tasks) settled.push({ status: 'fulfilled', value: await task() })
+      return settled
+    },
+    fetchSourceWithCurrentStack: async (source, platform) => {
+      order.push(source.id)
+      return { result: { items: [], feedTitle: 'x', platform }, backendUsed: platform === 'xiaohongshu' ? 'browser' : 'native' }
+    },
+  })
+  const handle = fetchGroup.register(ipc, deps)
+
+  await handle.fetchAll()
+
+  assert.deepEqual(order, ['native-1', 'native-2', 'xhs-1'])
 })

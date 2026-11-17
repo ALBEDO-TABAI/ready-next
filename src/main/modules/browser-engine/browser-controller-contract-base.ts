@@ -21,6 +21,7 @@ import type {
   BrowserUploadTarget,
   BrowserViewportMetrics,
 } from './automation-types'
+import type { BackgroundPageHandle, BackgroundPageObserveOptions } from './background-capture-page'
 import { type BrowserAdblockState } from './data-service'
 import { type BrowserDownloadUrlToDirectoryPayload, type BrowserDownloadUrlToDirectoryResult } from './download-service'
 import { type BrowserNetworkObserverHandle, type BrowserNetworkObserverOptions } from './network-observer-service'
@@ -523,27 +524,7 @@ export abstract class BrowserControllerContractBase {
    * Get the plain text content of a page (document.body.innerText), truncated to 30K chars.
    */
   abstract getPageContent(tabId: string | null): Promise<string>;
-  abstract captureBackgroundPage(url: string, options?: {
-      timeoutMs?: number;
-      settleMs?: number;
-      script?: string;
-      cookies?: Array<{
-          url: string;
-          name: string;
-          value: string;
-          domain?: string;
-          path?: string;
-          secure?: boolean;
-          httpOnly?: boolean;
-          expirationDate?: number;
-          sameSite?: 'unspecified' | 'no_restriction' | 'lax' | 'strict';
-      }>;
-  }): Promise<unknown>;
-  abstract captureLiveTabPage(url: string, options?: {
-      timeoutMs?: number;
-      settleMs?: number;
-      script?: string;
-  }): Promise<unknown | null>;
+  abstract openBackgroundPage(options?: { observe?: BackgroundPageObserveOptions }): Promise<BackgroundPageHandle>;
   /**
    * Get the HTML content of a page (document.documentElement.outerHTML), truncated to 50K chars.
    */

@@ -3,13 +3,12 @@ import { describe, it } from 'node:test'
 
 import { detectPlatform } from '../main/modules/rss-engine/scrapers/index'
 import { NativeRSSScraper } from '../main/modules/rss-engine/scrapers/native-rss'
+import { createScraper } from '../main/modules/rss-engine/scrapers/index'
 import {
   BilibiliScraper,
   DouyinScraper,
   WeiboScraper,
-  XiaohongshuScraper,
   isLikelyStaleBilibiliResult,
-  resolveBilibiliStaleRouteResult,
 } from '../main/modules/rss-engine/scrapers/rsshub'
 
 describe('RSS scraper platform detection', () => {
@@ -88,154 +87,96 @@ describe('Bilibili freshness heuristic', () => {
     assert.equal(stale, true)
   })
 
-  it('prefers browser items when stale bilibili upstream data is replaced by a fresher browser result', () => {
-    const resolved = resolveBilibiliStaleRouteResult(
-      {
-        items: [
-          {
-            itemId: 'bilibili_old',
-            title: '旧视频',
-            description: '',
-            link: 'https://www.bilibili.com/video/BV1oldoldold',
-            pubDate: '2026-03-04T11:00:00.000Z',
-            author: '',
-            coverImage: null,
-            metadata: {},
-          },
-        ],
-        feedTitle: 'Bilibili 39627524',
-        platform: 'bilibili',
-      },
-      {
-        items: [
-          {
-            itemId: 'bilibili_new',
-            title: '新视频',
-            description: '',
-            link: 'https://www.bilibili.com/video/BV1newnewnew',
-            pubDate: '',
-            author: '',
-            coverImage: null,
-            metadata: {},
-          },
-        ],
-        feedTitle: '某幻君投稿视频',
-        platform: 'bilibili',
-      },
-      Date.parse('2026-03-31T08:00:00.000Z'),
-    )
+  it('keeps a recent route result', () => {
+    const stale = isLikelyStaleBilibiliResult({
+      items: [
+        {
+          itemId: 'bilibili_1',
+          title: '新视频',
+          description: '',
+          link: 'https://www.bilibili.com/video/BV1fr421M7y7',
+          pubDate: '2026-03-28T11:00:00.000Z',
+          author: '',
+          coverImage: null,
+          metadata: {},
+        },
+      ],
+      feedTitle: 'Bilibili 39627524',
+      platform: 'bilibili',
+    }, Date.parse('2026-03-31T08:00:00.000Z'))
 
-    assert.equal(resolved.backend, 'browser')
-    assert.equal(resolved.result.items[0]?.title, '新视频')
-    assert.match(resolved.result.error || '', /浏览器页面兜底/)
-  })
-
-  it('surfaces the browser failure instead of silently accepting stale bilibili results', () => {
-    const resolved = resolveBilibiliStaleRouteResult(
-      {
-        items: [
-          {
-            itemId: 'bilibili_old',
-            title: '旧视频',
-            description: '',
-            link: 'https://www.bilibili.com/video/BV1oldoldold',
-            pubDate: '2026-03-04T11:00:00.000Z',
-            author: '',
-            coverImage: null,
-            metadata: {},
-          },
-        ],
-        feedTitle: 'Bilibili 39627524',
-        platform: 'bilibili',
-      },
-      {
-        items: [],
-        feedTitle: '某幻君投稿视频',
-        platform: 'bilibili',
-        error: 'Bilibili 应用内浏览器会话当前未登录，或已被重定向到登录页。',
-      },
-      Date.parse('2026-03-31T08:00:00.000Z'),
-    )
-
-    assert.equal(resolved.backend, 'browser')
-    assert.equal(resolved.result.items.length, 0)
-    assert.match(resolved.result.error || '', /接口返回内容偏旧/)
-    assert.match(resolved.result.error || '', /未登录/)
+    assert.equal(stale, false)
   })
 })
 
-describe('BilibiliScraper route priority', () => {
-  it('prefers the rsshub video route over older polymer fallback data', async () => {
-    const scraper = new BilibiliScraper('http://127.0.0.1:1240') as BilibiliScraper & {
-      resolveUserId: (url: string) => Promise<string | null>
-      fetchViaPolymerAPI: (userId: string) => Promise<import('../main/modules/rss-engine/scrapers/base').ScrapeResult>
-      fetchRoute: (routePath: string, platform: string) => Promise<import('../main/modules/rss-engine/scrapers/base').ScrapeResult>
-      fetchViaOfficialAPI: (userId: string) => Promise<import('../main/modules/rss-engine/scrapers/base').ScrapeResult>
-    }
+describe('BilibiliScraper, the signed-out route', () => {
+  type RouteStub = (routePath: string, platform: string) => Promise<import('../main/modules/rss-engine/scrapers/base').ScrapeResult>
+  const video = {
+    itemId: 'rsshub_new',
+    title: '最新投稿',
+    description: '',
+    link: 'https://www.bilibili.com/video/BV1newnewnew',
+    pubDate: '2026-03-31T09:00:00.000Z',
+    author: '',
+    coverImage: null,
+    metadata: {},
+  }
 
-    const calls: string[] = []
-    scraper.resolveUserId = async () => '946974'
-    scraper.fetchViaPolymerAPI = async () => {
-      calls.push('polymer')
-      return {
-        items: [
-          {
-            itemId: 'polymer_old',
-            title: '旧合集内容',
-            description: '',
-            link: 'https://www.bilibili.com/video/BV1oldoldold',
-            pubDate: '2026-01-06T09:00:00.000Z',
-            author: '',
-            coverImage: null,
-            metadata: {},
-          },
-        ],
-        feedTitle: '影视飓风',
-        platform: 'bilibili',
-      }
+  it('asks RSSHub for the uploads, then for the dynamics, and nothing else', async () => {
+    const originalFetch = globalThis.fetch
+    const fetched: string[] = []
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      fetched.push(String(input))
+      throw new Error('ECONNREFUSED')
+    }) as typeof fetch
+    try {
+      const result = await new BilibiliScraper('http://127.0.0.1:1240').fetchItems('https://space.bilibili.com/946974?from=x')
+      assert.equal(result.items.length, 0)
+      assert.ok(result.error)
+      assert.ok(fetched.length > 0)
+      assert.ok(
+        fetched.every((url) => url.startsWith('http://127.0.0.1:1240/bilibili/user/')),
+        `only RSSHub is asked, never Bilibili itself: ${fetched.join(', ')}`,
+      )
+      assert.ok(fetched.some((url) => url.includes('/bilibili/user/video/946974')))
+      assert.ok(fetched.some((url) => url.includes('/bilibili/user/dynamic/946974')))
+    } finally {
+      globalThis.fetch = originalFetch
     }
+  })
+
+  it('stops at the uploads route when it answers', async () => {
+    const scraper = new BilibiliScraper('http://127.0.0.1:1240') as BilibiliScraper & { fetchRoute: RouteStub }
+    const calls: string[] = []
     scraper.fetchRoute = async (routePath, platform) => {
       calls.push(routePath)
-      if (routePath.includes('/video/')) {
-        return {
-          items: [
-            {
-              itemId: 'rsshub_new',
-              title: '最新投稿',
-              description: '',
-              link: 'https://www.bilibili.com/video/BV1newnewnew',
-              pubDate: '2026-03-31T09:00:00.000Z',
-              author: '',
-              coverImage: null,
-              metadata: {},
-            },
-          ],
-          feedTitle: '影视飓风',
-          platform,
-        }
-      }
-      return {
-        items: [],
-        feedTitle: '',
-        platform,
-        error: 'should not reach dynamic when video route already works',
-      }
-    }
-    scraper.fetchViaOfficialAPI = async () => {
-      calls.push('official')
-      return {
-        items: [],
-        feedTitle: '',
-        platform: 'bilibili',
-        error: 'should not reach official when video route already works',
-      }
+      return { items: [video], feedTitle: '影视飓风', platform }
     }
 
     const result = await scraper.fetchItems('https://space.bilibili.com/946974')
 
     assert.equal(result.items[0]?.title, '最新投稿')
-    assert.equal(calls[0], '/bilibili/user/video/946974')
-    assert.equal(calls.includes('polymer'), false)
+    assert.deepEqual(calls, ['/bilibili/user/video/946974'])
+  })
+
+  it('only takes a space address; a short or video link is resolved by the browser session first', async () => {
+    const originalFetch = globalThis.fetch
+    let fetches = 0
+    globalThis.fetch = (async () => { fetches += 1; throw new Error('must not fetch') }) as typeof fetch
+    try {
+      const result = await new BilibiliScraper('http://127.0.0.1:1240').fetchItems('https://b23.tv/abc')
+      assert.equal(result.items.length, 0)
+      assert.match(result.error || '', /空间页的链接/)
+      assert.equal(fetches, 0)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+})
+
+describe('Xiaohongshu has no scraper of its own', () => {
+  it('is read only through the browser session', () => {
+    assert.throws(() => createScraper('xiaohongshu'), /Ready 浏览器会话/)
   })
 })
 
@@ -261,196 +202,5 @@ describe('NativeRSSScraper cover images', () => {
       </channel></rss>`, 'xiaohongshu')
     assert.equal(result.items[0]?.coverImage, cover)
     assert.equal(result.items[0]?.description, '广州新的！！白云也有了')
-  })
-})
-
-describe('XiaohongshuScraper', () => {
-  it('keeps RSSHub JSON items separate when the route reuses the profile link', () => {
-    class TestXiaohongshuScraper extends XiaohongshuScraper {
-      parseForTest(payload: {
-        item: Array<{ title: string; link: string; guid: string }>
-        title: string
-      }) {
-        return this.parseJSONFeed(payload, 'xiaohongshu')
-      }
-    }
-    const scraper = new TestXiaohongshuScraper('http://127.0.0.1:1240')
-    const result = scraper.parseForTest({
-      title: '广州潮会吃 - 小红书笔记',
-      item: [
-        {
-          title: '广州越来越少见的纯手工茶楼。。。。',
-          link: 'https://www.xiaohongshu.com/user/profile/5e31b693000000000100bb06',
-          guid: '广州越来越少见的纯手工茶楼。。。。',
-        },
-        {
-          title: '广州真正好味的纯手工茶楼！！！',
-          link: 'https://www.xiaohongshu.com/user/profile/5e31b693000000000100bb06',
-          guid: '广州真正好味的纯手工茶楼！！！',
-        },
-      ],
-    })
-
-    assert.equal(result.items.length, 2)
-    assert.notEqual(result.items[0]?.itemId, result.items[1]?.itemId)
-    assert.equal(result.items[0]?.metadata.rssGuid, '广州越来越少见的纯手工茶楼。。。。')
-  })
-
-  it('does not treat note or explore URLs as user IDs', () => {
-    const scraper = new XiaohongshuScraper('http://127.0.0.1:1240')
-
-    assert.equal(
-      scraper.extractUserId('https://www.xiaohongshu.com/explore/65a123456789012345678901'),
-      null,
-    )
-    assert.equal(
-      scraper.extractUserId('https://www.xiaohongshu.com/discovery/item/65a123456789012345678901'),
-      null,
-    )
-  })
-
-  it('resolves xhs short links before extracting user id', async () => {
-    const scraper = new XiaohongshuScraper('http://127.0.0.1:1240') as XiaohongshuScraper & {
-      resolveFinalUrl: (url: string) => Promise<string>
-      fetchRouteWithRecovery: (routePath: string, platform: string) => Promise<{
-        items: never[]
-        feedTitle: string
-        platform: string
-      }>
-    }
-
-    let requestedRoute = ''
-    scraper.resolveFinalUrl = async () => 'https://www.xiaohongshu.com/user/profile/5fc91b41000000000101fe32'
-    scraper.fetchRouteWithRecovery = async (routePath, platform) => {
-      requestedRoute = `${platform}:${routePath}`
-      return {
-        items: [],
-        feedTitle: '',
-        platform,
-      }
-    }
-
-    await scraper.fetchItems('https://xhslink.com/abc123')
-
-    assert.equal(requestedRoute, 'xiaohongshu:/xiaohongshu/user/5fc91b41000000000101fe32/notes')
-  })
-
-  it('explains RSSHub parser failures without exposing raw route internals', async () => {
-    const scraper = new XiaohongshuScraper('http://127.0.0.1:1240') as XiaohongshuScraper & {
-      fetchRoute: (routePath: string, platform: string) => Promise<{
-        items: never[]
-        feedTitle: string
-        platform: string
-        error?: string
-      }>
-    }
-
-    scraper.fetchRoute = async (_routePath, platform) => ({
-      items: [],
-      feedTitle: '',
-      platform,
-      error: "HTTP 503: Service Unavailable | Cannot read properties of undefined (reading 'user')",
-    })
-
-    const result = await scraper.fetchItems('https://www.xiaohongshu.com/user/profile/5e31b693000000000100bb06')
-
-    assert.match(result.error || '', /RSSHub 暂时没有解析到公开笔记/)
-  })
-
-  it('explains RSSHub timeouts without leaking AbortError text', async () => {
-    const scraper = new XiaohongshuScraper('http://127.0.0.1:1240') as XiaohongshuScraper & {
-      fetchRoute: (routePath: string, platform: string) => Promise<{
-        items: never[]
-        feedTitle: string
-        platform: string
-        error?: string
-      }>
-    }
-
-    scraper.fetchRoute = async (_routePath, platform) => ({
-      items: [],
-      feedTitle: '',
-      platform,
-      error: 'This operation was aborted',
-    })
-
-    const result = await scraper.fetchItems('https://www.xiaohongshu.com/user/profile/5e31b693000000000100bb06')
-
-    assert.match(result.error || '', /RSSHub 路由请求超时/)
-  })
-
-  it('retries transient browser route failures once', async () => {
-    const scraper = new XiaohongshuScraper('http://127.0.0.1:1240') as XiaohongshuScraper & {
-      fetchRoute: (routePath: string, platform: string) => Promise<{
-        items: never[]
-        feedTitle: string
-        platform: string
-        error?: string
-      }>
-    }
-
-    let attempts = 0
-    scraper.fetchRoute = async (_routePath, platform) => {
-      attempts += 1
-      if (attempts === 1) {
-        return {
-          items: [],
-          feedTitle: '',
-          platform,
-          error: 'TargetCloseError: target closed',
-        }
-      }
-      return {
-        items: [],
-        feedTitle: '',
-        platform,
-      }
-    }
-
-    await scraper.fetchItems('https://www.xiaohongshu.com/user/profile/5fc91b41000000000101fe32')
-
-    assert.equal(attempts, 2)
-  })
-
-  it('says a profile Xiaohongshu never opened was blocked, without asking again', async () => {
-    // RSSHub's own replies when the page went to the security-restriction page or a captcha (embedded, format=json).
-    const blocked = [
-      `HTTP 503: Service Unavailable | {"error":{"message":"page.waitForSelector: Target page, context or browser has been closed\\nCall log:\\n\\u001b[2m  - waiting for locator('div.reds-tab-item:nth-child(2), #red-captcha') to be visible\\u001b[22m\\n"}}`,
-      `HTTP 503: Service Unavailable | {"error":{"message":"page.waitForSelector: Target page, context or browser has been closed\\nCall log:\\n\\u001b[2m    - navigated to \\"https://www.xiaohongshu.com/website-login/error?redirectPath=https://www.xiaohongshu.com/login`,
-      'HTTP 503: Service Unavailable | {"error":{"message":"小红书风控校验，请稍后再试"}}',
-    ]
-    for (const error of blocked) {
-      const scraper = new XiaohongshuScraper('http://127.0.0.1:1240') as XiaohongshuScraper & {
-        fetchRoute: (routePath: string, platform: string) => Promise<{ items: never[]; feedTitle: string; platform: string; error?: string }>
-      }
-      let attempts = 0
-      scraper.fetchRoute = async (_routePath, platform) => {
-        attempts += 1
-        return { items: [], feedTitle: '', platform, error }
-      }
-
-      const result = await scraper.fetchItems('https://www.xiaohongshu.com/user/profile/5e31b693000000000100bb06')
-
-      assert.equal(attempts, 1, error)
-      assert.match(result.error || '', /登录或安全限制页/)
-      assert.doesNotMatch(result.error || '', /waitForSelector|HTTP 503/)
-    }
-  })
-
-  it('waits past RSSHub\'s page browser and does not repeat a route that timed out', async () => {
-    const scraper = new XiaohongshuScraper('http://127.0.0.1:1240') as XiaohongshuScraper & {
-      httpGet: (url: string, options?: { timeout?: number }) => Promise<never>
-    }
-    const timeouts: number[] = []
-    scraper.httpGet = async (_url, options) => {
-      timeouts.push(options?.timeout ?? 0)
-      throw new Error(`Request timed out after ${options?.timeout}ms`)
-    }
-
-    const result = await scraper.fetchItems('https://www.xiaohongshu.com/user/profile/5e31b693000000000100bb06')
-
-    assert.equal(timeouts.length, 1)
-    assert.ok(timeouts[0]! > 30_000 + 5_000, 'RSSHub closes the page browser 30s after launch')
-    assert.match(result.error || '', /RSSHub 路由请求超时/)
   })
 })

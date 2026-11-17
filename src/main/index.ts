@@ -26,6 +26,7 @@ import { onCalendarChanged } from './modules/calendar-engine/calendar-change'
 import { isChatGptOAuthConfig } from '../shared/chatgpt-oauth'
 import { startRSSDigests, stopRSSDigests, resumeRSSDigests } from './modules/rss-engine/digest-runtime'
 import { stopRSSContentService } from './modules/rss-engine/content-runtime'
+import { readSystemIdleMs } from './modules/rss-engine/user-presence'
 import { startRSSProcessing, stopRSSProcessing, wakeRSSProcessing } from './modules/rss-engine/processing-runtime'
 // 本文件是重模块：由 boot-entry.ts（构建入口）在 splash 可见后动态加载。
 // dotenv、userData 路径、协议注册、命令行开关等 pre-ready 配置都在 boot-entry 完成。
@@ -59,6 +60,7 @@ import {
   setupRSSIPC,
   setRSSBrowserController,
   setRSSFetchAllCompletedListener,
+  setRSSUserIdleReader,
 } from './modules/rss-engine/ipc-handler'
 import {
   RSSAutoRefreshScheduler,
@@ -388,6 +390,7 @@ const handleCalendarResume = (): void => {
 
 function stopRSSAutoRefresh(): Promise<void> {
   setRSSFetchAllCompletedListener(null)
+  setRSSUserIdleReader(null)
   try {
     return rssAutoRefreshScheduler?.stop() ?? Promise.resolve()
   } catch (error) {
@@ -737,12 +740,13 @@ function setupGlobalIPC(): void {
   setupTagForgeIPC()
   setupImageGenerationIPC()
   setupRSSIPC(RSS_USE_MOCK)
+  setRSSUserIdleReader(() => readSystemIdleMs(powerMonitor))
   if (!RSS_USE_MOCK) { void startRSSDigests().catch((error) => console.error('[rss-digests] startup failed', error)); powerMonitor.on('resume', handleRSSResume) }
   rssAutoRefreshScheduler = new RSSAutoRefreshScheduler({
     now: () => Date.now(),
     readIntervalMs: readRSSAutoRefreshInterval,
     readLastCompletedAt: readLastRSSFetchAllCompletedAt,
-    runFetchAll: () => fetchAllRSSFeeds(),
+    runFetchAll: () => fetchAllRSSFeeds({ trigger: 'auto' }),
     schedule: (delayMs, callback) => setTimeout(callback, delayMs),
     cancel: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
     publish: (snapshot) => {

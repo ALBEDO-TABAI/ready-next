@@ -1,11 +1,10 @@
 /**
- * RSSHub proxy base + Bilibili/Weibo/Douyin/Xiaohongshu scrapers.
- * These platforms depend on a self-hosted or embedded RSSHub instance.
+ * RSSHub proxy base + Bilibili/Weibo/Douyin scrapers.
+ * Bilibili uses it only as the signed-out route; Xiaohongshu is read through the person's browser session.
  */
 
 import { BaseScraper, type ScrapeResult, type ScrapedItem } from './base'
 import { NativeRSSScraper } from './native-rss'
-import { createHash } from 'crypto'
 
 interface RSSHubJSONItem {
   title?: string
@@ -84,39 +83,6 @@ function isWafRouteError(message: string): boolean {
   )
 }
 
-function isRouteTimeoutError(message: string): boolean {
-  const lower = message.toLowerCase()
-  return (
-    lower.includes('request timed out') ||
-    lower.includes('operation was aborted') ||
-    lower.includes('aborterror')
-  )
-}
-
-/**
- * The profile page never rendered: Xiaohongshu sent the visitor to its login or security-restriction page
- * (`website-login/error`, e.g. 300012 "IP 存在风险") or a captcha, and RSSHub waited for the profile tabs until
- * its page browser closed. Asking again from the same network gets the same page.
- */
-function isXiaohongshuProfileBlocked(message: string): boolean {
-  const lower = message.toLowerCase()
-  return (
-    lower.includes('website-login/error') ||
-    (lower.includes('waitforselector') && lower.includes('reds-tab-item')) ||
-    message.includes('风控校验')
-  )
-}
-
-function isXiaohongshuRouteParserError(message: string): boolean {
-  const lower = message.toLowerCase()
-  return (
-    lower.includes("reading 'user'") ||
-    lower.includes('reading "user"') ||
-    lower.includes('__initial_state__') ||
-    lower.includes('cannot extract __initial_state__')
-  )
-}
-
 export function isLikelyStaleBilibiliResult(
   result: Pick<ScrapeResult, 'items' | 'platform'>,
   now = Date.now(),
@@ -132,41 +98,6 @@ export function isLikelyStaleBilibiliResult(
   )
   if (!latestMs) return false
   return now - latestMs > maxAgeDays * 24 * 60 * 60 * 1000
-}
-
-export function resolveBilibiliStaleRouteResult(
-  primary: ScrapeResult,
-  browserResult: ScrapeResult | null,
-  now = Date.now(),
-): { result: ScrapeResult; backend: 'rsshub' | 'browser' } {
-  if (!isLikelyStaleBilibiliResult(primary, now) || !browserResult) {
-    return {
-      result: primary,
-      backend: 'rsshub',
-    }
-  }
-
-  if (browserResult.items.length > 0) {
-    return {
-      result: {
-        ...browserResult,
-        error: 'Bilibili 上游接口返回内容偏旧，已改用浏览器页面兜底。',
-      },
-      backend: 'browser',
-    }
-  }
-
-  const browserError =
-    browserResult.error || 'Bilibili 应用内浏览器未提取到可用条目，请先在 Ready 浏览器中打开该 UP 主页后重试。'
-  return {
-    result: {
-      items: [],
-      feedTitle: browserResult.feedTitle || primary.feedTitle,
-      platform: primary.platform,
-      error: `Bilibili 上游接口返回内容偏旧。${browserError}`,
-    },
-    backend: 'browser',
-  }
 }
 
 class RSSHubScraper extends BaseScraper {
@@ -287,14 +218,12 @@ class RSSHubScraper extends BaseScraper {
   }
 }
 
+/**
+ * The anonymous route for a Bilibili space, used only when the person is not signed in to Bilibili in Ready's
+ * browser. It asks RSSHub and nothing else: no request is signed or sent to Bilibili from here.
+ */
 export class BilibiliScraper extends RSSHubScraper {
   private fallbackRoute: string
-  private static readonly mixinKeyEncTab = [
-    46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35,
-    27, 43, 5, 49, 33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13,
-    37, 48, 7, 16, 24, 55, 40, 61, 26, 17, 0, 1, 60, 51, 30, 4,
-    22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11, 36, 20, 34, 44, 52,
-  ]
 
   constructor(rsshubBase = 'http://localhost:1200') {
     super('/bilibili/user/video/{id}', rsshubBase)
@@ -311,297 +240,14 @@ export class BilibiliScraper extends RSSHubScraper {
     return null
   }
 
-  private async extractUserIdFromVideo(url: string): Promise<string | null> {
-    const bvid = url.match(/\/video\/(BV[0-9A-Za-z]+)/i)?.[1]
-    const aid = url.match(/\/video\/av(\d+)/i)?.[1]
-    if (!bvid && !aid) return null
-
-    const apiUrl = bvid
-      ? `https://api.bilibili.com/x/web-interface/view?bvid=${encodeURIComponent(bvid)}`
-      : `https://api.bilibili.com/x/web-interface/view?aid=${encodeURIComponent(aid || '')}`
-
-    try {
-      const { text } = await this.httpGet(apiUrl, {
-        headers: { Accept: 'application/json, text/plain, */*' },
-      })
-      const payload = JSON.parse(text) as {
-        code?: number
-        data?: { owner?: { mid?: number | string } }
-      }
-      const mid = payload?.data?.owner?.mid
-      return mid ? String(mid) : null
-    } catch {
-      return null
-    }
-  }
-
-  private async resolveUserId(url: string): Promise<string | null> {
-    const spaceId = this.extractUserId(url)
-    if (spaceId) return spaceId
-
-    const lower = url.toLowerCase()
-    if (lower.includes('b23.tv') || lower.includes('bili2233.cn')) {
-      try {
-        const resolved = await this.resolveFinalUrl(url)
-        if (resolved && resolved !== url) {
-          return this.resolveUserId(resolved)
-        }
-      } catch {
-        return null
-      }
-    }
-
-    return this.extractUserIdFromVideo(url)
-  }
-
-  private getMixinKey(imgKey: string, subKey: string): string {
-    const orig = imgKey + subKey
-    return BilibiliScraper.mixinKeyEncTab.map((index) => orig[index]).join('').slice(0, 32)
-  }
-
-  private encodeWbiParams(
-    params: Record<string, string | number>,
-    imgKey: string,
-    subKey: string,
-  ): string {
-    const mixinKey = this.getMixinKey(imgKey, subKey)
-    const chrFilter = /[!'()*]/g
-    const wts = Math.round(Date.now() / 1000)
-    const payload: Record<string, string | number> = { ...params, wts }
-
-    const query = Object.keys(payload)
-      .sort()
-      .map((key) => {
-        const value = String(payload[key]).replace(chrFilter, '')
-        return `${encodeURIComponent(key)}=${encodeURIComponent(value)}`
-      })
-      .join('&')
-
-    const wRid = createHash('md5').update(query + mixinKey).digest('hex')
-    return `${query}&w_rid=${wRid}`
-  }
-
-  /**
-   * Anti-risk fallback: uses Bilibili's polymer web-space API.
-   * This endpoint often remains available when WBI API returns -352/-799.
-   */
-  private async fetchViaPolymerAPI(userId: string): Promise<ScrapeResult> {
-    try {
-      const apiUrl = `https://api.bilibili.com/x/polymer/web-space/seasons_series_list?mid=${encodeURIComponent(userId)}&page_num=1&page_size=20`
-      const response = await this.httpGet(apiUrl, {
-        headers: {
-          Accept: 'application/json, text/plain, */*',
-          Referer: `https://space.bilibili.com/${userId}`,
-        },
-      })
-
-      const data = JSON.parse(response.text) as {
-        code?: number
-        message?: string
-        data?: {
-          items_lists?: {
-            seasons_list?: Array<{
-              meta?: { name?: string }
-              archives?: Array<{
-                bvid?: string
-                aid?: number
-                title?: string
-                desc?: string
-                pubdate?: number
-                author?: string
-                pic?: string
-              }>
-            }>
-            series_list?: Array<{
-              meta?: { name?: string }
-              archives?: Array<{
-                bvid?: string
-                aid?: number
-                title?: string
-                desc?: string
-                pubdate?: number
-                author?: string
-                pic?: string
-              }>
-            }>
-          }
-        }
-      }
-
-      if (data?.code !== 0) {
-        return {
-          items: [],
-          feedTitle: '',
-          platform: this.platform,
-          error: `Bilibili polymer API error: ${data?.message || data?.code || 'unknown'}`,
-        }
-      }
-
-      const seasons = data?.data?.items_lists?.seasons_list ?? []
-      const series = data?.data?.items_lists?.series_list ?? []
-      const groups = [...seasons, ...series]
-      const seen = new Set<string>()
-      const items: ScrapedItem[] = []
-      let feedTitle = `Bilibili ${userId}`
-
-      for (const group of groups) {
-        if (group?.meta?.name && feedTitle.startsWith('Bilibili ')) {
-          feedTitle = group.meta.name
-        }
-        for (const archive of group.archives ?? []) {
-          const bvid = archive.bvid || ''
-          const aid = archive.aid || 0
-          const key = bvid || String(aid)
-          if (!key || seen.has(key)) continue
-          seen.add(key)
-
-          const pic = archive.pic || ''
-          const cover =
-            pic.length > 0 ? (pic.startsWith('//') ? `https:${pic}` : pic) : null
-          items.push({
-            itemId: this.generateItemId(`bilibili:${userId}:polymer:${key}`),
-            title: archive.title || '(Untitled)',
-            description: (archive.desc || '').slice(0, 500),
-            link: bvid
-              ? `https://www.bilibili.com/video/${bvid}`
-              : `https://www.bilibili.com/video/av${aid}`,
-            pubDate: archive.pubdate ? new Date(archive.pubdate * 1000).toISOString() : '',
-            author: archive.author || '',
-            coverImage: cover,
-            metadata: {},
-          })
-        }
-      }
-
-      items.sort((a, b) => {
-        const ta = a.pubDate ? new Date(a.pubDate).getTime() : 0
-        const tb = b.pubDate ? new Date(b.pubDate).getTime() : 0
-        return tb - ta
-      })
-
-      return {
-        items: items.slice(0, 50),
-        feedTitle,
-        platform: this.platform,
-      }
-    } catch (err) {
-      return {
-        items: [],
-        feedTitle: '',
-        platform: this.platform,
-        error: err instanceof Error ? err.message : String(err),
-      }
-    }
-  }
-
-  private async fetchViaOfficialAPI(userId: string): Promise<ScrapeResult> {
-    try {
-      const navResp = await this.httpGet('https://api.bilibili.com/x/web-interface/nav', {
-        headers: {
-          Accept: 'application/json, text/plain, */*',
-          Referer: 'https://www.bilibili.com/',
-        },
-      })
-      const nav = JSON.parse(navResp.text) as {
-        code?: number
-        data?: { wbi_img?: { img_url?: string; sub_url?: string } }
-      }
-      const imgUrl = nav?.data?.wbi_img?.img_url || ''
-      const subUrl = nav?.data?.wbi_img?.sub_url || ''
-      const imgKey = (imgUrl.split('/').pop() || '').split('.')[0]
-      const subKey = (subUrl.split('/').pop() || '').split('.')[0]
-      if (!imgKey || !subKey) {
-        return {
-          items: [],
-          feedTitle: '',
-          platform: this.platform,
-          error: 'Bilibili API: failed to resolve WBI keys',
-        }
-      }
-
-      const query = this.encodeWbiParams(
-        { mid: userId, pn: 1, ps: 30, order: 'pubdate' },
-        imgKey,
-        subKey,
-      )
-      const apiUrl = `https://api.bilibili.com/x/space/wbi/arc/search?${query}`
-      const arcResp = await this.httpGet(apiUrl, {
-        headers: {
-          Accept: 'application/json, text/plain, */*',
-          Referer: `https://space.bilibili.com/${userId}`,
-        },
-      })
-
-      const data = JSON.parse(arcResp.text) as {
-        code?: number
-        message?: string
-        data?: {
-          list?: {
-            vlist?: Array<{
-              bvid?: string
-              aid?: number
-              title?: string
-              description?: string
-              pic?: string
-              created?: number
-              author?: string
-            }>
-          }
-        }
-      }
-
-      if (data?.code !== 0) {
-        return {
-          items: [],
-          feedTitle: '',
-          platform: this.platform,
-          error: `Bilibili API error: ${data?.message || data?.code || 'unknown'}`,
-        }
-      }
-
-      const vlist = data?.data?.list?.vlist ?? []
-      const items: ScrapedItem[] = vlist.map((video) => {
-        const bvid = video.bvid || ''
-        const aid = video.aid || 0
-        const key = bvid || String(aid)
-        return {
-          itemId: this.generateItemId(`bilibili:${userId}:${key}`),
-          title: video.title || '(Untitled)',
-          description: (video.description || '').slice(0, 500),
-          link: bvid
-            ? `https://www.bilibili.com/video/${bvid}`
-            : `https://www.bilibili.com/video/av${aid}`,
-          pubDate: video.created ? new Date(video.created * 1000).toISOString() : '',
-          author: video.author || '',
-          coverImage: video.pic ? (video.pic.startsWith('//') ? `https:${video.pic}` : video.pic) : null,
-          metadata: {},
-        }
-      })
-
-      return {
-        items,
-        feedTitle: `Bilibili ${userId}`,
-        platform: this.platform,
-      }
-    } catch (err) {
-      return {
-        items: [],
-        feedTitle: '',
-        platform: this.platform,
-        error: err instanceof Error ? err.message : String(err),
-      }
-    }
-  }
-
   async fetchItems(url: string): Promise<ScrapeResult> {
-    const userId = await this.resolveUserId(url)
+    const userId = this.extractUserId(url)
     if (!userId) {
       return {
         items: [],
         feedTitle: '',
         platform: this.platform,
-        error:
-          '无法识别 Bilibili 用户。支持链接：space.bilibili.com/<mid>、bilibili.com/video/BV...、bilibili.com/video/av...、b23 短链。',
+        error: '无法识别 Bilibili 用户。请使用 UP 主空间页的链接（space.bilibili.com/<mid>）。',
       }
     }
 
@@ -617,22 +263,7 @@ export class BilibiliScraper extends RSSHubScraper {
       return fallback
     }
 
-    const official = await this.fetchViaOfficialAPI(userId)
-    if (official.items.length > 0) {
-      console.log(`[rss:bilibili] wbi api success user=${userId} items=${official.items.length}`)
-      return official
-    }
-
-    const polymer = await this.fetchViaPolymerAPI(userId)
-    if (polymer.items.length > 0) {
-      console.log(`[rss:bilibili] polymer api success user=${userId} items=${polymer.items.length}`)
-      return polymer
-    }
-    if (polymer.error) {
-      console.warn(`[rss:bilibili] polymer api failed user=${userId}: ${polymer.error}`)
-    }
-
-    const errorParts = [primary.error, fallback.error, official.error, polymer.error].filter(Boolean)
+    const errorParts = [primary.error, fallback.error].filter(Boolean)
     return {
       items: [],
       feedTitle: '',
@@ -777,78 +408,6 @@ export class DouyinScraper extends RSSHubScraper {
         if (resolved) normalizedUrl = resolved
       } catch {
         // Keep original URL and let normal extraction report a proper error.
-      }
-    }
-    return super.fetchItems(normalizedUrl)
-  }
-}
-
-export class XiaohongshuScraper extends RSSHubScraper {
-  constructor(rsshubBase = 'http://localhost:1200') {
-    super('/xiaohongshu/user/{id}/notes', rsshubBase)
-  }
-
-  get platform(): string {
-    return 'xiaohongshu'
-  }
-
-  // RSSHub closes the route's page browser 30s after launch; waiting past that hears what the page showed.
-  protected getRouteTimeoutMs(): number {
-    return 45_000
-  }
-
-  extractUserId(url: string): string | null {
-    let match = url.match(/\/user\/profile\/([a-zA-Z0-9_-]+)(?:[/?#]|$)/i)
-    if (match) return match[1]
-    match = url.match(/xiaohongshu\.com\/([a-f0-9]{24})(?:[/?#]|$)/i)
-    return match ? match[1] : null
-  }
-
-  protected shouldRetryRouteError(message: string): boolean {
-    return (
-      isTransientBrowserRouteError(message) &&
-      !isXiaohongshuProfileBlocked(message) &&
-      !isRouteTimeoutError(message) &&
-      !isChromiumDependencyError(message) &&
-      !isLoginOrCookieError(message)
-    )
-  }
-
-  protected normalizeRouteError(message: string, url: string): string {
-    if (isXiaohongshuProfileBlocked(message)) {
-      return '小红书没有打开这个主页：访问被转到了登录或安全限制页，多为当前网络被小红书风控。换个网络后再刷新。'
-    }
-    if (isChromiumDependencyError(message)) {
-      return `小红书 RSSHub 抓取依赖 Chromium，可先修复 RSS 运行时后重试：${message}`
-    }
-    if (isLoginOrCookieError(message)) {
-      return `小红书 RSSHub 当前需要有效 Cookie 或访客会话：${message}`
-    }
-    if (isRouteTimeoutError(message)) {
-      return `小红书 RSSHub 路由请求超时，已保留为可稍后刷新的订阅：${message}`
-    }
-    if (isXiaohongshuRouteParserError(message)) {
-      return `小红书页面结构已变化，RSSHub 暂时没有解析到公开笔记：${message}`
-    }
-    if (isTransientBrowserRouteError(message)) {
-      return `小红书 RSSHub 浏览器抓取链路不稳定，已自动重试一次：${message}`
-    }
-    if (message.includes('Cannot extract user ID')) {
-      return `小红书当前仅支持用户主页订阅，请使用 /user/profile/{id} 链接：${url}`
-    }
-    return message
-  }
-
-  async fetchItems(url: string): Promise<ScrapeResult> {
-    let normalizedUrl = url
-    const lower = url.toLowerCase()
-    const shouldResolve = lower.includes('xhslink.com') || lower.includes('xhsurl.cn') || !this.extractUserId(url)
-    if (shouldResolve) {
-      try {
-        const resolved = await this.resolveFinalUrl(url)
-        if (resolved) normalizedUrl = resolved
-      } catch {
-        // Keep original URL and surface a normalized scraper error later.
       }
     }
     return super.fetchItems(normalizedUrl)

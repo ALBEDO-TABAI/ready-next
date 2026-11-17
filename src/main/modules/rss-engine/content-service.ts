@@ -27,6 +27,20 @@ export function rssLinkWithoutArticleBody(link: string): string | null {
   return null
 }
 
+/**
+ * A page that is opened only when the person asks to read it. A Xiaohongshu note is never fetched in the
+ * background: subscriptions read the profile at a person's pace, and opening every new note behind their back
+ * would be the opposite.
+ */
+export function rssLinkWithoutBackgroundPrefetch(link: string): boolean {
+  try {
+    const url = new URL(link)
+    return url.hostname.replace(/^www\./, '') === 'xiaohongshu.com' && /^\/(?:explore|discovery\/item)\//.test(url.pathname)
+  } catch {
+    return false
+  }
+}
+
 /** Reader actions and bounded judgment prefetch own loads. Queries never fetch. */
 export class RSSContentService {
   private readonly inFlight = new Map<symbol, { itemId: string; revision: string; controller: AbortController; promise: Promise<RSSArticle> }>()
@@ -44,6 +58,7 @@ export class RSSContentService {
       if (!original) throw new Error('article_not_found')
       try {
         if (original.summary.length >= 800 || ['ready','partial','failed','login_required'].includes(original.body.status)) return original
+        if (rssLinkWithoutBackgroundPrefetch(original.link)) return original
         const origin = new URL(original.link).origin, paused = this.pausedOrigins.get(origin)
         if (paused && shouldPauseSilentBrowserRetry(paused.kind, paused.at, false)) return original
         const delay = this.nextJudgmentFetch - Date.now()

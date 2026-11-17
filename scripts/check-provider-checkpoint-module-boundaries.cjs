@@ -122,7 +122,7 @@ function main() {
   }
 
   const browserIpcFacade = read('src/main/modules/browser-engine/ipc-handler.ts', errors)
-  if (/class BrowserController|attachAgentTabSupervision|captureBackgroundPage\(/.test(browserIpcFacade)) {
+  if (/class BrowserController|attachAgentTabSupervision|openBackgroundPage\(/.test(browserIpcFacade)) {
     errors.push('src/main/modules/browser-engine/ipc-handler.ts: facade reabsorbed BrowserController business logic')
   }
   const runtimeFacade = read('src/main/modules/agent-control/runtime-core/runtime.ts', errors)

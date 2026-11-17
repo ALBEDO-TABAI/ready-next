@@ -10,7 +10,7 @@ import { TwitterScraper } from './twitter'
 import { ZsxqScraper } from './zsxq'
 import { VimeoScraper } from './vimeo'
 import { BehanceScraper } from './behance'
-import { BilibiliScraper, WeiboScraper, DouyinScraper, XiaohongshuScraper } from './rsshub'
+import { BilibiliScraper, WeiboScraper, DouyinScraper } from './rsshub'
 
 export type PlatformType =
   | 'youtube'
@@ -61,7 +61,8 @@ export function createScraper(platform: PlatformType, rsshubBase?: string): Base
     case 'douyin':
       return new DouyinScraper(hub)
     case 'xiaohongshu':
-      return new XiaohongshuScraper(hub)
+      // Read only through the person's browser session; there is no scraper that asks on its own.
+      throw new Error('小红书订阅只通过 Ready 浏览器会话获取')
     case 'rss':
     default:
       return new NativeRSSScraper()
@@ -85,7 +86,10 @@ export function platformLabel(platform: PlatformType): string {
   return labels[platform] ?? 'RSS'
 }
 
-/** Check if a platform depends on RSSHub */
-export function needsRSSHub(platform: PlatformType): boolean {
-  return platform === 'bilibili' || platform === 'xiaohongshu'
+/**
+ * Whether a platform can end up asking RSSHub. Only Bilibili does, and only when the person is not signed in to
+ * it in Ready's browser; every other login platform is read through the browser session alone.
+ */
+export function mayUseRSSHub(platform: PlatformType): boolean {
+  return platform === 'bilibili'
 }

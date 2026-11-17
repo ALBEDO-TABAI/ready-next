@@ -20,11 +20,10 @@ import { RSSRepository } from '../repositories/rss-repository'
 import {
   detectPlatform,
   createScraper,
-  needsRSSHub,
-  platformLabel,
+  mayUseRSSHub,
   type PlatformType,
 } from './scrapers/index'
-import { isLikelyStaleBilibiliResult, resolveBilibiliStaleRouteResult } from './scrapers/rsshub'
+import { isLikelyStaleBilibiliResult } from './scrapers/rsshub'
 import { rsshubManager } from './rsshub-process'
 import type { ScrapedItem, ScrapeResult } from './scrapers/base'
 import { normalizeScrapedItemIdentities } from './item-identity'
@@ -32,20 +31,26 @@ import { generateRSSArtifacts, generateRSSBenchmarkArtifacts } from './reports'
 import { rssUpdateLock } from './update-lock'
 import { getRSSItemAnalysisManager } from './item-analysis-manager'
 import {
-  fetchFeedViaBrowserSession,
+  knownBilibiliSpaceUrl,
   supportsBrowserSessionAcquisition,
   type BrowserAcquisitionMode,
 } from './browser-acquisition'
+import { buildRSSBrowserOpenAction, type RSSBrowserOpenAction } from './browser-handoff'
 import {
-  buildRSSBrowserOpenAction,
-  shouldPauseSilentBrowserRetry,
-  type RSSBrowserOpenAction,
-} from './browser-handoff'
+  SessionAcquisitionPacer,
+  isSessionPlatform,
+  type SessionChallengeKind,
+  type SessionPlatform,
+  type SessionPlatformState,
+  type SessionRefreshTrigger,
+} from './session-acquisition-pacer'
+import { fetchSessionSource, type SessionSourceFetchOutcome } from './session-source-fetch'
+import { createRotatingLogger, type RotatingLogger } from '../../utils/rotating-logger'
 import { findExistingRSSSourceByUrl } from './source-url'
 import {
-  allowsRSSHubFallbackAfterBrowser,
   buildBenchmarkSummary,
   buildSourceDiagnostics,
+  classifyRouteFailure,
   getRouteCapabilityMatrix,
   listRouteAttempts,
   recordSourceRouteAttempt,
@@ -89,6 +94,7 @@ interface FetchAllOptions {
   digest?: boolean
   group?: string
   sourceIds?: string[]
+  trigger?: 'auto'
 }
 
 interface RSSBenchmarkOptions {
@@ -469,7 +475,7 @@ async function resolveRSSHubBase(): Promise<string> {
 function isRSSHubRequiredForCurrentSources(): boolean {
   const sources = rssRepository.getRSSSources() as DBRSSSource[]
   return sources.some((source) =>
-    needsRSSHub(((source.platform as PlatformType) || 'rss') as PlatformType),
+    mayUseRSSHub(((source.platform as PlatformType) || 'rss') as PlatformType),
   )
 }
 
@@ -500,6 +506,7 @@ function normalizeFetchOptions(options?: FetchAllOptions): {
   digest: boolean
   group?: string
   sourceIds?: string[]
+  trigger: 'auto' | 'manual-all'
 } {
   const digest = options?.digest === true
   const group = options?.group?.trim()
@@ -510,6 +517,7 @@ function normalizeFetchOptions(options?: FetchAllOptions): {
     digest,
     group: group || undefined,
     sourceIds: sourceIds && sourceIds.length > 0 ? sourceIds : undefined,
+    trigger: options?.trigger === 'auto' ? 'auto' : 'manual-all',
   }
 }
 
@@ -577,25 +585,6 @@ function classifyBackend(source: DBRSSSource): SourceBackend {
   return resolveSourceBackend(normalizeSourcePlatform(source))
 }
 
-function requiresRSSHubWarmup(platform: PlatformType): boolean {
-  return (
-    allowsRSSHubFallbackAfterBrowser(platform) ||
-    (needsRSSHub(platform) && !(rssBrowserController && supportsBrowserSessionAcquisition(platform)))
-  )
-}
-
-function requiresStrictRSSHubAvailability(platform: PlatformType): boolean {
-  return needsRSSHub(platform) && !(rssBrowserController && supportsBrowserSessionAcquisition(platform))
-}
-
-function resolveBrowserAcquisitionMode(
-  source: Pick<DBRSSSource, 'draft_seeded'> | Pick<{ draft_seeded?: number }, 'draft_seeded'>,
-  platform: PlatformType,
-): BrowserAcquisitionMode {
-  if (platform !== 'xiaohongshu') return 'full'
-  return source.draft_seeded === 1 ? 'incremental' : 'full'
-}
-
 function canSaveSourceWithoutInitialItems(platform: PlatformType, result: ScrapeResult): boolean {
   return result.items.length === 0 && Boolean(result.error) && (
     platform === 'bilibili' || platform === 'xiaohongshu'
@@ -608,7 +597,7 @@ function buildInitialFetchWarning(platform: PlatformType, error: string | undefi
     return `Bilibili 源已添加，但首次抓取失败：${error}`
   }
   if (platform === 'xiaohongshu') {
-    return `小红书源已添加，但首次抓取失败；可稍后刷新或配置可用 RSSHub/Cookie：${error}`
+    return `小红书源已添加，但首次抓取失败；请确认已在 Ready 浏览器登录小红书，稍后再刷新：${error}`
   }
   return error
 }
@@ -648,154 +637,125 @@ async function ensureArtifactFiles() {
   })
 }
 
-async function fetchSourceWithCurrentStackRaw(
-  source: Pick<DBRSSSource, 'id' | 'name' | 'url' | 'group_name' | 'draft_seeded'>,
-  platform: PlatformType,
-  rsshubBase?: string,
-): Promise<{ result: ScrapeResult; backendUsed: SourceBackend }> {
-  const allowRSSHubFallback = allowsRSSHubFallbackAfterBrowser(platform)
+let rssUserIdleReader: () => number = () => 0
 
-  if (supportsBrowserSessionAcquisition(platform)) {
-    if (!rssBrowserController) {
-      return {
-        result: {
-          items: [],
-          feedTitle: '',
-          platform,
-          error: `${platformLabel(platform)} 当前需要 Ready 应用内浏览器运行态，请稍后重试。`,
-        },
-        backendUsed: 'browser',
-      }
+/** How long the person has been away from the computer, in milliseconds. Wired to the power monitor at startup. */
+export function setRSSUserIdleReader(reader: (() => number) | null): void {
+  rssUserIdleReader = reader ?? (() => 0)
+}
+
+let sessionAcquisitionLogger: RotatingLogger | null = null
+
+/** One line per session page load or skipped load: platform, read path, counts and timing. Never page content. */
+function logSessionAcquisition(line: string): void {
+  try {
+    sessionAcquisitionLogger ??= createRotatingLogger('ready-browser.log', { buffered: true })
+    sessionAcquisitionLogger.append(`${new Date().toISOString()} ${line}\n`)
+  } catch (error) {
+    console.warn('[rss-session] diagnostics line not written:', error instanceof Error ? error.message : String(error))
+  }
+}
+
+const SESSION_CHALLENGE_KINDS: readonly string[] = ['auth', 'anti_bot', 'waf']
+
+/** What the attempts recorded before a restart say about a platform: its last sign-in or verification page. */
+function readPersistedSessionState(
+  platform: SessionPlatform,
+): Pick<SessionPlatformState, 'lastChallenge' | 'lastSuccessAt'> {
+  let lastChallenge: SessionPlatformState['lastChallenge'] = null
+  let lastSuccessAt: number | null = null
+  for (const attempt of listRouteAttempts()) {
+    if (attempt.platform !== platform || attempt.backend !== 'browser') continue
+    const at = Date.parse(attempt.attemptedAt)
+    if (!Number.isFinite(at)) continue
+    if (attempt.success && attempt.itemCount > 0) {
+      if (lastSuccessAt === null || at > lastSuccessAt) lastSuccessAt = at
+      continue
     }
-
-    if (shouldPauseSilentBrowserFetch(source, platform)) {
-      return {
-        result: {
-          items: [],
-          feedTitle: '',
-          platform,
-          error: `${platformLabel(platform)} 最近刚触发验证码/风控，已暂停后台静默刷新。请先在 Ready 浏览器中打开该主页并完成验证后再重试。`,
-        },
-        backendUsed: 'browser',
-      }
-    }
-
-    try {
-      const browserResult = await fetchFeedViaBrowserSession(rssBrowserController, platform, source.url, {
-        mode: resolveBrowserAcquisitionMode(source, platform),
-      })
-      if (browserResult.items.length > 0 || !browserResult.error) {
-        return {
-          result: browserResult,
-          backendUsed: 'browser',
-        }
-      }
-
-      if (!rsshubBase || !allowRSSHubFallback) {
-        return {
-          result: browserResult,
-          backendUsed: 'browser',
-        }
-      }
-
-      const scraper = createScraper(platform, rsshubBase)
-      const rsshubResult = await scraper.fetchItems(source.url)
-      if (rsshubResult.items.length > 0 || !rsshubResult.error) {
-        return {
-          result: {
-            ...rsshubResult,
-            error: browserResult.error
-              ? `应用内浏览器主链失败，已回退 RSSHub：${browserResult.error}`
-              : undefined,
-          },
-          backendUsed: 'rsshub',
-        }
-      }
-
-      return {
-        result: {
-          ...browserResult,
-          error: [browserResult.error, rsshubResult.error].filter(Boolean).join(' | RSSHub 回退失败：'),
-        },
-        backendUsed: 'browser',
-      }
-    } catch (error) {
-      const browserMessage = error instanceof Error ? error.message : String(error)
-      if (!rsshubBase || !allowRSSHubFallback) {
-        return {
-          result: {
-            items: [],
-            feedTitle: '',
-            platform,
-            error: `应用内浏览器抓取异常：${browserMessage}`,
-          },
-          backendUsed: 'browser',
-        }
-      }
-
-      const scraper = createScraper(platform, rsshubBase)
-      const rsshubResult = await scraper.fetchItems(source.url)
-      if (rsshubResult.items.length > 0 || !rsshubResult.error) {
-        return {
-          result: {
-            ...rsshubResult,
-            error: `应用内浏览器抓取异常，已回退 RSSHub：${browserMessage}`,
-          },
-          backendUsed: 'rsshub',
-        }
-      }
-
-      return {
-        result: {
-          items: [],
-          feedTitle: '',
-          platform,
-          error: `应用内浏览器抓取异常：${browserMessage}${rsshubResult.error ? ` | RSSHub 回退失败：${rsshubResult.error}` : ''}`,
-        },
-        backendUsed: 'browser',
-      }
+    // A source saved without its first items is recorded as a success that carries the page's message.
+    const kind = attempt.lastRouteError?.kind
+      ?? (attempt.success && attempt.warning ? classifyRouteFailure(attempt.warning).kind : undefined)
+    if (kind && SESSION_CHALLENGE_KINDS.includes(kind) && (!lastChallenge || at > lastChallenge.at)) {
+      lastChallenge = { kind: kind as SessionChallengeKind, at }
     }
   }
+  return { lastChallenge, lastSuccessAt }
+}
 
-  const scraper = createScraper(platform, rsshubBase)
-  const result = await scraper.fetchItems(source.url)
-  if (platform === 'bilibili' && rssBrowserController && isLikelyStaleBilibiliResult(result)) {
-    const browserResult = await fetchFeedViaBrowserSession(rssBrowserController, platform, source.url, {
-      mode: 'full',
-    })
-    const resolved = resolveBilibiliStaleRouteResult(result, browserResult)
-    return {
-      result: resolved.result,
-      backendUsed: resolved.backend,
-    }
+const sessionAcquisitionPacer = new SessionAcquisitionPacer({
+  now: () => Date.now(),
+  random: () => Math.random(),
+  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  readUserIdleMs: () => rssUserIdleReader(),
+  readPersistedState: readPersistedSessionState,
+})
+
+function readLastSessionAttemptAt(sourceId: string): number | null {
+  const attempt = listRouteAttempts().find((entry) => entry.sourceId === sourceId)
+  const at = attempt ? Date.parse(attempt.attemptedAt) : NaN
+  return Number.isFinite(at) ? at : null
+}
+
+function countSessionPlatformSources(platform: SessionPlatform): number {
+  return (rssRepository.getRSSSources() as DBRSSSource[])
+    .filter((source) => source.enabled !== 0 && normalizeSourcePlatform(source) === platform)
+    .length
+}
+
+/**
+ * The anonymous Bilibili route through RSSHub, started only when a signed-out space actually needs it.
+ * Resolves to null when no RSSHub can be reached.
+ */
+async function fetchSignedOutBilibili(url: string): Promise<ScrapeResult | null> {
+  let rsshubBase: string
+  try {
+    rsshubBase = await resolveRSSHubBase()
+  } catch (error) {
+    console.warn(`[rss:bilibili] anonymous route unavailable: ${error instanceof Error ? error.message : String(error)}`)
+    return null
   }
-  return {
-    result,
-    backendUsed: resolveSourceBackend(platform),
+  const embeddedBase = rsshubManager.getStatus().baseUrl
+  const releaseRequest = embeddedBase && normalizeRSSHubBase(rsshubBase) === normalizeRSSHubBase(embeddedBase)
+    ? rsshubManager.beginRequest()
+    : null
+  try {
+    return await createScraper('bilibili', rsshubBase).fetchItems(knownBilibiliSpaceUrl(url) ?? url)
+  } finally {
+    releaseRequest?.()
   }
 }
 
 async function fetchSourceWithCurrentStack(
   source: Pick<DBRSSSource, 'id' | 'name' | 'url' | 'group_name' | 'draft_seeded'>,
   platform: PlatformType,
-  rsshubBase?: string,
-): Promise<{ result: ScrapeResult; backendUsed: SourceBackend }> {
-  const embeddedBase = rsshubManager.getStatus().baseUrl
-  const releaseRequest = rsshubBase && embeddedBase
-    && normalizeRSSHubBase(rsshubBase) === normalizeRSSHubBase(embeddedBase)
-    ? rsshubManager.beginRequest()
-    : null
-  try {
-    const outcome = await fetchSourceWithCurrentStackRaw(source, platform, rsshubBase)
-    return {
-      ...outcome,
-      result: {
-        ...outcome.result,
-        items: normalizeScrapedItemIdentities(outcome.result.items),
-      },
-    }
-  } finally {
-    releaseRequest?.()
+  options: { trigger: SessionRefreshTrigger },
+): Promise<SessionSourceFetchOutcome> {
+  const outcome: SessionSourceFetchOutcome = isSessionPlatform(platform)
+    ? await fetchSessionSource(
+        {
+          pacer: sessionAcquisitionPacer,
+          getController: () => rssBrowserController,
+          readLastAttemptAt: readLastSessionAttemptAt,
+          countPlatformSources: countSessionPlatformSources,
+          fetchSignedOutBilibili,
+          isStaleBilibiliResult: (result) => isLikelyStaleBilibiliResult(result),
+          now: () => Date.now(),
+          log: logSessionAcquisition,
+        },
+        source,
+        platform,
+        options.trigger,
+      )
+    : {
+        result: await createScraper(platform).fetchItems(source.url),
+        backendUsed: resolveSourceBackend(platform),
+      }
+  return {
+    ...outcome,
+    result: {
+      ...outcome.result,
+      items: normalizeScrapedItemIdentities(outcome.result.items),
+    },
   }
 }
 
@@ -814,27 +774,6 @@ function buildBrowserActionFromSource(
     },
   ])
   return buildRSSBrowserOpenAction(platform, source.url, entry?.lastRouteError?.kind)
-}
-
-function shouldPauseSilentBrowserFetch(
-  source: Pick<DBRSSSource, 'id' | 'name' | 'url' | 'group_name'>,
-  platform: PlatformType,
-): boolean {
-  if (!supportsBrowserSessionAcquisition(platform)) return false
-  const [entry] = buildSourceDiagnostics([
-    {
-      id: source.id,
-      name: source.name,
-      url: source.url,
-      group_name: source.group_name,
-      platform,
-    },
-  ])
-  const hasReusablePage =
-    rssBrowserController && typeof rssBrowserController.hasReusableCaptureTarget === 'function'
-      ? rssBrowserController.hasReusableCaptureTarget(source.url)
-      : false
-  return shouldPauseSilentBrowserRetry(entry?.lastRouteError?.kind, entry?.lastAttemptAt, hasReusablePage)
 }
 
 async function loadLatestBenchmarkSnapshot(): Promise<{
@@ -875,9 +814,10 @@ async function loadLatestBenchmarkSnapshot(): Promise<{
  * Stage V V2.2a — `rss:addSource` initial-fetch pipeline lifted verbatim
  * from the inline handler so `sourceGroup` can stay focused on response
  * shaping + mock dispatch. Semantics follow the pre-extraction handler body:
- * validate URL → detect existing source → detect platform → start
- * RSSHub only when required (with bilibili fallback) → scrape → persist → record route
- * diagnostics → return shaped result. Mock-mode short-circuits in the
+ * validate URL → detect existing source → detect platform → fetch once
+ * (a login platform opens its page in the browser session, as a refresh
+ * the person asked for) → persist → record route diagnostics → return
+ * shaped result. Mock-mode short-circuits in the
  * group itself before this runs, so this function is only invoked in
  * real-mode.
  */
@@ -913,25 +853,8 @@ async function runAddSourceCore(input: AddSourceCoreInput): Promise<AddSourceCor
   // (kept the side-effect-free call in case future diagnostics rely on
   // backend resolution happening here).
   void resolveSourceBackend(platform)
-  let rsshubBase: string | undefined
-
-  if (requiresRSSHubWarmup(platform)) {
-    try {
-      rsshubBase = await resolveRSSHubBase()
-    } catch (error) {
-      if (platform !== 'bilibili') {
-        throw error
-      }
-      console.warn(
-        `[rss:add] rsshub unavailable for bilibili, will fallback to official API: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      )
-    }
-  }
-
-  console.log(`[rss:add] url=${feedUrl} platform=${platform} hub=${rsshubBase || 'none'}`)
-  const { result, backendUsed } = await fetchSourceWithCurrentStack(
+  console.log(`[rss:add] url=${feedUrl} platform=${platform}`)
+  const { result, backendUsed, deferred } = await fetchSourceWithCurrentStack(
     {
       id: `pending:${feedUrl}`,
       name: input.name?.trim() || feedUrl,
@@ -940,7 +863,7 @@ async function runAddSourceCore(input: AddSourceCoreInput): Promise<AddSourceCor
       draft_seeded: 0,
     },
     platform,
-    rsshubBase,
+    { trigger: 'manual-source' },
   )
 
   const allowSourceWithoutInitialItems = canSaveSourceWithoutInitialItems(platform, result)
@@ -972,36 +895,41 @@ async function runAddSourceCore(input: AddSourceCoreInput): Promise<AddSourceCor
   }
 
   if (result.error && result.items.length === 0 && !allowSourceWithoutInitialItems) {
+    // A page that was not opened (the platform is paused) leaves no attempt to record.
+    if (!deferred) {
+      recordSourceRouteAttempt({
+        sourceId: `pending:${feedUrl}`,
+        sourceName,
+        url: feedUrl,
+        groupName: input.group,
+        platform,
+        backend: backendUsed,
+        durationMs: Date.now() - startedAt,
+        itemCount: 0,
+        success: false,
+        error: result.error,
+      })
+      persistRouteDiagnosticsSnapshot()
+    }
+    rssRepository.removeRSSSource(id)
+    return { ok: false, error: `Cannot fetch feed: ${result.error}` }
+  }
+
+  if (!deferred) {
     recordSourceRouteAttempt({
-      sourceId: `pending:${feedUrl}`,
+      sourceId: id,
       sourceName,
       url: feedUrl,
       groupName: input.group,
       platform,
       backend: backendUsed,
       durationMs: Date.now() - startedAt,
-      itemCount: 0,
-      success: false,
-      error: result.error,
+      itemCount: result.items.length,
+      success: true,
+      warning: result.error ?? null,
     })
     persistRouteDiagnosticsSnapshot()
-    rssRepository.removeRSSSource(id)
-    return { ok: false, error: `Cannot fetch feed: ${result.error}` }
   }
-
-  recordSourceRouteAttempt({
-    sourceId: id,
-    sourceName,
-    url: feedUrl,
-    groupName: input.group,
-    platform,
-    backend: backendUsed,
-    durationMs: Date.now() - startedAt,
-    itemCount: result.items.length,
-    success: true,
-    warning: result.error ?? null,
-  })
-  persistRouteDiagnosticsSnapshot()
 
   return {
     ok: true,
@@ -1157,9 +1085,6 @@ export function setupRSSIPC(useMock = false): void {
     isEmbeddedRSSHubRequiredForDiagnostics,
     getArtifactsRootDir,
     fetchSourceWithCurrentStack,
-    resolveRSSHubBase,
-    requiresRSSHubWarmup,
-    requiresStrictRSSHubAvailability,
     recordSourceRouteAttempt,
     persistRouteDiagnosticsSnapshot,
     resolveSourceBackend,

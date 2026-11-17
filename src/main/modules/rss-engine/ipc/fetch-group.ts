@@ -66,6 +66,8 @@ export interface FetchAllOptions {
   digest?: boolean
   group?: string
   sourceIds?: string[]
+  /** Set by the scheduler. A refresh the person asked for leaves it out. */
+  trigger?: 'auto'
 }
 
 export interface RSSBenchmarkOptions {
@@ -140,14 +142,15 @@ export interface FetchGroupDeps {
   getArtifactsRootDir(): string
 
   // --- fetch pipeline + diagnostics ---
+  /**
+   * `deferred` means the source's page was not opened this time (not yet due, the person is away, the platform
+   * is paused). Such a round is neither a success nor a failure and leaves the last recorded attempt untouched.
+   */
   fetchSourceWithCurrentStack(
     source: Pick<DBRSSSourceRow, 'id' | 'name' | 'url' | 'group_name' | 'draft_seeded'>,
     platform: PlatformType,
-    rsshubBase?: string,
-  ): Promise<{ result: ScrapeResult; backendUsed: SourceBackend }>
-  resolveRSSHubBase(): Promise<string>
-  requiresRSSHubWarmup(platform: PlatformType): boolean
-  requiresStrictRSSHubAvailability(platform: PlatformType): boolean
+    options: { trigger: 'auto' | 'manual-all' | 'manual-source' },
+  ): Promise<{ result: ScrapeResult; backendUsed: SourceBackend; deferred?: { reason: string } }>
   recordSourceRouteAttempt(entry: {
     sourceId: string
     sourceName: string
@@ -195,6 +198,7 @@ export interface FetchGroupDeps {
     digest: boolean
     group?: string
     sourceIds?: string[]
+    trigger: 'auto' | 'manual-all'
   }
   persistFetchInvocation(payload: Record<string, unknown>): void
   recordFetchAllCompletedAt(completedAt: string, result: RSSFetchAllResponse): void
@@ -244,6 +248,11 @@ function fail<T = never>(error: string, data?: T): RSSResponse<T> {
   return data === undefined
     ? { success: false, mock: false, error }
     : { success: false, mock: false, error, data }
+}
+
+/** Sources whose page was not opened this round are named in the summary, never listed as errors. */
+function deferredNote(count: number): string {
+  return count > 0 ? `, ${count} waiting for their next turn` : ''
 }
 
 export const fetchGroup: {
@@ -369,36 +378,28 @@ export const fetchGroup: {
             }
           }
 
-          const hasRSSHubSource = sources.some((source) =>
-            deps.requiresRSSHubWarmup((((source.platform as PlatformType) || 'rss') as PlatformType)),
-          )
-          let rsshubBase: string | undefined
-          let rsshubResolveError: string | null = null
-          if (hasRSSHubSource) {
-            try {
-              rsshubBase = await deps.resolveRSSHubBase()
-            } catch (error) {
-              rsshubResolveError = error instanceof Error ? error.message : String(error)
-              console.warn(`[rss:fetchAll] rsshub unavailable: ${rsshubResolveError}`)
-            }
-          }
-
           console.log(
-            `[rss:fetchAll] sources=${sources.length} digest=${normalized.digest} rsshub=${rsshubBase || 'none'}`,
+            `[rss:fetchAll] sources=${sources.length} digest=${normalized.digest} trigger=${normalized.trigger}`,
           )
 
           const insertedItemIds: string[] = []
           const errors: string[] = []
           let totalInserted = 0
 
-          const tasks = sources.map((source) => async () => {
+          // Sources read through the browser session take turns one page at a time, with pauses in between.
+          // They go last so that ordinary feeds are never left waiting behind them.
+          const usesBrowserSession = (source: DBRSSSourceRow): boolean =>
+            deps.resolveSourceBackend(deps.normalizeSourcePlatform(source)) === 'browser'
+          const ordered = [
+            ...sources.filter((source) => !usesBrowserSession(source)),
+            ...sources.filter((source) => usesBrowserSession(source)),
+          ]
+          const tasks = ordered.map((source) => async () => {
             const startedAt = Date.now()
             const storedPlatform = (source.platform as PlatformType) || 'rss'
             const detectedPlatform = deps.detectPlatform(source.url)
             const platform =
               storedPlatform === 'rss' && detectedPlatform !== 'rss' ? detectedPlatform : storedPlatform
-            const backend = deps.resolveSourceBackend(platform)
-
             if (platform !== storedPlatform) {
               deps.updateRSSSourcePlatform(source.id, platform)
               console.log(
@@ -406,24 +407,12 @@ export const fetchGroup: {
               )
             }
 
-            if (deps.requiresStrictRSSHubAvailability(platform) && platform !== 'bilibili' && !rsshubBase) {
-              const message = `[${source.name}] RSSHub unavailable: ${rsshubResolveError || 'unknown error'}`
-              deps.recordSourceRouteAttempt({
-                sourceId: source.id,
-                sourceName: source.name,
-                url: source.url,
-                groupName: source.group_name,
-                platform,
-                backend,
-                durationMs: Date.now() - startedAt,
-                itemCount: 0,
-                success: false,
-                error: message,
-              })
-              deps.persistRouteDiagnosticsSnapshot()
-              throw new Error(message)
+            const { result, backendUsed, deferred } = await deps.fetchSourceWithCurrentStack(source, platform, {
+              trigger: normalized.trigger,
+            })
+            if (deferred) {
+              return { sourceId: source.id, inserted: 0, insertedIds: [] as string[], deferred: true }
             }
-            const { result, backendUsed } = await deps.fetchSourceWithCurrentStack(source, platform, rsshubBase)
 
             if (result.error && result.items.length === 0) {
               const message = `[${source.name}] ${result.error}`
@@ -481,12 +470,15 @@ export const fetchGroup: {
               sourceId: source.id,
               inserted: newIds.length,
               insertedIds: newIds,
+              deferred: false,
             }
           })
 
           const settled = await deps.limitConcurrency(tasks, 5)
+          let deferredCount = 0
           for (const result of settled) {
             if (result.status === 'fulfilled') {
+              if (result.value.deferred) deferredCount += 1
               totalInserted += result.value.inserted
               insertedItemIds.push(...result.value.insertedIds)
             } else {
@@ -520,7 +512,7 @@ export const fetchGroup: {
               insertedCount: totalInserted,
               errors,
               sourceCount: sources.length,
-              message: `Fetched ${sources.length} sources, ${totalInserted} new items, digest changed ${changedSources.length} sources`,
+              message: `Fetched ${sources.length - deferredCount} sources, ${totalInserted} new items, digest changed ${changedSources.length} sources${deferredNote(deferredCount)}`,
             }
           }
 
@@ -528,7 +520,7 @@ export const fetchGroup: {
             insertedCount: totalInserted,
             errors,
             sourceCount: sources.length,
-            message: `Fetched ${sources.length} sources, ${totalInserted} new items`,
+            message: `Fetched ${sources.length - deferredCount} sources, ${totalInserted} new items${deferredNote(deferredCount)}`,
           }
         })
 
@@ -604,47 +596,30 @@ export const fetchGroup: {
         const detectedPlatform = deps.detectPlatform(source.url)
         const platform =
           storedPlatform === 'rss' && detectedPlatform !== 'rss' ? detectedPlatform : storedPlatform
-        const backend = deps.resolveSourceBackend(platform)
         const startedAt = Date.now()
 
         if (platform !== storedPlatform) {
           deps.updateRSSSourcePlatform(source.id, platform)
         }
 
-        let rsshubBase: string | undefined
-        let rsshubResolveError: string | null = null
-        if (deps.requiresRSSHubWarmup(platform)) {
-          try {
-            rsshubBase = await deps.resolveRSSHubBase()
-          } catch (error) {
-            rsshubResolveError = error instanceof Error ? error.message : String(error)
-          }
-        }
-
-        if (deps.requiresStrictRSSHubAvailability(platform) && platform !== 'bilibili' && !rsshubBase) {
-          const message = `[${source.name}] RSSHub unavailable: ${rsshubResolveError || 'unknown error'}`
-          deps.recordSourceRouteAttempt({
-            sourceId: source.id,
-            sourceName: source.name,
-            url: source.url,
-            groupName: source.group_name,
-            platform,
-            backend,
-            durationMs: Date.now() - startedAt,
-            itemCount: 0,
-            success: false,
-            error: message,
-          })
-          deps.persistRouteDiagnosticsSnapshot()
+        const { result, backendUsed, deferred } = await deps.fetchSourceWithCurrentStack(source, platform, {
+          trigger: 'manual-source',
+        })
+        if (deferred) {
+          // The page was not opened (the platform is paused after a verification page): say so and offer the
+          // way to deal with it, without recording an attempt that never happened.
+          const message = `[${source.name}] ${result.error || '这个订阅暂时不能刷新'}`
+          const browserAction = deps.buildBrowserActionFromSource(source, platform)
           return fail(message, {
             message,
             fetched: 0,
             sourceId,
             sourceName: source.name,
+            backend: backendUsed,
+            errors: [result.error || message],
+            browserAction: browserAction ?? undefined,
           })
         }
-
-        const { result, backendUsed } = await deps.fetchSourceWithCurrentStack(source, platform, rsshubBase)
         if (result.error && result.items.length === 0) {
           const message = `[${source.name}] ${result.error}`
           deps.recordSourceRouteAttempt({
@@ -799,35 +774,21 @@ export const fetchGroup: {
           )
         }
 
-        const hasRSSHubSource = sources.some((source) =>
-          deps.requiresRSSHubWarmup(deps.normalizeSourcePlatform(source)),
-        )
-        let rsshubBase: string | undefined
-        let rsshubResolveError: string | null = null
-        if (hasRSSHubSource) {
-          try {
-            rsshubBase = await deps.resolveRSSHubBase()
-          } catch (error) {
-            rsshubResolveError = error instanceof Error ? error.message : String(error)
-          }
-        }
-
         const tasks = sources.map((source) => async (): Promise<RSSSourceBenchmarkEntry> => {
           const platform = deps.normalizeSourcePlatform(source)
           const backend = deps.classifyBackend(source)
           const started = Date.now()
 
           try {
-            if (deps.requiresStrictRSSHubAvailability(platform) && platform !== 'bilibili' && !rsshubBase) {
-              throw new Error(`RSSHub unavailable: ${rsshubResolveError || 'unknown error'}`)
-            }
-
-            const { result, backendUsed } = await deps.fetchSourceWithCurrentStack(source, platform, rsshubBase)
+            const { result, backendUsed, deferred } = await deps.fetchSourceWithCurrentStack(source, platform, {
+              trigger: 'manual-all',
+            })
             const success = result.items.length > 0 || !result.error
             const errorMessage = success ? null : result.error || 'Unknown fetch error'
             const durationMs = Date.now() - started
 
-            deps.recordSourceRouteAttempt({
+            // A source whose page was not opened has no new attempt to record.
+            if (!deferred) deps.recordSourceRouteAttempt({
               sourceId: source.id,
               sourceName: source.name,
               url: source.url,

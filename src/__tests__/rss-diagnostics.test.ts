@@ -2,16 +2,15 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import {
-  allowsRSSHubFallbackAfterBrowser,
   buildBenchmarkSummary,
   buildSourceDiagnostics,
   getRouteCapabilityMatrix,
   recordSourceRouteAttempt,
 } from '../main/modules/rss-engine/source-diagnostics'
-import { needsRSSHub } from '../main/modules/rss-engine/scrapers/index'
+import { mayUseRSSHub } from '../main/modules/rss-engine/scrapers/index'
 
 describe('RSS source diagnostics', () => {
-  it('marks xiaohongshu RSSHub failures as RSSHub-managed Chromium work', () => {
+  it('marks a Xiaohongshu sign-in page as a browser-session failure the person can act on', () => {
     recordSourceRouteAttempt({
       sourceId: 'xhs-source',
       sourceName: 'XHS Creator',
@@ -21,7 +20,7 @@ describe('RSS source diagnostics', () => {
       durationMs: 1840,
       itemCount: 0,
       success: false,
-      error: 'RSSHub unavailable: embedded worker failed to start',
+      error: '[XHS Creator] 小红书 应用内浏览器会话当前未登录，或已被重定向到登录页 (https://www.xiaohongshu.com/login)。请先在 Ready 浏览器中登录该站点后再刷新。',
     })
 
     const [entry] = buildSourceDiagnostics([
@@ -34,12 +33,12 @@ describe('RSS source diagnostics', () => {
       },
     ])
 
-    assert.equal(entry.backend, 'rsshub')
+    assert.equal(entry.backend, 'browser')
     assert.equal(entry.backendState, 'failing')
     assert.equal(entry.chromiumRequired, true)
     assert.equal(entry.scraplingEligible, false)
-    assert.equal(entry.lastRouteError?.kind, 'startup')
-    assert.equal(entry.lastRouteError?.detail, 'rsshub_runtime_unavailable')
+    assert.equal(entry.lastRouteError?.kind, 'auth')
+    assert.equal(entry.lastRouteError?.detail, 'login_or_cookie_required')
   })
 
   it('marks Chromium-dependent successful routes as conditional instead of stable', () => {
@@ -180,30 +179,45 @@ describe('RSS benchmark summary', () => {
     const xiaohongshu = matrix.find((entry) => entry.platform === 'xiaohongshu')
     const behance = matrix.find((entry) => entry.platform === 'behance')
 
-    assert.equal(bilibili?.backend, 'rsshub')
-    assert.deepEqual(bilibili?.fallbackOrder, ['rsshub', 'browser', 'native', 'scrapling'])
+    assert.equal(bilibili?.backend, 'browser')
+    assert.deepEqual(bilibili?.fallbackOrder, ['browser', 'rsshub'])
     assert.equal(weibo?.backend, 'browser')
     assert.deepEqual(weibo?.fallbackOrder, ['browser', 'scrapling'])
     assert.equal(douyin?.backend, 'browser')
     assert.deepEqual(douyin?.fallbackOrder, ['browser', 'scrapling'])
-    assert.equal(xiaohongshu?.backend, 'rsshub')
-    assert.deepEqual(xiaohongshu?.fallbackOrder, ['rsshub'])
+    assert.equal(xiaohongshu?.backend, 'browser')
+    assert.deepEqual(xiaohongshu?.fallbackOrder, ['browser'])
     assert.equal(xiaohongshu?.chromiumRequired, true)
     assert.equal(douyin?.scraplingEligible, true)
     assert.equal(behance?.backend, 'native')
     assert.equal(behance?.scraplingEligible, false)
   })
 
-  it('disables RSSHub fallback after browser for browser-first creator platforms', () => {
-    assert.equal(allowsRSSHubFallbackAfterBrowser('weibo'), false)
-    assert.equal(allowsRSSHubFallbackAfterBrowser('douyin'), false)
-    assert.equal(allowsRSSHubFallbackAfterBrowser('xiaohongshu'), false)
+  it('only a signed-out Bilibili space can end up asking RSSHub', () => {
+    assert.equal(mayUseRSSHub('bilibili'), true)
+    assert.equal(mayUseRSSHub('weibo'), false)
+    assert.equal(mayUseRSSHub('douyin'), false)
+    assert.equal(mayUseRSSHub('xiaohongshu'), false)
+    assert.equal(mayUseRSSHub('rss'), false)
   })
 
-  it('treats bilibili and xiaohongshu as RSSHub-required among creator platforms', () => {
-    assert.equal(needsRSSHub('bilibili'), true)
-    assert.equal(needsRSSHub('weibo'), false)
-    assert.equal(needsRSSHub('douyin'), false)
-    assert.equal(needsRSSHub('xiaohongshu'), true)
+  it('tells sign-in pages, verification pages and risk pages apart from the session messages', () => {
+    const kindOf = (message: string) => {
+      recordSourceRouteAttempt({
+        sourceId: 'kind-probe',
+        sourceName: 'Probe',
+        url: 'https://space.bilibili.com/1',
+        platform: 'bilibili',
+        durationMs: 1,
+        itemCount: 0,
+        success: false,
+        error: message,
+      })
+      return buildSourceDiagnostics([{ id: 'kind-probe', name: 'Probe', url: 'https://space.bilibili.com/1', platform: 'bilibili' }])[0]
+        .lastRouteError?.kind
+    }
+    assert.equal(kindOf('[影视飓风] Bilibili 应用内浏览器会话当前未登录，或已被重定向到登录页 (https://space.bilibili.com/946974/upload/video)。请先在 Ready 浏览器中登录该站点后再刷新。'), 'auth')
+    assert.equal(kindOf('[影视飓风] Bilibili 应用内浏览器当前遇到验证码/风控校验 (https://space.bilibili.com/946974/upload/video)：访问异常'), 'anti_bot')
+    assert.equal(kindOf('[广州潮会吃] 小红书 应用内浏览器当前被平台风控/WAF 拦截 (https://www.xiaohongshu.com/website-login/error)'), 'waf')
   })
 })

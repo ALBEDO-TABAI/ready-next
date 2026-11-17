@@ -11,37 +11,20 @@ import {
   isAllowedBrowserURL
 } from './popup-policy'
 import { BrowserControllerAutomationRuntime } from './browser-controller-automation-runtime'
+import {
+  createBackgroundCapturePage,
+  createMockBackgroundPage,
+  type BackgroundPageHandle,
+  type BackgroundPageObserveOptions,
+} from './background-capture-page'
 
 export abstract class BrowserControllerCaptureRuntime extends BrowserControllerAutomationRuntime {
-  async captureBackgroundPage(
-    url: string,
-    options?: {
-      timeoutMs?: number
-      settleMs?: number
-      script?: string
-      cookies?: Array<{
-        url: string
-        name: string
-        value: string
-        domain?: string
-        path?: string
-        secure?: boolean
-        httpOnly?: boolean
-        expirationDate?: number
-        sameSite?: 'unspecified' | 'no_restriction' | 'lax' | 'strict'
-      }>
-    },
-  ): Promise<unknown> {
-    if (!isAllowedBrowserURL(url)) {
-      throw new Error('Blocked URL protocol. Only http: and https: are allowed.')
-    }
-    if (this.useMock) {
-      return {
-        title: 'Mock Background Page',
-        finalUrl: url,
-        items: [],
-      }
-    }
+  /**
+   * Opens one hidden page in the person's own browser session (same cookies and user agent as their tabs).
+   * It never touches a tab the person has open. The caller closes it.
+   */
+  async openBackgroundPage(options?: { observe?: BackgroundPageObserveOptions }): Promise<BackgroundPageHandle> {
+    if (this.useMock) return createMockBackgroundPage()
     const probeWindow = new BrowserWindow({
       show: false,
       width: 1440,
@@ -59,212 +42,16 @@ export abstract class BrowserControllerCaptureRuntime extends BrowserControllerA
       }),
     })
     probeWindow.setMenuBarVisibility(false)
-    probeWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-    const blockNonHttpNavigation = (event: Electron.Event, targetUrl: string) => {
-      if (isAllowedBrowserURL(targetUrl)) return
-      event.preventDefault()
-    }
-    probeWindow.webContents.on('will-navigate', blockNonHttpNavigation)
-    probeWindow.webContents.on('will-frame-navigate', blockNonHttpNavigation as never)
-    probeWindow.webContents.on('will-redirect', blockNonHttpNavigation as never)
     try {
       probeWindow.webContents.setUserAgent(this.browserUserAgent)
       probeWindow.webContents.setAudioMuted(true)
     } catch {
-      // ignore background probe sync failures
+      // silent-catch: the page still loads with the session default user agent
     }
-
-    const timeoutMs = Math.max(5_000, options?.timeoutMs ?? 30_000)
-    const settleMs = Math.max(0, options?.settleMs ?? 1_500)
-
-    try {
-      if (Array.isArray(options?.cookies) && options.cookies.length > 0) {
-        for (const cookie of options.cookies) {
-          try {
-            await probeWindow.webContents.session.cookies.set(cookie)
-          } catch {
-            // ignore cookie seed failures for individual entries
-          }
-        }
-      }
-
-      await new Promise<void>((resolve, reject) => {
-        let settled = false
-        const timer = setTimeout(() => {
-          finish(new Error(`Timed out loading ${url}`))
-        }, timeoutMs)
-
-        const cleanup = () => {
-          clearTimeout(timer)
-          probeWindow.webContents.removeListener('did-stop-loading', handleStop)
-          probeWindow.webContents.removeListener('did-fail-load', handleFail as never)
-        }
-
-        const finish = (error?: Error) => {
-          if (settled) return
-          settled = true
-          cleanup()
-          if (error) {
-            reject(error)
-          } else {
-            resolve()
-          }
-        }
-
-        const handleStop = () => finish()
-        const handleFail = (
-          _event: Electron.Event,
-          errorCode: number,
-          errorDescription: string,
-          _validatedURL: string,
-          isMainFrame: boolean,
-        ) => {
-          if (!isMainFrame) return
-          finish(new Error(`${errorDescription} (${errorCode})`))
-        }
-
-        probeWindow.webContents.on('did-stop-loading', handleStop)
-        probeWindow.webContents.on('did-fail-load', handleFail as never)
-        void probeWindow.webContents.loadURL(url).catch((error) => {
-          finish(error instanceof Error ? error : new Error(String(error)))
-        })
-      })
-
-      if (settleMs > 0) {
-        await new Promise((resolve) => setTimeout(resolve, settleMs))
-      }
-
-      if (options?.script) {
-        const wrappedScript = `
-          (async () => {
-            try {
-              const __readyCaptureSource = ${JSON.stringify(options.script)}
-              const __readyCaptureValue = await eval(__readyCaptureSource)
-              return { __readyCaptureOk: true, value: __readyCaptureValue }
-            } catch (error) {
-              return {
-                __readyCaptureOk: false,
-                error: String((error && (error.stack || error.message)) || error || 'Unknown capture error'),
-              }
-            }
-          })()
-        `
-        const captureResult = await probeWindow.webContents.executeJavaScript(wrappedScript, true) as
-          | { __readyCaptureOk?: boolean; value?: unknown; error?: string }
-          | null
-        if (captureResult && captureResult.__readyCaptureOk === false) {
-          return {
-            __readyCaptureError: captureResult.error || 'Unknown capture error',
-          }
-        }
-        return captureResult && captureResult.__readyCaptureOk ? captureResult.value : captureResult
-      }
-
-      return probeWindow.webContents.executeJavaScript(
-        `(() => ({
-          title: document.title || '',
-          finalUrl: location.href,
-          text: document.body?.innerText || '',
-          html: document.documentElement?.outerHTML || '',
-        }))()`,
-        true,
-      )
-    } finally {
-      try {
-        probeWindow.webContents.removeListener('will-navigate', blockNonHttpNavigation)
-        probeWindow.webContents.removeListener('will-frame-navigate', blockNonHttpNavigation as never)
-        probeWindow.webContents.removeListener('will-redirect', blockNonHttpNavigation as never)
-      } catch {
-        // ignore listener cleanup failures
-      }
-      try {
-        probeWindow.webContents.stop()
-      } catch {
-        // ignore stop failures
-      }
-      try {
-        probeWindow.destroy()
-      } catch {
-        // ignore cleanup failures
-      }
-    }
-  }
-
-  async captureLiveTabPage(
-    url: string,
-    options?: {
-      timeoutMs?: number
-      settleMs?: number
-      script?: string
-    },
-  ): Promise<unknown | null> {
-    if (!isAllowedBrowserURL(url)) {
-      throw new Error('Blocked URL protocol. Only http: and https: are allowed.')
-    }
-    if (this.useMock) {
-      return null
-    }
-    const tab = this.findReusableTabForCapture(url)
-    if (!tab?.view) {
-      return null
-    }
-
-    const webContents = tab.view.webContents
-    const timeoutMs = Math.max(5_000, options?.timeoutMs ?? 30_000)
-    const settleMs = Math.max(0, options?.settleMs ?? 1_500)
-    const originalUrl = webContents.getURL() || tab.url
-    const shouldRestore = !!originalUrl && originalUrl !== url
-
-    await this.loadWebContentsURL(webContents, url, timeoutMs)
-    if (settleMs > 0) {
-      await new Promise((resolve) => setTimeout(resolve, settleMs))
-    }
-
-    try {
-      if (options?.script) {
-        const wrappedScript = `
-          (async () => {
-            try {
-              const __readyCaptureSource = ${JSON.stringify(options.script)}
-              const __readyCaptureValue = await eval(__readyCaptureSource)
-              return { __readyCaptureOk: true, value: __readyCaptureValue }
-            } catch (error) {
-              return {
-                __readyCaptureOk: false,
-                error: String((error && (error.stack || error.message)) || error || 'Unknown capture error'),
-              }
-            }
-          })()
-        `
-        const captureResult = await webContents.executeJavaScript(wrappedScript, true) as
-          | { __readyCaptureOk?: boolean; value?: unknown; error?: string }
-          | null
-        if (captureResult && captureResult.__readyCaptureOk === false) {
-          return {
-            __readyCaptureError: captureResult.error || 'Unknown capture error',
-          }
-        }
-        return captureResult && captureResult.__readyCaptureOk ? captureResult.value : captureResult
-      }
-
-      return webContents.executeJavaScript(
-        `(() => ({
-          title: document.title || '',
-          finalUrl: location.href,
-          text: document.body?.innerText || '',
-          html: document.documentElement?.outerHTML || '',
-        }))()`,
-        true,
-      )
-    } finally {
-      if (shouldRestore) {
-        try {
-          await this.loadWebContentsURL(webContents, originalUrl, Math.min(timeoutMs, 15_000))
-        } catch {
-          // ignore restore failures for live capture reuse
-        }
-      }
-    }
+    return createBackgroundCapturePage(probeWindow, {
+      observe: options?.observe,
+      isAllowedUrl: isAllowedBrowserURL,
+    })
   }
 
   /**

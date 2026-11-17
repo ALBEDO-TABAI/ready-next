@@ -56,7 +56,7 @@ test('browser performance contract accepts the governed lazy architecture', (t) 
     registerDormantTabs(request) { return this.tabLifecycleService.registerDormantTabs(request) }
   `)
   write(root, 'src/main/modules/browser-engine/browser-controller-capture-runtime.ts', `
-    async captureBackgroundPage() {
+    async openBackgroundPage() {
       const probeWindow = new BrowserWindow({ webPreferences: { backgroundThrottling: false } })
     }
   `)

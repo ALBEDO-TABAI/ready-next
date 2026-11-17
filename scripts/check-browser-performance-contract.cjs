@@ -45,7 +45,7 @@ function hasDisallowedForcedFullSpeed(rel, source) {
   const matches = [...source.matchAll(/backgroundThrottling\s*:\s*false/g)]
   if (matches.length === 0) return false
   if (rel !== CONTROLLER_CAPTURE_REL) return true
-  const captureStart = source.indexOf('async captureBackgroundPage(')
+  const captureStart = source.indexOf('async openBackgroundPage(')
   return matches.some((match) => {
     const offset = match.index ?? -1
     if (captureStart < 0 || offset < captureStart || offset - captureStart > 4_000) return true

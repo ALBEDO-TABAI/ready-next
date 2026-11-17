@@ -76,6 +76,16 @@ for(const error of ['challenge','HTTP 403 Forbidden','HTTP 429 Too Many Requests
     assert.equal(calls,1);await content.stop()
   })
 }
+test('session S10 a Xiaohongshu note is never fetched in the background and still opens for the reader',async t=>{
+  const f=setup(t);if(!f)return
+  f.put('a',f.source,'https://www.xiaohongshu.com/explore/65f0a1b2c3d4e5f6a7b8c9d0?xsec_token=T&xsec_source=pc_user');let calls=0
+  const content=new RSSContentService({content:f.rss.content,extractor,fetchHtml:async url=>{calls++;return {html:'<title>笔记</title><article>正文</article>',finalUrl:url}}})
+  const original=f.rss.content.getArticle('a')!
+  const judged=await content.loadForJudgment('a')
+  assert.equal(calls,0);assert.equal(judged.revision,original.revision)
+  assert.equal((await content.load('a',true)).body.status,'ready');assert.equal(calls,1)
+  await content.stop()
+})
 for(const link of ['/relative','', 'https://example.test/network']){
   test(`R3 fetch failure ${link || 'empty URL'} uses one capped summary judgment`,async t=>{
     const f=setup(t);if(!f)return

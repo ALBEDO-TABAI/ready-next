@@ -132,10 +132,6 @@ interface RouteAttemptInput {
 
 const routeAttemptStore = new Map<string, RecordedRouteAttempt>()
 
-export function allowsRSSHubFallbackAfterBrowser(_platform: PlatformType): boolean {
-  return false
-}
-
 const routeCapabilityMatrix: Record<PlatformType, RouteCapabilityMatrixEntry> = {
   rss: {
     platform: 'rss',
@@ -167,11 +163,11 @@ const routeCapabilityMatrix: Record<PlatformType, RouteCapabilityMatrixEntry> = 
   bilibili: {
     platform: 'bilibili',
     label: platformLabel('bilibili'),
-    backend: 'rsshub',
-    fallbackOrder: ['rsshub', 'browser', 'native', 'scrapling'],
-    chromiumRequired: false,
+    backend: 'browser',
+    fallbackOrder: ['browser', 'rsshub'],
+    chromiumRequired: true,
     scraplingEligible: false,
-    notes: '继续以 RSSHub/官方 API 为主体，必要时用应用内浏览器页面兜底；Scrapling 仅保留远期 anti-risk 备选。',
+    notes: '用 Ready 浏览器里的登录在隐藏页打开空间页，读页面自己请求到的投稿列表；没有登录时退到 RSSHub 的匿名路由。',
   },
   weibo: {
     platform: 'weibo',
@@ -194,11 +190,11 @@ const routeCapabilityMatrix: Record<PlatformType, RouteCapabilityMatrixEntry> = 
   xiaohongshu: {
     platform: 'xiaohongshu',
     label: platformLabel('xiaohongshu'),
-    backend: 'rsshub',
-    fallbackOrder: ['rsshub'],
+    backend: 'browser',
+    fallbackOrder: ['browser'],
     chromiumRequired: true,
     scraplingEligible: false,
-    notes: '小红书后台获取不复用应用内浏览器登录态；只走 RSSHub 管理的 Chromium，避免触发账号风控。',
+    notes: '用 Ready 浏览器里的登录在隐藏页低频打开主页，读页面内嵌的笔记列表；没有匿名通道，未登录时提示去浏览器登录。',
   },
   vimeo: {
     platform: 'vimeo',

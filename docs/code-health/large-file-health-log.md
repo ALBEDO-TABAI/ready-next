@@ -21,6 +21,9 @@
 
 | 评估日期 | 任务 | 文件 | 总行数 | 本次新增 | 结论 | 判断与后续动作 | 状态 |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
+| 2026-11-17 | 订阅的会话内采集 | `src/main/index.ts` | 1425 | 净 +4 | 一般 | 只接两根线：自动刷新调用带上“自动”标记，把系统闲置时长读数交给资讯引擎（读数函数在 `rss-engine/user-presence.ts`）。复查同 B3 行。 | 复查：2026-12-15 |
+| 2026-11-17 | 订阅的会话内采集 | `src/main/modules/rss-engine/ipc-handler.ts` | 1186 | 净 −75 | 一般 | 路由改为会话优先后删掉了 RSSHub 预热、严格可用性判断和逐源暂停；会话源的单次刷新在 `session-source-fetch.ts`，节奏在 `session-acquisition-pacer.ts`。同批 `browser-acquisition.ts` 1096 → 483（页面脚本移到 `session-page-scripts.ts`，702 行）。 | 复查：2026-11-30 |
+| 2026-11-17 | 密码框的值不进页面清单 | `src/main/modules/tools/browser-probe.ts` | 1022 | 净 0 | 一般 | 两处各改一行：目标记录与单个目标读取都不再带出密码框里的内容。 | 复查：2026-12-15 |
 | 2026-11-17 | 编辑后重发覆盖上一轮 | `src/main/modules/agent-control/codex-runtime/composition/ingress-prepare.ts` | 1023 | 净 +3 | 一般 | 只调用一次前置校验（被替换的必须仍是最新一条用户消息）并把结果交给 preparer；校验、拒绝与打标记的实现都在独立的 `codex-turn-replacement.ts`，本文件仍在结构测试的 1025 行上限内。 | 复查：2026-11-30 |
 | 2026-11-17 | 编辑后重发覆盖上一轮 | `src/main/modules/agent-control/codex-runtime/codex-product-run-preparer.ts` | 1022 | 净 +8 | 一般 | 只给冻结的 prepared 增加一个可选字段 `replacedOriginUserMessageId`（类型、两处 schema、构造各一行）。 | 复查：2026-11-30 |
 | 2026-11-17 | 编辑后重发覆盖上一轮 | `src/main/modules/migrations.ts` | 4654 | 净 +12 | 健康 | 迁移 161 只给 `chat_messages` 加一列 `replaced_by_run_id`；真实数据库行为由 `codex-turn-replacement.test.ts` 在 Electron 运行时覆盖。 | 记录结论 |
