@@ -124,6 +124,8 @@ describe('browser popup policy', () => {
 
   it('should only auto-grant low-risk browser permissions', () => {
     assert.strictEqual(shouldAllowBrowserPermission('fullscreen', 'https://example.com'), true)
+    // Electron names it `pointerLock`; a page asking for it gets it, as it gets fullscreen.
+    assert.strictEqual(shouldAllowBrowserPermission('pointerLock', 'https://example.com'), true)
     assert.strictEqual(shouldAllowBrowserPermission('notifications', 'https://example.com'), false)
     assert.strictEqual(shouldAllowBrowserPermission('serial', 'https://example.com'), false)
   })

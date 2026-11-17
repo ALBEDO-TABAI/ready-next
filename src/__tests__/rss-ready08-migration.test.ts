@@ -44,7 +44,8 @@ test('full Ready 0.8 schema upgrades RSS atomically and retains conversation/cha
     assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name='rss_definitions'").get(), undefined)
     assert.deepEqual(preserved(), before)
     db.close(); db = new SQLite(path); runMigrations(db)
-    assert.deepEqual(preserved(), before)
+    // Migration 161 adds a nullable marker to messages; an old message is kept as it was and marks nothing replaced.
+    assert.deepEqual(preserved(), { ...before, message: { ...(before.message as Record<string, unknown>), replaced_by_run_id: null } })
     const rss = new RSSStore(() => db), article = rss.content.getArticle('old')!
     assert.equal(article.read, true); assert.equal(article.starred, true); assert.equal(article.inboxVisible, false)
     assert.equal(article.summary, 'Original summary')

@@ -332,7 +332,7 @@ function buildBrowserDomTargetLibraryJs(): string {
       return {
         role: readyRoleFor(el),
         name: readyLabelFor(el),
-        value: el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement ? readyCleanText(el.value).slice(0, 160) : undefined,
+        value: (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) && !states.password ? readyCleanText(el.value).slice(0, 160) : undefined,
         states,
         stableNodeToken: readyStableTargetToken(el),
         parentStableNodeToken: ancestorStableNodeTokens.length > 0
@@ -561,7 +561,7 @@ export function buildBrowserTargetReadJs(nodeId: string, frameDocumentToken?: st
     if (!el) return { matchCount: 0, content: '' };
     const record = readyTargetRecord(el, -1);
     const chunks = [
-      el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement
+      (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) && !record.states.password
         ? String(el.value || '')
         : '',
       String(el.innerText || ''),

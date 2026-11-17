@@ -151,7 +151,7 @@ export function shouldAllowBrowserPermission(
     'identity-credentials-get',
     'window-management',
     'fullscreen',
-    'pointerLock',
+    'pointerlock',
     'midi',
     'hid',
     'serial',

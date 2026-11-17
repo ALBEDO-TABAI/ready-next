@@ -6,6 +6,7 @@ import {
   buildBrowserPageMapProbeJs,
   buildBrowserTargetFocusJs,
   buildBrowserTargetProbeJs,
+  buildBrowserTargetReadJs,
 } from '../main/modules/tools/browser-probe'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
@@ -271,4 +272,27 @@ test('empty contenteditable is named from its structural placeholder', () => {
 
   assert.equal(runtime.targets[0]?.role, 'textbox')
   assert.equal(runtime.targets[0]?.name, '输入文字，内容将自动保存')
+})
+
+test('a password field is listed as a target but what was typed into it never leaves the page', () => {
+  const account = new FakeInputElement({ attrs: { type: 'text', 'aria-label': '账号' } })
+  account.value = 'someone@example.com'
+  const password = new FakeInputElement({ attrs: { type: 'password', 'aria-label': '密码' } })
+  password.value = 'hunter2-secret'
+  const runtime = createProbeRuntime([account, password])
+  const [accountTarget, passwordTarget] = runtime.targets as Array<ProbeTarget & {
+    value?: string
+    states?: { password?: boolean }
+  }>
+
+  assert.equal(accountTarget.value, 'someone@example.com')
+  assert.equal(passwordTarget.states?.password, true)
+  assert.equal('value' in passwordTarget, false)
+  assert.doesNotMatch(JSON.stringify(runtime.pageMap), /hunter2-secret/)
+
+  const read = runtime.run<{ matchCount: number }>(
+    buildBrowserTargetReadJs(passwordTarget.stableNodeToken, passwordTarget.frameDocumentToken),
+  )
+  assert.equal(read.matchCount, 1)
+  assert.doesNotMatch(JSON.stringify(read), /hunter2-secret/)
 })
