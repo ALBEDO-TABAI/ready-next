@@ -154,6 +154,18 @@ function ensureSnapshotAuthorityRoot(input?: string): string {
   }
   const stats = lstatSync(rootPath)
   const markerPath = join(rootPath, '.ready-owner')
+  // The OS clears old files out of the temp folder and can take the marker while leaving the directory. A root that
+  // is this user's own private directory and holds nothing has nothing in it to trust or distrust: mark it again.
+  if (stats.isDirectory() && !stats.isSymbolicLink() && (stats.mode & 0o777) === 0o700
+    && (typeof process.getuid !== 'function' || stats.uid === process.getuid())
+    && readdirSync(rootPath).length === 0) {
+    try {
+      writeFileSync(markerPath, SNAPSHOT_ROOT_MARKER, { flag: 'wx', mode: 0o600 })
+    } catch (error) {
+      // Another process marked it first; the checks below read whatever is there now.
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+    }
+  }
   if (!stats.isDirectory() || stats.isSymbolicLink()
     || (stats.mode & 0o777) !== 0o700
     || (typeof process.getuid === 'function' && stats.uid !== process.getuid())

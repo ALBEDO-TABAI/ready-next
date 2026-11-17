@@ -99,6 +99,40 @@ test('executes a private snapshot when the verified program replaces its install
   }
 })
 
+test('a snapshot root emptied by the OS temp sweep is marked again; one that still holds something is not', async () => {
+  const fixture = makeExecutableFixture()
+  try {
+    const authority = await resolveFrozenDesktopExecutableAuthority({ program: fixture.path })
+    // What the nightly sweep leaves behind: the private directory, without its marker.
+    const swept = join(fixture.root, 'swept-authority')
+    mkdirSync(swept, { mode: 0o700 })
+    const snapshot = materializeFrozenDesktopExecutableSnapshot({ authority, authorityRoot: swept })
+    assert.equal(existsSync(snapshot.spawnPath), true)
+    assert.equal(existsSync(join(swept, '.ready-owner')), true)
+
+    // A markerless directory with content was not made empty by Ready or the sweep: it stays refused.
+    const occupied = join(fixture.root, 'occupied-authority')
+    mkdirSync(occupied, { mode: 0o700 })
+    writeFileSync(join(occupied, 'someone-elses-file'), 'x')
+    assert.throws(
+      () => materializeFrozenDesktopExecutableSnapshot({ authority, authorityRoot: occupied }),
+      /dependency_snapshot_unavailable/,
+    )
+    // So does an empty one other users could have written into.
+    const open = join(fixture.root, 'open-authority')
+    mkdirSync(open, { mode: 0o755 })
+    chmodSync(open, 0o755)
+    assert.throws(
+      () => materializeFrozenDesktopExecutableSnapshot({ authority, authorityRoot: open }),
+      /dependency_snapshot_unavailable/,
+    )
+  } finally {
+    const swept = join(fixture.root, 'swept-authority')
+    for (const name of existsSync(swept) ? readdirSync(swept) : []) chmodSync(join(swept, name), 0o700)
+    fixture.cleanup()
+  }
+})
+
 test('dead snapshot cleanup requires the private root marker and exact Ready-owned shape', async () => {
   const fixture = makeExecutableFixture()
   const authorityRoot = join(fixture.root, 'snapshot-authority')

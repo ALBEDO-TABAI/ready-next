@@ -1214,7 +1214,7 @@ test('V1.0 fixture / case 4 — completed task-card: terminal projection renders
 })
 
 
-test('composer displays the Main consequence and submits that displayed head reference', async () => {
+test('composer submits the Main head reference with its consequence; the set-aside notice is not shown', async () => {
   resetStores()
   seedEmptyAgent()
   const scopeId = 'scope-consequence-ui'
@@ -1248,10 +1248,8 @@ test('composer displays the Main consequence and submits that displayed head ref
   })
   const { container, unmount } = mountChatPanel()
   try {
-    const note = container.querySelector('[data-ready-send-consequence="true"]')
-    assert.match(note?.textContent || '', /前面2项不会作为当前任务带入/)
-    assert.match(note?.textContent || '', /其中1项用到了当时的页面或附件，需要时请重新带上/)
-    assert.equal(note?.querySelector('button'), null, 'two set-aside items cannot be restated by resending one message')
+    assert.equal(container.querySelector('[data-ready-send-consequence="true"]'), null)
+    assert.doesNotMatch(container.textContent || '', /不会作为当前任务带入/)
     container.querySelector<HTMLButtonElement>('[data-ready-agent-send="true"]')!.click()
     await new Promise((resolve) => setTimeout(resolve, 0))
     assert.deepEqual(submitted, codexHeadActionAdmissionRef(head))
@@ -1274,7 +1272,7 @@ test('composer displays the Main consequence and submits that displayed head ref
 })
 
 
-test('a single set-aside plain message can be sent again from the notice, through the ordinary send', async () => {
+test('the latest user message can be copied, or edited in place and sent as an ordinary new message', async () => {
   resetStores()
   seedEmptyAgent()
   const scopeId = 'scope-resend-ui'
@@ -1304,21 +1302,42 @@ test('a single set-aside plain message can be sent again from the notice, throug
     },
   })
   const { container, unmount } = mountChatPanel()
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0))
   try {
-    const resend = () => container.querySelector<HTMLButtonElement>('[data-ready-send-consequence="true"] button')
-    assert.match(resend()?.textContent || '', /重新发送上一条/)
-    // A draft is never overwritten or sent in its place.
+    // The baseline mount shows the conversation in more than one list; follow one of them.
+    const list = container.querySelector('.ready-chat-user-message')!.closest('.panel-hover-scrollbar')!
+    const actions = () => list.querySelector('[data-chat-user-message-actions="true"]')
+    const editor = () => list.querySelector<HTMLTextAreaElement>('[data-chat-user-message-editor="true"] textarea')
+    const editorButton = (label: string) => [...list.querySelectorAll<HTMLButtonElement>(
+      '[data-chat-user-message-editor="true"] button',
+    )].find((button) => button.textContent === label)!
+    assert.ok(actions()?.querySelector('[aria-label="复制"]'))
+    flushSync(() => actions()!.querySelector<HTMLButtonElement>('[aria-label="编辑"]')!.click())
+    assert.equal(editor()?.value, '明天广州天气怎么样')
+    assert.equal(actions(), null, 'the bubble gives way to the editor')
+
+    // Cancel leaves everything as it was.
+    flushSync(() => editorButton('取消').click())
+    assert.equal(editor(), null)
+    assert.deepEqual(sent, [])
+
+    // A draft in the composer is never overwritten or sent in its place; the editor stays open.
+    flushSync(() => actions()!.querySelector<HTMLButtonElement>('[aria-label="编辑"]')!.click())
+    editor()!.value = '后天广州天气怎么样'
     flushSync(() => useAgent.setState((state) => ({ inputValue: '写了一半',
       sessions: { ...state.sessions, [sessionId]: { ...state.sessions[sessionId], inputValue: '写了一半' } } })))
-    resend()!.click()
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    flushSync(() => editorButton('发送').click())
+    await tick()
     assert.deepEqual(sent, [])
     assert.equal(useAgent.getState().inputValue, '写了一半')
+    assert.equal(editor()?.value, '后天广州天气怎么样')
+
     flushSync(() => useAgent.setState((state) => ({ inputValue: '',
       sessions: { ...state.sessions, [sessionId]: { ...state.sessions[sessionId], inputValue: '' } } })))
-    resend()!.click()
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    assert.deepEqual(sent, [{ text: '明天广州天气怎么样', ref: codexHeadActionAdmissionRef(head) }])
+    flushSync(() => editorButton('发送').click())
+    await tick()
+    assert.deepEqual(sent, [{ text: '后天广州天气怎么样', ref: codexHeadActionAdmissionRef(head) }])
+    assert.equal(editor(), null)
   } finally {
     unmount()
     agentApi.listConversationScopes = originalList

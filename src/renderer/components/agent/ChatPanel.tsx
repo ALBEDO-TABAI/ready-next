@@ -891,25 +891,21 @@ export default function ChatPanel({
   }, [activeLifecycleSlice?.beginNewContextActionRef, activeSessionId, attachments,
     inputValue, sendMessage, headProjection, setComposerNoticeFor, runCompaction, setInputValue, clearAttachments])
 
-  // A failed turn is set aside and must be restated. When that turn was one plain message, restating is sending
-  // the same words again through the ordinary send; exact Retry stays reserved for turns with no environment.
-  const resendableText = useMemo(() => {
-    if (headProjection?.actions.send_new_message.consequence?.omittedItemCount !== 1) return null
-    const lastUser = [...messages].reverse().find((message) => message.type === 'user')
-    const text = lastUser?.content?.trim()
-    return text && !lastUser?.attachments?.length ? text : null
-  }, [headProjection, messages])
-  const handleResendLastMessage = useCallback(() => {
-    if (!resendableText || !activeSessionId) return
+  // Editing the latest message sends the changed words as an ordinary new message; it never rewrites history,
+  // and it never takes or replaces what is waiting in the composer.
+  const handleSendEditedMessage = useCallback((text: string): boolean => {
+    const content = text.trim()
+    if (!content || !activeSessionId) return false
     if (inputValue.trim() || attachments.length > 0) {
       setComposerNoticeFor(activeSessionId, {
-        message: '输入框里还有内容。请先发送或清空它，再重新发送上一条。',
+        message: '输入框里还有内容。请先发送或清空它，再发送修改后的这一条。',
         errorKind: 'explicit_retry_control_invalid',
       })
-      return
+      return false
     }
-    void handleSend(resendableText)
-  }, [activeSessionId, attachments.length, handleSend, inputValue, resendableText, setComposerNoticeFor])
+    void handleSend(content)
+    return true
+  }, [activeSessionId, attachments.length, handleSend, inputValue, setComposerNoticeFor])
 
   const handleRetryProductTurn = useCallback(async (predecessorRunId: string) => {
     const sendSessionId = activeSessionId
@@ -1350,8 +1346,8 @@ export default function ChatPanel({
             errorKind: 'action_projection_confirmation_required',
           }))
       }}
-      sendConsequence={headProjection?.actions.send_new_message.consequence ?? null}
-      onResendLastMessage={resendableText ? handleResendLastMessage : undefined}
+      onSendEditedMessage={!isStreaming && headProjection?.actions.send_new_message.availability === 'ready'
+        ? handleSendEditedMessage : undefined}
       headUnavailable={Boolean(currentScopeId && currentScope && !headProjection)}
       onRefreshActionSurface={() => {
         if (currentScopeId) void useAgent.getState().refreshCodexActionSurface(currentScopeId)

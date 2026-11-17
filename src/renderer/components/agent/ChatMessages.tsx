@@ -9,8 +9,8 @@ const CHAT_BOTTOM_SAFETY_MARGIN_PX = 12
 // overflows the viewport), composer-resize-driven re-renders must NOT yank the
 // view back down. 96px ≈ one short message of slack so小幅 overshoot still counts.
 const CHAT_STICK_TO_BOTTOM_THRESHOLD_PX = 96
-import { Copy, Check, FilePlus2, MoreHorizontal, RotateCcw, Shapes } from 'lucide-react'
-import { anchorOf, IconButton, openMenu } from '../ui'
+import { Copy, Check, FilePlus2, MoreHorizontal, Pencil, RotateCcw, Shapes } from 'lucide-react'
+import { anchorOf, Button, IconButton, openMenu } from '../ui'
 import { answerCapture } from '../../modules/agent/answer-capture'
 import { receiveAnswerAsPage, receiveToCanvas, reportCaptureError } from '../../modules/workbench/capture-receipt'
 import type { AgentMessage, AgentArtifact, ChatAttachment, ToolTraceEvent } from '../../stores/useAgent'
@@ -58,6 +58,59 @@ const CHAT_SCROLL_TOP_FADE = 38
 // The reply's hover actions keep their 18px footprint (the reply reserves room for them on its right).
 const MESSAGE_ACTION_SIZE: React.CSSProperties = { width: 18, height: 18 }
 const MESSAGE_ACTION_ICON: React.CSSProperties = { width: 12, height: 12 }
+/** The latest user message, opened for editing in place: the words can be changed and sent again. */
+function UserMessageEditor({ initial, onCancel, onSend }: {
+  initial: string
+  onCancel: () => void
+  onSend: (text: string) => void
+}) {
+  const field = useRef<HTMLTextAreaElement>(null)
+  const fit = useCallback(() => {
+    const element = field.current
+    if (!element) return
+    element.style.height = 'auto'
+    element.style.height = `${Math.min(element.scrollHeight, 240)}px`
+  }, [])
+  useEffect(() => {
+    const element = field.current
+    if (!element) return
+    element.focus()
+    element.setSelectionRange(element.value.length, element.value.length)
+    fit()
+  }, [fit])
+  // The field keeps its own text; it is read when sending, and empty text is simply not sent.
+  const send = () => {
+    const text = field.current?.value.trim()
+    if (text) onSend(text)
+  }
+  return (
+    <div className="ready-chat-user-editor" data-chat-user-message-editor="true">
+      <textarea
+        ref={field}
+        // The slot's inner field: the surrounding inlay is the material, the field itself is bare.
+        className="ready-input-slot-inner"
+        defaultValue={initial}
+        rows={1}
+        aria-label="编辑这条消息"
+        onInput={fit}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            event.preventDefault()
+            onCancel()
+          } else if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+            event.preventDefault()
+            send()
+          }
+        }}
+      />
+      <div className="flex justify-end gap-2">
+        <Button variant="ghost" size="sm" onClick={onCancel}>取消</Button>
+        <Button variant="primary" size="sm" onClick={send}>发送</Button>
+      </div>
+    </div>
+  )
+}
+
 interface ChatMessagesProps {
   messages: AgentMessage[]
   contextBoundaries: CodexConversationContextBoundary[]
@@ -80,6 +133,8 @@ interface ChatMessagesProps {
   onToggleToolTrace: () => void
   onCopyMessage: (id: string, content: string) => void | Promise<void>
   onRetryProductTurn?: (readyRunId: string) => void | Promise<void>
+  /** Sends the edited words of the latest user message as an ordinary new message; false when it was not sent. */
+  onSendEditedMessage?: (text: string) => boolean | Promise<boolean>
   onAgentSelectionContextMenu?: (event: React.MouseEvent, selectedText: string) => void
   onAttachmentPreview: (attachment: ChatAttachment) => void | Promise<void>
   onReferenceSelect: (attachment: ChatAttachment) => void
@@ -113,6 +168,7 @@ export default function ChatMessages({
   onToggleToolTrace,
   onCopyMessage,
   onRetryProductTurn,
+  onSendEditedMessage,
   onAgentSelectionContextMenu,
   onAttachmentPreview,
   onReferenceSelect,
@@ -164,6 +220,15 @@ export default function ChatMessages({
   // Welcome 文案是 renderer-only 的本地提示（不进 LLM 上下文）。一旦用户
   // 发出第一条消息就把它从可见列表里抹掉——视觉上"被新内容顶走"。
   const hasUserMessage = messages.some((msg) => msg.type === 'user')
+  const lastUserMessageId = useMemo(
+    () => [...messages].reverse().find((msg) => msg.type === 'user')?.id ?? null,
+    [messages],
+  )
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
+  // Only the latest message can be open for editing: a newer one, or losing the permission to send, closes it.
+  useEffect(() => {
+    if (editingMessageId && (editingMessageId !== lastUserMessageId || !onSendEditedMessage)) setEditingMessageId(null)
+  }, [editingMessageId, lastUserMessageId, onSendEditedMessage])
   const visibleMessages = useMemo(
     () => (hasUserMessage ? messages.filter((msg) => !/^welcome(?:-|$)/.test(msg.id)) : messages),
     [messages, hasUserMessage],
@@ -316,8 +381,19 @@ export default function ChatMessages({
               </div>
             ) : null}
 
-            <div className={`flex gap-2.5 ${msg.type === 'user' ? 'flex-row-reverse' : ''}`}>
-              {msg.type === 'user' ? (
+            <div className={`flex gap-2.5 ${msg.type === 'user' ? 'group/usermsg flex-row-reverse' : ''}`}>
+              {msg.type === 'user' && editingMessageId === msg.id ? (
+                <UserMessageEditor
+                  initial={msg.content}
+                  onCancel={() => setEditingMessageId(null)}
+                  onSend={(text) => {
+                    void Promise.resolve(onSendEditedMessage?.(text)).then((sent) => {
+                      if (sent) setEditingMessageId(null)
+                    })
+                  }}
+                />
+              ) : msg.type === 'user' ? (
+                <>
                 <div
                   className="ready-chat-user-message max-w-[85%] t-body"
                   data-typography-role="body"
@@ -439,6 +515,40 @@ export default function ChatMessages({
                     </div>
                   )}
                 </div>
+                {msg.id === lastUserMessageId && msg.content?.trim() ? (
+                  <div
+                    data-chat-user-message-actions="true"
+                    className={`flex items-center gap-1 self-end transition-opacity duration-160 ease-out ${
+                      copiedMessageId === msg.id
+                        ? 'opacity-100'
+                        : 'opacity-0 group-hover/usermsg:opacity-100 group-focus-within/usermsg:opacity-100'
+                    }`}
+                  >
+                    {onSendEditedMessage && !msg.attachments?.length ? (
+                      <IconButton
+                        size="sm"
+                        icon={<Pencil style={MESSAGE_ACTION_ICON} />}
+                        onClick={() => setEditingMessageId(msg.id)}
+                        style={MESSAGE_ACTION_SIZE}
+                        title="编辑后重新发送"
+                        aria-label="编辑"
+                      />
+                    ) : null}
+                    <IconButton
+                      size="sm"
+                      icon={copiedMessageId === msg.id
+                        ? <Check style={MESSAGE_ACTION_ICON} />
+                        : <Copy style={MESSAGE_ACTION_ICON} />}
+                      onClick={() => { void onCopyMessage(msg.id, msg.content) }}
+                      style={copiedMessageId === msg.id
+                        ? { ...MESSAGE_ACTION_SIZE, color: 'var(--rn-ok)', background: 'color-mix(in srgb, var(--rn-ok) 12%, transparent)' }
+                        : MESSAGE_ACTION_SIZE}
+                      title={copiedMessageId === msg.id ? '已复制' : '复制'}
+                      aria-label="复制"
+                    />
+                  </div>
+                ) : null}
+                </>
               ) : msg.type === 'system' ? (
                 <div
                   className="t-body-sm"
