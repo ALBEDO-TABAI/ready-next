@@ -55,6 +55,7 @@ import type {
   CodexModelGatewayMetadata,
   CodexModelGatewayOriginalRequestCapture,
   CodexModelGatewayPreparedRequestReceipt,
+  CodexModelGatewayResponseEventNote,
   CodexModelGatewaySpawnCapability,
   CodexModelGatewayToolResponseCall,
   CodexModelGatewayUpstreamFailureDiagnostic,
@@ -104,6 +105,8 @@ export class CodexModelGateway {
     onUpstreamFailure?: (diagnostic: CodexModelGatewayUpstreamFailureDiagnostic) => void
     /** A request Ready's own checks refused. Without it a refusal leaves no trace outside the turn's database row. */
     onRequestRefused?: (refusal: { code: string; status: number }) => void
+    /** A response event Ready left out (unknown type) or stopped at (failed a check); names only, never content. */
+    onResponseEvent?: (note: CodexModelGatewayResponseEventNote) => void
     proofSentinel?: string
     proofSentinels?: readonly string[]
     onValidatedRequest?: (capture: CodexModelGatewayValidatedRequestCapture) => void | Promise<void>
@@ -696,6 +699,7 @@ export class CodexModelGateway {
           admitToolResponse,
           recordCompleted,
           recordFailed,
+          onResponseEvent: this.deps.onResponseEvent,
         })
       }
       completed = true

@@ -2798,6 +2798,9 @@ test('native Responses rejects model/status reroutes, redacts secrets and withho
               } : {}),
             },
           },
+          ...(mode === 'trailing'
+            ? [{ type: 'codex.rate_limits', plan: 'touch forbidden' }]
+            : []),
           {
             type: 'response.completed',
             response: {
@@ -2823,12 +2826,14 @@ test('native Responses rejects model/status reroutes, redacts secrets and withho
     },
     maxRetries: 0,
   })
+  const notes: Array<{ kind: string; eventType: string; code: string | null; keys: readonly string[] }> = []
   const request = requestBody()
   const binding = bindRequest(request, created.snapshot)
   const gateway = new CodexModelGateway({
     bearerToken: 'local-token',
     authority: { async resolve(input) { input.validate(binding); return binding } },
     credentials: { resolve() { return 'upstream-secret' } },
+    onResponseEvent(note) { notes.push(note) },
   })
   const address = await gateway.start()
   const call = async () => {
@@ -2881,10 +2886,20 @@ test('native Responses rejects model/status reroutes, redacts secrets and withho
     assert.match(unknownExtension.body, /gateway_response_shape_invalid/)
     assert.doesNotMatch(unknownExtension.body, /response\.completed|benign-but-unverified/)
 
+    // An event type Ready does not know is left out, as the runtime itself would skip it: nothing of it crosses,
+    // the turn is not failed for it, and the log names the type and its keys but never its content.
     mode = 'trailing'
     const trailing = await call()
-    assert.match(trailing.body, /gateway_response_event_not_allowed/)
-    assert.doesNotMatch(trailing.body, /response\.completed|touch forbidden/)
+    assert.match(trailing.body, /response\.completed/)
+    assert.doesNotMatch(trailing.body, /shell_call|rate_limits|touch forbidden/)
+    assert.deepEqual(notes.filter((note) => note.kind === 'ignored'), [
+      { kind: 'ignored', eventType: 'codex.rate_limits', code: null, keys: ['type', 'plan'] },
+      { kind: 'ignored', eventType: 'response.shell_call', code: null, keys: ['type', 'command'] },
+    ])
+    assert.ok(notes.some((note) => (
+      note.kind === 'refused' && note.code === 'gateway_response_shape_invalid'
+      && note.eventType === 'response.created' && note.keys.includes('command')
+    )), JSON.stringify(notes))
   } finally {
     await gateway.stop()
     await close(upstream)

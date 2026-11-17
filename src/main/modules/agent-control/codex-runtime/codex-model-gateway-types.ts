@@ -152,3 +152,11 @@ export type CodexModelGatewayOriginalRequestCapture = Omit<
   | 'memoryHistoryRedactionDigest'
   | 'memoryHistoryRedactedItemCount'
 >
+
+/** Names only: the event type and, for a refused exact-shape check, the key names Ready did not expect. */
+export type CodexModelGatewayResponseEventNote = Readonly<{
+  kind: 'ignored' | 'refused'
+  eventType: string
+  code: string | null
+  keys: readonly string[]
+}>

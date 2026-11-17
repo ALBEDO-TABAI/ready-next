@@ -1,5 +1,8 @@
 import { createRotatingLogger } from '../../../utils/rotating-logger'
-import type { CodexModelGatewayUpstreamFailureDiagnostic } from './codex-model-gateway-types'
+import type {
+  CodexModelGatewayResponseEventNote,
+  CodexModelGatewayUpstreamFailureDiagnostic,
+} from './codex-model-gateway-types'
 
 const logger = createRotatingLogger('ready-directchat.log', { buffered: true })
 
@@ -38,6 +41,25 @@ export function appendCodexUpstreamFailureLog(diagnostic: CodexModelGatewayUpstr
 export function appendCodexGatewayRefusalLog(refusal: { code: string; status: number }): void {
   try {
     logger.append(`[${new Date().toISOString()}] [gateway] request_refused code=${field(refusal.code)} status=${refusal.status}\n`)
+  } catch {
+    // silent-catch: the diagnostic log write is best-effort and must not fail the model request path
+    /* best-effort */
+  }
+}
+
+/** A provider-chosen name is logged only when it looks like one; anything else could be content. */
+function name(value: string): string {
+  return /^[A-Za-z0-9_.-]{1,80}$/.test(value) ? value : '(unprintable)'
+}
+
+/** Which response event Ready left out or stopped at. Names only: an event's content never reaches this log. */
+export function appendCodexGatewayResponseEventLog(note: CodexModelGatewayResponseEventNote): void {
+  const keys = note.keys.slice(0, 24).map(name).join(',') || '-'
+  try {
+    logger.append(
+      `[${new Date().toISOString()}] [gateway] response_event_${note.kind} type=${name(note.eventType)}`
+      + ` code=${field(note.code)} keys=${keys}\n`,
+    )
   } catch {
     // silent-catch: the diagnostic log write is best-effort and must not fail the model request path
     /* best-effort */

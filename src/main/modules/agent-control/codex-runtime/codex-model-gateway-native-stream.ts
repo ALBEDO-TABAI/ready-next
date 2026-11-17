@@ -1,5 +1,7 @@
 /** Deliver validated Responses events incrementally; admit tool results only after a valid terminal. */
-import { CodexModelGatewayError, createCodexDownstream, isRecord, refusedToolCallName, type JsonObject } from './codex-model-gateway-common'
+import {
+  CodexModelGatewayError, createCodexDownstream, isRecord, refusedToolCallName, unexpectedKeysOf, type JsonObject,
+} from './codex-model-gateway-common'
 import {
   type CodexModelGatewayFailureEvidence,
   type CodexModelGatewayResponseEvidence,
@@ -7,7 +9,7 @@ import {
   digestCanonicalJson,
 } from './codex-model-gateway-contract'
 import { CodexMessagesError } from './codex-model-gateway-messages'
-import { type NativeResponseState, validateNativeEvent } from './codex-model-gateway-native-validation'
+import { NATIVE_EVENT_KEYS, type NativeResponseState, validateNativeEvent } from './codex-model-gateway-native-validation'
 import { normalizeChatGptOAuthResponseEvent } from './codex-model-gateway-oauth'
 import {
   assertNativeProviderIdentitySafe,
@@ -15,7 +17,7 @@ import {
   redactNativeProviderEvent,
   sanitizeProviderText,
 } from './codex-model-gateway-provider-errors'
-import type { CodexModelGatewayToolResponseCall } from './codex-model-gateway-types'
+import type { CodexModelGatewayResponseEventNote, CodexModelGatewayToolResponseCall } from './codex-model-gateway-types'
 import { ProviderCredentialFilter } from './codex-provider-credential-filter'
 import { createProviderMessagePhaseNormalizer } from './codex-provider-message-phase'
 import { CodexProviderStreamPolicy, CodexProviderStreamPolicyError } from './codex-provider-stream-policy'
@@ -75,7 +77,18 @@ export async function streamNativeResponses(input: {
   admitToolResponse: (calls: readonly CodexModelGatewayToolResponseCall[]) => Promise<void>
   recordCompleted: (evidence: CodexModelGatewayResponseEvidence) => Promise<void>
   recordFailed: (evidence: CodexModelGatewayFailureEvidence) => void
+  /** Diagnostics only: an event type Ready does not know (left out of the turn), or the event a refusal stopped at. */
+  onResponseEvent?: (note: CodexModelGatewayResponseEventNote) => void
 }): Promise<void> {
+  const ignoredEventTypes = new Set<string>()
+  let eventUnderValidation: string | null = null
+  const note = (value: CodexModelGatewayResponseEventNote): void => {
+    try {
+      input.onResponseEvent?.(value)
+    } catch {
+      // silent-catch: diagnostics never change the stream outcome; a throwing observer is ignored
+    }
+  }
   const normalizePhase = input.inferMessagePhase ? createProviderMessagePhaseNormalizer() : (event: JsonObject) => [event]
   const startedAtMs = Date.now()
   const decoder = new TextDecoder('utf-8', { fatal: true })
@@ -191,8 +204,20 @@ export async function streamNativeResponses(input: {
       const parsed = parseSse(buffer)
       buffer = parsed.rest
       for (const block of parsed.blocks) {
+        eventUnderValidation = null
         const parsedEvent = nativeEventFromBlock(block)
         if (!parsedEvent) continue
+        const wireType = String(parsedEvent.payload.type)
+        if (!Object.prototype.hasOwnProperty.call(NATIVE_EVENT_KEYS, wireType)) {
+          // The Responses wire grows new event types and its consumers skip the ones they do not know; the pinned
+          // runtime does the same. Leaving one out passes nothing unvalidated on: every item and the terminal
+          // response are still checked in full, so an unknown event can only withhold, never add.
+          if (!ignoredEventTypes.has(wireType) && ignoredEventTypes.size < 16) {
+            ignoredEventTypes.add(wireType)
+            note({ kind: 'ignored', eventType: wireType, code: null, keys: Object.keys(parsedEvent.payload) })
+          }
+          continue
+        }
         const normalizedPayload = input.normalizeChatGptOAuth
           ? normalizeChatGptOAuthResponseEvent(
               parsedEvent.payload,
@@ -202,6 +227,7 @@ export async function streamNativeResponses(input: {
             : input.normalizeResponsesApi ? normalizeResponsesApiEvent(parsedEvent.payload) : parsedEvent.payload
         for (const providerPayload of normalizePhase(normalizedPayload)) {
           const eventType = String(providerPayload.type)
+          eventUnderValidation = eventType
           assertNativeProviderIdentitySafe(providerPayload, input.credential)
           validateNativeEvent(
             providerPayload,
@@ -413,6 +439,9 @@ export async function streamNativeResponses(input: {
     holdFromFunctionCall = false
     // silent-catch: abort upstream, persist response_failed, and emit the failed terminal; recordFailed errors still propagate.
     const code = error instanceof CodexModelGatewayError || error instanceof CodexMessagesError ? error.code : 'gateway_native_stream_failed'
+    if (eventUnderValidation) {
+      note({ kind: 'refused', eventType: eventUnderValidation, code, keys: unexpectedKeysOf(error) })
+    }
     const snapshot = policy.snapshot()
     input.recordFailed(gatewayFailureEvidence({
       code,

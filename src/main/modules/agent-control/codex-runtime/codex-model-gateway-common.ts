@@ -52,9 +52,19 @@ export function nonEmptyString(value: unknown, code: string): string {
   return value
 }
 
+/** Key names an exact-shape check did not expect, kept on the error for the diagnostic log only. */
+const unexpectedKeysByError = new WeakMap<Error, readonly string[]>()
+
+export function unexpectedKeysOf(error: unknown): readonly string[] {
+  return error instanceof Error ? unexpectedKeysByError.get(error) ?? [] : []
+}
+
 export function assertExactKeys(value: JsonObject, allowed: readonly string[], code: string): void {
-  if (Object.keys(value).some((key) => !allowed.includes(key))) {
-    throw new CodexModelGatewayError(code, 502)
+  const unexpected = Object.keys(value).filter((key) => !allowed.includes(key))
+  if (unexpected.length > 0) {
+    const error = new CodexModelGatewayError(code, 502)
+    unexpectedKeysByError.set(error, unexpected)
+    throw error
   }
 }
 
