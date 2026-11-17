@@ -23,7 +23,7 @@ function createHarness(options: {
   anonymous?: ScrapeResult | null
   stale?: boolean
   lastAttemptAt?: Record<string, number>
-  idleMs?: number
+  idleMs?: number | (() => number)
   hasPageOpen?: boolean
   withoutController?: boolean
 } = {}) {
@@ -52,7 +52,7 @@ function createHarness(options: {
       now: () => now,
       random: () => 0,
       sleep: async (ms) => { now += ms },
-      readUserIdleMs: () => options.idleMs ?? 0,
+      readUserIdleMs: () => (typeof options.idleMs === 'function' ? options.idleMs() : options.idleMs ?? 0),
     }),
     getController: () => (options.withoutController ? null : controller),
     readLastAttemptAt: (sourceId) => options.lastAttemptAt?.[sourceId] ?? null,
@@ -218,6 +218,27 @@ describe('Bilibili when the person is not signed in', () => {
     assert.equal(second.backendUsed, 'rsshub')
     assert.equal(second.deferred, undefined)
     assert.equal(third.backendUsed, 'rsshub')
+  })
+
+  it('asks the anonymous route at the pace the page would have had: not before the source is due, not while nobody is there', async () => {
+    const lastAttemptAt: Record<string, number> = {}
+    let idleMs = 0
+    const harness = createHarness({ pages: [signInPage], anonymous: anonymousVideos, lastAttemptAt, idleMs: () => idleMs })
+
+    await harness.refresh('b1', 'bilibili')
+    lastAttemptAt.b1 = T0 + 2_000 // the round records its attempt
+    assert.equal(harness.anonymousCalls(), 1)
+
+    const nextRound = await harness.refresh('b1', 'bilibili')
+    assert.equal(nextRound.deferred?.reason, 'not_due')
+    assert.equal(nextRound.backendUsed, 'browser')
+    assert.equal(harness.anonymousCalls(), 1, 'the anonymous route is not asked every round')
+
+    idleMs = 60 * 60_000
+    const whileAway = await harness.refresh('b22', 'bilibili')
+    assert.equal(whileAway.deferred?.reason, 'user_away')
+    assert.equal(harness.anonymousCalls(), 1)
+    assert.equal(harness.opened(), 1)
   })
 
   it('a verification page is not answered by trying the anonymous route', async () => {

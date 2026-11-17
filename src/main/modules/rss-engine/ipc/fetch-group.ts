@@ -151,6 +151,8 @@ export interface FetchGroupDeps {
     platform: PlatformType,
     options: { trigger: 'auto' | 'manual-all' | 'manual-source' },
   ): Promise<{ result: ScrapeResult; backendUsed: SourceBackend; deferred?: { reason: string } }>
+  /** Which of the fetched items are written; a login platform keeps an item as it was first seen. */
+  selectItemsToStore<T extends { id: string; published_at: number | null }>(platform: PlatformType, items: T[]): T[]
   recordSourceRouteAttempt(entry: {
     sourceId: string
     sourceName: string
@@ -444,14 +446,35 @@ export const fetchGroup: {
               published_at: item.pubDate ? Math.floor(new Date(item.pubDate).getTime() / 1000) : null,
             }))
 
-            const candidateIds = dbItems.map((item) => item.id)
-            const existingIds = new Set(deps.getRSSItemsByIds(candidateIds).map((item) => item.id))
-            const newIds = candidateIds.filter((id) => !existingIds.has(id))
+            let newIds: string[]
+            try {
+              const candidateIds = dbItems.map((item) => item.id)
+              const existingIds = new Set(deps.getRSSItemsByIds(candidateIds).map((item) => item.id))
+              newIds = candidateIds.filter((id) => !existingIds.has(id))
 
-            deps.upsertRSSItems(dbItems)
-            deps.updateRSSSourceLastFetched(source.id)
-            if (result.items.length > 0) {
-              deps.setRSSSourceDraftSeeded(source.id, true)
+              deps.upsertRSSItems(deps.selectItemsToStore(platform, dbItems))
+              deps.updateRSSSourceLastFetched(source.id)
+              if (result.items.length > 0) {
+                deps.setRSSSourceDraftSeeded(source.id, true)
+              }
+            } catch (error) {
+              // The source was fetched; what failed is saving it. Recorded as an attempt so that the next round
+              // does not fetch it again as if it had never been tried.
+              const message = `[${source.name}] ${error instanceof Error ? error.message : String(error)}`
+              deps.recordSourceRouteAttempt({
+                sourceId: source.id,
+                sourceName: source.name,
+                url: source.url,
+                groupName: source.group_name,
+                platform,
+                backend: backendUsed,
+                durationMs: Date.now() - startedAt,
+                itemCount: 0,
+                success: false,
+                error: message,
+              })
+              deps.persistRouteDiagnosticsSnapshot()
+              throw new Error(message)
             }
             deps.recordSourceRouteAttempt({
               sourceId: source.id,
@@ -661,7 +684,7 @@ export const fetchGroup: {
         const candidateIds = dbItems.map((item) => item.id)
         const existingIds = new Set(deps.getRSSItemsByIds(candidateIds).map((item) => item.id))
         const newIds = candidateIds.filter((id) => !existingIds.has(id))
-        deps.upsertRSSItems(dbItems)
+        deps.upsertRSSItems(deps.selectItemsToStore(platform, dbItems))
         deps.updateRSSSourceLastFetched(source.id)
         if (result.items.length > 0) {
           deps.setRSSSourceDraftSeeded(source.id, true)
@@ -813,7 +836,9 @@ export const fetchGroup: {
               durationMs,
               itemCount: result.items.length,
               error: errorMessage,
-              failureKind: errorMessage ? deps.buildSourceDiagnostics([{ ...source, platform }])[0]?.lastRouteError?.kind ?? 'unknown' : null,
+              failureKind: errorMessage && !deferred
+                ? deps.buildSourceDiagnostics([{ ...source, platform }])[0]?.lastRouteError?.kind ?? 'unknown'
+                : null,
             }
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error)

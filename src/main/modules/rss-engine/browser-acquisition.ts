@@ -6,9 +6,10 @@
  * resolution outside the page. Contract: docs/superpowers/plans/2026-11-17-ready-next-rss-session-acquisition-implementation.md
  */
 import { createHash } from 'crypto'
-import type {
-  BackgroundPageHandle,
-  BackgroundPageObserveOptions,
+import {
+  withDeadline,
+  type BackgroundPageHandle,
+  type BackgroundPageObserveOptions,
 } from '../browser-engine/background-capture-page'
 import { platformLabel, type PlatformType } from './scrapers'
 import type { ScrapeResult, ScrapedItem } from './scrapers/base'
@@ -305,9 +306,57 @@ interface SessionReading {
   signedOut?: boolean
 }
 
-async function readSnapshot(page: BackgroundPageHandle, script: string): Promise<BrowserFeedExtractionResult> {
-  const value = await page.evaluate(script)
+/** A page script polls for at most this long; the page gets a little more before it is given up on. */
+const PAGE_SCRIPT_TIMEOUT_MS: Readonly<Record<string, number>> = {
+  bilibili: 20_000,
+  xiaohongshu: 20_000,
+  weibo: 32_000,
+  douyin: 32_000,
+}
+
+/** One profile, start to finish. A page that never settles is closed rather than waited for. */
+const SESSION_READ_DEADLINE_MS = 150_000
+
+async function readSnapshot(
+  page: BackgroundPageHandle,
+  script: string,
+  timeoutMs: number,
+): Promise<BrowserFeedExtractionResult> {
+  const value = await page.evaluate(script, { timeoutMs })
   return value && typeof value === 'object' ? (value as BrowserFeedExtractionResult) : {}
+}
+
+/**
+ * Where the page ended up, when that address alone says the profile was not shown. Checked before a page is
+ * read and again when reading failed, because a platform may send the page away while it is being read.
+ */
+export function classifySessionLanding(platform: PlatformType, url: string): BrowserSessionState | null {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return null
+  }
+  const host = parsed.hostname.toLowerCase()
+  const path = parsed.pathname.toLowerCase()
+  if (platform === 'xiaohongshu') {
+    if (path.startsWith('/website-login/captcha')) return 'anti_bot'
+    if (path.startsWith('/website-login/error')) return 'waf'
+    if (path === '/login' || path.startsWith('/login/')) return 'auth'
+    return null
+  }
+  if (platform === 'bilibili') return host === 'passport.bilibili.com' ? 'auth' : null
+  if (platform === 'weibo') {
+    return host === 'passport.weibo.com' || host === 'login.sina.com.cn' || path.startsWith('/login') ? 'auth' : null
+  }
+  if (platform === 'douyin') return path.startsWith('/passport') || path.startsWith('/login') ? 'auth' : null
+  return null
+}
+
+function landedElsewhere(page: BackgroundPageHandle, platform: PlatformType): SessionReading | null {
+  const finalUrl = page.currentUrl()
+  const state = classifySessionLanding(platform, finalUrl)
+  return state ? { snapshot: { finalUrl, state }, items: [], via: null } : null
 }
 
 async function readBilibili(
@@ -320,7 +369,7 @@ async function readBilibili(
     await page.navigate(url, { timeoutMs: 30_000 })
     ownerId = extractBilibiliUserId(page.currentUrl())
     if (!ownerId) {
-      const owner = await page.evaluate(BILIBILI_VIDEO_OWNER_SCRIPT) as { ownerId?: string } | null
+      const owner = await page.evaluate(BILIBILI_VIDEO_OWNER_SCRIPT, { timeoutMs: 10_000 }) as { ownerId?: string } | null
       ownerId = /^\d+$/.test(String(owner?.ownerId || '')) ? String(owner?.ownerId) : null
     }
     if (!ownerId) {
@@ -339,22 +388,30 @@ async function readBilibili(
 
   const owner = ownerId
   await page.navigate(bilibiliUploadsUrl(owner), { timeoutMs: 45_000 })
+  const elsewhere = landedElsewhere(page, 'bilibili')
+  if (elsewhere) return elsewhere
+
+  // Wait for the uploads the page asks for. A risk answer on some other request of the page does not end the
+  // wait: the list may still arrive. Only a refusal of the uploads request itself does.
   await page.waitForResponses((responses) => {
     const reading = parseBilibiliSpaceResponses(responses, owner)
-    return reading.rows.length > 0 || reading.risk !== null
+    return reading.rows.length > 0 || reading.uploadsRefused
   }, 10_000)
-
-  const observed = parseBilibiliSpaceResponses(page.responses(), owner)
-  if (observed.rows.length > 0) {
-    return {
-      snapshot: { ...(await readSnapshot(page, PAGE_META_SCRIPT)), state: 'ready' },
-      items: observed.rows.map(bilibiliVideoItem),
-      via: 'responses',
-    }
+  const fromResponses = (): SessionReading | null => {
+    const observed = parseBilibiliSpaceResponses(page.responses(), owner)
+    return observed.rows.length > 0
+      ? { snapshot: { state: 'ready' }, items: observed.rows.map(bilibiliVideoItem), via: 'responses' }
+      : null
   }
+  const early = fromResponses()
+  if (early) return { ...early, snapshot: { ...(await readSnapshot(page, PAGE_META_SCRIPT, 10_000)), state: 'ready' } }
 
-  const snapshot = await readSnapshot(page, buildSessionPageScript('bilibili', page.currentUrl(), 'full'))
+  const snapshot = await readSnapshot(page, buildSessionPageScript('bilibili', page.currentUrl(), 'full'), PAGE_SCRIPT_TIMEOUT_MS.bilibili)
+  // The list may have arrived while the rendered page was being read; it is the better reading.
+  const late = fromResponses()
+  if (late) return { ...late, snapshot: { ...snapshot, state: 'ready' } }
   const items = normalizeItems('bilibili', snapshot)
+  const observed = parseBilibiliSpaceResponses(page.responses(), owner)
   return {
     snapshot,
     items,
@@ -373,10 +430,27 @@ async function readXiaohongshu(
   const entry = normalizeBrowserAcquisitionUrl('xiaohongshu', url)
   await page.navigate(entry, { timeoutMs: 45_000 })
   await settle()
-  const landedUrl = page.currentUrl() || entry
-  const profileId = extractXiaohongshuUserId(landedUrl) || extractXiaohongshuUserId(entry) || ''
+  const elsewhere = landedElsewhere(page, 'xiaohongshu')
+  if (elsewhere) return elsewhere
 
-  const snapshot = await readSnapshot(page, buildSessionPageScript('xiaohongshu', landedUrl, mode))
+  // Only a profile is read, and only its owner's notes: a page that is not a profile (a note, the feed the visit
+  // was sent to) holds other people's notes as well.
+  const landedUrl = page.currentUrl() || entry
+  const profileId = extractXiaohongshuUserId(landedUrl)
+  if (!profileId) {
+    return {
+      snapshot: {
+        finalUrl: landedUrl,
+        state: 'empty',
+        textSnippet: '小红书订阅需要作者主页的链接（/user/profile/…），这个链接没有打开某位作者的主页',
+      },
+      items: [],
+      via: null,
+    }
+  }
+
+  const profileUrl = `https://www.xiaohongshu.com/user/profile/${profileId}`
+  const snapshot = await readSnapshot(page, buildSessionPageScript('xiaohongshu', profileUrl, mode), PAGE_SCRIPT_TIMEOUT_MS.xiaohongshu)
   const fromPage = normalizeItems('xiaohongshu', snapshot)
   if (fromPage.length > 0 && snapshot.via === 'state') {
     return { snapshot, items: fromPage, via: 'state' }
@@ -399,7 +473,13 @@ async function readProfilePage(
   const entry = normalizeBrowserAcquisitionUrl(platform, url)
   await page.navigate(entry, { timeoutMs: 45_000 })
   await settle()
-  const snapshot = await readSnapshot(page, buildSessionPageScript(platform, page.currentUrl() || entry, mode))
+  const elsewhere = landedElsewhere(page, platform)
+  if (elsewhere) return elsewhere
+  const snapshot = await readSnapshot(
+    page,
+    buildSessionPageScript(platform, page.currentUrl() || entry, mode),
+    PAGE_SCRIPT_TIMEOUT_MS[platform] ?? 32_000,
+  )
   const items = normalizeItems(platform, snapshot)
   return { snapshot, items, via: items.length > 0 ? 'dom' : null }
 }
@@ -438,11 +518,16 @@ export async function fetchFeedViaBrowserSession(
     page = await controller.openBackgroundPage({
       observe: platform === 'bilibili' ? BILIBILI_OBSERVE : platform === 'xiaohongshu' ? XIAOHONGSHU_OBSERVE : undefined,
     })
-    const reading = platform === 'bilibili'
-      ? await readBilibili(page, url)
-      : platform === 'xiaohongshu'
-        ? await readXiaohongshu(page, url, mode, settle)
-        : await readProfilePage(page, platform, url, mode, settle)
+    const opened = page
+    const reading = await withDeadline(
+      platform === 'bilibili'
+        ? readBilibili(opened, url)
+        : platform === 'xiaohongshu'
+          ? readXiaohongshu(opened, url, mode, settle)
+          : readProfilePage(opened, platform, url, mode, settle),
+      SESSION_READ_DEADLINE_MS,
+      `${label} page`,
+    )
     const feedTitle = clipText(reading.snapshot.title, 160)
 
     if (reading.items.length > 0) {
@@ -469,6 +554,19 @@ export async function fetchFeedViaBrowserSession(
       error: describeBrowserFailure(platform, { ...reading.snapshot, state }),
     }
   } catch (error) {
+    // The platform may have sent the page to a sign-in or verification address while it was being read; that
+    // is what happened, not a reading error.
+    const landed = page ? classifySessionLanding(platform, page.currentUrl()) : null
+    if (landed && landed !== 'ready' && landed !== 'empty') {
+      return {
+        items: [],
+        feedTitle: '',
+        platform,
+        state: landed,
+        via: null,
+        error: describeBrowserFailure(platform, { finalUrl: page?.currentUrl(), state: landed }),
+      }
+    }
     return {
       items: [],
       feedTitle: '',

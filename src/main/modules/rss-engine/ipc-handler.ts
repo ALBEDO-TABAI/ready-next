@@ -41,16 +41,16 @@ import {
   isSessionPlatform,
   type SessionChallengeKind,
   type SessionPlatform,
-  type SessionPlatformState,
+  type SessionPlatformStanding,
   type SessionRefreshTrigger,
 } from './session-acquisition-pacer'
 import { fetchSessionSource, type SessionSourceFetchOutcome } from './session-source-fetch'
+import { selectFirstSeenSessionItems } from './session-item-store-policy'
 import { createRotatingLogger, type RotatingLogger } from '../../utils/rotating-logger'
 import { findExistingRSSSourceByUrl } from './source-url'
 import {
   buildBenchmarkSummary,
   buildSourceDiagnostics,
-  classifyRouteFailure,
   getRouteCapabilityMatrix,
   listRouteAttempts,
   recordSourceRouteAttempt,
@@ -656,30 +656,39 @@ function logSessionAcquisition(line: string): void {
   }
 }
 
+const SESSION_STANDING_KEY = 'rss:session_acquisition_standing'
 const SESSION_CHALLENGE_KINDS: readonly string[] = ['auth', 'anti_bot', 'waf']
 
-/** What the attempts recorded before a restart say about a platform: its last sign-in or verification page. */
-function readPersistedSessionState(
-  platform: SessionPlatform,
-): Pick<SessionPlatformState, 'lastChallenge' | 'lastSuccessAt'> {
-  let lastChallenge: SessionPlatformState['lastChallenge'] = null
-  let lastSuccessAt: number | null = null
-  for (const attempt of listRouteAttempts()) {
-    if (attempt.platform !== platform || attempt.backend !== 'browser') continue
-    const at = Date.parse(attempt.attemptedAt)
-    if (!Number.isFinite(at)) continue
-    if (attempt.success && attempt.itemCount > 0) {
-      if (lastSuccessAt === null || at > lastSuccessAt) lastSuccessAt = at
-      continue
+/**
+ * Each login platform's last sign-in or verification page and last good read, saved as what happened rather
+ * than re-read from error messages, so that a pause survives a restart exactly as it was.
+ */
+function readSessionStandings(): Partial<Record<SessionPlatform, SessionPlatformStanding>> {
+  const raw = appSettingsRepository.getSetting(SESSION_STANDING_KEY)
+  if (!raw) return {}
+  try {
+    const parsed = JSON.parse(raw) as Record<string, { lastChallenge?: { kind?: unknown; at?: unknown } | null; lastSuccessAt?: unknown }>
+    const standings: Partial<Record<SessionPlatform, SessionPlatformStanding>> = {}
+    for (const [platform, value] of Object.entries(parsed ?? {})) {
+      if (!isSessionPlatform(platform) || !value || typeof value !== 'object') continue
+      const challenge = value.lastChallenge
+      const kind = challenge && SESSION_CHALLENGE_KINDS.includes(String(challenge.kind)) ? String(challenge.kind) as SessionChallengeKind : null
+      const at = Number(challenge?.at)
+      const successAt = Number(value.lastSuccessAt)
+      standings[platform] = {
+        lastChallenge: kind && Number.isFinite(at) ? { kind, at } : null,
+        lastSuccessAt: value.lastSuccessAt != null && Number.isFinite(successAt) ? successAt : null,
+      }
     }
-    // A source saved without its first items is recorded as a success that carries the page's message.
-    const kind = attempt.lastRouteError?.kind
-      ?? (attempt.success && attempt.warning ? classifyRouteFailure(attempt.warning).kind : undefined)
-    if (kind && SESSION_CHALLENGE_KINDS.includes(kind) && (!lastChallenge || at > lastChallenge.at)) {
-      lastChallenge = { kind: kind as SessionChallengeKind, at }
-    }
+    return standings
+  } catch {
+    // silent-catch: an unreadable saved standing is treated as none; the next page load writes a fresh one
+    return {}
   }
-  return { lastChallenge, lastSuccessAt }
+}
+
+function saveSessionStanding(platform: SessionPlatform, standing: SessionPlatformStanding): void {
+  appSettingsRepository.setSetting(SESSION_STANDING_KEY, JSON.stringify({ ...readSessionStandings(), [platform]: standing }))
 }
 
 const sessionAcquisitionPacer = new SessionAcquisitionPacer({
@@ -687,8 +696,15 @@ const sessionAcquisitionPacer = new SessionAcquisitionPacer({
   random: () => Math.random(),
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   readUserIdleMs: () => rssUserIdleReader(),
-  readPersistedState: readPersistedSessionState,
+  readPersistedState: (platform) => readSessionStandings()[platform] ?? null,
+  persistState: saveSessionStanding,
 })
+
+/** Which fetched items are written: a login platform keeps an item as it was first seen. */
+function selectItemsToStore<T extends { id: string; published_at: number | null }>(platform: PlatformType, items: T[]): T[] {
+  if (!isSessionPlatform(platform) || items.length === 0) return items
+  return selectFirstSeenSessionItems(items, rssRepository.getRSSItemsByIds(items.map((item) => item.id)))
+}
 
 function readLastSessionAttemptAt(sourceId: string): number | null {
   const attempt = listRouteAttempts().find((entry) => entry.sourceId === sourceId)
@@ -747,7 +763,9 @@ async function fetchSourceWithCurrentStack(
         options.trigger,
       )
     : {
-        result: await createScraper(platform).fetchItems(source.url),
+        // A scraper with an RSSHub fallback of its own uses the instance that is already running, if any; none
+        // is started for it.
+        result: await createScraper(platform, rsshubManager.getStatus().baseUrl || undefined).fetchItems(source.url),
         backendUsed: resolveSourceBackend(platform),
       }
   return {
@@ -889,7 +907,7 @@ async function runAddSourceCore(input: AddSourceCoreInput): Promise<AddSourceCor
       author: item.author || null,
       published_at: item.pubDate ? Math.floor(new Date(item.pubDate).getTime() / 1000) : null,
     }))
-    itemCount = rssRepository.upsertRSSItems(dbItems)
+    itemCount = rssRepository.upsertRSSItems(selectItemsToStore(platform, dbItems))
     rssRepository.updateRSSSourceLastFetched(id)
     rssRepository.setRSSSourceDraftSeeded(id, true)
   }
@@ -1085,6 +1103,7 @@ export function setupRSSIPC(useMock = false): void {
     isEmbeddedRSSHubRequiredForDiagnostics,
     getArtifactsRootDir,
     fetchSourceWithCurrentStack,
+    selectItemsToStore,
     recordSourceRouteAttempt,
     persistRouteDiagnosticsSnapshot,
     resolveSourceBackend,

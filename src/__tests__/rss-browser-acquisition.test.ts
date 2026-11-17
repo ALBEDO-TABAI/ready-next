@@ -5,6 +5,7 @@ import vm from 'node:vm'
 import type { BackgroundPageHandle, CapturedPageResponse } from '../main/modules/browser-engine/background-capture-page'
 import {
   buildExtractionScriptForTest,
+  classifySessionLanding,
   fetchFeedViaBrowserSession,
   knownBilibiliSpaceUrl,
   normalizeBrowserAcquisitionUrl,
@@ -25,11 +26,14 @@ interface FakePageOptions {
   /** Where an address lands (a redirect). */
   landing?: Record<string, string>
   failNavigation?: string
+  /** Where the page is after a script was asked for (the platform sent it away meanwhile). */
+  urlAfterEvaluate?: string
 }
 
 function fakePage(options: FakePageOptions = {}) {
   const navigations: string[] = []
   const scripts: string[] = []
+  const evaluateTimeouts: Array<number | undefined> = []
   let url = ''
   let closed = 0
   let observe: unknown
@@ -39,9 +43,14 @@ function fakePage(options: FakePageOptions = {}) {
       if (options.failNavigation) throw new Error(options.failNavigation)
       url = options.landing?.[target] ?? target
     },
-    async evaluate(script) {
+    async evaluate(script, evaluateOptions) {
       scripts.push(script)
-      return options.evaluate?.(script, url) ?? {}
+      evaluateTimeouts.push(evaluateOptions?.timeoutMs)
+      try {
+        return options.evaluate?.(script, url) ?? {}
+      } finally {
+        if (options.urlAfterEvaluate) url = options.urlAfterEvaluate
+      }
     },
     responses: () => options.responses ?? [],
     waitForResponses: async (predicate) => predicate(options.responses ?? []),
@@ -54,7 +63,7 @@ function fakePage(options: FakePageOptions = {}) {
       return page
     },
   }
-  return { controller, navigations, scripts, closed: () => closed, observe: () => observe }
+  return { controller, navigations, scripts, evaluateTimeouts, closed: () => closed, observe: () => observe }
 }
 
 const noSettle = { settle: async () => undefined, dwell: async () => undefined }
@@ -87,6 +96,8 @@ async function runPageScriptInContext(
     cookie?: string
     state?: unknown
     mode?: 'full' | 'incremental'
+    /** What `a[href*="/user/profile/"]` finds on the page. */
+    profileAnchors?: unknown[]
   } = {},
 ) {
   const script = buildExtractionScriptForTest(platform, targetUrl, options.mode)
@@ -96,11 +107,11 @@ async function runPageScriptInContext(
       cookie: options.cookie || '',
       body: { innerText: options.bodyText || '' },
       scripts: [],
-      querySelectorAll: () => [],
+      querySelectorAll: (selector: string) => (selector === 'a[href*="/user/profile/"]' ? options.profileAnchors ?? [] : []),
       querySelector: () => null,
     },
     location: { href: options.href || targetUrl },
-    window: { __INITIAL_STATE__: options.state },
+    window: { __INITIAL_STATE__: options.state, scrollTo: () => undefined },
     setTimeout: (fn: () => void) => {
       fn()
       return 0
@@ -146,6 +157,49 @@ describe('session subscriptions: which platforms and which page', () => {
       normalizeBrowserAcquisitionUrl('douyin', 'https://www.iesdouyin.com/share/user/demo?sec_uid=MS4wLjABAAAATEST'),
       'https://www.iesdouyin.com/share/user/demo?sec_uid=MS4wLjABAAAATEST',
     )
+  })
+})
+
+describe('where the page ended up', () => {
+  it('knows the addresses that mean the profile was not shown', () => {
+    assert.equal(classifySessionLanding('xiaohongshu', 'https://www.xiaohongshu.com/website-login/captcha?redirectPath=x'), 'anti_bot')
+    assert.equal(classifySessionLanding('xiaohongshu', 'https://www.xiaohongshu.com/website-login/error?error_code=300012'), 'waf')
+    assert.equal(classifySessionLanding('xiaohongshu', 'https://www.xiaohongshu.com/login?redirectPath=%2Fuser'), 'auth')
+    assert.equal(classifySessionLanding('xiaohongshu', XHS_URL), null)
+    assert.equal(classifySessionLanding('bilibili', 'https://passport.bilibili.com/login?from=space'), 'auth')
+    assert.equal(classifySessionLanding('bilibili', `https://space.bilibili.com/${BILI_OWNER}/upload/video`), null)
+    assert.equal(classifySessionLanding('weibo', 'https://passport.weibo.com/visitor/visitor?entry=miniblog'), 'auth')
+    assert.equal(classifySessionLanding('weibo', 'https://weibo.com/u/6182606334'), null)
+    assert.equal(classifySessionLanding('douyin', 'not a url'), null)
+  })
+
+  it('a page sent to a verification address is reported as such without being read', async () => {
+    const fake = fakePage({ landing: { [XHS_URL]: 'https://www.xiaohongshu.com/website-login/captcha?redirectPath=%2Fuser' } })
+    const result = await fetchFeedViaBrowserSession(fake.controller, 'xiaohongshu', XHS_URL, noSettle)
+    assert.equal(result.state, 'anti_bot')
+    assert.match(result.error || '', /验证码|风控/)
+    assert.deepEqual(fake.scripts, [], 'nothing is run on a verification page')
+    assert.equal(fake.closed(), 1)
+  })
+
+  it('a page sent away while it was being read is reported by where it went, not as a reading error', async () => {
+    const fake = fakePage({
+      evaluate: () => { throw new Error('Execution context was destroyed') },
+      urlAfterEvaluate: 'https://www.xiaohongshu.com/website-login/error?error_code=300012',
+    })
+    const result = await fetchFeedViaBrowserSession(fake.controller, 'xiaohongshu', XHS_URL, noSettle)
+    assert.equal(result.state, 'waf')
+    assert.equal(fake.closed(), 1)
+  })
+
+  it('gives every page script a deadline', async () => {
+    const xhs = fakePage({ evaluate: () => ({ state: 'empty', items: [] }) })
+    await fetchFeedViaBrowserSession(xhs.controller, 'xiaohongshu', XHS_URL, noSettle)
+    const weibo = fakePage({ evaluate: () => ({ state: 'empty', items: [] }) })
+    await fetchFeedViaBrowserSession(weibo.controller, 'weibo', 'https://weibo.com/u/1', noSettle)
+    for (const timeoutMs of [...xhs.evaluateTimeouts, ...weibo.evaluateTimeouts]) {
+      assert.ok(typeof timeoutMs === 'number' && timeoutMs >= 10_000 && timeoutMs <= 40_000, `deadline ${timeoutMs}`)
+    }
   })
 })
 
@@ -284,6 +338,46 @@ describe('Bilibili through the browser session', () => {
     assert.match(signedIn.error || '', /风控/)
   })
 
+  it('a risk answer on another request of the page does not hide a list that arrives later', async () => {
+    const accountRisk: CapturedPageResponse = {
+      url: `https://api.bilibili.com/x/space/wbi/acc/info?mid=${BILI_OWNER}`,
+      status: 200,
+      mimeType: 'application/json',
+      body: JSON.stringify({ code: -352, message: '风控校验失败' }),
+    }
+    const responses = [biliNav(true), accountRisk]
+    const fake = fakePage({
+      responses,
+      evaluate: (script) => {
+        if (!script.includes('querySelectorAll')) return { title: 'UP主空间' }
+        // The uploads land while the rendered page is being read.
+        responses.push(biliResponse([{ bvid: 'BV1bb411c7mE', title: '后到的列表', created: 1_794_000_000, description: '简介' }]))
+        return { title: 'UP主空间', state: 'ready', via: 'dom', items: [{ title: '后到的列表', link: 'https://www.bilibili.com/video/BV1bb411c7mE' }] }
+      },
+    })
+
+    const result = await fetchFeedViaBrowserSession(fake.controller, 'bilibili', BILI_URL, noSettle)
+
+    assert.equal(result.state, 'ready')
+    assert.equal(result.via, 'responses', 'the list with dates wins over the rendered cards')
+    assert.equal(result.items[0].pubDate, new Date(1_794_000_000 * 1000).toISOString())
+  })
+
+  it('a risk answer elsewhere on a page that still shows its uploads is not a blocked page', async () => {
+    const fake = fakePage({
+      responses: [biliNav(true), {
+        url: `https://api.bilibili.com/x/space/wbi/acc/info?mid=${BILI_OWNER}`,
+        status: 200,
+        mimeType: 'application/json',
+        body: JSON.stringify({ code: -352, message: '风控校验失败' }),
+      }],
+      evaluate: () => ({ state: 'ready', via: 'dom', items: [{ title: '页面上的视频', link: 'https://www.bilibili.com/video/BV1fr421M7y7' }] }),
+    })
+    const result = await fetchFeedViaBrowserSession(fake.controller, 'bilibili', BILI_URL, noSettle)
+    assert.equal(result.state, 'ready')
+    assert.equal(result.via, 'dom')
+  })
+
   it('follows a short or video link to the uploader the way a person would, and remembers where it led', async () => {
     const shortLink = 'https://b23.tv/remember-me'
     const options: FakePageOptions = {
@@ -414,6 +508,23 @@ describe('Xiaohongshu through the browser session', () => {
     )
     assert.equal(first.items.length, 1)
     assert.notEqual(first.items[0].itemId, second.items[0].itemId)
+  })
+
+  it('only reads a profile: a note link, or a visit that was sent to the feed, is refused before anything is read', async () => {
+    const othersNotes = () => ({ state: 'ready', via: 'state', items: [stateNote(NOTE_A, '别人的笔记', 'T')] })
+
+    const noteLink = fakePage({ evaluate: othersNotes })
+    const fromNote = await fetchFeedViaBrowserSession(
+      noteLink.controller, 'xiaohongshu', `https://www.xiaohongshu.com/explore/${NOTE_A}?xsec_token=T`, noSettle,
+    )
+    assert.equal(fromNote.items.length, 0)
+    assert.match(fromNote.error || '', /作者主页的链接/)
+    assert.deepEqual(noteLink.scripts, [])
+
+    const sentToFeed = fakePage({ evaluate: othersNotes, landing: { [XHS_URL]: 'https://www.xiaohongshu.com/explore' } })
+    const fromFeed = await fetchFeedViaBrowserSession(sentToFeed.controller, 'xiaohongshu', XHS_URL, noSettle)
+    assert.equal(fromFeed.items.length, 0)
+    assert.deepEqual(sentToFeed.scripts, [])
   })
 
   it('drops links that are not notes of the profile', async () => {
@@ -610,6 +721,38 @@ describe('what the page scripts read', () => {
       mode: 'incremental',
     })
     assert.equal(captcha.state, 'anti_bot')
+  })
+
+  it('one item per rendered card: the link to the author is not a second note', async () => {
+    const card = { innerText: '周末探店合集\n广州潮会吃\n1.2万', querySelector: () => null }
+    const anchor = (href: string) => ({
+      getAttribute: (name: string) => (name === 'href' ? href : null),
+      textContent: '周末探店合集',
+      closest: () => card,
+      parentElement: null,
+    })
+    const result = await runPageScript('xiaohongshu', XHS_URL, {
+      profileAnchors: [
+        anchor(`/user/profile/${XHS_PROFILE}?xsec_token=AUTHOR&xsec_source=pc_note`),
+        anchor(`/user/profile/${XHS_PROFILE}/${NOTE_A}?xsec_token=NOTE&xsec_source=pc_user`),
+      ],
+    })
+    assert.equal(result.via, 'dom')
+    assert.deepEqual(result.items.map((item) => [item.noteId, item.link, item.xsecToken]), [
+      [NOTE_A, `https://www.xiaohongshu.com/explore/${NOTE_A}`, 'NOTE'],
+    ])
+  })
+
+  it('a Weibo or Douyin page that merely uses a common word is not a verification page', async () => {
+    const weiboUrl = 'https://weibo.com/u/6182606334'
+    assert.equal((await runPageScript('weibo', weiboUrl, { bodyText: '博主今天验证了一个想法，更新很频繁' })).state, 'empty')
+    assert.equal((await runPageScript('weibo', weiboUrl, { bodyText: '访问过于频繁，请完成验证后继续' })).state, 'anti_bot')
+    assert.equal((await runPageScript('weibo', weiboUrl, { href: 'https://passport.weibo.com/visitor/visitor?entry=miniblog' })).state, 'auth')
+
+    const douyinUrl = 'https://www.douyin.com/user/demo'
+    assert.equal((await runPageScript('douyin', douyinUrl, { bodyText: '账号数据异常波动的风险分析' })).state, 'empty')
+    assert.equal((await runPageScript('douyin', douyinUrl, { bodyText: '安全验证 请完成验证后继续访问' })).state, 'anti_bot')
+    assert.equal((await runPageScript('douyin', douyinUrl, { bodyText: '访问受限，请稍后再试' })).state, 'waf')
   })
 
   it('a signed-out Bilibili visitor is told to sign in before anything on the page is read', async () => {

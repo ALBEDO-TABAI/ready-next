@@ -19,6 +19,8 @@ function uploads(rows: unknown[]) {
   )
 }
 
+const uploads2 = (rows: unknown[]) => uploads(rows)
+
 describe('Bilibili space responses', () => {
   it('reads the uploads the space page requested, newest first, with time, summary and cover', () => {
     const reading = parseBilibiliSpaceResponses([
@@ -103,7 +105,26 @@ describe('Bilibili space responses', () => {
     const reading = parseBilibiliSpaceResponses([
       response(`https://api.bilibili.com/x/space/wbi/arc/search?mid=${OWNER}`, '<html>gateway error</html>', 502),
     ], OWNER)
-    assert.deepEqual(reading, { rows: [], risk: null, loggedIn: null })
+    assert.deepEqual(reading, { rows: [], risk: null, uploadsRefused: false, loggedIn: null })
+  })
+
+  it('tells a refused uploads request from a risk answer on some other request of the page', () => {
+    const elsewhere = parseBilibiliSpaceResponses([
+      response(`https://api.bilibili.com/x/space/wbi/acc/info?mid=${OWNER}`, { code: -352, message: '风控校验失败' }),
+    ], OWNER)
+    assert.equal(elsewhere.risk?.kind, 'waf')
+    assert.equal(elsewhere.uploadsRefused, false, 'the list may still arrive')
+
+    const uploads = parseBilibiliSpaceResponses([
+      response(`https://api.bilibili.com/x/space/wbi/arc/search?mid=${OWNER}`, { code: -352, message: '风控校验失败' }),
+    ], OWNER)
+    assert.equal(uploads.uploadsRefused, true)
+
+    const later = parseBilibiliSpaceResponses([
+      response(`https://api.bilibili.com/x/space/wbi/acc/info?mid=${OWNER}`, { code: -352, message: '风控校验失败' }),
+      uploads2([{ bvid: 'BV1bb411c7mE', title: '后到的列表', created: 1_794_000_000 }]),
+    ], OWNER)
+    assert.equal(later.rows.length, 1, 'rows that arrive after a risk answer elsewhere are still read')
   })
 })
 
@@ -142,6 +163,20 @@ describe('Xiaohongshu note responses', () => {
       }),
     ], PROFILE)
     assert.deepEqual(reading.rows, [])
+  })
+
+  it('does not take tags, topics or users for notes because their ids look alike', () => {
+    const reading = parseXiaohongshuNoteResponses([
+      response(`https://edith.xiaohongshu.com/api/sns/web/v1/user_posted?user_id=${PROFILE}`, {
+        code: 0,
+        data: {
+          notes: [{ note_id: NOTE_A, display_title: '第一篇', user: { user_id: PROFILE }, tag_list: [{ id: 'aaaaaaaaaaaaaaaaaaaaaaaa', name: '探店' }] }],
+          topics: [{ id: 'bbbbbbbbbbbbbbbbbbbbbbbb', title: '广州美食' }],
+          wrapped: [{ id: NOTE_B, note_card: { display_title: '第二篇', user: { user_id: PROFILE } } }],
+        },
+      }),
+    ], PROFILE)
+    assert.deepEqual(reading.rows.map((row) => row.noteId), [NOTE_A, NOTE_B])
   })
 
   it('reports sign-in, risk and verification answers', () => {

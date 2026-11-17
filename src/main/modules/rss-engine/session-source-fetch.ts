@@ -15,6 +15,7 @@ import {
   type SessionLoadOutcome,
   type SessionPlatform,
   type SessionRefreshTrigger,
+  type SessionRunRequest,
   type SessionSkipReason,
 } from './session-acquisition-pacer'
 import type { SourceBackend } from './source-diagnostics'
@@ -100,9 +101,17 @@ export async function fetchSessionSource(
     }
   }
 
+  const request: SessionRunRequest = {
+    trigger,
+    platform,
+    sourceId: source.id,
+    sourceCount: deps.countPlatformSources(platform),
+    readLastAttemptAt: () => deps.readLastAttemptAt(source.id),
+    readUserHasPageOpen: () => controller.hasReusableCaptureTarget?.(source.url) === true,
+  }
+
   /** A signed-out Bilibili space still has an anonymous route; a stale answer from it means "sign in". */
-  const signedOutBilibili = async (signInHint: ScrapeResult): Promise<SessionSourceFetchOutcome> => {
-    const anonymous = await deps.fetchSignedOutBilibili(source.url)
+  const fromAnonymousRoute = (anonymous: ScrapeResult | null, signInHint: ScrapeResult): SessionSourceFetchOutcome => {
     if (anonymous && anonymous.items.length > 0 && !deps.isStaleBilibiliResult(anonymous)) {
       return {
         result: { ...anonymous, error: '还没有在 Ready 浏览器登录 B 站，这次用的是匿名通道，内容可能不全。' },
@@ -112,35 +121,22 @@ export async function fetchSessionSource(
     return { result: signInHint, backendUsed: 'browser' }
   }
 
-  const run = await deps.pacer.run(
-    {
-      trigger,
-      platform,
-      sourceId: source.id,
-      sourceCount: deps.countPlatformSources(platform),
-      lastAttemptAt: deps.readLastAttemptAt(source.id),
-      userHasPageOpen: controller.hasReusableCaptureTarget?.(source.url) === true,
-    },
-    async () => {
-      const startedAt = deps.now()
-      const value = await fetchFeedViaBrowserSession(controller, platform, source.url, {
-        mode: resolveMode(source, platform),
-        settle: deps.settle,
-        dwell: deps.dwell,
-      })
-      deps.log(
-        `[rss-session] platform=${platform} source=${source.id} trigger=${trigger} state=${value.state}`
-        + ` via=${value.via ?? 'none'} items=${value.items.length} ms=${deps.now() - startedAt}`,
-      )
-      return { value, outcome: toOutcome(value) }
-    },
-  )
+  const run = await deps.pacer.run(request, async () => {
+    const startedAt = deps.now()
+    const value = await fetchFeedViaBrowserSession(controller, platform, source.url, {
+      mode: resolveMode(source, platform),
+      settle: deps.settle,
+      dwell: deps.dwell,
+    })
+    deps.log(
+      `[rss-session] platform=${platform} source=${source.id} trigger=${trigger} state=${value.state}`
+      + ` via=${value.via ?? 'none'} items=${value.items.length} ms=${deps.now() - startedAt}`,
+    )
+    return { value, outcome: toOutcome(value) }
+  })
 
   if (!run.ran) {
-    if (run.reason !== 'not_due') {
-      deps.log(`[rss-session] platform=${platform} source=${source.id} trigger=${trigger} skipped=${run.reason}`)
-    }
-    const signInHint: ScrapeResult = {
+    const waiting: ScrapeResult = {
       items: [],
       feedTitle: '',
       platform,
@@ -151,11 +147,34 @@ export async function fetchSessionSource(
       && run.reason === 'platform_paused'
       && deps.pacer.snapshot('bilibili').lastChallenge?.kind === 'auth'
     ) {
-      const outcome = await signedOutBilibili(signInHint)
-      if (outcome.backendUsed === 'rsshub') return outcome
+      // Signed out: the page is left alone, and the anonymous route keeps the pace the page would have had —
+      // one at a time, not before this source is due, not while nobody is there.
+      const anonymous = await deps.pacer.run(
+        request,
+        async () => ({ value: await deps.fetchSignedOutBilibili(source.url), outcome: 'other' as const }),
+        { ignorePause: true },
+      )
+      if (anonymous.ran) {
+        deps.log(`[rss-session] platform=bilibili source=${source.id} trigger=${trigger} route=anonymous items=${anonymous.value?.items.length ?? 0}`)
+        return fromAnonymousRoute(anonymous.value, {
+          ...waiting,
+          error: 'Bilibili 应用内浏览器会话当前未登录。请先在 Ready 浏览器中登录该站点后再刷新。',
+        })
+      }
+      if (anonymous.reason !== 'not_due') {
+        deps.log(`[rss-session] platform=bilibili source=${source.id} trigger=${trigger} route=anonymous skipped=${anonymous.reason}`)
+      }
+      return {
+        result: { ...waiting, error: describeDeferral(platform, anonymous.reason) },
+        backendUsed: 'browser',
+        deferred: { reason: anonymous.reason, retryAt: anonymous.retryAt },
+      }
+    }
+    if (run.reason !== 'not_due') {
+      deps.log(`[rss-session] platform=${platform} source=${source.id} trigger=${trigger} skipped=${run.reason}`)
     }
     return {
-      result: signInHint,
+      result: waiting,
       backendUsed: 'browser',
       deferred: { reason: run.reason, retryAt: run.retryAt },
     }
@@ -163,7 +182,9 @@ export async function fetchSessionSource(
 
   const sessionResult = run.value
   if (sessionResult.items.length === 0 && platform === 'bilibili' && sessionResult.state === 'auth') {
-    return signedOutBilibili(plain(sessionResult))
+    // The page has just shown its sign-in prompt; this source gets its anonymous answer now, still in single file.
+    const anonymous = await deps.pacer.serialize(() => deps.fetchSignedOutBilibili(source.url))
+    return fromAnonymousRoute(anonymous, plain(sessionResult))
   }
   return { result: plain(sessionResult), backendUsed: 'browser' }
 }

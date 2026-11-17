@@ -21,6 +21,7 @@
 
 | 评估日期 | 任务 | 文件 | 总行数 | 本次新增 | 结论 | 判断与后续动作 | 状态 |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
+| 2026-11-18 | 会话内采集：独立审查后的修正 | `src/main/modules/rss-engine/ipc-handler.ts` | 1205 | 净 +19 | 一般 | 只加两段接线：平台暂停状态按事实存取（设置项 `rss:session_acquisition_standing`），以及写入前按“已有条目不改写”筛一遍（规则本身在 `session-item-store-policy.ts`）。仍低于会话内采集之前的 1261 行。 | 复查：2026-11-30 |
 | 2026-11-17 | 订阅的会话内采集 | `src/main/index.ts` | 1425 | 净 +4 | 一般 | 只接两根线：自动刷新调用带上“自动”标记，把系统闲置时长读数交给资讯引擎（读数函数在 `rss-engine/user-presence.ts`）。复查同 B3 行。 | 复查：2026-12-15 |
 | 2026-11-17 | 订阅的会话内采集 | `src/main/modules/rss-engine/ipc-handler.ts` | 1186 | 净 −75 | 一般 | 路由改为会话优先后删掉了 RSSHub 预热、严格可用性判断和逐源暂停；会话源的单次刷新在 `session-source-fetch.ts`，节奏在 `session-acquisition-pacer.ts`。同批 `browser-acquisition.ts` 1096 → 483（页面脚本移到 `session-page-scripts.ts`，702 行）。 | 复查：2026-11-30 |
 | 2026-11-17 | 密码框的值不进页面清单 | `src/main/modules/tools/browser-probe.ts` | 1022 | 净 0 | 一般 | 两处各改一行：目标记录与单个目标读取都不再带出密码框里的内容。 | 复查：2026-12-15 |

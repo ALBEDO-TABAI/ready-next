@@ -1,5 +1,7 @@
 import { shouldPauseSilentBrowserRetry } from './browser-handoff'
 import { classifyRouteFailure } from './source-diagnostics'
+import { detectPlatform } from './scrapers'
+import { isSessionPlatform } from './session-acquisition-pacer'
 import type { RSSArticle } from '../../../shared/rss-workspace'
 import type { RSSContentClaim, RSSContentResult, RSSContentStore } from '../database/rss-content-store'
 import type { ExtractionAdapter } from '../clipping/extraction-adapter'
@@ -28,14 +30,15 @@ export function rssLinkWithoutArticleBody(link: string): string | null {
 }
 
 /**
- * A page that is opened only when the person asks to read it. A Xiaohongshu note is never fetched in the
- * background: subscriptions read the profile at a person's pace, and opening every new note behind their back
- * would be the opposite.
+ * A page that is opened only when the person asks to read it. Items of a login platform (Bilibili, Xiaohongshu,
+ * Weibo, Douyin) are never fetched in the background: their subscriptions are read at a person's pace, and
+ * opening every new item behind their back with their login would be the opposite.
  */
 export function rssLinkWithoutBackgroundPrefetch(link: string): boolean {
   try {
     const url = new URL(link)
-    return url.hostname.replace(/^www\./, '') === 'xiaohongshu.com' && /^\/(?:explore|discovery\/item)\//.test(url.pathname)
+    if (!['http:', 'https:'].includes(url.protocol)) return false
+    return isSessionPlatform(detectPlatform(`${url.protocol}//${url.hostname}/`))
   } catch {
     return false
   }

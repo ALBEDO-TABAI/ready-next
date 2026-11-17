@@ -28,7 +28,10 @@ export interface BilibiliVideoRow {
 
 export interface BilibiliSpaceReading {
   rows: BilibiliVideoRow[]
+  /** A risk answer from any of the page's requests. It only matters when nothing could be read. */
   risk: SessionRiskSignal | null
+  /** The uploads request itself was refused: waiting longer will not bring the list. */
+  uploadsRefused: boolean
   /** What the page's own account request said; null when the page did not ask. */
   loggedIn: boolean | null
 }
@@ -128,6 +131,10 @@ function isBilibiliAccountResponse(url: string): boolean {
   return url.includes('/x/web-interface/nav')
 }
 
+function isBilibiliUploadsRequest(url: string): boolean {
+  return /\/arc\/search\b/.test(url)
+}
+
 /**
  * The uploads a space page requested for itself. A response that names the space in its address is trusted whole
  * (a co-authored video carries another uploader's id); otherwise a row must carry the space owner's id.
@@ -135,6 +142,7 @@ function isBilibiliAccountResponse(url: string): boolean {
 export function parseBilibiliSpaceResponses(responses: ObservedResponse[], ownerId: string): BilibiliSpaceReading {
   const rows = new Map<string, BilibiliVideoRow>()
   let risk: SessionRiskSignal | null = null
+  let uploadsRefused = false
   let loggedIn: boolean | null = null
 
   for (const response of responses) {
@@ -150,11 +158,14 @@ export function parseBilibiliSpaceResponses(responses: ObservedResponse[], owner
 
     if (response.status === 412) {
       risk = risk ?? { kind: 'waf', detail: 'bilibili_http_412' }
+      if (isBilibiliUploadsRequest(response.url)) uploadsRefused = true
       continue
     }
     if (!isRecord(payload)) continue
     if (Number.isFinite(code) && code !== 0) {
-      risk = risk ?? BILIBILI_RISK_CODES.get(code) ?? null
+      const signal = BILIBILI_RISK_CODES.get(code) ?? null
+      risk = risk ?? signal
+      if (signal && isBilibiliUploadsRequest(response.url)) uploadsRefused = true
       continue
     }
 
@@ -172,7 +183,7 @@ export function parseBilibiliSpaceResponses(responses: ObservedResponse[], owner
   }
 
   const ordered = [...rows.values()].sort((left, right) => (right.publishedAt ?? 0) - (left.publishedAt ?? 0))
-  return { rows: ordered.slice(0, 30), risk, loggedIn }
+  return { rows: ordered.slice(0, 30), risk, uploadsRefused, loggedIn }
 }
 
 const XIAOHONGSHU_NOTE_ID = /^[0-9a-f]{24}$/i
@@ -187,8 +198,11 @@ const XIAOHONGSHU_RISK_CODES = new Map<number, SessionRiskSignal>([
 
 function readXiaohongshuNoteRow(entry: unknown): XiaohongshuNoteRow | null {
   if (!isRecord(entry)) return null
-  const card = isRecord(entry.noteCard) ? entry.noteCard : isRecord(entry.note_card) ? entry.note_card : entry
-  const noteId = text(card.note_id ?? card.noteId) || text(entry.note_id ?? entry.noteId ?? entry.id)
+  const wrapped = isRecord(entry.noteCard) ? entry.noteCard : isRecord(entry.note_card) ? entry.note_card : null
+  const card = wrapped ?? entry
+  // A bare `id` names a note only on the wrapper around a note card; tags, users and topics carry ids of the
+  // same shape.
+  const noteId = text(card.note_id ?? card.noteId) || text(entry.note_id ?? entry.noteId) || (wrapped ? text(entry.id) : '')
   const title = text(card.display_title ?? card.displayTitle ?? card.title)
   if (!XIAOHONGSHU_NOTE_ID.test(noteId)) return null
   const user = isRecord(card.user) ? card.user : null

@@ -86,6 +86,7 @@ function createMockDeps(): FetchGroupDeps {
     isEmbeddedRSSHubRequiredForDiagnostics: fail('isEmbeddedRSSHubRequiredForDiagnostics') as FetchGroupDeps['isEmbeddedRSSHubRequiredForDiagnostics'],
     getArtifactsRootDir: fail('getArtifactsRootDir') as FetchGroupDeps['getArtifactsRootDir'],
     fetchSourceWithCurrentStack: fail('fetchSourceWithCurrentStack') as FetchGroupDeps['fetchSourceWithCurrentStack'],
+    selectItemsToStore: fail('selectItemsToStore') as FetchGroupDeps['selectItemsToStore'],
     recordSourceRouteAttempt: fail('recordSourceRouteAttempt') as FetchGroupDeps['recordSourceRouteAttempt'],
     persistRouteDiagnosticsSnapshot: fail('persistRouteDiagnosticsSnapshot') as FetchGroupDeps['persistRouteDiagnosticsSnapshot'],
     resolveSourceBackend: fail('resolveSourceBackend') as FetchGroupDeps['resolveSourceBackend'],
@@ -289,6 +290,7 @@ function createFetchDeps(overrides: Partial<FetchGroupDeps> & {
     getRSSItemsByIds: () => [],
     getAllRSSItems: () => [],
     upsertRSSItems: (items) => items.length,
+    selectItemsToStore: (_platform, items) => items,
     updateRSSSourceLastFetched: (id) => { lastFetched.push(id) },
     setRSSSourceDraftSeeded: () => undefined,
     updateRSSSourcePlatform: () => undefined,
@@ -415,4 +417,59 @@ test('ordinary feeds are fetched before sources that take turns in the browser s
   await handle.fetchAll()
 
   assert.deepEqual(order, ['native-1', 'native-2', 'xhs-1'])
+})
+
+test('only the items the store policy keeps are written, while every fetched item still counts as read', async () => {
+  const { ipc } = createMockIpc()
+  const written: string[][] = []
+  const asked: string[] = []
+  const { deps, attempts } = createFetchDeps({
+    normalizeFetchOptions: () => ({ digest: false, trigger: 'manual-all' }),
+    getRSSSources: () => [
+      { id: 'xhs-1', name: '广州潮会吃', url: 'https://www.xiaohongshu.com/user/profile/5e31b693000000000100bb06', group_name: 'default', icon: null, last_fetched: null, enabled: 1, created_at: 3, platform: 'xiaohongshu' },
+    ],
+    selectItemsToStore: (platform, items) => { asked.push(platform); return items.filter((item) => item.id === 'note-new') },
+    upsertRSSItems: (items) => { written.push((items as Array<{ id: string }>).map((item) => item.id)); return items.length },
+    fetchSourceWithCurrentStack: async (_source, platform) => ({
+      result: {
+        items: [
+          { ...nativeItem, itemId: 'note-old', link: 'https://www.xiaohongshu.com/explore/1?xsec_token=NEW' },
+          { ...nativeItem, itemId: 'note-new', link: 'https://www.xiaohongshu.com/explore/2' },
+        ],
+        feedTitle: 'x',
+        platform,
+      },
+      backendUsed: 'browser',
+    }),
+  })
+  const handle = fetchGroup.register(ipc, deps)
+
+  await handle.fetchAll()
+
+  assert.deepEqual(asked, ['xiaohongshu'])
+  assert.deepEqual(written, [['note-new']])
+  assert.equal(attempts[0]?.itemCount, 2)
+  assert.equal(attempts[0]?.success, true)
+})
+
+test('a fetched source whose items cannot be saved is recorded as a failed attempt', async () => {
+  const { ipc } = createMockIpc()
+  const { deps, attempts } = createFetchDeps({
+    normalizeFetchOptions: () => ({ digest: false, trigger: 'auto' }),
+    getRSSSources: () => [
+      { id: 'xhs-1', name: '广州潮会吃', url: 'https://www.xiaohongshu.com/user/profile/5e31b693000000000100bb06', group_name: 'default', icon: null, last_fetched: null, enabled: 1, created_at: 3, platform: 'xiaohongshu' },
+    ],
+    upsertRSSItems: () => { throw new Error('database is locked') },
+    fetchSourceWithCurrentStack: async (_source, platform) => ({
+      result: { items: [nativeItem], feedTitle: 'x', platform },
+      backendUsed: 'browser',
+    }),
+  })
+  const handle = fetchGroup.register(ipc, deps)
+
+  const result = await handle.fetchAll({ trigger: 'auto' })
+
+  assert.deepEqual(attempts.map((entry) => [entry.sourceId, entry.success]), [['xhs-1', false]])
+  assert.match(String(attempts[0]?.error), /database is locked/)
+  assert.match(String(result.data?.errors?.[0]), /database is locked/)
 })

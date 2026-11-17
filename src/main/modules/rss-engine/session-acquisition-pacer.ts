@@ -30,8 +30,10 @@ export interface SessionPacingRule {
   loadGapMs: number
   /** Page loads allowed inside `loadGapMs * burst`. */
   burst: number
-  /** Pause between two consecutive page loads on the platform, picked at random inside this range. */
+  /** Pause between two consecutive automatic page loads on the platform, picked at random inside this range. */
   spacingMs: readonly [number, number]
+  /** The same pause when the person asked for the refresh and is waiting for it. */
+  manualSpacingMs: readonly [number, number]
   /** How long automatic refresh stays off after a sign-in page. */
   authPauseMs: number
   /** How long automatic refresh stays off after a verification or risk page. */
@@ -42,10 +44,10 @@ const MINUTE = 60_000
 const HOUR = 60 * MINUTE
 
 export const SESSION_PACING: Readonly<Record<SessionPlatform, SessionPacingRule>> = {
-  bilibili: { baseIntervalMs: 2 * HOUR, loadGapMs: 6 * MINUTE, burst: 4, spacingMs: [8_000, 25_000], authPauseMs: 12 * HOUR, challengePauseMs: 6 * HOUR },
-  weibo: { baseIntervalMs: 2 * HOUR, loadGapMs: 6 * MINUTE, burst: 4, spacingMs: [8_000, 25_000], authPauseMs: 12 * HOUR, challengePauseMs: 6 * HOUR },
-  douyin: { baseIntervalMs: 3 * HOUR, loadGapMs: 10 * MINUTE, burst: 3, spacingMs: [10_000, 30_000], authPauseMs: 12 * HOUR, challengePauseMs: 6 * HOUR },
-  xiaohongshu: { baseIntervalMs: 4 * HOUR, loadGapMs: 15 * MINUTE, burst: 3, spacingMs: [15_000, 45_000], authPauseMs: 12 * HOUR, challengePauseMs: 6 * HOUR },
+  bilibili: { baseIntervalMs: 2 * HOUR, loadGapMs: 6 * MINUTE, burst: 4, spacingMs: [8_000, 25_000], manualSpacingMs: [3_000, 8_000], authPauseMs: 12 * HOUR, challengePauseMs: 6 * HOUR },
+  weibo: { baseIntervalMs: 2 * HOUR, loadGapMs: 6 * MINUTE, burst: 4, spacingMs: [8_000, 25_000], manualSpacingMs: [3_000, 8_000], authPauseMs: 12 * HOUR, challengePauseMs: 6 * HOUR },
+  douyin: { baseIntervalMs: 3 * HOUR, loadGapMs: 10 * MINUTE, burst: 3, spacingMs: [10_000, 30_000], manualSpacingMs: [4_000, 10_000], authPauseMs: 12 * HOUR, challengePauseMs: 6 * HOUR },
+  xiaohongshu: { baseIntervalMs: 4 * HOUR, loadGapMs: 15 * MINUTE, burst: 3, spacingMs: [15_000, 45_000], manualSpacingMs: [6_000, 15_000], authPauseMs: 12 * HOUR, challengePauseMs: 6 * HOUR },
 }
 
 /** Automatic session loads wait for the person once the computer has been idle this long (or is locked). */
@@ -58,10 +60,14 @@ export function isSessionPlatform(platform: string): platform is SessionPlatform
   return Object.prototype.hasOwnProperty.call(SESSION_PACING, platform)
 }
 
-export interface SessionPlatformState {
-  recentLoadsAt: number[]
+/** What must survive a restart: the platform's last sign-in or verification page, and its last good read. */
+export interface SessionPlatformStanding {
   lastChallenge: { kind: SessionChallengeKind; at: number } | null
   lastSuccessAt: number | null
+}
+
+export interface SessionPlatformState extends SessionPlatformStanding {
+  recentLoadsAt: number[]
 }
 
 export interface SessionLoadRequest {
@@ -70,10 +76,15 @@ export interface SessionLoadRequest {
   sourceId: string
   /** How many enabled sources the person has on this platform. */
   sourceCount: number
-  /** The last time this source's page was opened, whatever the result. */
+  /** The last time this source was attempted, whatever the result. */
   lastAttemptAt: number | null
   /** The person has this very page open in a tab right now. */
   userHasPageOpen: boolean
+  /**
+   * For a route that does not open the platform's page (the anonymous Bilibili route): a pause after a sign-in
+   * page does not apply, the interval, presence and budget rules still do.
+   */
+  ignorePause?: boolean
 }
 
 export type SessionLoadDecision =
@@ -91,7 +102,7 @@ export function sessionRefreshIntervalMs(platform: SessionPlatform, sourceCount:
   return Math.max(rule.baseIntervalMs, Math.max(1, sourceCount) * rule.loadGapMs)
 }
 
-export function sessionPausedUntil(platform: SessionPlatform, state: SessionPlatformState): number | null {
+export function sessionPausedUntil(platform: SessionPlatform, state: SessionPlatformStanding): number | null {
   const challenge = state.lastChallenge
   if (!challenge) return null
   if (state.lastSuccessAt !== null && state.lastSuccessAt >= challenge.at) return null
@@ -106,7 +117,7 @@ export function decideSessionLoad(input: SessionLoadRequest & {
 }): SessionLoadDecision {
   const rule = SESSION_PACING[input.platform]
   const pausedUntil = sessionPausedUntil(input.platform, input.state)
-  const paused = pausedUntil !== null && input.now < pausedUntil
+  const paused = input.ignorePause !== true && pausedUntil !== null && input.now < pausedUntil
   const challengeKind = input.state.lastChallenge?.kind
 
   if (paused) {
@@ -152,8 +163,20 @@ export interface SessionAcquisitionPacerDeps {
   sleep(ms: number): Promise<void>
   /** How long since the person last touched the computer; a locked screen counts as away. */
   readUserIdleMs(): number
-  /** What the last recorded attempts say about the platform, used once after a restart. */
-  readPersistedState?(platform: SessionPlatform): Pick<SessionPlatformState, 'lastChallenge' | 'lastSuccessAt'> | null
+  /** The standing saved before the last restart. */
+  readPersistedState?(platform: SessionPlatform): SessionPlatformStanding | null
+  /** Called whenever a platform's standing changes, so that a pause survives a restart. */
+  persistState?(platform: SessionPlatform, standing: SessionPlatformStanding): void
+}
+
+/** What the queue asks at the moment a source reaches the front, not when it was queued. */
+export interface SessionRunRequest {
+  trigger: SessionRefreshTrigger
+  platform: SessionPlatform
+  sourceId: string
+  sourceCount: number
+  readLastAttemptAt(): number | null
+  readUserHasPageOpen(): boolean
 }
 
 export type SessionRunResult<T> =
@@ -162,23 +185,34 @@ export type SessionRunResult<T> =
 
 /**
  * One queue for the whole app: at most one session page is open at any moment. A request is decided when it
- * reaches the front, so a sign-in or verification page met earlier in the same round stops the ones behind it.
+ * reaches the front, so a sign-in or verification page met earlier in the same round stops the ones behind it,
+ * and a source that was opened while this request waited is not opened again.
  */
 export class SessionAcquisitionPacer {
   private readonly states = new Map<SessionPlatform, SessionPlatformState>()
   private readonly lastLoadFinishedAt = new Map<SessionPlatform, number>()
+  private readonly lastStartedAt = new Map<string, number>()
   private tail: Promise<unknown> = Promise.resolve()
 
   constructor(private readonly deps: SessionAcquisitionPacerDeps) {}
 
   run<T>(
-    request: SessionLoadRequest,
+    request: SessionRunRequest,
     load: () => Promise<{ value: T; outcome: SessionLoadOutcome }>,
+    options?: { ignorePause?: boolean },
   ): Promise<SessionRunResult<T>> {
     const task = this.tail.then(async (): Promise<SessionRunResult<T>> => {
       const state = this.stateOf(request.platform)
+      const recorded = request.readLastAttemptAt()
+      const started = this.lastStartedAt.get(request.sourceId) ?? null
       const decision = decideSessionLoad({
-        ...request,
+        trigger: request.trigger,
+        platform: request.platform,
+        sourceId: request.sourceId,
+        sourceCount: request.sourceCount,
+        lastAttemptAt: recorded === null ? started : started === null ? recorded : Math.max(recorded, started),
+        userHasPageOpen: request.readUserHasPageOpen(),
+        ignorePause: options?.ignorePause === true,
         now: this.deps.now(),
         userIdleMs: this.deps.readUserIdleMs(),
         state,
@@ -188,19 +222,25 @@ export class SessionAcquisitionPacer {
       const rule = SESSION_PACING[request.platform]
       const previous = this.lastLoadFinishedAt.get(request.platform)
       if (previous !== undefined) {
-        const spacing = rule.spacingMs[0] + this.deps.random() * (rule.spacingMs[1] - rule.spacingMs[0])
-        const wait = previous + spacing - this.deps.now()
+        const [min, max] = request.trigger === 'auto' ? rule.spacingMs : rule.manualSpacingMs
+        const wait = previous + min + this.deps.random() * (max - min) - this.deps.now()
         if (wait > 0) await this.deps.sleep(wait)
       }
 
       const startedAt = this.deps.now()
       const windowMs = rule.loadGapMs * rule.burst
       state.recentLoadsAt = [...state.recentLoadsAt.filter((at) => startedAt - at < windowMs), startedAt]
+      this.lastStartedAt.set(request.sourceId, startedAt)
       try {
         const { value, outcome } = await load()
         const finishedAt = this.deps.now()
-        if (outcome === 'ok') state.lastSuccessAt = finishedAt
-        else if (outcome !== 'other') state.lastChallenge = { kind: outcome, at: finishedAt }
+        if (outcome === 'ok') {
+          state.lastSuccessAt = finishedAt
+          this.persist(request.platform, state)
+        } else if (outcome !== 'other') {
+          state.lastChallenge = { kind: outcome, at: finishedAt }
+          this.persist(request.platform, state)
+        }
         return { ran: true, value }
       } finally {
         this.lastLoadFinishedAt.set(request.platform, this.deps.now())
@@ -210,9 +250,24 @@ export class SessionAcquisitionPacer {
     return task
   }
 
+  /** Runs `task` in the same single file as page loads, with no decision and no pause of its own. */
+  serialize<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.tail.then(task)
+    this.tail = run.then(() => undefined, () => undefined)
+    return run
+  }
+
   snapshot(platform: SessionPlatform): SessionPlatformState {
     const state = this.stateOf(platform)
     return { ...state, recentLoadsAt: [...state.recentLoadsAt] }
+  }
+
+  private persist(platform: SessionPlatform, state: SessionPlatformState): void {
+    try {
+      this.deps.persistState?.(platform, { lastChallenge: state.lastChallenge, lastSuccessAt: state.lastSuccessAt })
+    } catch (error) {
+      console.warn('[rss-session] standing not saved; a restart forgets this pause:', error instanceof Error ? error.message : String(error))
+    }
   }
 
   private stateOf(platform: SessionPlatform): SessionPlatformState {

@@ -36,7 +36,8 @@ const XIAOHONGSHU_BODY = String.raw`
     match = decoded.match(/\/discovery\/item\/([a-zA-Z0-9]+)/i);
     if (match) return match[1];
     match = decoded.match(/\/([a-f0-9]{24})(?:\?|$)/i);
-    return match ? match[1] : '';
+    // The profile's own id has the same shape as a note id.
+    return match && match[1] !== targetUserId ? match[1] : '';
   };
   const readToken = (href) => {
     try { return new URL(String(href || ''), location.href).searchParams.get('xsec_token') || ''; } catch { return ''; }
@@ -183,7 +184,8 @@ const XIAOHONGSHU_BODY = String.raw`
       : new RegExp('/user/profile/', 'i');
     const cardAnchors = Array.from(document.querySelectorAll('a[href*="/user/profile/"]'));
     const seen = new Set();
-    const items = [];
+    // A card carries both a link to its note and a link to its author: one item per card, the note link first.
+    const byCard = new Map();
     for (const [anchorIndex, anchor] of cardAnchors.entries()) {
       const href = abs(anchor.getAttribute('href'));
       if (!href || !profileHrefPattern.test(href)) continue;
@@ -198,7 +200,9 @@ const XIAOHONGSHU_BODY = String.raw`
       const lines = sanitizeTitleLines(container?.innerText || anchor.textContent || '', author);
       const title = lines[0] || '';
       if (!title || title === author) continue;
-      const noteId = extractNoteId(href);
+      // Only a link that goes on past the profile id names a note; the author link ends at the profile id.
+      const noteMatch = href.match(/\/user\/profile\/[^/?#]+\/([a-f0-9]{24})(?:[?#]|$)/i);
+      const noteId = noteMatch ? noteMatch[1] : '';
       const fallbackKey = encodeURIComponent(title.slice(0, 48)).replace(/%/g, '').toLowerCase() || 'card';
       const stableLink = NOTE_ID.test(noteId)
         ? abs('/explore/' + noteId)
@@ -206,8 +210,10 @@ const XIAOHONGSHU_BODY = String.raw`
             ? abs('/user/profile/' + targetUserId + '#note-' + fallbackKey + '-' + String(anchorIndex + 1))
             : href);
       if (!stableLink || seen.has(stableLink)) continue;
+      const known = byCard.get(container);
+      if (known && (known.noteId || !NOTE_ID.test(noteId))) continue;
       seen.add(stableLink);
-      items.push({
+      byCard.set(container, {
         noteId: NOTE_ID.test(noteId) ? noteId : '',
         xsecToken: readToken(href),
         title: clip(title, 160),
@@ -219,7 +225,7 @@ const XIAOHONGSHU_BODY = String.raw`
         fingerprint: clip([title, lines.slice(0, 4).join(' '), readNodeImage(container)].filter(Boolean).join('|'), 500),
       });
     }
-    return items;
+    return Array.from(byCard.values());
   };
 
   const blockedState = () => {
@@ -471,10 +477,13 @@ export function buildSessionPageScript(
           if (items.length > 0) {
             return { title: document.title || '', finalUrl: href, state: 'ready', items };
           }
+          // The list had no items this round. An address or a sign-in form says so at once; words on the page
+          // only count once the list has had time to render, and only as whole phrases.
+          const hadTimeToRender = attempt >= 8;
           if (
             href.includes('/login') ||
             document.querySelector('input[type="password"], input[name*="mobile"], form[class*="login"]') ||
-            (textHas(['登录后', '扫码登录', '手机号登录']) && !textHas(['作品', '合集', '搜索 Ta 的作品']))
+            (hadTimeToRender && textHas(['登录后', '扫码登录', '手机号登录']) && !textHas(['作品', '合集', '搜索 Ta 的作品']))
           ) {
             return {
               title: document.title || '',
@@ -485,11 +494,11 @@ export function buildSessionPageScript(
               items: [],
             };
           }
-          if (textHas(['风险', '异常', '验证', 'captcha', '稍后再试', '访问受限', '频繁'])) {
+          if (hadTimeToRender && textHas(['验证码', '安全验证', '请完成验证', 'captcha', '访问受限', '访问过于频繁', '操作过于频繁'])) {
             return {
               title: document.title || '',
               finalUrl: href,
-              state: snippet.includes('验证') || snippet.includes('captcha') ? 'anti_bot' : 'waf',
+              state: snippet.includes('验证') || snippet.toLowerCase().includes('captcha') ? 'anti_bot' : 'waf',
               detail: 'risk_control_or_waf',
               textSnippet: snippet,
               items: [],
@@ -648,24 +657,13 @@ export function buildSessionPageScript(
         if (
           href.includes('passport.weibo.com/visitor') ||
           href.includes('/login') ||
-          document.querySelector('input[type="password"], input[name*="username"], form[action*="login"]') ||
-          textHas(['visitor system', '扫码登录', '账号登录'])
+          document.querySelector('input[type="password"], input[name*="username"], form[action*="login"]')
         ) {
           return {
             title: document.title || '',
             finalUrl: href,
             state: 'auth',
             detail: 'browser_session_login_required',
-            textSnippet: bodyText(),
-            items: [],
-          };
-        }
-        if (textHas(['验证码', '验证', '频繁'])) {
-          return {
-            title: document.title || '',
-            finalUrl: href,
-            state: 'anti_bot',
-            detail: 'captcha_or_rate_limit',
             textSnippet: bodyText(),
             items: [],
           };
@@ -681,6 +679,29 @@ export function buildSessionPageScript(
         const stateItems = collectFromEmbeddedState();
         if (stateItems.length > 0) {
           return { title: document.title || '', finalUrl: href, state: 'ready', items: stateItems };
+        }
+        // Nothing to read yet. Words on the page only count once the posts have had time to render, and only
+        // as whole phrases: a post that mentions 验证 is not a verification page.
+        const hadTimeToRender = attempt >= 8;
+        if (hadTimeToRender && textHas(['visitor system', '扫码登录', '账号登录'])) {
+          return {
+            title: document.title || '',
+            finalUrl: href,
+            state: 'auth',
+            detail: 'browser_session_login_required',
+            textSnippet: bodyText(),
+            items: [],
+          };
+        }
+        if (hadTimeToRender && textHas(['验证码', '安全验证', '请完成验证', '访问过于频繁', '操作过于频繁'])) {
+          return {
+            title: document.title || '',
+            finalUrl: href,
+            state: 'anti_bot',
+            detail: 'captcha_or_rate_limit',
+            textSnippet: bodyText(),
+            items: [],
+          };
         }
         if (!tabClicked && attempt >= 2) {
           tabClicked = clickTabIfPresent();

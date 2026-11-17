@@ -22,8 +22,12 @@ export interface BackgroundPageObserveOptions {
 export interface BackgroundPageHandle {
   /** Resolves when the page stops loading. A navigation the page itself replaced (a redirect) is followed. */
   navigate(url: string, options?: { timeoutMs?: number }): Promise<void>
-  /** Runs a read-only script in the page. A script that throws comes back as `{ __readyCaptureError }`. */
-  evaluate(script: string): Promise<unknown>
+  /**
+   * Runs a read-only script in the page. A script that throws comes back as `{ __readyCaptureError }`.
+   * Rejects when the page does not answer in time (it navigated away under the script, or its renderer is gone),
+   * so a page that never settles cannot hold up whoever is waiting for it.
+   */
+  evaluate(script: string, options?: { timeoutMs?: number }): Promise<unknown>
   responses(): CapturedPageResponse[]
   waitForResponses(
     predicate: (responses: CapturedPageResponse[]) => boolean,
@@ -44,6 +48,7 @@ const DEFAULT_MAX_BODY_CHARS = 1_500_000
 /** All kept bodies together; a page that returns huge payloads cannot grow the main process without bound. */
 const MAX_TOTAL_BODY_CHARS = 8_000_000
 const NAVIGATION_ABORTED = -3
+const DEFAULT_EVALUATE_TIMEOUT_MS = 25_000
 const OBSERVED_RESOURCE_TYPES = new Set(['XHR', 'Fetch'])
 
 function wrapCaptureScript(script: string): string {
@@ -61,6 +66,22 @@ function wrapCaptureScript(script: string): string {
       }
     })()
   `
+}
+
+/** Rejects after `timeoutMs` unless `work` settles first. A late rejection of `work` is swallowed. */
+export async function withDeadline<T>(work: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  work.catch(() => undefined)
+  let timer: ReturnType<typeof setTimeout> | null = null
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} did not finish within ${timeoutMs} ms`)), timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }
 
 export function createMockBackgroundPage(): BackgroundPageHandle {
@@ -218,9 +239,19 @@ export function createBackgroundCapturePage(
       })
     },
 
-    async evaluate(script) {
+    async evaluate(script, evaluateOptions) {
       if (closed) throw new Error('Background page is closed')
-      const result = await webContents.executeJavaScript(wrapCaptureScript(script), true) as
+      const timeoutMs = Math.max(1_000, evaluateOptions?.timeoutMs ?? DEFAULT_EVALUATE_TIMEOUT_MS)
+      const running = webContents.executeJavaScript(wrapCaptureScript(script), true)
+      // The page may answer (or fail) after the deadline has passed; that late outcome is nobody's to handle.
+      running.catch(() => undefined)
+      let timer: ReturnType<typeof setTimeout> | null = null
+      const result = await Promise.race([
+        running,
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => reject(new Error(`Timed out reading the page after ${timeoutMs} ms`)), timeoutMs)
+        }),
+      ]).finally(() => { if (timer) clearTimeout(timer) }) as
         | { __readyCaptureOk?: boolean; value?: unknown; error?: string }
         | null
       if (result && result.__readyCaptureOk === false) {
