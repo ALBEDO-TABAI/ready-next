@@ -202,35 +202,62 @@ export function pickFollowedBrowserTab(
   return null
 }
 
+/** How long an action is given to bring up a tab of its own. */
+export const ACTION_FOLLOWED_TAB_WINDOW_MS = 2600
+
+/**
+ * Waits for a tab the action opened. A tab that appears is followed as before. Otherwise the wait ends as soon
+ * as the page has gone quiet (no request in flight and nothing changing for half a second, the `network_idle`
+ * condition): by then the action has had its effect and a tab of its own would already have been requested.
+ * Without that signal (no network tracking, a page that cannot run scripts) the whole window is kept.
+ */
 export async function waitForActionFollowedTab(
   controller: BrowserController,
   sourceTabId: string | null,
   beforeTabs: BrowserToolTabSnapshot[],
   signal?: AbortSignal,
-  timeoutMs = 2600,
+  timeoutMs = ACTION_FOLLOWED_TAB_WINDOW_MS,
 ): Promise<BrowserActionFollowedTab | null> {
   if (beforeTabs.length === 0) return null
   const started = Date.now()
-  while (Date.now() - started < timeoutMs) {
-    throwIfAborted(signal)
-    const followed = pickFollowedBrowserTab(beforeTabs, snapshotBrowserTabs(controller), sourceTabId)
-    if (followed) {
-      try {
-        if (typeof controller.switchTab === 'function') controller.switchTab(followed.tabId)
-      } catch {
-        // silent-catch: tab 可能已激活或测试桩不支持切换，跟随逻辑继续。
-      }
-      try {
-        const ready = await waitForReady(controller, followed.tabId, 3500, undefined, signal)
-        return { ...followed, ready: ready.ready, elapsedMs: Date.now() - started }
-      } catch {
-        // silent-catch: 就绪探测失败仍返回跟随到的 tab（不带 ready 位）。
-        return { ...followed, elapsedMs: Date.now() - started }
-      }
-    }
-    await sleepWithAbort(150, signal)
+  let pageWentQuiet = false
+  const quietWatch = new AbortController()
+  const stopQuietWatch = () => quietWatch.abort()
+  signal?.addEventListener('abort', stopQuietWatch, { once: true })
+  if (typeof controller.waitForCondition === 'function') {
+    void controller
+      .waitForCondition(sourceTabId, { condition: 'network_idle', timeoutMs, checkIntervalMs: 150 }, quietWatch.signal)
+      .then((result) => { pageWentQuiet = result?.matched === true })
+      .catch(() => {
+        // silent-catch: without the quiet signal the full window below still applies
+      })
   }
-  return null
+  try {
+    while (Date.now() - started < timeoutMs) {
+      throwIfAborted(signal)
+      const followed = pickFollowedBrowserTab(beforeTabs, snapshotBrowserTabs(controller), sourceTabId)
+      if (followed) {
+        try {
+          if (typeof controller.switchTab === 'function') controller.switchTab(followed.tabId)
+        } catch {
+          // silent-catch: tab 可能已激活或测试桩不支持切换，跟随逻辑继续。
+        }
+        try {
+          const ready = await waitForReady(controller, followed.tabId, 3500, undefined, signal)
+          return { ...followed, ready: ready.ready, elapsedMs: Date.now() - started }
+        } catch {
+          // silent-catch: 就绪探测失败仍返回跟随到的 tab（不带 ready 位）。
+          return { ...followed, elapsedMs: Date.now() - started }
+        }
+      }
+      if (pageWentQuiet) return null
+      await sleepWithAbort(150, signal)
+    }
+    return null
+  } finally {
+    signal?.removeEventListener('abort', stopQuietWatch)
+    stopQuietWatch()
+  }
 }
 
 export function didBrowserActionChange(before: unknown, after: unknown): boolean {

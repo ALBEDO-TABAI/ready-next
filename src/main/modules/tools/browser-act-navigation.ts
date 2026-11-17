@@ -49,7 +49,6 @@ import {
   runGuardedSelectorType,
   sendKeyStroke,
   settleAfterAction,
-  sleepWithAbort,
   throwIfAborted,
   dispatchTrustedPointer,
   dispatchTrustedText,
@@ -78,6 +77,9 @@ import {
   resolveToolContextMeta,
   uniqueStrings,
 } from './browser-tool-shared'
+
+/** The longest a successful navigation waits for the page to become readable before it reports back. */
+const NAVIGATION_READY_WAIT_MS = 1500
 
 export async function executeBrowserActNavigation(
   toolName: string,
@@ -146,8 +148,8 @@ export async function executeBrowserActNavigation(
         rememberBrowserAction(sessionId, 'navigate', url, {
           messageVisibilityEpoch: ctx.messageVisibilityEpoch,
         })
-        // Wait a moment for page to start loading
-        await sleepWithAbort(1500, abortSignal)
+        // The page is usually readable by now; wait for that, never longer than the old fixed pause.
+        await waitForReady(controller, navTabId, NAVIGATION_READY_WAIT_MS, undefined, abortSignal)
         const tabs = controller.getTabList()
         const target = navTabId ? tabs.find((t) => t.id === navTabId) : tabs.find((t) => t.active)
         const confirmation = null

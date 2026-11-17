@@ -300,6 +300,7 @@ export async function executeBrowserActTarget(
         const beforeTabs = snapshotBrowserTabs(controller)
         const before = readBack === 'none' ? null : await readBrowserActionDeltaBestEffort(controller, tabId, 'before')
         let actionResult: unknown
+        let settledByAction = false
         const point = await normalizedTargetPoint(
           controller,
           tabId,
@@ -426,7 +427,9 @@ export async function executeBrowserActTarget(
           }
           actionResult = { ok: true, trustedInput: true, value, clickPoint: trustedClickPoint }
         } else {
+          // The guarded click waits for the page to settle before it returns; that wait is not repeated below.
           const clicked = await runGuardedCoordinateClick(controller, tabId, presentedPoint!.x, presentedPoint!.y, abortSignal)
+          settledByAction = true
           actionResult = {
             ok: true,
             trustedInput: true,
@@ -435,7 +438,7 @@ export async function executeBrowserActTarget(
             clickPoint: trustedClickPoint,
           }
         }
-        await settleAfterAction(controller, tabId, abortSignal)
+        if (!settledByAction) await settleAfterAction(controller, tabId, abortSignal)
         let followedTab = await waitForActionFollowedTab(controller, tabId, beforeTabs, abortSignal)
         if (followedTab) mutationBoundary.recordMechanicalFact({ effect: 'popup', postActionTabId: followedTab.tabId })
         const actionFailed = typeof actionResult === 'object' && actionResult !== null && (actionResult as { ok?: unknown }).ok === false
