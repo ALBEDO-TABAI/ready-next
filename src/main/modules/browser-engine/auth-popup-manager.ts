@@ -125,6 +125,7 @@ export class AuthPopupManager {
         features: details.features,
         disposition: details.disposition,
         referrer: details.referrer?.url,
+        insidePopup: true,
       })
       this.logger(`[browser-v3][popup] nested-open id=${contents.id} mode=${decision.mode} reason=${decision.reason} url=${details.url}`)
       if (decision.mode === 'allow-popup') {
@@ -143,7 +144,7 @@ export class AuthPopupManager {
 
     contents.on('will-navigate', (event, url) => {
       if (this.knownPopupContents.has(contents.id) && /^https?:/i.test(url)) {
-        const decision = decidePopupPolicy({ url })
+        const decision = decidePopupPolicy({ url, insidePopup: true })
         this.logger(`[browser-v3][popup] child-navigate id=${contents.id} mode=${decision.mode} reason=${decision.reason} url=${url}`)
         if (decision.mode !== 'allow-popup') {
           event.preventDefault()

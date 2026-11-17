@@ -33,6 +33,31 @@ describe('browser popup policy', () => {
     assert.strictEqual(decision.mode, 'open-tab')
   })
 
+  it('opens an ordinary page as a tab even on a site that also offers sign-in', () => {
+    for (const url of [
+      'https://x.com/Kling_ai/status/2122183574308700468',
+      'https://github.com/electron/electron',
+      'https://www.instagram.com/p/abc/',
+      'https://example.com/blog/verifying-claims?next=/login',
+    ]) {
+      for (const disposition of ['foreground-tab', 'new-window']) {
+        assert.strictEqual(decidePopupPolicy({ url, disposition }).mode, 'open-tab', `${url} ${disposition}`)
+      }
+    }
+  })
+
+  it('keeps a sign-in flow in a small window', () => {
+    // third-party authorization, however it was opened
+    assert.strictEqual(decidePopupPolicy({ url: 'https://x.com/i/oauth2/authorize?client_id=1', disposition: 'foreground-tab' }).mode, 'allow-popup')
+    assert.strictEqual(decidePopupPolicy({ url: 'https://github.com/login/oauth/authorize', disposition: 'foreground-tab' }).mode, 'allow-popup')
+    // a site's own sign-in page, only when the site asked for a window
+    assert.strictEqual(decidePopupPolicy({ url: 'https://example.com/login', features: 'width=500,height=600' }).mode, 'allow-popup')
+    assert.strictEqual(decidePopupPolicy({ url: 'https://example.com/login', disposition: 'foreground-tab' }).mode, 'open-tab')
+    // the return leg inside an open sign-in window stays there
+    assert.strictEqual(decidePopupPolicy({ url: 'https://example.com/auth/callback?code=1', insidePopup: true }).mode, 'allow-popup')
+    assert.strictEqual(decidePopupPolicy({ url: 'https://example.com/home', insidePopup: true }).mode, 'open-tab')
+  })
+
   it('should pass source lane context when window-open falls back to a tab', () => {
     const service = readWorkspaceFile('src/main/modules/browser-engine/window-open-service.ts')
     assert.match(service, /interface WindowOpenLaneContext/)
@@ -47,7 +72,7 @@ describe('browser popup policy', () => {
       manager.indexOf("if (!/^https?:/i.test(url))"),
     )
 
-    assert.match(childNavigateBlock, /decidePopupPolicy\(\{ url \}\)/)
+    assert.match(childNavigateBlock, /decidePopupPolicy\(\{ url, insidePopup: true \}\)/)
     assert.match(childNavigateBlock, /decision\.mode !== 'allow-popup'/)
     assert.match(childNavigateBlock, /this\.openInTab\(url, this\.contentContexts\.get\(contents\.id\) \?\? \{\}\)/)
     assert.match(childNavigateBlock, /BrowserWindow\.fromWebContents\(contents\)/)

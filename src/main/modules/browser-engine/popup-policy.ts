@@ -6,6 +6,8 @@ export interface PopupRequestContext {
   features?: string
   disposition?: string
   referrer?: string
+  /** True for navigations and opens that happen inside an already open sign-in popup. */
+  insidePopup?: boolean
 }
 
 export interface PopupPolicyDecision {
@@ -25,22 +27,21 @@ interface BrowserUrlAllowanceOptions {
   allowLocalHtml?: boolean
 }
 
+// Hosts that only ever serve sign-in. A site that also has ordinary pages (x.com, github.com, …) is not listed:
+// its sign-in pages are recognised by their path, and everything else on it opens as a tab.
 const AUTH_HOST_PATTERNS = [
   /(^|\.)accounts\.google\.com$/i,
-  /(^|\.)myaccount\.google\.com$/i,
-  /(^|\.)pinterest\.com$/i,
-  /(^|\.)facebook\.com$/i,
-  /(^|\.)instagram\.com$/i,
   /(^|\.)appleid\.apple\.com$/i,
   /(^|\.)microsoftonline\.com$/i,
   /(^|\.)login\.live\.com$/i,
-  /(^|\.)github\.com$/i,
-  /(^|\.)x\.com$/i,
-  /(^|\.)twitter\.com$/i,
 ]
 
-const AUTH_PATH_PATTERN =
-  /(oauth|authorize|callback|signin|sign-in|signup|sign-up|login|log-in|passkey|challenge|2fa|verify|sso)/i
+// Words are matched as whole path words, so an article called "/blog/verifying-claims" is not a sign-in page.
+// A third-party authorization page needs its opener to hand the result back, however it was opened.
+const AUTHORIZATION_PATH_PATTERN = /(^|[^a-z])(oauth2?|authorize|authorization|qrconnect|sso|saml2?)([^a-z]|$)/i
+// A sign-in page counts only when the site itself asked for a small window, or the flow is already in one.
+const SIGN_IN_PATH_PATTERN =
+  /(^|[^a-z])(auth|callback|sign[-_]?in|sign[-_]?up|log[-_]?in|passkey|challenge|2fa|verify|verification)([^a-z]|$)/i
 
 function parseWindowFeatures(raw: string | undefined): Record<string, string> {
   if (!raw) return {}
@@ -116,19 +117,20 @@ export function decidePopupPolicy(context: PopupRequestContext): PopupPolicyDeci
   }
 
   const parsed = new URL(url)
-  const pathname = `${parsed.pathname || ''}${parsed.search || ''}`
+  const pathname = parsed.pathname || ''
   const features = parseWindowFeatures(context.features)
-  const isPopup = looksPopupSized(features) || String(context.disposition || '').toLowerCase() === 'new-window'
-  const authHost = isAuthHost(parsed.hostname)
-  const authPath = AUTH_PATH_PATTERN.test(pathname)
+  const askedForWindow = looksPopupSized(features) || String(context.disposition || '').toLowerCase() === 'new-window'
+  const signInShaped = askedForWindow || context.insidePopup === true
 
-  if (authHost) {
+  if (isAuthHost(parsed.hostname)) {
     return { mode: 'allow-popup', reason: 'auth-host', authLike: true }
   }
-  if (authPath) {
+  if (AUTHORIZATION_PATH_PATTERN.test(pathname)) {
     return { mode: 'allow-popup', reason: 'oauth-path', authLike: true }
   }
-  if (isPopup && (authHost || authPath || String(context.frameName || '').toLowerCase().includes('auth'))) {
+  if (signInShaped && (
+    SIGN_IN_PATH_PATTERN.test(pathname) || String(context.frameName || '').toLowerCase().includes('auth')
+  )) {
     return { mode: 'allow-popup', reason: 'popup-disposition', authLike: true }
   }
   return { mode: 'open-tab', reason: 'regular-http', authLike: false }
