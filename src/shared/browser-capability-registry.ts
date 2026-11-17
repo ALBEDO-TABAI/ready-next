@@ -3,7 +3,7 @@ import type { BrowserPowerEffect } from './browser-power'
 export type BrowserOperationMode = 'control' | 'observe' | 'mutate'
 
 export const BROWSER_OPERATION_IDS = [
-  'page_tools', 'call_page_tool',
+  'page_tools', 'call_page_tool', 'sequence',
   'tabs_list', 'tabs_open', 'tabs_switch', 'tabs_close',
   'navigate_open', 'navigate_back', 'navigate_forward', 'navigate_reload',
   'search', 'snapshot', 'find', 'read', 'screenshot', 'screenshot_analyze',
@@ -102,6 +102,7 @@ export const BROWSER_CAPABILITY_REGISTRY = {
   browser_read: { operations: ['read'], resolveOperationId: () => 'read' },
   browser_screenshot: { operations: ['screenshot', 'screenshot_analyze'], resolveOperationId: (args) => args.analyze === true ? 'screenshot_analyze' : 'screenshot' },
   browser_wait: { operations: ['wait_ready', 'wait_condition'], resolveOperationId: (args) => args.condition || args.duration_ms ? 'wait_condition' : 'wait_ready' },
+  browser_sequence: { operations: ['sequence'], resolveOperationId: () => 'sequence' },
 
   browser_click: { operations: ['click_target', 'click_selector', 'click_text', 'click_coordinate'], resolveOperationId: clickOperation },
   browser_type: { operations: ['type_target', 'type_selector', 'type_coordinate', 'type_smart'], resolveOperationId: typeOperation },
@@ -134,6 +135,12 @@ export const BROWSER_CAPABILITY_REGISTRY = {
 
 export type BrowserPublicToolName = keyof typeof BROWSER_CAPABILITY_REGISTRY
 
+export const BROWSER_SEQUENCE_STEP_TOOL_NAMES = [
+  'browser_click', 'browser_type', 'browser_press_key', 'browser_select',
+  'browser_hover', 'browser_scroll', 'browser_fill_form', 'browser_search',
+  'browser_navigate', 'browser_wait', 'browser_snapshot', 'browser_find', 'browser_read',
+] as const satisfies readonly BrowserPublicToolName[]
+
 type BrowserOperationRecord = Omit<BrowserOperationCapability, 'operationId'>
 type BrowserBoundaryProfile =
   | 'management'
@@ -164,6 +171,9 @@ const operation = (
 ): BrowserOperationRecord => ({ handlerGroup, mode, effects, ...BROWSER_BOUNDARY_PROFILES[boundaries] })
 
 const OPERATION_CAPABILITIES: Readonly<Record<BrowserOperationId, BrowserOperationRecord>> = {
+  // A sequence does what its steps do, so it declares the union of their effects. It holds no page lease
+  // and names no document of its own: each step claims and checks those for itself.
+  sequence: operation('system', 'mutate', ['observe', 'page_mutation', 'navigate', 'external_submit'], 'workflow_metadata'),
   page_tools: operation('webmcp', 'observe', ['observe'], 'page_observe'),
   call_page_tool: operation('webmcp', 'mutate', ['page_mutation'], 'page_mutate'),
   tabs_list: operation('observe', 'observe', ['observe'], 'management'), tabs_open: operation('act', 'mutate', ['navigate'], 'workflow_transport'), tabs_switch: operation('act', 'mutate', ['navigate'], 'workflow_transport'), tabs_close: operation('act', 'mutate', ['page_mutation'], 'workflow_transport'),

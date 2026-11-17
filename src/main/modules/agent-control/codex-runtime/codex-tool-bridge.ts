@@ -671,6 +671,17 @@ export class CodexReadyToolBridge implements CodexBoundServerRequestExecutor {
         onToolEffectStart: startEffectDeadline,
         onToolEffectEnd: endEffectDeadline,
         codexHostPrimitiveOnly: true,
+        // A step of a sequence is held to the same frozen contract as a call of its own: the tool must be
+        // on this turn's surface and authorized, and its arguments must satisfy the frozen definition.
+        // Run authority is not re-read here; it is asserted before this call and again as each step's
+        // effect starts.
+        assertNestedToolCall: (toolName, args) => {
+          const { entry } = validateRequest(input.binding, {
+            threadId: input.binding.codexThreadId, turnId: input.binding.codexTurnId,
+            callId: input.callId, namespace: null, tool: toolName, arguments: args,
+          })
+          this.deps.validateToolArguments(input.binding, toolName, args, entry)
+        },
         invoker: 'model',
         allowInternal: false,
       })

@@ -8,6 +8,7 @@ import type { CaseGroup } from '../harness'
 import { formGroup, keyboardGroup, loginGroup, surfaceGroup, wizardGroup } from './forms'
 import { framesGroup, pagingGroup, shadowGroup, spaGroup, waitGroup } from './pages'
 import { canvasGroup, dialogsGroup, downloadsGroup, editorGroup, popupGroup, takeoverGroup, uploadGroup } from './interactions'
+import { sequenceGroup } from './sequence'
 
 export const CASE_GROUPS: CaseGroup[] = [
   webMcpGroup,
@@ -15,6 +16,7 @@ export const CASE_GROUPS: CaseGroup[] = [
   formGroup,
   keyboardGroup,
   wizardGroup,
+  sequenceGroup,
   spaGroup,
   framesGroup,
   shadowGroup,

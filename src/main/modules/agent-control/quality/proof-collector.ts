@@ -22,6 +22,7 @@ import {
   normalizeToolExecutionOutput,
   type ToolExecutionOutput,
 } from '../tools-runtime/tool-result-types'
+import { readBrowserSequenceResult } from '../../../../shared/browser-sequence'
 
 export const PROOF_KINDS = ['tool_result', 'artifact', 'task_event', 'run_state', 'assistant_response', 'transaction_confirmed'] as const
 export type ProofKind = (typeof PROOF_KINDS)[number]
@@ -381,6 +382,35 @@ function sourceReceiptMaterial(
   return parts.join('\n').slice(0, SOURCE_RECEIPT_MATERIAL_CAP)
 }
 
+/**
+ * A sequence is several browser calls made in one. Each step that succeeded proves what the same call
+ * would have proved on its own, whether or not a later step stopped the sequence. Source content is only
+ * what the sequence handed back to the model: the result of its closing observation.
+ */
+function collectBrowserSequenceProofs(
+  output: ToolExecutionOutput,
+  now: Date,
+  context: { runId?: string },
+): ProofRef[] {
+  const result = readBrowserSequenceResult(output.data)
+  if (!result) return []
+  const proofs: ProofRef[] = []
+  for (const step of result.steps) {
+    if (!step.ok) continue
+    const returned = result.observation?.step === step.step ? result.observation : null
+    if (RESEARCH_SOURCE_CONTENT_TOOL_NAMES.has(step.tool) && !returned) continue
+    const material = JSON.stringify(returned ? returned.data : step)
+    proofs.push(collectToolResultProof(
+      step.tool,
+      material.slice(0, 500),
+      now,
+      material.slice(0, SOURCE_RECEIPT_MATERIAL_CAP),
+      context.runId,
+    ))
+  }
+  return proofs
+}
+
 export function collectToolOutputProofs(
   toolName: string,
   output: ToolExecutionOutput,
@@ -389,6 +419,7 @@ export function collectToolOutputProofs(
 ): ProofRef[] {
   if (toolName === 'declare_completion_criteria') return []
   const normalized = normalizeToolExecutionOutput(output)
+  if (toolName === 'browser_sequence') return collectBrowserSequenceProofs(normalized, now, context)
   if (isFailedToolOutput(normalized, toolName) || isNonterminalToolOutput(normalized)) return []
 
   const summary = normalized.text || JSON.stringify(normalized.data || normalized.projectionPatch || {})

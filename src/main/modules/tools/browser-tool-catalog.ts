@@ -4,6 +4,7 @@ import {
   type ToolParamSchemaSpec,
 } from './tool-schema'
 import { z } from 'zod'
+import { BROWSER_SEQUENCE_DESCRIPTION } from '../../../shared/browser-sequence'
 import { BROWSER_TOOL_SCHEMAS, type BrowserToolSchemaName } from './schemas/browser-tool-schemas'
 import { zodObjectToParamList } from './zod-param-derivation'
 import type { BrowserPowerEffect } from '../../../shared/browser-power'
@@ -34,6 +35,7 @@ const DESCRIPTIONS: Record<BrowserPublicToolName, string> = {
   browser_read: '读取页面、区域或目标正文。',
   browser_screenshot: '截取当前真实页面。',
   browser_wait: '等待时间、页面、文本、URL 或稳定状态。',
+  browser_sequence: BROWSER_SEQUENCE_DESCRIPTION,
   browser_click: '按引用、语义、选择器或坐标点击。',
   browser_type: '向快照中 editable:true 的精确输入目标写入文本；提交需独立动作。',
   browser_fill_form: '批量填写并核验表单字段。',

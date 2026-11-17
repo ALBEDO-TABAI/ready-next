@@ -7,6 +7,7 @@ import { parseBrowserResearchPublicRequest } from '../main/modules/tools/browser
 
 test('every public semantic tool resolves to a private operation', () => {
   const fixtures: Partial<Record<(typeof BROWSER_PUBLIC_TOOL_NAMES)[number], Record<string, unknown>>> = {
+    browser_sequence: { steps: [{ tool: 'browser_snapshot', args: {} }] },
     browser_call_page_tool: { frame_id: 'frame-1', tool_name: 'lookup', input: {} },
     browser_navigate: { action: 'open', url: 'https://example.com/fixture' },
     browser_search: { query: 'fixture' },

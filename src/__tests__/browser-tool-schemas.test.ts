@@ -9,6 +9,7 @@ import { getBrowserAnthropicTools, getBrowserOpenAITools } from '../main/modules
 import { billProviderRequestSections } from '../shared/context-budget-types'
 
 const MINIMAL_FIXTURES: Partial<Record<(typeof BROWSER_PUBLIC_TOOL_NAMES)[number], Record<string, unknown>>> = {
+  browser_sequence: { steps: [{ tool: 'browser_snapshot', args: {} }] },
   browser_call_page_tool: { frame_id: 'frame-1', tool_name: 'lookup', input: {} },
   browser_navigate: { action: 'open', url: 'https://example.com/fixture' },
   browser_search: { query: 'fixture' },
@@ -25,9 +26,9 @@ const MINIMAL_FIXTURES: Partial<Record<(typeof BROWSER_PUBLIC_TOOL_NAMES)[number
   browser_permission: { action: 'status', site_request_id: 'site-request-fixture' },
 }
 
-test('the canonical schema map exactly matches the 33 public browser tools', () => {
+test('the canonical schema map exactly matches the 34 public browser tools', () => {
   assert.deepEqual(Object.keys(BROWSER_TOOL_SCHEMAS), BROWSER_PUBLIC_TOOL_NAMES)
-  assert.equal(new Set(BROWSER_PUBLIC_TOOL_NAMES).size, 33)
+  assert.equal(new Set(BROWSER_PUBLIC_TOOL_NAMES).size, 34)
 })
 
 test('every public browser schema derives a model parameter list', () => {
@@ -93,14 +94,19 @@ test('default browser surface and opt-in WebMCP extension stay within their comp
   // The disabled experiment contributes zero schemas to the frozen default surface (covered by codex-tool-surface).
   const experimental = functions.filter(fn => (WEBMCP_TOOL_NAMES as readonly string[]).includes(String(fn.name)))
   const baseline = functions.filter(fn => !(WEBMCP_TOOL_NAMES as readonly string[]).includes(String(fn.name)))
-  assert.equal(baseline.length, 31)
+  assert.equal(baseline.length, 32)
   assert.equal(experimental.length, 2)
   assert.ok(billProviderRequestSections([], { toolSchemas: experimental }).sections.tool_schema <= 300)
   const bill = billProviderRequestSections([], { toolSchemas: baseline })
+  // Raised from 6000 on 2026-11-18 for browser_sequence (about 280) and browser_read's offset: one sequence
+  // call replaces several model round trips, each of which resends this whole catalog. The ceiling stays a
+  // ratchet; a new tool or parameter that does not fit has to earn its own raise.
   assert.ok(
-    bill.sections.tool_schema <= 6_000,
-    `browser schema bill ${bill.sections.tool_schema} exceeds 6000 tokens`,
+    bill.sections.tool_schema <= 6_300,
+    `browser schema bill ${bill.sections.tool_schema} exceeds 6300 tokens`,
   )
+  const sequence = baseline.filter(fn => fn.name === 'browser_sequence')
+  assert.ok(billProviderRequestSections([], { toolSchemas: sequence }).sections.tool_schema <= 290)
 
   const hasNestedDescription = (value: unknown): boolean => {
     if (Array.isArray(value)) return value.some(hasNestedDescription)

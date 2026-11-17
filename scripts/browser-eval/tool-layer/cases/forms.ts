@@ -48,8 +48,9 @@ export const surfaceGroup: CaseGroup = {
   async run(ctx) {
     const run = await ctx.run('surface')
     await run.open(ctx.url('/form/'))
-    await ctx.check('current-page-tools', '当前页工具面 20 项，与准入组合器一致', [], async () => {
+    await ctx.check('current-page-tools', '当前页工具面 21 项，与准入组合器一致', [], async () => {
       const expected = [
+        'browser_sequence',
         'browser_tabs',
         'browser_download',
         'browser_click',

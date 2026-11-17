@@ -43,6 +43,7 @@ export const BROWSER_CURRENT_PAGE_TOOL_NAMES = [
   'browser_screenshot',
   'browser_wait',
   'browser_click',
+  'browser_sequence',
   'browser_type',
   'browser_fill_form',
   'browser_select',

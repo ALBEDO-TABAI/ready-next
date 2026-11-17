@@ -22,6 +22,8 @@ import { getDefaultConfig } from '../shared/ai-providers'
 import { createBrowserDownloadFixture } from './utils/browser-download-fixture'
 import { attachBrowserWorkflowFixture } from './utils/browser-workflow-fixture'
 import type { ToolContext } from '../main/modules/tools/tool-executor'
+import { executeToolCall } from '../main/modules/tools/tool-executor'
+import { browserSequenceFixture } from './utils/browser-sequence-fixture'
 import type {
   CodexToolBridgeExecutionBinding,
   CodexToolCallBindingRead,
@@ -655,6 +657,51 @@ test('browser_download passes the frozen Codex surface, gateway and dispatch aut
     assert.equal(denied.receipts.records.size, 0)
     assert.equal(download.receipts.length, 1, 'refused calls do not download again')
   } finally { rmSync(directory, { recursive: true, force: true }) }
+})
+
+test('Q1/Q6: production bridge validates every sequence step and returns one outer call receipt', async (t) => {
+  const page = browserSequenceFixture()
+  t.after(() => page.lease.release())
+  const toolSurface = buildReadyToolSurface({ surfaceId: 'surface-sequence', toolDefinitions:
+    [...page.context.allowedToolNames || []].map(name => {
+      const found = defaultToolRegistry.getToolDefinitionForExecution(name)
+      assert.ok(found)
+      return found
+    }),
+  })
+  const base = binding()
+  const executionBinding = { ...base, toolSurface, authorization: buildReadyBoundTurnToolAuthorization({
+    authorization: buildReadyTurnToolAuthorization({ authorizationId: 'auth-sequence',
+      authorization: buildExplicitNoSkillAuthorization('no_skill_signal'), toolSurface }),
+    readySessionKey: base.readyAliasId, readyTaskId: base.readyTaskId, readyRunId: base.readyRunId,
+    scopeId: base.readyScopeId, toolSurfaceDigest: toolSurface.toolSurfaceDigest,
+    turnContractDigest: base.turnContractDigest, resourceAnchorDigest: 'resource-anchor', createdAt: new Date(0).toISOString(),
+  }) }
+  const steps = [{ tool: 'browser_type', args: { selector: '#amount', text: '42' } },
+    { tool: 'browser_press_key', args: { key: 'Enter' } }, { tool: 'browser_snapshot', args: {} }]
+  const validated = new Set<string>()
+  const f = fixture({ executionBinding, executeControlsEffectLifecycle: true,
+    validate: (toolName, args, frozenEntry) => {
+      validated.add(toolName)
+      validateCodexFrozenToolExecution({ binding: executionBinding, toolName, args, frozenEntry })
+    },
+    executeWithContext: context => executeToolCall('browser_sequence', { steps }, { ...page.context, ...context }),
+  })
+  const result = await f.bridge.execute(request({ tool: 'browser_sequence', arguments: { steps } }))
+  assert.equal(result.success, true, JSON.stringify(result))
+  assert.deepEqual([...validated].sort(), ['browser_press_key', 'browser_sequence', 'browser_snapshot', 'browser_type'])
+  assert.equal(page.actions.length, 2)
+  assert.equal(page.outcomes.length, 2)
+  assert.equal(page.observations.length, 1)
+  assert.equal(f.executions(), 1)
+  assert.equal(f.persistence.requestRpcClaims.size, 1)
+  assert.equal(f.receipts.records.size, 1)
+  assert.equal(f.persistence.deliveryCount, 1)
+  const receipt = [...f.receipts.records.values()][0]
+  assert.equal((receipt.output.data?.steps as unknown[]).length, 3)
+  await assert.rejects(f.bridge.execute({ ...request({ tool: 'browser_sequence', arguments: { steps } }), requestId: 8 }),
+    (error) => error instanceof CodexToolBridgeError && error.code === 'tool_result_replay_forbidden')
+  assert.equal(page.actions.length, 2)
 })
 
 test('production bridge executes the real completion declaration from the live failed-turn shape', async () => {

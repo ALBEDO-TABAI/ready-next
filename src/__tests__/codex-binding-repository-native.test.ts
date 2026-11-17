@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { disabledReadyMemorySnapshot } from './utils/ready-memory-fixture'
+import { browserSequenceFixture } from './utils/browser-sequence-fixture'
 import { ReadyMemoryRepository } from '../main/modules/agent-control/ready-memory/ready-memory-repository'
 import { FrozenCallStore } from '../main/modules/agent-control/safety/frozen-call-store'
 import { resolveExplicitRetryTailPlan } from '../main/modules/agent-control/codex-runtime/codex-history-continuity-policy'
@@ -7112,11 +7113,12 @@ test('tool-call binding is exact-once and process leases require stable tree-zer
 })
 
 test('the final Browser tool slot is observe-only at both gateway and durable admission', async (t) => {
-  await withRepository(t, (db, repository) => {
+  for (const mutationTool of ['browser_press_key', 'browser_sequence']) {
+  await withRepository(t, async (db, repository) => {
     const run = prepared('run-browser-observation-reserve')
     run.readyToolSurface = buildReadyToolSurface({
       surfaceId: 'surface-browser-observation-reserve',
-      toolDefinitions: ['browser_snapshot', 'browser_press_key', 'ready_read'].map((name) => ({
+      toolDefinitions: ['browser_snapshot', 'browser_press_key', 'browser_sequence', 'ready_read'].map((name) => ({
         name, groupId: 'agent_interaction', domain: 'browser', kind: 'read',
         concurrency: 'parallel_read_safe', interruptBehavior: 'abort_signal', timeoutProfile: 'default',
         supportsTextBridge: true, projectionHint: null, description: `Fixture ${name}`,
@@ -7177,7 +7179,7 @@ test('the final Browser tool slot is observe-only at both gateway and durable ad
     }
     assert.deepEqual(
       [...(repository.readModelGatewayBinding(gatewayInput).allowedToolNames || [])].sort(),
-      ['browser_press_key', 'browser_snapshot', 'ready_read'],
+      ['browser_press_key', 'browser_sequence', 'browser_snapshot', 'ready_read'],
     )
 
     const insertGatewayReceipt = (receiptId: string) => db.prepare(`
@@ -7194,9 +7196,23 @@ test('the final Browser tool slot is observe-only at both gateway and durable ad
     repository.admitToolResponseGroup({
       gatewayRequestReceiptId: 'gateway-browser-mutation-1',
       readyRunId: run.runId, codexThreadId: 'thread-native-1', codexTurnId: 'turn-native-1',
-      calls: [{ codexCallId: 'call-browser-mutation-1', toolName: 'browser_press_key', argsDigest: 'args-1' }],
+      calls: [{ codexCallId: 'call-browser-mutation-1', toolName: mutationTool, argsDigest: 'args-1' }],
       admittedAt,
     })
+    if (mutationTool === 'browser_sequence') {
+      const page = browserSequenceFixture()
+      try {
+        const output = await executeToolCall('browser_sequence', { steps: [
+          ...Array.from({ length: 5 }, () => ({ tool: 'browser_type', args: { selector: '#amount', text: '42' } })),
+          { tool: 'browser_snapshot', args: {} },
+        ] }, page.context)
+        assert.equal(output.data?.ok, true, output.text)
+        assert.equal(page.actions.length, 5)
+        assert.equal(page.observations.length, 1)
+        assert.equal(db.prepare('SELECT SUM(tool_call_count) AS calls FROM codex_tool_group_admissions').get<{ calls: number }>()?.calls, 1)
+        assert.equal(db.prepare('SELECT COUNT(*) AS calls FROM codex_tool_call_admissions').get<{ calls: number }>()?.calls, 1)
+      } finally { page.lease.release() }
+    }
     const reserved = repository.readModelGatewayBinding(gatewayInput)
     assert.deepEqual(reserved.allowedToolNames, ['browser_snapshot'])
     assert.equal(reserved.toolCallsExhausted, false)
@@ -7206,7 +7222,7 @@ test('the final Browser tool slot is observe-only at both gateway and durable ad
       () => repository.admitToolResponseGroup({
         gatewayRequestReceiptId: 'gateway-browser-mutation-2',
         readyRunId: run.runId, codexThreadId: 'thread-native-1', codexTurnId: 'turn-native-1',
-        calls: [{ codexCallId: 'call-browser-mutation-2', toolName: 'browser_press_key', argsDigest: 'args-2' }],
+        calls: [{ codexCallId: 'call-browser-mutation-2', toolName: mutationTool, argsDigest: 'args-2' }],
         admittedAt,
       }),
       (error) => error instanceof CodexBindingRepositoryError
@@ -7224,6 +7240,7 @@ test('the final Browser tool slot is observe-only at both gateway and durable ad
     assert.deepEqual(exhausted.allowedToolNames, [])
     assert.equal(exhausted.toolCallsExhausted, true)
   })
+  }
 })
 
 test('current-document turns cannot publish without an exact successful read receipt', async (t) => {

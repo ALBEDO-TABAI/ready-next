@@ -313,6 +313,8 @@ export async function executeBrowserTool(
   },
 ): Promise<string | ToolExecutionOutput> {
   log(`executeBrowserTool ${JSON.stringify(sanitizeBrowserToolLogArgs(toolName, args))}`)
+  // A sequence is only ever unfolded by the tool executor, where each step is admitted on its own.
+  if (toolName === 'browser_sequence') return createBrowserStructuredOutput({ ok: false, errorKind: 'browser_sequence_requires_tool_executor' })
   try {
     const ownerRunId = String(taskExecutionContext?.ownerRunId || '').trim()
     const invocation = resolveBrowserToolInvocation(toolName, args, taskExecutionContext?.inputSource)

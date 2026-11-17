@@ -52,6 +52,8 @@ import {
   type ToolInteractionHint,
 } from '../agent-control/tools-runtime/tool-result-types'
 import { executeBrowserTool } from './browser-tools'
+import { executeBrowserSequence } from './browser-sequence'
+import type { BrowserSequenceInput } from '../../../shared/browser-sequence'
 import type { BrowserTurnLease } from '../browser-engine/agent-browser-turn-lease'
 import { resolveBrowserToolSurfaceBinding } from '../browser-engine/browser-surface-binding'
 import { browserSnapshotService, parseBrowserSnapshotRef } from '../browser-engine/browser-snapshot-service'
@@ -150,6 +152,16 @@ export interface ToolContext {
     readyActionId: string
     actionIdentityDigest: string
   } | null
+  /**
+   * Set by `browser_sequence` on the context of each step it runs. A step never opens a confirmation
+   * card: one that needs the user's consent is turned away and has to be called on its own.
+   */
+  browserSequenceStep?: { step: number; of: number } | null
+  /**
+   * Provided by the Codex bridge: checks a tool call made on behalf of the current one (a sequence step)
+   * against this turn's frozen tool surface, authorization and schema. Throws when the turn may not make it.
+   */
+  assertNestedToolCall?: ((toolName: string, args: Record<string, unknown>) => void) | null
   abortSignal?: AbortSignal
   onToolEffectStart?: () => void
   onToolEffectEnd?: () => void
@@ -323,6 +335,7 @@ function browserTabsAction(args: Record<string, unknown>): string {
 }
 
 function browserToolTargetsReferencedPage(toolName: string, args: Record<string, unknown>): boolean {
+  if (toolName === 'browser_sequence') return false
   if (toolName === 'browser_task' || toolName === 'browser_research') return false
   if (toolName !== 'browser_tabs') return true
   const action = browserTabsAction(args)
@@ -728,7 +741,7 @@ async function executeToolCallInner(
         reason: `允许调用 ${preparedPageTool.origin} 的网页工具；该工具可能修改页面或产生外部后果。` }
     }
     let originsToApprove: string[] = []
-    if (definition.domain === 'browser' && trustedBrowserPageRef && context.browserController
+    if (definition.domain === 'browser' && toolName !== 'browser_sequence' && trustedBrowserPageRef && context.browserController
       && (preparedPageTool ? webMcpToolWrites(preparedPageTool.tool) : isBrowserOriginWrite(toolName, args))) {
       const controller = context.browserController
       const stale = await assertTrustedBrowserPageIdentity(controller, trustedBrowserPageRef, toolName === 'browser_dialog')
@@ -787,6 +800,11 @@ async function executeToolCallInner(
       )
     }
     if (confirmation.action === 'confirm') {
+      if (context.browserSequenceStep) {
+        // A sequence never waits on the user mid-way: the step is turned away before any card, action or lease.
+        return deniedOutput(ACTION_CONFIRMATION_ERROR_KINDS.deniedPendingConfirmation.code,
+          `这一步需要用户确认，连续动作不会代为确认；请单独调用 ${toolName}。${confirmation.reason}`, { notExecuted: true })
+      }
       const pendingDeniedText = `工具 ${toolName} 需要用户确认后才能执行（${confirmation.mode}：${confirmation.reason}）。`
         + '本次调用未执行；请先向用户说明你要做什么并征得明确同意，或改用只读/不落地的替代路径。'
       const frozenCallStore = getFrozenCallStore()
@@ -867,7 +885,7 @@ async function executeToolCallInner(
     }
   }
 
-  context.onToolEffectStart?.()
+  if (toolName !== 'browser_sequence') context.onToolEffectStart?.()
   try {
     const rawResult = await (async () => {
       switch (definition.domain) {
@@ -938,6 +956,9 @@ async function executeToolCallInner(
                 : {}),
               replayAllowed: false,
             })
+          }
+          if (toolName === 'browser_sequence') {
+            return executeBrowserSequence(args as BrowserSequenceInput, context, executeToolCall)
           }
           // WP2 — the public browser dispatcher resolves the physical target
           // before choosing user-view vs grounded agent-view on this turn lease.
@@ -1400,7 +1421,7 @@ async function executeToolCallInner(
       },
     })
   } finally {
-    context.onToolEffectEnd?.()
+    if (toolName !== 'browser_sequence') context.onToolEffectEnd?.()
   }
 }
 

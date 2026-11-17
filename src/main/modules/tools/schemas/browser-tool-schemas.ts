@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { BROWSER_SEQUENCE_SCHEMA } from '../../../../shared/browser-sequence'
 
 const tabId = z.string().optional().describe('目标标签页 ID；省略时使用当前活动标签页')
 const normalizedCoordinate = (description: string) => z.number().min(0).max(999).optional().describe(description)
@@ -95,6 +96,7 @@ export const BROWSER_TOOL_SCHEMAS = {
     }
   }),
 
+  browser_sequence: BROWSER_SEQUENCE_SCHEMA,
   browser_click: z.object({
     ...targetFields,
     button: z.enum(['left', 'right', 'middle']).optional().describe('鼠标按钮，默认 left'),
