@@ -1,5 +1,6 @@
+import { isInside } from '../object-service/registry'
+import { relativeFileReference } from '../../utils/platform'
 import { readFileSync } from 'node:fs'
-import { relative } from 'node:path'
 import { ReadyCanvasSchema, serializeCanvas, validateCanvasCollection } from '../../../shared/ready-canvas'
 import { rewriteMarkdownMediaRefs } from '../../../shared/markdown-asset-refs'
 import { extractObjectLinks } from '../search-engine/object-link-extract'
@@ -23,8 +24,8 @@ export async function repairCanvasPageMoves(service: CanvasService, group: Objec
 export function canvasPageMoveIds(service: CanvasService, group: ObjectMoveGroup): string[] {
   const changes = group.status === 'present' ? canvasChanges(service, group) : []
   if (group.status === 'present' && group.objects.every(o => o.status === 'present')) {
-    const objects = service.registry.list().filter(o => o.status === 'present' && o.current_path?.startsWith(group.root + '/'))
-    const paths = new Map(objects.map(o => [o.id, movedPath(relative(group.root, o.current_path!), group)]))
+    const objects = service.registry.list().filter(o => o.status === 'present' && o.current_path && isInside(group.root, o.current_path))
+    const paths = new Map(objects.map(o => [o.id, movedPath(relativeFileReference(group.root, o.current_path!), group)]))
     const entries = objects.filter(o => o.kind === 'canvas').map(o => ({ path: paths.get(o.id)!, canvas: ReadyCanvasSchema.parse(JSON.parse(changes.find(c => c.objectId === o.id)?.content ?? readFileSync(o.current_path!, 'utf8'))) }))
     validateCanvasCollection(entries, paths, service.recycled())
   }
@@ -32,7 +33,7 @@ export function canvasPageMoveIds(service: CanvasService, group: ObjectMoveGroup
 }
 function canvasChanges(service: CanvasService, group: ObjectMoveGroup, title?: { objectId: string; value: string }) {
   const rewrite = (path: string) => movedPath(path, group)
-  return service.registry.list().filter(o => o.kind === 'canvas' && o.status === 'present' && o.current_path?.startsWith(group.root + '/')).flatMap(object => {
+  return service.registry.list().filter(o => o.kind === 'canvas' && o.status === 'present' && o.current_path && isInside(group.root, o.current_path)).flatMap(object => {
     const original = readFileSync(object.current_path!, 'utf8'), canvas = ReadyCanvasSchema.parse(JSON.parse(original))
     const before = serializeCanvas(canvas)
     if (title?.objectId === object.id) canvas.ready.title = title.value
@@ -44,12 +45,12 @@ function canvasChanges(service: CanvasService, group: ObjectMoveGroup, title?: {
       if (node.ready.media?.poster) node.ready.media.poster = rewrite(node.ready.media.poster)
     }
     const content = serializeCanvas(canvas)
-    return content === before ? [] : [{ objectId: object.id, path: relative(group.root, object.current_path!), original, content, affectedNodeIds: canvas.nodes.map(n => n.id) }]
+    return content === before ? [] : [{ objectId: object.id, path: relativeFileReference(group.root, object.current_path!), original, content, affectedNodeIds: canvas.nodes.map(n => n.id) }]
   })
 }
 
 function movedPath(path: string, group: ObjectMoveGroup): string {
-  const moves = group.moves.map(move => ({ source: relative(group.root, move.source), target: relative(group.root, move.target) })).sort((a, b) => b.source.length - a.source.length)
+  const moves = group.moves.map(move => ({ source: relativeFileReference(group.root, move.source), target: relativeFileReference(group.root, move.target) })).sort((a, b) => b.source.length - a.source.length)
   const move = moves.find(m => path === m.source || path.startsWith(m.source + '/'))
   return move ? move.target + path.slice(move.source.length) : path
 }

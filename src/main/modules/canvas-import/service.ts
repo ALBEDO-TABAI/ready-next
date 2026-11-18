@@ -1,6 +1,7 @@
+import { relativeFileReference } from '../../utils/platform'
 import { randomUUID } from 'node:crypto'
 import { readFile, readdir, lstat } from 'node:fs/promises'
-import { basename, dirname, extname, join, relative } from 'node:path'
+import { basename, dirname, extname, join } from 'node:path'
 import { z } from 'zod'
 import { CanvasIdSchema, CanvasPathSchema, StandardCanvasSchema, importJsonCanvas, importReadyboard, importStillroom, stableJson, serializeCanvas, type ImportAsset, type ReadyboardImportOptions } from '../../../shared/ready-canvas'
 import { READY_BOARD_STATE_SCRIPT_ID } from '../../../shared/ready-board'
@@ -45,9 +46,9 @@ export class CanvasImportService {
           const walk = async (path: string): Promise<void> => {
             for (const entry of await readdir(path, { withFileTypes: true })) {
               const file = checkedPath(root, join(path, entry.name))
-              if (entry.isDirectory()) { if (request.mediaDirectory || relative(root, file).startsWith('assets')) await walk(file) }
-              else if ((await lstat(file)).isFile() && (request.mediaDirectory || relative(root, file).startsWith('assets/'))) {
-                const key = relative(root, file), bytes = await readFile(file)
+              if (entry.isDirectory()) { if (request.mediaDirectory || relativeFileReference(root, file).startsWith('assets')) await walk(file) }
+              else if ((await lstat(file)).isFile() && (request.mediaDirectory || relativeFileReference(root, file).startsWith('assets/'))) {
+                const key = relativeFileReference(root, file), bytes = await readFile(file)
                 assets.push({ source: request.kind === 'stillroom-json' ? `media/${key}` : key, content: bytes.toString('base64'), mime: mime(file), originalName: entry.name })
               }
             }

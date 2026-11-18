@@ -1,3 +1,4 @@
+import { protectPrivateDirectories } from '../../utils/windows-private-files'
 import { randomUUID } from 'node:crypto'
 import { chmodSync, mkdirSync } from 'node:fs'
 import { dirname, extname, join } from 'node:path'
@@ -34,9 +35,10 @@ export function backupBeforeObjectMigration(db: Pick<DatabaseConnection, 'prepar
   if (!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='file_identities'").get()) return null
   const directory = join(dirname(databasePath), 'backups')
   mkdirSync(directory, { recursive: true, mode: 0o700 })
+  if (process.platform === 'win32') protectPrivateDirectories([directory])
   const backup = join(directory, `before-objects-138-${Date.now()}-${randomUUID()}.sqlite`)
   db.prepare('VACUUM INTO ?').run(backup)
-  chmodSync(backup, 0o600)
+  if (process.platform !== 'win32') chmodSync(backup, 0o600)
   return backup
 }
 

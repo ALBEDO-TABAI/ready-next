@@ -1,4 +1,5 @@
-import { basename, extname, join, relative } from 'node:path'
+import { relativeFileReference } from '../../utils/platform'
+import { basename, extname, join } from 'node:path'
 import type { CanvasWriteResult } from '../../../shared/ready-canvas'
 import type { CanvasImportReceipt, CanvasImportService } from '../canvas-import/service'
 import { checkedPath, existsIgnoringCase, filename } from '../document-drafts/files'
@@ -17,7 +18,7 @@ export async function importStillroomSpace(services: { canvas: CanvasService; im
   if (canvas.holds(input.handleId) !== input.objectId) throw new Error('Canvas handle expired or belongs to another object')
   const parent = canvas.registry.get(input.objectId)
   if (!parent?.current_path || parent.status !== 'present') throw new Error('identity_conflict: canvas is unavailable')
-  const folder = relative(canvas.root, checkedPath(canvas.root, parent.current_path)).replace(/\.canvas$/i, '')
+  const folder = relativeFileReference(canvas.root, checkedPath(canvas.root, parent.current_path)).replace(/\.canvas$/i, '')
   const kind = extname(input.sourcePath).toLowerCase() === '.zip' ? 'stillroom-zip' as const : 'stillroom-json' as const
   const stem = filename(basename(input.sourcePath, extname(input.sourcePath)))
   let name = stem

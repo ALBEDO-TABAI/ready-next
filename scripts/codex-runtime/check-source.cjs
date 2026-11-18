@@ -86,7 +86,7 @@ function main() {
     assert(digestJson(readJson(filePath)) === bundle.semanticSha256, `Checked-in schema semantic drift: ${bundle.path}`)
   }
 
-  const binary = path.join(repoRoot, 'build/codex', sourceLock.targetTriple, 'codex')
+  const binary = path.join(repoRoot, 'build/codex', sourceLock.targetTriple, 'codex.exe')
   assert(fs.existsSync(binary), `Pinned development binary missing: ${binary}`)
   assert(digestFile(binary) === manifest.binarySha256, 'Pinned development binary digest mismatch')
   assert(run(binary, ['--version']) === `codex-cli ${manifest.codexVersion}`, 'Binary version mismatch')

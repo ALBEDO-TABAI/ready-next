@@ -95,7 +95,8 @@ const FORBIDDEN_HOME_LEAVES: ReadonlyArray<string> = [
 function normalizePath(input: string): string {
   if (!input) return input
   // Collapse double-slashes
-  let p = input.replace(/\/{2,}/g, '/')
+  let p = /^[A-Za-z]:[\\/]/.test(input) ? input.replace(/\\/g, '/') : input
+  p = p.replace(/\/{2,}/g, '/')
   // Strip trailing slash unless this is the root '/'
   if (p.length > 1) p = p.replace(/\/+$/, '')
   return p
@@ -105,7 +106,7 @@ function isAbsolutePath(path: string): boolean {
   if (!path) return false
   // Unix absolute path
   if (path.startsWith('/')) return true
-  // Windows: C:\ or C:/  (we don't ship Windows yet but be defensive)
+  // Windows: C:\ or C:/
   if (/^[A-Za-z]:[\\/]/.test(path)) return true
   return false
 }
@@ -212,7 +213,9 @@ export function validateWorkspaceRoot(
   // ~/Library, ~/Desktop, ~/Documents (root level), … via supplied homeDir
   if (options.homeDir) {
     const homeDir = normalizePath(options.homeDir)
-    if (path === homeDir) {
+    const inWindowsHome = /^[A-Za-z]:\//.test(homeDir)
+    const samePath = (a: string, b: string) => inWindowsHome ? a.toLowerCase() === b.toLowerCase() : a === b
+    if (samePath(path, homeDir)) {
       return {
         ok: false,
         reason: 'forbidden_user_root',
@@ -220,7 +223,7 @@ export function validateWorkspaceRoot(
       }
     }
     for (const leaf of FORBIDDEN_HOME_LEAVES) {
-      if (path === `${homeDir}/${leaf}`) {
+      if (samePath(path, `${homeDir}/${leaf}`)) {
         return {
           ok: false,
           reason: 'forbidden_personal_dir',

@@ -4,6 +4,7 @@ import {
   accessSync,
   chmodSync,
   constants,
+  lstatSync,
   mkdirSync,
   readFileSync,
   renameSync,
@@ -11,6 +12,8 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { isAbsolute, join, resolve } from 'node:path'
+
+import { protectPrivateDirectories, verifyPrivateFile } from '../../../utils/windows-private-files'
 
 type JsonObject = Record<string, unknown>
 
@@ -395,8 +398,8 @@ export function resolveCodexRuntimePaths(input: {
     throw new CodexRuntimeHostError('runtime_target_triple_invalid')
   }
   const binaryPath = resolve(input.isPackaged
-    ? join(assetRoot, manifest.targetTriple, 'codex')
-    : join(input.appPath, 'build/codex', manifest.targetTriple, 'codex'))
+    ? join(assetRoot, manifest.targetTriple, 'codex.exe')
+    : join(input.appPath, 'build/codex', manifest.targetTriple, 'codex.exe'))
   return { assetRoot, binaryPath }
 }
 
@@ -608,7 +611,8 @@ function renderIsolationConfig(input: {
 
 function ensurePrivateDirectory(path: string): void {
   mkdirSync(path, { recursive: true, mode: 0o700 })
-  chmodSync(path, 0o700)
+  if (lstatSync(path).isSymbolicLink()) throw new CodexRuntimeHostError('runtime_directory_symlink')
+  if (process.platform !== 'win32') chmodSync(path, 0o700)
 }
 
 export function prepareCodexRuntimeState(input: {
@@ -623,9 +627,11 @@ export function prepareCodexRuntimeState(input: {
   const codexHome = join(stateDir, 'codex-home')
   const threadCwdRoot = join(stateDir, 'threads')
   const runtimeTmpDir = join(stateDir, 'tmp')
-  for (const path of [stateDir, homeDir, codexHome, threadCwdRoot, runtimeTmpDir]) {
+  const directories = [stateDir, homeDir, codexHome, threadCwdRoot, runtimeTmpDir]
+  for (const path of directories) {
     ensurePrivateDirectory(path)
   }
+  if (process.platform === 'win32') protectPrivateDirectories(directories)
   renderIsolationConfig({
     contract: input.contracts.nativeIsolationConfigContract,
     gatewayUrl: input.gatewayUrl,
@@ -667,8 +673,9 @@ export function activateCodexGatewaySpawnConfig(input: {
   chmodSync(input.state.configPath, 0o600)
   if (
     readFileSync(input.state.configPath, 'utf8') !== config
-    || (statSync(input.state.configPath).mode & 0o777) !== 0o600
+    || (process.platform !== 'win32' && (statSync(input.state.configPath).mode & 0o777) !== 0o600)
   ) throw new CodexRuntimeHostError('gateway_spawn_config_readback_mismatch')
+  if (process.platform === 'win32') verifyPrivateFile(input.state.configPath)
   return {
     sidecarSpawnInstanceId: input.sidecarSpawnInstanceId,
     gatewayUrl: input.gatewayUrl,

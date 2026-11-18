@@ -1,13 +1,14 @@
+import { relativeFileReference } from '../../utils/platform'
 import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { readFile, unlink } from 'node:fs/promises'
-import { dirname, join, relative } from 'node:path'
+import { dirname, join } from 'node:path'
 import { z } from 'zod'
 import { applyCanvasOperations, subBoardEffects, CanvasIdSchema, CanvasPathSchema, graphicSvg, readCanvas, ReadyCanvasSchema, serializeCanvas, stableJson, validateCanvasCollection, type CanvasWriteRequest, type CanvasWriteResult, type CanvasReceipt, type CanvasOperation, type ReadyCanvas, type CanvasBufferConfirmation, type CardMoveDetail, type SubBoardEffects } from '../../../shared/ready-canvas'
 import { checkedPath, ensureDirectory, hashBytes, publishNewFile, stageFile, vaultRoot } from '../document-drafts/files'
 import { publishFileAtomically } from '../document-engine/atomic-file-publish'
 import { withDocumentPathLock } from '../document-engine/document-write-service'
-import { ObjectRegistry, objectTransaction } from '../object-service/registry'
+import { isInside, ObjectRegistry, objectTransaction } from '../object-service/registry'
 import { ObjectLinkRepository } from '../search-engine/object-links'
 import { extractCanvasLinks } from '../search-engine/canvas-links'
 import { BufferSchema, CreateSchema, WriteSchema, type CanvasBuffer } from './schema'
@@ -69,7 +70,7 @@ export class CanvasService {
     if (parsed.mode !== 'editable') throw new Error('Readonly canvas version')
     if (parsed.canvas.ready.id !== objectId) throw new Error('identity_conflict: embedded identity changed')
     const handleId = randomUUID(); this.handles.set(handleId, objectId)
-    return { objectId, handleId, path: relative(this.root, path), version: hashBytes(content), canvas: parsed.canvas }
+    return { objectId, handleId, path: relativeFileReference(this.root, path), version: hashBytes(content), canvas: parsed.canvas }
   }
   async read(handleId: string): Promise<CanvasOpen> {
     const objectId = this.handles.get(handleId)
@@ -144,7 +145,7 @@ export class CanvasService {
       if (this.handles.get(request.handleId) !== request.objectId) throw new Error('Canvas handle expired or belongs to another object')
       const path = this.objectPath(request.objectId), original = await readFile(path, 'utf8')
       if (hashBytes(original) !== request.expectedVersion) {
-        this.record({ root: this.root, path: relative(this.root, path), objectId: request.objectId, operationId: request.operationId, original, content: original, files: [], affectedNodeIds: [] }, fingerprint)
+        this.record({ root: this.root, path: relativeFileReference(this.root, path), objectId: request.objectId, operationId: request.operationId, original, content: original, files: [], affectedNodeIds: [] }, fingerprint)
         return this.saveResult(request.operationId, 'conflict', { state: 'conflict', operationId: request.operationId, conflict: { code: 'version_conflict', message: 'Canvas changed on disk', nodeIds: [], actualVersion: hashBytes(original) } })
       }
       const before = ReadyCanvasSchema.parse(JSON.parse(original)), files: CanvasFile[] = [], operations: CanvasOperation[] = []
@@ -153,7 +154,7 @@ export class CanvasService {
         else if (command.type === 'importAttachment') {
           const asset = this.assets.get(command.sourceToken)
           if (!asset || command.node.type !== 'file') throw new Error('Attachment token unavailable or invalid file node')
-          const hash = hashBytes(asset.bytes), target = `${relative(this.root, path).slice(0, -7)}.assets/${hash}-${asset.name}`
+          const hash = hashBytes(asset.bytes), target = `${relativeFileReference(this.root, path).slice(0, -7)}.assets/${hash}-${asset.name}`
           files.push({ path: target, content: asset.bytes.toString('base64'), sha256: hash })
           operations.push({ type: 'addNode', node: { ...command.node, file: target } })
           if (asset.stagedAt !== undefined) this.assets.delete(command.sourceToken) // [cv-media] staged bytes are used once
@@ -166,18 +167,18 @@ export class CanvasService {
       let canvas: ReadyCanvas
       try { canvas = applyCanvasOperations(before, operations).canvas } catch (error) {
         if (!(error instanceof Error) || !error.message.startsWith('text_conflict:')) throw error
-        this.record({ root: this.root, path: relative(this.root, path), objectId: request.objectId, operationId: request.operationId, original, content: original, files: [], affectedNodeIds: [] }, fingerprint)
+        this.record({ root: this.root, path: relativeFileReference(this.root, path), objectId: request.objectId, operationId: request.operationId, original, content: original, files: [], affectedNodeIds: [] }, fingerprint)
         return this.saveResult(request.operationId, 'conflict', { state: 'conflict', operationId: request.operationId, conflict: { code: 'text_conflict', message: error.message, nodeIds: operations.flatMap(op => op.type === 'textRanges' ? [op.id] : []) } })
       }
       for (const node of canvas.nodes) if (node.type === 'file' && node.ready.graphic) {
         const svg = graphicSvg(node.ready.graphic, node.width, node.height), bytes = Buffer.from(svg)
-        const target = `${relative(this.root, path).slice(0, -7)}.assets/${hashBytes(bytes)}.svg`
+        const target = `${relativeFileReference(this.root, path).slice(0, -7)}.assets/${hashBytes(bytes)}.svg`
         node.file = target
         if (!existsSync(this.location(target))) files.push({ path: target, content: bytes.toString('base64'), sha256: hashBytes(bytes) })
       }
       const affected = new Set([...before.nodes, ...canvas.nodes].filter(node => JSON.stringify(before.nodes.find(n => n.id === node.id)) !== JSON.stringify(canvas.nodes.find(n => n.id === node.id))).map(n => n.id))
       const subBoards = subBoardEffects(before, canvas)
-      const plan: CanvasPlan = { root: this.root, path: relative(this.root, path), objectId: request.objectId, operationId: request.operationId, original, content: serializeCanvas(canvas), files, affectedNodeIds: [...affected], ...(subBoards.restore.length || subBoards.trash.length ? { subBoards } : {}) }
+      const plan: CanvasPlan = { root: this.root, path: relativeFileReference(this.root, path), objectId: request.objectId, operationId: request.operationId, original, content: serializeCanvas(canvas), files, affectedNodeIds: [...affected], ...(subBoards.restore.length || subBoards.trash.length ? { subBoards } : {}) }
       this.record(plan, fingerprint)
       return this.execute(plan)
     })
@@ -228,7 +229,7 @@ export class CanvasService {
   /** Objects in the library bin: a sub-board card whose file is there waits for it instead of failing the board. */
   recycled(): Set<string> { return new Set(this.registry.list().filter(o => o.status === 'trashed').map(o => o.id)) }
   private validate(plan: CanvasPlan): void {
-    const entries = this.registry.list().filter(o => o.kind === 'canvas' && o.status === 'present' && o.current_path?.startsWith(this.root + '/') && o.id !== plan.objectId).map(o => ({ path: relative(this.root, checkedPath(this.root, o.current_path!)), canvas: ReadyCanvasSchema.parse(JSON.parse(readFileSync(o.current_path!, 'utf8'))) }))
+    const entries = this.registry.list().filter(o => o.kind === 'canvas' && o.status === 'present' && o.current_path && isInside(this.root, o.current_path) && o.id !== plan.objectId).map(o => ({ path: relativeFileReference(this.root, checkedPath(this.root, o.current_path!)), canvas: ReadyCanvasSchema.parse(JSON.parse(readFileSync(o.current_path!, 'utf8'))) }))
     const next = { path: plan.path, canvas: ReadyCanvasSchema.parse(JSON.parse(plan.content)) }
     for (const file of plan.files.filter(f => f.path.endsWith('.canvas'))) {
       const child = { path: file.path, canvas: ReadyCanvasSchema.parse(JSON.parse(Buffer.from(file.content, 'base64').toString())) }
@@ -236,7 +237,7 @@ export class CanvasService {
       if (existing >= 0) entries.splice(existing, 1)
       entries.push(child)
     }
-    const objects = new Map(this.registry.list().filter(o => o.status === 'present' && o.current_path).map(o => [o.id, relative(this.root, o.current_path!)]))
+    const objects = new Map(this.registry.list().filter(o => o.status === 'present' && o.current_path).map(o => [o.id, relativeFileReference(this.root, o.current_path!)]))
     validateCanvasCollection([...entries, next], objects, this.recycled())
     if (next.canvas.ready.id !== plan.objectId) throw new Error('identity_conflict')
   }

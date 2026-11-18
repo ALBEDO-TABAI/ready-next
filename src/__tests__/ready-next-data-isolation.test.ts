@@ -14,6 +14,11 @@ test('C15 rejects daily data and realpath aliases, while allowing independent pr
   const check = (userData: string, dbOverride?: string) =>
     assertReadyNextDataIsolation(userData, resolveReadyDatabasePath(userData, dbOverride), home)
   try {
+    if (process.platform === 'win32') {
+      const dailyWindows = join(home, 'AppData', 'Roaming', 'Ready')
+      assert.throws(() => check(join(dailyWindows, 'READY.DB')), ReadyNextDataIsolationError)
+      assert.doesNotThrow(() => check(dailyWindows + ' Next'))
+    }
     // The protected directory need not exist yet.
     assert.doesNotThrow(() => check(next))
     assert.throws(() => check(daily), ReadyNextDataIsolationError)

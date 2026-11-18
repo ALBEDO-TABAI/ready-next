@@ -19,6 +19,7 @@ import {
 import { executeFileManagementMutationTool } from './file-management-organize-tools'
 import {
   assertInsideWorkspace,
+  isPathInsideRoot,
   authorizeRoot,
   collectFileInventory,
   normalizeExplicitWorkspaceRoots,
@@ -509,8 +510,7 @@ async function resolveReadableDocumentPath(
 
   const rootRealPath = await realpath(guard.root)
   const targetRealPath = await realpath(path)
-  const rootPrefix = rootRealPath.endsWith('/') ? rootRealPath : `${rootRealPath}/`
-  if (targetRealPath !== rootRealPath && !targetRealPath.startsWith(rootPrefix)) {
+  if (!isPathInsideRoot(targetRealPath, rootRealPath)) {
     return {
       ok: false,
       output: {

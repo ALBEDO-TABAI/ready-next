@@ -128,7 +128,7 @@ export class DocumentPageService {
   }
   trash(root: string): PageTrashEntry[] {
     return this.registry.db.prepare("SELECT * FROM document_page_operations WHERE state='committed' AND json_extract(request_json,'$.type')='trash' AND json_extract(request_json,'$.root')=?").all<RecordRow>(vaultRoot(root))
-      .filter(row => { const receipt: PageReceipt = JSON.parse(row.receipt_json!); const object = this.registry.get(receipt.objectId); return object?.status === 'trashed' && object.last_known_path.includes(`/.ready/trash/${row.id}/`) })
+      .filter(row => { const receipt: PageReceipt = JSON.parse(row.receipt_json!); const object = this.registry.get(receipt.objectId); return object?.status === 'trashed' && isInside(join(root, '.ready', 'trash', row.id), object.last_known_path) })
       .map(row => {
         const receipt: PageReceipt = JSON.parse(row.receipt_json!), intent: Intent = JSON.parse(row.intent_json)
         if (intent.kind !== 'group') throw new Error('Invalid trash manifest')

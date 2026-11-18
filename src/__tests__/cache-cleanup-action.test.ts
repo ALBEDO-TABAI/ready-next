@@ -12,6 +12,7 @@
  */
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { sep } from 'node:path'
 import type { Stats, Dirent } from 'node:fs'
 
 import {
@@ -35,13 +36,13 @@ function makeFs(layout: FsLayout) {
   const rmFailures = layout.rmFailures ?? {}
 
   const existsSync = (p: unknown): boolean => {
-    const path = typeof p === 'string' ? p : String(p)
+    const path = String(p).split(sep).join('/')
     if (layout.dirs[path] === 'missing') return false
     return layout.dirs[path] !== undefined || layout.files[path] !== undefined
   }
 
   const readdirSync = (p: unknown): Dirent[] => {
-    const path = typeof p === 'string' ? p : String(p)
+    const path = String(p).split(sep).join('/')
     const entry = layout.dirs[path]
     if (!entry || entry === 'missing') {
       const err = new Error(`ENOENT: ${path}`) as NodeJS.ErrnoException
@@ -63,7 +64,7 @@ function makeFs(layout: FsLayout) {
   }
 
   const statSync = (p: unknown): Stats => {
-    const path = typeof p === 'string' ? p : String(p)
+    const path = String(p).split(sep).join('/')
     const size = layout.files[path]
     if (size === undefined) {
       const err = new Error(`ENOENT: ${path}`) as NodeJS.ErrnoException
@@ -74,7 +75,7 @@ function makeFs(layout: FsLayout) {
   }
 
   const rmSync = (p: unknown): void => {
-    const path = typeof p === 'string' ? p : String(p)
+    const path = String(p).split(sep).join('/')
     if (rmFailures[path]) throw rmFailures[path]
     removed.push(path)
   }

@@ -8,6 +8,7 @@
  */
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { sep } from 'node:path'
 import type { Stats, Dirent } from 'node:fs'
 
 import {
@@ -27,7 +28,7 @@ interface FsLayout {
 
 function makeFs(layout: FsLayout) {
   const existsSync = (p: unknown): boolean => {
-    const path = typeof p === 'string' ? p : String(p)
+    const path = String(p).split(sep).join('/')
     if (layout.dirs[path] === 'missing') return false
     if (layout.dirs[path] !== undefined) return true
     if (layout.files[path] !== undefined) return true
@@ -35,7 +36,7 @@ function makeFs(layout: FsLayout) {
   }
 
   const readdirSync = (p: unknown, _opts?: unknown): Dirent[] => {
-    const path = typeof p === 'string' ? p : String(p)
+    const path = String(p).split(sep).join('/')
     const entry = layout.dirs[path]
     if (!entry || entry === 'missing') {
       const err = new Error(`ENOENT: ${path}`) as NodeJS.ErrnoException
@@ -58,7 +59,7 @@ function makeFs(layout: FsLayout) {
   }
 
   const statSync = (p: unknown): Stats => {
-    const path = typeof p === 'string' ? p : String(p)
+    const path = String(p).split(sep).join('/')
     const size = layout.files[path]
     if (size === undefined) {
       const err = new Error(`ENOENT: ${path}`) as NodeJS.ErrnoException
@@ -70,7 +71,7 @@ function makeFs(layout: FsLayout) {
 
   const removed: string[] = []
   const rmSync = (p: unknown, _opts?: unknown): void => {
-    const path = typeof p === 'string' ? p : String(p)
+    const path = String(p).split(sep).join('/')
     removed.push(path)
   }
 

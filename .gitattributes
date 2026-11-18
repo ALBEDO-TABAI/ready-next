@@ -1,1 +1,3 @@
+assets/codex-runtime/** -text
 src/__tests__/fixtures/ready-markdown/** -text
+src/__tests__/fixtures/organizer-brief.pdf binary

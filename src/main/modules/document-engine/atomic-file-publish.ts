@@ -92,7 +92,7 @@ function isReplacePermissionError(error: unknown): boolean {
 }
 
 async function syncFile(path: string, ops: AtomicPublishFileOps): Promise<void> {
-  const handle = await ops.open(path, 'r')
+  const handle = await ops.open(path, process.platform === 'win32' ? 'r+' : 'r')
   try {
     await handle.sync()
   } finally {
@@ -160,7 +160,7 @@ export async function publishFileAtomically(
   const backupPath = uniqueSiblingPath(publishTargetPath, 'ready-swap')
   const existing = await readIfPresent(() => ops.stat(publishTargetPath))
   if (existing) {
-    if (platform !== 'win32' && (existing.mode & 0o222) === 0) {
+    if ((existing.mode & 0o222) === 0) {
       throw new Error(`目标文件不可写：${targetPath}`)
     }
     await ops.access(publishTargetPath, constants.W_OK)

@@ -12,7 +12,7 @@ test('pinned app-server returns content-free process diagnostics', { timeout: 20
     'utf8',
   )) as { targetTriple: string; codexVersion: string }
   assert.equal(sourceLock.codexVersion, '0.160.1')
-  const binary = join(process.cwd(), 'build/codex', sourceLock.targetTriple, 'codex')
+  const binary = join(process.cwd(), 'build/codex', sourceLock.targetTriple, 'codex.exe')
   assert.equal(existsSync(binary), true)
 
   const root = mkdtempSync(join(tmpdir(), 'ready-codex-diagnostics-'))
@@ -98,7 +98,9 @@ test('pinned app-server returns content-free process diagnostics', { timeout: 20
     }
     assert.equal(diagnostics.process.id, child.pid)
     assert.ok(Number(diagnostics.process.residentMemoryBytes) > 0)
-    assert.ok(Number(diagnostics.process.physicalFootprintBytes) > 0)
+    if (process.platform !== 'win32' || diagnostics.process.physicalFootprintBytes != null) {
+      assert.ok(Number(diagnostics.process.physicalFootprintBytes) > 0)
+    }
     assert.ok(Array.isArray(diagnostics.gauges))
     for (const gauge of diagnostics.gauges) {
       assert.deepEqual(Object.keys(gauge).sort(), ['name', 'value'])
@@ -107,7 +109,7 @@ test('pinned app-server returns content-free process diagnostics', { timeout: 20
     }
     assert.deepEqual(Object.keys(diagnostics).sort(), ['gauges', 'process'])
     assert.deepEqual(Object.keys(diagnostics.process).sort(), [
-      'id', 'physicalFootprintBytes', 'residentMemoryBytes',
+      'id', ...('physicalFootprintBytes' in diagnostics.process ? ['physicalFootprintBytes'] : []), 'residentMemoryBytes',
     ])
   } finally {
     lines.close()

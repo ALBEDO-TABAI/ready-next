@@ -41,6 +41,8 @@ files:
   - "!node_modules/react-dom/**"
   - "!node_modules/react-pdf/**"
   - "!node_modules/remotion/**"
+  - "!node_modules/better-sqlite3/build/**"
+  - "node_modules/better-sqlite3/build/Release/better_sqlite3.node"
   - "!node_modules/**/build/node_gyp_bins/**"
   - "!node_modules/**/.npmrc*"
   - "!node_modules/**/docs/**"
@@ -72,13 +74,12 @@ extraResources:
     to: runtime-continuity
     filter:
       - "**/*"
-  - from: build/codex/aarch64-apple-darwin/codex
-    to: codex-runtime/aarch64-apple-darwin/codex
+  - from: build/codex/x86_64-pc-windows-msvc/codex.exe
+    to: codex-runtime/x86_64-pc-windows-msvc/codex.exe
   - from: node_modules/better-sqlite3/build
     to: better-sqlite3/build
     filter:
-      - "**/*"
-      - "!node_gyp_bins/**"
+      - "Release/better_sqlite3.node"
   - from: assets/embedded-skills
     to: embedded-skills
     filter:
@@ -107,6 +108,10 @@ extraResources:
       - "**/*"
       - "!**/__pycache__/**"
       - "!**/*.py[co]"
+win:
+  target:
+    - target: nsis
+      arch: [x64]
 mac:
   category: public.app-category.productivity
   target:

@@ -5,10 +5,12 @@ on:
   push:
     branches:
       - main
+      - windows
       - 'codex/**'
   pull_request:
     branches:
       - main
+      - windows
 
 concurrency:
   group: ready-windows-packaged-smoke-${{ github.ref }}
@@ -27,7 +29,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20.19.1'
+          node-version-file: '.node-version'
           cache: 'npm'
 
       - name: Setup Python for native rebuild
@@ -38,11 +40,25 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Prepare pinned Windows runtime and empty test seed
+        shell: pwsh
+        run: |
+          $lock = Get-Content assets/codex-runtime/source-lock.json -Raw | ConvertFrom-Json
+          $archive = Join-Path $env:RUNNER_TEMP $lock.releaseAsset.name
+          Invoke-WebRequest $lock.releaseAsset.url -OutFile $archive
+          node scripts/codex-runtime/prepare-pinned-runtime.cjs --archive $archive
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Force build/runtime-seeds | Out-Null
+          Set-Content build/runtime-seeds/ai-settings.seed.json '{}' -Encoding utf8NoBOM
+
       - name: Build renderer and main process
         run: npm run build
 
+      - name: Generate packaged third-party notices
+        run: npm run licenses:generate
+
       - name: Package Windows app directory
-        run: npx electron-builder --config electron-builder.yml --win --dir
+        run: npx electron-builder --config electron-builder.yml --win --dir --publish never
 
       - name: Run packaged smoke
         run: node scripts/run-packaged-smoke.cjs --platform win32 --port 9335 --timeout 90000 --out test-results/windows-packaged-smoke.json

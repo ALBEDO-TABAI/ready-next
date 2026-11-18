@@ -1,3 +1,4 @@
+import { normalizePathForUrl, pathBasename } from '@shared/path-utils'
 import { READY_REF_MIME } from '../../../shared/ready-ref'
 import { dropPageTreeReference } from '../../modules/workbench/drop-page-tree'
 import { useMemo, useState, useRef, useEffect, useCallback, useLayoutEffect } from 'react'
@@ -384,7 +385,7 @@ export default function FileTree({
   const treeOrderedItems = useMemo(() => {
     if (pinnedFolders.length > 0) {
       const pinnedItems = pinnedFolders.filter((folderPath) => !rootFilter || rootFilter(folderPath)).map((folderPath) => ({
-        name: folderPath.split('/').pop() || folderPath,
+        name: pathBasename(folderPath),
         path: folderPath,
         isDirectory: true,
         size: 0,
@@ -705,10 +706,11 @@ export default function FileTree({
     const parentDir = targetDir || currentPath
     const vault = await window.electronAPI.vault.get()
     if (vault.status !== 'ready') { window.alert('请先配置资料库'); return }
-    const root = vault.root
-    if (parentDir !== root && !parentDir.startsWith(root + '/')) { window.alert('请在当前资料库中新建画板'); return }
+    const root = normalizePathForUrl(vault.root)
+    const directory = normalizePathForUrl(parentDir)
+    if (directory !== root && !directory.startsWith(root + '/')) { window.alert('请在当前资料库中新建画板'); return }
     const name = `新画板-${Date.now()}`
-    const path = `${parentDir.slice(root.length).replace(/^\//, '')}${parentDir === root ? '' : '/'}${name}.canvas`
+    const path = `${directory.slice(root.length).replace(/^\//, '')}${directory === root ? '' : '/'}${name}.canvas`
     const result = await window.electronAPI.canvas.create({ path, operationId: crypto.randomUUID() })
     if (!result.ok) { window.alert(result.error); return }
     await window.electronAPI.canvas.release(result.value.handleId)
@@ -1216,7 +1218,7 @@ export default function FileTree({
     if (pinnedFolders.length > 0) {
       const visiblePinned = pinnedFolders.filter((folderPath) => {
         if (rootFilter && !rootFilter(folderPath)) return false
-        const folderName = folderPath.split('/').pop() || folderPath
+        const folderName = pathBasename(folderPath)
         if (!filters.folder) return false
         if (!queryLower) return true
         if (folderName.toLowerCase().includes(queryLower)) return true
@@ -1236,7 +1238,7 @@ export default function FileTree({
         <>
           {emergenceNode}
           {visiblePinned.map((folderPath) => {
-        const folderName = folderPath.split('/').pop() || folderPath
+        const folderName = pathBasename(folderPath)
         const isExpanded = expandedDirs.has(folderPath)
         const children = dirChildren.get(folderPath) || []
         const browserDropLine =
@@ -1412,7 +1414,7 @@ export default function FileTree({
     if (pinnedFolders.length > 0) {
       const result: FileItem[] = []
       for (const folderPath of pinnedFolders) {
-        const folderName = folderPath.split('/').pop() || folderPath
+        const folderName = pathBasename(folderPath)
         if (!filters.folder) continue
         if (queryLower && !folderName.toLowerCase().includes(queryLower) && !hasMatchingDescendant(folderPath, queryLower, filters, dirChildren)) continue
         result.push({ name: folderName, path: folderPath, isDirectory: true, size: 0, modified: new Date() })
@@ -1432,7 +1434,7 @@ export default function FileTree({
 
   const gridDisplayPath = useMemo(() => {
     if (!effectiveGridPath) return null
-    return effectiveGridPath.split('/').pop() || effectiveGridPath
+    return pathBasename(effectiveGridPath)
   }, [effectiveGridPath])
   const gridContainerPath = effectiveGridPath ?? currentPath
   const gridOrderedPaths = useMemo(() => gridItems.map((item) => item.path), [gridItems])
@@ -1496,7 +1498,7 @@ export default function FileTree({
     ],
   )
   const handleOpenEmergenceFile = useCallback((path: string, _project: FileEmergenceProject) => {
-    const name = path.split('/').pop() || path
+    const name = pathBasename(path)
     handleOpenFile({
       name,
       path,

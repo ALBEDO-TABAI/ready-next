@@ -424,7 +424,7 @@ async function run() {
   const baseUrl = `http://127.0.0.1:${address.port}/v1`
   fs.writeFileSync(path.join(codexHome, 'config.toml'), buildConfig(baseUrl))
 
-  const binary = path.join(repoRoot, 'build/codex', sourceLock.targetTriple, 'codex')
+  const binary = path.join(repoRoot, 'build/codex', sourceLock.targetTriple, 'codex.exe')
   const childEnv = {
     PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
     LANG: 'en_US.UTF-8',

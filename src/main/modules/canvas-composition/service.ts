@@ -1,5 +1,6 @@
+import { relativeFileReference } from '../../utils/platform'
 import { randomUUID } from 'node:crypto'
-import { dirname, join, relative } from 'node:path'
+import { dirname, join } from 'node:path'
 import { z } from 'zod'
 import { CanvasComposeInputSchema, CanvasComposeReceiptSchema, CanvasPreviewInputSchema, DraftReceiptSchema,
   type CanvasComposeInput, type CanvasComposeReceipt, type CanvasPreviewInput, type DocumentDraft, type DraftFinalizeReceipt } from '../../../shared/document-drafts'
@@ -150,7 +151,7 @@ export class CanvasCompositionService {
         }
         const { draftId: _draft, draftLibraryId: _library, ...ready } = current.ready
         const { text: _text, ...geometry } = current
-        const card: CanvasNode | null = keep ? { ...geometry, type: 'file', file: relative(this.canvas.root, checkedPath(this.canvas.root, receipt.path)),
+        const card: CanvasNode | null = keep ? { ...geometry, type: 'file', file: relativeFileReference(this.canvas.root, checkedPath(this.canvas.root, receipt.path)),
           ready: { ...ready, kind: 'document', ref: { kind: 'page', id: receipt.objectId }, preview: { title: draft.finalize!.request.title } } } : null
         plan.finalization = { state: 'prepared', card, write: { operationId: `${receipt.operationId}:document-card`, objectId: opened.objectId, expectedVersion: opened.version,
           commands: card ? [{ type: 'replaceNode', node: card }] : [

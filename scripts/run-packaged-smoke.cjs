@@ -41,7 +41,7 @@ function parseArgs(argv) {
 }
 
 function defaultAppPath(platform) {
-  if (platform === 'win32') return path.join(ROOT, 'exports', 'win-unpacked', 'Ready.exe')
+  if (platform === 'win32') return path.join(ROOT, 'exports', 'win-unpacked', 'Ready Next.exe')
   if (platform === 'darwin') {
     return path.join(ROOT, 'exports', 'mac-arm64', 'Ready.app', 'Contents', 'MacOS', 'Ready')
   }
@@ -124,7 +124,7 @@ function openCdpClient(webSocketDebuggerUrl, timeoutMs) {
             const commandTimer = setTimeout(() => {
               pending.delete(id)
               rejectCommand(new Error(`Timed out waiting for CDP method ${method}`))
-            }, Math.min(timeoutMs, 10000))
+            }, timeoutMs)
             pending.set(id, {
               resolve: (value) => {
                 clearTimeout(commandTimer)

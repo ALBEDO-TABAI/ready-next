@@ -1,3 +1,4 @@
+import { verifyPrivateFile } from '../main/utils/windows-private-files'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs'
@@ -21,7 +22,8 @@ test('a database that still has file_identities is copied before the object migr
   const backup = backupBeforeObjectMigration(db, path)
   db.close()
   assert.ok(backup && backup.startsWith(join(dir, 'backups')), String(backup))
-  assert.equal(statSync(backup).mode & 0o777, 0o600)
+  if (process.platform === 'win32') verifyPrivateFile(backup)
+  else assert.equal(statSync(backup).mode & 0o777, 0o600)
   const copy = new Database(backup)
   assert.deepEqual(copy.prepare('SELECT file_key FROM file_identities').all(), [{ file_key: 'k1' }])
   copy.close()

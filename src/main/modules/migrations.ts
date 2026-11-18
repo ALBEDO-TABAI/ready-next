@@ -10,7 +10,7 @@ import { migrateCanvasComposition } from './canvas-composition/schema'
 import { DOCUMENT_DATABASE_MIGRATION, migrateDocumentDatabase } from './document-database/schema'
 import { DOCUMENT_PAGES_MIGRATION, migrateDocumentPages } from './document-pages/schema'
 import { migrateCalendarAttachmentReadyRefs, migrateCalendarAttachmentDisplayRefs } from './calendar-engine/ready-ref-migration'
-import { migrateObjectLinks } from './search-engine/object-link-schema'
+import { migrateObjectLinks, migrateObjectFilenameIndex } from './search-engine/object-link-schema'
 import { migrateDocumentDrafts, DOCUMENT_DRAFT_MIGRATION } from './document-drafts/schema'
 import { migrateObjects, OBJECT_MIGRATION } from './object-service/schema'
 import { migrateSearchReadyRefs } from './search-engine/ready-ref-migration'
@@ -4571,6 +4571,7 @@ const migrations: Migration[] = [
   { name: '160_search_titles_and_token_boundaries', up: migrateSearchTitlesAndTokenBoundaries },
   { name: '161_chat_message_replacement', up: migrateChatMessageReplacement },
   { name: RSS_PICTURES_MIGRATION, up: migrateRSSPictures },
+  { name: '163_portable_object_filename_index', up: migrateObjectFilenameIndex },
 ]
 
 /**

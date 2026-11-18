@@ -186,12 +186,14 @@ test('R3c smoke fixture persists real history and creates closed mappings on the
   const script = new URL('../../scripts/verify-ready-next-smoke-electron.cjs', import.meta.url).href
   const { seedCalendarHistory } = await import(script)
   const root = mkdtempSync(join(tmpdir(), 'ready-next-smoke-'))
-  t.after(() => rmSync(root, { recursive: true, force: true }))
+  let closeDatabase: (() => void) | undefined
+  t.after(() => { closeDatabase?.(); rmSync(root, { recursive: true, force: true }) })
   const { db } = fixture()
   db.exec(`VACUUM INTO '${join(root, 'ready.db').replaceAll("'", "''")}'`)
   db.close()
   const history = await seedCalendarHistory(root, { title: 'Second', seriesId: 'timed', second: 1793350800000, eventId: 'timed#1793350800' })
-  const reopened = new Database(join(root, 'ready.db')); t.after(() => reopened.close())
+  const reopened = new Database(join(root, 'ready.db'))
+  closeDatabase = () => reopened.close()
   const original = reopened.prepare('SELECT * FROM chat_messages WHERE id=?').get(history.closedMessageId)
   runMigrations(reopened)
   const chat = new ChatStore(() => reopened)

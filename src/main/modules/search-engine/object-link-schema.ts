@@ -2,6 +2,15 @@ import type { DatabaseConnection } from '../database/connection'
 import { parseReadyUri, toReadyUri } from '../../../shared/ready-ref'
 import { OBJECT_LINK_KINDS } from '../../../shared/object-links'
 
+// SQLite uses the identical expression for the filename lookup and its index.
+const normalizedPath = "replace(current_path, char(92), '/')"
+export const objectFilenameSql = `lower(substr(${normalizedPath}, length(rtrim(${normalizedPath}, replace(${normalizedPath}, '/', ''))) + 1))`
+
+export function migrateObjectFilenameIndex(db: Pick<DatabaseConnection, 'exec'>): void {
+  db.exec(`DROP INDEX objects_workspace_filename;
+    CREATE INDEX objects_workspace_filename ON objects(workspace_id, ${objectFilenameSql})`)
+}
+
 export function migrateObjectLinks(db: Pick<DatabaseConnection, 'exec' | 'prepare'>): void {
   db.exec(`CREATE TABLE object_links (
     id TEXT PRIMARY KEY NOT NULL,

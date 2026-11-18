@@ -23,7 +23,7 @@ import { disabledReadyMemorySnapshot } from './utils/ready-memory-fixture'
 // 2026-10-06: Codex turns could insert widgets but never saw Ready's component catalog, so the model guessed names.
 test('pinned runtime delivers the widget catalog every authorized turn without changing the instruction contract', { timeout: 30_000 }, async () => {
   const manifest = JSON.parse(readFileSync('assets/codex-runtime/runtime-manifest.json', 'utf8'))
-  const binary = join(process.cwd(), 'build/codex', manifest.targetTriple, 'codex')
+  const binary = join(process.cwd(), 'build/codex', manifest.targetTriple, 'codex.exe')
   assert.equal(createHash('sha256').update(readFileSync(binary)).digest('hex'), manifest.binarySha256)
   const root = mkdtempSync(join(tmpdir(), 'ready-widget-guidance-'))
   const codexHome = join(root, 'codex-home')

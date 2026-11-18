@@ -3,11 +3,10 @@ import { runMigrations } from '../main/modules/migrations'
 import { SearchEngine } from '../main/modules/search-engine/indexer'
 const databases:Database.Database[]=[]
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
 import { existsSync, realpathSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { Worker } from 'node:worker_threads'
 import test, { after, before } from 'node:test'
 
@@ -72,9 +71,9 @@ function fakeSearchEngineForRoots(roots: string[], indexedPaths: string[]) {
   return {
     findWorkspaceRootForPath: (path: string) => rootPairs.find(({ root, canonicalRoot }) =>
       path === root
-      || path.startsWith(`${root}/`)
+      || path.startsWith(`${root}${sep}`)
       || path === canonicalRoot
-      || path.startsWith(`${canonicalRoot}/`))?.root || null,
+      || path.startsWith(`${canonicalRoot}${sep}`))?.root || null,
     indexDocument: async () => ({ ok: true }),
     getRepository: () => ({
       getConnection: () => db,
@@ -248,22 +247,12 @@ test('file extraction supports docx and xlsx text paths', async (t) => {
   }
 })
 
-test('file extraction supports pdf text when a system PDF generator is available', async (t) => {
+test('file extraction reads PDF text from the workspace', async (t) => {
   if (skipIfSqliteUnavailable(t, 'File management objects')) return
   const root = await mkdtemp(join(tmpdir(), 'ready-file-organizer-pdf-'))
   try {
-    const sourceText = join(root, 'source.txt')
     const pdfPath = join(root, 'brief.pdf')
-    await writeFile(sourceText, 'PDF classify body\n', 'utf-8')
-    const generated = spawnSync('/usr/sbin/cupsfilter', ['-m', 'application/pdf', sourceText], {
-      encoding: 'buffer',
-      maxBuffer: 2 * 1024 * 1024,
-    })
-    if (generated.status !== 0 || generated.stdout.length === 0) {
-      t.skip('cupsfilter is unavailable for generating a test PDF')
-      return
-    }
-    await writeFile(pdfPath, generated.stdout)
+    await writeFile(pdfPath, await readFile(new URL('./fixtures/organizer-brief.pdf', import.meta.url)))
     const pdfText = JSON.parse(await executeFileManagementTool('file_extract_text', {
       path: pdfPath,
     }, { searchEngine: fakeSearchEngine(root) as never }))

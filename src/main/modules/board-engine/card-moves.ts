@@ -1,6 +1,7 @@
+import { relativeFileReference } from '../../utils/platform'
 import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
-import { join, relative } from 'node:path'
+import { join } from 'node:path'
 import { z } from 'zod'
 import { CanvasIdSchema, CanvasPathSchema, ReadyCanvasSchema, Sha256Schema, planCardMove, planCardMoveUndo, serializeCanvas, stableJson,
   type CanvasNode, type CanvasReceipt, type CanvasWriteResult, type CardMoveDetail, type CardMovePlacement, type ReadyCanvas } from '../../../shared/ready-canvas'
@@ -25,7 +26,7 @@ function board(service: CanvasService, objectId: string): Board {
   const object = service.registry.get(objectId)
   if (!object || object.kind !== 'canvas' || object.status !== 'present' || !object.current_path || object.identity_state === 'conflict') throw new Error('identity_conflict: canvas is unavailable')
   const absolute = checkedPath(service.root, object.current_path), original = readFileSync(absolute, 'utf8')
-  return { path: relative(service.root, absolute), original, canvas: ReadyCanvasSchema.parse(JSON.parse(original)) }
+  return { path: relativeFileReference(service.root, absolute), original, canvas: ReadyCanvasSchema.parse(JSON.parse(original)) }
 }
 const owner = (canvas: ReadyCanvas, childId: string): CanvasNode | undefined =>
   canvas.nodes.find(node => !node.ready.trash && node.ready.kind === 'subcanvas' && node.ready.ref?.kind === 'canvas' && node.ready.ref.id === childId)

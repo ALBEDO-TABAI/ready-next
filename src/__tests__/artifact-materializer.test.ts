@@ -288,6 +288,7 @@ test('the Codex export primitive replaces an existing file only on a confirmed o
     mkdirSync(targetRoot)
     const original = join(targetRoot, '阅读回顾.md')
     writeFileSync(original, '# 原文\n', { mode: 0o644 })
+    const originalMode = statSync(original).mode & 0o777
     const materializer = new ArtifactMaterializer(join(root, 'staging'))
     const staged = await materializer.write({
       readyRunId: 'run-edit', itemId: '阅读回顾.md', actionId: 'write-edit',
@@ -339,7 +340,7 @@ test('the Codex export primitive replaces an existing file only on a confirmed o
     const replaced = await exportOnce('export-confirmed', true)
     assert.equal((replaced.data as { result?: string }).result, 'replaced')
     assert.equal(readFileSync(original, 'utf8'), '# 原文\n\n> 信息卡\n')
-    assert.equal(statSync(original).mode & 0o777, 0o644, 'the replaced file keeps its permissions')
+    assert.equal(statSync(original).mode & 0o777, originalMode, 'the replaced file keeps its permissions')
     assert.deepEqual((await exportOnce('export-confirmed', true)).data, replaced.data, 'the confirmed action replays once')
     symlinkSync(original, join(targetRoot, 'link.md'))
     await assert.rejects(materializer.exportVersion({

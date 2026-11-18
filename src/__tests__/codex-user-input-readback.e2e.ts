@@ -18,7 +18,7 @@ import { disabledReadyMemorySnapshot } from './utils/ready-memory-fixture'
 for (const historyMode of ['paginated', 'legacy'] as const) {
 test(`pinned runtime retains resource inputs and quota failures across restart on the same thread (${historyMode})`, { timeout: 30_000 }, async () => {
   const manifest = JSON.parse(readFileSync('assets/codex-runtime/runtime-manifest.json', 'utf8'))
-  const binary = join(process.cwd(), 'build/codex', manifest.targetTriple, 'codex')
+  const binary = join(process.cwd(), 'build/codex', manifest.targetTriple, 'codex.exe')
   assert.equal(createHash('sha256').update(readFileSync(binary)).digest('hex'), manifest.binarySha256)
   const root = mkdtempSync(join(tmpdir(), 'ready-input-continuity-'))
   const codexHome = join(root, 'codex-home')

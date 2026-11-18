@@ -1,13 +1,32 @@
 # Ready Windows 开发与源码交接
 
-> 核对日期：2026-09-06
-> 本文取代根目录旧的单次 Windows handoff。它不固定分支、提交或阶段；每次交接都从当前工作区重新记录基线。
+## Windows x64 本地构建
 
-## 0. 当前事实与适用范围
+本分支使用 Electron 45.3.0、NSIS 和官方 Codex 0.160.1 x64。开发工具版本见 `.node-version` 和 `package.json#packageManager`。需要 Visual Studio C++ 工具链和 Python。运行文件符号链接回归时，Windows 账户需要对应权限，例如开启开发人员模式。
 
-当前 `electron-builder.yml` 只声明 macOS arm64 输出，并将 `build/codex/aarch64-apple-darwin/codex` 放入包体；`assets/codex-runtime/source-lock.json` 和 `runtime-manifest.json` 也固定为 darwin/arm64。仓库中的 Windows 窗口与路径处理是已有源码基础，不是当前 Windows 发行证明。
+首次从此分支构建时，在仓库根目录的 PowerShell 中执行：
 
-因此本文是目标平台开发与交接要求。生成 Windows 成品前，必须先补齐 Windows Codex 二进制来源、摘要、协议与连续性证据，调整资源和打包目标，再在 Windows 本机验收。不能直接给现有 macOS 配置加 `--win` 后宣称移植完成。
+```powershell
+npm ci
+$lock = Get-Content assets/codex-runtime/source-lock.json -Raw | ConvertFrom-Json
+$archive = Join-Path $env:TEMP $lock.releaseAsset.name
+Invoke-WebRequest $lock.releaseAsset.url -OutFile $archive
+node scripts/codex-runtime/prepare-pinned-runtime.cjs --archive $archive
+New-Item -ItemType Directory -Force build/runtime-seeds | Out-Null
+if (!(Test-Path build/runtime-seeds/ai-settings.seed.json)) {
+  Set-Content build/runtime-seeds/ai-settings.seed.json '{}' -Encoding ascii
+}
+```
+
+准备脚本校验发行档、解压后的程序、文件长度和 CLI 版本。以下命令构建本地测试包和运行主窗口冒烟检查。当前 Windows 目录只记录本平台的运行时目标，跨平台迁移旧会话仍需单独验证。
+
+```powershell
+npm run build
+npm run licenses:generate
+node scripts/check-ai-seed-release-safety.cjs
+npx electron-builder --win nsis --x64 --publish never
+node scripts/run-packaged-smoke.cjs --platform win32 --out test-results/windows-packaged-smoke.json
+```
 
 ## 1. 完成标准
 
@@ -66,7 +85,7 @@ npm -v
 使用 `package.json#engines` 要求的 Node 版本，并在 Windows 本地执行：
 
 ```powershell
-npm install
+npm ci
 npm run verify:native
 npm run typecheck
 ```
@@ -82,7 +101,7 @@ npm run test
 npm run build
 ```
 
-Windows 包体检查必须在 §0 的目标运行时与资源合同完成之后执行。打包命令从届时的目标配置读取；`scripts/run-packaged-smoke.cjs` 可作为现有探针入口，但成功启动仍不能代替真实 Agent、文件、网络与跨进程验证。
+执行本文开头的包体冒烟检查，再分别验证真实 Agent、文件、网络和跨进程恢复。
 
 真实 UI 至少按影响范围检查：
 

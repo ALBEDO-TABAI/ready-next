@@ -1,7 +1,8 @@
+import { relativeFileReference } from '../../utils/platform'
 import { randomUUID } from 'node:crypto'
 import { readFileSync, statSync } from 'node:fs'
 import { readFile, rm } from 'node:fs/promises'
-import { basename, dirname, extname, join, relative } from 'node:path'
+import { basename, dirname, extname, join } from 'node:path'
 import { z } from 'zod'
 import {
   DocumentDraftSchema, DraftCreateSchema, DraftFinalizeInputSchema, DraftIdSchema, DraftRevisionSchema,
@@ -161,7 +162,7 @@ export class DocumentDraftService {
     const directory = info.isDirectory() ? parentPath : join(dirname(parentPath), basename(parentPath, extname(parentPath)))
     checkedPath(draft.vaultRoot, directory)
     const path = join(directory, `${name}.md`)
-    if (draft.origin === 'canvas' && request.keepDocumentCard !== false && !CanvasPathSchema.safeParse(relative(draft.vaultRoot, path)).success) {
+    if (draft.origin === 'canvas' && request.keepDocumentCard !== false && !CanvasPathSchema.safeParse(relativeFileReference(draft.vaultRoot, path)).success) {
       throw draftError('invalid_canvas_path', '画板无法引用此路径，请使用不含 #、% 等特殊字符的名称或位置')
     }
     if (existsIgnoringCase(path)) throw collision(path)

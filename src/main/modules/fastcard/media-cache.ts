@@ -1,3 +1,4 @@
+import { syncParentDirectory } from '../../utils/sync-parent-directory'
 import { createHash, randomUUID } from 'node:crypto'
 import { constants, openSync, closeSync, writeFileSync, fsyncSync, renameSync, readFileSync, mkdirSync, realpathSync, lstatSync, existsSync, unlinkSync } from 'node:fs'
 import { join, resolve, relative, dirname } from 'node:path'
@@ -37,7 +38,7 @@ export function publishBytes(path: string, bytes: Buffer): void {
   const temp = `${path}.${randomUUID()}.tmp`
   const fd = openSync(temp, 'wx', 0o600)
   try { writeFileSync(fd, bytes); fsyncSync(fd) } finally { closeSync(fd) }
-  try { renameSync(temp, path); const directory = openSync(dirname(path), 'r'); try { fsyncSync(directory) } finally { closeSync(directory) } }
+  try { renameSync(temp, path); syncParentDirectory(path) }
   finally { if (existsSync(temp)) unlinkSync(temp) }
   verifiedRead(path, digest(bytes))
 }

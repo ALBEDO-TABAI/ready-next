@@ -1,3 +1,4 @@
+import { syncParentDirectory } from '../../utils/sync-parent-directory'
 import { createHash, randomUUID, type Hash } from 'node:crypto'
 import {
   closeSync,
@@ -124,8 +125,7 @@ function writeImmutable(path: string, bytes: Buffer): boolean {
     fd = null
     try {
       linkSync(tempPath, path)
-      const directoryFd = openSync(parent, 'r')
-      try { fsyncSync(directoryFd) } finally { closeSync(directoryFd) }
+      syncParentDirectory(path)
       return true
     } catch (error) {
       if (!error || typeof error !== 'object' || !('code' in error) || error.code !== 'EEXIST') throw error
@@ -593,8 +593,7 @@ export class ArtifactMaterializer {
         }
       }
       committed = true
-      const directoryFd = openSync(dirname(targetPath), 'r')
-      try { fsyncSync(directoryFd) } finally { closeSync(directoryFd) }
+      syncParentDirectory(targetPath)
       const readback = this.readExistingTarget(targetPath, input.expectedSha256)
       if (!readback) throw new ArtifactMaterializerError('artifact_target_readback_mismatch')
       const receipt = this.exportReceipt(

@@ -1,5 +1,5 @@
 import { tmpdir } from 'os'
-import { join } from 'path'
+import { join, relative, sep } from 'path'
 
 const TEST_LOG_DIRNAME = 'ready-test-logs'
 
@@ -25,4 +25,9 @@ function usesTestLogDirectory(): boolean {
  */
 export function getWhichCommand(): string {
   return process.platform === 'win32' ? 'where' : 'which'
+}
+
+/** Canvas and Markdown references use forward slashes on disk. */
+export function relativeFileReference(from: string, to: string): string {
+  return relative(from, to).split(sep).join('/')
 }

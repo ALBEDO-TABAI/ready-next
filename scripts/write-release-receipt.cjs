@@ -10,16 +10,14 @@
 const path = require('node:path')
 const fs = require('node:fs')
 
-const {
-  writeReleasePackageReceipt,
-} = require('./release-package-identity.cjs')
-
 exports.default = async function writeReleaseReceipts(buildResult, root = path.resolve(__dirname, '..')) {
   const artifacts = Array.isArray(buildResult?.artifactPaths) ? buildResult.artifactPaths : []
+  const dmgs = artifacts.filter(file => file.toLowerCase().endsWith('.dmg'))
+  if (dmgs.length === 0) return []
+  const { writeReleasePackageReceipt } = require('./release-package-identity.cjs')
   const written = []
   const { inspectBookSourceBuild } = await import('./verify-ready-next-book-sources.mjs')
-  for (const artifactPath of artifacts) {
-    if (!artifactPath.toLowerCase().endsWith('.dmg')) continue
+  for (const artifactPath of dmgs) {
     const features = inspectBookSourceBuild(path.join(root, 'out'))
     const receiptPath = writeReleasePackageReceipt(artifactPath, { root })
     const receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8'))

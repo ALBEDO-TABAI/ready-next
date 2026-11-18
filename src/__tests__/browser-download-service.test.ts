@@ -119,7 +119,7 @@ test('downloadUrlToDirectory sets a unique save path inside the target directory
     assert.equal(session.downloadedUrl, 'https://cdn.example.com/photo.jpg')
     const item = new FakeDownloadItem('https://cdn.example.com/photo.jpg', 'photo.jpg')
     session.emit('will-download', {}, item)
-    assert.match(item.getSavePath(), /\/\.ready-[^/]+\.part$/)
+    assert.match(item.getSavePath(), /[\\/]\.ready-[^\\/]+\.part$/)
     item.finish('completed')
 
     const result = await promise
@@ -180,7 +180,7 @@ test('downloadUrlToDirectory appends an inferred extension to extensionless sugg
       'image/webp',
     )
     session.emit('will-download', {}, item)
-    assert.match(item.getSavePath(), /\/\.ready-[^/]+\.part$/)
+    assert.match(item.getSavePath(), /[\\/]\.ready-[^\\/]+\.part$/)
     item.finish('completed')
 
     const result = await promise
@@ -226,7 +226,7 @@ test('downloadUrlToDirectory passes only allowed identity headers to the browser
       'video/mp4',
     )
     session.emit('will-download', {}, item)
-    assert.match(item.getSavePath(), /\/\.ready-[^/]+\.part$/)
+    assert.match(item.getSavePath(), /[\\/]\.ready-[^\\/]+\.part$/)
     item.finish('completed')
 
     const result = await promise

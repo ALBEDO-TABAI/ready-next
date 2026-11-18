@@ -37,7 +37,7 @@ function main() {
 
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ready-codex-runtime-'))
   try {
-    run('/usr/bin/tar', ['-xzf', archivePath, '-C', tempDir])
+    run('tar', ['-xzf', archivePath, '-C', tempDir])
     const extractedPath = path.join(tempDir, sourceLock.releaseAsset.binaryNameInArchive)
     assert(fs.existsSync(extractedPath), 'Pinned binary is missing from the archive')
     assert(
@@ -58,7 +58,7 @@ function main() {
       `${sourceLock.targetTriple}`
     )
     fs.mkdirSync(destinationDir, { recursive: true })
-    const destination = path.join(destinationDir, 'codex')
+    const destination = path.join(destinationDir, 'codex.exe')
     // Replace atomically: a running sidecar keeps its own inode, and a half-copied binary is never visible.
     const staged = path.join(destinationDir, `.codex-${process.pid}-${Date.now()}`)
     try {

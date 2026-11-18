@@ -1,3 +1,4 @@
+import { objectFilenameSql } from './object-link-schema'
 import { repairBinding } from './object-link-extract'
 import { createHash } from 'node:crypto'
 import { basename, dirname, resolve } from 'node:path'
@@ -117,7 +118,7 @@ export class ObjectLinkRepository {
             if (!candidates.length && !text.includes('/')) {
               const stem = text.replace(/\.md$/i, '').toLowerCase()
               candidates = this.db.prepare(`SELECT * FROM objects WHERE workspace_id=? AND status='present' AND identity_state<>'conflict'
-                AND lower(replace(current_path, rtrim(current_path, replace(current_path, '/', '')), '')) IN (?,?)`)
+                AND ${objectFilenameSql} IN (?,?)`)
                 .all<Target>(source.workspace_id, stem, stem + '.md')
                 .filter(o => basename(o.current_path!).replace(/\.md$/i, '').toLowerCase() === stem)
             }

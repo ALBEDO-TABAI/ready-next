@@ -527,7 +527,7 @@ async function run() {
   const configText = buildConfig(baseUrl, authorityPath, mcpAuditPath)
   fs.writeFileSync(path.join(codexHome, 'config.toml'), configText)
 
-  const binary = path.join(repoRoot, 'build/codex', sourceLock.targetTriple, 'codex')
+  const binary = path.join(repoRoot, 'build/codex', sourceLock.targetTriple, 'codex.exe')
   const baseEnv = {
     PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
     LANG: 'en_US.UTF-8',

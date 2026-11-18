@@ -49,8 +49,9 @@ test('atomic publish preserves target permission bits', async () => {
     const target = join(directory, 'note.md')
     await writeFile(target, 'old')
     await chmod(target, 0o660)
+    const originalMode = (await stat(target)).mode & 0o777
     await publishFileAtomically(target, 'new')
-    assert.equal((await stat(target)).mode & 0o777, 0o660)
+    assert.equal((await stat(target)).mode & 0o777, originalMode)
   } finally {
     await rm(directory, { recursive: true, force: true })
   }

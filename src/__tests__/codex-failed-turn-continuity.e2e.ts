@@ -51,7 +51,7 @@ async function withPinnedRuntime(respond: Respond, run: (probe: {
   restart(): Promise<void>
 }) => Promise<void>): Promise<void> {
   const manifest = JSON.parse(readFileSync('assets/codex-runtime/runtime-manifest.json', 'utf8'))
-  const binary = join(process.cwd(), 'build/codex', manifest.targetTriple, 'codex')
+  const binary = join(process.cwd(), 'build/codex', manifest.targetTriple, 'codex.exe')
   assert.equal(createHash('sha256').update(readFileSync(binary)).digest('hex'), manifest.binarySha256)
   const root = mkdtempSync(join(tmpdir(), 'ready-failed-turn-continuity-'))
   const codexHome = join(root, 'codex-home')

@@ -1,6 +1,7 @@
+import { relativeFileReference } from '../../utils/platform'
 import { randomUUID } from 'node:crypto'
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
-import { basename, dirname, join, relative, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { z } from 'zod'
 import { expandTemplate } from '../../../shared/document-anchors/template'
 import { rewriteTemplateAttachments } from './attachments'
@@ -48,7 +49,7 @@ export class DocumentTemplateService {
         const assets = new Map<string, { path: string; stage: string; hash: string; data: Buffer }>()
         content = rewriteTemplateAttachments(content, localPath => {
           const from = checkedPath(root, resolve(directory, localPath))
-          if (/\.(md|canvas)$/i.test(from)) return encodeURI(relative(parent, from))
+          if (/\.(md|canvas)$/i.test(from)) return encodeURI(relativeFileReference(parent, from))
           let asset = assets.get(from)
           if (!asset) {
             const data = readFileSync(from), assetName = `${request.operationId}-${assets.size}-${basename(from)}`
@@ -56,8 +57,8 @@ export class DocumentTemplateService {
             if (existsSync(asset.path)) throw new Error('目标附件已存在')
             assets.set(from, asset)
           }
-          return encodeURI(relative(parent, asset.path)).replace(/[()]/g, char => '%' + char.charCodeAt(0).toString(16))
-        }, page => relative(parent, resolveWikiPage(root, sourcePath, page)).replace(/\.md$/i, ''))
+          return encodeURI(relativeFileReference(parent, asset.path)).replace(/[()]/g, char => '%' + char.charCodeAt(0).toString(16))
+        }, page => relativeFileReference(parent, resolveWikiPage(root, sourcePath, page)).replace(/\.md$/i, ''))
         for (const asset of assets.values()) { ensureDirectory(root, dirname(asset.stage)); await stageFile(root, asset.stage, asset.data, asset.hash) }
         intent = { request, content, files: [...assets.values()].map(({ path, stage, hash }) => ({ path, stage, hash })) }
         await this.storage.write(manifest, intent)

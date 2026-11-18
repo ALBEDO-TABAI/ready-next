@@ -20,7 +20,7 @@ async function moveFile(source:string,target:string):Promise<void> {
         if(info.isSymbolicLink()){if(await readlink(from)!==await readlink(to))throw new Error('Cross-device symlink readback mismatch');return}
         if(info.isDirectory()){for(const entry of await readdir(from))await verify(join(from,entry),join(to,entry));return}
         if(fullHash(from)!==fullHash(to))throw new Error('Cross-device copy readback mismatch')
-        const file=await open(to,'r');try{await file.sync()}finally{await file.close()}
+        const file=await open(to,process.platform === 'win32' ? 'r+' : 'r');try{await file.sync()}finally{await file.close()}
       }
       await verify(source,temporary)
       await rename(temporary,target)

@@ -114,7 +114,7 @@ test('C5 migration keeps pending binding and old edge, then reconstructs fragmen
   const { runMigrations, __runMigrationForTests } = await import('../main/modules/migrations')
   const f = fixture(), db = new Database(':memory:')
   try {
-    db.exec("CREATE TABLE migrations(id INTEGER PRIMARY KEY,name TEXT NOT NULL UNIQUE,applied_at TEXT NOT NULL); INSERT INTO migrations(name,applied_at) VALUES('139_object_links','test'),('141_document_pages','test'),('146_canvas_operations','test')")
+    db.exec("CREATE TABLE migrations(id INTEGER PRIMARY KEY,name TEXT NOT NULL UNIQUE,applied_at TEXT NOT NULL); INSERT INTO migrations(name,applied_at) VALUES('139_object_links','test'),('141_document_pages','test'),('146_canvas_operations','test'),('163_portable_object_filename_index','test')")
     runMigrations(db)
     const source = join(f.root, 'source.md'), target = join(f.root, 'moved.md')
     writeFileSync(source, '[[old#Heading]]'); writeFileSync(target, 'target')
@@ -125,7 +125,7 @@ test('C5 migration keeps pending binding and old edge, then reconstructs fragmen
     }
     db.exec("INSERT INTO doc_links(src_doc_id,kind,target_text,target_doc_id,resolved) VALUES(1,'wikilink','old',2,1); INSERT INTO object_link_targets VALUES('s','wikilink','old','t','original-version','pending')")
     __runMigrationForTests('139_object_links',db)
-    db.prepare("DELETE FROM migrations WHERE name IN ('141_document_pages','146_canvas_operations')").run()
+    db.prepare("DELETE FROM migrations WHERE name IN ('141_document_pages','146_canvas_operations','163_portable_object_filename_index')").run()
     runMigrations(db)
     const links = new ObjectLinkRepository(db)
     assert.equal(links.incoming({objectId:'t'})[0].rawTarget,'old')

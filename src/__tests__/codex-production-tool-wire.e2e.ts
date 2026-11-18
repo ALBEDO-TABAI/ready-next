@@ -26,7 +26,7 @@ import { listLiveCodexThreadToolDefinitions } from '../main/modules/agent-contro
 test('pinned runtime sends exactly the request tools Ready derives for its production surface', { timeout: 60_000 }, async () => {
   const manifest = JSON.parse(readFileSync('assets/codex-runtime/runtime-manifest.json', 'utf8'))
   const contracts = JSON.parse(readFileSync('assets/codex-runtime/contracts/runtime-contracts.json', 'utf8'))
-  const binary = join(process.cwd(), 'build/codex', manifest.targetTriple, 'codex')
+  const binary = join(process.cwd(), 'build/codex', manifest.targetTriple, 'codex.exe')
   assert.equal(createHash('sha256').update(readFileSync(binary)).digest('hex'), manifest.binarySha256)
   const surface = buildReadyToolSurface({
     surfaceId: 'production-tool-wire',

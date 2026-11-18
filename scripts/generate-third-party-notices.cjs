@@ -14,7 +14,7 @@ function readText(root, file) {
 function generate({ root = path.resolve(__dirname, '..'), runNpm = spawnSync } = {}) {
   const result = runNpm(process.platform === 'win32' ? 'npm.cmd' : 'npm',
     ['ls', '--omit=dev', '--all', '--json', '--long'], {
-      cwd: root, encoding: 'utf8', maxBuffer: 128 * 1024 * 1024,
+      cwd: root, shell: process.platform === 'win32', encoding: 'utf8', maxBuffer: 128 * 1024 * 1024,
       env: { ...process.env, npm_config_offline: 'true', npm_config_update_notifier: 'false', npm_config_logs_max: '0' },
     })
   if (result.error) throw result.error

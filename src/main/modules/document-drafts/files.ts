@@ -71,7 +71,8 @@ export async function publishNewFile(root: string, stagePath: string, path: stri
     }
   }
   if (hashBytes(await readFile(path)) !== expectedHash) throw draftError('readback_mismatch', 'published file readback mismatch')
-  const handle = await open(dirname(path), 'r')
+  // Windows FlushFileBuffers requires a writable file handle.
+  const handle = process.platform === 'win32' ? await open(path, 'r+') : await open(dirname(path), 'r')
   try { await handle.sync() } finally { await handle.close() }
 }
 export async function stageFile(root: string, path: string, data: string | Uint8Array, hash: string): Promise<void> {

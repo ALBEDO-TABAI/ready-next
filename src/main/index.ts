@@ -1146,7 +1146,7 @@ function setupAutoUpdater(mainWindow: BrowserWindow): void {
 // 本模块在 splash 可见后才被动态加载，此处 whenReady 已 resolve，回调立即执行。
 app.whenReady().then(async () => {
   // Set app user model id for windows
-  electronApp.setAppUserModelId('com.ready.app')
+  electronApp.setAppUserModelId('com.ready.app.next')
   applyAppIcon()
   setupApplicationMenu()
   // boot-entry 已建 splash；此 await 幂等，保底"splash 先于 boot 清理与数据库门"。

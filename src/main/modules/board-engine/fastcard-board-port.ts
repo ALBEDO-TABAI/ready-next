@@ -1,4 +1,5 @@
-import { basename, join, relative } from 'node:path'
+import { relativeFileReference } from '../../utils/platform'
+import { basename, join } from 'node:path'
 import { isInside } from '../object-service/registry'
 import { checkedPath, ensureDirectory } from '../document-drafts/files'
 import type { FastCardBoardPort } from '../fastcard/transfer-service'
@@ -15,7 +16,7 @@ export function fastCardBoardPort(canvas: CanvasService): FastCardBoardPort {
         const directory = checkedPath(root, parent?.current_path ? parent.current_path.replace(/\.(md|canvas)$/i, '') : input.parentPath || root)
         if (!input.title.trim() || /[/\\]/.test(input.title) || [...input.title].some(char => char.charCodeAt(0) < 32)) throw new Error('画板名称无效')
         ensureDirectory(root, directory)
-        const opened = await canvas.create({ path: relative(root, join(directory, `${input.title}.canvas`)), operationId: input.operationId,
+        const opened = await canvas.create({ path: relativeFileReference(root, join(directory, `${input.title}.canvas`)), operationId: input.operationId,
           canvas: { nodes: [], edges: [], ready: { schemaVersion: 1, id: input.objectId, title: input.title } } })
         canvas.release(opened.handleId); return { objectId: opened.objectId, title: input.title }
       },

@@ -48,7 +48,8 @@ const args = [
   '--test',
   ...(watchMode ? ['--watch'] : []),
   '--test-concurrency=10',
-  ...files,
+  // A single glob stays below Windows' process command-line limit, including in watch mode.
+  ...(process.platform === 'win32' ? ['src/__tests__/!(skill-child-*|*.serial).test.{ts,tsx}'] : files),
 ]
 const result = spawnSync(process.execPath, args, { stdio: 'inherit', cwd: ROOT })
 process.exit(result.status ?? 1)

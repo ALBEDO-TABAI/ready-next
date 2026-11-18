@@ -1,5 +1,5 @@
 import { realpathSync } from 'fs'
-import { basename, dirname, join, resolve, sep } from 'path'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'path'
 
 export class ReadyNextDataIsolationError extends Error {
   readonly code = 'READY_NEXT_DAILY_DATA_FORBIDDEN'
@@ -32,10 +32,18 @@ export function assertReadyNextDataIsolation(
   home: string,
   extraProtectedDirs: readonly string[] = [],
 ): void {
-  const protectedDirs = [join(home, 'Library', 'Application Support', 'Ready'), ...extraProtectedDirs].map(canonicalPath)
+  const roots = [join(home, 'Library', 'Application Support', 'Ready'), ...extraProtectedDirs]
+  if (process.platform === 'win32') {
+    roots.push(join(home, 'AppData', 'Roaming', 'Ready'))
+    if (process.env.APPDATA) roots.push(join(process.env.APPDATA, 'Ready'))
+  }
+  const protectedDirs = [...new Set(roots)].map(canonicalPath)
   for (const path of [userData, databasePath]) {
     const target = canonicalPath(path)
-    if (protectedDirs.some(dir => target === dir || target.startsWith(dir + sep))) {
+    if (protectedDirs.some(dir => {
+      const rel = relative(dir, target)
+      return rel !== '..' && !rel.startsWith('..' + sep) && !isAbsolute(rel)
+    })) {
       throw new ReadyNextDataIsolationError(path)
     }
   }
