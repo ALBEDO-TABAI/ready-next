@@ -40,6 +40,10 @@ export function browserSequenceFixture() {
         viewport: { width: 1000, height: 800 }, bodyText: state.body,
         rawRoots: [{ role: 'button', name: state.body, backendDOMNodeId: 1, frameId: '0' }],
         riskFlags: {}, structureHints: { iframes: [], shadowRoots: [], hiddenLoaded: [] } }
+      if (code.includes('__READY_PAGE_MARKDOWN__')) {
+        calls.push('read')
+        return { ok: true, url: tab().url, title: tab().title, markdown: state.body, hitHardLimit: false }
+      }
       if (code.includes('String(node.type')) return { inputType: 'number' }
       if (code.includes('activeElementEditable') && code.includes('document.hasFocus')) return { ready: true, focused: true, activeElementEditable: true }
       if (code.includes('globalThis.__readyKeyDeliveryProbe = state')) return 'key-probe'
@@ -47,7 +51,8 @@ export function browserSequenceFixture() {
       return null
     },
     dispatchKey: async (_tabId: string | null, event: { type: string }) => { calls.push(event.type) },
-    getPageContent: async () => { calls.push('read'); return state.body },
+    // Only a page that is blocked (verification, error, empty shell) is still read as plain text.
+    getPageContent: async () => state.body,
     waitForCondition: async () => { calls.push('wait'); return { matched: state.matched, elapsedMs: 1 } },
     bindBrowserWorkflowPhysicalTarget: () => () => undefined,
     isBrowserWorkflowWriteAdmitted: () => state.writable,

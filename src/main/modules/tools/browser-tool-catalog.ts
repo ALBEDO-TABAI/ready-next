@@ -32,7 +32,7 @@ const DESCRIPTIONS: Record<BrowserPublicToolName, string> = {
   browser_search: '外部或站内搜索；独立核验填字与提交。',
   browser_snapshot: '读取紧凑页面图和稳定 target_id。',
   browser_find: '在缓存页面图中查找目标。',
-  browser_read: '读取页面、区域或目标正文。',
+  browser_read: '读取页面（Markdown，带链接）、区域或目标正文；truncated 时用 nextOffset 作 offset 续读。',
   browser_screenshot: '截取当前真实页面。',
   browser_wait: '等待时间、页面、文本、URL 或稳定状态。',
   browser_sequence: BROWSER_SEQUENCE_DESCRIPTION,

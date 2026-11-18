@@ -1,5 +1,6 @@
 import type { BrowserController } from '../../main/modules/browser-engine/ipc-handler'
 import type { executeBrowserTool } from '../../main/modules/tools/browser-tools'
+import { answerPageMarkdownFromPageContent } from './browser-page-markdown-fixture'
 
 export type BrowserWorkflowTestContext = NonNullable<Parameters<typeof executeBrowserTool>[8]>
 
@@ -36,6 +37,8 @@ export function attachBrowserWorkflowFixture(
     }
     return originalExecuteJS ? originalExecuteJS(tabId, code) : null
   }) as BrowserController['executeJS']
+  // A fake page says what its getPageContent holds when the read tool asks it for its Markdown.
+  answerPageMarkdownFromPageContent(controller)
 
   if (typeof controller.beginBrowserWorkflowAction !== 'function') {
     controller.beginBrowserWorkflowAction = ((input: {

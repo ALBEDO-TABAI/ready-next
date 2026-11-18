@@ -10,6 +10,7 @@ import { buildExplicitNoSkillAuthorization } from '../main/modules/agent-control
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { createBrowserTurnLease } from '../main/modules/browser-engine/agent-browser-turn-lease'
 import { BrowserTargetClaimService, MemoryBrowserTargetClaimRepository } from '../main/modules/browser-engine/browser-target-claims'
+import { answerPageMarkdownFromPageContent } from './utils/browser-page-markdown-fixture'
 
 test('browser-surface-gate declares transitive sqlite ABI guard', (t) => {
   skipIfSqliteUnavailable(t, 'browser-surface-gate transitive sqlite load')
@@ -35,6 +36,8 @@ function controller(): BrowserController & { goBackCalls: number; readCalls: num
 }
 
 function ctx(browserController: BrowserController): ToolContext {
+  // The fake pages below say what their getPageContent holds when the read tool asks for their Markdown.
+  answerPageMarkdownFromPageContent(browserController)
   return {
     browserController,
     allowedToolNames: null,

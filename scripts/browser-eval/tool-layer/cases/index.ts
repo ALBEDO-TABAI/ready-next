@@ -9,6 +9,7 @@ import { formGroup, keyboardGroup, loginGroup, surfaceGroup, wizardGroup } from 
 import { framesGroup, pagingGroup, shadowGroup, spaGroup, waitGroup } from './pages'
 import { canvasGroup, dialogsGroup, downloadsGroup, editorGroup, popupGroup, takeoverGroup, uploadGroup } from './interactions'
 import { sequenceGroup } from './sequence'
+import { readGroup } from './read'
 
 export const CASE_GROUPS: CaseGroup[] = [
   webMcpGroup,
@@ -21,6 +22,7 @@ export const CASE_GROUPS: CaseGroup[] = [
   framesGroup,
   shadowGroup,
   pagingGroup,
+  readGroup,
   loginGroup,
   downloadsGroup,
   uploadGroup,

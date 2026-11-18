@@ -69,6 +69,7 @@ export const BROWSER_TOOL_SCHEMAS = {
     target_id: z.string().optional().describe('可选目标引用'),
     selector: z.string().optional().describe('可选区域选择器'),
     max_chars: z.number().optional().describe('最大正文字符数'),
+    offset: z.number().optional().describe('从正文第几个字符开始读；续读时填上次结果的 nextOffset'),
   }),
   browser_screenshot: z.object({
     annotate: z.boolean().optional().describe('在视口截图上标出当前快照目标编号，默认 false'),

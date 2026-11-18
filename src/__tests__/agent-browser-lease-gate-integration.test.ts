@@ -9,6 +9,7 @@ import { attachBrowserWorkflowFixture } from './utils/browser-workflow-fixture'
 import { acquireTarget, createTargetClaimService, identityOf, setTargetUserOwnedForTest } from './utils/browser-target-claim-fixture'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+import { isPageMarkdownScript, pageMarkdownDocument } from './utils/browser-page-markdown-fixture'
 
 test('agent-browser-lease-gate-integration declares transitive sqlite ABI guard', (t) => {
   skipIfSqliteUnavailable(t, 'agent-browser-lease-gate-integration transitive sqlite load')
@@ -25,13 +26,15 @@ function createController(overrides?: Partial<BrowserController>): BrowserContro
     normalizedToCss: async (_t, x, y) => ({ x: Number(x), y: Number(y), width: 1000, height: 800 }),
     dispatchMouse: async () => {},
     getViewportMetrics: async () => ({ width: 1000, height: 800, pageX: 0, pageY: 0, scale: 1 }),
-    executeJS: async () => ({
-      url: 'https://example.com',
-      title: 'T',
-      timeOrigin: 1,
-      mutationRevision: 0,
-      frameDocumentToken: 'document-tab-1',
-    }),
+    executeJS: async (_tabId: string | null, code: string) => isPageMarkdownScript(code)
+      ? pageMarkdownDocument('visible page text', { url: 'https://example.com', title: 'T' })
+      : {
+          url: 'https://example.com',
+          title: 'T',
+          timeOrigin: 1,
+          mutationRevision: 0,
+          frameDocumentToken: 'document-tab-1',
+        },
     beginBrowserWorkflowAction: ((input: { identity: unknown }) => ({
       actionId: `action-${++actionSeq}`,
       actionSeq,

@@ -16,6 +16,8 @@ import {
   __resetBrowserAgentPageMapForTests,
 } from '../main/modules/tools/browser-observe-tools'
 
+import { isPageMarkdownScript, pageMarkdownDocument } from './utils/browser-page-markdown-fixture'
+
 function observeContext(controller: BrowserController) {
   return { controller }
 }
@@ -23,8 +25,10 @@ function observeContext(controller: BrowserController) {
 test('browser_read includes same-origin and cross-origin nested frames within one text budget and reports a failed frame', async () => {
   let removed = false
   const controller = {
-    executeJS: async () => ({ blocked: false }),
-    getPageContent: async () => 'MAIN',
+    executeJS: async (_tabId: string | null, code: string) => isPageMarkdownScript(code)
+      ? pageMarkdownDocument('# MAIN\n\nSee [the docs](https://same.test/docs).', { url: 'https://same.test/', title: 'Main page' })
+      : { blocked: false },
+    getPageContent: async () => { throw new Error('a readable page is not read as plain text') },
     listContentFrames: () => [
       { frameKey: '0', main: true, url: 'https://same.test/' },
       { frameKey: '1-2', main: false, url: 'https://same.test/middle' },
@@ -32,17 +36,51 @@ test('browser_read includes same-origin and cross-origin nested frames within on
     ],
     executeJSInFrame: async (_tabId: string, frame: string) => {
       if (removed && frame === '3-4') throw new Error('FRAME_NOT_FOUND')
-      return frame === '1-2' ? 'MID-7' : 'DEEP-42'
+      return pageMarkdownDocument(frame === '1-2' ? 'MID-7' : 'DEEP-42')
     },
   } as unknown as BrowserController
   const read = await executeBrowserObserveTool('read', {}, observeContext(controller)) as ToolExecutionOutput
-  assert.match(String(read.data?.content), /MAIN[\s\S]*MID-7[\s\S]*DEEP-42/)
-  const bounded = await executeBrowserObserveTool('read', { max_chars: 50 }, observeContext(controller)) as ToolExecutionOutput
-  assert.equal(String(bounded.data?.content).length, 50)
+  const whole = '# MAIN\n\nSee [the docs](https://same.test/docs).\n\n[frame 1-2 https://same.test/middle]\nMID-7\n\n[frame 3-4 https://cross.test/deep]\nDEEP-42'
+  assert.deepEqual(read.data, {
+    ok: true,
+    observationFresh: true,
+    url: 'https://same.test/',
+    title: 'Main page',
+    format: 'markdown',
+    totalChars: whole.length,
+    returnedChars: whole.length,
+    truncated: false,
+    content: whole,
+  })
+
+  // A page longer than the window says so, and the windows join up to the whole.
+  const first = await executeBrowserObserveTool('read', { max_chars: 50 }, observeContext(controller)) as ToolExecutionOutput
+  assert.deepEqual([first.data?.returnedChars, first.data?.totalChars, first.data?.truncated, first.data?.nextOffset], [50, whole.length, true, 50])
+  let joined = String(first.data?.content)
+  for (let offset = 50; offset < whole.length; offset += 50) {
+    const next = await executeBrowserObserveTool('read', { max_chars: 50, offset }, observeContext(controller)) as ToolExecutionOutput
+    joined += String(next.data?.content)
+    assert.equal(next.data?.truncated, offset + 50 < whole.length)
+  }
+  assert.equal(joined, whole)
+
   removed = true
   const failed = await executeBrowserObserveTool('read', {}, observeContext(controller)) as ToolExecutionOutput
   assert.equal(failed.data?.errorKind, 'frame_read_failed')
+  assert.equal(failed.data?.frameId, '3-4')
   assert.equal(failed.data?.content, undefined)
+})
+
+test('browser_read says so when the page cannot be turned into text, instead of returning an empty success', async () => {
+  for (const answer of [null, { ok: false, reason: 'no_document_body' }]) {
+    const controller = {
+      executeJS: async (_tabId: string | null, code: string) => isPageMarkdownScript(code) ? answer : { blocked: false },
+      getPageContent: async () => 'plain text that must not stand in for the page',
+      listContentFrames: () => [],
+    } as unknown as BrowserController
+    const failed = await executeBrowserObserveTool('read', {}, observeContext(controller)) as ToolExecutionOutput
+    assert.deepEqual([failed.data?.ok, failed.data?.errorKind, failed.data?.content], [false, 'page_read_failed', undefined])
+  }
 })
 
 test('browser_fill_form stops at the first failed field and never submits partial data', async () => {
@@ -99,12 +137,23 @@ test('browser_read enforces max_chars and returns structured selector ambiguity'
   const controller = {
     getActiveTab: () => ({ id: 'tab-a', url: 'https://example.test/' }),
     getTabList: () => [{ id: 'tab-a', url: 'https://example.test/', active: true }],
-    getPageContent: async () => 'abcdefghijk',
-    executeJS: async () => ({ matchCount: selectorMatches, content: 'selected region' }),
+    executeJS: async (_tabId: string | null, code: string) => isPageMarkdownScript(code)
+      ? pageMarkdownDocument('abcdefghijk')
+      : { matchCount: selectorMatches, content: 'selected region' },
   } as unknown as BrowserController
 
-  const bounded = await executeBrowserObserveTool('read', { tab_id: 'tab-a', max_chars: 5 }, observeContext(controller))
-  assert.equal((bounded as ToolExecutionOutput).data?.content, 'abcde')
+  const bounded = await executeBrowserObserveTool('read', { tab_id: 'tab-a', max_chars: 5 }, observeContext(controller)) as ToolExecutionOutput
+  assert.deepEqual(
+    [bounded.data?.content, bounded.data?.totalChars, bounded.data?.returnedChars, bounded.data?.truncated, bounded.data?.nextOffset],
+    ['abcde', 11, 5, true, 5],
+  )
+  const scoped = await executeBrowserObserveTool('read', { tab_id: 'tab-a', selector: '.card', max_chars: 8 }, observeContext(controller)) as ToolExecutionOutput
+  assert.deepEqual(
+    [scoped.data?.content, scoped.data?.totalChars, scoped.data?.truncated, scoped.data?.nextOffset],
+    ['selected', 15, true, 8],
+  )
+  const rest = await executeBrowserObserveTool('read', { tab_id: 'tab-a', selector: '.card', offset: 8 }, observeContext(controller)) as ToolExecutionOutput
+  assert.deepEqual([rest.data?.content, rest.data?.truncated, rest.data?.nextOffset], [' region', false, undefined])
 
   selectorMatches = 2
   const ambiguous = await executeBrowserObserveTool('read', { tab_id: 'tab-a', selector: '.card' }, observeContext(controller))
@@ -438,4 +487,27 @@ test('browser tool wiring records same-origin network 429 and rejects the retire
   } finally {
     browserOriginInteractionBudget.resetForTests()
   }
+})
+
+test('browser_read by selector hands back what a field holds, except a password', async () => {
+  const { JSDOM } = await import('jsdom')
+  const dom = new JSDOM(
+    '<!doctype html><body><input id="user" type="text" value="bai" aria-label="User name">'
+    + '<input id="pw" type="password" value="hunter2-secret" aria-label="Password"></body>',
+    { runScripts: 'outside-only' },
+  )
+  const controller = {
+    getActiveTab: () => ({ id: 'tab-a', url: 'https://example.test/' }),
+    getTabList: () => [{ id: 'tab-a', url: 'https://example.test/', active: true }],
+    executeJS: async (_tabId: string | null, code: string) => code.includes('__READY_BLOCKING_CHALLENGE_PROBE__')
+      ? { blocked: false }
+      : JSON.parse(JSON.stringify(dom.window.eval(code))),
+  } as unknown as BrowserController
+
+  const user = await executeBrowserObserveTool('read', { tab_id: 'tab-a', selector: '#user' }, observeContext(controller)) as ToolExecutionOutput
+  assert.equal(user.data?.content, 'bai\nUser name')
+  const password = await executeBrowserObserveTool('read', { tab_id: 'tab-a', selector: '#pw' }, observeContext(controller)) as ToolExecutionOutput
+  assert.equal(password.data?.ok, true)
+  assert.equal(password.data?.content, 'Password')
+  assert.equal(JSON.stringify(password).includes('hunter2'), false)
 })

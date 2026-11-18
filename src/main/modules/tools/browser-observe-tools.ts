@@ -1,5 +1,6 @@
 import { annotateBrowserScreenshot } from '../browser-engine/screenshot-annotations'
 import { browserSnapshotDiff, taskBrowserSnapshotDiff } from '../browser-engine/snapshot-diff'
+import { readTabAsMarkdown, sliceReadContent } from './browser-page-markdown'
 /**
  * P3 Phase B6（2026-07-05，纯移动拆分）— browser-tools 观察/感知组。
  *
@@ -88,6 +89,11 @@ function strictReadMaxChars(value: unknown): number {
     : 20_000
 }
 
+function strictReadOffset(value: unknown): number {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 0
+}
+
 function fitReadContent(value: unknown, maxChars: number): string {
   return String(value ?? '').slice(0, maxChars)
 }
@@ -99,7 +105,7 @@ function scopedReadProbeJs(selector: string): string {
       if (nodes.length !== 1) return { matchCount: nodes.length, content: '' };
       const el = nodes[0];
       const chunks = [
-        el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement
+        (el instanceof HTMLInputElement && el.type !== 'password') || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement
           ? String(el.value || '')
           : '',
         String(el.innerText || ''),
@@ -741,6 +747,7 @@ export async function executeBrowserObserveTool(
       case 'read': {
         let tabId = (args.tab_id as string) || null
         const maxChars = strictReadMaxChars(args.max_chars)
+        const offset = strictReadOffset(args.offset)
         const blockingChallenge = normalizeBrowserBlockingChallengeProbe(
           await controller.executeJS(tabId, buildBrowserBlockingChallengeProbeJs()),
         )
@@ -830,7 +837,7 @@ export async function executeBrowserObserveTool(
           return browserStructuredOutput({
             ok: true,
             observationFresh: true,
-            content: fitReadContent(record.content, maxChars),
+            ...sliceReadContent(record.content, offset, maxChars),
           })
         }
         if (selector) {
@@ -854,32 +861,38 @@ export async function executeBrowserObserveTool(
           return browserStructuredOutput({
             ok: true,
             observationFresh: true,
-            content: fitReadContent(record.content, maxChars),
+            ...sliceReadContent(record.content, offset, maxChars),
           })
         }
-        const parts = [await controller.getPageContent(tabId)]
-        const frames = typeof controller.listContentFrames === 'function' ? controller.listContentFrames(tabId).filter(frame => !frame.main) : []
-        for (const frame of frames) {
-          try {
-            const content = await controller.executeJSInFrame(tabId, frame.frameKey, `(document.body?.innerText || "").slice(0, ${maxChars})`)
-            if (typeof content === 'string' && content.trim()) parts.push(`[frame ${frame.frameKey} ${frame.url}]\n${content}`)
-          } catch (error) {
-            console.warn('[browser_read] frame read failed:', frame.frameKey, error instanceof Error ? error.message : String(error))
-            return browserStructuredOutput({ ok: false, errorKind: 'frame_read_failed', frameId: frame.frameKey, message: String(error) })
-          }
+        // The whole page: its rendered content as Markdown, every content frame included (plan 2026-11-18, D1–D5).
+        const reading = await readTabAsMarkdown(controller, tabId)
+        if (!reading.ok) {
+          console.warn(`[browser_read] ${reading.errorKind}:`, reading.frameId || 'main', reading.message)
+          return browserStructuredOutput({
+            ok: false,
+            errorKind: reading.errorKind,
+            ...(reading.frameId ? { frameId: reading.frameId } : {}),
+            message: reading.message,
+          })
         }
-        const content = parts.join('\n\n')
-        if (!content || content.trim().length === 0) {
+        if (!reading.markdown.trim()) {
           return browserStructuredOutput({
             ok: false,
             errorKind: 'page_content_empty',
             nextSuggestedAction: 'wait for a real page body or re-ground the intended live tab before reading again',
           })
         }
+        const { content, ...window } = sliceReadContent(reading.markdown, offset, maxChars)
         return browserStructuredOutput({
           ok: true,
           observationFresh: true,
-          content: fitReadContent(content, maxChars),
+          url: reading.url,
+          title: reading.title,
+          format: 'markdown',
+          ...window,
+          // The page is longer than one document may hand over; what lies past that point cannot be read here.
+          ...(reading.hardLimitReached ? { hardLimitReached: true } : {}),
+          content,
         })
       }
 
