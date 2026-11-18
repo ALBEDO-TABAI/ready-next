@@ -18,6 +18,9 @@
 //            tour's restart checks that the group came back.
 //   download T4/T8: the task card lists the downloaded file as a capsule with type and size; click opens it; Space
 //            quick-looks it.
+//   sequence plan 2026-11-18: one model call carries several steps. A first write that needs the person's consent
+//            stops the sequence before anything runs; made on its own, that step brings up the card; after consent the
+//            rest runs in one call and the closing read comes back with the result, once.
 //   settings T8: 设置 › 浏览器 — the engine is chosen there; suggestions are off by default and the switch says what
 //            turning them on sends. T12: the page-tools experiment is off; turned on, the row says a restart is needed.
 //   suggest  T8: typing in the address field lists open tabs and history from this computer (no engine suggestions
@@ -404,6 +407,17 @@ async function main() {
   const holds = {}
   const hold = name => new Promise(resolve => { holds[name] = resolve })
   const tabFrom = (turn, index) => turn.findDeep(turn.parsed[index], 'postActionTabId') || turn.findDeep(turn.parsed[index], 'tabId')
+  // The steps a model would chain on the form page: fill, submit, wait for the result page, read it. Fields are named
+  // by the targets of the snapshot the stand-in took of that page (its third result), as a model addresses fields.
+  const fieldOf = (turn, label) => (turn.parsed[2]?.data?.pageMap?.targets || [])
+    .find(target => target.role === 'textbox' && String(target.name).includes(label))?.targetId
+  // Only the two fields at the top are used: a field below the visible part of the page has to be scrolled to first.
+  const formSteps = turn => [
+    { tool: 'browser_type', args: { target_id: fieldOf(turn, '姓名'), text: '白' } },
+    { tool: 'browser_fill_form', args: { fields: [{ target_id: fieldOf(turn, '邮箱'), value: 'seq-shell@example.test' }], submit: true } },
+    { tool: 'browser_wait', args: { tab_id: tabFrom(turn, 1), condition: 'text', text: '已收到' } },
+    { tool: 'browser_read', args: { tab_id: tabFrom(turn, 1) } },
+  ]
   const model = createStandInModel([
     // Each scenario first observes the page the person is on, as a model does: an action is anchored to an observed
     // document, and a tab opened from it is the task's own (W7 T3).
@@ -421,6 +435,17 @@ async function main() {
       turn => ({ tool: 'browser_snapshot', args: { tab_id: tabFrom(turn, 1) } }),
       () => ({ tool: 'browser_download', args: { mode: 'urls', urls: [sites.url('/downloads/files/report-2026-q3.csv')] } }),
       () => ({ reply: '第三季度报表下载好了。' }),
+    ] },
+    // One call, several steps. The first write on this origin needs consent, which a sequence never asks for mid-way:
+    // the stand-in is turned away, makes that step on its own (the card appears for it), then sends the rest.
+    { name: 'sequence', match: /连续动作场景/, steps: [
+      () => ({ tool: 'browser_snapshot', args: {} }),
+      () => ({ tool: 'browser_tabs', args: { action: 'open', url: sites.url('/form/') } }),
+      turn => ({ tool: 'browser_snapshot', args: { tab_id: tabFrom(turn, 1) } }),
+      turn => ({ tool: 'browser_sequence', args: { steps: formSteps(turn) } }),
+      turn => ({ tool: 'browser_type', args: { target_id: fieldOf(turn, '姓名'), text: '白' } }),
+      turn => ({ tool: 'browser_sequence', args: { steps: formSteps(turn) } }),
+      turn => ({ reply: `完成页写着：${/已收到 [^\s"\\]+ 的留言/.exec(JSON.stringify(turn.parsed[5]?.data?.observation || ''))?.[0] || '没有读到'}` }),
     ] },
     { name: 'takeover', match: /接管场景/, steps: [
       () => ({ tool: 'browser_snapshot', args: {} }),
@@ -464,6 +489,7 @@ async function main() {
     }
     await run('login', () => loginCase({ app, page, model, sites }))
     await run('download', () => downloadCase({ app, page, model }))
+    await run('sequence', () => sequenceCase({ page, model, sites }))
     await run('groups', () => groupsCase({ page, site }))
     await run('tabs', () => tabsCase({ app, page }))
     await run('takeover', () => takeoverCase({ app, page, model, holds }))
@@ -656,6 +682,39 @@ async function tabsCase({ page }) {
   await group.locator('.browser-task-group__close').click()
   ok('T8 tabs: 全部关闭 closes the task’s tabs through Main', await waitFor(async () => !(await tabsOf(page)).some(tab => tab.browserTaskId === id && tab.owner === 'agent'))
     && await waitFor(async () => !(await group.count())))
+}
+
+async function sequenceCase({ page, model, sites }) {
+  await send(page, '连续动作场景：把表单填好提交，再告诉我完成页写了什么')
+  // The stand-in's sequence is turned away at its first write; the same step made on its own asks the person.
+  const confirm = page.locator(`${CHAT} [role="dialog"][aria-label="Agent 反问卡片"]`)
+  const asked = await waitFor(async () => (await confirm.count()) > 0, 90000)
+  ok('sequence: the step that needs consent brings up the card once it is called on its own', asked)
+  if (asked) {
+    await confirm.getByRole('button', { name: '确认执行' }).click()
+    await confirm.getByRole('button', { name: '提交回答' }).click()
+  }
+  await waitForReply(page, model, 'sequence')
+  // The request the stand-in answered with its reply: by then it had been given every tool result of the turn.
+  const last = model.requests.filter(entry => entry.scenario === 'sequence' && entry.decision?.reply).at(-1)
+  const parsed = (last?.results || []).map(text => { try { return JSON.parse(text) } catch { return null } })
+  const refused = parsed[3]?.data
+  const done = parsed[5]?.data
+  ok('sequence: the tool is on the surface the model was offered', Boolean(last?.tools.includes('browser_sequence')))
+  ok('sequence: a first write that needs consent stops the whole sequence before anything runs',
+    refused?.ok === false && refused.errorKind === 'denied_pending_confirmation' && refused.stoppedAt === 1
+      && Array.isArray(refused.steps) && refused.steps.length === 0 && refused.notExecuted?.length === 4
+      && refused.failure?.step === 1 && /单独调用 browser_type/.test(String(refused.message)), JSON.stringify(refused).slice(0, 400))
+  ok('sequence: after consent all four steps run in one call',
+    done?.ok === true && Array.isArray(done.steps) && done.steps.length === 4 && done.steps.every(step => step.ok === true)
+      && done.steps[1]?.tool === 'browser_fill_form' && /\/form\/done/.test(String(done.steps[1]?.url)), String(last?.results[5]).slice(0, 1500))
+  ok('sequence: the closing read comes back with the result, and the model receives it once',
+    done?.observation?.tool === 'browser_read' && done.observation.data?.format === 'markdown'
+      && String(done.observation.data?.content).includes('已收到 白 的留言') && parsed[5] && !('text' in parsed[5]),
+    JSON.stringify(Object.keys(parsed[5] || {})))
+  const row = sites.records('form.submit').map(entry => entry.data).find(entry => entry.email === 'seq-shell@example.test')
+  ok('sequence: the form reached the server as filled', row?.name === '白', JSON.stringify(row))
+  ok('sequence: the reply quotes the page the sequence read', String(last?.decision?.reply).includes('已收到 白 的留言'), String(last?.decision?.reply))
 }
 
 async function takeoverCase({ app, page, model, holds }) {

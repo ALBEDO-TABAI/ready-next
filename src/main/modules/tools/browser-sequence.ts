@@ -196,7 +196,8 @@ export async function executeBrowserSequence(
   /** The step whose input may or may not have reached the page; no step that changes the page follows it. */
   let unverifiedStep: number | null = null
 
-  const stopped = (at: number, stop: Stop): ToolExecutionOutput => {
+  /** `failed` is the stopping step's own result: the model needs it whole to decide what to do next. */
+  const stopped = (at: number, stop: Stop, failed?: ToolExecutionOutput): ToolExecutionOutput => {
     const result: BrowserSequenceResult = {
       ok: false,
       errorKind: stop.errorKind,
@@ -205,6 +206,7 @@ export async function executeBrowserSequence(
       steps: records,
       observation,
       notExecuted: rest(input.steps, records.length),
+      ...(failed?.data ? { failure: { step: at + 1, tool: input.steps[at].tool, data: failed.data } } : {}),
     }
     return createBrowserStructuredOutput({ ...result })
   }
@@ -232,10 +234,10 @@ export async function executeBrowserSequence(
     const record = recordOf(index + 1, step.tool, output, stop, context)
     if (stop && output.data?.notExecuted === true) {
       // The step was turned away before it started (it needs the user's confirmation): it counts as not executed.
-      return stopped(index, stop)
+      return stopped(index, stop, output)
     }
     records.push(record)
-    if (stop) return stopped(index, stop)
+    if (stop) return stopped(index, stop, output)
 
     if (PAGE_OBSERVATION_TOOLS.has(step.tool)) {
       observation = { step: index + 1, tool: step.tool, data: output.data || {} }

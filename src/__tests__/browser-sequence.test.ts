@@ -78,6 +78,10 @@ test('Q3/Q5: failure in step 2 keeps step 1, never reaches the closing look, nev
   alone.state.keyDelivered = false
   const standalone = await executeToolCall('browser_press_key', keyStep.args, alone.context)
   assert.equal(out.data?.errorKind, standalone.data?.errorKind, 'the sequence stops for the reason the step itself gave')
+  const failure = out.data?.failure as { step: number; tool: string; data: Record<string, unknown> }
+  assert.deepEqual([failure.step, failure.tool], [2, 'browser_press_key'])
+  assert.deepEqual(Object.keys(failure.data).sort(), Object.keys(standalone.data || {}).sort(), 'the stopping step is reported as a call of its own would report it')
+  assert.equal((failure.data.outcome as { delivery: string }).delivery, 'not_delivered')
   assert.deepEqual(records(out.data).map(s => [s.step, s.ok, s.delivery]), [[1, true, 'delivered'], [2, false, 'not_delivered']])
   assert.deepEqual(out.data?.notExecuted, [{ step: 3, tool: 'browser_snapshot' }])
   assert.equal(out.data?.observation, null)
@@ -100,6 +104,7 @@ test('Q4: origin confirmation in step 2 stops before card, action or lease; stan
   assert.equal(out.data?.errorKind, 'denied_pending_confirmation')
   assert.match(String(out.data?.message), /单独调用 browser_type/)
   assert.deepEqual(records(out.data).map(s => [s.step, s.ok]), [[1, true]], 'the step that needs consent was never started')
+  assert.deepEqual([(out.data?.failure as { step: number }).step, (out.data?.failure as { tool: string }).tool], [2, 'browser_type'])
   assert.equal(frozen, 0)
   assert.equal(f.lease.isHeld, false)
   assert.equal(f.actions.length, 0)

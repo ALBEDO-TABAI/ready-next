@@ -53,6 +53,13 @@ export interface BrowserSequenceObservation {
   data: Record<string, unknown>
 }
 
+export interface BrowserSequenceFailure {
+  step: number
+  tool: BrowserSequenceStepToolName
+  /** What the step that stopped the sequence returned, unchanged: what a call of its own would have shown. */
+  data: Record<string, unknown>
+}
+
 export interface BrowserSequenceResult {
   ok: boolean
   /** One record per attempted step, in order. */
@@ -66,6 +73,8 @@ export interface BrowserSequenceResult {
   message?: string
   /** The step the sequence stopped at, counted from 1. */
   stoppedAt?: number
+  /** The result of the step that stopped the sequence, when a step ran or was turned away. */
+  failure?: BrowserSequenceFailure
 }
 
 /** The sequence stopped before a step that changes the page because the step before it could not be confirmed. */

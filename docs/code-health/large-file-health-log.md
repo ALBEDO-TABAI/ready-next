@@ -24,6 +24,7 @@
 | 2026-11-18 | 浏览器连续动作 | `src/main/modules/tools/tool-executor.ts` | 1623 | 净 +21 | 一般 | 仅接线连续动作容器（分派、两个上下文字段、步骤需确认时直接返回）；清单预检、循环与结果整理由独立的 `browser-sequence.ts` 承担。复查各域分派和确认边界，不在本任务扩展重构。 | 复查：2026-12-02 |
 | 2026-11-18 | 浏览器连续动作 | `src/__tests__/codex-tool-bridge.test.ts` | 1996 | 净 +47 | 一般 | 复用原桥接夹具，新增多步共用一次模型调用、各步冻结校验与外层回执用例；复查按工具执行、交互等待及回执划分套件。 | 复查：2026-12-02 |
 | 2026-11-18 | 浏览器连续动作 | `src/__tests__/codex-binding-repository-native.test.ts` | 9333 | 净 +17 | 一般 | 在既有最后观察位用例增加连续动作变体，验证六步只计一次及最后一位继续拒绝写入；复用原数据库夹具，不新增生产存储规则。复查按准入、恢复及发布拆分套件。 | 复查：2026-12-02 |
+| 2026-11-18 | 浏览器读网页转 Markdown | `src/main/modules/tools/browser-observe-tools.ts` | 1288 | 净 +13 | 一般 | 整页读取改为调用新文件 `browser-page-markdown.ts`（转换脚本、各层 frame 合并、分段都在那里），本文件只剩调用、参数与结果字段；按目标和按选择器的读取接上同一个分段函数。2026-12-14 复查观察工具与页面脚本边界时一并看。 | 复查：2026-12-14 |
 | 2026-11-18 | 会话内采集：独立审查后的修正 | `src/main/modules/rss-engine/ipc-handler.ts` | 1205 | 净 +19 | 一般 | 只加两段接线：平台暂停状态按事实存取（设置项 `rss:session_acquisition_standing`），以及写入前按“已有条目不改写”筛一遍（规则本身在 `session-item-store-policy.ts`）。仍低于会话内采集之前的 1261 行。 | 复查：2026-11-30 |
 | 2026-11-17 | 订阅的会话内采集 | `src/main/index.ts` | 1425 | 净 +4 | 一般 | 只接两根线：自动刷新调用带上“自动”标记，把系统闲置时长读数交给资讯引擎（读数函数在 `rss-engine/user-presence.ts`）。复查同 B3 行。 | 复查：2026-12-15 |
 | 2026-11-17 | 订阅的会话内采集 | `src/main/modules/rss-engine/ipc-handler.ts` | 1186 | 净 −75 | 一般 | 路由改为会话优先后删掉了 RSSHub 预热、严格可用性判断和逐源暂停；会话源的单次刷新在 `session-source-fetch.ts`，节奏在 `session-acquisition-pacer.ts`。同批 `browser-acquisition.ts` 1096 → 483（页面脚本移到 `session-page-scripts.ts`，702 行）。 | 复查：2026-11-30 |
