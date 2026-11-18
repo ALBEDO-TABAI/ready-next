@@ -28,7 +28,7 @@ function createDb(): NativeDb {
     );
     CREATE TABLE chat_messages (
       id TEXT PRIMARY KEY, conversation_id TEXT, role TEXT, content TEXT,
-      timestamp TEXT, message_visibility_epoch INTEGER NOT NULL
+      timestamp TEXT, message_visibility_epoch INTEGER NOT NULL, replaced_by_run_id TEXT
     );
     CREATE TABLE codex_thread_bindings (
       thread_binding_id TEXT PRIMARY KEY, ready_scope_id TEXT, retired_at TEXT
@@ -122,12 +122,12 @@ test('closed local root success is sealed from durable truth while external cont
     conversationId: 'conversation-1', contributeToMemories: true,
     updatedAt: '2026-08-20T00:00:01.000Z',
   })
-  db.prepare(`INSERT INTO chat_messages VALUES (?, ?, ?, ?, ?, 0)`).run(
+  db.prepare(`INSERT INTO chat_messages VALUES (?, ?, ?, ?, ?, 0, NULL)`).run(
     'message-user', 'conversation-1', 'user', '以后请简洁汇报', '2026-08-20T00:00:02.000Z')
-  db.prepare(`INSERT INTO chat_messages VALUES (?, ?, ?, ?, ?, 0)`).run(
+  db.prepare(`INSERT INTO chat_messages VALUES (?, ?, ?, ?, ?, 0, NULL)`).run(
     'assistant:task-1:run-1:terminal', 'conversation-1', 'assistant',
     '好的，我会保持简洁', '2026-08-20T00:00:04.000Z')
-  db.prepare(`INSERT INTO chat_messages VALUES (?, ?, ?, ?, ?, 0)`).run(
+  db.prepare(`INSERT INTO chat_messages VALUES (?, ?, ?, ?, ?, 0, NULL)`).run(
     'failed-message', 'conversation-1', 'assistant', '不得进入证据', '2026-08-20T00:00:03.000Z')
   db.prepare(`INSERT INTO codex_thread_bindings VALUES ('thread-1', 'conversation-1', NULL)`).run()
   db.prepare(`INSERT INTO run_meta VALUES ('run-1', 'done')`).run()

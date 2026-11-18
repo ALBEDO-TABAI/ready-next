@@ -32,7 +32,8 @@ test('pet attention marker accepts only exact terminal activity identity and dir
         conversation_id TEXT NOT NULL,
         role TEXT NOT NULL,
         timestamp TEXT NOT NULL,
-        message_visibility_epoch INTEGER NOT NULL DEFAULT 0
+        message_visibility_epoch INTEGER NOT NULL DEFAULT 0,
+        replaced_by_run_id TEXT
       );
       CREATE TABLE task_projections (
         task_id TEXT PRIMARY KEY,
