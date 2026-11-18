@@ -20,7 +20,9 @@ type Edges = GestureScene['edgeElements']
 type Drag = {
   pointerId: number; start: Point; latest: Point; camera: Camera; selection: string[]; moved: boolean
 } & (
-  | { kind: 'move'; pressed: string; toggled: boolean; nodes: CanvasNode[]; box: Rect; members: DockItem[]; memberBox: Rect | null; dx: number; dy: number; free: boolean; adaptive: AdaptiveDock | null; edges: Edges }
+  | { kind: 'move'; pressed: string; toggled: boolean; nodes: CanvasNode[]; box: Rect; members: DockItem[]; memberBox: Rect | null; dx: number; dy: number; free: boolean; adaptive: AdaptiveDock | null; edges: Edges
+      /** A mark on the card that answers a press which did not move (a video's play mark); a drag from it moves the card. */
+      press: HTMLElement | null }
   | { kind: 'resize'; nodes: CanvasNode[]; box: Rect; handle: Handle; group: boolean; placements: Map<string, Placement> | null; edges: Edges }
   | { kind: 'pan' }
   | { kind: 'marquee'; additive: string[] }
@@ -57,6 +59,8 @@ export function edgePath(a: Rect, b: Rect, edge?: CanvasEdge): string {
 /** A connector is a group of two paths (the line and its wide hit area): both follow the cards. */
 function setEdge(group: SVGGElement, d: string): void { for (const path of group.querySelectorAll('path')) path.setAttribute('d', d) }
 const isMac = (): boolean => /mac/i.test(globalThis.navigator?.platform ?? '')
+/** Sent to a `[data-canvas-press]` mark when a press on it ended where it began. */
+export const CANVAS_PRESS = 'canvas:press'
 
 /** One RAF owns each transient gesture; no board state is changed until pointerup. */
 export class CanvasGestures {
@@ -87,7 +91,9 @@ export class CanvasGestures {
     const s = this.callbacks.scene()
     if (!s || s.busy || this.drag || (e.button !== 0 && e.button !== 1)) return
     const target = e.target instanceof Element ? e.target : null
-    if (target?.closest('button,input,textarea,select,audio,video,[contenteditable]:not([contenteditable="false"]),[data-canvas-ui]') && !target?.closest('[data-resize]')) return
+    // A control keeps its own presses. A video does only while it shows the browser's controls: without them its
+    // picture is part of the card, and a press on it picks or moves the card like a press on a picture.
+    if (target?.closest('button,input,textarea,select,audio,video[controls],[contenteditable]:not([contenteditable="false"]),[data-canvas-ui]') && !target?.closest('[data-resize]')) return
     const camera = this.wheelCamera ?? s.camera
     e.preventDefault(); s.root.focus(); this.finishWheel()
     this.view = s.root.ownerDocument.defaultView
@@ -115,7 +121,7 @@ export class CanvasGestures {
         const nodes = this.expandSelection(selected, s).flatMap(key => { const n = s.byId.get(key); return n ? [n] : [] })
         const members = nodes.filter(dockable).map(n => ({ id: n.id, x: n.x, y: n.y, width: n.width, height: n.height }))
         this.drag = { ...common, kind: 'move', pressed: node.id, toggled: toggles, nodes, box: bounds(nodes.map(visualBounds)), members, memberBox: members.length ? bounds(members) : null,
-          dx: 0, dy: 0, free: e.shiftKey, adaptive: null, edges: this.touching(nodes, s) }
+          dx: 0, dy: 0, free: e.shiftKey, adaptive: null, edges: this.touching(nodes, s), press: target?.closest<HTMLElement>('[data-canvas-press]') ?? null }
       }
     } else if (target?.closest('[data-edge-id]')) {
       // A connector is picked, never dragged: it follows its cards. ⇧ or ⌘ adds or removes it.
@@ -288,6 +294,8 @@ export class CanvasGestures {
         this.reset(s, d.nodes.map(n => n.id))
         // A plain click on one card of a multi-selection narrows the selection to it (Stillroom).
         if (!d.moved && !d.toggled && d.selection.length > 1) this.callbacks.select([d.pressed])
+        // The pointer is captured by the board, so the mark gets no click of its own: tell it that it was pressed.
+        if (!d.moved && !d.toggled && d.press?.isConnected) d.press.dispatchEvent(new (d.press.ownerDocument.defaultView as Window & typeof globalThis).Event(CANVAS_PRESS))
       }
     } else if (d.kind === 'resize') {
       if (d.moved && d.placements) this.land(s, d.nodes, d.placements, d.edges, false)

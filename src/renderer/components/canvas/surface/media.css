@@ -31,9 +31,36 @@
   .cv-image { container-type: size; }
   .cv-image__crop { position: absolute; left: 50%; top: 50%; width: max(100cqw, calc(100cqh * var(--cv-crop-ratio, 1))); height: max(100cqh, calc(100cqw / var(--cv-crop-ratio, 1))); transform: translate(-50%, -50%); }
   .cv-image.is-missing, .cv-video__missing { display: grid; place-items: center; color: var(--rn-ink-3); font-size: var(--rn-t-meta); }
+  /* Video card (2026-11-18): the picture is part of the card (a press picks it, a drag moves it). Playing is the
+     card's own few controls, light on the picture: a round mark in the middle and a bar along the bottom that shows
+     under the pointer, with the keyboard, or while a started video is paused. Never the signal colour (V5). */
   .cv-video { display: flex; flex-direction: column; width: 100%; height: 100%; margin: 0; overflow: hidden; border-radius: inherit; }
   .cv-video figcaption { flex: none; padding: 6px 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 var(--rn-t-meta)/var(--rn-lh-meta) var(--rn-font-ui); }
-  .rn-canvas .canvas-card .cv-video video, .cv-video__missing { flex: 1; min-height: 0; width: 100%; height: auto; object-fit: cover; }
+  .cv-video__stage { position: relative; flex: 1; min-height: 0; container-type: size; color: var(--rn-on-inverse); --cv-video-veil: color-mix(in srgb, var(--rn-inverse) 58%, transparent); }
+  .rn-canvas .canvas-card .cv-video video { display: block; width: 100%; height: 100%; object-fit: cover; }
+  .cv-video__missing { flex: 1; min-height: 0; }
+  .cv-video__mark { position: absolute; left: 50%; top: 50%; display: grid; place-items: center; width: 48px; height: 48px; border-radius: var(--rn-r-pill); background: var(--cv-video-veil); translate: -50% -50%; cursor: pointer; transition: opacity 160ms var(--rn-ease-std), scale 110ms var(--rn-ease-out); }
+  .cv-video__mark svg { width: 18px; height: 18px; fill: currentColor; stroke-width: 0; }
+  .cv-video:not([data-playing]) .cv-video__mark svg { margin-left: 3px; }
+  .cv-video__mark:active { scale: .94; }
+  .cv-video[data-playing] .cv-video__mark { opacity: 0; }
+  .canvas-card:hover .cv-video[data-playing] .cv-video__mark { opacity: 1; }
+  .cv-video__length { position: absolute; right: 8px; bottom: 8px; padding: 2px 6px; border-radius: var(--rn-r-xs); background: var(--cv-video-veil); font: 400 var(--rn-t-micro)/var(--rn-lh-micro) var(--rn-font-mono); font-variant-numeric: tabular-nums; transition: opacity 160ms var(--rn-ease-std); }
+  .cv-video__bar { position: absolute; left: 0; right: 0; bottom: 0; display: flex; align-items: center; gap: 6px; padding: 22px 8px 6px; background: linear-gradient(to top, color-mix(in srgb, var(--rn-inverse) 70%, transparent), transparent); opacity: 0; transition: opacity 160ms var(--rn-ease-std); }
+  .canvas-card:hover .cv-video__bar, .cv-video__bar:focus-within, .cv-video[data-started]:not([data-playing]) .cv-video__bar { opacity: 1; }
+  .canvas-card:hover .cv-video__length, .cv-video__stage:focus-within .cv-video__length { opacity: 0; }
+  .rn-canvas .cv-video__button { flex: none; display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border-radius: var(--rn-r-pill); background: transparent; color: inherit; transition: background-color 120ms var(--rn-ease-std); }
+  .rn-canvas .cv-video__button:hover { background: color-mix(in srgb, var(--rn-on-inverse) 20%, transparent); }
+  .cv-video__button:focus-visible, .cv-video__track:focus-visible { outline: 2px solid color-mix(in srgb, var(--rn-on-inverse) 72%, transparent); outline-offset: 1px; }
+  .cv-video__button svg { width: 14px; height: 14px; }
+  .cv-video__button[data-fill] svg { width: 12px; height: 12px; fill: currentColor; stroke-width: 0; }
+  .cv-video__track { flex: 1; min-width: 20px; height: 20px; display: flex; align-items: center; border-radius: var(--rn-r-xs); cursor: pointer; }
+  .cv-video__line { flex: 1; height: 3px; border-radius: 2px; background: color-mix(in srgb, var(--rn-on-inverse) 34%, transparent); overflow: hidden; }
+  .cv-video__line > i { display: block; height: 100%; background: var(--rn-on-inverse); }
+  .cv-video__time { flex: none; padding: 0 2px; font: 400 var(--rn-t-micro)/var(--rn-lh-micro) var(--rn-font-mono); font-variant-numeric: tabular-nums; }
+  .cv-video__note { position: absolute; left: 0; right: 0; bottom: 0; margin: 0; padding: 8px 12px; background: var(--cv-video-veil); font: 400 var(--rn-t-meta)/var(--rn-lh-meta) var(--rn-font-ui); }
+  @container (max-width: 250px) { .cv-video__time, .cv-video__button[data-extra] { display: none; } }
+  @container (max-height: 110px) { .cv-video__mark { width: 32px; height: 32px; } .cv-video__mark svg { width: 13px; height: 13px; } }
 
   /* Crop mode (M4 §11): the whole picture dimmed on the stage, the kept part at full strength inside an ink frame.
      Ink, not the signal colour: this is a selection. Sizes are divided by the zoom (--cv-crop-k) to stay the same on screen. */
@@ -83,6 +110,9 @@
   /* Slideshow: in the shared float host, sized to the board. */
   .cv-slideshow { position: fixed; display: grid; place-items: center; overflow: hidden; background: color-mix(in srgb, var(--rn-stage-2) 96%, transparent); animation: cv-slideshow-in 200ms var(--rn-ease-std) both; user-select: none; }
   .cv-slideshow__picture { max-width: calc(100% - 96px); max-height: calc(100% - 132px); margin-bottom: 36px; object-fit: contain; border-radius: var(--rn-r-md); box-shadow: var(--rn-shadow-3); background: var(--rn-fill-2); }
+  /* A video takes the largest box of its own shape that fits beside the bar (the view is the size container). */
+  .cv-slideshow { container-type: size; }
+  video.cv-slideshow__picture { width: min(100cqw - 96px, (100cqh - 132px) * var(--cv-film-ratio, 1.7778)); height: auto; max-width: none; max-height: none; aspect-ratio: var(--cv-film-ratio, 1.7778); background: var(--rn-inverse); }
   .cv-slideshow__bar { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); display: flex; align-items: center; gap: 2px; padding: 4px; }
   .cv-slideshow__bar .rn-icon-btn { border-radius: var(--rn-r-pill); }
   .cv-slideshow__caption { display: flex; align-items: baseline; gap: 10px; max-width: 360px; padding: 0 10px; font: 400 var(--rn-t-meta)/var(--rn-lh-meta) var(--rn-font-ui); }
@@ -92,5 +122,7 @@
   @media (prefers-reduced-motion: reduce) {
     .cv-record__dot, .cv-slideshow { animation: none; }
     .rn-canvas .cv-audio__play:active:not(:disabled) { transform: none; }
+    .cv-video__mark:active { scale: none; }
+    .cv-video__mark, .cv-video__bar, .cv-video__length { transition: none; }
   }
 }

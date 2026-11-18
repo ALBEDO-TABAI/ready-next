@@ -8,7 +8,8 @@ import { stopAudio } from '../../modules/canvas/audio-player'
 import { toLocalFileUrl } from '../../utils/dragDrop'
 import { showToast, type MenuEntry } from '../ui'
 import { AudioCard } from './cards/AudioCard'
-import { ImageCard, VideoCard } from './cards/ImageCard'
+import { ImageCard } from './cards/ImageCard'
+import { VideoCard } from './cards/VideoCard'
 import { LinkCard, type LinkPreviewData } from './cards/LinkCard'
 import { RecordTool } from './surface/RecordTool'
 import { boardSlides, closeSlideshow, openSlideshow } from './surface/Slideshow'
@@ -92,6 +93,17 @@ export function useBoardMedia({ opened, root, write, report, pick = pickFiles }:
     void keep(node.id, preview, false)
   }, [keep])
 
+  /** A picture or a video stands alone over the board. A video goes on from where its card was, and the cards fall silent. */
+  const enlarge = (node: CanvasNode): boolean => {
+    const board = latest.current.opened
+    if (!board || node.type !== 'file' || (node.ready.kind !== 'image' && node.ready.kind !== 'video')) return false
+    const element = surface.current?.element() ?? null
+    const card = element?.querySelector<HTMLVideoElement>(`[data-node-id=${JSON.stringify(node.id)}] video`)
+    const from = card && card.currentTime > .15 ? card.currentTime : 0
+    element?.querySelectorAll('video').forEach(video => video.pause())
+    openSlideshow(boardSlides(board.canvas, resolveAsset), node.id, () => surface.current?.element() ?? null, () => surface.current?.element()?.focus({ preventScroll: true }), from)
+    return true
+  }
   const renderCard = (node: CanvasNode): ReactNode | undefined => {
     if (node.ready.ref?.kind === 'event') return undefined
     if (node.type === 'link') return <LinkCard node={node} source={previews} resolveAsset={resolveAsset} onPreview={onPreview} />
@@ -99,7 +111,7 @@ export function useBoardMedia({ opened, root, write, report, pick = pickFiles }:
     const src = resolveAsset(node.file)
     if (node.ready.kind === 'audio') return <AudioCard node={node} src={src} />
     if (node.ready.kind === 'image') return <ImageCard node={node} src={src} />
-    if (node.ready.kind === 'video') return <VideoCard node={node} src={src} />
+    if (node.ready.kind === 'video') return <VideoCard node={node} src={src} onEnlarge={() => { enlarge(node) }} />
     return undefined
   }
   const fail = (cause: unknown) => latest.current.report(cause)
@@ -125,13 +137,8 @@ export function useBoardMedia({ opened, root, write, report, pick = pickFiles }:
       await add(files, { x: at.x - 150, y: at.y - 100 })
       return true
     },
-    /** Double-click on a picture: the slideshow. */
-    openNode(node: CanvasNode): boolean {
-      const board = latest.current.opened
-      if (!board || node.type !== 'file' || node.ready.kind !== 'image') return false
-      openSlideshow(boardSlides(board.canvas, resolveAsset), node.id, () => surface.current?.element() ?? null, () => surface.current?.element()?.focus({ preventScroll: true }))
-      return true
-    },
+    /** Double-click on a picture or a video: the slideshow. */
+    openNode: enlarge,
     cardItems(nodes: CanvasNode[]): MenuEntry[] {
       const node = nodes.length === 1 ? nodes[0] : undefined
       if (!node || node.type !== 'link' || node.ready.ref?.kind === 'event') return []

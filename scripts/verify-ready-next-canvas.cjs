@@ -343,6 +343,85 @@ async function main() {
     await snapshot('13a-zip-download')
     console.log('PASS 13-zip: selection, sub-board folder and whole board; original bytes; nothing outside the throwaway directory')
   }
+  // 2026-11-18 — a video on the board, on a board of its own: its picture picks and moves the card like a picture
+  // does, its mark and its bar play it, and a double-click shows it large with the browser's controls. The clip is a
+  // four-second fixture without sound; playing is read from the element, never from the clock (a hidden window may
+  // hold a silent video still).
+  const videoSteps = async () => {
+    const clip = fs.readFileSync(path.join(__dirname, 'fixtures/ready-next-canvas-clip.mp4')), clipFile = `影像.assets/${sha256(clip)}-clip.mp4`
+    fs.mkdirSync(path.join(vault, '影像.assets'))
+    fs.writeFileSync(path.join(vault, clipFile), clip)
+    fs.writeFileSync(path.join(vault, '影像.assets', 'still.png'), pngImage(480, 270, dusk))
+    const board = await page.evaluate(async ({ clipFile, clipHash }) => {
+      const canvas = await window.electronAPI.canvas.create({ path: '影像.canvas', operationId: crypto.randomUUID(), canvas: { edges: [], ready: { id: crypto.randomUUID(), schemaVersion: 1, title: '影像' }, nodes: [
+        { id: 'fixture-film', type: 'file', file: clipFile, x: 0, y: 0, width: 480, height: 298, ready: { kind: 'video', media: { mime: 'video/mp4', sha256: clipHash, originalName: 'clip.mp4' }, preview: { title: '样片' } } },
+        { id: 'fixture-still', type: 'file', file: '影像.assets/still.png', x: 620, y: 0, width: 480, height: 270, ready: { kind: 'image', preview: { title: '剧照' } } },
+      ] } })
+      if (!canvas.ok) throw new Error(canvas.error)
+      await window.electronAPI.canvas.release(canvas.value.handleId)
+      return canvas.value.objectId
+    }, { clipFile, clipHash: sha256(clip) })
+    // The page sidebar reads its tree when the document shell starts: restart, as a person reopening the app would.
+    await app.close(); await launch()
+    await reveal(board)
+    const stage = page.locator('[data-workbench-mode-panel="document"] .rn-canvas[aria-label="影像"]').first()
+    await stage.waitFor()
+    const filmNode = () => JSON.parse(fs.readFileSync(path.join(vault, '影像.canvas'), 'utf8')).nodes.find(node => node.id === 'fixture-film')
+    const card = stage.locator('.canvas-card[data-node-id="fixture-film"]'), film = card.locator('.cv-video video')
+    await poll(() => film.evaluate(video => video.readyState >= 1).catch(() => false), 'The video did not load')
+    assert.equal(await film.evaluate(video => video.controls), false, 'the board does not use the browser controls')
+    assert.equal(await card.locator('.cv-video__length').innerText(), '0:04')
+    await stage.getByRole('button', { name: '适应内容', exact: true }).click(); await page.waitForTimeout(300)
+    const playing = () => film.evaluate(video => !video.paused)
+    const at = async (u, v) => { const box = await film.boundingBox(); return { x: box.x + box.width * u, y: box.y + box.height * v } }
+    const drag = async (from, dx, dy) => { await page.mouse.move(from.x, from.y); await page.mouse.down(); await page.mouse.move(from.x + dx / 2, from.y + dy / 2, { steps: 4 }); await page.mouse.move(from.x + dx, from.y + dy, { steps: 4 }); await page.mouse.up() }
+    // The picture: a press picks the card and a drag moves it; moving does not start the video.
+    const first = filmNode()
+    await drag(await at(.25, .3), -40, 60)
+    await poll(() => { const node = filmNode(); return node.x < first.x && node.y > first.y }, 'Dragging the picture did not move the video card')
+    assert.equal(await card.getAttribute('data-selected'), 'true')
+    assert.equal(await playing(), false, 'moving a video does not start it')
+    // The mark in the middle: a press plays, another pauses; a drag from it moves the card and plays nothing.
+    let centre = await at(.5, .5)
+    await page.mouse.click(centre.x, centre.y)
+    await poll(playing, 'A press on the mark did not start the video')
+    await page.mouse.click(centre.x, centre.y)
+    await poll(async () => !await playing(), 'A second press on the mark did not pause the video')
+    const second = filmNode()
+    await drag(centre, 36, 24)
+    await poll(() => filmNode().x > second.x, 'A drag from the mark did not move the card')
+    assert.equal(await playing(), false, 'a drag from the mark is a move, not a press')
+    // The bar: play, a press on the line jumps there, sound off, pause. None of it moves the card.
+    const settled = filmNode()
+    await card.hover()
+    assert.equal(await card.locator('.cv-video__bar').evaluate(bar => getComputedStyle(bar).opacity), '1', 'the bar shows under the pointer')
+    await card.getByRole('button', { name: '播放', exact: true }).click()
+    await poll(playing, 'The bar did not start the video')
+    const line = await card.locator('.cv-video__track').boundingBox()
+    await page.mouse.click(line.x + line.width / 2, line.y + line.height / 2)
+    await poll(() => film.evaluate(video => Math.abs(video.currentTime - 2) < .7), 'A press on the line did not jump to the middle')
+    await card.getByRole('button', { name: '静音', exact: true }).click()
+    assert.equal(await film.evaluate(video => video.muted), true)
+    await card.getByRole('button', { name: '暂停', exact: true }).click()
+    await poll(async () => !await playing(), 'The bar did not pause the video')
+    assert.deepEqual([filmNode().x, filmNode().y], [settled.x, settled.y], 'the controls never move the card')
+    await page.screenshot({ path: path.join(evidence, '13-video-card.png') })
+    // Double-click: the video alone over the board, with the browser's controls, in the same row as the pictures.
+    const spot = await at(.2, .25)
+    await page.mouse.dblclick(spot.x, spot.y)
+    const show = page.locator('[data-float-id="canvas-slideshow"]'), large = show.locator('video.cv-slideshow__picture')
+    await large.waitFor()
+    assert.equal(await large.evaluate(video => video.controls), true)
+    assert.match(await show.locator('.cv-slideshow__count').innerText(), /^[12] \/ 2$/, 'the video stands in one row with the picture')
+    assert.equal(await playing(), false, 'the card is silent while its video is shown large')
+    await page.waitForTimeout(300)
+    await page.screenshot({ path: path.join(evidence, '13a-video-large.png') })
+    await page.keyboard.press('ArrowRight')
+    await show.locator('img.cv-slideshow__picture').waitFor()
+    await page.keyboard.press('Escape')
+    await poll(async () => await show.count() === 0, 'The slideshow did not close')
+    console.log('PASS 13-video-card: moved by its picture, played by its own controls, shown large with the pictures')
+  }
   try {
     await launch()
     await page.evaluate(async root => { const state = await window.electronAPI.vault.set(root); if (state.status !== 'ready') throw new Error('Vault not ready') }, vault)
@@ -747,6 +826,7 @@ async function main() {
     assert.ok(imported.nodes.some(node => node.text === '旧画板原文'))
     await snapshot('06-import-source-unchanged')
     await mediaSteps()
+    await videoSteps()
     console.log(`PASS M4 window gate: ${evidence}`)
   } finally { if (app) await app.close(); console.log(`Evidence retained: ${temporary}`) }
 }

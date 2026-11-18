@@ -6,6 +6,7 @@ import { CanvasSurface } from '../renderer/components/canvas/surface/CanvasSurfa
 import type { CanvasSurfaceProps } from '../renderer/components/canvas/surface/types'
 import { AudioCard } from '../renderer/components/canvas/cards/AudioCard'
 import { ImageCard } from '../renderer/components/canvas/cards/ImageCard'
+import { VideoCard } from '../renderer/components/canvas/cards/VideoCard'
 import { LinkCard } from '../renderer/components/canvas/cards/LinkCard'
 import { RecordTool } from '../renderer/components/canvas/surface/RecordTool'
 import { useBoardMedia, type CanvasSurfaceApi } from '../renderer/components/canvas/board-media'
@@ -348,5 +349,116 @@ test('the board document places dropped and pasted files, opens the slideshow an
     await act(async () => { refresh.onSelect?.() }); await ui.settle(); await ui.settle()
     assert.deepEqual(previewRequests, [{ objectId: 'board', url: 'https://example.com/post' }])
     assert.deepEqual(commits, [[{ type: 'replaceNode', node: { ...board.nodes[2], ready: { kind: 'link', preview: { title: '新标题', image: 'X.assets/cover.png', fetchedAt: '2026-11-14T06:00:00.000Z' } } } }]])
+  } finally { await ui.close() }
+})
+
+// jsdom plays nothing: a play, a pause and a position are kept on the element and announced the way a browser does.
+function fakePlayback(window: JSDOM['window'], length = 35) {
+  const proto = window.HTMLMediaElement.prototype, paused = new WeakMap<object, boolean>(), time = new WeakMap<object, number>()
+  Object.defineProperty(proto, 'paused', { configurable: true, get() { return paused.get(this) ?? true } })
+  Object.defineProperty(proto, 'duration', { configurable: true, get() { return length } })
+  Object.defineProperty(proto, 'currentTime', { configurable: true, get() { return time.get(this) ?? 0 }, set(value: number) { time.set(this, value) } })
+  proto.play = async function (this: HTMLMediaElement) { paused.set(this, false); this.dispatchEvent(new window.Event('play')) }
+  proto.pause = function (this: HTMLMediaElement) { if (paused.get(this) === false) { paused.set(this, true); this.dispatchEvent(new window.Event('pause')) } }
+}
+const film = (id = 'film', x = 0): Extract<CanvasNode, { type: 'file' }> => ({ id, type: 'file', file: `X.assets/${id}.mp4`, x, y: 0, width: 320, height: 208, ready: { kind: 'video', preview: { title: '样片' } } })
+
+test('a video card is picked and moved by its picture; its mark and its bar play it; the bar never moves the card', async () => {
+  const ui = await mount()
+  try {
+    fakePlayback(ui.dom.window)
+    let canvas: ReadyCanvas = { ready: { schemaVersion: 1, id: 'board' }, edges: [], nodes: [film(), image('pic', 900)] }
+    let commits = 0, enlarged = 0
+    const props: CanvasSurfaceProps = { canvas, onOperations: (ops: CanvasOperation[]) => { commits++; canvas = applyCanvasOperations(canvas, ops).canvas },
+      renderCard: node => node.type === 'file' && node.ready.kind === 'video' ? <VideoCard node={node} src="local-file:///vault/X.assets/film.mp4" onEnlarge={() => { enlarged++ }} /> : undefined }
+    const show = () => ui.render(<><CanvasSurface {...props} canvas={canvas} /><FloatHost /></>)
+    await show()
+    const surface = document.querySelector<HTMLElement>('[data-canvas-surface]')!
+    const card = () => surface.querySelector<HTMLElement>('[data-node-id="film"]')!
+    const pointer = (target: Element, type: string, x: number, y: number) => act(async () => { target.dispatchEvent(new ui.dom.window.MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0, buttons: type === 'pointerup' ? 0 : 1 })) })
+    const picture = card().querySelector('video')!
+    assert.equal(picture.hasAttribute('controls'), false, 'the board does not use the browser controls: they would take every press on the picture')
+    assert.equal(picture.getAttribute('src'), 'local-file:///vault/X.assets/film.mp4#t=0.1')
+    await act(async () => { picture.dispatchEvent(new ui.dom.window.Event('durationchange')) })
+    assert.equal(card().querySelector('.cv-video__length')?.textContent, '0:35')
+
+    // A press on the picture picks the card; a drag from it moves the card, once.
+    await pointer(picture, 'pointerdown', 100, 100)
+    assert.equal(card().dataset.selected, 'true')
+    await pointer(surface, 'pointermove', 60, 160); await pointer(surface, 'pointerup', 40, 180)
+    assert.equal(commits, 1); assert.deepEqual([canvas.nodes[0].x, canvas.nodes[0].y], [-60, 80])
+    await show()
+    assert.equal(card().querySelector('.cv-video')?.hasAttribute('data-playing'), false, 'moving a video does not start it')
+
+    // The mark in the middle: a press that does not move plays or pauses; a drag from it moves the card instead.
+    const mark = () => card().querySelector<HTMLElement>('.cv-video__mark')!
+    await pointer(mark(), 'pointerdown', 100, 100); await pointer(surface, 'pointerup', 100, 100)
+    assert.equal(card().querySelector('.cv-video')?.hasAttribute('data-playing'), true)
+    assert.equal(card().querySelector('.cv-video__length'), null, 'a started video shows its time in the bar')
+    await pointer(mark(), 'pointerdown', 100, 100); await pointer(surface, 'pointerup', 101, 100)
+    assert.equal(card().querySelector('.cv-video')?.hasAttribute('data-playing'), false)
+    await pointer(mark(), 'pointerdown', 100, 100); await pointer(surface, 'pointermove', 130, 100); await pointer(surface, 'pointerup', 130, 100)
+    assert.equal(commits, 2); assert.equal(canvas.nodes[0].x, -30)
+    await show()
+    assert.equal(card().querySelector('.cv-video')?.hasAttribute('data-playing'), false, 'a drag from the mark is a move, not a press')
+
+    // The bar: real controls. They keep their presses, so using them never moves the card.
+    await ui.click('播放')
+    assert.ok(ui.button('暂停')); assert.equal(card().querySelector('video')!.paused, false)
+    const track = card().querySelector<HTMLElement>('.cv-video__track')!
+    track.getBoundingClientRect = () => ({ left: 200, top: 0, right: 300, bottom: 20, width: 100, height: 20, x: 200, y: 0, toJSON() {} })
+    await pointer(track, 'pointerdown', 250, 10); await pointer(track, 'pointermove', 280, 10); await pointer(surface, 'pointerup', 280, 10)
+    assert.equal(card().querySelector('video')!.currentTime, 28); assert.equal(track.getAttribute('aria-valuenow'), '80')
+    assert.equal(card().querySelector('.cv-video__time')?.textContent, '0:28 / 0:35')
+    await act(async () => { track.dispatchEvent(new ui.dom.window.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true })) })
+    assert.equal(card().querySelector('video')!.currentTime, 23)
+    assert.equal(commits, 2, 'the position slider and its keys never move the card'); assert.equal(canvas.nodes[0].x, -30)
+    await ui.click('静音')
+    assert.equal(card().querySelector('video')!.muted, true); assert.equal(ui.button('打开声音')?.getAttribute('aria-pressed'), 'true')
+    await ui.click('暂停'); assert.ok(ui.button('播放'))
+    await ui.click('放大'); assert.equal(enlarged, 1)
+    // The end puts the still picture back.
+    await act(async () => { card().querySelector('video')!.dispatchEvent(new ui.dom.window.Event('ended')) })
+    assert.equal(card().querySelector('.cv-video__length')?.textContent, '0:35'); assert.equal(card().querySelector('video')!.currentTime, .1)
+  } finally { await ui.close() }
+})
+
+test('a video enlarges with the pictures: the browser controls there, space plays or pauses, the cards fall silent', async () => {
+  const ui = await mount()
+  try {
+    fakePlayback(ui.dom.window)
+    const clip = film('clip', 0)
+    const board: ReadyCanvas = { ready: { schemaVersion: 1, id: 'board', title: 'X' }, edges: [], nodes: [image('b', 400), clip] }
+    const opened: CanvasOpen = { objectId: 'board', handleId: 'h', path: 'X.canvas', version: sha, canvas: board }
+    let media!: ReturnType<typeof useBoardMedia>
+    function Host() {
+      media = useBoardMedia({ opened, root: '/vault', write: async () => {}, report: () => {} })
+      return <div data-node-id="clip">{media.renderCard(clip)}</div>
+    }
+    await ui.render(<><Host /><FloatHost /></>); await ui.settle()
+    const surfaceElement = document.querySelector<HTMLElement>('[data-node-id="clip"]')!.parentElement!
+    media.surfaceApi({ commit: async () => true, centre: () => ({ x: 0, y: 0 }), select: () => {}, element: () => surfaceElement })
+    const inline = surfaceElement.querySelector('video')!
+    await ui.click('播放'); inline.currentTime = 12
+    assert.equal(inline.paused, false)
+    await ui.click('放大')
+    const show = () => document.querySelector('[data-float-id="canvas-slideshow"]')
+    const large = () => show()?.querySelector<HTMLVideoElement>('video.cv-slideshow__picture')
+    assert.equal(inline.paused, true, 'the card stops when its video is shown large')
+    assert.equal(large()?.hasAttribute('controls'), true); assert.equal(large()?.getAttribute('src'), 'local-file:///vault/X.assets/clip.mp4#t=12.00')
+    assert.equal(large()?.autoplay, true); assert.equal(show()?.querySelector('.cv-slideshow__count')?.textContent, '1 / 2')
+    const press = (key: string) => act(async () => { window.dispatchEvent(new ui.dom.window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })) })
+    await press(' '); assert.equal(large()?.paused, false, 'space plays the video instead of stepping on')
+    await press(' '); assert.equal(large()?.paused, true)
+    await press('ArrowRight')
+    assert.equal(show()?.querySelector('img.cv-slideshow__picture')?.getAttribute('alt'), 'b')
+    await press(' ')
+    assert.equal(large()?.getAttribute('src'), 'local-file:///vault/X.assets/clip.mp4#t=12.00', 'space on a picture steps on, back round to the video')
+    await press('ArrowLeft'); await press('ArrowRight')
+    assert.equal(large()?.autoplay, true)
+    await press('Escape'); assert.equal(show(), null)
+    // Double-click reaches the same view.
+    await act(async () => { assert.equal(media.openNode(clip), true) })
+    assert.ok(large()); await press('Escape')
   } finally { await ui.close() }
 })

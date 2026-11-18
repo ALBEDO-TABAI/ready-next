@@ -158,8 +158,10 @@ test('waveform peaks, slideshow order and stored crops', () => {
   assert.deepEqual(peaksOf(new Float32Array(8), 4), [0, 0, 0, 0])
   const image = (id: string, x: number, y: number, extra: object = {}) => ({ id, type: 'file' as const, file: `X.assets/${id}.png`, x, y, width: 100, height: 100, ready: { kind: 'image' as const, preview: { title: id }, ...extra } })
   const canvas: ReadyCanvas = { ready: { schemaVersion: 1, id: 'board' }, edges: [], nodes: [image('low', 0, 420), image('right', 400, 30), image('left', 0, 60),
-    image('gone', 0, 0, { trash: { operationId: 'op', deletedAt: '2026-11-14T00:00:00.000Z' } }), { id: 'note', type: 'text', text: 'x', x: 0, y: 0, width: 10, height: 10, ready: { kind: 'text' } }] }
-  assert.deepEqual(boardSlides(canvas, path => `local-file:///v/${path}`).map(slide => slide.id), ['left', 'right', 'low'])
+    image('gone', 0, 0, { trash: { operationId: 'op', deletedAt: '2026-11-14T00:00:00.000Z' } }), { id: 'note', type: 'text', text: 'x', x: 0, y: 0, width: 10, height: 10, ready: { kind: 'text' } },
+    { id: 'film', type: 'file', file: 'X.assets/film.mp4', x: 200, y: 40, width: 100, height: 100, ready: { kind: 'video' } }] }
+  // Videos stand in the same row as the pictures, each said to be what it is.
+  assert.deepEqual(boardSlides(canvas, path => `local-file:///v/${path}`).map(slide => `${slide.id}:${slide.kind}:${slide.title}`), ['left:image:left', 'film:video:视频', 'right:image:right', 'low:image:low'])
   assert.deepEqual(boardSlides(canvas, () => undefined), [])
   assert.deepEqual(cropStyle({ mode: 'position', x: 20, y: 80 }), { objectPosition: '20% 80%' })
   assert.deepEqual(cropStyle({ mode: 'rect', x: .25, y: .5, w: .5, h: .25 }), { position: 'absolute', maxWidth: 'none', width: '200%', height: '400%', left: '-50%', top: '-200%', objectFit: 'fill' })

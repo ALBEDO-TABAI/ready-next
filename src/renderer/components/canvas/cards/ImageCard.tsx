@@ -28,12 +28,3 @@ export function ImageCard({ node, src }: { node: Extract<CanvasNode, { type: 'fi
     {crop?.mode === 'rect' ? <span className="cv-image__crop" style={{ '--cv-crop-ratio': String(ratio) } as CSSProperties}>{picture}</span> : picture}
   </figure>
 }
-
-export function VideoCard({ node, src }: { node: Extract<CanvasNode, { type: 'file' }>; src?: string }) {
-  const title = node.ready.preview?.title || node.ready.media?.originalName || '视频'
-  // preload="metadata" with a media fragment paints the first frame as the poster; the strip above stays draggable.
-  return <figure className="cv-video" aria-label={title}>
-    <figcaption>{title}</figcaption>
-    {src ? <video controls preload="metadata" playsInline src={`${src}#t=0.1`} /> : <div className="cv-video__missing">视频</div>}
-  </figure>
-}
