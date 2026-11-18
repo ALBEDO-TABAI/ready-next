@@ -394,19 +394,9 @@
   min-width: 0;
 }
 
-/* 宽版：导读与本刊信息在右栏上下排列；窄版：导读移到正文之前。 */
-.rss-paper-guide {
-  display: grid;
-  grid-column: 2;
-  grid-row: 1;
-  align-content: start;
-  gap: 36px;
-  min-width: 0;
-}
-
 .rss-paper-info {
   grid-column: 2;
-  grid-row: 2;
+  grid-row: 1 / span 2;
   align-self: start;
   min-width: 0;
 }
@@ -456,15 +446,6 @@
   overflow-wrap: anywhere;
 }
 
-.rss-paper-lead__body .rss-card-preview {
-  max-width: 280px;
-  margin: 4px 0 0;
-}
-
-.rss-paper-lead__body .rss-card-preview img {
-  max-height: 200px;
-}
-
 .rss-paper-section {
   margin-top: 44px;
 }
@@ -507,88 +488,6 @@
   font-size: var(--rn-t-meta);
   line-height: 1.65;
   color: var(--rn-ink-2);
-}
-
-.rss-paper-highlights,
-.rss-paper-index {
-  display: grid;
-  gap: 2px;
-  margin: 0 -10px;
-  padding: 0;
-  list-style: none;
-}
-
-.rss-paper-highlights li {
-  display: grid;
-  grid-template-columns: 26px minmax(0, 1fr);
-  gap: 6px;
-  padding: 0 10px;
-}
-
-.rss-paper-highlights li > span {
-  padding-top: 9px;
-  font-family: var(--rn-font-mono);
-  font-size: var(--rn-t-title);
-  line-height: 1;
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-  color: var(--rn-ink);
-}
-
-.rss-paper-highlights button,
-.rss-paper-index button {
-  display: grid;
-  gap: 4px;
-  width: 100%;
-  padding: 8px 10px;
-  border-radius: var(--rn-r-sm);
-  text-align: left;
-  transition: background-color var(--rn-d-1) var(--rss-ease);
-}
-
-.rss-paper-highlights button {
-  margin-left: -10px;
-}
-
-.rss-paper-highlights button:hover,
-.rss-paper-index button:hover {
-  background: var(--rn-fill);
-}
-
-.rss-paper-highlights strong {
-  font-size: var(--rn-t-body);
-  line-height: 1.5;
-  font-weight: 500;
-  color: var(--rn-ink);
-}
-
-.rss-paper-highlights small {
-  font-size: var(--rn-t-meta);
-  color: var(--rn-ink-3);
-}
-
-.rss-paper-index button {
-  grid-template-columns: 26px minmax(0, 1fr) auto;
-  align-items: baseline;
-  gap: 10px;
-}
-
-.rss-paper-index span {
-  font-family: var(--rn-font-mono);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  color: var(--rn-ink-3);
-}
-
-.rss-paper-index strong {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--rn-ink);
-}
-
-.rss-paper-index small {
-  font-size: var(--rn-t-meta);
-  color: var(--rn-ink-3);
 }
 
 .rss-paper-info .rss-digest-actions {
@@ -772,20 +671,13 @@
     gap: 40px;
   }
 
-  .rss-paper-guide {
-    grid-column: 1;
-    grid-row: 1;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 28px 40px;
-  }
-
   .rss-paper-body {
-    grid-row: 2;
+    grid-row: 1;
   }
 
   .rss-paper-info {
     grid-column: 1;
-    grid-row: 3;
+    grid-row: 2;
   }
 
   .rss-paper-calendar {

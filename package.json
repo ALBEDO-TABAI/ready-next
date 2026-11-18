@@ -261,6 +261,7 @@
     "verify:ready-next-sources": "node scripts/verify-ready-next-sources.cjs",
     "verify:ready-next-annotations": "node scripts/verify-ready-next-annotations.cjs",
     "verify:ready-next-canvas": "node scripts/verify-ready-next-canvas.cjs",
+    "verify:ready-next-rss-pictures": "node scripts/verify-ready-next-rss-pictures.cjs",
     "verify:ready-next-import": "node scripts/verify-ready-next-import.cjs",
     "verify:ready-next-timeline": "node scripts/verify-ready-next-timeline.cjs"
   },

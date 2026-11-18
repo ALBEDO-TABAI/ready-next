@@ -23,9 +23,10 @@ import {
   X,
 } from 'lucide-react'
 import { WORKBENCH_HEADER_EDGE_X } from '../../modules/workbench/chrome'
-import { endRssItemDragSession, setRssItemDragPayload } from '../layout/fileTreeExternalDrop'
 import { compactAnalysisDetail } from '../../modules/rss/analysisLabels'
 import { isRSSFeedItemContentEqual } from '../../modules/rss/rssFeedItemEquality'
+import { cardTimeLabel, dayHeading, dayKey, itemDragHandlers, itemTimestamp } from '../../modules/rss/feed-item'
+import { useRSSLayout } from '../../stores/useRSSLayout'
 import { rssQueryKey } from '../../modules/rss/workspace-query'
 import { FloatPanel } from '../ui/float/FloatPanel'
 import { Button, IconButton } from '../ui/Button'
@@ -34,7 +35,9 @@ import { anchorOf, openFloat } from '../ui/float/float-store'
 import { openMenu } from '../ui/float/open-menu'
 import { confirmDialog } from '../ui/float/Dialog'
 import type { MenuEntry } from '../ui/float/Menu'
-import RSSCoverImage from './RSSCoverImage'
+import RSSPicture from './RSSPicture'
+import RSSFeedGallery from './RSSFeedGallery'
+import RSSLayoutSwitch from './RSSLayoutSwitch'
 import RSSTopbarTools from './RSSTopbarTools'
 import RSSSearchField from './RSSSearchField'
 import RSSWorkspaceHeading from './RSSWorkspaceHeading'
@@ -260,35 +263,6 @@ function AnalysisProgressRing({
   )
 }
 
-const WEEKDAYS = '日一二三四五六'
-
-function itemTimestamp(entry: RSSItem): number | null {
-  return entry.eventGroup?.displayTime ?? entry.publishedAtMs ?? entry.collectedAt ?? null
-}
-
-function dayKey(timestamp: number | null): string {
-  return timestamp == null ? 'unknown' : new Date(timestamp).toDateString()
-}
-
-// 日期在前，“今天 / 昨天”与星期作补充，像报纸的日期栏。
-function dayHeading(timestamp: number | null): { main: string; detail: string } {
-  if (timestamp == null) return { main: '时间未提供', detail: '' }
-  const date = new Date(timestamp)
-  const startOfDay = (value: Date) => new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime()
-  const offset = Math.round((startOfDay(new Date()) - startOfDay(date)) / 86_400_000)
-  const sameYear = date.getFullYear() === new Date().getFullYear()
-  const day = `${sameYear ? '' : `${date.getFullYear()}年`}${date.getMonth() + 1}月${date.getDate()}日`
-  const weekday = `星期${WEEKDAYS[date.getDay()]}`
-  return { main: day, detail: offset === 0 ? `今天 · ${weekday}` : offset === 1 ? `昨天 · ${weekday}` : weekday }
-}
-
-function cardTimeLabel(item: RSSItem): string {
-  const format = (value: number) => new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
-  if (item.publishedAtMs != null) return format(item.publishedAtMs)
-  if (item.publishedAt) return item.publishedAt
-  return item.collectedAt ? format(item.collectedAt) : ''
-}
-
 interface RSSFeedItemRowProps {
   item: RSSItem
   heading: { main: string; detail: string } | null
@@ -299,8 +273,6 @@ interface RSSFeedItemRowProps {
   active: boolean
   // Comma-joined ids of curated definitions: their membership is the 精选 mark and its reason, not a tag.
   curatedIds: string
-  // 精选 reads like an edition with a large preview; other columns scan faster with a thumbnail beside the text.
-  media: 'preview' | 'thumb'
   onItemClick: (item: RSSItem) => void
   onMarkItemRead: (itemId: string) => void
   onToggleStar: (itemId: string) => void
@@ -314,7 +286,6 @@ function areRSSFeedItemRowPropsEqual(previous: RSSFeedItemRowProps, next: RSSFee
     && previous.queryRevision === next.queryRevision
     && previous.query === next.query
     && previous.curatedIds === next.curatedIds
-    && previous.media === next.media
     && previous.heading?.main === next.heading?.main
     && previous.heading?.detail === next.heading?.detail
     && previous.onItemClick === next.onItemClick
@@ -334,7 +305,6 @@ const RSSFeedItemRow = memo(function RSSFeedItemRow({
   queryRevision,
   active,
   curatedIds,
-  media,
   onItemClick,
   onMarkItemRead,
   onToggleStar,
@@ -357,19 +327,7 @@ const RSSFeedItemRow = memo(function RSSFeedItemRow({
           data-rss-item-id={item.id}
           className={`rss-news-card rss-item-row${isSelected ? ' is-selected' : ''}${item.read ? ' is-read' : ''}`}
           onClick={() => onItemClick(item)}
-          draggable
-          onDragStart={(event) => {
-            setRssItemDragPayload(event, {
-              id: item.id,
-              title: item.title,
-              link: item.link,
-              summary: item.summary,
-              source: item.source,
-              publishedAt: item.publishedAt,
-            })
-            event.stopPropagation()
-          }}
-          onDragEnd={() => endRssItemDragSession()}
+          {...itemDragHandlers(item)}
         >
           <div className="rss-card-meta">
             <span className="rss-card-monogram" aria-hidden>{(item.source || '·').trim().slice(0, 1)}</span>
@@ -407,9 +365,10 @@ const RSSFeedItemRow = memo(function RSSFeedItemRow({
               <h3 className="rss-card-title"><button type="button" className="text-left">{item.title}</button></h3>
               {item.summary && item.summary.trim() !== item.title.trim() ? <p className="rss-card-summary">{item.summary}</p> : null}
             </div>
-            {media === 'thumb' && <RSSCoverImage link={item.link} coverImage={item.coverImage} variant="thumb" />}
+            {!curation && <RSSPicture itemId={item.id} link={item.link} coverImage={item.coverImage} frame="thumb" />}
           </div>
-          {media === 'preview' && <RSSCoverImage link={item.link} coverImage={item.coverImage} variant="preview" />}
+          {/* 列表 reads as an edition: what the sieve picked gets its picture large, under the words; the rest a small one at the end of the line. */}
+          {curation && <RSSPicture itemId={item.id} link={item.link} coverImage={item.coverImage} frame="feature" />}
           {topics.length > 0 && <div className="rss-classification-labels">
             {topics.map((entry) => <span key={entry.definitionId} title={entry.reason}>#{entry.name}{entry.stale ? ' · 需更新' : ''}</span>)}
           </div>}
@@ -486,6 +445,7 @@ export default function RSSFeed({
   const curatedIds = useMemo(() => definitions.filter((entry) => entry.kind === 'curated').map((entry) => entry.id).join(','), [definitions])
   // Like AIHOT's 精选 page, the curated collection opens with the multi-source events of the last two days.
   const onCuratedCollection = definitions.find((entry) => entry.id === query?.collectionId)?.kind === 'curated'
+  const layout = useRSSLayout((state) => state.layouts.feed)
   const listHeader = onCuratedCollection && toolsVisible ? <RSSHotEvents active={active} onSelect={onItemClick} /> : null
   const shouldShowBootstrapSkeleton = loading && items.length === 0
   const openMoreMenu = (anchor: HTMLElement) => {
@@ -629,7 +589,8 @@ export default function RSSFeed({
         loading={loading}
         definitions={definitions}
         status={toolsVisible ? <RSSProcessingPanel active={active} /> : null}
-        filtersAside={(
+        filtersAside={(<>
+          <RSSLayoutSwitch surface="feed" />
           <Button
             variant="ghost"
             size="sm"
@@ -641,7 +602,7 @@ export default function RSSFeed({
             <span>{sourceLabel}</span>
             <ChevronDown />
           </Button>
-        )}
+        </>)}
       />
 
       <div className="rss-feed-list" data-rss-loaded-count={items.length}>
@@ -658,6 +619,9 @@ export default function RSSFeed({
           </div>
         ) : items.length === 0 ? (
           <EmptyState icon={<Inbox />} title={queryError ? '当前范围暂时无法读取' : '这里还没有资讯'} />
+        ) : layout === 'gallery' ? (
+          <RSSFeedGallery key={query ? rssQueryKey(query) : 'rss-feed'} items={items} selectedItemId={selectedItemId} header={listHeader} curatedIds={curatedIds}
+            onItemClick={onItemClick} onMarkItemRead={onMarkItemRead} onToggleStar={onToggleStar} onDeleteItem={onDeleteItem} />
         ) : (
           <RSSVirtualList key={query ? rssQueryKey(query) : 'rss-feed'} items={items} selectedItemId={selectedItemId} header={listHeader}>{(item, index) => {
             const date = dayKey(itemTimestamp(item))
@@ -672,7 +636,6 @@ export default function RSSFeed({
                 queryRevision={queryRevision}
                 active={active}
                 curatedIds={curatedIds}
-                media={onCuratedCollection ? 'preview' : 'thumb'}
                 onItemClick={onItemClick}
                 onMarkItemRead={onMarkItemRead}
                 onToggleStar={onToggleStar}

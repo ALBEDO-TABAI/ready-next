@@ -8,7 +8,7 @@ const HEADER_ROW = { id: HEADER_KEY } as RSSItem
 const rowKey = (item: RSSItem) => item === HEADER_ROW ? HEADER_KEY : item.eventGroup ? `event:${item.eventGroup.id}` : item.id
 
 // Keep the real scrolling element as the source for RSS floating glass panels.
-const ScrollHolder = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(function ScrollHolder(props, ref) {
+export const ScrollHolder = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(function ScrollHolder(props, ref) {
   return <div {...props} ref={ref} data-liquid-scroll-root="rss-feed-list" className={`${props.className || ''} rss-feed-scroll`} />
 })
 

@@ -1,4 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import RSSPicture from './RSSPicture'
+import RSSLayoutSwitch from './RSSLayoutSwitch'
+import { coverWords } from '../../modules/rss/feed-item'
+import { useRSSLayout } from '../../stores/useRSSLayout'
 import { Bookmark, BookmarkCheck, ChevronDown, Layers, ThumbsDown, ThumbsUp } from 'lucide-react'
 import type { RSSBehaviorInput, RSSSieveItem, RSSSieveResult, RSSWorkContextSnapshot, RSSWorkPrivacy } from '../../../shared/rss-sieve'
 import type { FastCardItem } from '../../../shared/fastcard'
@@ -77,9 +81,10 @@ export function RSSSieveView({ shown, onOpen }: { shown: boolean; onOpen(item: R
   }
   const open = (item: RSSSieveItem) => { setOpened(previous => new Set(previous).add(item.id)); onOpen(item) }
   const items = result?.items ?? []
+  const layout = useRSSLayout(state => state.layouts.sieve)
   // The daily 换换口味 pick rides along below the ranked list; on its own it is no answer to “why is this empty”.
   const ranked = items.filter(item => !item.sieve.explore)
-  return <section ref={scroller} className="rss-sieve" aria-label="为你筛过的" style={{ display: shown ? undefined : 'none' }}
+  return <section ref={scroller} className="rss-sieve" aria-label="为你筛过的" data-layout={layout} style={{ display: shown ? undefined : 'none' }}
     onScroll={event => { scrollTop.current = event.currentTarget.scrollTop }}>
     <RSSTopbarTools slot="lead" show={shown}><span>为你筛过的</span></RSSTopbarTools>
     <div className="rss-sieve__inner">
@@ -87,14 +92,15 @@ export function RSSSieveView({ shown, onOpen }: { shown: boolean; onOpen(item: R
         <h1>为你筛过的</h1>
         <p>最近 48 小时，按和你的关系排序{ranked.length ? ` · ${ranked.length} 篇` : ''}</p>
         {updates && <Button size="sm" variant="ghost" className="rss-sieve__updates" onClick={() => void load()}>有新结果，刷新</Button>}
+        <RSSLayoutSwitch surface="sieve" />
       </header>
       {privacy?.answer === 'unanswered' && <WorkConsent work={work} onAnswer={enabled => void answer(enabled)} />}
       <RSSCalibrationCard active={shown} />
       {error && <p role="alert" className="rss-sieve__error">{error}</p>}
       {result && !ranked.length && <p className="rss-sieve__empty">{EMPTY[empty]}</p>}
       <ol className="rss-sieve__list">
-        {items.map(item => <li key={item.id}>
-          <SieveCard item={item} opened={opened.has(item.id) || item.read} onOpen={() => open(item)} onFeedback={feedback} onError={setError} />
+        {items.map((item, rank) => <li key={item.id}>
+          <SieveCard item={item} picture={layout === 'gallery' ? 'cover' : rank === 0 ? 'hero' : 'thumb'} opened={opened.has(item.id) || item.read} onOpen={() => open(item)} onFeedback={feedback} onError={setError} />
         </li>)}
       </ol>
       {!!result?.remainingCount && <div className="rss-sieve__rest">
@@ -126,8 +132,10 @@ function WorkConsent({ work, onAnswer }: { work: RSSWorkContextSnapshot | null; 
   </aside>
 }
 
-function SieveCard({ item, opened, onOpen, onFeedback, onError }: {
-  item: RSSSieveItem; opened: boolean; onOpen(): void; onFeedback: Feedback; onError(message: string): void
+// 列表: the first card opens the page with its picture across the column, the others carry a small one beside their
+// words. 图册: every card is a cover with its words under it; a card without a picture uses its summary as the cover.
+function SieveCard({ item, picture, opened, onOpen, onFeedback, onError }: {
+  item: RSSSieveItem; picture: 'hero' | 'thumb' | 'cover'; opened: boolean; onOpen(): void; onFeedback: Feedback; onError(message: string): void
 }) {
   const [starred, setStarred] = useState(item.starred)
   useEffect(() => setStarred(item.starred), [item.starred])
@@ -152,17 +160,26 @@ function SieveCard({ item, opened, onOpen, onFeedback, onError }: {
       await recordRSSBehavior({ itemId: item.id, action: 'fastcard' })
     } catch (cause) { onError(cause instanceof Error ? cause.message : String(cause)) }
   }
+  const words = coverWords(item)
   return <article className="rss-sieve__card" data-sieve-item={item.id} data-opened={opened || undefined} data-explore={item.sieve.explore || undefined}>
-    <button type="button" className="rss-sieve__title" onClick={onOpen}>{item.title}</button>
-    <p className="rss-sieve__reason">{item.sieve.reason}</p>
-    <div className="rss-sieve__foot">
-      <span className="rss-sieve__meta">{item.source} · {timeLabel(item)}</span>
-      <span className="rss-sieve__actions">
-        <IconButton size="sm" icon={starred ? <BookmarkCheck size={14} /> : <Bookmark size={14} />} title={starred ? '取消收藏' : '收藏'} active={starred} onClick={() => void star()} />
-        <IconButton size="sm" icon={<Layers size={14} />} title="存入 FastCard" onClick={() => void keep()} />
-        <IconButton size="sm" icon={<ThumbsUp size={14} />} title="多看这类" onClick={event => ask('more', event.currentTarget)} />
-        <IconButton size="sm" icon={<ThumbsDown size={14} />} title="少看这类" onClick={event => ask('less', event.currentTarget)} />
-      </span>
+    {picture === 'hero' && <RSSPicture itemId={item.id} link={item.link} coverImage={item.coverImage} frame="sieve-hero" />}
+    {picture === 'cover' && <RSSPicture itemId={item.id} link={item.link} coverImage={item.coverImage} frame="sieve-cover"
+      fallback={<div className={`rss-pic rss-pic--sieve-cover rss-pic--words${words.site ? ' is-site' : ''}`}><p>{words.text}</p></div>} />}
+    <div className="rss-sieve__main">
+      <div className="rss-sieve__words">
+        <button type="button" className="rss-sieve__title" onClick={onOpen}>{item.title}</button>
+        <p className="rss-sieve__reason">{item.sieve.reason}</p>
+        <div className="rss-sieve__foot">
+          <span className="rss-sieve__meta">{item.source} · {timeLabel(item)}</span>
+          <span className="rss-sieve__actions">
+            <IconButton size="sm" icon={starred ? <BookmarkCheck size={14} /> : <Bookmark size={14} />} title={starred ? '取消收藏' : '收藏'} active={starred} onClick={() => void star()} />
+            <IconButton size="sm" icon={<Layers size={14} />} title="存入 FastCard" onClick={() => void keep()} />
+            <IconButton size="sm" icon={<ThumbsUp size={14} />} title="多看这类" onClick={event => ask('more', event.currentTarget)} />
+            <IconButton size="sm" icon={<ThumbsDown size={14} />} title="少看这类" onClick={event => ask('less', event.currentTarget)} />
+          </span>
+        </div>
+      </div>
+      {picture === 'thumb' && <RSSPicture itemId={item.id} link={item.link} coverImage={item.coverImage} frame="sieve-thumb" />}
     </div>
   </article>
 }

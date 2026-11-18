@@ -6,6 +6,7 @@ import { MarkdownContent } from '../renderer/components/document/MarkdownContent
 import { isOutdatedRSSExtraction, readSavedRSSArticle } from '../renderer/modules/rss/read-article'
 import type { RSSArticleExcerpt } from '../shared/rss-workspace'
 import RSSCoverImage from '../renderer/components/rss/RSSCoverImage'
+import RSSPicture from '../renderer/components/rss/RSSPicture'
 import { describeRSSMedia, rssVideoEmbed } from '../shared/rss-media'
 import RSSArticleReader from '../renderer/components/rss/RSSArticleReader'
 import { RSSTranslatedBody, RSSTranslationControl } from '../renderer/components/rss/RSSTranslationControl'
@@ -97,8 +98,8 @@ test('Bilibili and YouTube items resolve to the framed players; a dynamic plays 
   }
   assert.equal(rssVideoEmbed('https://vimeo.com/123456'), null, 'only players the renderer CSP frames')
   assert.equal(rssVideoEmbed('javascript:alert(1)'), null)
-  assert.match(renderToStaticMarkup(<RSSCoverImage variant="thumb" link="https://www.bilibili.com/video/BV15far6dEjT" coverImage="https://i0.hdslb.com/cover.jpg" />), /class="rss-card-play"/)
-  assert.doesNotMatch(renderToStaticMarkup(<RSSCoverImage variant="thumb" link="https://example.test/story" coverImage="https://example.test/cover.jpg" />), /rss-card-play/)
+  assert.match(renderToStaticMarkup(<RSSPicture itemId="video" frame="thumb" link="https://www.bilibili.com/video/BV15far6dEjT" coverImage="https://i0.hdslb.com/cover.jpg" />), /class="rss-pic__play"/)
+  assert.doesNotMatch(renderToStaticMarkup(<RSSPicture itemId="story" frame="thumb" link="https://example.test/story" coverImage="https://example.test/cover.jpg" />), /rss-pic__play/)
 })
 
 test('a video item plays in the reader instead of showing only its cover', () => {

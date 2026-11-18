@@ -113,8 +113,8 @@ test('the digest view opens the latest daily issue as an edition led by its most
   assert.deepEqual(opened, ['daily-oct-2'])
   assert.match(dom.window.document.querySelector('.rss-paper h1')!.textContent!, /资讯日报 · 第 1 版/)
   assert.equal(dom.window.document.querySelector('.rss-paper-lead h2')!.textContent, 'Big story')
-  assert.deepEqual(texts(dom, '.rss-paper-highlights strong'), ['Mid story', 'Small story'])
-  assert.deepEqual(texts(dom, '.rss-paper-index strong'), ['AI'], 'the headline does not leave an empty section behind')
+  assert.deepEqual(texts(dom, '.rss-paper-strip strong'), ['Mid story', 'Small story'])
+  assert.deepEqual(texts(dom, '.rss-paper-contents strong'), ['AI'], 'the headline does not leave an empty section behind')
   assert.match(dom.window.document.body.textContent!, /推荐理由：Big story reason/)
   assert.deepEqual(texts(dom, '.rss-digest-month__head span'), ['2026 年 10 月', '2026 年 9 月'])
   assert.deepEqual(texts(dom, '.rss-digest-issue__title').map((title) => title?.trim()), ['Big story', 'Yesterday story', '3 项入选'])
@@ -123,7 +123,7 @@ test('the digest view opens the latest daily issue as an edition led by its most
   assert.deepEqual(texts(dom, '.rss-digest-issue__title').map((title) => title?.trim()), ['Range story'])
 }))
 
-test('curated rows carry a large preview and their reason while other columns use a thumbnail beside the text', async () => withDOM(async (root, dom) => {
+test('what the sieve picked carries a large picture under its words and its reason; any other row a small one beside the text', async () => withDOM(async (root, dom) => {
   Object.defineProperties(dom.window.HTMLElement.prototype, {
     clientHeight: { get: () => 768 }, offsetHeight: { get: () => 120 }, offsetParent: { get() { return dom.window.document.body } },
   })
@@ -144,22 +144,27 @@ test('curated rows carry a large preview and their reason while other columns us
       { definitionId: 'ai', name: 'AI 与模型', kind: 'topic', included: true, origin: 'model', reason: 'About a model.' },
     ],
   }
+  const plain = { ...item, id: 'b', title: 'Plain report', coverImage: 'https://example.test/plain.png', classifications: [] }
   const props = (collectionId?: string) => ({
-    items: [item], sources: [], filter: 'all' as const, selectedSource: null, selectedItemId: null, loading: false, refreshing: false, isMock: true, hasPreview: false,
+    items: [item, plain], sources: [], filter: 'all' as const, selectedSource: null, selectedItemId: null, loading: false, refreshing: false, isMock: true, hasPreview: false,
     newItemIds: new Set<string>(), analysisProgressMap: {}, analysisJobs: [], settingsOpen: false, definitions, query: { collectionId },
     onFilterChange: noop, onSourceChange: noop, onItemClick: noop, onMarkItemRead: noop, onToggleStar: noop, onDeleteItem: noop, onOpenAnalysisOutput: noop, onRefresh: noop,
     onAddSource: noop, onDeleteSource: noop, onClearRead: noop, onOpenSettings: noop, onPauseAnalysisJob: noop, onResumeAnalysisJob: noop, onDeleteAnalysisJob: noop,
   })
   const card = () => dom.window.document.querySelector('[data-rss-item-id="a"]')!
   await act(async () => root.render(createElement(RSSFeed, props('curated') as never)))
-  assert.ok(card().querySelector('.rss-card-preview img'))
-  assert.equal(card().querySelector('.rss-card-thumb'), null)
+  assert.ok(card().querySelector(':scope > .rss-pic--feature img'), 'the pick\'s picture stands under its words, not beside them')
+  assert.equal(card().querySelector('.rss-pic--thumb'), null)
   assert.equal(card().querySelector('.rss-card-reason')!.textContent, '推荐理由：Primary source with clear limits.')
   assert.deepEqual(texts(dom, '[data-rss-item-id="a"] .rss-classification-labels span'), ['#AI 与模型'], 'curation is the 精选 mark, not a tag')
   assert.ok(dom.window.document.querySelector('.rss-date-heading'))
+  // The size of a picture follows the item, not the column it is read in.
   await act(async () => root.render(createElement(RSSFeed, props(undefined) as never)))
-  assert.ok(card().querySelector('.rss-card-main .rss-card-thumb img'))
-  assert.equal(card().querySelector('.rss-card-preview'), null)
+  assert.ok(card().querySelector(':scope > .rss-pic--feature img'))
+  const other = dom.window.document.querySelector('[data-rss-item-id="b"]')!
+  assert.ok(other.querySelector('.rss-card-main .rss-pic--thumb img'))
+  assert.equal(other.querySelector('.rss-pic--feature'), null)
+  assert.equal(other.querySelector('.rss-card-reason'), null)
 }))
 
 const scheduleOff = async () => ({ success: true, data: { enabled: true, localTime: '08:00', timezone: 'UTC', nextRunAt: null, error: null } })

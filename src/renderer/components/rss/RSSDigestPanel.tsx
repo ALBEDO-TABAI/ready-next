@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { RSSDigestHeader, RSSDigestEntry, RSSDigestSource, RSSDigestCoverageSource, RSSDigestScheduleState, RSSDigestCriteria } from '../../../shared/rss-digests'
 import { RSSQuerySchema, type RSSQueryInput, type RSSQueryResult } from '../../../shared/rss-workspace'
 import type { RSSDefinition } from '../../../shared/rss-organization'
@@ -8,7 +8,9 @@ import { RefCapsule } from '../ui/RefCapsule'
 import { ReadyRefSchema } from '../../../shared/ready-ref'
 import { ChevronRight, Download, Plus, RefreshCw, Settings2 } from 'lucide-react'
 import RSSBriefComposer from './RSSBriefComposer'
-import RSSCoverImage from './RSSCoverImage'
+import RSSPicture, { type RSSPictureFrame } from './RSSPicture'
+import RSSLayoutSwitch from './RSSLayoutSwitch'
+import { useRSSLayout } from '../../stores/useRSSLayout'
 import RSSTopbarTools from './RSSTopbarTools'
 import { Button, IconButton } from '../ui/Button'
 import { Input } from '../ui/Field'
@@ -70,7 +72,6 @@ export default function RSSDigestPanel({ active, view, definitions = [], feedSou
   const [settingsOpen, setSettingsOpen] = useState(false), [composing, setComposing] = useState(false)
   const [tab, setTab] = useState<RSSDigestHeader['kind']>('daily')
   const [foldedMonths, setFoldedMonths] = useState<Set<string>>(() => new Set())
-  const [leadCover, setLeadCover] = useState<{ link: string; coverImage: string | null } | null>(null)
   const listTicket = useRef(0), readTicket = useRef(0), actionTicket = useRef(0), dirtyTime = useRef(false)
   const mainRef = useRef<HTMLDivElement>(null)
   const list = async (more = false) => {
@@ -119,7 +120,7 @@ export default function RSSDigestPanel({ active, view, definitions = [], feedSou
     // eslint-disable-next-line react-hooks/exhaustive-deps -- list is recreated every render; the subscription only ever calls list() for the first page, which reads refs and state setters, so it must not resubscribe on each render
   }, [active])
   useEffect(() => {
-    ++actionTicket.current; setBusy(false); setReport(null); setEntries([]); setNext(null); setError(''); setNotice(''); setLeadCover(null)
+    ++actionTicket.current; setBusy(false); setReport(null); setEntries([]); setNext(null); setError(''); setNotice('')
     if (!active || !selected) return
     void read(selected).catch((e) => setError(String(e)))
     // eslint-disable-next-line react-hooks/exhaustive-deps -- readTicket is a generation counter bumped on cleanup to drop the in-flight edition read; incrementing its live value is intended
@@ -175,15 +176,12 @@ export default function RSSDigestPanel({ active, view, definitions = [], feedSou
   }, [entries, lead])
   const sourceCount = useMemo(() => new Set(entries.map((entry) => entry.source.sourceId)).size, [entries])
   const readingMinutes = Math.max(1, Math.round(entries.reduce((sum, entry) => sum + entry.source.title.length + entry.source.quote.length, 0) / 450))
-  useEffect(() => {
-    if (!lead || !active) return
-    let live = true
-    void window.electronAPI.rss.readArticle({ itemId: lead.source.itemId, expectedRevision: lead.source.articleRevision, length: 1 }).then((result) => {
-      if (live && result.success && result.data) setLeadCover({ link: result.data.article.link, coverImage: result.data.article.coverImage })
-    }).catch(() => { /* silent-catch: the headline simply shows no image when its article is gone. */ })
-    return () => { live = false }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the headline story's identity; lead is re-derived from entries on every load and its pinned articleRevision belongs to that story, so only a different headline should refetch the cover
-  }, [lead?.groupKey, lead?.source.itemId, active])
+  const layout = useRSSLayout((state) => state.layouts.digest)
+  // An entry's picture is the article's as it is now; the saved issue holds none. Inside a button the frame is a span.
+  const picture = (entry: RSSDigestEntry, frame: RSSPictureFrame, fallback?: ReactNode, inline = false) =>
+    <RSSPicture itemId={entry.source.itemId} link={entry.source.link} coverImage={entry.coverImage} frame={frame} fallback={fallback} inline={inline} />
+  const words = (entry: RSSDigestEntry, frame: RSSPictureFrame) =>
+    <span className={`rss-pic rss-pic--${frame} rss-pic--words`}><span>{entry.source.quote.trim() || entry.source.title}</span></span>
   const shelf = editions.filter((edition) => edition.kind === tab)
   const months = useMemo(() => {
     const groups: Array<{ key: string; label: string; editions: RSSDigestHeader[] }> = []
@@ -201,6 +199,7 @@ export default function RSSDigestPanel({ active, view, definitions = [], feedSou
 
   return <section className="rss-digest-panel" aria-label="日报与简报">
     <RSSTopbarTools slot="lead" show={active}><span>日报与简报</span></RSSTopbarTools>
+    <RSSTopbarTools show={active}><RSSLayoutSwitch surface="digest" /></RSSTopbarTools>
     <aside className="rss-digest-side">
       <div className="rss-digest-side__actions">
         <Segmented label="刊物类型" value={tab} onChange={setTab} options={[{ value: 'daily', label: '日报' }, { value: 'range', label: '简报' }]} />
@@ -276,43 +275,66 @@ export default function RSSDigestPanel({ active, view, definitions = [], feedSou
           <span className="rss-paper-stats__end">{report.total ? `约 ${readingMinutes} 分钟读完` : '本期暂无入选'}</span>
         </div>
         {report.needsUpdate && <p className="rss-note" role="status">来源、标准或归属已经变化；这里保留发布时的内容，可重新生成新版本。</p>}
-        <div className="rss-paper-grid">
+        <div className="rss-paper-grid" data-layout={layout}>
           <div className="rss-paper-body">
             {!report.total && <p className="rss-note">本期暂无已入选的可用内容，不代表没有新闻。可在右侧查看订阅覆盖与采集情况。</p>}
-            {lead && <section className="rss-paper-lead" data-digest-anchor={lead.groupKey}>
-              <p className="rss-paper-label">头条</p>
-              <h2>{lead.source.title}</h2>
-              <div className="rss-paper-lead__body">
-                <blockquote>{lead.source.quote}</blockquote>
-                {leadCover && <RSSCoverImage link={leadCover.link} coverImage={leadCover.coverImage} variant="preview" />}
-              </div>
-              <EntryMeta entry={lead} />
-              {sources(lead)}
-            </section>}
+            {/* 列表 is a front page: the lead's picture across the column, three picks as a strip, a picture beside each entry.
+                图册 is a cover: the picture first, the picks with their words on the picture, each section a board. */}
+            {lead && (layout === 'gallery'
+              ? <section className="rss-paper-lead rss-paper-lead--cover" data-digest-anchor={lead.groupKey}>
+                {picture(lead, 'cover')}
+                <h2>{lead.source.title}</h2>
+                <div className="rss-paper-lead__body"><blockquote>{lead.source.quote}</blockquote></div>
+                <EntryMeta entry={lead} />
+                {sources(lead)}
+              </section>
+              : <section className="rss-paper-lead" data-digest-anchor={lead.groupKey}>
+                <p className="rss-paper-label">头条</p>
+                <h2>{lead.source.title}</h2>
+                {picture(lead, 'hero')}
+                <div className="rss-paper-lead__body"><blockquote>{lead.source.quote}</blockquote></div>
+                <EntryMeta entry={lead} />
+                {sources(lead)}
+              </section>)}
+            {(highlights.length > 0 || sections.length > 0) && <nav className="rss-paper-picks" aria-label="本期导读">
+              {highlights.length > 0 && <p className="rss-paper-label">今日看点</p>}
+              {highlights.length > 0 && (layout === 'gallery'
+                ? <ol className="rss-paper-mosaic">{highlights.map((entry, index) => <li key={entry.groupKey}>
+                  <button type="button" onClick={() => scrollTo(entry.groupKey)}>
+                    {picture(entry, 'mosaic', <span className="rss-pic rss-pic--mosaic rss-pic--blank" />, true)}
+                    <span className="rss-paper-mosaic__words"><b>{index + 1}</b><strong>{entry.source.title}</strong><small>{entry.source.source}</small></span>
+                  </button>
+                </li>)}</ol>
+                : <ol className="rss-paper-strip">{highlights.map((entry, index) => <li key={entry.groupKey}>
+                  <button type="button" onClick={() => scrollTo(entry.groupKey)}>
+                    {picture(entry, 'strip', words(entry, 'strip'), true)}
+                    <span className="rss-paper-strip__line"><b>{index + 1}</b><span><strong>{entry.source.title}</strong><small>{entry.source.source}</small></span></span>
+                  </button>
+                </li>)}</ol>)}
+              {sections.length > 0 && <ol className="rss-paper-contents" aria-label="本期版面">{sections.map((section, index) => <li key={section.name}>
+                <button type="button" onClick={() => scrollTo(`section:${section.name}`)}><span>{String(index + 1).padStart(2, '0')}</span><strong>{section.name}</strong>{section.entries.length} 件</button>
+              </li>)}</ol>}
+            </nav>}
             {sections.map((section) => <section key={section.name} className="rss-paper-section" data-digest-anchor={`section:${section.name}`}>
               <p className="rss-paper-label">{section.name}</p>
-              {section.entries.map((entry) => <div className="rss-digest-entry" key={entry.groupKey} data-digest-anchor={entry.groupKey}>
-                <h2>{entry.source.title}</h2><blockquote>{entry.source.quote}</blockquote>
-                <EntryMeta entry={entry} />
-                {sources(entry)}
-              </div>)}
+              {layout === 'gallery'
+                ? <div className="rss-paper-board">{section.entries.map((entry) => <div className="rss-paper-card" key={entry.groupKey} data-digest-anchor={entry.groupKey}>
+                  {picture(entry, 'card', words(entry, 'card'))}
+                  <h2>{entry.source.title}</h2>
+                  <EntryMeta entry={entry} />
+                  {sources(entry)}
+                </div>)}</div>
+                : section.entries.map((entry) => <div className="rss-digest-entry rss-paper-entry" key={entry.groupKey} data-digest-anchor={entry.groupKey}>
+                  <div className="rss-paper-entry__words">
+                    <h2>{entry.source.title}</h2><blockquote>{entry.source.quote}</blockquote>
+                    <EntryMeta entry={entry} />
+                    {sources(entry)}
+                  </div>
+                  {picture(entry, 'side')}
+                </div>)}
             </section>)}
             {next !== null && <Button variant="ghost" size="sm" className="rss-load-more" disabled={busy} onClick={() => void action(() => read(report.id, true))}>更多条目</Button>}
           </div>
-          {(highlights.length > 0 || sections.length > 0) && <nav className="rss-paper-guide" aria-label="本期导读">
-            {highlights.length > 0 && <section>
-              <p className="rss-paper-label">今日看点</p>
-              <ol className="rss-paper-highlights">{highlights.map((entry, index) => <li key={entry.groupKey}>
-                <span>{index + 1}</span><button type="button" onClick={() => scrollTo(entry.groupKey)}><strong>{entry.source.title}</strong><small>{entry.source.source}</small></button>
-              </li>)}</ol>
-            </section>}
-            {sections.length > 0 && <section>
-              <p className="rss-paper-label">本期版面</p>
-              <ol className="rss-paper-index">{sections.map((section, index) => <li key={section.name}>
-                <button type="button" onClick={() => scrollTo(`section:${section.name}`)}><span>{String(index + 1).padStart(2, '0')}</span><strong>{section.name}</strong><small>{section.entries.length} 件</small></button>
-              </li>)}</ol>
-            </section>}
-          </nav>}
           <aside className="rss-paper-info">
             <section>
               <p className="rss-paper-label">本刊信息</p>
