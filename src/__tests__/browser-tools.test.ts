@@ -248,7 +248,7 @@ describe('browser semantic tool facade', () => {
 
     assert.equal(opened.success, true)
     assert.equal(opened.tabId, 'agent-weather-tab')
-    assert.equal(opened.browserActionOutcome.postActionTabId, 'agent-weather-tab')
+    assert.equal(opened.outcome.postActionTabId, 'agent-weather-tab')
     assert.deepEqual(calls, [
       'create:browser-workflow-tools-test:https://example.test/weather:',
     ])

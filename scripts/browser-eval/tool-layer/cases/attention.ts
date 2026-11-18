@@ -12,7 +12,7 @@ export const attentionGroup: CaseGroup = {
           const run = await ctx.run(reason)
           await run.open(ctx.url('/form/'))
           const opened = await run.call('browser_tabs', { action: 'open', url: ctx.url('/login/') })
-          const outcome = opened.data.browserActionOutcome as BrowserActionOutcome
+          const outcome = opened.data.outcome as BrowserActionOutcome
           const tabId = outcome.postActionTabId
           if (!tabId) return fail(opened.text)
           await run.call('browser_snapshot', { tab_id: tabId })

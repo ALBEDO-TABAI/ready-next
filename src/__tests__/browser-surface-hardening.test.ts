@@ -171,7 +171,7 @@ async function runAct(toolName: string, args: Record<string, unknown>, controlle
     },
   })
   const data = outputData(result)
-  const outcome = (data.browserActionOutcome || port.outcomes[0] || null) as BrowserActionOutcome | null
+  const outcome = (data.outcome || port.outcomes[0] || null) as BrowserActionOutcome | null
   return { data, outcome, port }
 }
 

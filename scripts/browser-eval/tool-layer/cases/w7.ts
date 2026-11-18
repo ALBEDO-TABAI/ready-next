@@ -12,7 +12,7 @@ export const w7Group: CaseGroup = {
     let workTab = '', taskId = ''
     await ctx.check('tabs-lineage', '开页因果与可见范围', ['browser_tabs'], async () => {
       const opened = await run.call('browser_tabs', { action: 'open', url: ctx.url('/form/', 'alt'), background: false })
-      const outcome = opened.data.browserActionOutcome as BrowserActionOutcome
+      const outcome = opened.data.outcome as BrowserActionOutcome
       workTab = String(outcome.postActionTabId || opened.data.tabId || '')
       taskId = String(outcome.taskId || '')
       if (!workTab || !taskId || outcome.identity?.tabId !== root) return fail(opened.text)
@@ -35,7 +35,7 @@ export const w7Group: CaseGroup = {
       const denied = await run.call('browser_tabs', { action: 'close', tab_id: root })
       if (denied.data.errorKind !== 'browser_task_tab_not_owned') return fail(denied.text)
       const extra = await run.call('browser_tabs', { action: 'open', url: ctx.url('/form/') })
-      const extraId = String((extra.data.browserActionOutcome as BrowserActionOutcome)?.postActionTabId || '')
+      const extraId = String((extra.data.outcome as BrowserActionOutcome)?.postActionTabId || '')
       if (!extraId || extraId === workTab) return fail('第二次开页没有独立工作标签')
       const singleClose = await run.call('browser_tabs', { action: 'close', tab_id: extraId })
       if (singleClose.data.success !== true || run.controller.getTabList().some(tab => tab.id === extraId)) return fail(singleClose.text)

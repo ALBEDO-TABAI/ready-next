@@ -153,7 +153,7 @@ test('tool environmentSummary is persisted onto the settled action outcome', asy
       })
     },
   })
-  const outcome = outputData(result).browserActionOutcome as BrowserActionOutcome
+  const outcome = outputData(result).outcome as BrowserActionOutcome
   assert.equal(outcome.environmentSummary?.targetTabId, 'tab-1')
   assert.equal(outcome.environmentSummary?.url, 'https://example.test/page')
   assert.equal(outcome.environmentSummary?.title, 'Example')
@@ -206,7 +206,7 @@ test('environmentSummary from another tab is dropped at settlement', async () =>
       })
     },
   })
-  const outcome = outputData(result).browserActionOutcome as BrowserActionOutcome
+  const outcome = outputData(result).outcome as BrowserActionOutcome
   assert.equal(outcome.environmentSummary, undefined)
   assert.equal(port.outcomes[0]?.environmentSummary, undefined)
 })
@@ -265,7 +265,7 @@ test('durable begin, start event and physical transport share one ordered bounda
   assert.equal(data.operationId, 'click_coordinate')
   assert.equal(data.actionId, 'action-1')
   assert.equal(data.actionSeq, 1)
-  assert.equal((data.browserActionOutcome as BrowserActionOutcome).delivery, 'delivered')
+  assert.equal((data.outcome as BrowserActionOutcome).delivery, 'delivered')
 })
 
 test('typed ok:false is journaled as rejected and legacy prose is not reclassified', async () => {
@@ -280,7 +280,7 @@ test('typed ok:false is journaled as rejected and legacy prose is not reclassifi
       return JSON.stringify({ ok: false, errorKind: 'target_not_found' })
     },
   })
-  const outcome = outputData(result).browserActionOutcome as BrowserActionOutcome
+  const outcome = outputData(result).outcome as BrowserActionOutcome
   assert.equal(outcome.dispatch, 'rejected')
   assert.equal(outcome.mayHaveCommitted, false)
   assert.equal(normalizeBareBrowserToolError('Error: permission denied'), 'Error: permission denied')
@@ -318,8 +318,8 @@ test('search persists fill and submit as distinct actions under one search id', 
   assert.equal(port.outcomes[1].search?.phase, 'submitted_needs_observation')
   const data = outputData(result)
   assert.equal(data.actionId, 'action-2')
-  assert.equal((data.browserActionOutcome as BrowserActionOutcome).search?.fillActionId, 'action-1')
-  assert.equal((data.browserActionOutcome as BrowserActionOutcome).search?.submitActionId, 'action-2')
+  assert.equal((data.outcome as BrowserActionOutcome).search?.fillActionId, 'action-1')
+  assert.equal((data.outcome as BrowserActionOutcome).search?.submitActionId, 'action-2')
 })
 
 test('deadline drains a briefly non-cooperative dispatch before returning', async () => {

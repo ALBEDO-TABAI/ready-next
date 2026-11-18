@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util'
 import type { ToolExecutionOutput } from '../tools-runtime/tool-result-types'
 import { redactModelVisibleToolText } from '../tools-runtime/model-visible-tool-output'
 import { canonicalJson } from './codex-model-gateway-contract'
@@ -86,6 +87,23 @@ function safeOutputSuccess(output: ToolExecutionOutput): boolean {
   }
 }
 
+/**
+ * Whether the text is nothing but the data written out as JSON. Many tools build their text by
+ * stringifying the data they also return; sent together, the model reads the same content twice, the
+ * second time escaped inside a string. A text that says anything else is not a repeat.
+ */
+function textRepeatsData(output: ToolExecutionOutput): boolean {
+  if (!output.data || !output.text) return false
+  const text = output.text.trim()
+  if (!text.startsWith('{')) return false
+  try {
+    return isDeepStrictEqual(JSON.parse(text), JSON.parse(JSON.stringify(output.data)))
+  } catch {
+    // silent-catch: a text that is not JSON, or data that cannot be written as JSON, is not a repeat and is sent as it is.
+    return false
+  }
+}
+
 function mapReadyToolOutputUnsafe(
   output: ToolExecutionOutput,
   sensitiveValues: readonly string[] = [],
@@ -115,7 +133,9 @@ function mapReadyToolOutputUnsafe(
         ...(output.projectionPatch
           ? { projectionPatch: redactCodexToolValue(output.projectionPatch, normalizedSensitiveValues) }
           : {}),
-        ...(output.text ? { text: redactCodexToolText(output.text, normalizedSensitiveValues) } : {}),
+        ...(output.text && !textRepeatsData(output)
+          ? { text: redactCodexToolText(output.text, normalizedSensitiveValues) }
+          : {}),
       }),
     })
   } else if (output.text && !contentItems.some((item) => item.type === 'inputText')) {

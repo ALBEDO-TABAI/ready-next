@@ -13,7 +13,7 @@ export const backgroundGroup: CaseGroup = {
     await run.open(ctx.url('/form/'))
     const foreground = run.controller.getActiveTab()?.id
     const opened = await run.call('browser_tabs', { action: 'open', url: ctx.url('/form/') })
-    const tabId = (opened.data.browserActionOutcome as BrowserActionOutcome)?.postActionTabId
+    const tabId = (opened.data.outcome as BrowserActionOutcome)?.postActionTabId
     if (!tabId) throw new Error(opened.text)
     await run.controller.executeJS(tabId, `(() => {
       document.body.innerHTML = '<button style="position:absolute;left:40px;top:40px;width:200px;height:80px">Target</button><div id="lazy" style="position:absolute;top:2000px">Lazy</div>';

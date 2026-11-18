@@ -647,7 +647,6 @@ export class BrowserActionExecutor {
               actionId: settlement.outcome.actionId,
               actionSeq: settlement.outcome.actionSeq,
               outcome: settlement.outcome,
-              browserActionOutcome: settlement.outcome,
               browserActionReceiptId: settlement.receiptId,
             }
           : {}),

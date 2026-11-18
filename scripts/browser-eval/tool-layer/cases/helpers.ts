@@ -108,7 +108,7 @@ export interface ActionOutcomeView {
 }
 
 export function actionOutcome(result: ToolCallResult): ActionOutcomeView {
-  const outcome = (result.data.browserActionOutcome || result.data.outcome) as Record<string, unknown> | undefined
+  const outcome = result.data.outcome as Record<string, unknown> | undefined
   const nested = (result.data.result as Record<string, unknown> | undefined)
   return {
     actionId: typeof outcome?.actionId === 'string' ? outcome.actionId : null,
@@ -135,7 +135,7 @@ export function errorKind(result: ToolCallResult): string | null {
 
 /** The public result, its BrowserActionOutcome and the persisted journal must agree. */
 export function journalAgrees(run: AgentRun, result: ToolCallResult): { ok: boolean; detail: string } {
-  const outcome = (result.data.browserActionOutcome || result.data.outcome) as Record<string, unknown> | undefined
+  const outcome = result.data.outcome as Record<string, unknown> | undefined
   if (!outcome || typeof outcome.actionId !== 'string' || typeof outcome.taskId !== 'string') {
     return { ok: false, detail: 'result carries no BrowserActionOutcome' }
   }

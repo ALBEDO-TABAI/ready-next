@@ -333,9 +333,7 @@ export function recordBrowserWorkflowToolResult(
     runtimeContext.browserRequiredOperationIds.push(operationId)
     runtimeContext.browserRequiredOperationIds.sort()
   }
-  const actionOutcome = asPlainRecord(
-    structuredData.browserActionOutcome || structuredData.outcome,
-  )
+  const actionOutcome = asPlainRecord(structuredData.outcome)
   const actionSeq = Math.floor(Number(structuredData.actionSeq ?? actionOutcome?.actionSeq ?? 0))
   const actionOperationId = typeof actionOutcome?.operationId === 'string'
     ? actionOutcome.operationId

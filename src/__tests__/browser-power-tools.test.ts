@@ -126,7 +126,7 @@ test('browser_eval fails closed without creating a retired confirmation checkpoi
   assert.equal(denied.errorKind, 'grant_required')
   assert.equal(denied.browserSuspensionRequest, undefined)
   assert.equal(denied.suspendAfterToolResult, undefined)
-  assert.equal(denied.browserActionOutcome, undefined)
+  assert.equal(denied.outcome, undefined)
   assert.equal(denied.actionId, undefined)
   assert.equal(fixture.calls.includes('Runtime.evaluate'), false)
   assert.equal(__browserPowerAuditEventsForTests().length, 0)
@@ -155,7 +155,7 @@ test('browser_eval does not touch retired preflight storage while failing closed
 
   assert.equal(output.errorKind, 'grant_required')
   assert.equal(output.browserSuspensionRequest, undefined)
-  assert.equal(output.browserActionOutcome, undefined)
+  assert.equal(output.outcome, undefined)
   assert.equal(fixture.calls.includes('Runtime.evaluate'), false)
 })
 
