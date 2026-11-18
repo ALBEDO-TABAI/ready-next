@@ -36,7 +36,11 @@ export interface RSSDigestHeader {
   coverage: { matchingArticles: number; pendingArticles: number; unresolvedArticles: number; failedArticles: number; missingBodies: number; carriedOverArticles: number; duplicateOrPublishedArticles: number };
 }
 export interface RSSDigestCriteria { id: string; name: string; description: string; ruleRevision: number; kind: string }
-export interface RSSDigestEntry { section: string; groupKey: string; referenceCount: number; source: RSSDigestSource }
+export interface RSSDigestEntry {
+  section: string; groupKey: string; referenceCount: number; source: RSSDigestSource
+  /** The entry's picture as it is now (plan 2026-11-18 资讯配图, P6). Only on the app's own read: it is not part of the saved issue and the assistant's tool does not return it. */
+  coverImage?: string | null
+}
 export interface RSSDigestFetch { sourceId: string; success: boolean; attemptedAt: string; warning: string | null; error: string | null }
 export interface RSSDigestCoverageSource { id: string; name: string; url: string; lastFetchedAt: number | null; enabled: boolean; fetch: RSSDigestFetch | null }
 export type RSSDigestReadResult =

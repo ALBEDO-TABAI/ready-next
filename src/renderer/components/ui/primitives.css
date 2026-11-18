@@ -97,6 +97,9 @@
   .rn-seg__item:hover { color: var(--rn-ink); }
   /* the selected item is an ink capsule (light: ink glass; dark: translucent white) */
   .rn-seg__item[aria-checked='true'] { background: var(--rn-capsule-on-bg); color: var(--rn-capsule-on-ink); font-weight: 500; box-shadow: var(--rn-capsule-on-shadow); }
+  /* an item that is only an icon: a round-ended slot as wide as it is tall and a half */
+  .rn-seg__item[data-icon] { display: inline-grid; place-items: center; min-width: calc(var(--rn-control-h) + 6px); padding: 0 8px; }
+  .rn-seg__item[data-icon] svg { width: 15px; height: 15px; stroke-width: 1.9; }
   .rn-seg__count { margin-left: 6px; font: 400 var(--rn-t-micro)/1 var(--rn-font-mono); color: inherit; opacity: .64; font-variant-numeric: tabular-nums; }
 
   /* ---- Menu (inside a float) ---- */

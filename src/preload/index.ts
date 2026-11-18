@@ -888,6 +888,7 @@ const documentAPI = {
 const rssAPI = {
   readExcerpt: (input: import('../shared/rss-excerpt').RSSReadExcerptInput) => ipcRenderer.invoke('rss:readExcerpt', input),
   readDigests: (input?: import('../shared/rss-digests').RSSDigestReadInput) => ipcRenderer.invoke('rss:readDigests', input),
+  lookupPictures: (input: import('../shared/rss-pictures').RSSPictureLookupInput) => ipcRenderer.invoke('rss:lookupPictures', input),
   digestSettings: () => ipcRenderer.invoke('rss:digestSettings'),
   configureDigests: (input: import('../shared/rss-digests').RSSDigestSettings) => ipcRenderer.invoke('rss:configureDigests', input),
   generateDigest: (input: import('../shared/rss-digests').RSSDigestGenerateInput) => ipcRenderer.invoke('rss:generateDigest', input),

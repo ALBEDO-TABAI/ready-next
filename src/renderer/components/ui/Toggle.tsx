@@ -18,7 +18,10 @@ export function Checkbox({ checked, onChange, label, disabled }: { checked: bool
 }
 
 /** A radio group drawn as a pill track; ←/→ move the choice. */
-export function Segmented<T extends string>({ options, value, onChange, label }: { options: { value: T; label: string; count?: ReactNode }[]; value: T; onChange: (value: T) => void; label: string }) {
+export function Segmented<T extends string>({ options, value, onChange, label, className }: {
+  /** With an `icon` the item shows only the icon; its label names it for a pointer and a screen reader. */
+  options: { value: T; label: string; count?: ReactNode; icon?: ReactNode }[]; value: T; onChange: (value: T) => void; label: string; className?: string
+}) {
   const ref = useRef<HTMLDivElement>(null)
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0
@@ -29,10 +32,11 @@ export function Segmented<T extends string>({ options, value, onChange, label }:
     ref.current?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[index]?.focus()
   }
   return (
-    <div ref={ref} className="rn-seg" role="radiogroup" aria-label={label} onKeyDown={onKeyDown}>
+    <div ref={ref} className={className ? `rn-seg ${className}` : 'rn-seg'} role="radiogroup" aria-label={label} onKeyDown={onKeyDown}>
       {options.map(option => (
-        <button key={option.value} type="button" role="radio" className="rn-seg__item" aria-checked={option.value === value} tabIndex={option.value === value ? 0 : -1} onClick={() => onChange(option.value)}>
-          {option.label}
+        <button key={option.value} type="button" role="radio" className="rn-seg__item" aria-checked={option.value === value} tabIndex={option.value === value ? 0 : -1} onClick={() => onChange(option.value)}
+          {...(option.icon ? { 'aria-label': option.label, title: option.label, 'data-icon': '' } : {})}>
+          {option.icon ?? option.label}
           {option.count !== undefined && <span className="rn-seg__count">{option.count}</span>}
         </button>
       ))}

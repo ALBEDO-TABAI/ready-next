@@ -2124,6 +2124,8 @@ interface RSSItemAnalysisProgress {
 interface ElectronRSSAPI extends RSSSieveAPI {
   readExcerpt: (input: import('../../shared/rss-excerpt').RSSReadExcerptInput) => Promise<RSSResponse<import('../../shared/rss-excerpt').RSSSelectionExcerpt>>
   readDigests: (input?: import('../../shared/rss-digests').RSSDigestReadInput) => Promise<RSSResponse<import('../../shared/rss-digests').RSSDigestReadResult>>
+  /** Pictures for items that have none from their feed (plan 2026-11-18 资讯配图, P7): answers once every named item has a conclusion. */
+  lookupPictures: (input: import('../../shared/rss-pictures').RSSPictureLookupInput) => Promise<RSSResponse<import('../../shared/rss-pictures').RSSPictureLookupResult>>
   digestSettings: () => Promise<RSSResponse<import('../../shared/rss-digests').RSSDigestScheduleState | null>>
   configureDigests: (input: import('../../shared/rss-digests').RSSDigestSettings) => Promise<RSSResponse<import('../../shared/rss-digests').RSSDigestScheduleState>>
   generateDigest: (input: import('../../shared/rss-digests').RSSDigestGenerateInput) => Promise<RSSResponse<import('../../shared/rss-digests').RSSDigestHeader>>

@@ -70,6 +70,8 @@
   --rn-accent-soft: rgba(255, 90, 31, .13);
   --rn-ok: #1fae6b; --rn-warn: #e2a400; --rn-bad: #e5484d;
   --rn-inverse: #0b0b0e; --rn-on-inverse: #fafafa;
+  /* Words and marks laid over a picture: the same in both themes, because the picture does not change with the theme. */
+  --rn-media-veil: rgb(11 11 14 / .66); --rn-on-media: #fafafa;
   --rn-logo-ink: #ebebee;
 
   /* ---- materials (V1, V2): panel glass, inlay, well, float ---- */
