@@ -1,7 +1,8 @@
-import { Globe, Loader2, X } from 'lucide-react'
-import { extractBrowserDomain } from '../../modules/browser/url-utils'
+import { X } from 'lucide-react'
 import { BROWSER_TASK_STATE_LABEL, type BrowserTaskState } from '../../modules/browser/browser-task-work'
 import type { BrowserTab } from '../../stores/useBrowserTabs'
+import { browserTabHoverText } from '../../modules/browser/url-utils'
+import { BrowserTabIcon } from './BrowserTabIcon'
 
 /** One task's tabs in the sidebar: its name, its state and its tabs in Main's order. */
 export interface BrowserTaskTabGroup {
@@ -11,12 +12,6 @@ export interface BrowserTaskTabGroup {
   /** The tab the task is waiting on the person in, if any. */
   attentionTabId: string | null
   tabs: BrowserTab[]
-}
-
-function tabIcon(tab: BrowserTab) {
-  if (tab.loading) return <Loader2 className="browser-tab-list__icon animate-spin" strokeWidth={2} aria-hidden="true" />
-  if (tab.favicon) return <img className="browser-tab-list__icon browser-tab-list__favicon" src={tab.favicon} alt="" draggable={false} />
-  return <Globe className="browser-tab-list__icon" strokeWidth={1.8} aria-hidden="true" />
 }
 
 /**
@@ -58,12 +53,11 @@ export default function BrowserTaskTabGroups({ groups, activeTabId, splitTabId, 
                 全部关闭
               </button>
             </div>
-            <div role="list" aria-label={`${group.title}的标签`}>
+            <div className="browser-tab-list__rows" role="list" aria-label={`${group.title}的标签`}>
               {group.tabs.map(tab => {
                 const isSplit = tab.id === splitTabId && tab.id !== activeTabId
                 const current = tab.id === activeTabId || isSplit
                 const waiting = tab.id === group.attentionTabId
-                const domain = tab.domain || extractBrowserDomain(tab.url || '')
                 return (
                   <div
                     key={tab.id}
@@ -71,17 +65,13 @@ export default function BrowserTaskTabGroups({ groups, activeTabId, splitTabId, 
                     className="browser-tab-list__row"
                     data-browser-task-tab={tab.id}
                     data-current={current || undefined}
-                    title={tab.title || 'New Tab'}
+                    title={browserTabHoverText(tab)}
                     onClick={event => void onTabClick(tab.id, { shiftKey: event.shiftKey })}
                     onAuxClick={event => { if (event.button === 1) { event.preventDefault(); void onTabClose(tab.id) } }}
                   >
-                    <span className="browser-tab-list__glyph">{tabIcon(tab)}</span>
-                    <span className="browser-tab-list__text">
-                      <span className="browser-tab-list__label">{tab.title || 'New Tab'}</span>
-                      {waiting
-                        ? <span className="browser-task-group__waiting">等你处理</span>
-                        : domain && <span className="browser-tab-list__meta">{domain}</span>}
-                    </span>
+                    <span className="browser-tab-list__glyph"><BrowserTabIcon tab={tab} /></span>
+                    <span className="browser-tab-list__label">{tab.title || 'New Tab'}</span>
+                    {waiting && <span className="browser-task-group__waiting">等你处理</span>}
                     <button
                       type="button"
                       className="browser-tab-list__close"

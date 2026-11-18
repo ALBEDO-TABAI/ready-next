@@ -1,9 +1,8 @@
 import { ReadyRefSchema, writeReadyRefTransfer } from '../../../shared/ready-ref'
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent } from 'react'
-import { AtSign, FolderMinus, FolderPlus, Globe, Loader2, Lock, Plus, X } from 'lucide-react'
+import { AtSign, FolderMinus, FolderPlus, Lock, Plus, X } from 'lucide-react'
 import { beginBrowserTabDragSession, endBrowserTabDragSession } from '../../modules/browser/browserTabDragSession'
 import { addReadyContextReferenceToAgentInput } from '../../modules/agent/chat-input-bridge'
-import { extractBrowserDomain } from '../../modules/browser/url-utils'
 import type { BrowserTab } from '../../stores/useBrowserTabs'
 import type { TabGroup, TabGroupColor } from '../../../shared/tab-groups'
 import { buildTabRailRows, resolveReorderDrop } from '../tabs/tab-rail-display-model'
@@ -14,11 +13,14 @@ import { IconButton } from '../ui/Button'
 import type { MenuEntry } from '../ui/float/Menu'
 import { openContextMenu } from '../ui/float/open-menu'
 import BrowserTaskTabGroups, { type BrowserTaskTabGroup } from './BrowserTaskTabGroups'
+import { browserTabHoverText } from '../../modules/browser/url-utils'
+import { BrowserTabIcon } from './BrowserTabIcon'
 import './browser-tab-list.css'
 
 // The browser's navigator in the shell sidebar (W2-T3): tabs with titles, groups, drag to reorder,
 // group or hand a tab to the assistant. It replaces the icon-only rail and its hover window — in the
-// sidebar there is room for titles, so nothing has to float over the web page.
+// sidebar there is room for titles, so nothing has to float over the web page. A tab is one line, its
+// icon and its title; the site it is on is in the row's hover text.
 
 export interface BrowserTabListProps {
   tabs: BrowserTab[]
@@ -51,12 +53,6 @@ const NO_TASK_GROUPS: BrowserTaskTabGroup[] = []
 type Row =
   | { kind: 'group-header'; group: TabGroup }
   | { kind: 'tab'; tab: BrowserTab; groupId: string | null; collapsed: boolean }
-
-function tabIcon(tab: BrowserTab) {
-  if (tab.loading) return <Loader2 className="browser-tab-list__icon animate-spin" strokeWidth={2} aria-hidden="true" />
-  if (tab.favicon) return <img className="browser-tab-list__icon browser-tab-list__favicon" src={tab.favicon} alt="" draggable={false} />
-  return <Globe className="browser-tab-list__icon" strokeWidth={1.8} aria-hidden="true" />
-}
 
 export default function BrowserTabList({
   tabs,
@@ -291,7 +287,6 @@ export default function BrowserTabList({
           const current = tab.id === activeTabId || isSplit
           const group = row.groupId ? groupById.get(row.groupId) : undefined
           const drop = dropTarget?.id === tab.id ? dropTarget.intent : null
-          const domain = tab.domain || extractBrowserDomain(tab.url || '')
           return (
             <div
               key={tab.id}
@@ -303,7 +298,7 @@ export default function BrowserTabList({
               data-drop={drop ?? undefined}
               style={drop === 'onto' ? { background: tabGroupColorSoft(group?.color ?? 'blue', 20) } : undefined}
               draggable
-              title={tab.title || 'New Tab'}
+              title={browserTabHoverText(tab)}
               onDragStart={event => beginDrag(event, tab)}
               onDragEnd={finishDrag}
               onDragOver={event => handleRowDragOver(event, tab.id)}
@@ -314,14 +309,11 @@ export default function BrowserTabList({
             >
               {group && <span className="browser-tab-list__group-rail" style={{ background: tabGroupColorSoft(group.color, 45) }} aria-hidden="true" />}
               <span className="browser-tab-list__glyph">
-                {tabIcon(tab)}
+                <BrowserTabIcon tab={tab} />
                 {tab.owner === 'agent' && <span className="browser-tab-list__badge" data-kind="agent" aria-label="助手在用" />}
                 {tab.activity && tab.activity !== 'idle' && <span className="browser-tab-list__badge" data-kind={tab.activity} aria-label={tab.activity === 'attention' ? '需要你处理' : '助手正在操作'} />}
               </span>
-              <span className="browser-tab-list__text">
-                <span className="browser-tab-list__label">{tab.title || 'New Tab'}</span>
-                {domain && <span className="browser-tab-list__meta">{domain}</span>}
-              </span>
+              <span className="browser-tab-list__label">{tab.title || 'New Tab'}</span>
               {tab.required && <Lock className="browser-tab-list__lock" strokeWidth={2} aria-label="任务需要这个标签" />}
               <button
                 type="button"

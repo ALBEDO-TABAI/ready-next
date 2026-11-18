@@ -140,6 +140,7 @@ test('the sidebar lists the assistant’s tabs as their own groups with name and
   assert.deepEqual(rows.map(row => row.querySelector('.browser-tab-list__label')?.textContent), ['印厂 A 报价页', '登录 · 印厂 C'])
   assert.equal(rows[1].hasAttribute('data-current'), true, 'the visible task tab is the current row')
   assert.equal(rows[1].querySelector('.browser-task-group__waiting')?.textContent, '等你处理')
+  assert.deepEqual(rows.map(row => row.textContent), ['印厂 A 报价页', '登录 · 印厂 C等你处理'], 'a task tab is one line: its title, and the wait at its end')
   await click(rows[0])
   await click(group.querySelector('.browser-task-group__close')!)
   assert.deepEqual(log, ['click:b:false', 'close-all:bt-1'])

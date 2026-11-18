@@ -164,8 +164,10 @@
   padding-left: 18px;
 }
 
+/* The tab the task is waiting on the person in says so at the end of its line. */
 .browser-task-group__waiting {
-  font-size: var(--rn-fs-2xs);
+  flex: none;
+  font-size: var(--rn-fs-xs);
   font-weight: 500;
   color: var(--rn-accent-text);
 }

@@ -66,3 +66,10 @@ export function isSupportedBrowserNavigationUrl(url: string): boolean {
   const normalized = String(url || '').trim()
   return isReadyBrowserBlankUrl(normalized) || /^https?:\/\//i.test(normalized) || isLocalHtmlBrowserUrl(normalized)
 }
+
+/** What a tab's row says on hover: its whole title, and the site it is on (the row itself shows the title only). */
+export function browserTabHoverText(tab: { title?: string | null; domain?: string | null; url?: string | null }): string {
+  const title = tab.title || 'New Tab'
+  const domain = tab.domain || extractBrowserDomain(tab.url || '')
+  return domain && domain !== title ? `${title}\n${domain}` : title
+}

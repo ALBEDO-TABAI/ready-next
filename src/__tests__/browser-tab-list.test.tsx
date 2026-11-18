@@ -49,15 +49,41 @@ function handlers(log: string[]) {
   }
 }
 
-test('rows show titles and domains, mark the current tab and the split tab', async t => {
+test('a row is one line, its icon and its title; the site is in the hover text; the current and the split tab are marked', async t => {
   const { root, body } = await mount(t)
   const tabs = [tab('a', 'Alpha'), tab('b', 'Beta'), tab('c', 'Gamma')]
   await act(async () => root.render(<BrowserTabList tabs={tabs} tabGroups={[]} activeTabId="b" splitTabId="c" {...handlers([])} />))
   const rows = [...body.querySelectorAll<HTMLElement>('.browser-tab-list__row[role="listitem"]')]
   assert.deepEqual(rows.map(row => row.querySelector('.browser-tab-list__label')?.textContent), ['Alpha', 'Beta', 'Gamma'])
-  // The meta line is the site's registrable domain, as the old rail showed it.
-  assert.equal(rows[0].querySelector('.browser-tab-list__meta')?.textContent, 'example.com')
+  // No second line: the row's visible words are its title alone, and the site's domain is kept in the hover text.
+  assert.deepEqual(rows.map(row => row.textContent), ['Alpha', 'Beta', 'Gamma'])
+  assert.equal(rows[0].getAttribute('title'), 'Alpha\nexample.com')
   assert.deepEqual(rows.map(row => row.hasAttribute('data-current')), [false, true, true])
+})
+
+test('a tab shows its own icon, the spinner while it loads, and the globe when it has none or the icon cannot be shown', async t => {
+  const { root, body, dom } = await mount(t)
+  const tabs = [
+    tab('a', 'Alpha', { favicon: 'https://a.example.com/icon.png' }),
+    tab('b', 'Beta'),
+    tab('c', 'Gamma', { favicon: 'http://localhost:5173/favicon.ico' }),
+    tab('d', 'Delta', { favicon: 'https://d.example.com/icon.png', loading: true }),
+  ]
+  const render = (list: BrowserTab[]) => act(async () => root.render(<BrowserTabList tabs={list} tabGroups={[]} activeTabId="a" splitTabId={null} {...handlers([])} />))
+  await render(tabs)
+  const glyph = (id: string) => body.querySelector<HTMLElement>(`[data-browser-tab="${id}"] .browser-tab-list__glyph`)!
+  const kind = (id: string) => glyph(id).querySelector('img') ? 'site' : glyph(id).querySelector('.animate-spin') ? 'spinner' : 'globe'
+  assert.deepEqual(['a', 'b', 'c', 'd'].map(kind), ['site', 'globe', 'site', 'spinner'])
+
+  // The picture cannot be loaded (plain http, or nothing at that address): the globe stands in, not a broken picture.
+  await act(async () => { glyph('c').querySelector('img')!.dispatchEvent(new dom.window.Event('error')) })
+  assert.deepEqual(['a', 'b', 'c', 'd'].map(kind), ['site', 'globe', 'globe', 'spinner'])
+  assert.equal(glyph('c').querySelectorAll('svg').length, 1)
+
+  // The page names another icon: that one is tried.
+  await render(tabs.map(item => item.id === 'c' ? { ...item, favicon: 'https://c.example.com/icon.png' } : item))
+  assert.equal(kind('c'), 'site')
+  assert.equal(glyph('c').querySelector('img')!.getAttribute('src'), 'https://c.example.com/icon.png')
 })
 
 test('clicking a row activates it, the close button closes only that tab, + opens a new tab', async t => {
