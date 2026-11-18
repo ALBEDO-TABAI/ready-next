@@ -9,6 +9,7 @@ import { RSSProcessingStore } from './rss-processing-store'
 import { RSSEventStore } from './rss-event-store'
 import type { DatabaseConnection } from './connection'
 import { RSSContentStore } from './rss-content-store'
+import { RSSPictureStore } from './rss-picture-store'
 import { RSSTranslationStore } from './rss-translation-store'
 import type { RSSSource, RSSItem, RSSDraftStoreSourceSummary, RSSStats, RSSAnalysisAction, RSSAnalysisJobStatus, RSSAnalysisJob } from './records'
 
@@ -22,6 +23,7 @@ export class RSSStore {
   readonly events: RSSEventStore
   readonly catalog: RSSCatalogStore
   readonly translations: RSSTranslationStore
+  readonly pictures: RSSPictureStore
 
   constructor(private readonly getConnection: () => DatabaseConnection | null) {
     this.organization = new RSSOrganizationStore(getConnection, (id) => this.content.getArticle(id)?.revision || null)
@@ -33,6 +35,7 @@ export class RSSStore {
     this.learning = new RSSSieveLearningStore(getConnection, this.sieve, this.processing)
     this.digests = new RSSDigestStore(getConnection, this.content, this.organization, this.sieve)
     this.translations = new RSSTranslationStore(getConnection)
+    this.pictures = new RSSPictureStore(getConnection)
   }
 
   private get db(): DatabaseConnection | null {

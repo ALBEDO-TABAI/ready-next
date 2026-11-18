@@ -204,6 +204,7 @@ export interface FetchGroupDeps {
   }
   persistFetchInvocation(payload: Record<string, unknown>): void
   recordFetchAllCompletedAt(completedAt: string, result: RSSFetchAllResponse): void
+  schedulePicturesWarm(): void
   loadDigestSnapshot(): Record<string, string>
   saveDigestSnapshot(snapshot: Record<string, string>): void
   limitConcurrency<T>(
@@ -576,6 +577,7 @@ export const fetchGroup: {
       } finally {
         if (fetchAttemptStarted && completedResult) {
           deps.recordFetchAllCompletedAt(new Date().toISOString(), completedResult)
+          deps.schedulePicturesWarm()
         }
       }
     }
@@ -708,6 +710,7 @@ export const fetchGroup: {
           allItems: deps.getAllRSSItems(),
           insertedItems: deps.getRSSItemsByIds(newIds) as DBRSSItemRow[],
         })
+        deps.schedulePicturesWarm()
 
         return ok(
           {

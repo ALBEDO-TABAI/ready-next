@@ -40,6 +40,7 @@ test('R1 v2 classifications and queued jobs survive the sieve upgrade',async t=>
   const Sqlite=createRequire(import.meta.url)('better-sqlite3') as new(path:string)=>DatabaseConnection
   const db=new Sqlite(':memory:');t.after(()=>db.close())
   for(const name of __getMigrationNamesForTests().filter(name=>Number(name.slice(0,3))<155)) __runMigrationForTests(name,db)
+  __runMigrationForTests('162_rss_item_pictures',db)
   const rss=new RSSStore(()=>db)
   db.exec("INSERT INTO rss_sources(id,name,url) VALUES('s','Source','https://example.test/feed')")
   for(const id of ['saved','queued'])db.prepare("INSERT INTO rss_items(id,source_id,guid,title,link,summary) VALUES(?,'s',?,?,'https://example.test/article','摘要')").run(id,id,id)
@@ -236,7 +237,7 @@ test('R16 privacy IPC patches retain disabled categories and reject unknown fiel
   f.rss.sieve.configurePrivacy(RSSWorkPrivacySchema.parse({calendar:false}))
   const handlers=new Map<string,(...args:unknown[])=>unknown>()
   const ipc={removeHandler:(name:string)=>handlers.delete(name),handle:(name:string,handler:(...args:unknown[])=>unknown)=>handlers.set(name,handler)}
-  const handle=sieveGroup.register(ipc as Parameters<typeof sieveGroup.register>[0],{store:()=>f.rss.sieve,workContext:()=>previewRSSWorkContext(f.rss.sieve,sources,now),notify:()=>{}})
+  const handle=sieveGroup.register(ipc as Parameters<typeof sieveGroup.register>[0],{store:()=>f.rss.sieve,pictures:()=>f.rss.pictures,workContext:()=>previewRSSWorkContext(f.rss.sieve,sources,now),notify:()=>{}})
   const update=handlers.get('rss:sieveConfigurePrivacy')!
   assert.deepEqual(update(null,{answer:'enabled',enabled:true}),{success:true,data:{answer:'enabled',enabled:true,pages:true,calendar:false,books:true}})
   assert.equal((update(null,{calendar:undefined}) as {success:true;data:{calendar:boolean}}).data.calendar,false)

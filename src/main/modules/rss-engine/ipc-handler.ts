@@ -1,4 +1,6 @@
 import { sieveLearningGroup } from './ipc/sieve-learning-group'
+import { picturesGroup } from './ipc/pictures-group'
+import { getRSSPictureService } from './picture-runtime'
 import { sieveGroup } from './ipc/sieve-group'
 import { previewCurrentRSSWorkContext } from './work-context-runtime'
 import { digestGroup } from './ipc/digest-group'
@@ -258,6 +260,7 @@ let sieveLearningGroupDispose: IpcDisposeHandle | null = null
 let sieveGroupDispose: IpcDisposeHandle | null = null
 let processingGroupDispose: IpcDisposeHandle | null = null
 let digestGroupDispose: IpcDisposeHandle | null = null
+let picturesGroupDispose: IpcDisposeHandle | null = null
 let eventGroupDispose: IpcDisposeHandle | null = null
 let workspaceFilesGroupDispose: IpcDisposeHandle | null = null
 
@@ -910,6 +913,7 @@ async function runAddSourceCore(input: AddSourceCoreInput): Promise<AddSourceCor
     itemCount = rssRepository.upsertRSSItems(selectItemsToStore(platform, dbItems))
     rssRepository.updateRSSSourceLastFetched(id)
     rssRepository.setRSSSourceDraftSeeded(id, true)
+    getRSSPictureService().scheduleWarm()
   }
 
   if (result.error && result.items.length === 0 && !allowSourceWithoutInitialItems) {
@@ -967,8 +971,10 @@ async function runAddSourceCore(input: AddSourceCoreInput): Promise<AddSourceCor
 }
 
 export function setupRSSIPC(useMock = false): void {
+  picturesGroupDispose?.dispose()
+  picturesGroupDispose = picturesGroup.register(ipcMain, { service: getRSSPictureService })
   digestGroupDispose?.dispose()
-  digestGroupDispose = digestGroup.register(ipcMain, { store: () => getDatabase().rss.digests, service: getRSSDigestService, generate: generateRSSDigest,
+  digestGroupDispose = digestGroup.register(ipcMain, { store: () => getDatabase().rss.digests, pictures: () => getDatabase().rss.pictures, service: getRSSDigestService, generate: generateRSSDigest,
     chooseDirectory: async (sender) => {
       const parent = BrowserWindow.fromWebContents(sender)
       if (!parent) throw new Error('当前窗口不可用。')
@@ -983,7 +989,7 @@ export function setupRSSIPC(useMock = false): void {
   sieveLearningGroupDispose?.dispose()
   sieveLearningGroupDispose = sieveLearningGroup.register(ipcMain, { store: () => getDatabase().rss, notify: notifyRSSProcessing })
   sieveGroupDispose?.dispose()
-  sieveGroupDispose = sieveGroup.register(ipcMain, { store: () => getDatabase().rss.sieve, workContext: previewCurrentRSSWorkContext, notify: notifyRSSProcessing })
+  sieveGroupDispose = sieveGroup.register(ipcMain, { store: () => getDatabase().rss.sieve, pictures: () => getDatabase().rss.pictures, workContext: previewCurrentRSSWorkContext, notify: notifyRSSProcessing })
   processingGroupDispose?.dispose()
   processingGroupDispose = processingGroup.register(ipcMain, {
     store: () => getDatabase().rss.processing, service: getRSSProcessingService, hasModel: hasRSSProcessingModel, notify: notifyRSSProcessing,
@@ -1009,6 +1015,7 @@ export function setupRSSIPC(useMock = false): void {
   contentGroupDispose = contentGroup.register(ipcMain, {
     useMock,
     getContent: () => rssRepository.getContentStore(),
+    getPictures: () => getDatabase().rss.pictures,
     getLoader: getRSSContentService,
     getTranslator: getRSSTranslationService,
   })
@@ -1127,6 +1134,7 @@ export function setupRSSIPC(useMock = false): void {
     filterSelectedSources,
     normalizeFetchOptions,
     persistFetchInvocation,
+    schedulePicturesWarm: () => getRSSPictureService().scheduleWarm(),
     recordFetchAllCompletedAt: (completedAt, result) => {
       appSettingsRepository.setSetting(RSS_LAST_FETCH_ALL_COMPLETED_AT_KEY, completedAt)
       try {

@@ -77,7 +77,7 @@ test('V6 settings preview and actual request use identical title snapshot; updat
     // Invoke the real IPC group using its normal response envelope.
     const handlers=new Map<string, (...args:unknown[])=>unknown>()
     const ipc = {removeHandler:(name:string)=>handlers.delete(name),handle:(name:string,handler:(...args:unknown[])=>unknown)=>handlers.set(name,handler)}
-    const handle=sieveGroup.register(ipc as Parameters<typeof sieveGroup.register>[0],{store:()=>f.rss.sieve,workContext:context,notify:()=>{}})
+    const handle=sieveGroup.register(ipc as Parameters<typeof sieveGroup.register>[0],{store:()=>f.rss.sieve,pictures:()=>f.rss.pictures,workContext:context,notify:()=>{}})
     const send=async(id:string, workRef?:string|null)=>{
       f.put(id)
       let input:RSSJudgmentInput|undefined

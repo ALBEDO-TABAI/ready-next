@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import type { IpcChannelGroup } from './types'
 import type { RSSDigestStore } from '../../database/rss-digest-store'
+import type { RSSPictureStore } from '../../database/rss-picture-store'
 import type { RSSDigestService } from '../digest-service'
 import { RSSDigestReadSchema, RSSDigestSettingsSchema, RSSDigestGenerateSchema, type RSSDigestGenerateInput, type RSSDigestHeader, type RSSDigestSource, type RSSDigestCriteria, type RSSDigestCoverageSource } from '../../../../shared/rss-digests'
 import { writeNewText } from '../workspace-files'
@@ -9,6 +10,7 @@ import { renderRSSDigest } from '../../../../shared/rss-digest-markdown'
 const CHANNELS = ['rss:readDigests', 'rss:digestSettings', 'rss:configureDigests', 'rss:generateDigest', 'rss:exportDigest'] as const
 export const digestGroup: IpcChannelGroup<{
   store(): RSSDigestStore; service(): RSSDigestService; generate(input: RSSDigestGenerateInput): RSSDigestHeader;
+  pictures(): RSSPictureStore;
   chooseDirectory(sender: Electron.WebContents): Promise<string | null>;
 }> = { namespace: 'rss:digests', register(ipcMain, deps) {
   for (const name of CHANNELS) ipcMain.removeHandler(name)
@@ -16,7 +18,12 @@ export const digestGroup: IpcChannelGroup<{
     try { return { success: true, data: await action() } }
     catch (error) { return { success: false, error: error instanceof Error ? error.message : String(error) } }
   }
-  ipcMain.handle('rss:readDigests', (_e, input) => respond(() => deps.store().read(RSSDigestReadSchema.parse(input || {}))))
+  ipcMain.handle('rss:readDigests', (_e, input) => respond(() => {
+    const read = deps.store().read(RSSDigestReadSchema.parse(input || {}))
+    if (read.view !== 'entries') return read
+    const covers = deps.pictures().covers(read.entries.map(entry => entry.source.itemId))
+    return { ...read, entries: read.entries.map(entry => ({ ...entry, coverImage: covers.get(entry.source.itemId) ?? null })) }
+  }))
   ipcMain.handle('rss:digestSettings', () => respond(() => deps.store().schedule()))
   ipcMain.handle('rss:configureDigests', (_e, input) => respond(async () => { await deps.service().configure(RSSDigestSettingsSchema.parse(input)); return deps.store().schedule() }))
   ipcMain.handle('rss:generateDigest', (_e, input) => respond(() => deps.generate(RSSDigestGenerateSchema.parse(input))))

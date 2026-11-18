@@ -26,6 +26,7 @@ import { onCalendarChanged } from './modules/calendar-engine/calendar-change'
 import { isChatGptOAuthConfig } from '../shared/chatgpt-oauth'
 import { startRSSDigests, stopRSSDigests, resumeRSSDigests } from './modules/rss-engine/digest-runtime'
 import { stopRSSContentService } from './modules/rss-engine/content-runtime'
+import { stopRSSPictureService } from './modules/rss-engine/picture-runtime'
 import { readSystemIdleMs } from './modules/rss-engine/user-presence'
 import { startRSSProcessing, stopRSSProcessing, wakeRSSProcessing } from './modules/rss-engine/processing-runtime'
 // 本文件是重模块：由 boot-entry.ts（构建入口）在 splash 可见后动态加载。
@@ -403,7 +404,7 @@ function runFatalProcessCleanup(): Promise<void> {
   stopRSSDigests()
   powerMonitor.removeListener('resume', handleRSSResume)
   powerMonitor.removeListener('resume', handleCalendarResume)
-  const rssAutoRefreshStopped = Promise.all([stopRSSAutoRefresh(), stopRSSContentService(), stopRSSProcessing()])
+  const rssAutoRefreshStopped = Promise.all([stopRSSAutoRefresh(), stopRSSContentService(), stopRSSProcessing(), stopRSSPictureService()])
   return runBeforeQuitCleanup({
     cleanupAgentRuntime,
     cleanupAgentManager: () => agentManager.cleanup(),
@@ -1321,7 +1322,7 @@ async function cleanupBeforeAppQuit(startedAt: number, options: { agentRuntimeAl
   stopRSSDigests()
   powerMonitor.removeListener('resume', handleRSSResume)
   powerMonitor.removeListener('resume', handleCalendarResume)
-  const rssAutoRefreshStopped = Promise.all([stopRSSAutoRefresh(), stopRSSContentService(), stopRSSProcessing()])
+  const rssAutoRefreshStopped = Promise.all([stopRSSAutoRefresh(), stopRSSContentService(), stopRSSProcessing(), stopRSSPictureService()])
   const remainingTimeoutMs = Math.max(0, 5_000 - (Date.now() - startedAt))
   await runBeforeQuitCleanup({
     // After a failed stop the person chose to quit anyway: the runtime's ingress is already sealed, it is not stopped again.

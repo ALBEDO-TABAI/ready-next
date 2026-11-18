@@ -1,6 +1,7 @@
 import { RSSReadExcerptSchema } from '../../../../shared/rss-excerpt'
 import type { IpcChannelGroup } from './types'
 import type { RSSContentStore } from '../../database/rss-content-store'
+import type { RSSPictureStore } from '../../database/rss-picture-store'
 import type { RSSContentService } from '../content-service'
 import type { RSSTranslationService } from '../translation-service'
 import { RSSTranslateArticleSchema, RSSTranslationRefSchema } from '../../../../shared/rss-translation'
@@ -9,6 +10,7 @@ import { RSSLoadArticleSchema, RSSQuerySchema, RSSReadArticleSchema } from '../.
 interface ContentGroupDeps {
   useMock: boolean
   getContent(): RSSContentStore
+  getPictures(): RSSPictureStore
   getLoader(): RSSContentService
   getTranslator(): RSSTranslationService
 }
@@ -26,8 +28,10 @@ export const contentGroup: IpcChannelGroup<ContentGroupDeps> = {
       catch (error) { return { success: false, mock: false, error: error instanceof Error ? error.message : String(error) } }
     }
     ipcMain.handle('rss:readExcerpt', (_event, input: unknown) => respond(() => deps.getContent().readExcerpt(RSSReadExcerptSchema.parse(input))))
-    ipcMain.handle('rss:queryItems', (_event, input: unknown) => respond(() => deps.getContent().query(RSSQuerySchema.parse(input ?? {}))))
-    ipcMain.handle('rss:queryCards', (_event, input: unknown) => respond(() => deps.getContent().cards(RSSQuerySchema.parse(input ?? {}))))
+    // The lists the app shows carry the picture kept for an item's page where its feed gave none (资讯配图 P5).
+    const pictured = <T extends { items: Array<{ id: string; coverImage: string | null }> }>(result: T): T => ({ ...result, items: deps.getPictures().fill(result.items) })
+    ipcMain.handle('rss:queryItems', (_event, input: unknown) => respond(() => pictured(deps.getContent().query(RSSQuerySchema.parse(input ?? {})))))
+    ipcMain.handle('rss:queryCards', (_event, input: unknown) => respond(() => pictured(deps.getContent().cards(RSSQuerySchema.parse(input ?? {})))))
     ipcMain.handle('rss:dismissQuery', (_event, input: unknown) => respond(() => deps.getContent().dismissQuery(RSSQuerySchema.parse(input))))
     ipcMain.handle('rss:readArticle', (_event, input: unknown) => respond(() => deps.getContent().readArticle(RSSReadArticleSchema.parse(input))))
     ipcMain.handle('rss:loadArticle', (_event, input: unknown) => respond(async () => {

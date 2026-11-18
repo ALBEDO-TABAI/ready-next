@@ -105,6 +105,7 @@ function createMockDeps(): FetchGroupDeps {
     normalizeFetchOptions: fail('normalizeFetchOptions') as FetchGroupDeps['normalizeFetchOptions'],
     persistFetchInvocation: fail('persistFetchInvocation') as FetchGroupDeps['persistFetchInvocation'],
     recordFetchAllCompletedAt: fail('recordFetchAllCompletedAt') as FetchGroupDeps['recordFetchAllCompletedAt'],
+    schedulePicturesWarm: fail('schedulePicturesWarm'),
     loadDigestSnapshot: fail('loadDigestSnapshot') as FetchGroupDeps['loadDigestSnapshot'],
     saveDigestSnapshot: fail('saveDigestSnapshot') as FetchGroupDeps['saveDigestSnapshot'],
     limitConcurrency: fail('limitConcurrency') as FetchGroupDeps['limitConcurrency'],
@@ -173,6 +174,7 @@ test('completed fetchAll records durable completion after passing through RSSUpd
     normalizeFetchOptions: () => ({ digest: false, trigger: 'manual-all' }),
     persistFetchInvocation: () => undefined,
     recordFetchAllCompletedAt: (value) => completedAt.push(value),
+    schedulePicturesWarm: () => undefined,
     rssUpdateLock: new RSSUpdateLock(),
   })
 
@@ -195,6 +197,7 @@ test('failed fetchAll also records completion so cold start does not retry in a 
     normalizeFetchOptions: () => ({ digest: false, trigger: 'manual-all' }),
     persistFetchInvocation: () => undefined,
     recordFetchAllCompletedAt: (value) => completedAt.push(value),
+    schedulePicturesWarm: () => undefined,
     rssUpdateLock: new RSSUpdateLock(),
   })
 
@@ -299,6 +302,7 @@ function createFetchDeps(overrides: Partial<FetchGroupDeps> & {
     generateRSSArtifacts: async () => ({}),
     persistFetchInvocation: () => undefined,
     recordFetchAllCompletedAt: () => undefined,
+    schedulePicturesWarm: () => undefined,
     buildBrowserActionFromSource: () => ({ type: 'open_in_browser', label: '去浏览器继续验证', url: sources[1].url, platform: 'xiaohongshu', reason: 'verify' }),
     limitConcurrency: async (tasks) => Promise.allSettled(tasks.map((task) => task())),
     yieldToEventLoop: async () => undefined,

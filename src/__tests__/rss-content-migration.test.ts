@@ -5,6 +5,7 @@ import { migrateRSSCatalog, RSS_CATALOG_MIGRATION } from '../main/modules/rss-en
 import { migrateRSSMethodValidity, RSS_METHOD_VALIDITY_MIGRATION } from '../main/modules/rss-engine/method-validity-schema'
 import { migrateRSSTranslations, RSS_TRANSLATION_MIGRATION } from '../main/modules/rss-engine/translation-schema'
 import { RSSStore } from '../main/modules/database/rss-store'
+import { migrateRSSPictures } from '../main/modules/rss-engine/pictures-schema'
 import { migrateRSSResults, RSS_RESULT_MIGRATION } from '../main/modules/rss-engine/result-schema'
 import { migrateRSSOrganization, RSS_ORGANIZATION_MIGRATION } from '../main/modules/rss-engine/organization-schema'
 import { migrateRSSProcessing, RSS_PROCESSING_MIGRATION } from '../main/modules/rss-engine/processing-schema'
@@ -94,6 +95,7 @@ test('RSS migration backs up existing WAL data and rolls back without losing rea
     db.close(); db = new Sqlite(path)
     assert.equal(new RSSStore(() => db).catalog.read({ view: 'sources' }).total, 1)
     assert.deepEqual(new RSSStore(() => db).catalog.read({ view: 'analysis' }).entries, [oldJob])
+    migrateRSSPictures(db)
     const beforeMethods = new RSSStore(() => db).content.query({})
     assert.ok(backupBeforeRSSMigration(db, path)?.includes('before-rss-131-'))
     db.exec('BEGIN')

@@ -111,7 +111,7 @@ test('IPC and Agent readers return identical data without a mounted UI or networ
   const handlers = new Map<string, (...args: unknown[]) => Promise<{ success: boolean; data?: unknown }>>()
   const ipc = { handle: (name: string, handler: never) => handlers.set(name, handler), removeHandler: (name: string) => handlers.delete(name) } as unknown as IpcMain
   const registered = contentGroup.register(ipc, {
-    useMock: false, getContent: () => content,
+    useMock: false, getContent: () => content, getPictures: () => db.rss.pictures,
     getLoader: () => { throw new Error('Reads must not start retrieval') },
   })
   try {

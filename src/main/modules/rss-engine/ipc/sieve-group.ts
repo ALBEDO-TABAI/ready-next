@@ -1,10 +1,11 @@
 import type { IpcChannelGroup } from './types'
 import type { RSSSieveStore } from '../../database/rss-sieve-store'
+import type { RSSPictureStore } from '../../database/rss-picture-store'
 import { RSSBehaviorSchema, RSSWorkPrivacyPatchSchema, RSSSieveQuerySchema, type RSSWorkContextSnapshot } from '../../../../shared/rss-sieve'
 import { z } from 'zod'
 const CHANNELS = ['rss:sieveRelevance','rss:sieveQuery','rss:sieveToday','rss:sieveRecordBehavior','rss:sievePrivacy','rss:sieveConfigurePrivacy',
   'rss:sieveWorkContext','rss:sieveExcludedPages','rss:sieveExcludePage','rss:sieveFocus','rss:sieveSaveFocus'] as const
-export const sieveGroup: IpcChannelGroup<{ store(): RSSSieveStore; workContext(): RSSWorkContextSnapshot; notify(): void }> = {
+export const sieveGroup: IpcChannelGroup<{ store(): RSSSieveStore; pictures(): RSSPictureStore; workContext(): RSSWorkContextSnapshot; notify(): void }> = {
   namespace:'rss:sieve',
   register(ipcMain,deps) {
     for (const channel of CHANNELS) ipcMain.removeHandler(channel)
@@ -13,7 +14,11 @@ export const sieveGroup: IpcChannelGroup<{ store(): RSSSieveStore; workContext()
       catch (error) { return {success:false,error:error instanceof Error ? error.message : String(error)} }
     }
     ipcMain.handle('rss:sieveRelevance',(_event,input:unknown) => respond(() => deps.store().relevance(z.string().min(1).parse(input))))
-    ipcMain.handle('rss:sieveQuery',(_event,input:unknown) => respond(() => deps.store().query(RSSSieveQuerySchema.parse(input ?? {}))))
+    // 为你筛过的 shows pictures: an item without a feed cover carries the one kept for its page (资讯配图 P5).
+    ipcMain.handle('rss:sieveQuery',(_event,input:unknown) => respond(() => {
+      const result = deps.store().query(RSSSieveQuerySchema.parse(input ?? {}))
+      return { ...result, items: deps.pictures().fill(result.items) }
+    }))
     ipcMain.handle('rss:sieveToday',() => respond(() => deps.store().today()))
     ipcMain.handle('rss:sieveRecordBehavior',(_event,input:unknown) => respond(() => deps.store().recordBehavior(RSSBehaviorSchema.parse(input)),true))
     ipcMain.handle('rss:sievePrivacy',() => respond(() => deps.store().privacy()))

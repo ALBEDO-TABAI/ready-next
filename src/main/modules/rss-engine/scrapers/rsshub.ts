@@ -15,6 +15,10 @@ interface RSSHubJSONItem {
   pubDate?: string
   author?: string
   category?: string
+  image?: string
+  enclosure_url?: string
+  enclosure_type?: string
+  content_html?: string
 }
 
 interface RSSHubJSONFeed {
@@ -25,6 +29,21 @@ interface RSSHubJSONFeed {
 
 function normalizeBaseUrl(url: string): string {
   return url.replace(/\/+$/, '')
+}
+
+function jsonCover(item: RSSHubJSONItem): string | null {
+  const html = [item.description, item.content_html].filter(Boolean).join('\n')
+  const image = html.match(/<img\b[^>]*?\s+src\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i)
+  for (const raw of [item.image, item.enclosure_type?.startsWith('image') ? item.enclosure_url : undefined, image?.[1] ?? image?.[2] ?? image?.[3]]) {
+    if (!raw) continue
+    try {
+      const url = new URL(raw)
+      if (['http:', 'https:'].includes(url.protocol)) return url.href
+    } catch {
+      // silent-catch: relative or malformed feed images do not provide a cover.
+    }
+  }
+  return null
 }
 
 function isTransientBrowserRouteError(message: string): boolean {
@@ -133,7 +152,7 @@ class RSSHubScraper extends BaseScraper {
         link,
         pubDate: item.pubDate || '',
         author: item.author || '',
-        coverImage: null,
+        coverImage: jsonCover(item),
         metadata: rssGuid ? { rssGuid } : {},
       }
     })

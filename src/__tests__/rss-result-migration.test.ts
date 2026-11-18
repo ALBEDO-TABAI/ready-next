@@ -31,6 +31,7 @@ test('result migration preserves actual current values on disk without inventing
     db.exec('BEGIN')
     __runMigrationForTests('128_rss_saved_results', db)
     db.exec('COMMIT')
+    __runMigrationForTests('162_rss_item_pictures', db)
     db.close(); db = new SQLite(path); db.exec('PRAGMA foreign_keys=ON')
     const rss = new RSSStore(() => db), article = rss.content.getArticle('one')!
     assert.equal(article.read, true); assert.equal(article.starred, true)
