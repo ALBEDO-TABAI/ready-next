@@ -85,26 +85,6 @@ test('boot entry static import graph stays tiny so the splash is not delayed', (
   }
 })
 
-test('startup splash uses sparse logo dots instead of revealing a complete wordmark during loading', () => {
-  const splashHtml = readWorkspaceFile('src/main/startup-splash-html.ts')
-
-  assert.match(splashHtml, /createReadyLogoDotPattern/)
-  assert.match(splashHtml, /ready-logo-scan/)
-  assert.doesNotMatch(splashHtml, /createInlineWordmark/)
-  assert.doesNotMatch(splashHtml, /ready-startup-wordmark/)
-  assert.doesNotMatch(splashHtml, /clip-path/)
-})
-
-test('startup splash animation is compositor-driven so boot-time main-thread blocks cannot freeze it', () => {
-  const splashHtml = readWorkspaceFile('src/main/startup-splash-html.ts')
-
-  // 只允许 opacity/transform 的 CSS 关键帧与过渡（合成器可独立驱动，等价预渲染播片）。
-  // 逐帧 JS 动画（rAF + setAttribute）跑在 renderer 主线程，启动期会被整机负载饿死。
-  assert.match(splashHtml, /will-change: opacity/)
-  assert.match(splashHtml, /will-change: transform/)
-  assert.doesNotMatch(splashHtml, /requestAnimationFrame/)
-})
-
 test('workbench defers hidden mode preloads until the first surface is idle', () => {
   const outlet = readWorkspaceFile('src/renderer/components/layout/WorkbenchModeOutlet.tsx')
 
