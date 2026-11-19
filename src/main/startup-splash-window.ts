@@ -1,7 +1,6 @@
 import { BrowserWindow, nativeTheme } from 'electron'
 import {
   renderStartupSplashMarkup,
-  startupSplashGround,
   STARTUP_SPLASH_FINISH,
   STARTUP_SPLASH_FINISH_EVENT,
   STARTUP_SPLASH_SIZE,
@@ -27,7 +26,7 @@ export function yieldToPresentation(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 48))
 }
 // 退场节奏来自页面自己的时间表（startup-splash-markup.ts）：字标立住、点散尽，再停一拍，
-// 由这里的窗口整体 setOpacity 渐隐退场（窗口不透明，页面内淡出只会淡成底色）。
+// 由这里的窗口整体 setOpacity 渐隐退场。
 const STARTUP_SPLASH_EXIT_FADE_DELAY_MS = STARTUP_SPLASH_FINISH.fadeDelayMs
 const STARTUP_SPLASH_EXIT_FADE_MS = STARTUP_SPLASH_FINISH.fadeMs
 
@@ -55,7 +54,7 @@ export async function createStartupSplashWindow(): Promise<void> {
 
   startupSplashFinishing = false
   startupSplashShownAtMs = null
-  // 设置库此时还没打开，读不到应用自己的主题：跟随系统外观。
+  // 设置库此时还没打开，读不到应用自己的主题：字标的墨色跟随系统外观（玻璃本身无色）。
   const theme: StartupSplashTheme = nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
   const splashWindow = new BrowserWindow({
     width: STARTUP_SPLASH_SIZE.width,
@@ -68,14 +67,14 @@ export async function createStartupSplashWindow(): Promise<void> {
     maximizable: false,
     fullscreenable: false,
     skipTaskbar: true,
-    // 必须不透明：macOS 上 transparent 窗口的帧呈现耦合浏览器主线程，
-    // 启动期重模块求值/DB 初始化等实心同步块会把动画整段冻住（逐帧截屏实证）；
-    // 不透明窗口走 GPU 直通呈现，主线程阻塞期间动画照常。圆角由系统窗形提供，
-    // 液态玻璃由页面自己画（不借桌面）。
-    transparent: false,
-    roundedCorners: true,
-    hasShadow: true,
-    backgroundColor: startupSplashGround(theme),
+    // 透明窗口：玻璃板是无色的真透明（用户 2026-11-19 要求），页面只画玻璃板和它的阴影。
+    // 已知代价（2026-07 逐帧截屏实证）：macOS 透明窗口的出帧耦合主进程主线程，启动期的实心
+    // 同步块会让画面停住，停完按时间跳到当前帧。所以加载阶段只放随机闪烁（停顿看不出来），
+    // 字标的构成留到就绪信号之后；首帧握手的保护（ready-to-show + 帧跑道回执）照旧。
+    transparent: true,
+    roundedCorners: false,
+    hasShadow: false,
+    backgroundColor: '#00000000',
     autoHideMenuBar: true,
     webPreferences: {
       sandbox: false,
@@ -170,7 +169,7 @@ export function finishStartupSplashThen(showMainWindow: () => void): void {
     })
   }, finishDelayMs)
 
-  // 不透明窗口的视觉退场：字标立住 + 停顿结束后整窗渐隐再关闭。
+  // 视觉退场：字标立住 + 停顿结束后整窗渐隐再关闭。
   // 页面内的自关闭与这里的 close 竞态无妨，先到先赢。
   setTimeout(() => {
     if (splashWindow.isDestroyed()) return

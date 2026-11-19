@@ -2,45 +2,47 @@ import { STARTUP_SPLASH_WORDMARK, type StartupSplashGlyph } from './startup-spla
 
 /**
  * The startup splash (plan docs/superpowers/plans/2026-11-19-ready-next-startup-splash-implementation.md): a slab of
- * liquid glass in which orange-red dots appear while Ready loads; when Ready is ready they gather on the corners of the
- * wordmark (Instrument Serif), a hairline draws each letter's outline between them, the letters fill and the dots
- * dissolve, in the DevDay "dot → line → plane" vocabulary.
+ * clear, colourless liquid glass over the desktop. While Ready loads, tiny orange-red specks twinkle at random in it.
+ * When Ready is about to open, orange-red dots appear beside each of the five letters, attach to the letter's corners,
+ * a hairline draws each outline between them, the letters fill and the dots dissolve (the DevDay "dot → line → plane").
  *
- * Motion contract: the page moves only opacity and transform, through CSS keyframes and transitions, so the compositor
- * plays it even while the boot blocks the main thread (no per-frame script; the one script runs once, at the finish
- * signal). The window is opaque, so the glass is drawn here rather than lent by the desktop.
+ * Motion contract: the page moves only opacity and transform, through CSS keyframes and transitions (no per-frame
+ * script; the one script runs once, at the finish signal). Every motion is a function of time, so a stalled frame only
+ * skips ahead; the loading twinkle is random by design, so a skip there cannot be seen.
  *
+ * The window is transparent: the page draws the slab inside a margin that holds its shadow, and nothing else.
  * Pure: no Electron, no DOM. Main turns the markup into the splash window's data URL; the renderer's #/startup-preview
  * shows the same markup in a frame.
  */
 
 export type StartupSplashTheme = 'light' | 'dark'
 
-export const STARTUP_SPLASH_SIZE = { width: 650, height: 190 } as const
+const SLAB = { width: 650, height: 190, radius: 28 }
+const MARGIN = 32 // room for the slab's shadow inside the transparent window: no shadow may reach past it
+export const STARTUP_SPLASH_SIZE = { width: SLAB.width + 2 * MARGIN, height: SLAB.height + 2 * MARGIN } as const
 export const STARTUP_SPLASH_FINISH_EVENT = 'ready-startup-finish'
 
 const FONT_SIZE = 104
 const DOT_RADIUS = 3.3
-const DOT_COUNT = 48            // more dots than anchors: the spare ones land on an anchor already taken and merge with it
-const FIELD_ROWS = 4
-const FIELD_INSET = { x: 64, y: 40 }
+const SPECK_COUNT = 56
+const SPECK_INSET = 26
 
-// Timing (ms). Intro: from the page's first style; the finish: from the finish signal.
-const INTRO_DELAY = 160
-const POP_SPREAD = 400
-const POP_MS = 440
-const PULSE_MS = 1900
-const CONVERGE_COLUMN_STEP = 20
-const CONVERGE_MS = 620
-const GLYPH_STEP = 45
-const LINE_AT = 360
-const LINE_MS = 360
+// Timing (ms). The loading twinkle: from the page's first style; the build: from the finish signal.
+const TWINKLE_AT = 260
+const GLINT_IN_AT = 220
+const SPECKS_OUT_MS = 320
+const GLYPH_STEP = 55
+const POP_MS = 300
+const ATTACH_AT = 220
+const ATTACH_MS = 420
+const LINE_AT = 450
+const LINE_MS = 340
 const FILL_AT = LINE_AT + Math.round(LINE_MS * 0.62)
 const FILL_MS = 220
 const LINE_FADE_MS = 260
 const DOT_OUT_AT = FILL_AT + 88
 const DOT_OUT_MS = 240
-const GLINT_AT = 700
+const GLINT_AT = 760
 const GLINT_MS = 800
 const HOLD_MS = 420
 const FADE_MS = 280
@@ -56,53 +58,40 @@ export const STARTUP_SPLASH_FINISH = {
   fadeMs: FADE_MS,
 } as const
 
+// The glass has no colour of its own in either appearance; only the ink of the wordmark (and the halo that keeps it
+// legible over any wallpaper) follows the system's light or dark.
 interface Palette {
-  ground: [string, string]
-  /** A cool light from the top left and a warm one from the bottom right under the glass: something for it to bend. */
-  tint: [string, string]
   accent: string
   ink: string
   line: string
-  bloom: string
-  glass: string
-  rim: string
-  ring: string
-  sheen: string
-  dotGlow: string
+  halo: string
 }
 
 const PALETTES: Record<StartupSplashTheme, Palette> = {
   light: {
-    ground: ['#fbfbfc', '#dfdfe5'],
-    tint: ['rgba(178, 198, 236, .55)', 'rgba(255, 190, 160, .4)'],
     accent: '#ff5a1f',
     ink: '#0b0b0e',
-    line: 'rgba(11, 11, 14, .78)',
-    bloom: 'rgba(255, 90, 31, .16)',
-    glass: 'linear-gradient(176deg, rgba(255, 255, 255, .64), rgba(255, 255, 255, .16) 40%, rgba(255, 255, 255, .05) 64%, rgba(255, 255, 255, .3))',
-    rim: 'inset 0 1.5px 0 #fff, inset 0 -1px 0 rgba(255, 255, 255, .85), inset 0 -2px 0 rgba(11, 11, 14, .05), inset 0 20px 24px -18px rgba(255, 255, 255, .95), inset 0 -20px 26px -20px rgba(11, 11, 14, .12), inset 16px 0 24px -20px rgba(255, 255, 255, .7), inset -16px 0 24px -20px rgba(11, 11, 14, .05)',
-    ring: 'conic-gradient(from 210deg, #fff, rgba(255, 255, 255, .35) 60deg, rgba(11, 11, 14, .1) 120deg, rgba(255, 255, 255, .95) 180deg, rgba(255, 255, 255, .3) 240deg, rgba(11, 11, 14, .08) 300deg, #fff)',
-    sheen: 'rgba(255, 255, 255, .6)',
-    dotGlow: '0 0 7px rgba(255, 90, 31, .38)',
+    line: 'rgba(11, 11, 14, .8)',
+    halo: 'drop-shadow(0 0 .6px rgba(255, 255, 255, .9)) drop-shadow(0 0 7px rgba(255, 255, 255, .55))',
   },
   dark: {
-    ground: ['#1c1c21', '#09090b'],
-    tint: ['rgba(96, 118, 170, .16)', 'rgba(255, 120, 60, .08)'],
     accent: '#ff6a2c',
     ink: '#f4f4f6',
-    line: 'rgba(244, 244, 246, .9)',
-    bloom: 'rgba(255, 106, 44, .3)',
-    glass: 'linear-gradient(176deg, rgba(255, 255, 255, .085), rgba(255, 255, 255, .02) 42%, rgba(255, 255, 255, .012) 64%, rgba(255, 255, 255, .05))',
-    rim: 'inset 0 1px 0 rgba(255, 255, 255, .3), inset 0 -1px 0 rgba(255, 255, 255, .07), inset 0 20px 26px -20px rgba(255, 255, 255, .16), inset 0 -22px 28px -20px rgba(0, 0, 0, .6), inset 16px 0 24px -20px rgba(255, 255, 255, .07), inset -16px 0 24px -20px rgba(255, 255, 255, .04)',
-    ring: 'conic-gradient(from 210deg, rgba(255, 255, 255, .55), rgba(255, 255, 255, .08) 60deg, rgba(255, 255, 255, .03) 120deg, rgba(255, 255, 255, .4) 180deg, rgba(255, 255, 255, .06) 240deg, rgba(255, 255, 255, .04) 300deg, rgba(255, 255, 255, .55))',
-    sheen: 'rgba(255, 255, 255, .07)',
-    dotGlow: '0 0 10px rgba(255, 106, 44, .55), 0 0 2px rgba(255, 140, 90, .9)',
+    line: 'rgba(244, 244, 246, .92)',
+    halo: 'drop-shadow(0 0 1px rgba(0, 0, 0, .5)) drop-shadow(0 0 8px rgba(0, 0, 0, .38))',
   },
 }
 
-/** The colour under everything: the window's own background, so its first frame matches the page. */
-export function startupSplashGround(theme: StartupSplashTheme): string {
-  return PALETTES[theme].ground[1]
+const GLASS = {
+  body: 'linear-gradient(180deg, rgba(255, 255, 255, .13), rgba(255, 255, 255, .04) 38%, rgba(255, 255, 255, .02) 62%, rgba(255, 255, 255, .06))',
+  // outside: a hairline and a soft shadow, so the slab reads on a light wallpaper; inside: the lit top edge, the
+  // thickness at the bottom and a faint caustic along it
+  edge: '0 0 0 .5px rgba(0, 0, 0, .16), 0 14px 28px -14px rgba(0, 0, 0, .38), 0 3px 10px -4px rgba(0, 0, 0, .14), '
+    + 'inset 0 1px 0 rgba(255, 255, 255, .72), inset 0 -1px 0 rgba(255, 255, 255, .24), inset 0 0 0 1px rgba(255, 255, 255, .14), '
+    + 'inset 0 14px 22px -16px rgba(255, 255, 255, .42), inset 0 -16px 24px -18px rgba(0, 0, 0, .2), inset 0 -7px 10px -8px rgba(255, 255, 255, .3)',
+  ring: 'conic-gradient(from 210deg, rgba(255, 255, 255, .95), rgba(255, 255, 255, .25) 60deg, rgba(255, 255, 255, .08) 120deg, '
+    + 'rgba(255, 255, 255, .75) 180deg, rgba(255, 255, 255, .2) 240deg, rgba(255, 255, 255, .08) 300deg, rgba(255, 255, 255, .95))',
+  sheen: 'rgba(255, 255, 255, .28)',
 }
 
 // A fixed pseudo-random number in [0, 1) per seed: the same splash on every launch.
@@ -113,44 +102,57 @@ const hash = (seed: number): number => {
 const px = (value: number): string => `${Math.round(value * 10) / 10}`
 const ms = (value: number): string => `${Math.round(value)}ms`
 
-/** Where the dots end (an anchor of the wordmark) and where they float before (a jittered grid across the slab). */
+const ORIGIN_X = MARGIN + (SLAB.width - STARTUP_SPLASH_WORDMARK.width * FONT_SIZE) / 2
+// The wordmark's visual middle sits .281em above the baseline (measured for .shell-wordmark), on the slab's centre.
+const BASELINE = MARGIN + SLAB.height / 2 + 0.281 * FONT_SIZE
+/** Where the wordmark stands in the window: its pen start, baseline and size (px), as text set in the font would be. */
+export const STARTUP_SPLASH_WORDMARK_PLACE = { x: ORIGIN_X, baseline: BASELINE, fontSize: FONT_SIZE } as const
+/** The slab inside the window (px). */
+export const STARTUP_SPLASH_SLAB = { x: MARGIN, y: MARGIN, ...SLAB } as const
+
+/** A dot: where it lands (a corner of a letter) and where it appears first, just beside that corner. */
 export interface StartupSplashDot {
   glyph: number
   x: number
   y: number
   startX: number
   startY: number
-  column: number
 }
 
-const ORIGIN_X = (STARTUP_SPLASH_SIZE.width - STARTUP_SPLASH_WORDMARK.width * FONT_SIZE) / 2
-// The wordmark's visual middle sits .281em above the baseline (measured for .shell-wordmark), on the slab's centre.
-const BASELINE = STARTUP_SPLASH_SIZE.height / 2 + 0.281 * FONT_SIZE
-/** Where the wordmark stands in the slab: its pen start, baseline and size (px), as text set in the font would be. */
-export const STARTUP_SPLASH_WORDMARK_PLACE = { x: ORIGIN_X, baseline: BASELINE, fontSize: FONT_SIZE } as const
-
 export function startupSplashDots(): StartupSplashDot[] {
-  const anchors = STARTUP_SPLASH_WORDMARK.glyphs.flatMap((glyph, index) =>
-    glyph.anchors.map(([x, y]) => ({ glyph: index, x: ORIGIN_X + (glyph.x + x) * FONT_SIZE, y: BASELINE + y * FONT_SIZE })))
-  const dots = [...anchors]
-  for (let spare = 0; dots.length < DOT_COUNT; spare += 1) dots.push(anchors[Math.floor(hash(spare * 13.7 + 5) * anchors.length)])
-  // Columns of the field take the dots in the order of where they land, so every dot travels mostly inward.
-  const columns = Math.ceil(dots.length / FIELD_ROWS)
-  const { width, height } = STARTUP_SPLASH_SIZE
-  const byX = [...dots].sort((a, b) => a.x - b.x)
-  const placed: StartupSplashDot[] = []
-  for (let column = 0; column < columns; column += 1) {
-    byX.slice(column * FIELD_ROWS, (column + 1) * FIELD_ROWS).sort((a, b) => a.y - b.y).forEach((dot, row) => {
-      const n = column * FIELD_ROWS + row
-      placed.push({
-        ...dot,
-        column,
-        startX: FIELD_INSET.x + (width - 2 * FIELD_INSET.x) * (column + 0.5 + (hash(n * 3.1) - 0.5) * 0.7) / columns,
-        startY: FIELD_INSET.y + (height - 2 * FIELD_INSET.y) * (row + 0.5 + (hash(n * 7.7 + 1) - 0.5) * 0.7) / FIELD_ROWS,
-      })
-    })
-  }
-  return placed
+  return STARTUP_SPLASH_WORDMARK.glyphs.flatMap((glyph, index) => glyph.anchors.map(([ax, ay], k) => {
+    const n = index * 31 + k
+    const x = ORIGIN_X + (glyph.x + ax) * FONT_SIZE, y = BASELINE + ay * FONT_SIZE
+    const angle = hash(n * 2.3) * Math.PI * 2, distance = 11 + hash(n * 5.9) * 13
+    return { glyph: index, x, y, startX: x + Math.cos(angle) * distance, startY: y + Math.sin(angle) * distance }
+  }))
+}
+
+/** A speck of the loading twinkle: where in the slab (slab coordinates), how big, how often it lights. */
+export interface StartupSplashSpeck {
+  x: number
+  y: number
+  radius: number
+  periodMs: number
+  phaseMs: number
+}
+
+export function startupSplashSpecks(): StartupSplashSpeck[] {
+  return Array.from({ length: SPECK_COUNT }, (_, n) => {
+    const periodMs = 1700 + hash(n * 4.7) * 1900
+    return {
+      x: SPECK_INSET + hash(n * 3.3 + 7) * (SLAB.width - 2 * SPECK_INSET),
+      y: SPECK_INSET + hash(n * 8.1 + 2) * (SLAB.height - 2 * SPECK_INSET),
+      radius: 1.1 + hash(n * 6.6) * 1,
+      periodMs,
+      phaseMs: hash(n * 1.7 + 3) * periodMs,
+    }
+  })
+}
+
+function speckMarkup(speck: StartupSplashSpeck): string {
+  const size = speck.radius * 2
+  return `<i style="left:${px(speck.x - speck.radius)}px;top:${px(speck.y - speck.radius)}px;width:${px(size)}px;height:${px(size)}px;animation-duration:${ms(speck.periodMs)};animation-delay:${ms(TWINKLE_AT + speck.phaseMs * 0.6)}"></i>`
 }
 
 function fillMarkup(glyph: StartupSplashGlyph, index: number): string {
@@ -185,81 +187,62 @@ function lineMarkup(glyph: StartupSplashGlyph, index: number): string {
   return `<div class="lines" style="transition-delay:${ms(index * GLYPH_STEP + FILL_AT + 110)}">${pieces.join('')}</div>`
 }
 
-// Four wrappers, one motion each, because a transition cannot start from where a running animation has left a value:
-// .dot gathers (transition), .drift floats (animation; settled by the finish script), .pulse breathes (animation;
-// settled likewise), .out dissolves (transition), and the disc itself pops in (animation).
+// Three wrappers, one transition each, all started by the finish signal: .dot attaches (from beside the corner onto
+// it), .pop appears, .out dissolves.
 function dotMarkup(dot: StartupSplashDot, n: number): string {
-  const { width } = STARTUP_SPLASH_SIZE
-  const across = Math.min(1, Math.max(0, dot.startX / width))
-  const pop = INTRO_DELAY + across * POP_SPREAD + hash(n * 5.3) * 120
-  const gather = dot.column * CONVERGE_COLUMN_STEP + hash(n * 2.9) * 60
-  const out = dot.glyph * GLYPH_STEP + DOT_OUT_AT + hash(n * 4.4) * 60
-  const driftMs = 2600 + hash(n * 9.1) * 1400
-  return `<div class="dot" style="left:${px(dot.x - DOT_RADIUS)}px;top:${px(dot.y - DOT_RADIUS)}px;--sx:${px(dot.startX - dot.x)}px;--sy:${px(dot.startY - dot.y)}px;transition-delay:${ms(gather)}">`
-    + `<div class="drift" style="animation-duration:${ms(driftMs)};animation-delay:${ms(-hash(n * 6.2) * driftMs)};--dx:${px((hash(n * 8.8) - 0.5) * 9)}px;--dy:${px((hash(n * 1.9) - 0.5) * 7)}px">`
-    + `<div class="pulse" style="animation-delay:${ms(-(1 - across) * 0.62 * PULSE_MS)}">`
-    + `<div class="out" style="transition-delay:${ms(out)}"><i style="animation-delay:${ms(pop)}"></i></div></div></div></div>`
+  const at = dot.glyph * GLYPH_STEP
+  return `<div class="dot" style="left:${px(dot.x - DOT_RADIUS)}px;top:${px(dot.y - DOT_RADIUS)}px;--sx:${px(dot.startX - dot.x)}px;--sy:${px(dot.startY - dot.y)}px;transition-delay:${ms(at + ATTACH_AT + hash(n * 2.9) * 60)}">`
+    + `<div class="pop" style="transition-delay:${ms(at + hash(n * 5.3) * 80)}">`
+    + `<div class="out" style="transition-delay:${ms(at + DOT_OUT_AT + hash(n * 4.4) * 60)}"><i></i></div></div></div>`
 }
 
 function styles(theme: StartupSplashTheme): string {
   const p = PALETTES[theme]
   const radius = DOT_RADIUS * 2
   return `
-:root { color-scheme: ${theme}; }
-html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: ${p.ground[1]}; }
-.ground { position: absolute; inset: 0; background: radial-gradient(60% 120% at 12% 0%, ${p.tint[0]}, transparent 70%),
-  radial-gradient(55% 110% at 92% 100%, ${p.tint[1]}, transparent 70%), radial-gradient(130% 150% at 28% -12%, ${p.ground[0]}, ${p.ground[1]} 72%); }
-.bloom { position: absolute; inset: 0; transition: opacity 560ms ease ${ms(FILL_AT)}; }
-.bloom i { position: absolute; left: 50%; top: 50%; width: 520px; height: 150px; margin: -75px 0 0 -260px; border-radius: 50%;
-  background: radial-gradient(closest-side, ${p.bloom}, transparent); filter: blur(10px); opacity: 0;
-  animation: splash-bloom 900ms cubic-bezier(.22, 1, .36, 1) ${ms(INTRO_DELAY)} forwards; }
-.glass { position: absolute; inset: 0; border-radius: 16px; background: ${p.glass}; box-shadow: ${p.rim}; overflow: hidden; }
-.glass::before { content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1.25px; background: ${p.ring};
+html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
+.glass { position: absolute; left: ${MARGIN}px; top: ${MARGIN}px; width: ${SLAB.width}px; height: ${SLAB.height}px; border-radius: ${SLAB.radius}px;
+  overflow: hidden; background: ${GLASS.body}; box-shadow: ${GLASS.edge}; }
+.glass::before { content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1.25px; background: ${GLASS.ring};
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; }
-.sheen { position: absolute; top: -40%; bottom: -40%; left: 0; width: 34%; background: linear-gradient(100deg, transparent, ${p.sheen} 50%, transparent);
-  transform: translateX(-120%) skewX(-14deg); animation: splash-sweep 1400ms cubic-bezier(.45, 0, .2, 1) 220ms both; }
+.sheen { position: absolute; top: -40%; bottom: -40%; left: 0; width: 30%; background: linear-gradient(100deg, transparent, ${GLASS.sheen} 50%, transparent);
+  transform: translateX(-120%) skewX(-14deg); animation: splash-sweep 1400ms cubic-bezier(.45, 0, .2, 1) ${ms(GLINT_IN_AT)} both; }
+.specks { position: absolute; inset: 0; transition: opacity ${ms(SPECKS_OUT_MS)} ease; }
+.specks i { position: absolute; border-radius: 50%; background: ${p.accent}; box-shadow: 0 0 6px ${p.accent}; opacity: 0;
+  animation: splash-twinkle ease-in-out infinite both; }
 .fill, .seg { position: absolute; display: block; overflow: visible; }
-.fill { fill: ${p.ink}; opacity: 0; transition: opacity ${ms(FILL_MS)} cubic-bezier(.22, 1, .36, 1); }
+.fill { fill: ${p.ink}; filter: ${p.halo}; opacity: 0; transition: opacity ${ms(FILL_MS)} cubic-bezier(.22, 1, .36, 1); }
 .seg { fill: none; stroke: ${p.line}; stroke-width: 1.25; stroke-linecap: round; stroke-linejoin: round; opacity: 0; transition: opacity 70ms linear; }
-.lines { position: absolute; inset: 0; transition: opacity ${ms(LINE_FADE_MS)} ease; }
-.dot { position: absolute; width: ${radius}px; height: ${radius}px; transform: translate(var(--sx), var(--sy)); transition: transform ${ms(CONVERGE_MS)} cubic-bezier(.3, .7, .2, 1); }
-.drift, .pulse, .out, .dot i { position: absolute; inset: 0; }
-.drift { animation: splash-drift ease-in-out infinite alternate; }
-.pulse { animation: splash-pulse ${ms(PULSE_MS)} ease-in-out infinite; }
+.lines { position: absolute; inset: 0; filter: ${p.halo}; transition: opacity ${ms(LINE_FADE_MS)} ease; }
+.dot { position: absolute; width: ${radius}px; height: ${radius}px; transform: translate(var(--sx), var(--sy)); transition: transform ${ms(ATTACH_MS)} cubic-bezier(.3, .7, .2, 1); }
+.pop, .out, .dot i { position: absolute; inset: 0; }
+.pop { transform: scale(0); transition: transform ${ms(POP_MS)} cubic-bezier(.34, 1.56, .64, 1); }
 .out { transition: transform ${ms(DOT_OUT_MS)} cubic-bezier(.55, 0, .75, .2); }
-.dot i { border-radius: 50%; background: ${p.accent}; box-shadow: ${p.dotGlow}; transform: scale(0); animation: splash-pop ${ms(POP_MS)} cubic-bezier(.34, 1.56, .64, 1) both; }
+.dot i { border-radius: 50%; background: ${p.accent}; box-shadow: 0 0 8px ${p.accent}; }
+.finishing .specks { opacity: 0; }
 .finishing .dot { transform: none; }
-.finishing .drift { transform: none; transition: transform 420ms cubic-bezier(.22, 1, .36, 1); }
-.finishing .pulse { opacity: 1; transition: opacity 260ms ease; }
+.finishing .pop { transform: none; }
 .finishing .out { transform: scale(0); }
 .finishing .seg, .finishing .fill { opacity: 1; }
-.finishing .lines, .finishing .bloom { opacity: 0; }
+.finishing .lines { opacity: 0; }
 .finishing .sheen { animation: splash-glint ${ms(GLINT_MS)} cubic-bezier(.45, 0, .2, 1) ${ms(GLINT_AT)} both; }
-@keyframes splash-bloom { to { opacity: 1; } }
 @keyframes splash-sweep { to { transform: translateX(420%) skewX(-14deg); } }
 @keyframes splash-glint { from { transform: translateX(-120%) skewX(-14deg); } to { transform: translateX(420%) skewX(-14deg); } }
-@keyframes splash-drift { from { transform: translate(calc(var(--dx) * -1), calc(var(--dy) * -1)); } to { transform: translate(var(--dx), var(--dy)); } }
-@keyframes splash-pulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
-@keyframes splash-pop { from { transform: scale(0); } to { transform: scale(1); } }
+@keyframes splash-twinkle { 0%, 34%, 100% { opacity: 0; transform: scale(.4); } 12% { opacity: 1; transform: scale(1); } }
 @media (prefers-reduced-motion: reduce) {
-  .bloom, .sheen, .lines, .dot { display: none; }
+  .sheen, .specks, .lines, .dot { display: none; }
   .fill { opacity: 1; transition: none; }
 }`
 }
 
-// Runs once, at the finish signal: pins the floating and breathing values where they are, so the gathering starts
-// from what is on screen, then lets the stylesheet take every element to its end. Closes itself if Main never does.
+// Runs once, at the finish signal: switches the page to its ending; the stylesheet's transitions do the rest. Closes the
+// window itself if Main never does.
 function finishScript(): string {
   const closeAfter = STARTUP_SPLASH_FINISH.fadeDelayMs + FADE_MS + 400
   return `(() => {
   window.addEventListener('${STARTUP_SPLASH_FINISH_EVENT}', () => {
     const root = document.documentElement;
     if (root.classList.contains('finishing')) return;
-    const live = [...document.querySelectorAll('.drift, .pulse')];
-    const now = live.map((element) => { const style = getComputedStyle(element); return [style.transform, style.opacity]; });
-    live.forEach((element, i) => { element.style.transform = now[i][0]; element.style.opacity = now[i][1]; element.style.animation = 'none'; });
-    void root.offsetWidth;
-    live.forEach((element) => { element.style.transform = ''; element.style.opacity = ''; });
     root.classList.add('finishing');
     setTimeout(() => window.close(), ${closeAfter});
   });
@@ -277,9 +260,7 @@ export function renderStartupSplashMarkup(theme: StartupSplashTheme, { scriptNon
 <style>${styles(theme)}</style>
 </head>
 <body>
-<div class="ground"></div>
-<div class="bloom"><i></i></div>
-<div class="glass"><div class="sheen"></div></div>
+<div class="glass"><div class="specks">${startupSplashSpecks().map(speckMarkup).join('')}</div><div class="sheen"></div></div>
 <div class="word" role="img" aria-label="Ready">${glyphs.map(fillMarkup).join('')}${glyphs.map(lineMarkup).join('')}${startupSplashDots().map(dotMarkup).join('')}</div>
 <script${scriptNonce ? ` nonce="${scriptNonce}"` : ''}>${finishScript()}</script>
 </body>

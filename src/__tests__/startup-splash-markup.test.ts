@@ -4,46 +4,54 @@ import { STARTUP_SPLASH_WORDMARK } from '../shared/startup-splash-glyphs'
 import {
   renderStartupSplashMarkup,
   startupSplashDots,
-  startupSplashGround,
+  startupSplashSpecks,
   STARTUP_SPLASH_FINISH,
   STARTUP_SPLASH_SIZE,
+  STARTUP_SPLASH_SLAB,
   STARTUP_SPLASH_WORDMARK_PLACE,
 } from '../shared/startup-splash-markup'
 
 // The rendered frames, the comparison with real Instrument Serif text and the runtime motion check are in
 // scripts/verify-ready-next-splash.cjs (a hidden Electron window); these are the parts that need no browser.
 
-test('every dot ends on a corner of the wordmark, and every corner gets a dot', () => {
+test('each corner of the five letters gets one dot, which appears just beside it', () => {
   const dots = startupSplashDots()
   const anchors = STARTUP_SPLASH_WORDMARK.glyphs.flatMap((glyph, index) => glyph.anchors.map(([x, y]) => ({
     glyph: index,
     x: STARTUP_SPLASH_WORDMARK_PLACE.x + (glyph.x + x) * STARTUP_SPLASH_WORDMARK_PLACE.fontSize,
     y: STARTUP_SPLASH_WORDMARK_PLACE.baseline + y * STARTUP_SPLASH_WORDMARK_PLACE.fontSize,
   })))
-  const key = (point: { x: number; y: number }) => `${point.x.toFixed(3)},${point.y.toFixed(3)}`
-  const corners = new Set(anchors.map(key))
-  assert.ok(dots.length > anchors.length, 'spare dots merge into corners already taken')
-  for (const dot of dots) assert.ok(corners.has(key(dot)), `dot ends off the wordmark at ${key(dot)}`)
-  assert.equal(new Set(dots.map(key)).size, corners.size)
+  assert.equal(STARTUP_SPLASH_WORDMARK.glyphs.length, 5)
+  assert.equal(dots.length, anchors.length)
+  dots.forEach((dot, i) => {
+    assert.equal(dot.glyph, anchors[i].glyph)
+    assert.ok(Math.abs(dot.x - anchors[i].x) < 1e-9 && Math.abs(dot.y - anchors[i].y) < 1e-9, `dot ${i} lands on its corner`)
+    const away = Math.hypot(dot.startX - dot.x, dot.startY - dot.y)
+    assert.ok(away >= 10 && away <= 25, `dot ${i} appears ${away.toFixed(1)}px from its corner`)
+  })
 })
 
-test('before gathering, the dots float across the slab, inside its edges', () => {
-  const { width, height } = STARTUP_SPLASH_SIZE
-  const dots = startupSplashDots()
-  for (const dot of dots) {
-    assert.ok(dot.startX > 24 && dot.startX < width - 24, `start x ${dot.startX}`)
-    assert.ok(dot.startY > 24 && dot.startY < height - 24, `start y ${dot.startY}`)
+test('the loading specks lie inside the slab and twinkle out of step', () => {
+  const specks = startupSplashSpecks()
+  assert.ok(specks.length >= 40)
+  for (const speck of specks) {
+    assert.ok(speck.x - speck.radius > 0 && speck.x + speck.radius < STARTUP_SPLASH_SLAB.width)
+    assert.ok(speck.y - speck.radius > 0 && speck.y + speck.radius < STARTUP_SPLASH_SLAB.height)
+    assert.ok(speck.radius <= 2.2, 'tiny, not the letter dots')
   }
-  const xs = dots.map(dot => dot.startX)
-  assert.ok((Math.max(...xs) - Math.min(...xs)) / width > 0.7)
+  assert.ok(new Set(specks.map(speck => Math.round(speck.periodMs / 50))).size > specks.length / 2, 'periods differ')
 })
 
-test('the wordmark stands centred in the slab, set as the shell sets it', () => {
+test('the wordmark stands centred on the slab, set as the shell sets it', () => {
   const { x, fontSize, baseline } = STARTUP_SPLASH_WORDMARK_PLACE
+  const slab = STARTUP_SPLASH_SLAB
   assert.equal(STARTUP_SPLASH_WORDMARK.text, 'Ready')
-  assert.ok(Math.abs(x + STARTUP_SPLASH_WORDMARK.width * fontSize / 2 - STARTUP_SPLASH_SIZE.width / 2) < 0.01)
+  assert.ok(Math.abs(x + STARTUP_SPLASH_WORDMARK.width * fontSize / 2 - (slab.x + slab.width / 2)) < 0.01)
   // its visual middle (.281em above the baseline, as .shell-wordmark measures it) on the slab's centre line
-  assert.ok(Math.abs(baseline - 0.281 * fontSize - STARTUP_SPLASH_SIZE.height / 2) < 0.01)
+  assert.ok(Math.abs(baseline - 0.281 * fontSize - (slab.y + slab.height / 2)) < 0.01)
+  // the slab sits inside the window with room for its shadow on every side
+  assert.equal(slab.x * 2 + slab.width, STARTUP_SPLASH_SIZE.width)
+  assert.equal(slab.y * 2 + slab.height, STARTUP_SPLASH_SIZE.height)
 })
 
 test('only opacity and transform are animated, and no script runs per frame', () => {
@@ -51,12 +59,12 @@ test('only opacity and transform are animated, and no script runs per frame', ()
     const markup = renderStartupSplashMarkup(theme)
     const style = markup.slice(markup.indexOf('<style>'), markup.indexOf('</style>'))
     const keyframes = [...style.matchAll(/@keyframes [\w-]+ \{((?:[^{}]*\{[^{}]*\})*)[^{}]*\}/g)]
-    assert.ok(keyframes.length >= 6)
+    assert.ok(keyframes.length >= 3)
     for (const [, body] of keyframes) {
       for (const [, property] of body.matchAll(/([a-z-]+):/g)) assert.ok(['opacity', 'transform'].includes(property), `keyframes animate ${property}`)
     }
     const transitions = [...style.matchAll(/transition: ([^;]+);/g)]
-    assert.ok(transitions.length >= 8)
+    assert.ok(transitions.length >= 7)
     for (const [, value] of transitions) {
       assert.ok(['opacity', 'transform', 'none'].includes(value.trim().split(' ')[0]), `transition of ${value}`)
     }
@@ -65,16 +73,32 @@ test('only opacity and transform are animated, and no script runs per frame', ()
   }
 })
 
+test('the page is see-through around the slab, and the glass has no colour of its own', () => {
+  for (const theme of ['light', 'dark'] as const) {
+    const markup = renderStartupSplashMarkup(theme)
+    assert.match(markup, /html, body \{[^}]*background: transparent;/)
+    const glass = markup.match(/\.glass \{[^}]*\}/)?.[0] ?? ''
+    for (const [, r, g, b] of glass.matchAll(/rgba\((\d+), (\d+), (\d+),/g)) assert.ok(r === g && g === b, `glass colour rgba(${r}, ${g}, ${b})`)
+  }
+  // the glass is the same in both appearances; only the ink of the wordmark follows the system
+  const glassOf = (theme: 'light' | 'dark') => renderStartupSplashMarkup(theme).match(/\.glass \{[^}]*\}/)?.[0]
+  assert.equal(glassOf('light'), glassOf('dark'))
+  assert.ok(STARTUP_SPLASH_FINISH.fadeDelayMs > STARTUP_SPLASH_FINISH.settledMs)
+})
+
+test("the slab's shadow ends inside the window, so the window edge never cuts it", () => {
+  const glass = renderStartupSplashMarkup('light').match(/\.glass \{[^}]*box-shadow: ([^;]+);/)?.[1] ?? ''
+  const shadows = glass.split(/,(?![^(]*\))/).map(part => part.trim()).filter(part => !part.startsWith('inset'))
+  assert.ok(shadows.length >= 2)
+  for (const shadow of shadows) {
+    const [x, y, blur = 0, spread = 0] = [...shadow.matchAll(/(-?[\d.]+)px|(?<![\w.])0(?= )/g)].map(match => Number(match[1] ?? 0))
+    const reach = Math.max(Math.abs(x), Math.abs(y)) + blur + spread
+    assert.ok(reach <= STARTUP_SPLASH_SLAB.x && reach <= STARTUP_SPLASH_SLAB.y, `"${shadow}" reaches ${reach}px past the slab`)
+  }
+})
+
 test('a host that admits inline scripts only by nonce gets the nonce on the one script', () => {
   assert.match(renderStartupSplashMarkup('light', { scriptNonce: 'abc' }), /<script nonce="abc">/)
   assert.equal(renderStartupSplashMarkup('light').match(/<script[ >]/g)?.length, 1)
   assert.doesNotMatch(renderStartupSplashMarkup('light'), /nonce=/)
-})
-
-test('the window background is the page ground, and the fade waits for the wordmark to settle', () => {
-  for (const theme of ['light', 'dark'] as const) {
-    assert.match(renderStartupSplashMarkup(theme), new RegExp(`html, body \\{[^}]*background: ${startupSplashGround(theme)};`))
-  }
-  assert.notEqual(startupSplashGround('light'), startupSplashGround('dark'))
-  assert.ok(STARTUP_SPLASH_FINISH.fadeDelayMs > STARTUP_SPLASH_FINISH.settledMs)
 })

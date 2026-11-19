@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // Hidden check of the startup splash (plan docs/superpowers/plans/2026-11-19-ready-next-startup-splash-implementation.md).
 // The page the splash window loads (src/shared/startup-splash-markup.ts) is opened in a hidden Electron window of the
-// same size and background as the splash window, in both themes, and driven frame by frame: every animation paused
-// and seeked to a moment, the finish signal sent at a chosen moment. Nothing is shown on screen; HOME and TMPDIR live in
+// same size as the splash window, over a flat stand-in for the desktop (the splash window itself is transparent), in
+// both themes, and driven frame by frame: every animation paused and seeked to a moment, the finish signal sent at a
+// chosen moment. The frames kept for a person to judge are drawn over a colourful stand-in wallpaper. Nothing is shown on screen; HOME and TMPDIR live in
 // a throwaway directory; no network. The wordmark is compared with "Ready" set as text in Instrument Serif (the app's
 // own font file) at the same place, so the dots build the real wordmark and not some other shape.
 const assert = require('node:assert/strict')
@@ -25,6 +26,10 @@ const { PNG } = require('pngjs')
 
 const { width: W, height: H } = splash.STARTUP_SPLASH_SIZE
 const WAIT_MS = 1500 // how long Ready "loads" in the frames below; the finish signal comes then
+// What shows through the clear glass: a flat light and a flat dark desktop for the measurements, a colourful one for
+// the frames a person looks at.
+const DESKTOP = { light: '#d5dbe4', dark: '#1e2734' }
+const WALLPAPER = 'html { background: radial-gradient(70% 120% at 15% 10%, #f2b38a, transparent 60%), radial-gradient(60% 110% at 85% 90%, #6f8fd8, transparent 65%), linear-gradient(120deg, #2c3e66, #a35d6a 55%, #e7c27d) !important; }'
 const SETTLED_MS = splash.STARTUP_SPLASH_FINISH.settledMs
 const FONT = fs.readFileSync(path.join(REPO, 'src/renderer/design/next/fonts/InstrumentSerif.woff2')).toString('base64')
 const results = []
@@ -64,7 +69,8 @@ function read(png, theme) {
     const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
     if (x >= box.x0 && x <= box.x1 && y >= box.y0 && y <= box.y1 && (theme === 'light' ? lum < 90 : lum > 205) && Math.abs(r - b) < 40) ink[y * png.width + x] = 1
   }
-  let blobs = 0
+  let blobs = 0, largest = 0, outside = 0
+  const near = { x0: (place.x - 34) * scale, x1: (place.x + 2.05 * place.fontSize + 34) * scale, y0: (place.baseline - 0.8 * place.fontSize - 34) * scale, y1: (place.baseline + 0.25 * place.fontSize + 34) * scale }
   const seen = new Uint8Array(accent.length), stack = []
   for (let start = 0; start < accent.length; start++) {
     if (!accent[start] || seen[start]) continue
@@ -73,14 +79,16 @@ function read(png, theme) {
     while (stack.length) {
       const at = stack.pop(); size++
       const x = at % png.width, y = (at - x) / png.width
+      if (x < near.x0 || x > near.x1 || y < near.y0 || y > near.y1) outside++
       for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
         const nx = x + dx, ny = y + dy, n = ny * png.width + nx
         if (nx >= 0 && ny >= 0 && nx < png.width && ny < png.height && accent[n] && !seen[n]) { seen[n] = 1; stack.push(n) }
       }
     }
-    if (size >= 4 * scale * scale) blobs++
+    if (size >= 2 * scale * scale) blobs++
+    largest = Math.max(largest, size / (scale * scale))
   }
-  return { scale, accentCount, blobs, spread: accentCount ? (maxX - minX) / png.width : 0, ink }
+  return { scale, accentCount, blobs, largest, outside, spread: accentCount ? (maxX - minX) / png.width : 0, ink }
 }
 
 function overlap(a, b) {
@@ -99,12 +107,12 @@ async function main() {
   fs.writeFileSync(entry, ENTRY)
   const app = await _electron.launch({ executablePath: require(path.join(REPO, 'node_modules', 'electron')), args: [entry], env: { ...process.env, READY_START_HIDDEN: '1' }, timeout: 60000 })
   try {
-    const open = async (url, background) => {
+    const open = async (url, background, transparent = false) => {
       const pending = app.waitForEvent('window')
-      await app.evaluate(({ BrowserWindow }, { url, background, width, height }) => {
-        const win = new BrowserWindow({ width, height, useContentSize: true, show: false, frame: false, transparent: false, backgroundColor: background, webPreferences: { backgroundThrottling: false, contextIsolation: true, nodeIntegration: false } })
+      await app.evaluate(({ BrowserWindow }, { url, background, width, height, transparent }) => {
+        const win = new BrowserWindow({ width, height, useContentSize: true, show: false, frame: false, transparent, backgroundColor: transparent ? '#00000000' : background, webPreferences: { backgroundThrottling: false, contextIsolation: true, nodeIntegration: false } })
         void win.loadURL(url)
-      }, { url, background, width: W, height: H })
+      }, { url, background, width: W, height: H, transparent })
       const page = await pending
       await page.waitForLoadState('load')
       return page
@@ -112,12 +120,12 @@ async function main() {
 
     for (const theme of ['light', 'dark']) {
       const markup = splash.renderStartupSplashMarkup(theme)
-      const page = await open(`data:text/html;charset=utf-8,${encodeURIComponent(markup)}`, splash.startupSplashGround(theme))
+      const page = await open(`data:text/html;charset=utf-8,${encodeURIComponent(markup)}`, DESKTOP[theme])
       // No frame-by-frame script: requestAnimationFrame is counted from before the page's own script runs.
       await page.addInitScript(() => { window.__rafCalls = 0; const raf = window.requestAnimationFrame.bind(window); window.requestAnimationFrame = callback => { window.__rafCalls++; return raf(callback) } })
 
       // The reference: "Ready" set as text in the app's Instrument Serif file, where the splash says the wordmark stands.
-      const reference = await open(`data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html><body style="margin:0;background:${splash.startupSplashGround(theme)}"><canvas width="${W}" height="${H}" style="display:block;width:${W}px;height:${H}px"></canvas></body>`)}`, splash.startupSplashGround(theme))
+      const reference = await open(`data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html><body style="margin:0;background:${DESKTOP[theme]}"><canvas width="${W}" height="${H}" style="display:block;width:${W}px;height:${H}px"></canvas></body>`)}`, DESKTOP[theme])
       await reference.evaluate(async ({ font, place, ink, W, H }) => {
         const face = new FontFace('Reference Serif', Uint8Array.from(atob(font), c => c.charCodeAt(0)))
         document.fonts.add(await face.load())
@@ -138,22 +146,28 @@ async function main() {
       let frame = read(await shot(page, `${theme}-00-glass`), theme)
       assert.equal(frame.accentCount, 0, 'no dot before the intro')
       assert.ok(overlap(frame.ink, referenceInk) < 0.05, 'no wordmark before the intro')
-      pass(`${theme}: the first frame is the glass alone`)
+      pass(`${theme}: the first frame is the clear glass alone`)
 
-      // 2. While Ready loads: the dots are up, spread across the slab; the wordmark is not shown yet.
-      await seek(page, WAIT_MS)
-      const waiting = read(await shot(page, `${theme}-01-waiting`), theme)
-      assert.ok(waiting.blobs >= 36, `dots while loading: ${waiting.blobs}`)
-      assert.ok(waiting.spread >= 0.7, `dots spread across the slab: ${waiting.spread.toFixed(2)}`)
-      assert.ok(overlap(waiting.ink, referenceInk) < 0.05, 'the wordmark is not revealed while loading')
-      pass(`${theme}: while loading, orange dots float across the glass`, `${waiting.blobs} dots over ${(waiting.spread * 100).toFixed(0)}% of the width`)
+      // 2. While Ready loads: only tiny specks twinkle here and there; no letter dots, no wordmark.
+      const counts = []
+      for (const at of [900, 1200, WAIT_MS]) {
+        await seek(page, at)
+        const loading = read(await shot(page, `${theme}-01-loading-${at}`), theme)
+        assert.ok(loading.largest < 30, `only tiny specks while loading (largest ${loading.largest.toFixed(0)} px)`)
+        assert.ok(overlap(loading.ink, referenceInk) < 0.05, 'the wordmark is not revealed while loading')
+        counts.push(loading.blobs)
+      }
+      assert.ok(Math.min(...counts) >= 3, `specks twinkle while loading: ${counts.join(', ')}`)
+      pass(`${theme}: while loading, tiny specks twinkle at random`, `lit: ${counts.join(', ')}`)
 
-      // 3. After the finish signal: the dots gather toward the wordmark.
-      await seek(page, WAIT_MS + 420, WAIT_MS)
-      const gathering = read(await shot(page, `${theme}-02-gathering`), theme)
-      assert.ok(gathering.spread < waiting.spread - 0.08, `the dots gather: ${waiting.spread.toFixed(2)} → ${gathering.spread.toFixed(2)}`)
-      for (const at of [150, 300, 560, 720, 880]) { await seek(page, WAIT_MS + at, WAIT_MS); await shot(page, `${theme}-03-build-${at}`) }
-      pass(`${theme}: at the finish signal the dots gather`, `spread ${(gathering.spread * 100).toFixed(0)}%`)
+      // 3. At the finish signal: dots appear beside the five letters (nowhere else), before any letter shows.
+      await seek(page, WAIT_MS + 300, WAIT_MS)
+      const appearing = read(await shot(page, `${theme}-02-dots-appear`), theme)
+      assert.ok(appearing.blobs >= 20, `dots beside the letters: ${appearing.blobs}`)
+      assert.ok(appearing.outside === 0, `every dot is beside the wordmark (${appearing.outside} px outside)`)
+      assert.ok(overlap(appearing.ink, referenceInk) < 0.2, 'the letters are not there yet')
+      for (const at of [150, 450, 650, 800, 950, 1100]) { await seek(page, WAIT_MS + at, WAIT_MS); await shot(page, `${theme}-03-build-${at}`) }
+      pass(`${theme}: when Ready is about to open, dots appear beside the five letters`, `${appearing.blobs} dots`)
 
       // 4. Settled: the wordmark alone, in Instrument Serif, where text in that font would stand; every dot gone.
       await seek(page, WAIT_MS + SETTLED_MS + 40, WAIT_MS)
@@ -201,7 +215,23 @@ async function main() {
       await page.emulateMedia({ reducedMotion: 'no-preference' })
       pass(`${theme}: with reduced motion the wordmark shows at once, without dots`)
 
-      // Frames for a person to judge, every 150 ms through the whole run.
+      // 8. See-through: in a transparent window like the splash window, nothing is painted around the slab, and the
+      // glass itself lets most of the desktop through.
+      const clear = await open(`data:text/html;charset=utf-8,${encodeURIComponent(markup)}`, null, true)
+      await seek(clear, 0)
+      const glassPng = PNG.sync.read(await clear.screenshot({ omitBackground: true }))
+      const alphaAt = (x, y) => glassPng.data[(Math.round(y * glassPng.width / W) * glassPng.width + Math.round(x * glassPng.width / W)) * 4 + 3]
+      const slab = splash.STARTUP_SPLASH_SLAB
+      for (const [x, y] of [[1, 1], [W - 2, 1], [1, H - 2], [W - 2, H - 2]]) assert.equal(alphaAt(x, y), 0, `the window corner (${x}, ${y}) is see-through`)
+      let alphaSum = 0, alphaCount = 0
+      for (let y = slab.y + 30; y < slab.y + slab.height - 30; y += 4) for (let x = slab.x + 40; x < slab.x + slab.width - 40; x += 4) { alphaSum += alphaAt(x, y); alphaCount++ }
+      const meanAlpha = alphaSum / alphaCount / 255
+      assert.ok(meanAlpha < 0.2, `the glass lets the desktop through: mean opacity ${meanAlpha.toFixed(2)}`)
+      await clear.close()
+      pass(`${theme}: see-through around the slab, and the glass is clear`, `glass opacity ${(meanAlpha * 100).toFixed(0)}%`)
+
+      // Frames for a person to judge, every 150 ms through the whole run, over the colourful wallpaper.
+      await page.addInitScript(css => document.addEventListener('DOMContentLoaded', () => { const style = document.createElement('style'); style.textContent = css; document.head.append(style) }), WALLPAPER)
       for (let at = 0; at <= WAIT_MS + SETTLED_MS + 300; at += 150) {
         await seek(page, at, WAIT_MS)
         await shot(page, `${theme}-run-${String(at).padStart(4, '0')}`)

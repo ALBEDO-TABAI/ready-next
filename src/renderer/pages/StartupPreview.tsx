@@ -15,7 +15,7 @@ const DEMO_RESTART_MS = 900
 
 /**
  * #/startup-preview: the startup splash exactly as the splash window shows it (the same markup, in a frame of the same
- * size), replayed in a loop. ?theme=light|dark picks the look (default: the system's); ?loop=0 plays it once and never
+ * size; the page is see-through, so the stage shows through the glass as the desktop does), replayed in a loop. ?theme=light|dark picks the look (default: the system's); ?loop=0 plays it once and never
  * sends the finish signal, so a check can drive the frame itself.
  */
 export default function StartupPreview() {
@@ -44,7 +44,7 @@ export default function StartupPreview() {
         srcDoc={markup}
         width={STARTUP_SPLASH_SIZE.width}
         height={STARTUP_SPLASH_SIZE.height}
-        style={{ border: 0, borderRadius: 16, boxShadow: 'var(--rn-shadow-2)' }}
+        style={{ border: 0, background: 'transparent' }}
       />
     </div>
   )
