@@ -54,10 +54,9 @@ import {
 import { CodexSidecarSession } from '../main/modules/agent-control/codex-runtime/codex-sidecar-session'
 import {
   CodexSidecarSupervisor,
-  MacCodexProcessInspector,
-  NodeCodexSidecarSpawnPort,
   type CodexProcessInspector,
 } from '../main/modules/agent-control/codex-runtime/codex-sidecar-supervisor'
+import { createCodexProcessPorts } from '../main/modules/agent-control/codex-runtime/codex-process-platform'
 import { createCodexStartIdentityRegistryForRuntime } from '../main/modules/agent-control/codex-runtime/codex-start-identity-registry'
 import type { StartIdentityReservationSet } from '../main/modules/agent-control/send-scoped-confirmation'
 import { RunMetaRepository } from '../main/modules/agent-control/task-projection/run-meta-repository'
@@ -441,10 +440,6 @@ test('real app-server crash recovery covers all six start seams and three-way re
     t.skip('set READY_CODEX_E2E=1 to run the pinned real child')
     return
   }
-  if (process.platform !== 'darwin' || process.arch !== 'arm64') {
-    t.skip('pinned E2 runtime is macOS arm64 only')
-    return
-  }
 
   if (skipIfSqliteUnavailable(t, 'Codex sidecar crash recovery database')) return
   const database = new DatabaseManager(true)
@@ -491,14 +486,14 @@ test('real app-server crash recovery covers all six start seams and three-way re
       runtimeManifestDigest: runtime.manifestDigest,
       protocolSchemaDigest: 'protocol-schema-recovery',
       runtimeContinuityCatalog: loadRuntimeContinuityAssets({
-        assetRoot: join(repoRoot, 'assets/runtime-continuity'),
+        assetRoot: paths.continuityAssetRoot,
         targetManifestDigest: runtime.manifestDigest,
       }).catalog,
     })
     const state = prepareCodexRuntimeState({
       userDataPath: tempRoot, gatewayUrl, contracts: runtime.contracts,
     })
-    const inspector = new MacCodexProcessInspector()
+    const { inspector, spawnPort } = createCodexProcessPorts(runtime.binaryPath, repoRoot)
     const main = (await inspector.list()).find((row) => row.pid === process.pid)
     assert.ok(main)
     let ownerMainBootId = randomUUID()
@@ -796,7 +791,7 @@ test('real app-server crash recovery covers all six start seams and three-way re
         },
         leaseStore: repository,
         inspector: processInspector,
-        spawnPort: new NodeCodexSidecarSpawnPort(),
+        spawnPort,
         ownerMainBootId: bootId,
         ownerMainPid: process.pid,
         ownerMainProcessStartIdentity: main.processStartIdentity,
@@ -1050,8 +1045,9 @@ test('real app-server crash recovery covers all six start seams and three-way re
       activeFault = null
       ownerMainBootId = randomUUID()
       const hidesOldMain: CodexProcessInspector = {
-        async list() {
-          return (await inspector.list()).filter((row) => row.pid !== process.pid)
+        ...inspector,
+        async list(lease) {
+          return (await inspector.list(lease)).filter((row) => row.pid !== process.pid)
         },
       }
       activeSupervisor = makeSupervisor(ownerMainBootId, hidesOldMain)

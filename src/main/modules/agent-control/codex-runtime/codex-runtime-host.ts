@@ -389,7 +389,7 @@ export function resolveCodexRuntimePaths(input: {
   appPath: string
   resourcesPath: string
   isPackaged: boolean
-}): { assetRoot: string; binaryPath: string } {
+}): { assetRoot: string; binaryPath: string; continuityAssetRoot: string } {
   const assetRoot = resolve(input.isPackaged
     ? join(input.resourcesPath, 'codex-runtime')
     : join(input.appPath, 'assets/codex-runtime'))
@@ -400,7 +400,7 @@ export function resolveCodexRuntimePaths(input: {
   const binaryPath = resolve(input.isPackaged
     ? join(assetRoot, manifest.targetTriple, 'codex.exe')
     : join(input.appPath, 'build/codex', manifest.targetTriple, 'codex.exe'))
-  return { assetRoot, binaryPath }
+  return { assetRoot, binaryPath, continuityAssetRoot: join(assetRoot, '..', 'runtime-continuity', 'windows-x64') }
 }
 
 export function loadVerifiedCodexRuntime(input: {
@@ -554,6 +554,7 @@ function renderIsolationConfig(input: {
     'model_provider = "ready_gateway"',
     'approval_policy = "never"',
     'sandbox_mode = "read-only"',
+    ...(process.platform === 'win32' ? ['windows.sandbox = "unelevated"'] : []),
     'web_search = "disabled"',
     'include_permissions_instructions = false',
     'include_apps_instructions = false',

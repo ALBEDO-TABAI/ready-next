@@ -58,6 +58,19 @@ function main() {
       `${sourceLock.targetTriple}`
     )
     fs.mkdirSync(destinationDir, { recursive: true })
+    const vswhere = path.join(process.env['ProgramFiles(x86)'], 'Microsoft Visual Studio/Installer/vswhere.exe')
+    const msbuild = run(vswhere, [
+      '-latest', '-products', '*', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64',
+      '-find', 'MSBuild/Current/Bin/MSBuild.exe',
+    ])
+    assert(msbuild, 'Visual Studio C++ build tools are required for the Windows Codex job')
+    run(msbuild, [
+      path.join(__dirname, 'windows-job/ready-codex-job.vcxproj'),
+      '/nologo', '/verbosity:minimal', '/p:Configuration=Release', '/p:Platform=x64',
+      '/p:OutDir=' + destinationDir + '/', '/p:IntDir=' + destinationDir + '/obj/',
+    ])
+    fs.writeFileSync(path.join(destinationDir, '../ready-codex-job.sha256'),
+      digestFile(path.join(destinationDir, 'ready-codex-job.exe')) + '\n')
     const destination = path.join(destinationDir, 'codex.exe')
     // Replace atomically: a running sidecar keeps its own inode, and a half-copied binary is never visible.
     const staged = path.join(destinationDir, `.codex-${process.pid}-${Date.now()}`)

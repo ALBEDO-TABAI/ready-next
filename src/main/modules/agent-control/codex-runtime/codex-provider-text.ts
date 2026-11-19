@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import type { AIModelConfig } from '../../../../shared/ai-providers'
 import { CHATGPT_OAUTH_PROFILE_ID, isChatGptOAuthConfig } from '../../../../shared/chatgpt-oauth'
 import { CodexModelGateway, type CodexModelGatewayBinding } from './codex-model-gateway'
-import { createCodexUpstreamProfileSnapshot, digestCanonicalJson, instructionTranscriptDigest } from './codex-model-gateway-contract'
+import { CODEX_PLATFORM_SANDBOX, createCodexUpstreamProfileSnapshot, digestCanonicalJson, instructionTranscriptDigest } from './codex-model-gateway-contract'
 
 /** A bounded, tool-free provider request through the current gateway; no chat thread or model loop. */
 export async function requestCodexProviderText(config: AIModelConfig, options: { system: string; user: string; maxTokens: number; timeoutMs: number; signal?: AbortSignal }): Promise<{ text: string; latencyMs: number }> {
@@ -16,7 +16,7 @@ export async function requestCodexProviderText(config: AIModelConfig, options: {
   const input = [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: options.user }] }]
   const metadata = {
     installation_id: id, session_id: id, thread_id: id, turn_id: id, root_turn_id: id,
-    window_id: `${id}:0`, agent_name: '/root', request_kind: 'turn', sandbox: 'seatbelt', sandbox_mode: 'read-only',
+    window_id: `${id}:0`, agent_name: '/root', request_kind: 'turn', sandbox: CODEX_PLATFORM_SANDBOX, sandbox_mode: 'read-only',
     auto_review_enabled: false, node_repl_auto_review_required: false, node_repl_disabled: false,
     // The exact product shape of the pinned runtime; the gateway accepts no other.
     turn_started_at_unix_ms: started, window_number: 0, context_window_id: id, analytics_enabled: false,

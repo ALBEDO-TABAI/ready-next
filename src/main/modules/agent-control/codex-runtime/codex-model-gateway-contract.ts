@@ -23,6 +23,8 @@ import {
 
 type JsonObject = Record<string, unknown>
 
+export const CODEX_PLATFORM_SANDBOX = process.platform === 'win32' ? 'windows_sandbox' : 'seatbelt'
+
 export type CodexModelGatewayRequestKind = 'product' | 'automatic_compaction' | 'manual_compaction'
 
 export type CodexModelGatewayRequestEvidence = Readonly<{

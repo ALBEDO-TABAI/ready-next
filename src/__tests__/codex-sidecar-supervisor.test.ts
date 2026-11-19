@@ -35,14 +35,14 @@ import type {
 
 const startedAt = Date.parse('2026-08-07T02:00:00.000Z')
 
-test('macOS process evidence preserves the full current executable path', async () => {
+test('macOS process evidence preserves the full current executable path', { skip: process.platform !== 'darwin' }, async () => {
   const self = (await new MacCodexProcessInspector().list()).find((row) => row.pid === process.pid)
   assert.ok(self)
   assert.equal(realpathSync(self.executablePath), realpathSync(process.execPath))
   assert.match(self.processStartIdentity, new RegExp(`^${process.pid}:`))
 })
 
-test('process evidence does not depend on the locale the app was launched in', async (t) => {
+test('macOS process evidence does not depend on the locale the app was launched in', { skip: process.platform !== 'darwin' }, async (t) => {
   // `ps` prints non-ASCII bytes as `M-g…` with no locale and a four-token start time under zh_CN.
   const stateDir = '/Users/某人/Library/Application Support/Ready Next/codex-runtime'
   const child = spawn('/bin/sleep', ['30'], { env: { READY_CODEX_PROCESS_LEASE_ID: 'lease-locale', READY_CODEX_STATE_DIR: stateDir } })

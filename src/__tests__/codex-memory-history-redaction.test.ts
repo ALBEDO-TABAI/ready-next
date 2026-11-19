@@ -332,7 +332,7 @@ test('gateway validates original sidecar input but receipts and forwards redacte
         installation_id: 'installation-memory', session_id: 'thread-memory', request_kind: 'turn',
         thread_id: 'thread-memory', turn_id: 'turn-memory', window_id: 'thread-memory:0',
         root_turn_id: 'turn-memory', agent_name: '/root',
-        sandbox: 'seatbelt', sandbox_mode: 'read-only', auto_review_enabled: false,
+        sandbox: process.platform === 'win32' ? 'windows_sandbox' : 'seatbelt', sandbox_mode: 'read-only', auto_review_enabled: false,
         node_repl_auto_review_required: false, node_repl_disabled: false,
         turn_started_at_unix_ms: 1, window_number: 0, context_window_id: 'context-window-1',
         analytics_enabled: false, model: 'ready-e0-model', readyRunId: 'run-memory',

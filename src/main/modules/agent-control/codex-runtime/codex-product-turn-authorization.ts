@@ -626,7 +626,10 @@ export function readCodexInstructionContractDigest(
   )) as { provider?: { requests?: Array<{ request?: { instructions?: unknown; input?: unknown } }> } }
   const request = fixture.provider?.requests?.[0]?.request
   if (!request) throw new Error('codex_instruction_fixture_missing')
-  return instructionTranscriptDigest(request.instructions, [{
+  // The pinned Windows binary embeds this exact base text with CRLF. Compare incoming bytes as received.
+  const instructions = process.platform === 'win32' && typeof request.instructions === 'string'
+    ? request.instructions.replace(/\r?\n/g, '\r\n') : request.instructions
+  return instructionTranscriptDigest(instructions, [{
     type: 'message',
     role: 'developer',
     content: [{ type: 'input_text', text: developerInstructions }],

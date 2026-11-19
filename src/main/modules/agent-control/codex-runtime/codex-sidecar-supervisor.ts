@@ -39,8 +39,13 @@ export type CodexOwnedProcess = {
   }
 }
 
+export type CodexProcessInspectionLease = Pick<CodexProcessLeaseRow,
+  'processLeaseId' | 'sidecarSpawnInstanceId' | 'connectionEpoch' | 'isolatedStateDir' |
+  'ownerMainPid' | 'executablePath' | 'processGroupId'>
+
 export interface CodexProcessInspector {
-  list(): Promise<CodexOwnedProcess[]>
+  list(lease?: CodexProcessInspectionLease): Promise<CodexOwnedProcess[]>
+  terminateOwnedJob?(lease: CodexProcessInspectionLease): Promise<void>
 }
 
 export interface CodexProcessLeaseStore {
@@ -87,6 +92,7 @@ export interface CodexProcessLeaseStore {
 export interface CodexSidecarChild {
   pid: number
   process: ChildProcessWithoutNullStreams
+  launchesInJob?: boolean
 }
 
 export interface CodexSidecarSpawnPort {
@@ -180,7 +186,7 @@ const PS_OPTIONS = { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, env: { LC_AL
 
 /** The runtime binary is hundreds of megabytes and is listed on every ownership poll; hash it once per version. */
 const executableDigests = new Map<string, { stamp: string; sha256: string }>()
-function executableDigest(path: string): string {
+export function executableDigest(path: string): string {
   const stat = statSync(path)
   const stamp = `${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`
   const known = executableDigests.get(path)
@@ -235,6 +241,7 @@ export class NodeCodexSidecarSpawnPort implements CodexSidecarSpawnPort {
       cwd: input.cwd,
       env: input.env,
       detached: true,
+      windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
     })
     child.once('error', () => undefined)
@@ -481,7 +488,7 @@ export class CodexSidecarSupervisor {
     })
 
     try {
-      const owned = await this.waitForSpawnOwnership(lease, child.pid)
+      const owned = await this.waitForSpawnOwnership(lease, child)
       if (childExited) throw new CodexSidecarSupervisorError('sidecar_exited_during_start')
       if (childError) throw new CodexSidecarSupervisorError('sidecar_errored_during_start', childError)
       lease = this.deps.leaseStore.confirmProcessLeaseOwnership({
@@ -552,7 +559,7 @@ export class CodexSidecarSupervisor {
       throw new CodexSidecarSupervisorError('fence_owner_settled_lease_missing')
     }
     if (lease.ownerMainDeadAt && lease.ownerMainDeathEvidenceDigest) return 'settled'
-    const owner = (await this.deps.inspector.list()).find((process) => (
+    const owner = (await this.deps.inspector.list(lease)).find((process) => (
       process.pid === lease.ownerMainPid
       && process.processStartIdentity === lease.ownerMainProcessStartIdentity
     ))
@@ -590,7 +597,7 @@ export class CodexSidecarSupervisor {
   private async settlePreCas(lease: CodexProcessLeaseRow): Promise<void> {
     const deadline = Date.parse(lease.spawnVisibilityDeadlineAt)
     if (this.nowMs() < deadline) await this.wait(deadline - this.nowMs())
-    const candidates = this.preCasCandidates(await this.deps.inspector.list(), lease)
+    const candidates = this.preCasCandidates(await this.deps.inspector.list(lease), lease)
     if (candidates.length > 1) throw new CodexSidecarSupervisorError('pre_cas_multiple_candidates')
     if (candidates.length === 1) {
       const candidate = candidates[0]
@@ -641,15 +648,17 @@ export class CodexSidecarSupervisor {
     lease: CodexProcessLeaseRow,
     _reason: HardResetReason,
   ): Promise<void> {
-    const processes = await this.deps.inspector.list()
+    const processes = await this.deps.inspector.list(lease)
     const root = processes.find((process) => process.pid === lease.pid)
-    if (root) {
-      if (!this.matchesPostCasRoot(root, lease)) {
-        throw new CodexSidecarSupervisorError('post_cas_owner_mismatch')
-      }
+    if (root && !this.matchesPostCasRoot(root, lease)) {
+      throw new CodexSidecarSupervisorError('post_cas_owner_mismatch')
+    }
+    if (this.deps.inspector.terminateOwnedJob) {
+      await this.deps.inspector.terminateOwnedJob(lease)
+    } else if (root) {
       this.killGroup(lease.processGroupId as number, 'SIGTERM')
       await this.wait(100)
-      const remaining = (await this.deps.inspector.list()).filter((process) => (
+      const remaining = (await this.deps.inspector.list(lease)).filter((process) => (
         process.processGroupId === lease.processGroupId
       ))
       if (remaining.length > 0) this.killGroup(lease.processGroupId as number, 'SIGKILL')
@@ -684,7 +693,7 @@ export class CodexSidecarSupervisor {
       && lease.ownerMainPid === this.deps.ownerMainPid
       && lease.ownerMainProcessStartIdentity === this.deps.ownerMainProcessStartIdentity
     ) return lease
-    const owner = (await this.deps.inspector.list()).find((process) => (
+    const owner = (await this.deps.inspector.list(lease)).find((process) => (
       process.pid === lease.ownerMainPid
       && process.processStartIdentity === lease.ownerMainProcessStartIdentity
     ))
@@ -704,11 +713,13 @@ export class CodexSidecarSupervisor {
 
   private async waitForSpawnOwnership(
     lease: CodexProcessLeaseRow,
-    pid: number,
+    child: CodexSidecarChild,
   ): Promise<CodexOwnedProcess> {
     const deadline = Date.parse(lease.spawnVisibilityDeadlineAt)
     while (this.nowMs() <= deadline) {
-      const candidate = (await this.deps.inspector.list()).find((process) => process.pid === pid)
+      const candidate = (await this.deps.inspector.list(lease)).find((process) => child.launchesInJob
+        ? process.parentPid === child.pid && process.processGroupId === child.pid
+        : process.pid === child.pid)
       if (candidate && this.matchesPreCas(candidate, lease) && this.isExactExecutable(candidate, lease)) {
         return candidate
       }
@@ -727,7 +738,7 @@ export class CodexSidecarSupervisor {
     const transcript: Array<{ at: string; candidates: number[] }> = []
     let consecutiveZero = 0
     for (let observation = 0; observation < STABLE_ZERO_MAX_OBSERVATIONS; observation += 1) {
-      const processes = await this.deps.inspector.list()
+      const processes = await this.deps.inspector.list(lease)
       const candidates = mode === 'pre_cas'
         ? this.preCasCandidates(processes, lease)
         : processes.filter((process) => process.processGroupId === lease.processGroupId)

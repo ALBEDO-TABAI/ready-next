@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -24,7 +24,6 @@ import {
   createCodexUpstreamProfileSnapshot,
   digestCanonicalJson,
   digestReadyAdditionalContext,
-  instructionTranscriptDigest,
   resolveCodexNativeModelSettings,
 } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
 import { verifyCodexAutomaticCompactionEvidence } from '../main/modules/agent-control/codex-runtime/codex-automatic-compaction-evidence'
@@ -63,11 +62,9 @@ import { createLifecycleStore } from '../main/modules/agent-control/codex-runtim
 import { StableNativeRuntime } from '../main/modules/agent-control/codex-runtime/codex-stable-native-runtime'
 import { CodexThreadResumeAuthority } from '../main/modules/agent-control/codex-runtime/codex-thread-resume-authority'
 import { ReadyCodexLifecycleAdapter } from '../main/modules/agent-control/codex-runtime/ready-codex-lifecycle-adapter'
-import {
-  CodexSidecarSupervisor,
-  MacCodexProcessInspector,
-  NodeCodexSidecarSpawnPort,
-} from '../main/modules/agent-control/codex-runtime/codex-sidecar-supervisor'
+import { createCodexProcessPorts } from '../main/modules/agent-control/codex-runtime/codex-process-platform'
+import { readCodexInstructionContractDigest } from '../main/modules/agent-control/codex-runtime/codex-product-turn-authorization'
+import { CodexSidecarSupervisor } from '../main/modules/agent-control/codex-runtime/codex-sidecar-supervisor'
 import { createCodexStartIdentityRegistryForRuntime } from '../main/modules/agent-control/codex-runtime/codex-start-identity-registry'
 import { codexRequestToolsDigest } from '../main/modules/agent-control/codex-runtime/codex-tool-surface'
 import type { StartIdentityReservationSet } from '../main/modules/agent-control/send-scoped-confirmation'
@@ -194,10 +191,6 @@ async function waitUntil<T>(read: () => T | null, timeoutMs = 20_000): Promise<T
 test('pinned app-server crosses the Ready gateway for product and compaction requests', async (t) => {
   if (process.env.READY_CODEX_E3E !== '1') {
     t.skip('set READY_CODEX_E3E=1 to run the pinned real child')
-    return
-  }
-  if (process.platform !== 'darwin' || process.arch !== 'arm64') {
-    t.skip('pinned E3 runtime is macOS arm64 only')
     return
   }
   if (skipIfSqliteUnavailable(t, 'Codex model gateway sidecar database')) return
@@ -721,16 +714,8 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
     })
     const threadCwd = join(state.threadCwdRoot, threadBindingId)
     mkdirSync(threadCwd, { recursive: true })
-    const capture = JSON.parse(readFileSync(
-      join(repoRoot, 'assets/codex-runtime/fixtures/native-protocol-capture.json'),
-      'utf8',
-    )) as { provider: { requests: Array<{ request: Record<string, unknown> }> } }
-    const capturedRequest = capture.provider.requests[0].request
-    const instructionDigest = instructionTranscriptDigest(
-      capturedRequest.instructions,
-      capturedRequest.input,
-    )
-    const inspector = new MacCodexProcessInspector()
+    const instructionDigest = readCodexInstructionContractDigest(paths.assetRoot, developerInstructions)
+    const { inspector, spawnPort } = createCodexProcessPorts(runtime.binaryPath, repoRoot)
     const mainProcess = (await inspector.list()).find((entry) => entry.pid === process.pid)
     assert.ok(mainProcess)
     const supervisor = new CodexSidecarSupervisor({
@@ -756,7 +741,7 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
       },
       leaseStore: repository,
       inspector,
-      spawnPort: new NodeCodexSidecarSpawnPort(),
+      spawnPort,
       ownerMainBootId: randomUUID(),
       ownerMainPid: process.pid,
       ownerMainProcessStartIdentity: mainProcess.processStartIdentity,
@@ -1195,10 +1180,15 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
 
     const liveLease = repository.readLiveProcessLease()
     assert.ok(liveLease?.pid)
-    const childEnvironment = execFileSync('/bin/ps', [
-      'eww', '-p', String(liveLease.pid), '-o', 'command=',
-    ], { encoding: 'utf8', maxBuffer: 2 * 1024 * 1024 })
-    assert.equal(childEnvironment.includes('host-secret-e3-must-not-cross'), false)
+    if (process.platform === 'win32') {
+      const root = (await inspector.list(liveLease)).find((row) => row.pid === liveLease.pid)
+      assert.equal(root?.executableSha256, runtime.binarySha256)
+    } else {
+      const childEnvironment = execFileSync('/bin/ps', [
+        'eww', '-p', String(liveLease.pid), '-o', 'command=',
+      ], { encoding: 'utf8', maxBuffer: 2 * 1024 * 1024 })
+      assert.equal(childEnvironment.includes('host-secret-e3-must-not-cross'), false)
+    }
     assert.equal(upstreamPaths.every((path) => (
       path === '/v1/chat/completions' || path === '/v1/responses'
     )), true)

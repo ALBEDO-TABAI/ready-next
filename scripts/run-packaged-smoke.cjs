@@ -291,6 +291,9 @@ async function main(argv = process.argv.slice(2)) {
 
   const startedAt = new Date().toISOString()
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ready-packaged-smoke-'))
+  const isolatedTemp = path.join(userDataDir, 'temp')
+  const windows = options.platform === 'win32'
+  if (windows) fs.mkdirSync(isolatedTemp)
   const logs = []
   const child = spawn(appPath, [`--remote-debugging-port=${options.port}`], {
     cwd: ROOT,
@@ -298,6 +301,10 @@ async function main(argv = process.argv.slice(2)) {
       ...process.env,
       READY_REMOTE_DEBUGGING_PORT: String(options.port),
       READY_USER_DATA_DIR: userDataDir,
+      ...(windows && {
+        READY_DB_PATH: path.join(userDataDir, 'ready.db'),
+        TEMP: isolatedTemp, TMP: isolatedTemp, READY_TEST_LOG_ISOLATION: '1',
+      }),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
@@ -307,6 +314,10 @@ async function main(argv = process.argv.slice(2)) {
   try {
     const { page, targets } = await pollTarget(options.port, options.timeoutMs)
     const renderer = await evaluateRendererDom(page, options.timeoutMs)
+    const agentRecovery = windows
+      ? await require('./codex-runtime/check-windows-packaged-recovery.cjs').checkWindowsPackagedRecovery({
+        userDataDir, appPath, mainPid: child.pid, timeoutMs: options.timeoutMs,
+      }) : undefined
     const report = {
       status: 'pass',
       platform: options.platform,
@@ -322,6 +333,7 @@ async function main(argv = process.argv.slice(2)) {
         url: page.url,
       },
       renderer,
+      agentRecovery,
       targetCount: Array.isArray(targets) ? targets.length : 0,
       logTail: logs.join('').split(/\r?\n/).filter(Boolean).slice(-40),
     }

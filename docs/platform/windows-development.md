@@ -18,9 +18,10 @@ if (!(Test-Path build/runtime-seeds/ai-settings.seed.json)) {
 }
 ```
 
-准备脚本校验发行档、解压后的程序、文件长度和 CLI 版本。以下命令构建本地测试包和运行主窗口冒烟检查。当前 Windows 目录只记录本平台的运行时目标，跨平台迁移旧会话仍需单独验证。
+准备脚本校验官方 Codex，并使用本机 Visual Studio C++ 工具链编译随包交付的 `ready-codex-job.exe`。它把每次启动的 Agent 和子进程放入独立的 Windows 作业，Ready 或 Agent 意外退出时会回收整组进程。以下命令用本机测试服务验证工具调用和崩溃恢复，再构建应用、打开真实窗口并验证 Agent 在窗口内自动重启。当前 Windows 目录只记录本平台的运行时目标，跨平台迁移旧会话仍需单独验证。
 
 ```powershell
+npm run verify:codex-runtime-windows
 npm run build
 npm run licenses:generate
 node scripts/check-ai-seed-release-safety.cjs

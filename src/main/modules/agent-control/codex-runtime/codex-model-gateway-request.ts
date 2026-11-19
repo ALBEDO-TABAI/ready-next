@@ -2,6 +2,7 @@
 import { redactPriorReadyMemoryHistory } from './codex-memory-history-redaction'
 import { CodexModelGatewayError, isRecord, type JsonObject, nonEmptyString } from './codex-model-gateway-common'
 import {
+  CODEX_PLATFORM_SANDBOX,
   canonicalJson,
   classifyCodexModelGatewayRequest,
   type CodexModelGatewayRequestEvidence,
@@ -150,7 +151,7 @@ export function parseMetadata(body: JsonObject): CodexModelGatewayMetadata {
     throw new CodexModelGatewayError('gateway_root_prompt_cache_thread_mismatch')
   }
   if (
-    parsed.sandbox !== 'seatbelt'
+    parsed.sandbox !== CODEX_PLATFORM_SANDBOX
     || parsed.sandbox_mode !== 'read-only'
     || parsed.agent_name !== '/root'
     || parsed.analytics_enabled !== false

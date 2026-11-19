@@ -114,7 +114,7 @@ function baseRequest(toolName: string | null = 'ready_read_probe'): Record<strin
         auto_review_enabled: false,
         node_repl_auto_review_required: false,
         node_repl_disabled: false,
-        sandbox: 'seatbelt',
+        sandbox: process.platform === 'win32' ? 'windows_sandbox' : 'seatbelt',
         sandbox_mode: 'read-only',
         turn_started_at_unix_ms: 1, window_number: 0, context_window_id: 'context-window-1',
         analytics_enabled: false, model: 'ready-e0-model',

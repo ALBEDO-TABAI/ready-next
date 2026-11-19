@@ -1,3 +1,4 @@
 assets/codex-runtime/** -text
+docs/superpowers/audits/2026-08-06-codex-runtime-exit-authority-matrix.json -text
 src/__tests__/fixtures/ready-markdown/** -text
 src/__tests__/fixtures/organizer-brief.pdf binary

@@ -88,7 +88,7 @@ export function createCodexCompositionBase(input: FactoryInput, live: CodexCompo
   const verified = loadVerifiedCodexRuntime(paths)
 
   const runtimeContinuity = loadRuntimeContinuityAssets({
-    assetRoot: join(paths.assetRoot, '..', 'runtime-continuity', 'windows-x64'),
+    assetRoot: paths.continuityAssetRoot,
     targetManifestDigest: verified.manifestDigest,
   })
 

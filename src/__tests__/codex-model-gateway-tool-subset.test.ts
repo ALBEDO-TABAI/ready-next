@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { createServer, type Server } from 'node:http'
 import test from 'node:test'
+import { parseMetadata } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-request'
 
 import {
   createCodexUpstreamProfileSnapshot,
@@ -68,7 +69,7 @@ function requestBody(): JsonObject {
         node_repl_auto_review_required: false,
         node_repl_disabled: false,
         request_kind: 'turn',
-        sandbox: 'seatbelt',
+        sandbox: process.platform === 'win32' ? 'windows_sandbox' : 'seatbelt',
         sandbox_mode: 'read-only',
         turn_started_at_unix_ms: 1, window_number: 0, context_window_id: 'context-window-1',
         analytics_enabled: false, model: 'ready-e0-model',
@@ -106,6 +107,17 @@ function bindRequest(
     allowedToolNames,
   }
 }
+
+test('Gateway requires the native read-only sandbox for this platform', () => {
+  const request = requestBody()
+  const outer = request.client_metadata as Record<string, string>
+  const metadata = parseMetadata(request).raw
+  const foreignSandbox = process.platform === 'win32' ? 'seatbelt' : 'windows_sandbox'
+  for (const invalid of [{ sandbox: 'none' }, { sandbox: foreignSandbox }, { sandbox_mode: 'workspace-write' }]) {
+    outer['x-codex-turn-metadata'] = JSON.stringify({ ...metadata, ...invalid })
+    assert.throws(() => parseMetadata(request), /gateway_turn_metadata_value_invalid/)
+  }
+})
 
 test('Gateway validates the root surface then forwards only the authorized turn subset', async () => {
   const captured: JsonObject[] = []

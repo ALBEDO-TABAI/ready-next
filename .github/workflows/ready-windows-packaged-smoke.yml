@@ -51,6 +51,9 @@ jobs:
           New-Item -ItemType Directory -Force build/runtime-seeds | Out-Null
           Set-Content build/runtime-seeds/ai-settings.seed.json '{}' -Encoding utf8NoBOM
 
+      - name: Verify Windows Agent startup, recovery and exit authority
+        run: npm run verify:codex-runtime-windows
+
       - name: Build renderer and main process
         run: npm run build
 

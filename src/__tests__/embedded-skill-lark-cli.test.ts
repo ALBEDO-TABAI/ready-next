@@ -196,10 +196,11 @@ test('Codex keeps thread instructions stable and sends the selected Lark CLI as 
   const fixture = JSON.parse(readFileSync(
     join(assetRoot, 'fixtures', 'native-protocol-capture.json'),
     'utf8',
-  )) as { provider: { requests: Array<{ request: { instructions: unknown } }> } }
+  )) as { provider: { requests: Array<{ request: { instructions: string } }> } }
+  const base = fixture.provider.requests[0].request.instructions
   assert.equal(
     readCodexInstructionContractDigest(assetRoot, developerInstructions),
-    instructionTranscriptDigest(fixture.provider.requests[0].request.instructions, [{
+    instructionTranscriptDigest(process.platform === 'win32' ? base.replaceAll('\n', '\r\n') : base, [{
       type: 'message',
       role: 'developer',
       content: [{ type: 'input_text', text: developerInstructions }],

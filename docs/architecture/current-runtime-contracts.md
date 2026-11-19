@@ -363,5 +363,5 @@
 - 新测试默认验证真实入口的可观察行为；结构测试只用于行为无法证明的硬合同。不得用 source grep 冒充行为验证，不得用 skip 当通过。
 - SQLite、设置、搜索索引或本地持久化验收先跑 `npm run verify:native`；普通 Node 下 ABI skip 只说明该路径未覆盖。
 - 主进程启动、日志轮转、SQLite native gate 和 `better-sqlite3` 真实加载都属于验收边界。
-- 当前 `electron-builder.yml` 与固定 Codex 资产只覆盖 macOS arm64；Windows 指引是移植准备，不能作为已发布证明。Windows 必须先提供并验证目标平台 Codex 资产，再本机重装依赖并重编 `better-sqlite3`。路径使用 `app.getPath`、`process.resourcesPath`、`path.join`、`path.delimiter`；不得带入 macOS `node_modules`、`.app`、`.dmg`、`.icns`、种子、缓存或密钥。
+- Windows 支线随包提供官方 x64 Codex 与本机编译的作业启动器。启动器从继承的四个归属标记派生作业名，在创建 Codex 前加入作业。Ready 核对实际程序、摘要、创建时间与进程归属，确认旧作业清空后才能重启。Windows 启用 `windows.sandbox = "unelevated"`，模型请求必须同时带有 Windows 原生沙箱标记和只读权限。验收运行 `verify:codex-runtime-windows` 和 Windows 包体冒烟检查。依赖与 `better-sqlite3` 均在 Windows 构建，路径使用 `app.getPath`、`process.resourcesPath`、`path.join`、`path.delimiter`。种子、缓存、密钥和 macOS 构建产物不得用于 Windows 交付。
 - Windows 开发与回传流程见 `docs/platform/windows-development.md`；测试细则见 `docs/superpowers/testing-conventions.md`。

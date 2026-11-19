@@ -53,11 +53,8 @@ import {
   CodexThreadArchiveIntentStore,
 } from '../main/modules/agent-control/codex-runtime/codex-thread-archive-cleanup'
 import { CodexTurnCollector } from '../main/modules/agent-control/codex-runtime/codex-turn-collector'
-import {
-  CodexSidecarSupervisor,
-  MacCodexProcessInspector,
-  NodeCodexSidecarSpawnPort,
-} from '../main/modules/agent-control/codex-runtime/codex-sidecar-supervisor'
+import { CodexSidecarSupervisor } from '../main/modules/agent-control/codex-runtime/codex-sidecar-supervisor'
+import { createCodexProcessPorts } from '../main/modules/agent-control/codex-runtime/codex-process-platform'
 import { createCodexStartIdentityRegistryForRuntime } from '../main/modules/agent-control/codex-runtime/codex-start-identity-registry'
 import type { StartIdentityReservationSet } from '../main/modules/agent-control/send-scoped-confirmation'
 import { RunMetaRepository } from '../main/modules/agent-control/task-projection/run-meta-repository'
@@ -411,10 +408,6 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
     t.skip('set READY_CODEX_E2E=1 to run the pinned real child')
     return
   }
-  if (process.platform !== 'darwin' || process.arch !== 'arm64') {
-    t.skip('pinned E2 runtime is macOS arm64 only')
-    return
-  }
   if (skipIfSqliteUnavailable(t, 'Codex sidecar process lease database')) return
   const database = new DatabaseManager(true)
   const db = database.getRawDb()
@@ -430,7 +423,7 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
     runtimeManifestDigest: runtime.manifestDigest,
     protocolSchemaDigest: 'protocol-schema-e2e',
     runtimeContinuityCatalog: loadRuntimeContinuityAssets({
-      assetRoot: join(repoRoot, 'assets/runtime-continuity'),
+      assetRoot: paths.continuityAssetRoot,
       targetManifestDigest: runtime.manifestDigest,
     }).catalog,
   })
@@ -544,7 +537,7 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
     })
     const threadCwd = join(state.threadCwdRoot, threadBindingId)
     mkdirSync(threadCwd, { recursive: true })
-    const inspector = new MacCodexProcessInspector()
+    const { inspector, spawnPort } = createCodexProcessPorts(runtime.binaryPath, repoRoot)
     const mainProcess = (await inspector.list()).find((processRow) => processRow.pid === process.pid)
     assert.ok(mainProcess)
     const ownerMainBootId = randomUUID()
@@ -565,7 +558,7 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
       },
       leaseStore: repository,
       inspector,
-      spawnPort: new NodeCodexSidecarSpawnPort(),
+      spawnPort,
       ownerMainBootId,
       ownerMainPid: process.pid,
       ownerMainProcessStartIdentity: mainProcess.processStartIdentity,
@@ -690,11 +683,17 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
     const liveConnectionAbortSignal = session.getConnectionAbortSignal(liveLease.connectionEpoch)
     assert.ok(liveConnectionAbortSignal)
     assert.equal(liveConnectionAbortSignal.aborted, false)
-    const childEnvironment = execFileSync('/bin/ps', [
-      'eww', '-p', String(liveLease.pid), '-o', 'command=',
-    ], { encoding: 'utf8', maxBuffer: 2 * 1024 * 1024 })
-    assert.equal(childEnvironment.includes('host-secret-must-not-cross'), false)
-    assert.equal(childEnvironment.includes(`READY_CODEX_PROCESS_LEASE_ID=${liveLease.processLeaseId}`), true)
+    if (process.platform === 'win32') {
+      const root = (await inspector.list(liveLease)).find((row) => row.pid === liveLease.pid)
+      assert.equal(root?.markers.processLeaseId, liveLease.processLeaseId)
+      assert.equal(root?.executableSha256, runtime.binarySha256)
+    } else {
+      const childEnvironment = execFileSync('/bin/ps', [
+        'eww', '-p', String(liveLease.pid), '-o', 'command=',
+      ], { encoding: 'utf8', maxBuffer: 2 * 1024 * 1024 })
+      assert.equal(childEnvironment.includes('host-secret-must-not-cross'), false)
+      assert.equal(childEnvironment.includes(`READY_CODEX_PROCESS_LEASE_ID=${liveLease.processLeaseId}`), true)
+    }
 
     let client = session.getClient()
     const threadStarted = await client.threadStart({

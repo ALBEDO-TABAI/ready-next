@@ -20,7 +20,8 @@ import type { ReadyClosedCodexProductRun } from '../codex-runtime-composition'
 import { prepareCodexRuntimeState, activateCodexGatewaySpawnConfig, buildCodexChildEnvironment, type PreparedCodexRuntimeState } from '../codex-runtime-host'
 import { CodexSidecarRecoveryOwner } from '../codex-sidecar-recovery-owner'
 import { CodexSidecarSession } from '../codex-sidecar-session'
-import { MacCodexProcessInspector, CodexSidecarSupervisor, NodeCodexSidecarSpawnPort, CODEX_SIDECAR_CRASH_ATTEMPT_LIMIT } from '../codex-sidecar-supervisor'
+import { createCodexProcessPorts } from '../codex-process-platform'
+import { CodexSidecarSupervisor, CODEX_SIDECAR_CRASH_ATTEMPT_LIMIT } from '../codex-sidecar-supervisor'
 import type { CodexStartIdentityRegistry } from '../codex-start-identity-registry'
 import { createCodexReadyToolBridge, CodexToolBridgeError } from '../codex-tool-bridge'
 import type { CodexCompositionBase } from './base'
@@ -78,7 +79,7 @@ export function createRuntimeStart(deps: RuntimeStartDeps) {
       gatewayUrl: `${address.url}/v1`,
       contracts: verified.contracts,
     })
-    const inspector = new MacCodexProcessInspector()
+    const { inspector, spawnPort } = createCodexProcessPorts(verified.binaryPath, input.appPath)
     const mainProcess = (await inspector.list()).find((entry) => entry.pid === process.pid)
     if (!mainProcess) throw new Error('codex_main_process_identity_unavailable')
     live.supervisor = new CodexSidecarSupervisor({
@@ -100,7 +101,7 @@ export function createRuntimeStart(deps: RuntimeStartDeps) {
       },
       leaseStore: repository,
       inspector,
-      spawnPort: new NodeCodexSidecarSpawnPort(),
+      spawnPort,
       ownerMainBootId,
       ownerMainPid: process.pid,
       ownerMainProcessStartIdentity: mainProcess.processStartIdentity,
