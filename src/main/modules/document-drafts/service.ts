@@ -14,7 +14,7 @@ import { rewriteMarkdownMediaRefs } from '../../../shared/markdown-asset-refs'
 import { CanvasPathSchema } from '../../../shared/ready-canvas/schema'
 import type { DatabaseConnection } from '../database/connection'
 import { ObjectRegistry, objectTransaction } from '../object-service/registry'
-import { checkedPath, collision, draftError, ensureDirectory, existsIgnoringCase, filename, hashBytes, publishNewFile, realParent, stageFile, vaultRoot } from './files'
+import { checkedPath, collision, documentPath, draftError, ensureDirectory, existsIgnoringCase, filename, hashBytes, publishNewFile, realParent, stageFile, vaultRoot } from './files'
 
 export interface DraftDependencies {
   registry: ObjectRegistry
@@ -74,7 +74,8 @@ export class DocumentDraftService {
     if (draft.origin !== 'document') return false
     const object = this.dependencies.registry.get(draft.objectId!)
     if (!object?.current_path || object.status !== 'present' || object.identity_state === 'conflict') return true
-    const path = checkedPath(draft.vaultRoot, object.current_path)
+    // Only a read: the document may live outside the vault (a mounted folder). Vault checks guard what drafts write.
+    const path = documentPath(object.current_path)
     try { return hashBytes(readFileSync(path)) !== draft.baseVersion }
     catch (error) { if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return true; throw error }
   }
@@ -266,7 +267,7 @@ export class DocumentDraftService {
       const created = this.create({ tabId: item.tabId, vaultRoot: root, origin: 'new', content: item.content, title: item.title ?? '' })
       if (item.path) {
         // Legacy storage has no base version. Do not claim today's disk bytes were its base.
-        const path = checkedPath(root, item.path)
+        const path = documentPath(item.path)
         const object = this.dependencies.registry.reserve(path)
         this.db.prepare("UPDATE document_drafts SET origin='document',object_id=?,base_version=?,state='conflict' WHERE draft_id=?")
           .run(object.id, item.contentHash, created.draftId)

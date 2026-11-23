@@ -4,7 +4,7 @@ import test from 'node:test'
 import Database from 'better-sqlite3'
 import { mkdtempSync, realpathSync, rmSync, writeFileSync, readFileSync, mkdirSync, readdirSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { runMigrations } from '../main/modules/migrations'
 import { ObjectRegistry } from '../main/modules/object-service/registry'
 import { SearchEngine } from '../main/modules/search-engine/indexer'
@@ -289,5 +289,43 @@ test('C12 finalizing freezes its snapshot and saving a document as a new file do
     assert.equal(readFileSync(path, 'utf8'), original)
     assert.equal(readFileSync(result.path, 'utf8'), '---\ntitle: Source\n---\nbody')
     assert.equal(service.read(draft.draftId)?.content, original)
+  } finally { s.close(); f.cleanup() }
+})
+
+test('Mounted folder: a document outside the vault keeps its draft, notices outside edits and saves a copy into the vault', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'Draft hierarchy')) return
+  const f = fixture(); const s = f.open()
+  try {
+    const mounted = join(dirname(f.root), 'mounted'); mkdirSync(mounted)
+    const path = join(mounted, 'guide.md'); writeFileSync(path, 'base')
+    const objectId = s.registry.register(path).id
+    const create = () => s.service.create({ tabId: randomUUID(), vaultRoot: f.root, origin: 'document', objectId, baseVersion: documentVersion('base'), content: 'buffer' })
+    // D1: the base check only reads the file, wherever it lives.
+    const d = create()
+    assert.equal(s.service.read(d.draftId)?.state, 'editing')
+    const saved = s.service.save(d.draftId, d.revision, 'edited', s.service.read(d.draftId)!.tabId!)
+    assert.equal(s.service.read(d.draftId)?.content, 'edited')
+    // D3: the draft still belongs to the current vault.
+    assert.deepEqual(s.service.list(f.root).map(draft => draft.draftId), [d.draftId])
+    // D2: "save to" writes a new page inside the vault and leaves the mounted file alone.
+    const copy = create()
+    const result = await s.service.finalize(copy.draftId, copy.revision, { parentPath: f.root, title: 'copy', operationId: 'copy-mounted' })
+    assert.equal(result.path, join(f.root, 'copy.md'))
+    assert.equal(readFileSync(result.path, 'utf8'), 'buffer')
+    assert.equal(readFileSync(path, 'utf8'), 'base')
+    const escape = create()
+    await assert.rejects(s.service.finalize(escape.draftId, escape.revision, { parentPath: mounted, title: 'escape', operationId: 'into-mounted' }), /outside vault/)
+    // An edit made elsewhere turns the draft into a conflict; the latest buffer is kept and cannot be finalized.
+    writeFileSync(path, 'external edit')
+    assert.throws(() => s.service.save(d.draftId, saved.revision, 'latest', s.service.read(d.draftId)!.tabId!), /base version/)
+    assert.equal(s.service.read(d.draftId)?.state, 'conflict')
+    assert.equal(s.service.read(d.draftId)?.content, 'latest')
+    await assert.rejects(s.service.finalize(d.draftId, s.service.read(d.draftId)!.revision, { parentPath: f.root, title: 'late', operationId: 'late' }), /base version/)
+    assert.equal(readFileSync(path, 'utf8'), 'external edit')
+    // D4: a legacy draft of the same file imports as a conflict; a relative path is refused.
+    const [imported] = s.service.importLegacy(f.root, [{ tabId: 'legacy-mounted', migrationKey: 'mounted', content: 'old', contentHash: documentVersion('old'), path }])
+    assert.equal(s.service.read(imported.draftId)?.state, 'conflict')
+    assert.equal(s.service.read(imported.draftId)?.objectId, objectId)
+    assert.throws(() => s.service.importLegacy(f.root, [{ tabId: 'legacy-relative', migrationKey: 'relative', content: 'old', contentHash: documentVersion('old'), path: 'relative.md' }]), /absolute/)
   } finally { s.close(); f.cleanup() }
 })

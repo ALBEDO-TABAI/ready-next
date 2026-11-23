@@ -20,7 +20,12 @@ export function vaultRoot(path: string): string {
 export function realParent(path: string): string {
   try { return realpathSync(resolve(path)) } catch (error) { if (missing(error)) return resolve(path); throw error }
 }
-/** No symlink component is accepted, including dangling links and internal aliases. */
+/** Where an existing document is read from to compare its base version. Reading needs no vault: the file may sit in the vault, a mounted folder or anywhere it was registered. */
+export function documentPath(path: string): string {
+  if (!isAbsolute(path)) throw draftError('invalid_path', 'document path must be absolute')
+  return resolve(path)
+}
+/** Where the draft layer itself writes. No symlink component is accepted, including dangling links and internal aliases. */
 export function checkedPath(root: string, path: string): string {
   if (realpathSync(root) !== root || lstatSync(root).isSymbolicLink()) throw draftError('invalid_path', 'vault location changed')
   const target = resolve(path)
